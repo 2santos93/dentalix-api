@@ -109,10 +109,16 @@ export class PrismaLocationScheduleRepository implements LocationScheduleReposit
       // DX-089: la sede del request o la de escritura de la sesión (la
       // principal sin restricción): la misma en la que se agenda.
       const locationId = await this.tenantContext.writeLocationId(tx);
-      const location = await tx.location.findFirst({
-        where: { id: locationId, tenantId },
-        select: { id: true, timeZone: true },
-      });
+      // FOR SHARE: choca con el FOR UPDATE de un cambio de zona en curso
+      // (PATCH /locations/:id), así que aquí se lee la zona ya confirmada y la
+      // columna legada no vuelve a la anterior (R20).
+      const [location] = await tx.$queryRaw<
+        { id: string; timeZone: string | null }[]
+      >`
+        SELECT l."id", l."timeZone"
+          FROM "locations" l
+         WHERE l."id" = ${locationId}::uuid AND l."tenantId" = ${tenantId}::uuid
+           FOR SHARE`;
       // R15: una web antigua manda la zona; solo vale si es la de la sede.
       if (
         input.legacyTimeZone !== undefined &&
@@ -174,17 +180,6 @@ export class PrismaLocationScheduleRepository implements LocationScheduleReposit
         }),
         timeZone,
       );
-    });
-  }
-
-  async syncLegacyTimeZone(
-    tx: Prisma.TransactionClient,
-    locationId: string,
-    timeZone: string,
-  ): Promise<void> {
-    await tx.locationSchedule.updateMany({
-      where: { tenantId: this.requireTenantId(), locationId },
-      data: { timezone: timeZone },
     });
   }
 }

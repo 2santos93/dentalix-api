@@ -13,7 +13,11 @@ const prisma = new PrismaClient<Prisma.PrismaClientOptions>({
 // prisma/scripts/generate-iso4217-sql.ts. La misma lista se siembra en la
 // migración 20261027120000_g1_location_regional_settings, así que existe con
 // solo `prisma migrate deploy`; el upsert de abajo permite actualizar
-// name/symbol sin una migración nueva.
+// name/symbol sin una migración nueva. A propósito: la migración inserta con
+// `ON CONFLICT DO NOTHING`, así que en una base solo migrada las 10 monedas de
+// 2026-07 (USD, COP, EUR…) conservan su nombre y símbolo de entonces, y el
+// seed los cambia por los de `Intl`. Solo es texto de presentación: el código
+// y los decimales no cambian.
 async function seedCurrencies(): Promise<void> {
   for (const { code, name, symbol } of ISO4217_CURRENCIES) {
     await prisma.currency.upsert({

@@ -545,6 +545,34 @@ describe('teléfono de la sede (DX-222)', () => {
       ]);
     });
 
+    it('confirmar una sede con algún campo NULL es 400 con el primero que falta y no escribe', async () => {
+      const written: object[] = [];
+      const uc = updateUseCase(
+        regionalRepo({
+          written,
+          current: { currency: 'COP', timeZone: null, locale: null },
+        }),
+      );
+      await expect(
+        uc.execute('loc-1', { confirmRegionalSettings: true }),
+      ).rejects.toMatchObject({
+        response: {
+          field: 'timeZone',
+          message:
+            'La sede tiene que tener moneda, zona horaria y formato regional.',
+        },
+      });
+      // Rellenando lo que falta sí se confirma.
+      await uc.execute('loc-1', {
+        timeZone: 'Asia/Tokyo',
+        locale: 'ja-JP',
+        confirmRegionalSettings: true,
+      });
+      expect(written).toEqual([
+        expect.objectContaining({ timeZone: 'Asia/Tokyo', reviewed: true }),
+      ]);
+    });
+
     it('null en un campo regional es 400 con su campo', async () => {
       const uc = updateUseCase(regionalRepo({}));
       await expect(

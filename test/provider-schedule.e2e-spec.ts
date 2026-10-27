@@ -14,6 +14,7 @@ import {
 import { PasswordService } from '../src/shared/crypto/password.service';
 import {
   REGIONAL_BOGOTA_FIXTURE,
+  legacyLocationInsert,
   locationBody,
 } from './support/location-fixtures';
 
@@ -335,6 +336,63 @@ describe('Horario de los profesionales por sede (e2e, DX-233)', () => {
         },
       ]);
       expect(byDate[addDays(MON, 1)].assignments).toEqual([]);
+    });
+
+    describe('sede sin zona (réplica antigua) en el cuadrante de toda la clínica', () => {
+      const roster = (query = '') =>
+        as(
+          api().get(`/api/v1/schedule/roster?weekStart=${MON}${query}`),
+          reception.token,
+        );
+
+      it('roster without locationId ignores an unconfigured location without ranges', async () => {
+        const legacy = await legacyLocationInsert(
+          raw,
+          clinic.tenantId,
+          'Réplica antigua',
+        );
+        try {
+          const res = await roster().expect(200);
+          const ids = (res.body as { locations: { id: string }[] }).locations
+            .map((l) => l.id)
+            .sort();
+          expect(ids).toEqual([sedeA, sedeB].sort());
+          // Pedirla a ella sí necesita su zona.
+          await roster(`&locationId=${legacy}`).expect(409);
+        } finally {
+          await raw.location.delete({ where: { id: legacy } });
+        }
+      });
+
+      it('roster with ranges at an unconfigured location is 409 LOCATION_TIMEZONE_REQUIRED', async () => {
+        // La Dra. X atiende los jueves en B: B sin zona no se puede omitir.
+        await raw.$executeRaw`
+          UPDATE "locations" SET "timeZone" = NULL WHERE "id" = ${sedeB}::uuid`;
+        try {
+          const res = await roster().expect(409);
+          expect(res.body).toMatchObject({
+            code: 'LOCATION_TIMEZONE_REQUIRED',
+            locationId: sedeB,
+          });
+          // Su horario semanal se sigue leyendo, con la zona de B a null
+          // (nunca una de reserva).
+          const schedule = await as(
+            api().get(`/api/v1/providers/${draX.userId}/schedule`),
+            clinic.adminToken,
+          ).expect(200);
+          const zones = Object.fromEntries(
+            (
+              schedule.body as {
+                locations: { locationId: string; timeZone: string | null }[];
+              }
+            ).locations.map((l) => [l.locationId, l.timeZone]),
+          );
+          expect(zones).toEqual({ [sedeA]: 'America/Bogota', [sedeB]: null });
+        } finally {
+          await raw.$executeRaw`
+            UPDATE "locations" SET "timeZone" = 'America/Bogota' WHERE "id" = ${sedeB}::uuid`;
+        }
+      });
     });
 
     it('con locationId dice si trabaja allí y sus tramos (para sombrear la agenda)', async () => {

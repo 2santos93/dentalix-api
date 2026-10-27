@@ -27,13 +27,8 @@ export interface LocationRegionalBackfillReport {
 export async function backfillLocationRegional(
   prisma: PrismaService,
 ): Promise<LocationRegionalBackfillReport[]> {
-  const tenants = await prisma.tenant.findMany({
-    where: { deletedAt: null },
-    select: { id: true },
-    orderBy: { createdAt: 'asc' },
-  });
   const reports: LocationRegionalBackfillReport[] = [];
-  for (const { id: tenantId } of tenants) {
+  for (const tenantId of await allTenantIds(prisma)) {
     const filled = await prisma.runWithTenant(tenantId, async (tx) => {
       const [row] = await tx.$queryRaw<{ filled: number }[]>`
         SELECT public.dx_g1_backfill_location_regional(${tenantId}::uuid) AS "filled"`;
@@ -42,6 +37,54 @@ export async function backfillLocationRegional(
     reports.push({ tenantId, filled });
   }
   return reports;
+}
+
+/**
+ * Todas las clínicas, también las retiradas: sus sedes cuentan igual para el
+ * `SET NOT NULL` de la fase 2, así que el barrido y la comprobación las cubren.
+ */
+async function allTenantIds(prisma: PrismaService): Promise<string[]> {
+  const tenants = await prisma.tenant.findMany({
+    select: { id: true },
+    orderBy: { createdAt: 'asc' },
+  });
+  return tenants.map((t) => t.id);
+}
+
+/** Lo que queda sin configurar en toda la base. */
+export interface LocationRegionalCheck {
+  /** Sedes con moneda, zona o locale NULL. */
+  locations: number;
+  /** Registros pendientes y vigentes sin los datos de la sede (forma legada). */
+  legacyPending: number;
+}
+
+/**
+ * Comprobación del runbook (paso 3) y precondición de la fase 2: cuenta, con
+ * el rol de la app y clínica por clínica bajo su RLS (como escribe el
+ * barrido), las sedes con algún campo regional NULL, y los registros legados
+ * vigentes (`pending_registrations` no tiene RLS). Solo lecturas: ni DDL ni
+ * más bloqueo que el de un SELECT, así que se puede correr con tráfico. No da
+ * un falso 0: cada clínica se lee con su tenant fijado.
+ */
+export async function checkLocationRegional(
+  prisma: PrismaService,
+): Promise<LocationRegionalCheck> {
+  let locations = 0;
+  for (const tenantId of await allTenantIds(prisma)) {
+    locations += await prisma.runWithTenant(tenantId, (tx) =>
+      tx.location.count({
+        where: {
+          tenantId,
+          OR: [{ currency: null }, { timeZone: null }, { locale: null }],
+        },
+      }),
+    );
+  }
+  const legacyPending = await prisma.pendingRegistration.count({
+    where: { locationCurrency: null, expiresAt: { gt: new Date() } },
+  });
+  return { locations, legacyPending };
 }
 
 /** El barrido cada 5 minutos en la cola de DX-085 (un ejecutor por tick). */

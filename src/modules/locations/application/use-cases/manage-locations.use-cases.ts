@@ -20,6 +20,7 @@ import {
 import {
   COUNTRY_MISSING,
   REGIONAL_CHANGE_MESSAGES,
+  REGIONAL_FIELDS,
   REGIONAL_NULL_MESSAGE,
   type RegionalError,
   type RegionalField,
@@ -291,6 +292,15 @@ export class UpdateLocationUseCase {
           differs('currency') ||
           differs('timeZone') ||
           differs('locale');
+        // Una sede revisada tiene los tres valores: confirmar una fila de
+        // réplica antigua con algún NULL dejaría que el barrido pusiera
+        // después valores que el ADMIN no vio (y el aviso D5 no saldría).
+        const missing = REGIONAL_FIELDS.find(
+          (field) => (regional[field] ?? cur[field]) === null,
+        );
+        if (reviewed && missing) {
+          throw regionalBadRequest(missing, REGIONAL_NULL_MESSAGE);
+        }
         return {
           currency: differs('currency') ? regional.currency : undefined,
           timeZone: differs('timeZone') ? regional.timeZone : undefined,

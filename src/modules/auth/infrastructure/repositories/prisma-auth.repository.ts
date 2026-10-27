@@ -147,8 +147,17 @@ export class PrismaAuthRepository implements AuthRepository {
       select: { timeZone: true },
     });
     if (!filled.timeZone) {
-      // No debería ocurrir: la función cubre todos los países del enum.
-      throw new Error('Legacy registration location left without a zone');
+      // Inalcanzable mientras `ClinicCountry` sea CO/ES: la función D5 cubre
+      // los dos. Si se añade un país antes de la fase 2, la función tiene que
+      // cubrirlo; hasta entonces, se registra y falla en lugar de inventar.
+      this.logger.error({
+        event: 'registration.legacy_location_unfilled',
+        tenantId,
+        locationId: id,
+      });
+      throw new Error(
+        'La sede del registro legado quedó sin zona: la función D5 no cubre su país.',
+      );
     }
     this.logger.log({
       event: 'registration.legacy_location_backfilled',

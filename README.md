@@ -986,20 +986,21 @@ siguen admitiendo NULL hasta la fase 2.
    npm run g1:backfill-locations
    ```
 
-   y la comprobación, **como el owner** de la base (las dos cifras tienen que
-   ser 0):
+   y la comprobación (las dos cifras tienen que ser 0):
 
    ```bash
-   psql "${DIRECT_URL%%\?*}" -X -tA -v ON_ERROR_STOP=1 -f prisma/scripts/g1-check-null-regional.sql
+   npm run g1:backfill-locations -- --check
    ```
 
-   Imprime `locations_sin_configurar=N` y `pendientes_legados_vigentes=N`.
-   **No sustituyas el script por un `SELECT count(*)` suelto**: `locations`
-   tiene FORCE RLS y el owner (sin superusuario ni BYPASSRLS) lee 0 filas sin
-   clínica fijada, es decir, un falso 0. El script quita FORCE dentro de una
-   transacción que termina en `ROLLBACK` (FORCE vuelve solo) y, si algo falla,
-   sale con error en lugar de un 0. Contraste: una segunda pasada de
-   `npm run g1:backfill-locations` debe imprimir `"filled":0`.
+   Imprime `locations_sin_configurar=N` y `pendientes_legados_vigentes=N` y
+   sale con código 1 si alguna no es 0. Corre con el rol de la app
+   (`DATABASE_URL`), clínica por clínica bajo su RLS (también las retiradas),
+   igual que escribe el barrido: no necesita las credenciales del owner, no
+   hace DDL ni toma más bloqueo que el de un `SELECT`, así que se puede correr
+   con tráfico. **No la sustituyas por un `SELECT count(*)` suelto como
+   owner**: `locations` tiene FORCE RLS y el owner (sin superusuario ni
+   BYPASSRLS) lee 0 filas sin clínica fijada, es decir, un falso 0. Si no da
+   0: `npm run g1:backfill-locations` y repetir.
 
    Mientras tanto, el job `locations.regional-backfill` (programa
    `locations.regional-backfill.every-5-min`, cada 5 minutos; registra
@@ -1015,6 +1016,8 @@ siguen admitiendo NULL hasta la fase 2.
 | Web antigua | API nueva | `PUT /locations/schedule` con `timezone` igual a la zona de la sede se acepta; registro sin campos de sede se acepta en la forma legada; `LocationDto` solo gana campos |
 | Web nueva | API antigua | `LocationDto` sin `currency` → `SedeConfigError`, nunca COP |
 | Enlace de registro de una réplica antigua | API nueva | `verify` lo acepta |
+| Web antigua | API antigua (`PUT /locations/schedule` con otra zona) | La zona se guarda solo en `location_schedules.timezone`, que el código nuevo no lee: se pierde. El ADMIN la corrige en Ajustes → Sedes |
+| Registro pendiente con los cuatro campos (API nueva) | `verify` en una réplica antigua | La sede nace con país CO y moneda, zona y formato NULL; el barrido la rellena según D5 y no los elegidos. Queda «por revisar»: el aviso D5 se lo muestra al ADMIN, que la corrige |
 
 La lista ISO de monedas amplía las aceptadas en listas, gastos, caja y planes;
 el proveedor de tasas puede no tener alguna y esos abonos cuentan en
@@ -1025,10 +1028,10 @@ el proveedor de tasas puede no tener alguna y esos abonos cuentan en
 
 «G1 · Fase 2: cerrar las columnas regionales de la sede» (bajo DX-311; ticket
 por crear). Va en un release **posterior**, cuando no quede ninguna réplica
-anterior a la fase 1. Precondición: las dos cifras de
-`prisma/scripts/g1-check-null-regional.sql` (como owner, ver arriba) dan 0; si
-no, correr `npm run g1:backfill-locations` y repetir. Las consultas que
-comprueba son:
+anterior a la fase 1. Precondición: `npm run g1:backfill-locations -- --check`
+(ver arriba) da 0 en las dos cifras; si no, correr
+`npm run g1:backfill-locations` y repetir. Cuenta, en todas las clínicas
+(también las retiradas):
 
 ```sql
 SELECT count(*) FROM locations
@@ -1039,7 +1042,10 @@ SELECT count(*) FROM pending_registrations
 
 Contenido del ticket:
 
-- Migración (mismo bracket RLS que la de la fase 1): `SET NOT NULL` en
+- Migración (mismo bracket RLS que la de la fase 1): dentro del bracket NO
+  FORCE, llamar antes a `SELECT dx_g1_backfill_location_regional();` (sin
+  tenant: todas las clínicas) para que una fila que quede no la tumbe; luego
+  `SET NOT NULL` en
   `locations.currency/"timeZone"/locale`; `ALTER COLUMN country DROP DEFAULT`;
   `ALTER TABLE location_schedules DROP COLUMN timezone`; borrar los pendientes
   legados caducados y poner NOT NULL en los cuatro `location*` de

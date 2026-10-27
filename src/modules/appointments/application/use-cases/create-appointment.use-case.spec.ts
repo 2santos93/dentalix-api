@@ -133,8 +133,6 @@ function makeSchedule(hours: unknown = null): LocationScheduleRepository {
       Promise.resolve(hours) as Promise<never>,
     replaceForCurrentLocation: (): Promise<never> =>
       Promise.reject(new Error('not implemented in this fake')),
-    syncLegacyTimeZone: (): Promise<never> =>
-      Promise.reject(new Error('not implemented in this fake')),
   };
 }
 

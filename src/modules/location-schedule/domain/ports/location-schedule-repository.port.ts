@@ -1,4 +1,3 @@
-import type { Prisma } from '@prisma/client';
 import { BusinessHours, ScheduleRange } from '../../application/business-hours';
 
 export const LOCATION_SCHEDULE_REPOSITORY = Symbol(
@@ -51,14 +50,4 @@ export interface LocationScheduleRepository {
   replaceForCurrentLocation(
     input: ReplaceScheduleInput,
   ): Promise<BusinessHours>;
-
-  /**
-   * G1 fase 1 (R20): deja `location_schedules.timezone` de la sede igual a
-   * `timeZone`, dentro de la transacción `tx` que cambia la zona de la sede.
-   */
-  syncLegacyTimeZone(
-    tx: Prisma.TransactionClient,
-    locationId: string,
-    timeZone: string,
-  ): Promise<void>;
 }

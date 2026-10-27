@@ -8,6 +8,7 @@ import {
   LOCATION_REGIONAL_BACKFILL_CRON,
   LOCATION_REGIONAL_BACKFILL_JOB,
   LocationRegionalBackfillJob,
+  checkLocationRegional,
 } from '../src/modules/locations/infrastructure/jobs/location-regional-backfill.job';
 import {
   REGIONAL_TOKYO_FIXTURE,
@@ -160,5 +161,51 @@ describe('barrido de sedes sin configurar (int, G1 fase 1)', () => {
     expect(
       await raw.location.findUniqueOrThrow({ where: { id: legacy } }),
     ).toMatchObject({ currency: 'COP', regionalSettingsReviewedAt: null });
+  }, 180_000);
+
+  it('g1:backfill-locations --check counts NULL rows across tenants with the app role, without writing', async () => {
+    const before = await checkLocationRegional(prisma);
+    const nullA = await legacyLocationInsert(raw, tenantA, 'Sin barrer A');
+    const nullB = await legacyLocationInsert(raw, tenantB, 'Sin barrer B');
+    // Una clínica retirada cuenta igual: la fase 2 pone NOT NULL en todas.
+    await raw.tenant.update({
+      where: { id: tenantB },
+      data: { deletedAt: new Date() },
+    });
+    try {
+      const counted = await checkLocationRegional(prisma);
+      expect(counted.locations).toBe(before.locations + 2);
+      const failed = await run(
+        process.execPath,
+        [
+          'node_modules/.bin/ts-node',
+          '--transpile-only',
+          'prisma/scripts/g1-backfill-locations.ts',
+          '--check',
+        ],
+        { env: process.env, timeout: 120_000 },
+      ).catch((error: { code: number; stdout: string }) => error);
+      expect('code' in failed && failed.code).toBe(1);
+      expect(failed.stdout.trim().split('\n')).toEqual([
+        `locations_sin_configurar=${counted.locations}`,
+        `pendientes_legados_vigentes=${counted.legacyPending}`,
+      ]);
+      // Solo cuenta: las dos sedes siguen sin configurar.
+      for (const id of [nullA, nullB]) {
+        expect(
+          await raw.location.findUniqueOrThrow({ where: { id } }),
+        ).toMatchObject({ currency: null, timeZone: null, locale: null });
+      }
+      // Tras el barrido (que también recorre la retirada) vuelve a la base.
+      await job.sweep();
+      expect((await checkLocationRegional(prisma)).locations).toBe(
+        before.locations,
+      );
+    } finally {
+      await raw.tenant.update({
+        where: { id: tenantB },
+        data: { deletedAt: null },
+      });
+    }
   }, 180_000);
 });

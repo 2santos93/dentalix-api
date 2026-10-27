@@ -10,6 +10,13 @@ import { isValidTimeZone } from '../../../shared/time/civil-day';
 
 export type RegionalField = 'currency' | 'timeZone' | 'locale';
 
+/** Los tres campos regionales, en el orden en que se validan y se informan. */
+export const REGIONAL_FIELDS: readonly RegionalField[] = [
+  'currency',
+  'timeZone',
+  'locale',
+];
+
 export interface RegionalInput {
   currency?: string | null;
   timeZone?: string | null;
