@@ -27,4 +27,13 @@ export class UpdateStaffDto {
   @IsString()
   @MaxLength(60)
   professionalLicense?: string;
+  @ApiPropertyOptional({
+    maxLength: 80,
+    description:
+      'Especialidad del profesional en esta clínica; la receta la imprime si existe. Cadena vacía la borra.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  professionalSpecialty?: string;
 }

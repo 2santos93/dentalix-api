@@ -16,6 +16,8 @@ export interface StaffMember {
    * Solo lo traen el perfil (`findDetailById`) y la respuesta del PATCH.
    */
   professionalLicense?: string | null;
+  /** Especialidad del miembro en esta clínica (DX-324). Mismo alcance que `professionalLicense`. */
+  professionalSpecialty?: string | null;
   /**
    * DX-089: sedes permitidas, solo activas. `null` = todas (sin restricción,
    * siempre en un ADMIN). Lo traen el listado (`listActive`), `findById` y

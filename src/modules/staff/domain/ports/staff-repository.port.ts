@@ -7,11 +7,12 @@ import {
 
 export const STAFF_REPOSITORY = Symbol('STAFF_REPOSITORY');
 
-/** Cambios de `PATCH /staff/:userId`; `professionalLicense: null` lo borra. */
+/** Cambios de `PATCH /staff/:userId`; `professionalLicense` / `professionalSpecialty: null` lo borran. */
 export interface StaffPatch {
   fullName?: string;
   role?: ClinicRole;
   professionalLicense?: string | null;
+  professionalSpecialty?: string | null;
 }
 
 /**

@@ -18,6 +18,8 @@ export interface UpdateStaffInput {
   role?: ClinicRole;
   /** `''` o solo espacios lo borran. */
   professionalLicense?: string;
+  /** `''` o solo espacios la borran. */
+  professionalSpecialty?: string;
 }
 
 @Injectable()
@@ -31,6 +33,9 @@ export class UpdateStaffUseCase {
     if (input.fullName) patch.fullName = input.fullName.trim();
     if (input.professionalLicense !== undefined) {
       patch.professionalLicense = input.professionalLicense.trim() || null;
+    }
+    if (input.professionalSpecialty !== undefined) {
+      patch.professionalSpecialty = input.professionalSpecialty.trim() || null;
     }
     // "No dejar la clínica sin ADMIN" se comprueba y se escribe en la misma
     // transacción (ver StaffRepository.updateById, DB-012).
