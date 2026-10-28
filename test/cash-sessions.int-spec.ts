@@ -621,6 +621,126 @@ describe('caja por turno: tablas, RLS e inmutabilidad (int, DX-027)', () => {
     ).rejects.toThrow(IMMUTABLE);
     await close(session.id);
   });
+  it('abrir durante la anulación de un abono de caja cerrada recoge el VOID', async () => {
+    const location = await raw.location.create({
+      data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        tenantId: a.tenantId,
+        name: 'Sede carrera VOID cerrado',
+      }),
+    });
+    const original = await open(location.id);
+    const paid = await raw.payment.create({
+      data: payment(a, { locationId: location.id, cashSessionId: original.id }),
+    });
+    await close(original.id);
+    const ready = deferred();
+    const release = deferred();
+    let functionCreated = false;
+    let triggerCreated = false;
+    let gate: Promise<void> | undefined;
+    let gateSettled: Promise<unknown> | undefined;
+    let voidSettled: Promise<unknown> | undefined;
+    let opening: ReturnType<PrismaCashSessionRepository['open']> | undefined;
+    let openingSettled: Promise<unknown> | undefined;
+    try {
+      await raw.$executeRawUnsafe(`CREATE FUNCTION public.dx345_test_void_gate() RETURNS trigger
+      LANGUAGE plpgsql AS $$ BEGIN
+        IF NEW."paymentId" = '${paid.id}'::uuid AND NEW."kind" = 'VOID' THEN
+          PERFORM pg_advisory_xact_lock(345345);
+        END IF;
+        RETURN NEW;
+      END $$`);
+      functionCreated = true;
+      await raw.$executeRawUnsafe(`CREATE TRIGGER dx345_test_void_gate
+      BEFORE INSERT ON cash_session_adjustments FOR EACH ROW
+      EXECUTE FUNCTION public.dx345_test_void_gate()`);
+      triggerCreated = true;
+      gate = raw.$transaction(
+        async (tx) => {
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(345345)`;
+          ready.resolve();
+          await release.promise;
+        },
+        { timeout: 10000 },
+      );
+      gateSettled = Promise.allSettled([gate]);
+      await Promise.race([ready.promise, gate]);
+      let voidPid = 0;
+      const voiding = asA(async (tx) => {
+        const [backend] = await tx.$queryRaw<
+          { pid: number }[]
+        >`SELECT pg_backend_pid() AS pid`;
+        voidPid = backend.pid;
+        await tx.payment.update({
+          where: { id: paid.id },
+          data: {
+            deletedAt: new Date(),
+            voidedAt: new Date(),
+            voidedById: userId,
+            voidReason: 'Abono duplicado',
+          },
+        });
+        await recordVoidAdjustment(tx, {
+          tenantId: a.tenantId,
+          paymentId: paid.id,
+          voidedById: userId,
+        });
+      });
+      voidSettled = Promise.allSettled([voiding]);
+      const repo = new PrismaCashSessionRepository(prisma, tenantContext);
+      await waitFor(async () => {
+        const rows = await raw.$queryRaw<{ waiting: boolean }[]>`
+          SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE pid = ${voidPid} AND wait_event = 'advisory') AS waiting`;
+        return rows[0].waiting;
+      }, 'anulación en barrera de inserción');
+      let opened = false;
+      opening = tenantContext
+        .run(a.tenantId, () =>
+          repo.open({
+            locationId: location.id,
+            openedById: userId,
+            floats: [],
+            notes: null,
+          }),
+        )
+        .then((result) => {
+          opened = true;
+          return result;
+        });
+      openingSettled = Promise.allSettled([opening]);
+      await waitFor(async () => {
+        if (opened) return true;
+        const rows = await raw.$queryRaw<{ waiting: boolean }[]>`
+          SELECT EXISTS(SELECT 1 FROM pg_stat_activity
+            WHERE ${voidPid} = ANY(pg_blocking_pids(pid)) AND wait_event_type = 'Lock'
+              AND query LIKE '%locations%' AND query NOT LIKE '%pg_stat_activity%') AS waiting`;
+        return rows[0].waiting;
+      }, 'apertura termina o espera sede');
+      release.resolve();
+      await gate;
+      const [session] = await Promise.all([opening, voiding]);
+      if (session === 'ALREADY_OPEN') throw new Error('No había caja abierta');
+      const adjustment = await raw.cashSessionAdjustment.findFirstOrThrow({
+        where: { paymentId: paid.id, kind: 'VOID' },
+      });
+      expect(adjustment.sessionId).toBe(session.id);
+      expect(adjustment.originalSessionId).toBe(original.id);
+      expect(adjustment.amount.toNumber()).toBe(-10000);
+    } finally {
+      release.resolve();
+      await Promise.allSettled([gateSettled, voidSettled, openingSettled]);
+      if (triggerCreated) {
+        await raw.$executeRawUnsafe(
+          'DROP TRIGGER IF EXISTS dx345_test_void_gate ON cash_session_adjustments',
+        );
+      }
+      if (functionCreated) {
+        await raw.$executeRawUnsafe(
+          'DROP FUNCTION IF EXISTS public.dx345_test_void_gate()',
+        );
+      }
+    }
+  });
   it('abrir mientras se anula un abono tardío pendiente recoge juntos el positivo y su compensación', async () => {
     const location = await raw.location.create({
       data: locationData(REGIONAL_BOGOTA_FIXTURE, {

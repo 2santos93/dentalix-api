@@ -200,6 +200,7 @@ export async function recordVoidAdjustment(
   let targetSessionId: string | null;
   let originalSessionId: string | null = null;
   if (payment.cashSessionId) {
+    await lockCashAdjustmentAssignment(tx, input.tenantId, payment.locationId);
     // Abono directo de una caja abierta: deja de contar sin ajuste.
     if ((await statusOf(payment.cashSessionId)) === 'OPEN') return;
     originalSessionId = payment.cashSessionId;
