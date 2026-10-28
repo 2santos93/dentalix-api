@@ -4523,7 +4523,7 @@ model LocationWorkingCalendar {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   location Location @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Cascade, onUpdate: Cascade, map: "location_working_calendars_location_fkey")
 
   @@unique([tenantId, locationId], map: "location_working_calendars_tenant_location_key")
@@ -4551,7 +4551,7 @@ model LocationHoliday {
   /// Retirada en blando (no-hard-delete.ts): toda lectura filtra deletedAt null.
   deletedAt  DateTime?
 
-  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   location Location @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "location_holidays_location_fkey")
 
   @@index([tenantId, locationId, date])

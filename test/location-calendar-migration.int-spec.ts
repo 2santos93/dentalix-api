@@ -213,7 +213,7 @@ describe('DX-316 · trigger y reglas de la BD del calendario de la sede (int)', 
     datasources: { db: { url: process.env.DATABASE_URL } },
   });
   const prisma = new PrismaService(new TenantContextService());
-  const SUBDOMAINS = ['dx316-int-a', 'dx316-int-b'];
+  const SUBDOMAINS = ['dx316-int-a', 'dx316-int-b', 'dx316-int-c'];
   let tenantA: string;
   let tenantB: string;
   let locationA: string;
@@ -349,6 +349,34 @@ describe('DX-316 · trigger y reglas de la BD del calendario de la sede (int)', 
     expect(await calendarOf(id)).toHaveLength(1);
     await raw.location.delete({ where: { id } });
     expect(await calendarOf(id)).toEqual([]);
+  });
+
+  it('deleting a clinic removes the calendar and holidays of its locations (tenant FK CASCADE)', async () => {
+    // Como location_reminder_settings: es configuración de la sede. Con
+    // RESTRICT, `tenant.deleteMany` de las limpiezas e2e fallaba por la fila
+    // que el trigger crea en cada sede.
+    const tenantC = (
+      await raw.tenant.create({
+        data: { name: 'Clínica DX-316 C', subdomain: SUBDOMAINS[2] },
+      })
+    ).id;
+    const id = await g1LocationInsert(
+      raw,
+      tenantC,
+      'Sede de la clínica que se borra',
+      REGIONAL_TOKYO_FIXTURE,
+    );
+    await insertHoliday('2027-01-04', 'Cierre anual', false, tenantC, id);
+    expect(await calendarOf(id)).toHaveLength(1);
+
+    await raw.tenant.delete({ where: { id: tenantC } });
+
+    expect(await calendarOf(id)).toEqual([]);
+    const holidays = await raw.$queryRaw<{ n: bigint }[]>`
+      SELECT count(*) AS n FROM "location_holidays" WHERE "tenantId" = ${tenantC}::uuid`;
+    expect(Number(holidays[0].n)).toBe(0);
+    // `locations` no tiene FK al tenant: la sede huérfana se borra a mano.
+    await raw.$executeRaw`DELETE FROM "locations" WHERE "id" = ${id}::uuid`;
   });
 
   it('a location with holidays cannot be hard-deleted', async () => {

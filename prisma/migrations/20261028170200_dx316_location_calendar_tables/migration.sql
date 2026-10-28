@@ -26,6 +26,10 @@
 --         (pre-flight C3).
 --       - Festivos: ON DELETE RESTRICT. Solo se crean a propósito; una sede
 --         con festivos no se borra en duro.
+--       - FK de clínica, en las dos tablas: ON DELETE CASCADE. Es
+--         configuración de la sede, como location_reminder_settings; con
+--         RESTRICT, borrar una clínica con sedes fallaría por la fila que
+--         el trigger crea en cada una.
 --   * Días hábiles: array de una dimensión, de 1 a 7 días, entre 0 y 6 y sin
 --     NULL. El orden y los repetidos los normaliza la API
 --     (normalizeWorkingWeekdays): un repetido no cambia el significado.
@@ -65,8 +69,9 @@ CREATE TABLE "location_working_calendars" (
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "location_working_calendars_pkey" PRIMARY KEY ("id"),
+    -- CASCADE: configuración de la sede, como location_reminder_settings (20261017210600_dx026_appointment_reminders).
     CONSTRAINT "location_working_calendars_tenantId_fkey"
-      FOREIGN KEY ("tenantId") REFERENCES "tenants"("id") ON DELETE RESTRICT ON UPDATE CASCADE,
+      FOREIGN KEY ("tenantId") REFERENCES "tenants"("id") ON DELETE CASCADE ON UPDATE CASCADE,
     CONSTRAINT "location_working_calendars_location_fkey"
       FOREIGN KEY ("tenantId", "locationId") REFERENCES "locations"("tenantId", "id")
       ON DELETE CASCADE ON UPDATE CASCADE,
@@ -97,8 +102,9 @@ CREATE TABLE "location_holidays" (
     "deletedAt" TIMESTAMP(3),
 
     CONSTRAINT "location_holidays_pkey" PRIMARY KEY ("id"),
+    -- CASCADE: configuración de la sede, como location_reminder_settings (20261017210600_dx026_appointment_reminders).
     CONSTRAINT "location_holidays_tenantId_fkey"
-      FOREIGN KEY ("tenantId") REFERENCES "tenants"("id") ON DELETE RESTRICT ON UPDATE CASCADE,
+      FOREIGN KEY ("tenantId") REFERENCES "tenants"("id") ON DELETE CASCADE ON UPDATE CASCADE,
     CONSTRAINT "location_holidays_location_fkey"
       FOREIGN KEY ("tenantId", "locationId") REFERENCES "locations"("tenantId", "id")
       ON DELETE RESTRICT ON UPDATE CASCADE,
