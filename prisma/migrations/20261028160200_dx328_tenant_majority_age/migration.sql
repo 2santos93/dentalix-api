@@ -24,10 +24,15 @@
 -- Sin fase 2: la columna nace NOT NULL y nunca hay un NULL que barrer (ver
 -- spec G2G3 §4.1).
 --
+-- lock_timeout 5 s, como DX-247 en esta misma tabla: toda petición lee
+-- `tenants` al resolver la clínica, así que mientras este ALTER espera su
+-- bloqueo los lectores nuevos hacen cola detrás. Si falla, se reintenta el
+-- deploy.
+--
 -- Grants: no aplica (`tenants` ya concedida a dentalix_app; columna nueva de
 -- tabla existente).
 
-SET LOCAL lock_timeout = '10s';
+SET LOCAL lock_timeout = '5s';
 
 ALTER TABLE "tenants"
   ADD COLUMN "majorityAge" INTEGER NOT NULL DEFAULT 18,
