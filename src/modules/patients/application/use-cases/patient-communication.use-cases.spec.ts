@@ -86,11 +86,11 @@ describe('Bloque «Comunicaciones» de la ficha (DX-128)', () => {
           responsiblePartyId: 'r1',
         },
       });
-      // En España, a los 16 ya recibe los suyos.
+      // Con la mayoría de edad de la clínica en 16, a los 17 ya recibe los suyos.
       repo.add(ANA, {
         birthDate: new Date('2009-06-01'),
         responsibles: [mother],
-        noticeLocation: { country: 'ES', timeZone: 'Europe/Madrid' },
+        noticeSettings: { timeZone: 'UTC', majorityAge: 16 },
       });
       await expect(get.execute(ANA)).resolves.toMatchObject({
         recipient: { kind: 'PATIENT', minor: false },

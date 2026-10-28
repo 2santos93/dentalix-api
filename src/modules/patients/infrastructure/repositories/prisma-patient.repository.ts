@@ -111,7 +111,6 @@ function mapToEntity(patient: PrismaPatient, now = new Date()): Patient {
     dataConsentPolicyVersion: patient.dataConsentPolicyVersion,
     maritalStatus: patient.maritalStatus,
     occupation: patient.occupation,
-    insurerEps: patient.insurerEps,
     physicianName: patient.physicianName,
     physicianPhone: patient.physicianPhone,
     emergencyContactName: patient.emergencyContactName,

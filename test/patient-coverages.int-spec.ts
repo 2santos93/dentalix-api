@@ -245,6 +245,13 @@ describe('pagadores y coberturas (int, DX-153)', () => {
     );
   });
 
+  // DX-322: el cliente Prisma ya no ve `insurerEps` (@ignore); la columna
+  // legada sigue en la BD hasta la fase 2 y se siembra y lee en crudo.
+  async function setInsurerEps(id: string, text: string): Promise<void> {
+    await raw.$executeRaw`
+      UPDATE patients SET "insurerEps" = ${text} WHERE id = ${id}::uuid`;
+  }
+
   describe('relleno de insurerEps', () => {
     let bf: { a: string[]; b: string };
     const longText = 'X'.repeat(300);
@@ -266,19 +273,19 @@ describe('pagadores y coberturas (int, DX-153)', () => {
         insurerEps: string | null,
         createdAt: Date,
         archived = false,
-      ) =>
-        (
-          await raw.patient.create({
-            data: {
-              tenantId: clinic.tenantId,
-              firstName,
-              lastName: 'Relleno',
-              insurerEps,
-              createdAt,
-              ...(archived ? { deletedAt: new Date() } : {}),
-            },
-          })
-        ).id;
+      ) => {
+        const { id } = await raw.patient.create({
+          data: {
+            tenantId: clinic.tenantId,
+            firstName,
+            lastName: 'Relleno',
+            createdAt,
+            ...(archived ? { deletedAt: new Date() } : {}),
+          },
+        });
+        if (insurerEps !== null) await setInsurerEps(id, insurerEps);
+        return id;
+      };
       const ids = [
         await mk(a, 'P1', 'Sura EPS', new Date('2026-01-02')),
         await mk(a, 'P2', '  sura eps ', new Date('2026-01-01')),
@@ -379,10 +386,11 @@ describe('pagadores y coberturas (int, DX-153)', () => {
       ];
       expect(after).toEqual(before);
       expect(before).toEqual([4, 5]);
-      const texts = await raw.patient.findMany({
-        where: { id: { in: [...bf.a, bf.b] } },
-        select: { firstName: true, insurerEps: true },
-      });
+      const texts = await raw.$queryRaw<
+        { firstName: string; insurerEps: string | null }[]
+      >`
+        SELECT "firstName", "insurerEps" FROM patients
+         WHERE id = ANY(${[...bf.a, bf.b]}::uuid[])`;
       const byName = Object.fromEntries(
         texts.map((t) => [t.firstName, t.insurerEps]),
       );
@@ -421,17 +429,13 @@ describe('pagadores y coberturas (int, DX-153)', () => {
       clinic: Clinic,
       firstName: string,
       insurerEps: string,
-    ) =>
-      (
-        await raw.patient.create({
-          data: {
-            tenantId: clinic.tenantId,
-            firstName,
-            lastName: 'Clave',
-            insurerEps,
-          },
-        })
-      ).id;
+    ) => {
+      const { id } = await raw.patient.create({
+        data: { tenantId: clinic.tenantId, firstName, lastName: 'Clave' },
+      });
+      await setInsurerEps(id, insurerEps);
+      return id;
+    };
 
     it('dos textos de 121 caracteres que solo difieren en mayúsculas dan UN pagador y dos coberturas', async () => {
       const p1 = await mkPatient(b, 'L1', 'Y'.repeat(121));

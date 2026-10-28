@@ -31,6 +31,7 @@ function loaded(
   over: {
     birthDate?: Date | null;
     responsibles?: NoticeResponsible[];
+    majorityAge?: number;
   } = {},
 ): LoadedPaymentReceipt {
   return {
@@ -44,7 +45,10 @@ function loaded(
         emergencyContactName: null,
       },
       responsibles: over.responsibles ?? [],
-      location: { country: 'CO', timeZone: 'America/Bogota' },
+      settings: {
+        timeZone: 'America/Bogota',
+        majorityAge: over.majorityAge ?? 18,
+      },
     },
   };
 }
@@ -103,6 +107,22 @@ describe('SendPaymentReceiptUseCase (DX-136)', () => {
         responsibleName: 'Claudia',
       },
     ]);
+  });
+
+  it('receipt recipient uses the clinic majorityAge', async () => {
+    // 17 años el 2026-10-17, con email propio y un responsable con email.
+    const { uc, sent } = makeUseCase(
+      loaded('ana.ruiz@example.com', {
+        birthDate: new Date('2009-03-01'),
+        responsibles: [mother],
+        majorityAge: 16,
+      }),
+    );
+    await expect(uc.execute('pay-1')).resolves.toEqual({
+      sentTo: 'an***@example.com',
+      sentToResponsible: false,
+    });
+    expect(sent[0].to).toBe('ana.ruiz@example.com');
   });
 
   it('DX-203: un adulto sin email con responsable que recibe avisos: al responsable', async () => {

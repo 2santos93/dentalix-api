@@ -1,6 +1,6 @@
 import type { ResponsibleRelationship } from '@prisma/client';
 import type {
-  NoticeLocation,
+  NoticeSettings,
   NoticePatientFields,
   NoticeResponsible,
 } from '../../../patients/domain/communication/notice-recipient';
@@ -13,7 +13,7 @@ export const STATEMENT_FAMILY_REPOSITORY = Symbol(
 export interface StatementNoticeData {
   patient: NoticePatientFields;
   responsibles: NoticeResponsible[];
-  location: NoticeLocation;
+  settings: NoticeSettings;
 }
 
 export interface FamilyMemberRef {

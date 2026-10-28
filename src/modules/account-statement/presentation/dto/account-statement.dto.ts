@@ -350,7 +350,7 @@ export class AccountStatementAddresseeDto {
     enum: ['PATIENT', 'RESPONSIBLE'],
     enumName: 'StatementAddresseeKind',
     description:
-      'RESPONSIBLE: un menor (CO < 18, ES < 16) o un paciente sin email; sale a nombre de su responsable que recibe avisos (primero el pagador principal).',
+      'RESPONSIBLE: un menor (menor que la mayoría de edad de la clínica) o un paciente sin email; sale a nombre de su responsable que recibe avisos (primero el pagador principal).',
   })
   kind!: 'PATIENT' | 'RESPONSIBLE';
 

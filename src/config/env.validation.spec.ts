@@ -730,21 +730,10 @@ describe('validateEnv', () => {
     });
   });
 
-  describe('CANCELLATION_FEE_BLOCK_EPS_CO (DX-291)', () => {
-    it('admite true o false y no exige la variable', () => {
-      expect(() => validateEnv(baseEnv())).not.toThrow();
-      expect(() =>
-        validateEnv(baseEnv({ CANCELLATION_FEE_BLOCK_EPS_CO: 'false' })),
-      ).not.toThrow();
-      expect(() =>
-        validateEnv(baseEnv({ CANCELLATION_FEE_BLOCK_EPS_CO: 'TRUE' })),
-      ).not.toThrow();
-    });
-
-    it('rechaza otro valor', () => {
-      expect(
-        errorOf(baseEnv({ CANCELLATION_FEE_BLOCK_EPS_CO: 'no' })),
-      ).toContain('CANCELLATION_FEE_BLOCK_EPS_CO debe ser "true" o "false".');
-    });
+  it('validateEnv accepts an env that still sets the retired CANCELLATION_FEE_BLOCK_EPS_CO', () => {
+    // DX-321: la variable ya no existe; un despliegue que aún la defina arranca.
+    expect(() =>
+      validateEnv(baseEnv({ CANCELLATION_FEE_BLOCK_EPS_CO: 'no' })),
+    ).not.toThrow();
   });
 });

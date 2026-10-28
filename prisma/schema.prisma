@@ -27,6 +27,12 @@ model Tenant {
   // DX-247: meses que vale una anamnesis (o su última confirmación «Sin
   // cambios hoy») antes de salir «Anamnesis caducada». CHECK 1..60 en la BD.
   anamnesisValidityMonths   Int                             @default(12)
+  /// DX-328: edad desde la que el paciente es adulto en esta clínica: sus
+  /// avisos y documentos de cobro van a él y la ficha deja de pedir
+  /// responsable. 18 de plataforma al crear la clínica (lo escribe la API;
+  /// el default de la BD es el mismo valor, para réplicas anteriores).
+  /// CHECK 14..21. Lo cambia el ADMIN (PUT /patients/settings, auditado).
+  majorityAge               Int                             @default(18)
   createdAt                 DateTime                        @default(now())
   updatedAt                 DateTime                        @updatedAt
   deletedAt                 DateTime?
@@ -433,10 +439,10 @@ model Patient {
   // Identificación ampliada.
   maritalStatus                String?
   occupation                   String?
-  // DEPRECADO (DX-153): solo lectura; el pagador vive en patient_coverages
-  // (la migración 20261020210200 copió cada valor a un pagador y una
-  // cobertura principal con `migratedFromInsurerEps`).
-  insurerEps                   String?
+  /// DX-322 fase 1: columna LEGADA. Solo la leen réplicas anteriores a esta
+  /// unidad. El dato vive en patient_coverages (migratedFromInsurerEps, DX-153).
+  /// Fase 2 (ticket aparte) la borra con DROP COLUMN.
+  insurerEps                   String?               @ignore
   physicianName                String?
   physicianPhone               String?
   // Contacto de emergencia / acudiente.
@@ -2730,6 +2736,8 @@ enum AuditResourceType {
   CANCELLATION_POLICY
   // DX-051: reasignación manual de la imputación de un abono (ADMIN).
   PAYMENT_ALLOCATION
+  // DX-328: ajustes de la clínica (mayoría de edad; más adelante, otros).
+  CLINIC_SETTINGS
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o
@@ -3604,7 +3612,8 @@ enum PayerType {
   PREPAGADA_CO
   EPS_CO
   EMPRESA
-  /// «Otro / sin clasificar»: el que crea el relleno de `insurerEps`.
+  /// «Otro / sin clasificar»: el que crea el relleno del texto libre de
+  /// aseguradora anterior a DX-153 (`patients."insurerEps"`).
   OTRO
 }
 
@@ -3664,7 +3673,8 @@ model PatientCoverage {
   validTo                DateTime? @db.Date
   isPrimary              Boolean   @default(false)
   notes                  String?
-  /// Copiado de `patients.insurerEps` por la migración.
+  /// Copiado de la columna legada `patients."insurerEps"` por la migración.
+  /// Excepción G5.3 (DX-334): marca histórica de SEC-047; no es un supuesto de país.
   migratedFromInsurerEps Boolean   @default(false)
   /// Punteros suaves a User, como `Payment.createdById`.
   createdById            String?   @db.Uuid

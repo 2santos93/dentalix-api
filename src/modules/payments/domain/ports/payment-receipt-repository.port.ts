@@ -4,7 +4,7 @@ import type {
 } from '../receipt-snapshot';
 
 import type {
-  NoticeLocation,
+  NoticeSettings,
   NoticePatientFields,
   NoticeResponsible,
 } from '../../../patients/domain/communication/notice-recipient';
@@ -34,13 +34,14 @@ export interface LegacyReceiptSource {
 }
 
 /**
- * DX-203: lo que decide si el recibo va al responsable: edad (con el país y
- * el día civil de la SEDE DEL ABONO) y responsables vivos del paciente.
+ * DX-203: lo que decide si el recibo va al responsable: edad (con la mayoría
+ * de edad de la clínica y el día civil de la SEDE DEL ABONO) y responsables
+ * vivos del paciente.
  */
 export interface ReceiptNoticeData {
   patient: NoticePatientFields;
   responsibles: NoticeResponsible[];
-  location: NoticeLocation;
+  settings: NoticeSettings;
 }
 
 interface ReceiptSourceBase {

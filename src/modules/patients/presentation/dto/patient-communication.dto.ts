@@ -61,7 +61,7 @@ export class CommunicationRecipientDto {
     enum: ['PATIENT', 'RESPONSIBLE', 'GUARDIAN', 'CONTACT'],
     enumName: 'CommunicationRecipientKind',
     description:
-      'PATIENT: el propio paciente. RESPONSIBLE (DX-203): un menor (CO < 18, ES < 16) o un paciente sin email; los avisos van al email de su responsable que recibe avisos (primero el pagador). GUARDIAN: menor cuyo responsable no tiene email; va al email de la ficha saludándolo. CONTACT: menor sin responsables; se saluda a su contacto principal.',
+      'PATIENT: el propio paciente. RESPONSIBLE (DX-203): un menor (menor que la mayoría de edad de la clínica) o un paciente sin email; los avisos van al email de su responsable que recibe avisos (primero el pagador). GUARDIAN: menor cuyo responsable no tiene email; va al email de la ficha saludándolo. CONTACT: menor sin responsables; se saluda a su contacto principal.',
   })
   kind!: 'PATIENT' | 'RESPONSIBLE' | 'GUARDIAN' | 'CONTACT';
 
@@ -81,7 +81,7 @@ export class CommunicationRecipientDto {
 
   @ApiProperty({
     description:
-      'Menor según el país de la sede (CO: menos de 18; ES: menos de 16).',
+      'Menor que la mayoría de edad de la clínica, en el día civil de la sede.',
   })
   minor!: boolean;
 

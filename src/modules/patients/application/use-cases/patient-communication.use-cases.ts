@@ -104,8 +104,8 @@ function toView(
     recipient: noticeRecipient({
       patient: state,
       responsibles: state.responsibles,
-      country: state.noticeLocation.country,
-      today: civilDateIn(now, state.noticeLocation.timeZone),
+      majorityAge: state.noticeSettings.majorityAge,
+      today: civilDateIn(now, state.noticeSettings.timeZone),
     }),
   };
 }

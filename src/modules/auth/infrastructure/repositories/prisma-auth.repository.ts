@@ -7,6 +7,7 @@ import {
 } from '../../../../shared/locations/membership-locations';
 import { seedDefaultBusinessHours } from '../../../../shared/locations/default-business-hours';
 import { DEFAULT_DENTAL_CATALOG } from '../../../../shared/catalog/default-dental-catalog';
+import { PLATFORM_DEFAULT_MAJORITY_AGE } from '../../../patients/domain/responsible-parties/majority-age';
 import {
   AuthRepository,
   AuthUserRecord,
@@ -65,7 +66,12 @@ export class PrismaAuthRepository implements AuthRepository {
     // so the RLS WITH CHECK passes for the freshly created tenant.
     return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const tenant = await tx.tenant.create({
-        data: { name: input.clinicName, subdomain: input.subdomain },
+        data: {
+          name: input.clinicName,
+          subdomain: input.subdomain,
+          // DX-328: explícito; el default de la BD es el mismo valor.
+          majorityAge: PLATFORM_DEFAULT_MAJORITY_AGE,
+        },
         select: { id: true },
       });
       const user = await tx.user.create({

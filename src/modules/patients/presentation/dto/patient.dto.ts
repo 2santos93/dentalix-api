@@ -91,15 +91,6 @@ export class PatientDto {
   @ApiProperty({ type: String, nullable: true })
   occupation!: string | null;
 
-  @ApiProperty({
-    type: String,
-    nullable: true,
-    deprecated: true,
-    description:
-      'DEPRECADO (DX-153): texto libre original, solo lectura. La aseguradora vive ahora en las coberturas del paciente (`/patients/:id/coverages`); enviarlo en POST o PATCH se ignora.',
-  })
-  insurerEps!: string | null;
-
   @ApiProperty({ type: String, nullable: true })
   physicianName!: string | null;
 

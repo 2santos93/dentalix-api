@@ -1943,9 +1943,10 @@ condonar) el cargo con el flujo de plan, abono y recibo de siempre.
   generado por error se **anula** desde la cita (SEC-050, abajo) y la cita
   conserva su única decisión. 409 en español: no es inasistencia ni tardía, «No
   consta que el paciente fuera informado de la política» (sin
-  `policyVersionId`), la versión comunicada no tiene importe, cobertura
-  `EPS_CO` vigente (día civil de la sede) en una sede de Colombia (Ley 1438
-  de 2011, art. 55), ya cobrado o condonado, o la cita cambió.
+  `policyVersionId`), la versión comunicada no tiene importe, ya cobrado o
+  condonado, o la cita cambió. El cargo se calcula igual para cualquier
+  paciente, tenga la cobertura que tenga, y no depende de la zona de la sede
+  (DX-321); para no cobrar a alguien está la condonación, con motivo.
 - **Anular un cargo generado (SEC-050)**: `POST
   /appointments/:id/cancellation-fee/void` (`{ reason }`, 3–500), con el mismo
   permiso que generarlo (ADMIN, o RECEPTION si la política vigente lo permite)
@@ -1993,9 +1994,6 @@ condonar) el cargo con el flujo de plan, abono y recibo de siempre.
   `CANCELLATION_FEE_CHARGED`, `UPDATE APPOINTMENT` `CANCELLATION_FEE_WAIVED`
   y `VOID APPOINTMENT` `CANCELLATION_FEE_VOIDED` (SEC-050), con el paciente;
   nunca el texto del motivo.
-- **Bloqueo por EPS_CO**: lo fija la plataforma con
-  `CANCELLATION_FEE_BLOCK_EPS_CO` (`true` por defecto, `false` lo apaga); la
-  clínica no puede cambiarlo.
 - **Fecha de cierre (DX-091)**: aún no hay bloqueo contable; el ítem y el
   abono se fechan con la hora del servidor (hoy), así que nunca caen en un
   período anterior.
@@ -2004,10 +2002,9 @@ condonar) el cargo con el flujo de plan, abono y recibo de siempre.
   del recordatorio con la marca de la clínica y la política vigente (paciente
   y profesional de ejemplo). No envía nada.
 - **Demo**: las dos inasistencias y la cancelación tardía de Daniela Montoya
-  Arango tienen la política comunicada, pero ella tiene EPS_CO (Sura) y su
-  cargo sale bloqueado (Ley 1438): sirve para ver el 409. La inasistencia de
-  Jorge Eduardo Ramírez Ospina (hace 8 días, sin EPS) también tiene la
-  política comunicada: ahí «Generar cargo» funciona como ADMIN.
+  Arango tienen la política comunicada y se pueden cobrar. La inasistencia de
+  Jorge Eduardo Ramírez Ospina (hace 8 días) también tiene la política
+  comunicada: ahí «Generar cargo» funciona igual como ADMIN.
 
 ## Recordatorios de cita por email (DX-026)
 
@@ -2130,11 +2127,14 @@ Dentrix. Módulo `patients`, tabla `patient_responsible_parties`; migraciones
   `RESPONSIBLE_PARTY_ADDED|CHANGED|REMOVED` y los nombres de los campos.
 - **Regla de destinatario**
   (`patients/domain/communication/notice-recipient.ts`): un paciente MENOR
-  (CO < 18, ES < 16 —menor maduro, Ley 41/2002—, con el país y el día civil
-  de la sede) o SIN email recibe el recordatorio (DX-026), el recibo (DX-136)
-  y el estado de cuenta (DX-011) en el email de su responsable que recibe
-  avisos, primero el pagador. El canal y la baja del PACIENTE (DX-128) se
-  respetan igual; en el recordatorio automático, tampoco recibe un paciente
+  (por debajo de la mayoría de edad de la clínica, `tenants."majorityAge"`
+  —DX-328—, contada en el día civil de la sede) o SIN email recibe el
+  recordatorio (DX-026), el recibo (DX-136), el estado de cuenta (DX-011) y
+  las indicaciones postoperatorias por email (DX-222) en el email de su
+  responsable que recibe avisos, primero el pagador. La edad se lee en cada
+  envío: un recordatorio ya encolado usa el valor vigente al enviarse. El
+  canal y la baja del PACIENTE (DX-128) se respetan igual; en el
+  recordatorio automático, tampoco recibe un paciente
   responsable dado de baja o con canal distinto de EMAIL. El registro de
   envíos (`outbound_messages."recipientKind"`) y el estado de los
   recordatorios (`sentToResponsible`) dicen «enviado al responsable»; `POST
@@ -2157,6 +2157,108 @@ Dentrix. Módulo `patients`, tabla `patient_responsible_parties`; migraciones
   Cifuentes (su ficha muestra «Responsable de» y el estado de cuenta
   familiar); los avisos de Sofía van a su madre Claudia (contacto) y los de
   Mateo a la abuela.
+
+## Mayoría de edad de la clínica (DX-328)
+
+La edad desde la que un paciente es adulto la fija cada clínica en
+`tenants."majorityAge"` (entero, CHECK 14..21). La leen el bloque
+«Responsable y familia» y la regla de destinatario de arriba. Ningún código
+la deduce del país de una sede. Migraciones `20261028160000_dx328_enums`,
+`20261028160100_dx328_audit_events_idx`,
+`20261028160200_dx328_tenant_majority_age` y
+`20261028160300_dx328_tenant_majority_age_backfill`.
+
+- **Valor inicial**: una clínica nueva empieza en 18
+  (`PLATFORM_DEFAULT_MAJORITY_AGE`). Las que ya existían conservan la edad que
+  cada clínica ya aplicaba (la mayor si tenía varias); ver
+  [la migración de relleno](prisma/migrations/20261028160300_dx328_tenant_majority_age_backfill/migration.sql).
+- **Endpoints**: `GET /patients/settings` (los 4 roles) devuelve
+  `{ majorityAge }`. `PUT /patients/settings` solo lo usa el ADMIN
+  (`CLINIC_SETTINGS_WRITE_ROLES`); cualquier otro rol recibe 403 «Solo un
+  administrador puede cambiar la mayoría de edad.». El cuerpo es
+  `{ majorityAge }`, un entero de 14 a 21. Si el valor está fuera de rango, es
+  decimal, es texto o falta, la respuesta es 400 con «La mayoría de edad
+  tiene que ser un número entero de años entre 14 y 21.». Las dos rutas
+  están declaradas antes de `GET /patients/:id`.
+- **Escritura**: lee la fila de la clínica con `FOR UPDATE` y la actualiza en
+  la misma transacción. Así, dos ADMIN a la vez dejan dos cambios
+  encadenados. El cambio aplica desde la siguiente petición, porque no hay
+  caché. Lo ya enviado no se rehace.
+- **Auditoría**: solo si el valor cambia. Es un UPDATE de `CLINIC_SETTINGS`
+  sin recurso ni paciente, con `reason: MAJORITY_AGE_SETTINGS` y
+  `statusChange` `AGE_<antes>` → `AGE_<después>`. Guardar el mismo valor
+  responde 200 sin evento.
+- **Despliegue** (orden obligatorio):
+  1. `npx prisma migrate deploy` aplica las cuatro migraciones y tiene que
+     terminar ANTES de que arranque la primera réplica nueva de la imagen,
+     sea de la API (`APP_ROLE=api`) o del worker (`APP_ROLE=worker`): el
+     worker también lee la columna al enviar cada recordatorio
+     (`loadTenantMajorityAge`). Una réplica nueva contra el esquema anterior
+     falla en cada lectura de `tenants` que pide `majorityAge`; en el worker,
+     el trabajo falla y la cola lo reintenta, así que el recordatorio se
+     retrasa (o queda FAILED si la espera agota sus intentos). Las réplicas
+     antiguas no leen la columna y siguen funcionando con el esquema nuevo.
+  2. Si falla el relleno (`20261028160300_dx328_tenant_majority_age_backfill`),
+     se para el despliegue y NO se despliega la API ni el worker. Se ejecuta
+     `npx prisma migrate resolve --rolled-back 20261028160300_dx328_tenant_majority_age_backfill`,
+     se corrige la causa y se repite `migrate deploy`. Si se sigue adelante,
+     todas las clínicas quedan en 18 (el default de la columna), y las que
+     aplicaban 16 pasan a tratar en silencio como menores a los pacientes de
+     16 y 17 años.
+  3. Esperas de bloqueo: `lock_timeout` de 5 s en el enum, en el índice y en
+     la columna de `tenants`, y de 10 s en el relleno. El relleno toma
+     `ACCESS EXCLUSIVE` en `locations` (quita y devuelve FORCE) y en
+     `tenants` solo bloqueos de fila; el `lock_timeout` acota las dos
+     esperas. Mientras el relleno espera su bloqueo (hasta 10 s), las
+     peticiones que leen sedes (casi todas: la zona de la sede, la agenda,
+     los avisos) hacen cola detrás de él; es otro motivo para la hora de
+     poco tráfico.
+  4. Un fallo por bloqueo es benigno, no un problema de datos: si se agota
+     el `lock_timeout`, o Postgres aborta el relleno por un interbloqueo
+     (deadlock) con una transacción de una réplica antigua que tenía la fila
+     de una clínica, la migración falla sin dejar nada a medias. Se ejecuta
+     `npx prisma migrate resolve --rolled-back <migración>` (la que nombre
+     `npx prisma migrate status`) y se repite `migrate deploy`; no hay causa
+     que corregir.
+  5. El índice parcial de `audit_events` (`…160100`) no es concurrente,
+     porque la tabla está particionada. Mientras se construye, bloquea las
+     escrituras de auditoría durante un momento, así que conviene desplegar a
+     una hora de poco tráfico.
+  6. **Vuelta atrás: se corrige hacia delante, no se revierte.** Los datos
+     aguantan la API anterior: la columna, el valor del enum y el índice se
+     quedan, y esa API no lee ni escribe `majorityAge`. Pero en cuanto un
+     ADMIN ha cambiado la mayoría de edad (hay una fila `CLINIC_SETTINGS` en
+     `audit_events`), la API anterior, en esa clínica:
+     - devuelve 500 en `GET /audit-events` en cuanto la página incluye esa
+       fila (sin filtros, la primera, porque va de la más reciente a la más
+       antigua): su cliente de Prisma no conoce el valor `CLINIC_SETTINGS`
+       de `AuditResourceType`;
+     - vuelve a la edad que salía del país de cada sede y deja de lado la
+       que fijó la clínica, sin avisar a nadie.
+
+     Las dos cosas terminan al volver a desplegar la API nueva, sin tocar
+     datos; lo enviado mientras tanto no se rehace. Las clínicas que nunca
+     cambiaron la edad vuelven a la regla de antes del despliegue, nada más.
+     Si la vuelta atrás es inevitable: no se revierte ninguna migración ni se
+     tocan filas de `audit_events` (es de solo inserción); se sacan las
+     clínicas afectadas con la consulta de abajo (solo lectura, con un rol
+     BYPASSRLS o superusuario) y se avisa a sus ADMIN de los dos efectos; si
+     la web nueva sigue desplegada, Ajustes › Mayoría de edad muestra un
+     error con reintento (la API anterior no tiene la ruta); y se vuelve a
+     desplegar la API nueva en cuanto se pueda.
+
+     ```sql
+     BEGIN TRANSACTION READ ONLY;
+     SET LOCAL row_security = off;
+     SELECT t.id, t.subdomain, t."majorityAge",
+            max(a."occurredAt") AS "lastChange"
+     FROM audit_events a
+     JOIN tenants t ON t.id = a."tenantId"
+     WHERE a."resourceType" = 'CLINIC_SETTINGS'
+     GROUP BY t.id, t.subdomain, t."majorityAge"
+     ORDER BY t.subdomain;
+     ROLLBACK;
+     ```
 
 ## Indicaciones postoperatorias (DX-222)
 
@@ -2277,8 +2379,9 @@ coberturas por paciente, una principal. Sustituye al texto libre
   clínica y texto normalizado (tipo OTRO, sin país; el ADMIN lo reclasifica) y
   una cobertura principal por paciente con `insurerEps` no vacío, marcada
   `migratedFromInsurerEps`. Es idempotente, incluye archivados y no toca
-  `insurerEps`, que queda DEPRECADO y de solo lectura: la API ya no lo
-  escribe y un cliente antiguo que lo mande no da error.
+  `insurerEps`. Esa columna queda legada, sin lectores desde DX-322; DROP en
+  fase 2. La API ya no la lee, no la escribe ni la expone (`@ignore` en el
+  esquema), y un cliente antiguo que la mande no da error: se descarta.
 - **Demo**: `npm run seed:demo` crea 8 pagadores (Sura EPS, Sanitas,
   Compensar, Nueva EPS, Famisanar, Salud Total, Coomeva, Empresa Alfa) y una cobertura
   principal por paciente que tenía aseguradora, con una vencida y una

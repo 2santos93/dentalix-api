@@ -12,7 +12,7 @@ import {
   type UpdateResponsiblePartyData,
 } from '../../domain/ports/responsible-party-repository.port';
 import {
-  loadNoticeLocation,
+  loadNoticeSettings,
   loadNoticeResponsibles,
 } from '../notices/notice-context';
 
@@ -129,7 +129,7 @@ export class PrismaResponsiblePartyRepository implements ResponsiblePartyReposit
         },
       });
       if (!patient) return null;
-      const [rows, responsibleFor, noticeResponsibles, noticeLocation] =
+      const [rows, responsibleFor, noticeResponsibles, noticeSettings] =
         await Promise.all([
           tx.patientResponsibleParty.findMany({
             // Con el responsable archivado también: sigue ocupando el pagador
@@ -158,7 +158,7 @@ export class PrismaResponsiblePartyRepository implements ResponsiblePartyReposit
             },
           }),
           loadNoticeResponsibles(tx, patientId),
-          loadNoticeLocation(
+          loadNoticeSettings(
             tx,
             tenantId,
             this.tenantContext.getLocationId() ?? null,
@@ -169,7 +169,7 @@ export class PrismaResponsiblePartyRepository implements ResponsiblePartyReposit
         parties: rows.map(toView),
         noticeResponsibles,
         responsibleFor,
-        noticeLocation,
+        noticeSettings,
       };
     });
   }

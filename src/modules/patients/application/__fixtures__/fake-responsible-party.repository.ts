@@ -6,7 +6,10 @@ import type {
   ResponsiblePatientSummary,
   UpdateResponsiblePartyData,
 } from '../../domain/ports/responsible-party-repository.port';
-import type { NoticePatientFields } from '../../domain/communication/notice-recipient';
+import type {
+  NoticePatientFields,
+  NoticeSettings,
+} from '../../domain/communication/notice-recipient';
 
 interface FakePatient extends ResponsiblePatientSummary {
   notice: NoticePatientFields;
@@ -16,9 +19,11 @@ interface FakePatient extends ResponsiblePatientSummary {
 export class FakeResponsiblePartyRepository implements ResponsiblePartyRepository {
   readonly patients = new Map<string, FakePatient>();
   readonly parties: (ResponsiblePartyView & { deleted: boolean })[] = [];
-  country: 'CO' | 'ES' = 'CO';
-  /** Dato de test de la sede; el fake no deduce la zona del país. */
-  timeZone = 'America/Bogota';
+  /** Zona de la sede y mayoría de edad de la clínica (DX-328). */
+  noticeSettings: NoticeSettings = {
+    timeZone: 'America/Bogota',
+    majorityAge: 18,
+  };
   private seq = 0;
 
   addPatient(
@@ -78,10 +83,7 @@ export class FakeResponsiblePartyRepository implements ResponsiblePartyRepositor
             receivesNotices: p.receivesNotices,
           };
         }),
-      noticeLocation: {
-        country: this.country,
-        timeZone: this.timeZone,
-      },
+      noticeSettings: { ...this.noticeSettings },
     });
   }
 

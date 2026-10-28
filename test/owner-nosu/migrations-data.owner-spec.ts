@@ -272,6 +272,31 @@ const FIXTURE_G1B = [
      (gen_random_uuid(),'${T_B}','Sede Berlín','EUR','Europe/Berlin','de-DE',now())`,
 ];
 
+/** DX-328: mayoría de edad por clínica (relleno con la que ya aplicaba). */
+const DX328 = '20261028160000_dx328_enums';
+const DX328_COLUMN = '20261028160200_dx328_tenant_majority_age';
+const T_CO = '00000000-0000-4000-8000-0000000328a1';
+const T_ES = '00000000-0000-4000-8000-0000000328b1';
+const T_MIX = '00000000-0000-4000-8000-0000000328c1';
+const T_NONE = '00000000-0000-4000-8000-0000000328e1';
+
+/**
+ * Esquema de G1-B, antes de la columna de DX-328: una clínica con dos sedes
+ * CO, una con una sede ES, una mixta y una sin sedes. A tiene solo sedes CO
+ * y B es mixta (Madrid y la retirada son ES).
+ */
+const FIXTURE_DX328 = [
+  `INSERT INTO "tenants" ("id","name","subdomain","updatedAt") VALUES
+     ('${T_CO}','Clínica CO','mig-co',now()), ('${T_ES}','Clínica ES','mig-es',now()),
+     ('${T_MIX}','Clínica mixta','mig-mix',now()), ('${T_NONE}','Clínica sin sedes','mig-none',now())`,
+  `INSERT INTO "locations" ("id","tenantId","name","country","currency","timeZone","locale","hourCycle","updatedAt") VALUES
+     (gen_random_uuid(),'${T_CO}','Sede 1','CO','EUR','Europe/Berlin','de-DE','h23',now()),
+     (gen_random_uuid(),'${T_CO}','Sede 2','CO','EUR','Europe/Berlin','de-DE','h23',now()),
+     (gen_random_uuid(),'${T_ES}','Sede 1','ES','EUR','Europe/Berlin','de-DE','h23',now()),
+     (gen_random_uuid(),'${T_MIX}','Sede 1','CO','EUR','Europe/Berlin','de-DE','h23',now()),
+     (gen_random_uuid(),'${T_MIX}','Sede 2','ES','EUR','Europe/Berlin','de-DE','h23',now())`,
+];
+
 const STEPS: Step[] = [
   { until: '20260731115959', fixture: [] },
   // 20260731120000_structured_clinical_history y _remove_owner_role.
@@ -335,8 +360,14 @@ const STEPS: Step[] = [
   // location_schedules durante el backfill D5) y las siguientes hasta G1-B.
   { until: G1B, fixture: FIXTURE_G1 },
   // g1b_location_hour_cycle (FORCE fuera de locations durante el backfill del
-  // reloj) y las siguientes.
-  { until: '99999999999999', fixture: FIXTURE_G1B },
+  // reloj) y las siguientes hasta DX-328.
+  { until: DX328, fixture: FIXTURE_G1B },
+  // dx328_enums y dx328_audit_events_idx: las clínicas se siembran antes de
+  // la columna.
+  { until: DX328_COLUMN, fixture: FIXTURE_DX328 },
+  // dx328_tenant_majority_age, su relleno (FORCE fuera de locations) y las
+  // siguientes.
+  { until: '99999999999999' },
 ];
 
 describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-nosu)', () => {
@@ -854,6 +885,51 @@ describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-no
         'Sede principal:h23:-',
       ].join(','),
     );
+    expect(
+      await scalar<boolean>(
+        `SELECT relforcerowsecurity AS v FROM pg_class
+          WHERE oid = 'public.locations'::regclass`,
+      ),
+    ).toBe(true);
+  }, 180_000);
+
+  it('owner-nosu majority age backfill sees every location and restores FORCE on locations', async () => {
+    await run(STEPS[20]);
+    expect(
+      await scalar<number>(
+        `SELECT count(*)::int AS v FROM information_schema.columns
+          WHERE table_name = 'tenants' AND column_name = 'majorityAge'`,
+      ),
+    ).toBe(0);
+    await run(STEPS[21]);
+    // Todas las clínicas de la BD, también las de etapas anteriores: A solo
+    // tiene sedes CO; B es mixta (Madrid y la retirada son ES). Con el owner
+    // sujeto a la RLS, un relleno que no viera las sedes dejaría la ES en 18.
+    expect(
+      await scalar<string>(
+        `SELECT string_agg("subdomain" || '=' || "majorityAge", ','
+                ORDER BY "subdomain") AS v FROM "tenants"`,
+      ),
+    ).toBe(
+      [
+        'mig-a=18',
+        'mig-b=18',
+        'mig-co=18',
+        'mig-es=16',
+        'mig-mix=18',
+        'mig-none=18',
+      ].join(','),
+    );
+    // Ninguna clínica con sedes se queda sin relleno: su edad es la mayor de
+    // las de sus sedes.
+    expect(
+      await scalar<number>(
+        `SELECT count(*)::int AS v FROM "tenants" t
+          WHERE t."majorityAge" IS DISTINCT FROM coalesce(
+            (SELECT max(CASE l."country"::text WHEN 'CO' THEN 18 WHEN 'ES' THEN 16 END)
+               FROM "locations" l WHERE l."tenantId" = t."id"), 18)`,
+      ),
+    ).toBe(0);
     expect(
       await scalar<boolean>(
         `SELECT relforcerowsecurity AS v FROM pg_class

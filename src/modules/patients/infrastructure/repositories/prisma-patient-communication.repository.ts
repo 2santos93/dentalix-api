@@ -12,7 +12,7 @@ import {
   type PatientCommunicationState,
 } from '../../domain/ports/patient-communication-repository.port';
 import {
-  loadNoticeLocation,
+  loadNoticeSettings,
   loadNoticeResponsibles,
 } from '../notices/notice-context';
 
@@ -52,7 +52,7 @@ export class PrismaPatientCommunicationRepository implements PatientCommunicatio
     const { whatsappOptInById, id, ...rest } = row;
     const tenantId = this.tenantContext.getTenantId();
     if (!tenantId) throw new Error('No tenant in context');
-    const [membership, responsibles, noticeLocation] = await Promise.all([
+    const [membership, responsibles, noticeSettings] = await Promise.all([
       whatsappOptInById
         ? tx.clinicMembership.findFirst({
             where: { userId: whatsappOptInById },
@@ -61,7 +61,7 @@ export class PrismaPatientCommunicationRepository implements PatientCommunicatio
           })
         : null,
       loadNoticeResponsibles(tx, id),
-      loadNoticeLocation(
+      loadNoticeSettings(
         tx,
         tenantId,
         this.tenantContext.getLocationId() ?? null,
@@ -71,7 +71,7 @@ export class PrismaPatientCommunicationRepository implements PatientCommunicatio
       patientId: id,
       ...rest,
       responsibles,
-      noticeLocation,
+      noticeSettings,
       whatsappOptInBy: whatsappOptInById
         ? {
             id: whatsappOptInById,

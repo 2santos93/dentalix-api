@@ -255,9 +255,10 @@ export interface StatementClinic {
 }
 
 /**
- * A nombre de quién sale el estado de cuenta (DX-203): el de un menor (CO <
- * 18, ES < 16) o de un paciente sin email, a nombre de su responsable que
- * recibe avisos (primero el pagador principal); si no, del propio paciente.
+ * A nombre de quién sale el estado de cuenta (DX-203): el de un menor (menor
+ * que la mayoría de edad de la clínica) o de un paciente sin email, a nombre
+ * de su responsable que recibe avisos (primero el pagador principal); si no,
+ * del propio paciente.
  */
 export interface StatementAddressee {
   kind: 'PATIENT' | 'RESPONSIBLE';

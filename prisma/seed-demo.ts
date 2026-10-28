@@ -1436,9 +1436,8 @@ class DemoSeeder {
    * inasistencias y una cancelación tardía en citas pasadas de esa sede, para
    * ver la insignia en su ficha y en sus citas. DX-291: esas tres citas
    * tienen la política comunicada (como si la hubiera llevado el
-   * recordatorio); como la paciente tiene EPS_CO, su cargo sale bloqueado
-   * (Ley 1438). Otra inasistencia, de un paciente sin EPS y también con la
-   * política comunicada, deja probar «Generar cargo» en la demo.
+   * recordatorio) y se pueden cobrar. Otra inasistencia, de otro paciente y
+   * también con la política comunicada, se puede cobrar igual (DX-321).
    */
   private async createCancellationPolicy(
     tenantId: string,

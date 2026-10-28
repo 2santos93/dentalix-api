@@ -60,7 +60,6 @@ describe('responsables de pago y avisos (DX-203)', () => {
     expect(son).toMatchObject({
       minor: true,
       majorityAge: 18,
-      country: 'CO',
       parties: [
         {
           kind: 'PATIENT',
@@ -253,15 +252,12 @@ describe('responsables de pago y avisos (DX-203)', () => {
     );
   });
 
-  it('la edad cuenta con el país de la sede: 16 años en España ya no es menor', async () => {
-    repo.addPatient('teen', { birthDate: new Date('2010-01-01') });
-    expect((await list.execute('teen')).minor).toBe(true);
-    repo.country = 'ES';
-    repo.timeZone = 'Europe/Madrid';
-    expect(await list.execute('teen')).toMatchObject({
-      minor: false,
-      majorityAge: 16,
-      country: 'ES',
-    });
+  it('responsibles view takes majorityAge from the clinic and has no country', async () => {
+    repo.noticeSettings = { timeZone: 'Asia/Tokyo', majorityAge: 20 };
+    // 19 años en el día civil de Tokio: menor con 20.
+    repo.addPatient('nineteen', { birthDate: new Date('2007-01-01') });
+    const view = await list.execute('nineteen');
+    expect(view).toMatchObject({ minor: true, majorityAge: 20 });
+    expect(view).not.toHaveProperty('country');
   });
 });

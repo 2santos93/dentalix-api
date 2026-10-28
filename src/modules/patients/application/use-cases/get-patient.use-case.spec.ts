@@ -29,7 +29,6 @@ function fakePatient(id: string): Patient {
     dataConsentPolicyVersion: null,
     maritalStatus: null,
     occupation: null,
-    insurerEps: null,
     physicianName: null,
     physicianPhone: null,
     emergencyContactName: null,

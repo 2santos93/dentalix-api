@@ -8,7 +8,10 @@ import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { requireLocationTimeZone } from '../../../shared/locations/location-time-zone';
 import { requireLocationFormat } from '../../../shared/locations/location-regional';
-import { loadNoticeResponsibles } from '../../patients/infrastructure/notices/notice-context';
+import {
+  loadNoticeResponsibles,
+  loadTenantMajorityAge,
+} from '../../patients/infrastructure/notices/notice-context';
 import {
   REMINDER_CATCH_UP_MS,
   REMINDER_LOOKAHEAD_MS,
@@ -216,7 +219,6 @@ export class PrismaReminderRepository implements ReminderRepository {
           location: {
             select: {
               id: true,
-              country: true,
               timeZone: true,
               locale: true,
               hourCycle: true,
@@ -225,7 +227,7 @@ export class PrismaReminderRepository implements ReminderRepository {
         },
       });
       if (!appointment) return null;
-      const [settings, responsibles, policy] = await Promise.all([
+      const [settings, responsibles, policy, majorityAge] = await Promise.all([
         tx.locationReminderSettings.findFirst({
           where: { locationId: appointment.locationId },
           select: { enabled: true, leadHours: true },
@@ -244,6 +246,8 @@ export class PrismaReminderRepository implements ReminderRepository {
             currency: true,
           },
         }),
+        // DX-328: la vigente al enviarse, no la de cuando se encoló.
+        loadTenantMajorityAge(tx, tenantId),
       ]);
       return {
         appointment: {
@@ -252,7 +256,7 @@ export class PrismaReminderRepository implements ReminderRepository {
           status: appointment.status,
           deleted: appointment.deletedAt !== null,
         },
-        locationCountry: appointment.location.country,
+        majorityAge,
         locationTimeZone: requireLocationTimeZone(appointment.location),
         // Después de la zona (su 409 gana): sin formato o sin reloj, el 409
         // de formato y el envío no sale, igual que con una zona NULL.

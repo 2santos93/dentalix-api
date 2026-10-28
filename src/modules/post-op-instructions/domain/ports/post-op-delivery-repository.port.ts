@@ -36,6 +36,7 @@ export interface PostOpAppointmentContext {
     id: string;
     name: string;
     phone: string | null;
+    /** Solo para el número de WhatsApp. */
     country: ClinicCountry;
     /** Zona IANA de la sede. */
     timeZone: string;
@@ -44,6 +45,8 @@ export interface PostOpAppointmentContext {
     hourCycle: string | null;
   };
   clinicName: string;
+  /** Mayoría de edad de la clínica (DX-328): decide si es menor. */
+  majorityAge: number;
 }
 
 // Sin `tenantId` (sale del contexto) ni `deliveredAt` (lo pone la BD).

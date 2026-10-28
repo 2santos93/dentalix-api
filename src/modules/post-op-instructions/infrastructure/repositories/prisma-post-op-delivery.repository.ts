@@ -3,7 +3,10 @@ import type { PostOpInstructionDelivery, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { requireLocationTimeZone } from '../../../../shared/locations/location-time-zone';
-import { loadNoticeResponsibles } from '../../../patients/infrastructure/notices/notice-context';
+import {
+  loadNoticeResponsibles,
+  loadTenantMajorityAge,
+} from '../../../patients/infrastructure/notices/notice-context';
 import { performedItemsOf } from '../../../clinical-entries/infrastructure/repositories/performed-items';
 import type { PostOpDelivery } from '../../domain/entities/post-op-delivery.entity';
 import type {
@@ -107,7 +110,7 @@ export class PrismaPostOpDeliveryRepository implements PostOpDeliveryRepository 
       if (!appointment || appointment.patient.deletedAt) return null;
       const { patient, location } = appointment;
 
-      const [provider, tenant, responsibles] = await Promise.all([
+      const [provider, tenant, responsibles, majorityAge] = await Promise.all([
         tx.clinicMembership.findFirst({
           where: { userId: appointment.providerId },
           orderBy: { createdAt: 'desc' },
@@ -118,6 +121,7 @@ export class PrismaPostOpDeliveryRepository implements PostOpDeliveryRepository 
           select: { name: true },
         }),
         loadNoticeResponsibles(tx, appointment.patientId),
+        loadTenantMajorityAge(tx, tenantId),
       ]);
 
       return {
@@ -150,6 +154,7 @@ export class PrismaPostOpDeliveryRepository implements PostOpDeliveryRepository 
           hourCycle: location.hourCycle,
         },
         clinicName: tenant.name,
+        majorityAge,
       };
     });
   }

@@ -3,8 +3,6 @@ import {
   blockMessage,
   canManageFee,
   chargeBlockReason,
-  epsCoBlockEnabled,
-  hasActiveEpsCoverage,
   isFeeEligible,
   normalizeWaiveReason,
   resolveChargeAmount,
@@ -20,9 +18,6 @@ const facts = (over: Partial<FeeChargeFacts> = {}): FeeChargeFacts => ({
     policyVersionId: 'v1',
   },
   communicated: { suggestedFee: 50000, currency: 'COP' },
-  locationCountry: 'CO',
-  hasActiveEpsCo: false,
-  epsCoBlockEnabled: true,
   existing: null,
   ...over,
 });
@@ -84,18 +79,58 @@ describe('cargo por inasistencia o cancelación tardía (DX-291)', () => {
       );
     });
 
-    it('EPS_CO activa en una sede de Colombia bloquea; en España o con el bloqueo apagado, no', () => {
-      expect(chargeBlockReason(facts({ hasActiveEpsCo: true }))).toBe('EPS_CO');
+    it('chargeBlockReason ignores coverages and location: a NO_SHOW with a communicated fee is chargeable', () => {
+      const noShow = {
+        status: 'NO_SHOW',
+        lateCancellation: null,
+        policyVersionId: 'v1',
+      } as const;
       expect(
-        chargeBlockReason(
-          facts({ hasActiveEpsCo: true, locationCountry: 'ES' }),
-        ),
+        chargeBlockReason({
+          appointment: noShow,
+          communicated: { suggestedFee: 50, currency: 'USD' },
+          existing: null,
+        }),
       ).toBeNull();
-      expect(
-        chargeBlockReason(
-          facts({ hasActiveEpsCo: true, epsCoBlockEnabled: false }),
-        ),
-      ).toBeNull();
+    });
+
+    it('block order is ALREADY_CHARGED, ALREADY_WAIVED, NOT_ELIGIBLE, NOT_INFORMED, NO_FEE', () => {
+      const notEligible = {
+        status: 'CANCELLED',
+        lateCancellation: false,
+        policyVersionId: null,
+      } as const;
+      const noFee = { suggestedFee: null, currency: null };
+      const cases: [Partial<FeeChargeFacts>, string][] = [
+        [
+          {
+            existing: 'CHARGED',
+            appointment: notEligible,
+            communicated: null,
+          },
+          'ALREADY_CHARGED',
+        ],
+        [
+          { existing: 'WAIVED', appointment: notEligible, communicated: null },
+          'ALREADY_WAIVED',
+        ],
+        [{ appointment: notEligible, communicated: null }, 'NOT_ELIGIBLE'],
+        [
+          {
+            appointment: {
+              status: 'NO_SHOW',
+              lateCancellation: null,
+              policyVersionId: null,
+            },
+            communicated: noFee,
+          },
+          'NOT_INFORMED',
+        ],
+        [{ communicated: noFee }, 'NO_FEE'],
+      ];
+      for (const [over, expected] of cases) {
+        expect(chargeBlockReason(facts(over))).toBe(expected);
+      }
     });
 
     it('una política comunicada sin importe no tiene nada que cobrar', () => {
@@ -213,33 +248,6 @@ describe('cargo por inasistencia o cancelación tardía (DX-291)', () => {
     expect(canManageFee('RECEPTION', false)).toBe(false);
     expect(canManageFee('RECEPTION', true)).toBe(true);
     expect(canManageFee('DENTIST', true)).toBe(false);
-  });
-
-  it('hasActiveEpsCoverage: solo EPS_CO vigente ese día (extremos incluidos)', () => {
-    const eps = {
-      payerType: 'EPS_CO' as const,
-      validFrom: null,
-      validTo: null,
-    };
-    expect(hasActiveEpsCoverage([eps], '2026-10-24')).toBe(true);
-    expect(
-      hasActiveEpsCoverage([{ ...eps, validTo: '2026-10-24' }], '2026-10-24'),
-    ).toBe(true);
-    expect(
-      hasActiveEpsCoverage([{ ...eps, validTo: '2026-10-23' }], '2026-10-24'),
-    ).toBe(false);
-    expect(
-      hasActiveEpsCoverage(
-        [{ ...eps, payerType: 'PREPAGADA_CO' }],
-        '2026-10-24',
-      ),
-    ).toBe(false);
-  });
-
-  it('epsCoBlockEnabled: activado salvo «false»', () => {
-    expect(epsCoBlockEnabled(undefined)).toBe(true);
-    expect(epsCoBlockEnabled('true')).toBe(true);
-    expect(epsCoBlockEnabled(' FALSE ')).toBe(false);
   });
 
   describe('voidBlockMessage (SEC-050)', () => {

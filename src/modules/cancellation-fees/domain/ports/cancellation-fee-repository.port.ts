@@ -1,9 +1,4 @@
-import type {
-  AppointmentStatus,
-  CancellationFeeStatus,
-  ClinicCountry,
-} from '@prisma/client';
-import type { FeeCoverage } from '../cancellation-fee';
+import type { AppointmentStatus, CancellationFeeStatus } from '@prisma/client';
 
 // Sin `tenantId` en ningún input: el tenant sale SIEMPRE del contexto de la
 // petición y todo se lee y escribe bajo RLS (una cita de otra clínica no
@@ -66,13 +61,9 @@ export interface CancellationFeeContext {
   communicated: CommunicatedPolicy | null;
   /** De la política VIGENTE de la sede de la cita (false sin política). */
   receptionCanCharge: boolean;
-  locationCountry: ClinicCountry;
-  locationTimeZone: string;
   /** Formato y reloj de la sede de la cita, en crudo: los pide quien pinta (G1-B, I4). */
   locationLocale: string | null;
   locationHourCycle: string | null;
-  /** Coberturas vivas del paciente con el tipo de su pagador. */
-  coverages: FeeCoverage[];
   fee: CancellationFeeRecord | null;
 }
 

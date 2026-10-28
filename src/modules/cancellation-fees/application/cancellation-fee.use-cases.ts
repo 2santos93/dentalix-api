@@ -9,13 +9,11 @@ import {
 import type { ClinicRole } from '@prisma/client';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { requireLocationFormat } from '../../../shared/locations/location-regional';
-import { civilDateIn } from '../../../shared/time/civil-day';
 import {
   CANCELLATION_FEE_MESSAGES,
   blockMessage,
   canManageFee,
   chargeBlockReason,
-  hasActiveEpsCoverage,
   isFeeEligible,
   normalizeWaiveReason,
   resolveChargeAmount,
@@ -30,11 +28,6 @@ import {
   type CancellationFeeRepository,
   type FeeWriteOutcome,
 } from '../domain/ports/cancellation-fee-repository.port';
-
-/** Bloqueo por EPS_CO (lo fija la plataforma; ver `epsCoBlockEnabled`). */
-export const CANCELLATION_FEE_EPS_CO_BLOCK = Symbol(
-  'CANCELLATION_FEE_EPS_CO_BLOCK',
-);
 
 /** Quién pide: el usuario y su rol en la clínica. */
 export interface FeeActor {
@@ -85,18 +78,10 @@ async function loadFor(
 function toView(
   ctx: CancellationFeeContext,
   actor: FeeActor,
-  epsCoBlock: boolean,
-  now: Date,
 ): CancellationFeeView {
   const block = chargeBlockReason({
     appointment: ctx.appointment,
     communicated: ctx.communicated,
-    locationCountry: ctx.locationCountry,
-    hasActiveEpsCo: hasActiveEpsCoverage(
-      ctx.coverages,
-      civilDateIn(now, ctx.locationTimeZone),
-    ),
-    epsCoBlockEnabled: epsCoBlock,
     existing: ctx.fee?.status ?? null,
   });
   return {
@@ -150,7 +135,6 @@ export class GetCancellationFeeUseCase {
     @Inject(CANCELLATION_FEE_REPOSITORY)
     private readonly repo: CancellationFeeRepository,
     private readonly tenantContext: TenantContextService,
-    @Inject(CANCELLATION_FEE_EPS_CO_BLOCK) private readonly epsCoBlock: boolean,
   ) {}
 
   async execute(
@@ -158,16 +142,16 @@ export class GetCancellationFeeUseCase {
     actor: FeeActor,
   ): Promise<CancellationFeeView> {
     const ctx = await loadFor(this.repo, this.tenantContext, appointmentId);
-    return toView(ctx, actor, this.epsCoBlock, new Date());
+    return toView(ctx, actor);
   }
 }
 
 /**
  * `POST /appointments/:id/cancellation-fee` (DX-291): genera el cargo de una
  * inasistencia o cancelación tardía con el importe sugerido de la versión
- * COMUNICADA (editable a la baja). 409 sin política comunicada, con EPS_CO
- * activa en Colombia o si ya hay cargo/condonación; 400 por encima del
- * sugerido.
+ * COMUNICADA (editable a la baja). 409 sin política comunicada o si ya hay
+ * cargo/condonación; 400 por encima del sugerido. Igual para cualquier
+ * paciente, tenga la cobertura que tenga (DX-321).
  */
 @Injectable()
 export class ChargeCancellationFeeUseCase {
@@ -175,7 +159,6 @@ export class ChargeCancellationFeeUseCase {
     @Inject(CANCELLATION_FEE_REPOSITORY)
     private readonly repo: CancellationFeeRepository,
     private readonly tenantContext: TenantContextService,
-    @Inject(CANCELLATION_FEE_EPS_CO_BLOCK) private readonly epsCoBlock: boolean,
   ) {}
 
   async execute(
@@ -185,7 +168,7 @@ export class ChargeCancellationFeeUseCase {
   ): Promise<CancellationFeeView> {
     const ctx = await loadFor(this.repo, this.tenantContext, appointmentId);
     assertCanManage(ctx, actor);
-    const view = toView(ctx, actor, this.epsCoBlock, new Date());
+    const view = toView(ctx, actor);
     if (view.chargeBlock)
       throw new ConflictException(blockMessage(view.chargeBlock));
     // chargeBlockReason ya exige versión comunicada con importe y moneda.
@@ -217,8 +200,6 @@ export class ChargeCancellationFeeUseCase {
       toView(
         await loadFor(this.repo, this.tenantContext, appointmentId),
         actor,
-        this.epsCoBlock,
-        new Date(),
       ),
     );
   }
@@ -234,7 +215,6 @@ export class WaiveCancellationFeeUseCase {
     @Inject(CANCELLATION_FEE_REPOSITORY)
     private readonly repo: CancellationFeeRepository,
     private readonly tenantContext: TenantContextService,
-    @Inject(CANCELLATION_FEE_EPS_CO_BLOCK) private readonly epsCoBlock: boolean,
   ) {}
 
   async execute(
@@ -259,8 +239,6 @@ export class WaiveCancellationFeeUseCase {
       toView(
         await loadFor(this.repo, this.tenantContext, appointmentId),
         actor,
-        this.epsCoBlock,
-        new Date(),
       ),
     );
   }
@@ -279,7 +257,6 @@ export class VoidCancellationFeeUseCase {
     @Inject(CANCELLATION_FEE_REPOSITORY)
     private readonly repo: CancellationFeeRepository,
     private readonly tenantContext: TenantContextService,
-    @Inject(CANCELLATION_FEE_EPS_CO_BLOCK) private readonly epsCoBlock: boolean,
   ) {}
 
   async execute(
@@ -304,8 +281,6 @@ export class VoidCancellationFeeUseCase {
         return toView(
           await loadFor(this.repo, this.tenantContext, appointmentId),
           actor,
-          this.epsCoBlock,
-          new Date(),
         );
       case 'STALE':
         throw new ConflictException(STALE);

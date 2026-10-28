@@ -1,6 +1,6 @@
 import type { DocType, ResponsibleRelationship } from '@prisma/client';
 import type {
-  NoticeLocation,
+  NoticeSettings,
   NoticePatientFields,
   NoticeResponsible,
 } from '../communication/notice-recipient';
@@ -58,7 +58,7 @@ export interface PatientResponsiblesSnapshot {
   /** Para la regla de destinatario (mismo orden que `parties`). */
   noticeResponsibles: NoticeResponsible[];
   responsibleFor: ResponsibleForView[];
-  noticeLocation: NoticeLocation;
+  noticeSettings: NoticeSettings;
 }
 
 /** Datos de un contacto sin ficha (ya normalizados por el caso de uso). */

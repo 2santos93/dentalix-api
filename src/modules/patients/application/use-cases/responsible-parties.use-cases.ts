@@ -6,20 +6,13 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import type {
-  ClinicCountry,
-  DocType,
-  ResponsibleRelationship,
-} from '@prisma/client';
+import type { DocType, ResponsibleRelationship } from '@prisma/client';
 import { civilDateIn } from '../../../../shared/time/civil-day';
 import {
   noticeRecipient,
   type NoticeRecipient,
 } from '../../domain/communication/notice-recipient';
-import {
-  isMinor,
-  MAJORITY_AGE,
-} from '../../domain/responsible-parties/majority-age';
+import { isMinor } from '../../domain/responsible-parties/majority-age';
 import {
   MAX_RESPONSIBLE_PARTIES,
   payerConflict,
@@ -58,10 +51,10 @@ const PAYER_TAKEN_MESSAGE =
 /** Lo que muestra el bloque «Responsable y familia» de la ficha. */
 export interface PatientResponsiblesView {
   patientId: string;
-  /** Menor según el país de la sede (CO < 18, ES < 16) en su día civil. */
+  /** Menor que la mayoría de edad de la clínica, en el día civil de la sede. */
   minor: boolean;
+  /** Mayoría de edad de la clínica (DX-328). */
   majorityAge: number;
-  country: ClinicCountry;
   parties: ResponsiblePartyView[];
   responsibleFor: ResponsibleForView[];
   /** A quién van hoy sus avisos (regla de destinatario). */
@@ -118,19 +111,18 @@ function toView(
   snapshot: PatientResponsiblesSnapshot,
   now: Date,
 ): PatientResponsiblesView {
-  const { country, timeZone } = snapshot.noticeLocation;
+  const { majorityAge, timeZone } = snapshot.noticeSettings;
   const today = civilDateIn(now, timeZone);
   return {
     patientId: snapshot.patient.id,
-    minor: isMinor(snapshot.patient.birthDate, country, today),
-    majorityAge: MAJORITY_AGE[country],
-    country,
+    minor: isMinor(snapshot.patient.birthDate, majorityAge, today),
+    majorityAge,
     parties: snapshot.parties,
     responsibleFor: snapshot.responsibleFor,
     noticeRecipient: noticeRecipient({
       patient: snapshot.patient,
       responsibles: snapshot.noticeResponsibles,
-      country,
+      majorityAge,
       today,
     }),
   };

@@ -34,7 +34,6 @@ interface Responsibles {
   patientId: string;
   minor: boolean;
   majorityAge: number;
-  country: string;
   parties: Party[];
   responsibleFor: {
     id: string;
@@ -126,16 +125,17 @@ describe('Responsables de pago y avisos (e2e, DX-203)', () => {
     await raw.$disconnect();
   });
 
-  it('sin responsables: lista vacía, menor según el país de la sede', async () => {
-    expect(await list(son)).toMatchObject({
+  it('sin responsables: lista vacía, menor según la mayoría de edad de la clínica', async () => {
+    const view = await list(son);
+    expect(view).toMatchObject({
       patientId: son,
       minor: true,
       majorityAge: 18,
-      country: 'CO',
       parties: [],
       responsibleFor: [],
       noticeRecipient: { kind: 'PATIENT', email: null },
     });
+    expect(view).not.toHaveProperty('country');
   });
 
   it('recepción vincula a la madre (paciente) como pagadora y aparece en la ficha de ambos', async () => {
@@ -459,6 +459,35 @@ describe('Responsables de pago y avisos (e2e, DX-203)', () => {
       guardianDocNumber: null,
     });
   });
+
+  it('responsible-parties minor follows the clinic value', async () => {
+    // 17 años y medio hoy, sea cual sea la zona de la sede.
+    const birth = new Date();
+    birth.setUTCFullYear(birth.getUTCFullYear() - 17);
+    birth.setUTCMonth(birth.getUTCMonth() - 6);
+    const teen = await createPatient(clinic, {
+      firstName: 'Irene',
+      docType: 'TI',
+      docNumber: '1011000003',
+      birthDate: birth.toISOString().slice(0, 10),
+    });
+    const settings = '/api/v1/patients/settings';
+    try {
+      expect(await list(teen)).toMatchObject({ minor: true, majorityAge: 18 });
+      await as(api().put(settings), tokens.ADMIN)
+        .send({ majorityAge: 16 })
+        .expect(200);
+      expect(await list(teen)).toMatchObject({
+        minor: false,
+        majorityAge: 16,
+      });
+    } finally {
+      await as(api().put(settings), tokens.ADMIN)
+        .send({ majorityAge: 18 })
+        .expect(200);
+    }
+  });
+
   describe('estado de cuenta familiar del pagador', () => {
     let catalogItemId: string;
     let brother: string;

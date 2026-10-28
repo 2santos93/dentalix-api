@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
-  loadNoticeLocation,
+  loadNoticeSettings,
   loadNoticeResponsibles,
 } from '../../../patients/infrastructure/notices/notice-context';
 import type {
@@ -42,15 +42,15 @@ export class PrismaStatementFamilyRepository implements StatementFamilyRepositor
         },
       });
       if (!patient) return null;
-      const [responsibles, location] = await Promise.all([
+      const [responsibles, settings] = await Promise.all([
         loadNoticeResponsibles(tx, patientId),
-        loadNoticeLocation(
+        loadNoticeSettings(
           tx,
           tenantId,
           this.tenantContext.getLocationId() ?? null,
         ),
       ]);
-      return { patient, responsibles, location };
+      return { patient, responsibles, settings };
     });
   }
 

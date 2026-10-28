@@ -1,11 +1,8 @@
 import type {
   AppointmentStatus,
   CancellationFeeStatus,
-  ClinicCountry,
   ClinicRole,
-  PayerType,
 } from '@prisma/client';
-import { coverageStatus } from '../../patient-coverages/domain/coverage-rules';
 import { decimalPlaces } from '../../../shared/validation/bounded-decimal';
 
 /**
@@ -36,8 +33,6 @@ export const CANCELLATION_FEE_MESSAGES = {
   notInformed: 'No consta que el paciente fuera informado de la política.',
   noFee:
     'La política comunicada al paciente no tiene importe de cargo: no hay nada que cobrar.',
-  epsCo:
-    'No se puede cobrar: el paciente tiene una cobertura activa de EPS y la sede es de Colombia (Ley 1438 de 2011, art. 55).',
   alreadyCharged: 'Esta cita ya tiene su cargo generado.',
   alreadyWaived: 'El cargo de esta cita ya se condonó.',
   amount: 'El importe debe ser mayor que 0 y con 2 decimales como mucho.',
@@ -67,7 +62,6 @@ export type FeeBlockReason =
   | 'NOT_ELIGIBLE'
   | 'NOT_INFORMED'
   | 'NO_FEE'
-  | 'EPS_CO'
   | 'ALREADY_CHARGED'
   | 'ALREADY_WAIVED';
 
@@ -84,11 +78,6 @@ export interface FeeChargeFacts {
   appointment: FeeAppointment;
   /** Importe sugerido y moneda de la versión COMUNICADA (`null` = sin importe). */
   communicated: { suggestedFee: number | null; currency: string | null } | null;
-  locationCountry: ClinicCountry;
-  /** El paciente tiene hoy (día civil de la sede) una cobertura EPS_CO vigente. */
-  hasActiveEpsCo: boolean;
-  /** Bloqueo por EPS_CO activado por la plataforma (variable de entorno). */
-  epsCoBlockEnabled: boolean;
   existing: CancellationFeeStatus | null;
 }
 
@@ -113,12 +102,6 @@ export function chargeBlockReason(
   if (!isFeeEligible(facts.appointment)) return 'NOT_ELIGIBLE';
   if (!facts.appointment.policyVersionId || !facts.communicated)
     return 'NOT_INFORMED';
-  if (
-    facts.epsCoBlockEnabled &&
-    facts.locationCountry === 'CO' &&
-    facts.hasActiveEpsCo
-  )
-    return 'EPS_CO';
   if (
     facts.communicated.suggestedFee === null ||
     facts.communicated.suggestedFee <= 0 ||
@@ -148,8 +131,6 @@ export function blockMessage(reason: FeeBlockReason): string {
       return CANCELLATION_FEE_MESSAGES.notInformed;
     case 'NO_FEE':
       return CANCELLATION_FEE_MESSAGES.noFee;
-    case 'EPS_CO':
-      return CANCELLATION_FEE_MESSAGES.epsCo;
     case 'ALREADY_CHARGED':
       return CANCELLATION_FEE_MESSAGES.alreadyCharged;
     case 'ALREADY_WAIVED':
@@ -216,30 +197,4 @@ export function canManageFee(
   receptionCanCharge: boolean,
 ): boolean {
   return role === 'ADMIN' || (role === 'RECEPTION' && receptionCanCharge);
-}
-
-/** Una cobertura del paciente tal como la mira el bloqueo por EPS. */
-export interface FeeCoverage {
-  payerType: PayerType;
-  validFrom: string | null;
-  validTo: string | null;
-}
-
-/** ¿Alguna cobertura EPS_CO vigente el día civil `today` (YYYY-MM-DD)? */
-export function hasActiveEpsCoverage(
-  coverages: readonly FeeCoverage[],
-  today: string,
-): boolean {
-  return coverages.some(
-    (c) => c.payerType === 'EPS_CO' && coverageStatus(c, today) === 'ACTIVE',
-  );
-}
-
-/**
- * Bloqueo por EPS_CO: lo decide la plataforma, no la clínica
- * (`CANCELLATION_FEE_BLOCK_EPS_CO`, por defecto activado). Solo `false`
- * (sin distinguir mayúsculas) lo desactiva.
- */
-export function epsCoBlockEnabled(raw: string | undefined): boolean {
-  return (raw ?? '').trim().toLowerCase() !== 'false';
 }
