@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { EmailOutboxStatus, EmailTemplate } from '@prisma/client';
+import { EmailOutboxStatus, EmailTemplate, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../../shared/prisma/prisma.service';
 import { EmailTemplateName } from '../../domain/email-message';
 import {
@@ -20,6 +20,15 @@ const TEMPLATE_TO_DB: Record<EmailTemplateName, EmailTemplate> = {
   'payment-receipt': EmailTemplate.PAYMENT_RECEIPT,
   'post-op-instructions': EmailTemplate.POST_OP_INSTRUCTIONS,
 };
+
+/**
+ * Hora UTC de la BD (como en PrismaJobRepository). DX-355: "nextAttemptAt" lo
+ * compara email_outbox_claim con este reloj, así que solo él lo escribe. Ni
+ * `new Date()` ni el `@default(now())` de Prisma, que también lo rellena el
+ * cliente con el reloj del host: un host unos ms por delante dejaba la fila
+ * «en el futuro» y el kick tras encolar no la encontraba.
+ */
+const NOW = Prisma.sql`timezone('utc', now())`;
 
 /**
  * Persistencia del registro de envíos. Desde una petición (encolar, cancelar
@@ -61,22 +70,22 @@ export class PrismaEmailOutboxRepository implements EmailOutboxRepository {
 
   async insert(row: NewOutboxEmail): Promise<{ id: string }> {
     const tenantId = row.tenantId;
-    return this.prisma.runWithTenant(tenantId, (tx) =>
-      tx.emailOutbox.create({
-        data: {
-          tenantId,
-          template: TEMPLATE_TO_DB[row.template],
-          toHash: row.toHash,
-          toMasked: row.toMasked,
-          referenceId: row.referenceId,
-          // Copia a un Uint8Array sobre ArrayBuffer propio (lo que tipa Prisma).
-          payload: new Uint8Array(row.payload),
-          status: EmailOutboxStatus.PENDING,
-          nextAttemptAt: new Date(),
-        },
-        select: { id: true },
-      }),
+    // SQL crudo para que las horas las ponga la BD (ver NOW); sigue bajo la
+    // RLS de la clínica, como el `create` de Prisma.
+    const [created] = await this.prisma.runWithTenant(
+      tenantId,
+      (tx) =>
+        tx.$queryRaw<{ id: string }[]>`
+        INSERT INTO "email_outbox"
+          ("id", "tenantId", "template", "toHash", "toMasked", "referenceId",
+           "payload", "status", "nextAttemptAt", "createdAt", "updatedAt")
+        VALUES
+          (gen_random_uuid(), ${tenantId}::uuid, ${row.template}::"EmailTemplate",
+           ${row.toHash}, ${row.toMasked}, ${row.referenceId}::uuid,
+           ${row.payload}, 'PENDING', ${NOW}, ${NOW}, ${NOW})
+        RETURNING "id"`,
     );
+    return { id: created.id };
   }
 
   async claimDue(
@@ -105,14 +114,16 @@ export class PrismaEmailOutboxRepository implements EmailOutboxRepository {
     outcome: OutboxSettlement,
   ): Promise<boolean> {
     const next =
-      outcome.status === 'PENDING' ? outcome.nextAttemptAt.toISOString() : null;
+      outcome.status === 'PENDING'
+        ? Prisma.sql`${NOW} + make_interval(secs => ${outcome.retryDelayMs / 1000}::double precision)`
+        : Prisma.sql`NULL`;
     const lastError = outcome.status === 'SENT' ? null : outcome.lastError;
     const [result] = await this.prisma.$queryRaw<{ settled: boolean }[]>`
       SELECT email_outbox_settle(
         ${id}::uuid,
         ${attempts}::int,
         ${outcome.status}::"EmailOutboxStatus",
-        (${next}::timestamptz AT TIME ZONE 'UTC')::timestamp(3),
+        (${next})::timestamp(3),
         ${lastError}
       ) AS settled`;
     return result.settled;

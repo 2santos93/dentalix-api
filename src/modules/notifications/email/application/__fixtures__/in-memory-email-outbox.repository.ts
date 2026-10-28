@@ -122,7 +122,9 @@ export class InMemoryEmailOutboxRepository implements EmailOutboxRepository {
     if (!row) return Promise.resolve(false);
     row.status = outcome.status;
     row.lastError = outcome.status === 'SENT' ? null : outcome.lastError;
-    if (outcome.status === 'PENDING') row.nextAttemptAt = outcome.nextAttemptAt;
+    if (outcome.status === 'PENDING') {
+      row.nextAttemptAt = new Date(Date.now() + outcome.retryDelayMs);
+    }
     if (outcome.status === 'SENT') row.sentAt = new Date();
     if (outcome.status !== 'PENDING') row.storedPayload = null;
     return Promise.resolve(true);

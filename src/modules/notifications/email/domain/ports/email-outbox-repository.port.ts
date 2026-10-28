@@ -37,9 +37,13 @@ export interface ClaimedOutboxEmail {
   attempts: number;
 }
 
+/**
+ * PENDING lleva la ESPERA, no la hora: el próximo intento lo fija la BD
+ * (`now() + espera`), con el mismo reloj con que lo reclama (DX-355).
+ */
 export type OutboxSettlement =
   | { status: 'SENT' }
-  | { status: 'PENDING'; nextAttemptAt: Date; lastError: string }
+  | { status: 'PENDING'; retryDelayMs: number; lastError: string }
   | { status: 'FAILED'; lastError: string };
 
 export interface EmailOutboxRepository {
