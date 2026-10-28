@@ -33,6 +33,12 @@ model Tenant {
   /// el default de la BD es el mismo valor, para réplicas anteriores).
   /// CHECK 14..21. Lo cambia el ADMIN (PUT /patients/settings, auditado).
   majorityAge               Int                             @default(18)
+  /// DX-324: la receta imprime la cantidad de cada medicamento también en letras. false al crear la clínica.
+  prescriptionPrintQuantityInWords        Boolean @default(false)
+  /// DX-324: no se emite sin documento del paciente, que la receta imprime como nº de historia clínica.
+  prescriptionRequireClinicalRecordNumber Boolean @default(false)
+  /// DX-324: días que vale la receta desde la fecha de inicio. CHECK 1..365. 30 de plataforma.
+  prescriptionValidityDays                Int     @default(30)
   createdAt                 DateTime                        @default(now())
   updatedAt                 DateTime                        @updatedAt
   deletedAt                 DateTime?
@@ -329,9 +335,10 @@ model ClinicMembership {
   tenantId            String               @db.Uuid
   userId              String               @db.Uuid
   role                ClinicRole
-  // Registro profesional (CO: RETHUS / tarjeta profesional) o nº de colegiado
-  // (ES) del miembro EN ESTA CLÍNICA (DX-013). Lo exige la receta.
-  professionalLicense String?
+  /// Nº de registro profesional del miembro en esta clínica. Lo exige la receta.
+  professionalLicense   String?
+  /// DX-324: especialidad del miembro; la receta la imprime si existe. CHECK 1..80.
+  professionalSpecialty String?
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
   deletedAt           DateTime?
@@ -2575,11 +2582,18 @@ model Prescription {
   patientId            String             @db.Uuid
   // Quien prescribe: sale del token, nunca del cuerpo.
   professionalId       String             @db.Uuid
+  /// Excepción G5.3 (DX-334): país de la plantilla legada. En la receta única
+  /// (singleFormat) es solo un dato que se sigue escribiendo para las réplicas
+  /// anteriores (fase 1); nada lo lee para decidir. La fase 2 lo deja NULL.
   country              ClinicCountry
+  /// DX-324: receta única (hash v3). false en toda receta anterior.
+  singleFormat         Boolean            @default(false)
+  /// DX-324: el ajuste «cantidad en letras» al emitir; NULL en las legadas.
+  printQuantityInWords Boolean?
   status               PrescriptionStatus @default(ISSUED)
   // Hora del servidor.
   issuedAt             DateTime
-  // Fecha prevista de dispensación (ES) / fecha de la receta (CO).
+  // Fecha de inicio de la receta (desde la que se puede dispensar).
   dispensationDate     DateTime           @db.Date
   validUntil           DateTime           @db.Date
   // Foto de los datos legales en el momento de emitir.
@@ -2589,11 +2603,16 @@ model Prescription {
   clinicalRecordNumber String?
   professionalName     String
   professionalLicense  String
+  professionalSpecialty String?
   professionalEmail    String?
   clinicName           String
   locationName         String
   locationAddress      String?
   notes                String?
+  // DX-324: edad cumplida al emitir y peso de la anamnesis vigente (receta
+  // única); NULL en las legadas.
+  patientAgeYears      Int?
+  patientWeightKg      Float?
   // Alerta de alergia confirmada por el profesional (y contra qué alergias).
   allergyOverride      Boolean            @default(false)
   allergyMatches       Json?
@@ -2642,9 +2661,10 @@ model PrescriptionItem {
   durationDays       Int
   totalQuantity      Int
   quantityUnit       String
-  // Cantidad total en letras (CO), generada por el servidor.
+  /// Siempre escrita en fase 1 (réplicas anteriores). Una receta única solo la
+  /// muestra si su printQuantityInWords es true.
   quantityInWords    String
-  // Nº de envases (obligatorio en ES).
+  // Nº de envases (opcional).
   packages           Int?
   instructions       String?
 

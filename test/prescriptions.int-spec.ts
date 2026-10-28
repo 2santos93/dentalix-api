@@ -303,21 +303,35 @@ describe('prescriptions: FK compuestas, RLS, inmutabilidad y CHECKs (DX-013, int
   });
 
   describe('CHECKs', () => {
-    it('ES exige documento y año de nacimiento; CO, nº de historia clínica', async () => {
+    it('legacy CHECK applies only to legacy rows', async () => {
+      // Receta legada (singleFormat false): ES exige documento y año de
+      // nacimiento; CO, nº de historia clínica.
       await expect(
         asA((tx) =>
           tx.prescription.create({
             data: rxData(a, { country: 'ES', patientDocument: '12345678Z' }),
           }),
         ),
-      ).rejects.toThrow(/prescriptions_country_fields_check/);
+      ).rejects.toThrow(/prescriptions_legacy_country_fields_check/);
       await expect(
         asA((tx) =>
           tx.prescription.create({
             data: rxData(a, { clinicalRecordNumber: null }),
           }),
         ),
-      ).rejects.toThrow(/prescriptions_country_fields_check/);
+      ).rejects.toThrow(/prescriptions_legacy_country_fields_check/);
+      // DX-324: la receta única escribe el país como dato, sin sus reglas.
+      await expect(
+        asA((tx) =>
+          tx.prescription.create({
+            data: rxData(a, {
+              clinicalRecordNumber: null,
+              singleFormat: true,
+              printQuantityInWords: false,
+            }),
+          }),
+        ),
+      ).resolves.toMatchObject({ singleFormat: true, country: 'CO' });
     });
 
     it('VOIDED exige motivo, autor y fecha; el hash es hex de 64', async () => {
