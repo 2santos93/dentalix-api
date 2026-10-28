@@ -1091,6 +1091,35 @@ describe('parseIcsHolidays (DX-316)', () => {
         ).toEqual(['2100-12-31', '2000-01-01']);
       });
 
+      it('N1: a yearly event past 9999-12-31 keeps clean dates', () => {
+        const parsed = one(
+          'DTSTART;VALUE=DATE:99991231',
+          'DURATION:P3D',
+          'RRULE:FREQ=YEARLY',
+          NAMED,
+        );
+        expect(parsed.errors).toEqual([]);
+        expect(parsed.candidates.map((c) => c.date)).toEqual([
+          '2000-12-31',
+          '2000-01-01',
+          '2000-01-02',
+        ]);
+      });
+
+      it('N1: a one-off past 9999-12-31 is out of range with its own date', () => {
+        const parsed = one(
+          'DTSTART;VALUE=DATE:99991231',
+          'DURATION:P3D',
+          NAMED,
+        );
+        expect(parsed.candidates).toEqual([]);
+        expect(parsed.errors.map((e) => [e.date, e.message])).toEqual([
+          ['9999-12-31', HOLIDAY_MESSAGES.dateOutOfRange],
+          ['9999-12-31', HOLIDAY_MESSAGES.dateOutOfRange],
+          ['9999-12-31', HOLIDAY_MESSAGES.dateOutOfRange],
+        ]);
+      });
+
       it('a one-off 19951225 is still out of range', () => {
         expect(rowError('DTSTART;VALUE=DATE:19951225', NAMED).message).toBe(
           HOLIDAY_MESSAGES.dateOutOfRange,

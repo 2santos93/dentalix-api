@@ -16,7 +16,6 @@ import {
   HolidayRuleError,
   MAX_HOLIDAYS_PER_FILE,
   assertRecurringAllowed,
-  monthDay,
   validateHolidayDate,
   validateHolidayName,
 } from './holiday-rules';
@@ -30,6 +29,7 @@ import {
  */
 
 const MAX_EVENT_DAYS = 31;
+const CIVIL_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 /** Una línea lógica (ya desplegada) y la línea física donde empieza. */
 interface ContentLine {
@@ -370,7 +370,8 @@ function unescapeText(value: string): string {
  */
 function intoRange(day: string): string {
   if (day >= PERIOD_DAY_MIN && day <= PERIOD_DAY_MAX) return day;
-  return `${PERIOD_DAY_MIN.slice(0, 4)}-${monthDay(day)}`;
+  // `slice(-5)` y no `monthDay`: pasado el 9999 la suma da '10000-01-01'.
+  return `${PERIOD_DAY_MIN.slice(0, 4)}-${day.slice(-5)}`;
 }
 
 /**
@@ -462,6 +463,12 @@ function* readEvent(event: RawEvent): Generator<Entry> {
 
   for (let i = 0; i < days; i++) {
     const written = i === 0 ? start : addCivilDays(start, i);
+    // Pasado el 9999-12-31 el año tiene 5 cifras: un puntual ahí está fuera
+    // de rango y se informa con la fecha del evento, nunca con una mal formada.
+    if (recurring !== true && !CIVIL_DATE.test(written)) {
+      yield fail(HOLIDAY_MESSAGES.dateOutOfRange, start);
+      continue;
+    }
     const day = recurring === true ? intoRange(written) : written;
     try {
       validateHolidayDate(day);
