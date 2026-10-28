@@ -366,7 +366,6 @@ describe('parseIcsHolidays (DX-316)', () => {
 
     it.each([
       ['DTEND 32 days later', 'DTEND;VALUE=DATE:20270604'],
-      ['DTEND = DTSTART', 'DTEND;VALUE=DATE:20270503'],
       ['DTEND < DTSTART', 'DTEND;VALUE=DATE:20270501'],
       ['DTEND 400 days later', 'DTEND;VALUE=DATE:20280606'],
       ['DTEND far in the future', 'DTEND;VALUE=DATE:99991231'],
@@ -758,7 +757,6 @@ describe('parseIcsHolidays (DX-316)', () => {
       ['a CSV', 'fecha,nombre\n2027-05-03,Cierre anual\n'],
       ['a VEVENT first', 'BEGIN:VEVENT\nDTSTART:20270503\nEND:VEVENT\n'],
       ['text before the calendar', 'hola\nBEGIN:VCALENDAR\nEND:VCALENDAR\n'],
-      ['a lone-CR calendar', 'BEGIN:VCALENDAR\rBEGIN:VEVENT\rEND:VEVENT\r'],
     ])('no BEGIN:VCALENDAR (%s) → wrong format', (_label, text) => {
       expect(fileMessage(() => parseIcsHolidays(Buffer.from(text)))).toBe(
         HOLIDAY_MESSAGES.extensionMismatch('ics'),
@@ -918,6 +916,313 @@ describe('parseIcsHolidays (DX-316)', () => {
           spy.mockRestore();
         }
       });
+    });
+  });
+
+  describe('review T4 fixes', () => {
+    /** Bytes de un calendario cuyas líneas pueden ser Buffers (para partir caracteres). */
+    const raw = (...lines: (string | Buffer)[]) =>
+      Buffer.concat(
+        lines.flatMap((l) => [
+          typeof l === 'string' ? Buffer.from(l, 'utf8') : l,
+          Buffer.from('\r\n'),
+        ]),
+      );
+    /** `text` partido en el byte `at` con un plegado CRLF + espacio. */
+    const foldAtByte = (text: string, at: number) => {
+      const bytes = Buffer.from(text, 'utf8');
+      return Buffer.concat([
+        bytes.subarray(0, at),
+        Buffer.from('\r\n '),
+        bytes.subarray(at),
+      ]);
+    };
+
+    describe('I1: unfolding happens on bytes, before UTF-8 decoding', () => {
+      it.each([
+        ['a 2-byte «í»', 'SUMMARY:Día de cierre', 'SUMMARY:D'.length + 1],
+        ['a 3-byte «€»', 'SUMMARY:Cierre €', 'SUMMARY:Cierre '.length + 1],
+        [
+          'a 3-byte «€» at its last byte',
+          'SUMMARY:Cierre €',
+          'SUMMARY:Cierre '.length + 2,
+        ],
+        ['a 4-byte emoji', 'SUMMARY:Cierre 🎉', 'SUMMARY:Cierre '.length + 2],
+      ])('%s split across a fold decodes whole', (_label, summary, at) => {
+        const parsed = parseIcsHolidays(
+          raw(
+            'BEGIN:VCALENDAR',
+            'BEGIN:VEVENT',
+            ALL_DAY,
+            foldAtByte(summary, at),
+            'END:VEVENT',
+            'BEGIN:VEVENT',
+            'DTSTART;VALUE=DATE:20270504',
+            NAMED,
+            'END:VEVENT',
+            'END:VCALENDAR',
+          ),
+        );
+        expect(parsed.errors).toEqual([]);
+        expect(parsed.candidates).toEqual([
+          {
+            line: 2,
+            date: '2027-05-03',
+            name: summary.slice('SUMMARY:'.length),
+            recurring: false,
+          },
+          // El plegado ocupa una línea física más: el segundo evento empieza en la 7.
+          {
+            line: 7,
+            date: '2027-05-04',
+            name: 'Cierre anual',
+            recurring: false,
+          },
+        ]);
+      });
+
+      it('a split character in an ignored DESCRIPTION does not break the file', () => {
+        const parsed = parseIcsHolidays(
+          raw(
+            'BEGIN:VCALENDAR',
+            'BEGIN:VEVENT',
+            ALL_DAY,
+            NAMED,
+            foldAtByte(
+              'DESCRIPTION:Clínica cerrada',
+              'DESCRIPTION:Cl'.length + 1,
+            ),
+            'END:VEVENT',
+            'END:VCALENDAR',
+          ),
+        );
+        expect(parsed.candidates).toHaveLength(1);
+      });
+
+      it.each([
+        [
+          'a lead byte before a line break (no fold)',
+          Buffer.from([0x53, 0x3a, 0xc3]),
+        ],
+        [
+          'a fold that joins two lead bytes',
+          Buffer.from([0x53, 0x3a, 0xc3, 0x0d, 0x0a, 0x20, 0xc3]),
+        ],
+      ])('%s is still not UTF-8', (_label, bad) => {
+        expect(
+          fileMessage(() =>
+            parseIcsHolidays(
+              raw(
+                'BEGIN:VCALENDAR',
+                ...vevent(ALL_DAY, NAMED),
+                bad,
+                'END:VCALENDAR',
+              ),
+            ),
+          ),
+        ).toBe(HOLIDAY_MESSAGES.icsNotUtf8);
+      });
+    });
+
+    describe('I2: a yearly event keeps only its day and month', () => {
+      it('yearly 19951225 is stored as its first occurrence in range, 2000-12-25', () => {
+        const parsed = one(
+          'DTSTART;VALUE=DATE:19951225',
+          'RRULE:FREQ=YEARLY;BYMONTH=12;BYMONTHDAY=25',
+          NAMED,
+        );
+        expect(parsed.errors).toEqual([]);
+        expect(parsed.candidates).toEqual([
+          {
+            line: 3,
+            date: '2000-12-25',
+            name: 'Cierre anual',
+            recurring: true,
+          },
+        ]);
+      });
+
+      it('yearly 19960229 becomes 2000-02-29, the first leap year ≥ 2000, and fails as 29 February', () => {
+        expect(
+          rowError('DTSTART;VALUE=DATE:19960229', 'RRULE:FREQ=YEARLY', NAMED),
+        ).toEqual({
+          line: 3,
+          date: '2000-02-29',
+          name: 'Cierre anual',
+          recurring: true,
+          message: HOLIDAY_MESSAGES.recurringFeb29,
+        });
+      });
+
+      it('yearly 19700101 and 21501225 are moved into range too', () => {
+        expect(
+          one('DTSTART;VALUE=DATE:19700101', 'RRULE:FREQ=YEARLY', NAMED)
+            .candidates[0].date,
+        ).toBe('2000-01-01');
+        expect(
+          one('DTSTART;VALUE=DATE:21501225', 'RRULE:FREQ=YEARLY', NAMED)
+            .candidates[0].date,
+        ).toBe('2000-12-25');
+      });
+
+      it('each day keeps its own day and month: 1995 has no 29 February to add', () => {
+        const parsed = one(
+          'DTSTART;VALUE=DATE:19950227',
+          'DURATION:P3D',
+          'RRULE:FREQ=YEARLY',
+          NAMED,
+        );
+        expect(parsed.errors).toEqual([]);
+        expect(parsed.candidates.map((c) => c.date)).toEqual([
+          '2000-02-27',
+          '2000-02-28',
+          '2000-03-01',
+        ]);
+      });
+
+      it('a yearly event over 31 Dec 2100 keeps 2100-12-31 and moves 1 January', () => {
+        expect(
+          one(
+            'DTSTART;VALUE=DATE:21001231',
+            'DURATION:P2D',
+            'RRULE:FREQ=YEARLY',
+            NAMED,
+          ).candidates.map((c) => c.date),
+        ).toEqual(['2100-12-31', '2000-01-01']);
+      });
+
+      it('a one-off 19951225 is still out of range', () => {
+        expect(rowError('DTSTART;VALUE=DATE:19951225', NAMED).message).toBe(
+          HOLIDAY_MESSAGES.dateOutOfRange,
+        );
+      });
+    });
+
+    describe('M1: the Exchange all-day shape (local midnight + ALLDAYEVENT:TRUE)', () => {
+      const ALL_DAY_FLAG = 'X-MICROSOFT-CDO-ALLDAYEVENT:TRUE';
+
+      it('accepted with TZID: the written date, never converted', () => {
+        const parsed = one(
+          'DTSTART;TZID="Romance Standard Time":20270503T000000',
+          'DTEND;TZID="Romance Standard Time":20270504T000000',
+          ALL_DAY_FLAG,
+          NAMED,
+        );
+        expect(parsed.errors).toEqual([]);
+        expect(parsed.candidates).toEqual([
+          {
+            line: 3,
+            date: '2027-05-03',
+            name: 'Cierre anual',
+            recurring: false,
+          },
+        ]);
+      });
+
+      it('accepted without TZID, over 2 days, with a lower-case flag', () => {
+        expect(
+          one(
+            'DTSTART:20270503T000000',
+            'DTEND:20270505T000000',
+            'x-microsoft-cdo-alldayevent:true',
+            NAMED,
+          ).candidates.map((c) => c.date),
+        ).toEqual(['2027-05-03', '2027-05-04']);
+      });
+
+      it('accepted with no DTEND, and with a DATE DTEND', () => {
+        expect(
+          one('DTSTART:20270503T000000', ALL_DAY_FLAG, NAMED).candidates,
+        ).toHaveLength(1);
+        expect(
+          one(
+            'DTSTART:20270503T000000',
+            'DTEND;VALUE=DATE:20270504',
+            ALL_DAY_FLAG,
+            NAMED,
+          ).candidates,
+        ).toHaveLength(1);
+      });
+
+      it.each([
+        [
+          'ALLDAYEVENT:FALSE',
+          ['DTSTART:20270503T000000', 'X-MICROSOFT-CDO-ALLDAYEVENT:FALSE'],
+        ],
+        [
+          'no ALLDAYEVENT',
+          [
+            'DTSTART;TZID=Etc/UTC:20270503T000000',
+            'DTEND;TZID=Etc/UTC:20270504T000000',
+          ],
+        ],
+        [
+          'a start that is not midnight',
+          ['DTSTART:20270503T090000', ALL_DAY_FLAG],
+        ],
+        [
+          'a UTC midnight (not local)',
+          ['DTSTART:20270503T000000Z', ALL_DAY_FLAG],
+        ],
+        [
+          'an end that is not midnight',
+          ['DTSTART:20270503T000000', 'DTEND:20270504T090000', ALL_DAY_FLAG],
+        ],
+        [
+          'a malformed flag',
+          ['DTSTART:20270503T000000', 'X-MICROSOFT-CDO-ALLDAYEVENT;X="a:TRUE'],
+        ],
+        ['a midnight with seconds', ['DTSTART:20270503T000001', ALL_DAY_FLAG]],
+      ])('rejected: %s', (_label, props) => {
+        expect(rowError(...props, NAMED).message).toBe(
+          HOLIDAY_MESSAGES.icsNotAllDay,
+        );
+      });
+
+      it('an impossible midnight date is a date error', () => {
+        expect(
+          rowError('DTSTART:20270230T000000', ALL_DAY_FLAG, NAMED).message,
+        ).toBe(HOLIDAY_MESSAGES.icsDateInvalid('20270230T000000'));
+      });
+    });
+
+    it('M2: a file with only CR line breaks parses', () => {
+      const parsed = parseIcsHolidays(
+        Buffer.from(
+          'BEGIN:VCALENDAR\rBEGIN:VEVENT\rDTSTART;VALUE=DATE:20270503\rSUMMARY:Cierre\r  anual\rEND:VEVENT\rEND:VCALENDAR\r',
+        ),
+      );
+      expect(parsed.candidates).toEqual([
+        { line: 2, date: '2027-05-03', name: 'Cierre anual', recurring: false },
+      ]);
+    });
+
+    describe('M3: whitespace controls in SUMMARY are a space', () => {
+      it.each([
+        ['a TAB', 'Cierre\tanual'],
+        ['a vertical tab', 'Cierre\u000Banual'],
+        ['a form feed', 'Cierre\u000Canual'],
+        ['NEL', 'Cierre\u0085anual'],
+        ['a run of them', 'Cierre\t\u000Banual'],
+      ])('%s', (_label, summary) => {
+        expect(one(ALL_DAY, `SUMMARY:${summary}`).candidates[0].name).toBe(
+          'Cierre anual',
+        );
+      });
+
+      it('only TABs is still an empty name', () => {
+        expect(rowError(ALL_DAY, 'SUMMARY:\t\t').message).toBe(
+          HOLIDAY_MESSAGES.nameInvalid,
+        );
+      });
+    });
+
+    it('M4: DTEND equal to DTSTART is a one-day event', () => {
+      expect(
+        one(ALL_DAY, 'DTEND;VALUE=DATE:20270503', NAMED).candidates,
+      ).toEqual([
+        { line: 3, date: '2027-05-03', name: 'Cierre anual', recurring: false },
+      ]);
     });
   });
 });

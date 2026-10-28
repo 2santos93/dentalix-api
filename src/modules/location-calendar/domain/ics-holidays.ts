@@ -1,5 +1,7 @@
 import { ImportFileError } from '../../patient-imports/domain/tabular-file';
 import {
+  PERIOD_DAY_MAX,
+  PERIOD_DAY_MIN,
   addCivilDays,
   civilDaysInclusive,
   parseCivilDate,
@@ -14,6 +16,7 @@ import {
   HolidayRuleError,
   MAX_HOLIDAYS_PER_FILE,
   assertRecurringAllowed,
+  monthDay,
   validateHolidayDate,
   validateHolidayName,
 } from './holiday-rules';
@@ -52,7 +55,7 @@ type Entry = HolidayCandidate | HolidayRowError;
 export function parseIcsHolidays(bytes: Buffer): ParsedHolidayFile {
   const candidates: HolidayCandidate[] = [];
   const errors: HolidayRowError[] = [];
-  for (const event of topLevelEvents(decode(bytes))) {
+  for (const event of topLevelEvents(logicalLines(bytes))) {
     for (const entry of readEvent(event)) {
       // La entrada 501 corta la lectura: ni se expande ni se sigue leyendo.
       if (candidates.length + errors.length === MAX_HOLIDAYS_PER_FILE) {
@@ -65,36 +68,69 @@ export function parseIcsHolidays(bytes: Buffer): ParsedHolidayFile {
   return { format: 'ICS', candidates, errors };
 }
 
-/** UTF-8 estricto; `TextDecoder` quita el BOM. */
-function decode(bytes: Buffer): string {
-  try {
-    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-  } catch {
-    throw new ImportFileError(HOLIDAY_MESSAGES.icsNotUtf8);
-  }
+const SP = 0x20;
+const HTAB = 0x09;
+const CR = 0x0d;
+const LF = 0x0a;
+
+/** Una línea ya desplegada y decodificada, con la línea física donde empieza. */
+interface LogicalLine {
+  line: number;
+  text: string;
 }
 
 /**
- * Líneas lógicas: CRLF o LF; una línea que empieza por espacio o tabulador
- * continúa la anterior (sin ese primer blanco). Las vacías se saltan. Los
- * blancos antes de `BEGIN:VCALENDAR` no cuentan, pero sí sus saltos de línea.
+ * Líneas lógicas. Se despliegan sobre los BYTES y luego se decodifican
+ * (RFC 5545 §3.1): un plegado puede partir en dos un carácter UTF-8 de varios
+ * bytes. Saltos CRLF, LF o CR; una línea que empieza por espacio o tabulador
+ * continúa la anterior (sin ese primer blanco). Las vacías se saltan. Antes
+ * de `BEGIN:VCALENDAR` se saltan el BOM y los blancos, pero sus saltos de
+ * línea cuentan para `line`. Se decodifica todo antes de leer: un byte que no
+ * es UTF-8 es error del fichero aunque esté tras la entrada 501.
  */
-function* contentLines(text: string): Generator<ContentLine | null> {
-  const leading = /^\s*/.exec(text)?.[0] ?? '';
-  const offset = leading.split(/\r?\n/).length - 1;
-  const physical = text.slice(leading.length).split(/\r?\n/);
-  let start = 0;
-  let parts: string[] = [];
-  for (let i = 0; i <= physical.length; i++) {
-    const raw = physical[i];
-    if (raw !== undefined && parts.length > 0 && /^[ \t]/.test(raw)) {
-      parts.push(raw.slice(1));
-      continue;
+function logicalLines(bytes: Buffer): LogicalLine[] {
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  const lines: LogicalLine[] = [];
+  let parts: Buffer[] = [];
+  let partsLine = 0;
+  const flush = () => {
+    if (parts.length === 0) return;
+    let text: string;
+    try {
+      text = decoder.decode(Buffer.concat(parts));
+    } catch {
+      throw new ImportFileError(HOLIDAY_MESSAGES.icsNotUtf8);
     }
-    if (parts.length > 0) yield parseContentLine(start, parts.join(''));
-    parts = raw === undefined || raw === '' ? [] : [raw];
-    start = i + 1 + offset;
+    lines.push({ line: partsLine, text });
+    parts = [];
+  };
+
+  const bom = bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf;
+  let at = bom ? 3 : 0;
+  let content = false;
+  for (let line = 1; ; line++) {
+    let end = at;
+    while (end < bytes.length && bytes[end] !== CR && bytes[end] !== LF) end++;
+    let raw = bytes.subarray(at, end);
+    if (parts.length > 0 && (raw[0] === SP || raw[0] === HTAB)) {
+      parts.push(raw.subarray(1));
+    } else {
+      flush();
+      if (!content) {
+        const first = raw.findIndex((b) => b !== SP && b !== HTAB);
+        raw = first === -1 ? raw.subarray(raw.length) : raw.subarray(first);
+        content = raw.length > 0;
+      }
+      if (raw.length > 0) {
+        parts = [raw];
+        partsLine = line;
+      }
+    }
+    if (end === bytes.length) break;
+    at = bytes[end] === CR && bytes[end + 1] === LF ? end + 2 : end + 1;
   }
+  flush();
+  return lines;
 }
 
 const NAME = /[A-Za-z0-9-]+/y;
@@ -154,8 +190,8 @@ function parseContentLine(line: number, text: string): ContentLine | null {
  * su `END:VEVENT`: así el tope de 500 corta sin leer el resto del fichero.
  * Las propiedades de los componentes anidados (`VALARM`) no son del evento.
  */
-function* topLevelEvents(text: string): Generator<RawEvent> {
-  if (text.trim() === '') throw new ImportFileError(HOLIDAY_MESSAGES.emptyFile);
+function* topLevelEvents(lines: LogicalLine[]): Generator<RawEvent> {
+  if (lines.length === 0) throw new ImportFileError(HOLIDAY_MESSAGES.emptyFile);
   const stack: string[] = [];
   /** Componentes abiertos que no son `VCALENDAR`. */
   let nested = 0;
@@ -164,7 +200,8 @@ function* topLevelEvents(text: string): Generator<RawEvent> {
   let eventDepth = 0;
   let events = 0;
   let first = true;
-  for (const content of contentLines(text)) {
+  for (const { line, text } of lines) {
+    const content = parseContentLine(line, text);
     if (first) {
       first = false;
       if (
@@ -219,33 +256,46 @@ type DateRead = { date: string } | { error: string };
 
 /**
  * Un `DATE` de 8 cifras. Con `T` o `VALUE` distinto de `DATE` es un
- * `DATE-TIME` (o un periodo): no es de día completo y no se desplaza.
+ * `DATE-TIME` (o un periodo): no es de día completo y no se desplaza. La
+ * excepción es la forma de Exchange (`exchangeAllDay`, enmienda M1): una
+ * medianoche local `T000000` (sin `Z`, con o sin `TZID`) es la fecha tal como
+ * está escrita, sin pasar por ninguna zona.
  */
-function readDate(prop: ContentLine): DateRead {
+function readDate(prop: ContentLine, exchangeAllDay: boolean): DateRead {
   const raw = prop.value.trim();
   if (prop.malformed) return { error: HOLIDAY_MESSAGES.icsDateInvalid(raw) };
   const value = prop.params.get('VALUE')?.toUpperCase();
-  if ((value !== undefined && value !== 'DATE') || /t/i.test(raw)) {
+  const exchangeDate =
+    exchangeAllDay && (value === undefined || value === 'DATE-TIME')
+      ? /^(\d{8})T000000$/i.exec(raw)?.[1]
+      : undefined;
+  const dateTime = (value !== undefined && value !== 'DATE') || /t/i.test(raw);
+  if (exchangeDate === undefined && dateTime) {
     return { error: HOLIDAY_MESSAGES.icsNotAllDay };
   }
-  const match = /^(\d{4})(\d{2})(\d{2})$/.exec(raw);
+  const match = /^(\d{4})(\d{2})(\d{2})$/.exec(exchangeDate ?? raw);
   const date = match && parseCivilDate(`${match[1]}-${match[2]}-${match[3]}`);
   return date ? { date } : { error: HOLIDAY_MESSAGES.icsDateInvalid(raw) };
 }
 
-/** Días de `DTEND` (exclusivo) o `DURATION` (`P{n}D`, `P{n}W`); 1 sin ninguno. */
+/**
+ * Días de `DTEND` (exclusivo) o `DURATION` (`P{n}D`, `P{n}W`); 1 sin ninguno.
+ * Un `DTEND` igual a `DTSTART` es un día (enmienda M4): así escriben algunas
+ * herramientas un evento de día completo sin duración.
+ */
 function eventDays(
   start: string,
   ends: ContentLine[],
   durations: ContentLine[],
+  exchangeAllDay: boolean,
 ): number | { error: string } {
   if (ends.length + durations.length > 1) {
     return { error: HOLIDAY_MESSAGES.icsBadDuration };
   }
   if (ends.length === 1) {
-    const end = readDate(ends[0]);
+    const end = readDate(ends[0], exchangeAllDay);
     if ('error' in end) return end;
-    return civilDaysInclusive(start, end.date) - 1;
+    return end.date === start ? 1 : civilDaysInclusive(start, end.date) - 1;
   }
   if (durations.length === 1) {
     if (durations[0].malformed) {
@@ -299,11 +349,28 @@ function isYearlyOnStart(rule: string, start: string): boolean {
   return seen.has('FREQ');
 }
 
-/** `\\` `\;` `\,` quitan el escape; `\n` y `\N` son un espacio. */
+/**
+ * `\\` `\;` `\,` quitan el escape; `\n` y `\N` son un espacio. Los
+ * controles que son blanco (TAB, VT, FF, NEL…) también son un espacio
+ * (revisión M3): solo los demás controles hacen fallar el nombre.
+ */
 function unescapeText(value: string): string {
-  return value.replace(/\\([\\;,nN])/g, (_, c: string) =>
-    c === 'n' || c === 'N' ? ' ' : c,
-  );
+  return value
+    .replace(/\\([\\;,nN])/g, (_, c: string) =>
+      c === 'n' || c === 'N' ? ' ' : c,
+    )
+    .replace(/[\t-\r\u0085]+/g, ' ');
+}
+
+/**
+ * Un día de un evento anual solo vale por su día y mes (enmienda I2): fuera
+ * de 2000–2100 se guarda como su primera aparición en el rango, en 2000.
+ * 2000 es bisiesto, así que todo 'MM-DD' existe (el 29 de febrero recurrente
+ * lo rechaza luego R6).
+ */
+function intoRange(day: string): string {
+  if (day >= PERIOD_DAY_MIN && day <= PERIOD_DAY_MAX) return day;
+  return `${PERIOD_DAY_MIN.slice(0, 4)}-${monthDay(day)}`;
 }
 
 /**
@@ -325,6 +392,9 @@ function* readEvent(event: RawEvent): Generator<Entry> {
     }
   }
 
+  const exchangeAllDay = all('X-MICROSOFT-CDO-ALLDAYEVENT').some(
+    (p) => !p.malformed && p.value.trim().toUpperCase() === 'TRUE',
+  );
   const starts = all('DTSTART');
   const startRead: DateRead =
     starts.length === 0 || starts[0].value.trim() === ''
@@ -335,7 +405,7 @@ function* readEvent(event: RawEvent): Generator<Entry> {
               starts.map((s) => s.value.trim()).join(', '),
             ),
           }
-        : readDate(starts[0]);
+        : readDate(starts[0], exchangeAllDay);
   const start = 'date' in startRead ? startRead.date : null;
 
   const rules = all('RRULE');
@@ -366,7 +436,9 @@ function* readEvent(event: RawEvent): Generator<Entry> {
       : s.value.trim().toUpperCase() === 'CANCELLED',
   );
   const days =
-    start === null ? 0 : eventDays(start, all('DTEND'), all('DURATION'));
+    start === null
+      ? 0
+      : eventDays(start, all('DTEND'), all('DURATION'), exchangeAllDay);
   const problem = cancelled
     ? HOLIDAY_MESSAGES.icsCancelled
     : 'error' in startRead
@@ -389,7 +461,8 @@ function* readEvent(event: RawEvent): Generator<Entry> {
   }
 
   for (let i = 0; i < days; i++) {
-    const day = i === 0 ? start : addCivilDays(start, i);
+    const written = i === 0 ? start : addCivilDays(start, i);
+    const day = recurring === true ? intoRange(written) : written;
     try {
       validateHolidayDate(day);
       assertRecurringAllowed(day, recurring === true);
