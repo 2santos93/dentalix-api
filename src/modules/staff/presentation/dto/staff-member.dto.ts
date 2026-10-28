@@ -22,7 +22,7 @@ export class StaffMemberDto {
     type: String,
     nullable: true,
     description:
-      'Registro profesional / nº de colegiado (DX-013). Solo en el perfil y en la respuesta del PATCH.',
+      'Nº de registro profesional del miembro (DX-013). Solo en el perfil y en la respuesta del PATCH.',
   })
   professionalLicense?: string | null;
 

@@ -21,7 +21,7 @@ export class UpdateStaffDto {
   @ApiPropertyOptional({
     maxLength: 60,
     description:
-      'Registro profesional (CO: RETHUS / tarjeta profesional) o nº de colegiado (ES). Cadena vacía lo borra. Lo exige la receta (DX-013).',
+      'Nº de registro profesional del miembro. Cadena vacía lo borra. Lo exige la receta (DX-013).',
   })
   @IsOptional()
   @IsString()

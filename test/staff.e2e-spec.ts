@@ -198,6 +198,27 @@ describe('Staff (e2e)', () => {
         .professionalSpecialty,
     ).toBeNull();
 
+    const afterClear = await request(app.getHttpServer())
+      .get(`/api/v1/staff/${dentist.userId}`)
+      .set('X-Tenant-Host', hostFor(clinic.subdomain))
+      .set('Authorization', `Bearer ${clinic.accessToken}`)
+      .expect(200);
+    expect(
+      (afterClear.body as { professionalSpecialty: string | null })
+        .professionalSpecialty,
+    ).toBeNull();
+
+    await patch(clinic.accessToken, {
+      professionalSpecialty: 'Ortodoncia',
+    }).expect(200);
+    const blank = await patch(clinic.accessToken, {
+      professionalSpecialty: '   ',
+    }).expect(200);
+    expect(
+      (blank.body as { professionalSpecialty: string | null })
+        .professionalSpecialty,
+    ).toBeNull();
+
     await patch(clinic.accessToken, {
       professionalSpecialty: 'x'.repeat(81),
     }).expect(400);

@@ -317,6 +317,21 @@ describe('receta sin reglas nacionales (DX-324)', () => {
     expect(offending(files, (line) => NATIONAL_RULE.test(line))).toEqual([]);
   });
 
+  it('architecture: staff profile fields name no national rule', () => {
+    const staff = join(SRC, 'modules', 'staff');
+    const files = [
+      join(staff, 'presentation', 'dto', 'update-staff.dto.ts'),
+      join(staff, 'presentation', 'dto', 'staff-member.dto.ts'),
+      join(staff, 'domain', 'entities', 'staff-member.entity.ts'),
+    ];
+    expect(
+      offending(
+        files,
+        (line) => NATIONAL_RULE.test(line) || /RETHUS/i.test(line),
+      ),
+    ).toEqual([]);
+  });
+
   it('the national-rule pattern catches each term and skips neutral text', () => {
     for (const line of [
       "'Falta tu número de colegiado'",
