@@ -1052,7 +1052,7 @@ describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-no
         'mig-b=true/true/10',
         'mig-cal=true/true/30',
         'mig-co=true/true/30',
-        'mig-es=true/false/10',
+        'mig-es=true/true/10',
         'mig-mix=true/true/10',
         'mig-none=false/false/30',
       ].join(','),
@@ -1065,7 +1065,7 @@ describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-no
            FROM "tenants" t
            JOIN (
              SELECT t2."id",
-                    coalesce(bool_or(l."country"::text = 'CO'), false) AS hc,
+                    count(l."id") > 0 AS hc,
                     count(l."id") > 0 AS words,
                     coalesce(min(CASE l."country"::text WHEN 'CO' THEN 30 WHEN 'ES' THEN 10 END), 30) AS days
                FROM "tenants" t2

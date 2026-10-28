@@ -3,12 +3,21 @@
 -- Cada clínica conserva lo que la app le hace hoy, que hasta ahora salía del
 -- país de la sede desde la que se emite:
 --
---   locations.country | nº de historia clínica | validez (días)
+--   locations.country | documento del paciente | validez (días)
 --   ------------------+------------------------+---------------
 --   CO                | exigido                | 30
---   ES                | no exigido             | 10
+--   ES                | exigido                | 10
 --
---   prescriptionRequireClinicalRecordNumber = true si alguna sede viva es CO.
+--   prescriptionRequireClinicalRecordNumber = true si la clínica tiene alguna
+--                                             sede viva. Hoy toda receta exige
+--                                             el documento del paciente
+--                                             (`docNumber` no vacío): CO lo
+--                                             llama «nº de historia clínica» y
+--                                             ES «DNI/NIE», pero las dos ramas
+--                                             comprueban lo mismo. La clínica
+--                                             lo sigue exigiendo (D5, como
+--                                             DX-328 Q1); solo desaparecen el
+--                                             formato DNI/NIE y la abreviatura.
 --   prescriptionPrintQuantityInWords        = true si la clínica tiene alguna
 --                                             sede viva (hoy toda receta la
 --                                             imprime; decisión Q1).
@@ -67,7 +76,7 @@ BEGIN
   -- los valores de plataforma.
   WITH expected AS (
     SELECT t."id",
-           coalesce(bool_or(l."country"::text = 'CO'), false) AS hc,
+           count(l."id") > 0 AS hc,
            count(l."id") > 0 AS words,
            coalesce(min(CASE l."country"::text WHEN 'CO' THEN 30 WHEN 'ES' THEN 10 END), 30) AS days
       FROM "tenants" t
@@ -85,15 +94,13 @@ BEGIN
           OR t."prescriptionPrintQuantityInWords" IS DISTINCT FROM e.words
           OR t."prescriptionValidityDays" IS DISTINCT FROM e.days);
 
-  -- Comprobación, contada aparte: con alguna sede viva CO, HC exigido; con
-  -- alguna sede viva, letras; validez 10 si alguna sede viva es ES y 30 si
-  -- no. count(l."id") y coalesce: una clínica sin sedes vivas cuenta como
+  -- Comprobación, contada aparte: con alguna sede viva, documento exigido y
+  -- letras; validez 10 si alguna sede viva es ES y 30 si no. count(l."id") y coalesce: una clínica sin sedes vivas cuenta como
   -- «sin sedes», no como una fila con NULL.
   SELECT count(*) INTO wrong
     FROM "tenants" t
     JOIN (
       SELECT t2."id",
-             coalesce(bool_or(l."country"::text = 'CO'), false) AS has_co,
              coalesce(bool_or(l."country"::text = 'ES'), false) AS has_es,
              count(l."id") AS live
         FROM "tenants" t2
@@ -101,7 +108,7 @@ BEGIN
           ON l."tenantId" = t2."id" AND l."deletedAt" IS NULL
        GROUP BY t2."id"
     ) s ON s."id" = t."id"
-   WHERE t."prescriptionRequireClinicalRecordNumber" <> s.has_co
+   WHERE t."prescriptionRequireClinicalRecordNumber" <> (s.live > 0)
       OR t."prescriptionPrintQuantityInWords" <> (s.live > 0)
       OR t."prescriptionValidityDays" <> (CASE WHEN s.has_es THEN 10 ELSE 30 END);
   IF wrong > 0 THEN

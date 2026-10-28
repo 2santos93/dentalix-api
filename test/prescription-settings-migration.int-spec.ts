@@ -330,12 +330,21 @@ describe('DX-324 · migraciones de la receta única y sus ajustes por clínica (
       none: await settings(T_NONE),
     }).toEqual({
       co: 'true/true/30',
-      es: 'true/false/10',
+      es: 'true/true/10',
       mixed: 'true/true/10',
       retired: 'true/true/30',
       gone: 'false/false/30',
       none: 'false/false/30',
     });
+  });
+
+  it('a clinic with only ES locations keeps requiring the patient document', async () => {
+    // Hoy la rama ES exige el documento (como DNI/NIE): la clínica lo sigue
+    // exigiendo; solo cambian el formato y la etiqueta.
+    const [row] = await target.$queryRaw<{ hc: boolean }[]>`
+      SELECT "prescriptionRequireClinicalRecordNumber" AS hc
+        FROM "tenants" WHERE "id" = ${T_ES}::uuid`;
+    expect(row.hc).toBe(true);
   });
 
   it('migration defaults equal PLATFORM_DEFAULT_PRESCRIPTION_SETTINGS', async () => {
@@ -498,6 +507,14 @@ describe('DX-324 · migraciones de la receta única y sus ajustes por clínica (
     );
     await expect(single({ patientAgeYears: '151' })).rejects.toThrow(CHECK);
     await expect(single({ patientAgeYears: '-1' })).rejects.toThrow(CHECK);
+    await expect(single({ patientAgeYears: '0' })).resolves.toBe(1);
+    await expect(single({ patientAgeYears: '150' })).resolves.toBe(1);
+    await expect(
+      single({ professionalSpecialty: `'${'x'.repeat(80)}'` }),
+    ).resolves.toBe(1);
+    await expect(
+      single({ professionalSpecialty: `'${'x'.repeat(81)}'` }),
+    ).rejects.toThrow(CHECK);
     await expect(single({ patientWeightKg: '0' })).rejects.toThrow(CHECK);
     await expect(single({ patientWeightKg: '400' })).rejects.toThrow(CHECK);
     await expect(single({ patientWeightKg: '72.5' })).resolves.toBe(1);

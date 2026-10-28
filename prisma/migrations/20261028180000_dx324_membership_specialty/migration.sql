@@ -7,9 +7,11 @@
 -- la escriben.
 --
 -- CHECK 1..80 caracteres sin los espacios de los extremos (la API responde
--- 400 antes; esto es la red). NOT VALID + VALIDATE: el ADD CONSTRAINT no
--- recorre la tabla con el bloqueo fuerte; la validación va aparte con un
--- bloqueo que no frena las escrituras. Todas las filas tienen NULL.
+-- 400 antes; esto es la red). NOT VALID + VALIDATE en la misma transacción:
+-- el VALIDATE recorre la tabla bajo el ACCESS EXCLUSIVE que ya tomó el ADD
+-- COLUMN (no bajo un bloqueo más débil). Es breve porque la columna es nueva
+-- y todas las filas tienen NULL. En una tabla grande, el VALIDATE iría en
+-- una migración posterior.
 --
 -- lock_timeout 5 s: si una transacción larga retiene la tabla, falla limpia
 -- y se reintenta el deploy, sin dejar en cola a los lectores.

@@ -26,10 +26,11 @@
 --     de las letras (y solo ella); especialidad de 1 a 80 caracteres; edad de
 --     0 a 150; peso mayor que 0 y menor que 400. La API guarda NULL fuera de
 --     esos rangos antes de llegar aquí; esto es la red.
---   NOT VALID + VALIDATE: el ADD CONSTRAINT no recorre la tabla con el
---   bloqueo fuerte; la validación va aparte con un bloqueo que no frena las
---   escrituras. El DROP y el ADD van en la misma transacción: no hay un
---   momento sin regla.
+--   NOT VALID + VALIDATE en la misma transacción: cada VALIDATE recorre la
+--   tabla bajo el ACCESS EXCLUSIVE que ya tomó el ADD COLUMN (no bajo un
+--   bloqueo más débil). Es breve porque `prescriptions` es pequeña; en una
+--   tabla grande, el VALIDATE iría en una migración posterior. El DROP y el
+--   ADD van en la misma transacción: no hay un momento sin regla.
 --
 -- lock_timeout 5 s: si una transacción larga retiene la tabla, falla limpia y
 -- se reintenta el deploy.
