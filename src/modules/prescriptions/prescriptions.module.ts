@@ -17,10 +17,16 @@ import {
   ListPrescriptionTemplatesUseCase,
   UpdatePrescriptionTemplateUseCase,
 } from './application/use-cases/prescription-templates.use-cases';
+import {
+  GetPrescriptionSettingsUseCase,
+  UpdatePrescriptionSettingsUseCase,
+} from './application/use-cases/prescription-settings.use-cases';
 import { PRESCRIPTION_REPOSITORY } from './domain/ports/prescription-repository.port';
+import { PRESCRIPTION_SETTINGS_REPOSITORY } from './domain/ports/prescription-settings-repository.port';
 import { PRESCRIPTION_TEMPLATE_REPOSITORY } from './domain/ports/prescription-template-repository.port';
 import { PrismaPrescriptionRepository } from './infrastructure/repositories/prisma-prescription.repository';
 import { PrismaPrescriptionTemplateRepository } from './infrastructure/repositories/prisma-prescription-template.repository';
+import { PrismaPrescriptionSettingsRepository } from './infrastructure/repositories/prisma-prescription-settings.repository';
 import {
   PatientPrescriptionsController,
   PrescriptionsController,
@@ -51,12 +57,18 @@ import { PrescriptionTemplatesController } from './presentation/prescription-tem
     CreatePrescriptionTemplateUseCase,
     UpdatePrescriptionTemplateUseCase,
     DeletePrescriptionTemplateUseCase,
+    GetPrescriptionSettingsUseCase,
+    UpdatePrescriptionSettingsUseCase,
     TokenService,
     TenantContextInterceptor,
     { provide: PRESCRIPTION_CLOCK, useValue: () => new Date() },
     {
       provide: PRESCRIPTION_REPOSITORY,
       useClass: PrismaPrescriptionRepository,
+    },
+    {
+      provide: PRESCRIPTION_SETTINGS_REPOSITORY,
+      useClass: PrismaPrescriptionSettingsRepository,
     },
     {
       provide: PRESCRIPTION_TEMPLATE_REPOSITORY,

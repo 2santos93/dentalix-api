@@ -1189,6 +1189,10 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   'DELETE /providers/:providerId/schedule-overrides/:overrideId':
     'provider-schedule.e2e-spec.ts',
   'PUT /schedule/settings': 'provider-schedule.e2e-spec.ts',
+  // DX-324: CLINIC_SETTINGS con PRESCRIPTION_SETTINGS, los campos cambiados
+  // y el antes y el después en códigos RX; sin evento si nada cambió.
+  'PUT /prescriptions/settings':
+    'prescription-settings.use-cases.spec.ts y prescription-settings.e2e-spec.ts',
   // DX-274: VIEW si se abre en el navegador, EXPORT si se descarga (la acción
   // depende de la query, que el decorador no lee).
   'GET /expenses/:id/attachment/url':

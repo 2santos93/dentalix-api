@@ -177,6 +177,14 @@ const COUNTRY_FREE = [
     'use-cases',
     'prescriptions.use-cases.ts',
   ),
+  join(
+    SRC,
+    'modules',
+    'prescriptions',
+    'application',
+    'use-cases',
+    'prescription-settings.use-cases.ts',
+  ),
 ];
 
 describe('formato regional y reloj solo desde el helper (G1-B, I5)', () => {

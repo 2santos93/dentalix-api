@@ -269,6 +269,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // DX-300: previsualización de avisos de seguridad (solo quien emite).
   'POST /patients/:patientId/prescriptions/safety-check': PRESCRIBERS,
   'GET /prescriptions/issuer': PRESCRIBERS,
+  // DX-324: ajustes de la receta de la clínica; los cambia solo el ADMIN.
+  'GET /prescriptions/settings': CLINICAL,
+  'PUT /prescriptions/settings': ADMIN_ONLY,
   'GET /prescriptions/:id': CLINICAL,
   'POST /prescriptions/:id/void': PRESCRIBERS,
 

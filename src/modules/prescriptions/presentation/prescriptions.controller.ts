@@ -6,6 +6,7 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Put,
   Req,
   UseGuards,
   UseInterceptors,
@@ -19,18 +20,34 @@ import {
   ApiHeader,
   ApiNotFoundResponse,
   ApiOkResponse,
+  ApiOperation,
   ApiParam,
   ApiTags,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
-import { Roles } from '../../auth/presentation/guards/roles.decorator';
 import {
+  Roles,
+  RolesDeniedMessage,
+} from '../../auth/presentation/guards/roles.decorator';
+import {
+  CLINIC_SETTINGS_WRITE_ROLES,
   CLINICAL_ROLES,
   PRESCRIPTION_ISSUE_ROLES,
 } from '../../auth/presentation/guards/clinic-role-sets';
 import type { TenantJwtPayload } from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
+import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
+import {
+  auditRequestContext,
+  type AuditableRequest,
+} from '../../audit/presentation/audit-request-context';
+import {
+  GetPrescriptionSettingsUseCase,
+  UpdatePrescriptionSettingsUseCase,
+} from '../application/use-cases/prescription-settings.use-cases';
+import type { PrescriptionSettings } from '../domain/prescription-settings';
+import { PrescriptionSettingsDto } from './dto/prescription-settings.dto';
 import {
   CheckPrescriptionSafetyUseCase,
   GetPrescriptionIssuerUseCase,
@@ -62,6 +79,9 @@ import { Audit } from '../../audit/presentation/audit.decorator';
 interface AuthenticatedRequest {
   user: TenantJwtPayload;
 }
+
+export const PRESCRIPTION_SETTINGS_FORBIDDEN_MESSAGE =
+  'Solo un administrador puede cambiar los ajustes de la receta.';
 
 const LOCATION_HEADER = {
   name: 'X-Location-Id',
@@ -200,6 +220,9 @@ export class PrescriptionsController {
     private readonly getIssuer: GetPrescriptionIssuerUseCase,
     private readonly getPrescription: GetPrescriptionUseCase,
     private readonly voidPrescription: VoidPrescriptionUseCase,
+    private readonly getSettings: GetPrescriptionSettingsUseCase,
+    private readonly updateSettings: UpdatePrescriptionSettingsUseCase,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   // Declarada ANTES de `:id`: Express casa las rutas en orden.
@@ -213,6 +236,49 @@ export class PrescriptionsController {
   })
   issuer(@Req() req: AuthenticatedRequest): Promise<PrescriptionIssuerView> {
     return this.getIssuer.execute(req.user.sub);
+  }
+
+  // También antes de `:id`: si no, `settings` se leería como el id de una
+  // receta.
+  @Get('settings')
+  @ApiOperation({ summary: 'Ajustes de la receta de la clínica (DX-324)' })
+  @ApiOkResponse({ type: PrescriptionSettingsDto })
+  settings(): Promise<PrescriptionSettings> {
+    return this.getSettings.execute();
+  }
+
+  @Put('settings')
+  @Roles(...CLINIC_SETTINGS_WRITE_ROLES)
+  @RolesDeniedMessage(PRESCRIPTION_SETTINGS_FORBIDDEN_MESSAGE)
+  @ApiOperation({
+    summary:
+      'Cambia los ajustes de la receta de la clínica; queda en la auditoría',
+    description:
+      'DX-324. Aplica a la siguiente emisión; una receta ya emitida no cambia. ' +
+      'Si nada cambia, responde 200 sin evento de auditoría.',
+  })
+  @ApiOkResponse({ type: PrescriptionSettingsDto })
+  @ApiBadRequestResponse({
+    description:
+      'Falta un campo, un sí/no que no es booleano o una validez fuera de 1–365 o no entera',
+  })
+  @ApiForbiddenResponse({
+    description: PRESCRIPTION_SETTINGS_FORBIDDEN_MESSAGE,
+  })
+  updateClinicSettings(
+    @Body() dto: PrescriptionSettingsDto,
+    @Req() req: AuditableRequest,
+  ): Promise<PrescriptionSettings> {
+    const ctx = auditRequestContext(req, this.tenantContext);
+    if (!ctx) throw new Error('Sin sesión de clínica detrás del RolesGuard');
+    return this.updateSettings.execute(
+      {
+        printQuantityInWords: dto.printQuantityInWords,
+        requireClinicalRecordNumber: dto.requireClinicalRecordNumber,
+        validityDays: dto.validityDays,
+      },
+      ctx,
+    );
   }
 
   @Audit({

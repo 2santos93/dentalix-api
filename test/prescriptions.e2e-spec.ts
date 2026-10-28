@@ -86,8 +86,9 @@ interface RxSettings {
 const SETTINGS_ON: RxSettings = { words: true, hc: true, days: 30 };
 
 /**
- * Ajustes de la receta de la clínica. Por SQL hasta que la Task 5 publique
- * `PUT /prescriptions/settings`.
+ * Ajustes de la receta de la clínica, por SQL para no dejar eventos de
+ * auditoría en cada test. `PUT /prescriptions/settings` tiene su propio spec
+ * (`prescription-settings.e2e-spec.ts`).
  */
 async function setRxSettings(
   tenantId: string,

@@ -111,6 +111,7 @@ import { CreateConsentTemplateUseCase } from '../src/modules/consents/applicatio
 import { SignPatientConsentUseCase } from '../src/modules/consents/application/use-cases/patient-consents.use-cases';
 import { CreatePrescriptionTemplateUseCase } from '../src/modules/prescriptions/application/use-cases/prescription-templates.use-cases';
 import { IssuePrescriptionUseCase } from '../src/modules/prescriptions/application/use-cases/prescriptions.use-cases';
+import { UpdatePrescriptionSettingsUseCase } from '../src/modules/prescriptions/application/use-cases/prescription-settings.use-cases';
 import { RegisterImplantUseCase } from '../src/modules/implants/application/use-cases/implants.use-cases';
 import { UpdateStaffUseCase } from '../src/modules/staff/application/use-cases/update-staff.use-case';
 import { ReplaceStaffLocationsUseCase } from '../src/modules/staff/application/use-cases/staff-locations.use-cases';
@@ -180,6 +181,8 @@ import {
   DEMO_PRESCRIPTION,
   DEMO_PRESCRIPTION_TEMPLATES,
   DEMO_PROFESSIONAL_LICENSES,
+  DEMO_PROFESSIONAL_SPECIALTIES,
+  DEMO_PRESCRIPTION_SETTINGS,
   demoPerioMeasures,
   DEMO_CURRENCY,
   DEMO_HOUR_CYCLE,
@@ -2614,9 +2617,10 @@ class DemoSeeder {
   }
 
   /**
-   * DX-013: registro profesional de los odontólogos, las plantillas típicas
-   * (las crea el ADMIN) y una receta post-exodoncia emitida, todo por los
-   * mismos casos de uso que la API. Sin X-Location-Id: la sede principal (CO).
+   * DX-013: registro profesional y especialidad de los odontólogos, los
+   * ajustes de la receta (los fija el ADMIN, auditado), las plantillas
+   * típicas (las crea el ADMIN) y una receta post-exodoncia emitida, todo por
+   * los mismos casos de uso que la API. Sin X-Location-Id: la sede principal.
    */
   private async createPrescriptions(
     ownerId: string,
@@ -2627,8 +2631,21 @@ class DemoSeeder {
       await this.use(UpdateStaffUseCase).execute({
         userId: dentists[index],
         professionalLicense: license,
+        professionalSpecialty: DEMO_PROFESSIONAL_SPECIALTIES[index],
       });
     }
+    // DX-324: antes de emitir, como lo haría el ADMIN en Ajustes › Recetas.
+    await this.use(UpdatePrescriptionSettingsUseCase).execute(
+      { ...DEMO_PRESCRIPTION_SETTINGS },
+      {
+        tenantId: this.tenantContext.getTenantId() as string,
+        locationId: null,
+        actor: { userId: ownerId, role: ClinicRole.ADMIN },
+        requestId: null,
+        ip: null,
+        userAgent: null,
+      },
+    );
     for (const template of DEMO_PRESCRIPTION_TEMPLATES) {
       await this.use(CreatePrescriptionTemplateUseCase).execute(
         { name: template.name, notes: template.notes, items: template.items },

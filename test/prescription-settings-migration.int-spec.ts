@@ -13,6 +13,7 @@ import {
   computePrescriptionHash,
   type PrescriptionHashInput,
 } from '../src/modules/prescriptions/domain/prescription-hash';
+import { PLATFORM_DEFAULT_PRESCRIPTION_SETTINGS } from '../src/modules/prescriptions/domain/prescription-settings';
 
 // DX-324: la receta deja de razonar por país. Una BD desechable recibe todas
 // las migraciones ANTERIORES, clínicas con sedes como las de hoy (el país de
@@ -33,12 +34,7 @@ const COLUMN = '20261028180300_dx324_tenant_prescription_settings';
 const BACKFILL = '20261028180400_dx324_tenant_prescription_settings_backfill';
 const ROOT = join(__dirname, '..');
 
-// TODO(T5): comparar con PLATFORM_DEFAULT_PRESCRIPTION_SETTINGS.
-const PLATFORM_DEFAULTS = {
-  printQuantityInWords: false,
-  requireClinicalRecordNumber: false,
-  validityDays: 30,
-};
+const PLATFORM_DEFAULTS = PLATFORM_DEFAULT_PRESCRIPTION_SETTINGS;
 
 function urlFor(db: string): string {
   const url = new URL(process.env.DIRECT_URL as string);
