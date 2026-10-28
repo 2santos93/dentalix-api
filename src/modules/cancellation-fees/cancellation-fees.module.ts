@@ -1,12 +1,10 @@
 import { Module } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 import { PaymentAllocationsModule } from '../payments/payment-allocations.module';
 import { CancellationFeeController } from './presentation/cancellation-fee.controller';
 import {
-  CANCELLATION_FEE_EPS_CO_BLOCK,
   ChargeCancellationFeeUseCase,
   GetCancellationFeeUseCase,
   VoidCancellationFeeUseCase,
@@ -14,14 +12,12 @@ import {
 } from './application/cancellation-fee.use-cases';
 import { CANCELLATION_FEE_REPOSITORY } from './domain/ports/cancellation-fee-repository.port';
 import { PrismaCancellationFeeRepository } from './infrastructure/prisma-cancellation-fee.repository';
-import { epsCoBlockEnabled } from './domain/cancellation-fee';
 
 /**
  * DX-291: cargo por inasistencia o cancelación tardía y su condonación (y su
  * anulación con motivo, SEC-050). El
  * cargo es un ítem del plan «Cargos administrativos» y se cobra con el abono
- * y el recibo de siempre (módulo payments). El bloqueo por EPS_CO lo fija la
- * plataforma con `CANCELLATION_FEE_BLOCK_EPS_CO` (activado salvo `false`).
+ * y el recibo de siempre (módulo payments).
  */
 @Module({
   // DX-051: el cargo y su anulación drenan el reparto de abonos del plan.
@@ -37,12 +33,6 @@ import { epsCoBlockEnabled } from './domain/cancellation-fee';
     {
       provide: CANCELLATION_FEE_REPOSITORY,
       useClass: PrismaCancellationFeeRepository,
-    },
-    {
-      provide: CANCELLATION_FEE_EPS_CO_BLOCK,
-      inject: [ConfigService],
-      useFactory: (config: ConfigService) =>
-        epsCoBlockEnabled(config.get<string>('CANCELLATION_FEE_BLOCK_EPS_CO')),
     },
   ],
 })

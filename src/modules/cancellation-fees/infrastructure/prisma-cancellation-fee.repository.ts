@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
-import { requireLocationTimeZone } from '../../../shared/locations/location-time-zone';
 import {
   ADMIN_FEES_PLAN_LABEL,
   FEE_CATALOG_CODE,
@@ -70,9 +69,6 @@ function toRecord(fee: SelectedFee): CancellationFeeRecord {
   };
 }
 
-/** Día civil `YYYY-MM-DD` de una columna DATE (Prisma la trae a medianoche UTC). */
-const civil = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
-
 /** Fuerza el ROLLBACK cuando la cita cambió bajo nuestros pies. */
 class StaleAppointmentError extends Error {}
 
@@ -113,13 +109,7 @@ export class PrismaCancellationFeeRepository implements CancellationFeeRepositor
             lateCancellation: true,
             policyVersionId: true,
             location: {
-              select: {
-                id: true,
-                country: true,
-                timeZone: true,
-                locale: true,
-                hourCycle: true,
-              },
+              select: { id: true, locale: true, hourCycle: true },
             },
             policyVersion: {
               select: {
@@ -134,21 +124,11 @@ export class PrismaCancellationFeeRepository implements CancellationFeeRepositor
           },
         });
         if (!appointment) return null;
-        const [current, coverages] = await Promise.all([
-          tx.cancellationPolicyVersion.findFirst({
-            where: { locationId: appointment.locationId },
-            orderBy: { version: 'desc' },
-            select: { receptionCanCharge: true },
-          }),
-          tx.patientCoverage.findMany({
-            where: { patientId: appointment.patientId, deletedAt: null },
-            select: {
-              validFrom: true,
-              validTo: true,
-              payer: { select: { type: true } },
-            },
-          }),
-        ]);
+        const current = await tx.cancellationPolicyVersion.findFirst({
+          where: { locationId: appointment.locationId },
+          orderBy: { version: 'desc' },
+          select: { receptionCanCharge: true },
+        });
         const version = appointment.policyVersion;
         return {
           appointment: {
@@ -173,15 +153,8 @@ export class PrismaCancellationFeeRepository implements CancellationFeeRepositor
               }
             : null,
           receptionCanCharge: current?.receptionCanCharge ?? false,
-          locationCountry: appointment.location.country,
-          locationTimeZone: requireLocationTimeZone(appointment.location),
           locationLocale: appointment.location.locale,
           locationHourCycle: appointment.location.hourCycle,
-          coverages: coverages.map((c) => ({
-            payerType: c.payer.type,
-            validFrom: civil(c.validFrom),
-            validTo: civil(c.validTo),
-          })),
           fee: appointment.cancellationFee
             ? toRecord(appointment.cancellationFee)
             : null,

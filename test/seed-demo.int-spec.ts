@@ -772,18 +772,8 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       },
     });
     expect(communicated).toBe(3);
-    // DX-291: esa paciente tiene EPS_CO (Sura) en una sede de Colombia, así
-    // que su cargo sale bloqueado (Ley 1438 art. 55); otra inasistencia con
-    // la política comunicada, de un paciente SIN EPS_CO, sí se puede cobrar.
-    const epsCo = {
-      deletedAt: null,
-      payer: { type: 'EPS_CO' as const },
-    };
-    expect(
-      await raw.patientCoverage.count({
-        where: { tenantId, patientId: late[0].patientId, ...epsCo },
-      }),
-    ).toBeGreaterThan(0);
+    // DX-321: sus incidencias se pueden cobrar, y la inasistencia de otro
+    // paciente con la política comunicada también.
     const chargeable = await raw.appointment.findMany({
       where: {
         tenantId,
@@ -794,11 +784,6 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       select: { patientId: true },
     });
     expect(chargeable).toHaveLength(1);
-    expect(
-      await raw.patientCoverage.count({
-        where: { tenantId, patientId: chargeable[0].patientId, ...epsCo },
-      }),
-    ).toBe(0);
     // Las cancelaciones del calendario llevan origen y motivo, y no son tardías.
     const cancelled = await raw.appointment.findMany({
       where: { tenantId, status: 'CANCELLED', lateCancellation: false },

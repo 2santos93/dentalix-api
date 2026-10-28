@@ -2582,10 +2582,9 @@ export const DEMO_CANCELLATION = {
       reasonCode: 'WORK' as const,
     },
     /**
-     * DX-291: la paciente de arriba tiene EPS_CO (Sura), así que su cargo sale
-     * bloqueado (Ley 1438 art. 55). Una inasistencia de un paciente SIN EPS
-     * (Jorge Eduardo Ramírez) con la política comunicada deja probar
-     * «Generar cargo» en la demo.
+     * DX-291/DX-321: las incidencias de la paciente de arriba se pueden
+     * cobrar, y la inasistencia de otro paciente (Jorge Eduardo Ramírez) con
+     * la política comunicada también.
      */
     chargeable: { patientIndex: 1, noShowDaysAgo: 8 },
   },

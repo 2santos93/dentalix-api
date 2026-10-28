@@ -1,6 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { INestApplication } from '@nestjs/common';
-import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
+import { Test } from '@nestjs/testing';
+import {
+  ClinicCountry,
+  ClinicRole,
+  PayerType,
+  Prisma,
+  PrismaClient,
+} from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import {
@@ -11,13 +18,16 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
+import { AppModule } from '../src/app.module';
+import { setupSwagger } from '../src/config/swagger';
 import { CANCELLATION_FEE_MESSAGES } from '../src/modules/cancellation-fees/domain/cancellation-fee';
 
 // DX-291 (porción 2 de DX-279): la política en el enlace público con
 // aceptación al cancelar tarde, el cargo por inasistencia o cancelación
 // tardía (ítem DONE en «Cargos administrativos», cobrado con abono y recibo),
-// su condonación, los 409 (sin política comunicada, EPS_CO en Colombia), los
-// 403 por rol, los 404 desde otra clínica y la vista previa del email.
+// su condonación, los 409 (sin política comunicada), los 403 por rol, los 404
+// desde otra clínica y la vista previa del email. DX-321: el cargo se calcula
+// igual para todos los pacientes, tengan la cobertura que tengan.
 
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
@@ -26,6 +36,16 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 const HOUR = 3_600_000;
 const POLICY_TEXT =
   'Si no puedes venir, avísanos con 24 h o se cobrará la cita.';
+
+/**
+ * País del pagador: lo exige payers_type_country_check (G3.3). Es un fixture
+ * para poder crear cada tipo, no una regla del cargo.
+ */
+function payerCountry(type: PayerType): ClinicCountry | null {
+  if (type === PayerType.MUTUA_ES) return 'ES';
+  if (type === PayerType.EPS_CO || type === PayerType.PREPAGADA_CO) return 'CO';
+  return null;
+}
 
 interface FeeView {
   appointmentId: string;
@@ -442,39 +462,48 @@ describe('Cargo por inasistencia y política en el enlace (DX-291)', () => {
       );
     });
 
-    it('EPS_CO activa en una sede de Colombia: 409 (Ley 1438 art. 55)', async () => {
-      const epsPatient = (
-        await raw.patient.create({
-          data: { tenantId: a.tenantId, firstName: 'Eps', lastName: 'Activa' },
-        })
-      ).id;
-      const payer = await raw.payer.create({
-        data: {
-          tenantId: a.tenantId,
-          name: 'EPS Sura',
-          type: 'EPS_CO',
-          country: 'CO',
-        },
-      });
-      await raw.patientCoverage.create({
-        data: {
-          tenantId: a.tenantId,
-          patientId: epsPatient,
-          payerId: payer.id,
-          isPrimary: true,
-        },
-      });
-      const id = await appointment(-80, {
-        status: 'NO_SHOW',
-        patientId: epsPatient,
-      });
-      const res = await admin()
-        .post(`/appointments/${id}/cancellation-fee`)
-        .expect(409);
-      expect((res.body as { message: string }).message).toBe(
-        CANCELLATION_FEE_MESSAGES.epsCo,
-      );
-    });
+    it.each(Object.values(PayerType))(
+      'a patient with an active coverage is charged like any other (DX-321): %s',
+      async (type) => {
+        const covered = (
+          await raw.patient.create({
+            data: {
+              tenantId: a.tenantId,
+              firstName: 'Cubierto',
+              lastName: type,
+            },
+          })
+        ).id;
+        const payer = await raw.payer.create({
+          data: {
+            tenantId: a.tenantId,
+            name: `Pagador ${type}`,
+            type,
+            country: payerCountry(type),
+          },
+        });
+        await raw.patientCoverage.create({
+          data: {
+            tenantId: a.tenantId,
+            patientId: covered,
+            payerId: payer.id,
+            isPrimary: true,
+          },
+        });
+        const id = await appointment(-80, {
+          status: 'NO_SHOW',
+          patientId: covered,
+        });
+        const view = (
+          await admin().get(`/appointments/${id}/cancellation-fee`).expect(200)
+        ).body as FeeView;
+        expect(view.chargeBlock).toBeNull();
+        const charged = (
+          await admin().post(`/appointments/${id}/cancellation-fee`).expect(201)
+        ).body as FeeView;
+        expect(charged.status).toBe('CHARGED');
+      },
+    );
 
     it('una cita que no es inasistencia ni tardía: 409', async () => {
       const id = await appointment(48);
@@ -497,6 +526,78 @@ describe('Cargo por inasistencia y política en el enlace (DX-291)', () => {
       expect(
         await raw.cancellationFee.count({ where: { appointmentId: id } }),
       ).toBe(0);
+    });
+  });
+
+  it('GET …/cancellation-fee for an appointment at a location without time zone is 200 (DX-321)', async () => {
+    // Ningún cálculo del cargo depende del día: la sede sin zona no lo bloquea.
+    const id = await appointment(-100, { status: 'NO_SHOW' });
+    const { timeZone } = await raw.location.findUniqueOrThrow({
+      where: { id: principal },
+      select: { timeZone: true },
+    });
+    await raw.$executeRaw`
+      UPDATE "locations" SET "timeZone" = NULL WHERE "id" = ${principal}::uuid`;
+    try {
+      const view = (
+        await admin().get(`/appointments/${id}/cancellation-fee`).expect(200)
+      ).body as FeeView;
+      expect(view.chargeBlock).toBeNull();
+    } finally {
+      await raw.$executeRaw`
+        UPDATE "locations" SET "timeZone" = ${timeZone} WHERE "id" = ${principal}::uuid`;
+    }
+  });
+
+  describe('contrato OpenAPI (DX-321)', () => {
+    let docsApp: INestApplication<App>;
+
+    beforeAll(async () => {
+      // Una app aparte con /docs, montada como en main.ts (prefijo y luego
+      // Swagger, antes de init).
+      const moduleRef = await Test.createTestingModule({
+        imports: [AppModule],
+      }).compile();
+      docsApp = moduleRef.createNestApplication<INestApplication<App>>();
+      docsApp.setGlobalPrefix('api/v1');
+      setupSwagger(docsApp);
+      await docsApp.init();
+    });
+
+    afterAll(async () => {
+      await docsApp.close();
+    });
+
+    it('chargeBlock never reports a payer-based reason', async () => {
+      const doc = (
+        await request(docsApp.getHttpServer()).get('/docs-json').expect(200)
+      ).body as {
+        components: {
+          schemas: Record<
+            string,
+            { properties: Record<string, { enum?: unknown[] }> }
+          >;
+        };
+        paths: Record<
+          string,
+          Record<string, { responses: Record<string, { description: string }> }>
+        >;
+      };
+      const reasons =
+        doc.components.schemas.CancellationFeeViewDto.properties.chargeBlock
+          .enum ?? [];
+      expect(reasons.filter((r) => r !== null)).toEqual([
+        'NOT_ELIGIBLE',
+        'NOT_INFORMED',
+        'NO_FEE',
+        'ALREADY_CHARGED',
+        'ALREADY_WAIVED',
+      ]);
+      const conflict =
+        doc.paths['/api/v1/appointments/{id}/cancellation-fee'].post.responses[
+          '409'
+        ].description;
+      expect(conflict).not.toMatch(/EPS|Colombia|Ley/);
     });
   });
 

@@ -125,7 +125,7 @@ export class CancellationFeeController {
   @ApiNotFoundResponse({ description: 'Cita no encontrada en esta clínica' })
   @ApiConflictResponse({
     description:
-      'No es inasistencia ni tardía, «No consta que el paciente fuera informado de la política», la versión comunicada no tiene importe, cobertura EPS_CO activa en una sede de Colombia (Ley 1438 art. 55), ya cobrado o condonado, o la cita cambió mientras tanto',
+      'No es inasistencia ni tardía, «No consta que el paciente fuera informado de la política», la versión comunicada no tiene importe, ya cobrado o condonado, o la cita cambió mientras tanto',
   })
   charge(
     @Param('id', ParseUUIDPipe) id: string,

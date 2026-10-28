@@ -57,11 +57,8 @@ class FakeFeeRepo implements CancellationFeeRepository {
       currency: 'COP',
     },
     receptionCanCharge: false,
-    locationCountry: 'CO',
-    locationTimeZone: 'America/Bogota',
     locationLocale: 'es-CO',
     locationHourCycle: 'h23',
-    coverages: [],
     fee: null,
   };
   charges: ChargeFeeInput[] = [];
@@ -136,13 +133,9 @@ describe('casos de uso del cargo por inasistencia (DX-291)', () => {
   let ctx: TenantContextService;
   const run = <T>(fn: () => Promise<T>, allowed?: string[]) =>
     ctx.run(TENANT, undefined, fn, allowed);
-  const charge = (amount?: number, actor = ADMIN, epsBlock = true) =>
+  const charge = (amount?: number, actor = ADMIN) =>
     run(() =>
-      new ChargeCancellationFeeUseCase(repo, ctx, epsBlock).execute(
-        APPT,
-        amount,
-        actor,
-      ),
+      new ChargeCancellationFeeUseCase(repo, ctx).execute(APPT, amount, actor),
     );
 
   beforeEach(() => {
@@ -217,14 +210,13 @@ describe('casos de uso del cargo por inasistencia (DX-291)', () => {
     );
   });
 
-  it('EPS_CO activa en Colombia: 409 (Ley 1438); con el bloqueo apagado por la plataforma, se cobra', async () => {
-    repo.ctx!.coverages = [
-      { payerType: 'EPS_CO', validFrom: null, validTo: null },
-    ];
-    await expect(charge()).rejects.toThrow(/Ley 1438/);
-    await expect(charge(undefined, ADMIN, false)).resolves.toMatchObject({
-      status: 'CHARGED',
-    });
+  it('charge succeeds for a patient with an active coverage of any payer type', async () => {
+    // DX-321: el contexto ya no carga coberturas ni el país o la zona de la
+    // sede; el cargo se decide igual para cualquier paciente.
+    await expect(
+      run(() => new GetCancellationFeeUseCase(repo, ctx).execute(APPT, ADMIN)),
+    ).resolves.toMatchObject({ chargeBlock: null });
+    await expect(charge()).resolves.toMatchObject({ status: 'CHARGED' });
   });
 
   it('RECEPTION: 403 si la política no lo permite; con permiso, cobra', async () => {
@@ -267,8 +259,7 @@ describe('casos de uso del cargo por inasistencia (DX-291)', () => {
     repo = new FakeFeeRepo();
     await expect(
       run(
-        () =>
-          new GetCancellationFeeUseCase(repo, ctx, true).execute(APPT, ADMIN),
+        () => new GetCancellationFeeUseCase(repo, ctx).execute(APPT, ADMIN),
         ['otra-sede'],
       ),
     ).rejects.toThrow(ForbiddenException);
@@ -277,11 +268,7 @@ describe('casos de uso del cargo por inasistencia (DX-291)', () => {
   it('condonar exige motivo (400), queda WAIVED y luego cobrar da 409', async () => {
     const waive = (reason?: string) =>
       run(() =>
-        new WaiveCancellationFeeUseCase(repo, ctx, true).execute(
-          APPT,
-          reason,
-          ADMIN,
-        ),
+        new WaiveCancellationFeeUseCase(repo, ctx).execute(APPT, reason, ADMIN),
       );
     await expect(waive('  ')).rejects.toThrow(BadRequestException);
     const view = await waive('  Hospitalización  ');
@@ -295,7 +282,7 @@ describe('casos de uso del cargo por inasistencia (DX-291)', () => {
 
   it('la vista dice si se puede cobrar y si el usuario puede decidir', async () => {
     const view = await run(() =>
-      new GetCancellationFeeUseCase(repo, ctx, true).execute(APPT, RECEPTION),
+      new GetCancellationFeeUseCase(repo, ctx).execute(APPT, RECEPTION),
     );
     expect(view).toMatchObject({
       eligible: true,
@@ -310,7 +297,7 @@ describe('casos de uso del cargo por inasistencia (DX-291)', () => {
     const voidFee = (reason?: string, actor = ADMIN, allowed?: string[]) =>
       run(
         () =>
-          new VoidCancellationFeeUseCase(repo, ctx, true).execute(
+          new VoidCancellationFeeUseCase(repo, ctx).execute(
             APPT,
             reason,
             actor,

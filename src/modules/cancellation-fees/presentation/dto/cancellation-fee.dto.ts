@@ -10,7 +10,6 @@ const FEE_BLOCK_REASONS: FeeBlockReason[] = [
   'NOT_ELIGIBLE',
   'NOT_INFORMED',
   'NO_FEE',
-  'EPS_CO',
   'ALREADY_CHARGED',
   'ALREADY_WAIVED',
 ];
@@ -177,7 +176,7 @@ export class CancellationFeeViewDto {
     enum: FEE_BLOCK_REASONS,
     nullable: true,
     description:
-      'Por qué no se puede generar el cargo ahora: no es inasistencia ni tardía, no consta la política comunicada, la versión comunicada no tiene importe, EPS_CO activa en Colombia, o ya cobrado/condonado.',
+      'Por qué no se puede generar el cargo ahora: no es inasistencia ni tardía, no consta la política comunicada, la versión comunicada no tiene importe, o ya cobrado/condonado.',
   })
   chargeBlock!: FeeBlockReason | null;
 

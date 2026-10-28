@@ -1943,9 +1943,10 @@ condonar) el cargo con el flujo de plan, abono y recibo de siempre.
   generado por error se **anula** desde la cita (SEC-050, abajo) y la cita
   conserva su única decisión. 409 en español: no es inasistencia ni tardía, «No
   consta que el paciente fuera informado de la política» (sin
-  `policyVersionId`), la versión comunicada no tiene importe, cobertura
-  `EPS_CO` vigente (día civil de la sede) en una sede de Colombia (Ley 1438
-  de 2011, art. 55), ya cobrado o condonado, o la cita cambió.
+  `policyVersionId`), la versión comunicada no tiene importe, ya cobrado o
+  condonado, o la cita cambió. El cargo se calcula igual para cualquier
+  paciente, tenga la cobertura que tenga, y no depende de la zona de la sede
+  (DX-321); para no cobrar a alguien está la condonación, con motivo.
 - **Anular un cargo generado (SEC-050)**: `POST
   /appointments/:id/cancellation-fee/void` (`{ reason }`, 3–500), con el mismo
   permiso que generarlo (ADMIN, o RECEPTION si la política vigente lo permite)
@@ -1993,9 +1994,6 @@ condonar) el cargo con el flujo de plan, abono y recibo de siempre.
   `CANCELLATION_FEE_CHARGED`, `UPDATE APPOINTMENT` `CANCELLATION_FEE_WAIVED`
   y `VOID APPOINTMENT` `CANCELLATION_FEE_VOIDED` (SEC-050), con el paciente;
   nunca el texto del motivo.
-- **Bloqueo por EPS_CO**: lo fija la plataforma con
-  `CANCELLATION_FEE_BLOCK_EPS_CO` (`true` por defecto, `false` lo apaga); la
-  clínica no puede cambiarlo.
 - **Fecha de cierre (DX-091)**: aún no hay bloqueo contable; el ítem y el
   abono se fechan con la hora del servidor (hoy), así que nunca caen en un
   período anterior.
@@ -2004,10 +2002,9 @@ condonar) el cargo con el flujo de plan, abono y recibo de siempre.
   del recordatorio con la marca de la clínica y la política vigente (paciente
   y profesional de ejemplo). No envía nada.
 - **Demo**: las dos inasistencias y la cancelación tardía de Daniela Montoya
-  Arango tienen la política comunicada, pero ella tiene EPS_CO (Sura) y su
-  cargo sale bloqueado (Ley 1438): sirve para ver el 409. La inasistencia de
-  Jorge Eduardo Ramírez Ospina (hace 8 días, sin EPS) también tiene la
-  política comunicada: ahí «Generar cargo» funciona como ADMIN.
+  Arango tienen la política comunicada y se pueden cobrar. La inasistencia de
+  Jorge Eduardo Ramírez Ospina (hace 8 días) también tiene la política
+  comunicada: ahí «Generar cargo» funciona igual como ADMIN.
 
 ## Recordatorios de cita por email (DX-026)
 
