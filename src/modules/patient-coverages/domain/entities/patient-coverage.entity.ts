@@ -27,8 +27,8 @@ export interface PatientCoverage {
   isPrimary: boolean;
   notes: string | null;
   /**
-   * Copiada de `patients.insurerEps` por el relleno de DX-153; la API nunca la
-   * crea. SEC-047: habilita a cualquier rol a asignar un convenio de pagador
+   * Copiada del texto libre de aseguradora anterior a DX-153 por el relleno
+   * de DX-153; la API nunca la crea. SEC-047: habilita a cualquier rol a asignar un convenio de pagador
    * OTRO (los pagadores del relleno son OTRO hasta que se reclasifican).
    */
   migratedFromInsurerEps: boolean;

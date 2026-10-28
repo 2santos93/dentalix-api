@@ -32,8 +32,8 @@ export function coverageRequiredMessage(payerName: string): string {
  * SEC-047: con un pagador externo (`isExternalPayer`, en el catálogo de
  * pagadores), la asignación exige una cobertura viva del paciente con ese
  * pagador; un convenio interno (pagador OTRO) solo lo asigna ADMIN, salvo que
- * el paciente traiga una cobertura MIGRADA de `insurerEps` (DX-153) de ese
- * pagador: el relleno creó pagadores OTRO para aseguradoras reales sin
+ * el paciente traiga una cobertura MIGRADA del texto libre de aseguradora
+ * anterior a DX-153 de ese pagador: el relleno creó pagadores OTRO para aseguradoras reales sin
  * clasificar, y esa cobertura sale de la ficha original (la API no la puede
  * crear), así que habilita a cualquier rol.
  */
@@ -58,7 +58,8 @@ export interface CoverageTrustFacts {
  * - asigna un ADMIN (como hasta ahora);
  * - un ADMIN la verificó (y nadie cambió después su pagador o su número:
  *   cambiarlos borra la verificación);
- * - es migrada de `insurerEps` (sale de la ficha original, no de la API);
+ * - es migrada del texto libre de aseguradora anterior a DX-153 (sale de la
+ *   ficha original, no de la API);
  * - o su pagador y su número los registró OTRO usuario. Sin autor conocido
  *   (filas anteriores a la API) cuenta como de otro.
  */

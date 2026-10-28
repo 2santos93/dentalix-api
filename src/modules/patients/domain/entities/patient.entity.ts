@@ -32,7 +32,6 @@ export interface Patient {
   dataConsentPolicyVersion: string | null;
   maritalStatus: string | null;
   occupation: string | null;
-  insurerEps: string | null;
   physicianName: string | null;
   physicianPhone: string | null;
   emergencyContactName: string | null;

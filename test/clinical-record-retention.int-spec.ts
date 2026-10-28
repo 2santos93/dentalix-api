@@ -50,7 +50,6 @@ async function newPatient(tenantId: string, name: string): Promise<string> {
         emergencyContactRelationship: 'Hermano',
         emergencyContactPhone: '3004445566',
         occupation: 'Docente',
-        insurerEps: 'Sura',
       },
     })
   ).id;
@@ -308,7 +307,6 @@ describe('retención legal de la HC (DX-039, int)', () => {
       // Identificación que exige la HC: se conserva.
       firstName: 'Supresion',
       occupation: 'Docente',
-      insurerEps: 'Sura',
       underRetention: true,
     });
     expect(result.partiallySuppressedAt).toBeInstanceOf(Date);

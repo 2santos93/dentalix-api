@@ -701,7 +701,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
   },
 ];
 
-/** DX-153: pagadores del catálogo de la clínica demo (reemplazan al texto libre `insurerEps`). */
+/** DX-153: pagadores del catálogo de la clínica demo (reemplazan al texto libre de aseguradora anterior a DX-153). */
 export const DEMO_PAYERS = [
   { key: 'sura', name: 'Sura EPS', type: 'EPS_CO' },
   { key: 'sanitas', name: 'Sanitas', type: 'PREPAGADA_CO' },
@@ -818,7 +818,7 @@ export interface DemoCoverage {
   isPrimary: boolean;
 }
 
-/** Una cobertura principal por paciente que tenía `insurerEps`; una vencida y una pendiente. */
+/** Una cobertura principal por paciente que tenía el texto libre de aseguradora anterior a DX-153; una vencida y una pendiente. */
 export const DEMO_COVERAGES: readonly DemoCoverage[] = [
   {
     patientIndex: 0,

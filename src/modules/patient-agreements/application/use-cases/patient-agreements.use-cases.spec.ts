@@ -388,7 +388,7 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
       );
 
       it.each(NON_ADMIN)(
-        '%s: con una cobertura MIGRADA de insurerEps del mismo pagador, el convenio OTRO se asigna',
+        '%s: con una cobertura MIGRADA del texto libre de aseguradora anterior a DX-153 del mismo pagador, el convenio OTRO se asigna',
         async (role) => {
           const migrated = coverages.seed({
             patientId: PATIENT,

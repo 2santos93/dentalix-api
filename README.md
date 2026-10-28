@@ -2274,8 +2274,9 @@ coberturas por paciente, una principal. Sustituye al texto libre
   clínica y texto normalizado (tipo OTRO, sin país; el ADMIN lo reclasifica) y
   una cobertura principal por paciente con `insurerEps` no vacío, marcada
   `migratedFromInsurerEps`. Es idempotente, incluye archivados y no toca
-  `insurerEps`, que queda DEPRECADO y de solo lectura: la API ya no lo
-  escribe y un cliente antiguo que lo mande no da error.
+  `insurerEps`. Esa columna queda legada, sin lectores desde DX-322; DROP en
+  fase 2. La API ya no la lee, no la escribe ni la expone (`@ignore` en el
+  esquema), y un cliente antiguo que la mande no da error: se descarta.
 - **Demo**: `npm run seed:demo` crea 8 pagadores (Sura EPS, Sanitas,
   Compensar, Nueva EPS, Famisanar, Salud Total, Coomeva, Empresa Alfa) y una cobertura
   principal por paciente que tenía aseguradora, con una vencida y una

@@ -122,8 +122,9 @@ export class GetPatientAgreementUseCase {
  *   cualquier rol, ADMIN incluido.
  * - Convenio interno (pagador `OTRO`: cortesía, empleados…): ADMIN, con la
  *   cobertura opcional (si viene, se valida igual). Otro rol solo con una
- *   cobertura MIGRADA de `insurerEps` del paciente y de ese pagador (vigente:
- *   si no, 400); sin ella, 403 sin decir nada más de la cobertura.
+ *   cobertura MIGRADA del texto libre de aseguradora anterior a DX-153, del
+ *   paciente y de ese pagador (vigente: si no, 400); sin ella, 403 sin decir
+ *   nada más de la cobertura.
  * - SEC-049: quien no es ADMIN no puede usar una cobertura cuyo pagador o nº
  *   de afiliado registró él mismo, salvo que un ADMIN la haya verificado (403
  *   que dice qué falta). Va después de comprobar que la cobertura es del

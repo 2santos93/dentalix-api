@@ -35,7 +35,6 @@ function fakePatientFrom(
     dataConsentPolicyVersion: null,
     maritalStatus: input.maritalStatus ?? null,
     occupation: input.occupation ?? null,
-    insurerEps: null,
     physicianName: input.physicianName ?? null,
     physicianPhone: input.physicianPhone ?? null,
     emergencyContactName: input.emergencyContactName ?? null,

@@ -433,10 +433,10 @@ model Patient {
   // Identificación ampliada.
   maritalStatus                String?
   occupation                   String?
-  // DEPRECADO (DX-153): solo lectura; el pagador vive en patient_coverages
-  // (la migración 20261020210200 copió cada valor a un pagador y una
-  // cobertura principal con `migratedFromInsurerEps`).
-  insurerEps                   String?
+  /// DX-322 fase 1: columna LEGADA. Solo la leen réplicas anteriores a esta
+  /// unidad. El dato vive en patient_coverages (migratedFromInsurerEps, DX-153).
+  /// Fase 2 (ticket aparte) la borra con DROP COLUMN.
+  insurerEps                   String?               @ignore
   physicianName                String?
   physicianPhone               String?
   // Contacto de emergencia / acudiente.
@@ -3604,7 +3604,8 @@ enum PayerType {
   PREPAGADA_CO
   EPS_CO
   EMPRESA
-  /// «Otro / sin clasificar»: el que crea el relleno de `insurerEps`.
+  /// «Otro / sin clasificar»: el que crea el relleno del texto libre de
+  /// aseguradora anterior a DX-153 (`patients."insurerEps"`).
   OTRO
 }
 
@@ -3664,7 +3665,8 @@ model PatientCoverage {
   validTo                DateTime? @db.Date
   isPrimary              Boolean   @default(false)
   notes                  String?
-  /// Copiado de `patients.insurerEps` por la migración.
+  /// Copiado de la columna legada `patients."insurerEps"` por la migración.
+  /// Excepción G5.3 (DX-334): marca histórica de SEC-047; no es un supuesto de país.
   migratedFromInsurerEps Boolean   @default(false)
   /// Punteros suaves a User, como `Payment.createdById`.
   createdById            String?   @db.Uuid

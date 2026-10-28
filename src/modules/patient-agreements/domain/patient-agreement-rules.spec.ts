@@ -125,7 +125,7 @@ describe('coverageTrustedFor (SEC-049)', () => {
     ).toBe(true);
   });
 
-  it('migrada de insurerEps o sin autor conocido, vale', () => {
+  it('cobertura MIGRADA del texto libre de aseguradora anterior a DX-153 o sin autor conocido, vale', () => {
     const actor = { userId: ME, role: ClinicRole.RECEPTION };
     expect(
       coverageTrustedFor(coverage({ migratedFromInsurerEps: true }), actor),

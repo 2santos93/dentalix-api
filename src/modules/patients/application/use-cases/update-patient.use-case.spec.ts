@@ -32,7 +32,6 @@ function fakePatient(overrides: Partial<Patient> = {}): Patient {
     dataConsentPolicyVersion: null,
     maritalStatus: null,
     occupation: null,
-    insurerEps: null,
     physicianName: null,
     physicianPhone: null,
     emergencyContactName: null,

@@ -176,8 +176,6 @@ describe('Patients (e2e)', () => {
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
       .send({
         occupation: 'Docente',
-        // DX-153: DEPRECADO y de solo lectura: se descarta sin error.
-        insurerEps: 'Sura',
         maritalStatus: 'Casado',
         physicianName: 'Dra. Ruiz',
         physicianPhone: '+57 300 000 0000',
@@ -191,7 +189,6 @@ describe('Patients (e2e)', () => {
       .expect(200);
     const admin = patchAdmin.body as Record<string, unknown>;
     expect(admin.occupation).toBe('Docente');
-    expect(admin.insurerEps).toBeNull();
     expect(admin.emergencyContactName).toBe('Ana Pérez');
     expect(admin.guardianName).toBeNull();
     expect(admin.guardianDocNumber).toBeNull();
@@ -210,8 +207,61 @@ describe('Patients (e2e)', () => {
     // birthDate era el caso peligroso: `new Date(null)` da 1970-01-01, así que
     // un null mal manejado escribía una fecha falsa en vez de vaciar.
     expect(cleared.birthDate).toBeNull();
-    // Lo omitido no se toca (y `insurerEps` sigue como estaba: nunca se escribe).
-    expect(cleared.insurerEps).toBeNull();
+  });
+
+  describe('DX-322 fase 1: el texto libre de aseguradora anterior a DX-153', () => {
+    let clinic: { tenantId: string; accessToken: string; subdomain: string };
+    let patientId: string;
+
+    beforeAll(async () => {
+      clinic = await registerAndLogin(app, {
+        clinicName: 'Clinica DX322',
+        subdomain: 'clinica-dx322',
+        email: 'owner@clinica-dx322.com',
+      });
+      patientId = (
+        await raw.patient.create({
+          data: {
+            tenantId: clinic.tenantId,
+            firstName: 'Legada',
+            lastName: 'DX322',
+          },
+        })
+      ).id;
+      // La columna sigue en la BD hasta la fase 2; el cliente Prisma ya no la
+      // ve, así que se siembra en crudo.
+      await raw.$executeRaw`
+        UPDATE patients SET "insurerEps" = 'Texto anterior' WHERE id = ${patientId}::uuid`;
+    });
+
+    function insurerEpsInDb(): Promise<{ insurerEps: string | null }[]> {
+      return raw.$queryRaw`
+        SELECT "insurerEps" FROM patients WHERE id = ${patientId}::uuid`;
+    }
+
+    it('GET /patients/:id has no insurerEps key', async () => {
+      const res = await request(app.getHttpServer())
+        .get(`/api/v1/patients/${patientId}`)
+        .set('X-Tenant-Host', hostFor(clinic.subdomain))
+        .set('Authorization', `Bearer ${clinic.accessToken}`)
+        .expect(200);
+      expect(res.body).not.toHaveProperty('insurerEps');
+    });
+
+    it('PATCH with insurerEps is 200 and ignored', async () => {
+      const res = await request(app.getHttpServer())
+        .patch(`/api/v1/patients/${patientId}`)
+        .set('X-Tenant-Host', hostFor(clinic.subdomain))
+        .set('Authorization', `Bearer ${clinic.accessToken}`)
+        .send({ occupation: 'Docente', insurerEps: 'Sura' })
+        .expect(200);
+      const body = res.body as Record<string, unknown>;
+      expect(body.occupation).toBe('Docente');
+      expect(body).not.toHaveProperty('insurerEps');
+      expect(await insurerEpsInDb()).toEqual([
+        { insurerEps: 'Texto anterior' },
+      ]);
+    });
   });
 
   it('rejects null on columns that are NOT NULL, with 400 instead of a 500', async () => {
