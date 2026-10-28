@@ -76,7 +76,7 @@ function belowThousand(n: number): string {
 
 /**
  * Cardinal en español de 1 a 9999, como se escribe la cantidad total de una
- * receta en letras (Dec. 780/2016, CO): 21 → «veintiuno», 1500 → «mil
+ * receta en letras cuando la clínica lo pide: 21 → «veintiuno», 1500 → «mil
  * quinientos». La forma es la del número suelto, que es como se imprime entre
  * paréntesis junto a la cifra: «21 (veintiuno) cápsulas».
  */

@@ -163,6 +163,12 @@ const COUNTRY_FREE = [
   // DX-316: el calendario de la sede y su cargador (I4).
   join(SRC, 'shared', 'locations', 'location-business-calendar.ts'),
   ...tsFiles(join(SRC, 'modules', 'location-calendar')).filter(isProduction),
+  // DX-324: la receta única no se razona por país (spec R1).
+  ...[
+    'prescription-rules.ts',
+    'prescription-settings.ts',
+    'patient-snapshot.ts',
+  ].map((file) => join(SRC, 'modules', 'prescriptions', 'domain', file)),
 ];
 
 describe('formato regional y reloj solo desde el helper (G1-B, I5)', () => {
@@ -264,5 +270,77 @@ describe('formato regional y reloj solo desde el helper (G1-B, I5)', () => {
         /country/i.test(line),
       ),
     ).toEqual([]);
+  });
+});
+
+/**
+ * DX-324 (spec §6.10, R12, R14): el módulo de recetas no nombra una regla
+ * nacional. Fuera quedan las excepciones legadas con nombre (R12) y, hasta la
+ * Task 4, los tres ficheros que aún llevan los textos por país.
+ */
+const NATIONAL_RULE = new RegExp(
+  [
+    'colegiado',
+    'DNI\\/NIE',
+    'AEMPS',
+    'CIMA',
+    'Decreto',
+    'Dec\\. 780',
+    'RD 1718',
+    'Espa' + 'ña',
+    'Colom' + 'bia',
+  ].join('|'),
+);
+const PRESCRIPTIONS = join(SRC, 'modules', 'prescriptions');
+const LEGACY_PRESCRIPTION_FILES = [
+  join(PRESCRIPTIONS, 'domain', 'legacy-prescription.ts'),
+  join(PRESCRIPTIONS, 'domain', 'prescription-hash.ts'),
+];
+// TODO(T4): fuera de esta lista cuando la Task 4 los deja sin país.
+const NATIONAL_TEXT_UNTIL_T4 = [
+  join(PRESCRIPTIONS, 'application', 'use-cases', 'prescriptions.use-cases.ts'),
+  join(PRESCRIPTIONS, 'presentation', 'dto', 'issue-prescription.dto.ts'),
+  join(PRESCRIPTIONS, 'presentation', 'dto', 'prescription.dto.ts'),
+];
+
+describe('receta sin reglas nacionales (DX-324)', () => {
+  it('architecture: prescriptions module names no national rule', () => {
+    const files = tsFiles(PRESCRIPTIONS).filter(
+      (file) =>
+        isProduction(file) &&
+        !LEGACY_PRESCRIPTION_FILES.includes(file) &&
+        !NATIONAL_TEXT_UNTIL_T4.includes(file),
+    );
+    expect(files.length).toBeGreaterThan(10);
+    expect(offending(files, (line) => NATIONAL_RULE.test(line))).toEqual([]);
+  });
+
+  it('the national-rule pattern catches each term and skips neutral text', () => {
+    for (const line of [
+      "'Falta tu número de colegiado'",
+      "'Falta el DNI/NIE del paciente'",
+      '// ficha técnica de la AEMPS',
+      'cimaTechnicalSheetUrl: CIMA',
+      ' * Decreto 780',
+      ' * (Dec. 780/2016)',
+      ' * RD 1718/2010',
+      "'En " + 'Espa' + "ña cada receta'",
+      "'Las sedes son de " + 'Colom' + "bia'",
+    ]) {
+      expect({ line, caught: NATIONAL_RULE.test(line) }).toEqual({
+        line,
+        caught: true,
+      });
+    }
+    for (const line of [
+      "'Falta tu número de registro profesional'",
+      "'Falta el número de historia clínica'",
+      'const decree = 1;',
+    ]) {
+      expect({ line, caught: NATIONAL_RULE.test(line) }).toEqual({
+        line,
+        caught: false,
+      });
+    }
   });
 });

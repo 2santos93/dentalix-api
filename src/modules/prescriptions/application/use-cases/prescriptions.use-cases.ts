@@ -31,7 +31,6 @@ import {
 import {
   computeValidUntil,
   MAX_PRESCRIPTION_ITEMS,
-  PRESCRIPTION_VALIDITY_DAYS,
   validatePrescription,
   type PrescriptionItemInput,
 } from '../../domain/prescription-rules';
@@ -143,6 +142,64 @@ function resolveDispensationDate(
   return requested;
 }
 
+/**
+ * TODO(T4): parche que conserva, hasta la Task 4, lo que cada país de la sede
+ * exigía antes de las reglas únicas (pre-flight M11): así este commit no
+ * cambia el comportamiento. La Task 4 lo borra junto con `country`.
+ */
+const LICENSE_MISSING = 'Falta tu número de registro profesional';
+
+export function validateByLocationCountryUntilT4(
+  country: ClinicCountry,
+  input: {
+    items: readonly PrescriptionItemInput[];
+    patient: { docNumber: string | null; birthDate: Date | null };
+    professionalLicense: string | null | undefined;
+  },
+): string[] {
+  const errors = validatePrescription({
+    items: input.items,
+    patient: { docNumber: input.patient.docNumber },
+    professionalLicense: input.professionalLicense,
+    requireClinicalRecordNumber: country === ClinicCountry.CO,
+  });
+  const { length } = input.items;
+  if (length === 0 || length > MAX_PRESCRIPTION_ITEMS) return errors;
+  if (country === ClinicCountry.CO) {
+    return errors.map((error) =>
+      error === LICENSE_MISSING ? 'Falta tu registro profesional' : error,
+    );
+  }
+  if (length > 1) {
+    return [
+      'En España cada receta lleva un solo medicamento: emite una receta por medicamento',
+    ];
+  }
+  const legacy = errors.filter((error) => error !== LICENSE_MISSING);
+  if (input.items[0].packages == null) {
+    legacy.push('Medicamento 1: falta el número de envases');
+  }
+  if (trimmedOrNull(input.patient.docNumber) === null) {
+    legacy.push('Falta el DNI/NIE del paciente: regístralo en sus datos');
+  }
+  if (!input.patient.birthDate) {
+    legacy.push(
+      'Falta el año de nacimiento del paciente: registra su fecha de nacimiento',
+    );
+  }
+  if (errors.includes(LICENSE_MISSING)) {
+    legacy.push('Falta tu número de colegiado');
+  }
+  return legacy;
+}
+
+/** TODO(T4): la validez sale del ajuste de la clínica en la Task 4. */
+export function validityDaysByLocationCountryUntilT4(
+  country: ClinicCountry,
+): number {
+  return country === ClinicCountry.ES ? 10 : 30;
+}
+
 function patientDocument(
   country: ClinicCountry,
   patient: PrescriptionPatient,
@@ -225,7 +282,7 @@ export class GetPrescriptionIssuerUseCase {
       clinicName: issuer.clinicName,
       professionalName: issuer.professional.name,
       professionalLicense: issuer.professional.license,
-      validityDays: PRESCRIPTION_VALIDITY_DAYS[country],
+      validityDays: validityDaysByLocationCountryUntilT4(country),
       maxItems: country === ClinicCountry.ES ? 1 : MAX_PRESCRIPTION_ITEMS,
     };
   }
@@ -266,7 +323,7 @@ export class IssuePrescriptionUseCase {
       : trimmedOrNull(input.professionalLicense);
     const license = issuer.professional.license ?? providedLicense;
 
-    const errors = validatePrescription(country, {
+    const errors = validateByLocationCountryUntilT4(country, {
       items: input.items,
       patient: { docNumber: patient.docNumber, birthDate: patient.birthDate },
       professionalLicense: license,
@@ -312,7 +369,10 @@ export class IssuePrescriptionUseCase {
       country,
       issuedAt,
       dispensationDate,
-      validUntil: computeValidUntil(country, dispensationDate),
+      validUntil: computeValidUntil(
+        dispensationDate,
+        validityDaysByLocationCountryUntilT4(country),
+      ),
       patientId: patient.id,
       patientName: `${patient.firstName} ${patient.lastName}`,
       patientDocument: patientDocument(country, patient),

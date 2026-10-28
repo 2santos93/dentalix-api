@@ -1,15 +1,15 @@
-import { ClinicCountry } from '@prisma/client';
+import { addCivilDays } from '../../../shared/time/civil-day';
 
 /**
- * Reglas legales de la receta por país (DX-013).
- *
- * - CO (Dec. 780/2016, art. 2.5.3.10.16): por medicamento, DCI, concentración,
- *   forma farmacéutica, vía, dosis, frecuencia, duración y cantidad total (que
- *   se imprime también en letras); nº de historia clínica del paciente y
- *   registro profesional del prescriptor.
- * - ES (RD 1718/2010, art. 3): lo anterior más nº de envases, DNI/NIE y año de
- *   nacimiento del paciente y nº de colegiado; una receta por medicamento y
- *   validez de 10 días naturales desde la fecha prevista de dispensación.
+ * Reglas de la receta única (DX-324, spec R2–R4), iguales en toda clínica y
+ * sede:
+ * - por medicamento, principio activo, concentración, forma farmacéutica, vía,
+ *   dosis, frecuencia, duración (1–365), cantidad total (1–9999) y su unidad;
+ *   los envases son opcionales (1–99);
+ * - de 1 a `MAX_PRESCRIPTION_ITEMS` medicamentos;
+ * - el nº de registro profesional de quien prescribe;
+ * - el documento del paciente, solo si la clínica exige el nº de historia
+ *   clínica.
  *
  * Devuelve TODOS los fallos (en español, listos para el 400), no solo el
  * primero, para que el profesional los corrija de una vez.
@@ -30,26 +30,15 @@ export interface PrescriptionItemInput {
   instructions?: string | null;
 }
 
-export interface PrescriptionPatientFacts {
-  docNumber: string | null;
-  birthDate: Date | null;
-}
-
 export interface PrescriptionValidationInput {
   items: readonly PrescriptionItemInput[];
-  patient: PrescriptionPatientFacts;
+  patient: { docNumber: string | null };
   professionalLicense: string | null | undefined;
+  /** Ajuste de la clínica: exige el documento del paciente (nº de HC). */
+  requireClinicalRecordNumber: boolean;
 }
 
 export const MAX_PRESCRIPTION_ITEMS = 10;
-
-/** Días naturales de validez, contando el día de inicio. */
-export const PRESCRIPTION_VALIDITY_DAYS: Record<ClinicCountry, number> = {
-  // Dec. 780 exige indicar la vigencia sin fijar el plazo: convención de 30 días.
-  CO: 30,
-  // RD 1718/2010: 10 días naturales desde la fecha prevista de dispensación.
-  ES: 10,
-};
 
 const TEXT_FIELDS: readonly [keyof PrescriptionItemInput, string][] = [
   ['activeIngredient', 'el principio activo (DCI)'],
@@ -68,11 +57,7 @@ function intInRange(value: number, min: number, max: number): boolean {
   return Number.isInteger(value) && value >= min && value <= max;
 }
 
-function itemErrors(
-  country: ClinicCountry,
-  item: PrescriptionItemInput,
-  n: number,
-): string[] {
+function itemErrors(item: PrescriptionItemInput, n: number): string[] {
   const errors: string[] = [];
   const missing = (what: string) =>
     errors.push(`Medicamento ${n}: falta ${what}`);
@@ -96,9 +81,7 @@ function itemErrors(
   if (blank(item.quantityUnit)) {
     missing('la unidad de la cantidad (p. ej. tabletas)');
   }
-  if (item.packages == null) {
-    if (country === ClinicCountry.ES) missing('el número de envases');
-  } else if (!intInRange(item.packages, 1, 99)) {
+  if (item.packages != null && !intInRange(item.packages, 1, 99)) {
     errors.push(
       `Medicamento ${n}: el número de envases debe ser un entero entre 1 y 99`,
     );
@@ -107,7 +90,6 @@ function itemErrors(
 }
 
 export function validatePrescription(
-  country: ClinicCountry,
   input: PrescriptionValidationInput,
 ): string[] {
   if (input.items.length === 0) {
@@ -118,50 +100,26 @@ export function validatePrescription(
       `Una receta admite como mucho ${MAX_PRESCRIPTION_ITEMS} medicamentos`,
     ];
   }
-  if (country === ClinicCountry.ES && input.items.length > 1) {
-    return [
-      'En España cada receta lleva un solo medicamento: emite una receta por medicamento',
-    ];
+
+  const errors = input.items.flatMap((item, i) => itemErrors(item, i + 1));
+  if (input.requireClinicalRecordNumber && blank(input.patient.docNumber)) {
+    errors.push(
+      'Falta el número de historia clínica: registra el documento del paciente en sus datos',
+    );
   }
-
-  const errors = input.items.flatMap((item, i) =>
-    itemErrors(country, item, i + 1),
-  );
-
-  const { docNumber, birthDate } = input.patient;
-  if (country === ClinicCountry.CO) {
-    if (blank(docNumber)) {
-      errors.push(
-        'Falta el número de historia clínica: registra el documento del paciente en sus datos',
-      );
-    }
-    if (blank(input.professionalLicense)) {
-      errors.push('Falta tu registro profesional');
-    }
-  } else {
-    if (blank(docNumber)) {
-      errors.push('Falta el DNI/NIE del paciente: regístralo en sus datos');
-    }
-    if (!birthDate) {
-      errors.push(
-        'Falta el año de nacimiento del paciente: registra su fecha de nacimiento',
-      );
-    }
-    if (blank(input.professionalLicense)) {
-      errors.push('Falta tu número de colegiado');
-    }
+  if (blank(input.professionalLicense)) {
+    errors.push('Falta tu número de registro profesional');
   }
   return errors;
 }
 
-/** `YYYY-MM-DD` + (validez − 1) días: el último día en que la receta vale. */
+/**
+ * `YYYY-MM-DD` + (validez − 1) días civiles: el último día en que la receta
+ * vale, contando el de inicio (spec R6).
+ */
 export function computeValidUntil(
-  country: ClinicCountry,
   startDate: string,
+  validityDays: number,
 ): string {
-  const start = new Date(`${startDate}T00:00:00.000Z`);
-  start.setUTCDate(
-    start.getUTCDate() + PRESCRIPTION_VALIDITY_DAYS[country] - 1,
-  );
-  return start.toISOString().slice(0, 10);
+  return addCivilDays(startDate, validityDays - 1);
 }

@@ -1,6 +1,10 @@
+/**
+ * Excepción G5.3 (DX-334): recetas emitidas antes de DX-324. Los formatos v1 y
+ * v2 sellan el país de la plantilla legada; la v3 (receta única) no lo lleva.
+ */
 import { createHash } from 'node:crypto';
-import type { ClinicCountry } from '@prisma/client';
 import type { AllergyMatch } from './allergy-match';
+import type { LegacyPrescriptionCountry } from './legacy-prescription';
 import type { SafetyAlert } from './prescription-safety';
 
 export interface PrescriptionItemContent {
@@ -22,7 +26,8 @@ export interface PrescriptionItemContent {
 
 /** Todo lo que la receta EMITIDA afirma; el hash lo sella. */
 export interface PrescriptionHashInput {
-  country: ClinicCountry;
+  /** En fase 1 la receta única lo sigue escribiendo; solo lo sellan v1 y v2. */
+  country: LegacyPrescriptionCountry;
   issuedAt: Date;
   dispensationDate: string;
   validUntil: string;
@@ -50,6 +55,26 @@ export interface PrescriptionHashInput {
   safetyAlerts: SafetyAlert[] | null;
   safetyOverrideReason: string | null;
   items: PrescriptionItemContent[];
+  /**
+   * DX-324: campos de la receta única, OPCIONALES para que las llamadas v1/v2
+   * compilen sin tocarlas y sus hashes no cambien ni un byte (pre-flight I2).
+   * Solo los lee la v3, con `?? null`. Ausente o `false` = receta legada.
+   */
+  singleFormat?: boolean;
+  printQuantityInWords?: boolean | null;
+  professionalSpecialty?: string | null;
+  patientAgeYears?: number | null;
+  patientWeightKg?: number | null;
+}
+
+/**
+ * Peso de la foto, redondeado a 0,1 kg ANTES de sellar, sobre el valor binario
+ * exacto: 72,55 es en realidad 72,5499… (×10 = 725,4999…), así que queda en
+ * 72,5, y así se guarda y se sella. `Math.round(kg * 10)` daría 72,6, porque
+ * la multiplicación ya redondea a 725,5.
+ */
+export function roundWeightKg(kg: number): number {
+  return Number(kg.toFixed(1));
 }
 
 /**
@@ -60,6 +85,16 @@ export interface PrescriptionHashInput {
  * motivo) NO entra: anular no altera lo que se prescribió.
  */
 export function computePrescriptionHash(input: PrescriptionHashInput): string {
+  const canonical = JSON.stringify(
+    input.singleFormat === true
+      ? singleFormatFields(input)
+      : legacyFields(input),
+  );
+  return createHash('sha256').update(canonical, 'utf8').digest('hex');
+}
+
+/** v1 o v2, exactamente como antes de DX-324: con país y sin campos nuevos. */
+function legacyFields(input: PrescriptionHashInput): unknown[] {
   const fields = [
     input.country,
     input.issuedAt.toISOString(),
@@ -99,23 +134,82 @@ export function computePrescriptionHash(input: PrescriptionHashInput): string {
   ];
   // v1 (DX-013) intacto para las recetas emitidas antes de DX-300; v2 añade
   // al final versión de reglas, avisos y motivo de la confirmación.
-  const canonical = JSON.stringify(
-    input.safetyAlerts === null
-      ? ['dentalix-prescription-v1', ...fields]
-      : [
-          'dentalix-prescription-v2',
-          ...fields,
-          input.safetyRulesVersion,
-          input.safetyAlerts.map((a) => [
-            a.rule,
-            a.code,
-            a.severity,
-            a.activeIngredient,
-            a.message,
-            a.source,
-          ]),
-          input.safetyOverrideReason,
-        ],
-  );
-  return createHash('sha256').update(canonical, 'utf8').digest('hex');
+  return input.safetyAlerts === null
+    ? ['dentalix-prescription-v1', ...fields]
+    : [
+        'dentalix-prescription-v2',
+        ...fields,
+        input.safetyRulesVersion,
+        safetyAlertFields(input.safetyAlerts),
+        input.safetyOverrideReason,
+      ];
+}
+
+function safetyAlertFields(alerts: SafetyAlert[]): unknown[] {
+  return alerts.map((a) => [
+    a.rule,
+    a.code,
+    a.severity,
+    a.activeIngredient,
+    a.message,
+    a.source,
+  ]);
+}
+
+/**
+ * v3 (DX-324, spec §3.3): la receta única. Sin país, y las letras solo si la
+ * foto dice que se imprimen, así que dejar de escribirlas (fase 2) no cambia
+ * ningún hash v3. Siempre lleva avisos de seguridad (aunque sea `[]`).
+ */
+function singleFormatFields(input: PrescriptionHashInput): unknown[] {
+  if (input.safetyAlerts === null) {
+    throw new Error(
+      'Una receta única se sella siempre con sus avisos de seguridad',
+    );
+  }
+  const printQuantityInWords = input.printQuantityInWords ?? null;
+  return [
+    'dentalix-prescription-v3',
+    input.issuedAt.toISOString(),
+    input.dispensationDate,
+    input.validUntil,
+    input.patientId,
+    input.patientName,
+    input.patientDocument,
+    input.patientBirthYear,
+    input.patientAgeYears ?? null,
+    input.patientWeightKg ?? null,
+    input.clinicalRecordNumber,
+    input.professionalId,
+    input.professionalName,
+    input.professionalLicense,
+    input.professionalSpecialty ?? null,
+    input.professionalEmail,
+    input.clinicName,
+    input.locationName,
+    input.locationAddress,
+    input.notes,
+    input.allergyOverride,
+    printQuantityInWords,
+    input.allergyMatches.map((m) => [m.activeIngredient, m.allergen]),
+    input.items.map((i) => [
+      i.position,
+      i.activeIngredient,
+      i.brandName,
+      i.concentration,
+      i.pharmaceuticalForm,
+      i.route,
+      i.dose,
+      i.frequency,
+      i.durationDays,
+      i.totalQuantity,
+      i.quantityUnit,
+      printQuantityInWords ? i.quantityInWords : null,
+      i.packages,
+      i.instructions,
+    ]),
+    input.safetyRulesVersion,
+    safetyAlertFields(input.safetyAlerts),
+    input.safetyOverrideReason,
+  ];
 }

@@ -1,6 +1,6 @@
 import { quantityInWords } from './quantity-in-words';
 
-describe('quantityInWords (cantidad total en letras, CO)', () => {
+describe('quantityInWords (cantidad total en letras)', () => {
   it.each([
     [1, 'uno'],
     [7, 'siete'],
