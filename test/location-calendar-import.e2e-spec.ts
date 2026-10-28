@@ -364,6 +364,23 @@ describe('Calendario de la sede: importar festivos (e2e, DX-316)', () => {
       expect(await holidaysOf(id)).toHaveLength(1);
     });
 
+    it('preview gives exactly the rows and counts that the import then gives', async () => {
+      const id = await newLocation();
+      await addHoliday(id, { date: '2027-11-08', name: 'Existente' });
+      await addHoliday(id, {
+        date: '2001-07-20',
+        name: 'Cada año',
+        recurring: true,
+      });
+      const file = csv(...MIXED, '2027-07-20,Sobre recurrente,');
+      const preview = (await previewFile(id, file, 'f.csv'))
+        .body as ImportResult;
+      const imported = (await importFile(id, file, 'f.csv'))
+        .body as ImportResult;
+      expect(preview.dryRun).toBe(true);
+      expect(imported).toEqual({ ...preview, dryRun: false });
+    });
+
     it('import order does not change the classification', async () => {
       const id = await newLocation();
       await addHoliday(id, { date: '2027-11-08', name: 'Existente' });
@@ -469,6 +486,20 @@ describe('Calendario de la sede: importar festivos (e2e, DX-316)', () => {
           message: 'El archivo está vacío.',
         });
       }
+    });
+
+    it('two file parts are 400 «Solo se admite un archivo por subida.»', async () => {
+      const id = await newLocation();
+      const res = await auth(
+        request(server()).post(
+          `/api/v1/locations/${id}/holidays/import/preview`,
+        ),
+      )
+        .attach('file', ICS_A, { filename: 'a.ics' })
+        .attach('file', ICS_A, { filename: 'b.ics' });
+      expect(res.status).toBe(400);
+      expect(message(res)).toBe('Solo se admite un archivo por subida.');
+      expect(await holidaysOf(id)).toEqual([]);
     });
 
     it('no file is 400 «Falta el archivo.»; another field name is the multer text in Spanish', async () => {
@@ -589,7 +620,9 @@ describe('Calendario de la sede: importar festivos (e2e, DX-316)', () => {
       await upload(id, ICS_A, 'f.ics').expect(200);
     });
 
-    it('a malformed location id is 400 and another clinic location is 404', async () => {
+    // El caso de otra clínica (B → 404 sin tocar nada de A) está en
+    // tenant-isolation-matrix.e2e-spec.ts, en las dos rutas.
+    it('a malformed location id is 400 and an unknown location id is 404', async () => {
       const bad = await upload('no-es-un-id', ICS_A, 'f.ics');
       expect(bad.status).toBe(400);
       expect((bad.body as { message: string }).message).toBe(

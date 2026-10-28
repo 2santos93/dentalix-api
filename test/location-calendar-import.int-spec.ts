@@ -226,4 +226,69 @@ describe('importar festivos bajo concurrencia (int, DX-316)', () => {
     });
     expect(await liveCount(locationId)).toBe(998);
   });
+  it('a NEW row whose INSERT a writer outside the lock beat is DUPLICATE, not NEW (no id → DUPLICATE)', async () => {
+    const locationId = await seedLocation('Sede escritor por fuera');
+    const inserted = gate<string>();
+    const release = gate();
+    // Un escritor que no pasa por `withLockedCalendar` (owner, sin bloqueo)
+    // deja sin confirmar el mismo puntual que trae el fichero. La importación
+    // lo clasifica como NEW; su INSERT espera al índice único y, al confirmar
+    // el otro, ON CONFLICT DO NOTHING no devuelve su id.
+    const bypass = raw.$transaction(
+      async (tx) => {
+        await tx.$executeRaw`
+          INSERT INTO "location_holidays"
+            ("id", "tenantId", "locationId", "date", "name", "recurring", "updatedAt")
+          VALUES (${randomUUID()}::uuid, ${tenantId}::uuid, ${locationId}::uuid,
+                  DATE '2027-05-03', 'Por fuera', false, now())`;
+        inserted.open(await transactionId(tx));
+        await release.wait;
+      },
+      { timeout: 20_000 },
+    );
+    const xid = await Promise.race([
+      inserted.wait,
+      bypass.then(() => {
+        throw new Error('el escritor terminó sin insertar');
+      }),
+    ]);
+    const contender = settle(
+      asTenant(() =>
+        importHolidays.execute(
+          locationId,
+          csvUpload(
+            'f.csv',
+            'fecha,nombre',
+            '2027-05-03,Del fichero',
+            '2027-05-04,Otro',
+          ),
+          { dryRun: false },
+        ),
+      ),
+    );
+    try {
+      await waitForTransactionWaiters(raw, xid);
+    } finally {
+      release.open();
+    }
+    await bypass;
+    const outcome = await contender;
+    if (outcome.status === 'rejected') throw outcome.reason;
+    expect(outcome.value.counts).toEqual({ new: 1, duplicate: 1, error: 0 });
+    expect(
+      outcome.value.rows.map((r) => [r.line, r.status, r.message]),
+    ).toEqual([
+      [2, 'DUPLICATE', 'Ya existe: «Por fuera».'],
+      [3, 'NEW', null],
+    ]);
+    expect(
+      (
+        await raw.locationHoliday.findMany({
+          where: { locationId, deletedAt: null },
+          select: { name: true },
+          orderBy: { date: 'asc' },
+        })
+      ).map((h) => h.name),
+    ).toEqual(['Por fuera', 'Otro']);
+  });
 });
