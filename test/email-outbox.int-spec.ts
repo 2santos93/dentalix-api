@@ -10,6 +10,8 @@ import { EmailOutbox } from '../src/modules/notifications/email/application/emai
 import { ConsoleMailer } from '../src/modules/notifications/email/infrastructure/mailers/console.mailer';
 import type { Mailer } from '../src/modules/notifications/email/domain/ports/mailer.port';
 import type { MailConfig } from '../src/modules/notifications/email/infrastructure/mail-config';
+import { EMAIL_TEMPLATES } from '../src/modules/notifications/email/domain/email-message';
+import { EmailQuotaExceededError } from '../src/modules/notifications/email/domain/email-quota-exceeded.error';
 
 // DX-088, capa de BD: email_outbox contra Postgres. RLS por clínica, las
 // funciones SECURITY DEFINER del despachador (reclamar con SKIP LOCKED,
@@ -589,10 +591,50 @@ describe('DX-088 · email_outbox en la BD (int)', () => {
     ]);
   });
 
+  it('cada EmailTemplateName es una etiqueta del enum "EmailTemplate" de la BD, y al revés (el INSERT crudo lo castea tal cual, DX-355)', async () => {
+    const rows = await owner.$queryRaw<{ label: string }[]>`
+      SELECT unnest(enum_range(NULL::"EmailTemplate"))::text AS label`;
+    expect(rows.map((r) => r.label).sort()).toEqual(
+      [...EMAIL_TEMPLATES].sort(),
+    );
+  });
+
   describe('DX-355 · la hora del envío la pone la BD, no el reloj de la API', () => {
     afterEach(() => {
       jest.useRealTimers();
     });
+
+    it.each([
+      ['adelantado 1 h', HOUR],
+      ['atrasado 1 h', -HOUR],
+    ])(
+      'con el reloj de la API %s, el enfriamiento por destinatario se cuenta con la hora de la BD',
+      async (_label, offsetMs) => {
+        const strict = services(new ConsoleMailer(), {
+          quotas: {
+            tenantDaily: 1000,
+            recipientDaily: 1000,
+            recipientCooldownSeconds: 60,
+          },
+        });
+        await strict.dispatcher.onModuleDestroy();
+        await owner.emailOutbox.deleteMany({ where: { tenantId: tenantB } });
+        skewAppClock(offsetMs);
+        await strict.outbox.enqueue(invitation(tenantB));
+
+        const error = await strict.outbox
+          .assertWithinQuota(tenantB, EMAIL)
+          .then(
+            () => null,
+            (e: unknown) => e,
+          );
+        expect(error).toBeInstanceOf(EmailQuotaExceededError);
+        // Recién enviado: quedan ~60 s, ni 0 ni 60 + 3600.
+        const wait = (error as EmailQuotaExceededError).retryAfterSeconds;
+        expect(wait).toBeGreaterThanOrEqual(58);
+        expect(wait).toBeLessThanOrEqual(60);
+      },
+    );
 
     it.each([
       ['adelantado 1 h', HOUR],

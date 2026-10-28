@@ -154,24 +154,36 @@ export class PrismaEmailOutboxRepository implements EmailOutboxRepository {
   async recentSends(
     tenantId: string,
     toHash: string,
-    since: Date,
   ): Promise<{
     tenant: number;
     recipient: number;
-    lastToRecipient: Date | null;
+    secondsSinceLastToRecipient: number | null;
   }> {
-    return this.prisma.runWithTenant(tenantId, async (tx) => {
-      const [tenant, recipient, last] = await Promise.all([
-        tx.emailOutbox.count({ where: { createdAt: { gte: since } } }),
-        tx.emailOutbox.count({ where: { toHash, createdAt: { gte: since } } }),
-        tx.emailOutbox.findFirst({
-          where: { toHash },
-          orderBy: { createdAt: 'desc' },
-          select: { createdAt: true },
-        }),
-      ]);
-      return { tenant, recipient, lastToRecipient: last?.createdAt ?? null };
-    });
+    // Como email_outbox_platform_allowed: ventana y enfriamiento contra NOW,
+    // el reloj que puso "createdAt". Índices (tenantId, createdAt DESC) y
+    // (tenantId, toHash, createdAt DESC).
+    const [sends] = await this.prisma.runWithTenant(
+      tenantId,
+      (tx) => tx.$queryRaw<
+        {
+          tenant: number;
+          recipient: number;
+          secondsSinceLastToRecipient: number | null;
+        }[]
+      >`
+        SELECT
+          (SELECT count(*)::int FROM "email_outbox"
+            WHERE "tenantId" = ${tenantId}::uuid
+              AND "createdAt" >= ${NOW} - interval '24 hours') AS "tenant",
+          (SELECT count(*)::int FROM "email_outbox"
+            WHERE "tenantId" = ${tenantId}::uuid AND "toHash" = ${toHash}
+              AND "createdAt" >= ${NOW} - interval '24 hours') AS "recipient",
+          (SELECT extract(epoch FROM ${NOW} - max("createdAt"))::float8
+             FROM "email_outbox"
+            WHERE "tenantId" = ${tenantId}::uuid AND "toHash" = ${toHash})
+            AS "secondsSinceLastToRecipient"`,
+    );
+    return sends;
   }
 
   /**

@@ -155,12 +155,13 @@ export class InMemoryEmailOutboxRepository implements EmailOutboxRepository {
   recentSends(
     tenantId: string,
     toHash: string,
-    since: Date,
   ): Promise<{
     tenant: number;
     recipient: number;
-    lastToRecipient: Date | null;
+    secondsSinceLastToRecipient: number | null;
   }> {
+    const now = Date.now();
+    const since = new Date(now - 24 * 60 * 60 * 1000);
     const ofTenant = this.rows.filter((r) => r.tenantId === tenantId);
     const toRecipient = ofTenant.filter((r) => r.toHash === toHash);
     const last = toRecipient.reduce<Date | null>(
@@ -170,7 +171,7 @@ export class InMemoryEmailOutboxRepository implements EmailOutboxRepository {
     return Promise.resolve({
       tenant: ofTenant.filter((r) => r.createdAt >= since).length,
       recipient: toRecipient.filter((r) => r.createdAt >= since).length,
-      lastToRecipient: last,
+      secondsSinceLastToRecipient: last ? (now - last.getTime()) / 1000 : null,
     });
   }
 

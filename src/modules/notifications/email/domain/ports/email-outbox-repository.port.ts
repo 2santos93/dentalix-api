@@ -83,18 +83,18 @@ export interface EmailOutboxRepository {
   ): Promise<boolean>;
 
   /**
-   * Envíos de la clínica creados desde `since` (todos los estados), en total o
-   * solo al destinatario `toHash`, y el más reciente a ese destinatario. Para
-   * los topes anti-abuso.
+   * Envíos de la clínica de las últimas 24 h (todos los estados), en total o
+   * solo al destinatario `toHash`, y los segundos desde el más reciente a ese
+   * destinatario. Para los topes anti-abuso. Las 24 h y los segundos se
+   * cuentan con el reloj de la BD, el mismo que fija "createdAt" (DX-355).
    */
   recentSends(
     tenantId: string,
     toHash: string,
-    since: Date,
   ): Promise<{
     tenant: number;
     recipient: number;
-    lastToRecipient: Date | null;
+    secondsSinceLastToRecipient: number | null;
   }>;
 
   /**
