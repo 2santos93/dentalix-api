@@ -633,53 +633,61 @@ describe('caja por turno: tablas, RLS e inmutabilidad (int, DX-027)', () => {
       data: payment(a, { locationId: location.id, cashSessionId: original.id }),
     });
     await close(original.id);
-    await raw.$executeRawUnsafe(`CREATE FUNCTION public.dx345_test_void_gate() RETURNS trigger
+    const ready = deferred();
+    const release = deferred();
+    let functionCreated = false;
+    let triggerCreated = false;
+    let gate: Promise<void> | undefined;
+    let gateSettled: Promise<unknown> | undefined;
+    let voidSettled: Promise<unknown> | undefined;
+    let opening: ReturnType<PrismaCashSessionRepository['open']> | undefined;
+    let openingSettled: Promise<unknown> | undefined;
+    try {
+      await raw.$executeRawUnsafe(`CREATE FUNCTION public.dx345_test_void_gate() RETURNS trigger
       LANGUAGE plpgsql AS $$ BEGIN
         IF NEW."paymentId" = '${paid.id}'::uuid AND NEW."kind" = 'VOID' THEN
           PERFORM pg_advisory_xact_lock(345345);
         END IF;
         RETURN NEW;
       END $$`);
-    await raw.$executeRawUnsafe(`CREATE TRIGGER dx345_test_void_gate
+      functionCreated = true;
+      await raw.$executeRawUnsafe(`CREATE TRIGGER dx345_test_void_gate
       BEFORE INSERT ON cash_session_adjustments FOR EACH ROW
       EXECUTE FUNCTION public.dx345_test_void_gate()`);
-    const ready = deferred();
-    const release = deferred();
-    const gate = raw.$transaction(
-      async (tx) => {
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(345345)`;
-        ready.resolve();
-        await release.promise;
-      },
-      { timeout: 10000 },
-    );
-    await ready.promise;
-    let voidPid = 0;
-    const voiding = asA(async (tx) => {
-      const [backend] = await tx.$queryRaw<
-        { pid: number }[]
-      >`SELECT pg_backend_pid() AS pid`;
-      voidPid = backend.pid;
-      await tx.payment.update({
-        where: { id: paid.id },
-        data: {
-          deletedAt: new Date(),
-          voidedAt: new Date(),
-          voidedById: userId,
-          voidReason: 'Abono duplicado',
+      triggerCreated = true;
+      gate = raw.$transaction(
+        async (tx) => {
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(345345)`;
+          ready.resolve();
+          await release.promise;
         },
+        { timeout: 10000 },
+      );
+      gateSettled = Promise.allSettled([gate]);
+      await Promise.race([ready.promise, gate]);
+      let voidPid = 0;
+      const voiding = asA(async (tx) => {
+        const [backend] = await tx.$queryRaw<
+          { pid: number }[]
+        >`SELECT pg_backend_pid() AS pid`;
+        voidPid = backend.pid;
+        await tx.payment.update({
+          where: { id: paid.id },
+          data: {
+            deletedAt: new Date(),
+            voidedAt: new Date(),
+            voidedById: userId,
+            voidReason: 'Abono duplicado',
+          },
+        });
+        await recordVoidAdjustment(tx, {
+          tenantId: a.tenantId,
+          paymentId: paid.id,
+          voidedById: userId,
+        });
       });
-      await recordVoidAdjustment(tx, {
-        tenantId: a.tenantId,
-        paymentId: paid.id,
-        voidedById: userId,
-      });
-    });
-    const voidSettled = Promise.allSettled([voiding]);
-    const repo = new PrismaCashSessionRepository(prisma, tenantContext);
-    let opening: ReturnType<typeof repo.open> | undefined;
-    let openingSettled: Promise<unknown> | undefined;
-    try {
+      voidSettled = Promise.allSettled([voiding]);
+      const repo = new PrismaCashSessionRepository(prisma, tenantContext);
       await waitFor(async () => {
         const rows = await raw.$queryRaw<{ waiting: boolean }[]>`
           SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE pid = ${voidPid} AND wait_event = 'advisory') AS waiting`;
@@ -720,13 +728,17 @@ describe('caja por turno: tablas, RLS e inmutabilidad (int, DX-027)', () => {
       expect(adjustment.amount.toNumber()).toBe(-10000);
     } finally {
       release.resolve();
-      await Promise.allSettled([gate, voidSettled, openingSettled]);
-      await raw.$executeRawUnsafe(
-        'DROP TRIGGER dx345_test_void_gate ON cash_session_adjustments',
-      );
-      await raw.$executeRawUnsafe(
-        'DROP FUNCTION public.dx345_test_void_gate()',
-      );
+      await Promise.allSettled([gateSettled, voidSettled, openingSettled]);
+      if (triggerCreated) {
+        await raw.$executeRawUnsafe(
+          'DROP TRIGGER IF EXISTS dx345_test_void_gate ON cash_session_adjustments',
+        );
+      }
+      if (functionCreated) {
+        await raw.$executeRawUnsafe(
+          'DROP FUNCTION IF EXISTS public.dx345_test_void_gate()',
+        );
+      }
     }
   });
   it('abrir mientras se anula un abono tardío pendiente recoge juntos el positivo y su compensación', async () => {
