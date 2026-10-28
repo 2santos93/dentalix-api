@@ -1,5 +1,9 @@
 import { civilDateIn } from '../../../shared/time/civil-day';
-import { ageForSnapshot, weightForSnapshot } from './patient-snapshot';
+import {
+  ageForSnapshot,
+  roundWeightKg,
+  weightForSnapshot,
+} from './patient-snapshot';
 
 describe('patient snapshot', () => {
   it('an impossible age (future birth date, 1850) snapshots null', () => {
@@ -52,5 +56,14 @@ describe('patient snapshot', () => {
     expect(weightForSnapshot(Number.NaN)).toBeNull();
     expect(weightForSnapshot(Number.POSITIVE_INFINITY)).toBeNull();
     expect(weightForSnapshot(-5)).toBeNull();
+  });
+
+  it('roundWeightKg', () => {
+    // 72,55 es 72,5499… en binario (×10 = 725,4999…), así que redondea a 72,5.
+    // No se «arregla» a 72,6: el peso guardado y el hash de las recetas
+    // emitidas dependen de ello.
+    expect(roundWeightKg(72.55)).toBe(72.5);
+    expect(roundWeightKg(72.56)).toBe(72.6);
+    expect(roundWeightKg(18)).toBe(18);
   });
 });

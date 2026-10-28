@@ -1,6 +1,6 @@
+import { roundWeightKg } from './patient-snapshot';
 import {
   computePrescriptionHash,
-  roundWeightKg,
   type PrescriptionHashInput,
 } from './prescription-hash';
 import type { SafetyAlert } from './prescription-safety';
@@ -279,14 +279,50 @@ describe('computePrescriptionHash', () => {
         computePrescriptionHash({ ...single, safetyAlerts: null }),
       ).toThrow();
     });
+
+    it('v3 without a real printQuantityInWords boolean throws', () => {
+      const { printQuantityInWords: _omitted, ...absent } = single;
+      for (const input of [
+        absent,
+        { ...single, printQuantityInWords: undefined },
+        { ...single, printQuantityInWords: null },
+      ]) {
+        expect(() => computePrescriptionHash(input)).toThrow(
+          'printQuantityInWords',
+        );
+      }
+    });
+
+    it.each([true, false])(
+      'v3 round-trips through the stored row with printQuantityInWords %s',
+      (printQuantityInWords) => {
+        const sealed = { ...single, printQuantityInWords };
+        // Lo que vuelve de la fila: JSON sin `Date`, que el repositorio rehace.
+        const row = JSON.parse(JSON.stringify(sealed)) as PrescriptionHashInput;
+        const read = { ...row, issuedAt: new Date(row.issuedAt) };
+        expect(computePrescriptionHash(read)).toBe(
+          computePrescriptionHash(sealed),
+        );
+        expect(computePrescriptionHash(sealed)).not.toBe(
+          computePrescriptionHash({
+            ...sealed,
+            printQuantityInWords: !printQuantityInWords,
+          }),
+        );
+      },
+    );
+
+    it('a legacy snapshot still hashes with printQuantityInWords absent', () => {
+      expect(
+        computePrescriptionHash({
+          ...storedV2,
+          printQuantityInWords: undefined,
+        }),
+      ).toBe(LEGACY_V2);
+    });
   });
 
-  it('roundWeightKg', () => {
-    // 72,55 es 72,5499… en binario (×10 = 725,4999…), así que redondea a 72,5.
-    // No se «arregla» a 72,6: el peso guardado y el hash de las recetas
-    // emitidas dependen de ello.
+  it('the hash seals the weight rounded by the country-free snapshot helper', () => {
     expect(roundWeightKg(72.55)).toBe(72.5);
-    expect(roundWeightKg(72.56)).toBe(72.6);
-    expect(roundWeightKg(18)).toBe(18);
   });
 });

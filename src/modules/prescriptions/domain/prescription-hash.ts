@@ -7,6 +7,10 @@ import type { AllergyMatch } from './allergy-match';
 import type { LegacyPrescriptionCountry } from './legacy-prescription';
 import type { SafetyAlert } from './prescription-safety';
 
+// El redondeo del peso vive en la foto del paciente, sin país; se reexporta
+// aquí porque es la regla con la que se sella (spec §3.3).
+export { roundWeightKg } from './patient-snapshot';
+
 export interface PrescriptionItemContent {
   position: number;
   activeIngredient: string;
@@ -58,23 +62,15 @@ export interface PrescriptionHashInput {
   /**
    * DX-324: campos de la receta única, OPCIONALES para que las llamadas v1/v2
    * compilen sin tocarlas y sus hashes no cambien ni un byte (pre-flight I2).
-   * Solo los lee la v3, con `?? null`. Ausente o `false` = receta legada.
+   * Solo los lee la v3, con `?? null`, salvo `printQuantityInWords`, que la
+   * v3 exige booleano. `singleFormat` ausente o `false` = receta legada. El
+   * peso llega ya redondeado (`roundWeightKg` de `patient-snapshot.ts`).
    */
   singleFormat?: boolean;
   printQuantityInWords?: boolean | null;
   professionalSpecialty?: string | null;
   patientAgeYears?: number | null;
   patientWeightKg?: number | null;
-}
-
-/**
- * Peso de la foto, redondeado a 0,1 kg ANTES de sellar, sobre el valor binario
- * exacto: 72,55 es en realidad 72,5499… (×10 = 725,4999…), así que queda en
- * 72,5, y así se guarda y se sella. `Math.round(kg * 10)` daría 72,6, porque
- * la multiplicación ya redondea a 725,5.
- */
-export function roundWeightKg(kg: number): number {
-  return Number(kg.toFixed(1));
 }
 
 /**
@@ -167,7 +163,14 @@ function singleFormatFields(input: PrescriptionHashInput): unknown[] {
       'Una receta única se sella siempre con sus avisos de seguridad',
     );
   }
-  const printQuantityInWords = input.printQuantityInWords ?? null;
+  // Nunca `null` por omisión: la fila guarda un booleano, y un hash sellado con
+  // `null` no volvería a validar al leerla.
+  const { printQuantityInWords } = input;
+  if (typeof printQuantityInWords !== 'boolean') {
+    throw new Error(
+      'Una receta única se sella siempre con printQuantityInWords (true o false)',
+    );
+  }
   return [
     'dentalix-prescription-v3',
     input.issuedAt.toISOString(),

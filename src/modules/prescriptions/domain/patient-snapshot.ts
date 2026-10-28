@@ -1,4 +1,3 @@
-import { roundWeightKg } from './prescription-hash';
 import { ageInYears } from './prescription-safety';
 
 /**
@@ -23,6 +22,16 @@ export function ageForSnapshot(
   return Number.isInteger(age) && age >= 0 && age <= MAX_SNAPSHOT_AGE
     ? age
     : null;
+}
+
+/**
+ * Peso de la foto, redondeado a 0,1 kg ANTES de sellar, sobre el valor binario
+ * exacto: 72,55 es en realidad 72,5499… (×10 = 725,4999…), así que queda en
+ * 72,5, y así se guarda y se sella. `Math.round(kg * 10)` daría 72,6, porque
+ * la multiplicación ya redondea a 725,5.
+ */
+export function roundWeightKg(kg: number): number {
+  return Number(kg.toFixed(1));
 }
 
 /** Peso redondeado a 0,1 kg, o `null` si el redondeo queda fuera de `0 < w < 400`. */

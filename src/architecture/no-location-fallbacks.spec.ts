@@ -275,8 +275,10 @@ describe('formato regional y reloj solo desde el helper (G1-B, I5)', () => {
 
 /**
  * DX-324 (spec §6.10, R12, R14): el módulo de recetas no nombra una regla
- * nacional. Fuera quedan las excepciones legadas con nombre (R12) y, hasta la
- * Task 4, los tres ficheros que aún llevan los textos por país.
+ * nacional, en mayúsculas o minúsculas. Fuera queda solo el tipo legado con
+ * nombre (R12) y, hasta la Task 4, los tres ficheros que aún llevan los textos
+ * por país. El hash legado sí se escanea: R12 le deja nombrar el país, no una
+ * regla nacional.
  */
 const NATIONAL_RULE = new RegExp(
   [
@@ -290,11 +292,11 @@ const NATIONAL_RULE = new RegExp(
     'Espa' + 'ña',
     'Colom' + 'bia',
   ].join('|'),
+  'i',
 );
 const PRESCRIPTIONS = join(SRC, 'modules', 'prescriptions');
 const LEGACY_PRESCRIPTION_FILES = [
   join(PRESCRIPTIONS, 'domain', 'legacy-prescription.ts'),
-  join(PRESCRIPTIONS, 'domain', 'prescription-hash.ts'),
 ];
 // TODO(T4): fuera de esta lista cuando la Task 4 los deja sin país.
 const NATIONAL_TEXT_UNTIL_T4 = [
@@ -326,6 +328,9 @@ describe('receta sin reglas nacionales (DX-324)', () => {
       ' * RD 1718/2010',
       "'En " + 'Espa' + "ña cada receta'",
       "'Las sedes son de " + 'Colom' + "bia'",
+      "'falta el dni/nie'",
+      "'clínicas de " + 'colom' + "bia'",
+      "'número de COLEGIADO'",
     ]) {
       expect({ line, caught: NATIONAL_RULE.test(line) }).toEqual({
         line,
