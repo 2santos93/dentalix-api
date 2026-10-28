@@ -4,7 +4,7 @@ import { regionalFormat } from '../../../shared/format/regional-format';
 import * as civilDay from '../../../shared/time/civil-day';
 import { ImportFileError } from '../../patient-imports/domain/tabular-file';
 import { HOLIDAY_MESSAGES, MAX_HOLIDAYS_PER_FILE } from './holiday-rules';
-import { parseIcsHolidays } from './ics-holidays';
+import { looksLikeUtf16, parseIcsHolidays } from './ics-holidays';
 
 const fixture = (name: string) =>
   readFileSync(join(__dirname, '__fixtures__', name));
@@ -853,6 +853,35 @@ describe('parseIcsHolidays (DX-316)', () => {
         );
       },
     );
+
+    describe('UTF-16 (Outlook en Windows, T6 m3)', () => {
+      const text = cal(...vevent(ALL_DAY, NAMED)).toString('utf8');
+      const le = Buffer.from(text, 'utf16le');
+      const be = Buffer.from(le).swap16();
+
+      it.each([
+        ['UTF-16 LE with BOM', Buffer.concat([Buffer.from([0xff, 0xfe]), le])],
+        ['UTF-16 BE with BOM', Buffer.concat([Buffer.from([0xfe, 0xff]), be])],
+        ['UTF-16 LE without BOM', le],
+        ['UTF-16 BE without BOM', be],
+      ])('%s → «El calendario no está en UTF-8.»', (_label, bytes) => {
+        expect(looksLikeUtf16(bytes)).toBe(true);
+        expect(fileMessage(() => parseIcsHolidays(bytes))).toBe(
+          'El calendario no está en UTF-8.',
+        );
+      });
+
+      it('UTF-8, with or without BOM, is not UTF-16', () => {
+        const utf8 = Buffer.from(text, 'utf8');
+        expect(looksLikeUtf16(utf8)).toBe(false);
+        expect(
+          looksLikeUtf16(
+            Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), utf8]),
+          ),
+        ).toBe(false);
+        expect(looksLikeUtf16(Buffer.alloc(0))).toBe(false);
+      });
+    });
 
     describe('500 entries', () => {
       const deDE = regionalFormat({ locale: 'de-DE', hourCycle: 'h23' });

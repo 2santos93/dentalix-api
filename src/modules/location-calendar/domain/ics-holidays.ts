@@ -53,6 +53,9 @@ interface RawEvent {
 type Entry = HolidayCandidate | HolidayRowError;
 
 export function parseIcsHolidays(bytes: Buffer): ParsedHolidayFile {
+  if (looksLikeUtf16(bytes)) {
+    throw new ImportFileError(HOLIDAY_MESSAGES.icsNotUtf8);
+  }
   const candidates: HolidayCandidate[] = [];
   const errors: HolidayRowError[] = [];
   for (const event of topLevelEvents(logicalLines(bytes))) {
@@ -66,6 +69,27 @@ export function parseIcsHolidays(bytes: Buffer): ParsedHolidayFile {
     }
   }
   return { format: 'ICS', candidates, errors };
+}
+
+/**
+ * UTF-16 (o UTF-32): BOM `FF FE` o `FE FF`, o sin BOM con muchos NUL al
+ * principio (en UTF-16 cada carácter ASCII lleva un 0x00). Outlook en Windows
+ * guarda así los .ics. Se mira ANTES de buscar `BEGIN:VCALENDAR`: así se dice
+ * «no está en UTF-8» y no que el fichero no es lo que dice su extensión.
+ */
+export function looksLikeUtf16(bytes: Buffer): boolean {
+  if (
+    bytes.length >= 2 &&
+    ((bytes[0] === 0xff && bytes[1] === 0xfe) ||
+      (bytes[0] === 0xfe && bytes[1] === 0xff))
+  ) {
+    return true;
+  }
+  const head = bytes.subarray(0, 4096);
+  let nul = 0;
+  for (const b of head) if (b === 0) nul += 1;
+  // Un ICS o CSV en UTF-8 no lleva NUL; uno en UTF-16 ASCII, la mitad.
+  return head.length > 0 && nul * 4 >= head.length;
 }
 
 const SP = 0x20;

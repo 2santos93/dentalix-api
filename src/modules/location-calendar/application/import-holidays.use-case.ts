@@ -14,7 +14,7 @@ import {
   exceedsLocationLimit,
   type ClassifiedRow,
 } from '../domain/holiday-rules';
-import { parseIcsHolidays } from '../domain/ics-holidays';
+import { looksLikeUtf16, parseIcsHolidays } from '../domain/ics-holidays';
 import { holidayLimitReached } from '../domain/location-calendar-errors';
 import {
   LOCATION_CALENDAR_REPOSITORY,
@@ -52,19 +52,34 @@ function isBlank(bytes: Buffer): boolean {
 }
 
 function looksLikeIcs(bytes: Buffer): boolean {
-  const head = bytes.subarray(
-    bytes.subarray(0, 3).equals(UTF8_BOM) ? 3 : 0,
-    // Los blancos de delante y la marca caben de sobra.
-    4096,
-  );
-  return ICS_START.test(head.toString('latin1'));
+  // Los blancos de delante y la marca caben de sobra.
+  const head = bytes.subarray(0, 4096);
+  return ICS_START.test(headText(head));
+}
+
+/**
+ * Principio del fichero como texto para reconocer la marca: UTF-16 con BOM
+ * (un .csv que en realidad es un ICS de Outlook sigue siendo un ICS) o,
+ * si no, bytes tras el BOM de UTF-8.
+ */
+function headText(head: Buffer): string {
+  if (head[0] === 0xff && head[1] === 0xfe) {
+    return head.subarray(2).toString('utf16le');
+  }
+  if (head[0] === 0xfe && head[1] === 0xff) {
+    const body = Buffer.from(head.subarray(2, head.length - (head.length % 2)));
+    return body.swap16().toString('utf16le');
+  }
+  return head
+    .subarray(head.subarray(0, 3).equals(UTF8_BOM) ? 3 : 0)
+    .toString('latin1');
 }
 
 /**
  * Importa festivos a una sede desde un CSV o un ICS (DX-316, spec §5.1).
  * Orden: la sede (otra clínica recibe 404 antes que cualquier error del
- * fichero), el fichero (falta, extensión, vacío, contenido), la lectura y la
- * clasificación como conjunto. La vista previa no
+ * fichero), el fichero (falta, extensión, vacío, codificación del .ics,
+ * contenido), la lectura y la clasificación como conjunto. La vista previa no
  * escribe ni bloquea; importar reclasifica y escribe las NEW bajo el bloqueo
  * del calendario. Los mensajes con cifras piden el formato de la sede solo al
  * pintarse (P4, G1-B I4).
@@ -113,6 +128,12 @@ async function readHolidayFile(
   if (!format) throw new BadRequestException(HOLIDAY_MESSAGES.wrongExtension);
   const bytes = await readFile(file.path);
   if (isBlank(bytes)) throw new BadRequestException(HOLIDAY_MESSAGES.emptyFile);
+  // Un .ics en UTF-16 no empieza por `BEGIN:VCALENDAR` en bytes: sin esto
+  // saldría como extensión que no coincide. El CSV en UTF-16 LE con BOM lo lee
+  // `decodeCsv`.
+  if (format === 'ICS' && looksLikeUtf16(bytes)) {
+    throw new BadRequestException(HOLIDAY_MESSAGES.icsNotUtf8);
+  }
   if (looksLikeIcs(bytes) !== (format === 'ICS')) {
     throw new BadRequestException(
       HOLIDAY_MESSAGES.extensionMismatch(extension.slice(1)),

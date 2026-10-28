@@ -476,6 +476,50 @@ describe('Calendario de la sede: importar festivos (e2e, DX-316)', () => {
       expect(await holidaysOf(id)).toEqual([]);
     });
 
+    it('a UTF-16 .ics is 400 «El calendario no está en UTF-8.», not the extension message', async () => {
+      const id = await newLocation();
+      const le = Buffer.from(ICS_A.toString('utf8'), 'utf16le');
+      const files: [string, Buffer][] = [
+        ['LE with BOM', Buffer.concat([Buffer.from([0xff, 0xfe]), le])],
+        [
+          'BE with BOM',
+          Buffer.concat([Buffer.from([0xfe, 0xff]), Buffer.from(le).swap16()]),
+        ],
+        ['LE without BOM', le],
+      ];
+      for (const [label, bytes] of files) {
+        const res = await upload(id, bytes, 'outlook.ics', { preview: true });
+        expect({ label, status: res.status, message: message(res) }).toEqual({
+          label,
+          status: 400,
+          message: 'El calendario no está en UTF-8.',
+        });
+      }
+      // Un ICS en UTF-16 con extensión .csv sigue siendo un ICS.
+      const asCsv = await upload(
+        id,
+        Buffer.concat([Buffer.from([0xff, 0xfe]), le]),
+        'outlook.csv',
+        { preview: true },
+      );
+      expect(asCsv.status).toBe(400);
+      expect(message(asCsv)).toBe(
+        'El archivo .csv no tiene el formato que dice su extensión.',
+      );
+      // El CSV en UTF-16 LE con BOM («Texto Unicode» de Excel) se lee.
+      const csvLe = Buffer.concat([
+        Buffer.from([0xff, 0xfe]),
+        Buffer.from('fecha\tnombre\r\n2027-01-04\tCierre\r\n', 'utf16le'),
+      ]);
+      const ok = await previewFile(id, csvLe, 'excel.csv');
+      expect((ok.body as ImportResult).counts).toEqual({
+        new: 1,
+        duplicate: 0,
+        error: 0,
+      });
+      expect(await holidaysOf(id)).toEqual([]);
+    });
+
     it('an empty file is 400 «El archivo está vacío.»', async () => {
       const id = await newLocation();
       for (const name of ['vacio.csv', 'vacio.ics']) {
