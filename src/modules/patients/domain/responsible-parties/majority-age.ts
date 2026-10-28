@@ -13,6 +13,24 @@ export const MAJORITY_AGE: Readonly<Record<ClinicCountry, number>> = {
   ES: 16,
 };
 
+/** DX-328: valor de plataforma al crear una clínica. */
+export const PLATFORM_DEFAULT_MAJORITY_AGE = 18;
+/** Límites de la plataforma (CHECK tenants_majority_age_check). */
+export const MAJORITY_AGE_MIN = 14;
+export const MAJORITY_AGE_MAX = 21;
+export const MAJORITY_AGE_MESSAGE =
+  'La mayoría de edad tiene que ser un número entero de años entre 14 y 21.';
+
+/** ¿Es una mayoría de edad válida? Entero de años dentro de los límites. */
+export function isValidMajorityAge(value: unknown): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= MAJORITY_AGE_MIN &&
+    value <= MAJORITY_AGE_MAX
+  );
+}
+
 /**
  * ¿Es menor en `today` (día civil YYYY-MM-DD de la sede, nunca el UTC del
  * servidor)? `birthDate` es una fecha civil guardada a medianoche UTC. Sin

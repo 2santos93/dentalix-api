@@ -15,6 +15,7 @@ import {
   registerBody as clinicRegisterBody,
 } from './support/location-fixtures';
 import { PasswordService } from '../src/shared/crypto/password.service';
+import { PLATFORM_DEFAULT_MAJORITY_AGE } from '../src/modules/patients/domain/responsible-parties/majority-age';
 import {
   generateRegistrationToken,
   hashRegistrationToken,
@@ -87,6 +88,26 @@ describe('Auth (e2e)', () => {
     const loginBody = login.body as LoginResponseBody;
     expect(loginBody.accessToken).toBeDefined();
     expect(loginBody.refreshToken).toBeDefined();
+  });
+
+  it('a registered clinic is created with majorityAge 18', async () => {
+    const register = await registerVerified(
+      app,
+      clinicRegisterBody(REGIONAL_BOGOTA_FIXTURE, {
+        clinicName: 'Mayoría',
+        subdomain: 'dx328-registro',
+        email: 'owner@dx328-registro.com',
+        password: 'S3cret!!',
+        fullName: 'Dr. Owner',
+      }),
+    );
+    const { tenantId } = register.body as RegisterResponseBody;
+    const tenant = await raw.tenant.findUniqueOrThrow({
+      where: { id: tenantId },
+      select: { majorityAge: true },
+    });
+    expect(tenant.majorityAge).toBe(PLATFORM_DEFAULT_MAJORITY_AGE);
+    expect(PLATFORM_DEFAULT_MAJORITY_AGE).toBe(18);
   });
 
   it('rejects login with a wrong password', async () => {

@@ -27,6 +27,12 @@ model Tenant {
   // DX-247: meses que vale una anamnesis (o su última confirmación «Sin
   // cambios hoy») antes de salir «Anamnesis caducada». CHECK 1..60 en la BD.
   anamnesisValidityMonths   Int                             @default(12)
+  /// DX-328: edad desde la que el paciente es adulto en esta clínica: sus
+  /// avisos y documentos de cobro van a él y la ficha deja de pedir
+  /// responsable. 18 de plataforma al crear la clínica (lo escribe la API;
+  /// el default de la BD es el mismo valor, para réplicas anteriores).
+  /// CHECK 14..21. Lo cambia el ADMIN (PUT /patients/settings, auditado).
+  majorityAge               Int                             @default(18)
   createdAt                 DateTime                        @default(now())
   updatedAt                 DateTime                        @updatedAt
   deletedAt                 DateTime?
@@ -2730,6 +2736,8 @@ enum AuditResourceType {
   CANCELLATION_POLICY
   // DX-051: reasignación manual de la imputación de un abono (ADMIN).
   PAYMENT_ALLOCATION
+  // DX-328: ajustes de la clínica (mayoría de edad; más adelante, otros).
+  CLINIC_SETTINGS
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o
