@@ -2187,6 +2187,27 @@ la deduce del país de una sede. Migraciones `20261028160000_dx328_enums`,
   sin recurso ni paciente, con `reason: MAJORITY_AGE_SETTINGS` y
   `statusChange` `AGE_<antes>` → `AGE_<después>`. Guardar el mismo valor
   responde 200 sin evento.
+- **Despliegue** (orden obligatorio):
+  1. `npx prisma migrate deploy` aplica las cuatro migraciones y tiene que
+     terminar ANTES de que arranque la primera réplica nueva de la API. Una
+     réplica nueva contra el esquema anterior falla en cada lectura de
+     `tenants` que pide `majorityAge`. Las réplicas antiguas no leen la
+     columna y siguen funcionando con el esquema nuevo.
+  2. Si falla el relleno (`20261028160300_dx328_tenant_majority_age_backfill`),
+     se para el despliegue y NO se despliega la API. Se ejecuta
+     `npx prisma migrate resolve --rolled-back 20261028160300_dx328_tenant_majority_age_backfill`,
+     se corrige la causa y se repite `migrate deploy`. Si se sigue adelante,
+     todas las clínicas quedan en 18 (el default de la columna), y las que
+     aplicaban 16 pasan a tratar en silencio como menores a los pacientes de
+     16 y 17 años.
+  3. Esperas de bloqueo: `lock_timeout` de 5 s en el enum, en el índice y en
+     la columna de `tenants`, y de 10 s en el relleno, que solo bloquea
+     `locations`. Si se agota, la migración falla sin cambios y se repite el
+     deploy.
+  4. El índice parcial de `audit_events` (`…160100`) no es concurrente,
+     porque la tabla está particionada. Mientras se construye, bloquea las
+     escrituras de auditoría durante un momento, así que conviene desplegar a
+     una hora de poco tráfico.
 
 ## Indicaciones postoperatorias (DX-222)
 

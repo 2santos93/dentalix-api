@@ -47,6 +47,8 @@ export class UpdatePatientSettingsUseCase {
       throw new BadRequestException(MAJORITY_AGE_MESSAGE);
     }
     const { before, after } = await this.repo.setMajorityAge(input.majorityAge);
+    // Como la vigencia de la anamnesis y el modo estricto del horario: el
+    // evento va tras confirmar el cambio y `record` nunca lanza (DX-009).
     if (before !== after) {
       await this.audit.record({
         tenantId: ctx.tenantId,

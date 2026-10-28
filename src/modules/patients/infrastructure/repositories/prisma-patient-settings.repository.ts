@@ -17,7 +17,8 @@ export class PrismaPatientSettingsRepository implements PatientSettingsRepositor
   }
 
   async getMajorityAge(): Promise<number> {
-    // `tenants` es global (sin RLS): siempre por el id del contexto.
+    // `tenants` es global (sin RLS): siempre por el id del contexto, sin
+    // runWithTenant, como `clinicDefaultChannel` de la comunicación.
     const tenant = await this.prisma.tenant.findUniqueOrThrow({
       where: { id: this.tenantId() },
       select: { majorityAge: true },

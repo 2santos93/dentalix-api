@@ -90,15 +90,21 @@ describe('Mayoría de edad de la clínica (e2e, DX-328)', () => {
   });
 
   it('GET /patients/settings is not shadowed by GET /patients/:id', async () => {
-    // Con `:id` delante sería la ficha de un paciente «settings» (404) y
-    // dejaría un evento VIEW de PATIENT.
-    await as(api().get(SETTINGS), tokens.RECEPTION)
-      .expect(200)
-      .expect({ majorityAge: 18 });
-    const views = await raw.auditEvent.count({
-      where: { tenantId: clinic.tenantId, resourceType: 'PATIENT' },
-    });
-    expect(views).toBe(0);
+    // Con `:id` delante, esta petición iría a la ficha de un paciente
+    // «settings»: 404, o una ficha y su VIEW de PATIENT. Se mira solo lo que
+    // deja ESTA petición, no el total de la clínica.
+    const patientViews = () =>
+      raw.auditEvent.count({
+        where: {
+          tenantId: clinic.tenantId,
+          resourceType: 'PATIENT',
+          action: 'VIEW',
+        },
+      });
+    const viewsBefore = await patientViews();
+    const res = await as(api().get(SETTINGS), tokens.RECEPTION).expect(200);
+    expect(res.body).toStrictEqual({ majorityAge: 18 });
+    expect(await patientViews()).toBe(viewsBefore);
   });
 
   it('RECEPTION, DENTIST and ASSISTANT get 403 on PUT and 200 on GET', async () => {
