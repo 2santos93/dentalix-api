@@ -85,6 +85,10 @@ async function cleanup(): Promise<void> {
     where: { email: { endsWith: '@mail-e2e.test' } },
   });
   // email_outbox cae en cascada con el tenant.
+  // DX-316: cada sede nace con su calendario (trigger) y su FK al tenant es RESTRICT.
+  await raw.locationWorkingCalendar.deleteMany({
+    where: { tenant: { subdomain: SUB } },
+  });
   await raw.tenant.deleteMany({ where: { subdomain: SUB } });
 }
 

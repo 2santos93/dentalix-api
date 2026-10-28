@@ -50,6 +50,10 @@ async function cleanup(): Promise<void> {
   await raw.pendingRegistration.deleteMany({
     where: { email: { endsWith: DOMAIN } },
   });
+  // DX-316: cada sede nace con su calendario (trigger) y su FK al tenant es RESTRICT.
+  await raw.locationWorkingCalendar.deleteMany({
+    where: { tenant: { subdomain: { in: subs } } },
+  });
   await raw.tenant.deleteMany({ where: { subdomain: { in: subs } } });
 }
 

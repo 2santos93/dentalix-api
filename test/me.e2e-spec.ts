@@ -59,6 +59,10 @@ describe('Me (e2e)', () => {
       where: { tenant: { subdomain: sub } },
     });
     await raw.user.deleteMany({ where: { email: 'perfil@e2e.com' } });
+    // DX-316: cada sede nace con su calendario (trigger) y su FK al tenant es RESTRICT.
+    await raw.locationWorkingCalendar.deleteMany({
+      where: { tenant: { subdomain: sub } },
+    });
     await raw.tenant.deleteMany({ where: { subdomain: sub } });
 
     await registerVerified(
@@ -78,6 +82,10 @@ describe('Me (e2e)', () => {
       where: { tenant: { subdomain: sub } },
     });
     await raw.user.deleteMany({ where: { email: 'perfil@e2e.com' } });
+    // DX-316: cada sede nace con su calendario (trigger) y su FK al tenant es RESTRICT.
+    await raw.locationWorkingCalendar.deleteMany({
+      where: { tenant: { subdomain: sub } },
+    });
     await raw.tenant.deleteMany({ where: { subdomain: sub } });
     await app.close();
     await raw.$disconnect();
