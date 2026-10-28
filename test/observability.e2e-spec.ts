@@ -93,10 +93,6 @@ describe('Observabilidad (e2e, DX-023)', () => {
       where: { tenant: { subdomain: SUB } },
     });
     await raw.user.deleteMany({ where: { email: EMAIL } });
-    // DX-316: cada sede nace con su calendario (trigger) y su FK al tenant es RESTRICT.
-    await raw.locationWorkingCalendar.deleteMany({
-      where: { tenant: { subdomain: SUB } },
-    });
     await raw.tenant.deleteMany({ where: { subdomain: SUB } });
   };
 

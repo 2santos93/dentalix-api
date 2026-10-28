@@ -93,10 +93,6 @@ describe('Registro sin relé de emails (e2e, DX-144)', () => {
     await raw.pendingRegistration.deleteMany({
       where: { email: { endsWith: DOMAIN } },
     });
-    // DX-316: cada sede nace con su calendario (trigger) y su FK al tenant es RESTRICT.
-    await raw.locationWorkingCalendar.deleteMany({
-      where: { tenant: { subdomain: { startsWith: SUB_PREFIX } } },
-    });
     await raw.tenant.deleteMany({
       where: { subdomain: { startsWith: SUB_PREFIX } },
     });
