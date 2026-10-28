@@ -1,4 +1,5 @@
 import {
+  applyDecorators,
   BadRequestException,
   Body,
   Controller,
@@ -11,20 +12,28 @@ import {
   Post,
   Put,
   Req,
+  UploadedFile,
+  UseFilters,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
+  ApiBody,
   ApiConflictResponse,
+  ApiConsumes,
   ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiPayloadTooLargeResponse,
+  ApiServiceUnavailableResponse,
   ApiTags,
+  type ApiBodyOptions,
 } from '@nestjs/swagger';
 import { ClinicRole } from '@prisma/client';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
@@ -34,6 +43,12 @@ import {
   RolesDeniedMessage,
 } from '../../auth/presentation/guards/roles.decorator';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
+import { UPLOAD_TEMP_DIR } from '../../../shared/storage/local-file';
+import {
+  UPLOAD_BUSY_MESSAGE,
+  UploadSlotGuard,
+  UploadSlotInterceptor,
+} from '../../../shared/storage/upload-slots';
 import { Audit } from '../../audit/presentation/audit.decorator';
 import type { AuditedRequest } from '../../audit/presentation/audit-request';
 import type { AuditHolidaySide } from '../../audit/domain/audit-metadata';
@@ -44,6 +59,10 @@ import {
   SetWorkingWeekdaysUseCase,
   UpdateHolidayUseCase,
 } from '../application/location-calendar.use-cases';
+import {
+  ImportHolidaysUseCase,
+  type HolidayImportResult,
+} from '../application/import-holidays.use-case';
 import { HOLIDAY_MESSAGES } from '../domain/holiday-rules';
 import type {
   HolidayView,
@@ -51,11 +70,13 @@ import type {
 } from '../domain/ports/location-calendar-repository.port';
 import {
   CreateLocationHolidayDto,
+  HolidayImportResultDto,
   LocationCalendarDto,
   LocationHolidayDto,
   SetWorkingWeekdaysDto,
   UpdateLocationHolidayDto,
 } from './dto/location-calendar.dto';
+import { HolidayImportMultipartErrorsFilter } from './holiday-import-multipart-errors.filter';
 
 /** Un id que no es un uuid: 400, como las demás rutas de sede. */
 const locationIdPipe = new ParseUUIDPipe({
@@ -74,6 +95,50 @@ const auditSide = (h: HolidayView): AuditHolidaySide => ({
 });
 
 const LOCATION_404 = 'Sede inexistente, de otra clínica o retirada';
+
+/** 256 KB por fichero (§5.1): más es 413 de multer, en español por el filtro. */
+const MAX_IMPORT_BYTES = 256 * 1024;
+
+const FILE_BODY: ApiBodyOptions = {
+  schema: {
+    type: 'object',
+    required: ['file'],
+    properties: {
+      file: {
+        type: 'string',
+        format: 'binary',
+        description:
+          '.csv (fecha, nombre y, si quieres, recurrente) o .ics; hasta 256 KB y 500 filas o días de festivo',
+      },
+    },
+  },
+};
+
+/**
+ * Las dos rutas de importación (P16, P17): semáforo de subidas y multer a un
+ * temporal en disco, que `UploadSlotInterceptor` borra al terminar el
+ * handler (el fichero no se guarda), con los errores de multer en español.
+ */
+const HolidayImportUpload = () =>
+  applyDecorators(
+    UseGuards(UploadSlotGuard),
+    UseInterceptors(
+      UploadSlotInterceptor,
+      FileInterceptor('file', {
+        dest: UPLOAD_TEMP_DIR,
+        defParamCharset: 'utf8',
+        limits: {
+          fileSize: MAX_IMPORT_BYTES,
+          files: 1,
+          fields: 2,
+          fieldSize: 1024,
+        },
+      }),
+    ),
+    UseFilters(HolidayImportMultipartErrorsFilter),
+  );
+
+const IMPORT_400 = `${HOLIDAY_MESSAGES.missingFile} / ${HOLIDAY_MESSAGES.wrongExtension} / ${HOLIDAY_MESSAGES.emptyFile} / extensión que no coincide con el contenido / fichero ilegible (cabecera del CSV, UTF-8, sin eventos, incompleto, más de 500 entradas) / ${HOLIDAY_MESSAGES.invalidLocationId}`;
 
 /**
  * Ajustes → «Calendario de la sede» (DX-316): días hábiles de la semana y
@@ -97,6 +162,7 @@ export class LocationCalendarController {
     private readonly createHoliday: CreateHolidayUseCase,
     private readonly updateHoliday: UpdateHolidayUseCase,
     private readonly retireHoliday: RetireHolidayUseCase,
+    private readonly importHolidays: ImportHolidaysUseCase,
   ) {}
 
   @Get('calendar')
@@ -258,5 +324,89 @@ export class LocationCalendarController {
     req.auditMetadata = {
       locationCalendar: { holiday: { before: auditSide(before) } },
     };
+  }
+
+  @Post('holidays/import/preview')
+  @HttpCode(200)
+  @HolidayImportUpload()
+  @ApiOperation({
+    summary: 'Vista previa de una importación de festivos (CSV o ICS)',
+    description:
+      'Lee, valida y clasifica cada fila contra los festivos vivos de la sede sin escribir nada ni auditar.',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody(FILE_BODY)
+  @ApiOkResponse({ type: HolidayImportResultDto })
+  @ApiBadRequestResponse({ description: IMPORT_400 })
+  @ApiForbiddenResponse({ description: HOLIDAY_MESSAGES.rolesDenied })
+  @ApiNotFoundResponse({ description: LOCATION_404 })
+  @ApiConflictResponse({
+    description:
+      '`LOCATION_HOLIDAY_LIMIT`: las filas nuevas pasarían de 1000 festivos en la sede',
+  })
+  @ApiPayloadTooLargeResponse({ description: HOLIDAY_MESSAGES.fileTooLarge })
+  @ApiServiceUnavailableResponse({
+    description: `${UPLOAD_BUSY_MESSAGE} (con Retry-After)`,
+  })
+  preview(
+    @Param('id', locationIdPipe) id: string,
+    @UploadedFile() file: Express.Multer.File | undefined,
+  ): Promise<HolidayImportResult> {
+    return this.importHolidays.execute(id, file, { dryRun: true });
+  }
+
+  @Audit({
+    action: 'CREATE',
+    resource: 'LOCATION_CALENDAR',
+    resourceId: { param: 'id' },
+    reason: 'HOLIDAYS_IMPORTED',
+  })
+  @Post('holidays/import')
+  @HttpCode(200)
+  @HolidayImportUpload()
+  @ApiOperation({
+    summary: 'Importar festivos (CSV o ICS) sin duplicar',
+    description:
+      'Escribe las filas NEW en una transacción con el calendario de la sede bloqueado; las filas con error no impiden escribir las demás. Importar dos veces el mismo fichero no duplica nada. Sin festivos creados no queda evento de auditoría.',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody(FILE_BODY)
+  @ApiOkResponse({ type: HolidayImportResultDto })
+  @ApiBadRequestResponse({ description: IMPORT_400 })
+  @ApiForbiddenResponse({ description: HOLIDAY_MESSAGES.rolesDenied })
+  @ApiNotFoundResponse({ description: LOCATION_404 })
+  @ApiConflictResponse({
+    description:
+      '`LOCATION_HOLIDAY_LIMIT`: las filas nuevas pasarían de 1000 festivos en la sede; no se escribe nada',
+  })
+  @ApiPayloadTooLargeResponse({ description: HOLIDAY_MESSAGES.fileTooLarge })
+  @ApiServiceUnavailableResponse({
+    description: `${UPLOAD_BUSY_MESSAGE} (con Retry-After)`,
+  })
+  async import(
+    @Param('id', locationIdPipe) id: string,
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @Req() req: AuditedRequest,
+  ): Promise<HolidayImportResult> {
+    const result = await this.importHolidays.execute(id, file, {
+      dryRun: false,
+    });
+    // Sin festivos creados el calendario no cambia: sin evento (como el PUT
+    // y el PATCH sin cambio). Ni nombres ni filas: solo los recuentos (R10).
+    if (result.counts.new === 0) {
+      req.skipAudit = true;
+    } else {
+      req.auditMetadata = {
+        locationCalendar: {
+          import: {
+            format: result.format,
+            created: result.counts.new,
+            duplicate: result.counts.duplicate,
+            error: result.counts.error,
+          },
+        },
+      };
+    }
+    return result;
   }
 }

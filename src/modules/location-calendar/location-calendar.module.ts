@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
+import { StorageModule } from '../../shared/storage/storage.module';
+import { ImportHolidaysUseCase } from './application/import-holidays.use-case';
 import {
   CreateHolidayUseCase,
   GetLocationCalendarUseCase,
@@ -15,7 +17,7 @@ import { LocationCalendarController } from './presentation/location-calendar.con
 
 /** DX-316: días hábiles y festivos por sede (Ajustes, solo ADMIN). */
 @Module({
-  imports: [JwtModule.register({})],
+  imports: [JwtModule.register({}), StorageModule],
   controllers: [LocationCalendarController],
   providers: [
     GetLocationCalendarUseCase,
@@ -23,6 +25,7 @@ import { LocationCalendarController } from './presentation/location-calendar.con
     CreateHolidayUseCase,
     UpdateHolidayUseCase,
     RetireHolidayUseCase,
+    ImportHolidaysUseCase,
     TokenService,
     TenantContextInterceptor,
     {

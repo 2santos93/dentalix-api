@@ -321,6 +321,18 @@ export function classifyHolidayBatch(
 }
 
 /**
+ * Tope por sede (§5.1): solo cuentan las filas NEW. Un fichero que solo
+ * repite lo que ya hay nunca choca con el tope, aunque la sede ya lo pase.
+ */
+export function exceedsLocationLimit(
+  liveCount: number,
+  rows: readonly ClassifiedRow[],
+): boolean {
+  const created = rows.filter((row) => row.status === 'NEW').length;
+  return created > 0 && liveCount + created > MAX_HOLIDAYS_PER_LOCATION;
+}
+
+/**
  * Por línea y, a igual línea (los días de un mismo evento del ICS), por fecha:
  * un orden total que no depende del orden de entrada.
  */

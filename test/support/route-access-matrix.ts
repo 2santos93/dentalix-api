@@ -591,6 +591,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /locations/:id/holidays': ADMIN_ONLY,
   'PATCH /locations/:id/holidays/:holidayId': ADMIN_ONLY,
   'DELETE /locations/:id/holidays/:holidayId': ADMIN_ONLY,
+  'POST /locations/:id/holidays/import/preview': ADMIN_ONLY,
+  'POST /locations/:id/holidays/import': ADMIN_ONLY,
 
   // --- Personal e invitaciones ---------------------------------------------
   // dentalix-docs/docs/plans/2026-07-23-fase2c-role-matrix.md (STAFF_WRITE_ROLES)

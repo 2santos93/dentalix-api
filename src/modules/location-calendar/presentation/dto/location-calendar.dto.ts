@@ -117,3 +117,73 @@ export class UpdateLocationHolidayDto {
   @IsBoolean({ message: HOLIDAY_MESSAGES.recurringInvalid })
   recurring?: boolean;
 }
+
+/** Una fila del fichero importado, clasificada (spec §5.1). */
+export class HolidayImportRowDto {
+  @ApiProperty({
+    description: 'Fila física del CSV o línea del `BEGIN:VEVENT` del ICS',
+    example: 2,
+  })
+  line!: number;
+
+  @ApiProperty({
+    type: String,
+    format: 'date',
+    nullable: true,
+    description: 'AAAA-MM-DD; null si no se pudo leer',
+    example: '2027-05-03',
+  })
+  date!: string | null;
+
+  @ApiProperty({ type: String, nullable: true, example: 'Cierre anual' })
+  name!: string | null;
+
+  @ApiProperty({ type: Boolean, nullable: true })
+  recurring!: boolean | null;
+
+  @ApiProperty({
+    enum: ['NEW', 'DUPLICATE', 'ERROR'],
+    description:
+      'NEW: se crea (o se ha creado); DUPLICATE: ya existe igual; ERROR: no se importa',
+  })
+  status!: 'NEW' | 'DUPLICATE' | 'ERROR';
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'Por qué es DUPLICATE o ERROR; null si es NEW. Sin cifras.',
+  })
+  message!: string | null;
+
+  @ApiProperty({
+    type: [Number],
+    description:
+      'Líneas del fichero con las que choca, ordenadas; [] si ninguna',
+  })
+  relatedLines!: number[];
+}
+
+export class HolidayImportCountsDto {
+  @ApiProperty({ description: 'Creados, o que se crearían en la vista previa' })
+  new!: number;
+
+  @ApiProperty()
+  duplicate!: number;
+
+  @ApiProperty()
+  error!: number;
+}
+
+export class HolidayImportResultDto {
+  @ApiProperty({ enum: ['CSV', 'ICS'] })
+  format!: 'CSV' | 'ICS';
+
+  @ApiProperty({ description: 'true en la vista previa (no escribe)' })
+  dryRun!: boolean;
+
+  @ApiProperty({ type: HolidayImportCountsDto })
+  counts!: HolidayImportCountsDto;
+
+  @ApiProperty({ type: [HolidayImportRowDto], description: 'Por línea' })
+  rows!: HolidayImportRowDto[];
+}

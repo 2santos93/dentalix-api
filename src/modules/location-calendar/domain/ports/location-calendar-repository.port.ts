@@ -1,4 +1,6 @@
 import type { Prisma } from '@prisma/client';
+import type { ParsedHolidayFile } from '../holiday-file';
+import type { ClassifiedRow } from '../holiday-rules';
 
 export const LOCATION_CALENDAR_REPOSITORY = Symbol(
   'LOCATION_CALENDAR_REPOSITORY',
@@ -24,6 +26,13 @@ export interface HolidayInput {
   date: string;
   name: string;
   recurring: boolean;
+}
+
+/** Lo que pide `requireLocationFormat` (P4) para los mensajes con cifras. */
+export interface LocationFormatSource {
+  id: string;
+  locale: string | null;
+  hourCycle: string | null;
 }
 
 /**
@@ -55,6 +64,24 @@ export interface LocationCalendarRepository {
   ): Promise<{ before: HolidayView; after: HolidayView }>;
   /** Retirada en blando (`deletedAt`); 404 si no es un festivo vivo de la sede. */
   retireHoliday(locationId: string, holidayId: string): Promise<HolidayView>;
+  /**
+   * La sede (404 si no es viva) y sus festivos vivos, para la vista previa de
+   * una importación. No escribe ni bloquea.
+   */
+  readForImport(locationId: string): Promise<{
+    location: LocationFormatSource;
+    holidays: HolidayView[];
+  }>;
+  /**
+   * Importa `file` bajo el bloqueo del calendario: clasifica contra los vivos
+   * ya bloqueados, 409 `LOCATION_HOLIDAY_LIMIT` si las filas NEW pasarían el
+   * tope (y no escribe nada), e inserta las NEW. Una NEW que la BD rechaza
+   * por un índice único vuelve como DUPLICATE. Devuelve las filas por línea.
+   */
+  importHolidays(
+    locationId: string,
+    file: ParsedHolidayFile,
+  ): Promise<ClassifiedRow[]>;
   /**
    * Corre `fn` en una transacción del tenant con la fila de calendario de la
    * sede bloqueada (`FOR UPDATE`).

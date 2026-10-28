@@ -1,15 +1,20 @@
 import { randomUUID } from 'node:crypto';
-import { Injectable } from '@nestjs/common';
+import { ConflictException, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { requireLocationFormat } from '../../../shared/locations/location-regional';
+import type { ParsedHolidayFile } from '../domain/holiday-file';
 import {
+  HOLIDAY_MESSAGES,
   HolidayRuleError,
   MAX_HOLIDAYS_PER_LOCATION,
   assertRecurringAllowed,
+  classifyHolidayBatch,
   conflictOf,
+  exceedsLocationLimit,
   monthDay,
+  type ClassifiedRow,
   type HolidayConflict,
 } from '../domain/holiday-rules';
 import {
@@ -24,6 +29,7 @@ import type {
   HolidayView,
   LocationCalendarRepository,
   LocationCalendarView,
+  LocationFormatSource,
 } from '../domain/ports/location-calendar-repository.port';
 
 const HOLIDAY_SELECT = {
@@ -83,6 +89,23 @@ function firstConflict(
     if (conflict) return { existing, conflict };
   }
   return null;
+}
+
+/** Una fila NEW de la clasificación: fecha, nombre y clase ya leídos. */
+type NewRow = ClassifiedRow & {
+  status: 'NEW';
+  date: string;
+  name: string;
+  recurring: boolean;
+};
+
+function isNewRow(row: ClassifiedRow): row is NewRow {
+  return (
+    row.status === 'NEW' &&
+    row.date !== null &&
+    row.name !== null &&
+    row.recurring !== null
+  );
 }
 
 function isUniqueViolation(error: unknown): boolean {
@@ -187,11 +210,7 @@ export class PrismaLocationCalendarRepository implements LocationCalendarReposit
         // Tope por sede (§5.1), bajo el mismo bloqueo: dos altas a la vez no
         // lo pasan. Editar no cambia la cuenta.
         if (live.length >= MAX_HOLIDAYS_PER_LOCATION) {
-          const location = await tx.location.findFirstOrThrow({
-            where: { id: locationId, tenantId },
-            select: { id: true, locale: true, hourCycle: true },
-          });
-          throw holidayLimitReached(requireLocationFormat(location));
+          throw await this.limitReached(tx, tenantId, locationId);
         }
         const row = await tx.locationHoliday.create({
           data: {
@@ -288,6 +307,90 @@ export class PrismaLocationCalendarRepository implements LocationCalendarReposit
       });
       return before;
     });
+  }
+
+  readForImport(locationId: string): Promise<{
+    location: LocationFormatSource;
+    holidays: HolidayView[];
+  }> {
+    const tenantId = this.requireTenantId();
+    return this.prisma.runWithTenant(tenantId, async (tx) => {
+      const location = await tx.location.findFirst({
+        where: { id: locationId, tenantId, deletedAt: null },
+        select: { id: true, locale: true, hourCycle: true },
+      });
+      if (!location) throw locationNotFound();
+      const holidays = await this.liveHolidays(tx, tenantId, locationId);
+      return { location, holidays };
+    });
+  }
+
+  importHolidays(
+    locationId: string,
+    file: ParsedHolidayFile,
+  ): Promise<ClassifiedRow[]> {
+    return this.withLockedCalendar(locationId, async (tx, tenantId) => {
+      // Se reclasifica con los vivos ya bloqueados: lo que vio la vista previa
+      // (o una importación que se adelantó) puede haber cambiado.
+      const live = await this.liveHolidays(tx, tenantId, locationId);
+      const rows = classifyHolidayBatch(file, live);
+      if (exceedsLocationLimit(live.length, rows)) {
+        throw await this.limitReached(tx, tenantId, locationId);
+      }
+      const fresh = rows.filter(isNewRow).map((row) => ({
+        row,
+        // La columna no tiene default en la BD: el id va siempre aquí.
+        id: randomUUID(),
+      }));
+      if (fresh.length === 0) return rows;
+      // Sin destino (M10): vale para los dos índices únicos parciales sin
+      // repetir sus predicados. Con el bloqueo no debería saltar nunca.
+      const inserted = await tx.$queryRaw<{ id: string }[]>`
+        INSERT INTO "location_holidays"
+          ("id", "tenantId", "locationId", "date", "name", "recurring", "updatedAt")
+        VALUES ${Prisma.join(
+          fresh.map(
+            ({ row, id }) => Prisma.sql`(
+              ${id}::uuid, ${tenantId}::uuid, ${locationId}::uuid,
+              ${row.date}::date, ${row.name}, ${row.recurring},
+              timezone('UTC', now())
+            )`,
+          ),
+        )}
+        ON CONFLICT DO NOTHING
+        RETURNING "id"`;
+      const created = new Set(inserted.map((r) => r.id));
+      if (created.size === fresh.length) return rows;
+      // Alguna la rechazó un índice único: ese día ya lo ocupa un vivo.
+      const occupied = await this.liveHolidays(tx, tenantId, locationId);
+      const skipped = new Map<ClassifiedRow, NewRow>(
+        fresh.filter(({ id }) => !created.has(id)).map(({ row }) => [row, row]),
+      );
+      return rows.map((row) => {
+        const candidate = skipped.get(row);
+        if (!candidate) return row;
+        const same = occupied.find((h) => conflictOf(candidate, h) === 'SAME');
+        if (!same) throw new Error('LOCATION_HOLIDAY_IMPORT_CONFLICT_UNKNOWN');
+        return {
+          ...row,
+          status: 'DUPLICATE' as const,
+          message: HOLIDAY_MESSAGES.alreadyImported(same.name),
+        };
+      });
+    });
+  }
+
+  /** 409 del tope por sede, con la cifra en el formato de la sede (P4). */
+  private async limitReached(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    locationId: string,
+  ): Promise<ConflictException> {
+    const location = await tx.location.findFirstOrThrow({
+      where: { id: locationId, tenantId },
+      select: { id: true, locale: true, hourCycle: true },
+    });
+    return holidayLimitReached(requireLocationFormat(location));
   }
 
   private async readView(

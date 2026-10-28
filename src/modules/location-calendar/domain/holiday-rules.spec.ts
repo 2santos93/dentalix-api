@@ -13,6 +13,7 @@ import {
   assertRecurringAllowed,
   classifyHolidayBatch,
   conflictOf,
+  exceedsLocationLimit,
   holidayKey,
   monthDay,
   normalizeWorkingWeekdays,
@@ -544,6 +545,41 @@ describe('holiday-rules (DX-316)', () => {
           relatedLines: [],
         },
       ]);
+    });
+  });
+
+  describe('exceedsLocationLimit (§5.1)', () => {
+    const row = (status: ClassifiedRow['status']): ClassifiedRow => ({
+      line: 2,
+      date: '2027-05-03',
+      name: 'Festivo de prueba',
+      recurring: false,
+      status,
+      message: null,
+      relatedLines: [],
+    });
+    const max = MAX_HOLIDAYS_PER_LOCATION;
+
+    it('only NEW rows count: up to the cap is fine, one more is not', () => {
+      expect(exceedsLocationLimit(max - 2, [row('NEW'), row('NEW')])).toBe(
+        false,
+      );
+      expect(
+        exceedsLocationLimit(max - 2, [row('NEW'), row('NEW'), row('NEW')]),
+      ).toBe(true);
+      expect(
+        exceedsLocationLimit(max - 1, [
+          row('NEW'),
+          row('DUPLICATE'),
+          row('ERROR'),
+        ]),
+      ).toBe(false);
+    });
+
+    it('a file with nothing new never hits the cap, even over it', () => {
+      expect(
+        exceedsLocationLimit(max + 5, [row('DUPLICATE'), row('ERROR')]),
+      ).toBe(false);
     });
   });
 });

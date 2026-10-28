@@ -1243,6 +1243,22 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       status: 404,
       message: 'No encontramos esa sede.',
     },
+    // La sede se comprueba antes que el fichero: B recibe 404 aunque no mande
+    // archivo, y no se lee nada de A.
+    {
+      name: 'POST /locations/:id/holidays/import/preview',
+      verb: 'post',
+      path: () => `/locations/${a.locationId}/holidays/import/preview`,
+      status: 404,
+      message: 'No encontramos esa sede.',
+    },
+    {
+      name: 'POST /locations/:id/holidays/import',
+      verb: 'post',
+      path: () => `/locations/${a.locationId}/holidays/import`,
+      status: 404,
+      message: 'No encontramos esa sede.',
+    },
     // --- reminders (DX-026) ---
     {
       name: 'PUT /reminder-settings/:locationId',
