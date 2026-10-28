@@ -15,7 +15,11 @@
 -- La fila de calendario de cada sede la crean el trigger de alta de sede y el
 -- backfill de 20261028170300_dx316_location_calendar_default (otra
 -- transacción, con su propio bracket NO FORCE/FORCE sobre `locations`). Esta
--- migración no toca `locations` (pre-flight I1).
+-- migración no altera `locations` ni su RLS (pre-flight I1), pero sus FK sí
+-- la bloquean: cada CREATE TABLE toma SHARE ROW EXCLUSIVE primero en
+-- `tenants` y después en `locations`, hasta el COMMIT. Ese modo no choca con
+-- los ROW SHARE / KEY SHARE de las comprobaciones de FK; solo frena las
+-- escrituras en las dos tablas mientras dura.
 --
 -- Reglas en la BD:
 --   * FK de clínica y FK COMPUESTA (tenantId, locationId) → locations(tenantId,
@@ -49,7 +53,10 @@
 --
 -- lock_timeout 5 s: las FK toman SHARE ROW EXCLUSIVE en `tenants` y en
 -- `locations` mientras se crean; si una transacción larga las retiene, falla
--- limpia y se reintenta el deploy.
+-- limpia. Prisma la deja marcada como fallida (otro `migrate deploy` se para
+-- con P3009): se ejecuta `npx prisma migrate resolve --rolled-back
+-- 20261028170200_dx316_location_calendar_tables` y se repite
+-- `migrate deploy`.
 --
 -- Grants: ALTER DEFAULT PRIVILEGES ya cubre a dentalix_app en tablas nuevas
 -- (SELECT, INSERT, UPDATE y DELETE; UPDATE hace falta para el FOR UPDATE de

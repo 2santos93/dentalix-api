@@ -13,8 +13,10 @@
 --
 -- lock_timeout 5 s: acota la ESPERA del bloqueo (no la construcción). Una
 -- transacción larga que escribe auditoría no deja las escrituras nuevas en
--- cola sin límite detrás de este CREATE INDEX; si falla, se reintenta el
--- deploy.
+-- cola sin límite detrás de este CREATE INDEX. Si falla, Prisma la deja
+-- marcada como fallida y otro `migrate deploy` se para con P3009: antes hay
+-- que ejecutar `npx prisma migrate resolve --rolled-back
+-- 20261028170100_dx316_audit_events_idx` y luego repetir `migrate deploy`.
 --
 -- Aditiva; se propaga a cada partición. IF NOT EXISTS: idempotente.
 

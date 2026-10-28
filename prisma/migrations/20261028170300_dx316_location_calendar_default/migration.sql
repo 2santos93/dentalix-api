@@ -29,8 +29,17 @@
 -- Bloqueos (pre-flight I1): ACCESS EXCLUSIVE en `locations` desde el primer
 -- paso que la toca (LOCK TABLE antes del CREATE TRIGGER, sin subir de
 -- bloqueo después) y en `location_working_calendars` (NO FORCE/FORCE);
--- ningún ALTER TABLE "tenants". lock_timeout 10 s: si una transacción larga retiene
--- `locations`, falla limpia y se reintenta el deploy.
+-- ningún ALTER TABLE "tenants". lock_timeout 10 s: si una transacción larga
+-- retiene `locations`, falla limpia. Prisma la deja marcada como fallida
+-- (otro `migrate deploy` se para con P3009): se ejecuta `npx prisma migrate
+-- resolve --rolled-back 20261028170300_dx316_location_calendar_default` y se
+-- repite `migrate deploy`.
+--
+-- Un INSERT crudo en `locations` hecho por el owner con el bracket habitual
+-- (row_security = off y NO FORCE solo en `locations`) falla ahora: el
+-- trigger inserta en `location_working_calendars`, que sigue en FORCE, y la
+-- RLS lo rechaza. Ese INSERT tiene que poner también NO FORCE/FORCE en
+-- `location_working_calendars`.
 --
 -- Compatible hacia atrás: una réplica anterior que crea una sede sin conocer
 -- las tablas recibe su calendario por el trigger. Sin fase 2.

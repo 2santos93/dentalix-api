@@ -2260,6 +2260,36 @@ la deduce del país de una sede. Migraciones `20261028160000_dx328_enums`,
      ROLLBACK;
      ```
 
+## Calendario de días hábiles y festivos de la sede (DX-316)
+
+Cada sede tiene sus días hábiles de la semana (lunes a viernes por defecto) y
+sus festivos, que carga la clínica (a mano o importando un `.csv` o `.ics`).
+Dentalix no trae festivos de ningún país.
+
+- **Despliegue**: `npx prisma migrate deploy` a una hora de poco tráfico y
+  ANTES de desplegar la API nueva. Son cuatro migraciones
+  (`20261028170000_dx316_enums`, `…170100_dx316_audit_events_idx`,
+  `…170200_dx316_location_calendar_tables` y
+  `…170300_dx316_location_calendar_default`), cada una atómica.
+- **Si falla CUALQUIERA de las cuatro** (normalmente por su
+  `lock_timeout`), Prisma la deja marcada como fallida y otro
+  `migrate deploy` se para con P3009. No se despliega la API nueva; se
+  ejecuta, con el nombre completo de la que falló (lo da
+  `npx prisma migrate status`):
+  ```
+  npx prisma migrate resolve --rolled-back <migración que falló>
+  npx prisma migrate deploy
+  ```
+  La API se despliega solo cuando `migrate deploy` termina bien.
+- **INSERT crudo en `locations` como owner**: el trigger
+  `locations_default_working_calendar` crea la fila de calendario de cada
+  sede nueva con la RLS de quien inserta. Un script o una migración de datos
+  que inserte sedes con `row_security = off` y `NO FORCE` solo en
+  `locations` falla («query would be affected by row-level security policy»), porque
+  `location_working_calendars` sigue en FORCE. Hay que quitar y devolver
+  FORCE también en `location_working_calendars`, en la misma transacción.
+  Falla con error, nunca deja una sede sin calendario en silencio.
+
 ## Indicaciones postoperatorias (DX-222)
 
 Las indicaciones que el paciente se lleva tras una exodoncia, un cordal, una
