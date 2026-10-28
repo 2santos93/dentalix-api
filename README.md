@@ -2287,8 +2287,10 @@ Dentalix no trae festivos de ningún país.
   que inserte sedes con `row_security = off` y `NO FORCE` solo en
   `locations` falla («query would be affected by row-level security policy»), porque
   `location_working_calendars` sigue en FORCE. Hay que quitar y devolver
-  FORCE también en `location_working_calendars`, en la misma transacción.
-  Falla con error, nunca deja una sede sin calendario en silencio.
+  FORCE también en `location_working_calendars`, en la misma transacción
+  (además de `payment_receipt_counters` y `payment_receipts`, que ya pedía
+  el trigger del prefijo de recibos). Falla con error, nunca deja una sede
+  sin calendario en silencio.
 
 ## Indicaciones postoperatorias (DX-222)
 
