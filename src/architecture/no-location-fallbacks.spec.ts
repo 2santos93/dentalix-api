@@ -169,6 +169,14 @@ const COUNTRY_FREE = [
     'prescription-settings.ts',
     'patient-snapshot.ts',
   ].map((file) => join(SRC, 'modules', 'prescriptions', 'domain', file)),
+  join(
+    SRC,
+    'modules',
+    'prescriptions',
+    'application',
+    'use-cases',
+    'prescriptions.use-cases.ts',
+  ),
 ];
 
 describe('formato regional y reloj solo desde el helper (G1-B, I5)', () => {
@@ -276,9 +284,8 @@ describe('formato regional y reloj solo desde el helper (G1-B, I5)', () => {
 /**
  * DX-324 (spec §6.10, R12, R14): el módulo de recetas no nombra una regla
  * nacional, en mayúsculas o minúsculas. Fuera queda solo el tipo legado con
- * nombre (R12) y, hasta la Task 4, los tres ficheros que aún llevan los textos
- * por país. El hash legado sí se escanea: R12 le deja nombrar el país, no una
- * regla nacional.
+ * nombre (R12). El hash, la entidad, el repositorio y el DTO legados sí se
+ * escanean: R12 les deja nombrar el país, no una regla nacional.
  */
 const NATIONAL_RULE = new RegExp(
   [
@@ -298,20 +305,11 @@ const PRESCRIPTIONS = join(SRC, 'modules', 'prescriptions');
 const LEGACY_PRESCRIPTION_FILES = [
   join(PRESCRIPTIONS, 'domain', 'legacy-prescription.ts'),
 ];
-// TODO(T4): fuera de esta lista cuando la Task 4 los deja sin país.
-const NATIONAL_TEXT_UNTIL_T4 = [
-  join(PRESCRIPTIONS, 'application', 'use-cases', 'prescriptions.use-cases.ts'),
-  join(PRESCRIPTIONS, 'presentation', 'dto', 'issue-prescription.dto.ts'),
-  join(PRESCRIPTIONS, 'presentation', 'dto', 'prescription.dto.ts'),
-];
 
 describe('receta sin reglas nacionales (DX-324)', () => {
   it('architecture: prescriptions module names no national rule', () => {
     const files = tsFiles(PRESCRIPTIONS).filter(
-      (file) =>
-        isProduction(file) &&
-        !LEGACY_PRESCRIPTION_FILES.includes(file) &&
-        !NATIONAL_TEXT_UNTIL_T4.includes(file),
+      (file) => isProduction(file) && !LEGACY_PRESCRIPTION_FILES.includes(file),
     );
     expect(files.length).toBeGreaterThan(10);
     expect(offending(files, (line) => NATIONAL_RULE.test(line))).toEqual([]);

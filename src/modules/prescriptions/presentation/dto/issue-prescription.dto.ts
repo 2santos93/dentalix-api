@@ -15,7 +15,7 @@ import { PrescriptionItemInputDto } from './prescription-item-input.dto';
 export class IssuePrescriptionDto {
   @ApiProperty({
     type: [PrescriptionItemInputDto],
-    description: '1 a 10 (en ES, 1)',
+    description: '1 a 10',
   })
   @IsArray({ message: 'Los medicamentos deben ser una lista' })
   @ArrayMaxSize(10, { message: 'Una receta admite como mucho 10 medicamentos' })
@@ -27,7 +27,7 @@ export class IssuePrescriptionDto {
     format: 'date',
     example: '2026-10-16',
     description:
-      'Fecha prevista de dispensación (ES) / de la receta. Por defecto hoy en la zona de la sede; no anterior a hoy ni más de 90 días después.',
+      'Fecha desde la que vale la receta. Por defecto hoy en la zona de la sede; no anterior a hoy ni más de 90 días después.',
   })
   @IsOptional()
   @IsString({
@@ -49,7 +49,7 @@ export class IssuePrescriptionDto {
   @ApiPropertyOptional({
     maxLength: 60,
     description:
-      'Registro profesional (CO) / nº de colegiado (ES) si tu perfil aún no lo tiene; queda guardado en la receta y en tu perfil de la clínica. Si el perfil ya lo tiene, se ignora (lo cambia un ADMIN en Personal).',
+      'Nº de registro profesional si tu perfil aún no lo tiene; queda guardado en la receta y en tu perfil de la clínica. Si el perfil ya lo tiene, se ignora (lo cambia un ADMIN en Personal).',
   })
   @IsOptional()
   @IsString({ message: 'El registro profesional debe ser un texto' })

@@ -13,15 +13,15 @@ const integer = (field: string) => ({
 
 /**
  * Un medicamento tal como llega del modal o de una plantilla. Todo es opcional
- * A PROPÓSITO en el DTO: qué es obligatorio depende del país de la sede y lo
- * decide el dominio (prescription-rules.ts), que responde 400 en español con
- * todos los campos que faltan a la vez.
+ * A PROPÓSITO en el DTO: qué es obligatorio lo decide el dominio
+ * (prescription-rules.ts), que responde 400 en español con todos los campos
+ * que faltan a la vez.
  */
 export class PrescriptionItemInputDto {
   @ApiPropertyOptional({
     maxLength: TEXT_MAX,
     example: 'Amoxicilina',
-    description: 'Principio activo (DCI/DOE)',
+    description: 'Principio activo (DCI)',
   })
   @IsOptional()
   @IsString(text('El principio activo'))
@@ -76,7 +76,8 @@ export class PrescriptionItemInputDto {
     minimum: 1,
     maximum: 9999,
     example: 21,
-    description: 'Se imprime también en letras',
+    description:
+      'Se imprime en cifras y, si la clínica lo tiene activado, también en letras',
   })
   @IsOptional()
   @IsInt(integer('La cantidad total'))
@@ -91,7 +92,7 @@ export class PrescriptionItemInputDto {
   @ApiPropertyOptional({
     minimum: 1,
     maximum: 99,
-    description: 'Nº de envases (obligatorio en ES)',
+    description: 'Nº de envases (opcional)',
   })
   @IsOptional()
   @IsInt(integer('El número de envases'))

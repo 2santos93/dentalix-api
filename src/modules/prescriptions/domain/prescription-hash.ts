@@ -30,8 +30,11 @@ export interface PrescriptionItemContent {
 
 /** Todo lo que la receta EMITIDA afirma; el hash lo sella. */
 export interface PrescriptionHashInput {
-  /** En fase 1 la receta única lo sigue escribiendo; solo lo sellan v1 y v2. */
-  country: LegacyPrescriptionCountry;
+  /**
+   * Solo lo sellan v1 y v2, que lo exigen. La receta única no lo lleva al
+   * sellarse: en fase 1 lo copia el repositorio en la fila, fuera del hash.
+   */
+  country?: LegacyPrescriptionCountry;
   issuedAt: Date;
   dispensationDate: string;
   validUntil: string;
@@ -91,6 +94,9 @@ export function computePrescriptionHash(input: PrescriptionHashInput): string {
 
 /** v1 o v2, exactamente como antes de DX-324: con país y sin campos nuevos. */
 function legacyFields(input: PrescriptionHashInput): unknown[] {
+  if (input.country === undefined) {
+    throw new Error('Una receta legada se sella siempre con su país');
+  }
   const fields = [
     input.country,
     input.issuedAt.toISOString(),

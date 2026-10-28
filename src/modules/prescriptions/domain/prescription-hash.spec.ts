@@ -149,6 +149,29 @@ describe('computePrescriptionHash', () => {
     });
   });
 
+  it('legacy v1 and v2 without their country throw; v3 needs none', () => {
+    const { country: _c, ...noCountry } = base;
+    expect(() => computePrescriptionHash(noCountry)).toThrow(
+      'Una receta legada se sella siempre con su país',
+    );
+    expect(() =>
+      computePrescriptionHash({
+        ...noCountry,
+        safetyRulesVersion: 'RX_SAFETY_V1',
+        safetyAlerts: [],
+      }),
+    ).toThrow('Una receta legada se sella siempre con su país');
+    expect(
+      computePrescriptionHash({
+        ...noCountry,
+        safetyRulesVersion: 'RX_SAFETY_V1',
+        safetyAlerts: [],
+        singleFormat: true,
+        printQuantityInWords: false,
+      }),
+    ).toMatch(/^[0-9a-f]{64}$/);
+  });
+
   describe('DX-324: single-format v3', () => {
     const LEGACY_V1 =
       '6b6384eb06021c3f7bb9eb02f5677252d60455d301b08c9b7e64f04981a569d7';

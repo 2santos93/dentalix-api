@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
@@ -6,12 +7,19 @@ import { ClinicRole, DocType, Prisma, PrismaClient, Sex } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { applyBodyLimits } from '../src/config/body-limits';
 import { PasswordService } from '../src/shared/crypto/password.service';
+import {
+  computePrescriptionHash,
+  type PrescriptionHashInput,
+} from '../src/modules/prescriptions/domain/prescription-hash';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import {
   REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_NEW_YORK_FIXTURE,
+  REGIONAL_TOKYO_FIXTURE,
   locationBody,
   registerBody,
+  type RegionalFixture,
 } from './support/location-fixtures';
 
 // DIRECT_URL (owner, sin RLS) solo para sembrar miembros y limpiar. Fuera de
@@ -32,7 +40,7 @@ interface Session {
 interface RxBody {
   id: string;
   status: 'ISSUED' | 'VOIDED';
-  country: 'CO' | 'ES';
+  country: 'CO' | 'ES' | null;
   locationId: string;
   locationName: string;
   professionalId: string;
@@ -43,7 +51,10 @@ interface RxBody {
   validUntil: string;
   patientDocument: string | null;
   patientBirthYear: number | null;
+  patientAgeYears: number | null;
+  patientWeightKg: number | null;
   clinicalRecordNumber: string | null;
+  professionalSpecialty: string | null;
   allergyOverride: boolean;
   allergyMatches: { activeIngredient: string; allergen: string }[];
   contentHash: string;
@@ -52,12 +63,68 @@ interface RxBody {
   voidedByName: string | null;
   voidReason: string | null;
   integrityOk?: boolean;
+  locationFormat?: {
+    timeZone: string | null;
+    locale: string | null;
+    hourCycle: 'h12' | 'h23' | null;
+  };
   items: {
     position: number;
     activeIngredient: string;
-    quantityInWords: string;
+    quantityInWords: string | null;
     packages: number | null;
   }[];
+}
+
+interface RxSettings {
+  words: boolean;
+  hc: boolean;
+  days: number;
+}
+/** Los ajustes con los que siembra este fichero: letras, nº de HC y 30 días. */
+const SETTINGS_ON: RxSettings = { words: true, hc: true, days: 30 };
+
+/**
+ * Ajustes de la receta de la clínica. Por SQL hasta que la Task 5 publique
+ * `PUT /prescriptions/settings`.
+ */
+async function setRxSettings(
+  tenantId: string,
+  { words, hc, days }: RxSettings,
+): Promise<void> {
+  await raw.$executeRaw`
+    UPDATE "tenants"
+       SET "prescriptionPrintQuantityInWords" = ${words},
+           "prescriptionRequireClinicalRecordNumber" = ${hc},
+           "prescriptionValidityDays" = ${days}
+     WHERE "id" = ${tenantId}::uuid`;
+}
+
+const dayOnly = (value: Date) => value.toISOString().slice(0, 10);
+
+/** El hash recalculado con la fila leída de la BD, como hace la API al leer. */
+async function hashOfStoredRow(
+  id: string,
+  override: Partial<PrescriptionHashInput> = {},
+): Promise<{ stored: string; computed: string }> {
+  const row = await raw.prescription.findUniqueOrThrow({
+    where: { id },
+    include: { items: { orderBy: { position: 'asc' } } },
+  });
+  const input: PrescriptionHashInput = {
+    ...row,
+    dispensationDate: dayOnly(row.dispensationDate),
+    validUntil: dayOnly(row.validUntil),
+    allergyMatches:
+      row.allergyMatches as unknown as PrescriptionHashInput['allergyMatches'],
+    safetyAlerts:
+      row.safetyAlerts as unknown as PrescriptionHashInput['safetyAlerts'],
+    items: row.items.map(
+      ({ id: _id, tenantId: _t, prescriptionId: _p, ...item }) => item,
+    ),
+    ...override,
+  };
+  return { stored: row.contentHash, computed: computePrescriptionHash(input) };
 }
 
 const SUBDOMAINS = ['rx-a', 'rx-b'];
@@ -120,7 +187,6 @@ describe('Recetas — /patients/:id/prescriptions, /prescriptions, /prescription
   let receptionA: string;
   let patientA: string;
   let allergicA: string;
-  let spanishA: string;
   let patientB: string;
   let locationB: string;
   let rxId: string;
@@ -266,13 +332,13 @@ describe('Recetas — /patients/:id/prescriptions, /prescriptions, /prescription
     ).token;
     patientA = await createPatient(clinicA, 'Ana', 'RX-A-1');
     allergicA = await createPatient(clinicA, 'Alba', 'RX-A-2');
-    spanishA = await createPatient(clinicA, 'Elena', '12345678Z', '1980-05-04');
     patientB = await createPatient(clinicB, 'Carla', 'RX-B-1');
     locationB = (
       await raw.location.findFirstOrThrow({
         where: { tenantId: clinicB.tenantId },
       })
     ).id;
+    await setRxSettings(clinicA.tenantId, SETTINGS_ON);
 
     await as(clinicA, dentistA.token)
       .put(`/patients/${allergicA}/medical-history`, {
@@ -294,18 +360,21 @@ describe('Recetas — /patients/:id/prescriptions, /prescriptions, /prescription
     await raw.$disconnect();
   });
 
-  describe('emitir (CO)', () => {
-    it('el emisor: país, sede y registro profesional del usuario', async () => {
+  describe('emitir', () => {
+    it('issuer has no country', async () => {
       const res = await as(clinicA, dentistA.token)
         .get('/prescriptions/issuer')
         .expect(200);
       expect(res.body).toMatchObject({
-        country: 'CO',
         professionalName: 'Dra. Laura Ruiz',
         professionalLicense: 'RM-12345',
+        professionalSpecialty: null,
         validityDays: 30,
         maxItems: 10,
+        printQuantityInWords: true,
+        requireClinicalRecordNumber: true,
       });
+      expect(res.body).not.toHaveProperty('country');
     });
 
     it('un DENTIST emite con 2 medicamentos: foto legal, cantidad en letras y hash; autor y hora del servidor', async () => {
@@ -323,7 +392,7 @@ describe('Recetas — /patients/:id/prescriptions, /prescriptions, /prescription
       const rx = res.body as RxBody;
       expect(rx).toMatchObject({
         status: 'ISSUED',
-        country: 'CO',
+        country: null,
         professionalId: dentistA.userId,
         professionalLicense: 'RM-12345',
         clinicalRecordNumber: 'RX-A-1',
@@ -379,7 +448,7 @@ describe('Recetas — /patients/:id/prescriptions, /prescriptions, /prescription
         .post(rxPath(patientA), { items: [amoxicilina] })
         .expect(400);
       expect((res.body as { message: string }).message).toContain(
-        'Falta tu registro profesional',
+        'Falta tu número de registro profesional',
       );
       const ok = await as(clinicA)
         .post(rxPath(patientA), {
@@ -689,78 +758,476 @@ describe('Recetas — /patients/:id/prescriptions, /prescriptions, /prescription
     });
   });
 
-  describe('España (sede con country=ES)', () => {
-    let madrid: string;
+  describe('ajustes de la receta en dos sedes de formatos distintos', () => {
+    // Sede A con formato en-US y reloj de 12 h; sede B con ja-JP y 24 h.
+    let siteA: string;
+    let siteB: string;
+    let noDocA: string;
+
+    async function createSite(
+      regional: RegionalFixture,
+      name: string,
+    ): Promise<string> {
+      const res = await as(clinicA)
+        .post('/locations', locationBody(regional, { name, address: name }))
+        .expect(201);
+      return (res.body as { id: string }).id;
+    }
+
+    const issueAt = (site: string | undefined, patientId: string, body = {}) =>
+      as(clinicA, dentistA.token, site).post(rxPath(patientId), {
+        items: [amoxicilina],
+        ...body,
+      });
+
+    async function setSpecialty(userId: string, value: string): Promise<void> {
+      await as(clinicA)
+        .patch(`/staff/${userId}`, { professionalSpecialty: value })
+        .expect(200);
+    }
+
+    const yearsAgo = (years: number) => {
+      const date = new Date();
+      date.setUTCFullYear(date.getUTCFullYear() - years);
+      date.setUTCMonth(date.getUTCMonth() - 1);
+      return dayOnly(date);
+    };
 
     beforeAll(async () => {
-      const res = await as(clinicA)
-        .post(
-          '/locations',
-          locationBody(REGIONAL_BOGOTA_FIXTURE, {
-            name: 'Sede Madrid',
-            address: 'Calle Mayor 1, Madrid',
-            country: 'ES',
-            currency: 'EUR',
-            timeZone: 'Europe/Madrid',
-            locale: 'es-ES',
-          }),
-        )
-        .expect(201);
-      madrid = (res.body as { id: string; country: string }).id;
-      expect((res.body as { country: string }).country).toBe('ES');
+      siteA = await createSite(REGIONAL_NEW_YORK_FIXTURE, 'Sede A');
+      siteB = await createSite(REGIONAL_TOKYO_FIXTURE, 'Sede B');
+      noDocA = await createPatient(clinicA, 'Nadia');
     });
 
-    it('exige nº de envases, DNI/NIE y año de nacimiento; un medicamento por receta', async () => {
-      const ctx = await as(clinicA, dentistA.token, madrid)
-        .get('/prescriptions/issuer')
-        .expect(200);
-      expect(ctx.body).toMatchObject({
-        country: 'ES',
-        validityDays: 10,
-        maxItems: 1,
+    afterEach(() => setRxSettings(clinicA.tenantId, SETTINGS_ON));
+
+    it('a five-item prescription with no packages and no birth date is 201 at every location', async () => {
+      const five = Array.from({ length: 5 }, (_, i) => ({
+        ...amoxicilina,
+        activeIngredient: `Principio ${i + 1}`,
+      }));
+      for (const site of [undefined, siteA, siteB]) {
+        const res = await issueAt(site, patientA, { items: five }).expect(201);
+        const rx = res.body as RxBody;
+        expect({ site, packages: rx.items.map((i) => i.packages) }).toEqual({
+          site,
+          packages: [null, null, null, null, null],
+        });
+        expect(rx).toMatchObject({
+          patientBirthYear: null,
+          patientAgeYears: null,
+        });
+      }
+    });
+
+    it('the same settings give the same rules at a ja-JP/Asia/Tokyo/JPY location and at an en-US/America/New_York/USD one', async () => {
+      await setRxSettings(clinicA.tenantId, {
+        words: true,
+        hc: true,
+        days: 30,
       });
+      for (const site of [siteA, siteB]) {
+        const noDoc = await issueAt(site, noDocA).expect(400);
+        expect({
+          site,
+          message: (noDoc.body as { message: string }).message,
+        }).toEqual({
+          site,
+          message:
+            'No se puede emitir la receta: Falta el número de historia clínica: registra el documento del paciente en sus datos.',
+        });
+        const on = (await issueAt(site, patientA).expect(201)).body as RxBody;
+        expect(on.items[0].quantityInWords).toBe('veintiuno');
+        expect(on.clinicalRecordNumber).toBe('RX-A-1');
+      }
 
-      const noPackages = await as(clinicA, dentistA.token, madrid)
-        .post(rxPath(spanishA), { items: [amoxicilina] })
-        .expect(400);
-      expect((noPackages.body as { message: string }).message).toContain(
-        'falta el número de envases',
-      );
-      const noDni = await as(clinicA, dentistA.token, madrid)
-        .post(rxPath(patientA), { items: [{ ...amoxicilina, packages: 1 }] })
-        .expect(400);
-      expect((noDni.body as { message: string }).message).toContain(
-        'Falta el año de nacimiento del paciente',
-      );
-      const two = await as(clinicA, dentistA.token, madrid)
-        .post(rxPath(spanishA), {
-          items: [
-            { ...amoxicilina, packages: 1 },
-            { ...ibuprofeno, packages: 1 },
-          ],
-        })
-        .expect(400);
-      expect((two.body as { message: string }).message).toContain(
-        'un solo medicamento',
-      );
+      await setRxSettings(clinicA.tenantId, {
+        words: false,
+        hc: false,
+        days: 30,
+      });
+      for (const site of [siteA, siteB]) {
+        const res = await issueAt(site, noDocA).expect(201);
+        const rx = res.body as RxBody;
+        expect(rx).toMatchObject({
+          country: null,
+          clinicalRecordNumber: null,
+          patientDocument: null,
+        });
+        expect(rx.items[0].quantityInWords).toBeNull();
+        // Fase 1 (spec D1): la fila sigue llevando el país de la sede y las
+        // letras, para las réplicas anteriores.
+        const [row] = await raw.$queryRaw<
+          {
+            country: string | null;
+            siteCountry: string;
+            singleFormat: boolean;
+            printQuantityInWords: boolean | null;
+            quantityInWords: string;
+          }[]
+        >`
+          SELECT p."country"::text AS "country", l."country"::text AS "siteCountry",
+                 p."singleFormat", p."printQuantityInWords", i."quantityInWords"
+            FROM "prescriptions" p
+            JOIN "locations" l ON l."id" = p."locationId"
+            JOIN "prescription_items" i ON i."prescriptionId" = p."id"
+           WHERE p."id" = ${rx.id}::uuid`;
+        expect(row).toEqual({
+          country: row.siteCountry,
+          siteCountry: expect.any(String) as string,
+          singleFormat: true,
+          printQuantityInWords: false,
+          quantityInWords: 'veintiuno',
+        });
+      }
     });
 
-    it('emite con validez de 10 días desde la fecha prevista de dispensación', async () => {
-      const res = await as(clinicA, dentistA.token, madrid)
-        .post(rxPath(spanishA), { items: [{ ...amoxicilina, packages: 2 }] })
-        .expect(201);
+    it('legacy columns: a new prescription copies the country of its location as data and applies none of its rules', async () => {
+      const site = await createSite(REGIONAL_TOKYO_FIXTURE, 'Sede legado');
+      await raw.$executeRaw`
+        UPDATE "locations" SET "country" = 'ES' WHERE "id" = ${site}::uuid`;
+      // Varios medicamentos, sin envases y sin fecha de nacimiento: la regla
+      // del país copiado no se aplica.
+      const res = await issueAt(site, patientA, {
+        items: [amoxicilina, ibuprofeno],
+      }).expect(201);
+      const rx = res.body as RxBody;
+      expect(rx.country).toBeNull();
+      expect(rx.patientDocument).toBe('CC RX-A-1');
+      const row = await raw.prescription.findUniqueOrThrow({
+        where: { id: rx.id },
+        include: { items: { orderBy: { position: 'asc' } } },
+      });
+      expect(row.country).toBe('ES');
+      expect(row.items.map((i) => i.quantityInWords)).toEqual([
+        'veintiuno',
+        'nueve',
+      ]);
+      const doc = await as(clinicA, dentistA.token)
+        .get(`/prescriptions/${rx.id}`)
+        .expect(200);
+      expect(doc.body).toMatchObject({ country: null, integrityOk: true });
+    });
+
+    it('validity follows validityDays (1, 30, 365)', async () => {
+      for (const days of [1, 30, 365]) {
+        await setRxSettings(clinicA.tenantId, { ...SETTINGS_ON, days });
+        const rx = (await issueAt(siteB, patientA).expect(201)).body as RxBody;
+        const until = new Date(`${rx.dispensationDate}T00:00:00Z`);
+        until.setUTCDate(until.getUTCDate() + days - 1);
+        expect({ days, validUntil: rx.validUntil }).toEqual({
+          days,
+          validUntil: dayOnly(until),
+        });
+      }
+    });
+
+    it('issued snapshot is single format, age, weight, specialty and the v3 hash', async () => {
+      const vera = await createPatient(
+        clinicA,
+        'Vera',
+        'RX-A-30',
+        yearsAgo(30),
+      );
+      await as(clinicA, dentistA.token)
+        .put(`/patients/${vera}/medical-history`, { vitalSigns: { peso: 64 } })
+        .expect(200);
+      await setSpecialty(dentistA.userId, 'Cirugía oral');
+      const res = await issueAt(siteB, vera).expect(201);
       const rx = res.body as RxBody;
       expect(rx).toMatchObject({
+        country: null,
+        patientAgeYears: 30,
+        patientWeightKg: 64,
+        professionalSpecialty: 'Cirugía oral',
+        clinicalRecordNumber: 'RX-A-30',
+        patientDocument: 'CC RX-A-30',
+      });
+      expect(rx).not.toHaveProperty('singleFormat');
+
+      const row = await raw.prescription.findUniqueOrThrow({
+        where: { id: rx.id },
+      });
+      expect(row).toMatchObject({
+        singleFormat: true,
+        printQuantityInWords: true,
+        patientAgeYears: 30,
+        patientWeightKg: 64,
+        professionalSpecialty: 'Cirugía oral',
+      });
+      const v3 = await hashOfStoredRow(rx.id);
+      expect(v3.computed).toBe(v3.stored);
+      const asLegacy = await hashOfStoredRow(rx.id, { singleFormat: false });
+      expect(asLegacy.computed).not.toBe(v3.stored);
+
+      const doc = await as(clinicA, dentistA.token, siteA)
+        .get(`/prescriptions/${rx.id}`)
+        .expect(200);
+      expect(doc.body).toMatchObject({
+        country: null,
+        integrityOk: true,
+        patientAgeYears: 30,
+        professionalSpecialty: 'Cirugía oral',
+      });
+    });
+
+    it('weight 72.55 is stored and hashed as 72.5, and integrityOk is true after reading it back', async () => {
+      const wera = await createPatient(clinicA, 'Wera', 'RX-A-31');
+      await as(clinicA, dentistA.token)
+        .put(`/patients/${wera}/medical-history`, {
+          vitalSigns: { peso: 72.55 },
+        })
+        .expect(200);
+      const rx = (await issueAt(siteA, wera).expect(201)).body as RxBody;
+      expect(rx.patientWeightKg).toBe(72.5);
+      const row = await raw.prescription.findUniqueOrThrow({
+        where: { id: rx.id },
+      });
+      expect(row.patientWeightKg).toBe(72.5);
+      const v3 = await hashOfStoredRow(rx.id);
+      expect(v3.computed).toBe(v3.stored);
+      const doc = await as(clinicA, dentistA.token)
+        .get(`/prescriptions/${rx.id}`)
+        .expect(200);
+      expect(doc.body).toMatchObject({
+        patientWeightKg: 72.5,
+        integrityOk: true,
+      });
+    });
+
+    it('a future birth date issues 201 with patientAgeYears null', async () => {
+      const nextYear = new Date().getUTCFullYear() + 1;
+      const unborn = await createPatient(
+        clinicA,
+        'Futura',
+        'RX-A-32',
+        `${nextYear}-01-15`,
+      );
+      for (const site of [siteA, siteB]) {
+        const rx = (await issueAt(site, unborn).expect(201)).body as RxBody;
+        expect(rx).toMatchObject({
+          patientAgeYears: null,
+          patientBirthYear: nextYear,
+        });
+      }
+    });
+
+    it('blank specialty in the profile is stored null', async () => {
+      await setSpecialty(dentist2A.userId, '   ');
+      const staff = await as(clinicA)
+        .get(`/staff/${dentist2A.userId}`)
+        .expect(200);
+      expect(
+        (staff.body as { professionalSpecialty: string | null })
+          .professionalSpecialty,
+      ).toBeNull();
+      const res = await as(clinicA, dentist2A.token, siteA)
+        .post(rxPath(patientA), { items: [amoxicilina] })
+        .expect(201);
+      expect((res.body as RxBody).professionalSpecialty).toBeNull();
+      const row = await raw.prescription.findUniqueOrThrow({
+        where: { id: (res.body as RxBody).id },
+      });
+      expect(row.professionalSpecialty).toBeNull();
+    });
+
+    it('license and specialty come from the member profile; the body license only fills an empty profile', async () => {
+      await setSpecialty(dentistA.userId, 'Endodoncia');
+      const fromProfile = await issueAt(siteB, patientA, {
+        professionalLicense: 'OTRO-1',
+        professionalSpecialty: 'Falsa',
+      }).expect(201);
+      expect(fromProfile.body).toMatchObject({
+        professionalLicense: 'RM-12345',
+        professionalSpecialty: 'Endodoncia',
+      });
+
+      const fresh = await member(
+        clinicA,
+        ClinicRole.DENTIST,
+        'Dr. Nuevo',
+        'dentist3',
+      );
+      const filled = await as(clinicA, fresh.token, siteA)
+        .post(rxPath(patientA), {
+          items: [amoxicilina],
+          professionalLicense: ' TP-77 ',
+          professionalSpecialty: 'Falsa',
+        })
+        .expect(201);
+      expect(filled.body).toMatchObject({
+        professionalLicense: 'TP-77',
+        professionalSpecialty: null,
+      });
+      const profile = await raw.clinicMembership.findFirstOrThrow({
+        where: { tenantId: clinicA.tenantId, userId: fresh.userId },
+      });
+      expect(profile).toMatchObject({
+        professionalLicense: 'TP-77',
+        professionalSpecialty: null,
+      });
+    });
+
+    it('changing the member specialty does not change an issued prescription', async () => {
+      await setSpecialty(dentistA.userId, 'Periodoncia');
+      const rx = (await issueAt(siteA, patientA).expect(201)).body as RxBody;
+      await setSpecialty(dentistA.userId, 'Ortodoncia');
+      const doc = await as(clinicA, dentistA.token)
+        .get(`/prescriptions/${rx.id}`)
+        .expect(200);
+      expect(doc.body).toMatchObject({
+        professionalSpecialty: 'Periodoncia',
+        integrityOk: true,
+      });
+    });
+
+    it('changing the clinic settings does not change an issued prescription', async () => {
+      await setRxSettings(clinicA.tenantId, SETTINGS_ON);
+      const on = (await issueAt(siteB, patientA).expect(201)).body as RxBody;
+      await setRxSettings(clinicA.tenantId, {
+        words: false,
+        hc: false,
+        days: 30,
+      });
+      const off = (await issueAt(siteB, patientA).expect(201)).body as RxBody;
+
+      await setRxSettings(clinicA.tenantId, {
+        words: false,
+        hc: false,
+        days: 7,
+      });
+      const onDoc = await as(clinicA, dentistA.token)
+        .get(`/prescriptions/${on.id}`)
+        .expect(200);
+      expect(onDoc.body).toMatchObject({
+        clinicalRecordNumber: 'RX-A-1',
+        validUntil: on.validUntil,
+        integrityOk: true,
+      });
+      expect((onDoc.body as RxBody).items[0].quantityInWords).toBe('veintiuno');
+
+      await setRxSettings(clinicA.tenantId, {
+        words: true,
+        hc: true,
+        days: 365,
+      });
+      const offDoc = await as(clinicA, dentistA.token)
+        .get(`/prescriptions/${off.id}`)
+        .expect(200);
+      expect(offDoc.body).toMatchObject({
+        clinicalRecordNumber: null,
+        validUntil: off.validUntil,
+        integrityOk: true,
+      });
+      expect((offDoc.body as RxBody).items[0].quantityInWords).toBeNull();
+    });
+
+    it('a row inserted the old way during the rollout validates with v2', async () => {
+      const id = await insertLegacyRow(siteA, {
+        country: 'CO',
+        patientDocument: 'CC RX-A-1',
+        patientBirthYear: null,
+        clinicalRecordNumber: 'RX-A-1',
+        professionalLicense: 'RM-12345',
+        safetyRulesVersion: 'RX_SAFETY_V1',
+        safetyAlerts: [],
+        packages: null,
+      });
+      const doc = await as(clinicA, dentistA.token)
+        .get(`/prescriptions/${id}`)
+        .expect(200);
+      const body = doc.body as RxBody;
+      expect(body).toMatchObject({
+        country: 'CO',
+        integrityOk: true,
+        clinicalRecordNumber: 'RX-A-1',
+        patientDocument: 'CC RX-A-1',
+        patientAgeYears: null,
+        patientWeightKg: null,
+        professionalSpecialty: null,
+      });
+      expect(body.items[0].quantityInWords).toBe('veintiuno');
+      const row = await raw.prescription.findUniqueOrThrow({ where: { id } });
+      expect(row.singleFormat).toBe(false);
+    });
+
+    it('legacy ES-format row inserted the old way renders its issued fields with v1', async () => {
+      const id = await insertLegacyRow(siteB, {
         country: 'ES',
-        locationId: madrid,
-        locationName: 'Sede Madrid',
         patientDocument: '12345678Z',
         patientBirthYear: 1980,
+        clinicalRecordNumber: '12345678Z',
+        professionalLicense: '28/012345',
+        safetyRulesVersion: null,
+        safetyAlerts: null,
+        packages: 2,
       });
-      expect(rx.items[0].packages).toBe(2);
-      const start = new Date(`${rx.dispensationDate}T00:00:00Z`);
-      start.setUTCDate(start.getUTCDate() + 9);
-      expect(rx.validUntil).toBe(start.toISOString().slice(0, 10));
+      const doc = await as(clinicA, dentistA.token)
+        .get(`/prescriptions/${id}`)
+        .expect(200);
+      const body = doc.body as RxBody;
+      expect(body).toMatchObject({
+        country: 'ES',
+        integrityOk: true,
+        patientDocument: '12345678Z',
+        patientBirthYear: 1980,
+        professionalLicense: '28/012345',
+      });
+      expect(body.items[0]).toMatchObject({
+        quantityInWords: 'veintiuno',
+        packages: 2,
+      });
+    });
+
+    it('a location without locale returns nulls, never a 409', async () => {
+      const bare = await createSite(
+        REGIONAL_NEW_YORK_FIXTURE,
+        'Sede sin formato',
+      );
+      const rx = (await issueAt(bare, patientA).expect(201)).body as RxBody;
+      await raw.$executeRaw`
+        UPDATE "locations" SET "locale" = NULL, "hourCycle" = NULL
+         WHERE "id" = ${bare}::uuid`;
+      const doc = await as(clinicA, dentistA.token)
+        .get(`/prescriptions/${rx.id}`)
+        .expect(200);
+      expect((doc.body as RxBody).locationFormat).toEqual({
+        timeZone: 'America/New_York',
+        locale: null,
+        hourCycle: null,
+      });
+    });
+
+    it('GET /prescriptions/:id returns the current locationFormat of its own location, also when retired', async () => {
+      const rx = (await issueAt(siteB, patientA).expect(201)).body as RxBody;
+      const read = async () =>
+        (
+          (
+            await as(clinicA, dentistA.token, siteA)
+              .get(`/prescriptions/${rx.id}`)
+              .expect(200)
+          ).body as RxBody
+        ).locationFormat;
+      expect(await read()).toEqual({
+        timeZone: 'Asia/Tokyo',
+        locale: 'ja-JP',
+        hourCycle: 'h23',
+      });
+      await raw.$executeRaw`
+        UPDATE "locations" SET "locale" = 'de-DE', "hourCycle" = 'h12'
+         WHERE "id" = ${siteB}::uuid`;
+      expect(await read()).toEqual({
+        timeZone: 'Asia/Tokyo',
+        locale: 'de-DE',
+        hourCycle: 'h12',
+      });
+      await raw.$executeRaw`
+        UPDATE "locations" SET "deletedAt" = now() WHERE "id" = ${siteB}::uuid`;
+      expect(await read()).toEqual({
+        timeZone: 'Asia/Tokyo',
+        locale: 'de-DE',
+        hourCycle: 'h12',
+      });
     });
 
     it('una sede de otra clínica en X-Location-Id se rechaza', async () => {
@@ -768,6 +1235,92 @@ describe('Recetas — /patients/:id/prescriptions, /prescriptions, /prescription
         .post(rxPath(patientA), { items: [amoxicilina] })
         .expect(400);
     });
+
+    /**
+     * Una fila como la escribía la API anterior a la receta única: sin
+     * `singleFormat` ni ninguna columna nueva, con su país y su hash legado.
+     */
+    async function insertLegacyRow(
+      locationId: string,
+      legacy: Pick<
+        PrescriptionHashInput,
+        | 'country'
+        | 'patientDocument'
+        | 'patientBirthYear'
+        | 'clinicalRecordNumber'
+        | 'professionalLicense'
+        | 'safetyRulesVersion'
+        | 'safetyAlerts'
+      > & { packages: number | null },
+    ): Promise<string> {
+      const id = randomUUID();
+      const { packages, ...fields } = legacy;
+      const content: PrescriptionHashInput = {
+        ...fields,
+        issuedAt: new Date('2026-10-16T15:00:00.000Z'),
+        dispensationDate: '2026-10-16',
+        validUntil: '2026-11-14',
+        patientId: patientA,
+        patientName: 'Ana Receta',
+        professionalId: dentistA.userId,
+        professionalName: 'Dra. Laura Ruiz',
+        professionalEmail: null,
+        clinicName: 'Clinica rx-a',
+        locationName: 'Sede',
+        locationAddress: null,
+        notes: null,
+        allergyOverride: false,
+        allergyMatches: [],
+        safetyOverrideReason: null,
+        items: [
+          {
+            ...amoxicilina,
+            position: 1,
+            brandName: null,
+            quantityInWords: 'veintiuno',
+            packages,
+            instructions: null,
+          },
+        ],
+      };
+      const [item] = content.items;
+      const alerts =
+        content.safetyAlerts === null
+          ? null
+          : JSON.stringify(content.safetyAlerts);
+      await raw.$transaction([
+        raw.$executeRaw`
+          INSERT INTO "prescriptions" ("id", "tenantId", "locationId", "patientId",
+            "professionalId", "country", "issuedAt", "dispensationDate", "validUntil",
+            "patientName", "patientDocument", "patientBirthYear", "clinicalRecordNumber",
+            "professionalName", "professionalLicense", "professionalEmail", "clinicName",
+            "locationName", "locationAddress", "notes", "allergyOverride", "allergyMatches",
+            "safetyRulesVersion", "safetyAlerts", "safetyOverrideReason", "contentHash")
+          VALUES (${id}::uuid, ${clinicA.tenantId}::uuid, ${locationId}::uuid,
+            ${content.patientId}::uuid, ${content.professionalId}::uuid,
+            ${content.country}::"ClinicCountry", ${content.issuedAt},
+            ${content.dispensationDate}::date, ${content.validUntil}::date,
+            ${content.patientName}, ${content.patientDocument}, ${content.patientBirthYear},
+            ${content.clinicalRecordNumber}, ${content.professionalName},
+            ${content.professionalLicense}, ${content.professionalEmail},
+            ${content.clinicName}, ${content.locationName}, ${content.locationAddress},
+            ${content.notes}, ${content.allergyOverride}, '[]'::jsonb,
+            ${content.safetyRulesVersion}, ${alerts}::jsonb,
+            ${content.safetyOverrideReason}, ${computePrescriptionHash(content)})`,
+        raw.$executeRaw`
+          INSERT INTO "prescription_items" ("id", "tenantId", "prescriptionId",
+            "position", "activeIngredient", "brandName", "concentration",
+            "pharmaceuticalForm", "route", "dose", "frequency", "durationDays",
+            "totalQuantity", "quantityUnit", "quantityInWords", "packages", "instructions")
+          VALUES (gen_random_uuid(), ${clinicA.tenantId}::uuid, ${id}::uuid,
+            ${item.position}, ${item.activeIngredient}, ${item.brandName},
+            ${item.concentration}, ${item.pharmaceuticalForm}, ${item.route},
+            ${item.dose}, ${item.frequency}, ${item.durationDays},
+            ${item.totalQuantity}, ${item.quantityUnit}, ${item.quantityInWords},
+            ${item.packages}, ${item.instructions})`,
+      ]);
+      return id;
+    }
   });
 
   describe('anular', () => {

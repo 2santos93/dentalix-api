@@ -1,8 +1,14 @@
+/**
+ * Excepción G5.3 (DX-334): recetas emitidas antes de DX-324. El repositorio
+ * lee el `country` legado de cada fila y, en fase 1, copia en la receta única
+ * el de su sede como dato (spec D1, R12). Ninguna regla lo usa.
+ */
 import { Injectable } from '@nestjs/common';
 import { Prisma, PrescriptionStatus } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { resolveLocationTimeZones } from '../../../../shared/locations/location-time-zone';
+import { isHourCycle } from '../../../../shared/locations/location-regional';
 import type { AllergyMatch } from '../../domain/allergy-match';
 import type {
   SafetyAlert,
@@ -18,6 +24,7 @@ import type {
 import type {
   CreatePrescriptionRepoInput,
   PrescriptionRepository,
+  StoredPrescription,
   VoidPrescriptionOutcome,
   VoidPrescriptionRepoInput,
 } from '../../domain/ports/prescription-repository.port';
@@ -148,6 +155,8 @@ function mapRow(row: Row): Prescription {
     patientId: row.patientId,
     professionalId: row.professionalId,
     country: row.country,
+    singleFormat: row.singleFormat,
+    printQuantityInWords: row.printQuantityInWords,
     status: row.status,
     issuedAt: row.issuedAt,
     dispensationDate: toDateOnly(row.dispensationDate),
@@ -155,9 +164,12 @@ function mapRow(row: Row): Prescription {
     patientName: row.patientName,
     patientDocument: row.patientDocument,
     patientBirthYear: row.patientBirthYear,
+    patientAgeYears: row.patientAgeYears,
+    patientWeightKg: row.patientWeightKg,
     clinicalRecordNumber: row.clinicalRecordNumber,
     professionalName: row.professionalName,
     professionalLicense: row.professionalLicense,
+    professionalSpecialty: row.professionalSpecialty,
     professionalEmail: row.professionalEmail,
     clinicName: row.clinicName,
     locationName: row.locationName,
@@ -217,7 +229,9 @@ export class PrismaPrescriptionRepository implements PrescriptionRepository {
    * Sede del request (X-Location-Id, ya validada contra esta clínica) o, en
    * la vista consolidada, la de escritura de la sesión (la principal, o la
    * primera permitida de un miembro restringido — DX-089): una receta siempre
-   * se emite desde UNA sede, que da el país y la dirección.
+   * se emite desde UNA sede, que da la dirección y la zona. Los ajustes de
+   * receta son de la clínica (spec R3) y el registro y la especialidad, del
+   * perfil del miembro.
    */
   loadIssuer(professionalUserId: string): Promise<PrescriptionIssuer> {
     const tenantId = this.requireTenantId();
@@ -226,11 +240,16 @@ export class PrismaPrescriptionRepository implements PrescriptionRepository {
       const [location, tenant, user, membership, zoneOf] = await Promise.all([
         tx.location.findFirstOrThrow({
           where: { id: locationId, deletedAt: null },
-          select: { id: true, name: true, address: true, country: true },
+          select: { id: true, name: true, address: true },
         }),
-        tx.tenant.findFirst({
+        tx.tenant.findFirstOrThrow({
           where: { id: tenantId },
-          select: { name: true },
+          select: {
+            name: true,
+            prescriptionPrintQuantityInWords: true,
+            prescriptionRequireClinicalRecordNumber: true,
+            prescriptionValidityDays: true,
+          },
         }),
         tx.user.findFirst({
           where: { id: professionalUserId },
@@ -238,18 +257,25 @@ export class PrismaPrescriptionRepository implements PrescriptionRepository {
         }),
         tx.clinicMembership.findFirst({
           where: { userId: professionalUserId, deletedAt: null },
-          select: { professionalLicense: true },
+          select: { professionalLicense: true, professionalSpecialty: true },
         }),
         resolveLocationTimeZones(tx, tenantId, [locationId]),
       ]);
       return {
         location: { ...location, timeZone: zoneOf(location.id) },
-        clinicName: tenant?.name ?? '',
+        clinicName: tenant.name,
+        settings: {
+          printQuantityInWords: tenant.prescriptionPrintQuantityInWords,
+          requireClinicalRecordNumber:
+            tenant.prescriptionRequireClinicalRecordNumber,
+          validityDays: tenant.prescriptionValidityDays,
+        },
         professional: {
           id: professionalUserId,
           name: user?.fullName ?? UNKNOWN_PROFESSIONAL,
           email: user?.email ?? null,
           license: membership?.professionalLicense ?? null,
+          specialty: membership?.professionalSpecialty ?? null,
         },
       };
     });
@@ -312,10 +338,19 @@ export class PrismaPrescriptionRepository implements PrescriptionRepository {
     } = input;
     // Receta y medicamentos en la MISMA transacción: el trigger de la base solo
     // admite medicamentos insertados por la transacción que creó la receta.
-    const row = await this.prisma.runWithTenant((tx) =>
-      tx.prescription.create({
+    const row = await this.prisma.runWithTenant(async (tx) => {
+      // Fase 1 (spec D1, pre-flight I5): las réplicas anteriores leen
+      // `country` como no nulo, así que la receta única sigue llevando el país
+      // ACTUAL de su sede, leído en esta transacción. Es solo un dato: no
+      // entra en el hash v3 ni decide nada. La fase 2 deja de escribirlo.
+      const { country } = await tx.location.findFirstOrThrow({
+        where: { id: rest.locationId },
+        select: { country: true },
+      });
+      return tx.prescription.create({
         data: {
           ...rest,
+          country,
           tenantId,
           dispensationDate: fromDateOnly(dispensationDate),
           validUntil: fromDateOnly(validUntil),
@@ -324,8 +359,8 @@ export class PrismaPrescriptionRepository implements PrescriptionRepository {
           items: { create: items },
         },
         include: INCLUDE,
-      }),
-    );
+      });
+    });
     return mapRow(row);
   }
 
@@ -340,9 +375,12 @@ export class PrismaPrescriptionRepository implements PrescriptionRepository {
     return rows.map(mapRow);
   }
 
-  async findById(
-    id: string,
-  ): Promise<(Prescription & { clinicLogoUrl: string | null }) | null> {
+  /**
+   * Con el formato ACTUAL de la sede de la receta (spec §4.6), también si
+   * está retirada (sin filtrar `deletedAt`). Tolerante: lo que falte o no sea
+   * válido llega como `null`, nunca un 409; la web pinta «—».
+   */
+  async findById(id: string): Promise<StoredPrescription | null> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
       const row = await tx.prescription.findFirst({
@@ -350,11 +388,27 @@ export class PrismaPrescriptionRepository implements PrescriptionRepository {
         include: INCLUDE,
       });
       if (!row) return null;
-      const tenant = await tx.tenant.findFirst({
-        where: { id: tenantId },
-        select: { logoUrl: true },
-      });
-      return { ...mapRow(row), clinicLogoUrl: tenant?.logoUrl ?? null };
+      const [tenant, location] = await Promise.all([
+        tx.tenant.findFirst({
+          where: { id: tenantId },
+          select: { logoUrl: true },
+        }),
+        tx.location.findFirst({
+          where: { id: row.locationId },
+          select: { timeZone: true, locale: true, hourCycle: true },
+        }),
+      ]);
+      return {
+        ...mapRow(row),
+        clinicLogoUrl: tenant?.logoUrl ?? null,
+        locationFormat: {
+          timeZone: location?.timeZone ?? null,
+          locale: location?.locale ?? null,
+          hourCycle: isHourCycle(location?.hourCycle)
+            ? location.hourCycle
+            : null,
+        },
+      };
     });
   }
 

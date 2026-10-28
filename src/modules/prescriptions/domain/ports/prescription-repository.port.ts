@@ -1,28 +1,36 @@
-import type { ClinicCountry } from '@prisma/client';
 import type { AllergyMatch } from '../allergy-match';
 import type { PrescriptionItemContent } from '../prescription-hash';
 import type { SafetyAlert } from '../prescription-safety';
 import type {
   Prescription,
   PrescriptionIssuer,
+  PrescriptionLocationFormat,
   PrescriptionPatient,
 } from '../entities/prescription.entity';
 
-// Sin `tenantId`: sale del contexto del request, nunca del cliente.
+/**
+ * Lo que el caso de uso sella y lo que se inserta: el mismo objeto. Sin
+ * `tenantId` (sale del contexto del request, nunca del cliente) y sin el país
+ * de la sede, que en fase 1 escribe el propio repositorio (spec D1).
+ */
 export interface CreatePrescriptionRepoInput {
   locationId: string;
   patientId: string;
   professionalId: string;
-  country: ClinicCountry;
+  singleFormat: true;
+  printQuantityInWords: boolean;
   issuedAt: Date;
   dispensationDate: string;
   validUntil: string;
   patientName: string;
   patientDocument: string | null;
   patientBirthYear: number | null;
+  patientAgeYears: number | null;
+  patientWeightKg: number | null;
   clinicalRecordNumber: string | null;
   professionalName: string;
   professionalLicense: string;
+  professionalSpecialty: string | null;
   professionalEmail: string | null;
   clinicName: string;
   locationName: string;
@@ -48,6 +56,12 @@ export type VoidPrescriptionOutcome =
   | { kind: 'NOT_FOUND' }
   | { kind: 'ALREADY_VOIDED' };
 
+/** La receta guardada con lo que la vista imprimible lee de la clínica y la sede. */
+export type StoredPrescription = Prescription & {
+  clinicLogoUrl: string | null;
+  locationFormat: PrescriptionLocationFormat;
+};
+
 export const PRESCRIPTION_REPOSITORY = Symbol('PRESCRIPTION_REPOSITORY');
 
 export interface PrescriptionRepository {
@@ -65,17 +79,19 @@ export interface PrescriptionRepository {
 
   /**
    * Inserta receta y medicamentos en UNA transacción. No hay `update` de
-   * contenido en este puerto (la base también lo impide).
+   * contenido en este puerto (la base también lo impide). En fase 1 copia en
+   * la fila, en esa misma transacción, el país actual de la sede como dato.
    */
   create(input: CreatePrescriptionRepoInput): Promise<Prescription>;
 
   /** Del paciente, más reciente primero, con medicamentos. */
   listByPatient(patientId: string): Promise<Prescription[]>;
 
-  /** `null` si no existe o es de otra clínica. */
-  findById(
-    id: string,
-  ): Promise<(Prescription & { clinicLogoUrl: string | null }) | null>;
+  /**
+   * `null` si no existe o es de otra clínica. Con el formato actual de su
+   * sede, también si está retirada.
+   */
+  findById(id: string): Promise<StoredPrescription | null>;
 
   /** ISSUED → VOIDED, atómico: dos anulaciones a la vez, solo gana una. */
   void(

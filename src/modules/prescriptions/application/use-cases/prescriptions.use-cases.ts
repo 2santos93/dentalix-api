@@ -6,7 +6,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { ClinicCountry, ClinicRole, DocType } from '@prisma/client';
+import { ClinicRole, DocType } from '@prisma/client';
 import type {
   Prescription,
   PrescriptionDocument,
@@ -14,8 +14,13 @@ import type {
 } from '../../domain/entities/prescription.entity';
 import {
   PRESCRIPTION_REPOSITORY,
+  type CreatePrescriptionRepoInput,
   type PrescriptionRepository,
 } from '../../domain/ports/prescription-repository.port';
+import {
+  ageForSnapshot,
+  weightForSnapshot,
+} from '../../domain/patient-snapshot';
 import {
   ageInYears,
   checkPrescriptionSafety,
@@ -57,7 +62,7 @@ export interface IssuePrescriptionInput {
   /** `YYYY-MM-DD`; por defecto, hoy en la zona de la sede. */
   dispensationDate?: string;
   notes?: string;
-  /** Registro profesional / nº de colegiado si el perfil aún no lo tiene. */
+  /** Nº de registro profesional si el perfil aún no lo tiene. */
   professionalLicense?: string;
   /**
    * Confirmación explícita ante una alerta de alergia (DX-013). Desde DX-300
@@ -81,16 +86,19 @@ export interface PrescriptionSafetyPreview {
 
 export const SAFETY_OVERRIDE_REASON_MAX = 500;
 
+/** Lo que el modal necesita antes de emitir (spec §4.4). */
 export interface PrescriptionIssuerView {
-  country: ClinicCountry;
   locationId: string;
   locationName: string;
   locationAddress: string | null;
   clinicName: string;
   professionalName: string;
   professionalLicense: string | null;
+  professionalSpecialty: string | null;
   validityDays: number;
   maxItems: number;
+  printQuantityInWords: boolean;
+  requireClinicalRecordNumber: boolean;
 }
 
 function trimmedOrNull(value: string | null | undefined): string | null {
@@ -142,73 +150,10 @@ function resolveDispensationDate(
   return requested;
 }
 
-/**
- * TODO(T4): parche que conserva, hasta la Task 4, lo que cada país de la sede
- * exigía antes de las reglas únicas (pre-flight M11): así este commit no
- * cambia el comportamiento. La Task 4 lo borra junto con `country`.
- */
-const LICENSE_MISSING = 'Falta tu número de registro profesional';
-
-export function validateByLocationCountryUntilT4(
-  country: ClinicCountry,
-  input: {
-    items: readonly PrescriptionItemInput[];
-    patient: { docNumber: string | null; birthDate: Date | null };
-    professionalLicense: string | null | undefined;
-  },
-): string[] {
-  const errors = validatePrescription({
-    items: input.items,
-    patient: { docNumber: input.patient.docNumber },
-    professionalLicense: input.professionalLicense,
-    requireClinicalRecordNumber: country === ClinicCountry.CO,
-  });
-  const { length } = input.items;
-  if (length === 0 || length > MAX_PRESCRIPTION_ITEMS) return errors;
-  if (country === ClinicCountry.CO) {
-    return errors.map((error) =>
-      error === LICENSE_MISSING ? 'Falta tu registro profesional' : error,
-    );
-  }
-  if (length > 1) {
-    return [
-      'En España cada receta lleva un solo medicamento: emite una receta por medicamento',
-    ];
-  }
-  const legacy = errors.filter((error) => error !== LICENSE_MISSING);
-  if (input.items[0].packages == null) {
-    legacy.push('Medicamento 1: falta el número de envases');
-  }
-  if (trimmedOrNull(input.patient.docNumber) === null) {
-    legacy.push('Falta el DNI/NIE del paciente: regístralo en sus datos');
-  }
-  if (!input.patient.birthDate) {
-    legacy.push(
-      'Falta el año de nacimiento del paciente: registra su fecha de nacimiento',
-    );
-  }
-  if (errors.includes(LICENSE_MISSING)) {
-    legacy.push('Falta tu número de colegiado');
-  }
-  return legacy;
-}
-
-/** TODO(T4): la validez sale del ajuste de la clínica en la Task 4. */
-export function validityDaysByLocationCountryUntilT4(
-  country: ClinicCountry,
-): number {
-  return country === ClinicCountry.ES ? 10 : 30;
-}
-
-function patientDocument(
-  country: ClinicCountry,
-  patient: PrescriptionPatient,
-): string | null {
+/** `«{tipo} {número}»` en toda clínica (spec R8), o `null` sin número. */
+function patientDocument(patient: PrescriptionPatient): string | null {
   if (!patient.docNumber) return null;
-  // En ES el documento es el DNI/NIE tal cual; los tipos (CC, TI…) son de CO.
-  return country === ClinicCountry.ES
-    ? patient.docNumber
-    : `${DOC_TYPE_LABEL[patient.docType]} ${patient.docNumber}`;
+  return `${DOC_TYPE_LABEL[patient.docType]} ${patient.docNumber}`;
 }
 
 function toItemContent(
@@ -270,20 +215,22 @@ export class GetPrescriptionIssuerUseCase {
     private readonly repo: PrescriptionRepository,
   ) {}
 
-  /** Lo que el modal necesita saber antes de emitir: país, sede y registro. */
+  /** Sede, profesional con su perfil y los ajustes de receta de la clínica. */
   async execute(professionalUserId: string): Promise<PrescriptionIssuerView> {
     const issuer = await this.repo.loadIssuer(professionalUserId);
-    const country = issuer.location.country;
+    const { settings } = issuer;
     return {
-      country,
       locationId: issuer.location.id,
       locationName: issuer.location.name,
       locationAddress: issuer.location.address,
       clinicName: issuer.clinicName,
       professionalName: issuer.professional.name,
       professionalLicense: issuer.professional.license,
-      validityDays: validityDaysByLocationCountryUntilT4(country),
-      maxItems: country === ClinicCountry.ES ? 1 : MAX_PRESCRIPTION_ITEMS,
+      professionalSpecialty: trimmedOrNull(issuer.professional.specialty),
+      validityDays: settings.validityDays,
+      maxItems: MAX_PRESCRIPTION_ITEMS,
+      printQuantityInWords: settings.printQuantityInWords,
+      requireClinicalRecordNumber: settings.requireClinicalRecordNumber,
     };
   }
 }
@@ -298,11 +245,12 @@ export class IssuePrescriptionUseCase {
   ) {}
 
   /**
-   * Emitir = foto congelada. Valida los campos legales del país de la sede,
-   * recalcula los avisos de seguridad con la anamnesis vigente (DX-300: 409
-   * si hay bloqueantes sin confirmación y motivo), escribe la cantidad en
-   * letras y sella todo (avisos y motivo incluidos) con un SHA-256.
-   * Profesional, sede y hora salen del servidor, nunca del cuerpo.
+   * Emitir = foto congelada de la receta única (spec §4.3). Valida con las
+   * reglas únicas y los ajustes de la clínica, recalcula los avisos de
+   * seguridad con la anamnesis vigente (DX-300: 409 si hay bloqueantes sin
+   * confirmación y motivo), congela edad, peso, especialidad y el ajuste de
+   * las letras, y sella todo con el hash v3. Profesional, sede, ajustes y
+   * hora salen del servidor, nunca del cuerpo.
    */
   async execute(
     patientId: string,
@@ -314,7 +262,7 @@ export class IssuePrescriptionUseCase {
       throw new NotFoundException(PATIENT_NOT_FOUND_MESSAGE);
     }
     const issuer = await this.repo.loadIssuer(professionalUserId);
-    const country = issuer.location.country;
+    const { settings } = issuer;
     // El registro del perfil (lo gestiona ADMIN en Personal) manda: el del
     // cuerpo solo cubre el hueco de un perfil que aún no lo tiene, para que un
     // profesional no selle recetas con un registro distinto al de su ficha.
@@ -323,10 +271,11 @@ export class IssuePrescriptionUseCase {
       : trimmedOrNull(input.professionalLicense);
     const license = issuer.professional.license ?? providedLicense;
 
-    const errors = validateByLocationCountryUntilT4(country, {
+    const errors = validatePrescription({
       items: input.items,
-      patient: { docNumber: patient.docNumber, birthDate: patient.birthDate },
+      patient: { docNumber: patient.docNumber },
       professionalLicense: license,
+      requireClinicalRecordNumber: settings.requireClinicalRecordNumber,
     });
     if (errors.length > 0) {
       throw new BadRequestException(
@@ -365,24 +314,31 @@ export class IssuePrescriptionUseCase {
     }
     const allergyMatches = safety.allergyMatches;
 
-    const content = {
-      country,
+    // Lo que se sella y lo que se inserta son el mismo objeto. Las letras se
+    // guardan siempre en fase 1 (réplicas anteriores); `printQuantityInWords`
+    // congela si esta receta las muestra.
+    const content: Omit<CreatePrescriptionRepoInput, 'contentHash'> = {
+      singleFormat: true,
+      printQuantityInWords: settings.printQuantityInWords,
+      locationId: issuer.location.id,
+      patientId: patient.id,
+      professionalId: professionalUserId,
       issuedAt,
       dispensationDate,
-      validUntil: computeValidUntil(
-        dispensationDate,
-        validityDaysByLocationCountryUntilT4(country),
-      ),
-      patientId: patient.id,
+      validUntil: computeValidUntil(dispensationDate, settings.validityDays),
       patientName: `${patient.firstName} ${patient.lastName}`,
-      patientDocument: patientDocument(country, patient),
+      patientDocument: patientDocument(patient),
       patientBirthYear: patient.birthDate
         ? patient.birthDate.getUTCFullYear()
         : null,
-      clinicalRecordNumber: patient.docNumber,
-      professionalId: professionalUserId,
+      patientAgeYears: ageForSnapshot(patient.birthDate, today),
+      patientWeightKg: weightForSnapshot(patient.anamnesis?.weightKg ?? null),
+      clinicalRecordNumber: settings.requireClinicalRecordNumber
+        ? patient.docNumber
+        : null,
       professionalName: issuer.professional.name,
       professionalLicense: license as string,
+      professionalSpecialty: trimmedOrNull(issuer.professional.specialty),
       professionalEmail: issuer.professional.email,
       clinicName: issuer.clinicName,
       locationName: issuer.location.name,
@@ -397,7 +353,6 @@ export class IssuePrescriptionUseCase {
     };
     const created = await this.repo.create({
       ...content,
-      locationId: issuer.location.id,
       contentHash: computePrescriptionHash(content),
     });
 

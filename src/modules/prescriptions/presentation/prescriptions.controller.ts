@@ -41,10 +41,6 @@ import {
   type PrescriptionIssuerView,
   type PrescriptionSafetyPreview,
 } from '../application/use-cases/prescriptions.use-cases';
-import type {
-  Prescription,
-  PrescriptionDocument,
-} from '../domain/entities/prescription.entity';
 import {
   IssuePrescriptionDto,
   PrescriptionSafetyCheckDto,
@@ -57,6 +53,10 @@ import {
   PrescriptionSafetyPreviewDto,
   SafetyConflictDto,
 } from './dto/prescription.dto';
+import {
+  presentPrescription,
+  presentPrescriptionDocument,
+} from './prescription.presenter';
 import { Audit } from '../../audit/presentation/audit.decorator';
 
 interface AuthenticatedRequest {
@@ -67,7 +67,7 @@ const LOCATION_HEADER = {
   name: 'X-Location-Id',
   required: false,
   description:
-    'Sede desde la que se emite (da el país y la dirección). Sin ella, la sede principal.',
+    'Sede desde la que se emite (da la dirección y la zona horaria). Sin ella, la sede principal.',
 };
 
 // Sin @Patch, @Put ni @Delete A PROPÓSITO: una receta emitida es documento
@@ -102,10 +102,11 @@ export class PatientPrescriptionsController {
   @ApiNotFoundResponse({
     description: 'Paciente no encontrado en esta clínica',
   })
-  list(
+  async list(
     @Param('patientId', ParseUUIDPipe) patientId: string,
-  ): Promise<Prescription[]> {
-    return this.listPrescriptions.execute(patientId);
+  ): Promise<PrescriptionDto[]> {
+    const prescriptions = await this.listPrescriptions.execute(patientId);
+    return prescriptions.map(presentPrescription);
   }
 
   /**
@@ -154,7 +155,7 @@ export class PatientPrescriptionsController {
   @ApiCreatedResponse({ type: PrescriptionDto })
   @ApiBadRequestResponse({
     description:
-      'Falta un campo legal según el país de la sede (mensaje en español con todos los que faltan), fecha de dispensación inválida o ES con más de un medicamento',
+      'Falta un campo obligatorio de la receta o el documento del paciente si la clínica lo exige (mensaje en español con todos los que faltan), o fecha de inicio inválida',
   })
   @ApiNotFoundResponse({
     description: 'Paciente no encontrado en esta clínica',
@@ -165,12 +166,12 @@ export class PatientPrescriptionsController {
       'Avisos de seguridad bloqueantes (DX-300: alergia —lista o casillas de la anamnesis—, interacción grave, embarazo, dosis infantil) sin `safetyOverride=true` y `safetyOverrideReason`; mensaje en español con los avisos',
   })
   @ApiForbiddenResponse({ description: 'Solo DENTIST y ADMIN emiten recetas' })
-  issue(
+  async issue(
     @Param('patientId', ParseUUIDPipe) patientId: string,
     @Body() dto: IssuePrescriptionDto,
     @Req() req: AuthenticatedRequest,
-  ): Promise<Prescription> {
-    return this.issuePrescription.execute(
+  ): Promise<PrescriptionDto> {
+    const issued = await this.issuePrescription.execute(
       patientId,
       {
         items: dto.items,
@@ -183,6 +184,7 @@ export class PatientPrescriptionsController {
       },
       req.user.sub,
     );
+    return presentPrescription(issued);
   }
 }
 
@@ -207,7 +209,7 @@ export class PrescriptionsController {
   @ApiOkResponse({
     type: PrescriptionIssuerDto,
     description:
-      'País y sede desde los que se emitiría, y el registro profesional del usuario',
+      'Sede desde la que se emitiría, registro y especialidad del usuario, y los ajustes de receta de la clínica',
   })
   issuer(@Req() req: AuthenticatedRequest): Promise<PrescriptionIssuerView> {
     return this.getIssuer.execute(req.user.sub);
@@ -222,8 +224,10 @@ export class PrescriptionsController {
   @Get(':id')
   @ApiOkResponse({ type: PrescriptionDocumentDto })
   @ApiNotFoundResponse({ description: 'Receta no encontrada en esta clínica' })
-  get(@Param('id', ParseUUIDPipe) id: string): Promise<PrescriptionDocument> {
-    return this.getPrescription.execute(id);
+  async get(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<PrescriptionDocumentDto> {
+    return presentPrescriptionDocument(await this.getPrescription.execute(id));
   }
 
   @Audit({
@@ -243,14 +247,15 @@ export class PrescriptionsController {
     description:
       'Solo quien la emitió o un ADMIN (y nunca asistente ni recepción)',
   })
-  void(
+  async void(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: VoidPrescriptionDto,
     @Req() req: AuthenticatedRequest,
-  ): Promise<Prescription> {
-    return this.voidPrescription.execute(id, dto.reason, {
+  ): Promise<PrescriptionDto> {
+    const voided = await this.voidPrescription.execute(id, dto.reason, {
       userId: req.user.sub,
       role: req.user.role,
     });
+    return presentPrescription(voided);
   }
 }
