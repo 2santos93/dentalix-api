@@ -8,12 +8,14 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Query,
   Req,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import {
+  ApiBadRequestResponse,
   ApiBearerAuth,
   ApiConflictResponse,
   ApiCreatedResponse,
@@ -49,8 +51,12 @@ import { UpdatePatientUseCase } from '../application/use-cases/update-patient.us
 import { Patient } from '../domain/entities/patient.entity';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
-import { Roles } from '../../auth/presentation/guards/roles.decorator';
 import {
+  Roles,
+  RolesDeniedMessage,
+} from '../../auth/presentation/guards/roles.decorator';
+import {
+  CLINIC_SETTINGS_WRITE_ROLES,
   PATIENT_RETENTION_ROLES,
   PATIENT_ROLES,
 } from '../../auth/presentation/guards/clinic-role-sets';
@@ -70,11 +76,25 @@ import {
 } from '../application/use-cases/retention.use-cases';
 import { TenantJwtPayload } from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
+import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import {
   consentEvidenceFrom,
   EvidenceRequest,
 } from '../../data-consents/presentation/consent-evidence';
 import { Audit } from '../../audit/presentation/audit.decorator';
+import {
+  auditRequestContext,
+  type AuditableRequest,
+} from '../../audit/presentation/audit-request-context';
+import {
+  GetPatientSettingsUseCase,
+  UpdatePatientSettingsUseCase,
+  type PatientSettings,
+} from '../application/use-cases/patient-settings.use-cases';
+import { PatientSettingsDto } from './dto/patient-settings.dto';
+
+export const CLINIC_SETTINGS_FORBIDDEN_MESSAGE =
+  'Solo un administrador puede cambiar la mayoría de edad.';
 
 type ListPatientsWithCoverageOutput = Omit<ListPatientsOutput, 'items'> & {
   items: (Patient & { coverage: CoverageSummary })[];
@@ -105,6 +125,10 @@ export class PatientsController {
     // DX-153: resumen de cobertura de la ficha y del listado.
     private readonly coverageFlags: PatientCoverageFlags,
     private readonly agreementFlags: PatientAgreementFlags,
+    // DX-328: mayoría de edad de la clínica.
+    private readonly getSettings: GetPatientSettingsUseCase,
+    private readonly updateSettings: UpdatePatientSettingsUseCase,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   @Audit({
@@ -196,6 +220,37 @@ export class PatientsController {
         RETENTION_EXPIRING_MAX_PAGE_SIZE,
       ),
     };
+  }
+
+  // Antes de `@Get(':id')`, como `retention/expiring`: si no, `settings` se
+  // leería como el id de un paciente.
+  @Get('settings')
+  @ApiOperation({ summary: 'Mayoría de edad de la clínica (DX-328)' })
+  @ApiOkResponse({ type: PatientSettingsDto })
+  settings(): Promise<PatientSettings> {
+    return this.getSettings.execute();
+  }
+
+  @Put('settings')
+  @Roles(...CLINIC_SETTINGS_WRITE_ROLES)
+  @RolesDeniedMessage(CLINIC_SETTINGS_FORBIDDEN_MESSAGE)
+  @ApiOperation({
+    summary:
+      'Cambia la mayoría de edad de la clínica (14–21 años); queda en la auditoría',
+    description:
+      'DX-328. Aplica desde la siguiente petición. Si el valor no cambia, ' +
+      'responde 200 sin evento de auditoría.',
+  })
+  @ApiOkResponse({ type: PatientSettingsDto })
+  @ApiBadRequestResponse({ description: 'Fuera de 14–21 o no entero' })
+  @ApiForbiddenResponse({ description: CLINIC_SETTINGS_FORBIDDEN_MESSAGE })
+  updateClinicSettings(
+    @Body() dto: PatientSettingsDto,
+    @Req() req: AuditableRequest,
+  ): Promise<PatientSettings> {
+    const ctx = auditRequestContext(req, this.tenantContext);
+    if (!ctx) throw new Error('Sin sesión de clínica detrás del RolesGuard');
+    return this.updateSettings.execute({ majorityAge: dto.majorityAge }, ctx);
   }
 
   @Audit({

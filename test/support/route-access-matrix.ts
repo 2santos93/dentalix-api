@@ -171,6 +171,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'PATCH /patients/:id/retention': ADMIN_ONLY,
   'POST /patients/:id/partial-suppression': ADMIN_ONLY,
   'GET /patients/retention/expiring': ADMIN_ONLY,
+  // DX-328: la mayoría de edad de la clínica la leen todos; la cambia gestión.
+  'GET /patients/settings': EVERY_ROLE,
+  'PUT /patients/settings': ADMIN_ONLY,
 
   // --- Clínico: historia, evoluciones, odontograma, periodontograma --------
   // dentalix-docs/docs/plans/2026-07-23-fase2c-role-matrix.md (CLINICAL_ROLES);

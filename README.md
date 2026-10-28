@@ -2157,6 +2157,37 @@ Dentrix. Módulo `patients`, tabla `patient_responsible_parties`; migraciones
   familiar); los avisos de Sofía van a su madre Claudia (contacto) y los de
   Mateo a la abuela.
 
+## Mayoría de edad de la clínica (DX-328)
+
+La edad desde la que un paciente es adulto la fija cada clínica en
+`tenants."majorityAge"` (entero, CHECK 14..21). La leen el bloque
+«Responsable y familia» y la regla de destinatario de arriba. Ningún código
+la deduce del país de una sede. Migraciones `20261028160000_dx328_enums`,
+`20261028160100_dx328_audit_events_idx`,
+`20261028160200_dx328_tenant_majority_age` y
+`20261028160300_dx328_tenant_majority_age_backfill`.
+
+- **Valor inicial**: una clínica nueva empieza en 18
+  (`PLATFORM_DEFAULT_MAJORITY_AGE`). Las que ya existían conservan la edad que
+  cada clínica ya aplicaba (la mayor si tenía varias); ver
+  [la migración de relleno](prisma/migrations/20261028160300_dx328_tenant_majority_age_backfill/migration.sql).
+- **Endpoints**: `GET /patients/settings` (los 4 roles) devuelve
+  `{ majorityAge }`. `PUT /patients/settings` solo lo usa el ADMIN
+  (`CLINIC_SETTINGS_WRITE_ROLES`); cualquier otro rol recibe 403 «Solo un
+  administrador puede cambiar la mayoría de edad.». El cuerpo es
+  `{ majorityAge }`, un entero de 14 a 21. Si el valor está fuera de rango, es
+  decimal, es texto o falta, la respuesta es 400 con «La mayoría de edad
+  tiene que ser un número entero de años entre 14 y 21.». Las dos rutas
+  están declaradas antes de `GET /patients/:id`.
+- **Escritura**: lee la fila de la clínica con `FOR UPDATE` y la actualiza en
+  la misma transacción. Así, dos ADMIN a la vez dejan dos cambios
+  encadenados. El cambio aplica desde la siguiente petición, porque no hay
+  caché. Lo ya enviado no se rehace.
+- **Auditoría**: solo si el valor cambia. Es un UPDATE de `CLINIC_SETTINGS`
+  sin recurso ni paciente, con `reason: MAJORITY_AGE_SETTINGS` y
+  `statusChange` `AGE_<antes>` → `AGE_<después>`. Guardar el mismo valor
+  responde 200 sin evento.
+
 ## Indicaciones postoperatorias (DX-222)
 
 Las indicaciones que el paciente se lleva tras una exodoncia, un cordal, una
