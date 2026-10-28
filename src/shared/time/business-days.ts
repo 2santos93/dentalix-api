@@ -111,7 +111,8 @@ export function addBusinessDays(
   let day: string;
   if (date instanceof Date) {
     if (Number.isNaN(date.getTime())) throw new RangeError('Invalid date');
-    day = civilDateIn(date, timeZone);
+    // Mismas reglas que un día civil de texto: años 0100–9999.
+    day = requireDay(civilDateIn(date, timeZone));
   } else {
     day = requireDay(date);
   }

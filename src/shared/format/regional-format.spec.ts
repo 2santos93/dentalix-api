@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { regionalFormat, UI_LANGUAGE, type HourCycle } from './regional-format';
+import type * as RegionalFormatModule from './regional-format';
 
 interface GoldenCase {
   locale: string;
@@ -265,12 +266,6 @@ describe('regionalFormat', () => {
 
   describe('civil words (DX-316)', () => {
     const fmt = regionalFormat({ locale: 'en-US', hourCycle: 'h12' });
-    const processZone = process.env.TZ;
-
-    afterEach(() => {
-      if (processZone === undefined) delete process.env.TZ;
-      else process.env.TZ = processZone;
-    });
 
     it('civilLongDate gives weekday, day, month and year without a comma', () => {
       expect(fmt.civilLongDate('2027-05-03')).toBe('lunes 3 de mayo de 2027');
@@ -304,14 +299,48 @@ describe('regionalFormat', () => {
     });
 
     it('civil words do not depend on the process zone', () => {
-      process.env.TZ = 'America/Los_Angeles';
-      expect(fmt.weekdayName(1)).toBe('lunes');
-      expect(fmt.civilLongDate('2027-05-03', { year: false })).toBe(
-        'lunes 3 de mayo',
-      );
-      expect(
-        fmt.civilLongDate('2027-05-03', { weekday: false, year: false }),
-      ).toBe('3 de mayo');
+      // Jest da al test una copia de `process.env`, así que cambiar `TZ` no
+      // llega a ICU. Se simula la zona del proceso: todo formatter sin
+      // `timeZone` explícito usa Pacific/Kiritimati (UTC+14), donde el
+      // mediodía UTC del lunes ya es «martes». Un módulo nuevo evita que un
+      // formatter cacheado antes tape el fallo.
+      const RealDateTimeFormat = Intl.DateTimeFormat;
+      const withProcessZone = function (
+        locales?: string | string[],
+        options?: Intl.DateTimeFormatOptions,
+      ) {
+        return new RealDateTimeFormat(locales, {
+          timeZone: 'Pacific/Kiritimati',
+          ...options,
+        });
+      } as unknown as typeof Intl.DateTimeFormat;
+      withProcessZone.supportedLocalesOf =
+        RealDateTimeFormat.supportedLocalesOf.bind(RealDateTimeFormat);
+      Intl.DateTimeFormat = withProcessZone;
+      try {
+        jest.isolateModules(() => {
+          /* eslint-disable @typescript-eslint/no-require-imports -- módulo nuevo, sin formatters cacheados */
+          const fresh =
+            require('./regional-format') as typeof RegionalFormatModule;
+          /* eslint-enable @typescript-eslint/no-require-imports */
+          const kiritimati = fresh.regionalFormat({
+            locale: 'en-US',
+            hourCycle: 'h12',
+          });
+          expect(kiritimati.weekdayName(1)).toBe('lunes');
+          expect(kiritimati.civilLongDate('2027-05-03')).toBe(
+            'lunes 3 de mayo de 2027',
+          );
+          expect(
+            kiritimati.civilLongDate('2027-05-03', {
+              weekday: false,
+              year: false,
+            }),
+          ).toBe('3 de mayo');
+        });
+      } finally {
+        Intl.DateTimeFormat = RealDateTimeFormat;
+      }
     });
 
     it('civil words keep the Gregorian calendar for any locale', () => {

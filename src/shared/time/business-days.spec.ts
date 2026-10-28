@@ -188,6 +188,46 @@ describe('business-days (DX-316)', () => {
       },
     );
 
+    it('365 non-business days in a row still resolve', () => {
+      const holidays = Array.from({ length: 365 }, (_, i) => ({
+        date: addCivilDays('2027-01-09', i),
+        recurring: false,
+      }));
+      expect(
+        addBusinessDays(
+          '2027-01-08',
+          1,
+          { workingWeekdays: [0, 1, 2, 3, 4, 5, 6], holidays },
+          'Europe/Berlin',
+        ),
+      ).toBe('2028-01-09');
+    });
+
+    it.each([
+      ['year 10000', new Date('+010000-01-01T12:00:00Z'), '10000-01-01'],
+      ['a year before 0100', new Date('0050-06-01T12:00:00Z'), '0050-06-01'],
+    ])(
+      'an instant in %s throws like the civil day string',
+      (_name, instant, day) => {
+        expect(() => addBusinessDays(instant, 0, MON_FRI, 'UTC')).toThrow(
+          RangeError,
+        );
+        expect(() => addBusinessDays(day, 0, MON_FRI, 'UTC')).toThrow(
+          RangeError,
+        );
+      },
+    );
+
+    it('an invalid holiday date throws RangeError', () => {
+      for (const date of ['2027-02-30', '2027-5-3', '']) {
+        const calendar = withHolidays(MON_FRI, { date, recurring: false });
+        expect(() =>
+          addBusinessDays('2027-01-08', 1, calendar, 'Europe/Berlin'),
+        ).toThrow(RangeError);
+        expect(() => isBusinessDay('2027-01-08', calendar)).toThrow(RangeError);
+      }
+    });
+
     it('366 non-business days in a row throws instead of looping', () => {
       const holidays = Array.from({ length: 366 }, (_, i) => ({
         date: addCivilDays('2027-01-09', i),
