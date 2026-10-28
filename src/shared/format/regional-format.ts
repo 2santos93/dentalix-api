@@ -58,6 +58,16 @@ export interface RegionalFormat {
   ): string;
   /** «martes 20 de octubre de 2026 a las 3:05 p. m.» */
   longDateTime(instant: Date, timeZone: string): string;
+  /**
+   * Día civil 'YYYY-MM-DD' en palabras de UI_LANGUAGE, sin zona: «lunes 3 de
+   * mayo de 2027». Por defecto con día de la semana y año. Sin coma.
+   */
+  civilLongDate(
+    day: string,
+    opts?: { weekday?: boolean; year?: boolean },
+  ): string;
+  /** 0 = domingo … 6 = sábado, en minúsculas y en UI_LANGUAGE: «lunes». */
+  weekdayName(weekday: number): string;
   /** Hora de reloj sin instante (0–23, 0–59); misma composición que `time()`. */
   clock(hour: number, minute: number): string;
   wallParts(instant: Date, timeZone: string): WallParts;
@@ -102,6 +112,53 @@ function numberFormatter(
     numberFormatters.set(key, formatter);
   }
   return formatter;
+}
+
+/**
+ * Mediodía UTC del día civil `day`: con `timeZone: 'UTC'` sus palabras no
+ * dependen de la zona del proceso ni del navegador. RangeError si el día no existe.
+ */
+function civilNoonUtc(day: string): Date {
+  const match = CIVIL_DATE_RE.exec(day);
+  const instant = match
+    ? new Date(Date.UTC(+match[1], +match[2] - 1, +match[3], 12))
+    : undefined;
+  if (!instant || instant.toISOString().slice(0, 10) !== day) {
+    throw new RangeError(`Día civil no válido: ${day}`);
+  }
+  return instant;
+}
+
+/** Palabras de fecha de `UI_LANGUAGE` para un día civil, sin zona. */
+function civilLongDate(
+  day: string,
+  opts: { weekday?: boolean; year?: boolean } = {},
+): string {
+  const parts = partsOf(
+    dateFormatter(UI_LANGUAGE, {
+      timeZone: 'UTC',
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    }),
+    civilNoonUtc(day),
+  );
+  const dayMonth = `${parts.day} de ${parts.month}`;
+  const withYear =
+    opts.year === false ? dayMonth : `${dayMonth} de ${parts.year}`;
+  return opts.weekday === false ? withYear : `${parts.weekday} ${withYear}`;
+}
+
+function weekdayName(weekday: number): string {
+  if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6) {
+    throw new RangeError(`Día de la semana fuera de rango: ${weekday}`);
+  }
+  // El 2 de enero de 2000 fue domingo.
+  return dateFormatter(UI_LANGUAGE, {
+    timeZone: 'UTC',
+    weekday: 'long',
+  }).format(new Date(Date.UTC(2000, 0, 2 + weekday, 12)));
 }
 
 function stripBidi(text: string): string {
@@ -273,16 +330,7 @@ function build(locale: string, hourCycle: HourCycle): RegionalFormat {
       }
     },
     date,
-    civilDate: (day) => {
-      const match = CIVIL_DATE_RE.exec(day);
-      const instant = match
-        ? new Date(Date.UTC(+match[1], +match[2] - 1, +match[3]))
-        : undefined;
-      if (!instant || instant.toISOString().slice(0, 10) !== day) {
-        throw new RangeError(`Día civil no válido: ${day}`);
-      }
-      return date(instant, 'UTC');
-    },
+    civilDate: (day) => date(civilNoonUtc(day), 'UTC'),
     dayMonth: (instant, timeZone) =>
       stripBidi(
         dateFormatter(locale, {
@@ -297,6 +345,8 @@ function build(locale: string, hourCycle: HourCycle): RegionalFormat {
     longDate,
     longDateTime: (instant, timeZone) =>
       `${longDate(instant, timeZone)} a las ${time(instant, timeZone)}`,
+    civilLongDate,
+    weekdayName,
     clock: (hour, minute) => clock(hourCycle, hour, minute),
     wallParts,
   };

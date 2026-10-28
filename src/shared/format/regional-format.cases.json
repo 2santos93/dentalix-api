@@ -113,5 +113,12 @@
   { "locale": "en-US", "hourCycle": "h23", "op": "wallParts", "args": ["2026-10-27T10:59:00Z", "Pacific/Auckland"], "expected": { "year": 2026, "month": 10, "day": 27, "hour": 23, "minute": 59 } },
   { "locale": "en-US", "hourCycle": "h23", "op": "wallParts", "args": ["2026-10-27T11:00:00Z", "Pacific/Auckland"], "expected": { "year": 2026, "month": 10, "day": 28, "hour": 0, "minute": 0 } },
   { "locale": "en-US", "hourCycle": "h12", "op": "time", "args": ["2026-10-27T11:00:00Z", "Pacific/Auckland"], "expected": "12:00 a. m." },
-  { "locale": "en-US", "hourCycle": "h12", "op": "longDateTime", "args": ["2026-10-27T11:00:00Z", "Pacific/Auckland"], "expected": "miércoles 28 de octubre de 2026 a las 12:00 a. m." }
+  { "locale": "en-US", "hourCycle": "h12", "op": "longDateTime", "args": ["2026-10-27T11:00:00Z", "Pacific/Auckland"], "expected": "miércoles 28 de octubre de 2026 a las 12:00 a. m." },
+
+  { "locale": "en-US", "hourCycle": "h12", "op": "civilLongDate", "args": ["2027-05-03"], "expected": "lunes 3 de mayo de 2027" },
+  { "locale": "en-US", "hourCycle": "h12", "op": "civilLongDate", "args": ["2027-05-03", { "weekday": false, "year": false }], "expected": "3 de mayo" },
+  { "locale": "en-US", "hourCycle": "h12", "op": "weekdayName", "args": [0], "expected": "domingo" },
+  { "locale": "de-DE", "hourCycle": "h23", "op": "civilLongDate", "args": ["2027-05-03"], "expected": "lunes 3 de mayo de 2027" },
+  { "locale": "de-DE", "hourCycle": "h23", "op": "civilLongDate", "args": ["2027-05-03", { "weekday": false, "year": false }], "expected": "3 de mayo" },
+  { "locale": "de-DE", "hourCycle": "h23", "op": "weekdayName", "args": [0], "expected": "domingo" }
 ]

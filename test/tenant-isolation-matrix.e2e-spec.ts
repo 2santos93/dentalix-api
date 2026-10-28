@@ -236,6 +236,8 @@ interface SeedA {
   notePromptId: string;
   /** DX-207: token del enlace de confirmación de la cita de A. */
   confirmationToken: string;
+  /** DX-316: un festivo de la sede nueva de A (y su fila de calendario). */
+  holidayId: string;
 }
 
 interface SeedB {
@@ -449,6 +451,12 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     },
   });
   await create(app, a, `/appointments/${noShow.id}/cancellation-fee`, {});
+  // DX-316: un festivo en el calendario de la sede nueva de A (la fila de
+  // location_working_calendars la crea el trigger del alta).
+  const holiday = await create(app, a, `/locations/${location.id}/holidays`, {
+    date: '2027-05-03',
+    name: 'Cierre anual de A',
+  });
   const dentist = await seedMember(raw, a, ClinicRole.DENTIST);
   // DX-089: la dentista de A queda restringida a TODAS las sedes activas de A
   // (deja filas en membership_locations sin cambiar a qué puede acceder).
@@ -718,6 +726,7 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     postOpTemplateId: postOpTemplate.id,
     postOpDeliveryId: (postOpDelivery.body as { delivery: IdBody }).delivery.id,
     providerOverrideId: providerOverride.id,
+    holidayId: holiday.id,
     clinicalEntryId: clinicalEntry.id,
     privacyPolicyId: (policies.body as { current: IdBody }).current.id,
     notePromptId: notePrompt.id,
@@ -990,6 +999,9 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       'location_reminder_settings',
       // DX-279: versiones de la política de cancelación.
       'cancellation_policy_versions',
+      // DX-316: calendario de la sede nueva de A y su festivo.
+      'location_working_calendars',
+      'location_holidays',
       // DX-027: caja por turno.
       'cash_sessions',
       'cash_session_floats',
@@ -1191,6 +1203,61 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       path: () =>
         `/locations/${a.locationId}/cancellation-policy/email-preview`,
       status: 404,
+    },
+    // --- calendario de la sede (DX-316): la sede de A no existe para B ---
+    {
+      name: 'GET /locations/:id/calendar',
+      verb: 'get',
+      path: () => `/locations/${a.locationId}/calendar`,
+      status: 404,
+      message: 'No encontramos esa sede.',
+    },
+    {
+      name: 'PUT /locations/:id/calendar/working-weekdays',
+      verb: 'put',
+      path: () => `/locations/${a.locationId}/calendar/working-weekdays`,
+      body: () => ({ workingWeekdays: [0] }),
+      status: 404,
+      message: 'No encontramos esa sede.',
+    },
+    {
+      name: 'POST /locations/:id/holidays',
+      verb: 'post',
+      path: () => `/locations/${a.locationId}/holidays`,
+      body: () => ({ date: '2027-05-04', name: 'Intruso' }),
+      status: 404,
+      message: 'No encontramos esa sede.',
+    },
+    {
+      name: 'PATCH /locations/:id/holidays/:holidayId',
+      verb: 'patch',
+      path: () => `/locations/${a.locationId}/holidays/${a.holidayId}`,
+      body: () => ({ name: 'Intruso' }),
+      status: 404,
+      message: 'No encontramos esa sede.',
+    },
+    {
+      name: 'DELETE /locations/:id/holidays/:holidayId',
+      verb: 'delete',
+      path: () => `/locations/${a.locationId}/holidays/${a.holidayId}`,
+      status: 404,
+      message: 'No encontramos esa sede.',
+    },
+    // La sede se comprueba antes que el fichero: B recibe 404 aunque no mande
+    // archivo, y no se lee nada de A.
+    {
+      name: 'POST /locations/:id/holidays/import/preview',
+      verb: 'post',
+      path: () => `/locations/${a.locationId}/holidays/import/preview`,
+      status: 404,
+      message: 'No encontramos esa sede.',
+    },
+    {
+      name: 'POST /locations/:id/holidays/import',
+      verb: 'post',
+      path: () => `/locations/${a.locationId}/holidays/import`,
+      status: 404,
+      message: 'No encontramos esa sede.',
     },
     // --- reminders (DX-026) ---
     {

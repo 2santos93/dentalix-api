@@ -1,0 +1,67 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Herramienta A//Calendario de prueba//ES
+CALSCALE:GREGORIAN
+BEGIN:VEVENT
+UID:festivo-01@herramienta-a.example
+DTSTART;VALUE=DATE:20270111
+SUMMARY:Festivo de prueba 01
+END:VEVENT
+BEGIN:VEVENT
+UID:festivo-02@herramienta-a.example
+DTSTART;VALUE=DATE:20270215
+SUMMARY:Festivo de prueba 02
+END:VEVENT
+BEGIN:VEVENT
+UID:festivo-03@herramienta-a.example
+DTSTART;VALUE=DATE:20270322
+SUMMARY:Festivo de prueba 03
+END:VEVENT
+BEGIN:VEVENT
+UID:festivo-04@herramienta-a.example
+DTSTART;VALUE=DATE:20270412
+SUMMARY:Festivo de prueba 04
+END:VEVENT
+BEGIN:VEVENT
+UID:festivo-05@herramienta-a.example
+DTSTART;VALUE=DATE:20270503
+SUMMARY:Festivo de prueba 05
+END:VEVENT
+BEGIN:VEVENT
+UID:festivo-06@herramienta-a.example
+DTSTART;VALUE=DATE:20270614
+SUMMARY:Festivo de prueba 06
+END:VEVENT
+BEGIN:VEVENT
+UID:festivo-07@herramienta-a.example
+DTSTART;VALUE=DATE:20270719
+SUMMARY:Festivo de prueba 07
+END:VEVENT
+BEGIN:VEVENT
+UID:festivo-08@herramienta-a.example
+DTSTART;VALUE=DATE:20270816
+SUMMARY:Festivo de prueba 08
+END:VEVENT
+BEGIN:VEVENT
+UID:festivo-09@herramienta-a.example
+DTSTART;VALUE=DATE:20271011
+SUMMARY:Festivo de prueba 09
+END:VEVENT
+BEGIN:VEVENT
+UID:festivo-10@herramienta-a.example
+DTSTART;VALUE=DATE:20271115
+SUMMARY:Festivo de prueba 10
+END:VEVENT
+BEGIN:VEVENT
+UID:festivo-11@herramienta-a.example
+DTSTART;VALUE=DATE:20270630
+RRULE:FREQ=YEARLY
+SUMMARY:Festivo de prueba 11
+END:VEVENT
+BEGIN:VEVENT
+UID:festivo-12@herramienta-a.example
+DTSTART;VALUE=DATE:20271231
+RRULE:FREQ=YEARLY
+SUMMARY:Festivo de prueba 12
+END:VEVENT
+END:VCALENDAR

@@ -297,6 +297,23 @@ const FIXTURE_DX328 = [
      (gen_random_uuid(),'${T_MIX}','Sede 2','ES','EUR','Europe/Berlin','de-DE','h23',now())`,
 ];
 
+/** DX-316: calendario de la sede (backfill de lunes a viernes). */
+const DX316_DEFAULT = '20261028170300';
+const T_CAL = '00000000-0000-4000-8000-0000000316c1';
+
+/**
+ * Esquema de DX-316 con sus tablas y sin el trigger de alta: una clínica
+ * nueva con una sede viva y otra retirada (B ya tiene otra retirada). Ninguna
+ * sede de la BD tiene aún calendario.
+ */
+const FIXTURE_DX316 = [
+  `INSERT INTO "tenants" ("id","name","subdomain","updatedAt") VALUES
+     ('${T_CAL}','Clínica calendario','mig-cal',now())`,
+  `INSERT INTO "locations" ("id","tenantId","name","currency","timeZone","locale","hourCycle","deletedAt","updatedAt") VALUES
+     (gen_random_uuid(),'${T_CAL}','Sede viva','JPY','Asia/Tokyo','ja-JP','h23',NULL,now()),
+     (gen_random_uuid(),'${T_CAL}','Sede retirada','USD','America/New_York','en-US','h12',now(),now())`,
+];
+
 const STEPS: Step[] = [
   { until: '20260731115959', fixture: [] },
   // 20260731120000_structured_clinical_history y _remove_owner_role.
@@ -366,8 +383,12 @@ const STEPS: Step[] = [
   // la columna.
   { until: DX328_COLUMN, fixture: FIXTURE_DX328 },
   // dx328_tenant_majority_age, su relleno (FORCE fuera de locations) y las
-  // siguientes.
-  { until: '99999999999999' },
+  // siguientes hasta el backfill de DX-316 (sus enums, el índice de
+  // auditoría y las tablas del calendario, aún sin trigger).
+  { until: DX316_DEFAULT },
+  // dx316_location_calendar_default (FORCE fuera de locations y de
+  // location_working_calendars durante el backfill) y las siguientes.
+  { until: '99999999999999', fixture: FIXTURE_DX316 },
 ];
 
 describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-nosu)', () => {
@@ -936,6 +957,59 @@ describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-no
           WHERE oid = 'public.locations'::regclass`,
       ),
     ).toBe(true);
+  }, 180_000);
+
+  it('owner-nosu calendar backfill covers every location and restores FORCE', async () => {
+    // Antes del tramo, ninguna sede tiene calendario: lo hace el backfill.
+    expect(
+      await scalar<number>(
+        `SELECT count(*)::int AS v FROM "locations" l
+          WHERE NOT EXISTS (SELECT 1 FROM "location_working_calendars" c
+                             WHERE c."tenantId" = l."tenantId" AND c."locationId" = l."id")`,
+      ),
+    ).toBeGreaterThan(0);
+    await run(STEPS[22]);
+    // Toda sede de la BD, viva o retirada y de toda clínica: con el owner
+    // sujeto a la RLS, un backfill que no viera las sedes no haría nada.
+    expect(
+      await scalar<number>(
+        `SELECT count(*)::int AS v FROM "locations" l
+          WHERE NOT EXISTS (SELECT 1 FROM "location_working_calendars" c
+                             WHERE c."tenantId" = l."tenantId" AND c."locationId" = l."id"
+                               AND c."workingWeekdays" = '{1,2,3,4,5}'::smallint[])`,
+      ),
+    ).toBe(0);
+    expect(
+      await scalar<number>(
+        `SELECT count(*)::int AS v FROM "location_working_calendars"`,
+      ),
+    ).toBe(await scalar<number>(`SELECT count(*)::int AS v FROM "locations"`));
+    expect(
+      await scalar<string>(
+        `SELECT string_agg(l."name" || ':' || c."workingWeekdays"::text, ','
+                ORDER BY l."name" COLLATE "C") AS v
+           FROM "locations" l
+           JOIN "location_working_calendars" c
+             ON c."tenantId" = l."tenantId" AND c."locationId" = l."id"
+          WHERE l."tenantId" = '${T_CAL}'`,
+      ),
+    ).toBe('Sede retirada:{1,2,3,4,5},Sede viva:{1,2,3,4,5}');
+    expect(
+      await scalar<number>(
+        `SELECT count(*)::int AS v FROM "location_holidays"`,
+      ),
+    ).toBe(0);
+    expect(
+      await scalar<string>(
+        `SELECT string_agg(relname || '=' || relforcerowsecurity::text, ',' ORDER BY relname) AS v
+           FROM pg_class
+          WHERE oid IN ('public.locations'::regclass,
+                        'public.location_working_calendars'::regclass,
+                        'public.location_holidays'::regclass)`,
+      ),
+    ).toBe(
+      'location_holidays=true,location_working_calendars=true,locations=true',
+    );
   }, 180_000);
 
   it('al terminar: FORCE en toda tabla con RLS y todo es del owner', async () => {

@@ -1,0 +1,2 @@
+# Bytes exactos: el lector ICS se prueba con CRLF y BOM reales.
+*.ics -text

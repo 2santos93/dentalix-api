@@ -22,6 +22,7 @@ import { DentalCatalogController } from '../dental-catalog/presentation/dental-c
 import { PriceListsController } from '../price-lists/presentation/price-lists.controller';
 import { AgreementsController } from '../agreements/presentation/agreements.controller';
 import { LocationsController } from '../locations/presentation/locations.controller';
+import { LocationCalendarController } from '../location-calendar/presentation/location-calendar.controller';
 import { OdontogramController } from '../odontogram/presentation/odontogram.controller';
 import { PerioExamsController } from '../periodontal/presentation/perio-exams.controller';
 import { PatientConsentsController } from '../consents/presentation/patient-consents.controller';
@@ -861,6 +862,38 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: RES,
     reason: 'CANCELLATION_POLICY_CHANGED',
   },
+  // DX-316: calendario de la sede (solo ADMIN). La vista previa de la
+  // importación no escribe y no se audita.
+  'PUT /locations/:id/calendar/working-weekdays': {
+    action: 'UPDATE',
+    resource: 'LOCATION_CALENDAR',
+    resourceId: { param: 'id' },
+    reason: 'WORKING_WEEKDAYS_CHANGED',
+  },
+  'POST /locations/:id/holidays': {
+    action: 'CREATE',
+    resource: 'LOCATION_CALENDAR',
+    resourceId: { param: 'id' },
+    reason: 'HOLIDAY_CREATED',
+  },
+  'PATCH /locations/:id/holidays/:holidayId': {
+    action: 'UPDATE',
+    resource: 'LOCATION_CALENDAR',
+    resourceId: { param: 'id' },
+    reason: 'HOLIDAY_UPDATED',
+  },
+  'DELETE /locations/:id/holidays/:holidayId': {
+    action: 'DELETE',
+    resource: 'LOCATION_CALENDAR',
+    resourceId: { param: 'id' },
+    reason: 'HOLIDAY_DELETED',
+  },
+  'POST /locations/:id/holidays/import': {
+    action: 'CREATE',
+    resource: 'LOCATION_CALENDAR',
+    resourceId: { param: 'id' },
+    reason: 'HOLIDAYS_IMPORTED',
+  },
   // DX-291: cargo por inasistencia o cancelación tardía y su condonación
   // (sobre la cita; el motivo de la condonación nunca va a la metadata).
   'POST /appointments/:id/cancellation-fee': {
@@ -1176,6 +1209,7 @@ const CONTROLLERS: Type[] = [
   PriceListsController,
   AgreementsController,
   LocationsController,
+  LocationCalendarController,
   OdontogramController,
   PerioExamsController,
   PatientConsentsController,

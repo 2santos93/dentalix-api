@@ -750,3 +750,97 @@ describe('sanitizeAuditMetadata — moneda, zona y formato de la sede (G1)', () 
     });
   });
 });
+
+describe('sanitizeAuditMetadata — calendario de la sede (DX-316)', () => {
+  it('locationCalendar keeps weekdays, dates, recurring and import counts and drops a holiday name', () => {
+    expect(
+      sanitizeAuditMetadata({
+        locationCalendar: {
+          workingWeekdays: { before: [1, 2, 3, 4, 5], after: [0, 1, 2, 3, 4] },
+          holiday: {
+            before: { date: '2027-05-03', recurring: false, name: 'Cierre' },
+            after: { date: '2000-12-31', recurring: true, name: 'Cierre' },
+          },
+          import: { format: 'ICS', created: 12, duplicate: 0, error: 1 },
+        },
+      }),
+    ).toEqual({
+      locationCalendar: {
+        workingWeekdays: { before: [1, 2, 3, 4, 5], after: [0, 1, 2, 3, 4] },
+        holiday: {
+          before: { date: '2027-05-03', recurring: false },
+          after: { date: '2000-12-31', recurring: true },
+        },
+        import: { format: 'ICS', created: 12, duplicate: 0, error: 1 },
+      },
+    });
+  });
+
+  it('keeps a holiday with only one side (create or delete)', () => {
+    const after = { date: '2027-05-03', recurring: false };
+    expect(
+      sanitizeAuditMetadata({ locationCalendar: { holiday: { after } } }),
+    ).toEqual({ locationCalendar: { holiday: { after } } });
+  });
+
+  it('days outside 0–6 or non-ISO dates are dropped', () => {
+    for (const workingWeekdays of [
+      { before: [1, 2, 3, 4, 5], after: [7] },
+      { before: [-1], after: [1] },
+      { before: [1.5], after: [1] },
+      { before: [], after: [1] },
+      { before: [0, 1, 2, 3, 4, 5, 6, 0], after: [1] },
+      { before: ['1'], after: [1] },
+      { before: [1] },
+    ]) {
+      expect(
+        sanitizeAuditMetadata({ locationCalendar: { workingWeekdays } }),
+      ).toEqual({});
+    }
+    for (const side of [
+      { date: '03/05/2027', recurring: false },
+      { date: '2027-5-3', recurring: false },
+      { date: '2027-02-30', recurring: false },
+      { date: '2027-05-03T00:00:00.000Z', recurring: false },
+      { date: '2027-05-03', recurring: 'no' },
+      { date: '2027-05-03' },
+      'Cierre anual',
+    ]) {
+      expect(
+        sanitizeAuditMetadata({
+          locationCalendar: { holiday: { before: side, after: side } },
+        }),
+      ).toEqual({});
+    }
+  });
+
+  it('an import with an unknown format or a count that is not a small natural is dropped', () => {
+    for (const imported of [
+      { format: 'XLSX', created: 1, duplicate: 0, error: 0 },
+      { format: 'CSV', created: -1, duplicate: 0, error: 0 },
+      { format: 'CSV', created: 1.5, duplicate: 0, error: 0 },
+      { format: 'CSV', created: 1, duplicate: 0 },
+      { format: 'CSV', created: 1, duplicate: 0, error: 0, name: 'x' },
+      { format: 'CSV', created: 10_001, duplicate: 0, error: 0 },
+    ]) {
+      expect(
+        sanitizeAuditMetadata({ locationCalendar: { import: imported } }),
+      ).toEqual({});
+    }
+  });
+
+  it('a valid part survives next to an invalid one', () => {
+    expect(
+      sanitizeAuditMetadata({
+        locationCalendar: {
+          workingWeekdays: { before: [1], after: [9] },
+          holiday: { after: { date: '2027-05-03', recurring: false } },
+        },
+      }),
+    ).toEqual({
+      locationCalendar: {
+        holiday: { after: { date: '2027-05-03', recurring: false } },
+      },
+    });
+  });
+});

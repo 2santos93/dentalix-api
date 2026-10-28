@@ -173,7 +173,10 @@ function prescriptionSafetyOf(body: unknown): Record<string, unknown> | null {
 
 /**
  * DX-319: lo que el handler añade al evento. El antes/después del nº de
- * registro sanitario solo vale en un evento de sede (LOCATION).
+ * registro sanitario solo vale en un evento de sede (LOCATION). DX-316: un
+ * evento `LOCATION_CALENDAR` también tiene una sede por `resourceId`, pero no
+ * trae ese dato: su `locationCalendar` pasa con el resto y lo filtra el
+ * saneador.
  */
 function handlerMetadata(
   options: AuditOptions,
