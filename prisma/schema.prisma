@@ -109,6 +109,9 @@ model Tenant {
   // DX-262: hoja de saldos del importador y saldos migrados.
   patientImportBalanceRows  PatientImportBalanceRow[]
   openingBalances           OpeningBalance[]
+  // DX-316: calendario de días hábiles y festivos de cada sede.
+  locationWorkingCalendars  LocationWorkingCalendar[]
+  locationHolidays          LocationHoliday[]
 
   @@map("tenants")
 }
@@ -305,6 +308,10 @@ model Location {
   // DX-279: versiones de la política de cancelación de la sede.
   cancellationPolicyVersions CancellationPolicyVersion[]
   cancellationFees           CancellationFee[]
+  // DX-316: días hábiles de la sede (1:1, la crea el trigger de alta) y sus
+  // festivos.
+  workingCalendar            LocationWorkingCalendar?
+  holidays                   LocationHoliday[]
   // GLOBAL-G1: moneda de la sede (locations_currency_fkey; admite NULL en fase 1).
   currencyRef                Currency?                   @relation(fields: [currency], references: [code], onDelete: Restrict, map: "locations_currency_fkey")
 
@@ -2738,6 +2745,8 @@ enum AuditResourceType {
   PAYMENT_ALLOCATION
   // DX-328: ajustes de la clínica (mayoría de edad; más adelante, otros).
   CLINIC_SETTINGS
+  // DX-316: calendario de la sede (días hábiles, festivos e importaciones).
+  LOCATION_CALENDAR
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o
@@ -4491,6 +4500,62 @@ model Expense {
   @@unique([tenantId, id, locationId, currency], map: "expenses_tenant_id_location_currency_key")
   @@index([tenantId, locationId, invoiceDate(sort: Desc), id(sort: Desc)], map: "expenses_tenant_location_invoice_idx")
   @@map("expenses")
+}
+
+/// DX-316 (G1.5): días hábiles de la sede para los plazos en días hábiles.
+/// 1:1 con Location (R2); la crea el trigger de alta de sede
+/// (`locations_default_working_calendar`) con
+/// `dx_location_default_working_weekdays()`, el único sitio con el valor por
+/// defecto. No es el horario de atención (LocationSchedule), que decide cuándo
+/// se puede citar (R4). RLS FORCE por tenant.
+///
+/// Solo SQL: CHECK de `workingWeekdays` (una dimensión, 1 a 7 días entre 0 y
+/// 6, sin NULL) y trigger `location_working_calendars_server_created_at`
+/// (hora UTC de la BD). ON DELETE CASCADE con la sede: la app nunca la borra
+/// en duro; solo las limpiezas de test.
+model LocationWorkingCalendar {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId        String   @db.Uuid
+  locationId      String   @db.Uuid
+  /// 0 = domingo … 6 = sábado (civilWeekday), ordenados y sin repetidos; 1–7 días.
+  workingWeekdays Int[]    @db.SmallInt
+  /// La pone el servidor de BD (trigger), en UTC.
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  location Location @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Cascade, onUpdate: Cascade, map: "location_working_calendars_location_fkey")
+
+  @@unique([tenantId, locationId], map: "location_working_calendars_tenant_location_key")
+  @@map("location_working_calendars")
+}
+
+/// DX-316 (G1.5): festivo de la sede. Puntual (esa fecha) o recurrente (cada
+/// año ese mes y día, R6). RLS FORCE por tenant.
+///
+/// Solo SQL: CHECK de fecha (2000-01-01…2100-12-31), nombre (1 a 120, sin
+/// espacios en los extremos ni caracteres de control) y recurrente que no es
+/// 29 de febrero; únicos parciales entre los vivos
+/// `location_holidays_one_off_key` (fecha) y `location_holidays_recurring_key`
+/// (mes y día); trigger `location_holidays_server_created_at` (hora UTC).
+model LocationHoliday {
+  id         String    @id @default(uuid()) @db.Uuid
+  tenantId   String    @db.Uuid
+  locationId String    @db.Uuid
+  date       DateTime  @db.Date
+  name       String
+  recurring  Boolean   @default(false)
+  /// La pone el servidor de BD (trigger), en UTC.
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  /// Retirada en blando (no-hard-delete.ts): toda lectura filtra deletedAt null.
+  deletedAt  DateTime?
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  location Location @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "location_holidays_location_fkey")
+
+  @@index([tenantId, locationId, date])
+  @@map("location_holidays")
 }
 
 /// Pago de un gasto (DX-274). Con `cashSessionId` es una SALIDA DE CAJA

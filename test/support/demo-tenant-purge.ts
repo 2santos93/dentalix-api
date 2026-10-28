@@ -108,6 +108,9 @@ export const TENANT_TABLES = [
   'membership_locations',
   'clinic_memberships',
   'tenant_domains',
+  // DX-316: calendario y festivos de la sede (hijos de locations).
+  'location_holidays',
+  'location_working_calendars',
   'locations',
 ] as const;
 

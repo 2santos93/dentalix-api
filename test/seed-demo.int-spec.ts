@@ -232,6 +232,10 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     firstCounts = await countsFor(tenantId);
     expect(firstCounts.locations).toBe(2);
     expect(firstCounts.location_schedules).toBe(2);
+    // DX-316: cada sede con su calendario de lunes a viernes (trigger), sin
+    // festivos (los de ejemplo son de G6.1).
+    expect(firstCounts.location_working_calendars).toBe(2);
+    expect(firstCounts.location_holidays).toBe(0);
     expect(firstCounts.clinic_memberships).toBe(6);
     // DX-089: solo «Recepción Norte» tiene sedes; el resto atiende en todas.
     expect(firstCounts.membership_locations).toBe(1);
