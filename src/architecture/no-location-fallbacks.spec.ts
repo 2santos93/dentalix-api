@@ -159,6 +159,7 @@ const COUNTRY_FREE = [
     'notices',
     'notice-context.ts',
   ),
+  join(SRC, 'shared', 'time', 'business-days.ts'),
 ];
 
 describe('formato regional y reloj solo desde el helper (G1-B, I5)', () => {
