@@ -67,6 +67,9 @@ async function cleanup(): Promise<void> {
   await raw.dentalCatalogItem.deleteMany({ where });
   await raw.patientLedger.deleteMany({ where });
   await raw.patient.deleteMany({ where });
+  // DX-316: los festivos frenan el borrado de la sede (RESTRICT); el
+  // calendario cae con ella (CASCADE).
+  await raw.locationHoliday.deleteMany({ where });
   await raw.location.deleteMany({ where });
   await raw.tenant.deleteMany({ where: { subdomain: SUBDOMAIN } });
   await raw.user.deleteMany({ where: { email: EMAIL } });
@@ -489,6 +492,45 @@ describe('hora del servidor en UTC con una sesión fuera de UTC (DX-226, int)', 
         await utcDrift(tx, 'expenses', 'voidedAt', expense.id),
       ).toBeLessThan(1);
     });
+  });
+
+  it('location_working_calendars y location_holidays: createdAt en UTC (DX-316)', async () => {
+    // El calendario lo crea el trigger de alta de sede, con la sesión en Bogotá.
+    await txInBogota(async (tx) => {
+      const location = await tx.location.create({
+        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+          tenantId: s.tenantId,
+          name: 'Sede del calendario',
+        }),
+      });
+      const calendar = await tx.locationWorkingCalendar.findUniqueOrThrow({
+        where: {
+          tenantId_locationId: {
+            tenantId: s.tenantId,
+            locationId: location.id,
+          },
+        },
+        select: { id: true },
+      });
+      expect(
+        await utcDrift(
+          tx,
+          'location_working_calendars',
+          'createdAt',
+          calendar.id,
+        ),
+      ).toBeLessThan(1);
+    });
+    // Lo que mande la API en createdAt no cuenta.
+    const holiday = await inBogota<{ id: string }>(
+      `INSERT INTO "location_holidays"
+         ("id", "tenantId", "locationId", "date", "name", "createdAt", "updatedAt")
+       VALUES (gen_random_uuid(), $1::uuid, $2::uuid, '2027-01-04'::date,
+               'Cierre anual', '2001-01-01 00:00:00', now())
+       RETURNING "id", ${drift('"createdAt"')}`,
+      s.locationId,
+    );
+    expect(holiday.drift).toBeLessThan(1);
   });
 
   it('imputación de abonos: base, imputación, cola e historial con la hora del servidor en UTC (DX-051)', async () => {

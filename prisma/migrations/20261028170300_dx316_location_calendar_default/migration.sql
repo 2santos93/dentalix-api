@@ -26,9 +26,10 @@
 -- sedes y el backfill (y su comprobación) no harían nada en silencio. FORCE
 -- se restaura en esta misma transacción en las dos tablas.
 --
--- Bloqueos (pre-flight I1): ACCESS EXCLUSIVE en `locations` y en
--- `location_working_calendars` (NO FORCE/FORCE); ningún ALTER TABLE
--- "tenants". lock_timeout 10 s: si una transacción larga retiene
+-- Bloqueos (pre-flight I1): ACCESS EXCLUSIVE en `locations` desde el primer
+-- paso que la toca (LOCK TABLE antes del CREATE TRIGGER, sin subir de
+-- bloqueo después) y en `location_working_calendars` (NO FORCE/FORCE);
+-- ningún ALTER TABLE "tenants". lock_timeout 10 s: si una transacción larga retiene
 -- `locations`, falla limpia y se reintenta el deploy.
 --
 -- Compatible hacia atrás: una réplica anterior que crea una sede sin conocer
@@ -48,6 +49,12 @@ CREATE FUNCTION public.dx_location_default_working_weekdays() RETURNS smallint[]
 AS $$
   SELECT '{1,2,3,4,5}'::smallint[]
 $$;
+
+-- ACCESS EXCLUSIVE sobre `locations` ANTES del CREATE TRIGGER (que solo pide
+-- SHARE ROW EXCLUSIVE): sin subir de bloqueo después en el NO FORCE, no hay
+-- interbloqueo con un PATCH de sede que ya tenga su FOR UPDATE (review M1).
+-- Lo acota el lock_timeout de arriba.
+LOCK TABLE "locations" IN ACCESS EXCLUSIVE MODE;
 
 -- 2. Calendario de toda sede nueva.
 CREATE FUNCTION public.dx_location_default_working_calendar() RETURNS trigger
