@@ -5,6 +5,8 @@
  * nombres de campo, ids de la ruta y códigos.
  */
 import { MAX_ALLOCATION_LINES } from '../../payments/domain/allocation-rules';
+import { MAX_HOLIDAYS_PER_FILE } from '../../location-calendar/domain/holiday-rules';
+import { parseCivilDate } from '../../../shared/time/civil-day';
 
 export interface AuditMetadata {
   /** Campos que traía la petición de escritura (nombres, nunca valores). */
@@ -111,6 +113,29 @@ export interface AuditMetadata {
    * G1-B: y el reloj (`h12`/`h23`); los eventos de G1 no lo traen.
    */
   regionalSettings?: AuditRegionalSettingsChange;
+  /**
+   * DX-316: un cambio del calendario de la sede (`resourceId` = la sede):
+   * días hábiles antes y después, la fecha y la clase de un festivo, o los
+   * recuentos de una importación. Nunca el nombre del festivo (texto libre).
+   */
+  locationCalendar?: AuditLocationCalendar;
+}
+
+/** Un festivo en la auditoría: su día civil y si se repite cada año. */
+export interface AuditHolidaySide {
+  date: string;
+  recurring: boolean;
+}
+
+export interface AuditLocationCalendar {
+  workingWeekdays?: { before: number[]; after: number[] };
+  holiday?: { before?: AuditHolidaySide; after?: AuditHolidaySide };
+  import?: {
+    format: 'CSV' | 'ICS';
+    created: number;
+    duplicate: number;
+    error: number;
+  };
 }
 
 export interface AuditRegionalSettingsSide {
@@ -782,6 +807,80 @@ function allocation(value: unknown): AuditAllocation | null {
   return { currency, mode, before, after };
 }
 
+/** 1–7 días de 0 (domingo) a 6, enteros; si no, nada (DX-316). */
+function weekdays(value: unknown): number[] | null {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 7) {
+    return null;
+  }
+  return value.every(
+    (d): d is number =>
+      typeof d === 'number' && Number.isInteger(d) && d >= 0 && d <= 6,
+  )
+    ? [...value]
+    : null;
+}
+
+/** Fecha civil que existe y la clase; el nombre (y cualquier otra clave) se cae. */
+function holidaySide(value: unknown): AuditHolidaySide | null {
+  if (!isRecord(value)) return null;
+  const { date, recurring } = value;
+  if (
+    typeof date !== 'string' ||
+    !CIVIL_DATE.test(date) ||
+    parseCivilDate(date) !== date ||
+    typeof recurring !== 'boolean'
+  ) {
+    return null;
+  }
+  return { date, recurring };
+}
+
+function importCount(value: unknown): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= 0 &&
+    value <= MAX_HOLIDAYS_PER_FILE
+  );
+}
+
+/**
+ * Cada parte con su forma; la que no encaja se cae sola y, si no queda
+ * ninguna, nada (DX-316).
+ */
+function locationCalendar(value: unknown): AuditLocationCalendar | null {
+  if (!isRecord(value)) return null;
+  const out: AuditLocationCalendar = {};
+  if (isRecord(value.workingWeekdays)) {
+    const before = weekdays(value.workingWeekdays.before);
+    const after = weekdays(value.workingWeekdays.after);
+    if (before && after) out.workingWeekdays = { before, after };
+  }
+  if (isRecord(value.holiday)) {
+    const before = holidaySide(value.holiday.before);
+    const after = holidaySide(value.holiday.after);
+    if (before || after) {
+      out.holiday = {
+        ...(before ? { before } : {}),
+        ...(after ? { after } : {}),
+      };
+    }
+  }
+  if (isRecord(value.import)) {
+    const { format, created, duplicate, error, ...rest } = value.import;
+    if (
+      Object.keys(rest).length === 0 &&
+      (format === 'CSV' || format === 'ICS') &&
+      importCount(created) &&
+      importCount(duplicate) &&
+      importCount(error)
+    ) {
+      out.import = { format, created, duplicate, error };
+    }
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+
 /**
  * Deja pasar solo lo que la lista admite, con el formato que admite. Lo que
  * no encaja se DESCARTA (no se trunca ni se escapa): así un valor clínico que
@@ -827,5 +926,7 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (reallocated) out.allocation = reallocated;
   const regional = regionalSettings(input.regionalSettings);
   if (regional) out.regionalSettings = regional;
+  const calendar = locationCalendar(input.locationCalendar);
+  if (calendar) out.locationCalendar = calendar;
   return out;
 }

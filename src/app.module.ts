@@ -44,6 +44,7 @@ import { LocationsModule } from './modules/locations/locations.module';
 import { CancellationPoliciesModule } from './modules/cancellation-policies/cancellation-policies.module';
 import { CancellationFeesModule } from './modules/cancellation-fees/cancellation-fees.module';
 import { LocationScheduleModule } from './modules/location-schedule/location-schedule.module';
+import { LocationCalendarModule } from './modules/location-calendar/location-calendar.module';
 import { ProviderScheduleModule } from './modules/provider-schedule/provider-schedule.module';
 import { PlatformModule } from './modules/platform/platform.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
@@ -121,6 +122,7 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     CancellationPoliciesModule,
     CancellationFeesModule,
     LocationScheduleModule,
+    LocationCalendarModule,
     // DX-233: horario de cada profesional por sede y cuadrante.
     ProviderScheduleModule,
     PlatformModule,

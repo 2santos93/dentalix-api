@@ -584,6 +584,13 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /locations/:id/cancellation-policy': ADMIN_ONLY,
   // DX-291: vista previa del recordatorio con la política vigente.
   'GET /locations/:id/cancellation-policy/email-preview': ADMIN_ONLY,
+  // DX-316: calendario de la sede (días hábiles y festivos), solo ADMIN, también
+  // para leer (spec G1.5 §6, R9).
+  'GET /locations/:id/calendar': ADMIN_ONLY,
+  'PUT /locations/:id/calendar/working-weekdays': ADMIN_ONLY,
+  'POST /locations/:id/holidays': ADMIN_ONLY,
+  'PATCH /locations/:id/holidays/:holidayId': ADMIN_ONLY,
+  'DELETE /locations/:id/holidays/:holidayId': ADMIN_ONLY,
 
   // --- Personal e invitaciones ---------------------------------------------
   // dentalix-docs/docs/plans/2026-07-23-fase2c-role-matrix.md (STAFF_WRITE_ROLES)

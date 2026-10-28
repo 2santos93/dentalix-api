@@ -160,6 +160,9 @@ const COUNTRY_FREE = [
     'notice-context.ts',
   ),
   join(SRC, 'shared', 'time', 'business-days.ts'),
+  // DX-316: el calendario de la sede y su cargador (I4).
+  join(SRC, 'shared', 'locations', 'location-business-calendar.ts'),
+  ...tsFiles(join(SRC, 'modules', 'location-calendar')).filter(isProduction),
 ];
 
 describe('formato regional y reloj solo desde el helper (G1-B, I5)', () => {
@@ -231,6 +234,26 @@ describe('formato regional y reloj solo desde el helper (G1-B, I5)', () => {
         (line) => HOUR_CYCLE_LITERAL.test(line),
       ),
     ).toEqual([]);
+  });
+
+  it('DX-316: every production file of the location calendar is in the country-free list', () => {
+    const calendar = join(SRC, 'modules', 'location-calendar');
+    for (const layer of [
+      'domain',
+      'application',
+      'infrastructure',
+      'presentation',
+    ]) {
+      expect({
+        layer,
+        listed: COUNTRY_FREE.some((file) =>
+          file.startsWith(join(calendar, layer)),
+        ),
+      }).toEqual({ layer, listed: true });
+    }
+    expect(COUNTRY_FREE.filter((file) => file.endsWith('.spec.ts'))).toEqual(
+      [],
+    );
   });
 
   it('architecture: reminder text builder has no country', () => {
