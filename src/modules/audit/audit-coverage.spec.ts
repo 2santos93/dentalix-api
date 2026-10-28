@@ -68,6 +68,18 @@ import {
   ProviderScheduleController,
   ScheduleRosterController,
 } from '../provider-schedule/presentation/provider-schedule.controller';
+import { AppModule } from '../../app.module';
+import {
+  collectControllers,
+  discoverRoutes,
+} from '../../../test/support/route-discovery';
+
+// Como en `auth-matrix.spec.ts`: el ConfigModule real valida el entorno al
+// importarse y no declara controladores, así que un módulo vacío no quita
+// ninguna ruta del recorrido de AppModule.
+jest.mock('../../config/config.module', () => ({
+  ConfigModule: class ConfigModule {},
+}));
 
 /**
  * Qué endpoints quedan auditados y cómo (DX-009). Tabla escrita a mano: un
@@ -1189,6 +1201,47 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   'DELETE /providers/:providerId/schedule-overrides/:overrideId':
     'provider-schedule.e2e-spec.ts',
   'PUT /schedule/settings': 'provider-schedule.e2e-spec.ts',
+  // DX-328: CLINIC_SETTINGS con MAJORITY_AGE_SETTINGS; sin evento si no cambia.
+  'PUT /patients/settings':
+    'patient-settings.use-cases.spec.ts y patient-settings.e2e-spec.ts',
+  // DX-128: COMMUNICATION_PREFERENCES_CHANGED con los campos cambiados.
+  'PATCH /patients/:id/communication':
+    'patient-communication.use-cases.spec.ts y patient-communication.e2e-spec.ts',
+  // Vigencia de la anamnesis: CLINIC_SETTINGS con ANAMNESIS_VALIDITY_SETTINGS.
+  'PUT /medical-history/settings':
+    'medical-alerts.spec.ts y appointments-medical-alerts.e2e-spec.ts',
+  // APPOINTMENT_PLAN_ITEMS en cada cita, en la transacción del traspaso.
+  'POST /appointments/:id/plan-items/:planItemId/claim':
+    'plan-items-arrival.e2e-spec.ts',
+  // DX-200: ARRIVAL_UNDONE con el estado al que vuelve.
+  'POST /appointments/:id/undo-arrival':
+    'patient-flow.use-case.spec.ts y patient-flow.e2e-spec.ts',
+  // Adelantar al hueco: APPOINTMENT_MOVED, como cualquier reagendado.
+  'PATCH /appointments/:id/opening': 'update-appointment.use-case.spec.ts',
+  // Lista de espera: WAITLIST_MANUAL, WAITLIST_DISMISSED y WAITLIST_SCHEDULED.
+  'POST /waitlist': 'waitlist.use-cases.spec.ts',
+  'POST /waitlist/:id/dismiss': 'waitlist.use-cases.spec.ts',
+  'POST /waitlist/:id/schedule': 'waitlist.use-cases.spec.ts',
+  // Ofertas de huecos: WAITLIST_OFFER al crearla y OFFER_<resultado>.
+  'POST /appointments/openings/:locationId/offers':
+    'opening-candidates.use-cases.spec.ts',
+  'PATCH /appointments/openings/offers/:id':
+    'opening-candidates.use-cases.spec.ts',
+  // PASSWORD_RESET de SESSION (sin sesión: el actor es el titular).
+  'POST /auth/reset-password':
+    'reset-password.use-case.spec.ts y password-reset.e2e-spec.ts',
+  // Solo la RECLAMACIÓN de una cuenta existente deja evento (ACCOUNT_CLAIM);
+  // aceptar con una cuenta nueva no deja ninguno (ver el informe de DX-324).
+  'POST /public/invitations/:token/accept':
+    'accept-invitation.use-case.spec.ts y accounts-no-enumeration.e2e-spec.ts',
+  // REMINDER_OPT_OUT del paciente por el enlace (solo si de verdad se da de baja).
+  'POST /public/reminder-opt-outs/:token':
+    'reminder-opt-out.use-cases.spec.ts y reminder-opt-out.e2e-spec.ts',
+  // ANAMNESIS_SUBMITTED (y el consentimiento) en la transacción del envío.
+  'POST /public/medical-history/:token':
+    'medical-history-submissions.e2e-spec.ts',
+  // Plataforma: JOB_RETRIED en `platform_audit_events`, no en `audit_events`.
+  'POST /platform/jobs/:id/retry': 'jobs-platform.e2e-spec.ts',
   // DX-324: CLINIC_SETTINGS con PRESCRIPTION_SETTINGS, los campos cambiados
   // y el antes y el después en códigos RX; sin evento si nada cambió.
   'PUT /prescriptions/settings':
@@ -1197,6 +1250,92 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // depende de la query, que el decorador no lee).
   'GET /expenses/:id/attachment/url':
     'expense-receipts.use-cases.spec.ts y expenses.e2e-spec.ts',
+};
+
+/**
+ * Rutas que escriben (POST/PUT/PATCH/DELETE) SIN evento de auditoría, cada una
+ * con su motivo. No es una lista de «ya está bien»: las marcadas «hueco» son
+ * cambios que deberían quedar auditados y tienen ticket pendiente; el resto
+ * no escriben datos de la clínica o no escriben nada.
+ */
+const KNOWN_UNAUDITED: Record<string, string> = {
+  // --- No escriben nada o solo preparan una escritura auditada ------------
+  'POST /auth/reset-password/check':
+    'solo comprueba el token (POST por el cuerpo)',
+  'POST /locations/:id/holidays/import/preview':
+    'vista previa de la importación; no escribe',
+  'POST /patient-imports/inspect': 'no escribe nada ni crea lote',
+  'POST /patients/:patientId/documents/upload-url':
+    'URL prefirmada; el alta del documento es la ruta auditada',
+  'POST /expenses/attachments/upload-url':
+    'URL prefirmada; el gasto que la usa es la ruta auditada',
+  'POST /files/uploads':
+    'subida directa del adaptador de disco (desarrollo y tests)',
+  'PATCH /patients/:patientId/clinical-entries/:entryId':
+    'siempre rechaza: una evolución firmada no se edita',
+  'PUT /patients/:patientId/clinical-entries/:entryId':
+    'siempre rechaza: una evolución firmada no se edita',
+  'DELETE /patients/:patientId/clinical-entries/:entryId':
+    'siempre rechaza: una evolución firmada no se borra',
+
+  // --- Sesión y cuenta propia ---------------------------------------------
+  'POST /auth/register': 'pide el enlace de verificación; aún no hay clínica',
+  'POST /auth/refresh': 'rota el token de refresco',
+  'POST /auth/logout': 'revoca el token de refresco',
+  'POST /auth/forgot-password': 'envía el email; no enumera cuentas',
+  'POST /auth/register/verify': 'hueco: crea la clínica y su ADMIN sin evento',
+  'PATCH /me': 'hueco: cambio del nombre propio sin evento',
+  'POST /me/password': 'hueco: cambio de contraseña sin evento',
+  'POST /me/avatar': 'foto de perfil propia',
+  'DELETE /me/avatar': 'foto de perfil propia',
+  'POST /platform/mfa/enrollment':
+    'hueco: alta del MFA de plataforma sin platform_audit_event',
+  'POST /platform/mfa/enrollment/confirm':
+    'hueco: alta del MFA de plataforma sin platform_audit_event',
+
+  // --- Personal y accesos -------------------------------------------------
+  'POST /staff/invitations': 'hueco: invitar (rol y sedes) sin evento',
+  'POST /staff/invitations/:id/resend': 'hueco: reenviar invitación sin evento',
+  'DELETE /staff/invitations/:id': 'hueco: retirar invitación sin evento',
+  'PATCH /staff/:userId': 'hueco: rol, sedes y registro profesional sin evento',
+  'POST /staff/:userId/reactivate': 'hueco: reactivar un miembro sin evento',
+  'DELETE /staff/:userId': 'hueco: desactivar un miembro sin evento',
+
+  // --- Configuración de la clínica ----------------------------------------
+  'POST /locations': 'hueco: alta de sede sin evento',
+  'PUT /locations/schedule': 'hueco: horario de la sede sin evento',
+  'PUT /reminder-settings/:locationId':
+    'hueco: ajustes de recordatorios de la sede sin evento',
+  'POST /domains': 'hueco: alta de dominio propio sin evento',
+  'POST /privacy-policies':
+    'hueco: publicar una versión de la política sin evento',
+  'POST /appointment-types': 'hueco: catálogo de tipos de cita sin evento',
+  'PATCH /appointment-types/:id': 'hueco: catálogo de tipos de cita sin evento',
+  'DELETE /appointment-types/:id':
+    'hueco: catálogo de tipos de cita sin evento',
+  'POST /payers': 'hueco: pagadores sin evento',
+  'PATCH /payers/:id': 'hueco: pagadores sin evento',
+  'DELETE /payers/:id': 'hueco: pagadores sin evento',
+  'POST /consent-templates': 'hueco: plantillas de consentimiento sin evento',
+  'PATCH /consent-templates/:id':
+    'hueco: plantillas de consentimiento sin evento',
+  'POST /prescription-templates': 'hueco: plantillas de receta sin evento',
+  'PATCH /prescription-templates/:id': 'hueco: plantillas de receta sin evento',
+  'DELETE /prescription-templates/:id':
+    'hueco: plantillas de receta sin evento',
+  'POST /inventory/items': 'hueco: inventario sin evento',
+  'PATCH /inventory/items/:id': 'hueco: inventario sin evento',
+  'DELETE /inventory/items/:id': 'hueco: inventario sin evento',
+  'POST /inventory/items/:id/movements':
+    'hueco: movimientos de inventario sin evento',
+
+  // --- Citas y enlaces al paciente -----------------------------------------
+  'POST /appointments/:id/confirmation-link':
+    'hueco: emitir el enlace de confirmación sin evento',
+  'POST /public/appointment-confirmations/:token':
+    'hueco: la respuesta del paciente cambia la cita sin evento',
+  'POST /public/post-op-instructions/:token/opened':
+    'marca la apertura de la indicación; sin evento',
 };
 
 const CONTROLLERS: Type[] = [
@@ -1265,24 +1404,6 @@ function joinPath(...parts: string[]): string {
   return `/${path}`;
 }
 
-/** `MÉTODO /ruta` de todos los handlers del controlador, auditados o no. */
-function routeKeys(controller: Type): string[] {
-  const base = (Reflect.getMetadata(PATH_METADATA, controller) as string) ?? '';
-  const proto = controller.prototype as Record<string, unknown>;
-  return Object.getOwnPropertyNames(proto).flatMap((name) => {
-    const handler = proto[name];
-    if (typeof handler !== 'function' || name === 'constructor') return [];
-    const path = Reflect.getMetadata(PATH_METADATA, handler) as
-      string | undefined;
-    if (path === undefined) return [];
-    const method =
-      RequestMethod[
-        Reflect.getMetadata(METHOD_METADATA, handler) as RequestMethod
-      ];
-    return [`${method} ${joinPath(base, path)}`];
-  });
-}
-
 interface AuditedRoute {
   key: string;
   options: AuditOptions;
@@ -1329,12 +1450,52 @@ describe('cobertura de la auditoría (DX-009)', () => {
     );
   });
 
+  // Todas las rutas de la app, no solo las de CONTROLLERS.
+  const appRoutes = discoverRoutes(collectControllers(AppModule));
+  const isDecorated = (route: (typeof appRoutes)[number]) =>
+    Reflect.getMetadata(
+      AUDIT_OPTIONS,
+      (route.controllerClass.prototype as Record<string, object>)[
+        route.handler
+      ],
+    ) !== undefined;
+  const mutating = appRoutes.filter((r) =>
+    /^(POST|PUT|PATCH|DELETE) /.test(r.key),
+  );
+
   it('las rutas auditadas en el caso de uso existen y no llevan además @Audit', () => {
-    const all = new Set(CONTROLLERS.flatMap(routeKeys));
-    const decorated = new Set(routes.map((r) => r.key));
+    const all = new Set(appRoutes.map((r) => r.key));
+    const decorated = new Set(appRoutes.filter(isDecorated).map((r) => r.key));
     expect(
       Object.keys(AUDITED_IN_USE_CASE).filter(
         (key) => !all.has(key) || decorated.has(key),
+      ),
+    ).toEqual([]);
+  });
+
+  it('cada ruta que escribe está auditada (@Audit en EXPECTED o en su caso de uso) o es una excepción con nombre', () => {
+    expect(
+      mutating
+        .map((r) => r.key)
+        .filter(
+          (key) =>
+            !(key in EXPECTED) &&
+            !(key in AUDITED_IN_USE_CASE) &&
+            !(key in KNOWN_UNAUDITED),
+        ),
+    ).toEqual([]);
+  });
+
+  it('KNOWN_UNAUDITED solo nombra rutas que escriben, existen y no tienen auditoría', () => {
+    const keys = new Set(mutating.map((r) => r.key));
+    const decorated = new Set(mutating.filter(isDecorated).map((r) => r.key));
+    expect(
+      Object.keys(KNOWN_UNAUDITED).filter(
+        (key) =>
+          !keys.has(key) ||
+          decorated.has(key) ||
+          key in EXPECTED ||
+          key in AUDITED_IN_USE_CASE,
       ),
     ).toEqual([]);
   });

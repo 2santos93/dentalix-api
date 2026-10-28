@@ -34,10 +34,11 @@ import {
 import { PrescriptionTemplatesController } from './presentation/prescription-templates.controller';
 
 /**
- * Recetas (DX-013): emisión inmutable con campos legales por país de la sede
- * (CO/ES), avisos de seguridad contra la anamnesis (DX-300: alergias,
- * interacciones, embarazo, antirresortivos, dosis infantil), anulación con
- * motivo y plantillas por clínica.
+ * Recetas (DX-013): emisión inmutable de una receta única (DX-324: sin reglas
+ * por país; lo que exige e imprime lo deciden los ajustes de la clínica),
+ * avisos de seguridad contra la anamnesis (DX-300: alergias, interacciones,
+ * embarazo, antirresortivos, dosis infantil), anulación con motivo,
+ * plantillas y ajustes de la receta por clínica.
  */
 @Module({
   imports: [JwtModule.register({})],

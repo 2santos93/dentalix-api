@@ -1,4 +1,6 @@
 import { Prisma } from '@prisma/client';
+import { PLATFORM_DEFAULT_MAJORITY_AGE } from '../../../patients/domain/responsible-parties/majority-age';
+import { PLATFORM_DEFAULT_PRESCRIPTION_SETTINGS } from '../../../prescriptions/domain/prescription-settings';
 import { PrismaAuthRepository } from './prisma-auth.repository';
 
 describe('PrismaAuthRepository — refresh-token denylist', () => {
@@ -62,5 +64,46 @@ describe('PrismaAuthRepository — refresh-token denylist', () => {
     await expect(
       repo.consumeRefreshToken('jti-1', new Date('2030-01-01T00:00:00Z')),
     ).rejects.toBe(boom);
+  });
+});
+
+describe('PrismaAuthRepository — createClinicWithOwner', () => {
+  it('writes the platform clinic settings explicitly, not by the DB defaults (DX-328, DX-324)', async () => {
+    // Se corta tras crear la clínica: aquí solo importa qué datos recibe
+    // `tenant.create`, que la BD no distingue de sus defaults.
+    const stop = new Error('stop after tenant.create');
+    const tx = {
+      tenant: { create: jest.fn().mockResolvedValue({ id: 't-1' }) },
+      user: { create: jest.fn().mockRejectedValue(stop) },
+    };
+    const prisma = {
+      $transaction: (fn: (client: typeof tx) => Promise<unknown>) => fn(tx),
+    };
+    const repo = new PrismaAuthRepository(prisma as never);
+
+    await expect(
+      repo.createClinicWithOwner({
+        clinicName: 'Clínica',
+        subdomain: 'clinica',
+        email: 'owner@clinica.test',
+        passwordHash: 'hash',
+        fullName: 'Owner',
+        emailVerifiedAt: new Date('2030-01-01T00:00:00Z'),
+        location: null,
+      }),
+    ).rejects.toBe(stop);
+
+    expect(tx.tenant.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        majorityAge: PLATFORM_DEFAULT_MAJORITY_AGE,
+        prescriptionPrintQuantityInWords:
+          PLATFORM_DEFAULT_PRESCRIPTION_SETTINGS.printQuantityInWords,
+        prescriptionRequireClinicalRecordNumber:
+          PLATFORM_DEFAULT_PRESCRIPTION_SETTINGS.requireClinicalRecordNumber,
+        prescriptionValidityDays:
+          PLATFORM_DEFAULT_PRESCRIPTION_SETTINGS.validityDays,
+      }) as unknown,
+      select: { id: true },
+    });
   });
 });

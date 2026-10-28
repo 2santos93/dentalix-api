@@ -332,6 +332,14 @@ describe('Ajustes de la receta de la clínica (e2e, DX-324)', () => {
   });
 
   it('another clinic is not affected', async () => {
+    // Por sí mismo: deja esta clínica en valores que no son los de plataforma.
+    const changed = {
+      printQuantityInWords: true,
+      requireClinicalRecordNumber: false,
+      validityDays: 365,
+    };
+    await put(changed).expect(200).expect(changed);
+    expect(await settings()).toEqual(changed);
     expect(await settings(other.adminToken, other.host)).toEqual(
       PLATFORM_DEFAULT_PRESCRIPTION_SETTINGS,
     );
