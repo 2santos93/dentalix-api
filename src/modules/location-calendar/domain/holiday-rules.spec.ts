@@ -192,6 +192,12 @@ describe('holiday-rules (DX-316)', () => {
       expect(validateHolidayName(emojis)).toBe(emojis);
     });
 
+    it('keeps zero-width joiners inside a visible name (m3)', () => {
+      expect(validateHolidayName('Cierre \u{1F468}\u200D\u{1F9B7}')).toBe(
+        'Cierre \u{1F468}\u200D\u{1F9B7}',
+      );
+    });
+
     it('keeps a formula-looking name as plain text (P15: only exports neutralize)', () => {
       expect(validateHolidayName('=cmd|/C calc')).toBe('=cmd|/C calc');
     });
@@ -203,6 +209,11 @@ describe('holiday-rules (DX-316)', () => {
       ['a line separator', 'Cierre\u2028anual'],
       ['only spaces', '   '],
       ['empty', ''],
+      ['only a zero-width space (m3)', '\u200B'],
+      ['only format characters and spaces (m3)', ' \u200B\u2060\uFEFF\u200D '],
+      ['a right-to-left override (m3)', 'A\u202EB'],
+      ['a left-to-right embedding (m3)', '\u202ACierre anual'],
+      ['a first-strong isolate (m3)', 'Cierre \u2068anual\u2069'],
       ['not a string', 12],
       ['null', null],
     ])('%s → the name message', (_label, raw) => {

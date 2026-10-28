@@ -1,4 +1,9 @@
-import { parseCsv } from '../../patient-imports/domain/csv-parser';
+import {
+  csvRecords,
+  decodeCsv,
+  detectDelimiter,
+  type CsvDelimiter,
+} from '../../patient-imports/domain/csv-parser';
 import { ImportFileError } from '../../patient-imports/domain/tabular-file';
 import type {
   HolidayCandidate,
@@ -15,10 +20,13 @@ import {
 } from './holiday-rules';
 
 /**
- * Lector CSV de festivos (spec §5.2), puro. Decodifica y separa con el lector
- * de la importación de pacientes (P15: BOM, Windows-1252, `;` o `,`, comillas
- * RFC 4180, CRLF). La cabecera va en la primera fila; las fechas solo en ISO
- * (R8): `03/05/2027` o un número de serie de Excel son errores de fila.
+ * Lector CSV de festivos (spec §5.2), puro. Decodifica y separa con las piezas
+ * del lector de la importación de pacientes (P15: BOM, Windows-1252, comillas
+ * RFC 4180, CRLF), pero el separador sale de la CABECERA, no de las filas:
+ * un nombre con comas («Cierre, anual») no convierte un fichero con `;` en
+ * uno con `,` (revisión m2). La cabecera va en la primera fila; las fechas
+ * solo en ISO (R8): `03/05/2027` o un número de serie de Excel son errores de
+ * fila.
  */
 
 type Column = 'date' | 'name' | 'recurring';
@@ -37,8 +45,75 @@ const HEADER_ALIASES: Record<string, Column> = {
 const YES = new Set(['si', 'yes', 'true', '1', 'x']);
 const NO = new Set(['', 'no', 'false', '0']);
 
+/**
+ * Minúsculas, sin acentos ni caracteres invisibles (ancho cero, BOM) y con los
+ * blancos colapsados y recortados: «  Cada\u00A0 Año » → «cada ano» (m4).
+ */
 function normalizeLabel(value: string): string {
-  return value.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().trim();
+  return value
+    .normalize('NFD')
+    .replace(/[\p{M}\p{Cf}]/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+/** `sep=;` en la primera línea: la pista de separador que entiende Excel. */
+const SEP_HINT = /^sep=([,;\t])\r?\n/i;
+const DELIMITERS: readonly CsvDelimiter[] = [',', ';', '\t'];
+
+interface HeaderColumns {
+  date: number | undefined;
+  name: number | undefined;
+  recurring: number | undefined;
+}
+
+/** Cada columna, la primera de la cabecera con ese nombre o alias. */
+function headerColumns(cells: readonly string[]): HeaderColumns {
+  const columns = new Map<Column, number>();
+  cells.forEach((cell, index) => {
+    const column = HEADER_ALIASES[normalizeLabel(cell)];
+    if (column && !columns.has(column)) columns.set(column, index);
+  });
+  return {
+    date: columns.get('date'),
+    name: columns.get('name'),
+    recurring: columns.get('recurring'),
+  };
+}
+
+function recognized(columns: HeaderColumns): number {
+  return Object.values(columns).filter((at) => at !== undefined).length;
+}
+
+/**
+ * El separador con el que la primera fila tiene «fecha» y «nombre»; entre
+ * varios, el que reconoce más columnas (así `fecha,nombre;recurrente` no
+ * pierde «recurrente» en silencio) y, a igualdad, el que más aparece en la
+ * cabecera. Con la pista `sep=`, solo ese. Si ninguno, `null`: error de
+ * cabecera.
+ */
+function pickDelimiter(
+  text: string,
+  hinted: CsvDelimiter | null,
+  firstRowNumber: number,
+): { delimiter: CsvDelimiter; columns: HeaderColumns } | null {
+  const headerLine = text.split(/\r\n|\r|\n/, 1)[0];
+  const preferred = detectDelimiter(headerLine);
+  const order = hinted
+    ? [hinted]
+    : [preferred, ...DELIMITERS.filter((d) => d !== preferred)];
+  let best: { delimiter: CsvDelimiter; columns: HeaderColumns } | null = null;
+  for (const delimiter of order) {
+    const header = csvRecords(text, delimiter, firstRowNumber).next();
+    if (header.done) return null;
+    const columns = headerColumns(header.value.cells);
+    if (columns.date === undefined || columns.name === undefined) continue;
+    if (best === null || recognized(columns) > recognized(best.columns)) {
+      best = { delimiter, columns };
+    }
+  }
+  return best;
 }
 
 function isBlank(cells: readonly string[]): boolean {
@@ -46,26 +121,22 @@ function isBlank(cells: readonly string[]): boolean {
 }
 
 export function parseCsvHolidays(bytes: Buffer): ParsedHolidayFile {
-  const { records } = parseCsv(bytes);
-  const first = records.next();
-  if (first.done) throw new ImportFileError(HOLIDAY_MESSAGES.emptyFile);
+  const { text: decoded } = decodeCsv(bytes);
+  const hint = SEP_HINT.exec(decoded);
+  const text = hint ? decoded.slice(hint[0].length) : decoded;
+  const firstRowNumber = hint ? 2 : 1;
+  if (text.trim() === '') throw new ImportFileError(HOLIDAY_MESSAGES.emptyFile);
 
-  // Cada columna, la primera de la cabecera con ese nombre o alias.
-  const columns = new Map<Column, number>();
-  first.value.cells.forEach((cell, index) => {
-    const column = HEADER_ALIASES[normalizeLabel(cell)];
-    if (column && !columns.has(column)) columns.set(column, index);
-  });
-  const dateAt = columns.get('date');
-  const nameAt = columns.get('name');
-  const recurringAt = columns.get('recurring');
-  if (dateAt === undefined || nameAt === undefined) {
-    if (isBlank(first.value.cells) && allBlank(records)) {
-      throw new ImportFileError(HOLIDAY_MESSAGES.emptyFile);
-    }
-    throw new ImportFileError(HOLIDAY_MESSAGES.csvHeader);
-  }
+  const picked = pickDelimiter(
+    text,
+    hint ? (hint[1] as CsvDelimiter) : null,
+    firstRowNumber,
+  );
+  if (picked === null) throw new ImportFileError(HOLIDAY_MESSAGES.csvHeader);
+  const { delimiter, columns } = picked;
 
+  const records = csvRecords(text, delimiter, firstRowNumber);
+  records.next(); // la cabecera
   const candidates: HolidayCandidate[] = [];
   const errors: HolidayRowError[] = [];
   for (const record of records) {
@@ -78,22 +149,18 @@ export function parseCsvHolidays(bytes: Buffer): ParsedHolidayFile {
       index === undefined ? '' : (record.cells[index] ?? '');
     const line = record.rowNumber;
     const read = readRow(
-      cell(dateAt),
-      cell(nameAt),
-      recurringAt === undefined ? '' : cell(recurringAt),
+      cell(columns.date),
+      cell(columns.name),
+      cell(columns.recurring),
     );
     if ('message' in read) errors.push({ line, ...read });
     else candidates.push({ line, ...read });
   }
-  return { format: 'CSV', candidates, errors };
-}
-
-/** Los registros que quedan están todos en blanco (el fichero solo tiene saltos). */
-function allBlank(records: Iterator<{ cells: string[] }>): boolean {
-  for (let next = records.next(); !next.done; next = records.next()) {
-    if (!isBlank(next.value.cells)) return false;
+  // Solo la cabecera (o filas en blanco): nada que importar (revisión m1).
+  if (candidates.length + errors.length === 0) {
+    throw new ImportFileError(HOLIDAY_MESSAGES.emptyFile);
   }
-  return true;
+  return { format: 'CSV', candidates, errors };
 }
 
 type ReadRow = Omit<HolidayCandidate, 'line'> | Omit<HolidayRowError, 'line'>;

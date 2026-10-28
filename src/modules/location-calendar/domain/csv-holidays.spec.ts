@@ -135,6 +135,8 @@ describe('parseCsvHolidays (DX-316)', () => {
     ['empty', ''],
     ['only a BOM', '\uFEFF'],
     ['only blank lines', '\r\n\r\n  \n'],
+    ['only a header (m1)', 'fecha,nombre\n'],
+    ['a header and blank rows (m1)', 'fecha;nombre;recurrente\r\n;;\r\n\r\n'],
   ])('%s file → «El archivo está vacío.»', (_label, text) => {
     const error = fileError(() => parseCsvHolidays(csv(text)));
     expect(
@@ -142,6 +144,103 @@ describe('parseCsvHolidays (DX-316)', () => {
         throw new Error('fmt not needed');
       }),
     ).toBe('El archivo está vacío.');
+  });
+
+  it('takes the delimiter from the header, not from commas in the names (m2)', () => {
+    const parsed = parseCsvHolidays(
+      csv('fecha;nombre\n2027-05-03;Cierre, anual, a\n2027-05-04;Otro, b, c\n'),
+    );
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.candidates).toEqual([
+      {
+        line: 2,
+        date: '2027-05-03',
+        name: 'Cierre, anual, a',
+        recurring: false,
+      },
+      { line: 3, date: '2027-05-04', name: 'Otro, b, c', recurring: false },
+    ]);
+  });
+
+  it('a tab-separated header is read with tabs, and `sep=` still wins (m2)', () => {
+    expect(
+      parseCsvHolidays(csv('fecha\tnombre\n2027-05-03\tCierre, anual; a\n'))
+        .candidates[0].name,
+    ).toBe('Cierre, anual; a');
+    expect(
+      parseCsvHolidays(csv('sep=;\nfecha;nombre\n2027-05-03;Cierre, a, b, c\n'))
+        .candidates,
+    ).toEqual([
+      {
+        line: 3,
+        date: '2027-05-03',
+        name: 'Cierre, a, b, c',
+        recurring: false,
+      },
+    ]);
+  });
+
+  it.each([
+    ['two inner spaces', 'cada  año'],
+    ['a tab and spaces around', ' \tCada\tAño '],
+    ['a no-break space', 'cada\u00A0año'],
+    ['a zero-width space', 'recu\u200Brrente'],
+    ['upper case with accents', 'RECURRENTE'],
+  ])('recognizes the recurrente header with %s (m4)', (_label, header) => {
+    const parsed = parseCsvHolidays(
+      csv(`fecha,nombre,${header},notas\n2027-05-03,Cierre anual,sí,x\n`),
+    );
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.candidates[0].recurring).toBe(true);
+  });
+
+  it('extra header cells do not drop the recurrente column (m4)', () => {
+    const parsed = parseCsvHolidays(
+      csv(
+        'notas,,fecha,recurrente,nombre,otra,recurrente\n,,2027-05-03,sí,Cierre anual,,no\n',
+      ),
+    );
+    expect(parsed.candidates).toEqual([
+      { line: 2, date: '2027-05-03', name: 'Cierre anual', recurring: true },
+    ]);
+  });
+
+  it('a header mixing delimiters is the header error, never a silent drop (m4)', () => {
+    const error = fileError(() =>
+      parseCsvHolidays(
+        csv('fecha,nombre;recurrente\n2027-05-03,Cierre anual;sí\n'),
+      ),
+    );
+    expect(
+      error.render(() => {
+        throw new Error('fmt not needed');
+      }),
+    ).toBe(HOLIDAY_MESSAGES.csvHeader);
+  });
+
+  it('between two delimiters that both find «fecha» and «nombre», the one that also finds «recurrente» wins (m4)', () => {
+    // «,» (el más frecuente) → [fecha, nombre, x, y, «z⇥recurrente⇥fecha⇥nombre»]: 2.
+    // «⇥» → [«fecha,nombre,x,y,z», recurrente, fecha, nombre]: 3.
+    const parsed = parseCsvHolidays(
+      csv(
+        'fecha,nombre,x,y,z\trecurrente\tfecha\tnombre\na,b,c,d,e\tsí\t2027-05-03\tCierre anual\n',
+      ),
+    );
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.candidates).toEqual([
+      { line: 2, date: '2027-05-03', name: 'Cierre anual', recurring: true },
+    ]);
+  });
+
+  it('a mangled required header is the header error (m4)', () => {
+    const error = fileError(() =>
+      parseCsvHolidays(csv('fecha,nom bre\n2027-05-03,Cierre anual\n')),
+    );
+    expect(
+      error.render(() => {
+        throw new Error('fmt not needed');
+      }),
+    ).toBe(HOLIDAY_MESSAGES.csvHeader);
   });
 
   it('ignores unknown columns and skips empty rows', () => {
@@ -327,19 +426,14 @@ describe('parseCsvHolidays (DX-316)', () => {
     });
 
     it('the reader stops at entry 501 instead of reading the whole file', () => {
-      const realParseCsv = csvParser.parseCsv;
-      const parse = jest.spyOn(csvParser, 'parseCsv');
+      const realCsvRecords = csvParser.csvRecords;
+      const parse = jest.spyOn(csvParser, 'csvRecords');
       let pulled = 0;
-      parse.mockImplementation((bytes) => {
-        const parsed = realParseCsv(bytes);
-        const records = parsed.records;
-        function* counted() {
-          for (const record of records) {
-            pulled += 1;
-            yield record;
-          }
+      parse.mockImplementation(function* (...args) {
+        for (const record of realCsvRecords(...args)) {
+          pulled += 1;
+          yield record;
         }
-        return { ...parsed, records: counted() };
       });
       try {
         const error = fileError(() =>
@@ -352,8 +446,9 @@ describe('parseCsvHolidays (DX-316)', () => {
         expect(error.render(() => deDE)).toBe(
           HOLIDAY_MESSAGES.tooManyEntries(deDE),
         );
-        // La cabecera y 501 entradas: ni una fila más.
-        expect(pulled).toBe(502);
+        // La cabecera con cada uno de los 3 separadores, y luego la cabecera
+        // y 501 entradas: ni una fila más.
+        expect(pulled).toBe(3 + 502);
       } finally {
         parse.mockRestore();
       }

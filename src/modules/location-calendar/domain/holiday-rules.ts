@@ -135,16 +135,28 @@ export function validateHolidayDate(raw: unknown): string {
  * que la BD también rechaza (`[[:cntrl:]]` en `location_holidays_name_check`).
  */
 const CONTROL_CHARS = /[\p{Cc}\u2028\u2029]/u;
+/**
+ * Incrustaciones, anulaciones y aislamientos bidireccionales: reordenan a la
+ * vista el nombre en las listas y en los mensajes «Ya existe: «X».».
+ */
+const BIDI_CONTROLS = /[\u202A-\u202E\u2066-\u2069]/u;
+/** Formato (ancho cero, BOM…) y blancos: lo que no se ve. */
+const INVISIBLE = /[\p{Cf}\s]/gu;
 
 /**
  * Recortado, 1–120 caracteres (contados como `char_length`, no en unidades
- * UTF-16) y sin caracteres de control. Un nombre que empieza por `=` se guarda
- * tal cual: es texto; solo las exportaciones a CSV lo neutralizan (P15).
+ * UTF-16), con algo visible, sin caracteres de control ni de control
+ * bidireccional. Un nombre que empieza por `=` se guarda tal cual: es texto;
+ * solo las exportaciones a CSV lo neutralizan (P15).
  */
 export function validateHolidayName(raw: unknown): string {
   const name = typeof raw === 'string' ? raw.trim() : '';
-  const length = [...name].length;
-  if (length === 0 || length > HOLIDAY_NAME_MAX || CONTROL_CHARS.test(name)) {
+  if (
+    name.replace(INVISIBLE, '') === '' ||
+    [...name].length > HOLIDAY_NAME_MAX ||
+    CONTROL_CHARS.test(name) ||
+    BIDI_CONTROLS.test(name)
+  ) {
     throw new HolidayRuleError('name', HOLIDAY_MESSAGES.nameInvalid);
   }
   return name;
