@@ -21,7 +21,7 @@ function context(over: Partial<ReminderSendContext> = {}): ReminderSendContext {
       status: 'SCHEDULED',
       deleted: false,
     },
-    locationCountry: 'CO',
+    majorityAge: 18,
     locationTimeZone: 'America/Bogota',
     // Ajustes explícitos de la sede: el reloj sale de aquí, nunca del país.
     locationFormat: regionalFormat({ locale: 'es-CO', hourCycle: 'h12' }),
@@ -274,6 +274,31 @@ describe('SendAppointmentReminder (DX-026)', () => {
     // La baja del email es la del PACIENTE de la cita.
     expect(optOutLinks.issue).toHaveBeenCalledWith(PATIENT);
     expect(repo.reminders[0]).toMatchObject({ status: 'SENT' });
+  });
+
+  it('reminder recipient uses the clinic majorityAge', async () => {
+    // 17 años el 2026-10-20, con email propio y un responsable con email.
+    repo.contexts.set(
+      APPT,
+      context({
+        majorityAge: 16,
+        recipient: {
+          firstName: 'Ana',
+          birthDate: new Date('2009-03-01'),
+          email: 'ana@example.com',
+          emergencyContactName: null,
+        },
+        responsibles: [mother],
+      }),
+    );
+    await handler.handle(payload);
+    expect(outbound.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recipient: 'ana@example.com',
+        recipientKind: 'PATIENT',
+      }),
+      expect.any(Function),
+    );
   });
 
   it('un menor sin email cuyo responsable no recibe avisos (o se dio de baja): NO_EMAIL', async () => {

@@ -1,9 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import {
-  ClinicCountry,
-  DocType,
-  ResponsibleRelationship,
-} from '@prisma/client';
+import { DocType, ResponsibleRelationship } from '@prisma/client';
 import {
   IsBoolean,
   IsEmail,
@@ -257,15 +253,16 @@ export class PatientResponsiblesDto {
 
   @ApiProperty({
     description:
-      'Menor según el país de la sede activa o principal, en su día civil (CO < 18, ES < 16).',
+      'Menor que la mayoría de edad de la clínica (`majorityAge`), en el día civil de la sede activa o principal.',
   })
   minor!: boolean;
 
-  @ApiProperty({ example: 18 })
+  @ApiProperty({
+    example: 18,
+    description:
+      'Edad desde la que el paciente es adulto en esta clínica (Ajustes › Mayoría de edad).',
+  })
   majorityAge!: number;
-
-  @ApiProperty({ enum: ClinicCountry, enumName: 'ClinicCountry' })
-  country!: ClinicCountry;
 
   @ApiProperty({ type: [ResponsiblePartyDto] })
   parties!: ResponsiblePartyDto[];

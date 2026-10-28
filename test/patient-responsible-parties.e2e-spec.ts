@@ -34,7 +34,6 @@ interface Responsibles {
   patientId: string;
   minor: boolean;
   majorityAge: number;
-  country: string;
   parties: Party[];
   responsibleFor: {
     id: string;
@@ -126,16 +125,17 @@ describe('Responsables de pago y avisos (e2e, DX-203)', () => {
     await raw.$disconnect();
   });
 
-  it('sin responsables: lista vacía, menor según el país de la sede', async () => {
-    expect(await list(son)).toMatchObject({
+  it('sin responsables: lista vacía, menor según la mayoría de edad de la clínica', async () => {
+    const view = await list(son);
+    expect(view).toMatchObject({
       patientId: son,
       minor: true,
       majorityAge: 18,
-      country: 'CO',
       parties: [],
       responsibleFor: [],
       noticeRecipient: { kind: 'PATIENT', email: null },
     });
+    expect(view).not.toHaveProperty('country');
   });
 
   it('recepción vincula a la madre (paciente) como pagadora y aparece en la ficha de ambos', async () => {

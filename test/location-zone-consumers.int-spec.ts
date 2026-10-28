@@ -11,7 +11,7 @@ import { PrismaPatientConsentRepository } from '../src/modules/consents/infrastr
 import { PreviewPatientConsentUseCase } from '../src/modules/consents/application/use-cases/patient-consents.use-cases';
 import { InMemoryConsentTemplateRepository } from '../src/modules/consents/application/__fixtures__/in-memory-consent-templates';
 import { PrismaPatientImportRepository } from '../src/modules/patient-imports/infrastructure/prisma-patient-import.repository';
-import { loadNoticeLocation } from '../src/modules/patients/infrastructure/notices/notice-context';
+import { loadNoticeSettings } from '../src/modules/patients/infrastructure/notices/notice-context';
 import { civilDateIn } from '../src/shared/time/civil-day';
 import { noticeRecipient } from '../src/modules/patients/domain/communication/notice-recipient';
 import { startsAtLabel } from '../src/modules/reminders/domain/starts-at-label';
@@ -168,14 +168,14 @@ describe('consumidores de la zona de la sede: día civil en Tokio (int, G1)', ()
       repo.loadSendContext(appointmentId),
     );
     expect(ctx?.locationTimeZone).toBe('Asia/Tokyo');
-    const { recipient, contact, responsibles, locationCountry } = ctx!;
+    const { recipient, contact, responsibles, majorityAge } = ctx!;
     // Las dos decisiones de fecha del envío, con lo que da el repositorio:
     // ¿es menor HOY en la sede? y la fecha de la cita del email.
     const recipientOn = (timeZone: string) =>
       noticeRecipient({
         patient: { ...recipient, email: contact.email },
         responsibles,
-        country: locationCountry,
+        majorityAge,
         today: civilDateIn(NOW, timeZone),
         automatic: true,
       });
@@ -193,6 +193,26 @@ describe('consumidores de la zona de la sede: día civil en Tokio (int, G1)', ()
         ctx!.locationFormat,
       ),
     ).toMatch(/^miércoles 21 de octubre de 2026 a las 10:00/);
+  });
+
+  it('reminder send context carries the clinic majorityAge', async () => {
+    const repo = new PrismaReminderRepository(prisma, tenantContext);
+    await owner.tenant.update({
+      where: { id: tenantId },
+      data: { majorityAge: 20 },
+    });
+    try {
+      const ctx = await inTenant(undefined, () =>
+        repo.loadSendContext(appointmentId),
+      );
+      expect(ctx?.majorityAge).toBe(20);
+      expect(ctx).not.toHaveProperty('locationCountry');
+    } finally {
+      await owner.tenant.update({
+        where: { id: tenantId },
+        data: { majorityAge: 18 },
+      });
+    }
   });
 
   it('medical alert day cut at Tokyo midnight', async () => {
@@ -345,7 +365,7 @@ describe('consumidores de la zona de la sede: día civil en Tokio (int, G1)', ()
     expect(
       await conflictOf(
         prisma.runWithTenant(emptyTenantId, (tx) =>
-          loadNoticeLocation(tx, emptyTenantId, null),
+          loadNoticeSettings(tx, emptyTenantId, null),
         ),
       ),
     ).toMatchObject({
@@ -353,11 +373,11 @@ describe('consumidores de la zona de la sede: día civil en Tokio (int, G1)', ()
       message:
         'La clínica no tiene ninguna sede activa. Crea una en Ajustes → Sedes.',
     });
-    // Con sedes: país y zona de la principal.
+    // Con sedes: la zona de la principal y la mayoría de edad de la clínica.
     await expect(
       prisma.runWithTenant(tenantId, (tx) =>
-        loadNoticeLocation(tx, tenantId, null),
+        loadNoticeSettings(tx, tenantId, null),
       ),
-    ).resolves.toEqual({ country: 'CO', timeZone: 'Asia/Tokyo' });
+    ).resolves.toEqual({ timeZone: 'Asia/Tokyo', majorityAge: 18 });
   });
 });

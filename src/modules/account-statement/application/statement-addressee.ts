@@ -24,8 +24,8 @@ export function statementAddressee(
   const recipient = noticeRecipient({
     patient: notice.patient,
     responsibles: notice.responsibles,
-    country: notice.location.country,
-    today: civilDateIn(now, notice.location.timeZone),
+    majorityAge: notice.settings.majorityAge,
+    today: civilDateIn(now, notice.settings.timeZone),
   });
   const responsible = notice.responsibles.find(
     (r) => r.id === recipient.responsiblePartyId,

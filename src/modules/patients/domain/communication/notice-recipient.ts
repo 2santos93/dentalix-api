@@ -1,4 +1,3 @@
-import type { ClinicCountry } from '@prisma/client';
 import { firstNameOnly } from '../../../appointment-confirmations/application/confirmation-token';
 import { isMinor } from '../responsible-parties/majority-age';
 
@@ -21,10 +20,13 @@ export interface NoticeResponsible {
   optedOut: boolean;
 }
 
-/** País y zona de la sede con que se cuenta la edad del paciente (DX-203). */
-export interface NoticeLocation {
-  country: ClinicCountry;
+/**
+ * Con qué se cuenta la edad del paciente (DX-203, DX-328): la zona de la sede
+ * da el día civil y la clínica, su mayoría de edad.
+ */
+export interface NoticeSettings {
   timeZone: string;
+  majorityAge: number;
 }
 
 export interface NoticePatientFields {
@@ -38,8 +40,8 @@ export interface NoticeRecipientInput {
   patient: NoticePatientFields;
   /** Responsables VIVOS del paciente. */
   responsibles: readonly NoticeResponsible[];
-  /** País de la sede (su edad de mayoría, ver majority-age.ts). */
-  country: ClinicCountry;
+  /** Mayoría de edad de la clínica (ver majority-age.ts). */
+  majorityAge: number;
   /** Día civil (YYYY-MM-DD) de la sede. */
   today: string;
   /** Envío automático (recordatorio): respeta la baja del responsable. */
@@ -72,17 +74,18 @@ const clean = (email: string | null): string | null => email?.trim() || null;
 /**
  * Regla de destinatario de los avisos (DX-203): el recordatorio de cita
  * (DX-026), el recibo de caja (DX-136) y el estado de cuenta (DX-011) de un
- * paciente MENOR (CO < 18, ES < 16, en el día civil de la sede) o SIN email
- * van al responsable que recibe avisos y tiene email; primero el pagador
- * principal y luego por orden de alta. Si no hay ninguno, al email de la
- * ficha (si lo hay). Un adulto con email recibe los suyos.
+ * paciente MENOR (por debajo de la mayoría de edad de la clínica, en el día
+ * civil de la sede) o SIN email van al responsable que recibe avisos y tiene
+ * email; primero el pagador principal y luego por orden de alta. Si no hay
+ * ninguno, al email de la ficha (si lo hay). Un adulto con email recibe los
+ * suyos.
  *
  * El canal y la baja del PACIENTE (DX-128) los aplica antes quien envía
  * (reminder-eligibility.ts): esto solo decide a quién.
  */
 export function noticeRecipient(input: NoticeRecipientInput): NoticeRecipient {
   const { patient } = input;
-  const minor = isMinor(patient.birthDate, input.country, input.today);
+  const minor = isMinor(patient.birthDate, input.majorityAge, input.today);
   const own = clean(patient.email);
   const candidates = input.responsibles
     .filter((r) => r.receivesNotices && !(input.automatic && r.optedOut))

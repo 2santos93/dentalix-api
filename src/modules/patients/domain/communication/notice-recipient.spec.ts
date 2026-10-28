@@ -1,3 +1,4 @@
+import { civilDateIn } from '../../../../shared/time/civil-day';
 import {
   noticeRecipient,
   type NoticeRecipientInput,
@@ -7,7 +8,7 @@ import {
 const TODAY = '2026-10-17';
 const CHILD = new Date('2015-03-10T00:00:00.000Z');
 const ADULT = new Date('1990-05-01T00:00:00.000Z');
-/** 17 años en TODAY: menor en CO, adulto en ES. */
+/** 17 años en TODAY: menor con 18, adulto con 16. */
 const SEVENTEEN = new Date('2009-03-01T00:00:00.000Z');
 
 const mother: NoticeResponsible = {
@@ -36,7 +37,7 @@ function input(over: Partial<NoticeRecipientInput> = {}): NoticeRecipientInput {
       emergencyContactName: null,
     },
     responsibles: [mother],
-    country: 'CO',
+    majorityAge: 18,
     today: TODAY,
     ...over,
   };
@@ -95,21 +96,59 @@ describe('noticeRecipient (DX-203: menores y pacientes sin email, al responsable
     });
   });
 
-  it('por país: 17 años es menor en CO y adulto en ES', () => {
+  it('noticeRecipient routes a 17-year-old to the responsible with 18 and to the patient with 16', () => {
     const teen = {
       ...input().patient,
       birthDate: SEVENTEEN,
       email: 'teen@example.com',
     };
-    expect(noticeRecipient(input({ patient: teen, country: 'CO' })).kind).toBe(
-      'RESPONSIBLE',
-    );
     expect(
-      noticeRecipient(input({ patient: teen, country: 'ES' })),
+      noticeRecipient(input({ patient: teen, majorityAge: 18 })).kind,
+    ).toBe('RESPONSIBLE');
+    expect(
+      noticeRecipient(input({ patient: teen, majorityAge: 16 })),
     ).toMatchObject({
       kind: 'PATIENT',
       email: 'teen@example.com',
       minor: false,
+    });
+  });
+
+  it('a 19-year-old is a minor with 20', () => {
+    const nineteen = {
+      ...input().patient,
+      birthDate: new Date('2007-03-01T00:00:00.000Z'),
+      email: 'nineteen@example.com',
+    };
+    expect(
+      noticeRecipient(input({ patient: nineteen, majorityAge: 20 })),
+    ).toMatchObject({ kind: 'RESPONSIBLE', minor: true });
+  });
+
+  it('birthday boundary uses the location civil day: adult in Pacific/Auckland, minor in America/New_York at the same instant', () => {
+    // 2026-10-17T03:00Z: ya es 17 de octubre en Auckland (UTC+13) y aún 16
+    // en Nueva York (UTC-4). Cumple 18 el 17 de octubre.
+    const now = new Date('2026-10-17T03:00:00.000Z');
+    const birthday = {
+      ...input().patient,
+      birthDate: new Date('2008-10-17T00:00:00.000Z'),
+      email: 'birthday@example.com',
+    };
+    const at = (zone: string) =>
+      noticeRecipient(
+        input({
+          patient: birthday,
+          majorityAge: 18,
+          today: civilDateIn(now, zone),
+        }),
+      );
+    expect(at('Pacific/Auckland')).toMatchObject({
+      kind: 'PATIENT',
+      minor: false,
+    });
+    expect(at('America/New_York')).toMatchObject({
+      kind: 'RESPONSIBLE',
+      minor: true,
     });
   });
 

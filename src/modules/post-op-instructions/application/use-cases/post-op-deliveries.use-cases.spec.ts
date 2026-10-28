@@ -327,6 +327,39 @@ describe('DeliverPostOpInstructionsUseCase (DX-222)', () => {
     });
   });
 
+  it('post-op email recipient uses the clinic majorityAge', async () => {
+    const { deliver, exo, deliveries, email } = setup();
+    deliveries.contexts.set(
+      APPOINTMENT_ID,
+      appointmentContext({
+        // 17 años el 2026-10-20, con email propio.
+        patient: { birthDate: new Date('2009-03-01T00:00:00.000Z') },
+        responsibles: [
+          {
+            id: 'resp-1',
+            name: 'Claudia Navarro',
+            email: 'claudia.navarro@example.com',
+            isPayer: true,
+            receivesNotices: true,
+            optedOut: false,
+          },
+        ],
+        majorityAge: 16,
+      }),
+    );
+    const result = await deliver.execute(
+      APPOINTMENT_ID,
+      { templateId: exo.id, channel: 'EMAIL' },
+      CTX,
+      LINK,
+    );
+
+    expect(result.sentToResponsible).toBe(false);
+    expect(email.sent[0]).toMatchObject({
+      to: 'carolina.duque@example.com',
+    });
+  });
+
   it('EMAIL sin email ni responsable: 422 y no registra nada', async () => {
     const { deliver, exo, deliveries, email } = setup();
     deliveries.contexts.set(

@@ -124,6 +124,22 @@ const HOUR_CYCLE_LITERAL = /hourCycle:\s*'h\d{2}'|\bhour12\s*:/;
 /** Donde se arma el texto del recordatorio y el helper: sin país. */
 const COUNTRY_FREE = [
   join(SRC, 'modules', 'reminders', 'domain', 'starts-at-label.ts'),
+  join(
+    SRC,
+    'modules',
+    'reminders',
+    'domain',
+    'ports',
+    'reminder-repository.port.ts',
+  ),
+  join(
+    SRC,
+    'modules',
+    'patients',
+    'domain',
+    'communication',
+    'notice-recipient.ts',
+  ),
 ];
 
 describe('formato regional y reloj solo desde el helper (G1-B, I5)', () => {
@@ -200,8 +216,6 @@ describe('formato regional y reloj solo desde el helper (G1-B, I5)', () => {
   it('architecture: reminder text builder has no country', () => {
     const formatFiles = files.filter((file) => file.startsWith(FORMAT_DIR));
     expect(formatFiles.length).toBeGreaterThan(0);
-    // Los ports de `reminders/domain/ports/*` conservan `locationCountry`
-    // para la regla de menores (DX-203): no entran aquí.
     expect(
       offending([...COUNTRY_FREE, ...formatFiles], (line) =>
         /country/i.test(line),

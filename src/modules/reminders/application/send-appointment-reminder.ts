@@ -110,13 +110,14 @@ export class SendAppointmentReminder {
       return;
     }
     const now = this.clock.now();
-    // DX-203: un menor (por el país y el día civil de la sede de la cita) o
-    // un paciente sin email lo recibe en el email de su responsable que
-    // recibe avisos. El canal y la baja siguen siendo los del PACIENTE.
+    // DX-203: un menor (por la mayoría de edad de la clínica y el día civil de
+    // la sede de la cita) o un paciente sin email lo recibe en el email de su
+    // responsable que recibe avisos. El canal y la baja siguen siendo los del
+    // PACIENTE.
     const recipient = noticeRecipient({
       patient: { ...ctx.recipient, email: ctx.contact.email },
       responsibles: ctx.responsibles,
-      country: ctx.locationCountry,
+      majorityAge: ctx.majorityAge,
       today: civilDateIn(now, ctx.locationTimeZone),
       automatic: true,
     });

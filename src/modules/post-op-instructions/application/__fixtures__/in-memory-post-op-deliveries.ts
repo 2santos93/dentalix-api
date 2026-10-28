@@ -20,6 +20,7 @@ export function appointmentContext(
     location?: Partial<PostOpAppointmentContext['location']>;
     responsibles?: PostOpAppointmentContext['responsibles'];
     clinicName?: string;
+    majorityAge?: number;
   } = {},
 ): PostOpAppointmentContext {
   return {
@@ -56,6 +57,7 @@ export function appointmentContext(
       ...overrides.location,
     },
     clinicName: overrides.clinicName ?? 'Sonrisas del Norte',
+    majorityAge: overrides.majorityAge ?? 18,
   };
 }
 

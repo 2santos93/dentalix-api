@@ -1,11 +1,13 @@
 import type {
-  ClinicCountry,
   ContactChannel,
   ReminderOptOutSource,
   WhatsappOptInSource,
 } from '@prisma/client';
 
-import type { NoticeResponsible } from '../communication/notice-recipient';
+import type {
+  NoticeResponsible,
+  NoticeSettings,
+} from '../communication/notice-recipient';
 
 export const PATIENT_NOT_FOUND_MESSAGE = 'Paciente no encontrado';
 
@@ -18,8 +20,8 @@ export interface PatientCommunicationState {
   emergencyContactName: string | null;
   /** DX-203: responsables vivos del paciente (regla de destinatario). */
   responsibles: NoticeResponsible[];
-  /** DX-203: país y zona de la sede con que se cuenta la edad. */
-  noticeLocation: { country: ClinicCountry; timeZone: string };
+  /** DX-203, DX-328: zona de la sede y mayoría de edad de la clínica. */
+  noticeSettings: NoticeSettings;
   /** País de residencia del paciente (respaldo si la clínica no tiene sede). */
   countryCode: string | null;
   phone: string | null;

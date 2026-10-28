@@ -2,7 +2,6 @@ import type {
   AppointmentReminderSkipReason,
   AppointmentReminderStatus,
   AppointmentStatus,
-  ClinicCountry,
   Prisma,
 } from '@prisma/client';
 import type { RegionalFormat } from '../../../../shared/format/regional-format';
@@ -42,8 +41,8 @@ export interface ReminderSendContext {
     status: AppointmentStatus;
     deleted: boolean;
   };
-  /** Solo para la regla de menores (DX-203); nunca para el formato. */
-  locationCountry: ClinicCountry;
+  /** Mayoría de edad de la clínica (DX-328), para la regla de menores (DX-203). */
+  majorityAge: number;
   locationTimeZone: string;
   /** G1-B: formato y reloj de la sede de la cita, con los que se pinta el email. */
   locationFormat: RegionalFormat;

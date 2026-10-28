@@ -29,9 +29,9 @@ export interface SendPaymentReceiptResult {
  * actual del paciente. Sale por el outbox de DX-088: la petición no espera al
  * proveedor, y los topes de la clínica responden 429 en español.
  *
- * DX-203: el de un menor (país y día civil de la sede del abono) o de un
- * paciente sin email va al responsable que recibe avisos (primero el
- * pagador), saludándolo. Lo pide recepción: no es un envío automático, así
+ * DX-203: el de un menor (mayoría de edad de la clínica y día civil de la
+ * sede del abono) o de un paciente sin email va al responsable que recibe
+ * avisos (primero el pagador), saludándolo. Lo pide recepción: no es un envío automático, así
  * que la baja de recordatorios de un paciente responsable no lo frena.
  */
 @Injectable()
@@ -49,8 +49,8 @@ export class SendPaymentReceiptUseCase {
     const recipient = noticeRecipient({
       patient: { ...notice.patient, email: patientEmail },
       responsibles: notice.responsibles,
-      country: notice.location.country,
-      today: civilDateIn(this.now(), notice.location.timeZone),
+      majorityAge: notice.settings.majorityAge,
+      today: civilDateIn(this.now(), notice.settings.timeZone),
     });
     if (!recipient.email) {
       throw new UnprocessableEntityException(PATIENT_WITHOUT_EMAIL_MESSAGE);

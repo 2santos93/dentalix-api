@@ -132,7 +132,7 @@ describe('GetAccountStatementUseCase', () => {
         emergencyContactName: null,
       },
       responsibles: [],
-      location: { country: 'CO', timeZone: 'America/Bogota' },
+      settings: { timeZone: 'America/Bogota', majorityAge: 18 },
     }).useCase.execute('p-1', {});
     expect(adult.addressee).toEqual({
       kind: 'PATIENT',
@@ -157,13 +157,41 @@ describe('GetAccountStatementUseCase', () => {
           optedOut: false,
         },
       ],
-      location: { country: 'CO', timeZone: 'America/Bogota' },
+      settings: { timeZone: 'America/Bogota', majorityAge: 18 },
     }).useCase.execute('p-1', {});
     // Se imprime y se entrega: aunque el responsable no tenga email.
     expect(minor.addressee).toEqual({
       kind: 'RESPONSIBLE',
       name: 'Claudia Navarro',
       email: null,
+    });
+  });
+
+  it('statement addressee uses the clinic majorityAge', async () => {
+    // 17 años el 2026-03-01, con email propio y un responsable con email.
+    const out = await makeUseCase(data(), {
+      patient: {
+        firstName: 'Ana',
+        birthDate: new Date('2008-06-01'),
+        email: 'ana@example.com',
+        emergencyContactName: null,
+      },
+      responsibles: [
+        {
+          id: 'r-1',
+          name: 'Claudia Navarro',
+          email: 'claudia@example.com',
+          isPayer: true,
+          receivesNotices: true,
+          optedOut: false,
+        },
+      ],
+      settings: { timeZone: 'America/Bogota', majorityAge: 16 },
+    }).useCase.execute('p-1', {});
+    expect(out.addressee).toEqual({
+      kind: 'PATIENT',
+      name: 'Ana Pérez',
+      email: 'ana@example.com',
     });
   });
 

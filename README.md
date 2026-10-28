@@ -2127,10 +2127,12 @@ Dentrix. Módulo `patients`, tabla `patient_responsible_parties`; migraciones
   `RESPONSIBLE_PARTY_ADDED|CHANGED|REMOVED` y los nombres de los campos.
 - **Regla de destinatario**
   (`patients/domain/communication/notice-recipient.ts`): un paciente MENOR
-  (CO < 18, ES < 16 —menor maduro, Ley 41/2002—, con el país y el día civil
-  de la sede) o SIN email recibe el recordatorio (DX-026), el recibo (DX-136)
-  y el estado de cuenta (DX-011) en el email de su responsable que recibe
-  avisos, primero el pagador. El canal y la baja del PACIENTE (DX-128) se
+  (por debajo de la mayoría de edad de la clínica, `tenants."majorityAge"`
+  —DX-328—, contada en el día civil de la sede) o SIN email recibe el
+  recordatorio (DX-026), el recibo (DX-136), el estado de cuenta (DX-011) y
+  las indicaciones postoperatorias por email (DX-222) en el email de su
+  responsable que recibe avisos, primero el pagador. La edad se lee en cada
+  envío: un recordatorio ya encolado usa el valor vigente al enviarse. El canal y la baja del PACIENTE (DX-128) se
   respetan igual; en el recordatorio automático, tampoco recibe un paciente
   responsable dado de baja o con canal distinto de EMAIL. El registro de
   envíos (`outbound_messages."recipientKind"`) y el estado de los

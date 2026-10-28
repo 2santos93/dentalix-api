@@ -9,7 +9,7 @@ import type {
 } from '../../domain/ports/payment-receipt-repository.port';
 import { parseReceiptSnapshot } from '../../domain/receipt-snapshot';
 import {
-  loadNoticeLocation,
+  loadNoticeSettings,
   loadNoticeResponsibles,
 } from '../../../patients/infrastructure/notices/notice-context';
 
@@ -90,9 +90,9 @@ export class PrismaPaymentReceiptRepository implements PaymentReceiptRepository 
         throw new Error(`Abono ${payment.id} sin plan ni saldo migrado`);
       }
       const patientEmail = patient.email?.trim() ? patient.email.trim() : null;
-      const [responsibles, location] = await Promise.all([
+      const [responsibles, settings] = await Promise.all([
         loadNoticeResponsibles(tx, patient.id),
-        loadNoticeLocation(tx, payment.tenantId, payment.locationId),
+        loadNoticeSettings(tx, payment.tenantId, payment.locationId),
       ]);
       const base = {
         paymentId: payment.id,
@@ -106,7 +106,7 @@ export class PrismaPaymentReceiptRepository implements PaymentReceiptRepository 
             emergencyContactName: patient.emergencyContactName,
           },
           responsibles,
-          location,
+          settings,
         },
       };
       if (payment.receipt) {

@@ -191,7 +191,7 @@ function emailRecipient(
       emergencyContactName: ctx.patient.emergencyContactName,
     },
     responsibles: ctx.responsibles,
-    country: ctx.location.country,
+    majorityAge: ctx.majorityAge,
     today: civilDateIn(now, ctx.location.timeZone),
     automatic: false,
   });

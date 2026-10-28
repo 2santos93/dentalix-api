@@ -20,7 +20,7 @@ const NOTICE = {
     emergencyContactName: null,
   },
   responsibles: [],
-  location: { country: 'CO' as const, timeZone: 'America/Bogota' },
+  settings: { timeZone: 'America/Bogota', majorityAge: 18 },
 };
 
 const PAYMENT_ID = '3f1c2b9e-8a4d-4c1e-9f0a-1b2c3d4e5f60';
