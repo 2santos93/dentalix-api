@@ -2132,8 +2132,9 @@ Dentrix. Módulo `patients`, tabla `patient_responsible_parties`; migraciones
   recordatorio (DX-026), el recibo (DX-136), el estado de cuenta (DX-011) y
   las indicaciones postoperatorias por email (DX-222) en el email de su
   responsable que recibe avisos, primero el pagador. La edad se lee en cada
-  envío: un recordatorio ya encolado usa el valor vigente al enviarse. El canal y la baja del PACIENTE (DX-128) se
-  respetan igual; en el recordatorio automático, tampoco recibe un paciente
+  envío: un recordatorio ya encolado usa el valor vigente al enviarse. El
+  canal y la baja del PACIENTE (DX-128) se respetan igual; en el
+  recordatorio automático, tampoco recibe un paciente
   responsable dado de baja o con canal distinto de EMAIL. El registro de
   envíos (`outbound_messages."recipientKind"`) y el estado de los
   recordatorios (`sentToResponsible`) dicen «enviado al responsable»; `POST
@@ -2189,25 +2190,75 @@ la deduce del país de una sede. Migraciones `20261028160000_dx328_enums`,
   responde 200 sin evento.
 - **Despliegue** (orden obligatorio):
   1. `npx prisma migrate deploy` aplica las cuatro migraciones y tiene que
-     terminar ANTES de que arranque la primera réplica nueva de la API. Una
-     réplica nueva contra el esquema anterior falla en cada lectura de
-     `tenants` que pide `majorityAge`. Las réplicas antiguas no leen la
-     columna y siguen funcionando con el esquema nuevo.
+     terminar ANTES de que arranque la primera réplica nueva de la imagen,
+     sea de la API (`APP_ROLE=api`) o del worker (`APP_ROLE=worker`): el
+     worker también lee la columna al enviar cada recordatorio
+     (`loadTenantMajorityAge`). Una réplica nueva contra el esquema anterior
+     falla en cada lectura de `tenants` que pide `majorityAge`; en el worker,
+     el trabajo falla y la cola lo reintenta, así que el recordatorio se
+     retrasa (o queda FAILED si la espera agota sus intentos). Las réplicas
+     antiguas no leen la columna y siguen funcionando con el esquema nuevo.
   2. Si falla el relleno (`20261028160300_dx328_tenant_majority_age_backfill`),
-     se para el despliegue y NO se despliega la API. Se ejecuta
+     se para el despliegue y NO se despliega la API ni el worker. Se ejecuta
      `npx prisma migrate resolve --rolled-back 20261028160300_dx328_tenant_majority_age_backfill`,
      se corrige la causa y se repite `migrate deploy`. Si se sigue adelante,
      todas las clínicas quedan en 18 (el default de la columna), y las que
      aplicaban 16 pasan a tratar en silencio como menores a los pacientes de
      16 y 17 años.
   3. Esperas de bloqueo: `lock_timeout` de 5 s en el enum, en el índice y en
-     la columna de `tenants`, y de 10 s en el relleno, que solo bloquea
-     `locations`. Si se agota, la migración falla sin cambios y se repite el
-     deploy.
-  4. El índice parcial de `audit_events` (`…160100`) no es concurrente,
+     la columna de `tenants`, y de 10 s en el relleno. El relleno toma
+     `ACCESS EXCLUSIVE` en `locations` (quita y devuelve FORCE) y en
+     `tenants` solo bloqueos de fila; el `lock_timeout` acota las dos
+     esperas. Mientras el relleno espera su bloqueo (hasta 10 s), las
+     peticiones que leen sedes (casi todas: la zona de la sede, la agenda,
+     los avisos) hacen cola detrás de él; es otro motivo para la hora de
+     poco tráfico.
+  4. Un fallo por bloqueo es benigno, no un problema de datos: si se agota
+     el `lock_timeout`, o Postgres aborta el relleno por un interbloqueo
+     (deadlock) con una transacción de una réplica antigua que tenía la fila
+     de una clínica, la migración falla sin dejar nada a medias. Se ejecuta
+     `npx prisma migrate resolve --rolled-back <migración>` (la que nombre
+     `npx prisma migrate status`) y se repite `migrate deploy`; no hay causa
+     que corregir.
+  5. El índice parcial de `audit_events` (`…160100`) no es concurrente,
      porque la tabla está particionada. Mientras se construye, bloquea las
      escrituras de auditoría durante un momento, así que conviene desplegar a
      una hora de poco tráfico.
+  6. **Vuelta atrás: se corrige hacia delante, no se revierte.** Los datos
+     aguantan la API anterior: la columna, el valor del enum y el índice se
+     quedan, y esa API no lee ni escribe `majorityAge`. Pero en cuanto un
+     ADMIN ha cambiado la mayoría de edad (hay una fila `CLINIC_SETTINGS` en
+     `audit_events`), la API anterior, en esa clínica:
+     - devuelve 500 en `GET /audit-events` en cuanto la página incluye esa
+       fila (sin filtros, la primera, porque va de la más reciente a la más
+       antigua): su cliente de Prisma no conoce el valor `CLINIC_SETTINGS`
+       de `AuditResourceType`;
+     - vuelve a la edad que salía del país de cada sede y deja de lado la
+       que fijó la clínica, sin avisar a nadie.
+
+     Las dos cosas terminan al volver a desplegar la API nueva, sin tocar
+     datos; lo enviado mientras tanto no se rehace. Las clínicas que nunca
+     cambiaron la edad vuelven a la regla de antes del despliegue, nada más.
+     Si la vuelta atrás es inevitable: no se revierte ninguna migración ni se
+     tocan filas de `audit_events` (es de solo inserción); se sacan las
+     clínicas afectadas con la consulta de abajo (solo lectura, con un rol
+     BYPASSRLS o superusuario) y se avisa a sus ADMIN de los dos efectos; si
+     la web nueva sigue desplegada, Ajustes › Mayoría de edad muestra un
+     error con reintento (la API anterior no tiene la ruta); y se vuelve a
+     desplegar la API nueva en cuanto se pueda.
+
+     ```sql
+     BEGIN TRANSACTION READ ONLY;
+     SET LOCAL row_security = off;
+     SELECT t.id, t.subdomain, t."majorityAge",
+            max(a."occurredAt") AS "lastChange"
+     FROM audit_events a
+     JOIN tenants t ON t.id = a."tenantId"
+     WHERE a."resourceType" = 'CLINIC_SETTINGS'
+     GROUP BY t.id, t.subdomain, t."majorityAge"
+     ORDER BY t.subdomain;
+     ROLLBACK;
+     ```
 
 ## Indicaciones postoperatorias (DX-222)
 

@@ -31,8 +31,9 @@ export interface SendPaymentReceiptResult {
  *
  * DX-203: el de un menor (mayoría de edad de la clínica y día civil de la
  * sede del abono) o de un paciente sin email va al responsable que recibe
- * avisos (primero el pagador), saludándolo. Lo pide recepción: no es un envío automático, así
- * que la baja de recordatorios de un paciente responsable no lo frena.
+ * avisos (primero el pagador), saludándolo. Lo pide recepción: no es un
+ * envío automático, así que la baja de recordatorios de un paciente
+ * responsable no lo frena.
  */
 @Injectable()
 export class SendPaymentReceiptUseCase {

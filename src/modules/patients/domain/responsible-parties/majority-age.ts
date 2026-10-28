@@ -1,11 +1,5 @@
 import { ageInYears } from '../../../odontogram/domain/dentition';
 
-/*
- * Edad desde la que los avisos y los documentos de cobro van al propio
- * paciente (DX-203): la mayoría de edad de la clínica (`tenants.majorityAge`,
- * DX-328), que fija su administrador. Antes, sus avisos van al responsable.
- */
-
 /** DX-328: valor de plataforma al crear una clínica. */
 export const PLATFORM_DEFAULT_MAJORITY_AGE = 18;
 /** Límites de la plataforma (CHECK tenants_majority_age_check). */
@@ -25,6 +19,10 @@ export function isValidMajorityAge(value: unknown): value is number {
 }
 
 /**
+ * Desde la mayoría de edad de la clínica (`tenants.majorityAge`, DX-328, la
+ * fija su administrador), los avisos y los documentos de cobro van al propio
+ * paciente (DX-203); por debajo de esa edad, al responsable.
+ *
  * ¿Es menor en `today` (día civil YYYY-MM-DD de la sede, nunca el UTC del
  * servidor) con la mayoría de edad `majorityAge` de la clínica? Quien la
  * cumple hoy ya es adulto hoy. `birthDate` es una fecha civil guardada a

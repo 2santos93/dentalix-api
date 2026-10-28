@@ -285,7 +285,7 @@ describe('Elegibilidad para asignar un convenio (e2e, SEC-047)', () => {
   );
 
   it.each([ClinicRole.DENTIST, ClinicRole.ASSISTANT, ClinicRole.RECEPTION])(
-    '%s asigna un convenio OTRO si el paciente trae la cobertura MIGRADA de insurerEps de ese pagador',
+    '%s asigna un convenio OTRO si el paciente trae de ese pagador la cobertura MIGRADA del texto libre de aseguradora anterior a DX-153',
     async (role) => {
       const patient = await createPatient(clinic, `Migrada ${role}`);
       const coverageId = (await coverageFor(patient, cortesiaPayer, 'viva'))!;

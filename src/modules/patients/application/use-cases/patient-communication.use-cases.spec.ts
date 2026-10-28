@@ -90,7 +90,7 @@ describe('Bloque «Comunicaciones» de la ficha (DX-128)', () => {
       repo.add(ANA, {
         birthDate: new Date('2009-06-01'),
         responsibles: [mother],
-        noticeSettings: { timeZone: 'Europe/Madrid', majorityAge: 16 },
+        noticeSettings: { timeZone: 'UTC', majorityAge: 16 },
       });
       await expect(get.execute(ANA)).resolves.toMatchObject({
         recipient: { kind: 'PATIENT', minor: false },

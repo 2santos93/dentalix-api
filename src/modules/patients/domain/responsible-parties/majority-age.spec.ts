@@ -17,6 +17,12 @@ describe('isMinor (DX-328: la mayoría de edad de la clínica)', () => {
     }
     expect(isMinor(null, 20, '2026-10-17')).toBe(false);
   });
+
+  it('isMinor for a 29-February birthday: adult from 1 March in a non-leap year', () => {
+    const born = new Date('2008-02-29T00:00:00.000Z');
+    expect(isMinor(born, 18, '2026-02-28')).toBe(true);
+    expect(isMinor(born, 18, '2026-03-01')).toBe(false);
+  });
 });
 
 describe('mayoría de edad por clínica (DX-328): constantes y validación', () => {

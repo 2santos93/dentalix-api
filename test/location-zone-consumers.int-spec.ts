@@ -197,6 +197,10 @@ describe('consumidores de la zona de la sede: día civil en Tokio (int, G1)', ()
 
   it('reminder send context carries the clinic majorityAge', async () => {
     const repo = new PrismaReminderRepository(prisma, tenantContext);
+    const { majorityAge: before } = await owner.tenant.findUniqueOrThrow({
+      where: { id: tenantId },
+      select: { majorityAge: true },
+    });
     await owner.tenant.update({
       where: { id: tenantId },
       data: { majorityAge: 20 },
@@ -210,7 +214,7 @@ describe('consumidores de la zona de la sede: día civil en Tokio (int, G1)', ()
     } finally {
       await owner.tenant.update({
         where: { id: tenantId },
-        data: { majorityAge: 18 },
+        data: { majorityAge: before },
       });
     }
   });
