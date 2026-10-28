@@ -3,8 +3,10 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
+import { requireLocationFormat } from '../../../shared/locations/location-regional';
 import {
   HolidayRuleError,
+  MAX_HOLIDAYS_PER_LOCATION,
   assertRecurringAllowed,
   conflictOf,
   monthDay,
@@ -13,6 +15,7 @@ import {
 import {
   holidayAlreadyExists,
   holidayBadRequest,
+  holidayLimitReached,
   holidayNotFound,
   locationNotFound,
 } from '../domain/location-calendar-errors';
@@ -181,6 +184,15 @@ export class PrismaLocationCalendarRepository implements LocationCalendarReposit
         const live = await this.liveHolidays(tx, tenantId, locationId);
         const found = firstConflict(input, live);
         if (found) throw holidayAlreadyExists(found.existing, found.conflict);
+        // Tope por sede (§5.1), bajo el mismo bloqueo: dos altas a la vez no
+        // lo pasan. Editar no cambia la cuenta.
+        if (live.length >= MAX_HOLIDAYS_PER_LOCATION) {
+          const location = await tx.location.findFirstOrThrow({
+            where: { id: locationId, tenantId },
+            select: { id: true, locale: true, hourCycle: true },
+          });
+          throw holidayLimitReached(requireLocationFormat(location));
+        }
         const row = await tx.locationHoliday.create({
           data: {
             // La columna no tiene default en la BD: el id va siempre aquí.
@@ -231,6 +243,14 @@ export class PrismaLocationCalendarRepository implements LocationCalendarReposit
         ).filter((h) => h.id !== holidayId);
         const found = firstConflict(merged, others);
         if (found) throw holidayAlreadyExists(found.existing, found.conflict);
+        // Sin cambio real no se escribe (y el controlador no audita).
+        if (
+          merged.date === before.date &&
+          merged.name === before.name &&
+          merged.recurring === before.recurring
+        ) {
+          return { before, after: before };
+        }
         const row = await tx.locationHoliday.update({
           where: { id: holidayId },
           data: {

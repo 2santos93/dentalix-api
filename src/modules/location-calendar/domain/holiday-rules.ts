@@ -47,6 +47,9 @@ export const HOLIDAY_MESSAGES = {
   // Recursos
   holidayNotFound: 'No encontramos ese festivo.',
   locationNotFound: 'No encontramos esa sede.',
+  // Mismo texto que el resto de rutas de sede (cancelación, recordatorios).
+  invalidLocationId: 'El identificador de la sede no es válido.',
+  invalidHolidayId: 'El identificador del festivo no es válido.',
   rolesDenied:
     'Solo un administrador de la clínica puede ver o cambiar el calendario de la sede.',
   locationLimit: (fmt: RegionalFormat) =>

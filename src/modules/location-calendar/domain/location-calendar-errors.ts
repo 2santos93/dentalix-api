@@ -3,6 +3,7 @@ import {
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
+import type { RegionalFormat } from '../../../shared/format/regional-format';
 import {
   HOLIDAY_MESSAGES,
   type HolidayConflict,
@@ -48,6 +49,19 @@ export function holidayAlreadyExists(
     code: 'HOLIDAY_ALREADY_EXISTS',
     message: CONFLICT_MESSAGES[conflict](existing.name),
     holidayId: existing.id,
+  });
+}
+
+/**
+ * 409 `LOCATION_HOLIDAY_LIMIT` (§5.1): la sede ya tiene el máximo de festivos
+ * vivos. La cifra sale con el formato de la sede (G1-B).
+ */
+export function holidayLimitReached(fmt: RegionalFormat): ConflictException {
+  return new ConflictException({
+    statusCode: 409,
+    error: 'Conflict',
+    code: 'LOCATION_HOLIDAY_LIMIT',
+    message: HOLIDAY_MESSAGES.locationLimit(fmt),
   });
 }
 

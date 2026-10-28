@@ -33,6 +33,16 @@ const FIELD_LABELS = {
   recurring: 'recurrente',
 } as const;
 
+/** 400 «Indica un valor para «{campo}».»: `null` explícito en un campo. */
+function nullField(field: keyof typeof FIELD_LABELS): BadRequestException {
+  return new BadRequestException({
+    statusCode: 400,
+    error: 'Bad Request',
+    message: HOLIDAY_MESSAGES.nullField(FIELD_LABELS[field]),
+    field,
+  });
+}
+
 @Injectable()
 export class GetLocationCalendarUseCase {
   constructor(
@@ -82,8 +92,10 @@ export class CreateHolidayUseCase {
 
   execute(
     locationId: string,
-    input: { date: unknown; name: unknown; recurring?: boolean },
+    input: { date: unknown; name: unknown; recurring?: boolean | null },
   ): Promise<HolidayView> {
+    // `@IsOptional()` deja pasar `null`: es 400 como en el PATCH, no «no».
+    if (input.recurring === null) throw nullField('recurring');
     const holiday = asBadRequest((): HolidayInput => {
       const date = validateHolidayDate(input.date);
       const name = validateHolidayName(input.name);
@@ -112,14 +124,7 @@ export class UpdateHolidayUseCase {
     raw: { date?: unknown; name?: unknown; recurring?: unknown },
   ): Promise<{ before: HolidayView; after: HolidayView }> {
     for (const field of ['date', 'name', 'recurring'] as const) {
-      if (raw[field] === null) {
-        throw new BadRequestException({
-          statusCode: 400,
-          error: 'Bad Request',
-          message: HOLIDAY_MESSAGES.nullField(FIELD_LABELS[field]),
-          field,
-        });
-      }
+      if (raw[field] === null) throw nullField(field);
     }
     const patch = asBadRequest((): Partial<HolidayInput> => {
       const out: Partial<HolidayInput> = {};

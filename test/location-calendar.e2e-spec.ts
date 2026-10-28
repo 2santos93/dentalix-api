@@ -530,6 +530,93 @@ describe('Calendario de la sede: días hábiles y festivos (e2e, DX-316)', () =>
       expect(again.id).not.toBe(holiday.id);
     });
 
+    it('an empty or identical PATCH answers 200 unchanged and leaves no audit event', async () => {
+      const id = await newLocation();
+      const holiday = await addHoliday(id, {
+        date: '2027-05-03',
+        name: 'Cierre anual',
+      });
+      const before = await calendarEvents(id);
+      const stored = await raw.locationHoliday.findUniqueOrThrow({
+        where: { id: holiday.id },
+      });
+      for (const body of [
+        {},
+        { date: '2027-05-03', name: 'Cierre anual', recurring: false },
+        { name: '  Cierre anual  ' },
+      ]) {
+        const res = await admin()
+          .patch(`/locations/${id}/holidays/${holiday.id}`, body)
+          .expect(200);
+        expect(res.body).toEqual(holiday);
+      }
+      expect(await calendarEvents(id)).toEqual(before);
+      // Ni se escribe la fila.
+      const row = await raw.locationHoliday.findUniqueOrThrow({
+        where: { id: holiday.id },
+      });
+      expect(row.updatedAt).toEqual(stored.updatedAt);
+    });
+
+    it('POST with recurring null is 400 like PATCH, not a one-off', async () => {
+      const id = await newLocation();
+      const res = await admin()
+        .post(`/locations/${id}/holidays`, {
+          date: '2027-05-03',
+          name: 'Cierre anual',
+          recurring: null,
+        })
+        .expect(400);
+      expect((res.body as ErrorBody).message).toBe(
+        'Indica un valor para «recurrente».',
+      );
+      expect((await calendarOf(id)).holidays).toEqual([]);
+    });
+
+    it('at 1000 live holidays POST is 409 LOCATION_HOLIDAY_LIMIT and PATCH still works', async () => {
+      const id = await newLocation();
+      // 999 puntuales sembrados de una vez (días seguidos desde 2030-01-01) y
+      // uno por la API: 1000 vivos. Los retirados no cuentan.
+      await raw.$executeRaw`
+        INSERT INTO "location_holidays"
+          ("id", "tenantId", "locationId", "date", "name", "recurring", "updatedAt")
+        SELECT gen_random_uuid(), ${a.tenantId}::uuid, ${id}::uuid,
+               DATE '2030-01-01' + g, 'Festivo de prueba ' || g, false, now()
+          FROM generate_series(0, 998) AS g`;
+      const last = await addHoliday(id, {
+        date: '2027-05-03',
+        name: 'Cierre anual',
+      });
+      const res = await admin()
+        .post(`/locations/${id}/holidays`, {
+          date: '2027-05-04',
+          name: 'Uno más',
+        })
+        .expect(409);
+      expect(res.body).toEqual({
+        statusCode: 409,
+        error: 'Conflict',
+        code: 'LOCATION_HOLIDAY_LIMIT',
+        // Berlín: la cifra con el formato de la sede (de-DE).
+        message:
+          'La sede tendría más de 1.000 festivos. Borra los de años pasados e inténtalo de nuevo.',
+      });
+      await admin()
+        .patch(`/locations/${id}/holidays/${last.id}`, {
+          date: '2027-05-04',
+          name: 'Cierre movido',
+        })
+        .expect(200);
+      // Retirar uno deja sitio para otro.
+      await admin().delete(`/locations/${id}/holidays/${last.id}`).expect(204);
+      await addHoliday(id, { date: '2027-05-05', name: 'Ahora sí' });
+      expect(
+        await raw.locationHoliday.count({
+          where: { locationId: id, deletedAt: null },
+        }),
+      ).toBe(1000);
+    });
+
     it('GET orders recurring by month-day, then one-off by date', async () => {
       const id = await newLocation();
       const oneOffLate = await addHoliday(id, {
@@ -610,7 +697,6 @@ describe('Calendario de la sede: días hábiles y festivos (e2e, DX-316)', () =>
         await admin().delete(
           `/locations/${otherId}/holidays/00000000-0000-4000-8000-000000000000`,
         ),
-        await admin().delete(`/locations/${otherId}/holidays/no-es-un-id`),
       ]) {
         expect(res.status).toBe(404);
         expect(res.body).toMatchObject({
@@ -647,11 +733,50 @@ describe('Calendario de la sede: días hábiles y festivos (e2e, DX-316)', () =>
           date: '2027-05-03',
           name: 'Cierre',
         }),
-        await admin().get('/locations/no-es-un-id/calendar'),
       ]) {
         expect(res.status).toBe(404);
         expect((res.body as ErrorBody).code).toBe('LOCATION_NOT_FOUND');
       }
+    });
+
+    it('a malformed location or holiday id is 400 like the other location routes', async () => {
+      const id = await newLocation();
+      const holiday = await addHoliday(id, {
+        date: '2027-05-03',
+        name: 'Cierre anual',
+      });
+      const badLocation = [
+        await admin().get('/locations/no-es-un-id/calendar'),
+        await admin().put('/locations/no-es-un-id/calendar/working-weekdays', {
+          workingWeekdays: [1],
+        }),
+        await admin().post('/locations/no-es-un-id/holidays', {
+          date: '2027-05-04',
+          name: 'Cierre',
+        }),
+        await admin().patch(`/locations/no-es-un-id/holidays/${holiday.id}`, {
+          name: 'Cambiado',
+        }),
+        await admin().delete(`/locations/no-es-un-id/holidays/${holiday.id}`),
+      ];
+      for (const res of badLocation) {
+        expect(res.status).toBe(400);
+        expect((res.body as ErrorBody).message).toBe(
+          'El identificador de la sede no es válido.',
+        );
+      }
+      for (const res of [
+        await admin().patch(`/locations/${id}/holidays/no-es-un-id`, {
+          name: 'Cambiado',
+        }),
+        await admin().delete(`/locations/${id}/holidays/no-es-un-id`),
+      ]) {
+        expect(res.status).toBe(400);
+        expect((res.body as ErrorBody).message).toBe(
+          'El identificador del festivo no es válido.',
+        );
+      }
+      expect((await calendarOf(id)).holidays).toEqual([holiday]);
     });
 
     it('DENTIST, ASSISTANT and RECEPTION get 403 with the Spanish message', async () => {

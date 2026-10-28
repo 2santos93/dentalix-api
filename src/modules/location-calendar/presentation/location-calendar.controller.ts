@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -44,10 +45,6 @@ import {
   UpdateHolidayUseCase,
 } from '../application/location-calendar.use-cases';
 import { HOLIDAY_MESSAGES } from '../domain/holiday-rules';
-import {
-  holidayNotFound,
-  locationNotFound,
-} from '../domain/location-calendar-errors';
 import type {
   HolidayView,
   LocationCalendarView,
@@ -60,12 +57,14 @@ import {
   UpdateLocationHolidayDto,
 } from './dto/location-calendar.dto';
 
-/** Un id que no es un uuid no es ninguna sede ni ningún festivo: 404. */
+/** Un id que no es un uuid: 400, como las demás rutas de sede. */
 const locationIdPipe = new ParseUUIDPipe({
-  exceptionFactory: () => locationNotFound(),
+  exceptionFactory: () =>
+    new BadRequestException(HOLIDAY_MESSAGES.invalidLocationId),
 });
 const holidayIdPipe = new ParseUUIDPipe({
-  exceptionFactory: () => holidayNotFound(),
+  exceptionFactory: () =>
+    new BadRequestException(HOLIDAY_MESSAGES.invalidHolidayId),
 });
 
 /** Lo que la auditoría guarda de un festivo: fecha y clase, nunca el nombre (R10). */
@@ -103,6 +102,7 @@ export class LocationCalendarController {
   @Get('calendar')
   @ApiOperation({ summary: 'Días hábiles y festivos vivos de la sede' })
   @ApiOkResponse({ type: LocationCalendarDto })
+  @ApiBadRequestResponse({ description: HOLIDAY_MESSAGES.invalidLocationId })
   @ApiForbiddenResponse({ description: HOLIDAY_MESSAGES.rolesDenied })
   @ApiNotFoundResponse({ description: LOCATION_404 })
   get(@Param('id', locationIdPipe) id: string): Promise<LocationCalendarView> {
@@ -163,7 +163,7 @@ export class LocationCalendarController {
   @ApiNotFoundResponse({ description: LOCATION_404 })
   @ApiConflictResponse({
     description:
-      '`HOLIDAY_ALREADY_EXISTS` con `holidayId`: ese día ya es festivo de la sede (R5)',
+      '`HOLIDAY_ALREADY_EXISTS` con `holidayId`: ese día ya es festivo de la sede (R5); `LOCATION_HOLIDAY_LIMIT`: la sede ya tiene 1000 festivos',
   })
   async create(
     @Param('id', locationIdPipe) id: string,
@@ -212,6 +212,15 @@ export class LocationCalendarController {
       holidayId,
       dto,
     );
+    // Un PATCH vacío o con los valores guardados no cambia nada: sin evento.
+    if (
+      before.date === after.date &&
+      before.name === after.name &&
+      before.recurring === after.recurring
+    ) {
+      req.skipAudit = true;
+      return after;
+    }
     req.auditMetadata = {
       locationCalendar: {
         holiday: { before: auditSide(before), after: auditSide(after) },
@@ -233,6 +242,9 @@ export class LocationCalendarController {
       'Eliminar un festivo (se retira; la fecha se puede volver a añadir)',
   })
   @ApiNoContentResponse({ description: 'Retirado' })
+  @ApiBadRequestResponse({
+    description: `${HOLIDAY_MESSAGES.invalidLocationId} / ${HOLIDAY_MESSAGES.invalidHolidayId}`,
+  })
   @ApiForbiddenResponse({ description: HOLIDAY_MESSAGES.rolesDenied })
   @ApiNotFoundResponse({
     description: `${LOCATION_404}, o festivo inexistente, retirado o de otra sede`,
