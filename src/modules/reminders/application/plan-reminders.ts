@@ -77,7 +77,9 @@ export class PlanReminders {
       };
       await this.jobs.enqueue(SEND_REMINDER_JOB, payload, {
         tenantId,
-        runAt: due.getTime() > now.getTime() ? due : now,
+        // Atrasado: sin `runAt`, «ya» lo pone la BD con el reloj con que
+        // reclama; `now` es el de la API y puede ir por delante (DX-355).
+        ...(due.getTime() > now.getTime() ? { runAt: due } : {}),
         idempotencyKey: reminderIdempotencyKey(
           c.appointmentId,
           c.leadHours,

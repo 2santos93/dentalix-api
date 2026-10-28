@@ -200,9 +200,7 @@ export class EmailDispatcher
         await this.finish(email, {
           status: 'PENDING',
           lastError,
-          nextAttemptAt: new Date(
-            Date.now() + retryDelayMs(email.attempts, this.config.retryBaseMs),
-          ),
+          retryDelayMs: retryDelayMs(email.attempts, this.config.retryBaseMs),
         });
       }
       return;
@@ -215,7 +213,7 @@ export class EmailDispatcher
     outcome:
       | { status: 'SENT' }
       | { status: 'FAILED'; lastError: string }
-      | { status: 'PENDING'; lastError: string; nextAttemptAt: Date },
+      | { status: 'PENDING'; lastError: string; retryDelayMs: number },
   ): Promise<void> {
     await this.repo.settle(email.id, email.attempts, outcome);
     const fields = {
@@ -225,7 +223,7 @@ export class EmailDispatcher
       attempt: email.attempts,
       ...(outcome.status === 'SENT' ? {} : { error: outcome.lastError }),
       ...(outcome.status === 'PENDING'
-        ? { nextAttemptAt: outcome.nextAttemptAt.toISOString() }
+        ? { retryDelayMs: outcome.retryDelayMs }
         : {}),
     };
     if (outcome.status === 'SENT') {

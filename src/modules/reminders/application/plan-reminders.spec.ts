@@ -31,12 +31,17 @@ describe('PlanReminders (DX-026)', () => {
         idempotencyKey: `reminder:a-1:48h:${start.toISOString()}`,
       },
     );
-    // Atrasado (dentro del margen): sale ya, no en el pasado.
-    expect(enqueue).toHaveBeenCalledWith(
-      SEND_REMINDER_JOB,
-      expect.objectContaining({ appointmentId: 'a-2' }),
-      expect.objectContaining({ tenantId: 'tenant-a', runAt: NOW }),
-    );
+    // Atrasado (dentro del margen): sale ya, no en el pasado. «Ya» lo pone la
+    // BD (sin `runAt`): el reloj de la API puede ir por delante del suyo y
+    // dejarlo «en el futuro» para el reclamo (DX-355).
+    const calls = enqueue.mock.calls as [
+      string,
+      { appointmentId: string },
+      Record<string, unknown>,
+    ][];
+    const lateOptions = calls.find(([, p]) => p.appointmentId === 'a-2')?.[2];
+    expect(lateOptions).toMatchObject({ tenantId: 'tenant-a' });
+    expect(lateOptions).not.toHaveProperty('runAt');
   });
 
   it('una clínica que falla no impide planificar las demás', async () => {

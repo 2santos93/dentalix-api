@@ -60,17 +60,15 @@ export class EmailOutbox {
    */
   async assertWithinQuota(tenantId: string, to: string): Promise<void> {
     const { quotas } = this.config;
-    const now = Date.now();
-    const dayAgo = new Date(now - 24 * 60 * 60 * 1000);
     const sends = await this.repo.recentSends(
       tenantId,
       this.cipher.hashRecipient(to),
-      dayAgo,
     );
-    if (sends.lastToRecipient && quotas.recipientCooldownSeconds > 0) {
-      const elapsed = Math.floor(
-        (now - sends.lastToRecipient.getTime()) / 1000,
-      );
+    if (
+      sends.secondsSinceLastToRecipient !== null &&
+      quotas.recipientCooldownSeconds > 0
+    ) {
+      const elapsed = Math.floor(sends.secondsSinceLastToRecipient);
       if (elapsed < quotas.recipientCooldownSeconds) {
         const wait = quotas.recipientCooldownSeconds - elapsed;
         throw new EmailQuotaExceededError(

@@ -10,6 +10,8 @@ import { EmailOutbox } from '../src/modules/notifications/email/application/emai
 import { ConsoleMailer } from '../src/modules/notifications/email/infrastructure/mailers/console.mailer';
 import type { Mailer } from '../src/modules/notifications/email/domain/ports/mailer.port';
 import type { MailConfig } from '../src/modules/notifications/email/infrastructure/mail-config';
+import { EMAIL_TEMPLATES } from '../src/modules/notifications/email/domain/email-message';
+import { EmailQuotaExceededError } from '../src/modules/notifications/email/domain/email-quota-exceeded.error';
 
 // DX-088, capa de BD: email_outbox contra Postgres. RLS por clínica, las
 // funciones SECURITY DEFINER del despachador (reclamar con SKIP LOCKED,
@@ -24,20 +26,6 @@ const tenantContext = new TenantContextService();
 const prisma = new PrismaService(tenantContext);
 const repo = new PrismaEmailOutboxRepository(prisma);
 const cipher = new EmailPayloadCipher(randomBytes(32));
-
-// Solo los casos que requieren un intento inmediato usan este fixture.
-// insert real crea una fila nueva (no hace upsert/dedupe); se vence antes
-// del kick de enqueue, sin adelantar un reintento ni despachar dos veces.
-class DueOnInsertRepository extends PrismaEmailOutboxRepository {
-  override async insert(
-    input: Parameters<PrismaEmailOutboxRepository['insert']>[0],
-  ): Promise<{ id: string }> {
-    const inserted = await repo.insert(input);
-    await makeDue(inserted.id);
-    return inserted;
-  }
-}
-const dueOnInsertRepo = new DueOnInsertRepository(prisma);
 
 const SUBDOMAINS = ['outbox-int-a', 'outbox-int-b'];
 const EMAIL = 'ana.perez@clinica-outbox.co';
@@ -66,14 +54,10 @@ function config(overrides: Partial<MailConfig> = {}): MailConfig {
   };
 }
 
-function services(
-  mailer: Mailer,
-  overrides: Partial<MailConfig> = {},
-  enqueueRepository = repo,
-) {
+function services(mailer: Mailer, overrides: Partial<MailConfig> = {}) {
   const cfg = config(overrides);
   const dispatcher = new EmailDispatcher(repo, mailer, cipher, cfg);
-  const outbox = new EmailOutbox(enqueueRepository, cipher, dispatcher, cfg);
+  const outbox = new EmailOutbox(repo, cipher, dispatcher, cfg);
   return { dispatcher, outbox };
 }
 
@@ -108,13 +92,48 @@ async function row(id: string) {
   return owner.emailOutbox.findUniqueOrThrow({ where: { id } });
 }
 
-// El cliente y PostgreSQL pueden diferir al comparar una emisión recién hecha.
-// Fija con el reloj de la BD la precondición vencida, sin sleeps ni reloj fake.
+// Adelanta un reintento o un arriendo (minutos) con el reloj de la BD, sin
+// sleeps ni reloj fake.
 function makeDue(id: string) {
   return owner.$executeRaw`
     UPDATE "email_outbox"
        SET "nextAttemptAt" = timezone('utc', clock_timestamp()) - interval '1 second'
      WHERE "id" = ${id}::uuid`;
+}
+
+// DX-355: el reloj del host de la API no coincide con el de Postgres (VM de
+// Docker en macOS, deriva entre réplicas y BD). Solo se falsea `Date`: los
+// timers, las promesas y Prisma siguen con su reloj real.
+const HOUR = 3_600_000;
+const NOT_DATE = [
+  'hrtime',
+  'nextTick',
+  'performance',
+  'queueMicrotask',
+  'requestAnimationFrame',
+  'cancelAnimationFrame',
+  'requestIdleCallback',
+  'cancelIdleCallback',
+  'setImmediate',
+  'clearImmediate',
+  'setInterval',
+  'clearInterval',
+  'setTimeout',
+  'clearTimeout',
+] as const;
+
+function skewAppClock(offsetMs: number): void {
+  jest.useFakeTimers({
+    doNotFake: [...NOT_DATE],
+    now: Date.now() + offsetMs,
+    advanceTimers: true,
+  });
+}
+
+async function dbNow(): Promise<number> {
+  const [{ now }] = await owner.$queryRaw<{ now: Date }[]>`
+    SELECT timezone('utc', clock_timestamp()) AS "now"`;
+  return now.getTime();
 }
 
 describe('DX-088 · email_outbox en la BD (int)', () => {
@@ -152,11 +171,7 @@ describe('DX-088 · email_outbox en la BD (int)', () => {
   });
 
   it('crear → exactamente una fila PENDING, sin el email ni el token en claro, y el despachador la deja SENT con ConsoleMailer', async () => {
-    const { outbox, dispatcher } = services(
-      new ConsoleMailer(),
-      {},
-      dueOnInsertRepo,
-    );
+    const { outbox, dispatcher } = services(new ConsoleMailer());
     const { id } = await outbox.enqueue(invitation(tenantA));
     await dispatcher.whenIdle();
 
@@ -246,11 +261,7 @@ describe('DX-088 · email_outbox en la BD (int)', () => {
   });
 
   it('reclamar usa FOR UPDATE SKIP LOCKED: salta las filas bloqueadas y dos reclamos nunca comparten fila', async () => {
-    const { outbox, dispatcher } = services(
-      new ConsoleMailer(),
-      {},
-      dueOnInsertRepo,
-    );
+    const { outbox, dispatcher } = services(new ConsoleMailer());
     await dispatcher.onModuleDestroy();
     const ids: string[] = [];
     for (let i = 0; i < 6; i++) {
@@ -303,11 +314,7 @@ describe('DX-088 · email_outbox en la BD (int)', () => {
   });
 
   it('un SENDING con el arriendo vencido (réplica caída) se puede reclamar otra vez', async () => {
-    const { outbox, dispatcher } = services(
-      new ConsoleMailer(),
-      {},
-      dueOnInsertRepo,
-    );
+    const { outbox, dispatcher } = services(new ConsoleMailer());
     await dispatcher.onModuleDestroy();
     const { id } = await outbox.enqueue(invitation(tenantA));
     const [claimed] = await repo.claimDue(1, 300);
@@ -330,11 +337,7 @@ describe('DX-088 · email_outbox en la BD (int)', () => {
         );
       },
     };
-    const { outbox, dispatcher } = services(
-      failing,
-      { retryBaseMs: 60_000 },
-      dueOnInsertRepo,
-    );
+    const { outbox, dispatcher } = services(failing, { retryBaseMs: 60_000 });
     const { id } = await outbox.enqueue(invitation(tenantA));
     await dispatcher.whenIdle();
 
@@ -411,11 +414,7 @@ describe('DX-088 · email_outbox en la BD (int)', () => {
   });
 
   it('el arriendo se acota a 900 s aunque se pida más (revisión D1)', async () => {
-    const { outbox, dispatcher } = services(
-      new ConsoleMailer(),
-      {},
-      dueOnInsertRepo,
-    );
+    const { outbox, dispatcher } = services(new ConsoleMailer());
     await dispatcher.onModuleDestroy();
     const { id } = await outbox.enqueue(invitation(tenantA));
     await repo.claimDue(1, 2_147_483_647);
@@ -590,5 +589,110 @@ describe('DX-088 · email_outbox en la BD (int)', () => {
       { fn: 'email_outbox_purge_platform', public: false },
       { fn: 'email_outbox_settle', public: false },
     ]);
+  });
+
+  it('cada EmailTemplateName es una etiqueta del enum "EmailTemplate" de la BD, y al revés (el INSERT crudo lo castea tal cual, DX-355)', async () => {
+    const rows = await owner.$queryRaw<{ label: string }[]>`
+      SELECT unnest(enum_range(NULL::"EmailTemplate"))::text AS label`;
+    expect(rows.map((r) => r.label).sort()).toEqual(
+      [...EMAIL_TEMPLATES].sort(),
+    );
+  });
+
+  describe('DX-355 · la hora del envío la pone la BD, no el reloj de la API', () => {
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it.each([
+      ['adelantado 1 h', HOUR],
+      ['atrasado 1 h', -HOUR],
+    ])(
+      'con el reloj de la API %s, el enfriamiento por destinatario se cuenta con la hora de la BD',
+      async (_label, offsetMs) => {
+        const strict = services(new ConsoleMailer(), {
+          quotas: {
+            tenantDaily: 1000,
+            recipientDaily: 1000,
+            recipientCooldownSeconds: 60,
+          },
+        });
+        await strict.dispatcher.onModuleDestroy();
+        await owner.emailOutbox.deleteMany({ where: { tenantId: tenantB } });
+        skewAppClock(offsetMs);
+        await strict.outbox.enqueue(invitation(tenantB));
+
+        const error = await strict.outbox
+          .assertWithinQuota(tenantB, EMAIL)
+          .then(
+            () => null,
+            (e: unknown) => e,
+          );
+        expect(error).toBeInstanceOf(EmailQuotaExceededError);
+        // Recién enviado: quedan ~60 s, ni 0 ni 60 + 3600.
+        const wait = (error as EmailQuotaExceededError).retryAfterSeconds;
+        expect(wait).toBeGreaterThanOrEqual(58);
+        expect(wait).toBeLessThanOrEqual(60);
+      },
+    );
+
+    it.each([
+      ['adelantado 1 h', HOUR],
+      ['atrasado 1 h', -HOUR],
+    ])(
+      'con el reloj de la API %s, el kick tras encolar reclama y envía el email al momento',
+      async (_label, offsetMs) => {
+        const sent: string[] = [];
+        const recording: Mailer = {
+          send: (message) => {
+            sent.push(message.to);
+            return Promise.resolve();
+          },
+        };
+        const { outbox, dispatcher } = services(recording);
+        skewAppClock(offsetMs);
+        const { id } = await outbox.enqueue(invitation(tenantA));
+        await dispatcher.whenIdle();
+
+        expect(await row(id)).toMatchObject({ status: 'SENT', attempts: 1 });
+        expect(sent).toEqual([EMAIL]);
+      },
+    );
+
+    it.each([
+      ['adelantado 1 h', HOUR],
+      ['atrasado 1 h', -HOUR],
+    ])(
+      'con el reloj de la API %s, el reintento se programa con el backoff contado desde la hora de la BD',
+      async (_label, offsetMs) => {
+        const failing: Mailer = {
+          send: () =>
+            Promise.reject(
+              Object.assign(new Error('421 try later'), { responseCode: 421 }),
+            ),
+        };
+        const { outbox, dispatcher } = services(failing, {
+          retryBaseMs: 60_000,
+        });
+        await dispatcher.onModuleDestroy(); // sin kick: se reclama a mano
+        skewAppClock(offsetMs);
+        const { id } = await outbox.enqueue(invitation(tenantA));
+        await makeDue(id);
+
+        const live = services(failing, { retryBaseMs: 60_000 }).dispatcher;
+        const before = await dbNow();
+        expect(await live.dispatchBatch()).toBe(1);
+        const after = await dbNow();
+
+        const retry = await row(id);
+        expect(retry).toMatchObject({ status: 'PENDING', attempts: 1 });
+        const at = retry.nextAttemptAt.getTime();
+        // ±1 ms: "nextAttemptAt" se redondea a timestamp(3).
+        expect(at).toBeGreaterThanOrEqual(before + 60_000 - 1);
+        expect(at).toBeLessThanOrEqual(after + 60_000 + 1);
+        // Ni vencido antes de tiempo ni aparcado una hora de más.
+        expect(await repo.claimDue(20, 300)).toEqual([]);
+      },
+    );
   });
 });
