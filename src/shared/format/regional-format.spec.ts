@@ -301,17 +301,17 @@ describe('regionalFormat', () => {
     it('civil words do not depend on the process zone', () => {
       // Jest da al test una copia de `process.env`, así que cambiar `TZ` no
       // llega a ICU. Se simula la zona del proceso: todo formatter sin
-      // `timeZone` explícito usa Pacific/Kiritimati (UTC+14), donde el
-      // mediodía UTC del lunes ya es «martes». Un módulo nuevo evita que un
-      // formatter cacheado antes tape el fallo.
+      // `timeZone` (ausente o `undefined` explícito) usa Pacific/Kiritimati
+      // (UTC+14), donde el mediodía UTC del lunes ya es «martes». Un módulo
+      // nuevo evita que un formatter cacheado antes tape el fallo.
       const RealDateTimeFormat = Intl.DateTimeFormat;
       const withProcessZone = function (
         locales?: string | string[],
         options?: Intl.DateTimeFormatOptions,
       ) {
         return new RealDateTimeFormat(locales, {
-          timeZone: 'Pacific/Kiritimati',
           ...options,
+          timeZone: options?.timeZone ?? 'Pacific/Kiritimati',
         });
       } as unknown as typeof Intl.DateTimeFormat;
       withProcessZone.supportedLocalesOf =
@@ -328,6 +328,7 @@ describe('regionalFormat', () => {
             hourCycle: 'h12',
           });
           expect(kiritimati.weekdayName(1)).toBe('lunes');
+          expect(kiritimati.civilDate('2027-05-03')).toBe('05/03/2027');
           expect(kiritimati.civilLongDate('2027-05-03')).toBe(
             'lunes 3 de mayo de 2027',
           );
