@@ -45,8 +45,8 @@ export function makeIssuer(
     location: {
       id: '00000000-0000-4000-8000-0000000000l1',
       name: 'Sede Principal',
-      address: 'Cra 15 #90-20, Bogotá',
-      timeZone: 'America/Bogota',
+      address: 'Avenida Central 100',
+      timeZone: 'America/New_York',
       ...overrides,
     },
     clinicName: 'Clínica Demo',
@@ -85,8 +85,9 @@ export class InMemoryPrescriptionRepository implements PrescriptionRepository {
   /** Lo último que el caso de uso pidió insertar, tal cual. */
   lastCreateInput: CreatePrescriptionRepoInput | null = null;
   /**
-   * Fase 1 (spec D1): como el repositorio real, el país de la sede se copia
-   * en la fila como dato; el caso de uso no lo conoce.
+   * Fase 1 (spec D1): como el repositorio real, la fila lleva el país de la
+   * sede como dato (la columna legada no admite NULL); el caso de uso no lo
+   * conoce y ningún test que no sea legado lo cambia.
    */
   locationCountry: LegacyPrescriptionCountry = 'CO';
   savedLicenses: { userId: string; license: string }[] = [];

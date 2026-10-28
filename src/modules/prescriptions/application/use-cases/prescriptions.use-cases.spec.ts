@@ -24,6 +24,7 @@ import {
 } from './prescriptions.use-cases';
 import {
   computePrescriptionHash,
+  expectedPrescriptionHash,
   type PrescriptionHashInput,
 } from '../../domain/prescription-hash';
 import {
@@ -32,7 +33,7 @@ import {
   type SafetyAnamnesis,
 } from '../../domain/prescription-safety';
 
-// 15:00 UTC = 10:00 en la zona de la sede de los tests, el mismo día 16.
+// 15:00 UTC = 11:00 en la zona de la sede de los tests (Nueva York), el mismo día 16.
 const NOW = new Date('2026-10-16T15:00:00.000Z');
 
 const amoxicilina = {
@@ -98,12 +99,7 @@ describe('IssuePrescriptionUseCase', () => {
         brandName: null,
       }),
     ]);
-    expect(rx.contentHash).toBe(
-      computePrescriptionHash({
-        ...rx,
-        items: rx.items.map(({ id: _id, ...item }) => item),
-      }),
-    );
+    expect(rx.contentHash).toBe(expectedPrescriptionHash(rx));
     expect(repo.savedLicenses).toEqual([]);
   });
 
@@ -250,12 +246,7 @@ describe('IssuePrescriptionUseCase', () => {
         }),
       ]);
       expect(rx.allergyOverride).toBe(false);
-      expect(rx.contentHash).toBe(
-        computePrescriptionHash({
-          ...rx,
-          items: rx.items.map(({ id: _id, ...item }) => item),
-        }),
-      );
+      expect(rx.contentHash).toBe(expectedPrescriptionHash(rx));
     });
 
     it('allergyOverride (cliente anterior) cuenta como confirmación; el motivo sigue siendo obligatorio', async () => {
@@ -430,11 +421,33 @@ describe('Listar, ver y anular', () => {
     legacy.safetyOverrideReason = null;
     legacy.contentHash = computePrescriptionHash({
       ...legacy,
+      singleFormat: false,
       items: legacy.items.map(({ id: _id, ...item }) => item),
     });
     const doc = await new GetPrescriptionUseCase(repo).execute(id);
     expect(doc.integrityOk).toBe(true);
     expect(doc.safetyAlerts).toBeNull();
+  });
+
+  it('legacy: a row that cannot be sealed with its format reads integrityOk false, never a 500', async () => {
+    const get = new GetPrescriptionUseCase(repo);
+    const row = repo.rows[0];
+    const sealed = structuredClone(row);
+
+    // Única sin el booleano de las letras (lo impide el CHECK de la tabla).
+    row.printQuantityInWords = null;
+    await expect(get.execute(id)).resolves.toMatchObject({
+      integrityOk: false,
+    });
+
+    // Legada sin país (lo impide el NOT NULL de fase 1).
+    Object.assign(row, sealed, {
+      singleFormat: false,
+      country: null as unknown as typeof row.country,
+    });
+    await expect(get.execute(id)).resolves.toMatchObject({
+      integrityOk: false,
+    });
   });
 
   it('anula con motivo, autor y fecha del servidor; la integridad sigue intacta', async () => {
@@ -504,7 +517,7 @@ describe('GetPrescriptionIssuerUseCase', () => {
     expect(view).toEqual({
       locationId: repo.issuer.location.id,
       locationName: 'Sede Principal',
-      locationAddress: 'Cra 15 #90-20, Bogotá',
+      locationAddress: 'Avenida Central 100',
       clinicName: 'Clínica Demo',
       professionalName: 'Dra. Laura Ruiz',
       professionalLicense: null,
@@ -558,9 +571,13 @@ describe('receta única (DX-324)', () => {
     expect(contentHash).toBe(computePrescriptionHash(sealed));
     expect(computePrescriptionHash(asCo)).toBe(contentHash);
     expect(computePrescriptionHash(asEs)).toBe(contentHash);
-    expect(computePrescriptionHash({ ...asCo, singleFormat: false })).not.toBe(
-      contentHash,
-    );
+    expect(
+      computePrescriptionHash({
+        ...sealed,
+        country: 'CO',
+        singleFormat: false,
+      }),
+    ).not.toBe(contentHash);
     const doc = await new GetPrescriptionUseCase(repo).execute(repo.rows[0].id);
     expect(doc.integrityOk).toBe(true);
   });
@@ -612,8 +629,6 @@ describe('receta única (DX-324)', () => {
       PATIENT_ID,
       makePatient({ docType: 'PASSPORT', docNumber: 'X1' }),
     );
-    expect((await issue()).patientDocument).toBe('Pasaporte X1');
-    repo.locationCountry = 'ES';
     expect((await issue()).patientDocument).toBe('Pasaporte X1');
     repo.patients.set(PATIENT_ID, makePatient({ docNumber: null }));
     setSettings({ requireClinicalRecordNumber: false });

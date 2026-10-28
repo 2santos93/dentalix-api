@@ -28,13 +28,8 @@ export interface PrescriptionItemContent {
   instructions: string | null;
 }
 
-/** Todo lo que la receta EMITIDA afirma; el hash lo sella. */
-export interface PrescriptionHashInput {
-  /**
-   * Solo lo sellan v1 y v2, que lo exigen. La receta única no lo lleva al
-   * sellarse: en fase 1 lo copia el repositorio en la fila, fuera del hash.
-   */
-  country?: LegacyPrescriptionCountry;
+/** Lo que toda receta EMITIDA afirma, legada o única; el hash lo sella. */
+interface PrescriptionHashContent {
   issuedAt: Date;
   dispensationDate: string;
   validUntil: string;
@@ -63,18 +58,41 @@ export interface PrescriptionHashInput {
   safetyOverrideReason: string | null;
   items: PrescriptionItemContent[];
   /**
-   * DX-324: campos de la receta única, OPCIONALES para que las llamadas v1/v2
-   * compilen sin tocarlas y sus hashes no cambien ni un byte (pre-flight I2).
-   * Solo los lee la v3, con `?? null`, salvo `printQuantityInWords`, que la
-   * v3 exige booleano. `singleFormat` ausente o `false` = receta legada. El
+   * DX-324: foto de la receta única. Solo la lee la v3, con `?? null`. El
    * peso llega ya redondeado (`roundWeightKg` de `patient-snapshot.ts`).
    */
-  singleFormat?: boolean;
-  printQuantityInWords?: boolean | null;
   professionalSpecialty?: string | null;
   patientAgeYears?: number | null;
   patientWeightKg?: number | null;
 }
+
+/**
+ * Receta legada (v1/v2): `singleFormat` ausente o `false`, y SIEMPRE con el
+ * país de su plantilla, primer campo del hash. Los campos de la receta única
+ * pueden venir (la fila los tiene, a `null`) y se ignoran, así las llamadas
+ * v1/v2 compilan sin tocarlas y sus hashes no cambian ni un byte (pre-flight
+ * I2).
+ */
+export interface LegacyPrescriptionHashInput extends PrescriptionHashContent {
+  country: LegacyPrescriptionCountry;
+  singleFormat?: false;
+  printQuantityInWords?: boolean | null;
+}
+
+/**
+ * Receta única (v3, spec §3.3): con sus avisos de seguridad y el ajuste de
+ * las letras como booleano. No sella el país: si la fila de fase 1 lo trae
+ * (lo copia el repositorio), se ignora.
+ */
+export interface SingleFormatPrescriptionHashInput extends PrescriptionHashContent {
+  singleFormat: true;
+  printQuantityInWords: boolean;
+  safetyAlerts: SafetyAlert[];
+  country?: LegacyPrescriptionCountry;
+}
+
+export type PrescriptionHashInput =
+  LegacyPrescriptionHashInput | SingleFormatPrescriptionHashInput;
 
 /**
  * SHA-256 (hex) del contenido emitido. Mismo criterio que el consentimiento
@@ -92,8 +110,44 @@ export function computePrescriptionHash(input: PrescriptionHashInput): string {
   return createHash('sha256').update(canonical, 'utf8').digest('hex');
 }
 
+/**
+ * Una receta tal como se guarda y se lee (fila o entidad): el formato aún
+ * sin estrechar y las columnas que la v3 exige, nulables.
+ */
+export type StoredPrescriptionHashInput = PrescriptionHashContent & {
+  country: LegacyPrescriptionCountry | null;
+  singleFormat: boolean;
+  printQuantityInWords: boolean | null;
+};
+
+/**
+ * El hash que DEBERÍA tener una receta guardada, sellada con el formato que
+ * dice su foto (spec R10), o `null` si la fila no se puede sellar con él:
+ * única sin avisos o sin el booleano de las letras, o legada sin país. Los
+ * CHECK y el NOT NULL de la tabla lo impiden; si aun así ocurre, quien lee
+ * responde `integrityOk: false`, nunca un 500.
+ */
+export function expectedPrescriptionHash(
+  rx: StoredPrescriptionHashInput,
+): string | null {
+  const { country, ...content } = rx;
+  const { printQuantityInWords, safetyAlerts } = content;
+  if (content.singleFormat) {
+    if (printQuantityInWords === null || safetyAlerts === null) return null;
+    return computePrescriptionHash({
+      ...content,
+      singleFormat: true,
+      printQuantityInWords,
+      safetyAlerts,
+    });
+  }
+  if (country === null) return null;
+  return computePrescriptionHash({ ...content, country, singleFormat: false });
+}
+
 /** v1 o v2, exactamente como antes de DX-324: con país y sin campos nuevos. */
-function legacyFields(input: PrescriptionHashInput): unknown[] {
+function legacyFields(input: LegacyPrescriptionHashInput): unknown[] {
+  // Segunda guarda, por si una entrada llega sin tipar (JSON, casts).
   if (input.country === undefined) {
     throw new Error('Una receta legada se sella siempre con su país');
   }
@@ -163,7 +217,9 @@ function safetyAlertFields(alerts: SafetyAlert[]): unknown[] {
  * foto dice que se imprimen, así que dejar de escribirlas (fase 2) no cambia
  * ningún hash v3. Siempre lleva avisos de seguridad (aunque sea `[]`).
  */
-function singleFormatFields(input: PrescriptionHashInput): unknown[] {
+function singleFormatFields(
+  input: SingleFormatPrescriptionHashInput,
+): unknown[] {
   if (input.safetyAlerts === null) {
     throw new Error(
       'Una receta única se sella siempre con sus avisos de seguridad',

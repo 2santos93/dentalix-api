@@ -31,6 +31,7 @@ import {
 } from '../../domain/prescription-safety';
 import {
   computePrescriptionHash,
+  expectedPrescriptionHash,
   type PrescriptionItemContent,
 } from '../../domain/prescription-hash';
 import {
@@ -199,13 +200,6 @@ function conflictMessage(blocking: SafetyAlert[], confirmed: boolean): string {
   return confirmed
     ? `Escribe el motivo por el que emites la receta pese a los avisos de seguridad. ${detail}`
     : `Avisos de seguridad sin confirmar: ${detail} Confirma y escribe el motivo para emitir igualmente.`;
-}
-
-function hashOf(rx: Prescription): string {
-  return computePrescriptionHash({
-    ...rx,
-    items: rx.items.map(({ id: _id, ...item }) => item),
-  });
 }
 
 @Injectable()
@@ -434,7 +428,12 @@ export class GetPrescriptionUseCase {
     if (!rx) {
       throw new NotFoundException(PRESCRIPTION_NOT_FOUND_MESSAGE);
     }
-    return { ...rx, integrityOk: hashOf(rx) === rx.contentHash };
+    // Una fila que ni siquiera se puede sellar con su formato no valida: nunca
+    // un 500 al leer.
+    return {
+      ...rx,
+      integrityOk: expectedPrescriptionHash(rx) === rx.contentHash,
+    };
   }
 }
 

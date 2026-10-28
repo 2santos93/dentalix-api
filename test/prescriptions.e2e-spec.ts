@@ -9,12 +9,13 @@ import { applyBodyLimits } from '../src/config/body-limits';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import {
   computePrescriptionHash,
-  type PrescriptionHashInput,
+  expectedPrescriptionHash,
+  type LegacyPrescriptionHashInput,
+  type StoredPrescriptionHashInput,
 } from '../src/modules/prescriptions/domain/prescription-hash';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
   REGIONAL_NEW_YORK_FIXTURE,
   REGIONAL_TOKYO_FIXTURE,
   locationBody,
@@ -105,26 +106,26 @@ const dayOnly = (value: Date) => value.toISOString().slice(0, 10);
 /** El hash recalculado con la fila leída de la BD, como hace la API al leer. */
 async function hashOfStoredRow(
   id: string,
-  override: Partial<PrescriptionHashInput> = {},
-): Promise<{ stored: string; computed: string }> {
+  override: Partial<StoredPrescriptionHashInput> = {},
+): Promise<{ stored: string; computed: string | null }> {
   const row = await raw.prescription.findUniqueOrThrow({
     where: { id },
     include: { items: { orderBy: { position: 'asc' } } },
   });
-  const input: PrescriptionHashInput = {
+  const input: StoredPrescriptionHashInput = {
     ...row,
     dispensationDate: dayOnly(row.dispensationDate),
     validUntil: dayOnly(row.validUntil),
     allergyMatches:
-      row.allergyMatches as unknown as PrescriptionHashInput['allergyMatches'],
+      row.allergyMatches as unknown as StoredPrescriptionHashInput['allergyMatches'],
     safetyAlerts:
-      row.safetyAlerts as unknown as PrescriptionHashInput['safetyAlerts'],
+      row.safetyAlerts as unknown as StoredPrescriptionHashInput['safetyAlerts'],
     items: row.items.map(
       ({ id: _id, tenantId: _t, prescriptionId: _p, ...item }) => item,
     ),
     ...override,
   };
-  return { stored: row.contentHash, computed: computePrescriptionHash(input) };
+  return { stored: row.contentHash, computed: expectedPrescriptionHash(input) };
 }
 
 const SUBDOMAINS = ['rx-a', 'rx-b'];
@@ -230,7 +231,7 @@ describe('Recetas — /patients/:id/prescriptions, /prescriptions, /prescription
     const email = `owner@${subdomain}.com`;
     const reg = await registerVerified(
       app,
-      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+      registerBody(REGIONAL_NEW_YORK_FIXTURE, {
         clinicName: `Clinica ${subdomain}`,
         subdomain,
         email,
@@ -1179,7 +1180,7 @@ describe('Recetas — /patients/:id/prescriptions, /prescriptions, /prescription
       });
     });
 
-    it('a location without locale returns nulls, never a 409', async () => {
+    it('a location without locale or zone returns nulls, never a 409', async () => {
       const bare = await createSite(
         REGIONAL_NEW_YORK_FIXTURE,
         'Sede sin formato',
@@ -1195,6 +1196,17 @@ describe('Recetas — /patients/:id/prescriptions, /prescriptions, /prescription
         timeZone: 'America/New_York',
         locale: null,
         hourCycle: null,
+      });
+
+      // Y sin zona (sede a medio configurar): tampoco 409, todo `null`.
+      await raw.$executeRaw`
+        UPDATE "locations" SET "timeZone" = NULL WHERE "id" = ${bare}::uuid`;
+      const noZone = await as(clinicA, dentistA.token)
+        .get(`/prescriptions/${rx.id}`)
+        .expect(200);
+      expect(noZone.body).toMatchObject({
+        integrityOk: true,
+        locationFormat: { timeZone: null, locale: null, hourCycle: null },
       });
     });
 
@@ -1243,7 +1255,7 @@ describe('Recetas — /patients/:id/prescriptions, /prescriptions, /prescription
     async function insertLegacyRow(
       locationId: string,
       legacy: Pick<
-        PrescriptionHashInput,
+        LegacyPrescriptionHashInput,
         | 'country'
         | 'patientDocument'
         | 'patientBirthYear'
@@ -1255,7 +1267,7 @@ describe('Recetas — /patients/:id/prescriptions, /prescriptions, /prescription
     ): Promise<string> {
       const id = randomUUID();
       const { packages, ...fields } = legacy;
-      const content: PrescriptionHashInput = {
+      const content: LegacyPrescriptionHashInput = {
         ...fields,
         issuedAt: new Date('2026-10-16T15:00:00.000Z'),
         dispensationDate: '2026-10-16',

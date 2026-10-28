@@ -1,7 +1,9 @@
 import { roundWeightKg } from './patient-snapshot';
 import {
   computePrescriptionHash,
+  expectedPrescriptionHash,
   type PrescriptionHashInput,
+  type StoredPrescriptionHashInput,
 } from './prescription-hash';
 import type { SafetyAlert } from './prescription-safety';
 
@@ -149,18 +151,23 @@ describe('computePrescriptionHash', () => {
     });
   });
 
-  it('legacy v1 and v2 without their country throw; v3 needs none', () => {
+  it('legacy v1 and v2 without their country do not compile, and throw if they arrive untyped; v3 needs none', () => {
     const { country: _c, ...noCountry } = base;
-    expect(() => computePrescriptionHash(noCountry)).toThrow(
-      'Una receta legada se sella siempre con su país',
-    );
-    expect(() =>
-      computePrescriptionHash({
-        ...noCountry,
-        safetyRulesVersion: 'RX_SAFETY_V1',
-        safetyAlerts: [],
-      }),
-    ).toThrow('Una receta legada se sella siempre con su país');
+    // @ts-expect-error una legada exige su país en compilación.
+    const v1: PrescriptionHashInput = noCountry;
+    // @ts-expect-error tampoco con `singleFormat: false` explícito.
+    const v2: PrescriptionHashInput = {
+      ...noCountry,
+      safetyRulesVersion: 'RX_SAFETY_V1',
+      safetyAlerts: [],
+      singleFormat: false,
+    };
+    // Segunda guarda en ejecución, para lo que llegue sin tipar.
+    for (const input of [v1, v2]) {
+      expect(() => computePrescriptionHash(input)).toThrow(
+        'Una receta legada se sella siempre con su país',
+      );
+    }
     expect(
       computePrescriptionHash({
         ...noCountry,
@@ -235,7 +242,7 @@ describe('computePrescriptionHash', () => {
     });
 
     it('a legacy snapshot ignores the new fields', () => {
-      const legacy = { ...storedV2, singleFormat: false };
+      const legacy = { ...storedV2, singleFormat: false as const };
       expect(computePrescriptionHash(legacy)).toBe(LEGACY_V2);
       expect(
         computePrescriptionHash({
@@ -297,23 +304,82 @@ describe('computePrescriptionHash', () => {
       ).not.toBe(hash);
     });
 
-    it('v3 without safetyAlerts throws', () => {
-      expect(() =>
-        computePrescriptionHash({ ...single, safetyAlerts: null }),
-      ).toThrow();
+    it('v3 without safetyAlerts does not compile and throws if it arrives untyped', () => {
+      // @ts-expect-error la v3 exige la lista de avisos.
+      const input: PrescriptionHashInput = { ...single, safetyAlerts: null };
+      expect(() => computePrescriptionHash(input)).toThrow();
     });
 
-    it('v3 without a real printQuantityInWords boolean throws', () => {
+    it('v3 without a real printQuantityInWords boolean does not compile and throws if it arrives untyped', () => {
       const { printQuantityInWords: _omitted, ...absent } = single;
+      // Sin tipar a propósito: la segunda guarda en ejecución.
       for (const input of [
         absent,
         { ...single, printQuantityInWords: undefined },
         { ...single, printQuantityInWords: null },
-      ]) {
+      ] as unknown as PrescriptionHashInput[]) {
         expect(() => computePrescriptionHash(input)).toThrow(
           'printQuantityInWords',
         );
       }
+      // @ts-expect-error la v3 exige el booleano de las letras.
+      const nullWords: PrescriptionHashInput = {
+        ...single,
+        printQuantityInWords: null,
+      };
+      expect(nullWords.singleFormat).toBe(true);
+    });
+
+    describe('expectedPrescriptionHash (lectura de una receta guardada)', () => {
+      const stored = (
+        over: Partial<StoredPrescriptionHashInput>,
+      ): StoredPrescriptionHashInput => ({
+        ...base,
+        singleFormat: false,
+        printQuantityInWords: null,
+        ...over,
+      });
+
+      it('picks the format from the snapshot and matches the sealed hashes', () => {
+        expect(
+          expectedPrescriptionHash(
+            stored({ ...storedV1, singleFormat: false }),
+          ),
+        ).toBe(LEGACY_V1);
+        expect(
+          expectedPrescriptionHash(
+            stored({ ...storedV2, singleFormat: false }),
+          ),
+        ).toBe(LEGACY_V2);
+        expect(
+          expectedPrescriptionHash({
+            ...stored({}),
+            ...single,
+            singleFormat: true,
+            printQuantityInWords: true,
+            // La fila de fase 1 trae el país copiado: no entra en la v3.
+            country: 'ES',
+          }),
+        ).toBe(computePrescriptionHash(single));
+      });
+
+      it('returns null, never throws, for a row that cannot be sealed with its format', () => {
+        for (const row of [
+          stored({ singleFormat: false, country: null }),
+          stored({
+            singleFormat: true,
+            printQuantityInWords: null,
+            safetyAlerts: [],
+          }),
+          stored({
+            singleFormat: true,
+            printQuantityInWords: true,
+            safetyAlerts: null,
+          }),
+        ]) {
+          expect(expectedPrescriptionHash(row)).toBeNull();
+        }
+      });
     });
 
     it.each([true, false])(
