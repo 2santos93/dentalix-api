@@ -248,8 +248,9 @@ describe('DX-326 · migraciones de los tipos de pagador genéricos (int)', () =>
     await expect(insertPayer('Pagador 4', 'OTHER', null)).resolves.toBe(1);
   });
 
-  it('an old-API insert (legacy code with country) still succeeds', async () => {
-    // Lo que envía el cliente Prisma de una réplica anterior a DX-326.
+  it('a raw insert of a legacy code with country, as the previous API writes it, still succeeds', async () => {
+    // La BD acepta la fila que escribe una réplica anterior a DX-326 (por SQL;
+    // no usa el cliente Prisma anterior).
     await expect(insertPayer('Réplica antigua', 'EPS_CO', 'CO')).resolves.toBe(
       1,
     );

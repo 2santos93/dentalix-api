@@ -17,8 +17,9 @@
 -- ADD VALUE va en su propio fichero: un valor nuevo no se puede usar en la
 -- misma transacción que lo crea. No reescribe filas.
 --
--- lock_timeout 5 s: si una transacción larga retiene el tipo, falla limpia y
--- se reintenta el deploy.
+-- lock_timeout 5 s: si una transacción larga retiene el tipo, falla limpia;
+-- para reintentar, `npx prisma migrate resolve --rolled-back
+-- 20261029120000_dx326_payer_type_generic_values` y de nuevo el deploy.
 
 SET LOCAL lock_timeout = '5s';
 
