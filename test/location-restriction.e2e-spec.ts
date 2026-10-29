@@ -790,6 +790,12 @@ describe('Personal restringido a sedes (DX-089)', () => {
       const before = await raw.inventoryMovement.findMany({
         where: { itemId: item.a2 },
       });
+      const beforeItem = await raw.inventoryItem.findUniqueOrThrow({
+        where: { id: item.a2 },
+      });
+      const beforeStock = await admin()
+        .get(`/inventory/items/${item.a2}`)
+        .expect(200);
       for (const active of [undefined, a1]) {
         expectNotAllowed(
           await as(s, active).post(`/inventory/items/${item.a2}/movements`, {
@@ -800,7 +806,52 @@ describe('Personal restringido a sedes (DX-089)', () => {
         expect(
           await raw.inventoryMovement.findMany({ where: { itemId: item.a2 } }),
         ).toEqual(before);
+        expect(
+          await raw.inventoryItem.findUniqueOrThrow({ where: { id: item.a2 } }),
+        ).toEqual(beforeItem);
+        const afterStock = await admin()
+          .get(`/inventory/items/${item.a2}`)
+          .expect(200);
+        expect((afterStock.body as { stock: number }).stock).toBe(
+          (beforeStock.body as { stock: number }).stock,
+        );
       }
+    });
+
+    it('sella el movimiento con la sede del ítem aunque otra sede permitida esté activa', async () => {
+      const member = await seedUser(
+        'i1@dx089-restr-a.test',
+        ClinicRole.ASSISTANT,
+      );
+      await restrict(member, [a1, a2]);
+      const token = await loginAs(app, a.host, member.email);
+      const target = await raw.inventoryItem.create({
+        data: {
+          tenantId: a.tenantId,
+          locationId: a2,
+          name: 'I1 sede B',
+          unit: 'caja',
+        },
+      });
+      const response = await api(token, a1)
+        .post(`/inventory/items/${target.id}/movements`, {
+          type: 'IN',
+          quantity: 3,
+        })
+        .expect(201);
+      const stored = await raw.inventoryMovement.findUniqueOrThrow({
+        where: { id: (response.body as { id: string }).id },
+      });
+      expect(target.locationId).toBe(a2);
+      expect(stored.tenantId).toBe(a.tenantId);
+      expect(stored.itemId).toBe(target.id);
+      expect(stored.locationId).toBe(a2);
+      expect(stored.type).toBe('IN');
+      expect(stored.quantity.toNumber()).toBe(3);
+      const detail = await api(token, a2)
+        .get(`/inventory/items/${target.id}`)
+        .expect(200);
+      expect((detail.body as { stock: number }).stock).toBe(3);
     });
 
     it('movimientos en sede propia y ALL conservan acceso', async () => {
@@ -810,12 +861,20 @@ describe('Personal restringido a sedes (DX-089)', () => {
           quantity: 5,
         })
         .expect(201);
-      await admin()
+      const response = await admin()
         .post(`/inventory/items/${item.a2}/movements`, {
           type: 'IN',
           quantity: 7,
         })
         .expect(201);
+      const stored = await raw.inventoryMovement.findUniqueOrThrow({
+        where: { id: (response.body as { id: string }).id },
+      });
+      expect(stored.tenantId).toBe(a.tenantId);
+      expect(stored.itemId).toBe(item.a2);
+      expect(stored.locationId).toBe(a2);
+      expect(stored.type).toBe('IN');
+      expect(stored.quantity.toNumber()).toBe(7);
       expect(
         await raw.inventoryMovement.count({ where: { itemId: item.a1 } }),
       ).toBe(1);
