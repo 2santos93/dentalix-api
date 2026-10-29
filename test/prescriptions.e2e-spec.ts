@@ -363,10 +363,11 @@ describe('Recetas — /patients/:id/prescriptions, /prescriptions, /prescription
   });
 
   describe('emitir', () => {
-    it('issuer has no country', async () => {
+    it('issuer carries the deprecated legacy country of its location (phase 1, old web)', async () => {
       const res = await as(clinicA, dentistA.token)
         .get('/prescriptions/issuer')
         .expect(200);
+      const issuerBody = res.body as { locationId: string; country: unknown };
       expect(res.body).toMatchObject({
         professionalName: 'Dra. Laura Ruiz',
         professionalLicense: 'RM-12345',
@@ -376,7 +377,14 @@ describe('Recetas — /patients/:id/prescriptions, /prescriptions, /prescription
         printQuantityInWords: true,
         requireClinicalRecordNumber: true,
       });
-      expect(res.body).not.toHaveProperty('country');
+      const site = await raw.location.findUniqueOrThrow({
+        where: { id: issuerBody.locationId },
+        select: { country: true },
+      });
+      expect(issuerBody.country).toBe(site.country);
+      expect(res.body).not.toHaveProperty('phase1');
+      // La forma que lee la web de main: «Sede (país)» con un país conocido.
+      expect(['CO', 'ES']).toContain(issuerBody.country);
     });
 
     it('un DENTIST emite con 2 medicamentos: foto legal, cantidad en letras y hash; autor y hora del servidor', async () => {
@@ -888,6 +896,12 @@ describe('Recetas — /patients/:id/prescriptions, /prescriptions, /prescription
       const site = await createSite(REGIONAL_TOKYO_FIXTURE, 'Sede legado');
       await raw.$executeRaw`
         UPDATE "locations" SET "country" = 'ES' WHERE "id" = ${site}::uuid`;
+      // Fase 1: la vista del emisor reenvía el país guardado de ESTA sede
+      // (deprecated, para la web anterior), no uno por defecto.
+      const issuer = await as(clinicA, dentistA.token, site)
+        .get('/prescriptions/issuer')
+        .expect(200);
+      expect(issuer.body).toMatchObject({ locationId: site, country: 'ES' });
       // Varios medicamentos, sin envases y sin fecha de nacimiento: la regla
       // del país copiado no se aplica.
       const res = await issueAt(site, patientA, {

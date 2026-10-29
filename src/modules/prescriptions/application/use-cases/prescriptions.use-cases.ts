@@ -40,6 +40,7 @@ import {
   validatePrescription,
   type PrescriptionItemInput,
 } from '../../domain/prescription-rules';
+import type { Phase1IssuerCompat } from '../../domain/legacy-prescription';
 import { quantityInWords } from '../../domain/quantity-in-words';
 import { PATIENT_NOT_FOUND_MESSAGE } from '../../../patients/application/assert-patient-in-clinic';
 
@@ -100,6 +101,8 @@ export interface PrescriptionIssuerView {
   maxItems: number;
   printQuantityInWords: boolean;
   requireClinicalRecordNumber: boolean;
+  /** Compatibilidad de fase 1, opaca aquí: solo el presenter la abre. */
+  phase1: Phase1IssuerCompat;
 }
 
 function trimmedOrNull(value: string | null | undefined): string | null {
@@ -225,6 +228,7 @@ export class GetPrescriptionIssuerUseCase {
       maxItems: MAX_PRESCRIPTION_ITEMS,
       printQuantityInWords: settings.printQuantityInWords,
       requireClinicalRecordNumber: settings.requireClinicalRecordNumber,
+      phase1: issuer.phase1,
     };
   }
 }

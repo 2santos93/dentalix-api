@@ -5,7 +5,10 @@
 import type { DocType, PrescriptionStatus } from '@prisma/client';
 import type { HourCycle } from '../../../../shared/format/regional-format';
 import type { AllergyMatch } from '../allergy-match';
-import type { LegacyPrescriptionCountry } from '../legacy-prescription';
+import type {
+  LegacyPrescriptionCountry,
+  Phase1IssuerCompat,
+} from '../legacy-prescription';
 import type { PrescriptionItemContent } from '../prescription-hash';
 import type { SafetyAlert, SafetyAnamnesis } from '../prescription-safety';
 import type { PrescriptionSettings } from '../prescription-settings';
@@ -120,6 +123,8 @@ export interface PrescriptionIssuer {
   };
   clinicName: string;
   settings: PrescriptionSettings;
+  /** Solo para la web anterior a DX-324; ninguna regla lo lee (R1). */
+  phase1: Phase1IssuerCompat;
   professional: {
     id: string;
     name: string;

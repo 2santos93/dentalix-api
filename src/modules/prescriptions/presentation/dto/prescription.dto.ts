@@ -292,4 +292,13 @@ export class PrescriptionIssuerDto {
       'Se exige el documento del paciente, que se imprime como nº de historia clínica (ajuste de la clínica)',
   })
   requireClinicalRecordNumber!: boolean;
+  @ApiProperty({
+    enum: LEGACY_PRESCRIPTION_COUNTRIES,
+    enumName: 'LegacyPrescriptionCountry',
+    nullable: true,
+    deprecated: true,
+    description:
+      'Fase 1: país legado de la sede, solo para la web anterior a DX-324; la fase 2 lo retira. La web nueva no lo lee.',
+  })
+  country!: LegacyPrescriptionCountry | null;
 }

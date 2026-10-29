@@ -51,6 +51,7 @@ export function makeIssuer(
     },
     clinicName: 'Clínica Demo',
     settings: { ...TEST_PRESCRIPTION_SETTINGS, ...extra.settings },
+    phase1: { country: 'CO' },
     professional: {
       id: DENTIST_ID,
       name: 'Dra. Laura Ruiz',

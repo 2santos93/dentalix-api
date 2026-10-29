@@ -55,7 +55,6 @@ import {
   IssuePrescriptionUseCase,
   ListPatientPrescriptionsUseCase,
   VoidPrescriptionUseCase,
-  type PrescriptionIssuerView,
   type PrescriptionSafetyPreview,
 } from '../application/use-cases/prescriptions.use-cases';
 import {
@@ -71,6 +70,7 @@ import {
   SafetyConflictDto,
 } from './dto/prescription.dto';
 import {
+  presentIssuer,
   presentPrescription,
   presentPrescriptionDocument,
 } from './prescription.presenter';
@@ -234,8 +234,10 @@ export class PrescriptionsController {
     description:
       'Sede desde la que se emitiría, registro y especialidad del usuario, y los ajustes de receta de la clínica',
   })
-  issuer(@Req() req: AuthenticatedRequest): Promise<PrescriptionIssuerView> {
-    return this.getIssuer.execute(req.user.sub);
+  async issuer(
+    @Req() req: AuthenticatedRequest,
+  ): Promise<PrescriptionIssuerDto> {
+    return presentIssuer(await this.getIssuer.execute(req.user.sub));
   }
 
   // También antes de `:id`: si no, `settings` se leería como el id de una

@@ -163,28 +163,8 @@ const COUNTRY_FREE = [
   // DX-316: el calendario de la sede y su cargador (I4).
   join(SRC, 'shared', 'locations', 'location-business-calendar.ts'),
   ...tsFiles(join(SRC, 'modules', 'location-calendar')).filter(isProduction),
-  // DX-324: la receta única no se razona por país (spec R1).
-  ...[
-    'prescription-rules.ts',
-    'prescription-settings.ts',
-    'patient-snapshot.ts',
-  ].map((file) => join(SRC, 'modules', 'prescriptions', 'domain', file)),
-  join(
-    SRC,
-    'modules',
-    'prescriptions',
-    'application',
-    'use-cases',
-    'prescriptions.use-cases.ts',
-  ),
-  join(
-    SRC,
-    'modules',
-    'prescriptions',
-    'application',
-    'use-cases',
-    'prescription-settings.use-cases.ts',
-  ),
+  // DX-324: el módulo de recetas entero, salvo los legados de R12, en
+  // `prescriptions module reads no country` (abajo).
 ];
 
 describe('formato regional y reloj solo desde el helper (G1-B, I5)', () => {
@@ -313,6 +293,21 @@ const PRESCRIPTIONS = join(SRC, 'modules', 'prescriptions');
 const LEGACY_PRESCRIPTION_FILES = [
   join(PRESCRIPTIONS, 'domain', 'legacy-prescription.ts'),
 ];
+/**
+ * R1/R12: los únicos ficheros de producción del módulo que nombran el país
+ * legado, cada uno con la cabecera «Excepción G5.3 (DX-334)» por la que
+ * G5.3 los encontrará. Cualquier otro que lo lea (una regla, el controlador,
+ * la seguridad, las letras…) falla.
+ */
+const R12_HEADER = 'Excepción G5.3 (DX-334)';
+const R12_COUNTRY_FILES = [
+  'domain/legacy-prescription.ts',
+  'domain/prescription-hash.ts',
+  'domain/entities/prescription.entity.ts',
+  'infrastructure/repositories/prisma-prescription.repository.ts',
+  'presentation/dto/prescription.dto.ts',
+  'presentation/prescription.presenter.ts',
+].map((path) => join(PRESCRIPTIONS, ...path.split('/')));
 
 describe('receta sin reglas nacionales (DX-324)', () => {
   it('architecture: prescriptions module names no national rule', () => {
@@ -321,6 +316,23 @@ describe('receta sin reglas nacionales (DX-324)', () => {
     );
     expect(files.length).toBeGreaterThan(10);
     expect(offending(files, (line) => NATIONAL_RULE.test(line))).toEqual([]);
+  });
+
+  it('architecture: prescriptions module reads no country outside the R12 legacy files', () => {
+    const files = tsFiles(PRESCRIPTIONS).filter(
+      (file) => isProduction(file) && !R12_COUNTRY_FILES.includes(file),
+    );
+    expect(files.length).toBeGreaterThan(20);
+    expect(offending(files, (line) => /country/i.test(line))).toEqual([]);
+  });
+
+  it('every R12 legacy file exists and carries the G5.3 header', () => {
+    for (const file of R12_COUNTRY_FILES) {
+      expect({
+        file: relative(SRC, file),
+        header: readFileSync(file, 'utf8').slice(0, 200).includes(R12_HEADER),
+      }).toEqual({ file: relative(SRC, file), header: true });
+    }
   });
 
   it('architecture: staff profile fields name no national rule', () => {

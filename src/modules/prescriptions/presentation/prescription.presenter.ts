@@ -1,10 +1,18 @@
+/**
+ * Excepción G5.3 (DX-334): recetas emitidas antes de DX-324. El presenter
+ * devuelve el `country` legado de una receta anterior a la receta única y, en
+ * fase 1, el de la sede en la vista del emisor (spec R12, §4.4). Ninguna regla
+ * decide con él.
+ */
 import type {
   Prescription,
   PrescriptionDocument,
 } from '../domain/entities/prescription.entity';
+import type { PrescriptionIssuerView } from '../application/use-cases/prescriptions.use-cases';
 import type {
   PrescriptionDocumentDto,
   PrescriptionDto,
+  PrescriptionIssuerDto,
 } from './dto/prescription.dto';
 
 /**
@@ -39,4 +47,17 @@ export function presentPrescriptionDocument(
     locationFormat: doc.locationFormat,
     integrityOk: doc.integrityOk,
   };
+}
+
+/**
+ * Vista del emisor (spec §4.4). En fase 1 abre el bloque de compatibilidad y
+ * reenvía el país legado de la sede como `country` (deprecated) para la web
+ * anterior a DX-324, que pinta «Sede (país)»; la web nueva no lo lee y la
+ * fase 2 lo retira (§10.8).
+ */
+export function presentIssuer(
+  view: PrescriptionIssuerView,
+): PrescriptionIssuerDto {
+  const { phase1, ...issuer } = view;
+  return { ...issuer, country: phase1.country };
 }

@@ -1230,10 +1230,6 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // PASSWORD_RESET de SESSION (sin sesión: el actor es el titular).
   'POST /auth/reset-password':
     'reset-password.use-case.spec.ts y password-reset.e2e-spec.ts',
-  // Solo la RECLAMACIÓN de una cuenta existente deja evento (ACCOUNT_CLAIM);
-  // aceptar con una cuenta nueva no deja ninguno (ver el informe de DX-324).
-  'POST /public/invitations/:token/accept':
-    'accept-invitation.use-case.spec.ts y accounts-no-enumeration.e2e-spec.ts',
   // REMINDER_OPT_OUT del paciente por el enlace (solo si de verdad se da de baja).
   'POST /public/reminder-opt-outs/:token':
     'reminder-opt-out.use-cases.spec.ts y reminder-opt-out.e2e-spec.ts',
@@ -1297,9 +1293,12 @@ const KNOWN_UNAUDITED: Record<string, string> = {
   'POST /staff/invitations': 'hueco: invitar (rol y sedes) sin evento',
   'POST /staff/invitations/:id/resend': 'hueco: reenviar invitación sin evento',
   'DELETE /staff/invitations/:id': 'hueco: retirar invitación sin evento',
-  'PATCH /staff/:userId': 'hueco: rol, sedes y registro profesional sin evento',
+  'PATCH /staff/:userId':
+    'hueco: rol, sedes, registro profesional y especialidad sin evento',
   'POST /staff/:userId/reactivate': 'hueco: reactivar un miembro sin evento',
   'DELETE /staff/:userId': 'hueco: desactivar un miembro sin evento',
+  'POST /public/invitations/:token/accept':
+    'hueco parcial: solo reclamar una cuenta existente deja evento (INVITATION_ACCOUNT_CLAIM); aceptar con una cuenta nueva crea usuario y membresía sin evento (DX-359)',
 
   // --- Configuración de la clínica ----------------------------------------
   'POST /locations': 'hueco: alta de sede sin evento',

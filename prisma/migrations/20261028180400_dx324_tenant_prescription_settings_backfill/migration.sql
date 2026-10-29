@@ -50,6 +50,11 @@
 -- deploy. Si esta migración falla, la API nueva no se despliega hasta que se
 -- reintente con éxito.
 --
+-- Reintentar es seguro, como en los rellenos anteriores (DX-328, G1-B): todo
+-- corre en una sola transacción, así que un fallo (lock_timeout, deadlock,
+-- país sin fila o comprobación final) la deshace entera, FORCE incluido, y el
+-- siguiente `migrate deploy` la aplica desde cero sobre los datos intactos.
+--
 -- Ninguna sentencia inserta en `locations`, así que el trigger de calendario
 -- de DX-316 no se dispara. Sin trigger UTC (DX-226): no hay columnas de
 -- fecha. Grants: no aplica.

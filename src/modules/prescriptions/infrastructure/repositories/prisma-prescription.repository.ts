@@ -240,7 +240,7 @@ export class PrismaPrescriptionRepository implements PrescriptionRepository {
       const [location, tenant, user, membership, zoneOf] = await Promise.all([
         tx.location.findFirstOrThrow({
           where: { id: locationId, deletedAt: null },
-          select: { id: true, name: true, address: true },
+          select: { id: true, name: true, address: true, country: true },
         }),
         tx.tenant.findFirstOrThrow({
           where: { id: tenantId },
@@ -261,9 +261,13 @@ export class PrismaPrescriptionRepository implements PrescriptionRepository {
         }),
         resolveLocationTimeZones(tx, tenantId, [locationId]),
       ]);
+      const { country, ...site } = location;
       return {
-        location: { ...location, timeZone: zoneOf(location.id) },
+        location: { ...site, timeZone: zoneOf(location.id) },
         clinicName: tenant.name,
+        // Fase 1 (spec §4.4, §7): el país legado de la sede, solo para la web
+        // anterior a DX-324; la fase 2 lo retira.
+        phase1: { country },
         settings: {
           printQuantityInWords: tenant.prescriptionPrintQuantityInWords,
           requireClinicalRecordNumber:

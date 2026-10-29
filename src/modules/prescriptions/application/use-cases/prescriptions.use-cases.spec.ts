@@ -501,7 +501,7 @@ describe('Listar, ver y anular', () => {
 });
 
 describe('GetPrescriptionIssuerUseCase', () => {
-  it('issuer view has no country and carries the clinic settings and the specialty', async () => {
+  it('issuer view carries the clinic settings, the specialty and the phase-1 block untouched; no country of its own', async () => {
     const repo = new InMemoryPrescriptionRepository();
     repo.issuer = makeIssuer({}, null, {
       settings: {
@@ -526,7 +526,9 @@ describe('GetPrescriptionIssuerUseCase', () => {
       maxItems: 10,
       printQuantityInWords: false,
       requireClinicalRecordNumber: true,
+      phase1: { country: 'CO' },
     });
+    expect(view.phase1).toBe(repo.issuer.phase1);
     expect('country' in view).toBe(false);
   });
 });
