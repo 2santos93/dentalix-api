@@ -6,7 +6,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { ClinicCountry, ClinicRole, DocType } from '@prisma/client';
+import { ClinicRole, DocType } from '@prisma/client';
 import type {
   Prescription,
   PrescriptionDocument,
@@ -14,8 +14,13 @@ import type {
 } from '../../domain/entities/prescription.entity';
 import {
   PRESCRIPTION_REPOSITORY,
+  type CreatePrescriptionRepoInput,
   type PrescriptionRepository,
 } from '../../domain/ports/prescription-repository.port';
+import {
+  ageForSnapshot,
+  weightForSnapshot,
+} from '../../domain/patient-snapshot';
 import {
   ageInYears,
   checkPrescriptionSafety,
@@ -26,15 +31,16 @@ import {
 } from '../../domain/prescription-safety';
 import {
   computePrescriptionHash,
+  expectedPrescriptionHash,
   type PrescriptionItemContent,
 } from '../../domain/prescription-hash';
 import {
   computeValidUntil,
   MAX_PRESCRIPTION_ITEMS,
-  PRESCRIPTION_VALIDITY_DAYS,
   validatePrescription,
   type PrescriptionItemInput,
 } from '../../domain/prescription-rules';
+import type { Phase1IssuerCompat } from '../../domain/legacy-prescription';
 import { quantityInWords } from '../../domain/quantity-in-words';
 import { PATIENT_NOT_FOUND_MESSAGE } from '../../../patients/application/assert-patient-in-clinic';
 
@@ -58,7 +64,7 @@ export interface IssuePrescriptionInput {
   /** `YYYY-MM-DD`; por defecto, hoy en la zona de la sede. */
   dispensationDate?: string;
   notes?: string;
-  /** Registro profesional / nº de colegiado si el perfil aún no lo tiene. */
+  /** Nº de registro profesional si el perfil aún no lo tiene. */
   professionalLicense?: string;
   /**
    * Confirmación explícita ante una alerta de alergia (DX-013). Desde DX-300
@@ -82,16 +88,21 @@ export interface PrescriptionSafetyPreview {
 
 export const SAFETY_OVERRIDE_REASON_MAX = 500;
 
+/** Lo que el modal necesita antes de emitir (spec §4.4). */
 export interface PrescriptionIssuerView {
-  country: ClinicCountry;
   locationId: string;
   locationName: string;
   locationAddress: string | null;
   clinicName: string;
   professionalName: string;
   professionalLicense: string | null;
+  professionalSpecialty: string | null;
   validityDays: number;
   maxItems: number;
+  printQuantityInWords: boolean;
+  requireClinicalRecordNumber: boolean;
+  /** Compatibilidad de fase 1, opaca aquí: solo el presenter la abre. */
+  phase1: Phase1IssuerCompat;
 }
 
 function trimmedOrNull(value: string | null | undefined): string | null {
@@ -143,15 +154,10 @@ function resolveDispensationDate(
   return requested;
 }
 
-function patientDocument(
-  country: ClinicCountry,
-  patient: PrescriptionPatient,
-): string | null {
+/** `«{tipo} {número}»` en toda clínica (spec R8), o `null` sin número. */
+function patientDocument(patient: PrescriptionPatient): string | null {
   if (!patient.docNumber) return null;
-  // En ES el documento es el DNI/NIE tal cual; los tipos (CC, TI…) son de CO.
-  return country === ClinicCountry.ES
-    ? patient.docNumber
-    : `${DOC_TYPE_LABEL[patient.docType]} ${patient.docNumber}`;
+  return `${DOC_TYPE_LABEL[patient.docType]} ${patient.docNumber}`;
 }
 
 function toItemContent(
@@ -199,13 +205,6 @@ function conflictMessage(blocking: SafetyAlert[], confirmed: boolean): string {
     : `Avisos de seguridad sin confirmar: ${detail} Confirma y escribe el motivo para emitir igualmente.`;
 }
 
-function hashOf(rx: Prescription): string {
-  return computePrescriptionHash({
-    ...rx,
-    items: rx.items.map(({ id: _id, ...item }) => item),
-  });
-}
-
 @Injectable()
 export class GetPrescriptionIssuerUseCase {
   constructor(
@@ -213,20 +212,23 @@ export class GetPrescriptionIssuerUseCase {
     private readonly repo: PrescriptionRepository,
   ) {}
 
-  /** Lo que el modal necesita saber antes de emitir: país, sede y registro. */
+  /** Sede, profesional con su perfil y los ajustes de receta de la clínica. */
   async execute(professionalUserId: string): Promise<PrescriptionIssuerView> {
     const issuer = await this.repo.loadIssuer(professionalUserId);
-    const country = issuer.location.country;
+    const { settings } = issuer;
     return {
-      country,
       locationId: issuer.location.id,
       locationName: issuer.location.name,
       locationAddress: issuer.location.address,
       clinicName: issuer.clinicName,
       professionalName: issuer.professional.name,
       professionalLicense: issuer.professional.license,
-      validityDays: PRESCRIPTION_VALIDITY_DAYS[country],
-      maxItems: country === ClinicCountry.ES ? 1 : MAX_PRESCRIPTION_ITEMS,
+      professionalSpecialty: trimmedOrNull(issuer.professional.specialty),
+      validityDays: settings.validityDays,
+      maxItems: MAX_PRESCRIPTION_ITEMS,
+      printQuantityInWords: settings.printQuantityInWords,
+      requireClinicalRecordNumber: settings.requireClinicalRecordNumber,
+      phase1: issuer.phase1,
     };
   }
 }
@@ -241,11 +243,12 @@ export class IssuePrescriptionUseCase {
   ) {}
 
   /**
-   * Emitir = foto congelada. Valida los campos legales del país de la sede,
-   * recalcula los avisos de seguridad con la anamnesis vigente (DX-300: 409
-   * si hay bloqueantes sin confirmación y motivo), escribe la cantidad en
-   * letras y sella todo (avisos y motivo incluidos) con un SHA-256.
-   * Profesional, sede y hora salen del servidor, nunca del cuerpo.
+   * Emitir = foto congelada de la receta única (spec §4.3). Valida con las
+   * reglas únicas y los ajustes de la clínica, recalcula los avisos de
+   * seguridad con la anamnesis vigente (DX-300: 409 si hay bloqueantes sin
+   * confirmación y motivo), congela edad, peso, especialidad y el ajuste de
+   * las letras, y sella todo con el hash v3. Profesional, sede, ajustes y
+   * hora salen del servidor, nunca del cuerpo.
    */
   async execute(
     patientId: string,
@@ -257,7 +260,7 @@ export class IssuePrescriptionUseCase {
       throw new NotFoundException(PATIENT_NOT_FOUND_MESSAGE);
     }
     const issuer = await this.repo.loadIssuer(professionalUserId);
-    const country = issuer.location.country;
+    const { settings } = issuer;
     // El registro del perfil (lo gestiona ADMIN en Personal) manda: el del
     // cuerpo solo cubre el hueco de un perfil que aún no lo tiene, para que un
     // profesional no selle recetas con un registro distinto al de su ficha.
@@ -266,10 +269,11 @@ export class IssuePrescriptionUseCase {
       : trimmedOrNull(input.professionalLicense);
     const license = issuer.professional.license ?? providedLicense;
 
-    const errors = validatePrescription(country, {
+    const errors = validatePrescription({
       items: input.items,
-      patient: { docNumber: patient.docNumber, birthDate: patient.birthDate },
+      patient: { docNumber: patient.docNumber },
       professionalLicense: license,
+      requireClinicalRecordNumber: settings.requireClinicalRecordNumber,
     });
     if (errors.length > 0) {
       throw new BadRequestException(
@@ -308,21 +312,31 @@ export class IssuePrescriptionUseCase {
     }
     const allergyMatches = safety.allergyMatches;
 
-    const content = {
-      country,
+    // Lo que se sella y lo que se inserta son el mismo objeto. Las letras se
+    // guardan siempre en fase 1 (réplicas anteriores); `printQuantityInWords`
+    // congela si esta receta las muestra.
+    const content: Omit<CreatePrescriptionRepoInput, 'contentHash'> = {
+      singleFormat: true,
+      printQuantityInWords: settings.printQuantityInWords,
+      locationId: issuer.location.id,
+      patientId: patient.id,
+      professionalId: professionalUserId,
       issuedAt,
       dispensationDate,
-      validUntil: computeValidUntil(country, dispensationDate),
-      patientId: patient.id,
+      validUntil: computeValidUntil(dispensationDate, settings.validityDays),
       patientName: `${patient.firstName} ${patient.lastName}`,
-      patientDocument: patientDocument(country, patient),
+      patientDocument: patientDocument(patient),
       patientBirthYear: patient.birthDate
         ? patient.birthDate.getUTCFullYear()
         : null,
-      clinicalRecordNumber: patient.docNumber,
-      professionalId: professionalUserId,
+      patientAgeYears: ageForSnapshot(patient.birthDate, today),
+      patientWeightKg: weightForSnapshot(patient.anamnesis?.weightKg ?? null),
+      clinicalRecordNumber: settings.requireClinicalRecordNumber
+        ? patient.docNumber
+        : null,
       professionalName: issuer.professional.name,
       professionalLicense: license as string,
+      professionalSpecialty: trimmedOrNull(issuer.professional.specialty),
       professionalEmail: issuer.professional.email,
       clinicName: issuer.clinicName,
       locationName: issuer.location.name,
@@ -337,7 +351,6 @@ export class IssuePrescriptionUseCase {
     };
     const created = await this.repo.create({
       ...content,
-      locationId: issuer.location.id,
       contentHash: computePrescriptionHash(content),
     });
 
@@ -419,7 +432,12 @@ export class GetPrescriptionUseCase {
     if (!rx) {
       throw new NotFoundException(PRESCRIPTION_NOT_FOUND_MESSAGE);
     }
-    return { ...rx, integrityOk: hashOf(rx) === rx.contentHash };
+    // Una fila que ni siquiera se puede sellar con su formato no valida: nunca
+    // un 500 al leer.
+    return {
+      ...rx,
+      integrityOk: expectedPrescriptionHash(rx) === rx.contentHash,
+    };
   }
 }
 

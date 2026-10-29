@@ -89,3 +89,18 @@ describe('registro profesional (DX-013)', () => {
     });
   });
 });
+
+describe('especialidad del miembro (DX-324)', () => {
+  it('trims the specialty and clears it with blanks', async () => {
+    const repo = makeRepo();
+    const uc = new UpdateStaffUseCase(asRepo(repo));
+    await uc.execute({ userId: 'u1', professionalSpecialty: '  Ortodoncia  ' });
+    expect(repo.updateById).toHaveBeenLastCalledWith('u1', {
+      professionalSpecialty: 'Ortodoncia',
+    });
+    await uc.execute({ userId: 'u1', professionalSpecialty: '   ' });
+    expect(repo.updateById).toHaveBeenLastCalledWith('u1', {
+      professionalSpecialty: null,
+    });
+  });
+});

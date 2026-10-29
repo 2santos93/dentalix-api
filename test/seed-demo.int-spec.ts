@@ -14,7 +14,13 @@ import {
   assertLocalEnvironment,
   seedDemo,
 } from '../prisma/seed-demo';
-import { DEMO_COMPARISON_HISTORY, DEMO_COVERAGES } from '../prisma/demo/data';
+import {
+  DEMO_COMPARISON_HISTORY,
+  DEMO_COVERAGES,
+  DEMO_PRESCRIPTION,
+  DEMO_PRESCRIPTION_SETTINGS,
+  DEMO_PROFESSIONAL_SPECIALTIES,
+} from '../prisma/demo/data';
 import { TENANT_TABLES, purgeDemoTenants } from './support/demo-tenant-purge';
 import { hostFor } from './support/tenant-host';
 
@@ -313,6 +319,61 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       /^http:\/\/demo\.localhost:3001\/confirmar\/[A-Za-z0-9_-]{43}$/,
     );
   }, 120000);
+
+  it('demo prescription is a single-format prescription with words, HC and specialty', async () => {
+    const tenantId = await liveDemoTenantId();
+    const tenant = await raw.tenant.findUniqueOrThrow({
+      where: { id: tenantId },
+      select: {
+        prescriptionPrintQuantityInWords: true,
+        prescriptionRequireClinicalRecordNumber: true,
+        prescriptionValidityDays: true,
+      },
+    });
+    expect({
+      printQuantityInWords: tenant.prescriptionPrintQuantityInWords,
+      requireClinicalRecordNumber:
+        tenant.prescriptionRequireClinicalRecordNumber,
+      validityDays: tenant.prescriptionValidityDays,
+    }).toEqual(DEMO_PRESCRIPTION_SETTINGS);
+    // DX-324: los ajustes los fija el ADMIN por su caso de uso, auditado.
+    const settingsEvents = await raw.auditEvent.findMany({
+      where: { tenantId, resourceType: 'CLINIC_SETTINGS' },
+      select: { action: true, actorRole: true, metadata: true },
+    });
+    expect(settingsEvents).toEqual([
+      expect.objectContaining({
+        action: 'UPDATE',
+        actorRole: ClinicRole.ADMIN,
+        metadata: expect.objectContaining({
+          reason: 'PRESCRIPTION_SETTINGS',
+        }) as unknown,
+      }),
+    ]);
+
+    const rx = await raw.prescription.findFirstOrThrow({
+      where: { tenantId },
+      include: { items: { orderBy: { position: 'asc' } } },
+    });
+    expect(rx).toMatchObject({
+      singleFormat: true,
+      printQuantityInWords: true,
+      professionalSpecialty:
+        DEMO_PROFESSIONAL_SPECIALTIES[DEMO_PRESCRIPTION.dentistIndex],
+    });
+    expect(rx.clinicalRecordNumber).toMatch(/\S/);
+    expect(rx.items.map((item) => item.quantityInWords)).toEqual([
+      'veintiuno',
+      'nueve',
+    ]);
+    const memberships = await raw.clinicMembership.findMany({
+      where: { tenantId, professionalSpecialty: { not: null } },
+      select: { professionalSpecialty: true },
+    });
+    expect(memberships.map((m) => m.professionalSpecialty).sort()).toEqual(
+      [...DEMO_PROFESSIONAL_SPECIALTIES].sort(),
+    );
+  });
 
   it('every demo location is reviewed and complete (G1)', async () => {
     const tenantId = await liveDemoTenantId();

@@ -314,6 +314,14 @@ const FIXTURE_DX316 = [
      (gen_random_uuid(),'${T_CAL}','Sede retirada','USD','America/New_York','en-US','h12',now(),now())`,
 ];
 
+/**
+ * DX-324: ajustes de receta por clínica (relleno desde las sedes vivas).
+ * Sin fixture propio: A (solo CO), B (Madrid ES viva, retirada ES y el resto
+ * CO por el default de la columna), mig-cal (la viva es CO por el default),
+ * mig-co, mig-es, mig-mix y mig-none ya cubren cada caso.
+ */
+const DX324 = '20261028180000_dx324_membership_specialty';
+
 const STEPS: Step[] = [
   { until: '20260731115959', fixture: [] },
   // 20260731120000_structured_clinical_history y _remove_owner_role.
@@ -387,8 +395,12 @@ const STEPS: Step[] = [
   // auditoría y las tablas del calendario, aún sin trigger).
   { until: DX316_DEFAULT },
   // dx316_location_calendar_default (FORCE fuera de locations y de
-  // location_working_calendars durante el backfill) y las siguientes.
-  { until: '99999999999999', fixture: FIXTURE_DX316 },
+  // location_working_calendars durante el backfill) y las siguientes hasta
+  // DX-324.
+  { until: DX324, fixture: FIXTURE_DX316 },
+  // dx324: especialidad del miembro, receta única, ajustes de receta de la
+  // clínica y su relleno (FORCE fuera de locations), y las siguientes.
+  { until: '99999999999999' },
 ];
 
 describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-nosu)', () => {
@@ -1010,6 +1022,68 @@ describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-no
     ).toBe(
       'location_holidays=true,location_working_calendars=true,locations=true',
     );
+  }, 180_000);
+
+  it('owner-nosu prescription settings backfill sees every location and restores FORCE', async () => {
+    expect(
+      await scalar<number>(
+        `SELECT count(*)::int AS v FROM information_schema.columns
+          WHERE table_name = 'tenants'
+            AND column_name IN ('prescriptionPrintQuantityInWords',
+                                'prescriptionRequireClinicalRecordNumber',
+                                'prescriptionValidityDays')`,
+      ),
+    ).toBe(0);
+    await run(STEPS[23]);
+    // Letras/HC/validez. Con el owner sujeto a la RLS, un relleno que no
+    // viera las sedes dejaría a todas en false/false/30.
+    expect(
+      await scalar<string>(
+        `SELECT string_agg("subdomain" || '=' || "prescriptionPrintQuantityInWords"
+                  || '/' || "prescriptionRequireClinicalRecordNumber"
+                  || '/' || "prescriptionValidityDays", ','
+                ORDER BY "subdomain") AS v
+           FROM "tenants"
+          WHERE "subdomain" IN ('mig-a','mig-b','mig-cal','mig-co','mig-es','mig-mix','mig-none')`,
+      ),
+    ).toBe(
+      [
+        'mig-a=true/true/30',
+        'mig-b=true/true/10',
+        'mig-cal=true/true/30',
+        'mig-co=true/true/30',
+        'mig-es=true/true/10',
+        'mig-mix=true/true/10',
+        'mig-none=false/false/30',
+      ].join(','),
+    );
+    // Toda clínica de la BD tiene lo que dictan sus sedes vivas (sin sedes
+    // vivas, los valores de plataforma).
+    expect(
+      await scalar<number>(
+        `SELECT count(*)::int AS v
+           FROM "tenants" t
+           JOIN (
+             SELECT t2."id",
+                    count(l."id") > 0 AS hc,
+                    count(l."id") > 0 AS words,
+                    coalesce(min(CASE l."country"::text WHEN 'CO' THEN 30 WHEN 'ES' THEN 10 END), 30) AS days
+               FROM "tenants" t2
+               LEFT JOIN "locations" l
+                 ON l."tenantId" = t2."id" AND l."deletedAt" IS NULL
+              GROUP BY t2."id"
+           ) e ON e."id" = t."id"
+          WHERE t."prescriptionRequireClinicalRecordNumber" IS DISTINCT FROM e.hc
+             OR t."prescriptionPrintQuantityInWords" IS DISTINCT FROM e.words
+             OR t."prescriptionValidityDays" IS DISTINCT FROM e.days`,
+      ),
+    ).toBe(0);
+    expect(
+      await scalar<boolean>(
+        `SELECT relforcerowsecurity AS v FROM pg_class
+          WHERE oid = 'public.locations'::regclass`,
+      ),
+    ).toBe(true);
   }, 180_000);
 
   it('al terminar: FORCE en toda tabla con RLS y todo es del owner', async () => {

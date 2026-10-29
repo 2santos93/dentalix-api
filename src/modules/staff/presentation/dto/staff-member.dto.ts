@@ -22,9 +22,17 @@ export class StaffMemberDto {
     type: String,
     nullable: true,
     description:
-      'Registro profesional / nº de colegiado (DX-013). Solo en el perfil y en la respuesta del PATCH.',
+      'Nº de registro profesional del miembro (DX-013). Solo en el perfil y en la respuesta del PATCH.',
   })
   professionalLicense?: string | null;
+
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    description:
+      'Especialidad del profesional en esta clínica (DX-324). Solo en el perfil y en la respuesta del PATCH.',
+  })
+  professionalSpecialty?: string | null;
 
   // Opcional en el contrato porque el DTO también describe el PATCH, que no lo envía; GET /staff siempre incluye la clave.
   @ApiPropertyOptional({

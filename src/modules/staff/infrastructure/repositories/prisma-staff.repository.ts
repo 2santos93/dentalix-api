@@ -200,6 +200,7 @@ export class PrismaStaffRepository implements StaffRepository {
             email: membership.user.email,
             role: membership.role,
             professionalLicense: membership.professionalLicense,
+            professionalSpecialty: membership.professionalSpecialty,
             locationIds: allowedLocationIds(
               membership.role,
               membership.locations,
@@ -381,12 +382,17 @@ export class PrismaStaffRepository implements StaffRepository {
       if (demotes && (await isLastActiveAdmin(tx, membership.role))) {
         return { kind: 'LAST_ADMIN' };
       }
-      if (patch.role || patch.professionalLicense !== undefined) {
+      if (
+        patch.role ||
+        patch.professionalLicense !== undefined ||
+        patch.professionalSpecialty !== undefined
+      ) {
         await tx.clinicMembership.update({
           where: { id: membership.id },
           data: {
             role: patch.role,
             professionalLicense: patch.professionalLicense,
+            professionalSpecialty: patch.professionalSpecialty,
           },
         });
       }
@@ -417,6 +423,7 @@ export class PrismaStaffRepository implements StaffRepository {
           email: updated.user.email,
           role: updated.role,
           professionalLicense: updated.professionalLicense,
+          professionalSpecialty: updated.professionalSpecialty,
         },
       };
     });

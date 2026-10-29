@@ -1,12 +1,16 @@
-import { ClinicCountry, PrescriptionStatus } from '@prisma/client';
+import { PrescriptionStatus } from '@prisma/client';
 import type {
   Prescription,
   PrescriptionIssuer,
+  PrescriptionLocationFormat,
   PrescriptionPatient,
 } from '../../domain/entities/prescription.entity';
+import type { LegacyPrescriptionCountry } from '../../domain/legacy-prescription';
+import type { PrescriptionSettings } from '../../domain/prescription-settings';
 import type {
   CreatePrescriptionRepoInput,
   PrescriptionRepository,
+  StoredPrescription,
   VoidPrescriptionOutcome,
   VoidPrescriptionRepoInput,
 } from '../../domain/ports/prescription-repository.port';
@@ -22,25 +26,38 @@ export const DENTIST_ID = '00000000-0000-4000-8000-0000000000d1';
 export const OTHER_DENTIST_ID = '00000000-0000-4000-8000-0000000000d2';
 export const PATIENT_ID = '00000000-0000-4000-8000-0000000000a1';
 
+/** Ajustes de la clínica de los tests: letras y nº de HC encendidos, 30 días. */
+export const TEST_PRESCRIPTION_SETTINGS: PrescriptionSettings = {
+  printQuantityInWords: true,
+  requireClinicalRecordNumber: true,
+  validityDays: 30,
+};
+
 export function makeIssuer(
   overrides: Partial<PrescriptionIssuer['location']> = {},
   license: string | null = 'RM-12345',
+  extra: {
+    settings?: Partial<PrescriptionSettings>;
+    specialty?: string | null;
+  } = {},
 ): PrescriptionIssuer {
   return {
     location: {
       id: '00000000-0000-4000-8000-0000000000l1',
       name: 'Sede Principal',
-      address: 'Cra 15 #90-20, Bogotá',
-      country: ClinicCountry.CO,
-      timeZone: 'America/Bogota',
+      address: 'Avenida Central 100',
+      timeZone: 'America/New_York',
       ...overrides,
     },
     clinicName: 'Clínica Demo',
+    settings: { ...TEST_PRESCRIPTION_SETTINGS, ...extra.settings },
+    phase1: { country: 'CO' },
     professional: {
       id: DENTIST_ID,
       name: 'Dra. Laura Ruiz',
       email: 'laura@example.com',
       license,
+      specialty: extra.specialty ?? null,
     },
   };
 }
@@ -66,6 +83,14 @@ export class InMemoryPrescriptionRepository implements PrescriptionRepository {
     [PATIENT_ID, makePatient()],
   ]);
   rows: Prescription[] = [];
+  /** Lo último que el caso de uso pidió insertar, tal cual. */
+  lastCreateInput: CreatePrescriptionRepoInput | null = null;
+  /**
+   * Fase 1 (spec D1): como el repositorio real, la fila lleva el país de la
+   * sede como dato (la columna legada no admite NULL); el caso de uso no lo
+   * conoce y ningún test que no sea legado lo cambia.
+   */
+  locationCountry: LegacyPrescriptionCountry = 'CO';
   savedLicenses: { userId: string; license: string }[] = [];
   userNames = new Map<string, string>([
     [DENTIST_ID, 'Dra. Laura Ruiz'],
@@ -90,10 +115,12 @@ export class InMemoryPrescriptionRepository implements PrescriptionRepository {
   }
 
   create(input: CreatePrescriptionRepoInput): Promise<Prescription> {
+    this.lastCreateInput = structuredClone(input);
     this.seq += 1;
     const id = `00000000-0000-4000-8000-${String(this.seq).padStart(12, '0')}`;
     const row: Prescription = {
       ...input,
+      country: this.locationCountry,
       id,
       tenantId: TENANT_ID,
       status: PrescriptionStatus.ISSUED,
@@ -115,12 +142,23 @@ export class InMemoryPrescriptionRepository implements PrescriptionRepository {
     );
   }
 
-  findById(
-    id: string,
-  ): Promise<(Prescription & { clinicLogoUrl: string | null }) | null> {
+  /** Formato actual de cada sede, por id; sin entrada, todo `null`. */
+  locationFormats = new Map<string, PrescriptionLocationFormat>();
+
+  findById(id: string): Promise<StoredPrescription | null> {
     const row = this.rows.find((r) => r.id === id);
     return Promise.resolve(
-      row ? { ...structuredClone(row), clinicLogoUrl: null } : null,
+      row
+        ? {
+            ...structuredClone(row),
+            clinicLogoUrl: null,
+            locationFormat: this.locationFormats.get(row.locationId) ?? {
+              timeZone: null,
+              locale: null,
+              hourCycle: null,
+            },
+          }
+        : null,
     );
   }
 

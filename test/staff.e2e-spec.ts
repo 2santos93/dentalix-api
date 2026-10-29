@@ -148,6 +148,85 @@ describe('Staff (e2e)', () => {
     await raw.$disconnect();
   });
 
+  it('PATCH /staff sets and clears professionalSpecialty, rejects 81 characters (400) and a DENTIST cannot set it (403)', async () => {
+    const clinic = await registerAndLogin(app, {
+      clinicName: 'Clinica Staff Esp',
+      subdomain: 'clinica-staff-esp',
+      email: 'owner@clinica-staff-esp.com',
+    });
+    const dentist = await seedRoledMember(
+      clinic.tenantId,
+      'dentist@clinica-staff-esp.com',
+      ClinicRole.DENTIST,
+      'Dentist Esp',
+    );
+    const dentistToken = (
+      await loginAs(app, {
+        subdomain: 'clinica-staff-esp',
+        email: 'dentist@clinica-staff-esp.com',
+      })
+    ).accessToken;
+    const patch = (token: string, body: object) =>
+      request(app.getHttpServer())
+        .patch(`/api/v1/staff/${dentist.userId}`)
+        .set('X-Tenant-Host', hostFor(clinic.subdomain))
+        .set('Authorization', `Bearer ${token}`)
+        .send(body);
+
+    const set = await patch(clinic.accessToken, {
+      professionalSpecialty: '  Ortodoncia  ',
+    }).expect(200);
+    expect(
+      (set.body as { professionalSpecialty: string | null })
+        .professionalSpecialty,
+    ).toBe('Ortodoncia');
+    const detail = await request(app.getHttpServer())
+      .get(`/api/v1/staff/${dentist.userId}`)
+      .set('X-Tenant-Host', hostFor(clinic.subdomain))
+      .set('Authorization', `Bearer ${clinic.accessToken}`)
+      .expect(200);
+    expect(
+      (detail.body as { professionalSpecialty: string | null })
+        .professionalSpecialty,
+    ).toBe('Ortodoncia');
+
+    const cleared = await patch(clinic.accessToken, {
+      professionalSpecialty: '',
+    }).expect(200);
+    expect(
+      (cleared.body as { professionalSpecialty: string | null })
+        .professionalSpecialty,
+    ).toBeNull();
+
+    const afterClear = await request(app.getHttpServer())
+      .get(`/api/v1/staff/${dentist.userId}`)
+      .set('X-Tenant-Host', hostFor(clinic.subdomain))
+      .set('Authorization', `Bearer ${clinic.accessToken}`)
+      .expect(200);
+    expect(
+      (afterClear.body as { professionalSpecialty: string | null })
+        .professionalSpecialty,
+    ).toBeNull();
+
+    await patch(clinic.accessToken, {
+      professionalSpecialty: 'Ortodoncia',
+    }).expect(200);
+    const blank = await patch(clinic.accessToken, {
+      professionalSpecialty: '   ',
+    }).expect(200);
+    expect(
+      (blank.body as { professionalSpecialty: string | null })
+        .professionalSpecialty,
+    ).toBeNull();
+
+    await patch(clinic.accessToken, {
+      professionalSpecialty: 'x'.repeat(81),
+    }).expect(400);
+    await patch(dentistToken, { professionalSpecialty: 'Endodoncia' }).expect(
+      403,
+    );
+  });
+
   it('lists a seeded member, logs in as it, updates role, enforces write permission (403), and deactivates (409/204)', async () => {
     const subdomain = 'clinica-staff-a';
     const clinicA = await registerAndLogin(app, {

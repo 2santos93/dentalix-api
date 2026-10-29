@@ -163,6 +163,8 @@ const COUNTRY_FREE = [
   // DX-316: el calendario de la sede y su cargador (I4).
   join(SRC, 'shared', 'locations', 'location-business-calendar.ts'),
   ...tsFiles(join(SRC, 'modules', 'location-calendar')).filter(isProduction),
+  // DX-324: el módulo de recetas entero, salvo los legados de R12, en
+  // `prescriptions module reads no country` (abajo).
 ];
 
 describe('formato regional y reloj solo desde el helper (G1-B, I5)', () => {
@@ -264,5 +266,119 @@ describe('formato regional y reloj solo desde el helper (G1-B, I5)', () => {
         /country/i.test(line),
       ),
     ).toEqual([]);
+  });
+});
+
+/**
+ * DX-324 (spec §6.10, R12, R14): el módulo de recetas no nombra una regla
+ * nacional, en mayúsculas o minúsculas. Fuera queda solo el tipo legado con
+ * nombre (R12). El hash, la entidad, el repositorio y el DTO legados sí se
+ * escanean: R12 les deja nombrar el país, no una regla nacional.
+ */
+const NATIONAL_RULE = new RegExp(
+  [
+    'colegiado',
+    'DNI\\/NIE',
+    'AEMPS',
+    'CIMA',
+    'Decreto',
+    'Dec\\. 780',
+    'RD 1718',
+    'Espa' + 'ña',
+    'Colom' + 'bia',
+  ].join('|'),
+  'i',
+);
+const PRESCRIPTIONS = join(SRC, 'modules', 'prescriptions');
+const LEGACY_PRESCRIPTION_FILES = [
+  join(PRESCRIPTIONS, 'domain', 'legacy-prescription.ts'),
+];
+/**
+ * R1/R12: los únicos ficheros de producción del módulo que nombran el país
+ * legado, cada uno con la cabecera «Excepción G5.3 (DX-334)» por la que
+ * G5.3 los encontrará. Cualquier otro que lo lea (una regla, el controlador,
+ * la seguridad, las letras…) falla.
+ */
+const R12_HEADER = 'Excepción G5.3 (DX-334)';
+const R12_COUNTRY_FILES = [
+  'domain/legacy-prescription.ts',
+  'domain/prescription-hash.ts',
+  'domain/entities/prescription.entity.ts',
+  'infrastructure/repositories/prisma-prescription.repository.ts',
+  'presentation/dto/prescription.dto.ts',
+  'presentation/prescription.presenter.ts',
+].map((path) => join(PRESCRIPTIONS, ...path.split('/')));
+
+describe('receta sin reglas nacionales (DX-324)', () => {
+  it('architecture: prescriptions module names no national rule', () => {
+    const files = tsFiles(PRESCRIPTIONS).filter(
+      (file) => isProduction(file) && !LEGACY_PRESCRIPTION_FILES.includes(file),
+    );
+    expect(files.length).toBeGreaterThan(10);
+    expect(offending(files, (line) => NATIONAL_RULE.test(line))).toEqual([]);
+  });
+
+  it('architecture: prescriptions module reads no country outside the R12 legacy files', () => {
+    const files = tsFiles(PRESCRIPTIONS).filter(
+      (file) => isProduction(file) && !R12_COUNTRY_FILES.includes(file),
+    );
+    expect(files.length).toBeGreaterThan(20);
+    expect(offending(files, (line) => /country/i.test(line))).toEqual([]);
+  });
+
+  it('every R12 legacy file exists and carries the G5.3 header', () => {
+    for (const file of R12_COUNTRY_FILES) {
+      expect({
+        file: relative(SRC, file),
+        header: readFileSync(file, 'utf8').slice(0, 200).includes(R12_HEADER),
+      }).toEqual({ file: relative(SRC, file), header: true });
+    }
+  });
+
+  it('architecture: staff profile fields name no national rule', () => {
+    const staff = join(SRC, 'modules', 'staff');
+    const files = [
+      join(staff, 'presentation', 'dto', 'update-staff.dto.ts'),
+      join(staff, 'presentation', 'dto', 'staff-member.dto.ts'),
+      join(staff, 'domain', 'entities', 'staff-member.entity.ts'),
+    ];
+    expect(
+      offending(
+        files,
+        (line) => NATIONAL_RULE.test(line) || /RETHUS/i.test(line),
+      ),
+    ).toEqual([]);
+  });
+
+  it('the national-rule pattern catches each term and skips neutral text', () => {
+    for (const line of [
+      "'Falta tu número de colegiado'",
+      "'Falta el DNI/NIE del paciente'",
+      '// ficha técnica de la AEMPS',
+      'cimaTechnicalSheetUrl: CIMA',
+      ' * Decreto 780',
+      ' * (Dec. 780/2016)',
+      ' * RD 1718/2010',
+      "'En " + 'Espa' + "ña cada receta'",
+      "'Las sedes son de " + 'Colom' + "bia'",
+      "'falta el dni/nie'",
+      "'clínicas de " + 'colom' + "bia'",
+      "'número de COLEGIADO'",
+    ]) {
+      expect({ line, caught: NATIONAL_RULE.test(line) }).toEqual({
+        line,
+        caught: true,
+      });
+    }
+    for (const line of [
+      "'Falta tu número de registro profesional'",
+      "'Falta el número de historia clínica'",
+      'const decree = 1;',
+    ]) {
+      expect({ line, caught: NATIONAL_RULE.test(line) }).toEqual({
+        line,
+        caught: false,
+      });
+    }
   });
 });

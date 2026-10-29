@@ -1,5 +1,12 @@
+/**
+ * Excepción G5.3 (DX-334): recetas emitidas antes de DX-324. `country` es el
+ * campo histórico de la plantilla legada; en la receta única viaja `null`.
+ */
 import { ApiProperty } from '@nestjs/swagger';
-import { ClinicCountry, PrescriptionStatus } from '@prisma/client';
+import { PrescriptionStatus } from '@prisma/client';
+import type { LegacyPrescriptionCountry } from '../../domain/legacy-prescription';
+
+const LEGACY_PRESCRIPTION_COUNTRIES: LegacyPrescriptionCountry[] = ['CO', 'ES'];
 
 export class AllergyMatchDto {
   @ApiProperty({ example: 'Amoxicilina' })
@@ -99,7 +106,14 @@ export class PrescriptionItemDto {
   @ApiProperty() durationDays!: number;
   @ApiProperty() totalQuantity!: number;
   @ApiProperty() quantityUnit!: string;
-  @ApiProperty({ example: 'veintiuno' }) quantityInWords!: string;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'veintiuno',
+    description:
+      'Cantidad total en letras: la guardada en una receta legada; en la receta única, solo si la clínica la imprimía al emitir (si no, null)',
+  })
+  quantityInWords!: string | null;
   @ApiProperty({ type: Number, nullable: true }) packages!: number | null;
   @ApiProperty({ type: String, nullable: true }) instructions!: string | null;
 }
@@ -110,13 +124,23 @@ export class PrescriptionDto {
   @ApiProperty({ format: 'uuid' }) locationId!: string;
   @ApiProperty({ format: 'uuid' }) patientId!: string;
   @ApiProperty({ format: 'uuid' }) professionalId!: string;
-  @ApiProperty({ enum: ClinicCountry, enumName: 'ClinicCountry' })
-  country!: ClinicCountry;
+  @ApiProperty({
+    enum: LEGACY_PRESCRIPTION_COUNTRIES,
+    enumName: 'LegacyPrescriptionCountry',
+    nullable: true,
+    description:
+      'Plantilla con la que se emitió una receta anterior a la receta única; null en la receta única',
+  })
+  country!: LegacyPrescriptionCountry | null;
   @ApiProperty({ enum: PrescriptionStatus, enumName: 'PrescriptionStatus' })
   status!: PrescriptionStatus;
   @ApiProperty({ format: 'date-time', description: 'Hora del servidor' })
   issuedAt!: Date;
-  @ApiProperty({ format: 'date', example: '2026-10-16' })
+  @ApiProperty({
+    format: 'date',
+    example: '2026-10-16',
+    description: 'Fecha desde la que la receta vale',
+  })
   dispensationDate!: string;
   @ApiProperty({
     format: 'date',
@@ -129,16 +153,36 @@ export class PrescriptionDto {
   @ApiProperty({ type: Number, nullable: true }) patientBirthYear!:
     number | null;
   @ApiProperty({
+    type: Number,
+    nullable: true,
+    description:
+      'Años cumplidos el día de la emisión en la zona de la sede; null sin fecha de nacimiento, con una edad imposible o en recetas anteriores',
+  })
+  patientAgeYears!: number | null;
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    example: 72.5,
+    description:
+      'Peso de la anamnesis vigente al emitir, redondeado a 0,1 kg; null si no consta o en recetas anteriores',
+  })
+  patientWeightKg!: number | null;
+  @ApiProperty({
     type: String,
     nullable: true,
     description: 'Nº de historia clínica',
   })
   clinicalRecordNumber!: string | null;
   @ApiProperty() professionalName!: string;
-  @ApiProperty({
-    description: 'Registro profesional (CO) / nº de colegiado (ES)',
-  })
+  @ApiProperty({ description: 'Nº de registro profesional' })
   professionalLicense!: string;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'Especialidad del perfil del profesional al emitir; null si no tenía o en recetas anteriores',
+  })
+  professionalSpecialty!: string | null;
   @ApiProperty({ type: String, nullable: true }) professionalEmail!:
     string | null;
   @ApiProperty() clinicName!: string;
@@ -180,8 +224,31 @@ export class PrescriptionDto {
   @ApiProperty({ type: [PrescriptionItemDto] }) items!: PrescriptionItemDto[];
 }
 
+/**
+ * Formato ACTUAL de la sede de la receta, también si está retirada; lo que
+ * falte llega como null (nunca un 409).
+ */
+export class PrescriptionLocationFormatDto {
+  @ApiProperty({ type: String, nullable: true, example: 'Asia/Tokyo' })
+  timeZone!: string | null;
+  @ApiProperty({ type: String, nullable: true, example: 'ja-JP' })
+  locale!: string | null;
+  @ApiProperty({
+    enum: ['h12', 'h23'],
+    enumName: 'PrescriptionHourCycle',
+    nullable: true,
+  })
+  hourCycle!: 'h12' | 'h23' | null;
+}
+
 export class PrescriptionDocumentDto extends PrescriptionDto {
   @ApiProperty({ type: String, nullable: true }) clinicLogoUrl!: string | null;
+  @ApiProperty({
+    type: PrescriptionLocationFormatDto,
+    description:
+      'Formato regional y zona actuales de la sede de la receta, para imprimirla',
+  })
+  locationFormat!: PrescriptionLocationFormatDto;
   @ApiProperty({
     description: 'true si el hash guardado coincide con el recalculado al leer',
   })
@@ -189,8 +256,6 @@ export class PrescriptionDocumentDto extends PrescriptionDto {
 }
 
 export class PrescriptionIssuerDto {
-  @ApiProperty({ enum: ClinicCountry, enumName: 'ClinicCountry' })
-  country!: ClinicCountry;
   @ApiProperty({ format: 'uuid' }) locationId!: string;
   @ApiProperty() locationName!: string;
   @ApiProperty({ type: String, nullable: true }) locationAddress!:
@@ -203,8 +268,37 @@ export class PrescriptionIssuerDto {
     description: 'null = hay que pedirlo en el modal',
   })
   professionalLicense!: string | null;
-  @ApiProperty({ description: 'Días naturales de validez (ES 10, CO 30)' })
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'Especialidad del perfil; se imprime si existe',
+  })
+  professionalSpecialty!: string | null;
+  @ApiProperty({
+    minimum: 1,
+    maximum: 365,
+    description: 'Días de validez de la receta (ajuste de la clínica)',
+  })
   validityDays!: number;
-  @ApiProperty({ description: 'Medicamentos por receta (ES 1, CO 10)' })
+  @ApiProperty({ example: 10, description: 'Medicamentos por receta' })
   maxItems!: number;
+  @ApiProperty({
+    description:
+      'La receta imprime la cantidad también en letras (ajuste de la clínica)',
+  })
+  printQuantityInWords!: boolean;
+  @ApiProperty({
+    description:
+      'Se exige el documento del paciente, que se imprime como nº de historia clínica (ajuste de la clínica)',
+  })
+  requireClinicalRecordNumber!: boolean;
+  @ApiProperty({
+    enum: LEGACY_PRESCRIPTION_COUNTRIES,
+    enumName: 'LegacyPrescriptionCountry',
+    nullable: true,
+    deprecated: true,
+    description:
+      'Fase 1: país legado de la sede, solo para la web anterior a DX-324; la fase 2 lo retira. La web nueva no lo lee.',
+  })
+  country!: LegacyPrescriptionCountry | null;
 }

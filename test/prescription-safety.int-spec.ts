@@ -219,7 +219,7 @@ describe('receta segura: emisión con anamnesis real (DX-300, int)', () => {
     ).resolves.toBe(null);
   });
 
-  it('regresión: una receta emitida antes de la migración (columnas NULL, hash v1) sigue validando', async () => {
+  it('legacy: una receta emitida antes de la receta segura y de la receta única (columnas NULL, país, hash v1) sigue validando', async () => {
     const issuedAt = new Date('2026-10-16T15:00:00.000Z');
     const content = {
       country: 'CO' as const,

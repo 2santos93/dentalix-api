@@ -33,7 +33,7 @@ export const DEMO_PRIMARY_COLOR = '#0E7C86';
 export const DEMO_EMAIL_DOMAIN = 'demo.dentalix.app';
 /** Contraseña común de todos los usuarios demo (se imprime al terminar). */
 export const DEMO_PASSWORD = 'DemoDentalix2026!';
-/** Moneda de la clínica: planes y abonos van en COP (Colombia). */
+/** Moneda de la clínica: planes y abonos van en COP. */
 export const DEMO_CURRENCY = 'COP';
 /**
  * G1-B (DX-350): reloj de las sedes demo, explícito (nunca un default): 24 h,
@@ -2021,9 +2021,10 @@ export function demoPerioMeasures(phase: DemoPerioExam['phase']): {
 
 // ---------------------------------------------------------------------------
 // DX-013: recetas. Tres plantillas típicas (las crea el ADMIN), el registro
-// profesional de los odontólogos y una receta emitida post-exodoncia para el
-// paciente del plan de implante (sin alergias a esos fármacos). Las sedes de
-// la demo son de Colombia: rigen los campos del Dec. 780/2016.
+// profesional y la especialidad de los odontólogos, los ajustes de la receta
+// de la clínica y una receta emitida post-exodoncia para el paciente del plan
+// de implante (sin alergias a esos fármacos). DX-324: una sola receta, sin
+// reglas por país; lo que imprime lo deciden los ajustes de la clínica.
 // ---------------------------------------------------------------------------
 
 export interface DemoPrescriptionItem {
@@ -2106,11 +2107,27 @@ export const DEMO_PRESCRIPTION_TEMPLATES: readonly DemoPrescriptionTemplate[] =
     },
   ];
 
-/** Registro profesional (RETHUS / tarjeta profesional) de los odontólogos demo. */
+/** Nº de registro profesional de los odontólogos demo. */
 export const DEMO_PROFESSIONAL_LICENSES: readonly string[] = [
   'RM 52-1234-19',
   'RM 25-7788-21',
 ];
+
+/** Especialidad de los odontólogos demo, en el mismo orden (DX-324). */
+export const DEMO_PROFESSIONAL_SPECIALTIES: readonly string[] = [
+  'Cirugía oral',
+  'Odontología general',
+];
+
+/**
+ * Ajustes de la receta de la demo (DX-324): cantidad en letras, nº de
+ * historia clínica y 30 días, para que el A4 de ejemplo enseñe todo.
+ */
+export const DEMO_PRESCRIPTION_SETTINGS = {
+  printQuantityInWords: true,
+  requireClinicalRecordNumber: true,
+  validityDays: 30,
+} as const;
 
 export const DEMO_PRESCRIPTION = {
   patientIndex: 1,

@@ -4,7 +4,7 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
-import { ClinicCountry, ClinicRole, PrescriptionStatus } from '@prisma/client';
+import { ClinicRole, PrescriptionStatus } from '@prisma/client';
 import {
   DENTIST_ID,
   InMemoryPrescriptionRepository,
@@ -22,14 +22,18 @@ import {
   VoidPrescriptionUseCase,
   type IssuePrescriptionInput,
 } from './prescriptions.use-cases';
-import { computePrescriptionHash } from '../../domain/prescription-hash';
+import {
+  computePrescriptionHash,
+  expectedPrescriptionHash,
+  type PrescriptionHashInput,
+} from '../../domain/prescription-hash';
 import {
   emptySafetyAnamnesis,
   PRESCRIPTION_SAFETY_RULES_VERSION,
   type SafetyAnamnesis,
 } from '../../domain/prescription-safety';
 
-// 15:00 UTC = 10:00 en Bogotá y 17:00 en Madrid, el mismo día 16.
+// 15:00 UTC = 11:00 en la zona de la sede de los tests (Nueva York), el mismo día 16.
 const NOW = new Date('2026-10-16T15:00:00.000Z');
 
 const amoxicilina = {
@@ -59,7 +63,7 @@ describe('IssuePrescriptionUseCase', () => {
     useCase = new IssuePrescriptionUseCase(repo, () => NOW);
   });
 
-  it('emite una receta CO con la foto de los datos legales, cantidad en letras y hash', async () => {
+  it('emite la receta única con la foto de los datos, cantidad en letras y hash', async () => {
     const rx = await useCase.execute(
       PATIENT_ID,
       input({ notes: ' Tomar con comida ' }),
@@ -68,7 +72,7 @@ describe('IssuePrescriptionUseCase', () => {
 
     expect(rx).toMatchObject({
       status: PrescriptionStatus.ISSUED,
-      country: ClinicCountry.CO,
+      singleFormat: true,
       patientId: PATIENT_ID,
       professionalId: DENTIST_ID,
       issuedAt: NOW,
@@ -95,12 +99,7 @@ describe('IssuePrescriptionUseCase', () => {
         brandName: null,
       }),
     ]);
-    expect(rx.contentHash).toBe(
-      computePrescriptionHash({
-        ...rx,
-        items: rx.items.map(({ id: _id, ...item }) => item),
-      }),
-    );
+    expect(rx.contentHash).toBe(expectedPrescriptionHash(rx));
     expect(repo.savedLicenses).toEqual([]);
   });
 
@@ -131,7 +130,7 @@ describe('IssuePrescriptionUseCase', () => {
     repo.issuer = makeIssuer({}, null);
     await expect(
       useCase.execute(PATIENT_ID, input(), DENTIST_ID),
-    ).rejects.toThrow('Falta tu registro profesional');
+    ).rejects.toThrow('Falta tu número de registro profesional');
     const rx = await useCase.execute(
       PATIENT_ID,
       input({ professionalLicense: ' TP-998877 ' }),
@@ -247,12 +246,7 @@ describe('IssuePrescriptionUseCase', () => {
         }),
       ]);
       expect(rx.allergyOverride).toBe(false);
-      expect(rx.contentHash).toBe(
-        computePrescriptionHash({
-          ...rx,
-          items: rx.items.map(({ id: _id, ...item }) => item),
-        }),
-      );
+      expect(rx.contentHash).toBe(expectedPrescriptionHash(rx));
     });
 
     it('allergyOverride (cliente anterior) cuenta como confirmación; el motivo sigue siendo obligatorio', async () => {
@@ -367,45 +361,6 @@ describe('IssuePrescriptionUseCase', () => {
     });
   });
 
-  describe('España', () => {
-    beforeEach(() => {
-      repo.issuer = makeIssuer(
-        { country: ClinicCountry.ES, timeZone: 'Europe/Madrid' },
-        '28/012345',
-      );
-      repo.patients.set(
-        PATIENT_ID,
-        makePatient({ docType: 'OTHER', docNumber: '12345678Z' }),
-      );
-    });
-
-    it('validez de 10 días desde la fecha prevista de dispensación y año de nacimiento', async () => {
-      const rx = await useCase.execute(
-        PATIENT_ID,
-        input({
-          items: [{ ...amoxicilina, packages: 1 }],
-          dispensationDate: '2026-10-20',
-        }),
-        DENTIST_ID,
-      );
-      expect(rx).toMatchObject({
-        country: ClinicCountry.ES,
-        dispensationDate: '2026-10-20',
-        validUntil: '2026-10-29',
-        patientBirthYear: 1985,
-        patientDocument: '12345678Z',
-        clinicalRecordNumber: '12345678Z',
-      });
-      expect(rx.items[0].packages).toBe(1);
-    });
-
-    it('exige el nº de envases', async () => {
-      await expect(
-        useCase.execute(PATIENT_ID, input(), DENTIST_ID),
-      ).rejects.toThrow('Medicamento 1: falta el número de envases');
-    });
-  });
-
   it.each([
     ['2026-10-15', 'La fecha de dispensación no puede ser anterior a hoy'],
     ['2026-02-31', 'La fecha de dispensación no existe en el calendario'],
@@ -454,18 +409,45 @@ describe('Listar, ver y anular', () => {
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
-  it('una receta emitida antes de DX-300 (sin avisos) sigue validando con el hash v1', async () => {
+  it('legacy: una receta emitida antes de DX-300 (sin avisos) sigue validando con el hash v1', async () => {
     const legacy = repo.rows[0];
+    legacy.singleFormat = false;
+    legacy.printQuantityInWords = null;
+    legacy.professionalSpecialty = null;
+    legacy.patientAgeYears = null;
+    legacy.patientWeightKg = null;
     legacy.safetyRulesVersion = null;
     legacy.safetyAlerts = null;
     legacy.safetyOverrideReason = null;
     legacy.contentHash = computePrescriptionHash({
       ...legacy,
+      singleFormat: false,
       items: legacy.items.map(({ id: _id, ...item }) => item),
     });
     const doc = await new GetPrescriptionUseCase(repo).execute(id);
     expect(doc.integrityOk).toBe(true);
     expect(doc.safetyAlerts).toBeNull();
+  });
+
+  it('legacy: a row that cannot be sealed with its format reads integrityOk false, never a 500', async () => {
+    const get = new GetPrescriptionUseCase(repo);
+    const row = repo.rows[0];
+    const sealed = structuredClone(row);
+
+    // Única sin el booleano de las letras (lo impide el CHECK de la tabla).
+    row.printQuantityInWords = null;
+    await expect(get.execute(id)).resolves.toMatchObject({
+      integrityOk: false,
+    });
+
+    // Legada sin país (lo impide el NOT NULL de fase 1).
+    Object.assign(row, sealed, {
+      singleFormat: false,
+      country: null as unknown as typeof row.country,
+    });
+    await expect(get.execute(id)).resolves.toMatchObject({
+      integrityOk: false,
+    });
   });
 
   it('anula con motivo, autor y fecha del servidor; la integridad sigue intacta', async () => {
@@ -519,21 +501,222 @@ describe('Listar, ver y anular', () => {
 });
 
 describe('GetPrescriptionIssuerUseCase', () => {
-  it('devuelve país, sede, profesional, registro y validez', async () => {
+  it('issuer view carries the clinic settings, the specialty and the phase-1 block untouched; no country of its own', async () => {
     const repo = new InMemoryPrescriptionRepository();
-    repo.issuer = makeIssuer({ country: ClinicCountry.ES }, null);
-    await expect(
-      new GetPrescriptionIssuerUseCase(repo).execute(DENTIST_ID),
-    ).resolves.toEqual({
-      country: ClinicCountry.ES,
+    repo.issuer = makeIssuer({}, null, {
+      settings: {
+        printQuantityInWords: false,
+        requireClinicalRecordNumber: true,
+        validityDays: 7,
+      },
+      specialty: 'Cirugía oral',
+    });
+    const view = await new GetPrescriptionIssuerUseCase(repo).execute(
+      DENTIST_ID,
+    );
+    expect(view).toEqual({
       locationId: repo.issuer.location.id,
       locationName: 'Sede Principal',
-      locationAddress: 'Cra 15 #90-20, Bogotá',
+      locationAddress: 'Avenida Central 100',
       clinicName: 'Clínica Demo',
       professionalName: 'Dra. Laura Ruiz',
       professionalLicense: null,
-      validityDays: 10,
-      maxItems: 1,
+      professionalSpecialty: 'Cirugía oral',
+      validityDays: 7,
+      maxItems: 10,
+      printQuantityInWords: false,
+      requireClinicalRecordNumber: true,
+      phase1: { country: 'CO' },
     });
+    expect(view.phase1).toBe(repo.issuer.phase1);
+    expect('country' in view).toBe(false);
+  });
+});
+
+describe('receta única (DX-324)', () => {
+  let repo: InMemoryPrescriptionRepository;
+
+  const issueAt = (now: Date, extra: Partial<IssuePrescriptionInput> = {}) =>
+    new IssuePrescriptionUseCase(repo, () => now).execute(
+      PATIENT_ID,
+      input(extra),
+      DENTIST_ID,
+    );
+  const issue = (extra: Partial<IssuePrescriptionInput> = {}) =>
+    issueAt(NOW, extra);
+  const created = () => {
+    if (repo.lastCreateInput === null) throw new Error('nada insertado');
+    return repo.lastCreateInput;
+  };
+  const setSettings = (
+    settings: Partial<typeof repo.issuer.settings>,
+  ): void => {
+    repo.issuer = {
+      ...repo.issuer,
+      settings: { ...repo.issuer.settings, ...settings },
+    };
+  };
+
+  beforeEach(() => {
+    repo = new InMemoryPrescriptionRepository();
+  });
+
+  it('issued snapshot has no country key, singleFormat true and a v3 hash', async () => {
+    await issue();
+    const content = created();
+    expect('country' in content).toBe(false);
+    expect(content.singleFormat).toBe(true);
+    const { contentHash, locationId: _l, ...sealed } = content;
+    // La v3 no sella el país: el que copie el repositorio no cambia el hash.
+    const asCo: PrescriptionHashInput = { ...sealed, country: 'CO' };
+    const asEs: PrescriptionHashInput = { ...sealed, country: 'ES' };
+    expect(contentHash).toBe(computePrescriptionHash(sealed));
+    expect(computePrescriptionHash(asCo)).toBe(contentHash);
+    expect(computePrescriptionHash(asEs)).toBe(contentHash);
+    expect(
+      computePrescriptionHash({
+        ...sealed,
+        country: 'CO',
+        singleFormat: false,
+      }),
+    ).not.toBe(contentHash);
+    const doc = await new GetPrescriptionUseCase(repo).execute(repo.rows[0].id);
+    expect(doc.integrityOk).toBe(true);
+  });
+
+  it('words are always written; printQuantityInWords freezes the setting', async () => {
+    setSettings({ printQuantityInWords: false });
+    const off = await issue();
+    expect(created().printQuantityInWords).toBe(false);
+    expect(created().items[0].quantityInWords).toBe('veintiuno');
+
+    setSettings({ printQuantityInWords: true });
+    await issue();
+    expect(created().printQuantityInWords).toBe(true);
+    expect(created().items[0].quantityInWords).toBe('veintiuno');
+
+    // Encender el ajuste después no cambia la receta ya emitida.
+    const doc = await new GetPrescriptionUseCase(repo).execute(off.id);
+    expect(doc.printQuantityInWords).toBe(false);
+    expect(doc.integrityOk).toBe(true);
+  });
+
+  it('HC on copies docNumber to clinicalRecordNumber; HC off leaves it null even with a document', async () => {
+    setSettings({ requireClinicalRecordNumber: true });
+    expect((await issue()).clinicalRecordNumber).toBe('1020304050');
+
+    setSettings({ requireClinicalRecordNumber: false });
+    const off = await issue();
+    expect(off.clinicalRecordNumber).toBeNull();
+    expect(off.patientDocument).toBe('CC 1020304050');
+
+    repo.patients.set(PATIENT_ID, makePatient({ docNumber: null }));
+    expect((await issue()).patientDocument).toBeNull();
+    setSettings({ requireClinicalRecordNumber: true });
+    await expect(issue()).rejects.toThrow(
+      'Falta el número de historia clínica: registra el documento del paciente en sus datos',
+    );
+  });
+
+  it('validUntil uses the clinic validityDays (7 → start + 6)', async () => {
+    setSettings({ validityDays: 7 });
+    const rx = await issue({ dispensationDate: '2026-10-20' });
+    expect(rx.validUntil).toBe('2026-10-26');
+    setSettings({ validityDays: 1 });
+    expect((await issue()).validUntil).toBe('2026-10-16');
+  });
+
+  it('patientDocument is «{label} {number}» for every clinic and null without a number', async () => {
+    repo.patients.set(
+      PATIENT_ID,
+      makePatient({ docType: 'PASSPORT', docNumber: 'X1' }),
+    );
+    expect((await issue()).patientDocument).toBe('Pasaporte X1');
+    repo.patients.set(PATIENT_ID, makePatient({ docNumber: null }));
+    setSettings({ requireClinicalRecordNumber: false });
+    expect((await issue()).patientDocument).toBeNull();
+  });
+
+  it('age is computed on the location day', async () => {
+    repo.issuer = makeIssuer({ timeZone: 'America/New_York' });
+    repo.patients.set(
+      PATIENT_ID,
+      makePatient({ birthDate: new Date('2000-05-04T00:00:00.000Z') }),
+    );
+    // 02:00 UTC del 4 de mayo aún es el día 3 en la sede: 26, no 27.
+    const rx = await issueAt(new Date('2027-05-04T02:00:00.000Z'));
+    expect(rx.patientAgeYears).toBe(26);
+    expect(rx.dispensationDate).toBe('2027-05-03');
+  });
+
+  it('an impossible age snapshots null and still issues', async () => {
+    for (const birth of ['2030-01-01', '1850-01-01']) {
+      repo.patients.set(
+        PATIENT_ID,
+        makePatient({ birthDate: new Date(`${birth}T00:00:00.000Z`) }),
+      );
+      const rx = await issue();
+      expect({ birth, age: rx.patientAgeYears }).toEqual({ birth, age: null });
+      expect(rx.patientBirthYear).toBe(Number(birth.slice(0, 4)));
+    }
+    repo.patients.set(PATIENT_ID, makePatient({ birthDate: null }));
+    expect((await issue()).patientAgeYears).toBeNull();
+  });
+
+  it('weight 72.55 from the anamnesis is snapshotted as 72.5; 399.96 → null; no anamnesis → null', async () => {
+    const withWeight = (weightKg: number | null) =>
+      repo.patients.set(
+        PATIENT_ID,
+        makePatient({ anamnesis: { ...emptySafetyAnamnesis(), weightKg } }),
+      );
+    withWeight(72.55);
+    const rx = await issue();
+    expect(rx.patientWeightKg).toBe(72.5);
+    expect(rx.contentHash).toBe(
+      computePrescriptionHash({ ...created(), patientWeightKg: 72.5 }),
+    );
+    withWeight(399.96);
+    expect((await issue()).patientWeightKg).toBeNull();
+    withWeight(null);
+    expect((await issue()).patientWeightKg).toBeNull();
+    repo.patients.set(PATIENT_ID, makePatient({ anamnesis: null }));
+    expect((await issue()).patientWeightKg).toBeNull();
+  });
+
+  it('body license fills only an empty profile; specialty only from the profile', async () => {
+    repo.issuer = makeIssuer({}, null, { specialty: '  Endodoncia ' });
+    const body = {
+      professionalLicense: ' RP-7 ',
+      professionalSpecialty: 'Falsa',
+    } as Partial<IssuePrescriptionInput>;
+    const filled = await issue(body);
+    expect(filled.professionalLicense).toBe('RP-7');
+    expect(filled.professionalSpecialty).toBe('Endodoncia');
+    expect(repo.savedLicenses).toEqual([
+      { userId: DENTIST_ID, license: 'RP-7' },
+    ]);
+
+    repo.issuer = makeIssuer({}, 'RM-12345', { specialty: null });
+    const kept = await issue(body);
+    expect(kept.professionalLicense).toBe('RM-12345');
+    expect(kept.professionalSpecialty).toBeNull();
+    expect(repo.savedLicenses).toHaveLength(1);
+  });
+
+  it('a five-item prescription with no packages and no birth date issues', async () => {
+    repo.patients.set(PATIENT_ID, makePatient({ birthDate: null }));
+    const rx = await issue({
+      items: Array.from({ length: 5 }, (_, i) => ({
+        ...amoxicilina,
+        activeIngredient: `Principio ${i + 1}`,
+      })),
+    });
+    expect(rx.items.map((item) => item.packages)).toEqual([
+      null,
+      null,
+      null,
+      null,
+      null,
+    ]);
   });
 });

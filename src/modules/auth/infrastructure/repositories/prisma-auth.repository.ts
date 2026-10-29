@@ -8,6 +8,7 @@ import {
 import { seedDefaultBusinessHours } from '../../../../shared/locations/default-business-hours';
 import { DEFAULT_DENTAL_CATALOG } from '../../../../shared/catalog/default-dental-catalog';
 import { PLATFORM_DEFAULT_MAJORITY_AGE } from '../../../patients/domain/responsible-parties/majority-age';
+import { PLATFORM_DEFAULT_PRESCRIPTION_SETTINGS } from '../../../prescriptions/domain/prescription-settings';
 import {
   AuthRepository,
   AuthUserRecord,
@@ -71,6 +72,13 @@ export class PrismaAuthRepository implements AuthRepository {
           subdomain: input.subdomain,
           // DX-328: explícito; el default de la BD es el mismo valor.
           majorityAge: PLATFORM_DEFAULT_MAJORITY_AGE,
+          // DX-324: igual con los ajustes de la receta.
+          prescriptionPrintQuantityInWords:
+            PLATFORM_DEFAULT_PRESCRIPTION_SETTINGS.printQuantityInWords,
+          prescriptionRequireClinicalRecordNumber:
+            PLATFORM_DEFAULT_PRESCRIPTION_SETTINGS.requireClinicalRecordNumber,
+          prescriptionValidityDays:
+            PLATFORM_DEFAULT_PRESCRIPTION_SETTINGS.validityDays,
         },
         select: { id: true },
       });
