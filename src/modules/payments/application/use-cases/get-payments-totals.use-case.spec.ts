@@ -1,3 +1,4 @@
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { BadRequestException } from '@nestjs/common';
 import { ClinicRole } from '@prisma/client';
 import { GetPaymentsTotalsUseCase } from './get-payments-totals.use-case';
@@ -137,6 +138,7 @@ describe('GetPaymentsTotalsUseCase', () => {
     const voidUc = new VoidPaymentUseCase(
       repo,
       () => new Date('2026-03-06T15:00:00.000Z'),
+      new TenantContextService(),
     );
     repo.seedPayment({
       id: 'p1',

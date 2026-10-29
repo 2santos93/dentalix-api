@@ -10,6 +10,7 @@ import {
   resetDatabase,
   SEEDED_PASSWORD,
 } from './support/e2e-fixtures';
+import { TokenService } from '../src/shared/crypto/token.service';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import {
   LOCATION_NOT_ALLOWED_CODE,
@@ -85,6 +86,8 @@ describe('Personal restringido a sedes (DX-089)', () => {
         auth(request(server).post(`/api/v1${path}`)).send(body),
       patch: (path: string, body: object) =>
         auth(request(server).patch(`/api/v1${path}`)).send(body),
+      delete: (path: string, body: object) =>
+        auth(request(server).delete(`/api/v1${path}`)).send(body),
       put: (path: string, body: object) =>
         auth(request(server).put(`/api/v1${path}`)).send(body),
     };
@@ -616,6 +619,209 @@ describe('Personal restringido a sedes (DX-089)', () => {
     it('pacientes y ficha: toda la clínica', async () => {
       await as(r).get('/patients').expect(200);
       await as(r).get(`/patients/${patient}`).expect(200);
+    });
+  });
+
+  describe('DX-089-bis: autorización de escrituras por sede persistida', () => {
+    const reason = 'Cobro duplicado por error';
+    const seedPayment = (
+      locationId: string,
+      patientId = patient,
+      treatmentPlanId = plan,
+      createdById = r2.userId,
+    ) =>
+      raw.payment.create({
+        data: {
+          tenantId: a.tenantId,
+          locationId,
+          patientId,
+          treatmentPlanId,
+          amount: 73,
+          currency: 'COP',
+          paidAt: new Date(),
+          createdById,
+        },
+      });
+    const financialState = async () => ({
+      payments: await raw.payment.findMany({
+        where: { tenantId: a.tenantId },
+        orderBy: { id: 'asc' },
+      }),
+      promises: await raw.paymentPromise.findMany({
+        where: { tenantId: a.tenantId },
+        orderBy: { id: 'asc' },
+      }),
+      allocations: await raw.paymentAllocation.findMany({
+        where: { tenantId: a.tenantId },
+        orderBy: { id: 'asc' },
+      }),
+      events: await raw.auditEvent.findMany({
+        where: { tenantId: a.tenantId },
+        orderBy: { id: 'asc' },
+      }),
+    });
+
+    it('anular otra sede: 403 sin mutación, en vista consolidada o con cabecera permitida', async () => {
+      const author = await seedUser(
+        'void-author@dx089-restr-a.test',
+        ClinicRole.RECEPTION,
+      );
+      const patientId = await createPatient('DX089-BIS-VOID');
+      const treatmentPlan = await raw.treatmentPlan.create({
+        data: { tenantId: a.tenantId, patientId, currency: 'COP' },
+      });
+      const promise = await raw.paymentPromise.create({
+        data: {
+          tenantId: a.tenantId,
+          patientId,
+          locationId: a1,
+          amount: 73,
+          currency: 'COP',
+          dueDate: new Date('2027-01-15'),
+          createdById: r2.userId,
+        },
+      });
+      const payment = await seedPayment(
+        a1,
+        patientId,
+        treatmentPlan.id,
+        author.userId,
+      );
+      await restrict(author, [a2, a3]);
+      tokens[author.email] = await loginAs(app, a.host, author.email);
+      await raw.paymentPromise.update({
+        where: { id: promise.id },
+        data: { status: 'KEPT', settledAt: new Date() },
+      });
+      const before = await financialState();
+      for (const active of [undefined, a2]) {
+        expectNotAllowed(
+          await as(author, active).delete(`/payments/${payment.id}`, {
+            reason,
+          }),
+        );
+        expect(await financialState()).toEqual(before);
+      }
+    });
+
+    it('anula su propia sede aunque la cabecera señale otra sede permitida', async () => {
+      const payment = await seedPayment(a3);
+      await as(r2, a2)
+        .delete(`/payments/${payment.id}`, { reason })
+        .expect(200);
+      const voided = await raw.payment.findUniqueOrThrow({
+        where: { id: payment.id },
+      });
+      expect(voided.deletedAt).not.toBeNull();
+      expect(voided.voidedById).toBe(r2.userId);
+    });
+
+    it('ALL conserva acceso a abonos de cualquier sede', async () => {
+      const payment = await seedPayment(a3);
+      await admin().delete(`/payments/${payment.id}`, { reason }).expect(200);
+      expect(
+        (await raw.payment.findUniqueOrThrow({ where: { id: payment.id } }))
+          .deletedAt,
+      ).not.toBeNull();
+    });
+
+    it('loc vacío no puede anular ningún abono', async () => {
+      const payment = await seedPayment(a2);
+      const token = (
+        await app.get(TokenService).issue({
+          sub: r2.userId,
+          tenantId: a.tenantId,
+          role: ClinicRole.RECEPTION,
+          loc: [],
+          tv: 0,
+        })
+      ).accessToken;
+      const before = await financialState();
+      expectNotAllowed(
+        await api(token).delete(`/payments/${payment.id}`, { reason }),
+      );
+      expect(await financialState()).toEqual(before);
+    });
+
+    it('abonos inexistentes o de otro tenant siguen siendo 404', async () => {
+      const b = await registerClinic(app, 'dx089-bis-other');
+      const location = await raw.location.findFirstOrThrow({
+        where: { tenantId: b.tenantId },
+      });
+      const foreignPatient = await raw.patient.create({
+        data: {
+          tenantId: b.tenantId,
+          firstName: 'Otro',
+          lastName: 'Tenant',
+          docType: 'CC',
+          docNumber: 'BIS-OTHER',
+          sex: Sex.F,
+        },
+      });
+      const foreignPlan = await raw.treatmentPlan.create({
+        data: {
+          tenantId: b.tenantId,
+          patientId: foreignPatient.id,
+          currency: 'COP',
+        },
+      });
+      const payment = await raw.payment.create({
+        data: {
+          tenantId: b.tenantId,
+          locationId: location.id,
+          patientId: foreignPatient.id,
+          treatmentPlanId: foreignPlan.id,
+          amount: 73,
+          currency: 'COP',
+          paidAt: new Date(),
+        },
+      });
+      await as(r2).delete(`/payments/${payment.id}`, { reason }).expect(404);
+      await as(r2)
+        .delete('/payments/00000000-0000-4000-8000-000000000000', { reason })
+        .expect(404);
+      expect(
+        (await raw.payment.findUniqueOrThrow({ where: { id: payment.id } }))
+          .deletedAt,
+      ).toBeNull();
+    });
+
+    it('movimientos en otra sede: 403 sin cambio en stock ni movimientos', async () => {
+      const before = await raw.inventoryMovement.findMany({
+        where: { itemId: item.a2 },
+      });
+      for (const active of [undefined, a1]) {
+        expectNotAllowed(
+          await as(s, active).post(`/inventory/items/${item.a2}/movements`, {
+            type: 'IN',
+            quantity: 5,
+          }),
+        );
+        expect(
+          await raw.inventoryMovement.findMany({ where: { itemId: item.a2 } }),
+        ).toEqual(before);
+      }
+    });
+
+    it('movimientos en sede propia y ALL conservan acceso', async () => {
+      await as(s)
+        .post(`/inventory/items/${item.a1}/movements`, {
+          type: 'IN',
+          quantity: 5,
+        })
+        .expect(201);
+      await admin()
+        .post(`/inventory/items/${item.a2}/movements`, {
+          type: 'IN',
+          quantity: 7,
+        })
+        .expect(201);
+      expect(
+        await raw.inventoryMovement.count({ where: { itemId: item.a1 } }),
+      ).toBe(1);
+      expect(
+        await raw.inventoryMovement.count({ where: { itemId: item.a2 } }),
+      ).toBe(1);
     });
   });
 

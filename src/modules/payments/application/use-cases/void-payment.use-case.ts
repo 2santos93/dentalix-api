@@ -10,6 +10,7 @@ import type {
   PaymentVoidRequest,
   PaymentVoidTarget,
 } from '../../domain/ports/payment-repository.port';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { voidDenial, type VoidActor } from '../../domain/void-window';
 
 export type PaymentClock = () => Date;
@@ -35,6 +36,7 @@ export class VoidPaymentUseCase {
     private readonly repo: PaymentRepository,
     @Inject(PAYMENT_CLOCK)
     private readonly now: PaymentClock,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   async execute(input: VoidPaymentInput): Promise<void> {
@@ -42,6 +44,8 @@ export class VoidPaymentUseCase {
     if (!target) {
       throw new NotFoundException('Payment not found');
     }
+
+    this.tenantContext.assertLocationAllowed(target.locationId);
 
     const now = this.now();
     this.assertActorMayVoid(target, input.actor, now);

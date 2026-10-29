@@ -22,6 +22,7 @@ import { requireLocationFormat } from '../../../../../shared/locations/location-
 // the stored row and strips it via `toEntity` (mirrors `mapToEntity` in
 // prisma-payment.repository.ts).
 type StoredPayment = Omit<Payment, 'paidOn' | 'receiptNumber'> & {
+  locationId: string;
   deletedAt: Date | null;
   idempotencyKey: string | null;
   requestFingerprint: string | null;
@@ -57,6 +58,7 @@ export class InMemoryPaymentRepository implements PaymentRepository {
   /** Test helper: seed a payment row directly, bypassing use-case validation. */
   seedPayment(overrides: Partial<StoredPayment> = {}): Payment {
     const row: StoredPayment = {
+      locationId: overrides.locationId ?? 'loc-1',
       id: overrides.id ?? `payment-seed-${++seq}`,
       tenantId: overrides.tenantId ?? 't1',
       treatmentPlanId:
@@ -116,6 +118,7 @@ export class InMemoryPaymentRepository implements PaymentRepository {
   create(input: CreatePaymentRepoInput): Promise<Payment> {
     this.lastCreateInput = input;
     const row: StoredPayment = {
+      locationId: 'loc-1',
       id: `payment-${++seq}`,
       tenantId: 't1',
       treatmentPlanId: input.treatmentPlanId,
@@ -246,6 +249,7 @@ export class InMemoryPaymentRepository implements PaymentRepository {
       row
         ? {
             id: row.id,
+            locationId: row.locationId,
             createdById: row.createdById,
             createdAt: row.createdAt,
             timeZone: this.timeZone,

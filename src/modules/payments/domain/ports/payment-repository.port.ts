@@ -134,6 +134,8 @@ export interface CashRegisterPage {
  */
 export interface PaymentVoidTarget extends VoidSubject {
   id: string;
+  /** Sede persistida del abono, para autorizar antes de escribir. */
+  locationId: string;
 }
 
 /** Desde dónde se anula: para el `audit_event` de la reapertura (DX-215). */
