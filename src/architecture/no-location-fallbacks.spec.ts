@@ -654,7 +654,20 @@ const legacyDocTypeHit = (line: string): boolean =>
  */
 const COUNTRY_DOC_ACRONYM = new RegExp(
   '\\b(' +
-    ['DNI', 'NIE', 'NIF', 'NIT', 'RUT', 'RIF', 'CURP', 'CPF'].join('|') +
+    [
+      'DNI',
+      'NIE',
+      'NIF',
+      'NIT',
+      'RUT',
+      'RUC',
+      'RIF',
+      'CURP',
+      'CPF',
+      'CUIL',
+      'CUIT',
+      'NUIP',
+    ].join('|') +
     ')\\b',
   'i',
 );
@@ -979,6 +992,10 @@ describe('tipos de documento genéricos (DX-327)', () => {
       'rif',
       'CURP',
       'cpf',
+      'ruc',
+      'CUIL',
+      'Cuit',
+      'nuip',
     ]) {
       expect({
         acronym,
