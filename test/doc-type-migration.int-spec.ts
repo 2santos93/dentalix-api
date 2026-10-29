@@ -598,6 +598,46 @@ describe('DX-327 · migraciones del tipo de documento genérico (int)', () => {
     expect(m3).not.toThrow();
   });
 
+  it('M3 sets the clinic in each pass and sees every clinic under FORCE', async () => {
+    // El owner de producción no tiene BYPASSRLS: la comprobación de M3 corre
+    // aquí como dentalix_app (sujeto a la RLS), que sin `app.current_tenant`
+    // no vería ninguna fila y daría por buena una BD incoherente.
+    const check = statements(VALIDATE).find((st) => st.startsWith('DO $$'));
+    expect(check).toBeDefined();
+    await target.$executeRawUnsafe(`GRANT SELECT ON "tenants" TO dentalix_app`);
+    const asAppM3 = (): void =>
+      psql(db, ['-1', '-c', 'SET ROLE dentalix_app', '-c', check as string]);
+    expect(asAppM3).not.toThrow();
+    const rows = { [T_X]: id(T_X, 0x71), [T_Y]: id(T_Y, 0x71) };
+    await target.$executeRawUnsafe(
+      `ALTER TABLE "patients" DISABLE TRIGGER "patients_document_type"`,
+    );
+    try {
+      for (const [tenant, rowId] of Object.entries(rows)) {
+        await target.$executeRawUnsafe(
+          `INSERT INTO "patients" ("id", "tenantId", "firstName", "lastName",
+                                   "docType", "documentType", "updatedAt")
+           VALUES ('${rowId}', '${tenant}', 'In', 'Coherente', 'CC', 'PASSPORT', now())`,
+        );
+      }
+    } finally {
+      await target.$executeRawUnsafe(
+        `ALTER TABLE "patients" ENABLE TRIGGER "patients_document_type"`,
+      );
+    }
+    const fix = (rowId: string): Promise<number> =>
+      target.$executeRawUnsafe(
+        `UPDATE "patients" SET "documentType" = 'NATIONAL_ID' WHERE "id" = '${rowId}'`,
+      );
+    // X va primero; arreglada X, la de Y también se ve (otra clínica, otra
+    // pasada con su `app.current_tenant`).
+    expect(asAppM3).toThrow(new RegExp(`DX-327.*incoherente.*${T_X}`));
+    await fix(rows[T_X]);
+    expect(asAppM3).toThrow(new RegExp(`DX-327.*incoherente.*${T_Y}`));
+    await fix(rows[T_Y]);
+    expect(asAppM3).not.toThrow();
+  });
+
   it('migrations shape', async () => {
     const m1 = statements(DX327);
     expect(m1[0]).toBe(`SET LOCAL lock_timeout = '5s'`);
@@ -612,6 +652,18 @@ describe('DX-327 · migraciones del tipo de documento genérico (int)', () => {
       ],
     );
     for (const s of checks) expect(s).toMatch(/NOT VALID$/);
+    // M2: cada lote (pacientes y responsables) fija su clínica y su
+    // lock_timeout tras cada COMMIT.
+    const m2 = statements(BACKFILL)[0];
+    expect(m2.match(/COMMIT;/g)).toHaveLength(2);
+    expect(
+      m2.match(/pg_catalog\.set_config\('lock_timeout', '5s', true\)/g),
+    ).toHaveLength(2);
+    expect(
+      m2.match(
+        /pg_catalog\.set_config\('app\.current_tenant', t::text, true\)/g,
+      ),
+    ).toHaveLength(2);
     const m3 = statements(VALIDATE);
     expect(m3[0]).toBe(`SET LOCAL lock_timeout = '5s'`);
     expect(
@@ -756,6 +808,24 @@ describe('DX-327 · migraciones del tipo de documento genérico (int)', () => {
         docType: 'CC',
         documentType: 'NATIONAL_ID',
         docTypeLabel: null,
+      });
+    });
+
+    it('documented behaviour: an incoherent insert with OTHER reads as an older writer, takes the legacy type and keeps its label', async () => {
+      // Paso 3 del INSERT: con "documentType" = 'OTHER' (el DEFAULT) y una
+      // pareja incoherente, manda el antiguo; la etiqueta no se toca. La API
+      // nueva nunca escribe esta pareja (R5, `satisfies`).
+      const p = await insertPatient({
+        docType: `'PASSPORT'`,
+        documentType: `'OTHER'`,
+        docTypeLabel: `'ID local'`,
+      });
+      expect(
+        track('hueco con etiqueta', 'ID local', await typesOf('patients', p)),
+      ).toEqual({
+        docType: 'PASSPORT',
+        documentType: 'PASSPORT',
+        docTypeLabel: 'ID local',
       });
     });
 
