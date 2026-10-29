@@ -703,23 +703,23 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
 
 /** DX-153: pagadores del catálogo de la clínica demo (reemplazan al texto libre de aseguradora anterior a DX-153). */
 export const DEMO_PAYERS = [
-  { key: 'sura', name: 'Sura EPS', type: 'EPS_CO' },
-  { key: 'sanitas', name: 'Sanitas', type: 'PREPAGADA_CO' },
-  { key: 'compensar', name: 'Compensar', type: 'EPS_CO' },
-  { key: 'nuevaEps', name: 'Nueva EPS', type: 'EPS_CO' },
-  { key: 'famisanar', name: 'Famisanar', type: 'EPS_CO' },
-  { key: 'saludTotal', name: 'Salud Total', type: 'EPS_CO' },
-  { key: 'coomeva', name: 'Coomeva', type: 'PREPAGADA_CO' },
+  { key: 'sura', name: 'Sura EPS', type: 'PUBLIC_SYSTEM' },
+  { key: 'sanitas', name: 'Sanitas', type: 'PREPAID_PLAN' },
+  { key: 'compensar', name: 'Compensar', type: 'PUBLIC_SYSTEM' },
+  { key: 'nuevaEps', name: 'Nueva EPS', type: 'PUBLIC_SYSTEM' },
+  { key: 'famisanar', name: 'Famisanar', type: 'PUBLIC_SYSTEM' },
+  { key: 'saludTotal', name: 'Salud Total', type: 'PUBLIC_SYSTEM' },
+  { key: 'coomeva', name: 'Coomeva', type: 'PREPAID_PLAN' },
 ] as const satisfies readonly {
   key: string;
   name: string;
-  type: 'EPS_CO' | 'PREPAGADA_CO';
+  type: 'PUBLIC_SYSTEM' | 'PREPAID_PLAN';
 }[];
 
 /** DX-105: pagador extra de la demo, para el convenio de lista de precios. */
 export const DEMO_ALFA_PAYER = {
   name: 'Empresa Alfa',
-  type: 'EMPRESA',
+  type: 'EMPLOYER',
 } as const;
 
 /**

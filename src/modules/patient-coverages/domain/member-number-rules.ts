@@ -12,8 +12,10 @@
  * Es un dato personal: ningún mensaje lo repite y la auditoría solo guarda
  * sus 4 últimos caracteres (`memberNumberLast4`).
  */
-import type { PayerType } from '@prisma/client';
-import { isExternalPayer } from '../../payers/domain/payer-rules';
+import {
+  isExternalPayer,
+  type PayerType,
+} from '../../payers/domain/payer-type';
 
 export const MEMBER_NUMBER_MIN = 4;
 export const MEMBER_NUMBER_RULE_MAX = 40;
@@ -30,7 +32,7 @@ export const MEMBER_NUMBER_REPEATED_MESSAGE =
 const ALLOWED = /^[\p{L}0-9 ./-]+$/u;
 const NOT_ALPHANUMERIC = /[^\p{L}0-9]/gu;
 
-/** ¿El tipo de pagador exige nº de afiliado? Los externos; OTRO no. */
+/** ¿El tipo de pagador exige nº de afiliado? Los externos; OTHER no. */
 export function requiresMemberNumber(type: PayerType): boolean {
   return isExternalPayer(type);
 }

@@ -379,7 +379,7 @@ describe('Cobertura verificable para asignar un convenio (e2e, SEC-049)', () => 
           actorUserId: userIds.RECEPTION,
           metadata: expect.objectContaining({
             coverage: {
-              payerType: 'EMPRESA',
+              payerType: 'EMPLOYER',
               memberNumberLast4: '4050',
               verified: false,
             },
@@ -392,7 +392,7 @@ describe('Cobertura verificable para asignar un convenio (e2e, SEC-049)', () => 
           actorUserId: clinic.adminUserId,
           metadata: expect.objectContaining({
             coverage: {
-              payerType: 'EMPRESA',
+              payerType: 'EMPLOYER',
               memberNumberLast4: '4050',
               verified: true,
             },

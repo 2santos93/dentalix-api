@@ -4,20 +4,28 @@ import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { Payer } from '../../domain/entities/payer.entity';
 import {
+  type LegacyStoredPayerType,
+  payerTypeFromStored,
+  storedPayerType,
+} from '../../domain/legacy-payer-type';
+import {
   CreatePayerRepoInput,
   PayerRepository,
   RetirePayerResult,
   UpdatePayerRepoInput,
 } from '../../domain/ports/payer-repository.port';
 
-type PrismaPayer = Prisma.PayerGetPayload<Record<string, never>>;
+export type PrismaPayer = Prisma.PayerGetPayload<Record<string, never>>;
 
-function mapToEntity(row: PrismaPayer): Payer {
+/**
+ * DX-326 fase 1: la fila guarda el código anterior (o el genérico) y el
+ * dominio solo ve el tipo genérico.
+ */
+export function mapToEntity(row: PrismaPayer): Payer {
   return {
     id: row.id,
     name: row.name,
-    type: row.type,
-    country: row.country,
+    type: payerTypeFromStored(row.type),
     active: row.active,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -105,14 +113,16 @@ export class PrismaPayerRepository implements PayerRepository {
     const row = await this.prisma
       .runWithTenant((tx) =>
         tx.payer.create({
+          // Fase 1 (R5): se guarda el código anterior del tipo genérico.
           data: {
             tenantId,
             name: input.name,
-            type: input.type,
-            country: input.country,
+            type: storedPayerType(input.type),
             active: input.active,
             createdById: input.createdById,
             updatedById: input.createdById,
+          } satisfies Prisma.PayerUncheckedCreateInput & {
+            type?: LegacyStoredPayerType;
           },
         }),
       )
@@ -131,10 +141,14 @@ export class PrismaPayerRepository implements PayerRepository {
           where: { id },
           data: {
             name: patch.name,
-            type: patch.type,
-            country: patch.country,
+            type:
+              patch.type === undefined
+                ? undefined
+                : storedPayerType(patch.type),
             active: patch.active,
             updatedById: patch.updatedById,
+          } satisfies Prisma.PayerUpdateInput & {
+            type?: LegacyStoredPayerType;
           },
         }),
       );

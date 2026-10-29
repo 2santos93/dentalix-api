@@ -508,7 +508,7 @@ describe('casos de uso de convenios (DX-105)', () => {
 
     it('cambiar de pagador exige uno vivo y activo; el mismo no se comprueba', async () => {
       const a = repo.seed({
-        payer: { id: payerId, name: 'Sanitas', type: 'EPS_CO' },
+        payer: { id: payerId, name: 'Sanitas', type: 'PUBLIC_SYSTEM' },
       });
       const off = payers.seed({ name: 'Apagado', active: false });
       await expect(update.execute(a.id, { payerId: off.id })).rejects.toThrow(

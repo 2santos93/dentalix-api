@@ -619,7 +619,7 @@ describe('Convenios (e2e, DX-105)', () => {
       expect((res.body as AgreementBody).payer).toEqual({
         id: second,
         name: 'Segundo pagador',
-        type: 'EMPRESA',
+        type: 'EMPLOYER',
       });
     });
 

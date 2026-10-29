@@ -9,17 +9,30 @@ import {
   normalizeMemberNumber,
   requiresMemberNumber,
 } from './member-number-rules';
+import { isExternalPayer, PAYER_TYPES } from '../../payers/domain/payer-type';
 
-const EXTERNAL = ['EPS_CO', 'PREPAGADA_CO', 'MUTUA_ES', 'EMPRESA'] as const;
+const EXTERNAL = [
+  'INSURER',
+  'PREPAID_PLAN',
+  'PUBLIC_SYSTEM',
+  'EMPLOYER',
+] as const;
 
 describe('nº de afiliado o póliza (SEC-049, regla única DX-311)', () => {
   describe('requiresMemberNumber', () => {
+    it.each(PAYER_TYPES)(
+      'requiresMemberNumber follows isExternalPayer for the five generic types (%s)',
+      (type) => {
+        expect(requiresMemberNumber(type)).toBe(isExternalPayer(type));
+      },
+    );
+
     it.each(EXTERNAL)('%s (pagador externo) lo exige', (type) => {
       expect(requiresMemberNumber(type)).toBe(true);
     });
 
-    it('OTRO (interno: cortesía, empleados) no', () => {
-      expect(requiresMemberNumber('OTRO')).toBe(false);
+    it('OTHER (interno: cortesía, empleados) no', () => {
+      expect(requiresMemberNumber('OTHER')).toBe(false);
     });
   });
 
@@ -64,9 +77,9 @@ describe('nº de afiliado o póliza (SEC-049, regla única DX-311)', () => {
       }
     });
 
-    it('OTRO admite no tenerlo y cualquier texto', () => {
-      expect(memberNumberError('OTRO', null)).toBeNull();
-      expect(memberNumberError('OTRO', 'x')).toBeNull();
+    it('OTHER admite no tenerlo y cualquier texto', () => {
+      expect(memberNumberError('OTHER', null)).toBeNull();
+      expect(memberNumberError('OTHER', 'x')).toBeNull();
     });
 
     it('la misma regla para todo pagador externo', () => {
@@ -106,7 +119,7 @@ describe('nº de afiliado o póliza (SEC-049, regla única DX-311)', () => {
         'ABCDEFGH',
         '99999999',
       ]) {
-        const message = memberNumberError('EMPRESA', value);
+        const message = memberNumberError('EMPLOYER', value);
         expect(message).not.toBeNull();
         expect(message).not.toContain(value.slice(0, 4));
       }

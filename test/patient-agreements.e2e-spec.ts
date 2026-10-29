@@ -210,7 +210,7 @@ describe('Convenio del paciente (e2e, DX-105)', () => {
       retiredAt: null,
       agreement: {
         name: 'Convenio Sanitas',
-        payer: { name: 'Sanitas', type: 'EPS_CO' },
+        payer: { name: 'Sanitas', type: 'PUBLIC_SYSTEM' },
       },
     });
     expect((await read(p, false)).current?.id).toBe(

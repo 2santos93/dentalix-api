@@ -50,7 +50,6 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
       tenantId: tenant.id,
       name: 'Sanitas',
       type: 'EPS_CO',
-      country: 'CO',
     },
   });
   return { tenantId: tenant.id, patients, payerId: payer.id };
@@ -308,9 +307,14 @@ describe('pagadores y coberturas (int, DX-153)', () => {
       );
       for (const p of payers) {
         expect(p.type).toBe('OTRO');
-        expect(p.country).toBeNull();
         expect(p.active).toBe(true);
       }
+      // `country` lleva @ignore en el cliente (DX-326): se lee por SQL.
+      const countries = await raw.$queryRaw<{ country: string | null }[]>`
+        SELECT "country"::text AS country FROM "payers"
+        WHERE "tenantId" = ${a.tenantId}::uuid`;
+      expect(countries).toHaveLength(payers.length);
+      expect(countries.every((c) => c.country === null)).toBe(true);
     });
 
     it('una cobertura principal migrada por paciente con texto (archivado incluido); vacío o nulo, ninguna', async () => {
@@ -448,7 +452,6 @@ describe('pagadores y coberturas (int, DX-153)', () => {
           tenantId: a.tenantId,
           name: 'SURA EPS',
           type: 'EPS_CO',
-          country: 'CO',
         },
       });
       const patientId = await mkPatient(a, 'R1', 'Sura EPS');

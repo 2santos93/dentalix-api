@@ -7,6 +7,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { Agreement } from '../../domain/entities/agreement.entity';
+import { payerTypeFromStored } from '../../../payers/domain/legacy-payer-type';
 import {
   AgreementRepository,
   CreateAgreementRepoInput,
@@ -29,7 +30,9 @@ const INCLUDE = {
   _count: { select: { assignments: { where: { deletedAt: null } } } },
 } satisfies Prisma.AgreementInclude;
 
-type PrismaAgreement = Prisma.AgreementGetPayload<{ include: typeof INCLUDE }>;
+export type PrismaAgreement = Prisma.AgreementGetPayload<{
+  include: typeof INCLUDE;
+}>;
 
 /** `Date` de una columna `@db.Date` (UTC medianoche) a `YYYY-MM-DD`. */
 function toDay(date: Date | null): string | null {
@@ -49,11 +52,16 @@ function toJson(
   return map === null ? Prisma.DbNull : map;
 }
 
-function mapToEntity(row: PrismaAgreement): Agreement {
+/** DX-326 fase 1: el pagador sale con su tipo genérico (R4). */
+export function mapToEntity(row: PrismaAgreement): Agreement {
   return {
     id: row.id,
     name: row.name,
-    payer: { id: row.payer.id, name: row.payer.name, type: row.payer.type },
+    payer: {
+      id: row.payer.id,
+      name: row.payer.name,
+      type: payerTypeFromStored(row.payer.type),
+    },
     kind: row.kind,
     percent: row.percent ? row.percent.toNumber() : null,
     percentByCategory: row.percentByCategory as unknown as Record<

@@ -3661,7 +3661,10 @@ model Payer {
   tenantId    String         @db.Uuid
   name        String
   type        PayerType
-  country     ClinicCountry?
+  /// Excepción G5.3 (DX-334): país anterior a DX-326. @ignore: el cliente no
+  /// lo lee ni lo escribe; la columna queda para las réplicas anteriores y la
+  /// borra DX-312 (§3.4).
+  country     ClinicCountry? @ignore
   active      Boolean        @default(true)
   /// Punteros suaves a User, como `Payment.createdById`.
   createdById String?        @db.Uuid

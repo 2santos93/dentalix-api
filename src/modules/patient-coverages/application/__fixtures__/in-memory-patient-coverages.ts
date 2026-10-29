@@ -89,7 +89,6 @@ export class InMemoryPatientCoverageRepository implements PatientCoverageReposit
         id: payer.id,
         name: payer.name,
         type: payer.type,
-        country: payer.country,
         active: payer.active,
       },
     };

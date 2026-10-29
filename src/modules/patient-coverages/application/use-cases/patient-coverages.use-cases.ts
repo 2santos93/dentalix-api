@@ -9,7 +9,7 @@ import {
   PAYER_REPOSITORY,
   type PayerRepository,
 } from '../../../payers/domain/ports/payer-repository.port';
-import type { PayerType } from '@prisma/client';
+import type { PayerType } from '../../../payers/domain/payer-type';
 import {
   COVERAGE_NOT_FOUND_MESSAGE,
   COVERAGE_PAYER_NOT_FOUND_MESSAGE,

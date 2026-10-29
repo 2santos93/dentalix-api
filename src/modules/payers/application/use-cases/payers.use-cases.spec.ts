@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { InMemoryPayerRepository } from '../__fixtures__/in-memory-payers';
 import {
+  type CreatePayerInput,
   CreatePayerUseCase,
   DeletePayerUseCase,
   ListPayersUseCase,
@@ -12,12 +13,11 @@ import {
   PAYER_DUPLICATE_MESSAGE,
   PAYER_IN_USE_MESSAGE,
   PAYER_NOT_FOUND_MESSAGE,
+  type UpdatePayerInput,
   UpdatePayerUseCase,
 } from './payers.use-cases';
-import {
-  PAYER_NAME_MESSAGE,
-  PAYER_TYPE_COUNTRY_MESSAGE,
-} from '../../domain/payer-rules';
+import { PAYER_NAME_MESSAGE } from '../../domain/payer-rules';
+import { PAYER_TYPES } from '../../domain/payer-type';
 
 describe('casos de uso de pagadores (DX-153)', () => {
   let repo: InMemoryPayerRepository;
@@ -37,7 +37,7 @@ describe('casos de uso de pagadores (DX-153)', () => {
   describe('listar', () => {
     it('por defecto solo activos, por nombre; includeInactive suma los desactivados', async () => {
       repo.seed({ name: 'Sura' });
-      repo.seed({ name: 'Adeslas', type: 'MUTUA_ES', country: 'ES' });
+      repo.seed({ name: 'Adeslas', type: 'INSURER' });
       repo.seed({ name: 'Colsanitas', active: false });
       const retired = repo.seed({ name: 'Retirada' });
       repo.deleted.add(retired.id);
@@ -53,39 +53,54 @@ describe('casos de uso de pagadores (DX-153)', () => {
   });
 
   describe('crear', () => {
-    it('normaliza el nombre y deja el país nulo si no viene', async () => {
+    it('normaliza el nombre', async () => {
       const payer = await create.execute(
-        { name: '  Empresa   Uno ', type: 'EMPRESA' },
+        { name: '  Empresa   Uno ', type: 'EMPLOYER' },
         'u1',
       );
       expect(payer).toMatchObject({
         name: 'Empresa Uno',
-        type: 'EMPRESA',
-        country: null,
+        type: 'EMPLOYER',
         active: true,
       });
     });
 
+    it.each(PAYER_TYPES)(
+      'any type is created with no country (%s)',
+      async (type) => {
+        const payer = await create.execute({ name: 'Aseguradora Norte', type });
+        expect(payer.type).toBe(type);
+        expect(repo.rows).toHaveLength(1);
+        expect(repo.rows[0]).not.toHaveProperty('country');
+        expect(payer).not.toHaveProperty('country');
+      },
+    );
+
+    it('the use cases take no country', () => {
+      const createInput: CreatePayerInput = {
+        name: 'Plan Sur',
+        type: 'PREPAID_PLAN',
+        // @ts-expect-error: el pagador no tiene país (DX-326).
+        country: 'ES',
+      };
+      const updateInput: UpdatePayerInput = {
+        // @ts-expect-error: el pagador no tiene país (DX-326).
+        country: null,
+      };
+      expect(createInput.name).toBe('Plan Sur');
+      expect(updateInput).toBeDefined();
+    });
+
     it('400 con nombre corto', async () => {
       await expect(
-        create.execute({ name: ' A ', type: 'OTRO' }),
+        create.execute({ name: ' A ', type: 'OTHER' }),
       ).rejects.toThrow(new BadRequestException(PAYER_NAME_MESSAGE));
     });
 
-    it('400 si el tipo no corresponde con el país', async () => {
-      await expect(
-        create.execute({ name: 'Mutua X', type: 'MUTUA_ES', country: 'CO' }),
-      ).rejects.toThrow(new BadRequestException(PAYER_TYPE_COUNTRY_MESSAGE));
-      await expect(
-        create.execute({ name: 'Mutua X', type: 'MUTUA_ES' }),
-      ).rejects.toThrow(new BadRequestException(PAYER_TYPE_COUNTRY_MESSAGE));
-      expect(repo.rows).toHaveLength(0);
-    });
-
     it('409 con un nombre que solo cambia en mayúsculas, tildes o espacios', async () => {
-      repo.seed({ name: 'Seguros Bolívar', type: 'OTRO', country: null });
+      repo.seed({ name: 'Seguros Bolívar', type: 'OTHER' });
       await expect(
-        create.execute({ name: ' SEGUROS  bolivar', type: 'OTRO' }),
+        create.execute({ name: ' SEGUROS  bolivar', type: 'OTHER' }),
       ).rejects.toThrow(new ConflictException(PAYER_DUPLICATE_MESSAGE));
       expect(repo.rows).toHaveLength(1);
     });
@@ -93,7 +108,7 @@ describe('casos de uso de pagadores (DX-153)', () => {
     it('409 propio si el que coincide está desactivado, al crear y al renombrar', async () => {
       repo.seed({ name: 'Sura', active: false });
       await expect(
-        create.execute({ name: 'SURA', type: 'OTRO' }),
+        create.execute({ name: 'SURA', type: 'OTHER' }),
       ).rejects.toThrow(
         new ConflictException(PAYER_DUPLICATE_INACTIVE_MESSAGE),
       );
@@ -107,7 +122,7 @@ describe('casos de uso de pagadores (DX-153)', () => {
       const old = repo.seed({ name: 'Sura' });
       repo.deleted.add(old.id);
       await expect(
-        create.execute({ name: 'sura', type: 'EPS_CO', country: 'CO' }),
+        create.execute({ name: 'sura', type: 'PUBLIC_SYSTEM' }),
       ).resolves.toMatchObject({ name: 'sura' });
     });
   });
@@ -151,17 +166,15 @@ describe('casos de uso de pagadores (DX-153)', () => {
       expect(other.name).toBe('Allianz');
     });
 
-    it('valida tipo y país contra el valor resultante', async () => {
-      const p = repo.seed({ type: 'EPS_CO', country: 'CO' });
-      await expect(update.execute(p.id, { type: 'MUTUA_ES' })).rejects.toThrow(
-        new BadRequestException(PAYER_TYPE_COUNTRY_MESSAGE),
-      );
-      await expect(update.execute(p.id, { country: 'ES' })).rejects.toThrow(
-        new BadRequestException(PAYER_TYPE_COUNTRY_MESSAGE),
-      );
+    it('update changes the type with no other rule', async () => {
+      const p = repo.seed({ type: 'OTHER' });
       await expect(
-        update.execute(p.id, { type: 'MUTUA_ES', country: 'ES' }),
-      ).resolves.toMatchObject({ type: 'MUTUA_ES', country: 'ES' });
+        update.execute(p.id, { type: 'INSURER' }),
+      ).resolves.toMatchObject({ type: 'INSURER' });
+      await expect(
+        update.execute(p.id, { type: 'OTHER' }),
+      ).resolves.toMatchObject({ type: 'OTHER' });
+      expect(repo.rows[0].type).toBe('OTHER');
     });
   });
 

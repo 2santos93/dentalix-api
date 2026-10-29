@@ -580,7 +580,6 @@ describe('Listas de precios (e2e, DX-105)', () => {
           tenantId: clinic.tenantId,
           name: 'Sanitas',
           type: 'EPS_CO',
-          country: 'CO',
         },
       });
       const agreement = await raw.agreement.create({

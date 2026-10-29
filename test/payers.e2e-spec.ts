@@ -12,8 +12,8 @@ import {
 } from './support/e2e-fixtures';
 
 // DX-153 en HTTP real: catálogo de pagadores (alta ADMIN y recepción, edición
-// y retiro solo ADMIN), duplicado sin mayúsculas ni tildes, coherencia tipo y
-// país, desactivar frente a retirar, y aislamiento entre clínicas.
+// y retiro solo ADMIN), duplicado sin mayúsculas ni tildes, desactivar frente
+// a retirar, y aislamiento entre clínicas. DX-326: tipo genérico y sin país.
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
@@ -22,7 +22,6 @@ interface PayerBody {
   id: string;
   name: string;
   type: string;
-  country: string | null;
   active: boolean;
 }
 
@@ -76,7 +75,7 @@ describe('Pagadores (e2e, DX-153)', () => {
     await app.close();
   });
 
-  it('ADMIN crea un pagador con tipo y país', async () => {
+  it('ADMIN crea un pagador: la respuesta lleva el tipo genérico y ninguna clave country', async () => {
     const payer = await createPayer({
       name: '  Sanitas   EPS ',
       type: 'EPS_CO',
@@ -84,18 +83,19 @@ describe('Pagadores (e2e, DX-153)', () => {
     });
     expect(payer).toMatchObject({
       name: 'Sanitas EPS',
-      type: 'EPS_CO',
-      country: 'CO',
+      type: 'PUBLIC_SYSTEM',
       active: true,
     });
+    expect(payer).not.toHaveProperty('country');
   });
 
-  it('recepción crea (201) y el país es opcional para empresa', async () => {
+  it('recepción crea (201)', async () => {
     const payer = await createPayer(
       { name: 'Empresa Mostrador', type: 'EMPRESA' },
       tokens.RECEPTION,
     );
-    expect(payer).toMatchObject({ type: 'EMPRESA', country: null });
+    expect(payer.type).toBe('EMPLOYER');
+    expect(payer).not.toHaveProperty('country');
   });
 
   it('el dentista no crea (403)', async () => {
@@ -114,12 +114,39 @@ describe('Pagadores (e2e, DX-153)', () => {
     );
   });
 
-  it('MUTUA_ES con país CO da 400 con el mensaje', async () => {
+  it('any type with or without a country in the body is 201', async () => {
+    const created = [
+      await createPayer({
+        name: 'Mutua rara',
+        type: 'MUTUA_ES',
+        country: 'CO',
+      }),
+      await createPayer({ name: 'Aseguradora Norte', type: 'INSURER' }),
+      await createPayer({
+        name: 'Sistema Público Central',
+        type: 'PUBLIC_SYSTEM',
+        country: 'ES',
+      }),
+    ];
+    expect(created.map((p) => p.type)).toEqual([
+      'INSURER',
+      'INSURER',
+      'PUBLIC_SYSTEM',
+    ]);
+    for (const payer of created) expect(payer).not.toHaveProperty('country');
+    for (const payer of created) {
+      await as(api().delete(`/api/v1/payers/${payer.id}`), tokens.ADMIN).expect(
+        204,
+      );
+    }
+  });
+
+  it('un tipo desconocido da 400 con la lista de los cinco genéricos', async () => {
     const res = await as(api().post('/api/v1/payers'), tokens.ADMIN)
-      .send({ name: 'Mutua rara', type: 'MUTUA_ES', country: 'CO' })
+      .send({ name: 'Tipo raro', type: 'XX' })
       .expect(400);
     expect(JSON.stringify(res.body)).toContain(
-      'El tipo de pagador no corresponde con el país.',
+      'El tipo de pagador debe ser uno de: INSURER, PREPAID_PLAN, PUBLIC_SYSTEM, EMPLOYER, OTHER.',
     );
   });
 
@@ -154,7 +181,7 @@ describe('Pagadores (e2e, DX-153)', () => {
     expect(await names('?includeInactive=true')).toContain('Prepagada Z');
   });
 
-  it('country null vacía el país de una empresa y se rechaza en una mutua', async () => {
+  it('el PATCH de la web anterior con country null da 200 y la respuesta no lleva country', async () => {
     const empresa = await createPayer({
       name: 'Empresa con país',
       type: 'EMPRESA',
@@ -164,24 +191,96 @@ describe('Pagadores (e2e, DX-153)', () => {
       api().patch(`/api/v1/payers/${empresa.id}`),
       tokens.ADMIN,
     )
-      .send({ country: null })
+      .send({ name: 'Empresa con país', type: 'EMPRESA', country: null })
       .expect(200);
-    expect((ok.body as PayerBody).country).toBeNull();
+    expect((ok.body as PayerBody).type).toBe('EMPLOYER');
+    expect(ok.body).not.toHaveProperty('country');
 
     const mutua = await createPayer({
       name: 'Mutua con país',
       type: 'MUTUA_ES',
       country: 'ES',
     });
-    const bad = await as(
+    const retyped = await as(
       api().patch(`/api/v1/payers/${mutua.id}`),
       tokens.ADMIN,
     )
-      .send({ country: null })
-      .expect(400);
-    expect(JSON.stringify(bad.body)).toContain(
-      'El tipo de pagador no corresponde con el país.',
-    );
+      .send({ type: 'OTHER', country: null })
+      .expect(200);
+    expect((retyped.body as PayerBody).type).toBe('OTHER');
+    expect(retyped.body).not.toHaveProperty('country');
+  });
+
+  it('legacy type codes in the body are accepted as their generic type during the rollout', async () => {
+    const LEGACY = [
+      ['MUTUA_ES', 'INSURER'],
+      ['PREPAGADA_CO', 'PREPAID_PLAN'],
+      ['EPS_CO', 'PUBLIC_SYSTEM'],
+      ['EMPRESA', 'EMPLOYER'],
+      ['OTRO', 'OTHER'],
+    ] as const;
+    for (const [code, type] of LEGACY) {
+      const payer = await createPayer({
+        name: `Legado ${code}`,
+        type: code,
+        country: 'CO',
+      });
+      expect(payer.type).toBe(type);
+      const patched = await as(
+        api().patch(`/api/v1/payers/${payer.id}`),
+        tokens.ADMIN,
+      )
+        .send({ type: code, country: null })
+        .expect(200);
+      expect((patched.body as PayerBody).type).toBe(type);
+      await as(api().delete(`/api/v1/payers/${payer.id}`), tokens.ADMIN).expect(
+        204,
+      );
+    }
+  });
+
+  it('legacy codes are stored for new payers during phase 1', async () => {
+    // Fase 1 (R5): la BD guarda el código anterior de cada tipo genérico, al
+    // crear y al editar, y nunca un código nuevo; `country` queda NULL.
+    const LEGACY = {
+      INSURER: 'MUTUA_ES',
+      PREPAID_PLAN: 'PREPAGADA_CO',
+      PUBLIC_SYSTEM: 'EPS_CO',
+      EMPLOYER: 'EMPRESA',
+      OTHER: 'OTRO',
+    } as const;
+    const stored = async (id: string) =>
+      (
+        await raw.$queryRaw<{ type: string; country: string | null }[]>`
+          SELECT "type"::text AS type, "country"::text AS country
+          FROM "payers" WHERE id = ${id}::uuid`
+      )[0];
+    const types = Object.keys(LEGACY) as (keyof typeof LEGACY)[];
+    for (const [i, type] of types.entries()) {
+      const payer = await createPayer({ name: `Fase uno ${type}`, type });
+      expect(payer.type).toBe(type);
+      expect(await stored(payer.id)).toEqual({
+        type: LEGACY[type],
+        country: null,
+      });
+      // Editar hacia el siguiente tipo también guarda su código anterior.
+      const next = types[(i + 1) % types.length];
+      const res = await as(
+        api().patch(`/api/v1/payers/${payer.id}`),
+        tokens.ADMIN,
+      )
+        .send({ type: next })
+        .expect(200);
+      expect((res.body as PayerBody).type).toBe(next);
+      expect((await stored(payer.id)).type).toBe(LEGACY[next]);
+      await as(api().delete(`/api/v1/payers/${payer.id}`), tokens.ADMIN).expect(
+        204,
+      );
+    }
+    const generic = await raw.$queryRaw<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM "payers"
+      WHERE "type"::text IN ('INSURER', 'PREPAID_PLAN', 'PUBLIC_SYSTEM', 'EMPLOYER', 'OTHER')`;
+    expect(generic[0].n).toBe(0);
   });
 
   it('el PATCH con name, type o active en null da 400, nunca 500', async () => {

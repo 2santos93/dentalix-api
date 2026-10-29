@@ -34,15 +34,10 @@ describe('DTOs de pagadores (DX-153)', () => {
     }
   });
 
-  it('rechaza tipo y país fuera del enum', async () => {
-    const out = await messages(CreatePayerDto, {
-      name: 'Sura',
-      type: 'XX',
-      country: 'MX',
-    });
+  it('rechaza un tipo fuera de los cinco genéricos', async () => {
+    const out = await messages(CreatePayerDto, { name: 'Sura', type: 'XX' });
     expect(out).toEqual([
-      expect.stringMatching(/^El tipo de pagador debe ser uno de/),
-      expect.stringMatching(/^El país debe ser uno de/),
+      'El tipo de pagador debe ser uno de: INSURER, PREPAID_PLAN, PUBLIC_SYSTEM, EMPLOYER, OTHER.',
     ]);
   });
 

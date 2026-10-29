@@ -1,5 +1,4 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { ClinicCountry, PayerType } from '@prisma/client';
 import {
   IsBoolean,
   IsOptional,
@@ -9,6 +8,7 @@ import {
   MaxLength,
   ValidateIf,
 } from 'class-validator';
+import { PAYER_TYPES, type PayerType } from '../../../payers/domain/payer-type';
 import {
   COVERAGE_DATE_FORMAT_MESSAGE,
   COVERAGE_NOTES_MAX,
@@ -39,15 +39,8 @@ export class CoveragePayerDto {
   @ApiProperty({ example: 'Sanitas' })
   name!: string;
 
-  @ApiProperty({ enum: PayerType, enumName: 'PayerType' })
+  @ApiProperty({ enum: PAYER_TYPES, enumName: 'PayerType' })
   type!: PayerType;
-
-  @ApiProperty({
-    enum: ClinicCountry,
-    enumName: 'ClinicCountry',
-    nullable: true,
-  })
-  country!: ClinicCountry | null;
 
   @ApiProperty()
   active!: boolean;

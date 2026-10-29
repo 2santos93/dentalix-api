@@ -22,8 +22,7 @@ export class InMemoryPayerRepository implements PayerRepository {
     const row: Payer = {
       id: `payer-${this.nextId++}`,
       name: 'Sanitas',
-      type: 'EPS_CO',
-      country: 'CO',
+      type: 'PUBLIC_SYSTEM',
       active: true,
       createdAt: new Date('2026-10-01T00:00:00.000Z'),
       updatedAt: new Date('2026-10-01T00:00:00.000Z'),
@@ -65,7 +64,6 @@ export class InMemoryPayerRepository implements PayerRepository {
       this.seed({
         name: input.name,
         type: input.type,
-        country: input.country,
         active: input.active,
       }),
     );
@@ -76,7 +74,6 @@ export class InMemoryPayerRepository implements PayerRepository {
     if (!row || this.deleted.has(id)) return Promise.resolve(null);
     if (patch.name !== undefined) row.name = patch.name;
     if (patch.type !== undefined) row.type = patch.type;
-    if (patch.country !== undefined) row.country = patch.country;
     if (patch.active !== undefined) row.active = patch.active;
     return Promise.resolve({ ...row });
   }

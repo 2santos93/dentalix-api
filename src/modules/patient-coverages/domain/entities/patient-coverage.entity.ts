@@ -1,11 +1,10 @@
-import { ClinicCountry, PayerType } from '@prisma/client';
+import type { PayerType } from '../../../payers/domain/payer-type';
 
 /** Pagador tal como viaja dentro de una cobertura. */
 export interface CoveragePayer {
   id: string;
   name: string;
   type: PayerType;
-  country: ClinicCountry | null;
   active: boolean;
 }
 
@@ -29,7 +28,7 @@ export interface PatientCoverage {
   /**
    * Copiada del texto libre de aseguradora anterior a DX-153 por el relleno
    * de DX-153; la API nunca la crea. SEC-047: habilita a cualquier rol a asignar un convenio de pagador
-   * OTRO (los pagadores del relleno son OTRO hasta que se reclasifican).
+   * OTHER (los pagadores del relleno son OTHER hasta que se reclasifican).
    */
   migratedFromInsurerEps: boolean;
   /**

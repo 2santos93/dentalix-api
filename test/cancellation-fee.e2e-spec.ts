@@ -1,13 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import {
-  ClinicCountry,
-  ClinicRole,
-  PayerType,
-  Prisma,
-  PrismaClient,
-} from '@prisma/client';
+import { ClinicRole, PayerType, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import {
@@ -36,16 +30,6 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 const HOUR = 3_600_000;
 const POLICY_TEXT =
   'Si no puedes venir, avísanos con 24 h o se cobrará la cita.';
-
-/**
- * País del pagador: lo exige payers_type_country_check (G3.3). Es un fixture
- * para poder crear cada tipo, no una regla del cargo.
- */
-function payerCountry(type: PayerType): ClinicCountry | null {
-  if (type === PayerType.MUTUA_ES) return 'ES';
-  if (type === PayerType.EPS_CO || type === PayerType.PREPAGADA_CO) return 'CO';
-  return null;
-}
 
 interface FeeView {
   appointmentId: string;
@@ -479,7 +463,6 @@ describe('Cargo por inasistencia y política en el enlace (DX-291)', () => {
             tenantId: a.tenantId,
             name: `Pagador ${type}`,
             type,
-            country: payerCountry(type),
           },
         });
         await raw.patientCoverage.create({

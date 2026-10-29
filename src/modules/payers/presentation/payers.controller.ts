@@ -94,7 +94,7 @@ export class PayersController {
     @Req() req: AuthenticatedRequest,
   ): Promise<Payer> {
     return this.createPayer.execute(
-      { name: dto.name, type: dto.type, country: dto.country },
+      { name: dto.name, type: dto.type },
       req.user.sub,
     );
   }
@@ -117,7 +117,6 @@ export class PayersController {
       {
         name: dto.name,
         type: dto.type,
-        country: dto.country,
         active: dto.active,
       },
       req.user.sub,

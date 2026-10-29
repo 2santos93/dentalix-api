@@ -57,7 +57,7 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
   /** Coberturas vivas del paciente con cada pagador. */
   let covSanitas: string;
   let covSura: string;
-  /** Convenio sin pagador externo: su pagador es de tipo OTRO (SEC-047). */
+  /** Convenio sin pagador externo: su pagador es de tipo OTHER (SEC-047). */
   let cortesia: string;
   let cortesiaPayer: { id: string; name: string };
 
@@ -81,21 +81,20 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
     sura = payers.seed({ name: 'Sura' });
     cortesiaPayer = payers.seed({
       name: 'Cortesía',
-      type: 'OTRO',
-      country: null,
+      type: 'OTHER',
     });
     convenioSanitas = agreements.seed({
       name: 'Convenio Sanitas',
-      payer: { id: sanitas.id, name: sanitas.name, type: 'EPS_CO' },
+      payer: { id: sanitas.id, name: sanitas.name, type: 'PUBLIC_SYSTEM' },
     }).id;
     convenioSura = agreements.seed({
       name: 'Convenio Sura',
-      payer: { id: sura.id, name: sura.name, type: 'EPS_CO' },
+      payer: { id: sura.id, name: sura.name, type: 'PUBLIC_SYSTEM' },
     }).id;
     cortesia = agreements.seed({
       name: 'Cortesía socios 100 %',
       percent: 100,
-      payer: { ...cortesiaPayer, type: 'OTRO' },
+      payer: { ...cortesiaPayer, type: 'OTHER' },
     }).id;
     covSanitas = coverages.seed({ patientId: PATIENT, payerId: sanitas.id }).id;
     covSura = coverages.seed({ patientId: PATIENT, payerId: sura.id }).id;
@@ -146,7 +145,7 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
     it('calcula el estado a hoy con las dos vigencias', async () => {
       const past = agreements.seed({
         name: 'Vencido',
-        payer: { id: sanitas.id, name: sanitas.name, type: 'EPS_CO' },
+        payer: { id: sanitas.id, name: sanitas.name, type: 'PUBLIC_SYSTEM' },
         validTo: '2026-10-19',
       });
       repo.seed({ patientId: PATIENT, agreementId: past.id });
@@ -388,7 +387,7 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
       );
 
       it.each(NON_ADMIN)(
-        '%s: con una cobertura MIGRADA del texto libre de aseguradora anterior a DX-153 del mismo pagador, el convenio OTRO se asigna',
+        '%s: con una cobertura MIGRADA del texto libre de aseguradora anterior a DX-153 del mismo pagador, el convenio OTHER se asigna',
         async (role) => {
           const migrated = coverages.seed({
             patientId: PATIENT,
@@ -453,7 +452,7 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
           ADMIN,
         );
         expect(out.coverageId).toBeNull();
-        expect(out.agreement.payer.type).toBe('OTRO');
+        expect(out.agreement.payer.type).toBe('OTHER');
       });
 
       it('ADMIN con un convenio sin pagador externo: la cobertura, si viene, se valida igual', async () => {
