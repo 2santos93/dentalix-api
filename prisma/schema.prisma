@@ -413,11 +413,23 @@ model ClinicInvitation {
   @@map("clinic_invitations")
 }
 
+/// Excepción G5.3 (DX-334): tipos de documento anteriores a DX-327. La API ya
+/// no los lee; los mantiene el trigger *_document_type para las réplicas
+/// anteriores (migración 20261030120000). La fase 2 borra el enum.
 enum DocType {
   CC
   TI
   CE
   PASSPORT
+  OTHER
+}
+
+/// DX-327: tipo de documento del paciente, igual para cualquier clínica.
+enum DocumentType {
+  NATIONAL_ID
+  PASSPORT
+  RESIDENCE_PERMIT
+  TAX_ID
   OTHER
 }
 
@@ -433,7 +445,15 @@ model Patient {
   tenantId                     String                @db.Uuid
   firstName                    String
   lastName                     String
+  /// Excepción G5.3 (DX-334): código anterior a DX-327, solo para las réplicas
+  /// anteriores. La API lo escribe al crear (proyección de R3) y no lo lee.
   docType                      DocType               @default(CC)
+  /// DX-327: el tipo. DEFAULT 'OTHER' solo para quien no lo da (R10): el
+  /// trigger patients_document_type lo deriva del código anterior.
+  documentType                 DocumentType          @default(OTHER)
+  /// DX-327: nombre libre del documento (1–40, recortado); se imprime en
+  /// lugar del tipo. Solo lo escribe la clínica.
+  docTypeLabel                 String?
   docNumber                    String?
   birthDate                    DateTime?
   sex                          Sex                   @default(UNSPECIFIED)
@@ -3604,7 +3624,13 @@ model PatientResponsibleParty {
   responsiblePatientId String?                 @db.Uuid
   /// Contacto sin ficha: NULL los cinco si es un paciente.
   fullName             String?
+  /// Excepción G5.3 (DX-334): código anterior a DX-327, solo para las réplicas
+  /// anteriores. La API lo escribe al crear (proyección de R3) y no lo lee.
   docType              DocType?
+  /// DX-327: el tipo (NULL si es un paciente; un contacto puede no tenerlo).
+  documentType         DocumentType?
+  /// DX-327: nombre libre del documento (1–40); exige tipo.
+  docTypeLabel         String?
   docNumber            String?
   email                String?
   phone                String?

@@ -347,6 +347,35 @@ const FIXTURE_DX326 = [
      (gen_random_uuid(),'${T_B}','${P_B}','${PAYER_EPS_B}',now())`,
 ];
 
+/**
+ * Excepción G5.3 (DX-334): tipos de documento anteriores a DX-327.
+ * DX-327 (fase 1): tipo de documento genérico en columna propia, relleno por
+ * lotes con la clínica fijada (sin NO FORCE) y validación. En A y en B un
+ * paciente por código guardado, uno borrado en blando y uno sin documento,
+ * con números propios de este fixture (FIXTURE_DX287 ya deja «1.111.111»
+ * vivo en A); en A, un contacto TI y un responsable que es paciente.
+ */
+const DX327 = '20261030120000_dx327_document_type';
+const DX327_CC_A = '00000000-0000-4000-8000-0000000327a1';
+const dx327Patients = (tenant: string, cc: string, n: string): string =>
+  [
+    `(${cc},'${tenant}','Doc','CC','CC','7.327.${n}1',NULL,now())`,
+    `(gen_random_uuid(),'${tenant}','Doc','TI','TI','7327${n}1',NULL,now())`,
+    `(gen_random_uuid(),'${tenant}','Doc','CE','CE','R327-${n}1',NULL,now())`,
+    `(gen_random_uuid(),'${tenant}','Doc','PASSPORT','PASSPORT','P327-${n}1',NULL,now())`,
+    `(gen_random_uuid(),'${tenant}','Doc','OTHER','OTHER','O327-${n}1',NULL,now())`,
+    `(gen_random_uuid(),'${tenant}','Doc','Borrado','CC','7.327.${n}9',now(),now())`,
+    `(gen_random_uuid(),'${tenant}','Doc','Sin documento',DEFAULT,NULL,NULL,now())`,
+  ].join(',\n');
+const FIXTURE_DX327 = [
+  `INSERT INTO "patients" ("id","tenantId","firstName","lastName","docType","docNumber","deletedAt","updatedAt") VALUES
+     ${dx327Patients(T_A, `'${DX327_CC_A}'`, '00')},
+     ${dx327Patients(T_B, 'gen_random_uuid()', '10')}`,
+  `INSERT INTO "patient_responsible_parties" ("id","tenantId","patientId","responsiblePatientId","fullName","docType","docNumber","relationship","updatedAt") VALUES
+     (gen_random_uuid(),'${T_A}','${P_A}',NULL,'Contacto TI','TI','7327050','MOTHER',now()),
+     (gen_random_uuid(),'${T_A}','${P_A}','${DX327_CC_A}',NULL,NULL,NULL,'SIBLING',now())`,
+];
+
 const STEPS: Step[] = [
   { until: '20260731115959', fixture: [] },
   // 20260731120000_structured_clinical_history y _remove_owner_role.
@@ -427,8 +456,11 @@ const STEPS: Step[] = [
   // clínica y su relleno (FORCE fuera de locations), hasta DX-326.
   { until: DX326 },
   // dx326: valores genéricos del enum y fuera el CHECK de tipo y país; sin
-  // relleno.
-  { until: '99999999999999', fixture: FIXTURE_DX326 },
+  // relleno; hasta DX-327.
+  { until: DX327, fixture: FIXTURE_DX326 },
+  // dx327: tipo de documento genérico, relleno por lotes y validación; el
+  // código antiguo se queda.
+  { until: '99999999999999', fixture: FIXTURE_DX327 },
 ];
 
 describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-nosu)', () => {
@@ -1162,6 +1194,126 @@ describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-no
           WHERE oid = 'public.payers'::regclass`,
       ),
     ).toBe(true);
+  }, 180_000);
+
+  it('owner-nosu document type migrations map every patient and contact, keep the legacy code, docKey and FORCE', async () => {
+    // Excepción G5.3 (DX-334): tipos de documento anteriores a DX-327.
+    const snapshot = (): Promise<string> =>
+      scalar<string>(
+        `SELECT count(*) || ':' || md5(string_agg(s.r, ',' ORDER BY s.r)) AS v
+           FROM (SELECT 'p:' || "id" || ':' || "tenantId" || ':'
+                        || coalesce("docNumber", '-') || ':'
+                        || coalesce("docKey", '-') || ':' || "docType"::text AS r
+                   FROM "patients"
+                 UNION ALL
+                 SELECT 'r:' || "id" || ':' || "tenantId" || ':'
+                        || coalesce("docNumber", '-') || ':'
+                        || coalesce("docType"::text, '-')
+                   FROM "patient_responsible_parties") s`,
+      );
+    let before = '';
+    await run(STEPS[25], async () => {
+      before = await snapshot();
+    });
+    expect(await snapshot()).toBe(before);
+    // R3 en cada fila (también los borrados, los 4.500 de B y los contactos),
+    // y ninguna etiqueta.
+    const r3 = `CASE "docType"::text WHEN 'CC' THEN 'NATIONAL_ID'
+                  WHEN 'TI' THEN 'NATIONAL_ID' WHEN 'CE' THEN 'RESIDENCE_PERMIT'
+                  WHEN 'PASSPORT' THEN 'PASSPORT' WHEN 'OTHER' THEN 'OTHER' END`;
+    expect(
+      await scalar<string>(
+        `SELECT (SELECT count(*) FROM "patients"
+                  WHERE "documentType"::text IS DISTINCT FROM ${r3}
+                     OR "docTypeLabel" IS NOT NULL)
+                || ':' ||
+                (SELECT count(*) FROM "patient_responsible_parties"
+                  WHERE "documentType"::text IS DISTINCT FROM ${r3}
+                     OR "docTypeLabel" IS NOT NULL) AS v`,
+      ),
+    ).toBe('0:0');
+    expect(
+      await scalar<string>(
+        `SELECT string_agg(coalesce("docType"::text, '-') || '/'
+                  || coalesce("documentType"::text, '-') || '/'
+                  || coalesce("docTypeLabel", '-'), ','
+                ORDER BY coalesce("docNumber", '~') COLLATE "C",
+                         coalesce("docType"::text, '~') COLLATE "C") AS v
+           FROM ((SELECT "id", "docNumber", "docType", "documentType", "docTypeLabel"
+                    FROM "patients"
+                   WHERE "firstName" = 'Doc')
+                 UNION ALL
+                 (SELECT "id", "docNumber", "docType", "documentType", "docTypeLabel"
+                    FROM "patient_responsible_parties"
+                   WHERE "tenantId" = '${T_A}' AND "migratedFromGuardian" = false)) s`,
+      ),
+    ).toBe(
+      [
+        // CC y borrado de A y de B; TI de A, el contacto TI y TI de B.
+        'CC/NATIONAL_ID/-',
+        'CC/NATIONAL_ID/-',
+        'CC/NATIONAL_ID/-',
+        'CC/NATIONAL_ID/-',
+        'TI/NATIONAL_ID/-',
+        'TI/NATIONAL_ID/-',
+        'TI/NATIONAL_ID/-',
+        'OTHER/OTHER/-',
+        'OTHER/OTHER/-',
+        'PASSPORT/PASSPORT/-',
+        'PASSPORT/PASSPORT/-',
+        'CE/RESIDENCE_PERMIT/-',
+        'CE/RESIDENCE_PERMIT/-',
+        // Sin documento (A, B) y el responsable que es paciente.
+        'CC/NATIONAL_ID/-',
+        'CC/NATIONAL_ID/-',
+        '-/-/-',
+      ].join(','),
+    );
+    expect(
+      await scalar<string>(
+        `SELECT string_agg(tgrelid::regclass::text || ':' || tgname, ','
+                ORDER BY tgname) AS v
+           FROM pg_trigger
+          WHERE tgname IN ('patients_document_type',
+                           'patient_responsible_parties_document_type')`,
+      ),
+    ).toBe(
+      'patient_responsible_parties:patient_responsible_parties_document_type,patients:patients_document_type',
+    );
+    expect(
+      await scalar<string>(
+        `SELECT string_agg(relname || '=' || relforcerowsecurity, ','
+                ORDER BY relname) AS v
+           FROM pg_class
+          WHERE oid IN ('public.patients'::regclass,
+                        'public.patient_responsible_parties'::regclass)`,
+      ),
+    ).toBe('patient_responsible_parties=true,patients=true');
+    // La API anterior (dentalix_app con la clínica fijada) escribe TI: el
+    // trigger da NATIONAL_ID, sin etiqueta. Se deshace al terminar.
+    const rollback = new Error('rollback');
+    let written: unknown;
+    await expect(
+      target.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe(
+          'GRANT SELECT, INSERT ON "patients" TO dentalix_app',
+        );
+        await tx.$executeRawUnsafe('SET LOCAL ROLE dentalix_app');
+        await tx.$queryRawUnsafe(
+          `SELECT set_config('app.current_tenant', '${T_B}', true)`,
+        );
+        written = await tx.$queryRawUnsafe(
+          `INSERT INTO "patients" ("id","tenantId","firstName","lastName","docType","docNumber","updatedAt")
+           VALUES (gen_random_uuid(),'${T_B}','Réplica','Anterior','TI','7327150',now())
+           RETURNING "docType"::text AS "docType",
+                     "documentType"::text AS "documentType", "docTypeLabel"`,
+        );
+        throw rollback;
+      }),
+    ).rejects.toBe(rollback);
+    expect(written).toEqual([
+      { docType: 'TI', documentType: 'NATIONAL_ID', docTypeLabel: null },
+    ]);
   }, 180_000);
 
   it('al terminar: FORCE en toda tabla con RLS y todo es del owner', async () => {
