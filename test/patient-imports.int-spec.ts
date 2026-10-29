@@ -610,7 +610,8 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
         manual.create({
           firstName: 'Otra',
           lastName: 'Alta',
-          docType: 'CC',
+          docType: 'NATIONAL_ID',
+          docTypeLabel: null,
           docNumber: '9191919',
           sex: 'F',
         }),
@@ -621,7 +622,8 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       manual.create({
         firstName: 'Manual',
         lastName: 'Puntos',
-        docType: 'CC',
+        docType: 'NATIONAL_ID',
+        docTypeLabel: null,
         docNumber: '7.272.727',
         sex: 'M',
       }),

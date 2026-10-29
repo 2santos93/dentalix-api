@@ -5,13 +5,21 @@ import {
   IsDateString,
   IsEmail,
   IsEnum,
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
   MinLength,
   ValidateNested,
 } from 'class-validator';
-import { DocType, Sex } from '@prisma/client';
+import { Sex } from '@prisma/client';
+import { DOCUMENT_TYPES } from '../../domain/document-type';
+import {
+  DOC_TYPE_INPUTS,
+  DOC_TYPE_LABEL_PROPERTY,
+  DOC_TYPE_MESSAGE,
+  type DocTypeInput,
+} from './doc-type-input';
 import { SaveMedicalHistoryDto } from '../../../medical-history/presentation/dto/save-medical-history.dto';
 import { RecordDataConsentsDto } from '../../../data-consents/presentation/dto/data-consent.dto';
 
@@ -28,9 +36,16 @@ export class CreatePatientDto {
   @MinLength(1)
   lastName!: string;
 
-  @ApiProperty({ enum: DocType })
-  @IsEnum(DocType)
-  docType!: DocType;
+  // DX-327: obligatorio, sin valor por defecto (R10). Los códigos anteriores
+  // se aceptan y el controlador los traduce (R9).
+  @ApiProperty({ enum: DOCUMENT_TYPES, enumName: 'DocType' })
+  @IsIn(DOC_TYPE_INPUTS, { message: DOC_TYPE_MESSAGE })
+  docType!: DocTypeInput;
+
+  @ApiPropertyOptional(DOC_TYPE_LABEL_PROPERTY)
+  @IsOptional()
+  @IsString({ message: 'docTypeLabel debe ser un texto.' })
+  docTypeLabel?: string | null;
 
   @ApiPropertyOptional()
   @IsOptional()

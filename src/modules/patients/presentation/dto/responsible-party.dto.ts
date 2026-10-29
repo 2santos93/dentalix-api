@@ -1,9 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { DocType, ResponsibleRelationship } from '@prisma/client';
+import { DocumentType, ResponsibleRelationship } from '@prisma/client';
 import {
   IsBoolean,
   IsEmail,
   IsEnum,
+  IsIn,
   IsOptional,
   IsString,
   IsUUID,
@@ -11,6 +12,14 @@ import {
   ValidateIf,
 } from 'class-validator';
 import { CommunicationRecipientDto } from './patient-communication.dto';
+import { DOCUMENT_TYPES } from '../../domain/document-type';
+import {
+  DOC_TYPE_INPUTS,
+  DOC_TYPE_LABEL_PROPERTY,
+  DOC_TYPE_MESSAGE,
+  DOC_TYPE_NAME_DESCRIPTION,
+  type DocTypeInput,
+} from './doc-type-input';
 
 export const RESPONSIBLE_NAME_MAX = 200;
 export const RESPONSIBLE_DOC_MAX = 60;
@@ -19,7 +28,6 @@ export const RESPONSIBLE_PHONE_MAX = 40;
 
 const RELATIONSHIP_MESSAGE =
   'relationship debe ser MOTHER, FATHER, LEGAL_GUARDIAN, GRANDPARENT, SIBLING, SPOUSE, CHILD u OTHER.';
-const DOC_TYPE_MESSAGE = 'docType debe ser CC, TI, CE, PASSPORT u OTHER.';
 const EMAIL_MESSAGE = 'El email del responsable no es válido.';
 
 /** Lo que se puede tocar de un contacto (null o vacío = borrarlo). */
@@ -32,10 +40,21 @@ class ResponsibleContactPatchDto {
   })
   fullName?: string;
 
-  @ApiPropertyOptional({ enum: DocType, enumName: 'DocType', nullable: true })
+  @ApiPropertyOptional({
+    enum: DOCUMENT_TYPES,
+    enumName: 'DocType',
+    nullable: true,
+  })
   @IsOptional()
-  @IsEnum(DocType, { message: DOC_TYPE_MESSAGE })
-  docType?: DocType | null;
+  @IsIn(DOC_TYPE_INPUTS, { message: DOC_TYPE_MESSAGE })
+  docType?: DocTypeInput | null;
+
+  // DX-327 (R7): exige tipo; quitar el tipo la quita; y si cambia el tipo sin
+  // traer otra, se borra.
+  @ApiPropertyOptional(DOC_TYPE_LABEL_PROPERTY)
+  @IsOptional()
+  @IsString({ message: 'docTypeLabel debe ser un texto.' })
+  docTypeLabel?: string | null;
 
   @ApiPropertyOptional({
     type: String,
@@ -144,8 +163,14 @@ export class ResponsiblePatientSummaryDto {
   @ApiProperty()
   lastName!: string;
 
-  @ApiProperty({ enum: DocType, enumName: 'DocType' })
-  docType!: DocType;
+  @ApiProperty({ enum: DOCUMENT_TYPES, enumName: 'DocType' })
+  docType!: DocumentType;
+
+  @ApiProperty(DOC_TYPE_LABEL_PROPERTY)
+  docTypeLabel!: string | null;
+
+  @ApiProperty({ description: DOC_TYPE_NAME_DESCRIPTION })
+  docTypeName!: string;
 
   @ApiProperty({ type: String, nullable: true })
   docNumber!: string | null;
@@ -178,8 +203,18 @@ export class ResponsiblePartyDto {
   @ApiProperty()
   fullName!: string;
 
-  @ApiProperty({ enum: DocType, enumName: 'DocType', nullable: true })
-  docType!: DocType | null;
+  @ApiProperty({ enum: DOCUMENT_TYPES, enumName: 'DocType', nullable: true })
+  docType!: DocumentType | null;
+
+  @ApiProperty(DOC_TYPE_LABEL_PROPERTY)
+  docTypeLabel!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: `${DOC_TYPE_NAME_DESCRIPTION} Null si no tiene tipo.`,
+  })
+  docTypeName!: string | null;
 
   @ApiProperty({ type: String, nullable: true })
   docNumber!: string | null;

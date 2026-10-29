@@ -85,7 +85,7 @@ describe('responsables de pago y avisos (DX-203)', () => {
       DAUGHTER,
       {
         fullName: '  Óscar Cifuentes ',
-        docType: 'CC',
+        docType: 'NATIONAL_ID',
         docNumber: ' 79345678 ',
         email: ' Oscar@Example.com ',
         phone: '',
@@ -259,5 +259,120 @@ describe('responsables de pago y avisos (DX-203)', () => {
     const view = await list.execute('nineteen');
     expect(view).toMatchObject({ minor: true, majorityAge: 20 });
     expect(view).not.toHaveProperty('country');
+  });
+
+  // DX-327 (R7, pre-flight I1): el nombre libre del documento de un contacto.
+  describe('contact document label', () => {
+    const labelled = () =>
+      create.execute(
+        SON,
+        {
+          fullName: 'Luis',
+          docType: 'NATIONAL_ID',
+          docTypeLabel: '  ID   local ',
+          relationship: 'FATHER',
+        },
+        USER,
+      );
+
+    it('a contact label needs a type', async () => {
+      const err = await create
+        .execute(
+          SON,
+          {
+            fullName: 'Luis',
+            docTypeLabel: 'ID local',
+            relationship: 'FATHER',
+          },
+          USER,
+        )
+        .catch((e: unknown) => e);
+      expect(err).toEqual(
+        new BadRequestException(
+          'El nombre del documento necesita un tipo de documento.',
+        ),
+      );
+      const typeless = await create.execute(
+        SON,
+        { fullName: 'Luis', relationship: 'FATHER' },
+        USER,
+      );
+      await expect(
+        update.execute(SON, typeless.id, { docTypeLabel: 'ID local' }),
+      ).rejects.toThrow(
+        'El nombre del documento necesita un tipo de documento.',
+      );
+    });
+
+    it('a contact keeps its normalized label', async () => {
+      await expect(labelled()).resolves.toMatchObject({
+        docType: 'NATIONAL_ID',
+        docTypeLabel: 'ID local',
+      });
+    });
+
+    it('removing the type removes the label', async () => {
+      const party = await labelled();
+      await expect(
+        update.execute(SON, party.id, { docType: null }),
+      ).resolves.toMatchObject({ docType: null, docTypeLabel: null });
+    });
+
+    it("resending the same type keeps the contact's label", async () => {
+      const party = await labelled();
+      await expect(
+        update.execute(SON, party.id, {
+          fullName: 'Luis',
+          docType: 'NATIONAL_ID',
+          phone: '+1 212 555 0100',
+        }),
+      ).resolves.toMatchObject({
+        docType: 'NATIONAL_ID',
+        docTypeLabel: 'ID local',
+        phone: '+1 212 555 0100',
+      });
+    });
+
+    it("changing the contact's type without a label clears it", async () => {
+      const party = await labelled();
+      await expect(
+        update.execute(SON, party.id, { docType: 'PASSPORT' }),
+      ).resolves.toMatchObject({ docType: 'PASSPORT', docTypeLabel: null });
+      await expect(
+        update.execute(SON, party.id, {
+          docType: 'TAX_ID',
+          docTypeLabel: 'Fiscal A',
+        }),
+      ).resolves.toMatchObject({ docType: 'TAX_ID', docTypeLabel: 'Fiscal A' });
+    });
+
+    it('a label that is too long is 400 with the message', async () => {
+      await expect(
+        create.execute(
+          SON,
+          {
+            fullName: 'Luis',
+            docType: 'OTHER',
+            docTypeLabel: 'x'.repeat(41),
+            relationship: 'FATHER',
+          },
+          USER,
+        ),
+      ).rejects.toThrow('El nombre del documento admite hasta 40 caracteres.');
+    });
+
+    it('a patient responsible takes no contact label', async () => {
+      await expect(
+        create.execute(
+          SON,
+          {
+            responsiblePatientId: MOTHER,
+            docTypeLabel: 'ID local',
+            relationship: 'MOTHER',
+          },
+          USER,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
   });
 });

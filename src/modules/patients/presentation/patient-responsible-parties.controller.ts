@@ -39,19 +39,33 @@ import {
   UpdateResponsiblePartyUseCase,
   type PatientResponsiblesView,
 } from '../application/use-cases/responsible-parties.use-cases';
-import type { ResponsiblePartyView } from '../domain/ports/responsible-party-repository.port';
+import { DocumentTypeNamesReader } from '../domain/ports/document-type-names-repository.port';
+import { resolveDocTypeInput } from '../domain/legacy-doc-type';
+import {
+  responsiblePartyWithDocTypeName,
+  type ResponsiblePartyOutput,
+} from './doc-type-name.presenter';
 import {
   CreateResponsiblePartyDto,
   PatientResponsiblesDto,
   ResponsiblePartyDto,
   UpdateResponsiblePartyDto,
 } from './dto/responsible-party.dto';
+import type { DocTypeInput } from './dto/doc-type-input';
+import type { ResponsiblePartyView } from '../domain/ports/responsible-party-repository.port';
 
 const uuidPipe = (what: string) =>
   new ParseUUIDPipe({
     exceptionFactory: () =>
       new BadRequestException(`El identificador ${what} no es válido.`),
   });
+
+/**
+ * DX-327 (R9): un código anterior llega como su genérico, sin etiqueta; ausente
+ * y null (quitar el tipo) se conservan.
+ */
+const docTypeOf = (type: DocTypeInput | null | undefined) =>
+  type === undefined || type === null ? type : resolveDocTypeInput(type);
 
 // Auditoría (DX-203): UPDATE de PATIENT con el motivo y los NOMBRES de los
 // campos enviados, nunca su contenido (datos de un tercero).
@@ -83,7 +97,18 @@ export class PatientResponsiblePartiesController {
     private readonly createParty: CreateResponsiblePartyUseCase,
     private readonly updateParty: UpdateResponsiblePartyUseCase,
     private readonly removeParty: RemoveResponsiblePartyUseCase,
+    // DX-327 (R17): nombres locales para el `docTypeName`, una lectura por petición.
+    private readonly documentTypeNamesReader: DocumentTypeNamesReader,
   ) {}
+
+  private async present(
+    party: ResponsiblePartyView,
+  ): Promise<ResponsiblePartyOutput> {
+    return responsiblePartyWithDocTypeName(
+      party,
+      await this.documentTypeNamesReader.get(),
+    );
+  }
 
   @Get()
   @ApiOperation({
@@ -91,10 +116,21 @@ export class PatientResponsiblePartiesController {
   })
   @ApiOkResponse({ type: PatientResponsiblesDto })
   @ApiNotFoundResponse({ description: 'Paciente no encontrado' })
-  list(
+  async list(
     @Param('patientId', uuidPipe('del paciente')) patientId: string,
-  ): Promise<PatientResponsiblesView> {
-    return this.listParties.execute(patientId);
+  ): Promise<
+    Omit<PatientResponsiblesView, 'parties'> & {
+      parties: ResponsiblePartyOutput[];
+    }
+  > {
+    const view = await this.listParties.execute(patientId);
+    const names = await this.documentTypeNamesReader.get();
+    return {
+      ...view,
+      parties: view.parties.map((p) =>
+        responsiblePartyWithDocTypeName(p, names),
+      ),
+    };
   }
 
   @Audit(audit('RESPONSIBLE_PARTY_ADDED'))
@@ -114,12 +150,18 @@ export class PatientResponsiblePartiesController {
   @ApiUnprocessableEntityResponse({
     description: 'Ya tiene pagador principal o el máximo de responsables',
   })
-  create(
+  async create(
     @Param('patientId', uuidPipe('del paciente')) patientId: string,
     @Body() dto: CreateResponsiblePartyDto,
     @Req() req: { user: TenantJwtPayload },
-  ): Promise<ResponsiblePartyView> {
-    return this.createParty.execute(patientId, dto, req.user.sub);
+  ): Promise<ResponsiblePartyOutput> {
+    return this.present(
+      await this.createParty.execute(
+        patientId,
+        { ...dto, docType: docTypeOf(dto.docType) },
+        req.user.sub,
+      ),
+    );
   }
 
   @Audit(audit('RESPONSIBLE_PARTY_CHANGED'))
@@ -129,12 +171,17 @@ export class PatientResponsiblePartiesController {
   @ApiBadRequestResponse({ description: 'Validación (mensaje en español)' })
   @ApiNotFoundResponse({ description: 'Paciente o responsable no encontrado' })
   @ApiUnprocessableEntityResponse({ description: 'Ya tiene pagador principal' })
-  update(
+  async update(
     @Param('patientId', uuidPipe('del paciente')) patientId: string,
     @Param('partyId', uuidPipe('del responsable')) partyId: string,
     @Body() dto: UpdateResponsiblePartyDto,
-  ): Promise<ResponsiblePartyView> {
-    return this.updateParty.execute(patientId, partyId, dto);
+  ): Promise<ResponsiblePartyOutput> {
+    return this.present(
+      await this.updateParty.execute(patientId, partyId, {
+        ...dto,
+        docType: docTypeOf(dto.docType),
+      }),
+    );
   }
 
   @Audit(audit('RESPONSIBLE_PARTY_REMOVED'))

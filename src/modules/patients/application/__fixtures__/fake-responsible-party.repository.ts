@@ -40,7 +40,8 @@ export class FakeResponsiblePartyRepository implements ResponsiblePartyRepositor
       id,
       firstName: notice.firstName,
       lastName: over.lastName ?? 'Pérez',
-      docType: 'CC',
+      docType: 'NATIONAL_ID',
+      docTypeLabel: null,
       docNumber: null,
       email: notice.email,
       phone: null,
@@ -115,6 +116,9 @@ export class FakeResponsiblePartyRepository implements ResponsiblePartyRepositor
       docType: responsible
         ? responsible.docType
         : (data.contact?.docType ?? null),
+      docTypeLabel: responsible
+        ? responsible.docTypeLabel
+        : (data.contact?.docTypeLabel ?? null),
       docNumber: responsible
         ? responsible.docNumber
         : (data.contact?.docNumber ?? null),

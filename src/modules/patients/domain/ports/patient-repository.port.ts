@@ -1,4 +1,4 @@
-import { DocType, RetentionExtension, Sex } from '@prisma/client';
+import { DocumentType, RetentionExtension, Sex } from '@prisma/client';
 import { Patient } from '../entities/patient.entity';
 import type { MedicalHistoryVersionData } from '../../../medical-history/domain/ports/medical-history-repository.port';
 import type { SafetyFlags } from '../../../medical-history/domain/entities/medical-history.entity';
@@ -33,7 +33,9 @@ export type CreatePatientConsent =
 export interface CreatePatientRepoInput {
   firstName: string;
   lastName: string;
-  docType: DocType;
+  docType: DocumentType;
+  /** Ya normalizada (R7); null = sin etiqueta. */
+  docTypeLabel: string | null;
   docNumber?: string;
   birthDate?: Date;
   sex: Sex;
@@ -62,7 +64,9 @@ export interface CreatePatientRepoInput {
 export interface UpdatePatientRepoInput {
   firstName?: string;
   lastName?: string;
-  docType?: DocType;
+  docType?: DocumentType;
+  /** Ausente = no se toca; null = sin etiqueta (R7). */
+  docTypeLabel?: string | null;
   docNumber?: string | null;
   birthDate?: Date | null;
   sex?: Sex;

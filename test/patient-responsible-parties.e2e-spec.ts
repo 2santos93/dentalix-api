@@ -10,6 +10,8 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
+import { REGIONAL_TOKYO_FIXTURE } from './support/location-fixtures';
+import { DocumentTypeNamesReader } from '../src/modules/patients/domain/ports/document-type-names-repository.port';
 
 // DX-203 en HTTP real: CRUD de responsables (paciente de la clínica o
 // contacto sin ficha), «Responsable de» en la ficha del responsable, 404 de un
@@ -683,6 +685,227 @@ describe('Responsables de pago y avisos (e2e, DX-203)', () => {
         other.adminToken,
         other.host,
       ).expect(404);
+    });
+  });
+
+  // DX-327: el tipo genérico y el nombre libre de un contacto (R7, pre-flight
+  // I1), el del paciente responsable y la fila anterior. La sede es
+  // REGIONAL_TOKYO_FIXTURE: el país de la sede lo obliga el enum hasta
+  // DX-312; no decide nada.
+  describe('DX-327: tipo de documento de los responsables', () => {
+    interface DocParty {
+      id: string;
+      kind: string;
+      docType: string | null;
+      docTypeLabel: string | null;
+      docTypeName: string | null;
+      phone: string | null;
+      responsiblePatient: {
+        docType: string;
+        docTypeLabel: string | null;
+        docTypeName: string;
+      } | null;
+    }
+    let tokyo: Clinic;
+    let seq = 0;
+    const at = (req: request.Test) =>
+      req
+        .set('X-Tenant-Host', tokyo.host)
+        .set('Authorization', `Bearer ${tokyo.adminToken}`);
+    const freshPatient = (body: Record<string, unknown> = {}) =>
+      createPatient(tokyo, {
+        firstName: `Documento ${++seq}`,
+        docType: 'NATIONAL_ID',
+        ...body,
+      });
+    const addContact = async (
+      patientId: string,
+      body: Record<string, unknown>,
+    ) =>
+      (
+        await at(api().post(parties(patientId)))
+          .send({ fullName: 'Contacto A', relationship: 'OTHER', ...body })
+          .expect(201)
+      ).body as DocParty;
+    const partiesOf = async (patientId: string) =>
+      (
+        (await at(api().get(parties(patientId))).expect(200)).body as {
+          parties: DocParty[];
+        }
+      ).parties;
+    const sqlRow = async (id: string) => {
+      const [row] = await raw.$queryRaw<
+        {
+          documentType: string | null;
+          docType: string | null;
+          docTypeLabel: string | null;
+        }[]
+      >`
+        SELECT "documentType"::text AS "documentType", "docType"::text AS "docType", "docTypeLabel"
+          FROM "patient_responsible_parties" WHERE "id" = ${id}::uuid`;
+      return row;
+    };
+    // Como el diálogo de contacto (responsible-party-dialog.tsx): todos los
+    // datos del contacto y los indicadores, con el tipo reenviado y sin
+    // `docTypeLabel`.
+    const dialogEdit = (patientId: string, partyId: string, docType: string) =>
+      at(api().patch(`${parties(patientId)}/${partyId}`))
+        .send({
+          relationship: 'OTHER',
+          isPayer: false,
+          receivesNotices: true,
+          fullName: 'Contacto A',
+          docType,
+          docNumber: 'RX-9001',
+          email: null,
+          phone: '+81 3 5555 0199',
+        })
+        .expect(200);
+
+    beforeAll(async () => {
+      tokyo = await registerClinic(app, 'dx327-rp', REGIONAL_TOKYO_FIXTURE);
+    });
+
+    it('a contact edit that resends its type keeps the label', async () => {
+      const patientId = await freshPatient();
+      const contact = await addContact(patientId, {
+        docType: 'TAX_ID',
+        docNumber: 'RX-9001',
+        docTypeLabel: '  ID   local ',
+      });
+      expect(contact).toMatchObject({
+        docType: 'TAX_ID',
+        docTypeLabel: 'ID local',
+        docTypeName: 'ID local',
+      });
+      // Fase 1: el alta escribe la pareja (TAX_ID no tiene código anterior).
+      expect(await sqlRow(contact.id)).toEqual({
+        documentType: 'TAX_ID',
+        docType: 'OTHER',
+        docTypeLabel: 'ID local',
+      });
+
+      await dialogEdit(patientId, contact.id, 'TAX_ID');
+      expect((await partiesOf(patientId))[0]).toMatchObject({
+        docType: 'TAX_ID',
+        docTypeLabel: 'ID local',
+        phone: '+81 3 5555 0199',
+      });
+
+      // Cambiar el tipo sin etiqueta la borra; quitar el tipo quita las dos.
+      await dialogEdit(patientId, contact.id, 'PASSPORT');
+      expect(await sqlRow(contact.id)).toEqual({
+        documentType: 'PASSPORT',
+        docType: 'PASSPORT',
+        docTypeLabel: null,
+      });
+      await at(api().patch(`${parties(patientId)}/${contact.id}`))
+        .send({ docTypeLabel: 'ID local' })
+        .expect(200);
+      await at(api().patch(`${parties(patientId)}/${contact.id}`))
+        .send({ docType: null })
+        .expect(200);
+      expect(await sqlRow(contact.id)).toEqual({
+        documentType: null,
+        docType: null,
+        docTypeLabel: null,
+      });
+      const res = await at(api().patch(`${parties(patientId)}/${contact.id}`))
+        .send({ docTypeLabel: 'ID local' })
+        .expect(400);
+      expect((res.body as { message: string }).message).toBe(
+        'El nombre del documento necesita un tipo de documento.',
+      );
+    });
+
+    it('legacy contact edit resending CC for a national ID keeps the label', async () => {
+      const patientId = await freshPatient();
+      const contact = await addContact(patientId, {
+        docType: 'NATIONAL_ID',
+        docTypeLabel: 'ID local',
+      });
+      await dialogEdit(patientId, contact.id, 'CC');
+      expect((await partiesOf(patientId))[0]).toMatchObject({
+        docType: 'NATIONAL_ID',
+        docTypeLabel: 'ID local',
+      });
+    });
+
+    it("a contact keeps its generic type and label; a patient responsible shows the patient's", async () => {
+      const mom = await freshPatient({
+        docType: 'RESIDENCE_PERMIT',
+        docNumber: 'RX-9101',
+        docTypeLabel: 'Permiso A',
+      });
+      const patientId = await freshPatient();
+      await addContact(patientId, { docType: 'OTHER' });
+      await at(api().post(parties(patientId)))
+        .send({ responsiblePatientId: mom, relationship: 'MOTHER' })
+        .expect(201);
+      // Un paciente responsable no lleva datos de contacto.
+      await at(api().post(parties(patientId)))
+        .send({
+          responsiblePatientId: mom,
+          docTypeLabel: 'ID local',
+          relationship: 'MOTHER',
+        })
+        .expect(400);
+
+      const reader = app.get(DocumentTypeNamesReader, { strict: false });
+      const get = jest.spyOn(reader, 'get');
+      let listed: DocParty[];
+      try {
+        listed = await partiesOf(patientId);
+        expect(get).toHaveBeenCalledTimes(1);
+      } finally {
+        get.mockRestore();
+      }
+      expect(listed).toEqual([
+        expect.objectContaining({
+          kind: 'CONTACT',
+          docType: 'OTHER',
+          docTypeLabel: null,
+          docTypeName: 'Otro documento',
+          responsiblePatient: null,
+        }),
+        expect.objectContaining({
+          kind: 'PATIENT',
+          docType: 'RESIDENCE_PERMIT',
+          docTypeLabel: 'Permiso A',
+          docTypeName: 'Permiso A',
+          responsiblePatient: expect.objectContaining({
+            docType: 'RESIDENCE_PERMIT',
+            docTypeLabel: 'Permiso A',
+            docTypeName: 'Permiso A',
+          }) as unknown,
+        }),
+      ]);
+      // Sin tipo: sin nombre visible.
+      const typeless = await addContact(await freshPatient(), {});
+      expect(typeless).toMatchObject({ docType: null, docTypeName: null });
+    });
+
+    it('legacy contact TI reads back as NATIONAL_ID with no label', async () => {
+      const patientId = await freshPatient();
+      await raw.$executeRaw`
+        INSERT INTO "patient_responsible_parties"
+          ("id","tenantId","patientId","fullName","docType","relationship","updatedAt")
+        VALUES (gen_random_uuid(), ${tokyo.tenantId}::uuid, ${patientId}::uuid,
+                'Contacto anterior', 'TI', 'OTHER', now())`;
+      expect(await partiesOf(patientId)).toEqual([
+        expect.objectContaining({
+          kind: 'CONTACT',
+          docType: 'NATIONAL_ID',
+          docTypeLabel: null,
+          docTypeName: 'Documento nacional',
+        }),
+      ]);
+      // La API nueva lo crea con el código anterior también.
+      const created = await addContact(patientId, { docType: 'TI' });
+      expect(created).toMatchObject({
+        docType: 'NATIONAL_ID',
+        docTypeLabel: null,
+      });
     });
   });
 });

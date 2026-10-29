@@ -3,13 +3,21 @@ import {
   IsDateString,
   IsEmail,
   IsEnum,
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
   MinLength,
   ValidateIf,
 } from 'class-validator';
-import { DocType, Sex } from '@prisma/client';
+import { Sex } from '@prisma/client';
+import { DOCUMENT_TYPES } from '../../domain/document-type';
+import {
+  DOC_TYPE_INPUTS,
+  DOC_TYPE_LABEL_PROPERTY,
+  DOC_TYPE_MESSAGE,
+  type DocTypeInput,
+} from './doc-type-input';
 
 /**
  * Para columnas NOT NULL. `@IsOptional()` no sirve: saltea TODOS los
@@ -39,10 +47,17 @@ export class UpdatePatientDto {
   @MinLength(1)
   lastName?: string;
 
-  @ApiPropertyOptional({ enum: DocType })
+  @ApiPropertyOptional({ enum: DOCUMENT_TYPES, enumName: 'DocType' })
   @NotNullable()
-  @IsEnum(DocType)
-  docType?: DocType;
+  @IsIn(DOC_TYPE_INPUTS, { message: DOC_TYPE_MESSAGE })
+  docType?: DocTypeInput;
+
+  // DX-327 (R7): ausente = no se toca, salvo que cambie el tipo (entonces se
+  // borra); null o vacío = sin nombre propio.
+  @ApiPropertyOptional(DOC_TYPE_LABEL_PROPERTY)
+  @IsOptional()
+  @IsString({ message: 'docTypeLabel debe ser un texto.' })
+  docTypeLabel?: string | null;
 
   @ApiPropertyOptional({ nullable: true })
   @IsOptional()

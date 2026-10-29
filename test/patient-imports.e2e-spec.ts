@@ -179,8 +179,10 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
       .expect(201);
     existingId = (existing.body as { id: string }).id;
     await as(api().post('/api/v1/patients'), a.adminToken)
+      // DX-327 (R12): otro tipo GENÉRICO; dos códigos que dan el mismo
+      // genérico ya no son «otro tipo».
       .send({
-        docType: 'TI',
+        docType: 'PASSPORT',
         docNumber: '700700',
         firstName: 'Otro',
         lastName: 'Tipo',
@@ -278,7 +280,7 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
       expect.objectContaining({ kind: 'DUPLICATE_EXISTING' }),
     ]);
     expect(byRow(6).map((i) => i.kind)).toEqual(['ERROR']);
-    expect(byRow(6)[0].message).toMatch(/registrado como TI/);
+    expect(byRow(6)[0].message).toMatch(/registrado como PASSPORT/);
     expect(byRow(7).map((i) => i.column)).toEqual([
       'nombres',
       'numero_documento',

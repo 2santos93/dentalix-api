@@ -3,7 +3,7 @@ import {
   DentitionEventReason,
   DentitionType,
   DiscountReason,
-  DocType,
+  DocumentType,
   InventoryMovementType,
   PaymentMethod,
   Sex,
@@ -154,7 +154,7 @@ export const DEMO_PRICES: Record<string, number> = {
 interface DemoPatient {
   firstName: string;
   lastName: string;
-  docType: DocType;
+  docType: DocumentType;
   docNumber: string;
   birthDate: string; // YYYY-MM-DD
   sex: Sex;
@@ -185,8 +185,8 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
   {
     firstName: 'Laura',
     lastName: 'Castro Jiménez',
-    docType: DocType.CC,
-    docNumber: '1020456789',
+    docType: 'NATIONAL_ID',
+    docNumber: 'DEMO-0001',
     birthDate: '1992-03-14',
     sex: Sex.F,
     phone: '+57 310 555 0101',
@@ -214,8 +214,8 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
   {
     firstName: 'Jorge Eduardo',
     lastName: 'Ramírez Ospina',
-    docType: DocType.CC,
-    docNumber: '79845123',
+    docType: 'NATIONAL_ID',
+    docNumber: 'DEMO-0002',
     birthDate: '1968-11-02',
     sex: Sex.M,
     phone: '+57 311 555 0102',
@@ -265,8 +265,8 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
   {
     firstName: 'Natalia',
     lastName: 'Vargas Quintero',
-    docType: DocType.CC,
-    docNumber: '1015332110',
+    docType: 'NATIONAL_ID',
+    docNumber: 'DEMO-0003',
     birthDate: '1998-07-21',
     sex: Sex.F,
     phone: '+57 312 555 0103',
@@ -279,8 +279,8 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
   {
     firstName: 'Héctor',
     lastName: 'Molina Cárdenas',
-    docType: DocType.CC,
-    docNumber: '80123987',
+    docType: 'NATIONAL_ID',
+    docNumber: 'DEMO-0004',
     birthDate: '1975-01-30',
     sex: Sex.M,
     phone: '+57 313 555 0104',
@@ -317,8 +317,8 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
   {
     firstName: 'Daniela',
     lastName: 'Montoya Arango',
-    docType: DocType.CC,
-    docNumber: '1036789456',
+    docType: 'NATIONAL_ID',
+    docNumber: 'DEMO-0005',
     birthDate: '1995-09-09',
     sex: Sex.F,
     phone: '+57 314 555 0105',
@@ -330,8 +330,8 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
   {
     firstName: 'Santiago',
     lastName: 'Pardo Luna',
-    docType: DocType.CC,
-    docNumber: '1019876543',
+    docType: 'NATIONAL_ID',
+    docNumber: 'DEMO-0006',
     birthDate: '2001-04-18',
     sex: Sex.M,
     phone: '+57 315 555 0106',
@@ -343,8 +343,8 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
   {
     firstName: 'Martha Lucía',
     lastName: 'Becerra Rincón',
-    docType: DocType.CC,
-    docNumber: '41678234',
+    docType: 'NATIONAL_ID',
+    docNumber: 'DEMO-0007',
     birthDate: '1960-12-05',
     sex: Sex.F,
     phone: '+57 316 555 0107',
@@ -393,8 +393,8 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
   {
     firstName: 'Ricardo',
     lastName: 'Salcedo Parra',
-    docType: DocType.CC,
-    docNumber: '19456789',
+    docType: 'NATIONAL_ID',
+    docNumber: 'DEMO-0008',
     birthDate: '1955-06-27',
     sex: Sex.M,
     phone: '+57 317 555 0108',
@@ -428,8 +428,8 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
   {
     firstName: 'Sofía',
     lastName: 'Ortiz Navarro',
-    docType: DocType.TI,
-    docNumber: '1011223344',
+    docType: 'NATIONAL_ID',
+    docNumber: 'DEMO-0009',
     birthDate: '2015-02-11',
     sex: Sex.F,
     phone: '+57 318 555 0109',
@@ -447,8 +447,8 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
   {
     firstName: 'Carolina',
     lastName: 'Duque Henao',
-    docType: DocType.CC,
-    docNumber: '1032456987',
+    docType: 'NATIONAL_ID',
+    docNumber: 'DEMO-0010',
     birthDate: '1993-10-03',
     sex: Sex.F,
     phone: '+57 319 555 0110',
@@ -466,8 +466,8 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
   {
     firstName: 'Felipe',
     lastName: 'Arias Londoño',
-    docType: DocType.CC,
-    docNumber: '1053789012',
+    docType: 'NATIONAL_ID',
+    docNumber: 'DEMO-0011',
     birthDate: '1988-08-16',
     sex: Sex.M,
     phone: '+57 320 555 0111',
@@ -479,8 +479,8 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
   {
     firstName: 'Juliana',
     lastName: 'Guerrero Pinzón',
-    docType: DocType.CC,
-    docNumber: '1018543210',
+    docType: 'NATIONAL_ID',
+    docNumber: 'DEMO-0012',
     birthDate: '1990-05-25',
     sex: Sex.F,
     phone: '+57 321 555 0112',
@@ -519,8 +519,8 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
   {
     firstName: 'Mateo',
     lastName: 'Cifuentes Rojas',
-    docType: DocType.TI,
-    docNumber: '1099887766',
+    docType: 'NATIONAL_ID',
+    docNumber: 'DEMO-0013',
     birthDate: '2012-09-30',
     sex: Sex.M,
     phone: '+57 322 555 0113',
@@ -531,8 +531,8 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
   {
     firstName: 'Ana María',
     lastName: 'Zapata Gil',
-    docType: DocType.CC,
-    docNumber: '43987123',
+    docType: 'NATIONAL_ID',
+    docNumber: 'DEMO-0014',
     birthDate: '1979-03-08',
     sex: Sex.F,
     phone: '+57 323 555 0114',
@@ -545,8 +545,8 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
   {
     firstName: 'Luis Fernando',
     lastName: 'Peña Acosta',
-    docType: DocType.CC,
-    docNumber: '72234567',
+    docType: 'NATIONAL_ID',
+    docNumber: 'DEMO-0015',
     birthDate: '1970-07-12',
     sex: Sex.M,
     phone: '+57 324 555 0115',
@@ -558,8 +558,8 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
   {
     firstName: 'Valeria',
     lastName: 'Suárez Medina',
-    docType: DocType.CC,
-    docNumber: '1000234987',
+    docType: 'NATIONAL_ID',
+    docNumber: 'DEMO-0016',
     birthDate: '2004-12-19',
     sex: Sex.F,
     phone: '+57 325 555 0116',
@@ -571,8 +571,8 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
   {
     firstName: 'Gustavo',
     lastName: 'Ríos Villamizar',
-    docType: DocType.CC,
-    docNumber: '91234876',
+    docType: 'NATIONAL_ID',
+    docNumber: 'DEMO-0017',
     birthDate: '1966-02-22',
     sex: Sex.M,
     phone: '+57 326 555 0117',
@@ -598,8 +598,8 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
   {
     firstName: 'Isabella',
     lastName: 'Moreno Castaño',
-    docType: DocType.CC,
-    docNumber: '1026789345',
+    docType: 'NATIONAL_ID',
+    docNumber: 'DEMO-0018',
     birthDate: '1997-06-06',
     sex: Sex.F,
     phone: '+57 327 555 0118',
@@ -611,8 +611,8 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
   {
     firstName: 'Alejandro',
     lastName: 'Fuentes Beltrán',
-    docType: DocType.CE,
-    docNumber: 'CE4567821',
+    docType: 'RESIDENCE_PERMIT',
+    docNumber: 'DEMO-0019',
     birthDate: '1986-01-17',
     sex: Sex.M,
     phone: '+57 328 555 0119',
@@ -624,8 +624,8 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
   {
     firstName: 'Camila',
     lastName: 'Rincón Pulido',
-    docType: DocType.CC,
-    docNumber: '1014567890',
+    docType: 'NATIONAL_ID',
+    docNumber: 'DEMO-0020',
     birthDate: '1999-11-28',
     sex: Sex.F,
     phone: '+57 329 555 0120',
@@ -637,8 +637,8 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
   {
     firstName: 'Diego',
     lastName: 'Lozano Torres',
-    docType: DocType.CC,
-    docNumber: '1022345678',
+    docType: 'NATIONAL_ID',
+    docNumber: 'DEMO-0021',
     birthDate: '1991-04-04',
     sex: Sex.M,
     phone: '+57 330 555 0121',
@@ -650,8 +650,8 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
   {
     firstName: 'Paula Andrea',
     lastName: 'Cortés Silva',
-    docType: DocType.CC,
-    docNumber: '52345678',
+    docType: 'NATIONAL_ID',
+    docNumber: 'DEMO-0022',
     birthDate: '1982-08-31',
     sex: Sex.F,
     phone: '+57 331 555 0122',
@@ -663,8 +663,8 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
   {
     firstName: 'Tomás',
     lastName: 'Aguilar Reyes',
-    docType: DocType.PASSPORT,
-    docNumber: 'G48213976',
+    docType: 'PASSPORT',
+    docNumber: 'DEMO-P01',
     birthDate: '1984-10-10',
     sex: Sex.M,
     phone: '+52 55 5555 0123',
@@ -676,8 +676,8 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
   {
     firstName: 'María José',
     lastName: 'Escobar Franco',
-    docType: DocType.CC,
-    docNumber: '1037654321',
+    docType: 'NATIONAL_ID',
+    docNumber: 'DEMO-0023',
     birthDate: '1996-01-23',
     sex: Sex.F,
     phone: '+57 332 555 0124',
@@ -689,8 +689,8 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
   {
     firstName: 'Sebastián',
     lastName: 'Niño Cabrera',
-    docType: DocType.CC,
-    docNumber: '1010987654',
+    docType: 'NATIONAL_ID',
+    docNumber: 'DEMO-0024',
     birthDate: '2000-03-15',
     sex: Sex.M,
     phone: '+57 333 555 0125',
@@ -2301,7 +2301,7 @@ export interface DemoResponsible {
   responsiblePatientIndex?: number;
   contact?: {
     fullName: string;
-    docType: DocType;
+    docType: DocumentType;
     docNumber: string;
     email?: string;
     phone: string;
@@ -2323,8 +2323,8 @@ export const DEMO_RESPONSIBLES: readonly DemoResponsible[] = [
     patientIndex: 8,
     contact: {
       fullName: 'Claudia Navarro',
-      docType: DocType.CC,
-      docNumber: '52987654',
+      docType: 'NATIONAL_ID',
+      docNumber: 'DEMO-C01',
       email: 'claudia.navarro@example.com',
       phone: '+57 318 555 0209',
     },
@@ -2343,8 +2343,8 @@ export const DEMO_RESPONSIBLES: readonly DemoResponsible[] = [
     patientIndex: 12,
     contact: {
       fullName: 'Óscar Cifuentes',
-      docType: DocType.CC,
-      docNumber: '79345678',
+      docType: 'NATIONAL_ID',
+      docNumber: 'DEMO-C02',
       phone: '+57 322 555 0213',
     },
     relationship: 'FATHER',
@@ -2390,7 +2390,7 @@ export const DEMO_IMPLANTS: readonly DemoImplant[] = [
     lot: DEMO_IMPLANT_RECALL_LOT,
     diameterMm: 4.1,
     lengthMm: 10,
-    sanitaryRegistration: 'INVIMA 2019DM-0019876',
+    sanitaryRegistration: 'REG-2019-0019876',
   },
   {
     patientIndex: 1,
@@ -2402,7 +2402,7 @@ export const DEMO_IMPLANTS: readonly DemoImplant[] = [
     system: 'BLT Roxolid SLActive',
     reference: '022.4200',
     lot: 'DEMO-PIL-0420',
-    sanitaryRegistration: 'INVIMA 2019DM-0019876',
+    sanitaryRegistration: 'REG-2019-0019876',
   },
   {
     patientIndex: 4,
@@ -2416,7 +2416,7 @@ export const DEMO_IMPLANTS: readonly DemoImplant[] = [
     lot: DEMO_IMPLANT_RECALL_LOT,
     diameterMm: 4.1,
     lengthMm: 10,
-    sanitaryRegistration: 'INVIMA 2019DM-0019876',
+    sanitaryRegistration: 'REG-2019-0019876',
   },
 ];
 

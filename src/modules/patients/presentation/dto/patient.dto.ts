@@ -4,12 +4,17 @@ import { OverdueBalanceDto } from '../../../collections/presentation/dto/collect
 import { ApiProperty } from '@nestjs/swagger';
 import {
   ContactChannel,
-  DocType,
+  DocumentType,
   ReminderOptOutSource,
   RetentionExtension,
   Sex,
   WhatsappOptInSource,
 } from '@prisma/client';
+import { DOCUMENT_TYPES } from '../../domain/document-type';
+import {
+  DOC_TYPE_LABEL_PROPERTY,
+  DOC_TYPE_NAME_DESCRIPTION,
+} from './doc-type-input';
 
 // Response shape for Patient endpoints — documents the Patient entity
 // contract for Swagger (same convention as BrandingDto / StaffMemberDto).
@@ -29,8 +34,14 @@ export class PatientDto {
   @ApiProperty()
   lastName!: string;
 
-  @ApiProperty({ enum: DocType })
-  docType!: DocType;
+  @ApiProperty({ enum: DOCUMENT_TYPES, enumName: 'DocType' })
+  docType!: DocumentType;
+
+  @ApiProperty(DOC_TYPE_LABEL_PROPERTY)
+  docTypeLabel!: string | null;
+
+  @ApiProperty({ description: DOC_TYPE_NAME_DESCRIPTION })
+  docTypeName!: string;
 
   @ApiProperty({ type: String, nullable: true })
   docNumber!: string | null;

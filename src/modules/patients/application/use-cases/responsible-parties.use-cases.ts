@@ -6,7 +6,7 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import type { DocType, ResponsibleRelationship } from '@prisma/client';
+import type { DocumentType, ResponsibleRelationship } from '@prisma/client';
 import { civilDateIn } from '../../../../shared/time/civil-day';
 import {
   noticeRecipient,
@@ -30,6 +30,7 @@ import {
   type UpdateResponsiblePartyData,
 } from '../../domain/ports/responsible-party-repository.port';
 import { PATIENT_NOT_FOUND_MESSAGE } from '../assert-patient-in-clinic';
+import { docTypeLabelInput } from '../doc-type-label-input';
 
 export const RESPONSIBLES_CLOCK = Symbol('RESPONSIBLES_CLOCK');
 
@@ -42,6 +43,8 @@ export const DUPLICATE_RESPONSIBLE_MESSAGE =
   'Ese paciente ya es responsable de este paciente.';
 export const PICK_ONE_KIND_MESSAGE =
   'Elige un paciente de la clínica o escribe el nombre del contacto responsable, no las dos cosas.';
+export const LABEL_NEEDS_TYPE_MESSAGE =
+  'El nombre del documento necesita un tipo de documento.';
 export const PATIENT_KIND_FIELDS_MESSAGE =
   'El responsable es un paciente: su nombre, documento, email y teléfono se cambian en su ficha.';
 /** Mensaje cuando el índice único del pagador salta (alta simultánea). */
@@ -64,7 +67,8 @@ export interface PatientResponsiblesView {
 export interface CreateResponsiblePartyInput {
   responsiblePatientId?: string;
   fullName?: string;
-  docType?: DocType | null;
+  docType?: DocumentType | null;
+  docTypeLabel?: string | null;
   docNumber?: string | null;
   email?: string | null;
   phone?: string | null;
@@ -78,7 +82,8 @@ export interface UpdateResponsiblePartyInput {
   isPayer?: boolean;
   receivesNotices?: boolean;
   fullName?: string;
-  docType?: DocType | null;
+  docType?: DocumentType | null;
+  docTypeLabel?: string | null;
   docNumber?: string | null;
   email?: string | null;
   phone?: string | null;
@@ -87,6 +92,7 @@ export interface UpdateResponsiblePartyInput {
 const CONTACT_KEYS = [
   'fullName',
   'docType',
+  'docTypeLabel',
   'docNumber',
   'email',
   'phone',
@@ -136,6 +142,38 @@ function translateConflict(err: unknown): never {
     throw new ConflictException(DUPLICATE_RESPONSIBLE_MESSAGE);
   }
   throw err;
+}
+
+/**
+ * DX-327 (R7) en la edición de un contacto: la etiqueta exige un tipo; quitar
+ * el tipo la quita; y solo se borra si el tipo CAMBIA y no llega otra. El
+ * diálogo de contacto reenvía siempre el tipo: reenviar el mismo la conserva
+ * (pre-flight I1).
+ */
+function contactDocType(
+  current: ResponsiblePartyView,
+  input: UpdateResponsiblePartyInput,
+): Partial<Pick<ResponsibleContactFields, 'docType' | 'docTypeLabel'>> {
+  if (input.docType === undefined && input.docTypeLabel === undefined) {
+    return {};
+  }
+  const docType = input.docType === undefined ? current.docType : input.docType;
+  const docTypeLabel = docTypeLabelInput(input.docTypeLabel);
+  if (docTypeLabel && docType === null) {
+    throw new BadRequestException(LABEL_NEEDS_TYPE_MESSAGE);
+  }
+  const fields: Partial<
+    Pick<ResponsibleContactFields, 'docType' | 'docTypeLabel'>
+  > = {};
+  if (input.docType !== undefined) fields.docType = input.docType;
+  if (docType === null) {
+    fields.docTypeLabel = null;
+  } else if (docTypeLabel !== undefined) {
+    fields.docTypeLabel = docTypeLabel;
+  } else if (docType !== current.docType) {
+    fields.docTypeLabel = null;
+  }
+  return fields;
 }
 
 async function loadOr404(
@@ -193,9 +231,15 @@ export class CreateResponsiblePartyUseCase {
     } else {
       const fullName = blank(input.fullName);
       if (!fullName) throw new BadRequestException(PICK_ONE_KIND_MESSAGE);
+      const docType = input.docType ?? null;
+      const docTypeLabel = docTypeLabelInput(input.docTypeLabel) ?? null;
+      if (docTypeLabel !== null && docType === null) {
+        throw new BadRequestException(LABEL_NEEDS_TYPE_MESSAGE);
+      }
       contact = {
         fullName,
-        docType: input.docType ?? null,
+        docType,
+        docTypeLabel,
         docNumber: blank(input.docNumber),
         email: blank(input.email)?.toLowerCase() ?? null,
         phone: blank(input.phone),
@@ -304,7 +348,7 @@ export class UpdateResponsiblePartyUseCase {
         }
         contact.fullName = fullName;
       }
-      if (input.docType !== undefined) contact.docType = input.docType;
+      Object.assign(contact, contactDocType(current, input));
       if (input.docNumber !== undefined) {
         contact.docNumber = blank(input.docNumber);
       }

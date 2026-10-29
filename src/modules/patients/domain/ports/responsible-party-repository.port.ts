@@ -1,4 +1,4 @@
-import type { DocType, ResponsibleRelationship } from '@prisma/client';
+import type { DocumentType, ResponsibleRelationship } from '@prisma/client';
 import type {
   NoticeSettings,
   NoticePatientFields,
@@ -14,7 +14,8 @@ export interface ResponsiblePatientSummary {
   id: string;
   firstName: string;
   lastName: string;
-  docType: DocType;
+  docType: DocumentType;
+  docTypeLabel: string | null;
   docNumber: string | null;
   email: string | null;
   phone: string | null;
@@ -30,7 +31,9 @@ export interface ResponsiblePartyView {
   kind: 'PATIENT' | 'CONTACT';
   responsiblePatient: ResponsiblePatientSummary | null;
   fullName: string;
-  docType: DocType | null;
+  /** DX-327: el del paciente responsable o el del contacto (que puede no tener). */
+  docType: DocumentType | null;
+  docTypeLabel: string | null;
   docNumber: string | null;
   email: string | null;
   phone: string | null;
@@ -64,7 +67,9 @@ export interface PatientResponsiblesSnapshot {
 /** Datos de un contacto sin ficha (ya normalizados por el caso de uso). */
 export interface ResponsibleContactFields {
   fullName: string;
-  docType: DocType | null;
+  docType: DocumentType | null;
+  /** R7: exige `docType`; null sin tipo. */
+  docTypeLabel: string | null;
   docNumber: string | null;
   email: string | null;
   phone: string | null;
