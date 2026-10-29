@@ -2260,6 +2260,188 @@ la deduce del país de una sede. Migraciones `20261028160000_dx328_enums`,
      ROLLBACK;
      ```
 
+## Tipos de documento genéricos y nombres locales (DX-327)
+
+El tipo de documento de un paciente o de un contacto es uno de cinco, iguales
+para cualquier clínica y país: `NATIONAL_ID` («Documento nacional»),
+`PASSPORT` («Pasaporte»), `RESIDENCE_PERMIT` («Permiso de residencia»),
+`TAX_ID` («Identificación fiscal») y `OTHER` («Otro documento»). Ningún código
+nombra el documento de un país. Los códigos anteriores a DX-327 solo se
+traducen en `src/modules/patients/domain/legacy-doc-type.ts` (excepción G5.3),
+y la guarda `src/architecture/no-location-fallbacks.spec.ts` lo comprueba,
+también sobre este README. Migraciones
+`20261030120000_dx327_document_type`,
+`20261030120100_dx327_document_type_backfill`,
+`20261030120200_dx327_document_type_validate` y
+`20261030120300_dx327_tenant_document_type_names`.
+
+- **Pacientes y contactos**: `docType` (uno de los cinco; el alta lo exige y
+  no propone ninguno), `docTypeLabel` y `docTypeName`.
+  - `docTypeLabel` es el nombre libre del documento de ese paciente. Es
+    opcional, de 1 a 40 caracteres, se recorta y vacío es `null`. Un cambio de
+    tipo que no trae etiqueta la deja en `null`; con el mismo tipo, se queda.
+  - `docTypeName` es el nombre visible, que resuelve la API: la etiqueta del
+    paciente; si no, el nombre local de la clínica para su tipo; si no, el
+    genérico. Es el que imprimen las recetas, consentimientos, presupuestos,
+    recibos, tarjetas de implante y el estado de cuenta nuevos. Lo ya emitido
+    conserva su texto y su hash.
+  - Durante la fase 1, los cuerpos de alta y edición (pacientes, contactos y
+    el `defaultDocType` de la importación) aceptan también los códigos
+    anteriores, para la web anterior. Se traducen a su genérico, sin etiqueta.
+    OpenAPI publica solo los cinco genéricos.
+- **Nombres locales de la clínica**: `tenants."docTypeNameNationalId"`,
+  `…Passport`, `…ResidencePermit`, `…TaxId` y `…Other`, todos nullable y
+  sin relleno. Todas las clínicas, también las nuevas y la demo, empiezan sin
+  ninguno (se ve el genérico).
+- **Endpoints** (declarados antes de `GET /patients/:id`):
+  - `GET /patients/document-type-names` (los 4 roles) devuelve
+    `{ names: { NATIONAL_ID, PASSPORT, RESIDENCE_PERMIT, TAX_ID, OTHER } }`,
+    cada uno texto o `null`.
+  - `PUT /patients/document-type-names` solo lo usa el ADMIN
+    (`CLINIC_SETTINGS_WRITE_ROLES`). Cualquier otro rol recibe 403 «Solo un
+    administrador puede cambiar los nombres de los documentos.».
+  - El cuerpo es el mismo `{ names }` y sustituye los cinco: una clave ausente
+    o `null` queda sin nombre local. Cada nombre se recorta, admite hasta 60
+    caracteres y necesita al menos una letra o un número.
+  - Dos tipos no pueden compartir nombre, y un nombre no puede ser el código
+    ni el nombre genérico de otro tipo. Se compara sin mayúsculas, tildes
+    latinas ni puntuación, en cualquier escritura.
+  - Si no se cumple, la respuesta es 400 y no se guarda nada. Los mensajes
+    son:
+    - «“…” ya es el nombre de … Cada tipo necesita un nombre distinto.»;
+    - «“…” es el nombre de … Elige otro.»;
+    - «El nombre necesita al menos una letra o un número.»;
+    - «El nombre del documento admite hasta 60 caracteres.».
+  - Un cuerpo sin `names`, o con un valor que no es texto, también es 400.
+  - Cambiar un nombre no toca ningún paciente.
+- **Escritura**: lee la fila de la clínica con `FOR UPDATE` y escribe los
+  cinco en un solo `UPDATE` de la misma transacción.
+- **Auditoría**: solo si cambia algún nombre. Es un UPDATE de
+  `CLINIC_SETTINGS` sin recurso ni paciente, con
+  `reason: DOCUMENT_TYPE_NAMES_SETTINGS` y `changedFields` con los tipos que
+  cambiaron (nunca los textos). Guardar lo mismo responde 200 sin evento.
+- **Importación**: la columna de tipo reconoce, en este orden, los nombres
+  locales de la clínica, los códigos y nombres genéricos, y los sinónimos de
+  los archivos de siempre. Dos filas con el mismo número y el mismo tipo
+  genérico son el mismo paciente. Ver «Importación de pacientes» abajo.
+- **BD**: `patients."documentType"` (con `DEFAULT 'OTHER'`) y
+  `"docTypeLabel"`, y lo mismo, nullable, en `patient_responsible_parties`.
+  Durante la fase 1 se queda la columna anterior `"docType"`, para las réplicas
+  anteriores. La API la escribe solo al crear, y el trigger
+  `dx_document_type_sync` mantiene coherentes las dos columnas. El trigger
+  nunca escribe una etiqueta: solo la conserva o la pone a `NULL`.
+- **Despliegue** (orden obligatorio):
+  1. **Antes de `migrate deploy`**, en cada entorno, se ejecuta la consulta
+     previa (solo lectura) y se guarda en la nota de versión. Hace falta un
+     rol con `BYPASSRLS` (el del DBA); con el owner `NOBYPASSRLS` devuelve 0
+     filas.
+
+     ```sql
+     -- 1. Tipos guardados (después deben cuadrar con su genérico).
+     SELECT 'patients' AS tabla, "docType"::text AS tipo, ("deletedAt" IS NULL) AS vivo, count(*)
+       FROM "patients" GROUP BY 1, 2, 3
+     UNION ALL
+     SELECT 'responsables', coalesce("docType"::text, '—'), ("deletedAt" IS NULL), count(*)
+       FROM "patient_responsible_parties" GROUP BY 1, 2, 3
+     ORDER BY 1, 2, 3;
+     -- 2. Claves con más de un paciente vivo (DX-287): el número no debe cambiar.
+     SELECT count(*) AS claves_ambiguas, coalesce(sum(n), 0) AS pacientes
+       FROM (SELECT count(*) AS n FROM "patients"
+              WHERE "deletedAt" IS NULL AND "docNumber" IS NOT NULL
+              GROUP BY "tenantId", "docKey" HAVING count(*) > 1) s;
+     -- 3. De ellas, las que mezclan códigos anteriores distintos. Las que
+     --    mezclan los dos que pasan a NATIONAL_ID dejan de ser «otro tipo».
+     SELECT count(*) AS claves_con_codigos_distintos
+       FROM (SELECT 1 FROM "patients"
+              WHERE "deletedAt" IS NULL AND "docNumber" IS NOT NULL
+              GROUP BY "tenantId", "docKey"
+             HAVING count(DISTINCT "docType") > 1) s;
+     -- 4. Filas de importación pendientes con su código (se traducen al leerlas).
+     SELECT "data"->>'docType' AS tipo, count(*) FROM "patient_import_rows"
+      WHERE "outcome" = 'PENDING' AND "data" IS NOT NULL GROUP BY 1;
+     ```
+
+  2. `npx prisma migrate deploy` aplica las cuatro y tiene que terminar ANTES
+     de que arranque la primera réplica nueva, sea de la API (`APP_ROLE=api`)
+     o del worker (`APP_ROLE=worker`). Una réplica nueva contra el esquema
+     anterior da 500 en casi todo DTO de paciente, porque resuelve
+     `docTypeName`. Las réplicas anteriores siguen funcionando con el esquema
+     nuevo.
+     - **M1** (`…120000`) añade las columnas, las funciones, los CHECK
+       `NOT VALID` y los triggers en una transacción. Toma un
+       `ACCESS EXCLUSIVE` breve sobre `patients` y
+       `patient_responsible_parties`, sin leer la tabla (`lock_timeout` 5 s).
+     - **M2** (`…120100`) rellena `"documentType"` por clínica, en lotes de
+       2.000 con `COMMIT` por lote (`lock_timeout` 5 s por lote, sin quitar
+       FORCE). No escribe ninguna etiqueta. Es idempotente.
+     - **M3** (`…120200`) valida los tres CHECK (`SHARE UPDATE EXCLUSIVE`, no
+       frena escrituras). Falla con `RAISE EXCEPTION` si queda una fila con
+       la pareja de tipos incoherente o con etiqueta.
+     - **M4** (`…120300`) añade los cinco nombres a `tenants`, con sus CHECK.
+       Toma un `ACCESS EXCLUSIVE` breve sobre `tenants`, que casi toda
+       petición lee; mientras espera su bloqueo (hasta 5 s), esas peticiones
+       hacen cola. Hay que desplegar a una hora de poco tráfico.
+  3. Si M1, M2 o M4 fallan (por `lock_timeout`, o porque se cortó el
+     relleno), se ejecuta
+     `npx prisma migrate resolve --rolled-back <migración>` (la que nombre
+     `npx prisma migrate status`) y se repite `migrate deploy`. Si una
+     migración figura fallida pero su efecto ya está (las columnas en
+     `information_schema`, o el CHECK validado en `pg_constraint`), se usa
+     `--applied` en lugar de `--rolled-back`.
+  4. Si M3 falla por una fila incoherente, se para el despliegue y NO se
+     despliega la API ni el worker: se investiga con la consulta posterior
+     (paso 5).
+     - Si M3 falló y la API nueva se desplegó igualmente, en cuanto alguien
+       guarda un «Nombre del documento» ningún reintento de M3 puede pasar.
+       En ese caso no se repite M3 ni se borran etiquetas.
+     - Primero se comprueba, con un rol `BYPASSRLS`, que
+       `SELECT conname, convalidated FROM pg_constraint WHERE conname IN
+       ('patients_doc_type_label_check',
+       'patient_responsible_parties_doc_type_label_check',
+       'patient_responsible_parties_document_type_check')` da los tres
+       `true`. Si alguno sale `false`, se valida a mano con
+       `ALTER TABLE … VALIDATE CONSTRAINT …`.
+     - Después, `SELECT count(*) FROM "patients" WHERE NOT
+       dx_doc_type_coherent("docType", "documentType")`, y lo mismo en
+       `patient_responsible_parties`, tienen que dar 0.
+     - Solo entonces se ejecuta
+       `npx prisma migrate resolve --applied 20261030120200_dx327_document_type_validate`.
+  5. **Después**, la consulta posterior:
+     `SELECT "docType"::text, "documentType"::text, "docTypeLabel", count(*) FROM "patients" GROUP BY 1, 2, 3 ORDER BY 1, 2, 3`.
+     Cada código anterior tiene que salir con su genérico y **todas** las
+     filas con `"docTypeLabel"` NULL. La consulta previa 2, repetida, tiene
+     que dar lo mismo.
+  6. Se despliegan la API **y los workers** de forma gradual hasta el 100 %.
+     Solo entonces se despliega la web, sin demora. Mientras tanto (el
+     hueco):
+     - la web anterior pinta «undefined» delante del número;
+     - un presupuesto mostrado por una versión y aceptado en la otra da 409
+       una vez («El presupuesto cambió desde que se mostró…»); se recarga y
+       se firma;
+     - un worker anterior que procesa con «actualizar vacíos» una fila que la
+       API nueva dio por «ya existe» la deja `SKIPPED` en lugar de `FILLED` si
+       el paciente guardaba el otro código anterior del documento nacional.
+       No se corrompe nada, y se puede repetir la importación con la versión
+       nueva.
+- **Vuelta atrás**: primero la web, después la API y los workers. Es inocua:
+  - el trigger mantiene al día la columna anterior;
+  - la API anterior no selecciona las columnas nuevas (tampoco las de
+    `tenants`);
+  - las etiquetas y los nombres locales no se ven, pero no se pierden; solo
+    se borra una etiqueta si alguien cambia el tipo genérico.
+
+  Un `TAX_ID` se ve como «Documento …» en la web anterior. No se revierte
+  ninguna migración. Al volver a la versión nueva, todo está coherente.
+- **Fase 2** (ticket aparte, con 0 réplicas y 0 workers anteriores):
+  - se quitan la columna anterior, el trigger, las funciones y el enum
+    `DocType`;
+  - antes de borrar la columna, hay que recrear
+    `patient_responsible_parties_kind_check` sin ella, porque `DROP COLUMN`
+    borra en silencio todo CHECK que la nombra;
+  - la traducción de solo lectura de los códigos anteriores no se borra
+    nunca: las fotos de recibos y las filas de importación antiguas la
+    necesitan.
+
 ## Calendario de días hábiles y festivos de la sede (DX-316)
 
 Cada sede tiene sus días hábiles de la semana (lunes a viernes por defecto) y

@@ -84,7 +84,7 @@ export interface ReceiptSnapshot {
   version: 1;
   clinic: ReceiptClinicData;
   location: ReceiptLocationData;
-  /** Falta la razón social o el NIT/NIF: el recibo dice «Datos fiscales pendientes». */
+  /** Falta la razón social o el identificador fiscal: el recibo dice «Datos fiscales pendientes». */
   fiscalDataPending: boolean;
   /**
    * DX-327 (fase 1, R5, R6 y R18): `docType` sigue siendo el código anterior

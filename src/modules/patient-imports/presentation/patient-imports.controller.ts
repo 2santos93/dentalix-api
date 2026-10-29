@@ -323,8 +323,10 @@ export class PatientImportsController {
       await loadUpload(file),
       {
         columns: parseMappingField(dto.mapping),
+        // `@IsOptional` deja pasar un `null` de JSON: cuenta como ausente
+        // (400 por el archivo que falta), nunca como un tipo por resolver.
         defaultDocType:
-          dto.defaultDocType === undefined
+          dto.defaultDocType == null
             ? undefined
             : resolveDocTypeInput(dto.defaultDocType),
       },

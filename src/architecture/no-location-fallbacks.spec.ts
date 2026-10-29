@@ -580,9 +580,16 @@ describe('pagadores sin país (DX-326)', () => {
  * son genéricos. Los códigos anteriores y los nombres de un país viven solo en
  * `legacy-doc-type.ts`; el enum guardado lo nombran ese fichero y los tres
  * escritores de R5; hay un solo mapa de etiquetas y un solo resolvedor de
- * nombres. Además de la producción de `src`, se recorren la demo
- * (`prisma/demo/**`, datos y CSV), `prisma/seed*.ts` y `schema.prisma`. Los
- * literales de los controles se arman por partes.
+ * nombres. Además de la producción de `src` (`.ts`, y `.sql` y `.json`), se
+ * recorren la demo (`prisma/demo/**`, datos y CSV), `prisma/seed*.ts`,
+ * `schema.prisma` y el `README.md` (la ayuda del desarrollador, spec §4.9).
+ * Las líneas se comparan plegadas (sin tildes) y sin distinguir mayúsculas:
+ * «Cedula» y `'ti'` cuentan igual que «Cédula» y `'TI'`.
+ *
+ * Fuera por construcción, y es a propósito: los tests (los `legacy …` nombran
+ * los códigos anteriores; los vectores de hash fijan textos ya emitidos con
+ * «CC …») y las migraciones (traducen los códigos guardados). Los literales
+ * de los controles se arman por partes.
  */
 const ROOT = join(SRC, '..');
 const PRISMA_DIR = join(ROOT, 'prisma');
@@ -618,12 +625,54 @@ const demoFiles = (): string[] => [
     .map((name) => join(PRISMA_DIR, name)),
 ];
 
-const AUTHORITY = 'INVI' + 'MA|marcado ' + 'CE';
-/** Un código anterior como tipo, el enum por su valor o un nombre de un país. */
+/** `src` de producción que no es `.ts`: fixtures SQL y casos JSON (M2). */
+const productionDataFiles = (): string[] =>
+  allFiles(SRC).filter(
+    (file) => /\.(sql|json)$/.test(file) && isProduction(file),
+  );
+
+/** Línea sin tildes (NFKD sin marcas): «Cédula» → «Cedula». */
+const fold = (line: string): string =>
+  line.normalize('NFKD').replace(/\p{M}/gu, '');
+
+const AUTHORITY = 'invi' + 'ma|marcado ' + 'ce';
+/**
+ * Un código anterior como tipo, el enum por su valor o un nombre de un país,
+ * sobre la línea plegada y sin distinguir mayúsculas.
+ */
 const LEGACY_DOC_TYPE = new RegExp(
-  '[\'"`](CC|TI|CE)[\'"`]|DocType\\.(CC|TI|CE)\\b|[Cc]édula|[Tt]arjeta de identidad|[Ee]xtranjería|' +
+  '[\'"`](cc|ti|ce)[\'"`]|DocType\\.(CC|TI|CE)\\b|cedula|tarjeta de identidad|extranjeria|' +
     AUTHORITY,
+  'i',
 );
+const legacyDocTypeHit = (line: string): boolean =>
+  LEGACY_DOC_TYPE.test(fold(line));
+/**
+ * Siglas de documentos de otros países (M9), como palabra y sin distinguir
+ * mayúsculas. `CC`, `TI` y `CE` solo cuentan como literal entre comillas
+ * (`LEGACY_DOC_TYPE`): sueltas son demasiado comunes.
+ */
+const COUNTRY_DOC_ACRONYM = new RegExp(
+  '\\b(' +
+    ['DNI', 'NIE', 'NIF', 'NIT', 'RUT', 'RIF', 'CURP', 'CPF'].join('|') +
+    ')\\b',
+  'i',
+);
+/**
+ * Excepción hasta DX-019: la línea fiscal impresa del recibo («Razón social ·
+ * NIT/NIF …»), la única línea que lo imprime. Sale de aquí con DX-019.
+ */
+const RECEIPT_FISCAL_LINE = {
+  file: join(
+    SRC,
+    'modules',
+    'payments',
+    'application',
+    'receipts',
+    'receipt-email-vars.ts',
+  ),
+  line: (text: string): boolean => /· NIT\/NIF \$\{clinic\.taxId\}`/.test(text),
+};
 /** `DocType` en un import de `@prisma/client` (también de varias líneas). */
 const PRISMA_DOC_TYPE_IMPORT =
   /import\s+(?:type\s+)?\{[^}]*\bDocType\b[^}]*\}\s*from\s*'@prisma\/client'/g;
@@ -636,10 +685,13 @@ const DOC_TYPE_LABEL_MAP =
   /\b(?:const|let)\s+DOC_TYPE_LABELS?\b|PASSPORT:\s*'Pasaporte'/;
 /** La demo: además, el enum por su nombre y una línea CSV con un código. */
 const DEMO_COUNTRY_DOCUMENT = new RegExp(
-  '[Cc][ée]dula|[Tt]arjeta de identidad|[Ee]xtranjer[ií]a|' +
+  'cedula|tarjeta de identidad|extranjeria|' +
     AUTHORITY +
     '|DocType\\.|^(?:CC|TI|CE);',
+  'i',
 );
+const demoCountryDocumentHit = (line: string): boolean =>
+  DEMO_COUNTRY_DOCUMENT.test(fold(line));
 /**
  * Un nombre largo de documento (spec §6.8). Sobre el código sin comentarios:
  * la cabecera G5.3 y la prosa llevan tildes. Las claves de sinónimo
@@ -656,20 +708,32 @@ const LEGACY_TRANSLATION =
   /\b(?:docTypeFromCode|docTypeFromStored|resolveDocTypeInput)\s*\(|\bLEGACY_DOC_TYPES\b/;
 const DOC_TYPE_NAME_RESOLUTION =
   /DOC_TYPE_LABEL\[|docTypeName(?:NationalId|Passport|ResidencePermit|TaxId|Other)\b/;
-/** Un alta de paciente o responsable por Prisma (pre-flight M1). */
+/**
+ * Un alta de paciente o responsable por Prisma (pre-flight M1, M3): la llamada
+ * (`create`, `createMany`, `createManyAndReturn`, `upsert`) o el alta anidada
+ * desde una relación (`patient: { create … }`, `responsibleParties: {
+ * createMany … }`).
+ */
 const PATIENT_CREATE =
-  /\b(?:patient|patientResponsibleParty)\.(?:create|createMany)\s*\(/g;
+  /\b(?:patient|patientResponsibleParty)\.(?:create|createMany|createManyAndReturn|upsert)\s*\(|\b(?:patient|responsiblePatient|responsibleParties|responsibleFor)\s*:\s*\{/g;
+/** Un INSERT crudo en las dos tablas, hasta el `;` o el fin del literal. */
+const RAW_PATIENT_INSERT =
+  /INSERT\s+INTO\s+(?:public\.)?"?(?:patients|patient_responsible_parties)"?[\s(][^;`]*/gi;
 
 /** Línea sin su comentario (`//`, `/*`, ` *`); para `legacy-doc-type.ts`. */
 const codeOnly = (line: string): string =>
   /^\s*(\/\/|\/?\*)/.test(line) ? '' : line.replace(/\s\/\/.*$/, '');
 
-/** El argumento de la llamada que abre en `start` (paréntesis equilibrados). */
+const CLOSING: Record<string, string> = { '(': ')', '{': '}', '[': ']' };
+
+/** Lo que encierra el `(`, `{` o `[` de `start` (equilibrado). */
 function callArgument(text: string, start: number): string {
+  const open = text[start];
+  const close = CLOSING[open];
   let depth = 0;
   for (let i = start; i < text.length; i += 1) {
-    if (text[i] === '(') depth += 1;
-    if (text[i] === ')') {
+    if (text[i] === open) depth += 1;
+    if (text[i] === close) {
       depth -= 1;
       if (depth === 0) return text.slice(start + 1, i);
     }
@@ -677,35 +741,96 @@ function callArgument(text: string, start: number): string {
   return text.slice(start + 1);
 }
 
+/** Los valores de `create:`/`createMany:` dentro de `body` (con llaves). */
+function createValues(body: string): string[] {
+  return [...body.matchAll(/\bcreate(?:Many)?\s*:\s*[[{]/g)].map((match) =>
+    callArgument(body, match.index + match[0].length - 1),
+  );
+}
+
+/**
+ * Lo que da de alta cada forma: el argumento entero de `create*`; de `upsert`
+ * y de una relación, solo sus `create` (el `update` puede cambiar el tipo
+ * genérico solo, R5 es para los INSERT).
+ */
+function createdData(match: RegExpExecArray, text: string): string[] {
+  const body = callArgument(text, match.index + match[0].length - 1);
+  if (/\.(?:create|createMany|createManyAndReturn)\s*\($/.test(match[0])) {
+    return [body];
+  }
+  return createValues(body);
+}
+
 /** Un alta con `documentType` y sin `docType`: el hueco OTHER (spec §3.3). */
 const writesDocumentTypeAlone = (argument: string): boolean =>
   /\bdocumentType\b/.test(argument) && !/\bdocType\b/.test(argument);
 
-/** `fichero:línea` de cada alta de paciente o responsable sin la pareja de R5. */
+/**
+ * Dónde empieza cada alta de paciente o responsable sin la pareja de R5, por
+ * Prisma o por un INSERT crudo que nombra `"documentType"` sin `"docType"`.
+ */
+function legacyPairHoles(text: string): number[] {
+  return [
+    ...[...text.matchAll(PATIENT_CREATE)].flatMap((match) =>
+      createdData(match, text).some(writesDocumentTypeAlone)
+        ? [match.index]
+        : [],
+    ),
+    ...[...text.matchAll(RAW_PATIENT_INSERT)].flatMap((match) =>
+      /"documentType"/.test(match[0]) && !/"docType"/.test(match[0])
+        ? [match.index]
+        : [],
+    ),
+  ];
+}
+
+/** `fichero:línea` de cada hueco de `legacyPairHoles`. */
 function patientCreatesWithoutLegacyPair(files: string[]): string[] {
   return files.flatMap((file) => {
     const text = readFileSync(file, 'utf8');
-    return [...text.matchAll(PATIENT_CREATE)].flatMap((match) => {
-      const open = match.index + match[0].length - 1;
-      const line = text.slice(0, match.index).split('\n').length;
-      return writesDocumentTypeAlone(callArgument(text, open))
-        ? [`${relative(SRC, file)}:${line}`]
-        : [];
-    });
+    return legacyPairHoles(text).map(
+      (index) =>
+        `${relative(SRC, file)}:${text.slice(0, index).split('\n').length}`,
+    );
   });
 }
 
 describe('tipos de documento genéricos (DX-327)', () => {
   const production = tsFiles(SRC).filter(isProduction);
 
+  /** Lo que recorren las dos guardas de nombres (M2). */
+  const scanned = (): string[] => [
+    ...production,
+    ...productionDataFiles(),
+    ...demoFiles(),
+    join(PRISMA_DIR, 'schema.prisma'),
+    join(ROOT, 'README.md'),
+  ];
+
   it('architecture: no legacy document type or name outside legacy-doc-type.ts', () => {
-    const files = [
-      ...production.filter((file) => file !== LEGACY_DOC_TYPE_FILE),
-      ...demoFiles(),
-      join(PRISMA_DIR, 'schema.prisma'),
-    ];
+    const files = scanned().filter((file) => file !== LEGACY_DOC_TYPE_FILE);
     expect(files.length).toBeGreaterThan(500);
-    expect(offending(files, (line) => LEGACY_DOC_TYPE.test(line))).toEqual([]);
+    expect(productionDataFiles().length).toBeGreaterThan(0);
+    expect(offending(files, legacyDocTypeHit)).toEqual([]);
+  });
+
+  it("architecture: no other country's document acronym outside legacy-doc-type.ts", () => {
+    // Excepciones, una por una: `legacy-doc-type.ts` (sinónimos de los
+    // archivos de importación de siempre, R13) y la línea fiscal del recibo
+    // hasta DX-019. Los tests y las migraciones no se recorren (ver arriba).
+    const files = scanned().filter((file) => file !== LEGACY_DOC_TYPE_FILE);
+    const fiscal = readFileSync(RECEIPT_FISCAL_LINE.file, 'utf8')
+      .split('\n')
+      .filter(RECEIPT_FISCAL_LINE.line);
+    expect(fiscal).toHaveLength(1);
+    expect(
+      offending(
+        files,
+        (line) =>
+          COUNTRY_DOC_ACRONYM.test(fold(line)) &&
+          !RECEIPT_FISCAL_LINE.line(line),
+      ),
+    ).toEqual([]);
   });
 
   it('architecture: only legacy-doc-type.ts and the three insert writers name the stored legacy enum', () => {
@@ -745,9 +870,7 @@ describe('tipos de documento genéricos (DX-327)', () => {
   it('architecture: the demo names no country document or authority', () => {
     const files = demoFiles();
     expect(files.some((file) => file.endsWith('.csv'))).toBe(true);
-    expect(
-      offending(files, (line) => DEMO_COUNTRY_DOCUMENT.test(line)),
-    ).toEqual([]);
+    expect(offending(files, demoCountryDocumentHit)).toEqual([]);
   });
 
   it('architecture: no code derives a document label from a legacy code', () => {
@@ -775,12 +898,17 @@ describe('tipos de documento genéricos (DX-327)', () => {
     ).toEqual([]);
   });
 
-  it('tests never create a patient with documentType and no docType', () => {
+  it('nothing creates a patient with documentType and no docType', () => {
+    // Producción, la demo y los seeds además de los tests (M3): un cuarto
+    // escritor que mande solo `documentType: 'OTHER'` acabaría como CC por el
+    // DEFAULT anterior y el paso 3 del trigger, sin error.
     const files = [
+      ...production,
+      ...demoFiles().filter((file) => file.endsWith('.ts')),
       ...tsFiles(join(ROOT, 'test')),
       ...tsFiles(SRC).filter((file) => file.endsWith('.spec.ts')),
     ];
-    expect(files.length).toBeGreaterThan(300);
+    expect(files.length).toBeGreaterThan(800);
     const creates = files.flatMap((file) => [
       ...readFileSync(file, 'utf8').matchAll(PATIENT_CREATE),
     ]);
@@ -799,7 +927,7 @@ describe('tipos de documento genéricos (DX-327)', () => {
 
   it('the document type patterns catch each legacy form and skip neutral text', () => {
     const caught = (line: string): boolean =>
-      LEGACY_DOC_TYPE.test(line) ||
+      legacyDocTypeHit(line) ||
       LEGACY_DOC_TYPE_COLUMN.test(line) ||
       PRISMA_DOC_TYPE_ENUM.test(line) ||
       [...line.matchAll(PRISMA_DOC_TYPE_IMPORT)].length > 0;
@@ -807,6 +935,13 @@ describe('tipos de documento genéricos (DX-327)', () => {
       "docType: 'C" + "C',",
       'DocType.' + 'TI',
       'C\u00e9dula de ciudadan\u00eda',
+      // M1: sin tilde, en mayúsculas o con la tilde descompuesta.
+      "label: 'Ced" + "ula'",
+      'C\u00c9DULA',
+      'Ce\u0301dula',
+      "if (code === 't" + "i')",
+      'case "c' + 'e":',
+      'EXTRANJER\u00cdA',
       'con marcado ' + 'CE',
       'INVI' + 'MA 2019',
       'Tarjeta' + ' de identidad',
@@ -824,12 +959,54 @@ describe('tipos de documento genéricos (DX-327)', () => {
       "import { DocumentType } from '@prisma/client';",
       "import type { LegacyDocType } from './legacy-doc-type';",
       'Documento nacional 123',
+      'const ticket = 1;',
+      'proceder con la cita',
     ]) {
       expect({ line, caught: caught(line) }).toEqual({ line, caught: false });
     }
-    expect(DEMO_COUNTRY_DOCUMENT.test('C' + 'C;123;Ana')).toBe(true);
-    expect(DEMO_COUNTRY_DOCUMENT.test('INVI' + 'MA 2019DM-0019876')).toBe(true);
-    expect(DEMO_COUNTRY_DOCUMENT.test('Documento nacional;DEMO-I001')).toBe(
+    expect(demoCountryDocumentHit('C' + 'C;123;Ana')).toBe(true);
+    expect(demoCountryDocumentHit('INVI' + 'MA 2019DM-0019876')).toBe(true);
+    expect(demoCountryDocumentHit('invi' + 'ma 2019')).toBe(true);
+    expect(demoCountryDocumentHit('Ced' + 'ula de identidad')).toBe(true);
+    expect(demoCountryDocumentHit('Documento nacional;DEMO-I001')).toBe(false);
+    // M9: siglas de otros países como palabra, en cualquier caja.
+    for (const acronym of [
+      'DNI',
+      'nie',
+      'NIF',
+      'Nit',
+      'RUT',
+      'rif',
+      'CURP',
+      'cpf',
+    ]) {
+      expect({
+        acronym,
+        caught: COUNTRY_DOC_ACRONYM.test(`tipo ${acronym}: 1`),
+      }).toEqual({
+        acronym,
+        caught: true,
+      });
+    }
+    for (const word of [
+      'unit',
+      'nitrilo',
+      'route',
+      'GUA-NTR-M',
+      'niece',
+      'riffle',
+    ]) {
+      expect({ word, caught: COUNTRY_DOC_ACRONYM.test(word) }).toEqual({
+        word,
+        caught: false,
+      });
+    }
+    expect(
+      RECEIPT_FISCAL_LINE.line(
+        '      : `${clinic.legalName} · NIT/NIF ${clinic.taxId}`,',
+      ),
+    ).toBe(true);
+    expect(RECEIPT_FISCAL_LINE.line('// NIT/NIF de la cl\u00ednica')).toBe(
       false,
     );
     expect(LONG_DOCUMENT_NAME.test('Tarjeta' + ' de identidad')).toBe(true);
@@ -858,5 +1035,36 @@ describe('tipos de documento genéricos (DX-327)', () => {
         ),
       ),
     ).toBe(false);
+    // M3: cada forma de alta con solo `documentType` es un hueco; con la
+    // pareja, un helper o solo en el `update`, no.
+    // Armados por partes: esta guarda también se recorre a sí misma.
+    const P = 'pati' + 'ent';
+    const prisma = `tx.${P}`;
+    for (const snippet of [
+      `${prisma}.createMany({ data: [{ documentType: 'OTHER' }] })`,
+      `${prisma}.createManyAndReturn({ data: rows.map(() => ({ documentType: 'OTHER' })) })`,
+      `${prisma}.upsert({ where: { id }, update: {}, create: { documentType: 'OTHER' } })`,
+      `tx.appointment.create({ data: { ${P}: { create: { documentType: 'OTHER' } } } })`,
+      `${prisma}.update({ where: { id }, data: { responsible${'Parties'}: { createMany: { data: [{ documentType: 'OTHER' }] } } } })`,
+      `INSERT INTO "${P}s" ("id", "documentType") VALUES ($1, 'OTHER')`,
+      `insert into ${P}_responsible_parties ("id", "documentType") values ($1, $2)`,
+    ]) {
+      expect({ snippet, holes: legacyPairHoles(snippet).length }).toEqual({
+        snippet,
+        holes: 1,
+      });
+    }
+    for (const snippet of [
+      `${prisma}.createManyAndReturn({ data: rows.map(importedPatientData) })`,
+      `${prisma}.upsert({ where: { id }, update: { documentType: 'OTHER' }, create: { documentType: 'OTHER', docType: 'OTHER' } })`,
+      `tx.appointment.findMany({ where: { ${P}: { documentType: 'OTHER' } } })`,
+      `INSERT INTO "${P}s" ("id", "docType", "documentType") VALUES ($1, $2, $3)`,
+      `INSERT INTO "${P}s" ("id", "firstName") VALUES ($1, $2)`,
+    ]) {
+      expect({ snippet, holes: legacyPairHoles(snippet).length }).toEqual({
+        snippet,
+        holes: 0,
+      });
+    }
   });
 });

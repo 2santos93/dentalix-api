@@ -24,7 +24,7 @@ export class ReceiptClinicDto {
   @ApiProperty({
     type: String,
     nullable: true,
-    description: 'NIT/NIF (DX-019).',
+    description: 'Identificador fiscal de la clínica (DX-019).',
   })
   taxId!: string | null;
 
@@ -148,7 +148,7 @@ export class ReceiptSnapshotDto {
 
   @ApiProperty({
     description:
-      'Falta la razón social o el NIT/NIF: el recibo dice «Datos fiscales pendientes».',
+      'Falta la razón social o el identificador fiscal: el recibo dice «Datos fiscales pendientes».',
   })
   fiscalDataPending!: boolean;
 

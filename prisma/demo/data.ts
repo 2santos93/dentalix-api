@@ -1731,7 +1731,7 @@ export const DEMO_INVENTORY: readonly DemoInventoryItem[] = [
   {
     location: 'principal',
     name: 'Guantes de nitrilo talla M',
-    sku: 'GUA-NIT-M',
+    sku: 'GUA-NTR-M',
     unit: 'caja x100',
     minStock: 10,
     movements: [
@@ -1799,7 +1799,7 @@ export const DEMO_INVENTORY: readonly DemoInventoryItem[] = [
   {
     location: 'norte',
     name: 'Guantes de nitrilo talla S',
-    sku: 'GUA-NIT-S',
+    sku: 'GUA-NTR-S',
     unit: 'caja x100',
     minStock: 8,
     movements: [

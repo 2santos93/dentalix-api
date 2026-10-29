@@ -98,7 +98,7 @@ export async function issuePaymentReceipt(
 
   const snapshot = buildReceiptSnapshot(
     {
-      // DX-019 añadirá razón social, NIT/NIF y dirección fiscal de la clínica;
+      // DX-019 añadirá razón social, identificador fiscal y dirección fiscal de la clínica;
       // hoy no existen y el recibo dice «Datos fiscales pendientes».
       clinic: {
         name: tenant.name,

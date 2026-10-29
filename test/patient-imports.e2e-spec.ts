@@ -18,6 +18,7 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import { legacyStoredDocType } from '../src/modules/patients/domain/legacy-doc-type';
+import { MISSING_FILE_MESSAGE } from '../src/modules/patient-imports/application/patient-imports.use-cases';
 
 // DX-107 · Importación de pacientes desde CSV/XLSX en HTTP real: plantilla,
 // inspección, dry-run sin escribir, confirmación en segundo plano mientras la
@@ -1205,6 +1206,15 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
     expect(
       JSON.stringify(swagger.paths['/api/v1/patient-imports']),
     ).not.toMatch(/"(CC|TI|CE)"|C[ée]dula/);
+  });
+
+  it('a JSON defaultDocType null counts as absent: 400, never 500', async () => {
+    const res = await as(api().post('/api/v1/patient-imports'), a.adminToken)
+      .send({ defaultDocType: null })
+      .expect(400);
+    expect((res.body as { message: string }).message).toBe(
+      MISSING_FILE_MESSAGE,
+    );
   });
 
   it("an import recognizes this clinic's local names and not another clinic's", async () => {
