@@ -7,6 +7,7 @@ import {
 import { Prisma } from '@prisma/client';
 import {
   REGISTRATION_EMAIL_TAKEN,
+  REGISTRATION_LINK_EXPIRED,
   REGISTRATION_LINK_INVALID,
   RegisterClinicUseCase,
 } from './register-clinic.use-case';
@@ -148,7 +149,7 @@ const INPUT = {
   ...TOKYO_LOCATION,
 };
 
-/** Forma legada (fase 1): una web anterior a G1 no envía la sede. */
+/** Forma legada: una web anterior a G1 no envía la sede (ya no se acepta, DX-312). */
 const LEGACY_INPUT = {
   clinicName: 'Sonrisa',
   subdomain: 'Sonrisa',
@@ -582,19 +583,41 @@ describe('RegisterClinicUseCase (DX-029)', () => {
       expect(pending.rows).toHaveLength(0);
     });
 
-    it('forma legada (sin los cuatro): se acepta y verify crea la clínica sin sede configurada', async () => {
+    it('legacy registration without location fields is 400 with field locationCountry', async () => {
+      const pending = new InMemoryPending();
+      const uc = newUseCase(makeRepo(), pending, makeNotifier(), realPassword);
+
+      for (const call of [uc.execute.bind(uc), uc.accept.bind(uc)]) {
+        const error = await call(LEGACY_INPUT).catch((e: unknown) => e);
+        expect(error).toBeInstanceOf(BadRequestException);
+        expect((error as BadRequestException).getResponse()).toMatchObject({
+          message: 'Elige el país de la sede.',
+          field: 'locationCountry',
+        });
+      }
+      expect(pending.rows).toHaveLength(0);
+    });
+
+    it('verify with a pending without location throws Gone before consuming it', async () => {
       const repo = makeRepo();
       const pending = new InMemoryPending();
       const notifier = makeNotifier();
       const uc = newUseCase(repo, pending, notifier, realPassword);
 
-      expect(await uc.execute(LEGACY_INPUT)).toBe('VERIFICATION_SENT');
-      expect(pending.rows[0].location).toBeNull();
+      expect(await uc.execute(INPUT)).toBe('VERIFICATION_SENT');
+      pending.rows[0].location = null;
+      const consume = jest.spyOn(pending, 'consumePending');
       const { verifyUrl } = notifier.sendVerification.mock.calls[0][0];
-      await uc.verify(tokenFrom(verifyUrl), INPUT.password);
-      expect(createClinic).toHaveBeenCalledWith(
-        expect.objectContaining({ location: null }),
-      );
+      const error = await uc
+        .verify(tokenFrom(verifyUrl), INPUT.password)
+        .catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(GoneException);
+      expect((error as GoneException).getResponse()).toMatchObject({
+        message: REGISTRATION_LINK_EXPIRED,
+      });
+      expect(consume).not.toHaveBeenCalled();
+      expect(createClinic).not.toHaveBeenCalled();
+      expect(pending.rows).toHaveLength(1);
     });
 
     it.each([

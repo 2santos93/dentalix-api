@@ -24,12 +24,10 @@ export interface CreateClinicWithOwnerInput {
   /** Cuándo se probó el control del email (enlace de verificación, DX-029). */
   emailVerifiedAt: Date;
   /**
-   * G1: la «Sede principal» nace con estos valores y revisada (R11). `null` =
-   * pendiente LEGADO de una réplica o una web anteriores a G1 (fase 1, spec
-   * §3.5): la sede se crea como antes (país por defecto de la BD) y la rellena
-   * `dx_g1_backfill_location_regional` en la misma transacción, sin revisar.
+   * G1: la «Sede principal» nace con estos valores y revisada (R11). Ya no
+   * hay forma legada sin sede (DX-312, R7).
    */
-  location: ClinicLocationSettings | null;
+  location: ClinicLocationSettings;
 }
 
 export interface MembershipRecord {

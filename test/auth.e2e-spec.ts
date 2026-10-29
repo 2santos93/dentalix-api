@@ -182,10 +182,9 @@ describe('Auth (e2e)', () => {
       .expect(204);
   });
 
-  // GLOBAL-G1 (spec §3.5): la primera sede se elige al registrarse. Fase 1:
-  // una web antigua (sin los cuatro campos) y un enlace de una réplica
-  // antigua siguen funcionando; la sede queda rellenada por la función D5 y
-  // «por revisar».
+  // GLOBAL-G1 (spec §3.5): la primera sede se elige al registrarse. La forma
+  // legada (web antigua sin sede) es 400 y su enlace pendiente responde 410
+  // sin consumirse (DX-312, R7).
   describe('registro con la primera sede (G1)', () => {
     const api = () => request(app.getHttpServer());
     const PASSWORD = 'S3cret!!';
@@ -288,30 +287,23 @@ describe('Auth (e2e)', () => {
       ).toBe(0);
     });
 
-    it('registration without the four (legacy shape) is 201', async () => {
+    it('legacy registration without location fields is 400 with field locationCountry', async () => {
       const legacy = base('g1-web-antigua');
-      await api()
+      const res = await api()
         .post('/api/v1/auth/register')
         .set('X-Tenant-Host', 'localhost')
         .send(legacy)
-        .expect(202);
-      await waitForPending(legacy.email);
-      const res = await verifyPending(legacy.email);
-      expect(res.status).toBe(201);
-      const location = await mainLocation(
-        (res.body as { tenantId: string }).tenantId,
-      );
-      expect(location).toMatchObject({
-        country: 'CO',
-        currency: 'COP',
-        timeZone: 'America/Bogota',
-        locale: 'es-CO',
-        hourCycle: 'h23',
-        regionalSettingsReviewedAt: null,
+        .expect(400);
+      expect(res.body).toMatchObject({
+        message: 'Elige el país de la sede.',
+        field: 'locationCountry',
       });
+      expect(
+        await raw.pendingRegistration.count({ where: { email: legacy.email } }),
+      ).toBe(0);
     });
 
-    it('legacy pending verify creates the clinic and backfills it unreviewed', async () => {
+    it('legacy pending without location answers 410 and creates nothing', async () => {
       // Lo que deja una réplica anterior a G1: un pendiente sin columnas de sede.
       const old = base('g1-replica-antigua');
       await raw.pendingRegistration.create({
@@ -326,32 +318,18 @@ describe('Auth (e2e)', () => {
         },
       });
       const res = await verifyPending(old.email);
-      expect(res.status).toBe(201);
-      const { tenantId } = res.body as { tenantId: string };
-      const location = await mainLocation(tenantId);
-      expect(location).toMatchObject({
-        name: 'Sede principal',
-        country: 'CO',
-        currency: 'COP',
-        timeZone: 'America/Bogota',
-        locale: 'es-CO',
-        hourCycle: 'h23',
-        // Por revisar: el ADMIN verá el aviso D5.
-        regionalSettingsReviewedAt: null,
-      });
-      expect(await legacyScheduleZone(location.id)).toBe('America/Bogota');
-      // El enlace se consumió y el dueño puede entrar.
+      expect(res.status).toBe(410);
+      expect((res.body as { message: string }).message).toMatch(/caducó/);
+      // El pendiente sigue, y no se creó ni la clínica ni el dueño.
       expect(
         await raw.pendingRegistration.count({ where: { email: old.email } }),
+      ).toBe(1);
+      expect(
+        await raw.tenant.count({ where: { subdomain: old.subdomain } }),
       ).toBe(0);
-      await api()
-        .post('/api/v1/auth/login')
-        .set('X-Tenant-Host', hostFor(old.subdomain))
-        .send({ email: old.email, password: PASSWORD })
-        .expect(201);
+      expect(await raw.user.count({ where: { email: old.email } })).toBe(0);
     });
 
-    // G1-B (DX-350, spec §4.3): el reloj de la primera sede.
     it('registration with the five fields creates the location with them', async () => {
       const { body } = await registerVerified(
         app,
@@ -431,28 +409,6 @@ describe('Auth (e2e)', () => {
       });
       expect(location.regionalSettingsReviewedAt).not.toBeNull();
       expect(await legacyScheduleZone(location.id)).toBe('Asia/Tokyo');
-    });
-
-    it('legacy registration verify leaves currency, zone, format and clock filled, unreviewed', async () => {
-      const legacy = base('g1b-legado');
-      await api()
-        .post('/api/v1/auth/register')
-        .set('X-Tenant-Host', 'localhost')
-        .send(legacy)
-        .expect(202);
-      await waitForPending(legacy.email);
-      const res = await verifyPending(legacy.email);
-      expect(res.status).toBe(201);
-      const location = await mainLocation(
-        (res.body as { tenantId: string }).tenantId,
-      );
-      // La función de G1 rellena moneda, zona y formato (sus valores los fija
-      // «legacy pending verify creates the clinic…»); la de G1-B, el reloj.
-      expect(location.currency).not.toBeNull();
-      expect(location.timeZone).not.toBeNull();
-      expect(location.locale).not.toBeNull();
-      expect(location.hourCycle).toBe('h23');
-      expect(location.regionalSettingsReviewedAt).toBeNull();
     });
 
     it('locationHourCycle alone is 400', async () => {

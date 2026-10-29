@@ -81,7 +81,7 @@ describe('RegisterDto · primera sede (G1)', () => {
     return errors.flatMap((e) => Object.values(e.constraints ?? {}));
   }
 
-  it('acepta los cuatro campos y también la forma legada sin ninguno', async () => {
+  it('acepta los cuatro campos; la forma legada sin ninguno pasa el DTO y la rechaza el caso de uso (400)', async () => {
     expect(
       await messages({
         locationCountry: 'CO',
