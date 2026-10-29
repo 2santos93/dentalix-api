@@ -33,6 +33,14 @@ model Tenant {
   /// el default de la BD es el mismo valor, para réplicas anteriores).
   /// CHECK 14..21. Lo cambia el ADMIN (PUT /patients/settings, auditado).
   majorityAge               Int                             @default(18)
+  /// DX-327: nombre local del tipo; NULL = el genérico. Lo cambia el ADMIN
+  /// (PUT /patients/document-type-names, auditado). CHECK 1..60 sin espacios
+  /// en los extremos. Todas las clínicas empiezan con los cinco a NULL.
+  docTypeNameNationalId      String?
+  docTypeNamePassport        String?
+  docTypeNameResidencePermit String?
+  docTypeNameTaxId           String?
+  docTypeNameOther           String?
   /// DX-324: la receta imprime la cantidad de cada medicamento también en letras. false al crear la clínica.
   prescriptionPrintQuantityInWords        Boolean @default(false)
   /// DX-324: no se emite sin documento del paciente, que la receta imprime como nº de historia clínica.

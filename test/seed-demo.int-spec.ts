@@ -407,6 +407,41 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     );
   });
 
+  it('the demo clinic configures no local document type names (DX-327)', async () => {
+    // R16 (pre-flight M18): toda clínica empieza sin nombres locales, también
+    // la demo; ni siembra ni valor por defecto los rellena, y no hay evento
+    // DOCUMENT_TYPE_NAMES_SETTINGS.
+    const tenantId = await liveDemoTenantId();
+    const tenant = await raw.tenant.findUniqueOrThrow({
+      where: { id: tenantId },
+      select: {
+        docTypeNameNationalId: true,
+        docTypeNamePassport: true,
+        docTypeNameResidencePermit: true,
+        docTypeNameTaxId: true,
+        docTypeNameOther: true,
+      },
+    });
+    expect(tenant).toEqual({
+      docTypeNameNationalId: null,
+      docTypeNamePassport: null,
+      docTypeNameResidencePermit: null,
+      docTypeNameTaxId: null,
+      docTypeNameOther: null,
+    });
+    const events = await raw.auditEvent.findMany({
+      where: { tenantId, resourceType: 'CLINIC_SETTINGS' },
+      select: { metadata: true },
+    });
+    expect(
+      events.filter(
+        (e) =>
+          (e.metadata as { reason?: string } | null)?.reason ===
+          'DOCUMENT_TYPE_NAMES_SETTINGS',
+      ),
+    ).toEqual([]);
+  });
+
   it('every demo location is reviewed and complete (G1)', async () => {
     const tenantId = await liveDemoTenantId();
     const locations = await raw.location.findMany({

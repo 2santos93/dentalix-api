@@ -39,6 +39,11 @@ import {
 } from './application/use-cases/patient-settings.use-cases';
 import { PATIENT_SETTINGS_REPOSITORY } from './domain/ports/patient-settings-repository.port';
 import { PrismaPatientSettingsRepository } from './infrastructure/repositories/prisma-patient-settings.repository';
+import {
+  GetDocumentTypeNamesUseCase,
+  UpdateDocumentTypeNamesUseCase,
+} from './application/use-cases/document-type-names.use-cases';
+import { DocumentTypeNamesModule } from '../document-type-names/document-type-names.module';
 import { PATIENT_REPOSITORY } from './domain/ports/patient-repository.port';
 import { PrismaPatientRepository } from './infrastructure/repositories/prisma-patient.repository';
 import { REFERENCE_LOOKUP } from './domain/ports/reference-lookup.port';
@@ -61,6 +66,8 @@ import { PatientAgreementsModule } from '../patient-agreements/patient-agreement
     CollectionsModule,
     PatientCoveragesModule,
     PatientAgreementsModule,
+    // DX-327: nombres locales de los tipos de documento (lector y repositorio).
+    DocumentTypeNamesModule,
   ],
   controllers: [
     PatientsController,
@@ -96,6 +103,9 @@ import { PatientAgreementsModule } from '../patient-agreements/patient-agreement
       provide: PATIENT_SETTINGS_REPOSITORY,
       useClass: PrismaPatientSettingsRepository,
     },
+    // DX-327: nombre local de cada tipo de documento (Ajustes).
+    GetDocumentTypeNamesUseCase,
+    UpdateDocumentTypeNamesUseCase,
     {
       provide: RESPONSIBLE_PARTY_REPOSITORY,
       useClass: PrismaResponsiblePartyRepository,

@@ -174,6 +174,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // DX-328: la mayoría de edad de la clínica la leen todos; la cambia gestión.
   'GET /patients/settings': EVERY_ROLE,
   'PUT /patients/settings': ADMIN_ONLY,
+  // DX-327: el nombre local de cada tipo de documento lo leen todos (los
+  // formularios y la importación lo usan); lo cambia gestión.
+  'GET /patients/document-type-names': EVERY_ROLE,
+  'PUT /patients/document-type-names': ADMIN_ONLY,
 
   // --- Clínico: historia, evoluciones, odontograma, periodontograma --------
   // dentalix-docs/docs/plans/2026-07-23-fase2c-role-matrix.md (CLINICAL_ROLES);

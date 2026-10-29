@@ -92,9 +92,18 @@ import {
   type PatientSettings,
 } from '../application/use-cases/patient-settings.use-cases';
 import { PatientSettingsDto } from './dto/patient-settings.dto';
+import {
+  GetDocumentTypeNamesUseCase,
+  UpdateDocumentTypeNamesUseCase,
+  type DocumentTypeNamesSettings,
+} from '../application/use-cases/document-type-names.use-cases';
+import { DocumentTypeNamesDto } from './dto/document-type-names.dto';
 
 export const CLINIC_SETTINGS_FORBIDDEN_MESSAGE =
   'Solo un administrador puede cambiar la mayoría de edad.';
+
+export const DOCUMENT_TYPE_NAMES_FORBIDDEN_MESSAGE =
+  'Solo un administrador puede cambiar los nombres de los documentos.';
 
 type ListPatientsWithCoverageOutput = Omit<ListPatientsOutput, 'items'> & {
   items: (Patient & { coverage: CoverageSummary })[];
@@ -128,6 +137,9 @@ export class PatientsController {
     // DX-328: mayoría de edad de la clínica.
     private readonly getSettings: GetPatientSettingsUseCase,
     private readonly updateSettings: UpdatePatientSettingsUseCase,
+    // DX-327: nombre local de cada tipo de documento de la clínica.
+    private readonly getDocumentTypeNames: GetDocumentTypeNamesUseCase,
+    private readonly updateDocumentTypeNames: UpdateDocumentTypeNamesUseCase,
     private readonly tenantContext: TenantContextService,
   ) {}
 
@@ -251,6 +263,48 @@ export class PatientsController {
     const ctx = auditRequestContext(req, this.tenantContext);
     if (!ctx) throw new Error('Sin sesión de clínica detrás del RolesGuard');
     return this.updateSettings.execute({ majorityAge: dto.majorityAge }, ctx);
+  }
+
+  // También antes de `@Get(':id')`, por lo mismo que `settings`.
+  @Get('document-type-names')
+  @ApiOperation({
+    summary: 'Nombre local de cada tipo de documento de la clínica (DX-327)',
+    description:
+      'Null = sin nombre local: se usa el genérico. El nombre visible de un ' +
+      'documento es la etiqueta del paciente, si no el nombre local de la ' +
+      'clínica para su tipo, si no el genérico (R17). La importación de ' +
+      'pacientes reconoce también estos nombres, antes que los genéricos (R19).',
+  })
+  @ApiOkResponse({ type: DocumentTypeNamesDto })
+  documentTypeNames(): Promise<DocumentTypeNamesSettings> {
+    return this.getDocumentTypeNames.execute();
+  }
+
+  @Put('document-type-names')
+  @Roles(...CLINIC_SETTINGS_WRITE_ROLES)
+  @RolesDeniedMessage(DOCUMENT_TYPE_NAMES_FORBIDDEN_MESSAGE)
+  @ApiOperation({
+    summary: 'Nombre local de cada tipo de documento de la clínica (DX-327)',
+    description:
+      'Sustituye los cinco nombres: una clave ausente o null queda sin nombre ' +
+      'local. Hasta 60 caracteres. Dos tipos no pueden tener el mismo nombre ' +
+      'ni el nombre genérico o el código de otro tipo (sin distinguir ' +
+      'mayúsculas, tildes ni puntuación, en cualquier escritura). Cambia el ' +
+      'nombre visible (R17) y lo que reconoce la importación (R19); no toca ' +
+      'ningún paciente. Si nada cambia, 200 sin evento de auditoría.',
+  })
+  @ApiOkResponse({ type: DocumentTypeNamesDto })
+  @ApiBadRequestResponse({
+    description: 'Nombre ambiguo, sin letras ni números o de más de 60',
+  })
+  @ApiForbiddenResponse({ description: DOCUMENT_TYPE_NAMES_FORBIDDEN_MESSAGE })
+  updateClinicDocumentTypeNames(
+    @Body() dto: DocumentTypeNamesDto,
+    @Req() req: AuditableRequest,
+  ): Promise<DocumentTypeNamesSettings> {
+    const ctx = auditRequestContext(req, this.tenantContext);
+    if (!ctx) throw new Error('Sin sesión de clínica detrás del RolesGuard');
+    return this.updateDocumentTypeNames.execute(dto.names, ctx);
   }
 
   @Audit({
