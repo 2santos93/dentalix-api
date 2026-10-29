@@ -10,6 +10,12 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Prisma, PrismaClient } from '@prisma/client';
+import { DOCUMENT_TYPES } from '../src/modules/patients/domain/document-type';
+import {
+  LEGACY_CODES,
+  LEGACY_DOC_TYPES,
+  legacyStoredDocType,
+} from '../src/modules/patients/domain/legacy-doc-type';
 import { REGIONAL_TOKYO_FIXTURE } from './support/location-fixtures';
 
 // DX-327 (fase 1): el tipo de documento genérico va en una columna nueva
@@ -1078,5 +1084,30 @@ describe('DX-327 · migraciones del tipo de documento genérico (int)', () => {
       { t: 'patient_responsible_parties', forced: true },
       { t: 'patients', forced: true },
     ]);
+  });
+
+  it('the SQL legacy functions match LEGACY_DOC_TYPES', async () => {
+    for (const code of LEGACY_CODES) {
+      const [row] = await target.$queryRawUnsafe<{ t: string }[]>(
+        `SELECT public.dx_doc_type_from_legacy($1::public."DocType")::text AS t`,
+        code,
+      );
+      expect({ code, t: row.t }).toEqual({ code, t: LEGACY_DOC_TYPES[code] });
+    }
+    for (const type of DOCUMENT_TYPES) {
+      const [row] = await target.$queryRawUnsafe<{ code: string }[]>(
+        `SELECT public.dx_doc_type_to_legacy($1::public."DocumentType")::text AS code`,
+        type,
+      );
+      expect({ type, code: row.code }).toEqual({
+        type,
+        code: legacyStoredDocType(type),
+      });
+    }
+    // Ninguna función de la migración compone una etiqueta.
+    const labelFns = await target.$queryRawUnsafe<{ proname: string }[]>(
+      `SELECT proname FROM pg_proc WHERE proname LIKE 'dx\\_doc\\_type\\_%label%'`,
+    );
+    expect(labelFns).toEqual([]);
   });
 });
