@@ -4,6 +4,9 @@
  * Fase 1 de DX-326: el repositorio traduce el código guardado al tipo genérico
  * al leer y guarda el código anterior al escribir (spec R4, R5).
  */
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import type { Prisma } from '@prisma/client';
 import type { PayerType } from '../../domain/payer-type';
 import type { LegacyStoredPayerType } from '../../domain/legacy-payer-type';
 import {
@@ -73,13 +76,39 @@ describe('PrismaPayerRepository (DX-326, fase 1)', () => {
     },
   );
 
-  it('create data satisfies the legacy stored type', () => {
+  /**
+   * El `satisfies` del repositorio es solo de compilación: ningún test en
+   * ejecución lo ve. Se comprueba en dos mitades: que `create` y `update`
+   * lo llevan (leyendo el fuente) y que ese mismo tipo rechaza un genérico sin
+   * traducir (`@ts-expect-error`, que `tsc` exige porque incluye `src`).
+   */
+  it('create and update data satisfy the legacy stored type', () => {
+    const source = readFileSync(
+      join(__dirname, 'prisma-payer.repository.ts'),
+      'utf8',
+    );
+    expect(
+      [
+        ...source.matchAll(
+          /\} satisfies Prisma\.(PayerUncheckedCreateInput|PayerUpdateInput) & \{\s*type\?: LegacyStoredPayerType;\s*\}/g,
+        ),
+      ].map((match) => match[1]),
+    ).toEqual(['PayerUncheckedCreateInput', 'PayerUpdateInput']);
+
     const type: PayerType = 'INSURER';
-    const data = {
+    const create = {
+      tenantId: 'tenant-1',
+      name: 'Sura EPS',
       // @ts-expect-error: un tipo genérico sin traducir no se guarda en la fase 1 (R5).
       type,
-    } satisfies { type?: LegacyStoredPayerType };
-    expect(data.type).toBe('INSURER');
+    } satisfies Prisma.PayerUncheckedCreateInput & {
+      type?: LegacyStoredPayerType;
+    };
+    const update = {
+      // @ts-expect-error: tampoco al retipar (R5).
+      type,
+    } satisfies Prisma.PayerUpdateInput & { type?: LegacyStoredPayerType };
+    expect([create.type, update.type]).toEqual(['INSURER', 'INSURER']);
   });
 
   it('legacy phase 1 reads a stored generic code unchanged', () => {

@@ -154,8 +154,10 @@ describe('pagadores y coberturas (int, DX-153)', () => {
     ).rejects.toThrow(/23503|foreign key/i);
   });
 
-  it('payers_type_country_check no longer exists', async () => {
-    // DX-326: cualquier tipo con cualquier país o ninguno.
+  it('legacy MUTUA_ES with CO inserts because payers_type_country_check no longer exists', async () => {
+    // Excepción G5.3 (DX-334): tipos de pagador anteriores a DX-326. DX-326:
+    // cualquier tipo con cualquier país o ninguno; el INSERT es el de la API
+    // anterior, con el código antiguo.
     const [check] = await raw.$queryRaw<{ n: number }[]>`
       SELECT count(*)::int AS n FROM pg_constraint
        WHERE conrelid = 'public.payers'::regclass

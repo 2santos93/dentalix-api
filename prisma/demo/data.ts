@@ -701,7 +701,17 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
   },
 ];
 
-/** DX-153: pagadores del catálogo de la clínica demo (reemplazan al texto libre de aseguradora anterior a DX-153). */
+/**
+ * DX-153: pagadores del catálogo de la clínica demo (reemplazan al texto libre de aseguradora anterior a DX-153).
+ *
+ * DX-326, fase 1: los tipos son genéricos, pero la tabla `payers` aún guarda
+ * los códigos anteriores. `seed-demo.ts` debe crearlos con `CreatePayerUseCase`
+ * (que traduce en el repositorio), nunca con `payer.create` directo: el
+ * cliente Prisma acepta el genérico y lo guardaría tal cual. Ninguna guarda
+ * de arquitectura escanea `prisma/`; lo comprueba
+ * `test/seed-demo.int-spec.ts` («demo payers use generic types and no
+ * country»), que exige `storedPayerType(type)` en la base.
+ */
 export const DEMO_PAYERS = [
   { key: 'sura', name: 'Sura EPS', type: 'PUBLIC_SYSTEM' },
   { key: 'sanitas', name: 'Sanitas', type: 'PREPAID_PLAN' },
