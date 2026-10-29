@@ -5,7 +5,6 @@ import { App } from 'supertest/types';
 import {
   CatalogKind,
   ClinicRole,
-  DocType,
   Prisma,
   PrismaClient,
   Sex,
@@ -133,7 +132,7 @@ describe('Reglas de dominio por HTTP (DX-042, e2e)', () => {
       .send({
         firstName: 'Ana',
         lastName: 'Dominio',
-        docType: DocType.CC,
+        docType: 'NATIONAL_ID',
         docNumber: '42042',
         sex: Sex.F,
       })

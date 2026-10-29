@@ -108,7 +108,7 @@ describe('Hueco libre → candidatos (e2e, DX-210)', () => {
       .send({
         firstName,
         lastName: 'Hueco',
-        docType: 'CC',
+        docType: 'NATIONAL_ID',
         docNumber: doc,
         sex: 'F',
         phone: '3101234567',

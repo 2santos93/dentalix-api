@@ -2,7 +2,6 @@ import { INestApplication } from '@nestjs/common';
 import {
   CatalogKind,
   ClinicRole,
-  DocType,
   Prisma,
   PrismaClient,
   Sex,
@@ -109,7 +108,7 @@ describe('Rebaja de convenio en el informe de descuentos (e2e, SEC-047)', () => 
     create('/patients', {
       firstName,
       lastName: 'Convenio',
-      docType: DocType.CC,
+      docType: 'NATIONAL_ID',
       docNumber: String(Math.floor(Math.random() * 1e9)),
       sex: Sex.F,
     });

@@ -82,7 +82,7 @@ describe('Convenio del paciente (e2e, DX-105)', () => {
 
   const createPatient = (target: Clinic, firstName: string) =>
     post(target, '/api/v1/patients', {
-      docType: 'CC',
+      docType: 'NATIONAL_ID',
       sex: 'F',
       lastName: 'Ortiz',
       docNumber: String(Math.floor(Math.random() * 1e9)),

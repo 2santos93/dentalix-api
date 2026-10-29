@@ -1,5 +1,5 @@
 import { INestApplication } from '@nestjs/common';
-import { ClinicRole, DocType, Prisma, PrismaClient, Sex } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient, Sex } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createE2eApp } from './support/create-e2e-app';
@@ -232,7 +232,7 @@ describe('Subrutas de la cita y sede permitida (SEC-045)', () => {
           .post('/patients', {
             firstName: 'Lucía',
             lastName: 'Restrepo',
-            docType: DocType.CC,
+            docType: 'NATIONAL_ID',
             docNumber: 'SEC045-1',
             sex: Sex.F,
             email: PATIENT_EMAIL,

@@ -2,7 +2,6 @@ import { INestApplication } from '@nestjs/common';
 import {
   CatalogKind,
   ClinicRole,
-  DocType,
   Prisma,
   PrismaClient,
   Sex,
@@ -129,7 +128,7 @@ describe('Alternativas de plan y presupuestos por seguir (e2e, DX-040)', () => {
       .post('/patients', {
         firstName,
         lastName: 'Seguimiento',
-        docType: DocType.CC,
+        docType: 'NATIONAL_ID',
         docNumber: `40${++patientSeq}`,
         sex: Sex.F,
         phone,

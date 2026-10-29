@@ -96,7 +96,7 @@ describe('Comunicaciones del paciente (e2e, DX-128)', () => {
       .send({
         firstName: 'Carolina',
         lastName: 'Duque',
-        docType: 'CC',
+        docType: 'NATIONAL_ID',
         docNumber: '128001',
         sex: 'F',
         email: 'carolina@example.com',
@@ -151,7 +151,7 @@ describe('Comunicaciones del paciente (e2e, DX-128)', () => {
       .send({
         firstName: 'Mateo',
         lastName: 'Duque',
-        docType: 'TI',
+        docType: 'NATIONAL_ID',
         docNumber: '128002',
         sex: 'M',
         birthDate: '2016-04-10',
@@ -354,7 +354,7 @@ describe('Comunicaciones del paciente (e2e, DX-128)', () => {
       .send({
         firstName: 'Fixture',
         lastName: 'Race',
-        docType: 'CC',
+        docType: 'NATIONAL_ID',
         docNumber: '214990',
         sex: 'F',
         phone: '+573101234567',

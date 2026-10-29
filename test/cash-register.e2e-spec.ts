@@ -4,7 +4,6 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import {
   ClinicRole,
-  DocType,
   PaymentMethod,
   Prisma,
   PrismaClient,
@@ -200,7 +199,7 @@ describe('Caja — GET /payments (e2e)', () => {
         request(app.getHttpServer()).post('/api/v1/patients').send({
           firstName,
           lastName,
-          docType: DocType.CC,
+          docType: 'NATIONAL_ID',
           docNumber,
           sex: Sex.F,
         }),

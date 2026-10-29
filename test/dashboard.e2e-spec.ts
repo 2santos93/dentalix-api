@@ -239,7 +239,7 @@ describe('Dashboard (e2e)', () => {
         .send({
           firstName: 'Dash',
           lastName: 'Board',
-          docType: 'CC',
+          docType: 'NATIONAL_ID',
           docNumber: 'DASH-A-001',
           sex: 'F',
         })
@@ -428,7 +428,7 @@ describe('Dashboard (e2e)', () => {
         .send({
           firstName: `Paciente ${n}`,
           lastName: 'Límite',
-          docType: 'CC',
+          docType: 'NATIONAL_ID',
           docNumber: `DASH-L-00${n}`,
           sex: 'F',
         })

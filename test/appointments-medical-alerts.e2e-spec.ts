@@ -106,7 +106,7 @@ describe('Alertas médicas en la agenda (e2e, DX-247)', () => {
       host: target.host,
     })
       .send({
-        docType: 'CC',
+        docType: 'NATIONAL_ID',
         sex: 'F',
         firstName,
         lastName: 'Alerta',

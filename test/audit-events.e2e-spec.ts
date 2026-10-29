@@ -156,7 +156,7 @@ describe('Registro de auditoría (e2e, DX-009)', () => {
       .send({
         firstName: 'Paula',
         lastName: 'Auditada',
-        docType: 'CC',
+        docType: 'NATIONAL_ID',
         docNumber: 'AUD-0001',
         sex: 'F',
       })

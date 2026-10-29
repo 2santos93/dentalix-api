@@ -2,7 +2,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
-import { ClinicRole, DocType, Prisma, PrismaClient, Sex } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient, Sex } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
@@ -161,7 +161,7 @@ describe('Anulación de abonos con motivo y autor — DELETE /payments/:id (e2e)
       .post('/patients', {
         firstName: 'Ana',
         lastName: 'Caja',
-        docType: DocType.CC,
+        docType: 'NATIONAL_ID',
         docNumber: 'VOID-001',
         sex: Sex.F,
       })

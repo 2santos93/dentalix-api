@@ -2,7 +2,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
-import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
+import { ClinicRole, DocumentType, Prisma, PrismaClient } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { fitsBusinessHours } from '../src/modules/location-schedule/application/business-hours';
 import { providerWorksAt } from '../src/modules/provider-schedule/domain/provider-availability';
@@ -27,6 +27,8 @@ import { TENANT_TABLES, purgeDemoTenants } from './support/demo-tenant-purge';
 import { hostFor } from './support/tenant-host';
 import { PAYER_TYPES } from '../src/modules/payers/domain/payer-type';
 import { storedPayerType } from '../src/modules/payers/domain/legacy-payer-type';
+import { DOCUMENT_TYPES } from '../src/modules/patients/domain/document-type';
+import { legacyStoredDocType } from '../src/modules/patients/domain/legacy-doc-type';
 
 // Este spec escribe y BORRA EN DURO: solo puede correr contra una base de test.
 for (const key of ['DATABASE_URL', 'DIRECT_URL'] as const) {
@@ -407,7 +409,7 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     );
   });
 
-  it('the demo clinic configures no local document type names (DX-327)', async () => {
+  it('the demo clinic has no local document type names', async () => {
     // R16 (pre-flight M18): toda clínica empieza sin nombres locales, también
     // la demo; ni siembra ni valor por defecto los rellena, y no hay evento
     // DOCUMENT_TYPE_NAMES_SETTINGS.
@@ -439,6 +441,52 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
           (e.metadata as { reason?: string } | null)?.reason ===
           'DOCUMENT_TYPE_NAMES_SETTINGS',
       ),
+    ).toEqual([]);
+  });
+
+  it('demo patients and contacts use generic types, neutral numbers and no label', async () => {
+    // DX-327 (spec §4.9, R14): tipos genéricos, números `DEMO-…`, sin
+    // etiqueta libre y sin registro sanitario de un país. La siembra pasa por
+    // los escritores de R5: la columna antigua es la proyección del genérico.
+    const tenantId = await liveDemoTenantId();
+    const pair = {
+      docType: true,
+      documentType: true,
+      docTypeLabel: true,
+      docNumber: true,
+    } as const;
+    const patients = await raw.patient.findMany({
+      where: { tenantId },
+      select: pair,
+    });
+    const contacts = await raw.patientResponsibleParty.findMany({
+      where: { tenantId, docNumber: { not: null } },
+      select: pair,
+    });
+    expect(patients.length).toBeGreaterThan(10);
+    expect(contacts.length).toBeGreaterThan(0);
+    for (const row of [...patients, ...contacts]) {
+      expect(row.documentType).not.toBeNull();
+      const documentType = row.documentType as DocumentType;
+      expect({
+        docNumber: row.docNumber?.startsWith('DEMO-'),
+        documentType: DOCUMENT_TYPES.includes(documentType),
+        docTypeLabel: row.docTypeLabel,
+        docType: row.docType,
+      }).toEqual({
+        docNumber: true,
+        documentType: true,
+        docTypeLabel: null,
+        docType: legacyStoredDocType(documentType),
+      });
+    }
+    const implants = await raw.patientImplant.findMany({
+      where: { tenantId },
+      select: { sanitaryRegistration: true },
+    });
+    expect(implants.length).toBeGreaterThan(0);
+    expect(
+      implants.filter((i) => /INVI[M]A/i.test(i.sanitaryRegistration ?? '')),
     ).toEqual([]);
   });
 

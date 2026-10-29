@@ -17,6 +17,7 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
+import { legacyStoredDocType } from '../src/modules/patients/domain/legacy-doc-type';
 
 // DX-107 · Importación de pacientes desde CSV/XLSX en HTTP real: plantilla,
 // inspección, dry-run sin escribir, confirmación en segundo plano mientras la
@@ -1053,7 +1054,7 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
       {
         docNumber: 'RX5001',
         documentType: 'NATIONAL_ID',
-        docType: 'CC',
+        docType: legacyStoredDocType('NATIONAL_ID'),
         docTypeLabel: null,
       },
       {
@@ -1065,7 +1066,7 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
       {
         docNumber: 'RX5003',
         documentType: 'RESIDENCE_PERMIT',
-        docType: 'CE',
+        docType: legacyStoredDocType('RESIDENCE_PERMIT'),
         docTypeLabel: null,
       },
       {
@@ -1156,7 +1157,7 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
       {
         docNumber: 'RX7001',
         documentType: 'NATIONAL_ID',
-        docType: 'CC',
+        docType: legacyStoredDocType('NATIONAL_ID'),
         docTypeLabel: null,
       },
     ]);
@@ -1234,7 +1235,7 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
         {
           docNumber: 'RX8001',
           documentType: 'NATIONAL_ID',
-          docType: 'CC',
+          docType: legacyStoredDocType('NATIONAL_ID'),
           docTypeLabel: null,
         },
       ]);

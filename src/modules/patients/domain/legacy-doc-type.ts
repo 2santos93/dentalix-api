@@ -4,7 +4,7 @@ import { DOCUMENT_TYPES, isDocumentType } from './document-type';
 
 /**
  * DX-327 (fase 1): traducción única de los códigos anteriores (columna
- * "docType", JSON guardado y cuerpos de la web anterior) a los tipos
+ * antigua `docType`, JSON guardado y cuerpos de la web anterior) a los tipos
  * genéricos (spec R3). Solo tipos: ningún código da etiqueta ni nombre; el
  * nombre visible sale siempre de `documentTypeName` (R17). La misma tabla en
  * SQL son `dx_doc_type_from_legacy` y `dx_doc_type_to_legacy` (migración

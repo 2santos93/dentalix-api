@@ -117,7 +117,7 @@ describe('Bloqueos de agenda y pendientes por agendar (e2e, DX-122)', () => {
       .send({
         firstName,
         lastName: 'Pendiente',
-        docType: 'CC',
+        docType: 'NATIONAL_ID',
         docNumber: doc,
         sex: 'F',
       })

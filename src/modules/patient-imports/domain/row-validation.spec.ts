@@ -41,7 +41,7 @@ describe('mapeo de columnas (DX-107)', () => {
   it('sugiere por sinónimos sin tildes ni mayúsculas, una cabecera por campo', () => {
     expect(
       suggestMapping([
-        'Cédula',
+        'Número de Documento',
         'Nombre',
         'Apellidos',
         'Fecha de Nacimiento',
@@ -52,7 +52,7 @@ describe('mapeo de columnas (DX-107)', () => {
       ]),
     ).toEqual({
       docType: 'Tipo Doc.',
-      docNumber: 'Cédula',
+      docNumber: 'Número de Documento',
       firstName: 'Nombre',
       lastName: 'Apellidos',
       birthDate: 'Fecha de Nacimiento',

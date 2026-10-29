@@ -13,6 +13,7 @@ import {
   REGIONAL_BOGOTA_FIXTURE,
   locationData,
 } from './support/location-fixtures';
+import { legacyStoredDocType } from '../src/modules/patients/domain/legacy-doc-type';
 
 // DX-262, capa DB del saldo migrado: RLS FORCE de opening_balances y de los
 // saldos preparados, FK compuestas por tenant (paciente, sede, lote), CHECK
@@ -118,7 +119,8 @@ async function seed(subdomain: string): Promise<Seeded> {
       tenantId: tenant.id,
       firstName: 'Ana',
       lastName: subdomain,
-      docType: 'CC',
+      documentType: 'NATIONAL_ID',
+      docType: legacyStoredDocType('NATIONAL_ID'),
       docNumber: `9${Math.floor(Math.random() * 1e8)}`,
       importBatchId: batch.id,
     },
@@ -309,7 +311,8 @@ describe('opening_balances: RLS, FK, CHECKs, inmutable y resumen de cartera (DX-
         tenantId: a.tenantId,
         firstName: 'Luis',
         lastName: 'Sin planes',
-        docType: 'CC',
+        documentType: 'NATIONAL_ID',
+        docType: legacyStoredDocType('NATIONAL_ID'),
         docNumber: `8${Math.floor(Math.random() * 1e8)}`,
       },
     });

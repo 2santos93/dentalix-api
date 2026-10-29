@@ -1,7 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import {
   ClinicRole,
-  DocType,
   PaymentMethod,
   Prisma,
   PrismaClient,
@@ -135,7 +134,7 @@ describe('Resumen mensual y CSV de gastos (e2e, DX-274)', () => {
           .send({
             firstName: 'Ana',
             lastName: 'Gómez',
-            docType: DocType.CC,
+            docType: 'NATIONAL_ID',
             docNumber: 'RES-1',
             sex: Sex.F,
           })

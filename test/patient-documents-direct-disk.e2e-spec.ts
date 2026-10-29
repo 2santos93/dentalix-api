@@ -84,7 +84,7 @@ describe('Documentos: subida directa con el almacén en disco (DX-259, e2e)', ()
       .send({
         firstName: 'Ana',
         lastName: 'Disco',
-        docType: 'CC',
+        docType: 'NATIONAL_ID',
         docNumber: '59200001',
         sex: 'F',
       })
@@ -221,7 +221,7 @@ describe('Documentos: subida directa con el almacén en disco (DX-259, e2e)', ()
         .send({
           firstName: 'Otra',
           lastName: 'Clínica',
-          docType: 'CC',
+          docType: 'NATIONAL_ID',
           docNumber: '59200002',
           sex: 'F',
         })

@@ -2,7 +2,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
-import { Prisma, PrismaClient, DocType, Sex } from '@prisma/client';
+import { Prisma, PrismaClient, Sex } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
@@ -133,7 +133,7 @@ describe('Patients (e2e)', () => {
       .send({
         firstName: 'Ana',
         lastName: 'Gomez',
-        docType: DocType.CC,
+        docType: 'NATIONAL_ID',
         docNumber: '1001',
         sex: Sex.F,
         // No surrounding whitespace: class-validator's IsEmail() rejects a
@@ -290,7 +290,7 @@ describe('Patients (e2e)', () => {
       .send({
         firstName: 'Nulo',
         lastName: 'Prueba',
-        docType: DocType.CC,
+        docType: 'NATIONAL_ID',
         docNumber: '8100',
         sex: Sex.M,
       })
@@ -337,7 +337,7 @@ describe('Patients (e2e)', () => {
           .post('/api/v1/patients')
           .set('X-Tenant-Host', hostFor(clinic.subdomain))
           .set('Authorization', `Bearer ${clinic.accessToken}`)
-          .send({ docType: DocType.CC, sex: Sex.M, ...body })
+          .send({ docType: 'NATIONAL_ID', sex: Sex.M, ...body })
           .expect(201)
       ).body as PatientResponseBody;
     const jose = await createIn(clinicA, {
@@ -405,7 +405,7 @@ describe('Patients (e2e)', () => {
       .send({
         firstName: 'Solo',
         lastName: 'DeA',
-        docType: DocType.CC,
+        docType: 'NATIONAL_ID',
         docNumber: '2002',
         sex: Sex.M,
       })
@@ -454,7 +454,7 @@ describe('Patients (e2e)', () => {
       .send({
         firstName: 'Con',
         lastName: 'Historia',
-        docType: DocType.CC,
+        docType: 'NATIONAL_ID',
         docNumber: '4001',
         sex: Sex.F,
         medicalHistory: {
@@ -499,7 +499,7 @@ describe('Patients (e2e)', () => {
       .send({
         firstName: 'Sin',
         lastName: 'Historia',
-        docType: DocType.CC,
+        docType: 'NATIONAL_ID',
         docNumber: '4002',
         sex: Sex.M,
       })
@@ -531,7 +531,7 @@ describe('Patients (e2e)', () => {
       send(request(app.getHttpServer()).post('/api/v1/patients')).send({
         firstName: 'Doc',
         lastName: docNumber,
-        docType: DocType.CC,
+        docType: 'NATIONAL_ID',
         docNumber,
         sex: Sex.F,
       });

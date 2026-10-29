@@ -122,7 +122,7 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
 
   async function patient(body: object): Promise<string> {
     const res = await as(clinicA)
-      .post('/patients', { docType: 'CC', sex: 'F', ...body })
+      .post('/patients', { docType: 'NATIONAL_ID', sex: 'F', ...body })
       .expect(201);
     return (res.body as { id: string }).id;
   }
@@ -473,7 +473,7 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
     const id = await patient({
       firstName: 'Tomás',
       lastName: 'Ortiz',
-      docType: 'TI',
+      docType: 'NATIONAL_ID',
       sex: 'M',
       birthDate: '2016-04-10',
     });

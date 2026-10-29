@@ -197,7 +197,7 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
       .expect(200);
     const existing = await as(api().post('/api/v1/patients'), a.adminToken)
       .send({
-        docType: 'CC',
+        docType: 'NATIONAL_ID',
         docNumber: '900900',
         firstName: 'Ya',
         lastName: 'Existía',

@@ -70,7 +70,7 @@ describe('Responsables de pago y avisos (e2e, DX-203)', () => {
       target.adminToken,
       target.host,
     )
-      .send({ docType: 'CC', sex: 'F', lastName: 'Ortiz', ...body })
+      .send({ docType: 'NATIONAL_ID', sex: 'F', lastName: 'Ortiz', ...body })
       .expect(201);
     return (res.body as { id: string }).id;
   }
@@ -103,14 +103,14 @@ describe('Responsables de pago y avisos (e2e, DX-203)', () => {
     });
     son = await createPatient(clinic, {
       firstName: 'Tomás',
-      docType: 'TI',
+      docType: 'NATIONAL_ID',
       docNumber: '1011000001',
       sex: 'M',
       birthDate: '2016-04-10',
     });
     daughter = await createPatient(clinic, {
       firstName: 'Sofía',
-      docType: 'TI',
+      docType: 'NATIONAL_ID',
       docNumber: '1011000002',
       birthDate: '2015-02-11',
     });
@@ -179,7 +179,7 @@ describe('Responsables de pago y avisos (e2e, DX-203)', () => {
     const res = await as(api().post(parties(son)), tokens.ASSISTANT)
       .send({
         fullName: ' Luis Ortiz ',
-        docType: 'CC',
+        docType: 'NATIONAL_ID',
         docNumber: '79345678',
         email: 'Luis@Example.com',
         phone: '+57 310 555 0101',
@@ -469,7 +469,7 @@ describe('Responsables de pago y avisos (e2e, DX-203)', () => {
     birth.setUTCMonth(birth.getUTCMonth() - 6);
     const teen = await createPatient(clinic, {
       firstName: 'Irene',
-      docType: 'TI',
+      docType: 'NATIONAL_ID',
       docNumber: '1011000003',
       birthDate: birth.toISOString().slice(0, 10),
     });
@@ -561,7 +561,7 @@ describe('Responsables de pago y avisos (e2e, DX-203)', () => {
       brother = await createPatient(clinic, {
         firstName: 'Iván',
         lastName: 'Gil',
-        docType: 'TI',
+        docType: 'NATIONAL_ID',
         docNumber: '1011000101',
         sex: 'M',
         birthDate: '2014-08-01',
@@ -569,7 +569,7 @@ describe('Responsables de pago y avisos (e2e, DX-203)', () => {
       sister = await createPatient(clinic, {
         firstName: 'Lucía',
         lastName: 'Gil',
-        docType: 'TI',
+        docType: 'NATIONAL_ID',
         docNumber: '1011000102',
         birthDate: '2017-03-03',
       });

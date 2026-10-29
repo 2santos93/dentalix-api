@@ -97,7 +97,7 @@ describe('Plantillas de evolución ligadas a la cita (e2e, DX-170)', () => {
       .send({
         firstName: 'Ana',
         lastName: 'Paciente',
-        docType: 'CC',
+        docType: 'NATIONAL_ID',
         docNumber: doc,
         sex: 'F',
       })

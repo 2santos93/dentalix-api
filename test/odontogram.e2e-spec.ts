@@ -5,7 +5,6 @@ import { App } from 'supertest/types';
 import {
   Prisma,
   PrismaClient,
-  DocType,
   Sex,
   CatalogKind,
   ToothSurface,
@@ -106,7 +105,7 @@ async function createPatient(
     .send({
       firstName: 'Odonto',
       lastName: 'Grama',
-      docType: DocType.CC,
+      docType: 'NATIONAL_ID',
       docNumber,
       sex: Sex.F,
     })

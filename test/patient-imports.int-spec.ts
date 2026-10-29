@@ -706,7 +706,7 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
 
   it('retención: caducar borra las filas preparadas y vacía los errores; a los 90 días, los de lotes terminados', async () => {
     const issues = [
-      { row: 2, column: 'doc', kind: 'ERROR', message: 'x', value: 'CC 123' },
+      { row: 2, column: 'doc', kind: 'ERROR', message: 'x', value: 'RX-123' },
     ];
     const dry = await inTenant(a, () =>
       repo.createBatch({

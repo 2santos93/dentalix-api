@@ -2838,14 +2838,15 @@ Módulo `src/modules/patient-imports`; rutas bajo `/api/v1/patient-imports`,
   fichero): nombres y apellidos obligatorios; tipo de documento genérico
   (DX-327) por, en este orden, los nombres locales de la clínica, el código o
   el nombre genérico (`NATIONAL_ID`, «Documento nacional», `PASSPORT`,
-  «Pasaporte»…) y los sinónimos anteriores (sin etiqueta), o el de por
-  defecto; nº de documento con una sola regla para cualquier tipo (sin
-  espacios, puntos, comas, guiones ni barras, en mayúsculas, hasta 30 letras
-  y dígitos: «V-12.345.678» → «V12345678»; notación científica de Excel
-  detectada); fecha DD/MM/AAAA, AAAA-MM-DD o serie de Excel, no futura ni
-  anterior a 1900; sexo por alias; email; teléfonos en E.164 con el indicativo
-  del país de la **sede del lote** (la de `X-Location-Id` o la de escritura;
-  regla de `toWhatsAppNumber`, DX-005) y un fijo local corto tal cual.
+  «Pasaporte»…) y los códigos y sinónimos anteriores, que se aceptan como su
+  tipo genérico y sin etiqueta, o el de por defecto; nº de documento con una
+  sola regla para cualquier tipo (sin espacios, puntos, comas, guiones ni
+  barras, en mayúsculas, hasta 30 letras y dígitos: «V-12.345.678» →
+  «V12345678»; notación científica de Excel detectada); fecha DD/MM/AAAA,
+  AAAA-MM-DD o serie de Excel, no futura ni anterior a 1900; sexo por alias;
+  email; teléfonos en E.164 con el indicativo del país de la **sede del lote**
+  (la de `X-Location-Id` o la de escritura; regla de `toWhatsAppNumber`,
+  DX-005) y un fijo local corto tal cual.
 - **Deduplicación** por (tipo, nº de documento), con la clave sin puntos ni
   guiones: dentro del fichero gana la primera fila; contra los pacientes vivos
   de la clínica, el existente se **salta** o se le **rellenan solo los campos

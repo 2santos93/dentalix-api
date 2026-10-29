@@ -83,7 +83,7 @@ describe('Recordatorios de cita por email (e2e, DX-026)', () => {
       .send({
         firstName: 'Carolina',
         lastName: 'Duque',
-        docType: 'CC',
+        docType: 'NATIONAL_ID',
         docNumber: doc,
         sex: 'F',
         ...(email ? { email } : {}),
@@ -496,7 +496,7 @@ describe('Recordatorios de cita por email (e2e, DX-026)', () => {
         .send({
           firstName: 'Tomás',
           lastName: 'Ortiz',
-          docType: 'TI',
+          docType: 'NATIONAL_ID',
           docNumber: '26010',
           sex: 'M',
           birthDate: '2016-04-10',

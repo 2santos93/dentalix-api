@@ -574,3 +574,289 @@ describe('pagadores sin país (DX-326)', () => {
     }
   });
 });
+
+/**
+ * DX-327 (spec §6.8, R1, R4, R5, R13, pre-flight M1): los tipos de documento
+ * son genéricos. Los códigos anteriores y los nombres de un país viven solo en
+ * `legacy-doc-type.ts`; el enum guardado lo nombran ese fichero y los tres
+ * escritores de R5; hay un solo mapa de etiquetas y un solo resolvedor de
+ * nombres. Además de la producción de `src`, se recorren la demo
+ * (`prisma/demo/**`, datos y CSV), `prisma/seed*.ts` y `schema.prisma`. Los
+ * literales de los controles se arman por partes.
+ */
+const ROOT = join(SRC, '..');
+const PRISMA_DIR = join(ROOT, 'prisma');
+const PATIENTS_DOMAIN = join(SRC, 'modules', 'patients', 'domain');
+const LEGACY_DOC_TYPE_FILE = join(PATIENTS_DOMAIN, 'legacy-doc-type.ts');
+const DOCUMENT_TYPE_FILE = join(PATIENTS_DOMAIN, 'document-type.ts');
+const DOCUMENT_TYPE_NAME_FILES = [
+  'patients/domain/document-type.ts',
+  'patients/domain/document-type-names.ts',
+  'patients/infrastructure/repositories/prisma-document-type-names.repository.ts',
+].map((path) => join(SRC, 'modules', ...path.split('/')));
+const DOC_TYPE_LEGACY_WRITERS = [
+  'patients/infrastructure/repositories/prisma-patient.repository.ts',
+  'patients/infrastructure/repositories/prisma-responsible-party.repository.ts',
+  'patient-imports/infrastructure/prisma-patient-import.repository.ts',
+].map((path) => join(SRC, 'modules', ...path.split('/')));
+const R13_HEADER =
+  'Excepción G5.3 (DX-334): tipos de documento anteriores a DX-327';
+
+/** Todo fichero bajo `dir` (la demo trae CSV además de `.ts`). */
+function allFiles(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    return entry.isDirectory() ? allFiles(path) : [path];
+  });
+}
+
+/** `prisma/demo/**` y `prisma/seed*.ts`. */
+const demoFiles = (): string[] => [
+  ...allFiles(join(PRISMA_DIR, 'demo')),
+  ...readdirSync(PRISMA_DIR)
+    .filter((name) => /^seed.*\.ts$/.test(name))
+    .map((name) => join(PRISMA_DIR, name)),
+];
+
+const AUTHORITY = 'INVI' + 'MA|marcado ' + 'CE';
+/** Un código anterior como tipo, el enum por su valor o un nombre de un país. */
+const LEGACY_DOC_TYPE = new RegExp(
+  '[\'"`](CC|TI|CE)[\'"`]|DocType\\.(CC|TI|CE)\\b|[Cc]édula|[Tt]arjeta de identidad|[Ee]xtranjería|' +
+    AUTHORITY,
+);
+/** `DocType` en un import de `@prisma/client` (también de varias líneas). */
+const PRISMA_DOC_TYPE_IMPORT =
+  /import\s+(?:type\s+)?\{[^}]*\bDocType\b[^}]*\}\s*from\s*'@prisma\/client'/g;
+/** El enum guardado por su nombre en `$Enums`. */
+const PRISMA_DOC_TYPE_ENUM =
+  /\$Enums\s*(?:\.\s*DocType\b|\[\s*['"]DocType['"]\s*\])|\{[^}]*\bDocType\b[^}]*\}\s*=\s*\$Enums\b/;
+/** La columna antigua en SQL crudo (R4). */
+const LEGACY_DOC_TYPE_COLUMN = /"docType"/;
+const DOC_TYPE_LABEL_MAP =
+  /\b(?:const|let)\s+DOC_TYPE_LABELS?\b|PASSPORT:\s*'Pasaporte'/;
+/** La demo: además, el enum por su nombre y una línea CSV con un código. */
+const DEMO_COUNTRY_DOCUMENT = new RegExp(
+  '[Cc][ée]dula|[Tt]arjeta de identidad|[Ee]xtranjer[ií]a|' +
+    AUTHORITY +
+    '|DocType\\.|^(?:CC|TI|CE);',
+);
+/**
+ * Un nombre largo de documento (spec §6.8). Sobre el código sin comentarios:
+ * la cabecera G5.3 y la prosa llevan tildes. Las claves de sinónimo
+ * normalizadas (`tarjetadeidentidad`) no lo cumplen: van sin tildes ni
+ * espacios, y las comprueba `isLegacyKeyLiteral`.
+ */
+const LONG_DOCUMENT_NAME =
+  /[Cc][ée]dula de|[Tt]arjeta de|[Ee]xtranjería|[ÁÉÍÓÚáéíóú]/;
+/** Literal de `legacy-doc-type.ts`: un código (`CC`, `PASSPORT`) o una clave normalizada. */
+const isLegacyKeyLiteral = (literal: string): boolean =>
+  /^(?:[A-Z_]+|[a-z0-9]+)$/.test(literal);
+/** Una línea que traduce un código y nombra la etiqueta a la vez. */
+const LEGACY_TRANSLATION =
+  /\b(?:docTypeFromCode|docTypeFromStored|resolveDocTypeInput)\s*\(|\bLEGACY_DOC_TYPES\b/;
+const DOC_TYPE_NAME_RESOLUTION =
+  /DOC_TYPE_LABEL\[|docTypeName(?:NationalId|Passport|ResidencePermit|TaxId|Other)\b/;
+/** Un alta de paciente o responsable por Prisma (pre-flight M1). */
+const PATIENT_CREATE =
+  /\b(?:patient|patientResponsibleParty)\.(?:create|createMany)\s*\(/g;
+
+/** Línea sin su comentario (`//`, `/*`, ` *`); para `legacy-doc-type.ts`. */
+const codeOnly = (line: string): string =>
+  /^\s*(\/\/|\/?\*)/.test(line) ? '' : line.replace(/\s\/\/.*$/, '');
+
+/** El argumento de la llamada que abre en `start` (paréntesis equilibrados). */
+function callArgument(text: string, start: number): string {
+  let depth = 0;
+  for (let i = start; i < text.length; i += 1) {
+    if (text[i] === '(') depth += 1;
+    if (text[i] === ')') {
+      depth -= 1;
+      if (depth === 0) return text.slice(start + 1, i);
+    }
+  }
+  return text.slice(start + 1);
+}
+
+/** Un alta con `documentType` y sin `docType`: el hueco OTHER (spec §3.3). */
+const writesDocumentTypeAlone = (argument: string): boolean =>
+  /\bdocumentType\b/.test(argument) && !/\bdocType\b/.test(argument);
+
+/** `fichero:línea` de cada alta de paciente o responsable sin la pareja de R5. */
+function patientCreatesWithoutLegacyPair(files: string[]): string[] {
+  return files.flatMap((file) => {
+    const text = readFileSync(file, 'utf8');
+    return [...text.matchAll(PATIENT_CREATE)].flatMap((match) => {
+      const open = match.index + match[0].length - 1;
+      const line = text.slice(0, match.index).split('\n').length;
+      return writesDocumentTypeAlone(callArgument(text, open))
+        ? [`${relative(SRC, file)}:${line}`]
+        : [];
+    });
+  });
+}
+
+describe('tipos de documento genéricos (DX-327)', () => {
+  const production = tsFiles(SRC).filter(isProduction);
+
+  it('architecture: no legacy document type or name outside legacy-doc-type.ts', () => {
+    const files = [
+      ...production.filter((file) => file !== LEGACY_DOC_TYPE_FILE),
+      ...demoFiles(),
+      join(PRISMA_DIR, 'schema.prisma'),
+    ];
+    expect(files.length).toBeGreaterThan(500);
+    expect(offending(files, (line) => LEGACY_DOC_TYPE.test(line))).toEqual([]);
+  });
+
+  it('architecture: only legacy-doc-type.ts and the three insert writers name the stored legacy enum', () => {
+    expect(DOC_TYPE_LEGACY_WRITERS).toHaveLength(3);
+    const allowed = [LEGACY_DOC_TYPE_FILE, ...DOC_TYPE_LEGACY_WRITERS];
+    const files = production.filter((file) => !allowed.includes(file));
+    expect([
+      ...offending(files, (line) => PRISMA_DOC_TYPE_ENUM.test(line)),
+      ...offendingMatches(files, PRISMA_DOC_TYPE_IMPORT, () => true),
+    ]).toEqual([]);
+  });
+
+  it('architecture: no raw SQL names the legacy docType column', () => {
+    expect(
+      offending(production, (line) => LEGACY_DOC_TYPE_COLUMN.test(line)),
+    ).toEqual([]);
+  });
+
+  it('architecture: one document label map', () => {
+    const hits = offending(production, (line) => DOC_TYPE_LABEL_MAP.test(line));
+    expect(hits.length).toBeGreaterThan(0);
+    expect(
+      hits.filter(
+        (hit) => !hit.startsWith(relative(SRC, DOCUMENT_TYPE_FILE) + ':'),
+      ),
+    ).toEqual([]);
+  });
+
+  it('legacy-doc-type.ts carries the G5.3 header', () => {
+    expect(
+      readFileSync(LEGACY_DOC_TYPE_FILE, 'utf8')
+        .slice(0, 200)
+        .includes(R13_HEADER),
+    ).toBe(true);
+  });
+
+  it('architecture: the demo names no country document or authority', () => {
+    const files = demoFiles();
+    expect(files.some((file) => file.endsWith('.csv'))).toBe(true);
+    expect(
+      offending(files, (line) => DEMO_COUNTRY_DOCUMENT.test(line)),
+    ).toEqual([]);
+  });
+
+  it('architecture: no code derives a document label from a legacy code', () => {
+    const legacyCode = readFileSync(LEGACY_DOC_TYPE_FILE, 'utf8')
+      .split('\n')
+      .map(codeOnly);
+    expect(
+      legacyCode.flatMap((line, i) =>
+        LONG_DOCUMENT_NAME.test(line) ? [`legacy-doc-type.ts:${i + 1}`] : [],
+      ),
+    ).toEqual([]);
+    const literals = legacyCode
+      .filter((line) => !/^\s*import\b|\bfrom\s+'/.test(line))
+      .flatMap((line) => [...line.matchAll(/'([^']*)'/g)].map((m) => m[1]));
+    expect(literals.length).toBeGreaterThan(30);
+    expect(literals.filter((literal) => !isLegacyKeyLiteral(literal))).toEqual(
+      [],
+    );
+    expect(
+      offending(
+        production,
+        (line) =>
+          line.includes('docTypeLabel') && LEGACY_TRANSLATION.test(line),
+      ),
+    ).toEqual([]);
+  });
+
+  it('tests never create a patient with documentType and no docType', () => {
+    const files = [
+      ...tsFiles(join(ROOT, 'test')),
+      ...tsFiles(SRC).filter((file) => file.endsWith('.spec.ts')),
+    ];
+    expect(files.length).toBeGreaterThan(300);
+    const creates = files.flatMap((file) => [
+      ...readFileSync(file, 'utf8').matchAll(PATIENT_CREATE),
+    ]);
+    expect(creates.length).toBeGreaterThan(100);
+    expect(patientCreatesWithoutLegacyPair(files)).toEqual([]);
+  });
+
+  it('architecture: one document type name resolver', () => {
+    const files = production.filter(
+      (file) => !DOCUMENT_TYPE_NAME_FILES.includes(file),
+    );
+    expect(
+      offending(files, (line) => DOC_TYPE_NAME_RESOLUTION.test(line)),
+    ).toEqual([]);
+  });
+
+  it('the document type patterns catch each legacy form and skip neutral text', () => {
+    const caught = (line: string): boolean =>
+      LEGACY_DOC_TYPE.test(line) ||
+      LEGACY_DOC_TYPE_COLUMN.test(line) ||
+      PRISMA_DOC_TYPE_ENUM.test(line) ||
+      [...line.matchAll(PRISMA_DOC_TYPE_IMPORT)].length > 0;
+    for (const line of [
+      "docType: 'C" + "C',",
+      'DocType.' + 'TI',
+      'C\u00e9dula de ciudadan\u00eda',
+      'con marcado ' + 'CE',
+      'INVI' + 'MA 2019',
+      'Tarjeta' + ' de identidad',
+      'SELECT p."doc' + 'Type" FROM patients p',
+      'import { Doc' + "Type } from '@prisma/client';",
+      'import {\n  Doc' + 'Type,\n  Prisma,\n} from ' + "'@prisma/client';",
+      '$Enums.Doc' + 'Type',
+    ]) {
+      expect({ line, caught: caught(line) }).toEqual({ line, caught: true });
+    }
+    for (const line of [
+      "docType: 'NATIONAL_ID',",
+      'docType: dto.docType,',
+      "enumName: 'DocType',",
+      "import { DocumentType } from '@prisma/client';",
+      "import type { LegacyDocType } from './legacy-doc-type';",
+      'Documento nacional 123',
+    ]) {
+      expect({ line, caught: caught(line) }).toEqual({ line, caught: false });
+    }
+    expect(DEMO_COUNTRY_DOCUMENT.test('C' + 'C;123;Ana')).toBe(true);
+    expect(DEMO_COUNTRY_DOCUMENT.test('INVI' + 'MA 2019DM-0019876')).toBe(true);
+    expect(DEMO_COUNTRY_DOCUMENT.test('Documento nacional;DEMO-I001')).toBe(
+      false,
+    );
+    expect(LONG_DOCUMENT_NAME.test('Tarjeta' + ' de identidad')).toBe(true);
+    expect(LONG_DOCUMENT_NAME.test('Extranjer\u00eda')).toBe(true);
+    expect(isLegacyKeyLiteral('tarjetade' + 'identidad')).toBe(true);
+    expect(isLegacyKeyLiteral('Tarjeta de ' + 'identidad')).toBe(false);
+    expect(
+      LEGACY_TRANSLATION.test('docTypeLabel: docTypeFromCode(row.docType)'),
+    ).toBe(true);
+    expect(DOC_TYPE_NAME_RESOLUTION.test('DOC_TYPE_LABEL[type]')).toBe(true);
+    expect(DOC_TYPE_NAME_RESOLUTION.test('DOC_TYPE_LABEL_MAX')).toBe(false);
+    const create = 'raw.patient' + '.create';
+    expect(
+      writesDocumentTypeAlone(
+        callArgument(
+          `${create}({ data: { documentType: 'OTHER', docNumber: '1' } })`,
+          create.length,
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      writesDocumentTypeAlone(
+        callArgument(
+          `${create}({ data: { documentType: 'OTHER', docType: legacyStoredDocType('OTHER') } })`,
+          create.length,
+        ),
+      ),
+    ).toBe(false);
+  });
+});

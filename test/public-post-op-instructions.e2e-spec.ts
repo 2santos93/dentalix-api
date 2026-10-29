@@ -126,7 +126,7 @@ describe('Indicaciones postoperatorias por enlace público (e2e, DX-222)', () =>
 
     const patient = await as(clinicA)
       .post('/patients', {
-        docType: 'CC',
+        docType: 'NATIONAL_ID',
         docNumber: DOC_NUMBER,
         sex: 'F',
         firstName: 'Mariana',

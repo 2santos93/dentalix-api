@@ -162,7 +162,7 @@ describe('Horario de los profesionales por sede (e2e, DX-233)', () => {
         .send({
           firstName,
           lastName: 'Horario',
-          docType: 'CC',
+          docType: 'NATIONAL_ID',
           docNumber: doc,
           sex: 'F',
         })

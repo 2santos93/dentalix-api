@@ -2,7 +2,6 @@ import { INestApplication } from '@nestjs/common';
 import {
   CatalogKind,
   ClinicRole,
-  DocType,
   Prisma,
   PrismaClient,
   Sex,
@@ -109,7 +108,7 @@ describe('Precio resuelto y foto en el ítem del plan (e2e, DX-105)', () => {
     create('/patients', {
       firstName,
       lastName: 'Convenio',
-      docType: DocType.CC,
+      docType: 'NATIONAL_ID',
       docNumber: String(Math.floor(Math.random() * 1e9)),
       sex: Sex.F,
     });

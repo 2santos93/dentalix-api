@@ -2,7 +2,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
-import { DocType, Prisma, PrismaClient, Sex } from '@prisma/client';
+import { Prisma, PrismaClient, Sex } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
@@ -79,7 +79,7 @@ describe('treatment plan currency whitelist (e2e)', () => {
       .send({
         firstName: 'Moneda',
         lastName: 'Test',
-        docType: DocType.CC,
+        docType: 'NATIONAL_ID',
         docNumber: 'CUR-001',
         sex: Sex.F,
       })

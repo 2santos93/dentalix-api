@@ -75,7 +75,7 @@ describe('patient location (e2e)', () => {
       .send({
         firstName: 'Ana',
         lastName: 'G',
-        docType: 'CC',
+        docType: 'NATIONAL_ID',
         sex: 'F',
         countryCode: 'CO',
         cityId: coCityId,
@@ -94,7 +94,7 @@ describe('patient location (e2e)', () => {
       .send({
         firstName: 'B',
         lastName: 'B',
-        docType: 'CC',
+        docType: 'NATIONAL_ID',
         sex: 'M',
         countryCode: 'US',
         cityId: coCityId,
@@ -110,7 +110,7 @@ describe('patient location (e2e)', () => {
       .send({
         firstName: 'C',
         lastName: 'C',
-        docType: 'CC',
+        docType: 'NATIONAL_ID',
         sex: 'M',
         cityId: coCityId,
       })

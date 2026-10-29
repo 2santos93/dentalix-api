@@ -386,7 +386,7 @@ describe('DX-247 · auditoría de «Sin cambios hoy» por la API (int)', () => {
     clinic = await registerClinic(app, 'dx247-int-audit');
     const created = await as(api().post('/api/v1/patients'))
       .send({
-        docType: 'CC',
+        docType: 'NATIONAL_ID',
         sex: 'F',
         firstName: 'Paula',
         lastName: 'Premedicada',

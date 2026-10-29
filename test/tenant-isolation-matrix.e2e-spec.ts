@@ -2,7 +2,6 @@ import { INestApplication } from '@nestjs/common';
 import {
   CatalogKind,
   ClinicRole,
-  DocType,
   Prisma,
   PrismaClient,
   Sex,
@@ -296,7 +295,7 @@ async function seedClinicData(
   const patient = await create(app, clinic, '/patients', {
     firstName: 'Paciente',
     lastName: clinic.subdomain,
-    docType: DocType.CC,
+    docType: 'NATIONAL_ID',
     docNumber,
     sex: Sex.F,
   });
@@ -797,7 +796,7 @@ async function seedBExtras(
   const secondPatient = await create(app, b, '/patients', {
     firstName: 'Segunda',
     lastName: 'Paciente de B',
-    docType: DocType.CC,
+    docType: 'NATIONAL_ID',
     docNumber: '9102',
     sex: Sex.F,
   });
@@ -2032,7 +2031,7 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       body: () => ({
         firstName: 'Con sede',
         lastName: 'Ajena',
-        docType: DocType.CC,
+        docType: 'NATIONAL_ID',
         docNumber: '9199',
         sex: Sex.M,
       }),
@@ -2441,7 +2440,7 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       body: () => ({
         firstName: 'Con política',
         lastName: 'Ajena',
-        docType: DocType.CC,
+        docType: 'NATIONAL_ID',
         docNumber: '9198',
         sex: Sex.F,
         dataConsents: {

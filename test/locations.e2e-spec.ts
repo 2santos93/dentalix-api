@@ -222,7 +222,7 @@ describe('Locations / multi-sede (e2e)', () => {
         request(app.getHttpServer()).post('/api/v1/patients').send({
           firstName: 'Ana',
           lastName: 'Ruiz',
-          docType: 'CC',
+          docType: 'NATIONAL_ID',
           docNumber: '999',
           sex: 'F',
         }),

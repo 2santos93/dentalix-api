@@ -73,7 +73,7 @@ describe('Coberturas del paciente (e2e, DX-153)', () => {
       target.host,
     )
       .send({
-        docType: 'CC',
+        docType: 'NATIONAL_ID',
         sex: 'F',
         lastName: 'Ortiz',
         docNumber: String(Math.floor(Math.random() * 1e9)),
