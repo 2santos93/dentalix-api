@@ -3,7 +3,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
-import { ClinicRole, DocType, Prisma, PrismaClient, Sex } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient, Sex } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { applyBodyLimits } from '../src/config/body-limits';
 import { PasswordService } from '../src/shared/crypto/password.service';
@@ -280,15 +280,17 @@ describe('Recetas — /patients/:id/prescriptions, /prescriptions, /prescription
     firstName: string,
     docNumber?: string,
     birthDate?: string,
+    doc: { docType?: string; docTypeLabel?: string } = {},
   ): Promise<string> {
     const res = await as(session)
       .post('/patients', {
         firstName,
         lastName: 'Receta',
-        docType: DocType.CC,
+        docType: 'NATIONAL_ID',
         docNumber,
         birthDate,
         sex: Sex.F,
+        ...doc,
       })
       .expect(201);
     return (res.body as { id: string }).id;
@@ -406,7 +408,7 @@ describe('Recetas — /patients/:id/prescriptions, /prescriptions, /prescription
         professionalId: dentistA.userId,
         professionalLicense: 'RM-12345',
         clinicalRecordNumber: 'RX-A-1',
-        patientDocument: 'CC RX-A-1',
+        patientDocument: 'Documento nacional RX-A-1',
         allergyOverride: false,
       });
       expect(new Date(rx.issuedAt).getTime()).toBeGreaterThanOrEqual(
@@ -909,7 +911,7 @@ describe('Recetas — /patients/:id/prescriptions, /prescriptions, /prescription
       }).expect(201);
       const rx = res.body as RxBody;
       expect(rx.country).toBeNull();
-      expect(rx.patientDocument).toBe('CC RX-A-1');
+      expect(rx.patientDocument).toBe('Documento nacional RX-A-1');
       const row = await raw.prescription.findUniqueOrThrow({
         where: { id: rx.id },
         include: { items: { orderBy: { position: 'asc' } } },
@@ -957,7 +959,7 @@ describe('Recetas — /patients/:id/prescriptions, /prescriptions, /prescription
         patientWeightKg: 64,
         professionalSpecialty: 'Cirugía oral',
         clinicalRecordNumber: 'RX-A-30',
-        patientDocument: 'CC RX-A-30',
+        patientDocument: 'Documento nacional RX-A-30',
       });
       expect(rx).not.toHaveProperty('singleFormat');
 
@@ -1138,7 +1140,7 @@ describe('Recetas — /patients/:id/prescriptions, /prescriptions, /prescription
       expect((offDoc.body as RxBody).items[0].quantityInWords).toBeNull();
     });
 
-    it('a row inserted the old way during the rollout validates with v2', async () => {
+    it('legacy row inserted the old way during the rollout validates with v2', async () => {
       const id = await insertLegacyRow(siteA, {
         country: 'CO',
         patientDocument: 'CC RX-A-1',
@@ -1165,6 +1167,68 @@ describe('Recetas — /patients/:id/prescriptions, /prescriptions, /prescription
       expect(body.items[0].quantityInWords).toBe('veintiuno');
       const row = await raw.prescription.findUniqueOrThrow({ where: { id } });
       expect(row.singleFormat).toBe(false);
+    });
+
+    it('a new prescription prints «ID local RX…» and a TAX_ID one «Identificación fiscal RX…»', async () => {
+      const labelled = await createPatient(
+        clinicA,
+        'Lia',
+        'RX-A-40',
+        undefined,
+        { docTypeLabel: 'ID local' },
+      );
+      const fiscal = await createPatient(clinicA, 'Tea', 'RX-A-41', undefined, {
+        docType: 'TAX_ID',
+      });
+      const one = (await issueAt(siteA, labelled).expect(201)).body as RxBody;
+      expect(one.patientDocument).toBe('ID local RX-A-40');
+      const two = (await issueAt(siteA, fiscal).expect(201)).body as RxBody;
+      expect(two.patientDocument).toBe('Identificación fiscal RX-A-41');
+      for (const rx of [one, two]) {
+        const doc = await as(clinicA, dentistA.token)
+          .get(`/prescriptions/${rx.id}`)
+          .expect(200);
+        expect(doc.body).toMatchObject({
+          patientDocument: rx.patientDocument,
+          integrityOk: true,
+        });
+      }
+    });
+
+    it('legacy prescription keeps its frozen «CC …» document and integrity', async () => {
+      const id = await insertLegacyRow(siteA, {
+        country: 'CO',
+        patientDocument: 'CC RX-L-1',
+        patientBirthYear: null,
+        clinicalRecordNumber: 'RX-L-1',
+        professionalLicense: 'RM-12345',
+        safetyRulesVersion: 'RX_SAFETY_V1',
+        safetyAlerts: [],
+        packages: null,
+      });
+      // Ni un nombre local nuevo ni la etiqueta del paciente la tocan.
+      await raw.tenant.update({
+        where: { id: clinicA.tenantId },
+        data: { docTypeNameNationalId: 'Documento A' },
+      });
+      try {
+        const doc = await as(clinicA, dentistA.token)
+          .get(`/prescriptions/${id}`)
+          .expect(200);
+        expect(doc.body).toMatchObject({
+          patientDocument: 'CC RX-L-1',
+          integrityOk: true,
+        });
+        const row = await raw.prescription.findUniqueOrThrow({
+          where: { id },
+        });
+        expect(row.patientDocument).toBe('CC RX-L-1');
+      } finally {
+        await raw.tenant.update({
+          where: { id: clinicA.tenantId },
+          data: { docTypeNameNationalId: null },
+        });
+      }
     });
 
     it('legacy ES-format row inserted the old way renders its issued fields with v1', async () => {

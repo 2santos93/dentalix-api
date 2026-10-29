@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
+import { DocumentTypeNamesModule } from '../document-type-names/document-type-names.module';
 import {
   CheckPrescriptionSafetyUseCase,
   GetPrescriptionIssuerUseCase,
@@ -41,7 +42,7 @@ import { PrescriptionTemplatesController } from './presentation/prescription-tem
  * plantillas y ajustes de la receta por clínica.
  */
 @Module({
-  imports: [JwtModule.register({})],
+  imports: [JwtModule.register({}), DocumentTypeNamesModule],
   controllers: [
     PatientPrescriptionsController,
     PrescriptionsController,

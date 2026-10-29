@@ -4,6 +4,7 @@ import {
   type ReceiptPlanBalance,
 } from '../../domain/receipt-snapshot';
 import { formatReceiptNumber } from '../../domain/receipt-number';
+import { readDocumentTypeNames } from '../../../patients/infrastructure/repositories/prisma-document-type-names.repository';
 
 /** El abono recién insertado, en la misma transacción. */
 export interface ReceiptPaymentRow {
@@ -25,8 +26,8 @@ export interface ReceiptPaymentRow {
 /**
  * Emite el recibo de caja de un abono (DX-136) DENTRO de la transacción que
  * lo inserta:
- *   1. lee clínica, sede (y su serie), paciente, plan (o saldo migrado,
- *      DX-262) y quién cobró;
+ *   1. lee clínica (y sus nombres de documento, DX-327), sede (y su serie),
+ *      paciente, plan (o saldo migrado, DX-262) y quién cobró;
  *   2. avanza el contador de la serie con un UPSERT: la fila del contador
  *      queda bloqueada hasta el COMMIT, así que dos abonos simultáneos de la
  *      misma sede se ordenan (sin duplicados) y un rollback deshace el
@@ -40,8 +41,8 @@ export async function issuePaymentReceipt(
   payment: ReceiptPaymentRow,
   planBalance: ReceiptPlanBalance | null,
 ): Promise<string> {
-  const [location, tenant, patient, plan, opening, cashier] = await Promise.all(
-    [
+  const [location, tenant, names, patient, plan, opening, cashier] =
+    await Promise.all([
       tx.location.findFirstOrThrow({
         where: { id: payment.locationId },
         select: { id: true, name: true, address: true, receiptPrefix: true },
@@ -50,13 +51,15 @@ export async function issuePaymentReceipt(
         where: { id: payment.tenantId },
         select: { name: true },
       }),
+      readDocumentTypeNames(tx, payment.tenantId),
       tx.patient.findFirstOrThrow({
         where: { id: payment.patientId },
         select: {
           id: true,
           firstName: true,
           lastName: true,
-          docType: true,
+          documentType: true,
+          docTypeLabel: true,
           docNumber: true,
         },
       }),
@@ -78,8 +81,7 @@ export async function issuePaymentReceipt(
             select: { id: true, fullName: true },
           })
         : Promise.resolve(null),
-    ],
-  );
+    ]);
   if (!location.receiptPrefix) {
     // El trigger de `locations` la pone al crear la sede y la migración la
     // rellenó en las existentes: llegar aquí es un fallo de despliegue.
@@ -94,35 +96,51 @@ export async function issuePaymentReceipt(
     DO UPDATE SET "lastNumber" = "payment_receipt_counters"."lastNumber" + 1
     RETURNING "lastNumber"`;
 
-  const snapshot = buildReceiptSnapshot({
-    // DX-019 añadirá razón social, NIT/NIF y dirección fiscal de la clínica;
-    // hoy no existen y el recibo dice «Datos fiscales pendientes».
-    clinic: { name: tenant.name, legalName: null, taxId: null, address: null },
-    location: {
-      id: location.id,
-      name: location.name,
-      address: location.address,
+  const snapshot = buildReceiptSnapshot(
+    {
+      // DX-019 añadirá razón social, NIT/NIF y dirección fiscal de la clínica;
+      // hoy no existen y el recibo dice «Datos fiscales pendientes».
+      clinic: {
+        name: tenant.name,
+        legalName: null,
+        taxId: null,
+        address: null,
+      },
+      location: {
+        id: location.id,
+        name: location.name,
+        address: location.address,
+      },
+      patient: {
+        id: patient.id,
+        firstName: patient.firstName,
+        lastName: patient.lastName,
+        docType: patient.documentType,
+        docTypeLabel: patient.docTypeLabel,
+        docNumber: patient.docNumber,
+      },
+      payment: {
+        id: payment.id,
+        amount: payment.amount,
+        currency: payment.currency,
+        method: payment.method,
+        paidAt: payment.paidAt,
+        paidOn: payment.paidOn,
+      },
+      plan,
+      openingBalance: opening
+        ? {
+            id: opening.id,
+            concept: opening.concept,
+            asOfDate: opening.asOfDate.toISOString().slice(0, 10),
+          }
+        : null,
+      planBalance,
+      cashier,
     },
-    patient,
-    payment: {
-      id: payment.id,
-      amount: payment.amount,
-      currency: payment.currency,
-      method: payment.method,
-      paidAt: payment.paidAt,
-      paidOn: payment.paidOn,
-    },
-    plan,
-    openingBalance: opening
-      ? {
-          id: opening.id,
-          concept: opening.concept,
-          asOfDate: opening.asOfDate.toISOString().slice(0, 10),
-        }
-      : null,
-    planBalance,
-    cashier,
-  });
+    // El nombre visible queda congelado en la foto (DX-327, R18).
+    names,
+  );
 
   await tx.paymentReceipt.create({
     data: {

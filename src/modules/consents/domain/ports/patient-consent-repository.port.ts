@@ -1,8 +1,8 @@
-import type { ConsentSignerType, DocType } from '@prisma/client';
+import type { ConsentSignerType, DocumentType } from '@prisma/client';
 import {
   PatientConsent,
-  PatientConsentDocument,
   PatientConsentSummary,
+  StoredPatientConsentDocument,
 } from '../entities/patient-consent.entity';
 
 /** Lo que hace falta para resolver las variables de una plantilla. */
@@ -10,7 +10,9 @@ export interface ConsentSigningContext {
   patient: {
     firstName: string;
     lastName: string;
-    docType: DocType;
+    docType: DocumentType;
+    /** DX-327: nombre libre del documento (R7); null = sin etiqueta. */
+    docTypeLabel: string | null;
     docNumber: string | null;
   };
   clinicName: string;
@@ -75,5 +77,5 @@ export interface PatientConsentRepository {
   findDocument(
     patientId: string,
     id: string,
-  ): Promise<Omit<PatientConsentDocument, 'integrityOk'> | null>;
+  ): Promise<StoredPatientConsentDocument | null>;
 }

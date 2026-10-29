@@ -293,7 +293,8 @@ export class PrismaPrescriptionRepository implements PrescriptionRepository {
           id: true,
           firstName: true,
           lastName: true,
-          docType: true,
+          documentType: true,
+          docTypeLabel: true,
           docNumber: true,
           birthDate: true,
         },
@@ -311,8 +312,10 @@ export class PrismaPrescriptionRepository implements PrescriptionRepository {
           safetyFlags: true,
         },
       });
+      const { documentType, ...rest } = patient;
       return {
-        ...patient,
+        ...rest,
+        docType: documentType,
         anamnesis: history ? readSafetyAnamnesis(history) : null,
       };
     });

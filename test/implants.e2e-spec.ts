@@ -54,6 +54,7 @@ interface CardBody {
 interface LotRow {
   patientId: string;
   patientName: string;
+  patientDocument: string | null;
   toothNumber: string;
   professionalName: string;
   placedOn: string;
@@ -68,7 +69,7 @@ const IMPLANT = {
   lot: LOT,
   diameterMm: 4.1,
   lengthMm: 10,
-  sanitaryRegistration: 'INVIMA 2020DM-0001',
+  sanitaryRegistration: 'REG-2020-0001',
   notes: 'Torque 35 Ncm',
 };
 const ABUTMENT = {
@@ -113,11 +114,13 @@ describe('Implantes — /patients/:id/implants, /implant-card, /implants (DX-191
     clinic: Clinic,
     firstName: string,
     docNumber: string,
+    docTypeLabel?: string,
   ): Promise<string> {
     const res = await call(clinic, clinic.adminToken, 'post', '/patients', {
       firstName,
       lastName: 'Implante',
-      docType: 'CC',
+      docType: 'NATIONAL_ID',
+      docTypeLabel,
       docNumber,
       sex: 'F',
     }).expect(201);
@@ -269,7 +272,7 @@ describe('Implantes — /patients/:id/implants, /implant-card, /implants (DX-191
       const card = res.body as CardBody;
       expect(card).toMatchObject({
         patientName: 'Lucía Implante',
-        patientDocument: 'CC 52000001',
+        patientDocument: 'Documento nacional 52000001',
         clinicName: 'Clinica impl-a',
         placedOn: today,
         professionals: ['Miembro DENTIST'],
@@ -666,6 +669,76 @@ describe('Implantes — /patients/:id/implants, /implant-card, /implants (DX-191
         { ...IMPLANT, lot: 'LOT-PLAN-01', treatmentPlanItemId: own },
       ).expect(201);
       expect(ok.body).toMatchObject({ treatmentPlanItemId: own });
+    });
+  });
+
+  describe('nombre del documento (DX-327)', () => {
+    const lotSearch = async (lot: string) =>
+      (
+        await call(
+          a,
+          a.adminToken,
+          'get',
+          `/implants/search?lot=${lot}`,
+        ).expect(200)
+      ).body as LotRow[];
+
+    it('the implant card and the lot search print the free label', async () => {
+      const patient = await createPatient(a, 'Lia', 'IMPL-40', 'ID local');
+      const placed = (
+        await call(a, dentist.token, 'post', `/patients/${patient}/implants`, {
+          ...IMPLANT,
+          lot: 'LOT-DX327-01',
+        }).expect(201)
+      ).body as { placedOn: string };
+      const card = (
+        await call(
+          a,
+          reception,
+          'get',
+          `/patients/${patient}/implant-card?date=${placed.placedOn}`,
+        ).expect(200)
+      ).body as CardBody;
+      expect(card.patientDocument).toBe('ID local IMPL-40');
+      expect(await lotSearch('LOT-DX327-01')).toEqual([
+        expect.objectContaining({
+          patientId: patient,
+          patientDocument: 'ID local IMPL-40',
+        }),
+      ]);
+    });
+
+    it('legacy TI patient seeded by SQL prints «Documento nacional …» in the lot search', async () => {
+      const [{ id }] = await raw.$queryRaw<{ id: string }[]>`
+        INSERT INTO "patients" ("id","tenantId","firstName","lastName","docType","docNumber","updatedAt")
+        VALUES (gen_random_uuid(), ${a.tenantId}::uuid, 'Anterior', 'Implante', 'TI', 'IMPL-41', now())
+        RETURNING "id"::text AS "id"`;
+      await call(a, dentist.token, 'post', `/patients/${id}/implants`, {
+        ...IMPLANT,
+        lot: 'LOT-DX327-02',
+      }).expect(201);
+      expect(await lotSearch('LOT-DX327-02')).toEqual([
+        expect.objectContaining({
+          patientId: id,
+          patientDocument: 'Documento nacional IMPL-41',
+        }),
+      ]);
+
+      // En vivo: el nombre local de hoy de la clínica.
+      await raw.tenant.update({
+        where: { id: a.tenantId },
+        data: { docTypeNameNationalId: 'Documento A' },
+      });
+      try {
+        expect((await lotSearch('LOT-DX327-02'))[0].patientDocument).toBe(
+          'Documento A IMPL-41',
+        );
+      } finally {
+        await raw.tenant.update({
+          where: { id: a.tenantId },
+          data: { docTypeNameNationalId: null },
+        });
+      }
     });
   });
 });

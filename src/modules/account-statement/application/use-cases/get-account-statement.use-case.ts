@@ -16,6 +16,8 @@ import {
   type StatementFamilyRepository,
 } from '../../domain/ports/statement-family-repository.port';
 import { statementAddressee } from '../statement-addressee';
+import { DocumentTypeNamesReader } from '../../../patients/domain/ports/document-type-names-repository.port';
+import { documentTypeName } from '../../../patients/domain/document-type';
 
 export interface GetAccountStatementInput {
   /** Primer día de los movimientos (YYYY-MM-DD), inclusive. */
@@ -53,6 +55,7 @@ export class GetAccountStatementUseCase {
     private readonly now: AccountStatementClock,
     @Inject(STATEMENT_FAMILY_REPOSITORY)
     private readonly family: StatementFamilyRepository,
+    private readonly documentTypeNames: DocumentTypeNamesReader,
   ) {}
 
   /** `actor` (del token) solo decide el `canVoid` de cada movimiento. */
@@ -71,9 +74,10 @@ export class GetAccountStatementUseCase {
       throw new BadRequestException('from must be on or before to');
     }
 
-    const [data, notice] = await Promise.all([
+    const [data, notice, names] = await Promise.all([
       this.repo.load(patientId),
       this.family.loadNotice(patientId),
+      this.documentTypeNames.get(),
     ]);
     if (!data) {
       throw new NotFoundException(PATIENT_NOT_FOUND_MESSAGE);
@@ -90,7 +94,15 @@ export class GetAccountStatementUseCase {
     return {
       issuedAt,
       clinic: data.clinic,
-      patient: data.patient,
+      // En vivo: el nombre visible de hoy (DX-327, R17 y R18).
+      patient: {
+        ...data.patient,
+        docTypeName: documentTypeName(
+          data.patient.docType,
+          data.patient.docTypeLabel,
+          names,
+        ),
+      },
       // DX-203: un menor o un paciente sin email, a nombre de su responsable.
       addressee: statementAddressee(data.patient, notice, issuedAt),
       range: { from: input.from ?? null, to: input.to ?? null },

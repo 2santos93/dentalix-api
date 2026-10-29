@@ -51,7 +51,11 @@ export class PlanQuotePatientDto {
   @ApiProperty()
   name!: string;
 
-  @ApiProperty({ type: String, nullable: true, example: 'CC 1020304050' })
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'Documento nacional DOC-0001',
+  })
   document!: string | null;
 }
 

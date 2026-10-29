@@ -3396,7 +3396,7 @@ model PatientImplant {
   udi                  String?
   diameterMm           Decimal?           @db.Decimal(4, 2)
   lengthMm             Decimal?           @db.Decimal(4, 2)
-  // Registro sanitario INVIMA (CO) o marcado CE (ES).
+  // Registro sanitario o certificación del producto, texto libre.
   sanitaryRegistration String?
   notes                String?
   createdAt            DateTime           @default(now())

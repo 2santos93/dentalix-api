@@ -2,8 +2,14 @@ import {
   RECEIPT_LEGAL_NOTICE,
   buildReceiptSnapshot,
   parseReceiptSnapshot,
+  receiptPatientView,
+  type ReceiptSnapshot,
   type ReceiptSnapshotInput,
 } from './receipt-snapshot';
+import { legacyStoredDocType } from '../../patients/domain/legacy-doc-type';
+import { NO_LOCAL_NAMES } from '../../document-type-names/__fixtures__/fixed-document-type-names.reader';
+
+const LOCAL = { ...NO_LOCAL_NAMES, NATIONAL_ID: 'Documento A' };
 
 const input = (
   overrides: Partial<ReceiptSnapshotInput> = {},
@@ -18,7 +24,8 @@ const input = (
     id: 'pat-1',
     firstName: 'Carolina',
     lastName: 'Duque',
-    docType: 'CC',
+    docType: 'NATIONAL_ID',
+    docTypeLabel: null,
     docNumber: '1012345678',
   },
   payment: {
@@ -46,7 +53,7 @@ const input = (
 
 describe('buildReceiptSnapshot (DX-136)', () => {
   it('congela clínica, sede, paciente, abono, plan, saldo y quién cobró', () => {
-    expect(buildReceiptSnapshot(input())).toEqual({
+    expect(buildReceiptSnapshot(input(), NO_LOCAL_NAMES)).toEqual({
       version: 1,
       clinic: {
         name: 'Clínica Demo',
@@ -63,7 +70,10 @@ describe('buildReceiptSnapshot (DX-136)', () => {
       patient: {
         id: 'pat-1',
         fullName: 'Carolina Duque',
-        docType: 'CC',
+        docType: legacyStoredDocType('NATIONAL_ID'),
+        documentType: 'NATIONAL_ID',
+        docTypeLabel: null,
+        docTypeName: 'Documento nacional',
         docNumberMasked: '******5678',
       },
       payment: {
@@ -93,7 +103,7 @@ describe('buildReceiptSnapshot (DX-136)', () => {
   });
 
   it('nunca guarda el documento del paciente en claro', () => {
-    const json = JSON.stringify(buildReceiptSnapshot(input()));
+    const json = JSON.stringify(buildReceiptSnapshot(input(), NO_LOCAL_NAMES));
     expect(json).not.toContain('1012345678');
   });
 
@@ -107,6 +117,7 @@ describe('buildReceiptSnapshot (DX-136)', () => {
           address: 'Cra 7 # 72-10, Bogotá',
         },
       }),
+      NO_LOCAL_NAMES,
     );
     expect(snapshot.fiscalDataPending).toBe(false);
     expect(snapshot.clinic.taxId).toBe('900123456-7');
@@ -122,6 +133,7 @@ describe('buildReceiptSnapshot (DX-136)', () => {
           address: null,
         },
       }),
+      NO_LOCAL_NAMES,
     );
     expect(snapshot.fiscalDataPending).toBe(true);
     expect(snapshot.clinic.taxId).toBeNull();
@@ -134,18 +146,23 @@ describe('buildReceiptSnapshot (DX-136)', () => {
           id: 'pat-1',
           firstName: ' Ana ',
           lastName: 'Ruiz',
-          docType: 'CC',
+          docType: 'NATIONAL_ID',
+          docTypeLabel: null,
           docNumber: null,
         },
         payment: { ...input().payment, method: null },
         planBalance: null,
         cashier: null,
       }),
+      NO_LOCAL_NAMES,
     );
     expect(snapshot.patient).toEqual({
       id: 'pat-1',
       fullName: 'Ana Ruiz',
-      docType: 'CC',
+      docType: legacyStoredDocType('NATIONAL_ID'),
+      documentType: 'NATIONAL_ID',
+      docTypeLabel: null,
+      docTypeName: 'Documento nacional',
       docNumberMasked: null,
     });
     expect(snapshot.payment.method).toBeNull();
@@ -158,11 +175,103 @@ describe('buildReceiptSnapshot (DX-136)', () => {
   });
 
   it('parseReceiptSnapshot acepta la versión 1 y rechaza lo demás', () => {
-    const snapshot = buildReceiptSnapshot(input());
+    const snapshot = buildReceiptSnapshot(input(), NO_LOCAL_NAMES);
     expect(parseReceiptSnapshot(JSON.parse(JSON.stringify(snapshot)))).toEqual(
       snapshot,
     );
     expect(() => parseReceiptSnapshot({ version: 2 })).toThrow();
     expect(() => parseReceiptSnapshot(null)).toThrow();
+  });
+});
+
+describe('receiptPatientView (DX-327)', () => {
+  it('a new snapshot carries the legacy code, the generic type, the label and the frozen display name', () => {
+    const labelled = buildReceiptSnapshot(
+      input({
+        patient: {
+          ...input().patient,
+          docType: 'TAX_ID',
+          docTypeLabel: 'ID local',
+        },
+      }),
+      LOCAL,
+    );
+    expect(labelled.version).toBe(1);
+    expect(labelled.patient).toMatchObject({
+      docType: legacyStoredDocType('TAX_ID'),
+      documentType: 'TAX_ID',
+      docTypeLabel: 'ID local',
+      docTypeName: 'ID local',
+    });
+
+    const local = buildReceiptSnapshot(input(), LOCAL);
+    expect(local.patient.docTypeName).toBe('Documento A');
+    // Lo congelado manda: cambiar el nombre local después no lo cambia.
+    const stored = parseReceiptSnapshot(JSON.parse(JSON.stringify(local)));
+    expect(
+      receiptPatientView(stored, { ...LOCAL, NATIONAL_ID: 'Documento B' }),
+    ).toEqual({
+      id: 'pat-1',
+      fullName: 'Carolina Duque',
+      docType: 'NATIONAL_ID',
+      docTypeLabel: null,
+      docTypeName: 'Documento A',
+      docNumberMasked: '******5678',
+    });
+  });
+
+  it("legacy snapshot with CC reads as NATIONAL_ID with no label and the clinic's current name, or the generic one", () => {
+    // Tal como la guardó la versión anterior: solo el código.
+    const legacy = parseReceiptSnapshot({
+      ...JSON.parse(JSON.stringify(buildReceiptSnapshot(input(), LOCAL))),
+      patient: {
+        id: 'pat-1',
+        fullName: 'Carolina Duque',
+        docType: 'CC',
+        docNumberMasked: '******5678',
+      },
+    });
+    expect(receiptPatientView(legacy, LOCAL)).toEqual({
+      id: 'pat-1',
+      fullName: 'Carolina Duque',
+      docType: 'NATIONAL_ID',
+      docTypeLabel: null,
+      docTypeName: 'Documento A',
+      docNumberMasked: '******5678',
+    });
+    expect(receiptPatientView(legacy, NO_LOCAL_NAMES).docTypeName).toBe(
+      'Documento nacional',
+    );
+    // El código CE es un permiso de residencia, nunca una etiqueta.
+    const ce = {
+      ...legacy,
+      patient: { ...legacy.patient, docType: 'CE' },
+    } as ReceiptSnapshot;
+    expect(receiptPatientView(ce, NO_LOCAL_NAMES)).toMatchObject({
+      docType: 'RESIDENCE_PERMIT',
+      docTypeLabel: null,
+      docTypeName: 'Permiso de residencia',
+    });
+  });
+
+  it('a snapshot with an unknown code throws', () => {
+    const snapshot = buildReceiptSnapshot(input(), NO_LOCAL_NAMES);
+    const unknown = {
+      ...snapshot,
+      patient: {
+        id: 'pat-1',
+        fullName: 'Carolina Duque',
+        docType: 'XX',
+        docNumberMasked: null,
+      },
+    } as unknown as ReceiptSnapshot;
+    expect(() => receiptPatientView(unknown, NO_LOCAL_NAMES)).toThrow(
+      'tipo de documento guardado desconocido',
+    );
+    const toString = {
+      ...unknown,
+      patient: { ...unknown.patient, docType: 'toString' },
+    } as unknown as ReceiptSnapshot;
+    expect(() => receiptPatientView(toString, NO_LOCAL_NAMES)).toThrow();
   });
 });

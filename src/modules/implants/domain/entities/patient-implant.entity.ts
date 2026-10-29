@@ -1,4 +1,4 @@
-import type { PatientImplantKind } from '@prisma/client';
+import type { DocumentType, PatientImplantKind } from '@prisma/client';
 
 /** Un componente colocado tal como lo ve la ficha (DX-191). */
 export interface PatientImplant {
@@ -60,7 +60,9 @@ export interface ImplantCardPatient {
   id: string;
   firstName: string;
   lastName: string;
-  docType: string;
+  docType: DocumentType;
+  /** DX-327: nombre libre del documento (R7); null = sin etiqueta. */
+  docTypeLabel: string | null;
   docNumber: string | null;
   birthDate: Date | null;
 }

@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { DocType, TreatmentPlanStatus } from '@prisma/client';
+import { TreatmentPlanStatus } from '@prisma/client';
 import {
   buildQuoteContent,
   computeAcceptanceHash,
@@ -24,6 +24,12 @@ import {
   parseSignaturePng,
   SignatureImageError,
 } from '../../../consents/domain/signature-image';
+import {
+  documentText,
+  documentTypeName,
+  type ClinicDocumentTypeNames,
+} from '../../../patients/domain/document-type';
+import { DocumentTypeNamesReader } from '../../../patients/domain/ports/document-type-names-repository.port';
 
 export type PlanQuoteClock = () => Date;
 export const PLAN_QUOTE_CLOCK = Symbol('PLAN_QUOTE_CLOCK');
@@ -34,14 +40,6 @@ export const PLAN_ACCEPTED_CONFLICT_MESSAGE =
 export const QUOTE_CHANGED_MESSAGE =
   'El presupuesto cambió desde que se mostró: revísalo de nuevo con el paciente antes de firmar.';
 const SIGNER_NAME_MAX = 200;
-
-const DOC_TYPE_LABEL: Record<DocType, string> = {
-  CC: 'CC',
-  TI: 'TI',
-  CE: 'CE',
-  PASSPORT: 'Pasaporte',
-  OTHER: 'Doc.',
-};
 
 /** La aceptación como la ve la vista imprimible. */
 export interface PlanQuoteAcceptanceView {
@@ -88,8 +86,16 @@ function todayIn(timeZone: string, now: Date): string {
   }).format(now);
 }
 
-/** El presupuesto VIVO del plan, emitido hoy en la zona de la sede. */
-function liveContent(source: PlanQuoteSource, now: Date): QuoteContent {
+/**
+ * El presupuesto VIVO del plan, emitido hoy en la zona de la sede, con el
+ * nombre visible de hoy del documento (DX-327, R17). Al aceptar se congela
+ * este texto (R18).
+ */
+function liveContent(
+  source: PlanQuoteSource,
+  now: Date,
+  names: ClinicDocumentTypeNames,
+): QuoteContent {
   const { patient } = source;
   return buildQuoteContent(
     {
@@ -104,9 +110,10 @@ function liveContent(source: PlanQuoteSource, now: Date): QuoteContent {
       },
       patient: {
         name: `${patient.firstName} ${patient.lastName}`.trim(),
-        document: patient.docNumber
-          ? `${DOC_TYPE_LABEL[patient.docType]} ${patient.docNumber}`
-          : null,
+        document: documentText(
+          documentTypeName(patient.docType, patient.docTypeLabel, names),
+          patient.docNumber,
+        ),
       },
       professionalName: source.professionalName,
       items: source.items,
@@ -119,7 +126,11 @@ function liveContent(source: PlanQuoteSource, now: Date): QuoteContent {
  * Un plan aceptado se imprime con la FOTO firmada (lo que vio y firmó el
  * paciente), nunca con el plan vivo; `integrityOk` recalcula los dos hashes.
  */
-function toDocument(source: PlanQuoteSource, now: Date): PlanQuoteDocument {
+function toDocument(
+  source: PlanQuoteSource,
+  now: Date,
+  names: ClinicDocumentTypeNames,
+): PlanQuoteDocument {
   const base = {
     visitOrganization:
       source.visitOrganization ??
@@ -134,7 +145,7 @@ function toDocument(source: PlanQuoteSource, now: Date): PlanQuoteDocument {
   };
   const stored = source.acceptance;
   if (!stored) {
-    const content = liveContent(source, now);
+    const content = liveContent(source, now, names);
     return {
       ...content,
       ...base,
@@ -173,6 +184,7 @@ export class GetPlanQuoteUseCase {
     private readonly repo: PlanQuoteRepository,
     @Inject(PLAN_QUOTE_CLOCK)
     private readonly now: PlanQuoteClock,
+    private readonly documentTypeNames: DocumentTypeNamesReader,
   ) {}
 
   /** El presupuesto imprimible; 404 si el plan no es de este paciente/clínica. */
@@ -181,7 +193,7 @@ export class GetPlanQuoteUseCase {
     if (!source) {
       throw new NotFoundException(PLAN_NOT_FOUND_MESSAGE);
     }
-    return toDocument(source, this.now());
+    return toDocument(source, this.now(), await this.documentTypeNames.get());
   }
 }
 
@@ -203,6 +215,7 @@ export class AcceptTreatmentPlanUseCase {
     private readonly repo: PlanQuoteRepository,
     @Inject(PLAN_QUOTE_CLOCK)
     private readonly now: PlanQuoteClock,
+    private readonly documentTypeNames: DocumentTypeNamesReader,
   ) {}
 
   /**
@@ -237,6 +250,9 @@ export class AcceptTreatmentPlanUseCase {
       );
     }
     const acceptedAt = this.now();
+    // Fuera de la transacción del plan (spec §4.6): si el ADMIN cambia un
+    // nombre entre el GET y la firma, el hash vivo cambia → 409 (R18).
+    const names = await this.documentTypeNames.get();
 
     const outcome = await this.repo.accept(
       patientId,
@@ -257,7 +273,7 @@ export class AcceptTreatmentPlanUseCase {
             'El plan no tiene ítems: agrega al menos un procedimiento antes de aceptarlo.',
           );
         }
-        const content = liveContent(source, acceptedAt);
+        const content = liveContent(source, acceptedAt, names);
         const contentHash = computeQuoteHash(content);
         if (contentHash !== input.contentHash) {
           throw new ConflictException(QUOTE_CHANGED_MESSAGE);
@@ -287,6 +303,6 @@ export class AcceptTreatmentPlanUseCase {
     if (outcome.kind === 'ALREADY_ACCEPTED') {
       throw new ConflictException(PLAN_ACCEPTED_CONFLICT_MESSAGE);
     }
-    return toDocument(outcome.source, acceptedAt);
+    return toDocument(outcome.source, acceptedAt, names);
   }
 }

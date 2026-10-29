@@ -13,6 +13,7 @@ import {
   OTHER_DENTIST_ID,
   PATIENT_ID,
 } from '../__fixtures__/in-memory-prescriptions';
+import { FixedDocumentTypeNamesReader } from '../../../document-type-names/__fixtures__/fixed-document-type-names.reader';
 import {
   GetPrescriptionIssuerUseCase,
   GetPrescriptionUseCase,
@@ -32,6 +33,12 @@ import {
   PRESCRIPTION_SAFETY_RULES_VERSION,
   type SafetyAnamnesis,
 } from '../../domain/prescription-safety';
+
+// DX-327: los nombres locales de la clínica; cada test empieza sin ninguno.
+let names: FixedDocumentTypeNamesReader;
+beforeEach(() => {
+  names = new FixedDocumentTypeNamesReader();
+});
 
 // 15:00 UTC = 11:00 en la zona de la sede de los tests (Nueva York), el mismo día 16.
 const NOW = new Date('2026-10-16T15:00:00.000Z');
@@ -60,7 +67,7 @@ describe('IssuePrescriptionUseCase', () => {
 
   beforeEach(() => {
     repo = new InMemoryPrescriptionRepository();
-    useCase = new IssuePrescriptionUseCase(repo, () => NOW);
+    useCase = new IssuePrescriptionUseCase(repo, () => NOW, names);
   });
 
   it('emite la receta única con la foto de los datos, cantidad en letras y hash', async () => {
@@ -79,7 +86,7 @@ describe('IssuePrescriptionUseCase', () => {
       dispensationDate: '2026-10-16',
       validUntil: '2026-11-14',
       patientName: 'Ana Pérez Gómez',
-      patientDocument: 'CC 1020304050',
+      patientDocument: 'Documento nacional 1020304050',
       clinicalRecordNumber: '1020304050',
       professionalName: 'Dra. Laura Ruiz',
       professionalLicense: 'RM-12345',
@@ -387,7 +394,7 @@ describe('Listar, ver y anular', () => {
 
   beforeEach(async () => {
     repo = new InMemoryPrescriptionRepository();
-    issue = new IssuePrescriptionUseCase(repo, () => NOW);
+    issue = new IssuePrescriptionUseCase(repo, () => NOW, names);
     id = (await issue.execute(PATIENT_ID, input(), DENTIST_ID)).id;
   });
 
@@ -537,7 +544,7 @@ describe('receta única (DX-324)', () => {
   let repo: InMemoryPrescriptionRepository;
 
   const issueAt = (now: Date, extra: Partial<IssuePrescriptionInput> = {}) =>
-    new IssuePrescriptionUseCase(repo, () => now).execute(
+    new IssuePrescriptionUseCase(repo, () => now, names).execute(
       PATIENT_ID,
       input(extra),
       DENTIST_ID,
@@ -608,7 +615,7 @@ describe('receta única (DX-324)', () => {
     setSettings({ requireClinicalRecordNumber: false });
     const off = await issue();
     expect(off.clinicalRecordNumber).toBeNull();
-    expect(off.patientDocument).toBe('CC 1020304050');
+    expect(off.patientDocument).toBe('Documento nacional 1020304050');
 
     repo.patients.set(PATIENT_ID, makePatient({ docNumber: null }));
     expect((await issue()).patientDocument).toBeNull();
@@ -635,6 +642,36 @@ describe('receta única (DX-324)', () => {
     repo.patients.set(PATIENT_ID, makePatient({ docNumber: null }));
     setSettings({ requireClinicalRecordNumber: false });
     expect((await issue()).patientDocument).toBeNull();
+  });
+
+  it('a new prescription freezes the display name: patient label, clinic name or generic', async () => {
+    names.names.NATIONAL_ID = 'Documento A';
+    repo.patients.set(
+      PATIENT_ID,
+      makePatient({ docTypeLabel: 'ID local', docNumber: 'RX-1' }),
+    );
+    const labelled = await issue();
+    expect(labelled.patientDocument).toBe('ID local RX-1');
+    expect(labelled.contentHash).toBe(expectedPrescriptionHash(labelled));
+
+    repo.patients.set(PATIENT_ID, makePatient({ docNumber: 'RX-2' }));
+    expect((await issue()).patientDocument).toBe('Documento A RX-2');
+
+    names.names.NATIONAL_ID = null;
+    repo.patients.set(
+      PATIENT_ID,
+      makePatient({ docType: 'TAX_ID', docNumber: 'RX-3' }),
+    );
+    const generic = await issue();
+    expect(generic.patientDocument).toBe('Identificación fiscal RX-3');
+
+    // Lo emitido es texto: cambiar el nombre local después no lo toca.
+    names.names.TAX_ID = 'Documento B';
+    const doc = await new GetPrescriptionUseCase(repo).execute(generic.id);
+    expect(doc.patientDocument).toBe('Identificación fiscal RX-3');
+    expect(doc.integrityOk).toBe(true);
+    // Una lectura de los nombres por emisión.
+    expect(names.reads).toBe(3);
   });
 
   it('age is computed on the location day', async () => {

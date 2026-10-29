@@ -49,7 +49,10 @@ export interface QuoteLocation {
 
 export interface QuotePatient {
   name: string;
-  /** «CC 123…», o `null` si el paciente no tiene documento. */
+  /**
+   * `documentText` del nombre visible y el número (DX-327, R8), o `null` si
+   * el paciente no tiene documento. Lo aceptado conserva el texto que firmó.
+   */
   document: string | null;
 }
 

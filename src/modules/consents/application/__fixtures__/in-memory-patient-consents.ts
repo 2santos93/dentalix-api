@@ -1,7 +1,6 @@
-import { DocType } from '@prisma/client';
 import {
   PatientConsent,
-  PatientConsentDocument,
+  StoredPatientConsentDocument,
   PatientConsentSummary,
 } from '../../domain/entities/patient-consent.entity';
 import {
@@ -32,7 +31,8 @@ export class InMemoryPatientConsentRepository implements PatientConsentRepositor
       p1: {
         firstName: 'Ana',
         lastName: 'Pérez',
-        docType: DocType.CC,
+        docType: 'NATIONAL_ID',
+        docTypeLabel: null,
         docNumber: '1020304050',
       },
     },
@@ -91,7 +91,7 @@ export class InMemoryPatientConsentRepository implements PatientConsentRepositor
   findDocument(
     patientId: string,
     id: string,
-  ): Promise<Omit<PatientConsentDocument, 'integrityOk'> | null> {
+  ): Promise<StoredPatientConsentDocument | null> {
     const row = this.rows.find((r) => r.id === id && r.patientId === patientId);
     const patient = this.patients[patientId];
     if (!row || !patient) return Promise.resolve(null);

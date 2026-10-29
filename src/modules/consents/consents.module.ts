@@ -3,6 +3,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 import { PatientsModule } from '../patients/patients.module';
+import { DocumentTypeNamesModule } from '../document-type-names/document-type-names.module';
 import { ConsentTemplatesController } from './presentation/consent-templates.controller';
 import { PatientConsentsController } from './presentation/patient-consents.controller';
 import {
@@ -28,7 +29,7 @@ import { PrismaPatientConsentRepository } from './infrastructure/repositories/pr
  * para el 404 de "paciente de otra clínica" del listado.
  */
 @Module({
-  imports: [JwtModule.register({}), PatientsModule],
+  imports: [JwtModule.register({}), PatientsModule, DocumentTypeNamesModule],
   controllers: [ConsentTemplatesController, PatientConsentsController],
   providers: [
     ListConsentTemplatesUseCase,

@@ -1,4 +1,4 @@
-import type { DocType, TreatmentPlanStatus } from '@prisma/client';
+import type { DocumentType, TreatmentPlanStatus } from '@prisma/client';
 import type { QuoteLocation, QuoteSourceItem } from '../plan-quote';
 
 /** La aceptación firmada tal como está guardada (DX-012). */
@@ -37,7 +37,9 @@ export interface PlanQuoteSource {
   patient: {
     firstName: string;
     lastName: string;
-    docType: DocType;
+    docType: DocumentType;
+    /** DX-327: nombre libre del documento (R7); null = sin etiqueta. */
+    docTypeLabel: string | null;
     docNumber: string | null;
   };
   clinic: { name: string; logoUrl: string | null };

@@ -1,3 +1,4 @@
+import { NO_LOCAL_NAMES } from '../src/modules/document-type-names/__fixtures__/fixed-document-type-names.reader';
 import { randomUUID } from 'node:crypto';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
@@ -306,13 +307,16 @@ describe('DX-225 · índices que sirven bajo RLS (int)', () => {
     it('ignora mayúsculas y blancos alrededor, también en el parámetro, y solo en la clínica', async () => {
       const repo = new PrismaPatientImplantRepository(prisma, tenantContext);
       const byLot = await tenantContext.run(a.tenantId, () =>
-        repo.searchByLot({ lot: ' lot-77 ' }),
+        repo.searchByLot({ lot: ' lot-77 ' }, NO_LOCAL_NAMES),
       );
       expect(byLot.map((m) => m.lot).sort()).toEqual(
         [' lot-77 ', 'LOT-77', 'Lot-77'].sort(),
       );
       const byRef = await tenantContext.run(a.tenantId, () =>
-        repo.searchByLot({ reference: 'Ref-9', lot: 'LOT-77  ' }),
+        repo.searchByLot(
+          { reference: 'Ref-9', lot: 'LOT-77  ' },
+          NO_LOCAL_NAMES,
+        ),
       );
       expect(byRef.map((m) => [m.lot, m.reference]).sort()).toEqual(
         [

@@ -1,3 +1,4 @@
+import type { ClinicDocumentTypeNames } from '../../../patients/domain/document-type';
 import type { NormalizedImplantInput } from '../implant-rules';
 import type { ImplantCardLocation } from '../implant-card';
 import type {
@@ -60,5 +61,9 @@ export interface PatientImplantRepository {
   clinicName(): Promise<string>;
   locations(ids: string[]): Promise<ImplantCardLocation[]>;
   catalog(): Promise<ImplantCatalogEntry[]>;
-  searchByLot(query: ImplantLotQuery): Promise<ImplantLotMatch[]>;
+  /** `names`: los de la clínica (R16), para el nombre visible en vivo. */
+  searchByLot(
+    query: ImplantLotQuery,
+    names: ClinicDocumentTypeNames,
+  ): Promise<ImplantLotMatch[]>;
 }

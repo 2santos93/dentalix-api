@@ -5,7 +5,6 @@ import { App } from 'supertest/types';
 import {
   CatalogKind,
   ClinicRole,
-  DocType,
   Prisma,
   PrismaClient,
   Sex,
@@ -40,7 +39,14 @@ interface Session {
 interface StatementBody {
   issuedAt: string;
   clinic: { name: string; logoUrl: string | null };
-  patient: { id: string; firstName: string; docNumber: string | null };
+  patient: {
+    id: string;
+    firstName: string;
+    docType: string;
+    docTypeLabel: string | null;
+    docTypeName: string;
+    docNumber: string | null;
+  };
   range: { from: string | null; to: string | null };
   summary: {
     currency: string;
@@ -182,7 +188,7 @@ describe('Estado de cuenta — GET /patients/:patientId/account-statement (e2e)'
       .post('/patients', {
         firstName: 'Ana',
         lastName: 'Saldo',
-        docType: DocType.CC,
+        docType: 'NATIONAL_ID',
         docNumber,
         sex: Sex.F,
       })
@@ -460,6 +466,44 @@ describe('Estado de cuenta — GET /patients/:patientId/account-statement (e2e)'
     expect(body.plans).toEqual([]);
     expect(body.movements).toEqual([]);
     expect(body.installments).toEqual([]);
+  });
+
+  it('the statement carries the generic type, the label and the display name', async () => {
+    const statement = async () =>
+      (
+        (
+          await as(clinicA)
+            .get(`/patients/${emptyPatientId}/account-statement`)
+            .expect(200)
+        ).body as StatementBody
+      ).patient;
+    expect(await statement()).toMatchObject({
+      docType: 'NATIONAL_ID',
+      docTypeLabel: null,
+      docTypeName: 'Documento nacional',
+      docNumber: 'EC-A-002',
+    });
+
+    // En vivo: el nombre local de hoy y, antes, la etiqueta del paciente.
+    await raw.tenant.update({
+      where: { id: clinicA.tenantId },
+      data: { docTypeNameNationalId: 'Documento A' },
+    });
+    try {
+      expect((await statement()).docTypeName).toBe('Documento A');
+      await as(clinicA)
+        .patch(`/patients/${emptyPatientId}`, { docTypeLabel: 'ID local' })
+        .expect(200);
+      expect(await statement()).toMatchObject({
+        docTypeLabel: 'ID local',
+        docTypeName: 'ID local',
+      });
+    } finally {
+      await raw.tenant.update({
+        where: { id: clinicA.tenantId },
+        data: { docTypeNameNationalId: null },
+      });
+    }
   });
 
   it('aísla por clínica: otra clínica recibe 404, igual que un UUID inexistente', async () => {

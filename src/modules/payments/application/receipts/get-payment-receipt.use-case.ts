@@ -8,8 +8,13 @@ import type {
 import type { PaymentReceiptView } from '../../domain/entities/payment-receipt.entity';
 import {
   buildReceiptSnapshot,
+  receiptPatientView,
   type ReceiptPlanBalance,
+  type ReceiptSnapshot,
+  type ReceiptViewSnapshot,
 } from '../../domain/receipt-snapshot';
+import type { ClinicDocumentTypeNames } from '../../../patients/domain/document-type';
+import { DocumentTypeNamesReader } from '../../../patients/domain/ports/document-type-names-repository.port';
 import {
   formatReceiptNumber,
   legacyReceiptReference,
@@ -17,6 +22,13 @@ import {
 import { GetPlanBalanceUseCase } from '../use-cases/get-plan-balance.use-case';
 
 export const PAYMENT_NOT_FOUND_MESSAGE = 'No encontramos ese abono.';
+
+function viewSnapshot(
+  snapshot: ReceiptSnapshot,
+  names: ClinicDocumentTypeNames,
+): ReceiptViewSnapshot {
+  return { ...snapshot, patient: receiptPatientView(snapshot, names) };
+}
 
 export interface LoadedPaymentReceipt {
   view: PaymentReceiptView;
@@ -39,6 +51,7 @@ export class GetPaymentReceiptUseCase {
     @Inject(PAYMENT_RECEIPT_REPOSITORY)
     private readonly repo: PaymentReceiptRepository,
     private readonly getPlanBalance: GetPlanBalanceUseCase,
+    private readonly documentTypeNames: DocumentTypeNamesReader,
   ) {}
 
   async execute(paymentId: string): Promise<PaymentReceiptView> {
@@ -50,11 +63,14 @@ export class GetPaymentReceiptUseCase {
     if (!source) {
       throw new NotFoundException(PAYMENT_NOT_FOUND_MESSAGE);
     }
+    // DX-327 (spec §4.6): el nombre visible del documento se resuelve AQUÍ,
+    // una vez, y de la vista salen la pantalla, el papel y el email.
+    const names = await this.documentTypeNames.get();
     return {
       view:
         source.kind === 'issued'
-          ? this.issuedView(source)
-          : await this.legacyView(source),
+          ? this.issuedView(source, names)
+          : await this.legacyView(source, names),
       patientEmail: source.patientEmail,
       notice: source.notice,
     };
@@ -62,6 +78,7 @@ export class GetPaymentReceiptUseCase {
 
   private issuedView(
     source: Extract<PaymentReceiptSource, { kind: 'issued' }>,
+    names: ClinicDocumentTypeNames,
   ): PaymentReceiptView {
     const { receipt } = source;
     return {
@@ -74,12 +91,13 @@ export class GetPaymentReceiptUseCase {
       voided: receipt.voidedAt !== null,
       voidedAt: receipt.voidedAt,
       voidReason: receipt.voidReason,
-      snapshot: receipt.snapshot,
+      snapshot: viewSnapshot(receipt.snapshot, names),
     };
   }
 
   private async legacyView(
     source: Extract<PaymentReceiptSource, { kind: 'legacy' }>,
+    names: ClinicDocumentTypeNames,
   ): Promise<PaymentReceiptView> {
     const { legacy } = source;
     return {
@@ -92,12 +110,18 @@ export class GetPaymentReceiptUseCase {
       voided: legacy.voidedAt !== null,
       voidedAt: legacy.voidedAt,
       voidReason: legacy.voidReason,
-      snapshot: buildReceiptSnapshot({
-        ...legacy.snapshotInput,
-        planBalance: source.treatmentPlanId
-          ? await this.currentBalance(source.treatmentPlanId)
-          : null,
-      }),
+      snapshot: viewSnapshot(
+        buildReceiptSnapshot(
+          {
+            ...legacy.snapshotInput,
+            planBalance: source.treatmentPlanId
+              ? await this.currentBalance(source.treatmentPlanId)
+              : null,
+          },
+          names,
+        ),
+        names,
+      ),
     };
   }
 

@@ -379,4 +379,266 @@ describe('Nombre local de cada tipo de documento (e2e, DX-327)', () => {
     const foreign = await settingsEvents(other.adminToken, other.host);
     expect(foreign.map((e) => e.metadata.changedFields)).toEqual([['TAX_ID']]);
   });
+
+  // DX-327 (R17, R18): los impresos con el nombre visible de cada paciente.
+  describe('printed documents', () => {
+    // PNG reales de 1x1 con tinta (firma del paciente y del profesional).
+    const PNG_A =
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+    const PNG_B =
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==';
+    const MEDICINE = {
+      activeIngredient: 'Amoxicilina',
+      concentration: '500 mg',
+      pharmaceuticalForm: 'Cápsula',
+      route: 'Oral',
+      dose: '1 cápsula',
+      frequency: 'Cada 8 horas',
+      durationDays: 7,
+      totalQuantity: 21,
+      quantityUnit: 'cápsulas',
+    };
+
+    let catalogItemId: string;
+    let templateId: string;
+    let templateVersion: number;
+
+    const get = <T>(path: string, token = tokens.ADMIN) =>
+      as(api().get(`/api/v1${path}`), token)
+        .expect(200)
+        .then((res) => res.body as T);
+    const post = <T>(path: string, body: object, token = tokens.ADMIN) =>
+      as(api().post(`/api/v1${path}`), token)
+        .send(body)
+        .expect(201)
+        .then((res) => res.body as T);
+    const setNames = (NATIONAL_ID: string | null) =>
+      put({ names: { NATIONAL_ID } }).expect(200);
+
+    async function patient(
+      docNumber: string,
+      doc: { docType?: string; docTypeLabel?: string } = {},
+    ): Promise<string> {
+      const created = await post<{ id: string }>('/patients', {
+        firstName: 'Ana',
+        lastName: 'Impresa',
+        docType: 'NATIONAL_ID',
+        docNumber,
+        sex: 'F',
+        ...doc,
+      });
+      return created.id;
+    }
+
+    async function plan(patientId: string): Promise<string> {
+      const { id } = await post<{ id: string }>(
+        `/patients/${patientId}/treatment-plans`,
+        { currency: 'USD' },
+      );
+      await post(`/treatment-plans/${id}/items`, {
+        toothNumber: '36',
+        catalogItemId,
+        price: 100,
+      });
+      return id;
+    }
+
+    const prescribe = (patientId: string) =>
+      post<{ id: string; patientDocument: string | null }>(
+        `/patients/${patientId}/prescriptions`,
+        { items: [MEDICINE] },
+        tokens.DENTIST,
+      );
+    const prescription = (id: string) =>
+      get<{ patientDocument: string | null; integrityOk: boolean }>(
+        `/prescriptions/${id}`,
+        tokens.DENTIST,
+      );
+    const sign = (patientId: string) =>
+      post<{ id: string; body: string; signerDocument: string | null }>(
+        `/patients/${patientId}/consents`,
+        {
+          templateId,
+          templateVersion,
+          signerType: 'PATIENT',
+          patientSignature: PNG_A,
+          professionalSignature: PNG_B,
+        },
+        tokens.DENTIST,
+      );
+    const consent = (patientId: string, id: string) =>
+      get<{
+        body: string;
+        signerDocument: string | null;
+        integrityOk: boolean;
+        patient: { docTypeName: string };
+      }>(`/patients/${patientId}/consents/${id}`, tokens.DENTIST);
+    const quote = (patientId: string, planId: string) =>
+      get<{
+        contentHash: string;
+        patient: { document: string | null };
+        acceptance: { integrityOk: boolean } | null;
+      }>(`/patients/${patientId}/treatment-plans/${planId}/quote`);
+    const accept = (patientId: string, planId: string, contentHash: string) =>
+      as(
+        api().post(
+          `/api/v1/patients/${patientId}/treatment-plans/${planId}/acceptance`,
+        ),
+        tokens.ADMIN,
+      ).send({ signerName: 'Ana Impresa', signature: PNG_A, contentHash });
+    const pay = (planId: string) =>
+      post<{ id: string }>(`/treatment-plans/${planId}/payments`, {
+        amount: 10,
+        currency: 'USD',
+        paidAt: new Date().toISOString(),
+        method: 'CARD',
+      });
+    const receipt = (paymentId: string) =>
+      get<{
+        snapshot: {
+          patient: { docTypeName: string; docNumberMasked: string | null };
+        };
+      }>(`/payments/${paymentId}/receipt`);
+    const statement = (patientId: string) =>
+      get<{ patient: { docTypeName: string } }>(
+        `/patients/${patientId}/account-statement`,
+      );
+
+    beforeAll(async () => {
+      const dentist = await raw.user.findFirstOrThrow({
+        where: { email: `dentist@${clinic.subdomain}.test` },
+        select: { id: true },
+      });
+      await raw.clinicMembership.updateMany({
+        where: { tenantId: clinic.tenantId, userId: dentist.id },
+        data: { professionalLicense: 'RM-0001' },
+      });
+      catalogItemId = (
+        await post<{ id: string }>('/catalog/items', {
+          code: 'DX327-PROC',
+          kind: 'PROCEDURE',
+          labelEs: 'Procedimiento',
+          color: '#336699',
+          defaultPrice: 100,
+        })
+      ).id;
+      const template = await post<{ id: string; version: number }>(
+        '/consent-templates',
+        {
+          title: 'Consentimiento DX-327',
+          body: 'Yo, {{paciente}} ({{documento}}), autorizo.',
+        },
+      );
+      templateId = template.id;
+      templateVersion = template.version;
+    });
+
+    afterEach(async () => {
+      await put({ names: {} }).expect(200);
+    });
+
+    it("the display name is the patient's label, then the clinic's local name, then the generic name", async () => {
+      await setNames('Documento A');
+      const local = await patient('DOC-0001');
+      const labelled = await patient('DOC-0002', { docTypeLabel: 'ID local' });
+      const fiscal = await patient('DOC-0003', { docType: 'TAX_ID' });
+
+      expect((await prescribe(labelled)).patientDocument).toBe(
+        'ID local DOC-0002',
+      );
+      expect((await prescribe(fiscal)).patientDocument).toBe(
+        'Identificación fiscal DOC-0003',
+      );
+
+      // El nombre local, en cada documento del paciente sin etiqueta.
+      const text = 'Documento A DOC-0001';
+      expect((await prescribe(local)).patientDocument).toBe(text);
+      const signed = await sign(local);
+      expect(signed.signerDocument).toBe(text);
+      expect(signed.body).toBe(`Yo, Ana Impresa (${text}), autorizo.`);
+      const planId = await plan(local);
+      expect((await quote(local, planId)).patient.document).toBe(text);
+      const paid = await receipt((await pay(planId)).id);
+      expect(paid.snapshot.patient.docTypeName).toBe('Documento A');
+      expect((await statement(local)).patient.docTypeName).toBe('Documento A');
+
+      const implant = await post<{ placedOn: string }>(
+        `/patients/${local}/implants`,
+        {
+          toothNumber: '36',
+          kind: 'IMPLANT',
+          manufacturer: 'Fabricante',
+          reference: 'REF-1',
+          lot: 'LOT-DX327-NAMES',
+        },
+        tokens.DENTIST,
+      );
+      const card = await get<{ patientDocument: string | null }>(
+        `/patients/${local}/implant-card?date=${implant.placedOn}`,
+      );
+      expect(card.patientDocument).toBe(text);
+      const lot = await get<{ patientDocument: string | null }[]>(
+        '/implants/search?lot=LOT-DX327-NAMES',
+      );
+      expect(lot.map((r) => r.patientDocument)).toEqual([text]);
+    });
+
+    it('issued documents keep the name they froze after the local name changes', async () => {
+      await setNames('Documento A');
+      const id = await patient('DOC-0010');
+      const text = 'Documento A DOC-0010';
+      const rx = await prescribe(id);
+      const signed = await sign(id);
+      const planId = await plan(id);
+      const shown = await quote(id, planId);
+      await accept(id, planId, shown.contentHash).expect(201);
+      const payment = await pay(planId);
+
+      await setNames('Documento B');
+
+      expect(await prescription(rx.id)).toMatchObject({
+        patientDocument: text,
+        integrityOk: true,
+      });
+      const doc = await consent(id, signed.id);
+      expect(doc).toMatchObject({
+        body: `Yo, Ana Impresa (${text}), autorizo.`,
+        signerDocument: text,
+        integrityOk: true,
+      });
+      const accepted = await quote(id, planId);
+      expect(accepted.patient.document).toBe(text);
+      expect(accepted.acceptance?.integrityOk).toBe(true);
+      expect((await receipt(payment.id)).snapshot.patient.docTypeName).toBe(
+        'Documento A',
+      );
+
+      // Lo que es en vivo ya enseña el nombre nuevo.
+      expect(doc.patient.docTypeName).toBe('Documento B');
+      expect(
+        (await get<{ docTypeName: string }>(`/patients/${id}`)).docTypeName,
+      ).toBe('Documento B');
+      expect((await statement(id)).patient.docTypeName).toBe('Documento B');
+    });
+
+    it('changing a local name between showing and accepting a quote is 409 once', async () => {
+      const id = await patient('DOC-0020');
+      const planId = await plan(id);
+      const shown = await quote(id, planId);
+      expect(shown.patient.document).toBe('Documento nacional DOC-0020');
+
+      await setNames('Documento A');
+      await accept(id, planId, shown.contentHash).expect(409);
+      expect(
+        await raw.treatmentPlanAcceptance.count({ where: { planId } }),
+      ).toBe(0);
+
+      const again = await quote(id, planId);
+      expect(again.patient.document).toBe('Documento A DOC-0020');
+      await accept(id, planId, again.contentHash).expect(201);
+      const accepted = await quote(id, planId);
+      expect(accepted.patient.document).toBe('Documento A DOC-0020');
+      expect(accepted.acceptance?.integrityOk).toBe(true);
+    });
+  });
 });

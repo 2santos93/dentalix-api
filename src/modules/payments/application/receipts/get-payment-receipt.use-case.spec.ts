@@ -7,8 +7,13 @@ import type {
 import type { GetPlanBalanceUseCase } from '../use-cases/get-plan-balance.use-case';
 import {
   buildReceiptSnapshot,
+  type ReceiptSnapshot,
   type ReceiptSnapshotInput,
 } from '../../domain/receipt-snapshot';
+import {
+  FixedDocumentTypeNamesReader,
+  NO_LOCAL_NAMES,
+} from '../../../document-type-names/__fixtures__/fixed-document-type-names.reader';
 
 // DX-203: sin responsables; lo que decide el destinatario lo prueba
 // send-payment-receipt.use-case.spec.ts.
@@ -32,7 +37,8 @@ const snapshotInput: Omit<ReceiptSnapshotInput, 'planBalance'> = {
     id: 'pat-1',
     firstName: 'Ana',
     lastName: 'Ruiz',
-    docType: 'CC',
+    docType: 'NATIONAL_ID',
+    docTypeLabel: null,
     docNumber: '52123456',
   },
   payment: {
@@ -47,14 +53,22 @@ const snapshotInput: Omit<ReceiptSnapshotInput, 'planBalance'> = {
   cashier: null,
 };
 
-const issuedSnapshot = buildReceiptSnapshot({
-  ...snapshotInput,
-  planBalance: {
-    currency: 'COP',
-    billable: 100000,
-    paid: 50000,
-    balance: 50000,
+const issuedSnapshot = buildReceiptSnapshot(
+  {
+    ...snapshotInput,
+    planBalance: {
+      currency: 'COP',
+      billable: 100000,
+      paid: 50000,
+      balance: 50000,
+    },
   },
+  NO_LOCAL_NAMES,
+);
+
+let names: FixedDocumentTypeNamesReader;
+beforeEach(() => {
+  names = new FixedDocumentTypeNamesReader();
 });
 
 function makeUseCase(
@@ -78,7 +92,7 @@ function makeUseCase(
             paymentsCount: 2,
           }),
   } as unknown as GetPlanBalanceUseCase;
-  return new GetPaymentReceiptUseCase(repo, getPlanBalance);
+  return new GetPaymentReceiptUseCase(repo, getPlanBalance, names);
 }
 
 const issued = (
@@ -114,7 +128,42 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
       voided: false,
       voidedAt: null,
       voidReason: null,
-      snapshot: issuedSnapshot,
+      snapshot: {
+        ...issuedSnapshot,
+        patient: {
+          id: 'pat-1',
+          fullName: 'Ana Ruiz',
+          docType: 'NATIONAL_ID',
+          docTypeLabel: null,
+          docTypeName: 'Documento nacional',
+          docNumberMasked: '****3456',
+        },
+      },
+    });
+    expect(names.reads).toBe(1);
+  });
+
+  it('legacy receipt snapshot with CC renders with the generic type, no label and the current local name', async () => {
+    names.names.NATIONAL_ID = 'Documento A';
+    const legacy = {
+      ...issuedSnapshot,
+      patient: {
+        id: 'pat-1',
+        fullName: 'Ana Ruiz',
+        docType: 'CC',
+        docNumberMasked: '****3456',
+      },
+    } satisfies ReceiptSnapshot;
+    const view = await makeUseCase(issued({ snapshot: legacy })).execute(
+      PAYMENT_ID,
+    );
+    expect(view.snapshot.patient).toEqual({
+      id: 'pat-1',
+      fullName: 'Ana Ruiz',
+      docType: 'NATIONAL_ID',
+      docTypeLabel: null,
+      docTypeName: 'Documento A',
+      docNumberMasked: '****3456',
     });
   });
 

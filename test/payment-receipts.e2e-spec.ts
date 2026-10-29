@@ -13,6 +13,7 @@ import {
 } from './support/e2e-fixtures';
 import { MAILER } from '../src/modules/notifications/email/domain/ports/mailer.port';
 import { EmailDispatcher } from '../src/modules/notifications/email/application/email-dispatcher.service';
+import { legacyStoredDocType } from '../src/modules/patients/domain/legacy-doc-type';
 
 // DX-136: recibo de caja por abono — emitir, reimprimir, anular y enviar, de
 // punta a punta por HTTP. DIRECT_URL (superusuario, sin RLS) solo siembra un
@@ -37,7 +38,13 @@ interface Receipt {
     clinic: { name: string; taxId: string | null };
     fiscalDataPending: boolean;
     location: { name: string };
-    patient: { fullName: string; docNumberMasked: string | null };
+    patient: {
+      fullName: string;
+      docType: string;
+      docTypeLabel: string | null;
+      docTypeName: string;
+      docNumberMasked: string | null;
+    };
     payment: { amount: number; currency: string; method: string | null };
     planBalance: { balance: number; paid: number } | null;
     cashier: { fullName: string } | null;
@@ -127,7 +134,7 @@ describe('Recibo de caja por abono (e2e, DX-136)', () => {
       .post('/patients', {
         firstName: 'Carolina',
         lastName: 'Duque',
-        docType: 'CC',
+        docType: 'NATIONAL_ID',
         docNumber: DOC,
         sex: 'F',
         email: PATIENT_EMAIL,
@@ -244,7 +251,7 @@ describe('Recibo de caja por abono (e2e, DX-136)', () => {
     expect(match).toBeTruthy();
     const email = mailer.sent.find((m) => m.to === PATIENT_EMAIL);
     expect(email?.subject).toContain(`Recibo de caja ${receiptNumber}`);
-    expect(email?.text).toContain('Documento: CC ******5678');
+    expect(email?.text).toContain('Documento: Documento nacional ******5678');
     expect(email?.text).toContain('Datos fiscales pendientes');
     expect(email?.text).toContain('Este documento no es factura');
     expect(email?.text).not.toContain(DOC);
@@ -275,7 +282,7 @@ describe('Recibo de caja por abono (e2e, DX-136)', () => {
       .post('/patients', {
         firstName: 'Sin',
         lastName: 'Correo',
-        docType: 'CC',
+        docType: 'NATIONAL_ID',
         sex: 'M',
       })
       .expect(201);
@@ -307,7 +314,7 @@ describe('Recibo de caja por abono (e2e, DX-136)', () => {
       .post('/patients', {
         firstName: 'Tomás',
         lastName: 'Ortiz',
-        docType: 'TI',
+        docType: 'NATIONAL_ID',
         sex: 'M',
         birthDate: '2016-04-10',
       })
@@ -435,5 +442,100 @@ describe('Recibo de caja por abono (e2e, DX-136)', () => {
       { action: 'SEND', resourceType: 'PAYMENT_RECEIPT', patientId },
     ]);
     expect(events).toHaveLength(4);
+  });
+
+  describe('nombre del documento (DX-327)', () => {
+    const storedPatient = async (paymentId: string) =>
+      (
+        (
+          await raw.paymentReceipt.findUniqueOrThrow({
+            where: { paymentId },
+            select: { snapshot: true },
+          })
+        ).snapshot as { patient: Record<string, unknown> }
+      ).patient;
+
+    async function emailText(paymentId: string): Promise<string> {
+      mailer.clear();
+      await as(clinicA, receptionToken)
+        .post(`/payments/${paymentId}/receipt/email`)
+        .expect(202);
+      await dispatcher.whenIdle();
+      await mailer.waitFor(PATIENT_EMAIL, /Recibo de caja/);
+      const email = mailer.sent.find((m) => m.to === PATIENT_EMAIL);
+      return email?.text ?? '';
+    }
+
+    it('a new receipt shows the free label, and its snapshot keeps the legacy code for older replicas', async () => {
+      await as(clinicA)
+        .patch(`/patients/${patientId}`, { docTypeLabel: 'ID local' })
+        .expect(200);
+      const { id } = await pay(receptionToken, 3);
+      const receipt = await receiptOf(id);
+      expect(receipt.snapshot.patient).toMatchObject({
+        docType: 'NATIONAL_ID',
+        docTypeLabel: 'ID local',
+        docTypeName: 'ID local',
+        docNumberMasked: '******5678',
+      });
+      expect(await storedPatient(id)).toMatchObject({
+        docType: legacyStoredDocType('NATIONAL_ID'),
+        documentType: 'NATIONAL_ID',
+        docTypeLabel: 'ID local',
+        docTypeName: 'ID local',
+      });
+      expect(await emailText(id)).toContain('Documento: ID local ******5678');
+    });
+
+    it('legacy receipt snapshot with CC reprints with the generic type and no label', async () => {
+      const { id } = await pay(receptionToken, 2);
+      // La foto como la guardaba la versión anterior: solo el código. El
+      // trigger la hace inmutable; aquí se reescribe sin triggers.
+      await raw.$transaction([
+        raw.$executeRaw`SET LOCAL session_replication_role = replica`,
+        raw.$executeRaw`
+          UPDATE "payment_receipts"
+             SET "snapshot" = jsonb_set(
+                   "snapshot" #- '{patient,documentType}'
+                              #- '{patient,docTypeLabel}'
+                              #- '{patient,docTypeName}',
+                   '{patient,docType}', '"CC"')
+           WHERE "paymentId" = ${id}::uuid`,
+      ]);
+      expect(await storedPatient(id)).toEqual({
+        id: patientId,
+        fullName: expect.any(String) as string,
+        docType: 'CC',
+        docNumberMasked: '******5678',
+      });
+
+      // El paciente tiene «ID local»: una foto anterior nunca la toma.
+      const receipt = await receiptOf(id);
+      expect(receipt.snapshot.patient).toMatchObject({
+        docType: 'NATIONAL_ID',
+        docTypeLabel: null,
+        docTypeName: 'Documento nacional',
+        docNumberMasked: '******5678',
+      });
+      expect(await emailText(id)).toContain(
+        'Documento: Documento nacional ******5678',
+      );
+
+      // Se pinta con el nombre local de HOY de la clínica.
+      await raw.tenant.update({
+        where: { id: clinicA.tenantId },
+        data: { docTypeNameNationalId: 'Documento A' },
+      });
+      try {
+        expect((await receiptOf(id)).snapshot.patient.docTypeName).toBe(
+          'Documento A',
+        );
+      } finally {
+        await raw.tenant.update({
+          where: { id: clinicA.tenantId },
+          data: { docTypeNameNationalId: null },
+        });
+      }
+    });
   });
 });

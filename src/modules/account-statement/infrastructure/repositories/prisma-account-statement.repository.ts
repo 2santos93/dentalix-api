@@ -64,7 +64,8 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
             id: true,
             firstName: true,
             lastName: true,
-            docType: true,
+            documentType: true,
+            docTypeLabel: true,
             docNumber: true,
           },
         });
@@ -205,7 +206,14 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
             name: tenant?.name ?? '',
             logoUrl: tenant?.logoUrl ?? null,
           },
-          patient,
+          patient: {
+            id: patient.id,
+            firstName: patient.firstName,
+            lastName: patient.lastName,
+            docType: patient.documentType,
+            docTypeLabel: patient.docTypeLabel,
+            docNumber: patient.docNumber,
+          },
           snapshot: {
             plans: plans.map((plan) => ({
               ...plan,

@@ -1,3 +1,4 @@
+import { FixedDocumentTypeNamesReader } from '../../../document-type-names/__fixtures__/fixed-document-type-names.reader';
 import {
   BadRequestException,
   ConflictException,
@@ -34,13 +35,17 @@ describe('Implantes (DX-191, casos de uso)', () => {
   let repo: InMemoryImplantRepository;
   let register: RegisterImplantUseCase;
 
+  let names: FixedDocumentTypeNamesReader;
+
   beforeEach(() => {
+    names = new FixedDocumentTypeNamesReader();
     repo = new InMemoryImplantRepository();
     repo.patients.set('p1', {
       id: 'p1',
       firstName: 'Ana',
       lastName: 'Gómez',
-      docType: 'CC',
+      docType: 'NATIONAL_ID',
+      docTypeLabel: null,
       docNumber: '52123456',
       birthDate: null,
     });
@@ -147,7 +152,7 @@ describe('Implantes (DX-191, casos de uso)', () => {
 
   describe('tarjeta', () => {
     it('compone la intervención del día con implante y pilar, y registra la entrega', async () => {
-      const card = new GetImplantCardUseCase(repo, clock);
+      const card = new GetImplantCardUseCase(repo, clock, names);
       await register.execute('p1', IMPLANT, 'dr-1');
       await register.execute(
         'p1',
@@ -157,7 +162,7 @@ describe('Implantes (DX-191, casos de uso)', () => {
       const shown = await card.execute('p1', '2026-10-17');
       expect(shown).toMatchObject({
         patientName: 'Ana Gómez',
-        patientDocument: 'CC 52123456',
+        patientDocument: 'Documento nacional 52123456',
         clinicName: 'Clínica Demo',
         deliveredAt: null,
       });
@@ -170,7 +175,7 @@ describe('Implantes (DX-191, casos de uso)', () => {
     });
 
     it('400 sin día válido y 404 sin implantes ese día', async () => {
-      const card = new GetImplantCardUseCase(repo, clock);
+      const card = new GetImplantCardUseCase(repo, clock, names);
       await expect(card.execute('p1', undefined)).rejects.toThrow(
         BadRequestException,
       );
@@ -187,7 +192,7 @@ describe('Implantes (DX-191, casos de uso)', () => {
   });
 
   it('buscar: exige lote o referencia y los recorta', async () => {
-    const search = new SearchImplantsByLotUseCase(repo);
+    const search = new SearchImplantsByLotUseCase(repo, names);
     await expect(search.execute({ lot: ' ', reference: '' })).rejects.toThrow(
       'Indica el lote o la referencia (REF) a buscar',
     );

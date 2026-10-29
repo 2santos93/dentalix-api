@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { DOCUMENT_TYPES } from '../../domain/document-type';
@@ -29,6 +30,23 @@ function fromColumns(row: NameColumns): DocumentTypeNames {
   return names;
 }
 
+/**
+ * Los nombres de una clínica leídos con el cliente o la transacción de quien
+ * llama: el recibo los congela dentro de la transacción del abono (spec
+ * §4.6), sin otro constructor para el repositorio de pagos.
+ */
+export async function readDocumentTypeNames(
+  db: Prisma.TransactionClient,
+  tenantId: string,
+): Promise<DocumentTypeNames> {
+  return fromColumns(
+    await db.tenant.findUniqueOrThrow({
+      where: { id: tenantId },
+      select: SELECT,
+    }),
+  );
+}
+
 function toColumns(names: DocumentTypeNames): NameColumns {
   const row = {} as NameColumns;
   for (const type of DOCUMENT_TYPES) {
@@ -55,11 +73,7 @@ export class PrismaDocumentTypeNamesRepository implements DocumentTypeNamesRepos
   async get(): Promise<DocumentTypeNames> {
     // `tenants` es global (sin RLS): siempre por el id del contexto, sin
     // runWithTenant, como `getMajorityAge`.
-    const tenant = await this.prisma.tenant.findUniqueOrThrow({
-      where: { id: this.tenantId() },
-      select: SELECT,
-    });
-    return fromColumns(tenant);
+    return readDocumentTypeNames(this.prisma, this.tenantId());
   }
 
   async set(

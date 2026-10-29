@@ -1,5 +1,9 @@
 import { composeImplantCard } from './implant-card';
-import type { PatientImplant } from './entities/patient-implant.entity';
+import { NO_LOCAL_NAMES } from '../../document-type-names/__fixtures__/fixed-document-type-names.reader';
+import type {
+  ImplantCardPatient,
+  PatientImplant,
+} from './entities/patient-implant.entity';
 
 function implant(over: Partial<PatientImplant>): PatientImplant {
   return {
@@ -20,7 +24,7 @@ function implant(over: Partial<PatientImplant>): PatientImplant {
     udi: null,
     diameterMm: 4.1,
     lengthMm: 10,
-    sanitaryRegistration: 'INVIMA 2020DM-0001',
+    sanitaryRegistration: 'REG-2020-0001',
     notes: 'Nota clínica que no va en la tarjeta',
     createdAt: new Date('2026-10-10T15:00:00Z'),
     voidedAt: null,
@@ -32,11 +36,12 @@ function implant(over: Partial<PatientImplant>): PatientImplant {
   };
 }
 
-const PATIENT = {
+const PATIENT: ImplantCardPatient = {
   id: 'p1',
   firstName: 'Ana',
   lastName: 'Gómez',
-  docType: 'CC',
+  docType: 'NATIONAL_ID',
+  docTypeLabel: null,
   docNumber: '52123456',
   birthDate: new Date('1980-05-02T00:00:00Z'),
 };
@@ -45,6 +50,7 @@ describe('composeImplantCard (DX-191)', () => {
   const card = composeImplantCard({
     clinicName: 'Clínica Demo',
     patient: PATIENT,
+    documentTypeNames: NO_LOCAL_NAMES,
     placedOn: '2026-10-10',
     locations: [
       { id: 'l1', name: 'Sede principal', address: 'Cra 1 # 2-3' },
@@ -71,7 +77,7 @@ describe('composeImplantCard (DX-191)', () => {
   it('lleva identidad del paciente, centro y fecha', () => {
     expect(card).toMatchObject({
       patientName: 'Ana Gómez',
-      patientDocument: 'CC 52123456',
+      patientDocument: 'Documento nacional 52123456',
       patientBirthDate: '1980-05-02',
       clinicName: 'Clínica Demo',
       locations: [{ id: 'l1', name: 'Sede principal', address: 'Cra 1 # 2-3' }],
@@ -97,10 +103,34 @@ describe('composeImplantCard (DX-191)', () => {
     expect(card.deliveredAt).toEqual(new Date('2026-10-11T09:00:00Z'));
   });
 
+  it('the card prints the display name', () => {
+    const print = (
+      patient: Partial<ImplantCardPatient>,
+      names = NO_LOCAL_NAMES,
+    ) =>
+      composeImplantCard({
+        clinicName: 'C',
+        patient: { ...PATIENT, ...patient },
+        documentTypeNames: names,
+        placedOn: '2026-10-10',
+        locations: [],
+        implants: [],
+      }).patientDocument;
+    const local = { ...NO_LOCAL_NAMES, NATIONAL_ID: 'Documento A' };
+    expect(print({ docTypeLabel: 'ID local', docNumber: ' RX-1 ' })).toBe(
+      'ID local RX-1',
+    );
+    expect(print({}, local)).toBe('Documento A 52123456');
+    expect(print({ docType: 'TAX_ID' }, local)).toBe(
+      'Identificación fiscal 52123456',
+    );
+  });
+
   it('sin documento, null (nunca se inventa)', () => {
     const noDoc = composeImplantCard({
       clinicName: 'C',
       patient: { ...PATIENT, docNumber: ' ' },
+      documentTypeNames: NO_LOCAL_NAMES,
       placedOn: '2026-10-10',
       locations: [],
       implants: [],

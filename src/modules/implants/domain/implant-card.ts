@@ -3,6 +3,11 @@ import type {
   ImplantCardPatient,
   PatientImplant,
 } from './entities/patient-implant.entity';
+import {
+  documentText,
+  documentTypeName,
+  type ClinicDocumentTypeNames,
+} from '../../patients/domain/document-type';
 
 export const IMPLANT_KIND_LABEL: Record<PatientImplantKind, string> = {
   IMPLANT: 'Implante',
@@ -10,14 +15,6 @@ export const IMPLANT_KIND_LABEL: Record<PatientImplantKind, string> = {
   GRAFT: 'Injerto',
   MEMBRANE: 'Membrana',
   OTHER: 'Otro',
-};
-
-const DOC_TYPE_LABEL: Record<string, string> = {
-  CC: 'CC',
-  TI: 'TI',
-  CE: 'CE',
-  PASSPORT: 'Pasaporte',
-  OTHER: 'Doc.',
 };
 
 export interface ImplantCardLocation {
@@ -65,10 +62,15 @@ export interface ImplantCard {
   deliveredAt: Date | null;
 }
 
-function patientDocument(patient: ImplantCardPatient): string | null {
-  const doc = patient.docNumber?.trim() ?? '';
-  if (doc === '') return null;
-  return `${DOC_TYPE_LABEL[patient.docType] ?? 'Doc.'} ${doc}`;
+/** En vivo (DX-327, R17 y R18): el nombre visible de hoy y el número. */
+function patientDocument(
+  patient: ImplantCardPatient,
+  names: ClinicDocumentTypeNames,
+): string | null {
+  return documentText(
+    documentTypeName(patient.docType, patient.docTypeLabel, names),
+    patient.docNumber?.trim() || null,
+  );
 }
 
 function unique<T>(values: T[]): T[] {
@@ -84,6 +86,8 @@ function unique<T>(values: T[]): T[] {
 export function composeImplantCard(input: {
   clinicName: string;
   patient: ImplantCardPatient;
+  /** Nombres locales de la clínica (R16), leídos una vez por tarjeta. */
+  documentTypeNames: ClinicDocumentTypeNames;
   placedOn: string;
   implants: PatientImplant[];
   locations: ImplantCardLocation[];
@@ -101,7 +105,7 @@ export function composeImplantCard(input: {
   return {
     patientId: input.patient.id,
     patientName: `${input.patient.firstName} ${input.patient.lastName}`.trim(),
-    patientDocument: patientDocument(input.patient),
+    patientDocument: patientDocument(input.patient, input.documentTypeNames),
     patientBirthDate: input.patient.birthDate
       ? input.patient.birthDate.toISOString().slice(0, 10)
       : null,

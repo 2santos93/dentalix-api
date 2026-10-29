@@ -20,6 +20,7 @@ import {
   computeQuoteHash,
   parseQuoteContent,
 } from '../../domain/plan-quote';
+import { FixedDocumentTypeNamesReader } from '../../../document-type-names/__fixtures__/fixed-document-type-names.reader';
 
 // PNG real de 1x1 (firma + IHDR).
 const PNG =
@@ -32,14 +33,20 @@ const META = {
   userAgent: 'jest',
 };
 
+// DX-327: los nombres locales de la clínica; cada test empieza sin ninguno.
+let names: FixedDocumentTypeNamesReader;
+beforeEach(() => {
+  names = new FixedDocumentTypeNamesReader();
+});
+
 function setup() {
   const repo = new InMemoryPlanQuoteRepository();
   repo.add(quoteSource());
   const clock = () => NOW;
   return {
     repo,
-    get: new GetPlanQuoteUseCase(repo, clock),
-    accept: new AcceptTreatmentPlanUseCase(repo, clock),
+    get: new GetPlanQuoteUseCase(repo, clock, names),
+    accept: new AcceptTreatmentPlanUseCase(repo, clock, names),
   };
 }
 
@@ -59,7 +66,7 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
       ],
     });
     repo.add(source);
-    const get = new GetPlanQuoteUseCase(repo, () => NOW);
+    const get = new GetPlanQuoteUseCase(repo, () => NOW, names);
     const doc = await get.execute('patient-1', 'plan-1');
     expect(doc).toHaveProperty('visitOrganization', [
       { itemId: 'item-1', visit: 2, label: 'Corona', minDaysAfterPrevious: 90 },
@@ -76,6 +83,7 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
     const late = new GetPlanQuoteUseCase(
       lateRepo,
       () => new Date('2026-10-16T04:30:00.000Z'),
+      names,
     );
     const doc = await get.execute('patient-1', 'plan-1');
 
@@ -83,7 +91,10 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
     expect(doc.validUntil).toBe('2026-11-15');
     expect(doc.clinicName).toBe('Clínica Sonrisa');
     expect(doc.clinicLogoUrl).toBeNull();
-    expect(doc.patient).toEqual({ name: 'Ana Pérez', document: 'CC 123' });
+    expect(doc.patient).toEqual({
+      name: 'Ana Pérez',
+      document: 'Documento nacional 123',
+    });
     expect(doc.professionalName).toBe('Dra. Gómez');
     expect(doc.planStatus).toBe(TreatmentPlanStatus.DRAFT);
     expect(doc.totals).toEqual([
@@ -108,7 +119,7 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
               name: 'Sede principal',
               address: 'Calle 1',
             },
-            patient: { name: 'Ana Pérez', document: 'CC 123' },
+            patient: { name: 'Ana Pérez', document: 'Documento nacional 123' },
             professionalName: 'Dra. Gómez',
             items: quoteSource().items,
           },
@@ -125,6 +136,23 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
     );
   });
 
+  it('the live quote prints the current display name', async () => {
+    const { repo, get } = setup();
+    const document = async () =>
+      (await get.execute('patient-1', 'plan-1')).patient.document;
+    expect(await document()).toBe('Documento nacional 123');
+
+    names.names.NATIONAL_ID = 'Documento A';
+    expect(await document()).toBe('Documento A 123');
+
+    const stored = repo.sources.get('plan-1')!;
+    repo.add({
+      ...stored,
+      patient: { ...stored.patient, docTypeLabel: 'ID local' },
+    });
+    expect(await document()).toBe('ID local 123');
+  });
+
   it('un paciente sin documento sale como null, no como texto vacío', async () => {
     const { repo, get } = setup();
     repo.add(
@@ -132,7 +160,8 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
         patient: {
           firstName: 'Luis',
           lastName: 'Ruiz',
-          docType: 'CC',
+          docType: 'NATIONAL_ID',
+          docTypeLabel: null,
           docNumber: null,
         },
       }),
@@ -175,6 +204,7 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
     const later = new GetPlanQuoteUseCase(
       repo,
       () => new Date('2026-12-01T15:00:00.000Z'),
+      names,
     );
     const doc = await later.execute('patient-1', 'plan-1');
     expect(doc.issuedOn).toBe('2026-10-16');
@@ -296,7 +326,7 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
         },
       }),
     );
-    const doc = await new GetPlanQuoteUseCase(repo, () => NOW).execute(
+    const doc = await new GetPlanQuoteUseCase(repo, () => NOW, names).execute(
       'patient-1',
       'plan-1',
     );
@@ -416,6 +446,25 @@ describe('AcceptTreatmentPlanUseCase (DX-012)', () => {
         META,
       ),
     ).rejects.toThrow('El nombre de quien firma es obligatorio');
+  });
+
+  it('changing a local name between showing and accepting is 409; shown again, it signs the new text', async () => {
+    const { repo, get, accept } = setup();
+    const sign = (contentHash: string) =>
+      accept.execute(
+        'patient-1',
+        'plan-1',
+        { signerName: 'Ana', signature: PNG, contentHash },
+        META,
+      );
+    const before = await shownHash(get);
+    names.names.NATIONAL_ID = 'Documento A';
+    await expect(sign(before)).rejects.toThrow(QUOTE_CHANGED_MESSAGE);
+    expect(repo.inserted).toHaveLength(0);
+
+    const doc = await sign(await shownHash(get));
+    expect(doc.patient.document).toBe('Documento A 123');
+    expect(doc.acceptance?.integrityOk).toBe(true);
   });
 
   it('409 si el presupuesto cambió desde que se mostró (hash distinto)', async () => {

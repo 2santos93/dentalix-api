@@ -5,13 +5,19 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { ConsentSignerType, DocType } from '@prisma/client';
+import { ConsentSignerType } from '@prisma/client';
 import {
   PatientConsent,
   PatientConsentDocument,
   PatientConsentSummary,
 } from '../../domain/entities/patient-consent.entity';
 import { ConsentTemplate } from '../../domain/entities/consent-template.entity';
+import {
+  documentText,
+  documentTypeName,
+  type ClinicDocumentTypeNames,
+} from '../../../patients/domain/document-type';
+import { DocumentTypeNamesReader } from '../../../patients/domain/ports/document-type-names-repository.port';
 import {
   CONSENT_TEMPLATE_REPOSITORY,
   type ConsentTemplateRepository,
@@ -48,14 +54,6 @@ export const CONSENT_NOT_FOUND_MESSAGE = 'Consentimiento no encontrado';
 const NO_TREATMENT = 'No especificado';
 const NO_DOCUMENT = 'Sin documento';
 
-const DOC_TYPE_LABEL: Record<DocType, string> = {
-  CC: 'CC',
-  TI: 'TI',
-  CE: 'CE',
-  PASSPORT: 'Pasaporte',
-  OTHER: 'Doc.',
-};
-
 export interface PreviewPatientConsentInput {
   templateId: string;
   treatmentPlanId?: string;
@@ -86,10 +84,18 @@ export interface SignPatientConsentMeta {
   userAgent: string | null;
 }
 
-function documentOf(patient: ConsentSigningContext['patient']): string | null {
-  return patient.docNumber
-    ? `${DOC_TYPE_LABEL[patient.docType]} ${patient.docNumber}`
-    : null;
+/**
+ * `«{nombre visible} {número}»` (DX-327, R8 y R17), o `null` sin número. Va
+ * al cuerpo (`{documento}`) y a `signerDocument`, y queda sellado (R18).
+ */
+function documentOf(
+  patient: ConsentSigningContext['patient'],
+  names: ClinicDocumentTypeNames,
+): string | null {
+  return documentText(
+    documentTypeName(patient.docType, patient.docTypeLabel, names),
+    patient.docNumber,
+  );
 }
 
 function treatmentOf(plan: ConsentSigningContext['plan']): string {
@@ -107,6 +113,7 @@ function treatmentOf(plan: ConsentSigningContext['plan']): string {
 async function prepare(
   templates: ConsentTemplateRepository,
   consents: PatientConsentRepository,
+  documentTypeNames: DocumentTypeNamesReader,
   now: Date,
   patientId: string,
   input: PreviewPatientConsentInput,
@@ -116,6 +123,8 @@ async function prepare(
   context: ConsentSigningContext;
   title: string;
   body: string;
+  /** El documento del paciente tal como va en el cuerpo (R18). */
+  document: string | null;
 }> {
   const template = await templates.findById(input.templateId);
   if (!template) {
@@ -137,9 +146,10 @@ async function prepare(
   if (context.plan === null) {
     throw new NotFoundException(PLAN_NOT_FOUND_MESSAGE);
   }
+  const document = documentOf(context.patient, await documentTypeNames.get());
   const body = renderConsent(template.body, {
     paciente: `${context.patient.firstName} ${context.patient.lastName}`,
-    documento: documentOf(context.patient) ?? NO_DOCUMENT,
+    documento: document ?? NO_DOCUMENT,
     profesional: context.professionalName,
     clinica: context.clinicName,
     // El formato de la sede (409 si le falta) solo si la plantilla lo pinta.
@@ -152,7 +162,7 @@ async function prepare(
       : '',
     tratamiento: treatmentOf(context.plan),
   });
-  return { template, context, title: template.title, body };
+  return { template, context, title: template.title, body, document };
 }
 
 @Injectable()
@@ -164,6 +174,7 @@ export class PreviewPatientConsentUseCase {
     private readonly consents: PatientConsentRepository,
     @Inject(CONSENT_CLOCK)
     private readonly now: ConsentClock,
+    private readonly documentTypeNames: DocumentTypeNamesReader,
   ) {}
 
   /** El documento como quedaría firmado ahora, sin guardar nada. */
@@ -175,6 +186,7 @@ export class PreviewPatientConsentUseCase {
     const { template, context, title, body } = await prepare(
       this.templates,
       this.consents,
+      this.documentTypeNames,
       this.now(),
       patientId,
       input,
@@ -215,6 +227,7 @@ export class SignPatientConsentUseCase {
     private readonly consents: PatientConsentRepository,
     @Inject(CONSENT_CLOCK)
     private readonly now: ConsentClock,
+    private readonly documentTypeNames: DocumentTypeNamesReader,
   ) {}
 
   /**
@@ -242,9 +255,10 @@ export class SignPatientConsentUseCase {
     }
 
     const signedAt = this.now();
-    const { template, context, title, body } = await prepare(
+    const { template, context, title, body, document } = await prepare(
       this.templates,
       this.consents,
+      this.documentTypeNames,
       signedAt,
       patientId,
       input,
@@ -272,7 +286,8 @@ export class SignPatientConsentUseCase {
     const signerName =
       guardian?.name ??
       `${context.patient.firstName} ${context.patient.lastName}`;
-    const signerDocument = guardian?.document ?? documentOf(context.patient);
+    // El mismo texto que el cuerpo: una sola lectura de los nombres.
+    const signerDocument = guardian?.document ?? document;
     const contentHash = computeConsentHash({
       title,
       body,
@@ -328,6 +343,7 @@ export class GetPatientConsentUseCase {
   constructor(
     @Inject(PATIENT_CONSENT_REPOSITORY)
     private readonly consents: PatientConsentRepository,
+    private readonly documentTypeNames: DocumentTypeNamesReader,
   ) {}
 
   /**
@@ -354,6 +370,20 @@ export class GetPatientConsentUseCase {
       professionalSignature: doc.professionalSignature,
       signedAt: doc.signedAt,
     });
-    return { ...doc, integrityOk: expected === doc.contentHash };
+    // La cabecera es en vivo (R18): el nombre visible de hoy; lo firmado
+    // (cuerpo y `signerDocument`) es texto sellado y no se recalcula.
+    const { patient } = doc;
+    return {
+      ...doc,
+      patient: {
+        ...patient,
+        docTypeName: documentTypeName(
+          patient.docType,
+          patient.docTypeLabel,
+          await this.documentTypeNames.get(),
+        ),
+      },
+      integrityOk: expected === doc.contentHash,
+    };
   }
 }

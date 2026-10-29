@@ -2,6 +2,7 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
+import { PrismaDocumentTypeNamesRepository } from '../src/modules/patients/infrastructure/repositories/prisma-document-type-names.repository';
 import { PrismaPrescriptionRepository } from '../src/modules/prescriptions/infrastructure/repositories/prisma-prescription.repository';
 import {
   CheckPrescriptionSafetyUseCase,
@@ -111,7 +112,11 @@ const item = (activeIngredient: string) => ({
 describe('receta segura: emisión con anamnesis real (DX-300, int)', () => {
   let a: Seeded;
   let b: Seeded;
-  const issue = new IssuePrescriptionUseCase(repo, NOW);
+  const issue = new IssuePrescriptionUseCase(
+    repo,
+    NOW,
+    new PrismaDocumentTypeNamesRepository(prisma, tenantContext),
+  );
   const check = new CheckPrescriptionSafetyUseCase(repo, NOW);
   const get = new GetPrescriptionUseCase(repo);
 
