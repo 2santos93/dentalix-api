@@ -5,7 +5,7 @@ export interface Location {
   tenantId: string;
   name: string;
   address: string | null;
-  /** País de la sede (DX-312): ISO 3166-1 alfa-2 de `countries`. */
+  /** País de la sede (ISO 3166-1 alfa-2). No decide ninguna regla. */
   country: string;
   /** DX-319: nº de registro sanitario (texto libre) o null. */
   healthRegistrationNumber: string | null;

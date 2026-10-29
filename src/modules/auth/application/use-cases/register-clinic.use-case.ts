@@ -17,6 +17,8 @@ import {
   DUMMY_PASSWORD_HASH,
   PasswordService,
 } from '../../../../shared/crypto/password.service';
+import { COUNTRY_WHITELIST } from '../../../locations/domain/ports/country-whitelist.port';
+import type { CountryWhitelist } from '../../../locations/domain/ports/country-whitelist.port';
 import { CURRENCY_WHITELIST } from '../../../treatment-plans/domain/ports/currency-whitelist.port';
 import type { CurrencyWhitelist } from '../../../treatment-plans/domain/ports/currency-whitelist.port';
 import type { ClinicLocationSettings } from '../../domain/ports/auth-repository.port';
@@ -104,6 +106,8 @@ export class RegisterClinicUseCase {
     private readonly password: PasswordService,
     @Inject(CURRENCY_WHITELIST)
     private readonly currencies: CurrencyWhitelist,
+    @Inject(COUNTRY_WHITELIST)
+    private readonly countries: CountryWhitelist,
   ) {}
 
   /**
@@ -114,7 +118,11 @@ export class RegisterClinicUseCase {
   async accept(input: RegisterClinicInput): Promise<void> {
     // G1: la sede se valida antes que nada (es un 400 de los datos enviados,
     // igual para todos; no dice nada del email).
-    const location = await registrationLocation(input, this.currencies);
+    const location = await registrationLocation(
+      input,
+      this.currencies,
+      this.countries,
+    );
     const subdomain = input.subdomain.trim().toLowerCase();
     if (await this.repo.findTenantBySubdomain(subdomain)) {
       throw new ConflictException(SUBDOMAIN_TAKEN);
@@ -133,7 +141,11 @@ export class RegisterClinicUseCase {
 
   /** Todo el registro esperando el resultado (lo usan los tests). */
   async execute(input: RegisterClinicInput): Promise<RegisterOutcome> {
-    const location = await registrationLocation(input, this.currencies);
+    const location = await registrationLocation(
+      input,
+      this.currencies,
+      this.countries,
+    );
     const subdomain = input.subdomain.trim().toLowerCase();
     if (await this.repo.findTenantBySubdomain(subdomain)) {
       throw new ConflictException(SUBDOMAIN_TAKEN);

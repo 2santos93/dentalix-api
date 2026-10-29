@@ -1,8 +1,9 @@
+import type { CountryWhitelist } from '../../locations/domain/ports/country-whitelist.port';
 import type { CurrencyWhitelist } from '../../treatment-plans/domain/ports/currency-whitelist.port';
 import {
-  COUNTRY_MISSING,
   isRegionalError,
   regionalBadRequest,
+  validateCountry,
   validateRegionalSettings,
 } from '../../locations/domain/regional-settings';
 import type { ClinicLocationSettings } from '../domain/ports/auth-repository.port';
@@ -18,6 +19,7 @@ export interface RegistrationLocationInput {
 }
 
 const FIELD = {
+  country: 'locationCountry',
   currency: 'locationCurrency',
   timeZone: 'locationTimeZone',
   locale: 'locationLocale',
@@ -35,9 +37,11 @@ const FIELD = {
 export async function registrationLocation(
   input: RegistrationLocationInput,
   currencies: CurrencyWhitelist,
+  countries: CountryWhitelist,
 ): Promise<ClinicLocationSettings> {
-  if (!input.locationCountry) {
-    throw regionalBadRequest('locationCountry', COUNTRY_MISSING);
+  const country = await validateCountry(input.locationCountry, countries);
+  if (typeof country !== 'string') {
+    throw regionalBadRequest(FIELD.country, country.message);
   }
   const regional = await validateRegionalSettings(
     {
@@ -51,5 +55,5 @@ export async function registrationLocation(
   if (isRegionalError(regional)) {
     throw regionalBadRequest(FIELD[regional.field], regional.message);
   }
-  return { country: input.locationCountry, ...regional };
+  return { country, ...regional };
 }

@@ -251,6 +251,90 @@ describe('Auth (e2e)', () => {
       expect(await legacyScheduleZone(location.id)).toBe('Asia/Tokyo');
     });
 
+    it('registration without locationCountry is 400 with field locationCountry', async () => {
+      const missing = base('pais-falta');
+      const res = await api()
+        .post('/api/v1/auth/register')
+        .set('X-Tenant-Host', 'localhost')
+        .send(
+          clinicRegisterBody(REGIONAL_TOKYO_FIXTURE, {
+            ...missing,
+            locationCountry: undefined,
+          }),
+        )
+        .expect(400);
+      expect(res.body).toMatchObject({
+        message: 'Elige el país de la sede.',
+        field: 'locationCountry',
+      });
+      expect(
+        await raw.pendingRegistration.count({
+          where: { email: missing.email },
+        }),
+      ).toBe(0);
+    });
+
+    it('registration with a code that is not in countries is 400', async () => {
+      const unknown = base('pais-xx');
+      const res = await api()
+        .post('/api/v1/auth/register')
+        .set('X-Tenant-Host', 'localhost')
+        .send(
+          clinicRegisterBody(REGIONAL_TOKYO_FIXTURE, {
+            ...unknown,
+            locationCountry: 'XX',
+          }),
+        )
+        .expect(400);
+      expect(res.body).toMatchObject({
+        message: 'El país «XX» no está en la lista de países.',
+        field: 'locationCountry',
+      });
+      expect(
+        await raw.pendingRegistration.count({
+          where: { email: unknown.email },
+        }),
+      ).toBe(0);
+    });
+
+    it('registration in a country outside the old pair creates the clinic with that country', async () => {
+      const ve = base('pais-ve');
+      await api()
+        .post('/api/v1/auth/register')
+        .set('X-Tenant-Host', 'localhost')
+        .send({
+          ...ve,
+          locationCountry: ' ve ',
+          locationCurrency: 'VES',
+          locationTimeZone: 'America/Caracas',
+          locationLocale: 'es-VE',
+          locationHourCycle: 'h12',
+        })
+        .expect(202);
+      await waitForPending(ve.email);
+      const pending = await raw.pendingRegistration.findFirstOrThrow({
+        where: { email: ve.email },
+      });
+      expect(pending.locationCountry).toBe('VE');
+      const verified = await verifyPending(ve.email);
+      expect(verified.status).toBe(201);
+      const location = await mainLocation(
+        (verified.body as { tenantId: string }).tenantId,
+      );
+      expect(location).toMatchObject({
+        country: 'VE',
+        currency: 'VES',
+        timeZone: 'America/Caracas',
+        locale: 'es-VE',
+        hourCycle: 'h12',
+      });
+      expect(
+        await raw.$queryRaw<{ country: string | null; countryCode: string }[]>`
+          SELECT "country"::text AS "country", "countryCode"
+          FROM "locations" WHERE "id" = ${location.id}::uuid`,
+      ).toEqual([{ country: null, countryCode: 'VE' }]);
+    });
+
     it('registration with a subset of the fields is 400', async () => {
       const subset = base('g1-subset');
       const res = await api()

@@ -6,7 +6,7 @@ import type { PrismaClient } from '@prisma/client';
  * fichero acepta que se omita el fixture, y cada llamada nombra el suyo.
  */
 export interface RegionalFixture {
-  country: 'CO' | 'ES';
+  country: string;
   currency: string;
   timeZone: string;
   locale: string;

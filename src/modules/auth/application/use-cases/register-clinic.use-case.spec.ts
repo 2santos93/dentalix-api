@@ -1,3 +1,4 @@
+import { ISO3166_COUNTRIES } from '../../../../../prisma/reference/iso3166';
 import {
   BadRequestException,
   ConflictException,
@@ -110,6 +111,12 @@ function makeNotifier(cooldownSeconds = 0) {
   } satisfies RegistrationNotifier;
 }
 
+/** Países de la lista de referencia (el puerto real consulta `countries`). */
+const COUNTRIES = {
+  has: (code: string) =>
+    Promise.resolve(ISO3166_COUNTRIES.some((c) => c.code === code)),
+};
+
 /** Monedas admitidas en estos tests (el puerto real consulta `currencies`). */
 const CURRENCIES = {
   has: (code: string) => Promise.resolve(['COP', 'JPY'].includes(code)),
@@ -127,12 +134,13 @@ function newUseCase(
     notifier,
     password,
     CURRENCIES,
+    COUNTRIES,
   );
 }
 
 // G1: la primera sede con sus cuatro valores (datos de test, no defaults).
 const TOKYO_LOCATION = {
-  locationCountry: 'CO' as const,
+  locationCountry: 'CO',
   locationCurrency: 'JPY',
   locationTimeZone: 'Asia/Tokyo',
   locationLocale: 'ja-JP',
@@ -581,6 +589,36 @@ describe('RegisterClinicUseCase (DX-029)', () => {
         field: 'locationHourCycle',
       });
       expect(pending.rows).toHaveLength(0);
+    });
+
+    it('registration checks locationCountry with the same messages', async () => {
+      const pending = new InMemoryPending();
+      const uc = newUseCase(makeRepo(), pending, makeNotifier(), realPassword);
+      const cases: [unknown, string][] = [
+        [null, 'Elige el país de la sede.'],
+        ['xx', 'El país «XX» no está en la lista de países.'],
+        ['x'.repeat(500), 'El país indicado no está en la lista de países.'],
+      ];
+      for (const [locationCountry, message] of cases) {
+        for (const call of [uc.execute.bind(uc), uc.accept.bind(uc)]) {
+          const error = await call({
+            ...INPUT,
+            locationCountry: locationCountry as string,
+          }).catch((e: unknown) => e);
+          expect((error as BadRequestException).getResponse()).toMatchObject({
+            message,
+            field: 'locationCountry',
+          });
+        }
+      }
+      expect(pending.rows).toHaveLength(0);
+    });
+
+    it('registration normalizes a listed country outside the old pair', async () => {
+      const pending = new InMemoryPending();
+      const uc = newUseCase(makeRepo(), pending, makeNotifier(), realPassword);
+      await uc.execute({ ...INPUT, locationCountry: ' ve ' });
+      expect(pending.rows[0].location?.country).toBe('VE');
     });
 
     it('legacy registration without location fields is 400 with field locationCountry', async () => {

@@ -1,7 +1,10 @@
+import { ISO3166_COUNTRIES } from '../../../../prisma/reference/iso3166';
+import type { CountryWhitelist } from './ports/country-whitelist.port';
 import type { CurrencyWhitelist } from '../../treatment-plans/domain/ports/currency-whitelist.port';
 import {
   isRegionalError,
   normalizeLocale,
+  validateCountry,
   validateHourCycle,
   validateRegionalSettings,
   validateTimeZone,
@@ -181,5 +184,42 @@ describe('normalizeLocale', () => {
     const long = 'es-ES-u-ca-gregory-co-standard-nu-latn-fw-mon';
     expect(Intl.getCanonicalLocales(long)[0].length).toBeGreaterThan(35);
     expect(normalizeLocale(long)).toBeNull();
+  });
+});
+
+describe('validateCountry (DX-312)', () => {
+  const countries: CountryWhitelist = {
+    has: (code) =>
+      Promise.resolve(ISO3166_COUNTRIES.some((c) => c.code === code)),
+  };
+
+  it('validateCountry trims, uppercases and checks the list', async () => {
+    await expect(validateCountry(' ve ', countries)).resolves.toBe('VE');
+    await expect(validateCountry('JP', countries)).resolves.toBe('JP');
+  });
+
+  it('validateCountry rejects an empty, null or non-text value with the missing message', async () => {
+    for (const raw of ['', '   ', null, undefined, 5, {}]) {
+      await expect(validateCountry(raw, countries)).resolves.toEqual({
+        field: 'country',
+        message: 'Elige el país de la sede.',
+      });
+    }
+  });
+
+  it('validateCountry rejects a two-letter code that is not in the list naming it', async () => {
+    await expect(validateCountry('xx', countries)).resolves.toEqual({
+      field: 'country',
+      message: 'El país «XX» no está en la lista de países.',
+    });
+  });
+
+  it('validateCountry rejects any other text without echoing it', async () => {
+    for (const raw of ['ZZZ', 'C0', 'V', 'a'.repeat(500)]) {
+      await expect(validateCountry(raw, countries)).resolves.toEqual({
+        field: 'country',
+        message: 'El país indicado no está en la lista de países.',
+      });
+    }
   });
 });

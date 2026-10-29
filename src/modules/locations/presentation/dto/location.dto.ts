@@ -3,12 +3,10 @@ import {
   ApiProperty,
   ApiPropertyOptional,
 } from '@nestjs/swagger';
-import { ClinicCountry } from '@prisma/client';
 import { Transform } from 'class-transformer';
 import {
   Equals,
   IsBoolean,
-  IsEnum,
   IsOptional,
   IsString,
   Matches,
@@ -43,10 +41,11 @@ function trim({ value }: { value: unknown }): unknown {
 }
 
 const COUNTRY_DOC = {
-  enum: ClinicCountry,
-  enumName: 'ClinicCountry',
+  type: String,
+  minLength: 2,
+  maxLength: 2,
   description:
-    'País de la sede: decide los campos legales obligatorios de la receta (CO o ES).',
+    'País de la sede: código ISO 3166-1 alfa-2 de la lista de países. No decide ninguna regla.',
 };
 
 // G1 (spec §3.1): los cuatro son obligatorios en el alta. La presencia y los
@@ -76,8 +75,8 @@ export class CreateLocationDto {
 
   @ApiProperty(COUNTRY_DOC)
   @IsOptional()
-  @IsEnum(ClinicCountry, { message: COUNTRY_MISSING })
-  country?: ClinicCountry;
+  @IsString({ message: COUNTRY_MISSING })
+  country?: string;
 
   @ApiProperty({ type: String, example: 'EUR', description: CURRENCY_DOC })
   @IsOptional()
@@ -135,8 +134,8 @@ export class UpdateLocationDto {
 
   @ApiPropertyOptional(COUNTRY_DOC)
   @IsOptional()
-  @IsEnum(ClinicCountry)
-  country?: ClinicCountry;
+  @IsString({ message: COUNTRY_MISSING })
+  country?: string;
 
   @ApiPropertyOptional({
     type: String,
@@ -262,7 +261,7 @@ export class LocationDto {
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty() name!: string;
   @ApiProperty({ nullable: true, type: String }) address!: string | null;
-  @ApiProperty({ enum: ClinicCountry, enumName: 'ClinicCountry' })
+  @ApiProperty(COUNTRY_DOC)
   country!: string;
   @ApiProperty({
     type: String,

@@ -1,3 +1,4 @@
+import { ISO3166_COUNTRIES } from '../../../../../prisma/reference/iso3166';
 import {
   BadRequestException,
   ConflictException,
@@ -52,6 +53,12 @@ function makeRepo(over: Partial<LocationRepository> = {}): LocationRepository {
   };
 }
 
+/** Países de la lista de referencia (el puerto real consulta `countries`). */
+const COUNTRIES = {
+  has: (code: string) =>
+    Promise.resolve(ISO3166_COUNTRIES.some((c) => c.code === code)),
+};
+
 /** Monedas admitidas en estos tests (el puerto real consulta `currencies`). */
 const CURRENCIES = {
   has: (code: string) => Promise.resolve(['COP', 'EUR', 'JPY'].includes(code)),
@@ -59,14 +66,14 @@ const CURRENCIES = {
 
 /** Los valores regionales del alta: datos de test, no defaults. */
 const TOKYO = {
-  country: 'CO' as const,
+  country: 'CO',
   currency: 'JPY',
   timeZone: 'Asia/Tokyo',
   locale: 'ja-JP',
   hourCycle: 'h23',
 };
 const NEW_YORK = {
-  country: 'CO' as const,
+  country: 'CO',
   currency: 'USD',
   timeZone: 'America/New_York',
   locale: 'en-US',
@@ -74,7 +81,7 @@ const NEW_YORK = {
 };
 
 function updateUseCase(repo: LocationRepository): UpdateLocationUseCase {
-  return new UpdateLocationUseCase(repo, CURRENCIES);
+  return new UpdateLocationUseCase(repo, CURRENCIES, COUNTRIES);
 }
 
 /**
@@ -110,7 +117,7 @@ function regionalRepo(opts: {
 }
 
 function createUseCase(repo: LocationRepository): CreateLocationUseCase {
-  return new CreateLocationUseCase(repo, CURRENCIES);
+  return new CreateLocationUseCase(repo, CURRENCIES, COUNTRIES);
 }
 
 describe('CreateLocationUseCase', () => {
@@ -278,6 +285,70 @@ describe('UpdateLocationUseCase', () => {
   });
 });
 
+describe('país de la sede (DX-312)', () => {
+  it('create checks the country before the currency', async () => {
+    const create = jest.fn();
+    const uc = createUseCase(makeRepo({ create }));
+    const error = await uc
+      .execute({ name: 'X', ...TOKYO, country: 'XX', currency: 'ZZZ' })
+      .catch((e: unknown) => e);
+    expect((error as BadRequestException).getResponse()).toMatchObject({
+      message: 'El país «XX» no está en la lista de países.',
+      field: 'country',
+    });
+    const missing = await uc
+      .execute({ name: 'X', ...TOKYO, country: undefined, currency: 'ZZZ' })
+      .catch((e: unknown) => e);
+    expect((missing as BadRequestException).getResponse()).toMatchObject({
+      message: 'Elige el país de la sede.',
+      field: 'country',
+    });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('create stores any listed country, uppercased', async () => {
+    const create = jest.fn((input: { country: string }) =>
+      Promise.resolve(makeLocation({ country: input.country })),
+    );
+    await createUseCase(makeRepo({ create })).execute({
+      name: 'Caracas',
+      ...TOKYO,
+      country: ' ve ',
+    });
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ country: 'VE' }),
+    );
+  });
+
+  it('update leaves the country alone when absent and rejects null', async () => {
+    const update = jest.fn((_id: string, patch: object) =>
+      Promise.resolve(makeLocation({ ...patch })),
+    );
+    const uc = updateUseCase(makeRepo({ update }));
+    await uc.execute('loc-1', { name: 'Otra' });
+    expect(update).toHaveBeenLastCalledWith(
+      'loc-1',
+      expect.objectContaining({ country: undefined }),
+    );
+    for (const country of [null, '', '  ']) {
+      const error = await uc
+        .execute('loc-1', { country })
+        .catch((e: unknown) => e);
+      expect((error as BadRequestException).getResponse()).toMatchObject({
+        message: 'Elige el país de la sede.',
+        field: 'country',
+      });
+    }
+    const unknown = await uc
+      .execute('loc-1', { country: 'xx' })
+      .catch((e: unknown) => e);
+    expect((unknown as BadRequestException).getResponse()).toMatchObject({
+      message: 'El país «XX» no está en la lista de países.',
+    });
+    expect(update).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('país de la sede (DX-013)', () => {
   it('se crea con el país pedido', async () => {
     const create = jest.fn((input: { country: string }) =>
@@ -297,7 +368,7 @@ describe('país de la sede (DX-013)', () => {
   });
 
   it('se cambia al editar', async () => {
-    const update = jest.fn((_id: string, patch: { country?: 'CO' | 'ES' }) =>
+    const update = jest.fn((_id: string, patch: { country?: string }) =>
       Promise.resolve(makeLocation({ ...patch })),
     );
     const uc = updateUseCase(makeRepo({ update }));
