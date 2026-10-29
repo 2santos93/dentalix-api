@@ -41,6 +41,7 @@ describe('assertNotUnderRetention (DX-039)', () => {
     expect(body.retentionUntil).toBe('2039-02-28');
     expect(body.message).toContain('retención legal hasta el 28/02/2039');
     expect(body.message).toContain('15 años desde la última atención');
+    expect(body.message).not.toContain('Res. 839');
   });
 
   it('DOUBLE: el mensaje cita el plazo doble (30 años), no los 15 años', () => {

@@ -526,7 +526,7 @@ export class PatientImportsController {
   @ApiOperation({
     summary: 'Paso 3: confirmar e importar en segundo plano',
     description:
-      'Encola el trabajo que importa el lote por bloques (la clínica sigue trabajando): primero los pacientes y después, si el lote trae hoja de saldos, un «Saldo migrado» por paciente y moneda (DX-262). Una importación en curso por clínica. Los pacientes quedan SIN autorización de datos (Ley 1581) registrada: la ficha la marca pendiente.',
+      'Encola el trabajo que importa el lote por bloques (la clínica sigue trabajando): primero los pacientes y después, si el lote trae hoja de saldos, un «Saldo migrado» por paciente y moneda (DX-262). Una importación en curso por clínica. Los pacientes quedan SIN autorización de datos registrada: la ficha la marca pendiente.',
   })
   @ApiOkResponse({ type: PatientImportBatchDetailDto })
   @ApiNotFoundResponse({ description: NOT_FOUND_MESSAGE })

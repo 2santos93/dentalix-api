@@ -599,9 +599,9 @@ describe('validateEnv', () => {
       ).not.toThrow();
     });
 
-    it('rechaza una retención por debajo del mínimo legal (180 meses)', () => {
+    it('rechaza una retención por debajo del mínimo de la plataforma (180 meses)', () => {
       expect(errorOf(baseEnv({ AUDIT_RETENTION_MONTHS: '120' }))).toContain(
-        'AUDIT_RETENTION_MONTHS debe ser un entero entre 180',
+        'AUDIT_RETENTION_MONTHS debe ser un entero entre 180 y 1200 (mínimo de la plataforma: 15 años).',
       );
     });
 

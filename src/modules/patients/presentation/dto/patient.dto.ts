@@ -141,7 +141,7 @@ export class PatientDto {
     enumName: 'RetentionExtension',
     description:
       'Retención extendida de la HC: NONE = 15 años desde la última ' +
-      'atención (Res. 839/2017), DOUBLE = 30 años, PERMANENT = nunca se ' +
+      'atención, DOUBLE = 30 años, PERMANENT = nunca se ' +
       'libera. Solo ADMIN la cambia.',
   })
   retentionExtended!: RetentionExtension;
@@ -178,7 +178,7 @@ export class PatientDto {
     nullable: true,
     type: String,
     description:
-      'DX-107: lote de importación que creó al paciente (null = alta a mano). Un paciente importado nace SIN autorización de datos (Ley 1581): la ficha la marca pendiente.',
+      'DX-107: lote de importación que creó al paciente (null = alta a mano). Un paciente importado nace SIN autorización de datos: la ficha la marca pendiente.',
   })
   importBatchId!: string | null;
 

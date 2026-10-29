@@ -290,7 +290,9 @@ describe('Adendas de la historia clínica (DX-038, e2e)', () => {
         )
           .send({ notes: 'alterado' })
           .expect(405);
-        expect((res.body as { message: string }).message).toMatch(/adenda/);
+        expect((res.body as { message: string }).message).toBe(
+          'La historia clínica no se puede modificar. Añade una adenda.',
+        );
       },
     );
 

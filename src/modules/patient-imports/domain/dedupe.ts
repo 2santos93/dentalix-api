@@ -19,7 +19,7 @@ export interface ExistingPatientDoc {
 const EXISTING_MESSAGE =
   'Ya existe un paciente con este documento en la clínica: no se crea otro (se salta o se rellenan sus campos vacíos, según elijas al confirmar).';
 const SUPPRESSED_MESSAGE =
-  'Ya existe un paciente con este documento en la clínica y pidió la supresión de sus datos (Ley 1581): no se crea otro y no se rellenarán su teléfono, correo, dirección, notas ni contacto de emergencia.';
+  'Ya existe un paciente con este documento en la clínica y pidió la supresión de sus datos por privacidad: no se crea otro y no se rellenarán su teléfono, correo, dirección, notas ni contacto de emergencia.';
 
 export interface DedupeResult {
   /** Filas nuevas: se crearán. */

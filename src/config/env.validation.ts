@@ -390,7 +390,7 @@ function auditProblems(env: Env): string[] {
     if (!/^\d{1,9}$/.test(raw.trim()) || value < min || value > max) {
       problems.push(
         key === 'AUDIT_RETENTION_MONTHS'
-          ? `${key} debe ser un entero entre ${min} y ${max} (mínimo legal: 15 años de la historia clínica, Res. 1995/1999 y 839/2017).`
+          ? `${key} debe ser un entero entre ${min} y ${max} (mínimo de la plataforma: 15 años).`
           : `${key} debe ser un entero entre ${min} y ${max}.`,
       );
     }
