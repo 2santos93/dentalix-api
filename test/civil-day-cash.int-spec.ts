@@ -382,7 +382,12 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
     let legacy: string;
 
     beforeAll(async () => {
-      legacy = await legacyLocationInsert(owner, tenantA, 'Réplica antigua');
+      legacy = await legacyLocationInsert(
+        owner,
+        tenantA,
+        'Réplica antigua',
+        REGIONAL_BOGOTA_FIXTURE.country,
+      );
     });
 
     afterAll(async () => {

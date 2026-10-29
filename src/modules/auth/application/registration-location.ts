@@ -1,4 +1,3 @@
-import type { ClinicCountry } from '@prisma/client';
 import type { CurrencyWhitelist } from '../../treatment-plans/domain/ports/currency-whitelist.port';
 import {
   COUNTRY_MISSING,
@@ -10,7 +9,7 @@ import type { ClinicLocationSettings } from '../domain/ports/auth-repository.por
 
 /** Los campos de la primera sede tal como llegan en el registro. */
 export interface RegistrationLocationInput {
-  locationCountry?: ClinicCountry | null;
+  locationCountry?: string | null;
   locationCurrency?: string | null;
   locationTimeZone?: string | null;
   locationLocale?: string | null;

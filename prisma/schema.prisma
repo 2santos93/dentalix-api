@@ -213,8 +213,11 @@ enum ClinicRole {
 /// DENTRO del tenant, no un nivel de aislamiento: el RLS por tenant sigue
 /// siendo la frontera dura. Pacientes, historia y catálogo NO llevan sede —
 /// la ficha del paciente es de la clínica (ver docs/plans/2026-08-01-multi-sede.md).
-/// País donde opera una sede (DX-013). Decide los campos legales obligatorios
-/// de la receta: CO (Dec. 780/2016 art. 2.5.3.10.16) o ES (RD 1718/2010 art. 3).
+/// Excepción G5.3 (DX-334): país de sede anterior a DX-312. La API ya no lo
+/// lee: lo mantienen los triggers locations_country_code y
+/// pending_registrations_location_country_code para las réplicas anteriores,
+/// y lo conservan las recetas legadas (prescriptions.country). La fase 2 lo
+/// renombra a LegacyPrescriptionCountry y borra las demás columnas.
 enum ClinicCountry {
   CO
   ES
@@ -225,11 +228,13 @@ model Location {
   tenantId                     String        @db.Uuid
   name                         String
   address                      String?
-  // País de la sede (DX-013): la receta se emite con las reglas del país donde
-  // se atiende. GLOBAL-G1 fase 1: el default CO se CONSERVA solo porque el
-  // INSERT de una réplica antigua no envía país; el código nuevo siempre lo
-  // escribe explícito (R1). La fase 2 lo quita (decisión 1 del dueño).
-  country                      ClinicCountry @default(CO)
+  /// DX-312: país de la sede, ISO 3166-1 alfa-2 de `countries` (columna
+  /// "countryCode"). Obligatorio y sin default. Ninguna regla lo lee; hasta
+  /// DX-329 da el indicativo de los teléfonos escritos sin «+».
+  country                      String        @map("countryCode") @db.Char(2)
+  /// Excepción G5.3 (DX-334): columna anterior a DX-312, solo para las réplicas
+  /// anteriores. La mantiene el trigger; el cliente no la lee ni la escribe.
+  legacyCountry                ClinicCountry? @map("country") @ignore
   // GLOBAL-G1 (DX-313): moneda ISO 4217 de la sede (FK a currencies). NULL solo
   // en una fila de una réplica antigua aún sin barrer: «sede sin configurar»,
   // nunca se sustituye por la moneda de su país (R19).
@@ -328,6 +333,8 @@ model Location {
   holidays                   LocationHoliday[]
   // GLOBAL-G1: moneda de la sede (locations_currency_fkey; admite NULL en fase 1).
   currencyRef                Currency?                   @relation(fields: [currency], references: [code], onDelete: Restrict, map: "locations_currency_fkey")
+  // DX-312: país de la sede (locations_country_code_fkey).
+  countryRef                 Country                     @relation(fields: [country], references: [code], onDelete: Restrict, map: "locations_country_code_fkey")
 
   // Destino de las FK compuestas (tenantId, locationId) de citas, pagos e
   // inventario: la sede tiene que ser del MISMO tenant (SEC-004).
@@ -1895,10 +1902,12 @@ model Currency {
 }
 
 model Country {
-  code     String    @id // ISO 3166-1 alpha-2, p.ej. "CO"
-  name     String // "Colombia"
-  cities   City[]
-  patients Patient[]
+  code                 String                @id // ISO 3166-1 alfa-2 (prisma/reference/iso3166.ts)
+  name                 String // en español (CLDR)
+  cities               City[]
+  patients             Patient[]
+  locations            Location[]
+  pendingRegistrations PendingRegistration[]
 
   @@map("countries")
 }
@@ -2610,10 +2619,10 @@ model Prescription {
   patientId            String             @db.Uuid
   // Quien prescribe: sale del token, nunca del cuerpo.
   professionalId       String             @db.Uuid
-  /// Excepción G5.3 (DX-334): país de la plantilla legada. En la receta única
-  /// (singleFormat) es solo un dato que se sigue escribiendo para las réplicas
-  /// anteriores (fase 1); nada lo lee para decidir. La fase 2 lo deja NULL.
-  country              ClinicCountry
+  /// Excepción G5.3 (DX-334): plantilla de la receta legada. En la receta
+  /// única, la proyección del país de la sede (CO/ES) o NULL; nada decide con
+  /// él. DX-364 deja de escribirlo.
+  country              ClinicCountry?
   /// DX-324: receta única (hash v3). false en toda receta anterior.
   singleFormat         Boolean            @default(false)
   /// DX-324: el ajuste «cantidad en letras» al emitir; NULL en las legadas.
@@ -2982,8 +2991,13 @@ model PendingRegistration {
   createdAt    DateTime @default(now())
   // GLOBAL-G1: país, moneda, zona y locale de la primera sede. NULL en los
   // pendientes creados por una réplica o una web antiguas (forma legada; la
-  // fase 2 los hace obligatorios).
-  locationCountry  ClinicCountry?
+  // fase 2 los hace obligatorios). DX-312: el país es ISO 3166-1 alfa-2 de
+  // `countries` (columna "locationCountryCode").
+  locationCountry       String?        @map("locationCountryCode") @db.Char(2)
+  locationCountryRef    Country?       @relation(fields: [locationCountry], references: [code], onDelete: Restrict, map: "pending_registrations_location_country_code_fkey")
+  /// Excepción G5.3 (DX-334): columna anterior a DX-312, solo para las réplicas
+  /// anteriores. La mantiene el trigger; el cliente no la lee ni la escribe.
+  legacyLocationCountry ClinicCountry? @map("locationCountry") @ignore
   locationCurrency String?        @db.Char(3)
   locationTimeZone String?
   locationLocale   String?

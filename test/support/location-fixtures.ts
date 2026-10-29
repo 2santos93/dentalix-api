@@ -86,14 +86,22 @@ export function registerBody<T extends object>(
   } as ReturnType<typeof registerBody<T>>;
 }
 
+/**
+ * Excepción G5.3 (DX-334): columna anterior a DX-312: solo admite CO/ES. País
+ * de las sedes que los int de migraciones insertan en una etapa ANTERIOR a
+ * DX-312 (sin la columna "countryCode"); no decide nada.
+ */
+export const LEGACY_ENUM_COUNTRY = 'CO';
+
+const quote = (text: string) => `'${text.replace(/'/g, "''")}'`;
+
 /** Fragmento para un INSERT crudo: `INSERT INTO locations (…, ${columns}) VALUES (…, ${values})`. */
 export function regionalSql(regional: RegionalFixture): {
   columns: string;
   values: string;
 } {
-  const quote = (text: string) => `'${text.replace(/'/g, "''")}'`;
   return {
-    columns: '"country", "currency", "timeZone", "locale", "hourCycle"',
+    columns: '"countryCode", "currency", "timeZone", "locale", "hourCycle"',
     values: [
       quote(regional.country),
       quote(regional.currency),
@@ -105,18 +113,41 @@ export function regionalSql(regional: RegionalFixture): {
 }
 
 /**
- * INSERT crudo sin columnas regionales: lo que hace una réplica anterior a G1
- * (`updatedAt` no tiene default en la BD; Prisma lo envía). Deja los campos
- * regionales en NULL y `country` en el default de la BD. Devuelve el id.
+ * Como `regionalSql`, para una etapa anterior a DX-312: el país va en la
+ * columna enum de entonces (`LEGACY_ENUM_COUNTRY`).
+ */
+export function legacyEnumRegionalSql(regional: RegionalFixture): {
+  columns: string;
+  values: string;
+} {
+  return {
+    columns: '"country", "currency", "timeZone", "locale", "hourCycle"',
+    values: [
+      quote(LEGACY_ENUM_COUNTRY),
+      quote(regional.currency),
+      quote(regional.timeZone),
+      quote(regional.locale),
+      quote(regional.hourCycle),
+    ].join(', '),
+  };
+}
+
+/**
+ * INSERT crudo de una sede sin datos regionales, como la de una réplica
+ * anterior a G1; el país lo da quien llama (`updatedAt` no tiene default en
+ * la BD; Prisma lo envía). Escribe "countryCode" (el trigger de DX-312 da la
+ * columna antigua) y deja moneda, zona, formato y revisión en NULL. Devuelve
+ * el id.
  */
 export async function legacyLocationInsert(
   prisma: Pick<PrismaClient, '$queryRaw'>,
   tenantId: string,
   name: string,
+  country: string,
 ): Promise<string> {
   const rows = await prisma.$queryRaw<{ id: string }[]>`
-    INSERT INTO "locations" ("id", "tenantId", "name", "updatedAt")
-    VALUES (gen_random_uuid(), ${tenantId}::uuid, ${name}, now())
+    INSERT INTO "locations" ("id", "tenantId", "name", "countryCode", "updatedAt")
+    VALUES (gen_random_uuid(), ${tenantId}::uuid, ${name}, ${country}, now())
     RETURNING "id"`;
   return rows[0].id;
 }
@@ -133,10 +164,29 @@ export async function g1LocationInsert(
   regional: RegionalFixture,
 ): Promise<string> {
   const rows = await prisma.$queryRaw<{ id: string }[]>`
+    INSERT INTO "locations" ("id", "tenantId", "name", "countryCode", "currency",
+                             "timeZone", "locale", "updatedAt")
+    VALUES (gen_random_uuid(), ${tenantId}::uuid, ${name}, ${regional.country},
+            ${regional.currency}, ${regional.timeZone}, ${regional.locale}, now())
+    RETURNING "id"`;
+  return rows[0].id;
+}
+
+/**
+ * Como `g1LocationInsert`, para una etapa anterior a DX-312: el país va en la
+ * columna enum de entonces (`LEGACY_ENUM_COUNTRY`).
+ */
+export async function legacyEnumG1LocationInsert(
+  prisma: Pick<PrismaClient, '$queryRaw'>,
+  tenantId: string,
+  name: string,
+  regional: RegionalFixture,
+): Promise<string> {
+  const rows = await prisma.$queryRaw<{ id: string }[]>`
     INSERT INTO "locations" ("id", "tenantId", "name", "country", "currency",
                              "timeZone", "locale", "updatedAt")
     VALUES (gen_random_uuid(), ${tenantId}::uuid, ${name},
-            ${regional.country}::"ClinicCountry", ${regional.currency},
+            ${LEGACY_ENUM_COUNTRY}::"ClinicCountry", ${regional.currency},
             ${regional.timeZone}, ${regional.locale}, now())
     RETURNING "id"`;
   return rows[0].id;

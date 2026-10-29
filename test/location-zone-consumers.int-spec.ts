@@ -109,7 +109,12 @@ describe('consumidores de la zona de la sede: día civil en Tokio (int, G1)', ()
       })
     ).id;
     // Creada por una réplica antigua: zona NULL hasta que pase el barrido.
-    legacy = await legacyLocationInsert(owner, tenantId, 'Réplica antigua');
+    legacy = await legacyLocationInsert(
+      owner,
+      tenantId,
+      'Réplica antigua',
+      REGIONAL_BOGOTA_FIXTURE.country,
+    );
     await owner.location.create({
       data: locationData(REGIONAL_BOGOTA_FIXTURE, {
         tenantId: emptyTenantId,

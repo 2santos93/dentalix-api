@@ -263,7 +263,7 @@ export class LocationDto {
   @ApiProperty() name!: string;
   @ApiProperty({ nullable: true, type: String }) address!: string | null;
   @ApiProperty({ enum: ClinicCountry, enumName: 'ClinicCountry' })
-  country!: ClinicCountry;
+  country!: string;
   @ApiProperty({
     type: String,
     nullable: true,

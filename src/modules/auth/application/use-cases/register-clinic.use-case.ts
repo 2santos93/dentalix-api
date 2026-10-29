@@ -193,13 +193,14 @@ export class RegisterClinicUseCase {
    * Abre el enlace del email: crea la clínica, su sede (con la moneda, la zona
    * y el formato del registro, G1) y su dueño (ADMIN) con el email ya
    * verificado. Un enlace de una réplica anterior a G1 (pendiente sin sede)
-   * caduca (410) sin consumirse (DX-312, R7). Exige ADEMÁS la contraseña elegida al registrarse:
-   * quien abre el enlace controla el buzón y quien la conoce es quien pidió
-   * el alta, así nadie convierte en suya una cuenta con un email ajeno porque
-   * la víctima pulse «Confirmar» en un correo que no pidió (pre-secuestro por
-   * clic engañado). Enlace inválido/usado y contraseña errónea dan el MISMO
-   * 404 genérico, y en los dos casos se ejecuta un argon2 (hash ficticio si no
-   * hay pendiente). Superado eso, los errores pueden ser concretos.
+   * caduca (410) sin consumirse (DX-312, R7). Exige ADEMÁS la contraseña
+   * elegida al registrarse: quien abre el enlace controla el buzón y quien la
+   * conoce es quien pidió el alta, así nadie convierte en suya una cuenta con
+   * un email ajeno porque la víctima pulse «Confirmar» en un correo que no
+   * pidió (pre-secuestro por clic engañado). Enlace inválido/usado y
+   * contraseña errónea dan el MISMO 404 genérico, y en los dos casos se
+   * ejecuta un argon2 (hash ficticio si no hay pendiente). Superado eso, los
+   * errores pueden ser concretos.
    */
   async verify(
     token: string,

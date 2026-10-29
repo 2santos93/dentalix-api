@@ -77,9 +77,10 @@ export interface PatientCommunicationRepository {
     patientId: string,
   ): Promise<PatientOptOutMatchWarningView[] | null>;
   /**
-   * País (ClinicCountry) con el que se valida el móvil: el de la sede activa
-   * de la petición (X-Location-Id) o, en la vista consolidada, el de la sede
-   * principal (la viva más antigua). null si la clínica no tiene sedes.
+   * País de la sede (ISO 3166-1 alfa-2) con el que se valida el móvil: el de
+   * la sede activa de la petición (X-Location-Id) o, en la vista consolidada,
+   * el de la sede principal (la viva más antigua). null si la clínica no tiene
+   * sedes.
    */
   locationCountry(): Promise<string | null>;
   /** Canal con el que nacen los pacientes de la clínica. */

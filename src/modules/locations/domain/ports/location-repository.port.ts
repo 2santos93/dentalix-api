@@ -1,4 +1,3 @@
-import type { ClinicCountry } from '@prisma/client';
 import type { HourCycle } from '../regional-settings';
 
 export interface Location {
@@ -6,8 +5,8 @@ export interface Location {
   tenantId: string;
   name: string;
   address: string | null;
-  /** País de la sede (DX-013): decide los campos legales de la receta. */
-  country: ClinicCountry;
+  /** País de la sede (DX-312): ISO 3166-1 alfa-2 de `countries`. */
+  country: string;
   /** DX-319: nº de registro sanitario (texto libre) o null. */
   healthRegistrationNumber: string | null;
   /** DX-319: si el nº sale en los documentos de la sede. */
@@ -42,7 +41,7 @@ export interface CreateLocationRepoInput {
   name: string;
   address?: string;
   /** G1 (R1, R10): los cuatro, explícitos y ya validados. */
-  country: ClinicCountry;
+  country: string;
   currency: string;
   timeZone: string;
   locale: string;
@@ -57,7 +56,7 @@ export interface CreateLocationRepoInput {
 export interface UpdateLocationRepoInput {
   name?: string;
   address?: string;
-  country?: ClinicCountry;
+  country?: string;
   /** DX-319: ya recortado; null lo quita. */
   healthRegistrationNumber?: string | null;
   showHealthRegistrationNumber?: boolean;

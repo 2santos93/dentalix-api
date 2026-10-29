@@ -465,7 +465,12 @@ describe('DX-256 visitas y agenda', () => {
 
     beforeAll(async () => {
       baseline = await unscheduled();
-      legacy = await legacyLocationInsert(raw, a.tenantId, 'Réplica antigua');
+      legacy = await legacyLocationInsert(
+        raw,
+        a.tenantId,
+        'Réplica antigua',
+        REGIONAL_BOGOTA_FIXTURE.country,
+      );
     });
 
     afterAll(async () => {

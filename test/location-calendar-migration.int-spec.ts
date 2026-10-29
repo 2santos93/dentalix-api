@@ -331,8 +331,9 @@ describe('DX-316 · trigger y reglas de la BD del calendario de la sede (int)', 
       SELECT count(*)::int AS n FROM "location_working_calendars"`;
     await expect(
       appRole.$executeRaw`
-        INSERT INTO "locations" ("id", "tenantId", "name", "updatedAt")
-        VALUES (gen_random_uuid(), ${tenantA}::uuid, 'Sin GUC', now())`,
+        INSERT INTO "locations" ("id", "tenantId", "name", "countryCode", "updatedAt")
+        VALUES (gen_random_uuid(), ${tenantA}::uuid, 'Sin GUC',
+                ${REGIONAL_TOKYO_FIXTURE.country}, now())`,
     ).rejects.toThrow(RLS_VIOLATION);
     const after = await raw.$queryRaw<{ n: number }[]>`
       SELECT count(*)::int AS n FROM "location_working_calendars"`;

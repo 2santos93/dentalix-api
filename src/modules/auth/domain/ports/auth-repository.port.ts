@@ -1,9 +1,9 @@
-import { ClinicCountry, ClinicRole } from '@prisma/client';
+import { ClinicRole } from '@prisma/client';
 import type { HourCycle } from '../../../locations/domain/regional-settings';
 
 /** G1: país, moneda, zona y formato regional de la primera sede, ya validados. */
 export interface ClinicLocationSettings {
-  country: ClinicCountry;
+  country: string;
   currency: string;
   timeZone: string;
   locale: string;

@@ -90,7 +90,7 @@ describe('PrismaAuthRepository — createClinicWithOwner', () => {
         fullName: 'Owner',
         emailVerifiedAt: new Date('2030-01-01T00:00:00Z'),
         location: {
-          country: 'CO',
+          country: 'JP',
           currency: 'JPY',
           timeZone: 'Asia/Tokyo',
           locale: 'ja-JP',

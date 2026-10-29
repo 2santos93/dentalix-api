@@ -59,7 +59,7 @@ describe('PrismaRegistrationRepository (int, DX-029)', () => {
     token: string,
     subdomain = 'reg-int',
     replaceCreatedBefore = new Date(Date.now() + 60_000),
-    location: ClinicLocationSettings | null = BOGOTA_LOCATION,
+    location: ClinicLocationSettings = BOGOTA_LOCATION,
   ) =>
     repo.savePending({
       replaceCreatedBefore,
@@ -132,22 +132,22 @@ describe('PrismaRegistrationRepository (int, DX-029)', () => {
       locationHourCycle: 'h23',
     });
 
-    // Forma legada (web antigua): el reemplazo deja la sede en NULL.
-    expect(await save(legacy, 'reg-int-3', undefined, null)).toBe(true);
+    // legacy: un pendiente sin sede lo escribe solo una réplica o una web
+    // anteriores a G1 (la API ya no, DX-312 R7); se lee sin sede.
+    await raw.pendingRegistration.update({
+      where: { email: EMAIL },
+      data: {
+        tokenHash: hashRegistrationToken(legacy),
+        locationCountry: null,
+        locationCurrency: null,
+        locationTimeZone: null,
+        locationLocale: null,
+        locationHourCycle: null,
+      },
+    });
     expect(
       await repo.findPendingByTokenHash(hashRegistrationToken(legacy)),
     ).toMatchObject({ location: null });
-    expect(
-      await raw.pendingRegistration.findUniqueOrThrow({
-        where: { email: EMAIL },
-      }),
-    ).toMatchObject({
-      locationCountry: null,
-      locationCurrency: null,
-      locationTimeZone: null,
-      locationLocale: null,
-      locationHourCycle: null,
-    });
   });
 
   it('G1-B: the clock is written on create and overwritten on replace, also to NULL for the G1 web shape', async () => {

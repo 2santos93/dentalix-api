@@ -18,6 +18,7 @@ import {
   g1LocationInsert,
   legacyLocationInsert,
   locationData,
+  REGIONAL_BOGOTA_FIXTURE,
 } from './support/location-fixtures';
 
 /**
@@ -100,8 +101,18 @@ describe('barrido de sedes sin configurar (int, G1 fase 1)', () => {
   });
 
   it('sweep job fills NULL rows per tenant and a second run changes nothing', async () => {
-    legacyA = await legacyLocationInsert(raw, tenantA, 'Antigua A');
-    legacyB = await legacyLocationInsert(raw, tenantB, 'Antigua B');
+    legacyA = await legacyLocationInsert(
+      raw,
+      tenantA,
+      'Antigua A',
+      REGIONAL_BOGOTA_FIXTURE.country,
+    );
+    legacyB = await legacyLocationInsert(
+      raw,
+      tenantB,
+      'Antigua B',
+      REGIONAL_BOGOTA_FIXTURE.country,
+    );
     // Una réplica antigua de España: el país sí lo envió.
     await raw.location.update({
       where: { id: legacyB },
@@ -158,7 +169,12 @@ describe('barrido de sedes sin configurar (int, G1 fase 1)', () => {
   });
 
   it('g1:backfill-locations reports the rows it filled', async () => {
-    const legacy = await legacyLocationInsert(raw, tenantB, 'Antigua B2');
+    const legacy = await legacyLocationInsert(
+      raw,
+      tenantB,
+      'Antigua B2',
+      REGIONAL_BOGOTA_FIXTURE.country,
+    );
     const { stdout } = await runScript();
     const lines = stdout
       .trim()
@@ -188,8 +204,18 @@ describe('barrido de sedes sin configurar (int, G1 fase 1)', () => {
 
   it('g1:backfill-locations --check counts NULL rows across tenants with the app role, without writing', async () => {
     const before = await checkLocationRegional(prisma);
-    const nullA = await legacyLocationInsert(raw, tenantA, 'Sin barrer A');
-    const nullB = await legacyLocationInsert(raw, tenantB, 'Sin barrer B');
+    const nullA = await legacyLocationInsert(
+      raw,
+      tenantA,
+      'Sin barrer A',
+      REGIONAL_BOGOTA_FIXTURE.country,
+    );
+    const nullB = await legacyLocationInsert(
+      raw,
+      tenantB,
+      'Sin barrer B',
+      REGIONAL_BOGOTA_FIXTURE.country,
+    );
     // Una clínica retirada cuenta igual: la fase 2 pone NOT NULL en todas.
     await raw.tenant.update({
       where: { id: tenantB },

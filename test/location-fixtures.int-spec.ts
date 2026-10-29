@@ -31,6 +31,17 @@ async function cleanup(): Promise<void> {
   await raw.tenant.deleteMany({ where: { subdomain: SUBDOMAIN } });
 }
 
+/** Las dos columnas del país (DX-312): la nueva y la antigua, en crudo. */
+async function countryColumns(
+  id: string,
+): Promise<{ countryCode: string; country: string | null }> {
+  const [row] = await raw.$queryRaw<
+    { countryCode: string; country: string | null }[]
+  >`SELECT "countryCode"::text AS "countryCode", "country"::text AS country
+      FROM "locations" WHERE "id" = ${id}::uuid`;
+  return row;
+}
+
 describe('fixtures de sede (G1)', () => {
   beforeAll(async () => {
     await cleanup();
@@ -73,6 +84,19 @@ describe('fixtures de sede (G1)', () => {
     });
   });
 
+  it('g1LocationInsert escribe countryCode', async () => {
+    const id = await g1LocationInsert(
+      raw,
+      tenantId,
+      'Réplica G1 país',
+      REGIONAL_NEW_YORK_FIXTURE,
+    );
+    expect(await countryColumns(id)).toEqual({
+      countryCode: REGIONAL_NEW_YORK_FIXTURE.country,
+      country: REGIONAL_NEW_YORK_FIXTURE.country,
+    });
+  });
+
   it('g1LocationInsert deja el reloj en NULL y escribe lo demás', async () => {
     const id = await g1LocationInsert(
       raw,
@@ -90,8 +114,13 @@ describe('fixtures de sede (G1)', () => {
     });
   });
 
-  it('legacyLocationInsert deja los campos regionales en NULL', async () => {
-    const id = await legacyLocationInsert(raw, tenantId, 'Antigua');
+  it('legacyLocationInsert deja los campos regionales en NULL y el país que recibe', async () => {
+    const id = await legacyLocationInsert(
+      raw,
+      tenantId,
+      'Antigua',
+      REGIONAL_BOGOTA_FIXTURE.country,
+    );
     const row = await raw.location.findUniqueOrThrow({ where: { id } });
     expect(row).toMatchObject({
       currency: null,
@@ -99,6 +128,12 @@ describe('fixtures de sede (G1)', () => {
       locale: null,
       hourCycle: null,
       regionalSettingsReviewedAt: null,
+    });
+    // El país que recibe va en "countryCode"; el trigger de DX-312 da la
+    // columna antigua.
+    expect(await countryColumns(id)).toEqual({
+      countryCode: REGIONAL_BOGOTA_FIXTURE.country,
+      country: REGIONAL_BOGOTA_FIXTURE.country,
     });
   });
 

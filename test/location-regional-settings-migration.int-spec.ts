@@ -14,6 +14,9 @@ import { isValidTimeZone } from '../src/shared/time/civil-day';
 // la función de backfill es idempotente y no pisa valores elegidos.
 
 const G1 = '20261027120000_g1_location_regional_settings';
+// La segunda tanda se queda antes de DX-312: este fichero fija el estado de
+// fase 1 de G1 (país en la columna enum, con su valor por defecto).
+const DX312 = '20261031120000_dx312_location_country_code';
 const ROOT = join(__dirname, '..');
 
 function urlFor(db: string): string {
@@ -107,7 +110,7 @@ describe('GLOBAL-G1 · migración de fase 1: moneda, zona y locale por sede (int
       datasources: { db: { url: urlFor(db) } },
     });
     for (const sql of SEED) await target.$executeRawUnsafe(sql);
-    for (const name of all.filter((n) => n >= G1)) copy(name);
+    for (const name of all.filter((n) => n >= G1 && n < DX312)) copy(name);
     migrateDeploy(dir, urlFor(db));
   }, 240_000);
 
@@ -197,7 +200,7 @@ describe('GLOBAL-G1 · migración de fase 1: moneda, zona y locale por sede (int
     expect(row).toEqual({ total: 6, reviewed: 0 });
   });
 
-  it('new columns are nullable without default', async () => {
+  it('legacy: new columns are nullable without default and the country keeps its phase-1 default', async () => {
     const rows = await target.$queryRaw<
       {
         table: string;
@@ -323,7 +326,7 @@ describe('GLOBAL-G1 · migración de fase 1: moneda, zona y locale por sede (int
     });
   });
 
-  it('old-replica INSERT without regional columns succeeds and leaves NULLs', async () => {
+  it('legacy: old-replica INSERT without regional columns succeeds and leaves NULLs', async () => {
     // Lo que envía el cliente Prisma de la API anterior al crear una sede.
     await target.$executeRawUnsafe(
       `INSERT INTO "locations" ("id", "tenantId", "name", "updatedAt")

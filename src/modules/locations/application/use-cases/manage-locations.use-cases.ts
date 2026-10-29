@@ -4,7 +4,6 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import type { ClinicCountry } from '@prisma/client';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { canonicalTimeZoneName } from '../../../../shared/time/canonical-time-zone';
 import { LOCATION_REPOSITORY } from '../../domain/ports/location-repository.port';
@@ -89,7 +88,7 @@ export class CreateLocationUseCase {
   async execute(input: {
     name: string;
     address?: string;
-    country?: ClinicCountry;
+    country?: string;
     currency?: string;
     timeZone?: string;
     locale?: string;
@@ -213,7 +212,7 @@ export class UpdateLocationUseCase {
     patch: {
       name?: string;
       address?: string;
-      country?: ClinicCountry;
+      country?: string;
       healthRegistrationNumber?: string | null;
       showHealthRegistrationNumber?: boolean;
       phone?: string | null;

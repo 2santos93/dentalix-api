@@ -280,7 +280,7 @@ describe('UpdateLocationUseCase', () => {
 
 describe('país de la sede (DX-013)', () => {
   it('se crea con el país pedido', async () => {
-    const create = jest.fn((input: { country: 'CO' | 'ES' }) =>
+    const create = jest.fn((input: { country: string }) =>
       Promise.resolve(makeLocation({ country: input.country })),
     );
     const uc = createUseCase(makeRepo({ create }));

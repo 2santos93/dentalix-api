@@ -1,7 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import {
   Prisma,
-  type ClinicCountry,
   type ContactChannel,
   type DocumentType,
   type PatientImportBatch,
@@ -233,7 +232,7 @@ export class BatchStateError extends Error {
 /** La sede de un lote nuevo: su país, su zona y su moneda (null: sin configurar). */
 export interface BatchLocation {
   id: string;
-  country: ClinicCountry;
+  country: string;
   timeZone: string;
   currency: string | null;
   /** Formato y reloj en crudo: los pide quien pinta un mensaje (G1-B, I4). */
