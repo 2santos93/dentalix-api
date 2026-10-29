@@ -213,6 +213,7 @@ describe('Pagadores (e2e, DX-153)', () => {
     expect((ok.body as PayerBody).type).toBe('EMPLOYER');
     expect(ok.body).not.toHaveProperty('country');
   });
+
   it('legacy type codes in the body are accepted as their generic type during the rollout', async () => {
     // Excepción G5.3 (DX-334): tipos de pagador anteriores a DX-326.
     const LEGACY = [
@@ -427,7 +428,9 @@ describe('Pagadores (e2e, DX-153)', () => {
     });
     expect(created).not.toHaveProperty('country');
     expect(await storedCountry(created.id)).toBeNull();
+  });
 
+  it('legacy payer stored with a country keeps it when the API edits the payer', async () => {
     // Excepción G5.3 (DX-334): tipos de pagador anteriores a DX-326. Un
     // pagador guardado antes con país conserva ese dato: la API no lo toca.
     const legacy = await insertPayer('Plan Sur Antiguo', 'EPS_CO', 'CO');

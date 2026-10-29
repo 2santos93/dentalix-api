@@ -15,14 +15,18 @@ import {
   seedDemo,
 } from '../prisma/seed-demo';
 import {
+  DEMO_ALFA_PAYER,
   DEMO_COMPARISON_HISTORY,
   DEMO_COVERAGES,
   DEMO_PRESCRIPTION,
+  DEMO_PAYERS,
   DEMO_PRESCRIPTION_SETTINGS,
   DEMO_PROFESSIONAL_SPECIALTIES,
 } from '../prisma/demo/data';
 import { TENANT_TABLES, purgeDemoTenants } from './support/demo-tenant-purge';
 import { hostFor } from './support/tenant-host';
+import { PAYER_TYPES } from '../src/modules/payers/domain/payer-type';
+import { storedPayerType } from '../src/modules/payers/domain/legacy-payer-type';
 
 // Este spec escribe y BORRA EN DURO: solo puede correr contra una base de test.
 for (const key of ['DATABASE_URL', 'DIRECT_URL'] as const) {
@@ -319,6 +323,34 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       /^http:\/\/demo\.localhost:3001\/confirmar\/[A-Za-z0-9_-]{43}$/,
     );
   }, 120000);
+
+  it('demo payers use generic types and no country', async () => {
+    const tenantId = await liveDemoTenantId();
+    const rows = await raw.$queryRawUnsafe<
+      { name: string; type: string; country: string | null }[]
+    >(
+      `SELECT name, type::text AS type, country FROM payers WHERE "tenantId" = $1::uuid ORDER BY name`,
+      tenantId,
+    );
+    const demo = [...DEMO_PAYERS, DEMO_ALFA_PAYER];
+    expect(rows.map((row) => row.name).sort()).toEqual(
+      demo.map((payer) => payer.name).sort(),
+    );
+    for (const payer of demo) {
+      // La demo pide tipos genéricos; la fase 1 los guarda con el código anterior.
+      expect(PAYER_TYPES).toContain(payer.type);
+      const row = rows.find((r) => r.name === payer.name);
+      expect({
+        name: payer.name,
+        type: row?.type,
+        country: row?.country,
+      }).toEqual({
+        name: payer.name,
+        type: storedPayerType(payer.type),
+        country: null,
+      });
+    }
+  });
 
   it('demo prescription is a single-format prescription with words, HC and specialty', async () => {
     const tenantId = await liveDemoTenantId();

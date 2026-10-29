@@ -382,3 +382,130 @@ describe('receta sin reglas nacionales (DX-324)', () => {
     }
   });
 });
+
+/**
+ * DX-326 (spec §6.8, R8, R10, R11): los pagadores no tienen país y los códigos
+ * de tipo anteriores a DX-326 viven solo en `legacy-payer-type.ts`. Los
+ * literales de los controles se arman por partes: este fichero es una de las
+ * excepciones de R10, pero su código de producción no los nombra.
+ */
+const PAYER_MODULES = [
+  'payers',
+  'agreements',
+  'patient-agreements',
+  'patient-coverages',
+].map((name) => join(SRC, 'modules', name));
+const LEGACY_PAYER_TYPE_FILE = join(
+  SRC,
+  'modules',
+  'payers',
+  'domain',
+  'legacy-payer-type.ts',
+);
+const PAYER_REPOSITORIES = [
+  'payers/infrastructure/repositories/prisma-payer.repository.ts',
+  'agreements/infrastructure/repositories/prisma-agreement.repository.ts',
+  'patient-agreements/infrastructure/repositories/prisma-patient-agreement.repository.ts',
+  'patient-coverages/infrastructure/repositories/prisma-patient-coverage.repository.ts',
+].map((path) => join(SRC, 'modules', ...path.split('/')));
+const R10_HEADER =
+  'Excepción G5.3 (DX-334): tipos de pagador anteriores a DX-326';
+/** Los códigos antiguos en código (spec §6.8). */
+const LEGACY_PAYER_CODE =
+  /\b(MUTUA_ES|PREPAGADA_CO|EPS_CO)\b|['"](EMPRESA|OTRO)['"]|PayerType\.(EMPRESA|OTRO)/;
+/** `OTRO` como tipo en prosa; «OTRO usuario» y «OTRO tenant» son la palabra. */
+const LEGACY_PAYER_PROSE = /\bOTRO\b(?! usuario| tenant)/;
+/** Un comentario (`//`, `*`) o una cadena `description:`/`summary:`. */
+const isProseLine = (line: string): boolean =>
+  /^\s*(\/\/|\/?\*)/.test(line) || /\b(description|summary)\s*:/.test(line);
+const legacyPayerTypeHit = (line: string): boolean =>
+  LEGACY_PAYER_CODE.test(line) ||
+  (isProseLine(line) && LEGACY_PAYER_PROSE.test(line));
+/** `PayerType` en un import de `@prisma/client` (también de varias líneas). */
+const PRISMA_PAYER_IMPORT =
+  /import\s+(?:type\s+)?\{[^}]*\bPayerType\b[^}]*\}\s*from\s*'@prisma\/client'/g;
+const PRISMA_PAYER_ENUM = /\$Enums\b|Prisma\.Payer\w*/;
+
+describe('pagadores sin país (DX-326)', () => {
+  const payerProduction = PAYER_MODULES.flatMap((dir) => tsFiles(dir)).filter(
+    isProduction,
+  );
+
+  it('architecture: payer modules read no country', () => {
+    expect(payerProduction.length).toBeGreaterThan(20);
+    expect(offending(payerProduction, (line) => /country/i.test(line))).toEqual(
+      [],
+    );
+  });
+
+  it('architecture: payer modules name no legacy payer type outside legacy-payer-type.ts', () => {
+    const files = payerProduction.filter(
+      (file) => file !== LEGACY_PAYER_TYPE_FILE,
+    );
+    expect(files.length).toBeGreaterThan(20);
+    expect(offending(files, legacyPayerTypeHit)).toEqual([]);
+  });
+
+  it('architecture: only legacy-payer-type.ts and the four payer repositories name the stored payer enum', () => {
+    const allowed = [LEGACY_PAYER_TYPE_FILE, ...PAYER_REPOSITORIES];
+    expect(PAYER_REPOSITORIES).toHaveLength(4);
+    const files = tsFiles(SRC).filter(
+      (file) => isProduction(file) && !allowed.includes(file),
+    );
+    expect([
+      ...offending(files, (line) => PRISMA_PAYER_ENUM.test(line)),
+      ...offendingMatches(files, PRISMA_PAYER_IMPORT, () => true),
+    ]).toEqual([]);
+  });
+
+  it('legacy-payer-type.ts carries the G5.3 header', () => {
+    expect(
+      readFileSync(LEGACY_PAYER_TYPE_FILE, 'utf8')
+        .slice(0, 200)
+        .includes(R10_HEADER),
+    ).toBe(true);
+  });
+
+  it('the legacy payer type patterns catch each code and skip neutral text', () => {
+    for (const line of [
+      "const x = 'EPS" + "_CO';",
+      'PayerType.' + 'OTRO',
+      "type: 'EMPRE" + "SA',",
+      'MUTUA' + '_ES',
+      'PREPAGADA' + '_CO',
+      '$Enums.PayerType',
+      '// un pagador ' + 'OTRO',
+      "description: 'Tipo OTRO del pagador'",
+    ]) {
+      expect({
+        line,
+        caught:
+          legacyPayerTypeHit(line) ||
+          PRISMA_PAYER_ENUM.test(line) ||
+          [...line.matchAll(PRISMA_PAYER_IMPORT)].length > 0,
+      }).toEqual({ line, caught: true });
+    }
+    expect(
+      [
+        "import {\n  PayerType,\n  Prisma,\n} from '@prisma/client';",
+        "import type { PayerType } from '@prisma/client';",
+      ].map((code) => [...code.matchAll(PRISMA_PAYER_IMPORT)].length),
+    ).toEqual([1, 1]);
+    expect([
+      ..."import { Prisma } from '@prisma/client';".matchAll(
+        PRISMA_PAYER_IMPORT,
+      ),
+    ]).toEqual([]);
+    for (const line of [
+      '// los registró ' + 'OTRO usuario',
+      '// de ' + 'OTRO tenant',
+      "type: 'OTHER',",
+      "type: 'EMPLOYER',",
+    ]) {
+      expect({ line, caught: legacyPayerTypeHit(line) }).toEqual({
+        line,
+        caught: false,
+      });
+    }
+  });
+});
