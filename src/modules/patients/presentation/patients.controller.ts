@@ -98,12 +98,10 @@ import {
   type DocumentTypeNamesSettings,
 } from '../application/use-cases/document-type-names.use-cases';
 import { DocumentTypeNamesDto } from './dto/document-type-names.dto';
+import { DOCUMENT_TYPE_NAMES_FORBIDDEN_MESSAGE } from '../domain/document-type-names';
 
 export const CLINIC_SETTINGS_FORBIDDEN_MESSAGE =
   'Solo un administrador puede cambiar la mayoría de edad.';
-
-export const DOCUMENT_TYPE_NAMES_FORBIDDEN_MESSAGE =
-  'Solo un administrador puede cambiar los nombres de los documentos.';
 
 type ListPatientsWithCoverageOutput = Omit<ListPatientsOutput, 'items'> & {
   items: (Patient & { coverage: CoverageSummary })[];

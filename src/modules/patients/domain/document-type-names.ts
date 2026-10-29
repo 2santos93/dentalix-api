@@ -29,6 +29,10 @@ export type DocTypeNameField = (typeof DOC_TYPE_NAME_FIELD)[DocumentType];
 /** Los cinco nombres de una clínica; null = sin nombre local. */
 export type DocumentTypeNames = Record<DocumentType, string | null>;
 
+/** 403 del PUT para quien no es ADMIN; la web (T8b) usa el mismo texto. */
+export const DOCUMENT_TYPE_NAMES_FORBIDDEN_MESSAGE =
+  'Solo un administrador puede cambiar los nombres de los documentos.';
+
 /** El mensaje va tal cual al 400. */
 export class DocumentTypeNameError extends Error {
   constructor(message: string) {
@@ -37,8 +41,11 @@ export class DocumentTypeNameError extends Error {
   }
 }
 
-/** Controles y formato (p. ej. U+202E invierte el texto impreso). */
-const CONTROL_OR_FORMAT = /[\p{Cc}\p{Cf}]/u;
+/**
+ * Controles y formato (p. ej. U+202E invierte el texto impreso), y sustitutos
+ * sueltos (`\p{Cs}`): un «\ud800» solo no es texto y la BD lo rechazaría (500).
+ */
+const CONTROL_OR_FORMAT = /[\p{Cc}\p{Cf}\p{Cs}]/u;
 
 /**
  * R16 (como R7, con 60): recorta y junta espacios; vacío, null o ausente =

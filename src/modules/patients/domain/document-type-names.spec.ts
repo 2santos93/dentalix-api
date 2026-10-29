@@ -36,6 +36,15 @@ describe('document-type-names (DX-327, R16)', () => {
     expect(normalizeDocumentTypeName('')).toBeNull();
     expect(normalizeDocumentTypeName('   ')).toBeNull();
     expect(normalizeDocumentTypeName('  ID   local\t ')).toBe('ID local');
+    // R7 «junta espacios»: tabulador, salto de línea y U+2028 son espacio
+    // (`\s`), así que se juntan en uno y se aceptan, no son «de control».
+    expect(normalizeDocumentTypeName('ID\n\u2028local\r\n')).toBe('ID local');
+    // Los 60 se cuentan tras recortar y juntar.
+    const padded = `  ${'a'.repeat(30)}    ${'b'.repeat(29)}  `;
+    expect([...padded].length).toBeGreaterThan(60);
+    expect(normalizeDocumentTypeName(padded)).toBe(
+      `${'a'.repeat(30)} ${'b'.repeat(29)}`,
+    );
     const sixty = '😀'.repeat(59) + 'a';
     expect([...sixty].length).toBe(60);
     expect(normalizeDocumentTypeName(sixty)).toBe(sixty);
@@ -50,7 +59,15 @@ describe('document-type-names (DX-327, R16)', () => {
     expect(() => normalizeDocumentTypeName('a' + '😀'.repeat(60))).toThrow(
       DocumentTypeNameError,
     );
-    for (const bad of ['ID\u0007local', 'ID​local', '‮ID local']) {
+    // También un sustituto suelto (`\p{Cs}`): no es texto y la BD lo
+    // rechazaría con un 500.
+    for (const bad of [
+      'ID\u0007local',
+      'ID​local',
+      '‮ID local',
+      'a\ud800',
+      '\udc00a',
+    ]) {
       expect(() => normalizeDocumentTypeName(bad)).toThrow(
         new DocumentTypeNameError(
           'El nombre del documento no puede llevar caracteres de control.',

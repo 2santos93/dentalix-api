@@ -74,7 +74,14 @@ describe('document-type (DX-327)', () => {
     expect(() => normalizeDocTypeLabel('a'.repeat(41))).toThrow(
       DocTypeLabelError,
     );
-    for (const bad of ['ID\u0007local', 'ID​local', '‮ID local']) {
+    // También un sustituto suelto (`\p{Cs}`), que la BD rechazaría (500).
+    for (const bad of [
+      'ID\u0007local',
+      'ID​local',
+      '‮ID local',
+      'a\ud800',
+      '\udc00a',
+    ]) {
       expect(() => normalizeDocTypeLabel(bad)).toThrow(DocTypeLabelError);
     }
   });

@@ -16,7 +16,7 @@ import {
 } from './support/location-fixtures';
 import { registerVerified } from './support/register-verified';
 import { hostFor } from './support/tenant-host';
-import { DOCUMENT_TYPE_NAMES_FORBIDDEN_MESSAGE } from '../src/modules/patients/presentation/patients.controller';
+import { DOCUMENT_TYPE_NAMES_FORBIDDEN_MESSAGE } from '../src/modules/patients/domain/document-type-names';
 
 // DX-327 (R16) en HTTP real: el nombre local de cada tipo de documento lo
 // leen todos los roles y solo el ADMIN lo cambia; toda clínica empieza sin
@@ -207,6 +207,20 @@ describe('Nombre local de cada tipo de documento (e2e, DX-327)', () => {
     await put({ names: { NATIONAL_ID: 'ID local', OTHER: '   ', FOO: 'x' } })
       .expect(200)
       .expect({ names: { ...NONE, NATIONAL_ID: 'ID local' } });
+    // Los 60 se cuentan tras recortar y juntar espacios: 60 caracteres con
+    // relleno (más de 60 antes de recortar) se guardan.
+    const sixty = 'a'.repeat(30) + ' ' + 'b'.repeat(29);
+    await put({
+      names: {
+        NATIONAL_ID: 'ID local',
+        OTHER: `   ${sixty.replace(' ', '    ')}  `,
+      },
+    })
+      .expect(200)
+      .expect({ names: { ...NONE, NATIONAL_ID: 'ID local', OTHER: sixty } });
+    await put({ names: { NATIONAL_ID: 'ID local' } })
+      .expect(200)
+      .expect({ names: { ...NONE, NATIONAL_ID: 'ID local' } });
   });
 
   it('an ambiguous set is 400 with the message', async () => {
@@ -251,6 +265,8 @@ describe('Nombre local de cada tipo de documento (e2e, DX-327)', () => {
       { names: 'x' },
       { names: { NATIONAL_ID: 7 } },
       { names: { OTHER: 'a'.repeat(61) } },
+      // Un sustituto suelto no es texto: 400, no un 500 de la BD.
+      { names: { OTHER: 'a\ud800' } },
       { NATIONAL_ID: 'ID local' },
     ]) {
       const res = await put(body).expect(400);
@@ -300,30 +316,23 @@ describe('Nombre local de cada tipo de documento (e2e, DX-327)', () => {
   });
 
   it('a local name is audited as CLINIC_SETTINGS with DOCUMENT_TYPE_NAMES_SETTINGS and the changed types, without values', async () => {
-    // Sin cambios: 200 sin evento.
+    // Solo cuenta lo que dejan las peticiones de este test: parte de un
+    // estado conocido y mira los eventos nuevos.
+    await put({ names: { NATIONAL_ID: 'V' } }).expect(200);
     const before = (await settingsEvents()).length;
+    // Sin cambios: 200 sin evento.
     await put({ names: { NATIONAL_ID: ' V ' } }).expect(200);
     expect((await settingsEvents()).length).toBe(before);
+    await put({
+      names: { NATIONAL_ID: 'V', OTHER: 'ID local', PASSPORT: 'Documento A' },
+    }).expect(200);
     await put({ names: { NATIONAL_ID: 'V', OTHER: 'ID local' } }).expect(200);
-    const events = await settingsEvents();
-    expect(events).toHaveLength(before + 1);
-    // Más reciente primero; en orden, los cambios de los tests anteriores
-    // (los saneados y los 400 no dejan evento). La auditoría guarda los
-    // campos ordenados.
-    const ALL = [
-      'NATIONAL_ID',
-      'OTHER',
-      'PASSPORT',
-      'RESIDENCE_PERMIT',
-      'TAX_ID',
-    ];
-    expect(events.map((e) => e.metadata.changedFields).reverse()).toEqual([
-      ALL, // los cinco del ADMIN
-      ['OTHER', 'PASSPORT', 'RESIDENCE_PERMIT', 'TAX_ID'], // solo ID local
-      ['PASSPORT'], // + el genérico del propio tipo
-      ALL, // las cinco escrituras
-      ALL, // solo «V»
-      ['OTHER'], // este
+    const all = await settingsEvents();
+    const events = all.slice(0, all.length - before);
+    // Más reciente primero; la auditoría guarda los campos ordenados.
+    expect(events.map((e) => e.metadata.changedFields)).toEqual([
+      ['PASSPORT'],
+      ['OTHER', 'PASSPORT'],
     ]);
     for (const event of events) {
       expect(event).toMatchObject({

@@ -38,8 +38,11 @@ export class DocTypeLabelError extends Error {
   }
 }
 
-/** Controles y formato (p. ej. U+202E invierte el texto impreso). */
-const CONTROL_OR_FORMAT = /[\p{Cc}\p{Cf}]/u;
+/**
+ * Controles y formato (p. ej. U+202E invierte el texto impreso), y sustitutos
+ * sueltos (`\p{Cs}`): un «\ud800» solo no es texto y la BD lo rechazaría (500).
+ */
+const CONTROL_OR_FORMAT = /[\p{Cc}\p{Cf}\p{Cs}]/u;
 
 /**
  * R7: recorta y junta espacios; vacía o null = sin etiqueta (null), ausente =

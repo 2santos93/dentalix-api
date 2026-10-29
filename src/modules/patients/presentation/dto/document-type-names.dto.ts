@@ -5,7 +5,6 @@ import {
   IsObject,
   IsOptional,
   IsString,
-  MaxLength,
   ValidateNested,
 } from 'class-validator';
 import { DOC_TYPE_NAME_MAX } from '../../domain/document-type-names';
@@ -17,43 +16,39 @@ const NAME = {
   maxLength: DOC_TYPE_NAME_MAX,
 } as const;
 
-const LENGTH_MESSAGE = `El nombre del documento admite hasta ${DOC_TYPE_NAME_MAX} caracteres.`;
 const TEXT_MESSAGE = 'El nombre del documento tiene que ser un texto.';
 
 /**
  * Los cinco nombres locales (DX-327, R16). Ausente o null = sin nombre local
- * (se usa el genérico). La normalización y la ambigüedad las aplica el
- * dominio (`validateDocumentTypeNames`).
+ * (se usa el genérico). La longitud (60 tras recortar y juntar espacios), la
+ * normalización y la ambigüedad las aplica el dominio
+ * (`validateDocumentTypeNames`): aquí no hay `MaxLength`, que contaría antes
+ * de recortar.
  */
 export class DocumentTypeNamesValuesDto {
   @ApiProperty({ ...NAME, description: 'Documento nacional' })
   @IsOptional()
   @IsString({ message: TEXT_MESSAGE })
-  @MaxLength(DOC_TYPE_NAME_MAX, { message: LENGTH_MESSAGE })
   NATIONAL_ID?: string | null;
 
   @ApiProperty({ ...NAME, description: 'Pasaporte' })
   @IsOptional()
   @IsString({ message: TEXT_MESSAGE })
-  @MaxLength(DOC_TYPE_NAME_MAX, { message: LENGTH_MESSAGE })
   PASSPORT?: string | null;
 
   @ApiProperty({ ...NAME, description: 'Permiso de residencia' })
   @IsOptional()
   @IsString({ message: TEXT_MESSAGE })
-  @MaxLength(DOC_TYPE_NAME_MAX, { message: LENGTH_MESSAGE })
   RESIDENCE_PERMIT?: string | null;
 
   @ApiProperty({ ...NAME, description: 'Identificación fiscal' })
   @IsOptional()
   @IsString({ message: TEXT_MESSAGE })
-  @MaxLength(DOC_TYPE_NAME_MAX, { message: LENGTH_MESSAGE })
   TAX_ID?: string | null;
 
   @ApiProperty({ ...NAME, description: 'Otro documento' })
   @IsOptional()
   @IsString({ message: TEXT_MESSAGE })
-  @MaxLength(DOC_TYPE_NAME_MAX, { message: LENGTH_MESSAGE })
   OTHER?: string | null;
 }
 
