@@ -479,7 +479,7 @@ const STEPS: Step[] = [
   // relleno; hasta DX-327.
   { until: DX327, fixture: FIXTURE_DX326 },
   // dx327: tipo de documento genérico, relleno por lotes y validación; el
-  // código antiguo se queda; hasta DX-312.
+  // código antiguo se queda; hasta la de DX-312.
   { until: DX312, fixture: FIXTURE_DX327 },
   // dx312: país ISO en columna propia, relleno por clínica y validación; la
   // columna antigua se queda.

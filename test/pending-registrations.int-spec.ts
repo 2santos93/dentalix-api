@@ -125,7 +125,7 @@ describe('PrismaRegistrationRepository (int, DX-029)', () => {
         where: { email: EMAIL },
       }),
     ).toMatchObject({
-      locationCountry: 'CO',
+      locationCountry: 'JP',
       locationCurrency: 'JPY',
       locationTimeZone: 'Asia/Tokyo',
       locationLocale: 'ja-JP',

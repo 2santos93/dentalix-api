@@ -297,8 +297,7 @@ describe('tipos de documento de la importación (DX-327)', () => {
     });
   });
 
-  // REGIONAL_TOKYO_FIXTURE: el país de la sede lo obliga el enum hasta
-  // DX-312; no decide nada. Nombres locales en otras escrituras (I4).
+  // Nombres locales en otras escrituras (I4).
   it.each([
     // «ドキュメント» en ancho completo y en medio ancho (el dakuten va aparte).
     ['japonés', 'ドキュメント', 'ﾄﾞｷｭﾒﾝﾄ'],

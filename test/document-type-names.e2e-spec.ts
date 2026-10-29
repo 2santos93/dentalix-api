@@ -23,8 +23,7 @@ import { DOCUMENT_TYPE_NAMES_FORBIDDEN_MESSAGE } from '../src/modules/patients/d
 // ninguno; el PUT sustituye los cinco; la ambigüedad es 400 sin cambios;
 // cada cambio real queda en la auditoría con los tipos cambiados y sin los
 // valores; no afecta a otra clínica; la ruta no la tapa `:id`. Las sedes son
-// REGIONAL_TOKYO_FIXTURE: el país de la sede lo obliga el enum hasta DX-312;
-// no decide nada.
+// REGIONAL_TOKYO_FIXTURE.
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });

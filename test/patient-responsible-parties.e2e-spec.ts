@@ -690,8 +690,7 @@ describe('Responsables de pago y avisos (e2e, DX-203)', () => {
 
   // DX-327: el tipo genérico y el nombre libre de un contacto (R7, pre-flight
   // I1), el del paciente responsable y la fila anterior. La sede es
-  // REGIONAL_TOKYO_FIXTURE: el país de la sede lo obliga el enum hasta
-  // DX-312; no decide nada.
+  // REGIONAL_TOKYO_FIXTURE.
   describe('DX-327: tipo de documento de los responsables', () => {
     interface DocParty {
       id: string;

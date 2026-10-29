@@ -2034,8 +2034,7 @@ confirmación firmado (DX-005); no añade otra cola ni otro transporte.
   el email `appointment-reminder` en `email_outbox` con `referenceId` = id del
   mensaje. El registro guarda ese id, nunca el cuerpo. Reprogramar la cita
   cambia la clave: lo de la hora vieja queda `RESCHEDULED` y se recalcula.
-- **Email**: fecha y hora en la zona de la sede (horario de la sede o su
-  país; 12 h en CO, 24 h en ES), sede, profesional y botón «Confirmar o
+- **Email**: fecha y hora con la zona, el formato y el reloj de la sede, sede, profesional y botón «Confirmar o
   cancelar». Nada clínico (ni motivo ni tratamiento). El enlace va al host de
   plataforma de la clínica, como los de restablecer e invitación (SEC-033,
   `TenantLinkBaseService.forTenant`): `<protocolo>://<subdominio>.<primer
@@ -2070,8 +2069,9 @@ de DX-037). Migración `20261017233300_dx128_contact_channel`.
   (motivos `OPTED_OUT`, `CHANNEL_NONE`, `CHANNEL_WHATSAPP`).
 - **Ficha**: `GET /patients/:id/communication` (4 roles) y `PATCH` (solo
   RECEPTION y ADMIN; 403 en español). El móvil se valida y normaliza a E.164
-  con el país de la sede activa o la principal (`whatsapp-phone.ts` + forma de
-  móvil de CO/ES); uno inválido se guarda con aviso, pero no puede ser canal
+  con el indicativo del país de la sede activa o la principal
+  (`country-calling-code.ts`, provisional hasta DX-329; un país sin indicativo
+  exige escribirlo con «+»); uno inválido se guarda con aviso, pero no puede ser canal
   WhatsApp (400 `WHATSAPP_REQUIRES_VALID_MOBILE`, también desde `PATCH
   /patients/:id`). Cada cambio deja un `audit_event` UPDATE de PATIENT con
   `reason: COMMUNICATION_PREFERENCES_CHANGED`, los campos y `origin`.

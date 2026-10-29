@@ -485,7 +485,7 @@ describe('Locations / multi-sede (e2e)', () => {
       ).expect(201);
       expect(res.body).toMatchObject({
         name: 'Tokio',
-        country: 'CO',
+        country: 'JP',
         currency: 'JPY',
         timeZone: 'Asia/Tokyo',
         locale: 'ja-JP',

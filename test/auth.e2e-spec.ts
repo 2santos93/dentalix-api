@@ -239,7 +239,7 @@ describe('Auth (e2e)', () => {
       const location = await mainLocation(body.tenantId);
       expect(location).toMatchObject({
         name: 'Sede principal',
-        country: 'CO',
+        country: 'JP',
         currency: 'JPY',
         timeZone: 'Asia/Tokyo',
         locale: 'ja-JP',

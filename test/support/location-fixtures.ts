@@ -22,27 +22,27 @@ export const REGIONAL_BOGOTA_FIXTURE: RegionalFixture = {
   hourCycle: 'h23',
 };
 
-/** Sede fuera de CO/ES; el país sigue siendo el enum actual hasta G1.1. */
+/** Sede de Tokio: su país no tiene indicativo provisional (DX-312). */
 export const REGIONAL_TOKYO_FIXTURE: RegionalFixture = {
-  country: 'CO',
+  country: 'JP',
   currency: 'JPY',
   timeZone: 'Asia/Tokyo',
   locale: 'ja-JP',
   hourCycle: 'h23',
 };
 
-/** Sede con reloj de 12 h; el país sigue siendo el enum actual hasta G1.1. */
+/** Sede con reloj de 12 h; un número sin «+» toma +1 (DX-312). */
 export const REGIONAL_NEW_YORK_FIXTURE: RegionalFixture = {
-  country: 'CO',
+  country: 'US',
   currency: 'USD',
   timeZone: 'America/New_York',
   locale: 'en-US',
   hourCycle: 'h12',
 };
 
-/** Sede con reloj de 24 h; el país sigue siendo el enum actual hasta G1.1. */
+/** Sede con reloj de 24 h; su país no tiene indicativo provisional (DX-312). */
 export const REGIONAL_BERLIN_FIXTURE: RegionalFixture = {
-  country: 'CO',
+  country: 'DE',
   currency: 'EUR',
   timeZone: 'Europe/Berlin',
   locale: 'de-DE',

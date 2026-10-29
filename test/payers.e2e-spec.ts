@@ -448,7 +448,6 @@ describe('Pagadores (e2e, DX-153)', () => {
   ])(
     "every payer type is created and covers a patient with no payer country, whatever the stored country of the clinic's location (%s)",
     async (name, regional) => {
-      // el país de la sede lo obliga el enum hasta DX-312; no decide nada.
       const c = await registerClinic(app, `dx326-${name.toLowerCase()}`);
       await raw.location.updateMany({
         where: { tenantId: c.tenantId },

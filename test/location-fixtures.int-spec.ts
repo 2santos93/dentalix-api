@@ -1,5 +1,7 @@
 import { Prisma, PrismaClient } from '@prisma/client';
+import { callingCodeOfCountry } from '../src/shared/phone/country-calling-code';
 import {
+  REGIONAL_BERLIN_FIXTURE,
   REGIONAL_BOGOTA_FIXTURE,
   REGIONAL_NEW_YORK_FIXTURE,
   REGIONAL_TOKYO_FIXTURE,
@@ -68,6 +70,31 @@ describe('fixtures de sede (G1)', () => {
     });
   });
 
+  // DX-312 (R13): cada sede de test lleva el país de su ciudad.
+  it('regional fixtures use their real countries', async () => {
+    const cases = [
+      [REGIONAL_TOKYO_FIXTURE, 'JP'],
+      [REGIONAL_NEW_YORK_FIXTURE, 'US'],
+      [REGIONAL_BERLIN_FIXTURE, 'DE'],
+    ] as const;
+    for (const [fixture, code] of cases) {
+      expect(fixture.country).toBe(code);
+      const location = await raw.location.create({
+        data: locationData(fixture, { tenantId, name: `País ${code}` }),
+      });
+      expect((await countryColumns(location.id)).countryCode).toBe(code);
+    }
+  });
+
+  // DX-312 (pre-flight m6): con su país real, un número sin «+» de Nueva York
+  // toma +1, y Tokio y Berlín no tienen indicativo provisional.
+  it('regional fixtures change the default calling code as their country says', () => {
+    expect(callingCodeOfCountry(REGIONAL_NEW_YORK_FIXTURE.country)).toBe('1');
+    expect(callingCodeOfCountry(REGIONAL_TOKYO_FIXTURE.country)).toBeNull();
+    expect(callingCodeOfCountry(REGIONAL_BERLIN_FIXTURE.country)).toBeNull();
+    expect(callingCodeOfCountry(REGIONAL_BOGOTA_FIXTURE.country)).toBe('57');
+  });
+
   it('regionalSql sirve para un INSERT crudo', async () => {
     const { columns, values } = regionalSql(REGIONAL_BOGOTA_FIXTURE);
     await raw.$executeRawUnsafe(
@@ -91,9 +118,11 @@ describe('fixtures de sede (G1)', () => {
       'Réplica G1 país',
       REGIONAL_NEW_YORK_FIXTURE,
     );
+    // Fuera de los dos valores de la columna antigua, el trigger de DX-312 la
+    // deja en NULL.
     expect(await countryColumns(id)).toEqual({
       countryCode: REGIONAL_NEW_YORK_FIXTURE.country,
-      country: REGIONAL_NEW_YORK_FIXTURE.country,
+      country: null,
     });
   });
 
