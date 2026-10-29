@@ -946,11 +946,10 @@ cuenta (`GET /patients/:id/account-statement`) reciben días civiles
 medianoche UTC: un abono de las 20:00 en Bogotá (01:00 UTC del día siguiente)
 cuenta en su día.
 
-- **Zona de la sede**: la de su horario (`location_schedules.timezone`); sin
-  horario, la de su país (CO → `America/Bogota`, ES → `Europe/Madrid`). Siempre
-  de la BD, nunca del cliente. `GET /locations` la publica (`timeZone`) para que
-  la web sepa qué día es «hoy» en la sede. Una sede nueva nace con el horario en
-  la zona de su país.
+- **Zona de la sede**: la zona IANA de la propia sede (`locations."timeZone"`,
+  G1), que se elige al crearla; ningún país la decide. Siempre de la BD, nunca
+  del cliente. `GET /locations` la publica (`timeZone`) para que la web sepa
+  qué día es «hoy» en la sede.
 - **Varias sedes**: en la vista consolidada cada sede corta su día en su zona;
   la consulta lleva una rama `(locationId IN (...) AND paidAt en [a, b))` por
   ZONA (no por sede), servida por `payments_tenantId_locationId_paidAt_active_idx`.
@@ -1016,12 +1015,12 @@ siguen admitiendo NULL hasta la fase 2.
 
 | Quién | Contra | Qué pasa |
 |---|---|---|
-| API antigua | BD de fase 1 | INSERT de sede sin columnas nuevas → filas NULL, las rellena el barrido; lee `location_schedules.timezone`, que el código nuevo mantiene igual a `Location.timeZone` (R20) |
-| Web antigua | API nueva | `PUT /locations/schedule` con `timezone` igual a la zona de la sede se acepta; registro sin campos de sede se acepta en la forma legada; `LocationDto` solo gana campos |
+| API antigua | BD de fase 1 | INSERT de sede sin columnas nuevas → filas NULL, las rellena el barrido (desde DX-312, el paso 0 del trigger rechaza ese INSERT); lee `location_schedules.timezone`, que el código nuevo mantiene igual a `Location.timeZone` (R20) |
+| Web antigua | API nueva | `PUT /locations/schedule` con `timezone` igual a la zona de la sede se acepta; `LocationDto` solo gana campos. El registro sin campos de sede (forma legada) es 400 con `field: locationCountry` desde DX-312 |
 | Web nueva | API antigua | `LocationDto` sin `currency` → `SedeConfigError`, nunca COP |
-| Enlace de registro de una réplica antigua | API nueva | `verify` lo acepta |
+| Enlace de registro de una réplica antigua | API nueva | Con los campos de sede, `verify` lo acepta. Sin ellos (forma legada), 410 `REGISTRATION_LINK_EXPIRED` sin consumirlo, desde DX-312 |
 | Web antigua | API antigua (`PUT /locations/schedule` con otra zona) | La zona se guarda solo en `location_schedules.timezone`, que el código nuevo no lee: se pierde. El ADMIN la corrige en Ajustes → Sedes |
-| Registro pendiente con los cuatro campos (API nueva) | `verify` en una réplica antigua | La sede nace con país CO y moneda, zona y formato NULL; el barrido la rellena según D5 y no los elegidos. Queda «por revisar»: el aviso D5 se lo muestra al ADMIN, que la corrige |
+| Registro pendiente con los cuatro campos (API nueva) | `verify` en una réplica antigua | Desde DX-312, el paso 0 del trigger de `locations` rechaza la sede sin datos regionales que crearía esa réplica: el alta se deshace entera, la respuesta es un 400 genérico, no se crea ninguna clínica y el pendiente queda consumido (ver «País de la sede ISO 3166 (DX-312)») |
 
 La lista ISO de monedas amplía las aceptadas en listas, gastos, caja y planes;
 el proveedor de tasas puede no tener alguna y esos abonos cuentan en
@@ -1030,8 +1029,8 @@ el proveedor de tasas puede no tener alguna y esos abonos cuentan en
 
 ### Fase 2 (ticket aparte)
 
-«G1 · Fase 2: cerrar las columnas regionales de la sede» (bajo DX-311; ticket
-por crear). Va en un release **posterior**, cuando no quede ninguna réplica
+«G1 · Fase 2: cerrar las columnas regionales de la sede» (DX-351, bajo
+DX-311). Va en un release **posterior**, cuando no quede ninguna réplica
 anterior a la fase 1. Precondición: `npm run g1:backfill-locations -- --check`
 (ver arriba) da 0 en las dos cifras; si no, correr
 `npm run g1:backfill-locations` y repetir. Cuenta, en todas las clínicas
@@ -1050,18 +1049,24 @@ Contenido del ticket:
   FORCE, llamar antes a `SELECT dx_g1_backfill_location_regional();` (sin
   tenant: todas las clínicas) para que una fila que quede no la tumbe; luego
   `SET NOT NULL` en
-  `locations.currency/"timeZone"/locale`; `ALTER COLUMN country DROP DEFAULT`;
+  `locations.currency/"timeZone"/locale`;
   `ALTER TABLE location_schedules DROP COLUMN timezone`; borrar los pendientes
-  legados caducados y poner NOT NULL en los cuatro `location*` de
-  `pending_registrations`; `DROP FUNCTION dx_g1_backfill_location_regional`.
-- Código: borrar el job `locations.regional-backfill`, el script
-  `g1:backfill-locations` y la rama legada de `verify`; `RegisterDto` con los
-  cuatro campos obligatorios; `PUT /locations/schedule` con `timezone` siempre
+  legados caducados y poner NOT NULL en `locationCurrency`,
+  `locationTimeZone`, `locationLocale` y `locationCountryCode` de
+  `pending_registrations` (no en `locationCountry`, la columna legada);
+  `DROP FUNCTION dx_g1_backfill_location_regional`.
+- Código: borrar el job `locations.regional-backfill` y el script
+  `g1:backfill-locations`; `PUT /locations/schedule` con `timezone` siempre
   400; quitar la doble escritura (R20); `LocationDto` sin `| null` (regenerar
   los tipos de la web); la web mantiene `SedeConfigError` solo para zona
   inválida.
 - Tests: los de fase 1 (réplica antigua, NULL, barrido) pasan a comprobar el
   NOT NULL y la ausencia de defaults.
+- **Ya hecho por DX-312** (no repetir): quitar el default del país de la sede
+  (M4), borrar la rama legada de `verify` y exigir los cuatro campos de sede
+  en el registro. **DX-351 no toca `locations."country"` ni
+  `pending_registrations."locationCountry"`**: las borra la fase 2 de DX-312
+  (ver «País de la sede ISO 3166 (DX-312)»).
 
 ## Cambiar la zona de una sede (G1, DX-313, DX-314)
 
@@ -2441,6 +2446,226 @@ también sobre este README. Migraciones
   - la traducción de solo lectura de los códigos anteriores no se borra
     nunca: las fotos de recibos y las filas de importación antiguas la
     necesitan.
+
+## País de la sede ISO 3166 (DX-312)
+
+El país de una sede es cualquier código ISO 3166-1 alfa-2 de la tabla
+`countries`. Ninguna regla lo lee. La moneda, lo único que puede ir ligado a
+un país, es un campo propio de la sede (G1) y no se deduce de él. Hasta
+DX-329, el país solo da
+el indicativo de los móviles escritos sin `+`
+(`src/shared/phone/country-calling-code.ts`, una tabla provisional de 24
+países; en los demás, el número se escribe con `+`). Es la fase 1 de un
+cambio sin parada (expand/contract).
+
+- **Modelo**:
+  - `locations."countryCode"` (`CHAR(2)`, `NOT NULL`, sin default), con la
+    FK `locations_country_code_fkey` a `countries.code` (`ON DELETE
+    RESTRICT`, `ON UPDATE CASCADE`). En Prisma y en el contrato HTTP el
+    campo se sigue llamando `country` (`@map("countryCode")`);
+  - `pending_registrations."locationCountryCode"`, igual pero nullable;
+  - `countries`: 250 filas (los 249 códigos ISO asignados más `XK`) con el
+    nombre en español de CLDR. La lista sale de
+    `prisma/scripts/generate-iso3166.ts`, que escribe
+    `prisma/reference/iso3166.ts` y `prisma/reference/iso3166-countries.json`
+    (la web lo copia byte a byte; lo comprueba
+    `scripts/check-api-reference-sync.mjs`). M1 la siembra y `seed.ts` la
+    repite. Cambiar la lista es regenerar, revisar el diff y crear una
+    migración nueva con el mismo `INSERT … ON CONFLICT DO UPDATE`.
+- **Validación** (`validateCountry`, `regional-settings.ts`): el código se
+  recorta y se pasa a mayúsculas. Sin país, con un código que no tiene dos
+  letras o que no está en `countries`, la respuesta es 400 con
+  `field: country` (alta y edición de sede) o `field: locationCountry`
+  (registro). En la edición, un `country` ausente no cambia nada; `null` o
+  vacío es 400.
+- **Lo guardado no se reescribe**: cambiar el país de una sede no toca
+  teléfonos, recetas ni nada guardado; solo cambia el indicativo de los
+  números nuevos escritos sin `+`.
+- **Registro**: el cuerpo sin campos de sede (la forma legada, anterior a G1)
+  es 400 con `field: locationCountry`. Un pendiente legado (sin sede) da 410
+  `REGISTRATION_LINK_EXPIRED` en `verify` y no se consume.
+- **Columnas legadas de la fase 1** (excepción G5.3, DX-334): se quedan
+  `locations."country"` y `pending_registrations."locationCountry"` (enum
+  `ClinicCountry`, ahora nullable) para las réplicas anteriores. Las mantienen
+  los triggers `locations_country_code` y
+  `pending_registrations_location_country_code`, con la proyección
+  `dx_legacy_clinic_country(code)`: el mismo valor si es uno de los dos del
+  enum y `NULL` en cualquier otro país. El cliente nuevo no las lee ni las
+  escribe (`@ignore`). En el código, el enum solo se nombra en
+  `src/shared/locations/legacy-clinic-country.ts`.
+  - **Paso 0 del trigger**: un INSERT de sede sin `"countryCode"` y sin
+    moneda, zona, formato ni revisión (la forma exacta del registro legado de
+    la API anterior) se rechaza con `check_violation`. Así una réplica
+    anterior no puede crear una clínica con el país que su cliente de Prisma
+    pone por defecto.
+  - `prescriptions.country` pasa a nullable. El CHECK
+    `prescriptions_legacy_country_present_check` exige país en las recetas
+    legadas; la receta única guarda la proyección (o `NULL`) y nada decide
+    con ella. DX-364 deja de escribirlo.
+- **Guardas**: `src/architecture/no-location-fallbacks.spec.ts`, bloque
+  «país de la sede libre (DX-312)». Ningún fichero de producción de `src/`
+  compara el país con un literal o una constante en MAYÚSCULAS, hace `switch`
+  con un `case` de dos letras, lo busca en una lista, tabla, `Set`,
+  `Object.hasOwn` o expresión regular, ni indexa un objeto por códigos de
+  país. Sus límites conocidos están en la cabecera del bloque.
+
+**Migraciones** (todas con `SET LOCAL lock_timeout = '5s'`):
+
+| Migración | Qué hace | Bloqueo | A mano |
+|---|---|---|---|
+| M1 `20261031120000_dx312_location_country_code` | Siembra `countries` (upsert, antes de los bloqueos); columnas nuevas, FK `NOT VALID`, funciones y triggers; `DROP NOT NULL` de las columnas legadas y CHECK de recetas `NOT VALID`. Sin relleno | `ACCESS EXCLUSIVE` breve en `locations`, `pending_registrations` y `prescriptions`, sin recorrer | `psql -1` |
+| M2 `20261031120100_dx312_location_country_code_backfill` | Rellena `"countryCode"` clínica por clínica, con `COMMIT` por clínica, y los pendientes. Idempotente | de fila | **sin** `-1` |
+| M3 `20261031120200_dx312_location_country_code_validate` | Valida la FK de pendientes y el CHECK de recetas; comprobación por clínica (falla con `RAISE EXCEPTION` si una sede no tiene país, tiene un código fuera de `countries` o la pareja es incoherente); después el bracket `NO FORCE` → `VALIDATE` de la FK de `locations` → `FORCE`, y el `NOT NULL` vía un CHECK validado | `ACCESS EXCLUSIVE` en `locations` **desde su `NO FORCE` hasta el `COMMIT`** | `psql -1` |
+| M4 `20261031120300_dx312_location_country_drop_default` | `ALTER COLUMN "country" DROP DEFAULT` en `locations` | `ACCESS EXCLUSIVE` breve | `psql -1` |
+
+- `prisma migrate deploy` aplica cada una en su transacción. **A mano**
+  (ensayo, sonda, operación): M1, M3 y M4 con
+  `psql -1 -v ON_ERROR_STOP=1 -f …/migration.sql`. Sin `-1`, un fallo de M3
+  después de su `NO FORCE` dejaría `locations` sin FORCE RLS, y
+  `SET LOCAL lock_timeout` no haría nada; el int
+  `test/location-country-code-migration.int-spec.ts` comprueba que, con `-1`,
+  un fallo del `VALIDATE` dentro del bracket lo deshace todo y FORCE sigue
+  puesto. M2 va **sin** `-1`: sus `COMMIT` dentro del `DO` fallan en un
+  bloque de transacción («invalid transaction termination»).
+- `locations` se lee en casi cada petición: todo en horas de poco tráfico.
+- Si una falla por `lock_timeout`: `npx prisma migrate resolve --rolled-back
+  <migración>` y repetir. Si M2 se corta, lo mismo (es idempotente). Si una
+  figura fallida pero su efecto ya está, `migrate resolve --applied`: M3 si
+  `"countryCode"` tiene `is_nullable = 'NO'` en
+  `information_schema.columns`; M4 si `column_default` de
+  `locations.country` es NULL.
+- Si M3 falla por la comprobación por clínica, no se despliega la API: se
+  investiga con la consulta posterior.
+
+**Runbook (en este orden):**
+
+1. Merge de la API antes que el de la web.
+2. Antes de `migrate deploy`, con un rol `BYPASSRLS` y solo lectura, la
+   consulta previa (a la nota de versión). La 2 tiene que dar 0; si no, se
+   espera a que caduquen (24 h). El 100 % de la API y de los workers tiene
+   que estar en DX-327 o posterior.
+
+   ```sql
+   -- 1. Países de las sedes (después deben cuadrar 1:1 con "countryCode").
+   SELECT "country"::text AS pais, ("deletedAt" IS NULL) AS viva, count(*) FROM "locations" GROUP BY 1, 2 ORDER BY 1, 2;
+   -- 2. Pendientes vivos sin sede (forma legada): debe ser 0.
+   SELECT count(*) FROM "pending_registrations" WHERE "expiresAt" > now() AND "locationCountry" IS NULL;
+   -- 3. Recetas por país y formato (no deben cambiar).
+   SELECT "country"::text, "singleFormat", count(*) FROM "prescriptions" GROUP BY 1, 2 ORDER BY 1, 2;
+   -- 4. Países sembrados.
+   SELECT count(*) FROM "countries";
+   ```
+3. `prisma migrate deploy` (M1-M4) termina **antes** del despliegue gradual.
+4. Consulta posterior: `SELECT "country"::text, "countryCode", count(*) FROM
+   "locations" GROUP BY 1, 2` solo da parejas iguales; `countries` tiene 250
+   filas (o más, si la base tenía propias); las consultas 1 y 3 dan lo mismo.
+   Y la consulta P5 (solo lectura, `BEGIN READ ONLY`, rol `BYPASSRLS`; lee
+   `"countryCode"`, así que va tras `migrate deploy` y antes de la web): qué
+   clínicas tienen sedes de qué país, para comprobar que ninguna del piloto
+   quedó con un país que no es el suyo. Si alguna lo está, la corrige su
+   ADMIN; nada se reescribe solo.
+
+   ```sql
+   SELECT t."subdomain", t."name" AS clinica, l."countryCode" AS pais,
+          count(*) FILTER (WHERE l."deletedAt" IS NULL) AS sedes_vivas,
+          count(*) FILTER (WHERE l."deletedAt" IS NOT NULL) AS sedes_borradas
+   FROM "locations" l JOIN "tenants" t ON t."id" = l."tenantId"
+   GROUP BY 1, 2, 3 ORDER BY 1, 3;
+   ```
+5. La API **y los workers** hasta el 100 %. **Solo entonces, la web**: es la
+   única que ofrece países fuera de los dos del enum, así que mientras viva
+   una réplica anterior no existe ninguna sede, receta ni pendiente de otro
+   país (salvo una llamada directa a la API nueva).
+
+**Réplica anterior contra la BD migrada** (ensayo de DX-312 con la API
+anterior entera):
+
+- Lee y escribe igual que hoy en las clínicas cuyas sedes son de los dos
+  países del enum. Sus escrituras mandan la columna legada y el trigger
+  rellena `"countryCode"`.
+- Una clínica con alguna sede (o receta) de otro país tiene la columna legada
+  a `NULL`, que su Prisma no admite: **500 solo en esa clínica y solo en las
+  lecturas autenticadas** que leen la sede (`GET /locations`, recetas, emisor,
+  bloque de comunicaciones con esa sede) y al **crear** enlaces
+  (anamnesis, postoperatorio) en esa sede. Las demás clínicas no se enteran
+  (RLS por clínica). Los **enlaces públicos ya emitidos se siguen abriendo**
+  (la anamnesis pública solo lee el id y el nombre de la sede), y también la
+  marca pública de la clínica. La baja por respuesta de WhatsApp solo falla
+  si la sede principal de la clínica es de otro país. Nunca se escribe un
+  país equivocado.
+- Un pendiente legado, o uno de otro país creado por la API nueva, que
+  confirma (`verify`) una réplica anterior: el paso 0 del trigger rechaza la
+  sede y la transacción del alta se deshace entera. La respuesta es un **400
+  genérico** (`CHECK_VIOLATION`, SQLSTATE 23514; su log dice solo «Regla de
+  BD violada (23514): -»), **no un 500**, y **no se crea nada**: ni clínica,
+  ni usuario, ni sede. El pendiente queda consumido; la persona se registra
+  de nuevo.
+- Un `PATCH` de la API anterior que mande `country` de uno de los dos
+  valores del enum sobre una sede de otro país cambia la columna legada y el
+  trigger pone `"countryCode"` a ese valor. Es una elección explícita de quien
+  llama, nunca un valor por defecto, y la web anterior no llega a esa clínica
+  (500).
+
+**Vuelta atrás**: primero la web, después la API y los workers. Antes de
+volver a la API anterior, con un rol `BYPASSRLS`:
+
+```sql
+SELECT (SELECT count(*) FROM "locations" WHERE "country" IS NULL) AS sedes,
+       (SELECT count(*) FROM "prescriptions" WHERE "country" IS NULL) AS recetas,
+       (SELECT count(*) FROM "pending_registrations"
+         WHERE "expiresAt" > now() AND "locationCountry" IS NULL) AS pendientes;
+```
+
+- **Las tres a 0**: el rollback es inocuo; el trigger mantiene al día la
+  columna legada y la API anterior ignora las nuevas.
+- **Alguna mayor que 0**: esas clínicas tendrían los 500 de arriba y esos
+  pendientes no crearían clínica. **Se sigue hacia delante.** Nunca se
+  escribe un país del enum en esas filas para poder volver: sería inventar un
+  país.
+- El trigger (con su paso 0) y M4 no se deshacen: la API anterior no
+  necesita el default (su cliente manda el país).
+- Un `prisma db seed` de la versión anterior (lo hace la CI) vuelve a poner
+  los nombres de `countries` en inglés; producción no ejecuta el seed, y el
+  `seed.ts` nuevo los deja otra vez en español.
+
+**Fase 2** (ticket aparte bajo DX-311, «G1.1 · Fase 2: fuera
+`ClinicCountry`»):
+
+- **Requisitos (todos):**
+  - 0 réplicas y 0 workers anteriores a DX-312, y 0 réplicas anteriores a
+    DX-326 (por `payers.country`);
+  - DX-364 publicado: la receta única ya no escribe `country` y el emisor no
+    tiene `phase1`;
+  - DX-351 publicado, porque borra `dx_g1_backfill_location_regional`, que
+    lee `locations."country"`; si no, esta migración la borra antes del
+    `DROP COLUMN`;
+  - `SELECT count(*) FROM pending_registrations WHERE "expiresAt" > now() AND
+    "locationCountryCode" IS NULL` = 0.
+- **Migración** (`lock_timeout`, una transacción, `psql -1` a mano):
+  - `DROP TRIGGER "locations_country_code" ON "locations"` y
+    `DROP TRIGGER "pending_registrations_location_country_code" ON
+    "pending_registrations"`;
+  - `DROP FUNCTION` de `dx_location_country_code_sync()`,
+    `dx_pending_registration_country_code_sync()` y
+    `dx_legacy_clinic_country(text)`;
+  - `DROP COLUMN` de `locations."country"`,
+    `pending_registrations."locationCountry"` y `payers."country"`
+    (DX-326);
+  - `ALTER TYPE "ClinicCountry" RENAME TO "LegacyPrescriptionCountry"` (solo
+    catálogo, sin reescribir `prescriptions`);
+  - se quedan `prescriptions.country` (nullable) y
+    `prescriptions_legacy_country_present_check`.
+- **Código:** fuera los tres campos `@ignore` (`Location.legacyCountry`,
+  `PendingRegistration.legacyLocationCountry`, `Payer.country`),
+  `legacy-clinic-country.ts` y su spec; `Prescription.country` pasa a
+  `LegacyPrescriptionCountry?`; la guarda «solo `legacy-clinic-country.ts`
+  nombra `ClinicCountry`» pasa a «`ClinicCountry` no existe ni en el esquema
+  ni en `src`».
+- **Tests:** los casos del trigger del int pasan a «no queda trigger ni
+  columna legada».
+- Tras la fase 2, ninguna sede, pendiente ni pagador tiene un enum de país.
+  Los dos valores solo sobreviven en `prescriptions.country`, como plantilla
+  congelada de las recetas legadas (excepción permanente de DX-324).
 
 ## Calendario de días hábiles y festivos de la sede (DX-316)
 

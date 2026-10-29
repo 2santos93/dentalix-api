@@ -110,7 +110,6 @@ export class CreateLocationDto {
   hourCycle?: string;
 
   @ApiPropertyOptional({
-    example: '+57 601 555 0101',
     maxLength: LOCATION_PHONE_MAX,
     description: PHONE_DOC,
   })
@@ -177,7 +176,6 @@ export class UpdateLocationDto {
   @ApiPropertyOptional({
     type: String,
     nullable: true,
-    example: '+57 601 555 0101',
     maxLength: LOCATION_PHONE_MAX,
     description: `${PHONE_DOC} Vacío o null lo quita; sin el campo no cambia.`,
   })

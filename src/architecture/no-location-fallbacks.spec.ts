@@ -1094,9 +1094,21 @@ describe('tipos de documento genéricos (DX-327)', () => {
  * Excepciones: la proyección legada, la tabla provisional de indicativos y los
  * legados R12 de recetas, cada uno con su cabecera G5.3.
  *
- * Límite conocido: las guardas miran el texto, no siguen valores. Un alias sin
- * «country» en el nombre (`const c = location.country; c === 'VE'`, o
- * `const { country: c } = location`) no se ve; eso queda para la revisión.
+ * Límite conocido: las guardas miran el texto, no siguen valores. Lo que
+ * queda para la revisión:
+ * - un alias sin «country» en el nombre (`const c = location.country;
+ *   c === 'VE'`, o `const { country: c } = location`);
+ * - la comparación con una constante con nombre en minúsculas o mixta
+ *   (`country === veCode`). En MAYÚSCULAS (`=== VE_CODE`) o como miembro de
+ *   dos letras (`=== Country.VE`) sí se ve;
+ * - `Reflect.get(T, country)` y cualquier búsqueda con el país en un argumento
+ *   que no sea el primero de un método de la lista de `MEMBERSHIP_CALL`;
+ * - las reglas por país en SQL (`CASE l."country"` de
+ *   `dx_g1_backfill_location_regional`, DX-351): solo se recorre TS de `src/`.
+ *
+ * `T?.[country]`, `Object.hasOwn(T, country)` y `.findIndex`, `.filter`,
+ * `.every` y `.exec` con el país en el argumento sí se ven (revisión final
+ * de DX-312, M4).
  */
 const COUNTRY = 'coun' + 'try';
 const LEGACY_CLINIC_COUNTRY_FILE = join(
@@ -1133,22 +1145,38 @@ const countryPattern = (source: string): RegExp => new RegExp(source, 'gi');
 const COUNTRY_COMPARE = countryPattern(
   `(?:${C_OPERAND}\\s*[!=]==?\\s*${L(1)})|(?:${L(2)}\\s*[!=]==?\\s*${C_OPERAND})`,
 );
+/**
+ * Una constante con nombre en lugar del literal: `VE_CODE` (MAYÚSCULAS, con
+ * al menos dos caracteres) o un miembro de dos letras (`Country.VE`). Sin
+ * `i`: `country === previous` o `country === other.country` no cuentan.
+ */
+const NAMED_CODE =
+  '(?:\\b[A-Z][A-Z0-9_]+\\b(?![\\w$.(])|\\b[\\w$]+\\??\\.[A-Z]{2}\\b(?![\\w$.(]))';
+/** `C_OPERAND` sin `i` en el patrón: «country» en cualquier caja, a mano. */
+const C_OPERAND_ANY_CASE = C_OPERAND.replace(
+  COUNTRY,
+  [...COUNTRY].map((ch) => `[${ch}${ch.toUpperCase()}]`).join(''),
+);
+const COUNTRY_NAMED_COMPARE = new RegExp(
+  `(?:${C_OPERAND_ANY_CASE}\\s*[!=]==?\\s*${NAMED_CODE})|(?:${NAMED_CODE}\\s*[!=]==?\\s*${C_OPERAND_ANY_CASE})`,
+  'g',
+);
 /** Un `case` de dos letras, con cualquier comilla y en cualquier caja. */
 const TWO_LETTER_CASE = /case\s*(['"`])[A-Za-z]{2}\1\s*:/i;
 const COUNTRY_LOOKUPS = [
   `${C}\\s*\\??\\.(?:startsWith|endsWith|includes|indexOf|localeCompare|match|test)\\(`,
-  `[\\w$\\])]\\s*\\[\\s*${C}\\s*\\]`,
+  `[\\w$\\])]\\s*(?:\\?\\.\\s*)?\\[\\s*${C}\\s*\\]`,
   `${C}\\s+in\\s+[\\w$]`,
 ].map(countryPattern);
 /** `.get(país)`, salvo sobre `countries` o una `*Whitelist`. */
 const COUNTRY_GET = countryPattern(`(\\b[\\w$]+)\\??\\.get\\(\\s*${C}\\s*\\)`);
 /**
  * Una búsqueda de pertenencia sobre cualquier receptor: un array (con nombre,
- * en línea o con `as const`), un `Set`, `Object.keys(T)` o una expresión
- * regular. Se mira el argumento entero, no el receptor.
+ * en línea o con `as const`), un `Set`, `Object.keys(T)`, `Object.hasOwn` o
+ * una expresión regular. Se mira el argumento entero, no el receptor.
  */
 const MEMBERSHIP_CALL =
-  /(\b[\w$]+)?\s*\??\.(?:includes|has|test|indexOf|some|find)\s*\(/g;
+  /(\b[\w$]+)?\s*\??\.(?:includes|has|hasOwn|test|exec|indexOf|some|find|findIndex|filter|every)\s*\(/g;
 const isCountryAllowList = (receiver: string): boolean =>
   /^(countries|\w*whitelist)$/i.test(receiver);
 const ISO_CODES: ReadonlySet<string> = new Set(
@@ -1179,8 +1207,12 @@ const matchLines = (
     .filter(accept)
     .map((match) => text.slice(0, match.index).split('\n').length);
 
-const compareHits = (code: string): number[] =>
-  matchLines(code, COUNTRY_COMPARE);
+const compareHits = (code: string): number[] => [
+  ...new Set([
+    ...matchLines(code, COUNTRY_COMPARE),
+    ...matchLines(code, COUNTRY_NAMED_COMPARE),
+  ]),
+];
 /**
  * `switch (…country…) {` con un `case` de dos letras en su bloque, antes de
  * otro `switch` anidado. La cabecera va equilibrada: `switch (norm(x.country))`
@@ -1369,6 +1401,16 @@ describe('país de la sede libre (DX-312)', () => {
       [`Object.keys(TABLE).includes(${COUNTRY})`, 'lookup'],
       [`/^(VE|CO)$/.test(${COUNTRY})`, 'lookup'],
       [`RULES.some((code) => code === ${LOC})`, 'lookup'],
+      [`RULES?.[${LOC}]`, 'lookup'],
+      [`RULES ?. [${COUNTRY}Code]`, 'lookup'],
+      [`Object.hasOwn(RULES, ${LOC})`, 'lookup'],
+      [`CODES.findIndex((code) => code === ${LOC})`, 'lookup'],
+      [`CODES.filter((code) => code === ${COUNTRY})`, 'lookup'],
+      [`CODES.every((code) => code !== ${COUNTRY})`, 'lookup'],
+      [`/^(VE|CO)$/.exec(${COUNTRY})`, 'lookup'],
+      [`if (${LOC} === VE_CODE) {}`, 'compare'],
+      [`if (VE_CODE !== phone${'Coun' + 'try'}) {}`, 'compare'],
+      [`${LOC}Code === Country.VE`, 'compare'],
       [`switch (norm(${LOC})) {\n  case 'VE':\n    break;\n}`, 'switch'],
       [`switch (this.${COUNTRY}()) {\n  case 've':\n    break;\n}`, 'switch'],
       [`switch (${LOC}) {\n  case 'VE':\n    break;\n}`, 'switch'],
@@ -1412,6 +1454,10 @@ describe('país de la sede libre (DX-312)', () => {
       `${COUNTRY} === ''`,
       `if (typeof ${COUNTRY} !== 'string') {}`,
       `if ('string' === typeof ${COUNTRY}) {}`,
+      `if (${LOC} === dto.${COUNTRY}) {}`,
+      `if (${COUNTRY} !== previous) {}`,
+      `${COUNTRY} === MAX_LENGTH.length`,
+      `items.filter((item) => item.active)`,
       `// País de la sede`,
     ]) {
       expect({ snippet, caughtBy: caughtBy(snippet) }).toEqual({

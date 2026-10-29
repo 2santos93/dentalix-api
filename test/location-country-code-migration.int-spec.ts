@@ -553,6 +553,53 @@ describe('DX-312 · migraciones del país ISO de la sede (int)', () => {
           `DELETE FROM "locations" WHERE "name" = 'Mala'`,
         );
       }
+      // Un fallo DESPUÉS del NO FORCE (revisión final, M6): la FK vuelve a
+      // NOT VALID, como la deja M1, y una sede huérfana (su clínica no está
+      // en tenants, así que la comprobación por clínica no la ve) con un
+      // código fuera de countries hace fallar el VALIDATE de la FK, que va
+      // dentro del bracket. Con `psql -1` todo se deshace: FORCE sigue
+      // puesto, la FK sin validar y "countryCode" nullable.
+      await check.$transaction([
+        check.$executeRawUnsafe(
+          `ALTER TABLE "locations" DROP CONSTRAINT "locations_country_code_fkey"`,
+        ),
+        check.$executeRawUnsafe(
+          `ALTER TABLE "locations" ADD CONSTRAINT "locations_country_code_fkey"
+             FOREIGN KEY ("countryCode") REFERENCES "countries"("code")
+             ON DELETE RESTRICT ON UPDATE CASCADE NOT VALID`,
+        ),
+        check.$executeRawUnsafe(`ALTER TABLE "locations" DISABLE TRIGGER ALL`),
+        check.$executeRawUnsafe(
+          `INSERT INTO "locations" ("id", "tenantId", "name", "country",
+               "countryCode", "currency", "timeZone", "locale", "updatedAt")
+           VALUES (gen_random_uuid(), '${id(T_B, 0xee)}', 'Huérfana', NULL,
+                   'ZZ', ${regional(REGIONAL_TOKYO_FIXTURE).split(', ').slice(0, 3).join(', ')}, now())`,
+        ),
+        check.$executeRawUnsafe(`ALTER TABLE "locations" ENABLE TRIGGER ALL`),
+      ]);
+      expect(() =>
+        psql(checkDb, ['-1', '-f', migrationPath(DX312_M3)]),
+      ).toThrow(
+        /violates foreign key constraint "locations_country_code_fkey"/,
+      );
+      const [afterFailure] = await check.$queryRaw<
+        { forced: boolean; validated: boolean; nullable: string }[]
+      >`
+        SELECT c.relforcerowsecurity AS forced,
+               (SELECT convalidated FROM pg_constraint
+                 WHERE conname = 'locations_country_code_fkey') AS validated,
+               (SELECT is_nullable FROM information_schema.columns
+                 WHERE table_name = 'locations'
+                   AND column_name = 'countryCode') AS nullable
+          FROM pg_class c WHERE c.oid = 'public.locations'::regclass`;
+      expect(afterFailure).toEqual({
+        forced: true,
+        validated: false,
+        nullable: 'YES',
+      });
+      await check.$executeRawUnsafe(
+        `DELETE FROM "locations" WHERE "name" = 'Huérfana'`,
+      );
       // Sin filas malas, M3 pasa.
       psql(checkDb, ['-1', '-f', migrationPath(DX312_M3)]);
     } finally {
