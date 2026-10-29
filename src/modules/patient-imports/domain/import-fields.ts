@@ -206,8 +206,18 @@ export const FILLABLE_FIELDS = [
 export type FillableField = (typeof FILLABLE_FIELDS)[number];
 
 /**
- * Cabecera de un fichero reducida a letras y dígitos, sin mayúsculas ni
- * tildes. La misma clave que los tipos y los nombres de la clínica
- * (`documentTypeKey`, DX-327 pre-flight I4): sirve en cualquier escritura.
+ * Claves de una cabecera para el mapeo automático, en orden de preferencia.
+ * Primero la de los tipos y los nombres de la clínica (`documentTypeKey`,
+ * DX-327 pre-flight I4), que sirve en cualquier escritura; si con ella no
+ * casa ninguna cabecera, la anterior (solo `[a-z0-9]`), para que no deje de
+ * casar lo que ya casaba: «Documento №» o «Nombres (名)» (revisión T5, m1).
  */
-export const headerKey = documentTypeKey;
+export const HEADER_KEYS: readonly ((header: string) => string)[] = [
+  documentTypeKey,
+  (header) =>
+    header
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, ''),
+];

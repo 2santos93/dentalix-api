@@ -1,6 +1,6 @@
 import type { PatientImportFileFormat } from '@prisma/client';
 import { csv } from './import-csv';
-import { IMPORT_FIELDS, headerKey } from './import-fields';
+import { HEADER_KEYS, IMPORT_FIELDS } from './import-fields';
 import {
   MAX_ISSUE_VALUE_LENGTH,
   docKey,
@@ -125,15 +125,16 @@ export function resolveBalanceColumns(
   const used = new Set<string>();
   for (const col of BALANCE_COLUMNS) {
     // El primer sinónimo que aparezca gana (el orden de la lista es la
-    // preferencia): «fecha_corte» antes que una «fecha» suelta.
-    for (const synonym of col.synonyms) {
-      const header = headers.find(
-        (h) => !used.has(h) && headerKey(h) === synonym,
-      );
-      if (header !== undefined) {
-        out[col.key] = header;
-        used.add(header);
-        break;
+    // preferencia): «fecha_corte» antes que una «fecha» suelta. La clave
+    // anterior solo si con la nueva no casa ninguna (`HEADER_KEYS`).
+    search: for (const key of HEADER_KEYS) {
+      for (const synonym of col.synonyms) {
+        const header = headers.find((h) => !used.has(h) && key(h) === synonym);
+        if (header !== undefined) {
+          out[col.key] = header;
+          used.add(header);
+          break search;
+        }
       }
     }
     if (col.required && out[col.key] === undefined) {

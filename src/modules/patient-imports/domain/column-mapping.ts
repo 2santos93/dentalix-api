@@ -7,7 +7,7 @@ import {
 import {
   IMPORT_FIELDS,
   fieldLabel,
-  headerKey,
+  HEADER_KEYS,
   type ImportFieldKey,
 } from './import-fields';
 import { ImportFileError } from './tabular-file';
@@ -35,11 +35,11 @@ export interface ResolvedMapping {
  * durante el despliegue, y `defaultDocumentType` el genérico, que es el que
  * lee la API nueva. La fase 2 deja de escribir el anterior.
  */
-export interface StoredColumnMapping {
+export type StoredColumnMapping = {
   columns: ColumnMapping;
   defaultDocType: LegacyDocType | null;
   defaultDocumentType: DocumentType | null;
-}
+};
 
 export function storedColumnMapping(
   columns: ColumnMapping,
@@ -81,9 +81,13 @@ export function suggestMapping(headers: readonly string[]): ColumnMapping {
   const used = new Set<number>();
   for (const field of IMPORT_FIELDS) {
     const synonyms: readonly string[] = field.synonyms;
-    const index = headers.findIndex(
-      (h, i) => !used.has(i) && h !== '' && synonyms.includes(headerKey(h)),
-    );
+    let index = -1;
+    for (const key of HEADER_KEYS) {
+      index = headers.findIndex(
+        (h, i) => !used.has(i) && h !== '' && synonyms.includes(key(h)),
+      );
+      if (index >= 0) break;
+    }
     if (index >= 0) {
       out[field.key] = headers[index];
       used.add(index);

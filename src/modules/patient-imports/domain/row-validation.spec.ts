@@ -28,6 +28,8 @@ import { parseCsv } from './csv-parser';
 import { toTable } from './tabular-file';
 
 const TODAY = '2026-10-21';
+/** Sin país de sede: estos casos no tienen teléfono (R14, ningún país). */
+const NEUTRAL_COUNTRY = null;
 /** Una clínica sin nombres locales (como empiezan todas, R16). */
 const NO_NAMES: ClinicDocumentTypeNames = {};
 
@@ -166,7 +168,7 @@ function typeError(raw: string, clinicNames: ClinicDocumentTypeNames): string {
     { rowNumber: 2, cells: [raw, 'RX-1', 'A', 'B'] },
     mapping,
     {
-      countryCode: 'CO',
+      countryCode: NEUTRAL_COUNTRY,
       today: TODAY,
       clinicNames,
     },
@@ -255,6 +257,33 @@ describe('tipos de documento de la importación (DX-327)', () => {
     );
   });
 
+  it('headers that matched before still match, and headers in any script match too', () => {
+    // La clave anterior (solo [a-z0-9]) cuando la nueva no casa ninguna.
+    expect(
+      suggestMapping(['Documento №', 'Nombres (名)', 'Apellidos']),
+    ).toMatchObject({
+      docNumber: 'Documento №',
+      firstName: 'Nombres (名)',
+      lastName: 'Apellidos',
+    });
+    expect(
+      resolveBalanceColumns(['Documento №', 'Importe', 'Moneda']),
+    ).toMatchObject({ docNumber: 'Documento №' });
+    // La nueva gana cuando las dos casan: «Nº documento» es el número.
+    expect(suggestMapping(['Nº documento'])).toEqual({
+      docNumber: 'Nº documento',
+    });
+    // Letras de ancho completo: solo la clave nueva las lee.
+    expect(suggestMapping(['ＮＯＭＢＲＥＳ'])).toEqual({
+      firstName: 'ＮＯＭＢＲＥＳ',
+    });
+    // Cabeceras con tildes y en mayúsculas, como antes.
+    expect(suggestMapping(['NÚMERO DE DOCUMENTO', 'Teléfono'])).toEqual({
+      docNumber: 'NÚMERO DE DOCUMENTO',
+      phone: 'Teléfono',
+    });
+  });
+
   // REGIONAL_TOKYO_FIXTURE: el país de la sede lo obliga el enum hasta
   // DX-312; no decide nada. Nombres locales en otras escrituras (I4).
   it.each([
@@ -326,7 +355,7 @@ describe('tipos de documento de la importación (DX-327)', () => {
       const r = validateRow(
         { rowNumber: 2, cells: ['V-12.345.678', 'A', 'B'] },
         mapping,
-        { countryCode: 'CO', today: TODAY, clinicNames: NO_NAMES },
+        { countryCode: NEUTRAL_COUNTRY, today: TODAY, clinicNames: NO_NAMES },
       );
       expect(r.issues).toEqual([]);
       expect(r.data).toMatchObject({ docType: type, docNumber: 'V12345678' });
@@ -695,7 +724,8 @@ describe('dedupeRows', () => {
     }
   });
 
-  it('a dedupe message never prints a label derived from a legacy code', () => {
+  // Excepción G5.3 (DX-334): tipos de documento anteriores a DX-327.
+  it('legacy: a dedupe message never prints a label derived from a legacy code', () => {
     // La fila «cédula» casa con un sinónimo anterior: su texto es el nombre
     // genérico, nunca el código ni el nombre de un país (Q3).
     const type = parseDocType('cédula', NO_NAMES)!;

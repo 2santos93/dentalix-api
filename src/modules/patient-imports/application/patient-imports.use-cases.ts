@@ -424,9 +424,7 @@ export class PatientImportsService {
       fileSha256: sha256(f.buffer),
       fileFormat: parsed.format,
       fileSizeBytes: f.size,
-      columnMapping: {
-        ...storedColumnMapping(columns, resolved.defaultDocType),
-      },
+      columnMapping: storedColumnMapping(columns, resolved.defaultDocType),
       totalRows: parsed.table.rows.length,
       validRows: deduped.fresh.length,
       duplicateRows: deduped.existing.length + deduped.fileDuplicates,
