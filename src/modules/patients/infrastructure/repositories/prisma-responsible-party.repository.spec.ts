@@ -3,7 +3,9 @@
  * etiqueta libre. El alta de un contacto escribe la pareja con el código
  * anterior; la edición, solo las columnas nuevas.
  */
+import type { DocumentType } from '@prisma/client';
 import {
+  contactUpdateData,
   PrismaResponsiblePartyRepository,
   toView,
   type PartyRow,
@@ -76,9 +78,15 @@ describe('PrismaResponsiblePartyRepository (DX-327, fase 1)', () => {
     expect(linked.responsiblePatient).not.toHaveProperty('documentType');
   });
 
-  function fakeRepository() {
+  /** `stored`: el tipo de la fila al bloquearla (FOR UPDATE) al escribir. */
+  function fakeRepository(stored: DocumentType | null = 'PASSPORT') {
     const writes: Array<Record<string, unknown>> = [];
+    const locks: string[] = [];
     const tx = {
+      $queryRaw: (sql: TemplateStringsArray) => {
+        locks.push(sql.join('?'));
+        return Promise.resolve([{ documentType: stored }]);
+      },
       patientResponsibleParty: {
         create: ({ data }: { data: Record<string, unknown> }) => {
           writes.push(data);
@@ -99,7 +107,7 @@ describe('PrismaResponsiblePartyRepository (DX-327, fase 1)', () => {
       prisma as never,
       tenantContext as never,
     );
-    return { repo, writes };
+    return { repo, writes, locks };
   }
 
   it('a contact is created with the legacy pair and edited with the generic type only', async () => {
@@ -158,5 +166,37 @@ describe('PrismaResponsiblePartyRepository (DX-327, fase 1)', () => {
       phone: '1',
     });
     for (const data of writes) expect(data).not.toHaveProperty('docType');
+  });
+
+  it('the contact label decision uses the row type at write time, not the one read before', async () => {
+    // El caso de uso vio NATIONAL_ID; la fila ya es PASSPORT (otra edición):
+    // reenviar PASSPORT no cambia el tipo y la etiqueta se queda.
+    const same = fakeRepository('PASSPORT');
+    await same.repo.update('son', 'party-1', {
+      contact: { docType: 'PASSPORT' },
+    });
+    expect(same.writes[0]).not.toHaveProperty('docTypeLabel');
+    expect(same.locks[0]).toMatch(/FOR UPDATE/);
+    // La fila es NATIONAL_ID: PASSPORT sí la cambia y la borra.
+    const changed = fakeRepository('NATIONAL_ID');
+    await changed.repo.update('son', 'party-1', {
+      contact: { docType: 'PASSPORT' },
+    });
+    expect(changed.writes[0]).toMatchObject({
+      documentType: 'PASSPORT',
+      docTypeLabel: null,
+    });
+    // Con etiqueta, manda la del cuerpo.
+    const labelled = fakeRepository('NATIONAL_ID');
+    await labelled.repo.update('son', 'party-1', {
+      contact: { docType: 'PASSPORT', docTypeLabel: 'ID local' },
+    });
+    expect(labelled.writes[0]).toMatchObject({ docTypeLabel: 'ID local' });
+  });
+
+  it('the contact update data type has no legacy column', () => {
+    const data = contactUpdateData({ docType: 'OTHER' }, 'OTHER');
+    // @ts-expect-error R5: la edición nunca escribe la columna anterior.
+    expect(data.docType).toBeUndefined();
   });
 });

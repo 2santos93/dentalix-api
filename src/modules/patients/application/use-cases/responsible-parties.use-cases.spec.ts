@@ -361,6 +361,25 @@ describe('responsables de pago y avisos (DX-203)', () => {
       ).rejects.toThrow('El nombre del documento admite hasta 40 caracteres.');
     });
 
+    it('a patient responsible edit with a null label is a no-op; with text it is 400', async () => {
+      const linked = await create.execute(
+        SON,
+        { responsiblePatientId: MOTHER, relationship: 'MOTHER' },
+        USER,
+      );
+      await expect(
+        update.execute(SON, linked.id, {
+          docTypeLabel: null,
+          receivesNotices: false,
+        }),
+      ).resolves.toMatchObject({ kind: 'PATIENT', receivesNotices: false });
+      await expect(
+        update.execute(SON, linked.id, { docTypeLabel: 'ID local' }),
+      ).rejects.toThrow(
+        'El responsable es un paciente: su nombre, documento, email y teléfono se cambian en su ficha.',
+      );
+    });
+
     it('a patient responsible takes no contact label', async () => {
       await expect(
         create.execute(

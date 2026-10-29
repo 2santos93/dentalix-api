@@ -5,9 +5,11 @@
  */
 import { DOCUMENT_TYPES } from '../../domain/document-type';
 import { legacyStoredDocType } from '../../domain/legacy-doc-type';
+import type { DocumentType } from '@prisma/client';
 import {
   mapToEntity,
   patientDocFields,
+  patientUpdateData,
   PrismaPatientRepository,
   type LegacyDocPair,
   type PrismaPatient,
@@ -98,11 +100,19 @@ describe('PrismaPatientRepository (DX-327, fase 1)', () => {
   });
 
   describe('update', () => {
-    function fakeRepository() {
+    /**
+     * Prisma de mentira. `stored` es el tipo de la fila al bloquearla (FOR
+     * UPDATE) dentro de la transacción de la escritura.
+     */
+    function fakeRepository(stored: DocumentType = 'NATIONAL_ID') {
       const updates: Array<Record<string, unknown>> = [];
+      const locks: string[] = [];
       const tx = {
+        $queryRaw: (sql: TemplateStringsArray) => {
+          locks.push(sql.join('?'));
+          return Promise.resolve([{ documentType: stored }]);
+        },
         patient: {
-          findFirst: () => Promise.resolve({ id: 'p1' }),
           update: jest.fn(({ data }: { data: Record<string, unknown> }) => {
             updates.push(data);
             return Promise.resolve(row());
@@ -117,7 +127,7 @@ describe('PrismaPatientRepository (DX-327, fase 1)', () => {
         prisma as never,
         tenantContext as never,
       );
-      return { repo, updates, tx };
+      return { repo, updates, locks, tx };
     }
 
     it('update writes documentType and docTypeLabel, never the legacy column', async () => {
@@ -136,6 +146,42 @@ describe('PrismaPatientRepository (DX-327, fase 1)', () => {
         { firstName: 'Ana María' },
       ]);
       for (const data of updates) expect(data).not.toHaveProperty('docType');
+    });
+
+    it('changing the type without a label clears the label; the same type keeps it', async () => {
+      const { repo, updates, locks } = fakeRepository('NATIONAL_ID');
+      await repo.update('p1', { docType: 'PASSPORT' });
+      await repo.update('p1', { docType: 'NATIONAL_ID', firstName: 'Ana' });
+      await repo.update('p1', { docType: 'TAX_ID', docTypeLabel: 'Fiscal A' });
+      expect(updates).toEqual([
+        { documentType: 'PASSPORT', docTypeLabel: null },
+        { documentType: 'NATIONAL_ID', firstName: 'Ana' },
+        { documentType: 'TAX_ID', docTypeLabel: 'Fiscal A' },
+      ]);
+      // La decisión sale de la fila bloqueada en la transacción de la escritura.
+      for (const sql of locks) expect(sql).toMatch(/FOR UPDATE/);
+    });
+
+    it('the label decision uses the row type at write time, not the one read before', async () => {
+      // El caso de uso leyó NATIONAL_ID; otra edición la cambió a PASSPORT
+      // antes de esta escritura, que también manda PASSPORT: mismo tipo que
+      // el guardado, la etiqueta (de PASSPORT) se queda.
+      const changedBehind = fakeRepository('PASSPORT');
+      await changedBehind.repo.update('p1', { docType: 'PASSPORT' });
+      expect(changedBehind.updates).toEqual([{ documentType: 'PASSPORT' }]);
+      // Y al revés: el caso de uso leyó PASSPORT, la fila ya es NATIONAL_ID:
+      // la escritura de PASSPORT sí cambia el tipo y borra la etiqueta.
+      const revertedBehind = fakeRepository('NATIONAL_ID');
+      await revertedBehind.repo.update('p1', { docType: 'PASSPORT' });
+      expect(revertedBehind.updates).toEqual([
+        { documentType: 'PASSPORT', docTypeLabel: null },
+      ]);
+    });
+
+    it('the update data type has no legacy column', () => {
+      const data = patientUpdateData({ docType: 'OTHER' }, 'OTHER');
+      // @ts-expect-error R5: un cambio nunca escribe la columna anterior.
+      expect(data.docType).toBeUndefined();
     });
   });
 });

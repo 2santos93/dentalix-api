@@ -65,7 +65,11 @@ export interface UpdatePatientRepoInput {
   firstName?: string;
   lastName?: string;
   docType?: DocumentType;
-  /** Ausente = no se toca; null = sin etiqueta (R7). */
+  /**
+   * Null = sin etiqueta. Ausente = no se toca, salvo que `docType` cambie el
+   * tipo guardado: entonces el repositorio la borra en la misma escritura
+   * (R7; la de un tipo no vale para otro).
+   */
   docTypeLabel?: string | null;
   docNumber?: string | null;
   birthDate?: Date | null;

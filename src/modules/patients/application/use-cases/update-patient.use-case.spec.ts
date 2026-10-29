@@ -225,8 +225,7 @@ describe('UpdatePatientUseCase', () => {
     });
   });
 
-  // DX-327 (R7, pre-flight I1): la etiqueta de un tipo no vale para otro; con
-  // el mismo tipo genérico se queda.
+  // DX-327 (R7): la etiqueta libre se normaliza en el caso de uso.
   describe('document type label', () => {
     function setup(patient: Patient) {
       const updates: UpdatePatientRepoInput[] = [];
@@ -247,30 +246,22 @@ describe('UpdatePatientUseCase', () => {
     const labelled = () =>
       fakePatient({ docType: 'NATIONAL_ID', docTypeLabel: 'ID local' });
 
-    it('changing the type without a label clears the label', async () => {
+    // El borrado al cambiar de tipo lo decide el repositorio con la fila
+    // bloqueada (prisma-patient.repository.spec.ts): aquí solo se reenvía.
+    it('a type without a label is passed on for the repository to decide', async () => {
       const { uc, updates } = setup(labelled());
       await uc.execute('p1', { docType: 'PASSPORT' });
-      expect(updates).toEqual([{ docType: 'PASSPORT', docTypeLabel: null }]);
-    });
-
-    it('changing the type with a label keeps the new label', async () => {
-      const { uc, updates } = setup(labelled());
       await uc.execute('p1', {
         docType: 'TAX_ID',
         docTypeLabel: ' Fiscal  A ',
       });
       expect(updates).toEqual([
+        { docType: 'PASSPORT' },
         { docType: 'TAX_ID', docTypeLabel: 'Fiscal A' },
       ]);
     });
 
-    it('resending the same type keeps the label', async () => {
-      const { uc, updates } = setup(labelled());
-      await uc.execute('p1', { docType: 'NATIONAL_ID', firstName: 'Ana' });
-      expect(updates).toEqual([{ docType: 'NATIONAL_ID', firstName: 'Ana' }]);
-    });
-
-    it('legacy CC resent for a national ID keeps the label', async () => {
+    it('legacy CC resent for a national ID reaches the repository as its generic type', async () => {
       const { uc, updates } = setup(labelled());
       await uc.execute('p1', { docType: resolveDocTypeInput('CC') });
       expect(updates).toEqual([{ docType: 'NATIONAL_ID' }]);

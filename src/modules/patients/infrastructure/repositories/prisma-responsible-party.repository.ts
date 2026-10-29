@@ -85,15 +85,22 @@ function contactCreateData({ docType, ...rest }: ResponsibleContactFields) {
   };
 }
 
-/** R5: la edición escribe solo el genérico; el trigger ajusta el anterior. */
-function contactUpdateData({
-  docType,
-  ...rest
-}: Partial<ResponsibleContactFields>): Omit<
-  Prisma.PatientResponsiblePartyUncheckedUpdateManyInput,
-  'docType'
-> {
-  return docType === undefined ? rest : { ...rest, documentType: docType };
+/**
+ * R5: la edición escribe solo el genérico; el trigger ajusta el anterior.
+ * R7: con `docType` y sin `docTypeLabel`, la etiqueta se borra solo si el
+ * tipo cambia respecto del GUARDADO (`stored`, de la fila bloqueada).
+ */
+export function contactUpdateData(
+  { docType, ...rest }: Partial<ResponsibleContactFields>,
+  stored: DocumentType | null,
+): Omit<Prisma.PatientResponsiblePartyUncheckedUpdateManyInput, 'docType'> {
+  if (docType === undefined) return rest;
+  const clearsLabel = rest.docTypeLabel === undefined && docType !== stored;
+  return {
+    ...rest,
+    documentType: docType,
+    ...(clearsLabel ? { docTypeLabel: null } : {}),
+  };
 }
 
 export function toView(row: PartyRow): ResponsiblePartyView {
@@ -262,13 +269,25 @@ export class PrismaResponsiblePartyRepository implements ResponsiblePartyReposit
   ): Promise<ResponsiblePartyView | null> {
     try {
       return await this.prisma.runWithTenant(async (tx) => {
+        // FOR UPDATE: el tipo con el que se decide la etiqueta (R7) es el de
+        // la fila que se va a escribir, no el que leyó antes el caso de uso.
+        const [locked] = await tx.$queryRaw<
+          { documentType: DocumentType | null }[]
+        >`
+          SELECT "documentType" FROM "patient_responsible_parties"
+           WHERE "id" = ${partyId}::uuid AND "patientId" = ${patientId}::uuid
+             AND "deletedAt" IS NULL
+           FOR UPDATE`;
+        if (!locked) return null;
         const { count } = await tx.patientResponsibleParty.updateMany({
           where: { id: partyId, patientId, deletedAt: null },
           data: {
             relationship: data.relationship,
             isPayer: data.isPayer,
             receivesNotices: data.receivesNotices,
-            ...(data.contact ? contactUpdateData(data.contact) : {}),
+            ...(data.contact
+              ? contactUpdateData(data.contact, locked.documentType)
+              : {}),
           },
         });
         if (count === 0) return null;

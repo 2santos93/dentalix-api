@@ -89,6 +89,11 @@ export interface UpdateResponsiblePartyData {
   relationship?: ResponsibleRelationship;
   isPayer?: boolean;
   receivesNotices?: boolean;
+  /**
+   * DX-327 (R7): con `docType` y sin `docTypeLabel`, el repositorio borra la
+   * etiqueta solo si el tipo cambia respecto de la fila, leída bloqueada en
+   * la misma transacción que la escritura.
+   */
   contact?: Partial<ResponsibleContactFields>;
 }
 

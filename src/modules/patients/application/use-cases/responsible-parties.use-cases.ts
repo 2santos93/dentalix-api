@@ -145,9 +145,10 @@ function translateConflict(err: unknown): never {
 }
 
 /**
- * DX-327 (R7) en la edición de un contacto: la etiqueta exige un tipo; quitar
- * el tipo la quita; y solo se borra si el tipo CAMBIA y no llega otra. El
- * diálogo de contacto reenvía siempre el tipo: reenviar el mismo la conserva
+ * DX-327 (R7) en la edición de un contacto: la etiqueta exige un tipo y quitar
+ * el tipo la quita. Si llega un tipo sin etiqueta, el repositorio la borra
+ * solo si el tipo CAMBIA respecto de la fila bloqueada al escribir: el diálogo
+ * de contacto reenvía siempre el tipo y reenviar el mismo la conserva
  * (pre-flight I1).
  */
 function contactDocType(
@@ -170,8 +171,6 @@ function contactDocType(
     fields.docTypeLabel = null;
   } else if (docTypeLabel !== undefined) {
     fields.docTypeLabel = docTypeLabel;
-  } else if (docType !== current.docType) {
-    fields.docTypeLabel = null;
   }
   return fields;
 }
@@ -312,7 +311,14 @@ export class UpdateResponsiblePartyUseCase {
     if (!current) {
       throw new NotFoundException(RESPONSIBLE_PARTY_NOT_FOUND_MESSAGE);
     }
-    const touchesContact = hasContactFields(input, { emptyIsAbsent: false });
+    // Un `docTypeLabel: null` no toca nada en un paciente responsable (no
+    // tiene etiqueta propia): el diálogo lo manda siempre. Uno con texto, sí.
+    const touchesContact = hasContactFields(
+      current.kind === 'PATIENT' && input.docTypeLabel === null
+        ? { ...input, docTypeLabel: undefined }
+        : input,
+      { emptyIsAbsent: false },
+    );
     if (current.kind === 'PATIENT' && touchesContact) {
       throw new BadRequestException(PATIENT_KIND_FIELDS_MESSAGE);
     }

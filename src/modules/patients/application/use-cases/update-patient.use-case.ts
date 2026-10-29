@@ -69,16 +69,12 @@ export class UpdatePatientUseCase {
     if (normalizedPatch.email) {
       normalizedPatch.email = normalizedPatch.email.trim().toLowerCase();
     }
-    // DX-327 (R7): la etiqueta de un tipo no vale para otro. Solo se borra si
-    // el tipo genérico CAMBIA y no llega otra; reenviar el mismo tipo (como
-    // hace cualquier edición completa) la conserva (pre-flight I1).
+    // DX-327 (R7): la etiqueta se normaliza aquí. Si llega `docType` sin
+    // etiqueta, el repositorio la borra solo si el tipo genérico CAMBIA,
+    // comparando con la fila bloqueada al escribir: reenviar el mismo tipo
+    // (como hace cualquier edición completa) la conserva (pre-flight I1).
     if (patch.docTypeLabel !== undefined) {
       normalizedPatch.docTypeLabel = docTypeLabelInput(patch.docTypeLabel);
-    } else if (
-      patch.docType !== undefined &&
-      patch.docType !== existing.docType
-    ) {
-      normalizedPatch.docTypeLabel = null;
     }
 
     return this.repo.update(id, normalizedPatch);

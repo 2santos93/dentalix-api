@@ -839,9 +839,19 @@ describe('Responsables de pago y avisos (e2e, DX-203)', () => {
       });
       const patientId = await freshPatient();
       await addContact(patientId, { docType: 'OTHER' });
-      await at(api().post(parties(patientId)))
-        .send({ responsiblePatientId: mom, relationship: 'MOTHER' })
-        .expect(201);
+      const linked = (
+        await at(api().post(parties(patientId)))
+          .send({ responsiblePatientId: mom, relationship: 'MOTHER' })
+          .expect(201)
+      ).body as DocParty;
+      // Un `docTypeLabel: null` no toca nada en un paciente responsable; uno
+      // con texto es 400 (sus datos se cambian en su ficha).
+      await at(api().patch(`${parties(patientId)}/${linked.id}`))
+        .send({ relationship: 'MOTHER', docTypeLabel: null })
+        .expect(200);
+      await at(api().patch(`${parties(patientId)}/${linked.id}`))
+        .send({ docTypeLabel: 'ID local' })
+        .expect(400);
       // Un paciente responsable no lleva datos de contacto.
       await at(api().post(parties(patientId)))
         .send({

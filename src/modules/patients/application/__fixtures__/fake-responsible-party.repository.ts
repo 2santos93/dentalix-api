@@ -147,7 +147,13 @@ export class FakeResponsiblePartyRepository implements ResponsiblePartyRepositor
     if (data.receivesNotices !== undefined) {
       party.receivesNotices = data.receivesNotices;
     }
-    Object.assign(party, data.contact ?? {});
+    // R7, como el repositorio: un tipo distinto sin etiqueta la borra.
+    const contact = data.contact ?? {};
+    const clearsLabel =
+      contact.docType !== undefined &&
+      contact.docTypeLabel === undefined &&
+      contact.docType !== party.docType;
+    Object.assign(party, contact, clearsLabel ? { docTypeLabel: null } : {});
     const { deleted: _d, ...view } = party;
     return Promise.resolve(view);
   }

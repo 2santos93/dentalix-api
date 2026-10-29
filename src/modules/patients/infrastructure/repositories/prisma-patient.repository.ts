@@ -60,12 +60,21 @@ export function patientDocFields(
 /**
  * R5: un cambio escribe solo las columnas nuevas (el trigger ajusta la
  * anterior). Nunca se pasa el `patch` tal cual: su `docType` es el genérico.
+ * R7: con `docType` y sin `docTypeLabel`, la etiqueta se borra solo si el
+ * tipo genérico cambia respecto del GUARDADO (`stored`, leído con la fila
+ * bloqueada en la misma transacción que la escritura).
  */
-function patientUpdateData({
-  docType,
-  ...rest
-}: UpdatePatientRepoInput): Prisma.PatientUncheckedUpdateInput {
-  return docType === undefined ? rest : { ...rest, documentType: docType };
+export function patientUpdateData(
+  { docType, ...rest }: UpdatePatientRepoInput,
+  stored: DocumentType,
+): Omit<Prisma.PatientUncheckedUpdateInput, 'docType'> {
+  if (docType === undefined) return rest;
+  const clearsLabel = rest.docTypeLabel === undefined && docType !== stored;
+  return {
+    ...rest,
+    documentType: docType,
+    ...(clearsLabel ? { docTypeLabel: null } : {}),
+  };
 }
 
 /**
@@ -397,10 +406,12 @@ export class PrismaPatientRepository implements PatientRepository {
 
   async update(id: string, patch: UpdatePatientRepoInput): Promise<Patient> {
     return this.prisma.runWithTenant(async (tx) => {
-      const existing = await tx.patient.findFirst({
-        where: { id, deletedAt: null },
-        select: { id: true },
-      });
+      // FOR UPDATE: el tipo con el que se decide la etiqueta (R7) es el de
+      // la fila que se va a escribir, no el que leyó antes el caso de uso.
+      const [existing] = await tx.$queryRaw<{ documentType: DocumentType }[]>`
+        SELECT "documentType" FROM "patients"
+         WHERE "id" = ${id}::uuid AND "deletedAt" IS NULL
+         FOR UPDATE`;
       if (!existing) {
         throw new NotFoundException('Patient not found');
       }
@@ -410,7 +421,7 @@ export class PrismaPatientRepository implements PatientRepository {
 
       const patient = await tx.patient.update({
         where: { id },
-        data: patientUpdateData(patch),
+        data: patientUpdateData(patch, existing.documentType),
       });
       return mapToEntity(patient);
     });
