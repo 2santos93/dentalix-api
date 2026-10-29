@@ -19,6 +19,11 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
+import {
+  REGIONAL_BERLIN_FIXTURE,
+  REGIONAL_NEW_YORK_FIXTURE,
+  REGIONAL_TOKYO_FIXTURE,
+} from './support/location-fixtures';
 
 // DX-128 en HTTP real: bloque «Comunicaciones» de la ficha. Lo ven los 4
 // roles; lo cambian recepción y ADMIN (403 en español para el resto); un
@@ -629,6 +634,60 @@ describe('Comunicaciones del paciente (e2e, DX-128)', () => {
         phoneStatus: 'VALID',
         phoneCountry: null,
       });
+    });
+
+    // Pre-flight m6: con su país real, las sedes de test cambian el indicativo
+    // de un número sin «+». Nueva York toma +1; Tokio y Berlín no tienen
+    // indicativo provisional: WhatsApp lo rechaza y, sin WhatsApp, se guarda
+    // tal cual, sin indicativo adivinado.
+    it('regional fixtures: a mobile without + gets +1 at New York and no guessed code at Tokyo or Berlin', async () => {
+      await setCountry(REGIONAL_NEW_YORK_FIXTURE.country);
+      const us = await newPatient();
+      const res = await setPhone(us, '212 555 0123').expect(200);
+      expect(res.body).toMatchObject({
+        phone: '+12125550123',
+        phoneE164: '+12125550123',
+        phoneStatus: 'VALID',
+        phoneCountry: REGIONAL_NEW_YORK_FIXTURE.country,
+      });
+
+      for (const fixture of [REGIONAL_TOKYO_FIXTURE, REGIONAL_BERLIN_FIXTURE]) {
+        await setCountry(fixture.country);
+        const id = await newPatient();
+        const refused = await setPhone(id, '0412-1234567').expect(400);
+        expect({
+          country: fixture.country,
+          body: refused.body as unknown,
+        }).toMatchObject({
+          country: fixture.country,
+          body: {
+            code: 'WHATSAPP_REQUIRES_VALID_MOBILE',
+            message: NEEDS_MOBILE,
+          },
+        });
+        expect(
+          (await raw.patient.findUniqueOrThrow({ where: { id } })).phone,
+        ).toBeNull();
+        const kept = await as(
+          api().patch(comms(id)),
+          phones.adminToken,
+          phones.host,
+        )
+          .send({ phone: '0412-1234567' })
+          .expect(200);
+        expect({
+          country: fixture.country,
+          body: kept.body as unknown,
+        }).toMatchObject({
+          country: fixture.country,
+          body: {
+            phone: '0412-1234567',
+            phoneE164: null,
+            phoneStatus: 'INVALID',
+            phoneCountry: null,
+          },
+        });
+      }
     });
   });
 });

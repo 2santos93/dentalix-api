@@ -876,7 +876,16 @@ describe('Recetas — /patients/:id/prescriptions, /prescriptions, /prescription
         hc: false,
         days: 30,
       });
-      for (const site of [siteA, siteB]) {
+      // Fase 1 (spec D1, R6): la fila sigue llevando las letras y la
+      // proyección del país de la sede para las réplicas anteriores: CO para
+      // una sede de Bogotá y NULL para Nueva York y Tokio, fuera de los dos
+      // valores de la columna antigua.
+      const siteC = await createSite(REGIONAL_BOGOTA_FIXTURE, 'Sede C');
+      for (const [site, siteCode, projected] of [
+        [siteA, REGIONAL_NEW_YORK_FIXTURE.country, null],
+        [siteB, REGIONAL_TOKYO_FIXTURE.country, null],
+        [siteC, REGIONAL_BOGOTA_FIXTURE.country, 'CO'],
+      ] as const) {
         const res = await issueAt(site, noDocA).expect(201);
         const rx = res.body as RxBody;
         expect(rx).toMatchObject({
@@ -885,28 +894,25 @@ describe('Recetas — /patients/:id/prescriptions, /prescriptions, /prescription
           patientDocument: null,
         });
         expect(rx.items[0].quantityInWords).toBeNull();
-        // Fase 1 (spec D1): la fila sigue llevando el país de la sede y las
-        // letras, para las réplicas anteriores.
         const [row] = await raw.$queryRaw<
           {
             country: string | null;
-            siteCountry: string | null;
+            siteCode: string;
             singleFormat: boolean;
             printQuantityInWords: boolean | null;
             quantityInWords: string;
           }[]
         >`
-          SELECT p."country"::text AS "country", l."country"::text AS "siteCountry",
+          SELECT p."country"::text AS "country", l."countryCode" AS "siteCode",
                  p."singleFormat", p."printQuantityInWords", i."quantityInWords"
             FROM "prescriptions" p
             JOIN "locations" l ON l."id" = p."locationId"
             JOIN "prescription_items" i ON i."prescriptionId" = p."id"
            WHERE p."id" = ${rx.id}::uuid`;
-        // DX-312 (R6): Nueva York y Tokio quedan fuera de los dos valores de
-        // la columna antigua de la sede, que es NULL, y la receta copia NULL.
-        expect(row).toEqual({
-          country: row.siteCountry,
-          siteCountry: null,
+        expect({ site, ...row }).toEqual({
+          site,
+          country: projected,
+          siteCode,
           singleFormat: true,
           printQuantityInWords: false,
           quantityInWords: 'veintiuno',
