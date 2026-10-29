@@ -11,6 +11,7 @@ import {
   TreatmentPlanItemStatus,
   TreatmentPlanStatus,
 } from '@prisma/client';
+import { PrismaDocumentTypeNamesRepository } from '../src/modules/patients/infrastructure/repositories/prisma-document-type-names.repository';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaTreatmentPlanRepository } from '../src/modules/treatment-plans/infrastructure/repositories/prisma-treatment-plan.repository';
@@ -50,6 +51,10 @@ const owner = new PrismaClient<Prisma.PrismaClientOptions>({
 });
 const tenantContext = new TenantContextService();
 const prisma = new PrismaService(tenantContext);
+const documentTypeNames = new PrismaDocumentTypeNamesRepository(
+  prisma,
+  tenantContext,
+);
 const planRepo = new PrismaTreatmentPlanRepository(prisma, tenantContext);
 const quoteRepo = new PrismaPlanQuoteRepository(prisma, tenantContext);
 const paymentRepo = new PrismaPaymentRepository(prisma, tenantContext);
@@ -75,8 +80,16 @@ const updateItem = new UpdateTreatmentPlanItemUseCase(
   () => NOW,
 );
 const getPlan = new GetTreatmentPlanUseCase(planRepo);
-const getQuote = new GetPlanQuoteUseCase(quoteRepo, () => NOW);
-const acceptSigned = new AcceptTreatmentPlanUseCase(quoteRepo, () => NOW);
+const getQuote = new GetPlanQuoteUseCase(
+  quoteRepo,
+  () => NOW,
+  documentTypeNames,
+);
+const acceptSigned = new AcceptTreatmentPlanUseCase(
+  quoteRepo,
+  () => NOW,
+  documentTypeNames,
+);
 const identityConvert = {
   execute: (input: { amount: number }) =>
     Promise.resolve({ ...input, result: input.amount, rateUsed: 1 }),

@@ -3,6 +3,7 @@ import {
   Prisma,
   type ClinicCountry,
   type ContactChannel,
+  type DocumentType,
   type PatientImportBatch,
   type PatientImportDuplicateMode,
   type PatientImportFileFormat,
@@ -16,6 +17,12 @@ import {
   resolveLocationTimeZones,
 } from '../../../shared/locations/location-time-zone';
 import { lockPatientDocs } from '../../patients/infrastructure/patient-doc-lock';
+import {
+  docTypeFromStored,
+  legacyStoredDocType,
+  type LegacyDocType,
+} from '../../patients/domain/legacy-doc-type';
+import type { LegacyDocPair } from '../../patients/infrastructure/repositories/prisma-patient.repository';
 import type { ExistingPatientDoc } from '../domain/dedupe';
 import {
   balancePatientsByDocSql,
@@ -72,6 +79,87 @@ export const UNDO_IGNORED_TABLES: ReadonlySet<string> = new Set([
 
 /** Saldos migrados por sentencia al importar (cada una refresca su cartera). */
 const BALANCE_INSERT_CHUNK = 500;
+
+/**
+ * JSON de una fila preparada (DX-327, fase 1, R6): `docType` lleva el código
+ * anterior, que es lo que lee un worker anterior durante el despliegue (un
+ * TAX_ID le llega como OTHER, spec §7), y `documentType` el genérico. Sin
+ * etiqueta: la importación no tiene esa columna.
+ */
+export type StoredImportRowData = Omit<ImportPatientData, 'docType'> & {
+  docType: LegacyDocType;
+  documentType: DocumentType;
+};
+
+export function storedImportRowData(
+  data: ImportPatientData,
+): StoredImportRowData {
+  return {
+    ...data,
+    docType: legacyStoredDocType(data.docType),
+    documentType: data.docType,
+  };
+}
+
+/**
+ * Lee el JSON de una fila preparada: prefiere el genérico; una fila de la API
+ * anterior (solo el código) se traduce con R6, sin etiqueta. Un código
+ * desconocido lanza: la fila queda FAILED.
+ */
+export function importRowDataFromJson(
+  json: Prisma.JsonValue,
+): ImportPatientData {
+  const stored = json as unknown as Partial<StoredImportRowData> & {
+    docType?: string;
+    documentType?: string;
+  };
+  const { documentType, docType, ...rest } = stored;
+  return {
+    ...(rest as Omit<ImportPatientData, 'docType'>),
+    docType: docTypeFromStored(String(documentType ?? docType)),
+  };
+}
+
+/**
+ * Datos del paciente que crea una fila nueva: la pareja de R5 (genérico y
+ * código anterior, para que el trigger no lo tome por un escritor anterior)
+ * y ninguna etiqueta.
+ */
+export function importedPatientData(
+  data: ImportPatientData,
+  base: {
+    tenantId: string;
+    importBatchId: string;
+    contactChannel: ContactChannel;
+    createdById: string | null;
+    now: Date;
+  },
+) {
+  return {
+    tenantId: base.tenantId,
+    importBatchId: base.importBatchId,
+    contactChannel: base.contactChannel,
+    createdById: base.createdById,
+    firstName: data.firstName,
+    lastName: data.lastName,
+    documentType: data.docType,
+    docType: legacyStoredDocType(data.docType),
+    docNumber: data.docNumber,
+    birthDate: data.birthDate
+      ? new Date(`${data.birthDate}T00:00:00.000Z`)
+      : null,
+    sex: data.sex ?? 'UNSPECIFIED',
+    phone: data.phone ?? null,
+    email: data.email ?? null,
+    address: data.address ?? null,
+    occupation: data.occupation ?? null,
+    emergencyContactName: data.emergencyContactName ?? null,
+    emergencyContactPhone: data.emergencyContactPhone ?? null,
+    notes: data.notes ?? null,
+    createdAt: base.now,
+    updatedAt: base.now,
+  } satisfies Prisma.PatientCreateManyInput & LegacyDocPair;
+}
 
 /** Lo que el dry-run deja preparado: una fila por paciente a crear o a rellenar. */
 export interface PreparedRow {
@@ -414,7 +502,7 @@ export class PrismaPatientImportRepository {
             tenantId,
             batchId: batch.id,
             rowNumber: r.rowNumber,
-            data: r.data as unknown as Prisma.InputJsonObject,
+            data: storedImportRowData(r.data),
           })),
         });
       }
@@ -1207,7 +1295,7 @@ export class PrismaPatientImportRepository {
     await this.assertRunning(tx, batch.id);
     const items = rows
       .filter((r) => r.data !== null)
-      .map((r) => ({ ...r, data: r.data as unknown as ImportPatientData }));
+      .map((r) => ({ ...r, data: importRowDataFromJson(r.data) }));
     // Candado por documento normalizado (el mismo del alta manual): un alta
     // a la vez con «1.111.111» y la importación con «1111111» se serializan.
     await lockPatientDocs(
@@ -1220,7 +1308,11 @@ export class PrismaPatientImportRepository {
     // compite con una edición a la vez.
     const existing = keys.length
       ? await tx.$queryRaw<
-          (FillablePatient & { id: string; docType: string; docKey: string })[]
+          (FillablePatient & {
+            id: string;
+            documentType: DocumentType;
+            docKey: string;
+          })[]
         >(patientsToFillByDocSql(tenantId, keys))
       : [];
     const byKey = new Map(existing.map((p) => [p.docKey, p]));
@@ -1239,7 +1331,7 @@ export class PrismaPatientImportRepository {
         continue;
       }
       // Otro tipo con el mismo número (creado tras el dry-run): no se toca.
-      const sameType = match.docType === item.data.docType;
+      const sameType = match.documentType === item.data.docType;
       if (!sameType || batch.duplicateMode !== 'FILL_EMPTY') {
         outcomes.push({
           id: item.id,
@@ -1278,29 +1370,15 @@ export class PrismaPatientImportRepository {
       const created = await tx.patient.createManyAndReturn({
         skipDuplicates: true,
         select: { id: true, docNumber: true },
-        data: fresh.map((r) => ({
-          tenantId,
-          importBatchId: batch.id,
-          contactChannel: channel,
-          createdById: batch.confirmedById,
-          firstName: r.data.firstName,
-          lastName: r.data.lastName,
-          docType: r.data.docType,
-          docNumber: r.data.docNumber,
-          birthDate: r.data.birthDate
-            ? new Date(`${r.data.birthDate}T00:00:00.000Z`)
-            : null,
-          sex: r.data.sex ?? 'UNSPECIFIED',
-          phone: r.data.phone ?? null,
-          email: r.data.email ?? null,
-          address: r.data.address ?? null,
-          occupation: r.data.occupation ?? null,
-          emergencyContactName: r.data.emergencyContactName ?? null,
-          emergencyContactPhone: r.data.emergencyContactPhone ?? null,
-          notes: r.data.notes ?? null,
-          createdAt: now,
-          updatedAt: now,
-        })),
+        data: fresh.map((r) =>
+          importedPatientData(r.data, {
+            tenantId,
+            importBatchId: batch.id,
+            contactChannel: channel,
+            createdById: batch.confirmedById,
+            now,
+          }),
+        ),
       });
       const idByDoc = new Map(created.map((p) => [p.docNumber, p.id]));
       const used = new Set<string>();

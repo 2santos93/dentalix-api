@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { DocumentTypeNamesModule } from '../document-type-names/document-type-names.module';
 import { JwtModule } from '@nestjs/jwt';
 import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
@@ -24,7 +25,7 @@ import {
  * entrega, autocompletar de fabricantes y búsqueda por lote/REF (solo ADMIN).
  */
 @Module({
-  imports: [JwtModule.register({})],
+  imports: [JwtModule.register({}), DocumentTypeNamesModule],
   controllers: [PatientImplantsController, ImplantsController],
   providers: [
     RegisterImplantUseCase,

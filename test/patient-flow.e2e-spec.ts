@@ -106,7 +106,7 @@ describe('Flujo del paciente en la clínica (e2e, DX-200)', () => {
       .send({
         firstName,
         lastName: 'Flujo',
-        docType: 'CC',
+        docType: 'NATIONAL_ID',
         docNumber: `200${++patientN}`,
         sex: 'F',
       })

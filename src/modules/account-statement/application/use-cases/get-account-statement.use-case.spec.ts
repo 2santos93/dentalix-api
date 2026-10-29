@@ -4,6 +4,7 @@ import {
   GetAccountStatementInput,
   GetAccountStatementUseCase,
 } from './get-account-statement.use-case';
+import { FixedDocumentTypeNamesReader } from '../../../document-type-names/__fixtures__/fixed-document-type-names.reader';
 import type { VoidActor } from '../../../payments/domain/void-window';
 import {
   AccountStatementData,
@@ -25,7 +26,8 @@ function data(): AccountStatementData {
       id: 'p-1',
       firstName: 'Ana',
       lastName: 'Pérez',
-      docType: 'CC',
+      docType: 'NATIONAL_ID',
+      docTypeLabel: null,
       docNumber: '123',
     },
     snapshot: {
@@ -78,6 +80,7 @@ function data(): AccountStatementData {
 function makeUseCase(
   result: AccountStatementData | null = data(),
   notice: StatementNoticeData | null = null,
+  names = new FixedDocumentTypeNamesReader(),
 ) {
   const load = jest.fn<Promise<AccountStatementData | null>, [string]>(() =>
     Promise.resolve(result),
@@ -86,10 +89,15 @@ function makeUseCase(
     load,
     loadBillablePlans: jest.fn(),
   };
-  const uc = new GetAccountStatementUseCase(repo, () => NOW, {
-    loadNotice: () => Promise.resolve(notice),
-    loadFamily: jest.fn(),
-  });
+  const uc = new GetAccountStatementUseCase(
+    repo,
+    () => NOW,
+    {
+      loadNotice: () => Promise.resolve(notice),
+      loadFamily: jest.fn(),
+    },
+    names,
+  );
   return {
     load,
     useCase: {
@@ -121,6 +129,32 @@ describe('GetAccountStatementUseCase', () => {
     expect(out.range).toEqual({ from: null, to: null });
     expect(out.summary[0]).toMatchObject({ budgeted: 1000, paid: 300 });
     expect(out.movements).toHaveLength(2);
+  });
+
+  it('the statement carries the generic type, the label and the display name', async () => {
+    const names = new FixedDocumentTypeNamesReader({
+      NATIONAL_ID: 'Documento A',
+    });
+    const local = await makeUseCase(data(), null, names).useCase.execute(
+      'p-1',
+      {},
+    );
+    expect(local.patient).toMatchObject({
+      docType: 'NATIONAL_ID',
+      docTypeLabel: null,
+      docTypeName: 'Documento A',
+    });
+
+    const labelled = data();
+    labelled.patient.docTypeLabel = 'ID local';
+    const out = await makeUseCase(labelled, null, names).useCase.execute(
+      'p-1',
+      {},
+    );
+    expect(out.patient).toMatchObject({
+      docTypeLabel: 'ID local',
+      docTypeName: 'ID local',
+    });
   });
 
   it('DX-203: a nombre del paciente adulto con email; el de un menor, a nombre de su responsable', async () => {

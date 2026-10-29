@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
-import { ClinicRole, DocType, Sex } from '@prisma/client';
+import { ClinicRole, Sex } from '@prisma/client';
 import { CreatePatientUseCase } from './create-patient.use-case';
 import { Patient } from '../../domain/entities/patient.entity';
 import {
@@ -8,6 +8,7 @@ import {
   PatientRepository,
 } from '../../domain/ports/patient-repository.port';
 import { ReferenceLookup } from '../../domain/ports/reference-lookup.port';
+import { DOCUMENT_TYPES } from '../../domain/document-type';
 
 function fakePatientFrom(
   id: string,
@@ -20,6 +21,7 @@ function fakePatientFrom(
     firstName: input.firstName,
     lastName: input.lastName,
     docType: input.docType,
+    docTypeLabel: input.docTypeLabel,
     docNumber: input.docNumber ?? null,
     birthDate: input.birthDate ?? null,
     sex: input.sex,
@@ -102,7 +104,7 @@ describe('CreatePatientUseCase', () => {
       actorRole: ClinicRole.ADMIN,
       firstName: 'Ana',
       lastName: 'Gomez',
-      docType: DocType.CC,
+      docType: 'NATIONAL_ID',
       sex: Sex.F,
       createdById: 'u1',
     });
@@ -127,7 +129,7 @@ describe('CreatePatientUseCase', () => {
       actorRole: ClinicRole.ADMIN,
       firstName: 'Carlos',
       lastName: 'Ruiz',
-      docType: DocType.CC,
+      docType: 'NATIONAL_ID',
       sex: Sex.M,
       email: '  Carlos.Ruiz@Example.COM  ',
     });
@@ -144,7 +146,7 @@ describe('CreatePatientUseCase', () => {
       actorRole: ClinicRole.ADMIN,
       firstName: 'No',
       lastName: 'Email',
-      docType: DocType.TI,
+      docType: 'NATIONAL_ID',
       sex: Sex.OTHER,
     });
 
@@ -169,7 +171,7 @@ describe('CreatePatientUseCase', () => {
       actorRole: ClinicRole.ADMIN,
       firstName: 'X',
       lastName: 'Y',
-      docType: DocType.CC,
+      docType: 'NATIONAL_ID',
       sex: Sex.UNSPECIFIED,
       tenantId: 'sneaky-tenant',
     } as unknown as Parameters<typeof uc.execute>[0];
@@ -194,7 +196,7 @@ describe('CreatePatientUseCase', () => {
       actorRole: ClinicRole.ADMIN,
       firstName: 'Jane',
       lastName: 'Doe',
-      docType: DocType.PASSPORT,
+      docType: 'PASSPORT',
       sex: Sex.F,
       createdById: 'user-42',
     });
@@ -216,7 +218,7 @@ describe('CreatePatientUseCase', () => {
       actorRole: ClinicRole.ADMIN,
       firstName: 'Ana',
       lastName: 'Ríos',
-      docType: DocType.CC,
+      docType: 'NATIONAL_ID',
       sex: Sex.F,
       medicalHistory: {
         allergies: [
@@ -248,7 +250,7 @@ describe('CreatePatientUseCase', () => {
       actorRole: ClinicRole.ADMIN,
       firstName: 'Ana',
       lastName: 'Ríos',
-      docType: DocType.CC,
+      docType: 'NATIONAL_ID',
       sex: Sex.F,
     });
     expect(captured).toBeDefined();
@@ -262,7 +264,7 @@ describe('CreatePatientUseCase', () => {
     const demographics = {
       firstName: 'Ana',
       lastName: 'Ríos',
-      docType: DocType.CC,
+      docType: 'NATIONAL_ID' as const,
       sex: Sex.F,
     };
     const withHistory = {
@@ -332,7 +334,7 @@ describe('CreatePatientUseCase', () => {
     const base = {
       firstName: 'Ana',
       lastName: 'Gomez',
-      docType: DocType.CC,
+      docType: 'NATIONAL_ID' as const,
       sex: Sex.F,
       createdById: 'u1',
       actorRole: ClinicRole.RECEPTION,
@@ -401,6 +403,66 @@ describe('CreatePatientUseCase', () => {
         },
       });
       expect(captured()?.consent?.kind).toBe('versioned');
+    });
+  });
+
+  // DX-327 (R2, R7): tipos genéricos y nombre libre opcional.
+  describe('document type', () => {
+    function capturing() {
+      let captured: CreatePatientRepoInput | undefined;
+      const repo = makeRepo({
+        create: (input) => {
+          captured = input;
+          return Promise.resolve(fakePatientFrom('p1', input));
+        },
+      });
+      const uc = new CreatePatientUseCase(repo, makeReferenceLookup());
+      return { uc, captured: () => captured };
+    }
+    const base = {
+      actorRole: ClinicRole.RECEPTION,
+      firstName: 'Ana',
+      lastName: 'Gomez',
+      sex: Sex.F,
+    };
+
+    it.each(DOCUMENT_TYPES)(
+      'any document type is created, with or without a free label (%s)',
+      async (docType) => {
+        const plain = capturing();
+        await plain.uc.execute({ ...base, docType });
+        expect(plain.captured()).toMatchObject({ docType, docTypeLabel: null });
+
+        const labelled = capturing();
+        const patient = await labelled.uc.execute({
+          ...base,
+          docType,
+          docTypeLabel: '  ID   local ',
+        });
+        expect(labelled.captured()).toMatchObject({
+          docType,
+          docTypeLabel: 'ID local',
+        });
+        expect(patient).toMatchObject({ docType, docTypeLabel: 'ID local' });
+      },
+    );
+
+    it('an empty label is no label', async () => {
+      const { uc, captured } = capturing();
+      await uc.execute({ ...base, docType: 'PASSPORT', docTypeLabel: '   ' });
+      expect(captured()?.docTypeLabel).toBeNull();
+    });
+
+    it('a label that is too long is 400 with the message', async () => {
+      const { uc, captured } = capturing();
+      const err = await uc
+        .execute({ ...base, docType: 'OTHER', docTypeLabel: 'x'.repeat(41) })
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(BadRequestException);
+      expect((err as BadRequestException).message).toBe(
+        'El nombre del documento admite hasta 40 caracteres.',
+      );
+      expect(captured()).toBeUndefined();
     });
   });
 });

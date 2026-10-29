@@ -2,13 +2,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
-import {
-  CatalogKind,
-  DocType,
-  Prisma,
-  PrismaClient,
-  Sex,
-} from '@prisma/client';
+import { CatalogKind, Prisma, PrismaClient, Sex } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { registerVerified } from './support/register-verified';
 import { hostFor } from './support/tenant-host';
@@ -188,7 +182,7 @@ describe('Reglas de cobro (e2e, DX-109)', () => {
       .post('/patients', {
         firstName: 'Ana',
         lastName: 'Cobro',
-        docType: DocType.CC,
+        docType: 'NATIONAL_ID',
         docNumber: 'DX109-1',
         sex: Sex.F,
       })

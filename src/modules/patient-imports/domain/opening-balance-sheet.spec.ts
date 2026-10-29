@@ -119,9 +119,14 @@ describe('columnas de la hoja de saldos (DX-262)', () => {
       concept: 'concepto',
     });
     expect(
-      resolveBalanceColumns(['Cédula', 'Saldo', 'Divisa', 'Fecha de corte']),
+      resolveBalanceColumns([
+        'Número de Documento',
+        'Saldo',
+        'Divisa',
+        'Fecha de corte',
+      ]),
     ).toEqual({
-      docNumber: 'Cédula',
+      docNumber: 'Número de Documento',
       amount: 'Saldo',
       currency: 'Divisa',
       asOfDate: 'Fecha de corte',

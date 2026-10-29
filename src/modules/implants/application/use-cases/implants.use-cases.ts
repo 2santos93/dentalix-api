@@ -9,6 +9,8 @@ import {
 import { ClinicRole } from '@prisma/client';
 import { PATIENT_NOT_FOUND_MESSAGE } from '../../../patients/application/assert-patient-in-clinic';
 import { civilDateIn } from '../../../../shared/time/civil-day';
+import type { ClinicDocumentTypeNames } from '../../../patients/domain/document-type';
+import { DocumentTypeNamesReader } from '../../../patients/domain/ports/document-type-names-repository.port';
 import type {
   ImplantCatalogEntry,
   ImplantLotMatch,
@@ -169,6 +171,7 @@ export class GetImplantCardUseCase {
     @Inject(PATIENT_IMPLANT_REPOSITORY)
     private readonly repo: PatientImplantRepository,
     @Inject(IMPLANT_CLOCK) private readonly now: ImplantClock,
+    private readonly documentTypeNames: DocumentTypeNamesReader,
   ) {}
 
   /** La tarjeta de la intervención de ese día (404 si no hay implantes). */
@@ -177,6 +180,14 @@ export class GetImplantCardUseCase {
     date: string | undefined,
   ): Promise<ImplantCard> {
     const placedOn = requireDay(date);
+    return this.card(patientId, placedOn, await this.documentTypeNames.get());
+  }
+
+  private async card(
+    patientId: string,
+    placedOn: string,
+    names: ClinicDocumentTypeNames,
+  ): Promise<ImplantCard> {
     const patient = await this.repo.loadPatient(patientId);
     if (!patient) throw new NotFoundException(PATIENT_NOT_FOUND_MESSAGE);
     const implants = await this.repo.listByPatientOn(patientId, placedOn);
@@ -192,6 +203,7 @@ export class GetImplantCardUseCase {
     return composeImplantCard({
       clinicName,
       patient,
+      documentTypeNames: names,
       placedOn,
       implants,
       locations,
@@ -209,12 +221,13 @@ export class GetImplantCardUseCase {
     actorId: string,
   ): Promise<ImplantCard> {
     const placedOn = requireDay(date);
-    await this.execute(patientId, placedOn);
+    const names = await this.documentTypeNames.get();
+    await this.card(patientId, placedOn, names);
     await this.repo.markCardDelivered(patientId, placedOn, {
       deliveredById: actorId,
       deliveredAt: this.now(),
     });
-    return this.execute(patientId, placedOn);
+    return this.card(patientId, placedOn, names);
   }
 }
 
@@ -241,6 +254,7 @@ export class SearchImplantsByLotUseCase {
   constructor(
     @Inject(PATIENT_IMPLANT_REPOSITORY)
     private readonly repo: PatientImplantRepository,
+    private readonly documentTypeNames: DocumentTypeNamesReader,
   ) {}
 
   /**
@@ -257,6 +271,9 @@ export class SearchImplantsByLotUseCase {
         'Indica el lote o la referencia (REF) a buscar',
       );
     }
-    return this.repo.searchByLot({ lot, reference });
+    return this.repo.searchByLot(
+      { lot, reference },
+      await this.documentTypeNames.get(),
+    );
   }
 }

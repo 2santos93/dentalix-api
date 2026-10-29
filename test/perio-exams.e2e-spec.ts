@@ -2,7 +2,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
-import { ClinicRole, DocType, Prisma, PrismaClient, Sex } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient, Sex } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { applyBodyLimits } from '../src/config/body-limits';
 import { PasswordService } from '../src/shared/crypto/password.service';
@@ -150,7 +150,7 @@ describe('Periodontograma — /patients/:id/perio-exams (e2e)', () => {
       .post('/patients', {
         firstName,
         lastName: 'Perio',
-        docType: DocType.CC,
+        docType: 'NATIONAL_ID',
         docNumber,
         sex: Sex.F,
       })

@@ -3,7 +3,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
-import { ClinicRole, DocType, Prisma, PrismaClient, Sex } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient, Sex } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
@@ -123,7 +123,7 @@ describe('Confirmación de cita por enlace (e2e)', () => {
       .send({
         firstName: 'Ana María',
         lastName: 'Secreta',
-        docType: DocType.CC,
+        docType: 'NATIONAL_ID',
         docNumber,
         sex: Sex.F,
         phone: '+57 310 555 0101',

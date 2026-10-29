@@ -5,7 +5,7 @@ import { TenantContextService } from '../../../../shared/tenancy/tenant-context.
 import { resolveReferenceLocation } from '../../../../shared/locations/reference-location';
 import {
   PatientConsent,
-  PatientConsentDocument,
+  StoredPatientConsentDocument,
   PatientConsentSummary,
 } from '../../domain/entities/patient-consent.entity';
 import {
@@ -97,7 +97,8 @@ export class PrismaPatientConsentRepository implements PatientConsentRepository 
           select: {
             firstName: true,
             lastName: true,
-            docType: true,
+            documentType: true,
+            docTypeLabel: true,
             docNumber: true,
           },
         });
@@ -154,8 +155,9 @@ export class PrismaPatientConsentRepository implements PatientConsentRepository 
           }
         }
 
+        const { documentType, ...rest } = patient;
         return {
-          patient,
+          patient: { ...rest, docType: documentType },
           clinicName: tenant?.name ?? '',
           professionalName: user?.fullName ?? UNKNOWN_PROFESSIONAL,
           timeZone: location.timeZone,
@@ -194,7 +196,7 @@ export class PrismaPatientConsentRepository implements PatientConsentRepository 
   async findDocument(
     patientId: string,
     id: string,
-  ): Promise<Omit<PatientConsentDocument, 'integrityOk'> | null> {
+  ): Promise<StoredPatientConsentDocument | null> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
       const row = await tx.patientConsent.findFirst({
@@ -205,7 +207,8 @@ export class PrismaPatientConsentRepository implements PatientConsentRepository 
               id: true,
               firstName: true,
               lastName: true,
-              docType: true,
+              documentType: true,
+              docTypeLabel: true,
               docNumber: true,
             },
           },
@@ -216,11 +219,14 @@ export class PrismaPatientConsentRepository implements PatientConsentRepository 
         where: { id: tenantId },
         select: { name: true, logoUrl: true },
       });
-      const { patient, ...consent } = row;
+      const {
+        patient: { documentType, ...patient },
+        ...consent
+      } = row;
       return {
         ...mapToEntity(consent),
         clinic: { name: tenant?.name ?? '', logoUrl: tenant?.logoUrl ?? null },
-        patient,
+        patient: { ...patient, docType: documentType },
       };
     });
   }

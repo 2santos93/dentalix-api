@@ -2,34 +2,51 @@ import { ConflictException } from '@nestjs/common';
 import type { EmailOutbox } from '../../../notifications/email/application/email-outbox.service';
 import type { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import type { PrismaService } from '../../../../shared/prisma/prisma.service';
-import { buildReceiptSnapshot } from '../../domain/receipt-snapshot';
+import {
+  buildReceiptSnapshot,
+  receiptPatientView,
+} from '../../domain/receipt-snapshot';
+import { NO_LOCAL_NAMES } from '../../../document-type-names/__fixtures__/fixed-document-type-names.reader';
 import type { PaymentReceiptView } from '../../domain/entities/payment-receipt.entity';
 import { OutboxReceiptEmailSender } from './outbox-receipt-email-sender';
 
 const TENANT_ID = 't1';
 
-const snapshot = buildReceiptSnapshot({
-  clinic: { name: 'Clínica Demo', legalName: null, taxId: null, address: null },
-  location: { id: 'loc-recibo', name: 'Sede Norte', address: null },
-  patient: {
-    id: 'pat-1',
-    firstName: 'Carolina',
-    lastName: 'Duque',
-    docType: 'CC',
-    docNumber: '1012345678',
+const stored = buildReceiptSnapshot(
+  {
+    clinic: {
+      name: 'Clínica Demo',
+      legalName: null,
+      taxId: null,
+      address: null,
+    },
+    location: { id: 'loc-recibo', name: 'Sede Norte', address: null },
+    patient: {
+      id: 'pat-1',
+      firstName: 'Carolina',
+      lastName: 'Duque',
+      docType: 'NATIONAL_ID',
+      docTypeLabel: null,
+      docNumber: '1012345678',
+    },
+    payment: {
+      id: 'pay-1',
+      amount: 150,
+      currency: 'USD',
+      method: 'CASH',
+      paidAt: new Date('2026-10-27T17:00:00.000Z'),
+      paidOn: '2026-10-27',
+    },
+    plan: null,
+    planBalance: null,
+    cashier: { id: 'u-1', fullName: 'Recepción Demo' },
   },
-  payment: {
-    id: 'pay-1',
-    amount: 150,
-    currency: 'USD',
-    method: 'CASH',
-    paidAt: new Date('2026-10-27T17:00:00.000Z'),
-    paidOn: '2026-10-27',
-  },
-  plan: null,
-  planBalance: null,
-  cashier: { id: 'u-1', fullName: 'Recepción Demo' },
-});
+  NO_LOCAL_NAMES,
+);
+const snapshot = {
+  ...stored,
+  patient: receiptPatientView(stored, NO_LOCAL_NAMES),
+};
 
 const receipt: PaymentReceiptView = {
   paymentId: 'pay-1',

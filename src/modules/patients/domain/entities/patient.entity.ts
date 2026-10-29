@@ -1,6 +1,6 @@
 import {
   ContactChannel,
-  DocType,
+  DocumentType,
   ReminderOptOutSource,
   RetentionExtension,
   Sex,
@@ -17,7 +17,10 @@ export interface Patient {
   tenantId: string;
   firstName: string;
   lastName: string;
-  docType: DocType;
+  /** DX-327: tipo genérico (columna `documentType`; nunca el código anterior). */
+  docType: DocumentType;
+  /** DX-327 (R7): nombre libre que escribió la clínica; null = sin etiqueta. */
+  docTypeLabel: string | null;
   docNumber: string | null;
   birthDate: Date | null;
   sex: Sex;

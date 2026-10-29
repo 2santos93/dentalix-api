@@ -75,7 +75,7 @@ describe('Resumen de cobertura y filtro por pagador (e2e, DX-153)', () => {
 
   const createPatient = (target: Clinic, firstName: string, lastName: string) =>
     post(target, '/api/v1/patients', {
-      docType: 'CC',
+      docType: 'NATIONAL_ID',
       sex: 'F',
       firstName,
       lastName,

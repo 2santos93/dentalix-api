@@ -3,6 +3,7 @@ import {
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
+import { FixedDocumentTypeNamesReader } from '../../../document-type-names/__fixtures__/fixed-document-type-names.reader';
 import { InMemoryConsentTemplateRepository } from '../__fixtures__/in-memory-consent-templates';
 import { InMemoryPatientConsentRepository } from '../__fixtures__/in-memory-patient-consents';
 import { patientsInClinic } from '../../../patients/application/__fixtures__/patients-in-clinic.fake';
@@ -47,14 +48,16 @@ function setup() {
       '{{clinica}} a realizar: {{tratamiento}}. Fecha: {{fecha}}.',
   });
   const now = () => NOW;
+  const names = new FixedDocumentTypeNamesReader();
   return {
+    names,
     templates,
     consents,
     template,
-    preview: new PreviewPatientConsentUseCase(templates, consents, now),
-    sign: new SignPatientConsentUseCase(templates, consents, now),
+    preview: new PreviewPatientConsentUseCase(templates, consents, now, names),
+    sign: new SignPatientConsentUseCase(templates, consents, now, names),
     list: new ListPatientConsentsUseCase(consents, patientsInClinic('p1')),
-    get: new GetPatientConsentUseCase(consents),
+    get: new GetPatientConsentUseCase(consents, names),
   };
 }
 
@@ -87,7 +90,7 @@ describe('PreviewPatientConsentUseCase', () => {
       templateVersion: 1,
       title: 'Consentimiento de exodoncia',
       body:
-        'Yo, Ana Pérez (CC 1020304050), autorizo a Dra. Laura Gómez de ' +
+        'Yo, Ana Pérez (Documento nacional 1020304050), autorizo a Dra. Laura Gómez de ' +
         'Clínica Demo a realizar: Exodoncia simple (diente 48); Resina ' +
         '(diente 36). Fecha: 16 de octubre de 2026.',
       professionalName: 'Dra. Laura Gómez',
@@ -206,7 +209,7 @@ describe('SignPatientConsentUseCase', () => {
       title: 'Consentimiento de exodoncia',
       signerType: 'PATIENT',
       signerName: 'Ana Pérez',
-      signerDocument: 'CC 1020304050',
+      signerDocument: 'Documento nacional 1020304050',
       professionalName: 'Dra. Laura Gómez',
       patientSignature: PNG_A,
       professionalSignature: PNG_B,
@@ -215,20 +218,50 @@ describe('SignPatientConsentUseCase', () => {
       ipAddress: '10.0.0.1',
       userAgent: 'jest',
     });
-    expect(signed.body).toContain('Ana Pérez (CC 1020304050)');
+    expect(signed.body).toContain('Ana Pérez (Documento nacional 1020304050)');
     expect(signed.contentHash).toBe(
       computeConsentHash({
         title: signed.title,
         body: signed.body,
         signerType: 'PATIENT',
         signerName: 'Ana Pérez',
-        signerDocument: 'CC 1020304050',
+        signerDocument: 'Documento nacional 1020304050',
         professionalName: 'Dra. Laura Gómez',
         patientSignature: PNG_A,
         professionalSignature: PNG_B,
         signedAt: NOW,
       }),
     );
+  });
+
+  it('the consent document and signer freeze the display name', async () => {
+    const { sign, get, consents, names, template } = setup();
+    consents.patients.p1 = {
+      ...consents.patients.p1,
+      docTypeLabel: 'ID local',
+    };
+    const labelled = await sign.execute('p1', signInput(template.id), META);
+    expect(labelled.signerDocument).toBe('ID local 1020304050');
+    expect(labelled.body).toContain('Ana Pérez (ID local 1020304050)');
+
+    consents.patients.p1 = { ...consents.patients.p1, docTypeLabel: null };
+    names.names.NATIONAL_ID = 'Documento A';
+    const local = await sign.execute('p1', signInput(template.id), META);
+    expect(local.signerDocument).toBe('Documento A 1020304050');
+    expect(local.body).toContain('Ana Pérez (Documento A 1020304050)');
+
+    // Cambiar el nombre local después: lo firmado no cambia y sigue íntegro;
+    // la cabecera imprimible es en vivo.
+    names.names.NATIONAL_ID = 'Documento B';
+    const doc = await get.execute('p1', local.id);
+    expect(doc.signerDocument).toBe('Documento A 1020304050');
+    expect(doc.body).toContain('Ana Pérez (Documento A 1020304050)');
+    expect(doc.integrityOk).toBe(true);
+    expect(doc.patient).toMatchObject({
+      docType: 'NATIONAL_ID',
+      docTypeLabel: null,
+      docTypeName: 'Documento B',
+    });
   });
 
   it('firma un tutor con su nombre y documento', async () => {
@@ -238,12 +271,12 @@ describe('SignPatientConsentUseCase', () => {
       signInput(template.id, {
         signerType: 'GUARDIAN',
         guardianName: '  Marta Pérez ',
-        guardianDocument: ' CC 999 ',
+        guardianDocument: ' DOC 999 ',
       }),
       META,
     );
     expect(signed.signerName).toBe('Marta Pérez');
-    expect(signed.signerDocument).toBe('CC 999');
+    expect(signed.signerDocument).toBe('DOC 999');
   });
 
   it('400 si firma un tutor sin nombre o sin documento', async () => {
@@ -260,7 +293,7 @@ describe('SignPatientConsentUseCase', () => {
         'p1',
         signInput(template.id, {
           signerType: 'GUARDIAN',
-          guardianDocument: 'CC 1',
+          guardianDocument: 'DOC 1',
         }),
         META,
       ),

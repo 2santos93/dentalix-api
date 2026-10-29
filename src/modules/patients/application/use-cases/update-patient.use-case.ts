@@ -18,6 +18,7 @@ import {
 } from '../../domain/ports/patient-communication-repository.port';
 import { normalizeMobile } from '../../domain/communication/mobile-number';
 import { whatsappMobileRequiredError } from './patient-communication.use-cases';
+import { docTypeLabelInput } from '../doc-type-label-input';
 
 export type UpdatePatientInput = UpdatePatientRepoInput;
 
@@ -67,6 +68,13 @@ export class UpdatePatientUseCase {
     const normalizedPatch: UpdatePatientRepoInput = { ...patch };
     if (normalizedPatch.email) {
       normalizedPatch.email = normalizedPatch.email.trim().toLowerCase();
+    }
+    // DX-327 (R7): la etiqueta se normaliza aquí. Si llega `docType` sin
+    // etiqueta, el repositorio la borra solo si el tipo genérico CAMBIA,
+    // comparando con la fila bloqueada al escribir: reenviar el mismo tipo
+    // (como hace cualquier edición completa) la conserva (pre-flight I1).
+    if (patch.docTypeLabel !== undefined) {
+      normalizedPatch.docTypeLabel = docTypeLabelInput(patch.docTypeLabel);
     }
 
     return this.repo.update(id, normalizedPatch);

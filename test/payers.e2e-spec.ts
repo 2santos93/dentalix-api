@@ -62,7 +62,7 @@ describe('Pagadores (e2e, DX-153)', () => {
       .send({
         firstName: 'Ana',
         lastName: 'Paciente',
-        docType: 'CC',
+        docType: 'NATIONAL_ID',
         docNumber,
         sex: 'F',
       })
@@ -362,7 +362,7 @@ describe('Pagadores (e2e, DX-153)', () => {
       .send({
         firstName: 'Ana',
         lastName: 'Paciente',
-        docType: 'CC',
+        docType: 'NATIONAL_ID',
         docNumber: '1010101010',
         sex: 'F',
       })

@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, RetentionExtension } from '@prisma/client';
+import { DocumentType, Prisma, RetentionExtension } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
@@ -23,13 +23,59 @@ import {
 } from '../../domain/retention/clinical-record-retention';
 import { Patient } from '../../domain/entities/patient.entity';
 import { livePatientWithDoc, lockPatientDocs } from '../patient-doc-lock';
+import {
+  legacyStoredDocType,
+  type LegacyDocType,
+} from '../../domain/legacy-doc-type';
 import { IN_CLINIC_STATUSES } from '../../../appointments/domain/patient-flow';
 import {
   recordConsentsInTx,
   recordLegacyConsentInTx,
 } from '../../../data-consents/infrastructure/record-consents-in-tx';
 
-type PrismaPatient = Prisma.PatientGetPayload<Record<string, never>>;
+export type PrismaPatient = Prisma.PatientGetPayload<Record<string, never>>;
+
+/**
+ * DX-327 (R5): un alta de fase 1 escribe el tipo genérico y su código
+ * anterior. Sin el anterior, el trigger tomaría el DEFAULT de la columna
+ * anterior y un OTHER quedaría NATIONAL_ID.
+ */
+export type LegacyDocPair = {
+  documentType: DocumentType;
+  docType: LegacyDocType;
+};
+
+/** Columnas del documento de un alta (R5) con la etiqueta libre (R7). */
+export function patientDocFields(
+  type: DocumentType,
+  label: string | null,
+): LegacyDocPair & { docTypeLabel: string | null } {
+  return {
+    documentType: type,
+    docType: legacyStoredDocType(type),
+    docTypeLabel: label,
+  };
+}
+
+/**
+ * R5: un cambio escribe solo las columnas nuevas (el trigger ajusta la
+ * anterior). Nunca se pasa el `patch` tal cual: su `docType` es el genérico.
+ * R7: con `docType` y sin `docTypeLabel`, la etiqueta se borra solo si el
+ * tipo genérico cambia respecto del GUARDADO (`stored`, leído con la fila
+ * bloqueada en la misma transacción que la escritura).
+ */
+export function patientUpdateData(
+  { docType, ...rest }: UpdatePatientRepoInput,
+  stored: DocumentType,
+): Omit<Prisma.PatientUncheckedUpdateInput, 'docType'> {
+  if (docType === undefined) return rest;
+  const clearsLabel = rest.docTypeLabel === undefined && docType !== stored;
+  return {
+    ...rest,
+    documentType: docType,
+    ...(clearsLabel ? { docTypeLabel: null } : {}),
+  };
+}
 
 /**
  * Desde cuántos caracteres (normalizados) se busca por la función indexada;
@@ -86,7 +132,7 @@ async function assertDocFree(
   }
 }
 
-function mapToEntity(patient: PrismaPatient, now = new Date()): Patient {
+export function mapToEntity(patient: PrismaPatient, now = new Date()): Patient {
   const until = retentionUntil(
     patient.lastAttentionAt,
     patient.retentionExtended,
@@ -96,7 +142,9 @@ function mapToEntity(patient: PrismaPatient, now = new Date()): Patient {
     tenantId: patient.tenantId,
     firstName: patient.firstName,
     lastName: patient.lastName,
-    docType: patient.docType,
+    // DX-327 (R4): el genérico; la columna anterior es de las réplicas viejas.
+    docType: patient.documentType,
+    docTypeLabel: patient.docTypeLabel,
     docNumber: patient.docNumber,
     birthDate: patient.birthDate,
     sex: patient.sex,
@@ -177,7 +225,7 @@ export class PrismaPatientRepository implements PatientRepository {
           contactChannel: clinic.defaultContactChannel,
           firstName: input.firstName,
           lastName: input.lastName,
-          docType: input.docType,
+          ...patientDocFields(input.docType, input.docTypeLabel),
           docNumber: input.docNumber,
           birthDate: input.birthDate,
           sex: input.sex,
@@ -195,7 +243,7 @@ export class PrismaPatientRepository implements PatientRepository {
           emergencyContactRelationship: input.emergencyContactRelationship,
           emergencyContactPhone: input.emergencyContactPhone,
           createdById: input.createdById,
-        },
+        } satisfies Prisma.PatientUncheckedCreateInput & LegacyDocPair,
       });
 
       if (input.medicalHistory) {
@@ -358,10 +406,12 @@ export class PrismaPatientRepository implements PatientRepository {
 
   async update(id: string, patch: UpdatePatientRepoInput): Promise<Patient> {
     return this.prisma.runWithTenant(async (tx) => {
-      const existing = await tx.patient.findFirst({
-        where: { id, deletedAt: null },
-        select: { id: true },
-      });
+      // FOR UPDATE: el tipo con el que se decide la etiqueta (R7) es el de
+      // la fila que se va a escribir, no el que leyó antes el caso de uso.
+      const [existing] = await tx.$queryRaw<{ documentType: DocumentType }[]>`
+        SELECT "documentType" FROM "patients"
+         WHERE "id" = ${id}::uuid AND "deletedAt" IS NULL
+         FOR UPDATE`;
       if (!existing) {
         throw new NotFoundException('Patient not found');
       }
@@ -371,7 +421,7 @@ export class PrismaPatientRepository implements PatientRepository {
 
       const patient = await tx.patient.update({
         where: { id },
-        data: patch,
+        data: patientUpdateData(patch, existing.documentType),
       });
       return mapToEntity(patient);
     });

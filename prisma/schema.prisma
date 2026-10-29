@@ -33,6 +33,14 @@ model Tenant {
   /// el default de la BD es el mismo valor, para réplicas anteriores).
   /// CHECK 14..21. Lo cambia el ADMIN (PUT /patients/settings, auditado).
   majorityAge               Int                             @default(18)
+  /// DX-327: nombre local del tipo; NULL = el genérico. Lo cambia el ADMIN
+  /// (PUT /patients/document-type-names, auditado). CHECK 1..60 sin espacios
+  /// en los extremos. Todas las clínicas empiezan con los cinco a NULL.
+  docTypeNameNationalId      String?
+  docTypeNamePassport        String?
+  docTypeNameResidencePermit String?
+  docTypeNameTaxId           String?
+  docTypeNameOther           String?
   /// DX-324: la receta imprime la cantidad de cada medicamento también en letras. false al crear la clínica.
   prescriptionPrintQuantityInWords        Boolean @default(false)
   /// DX-324: no se emite sin documento del paciente, que la receta imprime como nº de historia clínica.
@@ -413,11 +421,23 @@ model ClinicInvitation {
   @@map("clinic_invitations")
 }
 
+/// Excepción G5.3 (DX-334): tipos de documento anteriores a DX-327. La API ya
+/// no los lee; los mantiene el trigger *_document_type para las réplicas
+/// anteriores (migración 20261030120000). La fase 2 borra el enum.
 enum DocType {
   CC
   TI
   CE
   PASSPORT
+  OTHER
+}
+
+/// DX-327: tipo de documento del paciente, igual para cualquier clínica.
+enum DocumentType {
+  NATIONAL_ID
+  PASSPORT
+  RESIDENCE_PERMIT
+  TAX_ID
   OTHER
 }
 
@@ -433,7 +453,15 @@ model Patient {
   tenantId                     String                @db.Uuid
   firstName                    String
   lastName                     String
+  /// Excepción G5.3 (DX-334): código anterior a DX-327, solo para las réplicas
+  /// anteriores. La API lo escribe al crear (proyección de R3) y no lo lee.
   docType                      DocType               @default(CC)
+  /// DX-327: el tipo. DEFAULT 'OTHER' solo para quien no lo da (R10): el
+  /// trigger patients_document_type lo deriva del código anterior.
+  documentType                 DocumentType          @default(OTHER)
+  /// DX-327: nombre libre del documento (1–40, recortado); se imprime en
+  /// lugar del tipo. Solo lo escribe la clínica.
+  docTypeLabel                 String?
   docNumber                    String?
   birthDate                    DateTime?
   sex                          Sex                   @default(UNSPECIFIED)
@@ -3338,8 +3366,8 @@ enum PatientImplantKind {
 }
 
 /// DX-191: un implante (o pilar, injerto, membrana…) colocado a un paciente:
-/// ficha de la Res. 4816/2008 (CO) y datos de la tarjeta de implante del
-/// RD 192/2023 (ES). INALTERABLE en la BD (trigger
+/// su trazabilidad (producto, referencia y lote) y los datos de la tarjeta de
+/// implante que se entrega al paciente. INALTERABLE en la BD (trigger
 /// `dx_patient_implants_immutable`): solo se anula una vez (motivo, autor y
 /// fecha) o se marca su tarjeta como entregada una vez. RLS forzada.
 /// Búsqueda por lote / REF (DX-225): columnas GENERADAS "lotKey" y
@@ -3368,7 +3396,7 @@ model PatientImplant {
   udi                  String?
   diameterMm           Decimal?           @db.Decimal(4, 2)
   lengthMm             Decimal?           @db.Decimal(4, 2)
-  // Registro sanitario INVIMA (CO) o marcado CE (ES).
+  // Registro sanitario o certificación del producto, texto libre.
   sanitaryRegistration String?
   notes                String?
   createdAt            DateTime           @default(now())
@@ -3604,7 +3632,13 @@ model PatientResponsibleParty {
   responsiblePatientId String?                 @db.Uuid
   /// Contacto sin ficha: NULL los cinco si es un paciente.
   fullName             String?
+  /// Excepción G5.3 (DX-334): código anterior a DX-327, solo para las réplicas
+  /// anteriores. La API lo escribe al crear (proyección de R3) y no lo lee.
   docType              DocType?
+  /// DX-327: el tipo (NULL si es un paciente; un contacto puede no tenerlo).
+  documentType         DocumentType?
+  /// DX-327: nombre libre del documento (1–40); exige tipo.
+  docTypeLabel         String?
   docNumber            String?
   email                String?
   phone                String?

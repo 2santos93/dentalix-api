@@ -210,7 +210,7 @@ describe('Anamnesis previa a la cita por enlace (e2e, DX-099)', () => {
 
     const patient = await as(clinicA)
       .post('/patients', {
-        docType: 'CC',
+        docType: 'NATIONAL_ID',
         docNumber: DOC_NUMBER,
         sex: 'F',
         firstName: 'Mariana Isabel',
@@ -695,7 +695,7 @@ describe('Anamnesis previa a la cita por enlace (e2e, DX-099)', () => {
   it('sin política publicada ni autorización vigente no se puede crear el enlace (409)', async () => {
     const patientB = await as(clinicB)
       .post('/patients', {
-        docType: 'CC',
+        docType: 'NATIONAL_ID',
         docNumber: '555',
         sex: 'M',
         firstName: 'Pedro',

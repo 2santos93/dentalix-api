@@ -94,7 +94,7 @@ describe('Baja de recordatorios (e2e, DX-128)', () => {
       .send({
         firstName: 'Carolina Andrea',
         lastName: 'Duque',
-        docType: 'CC',
+        docType: 'NATIONAL_ID',
         docNumber: doc,
         sex: 'F',
         ...extra,

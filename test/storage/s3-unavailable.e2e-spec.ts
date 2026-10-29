@@ -89,7 +89,7 @@ describe('Almacén sin responder (DX-259, e2e)', () => {
       .send({
         firstName: 'Ana',
         lastName: 'Colgado',
-        docType: 'CC',
+        docType: 'NATIONAL_ID',
         docNumber: '59100001',
         sex: 'F',
       })

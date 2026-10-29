@@ -35,6 +35,7 @@ import { PrismaPlanCurrencySource } from './infrastructure/adapters/prisma-plan-
 import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 import { PatientsModule } from '../patients/patients.module';
+import { DocumentTypeNamesModule } from '../document-type-names/document-type-names.module';
 import { PaymentAllocationsModule } from '../payments/payment-allocations.module';
 import { DentalCatalogModule } from '../dental-catalog/dental-catalog.module';
 import { DiscountsModule } from '../discounts/discounts.module';
@@ -67,6 +68,7 @@ import { PriceQuoteController } from './presentation/price-quote.controller';
     JwtModule.register({}),
     DentalCatalogModule,
     PatientsModule,
+    DocumentTypeNamesModule,
     DiscountsModule,
     PriceListsModule,
     AgreementsModule,

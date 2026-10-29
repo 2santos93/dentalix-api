@@ -1,5 +1,5 @@
 import { INestApplication } from '@nestjs/common';
-import { ClinicRole, DocType, Prisma, PrismaClient, Sex } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient, Sex } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createE2eApp } from './support/create-e2e-app';
@@ -165,7 +165,7 @@ describe('Ajustes de la receta de la clínica (e2e, DX-324)', () => {
           .send({
             firstName: 'Ana',
             lastName: 'Receta',
-            docType: DocType.CC,
+            docType: 'NATIONAL_ID',
             docNumber: 'HC-324',
             sex: Sex.F,
           })

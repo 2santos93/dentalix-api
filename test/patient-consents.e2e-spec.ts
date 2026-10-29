@@ -5,7 +5,6 @@ import { App } from 'supertest/types';
 import {
   CatalogKind,
   ClinicRole,
-  DocType,
   Prisma,
   PrismaClient,
   Sex,
@@ -85,7 +84,14 @@ interface ConsentBody {
 
 interface DocumentBody extends ConsentBody {
   clinic: { name: string; logoUrl: string | null };
-  patient: { id: string; firstName: string; docNumber: string | null };
+  patient: {
+    id: string;
+    firstName: string;
+    docType: string;
+    docTypeLabel: string | null;
+    docTypeName: string;
+    docNumber: string | null;
+  };
   integrityOk: boolean;
 }
 
@@ -182,12 +188,14 @@ describe('Consentimientos informados — /consent-templates y /patients/:id/cons
     session: Session,
     firstName: string,
     docNumber: string,
+    docTypeLabel?: string,
   ): Promise<string> {
     const res = await as(session)
       .post('/patients', {
         firstName,
         lastName: 'Consentida',
-        docType: DocType.CC,
+        docType: 'NATIONAL_ID',
+        docTypeLabel,
         docNumber,
         sex: Sex.F,
       })
@@ -344,7 +352,9 @@ describe('Consentimientos informados — /consent-templates y /patients/:id/cons
         .expect(200);
       const body = res.body as { body: string; templateVersion: number };
       expect(body.templateVersion).toBe(1);
-      expect(body.body).toContain('Yo, Ana Consentida (CC CONS-A-1)');
+      expect(body.body).toContain(
+        'Yo, Ana Consentida (Documento nacional CONS-A-1)',
+      );
       expect(body.body).toContain(
         'autorizo a Dra. Laura Gómez de Clinica consentimientos-a',
       );
@@ -379,7 +389,7 @@ describe('Consentimientos informados — /consent-templates y /patients/:id/cons
         title: 'Consentimiento de exodoncia',
         signerType: 'PATIENT',
         signerName: 'Ana Consentida',
-        signerDocument: 'CC CONS-A-1',
+        signerDocument: 'Documento nacional CONS-A-1',
         professionalName: 'Dra. Laura Gómez',
         patientSignature: DATA_A,
         professionalSignature: DATA_B,
@@ -428,14 +438,14 @@ describe('Consentimientos informados — /consent-templates y /patients/:id/cons
           signBody(templateA, {
             signerType: 'GUARDIAN',
             guardianName: 'Marta Consentida',
-            guardianDocument: 'CC 777',
+            guardianDocument: 'DOC 777',
           }),
         )
         .expect(201);
       expect(res.body as ConsentBody).toMatchObject({
         signerType: 'GUARDIAN',
         signerName: 'Marta Consentida',
-        signerDocument: 'CC 777',
+        signerDocument: 'DOC 777',
       });
     });
 
@@ -510,7 +520,7 @@ describe('Consentimientos informados — /consent-templates y /patients/:id/cons
         .post('/patients', {
           firstName: 'Grande',
           lastName: 'Cuerpo',
-          docType: DocType.CC,
+          docType: 'NATIONAL_ID',
           notes: 'x'.repeat(150 * 1024),
           sex: Sex.F,
         })
@@ -649,6 +659,106 @@ describe('Consentimientos informados — /consent-templates y /patients/:id/cons
           where: { tenantId: clinicB.tenantId },
         }),
       ).toBe(0);
+    });
+  });
+
+  describe('nombre del documento (DX-327)', () => {
+    let template: TemplateBody;
+
+    const read = async (patientId: string, id: string) =>
+      (
+        await as(clinicA, dentistA)
+          .get(`/patients/${patientId}/consents/${id}`)
+          .expect(200)
+      ).body as DocumentBody;
+
+    beforeAll(async () => {
+      template = (
+        await as(clinicA)
+          .post('/consent-templates', {
+            title: 'Consentimiento con documento',
+            body: 'Yo, {{paciente}} ({{documento}}), autorizo.',
+          })
+          .expect(201)
+      ).body as TemplateBody;
+    });
+
+    it('a new consent signs with the free label', async () => {
+      const patient = await createPatient(
+        clinicA,
+        'Lia',
+        'CONS-A-40',
+        'ID local',
+      );
+      const signed = (
+        await as(clinicA, dentistA)
+          .post(`/patients/${patient}/consents`, signBody(template))
+          .expect(201)
+      ).body as ConsentBody;
+      expect(signed.body).toBe(
+        'Yo, Lia Consentida (ID local CONS-A-40), autorizo.',
+      );
+      expect(signed.signerDocument).toBe('ID local CONS-A-40');
+
+      const doc = await read(patient, signed.id);
+      expect(doc.integrityOk).toBe(true);
+      expect(doc.patient).toMatchObject({
+        docType: 'NATIONAL_ID',
+        docTypeLabel: 'ID local',
+        docTypeName: 'ID local',
+        docNumber: 'CONS-A-40',
+      });
+    });
+
+    it('legacy signed consent keeps its frozen document and integrity', async () => {
+      const patient = await createPatient(clinicA, 'Vera', 'CONS-L-1');
+      const signedAt = new Date('2026-10-16T15:00:00.000Z');
+      const frozen = {
+        title: 'Consentimiento anterior',
+        body: 'Yo, Vera Consentida (CC CONS-L-1), autorizo.',
+        signerType: 'PATIENT' as const,
+        signerName: 'Vera Consentida',
+        signerDocument: 'CC CONS-L-1',
+        professionalName: 'Dra. Laura Gómez',
+        patientSignature: PNG_A,
+        professionalSignature: PNG_B,
+        signedAt,
+      };
+      const row = await raw.patientConsent.create({
+        data: {
+          ...frozen,
+          tenantId: clinicA.tenantId,
+          patientId: patient,
+          templateId: template.id,
+          templateVersion: template.version,
+          contentHash: computeConsentHash(frozen),
+          recordedById: dentistAId,
+        },
+        select: { id: true },
+      });
+      await raw.tenant.update({
+        where: { id: clinicA.tenantId },
+        data: { docTypeNameNationalId: 'Documento A' },
+      });
+      try {
+        const doc = await read(patient, row.id);
+        expect(doc).toMatchObject({
+          body: frozen.body,
+          signerDocument: 'CC CONS-L-1',
+          integrityOk: true,
+        });
+        // La cabecera es en vivo: el nombre local de hoy.
+        expect(doc.patient).toMatchObject({
+          docType: 'NATIONAL_ID',
+          docTypeLabel: null,
+          docTypeName: 'Documento A',
+        });
+      } finally {
+        await raw.tenant.update({
+          where: { id: clinicA.tenantId },
+          data: { docTypeNameNationalId: null },
+        });
+      }
     });
   });
 });

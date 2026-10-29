@@ -6,6 +6,7 @@ import { JobWorker } from '../src/modules/jobs/application/job-worker.service';
 import { createE2eApp } from './support/create-e2e-app';
 import {
   REGIONAL_BERLIN_FIXTURE,
+  REGIONAL_TOKYO_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 import {
@@ -196,7 +197,7 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
       .expect(200);
     const existing = await as(api().post('/api/v1/patients'), a.adminToken)
       .send({
-        docType: 'CC',
+        docType: 'NATIONAL_ID',
         docNumber: '900900',
         firstName: 'Ya',
         lastName: 'Existía',
@@ -235,6 +236,29 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
     expect(res.text.startsWith('﻿"numero_documento","importe","moneda"')).toBe(
       true,
     );
+  });
+
+  it('balances template carries the location currency, never COP', async () => {
+    // DX-327 (AC4). REGIONAL_TOKYO_FIXTURE: el país de la sede lo obliga el
+    // enum hasta DX-312; no decide nada.
+    const tokyo = await raw.location.create({
+      data: locationData(REGIONAL_TOKYO_FIXTURE, {
+        tenantId: b.tenantId,
+        name: 'Sede DX327',
+      }),
+    });
+    const res = await as(
+      api().get('/api/v1/patient-imports/balances-template'),
+      b.adminToken,
+      b,
+    )
+      .set('X-Location-Id', tokyo.id)
+      .expect(200);
+    const [, example] = res.text.replace(/^\uFEFF/, '').split('\r\n');
+    expect(example).toBe(
+      '"DOC-1000001","150000","JPY","15/03/2026","Fila de ejemplo: bórrala antes de importar"',
+    );
+    expect(res.text).not.toContain('COP');
   });
 
   it('solo ADMIN: recepción recibe 403 en español al subir la hoja de saldos', async () => {

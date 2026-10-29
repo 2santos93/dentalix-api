@@ -1,5 +1,5 @@
 import { INestApplication } from '@nestjs/common';
-import { ClinicRole, DocType, Prisma, PrismaClient, Sex } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient, Sex } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import {
@@ -118,7 +118,7 @@ describe('Personal restringido a sedes (DX-089)', () => {
       .post('/patients', {
         firstName: 'Paciente',
         lastName: docNumber,
-        docType: DocType.CC,
+        docType: 'NATIONAL_ID',
         docNumber,
         sex: Sex.F,
       })

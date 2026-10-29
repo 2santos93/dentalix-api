@@ -1,10 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { DocumentType, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
   ResponsiblePartyConflictError,
   type CreateResponsiblePartyData,
+  type ResponsibleContactFields,
   type PatientResponsiblesSnapshot,
   type ResponsiblePartyRepository,
   type ResponsiblePartyView,
@@ -15,12 +16,17 @@ import {
   loadNoticeSettings,
   loadNoticeResponsibles,
 } from '../notices/notice-context';
+import {
+  legacyStoredDocType,
+  type LegacyDocType,
+} from '../../domain/legacy-doc-type';
 
 const SUMMARY_SELECT = {
   id: true,
   firstName: true,
   lastName: true,
-  docType: true,
+  documentType: true,
+  docTypeLabel: true,
   docNumber: true,
   email: true,
   phone: true,
@@ -30,7 +36,8 @@ const PARTY_SELECT = {
   id: true,
   patientId: true,
   fullName: true,
-  docType: true,
+  documentType: true,
+  docTypeLabel: true,
   docNumber: true,
   email: true,
   phone: true,
@@ -43,23 +50,62 @@ const PARTY_SELECT = {
   responsiblePatient: { select: SUMMARY_SELECT },
 } as const satisfies Prisma.PatientResponsiblePartySelect;
 
-type PartyRow = Prisma.PatientResponsiblePartyGetPayload<{
+export type PartyRow = Prisma.PatientResponsiblePartyGetPayload<{
   select: typeof PARTY_SELECT;
 }>;
 
-function toView(row: PartyRow): ResponsiblePartyView {
+type SummaryRow = Prisma.PatientGetPayload<{ select: typeof SUMMARY_SELECT }>;
+
+/** DX-327 (R4): el tipo genérico, nunca el código anterior. */
+function toSummary(p: SummaryRow): ResponsiblePatientSummary {
+  return {
+    id: p.id,
+    firstName: p.firstName,
+    lastName: p.lastName,
+    docType: p.documentType,
+    docTypeLabel: p.docTypeLabel,
+    docNumber: p.docNumber,
+    email: p.email,
+    phone: p.phone,
+  };
+}
+
+/**
+ * DX-327 (R5): el alta de un contacto escribe el tipo genérico y su código
+ * anterior (o los dos NULL sin tipo).
+ */
+function contactCreateData({ docType, ...rest }: ResponsibleContactFields) {
+  return {
+    ...rest,
+    documentType: docType,
+    docType: docType === null ? null : legacyStoredDocType(docType),
+  } satisfies {
+    documentType: DocumentType | null;
+    docType: LegacyDocType | null;
+  };
+}
+
+/**
+ * R5: la edición escribe solo el genérico; el trigger ajusta el anterior.
+ * R7: con `docType` y sin `docTypeLabel`, la etiqueta se borra solo si el
+ * tipo cambia respecto del GUARDADO (`stored`, de la fila bloqueada).
+ */
+export function contactUpdateData(
+  { docType, ...rest }: Partial<ResponsibleContactFields>,
+  stored: DocumentType | null,
+): Omit<Prisma.PatientResponsiblePartyUncheckedUpdateManyInput, 'docType'> {
+  if (docType === undefined) return rest;
+  const clearsLabel = rest.docTypeLabel === undefined && docType !== stored;
+  return {
+    ...rest,
+    documentType: docType,
+    ...(clearsLabel ? { docTypeLabel: null } : {}),
+  };
+}
+
+export function toView(row: PartyRow): ResponsiblePartyView {
   const p = row.responsiblePatient;
-  const summary: ResponsiblePatientSummary | null = p
-    ? {
-        id: p.id,
-        firstName: p.firstName,
-        lastName: p.lastName,
-        docType: p.docType,
-        docNumber: p.docNumber,
-        email: p.email,
-        phone: p.phone,
-      }
-    : null;
+  const summary = p ? toSummary(p) : null;
   return {
     id: row.id,
     patientId: row.patientId,
@@ -68,7 +114,8 @@ function toView(row: PartyRow): ResponsiblePartyView {
     fullName: summary
       ? `${summary.firstName} ${summary.lastName}`
       : (row.fullName ?? ''),
-    docType: summary ? summary.docType : row.docType,
+    docType: summary ? summary.docType : row.documentType,
+    docTypeLabel: summary ? summary.docTypeLabel : row.docTypeLabel,
     docNumber: summary ? summary.docNumber : row.docNumber,
     email: summary ? summary.email : row.email,
     phone: summary ? summary.phone : row.phone,
@@ -174,13 +221,16 @@ export class PrismaResponsiblePartyRepository implements ResponsiblePartyReposit
     });
   }
 
-  findPatient(patientId: string): Promise<ResponsiblePatientSummary | null> {
-    return this.prisma.runWithTenant((tx) =>
+  async findPatient(
+    patientId: string,
+  ): Promise<ResponsiblePatientSummary | null> {
+    const row = await this.prisma.runWithTenant((tx) =>
       tx.patient.findFirst({
         where: { id: patientId, deletedAt: null },
         select: SUMMARY_SELECT,
       }),
     );
+    return row ? toSummary(row) : null;
   }
 
   async create(
@@ -197,7 +247,7 @@ export class PrismaResponsiblePartyRepository implements ResponsiblePartyReposit
               tenantId,
               patientId,
               responsiblePatientId: data.responsiblePatientId,
-              ...(data.contact ?? {}),
+              ...(data.contact ? contactCreateData(data.contact) : {}),
               relationship: data.relationship,
               isPayer: data.isPayer,
               receivesNotices: data.receivesNotices,
@@ -219,13 +269,25 @@ export class PrismaResponsiblePartyRepository implements ResponsiblePartyReposit
   ): Promise<ResponsiblePartyView | null> {
     try {
       return await this.prisma.runWithTenant(async (tx) => {
+        // FOR UPDATE: el tipo con el que se decide la etiqueta (R7) es el de
+        // la fila que se va a escribir, no el que leyó antes el caso de uso.
+        const [locked] = await tx.$queryRaw<
+          { documentType: DocumentType | null }[]
+        >`
+          SELECT "documentType" FROM "patient_responsible_parties"
+           WHERE "id" = ${partyId}::uuid AND "patientId" = ${patientId}::uuid
+             AND "deletedAt" IS NULL
+           FOR UPDATE`;
+        if (!locked) return null;
         const { count } = await tx.patientResponsibleParty.updateMany({
           where: { id: partyId, patientId, deletedAt: null },
           data: {
             relationship: data.relationship,
             isPayer: data.isPayer,
             receivesNotices: data.receivesNotices,
-            ...(data.contact ?? {}),
+            ...(data.contact
+              ? contactUpdateData(data.contact, locked.documentType)
+              : {}),
           },
         });
         if (count === 0) return null;

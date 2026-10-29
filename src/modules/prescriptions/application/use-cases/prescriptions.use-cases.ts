@@ -6,7 +6,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { ClinicRole, DocType } from '@prisma/client';
+import { ClinicRole } from '@prisma/client';
 import type {
   Prescription,
   PrescriptionDocument,
@@ -43,6 +43,12 @@ import {
 import type { Phase1IssuerCompat } from '../../domain/legacy-prescription';
 import { quantityInWords } from '../../domain/quantity-in-words';
 import { PATIENT_NOT_FOUND_MESSAGE } from '../../../patients/application/assert-patient-in-clinic';
+import {
+  documentText,
+  documentTypeName,
+  type ClinicDocumentTypeNames,
+} from '../../../patients/domain/document-type';
+import { DocumentTypeNamesReader } from '../../../patients/domain/ports/document-type-names-repository.port';
 
 export type PrescriptionClock = () => Date;
 export const PRESCRIPTION_CLOCK = Symbol('PRESCRIPTION_CLOCK');
@@ -50,14 +56,6 @@ export const PRESCRIPTION_CLOCK = Symbol('PRESCRIPTION_CLOCK');
 export const PRESCRIPTION_NOT_FOUND_MESSAGE = 'Receta no encontrada';
 /** Hasta cuántos días después de hoy se puede fechar la dispensación. */
 export const MAX_DISPENSATION_DAYS_AHEAD = 90;
-
-const DOC_TYPE_LABEL: Record<DocType, string> = {
-  CC: 'CC',
-  TI: 'TI',
-  CE: 'CE',
-  PASSPORT: 'Pasaporte',
-  OTHER: 'Doc.',
-};
 
 export interface IssuePrescriptionInput {
   items: PrescriptionItemInput[];
@@ -154,10 +152,19 @@ function resolveDispensationDate(
   return requested;
 }
 
-/** `«{tipo} {número}»` en toda clínica (spec R8), o `null` sin número. */
-function patientDocument(patient: PrescriptionPatient): string | null {
-  if (!patient.docNumber) return null;
-  return `${DOC_TYPE_LABEL[patient.docType]} ${patient.docNumber}`;
+/**
+ * `«{nombre visible} {número}»` (DX-327, R8 y R17), o `null` sin número. Se
+ * congela como texto: lo ya emitido no cambia si después cambian la etiqueta
+ * o los nombres de la clínica (R18).
+ */
+function patientDocument(
+  patient: PrescriptionPatient,
+  names: ClinicDocumentTypeNames,
+): string | null {
+  return documentText(
+    documentTypeName(patient.docType, patient.docTypeLabel, names),
+    patient.docNumber,
+  );
 }
 
 function toItemContent(
@@ -240,6 +247,7 @@ export class IssuePrescriptionUseCase {
     private readonly repo: PrescriptionRepository,
     @Inject(PRESCRIPTION_CLOCK)
     private readonly now: PrescriptionClock,
+    private readonly documentTypeNames: DocumentTypeNamesReader,
   ) {}
 
   /**
@@ -325,7 +333,10 @@ export class IssuePrescriptionUseCase {
       dispensationDate,
       validUntil: computeValidUntil(dispensationDate, settings.validityDays),
       patientName: `${patient.firstName} ${patient.lastName}`,
-      patientDocument: patientDocument(patient),
+      patientDocument: patientDocument(
+        patient,
+        await this.documentTypeNames.get(),
+      ),
       patientBirthYear: patient.birthDate
         ? patient.birthDate.getUTCFullYear()
         : null,

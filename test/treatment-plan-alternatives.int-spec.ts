@@ -1,4 +1,5 @@
 import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
+import { PrismaDocumentTypeNamesRepository } from '../src/modules/patients/infrastructure/repositories/prisma-document-type-names.repository';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaTreatmentPlanRepository } from '../src/modules/treatment-plans/infrastructure/repositories/prisma-treatment-plan.repository';
@@ -29,6 +30,10 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 });
 const tenantContext = new TenantContextService();
 const prisma = new PrismaService(tenantContext);
+const documentTypeNames = new PrismaDocumentTypeNamesRepository(
+  prisma,
+  tenantContext,
+);
 const plans = new PrismaTreatmentPlanRepository(prisma, tenantContext);
 const quotes = new PrismaPlanQuoteRepository(prisma, tenantContext);
 const options = new PrismaPlanOptionsRepository(prisma, tenantContext);
@@ -286,8 +291,12 @@ describe('alternativas de plan y seguimiento (DX-040, int)', () => {
       const p = await patient(a, 'Firma');
       const g = await group(a, p);
       const now = () => new Date();
-      const get = new GetPlanQuoteUseCase(quotes, now);
-      const accept = new AcceptTreatmentPlanUseCase(quotes, now);
+      const get = new GetPlanQuoteUseCase(quotes, now, documentTypeNames);
+      const accept = new AcceptTreatmentPlanUseCase(
+        quotes,
+        now,
+        documentTypeNames,
+      );
 
       await inClinic(
         a,

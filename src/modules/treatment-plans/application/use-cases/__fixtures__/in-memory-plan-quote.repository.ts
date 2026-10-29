@@ -46,7 +46,8 @@ export function quoteSource(
     patient: {
       firstName: 'Ana',
       lastName: 'Pérez',
-      docType: 'CC',
+      docType: 'NATIONAL_ID',
+      docTypeLabel: null,
       docNumber: '123',
     },
     clinic: { name: 'Clínica Sonrisa', logoUrl: null },

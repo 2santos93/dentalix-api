@@ -1,4 +1,4 @@
-import type { ReceiptSnapshot } from '../receipt-snapshot';
+import type { ReceiptViewSnapshot } from '../receipt-snapshot';
 
 /**
  * El recibo de caja de un abono tal como se muestra, se imprime y se envía
@@ -17,5 +17,6 @@ export interface PaymentReceiptView {
   voided: boolean;
   voidedAt: Date | null;
   voidReason: string | null;
-  snapshot: ReceiptSnapshot;
+  /** La foto con el paciente ya leído (DX-327: nombre visible resuelto). */
+  snapshot: ReceiptViewSnapshot;
 }

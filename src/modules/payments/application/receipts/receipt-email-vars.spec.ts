@@ -1,5 +1,11 @@
 import { receiptEmailVars } from './receipt-email-vars';
-import { buildReceiptSnapshot } from '../../domain/receipt-snapshot';
+import {
+  buildReceiptSnapshot,
+  parseReceiptSnapshot,
+  receiptPatientView,
+  type ReceiptSnapshot,
+} from '../../domain/receipt-snapshot';
+import { NO_LOCAL_NAMES } from '../../../document-type-names/__fixtures__/fixed-document-type-names.reader';
 import type { PaymentReceiptView } from '../../domain/entities/payment-receipt.entity';
 import { regionalFormat } from '../../../../shared/format/regional-format';
 
@@ -10,7 +16,8 @@ const SNAPSHOT_INPUT = {
     id: 'pat-1',
     firstName: 'Carolina',
     lastName: 'Duque',
-    docType: 'CC',
+    docType: 'NATIONAL_ID',
+    docTypeLabel: null,
     docNumber: '1012345678',
   },
   payment: {
@@ -34,7 +41,13 @@ const SNAPSHOT_INPUT = {
   },
   cashier: { id: 'u-1', fullName: 'Recepción Demo' },
 } satisfies Parameters<typeof buildReceiptSnapshot>[0];
-const snapshot = buildReceiptSnapshot(SNAPSHOT_INPUT);
+
+/** La foto como la ve el recibo: el paciente con su nombre visible (R18). */
+const forView = (stored: ReceiptSnapshot, names = NO_LOCAL_NAMES) => ({
+  ...stored,
+  patient: receiptPatientView(stored, names),
+});
+const snapshot = forView(buildReceiptSnapshot(SNAPSHOT_INPUT, NO_LOCAL_NAMES));
 
 const view = (
   overrides: Partial<PaymentReceiptView> = {},
@@ -73,7 +86,7 @@ describe('receiptEmailVars (DX-136)', () => {
       locationName: 'Sede Norte',
       locationAddress: 'Cra 15 # 93-60',
       fiscalLine: null,
-      patientDocLabel: 'CC ******5678',
+      patientDocLabel: 'Documento nacional ******5678',
       paidOnLabel: '17/10/2026',
       methodLabel: 'Efectivo',
       planLabel: 'Plan del 01/09/2026 · Opción A: implante',
@@ -83,6 +96,41 @@ describe('receiptEmailVars (DX-136)', () => {
       legalNotice: 'Este documento no es factura',
     });
     expect(JSON.stringify(vars)).not.toContain('1012345678');
+  });
+
+  it('the email prints the frozen display name from the snapshot', () => {
+    const local = { ...NO_LOCAL_NAMES, NATIONAL_ID: 'Documento A' };
+    const stored = parseReceiptSnapshot(
+      JSON.parse(
+        JSON.stringify(
+          buildReceiptSnapshot(
+            {
+              ...SNAPSHOT_INPUT,
+              patient: { ...SNAPSHOT_INPUT.patient, docTypeLabel: 'ID local' },
+            },
+            local,
+          ),
+        ),
+      ),
+    );
+    // Aunque la clínica cambie después su nombre local, sale lo congelado.
+    const later = { ...local, NATIONAL_ID: 'Documento B' };
+    expect(
+      receiptEmailVars(
+        view({ snapshot: forView(stored, later) }),
+        SEDE_ZONE,
+        SEDE_FMT,
+      ).patientDocLabel,
+    ).toBe('ID local ******5678');
+
+    const noLabel = buildReceiptSnapshot(SNAPSHOT_INPUT, local);
+    expect(
+      receiptEmailVars(
+        view({ snapshot: forView(noLabel, later) }),
+        SEDE_ZONE,
+        SEDE_FMT,
+      ).patientDocLabel,
+    ).toBe('Documento A ******5678');
   });
 
   it('anulado: fecha (día civil de la sede) y motivo', () => {
@@ -163,16 +211,25 @@ describe('receiptEmailVars (DX-136)', () => {
   });
 
   it('receipt email for a JPY location shows no decimals', () => {
-    const jpy = buildReceiptSnapshot({
-      ...SNAPSHOT_INPUT,
-      payment: { ...SNAPSHOT_INPUT.payment, amount: 12000, currency: 'JPY' },
-      planBalance: {
-        currency: 'JPY',
-        billable: 50000,
-        paid: 12000,
-        balance: 38000,
-      },
-    });
+    const jpy = forView(
+      buildReceiptSnapshot(
+        {
+          ...SNAPSHOT_INPUT,
+          payment: {
+            ...SNAPSHOT_INPUT.payment,
+            amount: 12000,
+            currency: 'JPY',
+          },
+          planBalance: {
+            currency: 'JPY',
+            billable: 50000,
+            paid: 12000,
+            balance: 38000,
+          },
+        },
+        NO_LOCAL_NAMES,
+      ),
+    );
     const vars = receiptEmailVars(
       view({ snapshot: jpy }),
       'Asia/Tokyo',

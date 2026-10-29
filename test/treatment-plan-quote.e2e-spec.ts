@@ -5,7 +5,6 @@ import { App } from 'supertest/types';
 import {
   CatalogKind,
   ClinicRole,
-  DocType,
   Prisma,
   PrismaClient,
   Sex,
@@ -193,12 +192,14 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
     session: Session,
     firstName: string,
     docNumber: string,
+    docTypeLabel?: string,
   ): Promise<string> {
     const res = await as(session)
       .post('/patients', {
         firstName,
         lastName: 'Presupuesto',
-        docType: DocType.CC,
+        docType: 'NATIONAL_ID',
+        docTypeLabel,
         docNumber,
         sex: Sex.F,
       })
@@ -330,7 +331,7 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
       expect(quote.location.name).toBeTruthy();
       expect(quote.patient).toEqual({
         name: 'Ana Presupuesto',
-        document: 'CC PRES-A-1',
+        document: 'Documento nacional PRES-A-1',
       });
       expect(quote.professionalName).toBe('Dra. Laura Gómez');
       expect(quote.validityDays).toBe(30);
@@ -365,6 +366,39 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
       ]);
       expect(quote.contentHash).toMatch(/^[0-9a-f]{64}$/);
       expect(quote.acceptance).toBeNull();
+    });
+
+    it('the live quote prints the generic label', async () => {
+      const document = async (patientId: string, planId: string) =>
+        (
+          (await as(clinicA).get(quotePath(patientId, planId)).expect(200))
+            .body as QuoteBody
+        ).patient.document;
+      expect(await document(patientA, planA)).toBe(
+        'Documento nacional PRES-A-1',
+      );
+
+      // En vivo: el nombre local de hoy, y la etiqueta del paciente antes.
+      const labelled = await createPatient(
+        clinicA,
+        'Lia',
+        'PRES-A-40',
+        'ID local',
+      );
+      const plan = await createPlan(clinicA, labelled, dentistA);
+      await raw.tenant.update({
+        where: { id: clinicA.tenantId },
+        data: { docTypeNameNationalId: 'Documento A' },
+      });
+      try {
+        expect(await document(patientA, planA)).toBe('Documento A PRES-A-1');
+        expect(await document(labelled, plan)).toBe('ID local PRES-A-40');
+      } finally {
+        await raw.tenant.update({
+          where: { id: clinicA.tenantId },
+          data: { docTypeNameNationalId: null },
+        });
+      }
     });
 
     it('la sede del encabezado es la del request (X-Location-Id)', async () => {
@@ -813,7 +847,9 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
       expect((again.body as QuoteBody).acceptance?.integrityOk).toBe(true);
     });
 
-    it('una aceptación v1 sembrada por fuera sigue íntegra y sin convenio', async () => {
+    it('legacy accepted quote keeps its frozen document and integrity', async () => {
+      // Una aceptación v1 sembrada por fuera, con el documento como se
+      // imprimía antes de DX-327: sigue íntegra, sin convenio y con su texto.
       const patient = await createPatient(clinicA, 'Elena', 'PRES-A-4');
       const plan = await createPlan(clinicA, patient, dentistA);
       const location = await raw.location.findFirstOrThrow({
@@ -873,8 +909,21 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
         },
       });
 
-      const res = await as(clinicA).get(quotePath(patient, plan)).expect(200);
+      await raw.tenant.update({
+        where: { id: clinicA.tenantId },
+        data: { docTypeNameNationalId: 'Documento A' },
+      });
+      let res: request.Response;
+      try {
+        res = await as(clinicA).get(quotePath(patient, plan)).expect(200);
+      } finally {
+        await raw.tenant.update({
+          where: { id: clinicA.tenantId },
+          data: { docTypeNameNationalId: null },
+        });
+      }
       const quote = res.body as QuoteBody;
+      expect(quote.patient.document).toBe('CC PRES-A-4');
       expect(quote.version).toBe(1);
       expect(quote.agreement).toBeNull();
       expect(quote.contentHash).toBe(contentHash);

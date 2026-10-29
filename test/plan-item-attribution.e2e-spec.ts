@@ -2,7 +2,6 @@ import { INestApplication } from '@nestjs/common';
 import {
   CatalogKind,
   ClinicRole,
-  DocType,
   Prisma,
   PrismaClient,
   Sex,
@@ -187,7 +186,7 @@ describe('DX-050 · ítem realizado con profesional, sede y hora (e2e)', () => {
     const patient = await api('post', '/patients', a.adminToken, {
       firstName: 'Ana',
       lastName: 'Ruiz',
-      docType: DocType.CC,
+      docType: 'NATIONAL_ID',
       docNumber: '5050',
       sex: Sex.F,
     }).expect(201);

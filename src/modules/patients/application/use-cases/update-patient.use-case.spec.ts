@@ -1,5 +1,5 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { DocType, Sex } from '@prisma/client';
+import { Sex } from '@prisma/client';
 import { UpdatePatientUseCase } from './update-patient.use-case';
 import { Patient } from '../../domain/entities/patient.entity';
 import {
@@ -10,6 +10,7 @@ import {
 } from '../../domain/ports/patient-repository.port';
 import { ReferenceLookup } from '../../domain/ports/reference-lookup.port';
 import { FakePatientCommunicationRepository } from '../__fixtures__/fake-patient-communication.repository';
+import { resolveDocTypeInput } from '../../domain/legacy-doc-type';
 
 function fakePatient(overrides: Partial<Patient> = {}): Patient {
   return {
@@ -17,7 +18,8 @@ function fakePatient(overrides: Partial<Patient> = {}): Patient {
     tenantId: 't1',
     firstName: 'Ana',
     lastName: 'Gomez',
-    docType: DocType.CC,
+    docType: 'NATIONAL_ID',
+    docTypeLabel: null,
     docNumber: null,
     birthDate: null,
     sex: Sex.F,
@@ -220,6 +222,71 @@ describe('UpdatePatientUseCase', () => {
       const { uc, updates } = setup(fakePatient({ phone: null }));
       await uc.execute('p1', { phone: '123' });
       expect(updates).toEqual([{ phone: '123' }]);
+    });
+  });
+
+  // DX-327 (R7): la etiqueta libre se normaliza en el caso de uso.
+  describe('document type label', () => {
+    function setup(patient: Patient) {
+      const updates: UpdatePatientRepoInput[] = [];
+      const repo = makeRepo({
+        findById: (): Promise<Patient | null> => Promise.resolve(patient),
+        update: (_id: string, patch: UpdatePatientRepoInput) => {
+          updates.push(patch);
+          return Promise.resolve({ ...patient, ...patch });
+        },
+      });
+      const uc = new UpdatePatientUseCase(
+        repo,
+        makeReferenceLookup(),
+        new FakePatientCommunicationRepository(),
+      );
+      return { uc, updates };
+    }
+    const labelled = () =>
+      fakePatient({ docType: 'NATIONAL_ID', docTypeLabel: 'ID local' });
+
+    // El borrado al cambiar de tipo lo decide el repositorio con la fila
+    // bloqueada (prisma-patient.repository.spec.ts): aquí solo se reenvía.
+    it('a type without a label is passed on for the repository to decide', async () => {
+      const { uc, updates } = setup(labelled());
+      await uc.execute('p1', { docType: 'PASSPORT' });
+      await uc.execute('p1', {
+        docType: 'TAX_ID',
+        docTypeLabel: ' Fiscal  A ',
+      });
+      expect(updates).toEqual([
+        { docType: 'PASSPORT' },
+        { docType: 'TAX_ID', docTypeLabel: 'Fiscal A' },
+      ]);
+    });
+
+    it('legacy CC resent for a national ID reaches the repository as its generic type', async () => {
+      const { uc, updates } = setup(labelled());
+      await uc.execute('p1', { docType: resolveDocTypeInput('CC') });
+      expect(updates).toEqual([{ docType: 'NATIONAL_ID' }]);
+    });
+
+    it('a label alone is normalized; empty clears it', async () => {
+      const { uc, updates } = setup(labelled());
+      await uc.execute('p1', { docTypeLabel: '  Otro   nombre ' });
+      await uc.execute('p1', { docTypeLabel: '' });
+      expect(updates).toEqual([
+        { docTypeLabel: 'Otro nombre' },
+        { docTypeLabel: null },
+      ]);
+    });
+
+    it('a label that is too long is 400 with the message', async () => {
+      const { uc, updates } = setup(labelled());
+      const err = await uc
+        .execute('p1', { docTypeLabel: 'x'.repeat(41) })
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(BadRequestException);
+      expect((err as BadRequestException).message).toBe(
+        'El nombre del documento admite hasta 40 caracteres.',
+      );
+      expect(updates).toEqual([]);
     });
   });
 });

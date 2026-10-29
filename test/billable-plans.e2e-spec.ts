@@ -5,7 +5,6 @@ import { App } from 'supertest/types';
 import {
   CatalogKind,
   ClinicRole,
-  DocType,
   Prisma,
   PrismaClient,
   Sex,
@@ -179,7 +178,7 @@ describe('Planes cobrables — GET /patients/:patientId/billable-plans (e2e, DX-
       .post('/patients', {
         firstName: 'Bea',
         lastName: 'Cobro',
-        docType: DocType.CC,
+        docType: 'NATIONAL_ID',
         docNumber,
         sex: Sex.F,
       })

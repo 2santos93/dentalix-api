@@ -118,7 +118,7 @@ describeWithMinio(
       const res = await api('post', '/patients', {
         firstName: 'Ana',
         lastName: 'Directo',
-        docType: 'CC',
+        docType: 'NATIONAL_ID',
         docNumber: '59000001',
         sex: 'F',
       }).expect(201);

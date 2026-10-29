@@ -1,5 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma, type PatientImplantKind } from '@prisma/client';
+import {
+  Prisma,
+  type DocumentType,
+  type PatientImplantKind,
+} from '@prisma/client';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { resolveLocationTimeZones } from '../../../shared/locations/location-time-zone';
@@ -10,6 +14,11 @@ import type {
   PatientImplant,
 } from '../domain/entities/patient-implant.entity';
 import type { ImplantCardLocation } from '../domain/implant-card';
+import {
+  documentText,
+  documentTypeName,
+  type ClinicDocumentTypeNames,
+} from '../../patients/domain/document-type';
 import type {
   CreatePatientImplantRepoInput,
   ImplantLotQuery,
@@ -24,14 +33,6 @@ const INCLUDE = {
 } satisfies Prisma.PatientImplantInclude;
 
 type Row = Prisma.PatientImplantGetPayload<{ include: typeof INCLUDE }>;
-
-const DOC_TYPE_LABEL: Record<string, string> = {
-  CC: 'CC',
-  TI: 'TI',
-  CE: 'CE',
-  PASSPORT: 'Pasaporte',
-  OTHER: 'Doc.',
-};
 
 function toDateOnly(value: Date): string {
   return value.toISOString().slice(0, 10);
@@ -80,7 +81,8 @@ interface LotRow {
   patientId: string;
   firstName: string;
   lastName: string;
-  docType: string;
+  documentType: DocumentType;
+  docTypeLabel: string | null;
   docNumber: string | null;
   phone: string | null;
   placedOn: Date;
@@ -124,7 +126,7 @@ export function implantLotSearchSql(
   }
   return Prisma.sql`
     SELECT i."id" AS "implantId", i."patientId", p."firstName", p."lastName",
-           p."docType"::text AS "docType", p."docNumber", p."phone",
+           p."documentType", p."docTypeLabel", p."docNumber", p."phone",
            i."placedOn", i."toothNumber", i."kind", i."manufacturer",
            i."system", i."reference", i."lot",
            u."fullName" AS "professionalName", l."name" AS "locationName",
@@ -157,20 +159,24 @@ export class PrismaPatientImplantRepository implements PatientImplantRepository 
     return tenantId;
   }
 
-  loadPatient(patientId: string): Promise<ImplantCardPatient | null> {
-    return this.prisma.runWithTenant((tx) =>
+  async loadPatient(patientId: string): Promise<ImplantCardPatient | null> {
+    const row = await this.prisma.runWithTenant((tx) =>
       tx.patient.findFirst({
         where: { id: patientId, deletedAt: null },
         select: {
           id: true,
           firstName: true,
           lastName: true,
-          docType: true,
+          documentType: true,
+          docTypeLabel: true,
           docNumber: true,
           birthDate: true,
         },
       }),
     );
+    if (!row) return null;
+    const { documentType, ...patient } = row;
+    return { ...patient, docType: documentType };
   }
 
   resolveLocation(): Promise<{ id: string; timeZone: string }> {
@@ -331,7 +337,10 @@ export class PrismaPatientImplantRepository implements PatientImplantRepository 
   }
 
   /** Ver `implantLotSearchSql`. */
-  async searchByLot(query: ImplantLotQuery): Promise<ImplantLotMatch[]> {
+  async searchByLot(
+    query: ImplantLotQuery,
+    names: ClinicDocumentTypeNames,
+  ): Promise<ImplantLotMatch[]> {
     const sql = implantLotSearchSql(this.requireTenantId(), query);
     const rows = await this.prisma.runWithTenant((tx) =>
       tx.$queryRaw<LotRow[]>(sql),
@@ -340,9 +349,10 @@ export class PrismaPatientImplantRepository implements PatientImplantRepository 
       implantId: r.implantId,
       patientId: r.patientId,
       patientName: `${r.firstName} ${r.lastName}`.trim(),
-      patientDocument: r.docNumber
-        ? `${DOC_TYPE_LABEL[r.docType] ?? 'Doc.'} ${r.docNumber}`
-        : null,
+      patientDocument: documentText(
+        documentTypeName(r.documentType, r.docTypeLabel, names),
+        r.docNumber,
+      ),
       phone: r.phone,
       placedOn: toDateOnly(r.placedOn),
       toothNumber: r.toothNumber,

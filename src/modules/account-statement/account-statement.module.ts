@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { DocumentTypeNamesModule } from '../document-type-names/document-type-names.module';
 import { JwtModule } from '@nestjs/jwt';
 import {
   ACCOUNT_STATEMENT_CLOCK,
@@ -22,7 +23,7 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
 @Module({
   // JwtModule.register({}): JwtAuthGuard -> TokenService -> JwtService, igual
   // que PaymentsModule.
-  imports: [JwtModule.register({})],
+  imports: [JwtModule.register({}), DocumentTypeNamesModule],
   controllers: [AccountStatementController],
   providers: [
     GetAccountStatementUseCase,

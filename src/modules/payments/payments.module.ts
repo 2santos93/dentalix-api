@@ -1,5 +1,6 @@
 import { RecordOpeningBalancePaymentUseCase } from './application/use-cases/record-opening-balance-payment.use-case';
 import { Module } from '@nestjs/common';
+import { DocumentTypeNamesModule } from '../document-type-names/document-type-names.module';
 import { JwtModule } from '@nestjs/jwt';
 import { RecordPaymentUseCase } from './application/use-cases/record-payment.use-case';
 import { ListPaymentsUseCase } from './application/use-cases/list-payments.use-case';
@@ -48,6 +49,7 @@ import { ReplacePaymentAllocationsUseCase } from './application/use-cases/replac
   imports: [
     JwtModule.register({}),
     ExchangeModule,
+    DocumentTypeNamesModule,
     TreatmentPlansModule,
     EmailModule,
     // DX-150: cerrar el compromiso de pago que cubre un abono.

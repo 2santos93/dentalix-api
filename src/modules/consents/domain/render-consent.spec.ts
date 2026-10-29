@@ -9,7 +9,7 @@ import { regionalFormat } from '../../../shared/format/regional-format';
 
 const values: ConsentVariables = {
   paciente: 'Ana Pérez',
-  documento: 'CC 1020304050',
+  documento: 'Documento nacional 1020304050',
   profesional: 'Dra. Laura Gómez',
   clinica: 'Clínica Demo',
   fecha: '16 de octubre de 2026',
@@ -22,7 +22,7 @@ describe('renderConsent', () => {
       'Yo, {{paciente}} ({{documento}}), autorizo a {{profesional}} de {{clinica}} ' +
       'a realizar {{tratamiento}} el {{fecha}}.';
     expect(renderConsent(body, values)).toBe(
-      'Yo, Ana Pérez (CC 1020304050), autorizo a Dra. Laura Gómez de Clínica Demo ' +
+      'Yo, Ana Pérez (Documento nacional 1020304050), autorizo a Dra. Laura Gómez de Clínica Demo ' +
         'a realizar Exodoncia simple (diente 48) el 16 de octubre de 2026.',
     );
   });

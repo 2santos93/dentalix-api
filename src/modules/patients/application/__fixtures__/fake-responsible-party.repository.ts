@@ -40,7 +40,8 @@ export class FakeResponsiblePartyRepository implements ResponsiblePartyRepositor
       id,
       firstName: notice.firstName,
       lastName: over.lastName ?? 'Pérez',
-      docType: 'CC',
+      docType: 'NATIONAL_ID',
+      docTypeLabel: null,
       docNumber: null,
       email: notice.email,
       phone: null,
@@ -115,6 +116,9 @@ export class FakeResponsiblePartyRepository implements ResponsiblePartyRepositor
       docType: responsible
         ? responsible.docType
         : (data.contact?.docType ?? null),
+      docTypeLabel: responsible
+        ? responsible.docTypeLabel
+        : (data.contact?.docTypeLabel ?? null),
       docNumber: responsible
         ? responsible.docNumber
         : (data.contact?.docNumber ?? null),
@@ -143,7 +147,13 @@ export class FakeResponsiblePartyRepository implements ResponsiblePartyRepositor
     if (data.receivesNotices !== undefined) {
       party.receivesNotices = data.receivesNotices;
     }
-    Object.assign(party, data.contact ?? {});
+    // R7, como el repositorio: un tipo distinto sin etiqueta la borra.
+    const contact = data.contact ?? {};
+    const clearsLabel =
+      contact.docType !== undefined &&
+      contact.docTypeLabel === undefined &&
+      contact.docType !== party.docType;
+    Object.assign(party, contact, clearsLabel ? { docTypeLabel: null } : {});
     const { deleted: _d, ...view } = party;
     return Promise.resolve(view);
   }

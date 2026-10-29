@@ -1,5 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { DocType, PaymentMethod } from '@prisma/client';
+import { PaymentMethod, type DocumentType } from '@prisma/client';
+import { DOCUMENT_TYPES } from '../../../patients/domain/document-type';
+import {
+  DOC_TYPE_LABEL_PROPERTY,
+  DOC_TYPE_NAME_DESCRIPTION,
+} from '../../../patients/presentation/dto/doc-type-input';
 
 // Respuesta de GET /payments/:id/receipt y POST /payments/:id/receipt/print
 // (DX-136). Solo documenta el contrato para Swagger: el caso de uso ya
@@ -19,7 +24,7 @@ export class ReceiptClinicDto {
   @ApiProperty({
     type: String,
     nullable: true,
-    description: 'NIT/NIF (DX-019).',
+    description: 'Identificador fiscal de la clínica (DX-019).',
   })
   taxId!: string | null;
 
@@ -45,8 +50,18 @@ export class ReceiptPatientDto {
   @ApiProperty({ example: 'Carolina Duque' })
   fullName!: string;
 
-  @ApiProperty({ enum: DocType })
-  docType!: DocType;
+  @ApiProperty({ enum: DOCUMENT_TYPES, enumName: 'DocType' })
+  docType!: DocumentType;
+
+  @ApiProperty(DOC_TYPE_LABEL_PROPERTY)
+  docTypeLabel!: string | null;
+
+  @ApiProperty({
+    description:
+      `${DOC_TYPE_NAME_DESCRIPTION} Congelado al emitir el recibo; en los ` +
+      'recibos anteriores, el nombre local de hoy o el genérico.',
+  })
+  docTypeName!: string;
 
   @ApiProperty({
     type: String,
@@ -133,7 +148,7 @@ export class ReceiptSnapshotDto {
 
   @ApiProperty({
     description:
-      'Falta la razón social o el NIT/NIF: el recibo dice «Datos fiscales pendientes».',
+      'Falta la razón social o el identificador fiscal: el recibo dice «Datos fiscales pendientes».',
   })
   fiscalDataPending!: boolean;
 

@@ -11,12 +11,17 @@ import {
   Min,
 } from 'class-validator';
 import {
-  DocType,
+  type DocumentType,
   PatientImportDuplicateMode,
   PatientImportFileFormat,
   PatientImportStatus,
 } from '@prisma/client';
 import { IMPORT_FIELD_KEYS } from '../../domain/import-fields';
+import { DOCUMENT_TYPES } from '../../../patients/domain/document-type';
+import {
+  DOC_TYPE_INPUTS,
+  type DocTypeInput,
+} from '../../../patients/presentation/dto/doc-type-input';
 
 const FIELD_KEYS_DOC = IMPORT_FIELD_KEYS.join(', ');
 
@@ -27,26 +32,28 @@ const FIELD_KEYS_DOC = IMPORT_FIELD_KEYS.join(', ');
  */
 export class CreatePatientImportDto {
   @ApiPropertyOptional({
-    description: `JSON con el mapeo campo de Dentalix → cabecera del archivo, p. ej. {"firstName":"Nombre","docNumber":"Cédula"}. Campos: ${FIELD_KEYS_DOC}. Sin él, el mapeo sugerido.`,
+    description: `JSON con el mapeo campo de Dentalix → cabecera del archivo, p. ej. {"firstName":"Nombre","docNumber":"Documento"}. Campos: ${FIELD_KEYS_DOC}. Sin él, el mapeo sugerido.`,
     example:
-      '{"firstName":"Nombres","lastName":"Apellidos","docNumber":"Cédula"}',
+      '{"firstName":"Nombres","lastName":"Apellidos","docNumber":"Documento"}',
   })
   @IsOptional()
   @IsString({ message: 'El mapeo de columnas debe ser un JSON.' })
   @MaxLength(4000, { message: 'El mapeo de columnas es demasiado largo.' })
   mapping?: string;
 
+  // DX-327 (R9): en la fase 1 se aceptan también los códigos anteriores (web
+  // anterior); el controlador los traduce. OpenAPI publica solo los genéricos.
   @ApiPropertyOptional({
-    enum: DocType,
+    enum: DOCUMENT_TYPES,
     enumName: 'DocType',
     description:
       'Tipo de documento cuando la columna no está o la celda va vacía',
   })
   @IsOptional()
-  @IsEnum(DocType, {
+  @IsIn(DOC_TYPE_INPUTS, {
     message: 'El tipo de documento por defecto no es válido.',
   })
-  defaultDocType?: DocType;
+  defaultDocType?: DocTypeInput;
 }
 
 /** Campos de la subida de la hoja de saldos (DX-262, QA D1). */
@@ -166,8 +173,8 @@ export class ImportUserDto {
 
 export class ImportMappingDto {
   @ApiProperty({ type: ColumnMappingDto }) columns!: ColumnMappingDto;
-  @ApiProperty({ enum: DocType, enumName: 'DocType', nullable: true })
-  defaultDocType!: DocType | null;
+  @ApiProperty({ enum: DOCUMENT_TYPES, enumName: 'DocType', nullable: true })
+  defaultDocType!: DocumentType | null;
 }
 
 export class ImportTotalsDto {
@@ -223,7 +230,8 @@ export class ImportIssueDto {
 }
 
 export class ImportPatientDataDto {
-  @ApiProperty({ enum: DocType, enumName: 'DocType' }) docType!: DocType;
+  @ApiProperty({ enum: DOCUMENT_TYPES, enumName: 'DocType' })
+  docType!: DocumentType;
   @ApiProperty() docNumber!: string;
   @ApiProperty() firstName!: string;
   @ApiProperty() lastName!: string;

@@ -55,7 +55,7 @@ describe('Horario de atención en la zona de la sede (e2e, G1)', () => {
       .send({
         firstName: 'Ana',
         lastName: 'Paciente',
-        docType: 'CC',
+        docType: 'NATIONAL_ID',
         docNumber: '3140001',
         sex: 'F',
       })

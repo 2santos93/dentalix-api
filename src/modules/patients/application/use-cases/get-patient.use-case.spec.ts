@@ -1,5 +1,5 @@
 import { NotFoundException } from '@nestjs/common';
-import { DocType, Sex } from '@prisma/client';
+import { Sex } from '@prisma/client';
 import { GetPatientUseCase } from './get-patient.use-case';
 import { Patient } from '../../domain/entities/patient.entity';
 import {
@@ -14,7 +14,8 @@ function fakePatient(id: string): Patient {
     tenantId: 't1',
     firstName: 'Ana',
     lastName: 'Gomez',
-    docType: DocType.CC,
+    docType: 'NATIONAL_ID',
+    docTypeLabel: null,
     docNumber: null,
     birthDate: null,
     sex: Sex.F,

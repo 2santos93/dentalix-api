@@ -4,7 +4,7 @@ import {
   Inject,
   Injectable,
 } from '@nestjs/common';
-import { ClinicRole, DocType, Sex } from '@prisma/client';
+import { ClinicRole, DocumentType, Sex } from '@prisma/client';
 import { PATIENT_REPOSITORY } from '../../domain/ports/patient-repository.port';
 import type {
   CreatePatientConsent,
@@ -21,11 +21,15 @@ import type {
   ConsentEvidence,
 } from '../../../data-consents/domain/entities/data-consent.entity';
 import { assertValidDecisions } from '../../../data-consents/domain/consent-state';
+import { docTypeLabelInput } from '../doc-type-label-input';
 
 export interface CreatePatientInput {
   firstName: string;
   lastName: string;
-  docType: DocType;
+  /** DX-327: obligatorio y sin valor por defecto (R10). */
+  docType: DocumentType;
+  /** R7: nombre libre opcional; se normaliza aquí. */
+  docTypeLabel?: string | null;
   docNumber?: string;
   birthDate?: Date;
   sex: Sex;
@@ -82,6 +86,7 @@ export class CreatePatientUseCase {
     }
 
     const email = input.email ? input.email.trim().toLowerCase() : input.email;
+    const docTypeLabel = docTypeLabelInput(input.docTypeLabel) ?? null;
 
     if (input.cityId !== undefined) {
       if (!input.countryCode) {
@@ -110,6 +115,7 @@ export class CreatePatientUseCase {
       firstName: input.firstName,
       lastName: input.lastName,
       docType: input.docType,
+      docTypeLabel,
       docNumber: input.docNumber,
       birthDate: input.birthDate,
       sex: input.sex,

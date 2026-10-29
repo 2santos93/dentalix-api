@@ -2,13 +2,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
-import {
-  Prisma,
-  PrismaClient,
-  DocType,
-  Sex,
-  CatalogKind,
-} from '@prisma/client';
+import { Prisma, PrismaClient, Sex, CatalogKind } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
@@ -124,7 +118,7 @@ async function createPatient(
     .send({
       firstName: 'Historia',
       lastName: 'Clinica',
-      docType: DocType.CC,
+      docType: 'NATIONAL_ID',
       docNumber,
       sex: Sex.F,
     })

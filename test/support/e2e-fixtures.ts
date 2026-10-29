@@ -8,7 +8,11 @@ import { PasswordService } from '../../src/shared/crypto/password.service';
 import { PrismaExceptionFilter } from '../../src/shared/prisma/prisma-exception.filter';
 import { hostFor } from './tenant-host';
 import { registerVerified } from '../support/register-verified';
-import { REGIONAL_BOGOTA_FIXTURE, registerBody } from './location-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  registerBody,
+  type RegionalFixture,
+} from './location-fixtures';
 
 // Fixtures compartidas por las matrices de DX-068 (role-matrix y
 // tenant-isolation-matrix).
@@ -95,11 +99,12 @@ interface Tokens {
 export async function registerClinic(
   app: INestApplication<App>,
   subdomain: string,
+  fixture: RegionalFixture = REGIONAL_BOGOTA_FIXTURE,
 ): Promise<Clinic> {
   const email = `owner@${subdomain}.test`;
   const register = await registerVerified(
     app,
-    registerBody(REGIONAL_BOGOTA_FIXTURE, {
+    registerBody(fixture, {
       clinicName: `Clinica ${subdomain}`,
       subdomain,
       email,

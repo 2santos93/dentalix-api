@@ -87,7 +87,8 @@ export class RegisterImplantDto {
 
   @ApiPropertyOptional({
     maxLength: 80,
-    description: 'Registro sanitario INVIMA (CO) o marcado CE (ES)',
+    description:
+      'Registro sanitario o certificación del producto (texto libre)',
   })
   @IsOptional()
   @IsString({ message: 'El registro sanitario debe ser un texto' })

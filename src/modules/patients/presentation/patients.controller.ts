@@ -92,12 +92,31 @@ import {
   type PatientSettings,
 } from '../application/use-cases/patient-settings.use-cases';
 import { PatientSettingsDto } from './dto/patient-settings.dto';
+import {
+  GetDocumentTypeNamesUseCase,
+  UpdateDocumentTypeNamesUseCase,
+  type DocumentTypeNamesSettings,
+} from '../application/use-cases/document-type-names.use-cases';
+import { DocumentTypeNamesDto } from './dto/document-type-names.dto';
+import { DOCUMENT_TYPE_NAMES_FORBIDDEN_MESSAGE } from '../domain/document-type-names';
+import { DocumentTypeNamesReader } from '../domain/ports/document-type-names-repository.port';
+import { resolveDocTypeInput } from '../domain/legacy-doc-type';
+import {
+  withDocTypeName,
+  type WithDocTypeName,
+} from './doc-type-name.presenter';
 
 export const CLINIC_SETTINGS_FORBIDDEN_MESSAGE =
   'Solo un administrador puede cambiar la mayoría de edad.';
 
 type ListPatientsWithCoverageOutput = Omit<ListPatientsOutput, 'items'> & {
-  items: (Patient & { coverage: CoverageSummary })[];
+  items: WithDocTypeName<Patient & { coverage: CoverageSummary }>[];
+};
+
+/** DX-327 (R17): cada paciente de la respuesta con su `docTypeName`. */
+type PatientOutput = WithDocTypeName<Patient>;
+type PatientPageOutput = Omit<ListPatientsOutput, 'items'> & {
+  items: PatientOutput[];
 };
 
 // RolesGuard (a nivel de clase) ya rechazó cualquier token sin rol de clínica
@@ -128,6 +147,11 @@ export class PatientsController {
     // DX-328: mayoría de edad de la clínica.
     private readonly getSettings: GetPatientSettingsUseCase,
     private readonly updateSettings: UpdatePatientSettingsUseCase,
+    // DX-327: nombre local de cada tipo de documento de la clínica.
+    private readonly getDocumentTypeNames: GetDocumentTypeNamesUseCase,
+    private readonly updateDocumentTypeNames: UpdateDocumentTypeNamesUseCase,
+    // DX-327 (R17): nombres locales para el `docTypeName`, una lectura por petición.
+    private readonly documentTypeNamesReader: DocumentTypeNamesReader,
     private readonly tenantContext: TenantContextService,
   ) {}
 
@@ -151,17 +175,36 @@ export class PatientsController {
       'Rol sin acceso a pacientes, o rol no clínico (RECEPTION) enviando ' +
       '`medicalHistory`',
   })
-  create(
+  async create(
     @Body() dto: CreatePatientDto,
     @Req() req: AuthenticatedRequest,
-  ): Promise<Patient> {
-    return this.createPatient.execute({
+  ): Promise<PatientOutput> {
+    const patient = await this.createPatient.execute({
       ...dto,
+      // DX-327 (R9): un código anterior llega como su genérico, sin etiqueta.
+      docType: resolveDocTypeInput(dto.docType),
       birthDate: dto.birthDate ? new Date(dto.birthDate) : undefined,
       consentEvidence: consentEvidenceFrom(req),
       createdById: req.user.sub,
       actorRole: req.user.role,
     });
+    return this.presentOne(patient);
+  }
+
+  /** DX-327 (R17): un paciente con su `docTypeName`. */
+  private async presentOne(patient: Patient): Promise<PatientOutput> {
+    return withDocTypeName(patient, await this.documentTypeNamesReader.get());
+  }
+
+  /** Una página con un solo `get()` de los nombres, no uno por fila. */
+  private async presentPage<T extends { items: Patient[] }>(
+    page: T,
+  ): Promise<Omit<T, 'items'> & { items: PatientOutput[] }> {
+    const names = await this.documentTypeNamesReader.get();
+    return {
+      ...page,
+      items: page.items.map((p) => withDocTypeName(p, names)),
+    };
   }
 
   @Get()
@@ -179,15 +222,18 @@ export class PatientsController {
       page: query.page,
       pageSize: query.pageSize,
     });
-    const coverage = await this.coverageFlags.forPatients(
-      result.items.map((p) => p.id),
-    );
+    const [coverage, names] = await Promise.all([
+      this.coverageFlags.forPatients(result.items.map((p) => p.id)),
+      this.documentTypeNamesReader.get(),
+    ]);
     return {
       ...result,
-      items: result.items.map((p) => ({
-        ...p,
-        coverage: coverage.get(p.id) ?? NO_COVERAGE,
-      })),
+      items: result.items.map((p) =>
+        withDocTypeName(
+          { ...p, coverage: coverage.get(p.id) ?? NO_COVERAGE },
+          names,
+        ),
+      ),
     };
   }
 
@@ -205,21 +251,21 @@ export class PatientsController {
   @ApiForbiddenResponse({ description: 'Rol distinto de ADMIN' })
   async retentionExpiring(
     @Query() query: ListRetentionExpiringQueryDto,
-  ): Promise<ListPatientsOutput> {
+  ): Promise<PatientPageOutput> {
     const page = query.page ?? 1;
     const result = await this.listRetentionExpiring.execute({
       withinDays: query.withinDays ?? 90,
       page,
       pageSize: query.pageSize ?? 20,
     });
-    return {
+    return this.presentPage({
       ...result,
       page,
       pageSize: Math.min(
         query.pageSize ?? 20,
         RETENTION_EXPIRING_MAX_PAGE_SIZE,
       ),
-    };
+    });
   }
 
   // Antes de `@Get(':id')`, como `retention/expiring`: si no, `settings` se
@@ -253,6 +299,48 @@ export class PatientsController {
     return this.updateSettings.execute({ majorityAge: dto.majorityAge }, ctx);
   }
 
+  // También antes de `@Get(':id')`, por lo mismo que `settings`.
+  @Get('document-type-names')
+  @ApiOperation({
+    summary: 'Nombre local de cada tipo de documento de la clínica (DX-327)',
+    description:
+      'Null = sin nombre local: se usa el genérico. El nombre visible de un ' +
+      'documento es la etiqueta del paciente, si no el nombre local de la ' +
+      'clínica para su tipo, si no el genérico (R17). La importación de ' +
+      'pacientes reconoce también estos nombres, antes que los genéricos (R19).',
+  })
+  @ApiOkResponse({ type: DocumentTypeNamesDto })
+  documentTypeNames(): Promise<DocumentTypeNamesSettings> {
+    return this.getDocumentTypeNames.execute();
+  }
+
+  @Put('document-type-names')
+  @Roles(...CLINIC_SETTINGS_WRITE_ROLES)
+  @RolesDeniedMessage(DOCUMENT_TYPE_NAMES_FORBIDDEN_MESSAGE)
+  @ApiOperation({
+    summary: 'Nombre local de cada tipo de documento de la clínica (DX-327)',
+    description:
+      'Sustituye los cinco nombres: una clave ausente o null queda sin nombre ' +
+      'local. Hasta 60 caracteres. Dos tipos no pueden tener el mismo nombre ' +
+      'ni el nombre genérico o el código de otro tipo (sin distinguir ' +
+      'mayúsculas, tildes ni puntuación, en cualquier escritura). Cambia el ' +
+      'nombre visible (R17) y lo que reconoce la importación (R19); no toca ' +
+      'ningún paciente. Si nada cambia, 200 sin evento de auditoría.',
+  })
+  @ApiOkResponse({ type: DocumentTypeNamesDto })
+  @ApiBadRequestResponse({
+    description: 'Nombre ambiguo, sin letras ni números o de más de 60',
+  })
+  @ApiForbiddenResponse({ description: DOCUMENT_TYPE_NAMES_FORBIDDEN_MESSAGE })
+  updateClinicDocumentTypeNames(
+    @Body() dto: DocumentTypeNamesDto,
+    @Req() req: AuditableRequest,
+  ): Promise<DocumentTypeNamesSettings> {
+    const ctx = auditRequestContext(req, this.tenantContext);
+    if (!ctx) throw new Error('Sin sesión de clínica detrás del RolesGuard');
+    return this.updateDocumentTypeNames.execute(dto.names, ctx);
+  }
+
   @Audit({
     action: 'VIEW',
     resource: 'PATIENT',
@@ -269,13 +357,13 @@ export class PatientsController {
     @Param('id') id: string,
     @Req() req: AuthenticatedRequest,
   ): Promise<
-    Patient & {
+    PatientOutput & {
       balance: OverdueBalance;
       coverage: CoverageSummary;
       agreement: AgreementSummary;
     }
   > {
-    const patient = await this.getPatient.execute(id);
+    const patient = await this.presentOne(await this.getPatient.execute(id));
     const balance = await this.balanceFlags.forPatient(
       patient.id,
       req.user.role,
@@ -293,12 +381,19 @@ export class PatientsController {
   })
   @Patch(':id')
   @ApiOkResponse({ type: PatientDto })
-  update(
+  async update(
     @Param('id') id: string,
     @Body() dto: UpdatePatientDto,
-  ): Promise<Patient> {
-    return this.updatePatient.execute(id, {
+  ): Promise<PatientOutput> {
+    const patient = await this.updatePatient.execute(id, {
       ...dto,
+      // DX-327 (R9): traducido ANTES del caso de uso, que compara genéricos
+      // (R7): un código anterior reenviado con el mismo genérico conserva la
+      // etiqueta.
+      docType:
+        dto.docType === undefined
+          ? undefined
+          : resolveDocTypeInput(dto.docType),
       // Tres casos, no dos: ausente = no tocar, `null` = vaciar la columna
       // (es nullable), y una fecha = parsearla. El guard anterior sólo miraba
       // `undefined`, así que un `null` caía en `new Date(null)` y escribía
@@ -308,6 +403,7 @@ export class PatientsController {
           ? dto.birthDate
           : new Date(dto.birthDate),
     });
+    return this.presentOne(patient);
   }
 
   @Audit({
@@ -360,16 +456,18 @@ export class PatientsController {
   })
   @ApiOkResponse({ type: PatientDto })
   @ApiForbiddenResponse({ description: 'Rol distinto de ADMIN' })
-  changeRetention(
+  async changeRetention(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: SetRetentionExtensionDto,
     @Req() req: AuthenticatedRequest,
-  ): Promise<Patient> {
-    return this.setRetention.execute(id, {
-      value: dto.retentionExtended,
-      reason: dto.reason,
-      actorId: req.user.sub,
-    });
+  ): Promise<PatientOutput> {
+    return this.presentOne(
+      await this.setRetention.execute(id, {
+        value: dto.retentionExtended,
+        reason: dto.reason,
+        actorId: req.user.sub,
+      }),
+    );
   }
 
   @Audit({
@@ -396,14 +494,16 @@ export class PatientsController {
   @ApiOkResponse({ type: PatientDto })
   @ApiConflictResponse({ description: 'La HC no está en retención' })
   @ApiForbiddenResponse({ description: 'Rol distinto de ADMIN' })
-  suppress(
+  async suppress(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: PartialSuppressionDto,
     @Req() req: AuthenticatedRequest,
-  ): Promise<Patient> {
-    return this.partiallySuppress.execute(id, {
-      reason: dto.reason,
-      actorId: req.user.sub,
-    });
+  ): Promise<PatientOutput> {
+    return this.presentOne(
+      await this.partiallySuppress.execute(id, {
+        reason: dto.reason,
+        actorId: req.user.sub,
+      }),
+    );
   }
 }

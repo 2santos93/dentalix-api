@@ -2,15 +2,20 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
-import { Prisma, PrismaClient, DocType, Sex } from '@prisma/client';
+import { Prisma, PrismaClient, Sex } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
 import {
   REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_TOKYO_FIXTURE,
   registerBody as clinicRegisterBody,
+  type RegionalFixture,
 } from './support/location-fixtures';
+import { DOCUMENT_TYPES } from '../src/modules/patients/domain/document-type';
+import { legacyStoredDocType } from '../src/modules/patients/domain/legacy-doc-type';
+import { DocumentTypeNamesReader } from '../src/modules/patients/domain/ports/document-type-names-repository.port';
 
 // `raw` es una conexión de ADMINISTRACIÓN exclusiva para el cleanup en
 // beforeAll/afterAll — usa DIRECT_URL (rol owner `dentalix`, superuser)
@@ -55,11 +60,16 @@ interface MedicalHistoryResponseBody {
 
 async function registerAndLogin(
   app: INestApplication<App>,
-  opts: { clinicName: string; subdomain: string; email: string },
+  opts: {
+    clinicName: string;
+    subdomain: string;
+    email: string;
+    fixture?: RegionalFixture;
+  },
 ): Promise<{ tenantId: string; accessToken: string; subdomain: string }> {
   const register = await registerVerified(
     app,
-    clinicRegisterBody(REGIONAL_BOGOTA_FIXTURE, {
+    clinicRegisterBody(opts.fixture ?? REGIONAL_BOGOTA_FIXTURE, {
       clinicName: opts.clinicName,
       subdomain: opts.subdomain,
       email: opts.email,
@@ -123,7 +133,7 @@ describe('Patients (e2e)', () => {
       .send({
         firstName: 'Ana',
         lastName: 'Gomez',
-        docType: DocType.CC,
+        docType: 'NATIONAL_ID',
         docNumber: '1001',
         sex: Sex.F,
         // No surrounding whitespace: class-validator's IsEmail() rejects a
@@ -280,7 +290,7 @@ describe('Patients (e2e)', () => {
       .send({
         firstName: 'Nulo',
         lastName: 'Prueba',
-        docType: DocType.CC,
+        docType: 'NATIONAL_ID',
         docNumber: '8100',
         sex: Sex.M,
       })
@@ -327,7 +337,7 @@ describe('Patients (e2e)', () => {
           .post('/api/v1/patients')
           .set('X-Tenant-Host', hostFor(clinic.subdomain))
           .set('Authorization', `Bearer ${clinic.accessToken}`)
-          .send({ docType: DocType.CC, sex: Sex.M, ...body })
+          .send({ docType: 'NATIONAL_ID', sex: Sex.M, ...body })
           .expect(201)
       ).body as PatientResponseBody;
     const jose = await createIn(clinicA, {
@@ -395,7 +405,7 @@ describe('Patients (e2e)', () => {
       .send({
         firstName: 'Solo',
         lastName: 'DeA',
-        docType: DocType.CC,
+        docType: 'NATIONAL_ID',
         docNumber: '2002',
         sex: Sex.M,
       })
@@ -444,7 +454,7 @@ describe('Patients (e2e)', () => {
       .send({
         firstName: 'Con',
         lastName: 'Historia',
-        docType: DocType.CC,
+        docType: 'NATIONAL_ID',
         docNumber: '4001',
         sex: Sex.F,
         medicalHistory: {
@@ -489,7 +499,7 @@ describe('Patients (e2e)', () => {
       .send({
         firstName: 'Sin',
         lastName: 'Historia',
-        docType: DocType.CC,
+        docType: 'NATIONAL_ID',
         docNumber: '4002',
         sex: Sex.M,
       })
@@ -521,7 +531,7 @@ describe('Patients (e2e)', () => {
       send(request(app.getHttpServer()).post('/api/v1/patients')).send({
         firstName: 'Doc',
         lastName: docNumber,
-        docType: DocType.CC,
+        docType: 'NATIONAL_ID',
         docNumber,
         sex: Sex.F,
       });
@@ -555,5 +565,393 @@ describe('Patients (e2e)', () => {
       .expect(200);
     expect(await keyOf(first.id)).toBe('80100200');
     expect(await keyOf(other.id)).toBe('80100201');
+  });
+
+  // DX-327: tipos de documento genéricos, nombre libre (R7), entrada anterior
+  // (R9), fase 1 en la BD (R4–R5) y nombre visible (R17). La sede es
+  // REGIONAL_TOKYO_FIXTURE: el país de la sede lo obliga el enum hasta
+  // DX-312; no decide nada.
+  describe('DX-327: tipos de documento genéricos', () => {
+    interface DocPatient {
+      id: string;
+      docType: string;
+      docTypeLabel: string | null;
+      docTypeName: string;
+      docNumber: string | null;
+    }
+    interface DocRow {
+      documentType: string;
+      docType: string;
+      docTypeLabel: string | null;
+      docKey: string | null;
+    }
+
+    let clinic: { tenantId: string; accessToken: string; subdomain: string };
+    let seq = 0;
+
+    const send = (req: request.Test) =>
+      req
+        .set('X-Tenant-Host', hostFor(clinic.subdomain))
+        .set('Authorization', `Bearer ${clinic.accessToken}`);
+    const create = (body: Record<string, unknown>) =>
+      send(request(app.getHttpServer()).post('/api/v1/patients')).send({
+        firstName: 'Documento',
+        lastName: `Prueba ${++seq}`,
+        sex: Sex.F,
+        ...body,
+      });
+    const patch = (id: string, body: Record<string, unknown>) =>
+      send(request(app.getHttpServer()).patch(`/api/v1/patients/${id}`))
+        .send(body)
+        .expect(200);
+    const detail = async (id: string) =>
+      (
+        await send(
+          request(app.getHttpServer()).get(`/api/v1/patients/${id}`),
+        ).expect(200)
+      ).body as DocPatient;
+    const listed = async (id: string, query: string) => {
+      const res = await send(
+        request(app.getHttpServer()).get('/api/v1/patients'),
+      )
+        .query({ query })
+        .expect(200);
+      return (res.body as { items: DocPatient[] }).items.find(
+        (p) => p.id === id,
+      );
+    };
+    const sqlRow = async (id: string): Promise<DocRow> => {
+      const [row] = await raw.$queryRaw<DocRow[]>`
+        SELECT "documentType"::text AS "documentType", "docType"::text AS "docType",
+               "docTypeLabel", "docKey"
+          FROM "patients" WHERE "id" = ${id}::uuid`;
+      return row;
+    };
+    const setNames = (names: Record<string, string | null>) =>
+      send(
+        request(app.getHttpServer()).put(
+          '/api/v1/patients/document-type-names',
+        ),
+      )
+        .send({ names })
+        .expect(200);
+
+    beforeAll(async () => {
+      clinic = await registerAndLogin(app, {
+        clinicName: 'Clinica Documentos',
+        subdomain: 'clinica-documentos',
+        email: 'owner@clinica-documentos.com',
+        fixture: REGIONAL_TOKYO_FIXTURE,
+      });
+    });
+
+    it('every document type round-trips through create, edit and SQL', async () => {
+      for (const [i, docType] of DOCUMENT_TYPES.entries()) {
+        const res = await create({ docType, docNumber: `RX-10${i}` }).expect(
+          201,
+        );
+        const created = res.body as DocPatient;
+        expect(created).toMatchObject({ docType, docTypeLabel: null });
+        expect(await detail(created.id)).toMatchObject({
+          docType,
+          docTypeLabel: null,
+        });
+        // Fase 1: el genérico y la proyección anterior para las réplicas
+        // anteriores, que leen solo "docType" (R5, §7).
+        expect(await sqlRow(created.id)).toMatchObject({
+          documentType: docType,
+          docType: legacyStoredDocType(docType),
+          docTypeLabel: null,
+        });
+
+        const next = DOCUMENT_TYPES[(i + 1) % DOCUMENT_TYPES.length];
+        await patch(created.id, { docType: next });
+        expect(await detail(created.id)).toMatchObject({
+          docType: next,
+          docTypeLabel: null,
+        });
+        expect(await sqlRow(created.id)).toMatchObject({
+          documentType: next,
+          docType: legacyStoredDocType(next),
+          docTypeLabel: null,
+        });
+      }
+    });
+
+    it('a national number with a letter prefix and separators is stored as written with its free label', async () => {
+      const prefixed = (
+        await create({
+          docType: 'NATIONAL_ID',
+          docNumber: 'V-12345678',
+          docTypeLabel: 'ID local',
+        }).expect(201)
+      ).body as DocPatient;
+      expect(await detail(prefixed.id)).toMatchObject({
+        docType: 'NATIONAL_ID',
+        docNumber: 'V-12345678',
+        docTypeLabel: 'ID local',
+        docTypeName: 'ID local',
+      });
+      expect(await sqlRow(prefixed.id)).toMatchObject({
+        docKey: 'V12345678',
+        docTypeLabel: 'ID local',
+      });
+
+      const other = (
+        await create({
+          docType: 'NATIONAL_ID',
+          docNumber: 'E-81234567',
+        }).expect(201)
+      ).body as DocPatient;
+      expect(await detail(other.id)).toMatchObject({
+        docNumber: 'E-81234567',
+        docTypeLabel: null,
+      });
+      expect((await sqlRow(other.id)).docKey).toBe('E81234567');
+    });
+
+    it('a free label is stored normalized, comes back in the detail and the list, and is cleared only when the generic type changes without one', async () => {
+      const created = (
+        await create({
+          docType: 'NATIONAL_ID',
+          docNumber: 'RX-2001',
+          docTypeLabel: '  ID   local ',
+        }).expect(201)
+      ).body as DocPatient;
+      expect(created.docTypeLabel).toBe('ID local');
+      expect(await detail(created.id)).toMatchObject({
+        docTypeLabel: 'ID local',
+      });
+      expect(await listed(created.id, 'RX-2001')).toMatchObject({
+        docTypeLabel: 'ID local',
+        docTypeName: 'ID local',
+      });
+      expect((await sqlRow(created.id)).docTypeLabel).toBe('ID local');
+
+      // El mismo tipo, u otro campo: se queda.
+      await patch(created.id, { docType: 'NATIONAL_ID' });
+      await patch(created.id, { firstName: 'Documento' });
+      expect((await detail(created.id)).docTypeLabel).toBe('ID local');
+
+      // Otro tipo sin etiqueta: se borra.
+      await patch(created.id, { docType: 'PASSPORT' });
+      expect(await detail(created.id)).toMatchObject({
+        docType: 'PASSPORT',
+        docTypeLabel: null,
+      });
+      expect((await sqlRow(created.id)).docTypeLabel).toBeNull();
+
+      // Otro tipo con etiqueta: la nueva; null la quita.
+      await patch(created.id, { docType: 'TAX_ID', docTypeLabel: 'Fiscal A' });
+      expect((await detail(created.id)).docTypeLabel).toBe('Fiscal A');
+      await patch(created.id, { docTypeLabel: null });
+      expect((await detail(created.id)).docTypeLabel).toBeNull();
+
+      const tooLong = await send(
+        request(app.getHttpServer()).patch(`/api/v1/patients/${created.id}`),
+      )
+        .send({ docTypeLabel: 'x'.repeat(41) })
+        .expect(400);
+      expect((tooLong.body as { message: string }).message).toBe(
+        'El nombre del documento admite hasta 40 caracteres.',
+      );
+    });
+
+    it('legacy codes in the body are accepted as their generic type with no label during the rollout', async () => {
+      for (const [code, type] of [
+        ['CC', 'NATIONAL_ID'],
+        ['TI', 'NATIONAL_ID'],
+        ['CE', 'RESIDENCE_PERMIT'],
+      ] as const) {
+        const created = (await create({ docType: code }).expect(201))
+          .body as DocPatient;
+        expect(created).toMatchObject({ docType: type, docTypeLabel: null });
+        expect(await sqlRow(created.id)).toMatchObject({
+          documentType: type,
+          docTypeLabel: null,
+        });
+      }
+      const labelled = (
+        await create({ docType: 'CE', docTypeLabel: 'ID local' }).expect(201)
+      ).body as DocPatient;
+      expect(labelled).toMatchObject({
+        docType: 'RESIDENCE_PERMIT',
+        docTypeLabel: 'ID local',
+      });
+      // Una edición anterior que reenvía su código no cambia el tipo genérico:
+      // la etiqueta se queda (pre-flight I1).
+      await patch(labelled.id, { docType: 'CE', phone: '+81 3 5555 0100' });
+      expect(await detail(labelled.id)).toMatchObject({
+        docType: 'RESIDENCE_PERMIT',
+        docTypeLabel: 'ID local',
+      });
+    });
+
+    it("docTypeName is the patient's label, then the clinic's local name, then the generic name", async () => {
+      const plain = (
+        await create({ docType: 'NATIONAL_ID', docNumber: 'RX-3001' }).expect(
+          201,
+        )
+      ).body as DocPatient;
+      const labelled = (
+        await create({
+          docType: 'NATIONAL_ID',
+          docNumber: 'RX-3002',
+          docTypeLabel: 'ID local',
+        }).expect(201)
+      ).body as DocPatient;
+      const parties = `/api/v1/patients/${plain.id}/responsible-parties`;
+      await send(request(app.getHttpServer()).post(parties))
+        .send({
+          fullName: 'Contacto A',
+          docType: 'NATIONAL_ID',
+          relationship: 'OTHER',
+        })
+        .expect(201);
+      await send(request(app.getHttpServer()).post(parties))
+        .send({ responsiblePatientId: labelled.id, relationship: 'OTHER' })
+        .expect(201);
+      const contactName = async () => {
+        const res = await send(
+          request(app.getHttpServer()).get(parties),
+        ).expect(200);
+        const body = res.body as {
+          parties: {
+            kind: string;
+            docTypeName: string | null;
+            responsiblePatient: { docTypeName: string } | null;
+          }[];
+        };
+        return body.parties.map((p) => [
+          p.kind,
+          p.docTypeName,
+          p.responsiblePatient?.docTypeName ?? null,
+        ]);
+      };
+
+      expect(plain.docTypeName).toBe('Documento nacional');
+      expect((await detail(plain.id)).docTypeName).toBe('Documento nacional');
+      expect((await listed(plain.id, 'RX-3001'))?.docTypeName).toBe(
+        'Documento nacional',
+      );
+      expect(await contactName()).toEqual([
+        ['CONTACT', 'Documento nacional', null],
+        ['PATIENT', 'ID local', 'ID local'],
+      ]);
+
+      await setNames({ NATIONAL_ID: 'Documento A' });
+      try {
+        expect((await detail(plain.id)).docTypeName).toBe('Documento A');
+        expect((await listed(plain.id, 'RX-3001'))?.docTypeName).toBe(
+          'Documento A',
+        );
+        expect((await detail(labelled.id)).docTypeName).toBe('ID local');
+        expect(await contactName()).toEqual([
+          ['CONTACT', 'Documento A', null],
+          ['PATIENT', 'ID local', 'ID local'],
+        ]);
+      } finally {
+        await setNames({});
+      }
+    });
+
+    it('the clinic names are read once per request, not once per row', async () => {
+      for (let i = 0; i < 3; i += 1) {
+        await create({ docType: 'OTHER', docNumber: `RX-40${i}` }).expect(201);
+      }
+      const reader = app.get(DocumentTypeNamesReader, { strict: false });
+      const get = jest.spyOn(reader, 'get');
+      try {
+        const res = await send(
+          request(app.getHttpServer()).get('/api/v1/patients'),
+        )
+          .query({ query: 'RX-40' })
+          .expect(200);
+        expect((res.body as { items: unknown[] }).items).toHaveLength(3);
+        expect(get).toHaveBeenCalledTimes(1);
+      } finally {
+        get.mockRestore();
+      }
+    });
+
+    it('legacy rows written by an older API read back generic with no label', async () => {
+      const [{ id }] = await raw.$queryRaw<{ id: string }[]>`
+        INSERT INTO "patients" ("id","tenantId","firstName","lastName","docType","docNumber","updatedAt")
+        VALUES (gen_random_uuid(), ${clinic.tenantId}::uuid, 'Anterior', 'Fila', 'TI', 'RX-5001', now())
+        RETURNING "id"::text AS "id"`;
+      expect(await detail(id)).toMatchObject({
+        docType: 'NATIONAL_ID',
+        docTypeLabel: null,
+        docTypeName: 'Documento nacional',
+      });
+      expect(await listed(id, 'RX-5001')).toMatchObject({
+        docType: 'NATIONAL_ID',
+        docTypeLabel: null,
+      });
+    });
+
+    it('the type is required and has no default', async () => {
+      const res = await create({ docNumber: 'RX-6001' }).expect(400);
+      expect(JSON.stringify(res.body)).toContain(
+        'El tipo de documento debe ser uno de: NATIONAL_ID, PASSPORT, RESIDENCE_PERMIT, TAX_ID, OTHER.',
+      );
+      await create({ docType: 'constructor' }).expect(400);
+    });
+
+    it('a full edit that resends the same type keeps the label', async () => {
+      const created = (
+        await create({
+          docType: 'PASSPORT',
+          docNumber: 'RX-7001',
+          docTypeLabel: 'ID local',
+        }).expect(201)
+      ).body as DocPatient & Record<string, unknown>;
+      // Como cualquier cliente: todos los campos del formulario, con el mismo
+      // tipo y sin `docTypeLabel`.
+      await patch(created.id, {
+        firstName: 'Documento',
+        lastName: 'Completo',
+        docType: 'PASSPORT',
+        docNumber: 'RX-7001',
+        birthDate: '1990-05-01',
+        sex: Sex.M,
+        phone: '+81 3 5555 0101',
+        email: 'completo@example.com',
+        address: 'Calle 1',
+        notes: null,
+        maritalStatus: null,
+        occupation: null,
+        physicianName: null,
+        physicianPhone: null,
+        emergencyContactName: null,
+        emergencyContactRelationship: null,
+        emergencyContactPhone: null,
+      });
+      expect(await detail(created.id)).toMatchObject({
+        lastName: 'Completo',
+        docType: 'PASSPORT',
+        docTypeLabel: 'ID local',
+      });
+    });
+
+    it('PATCH docTypeLabel is audited by field name only', async () => {
+      const created = (
+        await create({ docType: 'OTHER', docNumber: 'RX-8001' }).expect(201)
+      ).body as DocPatient;
+      await patch(created.id, { docTypeLabel: 'Documento secreto' });
+      const events = await raw.auditEvent.findMany({
+        where: {
+          tenantId: clinic.tenantId,
+          patientId: created.id,
+          action: 'UPDATE',
+        },
+        select: { metadata: true },
+      });
+      expect(events).toHaveLength(1);
+      expect(
+        (events[0].metadata as { changedFields: string[] }).changedFields,
+      ).toEqual(['docTypeLabel']);
+      expect(JSON.stringify(events)).not.toContain('secreto');
+    });
   });
 });

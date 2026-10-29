@@ -1,4 +1,5 @@
 import { INestApplication } from '@nestjs/common';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import request from 'supertest';
@@ -16,6 +17,8 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
+import { legacyStoredDocType } from '../src/modules/patients/domain/legacy-doc-type';
+import { MISSING_FILE_MESSAGE } from '../src/modules/patient-imports/application/patient-imports.use-cases';
 
 // DX-107 · Importación de pacientes desde CSV/XLSX en HTTP real: plantilla,
 // inspección, dry-run sin escribir, confirmación en segundo plano mientras la
@@ -77,7 +80,7 @@ function bulkCsv(count: number, prefix: string): Buffer {
   for (let i = 0; i < count; i += 1) {
     const doc = `${prefix}${String(i).padStart(6, '0')}`;
     lines.push(
-      `CC;${doc};Paciente ${i};Masivo;01/02/1990;F;310${String(i).padStart(7, '0')};p${prefix}${i}@example.com;`,
+      `NATIONAL_ID;${doc};Paciente ${i};Masivo;01/02/1990;F;310${String(i).padStart(7, '0')};p${prefix}${i}@example.com;`,
     );
   }
   return csvOf(lines);
@@ -169,7 +172,7 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
     // Paciente que ya existe: nombre y teléfono propios, sin email ni fecha.
     const existing = await as(api().post('/api/v1/patients'), a.adminToken)
       .send({
-        docType: 'CC',
+        docType: 'NATIONAL_ID',
         docNumber: '900900',
         firstName: 'Ya',
         lastName: 'Existía',
@@ -179,8 +182,10 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
       .expect(201);
     existingId = (existing.body as { id: string }).id;
     await as(api().post('/api/v1/patients'), a.adminToken)
+      // DX-327 (R12): otro tipo GENÉRICO; dos códigos que dan el mismo
+      // genérico ya no son «otro tipo».
       .send({
-        docType: 'TI',
+        docType: 'PASSPORT',
         docNumber: '700700',
         firstName: 'Otro',
         lastName: 'Tipo',
@@ -200,9 +205,13 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
       reception,
     ).expect(403);
     expect((res.body as { message: string }).message).toMatch(/administrador/);
-    await upload('', csvOf(['CC;1;A;B;;;;;']), 'p.csv', {}, reception).expect(
-      403,
-    );
+    await upload(
+      '',
+      csvOf(['NATIONAL_ID;1;A;B;;;;;']),
+      'p.csv',
+      {},
+      reception,
+    ).expect(403);
     await as(api().get('/api/v1/patient-imports'), reception).expect(403);
   });
 
@@ -223,7 +232,7 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
   it('inspect: cabeceras, mapeo sugerido y muestra, sin crear lote', async () => {
     const res = await upload(
       '/inspect',
-      csvOf(['CC;1;Ana;Pérez;;;;;']),
+      csvOf(['NATIONAL_ID;1;Ana;Pérez;;;;;']),
       'pacientes.csv',
     ).expect(200);
     expect(res.body).toMatchObject({
@@ -245,18 +254,18 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
   it('dry-run: totales, duplicados y errores por fila en español SIN escribir pacientes', async () => {
     const before = await livePatients();
     const bytes = csvOf([
-      'CC;1.000.001;Ana;Nueva;03/05/1990;F;310 123 4567;ana@example.com;', // 2 válida
-      'CC;1000002;Luis;Nuevo;;M;;;', // 3 válida
-      'CC;1000001;Ana;Repetida;;;;;', // 4 repetida en el archivo
-      'CC;900900;Nombre;Distinto;1980-01-01;F;3001111111;ya@example.com;nota', // 5 ya existe
-      'CC;700700;Choque;Tipo;;;;;', // 6 mismo nº con otro tipo
+      'NATIONAL_ID;1.000.001;Ana;Nueva;03/05/1990;F;310 123 4567;ana@example.com;', // 2 válida
+      'NATIONAL_ID;1000002;Luis;Nuevo;;M;;;', // 3 válida
+      'NATIONAL_ID;1000001;Ana;Repetida;;;;;', // 4 repetida en el archivo
+      'NATIONAL_ID;900900;Nombre;Distinto;1980-01-01;F;3001111111;ya@example.com;nota', // 5 ya existe
+      'NATIONAL_ID;700700;Choque;Tipo;;;;;', // 6 mismo nº con otro tipo
       ';;;SinNombre;31/02/1990;Q;abc;=HYPERLINK("http://x");', // 7 errores
-      'CC;1000003;Eva;Nueva;;;;;', // 8 válida
+      'NATIONAL_ID;1000003;Eva;Nueva;;;;;', // 8 válida
     ]);
     const sha = createHash('sha256').update(bytes).digest('hex');
     const started = Date.now();
     const res = await upload('', bytes, 'pacientes.csv', {
-      defaultDocType: 'CC',
+      defaultDocType: 'NATIONAL_ID',
     }).expect(201);
     expect(Date.now() - started).toBeLessThan(10_000);
     firstBatch = res.body as Batch;
@@ -278,7 +287,7 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
       expect.objectContaining({ kind: 'DUPLICATE_EXISTING' }),
     ]);
     expect(byRow(6).map((i) => i.kind)).toEqual(['ERROR']);
-    expect(byRow(6)[0].message).toMatch(/registrado como TI/);
+    expect(byRow(6)[0].message).toMatch(/registrado como Pasaporte/);
     expect(byRow(7).map((i) => i.column)).toEqual([
       'nombres',
       'numero_documento',
@@ -463,7 +472,10 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
   it('el mismo archivo otra vez: todo son duplicados, nada nuevo que crear', async () => {
     const res = await upload(
       '',
-      csvOf(['CC;1000001;Ana;Nueva;;;;;', 'CC;1000002;Luis;Nuevo;;;;;']),
+      csvOf([
+        'NATIONAL_ID;1000001;Ana;Nueva;;;;;',
+        'NATIONAL_ID;1000002;Luis;Nuevo;;;;;',
+      ]),
       'otra-vez.csv',
     ).expect(201);
     expect((res.body as Batch).totals).toEqual({
@@ -506,7 +518,7 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
   it('deshacer: retira solo lo creado por el lote y revierte lo rellenado que nadie cambió', async () => {
     const victim = await as(api().post('/api/v1/patients'), a.adminToken)
       .send({
-        docType: 'CC',
+        docType: 'NATIONAL_ID',
         docNumber: '800800',
         firstName: 'Para',
         lastName: 'Rellenar',
@@ -517,9 +529,9 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
     const dry = await upload(
       '',
       csvOf([
-        'CC;2000001;Nuevo;Uno;;;;;',
-        'CC;2000002;Nuevo;Dos;;;;;',
-        'CC;800800;X;Y;1970-07-07;;3105550000;relleno@example.com;',
+        'NATIONAL_ID;2000001;Nuevo;Uno;;;;;',
+        'NATIONAL_ID;2000002;Nuevo;Dos;;;;;',
+        'NATIONAL_ID;800800;X;Y;1970-07-07;;3105550000;relleno@example.com;',
       ]),
       'segundo.csv',
     ).expect(201);
@@ -589,7 +601,7 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
     // Tras deshacer, el mismo documento se puede volver a importar.
     const again = await upload(
       '',
-      csvOf(['CC;2000001;Nuevo;Uno;;;;;']),
+      csvOf(['NATIONAL_ID;2000001;Nuevo;Uno;;;;;']),
       'tercero.csv',
     ).expect(201);
     expect((again.body as Batch).totals.validRows).toBe(1);
@@ -599,13 +611,20 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
     const book = buildXlsx([
       [
         'Tipo Doc',
-        'Cédula',
+        'Documento',
         'Nombre',
         'Apellidos',
         'Fecha de nacimiento',
         'Celular',
       ],
-      ['CC', 3000001, 'Hoja', 'Excel', { date: 32874 }, 3101234567],
+      [
+        'Documento nacional',
+        3000001,
+        'Hoja',
+        'Excel',
+        { date: 32874 },
+        3101234567,
+      ],
     ]);
     const res = await as(api().post('/api/v1/patient-imports'), a.adminToken)
       .attach('file', book, {
@@ -731,7 +750,7 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
       .expect(201);
     await as(api().post('/api/v1/patients'), a.adminToken)
       .send({
-        docType: 'CC',
+        docType: 'NATIONAL_ID',
         docNumber: '555000111',
         firstName: 'Alta',
         lastName: 'Manual',
@@ -754,7 +773,9 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
     const lines = ['sep=;', 'Listado de pacientes 2026', '', HEADER];
     for (let i = 0; i < 10_000; i += 1) {
       if (i % 1000 === 0) lines.push('');
-      lines.push(`CC;9${String(i).padStart(7, '0')};Nombre ${i};Hoja;;;;;`);
+      lines.push(
+        `NATIONAL_ID;9${String(i).padStart(7, '0')};Nombre ${i};Hoja;;;;;`,
+      );
     }
     const res = await upload(
       '',
@@ -800,7 +821,7 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
       { name: 'xl/styles.xml', data: Buffer.from(styles) },
     ]);
     const res = await as(api().post('/api/v1/patient-imports'), a.adminToken)
-      .field('defaultDocType', 'CC')
+      .field('defaultDocType', 'NATIONAL_ID')
       .attach('file', book, {
         filename: 'raro.xlsx',
         contentType: 'application/octet-stream',
@@ -892,15 +913,15 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
         lastName: docNumber,
         sex: 'F',
       });
-    await create('CC', '55.123.456').expect(201);
+    await create('NATIONAL_ID', '55.123.456').expect(201);
     await create('PASSPORT', 'ab 12 345').expect(201);
     const dry = (
       await upload(
         '',
         csvOf([
-          'CC;55123456;Ana;Mismo;;;;;', // 2: «55.123.456» ya existe
+          'NATIONAL_ID;55123456;Ana;Mismo;;;;;', // 2: «55.123.456» ya existe
           'PASAPORTE;AB-12345;Bea;Mismo;;;;;', // 3: «ab 12 345» ya existe
-          'CC;66.000.001;Nuevo;Paciente;;;;;', // 4: nuevo
+          'NATIONAL_ID;66.000.001;Nuevo;Paciente;;;;;', // 4: nuevo
         ]),
         'formatos.csv',
         {},
@@ -944,7 +965,301 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
       { docKey: 'AB12345', n: 1 },
     ]);
     // Y el alta manual con el formato del archivo (o al revés) no duplica.
-    await create('CC', '55-123-456').expect(409);
-    await create('CC', '66000001').expect(409);
+    await create('NATIONAL_ID', '55-123-456').expect(409);
+    await create('NATIONAL_ID', '66000001').expect(409);
+  });
+
+  // ---------------------------------------------------------------------
+  // DX-327: tipos de documento genéricos. Números ficticios (`RX-…`) o los
+  // formatos de R15 cuando el caso es justo ese formato.
+  // ---------------------------------------------------------------------
+
+  const importAndDrain = async (
+    bytes: Buffer,
+    name: string,
+    clinic: Clinic = a,
+  ): Promise<Batch> => {
+    const dry = (
+      await upload('', bytes, name, {}, clinic.adminToken, clinic).expect(201)
+    ).body as Batch;
+    await as(
+      api().post(`/api/v1/patient-imports/${dry.id}/confirm`),
+      clinic.adminToken,
+      clinic,
+    )
+      .send({ duplicateMode: 'SKIP' })
+      .expect(200);
+    await drain();
+    return dry;
+  };
+
+  const docColumns = (importBatchId: string) =>
+    raw.$queryRaw<
+      {
+        docNumber: string;
+        documentType: string;
+        docType: string;
+        docTypeLabel: string | null;
+      }[]
+    >`
+      SELECT "docNumber", "documentType"::text AS "documentType",
+             "docType"::text AS "docType", "docTypeLabel"
+        FROM "patients"
+       WHERE "import_batch_id" = ${importBatchId}::uuid
+       ORDER BY "docNumber"`;
+
+  it('a file with generic types imports every type and its legacy projection is stored', async () => {
+    const bytes = csvOf([
+      'NATIONAL_ID;RX-5001;Uno;Genérico;;;;;',
+      'Pasaporte;RX-5002;Dos;Genérico;;;;;',
+      'Permiso de residencia;RX-5003;Tres;Genérico;;;;;',
+      'Identificación fiscal;RX-5004;Cuatro;Genérico;;;;;',
+      'Otro documento;RX-5005;Cinco;Genérico;;;;;',
+    ]);
+    const dry = (await upload('', bytes, 'genericos.csv').expect(201))
+      .body as Batch;
+    expect(dry.issues).toEqual([]);
+    expect(dry.preview.map((p) => p.data.docType)).toEqual([
+      'NATIONAL_ID',
+      'PASSPORT',
+      'RESIDENCE_PERMIT',
+      'TAX_ID',
+      'OTHER',
+    ]);
+    // Filas preparadas de la fase 1: el código anterior para un worker
+    // anterior, el genérico para el nuevo, y ninguna etiqueta.
+    const rows = await raw.patientImportRow.findMany({
+      where: { batchId: dry.id },
+      orderBy: { rowNumber: 'asc' },
+    });
+    expect(
+      rows.map((r) => {
+        const data = r.data as Record<string, unknown>;
+        return [data.docType, data.documentType, 'docTypeLabel' in data];
+      }),
+    ).toEqual([
+      ['CC', 'NATIONAL_ID', false],
+      ['PASSPORT', 'PASSPORT', false],
+      ['CE', 'RESIDENCE_PERMIT', false],
+      ['OTHER', 'TAX_ID', false],
+      ['OTHER', 'OTHER', false],
+    ]);
+    await as(
+      api().post(`/api/v1/patient-imports/${dry.id}/confirm`),
+      a.adminToken,
+    )
+      .send({ duplicateMode: 'SKIP' })
+      .expect(200);
+    await drain();
+    expect(await docColumns(dry.id)).toEqual([
+      {
+        docNumber: 'RX5001',
+        documentType: 'NATIONAL_ID',
+        docType: legacyStoredDocType('NATIONAL_ID'),
+        docTypeLabel: null,
+      },
+      {
+        docNumber: 'RX5002',
+        documentType: 'PASSPORT',
+        docType: 'PASSPORT',
+        docTypeLabel: null,
+      },
+      {
+        docNumber: 'RX5003',
+        documentType: 'RESIDENCE_PERMIT',
+        docType: legacyStoredDocType('RESIDENCE_PERMIT'),
+        docTypeLabel: null,
+      },
+      {
+        docNumber: 'RX5004',
+        documentType: 'TAX_ID',
+        docType: 'OTHER',
+        docTypeLabel: null,
+      },
+      {
+        docNumber: 'RX5005',
+        documentType: 'OTHER',
+        docType: 'OTHER',
+        docTypeLabel: null,
+      },
+    ]);
+  });
+
+  it('legacy file with CC and cédula rows imports NATIONAL_ID with no label', async () => {
+    const dry = await importAndDrain(
+      csvOf([
+        'CC;RX-6001;Uno;Anterior;;;;;',
+        'cédula;RX-6002;Dos;Anterior;;;;;',
+        'TI;RX-6003;Tres;Anterior;;;;;',
+        'Extranjería;RX-6004;Cuatro;Anterior;;;;;',
+      ]),
+      'anterior.csv',
+    );
+    expect(dry.issues).toEqual([]);
+    expect(
+      (await docColumns(dry.id)).map((p) => [p.documentType, p.docTypeLabel]),
+    ).toEqual([
+      ['NATIONAL_ID', null],
+      ['NATIONAL_ID', null],
+      ['NATIONAL_ID', null],
+      ['RESIDENCE_PERMIT', null],
+    ]);
+  });
+
+  it('a file with letter-prefixed national numbers imports without errors', async () => {
+    const dry = await importAndDrain(
+      csvOf([
+        'Documento nacional;V-12.345.678;Uno;Prefijo;;;;;',
+        'Documento nacional;E-81234567;Dos;Prefijo;;;;;',
+        'Identificación fiscal;J-12345678-9;Tres;Prefijo;;;;;',
+      ]),
+      'prefijos.csv',
+    );
+    expect(dry.totals).toMatchObject({ validRows: 3, errorRows: 0 });
+    expect(dry.issues).toEqual([]);
+    expect(
+      (await docColumns(dry.id)).map((p) => [
+        p.docNumber,
+        p.documentType,
+        p.docTypeLabel,
+      ]),
+    ).toEqual([
+      ['E81234567', 'NATIONAL_ID', null],
+      ['J123456789', 'TAX_ID', null],
+      ['V12345678', 'NATIONAL_ID', null],
+    ]);
+  });
+
+  it('a pending legacy row from an older API is imported with its generic type', async () => {
+    const dry = (
+      await upload(
+        '',
+        csvOf(['OTHER;RX-7001;Fila;Anterior;;;;;']),
+        'anterior-pendiente.csv',
+      ).expect(201)
+    ).body as Batch;
+    // La fila como la escribía la API anterior: solo el código, sin el
+    // genérico (ni etiqueta).
+    await raw.$executeRaw`
+      UPDATE "patient_import_rows"
+         SET "data" = '{"docType":"TI","docNumber":"RX7001","firstName":"Fila","lastName":"Anterior"}'::jsonb
+       WHERE "batchId" = ${dry.id}::uuid`;
+    await as(
+      api().post(`/api/v1/patient-imports/${dry.id}/confirm`),
+      a.adminToken,
+    )
+      .send({ duplicateMode: 'SKIP' })
+      .expect(200);
+    await drain();
+    expect((await getBatch(dry.id)).progress).toMatchObject({
+      createdCount: 1,
+    });
+    expect(await docColumns(dry.id)).toEqual([
+      {
+        docNumber: 'RX7001',
+        documentType: 'NATIONAL_ID',
+        docType: legacyStoredDocType('NATIONAL_ID'),
+        docTypeLabel: null,
+      },
+    ]);
+  });
+
+  it('the template carries generic types and no legacy code', async () => {
+    const res = await as(
+      api().get('/api/v1/patient-imports/template'),
+      a.adminToken,
+    ).expect(200);
+    const [, first, second] = res.text.replace(/^\uFEFF/, '').split('\r\n');
+    expect(first).toMatch(/^"NATIONAL_ID","DOC-1000001",/);
+    expect(second).toMatch(/^"PASSPORT","X1000002",/);
+    expect(res.text).not.toMatch(/"(CC|TI|CE)"/);
+    // Se vuelve a leer sin errores (salvo que son de ejemplo).
+    const dry = (await upload('', Buffer.from(res.text), 'plantilla.csv'))
+      .body as Batch;
+    expect(dry.issues.filter((i) => i.kind === 'ERROR')).toEqual([]);
+  });
+
+  it('OpenAPI publishes only the generic types for the import', () => {
+    const swagger = SwaggerModule.createDocument(
+      app,
+      new DocumentBuilder().build(),
+    );
+    const schemas = swagger.components?.schemas ?? {};
+    const generic = [
+      'NATIONAL_ID',
+      'PASSPORT',
+      'RESIDENCE_PERMIT',
+      'TAX_ID',
+      'OTHER',
+    ];
+    expect((schemas.DocType as { enum?: string[] }).enum).toEqual(generic);
+    const body = swagger.paths['/api/v1/patient-imports']?.post
+      ?.requestBody as {
+      content: Record<
+        string,
+        { schema: { properties: Record<string, { enum?: string[] }> } }
+      >;
+    };
+    expect(
+      body.content['multipart/form-data'].schema.properties.defaultDocType.enum,
+    ).toEqual(generic);
+    expect(
+      JSON.stringify(swagger.paths['/api/v1/patient-imports']),
+    ).not.toMatch(/"(CC|TI|CE)"|C[ée]dula/);
+  });
+
+  it('a JSON defaultDocType null counts as absent: 400, never 500', async () => {
+    const res = await as(api().post('/api/v1/patient-imports'), a.adminToken)
+      .send({ defaultDocType: null })
+      .expect(400);
+    expect((res.body as { message: string }).message).toBe(
+      MISSING_FILE_MESSAGE,
+    );
+  });
+
+  it("an import recognizes this clinic's local names and not another clinic's", async () => {
+    const NAMES = '/api/v1/patients/document-type-names';
+    const none = {
+      NATIONAL_ID: null,
+      PASSPORT: null,
+      RESIDENCE_PERMIT: null,
+      TAX_ID: null,
+      OTHER: null,
+    };
+    await as(api().put(NAMES), a.adminToken)
+      .send({ names: { ...none, NATIONAL_ID: 'Documento A' } })
+      .expect(200);
+    try {
+      const bytes = csvOf(['documento a;RX-8001;Nombre;Local;;;;;']);
+      const inB = (
+        await upload('', bytes, 'local.csv', {}, b.adminToken, b).expect(201)
+      ).body as Batch;
+      expect(inB.totals).toMatchObject({ validRows: 0, errorRows: 1 });
+      expect(inB.issues[0].message).toMatch(
+        /^Tipo de documento no reconocido.*\)\.$/,
+      );
+      expect(inB.issues[0].message).not.toContain('Documento A');
+      const inA = await importAndDrain(bytes, 'local.csv');
+      expect(inA.issues).toEqual([]);
+      expect(await docColumns(inA.id)).toEqual([
+        {
+          docNumber: 'RX8001',
+          documentType: 'NATIONAL_ID',
+          docType: legacyStoredDocType('NATIONAL_ID'),
+          docTypeLabel: null,
+        },
+      ]);
+      // Un tipo desconocido en A lista también sus nombres locales.
+      const unknown = (
+        await upload('', csvOf(['ZZ;RX-8002;Otro;Local;;;;;']), 'zz.csv')
+      ).body as Batch;
+      expect(unknown.issues[0].message).toMatch(
+        /, o uno de los nombres de tu clínica: Documento A\.$/,
+      );
+    } finally {
+      await as(api().put(NAMES), a.adminToken)
+        .send({ names: none })
+        .expect(200);
+    }
   });
 });

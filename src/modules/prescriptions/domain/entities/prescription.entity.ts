@@ -2,7 +2,7 @@
  * Excepción G5.3 (DX-334): recetas emitidas antes de DX-324. La entidad lleva
  * el campo histórico `country`; ninguna regla decide con él (spec R1, R12).
  */
-import type { DocType, PrescriptionStatus } from '@prisma/client';
+import type { DocumentType, PrescriptionStatus } from '@prisma/client';
 import type { HourCycle } from '../../../../shared/format/regional-format';
 import type { AllergyMatch } from '../allergy-match';
 import type {
@@ -99,7 +99,9 @@ export interface PrescriptionPatient {
   id: string;
   firstName: string;
   lastName: string;
-  docType: DocType;
+  docType: DocumentType;
+  /** DX-327: nombre libre del documento (R7); null = sin etiqueta. */
+  docTypeLabel: string | null;
   docNumber: string | null;
   birthDate: Date | null;
   /**

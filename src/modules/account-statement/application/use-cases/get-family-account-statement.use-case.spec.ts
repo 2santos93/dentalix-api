@@ -1,3 +1,4 @@
+import { FixedDocumentTypeNamesReader } from '../../../document-type-names/__fixtures__/fixed-document-type-names.reader';
 import { NotFoundException } from '@nestjs/common';
 import { ClinicRole } from '@prisma/client';
 import { GetFamilyAccountStatementUseCase } from './get-family-account-statement.use-case';
@@ -46,7 +47,8 @@ function statement(
       id,
       firstName,
       lastName: 'Ortiz',
-      docType: 'TI',
+      docType: 'NATIONAL_ID',
+      docTypeLabel: null,
       docNumber: `doc-${id}`,
     },
     snapshot: {
@@ -168,7 +170,12 @@ describe('GetFamilyAccountStatementUseCase (DX-203)', () => {
     ]);
 
     // La suma de los estados de cuenta individuales, uno a uno.
-    const individual = new GetAccountStatementUseCase(repo, () => NOW, family);
+    const individual = new GetAccountStatementUseCase(
+      repo,
+      () => NOW,
+      family,
+      new FixedDocumentTypeNamesReader(),
+    );
     const actor = { userId: 'u-1', role: ClinicRole.ADMIN };
     const byCurrency = new Map<string, number>();
     for (const id of ['mother', 'son', 'daughter']) {

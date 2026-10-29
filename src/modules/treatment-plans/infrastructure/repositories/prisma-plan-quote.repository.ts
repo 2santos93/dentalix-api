@@ -141,7 +141,8 @@ export class PrismaPlanQuoteRepository implements PlanQuoteRepository {
           select: {
             firstName: true,
             lastName: true,
-            docType: true,
+            documentType: true,
+            docTypeLabel: true,
             docNumber: true,
             deletedAt: true,
           },
@@ -254,7 +255,8 @@ export class PrismaPlanQuoteRepository implements PlanQuoteRepository {
       patient: {
         firstName: patient.firstName,
         lastName: patient.lastName,
-        docType: patient.docType,
+        docType: patient.documentType,
+        docTypeLabel: patient.docTypeLabel,
         docNumber: patient.docNumber,
       },
       clinic: { name: tenant?.name ?? '', logoUrl: tenant?.logoUrl ?? null },

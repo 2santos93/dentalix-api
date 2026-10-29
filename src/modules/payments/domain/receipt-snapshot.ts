@@ -1,5 +1,14 @@
-import { DocType, PaymentMethod } from '@prisma/client';
+import type { DocumentType, PaymentMethod } from '@prisma/client';
 import { maskDocument } from '../../../shared/privacy/mask-document';
+import {
+  documentTypeName,
+  type ClinicDocumentTypeNames,
+} from '../../patients/domain/document-type';
+import {
+  docTypeFromStored,
+  legacyStoredDocType,
+  type LegacyDocType,
+} from '../../patients/domain/legacy-doc-type';
 
 /** Pie legal por defecto del recibo de caja (DX-136). */
 export const RECEIPT_LEGAL_NOTICE = 'Este documento no es factura';
@@ -40,7 +49,9 @@ export interface ReceiptSnapshotInput {
     id: string;
     firstName: string;
     lastName: string;
-    docType: DocType;
+    docType: DocumentType;
+    /** DX-327: nombre libre del documento (R7); null = sin etiqueta. */
+    docTypeLabel: string | null;
     docNumber: string | null;
   };
   payment: {
@@ -73,12 +84,21 @@ export interface ReceiptSnapshot {
   version: 1;
   clinic: ReceiptClinicData;
   location: ReceiptLocationData;
-  /** Falta la razón social o el NIT/NIF: el recibo dice «Datos fiscales pendientes». */
+  /** Falta la razón social o el identificador fiscal: el recibo dice «Datos fiscales pendientes». */
   fiscalDataPending: boolean;
+  /**
+   * DX-327 (fase 1, R5, R6 y R18): `docType` sigue siendo el código anterior
+   * para las réplicas anteriores; las fotos nuevas añaden el tipo genérico, la
+   * etiqueta y el nombre visible congelado. Las anteriores solo tienen el
+   * código. Se lee SIEMPRE con `receiptPatientView`.
+   */
   patient: {
     id: string;
     fullName: string;
-    docType: DocType;
+    docType: LegacyDocType;
+    documentType?: DocumentType;
+    docTypeLabel?: string | null;
+    docTypeName?: string;
     docNumberMasked: string | null;
   };
   payment: {
@@ -101,9 +121,15 @@ export interface ReceiptSnapshot {
 const blankToNull = (value: string | null): string | null =>
   value?.trim() ? value.trim() : null;
 
+/**
+ * `clinicNames`: los nombres locales de la clínica al emitir (R16); el
+ * nombre visible queda congelado en la foto (R18).
+ */
 export function buildReceiptSnapshot(
   input: ReceiptSnapshotInput,
+  clinicNames: ClinicDocumentTypeNames,
 ): ReceiptSnapshot {
+  const { docType, docTypeLabel } = input.patient;
   const clinic: ReceiptClinicData = {
     name: input.clinic.name,
     legalName: blankToNull(input.clinic.legalName),
@@ -122,7 +148,10 @@ export function buildReceiptSnapshot(
     patient: {
       id: input.patient.id,
       fullName: `${input.patient.firstName.trim()} ${input.patient.lastName.trim()}`,
-      docType: input.patient.docType,
+      docType: legacyStoredDocType(docType),
+      documentType: docType,
+      docTypeLabel,
+      docTypeName: documentTypeName(docType, docTypeLabel, clinicNames),
       docNumberMasked: maskDocument(input.patient.docNumber),
     },
     payment: {
@@ -161,4 +190,45 @@ export function parseReceiptSnapshot(value: unknown): ReceiptSnapshot {
     throw new Error('Foto de recibo con una versión desconocida');
   }
   return value as ReceiptSnapshot;
+}
+
+/** El paciente del recibo tal como se muestra, se imprime y se envía. */
+export interface ReceiptPatientView {
+  id: string;
+  fullName: string;
+  docType: DocumentType;
+  docTypeLabel: string | null;
+  /** «{docTypeName} {docNumberMasked}» es lo que pintan la web y el email. */
+  docTypeName: string;
+  docNumberMasked: string | null;
+}
+
+/** La foto del recibo con su paciente ya leído (`receiptPatientView`). */
+export type ReceiptViewSnapshot = Omit<ReceiptSnapshot, 'patient'> & {
+  patient: ReceiptPatientView;
+};
+
+/**
+ * DX-327 (R6 y R18): una foto nueva da su nombre visible congelado; una
+ * anterior solo guardó el código, que se traduce a su tipo genérico SIN
+ * etiqueta y se pinta con el nombre local de hoy de la clínica, o el
+ * genérico. Un código desconocido es un fallo de despliegue: lanza.
+ */
+export function receiptPatientView(
+  snapshot: ReceiptSnapshot,
+  clinicNames: ClinicDocumentTypeNames,
+): ReceiptPatientView {
+  const { patient } = snapshot;
+  const docType = docTypeFromStored(patient.documentType ?? patient.docType);
+  const docTypeLabel = patient.docTypeLabel ?? null;
+  return {
+    id: patient.id,
+    fullName: patient.fullName,
+    docType,
+    docTypeLabel,
+    docTypeName:
+      patient.docTypeName ??
+      documentTypeName(docType, docTypeLabel, clinicNames),
+    docNumberMasked: patient.docNumberMasked,
+  };
 }

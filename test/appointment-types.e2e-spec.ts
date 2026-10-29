@@ -74,7 +74,7 @@ describe('Tipos de cita y agenda en columnas (e2e, DX-121)', () => {
       .send({
         firstName: 'Ana',
         lastName: 'Paciente',
-        docType: 'CC',
+        docType: 'NATIONAL_ID',
         docNumber: doc,
         sex: 'F',
       })

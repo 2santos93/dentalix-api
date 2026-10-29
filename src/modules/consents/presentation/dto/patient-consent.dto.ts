@@ -1,5 +1,10 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { ConsentSignerType, DocType } from '@prisma/client';
+import { ConsentSignerType, type DocumentType } from '@prisma/client';
+import { DOCUMENT_TYPES } from '../../../patients/domain/document-type';
+import {
+  DOC_TYPE_LABEL_PROPERTY,
+  DOC_TYPE_NAME_DESCRIPTION,
+} from '../../../patients/presentation/dto/doc-type-input';
 
 export class ConsentPreviewDto {
   @ApiProperty({ format: 'uuid' })
@@ -93,8 +98,14 @@ class ConsentPatientDto {
   @ApiProperty()
   lastName!: string;
 
-  @ApiProperty({ enum: DocType })
-  docType!: DocType;
+  @ApiProperty({ enum: DOCUMENT_TYPES, enumName: 'DocType' })
+  docType!: DocumentType;
+
+  @ApiProperty(DOC_TYPE_LABEL_PROPERTY)
+  docTypeLabel!: string | null;
+
+  @ApiProperty({ description: DOC_TYPE_NAME_DESCRIPTION })
+  docTypeName!: string;
 
   @ApiProperty({ type: String, nullable: true })
   docNumber!: string | null;

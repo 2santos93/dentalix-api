@@ -2,7 +2,6 @@ import { INestApplication } from '@nestjs/common';
 import {
   CatalogKind,
   ClinicRole,
-  DocType,
   Prisma,
   PrismaClient,
   Sex,
@@ -116,7 +115,7 @@ describe('Elegibilidad para asignar un convenio (e2e, SEC-047)', () => {
 
   const createPatient = (target: Clinic, firstName: string) =>
     post(target, '/api/v1/patients', {
-      docType: DocType.CC,
+      docType: 'NATIONAL_ID',
       sex: Sex.F,
       lastName: 'Elegibilidad',
       docNumber: String(Math.floor(Math.random() * 1e9)),

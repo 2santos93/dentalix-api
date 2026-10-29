@@ -1,5 +1,5 @@
 import { INestApplication } from '@nestjs/common';
-import { ClinicRole, DocType, Prisma, PrismaClient, Sex } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient, Sex } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { PAYER_TYPES } from '../src/modules/payers/domain/payer-type';
@@ -86,7 +86,7 @@ describe('Cobertura verificable para asignar un convenio (e2e, SEC-049)', () => 
     post(
       '/api/v1/patients',
       {
-        docType: DocType.CC,
+        docType: 'NATIONAL_ID',
         sex: Sex.F,
         lastName: 'Verificable',
         docNumber: String(Math.floor(Math.random() * 1e9)),

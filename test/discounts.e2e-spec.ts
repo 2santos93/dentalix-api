@@ -2,7 +2,6 @@ import { INestApplication } from '@nestjs/common';
 import {
   CatalogKind,
   ClinicRole,
-  DocType,
   Prisma,
   PrismaClient,
   Sex,
@@ -180,7 +179,7 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
       .post('/patients', {
         firstName: 'Ana',
         lastName: 'Descuento',
-        docType: DocType.CC,
+        docType: 'NATIONAL_ID',
         docNumber: '9001',
         sex: Sex.F,
       })

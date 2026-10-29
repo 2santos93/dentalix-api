@@ -123,9 +123,9 @@ export interface PaymentReceiptEmailVars {
   legacy: boolean;
   locationName: string;
   locationAddress: string | null;
-  /** «Razón social · NIT/NIF …», o null si los datos fiscales están pendientes. */
+  /** «Razón social · identificador fiscal …», o null si los datos fiscales están pendientes. */
   fiscalLine: string | null;
-  /** «CC ******5678», o null si el paciente no tiene documento. */
+  /** «{nombre visible} ******5678» (DX-327), o null sin documento. */
   patientDocLabel: string | null;
   amountLabel: string;
   paidOnLabel: string;

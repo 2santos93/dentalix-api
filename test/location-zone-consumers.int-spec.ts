@@ -8,6 +8,7 @@ import { PatientMedicalAlertFlags } from '../src/modules/medical-history/applica
 import { PrismaReceivablesRepository } from '../src/modules/receivables/infrastructure/prisma-receivables.repository';
 import { GetReceivablesAgingUseCase } from '../src/modules/receivables/application/use-cases/get-receivables-aging.use-case';
 import { PrismaPatientConsentRepository } from '../src/modules/consents/infrastructure/repositories/prisma-patient-consent.repository';
+import { PrismaDocumentTypeNamesRepository } from '../src/modules/patients/infrastructure/repositories/prisma-document-type-names.repository';
 import { PreviewPatientConsentUseCase } from '../src/modules/consents/application/use-cases/patient-consents.use-cases';
 import { InMemoryConsentTemplateRepository } from '../src/modules/consents/application/__fixtures__/in-memory-consent-templates';
 import { PrismaPatientImportRepository } from '../src/modules/patient-imports/infrastructure/prisma-patient-import.repository';
@@ -326,6 +327,7 @@ describe('consumidores de la zona de la sede: día civil en Tokio (int, G1)', ()
       templates,
       new PrismaPatientConsentRepository(prisma, tenantContext),
       () => NOW,
+      new PrismaDocumentTypeNamesRepository(prisma, tenantContext),
     );
     const body = (location: string | undefined) =>
       inTenant(location, async () => {

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { JobsModule } from '../jobs/jobs.module';
+import { DocumentTypeNamesModule } from '../document-type-names/document-type-names.module';
 import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 import { StorageModule } from '../../shared/storage/storage.module';
@@ -33,7 +34,13 @@ import { PrismaPatientImportRepository } from './infrastructure/prisma-patient-i
  */
 @Module({
   // JwtModule.register({}): JwtAuthGuard -> TokenService -> JwtService.
-  imports: [JwtModule.register({}), JobsModule, StorageModule],
+  imports: [
+    JwtModule.register({}),
+    JobsModule,
+    StorageModule,
+    // DX-327 (R19): el dry-run reconoce los nombres locales de la clínica.
+    DocumentTypeNamesModule,
+  ],
   controllers: [PatientImportsController],
   providers: [
     PatientImportsService,

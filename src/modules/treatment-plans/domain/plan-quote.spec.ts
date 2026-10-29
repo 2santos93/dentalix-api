@@ -18,7 +18,7 @@ function source(
     currency: 'COP',
     clinicName: 'Clínica Sonrisa',
     location: { id: 'loc-1', name: 'Sede principal', address: 'Calle 1 # 2-3' },
-    patient: { name: 'Ana Pérez', document: 'CC 123' },
+    patient: { name: 'Ana Pérez', document: 'Documento nacional 123' },
     professionalName: 'Dra. Gómez',
     items: [
       {
@@ -136,7 +136,9 @@ describe('computeQuoteHash', () => {
       source({
         items: [{ ...source().items[0], toothNumber: '37' }, source().items[1]],
       }),
-      source({ patient: { name: 'Ana Pérez', document: 'CC 124' } }),
+      source({
+        patient: { name: 'Ana Pérez', document: 'Documento nacional 124' },
+      }),
       source({ currency: 'USD' }),
     ];
     for (const variant of variants) {

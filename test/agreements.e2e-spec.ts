@@ -92,7 +92,7 @@ describe('Convenios (e2e, DX-105)', () => {
       .send({
         firstName: 'Ana',
         lastName: 'Convenio',
-        docType: 'CC',
+        docType: 'NATIONAL_ID',
         docNumber: '2020202020',
         sex: 'F',
       })

@@ -158,7 +158,7 @@ describe('Documentos del paciente — /patients/:patientId/documents (DX-151, e2
     const res = await call(clinic, clinic.adminToken, 'post', '/patients', {
       firstName,
       lastName: 'Documentos',
-      docType: 'CC',
+      docType: 'NATIONAL_ID',
       docNumber,
       sex: 'F',
     }).expect(201);

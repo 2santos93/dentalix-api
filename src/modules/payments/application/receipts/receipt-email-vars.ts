@@ -1,7 +1,8 @@
-import type { DocType, PaymentMethod } from '@prisma/client';
+import type { PaymentMethod } from '@prisma/client';
 import type { PaymentReceiptView } from '../../domain/entities/payment-receipt.entity';
 import type { PaymentReceiptEmailVars } from '../../../notifications/email/domain/email-message';
 import { civilDateIn } from '../../../../shared/time/civil-day';
+import { documentText } from '../../../patients/domain/document-type';
 import type { RegionalFormat } from '../../../../shared/format/regional-format';
 
 const METHOD_LABELS: Record<PaymentMethod, string> = {
@@ -9,14 +10,6 @@ const METHOD_LABELS: Record<PaymentMethod, string> = {
   CARD: 'Tarjeta',
   TRANSFER: 'Transferencia',
   OTHER: 'Otro',
-};
-
-const DOC_TYPE_LABELS: Record<DocType, string> = {
-  CC: 'CC',
-  TI: 'TI',
-  CE: 'CE',
-  PASSPORT: 'Pasaporte',
-  OTHER: 'Documento',
 };
 
 /** «Plan del …» o, en un abono contra el saldo migrado (DX-262), su concepto. */
@@ -64,9 +57,8 @@ export function receiptEmailVars(
     fiscalLine: snapshot.fiscalDataPending
       ? null
       : `${clinic.legalName} · NIT/NIF ${clinic.taxId}`,
-    patientDocLabel: patient.docNumberMasked
-      ? `${DOC_TYPE_LABELS[patient.docType]} ${patient.docNumberMasked}`
-      : null,
+    // El nombre visible ya resuelto al leer el recibo (DX-327, R18).
+    patientDocLabel: documentText(patient.docTypeName, patient.docNumberMasked),
     amountLabel: fmt.money(payment.amount, payment.currency),
     paidOnLabel: fmt.civilDate(payment.paidOn),
     methodLabel: payment.method

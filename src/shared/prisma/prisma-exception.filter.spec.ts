@@ -140,7 +140,7 @@ describe('PrismaExceptionFilter', () => {
   }
 
   const SECRET_DETAIL =
-    'Failing row contains (1, Ana Pérez, CC 1234567, -1.00, USD)';
+    'Failing row contains (1, Ana Pérez, RX-1234567, -1.00, USD)';
 
   function bodyOf(json: jest.Mock): Record<string, unknown> {
     const [[body]] = json.mock.calls as [[Record<string, unknown>]];

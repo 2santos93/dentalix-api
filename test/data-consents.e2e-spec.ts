@@ -1,7 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types';
-import { ClinicRole, DocType, Prisma, PrismaClient, Sex } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient, Sex } from '@prisma/client';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import { createE2eApp } from './support/create-e2e-app';
 import { hostFor } from './support/tenant-host';
@@ -166,7 +166,7 @@ describe('Autorización de datos Ley 1581 — /privacy-policies y /patients/:id/
       .post('/patients', {
         firstName: 'Ana',
         lastName: 'Datos',
-        docType: DocType.CC,
+        docType: 'NATIONAL_ID',
         docNumber,
         sex: Sex.F,
         ...extra,
@@ -379,7 +379,7 @@ describe('Autorización de datos Ley 1581 — /privacy-policies y /patients/:id/
         .post('/patients', {
           firstName: 'Ana',
           lastName: 'Datos',
-          docType: DocType.CC,
+          docType: 'NATIONAL_ID',
           docNumber: 'ALTA-FALLA',
           sex: Sex.F,
           dataConsents: {

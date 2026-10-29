@@ -316,7 +316,7 @@ describe('plantillas reservadas para otras tareas', () => {
       locationName: 'Sede Norte',
       locationAddress: 'Cra 15 # 93-60',
       fiscalLine: null,
-      patientDocLabel: 'CC ******5678',
+      patientDocLabel: 'Documento nacional ******5678',
       amountLabel: '$ 150.000',
       paidOnLabel: '17/10/2026',
       methodLabel: 'Efectivo',
@@ -334,7 +334,7 @@ describe('plantillas reservadas para otras tareas', () => {
       );
       expect(email.text).toContain('Hola, Carolina Duque');
       expect(email.text).toContain('Recibo de caja N.º NOR-000123');
-      expect(email.text).toContain('Documento: CC ******5678');
+      expect(email.text).toContain('Documento: Documento nacional ******5678');
       expect(email.text).toContain('Valor: $ 150.000 · Efectivo · 17/10/2026');
       expect(email.text).toContain('Saldo del plan tras el abono: $ 450.000');
       expect(email.text).toContain('Sede: Sede Norte (Cra 15 # 93-60)');

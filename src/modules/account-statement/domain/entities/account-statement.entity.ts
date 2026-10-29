@@ -1,5 +1,5 @@
 import {
-  DocType,
+  DocumentType,
   PaymentMethod,
   PaymentPlanStatus,
   ResponsibleRelationship,
@@ -245,7 +245,9 @@ export interface StatementPatient {
   id: string;
   firstName: string;
   lastName: string;
-  docType: DocType;
+  docType: DocumentType;
+  /** DX-327: nombre libre del documento (R7); null = sin etiqueta. */
+  docTypeLabel: string | null;
   docNumber: string | null;
 }
 
@@ -271,7 +273,8 @@ export interface StatementAddressee {
 export interface AccountStatement extends ComputedAccountStatement {
   issuedAt: Date;
   clinic: StatementClinic;
-  patient: StatementPatient;
+  /** En vivo, con el nombre visible de hoy (DX-327, R17). */
+  patient: StatementPatient & { docTypeName: string };
   addressee: StatementAddressee;
   /** Filtro aplicado a `movements` (días civiles inclusive), o `null`. */
   range: { from: string | null; to: string | null };
