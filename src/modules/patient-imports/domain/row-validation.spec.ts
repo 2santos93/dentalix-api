@@ -28,8 +28,8 @@ import { parseCsv } from './csv-parser';
 import { toTable } from './tabular-file';
 
 const TODAY = '2026-10-21';
-/** Sin país de sede: estos casos no tienen teléfono (R14, ningún país). */
-const NEUTRAL_COUNTRY = null;
+/** Sin indicativo por defecto: estos casos no tienen teléfono (R14, ningún país). */
+const NO_CALLING_CODE = null;
 /** Una clínica sin nombres locales (como empiezan todas, R16). */
 const NO_NAMES: ClinicDocumentTypeNames = {};
 
@@ -135,22 +135,35 @@ describe('normalización de campos', () => {
     expect(parseSex('?')).toBeNull();
   });
 
-  it('teléfono en E.164 con el indicativo del país de la sede; un fijo corto tal cual', () => {
-    expect(normalizePhone('310 123 4567', 'CO')).toEqual({
+  it('teléfono en E.164 con el indicativo por defecto de la sede; un fijo corto tal cual', () => {
+    expect(normalizePhone('310 123 4567', '57')).toEqual({
       value: '+573101234567',
     });
-    expect(normalizePhone('+34 612 345 678', 'CO')).toEqual({
+    expect(normalizePhone('+34 612 345 678', '57')).toEqual({
       value: '+34612345678',
     });
-    expect(normalizePhone('612345678', 'ES')).toEqual({
+    expect(normalizePhone('612345678', '34')).toEqual({
       value: '+34612345678',
     });
-    expect(normalizePhone('2345678', 'CO')).toEqual({ value: '2345678' });
+    expect(normalizePhone('2345678', '57')).toEqual({ value: '2345678' });
     expect(
-      errorOf(normalizePhone('310 123 4567 / 601 234 5678', 'CO')),
+      errorOf(normalizePhone('310 123 4567 / 601 234 5678', '57')),
     ).toMatch(/más de un teléfono/);
-    expect(normalizePhone('llamar', 'CO')).toHaveProperty('error');
-    expect(normalizePhone('123', 'CO')).toHaveProperty('error');
+    expect(normalizePhone('llamar', '57')).toHaveProperty('error');
+    expect(normalizePhone('123', '57')).toHaveProperty('error');
+  });
+
+  it('a phone without + takes the default calling code, and without one it is never rewritten', () => {
+    expect(normalizePhone('0412-1234567', '58')).toEqual({
+      value: '+584121234567',
+    });
+    // Sin indicativo por defecto no se quita el 0 ni se inventa un indicativo.
+    expect(normalizePhone('06 1234 5678', null)).toEqual({
+      value: '06 1234 5678',
+    });
+    expect(normalizePhone('+39 06 1234 5678', null)).toEqual({
+      value: '+390612345678',
+    });
   });
 });
 
@@ -168,7 +181,7 @@ function typeError(raw: string, clinicNames: ClinicDocumentTypeNames): string {
     { rowNumber: 2, cells: [raw, 'RX-1', 'A', 'B'] },
     mapping,
     {
-      countryCode: NEUTRAL_COUNTRY,
+      defaultCallingCode: NO_CALLING_CODE,
       today: TODAY,
       clinicNames,
     },
@@ -355,7 +368,11 @@ describe('tipos de documento de la importación (DX-327)', () => {
       const r = validateRow(
         { rowNumber: 2, cells: ['V-12.345.678', 'A', 'B'] },
         mapping,
-        { countryCode: NEUTRAL_COUNTRY, today: TODAY, clinicNames: NO_NAMES },
+        {
+          defaultCallingCode: NO_CALLING_CODE,
+          today: TODAY,
+          clinicNames: NO_NAMES,
+        },
       );
       expect(r.issues).toEqual([]);
       expect(r.data).toMatchObject({ docType: type, docNumber: 'V12345678' });
@@ -482,7 +499,7 @@ describe('validateRow', () => {
     },
     defaultDocType: 'NATIONAL_ID',
   });
-  const ctx = { countryCode: 'CO', today: TODAY, clinicNames: NO_NAMES };
+  const ctx = { defaultCallingCode: '57', today: TODAY, clinicNames: NO_NAMES };
 
   it('fila válida normalizada; tipo vacío usa el de por defecto', () => {
     const r = validateRow(
@@ -849,7 +866,7 @@ describe('CSV de la plantilla y del informe', () => {
     });
     const rows = table.rows.map((row) =>
       validateRow(row, mapping, {
-        countryCode: 'CO',
+        defaultCallingCode: '57',
         today: TODAY,
         clinicNames: NO_NAMES,
       }),
@@ -872,7 +889,7 @@ describe('fila con más celdas que la cabecera', () => {
     const r = validateRow(
       { rowNumber: 5, cells: ['1020', 'Ana', 'Pérez'], extraCells: true },
       mapping,
-      { countryCode: 'CO', today: TODAY, clinicNames: NO_NAMES },
+      { defaultCallingCode: '57', today: TODAY, clinicNames: NO_NAMES },
     );
     expect(r.data).toBeNull();
     expect(r.issues).toEqual([

@@ -113,6 +113,47 @@ describe('Bloque «Comunicaciones» de la ficha (DX-128)', () => {
       });
     });
 
+    it('the communication view names the country only when it has a calling code', async () => {
+      repo.country = 'VE';
+      repo.add(ANA, { phone: '0412-1234567' });
+      await expect(get.execute(ANA)).resolves.toMatchObject({
+        phoneE164: '+584121234567',
+        phoneStatus: 'VALID',
+        phoneCountry: 'VE',
+      });
+      repo.country = 'JP';
+      await expect(get.execute(ANA)).resolves.toMatchObject({
+        phoneE164: null,
+        phoneStatus: 'INVALID',
+        phoneCountry: null,
+      });
+      repo.add(ANA, { phone: '+58 412 1234567' });
+      await expect(get.execute(ANA)).resolves.toMatchObject({
+        phoneE164: '+584121234567',
+        phoneStatus: 'VALID',
+        phoneCountry: null,
+      });
+    });
+
+    it('saving at a location without a calling code keeps a mobile without + as typed and refuses WhatsApp', async () => {
+      repo.country = 'JP';
+      repo.add(ANA);
+      await expect(
+        update.execute(
+          ANA,
+          { phone: '0412-1234567', contactChannel: 'WHATSAPP' },
+          ctx,
+        ),
+      ).rejects.toThrow(BadRequestException);
+      await expect(
+        update.execute(ANA, { phone: '0412-1234567' }, ctx),
+      ).resolves.toMatchObject({
+        phone: '0412-1234567',
+        phoneStatus: 'INVALID',
+        phoneCountry: null,
+      });
+    });
+
     it('distingue sin móvil (MISSING) de un móvil inválido (INVALID)', async () => {
       repo.add(ANA);
       await expect(get.execute(ANA)).resolves.toMatchObject({
