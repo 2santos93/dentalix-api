@@ -164,12 +164,11 @@ describe('Rebaja de convenio en el informe de descuentos (e2e, SEC-047)', () => 
     });
     const sura = await create('/payers', {
       name: 'Sura EPS',
-      type: 'EPS_CO',
-      country: 'CO',
+      type: 'PUBLIC_SYSTEM',
     });
     const cortesia = await create('/payers', {
       name: 'Cortesía de la clínica',
-      type: 'OTRO',
+      type: 'OTHER',
     });
     const suraAgreement = await create('/agreements', {
       name: 'Sura EPS −25 %',

@@ -20,7 +20,7 @@ import {
 
 // SEC-047 en HTTP real: asignar un convenio exige elegibilidad. La matriz
 // rol (los 4) × cobertura (sin, viva, vencida, de otra clínica) × tipo de
-// convenio (de un pagador externo o interno, pagador OTRO). Con un pagador
+// convenio (de un pagador externo o interno, pagador OTHER). Con un pagador
 // externo hace falta una cobertura viva del paciente con ese pagador, sea cual
 // sea el rol (400 en español si no); uno interno —cortesía, empleados— solo lo
 // asigna ADMIN (403 en español). Y la reproducción de la auditoría: sin esa
@@ -175,12 +175,11 @@ describe('Elegibilidad para asignar un convenio (e2e, SEC-047)', () => {
     }
     suraPayer = await post(clinic, '/api/v1/payers', {
       name: 'Sura EPS',
-      type: 'EPS_CO',
-      country: 'CO',
+      type: 'PUBLIC_SYSTEM',
     });
     cortesiaPayer = await post(clinic, '/api/v1/payers', {
       name: 'Cortesía de la clínica',
-      type: 'OTRO',
+      type: 'OTHER',
     });
     payerOf['pagador externo'] = suraPayer;
     payerOf.interno = cortesiaPayer;
@@ -201,8 +200,7 @@ describe('Elegibilidad para asignar un convenio (e2e, SEC-047)', () => {
     // cobertura viva: su id no vale en esta clínica.
     const foreignPayer = await post(other, '/api/v1/payers', {
       name: 'Sura EPS',
-      type: 'EPS_CO',
-      country: 'CO',
+      type: 'PUBLIC_SYSTEM',
     });
     const foreignPatient = await createPatient(other, 'Ajena');
     foreignCoverage = await post(
@@ -345,6 +343,32 @@ describe('Elegibilidad para asignar un convenio (e2e, SEC-047)', () => {
       (assigned.body as { current: { agreement: { payer: { type: string } } } })
         .current.agreement.payer.type,
     ).toBe('OTHER');
+  });
+
+  it('legacy EPS_CO payer stays external: an assignment without coverage is 400', async () => {
+    // Excepción G5.3 (DX-334): tipos de pagador anteriores a DX-326. Un
+    // pagador guardado con el código anterior EPS_CO se lee PUBLIC_SYSTEM
+    // (externo): SEC-047 pide cobertura viva, también a ADMIN.
+    const [{ id: payerId }] = await raw.$queryRaw<{ id: string }[]>`
+      INSERT INTO "payers" ("id", "tenantId", "name", "type", "country", "updatedAt")
+      VALUES (gen_random_uuid(), ${clinic.tenantId}::uuid, 'Plan Sur antiguo',
+              'EPS_CO', 'CO', now())
+      RETURNING id::text AS id`;
+    const agreementId = await post(clinic, '/api/v1/agreements', {
+      name: 'Plan Sur antiguo 100 %',
+      payerId,
+      kind: 'PERCENT_DISCOUNT',
+      percent: 100,
+    });
+    const patient = await createPatient(clinic, 'Legado externo');
+    for (const token of [tokens.RECEPTION, tokens.ADMIN]) {
+      const res = await as(api().put(url(patient)), token)
+        .send({ agreementId })
+        .expect(400);
+      expect((res.body as { message: string }).message).toBe(
+        COVERAGE_REQUIRED.replace('Sura EPS', 'Plan Sur antiguo'),
+      );
+    }
   });
 
   it('la cobertura migrada no se puede marcar por la API', async () => {

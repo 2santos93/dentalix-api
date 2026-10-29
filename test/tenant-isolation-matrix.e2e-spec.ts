@@ -502,7 +502,7 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
   // DX-153: un pagador de A.
   const payer = await create(app, a, '/payers', {
     name: 'Pagador de A',
-    type: 'EMPRESA',
+    type: 'EMPLOYER',
   });
 
   // DX-274: una categoría propia, un gasto de A (con esa categoría) y un pago.
@@ -758,7 +758,7 @@ async function seedBExtras(
   }).expect(200);
   const payer = await create(app, b, '/payers', {
     name: 'Pagador de B',
-    type: 'EMPRESA',
+    type: 'EMPLOYER',
   });
   const coverage = await create(app, b, `/patients/${patientId}/coverages`, {
     payerId: payer.id,

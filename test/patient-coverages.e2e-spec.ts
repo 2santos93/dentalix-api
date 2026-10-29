@@ -129,15 +129,13 @@ describe('Coberturas del paciente (e2e, DX-153)', () => {
     }
     sanitas = await createPayer(clinic, {
       name: 'Sanitas',
-      type: 'EPS_CO',
-      country: 'CO',
+      type: 'PUBLIC_SYSTEM',
     });
     sura = await createPayer(clinic, {
       name: 'Sura',
-      type: 'EPS_CO',
-      country: 'CO',
+      type: 'PUBLIC_SYSTEM',
     });
-    foreignPayer = await createPayer(other, { name: 'Ajena', type: 'OTRO' });
+    foreignPayer = await createPayer(other, { name: 'Ajena', type: 'OTHER' });
     patient = await createPatient(clinic, { firstName: 'Claudia' });
     foreignPatient = await createPatient(other, { firstName: 'Ajena' });
   });

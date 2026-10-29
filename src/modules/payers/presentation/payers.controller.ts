@@ -84,8 +84,7 @@ export class PayersController {
   @ApiOperation({ summary: 'Crear un pagador' })
   @ApiCreatedResponse({ type: PayerDto })
   @ApiBadRequestResponse({
-    description:
-      'Nombre fuera de 2–120 caracteres o tipo que no corresponde con el país',
+    description: 'Nombre fuera de 2–120 caracteres o tipo desconocido',
   })
   @ApiConflictResponse({ description: 'Ya existe un pagador con ese nombre' })
   @ApiForbiddenResponse({ description: 'Solo ADMIN y recepción' })

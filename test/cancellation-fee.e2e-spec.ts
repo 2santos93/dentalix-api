@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { ClinicRole, PayerType, Prisma, PrismaClient } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import {
@@ -14,6 +14,12 @@ import {
 } from './support/e2e-fixtures';
 import { AppModule } from '../src/app.module';
 import { setupSwagger } from '../src/config/swagger';
+import {
+  LEGACY_PAYER_TYPES,
+  storedPayerType,
+  type LegacyStoredPayerType,
+} from '../src/modules/payers/domain/legacy-payer-type';
+import { PAYER_TYPES } from '../src/modules/payers/domain/payer-type';
 import { CANCELLATION_FEE_MESSAGES } from '../src/modules/cancellation-fees/domain/cancellation-fee';
 
 // DX-291 (porción 2 de DX-279): la política en el enlace público con
@@ -446,45 +452,57 @@ describe('Cargo por inasistencia y política en el enlace (DX-291)', () => {
       );
     });
 
-    it.each(Object.values(PayerType))(
+    /** Paciente con una cobertura viva del pagador `stored`; la cita, sin asistir. */
+    async function noShowCoveredBy(
+      stored: LegacyStoredPayerType,
+      label: string,
+    ) {
+      const covered = (
+        await raw.patient.create({
+          data: {
+            tenantId: a.tenantId,
+            firstName: 'Cubierto',
+            lastName: label,
+          },
+        })
+      ).id;
+      const payer = await raw.payer.create({
+        data: { tenantId: a.tenantId, name: `Pagador ${label}`, type: stored },
+      });
+      await raw.patientCoverage.create({
+        data: {
+          tenantId: a.tenantId,
+          patientId: covered,
+          payerId: payer.id,
+          isPrimary: true,
+        },
+      });
+      return appointment(-80, { status: 'NO_SHOW', patientId: covered });
+    }
+
+    async function expectCharged(id: string) {
+      const view = (
+        await admin().get(`/appointments/${id}/cancellation-fee`).expect(200)
+      ).body as FeeView;
+      expect(view.chargeBlock).toBeNull();
+      const charged = (
+        await admin().post(`/appointments/${id}/cancellation-fee`).expect(201)
+      ).body as FeeView;
+      expect(charged.status).toBe('CHARGED');
+    }
+
+    it.each(PAYER_TYPES)(
       'a patient with an active coverage is charged like any other (DX-321): %s',
       async (type) => {
-        const covered = (
-          await raw.patient.create({
-            data: {
-              tenantId: a.tenantId,
-              firstName: 'Cubierto',
-              lastName: type,
-            },
-          })
-        ).id;
-        const payer = await raw.payer.create({
-          data: {
-            tenantId: a.tenantId,
-            name: `Pagador ${type}`,
-            type,
-          },
-        });
-        await raw.patientCoverage.create({
-          data: {
-            tenantId: a.tenantId,
-            patientId: covered,
-            payerId: payer.id,
-            isPrimary: true,
-          },
-        });
-        const id = await appointment(-80, {
-          status: 'NO_SHOW',
-          patientId: covered,
-        });
-        const view = (
-          await admin().get(`/appointments/${id}/cancellation-fee`).expect(200)
-        ).body as FeeView;
-        expect(view.chargeBlock).toBeNull();
-        const charged = (
-          await admin().post(`/appointments/${id}/cancellation-fee`).expect(201)
-        ).body as FeeView;
-        expect(charged.status).toBe('CHARGED');
+        await expectCharged(await noShowCoveredBy(storedPayerType(type), type));
+      },
+    );
+
+    it.each(Object.keys(LEGACY_PAYER_TYPES) as LegacyStoredPayerType[])(
+      'legacy codes are charged like any other: %s',
+      async (code) => {
+        // Excepción G5.3 (DX-334): tipos de pagador anteriores a DX-326.
+        await expectCharged(await noShowCoveredBy(code, `legado ${code}`));
       },
     );
 

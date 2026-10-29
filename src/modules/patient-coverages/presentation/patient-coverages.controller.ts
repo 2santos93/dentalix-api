@@ -178,7 +178,7 @@ export class PatientCoveragesController {
   @ApiOkResponse({ type: PatientCoverageDto })
   @ApiBadRequestResponse({
     description:
-      'Validación, cobertura sin nº de afiliado o de un pagador interno (OTRO)',
+      'Validación, cobertura sin nº de afiliado o de un pagador interno (OTHER)',
   })
   @ApiForbiddenResponse({ description: 'Solo un administrador' })
   @ApiNotFoundResponse({ description: 'Paciente o cobertura no encontrado' })

@@ -56,7 +56,7 @@ export class AgreementPayerDto {
     enum: PAYER_TYPES,
     enumName: 'PayerType',
     description:
-      'SEC-047: con un pagador externo, asignar el convenio exige una cobertura viva del paciente con él; OTRO (cortesía, empleados…) solo lo asigna ADMIN.',
+      'SEC-047: con un pagador externo, asignar el convenio exige una cobertura viva del paciente con él; OTHER (cortesía, empleados…) solo lo asigna ADMIN.',
   })
   type!: PayerType;
 }

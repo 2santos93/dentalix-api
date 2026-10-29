@@ -81,7 +81,7 @@ describe('casos de uso de pagadores (DX-153)', () => {
         name: 'Plan Sur',
         type: 'PREPAID_PLAN',
         // @ts-expect-error: el pagador no tiene país (DX-326).
-        country: 'ES',
+        country: null,
       };
       const updateInput: UpdatePayerInput = {
         // @ts-expect-error: el pagador no tiene país (DX-326).

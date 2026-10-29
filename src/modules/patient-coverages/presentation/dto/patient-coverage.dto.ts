@@ -93,7 +93,7 @@ export class PatientCoverageDto {
 
   @ApiProperty({
     description:
-      'Copiada de la aseguradora en texto libre de la ficha (DX-153); la API no la crea. SEC-047: habilita a cualquier rol a asignar un convenio de pagador OTRO.',
+      'Copiada de la aseguradora en texto libre de la ficha (DX-153); la API no la crea. SEC-047: habilita a cualquier rol a asignar un convenio de pagador OTHER.',
   })
   migratedFromInsurerEps!: boolean;
 
@@ -149,7 +149,7 @@ export class CreatePatientCoverageDto {
   @ApiPropertyOptional({
     maxLength: MEMBER_NUMBER_MAX,
     description:
-      'SEC-049: obligatorio con un pagador externo (todo tipo salvo OTRO), con la misma regla para todos: tras normalizar, de 4 a 40 caracteres (letras, dígitos, espacio, `-`, `.` o `/`), al menos un dígito y no un mismo carácter repetido; opcional con OTRO.',
+      'SEC-049: obligatorio con un pagador externo (todo tipo salvo OTHER), con la misma regla para todos: tras normalizar, de 4 a 40 caracteres (letras, dígitos, espacio, `-`, `.` o `/`), al menos un dígito y no un mismo carácter repetido; opcional con OTHER.',
   })
   @IsOptional()
   @IsString({ message: MEMBER_MESSAGE })
