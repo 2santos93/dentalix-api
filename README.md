@@ -1579,7 +1579,7 @@ módulo `src/modules/implants`, tabla `patient_implants`.
   español): diente FDI (el mismo validador que el odontograma, con
   temporales), tipo `IMPLANT|ABUTMENT|GRAFT|MEMBRANE|OTHER`, fabricante,
   sistema, referencia (REF), lote, UDI, diámetro × longitud, registro
-  sanitario (INVIMA/CE), notas, fecha de colocación (por defecto hoy en la
+  sanitario (texto libre), notas, fecha de colocación (por defecto hoy en la
   sede, nunca futura) e ítem del plan opcional (de un plan del mismo
   paciente). Falta de fabricante, REF o lote o diente inválido: 400 con todos
   los errores en un mensaje. Profesional del token y sede del request (o la
@@ -2835,9 +2835,13 @@ Módulo `src/modules/patient-imports`; rutas bajo `/api/v1/patient-imports`,
     MB). A medio plazo: `readImportFile` en un `worker_thread` con
     `resourceLimits`.
 - **Validación por fila** (motivo en español, columna tal como se llama en el
-  fichero): nombres y apellidos obligatorios; tipo de documento por alias (CC,
-  «cédula», TI, CE, PASAPORTE, RC→OTRO…) o el de por defecto; nº de documento
-  normalizado por tipo (puntos fuera en CC/TI; notación científica de Excel
+  fichero): nombres y apellidos obligatorios; tipo de documento genérico
+  (DX-327) por, en este orden, los nombres locales de la clínica, el código o
+  el nombre genérico (`NATIONAL_ID`, «Documento nacional», `PASSPORT`,
+  «Pasaporte»…) y los sinónimos anteriores (sin etiqueta), o el de por
+  defecto; nº de documento con una sola regla para cualquier tipo (sin
+  espacios, puntos, comas, guiones ni barras, en mayúsculas, hasta 30 letras
+  y dígitos: «V-12.345.678» → «V12345678»; notación científica de Excel
   detectada); fecha DD/MM/AAAA, AAAA-MM-DD o serie de Excel, no futura ni
   anterior a 1900; sexo por alias; email; teléfonos en E.164 con el indicativo
   del país de la **sede del lote** (la de `X-Location-Id` o la de escritura;

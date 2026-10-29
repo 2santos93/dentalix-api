@@ -1,4 +1,9 @@
-import { DocType } from '@prisma/client';
+import type { DocumentType } from '@prisma/client';
+import {
+  docTypeFromStored,
+  legacyStoredDocType,
+  type LegacyDocType,
+} from '../../patients/domain/legacy-doc-type';
 import {
   IMPORT_FIELDS,
   fieldLabel,
@@ -13,7 +18,7 @@ export type ColumnMapping = Partial<Record<ImportFieldKey, string>>;
 export interface MappingInput {
   columns: ColumnMapping;
   /** Tipo de documento cuando la columna no está o la celda va vacía. */
-  defaultDocType?: DocType;
+  defaultDocType?: DocumentType;
 }
 
 export interface ResolvedMapping {
@@ -21,7 +26,50 @@ export interface ResolvedMapping {
   indexes: Partial<Record<ImportFieldKey, number>>;
   /** Campo → cabecera (para el informe: la columna «como la ve» la persona). */
   headers: Partial<Record<ImportFieldKey, string>>;
-  defaultDocType: DocType | null;
+  defaultDocType: DocumentType | null;
+}
+
+/**
+ * Mapeo guardado en el lote (DX-327, fase 1, pre-flight M3):
+ * `defaultDocType` lleva el código anterior, para la API y la web anteriores
+ * durante el despliegue, y `defaultDocumentType` el genérico, que es el que
+ * lee la API nueva. La fase 2 deja de escribir el anterior.
+ */
+export interface StoredColumnMapping {
+  columns: ColumnMapping;
+  defaultDocType: LegacyDocType | null;
+  defaultDocumentType: DocumentType | null;
+}
+
+export function storedColumnMapping(
+  columns: ColumnMapping,
+  defaultDocType: DocumentType | null,
+): StoredColumnMapping {
+  return {
+    columns,
+    defaultDocType: defaultDocType && legacyStoredDocType(defaultDocType),
+    defaultDocumentType: defaultDocType,
+  };
+}
+
+/**
+ * Lee el mapeo guardado: prefiere el genérico y, si falta (lote de la API
+ * anterior), traduce el código anterior (R6, sin etiqueta).
+ */
+export function readStoredColumnMapping(raw: unknown): {
+  columns: ColumnMapping;
+  defaultDocType: DocumentType | null;
+} {
+  const stored = (raw ?? {}) as {
+    columns?: ColumnMapping;
+    defaultDocType?: string | null;
+    defaultDocumentType?: string | null;
+  };
+  const code = stored.defaultDocumentType ?? stored.defaultDocType ?? null;
+  return {
+    columns: stored.columns ?? {},
+    defaultDocType: code === null ? null : docTypeFromStored(code),
+  };
 }
 
 /**

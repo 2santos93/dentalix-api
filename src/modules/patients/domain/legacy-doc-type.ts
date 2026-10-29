@@ -119,3 +119,14 @@ export const LEGACY_DOC_TYPE_SYNONYMS: ReadonlyArray<
     ],
   ],
 ];
+
+/**
+ * Cabeceras anteriores de la columna del NÚMERO de documento en la
+ * importación (pre-flight I5), ya como claves normalizadas. `import-fields.ts`
+ * las añade a sus sinónimos; no son tipos (`rut` no es un valor de tipo).
+ */
+export const LEGACY_DOC_NUMBER_HEADER_SYNONYMS: readonly string[] = [
+  'cedula',
+  'dni',
+  'rut',
+];

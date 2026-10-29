@@ -88,7 +88,7 @@ const person = (
   doc: string,
   extra: Partial<ImportPatientData> = {},
 ): ImportPatientData => ({
-  docType: 'CC',
+  docType: 'NATIONAL_ID',
   docNumber: doc,
   firstName: 'Ana',
   lastName: `Doc ${doc}`,
@@ -814,6 +814,50 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
     expect(JSON.stringify(row.filledValues)).not.toMatch(
       /viejo@x\.com|3109999999|Calle vieja|nota vieja|Luis|3108888888/,
     );
+  });
+
+  it('existingDocsSql and the chunk lookup read documentType', async () => {
+    // DX-327: un TAX_ID tiene OTHER en la columna anterior. El dry-run y el
+    // bloque comparan el genérico (y el dry-run lee la etiqueta, que es su
+    // nombre visible); con la columna anterior, TAX_ID ≠ OTHER y no se
+    // rellenaría.
+    const existing = await raw.patient.create({
+      data: {
+        tenantId: a.tenantId,
+        firstName: 'Fiscal',
+        lastName: 'Genérico',
+        docNumber: 'RX-9191',
+        documentType: 'TAX_ID',
+        docType: 'OTHER',
+        docTypeLabel: 'ID local',
+      },
+    });
+    const docs = await inTenant(a, () => repo.existingDocs(['RX9191']));
+    expect(docs).toEqual([
+      expect.objectContaining({
+        id: existing.id,
+        documentType: 'TAX_ID',
+        docTypeLabel: 'ID local',
+      }),
+    ]);
+    expect(docs[0]).not.toHaveProperty('docType');
+    const batch = await prepared(
+      a,
+      [person('RX9191', { docType: 'TAX_ID', occupation: 'Docente' })],
+      'FILL_EMPTY',
+    );
+    await runAll(a, batch!.id);
+    const row = await raw.patientImportRow.findFirstOrThrow({
+      where: { batchId: batch!.id },
+    });
+    expect(row).toMatchObject({ outcome: 'FILLED', patientId: existing.id });
+    expect(
+      await raw.patient.findUniqueOrThrow({ where: { id: existing.id } }),
+    ).toMatchObject({
+      occupation: 'Docente',
+      documentType: 'TAX_ID',
+      docTypeLabel: 'ID local',
+    });
   });
 
   it('un bloque no escribe nada si el lote ya no está RUNNING (atascado → deshecho) (revisión I4)', async () => {

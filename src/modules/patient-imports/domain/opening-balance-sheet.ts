@@ -153,7 +153,7 @@ export function balanceTemplateCsv(currency: string): string {
   return csv([
     [...BALANCE_TEMPLATE_HEADERS],
     [
-      '1000000001',
+      'DOC-1000001',
       '150000',
       currency,
       '15/03/2026',

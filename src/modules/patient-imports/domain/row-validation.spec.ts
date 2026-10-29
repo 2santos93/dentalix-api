@@ -1,4 +1,15 @@
-import { resolveMapping, suggestMapping } from './column-mapping';
+import type { DocumentType } from '@prisma/client';
+import {
+  DOCUMENT_TYPES,
+  type ClinicDocumentTypeNames,
+} from '../../patients/domain/document-type';
+import { LEGACY_DOC_NUMBER_HEADER_SYNONYMS } from '../../patients/domain/legacy-doc-type';
+import {
+  readStoredColumnMapping,
+  resolveMapping,
+  storedColumnMapping,
+  suggestMapping,
+} from './column-mapping';
 import { dedupeRows } from './dedupe';
 import { fieldsToRevert, fillEmpty, type FillablePatient } from './fill-empty';
 import { csvCell, issuesCsv, templateCsv } from './import-csv';
@@ -12,10 +23,13 @@ import {
   parseSex,
   validateRow,
 } from './row-validation';
+import { resolveBalanceColumns } from './opening-balance-sheet';
 import { parseCsv } from './csv-parser';
 import { toTable } from './tabular-file';
 
 const TODAY = '2026-10-21';
+/** Una clínica sin nombres locales (como empiezan todas, R16). */
+const NO_NAMES: ClinicDocumentTypeNames = {};
 
 /** El motivo de un resultado `{ error }` (o '' si no es un error). */
 const errorOf = (r: { value: unknown } | { error: string }): string =>
@@ -66,45 +80,32 @@ describe('mapeo de columnas (DX-107)', () => {
     expect(
       resolveMapping(headers, {
         columns: { firstName: 'nom', lastName: 'ape', docNumber: 'doc' },
-        defaultDocType: 'CC',
+        defaultDocType: 'NATIONAL_ID',
       }),
     ).toEqual({
       indexes: { docNumber: 0, firstName: 1, lastName: 2 },
       headers: { docNumber: 'doc', firstName: 'nom', lastName: 'ape' },
-      defaultDocType: 'CC',
+      defaultDocType: 'NATIONAL_ID',
     });
   });
 });
 
 describe('normalización de campos', () => {
-  it('tipo de documento por alias', () => {
-    expect(parseDocType('C.C.')).toBe('CC');
-    expect(parseDocType('Cédula de ciudadanía')).toBe('CC');
-    expect(parseDocType('tarjeta de identidad')).toBe('TI');
-    expect(parseDocType('Pasaporte')).toBe('PASSPORT');
-    expect(parseDocType('RC')).toBe('OTHER');
-    expect(parseDocType('XX')).toBeNull();
-  });
-
-  it('documento según el tipo; notación científica con su arreglo', () => {
-    expect(normalizeDocNumber('CC', '1.020.304.050')).toEqual({
+  it('documento: notación científica con su arreglo', () => {
+    expect(normalizeDocNumber('1.020.304.050')).toEqual({
       value: '1020304050',
     });
-    expect(normalizeDocNumber('CC', '10203A')).toHaveProperty('error');
-    expect(errorOf(normalizeDocNumber('CC', '1,02E+09'))).toMatch(
+    expect(errorOf(normalizeDocNumber('1,02E+09'))).toMatch(
       /notación científica.*formato Texto/,
     );
     // QA 2026-10-23 D2: el valor del mensaje es el de la fila, no uno fijo.
-    const real = errorOf(normalizeDocNumber('CC', ' 1,09E+09 '));
+    const real = errorOf(normalizeDocNumber(' 1,09E+09 '));
     expect(real).toContain('(1,09E+09)');
     expect(real).not.toContain('1,02E+09');
-    expect(normalizeDocNumber('PASSPORT', 'ab-12 345')).toEqual({
-      value: 'AB12345',
-    });
-    expect(normalizeDocNumber('OTHER', 'nuip-77')).toEqual({
-      value: 'NUIP-77',
-    });
-    expect(docKey('nuip-77')).toBe('NUIP77');
+    expect(normalizeDocNumber('ab-12 345')).toEqual({ value: 'AB12345' });
+    // DX-327 (M14): los guiones ya no se guardan; la clave es la misma.
+    expect(normalizeDocNumber('rx-77')).toEqual({ value: 'RX77' });
+    expect(docKey('rx-77')).toBe('RX77');
   });
 
   it('fecha de nacimiento: día primero, ISO, serie de Excel, con hora; rechaza 2 cifras, inexistentes y futuras', () => {
@@ -151,6 +152,281 @@ describe('normalización de campos', () => {
   });
 });
 
+/** El mensaje de error de una celda de tipo, con estos nombres de la clínica. */
+function typeError(raw: string, clinicNames: ClinicDocumentTypeNames): string {
+  const mapping = resolveMapping(['tipo', 'doc', 'nom', 'ape'], {
+    columns: {
+      docType: 'tipo',
+      docNumber: 'doc',
+      firstName: 'nom',
+      lastName: 'ape',
+    },
+  });
+  const r = validateRow(
+    { rowNumber: 2, cells: [raw, 'RX-1', 'A', 'B'] },
+    mapping,
+    {
+      countryCode: 'CO',
+      today: TODAY,
+      clinicNames,
+    },
+  );
+  return r.issues.find((i) => i.column === 'tipo')?.message ?? '';
+}
+
+describe('tipos de documento de la importación (DX-327)', () => {
+  it.each([
+    ['NATIONAL_ID', 'NATIONAL_ID'],
+    ['national id', 'NATIONAL_ID'],
+    ['Documento nacional', 'NATIONAL_ID'],
+    ['Documento nacional de identidad', 'NATIONAL_ID'],
+    ['Documento de identidad', 'NATIONAL_ID'],
+    ['documento identidad', 'NATIONAL_ID'],
+    ['Identidad', 'NATIONAL_ID'],
+    ['PASSPORT', 'PASSPORT'],
+    ['Pasaporte', 'PASSPORT'],
+    ['P.A.', 'PASSPORT'],
+    ['pas', 'PASSPORT'],
+    ['PP', 'PASSPORT'],
+    ['RESIDENCE_PERMIT', 'RESIDENCE_PERMIT'],
+    ['Residence permit', 'RESIDENCE_PERMIT'],
+    ['Permiso de residencia', 'RESIDENCE_PERMIT'],
+    ['permiso residencia', 'RESIDENCE_PERMIT'],
+    ['TAX_ID', 'TAX_ID'],
+    ['Tax ID', 'TAX_ID'],
+    ['Identificación fiscal', 'TAX_ID'],
+    ['ID fiscal', 'TAX_ID'],
+    ['OTHER', 'OTHER'],
+    ['Otro', 'OTHER'],
+    ['Otro documento', 'OTHER'],
+  ])(
+    'generic codes and their Spanish and English names are recognized (%s → %s)',
+    (raw, type) => {
+      expect(parseDocType(raw, NO_NAMES)).toBe(type);
+    },
+  );
+
+  it.each([
+    ['C.C.', 'NATIONAL_ID'],
+    ['cc', 'NATIONAL_ID'],
+    ['Cédula', 'NATIONAL_ID'],
+    ['Cédula de ciudadanía', 'NATIONAL_ID'],
+    ['TI', 'NATIONAL_ID'],
+    ['Tarjeta de identidad', 'NATIONAL_ID'],
+    ['CE', 'RESIDENCE_PERMIT'],
+    ['Cédula de extranjería', 'RESIDENCE_PERMIT'],
+    ['Extranjería', 'RESIDENCE_PERMIT'],
+  ])(
+    'legacy synonyms map to their generic type with no label (%s → %s)',
+    (raw, type) => {
+      // parseDocType devuelve solo el tipo: no hay etiqueta que derivar (Q3).
+      expect(parseDocType(raw, NO_NAMES)).toBe(type);
+    },
+  );
+
+  it('legacy dni and nit still map to OTHER; rut is not a type', () => {
+    expect(parseDocType('DNI', NO_NAMES)).toBe('OTHER');
+    expect(parseDocType('NIT', NO_NAMES)).toBe('OTHER');
+    expect(parseDocType('RC', NO_NAMES)).toBe('OTHER');
+    // Pre-flight I7: `rut` solo era cabecera del número; no se añade nada.
+    expect(parseDocType('RUT', NO_NAMES)).toBeNull();
+    expect(typeError('RUT', NO_NAMES)).toMatch(
+      /^Tipo de documento no reconocido/,
+    );
+  });
+
+  it('legacy number header synonyms still recognize the number column', () => {
+    expect([...LEGACY_DOC_NUMBER_HEADER_SYNONYMS]).toEqual([
+      'cedula',
+      'dni',
+      'rut',
+    ]);
+    for (const header of ['Cédula', 'DNI', 'RUT']) {
+      expect(suggestMapping([header, 'Nombre', 'Apellidos'])).toMatchObject({
+        docNumber: header,
+      });
+      expect(
+        resolveBalanceColumns([header, 'Importe', 'Moneda']),
+      ).toMatchObject({ docNumber: header });
+    }
+    const docNumber = IMPORT_FIELDS.find((f) => f.key === 'docNumber')!;
+    expect(docNumber.synonyms).toEqual(
+      expect.arrayContaining([...LEGACY_DOC_NUMBER_HEADER_SYNONYMS]),
+    );
+  });
+
+  // REGIONAL_TOKYO_FIXTURE: el país de la sede lo obliga el enum hasta
+  // DX-312; no decide nada. Nombres locales en otras escrituras (I4).
+  it.each([
+    // «ドキュメント» en ancho completo y en medio ancho (el dakuten va aparte).
+    ['japonés', 'ドキュメント', 'ﾄﾞｷｭﾒﾝﾄ'],
+    ['cirílico', 'Личный Документ', 'личный-документ'],
+    ['árabe', 'وثيقة شخصية', 'وثيقة  شخصية'],
+  ])(
+    'a local name in a non-Latin script is recognized on import (%s)',
+    (_script, name, written) => {
+      const names: ClinicDocumentTypeNames = { NATIONAL_ID: name };
+      expect(parseDocType(name, names)).toBe('NATIONAL_ID');
+      expect(parseDocType(written, names)).toBe('NATIONAL_ID');
+      expect(parseDocType(name, NO_NAMES)).toBeNull();
+    },
+  );
+
+  it('a stored mapping keeps the legacy default for older replicas and reads the generic one', () => {
+    const columns = { docNumber: 'doc' };
+    expect(storedColumnMapping(columns, 'NATIONAL_ID')).toEqual({
+      columns,
+      defaultDocType: 'CC',
+      defaultDocumentType: 'NATIONAL_ID',
+    });
+    // TAX_ID no tiene código anterior: la réplica anterior lee OTHER.
+    expect(storedColumnMapping(columns, 'TAX_ID')).toMatchObject({
+      defaultDocType: 'OTHER',
+      defaultDocumentType: 'TAX_ID',
+    });
+    expect(storedColumnMapping(columns, null)).toEqual({
+      columns,
+      defaultDocType: null,
+      defaultDocumentType: null,
+    });
+    // La API nueva prefiere el genérico…
+    expect(
+      readStoredColumnMapping(storedColumnMapping(columns, 'TAX_ID')),
+    ).toEqual({ columns, defaultDocType: 'TAX_ID' });
+    // …y un lote de la API anterior (solo el código) se traduce (R6).
+    expect(readStoredColumnMapping({ columns, defaultDocType: 'TI' })).toEqual({
+      columns,
+      defaultDocType: 'NATIONAL_ID',
+    });
+    expect(readStoredColumnMapping({})).toEqual({
+      columns: {},
+      defaultDocType: null,
+    });
+  });
+
+  it.each(DOCUMENT_TYPES)(
+    'one number rule for every type accepts letter prefixes and separators (%s)',
+    (type) => {
+      // Una sola regla: el tipo no entra (R15).
+      void type;
+      expect(normalizeDocNumber('1.234.567')).toEqual({ value: '1234567' });
+      expect(normalizeDocNumber('V-12.345.678')).toEqual({
+        value: 'V12345678',
+      });
+      expect(normalizeDocNumber('e-81234567')).toEqual({ value: 'E81234567' });
+      expect(normalizeDocNumber('J-12345678-9')).toEqual({
+        value: 'J123456789',
+      });
+      expect(normalizeDocNumber('12345678Z')).toEqual({ value: '12345678Z' });
+      expect(normalizeDocNumber('AB/123')).toEqual({ value: 'AB123' });
+      const mapping = resolveMapping(['doc', 'nom', 'ape'], {
+        columns: { docNumber: 'doc', firstName: 'nom', lastName: 'ape' },
+        defaultDocType: type,
+      });
+      const r = validateRow(
+        { rowNumber: 2, cells: ['V-12.345.678', 'A', 'B'] },
+        mapping,
+        { countryCode: 'CO', today: TODAY, clinicNames: NO_NAMES },
+      );
+      expect(r.issues).toEqual([]);
+      expect(r.data).toMatchObject({ docType: type, docNumber: 'V12345678' });
+    },
+  );
+
+  it('a number is rejected only when empty of letters and digits, over 30, or in scientific notation', () => {
+    const rule =
+      'Número de documento no válido: letras y dígitos (hasta 30), con separadores opcionales.';
+    expect(normalizeDocNumber('---')).toEqual({ error: rule });
+    expect(normalizeDocNumber('A'.repeat(31))).toEqual({ error: rule });
+    expect(normalizeDocNumber('A'.repeat(30))).toEqual({
+      value: 'A'.repeat(30),
+    });
+    expect(normalizeDocNumber('RX#1')).toEqual({ error: rule });
+    expect(errorOf(normalizeDocNumber('1.23E+9'))).toMatch(
+      /notación científica/,
+    );
+    for (const message of [rule, errorOf(normalizeDocNumber('1.23E+9'))]) {
+      expect(message).not.toMatch(
+        /NATIONAL_ID|PASSPORT|RESIDENCE_PERMIT|TAX_ID|OTHER|pasaporte|nacional/i,
+      );
+    }
+  });
+
+  it.each([
+    // Copiados de la regla anterior (`row-validation.ts:124-175` antes de
+    // DX-327): lo que pasaba con cada código sigue pasando, igual o sin
+    // separadores.
+    ['CC', '1.020.304.050', '1020304050'],
+    ['CC', '1,020,304', '1020304'],
+    ['CC', '102 030 405', '102030405'],
+    ['TI', '1-020-304', '1020304'],
+    ['TI', '123456789012345', '123456789012345'],
+    ['CE', 'ab-12.345', 'AB12345'],
+    ['CE', 'X12345678901234', 'X12345678901234'],
+    ['PASSPORT', 'ab-12 345', 'AB12345'],
+    ['PASSPORT', 'A'.repeat(20), 'A'.repeat(20)],
+    ['OTHER', 'nuip-77', 'NUIP77'],
+    ['OTHER', 'a.b', 'AB'],
+    ['OTHER', '7', '7'],
+    ['OTHER', `${'1'.repeat(29)}-`, '1'.repeat(29)],
+  ])(
+    'legacy: nothing accepted before DX-327 is rejected now (%s %s)',
+    (_code, raw, value) => {
+      expect(normalizeDocNumber(raw)).toEqual({ value });
+    },
+  );
+
+  it("an unknown type lists the generic codes and names, and the clinic's local names when it has them", () => {
+    const base =
+      'Tipo de documento no reconocido: usa NATIONAL_ID, PASSPORT, RESIDENCE_PERMIT, TAX_ID u OTHER, o su nombre (documento nacional, pasaporte, permiso de residencia, identificación fiscal, otro)';
+    expect(typeError('ZZ', NO_NAMES)).toBe(`${base}.`);
+    expect(
+      typeError('ZZ', {
+        NATIONAL_ID: null,
+        TAX_ID: 'ID local',
+        PASSPORT: 'Libreta',
+      }),
+    ).toBe(`${base}, o uno de los nombres de tu clínica: Libreta, ID local.`);
+  });
+
+  it("a clinic's local name is recognized ignoring case and accents, and wins over a legacy synonym", () => {
+    const names: ClinicDocumentTypeNames = { TAX_ID: 'Nombre Local' };
+    for (const raw of [
+      'Nombre Local',
+      'nombre local',
+      'NOMBRE-LOCAL',
+      'Nómbre Locál',
+    ]) {
+      expect(parseDocType(raw, names)).toBe('TAX_ID');
+    }
+    // Sin el nombre local, no es ningún tipo.
+    expect(parseDocType('nombre local', NO_NAMES)).toBeNull();
+  });
+
+  it("legacy: a clinic's local name equal to a legacy key of another type wins", () => {
+    // «CE» era un sinónimo anterior de RESIDENCE_PERMIT; la clínica lo usa
+    // para TAX_ID: gana la clínica (R19, prioridad 1).
+    expect(parseDocType('CE', { TAX_ID: 'CE' })).toBe('TAX_ID');
+    expect(parseDocType('CE', NO_NAMES)).toBe('RESIDENCE_PERMIT');
+    // La clínica que llama «Cédula de identidad» a su documento nacional lo
+    // importa con ese nombre; sin configurarlo, no es ningún tipo.
+    const names: ClinicDocumentTypeNames = {
+      NATIONAL_ID: 'Cédula de identidad',
+    };
+    expect(parseDocType('cedula de identidad', names)).toBe('NATIONAL_ID');
+    expect(parseDocType('Cédula de identidad', NO_NAMES)).toBeNull();
+  });
+
+  it('a single letter is unknown unless the clinic configures it', () => {
+    expect(parseDocType('V', NO_NAMES)).toBeNull();
+    expect(typeError('V', NO_NAMES)).toMatch(
+      /^Tipo de documento no reconocido.*\)\.$/,
+    );
+    expect(parseDocType('V', { NATIONAL_ID: 'V' })).toBe('NATIONAL_ID');
+    expect(parseDocType('v', { NATIONAL_ID: 'V' })).toBe('NATIONAL_ID');
+  });
+});
+
 describe('validateRow', () => {
   const headers = [
     'tipo',
@@ -175,9 +451,9 @@ describe('validateRow', () => {
       email: 'email',
       notes: 'notas',
     },
-    defaultDocType: 'CC',
+    defaultDocType: 'NATIONAL_ID',
   });
-  const ctx = { countryCode: 'CO', today: TODAY };
+  const ctx = { countryCode: 'CO', today: TODAY, clinicNames: NO_NAMES };
 
   it('fila válida normalizada; tipo vacío usa el de por defecto', () => {
     const r = validateRow(
@@ -200,7 +476,7 @@ describe('validateRow', () => {
     );
     expect(r.issues).toEqual([]);
     expect(r.data).toEqual({
-      docType: 'CC',
+      docType: 'NATIONAL_ID',
       docNumber: '1020304',
       firstName: 'Ana María',
       lastName: 'Pérez',
@@ -255,17 +531,25 @@ const data = (
   lastName: 'B',
 });
 
+const existingDoc = (id: string, documentType: DocumentType, key: string) => ({
+  id,
+  documentType,
+  docTypeLabel: null as string | null,
+  docKey: key,
+});
+
 describe('dedupeRows', () => {
   it('dentro del fichero gana la primera; mismo nº con otro tipo es error', () => {
     const r = dedupeRows(
       [
-        { rowNumber: 2, data: data('CC', '111') },
-        { rowNumber: 3, data: data('CC', '111') },
-        { rowNumber: 4, data: data('TI', '111') },
-        { rowNumber: 5, data: data('CC', '222') },
+        { rowNumber: 2, data: data('NATIONAL_ID', '111') },
+        { rowNumber: 3, data: data('NATIONAL_ID', '111') },
+        { rowNumber: 4, data: data('PASSPORT', '111') },
+        { rowNumber: 5, data: data('NATIONAL_ID', '222') },
       ],
       [],
       'doc',
+      NO_NAMES,
     );
     expect(r.fresh.map((x) => x.rowNumber)).toEqual([2, 5]);
     expect(r.fileDuplicates).toBe(1);
@@ -279,19 +563,20 @@ describe('dedupeRows', () => {
   it('contra la BD: mismo tipo → existente; otro tipo → error', () => {
     const r = dedupeRows(
       [
-        { rowNumber: 2, data: data('CC', '111') },
-        { rowNumber: 3, data: data('TI', 'X-9') },
-        { rowNumber: 4, data: data('CC', '333') },
+        { rowNumber: 2, data: data('NATIONAL_ID', '111') },
+        { rowNumber: 3, data: data('NATIONAL_ID', 'X-9') },
+        { rowNumber: 4, data: data('NATIONAL_ID', '333') },
       ],
       [
-        { id: 'p1', docType: 'CC', docKey: '111' },
-        { id: 'p2', docType: 'CE', docKey: 'X9' },
+        existingDoc('p1', 'NATIONAL_ID', '111'),
+        existingDoc('p2', 'RESIDENCE_PERMIT', 'X9'),
       ],
       undefined,
+      NO_NAMES,
     );
     expect(r.fresh.map((x) => x.rowNumber)).toEqual([4]);
     expect(r.existing).toEqual([
-      { rowNumber: 2, data: data('CC', '111'), patientId: 'p1' },
+      { rowNumber: 2, data: data('NATIONAL_ID', '111'), patientId: 'p1' },
     ]);
     expect(r.issues.map((i) => [i.row, i.kind, i.column])).toEqual([
       [2, 'DUPLICATE_EXISTING', 'Número de documento'],
@@ -302,14 +587,21 @@ describe('dedupeRows', () => {
   it('existente con supresión parcial (Ley 1581): el aviso de la fila lo dice (revisión I2)', () => {
     const r = dedupeRows(
       [
-        { rowNumber: 2, data: data('CC', '111') },
-        { rowNumber: 3, data: data('CC', '222') },
+        { rowNumber: 2, data: data('NATIONAL_ID', '111') },
+        { rowNumber: 3, data: data('NATIONAL_ID', '222') },
       ],
       [
-        { id: 'p1', docType: 'CC', docKey: '111', partiallySuppressed: true },
-        { id: 'p2', docType: 'CC', docKey: '222', partiallySuppressed: false },
+        {
+          ...existingDoc('p1', 'NATIONAL_ID', '111'),
+          partiallySuppressed: true,
+        },
+        {
+          ...existingDoc('p2', 'NATIONAL_ID', '222'),
+          partiallySuppressed: false,
+        },
       ],
       undefined,
+      NO_NAMES,
     );
     expect(r.existing.map((x) => x.patientId)).toEqual(['p1', 'p2']);
     const [suppressed, normal] = r.issues;
@@ -317,6 +609,108 @@ describe('dedupeRows', () => {
     expect(suppressed.message).toMatch(/supresión de sus datos.*privacidad/);
     expect(suppressed.message).toMatch(/no se rellenarán/);
     expect(normal.message).not.toMatch(/supresión/);
+  });
+
+  it('the same number with the same generic type is the same patient', () => {
+    const r = dedupeRows(
+      [
+        { rowNumber: 2, data: data('TAX_ID', 'J123456789') },
+        { rowNumber: 3, data: data('TAX_ID', 'RX-1') },
+        { rowNumber: 4, data: data('TAX_ID', 'RX1') },
+      ],
+      [existingDoc('p1', 'TAX_ID', 'J123456789')],
+      undefined,
+      NO_NAMES,
+    );
+    expect(r.existing.map((x) => [x.rowNumber, x.patientId])).toEqual([
+      [2, 'p1'],
+    ]);
+    // Con guion y sin él es la misma clave (docKey no cambia).
+    expect(r.fresh.map((x) => x.rowNumber)).toEqual([3]);
+    expect(r.fileDuplicates).toBe(1);
+    expect(r.conflicts).toBe(0);
+  });
+
+  it('legacy CC and TI with the same key are the same type after the migration', () => {
+    // Una fila «CC» y otra «TI» del fichero dan las dos NATIONAL_ID (R3), y un
+    // paciente que la BD tenía como TI ya es NATIONAL_ID: repetido y
+    // existente, nunca «otro tipo» (R12).
+    const cc = parseDocType('CC', NO_NAMES);
+    const ti = parseDocType('TI', NO_NAMES);
+    expect([cc, ti]).toEqual(['NATIONAL_ID', 'NATIONAL_ID']);
+    const r = dedupeRows(
+      [
+        { rowNumber: 2, data: data(cc!, '123') },
+        { rowNumber: 3, data: data(ti!, '1.2.3') },
+        { rowNumber: 4, data: data(ti!, '456') },
+      ],
+      [existingDoc('p1', 'NATIONAL_ID', '456')],
+      undefined,
+      NO_NAMES,
+    );
+    expect(r.conflicts).toBe(0);
+    expect(r.issues.map((i) => [i.row, i.kind])).toEqual([
+      [3, 'DUPLICATE_FILE'],
+      [4, 'DUPLICATE_EXISTING'],
+    ]);
+  });
+
+  it('messages name the type label, never a code', () => {
+    const names: ClinicDocumentTypeNames = { PASSPORT: 'Nombre Local' };
+    const r = dedupeRows(
+      [
+        { rowNumber: 2, data: data('TAX_ID', '111') },
+        { rowNumber: 3, data: data('PASSPORT', '111') },
+        { rowNumber: 4, data: data('OTHER', '222') },
+        { rowNumber: 5, data: data('RESIDENCE_PERMIT', '333') },
+      ],
+      [
+        existingDoc('p1', 'NATIONAL_ID', '222'),
+        {
+          ...existingDoc('p2', 'NATIONAL_ID', '333'),
+          docTypeLabel: 'ID local',
+        },
+      ],
+      undefined,
+      names,
+    );
+    const byRow = (row: number) => r.issues.find((i) => i.row === row)!;
+    expect(byRow(3)).toMatchObject({
+      message:
+        'El número de documento ya aparece en la fila 2 con otro tipo (Identificación fiscal).',
+      value: 'Nombre Local 111',
+    });
+    expect(byRow(4)).toMatchObject({
+      message:
+        'Ya hay un paciente en la clínica con este número de documento registrado como Documento nacional: revisa el tipo.',
+      value: 'Otro documento 222',
+    });
+    // El paciente existente con etiqueta libre sale con su etiqueta (R17).
+    expect(byRow(5).message).toContain('registrado como ID local:');
+    expect(byRow(5).value).toBe('Permiso de residencia 333');
+    for (const issue of r.issues) {
+      expect(`${issue.message} ${issue.value}`).not.toMatch(
+        /NATIONAL_ID|PASSPORT|RESIDENCE_PERMIT|TAX_ID|OTHER\b/,
+      );
+    }
+  });
+
+  it('a dedupe message never prints a label derived from a legacy code', () => {
+    // La fila «cédula» casa con un sinónimo anterior: su texto es el nombre
+    // genérico, nunca el código ni el nombre de un país (Q3).
+    const type = parseDocType('cédula', NO_NAMES)!;
+    const r = dedupeRows(
+      [
+        { rowNumber: 2, data: data(type, '111') },
+        { rowNumber: 3, data: data('PASSPORT', '111') },
+      ],
+      [existingDoc('p1', 'TAX_ID', '111')],
+      undefined,
+      NO_NAMES,
+    );
+    const texts = r.issues.map((i) => `${i.message} | ${i.value}`).join('\n');
+    expect(texts).toContain('Documento nacional 111');
+    expect(texts).not.toMatch(/\bCC\b|\bTI\b|[Cc][ée]dula/);
   });
 });
 
@@ -335,7 +729,7 @@ describe('«Actualizar solo campos vacíos»', () => {
 
   it('rellena solo lo vacío y nunca pisa un dato', () => {
     const filled = fillEmpty(patient, {
-      ...data('CC', '1'),
+      ...data('NATIONAL_ID', '1'),
       birthDate: '1990-01-01',
       sex: 'F',
       phone: '+573101234567',
@@ -358,7 +752,7 @@ describe('«Actualizar solo campos vacíos»', () => {
       partiallySuppressedAt: new Date('2026-10-01T00:00:00Z'),
     };
     const filled = fillEmpty(suppressed, {
-      ...data('CC', '1'),
+      ...data('NATIONAL_ID', '1'),
       birthDate: '1990-01-01',
       phone: '+573101234567',
       email: 'otro@x.com',
@@ -424,11 +818,15 @@ describe('CSV de la plantilla y del informe', () => {
       columns: suggestMapping(table.headers),
     });
     const rows = table.rows.map((row) =>
-      validateRow(row, mapping, { countryCode: 'CO', today: TODAY }),
+      validateRow(row, mapping, {
+        countryCode: 'CO',
+        today: TODAY,
+        clinicNames: NO_NAMES,
+      }),
     );
     expect(rows.map((r) => r.issues)).toEqual([[], []]);
     expect(rows[0].data).toMatchObject({
-      docType: 'CC',
+      docType: 'NATIONAL_ID',
       birthDate: '1988-04-15',
       phone: '+573100000001',
     });
@@ -439,12 +837,12 @@ describe('fila con más celdas que la cabecera', () => {
   it('es un error de la fila, sin columna, y no se importa', () => {
     const mapping = resolveMapping(['doc', 'nom', 'ape'], {
       columns: { docNumber: 'doc', firstName: 'nom', lastName: 'ape' },
-      defaultDocType: 'CC',
+      defaultDocType: 'NATIONAL_ID',
     });
     const r = validateRow(
       { rowNumber: 5, cells: ['1020', 'Ana', 'Pérez'], extraCells: true },
       mapping,
-      { countryCode: 'CO', today: TODAY },
+      { countryCode: 'CO', today: TODAY, clinicNames: NO_NAMES },
     );
     expect(r.data).toBeNull();
     expect(r.issues).toEqual([

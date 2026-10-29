@@ -1,4 +1,14 @@
-import { DocType } from '@prisma/client';
+import type { DocumentType } from '@prisma/client';
+import {
+  DOCUMENT_TYPES,
+  GENERIC_DOC_TYPE_NAMES,
+  documentTypeKey,
+  type ClinicDocumentTypeNames,
+} from '../../patients/domain/document-type';
+import {
+  LEGACY_DOC_TYPES,
+  LEGACY_DOC_TYPE_SYNONYMS,
+} from '../../patients/domain/legacy-doc-type';
 import { toWhatsAppNumber } from '../../appointment-confirmations/application/whatsapp-phone';
 import type { ResolvedMapping } from './column-mapping';
 import type { ImportFieldKey, ImportPatientData } from './import-fields';
@@ -32,6 +42,8 @@ export interface RowContext {
   countryCode: string | null;
   /** Hoy, día civil AAAA-MM-DD (en la zona de la sede). */
   today: string;
+  /** Nombres locales de los tipos de documento de la clínica (R16, R19). */
+  clinicNames: ClinicDocumentTypeNames;
 }
 
 export interface ValidatedRow {
@@ -55,39 +67,6 @@ const LIMITS = {
   notes: 2000,
 } as const;
 
-const DOC_TYPE_ALIASES: ReadonlyArray<[DocType, readonly string[]]> = [
-  [
-    'CC',
-    [
-      'cc',
-      'cedula',
-      'ceduladeciudadania',
-      'cedulaciudadania',
-      'cedulaciudadana',
-    ],
-  ],
-  ['TI', ['ti', 'tarjetadeidentidad', 'tarjetaidentidad']],
-  ['CE', ['ce', 'cedulaextranjeria', 'ceduladeextranjeria', 'extranjeria']],
-  ['PASSPORT', ['pa', 'pas', 'pp', 'pasaporte', 'passport']],
-  [
-    'OTHER',
-    [
-      'otro',
-      'other',
-      'rc',
-      'registrocivil',
-      'nuip',
-      'pep',
-      'ppt',
-      'dni',
-      'nit',
-      'cv',
-      'ms',
-      'as',
-    ],
-  ],
-];
-
 const SEX_ALIASES: ReadonlyArray<
   ['M' | 'F' | 'OTHER' | null, readonly string[]]
 > = [
@@ -100,30 +79,59 @@ const SEX_ALIASES: ReadonlyArray<
   ],
 ];
 
-function aliasKey(raw: string): string {
-  return raw
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, '');
-}
-
 /** Clave de comparación del documento (la misma que usa el alta manual). */
 export { docKey } from '../../patients/domain/doc-key';
 
-export function parseDocType(raw: string): DocType | null {
-  const key = aliasKey(raw);
-  for (const [type, aliases] of DOC_TYPE_ALIASES) {
-    if (aliases.includes(key)) return type;
+/**
+ * Tipo de la celda (DX-327, R19), por `documentTypeKey` (sin mayúsculas, ni
+ * tildes latinas, ni puntuación; en cualquier escritura) y en este orden:
+ * los nombres locales de la clínica, los códigos y nombres genéricos y, por
+ * último, los sinónimos anteriores, que dan su genérico sin etiqueta (Q3).
+ */
+export function parseDocType(
+  raw: string,
+  clinicNames: ClinicDocumentTypeNames,
+): DocumentType | null {
+  const key = documentTypeKey(raw);
+  if (key === '') return null;
+  for (const type of DOCUMENT_TYPES) {
+    const local = Object.hasOwn(clinicNames, type) ? clinicNames[type] : null;
+    if (local && documentTypeKey(local) === key) return type;
+  }
+  for (const type of DOCUMENT_TYPES) {
+    if (GENERIC_DOC_TYPE_NAMES[type].includes(key)) return type;
+  }
+  for (const [code, synonyms] of LEGACY_DOC_TYPE_SYNONYMS) {
+    if (synonyms.includes(key)) return LEGACY_DOC_TYPES[code];
   }
   return null;
 }
 
+/** «… no reconocido» con los genéricos y, si los tiene, los nombres de la clínica. */
+function unknownDocTypeMessage(clinicNames: ClinicDocumentTypeNames): string {
+  const base =
+    'Tipo de documento no reconocido: usa NATIONAL_ID, PASSPORT, RESIDENCE_PERMIT, TAX_ID u OTHER, o su nombre (documento nacional, pasaporte, permiso de residencia, identificación fiscal, otro)';
+  const locals = DOCUMENT_TYPES.map((type) =>
+    Object.hasOwn(clinicNames, type) ? clinicNames[type] : null,
+  ).filter((name): name is string => !!name);
+  return locals.length === 0
+    ? `${base}.`
+    : `${base}, o uno de los nombres de tu clínica: ${locals.join(', ')}.`;
+}
+
 const SCIENTIFIC = /^\d+(?:[.,]\d+)?e\+?\d+$/i;
 
-/** Número de documento normalizado según su tipo, o el motivo del error. */
+const DOC_NUMBER_ERROR =
+  'Número de documento no válido: letras y dígitos (hasta 30), con separadores opcionales.';
+
+/**
+ * Número de documento normalizado, o el motivo del error. Una sola regla para
+ * cualquier tipo y país (DX-327, R15): sin espacios, puntos, comas, guiones
+ * ni barras, en mayúsculas, de 1 a 30 letras y dígitos. «V-12.345.678» →
+ * «V12345678». Es la unión de las reglas por tipo anteriores: nada que
+ * aceptaran se rechaza.
+ */
 export function normalizeDocNumber(
-  type: DocType,
   raw: string,
 ): { value: string } | { error: string } {
   const compact = raw.replace(/\s/g, '');
@@ -133,45 +141,10 @@ export function normalizeDocNumber(
       error: `El número de documento quedó en notación científica (${compact.slice(0, 30)}): en Excel da a la columna formato Texto y vuelve a exportar.`,
     };
   }
-  const upper = raw.toUpperCase();
-  switch (type) {
-    case 'CC':
-    case 'TI': {
-      const digits = upper.replace(/[\s.,-]/g, '');
-      return /^\d{3,15}$/.test(digits)
-        ? { value: digits }
-        : {
-            error: `Número de documento no válido para ${type}: solo dígitos (de 3 a 15).`,
-          };
-    }
-    case 'CE': {
-      const value = upper.replace(/[\s.,-]/g, '');
-      return /^[0-9A-Z]{3,15}$/.test(value)
-        ? { value }
-        : {
-            error:
-              'Número de documento no válido para CE: letras y dígitos (de 3 a 15).',
-          };
-    }
-    case 'PASSPORT': {
-      const value = upper.replace(/[\s-]/g, '');
-      return /^[0-9A-Z]{3,20}$/.test(value)
-        ? { value }
-        : {
-            error:
-              'Número de pasaporte no válido: letras y dígitos (de 3 a 20).',
-          };
-    }
-    default: {
-      const value = upper.replace(/[\s.]/g, '');
-      return /^[0-9A-Z-]{1,30}$/.test(value) && /[0-9A-Z]/.test(value)
-        ? { value }
-        : {
-            error:
-              'Número de documento no válido: letras, dígitos y guiones (hasta 30).',
-          };
-    }
-  }
+  const value = raw.toUpperCase().replace(/[\s.,/-]/g, '');
+  return /^[0-9A-Z]{1,30}$/.test(value)
+    ? { value }
+    : { error: DOC_NUMBER_ERROR };
 }
 
 function isRealDate(y: number, m: number, d: number): boolean {
@@ -254,7 +227,7 @@ export function parseBirthDate(
 export function parseSex(
   raw: string,
 ): { value: 'M' | 'F' | 'OTHER' | null } | null {
-  const key = aliasKey(raw);
+  const key = documentTypeKey(raw);
   for (const [sex, aliases] of SEX_ALIASES) {
     if (aliases.includes(key)) return { value: sex };
   }
@@ -376,15 +349,15 @@ export function validateRow(
   const firstName = text('firstName', 'Nombres', true);
   const lastName = text('lastName', 'Apellidos', true);
 
-  let docType: DocType | null = mapping.defaultDocType;
+  let docType: DocumentType | null = mapping.defaultDocType;
   const rawType = clean(cell('docType'));
   if (rawType !== '') {
-    docType = parseDocType(rawType);
+    docType = parseDocType(rawType, ctx.clinicNames);
     if (!docType) {
       fail(
         'docType',
         'Tipo de documento',
-        'Tipo de documento no reconocido: usa CC, TI, CE, PASAPORTE u OTRO.',
+        unknownDocTypeMessage(ctx.clinicNames),
         rawType,
       );
     }
@@ -402,7 +375,7 @@ export function validateRow(
       '',
     );
   } else if (docType) {
-    const doc = normalizeDocNumber(docType, rawDoc);
+    const doc = normalizeDocNumber(rawDoc);
     if ('error' in doc)
       fail('docNumber', 'Número de documento', doc.error, rawDoc);
     else docNumber = doc.value;

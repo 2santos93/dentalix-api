@@ -4,10 +4,14 @@ import {
   type BatchLocation,
 } from '../infrastructure/prisma-patient-import.repository';
 import type { PrismaPatientImportRepository } from '../infrastructure/prisma-patient-import.repository';
+import type { BatchRow } from '../infrastructure/prisma-patient-import.repository';
+import type { NewBatch } from '../infrastructure/prisma-patient-import.repository';
 import type { JobQueue } from '../../jobs/application/job-queue.service';
+import { FixedDocumentTypeNamesReader } from '../../document-type-names/__fixtures__/fixed-document-type-names.reader';
 import {
   LOCATION_MESSAGE,
   PatientImportsService,
+  mappingOf,
   type UploadedFile,
 } from './patient-imports.use-cases';
 
@@ -19,6 +23,7 @@ function makeUseCases(batchLocation: () => Promise<BatchLocation>) {
   return new PatientImportsService(
     { batchLocation } as unknown as PrismaPatientImportRepository,
     {} as JobQueue,
+    new FixedDocumentTypeNamesReader(),
   );
 }
 
@@ -91,5 +96,83 @@ describe('PatientImportsService: sede del lote antes que el fichero (G1-B)', () 
     await expect(
       uc.inspect(file('nombres,documento\nAna,1')),
     ).resolves.toMatchObject({ totalRows: 1 });
+  });
+});
+
+describe('PatientImportsService: tipos de documento genéricos (DX-327)', () => {
+  it('a stored legacy default type is read as its generic type', () => {
+    const batch = (columnMapping: unknown) => ({ columnMapping }) as BatchRow;
+    // Lote guardado por la API anterior: solo el código.
+    expect(
+      mappingOf(batch({ columns: { docNumber: 'doc' }, defaultDocType: 'TI' })),
+    ).toEqual({ columns: { docNumber: 'doc' }, defaultDocType: 'NATIONAL_ID' });
+    // Lote de la API nueva: el genérico manda sobre la proyección.
+    expect(
+      mappingOf(
+        batch({
+          columns: {},
+          defaultDocType: 'OTHER',
+          defaultDocumentType: 'TAX_ID',
+        }),
+      ),
+    ).toEqual({ columns: {}, defaultDocType: 'TAX_ID' });
+  });
+
+  it('the dry-run reads the clinic names once per batch and stores both default types', async () => {
+    const names = new FixedDocumentTypeNamesReader({ TAX_ID: 'Nombre Local' });
+    let saved: NewBatch | undefined;
+    const repo = {
+      batchLocation: () => Promise.resolve(location()),
+      existingDocs: () => Promise.resolve([]),
+      createBatch: (input: NewBatch) => {
+        saved = input;
+        return Promise.resolve({
+          ...input,
+          id: 'b1',
+          status: 'VALIDATED',
+          createdAt: new Date(),
+          preparedRows: input.rows.length,
+          processedRows: 0,
+          balancePreparedRows: 0,
+          balanceProcessedRows: 0,
+          balanceFileName: null,
+          balanceFileSha256: null,
+        });
+      },
+      userNames: () => Promise.resolve(new Map()),
+    } as unknown as PrismaPatientImportRepository;
+    const uc = new PatientImportsService(repo, {} as JobQueue, names);
+    const detail = await uc.dryRun(
+      file(
+        [
+          'tipo;doc;nombres;apellidos',
+          'nombre local;RX-1;Ana;Uno',
+          ';RX-2;Luis;Dos',
+          'Pasaporte;RX-3;Eva;Tres',
+        ].join('\n'),
+      ),
+      {
+        columns: {
+          docType: 'tipo',
+          docNumber: 'doc',
+          firstName: 'nombres',
+          lastName: 'apellidos',
+        },
+        defaultDocType: 'TAX_ID',
+      },
+      'u1',
+    );
+    expect(names.reads).toBe(1);
+    expect(detail.issues).toEqual([]);
+    expect(saved?.rows.map((r) => r.data.docType)).toEqual([
+      'TAX_ID',
+      'TAX_ID',
+      'PASSPORT',
+    ]);
+    expect(saved?.columnMapping).toMatchObject({
+      defaultDocType: 'OTHER',
+      defaultDocumentType: 'TAX_ID',
+    });
+    expect(detail.columnMapping.defaultDocType).toBe('TAX_ID');
   });
 });

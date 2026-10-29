@@ -14,10 +14,13 @@ import { Prisma } from '@prisma/client';
  * entera en cada bloque.
  */
 
-/** Pacientes vivos de la clínica con alguna de esas claves (dry-run). */
+/**
+ * Pacientes vivos de la clínica con alguna de esas claves (dry-run). DX-327:
+ * el tipo genérico y la etiqueta (el nombre visible de los mensajes).
+ */
 export function existingDocsSql(tenantId: string, keys: string[]): Prisma.Sql {
   return Prisma.sql`
-    SELECT "id", "docType", "docKey",
+    SELECT "id", "documentType", "docTypeLabel", "docKey",
            ("partially_suppressed_at" IS NOT NULL) AS "partiallySuppressed"
       FROM "patients"
      WHERE "tenantId" = ${tenantId}::uuid
@@ -121,7 +124,7 @@ export function patientsToFillByDocSql(
   keys: string[],
 ): Prisma.Sql {
   return Prisma.sql`
-    SELECT "id", "docType", "birthDate", "sex", "phone", "email", "address",
+    SELECT "id", "documentType", "birthDate", "sex", "phone", "email", "address",
            "occupation", "emergencyContactName", "emergencyContactPhone", "notes",
            "partially_suppressed_at" AS "partiallySuppressedAt",
            "docKey"

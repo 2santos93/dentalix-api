@@ -377,7 +377,7 @@ async function clinic(subdomain: string): Promise<Clinic> {
 }
 
 const person = (doc: string): ImportPatientData => ({
-  docType: 'CC',
+  docType: 'NATIONAL_ID',
   docNumber: doc,
   firstName: 'Ana',
   lastName: `Doc ${doc}`,

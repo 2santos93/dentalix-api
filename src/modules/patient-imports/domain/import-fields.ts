@@ -1,5 +1,7 @@
-import { DocType } from '@prisma/client';
+import type { DocumentType } from '@prisma/client';
 import type { RegionalFormat } from '../../../shared/format/regional-format';
+import { documentTypeKey } from '../../patients/domain/document-type';
+import { LEGACY_DOC_NUMBER_HEADER_SYNONYMS } from '../../patients/domain/legacy-doc-type';
 
 /**
  * Campos de la ficha que admite la importación de pacientes (DX-107), en el
@@ -42,9 +44,7 @@ export const IMPORT_FIELDS = [
       'numeroidentificacion',
       'numerodeidentificacion',
       'identificacion',
-      'cedula',
-      'dni',
-      'rut',
+      ...LEGACY_DOC_NUMBER_HEADER_SYNONYMS,
     ],
   },
   {
@@ -171,7 +171,8 @@ export const TOO_MANY_ROWS_MESSAGE = (fmt: RegionalFormat) =>
 
 /** Valores normalizados de una fila válida (lo que se guarda en la ficha). */
 export interface ImportPatientData {
-  docType: DocType;
+  /** Genérico (DX-327). Sin etiqueta: la importación no tiene esa columna. */
+  docType: DocumentType;
   docNumber: string;
   firstName: string;
   lastName: string;
@@ -204,11 +205,9 @@ export const FILLABLE_FIELDS = [
 ] as const;
 export type FillableField = (typeof FILLABLE_FIELDS)[number];
 
-/** Cabecera de un fichero reducida a letras y dígitos, sin tildes. */
-export function headerKey(header: string): string {
-  return header
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, '');
-}
+/**
+ * Cabecera de un fichero reducida a letras y dígitos, sin mayúsculas ni
+ * tildes. La misma clave que los tipos y los nombres de la clínica
+ * (`documentTypeKey`, DX-327 pre-flight I4): sirve en cualquier escritura.
+ */
+export const headerKey = documentTypeKey;

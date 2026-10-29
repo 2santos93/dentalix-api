@@ -1,8 +1,8 @@
-Cédula;Saldo;Moneda;Fecha de corte;Concepto
-1.090.500.100;350.000;COP;15/06/2026;Ortodoncia (programa anterior)
-1.090.501.101;120.000,50;COP;;
-1.090.501.101;80.000;COP;01/09/2026;Control
-1.090.502.102;45;USD;20/09/2026;Blanqueamiento
-1.090.503.103;0;COP;;Saldo en cero (error)
-9.999.999;10.000;COP;;Documento que no existe (error)
-1.090.504.104;50.000;XYZ;;Moneda no admitida (error)
+Número de documento;Saldo;Moneda;Fecha de corte;Concepto
+DEMO-I001;350.000;COP;15/06/2026;Ortodoncia (programa anterior)
+DEMO.I002;120.000,50;COP;;
+DEMO.I002;80.000;COP;01/09/2026;Control
+demo i003;45;USD;20/09/2026;Blanqueamiento
+DEMO-I004;0;COP;;Saldo en cero (error)
+DEMO-I999;10.000;COP;;Documento que no existe (error)
+DEMO.I005;50.000;XYZ;;Moneda no admitida (error)

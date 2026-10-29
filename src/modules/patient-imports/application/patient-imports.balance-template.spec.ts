@@ -2,12 +2,14 @@ import { BadRequestException, ConflictException } from '@nestjs/common';
 import { BatchLocationError } from '../infrastructure/prisma-patient-import.repository';
 import type { PrismaPatientImportRepository } from '../infrastructure/prisma-patient-import.repository';
 import type { JobQueue } from '../../jobs/application/job-queue.service';
+import { FixedDocumentTypeNamesReader } from '../../document-type-names/__fixtures__/fixed-document-type-names.reader';
 import { PatientImportsService } from './patient-imports.use-cases';
 
 function makeUseCases(batchLocation: () => Promise<unknown>) {
   return new PatientImportsService(
     { batchLocation } as unknown as PrismaPatientImportRepository,
     {} as JobQueue,
+    new FixedDocumentTypeNamesReader(),
   );
 }
 

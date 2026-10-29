@@ -28,8 +28,8 @@ export function csv(lines: (string | number | null)[][]): string {
 /** Plantilla: las columnas admitidas y dos filas de ejemplo ficticias. */
 export function templateCsv(): string {
   const example1: Record<string, string> = {
-    tipo_documento: 'CC',
-    numero_documento: '1000000001',
+    tipo_documento: 'NATIONAL_ID',
+    numero_documento: 'DOC-1000001',
     nombres: 'Ana María',
     apellidos: 'Ejemplo Gómez',
     fecha_nacimiento: '15/04/1988',
@@ -43,8 +43,8 @@ export function templateCsv(): string {
     notas: 'Fila de ejemplo: bórrala antes de importar',
   };
   const example2: Record<string, string> = {
-    tipo_documento: 'TI',
-    numero_documento: '1000000002',
+    tipo_documento: 'PASSPORT',
+    numero_documento: 'X1000002',
     nombres: 'Tomás',
     apellidos: 'Ejemplo Ruiz',
     fecha_nacimiento: '2014-09-02',

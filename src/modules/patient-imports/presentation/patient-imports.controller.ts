@@ -61,6 +61,8 @@ import {
   type ImportFieldKey,
 } from '../domain/import-fields';
 import type { ColumnMapping } from '../domain/column-mapping';
+import { DOCUMENT_TYPES } from '../../patients/domain/document-type';
+import { resolveDocTypeInput } from '../../patients/domain/legacy-doc-type';
 import {
   ACTIVE_IMPORT_MESSAGE,
   BALANCES_NOT_EDITABLE_MESSAGE,
@@ -294,7 +296,7 @@ export class PatientImportsController {
         },
         defaultDocType: {
           type: 'string',
-          enum: ['CC', 'TI', 'CE', 'PASSPORT', 'OTHER'],
+          enum: [...DOCUMENT_TYPES],
         },
       },
     },
@@ -321,7 +323,10 @@ export class PatientImportsController {
       await loadUpload(file),
       {
         columns: parseMappingField(dto.mapping),
-        defaultDocType: dto.defaultDocType,
+        defaultDocType:
+          dto.defaultDocType === undefined
+            ? undefined
+            : resolveDocTypeInput(dto.defaultDocType),
       },
       req.user.sub,
     );

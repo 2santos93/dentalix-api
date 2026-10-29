@@ -7,15 +7,18 @@ import {
 } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import type {
-  DocType,
+  DocumentType,
   PatientImportDuplicateMode,
   PatientImportFileFormat,
   PatientImportStatus,
 } from '@prisma/client';
 import { JobQueue } from '../../jobs/application/job-queue.service';
+import { DocumentTypeNamesReader } from '../../patients/domain/ports/document-type-names-repository.port';
 import { civilDateIn } from '../../../shared/time/civil-day';
 import {
+  readStoredColumnMapping,
   resolveMapping,
+  storedColumnMapping,
   suggestMapping,
   type ColumnMapping,
   type MappingInput,
@@ -201,7 +204,10 @@ export interface BatchView {
   locationId: string;
   createdAt: Date;
   createdBy: { id: string; fullName: string | null };
-  columnMapping: { columns: ColumnMapping; defaultDocType: DocType | null };
+  columnMapping: {
+    columns: ColumnMapping;
+    defaultDocType: DocumentType | null;
+  };
   totals: {
     totalRows: number;
     validRows: number;
@@ -288,15 +294,9 @@ function safeFileName(name: string): string {
   return (clean || 'archivo').slice(0, 255);
 }
 
-function mappingOf(batch: BatchRow): BatchView['columnMapping'] {
-  const raw = batch.columnMapping as {
-    columns?: ColumnMapping;
-    defaultDocType?: DocType | null;
-  };
-  return {
-    columns: raw.columns ?? {},
-    defaultDocType: raw.defaultDocType ?? null,
-  };
+/** Mapeo del lote con el tipo por defecto genérico (DX-327, pre-flight M3). */
+export function mappingOf(batch: BatchRow): BatchView['columnMapping'] {
+  return readStoredColumnMapping(batch.columnMapping);
 }
 
 /**
@@ -309,6 +309,7 @@ export class PatientImportsService {
   constructor(
     private readonly repo: PrismaPatientImportRepository,
     private readonly jobs: JobQueue,
+    private readonly documentTypeNames: DocumentTypeNamesReader,
   ) {}
 
   template(): string {
@@ -354,7 +355,7 @@ export class PatientImportsService {
    */
   async dryRun(
     file: UploadedFile | undefined,
-    mapping: { columns: ColumnMapping | null; defaultDocType?: DocType },
+    mapping: { columns: ColumnMapping | null; defaultDocType?: DocumentType },
     actorId: string,
   ): Promise<BatchDetail> {
     const f = requireFile(file);
@@ -370,9 +371,13 @@ export class PatientImportsService {
     } catch (err) {
       throw fileErrorOf(err, location);
     }
+    // DX-327 (R19): los nombres de la clínica, una vez por lote. Las filas
+    // guardadas ya llevan el tipo: el worker no los necesita.
+    const clinicNames = await this.documentTypeNames.get();
     const ctx = {
       countryCode: location.country,
       today: civilDateIn(new Date(), location.timeZone),
+      clinicNames,
     };
 
     const issues: RowIssue[] = [];
@@ -396,6 +401,7 @@ export class PatientImportsService {
       candidates,
       existing,
       resolved.headers.docNumber,
+      clinicNames,
     );
     issues.push(...deduped.issues);
     issues.sort((a, b) => a.row - b.row);
@@ -418,7 +424,9 @@ export class PatientImportsService {
       fileSha256: sha256(f.buffer),
       fileFormat: parsed.format,
       fileSizeBytes: f.size,
-      columnMapping: { columns, defaultDocType: resolved.defaultDocType },
+      columnMapping: {
+        ...storedColumnMapping(columns, resolved.defaultDocType),
+      },
       totalRows: parsed.table.rows.length,
       validRows: deduped.fresh.length,
       duplicateRows: deduped.existing.length + deduped.fileDuplicates,

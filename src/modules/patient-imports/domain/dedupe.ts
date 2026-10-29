@@ -1,4 +1,9 @@
-import type { DocType } from '@prisma/client';
+import type { DocumentType } from '@prisma/client';
+import {
+  documentText,
+  documentTypeName,
+  type ClinicDocumentTypeNames,
+} from '../../patients/domain/document-type';
 import type { ImportPatientData } from './import-fields';
 import { docKey, type RowIssue } from './row-validation';
 
@@ -10,7 +15,9 @@ export interface CandidateRow {
 /** Paciente vivo de la clínica con el mismo documento (clave `docKey`). */
 export interface ExistingPatientDoc {
   id: string;
-  docType: DocType;
+  documentType: DocumentType;
+  /** Etiqueta libre del paciente: su nombre visible en los mensajes (R17). */
+  docTypeLabel: string | null;
   docKey: string;
   /** Pidió la supresión parcial de sus datos (Ley 1581): no se rellenan. */
   partiallySuppressed?: boolean;
@@ -44,12 +51,20 @@ const DOC_COLUMN = 'Número de documento';
  * (o es otra persona, o el tipo está mal) y nunca se importa.
  *
  * Dentro del fichero gana la PRIMERA fila; las siguientes son duplicados.
+ *
+ * DX-327 (R12): los tipos son genéricos, así que dos códigos anteriores del
+ * mismo genérico son el mismo tipo. Los mensajes nombran el tipo con su
+ * nombre visible (R17: etiqueta, nombre local de la clínica o genérico),
+ * nunca con el código.
  */
 export function dedupeRows(
   rows: readonly CandidateRow[],
   existingDocs: readonly ExistingPatientDoc[],
   columnHeader: string | undefined,
+  clinicNames: ClinicDocumentTypeNames,
 ): DedupeResult {
+  const nameOf = (type: DocumentType, label: string | null = null) =>
+    documentTypeName(type, label, clinicNames);
   const column = columnHeader ?? DOC_COLUMN;
   const byKey = new Map<string, ExistingPatientDoc>();
   for (const doc of existingDocs) byKey.set(doc.docKey, doc);
@@ -63,7 +78,7 @@ export function dedupeRows(
   };
   for (const row of rows) {
     const key = docKey(row.data.docNumber);
-    const label = `${row.data.docType} ${row.data.docNumber}`;
+    const label = documentText(nameOf(row.data.docType), row.data.docNumber);
     const earlier = firstSeen.get(key);
     if (earlier) {
       if (earlier.data.docType === row.data.docType) {
@@ -81,7 +96,7 @@ export function dedupeRows(
           row: row.rowNumber,
           column,
           kind: 'ERROR',
-          message: `El número de documento ya aparece en la fila ${earlier.rowNumber} con otro tipo (${earlier.data.docType}).`,
+          message: `El número de documento ya aparece en la fila ${earlier.rowNumber} con otro tipo (${nameOf(earlier.data.docType)}).`,
           value: label,
         });
       }
@@ -91,7 +106,7 @@ export function dedupeRows(
     const match = byKey.get(key);
     if (!match) {
       result.fresh.push(row);
-    } else if (match.docType === row.data.docType) {
+    } else if (match.documentType === row.data.docType) {
       result.existing.push({ ...row, patientId: match.id });
       result.issues.push({
         row: row.rowNumber,
@@ -108,7 +123,7 @@ export function dedupeRows(
         row: row.rowNumber,
         column,
         kind: 'ERROR',
-        message: `Ya hay un paciente en la clínica con este número de documento registrado como ${match.docType}: revisa el tipo.`,
+        message: `Ya hay un paciente en la clínica con este número de documento registrado como ${nameOf(match.documentType, match.docTypeLabel)}: revisa el tipo.`,
         value: label,
       });
     }
