@@ -3366,8 +3366,8 @@ enum PatientImplantKind {
 }
 
 /// DX-191: un implante (o pilar, injerto, membrana…) colocado a un paciente:
-/// ficha de la Res. 4816/2008 (CO) y datos de la tarjeta de implante del
-/// RD 192/2023 (ES). INALTERABLE en la BD (trigger
+/// su trazabilidad (producto, referencia y lote) y los datos de la tarjeta de
+/// implante que se entrega al paciente. INALTERABLE en la BD (trigger
 /// `dx_patient_implants_immutable`): solo se anula una vez (motivo, autor y
 /// fecha) o se marca su tarjeta como entregada una vez. RLS forzada.
 /// Búsqueda por lote / REF (DX-225): columnas GENERADAS "lotKey" y

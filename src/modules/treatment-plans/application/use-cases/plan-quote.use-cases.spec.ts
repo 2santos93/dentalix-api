@@ -336,6 +336,26 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
     expect(doc.acceptance?.integrityOk).toBe(true);
   });
 
+  it('an accepted quote prints its stored document without reading the clinic names', async () => {
+    const { get, accept } = setup();
+    await accept.execute(
+      'patient-1',
+      'plan-1',
+      {
+        signerName: 'Ana',
+        signature: PNG,
+        contentHash: (await get.execute('patient-1', 'plan-1')).contentHash,
+      },
+      META,
+    );
+    names.names.NATIONAL_ID = 'Documento A';
+    const reads = names.reads;
+    const doc = await get.execute('patient-1', 'plan-1');
+    expect(doc.patient.document).toBe('Documento nacional 123');
+    expect(doc.acceptance?.integrityOk).toBe(true);
+    expect(names.reads).toBe(reads);
+  });
+
   it('marca integrityOk=false si la foto o la firma se alteraron por fuera', async () => {
     const { repo, get, accept } = setup();
     const shown = await get.execute('patient-1', 'plan-1');

@@ -193,7 +193,10 @@ export class GetPlanQuoteUseCase {
     if (!source) {
       throw new NotFoundException(PLAN_NOT_FOUND_MESSAGE);
     }
-    return toDocument(source, this.now(), await this.documentTypeNames.get());
+    // Un plan aceptado se imprime con su foto: los nombres de la clínica solo
+    // hacen falta para componer el presupuesto vivo.
+    const names = source.acceptance ? {} : await this.documentTypeNames.get();
+    return toDocument(source, this.now(), names);
   }
 }
 

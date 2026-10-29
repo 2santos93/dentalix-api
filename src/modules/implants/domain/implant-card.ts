@@ -45,8 +45,8 @@ export interface ImplantCardItem {
 /**
  * Tarjeta de implante de UNA intervención (paciente + día de colocación).
  * Identidad del paciente, centro, fecha, profesional(es) y los componentes;
- * NUNCA diagnóstico, notas ni motivo de anulación (RD 192/2023: datos del
- * implante y del portador, nada más).
+ * NUNCA diagnóstico, notas ni motivo de anulación (trazabilidad del implante
+ * para el paciente: datos del implante y del portador, nada más).
  */
 export interface ImplantCard {
   patientId: string;

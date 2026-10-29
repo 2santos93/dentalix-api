@@ -1231,6 +1231,47 @@ describe('Recetas — /patients/:id/prescriptions, /prescriptions, /prescription
       }
     });
 
+    it('legacy v3 prescription that froze «CC …» reads back identical and keeps its integrity', async () => {
+      // Una receta única (hash v3) emitida antes de DX-327: su documento se
+      // congeló con el código. Se reproduce sobre una emitida hoy, con su hash
+      // v3 recalculado, sin los triggers de inmutabilidad.
+      const rx = (await issueAt(siteA, patientA).expect(201)).body as RxBody;
+      const { computed } = await hashOfStoredRow(rx.id, {
+        patientDocument: 'CC RX-L-3',
+      });
+      await raw.$transaction([
+        raw.$executeRaw`SET LOCAL session_replication_role = replica`,
+        raw.$executeRaw`
+          UPDATE "prescriptions"
+             SET "patientDocument" = 'CC RX-L-3', "contentHash" = ${computed}
+           WHERE "id" = ${rx.id}::uuid`,
+      ]);
+      const row = await raw.prescription.findUniqueOrThrow({
+        where: { id: rx.id },
+      });
+      expect(row.singleFormat).toBe(true);
+
+      await raw.tenant.update({
+        where: { id: clinicA.tenantId },
+        data: { docTypeNameNationalId: 'Documento A' },
+      });
+      try {
+        const doc = await as(clinicA, dentistA.token)
+          .get(`/prescriptions/${rx.id}`)
+          .expect(200);
+        expect(doc.body).toMatchObject({
+          patientDocument: 'CC RX-L-3',
+          contentHash: computed,
+          integrityOk: true,
+        });
+      } finally {
+        await raw.tenant.update({
+          where: { id: clinicA.tenantId },
+          data: { docTypeNameNationalId: null },
+        });
+      }
+    });
+
     it('legacy ES-format row inserted the old way renders its issued fields with v1', async () => {
       const id = await insertLegacyRow(siteB, {
         country: 'ES',
