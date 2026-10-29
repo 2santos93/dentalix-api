@@ -57,19 +57,19 @@ describe('patientAgreementStatus', () => {
 });
 
 describe('isExternalPayer (SEC-047)', () => {
-  it('mutuas, prepagadas, EPS y empresas son pagadores externos', () => {
+  it('aseguradoras, planes prepago, sistemas públicos y empresas son pagadores externos', () => {
     for (const type of [
-      'MUTUA_ES',
-      'PREPAGADA_CO',
-      'EPS_CO',
-      'EMPRESA',
+      'INSURER',
+      'PREPAID_PLAN',
+      'PUBLIC_SYSTEM',
+      'EMPLOYER',
     ] as const) {
       expect(isExternalPayer(type)).toBe(true);
     }
   });
 
-  it('OTRO es un convenio interno (cortesía, empleados)', () => {
-    expect(isExternalPayer('OTRO')).toBe(false);
+  it('OTHER es un convenio interno (cortesía, empleados)', () => {
+    expect(isExternalPayer('OTHER')).toBe(false);
   });
 });
 

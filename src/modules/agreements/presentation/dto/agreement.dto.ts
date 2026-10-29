@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { AgreementKind, PayerType } from '@prisma/client';
+import { AgreementKind } from '@prisma/client';
+import { PAYER_TYPES, type PayerType } from '../../../payers/domain/payer-type';
 import {
   IsBoolean,
   IsEnum,
@@ -52,10 +53,10 @@ export class AgreementPayerDto {
   name!: string;
 
   @ApiProperty({
-    enum: PayerType,
+    enum: PAYER_TYPES,
     enumName: 'PayerType',
     description:
-      'SEC-047: con un pagador externo, asignar el convenio exige una cobertura viva del paciente con él; OTRO (cortesía, empleados…) solo lo asigna ADMIN.',
+      'SEC-047: con un pagador externo, asignar el convenio exige una cobertura viva del paciente con él; OTHER (cortesía, empleados…) solo lo asigna ADMIN.',
   })
   type!: PayerType;
 }

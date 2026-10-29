@@ -322,6 +322,31 @@ const FIXTURE_DX316 = [
  */
 const DX324 = '20261028180000_dx324_membership_specialty';
 
+/**
+ * Excepción G5.3 (DX-334): tipos de pagador anteriores a DX-326.
+ * DX-326 (fase 1): valores genéricos del enum y fuera el CHECK de tipo y país,
+ * sin relleno. Un pagador por código guardado en A y en B, con el país que
+ * exige el CHECK (aún vivo cuando corre el fixture), y una cobertura de P_B
+ * con el EPS_CO de B.
+ */
+const DX326 = '20261029120000_dx326_payer_type_generic_values';
+const PAYER_EPS_B = '00000000-0000-4000-8000-0000000326b4';
+const dx326Payers = (tenant: string, eps: string): string =>
+  [
+    `(gen_random_uuid(),'${tenant}','Pagador MUTUA_ES','MUTUA_ES','ES',now())`,
+    `(gen_random_uuid(),'${tenant}','Pagador PREPAGADA_CO','PREPAGADA_CO','CO',now())`,
+    `(${eps},'${tenant}','Pagador EPS_CO','EPS_CO','CO',now())`,
+    `(gen_random_uuid(),'${tenant}','Pagador EMPRESA','EMPRESA',NULL,now())`,
+    `(gen_random_uuid(),'${tenant}','Pagador OTRO','OTRO',NULL,now())`,
+  ].join(',\n');
+const FIXTURE_DX326 = [
+  `INSERT INTO "payers" ("id","tenantId","name","type","country","updatedAt") VALUES
+     ${dx326Payers(T_A, 'gen_random_uuid()')},
+     ${dx326Payers(T_B, `'${PAYER_EPS_B}'`)}`,
+  `INSERT INTO "patient_coverages" ("id","tenantId","patientId","payerId","updatedAt") VALUES
+     (gen_random_uuid(),'${T_B}','${P_B}','${PAYER_EPS_B}',now())`,
+];
+
 const STEPS: Step[] = [
   { until: '20260731115959', fixture: [] },
   // 20260731120000_structured_clinical_history y _remove_owner_role.
@@ -399,8 +424,11 @@ const STEPS: Step[] = [
   // DX-324.
   { until: DX324, fixture: FIXTURE_DX316 },
   // dx324: especialidad del miembro, receta única, ajustes de receta de la
-  // clínica y su relleno (FORCE fuera de locations), y las siguientes.
-  { until: '99999999999999' },
+  // clínica y su relleno (FORCE fuera de locations), hasta DX-326.
+  { until: DX326 },
+  // dx326: valores genéricos del enum y fuera el CHECK de tipo y país; sin
+  // relleno.
+  { until: '99999999999999', fixture: FIXTURE_DX326 },
 ];
 
 describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-nosu)', () => {
@@ -464,10 +492,15 @@ describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-no
     return Object.fromEntries(rows.map((r) => [r.table, r.n]));
   }
 
-  async function run(step: Step): Promise<void> {
+  /** `afterFixture` corre con las filas ya cargadas, antes del tramo. */
+  async function run(
+    step: Step,
+    afterFixture?: () => Promise<void>,
+  ): Promise<void> {
     for (const sql of step.fixture ?? []) {
       await target.$executeRawUnsafe(sql);
     }
+    await afterFixture?.();
     const before = await counts();
     deploy(step.until);
     const after = await counts();
@@ -1082,6 +1115,51 @@ describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-no
       await scalar<boolean>(
         `SELECT relforcerowsecurity AS v FROM pg_class
           WHERE oid = 'public.locations'::regclass`,
+      ),
+    ).toBe(true);
+  }, 180_000);
+
+  it('owner-nosu payer type migrations keep every payer and coverage, drop the type × country CHECK and keep FORCE', async () => {
+    // Excepción G5.3 (DX-334): tipos de pagador anteriores a DX-326.
+    const snapshot = (): Promise<string> =>
+      scalar<string>(
+        `SELECT string_agg(p."id" || ':' || p."tenantId" || ':' || p."name"
+                  || ':' || p."type"::text || ':' || coalesce(p."country"::text, '-')
+                  || ':' || p."active"::text || ':'
+                  || (SELECT count(*) FROM "patient_coverages" c
+                       WHERE c."payerId" = p."id"), ','
+                ORDER BY p."id") AS v
+           FROM "payers" p`,
+      );
+    let before = '';
+    await run(STEPS[24], async () => {
+      before = await snapshot();
+    });
+    expect(before.split(',')).toHaveLength(10);
+    expect(before).toContain(
+      `${PAYER_EPS_B}:${T_B}:Pagador EPS_CO:EPS_CO:CO:true:1`,
+    );
+    expect(await snapshot()).toBe(before);
+    expect(
+      await scalar<number>(
+        `SELECT count(*)::int AS v FROM pg_constraint
+          WHERE conrelid = 'public.payers'::regclass
+            AND conname = 'payers_type_country_check'`,
+      ),
+    ).toBe(0);
+    expect(
+      await scalar<string>(
+        `SELECT string_agg(e.enumlabel, ',' ORDER BY e.enumsortorder) AS v
+           FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid
+          WHERE t.typname = 'PayerType'`,
+      ),
+    ).toBe(
+      'MUTUA_ES,PREPAGADA_CO,EPS_CO,EMPRESA,OTRO,INSURER,PREPAID_PLAN,PUBLIC_SYSTEM,EMPLOYER,OTHER',
+    );
+    expect(
+      await scalar<boolean>(
+        `SELECT relforcerowsecurity AS v FROM pg_class
+          WHERE oid = 'public.payers'::regclass`,
       ),
     ).toBe(true);
   }, 180_000);

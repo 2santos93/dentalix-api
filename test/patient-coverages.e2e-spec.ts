@@ -129,15 +129,13 @@ describe('Coberturas del paciente (e2e, DX-153)', () => {
     }
     sanitas = await createPayer(clinic, {
       name: 'Sanitas',
-      type: 'EPS_CO',
-      country: 'CO',
+      type: 'PUBLIC_SYSTEM',
     });
     sura = await createPayer(clinic, {
       name: 'Sura',
-      type: 'EPS_CO',
-      country: 'CO',
+      type: 'PUBLIC_SYSTEM',
     });
-    foreignPayer = await createPayer(other, { name: 'Ajena', type: 'OTRO' });
+    foreignPayer = await createPayer(other, { name: 'Ajena', type: 'OTHER' });
     patient = await createPatient(clinic, { firstName: 'Claudia' });
     foreignPatient = await createPatient(other, { firstName: 'Ajena' });
   });
@@ -164,7 +162,12 @@ describe('Coberturas del paciente (e2e, DX-153)', () => {
     }).expect(201);
     expect(res.body).toMatchObject({
       patientId: patient,
-      payer: { id: sanitas, name: 'Sanitas', type: 'EPS_CO', active: true },
+      payer: {
+        id: sanitas,
+        name: 'Sanitas',
+        type: 'PUBLIC_SYSTEM',
+        active: true,
+      },
       planName: 'Plan Oro',
       memberNumber: 'AFI-778899',
       policyHolderName: 'Luis Ortiz',

@@ -704,7 +704,7 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
 
     beforeAll(async () => {
       const payer = await as(clinicA)
-        .post('/payers', { name: 'Sura EPS', type: 'EPS_CO', country: 'CO' })
+        .post('/payers', { name: 'Sura EPS', type: 'PUBLIC_SYSTEM' })
         .expect(201);
       const agreement = await as(clinicA)
         .post('/agreements', {

@@ -19,6 +19,7 @@ import {
 } from '../../domain/coverage-rules';
 import { memberNumberChanged } from '../../domain/member-number-rules';
 import type { PatientCoverage } from '../../domain/entities/patient-coverage.entity';
+import { payerTypeFromStored } from '../../../payers/domain/legacy-payer-type';
 import type {
   CreateCoverageRepoInput,
   PatientCoverageRepository,
@@ -32,13 +33,14 @@ export const PRIMARY_RACE_MESSAGE =
 
 const COVERAGE_INCLUDE = {
   payer: {
-    select: { id: true, name: true, type: true, country: true, active: true },
+    select: { id: true, name: true, type: true, active: true },
   },
 } as const satisfies Prisma.PatientCoverageInclude;
 
-type Row = Prisma.PatientCoverageGetPayload<{
+export type PatientCoverageRow = Prisma.PatientCoverageGetPayload<{
   include: typeof COVERAGE_INCLUDE;
 }>;
+type Row = PatientCoverageRow;
 
 // `@db.Date` ↔ texto `YYYY-MM-DD` (día civil, sin zona).
 const toDateOnly = (value: Date): string => value.toISOString().slice(0, 10);
@@ -63,11 +65,20 @@ async function verifierNames(
   return new Map(users.map((u) => [u.id, u.fullName]));
 }
 
-function toEntity(row: Row, names: Map<string, string>): PatientCoverage {
+/** DX-326 fase 1: el pagador sale con su tipo genérico (R4). */
+export function toEntity(
+  row: Row,
+  names: Map<string, string>,
+): PatientCoverage {
   return {
     id: row.id,
     patientId: row.patientId,
-    payer: row.payer,
+    payer: {
+      id: row.payer.id,
+      name: row.payer.name,
+      type: payerTypeFromStored(row.payer.type),
+      active: row.payer.active,
+    },
     planName: row.planName,
     memberNumber: row.memberNumber,
     policyHolderName: row.policyHolderName,

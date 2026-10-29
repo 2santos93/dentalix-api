@@ -1,4 +1,4 @@
-import type { PayerType } from '@prisma/client';
+import type { PayerType } from '../../../payers/domain/payer-type';
 import { Agreement } from '../../domain/entities/agreement.entity';
 import {
   AgreementRepository,
@@ -19,7 +19,7 @@ export class InMemoryAgreementRepository implements AgreementRepository {
   readonly deleted = new Set<string>();
   readonly liveAssignments = new Map<string, number>();
   readonly payers = new Map<string, string>();
-  /** Tipo del pagador por id; sin entrada, EPS_CO. */
+  /** Tipo del pagador por id; sin entrada, PUBLIC_SYSTEM. */
   readonly payerTypes = new Map<string, PayerType>();
   readonly priceLists = new Map<string, { name: string; currency: string }>();
   /** Último parche recibido por `update`, para afirmar qué columnas se tocan. */
@@ -30,7 +30,7 @@ export class InMemoryAgreementRepository implements AgreementRepository {
     const row: Agreement = {
       id: `agreement-${this.nextId++}`,
       name: 'Convenio base',
-      payer: { id: 'payer-1', name: 'Sanitas', type: 'EPS_CO' },
+      payer: { id: 'payer-1', name: 'Sanitas', type: 'PUBLIC_SYSTEM' },
       kind: 'PERCENT_DISCOUNT',
       percent: 10,
       percentByCategory: null,
@@ -52,7 +52,7 @@ export class InMemoryAgreementRepository implements AgreementRepository {
     return {
       id,
       name: this.payers.get(id) ?? 'Pagador',
-      type: this.payerTypes.get(id) ?? 'EPS_CO',
+      type: this.payerTypes.get(id) ?? 'PUBLIC_SYSTEM',
     };
   }
 

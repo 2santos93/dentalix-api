@@ -82,7 +82,7 @@ describe('Convenios (e2e, DX-105)', () => {
 
   async function createPayer(c: Clinic, name: string): Promise<string> {
     const res = await as(api().post('/api/v1/payers'), c.adminToken, c.host)
-      .send({ name, type: 'EMPRESA' })
+      .send({ name, type: 'EMPLOYER' })
       .expect(201);
     return (res.body as IdBody).id;
   }
@@ -619,7 +619,7 @@ describe('Convenios (e2e, DX-105)', () => {
       expect((res.body as AgreementBody).payer).toEqual({
         id: second,
         name: 'Segundo pagador',
-        type: 'EMPRESA',
+        type: 'EMPLOYER',
       });
     });
 

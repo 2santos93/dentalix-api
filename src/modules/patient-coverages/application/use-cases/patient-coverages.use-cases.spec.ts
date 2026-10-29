@@ -52,8 +52,8 @@ describe('casos de uso de coberturas (DX-153)', () => {
     remove = new DeletePatientCoverageUseCase(repo);
     // Pagadores OTRO: estas pruebas de DX-153 no van del nº de afiliado, que
     // con un pagador externo es obligatorio (SEC-049, más abajo).
-    sanitas = payers.seed({ name: 'Sanitas', type: 'OTRO', country: null }).id;
-    sura = payers.seed({ name: 'Sura', type: 'OTRO', country: null }).id;
+    sanitas = payers.seed({ name: 'Sanitas', type: 'OTHER' }).id;
+    sura = payers.seed({ name: 'Sura', type: 'OTHER' }).id;
   });
 
   describe('listar', () => {
@@ -363,7 +363,10 @@ describe('casos de uso de coberturas (DX-153)', () => {
     let external: string;
     let verify: VerifyPatientCoverageUseCase;
     beforeEach(() => {
-      external = payers.seed({ name: 'Aseguradora Norte', type: 'EMPRESA' }).id;
+      external = payers.seed({
+        name: 'Aseguradora Norte',
+        type: 'EMPLOYER',
+      }).id;
       verify = new VerifyPatientCoverageUseCase(
         repo,
         () => new Date('2026-10-20T15:00:00.000Z'),
@@ -486,7 +489,7 @@ describe('casos de uso de coberturas (DX-153)', () => {
         { payerId: external, memberNumber: '1020304050' },
         'u1',
       );
-      const moved = payers.seed({ name: 'Cortesía', type: 'OTRO' }).id;
+      const moved = payers.seed({ name: 'Cortesía', type: 'OTHER' }).id;
       const read = repo.findById.bind(repo);
       // Otra petición cambia el pagador justo después de que el caso de uso lea.
       jest.spyOn(repo, 'findById').mockImplementationOnce(async (p, id) => {
@@ -504,7 +507,7 @@ describe('casos de uso de coberturas (DX-153)', () => {
     it('editar el nº (o el pagador) borra la verificación y el editor pasa a declararlo', async () => {
       const otherExternal = payers.seed({
         name: 'Aseguradora Sur',
-        type: 'EMPRESA',
+        type: 'EMPLOYER',
       }).id;
       const c = await create.execute(
         PATIENT,

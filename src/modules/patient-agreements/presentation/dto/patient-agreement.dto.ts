@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { AgreementKind, PayerType } from '@prisma/client';
+import { AgreementKind } from '@prisma/client';
+import { PAYER_TYPES, type PayerType } from '../../../payers/domain/payer-type';
 import { Transform } from 'class-transformer';
 import {
   IsBoolean,
@@ -27,7 +28,7 @@ class AssignedAgreementPayerDto {
   @ApiProperty({ example: 'Sanitas' })
   name!: string;
 
-  @ApiProperty({ enum: PayerType, enumName: 'PayerType' })
+  @ApiProperty({ enum: PAYER_TYPES, enumName: 'PayerType' })
   type!: PayerType;
 }
 

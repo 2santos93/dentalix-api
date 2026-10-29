@@ -1,5 +1,5 @@
 import { ClinicRole } from '@prisma/client';
-import { isExternalPayer } from '../../payers/domain/payer-rules';
+import { isExternalPayer } from '../../payers/domain/payer-type';
 import {
   agreementStatus,
   type AgreementStatus,
@@ -31,9 +31,9 @@ export function coverageRequiredMessage(payerName: string): string {
 /**
  * SEC-047: con un pagador externo (`isExternalPayer`, en el catálogo de
  * pagadores), la asignación exige una cobertura viva del paciente con ese
- * pagador; un convenio interno (pagador OTRO) solo lo asigna ADMIN, salvo que
+ * pagador; un convenio interno (pagador OTHER) solo lo asigna ADMIN, salvo que
  * el paciente traiga una cobertura MIGRADA del texto libre de aseguradora
- * anterior a DX-153 de ese pagador: el relleno creó pagadores OTRO para aseguradoras reales sin
+ * anterior a DX-153 de ese pagador: el relleno creó pagadores OTHER para aseguradoras reales sin
  * clasificar, y esa cobertura sale de la ficha original (la API no la puede
  * crear), así que habilita a cualquier rol.
  */

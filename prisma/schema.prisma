@@ -3636,27 +3636,35 @@ model PatientResponsibleParty {
 // Pagadores y coberturas del paciente (DX-153)
 // ---------------------------------------------------------------------------
 
+/// Tipo de pagador. La API solo usa los cinco genéricos (DX-326). Los cinco
+/// primeros son los códigos anteriores: en fase 1 la BD los sigue guardando
+/// para las réplicas anteriores, y la API los traduce al leer y al escribir
+/// (src/modules/payers/domain/legacy-payer-type.ts). La fase 2 los retira.
 enum PayerType {
   MUTUA_ES
   PREPAGADA_CO
   EPS_CO
   EMPRESA
-  /// «Otro / sin clasificar»: el que crea el relleno del texto libre de
-  /// aseguradora anterior a DX-153 (`patients."insurerEps"`).
   OTRO
+  INSURER
+  PREPAID_PLAN
+  PUBLIC_SYSTEM
+  EMPLOYER
+  OTHER
 }
 
-/// DX-153: pagador de la clínica (mutua, prepagada, EPS, empresa). Catálogo
-/// POR CLÍNICA. Se retira en blando (`deletedAt` + `active = false`); desactivar
-/// solo lo oculta de los selectores. RLS FORCE.
-/// CHECK `payers_type_country_check` en la BD: MUTUA_ES exige ES; PREPAGADA_CO y
-/// EPS_CO exigen CO; EMPRESA y OTRO admiten CO, ES o nulo.
+/// DX-153: pagador de la clínica (aseguradora, plan prepago, sistema público,
+/// empresa u otro). Catálogo POR CLÍNICA. Se retira en blando (`deletedAt` +
+/// `active = false`); desactivar solo lo oculta de los selectores. RLS FORCE.
 model Payer {
   id          String         @id @default(uuid()) @db.Uuid
   tenantId    String         @db.Uuid
   name        String
   type        PayerType
-  country     ClinicCountry?
+  /// Excepción G5.3 (DX-334): país anterior a DX-326. @ignore: el cliente no
+  /// lo lee ni lo escribe; la columna queda para las réplicas anteriores y la
+  /// borra DX-312 (§3.4).
+  country     ClinicCountry? @ignore
   active      Boolean        @default(true)
   /// Punteros suaves a User, como `Payment.createdById`.
   createdById String?        @db.Uuid

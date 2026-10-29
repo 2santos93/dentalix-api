@@ -99,17 +99,15 @@ describe('Resumen de cobertura y filtro por pagador (e2e, DX-153)', () => {
 
     sura = await post(clinic, '/api/v1/payers', {
       name: 'Sura',
-      type: 'EPS_CO',
-      country: 'CO',
+      type: 'PUBLIC_SYSTEM',
     });
     sanitas = await post(clinic, '/api/v1/payers', {
       name: 'Sanitas',
-      type: 'EPS_CO',
-      country: 'CO',
+      type: 'PUBLIC_SYSTEM',
     });
     foreignPayer = await post(other, '/api/v1/payers', {
       name: 'Ajena',
-      type: 'OTRO',
+      type: 'OTHER',
     });
 
     patients.vencida = await createPatient(clinic, 'Vera', 'Vencida');

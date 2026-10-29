@@ -5,7 +5,6 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { ClinicCountry, PayerType } from '@prisma/client';
 import { Payer } from '../../domain/entities/payer.entity';
 import {
   PAYER_REPOSITORY,
@@ -15,8 +14,8 @@ import {
   normalizePayerName,
   payerNameKey,
   validatePayerName,
-  validatePayerTypeCountry,
 } from '../../domain/payer-rules';
+import type { PayerType } from '../../domain/payer-type';
 
 export const PAYER_NOT_FOUND_MESSAGE = 'Pagador no encontrado.';
 export const PAYER_DUPLICATE_MESSAGE = 'Ya existe un pagador con ese nombre.';
@@ -28,14 +27,12 @@ export const PAYER_IN_USE_MESSAGE =
 export interface CreatePayerInput {
   name: string;
   type: PayerType;
-  country?: ClinicCountry | null;
   active?: boolean;
 }
 
 export interface UpdatePayerInput {
   name?: string;
   type?: PayerType;
-  country?: ClinicCountry | null;
   active?: boolean;
 }
 
@@ -71,15 +68,12 @@ export class CreatePayerUseCase {
 
   async execute(input: CreatePayerInput, createdById?: string): Promise<Payer> {
     assertValid(validatePayerName(input.name));
-    const country = input.country ?? null;
-    assertValid(validatePayerTypeCountry(input.type, country));
     const name = normalizePayerName(input.name);
     const existing = await this.repo.findByNormalizedName(payerNameKey(name));
     if (existing) throw duplicateConflict(existing);
     return this.repo.create({
       name,
       type: input.type,
-      country,
       active: input.active ?? true,
       createdById,
     });
@@ -110,15 +104,8 @@ export class UpdatePayerUseCase {
       );
       if (existing) throw duplicateConflict(existing);
     }
-    // Tipo y país se validan juntos, con el valor que quedaría tras el cambio.
-    if (input.type !== undefined || input.country !== undefined) {
-      const type = input.type ?? current.type;
-      const country =
-        input.country !== undefined ? input.country : current.country;
-      assertValid(validatePayerTypeCountry(type, country));
-      if (input.type !== undefined) patch.type = input.type;
-      if (input.country !== undefined) patch.country = input.country;
-    }
+    // Cualquier tipo vale con cualquier sede (DX-326): el DTO ya lo validó.
+    if (input.type !== undefined) patch.type = input.type;
     const updated = await this.repo.update(id, { ...patch, updatedById });
     if (!updated) throw new NotFoundException(PAYER_NOT_FOUND_MESSAGE);
     return updated;

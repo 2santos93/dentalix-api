@@ -227,8 +227,7 @@ describe('Precio resuelto y foto en el ítem del plan (e2e, DX-105)', () => {
 
     payer = await create('/payers', {
       name: 'Sura',
-      type: 'EPS_CO',
-      country: 'CO',
+      type: 'PUBLIC_SYSTEM',
     });
 
     // Lista de la Sede Norte (COP): la endodoncia a 90 000.

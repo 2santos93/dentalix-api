@@ -1,4 +1,5 @@
-import type { AgreementKind, PayerType } from '@prisma/client';
+import type { AgreementKind } from '@prisma/client';
+import type { PayerType } from '../../../payers/domain/payer-type';
 
 /** Convenio tal como viaja dentro de una asignación. */
 export interface AssignedAgreement {

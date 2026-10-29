@@ -1,11 +1,10 @@
-import { ClinicCountry, PayerType } from '@prisma/client';
 import { Payer } from '../entities/payer.entity';
+import type { PayerType } from '../payer-type';
 
 // Sin `tenantId`: sale del contexto del request, nunca del cliente.
 export interface CreatePayerRepoInput {
   name: string;
   type: PayerType;
-  country: ClinicCountry | null;
   active: boolean;
   createdById?: string;
 }
@@ -13,7 +12,6 @@ export interface CreatePayerRepoInput {
 export interface UpdatePayerRepoInput {
   name?: string;
   type?: PayerType;
-  country?: ClinicCountry | null;
   active?: boolean;
   updatedById?: string;
 }

@@ -5,10 +5,9 @@ import {
   PartialType,
 } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { ClinicCountry, PayerType } from '@prisma/client';
 import {
   IsBoolean,
-  IsEnum,
+  IsIn,
   IsOptional,
   IsString,
   Length,
@@ -19,9 +18,10 @@ import {
   PAYER_NAME_MESSAGE,
   PAYER_NAME_MIN,
 } from '../../domain/payer-rules';
+import { legacyPayerTypeAlias } from '../../domain/legacy-payer-type';
+import { PAYER_TYPES, type PayerType } from '../../domain/payer-type';
 
-const TYPE_MESSAGE = `El tipo de pagador debe ser uno de: ${Object.values(PayerType).join(', ')}.`;
-const COUNTRY_MESSAGE = `El país debe ser uno de: ${Object.values(ClinicCountry).join(', ')}.`;
+const TYPE_MESSAGE = `El tipo de pagador debe ser uno de: ${PAYER_TYPES.join(', ')}.`;
 
 /**
  * Para columnas NOT NULL en el PATCH: `@IsOptional()` saltaría los validadores
@@ -39,15 +39,8 @@ export class PayerDto {
   @ApiProperty({ example: 'Sanitas' })
   name!: string;
 
-  @ApiProperty({ enum: PayerType, enumName: 'PayerType' })
+  @ApiProperty({ enum: PAYER_TYPES, enumName: 'PayerType' })
   type!: PayerType;
-
-  @ApiProperty({
-    enum: ClinicCountry,
-    enumName: 'ClinicCountry',
-    nullable: true,
-  })
-  country!: ClinicCountry | null;
 
   @ApiProperty()
   active!: boolean;
@@ -66,23 +59,17 @@ export class CreatePayerDto {
   @Length(PAYER_NAME_MIN, PAYER_NAME_MAX, { message: PAYER_NAME_MESSAGE })
   name!: string;
 
-  @ApiProperty({ enum: PayerType, enumName: 'PayerType' })
-  @IsEnum(PayerType, { message: TYPE_MESSAGE })
+  // Fase 1 de DX-326 (R9): un código anterior de la web anterior pasa a su
+  // genérico antes de validar. Un campo que ya no existe en el cuerpo lo
+  // descarta `whitelist`, como cualquier campo desconocido (R8).
+  @ApiProperty({ enum: PAYER_TYPES, enumName: 'PayerType' })
+  @Transform(({ value }) => legacyPayerTypeAlias(value))
+  @IsIn(PAYER_TYPES, { message: TYPE_MESSAGE })
   type!: PayerType;
-
-  @ApiPropertyOptional({
-    enum: ClinicCountry,
-    enumName: 'ClinicCountry',
-    description:
-      'MUTUA_ES exige ES; PREPAGADA_CO y EPS_CO exigen CO; EMPRESA y OTRO admiten cualquiera o ninguno.',
-  })
-  @IsOptional()
-  @IsEnum(ClinicCountry, { message: COUNTRY_MESSAGE })
-  country?: ClinicCountry;
 }
 
 export class UpdatePayerDto extends PartialType(
-  OmitType(CreatePayerDto, ['name', 'type', 'country'] as const),
+  OmitType(CreatePayerDto, ['name', 'type'] as const),
 ) {
   @ApiPropertyOptional({ minLength: PAYER_NAME_MIN, maxLength: PAYER_NAME_MAX })
   @NotNullable()
@@ -90,22 +77,11 @@ export class UpdatePayerDto extends PartialType(
   @Length(PAYER_NAME_MIN, PAYER_NAME_MAX, { message: PAYER_NAME_MESSAGE })
   name?: string;
 
-  @ApiPropertyOptional({ enum: PayerType, enumName: 'PayerType' })
+  @ApiPropertyOptional({ enum: PAYER_TYPES, enumName: 'PayerType' })
   @NotNullable()
-  @IsEnum(PayerType, { message: TYPE_MESSAGE })
+  @Transform(({ value }) => legacyPayerTypeAlias(value))
+  @IsIn(PAYER_TYPES, { message: TYPE_MESSAGE })
   type?: PayerType;
-
-  // `null` vacía el país (EMPRESA y OTRO lo admiten); `IsOptional` deja pasar
-  // null y undefined, y el enum solo se valida cuando hay valor.
-  @ApiPropertyOptional({
-    enum: ClinicCountry,
-    enumName: 'ClinicCountry',
-    nullable: true,
-    description: 'null = sin país. MUTUA_ES, PREPAGADA_CO y EPS_CO lo exigen.',
-  })
-  @IsOptional()
-  @IsEnum(ClinicCountry, { message: COUNTRY_MESSAGE })
-  country?: ClinicCountry | null;
 
   @ApiPropertyOptional({ description: 'false = sale de los selectores.' })
   @NotNullable()

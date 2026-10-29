@@ -9,7 +9,7 @@ import { PrismaPatientCoverageRepository } from '../src/modules/patient-coverage
 
 // DX-153, capa DB: pagadores (payers) y coberturas del paciente
 // (patient_coverages). RLS FORCE, FK COMPUESTAS (cruzar clínicas falla), las
-// CHECK (tipo↔país, vigencia), los índices únicos parciales y el relleno de
+// CHECK (vigencia), los índices únicos parciales y el relleno de
 // patients."insurerEps" (idempotente, sin tocar el texto). Lo que se prueba va
 // por la MISMA ruta que la app (runWithTenant, rol dentalix_app, sujeto a
 // RLS); `raw` (DIRECT_URL, superusuario) siembra y limpia.
@@ -50,7 +50,6 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
       tenantId: tenant.id,
       name: 'Sanitas',
       type: 'EPS_CO',
-      country: 'CO',
     },
   });
   return { tenantId: tenant.id, patients, payerId: payer.id };
@@ -155,35 +154,26 @@ describe('pagadores y coberturas (int, DX-153)', () => {
     ).rejects.toThrow(/23503|foreign key/i);
   });
 
-  it('CHECK tipo↔país: MUTUA_ES con CO se rechaza; MUTUA_ES con ES y OTRO sin país valen', async () => {
-    await expect(
-      raw.payer.create({
-        data: {
-          tenantId: a.tenantId,
-          name: 'Mutua mala',
-          type: 'MUTUA_ES',
-          country: 'CO',
-        },
-      }),
-    ).rejects.toThrow(/payers_type_country_check/);
-    const ok = await raw.payer.createMany({
-      data: [
-        {
-          tenantId: a.tenantId,
-          name: 'Mutua buena',
-          type: 'MUTUA_ES',
-          country: 'ES',
-        },
-        { tenantId: a.tenantId, name: 'Otro sin país', type: 'OTRO' },
-      ],
-    });
-    expect(ok.count).toBe(2);
-    await raw.payer.deleteMany({
-      where: {
-        tenantId: a.tenantId,
-        name: { in: ['Mutua buena', 'Otro sin país'] },
-      },
-    });
+  it('legacy MUTUA_ES with CO inserts because payers_type_country_check no longer exists', async () => {
+    // Excepción G5.3 (DX-334): tipos de pagador anteriores a DX-326. DX-326:
+    // cualquier tipo con cualquier país o ninguno; el INSERT es el de la API
+    // anterior, con el código antiguo.
+    const [check] = await raw.$queryRaw<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM pg_constraint
+       WHERE conrelid = 'public.payers'::regclass
+         AND conname = 'payers_type_country_check'`;
+    expect(check.n).toBe(0);
+    try {
+      await expect(
+        raw.$executeRaw`INSERT INTO payers
+          ("id", "tenantId", "name", "type", "country", "updatedAt")
+          VALUES (gen_random_uuid(), ${a.tenantId}::uuid, 'Mutua con CO',
+                  'MUTUA_ES', 'CO', now())`,
+      ).resolves.toBe(1);
+    } finally {
+      await raw.$executeRaw`DELETE FROM payers
+        WHERE "tenantId" = ${a.tenantId}::uuid AND "name" = 'Mutua con CO'`;
+    }
   });
 
   it('CHECK de vigencia: validTo anterior a validFrom se rechaza; igual o sin validTo vale', async () => {
@@ -319,9 +309,14 @@ describe('pagadores y coberturas (int, DX-153)', () => {
       );
       for (const p of payers) {
         expect(p.type).toBe('OTRO');
-        expect(p.country).toBeNull();
         expect(p.active).toBe(true);
       }
+      // `country` lleva @ignore en el cliente (DX-326): se lee por SQL.
+      const countries = await raw.$queryRaw<{ country: string | null }[]>`
+        SELECT "country"::text AS country FROM "payers"
+        WHERE "tenantId" = ${a.tenantId}::uuid`;
+      expect(countries).toHaveLength(payers.length);
+      expect(countries.every((c) => c.country === null)).toBe(true);
     });
 
     it('una cobertura principal migrada por paciente con texto (archivado incluido); vacío o nulo, ninguna', async () => {
@@ -459,7 +454,6 @@ describe('pagadores y coberturas (int, DX-153)', () => {
           tenantId: a.tenantId,
           name: 'SURA EPS',
           type: 'EPS_CO',
-          country: 'CO',
         },
       });
       const patientId = await mkPatient(a, 'R1', 'Sura EPS');

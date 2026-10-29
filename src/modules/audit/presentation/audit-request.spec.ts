@@ -48,7 +48,7 @@ describe('buildAuditDraft (DX-009)', () => {
       }),
       {
         id: ENTRY,
-        payer: { id: PLAN, type: 'EMPRESA' },
+        payer: { id: PLAN, type: 'EMPLOYER' },
         memberNumber: '1.020.304.050',
         verifiedAt: null,
       },
@@ -64,7 +64,7 @@ describe('buildAuditDraft (DX-009)', () => {
       params: { patientId: PATIENT },
       reason: 'COVERAGE_CREATED',
       coverage: {
-        payerType: 'EMPRESA',
+        payerType: 'EMPLOYER',
         memberNumberLast4: '4050',
         verified: false,
       },

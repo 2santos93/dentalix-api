@@ -921,11 +921,7 @@ class DemoSeeder {
     const alfaPayer =
       payers.find((p) => p.name === DEMO_ALFA_PAYER.name) ??
       (await this.use(CreatePayerUseCase).execute(
-        {
-          name: DEMO_ALFA_PAYER.name,
-          type: DEMO_ALFA_PAYER.type,
-          country: 'CO',
-        },
+        { name: DEMO_ALFA_PAYER.name, type: DEMO_ALFA_PAYER.type },
         receptionId,
       ));
     const payerIds = new Map(payers.map((p) => [p.name, p.id]));
@@ -1152,7 +1148,7 @@ class DemoSeeder {
         found?.id ??
         (
           await this.use(CreatePayerUseCase).execute(
-            { name: payer.name, type: payer.type, country: 'CO' },
+            { name: payer.name, type: payer.type },
             receptionId,
           )
         ).id;

@@ -152,17 +152,15 @@ describe('Convenio del paciente (e2e, DX-105)', () => {
     }
     sanitas = await post(clinic, '/api/v1/payers', {
       name: 'Sanitas',
-      type: 'EPS_CO',
-      country: 'CO',
+      type: 'PUBLIC_SYSTEM',
     });
     sura = await post(clinic, '/api/v1/payers', {
       name: 'Sura',
-      type: 'EPS_CO',
-      country: 'CO',
+      type: 'PUBLIC_SYSTEM',
     });
     const foreignPayer = await post(other, '/api/v1/payers', {
       name: 'Ajena',
-      type: 'OTRO',
+      type: 'OTHER',
     });
     convenioSanitas = await createAgreement(
       clinic,
@@ -210,7 +208,7 @@ describe('Convenio del paciente (e2e, DX-105)', () => {
       retiredAt: null,
       agreement: {
         name: 'Convenio Sanitas',
-        payer: { name: 'Sanitas', type: 'EPS_CO' },
+        payer: { name: 'Sanitas', type: 'PUBLIC_SYSTEM' },
       },
     });
     expect((await read(p, false)).current?.id).toBe(

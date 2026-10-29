@@ -84,8 +84,7 @@ export class PayersController {
   @ApiOperation({ summary: 'Crear un pagador' })
   @ApiCreatedResponse({ type: PayerDto })
   @ApiBadRequestResponse({
-    description:
-      'Nombre fuera de 2–120 caracteres o tipo que no corresponde con el país',
+    description: 'Nombre fuera de 2–120 caracteres o tipo desconocido',
   })
   @ApiConflictResponse({ description: 'Ya existe un pagador con ese nombre' })
   @ApiForbiddenResponse({ description: 'Solo ADMIN y recepción' })
@@ -94,7 +93,7 @@ export class PayersController {
     @Req() req: AuthenticatedRequest,
   ): Promise<Payer> {
     return this.createPayer.execute(
-      { name: dto.name, type: dto.type, country: dto.country },
+      { name: dto.name, type: dto.type },
       req.user.sub,
     );
   }
@@ -117,7 +116,6 @@ export class PayersController {
       {
         name: dto.name,
         type: dto.type,
-        country: dto.country,
         active: dto.active,
       },
       req.user.sub,

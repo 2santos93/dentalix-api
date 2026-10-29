@@ -13,6 +13,7 @@ import { civilDateIn } from '../../../../shared/time/civil-day';
 import { AGREEMENT_NOT_FOUND_MESSAGE } from '../../../agreements/domain/agreement-rules';
 import { COVERAGE_NOT_FOUND_MESSAGE } from '../../../patient-coverages/domain/coverage-rules';
 import type { PatientAgreement } from '../../domain/entities/patient-agreement.entity';
+import { payerTypeFromStored } from '../../../payers/domain/legacy-payer-type';
 import {
   AGREEMENT_RACE_MESSAGE,
   COVERAGE_PAYER_MISMATCH_MESSAGE,
@@ -41,7 +42,10 @@ const INCLUDE = {
   },
 } as const satisfies Prisma.PatientAgreementInclude;
 
-type Row = Prisma.PatientAgreementGetPayload<{ include: typeof INCLUDE }>;
+export type PatientAgreementRow = Prisma.PatientAgreementGetPayload<{
+  include: typeof INCLUDE;
+}>;
+type Row = PatientAgreementRow;
 
 // `@db.Date` ↔ texto `YYYY-MM-DD` (día civil, sin zona).
 const toDay = (value: Date | null): string | null =>
@@ -49,7 +53,11 @@ const toDay = (value: Date | null): string | null =>
 const fromDay = (value: string | null): Date | null =>
   value === null ? null : new Date(`${value}T00:00:00.000Z`);
 
-function toEntity(row: Row): PatientAgreement {
+/**
+ * DX-326 fase 1: el pagador se copia campo a campo con su tipo genérico (R4);
+ * SEC-047 lo mira, así que nunca pasa el tipo guardado tal cual.
+ */
+export function toEntity(row: Row): PatientAgreement {
   return {
     id: row.id,
     patientId: row.patientId,
@@ -60,7 +68,11 @@ function toEntity(row: Row): PatientAgreement {
       active: row.agreement.active,
       validFrom: toDay(row.agreement.validFrom),
       validTo: toDay(row.agreement.validTo),
-      payer: row.agreement.payer,
+      payer: {
+        id: row.agreement.payer.id,
+        name: row.agreement.payer.name,
+        type: payerTypeFromStored(row.agreement.payer.type),
+      },
     },
     coverageId: row.coverageId,
     validFrom: toDay(row.validFrom),

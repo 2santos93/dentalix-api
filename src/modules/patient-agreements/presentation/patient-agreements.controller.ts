@@ -102,7 +102,7 @@ export class PatientAgreementsController {
     summary:
       'Asignar un convenio al paciente, sustituyendo el vigente (DX-105)',
     description:
-      'La asignación anterior queda en el historial. Un convenio desactivado se acepta y la asignación sale con estado INACTIVE. SEC-047: un convenio de pagador externo exige `coverageId` con una cobertura vigente del paciente con ese pagador (cualquier rol); uno de pagador OTRO (cortesía, empleados…) solo lo asigna ADMIN, con la cobertura opcional.',
+      'La asignación anterior queda en el historial. Un convenio desactivado se acepta y la asignación sale con estado INACTIVE. SEC-047: un convenio de pagador externo exige `coverageId` con una cobertura vigente del paciente con ese pagador (cualquier rol); uno de pagador OTHER (cortesía, empleados…) solo lo asigna ADMIN, con la cobertura opcional.',
   })
   @ApiOkResponse({ type: PatientAgreementDto })
   @ApiBadRequestResponse({
@@ -111,7 +111,7 @@ export class PatientAgreementsController {
   })
   @ApiForbiddenResponse({
     description:
-      'Convenio sin pagador externo (pagador OTRO) asignado por un rol distinto de ADMIN',
+      'Convenio sin pagador externo (pagador OTHER) asignado por un rol distinto de ADMIN',
   })
   @ApiNotFoundResponse({ description: 'Paciente no encontrado' })
   @ApiUnprocessableEntityResponse({

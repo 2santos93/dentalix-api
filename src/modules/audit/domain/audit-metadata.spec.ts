@@ -543,7 +543,7 @@ describe('sanitizeAuditMetadata — cancelación de una cita (DX-279)', () => {
     expect(
       sanitizeAuditMetadata({
         coverage: {
-          payerType: 'EMPRESA',
+          payerType: 'EMPLOYER',
           memberNumberLast4: '4050',
           verified: true,
           memberNumber: '1020304050',
@@ -551,7 +551,7 @@ describe('sanitizeAuditMetadata — cancelación de una cita (DX-279)', () => {
       }),
     ).toEqual({
       coverage: {
-        payerType: 'EMPRESA',
+        payerType: 'EMPLOYER',
         memberNumberLast4: '4050',
         verified: true,
       },
@@ -560,37 +560,53 @@ describe('sanitizeAuditMetadata — cancelación de una cita (DX-279)', () => {
     expect(
       sanitizeAuditMetadata({
         coverage: {
-          payerType: 'EMPRESA',
+          payerType: 'EMPLOYER',
           memberNumberLast4: '1020304050',
           verified: false,
         },
       }),
     ).toEqual({
       coverage: {
-        payerType: 'EMPRESA',
+        payerType: 'EMPLOYER',
         memberNumberLast4: null,
         verified: false,
       },
     });
     expect(
       sanitizeAuditMetadata({
-        coverage: { payerType: 'empresa', verified: true },
+        coverage: { payerType: 'employer', verified: true },
       }),
     ).toEqual({});
+  });
+
+  it('legacy payer type codes still pass the CODE format', () => {
+    // Excepción G5.3 (DX-334): tipos de pagador anteriores a DX-326. Los
+    // eventos anteriores guardan el código antiguo y no se reescriben (R12).
+    expect(
+      sanitizeAuditMetadata({
+        coverage: { payerType: 'EPS_CO', verified: true },
+      }),
+    ).toEqual({
+      coverage: {
+        payerType: 'EPS_CO',
+        memberNumberLast4: null,
+        verified: true,
+      },
+    });
   });
 
   it('cobertura (SEC-049): los 4 últimos admiten letras de cualquier alfabeto (DX-311)', () => {
     expect(
       sanitizeAuditMetadata({
         coverage: {
-          payerType: 'EMPRESA',
+          payerType: 'EMPLOYER',
           memberNumberLast4: 'Ñ123',
           verified: false,
         },
       }),
     ).toEqual({
       coverage: {
-        payerType: 'EMPRESA',
+        payerType: 'EMPLOYER',
         memberNumberLast4: 'Ñ123',
         verified: false,
       },

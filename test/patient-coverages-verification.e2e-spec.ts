@@ -2,6 +2,7 @@ import { INestApplication } from '@nestjs/common';
 import { ClinicRole, DocType, Prisma, PrismaClient, Sex } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
+import { PAYER_TYPES } from '../src/modules/payers/domain/payer-type';
 import { createE2eApp } from './support/create-e2e-app';
 import {
   Clinic,
@@ -139,7 +140,7 @@ describe('Cobertura verificable para asignar un convenio (e2e, SEC-049)', () => 
     }
     payer = await post(
       '/api/v1/payers',
-      { name: 'Aseguradora Norte', type: 'EMPRESA' },
+      { name: 'Aseguradora Norte', type: 'EMPLOYER' },
       tokens.ADMIN,
     );
     agreement = await post(
@@ -156,7 +157,7 @@ describe('Cobertura verificable para asignar un convenio (e2e, SEC-049)', () => 
     // La otra clínica: su pagador con el mismo nombre y una cobertura VERIFICADA.
     const foreignPayer = await post(
       '/api/v1/payers',
-      { name: 'Aseguradora Norte', type: 'EMPRESA' },
+      { name: 'Aseguradora Norte', type: 'EMPLOYER' },
       other.adminToken,
       other.host,
     );
@@ -209,16 +210,75 @@ describe('Cobertura verificable para asignar un convenio (e2e, SEC-049)', () => 
       },
     );
 
-    it('con un pagador interno (OTRO) sigue siendo opcional', async () => {
+    it('con un pagador interno (OTHER) sigue siendo opcional', async () => {
       const cortesia = await post(
         '/api/v1/payers',
-        { name: 'Cortesía', type: 'OTRO' },
+        { name: 'Cortesía', type: 'OTHER' },
         tokens.ADMIN,
       );
       const patient = await createPatient('Cortesía');
       await as(api().post(coverages(patient)), tokens.RECEPTION)
         .send({ payerId: cortesia })
         .expect(201);
+    });
+
+    it.each(PAYER_TYPES)(
+      'SEC-049: every external generic type requires the member number; OTHER does not (%s)',
+      async (type) => {
+        const typed = await post(
+          '/api/v1/payers',
+          { name: `Pagador ${type}`, type },
+          tokens.ADMIN,
+        );
+        const patient = await createPatient(`Tipo ${type}`);
+        const res = await as(api().post(coverages(patient)), tokens.RECEPTION)
+          .send({ payerId: typed })
+          .expect(type === 'OTHER' ? 201 : 400);
+        if (type !== 'OTHER') expect(message(res)).toBe(REQUIRED);
+      },
+    );
+
+    it('SEC-049 audit carries the generic payer type', async () => {
+      for (const type of PAYER_TYPES) {
+        const typed = await post(
+          '/api/v1/payers',
+          { name: `Auditado ${type}`, type },
+          tokens.ADMIN,
+        );
+        const patient = await createPatient(`Auditada ${type}`);
+        await as(api().post(coverages(patient)), tokens.RECEPTION)
+          .send({ payerId: typed, memberNumber: NUMBER })
+          .expect(201);
+        const created = (await coverageEvents(patient)).filter(
+          (e) =>
+            (e.metadata as { reason?: string }).reason === 'COVERAGE_CREATED',
+        );
+        expect(created).toHaveLength(1);
+        expect(created[0].metadata).toMatchObject({
+          coverage: { payerType: type },
+        });
+      }
+    });
+
+    it('legacy EMPRESA payer audits as EMPLOYER', async () => {
+      // Excepción G5.3 (DX-334): tipos de pagador anteriores a DX-326.
+      const rows = await raw.$queryRaw<{ id: string }[]>`
+        INSERT INTO "payers" ("id", "tenantId", "name", "type", "updatedAt")
+        VALUES (gen_random_uuid(), ${clinic.tenantId}::uuid, 'Empresa Alfa',
+                'EMPRESA'::"PayerType", now())
+        RETURNING "id"`;
+      const patient = await createPatient('Auditada legado');
+      await as(api().post(coverages(patient)), tokens.RECEPTION)
+        .send({ payerId: rows[0].id, memberNumber: NUMBER })
+        .expect(201);
+      const events = (await coverageEvents(patient)).filter(
+        (e) =>
+          (e.metadata as { reason?: string }).reason === 'COVERAGE_CREATED',
+      );
+      expect(events).toHaveLength(1);
+      expect(events[0].metadata).toMatchObject({
+        coverage: { payerType: 'EMPLOYER' },
+      });
     });
 
     it('una cobertura migrada o anterior sin nº se lee igual, se edita en lo demás y habilita el convenio', async () => {
@@ -379,7 +439,7 @@ describe('Cobertura verificable para asignar un convenio (e2e, SEC-049)', () => 
           actorUserId: userIds.RECEPTION,
           metadata: expect.objectContaining({
             coverage: {
-              payerType: 'EMPRESA',
+              payerType: 'EMPLOYER',
               memberNumberLast4: '4050',
               verified: false,
             },
@@ -392,7 +452,7 @@ describe('Cobertura verificable para asignar un convenio (e2e, SEC-049)', () => 
           actorUserId: clinic.adminUserId,
           metadata: expect.objectContaining({
             coverage: {
-              payerType: 'EMPRESA',
+              payerType: 'EMPLOYER',
               memberNumberLast4: '4050',
               verified: true,
             },

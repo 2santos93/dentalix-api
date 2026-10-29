@@ -82,7 +82,7 @@ async function seedClinic(subdomain: string): Promise<Seeded> {
   });
   // DX-105: dos convenios para probar la foto del precio.
   const payer = await raw.payer.create({
-    data: { tenantId, name: 'Sanitas', type: 'EPS_CO', country: 'CO' },
+    data: { tenantId, name: 'Sanitas', type: 'EPS_CO' },
   });
   const [agreement, otherAgreement] = await Promise.all(
     ['Convenio 10', 'Convenio 20'].map((name, i) =>

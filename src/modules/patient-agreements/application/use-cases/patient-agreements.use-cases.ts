@@ -120,7 +120,7 @@ export class GetPatientAgreementUseCase {
  * - Convenio de un pagador externo: la cobertura es OBLIGATORIA y debe ser del
  *   paciente, del mismo pagador y estar vigente hoy (400 si no), para
  *   cualquier rol, ADMIN incluido.
- * - Convenio interno (pagador `OTRO`: cortesía, empleados…): ADMIN, con la
+ * - Convenio interno (pagador `OTHER`: cortesía, empleados…): ADMIN, con la
  *   cobertura opcional (si viene, se valida igual). Otro rol solo con una
  *   cobertura MIGRADA del texto libre de aseguradora anterior a DX-153, del
  *   paciente y de ese pagador (vigente: si no, 400); sin ella, 403 sin decir
