@@ -46,7 +46,7 @@ export function retentionMessage(
   const basis =
     extension === 'DOUBLE'
       ? 'plazo doble: 30 años desde la última atención'
-      : 'Res. 839/2017: 15 años desde la última atención';
+      : '15 años desde la última atención';
   return `La historia clínica de este paciente está en retención legal hasta el ${formatRetentionDate(until)} (${basis}): no se puede archivar ni borrar. Si necesitas retirar sus datos de contacto, usa la supresión parcial.`;
 }
 

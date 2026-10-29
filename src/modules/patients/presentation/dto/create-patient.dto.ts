@@ -82,7 +82,7 @@ export class CreatePatientDto {
   @ApiPropertyOptional({
     type: RecordDataConsentsDto,
     description:
-      'Autorización de datos (Ley 1581) que el paciente da en el alta: se registra en la misma transacción, con las mismas reglas que POST /patients/:id/data-consents. Sin este campo no se registra ninguna autorización.',
+      'Autorización de datos que el paciente da en el alta: se registra en la misma transacción, con las mismas reglas que POST /patients/:id/data-consents. Sin este campo no se registra ninguna autorización.',
   })
   @IsOptional()
   @ValidateNested()

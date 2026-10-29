@@ -51,7 +51,7 @@ interface AuthenticatedRequest {
 
 /** Respuesta a cualquier intento de editar o borrar una evolución (DX-038). */
 export const CLINICAL_ENTRY_IMMUTABLE_MESSAGE =
-  'Una evolución de la historia clínica no se puede modificar ni borrar (Res. 1995 de 1999, art. 18). Para corregirla, añade una adenda: POST /patients/{patientId}/clinical-entries/{entryId}/addenda';
+  'La historia clínica no se puede modificar. Añade una adenda.';
 
 // Las evoluciones son INALTERABLES (DX-038): no hay caso de uso ni método de
 // repositorio que las edite o borre, y la BD lo impide con un trigger. Las

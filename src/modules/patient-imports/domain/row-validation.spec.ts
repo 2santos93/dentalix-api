@@ -314,7 +314,7 @@ describe('dedupeRows', () => {
     expect(r.existing.map((x) => x.patientId)).toEqual(['p1', 'p2']);
     const [suppressed, normal] = r.issues;
     expect(suppressed).toMatchObject({ row: 2, kind: 'DUPLICATE_EXISTING' });
-    expect(suppressed.message).toMatch(/supresión de sus datos.*Ley 1581/);
+    expect(suppressed.message).toMatch(/supresión de sus datos.*privacidad/);
     expect(suppressed.message).toMatch(/no se rellenarán/);
     expect(normal.message).not.toMatch(/supresión/);
   });
