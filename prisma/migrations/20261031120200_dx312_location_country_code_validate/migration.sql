@@ -2,38 +2,39 @@
 --
 -- DX-312: valida las FK y el CHECK de recetas de 20261031120000, comprueba el
 -- relleno de 20261031120100 y pone el NOT NULL de "countryCode".
--- VALIDATE CONSTRAINT toma SHARE UPDATE EXCLUSIVE: no frena las escrituras.
 --
--- Validar una FK cuenta como leer filas (DX-134, README «Despliegue: roles
--- de la BD»): con un owner sin BYPASSRLS y FORCE en locations, la validación
--- no vería ninguna sede y aceptaría la FK con huérfanas dentro. Por eso
--- locations pasa a NO FORCE solo para validar su FK y vuelve a FORCE justo
--- después, en esta misma transacción (countries y pending_registrations no
--- tienen RLS). NO FORCE toma un ACCESS EXCLUSIVE sobre locations hasta el
--- COMMIT; la tabla tiene pocas filas por clínica.
---
--- Comprobación por clínica (con `app.current_tenant`, como el relleno: con
--- un owner sin BYPASSRLS, sin fijarla no vería ninguna fila y pasaría sin
--- mirar nada; no se fía de que la validación de la FK las vea todas): si
--- queda alguna sede sin "countryCode", con un "countryCode" que no está en
--- "countries" o con la columna antigua distinta de la proyección de
--- "countryCode", la migración falla y la API no se despliega. Se investiga
--- con la consulta posterior de la spec (§3.6).
---
--- Después, el NOT NULL sin recorrer la tabla dos veces: un CHECK NOT VALID,
--- su VALIDATE (SHARE UPDATE EXCLUSIVE), SET NOT NULL (Postgres ≥ 12 usa el
--- CHECK validado y no recorre la tabla) y fuera el CHECK. SET NOT NULL y
--- DROP CONSTRAINT toman un ACCESS EXCLUSIVE breve sobre locations.
+-- Orden y bloqueos (todo en una transacción; cada bloqueo dura hasta el
+-- COMMIT):
+--   1. VALIDATE de la FK de pending_registrations y del CHECK de recetas:
+--      SHARE UPDATE EXCLUSIVE, no frena lecturas ni escrituras. Van antes de
+--      tocar locations para que el recorrido de prescriptions no ocurra con
+--      locations bloqueada.
+--   2. Comprobación por clínica (con `app.current_tenant`, como el relleno:
+--      con un owner sin BYPASSRLS, sin fijarla no vería ninguna fila y
+--      pasaría sin mirar nada; no se fía de que la validación de la FK las
+--      vea todas): si queda alguna sede sin "countryCode", con un
+--      "countryCode" que no está en "countries" o con la columna antigua
+--      distinta de la proyección de "countryCode", la migración falla y la
+--      API no se despliega. Se investiga con la consulta posterior de la
+--      spec (§3.6). Solo lee: no bloquea locations.
+--   3. Validar la FK de locations cuenta como leer filas (DX-134, README
+--      «Despliegue: roles de la BD»): con un owner sin BYPASSRLS y FORCE en
+--      locations no vería ninguna sede y aceptaría huérfanas. locations pasa
+--      a NO FORCE solo para validarla y vuelve a FORCE (countries no tiene
+--      RLS). NO FORCE toma un ACCESS EXCLUSIVE sobre locations que dura
+--      hasta el COMMIT: desde aquí, nadie lee ni escribe sedes. Lo que queda
+--      solo recorre locations (pocas filas por clínica).
+--   4. El NOT NULL sin recorrer la tabla dos veces: un CHECK NOT VALID, su
+--      VALIDATE, SET NOT NULL (Postgres ≥ 12 usa el CHECK validado y no
+--      recorre la tabla) y fuera el CHECK.
 --
 -- lock_timeout 5 s; para reintentar, `npx prisma migrate resolve
 -- --rolled-back 20261031120200_dx312_location_country_code_validate` y el
--- deploy.
+-- deploy. A mano, siempre con `psql -1` (una transacción): sin ella, un
+-- fallo tras el paso 3 dejaría locations en NO FORCE.
 
 SET LOCAL lock_timeout = '5s';
 
-ALTER TABLE "locations" NO FORCE ROW LEVEL SECURITY;
-ALTER TABLE "locations" VALIDATE CONSTRAINT "locations_country_code_fkey";
-ALTER TABLE "locations" FORCE ROW LEVEL SECURITY;
 ALTER TABLE "pending_registrations" VALIDATE CONSTRAINT "pending_registrations_location_country_code_fkey";
 ALTER TABLE "prescriptions" VALIDATE CONSTRAINT "prescriptions_legacy_country_present_check";
 
@@ -67,6 +68,10 @@ BEGIN
   END LOOP;
 END
 $$;
+
+ALTER TABLE "locations" NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE "locations" VALIDATE CONSTRAINT "locations_country_code_fkey";
+ALTER TABLE "locations" FORCE ROW LEVEL SECURITY;
 
 ALTER TABLE "locations"
   ADD CONSTRAINT "locations_country_code_not_null"
