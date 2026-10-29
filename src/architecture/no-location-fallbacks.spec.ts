@@ -1093,6 +1093,10 @@ describe('tipos de documento genéricos (DX-327)', () => {
  * (PATTERNS §8) se aplican al fichero sin comentarios y se arman por partes.
  * Excepciones: la proyección legada, la tabla provisional de indicativos y los
  * legados R12 de recetas, cada uno con su cabecera G5.3.
+ *
+ * Límite conocido: las guardas miran el texto, no siguen valores. Un alias sin
+ * «country» en el nombre (`const c = location.country; c === 'VE'`, o
+ * `const { country: c } = location`) no se ve; eso queda para la revisión.
  */
 const COUNTRY = 'coun' + 'try';
 const LEGACY_CLINIC_COUNTRY_FILE = join(
@@ -1129,19 +1133,22 @@ const countryPattern = (source: string): RegExp => new RegExp(source, 'gi');
 const COUNTRY_COMPARE = countryPattern(
   `(?:${C_OPERAND}\\s*[!=]==?\\s*${L(1)})|(?:${L(2)}\\s*[!=]==?\\s*${C_OPERAND})`,
 );
-const COUNTRY_SWITCH = countryPattern(
-  `switch\\s*\\([^)]*${COUNTRY}[^)]*\\)\\s*\\{(?:(?!switch\\s*\\()[\\s\\S]){0,3000}?case\\s*(['"\`])[A-Za-z]{2}\\1\\s*:`,
-);
+/** Un `case` de dos letras, con cualquier comilla y en cualquier caja. */
+const TWO_LETTER_CASE = /case\s*(['"`])[A-Za-z]{2}\1\s*:/i;
 const COUNTRY_LOOKUPS = [
-  `\\[[^\\]]*(['"\`])[A-Za-z]{2}\\1[^\\]]*\\]\\s*\\.(?:includes|indexOf|some|find)\\(\\s*[^)]*${COUNTRY}`,
   `${C}\\s*\\??\\.(?:startsWith|endsWith|includes|indexOf|localeCompare|match|test)\\(`,
   `[\\w$\\])]\\s*\\[\\s*${C}\\s*\\]`,
   `${C}\\s+in\\s+[\\w$]`,
 ].map(countryPattern);
-/** `.has(país)` / `.get(país)`, salvo sobre `countries` o una `*Whitelist`. */
-const COUNTRY_HAS_GET = countryPattern(
-  `(\\b[\\w$]+)\\??\\.(?:has|get)\\(\\s*${C}\\s*\\)`,
-);
+/** `.get(país)`, salvo sobre `countries` o una `*Whitelist`. */
+const COUNTRY_GET = countryPattern(`(\\b[\\w$]+)\\??\\.get\\(\\s*${C}\\s*\\)`);
+/**
+ * Una búsqueda de pertenencia sobre cualquier receptor: un array (con nombre,
+ * en línea o con `as const`), un `Set`, `Object.keys(T)` o una expresión
+ * regular. Se mira el argumento entero, no el receptor.
+ */
+const MEMBERSHIP_CALL =
+  /(\b[\w$]+)?\s*\??\.(?:includes|has|test|indexOf|some|find)\s*\(/g;
 const isCountryAllowList = (receiver: string): boolean =>
   /^(countries|\w*whitelist)$/i.test(receiver);
 const ISO_CODES: ReadonlySet<string> = new Set(
@@ -1174,14 +1181,36 @@ const matchLines = (
 
 const compareHits = (code: string): number[] =>
   matchLines(code, COUNTRY_COMPARE);
-const switchHits = (code: string): number[] => matchLines(code, COUNTRY_SWITCH);
+/**
+ * `switch (…country…) {` con un `case` de dos letras en su bloque, antes de
+ * otro `switch` anidado. La cabecera va equilibrada: `switch (norm(x.country))`
+ * y `switch (this.country())` también cuentan.
+ */
+const switchHits = (code: string): number[] =>
+  matchLines(code, /\bswitch\s*\(/g, (match) => {
+    const headStart = match.index + match[0].length - 1;
+    const head = callArgument(code, headStart);
+    if (!new RegExp(COUNTRY, 'i').test(head)) return false;
+    const after = code.slice(headStart + head.length + 2);
+    const brace = /^\s*\{/.exec(after);
+    if (!brace) return false;
+    const body = callArgument(after, brace[0].length - 1);
+    return TWO_LETTER_CASE.test(body.split(/\bswitch\s*\(/)[0]);
+  });
 const lookupHits = (code: string): number[] => [
-  ...COUNTRY_LOOKUPS.flatMap((pattern) => matchLines(code, pattern)),
-  ...matchLines(
-    code,
-    COUNTRY_HAS_GET,
-    (match) => !isCountryAllowList(match[1]),
-  ),
+  ...new Set([
+    ...COUNTRY_LOOKUPS.flatMap((pattern) => matchLines(code, pattern)),
+    ...matchLines(code, COUNTRY_GET, (match) => !isCountryAllowList(match[1])),
+    ...matchLines(
+      code,
+      MEMBERSHIP_CALL,
+      (match) =>
+        !(match[1] && isCountryAllowList(match[1])) &&
+        new RegExp(COUNTRY, 'i').test(
+          callArgument(code, match.index + match[0].length - 1),
+        ),
+    ),
+  ]),
 ];
 /**
  * Cada objeto literal más interno con ≥ 2 claves, todas de dos letras, y ≥ 2
@@ -1287,11 +1316,8 @@ describe('país de la sede libre (DX-312)', () => {
     expect(offending(files, countryNameHit)).toEqual([]);
   });
 
-  it('legacy-clinic-country.ts and country-calling-code.ts carry the G5.3 header', () => {
-    for (const file of [
-      LEGACY_CLINIC_COUNTRY_FILE,
-      COUNTRY_CALLING_CODE_FILE,
-    ]) {
+  it('every country exception file carries the G5.3 header', () => {
+    for (const file of COUNTRY_EXCEPTIONS) {
       expect({
         file: relative(SRC, file),
         header: readFileSync(file, 'utf8')
@@ -1299,6 +1325,14 @@ describe('país de la sede libre (DX-312)', () => {
           .includes(COUNTRY_EXCEPTION_HEADER),
       }).toEqual({ file: relative(SRC, file), header: true });
     }
+  });
+
+  it('country-calling-code.ts names DX-329 as its expiry', () => {
+    const header = readFileSync(COUNTRY_CALLING_CODE_FILE, 'utf8').slice(
+      0,
+      200,
+    );
+    expect(header).toMatch(/provisional hasta DX-329/);
   });
 
   it('the country patterns catch each form and skip neutral text', () => {
@@ -1329,6 +1363,14 @@ describe('país de la sede libre (DX-312)', () => {
       [`TABLE[${LOC}Code]`, 'lookup'],
       [`${COUNTRY}Code in CODES`, 'lookup'],
       [`CURRENCY_BY_COUNTRY.get(${LOC})`, 'lookup'],
+      [`(['VE', 'CO'] as const).includes(${COUNTRY})`, 'lookup'],
+      [`ALLOWED.includes(${LOC})`, 'lookup'],
+      [`new Set(['VE', 'CO']).has(${COUNTRY})`, 'lookup'],
+      [`Object.keys(TABLE).includes(${COUNTRY})`, 'lookup'],
+      [`/^(VE|CO)$/.test(${COUNTRY})`, 'lookup'],
+      [`RULES.some((code) => code === ${LOC})`, 'lookup'],
+      [`switch (norm(${LOC})) {\n  case 'VE':\n    break;\n}`, 'switch'],
+      [`switch (this.${COUNTRY}()) {\n  case 've':\n    break;\n}`, 'switch'],
       [`switch (${LOC}) {\n  case 'VE':\n    break;\n}`, 'switch'],
       [`const t = { VE: 'VES', CO: 'COP' };`, 'keys'],
       [`const t = { ve: 'VES', co: 'COP' };`, 'keys'],
@@ -1354,6 +1396,8 @@ describe('país de la sede libre (DX-312)', () => {
       `switch (direction) {\n  case 'IN':\n    return 1;\n}`,
       // cancellation-fees/application/cancellation-fee.use-cases.ts:280
       `switch (status) {\n  case 'OK':\n    return true;\n}`,
+      `switch (kind(${COUNTRY})) {\n  case 'phone':\n    return 1;\n}`,
+      `switch (${COUNTRY}) {\n  default:\n    switch (mode) {\n      case 'AB':\n    }\n}`,
       `const labels = { SI: 'Sí', NO: 'No', NO_SE: 'No sé' };`,
       `const event = { kind: 'X', at: d, by: u };`,
       `const where = { OR: [a, b] };`,
