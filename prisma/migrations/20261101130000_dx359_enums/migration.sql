@@ -12,7 +12,7 @@
 --
 -- ADD VALUE va en su propio fichero: un valor nuevo no se puede usar en la
 -- misma transacción que lo crea (los índices de
--- 20261101120100_dx359_audit_events_idx lo usan).
+-- 20261101130100_dx359_audit_events_idx lo usan).
 --
 -- Compatible hacia atrás: solo AÑADE valores que el código anterior no conoce
 -- ni usa.

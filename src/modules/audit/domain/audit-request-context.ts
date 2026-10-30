@@ -2,12 +2,6 @@ import type { ClinicRole } from '@prisma/client';
 import type { AuditEventDraft } from './audit-event';
 
 /**
- * Quién hace una escritura y desde dónde, para los `audit_event` que escribe
- * un caso de uso (no el AuditInterceptor): el movimiento de una cita (DX-121),
- * que necesita el antes, y las altas y bajas de «Pendientes por agendar»
- * (DX-122), que conocen al paciente.
- */
-/**
  * Desde dónde llega una petición (DX-359), sin el quién: una ruta pública
  * cuyo actor resuelve la propia escritura (aceptar una invitación, verificar
  * el registro) o una sesión sin clínica (plataforma).
@@ -18,6 +12,12 @@ export interface AuditRequestMeta {
   userAgent: string | null;
 }
 
+/**
+ * Quién hace una escritura y desde dónde, para los `audit_event` que escribe
+ * un caso de uso (no el AuditInterceptor): el movimiento de una cita (DX-121),
+ * que necesita el antes, y las altas y bajas de «Pendientes por agendar»
+ * (DX-122), que conocen al paciente.
+ */
 export interface AuditRequestContext {
   tenantId: string;
   locationId: string | null;

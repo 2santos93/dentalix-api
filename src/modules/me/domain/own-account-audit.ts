@@ -38,11 +38,13 @@ export function ownNameAuditEvent(ctx: AuditRequestContext): AuditEventDraft {
 /**
  * `POST /me/password`: solo el hecho y que las demás sesiones se cerraron.
  * Ni la contraseña, ni su hash, ni la versión de sesión. `claims` son los
- * ACTUALES de la sesión (rol vigente).
+ * ACTUALES de la sesión (rol vigente); `locationId`, la sede activa del actor
+ * con sesión de clínica (`null` = toda la clínica).
  */
 export function passwordChangeAuditEvent(
   claims: JwtPayload,
   request: AuditRequestMeta,
+  locationId: string | null,
 ): OwnAccountAuditEvent {
   if (!isTenantPayload(claims)) {
     return {
@@ -58,7 +60,7 @@ export function passwordChangeAuditEvent(
     event: auditDraftFromContext(
       {
         tenantId: claims.tenantId,
-        locationId: null,
+        locationId,
         actor: { userId: claims.sub, role: claims.role },
         ...request,
       },

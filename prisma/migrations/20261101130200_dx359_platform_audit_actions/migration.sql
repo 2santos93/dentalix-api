@@ -14,9 +14,10 @@
 -- el otpauth URI, ni nada de la contraseña.
 --
 -- Compatible hacia atrás: la API anterior solo escribe JOB_RETRIED/JOB, que
--- siguen admitidos. Se sustituye cada CHECK en la misma transacción (DROP +
--- ADD NOT VALID + VALIDATE): no hay ningún instante sin la restricción y la
--- validación solo lee la tabla, pequeña (acciones manuales de superadmins).
+-- siguen admitidos. Cada CHECK se sustituye en la misma transacción (DROP +
+-- ADD), así que no hay ningún instante sin la restricción; el ADD valida las
+-- filas existentes de una vez, y la tabla es pequeña (acciones manuales de
+-- superadmins).
 
 SET LOCAL lock_timeout = '5s';
 
@@ -24,16 +25,10 @@ ALTER TABLE "platform_audit_events"
   DROP CONSTRAINT "platform_audit_events_action_check";
 ALTER TABLE "platform_audit_events"
   ADD CONSTRAINT "platform_audit_events_action_check"
-  CHECK ("action" IN ('JOB_RETRIED', 'MFA_ENROLLMENT_STARTED', 'MFA_ENABLED', 'PASSWORD_CHANGE'))
-  NOT VALID;
-ALTER TABLE "platform_audit_events"
-  VALIDATE CONSTRAINT "platform_audit_events_action_check";
+  CHECK ("action" IN ('JOB_RETRIED', 'MFA_ENROLLMENT_STARTED', 'MFA_ENABLED', 'PASSWORD_CHANGE'));
 
 ALTER TABLE "platform_audit_events"
   DROP CONSTRAINT "platform_audit_events_resource_type_check";
 ALTER TABLE "platform_audit_events"
   ADD CONSTRAINT "platform_audit_events_resource_type_check"
-  CHECK ("resourceType" IN ('JOB', 'USER'))
-  NOT VALID;
-ALTER TABLE "platform_audit_events"
-  VALIDATE CONSTRAINT "platform_audit_events_resource_type_check";
+  CHECK ("resourceType" IN ('JOB', 'USER'));

@@ -15,6 +15,12 @@ export interface ChangeMyPasswordInput {
   session: JwtPayload;
   currentPassword: string;
   newPassword: string;
+  /**
+   * DX-359: sede activa del actor (cabecera `X-Location-Id` validada o su
+   * única sede) con sesión de clínica, para el evento; `null` = toda la
+   * clínica o sesión de plataforma.
+   */
+  locationId: string | null;
 }
 
 /**
@@ -62,7 +68,7 @@ export class ChangeMyPasswordUseCase {
     const tv = await this.repo.updatePasswordAndRevokeSessions(
       userId,
       newHash,
-      passwordChangeAuditEvent(claims, request),
+      passwordChangeAuditEvent(claims, request, input.locationId),
     );
     return this.tokens.issue({ ...claims, tv });
   }

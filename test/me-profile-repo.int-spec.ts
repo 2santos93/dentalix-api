@@ -66,7 +66,7 @@ describe('PrismaUserProfileRepository (int)', () => {
     // Mismo nombre: no escribe ni audita nada.
     await repo.updateName(userId, 'Después', ownNameAuditEvent(ctx));
     // Cada cambio de contraseña incrementa la versión de sesión (0 → 1 → 2).
-    const passwordEvent = passwordChangeAuditEvent(claims, request);
+    const passwordEvent = passwordChangeAuditEvent(claims, request, null);
     expect(
       await repo.updatePasswordAndRevokeSessions(
         userId,

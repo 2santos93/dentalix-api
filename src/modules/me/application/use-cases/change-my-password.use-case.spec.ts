@@ -52,7 +52,12 @@ describe('ChangeMyPasswordUseCase', () => {
   it('DX-359: con sesión de clínica deja PASSWORD_CHANGE en su auditoría, solo el hecho (sin contraseña ni hash)', async () => {
     const { uc, repo, sink } = setup(await password.hash('OldPass1'));
     await uc.execute(
-      { session, currentPassword: 'OldPass1', newPassword: 'NewPass9' },
+      {
+        session,
+        currentPassword: 'OldPass1',
+        newPassword: 'NewPass9',
+        locationId: 'loc-activa',
+      },
       REQ,
     );
     const [, , audit] = repo.updatePasswordAndRevokeSessions.mock
@@ -61,7 +66,8 @@ describe('ChangeMyPasswordUseCase', () => {
       kind: 'tenant',
       event: {
         tenantId: 't1',
-        locationId: null,
+        // La sede activa del actor (DX-359, revisión).
+        locationId: 'loc-activa',
         // El rol vigente de la sesión (claims actuales), no el del token.
         actor: { kind: 'user', userId: 'u1', role: ClinicRole.ASSISTANT },
         patient: null,
@@ -91,6 +97,7 @@ describe('ChangeMyPasswordUseCase', () => {
         session: { sub: 'u1', platform: true },
         currentPassword: 'OldPass1',
         newPassword: 'NewPass9',
+        locationId: null,
       },
       REQ,
     );
@@ -117,6 +124,7 @@ describe('ChangeMyPasswordUseCase', () => {
         session,
         currentPassword: 'OldPass1',
         newPassword: 'NewPass9',
+        locationId: null,
       },
       REQ,
     );
@@ -153,6 +161,7 @@ describe('ChangeMyPasswordUseCase', () => {
           session,
           currentPassword: 'OldPass1',
           newPassword: 'NewPass9',
+          locationId: null,
         },
         REQ,
       ),
@@ -171,6 +180,7 @@ describe('ChangeMyPasswordUseCase', () => {
           session,
           currentPassword: 'WRONG',
           newPassword: 'NewPass9',
+          locationId: null,
         },
         REQ,
       ),
@@ -187,6 +197,7 @@ describe('ChangeMyPasswordUseCase', () => {
           session,
           currentPassword: 'x',
           newPassword: 'NewPass9',
+          locationId: null,
         },
         REQ,
       ),

@@ -364,10 +364,13 @@ describe('Auditoría de personal y cuenta (e2e, DX-359)', () => {
     const token = await loginAs(app, clinicA.host, member.email);
     await as(clinicA, token)
       .send('patch', '/me')
+      // Sede activa elegida en la web: el evento va a ella.
+      .set('X-Location-Id', locationA)
       .send({ fullName: 'Mi Nombre Nuevo' })
       .expect(200);
     const changed = await as(clinicA, token)
       .send('post', '/me/password')
+      .set('X-Location-Id', locationA)
       .send({ currentPassword: SEEDED_PASSWORD, newPassword: 'OtraClave99!' })
       .expect(200);
     expect((changed.body as Tokens).accessToken).toEqual(expect.any(String));
@@ -387,6 +390,8 @@ describe('Auditoría de personal y cuenta (e2e, DX-359)', () => {
       ],
       ['PASSWORD_CHANGE', 'SESSION', null, { reason: 'SESSIONS_REVOKED' }],
     ]);
+    // Revisión DX-359: la sede activa del actor, no null.
+    expect(events.map((e) => e.locationId)).toEqual([locationA, locationA]);
     expect(events[1]).toMatchObject({
       actorRole: ClinicRole.DENTIST,
       userAgent: UA,
@@ -417,6 +422,60 @@ describe('Auditoría de personal y cuenta (e2e, DX-359)', () => {
         action: 'PASSWORD_CHANGE',
       }),
     ).toHaveLength(1);
+  });
+
+  it('PATCH /me sin cabecera: un miembro restringido a una sola sede audita en ella; una sede ajena da 400 sin escribir', async () => {
+    // seedMember usa un email por rol y RECEPTION ya existe: otro email.
+    const email = 'restringida.dx359@clinica-dx359-a.test';
+    const user = await raw.user.create({
+      data: {
+        email,
+        passwordHash: await passwordService.hash(SEEDED_PASSWORD),
+        fullName: 'Recepción',
+        emailVerifiedAt: new Date(),
+      },
+      select: { id: true },
+    });
+    await raw.clinicMembership.create({
+      data: {
+        tenantId: clinicA.tenantId,
+        userId: user.id,
+        role: ClinicRole.RECEPTION,
+      },
+    });
+    const member = { userId: user.id, email };
+    await as(clinicA)
+      .send('put', `/staff/${member.userId}/locations`)
+      .send({ locationIds: [locationA] })
+      .expect(200);
+    const token = await loginAs(app, clinicA.host, member.email);
+    await as(clinicA, token)
+      .send('patch', '/me')
+      .send({ fullName: 'Recepción Restringida' })
+      .expect(200);
+    const locationB = (
+      await raw.location.findFirstOrThrow({
+        where: { tenantId: clinicB.tenantId },
+        select: { id: true },
+      })
+    ).id;
+    await as(clinicA, token)
+      .send('patch', '/me')
+      .set('X-Location-Id', locationB)
+      .send({ fullName: 'Otro Nombre' })
+      .expect(400);
+    const events = await eventsOf(clinicA.tenantId, {
+      actorUserId: member.userId,
+      action: 'UPDATE',
+    });
+    expect(events.map((e) => [e.locationId, e.metadata])).toEqual([
+      [locationA, { reason: 'OWN_NAME_CHANGED', changedFields: ['fullName'] }],
+    ]);
+    const { fullName } = await raw.user.findUniqueOrThrow({
+      where: { id: member.userId },
+      select: { fullName: true },
+    });
+    expect(fullName).toBe('Recepción Restringida');
   });
 
   it('aislamiento: la auditoría de la clínica B no ve ningún evento de personal de la A', async () => {

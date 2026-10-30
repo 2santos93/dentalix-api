@@ -53,6 +53,8 @@ import { AuthTokensDto } from '../../auth/presentation/dto/auth-tokens.dto';
 import { MyProfile } from '../domain/entities/my-profile.entity';
 import type { AuditRequestMeta } from '../../audit/domain/audit-request-context';
 import { currentRequestId } from '../../../shared/observability/request-context';
+import { PrismaService } from '../../../shared/prisma/prisma.service';
+import { resolveActiveLocationId } from '../../../shared/tenancy/active-location';
 import { RateLimit } from '../../../shared/security/rate-limit.decorator';
 import {
   DeliveredSession,
@@ -103,7 +105,27 @@ export class MeController {
     private readonly setMyAvatar: SetMyAvatarUseCase,
     private readonly removeMyAvatar: RemoveMyAvatarUseCase,
     private readonly cookie: SessionCookieService,
+    private readonly prisma: PrismaService,
   ) {}
+
+  /**
+   * DX-359: sede activa del actor para su evento de auditoría, con las mismas
+   * reglas que `TenantContextInterceptor` (que `/me` no usa: también sirve a
+   * tokens de plataforma). `null` = toda la clínica o sesión de plataforma.
+   */
+  private async activeLocationId(
+    req: AuthenticatedRequest,
+  ): Promise<string | null> {
+    if (!isTenantPayload(req.user)) return null;
+    return (
+      (await resolveActiveLocationId(
+        this.prisma,
+        req.headers,
+        req.user.tenantId,
+        req.user.loc,
+      )) ?? null
+    );
+  }
 
   @Get()
   @ApiOkResponse({ type: MyProfileDto })
@@ -136,7 +158,7 @@ export class MeController {
       { userId: user.sub, fullName: dto.fullName },
       {
         tenantId: user.tenantId,
-        locationId: null,
+        locationId: await this.activeLocationId(req),
         actor: { userId: user.sub, role: user.role },
         ...requestMeta(req),
       },
@@ -171,6 +193,7 @@ export class MeController {
         session: req.user,
         currentPassword: dto.currentPassword,
         newPassword: dto.newPassword,
+        locationId: await this.activeLocationId(req),
       },
       requestMeta(req),
     );

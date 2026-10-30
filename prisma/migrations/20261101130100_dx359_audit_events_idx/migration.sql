@@ -5,7 +5,7 @@
 -- "audit_events_action_<valor>_idx" por cada valor de "AuditAction" y
 -- "audit_events_resource_<valor>_idx" por cada valor de "AuditResourceType".
 -- Va en su PROPIA migración: los valores se añadieron en
--- 20261101120000_dx359_enums y Postgres no deja usar un valor de enum nuevo
+-- 20261101130000_dx359_enums y Postgres no deja usar un valor de enum nuevo
 -- en la misma transacción que lo crea.
 --
 -- No es concurrente (tabla particionada): bloquea las escrituras de auditoría
@@ -17,7 +17,7 @@
 -- cola sin límite detrás de este CREATE INDEX. Si falla, Prisma la deja
 -- marcada como fallida y otro `migrate deploy` se para con P3009: antes hay
 -- que ejecutar `npx prisma migrate resolve --rolled-back
--- 20261101120100_dx359_audit_events_idx` y luego repetir `migrate deploy`.
+-- 20261101130100_dx359_audit_events_idx` y luego repetir `migrate deploy`.
 --
 -- Aditiva; se propaga a cada partición. IF NOT EXISTS: idempotente.
 
