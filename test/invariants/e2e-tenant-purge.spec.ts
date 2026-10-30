@@ -1,4 +1,6 @@
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
+import { purgeTenants, type SqlRunner } from '../support/tenant-purge';
 import { readSpecs, type SpecSource } from './bare-delete-many';
 
 // DX-396 (TST-045): en los e2e la clínica se crea por la API (registro), que
@@ -57,4 +59,46 @@ describe('DX-396: los e2e no borran clínicas a mano', () => {
   it('ningún e2e del repo borra tenants fuera de test/support/', () => {
     expect(findHandTenantDeletes(readSpecs(REPO_ROOT))).toEqual([]);
   });
+});
+
+describe('DX-396: purgeTenants solo borra en una base de test', () => {
+  function fakeDb(dbName: string) {
+    const executed: string[] = [];
+    const db: SqlRunner = {
+      $queryRawUnsafe: (sql: string) => {
+        if (/current_database\(\)/.test(sql)) {
+          return Promise.resolve([{ db: dbName }]);
+        }
+        // Catálogo vacío: sin tablas de clínica, FKs ni triggers.
+        return Promise.resolve([]);
+      },
+      $executeRawUnsafe: (sql: string) => {
+        executed.push(sql);
+        return Promise.resolve(0);
+      },
+    } as unknown as SqlRunner;
+    return { db, executed };
+  }
+
+  it.each(['dentalix', 'dentalix_dev', 'dentalix_test_x-y', 'test_dentalix'])(
+    'se niega en "%s" sin ejecutar ningún DELETE',
+    async (name) => {
+      const { db, executed } = fakeDb(name);
+      await expect(purgeTenants(db, [randomUUID()])).rejects.toThrow(
+        /no es una base de test/,
+      );
+      expect(executed).toEqual([]);
+    },
+  );
+
+  it.each(['dentalix_test', 'dentalix_lead_test', 'dentalix_test_owner'])(
+    'borra en "%s"',
+    async (name) => {
+      const { db, executed } = fakeDb(name);
+      await purgeTenants(db, [randomUUID()]);
+      expect(executed).toEqual([
+        'DELETE FROM tenants WHERE id = ANY($1::uuid[])',
+      ]);
+    },
+  );
 });

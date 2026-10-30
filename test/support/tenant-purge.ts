@@ -161,6 +161,27 @@ export async function tenantTablesInDeleteOrder(
   return (await tenantTablesWithColumns(db)).map((t) => t.table);
 }
 
+/** Identificador SQL citado (dobla las comillas): los nombres salen del catálogo. */
+function quoteIdent(name: string): string {
+  return `"${name.replace(/"/g, '""')}"`;
+}
+
+/**
+ * Se niega a purgar fuera de una base de test: mismo criterio que
+ * `resetDatabase` (`*_test` o `*_test_<sufijo>`), leído de la base conectada y
+ * no de la URL.
+ */
+async function assertTestDatabase(db: SqlRunner): Promise<void> {
+  const [{ db: name }] = await db.$queryRawUnsafe<{ db: string }[]>(
+    'SELECT current_database() AS db',
+  );
+  if (!/_test(_\w+)?$/.test(name)) {
+    throw new Error(
+      `purga de clínicas: "${name}" no es una base de test (*_test); no se borra nada.`,
+    );
+  }
+}
+
 /**
  * Borra en duro (solo en bases de test) las clínicas `tenantIds` y todas sus
  * filas en las tablas de clínica. `db` debe ser el superusuario (DIRECT_URL):
@@ -171,12 +192,23 @@ export async function purgeTenants(
   tenantIds: string[],
 ): Promise<void> {
   if (tenantIds.length === 0) return;
+  await assertTestDatabase(db);
   for (const { table, columns } of await tenantTablesWithColumns(db)) {
-    const where = columns.map((c) => `"${c}" = ANY($1::uuid[])`).join(' OR ');
-    await db.$executeRawUnsafe(
-      `DELETE FROM "${table}" WHERE ${where}`,
-      tenantIds,
-    );
+    const where = columns
+      .map((c) => `${quoteIdent(c)} = ANY($1::uuid[])`)
+      .join(' OR ');
+    try {
+      await db.$executeRawUnsafe(
+        `DELETE FROM ${quoteIdent(table)} WHERE ${where}`,
+        tenantIds,
+      );
+    } catch (err) {
+      throw new Error(
+        `purga de clínicas: falló el borrado de ${table} (${columns.join(', ')}): ` +
+          (err instanceof Error ? err.message : String(err)),
+        { cause: err },
+      );
+    }
   }
   await db.$executeRawUnsafe(
     `DELETE FROM tenants WHERE id = ANY($1::uuid[])`,
