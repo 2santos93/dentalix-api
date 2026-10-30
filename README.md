@@ -212,6 +212,23 @@ Registro de quién vio o cambió datos clínicos y financieros (Ley 1581, Res.
   anulaciones, planes de cuotas, estado de cuenta y el login (correcto y
   fallido). La lista exacta la fija `src/modules/audit/audit-coverage.spec.ts`.
   No se audita la búsqueda `GET /patients` ni la propia lectura del registro.
+- **Personal y cuenta (DX-359)**: invitar (`CREATE STAFF_INVITATION`, con el
+  rol), reenviar (`INVITATION_RESENT`), retirar o sustituir una invitación
+  (`VOID`, `INVITATION_REVOKED`/`INVITATION_REPLACED`), aceptarla con
+  cualquier cuenta (`CREATE STAFF_MEMBER`, `INVITATION_ACCEPTED`, actor = el
+  propio miembro), cambiar rol, sedes, registro profesional o especialidad
+  (`STAFF_UPDATED`, con `staffAccess.before`/`after` de lo que cambió; el
+  nombre, solo en `changedFields`; sin evento si nada cambia), desactivar y
+  reactivar (`STAFF_DEACTIVATED`/`STAFF_REACTIVATED`, con `statusChange`), el
+  alta de la clínica (`CREATE CLINIC`, `CLINIC_REGISTERED`), el nombre propio
+  (`OWN_NAME_CHANGED`) y la contraseña propia (`PASSWORD_CHANGE`,
+  `SESSIONS_REVOKED`: solo el hecho). Estos eventos los escribe el
+  repositorio en la **misma transacción** que el cambio (`writeAuditEvent`):
+  sin cambio no hay evento y sin evento no hay cambio. Nunca guardan
+  contraseñas, hashes, tokens de invitación o verificación, emails ni
+  nombres. El alta del MFA del superadmin (`MFA_ENROLLMENT_STARTED`,
+  `MFA_ENABLED`) y su cambio de contraseña con sesión de plataforma van a
+  `platform_audit_events` (sin clínica), con la metadata vacía.
 - **Un evento por petición** que termina bien (una sola escritura, nunca N):
   actor, rol, acción, recurso, paciente, sede activa, request id
   (`X-Request-Id`, DX-023), IP y user agent. Una petición que falla (404,

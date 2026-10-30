@@ -860,3 +860,83 @@ describe('sanitizeAuditMetadata — calendario de la sede (DX-316)', () => {
     });
   });
 });
+
+describe('sanitizeAuditMetadata — accesos de un miembro del personal (DX-359)', () => {
+  const LOC_A = '0192f0a0-0000-7000-8000-0000000000aa';
+  const LOC_B = '0192f0a0-0000-7000-8000-0000000000bb';
+
+  it('conserva rol, sedes, registro profesional y especialidad antes y después', () => {
+    const staffAccess = {
+      before: {
+        role: 'DENTIST',
+        locationIds: [LOC_A],
+        professionalLicense: 'RP-123',
+        professionalSpecialty: 'Ortodoncia',
+      },
+      after: {
+        role: 'ADMIN',
+        locationIds: null,
+        professionalLicense: null,
+        professionalSpecialty: 'Endodoncia y periodoncia',
+      },
+    };
+    expect(sanitizeAuditMetadata({ staffAccess })).toEqual({ staffAccess });
+  });
+
+  it('admite un solo lado (alta de una invitación o de un miembro)', () => {
+    const staffAccess = { after: { role: 'RECEPTION', locationIds: [LOC_B] } };
+    expect(sanitizeAuditMetadata({ staffAccess })).toEqual({ staffAccess });
+  });
+
+  it('descarta el campo que no tiene la forma admitida y deja los demás', () => {
+    expect(
+      sanitizeAuditMetadata({
+        staffAccess: {
+          before: { role: 'ROOT', professionalLicense: 'RP-1' },
+          after: {
+            role: 'ASSISTANT',
+            locationIds: [LOC_A, 'no-es-uuid'],
+            professionalLicense: 'RP\n2',
+            professionalSpecialty: 'E'.repeat(81),
+          },
+        },
+      }),
+    ).toEqual({
+      staffAccess: {
+        before: { professionalLicense: 'RP-1' },
+        after: { role: 'ASSISTANT' },
+      },
+    });
+  });
+
+  it('nunca guarda claves fuera de la lista (contraseñas, hashes, tokens, emails)', () => {
+    expect(
+      sanitizeAuditMetadata({
+        staffAccess: {
+          after: {
+            role: 'DENTIST',
+            password: 'S3cret!!',
+            passwordHash: '$argon2id$v=19$m=65536',
+            token: 'abc',
+            email: 'ana@example.com',
+          },
+        },
+        password: 'S3cret!!',
+        passwordHash: '$argon2id$v=19$m=65536',
+        tokenHash: 'f'.repeat(64),
+      }),
+    ).toEqual({ staffAccess: { after: { role: 'DENTIST' } } });
+  });
+
+  it('sin ningún lado válido no queda nada', () => {
+    for (const staffAccess of [
+      {},
+      { before: 'ADMIN' },
+      { after: { role: 'ROOT' } },
+      { before: {}, after: { secret: 'x' } },
+      'ADMIN',
+    ]) {
+      expect(sanitizeAuditMetadata({ staffAccess })).toEqual({});
+    }
+  });
+});

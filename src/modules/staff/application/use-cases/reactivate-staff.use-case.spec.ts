@@ -10,6 +10,18 @@ import type {
 } from '../../domain/ports/staff-repository.port';
 import { StaffDirectoryPage } from '../../domain/entities/staff-directory-entry.entity';
 import type { StaffLoginLocks } from '../../domain/ports/staff-login-locks.port';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+
+// DX-359: quién cambia el miembro; el repositorio escribe el evento en la
+// misma transacción que el cambio.
+const CTX: AuditRequestContext = {
+  tenantId: 't1',
+  locationId: null,
+  actor: { userId: 'admin', role: ClinicRole.ADMIN },
+  requestId: 'req-1',
+  ip: null,
+  userAgent: null,
+};
 
 function makeRepo(overrides: Partial<StaffRepository> = {}): StaffRepository {
   return {
@@ -48,14 +60,23 @@ describe('ReactivateStaffUseCase', () => {
   it('devuelve el miembro reactivado', async () => {
     const repo = makeRepo({ reactivateById: () => Promise.resolve(miembro) });
     await expect(
-      new ReactivateStaffUseCase(repo).execute('u1'),
+      new ReactivateStaffUseCase(repo).execute('u1', CTX),
     ).resolves.toEqual(miembro);
+  });
+
+  it('DX-359: pasa al repositorio quién reactiva (el evento va en su transacción)', async () => {
+    const reactivateById = jest.fn().mockResolvedValue(miembro);
+    await new ReactivateStaffUseCase(makeRepo({ reactivateById })).execute(
+      'u1',
+      CTX,
+    );
+    expect(reactivateById).toHaveBeenCalledWith('u1', CTX);
   });
 
   it('404 cuando no hay ninguna membresía desactivada que reactivar', async () => {
     const repo = makeRepo({ reactivateById: () => Promise.resolve(null) });
     await expect(
-      new ReactivateStaffUseCase(repo).execute('u1'),
+      new ReactivateStaffUseCase(repo).execute('u1', CTX),
     ).rejects.toThrow(NotFoundException);
   });
 
@@ -72,7 +93,7 @@ describe('ReactivateStaffUseCase', () => {
         return Promise.resolve('NOT_FOUND');
       },
     });
-    await new ReactivateStaffUseCase(repo).execute('u1');
+    await new ReactivateStaffUseCase(repo).execute('u1', CTX);
     expect(escritoConRegla).toBe(false);
   });
 });

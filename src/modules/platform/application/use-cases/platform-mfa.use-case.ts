@@ -18,6 +18,7 @@ import {
   matchTotp,
   totpUri,
 } from '../../../../shared/crypto/totp';
+import type { AuditRequestMeta } from '../../../audit/domain/audit-request-context';
 import {
   PLATFORM_MFA_REPOSITORY,
   type PlatformMfaRepository,
@@ -82,7 +83,14 @@ export class PlatformMfaUseCase {
     };
   }
 
-  async start(userId: string): Promise<PlatformMfaEnrollment> {
+  /**
+   * DX-359: `request` es desde dónde lo pide el superadmin; el alta queda en
+   * `platform_audit_events` (sin el secreto) en la transacción que la guarda.
+   */
+  async start(
+    userId: string,
+    request: AuditRequestMeta,
+  ): Promise<PlatformMfaEnrollment> {
     const state = await this.require(userId);
     if (state.enabledAt) throw alreadyEnabled();
     const secret = generateTotpSecret();
@@ -90,6 +98,7 @@ export class PlatformMfaUseCase {
       !(await this.repo.savePending(
         userId,
         this.cipher.encrypt(secret, userId),
+        { userId, ...request },
       ))
     ) {
       throw alreadyEnabled();
@@ -97,7 +106,12 @@ export class PlatformMfaUseCase {
     return { secret, otpauthUri: totpUri(secret, state.email, TOTP_ISSUER) };
   }
 
-  async confirm(userId: string, code: string): Promise<PlatformMfaStatus> {
+  /** DX-359: la activación queda en `platform_audit_events` (sin el código). */
+  async confirm(
+    userId: string,
+    code: string,
+    request: AuditRequestMeta,
+  ): Promise<PlatformMfaStatus> {
     const state = await this.require(userId);
     if (state.enabledAt) throw alreadyEnabled();
     if (!state.pendingSecretEnc) {
@@ -118,6 +132,7 @@ export class PlatformMfaUseCase {
       userId,
       state.pendingSecretEnc,
       step,
+      { userId, ...request },
     );
     if (!enabledAt) throw alreadyEnabled();
     // SEC-008: evento para alertas de seguridad. Un alta que su dueño no hizo

@@ -226,6 +226,34 @@ export class AuditHealthRegistrationChangeDto {
   after!: AuditHealthRegistrationSideDto;
 }
 
+/** Un lado del cambio de accesos de un miembro (DX-359). */
+export class AuditStaffAccessSideDto {
+  @ApiPropertyOptional({ enum: ClinicRole, enumName: 'ClinicRole' })
+  role?: ClinicRole;
+
+  @ApiPropertyOptional({
+    type: [String],
+    format: 'uuid',
+    nullable: true,
+    description: 'Sedes permitidas; `null` = todas.',
+  })
+  locationIds?: string[] | null;
+
+  @ApiPropertyOptional({ type: String, nullable: true, maxLength: 60 })
+  professionalLicense?: string | null;
+
+  @ApiPropertyOptional({ type: String, nullable: true, maxLength: 80 })
+  professionalSpecialty?: string | null;
+}
+
+export class AuditStaffAccessChangeDto {
+  @ApiPropertyOptional({ type: AuditStaffAccessSideDto })
+  before?: AuditStaffAccessSideDto;
+
+  @ApiPropertyOptional({ type: AuditStaffAccessSideDto })
+  after?: AuditStaffAccessSideDto;
+}
+
 export class AuditMetadataDto {
   @ApiPropertyOptional({
     type: [String],
@@ -313,6 +341,13 @@ export class AuditMetadataDto {
       'DX-319: nº de registro sanitario de una sede y si sale en los documentos, antes y después (dato público de la sede, nunca de un paciente).',
   })
   healthRegistration?: AuditHealthRegistrationChangeDto;
+
+  @ApiPropertyOptional({
+    type: AuditStaffAccessChangeDto,
+    description:
+      'DX-359: accesos de un miembro antes y después (rol, sedes, nº de registro profesional, especialidad): solo lo que cambió, o un lado en un alta (invitación, aceptación, registro). Nunca el nombre, el email ni nada de la contraseña.',
+  })
+  staffAccess?: AuditStaffAccessChangeDto;
 }
 
 export class AuditEventDto {

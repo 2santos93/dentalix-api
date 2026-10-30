@@ -7,6 +7,7 @@
 import { MAX_ALLOCATION_LINES } from '../../payments/domain/allocation-rules';
 import { MAX_HOLIDAYS_PER_FILE } from '../../location-calendar/domain/holiday-rules';
 import { parseCivilDate } from '../../../shared/time/civil-day';
+import { ClinicRole } from '@prisma/client';
 
 export interface AuditMetadata {
   /** Campos que traía la petición de escritura (nombres, nunca valores). */
@@ -119,6 +120,30 @@ export interface AuditMetadata {
    * recuentos de una importación. Nunca el nombre del festivo (texto libre).
    */
   locationCalendar?: AuditLocationCalendar;
+  /**
+   * DX-359: accesos de un miembro del personal antes y después (rol, sedes,
+   * nº de registro profesional y especialidad): solo los campos que
+   * cambiaron, o un solo lado en un alta (invitación, aceptación, registro).
+   * `locationIds: null` = todas las sedes. El registro profesional y la
+   * especialidad son la otra excepción de texto: datos profesionales del
+   * MIEMBRO (los que imprime la receta), nunca de un paciente; sin saltos de
+   * línea ni caracteres de control. Nunca el nombre, el email ni nada de la
+   * contraseña.
+   */
+  staffAccess?: AuditStaffAccessChange;
+}
+
+/** Un lado del cambio de accesos de un miembro (DX-359). */
+export interface AuditStaffAccessSide {
+  role?: ClinicRole;
+  locationIds?: string[] | null;
+  professionalLicense?: string | null;
+  professionalSpecialty?: string | null;
+}
+
+export interface AuditStaffAccessChange {
+  before?: AuditStaffAccessSide;
+  after?: AuditStaffAccessSide;
 }
 
 /** Un festivo en la auditoría: su día civil y si se repite cada año. */
@@ -322,6 +347,14 @@ const CIVIL_DATE = /^\d{4}-\d{2}-\d{2}$/;
  * saltos (la misma clase que HEALTH_REGISTRATION_NUMBER_CHARS de locations).
  */
 const HEALTH_REGISTRATION_NUMBER = /^[^\p{Cc}\p{Cf}\u2028\u2029]{1,64}$/u;
+/**
+ * Registro profesional (60) y especialidad (80) de un miembro (DX-359): los
+ * topes del DTO de `PATCH /staff/:userId`, sin control, formato ni saltos.
+ */
+const PROFESSIONAL_LICENSE = /^[^\p{Cc}\p{Cf}\u2028\u2029]{1,60}$/u;
+const PROFESSIONAL_SPECIALTY = /^[^\p{Cc}\p{Cf}\u2028\u2029]{1,80}$/u;
+/** Tope de sedes por lado: las de una clínica, con holgura. */
+const MAX_STAFF_LOCATIONS = 200;
 const MAX_FIELDS = 50;
 /** Tope de tramos por lado (7 días × 7 tramos × varias sedes). */
 const MAX_SCHEDULE_ENTRIES = 500;
@@ -881,6 +914,54 @@ function locationCalendar(value: unknown): AuditLocationCalendar | null {
   return Object.keys(out).length > 0 ? out : null;
 }
 
+const CLINIC_ROLES = Object.values(ClinicRole);
+
+/** Texto profesional del miembro con su formato, `null` o `undefined` (se cae). */
+function nullableText(value: unknown, pattern: RegExp) {
+  if (value === null) return null;
+  return typeof value === 'string' && pattern.test(value) ? value : undefined;
+}
+
+/** Sedes: todas uuid (o `null` = todas las sedes); si una no encaja, ninguna. */
+function staffLocations(value: unknown): string[] | null | undefined {
+  if (value === null) return null;
+  if (!Array.isArray(value) || value.length > MAX_STAFF_LOCATIONS) {
+    return undefined;
+  }
+  const ids = value.filter(
+    (v): v is string => typeof v === 'string' && UUID.test(v),
+  );
+  return ids.length === value.length
+    ? ids.map((id) => id.toLowerCase())
+    : undefined;
+}
+
+/** Cada campo con su forma; el que no encaja se cae solo (DX-359). */
+function staffAccessSide(value: unknown): AuditStaffAccessSide | null {
+  if (!isRecord(value)) return null;
+  const out: AuditStaffAccessSide = {};
+  const role = CLINIC_ROLES.find((r) => r === value.role);
+  if (role) out.role = role;
+  const locationIds = staffLocations(value.locationIds);
+  if (locationIds !== undefined) out.locationIds = locationIds;
+  const license = nullableText(value.professionalLicense, PROFESSIONAL_LICENSE);
+  if (license !== undefined) out.professionalLicense = license;
+  const specialty = nullableText(
+    value.professionalSpecialty,
+    PROFESSIONAL_SPECIALTY,
+  );
+  if (specialty !== undefined) out.professionalSpecialty = specialty;
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+function staffAccess(value: unknown): AuditStaffAccessChange | null {
+  if (!isRecord(value)) return null;
+  const before = staffAccessSide(value.before);
+  const after = staffAccessSide(value.after);
+  if (!before && !after) return null;
+  return { ...(before ? { before } : {}), ...(after ? { after } : {}) };
+}
+
 /**
  * Deja pasar solo lo que la lista admite, con el formato que admite. Lo que
  * no encaja se DESCARTA (no se trunca ni se escapa): así un valor clínico que
@@ -928,5 +1009,7 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (regional) out.regionalSettings = regional;
   const calendar = locationCalendar(input.locationCalendar);
   if (calendar) out.locationCalendar = calendar;
+  const access = staffAccess(input.staffAccess);
+  if (access) out.staffAccess = access;
   return out;
 }

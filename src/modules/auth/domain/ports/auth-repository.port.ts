@@ -1,3 +1,4 @@
+import type { AuditRequestMeta } from '../../../audit/domain/audit-request-context';
 import { ClinicRole } from '@prisma/client';
 import type { HourCycle } from '../../../locations/domain/regional-settings';
 
@@ -28,6 +29,11 @@ export interface CreateClinicWithOwnerInput {
    * hay forma legada sin sede (DX-312, R7).
    */
   location: ClinicLocationSettings;
+  /**
+   * DX-359: desde dónde se verificó el registro, para el evento CLINIC_REGISTERED
+   * que se escribe en la MISMA transacción del alta (`null` en el seed).
+   */
+  request: AuditRequestMeta | null;
 }
 
 export interface MembershipRecord {

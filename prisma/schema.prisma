@@ -2727,6 +2727,8 @@ enum AuditAction {
   PRINT
   // DX-136: enviar un documento por email (el recibo de caja).
   SEND
+  // DX-359: el titular cambia su contraseña desde su perfil (POST /me/password).
+  PASSWORD_CHANGE
 }
 
 // DX-009: sobre qué tipo de recurso.
@@ -2804,6 +2806,10 @@ enum AuditResourceType {
   CLINIC_SETTINGS
   // DX-316: calendario de la sede (días hábiles, festivos e importaciones).
   LOCATION_CALENDAR
+  // DX-359: invitaciones al personal (invitar, reenviar, retirar) y el alta
+  // de la clínica con su ADMIN (registro verificado).
+  STAFF_INVITATION
+  CLINIC
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o
@@ -3092,9 +3098,10 @@ model JobWorker {
 model PlatformAuditEvent {
   id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   actorUserId  String   @db.Uuid
-  /// `JOB_RETRIED` (CHECK en la migración).
+  /// `JOB_RETRIED`; DX-359: `MFA_ENROLLMENT_STARTED`, `MFA_ENABLED`,
+  /// `PASSWORD_CHANGE` (CHECK en la migración).
   action       String
-  /// `JOB` (CHECK en la migración).
+  /// `JOB`; DX-359: `USER` (el propio superadmin) (CHECK en la migración).
   resourceType String
   resourceId   String?  @db.Uuid
   requestId    String?

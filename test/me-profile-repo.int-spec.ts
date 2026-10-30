@@ -2,6 +2,10 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaUserProfileRepository } from '../src/modules/me/infrastructure/repositories/prisma-user-profile.repository';
+import {
+  ownNameAuditEvent,
+  passwordChangeAuditEvent,
+} from '../src/modules/me/domain/own-account-audit';
 
 // Conexión admin (DIRECT_URL) para sembrar/limpiar, como en los otros int/e2e.
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
@@ -49,10 +53,48 @@ describe('PrismaUserProfileRepository (int)', () => {
       avatarKey: null,
     });
 
-    await repo.updateName(userId, 'Después');
+    // DX-359: cada cambio lleva su evento, en la clínica de la sesión.
+    const request = { requestId: null, ip: null, userAgent: null };
+    const ctx = {
+      tenantId,
+      locationId: null,
+      actor: { userId, role: 'DENTIST' as const },
+      ...request,
+    };
+    const claims = { sub: userId, tenantId, role: 'DENTIST' as const };
+    await repo.updateName(userId, 'Después', ownNameAuditEvent(ctx));
+    // Mismo nombre: no escribe ni audita nada.
+    await repo.updateName(userId, 'Después', ownNameAuditEvent(ctx));
     // Cada cambio de contraseña incrementa la versión de sesión (0 → 1 → 2).
-    expect(await repo.updatePasswordAndRevokeSessions(userId, 'HASH0')).toBe(1);
-    expect(await repo.updatePasswordAndRevokeSessions(userId, 'HASH1')).toBe(2);
+    const passwordEvent = passwordChangeAuditEvent(claims, request);
+    expect(
+      await repo.updatePasswordAndRevokeSessions(
+        userId,
+        'HASH0',
+        passwordEvent,
+      ),
+    ).toBe(1);
+    expect(
+      await repo.updatePasswordAndRevokeSessions(
+        userId,
+        'HASH1',
+        passwordEvent,
+      ),
+    ).toBe(2);
+    const events = await raw.auditEvent.findMany({
+      where: { tenantId, actorUserId: userId },
+      orderBy: { occurredAt: 'asc' },
+      select: { action: true, metadata: true },
+    });
+    expect(events).toEqual([
+      {
+        action: 'UPDATE',
+        metadata: { reason: 'OWN_NAME_CHANGED', changedFields: ['fullName'] },
+      },
+      { action: 'PASSWORD_CHANGE', metadata: { reason: 'SESSIONS_REVOKED' } },
+      { action: 'PASSWORD_CHANGE', metadata: { reason: 'SESSIONS_REVOKED' } },
+    ]);
+    expect(JSON.stringify(events)).not.toContain('HASH');
     await repo.updateAvatarKey(userId, 'avatars/x.png');
 
     const after = await repo.findUserById(userId);

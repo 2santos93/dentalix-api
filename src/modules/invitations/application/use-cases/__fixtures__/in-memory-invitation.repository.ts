@@ -8,6 +8,17 @@ import {
   InvitationRepository,
 } from '../../../domain/ports/invitation-repository.port';
 import { hashInvitationToken } from '../../invitation-token';
+import type { AuditEventDraft } from '../../../../audit/domain/audit-event';
+import type {
+  AuditRequestContext,
+  AuditRequestMeta,
+} from '../../../../audit/domain/audit-request-context';
+import {
+  invitationAcceptedAuditEvent,
+  invitationCreatedAuditEvent,
+  invitationResentAuditEvent,
+  invitationRevokedAuditEvent,
+} from '../../../domain/invitation-audit';
 
 // `ClinicInvitation` (the API-facing entity) deliberately has no `tokenHash`
 // field (see the port) — the fake still has to look rows up by hash like the
@@ -55,6 +66,11 @@ export class InMemoryInvitationRepository implements InvitationRepository {
   private readonly invitations: StoredInvitation[] = [];
   private readonly users: StoredUser[] = [];
   private readonly memberships: StoredMembership[] = [];
+  /**
+   * DX-359: eventos que el repo de Prisma escribe en la transacción de cada
+   * escritura, con los mismos constructores.
+   */
+  readonly auditEvents: AuditEventDraft[] = [];
   /** Backs `findTenantName()`; tests can overwrite it directly. */
   tenantName: string | null = 'Clínica Demo';
 
@@ -220,12 +236,18 @@ export class InMemoryInvitationRepository implements InvitationRepository {
     );
   }
 
-  revokePendingByEmail(email: string): Promise<string[]> {
+  revokePendingByEmail(
+    email: string,
+    audit: AuditRequestContext,
+  ): Promise<string[]> {
     const pending = this.invitations.filter(
       (i) => i.email === email && i.acceptedAt === null && i.revokedAt === null,
     );
     pending.forEach((i) => {
       i.revokedAt = NOW;
+      this.auditEvents.push(
+        invitationRevokedAuditEvent(audit, i.id, 'REPLACED'),
+      );
     });
     return Promise.resolve(pending.map((i) => i.id));
   }
@@ -240,6 +262,7 @@ export class InMemoryInvitationRepository implements InvitationRepository {
   reissue(
     id: string,
     input: { tokenHash: string; expiresAt: Date },
+    audit: AuditRequestContext,
   ): Promise<ClinicInvitation | null> {
     const row = this.invitations.find(
       (i) => i.id === id && i.acceptedAt === null && i.revokedAt === null,
@@ -247,10 +270,11 @@ export class InMemoryInvitationRepository implements InvitationRepository {
     if (!row) return Promise.resolve(null);
     row.tokenHash = input.tokenHash;
     row.expiresAt = input.expiresAt;
+    this.auditEvents.push(invitationResentAuditEvent(audit, id));
     return Promise.resolve(this.toEntity(row));
   }
 
-  revokeById(id: string): Promise<boolean> {
+  revokeById(id: string, audit: AuditRequestContext): Promise<boolean> {
     // Atomic check-and-set (mirrors PrismaInvitationRepository.revokeById's
     // `updateMany({where:{id, acceptedAt:null, revokedAt:null}, ...})`).
     const row = this.invitations.find(
@@ -258,17 +282,21 @@ export class InMemoryInvitationRepository implements InvitationRepository {
     );
     if (!row) return Promise.resolve(false);
     row.revokedAt = NOW;
+    this.auditEvents.push(invitationRevokedAuditEvent(audit, id, 'REVOKED'));
     return Promise.resolve(true);
   }
 
-  create(input: {
-    email: string;
-    fullName: string;
-    role: ClinicRole;
-    tokenHash: string;
-    expiresAt: Date;
-    invitedById?: string;
-  }): Promise<ClinicInvitation> {
+  create(
+    input: {
+      email: string;
+      fullName: string;
+      role: ClinicRole;
+      tokenHash: string;
+      expiresAt: Date;
+      invitedById?: string;
+    },
+    audit: AuditRequestContext,
+  ): Promise<ClinicInvitation> {
     const row: StoredInvitation = {
       id: `inv-${++seq}`,
       tenantId: TENANT_ID,
@@ -283,6 +311,9 @@ export class InMemoryInvitationRepository implements InvitationRepository {
       tokenHash: input.tokenHash,
     };
     this.invitations.push(row);
+    this.auditEvents.push(
+      invitationCreatedAuditEvent(audit, row.id, input.role),
+    );
     return Promise.resolve(this.toEntity(row));
   }
 
@@ -302,6 +333,7 @@ export class InMemoryInvitationRepository implements InvitationRepository {
     email: string;
     role: ClinicRole;
     user: AcceptUserResolution;
+    request: AuditRequestMeta | null;
   }): ReturnType<InvitationRepository['acceptTransactional']> {
     let user: StoredUser;
     const resolution = input.user;
@@ -337,6 +369,7 @@ export class InMemoryInvitationRepository implements InvitationRepository {
     const membership = this.memberships.find(
       (m) => m.userId === userId && m.tenantId === TENANT_ID,
     );
+    const reactivated = membership?.deletedAt != null;
     if (membership) {
       membership.deletedAt = null;
       membership.role = input.role;
@@ -356,6 +389,20 @@ export class InMemoryInvitationRepository implements InvitationRepository {
       invitation.acceptedAt = NOW;
     }
 
+    const allowedLocationIds =
+      input.role === ClinicRole.ADMIN
+        ? null
+        : (membership?.allowedLocationIds ?? null);
+    this.auditEvents.push(
+      invitationAcceptedAuditEvent(input.request, {
+        tenantId: TENANT_ID,
+        invitationId: input.invitationId,
+        userId,
+        role: input.role,
+        locationIds: allowedLocationIds,
+        reactivated,
+      }),
+    );
     return Promise.resolve({
       userId,
       role: input.role,

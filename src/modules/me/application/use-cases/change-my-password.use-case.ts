@@ -7,6 +7,8 @@ import {
   TokenService,
 } from '../../../../shared/crypto/token.service';
 import { SessionClaimsService } from '../../../auth/application/session-claims.service';
+import type { AuditRequestMeta } from '../../../audit/domain/audit-request-context';
+import { passwordChangeAuditEvent } from '../../domain/own-account-audit';
 
 export interface ChangeMyPasswordInput {
   /** Sesión del access token con el que se pide el cambio. */
@@ -33,8 +35,13 @@ export class ChangeMyPasswordUseCase {
     private readonly tokens: TokenService,
   ) {}
 
+  /**
+   * DX-359: `request` es desde dónde se pide; el cambio queda auditado en su
+   * transacción (clínica o plataforma, según la sesión), sin contraseña ni hash.
+   */
   async execute(
     input: ChangeMyPasswordInput,
+    request: AuditRequestMeta,
   ): Promise<{ accessToken: string; refreshToken: string }> {
     const userId = input.session.sub;
     // Primero la sesión: si ya no es válida (baja, superadmin revocado) se
@@ -52,7 +59,11 @@ export class ChangeMyPasswordUseCase {
       throw new UnauthorizedException('Invalid credentials');
     }
     const newHash = await this.password.hash(input.newPassword);
-    const tv = await this.repo.updatePasswordAndRevokeSessions(userId, newHash);
+    const tv = await this.repo.updatePasswordAndRevokeSessions(
+      userId,
+      newHash,
+      passwordChangeAuditEvent(claims, request),
+    );
     return this.tokens.issue({ ...claims, tv });
   }
 }

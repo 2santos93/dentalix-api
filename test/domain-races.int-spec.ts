@@ -12,6 +12,7 @@ import { TenantContextService } from '../src/shared/tenancy/tenant-context.servi
 import { PrismaStaffRepository } from '../src/modules/staff/infrastructure/repositories/prisma-staff.repository';
 import { UpdateStaffUseCase } from '../src/modules/staff/application/use-cases/update-staff.use-case';
 import { DeactivateStaffUseCase } from '../src/modules/staff/application/use-cases/deactivate-staff.use-case';
+import type { AuditRequestContext } from '../src/modules/audit/domain/audit-request-context';
 import { PrismaTreatmentPlanRepository } from '../src/modules/treatment-plans/infrastructure/repositories/prisma-treatment-plan.repository';
 import { PrismaPaymentRepository } from '../src/modules/payments/infrastructure/repositories/prisma-payment.repository';
 import {
@@ -102,6 +103,16 @@ describe('Carreras cerradas en una transacción (DX-042, int)', () => {
     return tenantContext.run(s.tenantId, fn);
   }
 
+  // DX-359: el evento de auditoría va en la transacción del cambio.
+  const ctx = (actorUserId: string): AuditRequestContext => ({
+    tenantId: s.tenantId,
+    locationId: null,
+    actor: { userId: actorUserId, role: ClinicRole.ADMIN },
+    requestId: null,
+    ip: null,
+    userAgent: null,
+  });
+
   describe('último ADMIN (DB-012)', () => {
     const staff = new PrismaStaffRepository(prisma, tenantContext);
     const update = new UpdateStaffUseCase(staff);
@@ -140,10 +151,10 @@ describe('Carreras cerradas en una transacción (DX-042, int)', () => {
         const [a, b] = await twoAdmins(round);
         const results = await Promise.allSettled([
           inTenant(() =>
-            update.execute({ userId: a, role: ClinicRole.DENTIST }),
+            update.execute({ userId: a, role: ClinicRole.DENTIST }, ctx(b)),
           ),
           inTenant(() =>
-            update.execute({ userId: b, role: ClinicRole.DENTIST }),
+            update.execute({ userId: b, role: ClinicRole.DENTIST }, ctx(a)),
           ),
         ]);
 
@@ -159,10 +170,10 @@ describe('Carreras cerradas en una transacción (DX-042, int)', () => {
         const [a, b] = await twoAdmins(100 + round);
         const results = await Promise.allSettled([
           inTenant(() =>
-            deactivate.execute({ userId: a, requestingUserId: b }),
+            deactivate.execute({ userId: a, requestingUserId: b }, ctx(b)),
           ),
           inTenant(() =>
-            deactivate.execute({ userId: b, requestingUserId: a }),
+            deactivate.execute({ userId: b, requestingUserId: a }, ctx(a)),
           ),
         ]);
 
@@ -174,8 +185,12 @@ describe('Carreras cerradas en una transacción (DX-042, int)', () => {
     it('una degradación y una desactivación concurrentes dejan 1 ADMIN', async () => {
       const [a, b] = await twoAdmins(200);
       await Promise.allSettled([
-        inTenant(() => update.execute({ userId: a, role: ClinicRole.DENTIST })),
-        inTenant(() => deactivate.execute({ userId: b, requestingUserId: a })),
+        inTenant(() =>
+          update.execute({ userId: a, role: ClinicRole.DENTIST }, ctx(b)),
+        ),
+        inTenant(() =>
+          deactivate.execute({ userId: b, requestingUserId: a }, ctx(a)),
+        ),
       ]);
       expect(await activeAdmins()).toBe(1);
     });
