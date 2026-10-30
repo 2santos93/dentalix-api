@@ -47,6 +47,10 @@ model Tenant {
   prescriptionRequireClinicalRecordNumber Boolean @default(false)
   /// DX-324: días que vale la receta desde la fecha de inicio. CHECK 1..365. 30 de plataforma.
   prescriptionValidityDays                Int     @default(30)
+  /// DX-374: de dónde sale la tasa de cambio del día de la clínica: el
+  /// proveedor (AUTOMATIC, lo de siempre) o las tasas manuales que registra
+  /// el ADMIN (MANUAL). Lo cambia el ADMIN (PUT /exchange/settings, auditado).
+  exchangeRateSource        ExchangeRateSource              @default(AUTOMATIC)
   createdAt                 DateTime                        @default(now())
   updatedAt                 DateTime                        @updatedAt
   deletedAt                 DateTime?
@@ -126,6 +130,8 @@ model Tenant {
   // DX-316: calendario de días hábiles y festivos de cada sede.
   locationWorkingCalendars  LocationWorkingCalendar[]
   locationHolidays          LocationHoliday[]
+  // DX-374: tasas de cambio manuales de la clínica.
+  manualExchangeRates       ManualExchangeRate[]
 
   @@map("tenants")
 }
@@ -363,6 +369,8 @@ model ClinicMembership {
   locations           MembershipLocation[]
   // DX-050: procedimientos del plan que realizó.
   performedPlanItems  TreatmentPlanItem[]
+  // DX-374: tasas de cambio manuales que registró.
+  manualExchangeRates ManualExchangeRate[]
 
   // PARTIAL unique (WHERE "deletedAt" IS NULL) — a soft-deleted membership must
   // NOT block re-adding the same user. The predicate lives in migration
@@ -1866,6 +1874,44 @@ model ExchangeRateSnapshot {
   @@map("exchange_rate_snapshots")
 }
 
+/// DX-374: de dónde sale la tasa de cambio del día de una clínica.
+enum ExchangeRateSource {
+  /// Del proveedor externo, cacheada en `exchange_rate_snapshots` (lo de siempre).
+  AUTOMATIC
+  /// De `manual_exchange_rates`: la que registra la clínica para cada día.
+  MANUAL
+}
+
+/// DX-374: tasa de cambio que la clínica fija para un día civil y una moneda,
+/// en unidades de `currency` por 1 USD (la misma base que
+/// `exchange_rate_snapshots`). Una por (clínica, día, moneda) y no se
+/// sobrescribe: la app solo tiene SELECT e INSERT. RLS FORCE por tenant; la FK
+/// compuesta al autor exige que sea miembro de la MISMA clínica, como la
+/// atribución de DX-050.
+model ManualExchangeRate {
+  id                    String   @id @default(uuid(7)) @db.Uuid
+  tenantId              String   @db.Uuid
+  /// Día civil de la tasa. CHECK 2000-01-01..2100-12-31.
+  date                  DateTime @db.Date
+  /// ISO 4217, de `currencies`; nunca USD (es la base). CHECK.
+  currency              String
+  /// Unidades de `currency` por 1 USD. CHECK > 0; hasta 8 decimales.
+  rate                  Decimal  @db.Decimal(18, 8)
+  createdById           String   @db.Uuid
+  createdByMembershipId String   @db.Uuid
+  createdAt             DateTime @default(dbgenerated("timezone('UTC'::text, now())"))
+
+  tenant      Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade, map: "manual_exchange_rates_tenantId_fkey")
+  currencyRef Currency         @relation(fields: [currency], references: [code], onDelete: Restrict, map: "manual_exchange_rates_currency_fkey")
+  createdBy   ClinicMembership @relation(fields: [tenantId, createdByMembershipId, createdById], references: [tenantId, id, userId], onDelete: Restrict, map: "manual_exchange_rates_created_by_fkey")
+
+  /// Una tasa por clínica, día y moneda. También sirve la lectura por
+  /// (clínica, día) y la lista de las últimas (recorrido hacia atrás).
+  @@unique([tenantId, date, currency], map: "manual_exchange_rates_tenant_date_currency_key")
+  @@index([tenantId, createdByMembershipId, createdById], map: "manual_exchange_rates_created_by_idx")
+  @@map("manual_exchange_rates")
+}
+
 // Catálogos de referencia GLOBALES (moneda/país/ciudad). Misma excepción que
 // ExchangeRateSnapshot: sin tenantId, sin RLS, sin deletedAt. Currency es
 // además la whitelist de códigos ISO 4217 aceptados en planes/abonos.
@@ -1897,6 +1943,8 @@ model Currency {
   paymentPlanAmounts         PaymentPlanAmount[]
   // GLOBAL-G1 (DX-313): sedes con esa moneda.
   locations                  Location[]
+  // DX-374: tasas manuales de las clínicas en esa moneda.
+  manualExchangeRates        ManualExchangeRate[]
 
   @@map("currencies")
 }
@@ -2804,6 +2852,8 @@ enum AuditResourceType {
   CLINIC_SETTINGS
   // DX-316: calendario de la sede (días hábiles, festivos e importaciones).
   LOCATION_CALENDAR
+  // DX-374: tasa de cambio manual registrada por el ADMIN.
+  EXCHANGE_RATE
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o
