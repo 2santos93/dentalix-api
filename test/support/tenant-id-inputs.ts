@@ -129,6 +129,11 @@ export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
     'anesthesia.e2e-spec.ts',
   'POST /patients/:patientId/clinical-entries/:entryId/anesthesia/check body.anestheticId':
     'anesthesia.e2e-spec.ts',
+  // DX-407: «un consentimiento o un monitor de otra clínica no se acepta».
+  'POST /patients/:patientId/clinical-entries/:entryId/sedation body.consentId':
+    'sedation.e2e-spec.ts',
+  'POST /patients/:patientId/clinical-entries/:entryId/sedation/discharge body.monitorId':
+    'sedation.e2e-spec.ts',
   // DX-377: «un medio de pago de otra clínica no se acepta (400)».
   'POST /treatment-plans/:id/payments body.paymentMethodId':
     'payment-methods.e2e-spec.ts',

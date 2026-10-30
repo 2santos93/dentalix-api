@@ -287,6 +287,13 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(firstCounts.medical_history_reviews).toBe(1);
     expect(firstCounts.clinical_entries).toBeGreaterThanOrEqual(10);
     expect(firstCounts.clinical_entry_addenda).toBeGreaterThanOrEqual(1);
+    // DX-407: una hoja de sedación completa: checklist, N2O, 1 toma basal,
+    // 3 intraoperatorias y la del alta, y el egreso.
+    expect(firstCounts.sedation_records).toBe(1);
+    expect(firstCounts.sedation_checklists).toBe(1);
+    expect(firstCounts.sedation_agent_administrations).toBe(1);
+    expect(firstCounts.sedation_vitals).toBe(5);
+    expect(firstCounts.sedation_discharges).toBe(1);
     expect(firstCounts.tooth_records).toBeGreaterThanOrEqual(10);
     // DX-120: dentición mixta de la paciente infantil (3 posiciones).
     expect(firstCounts.patient_dentition_events).toBe(3);

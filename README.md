@@ -4646,6 +4646,60 @@ MEDICAL_HISTORY` con `reason: ANESTHESIA_DOSE_CHECK`).
 - **Demo**: `seed:demo` carga los sugeridos y una exodoncia de la paciente
   infantil (Sofía, 32 kg) con 2 carpules de lidocaína (72 de 224 mg, 32 %).
 
+## Hoja de sedación consciente en la evolución (DX-407)
+
+Módulo `sedation` (porción 2 de DX-307); reglas en
+`src/modules/sedation/domain/sedation-rules.ts` (versión `SEDATION_RULES_V1`)
+y plantilla en `domain/sedation-template.ts`. Contenido de la hoja de la AAPD
+(2024) y la guía de la ADA (2025): dentalix-docs, `INVESTIGACION.md`,
+«Matriz 93».
+
+- **Plantilla de plataforma** (`SEDATION_PLATFORM_V1`), fija en el código y
+  servida por el puerto `SEDATION_TEMPLATE_SOURCE`: valoración obligatoria
+  (ASA, ayuno, Mallampati, peso, talla, acompañante, consentimiento), 6 ítems
+  de checklist (5 obligatorios), constantes obligatorias (SpO₂, FC, TA, FR,
+  nivel de sedación; CO₂ opcional), intervalo de constantes de **5 min**, 6
+  criterios de alta y Aldrete modificado ≥ 9. Cada hoja guarda la versión y el
+  intervalo; el checklist y el egreso copian los textos. DX-409 la sustituirá
+  por la plantilla de cada clínica implementando el mismo puerto.
+- **Tablas** (las cinco inalterables con el trigger de DX-038, fecha del
+  servidor, sin DELETE/TRUNCATE para la app, RLS FORZADA y FK compuestas):
+  `sedation_records` (una por evolución: grado, ASA I–V + E, interconsulta o
+  justificación con ASA ≥ III, ayuno en h, Mallampati, peso, talla, IMC y
+  reversores calculados —naloxona 0,1 mg/kg máx. 2 mg; flumazenil 0,01 mg/kg
+  máx. 0,2 mg—, acompañante, consentimiento y, si se cita, el `patient_consents`
+  firmado del MISMO paciente), `sedation_checklists` (uno por hoja; hora del
+  servidor y autor), `sedation_agent_administrations` (N₂O con % y flujo, oral
+  u otro con dosis, unidad, vía, hora y autor), `sedation_vitals` (basal,
+  intraoperatoria o al alta) y `sedation_discharges` (uno por hoja; criterios
+  o Aldrete, la toma al alta por FK de la MISMA hoja, hora, a quién se
+  entrega, indicaciones entregadas, operador = quien lo firma, monitor).
+- **Reglas**: lo que falta responde 400 con `problems: [{code, message}]`.
+  Orden: valoración → checklist (antes solo la toma basal) → fármacos y
+  tomas → egreso, que cierra la hoja (luego todo es 409). En sedación moderada,
+  operador = monitor exige justificación. `watch` (en cada respuesta): con la
+  sedación en curso, `nextDueAt` = última toma (o inicio) + intervalo y
+  `overdue` si pasa sin toma; `missedIntervals` cuenta los huecos pasados.
+  Cada escritura bloquea la hoja (`FOR UPDATE`).
+- **Roles**: valoración, checklist, fármacos y egreso, DENTIST y ADMIN; las
+  tomas, también ASSISTANT (en esta porción en todas las clínicas; DX-409 lo
+  hará configurable); leer, los tres; recepción, nada. Sede restringida
+  (DX-089): 403 en la evolución y fuera de la ficha.
+- **Rutas**: `GET /patients/:id/sedation` (ficha),
+  `GET|POST /patients/:id/clinical-entries/:entryId/sedation` (hoja y
+  plantilla / valoración) y `POST …/sedation/{checklist,agents,vitals,discharge}`;
+  `PATCH/PUT/DELETE …/sedation` → 405 que remite a la adenda. Auditoría:
+  `CREATE SEDATION_RECORD` con `metadata.reason` `SEDATION_ASSESSMENT|
+CHECKLIST|AGENT|VITALS|DISCHARGE`, sin constantes, dosis ni textos.
+- **Migraciones** `20261104130300_dx407_enums`,
+  `…130400_dx407_audit_events_idx` y `…130500_dx407_sedation`: aditivas
+  (tipos, cinco tablas y el único `patient_consents (tenantId, patientId, id)`
+  que sirve de destino a la FK del consentimiento).
+- **Demo**: `seed:demo` añade a Sofía (32 kg) una evolución «Restauraciones
+  bajo sedación con óxido nitroso» con la hoja completa (N₂O 30 %, 1 toma
+  basal, 3 intraoperatorias cada 5 min y egreso con el asistente como
+  monitor).
+
 ## Imputación de abonos a ítems (DX-051)
 
 Cada abono a un plan se reparte entre los ítems `DONE` y `ACCEPTED` del plan

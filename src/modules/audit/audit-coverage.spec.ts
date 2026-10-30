@@ -52,6 +52,7 @@ import { StaffController } from '../staff/presentation/staff.controller';
 import { ClinicalNoteTemplatesController } from '../clinical-note-templates/presentation/clinical-note-templates.controller';
 import { AnesthesiaController } from '../anesthesia/presentation/anesthesia.controller';
 import { AnestheticsController } from '../anesthesia/presentation/anesthetics.controller';
+import { SedationController } from '../sedation/presentation/sedation.controller';
 import { DomainsController } from '../domains/presentation/domains.controller';
 import { PostOpTemplatesController } from '../post-op-instructions/presentation/post-op-templates.controller';
 import { AppointmentPostOpController } from '../post-op-instructions/presentation/appointment-post-op.controller';
@@ -349,6 +350,54 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: RES,
     patient: P,
     anesthesiaSafety: true,
+  },
+  // DX-407: hoja de sedación. Cada parte es un CREATE de la hoja con un
+  // código que la distingue; ni constantes, ni dosis, ni textos.
+  'GET /patients/:patientId/sedation': {
+    action: 'VIEW',
+    resource: 'SEDATION_RECORD',
+    patient: P,
+  },
+  'GET /patients/:patientId/clinical-entries/:entryId/sedation': {
+    action: 'VIEW',
+    resource: 'SEDATION_RECORD',
+    resourceId: { param: 'entryId' },
+    patient: P,
+  },
+  'POST /patients/:patientId/clinical-entries/:entryId/sedation': {
+    action: 'CREATE',
+    resource: 'SEDATION_RECORD',
+    resourceId: RES,
+    patient: P,
+    reason: 'SEDATION_ASSESSMENT',
+  },
+  'POST /patients/:patientId/clinical-entries/:entryId/sedation/checklist': {
+    action: 'CREATE',
+    resource: 'SEDATION_RECORD',
+    resourceId: RES,
+    patient: P,
+    reason: 'SEDATION_CHECKLIST',
+  },
+  'POST /patients/:patientId/clinical-entries/:entryId/sedation/agents': {
+    action: 'CREATE',
+    resource: 'SEDATION_RECORD',
+    resourceId: RES,
+    patient: P,
+    reason: 'SEDATION_AGENT',
+  },
+  'POST /patients/:patientId/clinical-entries/:entryId/sedation/vitals': {
+    action: 'CREATE',
+    resource: 'SEDATION_RECORD',
+    resourceId: RES,
+    patient: P,
+    reason: 'SEDATION_VITALS',
+  },
+  'POST /patients/:patientId/clinical-entries/:entryId/sedation/discharge': {
+    action: 'CREATE',
+    resource: 'SEDATION_RECORD',
+    resourceId: RES,
+    patient: P,
+    reason: 'SEDATION_DISCHARGE',
   },
   // DX-307: catálogo de anestésicos (sin paciente); desactivar es un PATCH.
   'POST /anesthetics': {
@@ -1414,6 +1463,12 @@ const KNOWN_UNAUDITED: Record<string, string> = {
     'siempre rechaza: la anestesia registrada no se edita (DX-307)',
   'DELETE /patients/:patientId/clinical-entries/:entryId/anesthesia/:id':
     'siempre rechaza: la anestesia registrada no se borra (DX-307)',
+  'PATCH /patients/:patientId/clinical-entries/:entryId/sedation':
+    'siempre rechaza: la hoja de sedación no se edita (DX-407)',
+  'PUT /patients/:patientId/clinical-entries/:entryId/sedation':
+    'siempre rechaza: la hoja de sedación no se edita (DX-407)',
+  'DELETE /patients/:patientId/clinical-entries/:entryId/sedation':
+    'siempre rechaza: la hoja de sedación no se borra (DX-407)',
 
   // --- Sesión y cuenta propia ---------------------------------------------
   'POST /auth/register': 'pide el enlace de verificación; aún no hay clínica',
@@ -1472,6 +1527,7 @@ const CONTROLLERS: Type[] = [
   ClinicalEntriesController,
   AnesthesiaController,
   AnestheticsController,
+  SedationController,
   DentalCatalogController,
   PriceListsController,
   AgreementsController,

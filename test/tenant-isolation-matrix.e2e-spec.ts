@@ -3086,6 +3086,27 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     'DELETE /patients/:patientId/clinical-entries/:entryId/anesthesia/:id':
       'anesthesia.e2e-spec.ts',
     'PATCH /anesthetics/:id': 'anesthesia.e2e-spec.ts',
+    // DX-407: paciente/evolución de otra clínica → 404; las ediciones
+    // responden siempre 405 (inalterable).
+    'GET /patients/:patientId/sedation': 'sedation.e2e-spec.ts',
+    'GET /patients/:patientId/clinical-entries/:entryId/sedation':
+      'sedation.e2e-spec.ts',
+    'POST /patients/:patientId/clinical-entries/:entryId/sedation':
+      'sedation.e2e-spec.ts',
+    'POST /patients/:patientId/clinical-entries/:entryId/sedation/checklist':
+      'sedation.e2e-spec.ts',
+    'POST /patients/:patientId/clinical-entries/:entryId/sedation/agents':
+      'sedation.e2e-spec.ts',
+    'POST /patients/:patientId/clinical-entries/:entryId/sedation/vitals':
+      'sedation.e2e-spec.ts',
+    'POST /patients/:patientId/clinical-entries/:entryId/sedation/discharge':
+      'sedation.e2e-spec.ts',
+    'PATCH /patients/:patientId/clinical-entries/:entryId/sedation':
+      'sedation.e2e-spec.ts',
+    'PUT /patients/:patientId/clinical-entries/:entryId/sedation':
+      'sedation.e2e-spec.ts',
+    'DELETE /patients/:patientId/clinical-entries/:entryId/sedation':
+      'sedation.e2e-spec.ts',
     // DX-377: la clínica B no edita el medio de pago de A (404).
     'PATCH /payment-methods/:id': 'payment-methods.e2e-spec.ts',
     // DX-214: recepción consulta avisos de A; administrador de B obtiene 404

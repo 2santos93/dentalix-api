@@ -373,3 +373,18 @@ export const ANESTHESIA_WRITE_ROLES: ClinicRole[] = [
   ClinicRole.ADMIN,
 ];
 export const ANESTHETIC_CATALOG_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+
+// Hoja de sedación en la evolución (DX-407) — valoración previa, checklist,
+// fármacos y egreso: quien seda (odontólogo) y gestión. Las tomas de
+// constantes, además, la asistente que monitoriza. En esta porción la
+// asistente las registra en todas las clínicas; DX-409 lo hará configurable
+// por clínica. Leer la hoja: CLINICAL_ROLES; recepción, nada.
+export const SEDATION_WRITE_ROLES: ClinicRole[] = [
+  ClinicRole.DENTIST,
+  ClinicRole.ADMIN,
+];
+export const SEDATION_VITALS_ROLES: ClinicRole[] = [
+  ClinicRole.DENTIST,
+  ClinicRole.ADMIN,
+  ClinicRole.ASSISTANT,
+];
