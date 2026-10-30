@@ -82,7 +82,11 @@ jobs:
         run: npx tsc --noEmit
       - name: Unit (npm test)
         if: ${{ !cancelled() && steps.prisma.outcome == 'success' }}
-        run: npm test
+        # PR29: experimento serial; la contención de recursos no está demostrada.
+        run: |
+          node --version
+          node -p '"CPU disponibles (availableParallelism): " + require("node:os").availableParallelism()'
+          /usr/bin/time -v npm test -- --runInBand
       - name: Build
         id: build
         if: ${{ !cancelled() && steps.prisma.outcome == 'success' }}
