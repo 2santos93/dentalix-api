@@ -51,6 +51,9 @@ model Tenant {
   /// proveedor (AUTOMATIC, lo de siempre) o las tasas manuales que registra
   /// el ADMIN (MANUAL). Lo cambia el ADMIN (PUT /exchange/settings, auditado).
   exchangeRateSource        ExchangeRateSource              @default(AUTOMATIC)
+  /// DX-374: día civil (sede principal) desde el que rige la fuente MANUAL;
+  /// los anteriores siguen con la automática. NULL con AUTOMATIC (CHECK).
+  manualExchangeRatesSince  DateTime?                       @db.Date
   createdAt                 DateTime                        @default(now())
   updatedAt                 DateTime                        @updatedAt
   deletedAt                 DateTime?
