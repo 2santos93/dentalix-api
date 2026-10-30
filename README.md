@@ -4697,7 +4697,7 @@ y plantilla en `domain/sedation-template.ts`. Contenido de la hoja de la AAPD
   `PATCH/PUT/DELETE …/sedation` → 405 que remite a la adenda. Auditoría:
   `CREATE SEDATION_RECORD` con `metadata.reason` `SEDATION_ASSESSMENT|
 CHECKLIST|AGENT|VITALS|DISCHARGE`, sin constantes, dosis ni textos.
-- **Migraciones** `20261105130000_dx407_enums`,
+- **Migraciones** `20261105140000_dx407_enums`,
   `…130100_dx407_audit_events_idx` y `…130200_dx407_sedation`: aditivas
   (tipos, cinco tablas y el único `patient_consents (tenantId, patientId, id)`
   que sirve de destino a la FK del consentimiento).
