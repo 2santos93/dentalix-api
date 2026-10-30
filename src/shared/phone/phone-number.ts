@@ -70,6 +70,17 @@ function digitValue(digit: string): string {
 const asciiDigits = (text: string): string =>
   text.normalize('NFKC').replace(DECIMAL_DIGIT, digitValue).trim();
 
+/**
+ * El número sin la extensión del final (`ext. 3`, `x3`, `extensión 3`,
+ * `#3`; pre-flight m2) y la extensión tal cual se escribió, o `''`. El texto
+ * llega ya recortado y sin rachas largas de espacios (`EXTENSION` es
+ * cuadrático en ellas).
+ */
+export function splitExtension(text: string): { body: string; ext: string } {
+  const ext = EXTENSION.exec(text)?.[0] ?? '';
+  return { body: text.slice(0, text.length - ext.length), ext };
+}
+
 export function phoneRegions(): readonly PhoneRegion[] {
   return getCountries();
 }
@@ -147,8 +158,7 @@ export function readPhone(
   if (!raw || raw.length > MAX_LENGTH) return { kind: 'NONE' };
   const trimmed = asciiDigits(raw);
   if (!trimmed || trimmed.length > MAX_LENGTH) return { kind: 'NONE' };
-  const ext = EXTENSION.exec(trimmed)?.[0] ?? '';
-  const body = trimmed.slice(0, trimmed.length - ext.length);
+  const { body, ext } = splitExtension(trimmed);
   if (NOT_A_PHONE.test(body)) return { kind: 'NONE' };
   const region = phoneRegionOrNull(defaultRegion) as CountryCode | null;
   const digits = body.replace(/\D/g, '');

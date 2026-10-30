@@ -16,7 +16,10 @@ import {
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
-import { whatsAppDigits } from '../../../shared/phone/phone-number';
+import {
+  phoneRegionOrNull,
+  whatsAppDigits,
+} from '../../../shared/phone/phone-number';
 import {
   minimumVisitDate,
   RESERVED_APPOINTMENT_STATUSES,
@@ -312,7 +315,7 @@ export class PlanVisitsService {
               },
               select: { id: true, defaultPhoneRegion: true },
             })
-          ).map((l) => [l.id, l.defaultPhoneRegion]),
+          ).map((l) => [l.id, phoneRegionOrNull(l.defaultPhoneRegion)]),
         );
         const items = page.map((plan) => {
           const nextVisit = plan.items[0].visit;

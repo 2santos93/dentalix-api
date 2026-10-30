@@ -147,7 +147,6 @@ export class PrismaAppointmentConfirmationRepository implements AppointmentConfi
       status: a.status,
       patientFirstName: a.patient.firstName,
       patientPhone: a.patient.phone,
-
       providerName: membership?.user.fullName ?? null,
       locationId: a.locationId,
       locationName: a.location.name,

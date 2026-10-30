@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma, TreatmentPlanItemStatus } from '@prisma/client';
+import { phoneRegionOrNull } from '../../../../shared/phone/phone-number';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import type {
@@ -209,7 +210,13 @@ export class PrismaPlanOptionsRepository implements PlanOptionsRepository {
            LIMIT ${query.pageSize} OFFSET ${offset}`;
         return {
           total,
-          rows: rows.map((row) => ({ ...row, total: row.total.toNumber() })),
+          rows: rows.map((row) => ({
+            ...row,
+            presentedLocationPhoneRegion: phoneRegionOrNull(
+              row.presentedLocationPhoneRegion,
+            ),
+            total: row.total.toNumber(),
+          })),
         };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },

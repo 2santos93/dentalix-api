@@ -11,6 +11,7 @@ import {
 } from '../../patients/domain/legacy-doc-type';
 import {
   readPhone,
+  splitExtension,
   type PhoneRegion,
 } from '../../../shared/phone/phone-number';
 import type { ResolvedMapping } from './column-mapping';
@@ -249,7 +250,12 @@ export function normalizePhone(
 ): { value: string } | { error: string } {
   const text = raw.trim().replace(/\s+/g, ' ');
   const digits = text.replace(/\D/g, '');
-  if (/[a-z]/i.test(text.replace(/\b(ext|extension|ext\.)\b.*$/i, ''))) {
+  // Fuera de la extensión no puede haber letras. La extensión se reconoce
+  // como en el adaptador (`x3`, `extensión 3`…) o como antes de DX-329.
+  if (
+    /\p{L}/u.test(splitExtension(text).body) &&
+    /[a-z]/i.test(text.replace(/\b(ext|extension|ext\.)\b.*$/i, ''))
+  ) {
     return {
       error:
         'Teléfono no válido: solo dígitos, espacios, guiones, paréntesis y «+».',
@@ -262,8 +268,10 @@ export function normalizePhone(
     };
   }
   const reading = readPhone(text, defaultRegion);
-  if (reading.kind === 'VALID' && !reading.phone.ext) {
-    return { value: reading.phone.e164 };
+  // Con extensión, tal cual: la extensión no se pierde, y sus dígitos no
+  // cuentan para el largo de un número válido.
+  if (reading.kind === 'VALID') {
+    return { value: reading.phone.ext ? text : reading.phone.e164 };
   }
   if (digits.length >= 7 && digits.length <= 15) return { value: text };
   return { error: 'Teléfono no válido: debe tener entre 7 y 15 dígitos.' };

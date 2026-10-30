@@ -193,7 +193,19 @@ describe('normalización de campos', () => {
     });
     expect(normalizePhone('+58 212 5551234 ext. 12', null)).toEqual({
       value: '+58 212 5551234 ext. 12',
+    }); // 12 dígitos del número más 4 de la extensión: válido, tal cual.
+    expect(normalizePhone('+58 212 5551234 ext 1234', null)).toEqual({
+      value: '+58 212 5551234 ext 1234',
     });
+    // La extensión se reconoce como en el adaptador.
+    expect(normalizePhone('0212-5551234 x3', 'VE')).toEqual({
+      value: '0212-5551234 x3',
+    });
+    expect(normalizePhone('0212-5551234 extensión 3', 'VE')).toEqual({
+      value: '0212-5551234 extensión 3',
+    });
+    // Una letra fuera de la extensión sigue siendo un error.
+    expect(normalizePhone('0212-5551234 casa', 'VE')).toHaveProperty('error');
   });
 });
 

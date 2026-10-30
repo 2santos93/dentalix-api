@@ -354,6 +354,54 @@ describe('Baja de recordatorios por mensaje entrante (DX-128, para DX-126)', () 
     });
   });
 
+  // La librería no da por válidos estos números guardados (un 0 que el
+  // número no lleva); la lectura de antes sí los casaba (R8).
+  it.each([
+    ['CO', '03211234567', '573211234567'],
+    ['ES', '0612345678', '34612345678'],
+    ['US', '02015550123', '12015550123'],
+    ['MX', '02221234567', '522221234567'],
+  ])(
+    'an opt-out reply matches a stored national number with a stray leading 0 (%s)',
+    async (region, stored, fromPhone) => {
+      repo.regions = [region];
+      repo.addPatient(PEDRO, { phone: stored });
+      await expect(
+        useCase.execute({ tenantId: TENANT, fromPhone, text: 'BAJA' }),
+      ).resolves.toEqual({ isOptOut: true, optedOut: [PEDRO] });
+    },
+  );
+
+  it('the previous reading never replaces the library reading', async () => {
+    // Con la región, la librería conserva el 0 (+39 06…); la lectura de
+    // antes lo quitaba (+39 6…), que es otro número.
+    repo.regions = ['IT'];
+    repo.addPatient(PEDRO, { phone: '06 1234 5678' });
+    await expect(
+      useCase.execute({
+        tenantId: TENANT,
+        fromPhone: '390612345678',
+        text: 'BAJA',
+      }),
+    ).resolves.toEqual({ isOptOut: true, optedOut: [PEDRO] });
+  });
+
+  it('the location regions are read only when the tail has candidates', async () => {
+    const regions = jest.spyOn(repo, 'liveLocationPhoneRegions');
+    await useCase.execute({
+      tenantId: TENANT,
+      fromPhone: '573009999999',
+      text: 'BAJA',
+    });
+    expect(regions).not.toHaveBeenCalled();
+    await useCase.execute({
+      tenantId: TENANT,
+      fromPhone: '573101234567',
+      text: 'BAJA',
+    });
+    expect(regions).toHaveBeenCalledTimes(1);
+  });
+
   it('an opt-out reply from a fixed line opts the patient out', async () => {
     repo.regions = ['VE'];
     repo.addPatient(PEDRO, { phone: '0212-5551234' });

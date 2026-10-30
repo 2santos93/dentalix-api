@@ -10,8 +10,10 @@ import {
 } from '../../../appointment-confirmations/application/confirmation-token';
 import { RecordAuditEventUseCase } from '../../../audit/application/record-audit-event.use-case';
 import {
+  callingCodeOf,
   parsePhone,
   phoneReadings,
+  type CountryCode,
   type PhoneRegion,
 } from '../../../../shared/phone/phone-number';
 import {
@@ -198,10 +200,26 @@ function senderE164(digits: string): string | null {
 }
 
 /**
+ * La lectura de antes de DX-329 de un número nacional con el indicativo de
+ * una región: sin todos los `0` iniciales y con el indicativo delante (sin
+ * repetirlo si ya venía escrito). Solo sirve para casar una baja, nunca para
+ * guardar ni para enviar: así darse de baja nunca es más difícil que antes
+ * (R8), aunque la librería no dé el número por válido.
+ */
+function previousNationalReading(digits: string, region: PhoneRegion): string {
+  const code = callingCodeOf(region as CountryCode);
+  const national = digits.replace(/^0+/, '');
+  return national.startsWith(code) && national.length - code.length >= 8
+    ? `+${national}`
+    : `+${code}${national}`;
+}
+
+/**
  * ¿El número guardado es el del remitente? (DX-329, R8, pre-flight I7) Lo es
  * si se guardó con `+` o `00` y sus dígitos son exactamente los del
- * remitente, o si alguna lectura con la región de alguna sede viva (las dos,
- * si es ambiguo) da su E.164.
+ * remitente; si alguna lectura con la región de alguna sede viva (las dos,
+ * si es ambiguo) da su E.164; o, sin `+` ni `00`, si lo da la lectura de
+ * antes con el indicativo de alguna de esas regiones.
  */
 function storedPhoneMatches(
   stored: string,
@@ -216,8 +234,17 @@ function storedPhoneMatches(
       ? digits.slice(2)
       : null;
   if (international !== null && `+${international}` === from) return true;
-  return [null, ...regions].some((region) =>
-    phoneReadings(stored, region).includes(from),
+  if (
+    [null, ...regions].some((region) =>
+      phoneReadings(stored, region).includes(from),
+    )
+  ) {
+    return true;
+  }
+  return (
+    international === null &&
+    !/[a-z]/i.test(text) &&
+    regions.some((region) => previousNationalReading(digits, region) === from)
   );
 }
 
@@ -255,8 +282,10 @@ export class OptOutByMessageUseCase {
     if (!from) return { isOptOut: true, optedOut: [] };
 
     return this.tenantContext.run(reply.tenantId, async () => {
-      const regions = await this.repo.liveLocationPhoneRegions();
       const candidates = await this.repo.findByPhoneTail(digits.slice(-8));
+      const regions = candidates.length
+        ? await this.repo.liveLocationPhoneRegions()
+        : [];
       const matches = candidates.filter((c) =>
         storedPhoneMatches(c.phone, from, regions),
       );

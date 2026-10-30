@@ -119,6 +119,27 @@ describe('Bloque «Comunicaciones» de la ficha (DX-128)', () => {
       });
     });
 
+    it("saving no longer falls back to the patient's country", async () => {
+      repo.region = null;
+      repo.add(ANA, { countryCode: 'ES' });
+      await expect(
+        update.execute(
+          ANA,
+          { phone: '612 34 56 78', contactChannel: 'WHATSAPP' },
+          ctx,
+        ),
+      ).rejects.toThrow(BadRequestException);
+      expect(repo.updates).toEqual([]);
+      await expect(
+        update.execute(ANA, { phone: '612 34 56 78' }, ctx),
+      ).resolves.toMatchObject({
+        phone: '612 34 56 78',
+        phoneE164: null,
+        phoneStatus: 'INVALID',
+      });
+      expect(repo.updates.at(-1)).toEqual({ phone: '612 34 56 78' });
+    });
+
     it('the communication view gives the international format and the region used', async () => {
       repo.region = 'VE';
       repo.add(ANA, { phone: '0412-1234567' });
