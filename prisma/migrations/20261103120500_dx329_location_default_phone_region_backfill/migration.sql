@@ -23,7 +23,7 @@
 -- Idempotente: solo toca las sedes sin región y sin marca, así que nunca
 -- pisa una región que eligió o vació un ADMIN. Si se corta a mitad (las
 -- clínicas hechas quedan), basta con repetirla (`prisma migrate resolve
--- --rolled-back 20261103120100_dx329_location_default_phone_region_backfill`
+-- --rolled-back 20261103120500_dx329_location_default_phone_region_backfill`
 -- y `deploy`).
 DO $$
 DECLARE

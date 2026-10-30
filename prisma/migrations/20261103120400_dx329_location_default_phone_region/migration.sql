@@ -23,7 +23,7 @@
 -- (pequeña, columna vacía) bajo el ACCESS EXCLUSIVE breve del ALTER.
 -- lock_timeout 5 s: si una transacción larga lo retiene, falla limpia; para
 -- reintentar, `npx prisma migrate resolve --rolled-back
--- 20261103120000_dx329_location_default_phone_region` y de nuevo el deploy.
+-- 20261103120400_dx329_location_default_phone_region` y de nuevo el deploy.
 -- RLS FORCE no se toca.
 
 SET LOCAL lock_timeout = '5s';
