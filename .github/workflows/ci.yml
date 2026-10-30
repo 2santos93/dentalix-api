@@ -198,7 +198,9 @@ jobs:
   e2e:
     name: E2E (Postgres 16)
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # PR29 / run 40949683123: 129 suites PASS (1110 s cronometrados), sin
+    # FAIL, antes de agotar los 20 min; margen para setup y carga SEC-046.
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:16
