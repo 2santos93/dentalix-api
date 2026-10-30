@@ -1,4 +1,9 @@
-import { exceedsPending, knownSplitTotal, splitTotal } from './split-payment';
+import {
+  exceedsPending,
+  excessOverPending,
+  knownSplitTotal,
+  splitTotal,
+} from './split-payment';
 import {
   splitPaymentRequestFingerprint,
   paymentRequestFingerprint,
@@ -20,6 +25,15 @@ describe('reglas del cobro dividido (DX-390)', () => {
     expect(exceedsPending(100.01, 100)).toBe(true);
     expect(exceedsPending(1, -50)).toBe(true);
     expect(exceedsPending(0, 0)).toBe(false);
+  });
+
+  // QA DX-390 (B2): un saldo a favor previo no se suma al excedente.
+  it('el excedente es lo que el cobro supera lo pendiente, con lo pendiente nunca bajo 0', () => {
+    expect(excessOverPending(300, 200)).toBe(100);
+    expect(excessOverPending(60_000, -15_000)).toBe(60_000);
+    expect(excessOverPending(100, 100)).toBe(0);
+    expect(excessOverPending(50, 100)).toBe(0);
+    expect(excessOverPending(0.3, 0.1)).toBe(0.2);
   });
 });
 

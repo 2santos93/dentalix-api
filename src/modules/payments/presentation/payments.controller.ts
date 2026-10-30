@@ -304,8 +304,9 @@ export class PaymentsController {
     description:
       'Plan rechazado o cancelado (DX-109). `code: PAYMENT_REFERENCE_DUPLICATE` con `line` (desde 0) ' +
       'si la referencia de una línea ya está en otro abono vivo de ±90 días: se confirma con su ' +
-      '`duplicateReferenceReason`. `code: SPLIT_PAYMENT_EXCEEDS_BALANCE` (con `total`, `pending` y ' +
-      '`currency`, la del plan) si el total supera lo pendiente: se confirma con `confirmCreditBalance`. ' +
+      '`duplicateReferenceReason`. `code: SPLIT_PAYMENT_EXCEEDS_BALANCE` (con `total`, `pending` —nunca bajo 0—, ' +
+      '`excess` —lo que este cobro supera lo pendiente— y `currency`, la del plan) si el total supera lo pendiente: ' +
+      'se confirma con `confirmCreditBalance`. ' +
       '`code: SPLIT_PAYMENT_BALANCE_CHANGED` si, sin esa confirmación, otro abono entró al plan mientras ' +
       'se registraba el cobro: no se registra nada y se repite la petición (misma clave). ' +
       'Sin caja abierta, si la clínica la exige para el efectivo (DX-027).',

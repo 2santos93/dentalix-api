@@ -2658,7 +2658,9 @@ moneda y parte por transferencia en otra: un solo cobro, un solo recibo.
   el total recalculado con ellas. Todas las líneas llevan su `receiptNumber`.
 - **Saldo a favor**: si el total en la moneda del plan (las líneas con tasa)
   supera lo pendiente, 409 `SPLIT_PAYMENT_EXCEEDS_BALANCE` con `total`,
-  `pending` y `currency`; se confirma con `confirmCreditBalance: true`. Lo
+  `pending` (nunca bajo 0: un saldo a favor previo cuenta como 0 pendiente),
+  `excess` (lo que este cobro supera lo pendiente, sin sumar el saldo a favor
+  previo) y `currency`; se confirma con `confirmCreditBalance: true`. Lo
   pendiente se lee fuera de la transacción, pero sin la confirmación la
   transacción bloquea el plan (FOR NO KEY UPDATE) y comprueba que no entró
   ningún abono al plan desde esa lectura: si entró (dos cobros a la vez), 409

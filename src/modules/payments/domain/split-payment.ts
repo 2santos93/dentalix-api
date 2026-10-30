@@ -64,7 +64,16 @@ export function knownSplitTotal(converted: (number | null)[]): number {
   );
 }
 
+/**
+ * Lo que `total` supera lo pendiente del plan (al céntimo), o 0. Lo pendiente
+ * nunca baja de 0: un saldo a favor previo no se suma al excedente de este
+ * cobro (QA DX-390). La web cuenta igual el aviso «supera lo pendiente en X».
+ */
+export function excessOverPending(total: number, pending: number): number {
+  return Math.max(0, toCents(total) - Math.max(0, toCents(pending))) / 100;
+}
+
 /** ¿Supera `total` lo pendiente del plan (al céntimo)? */
 export function exceedsPending(total: number, pending: number): boolean {
-  return toCents(total) > Math.max(0, toCents(pending));
+  return excessOverPending(total, pending) > 0;
 }

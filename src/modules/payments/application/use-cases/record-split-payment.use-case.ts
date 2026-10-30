@@ -27,6 +27,7 @@ import {
   SPLIT_PAYMENT_EXCEEDS_BALANCE,
   SPLIT_PAYMENT_EXCEEDS_BALANCE_MESSAGE,
   exceedsPending,
+  excessOverPending,
   knownSplitTotal,
   splitTotal,
 } from '../../domain/split-payment';
@@ -311,6 +312,7 @@ export class RecordSplitPaymentUseCase {
         currency: before.planCurrency,
         total: known,
         pending: Math.max(0, before.balance),
+        excess: excessOverPending(known, before.balance),
       });
     }
     const total = splitTotal(converted);

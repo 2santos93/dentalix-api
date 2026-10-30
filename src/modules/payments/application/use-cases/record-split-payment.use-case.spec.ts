@@ -345,6 +345,7 @@ describe('RecordSplitPaymentUseCase (DX-390)', () => {
       currency: 'COP',
       total: 300_000,
       pending: 200_000,
+      excess: 100_000,
     });
     expect(repo.lastSplitInput).toBeNull();
 
@@ -354,6 +355,23 @@ describe('RecordSplitPaymentUseCase (DX-390)', () => {
     );
     expect(result.total).toBe(300_000);
     expect(repo.lastSplitInput?.receiptPlanBalance?.balance).toBe(-100_000);
+  });
+
+  // QA DX-390 (B2): con saldo a favor previo, lo pendiente es 0 (no negativo)
+  // y el excedente es solo lo que ESTE cobro supera lo pendiente.
+  it('con saldo a favor previo, el 409 da pendiente 0 y el excedente es el total del cobro', async () => {
+    const { uc, balance } = makeUseCase();
+    balance.paid = 515_000; // saldo a favor previo de 15 000
+
+    const error = await uc
+      .execute('plan-1', twoLines())
+      .catch((e: unknown) => e);
+    expect((error as ConflictException).getResponse()).toMatchObject({
+      code: SPLIT_PAYMENT_EXCEEDS_BALANCE,
+      total: 300_000,
+      pending: 0,
+      excess: 300_000,
+    });
   });
 
   it('justo lo pendiente no pide confirmación', async () => {
