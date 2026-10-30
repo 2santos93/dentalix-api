@@ -177,6 +177,22 @@ describe('Medios de pago y referencia repetida (e2e, DX-377)', () => {
       .expect(404);
   });
 
+  it('un medio inicial no cambia de tipo base (400 en español); sí de nombre', async () => {
+    const list = await as(api().get('/api/v1/payment-methods'), a).expect(200);
+    const cash = (list.body as MethodBody[]).find(
+      (m) => m.legacyMethod === 'CASH',
+    )!;
+    const res = await as(api().patch(`/api/v1/payment-methods/${cash.id}`), a)
+      .send({ kind: 'CARD' })
+      .expect(400);
+    expect((res.body as { message: string }).message).toMatch(
+      /^El tipo base de un medio inicial no se puede cambiar/,
+    );
+    await as(api().patch(`/api/v1/payment-methods/${cash.id}`), a)
+      .send({ kind: 'CASH', name: 'Efectivo' })
+      .expect(200);
+  });
+
   it('sin referencia, un medio que la pide responde 400 en español', async () => {
     const res = await pay(a, {
       paymentMethodId: mobile.get(a.tenantId),

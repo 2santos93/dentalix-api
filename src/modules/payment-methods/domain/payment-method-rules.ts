@@ -23,6 +23,14 @@ export const DUPLICATE_PAYMENT_METHOD_NAME_MESSAGE =
   'Ya existe un medio de pago con ese nombre.';
 export const PAYMENT_METHODS_ADMIN_MESSAGE =
   'Solo un administrador puede gestionar los medios de pago.';
+/**
+ * Un medio inicial (con `legacyMethod`) es el que reciben los clientes y las
+ * réplicas anteriores que solo mandan `method`: su tipo base no puede cambiar,
+ * o un abono «en efectivo» de un cliente anterior se guardaría con otro
+ * método (el del tipo nuevo) y la caja lo contaría donde no es.
+ */
+export const INITIAL_KIND_LOCKED_MESSAGE =
+  'El tipo base de un medio inicial no se puede cambiar. Crea un medio nuevo con ese tipo y desactiva este si ya no lo usas.';
 export const REFERENCE_REQUIRED_MESSAGE =
   'Este medio de pago pide la referencia del pago.';
 export const REFERENCE_TOO_LONG_MESSAGE = `La referencia admite como mucho ${REFERENCE_MAX} caracteres.`;

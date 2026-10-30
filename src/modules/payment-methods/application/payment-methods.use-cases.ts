@@ -14,6 +14,7 @@ import {
 } from '../domain/ports/payment-method-repository.port';
 import {
   DUPLICATE_PAYMENT_METHOD_NAME_MESSAGE,
+  INITIAL_KIND_LOCKED_MESSAGE,
   PAYMENT_METHOD_NOT_FOUND_MESSAGE,
   paymentMethodNameError,
 } from '../domain/payment-method-rules';
@@ -85,6 +86,16 @@ export class UpdatePaymentMethodUseCase {
     input: Partial<PaymentMethodInput>,
     userId: string,
   ): Promise<ClinicPaymentMethodEntity> {
+    if (input.kind !== undefined) {
+      const current = await this.repo.findById(id);
+      if (!current) {
+        throw new NotFoundException(PAYMENT_METHOD_NOT_FOUND_MESSAGE);
+      }
+      // Un medio inicial conserva su tipo base (ver INITIAL_KIND_LOCKED_MESSAGE).
+      if (current.legacyMethod !== null && current.kind !== input.kind) {
+        throw new BadRequestException(INITIAL_KIND_LOCKED_MESSAGE);
+      }
+    }
     const data: PaymentMethodWriteInput = {
       kind: input.kind,
       active: input.active,

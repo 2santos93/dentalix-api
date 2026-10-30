@@ -113,7 +113,10 @@ export class PaymentMethodsController {
   @Roles(...PAYMENT_METHOD_WRITE_ROLES)
   @RolesDeniedMessage(PAYMENT_METHODS_ADMIN_MESSAGE)
   @ApiOkResponse({ type: PaymentMethodDto })
-  @ApiBadRequestResponse({ description: 'Campo inválido' })
+  @ApiBadRequestResponse({
+    description:
+      'Campo inválido, o cambio del tipo base de un medio inicial (DX-377).',
+  })
   @ApiNotFoundResponse({ description: 'Medio no encontrado en esta clínica' })
   @ApiConflictResponse({ description: 'Ya existe un medio con ese nombre' })
   @ApiForbiddenResponse({ description: 'Solo ADMIN' })
