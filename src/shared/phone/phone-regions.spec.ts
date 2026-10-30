@@ -7,7 +7,7 @@ import { PHONE_REGIONS } from '../../../prisma/reference/phone-regions';
 const reference = (file: string): string =>
   readFileSync(join(__dirname, '../../../prisma/reference', file), 'utf8');
 
-const json = (): unknown => JSON.parse(reference('phone-regions.json'));
+const json = (): unknown => JSON.parse(reference('phone-regions-list.json'));
 
 const codes = PHONE_REGIONS.map((r) => r.code);
 

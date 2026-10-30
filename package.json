@@ -90,8 +90,8 @@
   "jest": {
     "moduleFileExtensions": [
       "js",
-      "ts",
-      "json"
+      "json",
+      "ts"
     ],
     "rootDir": "src",
     "roots": [

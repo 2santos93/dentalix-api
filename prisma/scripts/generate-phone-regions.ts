@@ -7,7 +7,7 @@
  *   npx ts-node --transpile-only prisma/scripts/generate-phone-regions.ts
  *
  * Escribe `prisma/reference/phone-regions.ts` (lo leen los tests) y
- * `prisma/reference/phone-regions.json` (lo copia la web byte a byte). Si se
+ * `prisma/reference/phone-regions-list.json` (lo copia la web byte a byte). Si se
  * sube la librería sin volver a generarla, falla
  * `src/shared/phone/phone-regions.spec.ts`.
  *
@@ -106,7 +106,7 @@ ${body}
     }),
   );
   writeFileSync(
-    join(reference, 'phone-regions.json'),
+    join(reference, 'phone-regions-list.json'),
     JSON.stringify(regions, null, 2) + '\n',
   );
 }
