@@ -12,6 +12,8 @@ export interface PaymentRequestShape {
   paidAt: unknown;
   method?: unknown;
   notes?: unknown;
+  paymentMethodId?: string;
+  reference?: string;
 }
 
 const CIVIL_DATE_SHAPE = /^\d{4}-\d{2}-\d{2}$/;
@@ -69,6 +71,10 @@ export function paymentRequestFingerprint(
     normalizePaidAt(input.paidAt),
     input.method ?? null,
     input.notes ?? null,
+    // DX-377: solo si vienen, para que las huellas anteriores sigan valiendo.
+    ...(input.paymentMethodId || input.reference
+      ? [input.paymentMethodId ?? null, input.reference?.trim() ?? null]
+      : []),
   ];
   return createHash('sha256').update(JSON.stringify(normalized)).digest('hex');
 }

@@ -1,3 +1,5 @@
+import { PaymentMethodGate } from '../payment-method-gate';
+import type { PaymentMethodRepository } from '../../../payment-methods/domain/ports/payment-method-repository.port';
 import {
   ConflictException,
   NotFoundException,
@@ -19,7 +21,17 @@ function setup() {
     currency: 'COP',
     amount: 150000,
   });
-  const uc = new RecordOpeningBalancePaymentUseCase(repo, whitelist);
+  const uc = new RecordOpeningBalancePaymentUseCase(
+    repo,
+    whitelist,
+    new PaymentMethodGate(
+      {
+        findById: () => Promise.resolve(null),
+        findByLegacyMethod: () => Promise.resolve(null),
+      } as unknown as PaymentMethodRepository,
+      repo,
+    ),
+  );
   return { repo, uc };
 }
 

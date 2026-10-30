@@ -18,6 +18,9 @@ export interface ReceiptPaymentRow {
   amount: number;
   currency: string;
   method: Prisma.PaymentGetPayload<Record<string, never>>['method'];
+  /** DX-377: nombre del medio de pago y referencia, para el recibo. */
+  paymentMethodName?: string | null;
+  reference?: string | null;
   paidAt: Date;
   paidOn: string;
   createdById: string | null;
@@ -124,6 +127,8 @@ export async function issuePaymentReceipt(
         amount: payment.amount,
         currency: payment.currency,
         method: payment.method,
+        paymentMethodName: payment.paymentMethodName ?? null,
+        reference: payment.reference ?? null,
         paidAt: payment.paidAt,
         paidOn: payment.paidOn,
       },

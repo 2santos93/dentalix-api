@@ -5,7 +5,7 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { Prisma, TreatmentPlanStatus } from '@prisma/client';
+import { PaymentMethod, Prisma, TreatmentPlanStatus } from '@prisma/client';
 import {
   isPlanBillable,
   notBillableMessage,
@@ -48,6 +48,7 @@ import {
   PaymentVoidAudit,
   PaymentVoidTarget,
   ReceivedPayment,
+  ReferenceMatch,
 } from '../../domain/ports/payment-repository.port';
 import { Payment } from '../../domain/entities/payment.entity';
 import { exchangeRateStatus } from '../../domain/payment-exchange-rate';
@@ -76,6 +77,8 @@ import {
 // recibo, si es anterior a la numeración).
 const PAYMENT_INCLUDE = {
   receipt: { select: { seriesPrefix: true, number: true } },
+  // DX-377: el nombre del medio de pago del catálogo.
+  paymentMethod: { select: { name: true } },
 } satisfies Prisma.PaymentInclude;
 
 type PrismaPayment = Prisma.PaymentGetPayload<{
@@ -113,6 +116,10 @@ function mapToEntity(payment: PrismaPayment, timeZone: string): Payment {
     paidAt: payment.paidAt,
     paidOn: civilDateIn(payment.paidAt, timeZone),
     method: payment.method,
+    paymentMethodId: payment.paymentMethodId,
+    paymentMethodName: payment.paymentMethod?.name ?? null,
+    reference: payment.reference,
+    duplicateReferenceReason: payment.duplicateReferenceReason,
     notes: payment.notes,
     createdById: payment.createdById,
     createdAt: payment.createdAt,
@@ -146,6 +153,8 @@ const CASH_PAYMENT_SELECT = {
   amount: true,
   currency: true,
   method: true,
+  paymentMethodId: true,
+  reference: true,
   notes: true,
   location: { select: { id: true, name: true } },
   plan: {
@@ -170,13 +179,45 @@ type PrismaCashPayment = Prisma.PaymentGetPayload<{
   select: typeof CASH_PAYMENT_SELECT;
 }>;
 
+/**
+ * DX-377: los medios de la clínica, para nombrar el de cada abono y contar un
+ * abono de una réplica anterior (sin medio) en el medio inicial de su método.
+ */
+interface MethodCatalog {
+  byId: Map<string, { id: string; name: string }>;
+  byLegacy: Map<PaymentMethod, { id: string; name: string }>;
+}
+
+function catalogOf(
+  rows: { id: string; name: string; legacyMethod: PaymentMethod | null }[],
+): MethodCatalog {
+  const byId = new Map<string, { id: string; name: string }>();
+  const byLegacy = new Map<PaymentMethod, { id: string; name: string }>();
+  for (const row of rows) {
+    const ref = { id: row.id, name: row.name };
+    byId.set(row.id, ref);
+    if (row.legacyMethod) byLegacy.set(row.legacyMethod, ref);
+  }
+  return { byId, byLegacy };
+}
+
+function methodRefOf(
+  catalog: MethodCatalog,
+  paymentMethodId: string | null,
+  method: PaymentMethod | null,
+): { id: string; name: string } | null {
+  if (paymentMethodId) return catalog.byId.get(paymentMethodId) ?? null;
+  return method ? (catalog.byLegacy.get(method) ?? null) : null;
+}
+
 function mapToCashRow(
   row: PrismaCashPayment,
   timeZoneOf: (locationId: string) => string,
+  catalog: MethodCatalog,
 ): CashRegisterRow {
   const timeZone = timeZoneOf(row.location.id);
   return {
-    payment: mapToCashPayment(row, timeZone),
+    payment: mapToCashPayment(row, timeZone, catalog),
     voidSubject: {
       createdById: row.createdById,
       createdAt: row.createdAt,
@@ -188,6 +229,7 @@ function mapToCashRow(
 function mapToCashPayment(
   row: PrismaCashPayment,
   timeZone: string,
+  catalog: MethodCatalog,
 ): CashPayment {
   return {
     id: row.id,
@@ -197,6 +239,8 @@ function mapToCashPayment(
     amount: row.amount.toNumber(),
     currency: row.currency,
     method: row.method,
+    paymentMethod: methodRefOf(catalog, row.paymentMethodId, row.method),
+    reference: row.reference,
     notes: row.notes,
     location: { id: row.location.id, name: row.location.name },
     // `Payment.patientId` es la copia desnormalizada del paciente del plan (o
@@ -453,6 +497,10 @@ export class PrismaPaymentRepository implements PaymentRepository {
           currency: input.currency,
           paidAt,
           method: input.method,
+          paymentMethodId: input.paymentMethodId ?? null,
+          reference: input.reference ?? null,
+          referenceNormalized: input.referenceNormalized ?? null,
+          duplicateReferenceReason: input.duplicateReferenceReason ?? null,
           notes: input.notes,
           idempotencyKey: input.idempotencyKey,
           idempotencyFingerprint: input.requestFingerprint,
@@ -460,6 +508,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
           exchangeRateCurrency: targetCurrency,
           ...(freeze ? frozenRateData(freeze) : {}),
         },
+        include: { paymentMethod: { select: { name: true } } },
       });
       // DX-027: con fecha de un día cuya caja ya cerró, es un ajuste de la
       // caja abierta (o pendiente), con enlace a la cerrada.
@@ -510,6 +559,8 @@ export class PrismaPaymentRepository implements PaymentRepository {
           amount: entity.amount,
           currency: created.currency,
           method: created.method,
+          paymentMethodName: created.paymentMethod?.name ?? null,
+          reference: created.reference,
           paidAt: created.paidAt,
           paidOn: entity.paidOn,
           createdById: created.createdById,
@@ -690,6 +741,44 @@ export class PrismaPaymentRepository implements PaymentRepository {
         orderBy: [{ paidAt: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
       });
       return this.toEntities(tx, payments);
+    });
+  }
+
+  findReferenceMatches(params: {
+    paymentMethodId: string;
+    referenceNormalized: string;
+    from: Date;
+    to: Date;
+  }): Promise<ReferenceMatch[]> {
+    // payments_tenant_method_reference_idx (tenantId por RLS y el filtro).
+    return this.prisma.runWithTenant(async (tx) => {
+      const rows = await tx.payment.findMany({
+        where: {
+          tenantId: this.requireTenantId(),
+          paymentMethodId: params.paymentMethodId,
+          referenceNormalized: params.referenceNormalized,
+          paidAt: { gte: params.from, lte: params.to },
+          deletedAt: null,
+        },
+        select: {
+          id: true,
+          paidAt: true,
+          amount: true,
+          currency: true,
+          receipt: { select: { seriesPrefix: true, number: true } },
+        },
+        orderBy: [{ paidAt: 'desc' }, { id: 'desc' }],
+        take: 5,
+      });
+      return rows.map((row) => ({
+        id: row.id,
+        paidAt: row.paidAt,
+        amount: row.amount.toNumber(),
+        currency: row.currency,
+        receiptNumber: row.receipt
+          ? formatReceiptNumber(row.receipt.seriesPrefix, row.receipt.number)
+          : null,
+      }));
     });
   }
 
@@ -885,50 +974,68 @@ export class PrismaPaymentRepository implements PaymentRepository {
         // registrado o anulado a mitad de camino no puede dejar un total que
         // describa otras filas que las devueltas (en READ COMMITTED, el nivel
         // por defecto, cada sentencia vería su propia foto).
-        const [rows, total, groups, scopeLocation] = await Promise.all([
-          tx.payment.findMany({
-            where,
-            select: CASH_PAYMENT_SELECT,
-            // Varios abonos pueden compartir `paidAt` (los registrados solo
-            // con fecha caen al mediodía de la sede): sin un desempate estable
-            // la paginación podría repetir o saltarse filas entre páginas.
-            // Desempate por alta y luego por id: dentro de un día, los
-            // registrados solo con fecha comparten el mediodía (DX-097).
-            orderBy: [
-              { paidAt: 'desc' },
-              { createdAt: 'desc' },
-              { id: 'desc' },
-            ],
-            skip: params.skip,
-            take: params.take,
-          }),
-          tx.payment.count({ where }),
-          tx.payment.groupBy({
-            by: ['currency', 'method'],
-            where,
-            _sum: { amount: true },
-            _count: { _all: true },
-            orderBy: [{ currency: 'asc' }, { method: 'asc' }],
-          }),
-          locationId
-            ? tx.location.findFirst({
-                // El interceptor ya la validó (activa y de esta clínica); se
-                // repite el filtro para que una sede retirada entre la
-                // validación y esta lectura no reaparezca como alcance.
-                where: { id: locationId, deletedAt: null },
-                select: { id: true, name: true },
-              })
-            : Promise.resolve(null),
-        ]);
+        const [rows, total, groups, scopeLocation, methods] = await Promise.all(
+          [
+            tx.payment.findMany({
+              where,
+              select: CASH_PAYMENT_SELECT,
+              // Varios abonos pueden compartir `paidAt` (los registrados solo
+              // con fecha caen al mediodía de la sede): sin un desempate estable
+              // la paginación podría repetir o saltarse filas entre páginas.
+              // Desempate por alta y luego por id: dentro de un día, los
+              // registrados solo con fecha comparten el mediodía (DX-097).
+              orderBy: [
+                { paidAt: 'desc' },
+                { createdAt: 'desc' },
+                { id: 'desc' },
+              ],
+              skip: params.skip,
+              take: params.take,
+            }),
+            tx.payment.count({ where }),
+            tx.payment.groupBy({
+              by: ['currency', 'method', 'paymentMethodId'],
+              where,
+              _sum: { amount: true },
+              _count: { _all: true },
+              orderBy: [
+                { currency: 'asc' },
+                { method: 'asc' },
+                { paymentMethodId: 'asc' },
+              ],
+            }),
+            locationId
+              ? tx.location.findFirst({
+                  // El interceptor ya la validó (activa y de esta clínica); se
+                  // repite el filtro para que una sede retirada entre la
+                  // validación y esta lectura no reaparezca como alcance.
+                  where: { id: locationId, deletedAt: null },
+                  select: { id: true, name: true },
+                })
+              : Promise.resolve(null),
+            // DX-377: el catálogo es corto (decenas de filas como mucho).
+            tx.clinicPaymentMethod.findMany({
+              select: { id: true, name: true, legacyMethod: true },
+            }),
+          ],
+        );
+        const catalog = catalogOf(methods);
 
         // La zona de cada sede ya se leyó para el período, en la misma foto:
         // el `canVoid` de cada fila usa el mismo "hoy" que la anulación.
         return {
-          items: rows.map((row) => mapToCashRow(row, scope.timeZoneOf)),
+          items: rows.map((row) =>
+            mapToCashRow(row, scope.timeZoneOf, catalog),
+          ),
           total,
           groups: groups.map((group) => ({
             currency: group.currency,
             method: group.method,
+            paymentMethod: methodRefOf(
+              catalog,
+              group.paymentMethodId,
+              group.method,
+            ),
             total: group._sum.amount?.toNumber() ?? 0,
             count: group._count._all,
           })),

@@ -3070,6 +3070,8 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
    * spec (B → 404 sobre el recurso de A). Cada una cita dónde.
    */
   const COVERED_ELSEWHERE: Record<string, string> = {
+    // DX-377: la clínica B no edita el medio de pago de A (404).
+    'PATCH /payment-methods/:id': 'payment-methods.e2e-spec.ts',
     // DX-214: recepción consulta avisos de A; administrador de B obtiene 404
     // y no se añade ningún evento VIEW a la auditoría de A.
     'GET /patients/:id/communication/opt-out-warnings':

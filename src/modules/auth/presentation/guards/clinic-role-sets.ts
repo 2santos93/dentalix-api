@@ -358,3 +358,7 @@ export const ANAMNESIS_REVIEW_DECISION_ROLES: ClinicRole[] = [
 // citas y ocupación de todas las sedes, frente a otro período: la mirada del
 // dueño. Solo gestión, como el dashboard (DASHBOARD_ROLES).
 export const REPORT_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+
+// Medios de pago de la clínica (DX-377) — crear y editar: solo gestión.
+// Leerlos (selector del modal de abono): PAYMENT_ROLES.
+export const PAYMENT_METHOD_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];

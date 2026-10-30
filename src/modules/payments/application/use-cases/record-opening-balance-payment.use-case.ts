@@ -28,6 +28,7 @@ import {
   normalizePaidAt,
   type RecordPaymentInput,
 } from './record-payment.use-case';
+import { PaymentMethodGate } from '../payment-method-gate';
 
 /**
  * Abono contra el saldo migrado de un paciente (DX-262, revisión C1): el
@@ -44,6 +45,8 @@ export class RecordOpeningBalancePaymentUseCase {
     private readonly repo: PaymentRepository,
     @Inject(CURRENCY_WHITELIST)
     private readonly whitelist: CurrencyWhitelist,
+    // DX-377: medio del catálogo, referencia y aviso de referencia repetida.
+    private readonly paymentMethodGate: PaymentMethodGate,
   ) {}
 
   async execute(
@@ -110,14 +113,19 @@ export class RecordOpeningBalancePaymentUseCase {
       );
     }
 
-    return this.repo.create({
+    const payMethod = await this.paymentMethodGate.resolve(input, paidAt);
+    const payment = await this.repo.create({
       treatmentPlanId: null,
       openingBalanceId,
       patientId: balance.patientId,
       amount: input.amount,
       currency,
       paidAt,
-      method: input.method,
+      method: payMethod.method,
+      paymentMethodId: payMethod.paymentMethodId,
+      reference: payMethod.reference,
+      referenceNormalized: payMethod.referenceNormalized,
+      duplicateReferenceReason: payMethod.duplicateReferenceReason,
       notes: input.notes,
       createdById,
       idempotencyKey: key,
@@ -129,5 +137,6 @@ export class RecordOpeningBalancePaymentUseCase {
       // Un saldo migrado se abona en su moneda: no hay tasa que congelar.
       frozenRate: null,
     });
+    return { ...payment, duplicateReferenceOf: payMethod.duplicateReferenceOf };
   }
 }

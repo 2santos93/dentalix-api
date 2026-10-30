@@ -142,6 +142,23 @@ function importBatchOf(body: unknown): Record<string, unknown> | null {
   };
 }
 
+/** DX-377: la confirmación de una referencia repetida del abono, si la hubo. */
+function paymentReferenceOf(body: unknown): Record<string, unknown> | null {
+  if (typeof body !== 'object' || body === null) return null;
+  const b = body as {
+    duplicateReferenceReason?: unknown;
+    duplicateReferenceOf?: unknown;
+  };
+  if (!Array.isArray(b.duplicateReferenceOf)) return null;
+  if (b.duplicateReferenceOf.length === 0) return null;
+  return {
+    duplicateConfirmed:
+      typeof b.duplicateReferenceReason === 'string' &&
+      b.duplicateReferenceReason !== '',
+    duplicateOf: b.duplicateReferenceOf,
+  };
+}
+
 /** DX-300: códigos de los avisos de la receta emitida y si se confirmaron. */
 function prescriptionSafetyOf(body: unknown): Record<string, unknown> | null {
   if (typeof body !== 'object' || body === null) return null;
@@ -290,6 +307,9 @@ export function buildAuditDraft(
         : {}),
       ...(options.coverage ? { coverage: coverageOf(responseBody) } : {}),
       ...(options.allocation ? { allocation: allocationOf(responseBody) } : {}),
+      ...(options.paymentReference
+        ? { paymentReference: paymentReferenceOf(responseBody) }
+        : {}),
     }),
   };
 }

@@ -91,6 +91,7 @@ import {
 import { PlanAllocationRebalancer } from '../src/modules/payments/application/plan-allocation-rebalancer';
 import { GetPaymentAllocationsUseCase } from '../src/modules/payments/application/use-cases/get-payment-allocations.use-case';
 import { RecordPaymentUseCase } from '../src/modules/payments/application/use-cases/record-payment.use-case';
+import { CreatePaymentMethodUseCase } from '../src/modules/payment-methods/application/payment-methods.use-cases';
 import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
 import {
   CreateCollectionNoteUseCase,
@@ -409,6 +410,7 @@ class DemoSeeder {
   private readonly tenantContext: TenantContextService;
   /** "Hoy" de referencia para fechar los datos (no para decidir pasado/futuro). */
   private readonly now = new Date();
+  private mobileMethodId: string | null = null;
 
   constructor(private readonly app: INestApplicationContext) {
     this.prisma = app.get(PrismaService);
@@ -571,6 +573,25 @@ class DemoSeeder {
       throw error;
     }
     return { tenantId, confirmationUrl };
+  }
+
+  /**
+   * DX-377: el medio demo «Pago móvil» (tipo digital, pide referencia), además
+   * de los 4 iniciales que el alta ya creó. Nombre genérico: ni país ni banco.
+   */
+  private async mobilePaymentMethod(
+    tenantId: string,
+    ownerId: string,
+  ): Promise<string> {
+    if (this.mobileMethodId) return this.mobileMethodId;
+    const created = await this.inTenant(tenantId, undefined, () =>
+      this.use(CreatePaymentMethodUseCase).execute(
+        { name: 'Pago móvil', kind: 'DIGITAL', requiresReference: true },
+        ownerId,
+      ),
+    );
+    this.mobileMethodId = created.id;
+    return created.id;
   }
 
   private inTenant<T>(
@@ -2231,10 +2252,21 @@ class DemoSeeder {
       }
 
       for (const [i, payment] of spec.payments.entries()) {
+        // DX-377: con referencia, por el medio demo «Pago móvil».
+        const mobile = payment.mobileReference
+          ? {
+              paymentMethodId: await this.mobilePaymentMethod(
+                tenantId,
+                ownerId,
+              ),
+              reference: payment.mobileReference,
+            }
+          : {};
         await this.inTenant(tenantId, locations[payment.location], () =>
           this.use(RecordPaymentUseCase).execute(
             planId,
             {
+              ...mobile,
               amount: payment.amount,
               currency: payment.currency ?? DEMO_CURRENCY,
               paidAt:
