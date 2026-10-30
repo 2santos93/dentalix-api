@@ -12,6 +12,7 @@ import {
   locationBody,
   registerBody,
 } from './support/location-fixtures';
+import { purgeTenantsBySubdomain } from './support/tenant-purge';
 
 // SEC-001 / SEC-002: el refresh revalida la sesión contra el estado ACTUAL
 // (membresía, rol, usuario, superadmin), es de un solo uso (rotación real) y
@@ -46,11 +47,8 @@ async function cleanup(): Promise<void> {
   await raw.clinicMembership.deleteMany({
     where: { user: { email: { endsWith: DOMAIN } } },
   });
-  await raw.clinicMembership.deleteMany({
-    where: { tenant: { subdomain: SUB } },
-  });
+  await purgeTenantsBySubdomain(raw, [SUB]);
   await raw.user.deleteMany({ where: { email: { endsWith: DOMAIN } } });
-  await raw.tenant.deleteMany({ where: { subdomain: SUB } });
 }
 
 describe('Session revalidation on refresh (e2e)', () => {

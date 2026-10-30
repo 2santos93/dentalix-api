@@ -17,6 +17,7 @@ import {
   REGIONAL_BOGOTA_FIXTURE,
   registerBody,
 } from './support/location-fixtures';
+import { purgeTenantsBySubdomain } from './support/tenant-purge';
 
 // DX-023: request id, log de acceso sin datos clínicos ni PII, 5xx sin stack
 // para el cliente y sondas de salud. La app se arma con configureApp, como
@@ -89,11 +90,8 @@ describe('Observabilidad (e2e, DX-023)', () => {
   let accessToken: string;
 
   const cleanup = async (): Promise<void> => {
-    await raw.clinicMembership.deleteMany({
-      where: { tenant: { subdomain: SUB } },
-    });
+    await purgeTenantsBySubdomain(raw, [SUB]);
     await raw.user.deleteMany({ where: { email: EMAIL } });
-    await raw.tenant.deleteMany({ where: { subdomain: SUB } });
   };
 
   beforeAll(async () => {

@@ -25,7 +25,8 @@ import {
   DEMO_PRESCRIPTION_SETTINGS,
   DEMO_PROFESSIONAL_SPECIALTIES,
 } from '../prisma/demo/data';
-import { TENANT_TABLES, purgeDemoTenants } from './support/demo-tenant-purge';
+import { purgeDemoTenants } from './support/demo-tenant-purge';
+import { tenantTablesInDeleteOrder } from './support/tenant-purge';
 import { hostFor } from './support/tenant-host';
 import { PAYER_TYPES } from '../src/modules/payers/domain/payer-type';
 import { storedPayerType } from '../src/modules/payers/domain/legacy-payer-type';
@@ -51,9 +52,22 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 
 type Counts = Record<string, number>;
 
+/**
+ * Tablas de clínica que se comparan: todas las del catálogo (DX-396) menos el
+ * registro de auditoría y la cola de correo, que crecen o se vacían con cada
+ * acción (login, reset, despacho) sin que eso sea duplicar datos de la demo.
+ */
+const NOT_SEED_DATA = new Set(['audit_events', 'email_outbox']);
+
+async function seedDataTables(): Promise<string[]> {
+  return (await tenantTablesInDeleteOrder(raw)).filter(
+    (t) => !NOT_SEED_DATA.has(t),
+  );
+}
+
 async function countsFor(tenantId: string): Promise<Counts> {
   const out: Counts = {};
-  for (const table of TENANT_TABLES) {
+  for (const table of await seedDataTables()) {
     const rows = await raw.$queryRawUnsafe<{ n: number }[]>(
       `SELECT count(*)::int AS n FROM "${table}" WHERE "tenantId" = $1::uuid`,
       tenantId,
@@ -65,7 +79,7 @@ async function countsFor(tenantId: string): Promise<Counts> {
 
 async function countsOutside(tenantIds: string[]): Promise<Counts> {
   const out: Counts = {};
-  for (const table of TENANT_TABLES) {
+  for (const table of await seedDataTables()) {
     const rows = await raw.$queryRawUnsafe<{ n: number }[]>(
       `SELECT count(*)::int AS n FROM "${table}" WHERE NOT ("tenantId" = ANY($1::uuid[]))`,
       tenantIds,

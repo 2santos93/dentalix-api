@@ -15,6 +15,7 @@ import {
   REGIONAL_BOGOTA_FIXTURE,
   registerBody,
 } from '../support/location-fixtures';
+import { purgeTenantsBySubdomain } from '../support/tenant-purge';
 
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
@@ -57,11 +58,8 @@ describeWithMinio('Avatar con S3 y dos réplicas (e2e)', (cfg) => {
   const pathOf = (url: string): string => new URL(url).pathname;
 
   async function cleanup(): Promise<void> {
-    await raw.clinicMembership.deleteMany({
-      where: { tenant: { subdomain: sub } },
-    });
+    await purgeTenantsBySubdomain(raw, [sub]);
     await raw.user.deleteMany({ where: { email } });
-    await raw.tenant.deleteMany({ where: { subdomain: sub } });
   }
 
   beforeAll(async () => {

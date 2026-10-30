@@ -16,6 +16,7 @@ import {
   REGIONAL_BOGOTA_FIXTURE,
   registerBody,
 } from './support/location-fixtures';
+import { purgeTenants } from './support/tenant-purge';
 
 // DX-144 (SEC-034): `POST /auth/register` ya no es un relé de emails. Con los
 // topes reales de plataforma (1 cada 10 min y 3 en 24 h al mismo
@@ -86,15 +87,17 @@ describe('Registro sin relé de emails (e2e, DX-144)', () => {
         where: { tenantId: null, toHash: { in: emails.map(hashOf) } },
       });
     }
-    await raw.clinicMembership.deleteMany({
-      where: { tenant: { subdomain: { startsWith: SUB_PREFIX } } },
+    const tenants = await raw.tenant.findMany({
+      where: { subdomain: { startsWith: SUB_PREFIX } },
+      select: { id: true },
     });
+    await purgeTenants(
+      raw,
+      tenants.map((t) => t.id),
+    );
     await raw.user.deleteMany({ where: { email: { endsWith: DOMAIN } } });
     await raw.pendingRegistration.deleteMany({
       where: { email: { endsWith: DOMAIN } },
-    });
-    await raw.tenant.deleteMany({
-      where: { subdomain: { startsWith: SUB_PREFIX } },
     });
   }
 

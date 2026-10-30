@@ -4785,13 +4785,29 @@ $ npm run test:cov
 datos), nunca con `raw.<modelo>.deleteMany()` sin `where` sobre una tabla con
 hijos: choca con la FK si otro spec dejó filas hijas (p. ej. citas) y tumba el
 fichero según el orden. Lo vigila el unit `test/invariants/bare-delete-many.spec.ts`.
+Para borrar solo unas clínicas (la demo, o las de un spec que no vacía la base)
+se usa `purgeTenants(raw, ids)` (`test/support/tenant-purge.ts`, DX-396): lee
+de `pg_constraint` las tablas de clínica (FK a `tenants` o columna `tenantId`)
+y las borra hijas primero, también tras las tablas que llenan los triggers de
+DELETE de otras. Una tabla nueva entra sola; si no puede (referencia a una de
+clínica sin tener `tenantId`) o hay un ciclo, falla nombrando la tabla. Lo
+vigila `test/tenant-purge.int-spec.ts`; y el unit
+`test/invariants/e2e-tenant-purge.spec.ts`, que ningún e2e borre `tenants` a
+mano (el registro por la API siembra filas propias, como los medios de pago).
 
 **CI.** `lint` va en su propio job (con `NODE_OPTIONS=--max-old-space-size=4096`,
 su memoria máxima con `/usr/bin/time -v` y las reglas más lentas con
 `TIMING=1` en el log) y tipos, unit y build en otro, con cada paso
 `if: ${{ !cancelled() }}`: un rojo del lint o de tsc ya no deja los demás
 `skipped` (DX-338). `integration` y `e2e` son jobs separados (cada uno con su Postgres 16 y
-su MinIO): un rojo en `test:int` no oculta la e2e. El MinIO de prueba es
+su MinIO): un rojo en `test:int` no oculta la e2e. La e2e va repartida en 3
+shards (`jest --shard=i/3`, matriz `shard`/`total`/`timeout` del job `e2e`,
+tope de 20 min por shard, DX-396): cada shard publica su duración en el
+resumen de la run y emite un `::warning::` al pasar del 70 % del tope
+(`.github/scripts/report-job-duration.sh`), y el job `e2e-shards` comprueba
+que la unión de las listas de los shards es `jest --listTests` completo sin
+repetidos (`.github/scripts/check-e2e-shards.sh`). Si un shard se acerca al
+tope, se sube `total` y se añade el número a `shard`. El MinIO de prueba es
 `cgr.dev/chainguard/minio` fijado por digest en `.github/scripts/start-test-s3.sh`
 y `docker-compose.yml` (`minio/minio` ya no se puede descargar de Docker Hub);
 si la imagen no se descarga, el paso queda en rojo con un error que lo dice y
