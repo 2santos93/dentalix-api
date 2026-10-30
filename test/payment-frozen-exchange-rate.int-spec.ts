@@ -6,6 +6,7 @@ import { PrismaPlanAllocationRepository } from '../src/modules/payments/infrastr
 import { PlanAllocationRebalancer } from '../src/modules/payments/application/plan-allocation-rebalancer';
 import { freezePaymentRate } from '../src/modules/payments/application/payment-exchange-rate';
 import type { FrozenExchangeRate } from '../src/modules/payments/domain/payment-exchange-rate';
+import type { ReceiptPlanBalance } from '../src/modules/payments/domain/receipt-snapshot';
 import { GetRatesForDateUseCase } from '../src/modules/exchange/application/use-cases/get-rates-for-date.use-case';
 import { ConvertAmountUseCase } from '../src/modules/exchange/application/use-cases/convert-amount.use-case';
 import { PrismaExchangeRateRepository } from '../src/modules/exchange/infrastructure/repositories/prisma-exchange-rate.repository';
@@ -138,6 +139,7 @@ async function pay(
   amount: number,
   day: string,
   frozenOverride?: FrozenExchangeRate | null,
+  receiptPlanBalance: ReceiptPlanBalance | null = null,
 ): Promise<string> {
   return inClinic(clinic, async () => {
     const frozenRate =
@@ -155,7 +157,7 @@ async function pay(
       currency: 'COP',
       paidAt: { civilDate: day },
       createdById: clinic.userId,
-      receiptPlanBalance: null,
+      receiptPlanBalance,
       planAmount: null,
       frozenRate,
     });
@@ -304,6 +306,48 @@ describe('Tasa congelada en cada abono (DX-375, int)', () => {
       source: null,
       date: null,
     });
+  });
+
+  // Revisión DX-375: el saldo del recibo se calculó fuera con la tasa
+  // cotizada; si dentro ya no vale, el abono no cuenta en el saldo y el
+  // recibo no puede decir que sí (sale sin saldo, como cualquier «sin tasa»).
+  it('si la tasa cotizada ya no vale dentro, el recibo sale sin saldo del plan', async () => {
+    const stale: FrozenExchangeRate = {
+      currency: 'USD',
+      fromPerBase: 4099,
+      toPerBase: 1,
+      source: 'MANUAL',
+      date: DAY,
+    };
+    const id = await pay(manual, 1000, DAY, stale, {
+      currency: 'USD',
+      billable: 100,
+      paid: 0.24,
+      balance: 99.76,
+    });
+    const receipt = await raw.paymentReceipt.findUniqueOrThrow({
+      where: { paymentId: id },
+      select: { snapshot: true },
+    });
+    expect(
+      (receipt.snapshot as { planBalance: unknown }).planBalance,
+    ).toBeNull();
+  });
+
+  it('con la tasa congelada el recibo conserva su saldo del plan', async () => {
+    const id = await pay(auto, 4000, DAY, undefined, {
+      currency: 'USD',
+      billable: 100,
+      paid: 1,
+      balance: 99,
+    });
+    const receipt = await raw.paymentReceipt.findUniqueOrThrow({
+      where: { paymentId: id },
+      select: { snapshot: true },
+    });
+    expect(
+      (receipt.snapshot as { planBalance: unknown }).planBalance,
+    ).toMatchObject({ paid: 1, balance: 99 });
   });
 
   it('sin tasa del día el abono se guarda «sin tasa» y el barrido la congela al registrarla', async () => {

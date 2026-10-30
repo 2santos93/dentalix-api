@@ -514,7 +514,13 @@ export class PrismaPaymentRepository implements PaymentRepository {
           paidOn: entity.paidOn,
           createdById: created.createdById,
         },
-        targetBalance ?? input.receiptPlanBalance,
+        // Revisión DX-375: el saldo del recibo salió de la tasa cotizada
+        // fuera; si aquí ya no vale, el abono queda «sin tasa» y el saldo no
+        // lo cuenta, así que el recibo sale sin saldo (como sin tasa).
+        targetBalance ??
+          (frozen !== null && freeze === null
+            ? null
+            : input.receiptPlanBalance),
       );
       return { ...entity, receiptNumber };
     });
