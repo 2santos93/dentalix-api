@@ -1,7 +1,8 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import {
   GetRatesForDateUseCase,
-  isValidDateFormat,
+  invalidRateDate,
+  isValidRateDate,
   type RatesLookup,
 } from './get-rates-for-date.use-case';
 import { MissingExchangeRateError } from '../../domain/missing-exchange-rate.error';
@@ -74,6 +75,16 @@ export class ConvertAmountUseCase implements AmountConverter {
   }
 
   /**
+   * SEC-054: la conversión de `GET /exchange/convert`, que solo pide al
+   * proveedor los días de la ventana de la clínica (`forRequest`).
+   */
+  forRequest(input: ConvertAmountInput): Promise<ConvertAmountResult> {
+    return this.convertWith(input, (date) =>
+      this.getRatesForDate.forRequest(date),
+    );
+  }
+
+  /**
    * Un convertidor para UN caso de uso de UNA clínica (saldo, totales): lee
    * los ajustes y las tasas de cada día una sola vez. Cada abono se sigue
    * convirtiendo por su importe (sin reutilizar `rateUsed`, ver IMP-4a).
@@ -90,9 +101,7 @@ export class ConvertAmountUseCase implements AmountConverter {
     input: QuoteInput,
     ratesFor: RatesLookup,
   ): Promise<ExchangeRateQuote> {
-    if (!isValidDateFormat(input.date)) {
-      throw new BadRequestException('date must match YYYY-MM-DD');
-    }
+    if (!isValidRateDate(input.date)) throw invalidRateDate();
     const { from, to, date } = input;
     const { rates, source } = await ratesFor(date);
     // DX-374: con tasa manual, una moneda ausente es la tasa que la clínica
@@ -117,9 +126,7 @@ export class ConvertAmountUseCase implements AmountConverter {
     input: ConvertAmountInput,
     ratesFor: RatesLookup,
   ): Promise<ConvertAmountResult> {
-    if (!isValidDateFormat(input.date)) {
-      throw new BadRequestException('date must match YYYY-MM-DD');
-    }
+    if (!isValidRateDate(input.date)) throw invalidRateDate();
     if (!isFiniteNonNegativeAmount(input.amount)) {
       throw new BadRequestException('amount must be a finite number >= 0');
     }

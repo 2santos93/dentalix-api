@@ -3,8 +3,10 @@ import type { ExchangeRateSource } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { resolveReferenceLocation } from '../../../../shared/locations/reference-location';
+import { isValidTimeZone } from '../../../../shared/time/civil-day';
 import type {
   ClinicExchangeSettings,
+  ClinicProviderWindow,
   ClinicExchangeSettingsRepository,
 } from '../../domain/ports/clinic-exchange-settings-repository.port';
 
@@ -83,5 +85,42 @@ export class PrismaClinicExchangeSettingsRepository implements ClinicExchangeSet
       resolveReferenceLocation(tx, tenantId, null),
     );
     return location.timeZone;
+  }
+
+  async providerWindow(): Promise<ClinicProviderWindow> {
+    const tenantId = this.tenantId();
+    const tenant = await this.prisma.tenant.findUniqueOrThrow({
+      where: { id: tenantId },
+      select: { createdAt: true },
+    });
+    // El primer abono vivo sale de payments_tenantId_paidAt_active_idx.
+    const { first, locations } = await this.prisma.runWithTenant(
+      tenantId,
+      async (tx) => ({
+        first: await tx.payment.aggregate({
+          where: { tenantId, deletedAt: null },
+          _min: { paidAt: true },
+        }),
+        locations: await tx.location.findMany({
+          where: { tenantId, deletedAt: null },
+          select: { timeZone: true },
+        }),
+      }),
+    );
+    const firstPaidAt = first._min.paidAt;
+    const timeZones = [
+      ...new Set(
+        locations
+          .map((l) => l.timeZone)
+          .filter((z): z is string => !!z && isValidTimeZone(z)),
+      ),
+    ];
+    return {
+      since:
+        firstPaidAt && firstPaidAt < tenant.createdAt
+          ? firstPaidAt
+          : tenant.createdAt,
+      timeZones,
+    };
   }
 }

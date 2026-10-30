@@ -19,6 +19,7 @@ for (const policy of [
   'PUBLIC_FILES',
   'DIRECT_UPLOAD',
   'PATIENT_IMPORT',
+  'EXCHANGE_RATES',
   'ANAMNESIS',
   'ANAMNESIS_TOKEN',
 ]) {

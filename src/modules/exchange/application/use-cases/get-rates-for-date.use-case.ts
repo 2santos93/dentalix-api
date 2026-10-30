@@ -1,4 +1,9 @@
-import { BadRequestException, Inject, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  Optional,
+} from '@nestjs/common';
 import { EXCHANGE_RATE_REPOSITORY } from '../../domain/ports/exchange-rate-repository.port';
 import type { ExchangeRateRepository } from '../../domain/ports/exchange-rate-repository.port';
 import { EXCHANGE_RATE_PROVIDER } from '../../domain/ports/exchange-rate-provider.port';
@@ -15,14 +20,49 @@ import {
 } from '../../domain/ports/manual-exchange-rate-repository.port';
 import type { ExchangeRateSource } from '../../domain/exchange-rate-source';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import { civilDateIn, parseCivilDate } from '../../../../shared/time/civil-day';
+import {
+  DEFAULT_PROVIDER_RATES_LIMITS,
+  ProviderRatesGate,
+  type ProviderRatesCaller,
+} from '../provider-rates-gate';
+import { EXCHANGE_RATE_CLOCK } from './manual-exchange-rates.use-cases';
 
-// YYYY-MM-DD only. Guards the date before it ever reaches the repository
-// query or (on a cache miss) gets interpolated into the provider's URL —
-// closes the "unsanitized date" note left from Task 1.
-export const DATE_FORMAT_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+/**
+ * Un día civil YYYY-MM-DD que EXISTE (`2026-02-30` y `2026-13-01` no; BE-049).
+ * Guarda la fecha antes de que llegue a la consulta del repositorio o (en un
+ * fallo de caché) a la URL del proveedor.
+ */
+export function isValidRateDate(date: unknown): date is string {
+  return typeof date === 'string' && parseCivilDate(date) !== null;
+}
 
-export function isValidDateFormat(date: unknown): date is string {
-  return typeof date === 'string' && DATE_FORMAT_PATTERN.test(date);
+export const RATE_DATE_INVALID_MESSAGE =
+  'date debe ser un día que exista, con el formato AAAA-MM-DD.';
+
+/** 400 de una fecha de tasa que no es un día real. */
+export function invalidRateDate(): BadRequestException {
+  return new BadRequestException({
+    statusCode: 400,
+    error: 'Bad Request',
+    code: 'EXCHANGE_RATE_DATE_INVALID',
+    message: RATE_DATE_INVALID_MESSAGE,
+  });
+}
+
+/**
+ * SEC-054: 400 de un día fuera de lo que una clínica puede pedir al
+ * proveedor (antes de su alta y de su primer abono, o después de hoy).
+ */
+function rateDateOutOfRange(first: string, today: string): BadRequestException {
+  return new BadRequestException({
+    statusCode: 400,
+    error: 'Bad Request',
+    code: 'EXCHANGE_RATE_DATE_OUT_OF_RANGE',
+    message: `No hay tasa guardada de ese día y solo se piden al proveedor los días entre el ${first} (alta de la clínica o su primer abono) y hoy, ${today}.`,
+    first,
+    today,
+  });
 }
 
 export interface RatesForDate {
@@ -53,13 +93,22 @@ function toRatesRecord(
 export type RatesLookup = (date: string) => Promise<RatesForDate>;
 
 /**
+ * Antes de llamar al proveedor por un día que no está en caché: lanza si ese
+ * día no se le puede pedir (SEC-054, solo las rutas de tasas).
+ */
+type BeforeProviderCall = (date: string) => Promise<void>;
+
+/**
  * Tasas de un día para la clínica del contexto (DX-374):
  * - fuente MANUAL y día >= `manualSince`: las tasas que la clínica registró
  *   para ESE día. Una moneda sin tasa no aparece y nunca se pide al proveedor
  *   ni se toma la de otro día;
  * - cualquier otro caso (AUTOMATIC, un día anterior al paso a MANUAL o sin
- *   clínica en el contexto, p. ej. la precarga diaria): cache-then-fetch del
- *   proveedor (ver `providerRates`), como siempre.
+ *   clínica en el contexto): cache-then-fetch del proveedor (ver
+ *   `providerRates`), a través de `ProviderRatesGate` (caché negativa,
+ *   single-flight y presupuestos; SEC-054). Un día anterior al paso a MANUAL
+ *   sigue pidiéndose si falta: si no, un abono de ese día que quedó «sin
+ *   tasa» al cambiar (BE-047) no la congelaría nunca en el barrido.
  */
 @Injectable()
 export class GetRatesForDateUseCase {
@@ -73,10 +122,34 @@ export class GetRatesForDateUseCase {
     @Inject(MANUAL_EXCHANGE_RATE_REPOSITORY)
     private readonly manual: ManualExchangeRateRepository,
     private readonly tenantContext: TenantContextService,
+    @Optional()
+    private readonly gate: ProviderRatesGate = new ProviderRatesGate(
+      DEFAULT_PROVIDER_RATES_LIMITS,
+      () => new Date(),
+    ),
+    @Optional()
+    @Inject(EXCHANGE_RATE_CLOCK)
+    private readonly now: () => Date = () => new Date(),
   ) {}
 
+  /** La lectura de quien convierte por dentro (saldos, abonos, barridos). */
   execute(date: string): Promise<RatesForDate> {
     return this.ratesWith(date, () => this.clinicSettings());
+  }
+
+  /**
+   * SEC-054: la lectura de las rutas `GET /exchange/rates` y `/convert`. Un
+   * día ya guardado se sirve siempre; uno sin guardar solo se pide al
+   * proveedor si está entre el alta de la clínica (o su primer abono, lo
+   * anterior) y hoy en la zona de sus sedes (la más adelantada): fuera de
+   * ahí, 400 sin llamar a nadie.
+   */
+  forRequest(date: string): Promise<RatesForDate> {
+    return this.ratesWith(
+      date,
+      () => this.clinicSettings(),
+      (day) => this.assertWithinProviderWindow(day),
+    );
   }
 
   /**
@@ -108,15 +181,13 @@ export class GetRatesForDateUseCase {
   private async ratesWith(
     date: string,
     clinicSettings: () => Promise<ClinicExchangeSettings | null>,
+    beforeProviderCall?: BeforeProviderCall,
   ): Promise<RatesForDate> {
-    if (!isValidDateFormat(date)) {
-      throw new BadRequestException('date must match YYYY-MM-DD');
-    }
+    if (!isValidRateDate(date)) throw invalidRateDate();
     const settings = await clinicSettings();
     if (
       settings?.source === 'MANUAL' &&
-      settings.manualSince !== null &&
-      date >= settings.manualSince
+      (settings.manualSince === null || date >= settings.manualSince)
     ) {
       return {
         base: 'USD',
@@ -127,8 +198,33 @@ export class GetRatesForDateUseCase {
     return {
       base: 'USD',
       source: 'AUTOMATIC',
-      rates: await this.providerRates(date),
+      rates: await this.cachedOrFetched(
+        date,
+        this.callerInContext(),
+        beforeProviderCall,
+      ),
     };
+  }
+
+  private callerInContext(): ProviderRatesCaller {
+    const tenantId = this.tenantContext.getTenantId();
+    return tenantId === undefined
+      ? { kind: 'PLATFORM' }
+      : { kind: 'CLINIC', tenantId };
+  }
+
+  private async assertWithinProviderWindow(date: string): Promise<void> {
+    const { since, timeZones } = await this.settings.providerWindow();
+    const zones = timeZones.length > 0 ? timeZones : ['UTC'];
+    const now = this.now();
+    const first = zones.map((zone) => civilDateIn(since, zone)).sort()[0];
+    const today = zones
+      .map((zone) => civilDateIn(now, zone))
+      .sort()
+      .at(-1)!;
+    if (date < first || date > today) {
+      throw rateDateOutOfRange(first, today);
+    }
   }
 
   /**
@@ -136,21 +232,41 @@ export class GetRatesForDateUseCase {
    * calls the external provider (and persists the result) on a cache miss.
    * Re-invoking for the same date after a miss is a hit — no duplicate fetch,
    * no duplicate rows (repo.upsertMany is idempotent on `@@unique([date,
-   * currency])`). No mira la fuente de ninguna clínica: es la que usa la
-   * precarga diaria.
+   * currency])`). No mira la fuente de ninguna clínica; el fallo de caché
+   * cuenta en el presupuesto de la clínica del contexto (SEC-054).
    */
-  async providerRates(date: string): Promise<Record<string, number>> {
-    if (!isValidDateFormat(date)) {
-      throw new BadRequestException('date must match YYYY-MM-DD');
-    }
+  providerRates(date: string): Promise<Record<string, number>> {
+    if (!isValidRateDate(date)) return Promise.reject(invalidRateDate());
+    return this.cachedOrFetched(date, this.callerInContext());
+  }
 
+  /**
+   * La de la precarga diaria (DX-085): igual que `providerRates`, pero fuera
+   * de los presupuestos y sin leer la caché negativa (SEC-054): las
+   * peticiones de los usuarios nunca la dejan sin cupo.
+   */
+  prefetchProviderRates(date: string): Promise<Record<string, number>> {
+    if (!isValidRateDate(date)) return Promise.reject(invalidRateDate());
+    return this.cachedOrFetched(date, { kind: 'PREFETCH' });
+  }
+
+  private async cachedOrFetched(
+    date: string,
+    caller: ProviderRatesCaller,
+    beforeProviderCall?: BeforeProviderCall,
+  ): Promise<Record<string, number>> {
     const cached = await this.repo.findByDate(date);
     if (cached.length > 0) {
       return toRatesRecord(cached);
     }
-
-    const fetched = await this.provider.fetchRates(date);
-    await this.repo.upsertMany(date, fetched.rates);
-    return fetched.rates;
+    await beforeProviderCall?.(date);
+    return this.gate.fetch(date, caller, async () => {
+      // Otra petición pudo guardarlo entre la lectura de arriba y esta.
+      const stored = await this.repo.findByDate(date);
+      if (stored.length > 0) return toRatesRecord(stored);
+      const fetched = await this.provider.fetchRates(date);
+      await this.repo.upsertMany(date, fetched.rates);
+      return fetched.rates;
+    });
   }
 }
