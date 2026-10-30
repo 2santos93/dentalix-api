@@ -1,6 +1,14 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional, OmitType } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsEnum, IsInt, IsOptional, Matches, Max, Min } from 'class-validator';
+import {
+  IsEnum,
+  IsInt,
+  IsOptional,
+  IsUUID,
+  Matches,
+  Max,
+  Min,
+} from 'class-validator';
 import { PaymentMethod } from '@prisma/client';
 import { MAX_RANGE_DAYS } from '../../application/use-cases/list-cash-payments.use-case';
 import {
@@ -51,6 +59,18 @@ export class ListCashPaymentsQueryDto {
   @IsEnum(PaymentMethod)
   method?: PaymentMethod;
 
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'DX-395: solo abonos de este medio de pago de la clínica (`GET ' +
+      '/payment-methods?includeInactive=true`), también los propios y los ' +
+      'desactivados. Uno inicial cuenta además los abonos sin medio de su ' +
+      'método (réplicas anteriores). De otra clínica o inexistente: 400.',
+  })
+  @IsOptional()
+  @IsUUID('all', { message: 'paymentMethodId debe ser un UUID.' })
+  paymentMethodId?: string;
+
   @ApiPropertyOptional({ minimum: 1, default: 1 })
   @IsOptional()
   @Type(() => Number)
@@ -69,3 +89,9 @@ export class ListCashPaymentsQueryDto {
   @Max(100)
   pageSize?: number;
 }
+
+/** Query de `GET /payments.csv` (DX-395): los filtros de la caja, sin página. */
+export class ExportCashPaymentsQueryDto extends OmitType(
+  ListCashPaymentsQueryDto,
+  ['page', 'pageSize'] as const,
+) {}

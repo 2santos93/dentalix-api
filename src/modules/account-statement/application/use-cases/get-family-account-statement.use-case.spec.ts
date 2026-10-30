@@ -25,6 +25,8 @@ function payment(
     currency,
     paidAt: new Date('2026-02-10T17:00:00.000Z'),
     method: 'CASH',
+    paymentMethod: null,
+    reference: null,
     location: { id: 'l-1', name: 'Sede' },
     createdById: 'u-1',
     createdAt: new Date('2026-02-10T17:00:00.000Z'),

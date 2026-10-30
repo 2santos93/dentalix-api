@@ -763,6 +763,8 @@ const EXPECTED: Record<string, AuditOptions> = {
   },
 
   'GET /payments': { action: 'VIEW', resource: 'PAYMENT' },
+  // DX-395: descargar la caja en CSV (con medio y referencia).
+  'GET /payments.csv': { action: 'EXPORT', resource: 'PAYMENT' },
   // DX-136: el recibo numerado se emite en la misma transacción que el abono.
   'POST /treatment-plans/:id/payments': {
     action: 'CREATE',

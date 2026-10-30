@@ -9,6 +9,7 @@ import {
   Post,
   Query,
   Req,
+  Res,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
@@ -22,14 +23,21 @@ import {
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiProduces,
   ApiTags,
   ApiUnprocessableEntityResponse,
 } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { RecordPaymentDto } from './dto/record-payment.dto';
 import { VoidPaymentDto } from './dto/void-payment.dto';
 import { PaymentDto } from './dto/payment.dto';
 import { PlanBalanceWithItemsDto } from './dto/plan-balance.dto';
-import { ListCashPaymentsQueryDto } from './dto/list-cash-payments-query.dto';
+import {
+  ExportCashPaymentsQueryDto,
+  ListCashPaymentsQueryDto,
+} from './dto/list-cash-payments-query.dto';
+import { toCashPaymentsCsv } from '../application/cash-payments-csv';
+import { CSV_RESPONSE, sendCsv } from '../../../shared/csv/csv-response';
 import { CashPaymentsResponseDto } from './dto/cash-payments-response.dto';
 import { RecordPaymentUseCase } from '../application/use-cases/record-payment.use-case';
 import { RecordOpeningBalancePaymentUseCase } from '../application/use-cases/record-opening-balance-payment.use-case';
@@ -115,7 +123,7 @@ export class PaymentsController {
   @ApiBadRequestResponse({
     description:
       'Fecha inválida, from > to, período de más de 366 días, método ' +
-      'desconocido o sede ajena a la clínica',
+      'desconocido, medio de pago de otra clínica o sede ajena a la clínica',
   })
   @ApiForbiddenResponse({ description: 'Rol sin acceso a pagos' })
   listCash(
@@ -127,12 +135,58 @@ export class PaymentsController {
         from: query.from,
         to: query.to,
         method: query.method,
+        paymentMethodId: query.paymentMethodId,
         page: query.page,
         pageSize: query.pageSize,
       },
       // `canVoid` de cada fila se calcula para quien consulta (del token).
       { userId: req.user.sub, role: req.user.role },
     );
+  }
+
+  /**
+   * DX-395: la caja en CSV, con medio y referencia. Mismos roles, sede y
+   * filtros que `GET /payments`, sin paginar. La descarga queda auditada.
+   */
+  @Audit({ action: 'EXPORT', resource: 'PAYMENT' })
+  @Get('payments.csv')
+  @ApiOperation({
+    summary: 'Caja en CSV: abonos del período con medio y referencia',
+    description:
+      'Mismos filtros que `GET /payments` (período, método y medio) y la ' +
+      'misma sede (`X-Location-Id`), sin paginar: hasta 10 000 abonos. UTF-8 ' +
+      'con BOM y CRLF; celdas protegidas contra fórmulas; importes con los ' +
+      'decimales de su moneda. Columnas: Fecha, Sede, Paciente, Destino, ' +
+      'Medio, Referencia, Moneda, Importe.',
+  })
+  @ApiHeader({
+    name: 'X-Location-Id',
+    required: false,
+    description: 'Sede activa. Sin cabecera: todas las sedes de la clínica.',
+  })
+  @ApiProduces('text/csv')
+  @ApiOkResponse(CSV_RESPONSE)
+  @ApiBadRequestResponse({
+    description:
+      'Período no válido, medio de otra clínica o más de 10 000 abonos',
+  })
+  @ApiForbiddenResponse({ description: 'Rol sin acceso a pagos' })
+  async listCashCsv(
+    @Query() query: ExportCashPaymentsQueryDto,
+    @Req() req: AuthenticatedRequest,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<string> {
+    const { items, from, to } = await this.listCashPayments.exportAll(
+      {
+        from: query.from,
+        to: query.to,
+        method: query.method,
+        paymentMethodId: query.paymentMethodId,
+      },
+      { userId: req.user.sub, role: req.user.role },
+    );
+    sendCsv(res, `caja-${from}-${to}.csv`);
+    return toCashPaymentsCsv(items);
   }
 
   @Audit({

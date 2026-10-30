@@ -2549,6 +2549,39 @@ referencia». No se borra: se desactiva (la app no tiene DELETE).
   abono sin medio de una réplica anterior cuenta en el medio inicial de su
   método). El recibo lleva `paymentMethodName` y `reference`.
 
+## Medio y referencia en el estado de cuenta y filtro de caja por medio (DX-395)
+
+Seguimiento de DX-377.
+
+- **Estado de cuenta** (`GET /patients/:id/account-statement`, solo roles de
+  cobro): cada movimiento trae `paymentMethod` (`{ id, name }` del medio de la
+  clínica; el inicial de su método si lo registró una réplica anterior sin
+  medio) y `reference`. `method` sigue siendo el método antiguo (un medio
+  digital es `TRANSFER`): para mostrar, `paymentMethod.name`.
+- **Caja por medio**: `GET /payments?paymentMethodId=` filtra por cualquier
+  medio de la clínica, también los propios y los desactivados. Uno inicial
+  cuenta además los abonos sin medio de su método. El medio se lee bajo RLS:
+  de otra clínica o inexistente, 400 «Medio de pago no encontrado en esta
+  clínica.».
+- **CSV de la caja**: `GET /payments.csv` (mismos roles, sede y filtros que
+  la caja, sin paginar, hasta 10 000 abonos; auditado como `EXPORT` de
+  `PAYMENT`). Columnas: Fecha, Sede, Paciente, Destino, Medio, Referencia,
+  Moneda, Importe. Las notas del abono no viajan.
+- **Referencia normalizada**: sin espacios (también los duros), puntos ni
+  guiones (también los tipográficos U+2010-U+2015 y el signo menos) y en
+  mayúsculas: «123-456», «123.456» y «123 456» son la misma. Una referencia
+  de solo separadores no cuenta como referencia.
+- **Mensajes**: una referencia de más de 60 caracteres o un motivo de más de
+  300 responden 400 en español desde el DTO.
+- **Migración** `20261103130000_dx395_payments_relink_reference` (datos, por
+  lotes de 2.000, clínica a clínica, idempotente): repite el enlace de los
+  abonos sin `paymentMethodId` al medio inicial de su método (los que
+  cobraron las réplicas anteriores durante el despliegue de DX-377) y quita
+  puntos y guiones de `referenceNormalized` de las referencias guardadas.
+  Desplegarla cuando ya no quede ninguna réplica anterior a DX-377; si se
+  despliega antes, basta con repetirla (`prisma migrate resolve
+  --rolled-back 20261103130000_dx395_payments_relink_reference` y `deploy`).
+
 ## Tipos de documento genéricos y nombres locales (DX-327)
 
 El tipo de documento de un paciente o de un contacto es uno de cinco, iguales

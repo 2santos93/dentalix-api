@@ -15,6 +15,27 @@ describe('payment-method-rules (DX-377)', () => {
       expect(normalizeReference('  ab 12\t34 cd ')).toBe('AB1234CD');
     });
 
+    it('DX-395: sin guiones, puntos ni espacios, «123-456», «123.456» y «123 456» son la misma', () => {
+      expect(normalizeReference('123-456')).toBe('123456');
+      expect(normalizeReference('123.456')).toBe('123456');
+      expect(normalizeReference('123 456')).toBe('123456');
+      expect(normalizeReference(' abc-12.34 5 ')).toBe('ABC12345');
+    });
+
+    it('DX-395: también los guiones tipográficos y los espacios duros que pega un móvil', () => {
+      expect(normalizeReference('123\u2013456')).toBe('123456');
+      expect(normalizeReference('123\u2212456')).toBe('123456');
+      expect(normalizeReference('123\u00a0456')).toBe('123456');
+    });
+
+    it('DX-395: otros separadores (/, _) siguen contando', () => {
+      expect(normalizeReference('12/34_5')).toBe('12/34_5');
+    });
+
+    it('DX-395: solo separadores es null (no hay referencia)', () => {
+      expect(normalizeReference(' -.- ')).toBeNull();
+    });
+
     it('vacía o solo espacios es null', () => {
       expect(normalizeReference('   ')).toBeNull();
       expect(normalizeReference(undefined)).toBeNull();
@@ -28,6 +49,13 @@ describe('payment-method-rules (DX-377)', () => {
         'Este medio de pago pide la referencia del pago.',
       );
       expect(referenceError('  ', true)).not.toBeNull();
+    });
+
+    it('DX-395: una referencia de solo separadores no vale cuando el medio la pide', () => {
+      expect(referenceError(' --.. ', true)).toBe(
+        'Este medio de pago pide la referencia del pago.',
+      );
+      expect(referenceError(' --.. ', false)).toBeNull();
     });
 
     it('opcional cuando el medio no la pide', () => {

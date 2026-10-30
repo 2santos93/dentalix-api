@@ -1,10 +1,14 @@
 import { BadRequestException } from '@nestjs/common';
 import { ClinicRole, PaymentMethod, TreatmentPlanStatus } from '@prisma/client';
 import {
+  CASH_EXPORT_MAX_ROWS,
+  CASH_EXPORT_TOO_MANY_MESSAGE,
   CASH_PERIOD_TOO_LONG_MESSAGE,
   INVALID_CASH_PERIOD_MESSAGE,
   ListCashPaymentsUseCase,
 } from './list-cash-payments.use-case';
+import type { ClinicPaymentMethodEntity } from '../../../payment-methods/domain/payment-method.entity';
+import type { PaymentMethodRepository } from '../../../payment-methods/domain/ports/payment-method-repository.port';
 import { PERIOD_DAY_OUT_OF_RANGE_MESSAGE } from '../../../../shared/time/civil-day';
 import { InMemoryPaymentRepository } from './__fixtures__/in-memory-payment.repository';
 import type {
@@ -57,12 +61,56 @@ function fakeRow(
   return { payment, voidSubject };
 }
 
+const METHOD_AT = new Date('2026-01-01T00:00:00.000Z');
+function medium(
+  overrides: Partial<ClinicPaymentMethodEntity>,
+): ClinicPaymentMethodEntity {
+  return {
+    id: 'pm-x',
+    tenantId: 't1',
+    name: 'Medio',
+    kind: 'OTHER',
+    active: true,
+    requiresReference: false,
+    legacyMethod: null,
+    createdAt: METHOD_AT,
+    updatedAt: METHOD_AT,
+    ...overrides,
+  };
+}
+
+/** Los medios de la clínica del contexto: lo que la RLS deja ver. */
+const CLINIC_METHODS = [
+  medium({
+    id: 'pm-mobile',
+    name: 'Pago móvil',
+    kind: 'DIGITAL',
+    requiresReference: true,
+  }),
+  medium({
+    id: 'pm-cash',
+    name: 'Efectivo',
+    kind: 'CASH',
+    legacyMethod: PaymentMethod.CASH,
+  }),
+  medium({ id: 'pm-old', name: 'Cheque', active: false }),
+];
+
+function methodsRepo(): PaymentMethodRepository {
+  return {
+    findById: (id: string) =>
+      Promise.resolve(CLINIC_METHODS.find((m) => m.id === id) ?? null),
+  } as Pick<PaymentMethodRepository, 'findById'> as PaymentMethodRepository;
+}
+
 /** El caso de uso con el reloj fijo y el actor dado (ADMIN por defecto). */
 function useCaseFor(repo: InMemoryPaymentRepository, actor: VoidActor = ADMIN) {
-  const useCase = new ListCashPaymentsUseCase(repo, clock);
+  const useCase = new ListCashPaymentsUseCase(repo, clock, methodsRepo());
   return {
     execute: (input: Parameters<ListCashPaymentsUseCase['execute']>[0]) =>
       useCase.execute(input, actor),
+    exportAll: (input: Parameters<ListCashPaymentsUseCase['exportAll']>[0]) =>
+      useCase.exportAll(input, actor),
   };
 }
 
@@ -181,6 +229,108 @@ describe('ListCashPaymentsUseCase', () => {
 
     expect(repo.calls[0].method).toBe(PaymentMethod.TRANSFER);
     expect(repo.calls[1].method).toBeUndefined();
+  });
+
+  describe('filtro por medio de pago de la clínica (DX-395)', () => {
+    it('un medio propio: el repositorio filtra por su id, sin método antiguo', async () => {
+      const repo = new SpyPaymentRepository();
+      await useCaseFor(repo).execute({
+        ...RANGE,
+        paymentMethodId: 'pm-mobile',
+      });
+
+      expect(repo.calls[0].paymentMethod).toEqual({
+        id: 'pm-mobile',
+        legacyMethod: null,
+      });
+    });
+
+    it('un medio inicial lleva su método: cuenta los abonos de réplicas anteriores sin medio', async () => {
+      const repo = new SpyPaymentRepository();
+      await useCaseFor(repo).execute({ ...RANGE, paymentMethodId: 'pm-cash' });
+
+      expect(repo.calls[0].paymentMethod).toEqual({
+        id: 'pm-cash',
+        legacyMethod: PaymentMethod.CASH,
+      });
+    });
+
+    it('un medio desactivado también filtra (sus abonos anteriores siguen en caja)', async () => {
+      const repo = new SpyPaymentRepository();
+      await useCaseFor(repo).execute({ ...RANGE, paymentMethodId: 'pm-old' });
+
+      expect(repo.calls[0].paymentMethod).toEqual({
+        id: 'pm-old',
+        legacyMethod: null,
+      });
+    });
+
+    it('un medio que no es de esta clínica: 400 en español, sin consultar la caja', async () => {
+      const repo = new SpyPaymentRepository();
+      await expect(
+        useCaseFor(repo).execute({ ...RANGE, paymentMethodId: 'pm-de-otra' }),
+      ).rejects.toThrow(
+        new BadRequestException('Medio de pago no encontrado en esta clínica.'),
+      );
+      expect(repo.calls).toHaveLength(0);
+    });
+
+    it('sin medio no filtra por medio', async () => {
+      const repo = new SpyPaymentRepository();
+      await useCaseFor(repo).execute(RANGE);
+
+      expect(repo.calls[0].paymentMethod).toBeUndefined();
+    });
+  });
+
+  describe('exportAll: el CSV de la caja (DX-395)', () => {
+    it('pide todas las filas del período (sin paginar) con los mismos filtros', async () => {
+      const repo = new SpyPaymentRepository({
+        items: [fakeRow('p1'), fakeRow('p2')],
+        total: 2,
+        groups: [],
+        scopeLocation: null,
+      });
+
+      const out = await useCaseFor(repo).exportAll({
+        ...RANGE,
+        method: PaymentMethod.TRANSFER,
+        paymentMethodId: 'pm-mobile',
+      });
+
+      expect(repo.calls[0]).toMatchObject({
+        from: '2026-10-01',
+        to: '2026-10-31',
+        method: PaymentMethod.TRANSFER,
+        paymentMethod: { id: 'pm-mobile', legacyMethod: null },
+        skip: 0,
+        take: CASH_EXPORT_MAX_ROWS + 1,
+      });
+      expect(out.items.map((i) => i.id)).toEqual(['p1', 'p2']);
+    });
+
+    it(`más de ${CASH_EXPORT_MAX_ROWS} abonos: 400 en español`, async () => {
+      const repo = new SpyPaymentRepository({
+        items: Array.from({ length: CASH_EXPORT_MAX_ROWS + 1 }, (_, i) =>
+          fakeRow(`p${i}`),
+        ),
+        total: CASH_EXPORT_MAX_ROWS + 1,
+        groups: [],
+        scopeLocation: null,
+      });
+
+      await expect(useCaseFor(repo).exportAll(RANGE)).rejects.toThrow(
+        new BadRequestException(CASH_EXPORT_TOO_MANY_MESSAGE),
+      );
+    });
+
+    it('valida el período igual que la caja', async () => {
+      const repo = new SpyPaymentRepository();
+      await expect(
+        useCaseFor(repo).exportAll({ from: '2026-10-02', to: '2026-10-01' }),
+      ).rejects.toThrow(new BadRequestException(INVALID_CASH_PERIOD_MESSAGE));
+      expect(repo.calls).toHaveLength(0);
+    });
   });
 
   it('devuelve filas, total, página efectiva, rango y alcance de sede', async () => {

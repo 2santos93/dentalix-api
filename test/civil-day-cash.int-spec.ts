@@ -5,6 +5,7 @@ import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaPaymentRepository } from '../src/modules/payments/infrastructure/repositories/prisma-payment.repository';
 import { ListCashPaymentsUseCase } from '../src/modules/payments/application/use-cases/list-cash-payments.use-case';
+import { PrismaPaymentMethodRepository } from '../src/modules/payment-methods/infrastructure/prisma-payment-method.repository';
 import { GetPaymentsTotalsUseCase } from '../src/modules/payments/application/use-cases/get-payments-totals.use-case';
 import type { ConvertAmountUseCase } from '../src/modules/exchange/application/use-cases/convert-amount.use-case';
 import {
@@ -27,6 +28,7 @@ const repo = new PrismaPaymentRepository(prisma, tenantContext);
 const cash = new ListCashPaymentsUseCase(
   repo,
   () => new Date('2026-10-17T15:00:00.000Z'),
+  new PrismaPaymentMethodRepository(prisma, tenantContext),
 );
 // Tasa 1:1: aquí importa QUÉ abonos entran, no la conversión.
 const identityExecute = (input: {

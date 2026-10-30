@@ -278,7 +278,7 @@ describe('Medios de pago y referencia repetida (e2e, DX-377)', () => {
       reference: 'ANUL-1',
     }).expect(201);
     const [voidable] = await raw.payment.findMany({
-      where: { tenantId: a.tenantId, referenceNormalized: 'ANUL-1' },
+      where: { tenantId: a.tenantId, referenceNormalized: 'ANUL1' },
     });
     await as(api().delete(`/api/v1/payments/${voidable.id}`), a)
       .send({ reason: 'Registrado por error' })

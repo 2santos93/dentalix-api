@@ -481,6 +481,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // 2026-07-30-payment-plans-cuotas.md; estado de cuenta: loop/informes/DX-011.md;
   // planes cobrables: loop/informes/DX-067.md.
   'GET /payments': BILLING,
+  // DX-395: la caja en CSV, mismos roles que la caja.
+  'GET /payments.csv': BILLING,
   'POST /treatment-plans/:id/payments': BILLING,
   // DX-262: abono contra el saldo migrado (los mismos roles que cobran).
   'POST /opening-balances/:id/payments': BILLING,
