@@ -1,7 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import { IsNumber, IsString, Min } from 'class-validator';
-import { IsRateDate, RATE_DATE_DESCRIPTION } from './rate-date.validator';
+import { IsRateDate, RATE_DATE_API_PROPERTY } from './rate-date.validator';
 
 // Uppercase-normalizes ISO 4217 codes so `from=usd` behaves the same as
 // `from=USD` — snapshots are stored uppercase (see PrismaExchangeRateRepository
@@ -27,11 +27,7 @@ export class ConvertQueryDto {
   @IsString()
   to!: string;
 
-  @ApiProperty({
-    example: '2026-07-01',
-    format: 'date',
-    description: RATE_DATE_DESCRIPTION,
-  })
+  @ApiProperty(RATE_DATE_API_PROPERTY)
   @IsRateDate()
   date!: string;
 }

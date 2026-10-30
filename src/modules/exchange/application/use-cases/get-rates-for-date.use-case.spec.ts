@@ -476,14 +476,15 @@ describe('GetRatesForDateUseCase', () => {
         since: new Date('2026-08-15T15:00:00.000Z'),
         timeZones: options.timeZones ?? ['America/Bogota'],
       };
+      const settings = makeSettings(
+        { [M]: { source: 'MANUAL', manualSince: '2026-10-01' } },
+        tenantContext,
+        { windows: { [A]: window, [M]: window } },
+      );
       const uc = new GetRatesForDateUseCase(
         repo,
         makeProvider(fetchRates),
-        makeSettings(
-          { [M]: { source: 'MANUAL', manualSince: '2026-10-01' } },
-          tenantContext,
-          { windows: { [A]: window, [M]: window } },
-        ),
+        settings,
         makeManualRates({}, tenantContext),
         tenantContext,
         gate,
@@ -491,7 +492,7 @@ describe('GetRatesForDateUseCase', () => {
       );
       const asA = <T>(fn: () => Promise<T>) => tenantContext.run(A, fn);
       const asM = <T>(fn: () => Promise<T>) => tenantContext.run(M, fn);
-      return { uc, repo, fetchRates, asA, asM };
+      return { uc, repo, fetchRates, asA, asM, settings };
     }
 
     async function badRequestBody(promise: Promise<unknown>) {
@@ -528,10 +529,8 @@ describe('GetRatesForDateUseCase', () => {
     });
 
     it.each([
-      ['un día futuro', '2026-10-31'],
-      ['muy futuro', '2099-01-01'],
       ['antes del primer abono', '2026-08-14'],
-      ['muy antiguo', '1999-01-04'],
+      ['muy antiguo', '2001-01-04'],
     ])(
       'fuera de la ventana de la clínica (%s): 400 sin llamar al proveedor',
       async (_label, date) => {
@@ -545,6 +544,83 @@ describe('GetRatesForDateUseCase', () => {
         expect(fetchRates).not.toHaveBeenCalled();
       },
     );
+
+    it.each(['1900-01-01', '1999-12-31', '2101-01-01', '2999-12-31'])(
+      'fuera de PERIOD_DAY_MIN..MAX (%s): 400 con las dos fuentes, sin leer ni llamar (DX-383)',
+      async (date) => {
+        const { uc, repo, fetchRates, asA, asM } = setup();
+        repo.seed(date, { COP: 1 });
+        for (const as of [asA, asM]) {
+          const body = await badRequestBody(as(() => uc.forRequest(date)));
+          expect(body).toMatchObject({
+            code: 'EXCHANGE_RATE_DATE_INVALID',
+            message:
+              'date tiene que ser un día entre el 2000-01-01 y el 2100-12-31.',
+          });
+        }
+        expect(fetchRates).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([
+      ['mañana', '2026-10-31'],
+      ['muy futuro', '2099-01-01'],
+    ])(
+      'un día futuro en la zona de la sede (%s): 400 con las dos fuentes, aunque esté guardado (DX-383)',
+      async (_label, date) => {
+        const { uc, repo, fetchRates, asA, asM } = setup();
+        // Un snapshot futuro (p. ej. de la precarga en UTC) tampoco se sirve.
+        repo.seed(date, { COP: 1 });
+        for (const as of [asA, asM]) {
+          const body = await badRequestBody(as(() => uc.forRequest(date)));
+          expect(body).toMatchObject({
+            code: 'EXCHANGE_RATE_DATE_FUTURE',
+            message:
+              'Ese día aún no ha llegado en las sedes de la clínica: no tiene tasa. Hoy es 2026-10-30.',
+            today: '2026-10-30',
+          });
+        }
+        expect(fetchRates).not.toHaveBeenCalled();
+      },
+    );
+
+    it('«hoy» de una sede más adelantada no es futuro, con las dos fuentes (DX-383)', async () => {
+      const { uc, fetchRates, asA, asM } = setup({
+        timeZones: ['America/Bogota', 'Pacific/Kiritimati'],
+      });
+      await expect(asM(() => uc.forRequest('2026-10-31'))).resolves.toEqual({
+        base: 'USD',
+        source: 'MANUAL',
+        rates: {},
+      });
+      const body = await badRequestBody(asA(() => uc.forRequest('2026-11-01')));
+      expect(body).toMatchObject({
+        code: 'EXCHANGE_RATE_DATE_FUTURE',
+        today: '2026-10-31',
+      });
+      expect(fetchRates).not.toHaveBeenCalled();
+    });
+
+    it('un día que ya llegó en todo el planeta no lee la ventana; uno sin guardar, una vez (DX-383)', async () => {
+      const { uc, fetchRates, asA, asM, settings } = setup({
+        timeZones: ['America/Bogota', 'Pacific/Kiritimati'],
+      });
+      const providerWindow = jest.spyOn(settings, 'providerWindow');
+      // Guardado, con MANUAL, y hoy (en UTC−12 ya es el 30): sin leer la ventana.
+      await asA(() => uc.forRequest('2020-01-02'));
+      await asM(() => uc.forRequest('2026-10-15'));
+      await asM(() => uc.forRequest('2026-10-30'));
+      expect(providerWindow).not.toHaveBeenCalled();
+      // Sin guardar: la ventana se lee una sola vez antes de pedirlo.
+      await asA(() => uc.forRequest('2026-10-01'));
+      expect(providerWindow).toHaveBeenCalledTimes(1);
+      // Un día que aún no llegó en alguna zona sí mira las sedes (y en
+      // Kiritimati el 31 ya es hoy), una sola lectura aunque lo pida.
+      providerWindow.mockClear();
+      await asA(() => uc.forRequest('2026-10-31'));
+      expect(providerWindow).toHaveBeenCalledTimes(1);
+      expect(fetchRates).toHaveBeenCalledTimes(2);
+    });
 
     it('los bordes de la ventana sí se piden', async () => {
       const { uc, fetchRates, asA } = setup();

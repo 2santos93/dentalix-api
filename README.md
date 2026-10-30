@@ -2411,14 +2411,22 @@ llamadas pasan por `ProviderRatesGate`
 (`src/modules/exchange/application/provider-rates-gate.ts`), detrás de la
 caché de `exchange_rate_snapshots` de `GetRatesForDateUseCase`:
 
-- **Fechas** (`GET /exchange/rates` y `/exchange/convert`): `date` tiene que
-  ser un día que exista (`2026-02-30` o `2026-13-01`: 400 «date debe ser un
-  día que exista, con el formato AAAA-MM-DD.», también `EXCHANGE_RATE_DATE_INVALID`
-  desde el caso de uso; cubre BE-049 en estas rutas). Un día ya guardado se
-  sirve siempre; uno sin guardar solo se pide al proveedor entre el alta de la
-  clínica o su primer abono vivo (lo anterior) y hoy en la zona de sus sedes
-  (la más adelantada). Fuera de ahí, 400 `EXCHANGE_RATE_DATE_OUT_OF_RANGE`
-  con `first` y `today`, sin llamar a nadie. Las conversiones internas
+- **Fechas** (`GET /exchange/rates` y `/exchange/convert`, BE-049, DX-383),
+  con las dos fuentes y antes de leer tasas o llamar a nadie:
+  - `date` tiene que ser un día que exista (`2026-02-30` o `2026-13-01`: 400
+    «date debe ser un día que exista, con el formato AAAA-MM-DD.»);
+  - entre `PERIOD_DAY_MIN` y `PERIOD_DAY_MAX` (`1900-01-01`, `2999-12-31`:
+    400 «date tiene que ser un día entre el 2000-01-01 y el 2100-12-31.»,
+    el mismo rango del alta de una tasa manual); desde el caso de uso, las
+    dos con `EXCHANGE_RATE_DATE_INVALID`;
+  - y no posterior a hoy en la zona de las sedes de la clínica (la más
+    adelantada): 400 `EXCHANGE_RATE_DATE_FUTURE` con `today`, aunque haya
+    snapshot de ese día.
+
+  Un día ya guardado se sirve siempre; uno sin guardar solo se pide al
+  proveedor desde el alta de la clínica o su primer abono vivo (lo
+  anterior): antes, 400 `EXCHANGE_RATE_DATE_OUT_OF_RANGE` con `first` y
+  `today`, sin llamar a nadie. Las conversiones internas
   (saldos, abonos, barridos) no aplican la ventana: sus días ya son reales.
 - **Caché negativa compartida**: un día que el proveedor no dio
   (`ExchangeRateUnavailableError`: HTTP no 2xx, red, tiempo agotado, forma

@@ -35,9 +35,9 @@ import { EXCHANGE_RATE_READ_ROLES } from '../../auth/presentation/guards/clinic-
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 import { RateLimit } from '../../../shared/security/rate-limit.decorator';
 import { withProviderErrors } from './exchange-provider-errors';
+import { PERIOD_DAY_MAX, PERIOD_DAY_MIN } from '../../../shared/time/civil-day';
 
-const DATE_ERRORS_DESCRIPTION =
-  'Fecha que no existe (`EXCHANGE_RATE_DATE_INVALID` o el mensaje de validación de `date`) o día sin tasa guardada fuera de la ventana de la clínica (`EXCHANGE_RATE_DATE_OUT_OF_RANGE`, con `first` y `today`); nunca se llama al proveedor.';
+const DATE_ERRORS_DESCRIPTION = `Fecha que no existe o fuera de ${PERIOD_DAY_MIN}..${PERIOD_DAY_MAX} (el mensaje de validación de \`date\`, o \`EXCHANGE_RATE_DATE_INVALID\`), un día posterior a hoy en las sedes de la clínica (\`EXCHANGE_RATE_DATE_FUTURE\`, con \`today\`) o un día sin tasa guardada anterior a la ventana de la clínica (\`EXCHANGE_RATE_DATE_OUT_OF_RANGE\`, con \`first\` y \`today\`); nunca se llama al proveedor.`;
 const TOO_MANY_DESCRIPTION =
   'Demasiadas solicitudes (límite `exchange-rates` por clínica + usuario) o `EXCHANGE_RATE_BUDGET_EXCEEDED`: la clínica (o la plataforma) agotó su presupuesto de días sin tasa guardada que se piden al proveedor. La cabecera Retry-After indica los segundos de espera.';
 const UNAVAILABLE_DESCRIPTION =
