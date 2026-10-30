@@ -2508,6 +2508,48 @@ después no altera nada ya calculado.
   «sin tasa» y enseña el aviso; para verlo congelado, pasa a `MANUAL` y
   registra la tasa COP de hoy: el barrido lo congela en menos de un minuto.
 
+## Medios de pago de la clínica y referencia del pago (DX-377)
+
+Porción 1. Cada clínica tiene su catálogo de medios de pago (`payment_methods`,
+RLS FORCE, FK compuesta desde `payments`). Un medio tiene nombre libre, tipo
+base (`CASH`, `CARD`, `TRANSFER`, `DIGITAL`, `OTHER`), activo y «pide
+referencia». No se borra: se desactiva (la app no tiene DELETE).
+
+- **Endpoints**: `GET /payment-methods` (roles de cobro; solo activos, o
+  `?includeInactive=true`), `POST /payment-methods` y
+  `PATCH /payment-methods/:id` (solo ADMIN; 403 «Solo un administrador puede
+  gestionar los medios de pago.»; 409 con nombre repetido, sin distinguir
+  mayúsculas). Auditados como `PAYMENT_METHOD`.
+- **Abono** (`POST /treatment-plans/:id/payments` y
+  `POST /opening-balances/:id/payments`): `paymentMethodId` (activo y de la
+  clínica, si no 400), `reference` (1-60; obligatoria si el medio la pide, 400
+  en español) y `duplicateReferenceReason`. La referencia se guarda tal cual y
+  normalizada (`referenceNormalized`: sin espacios y en mayúsculas).
+- **Referencia repetida**: si el mismo medio y la misma referencia normalizada
+  están en un abono vivo de la clínica con `paidAt` a ±90 días, la API responde
+  **409 `code: PAYMENT_REFERENCE_DUPLICATE`** con `matches` (id, fecha, importe,
+  moneda, nº de recibo). Se confirma repitiendo la petición con
+  `duplicateReferenceReason` (1-300). El motivo queda en el abono; la auditoría
+  guarda `metadata.paymentReference` (`duplicateConfirmed` y los ids
+  repetidos), nunca la referencia ni el motivo. Índice
+  `payments_tenant_method_reference_idx (tenantId, paymentMethodId,
+  referenceNormalized, paidAt)`. Es un aviso: se comprueba fuera de la
+  transacción del alta.
+- **Método antiguo**: `payments.method` se sigue escribiendo, derivado del tipo
+  base (**`DIGITAL` → `TRANSFER`**: se concilia contra el extracto como una
+  transferencia). Un cliente o réplica que solo manda `method` queda enlazado al
+  medio inicial de ese método.
+- **Relleno** (`20261103120100_dx377_payment_methods_backfill`): cada clínica
+  recibe los 4 medios iniciales (Efectivo, Tarjeta, Transferencia, Otro; activos
+  y sin pedir referencia, `legacyMethod` = su método) y cada abono con `method`
+  se enlaza al de su clínica, por lotes e idempotente. Las clínicas nuevas los
+  reciben en el alta. La FK `payments_payment_method_fkey` se queda NOT VALID a
+  propósito (DX-134), como la de DX-375.
+- **Caja y recibo**: cada fila de `GET /payments` trae `paymentMethod` y
+  `reference`, y `summary.byPaymentMethod` totaliza por medio y moneda (un
+  abono sin medio de una réplica anterior cuenta en el medio inicial de su
+  método). El recibo lleva `paymentMethodName` y `reference`.
+
 ## Tipos de documento genéricos y nombres locales (DX-327)
 
 El tipo de documento de un paciente o de un contacto es uno de cinco, iguales
