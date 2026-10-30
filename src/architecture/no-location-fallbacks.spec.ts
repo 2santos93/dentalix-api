@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { ISO3166_COUNTRIES } from '../../prisma/reference/iso3166';
+import { ISO4217_CURRENCIES } from '../../prisma/reference/iso4217';
 
 /**
  * GLOBAL-G1 (spec §9, R5): ningún código deriva la zona de una sede del país
@@ -1463,6 +1464,112 @@ describe('país de la sede libre (DX-312)', () => {
       expect({ snippet, caughtBy: caughtBy(snippet) }).toEqual({
         snippet,
         caughtBy: [],
+      });
+    }
+  });
+});
+
+/**
+ * DX-368: ningún texto de producción pone de ejemplo un teléfono, una moneda,
+ * una dirección o una ciudad de un país. Los ejemplos de moneda dicen «código
+ * ISO 4217 de 3 letras»; los de teléfono, que lleva el indicativo, sin número.
+ * Los documentos los guarda ya DX-327 (siglas de otros países, arriba).
+ * Recorre todo el código de producción, comentarios incluidos, salvo la
+ * ciudad, que los comentarios de zona horaria sí nombran.
+ */
+const ISO4217 = new Set(ISO4217_CURRENCIES.map((currency) => currency.code));
+
+/** `example: 'XXX'` u `example: { XXX: … }` con un código ISO 4217. */
+function currencyExampleHit(line: string): boolean {
+  const value = /\bexample:\s*['"`]([A-Z]{3})['"`]/.exec(line);
+  const key = /\bexample:\s*\{\s*['"]?([A-Z]{3})['"]?\s*:/.exec(line);
+  return [value, key].some((match) => match !== null && ISO4217.has(match[1]));
+}
+
+/** «p. ej. XXX», «e.g. "XXX"», «por ejemplo XXX» con un código ISO 4217. */
+function currencyForExampleHit(line: string): boolean {
+  const match =
+    /(?:p\.\s*ej\.|e\.\s*g\.|por ejemplo|ejemplo:)\s*[«"'`(]?([A-Z]{3})\b/i.exec(
+      line,
+    );
+  return match !== null && ISO4217.has(match[1]);
+}
+
+/**
+ * Un teléfono con indicativo real (`+57 601…`, `+34612…`, `+57…`); deja pasar
+ * `U+202E`, `UTC+11`, `N+1`, `+20 %`, `+2 p.p.` y el ficticio `+00 000…`.
+ */
+const PHONE_EXAMPLE = /(?<![\w+])\+[1-9]\d{0,2}(?:[\s-]?\d{2,}|…|\.\.\.)/;
+
+/** Dirección con número a la colombiana o similar: `Calle 1 # 2-3`, `Cra 15 #90-20`. */
+const ADDRESS_EXAMPLE =
+  /\b(?:Calle|Carrera|Cra|Cl|Kr|Avenida|Av|Diagonal|Dg|Transversal|Tv)\.?\s*\d+[A-Za-z]?\s*(?:#|N[°º.o]\.?)\s*\d/i;
+
+/** Ciudades que eran ejemplo de dirección (con tilde: no son ids IANA). */
+const CITY_EXAMPLE = new RegExp(['Bogot' + 'á', 'Medell' + 'ín'].join('|'));
+
+const isComment = (line: string): boolean => /^\s*(?:\/\/|\/?\*)/.test(line);
+
+function countryExampleHit(line: string): boolean {
+  return (
+    currencyExampleHit(line) ||
+    currencyForExampleHit(line) ||
+    PHONE_EXAMPLE.test(line) ||
+    ADDRESS_EXAMPLE.test(line) ||
+    (!isComment(line) && CITY_EXAMPLE.test(line))
+  );
+}
+
+describe('textos sin ejemplos de un país (DX-368)', () => {
+  it('architecture: no production text uses a currency, phone, address or city of one country as an example', () => {
+    const production = tsFiles(SRC).filter(isProduction);
+    expect(production.length).toBeGreaterThan(500);
+    expect(offending(production, countryExampleHit)).toEqual([]);
+  });
+
+  it('the example patterns catch each retired form and skip neutral text', () => {
+    for (const line of [
+      `  @ApiProperty({ example: '${'CO' + 'P'}' })`,
+      `    example: "${'EU' + 'R'}",`,
+      `  @ApiProperty({ type: String, nullable: true, example: '${'VE' + 'S'}' })`,
+      `    example: { ${'CO' + 'P'}: 4000, EUR: 0.92 },`,
+      `'currency debe ser un código ISO 4217 de 3 letras (p. ej. ${'CO' + 'P'}).'`,
+      `'Falta la moneda (código de 3 letras, p.ej. ${'MX' + 'N'}).'`,
+      `/** ISO 4217 currency code, e.g. "${'CO' + 'P'}", "EUR". */`,
+      `  example: '+${'57'} 300 123 4567',`,
+      `hint: 'Con indicativo de país, p. ej. +${'57'} 601 555 0101'`,
+      `'(p. ej. +${'34'}…)'`,
+      `/** E.164 (p. ej. \`+${'57'}3101234567\`). */`,
+      `    direccion: '${'Calle'} 1 # 2-3',`,
+      `  @ApiPropertyOptional({ example: '${'Cra'} 15 #90-20' })`,
+      `    address: '${'Carrera'} 7 N° 72-10',`,
+      `  @ApiProperty({ example: '${'Bogot' + 'á'}' })`,
+      `'el 16/10 a las 20:00 en ${'Bogot' + 'á'}) o '`,
+    ]) {
+      expect({ line, caught: countryExampleHit(line) }).toEqual({
+        line,
+        caught: true,
+      });
+    }
+    for (const line of [
+      `  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })`,
+      `  @ApiProperty({ example: 'BLT' })`,
+      `  @ApiProperty({ example: 'America/Bogota' })`,
+      `  codeHint: 'Corto y único, p. ej. EXO o CIR-3M.'`,
+      `const ZERO = ['${'CO' + 'P'}', 'CLP', 'JPY'];`,
+      ` * Controles y formato (p. ej. U+202E invierte el texto impreso)`,
+      `  'Etc/GMT+10',`,
+      ` * UTC−11 y UTC+11, también en el mismo día UTC.`,
+      ` * sin N+1 — paciente,`,
+      ` * PUNTOS (8 % → 10 % = +2 p.p.); el resto, en % relativo (10 → 12 = +20 %).`,
+      `    telefono: '+00 000 000 0001',`,
+      `    direccion: 'Dirección de ejemplo 123',`,
+      ` * deja un abono de las 20:00 en ${'Bogot' + 'á'} fuera de`,
+      `'Incluye el indicativo del país.'`,
+    ]) {
+      expect({ line, caught: countryExampleHit(line) }).toEqual({
+        line,
+        caught: false,
       });
     }
   });
