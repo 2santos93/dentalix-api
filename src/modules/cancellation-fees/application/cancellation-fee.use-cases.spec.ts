@@ -380,5 +380,15 @@ describe('casos de uso del cargo por inasistencia (DX-291)', () => {
       repo.nextVoid = 'ALREADY_VOIDED';
       await expect(voidFee('Error')).rejects.toThrow(/ya se anuló/);
     });
+
+    it('con abonos sin convertir a la moneda del plan (UNCONVERTED): 409 con el mensaje en español (DX-382)', async () => {
+      await charge();
+      repo.nextVoid = 'UNCONVERTED';
+      await expect(voidFee('Error')).rejects.toThrow(
+        new ConflictException(
+          'Hay abonos sin convertir; registra la tasa del día antes de anular',
+        ),
+      );
+    });
   });
 });

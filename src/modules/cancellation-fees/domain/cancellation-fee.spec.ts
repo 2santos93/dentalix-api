@@ -7,6 +7,7 @@ import {
   normalizeWaiveReason,
   resolveChargeAmount,
   voidBlockMessage,
+  voidPaymentsCheck,
   waiveBlockReason,
   type FeeChargeFacts,
 } from './cancellation-fee';
@@ -268,6 +269,40 @@ describe('cargo por inasistencia o cancelación tardía (DX-291)', () => {
       expect(
         voidBlockMessage({ status: 'CHARGED', voidedAt: new Date() }),
       ).toBe(CANCELLATION_FEE_MESSAGES.alreadyVoided);
+    });
+  });
+
+  describe('voidPaymentsCheck (DX-382: en la moneda del plan)', () => {
+    it('sin abonos vivos se anula', () => {
+      expect(voidPaymentsCheck([], 0)).toBe('CLEAR');
+      expect(voidPaymentsCheck([], 8_000_000)).toBe('CLEAR');
+    });
+
+    it('plan COP, 50 USD (base 200.000 COP) con 100.000 por cobrar sin el cargo: ya cobrado', () => {
+      // La suma bruta (50 frente a 100.000) lo dejaba anular.
+      expect(voidPaymentsCheck([20_000_000], 10_000_000)).toBe('PAID');
+    });
+
+    it('plan USD, 40.000 COP (base 10 USD) con 30 USD por cobrar sin el cargo: se anula', () => {
+      // La suma bruta (40.000 frente a 30) lo bloqueaba.
+      expect(voidPaymentsCheck([1_000], 3_000)).toBe('CLEAR');
+    });
+
+    it('lo cobrado igual a lo que queda se anula; un céntimo más, no', () => {
+      expect(voidPaymentsCheck([1_500, 1_500], 3_000)).toBe('CLEAR');
+      expect(voidPaymentsCheck([1_500, 1_501], 3_000)).toBe('PAID');
+    });
+
+    it('un abono sin base («sin tasa») decide antes que la suma, aunque el resto cupiera', () => {
+      expect(voidPaymentsCheck([1_000, null], 3_000)).toBe('UNCONVERTED');
+      expect(voidPaymentsCheck([null], 0)).toBe('UNCONVERTED');
+      expect(voidPaymentsCheck([20_000_000, null], 0)).toBe('UNCONVERTED');
+    });
+
+    it('el mensaje de abonos sin convertir, en español', () => {
+      expect(CANCELLATION_FEE_MESSAGES.voidUnconverted).toBe(
+        'Hay abonos sin convertir; registra la tasa del día antes de anular',
+      );
     });
   });
 });
