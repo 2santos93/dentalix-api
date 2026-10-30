@@ -129,6 +129,9 @@ export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
     'payment-methods.e2e-spec.ts',
   'POST /opening-balances/:id/payments body.paymentMethodId':
     'payment-methods.e2e-spec.ts',
+  // DX-395: «filtrar la caja (y su CSV) por un medio de otra clínica es 400».
+  'GET /payments ?paymentMethodId': 'payment-method-statement.e2e-spec.ts',
+  'GET /payments.csv ?paymentMethodId': 'payment-method-statement.e2e-spec.ts',
   // «la clínica B no puede usar la política de A para su propio paciente (409)».
   'POST /patients/:patientId/data-consents body.policyVersionId':
     'data-consents.e2e-spec.ts',

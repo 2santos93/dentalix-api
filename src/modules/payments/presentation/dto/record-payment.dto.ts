@@ -13,7 +13,9 @@ import {
 } from 'class-validator';
 import {
   DUPLICATE_REFERENCE_REASON_MAX,
+  DUPLICATE_REFERENCE_REASON_TOO_LONG_MESSAGE,
   REFERENCE_MAX,
+  REFERENCE_TOO_LONG_MESSAGE,
 } from '../../../payment-methods/domain/payment-method-rules';
 import { PaymentMethod } from '@prisma/client';
 import {
@@ -91,23 +93,28 @@ export class RecordPaymentDto {
     maxLength: REFERENCE_MAX,
     description:
       'Referencia del pago. Obligatoria si el medio la pide (400). Se compara ' +
-      'sin espacios y en mayúsculas: si el mismo medio ya la tiene en un abono ' +
-      'vivo de ±90 días, 409 `PAYMENT_REFERENCE_DUPLICATE` con `matches`.',
+      'sin espacios, puntos ni guiones y en mayúsculas (DX-395: «123-456», ' +
+      '«123.456» y «123 456» son la misma): si el mismo medio ya la tiene en ' +
+      'un abono vivo de ±90 días, 409 `PAYMENT_REFERENCE_DUPLICATE` con ' +
+      '`matches`. Más de 60 caracteres: 400 en español.',
   })
   @IsOptional()
-  @IsString()
-  @MaxLength(REFERENCE_MAX)
+  @IsString({ message: 'La referencia tiene que ser texto.' })
+  @MaxLength(REFERENCE_MAX, { message: REFERENCE_TOO_LONG_MESSAGE })
   reference?: string;
 
   @ApiPropertyOptional({
     maxLength: DUPLICATE_REFERENCE_REASON_MAX,
     description:
       'Motivo para confirmar una referencia repetida tras el 409. Se guarda en ' +
-      'el abono; la auditoría registra la confirmación y los abonos repetidos.',
+      'el abono; la auditoría registra la confirmación y los abonos repetidos. ' +
+      'Más de 300 caracteres: 400 en español.',
   })
   @IsOptional()
-  @IsString()
-  @MaxLength(DUPLICATE_REFERENCE_REASON_MAX)
+  @IsString({ message: 'El motivo tiene que ser texto.' })
+  @MaxLength(DUPLICATE_REFERENCE_REASON_MAX, {
+    message: DUPLICATE_REFERENCE_REASON_TOO_LONG_MESSAGE,
+  })
   duplicateReferenceReason?: string;
 
   @ApiPropertyOptional()

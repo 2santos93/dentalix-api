@@ -349,6 +349,8 @@ export function computeAccountStatement(
       amount: p.amount,
       currency: p.currency,
       method: p.method,
+      paymentMethod: p.paymentMethod,
+      reference: p.reference,
       location: p.location,
       treatmentPlanId: p.treatmentPlanId,
       openingBalanceId: p.openingBalanceId ?? null,

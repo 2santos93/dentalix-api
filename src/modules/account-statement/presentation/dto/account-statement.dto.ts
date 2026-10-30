@@ -233,6 +233,14 @@ export class AccountStatementVoidedByDto {
   fullName!: string | null;
 }
 
+export class AccountStatementPaymentMethodRefDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({ example: 'Pago móvil' })
+  name!: string;
+}
+
 export class AccountStatementMovementDto {
   @ApiProperty({ format: 'uuid' })
   id!: string;
@@ -259,8 +267,34 @@ export class AccountStatementMovementDto {
   @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
-  @ApiProperty({ enum: PaymentMethod, nullable: true })
+  @ApiProperty({
+    enum: PaymentMethod,
+    nullable: true,
+    description:
+      'Método antiguo, derivado del tipo base del medio (un medio digital ' +
+      'es TRANSFER). Para mostrar, usar `paymentMethod.name`.',
+  })
   method!: PaymentMethod | null;
+
+  @ApiProperty({
+    type: AccountStatementPaymentMethodRefDto,
+    nullable: true,
+    description:
+      'DX-395: medio de pago de la clínica con que se cobró (también los ' +
+      'propios, como «Pago móvil»). Un abono de una réplica anterior sin ' +
+      'medio lleva el medio inicial de su método; `null` si no tiene método.',
+  })
+  paymentMethod!: AccountStatementPaymentMethodRefDto | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'ABC 123',
+    description:
+      'DX-395: referencia del pago tal como se tecleó, o `null`. Solo la ven ' +
+      'los roles de cobro (este endpoint) y el paciente en su estado de cuenta.',
+  })
+  reference!: string | null;
 
   @ApiProperty({ type: AccountStatementLocationRefDto })
   location!: AccountStatementLocationRefDto;

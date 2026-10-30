@@ -82,12 +82,21 @@ export function paymentMethodNameError(name: string): string | null {
   return null;
 }
 
-/** Para comparar: sin ningún espacio y en mayúsculas; vacía es `null`. */
+/**
+ * Separadores que el pagador o el banco intercalan en la misma referencia
+ * (DX-395): espacios (también los duros), puntos y guiones, los tipográficos
+ * (U+2010-U+2015) y el signo menos (U+2212) incluidos. «123-456», «123.456» y
+ * «123 456» son la misma operación. La migración 20261103130000 aplica la
+ * misma limpieza (puntos y guiones) a las referencias guardadas antes.
+ */
+const REFERENCE_SEPARATORS = /[\s.\-\u2010-\u2015\u2212]+/g;
+
+/** Para comparar: sin separadores y en mayúsculas; vacía es `null`. */
 export function normalizeReference(
   raw: string | null | undefined,
 ): string | null {
   if (raw === null || raw === undefined) return null;
-  const normalized = raw.replace(/\s+/g, '').toUpperCase();
+  const normalized = raw.replace(REFERENCE_SEPARATORS, '').toUpperCase();
   return normalized === '' ? null : normalized;
 }
 

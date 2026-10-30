@@ -25,7 +25,7 @@ import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context
 import { Audit } from '../../audit/presentation/audit.decorator';
 import { toExpensesCsv } from '../application/expenses-csv';
 import { ListExpensesUseCase } from '../application/use-cases/list-expenses.use-case';
-import { CSV_RESPONSE, sendCsv } from './csv-response';
+import { CSV_RESPONSE, sendCsv } from '../../../shared/csv/csv-response';
 import { ExportExpensesQueryDto } from './dto/expense-requests.dto';
 
 const LOCATION_HEADER = {

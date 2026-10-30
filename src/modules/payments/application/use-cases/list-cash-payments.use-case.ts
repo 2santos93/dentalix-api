@@ -3,6 +3,8 @@ import { PaymentMethod } from '@prisma/client';
 import { PAYMENT_REPOSITORY } from '../../domain/ports/payment-repository.port';
 import type {
   CashRegisterGroup,
+  CashRegisterPage,
+  ListCashRegisterParams,
   PaymentRepository,
 } from '../../domain/ports/payment-repository.port';
 import {
@@ -21,6 +23,11 @@ import {
   PERIOD_DAY_OUT_OF_RANGE_MESSAGE,
 } from '../../../../shared/time/civil-day';
 import { PAYMENT_CLOCK, type PaymentClock } from './void-payment.use-case';
+import {
+  PAYMENT_METHOD_REPOSITORY,
+  type PaymentMethodRepository,
+} from '../../../payment-methods/domain/ports/payment-method-repository.port';
+import { PAYMENT_METHOD_NOT_FOUND_MESSAGE } from '../../../payment-methods/domain/payment-method-rules';
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 20;
@@ -34,6 +41,10 @@ export const MAX_RANGE_DAYS = 366;
 export const INVALID_CASH_PERIOD_MESSAGE =
   'El período no es válido: usa fechas AAAA-MM-DD con «desde» anterior o igual a «hasta».';
 export const CASH_PERIOD_TOO_LONG_MESSAGE = `El período admite como mucho ${MAX_RANGE_DAYS} días.`;
+
+/** DX-395: tope de filas del CSV de la caja (como el de gastos). */
+export const CASH_EXPORT_MAX_ROWS = 10_000;
+export const CASH_EXPORT_TOO_MANY_MESSAGE = `Hay más de ${CASH_EXPORT_MAX_ROWS} abonos con esos filtros: acota el período para exportarlos.`;
 
 // Orden de presentación del desglose por método: el del enum (efectivo
 // primero, que es lo que se arquea), y los abonos sin método al final.
@@ -51,8 +62,20 @@ export interface ListCashPaymentsInput {
   /** Último día del período (YYYY-MM-DD), inclusive. */
   to: string;
   method?: PaymentMethod;
+  /**
+   * DX-395: solo los abonos de este medio de la clínica (activo o no). Se
+   * comprueba que sea de la clínica del contexto (RLS) antes de consultar.
+   */
+  paymentMethodId?: string;
   page?: number;
   pageSize?: number;
+}
+
+/** DX-395: lo que el CSV de la caja necesita, sin paginar. */
+export interface CashPaymentsExport {
+  items: CashPaymentView[];
+  from: string;
+  to: string;
 }
 
 export interface CashPaymentsSummary {
@@ -219,6 +242,8 @@ export class ListCashPaymentsUseCase {
     private readonly repo: PaymentRepository,
     @Inject(PAYMENT_CLOCK)
     private readonly now: PaymentClock,
+    @Inject(PAYMENT_METHOD_REPOSITORY)
+    private readonly methods: PaymentMethodRepository,
   ) {}
 
   /**
@@ -229,9 +254,68 @@ export class ListCashPaymentsUseCase {
     input: ListCashPaymentsInput,
     actor: VoidActor,
   ): Promise<ListCashPaymentsOutput> {
-    // Días que existan (`2026-02-30` no), en el rango admitido y en orden. El
-    // período se queda en días civiles: cada sede lo traduce a instantes en
-    // SU zona (DX-097), en el repositorio.
+    const { from, to } = this.period(input);
+    const paymentMethod = await this.paymentMethodFilter(input.paymentMethodId);
+
+    const page = normalizePage(input.page);
+    const pageSize = normalizePageSize(input.pageSize);
+
+    const result = await this.repo.listForCashRegister({
+      from,
+      to,
+      method: input.method,
+      paymentMethod,
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    });
+
+    return {
+      items: this.viewsOf(result.items, actor),
+      total: result.total,
+      page,
+      pageSize,
+      from: input.from,
+      to: input.to,
+      scope: { location: result.scopeLocation },
+      summary: summarize(result.groups),
+    };
+  }
+
+  /**
+   * DX-395: todos los abonos del período con los mismos filtros, para el
+   * CSV, hasta `CASH_EXPORT_MAX_ROWS` (400 en español si hay más).
+   */
+  async exportAll(
+    input: Omit<ListCashPaymentsInput, 'page' | 'pageSize'>,
+    actor: VoidActor,
+  ): Promise<CashPaymentsExport> {
+    const { from, to } = this.period(input);
+    const paymentMethod = await this.paymentMethodFilter(input.paymentMethodId);
+    const result = await this.repo.listForCashRegister({
+      from,
+      to,
+      method: input.method,
+      paymentMethod,
+      skip: 0,
+      take: CASH_EXPORT_MAX_ROWS + 1,
+    });
+    if (result.items.length > CASH_EXPORT_MAX_ROWS) {
+      throw new BadRequestException(CASH_EXPORT_TOO_MANY_MESSAGE);
+    }
+    return {
+      items: this.viewsOf(result.items, actor),
+      from: input.from,
+      to: input.to,
+    };
+  }
+
+  // Días que existan (`2026-02-30` no), en el rango admitido y en orden. El
+  // período se queda en días civiles: cada sede lo traduce a instantes en SU
+  // zona (DX-097), en el repositorio.
+  private period(input: { from: string; to: string }): {
+    from: string;
+    to: string;
+  } {
     const period = checkPeriodDays(input.from, input.to);
     if (!period.ok) {
       throw new BadRequestException(
@@ -243,41 +327,40 @@ export class ListCashPaymentsUseCase {
     if (period.days > MAX_RANGE_DAYS) {
       throw new BadRequestException(CASH_PERIOD_TOO_LONG_MESSAGE);
     }
-    const { from, to } = period;
+    return { from: period.from, to: period.to };
+  }
 
-    const page = normalizePage(input.page);
-    const pageSize = normalizePageSize(input.pageSize);
+  /**
+   * DX-395: el medio del filtro, leído bajo RLS (nunca se confía en el id del
+   * cliente): de otra clínica o inexistente, 400. Uno inicial lleva su método
+   * para contar también los abonos sin medio de una réplica anterior.
+   */
+  private async paymentMethodFilter(
+    paymentMethodId: string | undefined,
+  ): Promise<ListCashRegisterParams['paymentMethod']> {
+    if (!paymentMethodId) return undefined;
+    const found = await this.methods.findById(paymentMethodId);
+    if (!found) throw new BadRequestException(PAYMENT_METHOD_NOT_FOUND_MESSAGE);
+    return { id: found.id, legacyMethod: found.legacyMethod };
+  }
 
-    const result = await this.repo.listForCashRegister({
-      from,
-      to,
-      method: input.method,
-      skip: (page - 1) * pageSize,
-      take: pageSize,
-    });
-
+  private viewsOf(
+    rows: CashRegisterPage['items'],
+    actor: VoidActor,
+  ): CashPaymentView[] {
     const now = this.now();
-    return {
-      items: result.items.map(({ payment, voidSubject }) => {
-        const registeredOn = civilDateIn(
-          voidSubject.createdAt,
-          voidSubject.timeZone,
-        );
-        return {
-          ...payment,
-          canVoid: canVoidPayment(voidSubject, actor, now),
-          registeredOn,
-          registeredToday:
-            registeredOn === civilDateIn(now, voidSubject.timeZone),
-        };
-      }),
-      total: result.total,
-      page,
-      pageSize,
-      from: input.from,
-      to: input.to,
-      scope: { location: result.scopeLocation },
-      summary: summarize(result.groups),
-    };
+    return rows.map(({ payment, voidSubject }) => {
+      const registeredOn = civilDateIn(
+        voidSubject.createdAt,
+        voidSubject.timeZone,
+      );
+      return {
+        ...payment,
+        canVoid: canVoidPayment(voidSubject, actor, now),
+        registeredOn,
+        registeredToday:
+          registeredOn === civilDateIn(now, voidSubject.timeZone),
+      };
+    });
   }
 }

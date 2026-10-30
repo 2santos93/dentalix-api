@@ -39,6 +39,13 @@ export interface StatementPaymentRow {
   currency: string;
   paidAt: Date;
   method: PaymentMethod | null;
+  /**
+   * DX-395: medio de pago de la clínica del abono (el inicial de su método si
+   * lo registró una réplica anterior sin medio), o `null` si no tiene método.
+   */
+  paymentMethod: StatementPaymentMethodRef | null;
+  /** DX-395: referencia del pago tal como se tecleó, o `null`. */
+  reference: string | null;
   location: { id: string; name: string };
   /** Quién registró el abono (`null` en abonos antiguos sin autor). */
   createdById: string | null;
@@ -52,6 +59,12 @@ export interface StatementPaymentRow {
   voidedBy: StatementVoidedBy | null;
   /** Motivo de la anulación; `null` si está activo o es una anulación antigua. */
   voidReason: string | null;
+}
+
+/** Medio de pago de la clínica de un abono (DX-395): id y nombre. */
+export interface StatementPaymentMethodRef {
+  id: string;
+  name: string;
 }
 
 /**
@@ -184,6 +197,10 @@ export interface StatementMovement {
   amount: number;
   currency: string;
   method: PaymentMethod | null;
+  /** DX-395: medio de pago de la clínica (su nombre es lo que se muestra). */
+  paymentMethod: StatementPaymentMethodRef | null;
+  /** DX-395: referencia del pago, o `null`. */
+  reference: string | null;
   location: { id: string; name: string };
   /** `null` si el abono es contra un saldo migrado (DX-262). */
   treatmentPlanId: string | null;

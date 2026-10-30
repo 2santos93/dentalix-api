@@ -5,7 +5,7 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { PaymentMethod, Prisma, TreatmentPlanStatus } from '@prisma/client';
+import { Prisma, TreatmentPlanStatus } from '@prisma/client';
 import {
   isPlanBillable,
   notBillableMessage,
@@ -72,6 +72,11 @@ import {
   lockPaymentAllocations,
   removeVoidedAllocations,
 } from '../allocations/prisma-plan-allocation.repository';
+import {
+  catalogOf,
+  methodRefOf,
+  type MethodCatalog,
+} from '../../../payment-methods/domain/method-catalog';
 
 // DX-136: cada abono se lee con la serie y el número de su recibo (o sin
 // recibo, si es anterior a la numeración).
@@ -178,37 +183,6 @@ const CASH_PAYMENT_SELECT = {
 type PrismaCashPayment = Prisma.PaymentGetPayload<{
   select: typeof CASH_PAYMENT_SELECT;
 }>;
-
-/**
- * DX-377: los medios de la clínica, para nombrar el de cada abono y contar un
- * abono de una réplica anterior (sin medio) en el medio inicial de su método.
- */
-interface MethodCatalog {
-  byId: Map<string, { id: string; name: string }>;
-  byLegacy: Map<PaymentMethod, { id: string; name: string }>;
-}
-
-function catalogOf(
-  rows: { id: string; name: string; legacyMethod: PaymentMethod | null }[],
-): MethodCatalog {
-  const byId = new Map<string, { id: string; name: string }>();
-  const byLegacy = new Map<PaymentMethod, { id: string; name: string }>();
-  for (const row of rows) {
-    const ref = { id: row.id, name: row.name };
-    byId.set(row.id, ref);
-    if (row.legacyMethod) byLegacy.set(row.legacyMethod, ref);
-  }
-  return { byId, byLegacy };
-}
-
-function methodRefOf(
-  catalog: MethodCatalog,
-  paymentMethodId: string | null,
-  method: PaymentMethod | null,
-): { id: string; name: string } | null {
-  if (paymentMethodId) return catalog.byId.get(paymentMethodId) ?? null;
-  return method ? (catalog.byLegacy.get(method) ?? null) : null;
-}
 
 function mapToCashRow(
   row: PrismaCashPayment,
@@ -963,10 +937,33 @@ export class PrismaPaymentRepository implements PaymentRepository {
         // arquea. El período se corta en la zona de cada sede (DX-097), leída
         // en esta misma foto; ver `periodScope` para los índices que la sirven.
         const scope = await this.periodScope(tx, params);
+        const medium = params.paymentMethod;
         const where: Prisma.PaymentWhereInput = {
           deletedAt: null,
           ...scope.where,
           ...(params.method ? { method: params.method } : {}),
+          // DX-395: el medio, y si es inicial también los abonos sin medio
+          // de su método (réplicas anteriores), como los nombra el resumen.
+          // En AND: `scope.where` ya trae su propio OR (una rama por sede).
+          ...(medium
+            ? {
+                AND: [
+                  {
+                    OR: [
+                      { paymentMethodId: medium.id },
+                      ...(medium.legacyMethod
+                        ? [
+                            {
+                              paymentMethodId: null,
+                              method: medium.legacyMethod,
+                            },
+                          ]
+                        : []),
+                    ],
+                  },
+                ],
+              }
+            : {}),
         };
 
         // Página, conteo, agregado y sede en la MISMA transacción REPEATABLE

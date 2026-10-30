@@ -120,6 +120,12 @@ export type ReceivedPayment = Payment;
 
 export interface ListCashRegisterParams extends CivilPeriod {
   method?: PaymentMethod;
+  /**
+   * DX-395: solo los abonos de este medio de la clínica (ya comprobado bajo
+   * RLS). Con `legacyMethod` (medio inicial) cuenta también los abonos sin
+   * medio de ese método (réplicas anteriores), como el resumen.
+   */
+  paymentMethod?: { id: string; legacyMethod: PaymentMethod | null };
   /** Ya normalizado por el caso de uso. */
   skip: number;
   /** Ya acotado por el caso de uso. */
