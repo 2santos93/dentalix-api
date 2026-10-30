@@ -355,7 +355,7 @@ export function validateBalanceRow(
   if (currencyRaw === '') {
     issue(
       'currency',
-      'Falta la moneda (código de 3 letras, p. ej. COP).',
+      'Falta la moneda (código ISO 4217 de 3 letras).',
       currencyRaw,
     );
   } else if (!ctx.currencies.has(currency)) {
