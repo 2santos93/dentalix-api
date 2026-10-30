@@ -6,10 +6,7 @@ import {
 } from '@nestjs/common';
 import { EXCHANGE_RATE_REPOSITORY } from '../../domain/ports/exchange-rate-repository.port';
 import type { ExchangeRateRepository } from '../../domain/ports/exchange-rate-repository.port';
-import {
-  EXCHANGE_RATE_PROVIDER,
-  ExchangeRateUnavailableError,
-} from '../../domain/ports/exchange-rate-provider.port';
+import { EXCHANGE_RATE_PROVIDER } from '../../domain/ports/exchange-rate-provider.port';
 import type { ExchangeRateProvider } from '../../domain/ports/exchange-rate-provider.port';
 import { ExchangeRateSnapshot } from '../../domain/entities/exchange-rate-snapshot.entity';
 import {
@@ -106,12 +103,12 @@ type BeforeProviderCall = (date: string) => Promise<void>;
  * - fuente MANUAL y día >= `manualSince`: las tasas que la clínica registró
  *   para ESE día. Una moneda sin tasa no aparece y nunca se pide al proveedor
  *   ni se toma la de otro día;
- * - fuente MANUAL y un día anterior al paso a MANUAL: la tasa automática,
- *   pero solo la ya guardada (SEC-054: una clínica en MANUAL nunca llama al
- *   proveedor); sin ella, «sin tasa»;
- * - AUTOMATIC o sin clínica en el contexto: cache-then-fetch del proveedor
- *   (ver `providerRates`), a través de `ProviderRatesGate` (caché negativa,
- *   single-flight y presupuestos).
+ * - cualquier otro caso (AUTOMATIC, un día anterior al paso a MANUAL o sin
+ *   clínica en el contexto): cache-then-fetch del proveedor (ver
+ *   `providerRates`), a través de `ProviderRatesGate` (caché negativa,
+ *   single-flight y presupuestos; SEC-054). Un día anterior al paso a MANUAL
+ *   sigue pidiéndose si falta: si no, un abono de ese día que quedó «sin
+ *   tasa» al cambiar (BE-047) no la congelaría nunca en el barrido.
  */
 @Injectable()
 export class GetRatesForDateUseCase {
@@ -188,18 +185,14 @@ export class GetRatesForDateUseCase {
   ): Promise<RatesForDate> {
     if (!isValidRateDate(date)) throw invalidRateDate();
     const settings = await clinicSettings();
-    if (settings?.source === 'MANUAL') {
-      if (settings.manualSince === null || date >= settings.manualSince) {
-        return {
-          base: 'USD',
-          source: 'MANUAL',
-          rates: await this.manual.ratesOn(date),
-        };
-      }
+    if (
+      settings?.source === 'MANUAL' &&
+      (settings.manualSince === null || date >= settings.manualSince)
+    ) {
       return {
         base: 'USD',
-        source: 'AUTOMATIC',
-        rates: await this.storedRates(date),
+        source: 'MANUAL',
+        rates: await this.manual.ratesOn(date),
       };
     }
     return {
@@ -218,17 +211,6 @@ export class GetRatesForDateUseCase {
     return tenantId === undefined
       ? { kind: 'PLATFORM' }
       : { kind: 'CLINIC', tenantId };
-  }
-
-  /** Solo el snapshot guardado: nunca el proveedor. */
-  private async storedRates(date: string): Promise<Record<string, number>> {
-    const cached = await this.repo.findByDate(date);
-    if (cached.length === 0) {
-      throw new ExchangeRateUnavailableError(
-        `Sin tasas guardadas del ${date} y la clínica usa tasa manual: no se piden al proveedor`,
-      );
-    }
-    return toRatesRecord(cached);
   }
 
   private async assertWithinProviderWindow(date: string): Promise<void> {

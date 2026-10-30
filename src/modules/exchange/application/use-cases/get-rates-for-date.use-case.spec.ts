@@ -505,26 +505,56 @@ describe('GetRatesForDateUseCase', () => {
       expect(fetchRates).toHaveBeenCalledTimes(2);
     });
 
-    it('una clínica en MANUAL nunca llama al proveedor, ni por un día anterior al cambio', async () => {
+    it('una clínica en MANUAL nunca llama al proveedor por los días de su tasa manual', async () => {
       const { uc, fetchRates, asM } = setup();
-      await expect(
-        asM(() => uc.forRequest('2026-09-15')),
-      ).rejects.toBeInstanceOf(ExchangeRateUnavailableError);
-      await expect(asM(() => uc.execute('2026-09-15'))).rejects.toBeInstanceOf(
-        ExchangeRateUnavailableError,
-      );
       await expect(asM(() => uc.forRequest('2026-10-15'))).resolves.toEqual({
         base: 'USD',
         source: 'MANUAL',
         rates: {},
       });
-      // El día anterior al cambio que sí está guardado se sigue leyendo.
+      await expect(asM(() => uc.execute('2026-10-30'))).resolves.toEqual({
+        base: 'USD',
+        source: 'MANUAL',
+        rates: {},
+      });
+      // El día anterior al cambio que ya está guardado se lee de la caché.
       await expect(asM(() => uc.execute('2020-01-02'))).resolves.toEqual({
         base: 'USD',
         source: 'AUTOMATIC',
         rates: { COP: 3200 },
       });
       expect(fetchRates).not.toHaveBeenCalled();
+    });
+
+    // Revisión de SEC-054: un día anterior al paso a MANUAL sigue con la tasa
+    // automática (DX-374) y, si falta, se pide al proveedor con las mismas
+    // protecciones que AUTOMATIC. Si no, un abono de ese día que quedó «sin
+    // tasa» al cambiar (BE-047) no la congelaría nunca en el barrido.
+    it('con MANUAL, un día anterior al cambio sin guardar se pide al proveedor (una vez)', async () => {
+      const { uc, repo, fetchRates, asM } = setup();
+      await expect(asM(() => uc.execute('2026-09-15'))).resolves.toEqual({
+        base: 'USD',
+        source: 'AUTOMATIC',
+        rates: { COP: 4010 },
+      });
+      await expect(asM(() => uc.forRequest('2026-09-15'))).resolves.toEqual({
+        base: 'USD',
+        source: 'AUTOMATIC',
+        rates: { COP: 4010 },
+      });
+      expect(fetchRates).toHaveBeenCalledTimes(1);
+      expect(await repo.findByDate('2026-09-15')).toHaveLength(1);
+    });
+
+    it('con MANUAL, un día anterior al cambio pasa por la ventana y el presupuesto de la clínica', async () => {
+      const { uc, fetchRates, asM } = setup({ clinicLimit: 1 });
+      const body = await badRequestBody(asM(() => uc.forRequest('2026-08-01')));
+      expect(body.code).toBe('EXCHANGE_RATE_DATE_OUT_OF_RANGE');
+      await asM(() => uc.forRequest('2026-09-15'));
+      await expect(asM(() => uc.execute('2026-09-16'))).rejects.toBeInstanceOf(
+        ExchangeRateBudgetExceededError,
+      );
+      expect(fetchRates).toHaveBeenCalledTimes(1);
     });
   });
 });

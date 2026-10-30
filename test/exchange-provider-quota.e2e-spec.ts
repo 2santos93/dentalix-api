@@ -23,7 +23,8 @@ import { REGIONAL_BOGOTA_FIXTURE } from './support/location-fixtures';
 // su clínica (30 por hora, el de por defecto) y recibe 429 sin más llamadas;
 // las fechas imposibles o fuera de la ventana de la clínica son 400 sin
 // llamar; un día que el proveedor no tiene no se vuelve a pedir (caché
-// negativa); una clínica en MANUAL nunca llama. `raw` (DIRECT_URL) solo
+// negativa); una clínica en MANUAL nunca llama por los días de su tasa
+// manual (un día anterior al cambio sí, con el mismo presupuesto). `raw` (DIRECT_URL) solo
 // adelanta el alta de las clínicas, pasa una a MANUAL y limpia snapshots.
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
@@ -199,18 +200,31 @@ describe('Cuota del proveedor de tasas (e2e, SEC-054)', () => {
     expect(fetchRates).toHaveBeenCalledTimes(budget + 1);
   });
 
-  it('una clínica en MANUAL nunca llama al proveedor, tampoco por un día anterior al cambio', async () => {
-    const past = await rates(manual, MANUAL_PAST_DAY);
-    expect(past.status).toBe(503);
-    expect(past.body).toMatchObject({ code: 'EXCHANGE_RATE_UNAVAILABLE' });
-    // El día anterior al cambio que ya está guardado sí se lee.
+  it('una clínica en MANUAL nunca llama al proveedor por los días de su tasa manual', async () => {
+    const todays = await rates(manual, today());
+    expect(todays.status).toBe(200);
+    expect(todays.body).toEqual({ base: 'USD', source: 'MANUAL', rates: {} });
+    // El día anterior al cambio que ya está guardado se lee de la caché.
     expect((await rates(manual, OLD_DAYS[0])).body).toMatchObject({
       source: 'AUTOMATIC',
       rates: { COP: 4001 },
     });
-    const todays = await rates(manual, today());
-    expect(todays.status).toBe(200);
-    expect(todays.body).toEqual({ base: 'USD', source: 'MANUAL', rates: {} });
     expect(fetchRates).not.toHaveBeenCalled();
+  });
+
+  // Revisión de SEC-054: un día anterior al cambio sin guardar sigue con la
+  // automática (DX-374) y se pide una vez, con el presupuesto de la clínica.
+  it('con MANUAL, un día anterior al cambio sin guardar se pide al proveedor una vez', async () => {
+    for (let i = 0; i < 2; i += 1) {
+      const past = await rates(manual, MANUAL_PAST_DAY);
+      expect(past.status).toBe(200);
+      expect(past.body).toEqual({
+        base: 'USD',
+        source: 'AUTOMATIC',
+        rates: { COP: 4020 },
+      });
+    }
+    expect(fetchRates).toHaveBeenCalledTimes(1);
+    expect(fetchRates).toHaveBeenCalledWith(MANUAL_PAST_DAY);
   });
 });

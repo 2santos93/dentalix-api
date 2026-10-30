@@ -41,7 +41,7 @@ const DATE_ERRORS_DESCRIPTION =
 const TOO_MANY_DESCRIPTION =
   'Demasiadas solicitudes (límite `exchange-rates` por clínica + usuario) o `EXCHANGE_RATE_BUDGET_EXCEEDED`: la clínica (o la plataforma) agotó su presupuesto de días sin tasa guardada que se piden al proveedor. La cabecera Retry-After indica los segundos de espera.';
 const UNAVAILABLE_DESCRIPTION =
-  '`EXCHANGE_RATE_UNAVAILABLE`: el proveedor no dio las tasas del día (o falló hace poco y no se vuelve a pedir durante un rato), o la clínica en MANUAL no tiene guardada la tasa automática de un día anterior al cambio.';
+  '`EXCHANGE_RATE_UNAVAILABLE`: el proveedor no dio las tasas del día (o falló hace poco y no se vuelve a pedir durante un rato).';
 
 // DX-374: la tasa de un día depende de la clínica (proveedor o tasa manual),
 // así que estas rutas son de clínica: TenantContextInterceptor fija el tenant

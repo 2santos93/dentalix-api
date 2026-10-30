@@ -2311,8 +2311,9 @@ existente queda en `AUTOMATIC` y no cambia nada para ella.
   en la zona de la sede principal; guardar `MANUAL` otra vez lo conserva;
   volver a `AUTOMATIC` lo limpia. La tasa de un día D sale de las manuales
   solo con `MANUAL` y D >= ese día; los días anteriores siguen con la
-  automática, pero solo la ya guardada en la caché (SEC-054: una clínica en
-  `MANUAL` nunca llama al proveedor; sin snapshot, «sin tasa»). Así, pasar a `MANUAL` no mueve
+  automática (caché y, si falta, el proveedor, con las protecciones de
+  SEC-054: ventana, caché negativa, single-flight y presupuesto de la
+  clínica). Así, pasar a `MANUAL` no mueve
   los saldos ni los totales de antes del cambio. Desde DX-375 cada abono
   congela su tasa (sección siguiente), así que ni pasar a `MANUAL` ni volver
   a `AUTOMATIC` mueve un abono ya cobrado.
@@ -2409,8 +2410,11 @@ caché de `exchange_rate_snapshots` de `GetRatesForDateUseCase`:
   memoria de cada réplica (como el rate limiting): con N réplicas el tope
   efectivo es N veces el configurado. No hay un contador compartido en la BD
   para esto; si se pasa a varias réplicas, divide los topes entre ellas.
-- **Fuente manual**: una clínica en `MANUAL` nunca llama al proveedor (los
-  días anteriores al cambio, solo desde la caché).
+- **Fuente manual**: una clínica en `MANUAL` nunca llama al proveedor por los
+  días de su tasa manual (D >= `manualSince`). Un día anterior al cambio sin
+  snapshot sí se pide, como en `AUTOMATIC` y con sus mismos topes: así un
+  abono de ese día que quedó «sin tasa» al cambiar (BE-047) la congela en el
+  barrido.
 - **Proveedor**: `fetch` con `AbortSignal.timeout(10 s)`; los errores llevan
   el estado HTTP y el tipo de error, nunca el cuerpo de la respuesta. En las
   rutas, un día sin tasa del proveedor es **503 `EXCHANGE_RATE_UNAVAILABLE`**

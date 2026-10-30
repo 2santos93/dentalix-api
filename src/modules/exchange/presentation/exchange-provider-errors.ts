@@ -18,8 +18,7 @@ interface HeaderSink {
  * proveedor):
  * - presupuesto agotado: 429 `EXCHANGE_RATE_BUDGET_EXCEEDED` con
  *   `Retry-After`;
- * - el proveedor no tiene el día, falló hace poco (caché negativa) o la
- *   clínica en MANUAL no tiene guardado un día anterior al cambio: 503
+ * - el proveedor no tiene el día o falló hace poco (caché negativa): 503
  *   `EXCHANGE_RATE_UNAVAILABLE`.
  */
 export async function withProviderErrors<T>(
