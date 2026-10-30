@@ -528,10 +528,8 @@ describe('GetRatesForDateUseCase', () => {
     });
 
     it.each([
-      ['un día futuro', '2026-10-31'],
-      ['muy futuro', '2099-01-01'],
       ['antes del primer abono', '2026-08-14'],
-      ['muy antiguo', '1999-01-04'],
+      ['muy antiguo', '2001-01-04'],
     ])(
       'fuera de la ventana de la clínica (%s): 400 sin llamar al proveedor',
       async (_label, date) => {
@@ -545,6 +543,62 @@ describe('GetRatesForDateUseCase', () => {
         expect(fetchRates).not.toHaveBeenCalled();
       },
     );
+
+    it.each(['1900-01-01', '1999-12-31', '2101-01-01', '2999-12-31'])(
+      'fuera de PERIOD_DAY_MIN..MAX (%s): 400 con las dos fuentes, sin leer ni llamar (DX-383)',
+      async (date) => {
+        const { uc, repo, fetchRates, asA, asM } = setup();
+        repo.seed(date, { COP: 1 });
+        for (const as of [asA, asM]) {
+          const body = await badRequestBody(as(() => uc.forRequest(date)));
+          expect(body).toMatchObject({
+            code: 'EXCHANGE_RATE_DATE_INVALID',
+            message:
+              'date tiene que ser un día entre el 2000-01-01 y el 2100-12-31.',
+          });
+        }
+        expect(fetchRates).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([
+      ['mañana', '2026-10-31'],
+      ['muy futuro', '2099-01-01'],
+    ])(
+      'un día futuro en la zona de la sede (%s): 400 con las dos fuentes, aunque esté guardado (DX-383)',
+      async (_label, date) => {
+        const { uc, repo, fetchRates, asA, asM } = setup();
+        // Un snapshot futuro (p. ej. de la precarga en UTC) tampoco se sirve.
+        repo.seed(date, { COP: 1 });
+        for (const as of [asA, asM]) {
+          const body = await badRequestBody(as(() => uc.forRequest(date)));
+          expect(body).toMatchObject({
+            code: 'EXCHANGE_RATE_DATE_FUTURE',
+            message:
+              'Ese día aún no ha llegado en las sedes de la clínica: no tiene tasa. Hoy es 2026-10-30.',
+            today: '2026-10-30',
+          });
+        }
+        expect(fetchRates).not.toHaveBeenCalled();
+      },
+    );
+
+    it('«hoy» de una sede más adelantada no es futuro, con las dos fuentes (DX-383)', async () => {
+      const { uc, fetchRates, asA, asM } = setup({
+        timeZones: ['America/Bogota', 'Pacific/Kiritimati'],
+      });
+      await expect(asM(() => uc.forRequest('2026-10-31'))).resolves.toEqual({
+        base: 'USD',
+        source: 'MANUAL',
+        rates: {},
+      });
+      const body = await badRequestBody(asA(() => uc.forRequest('2026-11-01')));
+      expect(body).toMatchObject({
+        code: 'EXCHANGE_RATE_DATE_FUTURE',
+        today: '2026-10-31',
+      });
+      expect(fetchRates).not.toHaveBeenCalled();
+    });
 
     it('los bordes de la ventana sí se piden', async () => {
       const { uc, fetchRates, asA } = setup();

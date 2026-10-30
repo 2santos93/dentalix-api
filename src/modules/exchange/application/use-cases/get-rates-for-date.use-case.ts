@@ -13,6 +13,7 @@ import {
   CLINIC_EXCHANGE_SETTINGS_REPOSITORY,
   type ClinicExchangeSettings,
   type ClinicExchangeSettingsRepository,
+  type ClinicProviderWindow,
 } from '../../domain/ports/clinic-exchange-settings-repository.port';
 import {
   MANUAL_EXCHANGE_RATE_REPOSITORY,
@@ -20,7 +21,12 @@ import {
 } from '../../domain/ports/manual-exchange-rate-repository.port';
 import type { ExchangeRateSource } from '../../domain/exchange-rate-source';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
-import { civilDateIn, parseCivilDate } from '../../../../shared/time/civil-day';
+import {
+  civilDateIn,
+  parseCivilDate,
+  PERIOD_DAY_MAX,
+  PERIOD_DAY_MIN,
+} from '../../../../shared/time/civil-day';
 import {
   DEFAULT_PROVIDER_RATES_LIMITS,
   ProviderRatesGate,
@@ -47,6 +53,42 @@ export function invalidRateDate(): BadRequestException {
     error: 'Bad Request',
     code: 'EXCHANGE_RATE_DATE_INVALID',
     message: RATE_DATE_INVALID_MESSAGE,
+  });
+}
+
+/**
+ * BE-049 (DX-383): las rutas de tasas solo admiten días del rango de las
+ * fechas de consulta (`PERIOD_DAY_MIN`..`PERIOD_DAY_MAX`, el mismo del alta de
+ * una tasa manual). Fuera de él no hay tasa que tenga sentido para una
+ * clínica, y con AUTOMATIC cada día nuevo sería una llamada al proveedor.
+ */
+export function isRateDateInRange(date: string): boolean {
+  return date >= PERIOD_DAY_MIN && date <= PERIOD_DAY_MAX;
+}
+
+export const RATE_DATE_OUT_OF_RANGE_MESSAGE = `date tiene que ser un día entre el ${PERIOD_DAY_MIN} y el ${PERIOD_DAY_MAX}.`;
+
+/** 400 de una fecha de tasa fuera de `PERIOD_DAY_MIN`..`PERIOD_DAY_MAX`. */
+function rateDateNotInRange(): BadRequestException {
+  return new BadRequestException({
+    statusCode: 400,
+    error: 'Bad Request',
+    code: 'EXCHANGE_RATE_DATE_INVALID',
+    message: RATE_DATE_OUT_OF_RANGE_MESSAGE,
+  });
+}
+
+/**
+ * BE-049 (DX-383): 400 de un día que aún no ha llegado en ninguna sede de la
+ * clínica: no tiene tasa (ni manual ni del proveedor) que dar.
+ */
+function rateDateInFuture(today: string): BadRequestException {
+  return new BadRequestException({
+    statusCode: 400,
+    error: 'Bad Request',
+    code: 'EXCHANGE_RATE_DATE_FUTURE',
+    message: `Ese día aún no ha llegado en las sedes de la clínica: no tiene tasa. Hoy es ${today}.`,
+    today,
   });
 }
 
@@ -170,17 +212,24 @@ export class GetRatesForDateUseCase {
   }
 
   /**
-   * SEC-054: la lectura de las rutas `GET /exchange/rates` y `/convert`. Un
-   * día ya guardado se sirve siempre; uno sin guardar solo se pide al
-   * proveedor si está entre el alta de la clínica (o su primer abono, lo
-   * anterior) y hoy en la zona de sus sedes (la más adelantada): fuera de
-   * ahí, 400 sin llamar a nadie.
+   * SEC-054: la lectura de las rutas `GET /exchange/rates` y `/convert`.
+   * BE-049 (DX-383): con las dos fuentes, el día tiene que existir, caer en
+   * `PERIOD_DAY_MIN`..`PERIOD_DAY_MAX` y no ser posterior a hoy en la zona de
+   * las sedes (la más adelantada); si no, 400 sin leer tasas ni llamar a
+   * nadie. Un día ya guardado se sirve siempre; uno sin guardar solo se pide
+   * al proveedor si además no es anterior al alta de la clínica (o a su
+   * primer abono, lo anterior).
    */
-  forRequest(date: string): Promise<RatesForDate> {
+  async forRequest(date: string): Promise<RatesForDate> {
+    if (!isValidRateDate(date)) throw invalidRateDate();
+    if (!isRateDateInRange(date)) throw rateDateNotInRange();
+    const window = await this.settings.providerWindow();
+    const { today } = this.windowDays(window);
+    if (date > today) throw rateDateInFuture(today);
     return this.ratesWith(
       date,
       () => this.clinicSettings(),
-      (day) => this.assertWithinProviderWindow(day),
+      (day) => this.assertWithinProviderWindow(day, window),
     );
   }
 
@@ -271,18 +320,34 @@ export class GetRatesForDateUseCase {
       : { kind: 'CLINIC', tenantId };
   }
 
-  private async assertWithinProviderWindow(date: string): Promise<void> {
-    const { since, timeZones } = await this.settings.providerWindow();
+  /**
+   * Primer día de la ventana (en la sede más atrasada) y hoy (en la más
+   * adelantada): así ninguna sede queda sin su primer día ni sin su hoy.
+   */
+  private windowDays({ since, timeZones }: ClinicProviderWindow): {
+    first: string;
+    today: string;
+  } {
     const zones = timeZones.length > 0 ? timeZones : ['UTC'];
     const now = this.now();
-    const first = zones.map((zone) => civilDateIn(since, zone)).sort()[0];
-    const today = zones
-      .map((zone) => civilDateIn(now, zone))
-      .sort()
-      .at(-1)!;
+    return {
+      first: zones.map((zone) => civilDateIn(since, zone)).sort()[0],
+      today: zones
+        .map((zone) => civilDateIn(now, zone))
+        .sort()
+        .at(-1)!,
+    };
+  }
+
+  private assertWithinProviderWindow(
+    date: string,
+    window: ClinicProviderWindow,
+  ): Promise<void> {
+    const { first, today } = this.windowDays(window);
     if (date < first || date > today) {
-      throw rateDateOutOfRange(first, today);
+      return Promise.reject(rateDateOutOfRange(first, today));
     }
+    return Promise.resolve();
   }
 
   /**

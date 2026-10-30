@@ -127,9 +127,10 @@ describe('Cuota del proveedor de tasas (e2e, SEC-054)', () => {
     },
   );
 
-  it('fuera de la ventana de la clínica (antes del alta, o después de hoy): 400 sin llamar', async () => {
-    const tomorrow = addCivilDays(today(), 1);
-    for (const date of ['2024-09-30', '1999-01-04', tomorrow, '2099-01-01']) {
+  // Un día futuro o fuera de PERIOD_DAY_MIN..MAX ya es 400 antes de mirar la
+  // ventana (DX-383, exchange-rate-dates.e2e-spec.ts).
+  it('fuera de la ventana de la clínica (antes del alta): 400 sin llamar', async () => {
+    for (const date of ['2024-09-30', '2001-01-04']) {
       for (const res of [await rates(a, date), await convert(a, date)]) {
         expect(res.status).toBe(400);
         const body = res.body as ErrorBody & { first: string; today: string };
