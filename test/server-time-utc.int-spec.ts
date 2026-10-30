@@ -70,6 +70,9 @@ async function cleanup(): Promise<void> {
   // DX-316: los festivos frenan el borrado de la sede (RESTRICT); el
   // calendario cae con ella (CASCADE).
   await raw.locationHoliday.deleteMany({ where });
+  // DX-374: la tasa manual frena el borrado de la membresía de su autor.
+  await raw.manualExchangeRate.deleteMany({ where });
+  await raw.clinicMembership.deleteMany({ where });
   await raw.location.deleteMany({ where });
   await raw.tenant.deleteMany({ where: { subdomain: SUBDOMAIN } });
   await raw.user.deleteMany({ where: { email: EMAIL } });
@@ -531,6 +534,23 @@ describe('hora del servidor en UTC con una sesión fuera de UTC (DX-226, int)', 
       s.locationId,
     );
     expect(holiday.drift).toBeLessThan(1);
+  });
+
+  it('manual_exchange_rates: createdAt en UTC aunque la API mande otra hora (DX-374)', async () => {
+    const membership = await raw.clinicMembership.create({
+      data: { tenantId: s.tenantId, userId: s.userId, role: 'ADMIN' },
+    });
+    const rate = await inBogota<{ id: string }>(
+      `INSERT INTO "manual_exchange_rates"
+         ("id", "tenantId", "date", "currency", "rate", "createdById",
+          "createdByMembershipId", "createdAt")
+       VALUES (gen_random_uuid(), $1::uuid, '2026-10-29'::date, 'COP', 4000,
+               $2::uuid, $3::uuid, '2001-01-01 00:00:00')
+       RETURNING "id", ${drift('"createdAt"')}`,
+      s.userId,
+      membership.id,
+    );
+    expect(rate.drift).toBeLessThan(1);
   });
 
   it('imputación de abonos: base, imputación, cola e historial con la hora del servidor en UTC (DX-051)', async () => {

@@ -1,12 +1,8 @@
-import {
-  BadRequestException,
-  Inject,
-  Injectable,
-  Logger,
-} from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { PAYMENT_REPOSITORY } from '../../domain/ports/payment-repository.port';
 import type { PaymentRepository } from '../../domain/ports/payment-repository.port';
 import { ConvertAmountUseCase } from '../../../exchange/application/use-cases/convert-amount.use-case';
+import { isMissingRateError } from '../../../exchange/domain/missing-exchange-rate.error';
 
 /**
  * Período en días CIVILES (YYYY-MM-DD, ambos inclusive, ya validados por quien
@@ -41,17 +37,11 @@ function round2(value: number): number {
 
 // `ConvertAmountUseCase` throws exactly this kind of error (see
 // convert-amount.use-case.ts) when a payment's stored currency has no rate
-// in that date's snapshot. This is the ONLY failure this use case treats as
-// "safe to skip" — anything else (a DB/infra outage inside
+// that day: missing from the provider's snapshot or, for a clinic on manual
+// rates, not registered (DX-374). This is the ONLY failure this use case
+// treats as "safe to skip" — anything else (a DB/infra outage inside
 // GetRatesForDateUseCase, a programming error, etc.) must propagate instead
 // of silently corrupting a financial total with no trace.
-function isUnsupportedCurrencyError(error: unknown): boolean {
-  return (
-    error instanceof BadRequestException &&
-    typeof error.message === 'string' &&
-    error.message.startsWith('unsupported currency')
-  );
-}
 
 /**
  * Mirrors `GetSalesTotalsUseCase` over `Payment` instead of `Sale` — this is
@@ -80,6 +70,9 @@ export class GetPaymentsTotalsUseCase {
 
     let totalConverted = 0;
     const byCurrency: Record<string, number> = {};
+    // DX-374: un convertidor por cálculo, que lee la fuente de la clínica y
+    // las tasas de cada día una sola vez (no una lectura por abono).
+    const convert = this.convertAmount.memoized();
 
     for (const payment of payments) {
       // Grouped in the payment's OWN currency, at its ORIGINAL (unconverted)
@@ -109,15 +102,14 @@ export class GetPaymentsTotalsUseCase {
       // correct total is 149.33, memoized was 147.84). So every payment is
       // converted FRESH, by its own amount and own paidAt date, exactly as
       // before that optimization.
-      // TODO(perf): memoize the RAW rate at the GetRatesForDateUseCase/
-      // rate-repository layer (NOT the amount-dependent rateUsed) to
-      // remove the per-payment lookup without drift.
+      // The RAW rates are memoized per day (`convert`, DX-374), never the
+      // amount-dependent rateUsed.
       try {
         // El día de la tasa es el día civil del abono en SU sede (DX-097):
         // un abono de las 20:00 en Bogotá se convierte con la tasa de ese
         // día, no con la del día UTC siguiente.
         const date = payment.paidOn;
-        const { rateUsed } = await this.convertAmount.execute({
+        const { rateUsed } = await convert.execute({
           amount: payment.amount,
           from: payment.currency,
           to: currency,
@@ -125,7 +117,7 @@ export class GetPaymentsTotalsUseCase {
         });
         totalConverted += round2(payment.amount * rateUsed);
       } catch (error) {
-        if (!isUnsupportedCurrencyError(error)) {
+        if (!isMissingRateError(error)) {
           throw error;
         }
         this.logger.warn(

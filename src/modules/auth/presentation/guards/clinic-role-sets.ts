@@ -314,6 +314,16 @@ export const ANAMNESIS_SETTINGS_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 // Mayoría de edad de la clínica (DX-328) — LEERLA: los cuatro roles
 // (PATIENT_ROLES). Cambiarla: solo gestión.
 export const CLINIC_SETTINGS_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+// Tasa de cambio (DX-374) — LEER las tasas del día y convertir: los cuatro
+// roles (todos cobran y ven saldos). La fuente de la tasa de la clínica y las
+// tasas manuales (verlas, registrarlas): solo gestión.
+export const EXCHANGE_RATE_READ_ROLES: ClinicRole[] = [
+  ClinicRole.ADMIN,
+  ClinicRole.DENTIST,
+  ClinicRole.ASSISTANT,
+  ClinicRole.RECEPTION,
+];
+export const EXCHANGE_RATE_SETTINGS_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 // Importación de pacientes desde CSV/XLSX (DX-107) — todas las rutas
 // (plantilla, validar, confirmar, ver, informe, historial, deshacer): solo
 // gestión. Escribe miles de fichas de golpe y el informe lleva datos de
