@@ -68,7 +68,7 @@ export class AgreementPriceListDto {
   @ApiProperty({ example: 'Lista Sanitas 2026' })
   name!: string;
 
-  @ApiProperty({ example: 'COP', description: 'Código ISO 4217' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 }
 

@@ -118,7 +118,8 @@ export class AuditScheduleChangeDto {
 }
 
 export class AuditCurrencyTotalDto {
-  @ApiProperty({ example: 'COP' }) currency!: string;
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
+  currency!: string;
   @ApiProperty({ description: 'Filas del archivo' }) rows!: number;
   @ApiProperty({ example: 1500000 }) amount!: number;
 }

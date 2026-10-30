@@ -76,7 +76,11 @@ export class CommunicatedPolicyDto {
   @ApiProperty({ type: Number, nullable: true })
   suggestedFee!: number | null;
 
-  @ApiProperty({ type: String, nullable: true, example: 'COP' })
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'Código ISO 4217 de 3 letras.',
+  })
   currency!: string | null;
 }
 

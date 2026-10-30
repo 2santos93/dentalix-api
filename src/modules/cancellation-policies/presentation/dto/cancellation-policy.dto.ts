@@ -54,7 +54,11 @@ export class CancellationPolicyVersionDto {
   })
   suggestedFee!: number | null;
 
-  @ApiProperty({ type: String, nullable: true, example: 'COP' })
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'Código ISO 4217 de 3 letras.',
+  })
   currency!: string | null;
 
   @ApiProperty({
@@ -132,7 +136,6 @@ export class CreateCancellationPolicyDto {
   @ApiPropertyOptional({
     type: String,
     nullable: true,
-    example: 'COP',
     description: 'ISO 4217 del importe sugerido (obligatoria con importe)',
   })
   @IsOptional()

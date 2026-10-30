@@ -16,12 +16,12 @@ export class ConvertQueryDto {
   @Min(0)
   amount!: number;
 
-  @ApiProperty({ example: 'USD', description: 'ISO 4217 currency code' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   @Transform(toUpperCase)
   @IsString()
   from!: string;
 
-  @ApiProperty({ example: 'COP', description: 'ISO 4217 currency code' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   @Transform(toUpperCase)
   @IsString()
   to!: string;

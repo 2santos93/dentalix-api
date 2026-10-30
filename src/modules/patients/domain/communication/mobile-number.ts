@@ -5,7 +5,7 @@ export type MobileStatus = 'MISSING' | 'VALID' | 'INVALID';
 
 export interface NormalizedMobile {
   status: MobileStatus;
-  /** E.164 con `+` (p. ej. `+573101234567`), solo si es VALID. */
+  /** E.164 (`+`, indicativo y número, sin espacios), solo si es VALID. */
   e164: string | null;
 }
 

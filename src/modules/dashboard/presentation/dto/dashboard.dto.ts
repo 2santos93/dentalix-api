@@ -28,7 +28,7 @@ export class DashboardIncomesDto {
   @ApiProperty({ type: String, format: 'date-time' })
   to!: Date;
 
-  @ApiProperty({ example: 'USD', description: 'ISO 4217 currency code' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({
@@ -46,9 +46,8 @@ export class DashboardIncomesDto {
   count!: number;
 
   @ApiProperty({
-    example: { COP: 500000, USD: 30 },
     description:
-      "Breakdown of the ORIGINAL (unconverted) amounts grouped by each payment's own currency.",
+      "Breakdown of the ORIGINAL (unconverted) amounts grouped by each payment's own currency, keyed by its ISO 4217 code (3 letters).",
   })
   byCurrency!: Record<string, number>;
 }

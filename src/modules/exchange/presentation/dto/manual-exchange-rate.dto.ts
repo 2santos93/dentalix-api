@@ -30,7 +30,6 @@ export class RegisterManualExchangeRateDto {
   date!: string;
 
   @ApiProperty({
-    example: 'VES',
     description:
       'Código ISO 4217 de la lista de monedas (GET /currencies). USD no: es la base.',
   })
@@ -112,7 +111,7 @@ export class ManualExchangeRateDto {
   @ApiProperty({ example: '2026-10-30', description: 'Día civil de la tasa.' })
   date!: string;
 
-  @ApiProperty({ example: 'VES' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({

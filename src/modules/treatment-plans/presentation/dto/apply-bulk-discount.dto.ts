@@ -52,7 +52,7 @@ export class ApplyBulkDiscountResultDto {
   @ApiProperty({
     type: [TreatmentPlanItemDto],
     description:
-      'Los ítems descontados: el % de su precio redondeado a la unidad de la moneda del plan (COP sin decimales, EUR a céntimos), nunca por encima del tope del rol ítem a ítem',
+      'Los ítems descontados: el % de su precio redondeado a la unidad de la moneda del plan (sin decimales si la moneda no los usa, a céntimos si usa dos), nunca por encima del tope del rol ítem a ítem',
   })
   items!: TreatmentPlanItemDto[];
 

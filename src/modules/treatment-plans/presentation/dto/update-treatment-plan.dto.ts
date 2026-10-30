@@ -18,7 +18,7 @@ export class UpdateTreatmentPlanDto {
   @IsEnum(TreatmentPlanStatus, { message: 'Estado de plan no válido.' })
   status?: TreatmentPlanStatus;
 
-  @ApiPropertyOptional({ example: 'USD', description: 'ISO 4217' })
+  @ApiPropertyOptional({ description: 'Código ISO 4217 de 3 letras.' })
   @IsOptional()
   @IsString()
   currency?: string;

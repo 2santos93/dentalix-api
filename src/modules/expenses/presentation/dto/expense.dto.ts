@@ -19,7 +19,8 @@ export class ExpenseAttachmentDto {
 export class ExpensePaymentDto {
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty({ example: 150000 }) amount!: number;
-  @ApiProperty({ example: 'COP' }) currency!: string;
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
+  currency!: string;
   @ApiProperty({ enum: PaymentMethod, enumName: 'PaymentMethod' })
   method!: PaymentMethod;
   @ApiProperty({ format: 'date', example: '2026-10-23' }) paidOn!: string;
@@ -52,7 +53,8 @@ export class ExpenseDto {
   @ApiProperty({ type: String, nullable: true }) supplier!: string | null;
   @ApiProperty({ type: String, nullable: true }) description!: string | null;
   @ApiProperty({ example: 150000 }) amount!: number;
-  @ApiProperty({ example: 'COP' }) currency!: string;
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
+  currency!: string;
   @ApiProperty({ format: 'date', example: '2026-10-20' }) invoiceDate!: string;
   @ApiProperty({ type: String, format: 'date', nullable: true }) dueDate!:
     string | null;
@@ -152,7 +154,8 @@ export class ExpenseSummaryRowDto {
   month!: string;
   @ApiProperty({ format: 'uuid' }) locationId!: string;
   @ApiProperty() locationName!: string;
-  @ApiProperty({ example: 'COP' }) currency!: string;
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
+  currency!: string;
   @ApiProperty({
     description: 'Abonos vivos del mes civil de la sede, sin anulados.',
   })

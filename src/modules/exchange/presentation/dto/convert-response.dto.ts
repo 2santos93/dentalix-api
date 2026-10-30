@@ -7,10 +7,10 @@ export class ConvertResponseDto {
   @ApiProperty({ example: 100 })
   amount!: number;
 
-  @ApiProperty({ example: 'USD' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   from!: string;
 
-  @ApiProperty({ example: 'COP' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   to!: string;
 
   @ApiProperty({ example: '2026-07-01' })

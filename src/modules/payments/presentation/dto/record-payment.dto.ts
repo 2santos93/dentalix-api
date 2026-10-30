@@ -40,7 +40,7 @@ export class RecordPaymentDto {
   @IsMoney()
   amount!: number;
 
-  @ApiProperty({ example: 'USD', description: 'ISO 4217 currency code' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   @Transform(toUpperCase)
   @IsISO4217CurrencyCode({
     message: 'currency must be a real ISO 4217 currency code',
@@ -52,7 +52,7 @@ export class RecordPaymentDto {
     example: '2026-10-16',
     description:
       'Cuándo se pagó el abono: un instante ISO 8601 con hora (p. ej. ' +
-      '`2026-10-17T01:00:00.000Z`, que es el 16/10 a las 20:00 en Bogotá) o ' +
+      '`2026-10-17T01:00:00.000Z`, que es el 16/10 a las 20:00 en UTC−5) o ' +
       'solo el día civil `YYYY-MM-DD`, que se guarda al mediodía de la zona ' +
       'horaria de la sede del abono (DX-097). La caja y el dashboard lo ' +
       'cuentan en su día civil en la zona de la sede. GET .../balance busca ' +

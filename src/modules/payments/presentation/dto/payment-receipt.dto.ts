@@ -79,7 +79,7 @@ export class ReceiptPaymentDto {
   @ApiProperty({ example: 150000 })
   amount!: number;
 
-  @ApiProperty({ example: 'COP' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({ enum: PaymentMethod, nullable: true })
@@ -115,7 +115,7 @@ export class ReceiptOpeningBalanceDto {
 }
 
 export class ReceiptPlanBalanceDto {
-  @ApiProperty({ example: 'COP' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({ example: 900000 })

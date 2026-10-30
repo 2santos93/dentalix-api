@@ -72,7 +72,6 @@ export class RegisterDto {
 
   @ApiPropertyOptional({
     type: String,
-    example: 'EUR',
     description: 'Moneda ISO 4217 de la primera sede (GET /public/currencies).',
   })
   @IsOptional()

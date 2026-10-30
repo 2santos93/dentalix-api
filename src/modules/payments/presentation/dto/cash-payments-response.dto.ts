@@ -79,8 +79,8 @@ export class CashPaymentDto {
     example: '2026-10-16',
     description:
       'Día civil (YYYY-MM-DD) de `paidAt` en la zona IANA de la sede del ' +
-      'abono (DX-097): el día de caja en que cuenta. Un abono a las 20:00 en ' +
-      'Bogotá es de ese día aunque en UTC ya sea el siguiente.',
+      'abono (DX-097): el día de caja en que cuenta. Un abono a las 20:00 de ' +
+      'una sede en UTC−5 es de ese día aunque en UTC ya sea el siguiente.',
   })
   paidOn!: string;
 
@@ -101,7 +101,7 @@ export class CashPaymentDto {
   @ApiProperty({ example: 150000 })
   amount!: number;
 
-  @ApiProperty({ example: 'COP', description: 'ISO 4217 currency code' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({ enum: PaymentMethod, nullable: true })
@@ -132,7 +132,7 @@ export class CashPaymentDto {
 }
 
 export class CashCurrencyTotalDto {
-  @ApiProperty({ example: 'COP' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({ example: 350000, description: 'Suma sin convertir' })
@@ -150,7 +150,7 @@ export class CashMethodTotalDto {
   })
   method!: PaymentMethod | null;
 
-  @ApiProperty({ example: 'COP' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({ example: 200000 })

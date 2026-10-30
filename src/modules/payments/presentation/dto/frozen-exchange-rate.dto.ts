@@ -14,7 +14,6 @@ export const EXCHANGE_RATE_STATUS_DESCRIPTION =
 /** La tasa que congeló un abono (DX-375). */
 export class FrozenExchangeRateDto {
   @ApiProperty({
-    example: 'USD',
     description: 'Moneda de destino: la del plan (o la del saldo migrado)',
   })
   currency!: string;
