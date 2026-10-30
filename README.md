@@ -105,13 +105,13 @@ de despliegue hacen falta las devDependencies para sembrar. El puerto se lee de
    | RECEPTION | `recepcion.norte@demo.dentalix.app` (solo Sede Norte — DX-089) |
 
    Contenido: 2 sedes con horario (la principal con el horario por defecto del
-   registro; "Sede Norte" con el suyo), catálogo por defecto con tarifas en COP,
+   registro; "Sede Norte" con el suyo), catálogo por defecto con tarifas en la moneda de la sede demo (hoy COP; la demo con sedes de varios países llega con DX-335),
    25 pacientes ficticios (correos `@example.com`) con historias clínicas,
    evoluciones (una corregida con una adenda — DX-038; tres con diagnóstico CIE-10 — DX-212) y odontograma (un hallazgo anulado con motivo y una paciente infantil con dentición mixta, registros temporales y de otro origen — DX-120), 5 tipos de cita con duración y color (DX-121), las 6 plantillas de evolución de ejemplo con dos evoluciones redactadas con ellas («Resina» y «Profilaxis») y ligadas a las últimas citas atendidas (DX-170), las 5 indicaciones postoperatorias de ejemplo con `POI-EXO` vinculada a «Exodoncia simple», la sede principal con teléfono y una entrega impresa de ayer (o del último día con consulta) — DX-222, ~90 citas desde el lunes de la semana pasada hasta
    el sábado de la próxima en distintos estados (las de valoración, limpieza, endodoncia, urgencia y ortodoncia con su tipo), bloqueos de agenda (vacaciones de la segunda dentista de lunes a viernes de la semana siguiente a la próxima, en todas las sedes, y el almuerzo del equipo en la sede principal el próximo día laborable, que deja agendar con aviso) y 3 «Pendientes por agendar» abiertos (las dos cancelaciones o no-shows más recientes y un alta manual urgente; las más antiguas quedan descartadas con motivo) — DX-122, y la cita agendada más lejana de la primera dentista en la sede principal marcada «Adelantar si hay hueco», que sale como candidata en «Ocupar este hueco» al cancelar una cita anterior (DX-210), la rotación de la segunda dentista entre las dos sedes (lunes, miércoles y viernes en la principal; martes y jueves en la Norte, con sus citas dentro) y una excepción el lunes que vuelve de vacaciones: no va a la principal y cubre la Norte de 7:00 a 12:00 — DX-233, planes de tratamiento en todos
    sus estados (con un presupuesto en borrador con descuentos —uno del 10 % del
    odontólogo y otro del 15 % de la administración con su motivo, que salen en
-   el informe de descuentos (DX-204)—, listo para presentar, y otro aceptado con la firma del paciente — DX-012; y dos opciones A/B de Carolina Duque —implante o puente— presentadas hace 9 días y sin cita futura, que salen en «Presupuestos por seguir» — DX-040), abonos en COP de los últimos 60 días en ambas sedes, cada uno con su recibo de caja numerado por sede (`PRI-000001`…, `NOR-000001`…; el abono duplicado anulado conserva su número y sale «ANULADO» — DX-136), un plan de
+   el informe de descuentos (DX-204)—, listo para presentar, y otro aceptado con la firma del paciente — DX-012; y dos opciones A/B de Carolina Duque —implante o puente— presentadas hace 9 días y sin cita futura, que salen en «Presupuestos por seguir» — DX-040), abonos en la moneda de la sede de los últimos 60 días en ambas sedes, cada uno con su recibo de caja numerado por sede (`PRI-000001`…, `NOR-000001`…; el abono duplicado anulado conserva su número y sale «ANULADO» — DX-136), un plan de
    pagos con cuotas e inventario por sede con ítems bajo el stock mínimo. Varios planes se abrieron hace 20, 40, 75 y 100 días (`openedDaysAgo`), así que la cartera (DX-145) tiene deudores en todos los tramos en las dos sedes. Dos de ellos tienen gestiones de cobro y uno un compromiso de pago abierto a 5 días (DX-150): se ven en la cartera, en el bloque «Cobranza» de su ficha y con el chip «Saldo vencido» en sus citas. Recepción tiene en la sede principal la caja por turno de hoy (DX-027): la de la mañana cerrada con un arqueo que no cuadra por 2.000 (con su motivo) y la de la tarde abierta con su fondo y un cobro; los abonos históricos quedan sin caja. «Recepción Norte» está restringida a la Sede Norte (DX-089): al entrar con ella la agenda, la caja, el inventario y la cartera muestran solo esa sede, y la principal da 403 (ver «Personal restringido a sedes»).
 
    - **Idempotencia**: si el tenant `demo` ya existe, no hace nada (solo vuelve a
@@ -123,8 +123,9 @@ de despliegue hacen falta las devDependencies para sembrar. El puerto se lee de
      `admin@demo.dentalix.app` como ADMIN vivo) aborta la corrida, con o sin
      `--reset`; y si algún usuario `@demo.dentalix.app` es miembro vivo de otra
      clínica, tampoco se retira nada.
-   - **Determinista**: sin azar; todo depende solo de la fecha de hoy (hora de
-     Bogotá, UTC-5 fijo).
+   - **Determinista**: sin azar; todo depende solo de la fecha de hoy (en la zona
+     de la sede demo, hoy UTC-5 fijo; con DX-335 la región de la demo será
+     configurable). Moneda, zona horaria y país dependen siempre de la sede.
    - **Conexión**: no usa `DIRECT_URL`. Levanta la app (`AppModule`) y escribe con
      los mismos casos de uso que la API (registro, invitación + aceptación, sedes,
      horarios, pacientes, planes, abonos, plan de pagos, inventario), por
@@ -174,7 +175,7 @@ de despliegue hacen falta las devDependencies para sembrar. El puerto se lee de
 
   Los campos son una lista cerrada: la ruta es la **plantilla** (nunca la URL
   con ids ni la query de búsqueda) y no se registran cuerpos, cabeceras,
-  nombres ni datos clínicos (Ley 1581 / RGPD). Además, cualquier campo
+  nombres ni datos clínicos (minimización de datos personales). Además, cualquier campo
   estructurado pasa por una redacción que oculta `Authorization`, `Cookie`,
   `Set-Cookie` y claves con `password`, `token`, `secret` o `apiKey`.
 - **Errores 5xx**: al cliente solo le llega su cuerpo (genérico si el error
@@ -202,8 +203,8 @@ de despliegue hacen falta las devDependencies para sembrar. El puerto se lee de
 
 ## Auditoría (DX-009)
 
-Registro de quién vio o cambió datos clínicos y financieros (Ley 1581, Res.
-1995/1999, RGPD), en la tabla `audit_events` (módulo `src/modules/audit`).
+Registro de quién vio o cambió datos clínicos y financieros (trazabilidad
+que piden las normas de protección de datos y de historia clínica), en la tabla `audit_events` (módulo `src/modules/audit`).
 
 - **Qué se audita**: los endpoints marcados con `@Audit({ action, resource,
   resourceId?, patient? })`: pacientes, historia clínica, evoluciones,
