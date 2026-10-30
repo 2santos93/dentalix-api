@@ -7,6 +7,8 @@ import {
   FEE_CATALOG_CODE,
   FEE_CATALOG_LABEL,
   FEE_TOOTH_NUMBER,
+  voidPaymentsCheck,
+  type FeeVoidPaymentsCheck,
 } from '../domain/cancellation-fee';
 import type {
   CancellationFeeContext,
@@ -386,12 +388,14 @@ export class PrismaCancellationFeeRepository implements CancellationFeeRepositor
 
         const item = fee.planItemId
           ? await tx.treatmentPlanItem.findFirst({
-              where: { id: fee.planItemId, deletedAt: null },
+              where: { id: fee.planItemId, tenantId, deletedAt: null },
               select: { id: true, planId: true },
             })
           : null;
-        if (item && (await this.paymentsWouldExceed(tx, tenantId, item))) {
-          return { outcome: 'PAID' };
+        if (item) {
+          const check = await this.paymentsCheck(tx, tenantId, item);
+          if (check === 'PAID') return { outcome: 'PAID' };
+          if (check === 'UNCONVERTED') return { outcome: 'UNCONVERTED' };
         }
 
         // Primero la anulación (autor y motivo) y después el ítem: el trigger
@@ -426,36 +430,66 @@ export class PrismaCancellationFeeRepository implements CancellationFeeRepositor
   }
 
   /**
-   * ¿Los abonos vivos del plan superarían lo que queda por cobrar en él sin
-   * este ítem? Bloquea el plan (FOR UPDATE): un abono simultáneo (que lo
-   * bloquea FOR SHARE) espera a la anulación y la ve. Así anular nunca deja
-   * un saldo a favor escondido: si ya se cobró, primero se anula el abono.
+   * ¿Se puede retirar el ítem sin dejar un saldo a favor escondido? Compara
+   * en la MONEDA DEL PLAN (DX-382, BE-046): cada abono vivo con su base de
+   * imputación (DX-051, convertida con la tasa que congeló al cobrarse,
+   * DX-375) frente a lo que queda por cobrar sin este ítem; un abono sin base
+   * («sin tasa») no deja decidir. Si ya se cobró, primero se anula el abono.
+   *
+   * Bloqueos en el orden R6 de DX-051 (plan → bases ORDER BY "paymentId" →
+   * ítems), y las sumas en sentencias POSTERIORES. El plan va FOR UPDATE, no
+   * FOR SHARE: un abono nuevo (que lo bloquea FOR SHARE), la anulación de un
+   * abono, la reasignación y el reparto (que también lo toman FOR SHARE
+   * primero) esperan a la anulación y la ven. Una base que el barrido cree
+   * mientras tanto (`ensureBase`, sin el plan) solo hace que aquí el abono
+   * cuente como «sin tasa»: 409, nunca un saldo a favor.
    */
-  private async paymentsWouldExceed(
+  private async paymentsCheck(
     tx: Prisma.TransactionClient,
     tenantId: string,
     item: { id: string; planId: string },
-  ): Promise<boolean> {
-    await tx.$queryRaw`SELECT "id" FROM "treatment_plans"
-      WHERE "id" = ${item.planId}::uuid FOR UPDATE`;
-    const [row] = await tx.$queryRaw<
-      { paid: Prisma.Decimal | null; rest: Prisma.Decimal | null }[]
-    >`
-      SELECT
-        (SELECT sum(pm."amount")
-           FROM "payments" pm
-          WHERE pm."tenantId" = ${tenantId}::uuid
-            AND pm."treatmentPlanId" = ${item.planId}::uuid
-            AND pm."deletedAt" IS NULL
-            AND pm."voidedAt" IS NULL) AS "paid",
-        (SELECT sum(i."price" - i."discount")
-           FROM "treatment_plan_items" i
-          WHERE i."planId" = ${item.planId}::uuid
-            AND i."id" <> ${item.id}::uuid
-            AND i."deletedAt" IS NULL
-            AND i."status" <> 'PROPOSED') AS "rest"`;
-    const paid = row?.paid ?? new Prisma.Decimal(0);
-    const rest = row?.rest ?? new Prisma.Decimal(0);
-    return paid.greaterThan(rest);
+  ): Promise<FeeVoidPaymentsCheck> {
+    const [plan] = await tx.$queryRaw<{ currency: string }[]>`
+      SELECT "currency" FROM "treatment_plans"
+       WHERE "tenantId" = ${tenantId}::uuid AND "id" = ${item.planId}::uuid
+         FOR UPDATE`;
+    await tx.$queryRaw`
+      SELECT "paymentId" FROM "payment_plan_amounts"
+       WHERE "tenantId" = ${tenantId}::uuid
+         AND "treatmentPlanId" = ${item.planId}::uuid
+       ORDER BY "paymentId"
+         FOR UPDATE`;
+    await tx.$queryRaw`
+      SELECT "id" FROM "treatment_plan_items"
+       WHERE "tenantId" = ${tenantId}::uuid AND "id" = ${item.id}::uuid
+         FOR UPDATE`;
+    // La base cuenta solo en la moneda que el plan tiene ahora (no cambia con
+    // abonos vivos, pero una base en otra moneda tampoco se sumaría).
+    const payments = await tx.$queryRaw<{ baseCents: bigint | null }[]>`
+      SELECT round(b."amount" * 100)::bigint AS "baseCents"
+        FROM "payments" pm
+        LEFT JOIN "payment_plan_amounts" b
+          ON b."tenantId" = pm."tenantId"
+         AND b."paymentId" = pm."id"
+         AND b."treatmentPlanId" = pm."treatmentPlanId"
+         AND b."currency" = ${plan.currency}
+       WHERE pm."tenantId" = ${tenantId}::uuid
+         AND pm."treatmentPlanId" = ${item.planId}::uuid
+         AND pm."deletedAt" IS NULL
+         AND pm."voidedAt" IS NULL
+       ORDER BY pm."id"`;
+    const [rest] = await tx.$queryRaw<{ restCents: bigint }[]>`
+      SELECT round(COALESCE(sum(i."price" - i."discount"), 0) * 100)::bigint
+               AS "restCents"
+        FROM "treatment_plan_items" i
+       WHERE i."tenantId" = ${tenantId}::uuid
+         AND i."planId" = ${item.planId}::uuid
+         AND i."id" <> ${item.id}::uuid
+         AND i."deletedAt" IS NULL
+         AND i."status" <> 'PROPOSED'`;
+    return voidPaymentsCheck(
+      payments.map((p) => (p.baseCents === null ? null : Number(p.baseCents))),
+      Number(rest.restCents),
+    );
   }
 }

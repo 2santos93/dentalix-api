@@ -1978,7 +1978,15 @@ condonar) el cargo con el flujo de plan, abono y recibo de siempre.
   `voidedById` y `voidReason` y DESPUÉS retira el ítem del plan (sale del
   estado de cuenta). Una vez (409 «ya se anuló»); sin cargo generado, 409; si
   los abonos vivos del plan ya no caben en lo que queda por cobrar, 409 «Anula
-  antes el abono». La vista pasa a `status: VOIDED` con quién, cuándo y el
+  antes el abono». Esa suma va en la moneda del plan (DX-382, BE-046): cada
+  abono cuenta por su base de imputación (`payment_plan_amounts.amount`,
+  DX-051, con la tasa que congeló, DX-375), nunca por su importe en otra
+  moneda; si algún abono vivo del plan no tiene base («sin tasa», o con tasa
+  pero aún sin la base que crea el barrido de cada minuto), 409 «Hay abonos
+  todavía sin convertir a la moneda del plan; registra la tasa del día o espera
+  un minuto y vuelve a intentarlo». Candados en
+  el orden R6: plan (FOR UPDATE, para que un abono nuevo espere) → sus bases
+  ORDER BY `paymentId` → el ítem del cargo; las sumas, después. La vista pasa a `status: VOIDED` con quién, cuándo y el
   motivo. Auditoría `VOID APPOINTMENT` `CANCELLATION_FEE_VOIDED` con
   `statusChange` CHARGED → VOIDED, sin el texto. Sin Idempotency-Key (como
   condonar): repetir da 409. **Desde el plan**, el ítem de un cargo vigente

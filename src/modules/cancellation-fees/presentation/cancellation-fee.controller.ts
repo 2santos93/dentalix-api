@@ -181,7 +181,7 @@ export class CancellationFeeController {
   @ApiOperation({
     summary: 'Anular un cargo ya generado, con motivo (SEC-050)',
     description:
-      'La única forma de dejar sin efecto un cargo generado: desde el plan, su ítem no cambia de precio, descuento ni estado ni se quita (409 a todo rol). En una transacción, con la cita y el cargo bloqueados, guarda en el cargo quién, cuándo y el motivo (3–500) y retira su ítem del plan «Cargos administrativos» (deja de salir en el estado de cuenta). Una vez por cargo. Si los abonos vivos de ese plan ya cubren el cargo, 409: se anula antes el abono. Auditado (VOID APPOINTMENT, CANCELLATION_FEE_VOIDED, estado CHARGED → VOIDED, sin el texto del motivo). Sin Idempotency-Key, como condonar: repetirla da 409 «ya se anuló».',
+      'La única forma de dejar sin efecto un cargo generado: desde el plan, su ítem no cambia de precio, descuento ni estado ni se quita (409 a todo rol). En una transacción, con la cita y el cargo bloqueados, guarda en el cargo quién, cuándo y el motivo (3–500) y retira su ítem del plan «Cargos administrativos» (deja de salir en el estado de cuenta). Una vez por cargo. Si los abonos vivos de ese plan ya cubren el cargo, 409: se anula antes el abono. Lo cobrado se compara en la moneda del plan con la base de imputación de cada abono (DX-051, con la tasa que congeló, DX-375); si algún abono vivo aún no la tiene («sin tasa»), 409 «Hay abonos sin convertir» (DX-382). Auditado (VOID APPOINTMENT, CANCELLATION_FEE_VOIDED, estado CHARGED → VOIDED, sin el texto del motivo). Sin Idempotency-Key, como condonar: repetirla da 409 «ya se anuló».',
   })
   @ApiCreatedResponse({ type: CancellationFeeViewDto })
   @ApiBadRequestResponse({ description: 'Motivo vacío o de más de 500' })
@@ -192,7 +192,7 @@ export class CancellationFeeController {
   @ApiNotFoundResponse({ description: 'Cita no encontrada en esta clínica' })
   @ApiConflictResponse({
     description:
-      'Sin cargo generado (o condonado), ya anulado, ya cobrado (anula antes el abono), o la cita cambió',
+      'Sin cargo generado (o condonado), ya anulado, ya cobrado (anula antes el abono), hay abonos del plan sin convertir a su moneda (registra la tasa del día), o la cita cambió. «Ya cobrado» compara en la moneda del plan con la base de cada abono (DX-382)',
   })
   voidFee(
     @Param('id', ParseUUIDPipe) id: string,
