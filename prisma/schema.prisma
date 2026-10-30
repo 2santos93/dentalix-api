@@ -2173,6 +2173,8 @@ model Payment {
   planAmounts         PaymentPlanAmount[]
   allocations         PaymentAllocation[]
   allocationMovements PaymentAllocationMovement[]
+  // DX-380: su reintento si se quedó sin tasa o sin base (una fila como mucho).
+  baseRetry           PaymentBaseRetry?
 
   // Idempotency dedup for POST payments. Prisma's `@@unique` would emit a FULL
   // unique index; the migration 20260731160000_add_payment_idempotency_key
@@ -2182,6 +2184,9 @@ model Payment {
   // migrate status/deploy see no drift. Do NOT accept a migrate-dev diff that
   // recreates this as a full index.
   @@unique([tenantId, idempotencyKey], map: "payments_tenant_idempotency_key")
+  // DX-380: destino de la FK compuesta por clínica de `payment_base_retries`
+  // (el único con "treatmentPlanId" no sirve para un abono a un saldo migrado).
+  @@unique([tenantId, id], map: "payments_tenant_id_key")
   // DX-051: destino de las FK de la base y de la imputación (solo abonos a
   // planes; CONCURRENTLY en 20261026100100).
   @@unique([tenantId, id, treatmentPlanId], map: "payments_tenant_id_plan_key")
@@ -5067,6 +5072,40 @@ model PaymentAllocation {
   @@index([tenantId, treatmentPlanItemId], map: "payment_allocations_tenant_item_idx")
   @@index([tenantId, treatmentPlanId], map: "payment_allocations_tenant_plan_idx")
   @@map("payment_allocations")
+}
+
+/// DX-380 (OPS-045): por qué falló el último intento de un abono sin base.
+enum PaymentBaseRetryReason {
+  /// Su moneda no tiene tasa ese día (manual sin registrar, proveedor caído,
+  /// tiempo agotado o presupuesto agotado).
+  NO_RATE
+  /// Cualquier otro fallo.
+  ERROR
+}
+
+/// DX-380 (OPS-045, DB-056): reintento escalonado de un abono vivo que se
+/// quedó sin base de imputación o sin su tasa congelada, y lista de trabajo
+/// del barrido de cada minuto (selección por "nextAttemptAt"). Una fila por
+/// abono pendiente; la crea el trigger diferido `payments_base_retry_enroll`
+/// al confirmar el alta y la borra el barrido al resolverlo. RLS FORCE por
+/// tenant. Solo SQL: CHECK `payment_base_retries_attempts_check`, funciones
+/// `dx_payment_base_retry_enroll` y `dx_payment_allocation_sweep_tenants`.
+model PaymentBaseRetry {
+  tenantId      String                  @db.Uuid
+  paymentId     String                  @db.Uuid
+  /// Intentos fallidos del barrido (0 = aún no intentado).
+  attempts      Int                     @default(0)
+  nextAttemptAt DateTime                @default(dbgenerated("timezone('UTC'::text, now())"))
+  lastReason    PaymentBaseRetryReason?
+  /// Desde cuándo está pendiente (el alta del abono): el aviso al ADMIN.
+  createdAt     DateTime                @default(dbgenerated("timezone('UTC'::text, now())"))
+  updatedAt     DateTime                @default(dbgenerated("timezone('UTC'::text, now())"))
+
+  payment Payment @relation(fields: [tenantId, paymentId], references: [tenantId, id], onDelete: Cascade, onUpdate: Restrict, map: "payment_base_retries_payment_fkey")
+
+  @@id([tenantId, paymentId])
+  @@index([tenantId, nextAttemptAt], map: "payment_base_retries_due_idx")
+  @@map("payment_base_retries")
 }
 
 /// Plan con reparto de sobrantes pendiente (DX-051). Cola de SOLO-INSERCIÓN:

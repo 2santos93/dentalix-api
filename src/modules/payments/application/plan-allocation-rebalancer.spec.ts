@@ -244,7 +244,7 @@ describe('PlanAllocationRebalancer', () => {
 
   // DX-375: el barrido congela la tasa de los abonos que la esperan, con la
   // fuente de la clínica y el día civil de cada uno; la base sale de ella.
-  describe('freezePendingRates (DX-375)', () => {
+  describe('freezeAllPending (DX-375, BE-047)', () => {
     function quoting(rates: Record<string, number>, source = 'AUTOMATIC') {
       const convert = {
         memoized: () => convert,
@@ -270,7 +270,7 @@ describe('PlanAllocationRebalancer', () => {
       return convert as unknown as ConvertAmountUseCase;
     }
 
-    it('congela la tasa de su día, cuenta los que siguen sin tasa y la base usa la congelada', async () => {
+    it('congela la tasa de su día y cuenta los que siguen sin tasa', async () => {
       const repo = new InMemoryPlanAllocationRepository();
       const rebalancer = new PlanAllocationRebalancer(
         repo,
@@ -290,19 +290,7 @@ describe('PlanAllocationRebalancer', () => {
           paidOn: '2026-10-20',
         },
       ];
-      repo.withoutBase = [
-        {
-          paymentId: 'cop',
-          amount: 200000,
-          currency: 'COP',
-          planCurrency: 'USD',
-          paidOn: '2026-10-20',
-          exchangeRateCurrency: 'USD',
-          frozenRate: null,
-        },
-      ];
-
-      await expect(rebalancer.freezePendingRates(50)).resolves.toEqual({
+      await expect(rebalancer.freezeAllPending(50)).resolves.toEqual({
         frozen: 1,
         withoutRate: 1,
       });
@@ -321,11 +309,6 @@ describe('PlanAllocationRebalancer', () => {
         targetCurrency: 'USD',
         rate: null,
       });
-      await expect(rebalancer.createMissingBases(50)).resolves.toEqual({
-        created: 1,
-        withoutRate: 0,
-      });
-      expect(repo.bases.get('cop')?.amount).toBe(50);
     });
 
     it('un abono anterior en su misma moneda solo recibe su moneda de destino', async () => {
@@ -339,7 +322,7 @@ describe('PlanAllocationRebalancer', () => {
           paidOn: '2026-10-20',
         },
       ];
-      await expect(rebalancer.freezePendingRates(50)).resolves.toEqual({
+      await expect(rebalancer.freezeAllPending(50)).resolves.toEqual({
         frozen: 0,
         withoutRate: 0,
       });
@@ -381,74 +364,6 @@ describe('PlanAllocationRebalancer', () => {
       await expect(rebalancer.freezeAllPending(2)).resolves.toEqual({
         frozen: 0,
         withoutRate: 1,
-      });
-    });
-  });
-
-  describe('createMissingBases', () => {
-    it('converts at paidOn, creates the base and counts payments without rate', async () => {
-      const { repo, rebalancer } = setup({ USD: 0.9 });
-      repo.withoutBase = [
-        {
-          paymentId: 'usd',
-          amount: 100,
-          currency: 'USD',
-          planCurrency: 'EUR',
-          paidOn: '2026-10-20',
-          exchangeRateCurrency: null,
-          frozenRate: null,
-        },
-        {
-          paymentId: 'gbp',
-          amount: 50,
-          currency: 'GBP',
-          planCurrency: 'EUR',
-          paidOn: '2026-10-20',
-          exchangeRateCurrency: null,
-          frozenRate: null,
-        },
-      ];
-
-      await expect(rebalancer.createMissingBases(50)).resolves.toEqual({
-        created: 1,
-        withoutRate: 1,
-      });
-      expect(repo.bases.get('usd')).toEqual({
-        amount: 90,
-        currency: 'EUR',
-        rateDate: '2026-10-20',
-      });
-    });
-
-    it('a conversion failure other than «no rate» counts as without rate and is logged', async () => {
-      const repo = new InMemoryPlanAllocationRepository();
-      const convert = {
-        execute: () => Promise.reject(new Error('proveedor caído')),
-      } as unknown as ConvertAmountUseCase;
-      const rebalancer = new PlanAllocationRebalancer(repo, convert);
-      repo.withoutBase = [
-        {
-          paymentId: 'usd',
-          amount: 100,
-          currency: 'USD',
-          planCurrency: 'EUR',
-          paidOn: '2026-10-20',
-          exchangeRateCurrency: null,
-          frozenRate: null,
-        },
-      ];
-      const warn = jest
-        .spyOn(Logger.prototype, 'warn')
-        .mockImplementation(() => undefined);
-
-      await expect(rebalancer.createMissingBases(50)).resolves.toEqual({
-        created: 0,
-        withoutRate: 1,
-      });
-      expect(warn).toHaveBeenCalledWith({
-        event: 'payments.allocation_base_conversion_failed',
-        paymentId: 'usd',
-        error: 'Error',
       });
     });
   });
