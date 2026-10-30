@@ -90,9 +90,12 @@ const acceptSigned = new AcceptTreatmentPlanUseCase(
   () => NOW,
   documentTypeNames,
 );
+const identityExecute = (input: { amount: number }) =>
+  Promise.resolve({ ...input, result: input.amount, rateUsed: 1 });
+// DX-374: el saldo pide un convertidor memoizado por cálculo.
 const identityConvert = {
-  execute: (input: { amount: number }) =>
-    Promise.resolve({ ...input, result: input.amount, rateUsed: 1 }),
+  execute: identityExecute,
+  memoized: () => ({ execute: identityExecute }),
 } as unknown as ConvertAmountUseCase;
 const balance = new GetPlanBalanceUseCase(
   paymentRepo,

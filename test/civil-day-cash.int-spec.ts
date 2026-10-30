@@ -29,13 +29,16 @@ const cash = new ListCashPaymentsUseCase(
   () => new Date('2026-10-17T15:00:00.000Z'),
 );
 // Tasa 1:1: aquí importa QUÉ abonos entran, no la conversión.
+const identityExecute = (input: {
+  amount: number;
+  from: string;
+  to: string;
+  date: string;
+}) => Promise.resolve({ ...input, result: input.amount, rateUsed: 1 });
+// DX-374: los totales piden un convertidor memoizado por cálculo.
 const identityConvert = {
-  execute: (input: {
-    amount: number;
-    from: string;
-    to: string;
-    date: string;
-  }) => Promise.resolve({ ...input, result: input.amount, rateUsed: 1 }),
+  execute: identityExecute,
+  memoized: () => ({ execute: identityExecute }),
 } as unknown as ConvertAmountUseCase;
 const totals = new GetPaymentsTotalsUseCase(repo, identityConvert);
 const ADMIN = { userId: 'int-admin', role: ClinicRole.ADMIN };
