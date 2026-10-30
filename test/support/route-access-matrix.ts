@@ -117,14 +117,12 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
 
   // --- Cualquier sesión (sin rol de clínica) -------------------------------
   // dentalix-docs/docs/plans/2026-07-28-user-profile.md (/me) y
-  // 2026-07-24-exchange-service.md (/exchange y referencia).
+  // 2026-07-24-exchange-service.md (referencia).
   'GET /me': AUTHENTICATED,
   'PATCH /me': AUTHENTICATED,
   'POST /me/password': AUTHENTICATED,
   'POST /me/avatar': AUTHENTICATED,
   'DELETE /me/avatar': AUTHENTICATED,
-  'GET /exchange/rates': AUTHENTICATED,
-  'GET /exchange/convert': AUTHENTICATED,
   'GET /currencies': AUTHENTICATED,
   'GET /countries': AUTHENTICATED,
   'GET /cities': AUTHENTICATED,
@@ -273,6 +271,15 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // DX-300: previsualización de avisos de seguridad (solo quien emite).
   'POST /patients/:patientId/prescriptions/safety-check': PRESCRIBERS,
   'GET /prescriptions/issuer': PRESCRIBERS,
+  // DX-374 (loop/informes/DX-374.md): la tasa de un día depende de la
+  // fuente de la clínica, así que leerla y convertir son rutas de clínica de
+  // los cuatro roles; la fuente y las tasas manuales, solo el ADMIN.
+  'GET /exchange/rates': EVERY_ROLE,
+  'GET /exchange/convert': EVERY_ROLE,
+  'GET /exchange/settings': ADMIN_ONLY,
+  'PUT /exchange/settings': ADMIN_ONLY,
+  'GET /exchange/manual-rates': ADMIN_ONLY,
+  'POST /exchange/manual-rates': ADMIN_ONLY,
   // DX-324: ajustes de la receta de la clínica; los cambia solo el ADMIN.
   'GET /prescriptions/settings': CLINICAL,
   'PUT /prescriptions/settings': ADMIN_ONLY,

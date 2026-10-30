@@ -1,12 +1,8 @@
-import {
-  BadRequestException,
-  Inject,
-  Injectable,
-  Logger,
-} from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { PAYMENT_REPOSITORY } from '../../domain/ports/payment-repository.port';
 import type { PaymentRepository } from '../../domain/ports/payment-repository.port';
 import { ConvertAmountUseCase } from '../../../exchange/application/use-cases/convert-amount.use-case';
+import { isMissingRateError } from '../../../exchange/domain/missing-exchange-rate.error';
 
 /**
  * Período en días CIVILES (YYYY-MM-DD, ambos inclusive, ya validados por quien
@@ -41,17 +37,11 @@ function round2(value: number): number {
 
 // `ConvertAmountUseCase` throws exactly this kind of error (see
 // convert-amount.use-case.ts) when a payment's stored currency has no rate
-// in that date's snapshot. This is the ONLY failure this use case treats as
-// "safe to skip" — anything else (a DB/infra outage inside
+// that day: missing from the provider's snapshot or, for a clinic on manual
+// rates, not registered (DX-374). This is the ONLY failure this use case
+// treats as "safe to skip" — anything else (a DB/infra outage inside
 // GetRatesForDateUseCase, a programming error, etc.) must propagate instead
 // of silently corrupting a financial total with no trace.
-function isUnsupportedCurrencyError(error: unknown): boolean {
-  return (
-    error instanceof BadRequestException &&
-    typeof error.message === 'string' &&
-    error.message.startsWith('unsupported currency')
-  );
-}
 
 /**
  * Mirrors `GetSalesTotalsUseCase` over `Payment` instead of `Sale` — this is
@@ -125,7 +115,7 @@ export class GetPaymentsTotalsUseCase {
         });
         totalConverted += round2(payment.amount * rateUsed);
       } catch (error) {
-        if (!isUnsupportedCurrencyError(error)) {
+        if (!isMissingRateError(error)) {
           throw error;
         }
         this.logger.warn(

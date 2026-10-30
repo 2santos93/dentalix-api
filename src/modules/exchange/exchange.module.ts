@@ -10,6 +10,21 @@ import { ExchangeController } from './presentation/exchange.controller';
 import { TokenService } from '../../shared/crypto/token.service';
 import { JobsModule } from '../jobs/jobs.module';
 import { ExchangePrefetchJobs } from './application/jobs/exchange-prefetch.jobs';
+import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
+import { CLINIC_EXCHANGE_SETTINGS_REPOSITORY } from './domain/ports/clinic-exchange-settings-repository.port';
+import { MANUAL_EXCHANGE_RATE_REPOSITORY } from './domain/ports/manual-exchange-rate-repository.port';
+import { PrismaClinicExchangeSettingsRepository } from './infrastructure/repositories/prisma-clinic-exchange-settings.repository';
+import { PrismaManualExchangeRateRepository } from './infrastructure/repositories/prisma-manual-exchange-rate.repository';
+import {
+  GetExchangeRateSettingsUseCase,
+  UpdateExchangeRateSettingsUseCase,
+} from './application/use-cases/exchange-rate-settings.use-cases';
+import {
+  ListManualExchangeRatesUseCase,
+  MANUAL_EXCHANGE_RATE_CLOCK,
+  RegisterManualExchangeRateUseCase,
+} from './application/use-cases/manual-exchange-rates.use-cases';
+import { ExchangeSettingsController } from './presentation/exchange-settings.controller';
 
 // ConfigModule (ConfigService, used by OpenExchangeRatesProvider) and
 // PrismaModule (PrismaService, used by PrismaExchangeRateRepository) are both
@@ -21,7 +36,8 @@ import { ExchangePrefetchJobs } from './application/jobs/exchange-prefetch.jobs'
   // here since the guard is applied on this module's controller.
   // JobsModule: precarga diaria de los tipos de cambio (DX-085).
   imports: [JwtModule.register({}), JobsModule],
-  controllers: [ExchangeController],
+  // DX-374: fuente de la tasa de la clínica y tasas manuales (solo ADMIN).
+  controllers: [ExchangeController, ExchangeSettingsController],
   providers: [
     // GetRatesForDateUseCase must be registered explicitly as a provider (not
     // only implicitly constructed): ConvertAmountUseCase injects it directly
@@ -29,7 +45,21 @@ import { ExchangePrefetchJobs } from './application/jobs/exchange-prefetch.jobs'
     GetRatesForDateUseCase,
     ConvertAmountUseCase,
     TokenService,
+    TenantContextInterceptor,
     ExchangePrefetchJobs,
+    GetExchangeRateSettingsUseCase,
+    UpdateExchangeRateSettingsUseCase,
+    ListManualExchangeRatesUseCase,
+    RegisterManualExchangeRateUseCase,
+    { provide: MANUAL_EXCHANGE_RATE_CLOCK, useValue: () => new Date() },
+    {
+      provide: CLINIC_EXCHANGE_SETTINGS_REPOSITORY,
+      useClass: PrismaClinicExchangeSettingsRepository,
+    },
+    {
+      provide: MANUAL_EXCHANGE_RATE_REPOSITORY,
+      useClass: PrismaManualExchangeRateRepository,
+    },
     {
       provide: EXCHANGE_RATE_PROVIDER,
       useClass: OpenExchangeRatesProvider,

@@ -68,6 +68,7 @@ import {
   ProviderScheduleController,
   ScheduleRosterController,
 } from '../provider-schedule/presentation/provider-schedule.controller';
+import { ExchangeSettingsController } from '../exchange/presentation/exchange-settings.controller';
 import { AppModule } from '../../app.module';
 import {
   collectControllers,
@@ -1167,6 +1168,12 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: { param: 'id' },
     patient: P,
   },
+  // DX-374: alta de una tasa de cambio manual (solo ADMIN); el id de la tasa.
+  'POST /exchange/manual-rates': {
+    action: 'CREATE',
+    resource: 'EXCHANGE_RATE',
+    resourceId: RES,
+  },
   // SEC-009: verificar (cambia el ruteo) y eliminar un dominio personalizado.
   'POST /domains/:id/verify': {
     action: 'UPDATE',
@@ -1245,6 +1252,10 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // y el antes y el después en códigos RX; sin evento si nada cambió.
   'PUT /prescriptions/settings':
     'prescription-settings.use-cases.spec.ts y prescription-settings.e2e-spec.ts',
+  // DX-374: CLINIC_SETTINGS con EXCHANGE_RATE_SOURCE y el antes y el después;
+  // sin evento si no cambia.
+  'PUT /exchange/settings':
+    'exchange-rate-settings.use-cases.spec.ts y exchange-rate-source.e2e-spec.ts',
   // DX-274: VIEW si se abre en el navegador, EXPORT si se descarga (la acción
   // depende de la query, que el decorador no lee).
   'GET /expenses/:id/attachment/url':
@@ -1396,6 +1407,7 @@ const CONTROLLERS: Type[] = [
   PatientPostOpDeliveriesController,
   ProviderScheduleController,
   ScheduleRosterController,
+  ExchangeSettingsController,
 ];
 
 function joinPath(...parts: string[]): string {

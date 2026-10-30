@@ -3,6 +3,7 @@ import {
   GetRatesForDateUseCase,
   isValidDateFormat,
 } from './get-rates-for-date.use-case';
+import { MissingExchangeRateError } from '../../domain/missing-exchange-rate.error';
 
 export interface ConvertAmountInput {
   amount: number;
@@ -30,7 +31,8 @@ function isFiniteNonNegativeAmount(value: unknown): value is number {
  * given date (so a payment always converts by the rate of ITS date, not
  * today's). Rates come from `GetRatesForDateUseCase` — this reuses that
  * use case (instead of talking to the repo/provider directly) so the
- * cache-then-fetch logic lives in exactly one place.
+ * cache-then-fetch logic lives in exactly one place. DX-374: también la
+ * fuente de la clínica del contexto (proveedor o tasa manual).
  */
 @Injectable()
 export class ConvertAmountUseCase {
@@ -50,17 +52,24 @@ export class ConvertAmountUseCase {
       return { amount, from, to, date, result: amount, rateUsed: 1 };
     }
 
-    const { rates } = await this.getRatesForDate.execute(date);
+    const { rates, source } = await this.getRatesForDate.execute(date);
+    // DX-374: con tasa manual, una moneda ausente es la tasa que la clínica
+    // aún no registró ese día (error de dominio en español); con el
+    // proveedor, una moneda que no trae.
+    const noRate = (currency: string): BadRequestException =>
+      source === 'MANUAL'
+        ? new MissingExchangeRateError(currency, date)
+        : new BadRequestException(`unsupported currency: ${currency}`);
 
     // Rates are "units of currency per 1 USD" (base USD); USD itself never
     // has (nor needs) a snapshot row.
     const rateFrom = from === 'USD' ? 1 : rates[from];
     if (rateFrom === undefined) {
-      throw new BadRequestException(`unsupported currency: ${from}`);
+      throw noRate(from);
     }
     const rateTo = to === 'USD' ? 1 : rates[to];
     if (rateTo === undefined) {
-      throw new BadRequestException(`unsupported currency: ${to}`);
+      throw noRate(to);
     }
 
     const usd = from === 'USD' ? amount : amount / rateFrom;
