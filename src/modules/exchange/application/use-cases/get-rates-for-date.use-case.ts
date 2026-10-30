@@ -57,6 +57,12 @@ export function invalidRateDate(): BadRequestException {
 }
 
 /**
+ * La zona IANA más atrasada (UTC−12): su día civil es el «hoy» más antiguo
+ * del planeta, así que un día que no lo supera no es futuro en ninguna sede.
+ */
+const EARLIEST_TIME_ZONE = 'Etc/GMT+12';
+
+/**
  * BE-049 (DX-383): las rutas de tasas solo admiten días del rango de las
  * fechas de consulta (`PERIOD_DAY_MIN`..`PERIOD_DAY_MAX`, el mismo del alta de
  * una tasa manual). Fuera de él no hay tasa que tenga sentido para una
@@ -223,13 +229,19 @@ export class GetRatesForDateUseCase {
   async forRequest(date: string): Promise<RatesForDate> {
     if (!isValidRateDate(date)) throw invalidRateDate();
     if (!isRateDateInRange(date)) throw rateDateNotInRange();
-    const window = await this.settings.providerWindow();
-    const { today } = this.windowDays(window);
-    if (date > today) throw rateDateInFuture(today);
+    // La ventana (alta, primer abono, zonas de las sedes) son tres consultas:
+    // se lee como mucho una vez, y solo si hace falta. Un día que ya llegó en
+    // la zona más atrasada del planeta no es futuro en ninguna sede.
+    let window: Promise<ClinicProviderWindow> | undefined;
+    const readWindow = () => (window ??= this.settings.providerWindow());
+    if (date > civilDateIn(this.now(), EARLIEST_TIME_ZONE)) {
+      const { today } = this.windowDays(await readWindow());
+      if (date > today) throw rateDateInFuture(today);
+    }
     return this.ratesWith(
       date,
       () => this.clinicSettings(),
-      (day) => this.assertWithinProviderWindow(day, window),
+      async (day) => this.assertWithinProviderWindow(day, await readWindow()),
     );
   }
 

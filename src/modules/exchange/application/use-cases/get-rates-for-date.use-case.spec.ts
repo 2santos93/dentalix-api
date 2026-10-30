@@ -476,14 +476,15 @@ describe('GetRatesForDateUseCase', () => {
         since: new Date('2026-08-15T15:00:00.000Z'),
         timeZones: options.timeZones ?? ['America/Bogota'],
       };
+      const settings = makeSettings(
+        { [M]: { source: 'MANUAL', manualSince: '2026-10-01' } },
+        tenantContext,
+        { windows: { [A]: window, [M]: window } },
+      );
       const uc = new GetRatesForDateUseCase(
         repo,
         makeProvider(fetchRates),
-        makeSettings(
-          { [M]: { source: 'MANUAL', manualSince: '2026-10-01' } },
-          tenantContext,
-          { windows: { [A]: window, [M]: window } },
-        ),
+        settings,
         makeManualRates({}, tenantContext),
         tenantContext,
         gate,
@@ -491,7 +492,7 @@ describe('GetRatesForDateUseCase', () => {
       );
       const asA = <T>(fn: () => Promise<T>) => tenantContext.run(A, fn);
       const asM = <T>(fn: () => Promise<T>) => tenantContext.run(M, fn);
-      return { uc, repo, fetchRates, asA, asM };
+      return { uc, repo, fetchRates, asA, asM, settings };
     }
 
     async function badRequestBody(promise: Promise<unknown>) {
@@ -598,6 +599,27 @@ describe('GetRatesForDateUseCase', () => {
         today: '2026-10-31',
       });
       expect(fetchRates).not.toHaveBeenCalled();
+    });
+
+    it('un día que ya llegó en todo el planeta no lee la ventana; uno sin guardar, una vez (DX-383)', async () => {
+      const { uc, fetchRates, asA, asM, settings } = setup({
+        timeZones: ['America/Bogota', 'Pacific/Kiritimati'],
+      });
+      const providerWindow = jest.spyOn(settings, 'providerWindow');
+      // Guardado, con MANUAL, y hoy (en UTC−12 ya es el 30): sin leer la ventana.
+      await asA(() => uc.forRequest('2020-01-02'));
+      await asM(() => uc.forRequest('2026-10-15'));
+      await asM(() => uc.forRequest('2026-10-30'));
+      expect(providerWindow).not.toHaveBeenCalled();
+      // Sin guardar: la ventana se lee una sola vez antes de pedirlo.
+      await asA(() => uc.forRequest('2026-10-01'));
+      expect(providerWindow).toHaveBeenCalledTimes(1);
+      // Un día que aún no llegó en alguna zona sí mira las sedes (y en
+      // Kiritimati el 31 ya es hoy), una sola lectura aunque lo pida.
+      providerWindow.mockClear();
+      await asA(() => uc.forRequest('2026-10-31'));
+      expect(providerWindow).toHaveBeenCalledTimes(1);
+      expect(fetchRates).toHaveBeenCalledTimes(2);
     });
 
     it('los bordes de la ventana sí se piden', async () => {
