@@ -7,6 +7,13 @@ import {
   type FrozenExchangeRate,
 } from '../domain/payment-exchange-rate';
 import { freezePaymentRate, paymentAmountIn } from './payment-exchange-rate';
+import { ConvertAmountUseCase } from '../../exchange/application/use-cases/convert-amount.use-case';
+import { GetRatesForDateUseCase } from '../../exchange/application/use-cases/get-rates-for-date.use-case';
+import {
+  makeManualRates,
+  makeSettings,
+} from '../../exchange/application/__fixtures__/in-memory-exchange-settings';
+import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 
 const DAY = '2026-10-30';
 const FROZEN_AUTO: FrozenExchangeRate = {
@@ -286,6 +293,103 @@ describe('tasa congelada de un abono (DX-375)', () => {
           paidOn: DAY,
         }),
       ).resolves.toBeNull();
+    });
+  });
+
+  // Criterio DX-375: dos clínicas con fuentes distintas el MISMO día congelan
+  // cada una la suya (A del proveedor, B la manual), sin mezclarse, y lo
+  // congelado no se mueve cuando después cambian la tasa del proveedor, la
+  // manual o la fuente.
+  describe('dos clínicas con fuentes distintas el mismo día', () => {
+    const A = '11111111-1111-4111-8111-111111111111';
+    const B = '22222222-2222-4222-8222-222222222222';
+
+    function clinics() {
+      const tenantContext = new TenantContextService();
+      const provider: Record<string, number> = { COP: 4000 };
+      const settings = makeSettings({ [B]: 'MANUAL' }, tenantContext);
+      const manual = makeManualRates(
+        { [B]: { [DAY]: { COP: 4100 } } },
+        tenantContext,
+      );
+      const convert = new ConvertAmountUseCase(
+        new GetRatesForDateUseCase(
+          {
+            findByDate: (date) =>
+              Promise.resolve(
+                date === DAY
+                  ? Object.entries(provider).map(([currency, rate]) => ({
+                      id: `${date}:${currency}`,
+                      date,
+                      currency,
+                      rate,
+                      fetchedAt: new Date(0),
+                    }))
+                  : [],
+              ),
+            upsertMany: () => Promise.reject(new Error('no')),
+          },
+          { fetchRates: () => Promise.reject(new Error('no')) },
+          settings,
+          manual,
+          tenantContext,
+        ),
+      );
+      const freezeIn = (tenant: string) =>
+        tenantContext.run(tenant, () =>
+          freezePaymentRate(convert, {
+            currency: 'COP',
+            targetCurrency: 'USD',
+            paidOn: DAY,
+          }),
+        );
+      return { tenantContext, provider, settings, manual, convert, freezeIn };
+    }
+
+    it('cada una congela su tasa y su fuente, y el saldo no se mueve después', async () => {
+      const c = clinics();
+      const a = await c.freezeIn(A);
+      const b = await c.freezeIn(B);
+      expect(a).toEqual({
+        currency: 'USD',
+        fromPerBase: 4000,
+        toPerBase: 1,
+        source: 'AUTOMATIC',
+        date: DAY,
+      });
+      expect(b).toEqual({
+        currency: 'USD',
+        fromPerBase: 4100,
+        toPerBase: 1,
+        source: 'MANUAL',
+        date: DAY,
+      });
+
+      const amountWith = (tenant: string, frozenRate: FrozenExchangeRate) =>
+        c.tenantContext.run(tenant, () =>
+          paymentAmountIn(
+            c.convert,
+            {
+              amount: 410000,
+              currency: 'COP',
+              paidOn: DAY,
+              exchangeRateCurrency: 'USD',
+              frozenRate,
+            },
+            'USD',
+          ),
+        );
+      await expect(amountWith(A, a!)).resolves.toBe(102.5);
+      await expect(amountWith(B, b!)).resolves.toBe(100);
+
+      // Cambian el proveedor, la tasa manual de B y la fuente de A: nada se mueve.
+      c.provider.COP = 5000;
+      c.manual.rows(B)[0].rate = 5100;
+      await c.tenantContext.run(A, () =>
+        c.settings.set(() => ({ source: 'MANUAL', manualSince: DAY })),
+      );
+      await expect(amountWith(A, a!)).resolves.toBe(102.5);
+      await expect(amountWith(B, b!)).resolves.toBe(100);
     });
   });
 });
