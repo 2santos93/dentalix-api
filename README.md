@@ -2371,7 +2371,10 @@ después no altera nada ya calculado.
   de la transacción del alta, con el plan bloqueado, se guarda si sigue
   valiendo: la misma moneda del plan, el mismo día y, con `MANUAL`, las mismas
   tasas manuales, que quedan `FOR SHARE` hasta el COMMIT. La base de
-  imputación (DX-051) y el saldo del recibo salen de esa misma tasa.
+  imputación (DX-051) y el saldo del recibo salen de esa misma tasa, ya
+  redondeada a los 8 decimales de la columna (lo mismo que se lee después;
+  una tasa que redondea a 0 cuenta como «sin tasa»). Si dentro ya no vale, el
+  abono queda «sin tasa» y el recibo sale sin saldo del plan.
 - **Columnas** de `payments` (todas NULL): `exchangeRateCurrency` (moneda de
   destino: la del plan o la del saldo migrado; la escribe todo abono nuevo),
   `exchangeRateFrom` y `exchangeRateTo` (unidades de la moneda del abono y de
@@ -2396,7 +2399,11 @@ después no altera nada ya calculado.
   el aviso con enlace a Ajustes › Tasa de cambio. El barrido de cada minuto
   (`payment-allocations.sweep`) congela primero la tasa de los abonos que la
   esperan (hasta 50 por clínica, índice parcial
-  `payments_exchange_rate_pending_idx`) y después crea sus bases.
+  `payments_exchange_rate_pending_idx`) y después crea sus bases. Va del más
+  reciente al más antiguo y sin reintento escalonado: con más de 50 abonos
+  que siguen sin tasa en una clínica, los más antiguos no entran en la pasada
+  aunque ya haya su tasa (hasta DX-380; mientras, los congela imputarlos a
+  mano o un cambio de fuente).
 - **Cambio de fuente** (BE-047): `PUT /exchange/settings`, si la fuente
   cambia, congela ANTES todos los abonos pendientes de la clínica con la
   fuente de antes (`ExchangeSourceChangeHooks`, que registra
