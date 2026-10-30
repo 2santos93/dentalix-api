@@ -815,10 +815,16 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     const confirmations = await raw.appointmentConfirmation.findMany({
       where: { tenantId },
       include: { appointment: true },
-      orderBy: { appointmentStart: 'asc' },
+      orderBy: [{ appointmentStart: 'asc' }, { id: 'asc' }],
     });
     expect(confirmations).toHaveLength(2);
-    const [pending, callMe] = confirmations;
+    // Las dos primeras citas pueden empezar a la vez (dos odontólogos): se
+    // eligen por su respuesta, no por su posición.
+    const pending = confirmations.find((c) => c.response === null);
+    const callMe = confirmations.find((c) => c.response === 'CALL_ME');
+    if (!pending || !callMe) {
+      throw new Error('falta la confirmación pendiente o la que pide llamada');
+    }
 
     expect(pending.respondedAt).toBeNull();
     expect(pending.appointment.status).toBe('SCHEDULED');
