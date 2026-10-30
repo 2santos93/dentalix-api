@@ -41,7 +41,34 @@ export type PhoneReading =
   | { kind: 'NONE' };
 
 // Solo una extensión al final, con su número (pre-flight m2).
-const EXTENSION = /\s*(?:ext\.?|extensi[oó]n|x|#)\s*\d{1,6}$/i;
+const EXTENSION = /\s*(?:ext\.?|extensi[oó]n|x|#)\s*\d{1,6}$/iu;
+/**
+ * Ningún teléfono con su extensión es más largo. Se corta antes de cualquier
+ * patrón: `EXTENSION` es cuadrático en una racha larga de espacios.
+ */
+const MAX_LENGTH = 64;
+/** Fuera de la extensión, cualquier letra de cualquier escritura, o un `#`. */
+const NOT_A_PHONE = /[\p{L}#]/u;
+const DECIMAL_DIGIT = /\p{Nd}/gu;
+
+/**
+ * El valor de un dígito decimal de cualquier escritura. Unicode los da en
+ * series contiguas de diez, del 0 al 9: el valor es la distancia al principio
+ * de su racha, módulo 10.
+ */
+function digitValue(digit: string): string {
+  const code = digit.codePointAt(0) ?? 0;
+  let start = code;
+  while (/\p{Nd}/u.test(String.fromCodePoint(start - 1))) start--;
+  return String((code - start) % 10);
+}
+
+/**
+ * NFKC (dígitos y `+` de ancho completo) y cada dígito decimal en ASCII, para
+ * que las dos lecturas vean los mismos dígitos que la librería (C1).
+ */
+const asciiDigits = (text: string): string =>
+  text.normalize('NFKC').replace(DECIMAL_DIGIT, digitValue).trim();
 
 export function phoneRegions(): readonly PhoneRegion[] {
   return getCountries();
@@ -69,8 +96,14 @@ export function suggestedPhoneRegion(
   return phoneRegionOrNull(country);
 }
 
-export function callingCodeOf(region: PhoneRegion): string {
-  return getCountryCallingCode(region as CountryCode);
+export type { CountryCode };
+
+/**
+ * Indicativo de una región que la librería admite, ya normalizada (la de
+ * `phoneRegionOrNull`). Con cualquier otra, lanza: es un error de programa.
+ */
+export function callingCodeOf(region: CountryCode): string {
+  return getCountryCallingCode(region);
 }
 
 function valid(text: string, region?: CountryCode): PhoneNumber | undefined {
@@ -97,7 +130,9 @@ function oneOf(
 }
 
 /**
- * Interpreta un teléfono escrito a mano (R4-R5):
+ * Interpreta un teléfono escrito a mano (R4-R5). Antes de nada, un texto de
+ * más de `MAX_LENGTH` no vale y los dígitos de cualquier escritura pasan a
+ * ASCII. Después:
  * - con `+`, el número trae su indicativo y la región no cuenta;
  * - con `00`, se lee como `+` y también con la región (que conoce su prefijo
  *   internacional);
@@ -108,11 +143,13 @@ export function readPhone(
   text: string | null | undefined,
   defaultRegion: PhoneRegion | null,
 ): PhoneReading {
-  const trimmed = text?.trim();
-  if (!trimmed) return { kind: 'NONE' };
+  const raw = text?.trim();
+  if (!raw || raw.length > MAX_LENGTH) return { kind: 'NONE' };
+  const trimmed = asciiDigits(raw);
+  if (!trimmed || trimmed.length > MAX_LENGTH) return { kind: 'NONE' };
   const ext = EXTENSION.exec(trimmed)?.[0] ?? '';
   const body = trimmed.slice(0, trimmed.length - ext.length);
-  if (/[a-z]/i.test(body)) return { kind: 'NONE' };
+  if (NOT_A_PHONE.test(body)) return { kind: 'NONE' };
   const region = phoneRegionOrNull(defaultRegion) as CountryCode | null;
   const digits = body.replace(/\D/g, '');
 

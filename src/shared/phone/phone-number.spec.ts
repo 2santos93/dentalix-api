@@ -16,6 +16,27 @@ import {
 const e164 = (text: string, region: string | null): string | null =>
   parsePhone(text, region)?.e164 ?? null;
 
+/** Los casos de dos lecturas fijados (pre-flight C1). */
+const AMBIGUOUS_CASES: [string, string, [string, string]][] = [
+  ['CO', '0058 412 1234567', ['+584121234567', '+84121234567']],
+  // Primero la lectura como `+`; después, con la región.
+  ['CO', '009 1 787 234 5678', ['+917872345678', '+17872345678']],
+  ['DE', '49 151 23456789', ['+4915123456789', '+494915123456789']],
+];
+
+/** Los mismos dígitos escritos con otra serie de dígitos decimales (su 0). */
+const inDigits = (text: string, zero: number): string =>
+  text.replace(/\d/g, (d) => String.fromCodePoint(zero + Number(d)));
+const FULL_WIDTH = 0xff10;
+const ARABIC_INDIC = 0x0660;
+const DIGIT_SERIES: [string, number][] = [
+  ['full-width', FULL_WIDTH],
+  ['arabic-indic', ARABIC_INDIC],
+  ['extended arabic-indic', 0x06f0],
+  ['devanagari', 0x0966],
+  ['mathematical bold', 0x1d7ce],
+];
+
 describe('phone-number (DX-329)', () => {
   it('a national number takes the default region', () => {
     const cases: [string, string, string, boolean][] = [
@@ -44,7 +65,7 @@ describe('phone-number (DX-329)', () => {
     expect(parsePhone('0412-1234567', 'VE')?.type).toBe('MOBILE');
   });
 
-  it('every Venezuelan mobile prefix is a mobile', () => {
+  it('every mobile prefix of the region is a mobile', () => {
     for (const prefix of ['0412', '0414', '0416', '0422', '0424', '0426']) {
       const phone = parsePhone(`${prefix}-1234567`, 'VE');
       expect({ prefix, e164: phone?.e164, mobile: phone?.mobile }).toEqual({
@@ -61,13 +82,7 @@ describe('phone-number (DX-329)', () => {
   });
 
   it('two different valid readings are ambiguous and never picked', () => {
-    const cases: [string, string, [string, string]][] = [
-      ['CO', '0058 412 1234567', ['+584121234567', '+84121234567']],
-      // Primero la lectura como `+`; después, con la región.
-      ['CO', '009 1 787 234 5678', ['+917872345678', '+17872345678']],
-      ['DE', '49 151 23456789', ['+4915123456789', '+494915123456789']],
-    ];
-    for (const [region, text, readings] of cases) {
+    for (const [region, text, readings] of AMBIGUOUS_CASES) {
       expect(readPhone(text, region)).toEqual({ kind: 'AMBIGUOUS', readings });
       expect(parsePhone(text, region)).toBeNull();
       expect(whatsAppDigits(text, region)).toBeNull();
@@ -206,6 +221,135 @@ describe('phone-number (DX-329)', () => {
     expect(phoneRegions()).toContain('XK');
   });
 
+  it('digits of any script read as the same digits', () => {
+    for (const [region, text, readings] of [
+      [
+        'CO',
+        '００５８ ４１２ １２３４５６７',
+        ['+584121234567', '+84121234567'],
+      ],
+      ['CO', '٠٠٥٨ ٤١٢ ١٢٣٤٥٦٧', ['+584121234567', '+84121234567']],
+      ['CO', '۰۰۵۸۴۱۲۱۲۳۴۵۶۷', ['+584121234567', '+84121234567']],
+      [
+        'CO',
+        '００９ １ ７８７ ２３４ ５６７８',
+        ['+917872345678', '+17872345678'],
+      ],
+      ['CO', '٠٠٩ ١ ٧٨٧ ٢٣٤ ٥٦٧٨', ['+917872345678', '+17872345678']],
+      [
+        'DE',
+        '４９ １５１ ２３４５６７８９',
+        ['+4915123456789', '+494915123456789'],
+      ],
+      ['DE', '٤٩ ١٥١ ٢٣٤٥٦٧٨٩', ['+4915123456789', '+494915123456789']],
+    ] as const) {
+      expect({ text, reading: readPhone(text, region) }).toEqual({
+        text,
+        reading: { kind: 'AMBIGUOUS', readings },
+      });
+    }
+    expect(readPhone('٠٤١٢-١٢٣٤٥٦٧', 'VE')).toEqual(
+      readPhone('0412-1234567', 'VE'),
+    );
+    expect(e164('٠٤١٢-١٢٣٤٥٦٧', 'VE')).toBe('+584121234567');
+    expect(e164('＋５８ ４１２ １２３４５６７', null)).toBe('+584121234567');
+    expect(parsePhone('٠٢١٢-٥٥٥١٢٣٤ x٣', 'VE')?.ext).toBe('3');
+  });
+
+  it('every ambiguous case stays ambiguous in every digit script', () => {
+    for (const [region, text, readings] of AMBIGUOUS_CASES) {
+      for (const [series, zero] of DIGIT_SERIES) {
+        const variant = inDigits(text, zero);
+        expect({
+          series,
+          variant,
+          reading: readPhone(variant, region),
+        }).toEqual({
+          series,
+          variant,
+          reading: { kind: 'AMBIGUOUS', readings },
+        });
+        expect(phoneReadings(variant, region)).toEqual(readings);
+      }
+    }
+  });
+
+  it('a very long text is refused before any pattern runs', () => {
+    const started = Date.now();
+    expect(readPhone(`1${' '.repeat(100_000)}1x`, 'VE')).toEqual({
+      kind: 'NONE',
+    });
+    expect(readPhone(' '.repeat(100_000), 'VE')).toEqual({ kind: 'NONE' });
+    expect(Date.now() - started).toBeLessThan(100);
+    // 64 caracteres recortados aún se leen; 65, no.
+    const padded = (length: number): string =>
+      '0412-1234567'.padEnd(length, '.');
+    expect(e164(padded(64), 'VE')).toBe('+584121234567');
+    expect(readPhone(padded(65), 'VE')).toEqual({ kind: 'NONE' });
+  });
+
+  it('a letter of any script gives null and the extension words still work', () => {
+    for (const text of [
+      '0412-1234567 ñ',
+      '0412-1234567 é',
+      'ñ 0412-1234567',
+      '0412-1234567 привет',
+      '0412-1234567 Ω',
+      '0412-1234567 数',
+    ]) {
+      expect({ text, reading: readPhone(text, 'VE') }).toEqual({
+        text,
+        reading: { kind: 'NONE' },
+      });
+    }
+    // La letra rompía la lectura con la región y dejaba elegir la otra.
+    expect(readPhone('0058ñ412 1234567', 'CO')).toEqual({ kind: 'NONE' });
+    for (const text of [
+      '0212-5551234 ext 3',
+      '0212-5551234 ext. 3',
+      '0212-5551234 EXT 3',
+      '0212-5551234 x3',
+      '0212-5551234 X 3',
+      '0212-5551234 #3',
+      '0212-5551234 extensión 3',
+      '0212-5551234 EXTENSIÓN 3',
+      '0212-5551234 extension 3',
+    ]) {
+      expect({ text, ext: parsePhone(text, 'VE')?.ext }).toEqual({
+        text,
+        ext: '3',
+      });
+    }
+  });
+
+  it('only the extension form at the end is an extension', () => {
+    for (const text of [
+      '0212-5551234 #3#',
+      '0212-5551234 # 3 #',
+      '0212-5551234 #',
+      '0212-5551234 x',
+      '0212-5551234 ext 1234567',
+      '0212-5551234 ext 3 ext 4',
+    ]) {
+      expect({ text, reading: readPhone(text, 'VE') }).toEqual({
+        text,
+        reading: { kind: 'NONE' },
+      });
+    }
+  });
+
+  it('the calling-code reading alone is never used without + or 00', () => {
+    // `+43 664…` sería válido, pero la lectura con la región no lo es (R4).
+    expect(readPhone('430664123456', 'AT')).toEqual({ kind: 'NONE' });
+  });
+
+  it('the calling-code reading keeps the extension', () => {
+    expect(parsePhone('58 212 5551234 x3', 'VE')).toMatchObject({
+      e164: '+582125551234',
+      ext: '3',
+    });
+  });
+
   it('callingCodeOf derives the code', () => {
     expect(callingCodeOf('PR')).toBe('1');
     expect(callingCodeOf('VE')).toBe('58');
@@ -284,7 +428,7 @@ describe('phone-number (DX-329)', () => {
       const differences: string[] = [];
       let total = 0;
       for (const [region, code] of Object.entries(PREVIOUS_CODES)) {
-        expect({ region, code: callingCodeOf(region) }).toEqual({
+        expect({ region, code: callingCodeOf(region as CountryCode) }).toEqual({
           region,
           code,
         });
