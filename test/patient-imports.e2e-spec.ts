@@ -1262,4 +1262,33 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
         .expect(200);
     }
   });
+
+  it('an import in a VE location stores +58 numbers', async () => {
+    const before = await raw.location.findUniqueOrThrow({
+      where: { id: mainLocationId },
+      select: { country: true },
+    });
+    await raw.location.update({
+      where: { id: mainLocationId },
+      data: { country: 'VE' },
+    });
+    try {
+      const dry = await importAndDrain(
+        csvOf(['NATIONAL_ID;312001;Vera;Indicativo;;F;0412-1234567;;']),
+        've.csv',
+      );
+      expect(dry.issues).toEqual([]);
+      expect(dry.preview[0].data.phone).toBe('+584121234567');
+      const stored = await raw.patient.findFirstOrThrow({
+        where: { tenantId: a.tenantId, docNumber: '312001' },
+        select: { phone: true },
+      });
+      expect(stored.phone).toBe('+584121234567');
+    } finally {
+      await raw.location.update({
+        where: { id: mainLocationId },
+        data: before,
+      });
+    }
+  });
 });

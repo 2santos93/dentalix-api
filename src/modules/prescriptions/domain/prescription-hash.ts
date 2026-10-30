@@ -124,8 +124,9 @@ export type StoredPrescriptionHashInput = PrescriptionHashContent & {
  * El hash que DEBERÍA tener una receta guardada, sellada con el formato que
  * dice su foto (spec R10), o `null` si la fila no se puede sellar con él:
  * única sin avisos o sin el booleano de las letras, o legada sin país. Los
- * CHECK y el NOT NULL de la tabla lo impiden; si aun así ocurre, quien lee
- * responde `integrityOk: false`, nunca un 500.
+ * CHECK de la tabla lo impiden (el país de la legada,
+ * prescriptions_legacy_country_present_check, DX-312); si aun así ocurre,
+ * quien lee responde `integrityOk: false`, nunca un 500.
  */
 export function expectedPrescriptionHash(
   rx: StoredPrescriptionHashInput,

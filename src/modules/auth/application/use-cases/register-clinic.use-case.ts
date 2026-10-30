@@ -17,6 +17,8 @@ import {
   DUMMY_PASSWORD_HASH,
   PasswordService,
 } from '../../../../shared/crypto/password.service';
+import { COUNTRY_WHITELIST } from '../../../locations/domain/ports/country-whitelist.port';
+import type { CountryWhitelist } from '../../../locations/domain/ports/country-whitelist.port';
 import { CURRENCY_WHITELIST } from '../../../treatment-plans/domain/ports/currency-whitelist.port';
 import type { CurrencyWhitelist } from '../../../treatment-plans/domain/ports/currency-whitelist.port';
 import type { ClinicLocationSettings } from '../../domain/ports/auth-repository.port';
@@ -104,6 +106,8 @@ export class RegisterClinicUseCase {
     private readonly password: PasswordService,
     @Inject(CURRENCY_WHITELIST)
     private readonly currencies: CurrencyWhitelist,
+    @Inject(COUNTRY_WHITELIST)
+    private readonly countries: CountryWhitelist,
   ) {}
 
   /**
@@ -114,7 +118,11 @@ export class RegisterClinicUseCase {
   async accept(input: RegisterClinicInput): Promise<void> {
     // G1: la sede se valida antes que nada (es un 400 de los datos enviados,
     // igual para todos; no dice nada del email).
-    const location = await registrationLocation(input, this.currencies);
+    const location = await registrationLocation(
+      input,
+      this.currencies,
+      this.countries,
+    );
     const subdomain = input.subdomain.trim().toLowerCase();
     if (await this.repo.findTenantBySubdomain(subdomain)) {
       throw new ConflictException(SUBDOMAIN_TAKEN);
@@ -133,7 +141,11 @@ export class RegisterClinicUseCase {
 
   /** Todo el registro esperando el resultado (lo usan los tests). */
   async execute(input: RegisterClinicInput): Promise<RegisterOutcome> {
-    const location = await registrationLocation(input, this.currencies);
+    const location = await registrationLocation(
+      input,
+      this.currencies,
+      this.countries,
+    );
     const subdomain = input.subdomain.trim().toLowerCase();
     if (await this.repo.findTenantBySubdomain(subdomain)) {
       throw new ConflictException(SUBDOMAIN_TAKEN);
@@ -145,7 +157,7 @@ export class RegisterClinicUseCase {
   private async process(
     input: RegisterClinicInput,
     passwordHash: string,
-    location: ClinicLocationSettings | null,
+    location: ClinicLocationSettings,
   ): Promise<RegisterOutcome> {
     const email = input.email.trim().toLowerCase();
     // Antes de guardar nada: con el tope alcanzado, ni siquiera se reemplaza
@@ -193,13 +205,14 @@ export class RegisterClinicUseCase {
    * Abre el enlace del email: crea la clínica, su sede (con la moneda, la zona
    * y el formato del registro, G1) y su dueño (ADMIN) con el email ya
    * verificado. Un enlace de una réplica anterior a G1 (pendiente sin sede)
-   * sigue valiendo (fase 1, spec §3.5). Exige ADEMÁS la contraseña elegida al registrarse:
-   * quien abre el enlace controla el buzón y quien la conoce es quien pidió
-   * el alta, así nadie convierte en suya una cuenta con un email ajeno porque
-   * la víctima pulse «Confirmar» en un correo que no pidió (pre-secuestro por
-   * clic engañado). Enlace inválido/usado y contraseña errónea dan el MISMO
-   * 404 genérico, y en los dos casos se ejecuta un argon2 (hash ficticio si no
-   * hay pendiente). Superado eso, los errores pueden ser concretos.
+   * caduca (410) sin consumirse (DX-312, R7). Exige ADEMÁS la contraseña
+   * elegida al registrarse: quien abre el enlace controla el buzón y quien la
+   * conoce es quien pidió el alta, así nadie convierte en suya una cuenta con
+   * un email ajeno porque la víctima pulse «Confirmar» en un correo que no
+   * pidió (pre-secuestro por clic engañado). Enlace inválido/usado y
+   * contraseña errónea dan el MISMO 404 genérico, y en los dos casos se
+   * ejecuta un argon2 (hash ficticio si no hay pendiente). Superado eso, los
+   * errores pueden ser concretos.
    */
   async verify(
     token: string,
@@ -216,6 +229,11 @@ export class RegisterClinicUseCase {
       throw new NotFoundException(REGISTRATION_LINK_INVALID);
     }
     if (record.expiresAt.getTime() <= Date.now()) {
+      throw new GoneException(REGISTRATION_LINK_EXPIRED);
+    }
+    // Un pendiente sin sede (forma legada de una réplica anterior) ya no puede
+    // crear una clínica: caduca sin consumirlo y sin crear nada (DX-312, R7).
+    if (record.location === null) {
       throw new GoneException(REGISTRATION_LINK_EXPIRED);
     }
     if (await this.repo.findTenantBySubdomain(record.subdomain)) {
@@ -238,8 +256,6 @@ export class RegisterClinicUseCase {
         passwordHash: record.passwordHash,
         fullName: record.fullName,
         emailVerifiedAt: new Date(),
-        // G1: null = pendiente legado (fase 1); la sede la rellena la
-        // función D5 y queda por revisar.
         location: record.location,
       });
       this.logger.log({

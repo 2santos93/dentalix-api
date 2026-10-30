@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import type { CountryWhitelist } from './ports/country-whitelist.port';
 import type { CurrencyWhitelist } from '../../treatment-plans/domain/ports/currency-whitelist.port';
 import { canonicalTimeZoneName } from '../../../shared/time/canonical-time-zone';
 import type { HourCycle } from '../../../shared/format/regional-format';
@@ -13,7 +14,8 @@ import {
  * el registro. Nada se deduce del país: cada valor lo elige quien crea la sede.
  */
 
-export type RegionalField = 'currency' | 'timeZone' | 'locale' | 'hourCycle';
+export type RegionalField =
+  'country' | 'currency' | 'timeZone' | 'locale' | 'hourCycle';
 
 /**
  * Los tres campos de G1, en el orden en que se validan y se informan. El
@@ -85,6 +87,14 @@ export const REGIONAL_CHANGE_MESSAGES = {
 
 /** País de la sede: obligatorio en el alta y el registro (decisión 1). */
 export const COUNTRY_MISSING = 'Elige el país de la sede.';
+
+/** Un código de dos letras que no está en la tabla `countries`. */
+export const COUNTRY_UNKNOWN = (code: string) =>
+  `El país «${code}» no está en la lista de países.`;
+
+/** Cualquier otro texto: no se repite lo recibido (puede ser larguísimo). */
+export const COUNTRY_INVALID =
+  'El país indicado no está en la lista de países.';
 
 /**
  * 400 con el mensaje exacto y el campo del cuerpo al que se refiere, para que
@@ -166,6 +176,27 @@ export function normalizeLocale(raw: string): string | null {
 
 const blank = (value: string | null | undefined): value is null | undefined =>
   value === null || value === undefined || value.trim() === '';
+
+/**
+ * El país de la sede: código ISO 3166-1 alfa-2, recortado y en mayúsculas, que
+ * esté en la tabla `countries`. No mira ningún país concreto ni decide reglas.
+ */
+export async function validateCountry(
+  raw: unknown,
+  countries: CountryWhitelist,
+): Promise<string | RegionalError> {
+  if (typeof raw !== 'string' || raw.trim() === '') {
+    return { field: 'country', message: COUNTRY_MISSING };
+  }
+  const code = raw.trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(code)) {
+    return { field: 'country', message: COUNTRY_INVALID };
+  }
+  if (!(await countries.has(code))) {
+    return { field: 'country', message: COUNTRY_UNKNOWN(code) };
+  }
+  return code;
+}
 
 export async function validateCurrency(
   raw: string | null | undefined,

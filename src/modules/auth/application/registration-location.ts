@@ -1,16 +1,16 @@
-import type { ClinicCountry } from '@prisma/client';
+import type { CountryWhitelist } from '../../locations/domain/ports/country-whitelist.port';
 import type { CurrencyWhitelist } from '../../treatment-plans/domain/ports/currency-whitelist.port';
 import {
-  COUNTRY_MISSING,
   isRegionalError,
   regionalBadRequest,
+  validateCountry,
   validateRegionalSettings,
 } from '../../locations/domain/regional-settings';
 import type { ClinicLocationSettings } from '../domain/ports/auth-repository.port';
 
 /** Los campos de la primera sede tal como llegan en el registro. */
 export interface RegistrationLocationInput {
-  locationCountry?: ClinicCountry | null;
+  locationCountry?: string | null;
   locationCurrency?: string | null;
   locationTimeZone?: string | null;
   locationLocale?: string | null;
@@ -19,38 +19,29 @@ export interface RegistrationLocationInput {
 }
 
 const FIELD = {
+  country: 'locationCountry',
   currency: 'locationCurrency',
   timeZone: 'locationTimeZone',
   locale: 'locationLocale',
   hourCycle: 'locationHourCycle',
 } as const;
 
-const absent = (value: unknown): boolean =>
-  value === undefined || value === null;
-
 /**
  * G1 (spec §3.5): la primera sede del registro, con las reglas y los mensajes
- * del alta de sede (§3.1). Fase 1: sin ninguno de los cinco es la forma
- * LEGADA de una web antigua y devuelve `null`; con algunos, 400 con el mensaje
- * y el campo del primero que falta o no vale (país, moneda, zona, formato,
- * reloj). G1-B fase 1 (spec §4.3): los cuatro de G1 sin reloj (web de G1) se
- * aceptan con `hourCycle: null`; un reloj solo es 400 con el país.
+ * del alta de sede (§3.1). Sin ninguno de los cinco campos (la forma legada de
+ * una web antigua) o con algunos, 400 con el mensaje y el campo del primero que
+ * falta o no vale (país, moneda, zona, formato, reloj). G1-B fase 1 (spec
+ * §4.3): los cuatro de G1 sin reloj (web de G1) se aceptan con
+ * `hourCycle: null`; un reloj solo es 400 con el país.
  */
 export async function registrationLocation(
   input: RegistrationLocationInput,
   currencies: CurrencyWhitelist,
-): Promise<ClinicLocationSettings | null> {
-  if (
-    absent(input.locationCountry) &&
-    absent(input.locationCurrency) &&
-    absent(input.locationTimeZone) &&
-    absent(input.locationLocale) &&
-    absent(input.locationHourCycle)
-  ) {
-    return null;
-  }
-  if (!input.locationCountry) {
-    throw regionalBadRequest('locationCountry', COUNTRY_MISSING);
+  countries: CountryWhitelist,
+): Promise<ClinicLocationSettings> {
+  const country = await validateCountry(input.locationCountry, countries);
+  if (typeof country !== 'string') {
+    throw regionalBadRequest(FIELD.country, country.message);
   }
   const regional = await validateRegionalSettings(
     {
@@ -64,5 +55,5 @@ export async function registrationLocation(
   if (isRegionalError(regional)) {
     throw regionalBadRequest(FIELD[regional.field], regional.message);
   }
-  return { country: input.locationCountry, ...regional };
+  return { country, ...regional };
 }

@@ -37,8 +37,6 @@ describe('loadNoticeSettings (int, DX-328)', () => {
   beforeAll(async () => {
     await prisma.onModuleInit();
     await cleanup();
-    // Sin `country`: la sede se queda con el default de la columna.
-    const { country: _country, ...regional } = REGIONAL_TOKYO_FIXTURE;
     for (const [i, age] of [16, 20].entries()) {
       const tenant = await owner.tenant.create({
         data: {
@@ -48,7 +46,11 @@ describe('loadNoticeSettings (int, DX-328)', () => {
         },
       });
       const location = await owner.location.create({
-        data: { ...regional, tenantId: tenant.id, name: 'Principal' },
+        data: {
+          ...REGIONAL_TOKYO_FIXTURE,
+          tenantId: tenant.id,
+          name: 'Principal',
+        },
       });
       clinics.push({ tenantId: tenant.id, locationId: location.id, age });
     }

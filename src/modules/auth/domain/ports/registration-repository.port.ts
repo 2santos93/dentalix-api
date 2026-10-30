@@ -25,10 +25,12 @@ export interface RegistrationRepository {
    * `replaceCreatedBefore` o ya caducó (DX-144: otra petición no puede
    * invalidar el enlace de quien se está registrando). Atómico: de varias
    * peticiones a la vez, como mucho una guarda. Devuelve si guardó. Al
-   * reemplazar, también sobrescribe los datos de la sede (G1).
+   * reemplazar, también sobrescribe los datos de la sede (G1). La sede es
+   * obligatoria (DX-312, R7): solo la lectura admite un pendiente legado.
    */
   savePending(
-    input: Omit<PendingRegistrationRecord, 'id'> & {
+    input: Omit<PendingRegistrationRecord, 'id' | 'location'> & {
+      location: ClinicLocationSettings;
       tokenHash: string;
       replaceCreatedBefore: Date;
     },

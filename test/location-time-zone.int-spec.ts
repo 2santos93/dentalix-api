@@ -110,7 +110,12 @@ describe('zona de la sede: solo Location.timeZone (int, G1)', () => {
     ).id;
     await raw.$executeRaw`
       UPDATE "locations" SET "timeZone" = 'Mars/Olympus' WHERE "id" = ${ids.corrupt}::uuid`;
-    ids.legacy = await legacyLocationInsert(raw, tenantId, 'Réplica antigua');
+    ids.legacy = await legacyLocationInsert(
+      raw,
+      tenantId,
+      'Réplica antigua',
+      REGIONAL_BOGOTA_FIXTURE.country,
+    );
     await raw.location.create({
       data: locationData(REGIONAL_BOGOTA_FIXTURE, {
         tenantId: emptyTenantId,
@@ -223,7 +228,6 @@ describe('zona de la sede: solo Location.timeZone (int, G1)', () => {
       ),
     ).resolves.toEqual({
       id: ids.tokyo,
-      country: 'CO',
       timeZone: 'Asia/Tokyo',
       currency: 'JPY',
       locale: 'ja-JP',
@@ -234,7 +238,6 @@ describe('zona de la sede: solo Location.timeZone (int, G1)', () => {
       inTenant(tenantId, (tx) => resolveReferenceLocation(tx, tenantId, null)),
     ).resolves.toEqual({
       id: ids.auckland,
-      country: 'CO',
       timeZone: 'Pacific/Auckland',
       currency: 'NZD',
       locale: 'en-NZ',

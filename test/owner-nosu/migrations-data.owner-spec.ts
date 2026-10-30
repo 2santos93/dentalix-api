@@ -376,6 +376,26 @@ const FIXTURE_DX327 = [
      (gen_random_uuid(),'${T_A}','${P_A}','${DX327_CC_A}',NULL,NULL,NULL,'SIBLING',now())`,
 ];
 
+/**
+ * Excepción G5.3 (DX-334): país de sede anterior a DX-312.
+ * DX-312 (fase 1): país ISO en columna propia ("countryCode", FK a
+ * countries), relleno por clínica con la clínica fijada (sin NO FORCE) y
+ * validación; la columna antigua se queda, mantenida por trigger. En A una
+ * sede viva de cada valor del enum y una borrada en blando; en B, una del
+ * segundo valor; un pendiente con sede y otro sin ella.
+ */
+const DX312 = '20261031120000_dx312_location_country_code';
+const FIXTURE_DX312 = [
+  `INSERT INTO "locations" ("id","tenantId","name","country","deletedAt","updatedAt") VALUES
+     (gen_random_uuid(),'${T_A}','Sede 312 viva','CO',NULL,now()),
+     (gen_random_uuid(),'${T_A}','Sede 312 segunda','ES',NULL,now()),
+     (gen_random_uuid(),'${T_A}','Sede 312 borrada','CO',now(),now()),
+     (gen_random_uuid(),'${T_B}','Sede 312 B','ES',NULL,now())`,
+  `INSERT INTO "pending_registrations" ("id","email","clinicName","subdomain","fullName","passwordHash","tokenHash","expiresAt","locationCountry","locationCurrency","locationTimeZone","locationLocale") VALUES
+     (gen_random_uuid(),'p312a@mig.test','Pendiente A','mig-p312a','P','x','${'a'.repeat(64)}',now() + interval '1 day','CO','COP','America/Bogota','es-CO'),
+     (gen_random_uuid(),'p312b@mig.test','Pendiente B','mig-p312b','P','x','${'b'.repeat(64)}',now() + interval '1 day',NULL,NULL,NULL,NULL)`,
+];
+
 const STEPS: Step[] = [
   { until: '20260731115959', fixture: [] },
   // 20260731120000_structured_clinical_history y _remove_owner_role.
@@ -459,8 +479,11 @@ const STEPS: Step[] = [
   // relleno; hasta DX-327.
   { until: DX327, fixture: FIXTURE_DX326 },
   // dx327: tipo de documento genérico, relleno por lotes y validación; el
-  // código antiguo se queda.
-  { until: '99999999999999', fixture: FIXTURE_DX327 },
+  // código antiguo se queda; hasta la de DX-312.
+  { until: DX312, fixture: FIXTURE_DX327 },
+  // dx312: país ISO en columna propia, relleno por clínica y validación; la
+  // columna antigua se queda.
+  { until: '99999999999999', fixture: FIXTURE_DX312 },
 ];
 
 describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-nosu)', () => {
@@ -1314,6 +1337,125 @@ describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-no
     expect(written).toEqual([
       { docType: 'TI', documentType: 'NATIONAL_ID', docTypeLabel: null },
     ]);
+  }, 180_000);
+
+  it('owner-nosu location country migrations keep every country, fill countryCode, keep the legacy column and FORCE', async () => {
+    // Excepción G5.3 (DX-334): país de sede anterior a DX-312.
+    const snapshot = (): Promise<string> =>
+      scalar<string>(
+        `SELECT count(*) || ':' || md5(string_agg("id" || ':' || "tenantId" || ':'
+                  || "country"::text, ',' ORDER BY "id")) AS v
+           FROM "locations"`,
+      );
+    let before = '';
+    await run(STEPS[26], async () => {
+      before = await snapshot();
+    });
+    expect(await snapshot()).toBe(before);
+    // Todas las sedes (también la borrada y las de B, que el owner solo ve
+    // con la clínica fijada) tienen "countryCode" igual a su país.
+    expect(
+      await scalar<string>(
+        `SELECT count(*) || ':' || count(*) FILTER (
+                  WHERE "countryCode" IS NULL
+                     OR "countryCode" <> "country"::text) AS v
+           FROM "locations"`,
+      ),
+    ).toMatch(/^\d+:0$/);
+    expect(
+      await scalar<string>(
+        `SELECT string_agg("name" || '=' || coalesce("country"::text, '-') || '/'
+                  || coalesce("countryCode", '-'), ',' ORDER BY "name") AS v
+           FROM "locations" WHERE "name" LIKE 'Sede 312%'`,
+      ),
+    ).toBe(
+      'Sede 312 B=ES/ES,Sede 312 borrada=CO/CO,Sede 312 segunda=ES/ES,Sede 312 viva=CO/CO',
+    );
+    expect(
+      await scalar<string>(
+        `SELECT string_agg("email" || '=' || coalesce("locationCountry"::text, '-')
+                  || '/' || coalesce("locationCountryCode", '-'), ','
+                ORDER BY "email") AS v
+           FROM "pending_registrations" WHERE "email" LIKE 'p312%'`,
+      ),
+    ).toBe('p312a@mig.test=CO/CO,p312b@mig.test=-/-');
+    expect(
+      await scalar<string>(
+        `SELECT string_agg(tgrelid::regclass::text || ':' || tgname, ','
+                ORDER BY tgname) AS v
+           FROM pg_trigger
+          WHERE tgname IN ('locations_country_code',
+                           'pending_registrations_location_country_code')`,
+      ),
+    ).toBe(
+      'locations:locations_country_code,pending_registrations:pending_registrations_location_country_code',
+    );
+    expect(
+      await scalar<boolean>(
+        `SELECT relforcerowsecurity AS v FROM pg_class
+          WHERE oid = 'public.locations'::regclass`,
+      ),
+    ).toBe(true);
+    // Escrituras de la app (dentalix_app con la clínica fijada), cada una en
+    // su transacción y deshecha al terminar.
+    // Los triggers de alta de sede leen y escriben otras tablas (serie de
+    // recibos, calendario); los GRANT se deshacen con la transacción.
+    const grantApp = async (tx: Prisma.TransactionClient): Promise<void> => {
+      await tx.$executeRawUnsafe(
+        'GRANT SELECT ON ALL TABLES IN SCHEMA public TO dentalix_app',
+      );
+      await tx.$executeRawUnsafe(
+        'GRANT INSERT ON "locations", "location_working_calendars" TO dentalix_app',
+      );
+    };
+    const asApp = async (sql: string): Promise<unknown> => {
+      const rollback = new Error('rollback');
+      let written: unknown;
+      await expect(
+        target.$transaction(async (tx) => {
+          await grantApp(tx);
+          await tx.$executeRawUnsafe('SET LOCAL ROLE dentalix_app');
+          await tx.$queryRawUnsafe(
+            `SELECT set_config('app.current_tenant', '${T_B}', true)`,
+          );
+          written = await tx.$queryRawUnsafe(sql);
+          throw rollback;
+        }),
+      ).rejects.toBe(rollback);
+      return written;
+    };
+    const returning = `RETURNING coalesce("country"::text, '-') AS "country", "countryCode"`;
+    // La API anterior: país en la columna antigua y los cuatro regionales.
+    expect(
+      await asApp(
+        `INSERT INTO "locations" ("id","tenantId","name","country","currency","timeZone","locale","regionalSettingsReviewedAt","hourCycle","updatedAt")
+         VALUES (gen_random_uuid(),'${T_B}','Réplica anterior','ES','EUR','Europe/Madrid','es-ES',now(),'h23',now())
+         ${returning}`,
+      ),
+    ).toEqual([{ country: 'ES', countryCode: 'ES' }]);
+    // La API nueva, con un país fuera de la columna antigua.
+    expect(
+      await asApp(
+        `INSERT INTO "locations" ("id","tenantId","name","countryCode","currency","timeZone","locale","regionalSettingsReviewedAt","hourCycle","updatedAt")
+         VALUES (gen_random_uuid(),'${T_B}','API nueva','JP','JPY','Asia/Tokyo','ja-JP',now(),'h23',now())
+         ${returning}`,
+      ),
+    ).toEqual([{ country: '-', countryCode: 'JP' }]);
+    // legacy: el registro legado de la API anterior (su cliente pone el país
+    // él mismo, sin datos regionales) lo rechaza el paso 0.
+    await expect(
+      target.$transaction(async (tx) => {
+        await grantApp(tx);
+        await tx.$executeRawUnsafe('SET LOCAL ROLE dentalix_app');
+        await tx.$queryRawUnsafe(
+          `SELECT set_config('app.current_tenant', '${T_B}', true)`,
+        );
+        await tx.$executeRawUnsafe(
+          `INSERT INTO "locations" ("id","tenantId","name","country","showHealthRegistrationNumber","isActive","createdAt","updatedAt")
+           VALUES (gen_random_uuid(),'${T_B}','Sede principal','CO',false,true,now(),now())`,
+        );
+      }),
+    ).rejects.toThrow(/23514[\s\S]*DX-312: una sede necesita país/);
   }, 180_000);
 
   it('al terminar: FORCE en toda tabla con RLS y todo es del owner', async () => {

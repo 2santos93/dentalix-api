@@ -72,7 +72,8 @@ export class PrismaRegistrationRepository implements RegistrationRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async savePending(
-    input: Omit<PendingRegistrationRecord, 'id'> & {
+    input: Omit<PendingRegistrationRecord, 'id' | 'location'> & {
+      location: ClinicLocationSettings;
       tokenHash: string;
       replaceCreatedBefore: Date;
     },
@@ -87,13 +88,13 @@ export class PrismaRegistrationRepository implements RegistrationRepository {
       expiresAt: input.expiresAt,
       createdAt: now,
       // G1: también en la rama que reemplaza (updateMany): registrarse de
-      // nuevo sobrescribe la sede, y la forma legada la deja en NULL.
-      locationCountry: input.location?.country ?? null,
-      locationCurrency: input.location?.currency ?? null,
-      locationTimeZone: input.location?.timeZone ?? null,
-      locationLocale: input.location?.locale ?? null,
+      // nuevo sobrescribe la sede.
+      locationCountry: input.location.country,
+      locationCurrency: input.location.currency,
+      locationTimeZone: input.location.timeZone,
+      locationLocale: input.location.locale,
       // G1-B: también en las dos ramas de replaceOrCreate.
-      locationHourCycle: input.location?.hourCycle ?? null,
+      locationHourCycle: input.location.hourCycle,
     };
     const saved = await this.replaceOrCreate(input.email, data, {
       replaceCreatedBefore: input.replaceCreatedBefore,

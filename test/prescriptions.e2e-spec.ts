@@ -16,6 +16,7 @@ import {
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import {
+  REGIONAL_BOGOTA_FIXTURE,
   REGIONAL_NEW_YORK_FIXTURE,
   REGIONAL_TOKYO_FIXTURE,
   locationBody,
@@ -366,7 +367,24 @@ describe('Recetas — /patients/:id/prescriptions, /prescriptions, /prescription
 
   describe('emitir', () => {
     it('issuer carries the deprecated legacy country of its location (phase 1, old web)', async () => {
-      const res = await as(clinicA, dentistA.token)
+      // DX-312 (R6): la sede principal es de Nueva York, fuera de los dos
+      // valores legados, y el emisor da NULL; una sede de Bogotá da el suyo.
+      const main = await as(clinicA, dentistA.token)
+        .get('/prescriptions/issuer')
+        .expect(200);
+      expect((main.body as { country: unknown }).country).toBeNull();
+      const bogota = (
+        await as(clinicA)
+          .post(
+            '/locations',
+            locationBody(REGIONAL_BOGOTA_FIXTURE, {
+              name: 'Sede emisor',
+              address: 'Sede emisor',
+            }),
+          )
+          .expect(201)
+      ).body as { id: string };
+      const res = await as(clinicA, dentistA.token, bogota.id)
         .get('/prescriptions/issuer')
         .expect(200);
       const issuerBody = res.body as { locationId: string; country: unknown };
@@ -858,7 +876,16 @@ describe('Recetas — /patients/:id/prescriptions, /prescriptions, /prescription
         hc: false,
         days: 30,
       });
-      for (const site of [siteA, siteB]) {
+      // Fase 1 (spec D1, R6): la fila sigue llevando las letras y la
+      // proyección del país de la sede para las réplicas anteriores: CO para
+      // una sede de Bogotá y NULL para Nueva York y Tokio, fuera de los dos
+      // valores de la columna antigua.
+      const siteC = await createSite(REGIONAL_BOGOTA_FIXTURE, 'Sede C');
+      for (const [site, siteCode, projected] of [
+        [siteA, REGIONAL_NEW_YORK_FIXTURE.country, null],
+        [siteB, REGIONAL_TOKYO_FIXTURE.country, null],
+        [siteC, REGIONAL_BOGOTA_FIXTURE.country, 'CO'],
+      ] as const) {
         const res = await issueAt(site, noDocA).expect(201);
         const rx = res.body as RxBody;
         expect(rx).toMatchObject({
@@ -867,26 +894,25 @@ describe('Recetas — /patients/:id/prescriptions, /prescriptions, /prescription
           patientDocument: null,
         });
         expect(rx.items[0].quantityInWords).toBeNull();
-        // Fase 1 (spec D1): la fila sigue llevando el país de la sede y las
-        // letras, para las réplicas anteriores.
         const [row] = await raw.$queryRaw<
           {
             country: string | null;
-            siteCountry: string;
+            siteCode: string;
             singleFormat: boolean;
             printQuantityInWords: boolean | null;
             quantityInWords: string;
           }[]
         >`
-          SELECT p."country"::text AS "country", l."country"::text AS "siteCountry",
+          SELECT p."country"::text AS "country", l."countryCode" AS "siteCode",
                  p."singleFormat", p."printQuantityInWords", i."quantityInWords"
             FROM "prescriptions" p
             JOIN "locations" l ON l."id" = p."locationId"
             JOIN "prescription_items" i ON i."prescriptionId" = p."id"
            WHERE p."id" = ${rx.id}::uuid`;
-        expect(row).toEqual({
-          country: row.siteCountry,
-          siteCountry: expect.any(String) as string,
+        expect({ site, ...row }).toEqual({
+          site,
+          country: projected,
+          siteCode,
           singleFormat: true,
           printQuantityInWords: false,
           quantityInWords: 'veintiuno',

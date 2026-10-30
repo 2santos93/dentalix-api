@@ -21,6 +21,7 @@ import {
   type NoticeRecipient,
 } from '../../domain/communication/notice-recipient';
 import { civilDateIn } from '../../../../shared/time/civil-day';
+import { callingCodeOfCountry } from '../../../../shared/phone/country-calling-code';
 import {
   PATIENT_COMMUNICATION_REPOSITORY,
   PATIENT_NOT_FOUND_MESSAGE,
@@ -47,7 +48,10 @@ export interface PatientCommunicationView {
   /** E.164 con `+`, solo si es un móvil válido. */
   phoneE164: string | null;
   phoneStatus: MobileStatus;
-  /** País con el que se validó (el de la sede, o el del paciente). */
+  /**
+   * País con el que se validó (el de la sede, o el del paciente), solo si
+   * tiene indicativo por defecto (DX-312, R9); si no, `null`.
+   */
   phoneCountry: string | null;
   email: string | null;
   whatsappOptIn: {
@@ -79,7 +83,8 @@ function toView(
   clinicDefaultChannel: ContactChannel,
   now: Date,
 ): PatientCommunicationView {
-  const mobile = normalizeMobile(state.phone, country);
+  const callingCode = callingCodeOfCountry(country);
+  const mobile = normalizeMobile(state.phone, callingCode);
   return {
     patientId: state.patientId,
     contactChannel: state.contactChannel,
@@ -87,7 +92,7 @@ function toView(
     phone: state.phone,
     phoneE164: mobile.e164,
     phoneStatus: mobile.status,
-    phoneCountry: country,
+    phoneCountry: callingCode ? country : null,
     email: state.email,
     whatsappOptIn:
       state.whatsappOptInAt && state.whatsappOptInSource
@@ -186,18 +191,21 @@ export class UpdatePatientCommunicationUseCase {
     const saved = await this.repo.update(
       patientId,
       (state) => {
-        const country = locationCountry ?? state.countryCode;
+        const callingCode = callingCodeOfCountry(
+          locationCountry ?? state.countryCode,
+        );
         const patch: PatientCommunicationPatch = {};
         let phone = state.phone;
         if (input.phone !== undefined) {
           const typed = input.phone?.trim() || null;
-          const mobile = normalizeMobile(typed, country);
+          const mobile = normalizeMobile(typed, callingCode);
           phone = mobile.e164 ?? typed;
           if (phone !== state.phone) {
             patch.phone = phone;
           }
         }
-        const mobileValid = normalizeMobile(phone, country).status === 'VALID';
+        const mobileValid =
+          normalizeMobile(phone, callingCode).status === 'VALID';
 
         const channel = input.contactChannel ?? state.contactChannel;
         if (

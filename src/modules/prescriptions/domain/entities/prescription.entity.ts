@@ -30,9 +30,11 @@ export interface Prescription {
   professionalId: string;
   /**
    * País de la plantilla legada (v1/v2). En la receta única es solo el dato
-   * que la fila sigue llevando en fase 1 (spec D1); la API no lo devuelve.
+   * que la fila sigue llevando en fase 1 (spec D1): la proyección del país de
+   * la sede, o `null` fuera de los dos países legados (DX-312). La API no lo
+   * devuelve.
    */
-  country: LegacyPrescriptionCountry;
+  country: LegacyPrescriptionCountry | null;
   /** DX-324: receta única (hash v3); `false` en toda receta anterior. */
   singleFormat: boolean;
   /** DX-324: el ajuste «cantidad en letras» al emitir; `null` en las legadas. */

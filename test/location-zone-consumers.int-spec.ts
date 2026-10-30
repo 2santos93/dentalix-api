@@ -109,7 +109,12 @@ describe('consumidores de la zona de la sede: día civil en Tokio (int, G1)', ()
       })
     ).id;
     // Creada por una réplica antigua: zona NULL hasta que pase el barrido.
-    legacy = await legacyLocationInsert(owner, tenantId, 'Réplica antigua');
+    legacy = await legacyLocationInsert(
+      owner,
+      tenantId,
+      'Réplica antigua',
+      REGIONAL_BOGOTA_FIXTURE.country,
+    );
     await owner.location.create({
       data: locationData(REGIONAL_BOGOTA_FIXTURE, {
         tenantId: emptyTenantId,
@@ -350,7 +355,7 @@ describe('consumidores de la zona de la sede: día civil en Tokio (int, G1)', ()
     const repo = new PrismaPatientImportRepository(prisma, tenantContext);
     await expect(inTenant(tokyo, () => repo.batchLocation())).resolves.toEqual({
       id: tokyo,
-      country: 'CO',
+      country: 'JP',
       timeZone: 'Asia/Tokyo',
       currency: 'JPY',
       locale: 'ja-JP',

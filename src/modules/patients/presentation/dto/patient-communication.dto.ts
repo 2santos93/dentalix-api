@@ -124,8 +124,8 @@ export class PatientCommunicationDto {
   @ApiProperty({
     type: String,
     nullable: true,
-    example: '+573101234567',
-    description: 'E.164, solo si es un móvil válido.',
+    description:
+      'E.164 (+ seguido del indicativo y el número, sin espacios), solo si es un móvil válido.',
   })
   phoneE164!: string | null;
 
@@ -140,9 +140,10 @@ export class PatientCommunicationDto {
   @ApiProperty({
     type: String,
     nullable: true,
-    example: 'CO',
+    minLength: 2,
+    maxLength: 2,
     description:
-      'País con el que se valida un número sin indicativo: el de la sede activa o la principal.',
+      'País (ISO 3166-1 alfa-2) con el que se valida un número sin indicativo: el de la sede activa o la principal (sin sedes, el del paciente). null si no hay país o si ese país no tiene indicativo por defecto (hasta DX-329): el número se escribe con +.',
   })
   phoneCountry!: string | null;
 

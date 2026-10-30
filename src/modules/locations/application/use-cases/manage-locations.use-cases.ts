@@ -4,7 +4,6 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import type { ClinicCountry } from '@prisma/client';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { canonicalTimeZoneName } from '../../../../shared/time/canonical-time-zone';
 import { LOCATION_REPOSITORY } from '../../domain/ports/location-repository.port';
@@ -19,7 +18,6 @@ import {
   normalizeHealthRegistrationNumber,
 } from '../../domain/health-registration';
 import {
-  COUNTRY_MISSING,
   REGIONAL_CHANGE_MESSAGES,
   REGIONAL_FIELDS,
   REGIONAL_MESSAGES,
@@ -30,12 +28,15 @@ import {
   isRegionalError,
   isStoredTimeZone,
   regionalBadRequest,
+  validateCountry,
   validateCurrency,
   validateHourCycle,
   validateLocale,
   validateRegionalSettings,
   validateTimeZone,
 } from '../../domain/regional-settings';
+import { COUNTRY_WHITELIST } from '../../domain/ports/country-whitelist.port';
+import type { CountryWhitelist } from '../../domain/ports/country-whitelist.port';
 import { CURRENCY_WHITELIST } from '../../../treatment-plans/domain/ports/currency-whitelist.port';
 import type { CurrencyWhitelist } from '../../../treatment-plans/domain/ports/currency-whitelist.port';
 
@@ -85,19 +86,21 @@ export class CreateLocationUseCase {
   constructor(
     @Inject(LOCATION_REPOSITORY) private readonly repo: LocationRepository,
     @Inject(CURRENCY_WHITELIST) private readonly currencies: CurrencyWhitelist,
+    @Inject(COUNTRY_WHITELIST) private readonly countries: CountryWhitelist,
   ) {}
   async execute(input: {
     name: string;
     address?: string;
-    country?: ClinicCountry;
+    country?: string;
     currency?: string;
     timeZone?: string;
     locale?: string;
     hourCycle?: string;
     phone?: string;
   }): Promise<Location> {
-    if (!input.country) {
-      throw regionalBadRequest('country', COUNTRY_MISSING);
+    const country = await validateCountry(input.country, this.countries);
+    if (typeof country !== 'string') {
+      throw regionalBadRequest(country.field, country.message);
     }
     const regional = await validateRegionalSettings(input, this.currencies);
     if (isRegionalError(regional)) {
@@ -106,7 +109,7 @@ export class CreateLocationUseCase {
     return this.repo.create({
       name: input.name.trim(),
       address: input.address?.trim() || undefined,
-      country: input.country,
+      country,
       ...regional,
       phone: input.phone?.trim() || undefined,
     });
@@ -160,6 +163,7 @@ export class UpdateLocationUseCase {
   constructor(
     @Inject(LOCATION_REPOSITORY) private readonly repo: LocationRepository,
     @Inject(CURRENCY_WHITELIST) private readonly currencies: CurrencyWhitelist,
+    @Inject(COUNTRY_WHITELIST) private readonly countries: CountryWhitelist,
   ) {}
 
   /**
@@ -213,7 +217,7 @@ export class UpdateLocationUseCase {
     patch: {
       name?: string;
       address?: string;
-      country?: ClinicCountry;
+      country?: string | null;
       healthRegistrationNumber?: string | null;
       showHealthRegistrationNumber?: boolean;
       phone?: string | null;
@@ -240,6 +244,16 @@ export class UpdateLocationUseCase {
       throw new ConflictException('Cannot deactivate the last active location');
     }
 
+    // El país va primero (como en el alta): ausente no cambia; null o vacío es
+    // COUNTRY_MISSING; presente tiene que estar en la lista.
+    let country: string | undefined;
+    if (patch.country !== undefined) {
+      const checked = await validateCountry(patch.country, this.countries);
+      if (typeof checked !== 'string') {
+        throw regionalBadRequest(checked.field, checked.message);
+      }
+      country = checked;
+    }
     const regional = await this.validateProvided(patch, current.timeZone);
     const touchesRegional =
       Object.keys(regional).length > 0 ||
@@ -252,7 +266,7 @@ export class UpdateLocationUseCase {
     const base = {
       name: patch.name?.trim(),
       address: patch.address?.trim(),
-      country: patch.country,
+      country,
       // DX-319: texto libre, sin formato por país; vacío o null lo quita.
       healthRegistrationNumber: normalizeHealthRegistrationNumber(
         patch.healthRegistrationNumber,

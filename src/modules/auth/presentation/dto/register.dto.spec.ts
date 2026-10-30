@@ -81,7 +81,7 @@ describe('RegisterDto · primera sede (G1)', () => {
     return errors.flatMap((e) => Object.values(e.constraints ?? {}));
   }
 
-  it('acepta los cuatro campos y también la forma legada sin ninguno', async () => {
+  it('acepta los cuatro campos; la forma legada sin ninguno pasa el DTO y la rechaza el caso de uso (400)', async () => {
     expect(
       await messages({
         locationCountry: 'CO',
@@ -93,10 +93,12 @@ describe('RegisterDto · primera sede (G1)', () => {
     expect(await messages({})).toEqual([]);
   });
 
-  it('un país fuera del enum o un valor que no es texto: 400 con el mensaje del campo', async () => {
-    expect(await messages({ locationCountry: 'FR' })).toEqual([
+  it('un país que no es texto: 400 con el mensaje del campo', async () => {
+    expect(await messages({ locationCountry: 5 })).toEqual([
       'Elige el país de la sede.',
     ]);
+    // La lista de países la comprueba el caso de uso, no el DTO.
+    expect(await messages({ locationCountry: 'VE' })).toEqual([]);
     expect(await messages({ locationCurrency: 840 })).toEqual([
       'Elige la moneda de la sede.',
     ]);

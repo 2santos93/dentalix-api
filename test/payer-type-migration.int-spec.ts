@@ -10,7 +10,10 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Prisma, PrismaClient } from '@prisma/client';
-import { REGIONAL_TOKYO_FIXTURE } from './support/location-fixtures';
+import {
+  LEGACY_ENUM_COUNTRY,
+  REGIONAL_TOKYO_FIXTURE,
+} from './support/location-fixtures';
 
 // DX-326 (fase 1): el enum PayerType gana los cinco tipos genéricos y se va
 // el CHECK de tipo y país de `payers`, sin relleno. Una BD desechable recibe
@@ -50,9 +53,9 @@ const P_X1 = '00000000-0000-4000-8000-0000000326a2';
 const P_X2 = '00000000-0000-4000-8000-0000000326a3';
 const EPS_X = '00000000-0000-4000-8000-0000000326a4';
 
-// El país de la sede lo obliga el enum hasta DX-312; no decide nada.
+// Columna anterior a DX-312: solo admite CO/ES; no decide nada.
 const location = (tenant: string): string =>
-  `(gen_random_uuid(), '${tenant}', 'Sede 1', '${REGIONAL_TOKYO_FIXTURE.country}',
+  `(gen_random_uuid(), '${tenant}', 'Sede 1', '${LEGACY_ENUM_COUNTRY}',
     '${REGIONAL_TOKYO_FIXTURE.currency}', '${REGIONAL_TOKYO_FIXTURE.timeZone}',
     '${REGIONAL_TOKYO_FIXTURE.locale}', '${REGIONAL_TOKYO_FIXTURE.hourCycle}', now())`;
 

@@ -9,6 +9,7 @@ import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { resolveLocationTimeZones } from '../../../../shared/locations/location-time-zone';
 import { isHourCycle } from '../../../../shared/locations/location-regional';
+import { legacyClinicCountry } from '../../../../shared/locations/legacy-clinic-country';
 import type { AllergyMatch } from '../../domain/allergy-match';
 import type {
   SafetyAlert,
@@ -266,8 +267,9 @@ export class PrismaPrescriptionRepository implements PrescriptionRepository {
         location: { ...site, timeZone: zoneOf(location.id) },
         clinicName: tenant.name,
         // Fase 1 (spec §4.4, §7): el país legado de la sede, solo para la web
-        // anterior a DX-324; la fase 2 lo retira.
-        phase1: { country },
+        // anterior a DX-324; la fase 2 lo retira. DX-312: la proyección del
+        // país ISO de la sede (null fuera de los dos países legados).
+        phase1: { country: legacyClinicCountry(country) },
         settings: {
           printQuantityInWords: tenant.prescriptionPrintQuantityInWords,
           requireClinicalRecordNumber:
@@ -350,6 +352,8 @@ export class PrismaPrescriptionRepository implements PrescriptionRepository {
       // `country` como no nulo, así que la receta única sigue llevando el país
       // ACTUAL de su sede, leído en esta transacción. Es solo un dato: no
       // entra en el hash v3 ni decide nada. La fase 2 deja de escribirlo.
+      // DX-312: la proyección del país ISO de la sede, o NULL fuera de los
+      // dos países legados (spec R6).
       const { country } = await tx.location.findFirstOrThrow({
         where: { id: rest.locationId },
         select: { country: true },
@@ -357,7 +361,7 @@ export class PrismaPrescriptionRepository implements PrescriptionRepository {
       return tx.prescription.create({
         data: {
           ...rest,
-          country,
+          country: legacyClinicCountry(country),
           tenantId,
           dispensationDate: fromDateOnly(dispensationDate),
           validUntil: fromDateOnly(validUntil),

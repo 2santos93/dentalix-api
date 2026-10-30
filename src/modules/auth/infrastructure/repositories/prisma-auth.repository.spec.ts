@@ -89,7 +89,13 @@ describe('PrismaAuthRepository — createClinicWithOwner', () => {
         passwordHash: 'hash',
         fullName: 'Owner',
         emailVerifiedAt: new Date('2030-01-01T00:00:00Z'),
-        location: null,
+        location: {
+          country: 'JP',
+          currency: 'JPY',
+          timeZone: 'Asia/Tokyo',
+          locale: 'ja-JP',
+          hourCycle: 'h23',
+        },
       }),
     ).rejects.toBe(stop);
 

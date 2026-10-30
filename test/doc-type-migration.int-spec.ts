@@ -16,7 +16,10 @@ import {
   LEGACY_DOC_TYPES,
   legacyStoredDocType,
 } from '../src/modules/patients/domain/legacy-doc-type';
-import { REGIONAL_TOKYO_FIXTURE } from './support/location-fixtures';
+import {
+  LEGACY_ENUM_COUNTRY,
+  REGIONAL_TOKYO_FIXTURE,
+} from './support/location-fixtures';
 
 // DX-327 (fase 1): el tipo de documento genérico va en una columna nueva
 // ("documentType", con "docTypeLabel" al lado) y la antigua ("docType") se
@@ -135,9 +138,9 @@ const NO_DOC = 10;
 const CONTACT = 0x50;
 const RESPONSIBLE_PATIENT = 0x51;
 
-// El país de la sede lo obliga el enum hasta DX-312; no decide nada.
+// Columna anterior a DX-312: solo admite CO/ES; no decide nada.
 const location = (tenant: string): string =>
-  `(gen_random_uuid(), '${tenant}', 'Sede 1', '${REGIONAL_TOKYO_FIXTURE.country}',
+  `(gen_random_uuid(), '${tenant}', 'Sede 1', '${LEGACY_ENUM_COUNTRY}',
     '${REGIONAL_TOKYO_FIXTURE.currency}', '${REGIONAL_TOKYO_FIXTURE.timeZone}',
     '${REGIONAL_TOKYO_FIXTURE.locale}', '${REGIONAL_TOKYO_FIXTURE.hourCycle}', now())`;
 

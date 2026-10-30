@@ -569,8 +569,7 @@ describe('Patients (e2e)', () => {
 
   // DX-327: tipos de documento genéricos, nombre libre (R7), entrada anterior
   // (R9), fase 1 en la BD (R4–R5) y nombre visible (R17). La sede es
-  // REGIONAL_TOKYO_FIXTURE: el país de la sede lo obliga el enum hasta
-  // DX-312; no decide nada.
+  // REGIONAL_TOKYO_FIXTURE.
   describe('DX-327: tipos de documento genéricos', () => {
     interface DocPatient {
       id: string;
