@@ -2304,9 +2304,9 @@ existente queda en `AUTOMATIC` y no cambia nada para ella.
   volver a `AUTOMATIC` lo limpia. La tasa de un día D sale de las manuales
   solo con `MANUAL` y D >= ese día; los días anteriores siguen con la
   automática (caché y, si falta, el proveedor). Así, pasar a `MANUAL` no mueve
-  los saldos ni los totales de antes del cambio. Al volver a `AUTOMATIC`, los
-  días del periodo manual vuelven a convertirse con la tasa automática hasta
-  que DX-375 congele la tasa en cada abono.
+  los saldos ni los totales de antes del cambio. Desde DX-375 cada abono
+  congela su tasa (sección siguiente), así que ni pasar a `MANUAL` ni volver
+  a `AUTOMATIC` mueve un abono ya cobrado.
 
 - **Lectura** (`GetRatesForDateUseCase`, la que usan todas las conversiones):
   devuelve `{ base: 'USD', source, rates }`. Con `MANUAL` (y un día desde el
@@ -2334,7 +2334,8 @@ existente queda en `AUTOMATIC` y no cambia nada para ella.
   moneda de `currencies` y nunca USD (es la base); día `AAAA-MM-DD` que existe,
   desde 2000-01-01 y no posterior a hoy en la zona de la sede activa (o de la
   principal). Una tasa ya registrada para ese día y moneda no se sobrescribe:
-  409 `MANUAL_EXCHANGE_RATE_TAKEN`. Corregirla llega con DX-375. Se puede
+  409 `MANUAL_EXCHANGE_RATE_TAKEN`; si ningún abono la usó, se corrige con
+  `PUT /exchange/manual-rates/:id` (DX-375). Se puede
   registrar con la fuente `AUTOMATIC`, para dejar la de hoy lista antes de
   cambiar a `MANUAL`. Quien no es miembro vivo de la clínica (acceso de
   soporte) recibe 403.
@@ -2343,7 +2344,8 @@ existente queda en `AUTOMATIC` y no cambia nada para ella.
   la lista; FK de clínica, FK a `currencies` y FK compuesta del autor
   (`tenantId`, `createdByMembershipId`, `createdById`) →
   `clinic_memberships`; CHECKs de tasa > 0, moneda distinta de USD y día en
-  rango. La app solo tiene SELECT e INSERT. `createdAt` lo pone en UTC un
+  rango. La app tiene SELECT, INSERT y UPDATE solo de `rate` (DX-375).
+  `createdAt` lo pone en UTC un
   trigger BEFORE INSERT (DX-226), aunque el INSERT mande otra hora.
 - **Auditoría**: cambiar la fuente deja un UPDATE de `CLINIC_SETTINGS` con
   `reason: EXCHANGE_RATE_SOURCE` y `statusChange` `AUTOMATIC` → `MANUAL` (o al
@@ -2352,8 +2354,81 @@ existente queda en `AUTOMATIC` y no cambia nada para ella.
 - **Despliegue**: `npx prisma migrate deploy` antes de la primera réplica
   nueva. El índice de auditoría no es concurrente (tabla particionada): a una
   hora de poco tráfico, como DX-316. Después, `npm run db:check-force`.
-- **Fuera de alcance** (DX-375): congelar en cada abono la tasa y su fuente,
-  el aviso «sin tasa» en el saldo y bloquear el cambio de una tasa ya usada.
+- **Fuera de alcance** de DX-374, hecho en DX-375 (sección siguiente):
+  congelar en cada abono la tasa y su fuente, el aviso «sin tasa» y bloquear
+  el cambio de una tasa ya usada.
+
+## Tasa congelada en cada abono y aviso «sin tasa» (DX-375)
+
+Porción 2 de DX-367. Cada abono guarda la tasa con la que se convirtió y su
+fuente, y saldos y totales la usan siempre: cambiar la tasa (o la fuente)
+después no altera nada ya calculado.
+
+- **Cuándo se congela**: al registrar el abono (`RecordPaymentUseCase`),
+  fuera de la transacción, con la fuente de la clínica y el **día civil del
+  abono en su sede** (`paidOn`, DX-097): `ConvertAmountUseCase.quote` da las
+  dos tasas por 1 USD tal como las dio la fuente, la fuente y el día. Dentro
+  de la transacción del alta, con el plan bloqueado, se guarda si sigue
+  valiendo: la misma moneda del plan, el mismo día y, con `MANUAL`, las mismas
+  tasas manuales, que quedan `FOR SHARE` hasta el COMMIT. La base de
+  imputación (DX-051) y el saldo del recibo salen de esa misma tasa.
+- **Columnas** de `payments` (todas NULL): `exchangeRateCurrency` (moneda de
+  destino: la del plan o la del saldo migrado; la escribe todo abono nuevo),
+  `exchangeRateFrom` y `exchangeRateTo` (unidades de la moneda del abono y de
+  la de destino por 1 USD, `Decimal(18,8)`), `exchangeRateSource` y
+  `exchangeRateDate`. CHECK `payments_exchange_rate_check` (las cuatro de la
+  tasa juntas, > 0 y solo con moneda distinta) y FK a `currencies`. Se guardan
+  las dos tasas por 1 USD, no el cociente: convertir con ellas da lo mismo,
+  céntimo a céntimo, que la conversión en vivo (`convertWithQuote`).
+- **Estado** de cada abono (`exchangeRateStatus` en la respuesta):
+  `NOT_NEEDED` (misma moneda), `FROZEN`, `MISSING` («sin tasa») y `LEGACY`
+  (anterior a DX-375 en otra moneda, aún sin congelar).
+- **Lectura** (`paymentAmountIn`, la única para saldo del plan, totales y
+  dashboard, base de imputación y backfill): con tasa congelada, siempre con
+  ella; `MISSING` no cuenta (`null`); `LEGACY` se convierte con la tasa de su
+  día, como antes («lectura compatible»). `GET /treatment-plans/:id/balance`
+  cuenta un abono con base de imputación **por su base** (BE-050: lo cobrado y
+  el desglose por ítem salen de la misma cifra) y devuelve
+  `paymentsWithoutRate` (`paymentId`, `amount`, `currency`, `paidOn`). El
+  estado de cuenta y la caja no convierten (siguen por moneda).
+- **Sin tasa del día**: el abono se guarda igual (201), sin base y con el
+  recibo sin saldo; el saldo lo dice en `paymentsWithoutRate` y la web enseña
+  el aviso con enlace a Ajustes › Tasa de cambio. El barrido de cada minuto
+  (`payment-allocations.sweep`) congela primero la tasa de los abonos que la
+  esperan (hasta 50 por clínica, índice parcial
+  `payments_exchange_rate_pending_idx`) y después crea sus bases.
+- **Cambio de fuente** (BE-047): `PUT /exchange/settings`, si la fuente
+  cambia, congela ANTES todos los abonos pendientes de la clínica con la
+  fuente de antes (`ExchangeSourceChangeHooks`, que registra
+  `PaymentAllocationJobs`). Un abono de hoy anterior al cambio, de una sede
+  con otra zona o anterior a DX-375 conserva su tasa. Si congelar falla, la
+  fuente no cambia. Los que siguen sin tasa la toman de la fuente nueva.
+- **Tasa manual usada**: `PUT /exchange/manual-rates/:id` (`{ rate }`, solo
+  ADMIN, `@Audit` UPDATE `EXCHANGE_RATE`) corrige una tasa que ningún abono
+  congeló; una usada responde 409 `MANUAL_EXCHANGE_RATE_IN_USE` («Esta tasa ya
+  la usa al menos un abono…»). La lista marca cada tasa con `inUse`. El
+  repositorio la bloquea `FOR UPDATE` y comprueba el uso en la misma
+  transacción; el trigger `manual_exchange_rates_in_use_guard` lo impide
+  también en la BD (índice parcial `payments_exchange_rate_manual_idx`).
+  Corregir una tasa usada, con motivo y rehaciendo la base, queda fuera.
+- **Migraciones**: `20261102120000_dx375_payment_exchange_rate` (columnas,
+  CHECK y FK NOT VALID, GRANT UPDATE de `rate`, trigger),
+  `20261102120100_dx375_payment_exchange_rate_backfill` (relleno por lotes de
+  2.000 por clínica con `lock_timeout`: `exchangeRateCurrency` de los abonos
+  en la moneda de su destino), `20261102120200_…_pending_idx` y
+  `20261102120300_…_manual_idx` (CONCURRENTLY, una por fichero) y
+  `20261102120400_…_validate`. Los abonos anteriores en otra moneda no se
+  rellenan en SQL (la tasa depende de la zona de la sede, la fuente y el
+  proveedor, que viven en la API): se leen como antes y el barrido les congela
+  esa misma tasa. Compatible hacia atrás: una réplica anterior no nombra las
+  columnas nuevas y sus abonos nacen `LEGACY`.
+- **Despliegue**: `npx prisma migrate deploy` antes de la primera réplica
+  nueva; después, `npm run db:check-force`. El barrido termina de congelar los
+  abonos anteriores solo (50 por clínica y minuto).
+- **Demo**: `npm run seed:demo` deja un abono de hoy de 50 USD en el plan
+  «Endodoncia y rehabilitación de 46» (en COP). Sin clave del proveedor queda
+  «sin tasa» y enseña el aviso; para verlo congelado, pasa a `MANUAL` y
+  registra la tasa COP de hoy: el barrido lo congela en menos de un minuto.
 
 ## Tipos de documento genéricos y nombres locales (DX-327)
 
