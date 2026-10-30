@@ -71,6 +71,11 @@ export async function paymentBaseAmount(
   return amount !== null && amount > 0 ? amount : null;
 }
 
+/** Una tasa con los 8 decimales de su columna (`Number` de ese decimal). */
+function toRateColumn(rate: number): number {
+  return Number(rate.toFixed(8));
+}
+
 /**
  * DX-375: la tasa que congela un abono de `currency` a `targetCurrency` el día
  * `paidOn`, con la fuente de la clínica del contexto. `null` si no hay que
@@ -88,10 +93,17 @@ export async function freezePaymentRate(
       to: payment.targetCurrency,
       date: payment.paidOn,
     });
+    // Lo que guardan las columnas (Decimal(18,8)): la base y el recibo, que
+    // salen de esta tasa en memoria, dan la misma cifra que las lecturas
+    // posteriores de la fila (en un fallo de la caché el proveedor puede dar
+    // más decimales). Una tasa que redondea a 0 no cabe (CHECK > 0).
+    const fromPerBase = toRateColumn(quote.fromPerBase);
+    const toPerBase = toRateColumn(quote.toPerBase);
+    if (fromPerBase <= 0 || toPerBase <= 0) return null;
     return {
       currency: payment.targetCurrency,
-      fromPerBase: quote.fromPerBase,
-      toPerBase: quote.toPerBase,
+      fromPerBase,
+      toPerBase,
       source: quote.source,
       date: quote.date,
     };

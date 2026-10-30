@@ -229,6 +229,55 @@ describe('tasa congelada de un abono (DX-375)', () => {
       ).rejects.toThrow('BD caída');
     });
 
+    // Revisión DX-375: en un fallo de la caché el proveedor da la tasa con
+    // más decimales de los que caben en Decimal(18,8). Lo congelado en memoria
+    // (base, recibo) tiene que ser lo mismo que se guarda y se lee después.
+    it('redondea las tasas a 8 decimales, lo que guarda la columna', async () => {
+      const convert: AmountConverter = {
+        execute: () => Promise.reject(new Error('no')),
+        quote: () =>
+          Promise.resolve({
+            from: 'COP',
+            to: 'USD',
+            date: DAY,
+            source: 'AUTOMATIC',
+            fromPerBase: 3912.123456789,
+            toPerBase: 1,
+          }),
+      };
+      const frozen = await freezePaymentRate(convert, {
+        currency: 'COP',
+        targetCurrency: 'USD',
+        paidOn: DAY,
+      });
+      expect(frozen).toMatchObject({
+        fromPerBase: 3912.12345679,
+        toPerBase: 1,
+      });
+    });
+
+    it('una tasa que redondea a 0 con 8 decimales cuenta como «sin tasa»', async () => {
+      const convert: AmountConverter = {
+        execute: () => Promise.reject(new Error('no')),
+        quote: () =>
+          Promise.resolve({
+            from: 'XAU',
+            to: 'USD',
+            date: DAY,
+            source: 'AUTOMATIC',
+            fromPerBase: 0.000000004,
+            toPerBase: 1,
+          }),
+      };
+      await expect(
+        freezePaymentRate(convert, {
+          currency: 'XAU',
+          targetCurrency: 'USD',
+          paidOn: DAY,
+        }),
+      ).resolves.toBeNull();
+    });
+
     it('en la moneda del destino no hay nada que congelar', async () => {
       await expect(
         freezePaymentRate(noLiveConverter(), {
