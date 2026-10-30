@@ -4,6 +4,7 @@ import {
   callingCodeOf,
   isPhoneRegion,
   parsePhone,
+  phoneInternational,
   phoneReadings,
   phoneRegionOrNull,
   phoneRegions,
@@ -191,6 +192,24 @@ describe('phone-number (DX-329)', () => {
     expect(parsePhone('+34 612 34 56 78', null)?.international).toBe(
       '+34 612 34 56 78',
     );
+  });
+
+  it('phoneInternational formats a valid number with the default region (DX-387)', () => {
+    expect(phoneInternational('0412-1234567', 'VE')).toBe('+58 412 1234567');
+    expect(phoneInternational('+584121234567', null)).toBe('+58 412 1234567');
+    expect(phoneInternational('601 555 0101 ext. 12', 'CO')).toBe(
+      '+57 601 5550101 ext. 12',
+    );
+  });
+
+  it('phoneInternational gives null for anything it cannot read (DX-387)', () => {
+    expect(phoneInternational(null, 'VE')).toBeNull();
+    expect(phoneInternational('', 'VE')).toBeNull();
+    expect(phoneInternational('llamar por la tarde', 'VE')).toBeNull();
+    expect(phoneInternational('0412-1234567', null)).toBeNull();
+    // Ambiguo: dos lecturas válidas distintas, no se elige ninguna.
+    expect(phoneInternational('0058 412 1234567', 'CO')).toBeNull();
+    expect(phoneInternational('9'.repeat(80), 'VE')).toBeNull();
   });
 
   it('whatsAppDigits accepts a valid fixed line and refuses an invalid one', () => {
