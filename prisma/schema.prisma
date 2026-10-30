@@ -67,6 +67,8 @@ model Tenant {
   prescriptionTemplates                   PrescriptionTemplate[]
   emailOutbox                             EmailOutbox[]
   clinicalEntryAddenda                    ClinicalEntryAddendum[]
+  anestheticProducts                      AnestheticProduct[]
+  anesthesiaAdministrations               AnesthesiaAdministration[]
   // DX-212: diagnósticos CIE-10 de las evoluciones.
   clinicalEntryDiagnoses                  ClinicalEntryDiagnosis[]
   dentitionEvents                         PatientDentitionEvent[]
@@ -189,6 +191,7 @@ model User {
   planAcceptancesRecorded           TreatmentPlanAcceptance[]
   tokens                            UserToken[]
   clinicalEntryAddenda              ClinicalEntryAddendum[]
+  anesthesiaAdministrations         AnesthesiaAdministration[]
   dentitionEventsRecorded           PatientDentitionEvent[]
   retentionActions                  PatientRetentionAction[]
   platformAccesses                  PlatformAccessAudit[]
@@ -298,6 +301,7 @@ model Location {
   deletedAt                    DateTime?
 
   clinicalEntries            ClinicalEntry[]
+  anesthesiaAdministrations  AnesthesiaAdministration[]
   appointments               Appointment[]
   payments                   Payment[]
   inventoryItems             InventoryItem[]
@@ -579,6 +583,7 @@ model Patient {
   medicalHistoryReviews       MedicalHistoryReview[]
   clinicalEntries             ClinicalEntry[]
   clinicalEntryAddenda        ClinicalEntryAddendum[]
+  anesthesiaAdministrations   AnesthesiaAdministration[]
   dentitionEvents             PatientDentitionEvent[]
   toothRecords                ToothRecord[]
   appointments                Appointment[]
@@ -794,17 +799,19 @@ model ClinicalEntry {
   // FK COMPUESTA (tenantId, patientId) -> patients(tenantId, id): exige que el
   // paciente sea del MISMO tenant (mismo criterio que Appointment.patient;
   // SEC-004, 20261015130000_tenant_composite_fks).
-  patient     Patient                  @relation(fields: [tenantId, patientId], references: [tenantId, id])
+  patient     Patient                    @relation(fields: [tenantId, patientId], references: [tenantId, id])
   addenda     ClinicalEntryAddendum[]
+  // DX-307: anestesia local registrada en la evolución (append-only).
+  anesthesia  AnesthesiaAdministration[]
   // DX-212: diagnósticos CIE-10, creados en la misma transacción que la
   // evolución e inalterables como ella.
   diagnoses   ClinicalEntryDiagnosis[]
   // DX-170: FK COMPUESTA con el paciente: la cita tiene que ser de la MISMA
   // clínica Y del MISMO paciente. RESTRICT en las dos acciones: la evolución
   // es inalterable (DX-038) y nada puede reescribirla en cascada.
-  appointment Appointment?             @relation(fields: [tenantId, patientId, appointmentId], references: [tenantId, patientId, id], onDelete: Restrict, onUpdate: Restrict)
-  location    Location?                @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict)
-  template    ClinicalNoteTemplate?    @relation(fields: [tenantId, templateId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict)
+  appointment Appointment?               @relation(fields: [tenantId, patientId, appointmentId], references: [tenantId, patientId, id], onDelete: Restrict, onUpdate: Restrict)
+  location    Location?                  @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict)
+  template    ClinicalNoteTemplate?      @relation(fields: [tenantId, templateId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict)
 
   // DX-038: INALTERABLE en la BD (trigger: ni UPDATE ni DELETE para el rol de
   // la app), `createdAt` lo fija el servidor de BD en el INSERT y
@@ -2961,6 +2968,9 @@ enum AuditResourceType {
   CLINIC
   // DX-377: medios de pago del catálogo de la clínica (alta y cambio).
   PAYMENT_METHOD
+  // DX-307: catálogo de anestésicos locales y anestesia de una evolución.
+  ANESTHETIC_PRODUCT
+  ANESTHESIA_ADMINISTRATION
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o
@@ -5155,4 +5165,99 @@ model PaymentAllocationMovement {
   @@index([tenantId, paymentId, treatmentPlanId], map: "payment_allocation_movements_tenant_payment_idx")
   @@index([tenantId, treatmentPlanItemId, treatmentPlanId, at], map: "payment_allocation_movements_tenant_item_at_idx")
   @@map("payment_allocation_movements")
+}
+
+// DX-307: técnica de la anestesia local.
+enum AnesthesiaTechnique {
+  INFILTRATION
+  NERVE_BLOCK
+  INTRALIGAMENTARY
+  INTRAPULPAL
+  INTRAOSSEOUS
+}
+
+/// Anestésico local del catálogo de la clínica (DX-307). DATOS editables por
+/// el ADMIN (principio activo, concentración, vasoconstrictor, ml por carpule,
+/// mg/kg máximo y tope absoluto en mg): el cálculo de dosis los lee de aquí y
+/// cada registro de anestesia copia los suyos. Se desactiva, no se borra.
+/// `sampleCode`: clave del ejemplo cargado («Cargar sugeridos» no duplica).
+model AnestheticProduct {
+  id               String   @id @default(uuid()) @db.Uuid
+  tenantId         String   @db.Uuid
+  name             String
+  activeIngredient String
+  concentrationPct Decimal  @db.Decimal(4, 2)
+  vasoconstrictor  String?
+  mlPerCarpule     Decimal  @db.Decimal(3, 2)
+  maxMgPerKg       Decimal  @db.Decimal(4, 2)
+  maxAbsoluteMg    Decimal  @db.Decimal(6, 1)
+  sampleCode       String?
+  active           Boolean  @default(true)
+  createdById      String?  @db.Uuid
+  updatedById      String?  @db.Uuid
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  tenant          Tenant                     @relation(fields: [tenantId], references: [id])
+  administrations AnesthesiaAdministration[]
+
+  // Destino de la FK compuesta de anesthesia_administrations.
+  @@unique([tenantId, id], map: "anesthetic_products_tenant_id_key")
+  @@unique([tenantId, name], map: "anesthetic_products_tenant_name_key")
+  @@index([tenantId, active, name], map: "anesthetic_products_tenant_active_name_idx")
+  // PARCIAL (WHERE "sampleCode" IS NOT NULL), no declarable en Prisma:
+  //   anesthetic_products_tenant_sample_key UNIQUE ("tenantId", "sampleCode")
+  @@map("anesthetic_products")
+}
+
+/// Anestesia local administrada en una evolución (DX-307). APPEND-ONLY como
+/// la evolución (DX-038: trigger que rechaza UPDATE/DELETE/TRUNCATE; corregir
+/// = adenda) y RLS forzada por tenant. Copia los valores del catálogo, el
+/// peso usado, los mg y el % acumulados de la evolución al guardarla, los
+/// avisos calculados por el servidor y, si superó el máximo o hay alergia, el
+/// motivo de la confirmación. FK compuestas: evolución del mismo paciente y
+/// clínica, anestésico y sede de la misma clínica.
+model AnesthesiaAdministration {
+  id                 String              @id @default(uuid()) @db.Uuid
+  tenantId           String              @db.Uuid
+  patientId          String              @db.Uuid
+  clinicalEntryId    String              @db.Uuid
+  locationId         String?             @db.Uuid
+  anestheticId       String              @db.Uuid
+  anestheticName     String
+  activeIngredient   String
+  concentrationPct   Decimal             @db.Decimal(4, 2)
+  vasoconstrictor    String?
+  mlPerCarpule       Decimal             @db.Decimal(3, 2)
+  maxMgPerKg         Decimal             @db.Decimal(4, 2)
+  maxAbsoluteMg      Decimal             @db.Decimal(6, 1)
+  carpules           Decimal             @db.Decimal(4, 2)
+  doseMg             Decimal             @db.Decimal(6, 1)
+  technique          AnesthesiaTechnique
+  site               String?
+  lot                String?
+  administeredAt     DateTime
+  weightKg           Decimal?            @db.Decimal(4, 1)
+  // ANAMNESIS (vitalSigns.peso) o ENTERED (lo anotó quien registra).
+  weightSource       String?
+  cumulativeMg       Decimal             @db.Decimal(7, 1)
+  cumulativePercent  Int?
+  safetyRulesVersion String
+  safetyAlerts       Json
+  overrideReason     String?
+  authorId           String              @db.Uuid
+  createdAt          DateTime            @default(now())
+
+  tenant     Tenant            @relation(fields: [tenantId], references: [id])
+  patient    Patient           @relation(fields: [tenantId, patientId], references: [tenantId, id])
+  entry      ClinicalEntry     @relation(fields: [tenantId, patientId, clinicalEntryId], references: [tenantId, patientId, id])
+  anesthetic AnestheticProduct @relation(fields: [tenantId, anestheticId], references: [tenantId, id])
+  location   Location?         @relation(fields: [tenantId, locationId], references: [tenantId, id])
+  author     User              @relation(fields: [authorId], references: [id])
+
+  @@index([tenantId, patientId, clinicalEntryId, administeredAt], map: "anesthesia_administrations_entry_idx")
+  @@index([tenantId, anestheticId], map: "anesthesia_administrations_anesthetic_idx")
+  // PARCIAL (WHERE "locationId" IS NOT NULL), no declarable en Prisma:
+  //   anesthesia_administrations_location_idx ("tenantId", "locationId")
+  @@map("anesthesia_administrations")
 }

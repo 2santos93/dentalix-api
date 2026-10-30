@@ -88,6 +88,13 @@ export interface AuditMetadata {
    */
   prescriptionSafety?: AuditPrescriptionSafety;
   /**
+   * DX-307: avisos de la anestesia registrada en una evolución (dosis máxima
+   * por peso, tope absoluto, alergia): versión de las reglas, CÓDIGOS y si se
+   * confirmaron con motivo. Mismo formato que `prescriptionSafety`; ni los mg,
+   * ni el texto del aviso ni el del motivo (van sellados en el registro).
+   */
+  anesthesiaSafety?: AuditPrescriptionSafety;
+  /**
    * SEC-049: alta, cambio o verificación de una cobertura: el tipo de
    * pagador, los 4 últimos caracteres alfanuméricos del nº de afiliado (null
    * si no hay o es más corto) y si quedó verificada. Nunca el número entero.
@@ -1061,6 +1068,8 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (cancelled) out.cancellation = cancelled;
   const safety = prescriptionSafety(input.prescriptionSafety);
   if (safety) out.prescriptionSafety = safety;
+  const anesthesia = prescriptionSafety(input.anesthesiaSafety);
+  if (anesthesia) out.anesthesiaSafety = anesthesia;
   const referenced = paymentReference(input.paymentReference);
   if (referenced) out.paymentReference = referenced;
   const backup = exchangeRateBackup(input.exchangeRateBackup);

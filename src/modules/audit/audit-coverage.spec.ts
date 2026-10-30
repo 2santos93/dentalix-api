@@ -50,6 +50,8 @@ import { CashSessionsController } from '../cash-sessions/presentation/cash-sessi
 import { ScheduleBlocksController } from '../schedule-blocks/presentation/schedule-blocks.controller';
 import { StaffController } from '../staff/presentation/staff.controller';
 import { ClinicalNoteTemplatesController } from '../clinical-note-templates/presentation/clinical-note-templates.controller';
+import { AnesthesiaController } from '../anesthesia/presentation/anesthesia.controller';
+import { AnestheticsController } from '../anesthesia/presentation/anesthetics.controller';
 import { DomainsController } from '../domains/presentation/domains.controller';
 import { PostOpTemplatesController } from '../post-op-instructions/presentation/post-op-templates.controller';
 import { AppointmentPostOpController } from '../post-op-instructions/presentation/appointment-post-op.controller';
@@ -320,6 +322,49 @@ const EXPECTED: Record<string, AuditOptions> = {
     action: 'VIEW',
     resource: 'CLINICAL_ENTRY',
     patient: P,
+  },
+  // DX-307: anestesia local en la evolución. Registrarla guarda los CÓDIGOS
+  // de los avisos de dosis/alergia y si se confirmaron; la previsualización
+  // lee la anamnesis vigente (peso y alergias).
+  'GET /patients/:patientId/anesthesia': {
+    action: 'VIEW',
+    resource: 'ANESTHESIA_ADMINISTRATION',
+    patient: P,
+  },
+  'GET /patients/:patientId/clinical-entries/:entryId/anesthesia': {
+    action: 'VIEW',
+    resource: 'ANESTHESIA_ADMINISTRATION',
+    resourceId: { param: 'entryId' },
+    patient: P,
+  },
+  'POST /patients/:patientId/clinical-entries/:entryId/anesthesia/check': {
+    action: 'VIEW',
+    resource: 'MEDICAL_HISTORY',
+    patient: P,
+    reason: 'ANESTHESIA_DOSE_CHECK',
+  },
+  'POST /patients/:patientId/clinical-entries/:entryId/anesthesia': {
+    action: 'CREATE',
+    resource: 'ANESTHESIA_ADMINISTRATION',
+    resourceId: RES,
+    patient: P,
+    anesthesiaSafety: true,
+  },
+  // DX-307: catálogo de anestésicos (sin paciente); desactivar es un PATCH.
+  'POST /anesthetics': {
+    action: 'CREATE',
+    resource: 'ANESTHETIC_PRODUCT',
+    resourceId: RES,
+  },
+  'POST /anesthetics/samples': {
+    action: 'CREATE',
+    resource: 'ANESTHETIC_PRODUCT',
+    reason: 'SAMPLE_ANESTHETICS',
+  },
+  'PATCH /anesthetics/:id': {
+    action: 'UPDATE',
+    resource: 'ANESTHETIC_PRODUCT',
+    resourceId: { param: 'id' },
   },
   // DX-212: los cambios del catálogo y de la sede.
   'POST /catalog/items': {
@@ -1353,6 +1398,12 @@ const KNOWN_UNAUDITED: Record<string, string> = {
     'siempre rechaza: una evolución firmada no se edita',
   'DELETE /patients/:patientId/clinical-entries/:entryId':
     'siempre rechaza: una evolución firmada no se borra',
+  'PATCH /patients/:patientId/clinical-entries/:entryId/anesthesia/:id':
+    'siempre rechaza: la anestesia registrada no se edita (DX-307)',
+  'PUT /patients/:patientId/clinical-entries/:entryId/anesthesia/:id':
+    'siempre rechaza: la anestesia registrada no se edita (DX-307)',
+  'DELETE /patients/:patientId/clinical-entries/:entryId/anesthesia/:id':
+    'siempre rechaza: la anestesia registrada no se borra (DX-307)',
 
   // --- Sesión y cuenta propia ---------------------------------------------
   'POST /auth/register': 'pide el enlace de verificación; aún no hay clínica',
@@ -1409,6 +1460,8 @@ const CONTROLLERS: Type[] = [
   PatientAgreementsController,
   MedicalHistoryController,
   ClinicalEntriesController,
+  AnesthesiaController,
+  AnestheticsController,
   DentalCatalogController,
   PriceListsController,
   AgreementsController,

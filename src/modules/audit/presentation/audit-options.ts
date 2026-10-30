@@ -54,6 +54,12 @@ export interface AuditOptions {
    */
   prescriptionSafety?: true;
   /**
+   * DX-307: anestesia registrada en una evolución. La metadata guarda, de la
+   * respuesta, la versión de las reglas de dosis, los CÓDIGOS de los avisos y
+   * si se confirmaron con motivo; nunca los mg ni el texto del motivo.
+   */
+  anesthesiaSafety?: true;
+  /**
    * SEC-049: alta, cambio o verificación de una cobertura. La metadata guarda,
    * de la respuesta, el tipo de pagador, los 4 últimos caracteres del nº de
    * afiliado y si quedó verificada; nunca el número completo.

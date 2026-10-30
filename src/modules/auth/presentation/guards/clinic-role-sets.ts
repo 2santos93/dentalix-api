@@ -362,3 +362,14 @@ export const REPORT_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 // Medios de pago de la clínica (DX-377) — crear y editar: solo gestión.
 // Leerlos (selector del modal de abono): PAYMENT_ROLES.
 export const PAYMENT_METHOD_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+
+// Anestesia local en la evolución (DX-307) — REGISTRARLA y previsualizar la
+// dosis: quien la aplica (odontólogo) y gestión. La asistente la ve
+// (CLINICAL_ROLES) pero no la registra; recepción, nada. El catálogo de
+// anestésicos: leerlo, CLINICAL_ROLES; crear, editar y cargar los sugeridos,
+// solo gestión.
+export const ANESTHESIA_WRITE_ROLES: ClinicRole[] = [
+  ClinicRole.DENTIST,
+  ClinicRole.ADMIN,
+];
+export const ANESTHETIC_CATALOG_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
