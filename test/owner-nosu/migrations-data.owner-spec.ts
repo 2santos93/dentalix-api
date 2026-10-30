@@ -402,7 +402,7 @@ const FIXTURE_DX312 = [
  * decisión. En A una sede viva y una borrada en blando, de países distintos;
  * en B, otra.
  */
-const DX329 = '20261103120000_dx329_location_default_phone_region';
+const DX329 = '20261103120400_dx329_location_default_phone_region';
 const FIXTURE_DX329 = [
   `INSERT INTO "locations" ("id","tenantId","name","countryCode","deletedAt","updatedAt") VALUES
      (gen_random_uuid(),'${T_A}','Sede 329 viva','VE',NULL,now()),
@@ -496,7 +496,8 @@ const STEPS: Step[] = [
   // código antiguo se queda; hasta la de DX-312.
   { until: DX312, fixture: FIXTURE_DX327 },
   // dx312: país ISO en columna propia, relleno por clínica y validación; la
-  // columna antigua se queda; hasta la de DX-329.
+  // columna antigua se queda; y las siguientes (las de DX-377, medios de
+  // pago, sin fixture propio) hasta la de DX-329.
   { until: DX329, fixture: FIXTURE_DX312 },
   // dx329: prefijo telefónico por defecto de la sede y su relleno por clínica.
   { until: '99999999999999', fixture: FIXTURE_DX329 },

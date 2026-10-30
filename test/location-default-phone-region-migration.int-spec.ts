@@ -14,8 +14,8 @@ import { Prisma, PrismaClient } from '@prisma/client';
 // runbook (spec §10.4) pisan una región que decidió un ADMIN, también si la
 // vació (pre-flight I9).
 
-const DX329 = '20261103120000_dx329_location_default_phone_region';
-const DX329_M2 = '20261103120100_dx329_location_default_phone_region_backfill';
+const DX329 = '20261103120400_dx329_location_default_phone_region';
+const DX329_M2 = '20261103120500_dx329_location_default_phone_region_backfill';
 const ROOT = join(__dirname, '..');
 
 // El relleno del runbook (spec §10.4), copiado tal cual.
