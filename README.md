@@ -3683,7 +3683,7 @@ lista de gastos sale de un índice con su orden. Migraciones
   | `Q3931`  | Alta de un pago con Σ pagos vivos + el nuevo > importe              | «El pago supera lo pendiente del gasto. Recarga…»                    |
   | `Q3932`  | Rebajar el importe del gasto por debajo de lo pagado en vivo        | «El importe no puede ser menor a lo ya pagado. Recarga…»             |
   | `Q3933`  | Anular un gasto con pagos vivos                                     | «El gasto tiene pagos sin anular: anúlalos antes de anular el gasto…» |
-  | `Q3934`  | `OUTFLOW_VOID` con otro importe, moneda o caja de origen que su salida, o sobre una salida viva | «La anulación de la salida no coincide con su importe o con su caja…» |
+  | `Q3934`  | `OUTFLOW_VOID` con otro importe, moneda o caja de origen que su salida, sobre una salida viva o con su caja aún abierta | «La anulación de la salida no coincide con su importe o con su caja…» |
 
   El alta de un pago lee el gasto `FOR NO KEY UPDATE`: dos altas del mismo
   gasto, o un alta y una anulación o una rebaja simultáneas, se esperan y la
@@ -3705,11 +3705,14 @@ lista de gastos sale de un índice con su orden. Migraciones
 - **Datos ya incoherentes**: las guardas solo validan escrituras nuevas; la
   migración no recorre ni cambia filas y no falla si existen. Se listan, sin
   tocarlos, con la consulta de solo lectura
-  `prisma/scripts/expense-integrity-report.sql` (una sentencia; con el owner o
-  un rol `BYPASSRLS` para ver todas las clínicas):
+  `prisma/scripts/expense-integrity-report.sql` (una sentencia), con un rol
+  `BYPASSRLS` o superusuario (el del DBA) para ver todas las clínicas. **No
+  con el owner de producción** (`NOBYPASSRLS`): con FORCE RLS y sin clínica
+  fijada no ve ningún gasto; en ese caso el informe no da un falso «todo
+  bien», sino una sola fila `ROLE_WITHOUT_BYPASSRLS`:
 
   ```bash
-  psql "postgresql://<owner>:<clave>@<host>:5432/<bd>" -X -v ON_ERROR_STOP=1 \
+  psql "postgresql://<rol BYPASSRLS>:<clave>@<host>:5432/<bd>" -X -v ON_ERROR_STOP=1 \
     -f prisma/scripts/expense-integrity-report.sql
   ```
 

@@ -762,14 +762,16 @@ describe('gastos, pagos de gasto y salidas de caja: tablas, RLS e inmutabilidad 
 
   describe('OUTFLOW_VOID en los ajustes de caja', () => {
     /**
-     * Una salida de la caja ABIERTA, ya anulada (como la app, antes del
-     * ajuste): el ajuste la devuelve con su importe y contra su caja.
+     * Una salida de una caja que después se CIERRA, ya anulada (como la app,
+     * antes del ajuste): el ajuste la devuelve con su importe y contra su caja.
      */
     async function outflow() {
+      const session = await open(a.locationId, thirdUserId);
       const { payment } = await pay({
         method: 'CASH',
-        cashSessionId: openSession,
+        cashSessionId: session.id,
       });
+      await close(session.id);
       return asA((tx) =>
         tx.expensePayment.update({
           where: { id: payment.id },
@@ -783,7 +785,7 @@ describe('gastos, pagos de gasto y salidas de caja: tablas, RLS e inmutabilidad 
     }
 
     function adjustment(
-      payment: { id: string },
+      payment: { id: string; cashSessionId: string | null },
       extra: Partial<Prisma.CashSessionAdjustmentUncheckedCreateInput> = {},
     ): Prisma.CashSessionAdjustmentUncheckedCreateInput {
       return {
@@ -791,7 +793,7 @@ describe('gastos, pagos de gasto y salidas de caja: tablas, RLS e inmutabilidad 
         locationId: a.locationId,
         kind: 'OUTFLOW_VOID',
         expensePaymentId: payment.id,
-        originalSessionId: openSession,
+        originalSessionId: payment.cashSessionId,
         currency: 'COP',
         method: 'CASH',
         amount: 10_000,

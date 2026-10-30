@@ -350,8 +350,14 @@ describe('salida de caja frente al cierre de su caja (int, DX-274)', () => {
       if (out.status === 'fulfilled') {
         // Entró antes del cierre: el arqueo guardado la resta.
         expect(attached).toBe(1);
-        expect(cashLine(seen[0])?.outflowsCount).toBe(1);
-        expect(cashLine(seen[0])?.expectedCents).toBe((FLOAT - AMOUNT) * 100);
+        const line = cashLine(seen[0]);
+        expect(line?.outflowsCount).toBe(1);
+        expect(line?.outflowsCents).toBe(AMOUNT * 100);
+        // La primera caja de la sede recoge al abrir el OUTFLOW_VOID pendiente
+        // del caso anterior (+AMOUNT): cuenta como ajuste, no como salida.
+        expect(line?.expectedCents).toBe(
+          FLOAT * 100 + (line?.adjustmentsCents ?? 0) - AMOUNT * 100,
+        );
       } else {
         expect(out.reason).toBeInstanceOf(ConflictException);
         expect(attached).toBe(0);

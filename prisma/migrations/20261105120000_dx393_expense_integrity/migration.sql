@@ -14,7 +14,8 @@
 --                       (Q3932) y no se anula con pagos vivos (Q3933).
 --   dx_cash_adjustment_guard (INSERT)  un OUTFLOW_VOID lleva el importe y la
 --                       moneda de la salida, su "originalSessionId" es la caja
---                       de la salida y la salida está anulada (Q3934).
+--                       de la salida, ya cerrada, y la salida está anulada
+--                       (Q3934).
 --
 -- ERRCODE propios de clase Q3 (implementación, I–Z; A–H los reserva el
 -- estándar SQL): el filtro de errores de la API los traduce a 409 en español,
@@ -230,13 +231,19 @@ BEGIN
     -- DX-393: OUTFLOW_VOID devuelve justo lo que restó la salida, en su
     -- moneda, contra la caja de la que salió, y solo de una salida ya anulada
     -- (la app la anula antes en la misma transacción; anulada no cambia).
-    -- Sin salida lo rechaza el CHECK de "kind".
+    -- Y solo si esa caja ya no está ABIERTA: anulada con su caja abierta, la
+    -- salida deja de restar allí y el ajuste la devolvería dos veces. La app
+    -- mira el estado con la caja `FOR SHARE` (`onPaymentVoided`), así que no
+    -- cambia hasta el COMMIT. Sin salida lo rechaza el CHECK de "kind".
     IF NEW."kind" = 'OUTFLOW_VOID' AND NEW."expensePaymentId" IS NOT NULL AND NOT EXISTS (
       SELECT 1 FROM public.expense_payments e
+        JOIN public.cash_sessions s
+          ON s."tenantId" = e."tenantId" AND s."id" = e."cashSessionId"
        WHERE e."id" = NEW."expensePaymentId" AND e."tenantId" = NEW."tenantId"
          AND e."amount" = NEW."amount" AND e."currency" = NEW."currency"
          AND e."cashSessionId" = NEW."originalSessionId"
          AND e."voidedAt" IS NOT NULL
+         AND s."status" <> 'OPEN'
     ) THEN
       RAISE EXCEPTION 'La anulación de la salida no coincide con su importe o con su caja. Vuelve a intentarlo.'
         USING ERRCODE = 'Q3934';

@@ -44,6 +44,7 @@ let locationId: string;
 let userId: string;
 let openSession: string;
 let otherSession: string;
+let thirdUserId: string;
 
 async function cleanup(): Promise<void> {
   const tenants = await raw.tenant.findMany({
@@ -57,6 +58,8 @@ async function cleanup(): Promise<void> {
     await raw.cashSessionAdjustment.deleteMany({ where });
     await raw.expensePayment.deleteMany({ where });
     await raw.expense.deleteMany({ where });
+    await raw.cashSessionClosingLine.deleteMany({ where });
+    await raw.cashSessionClosing.deleteMany({ where });
     await raw.cashSessionFloat.deleteMany({ where });
     await raw.cashSession.deleteMany({ where });
     await raw.location.deleteMany({ where });
@@ -143,6 +146,39 @@ function openCash(openedById: string) {
   });
 }
 
+/** Cierra la caja como la app: cierre + línea + estado, en una transacción. */
+function closeCash(sessionId: string) {
+  return asApp(async (tx) => {
+    const closing = await tx.cashSessionClosing.create({
+      data: {
+        tenantId,
+        sessionId,
+        sequence: 1,
+        closedById: userId,
+        blind: false,
+        hasDifference: false,
+        suggestedLockDate: DAY,
+      },
+    });
+    await tx.cashSessionClosingLine.create({
+      data: {
+        tenantId,
+        closingId: closing.id,
+        currency: 'COP',
+        method: 'CASH',
+        opening: 0,
+        expected: 0,
+        counted: 0,
+        difference: 0,
+      },
+    });
+    await tx.cashSession.update({
+      where: { id: sessionId },
+      data: { status: 'CLOSED', closedById: userId },
+    });
+  });
+}
+
 describe('DX-393 · integridad entre gasto y pagos en la BD (int)', () => {
   beforeAll(async () => {
     await prisma.onModuleInit();
@@ -172,11 +208,21 @@ describe('DX-393 · integridad entre gasto y pagos en la BD (int)', () => {
       },
     });
     otherSession = await openCash(other.id);
+    const third = await raw.user.create({
+      data: {
+        email: `tercera-${EMAIL}`,
+        passwordHash: 'x',
+        fullName: 'Tere Turno',
+      },
+    });
+    thirdUserId = third.id;
   });
 
   afterAll(async () => {
     await cleanup();
-    await raw.user.deleteMany({ where: { email: `otra-${EMAIL}` } });
+    await raw.user.deleteMany({
+      where: { email: { in: [`otra-${EMAIL}`, `tercera-${EMAIL}`] } },
+    });
     await raw.$disconnect();
     await prisma.onModuleDestroy();
   });
@@ -387,13 +433,18 @@ describe('DX-393 · integridad entre gasto y pagos en la BD (int)', () => {
   });
 
   describe('OUTFLOW_VOID exige el importe y la caja de la salida que anula', () => {
-    /** Salida de 10.000 de la caja abierta; `voided` la anula antes. */
+    /**
+     * Salida de 10.000 de una caja que después se CIERRA (la única que se
+     * devuelve con OUTFLOW_VOID, como `onPaymentVoided`); `voided` la anula.
+     */
     async function outflow(voided = true) {
+      const session = await openCash(thirdUserId);
       const e = await newExpense(50_000);
       const p = await pay(e.id, 10_000, {
         method: 'CASH',
-        cashSessionId: openSession,
+        cashSessionId: session,
       });
+      await closeCash(session);
       if (!voided) return p;
       return asApp((tx) =>
         tx.expensePayment.update({ where: { id: p.id }, data: VOID() }),
@@ -401,7 +452,7 @@ describe('DX-393 · integridad entre gasto y pagos en la BD (int)', () => {
     }
 
     function adjustment(
-      expensePaymentId: string,
+      payment: { id: string; cashSessionId: string | null },
       extra: Partial<Prisma.CashSessionAdjustmentUncheckedCreateInput> = {},
     ) {
       return asApp((tx) =>
@@ -410,8 +461,8 @@ describe('DX-393 · integridad entre gasto y pagos en la BD (int)', () => {
             tenantId,
             locationId,
             kind: 'OUTFLOW_VOID',
-            expensePaymentId,
-            originalSessionId: openSession,
+            expensePaymentId: payment.id,
+            originalSessionId: payment.cashSessionId ?? openSession,
             currency: 'COP',
             method: 'CASH',
             amount: 10_000,
@@ -425,28 +476,48 @@ describe('DX-393 · integridad entre gasto y pagos en la BD (int)', () => {
 
     it('con el importe y la caja de su salida anulada, entra', async () => {
       const p = await outflow();
-      await expect(adjustment(p.id)).resolves.toMatchObject({
+      await expect(adjustment(p)).resolves.toMatchObject({
         kind: 'OUTFLOW_VOID',
       });
     });
 
     it('otro importe, otra caja de origen o una salida aún viva: Q3934', async () => {
       const p = await outflow();
-      await expect(sqlState(adjustment(p.id, { amount: 9_999 }))).resolves.toBe(
+      await expect(sqlState(adjustment(p, { amount: 9_999 }))).resolves.toBe(
         'Q3934',
       );
       await expect(
-        sqlState(adjustment(p.id, { amount: 10_000.01 })),
+        sqlState(adjustment(p, { amount: 10_000.01 })),
       ).resolves.toBe('Q3934');
       await expect(
-        sqlState(adjustment(p.id, { originalSessionId: otherSession })),
+        sqlState(adjustment(p, { originalSessionId: otherSession })),
       ).resolves.toBe('Q3934');
       const live = await outflow(false);
-      await expect(sqlState(adjustment(live.id))).resolves.toBe('Q3934');
+      await expect(sqlState(adjustment(live))).resolves.toBe('Q3934');
       await expect(
         raw.cashSessionAdjustment.count({
           where: { expensePaymentId: { in: [p.id, live.id] } },
         }),
+      ).resolves.toBe(0);
+    });
+
+    it('una salida cuya caja sigue ABIERTA no se devuelve con un ajuste: contaría dos veces (Q3934)', async () => {
+      // Anulada con su caja abierta, la salida ya deja de restar allí: un
+      // OUTFLOW_VOID la sumaría otra vez (como si saliera dinero de más).
+      const e = await newExpense(50_000);
+      const p = await pay(e.id, 10_000, {
+        method: 'CASH',
+        cashSessionId: openSession,
+      });
+      const voided = await asApp((tx) =>
+        tx.expensePayment.update({ where: { id: p.id }, data: VOID() }),
+      );
+      await expect(sqlState(adjustment(voided))).resolves.toBe('Q3934');
+      await expect(
+        sqlState(adjustment(voided, { sessionId: otherSession })),
+      ).resolves.toBe('Q3934');
+      await expect(
+        raw.cashSessionAdjustment.count({ where: { expensePaymentId: p.id } }),
       ).resolves.toBe(0);
     });
 
@@ -456,7 +527,7 @@ describe('DX-393 · integridad entre gasto y pagos en la BD (int)', () => {
       await asApp((tx) =>
         tx.expensePayment.update({ where: { id: p.id }, data: VOID() }),
       );
-      await expect(sqlState(adjustment(p.id))).resolves.toBe('Q3934');
+      await expect(sqlState(adjustment(p))).resolves.toBe('Q3934');
     });
   });
 
@@ -579,6 +650,27 @@ describe('DX-393 · integridad entre gasto y pagos en la BD (int)', () => {
           'tenantId',
         ].sort(),
       );
+    });
+
+    it('sin BYPASSRLS (dentalix_app, o un owner NOBYPASSRLS) no da un falso «todo bien»', async () => {
+      // FORCE RLS: sin clínica fijada no ve ningún gasto; el informe lo dice
+      // con una fila propia en vez de devolver 0 filas.
+      const app = new PrismaClient<Prisma.PrismaClientOptions>({
+        datasources: { db: { url: process.env.DATABASE_URL } },
+      });
+      try {
+        const rows = await app.$queryRawUnsafe<
+          { problem: string; tenantId: string | null }[]
+        >(readFileSync(REPORT, 'utf8'));
+        expect(rows).toEqual([
+          expect.objectContaining({
+            problem: 'ROLE_WITHOUT_BYPASSRLS',
+            tenantId: null,
+          }),
+        ]);
+      } finally {
+        await app.$disconnect();
+      }
     });
 
     it('las migraciones de DX-393 se aplican igual con esas filas y no las tocan', () => {
