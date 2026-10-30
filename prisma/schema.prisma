@@ -4749,6 +4749,9 @@ model Expense {
   /// Destino de la FK de `expense_payments`: su sede y su moneda son las del gasto.
   @@unique([tenantId, id, locationId, currency], map: "expenses_tenant_id_location_currency_key")
   @@index([tenantId, locationId, invoiceDate(sort: Desc), id(sort: Desc)], map: "expenses_tenant_location_invoice_idx")
+  /// DX-393: el orden exacto de la lista de gastos (todas las sedes y por sede).
+  @@index([tenantId, invoiceDate(sort: Desc), createdAt(sort: Desc), id(sort: Desc)], map: "expenses_tenant_invoice_created_idx")
+  @@index([tenantId, locationId, invoiceDate(sort: Desc), createdAt(sort: Desc), id(sort: Desc)], map: "expenses_tenant_location_invoice_created_idx")
   @@map("expenses")
 }
 

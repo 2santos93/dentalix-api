@@ -2,6 +2,7 @@ import { ArgumentsHost, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import {
   BY_SQLSTATE,
+  EXPENSE_INTEGRITY_MESSAGES,
   PrismaExceptionFilter,
   conflictMessageForTarget,
 } from './prisma-exception.filter';
@@ -274,9 +275,32 @@ describe('PrismaExceptionFilter', () => {
     jest.restoreAllMocks();
   });
 
+  it.each(Object.entries(EXPENSE_INTEGRITY_MESSAGES))(
+    'turns the expense integrity guard %s (DX-393) into a 409 in Spanish, without the DETAIL',
+    (code, message) => {
+      const filter = new PrismaExceptionFilter();
+      const { host, status, json } = mockHost();
+      jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+      filter.catch(unknownPg(code, message, SECRET_DETAIL), host);
+
+      expect(status).toHaveBeenCalledWith(409);
+      expect(bodyOf(json)).toEqual({
+        statusCode: 409,
+        error: 'Conflict',
+        message,
+      });
+      expect(JSON.stringify(bodyOf(json))).not.toContain(SECRET_DETAIL);
+      jest.restoreAllMocks();
+    },
+  );
+
   it('own SQLSTATEs live in an implementation class (I–Z or 5–9), never A–H', () => {
     const own = Object.keys(BY_SQLSTATE).filter((code) => !/^\d{2}/.test(code));
     expect(own).toContain('Q0271');
+    expect(own).toEqual(
+      expect.arrayContaining(Object.keys(EXPENSE_INTEGRITY_MESSAGES)),
+    );
     for (const code of own) expect(code).toMatch(/^[5-9I-Z]/);
   });
 

@@ -3570,7 +3570,8 @@ migraciones `20261024150000_dx274_enums`, `…150100_dx274_expenses`,
 - **Estado derivado**: `PENDING`, `PARTIAL`, `PAID` o `VOIDED` salen de la
   anulación y de la suma de pagos vivos; `overdue` es «no pagado del todo con
   el vencimiento ya pasado» en el día civil de la sede. La lista lo calcula en
-  una sola consulta por página (filtros `status` y `overdue` incluidos).
+  una sola consulta por página (filtros `status` y `overdue` incluidos); sin
+  esos dos filtros solo suma los pagos de la página (DX-393).
 - **Reglas**: la factura no es futura y el vencimiento no es anterior a ella;
   la categoría es una predefinida o una propia activa (400 `Elige una
 categoría válida.`) y el gasto guarda una foto del nombre; el proveedor se
@@ -3661,6 +3662,78 @@ migrate deploy`). `…150300` crea un índice no concurrente sobre
   salida de caja menor de recepción en el turno ABIERTO de la tarde; la caja
   cerrada de la mañana no se toca, así que su arqueo (diferencia de −2.000)
   sigue igual.
+
+## Integridad entre gasto y pagos (DX-393)
+
+Auditoría DB-058 y DB-059. La BD hace de red de las reglas de los pagos de un
+gasto (DX-274), que antes solo aplicaba la app con el gasto `FOR UPDATE`, y la
+lista de gastos sale de un índice con su orden. Migraciones
+`20261105120000_dx393_expense_integrity` (funciones de trigger) y
+`…120100_dx393_expenses_list_idx` (índices).
+
+- **Guardas** (`CREATE OR REPLACE` de las funciones de DX-274; mismos
+  triggers, `SECURITY INVOKER` y `search_path = pg_catalog, pg_temp`; corren
+  como `dentalix_app`, bajo su RLS). Cada una con su `ERRCODE` propio, que el
+  filtro de errores (`BY_SQLSTATE`) traduce a **409 en español** sin el
+  `DETAIL` de Postgres, como `Q0271` (DX-271):
+
+  | SQLSTATE | Regla                                                               | 409                                                                  |
+  | -------- | ------------------------------------------------------------------- | -------------------------------------------------------------------- |
+  | `Q3930`  | Alta de un pago sobre un gasto anulado                              | «El gasto está anulado: ya no admite pagos.»                         |
+  | `Q3931`  | Alta de un pago con Σ pagos vivos + el nuevo > importe              | «El pago supera lo pendiente del gasto. Recarga…»                    |
+  | `Q3932`  | Rebajar el importe del gasto por debajo de lo pagado en vivo        | «El importe no puede ser menor a lo ya pagado. Recarga…»             |
+  | `Q3933`  | Anular un gasto con pagos vivos                                     | «El gasto tiene pagos sin anular: anúlalos antes de anular el gasto…» |
+  | `Q3934`  | `OUTFLOW_VOID` con otro importe, moneda o caja de origen que su salida, sobre una salida viva o con su caja aún abierta | «La anulación de la salida no coincide con su importe o con su caja…» |
+
+  El alta de un pago lee el gasto `FOR NO KEY UPDATE`: dos altas del mismo
+  gasto, o un alta y una anulación o una rebaja simultáneas, se esperan y la
+  segunda ve lo que dejó la primera (`test/expense-integrity.int-spec.ts`, con
+  las carreras sin el bloqueo de la app). La app sigue respondiendo antes con
+  sus mensajes (400 del tope con lo pendiente, 409 del resto); estos 409 solo
+  salen si una ruta se salta sus comprobaciones
+  (`test/expenses.e2e-spec.ts`, «la BD como red»).
+- **Lista**: índices `expenses_tenant_invoice_created_idx`
+  `("tenantId", "invoiceDate" DESC, "createdAt" DESC, "id" DESC)` y
+  `expenses_tenant_location_invoice_created_idx` (lo mismo con `"locationId"`
+  tras la clínica). Sin filtro `status` ni `overdue`, la página se corta en el
+  índice **antes** de sumar los pagos y el total es un `count` sin sumas. Con
+  esos filtros la suma decide qué filas entran, así que se suma por gasto que
+  pasa los demás filtros (como antes). Medido como `dentalix_app` con 20.000
+  gastos en 5 sedes y un pago cada uno (`test/expense-list-plan.int-spec.ts`,
+  exige el índice, 25 sumas y < 15 ms): página 1 de ~110 ms a ~0,3 ms; total de
+  ~14 ms a ~4 ms. Con `status`, el total sigue en ~110 ms.
+- **Datos ya incoherentes**: las guardas solo validan escrituras nuevas; la
+  migración no recorre ni cambia filas y no falla si existen. Se listan, sin
+  tocarlos, con la consulta de solo lectura
+  `prisma/scripts/expense-integrity-report.sql` (una sentencia), con un rol
+  `BYPASSRLS` o superusuario (el del DBA) para ver todas las clínicas. **No
+  con el owner de producción** (`NOBYPASSRLS`): con FORCE RLS y sin clínica
+  fijada no ve ningún gasto; en ese caso el informe no da un falso «todo
+  bien», sino una sola fila `ROLE_WITHOUT_BYPASSRLS`:
+
+  ```bash
+  psql "postgresql://<rol BYPASSRLS>:<clave>@<host>:5432/<bd>" -X -v ON_ERROR_STOP=1 \
+    -f prisma/scripts/expense-integrity-report.sql
+  ```
+
+  Devuelve `problem` (`VOIDED_WITH_LIVE_PAYMENTS`, `PAID_OVER_AMOUNT` u
+  `OUTFLOW_VOID_MISMATCH`), clínica, sede, gasto, ajuste (si aplica) y los dos
+  importes (esperado y real); nunca el proveedor ni la descripción. Corregirlos
+  es decisión de la clínica: anular un pago vivo siempre se puede, y después
+  el gasto ya se deja rebajar o anular.
+- **Despliegue** (aditivo; las réplicas anteriores cumplen ya estas reglas
+  antes de escribir, con los mismos bloqueos):
+  1. Antes, la consulta de diagnóstico (a la nota de versión). No bloquea el
+     despliegue: solo informa.
+  2. `prisma migrate deploy`. `…120000` solo reemplaza funciones
+     (`lock_timeout` 5 s, sin recorrer tablas). `…120100` crea los dos
+     índices **sin** `CONCURRENTLY`, en la transacción de Prisma con
+     `SET LOCAL lock_timeout = '5s'`: mientras se construyen se frenan las
+     escrituras de gastos (no las lecturas); con 20.000 gastos, decenas de ms.
+     Si falla por `lock_timeout` no deja nada a medias:
+     `npx prisma migrate resolve --rolled-back 20261105120100_dx393_expenses_list_idx`
+     y repetir.
+  3. Sin variables de entorno nuevas ni cambios en la web.
 
 ## Importación de pacientes desde CSV/XLSX (DX-107)
 
