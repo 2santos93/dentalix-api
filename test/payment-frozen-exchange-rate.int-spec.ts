@@ -14,6 +14,9 @@ import { PrismaClinicExchangeSettingsRepository } from '../src/modules/exchange/
 import { PrismaManualExchangeRateRepository } from '../src/modules/exchange/infrastructure/repositories/prisma-manual-exchange-rate.repository';
 import { ManualExchangeRateInUseError } from '../src/modules/exchange/domain/ports/manual-exchange-rate-repository.port';
 import { PaymentBaseRetries } from '../src/modules/payments/application/payment-base-retries';
+import { PaymentRateBackupAudit } from '../src/modules/payments/application/payment-rate-backup-audit';
+import { RecordAuditEventUseCase } from '../src/modules/audit/application/record-audit-event.use-case';
+import { PrismaAuditEventRepository } from '../src/modules/audit/infrastructure/prisma-audit-event.repository';
 import { PrismaPaymentBaseRetryRepository } from '../src/modules/payments/infrastructure/allocations/prisma-payment-base-retry.repository';
 import {
   REGIONAL_BOGOTA_FIXTURE,
@@ -61,6 +64,10 @@ const retries = new PaymentBaseRetries(
   new PrismaPaymentBaseRetryRepository(prisma, tenantContext),
   allocationRepo,
   convert,
+  new PaymentRateBackupAudit(
+    new RecordAuditEventUseCase(new PrismaAuditEventRepository(prisma)),
+    tenantContext,
+  ),
 );
 
 const SUBDOMAINS = ['dx375-int-auto', 'dx375-int-manual'];

@@ -255,6 +255,29 @@ export class AuditStaffAccessChangeDto {
   after?: AuditStaffAccessSideDto;
 }
 
+export class AuditExchangeRateBackupDto {
+  @ApiProperty({
+    format: 'date',
+    example: '2026-10-28',
+    description: 'Día civil de la tasa (el del abono en su sede).',
+  })
+  rateDate!: string;
+
+  @ApiProperty({
+    format: 'date',
+    example: '2026-10-30',
+    description:
+      'Desde qué día rige la tasa manual de la clínica (posterior a rateDate).',
+  })
+  manualSince!: string;
+
+  @ApiProperty({
+    type: [String],
+    description: 'Las monedas de la cotización (ISO 4217).',
+  })
+  currencies!: string[];
+}
+
 export class AuditMetadataDto {
   @ApiPropertyOptional({
     type: [String],
@@ -349,6 +372,13 @@ export class AuditMetadataDto {
       'DX-359: accesos de un miembro antes y después (rol, sedes, nº de registro profesional, especialidad): solo lo que cambió, o un lado en un alta (invitación, aceptación, registro). Nunca el nombre, el email ni nada de la contraseña.',
   })
   staffAccess?: AuditStaffAccessChangeDto;
+
+  @ApiPropertyOptional({
+    type: AuditExchangeRateBackupDto,
+    description:
+      'DX-402: el barrido congeló en un abono (`reason` EXCHANGE_RATE_BACKUP, `origin` JOB, sin usuario) la tasa manual de un día anterior a «manual desde», como tasa de respaldo de un día sin tasa del proveedor. Solo días y monedas; ni importes ni la tasa.',
+  })
+  exchangeRateBackup?: AuditExchangeRateBackupDto;
 }
 
 export class AuditEventDto {

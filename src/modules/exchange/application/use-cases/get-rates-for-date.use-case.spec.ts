@@ -307,6 +307,134 @@ describe('GetRatesForDateUseCase', () => {
     });
   });
 
+  // DX-402: la tasa manual de un día anterior a `manualSince` es la tasa de
+  // respaldo de los abonos pendientes de ese día sin tasa del proveedor. Solo
+  // la lectura que lo pide (`memoized({ manualBackup: true })`, el reintento
+  // de los abonos sin tasa); el resto de lecturas no cambia.
+  describe('tasa de respaldo de un día anterior a manual (DX-402)', () => {
+    const SINCE = '2026-10-30';
+    const C = '99999999-9999-4999-8999-999999999999';
+
+    function setup(options: { snapshotOn28?: boolean } = {}) {
+      const repo = makeInMemoryRepo();
+      if (options.snapshotOn28) repo.seed('2026-10-28', { COP: 3900 });
+      const fetchRates = jest
+        .fn()
+        .mockRejectedValue(new ExchangeRateUnavailableError('caído'));
+      const tenantContext = new TenantContextService();
+      const uc = new GetRatesForDateUseCase(
+        repo,
+        makeProvider(fetchRates),
+        makeSettings(
+          { [C]: { source: 'MANUAL', manualSince: SINCE } },
+          tenantContext,
+        ),
+        makeManualRates(
+          { [C]: { '2026-10-28': { COP: 4000 } } },
+          tenantContext,
+        ),
+        tenantContext,
+      );
+      return { uc, fetchRates, tenantContext };
+    }
+
+    it('sin snapshot del proveedor, la manual de ese día sirve de respaldo y no se llama al proveedor', async () => {
+      const { uc, tenantContext, fetchRates } = setup();
+      const lookup = tenantContext.run(C, () =>
+        uc.memoized({ manualBackup: true }),
+      );
+      await expect(
+        tenantContext.run(C, () => lookup('2026-10-28')),
+      ).resolves.toEqual({
+        base: 'USD',
+        source: 'MANUAL',
+        rates: { COP: 4000 },
+        backup: { manualSince: SINCE },
+      });
+      expect(fetchRates).not.toHaveBeenCalled();
+    });
+
+    it('con snapshot del proveedor ese día, manda el snapshot', async () => {
+      const { uc, tenantContext } = setup({ snapshotOn28: true });
+      const lookup = tenantContext.run(C, () =>
+        uc.memoized({ manualBackup: true }),
+      );
+      await expect(
+        tenantContext.run(C, () => lookup('2026-10-28')),
+      ).resolves.toEqual({
+        base: 'USD',
+        source: 'AUTOMATIC',
+        rates: { COP: 3900 },
+      });
+    });
+
+    it('sin la opción, un día anterior sigue el camino automático (y sin tasa falla)', async () => {
+      const { uc, tenantContext, fetchRates } = setup();
+      await expect(
+        tenantContext.run(C, () => uc.execute('2026-10-28')),
+      ).rejects.toBeInstanceOf(ExchangeRateUnavailableError);
+      expect(fetchRates).toHaveBeenCalledTimes(1);
+    });
+
+    it('`noBackup` en la lectura de respaldo vuelve al camino automático', async () => {
+      const { uc, tenantContext, fetchRates } = setup();
+      const lookup = tenantContext.run(C, () =>
+        uc.memoized({ manualBackup: true }),
+      );
+      await expect(
+        tenantContext.run(C, () => lookup('2026-10-28', { noBackup: true })),
+      ).rejects.toBeInstanceOf(ExchangeRateUnavailableError);
+      expect(fetchRates).toHaveBeenCalledTimes(1);
+    });
+
+    it('un día sin tasa manual registrada sigue el camino automático', async () => {
+      const { uc, tenantContext, fetchRates } = setup();
+      const lookup = tenantContext.run(C, () =>
+        uc.memoized({ manualBackup: true }),
+      );
+      await expect(
+        tenantContext.run(C, () => lookup('2026-10-27')),
+      ).rejects.toBeInstanceOf(ExchangeRateUnavailableError);
+      expect(fetchRates).toHaveBeenCalledWith('2026-10-27');
+    });
+
+    it('con la fuente automática no hay respaldo: las manuales no se usan', async () => {
+      const repo = makeInMemoryRepo();
+      const fetchRates = jest
+        .fn()
+        .mockRejectedValue(new ExchangeRateUnavailableError('caído'));
+      const tenantContext = new TenantContextService();
+      const uc = new GetRatesForDateUseCase(
+        repo,
+        makeProvider(fetchRates),
+        makeSettings({}, tenantContext),
+        makeManualRates(
+          { [C]: { '2026-10-28': { COP: 4000 } } },
+          tenantContext,
+        ),
+        tenantContext,
+      );
+      const lookup = tenantContext.run(C, () =>
+        uc.memoized({ manualBackup: true }),
+      );
+      await expect(
+        tenantContext.run(C, () => lookup('2026-10-28')),
+      ).rejects.toBeInstanceOf(ExchangeRateUnavailableError);
+    });
+
+    it('el día de inicio y los siguientes no son respaldo: son la manual de siempre', async () => {
+      const { uc, tenantContext } = setup();
+      const lookup = tenantContext.run(C, () =>
+        uc.memoized({ manualBackup: true }),
+      );
+      await expect(tenantContext.run(C, () => lookup(SINCE))).resolves.toEqual({
+        base: 'USD',
+        source: 'MANUAL',
+        rates: {},
+      });
+    });
+  });
+
   // SEC-054: la cuota del proveedor es una sola para toda la plataforma.
   describe('cuota del proveedor (SEC-054)', () => {
     const A = '33333333-3333-4333-8333-333333333333';

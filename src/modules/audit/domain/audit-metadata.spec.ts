@@ -965,3 +965,58 @@ describe('sanitizeAuditMetadata — accesos de un miembro del personal (DX-359)'
     }
   });
 });
+
+describe('sanitizeAuditMetadata — tasa de respaldo de un día sin tasa (DX-402)', () => {
+  it('guarda el día de la tasa, desde cuándo rige la manual y las monedas', () => {
+    expect(
+      sanitizeAuditMetadata({
+        reason: 'EXCHANGE_RATE_BACKUP',
+        origin: 'JOB',
+        exchangeRateBackup: {
+          rateDate: '2026-10-28',
+          manualSince: '2026-10-30',
+          currencies: ['COP', 'USD'],
+          amount: 50,
+          patientName: 'Ana',
+        },
+      }),
+    ).toEqual({
+      reason: 'EXCHANGE_RATE_BACKUP',
+      origin: 'JOB',
+      exchangeRateBackup: {
+        rateDate: '2026-10-28',
+        manualSince: '2026-10-30',
+        currencies: ['COP', 'USD'],
+      },
+    });
+  });
+
+  it('un día que no existe, un día de la tasa no anterior o una moneda rara no pasan', () => {
+    for (const exchangeRateBackup of [
+      {
+        rateDate: '2026-02-30',
+        manualSince: '2026-10-30',
+        currencies: ['COP'],
+      },
+      {
+        rateDate: '2026-10-30',
+        manualSince: '2026-10-30',
+        currencies: ['COP'],
+      },
+      {
+        rateDate: '2026-10-28',
+        manualSince: '2026-10-30',
+        currencies: ['cop'],
+      },
+      { rateDate: '2026-10-28', manualSince: '2026-10-30', currencies: [] },
+      {
+        rateDate: '2026-10-28',
+        manualSince: '2026-10-30',
+        currencies: ['COP', 'EUR', 'VES'],
+      },
+      '2026-10-28',
+    ]) {
+      expect(sanitizeAuditMetadata({ exchangeRateBackup })).toEqual({});
+    }
+  });
+});

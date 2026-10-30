@@ -106,6 +106,7 @@ export async function freezePaymentRate(
       toPerBase,
       source: quote.source,
       date: quote.date,
+      ...(quote.backup ? { backup: quote.backup } : {}),
     };
   } catch (error) {
     if (isNoRateError(error)) return null;

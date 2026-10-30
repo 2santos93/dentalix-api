@@ -39,6 +39,30 @@ export interface PaymentBaseBacklog {
   oldestSince: Date | null;
 }
 
+/**
+ * DX-402: los abonos pendientes de un día a los que serviría la tasa manual
+ * de una moneda (como tasa de respaldo de un día anterior a `manualSince`).
+ */
+export interface PaymentRatePendingDay {
+  /**
+   * Abonos vivos de la clínica en espera de su tasa, de ese día civil (en su
+   * sede), cuya moneda o moneda de destino es la de la tasa y cuya otra
+   * moneda es la base o ya tiene tasa manual ese día: a los que servirá.
+   */
+  count: number;
+  /**
+   * Hay tasa del proveedor guardada para ese día: la de respaldo no se usa
+   * (manda la automática).
+   */
+  providerRateSaved: boolean;
+  /**
+   * Abonos pendientes de ese día que necesitan esa moneda y OTRA que no es
+   * la base ni tiene tasa manual registrada ese día: la de respaldo solo les
+   * servirá cuando se registre también la otra (`currencies`, ISO 4217).
+   */
+  otherRatesMissing: { count: number; currencies: string[] };
+}
+
 export const PAYMENT_BASE_RETRY_REPOSITORY = Symbol(
   'PAYMENT_BASE_RETRY_REPOSITORY',
 );
@@ -73,4 +97,9 @@ export interface PaymentBaseRetryRepository {
   wake(): Promise<number>;
   /** Abonos vivos pendientes desde hace más de `olderThanHours`. */
   backlog(olderThanHours: number): Promise<PaymentBaseBacklog>;
+  /**
+   * DX-402: abonos de la clínica que esperan su tasa del día civil `date` y
+   * necesitan `currency` (su moneda o la de destino).
+   */
+  pendingOnDay(date: string, currency: string): Promise<PaymentRatePendingDay>;
 }

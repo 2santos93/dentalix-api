@@ -52,8 +52,11 @@ export class GetExchangeRateSettingsUseCase {
  * abonos de la clínica que la esperaban, con la fuente de ANTES
  * (`ExchangeSourceChangeHooks`): un abono ya cobrado, también uno de hoy
  * anterior al cambio o de una sede con otra zona, conserva su tasa. Los que
- * siguen sin tasa la tomarán de la fuente nueva. Si congelar falla, la fuente
- * no cambia.
+ * siguen sin tasa la toman después según la fuente nueva: con MANUAL, los de
+ * un día desde `manualSince` de la manual de su día, y los de un día anterior
+ * de la automática o, si el proveedor no tiene la de su día, de la manual de
+ * ese día como tasa de respaldo (DX-402). Si congelar falla, la fuente no
+ * cambia.
  */
 @Injectable()
 export class UpdateExchangeRateSettingsUseCase {

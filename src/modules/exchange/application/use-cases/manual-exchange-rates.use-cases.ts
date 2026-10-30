@@ -77,7 +77,9 @@ export const EXCHANGE_RATE_CLOCK = Symbol('EXCHANGE_RATE_CLOCK');
  * sobrescribe (409): si ningún abono la usó, se corrige con
  * `CorrectManualExchangeRateUseCase` (DX-375). Se puede registrar con la
  * fuente AUTOMATIC (así la clínica deja la de hoy lista antes de cambiar a
- * MANUAL); solo se usa con MANUAL.
+ * MANUAL); solo se usa con MANUAL: para los días desde `manualSince` y, la
+ * de un día anterior, como tasa de respaldo de los abonos de ese día que
+ * siguen sin tasa (DX-402).
  */
 @Injectable()
 export class RegisterManualExchangeRateUseCase {

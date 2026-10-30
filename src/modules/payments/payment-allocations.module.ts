@@ -3,6 +3,7 @@ import { ExchangeModule } from '../exchange/exchange.module';
 import { JobsModule } from '../jobs/jobs.module';
 import { PaymentAllocationJobs } from './application/payment-allocation-jobs';
 import { PaymentBaseRetries } from './application/payment-base-retries';
+import { PaymentRateBackupAudit } from './application/payment-rate-backup-audit';
 import { PAYMENT_BASE_RETRY_REPOSITORY } from './domain/ports/payment-base-retry-repository.port';
 import { PrismaPaymentBaseRetryRepository } from './infrastructure/allocations/prisma-payment-base-retry.repository';
 import { PlanAllocationRebalancer } from './application/plan-allocation-rebalancer';
@@ -31,6 +32,8 @@ import { DrainAllocationRebalancesInterceptor } from './presentation/drain-alloc
     },
     PlanAllocationRebalancer,
     PaymentBaseRetries,
+    // DX-402: el evento del abono que congela una tasa de respaldo.
+    PaymentRateBackupAudit,
     DrainAllocationRebalancesInterceptor,
     PaymentAllocationJobs,
   ],

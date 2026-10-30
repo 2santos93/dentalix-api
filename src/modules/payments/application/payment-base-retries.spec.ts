@@ -4,6 +4,8 @@ import { ExchangeRateUnavailableError } from '../../exchange/domain/ports/exchan
 import { PaymentBaseRetries } from './payment-base-retries';
 import { InMemoryPaymentBaseRetryRepository } from './__fixtures__/in-memory-payment-base-retry.repository';
 import { InMemoryPlanAllocationRepository } from './__fixtures__/in-memory-plan-allocation.repository';
+import type { FrozenExchangeRate } from '../domain/payment-exchange-rate';
+import { PaymentRateBackupAudit } from './payment-rate-backup-audit';
 
 const MIN = 60_000;
 
@@ -15,10 +17,15 @@ function quoting(
   rates: Record<string, number>,
   fail: () => Error = () =>
     new BadRequestException('unsupported currency: VES'),
+  backup?: { manualSince: string },
 ) {
   const quotes: string[] = [];
+  const memoizedWith: unknown[] = [];
   const convert = {
-    memoized: () => convert,
+    memoized: (options?: unknown) => {
+      memoizedWith.push(options);
+      return convert;
+    },
     execute: (input: { amount: number; from: string; to: string }) => {
       if (input.from === input.to) return Promise.resolve({ rateUsed: 1 });
       const from = input.from === 'USD' ? 1 : rates[input.from];
@@ -37,21 +44,37 @@ function quoting(
       }
       return Promise.resolve({
         ...input,
-        source: 'AUTOMATIC',
+        source: backup ? 'MANUAL' : 'AUTOMATIC',
         fromPerBase: perBase(input.from),
         toPerBase: perBase(input.to),
+        ...(backup ? { backup } : {}),
       });
     },
   };
-  return { convert: convert as unknown as ConvertAmountUseCase, quotes };
+  return {
+    convert: convert as unknown as ConvertAmountUseCase,
+    quotes,
+    memoizedWith,
+  };
 }
 
-function setup(rates: Record<string, number> = {}, fail?: () => Error) {
+function setup(
+  rates: Record<string, number> = {},
+  fail?: () => Error,
+  backup?: { manualSince: string },
+) {
   const retries = new InMemoryPaymentBaseRetryRepository();
   const allocations = new InMemoryPlanAllocationRepository();
-  const { convert, quotes } = quoting(rates, fail);
-  const service = new PaymentBaseRetries(retries, allocations, convert);
-  return { retries, allocations, service, quotes };
+  const { convert, quotes, memoizedWith } = quoting(rates, fail, backup);
+  const backupUses: { paymentId: string; rate: FrozenExchangeRate }[] = [];
+  const audit = {
+    backupRateUsed: (paymentId: string, rate: FrozenExchangeRate) => {
+      backupUses.push({ paymentId, rate });
+      return Promise.resolve();
+    },
+  } as unknown as PaymentRateBackupAudit;
+  const service = new PaymentBaseRetries(retries, allocations, convert, audit);
+  return { retries, allocations, service, quotes, memoizedWith, backupUses };
 }
 
 /** Un abono en VES (sin tasa) a un plan en USD, «sin tasa» (DX-375). */
@@ -99,6 +122,93 @@ describe('PaymentBaseRetries (DX-380, OPS-045)', () => {
       rateDate: '2026-10-30',
     });
     expect(retries.rows.has('cop')).toBe(false);
+  });
+
+  // DX-402: el reintento lee con la tasa de respaldo (la manual de un día
+  // anterior a «manual desde») y deja en la auditoría que la usó.
+  it('el reintento pide la lectura con tasa de respaldo', async () => {
+    const { retries, service, memoizedWith } = setup({ COP: 4000 });
+    retries.add(stuck('ves'));
+    await service.retryDue(50);
+    expect(memoizedWith).toEqual([{ manualBackup: true }]);
+  });
+
+  it('congelar con la tasa de respaldo queda en la auditoría, con el día y desde cuándo rige la manual', async () => {
+    const { retries, allocations, service, backupUses } = setup(
+      { COP: 4000 },
+      undefined,
+      { manualSince: '2026-10-30' },
+    );
+    retries.add({
+      paymentId: 'usd-28',
+      amount: 50,
+      currency: 'USD',
+      paidOn: '2026-10-28',
+      targetCurrency: 'COP',
+      planCurrency: 'COP',
+      exchangeRateCurrency: 'COP',
+    });
+
+    await expect(service.retryDue(50)).resolves.toMatchObject({ resolved: 1 });
+    expect(allocations.frozen.get('usd-28')?.rate).toMatchObject({
+      source: 'MANUAL',
+      date: '2026-10-28',
+      toPerBase: 4000,
+    });
+    expect(backupUses).toEqual([
+      {
+        paymentId: 'usd-28',
+        rate: expect.objectContaining({
+          date: '2026-10-28',
+          backup: { manualSince: '2026-10-30' },
+        }) as unknown,
+      },
+    ]);
+  });
+
+  it('una tasa que no es de respaldo no deja ese evento', async () => {
+    const { retries, service, backupUses } = setup({ COP: 4000 });
+    retries.add({
+      paymentId: 'cop',
+      amount: 200_000,
+      currency: 'COP',
+      targetCurrency: 'USD',
+      planCurrency: 'USD',
+      exchangeRateCurrency: 'USD',
+    });
+    await service.retryDue(50);
+    expect(backupUses).toEqual([]);
+  });
+
+  it('si el abono ya tenía la tasa congelada (otra pasada), no se audita el respaldo', async () => {
+    const { retries, allocations, service, backupUses } = setup(
+      { COP: 4000 },
+      undefined,
+      { manualSince: '2026-10-30' },
+    );
+    retries.add({
+      paymentId: 'ya',
+      amount: 50,
+      currency: 'USD',
+      paidOn: '2026-10-28',
+      targetCurrency: 'COP',
+      planCurrency: 'COP',
+      exchangeRateCurrency: 'COP',
+    });
+    // Otra pasada lo congeló entre la lectura y la escritura (DX-375).
+    allocations.frozen.set('ya', {
+      targetCurrency: 'COP',
+      rate: {
+        currency: 'COP',
+        fromPerBase: 1,
+        toPerBase: 3900,
+        source: 'AUTOMATIC',
+        date: '2026-10-28',
+      },
+    });
+    await service.retryDue(50);
+    expect(backupUses).toEqual([]);
+    expect(allocations.frozen.get('ya')?.rate?.toPerBase).toBe(3900);
   });
 
   it('un abono sin tasa se aplaza con el backoff 1 → 5 → 30 min, no cada minuto', async () => {

@@ -2328,7 +2328,10 @@ existente queda en `AUTOMATIC` y no cambia nada para ella.
   automática (caché y, si falta, el proveedor, con las protecciones de
   SEC-054: ventana, caché negativa, single-flight y presupuesto de la
   clínica). Así, pasar a `MANUAL` no mueve
-  los saldos ni los totales de antes del cambio. Desde DX-375 cada abono
+  los saldos ni los totales de antes del cambio. Excepción (DX-402): la tasa
+  manual de un día anterior sirve de tasa de respaldo a los abonos de ese día
+  que siguen sin tasa (ver «Tasa manual de un día anterior a «manual
+  desde»»). Desde DX-375 cada abono
   congela su tasa (sección siguiente), así que ni pasar a `MANUAL` ni volver
   a `AUTOMATIC` mueve un abono ya cobrado.
 
@@ -4554,6 +4557,50 @@ sin snapshot (OPS-045). Ahora:
   esperaban, por lotes de 2.000 y clínica; entran en la primera pasada).
   Una réplica anterior sigue con su barrido de siempre (todas las clínicas)
   durante el despliegue. Después, `npm run db:check-force`.
+
+### Tasa manual de un día anterior a «manual desde»: tasa de respaldo (DX-402)
+
+El caso habitual del aviso de DX-380: la clínica está en `AUTOMATIC`, el
+proveedor no da la tasa de un día D y un abono de D queda «sin tasa». El
+ADMIN pasa a `MANUAL` hoy (`manualSince` = hoy) y registra la tasa de D. Antes
+esa tasa no se usaba nunca (los días anteriores a `manualSince` siguen con la
+automática). Ahora:
+
+- **Regla**: con `MANUAL`, la tasa manual registrada para un día D anterior a
+  `manualSince` es la **tasa de respaldo** de los abonos pendientes de D (sin
+  tasa congelada) **si el proveedor no tiene tasa guardada de D**
+  (`exchange_rate_snapshots`). Si la tiene, manda la automática, como para
+  cualquier otro abono de ese día. Solo cubre la cotización si tiene las dos
+  monedas (la base vale 1); si no, la cotización sigue el camino automático.
+  Con `AUTOMATIC` las tasas manuales no se usan nunca.
+- **Dónde**: solo en la lectura del reintento de DX-380
+  (`ConvertAmountUseCase.memoized({ manualBackup: true })` en
+  `PaymentBaseRetries`). Saldos, totales, `GET /exchange/rates`, el alta de un
+  abono y el congelado previo a un cambio de fuente (BE-047) no cambian: un
+  abono de D que nace «sin tasa» lo resuelve el barrido siguiente. No se
+  llama al proveedor para un día con tasa de respaldo.
+- **Nunca cambia una tasa congelada** (DX-375): `freezeRate` solo escribe en
+  un abono con `exchangeRateFrom` NULL. La tasa queda congelada como `MANUAL`
+  del día D y, desde ese momento, «Usada en abonos» (409 al corregirla y el
+  trigger `manual_exchange_rates_in_use_guard`).
+- **Sin esperar el backoff**: registrar o corregir la tasa ya adelanta los
+  reintentos de la clínica (`afterRatesChange` → `wake`, DX-380).
+- **Auditoría**: el barrido deja un UPDATE de `PAYMENT` (el abono) sin usuario,
+  `reason: EXCHANGE_RATE_BACKUP`, `origin: JOB` y `exchangeRateBackup`
+  (`rateDate`, `manualSince`, `currencies`; ni importes ni la tasa).
+  Migración `20261104130000_dx402_audit_backup_rate_actor`: amplía
+  `audit_events_actor_check` para admitir ese evento sin actor (y solo ese);
+  CHECK más permisivo, NOT VALID + VALIDATE, `lock_timeout` 5 s.
+- **Aviso del formulario**: `GET /payments/rate-backlog/day?date=&currency=`
+  (solo ADMIN, 403 en español al resto) da `{ date, currency, count,
+  providerRateSaved, otherRatesMissing }`: cuántos abonos vivos de ese día
+  (en su sede) esperan su tasa, están en esa moneda o van a un plan (o saldo
+  migrado) en esa moneda y tienen la otra moneda cubierta (USD o ya con tasa
+  manual ese día); cuántos necesitan además la tasa manual de otra moneda y
+  cuál (`otherRatesMissing`); y si el proveedor ya tiene tasa de ese día. La
+  web lo usa para decir, al registrar una tasa anterior a «manual desde», a
+  qué abonos se aplicará, qué otra tasa falta o que no se usará.
+- **Fuera**: la tasa de respaldo de N días (DX-384).
 
 ## Despliegue: roles de la BD (DX-113)
 
