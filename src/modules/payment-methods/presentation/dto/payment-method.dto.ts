@@ -60,12 +60,12 @@ export class CreatePaymentMethodDto {
   @IsEnum(PaymentMethodKind)
   kind!: PaymentMethodKind;
 
-  @ApiPropertyOptional({ default: true })
+  @ApiPropertyOptional({ description: 'Sin indicarlo, activo.' })
   @IsOptional()
   @IsBoolean()
   active?: boolean;
 
-  @ApiPropertyOptional({ default: false })
+  @ApiPropertyOptional({ description: 'Sin indicarlo, no pide referencia.' })
   @IsOptional()
   @IsBoolean()
   requiresReference?: boolean;
