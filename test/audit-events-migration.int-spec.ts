@@ -138,7 +138,9 @@ describe('DX-102 · migración de audit_events con datos (int)', () => {
       rmSync(s.dir, { recursive: true, force: true });
     }
     await admin.$disconnect();
-  });
+    // Varias bases desechables con 3.000 eventos: como el resto de specs de
+    // migración, más que los 30 s por defecto (DX-412: se pasó con carga).
+  }, 120_000);
 
   it('convierte la tabla con datos previos sin perder ni alterar filas', async () => {
     const { dir, db, target } = await prepare('su');
