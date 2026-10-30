@@ -2266,6 +2266,62 @@ la deduce del país de una sede. Migraciones `20261028160000_dx328_enums`,
      ROLLBACK;
      ```
 
+## Tasa de cambio por clínica: automática o manual (DX-374)
+
+Porción 1 de DX-367. Cada clínica elige de dónde sale la tasa del día con la
+que se convierten saldos, totales e imputaciones: `tenants."exchangeRateSource"`
+(`AUTOMATIC` por defecto, el proveedor de siempre con su caché
+`exchange_rate_snapshots`; o `MANUAL`). Con `MANUAL` la tasa sale de
+`manual_exchange_rates`, que registra el ADMIN por día civil y moneda, en
+unidades de la moneda por 1 USD (la misma base que el proveedor). Migraciones
+`20261101120000_dx374_enums`, `20261101120100_dx374_audit_events_idx`,
+`20261101120200_dx374_tenant_exchange_rate_source` y
+`20261101120300_dx374_manual_exchange_rates`. Sin relleno: toda clínica
+existente queda en `AUTOMATIC` y no cambia nada para ella.
+
+- **Lectura** (`GetRatesForDateUseCase`, la que usan todas las conversiones):
+  devuelve `{ base: 'USD', source, rates }`. Con `MANUAL`, `rates` trae solo
+  las monedas con tasa registrada ESE día: una moneda que falta está «sin
+  tasa». No se toma la de otro día ni se llama al proveedor. Convertirla lanza
+  `MissingExchangeRateError` (400 `EXCHANGE_RATE_MISSING`, en español). Los
+  consumidores (`paymentInPlanCurrency`, `GetPaymentsTotalsUseCase`) la tratan
+  igual que una moneda que el proveedor no trae (`isMissingRateError`): el
+  abono queda sin base y el saldo responde 200 sin contarlo. La precarga diaria
+  (`exchange.prefetch-rates`) usa `providerRates`, que ignora la fuente de las
+  clínicas. `source` va en la respuesta para que DX-375 lo congele en cada
+  abono.
+- **Endpoints**: `GET /exchange/rates` y `GET /exchange/convert` son ahora
+  rutas de clínica (los 4 roles, `TenantContextInterceptor`: hace falta el
+  host de la clínica). Solo ADMIN (`EXCHANGE_RATE_SETTINGS_ROLES`; el resto,
+  403 «Solo un administrador puede ver y cambiar la tasa de cambio de la
+  clínica.»): `GET|PUT /exchange/settings` (`{ source }`),
+  `GET /exchange/manual-rates?limit=` (las últimas, día más reciente primero;
+  30 por defecto, 100 como mucho) y `POST /exchange/manual-rates`
+  (`{ date, currency, rate }`).
+- **Validación del alta**: tasa > 0, hasta 8 decimales y menos de 10.000.000;
+  moneda de `currencies` y nunca USD (es la base); día `AAAA-MM-DD` que existe,
+  desde 2000-01-01 y no posterior a hoy en la zona de la sede activa (o de la
+  principal). Una tasa ya registrada para ese día y moneda no se sobrescribe:
+  409 `MANUAL_EXCHANGE_RATE_TAKEN`. Corregirla llega con DX-375. Se puede
+  registrar con la fuente `AUTOMATIC`, para dejar la de hoy lista antes de
+  cambiar a `MANUAL`. Quien no es miembro vivo de la clínica (acceso de
+  soporte) recibe 403.
+- **BD**: `manual_exchange_rates` con RLS FORCE y la política NULLIF; única
+  por (`tenantId`, `date`, `currency`), que sirve también la lectura del día y
+  la lista; FK de clínica, FK a `currencies` y FK compuesta del autor
+  (`tenantId`, `createdByMembershipId`, `createdById`) →
+  `clinic_memberships`; CHECKs de tasa > 0, moneda distinta de USD y día en
+  rango. La app solo tiene SELECT e INSERT. `createdAt` lo pone la BD en UTC.
+- **Auditoría**: cambiar la fuente deja un UPDATE de `CLINIC_SETTINGS` con
+  `reason: EXCHANGE_RATE_SOURCE` y `statusChange` `AUTOMATIC` → `MANUAL` (o al
+  revés), solo si cambia. Registrar una tasa deja un CREATE de `EXCHANGE_RATE`
+  (`@Audit`) con el id de la tasa.
+- **Despliegue**: `npx prisma migrate deploy` antes de la primera réplica
+  nueva. El índice de auditoría no es concurrente (tabla particionada): a una
+  hora de poco tráfico, como DX-316. Después, `npm run db:check-force`.
+- **Fuera de alcance** (DX-375): congelar en cada abono la tasa y su fuente,
+  el aviso «sin tasa» en el saldo y bloquear el cambio de una tasa ya usada.
+
 ## Tipos de documento genéricos y nombres locales (DX-327)
 
 El tipo de documento de un paciente o de un contacto es uno de cinco, iguales
