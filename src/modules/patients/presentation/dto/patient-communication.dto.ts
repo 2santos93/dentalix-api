@@ -133,7 +133,7 @@ export class PatientCommunicationDto {
     enum: ['MISSING', 'VALID', 'INVALID'],
     enumName: 'MobileStatus',
     description:
-      'MISSING: sin móvil. INVALID: no es un móvil válido para el país de la sede (no puede ser canal WhatsApp).',
+      'MISSING: sin móvil. INVALID: no es un móvil válido con el prefijo de la sede (no puede ser canal WhatsApp).',
   })
   phoneStatus!: 'MISSING' | 'VALID' | 'INVALID';
 
