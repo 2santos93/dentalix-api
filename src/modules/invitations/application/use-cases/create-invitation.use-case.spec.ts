@@ -1,3 +1,4 @@
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { FakeInvitationNotifier } from './__fixtures__/fake-invitation-notifier';
 import {
   BadRequestException,
@@ -11,25 +12,41 @@ import { hashInvitationToken } from '../invitation-token';
 
 const LIMITS = { tenantDaily: 30 };
 
+// DX-359: quién gestiona la invitación (el evento va en la transacción).
+const CTX: AuditRequestContext = {
+  tenantId: 't1',
+  locationId: null,
+  actor: { userId: 'admin-1', role: ClinicRole.ADMIN },
+  requestId: 'req-1',
+  ip: null,
+  userAgent: null,
+};
+
 describe('CreateInvitationUseCase', () => {
   it('DX-029: tope diario de invitaciones por clínica -> 429 en español sin crear nada', async () => {
     const repo = new InMemoryInvitationRepository();
     const notifier = new FakeInvitationNotifier();
     const uc = new CreateInvitationUseCase(repo, notifier, { tenantDaily: 2 });
     for (const email of ['a@x.com', 'b@x.com']) {
-      await uc.execute({
-        fullName: 'Persona',
-        email,
-        role: ClinicRole.ASSISTANT,
-      });
+      await uc.execute(
+        {
+          fullName: 'Persona',
+          email,
+          role: ClinicRole.ASSISTANT,
+        },
+        CTX,
+      );
     }
 
     const err = await uc
-      .execute({
-        fullName: 'Persona',
-        email: 'c@x.com',
-        role: ClinicRole.ASSISTANT,
-      })
+      .execute(
+        {
+          fullName: 'Persona',
+          email: 'c@x.com',
+          role: ClinicRole.ASSISTANT,
+        },
+        CTX,
+      )
       .catch((e: unknown) => e);
 
     expect(err).toBeInstanceOf(HttpException);
@@ -44,6 +61,62 @@ describe('CreateInvitationUseCase', () => {
     jest.useRealTimers();
   });
 
+  it('DX-359: invitar deja su evento (rol invitado) y la sustituida queda anulada; sin token, hash ni email', async () => {
+    const repo = new InMemoryInvitationRepository();
+    const uc = new CreateInvitationUseCase(
+      repo,
+      new FakeInvitationNotifier(),
+      LIMITS,
+    );
+    const { invitation: first } = await uc.execute(
+      {
+        fullName: 'Ana Ruiz',
+        email: 'ana@clinic.com',
+        role: ClinicRole.DENTIST,
+      },
+      CTX,
+    );
+    const { invitation: second, token } = await uc.execute(
+      { fullName: 'Ana Ruiz', email: 'ana@clinic.com', role: ClinicRole.ADMIN },
+      CTX,
+    );
+
+    expect(
+      repo.auditEvents.map((e) => [e.action, e.resourceId, e.metadata]),
+    ).toEqual([
+      [
+        'CREATE',
+        first.id,
+        {
+          reason: 'INVITATION_SENT',
+          staffAccess: { after: { role: ClinicRole.DENTIST } },
+        },
+      ],
+      [
+        'VOID',
+        first.id,
+        {
+          reason: 'INVITATION_REPLACED',
+          statusChange: { from: 'PENDING', to: 'REVOKED' },
+        },
+      ],
+      [
+        'CREATE',
+        second.id,
+        {
+          reason: 'INVITATION_SENT',
+          staffAccess: { after: { role: ClinicRole.ADMIN } },
+        },
+      ],
+    ]);
+    expect(repo.auditEvents.every((e) => e.actor.kind === 'user')).toBe(true);
+    const stored = JSON.stringify(repo.auditEvents);
+    expect(stored).not.toContain(token);
+    expect(stored).not.toContain(hashInvitationToken(token));
+    expect(stored).not.toContain('ana@clinic.com');
+    expect(stored).not.toContain('Ana Ruiz');
+  });
+
   it('normaliza el correo a minúsculas y sin espacios', async () => {
     const repo = new InMemoryInvitationRepository();
     const uc = new CreateInvitationUseCase(
@@ -52,11 +125,14 @@ describe('CreateInvitationUseCase', () => {
       LIMITS,
     );
 
-    const { invitation } = await uc.execute({
-      fullName: 'Ana Ruiz',
-      email: '  Ana@Clinic.com  ',
-      role: ClinicRole.DENTIST,
-    });
+    const { invitation } = await uc.execute(
+      {
+        fullName: 'Ana Ruiz',
+        email: '  Ana@Clinic.com  ',
+        role: ClinicRole.DENTIST,
+      },
+      CTX,
+    );
 
     expect(invitation.email).toBe('ana@clinic.com');
   });
@@ -69,16 +145,22 @@ describe('CreateInvitationUseCase', () => {
       LIMITS,
     );
 
-    await uc.execute({
-      fullName: 'Ana Ruiz',
-      email: 'ana@clinic.com',
-      role: ClinicRole.DENTIST,
-    });
-    const { invitation: second } = await uc.execute({
-      fullName: 'Ana Ruiz',
-      email: 'ana@clinic.com',
-      role: ClinicRole.ASSISTANT,
-    });
+    await uc.execute(
+      {
+        fullName: 'Ana Ruiz',
+        email: 'ana@clinic.com',
+        role: ClinicRole.DENTIST,
+      },
+      CTX,
+    );
+    const { invitation: second } = await uc.execute(
+      {
+        fullName: 'Ana Ruiz',
+        email: 'ana@clinic.com',
+        role: ClinicRole.ASSISTANT,
+      },
+      CTX,
+    );
 
     const pending = await repo.listPending();
     expect(pending).toHaveLength(1);
@@ -95,11 +177,14 @@ describe('CreateInvitationUseCase', () => {
     );
 
     await expect(
-      uc.execute({
-        fullName: 'Ana Ruiz',
-        email: 'ana@clinic.com',
-        role: ClinicRole.DENTIST,
-      }),
+      uc.execute(
+        {
+          fullName: 'Ana Ruiz',
+          email: 'ana@clinic.com',
+          role: ClinicRole.DENTIST,
+        },
+        CTX,
+      ),
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
@@ -112,11 +197,14 @@ describe('CreateInvitationUseCase', () => {
       LIMITS,
     );
 
-    const { invitation } = await uc.execute({
-      fullName: 'Ana Ruiz',
-      email: 'ana@clinic.com',
-      role: ClinicRole.DENTIST,
-    });
+    const { invitation } = await uc.execute(
+      {
+        fullName: 'Ana Ruiz',
+        email: 'ana@clinic.com',
+        role: ClinicRole.DENTIST,
+      },
+      CTX,
+    );
 
     expect(invitation.expiresAt).toEqual(new Date('2026-08-08T00:00:00.000Z'));
   });
@@ -125,9 +213,9 @@ describe('CreateInvitationUseCase', () => {
     const repo = new InMemoryInvitationRepository();
     let captured: unknown;
     const originalCreate = repo.create.bind(repo);
-    repo.create = (input) => {
+    repo.create = (input, audit) => {
       captured = input;
-      return originalCreate(input);
+      return originalCreate(input, audit);
     };
     const uc = new CreateInvitationUseCase(
       repo,
@@ -135,11 +223,14 @@ describe('CreateInvitationUseCase', () => {
       LIMITS,
     );
 
-    const result = await uc.execute({
-      fullName: 'Ana Ruiz',
-      email: 'ana@clinic.com',
-      role: ClinicRole.DENTIST,
-    });
+    const result = await uc.execute(
+      {
+        fullName: 'Ana Ruiz',
+        email: 'ana@clinic.com',
+        role: ClinicRole.DENTIST,
+      },
+      CTX,
+    );
 
     expect(typeof result.token).toBe('string');
     expect(result.token.length).toBeGreaterThan(0);
@@ -157,11 +248,14 @@ describe('CreateInvitationUseCase', () => {
     );
 
     await expect(
-      uc.execute({
-        fullName: 'A',
-        email: 'ana@clinic.com',
-        role: ClinicRole.DENTIST,
-      }),
+      uc.execute(
+        {
+          fullName: 'A',
+          email: 'ana@clinic.com',
+          role: ClinicRole.DENTIST,
+        },
+        CTX,
+      ),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
@@ -173,11 +267,14 @@ describe('CreateInvitationUseCase', () => {
     );
 
     await expect(
-      uc.execute({
-        fullName: 'Ana Ruiz',
-        email: 'ana@clinic.com',
-        role: 'SUPERADMIN' as ClinicRole,
-      }),
+      uc.execute(
+        {
+          fullName: 'Ana Ruiz',
+          email: 'ana@clinic.com',
+          role: 'SUPERADMIN' as ClinicRole,
+        },
+        CTX,
+      ),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
@@ -189,12 +286,15 @@ describe('CreateInvitationUseCase', () => {
       LIMITS,
     );
 
-    const { invitation } = await uc.execute({
-      fullName: 'Ana Ruiz',
-      email: 'ana@clinic.com',
-      role: ClinicRole.DENTIST,
-      invitedById: 'user-99',
-    });
+    const { invitation } = await uc.execute(
+      {
+        fullName: 'Ana Ruiz',
+        email: 'ana@clinic.com',
+        role: ClinicRole.DENTIST,
+        invitedById: 'user-99',
+      },
+      CTX,
+    );
 
     expect(invitation.invitedById).toBe('user-99');
   });
@@ -205,12 +305,15 @@ describe('CreateInvitationUseCase', () => {
       const notifier = new FakeInvitationNotifier();
       const uc = new CreateInvitationUseCase(repo, notifier, LIMITS);
 
-      const result = await uc.execute({
-        fullName: 'Ana Ruiz',
-        email: 'ana@clinic.com',
-        role: ClinicRole.DENTIST,
-        linkBase: 'https://demo.dentalix.app',
-      });
+      const result = await uc.execute(
+        {
+          fullName: 'Ana Ruiz',
+          email: 'ana@clinic.com',
+          role: ClinicRole.DENTIST,
+          linkBase: 'https://demo.dentalix.app',
+        },
+        CTX,
+      );
 
       expect(result.emailDelivery).toBe('PENDING');
       expect(notifier.sent).toHaveLength(1);
@@ -231,9 +334,9 @@ describe('CreateInvitationUseCase', () => {
         role: ClinicRole.DENTIST,
         linkBase: 'https://demo.dentalix.app',
       };
-      const first = await uc.execute(input);
+      const first = await uc.execute(input, CTX);
       notifier.quotaError = new Error('429');
-      await expect(uc.execute(input)).rejects.toThrow('429');
+      await expect(uc.execute(input, CTX)).rejects.toThrow('429');
       const pending = await repo.listPending();
       expect(pending.map((i) => i.id)).toEqual([first.invitation.id]);
       expect(notifier.quotaChecks).toEqual([
@@ -249,11 +352,14 @@ describe('CreateInvitationUseCase', () => {
         notifier,
         LIMITS,
       );
-      const result = await uc.execute({
-        fullName: 'Ana Ruiz',
-        email: 'ana@clinic.com',
-        role: ClinicRole.DENTIST,
-      });
+      const result = await uc.execute(
+        {
+          fullName: 'Ana Ruiz',
+          email: 'ana@clinic.com',
+          role: ClinicRole.DENTIST,
+        },
+        CTX,
+      );
       expect(result.emailDelivery).toBeNull();
       expect(notifier.sent).toHaveLength(0);
     });
@@ -266,12 +372,15 @@ describe('CreateInvitationUseCase', () => {
         repo,
         notifier,
         LIMITS,
-      ).execute({
-        fullName: 'Ana Ruiz',
-        email: 'ana@clinic.com',
-        role: ClinicRole.DENTIST,
-        linkBase: 'https://demo.dentalix.app',
-      });
+      ).execute(
+        {
+          fullName: 'Ana Ruiz',
+          email: 'ana@clinic.com',
+          role: ClinicRole.DENTIST,
+          linkBase: 'https://demo.dentalix.app',
+        },
+        CTX,
+      );
       expect(result.emailDelivery).toBeNull();
       expect(await repo.listPending()).toHaveLength(1);
     });
@@ -286,8 +395,8 @@ describe('CreateInvitationUseCase', () => {
         role: ClinicRole.DENTIST,
         linkBase: 'https://demo.dentalix.app',
       };
-      const first = await uc.execute(input);
-      await uc.execute(input);
+      const first = await uc.execute(input, CTX);
+      await uc.execute(input, CTX);
       expect(notifier.cancelled).toEqual([first.invitation.id]);
     });
   });

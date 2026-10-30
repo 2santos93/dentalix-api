@@ -22,8 +22,10 @@ import {
   ApiBody,
   ApiConsumes,
   ApiOkResponse,
+  ApiOperation,
   ApiServiceUnavailableResponse,
   ApiTags,
+  ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { UPLOAD_TEMP_DIR } from '../../../shared/storage/local-file';
 import { STORAGE_UNAVAILABLE_MESSAGE } from '../../../shared/storage/storage-errors';
@@ -49,6 +51,10 @@ import { MyProfileDto } from './dto/my-profile.dto';
 import { AvatarResponseDto } from './dto/avatar-response.dto';
 import { AuthTokensDto } from '../../auth/presentation/dto/auth-tokens.dto';
 import { MyProfile } from '../domain/entities/my-profile.entity';
+import type { AuditRequestMeta } from '../../audit/domain/audit-request-context';
+import { currentRequestId } from '../../../shared/observability/request-context';
+import { PrismaService } from '../../../shared/prisma/prisma.service';
+import { resolveActiveLocationId } from '../../../shared/tenancy/active-location';
 import { RateLimit } from '../../../shared/security/rate-limit.decorator';
 import {
   DeliveredSession,
@@ -71,7 +77,18 @@ function tenantUserOrThrow(user: JwtPayload): TenantJwtPayload {
 
 interface AuthenticatedRequest {
   user: JwtPayload;
+  ip?: string;
   headers: Record<string, string | string[] | undefined>;
+}
+
+/** DX-359: desde dónde llega la petición, para su evento de auditoría. */
+function requestMeta(req: AuthenticatedRequest): AuditRequestMeta {
+  const userAgent = req.headers['user-agent'];
+  return {
+    requestId: currentRequestId() ?? null,
+    ip: req.ip ?? null,
+    userAgent: (Array.isArray(userAgent) ? userAgent[0] : userAgent) ?? null,
+  };
 }
 
 const MAX_AVATAR_BYTES = 2 * 1024 * 1024; // 2 MB
@@ -88,7 +105,27 @@ export class MeController {
     private readonly setMyAvatar: SetMyAvatarUseCase,
     private readonly removeMyAvatar: RemoveMyAvatarUseCase,
     private readonly cookie: SessionCookieService,
+    private readonly prisma: PrismaService,
   ) {}
+
+  /**
+   * DX-359: sede activa del actor para su evento de auditoría, con las mismas
+   * reglas que `TenantContextInterceptor` (que `/me` no usa: también sirve a
+   * tokens de plataforma). `null` = toda la clínica o sesión de plataforma.
+   */
+  private async activeLocationId(
+    req: AuthenticatedRequest,
+  ): Promise<string | null> {
+    if (!isTenantPayload(req.user)) return null;
+    return (
+      (await resolveActiveLocationId(
+        this.prisma,
+        req.headers,
+        req.user.tenantId,
+        req.user.loc,
+      )) ?? null
+    );
+  }
 
   @Get()
   @ApiOkResponse({ type: MyProfileDto })
@@ -101,17 +138,31 @@ export class MeController {
     });
   }
 
+  // DX-359: la sesión se comprueba ANTES de escribir (un token de plataforma
+  // no tiene clínica donde auditar el cambio) y el cambio queda auditado en
+  // la clínica de la sesión (OWN_NAME_CHANGED, sin el nombre).
   @Patch()
+  @ApiOperation({
+    summary: 'Cambia tu nombre',
+    description:
+      'Solo con sesión de clínica. Queda en su auditoría (OWN_NAME_CHANGED) sin el valor del nombre; sin evento si no cambia.',
+  })
   @ApiOkResponse({ type: MyProfileDto })
+  @ApiUnauthorizedResponse({ description: 'Sin sesión de clínica' })
   async updateName(
     @Req() req: AuthenticatedRequest,
     @Body() dto: UpdateNameDto,
   ): Promise<MyProfile> {
-    await this.updateMyName.execute({
-      userId: req.user.sub,
-      fullName: dto.fullName,
-    });
     const user = tenantUserOrThrow(req.user);
+    await this.updateMyName.execute(
+      { userId: user.sub, fullName: dto.fullName },
+      {
+        tenantId: user.tenantId,
+        locationId: await this.activeLocationId(req),
+        actor: { userId: user.sub, role: user.role },
+        ...requestMeta(req),
+      },
+    );
     return this.getMyProfile.execute({
       userId: user.sub,
       tenantId: user.tenantId,
@@ -126,17 +177,26 @@ export class MeController {
   @Post('password')
   @RateLimit('password')
   @HttpCode(200)
+  @ApiOperation({
+    summary: 'Cambia tu contraseña y cierra tus demás sesiones',
+    description:
+      'Queda auditado (PASSWORD_CHANGE): en la clínica de la sesión o, con sesión de plataforma, en platform_audit_events. Solo el hecho: ni la contraseña ni su hash.',
+  })
   @ApiOkResponse({ type: AuthTokensDto })
   async changePassword(
     @Req() req: AuthenticatedRequest,
     @Res({ passthrough: true }) res: Response,
     @Body() dto: ChangePasswordDto,
   ): Promise<DeliveredSession> {
-    const pair = await this.changeMyPassword.execute({
-      session: req.user,
-      currentPassword: dto.currentPassword,
-      newPassword: dto.newPassword,
-    });
+    const pair = await this.changeMyPassword.execute(
+      {
+        session: req.user,
+        currentPassword: dto.currentPassword,
+        newPassword: dto.newPassword,
+        locationId: await this.activeLocationId(req),
+      },
+      requestMeta(req),
+    );
     return this.cookie.deliver(res, pair, this.cookie.wantsCookie(req));
   }
 

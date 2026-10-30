@@ -19,6 +19,7 @@ import {
   generateInvitationToken,
   hashInvitationToken,
 } from '../invitation-token';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 
 export const INVITATION_TTL_DAYS = 7;
 
@@ -66,7 +67,14 @@ export class CreateInvitationUseCase {
     private readonly limits: InvitationLimits,
   ) {}
 
-  async execute(input: CreateInvitationInput): Promise<CreateInvitationResult> {
+  /**
+   * DX-359: `ctx` es quién invita; el alta (y la anulación de la pendiente
+   * que sustituye) quedan auditadas en su transacción.
+   */
+  async execute(
+    input: CreateInvitationInput,
+    ctx: AuditRequestContext,
+  ): Promise<CreateInvitationResult> {
     const email = input.email.trim().toLowerCase();
     const fullName = input.fullName.trim();
     if (fullName.length < 2) {
@@ -107,7 +115,7 @@ export class CreateInvitationUseCase {
       await this.notifier.assertCanSend(email);
     }
 
-    const revokedIds = await this.repo.revokePendingByEmail(email);
+    const revokedIds = await this.repo.revokePendingByEmail(email, ctx);
     // Su email, si seguía pendiente, llevaría un enlace que ya no sirve.
     for (const id of revokedIds) {
       await this.notifier.cancelPending(id);
@@ -117,14 +125,17 @@ export class CreateInvitationUseCase {
     const tokenHash = hashInvitationToken(token);
     const expiresAt = new Date(Date.now() + INVITATION_TTL_MS);
 
-    const invitation = await this.repo.create({
-      email,
-      fullName,
-      role: input.role,
-      tokenHash,
-      expiresAt,
-      invitedById: input.invitedById,
-    });
+    const invitation = await this.repo.create(
+      {
+        email,
+        fullName,
+        role: input.role,
+        tokenHash,
+        expiresAt,
+        invitedById: input.invitedById,
+      },
+      ctx,
+    );
 
     // Después del commit de la invitación y sin esperar al proveedor: el
     // despachador envía el email en segundo plano (DX-088).

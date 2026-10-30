@@ -1,4 +1,5 @@
 import { ClinicRole } from '@prisma/client';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { StaffMember } from '../entities/staff-member.entity';
 import {
   StaffDirectoryPage,
@@ -69,8 +70,15 @@ export interface StaffRepository {
    * Reactiva la membresía desactivada de `userId` (limpia `deletedAt`).
    * Devuelve el miembro ya activo, o `null` si no había ninguna membresía
    * desactivada que reactivar. Tenant-scoped (via RLS / `runWithTenant`).
+   *
+   * DX-359: el evento de auditoría (STAFF_REACTIVATED, de `audit`) se escribe
+   * en la MISMA transacción: sin cambio no hay evento y sin evento no hay
+   * cambio.
    */
-  reactivateById(userId: string): Promise<StaffMember | null>;
+  reactivateById(
+    userId: string,
+    audit: AuditRequestContext,
+  ): Promise<StaffMember | null>;
 
   /**
    * DX-213 (SEC-038): ¿`userId` tiene alguna membresía ACTIVA en otra clínica
@@ -125,14 +133,27 @@ export interface StaffRepository {
    *
    * DX-089: ascender a ADMIN borra en la misma transacción sus sedes
    * permitidas (el ADMIN siempre tiene todas).
+   *
+   * DX-359: lee el antes (rol, sedes, registro profesional, especialidad y
+   * nombre) en la transacción y escribe ahí el evento STAFF_UPDATED con lo
+   * que cambió (ninguno si nada cambió).
    */
-  updateById(userId: string, patch: StaffPatch): Promise<UpdateStaffOutcome>;
+  updateById(
+    userId: string,
+    patch: StaffPatch,
+    audit: AuditRequestContext,
+  ): Promise<UpdateStaffOutcome>;
 
   /**
    * Soft-deletes (sets `deletedAt`) the active `ClinicMembership` for
    * `userId` in the current tenant. Tenant-scoped (via RLS /
    * `runWithTenant`). Misma garantía atómica que `updateById`: nunca deja la
    * clínica sin ADMIN activo (`LAST_ADMIN`).
+   *
+   * DX-359: con el evento STAFF_DEACTIVATED en la misma transacción.
    */
-  deactivateById(userId: string): Promise<DeactivateStaffOutcome>;
+  deactivateById(
+    userId: string,
+    audit: AuditRequestContext,
+  ): Promise<DeactivateStaffOutcome>;
 }

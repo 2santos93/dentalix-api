@@ -1,3 +1,5 @@
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+import { ClinicRole } from '@prisma/client';
 import { NotFoundException } from '@nestjs/common';
 import { ResendInvitationUseCase } from './resend-invitation.use-case';
 import { InMemoryInvitationRepository } from './__fixtures__/in-memory-invitation.repository';
@@ -5,6 +7,16 @@ import { FakeInvitationNotifier } from './__fixtures__/fake-invitation-notifier'
 import { hashInvitationToken } from '../invitation-token';
 
 const LINK_BASE = 'https://demo.dentalix.app';
+
+// DX-359: quién gestiona la invitación (el evento va en la transacción).
+const CTX: AuditRequestContext = {
+  tenantId: 't1',
+  locationId: null,
+  actor: { userId: 'admin-1', role: ClinicRole.ADMIN },
+  requestId: 'req-1',
+  ip: null,
+  userAgent: null,
+};
 
 describe('ResendInvitationUseCase', () => {
   afterEach(() => {
@@ -20,10 +32,13 @@ describe('ResendInvitationUseCase', () => {
     });
     const notifier = new FakeInvitationNotifier();
 
-    const result = await new ResendInvitationUseCase(repo, notifier).execute({
-      id: original.id,
-      linkBase: LINK_BASE,
-    });
+    const result = await new ResendInvitationUseCase(repo, notifier).execute(
+      {
+        id: original.id,
+        linkBase: LINK_BASE,
+      },
+      CTX,
+    );
 
     expect(result.invitation.id).toBe(original.id);
     expect(result.token).not.toBe('token-viejo');
@@ -47,6 +62,27 @@ describe('ResendInvitationUseCase', () => {
     ]);
   });
 
+  it('DX-359: reenviar deja su evento, sin el token nuevo ni su hash', async () => {
+    const repo = new InMemoryInvitationRepository();
+    const original = repo.seedInvitation({ token: 'token-viejo' });
+    const result = await new ResendInvitationUseCase(
+      repo,
+      new FakeInvitationNotifier(),
+    ).execute({ id: original.id, linkBase: LINK_BASE }, CTX);
+    expect(repo.auditEvents).toEqual([
+      expect.objectContaining({
+        action: 'UPDATE',
+        resourceType: 'STAFF_INVITATION',
+        resourceId: original.id,
+        actor: { kind: 'user', userId: 'admin-1', role: ClinicRole.ADMIN },
+        metadata: { reason: 'INVITATION_RESENT' },
+      }),
+    ]);
+    const stored = JSON.stringify(repo.auditEvents);
+    expect(stored).not.toContain(result.token);
+    expect(stored).not.toContain(hashInvitationToken(result.token));
+  });
+
   it('también reenvía una invitación ya caducada', async () => {
     const repo = new InMemoryInvitationRepository();
     const expired = repo.seedInvitation({
@@ -55,7 +91,7 @@ describe('ResendInvitationUseCase', () => {
     const result = await new ResendInvitationUseCase(
       repo,
       new FakeInvitationNotifier(),
-    ).execute({ id: expired.id, linkBase: LINK_BASE });
+    ).execute({ id: expired.id, linkBase: LINK_BASE }, CTX);
     expect(result.invitation.expiresAt.getTime()).toBeGreaterThan(Date.now());
   });
 
@@ -68,7 +104,7 @@ describe('ResendInvitationUseCase', () => {
     const notifier = new FakeInvitationNotifier();
     const uc = new ResendInvitationUseCase(repo, notifier);
     await expect(
-      uc.execute({ id: invitation.id, linkBase: LINK_BASE }),
+      uc.execute({ id: invitation.id, linkBase: LINK_BASE }, CTX),
     ).rejects.toThrow(
       new NotFoundException(
         'No encontramos una invitación pendiente con ese id.',
@@ -82,7 +118,7 @@ describe('ResendInvitationUseCase', () => {
       new ResendInvitationUseCase(
         new InMemoryInvitationRepository(),
         new FakeInvitationNotifier(),
-      ).execute({ id: 'otra', linkBase: LINK_BASE }),
+      ).execute({ id: 'otra', linkBase: LINK_BASE }, CTX),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
@@ -92,10 +128,13 @@ describe('ResendInvitationUseCase', () => {
     const notifier = new FakeInvitationNotifier();
     notifier.quotaError = new Error('429');
     await expect(
-      new ResendInvitationUseCase(repo, notifier).execute({
-        id: original.id,
-        linkBase: LINK_BASE,
-      }),
+      new ResendInvitationUseCase(repo, notifier).execute(
+        {
+          id: original.id,
+          linkBase: LINK_BASE,
+        },
+        CTX,
+      ),
     ).rejects.toThrow('429');
     expect(
       (await repo.findByTokenHash(hashInvitationToken('token-vigente')))?.id,

@@ -96,6 +96,7 @@ describe('PrismaAuthRepository — createClinicWithOwner', () => {
           locale: 'ja-JP',
           hourCycle: 'h23',
         },
+        request: null,
       }),
     ).rejects.toBe(stop);
 

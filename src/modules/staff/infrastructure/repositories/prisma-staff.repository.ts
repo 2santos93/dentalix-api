@@ -21,6 +21,13 @@ import {
   UpdateStaffOutcome,
 } from '../../domain/ports/staff-repository.port';
 import { StaffMember } from '../../domain/entities/staff-member.entity';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
+import {
+  staffStatusAuditEvent,
+  staffUpdateAuditEvent,
+  type StaffAccessSnapshot,
+} from '../../domain/staff-audit';
 import {
   StaffDirectoryEntry,
   StaffDirectoryPage,
@@ -221,7 +228,10 @@ export class PrismaStaffRepository implements StaffRepository {
     return otherActiveMemberships(this.prisma, userId, tenantId);
   }
 
-  async reactivateById(userId: string): Promise<StaffMember | null> {
+  async reactivateById(
+    userId: string,
+    audit: AuditRequestContext,
+  ): Promise<StaffMember | null> {
     return this.prisma.runWithTenant(async (tx) => {
       const membership = await tx.clinicMembership.findFirst({
         where: { userId, deletedAt: { not: null }, user: { deletedAt: null } },
@@ -235,6 +245,11 @@ export class PrismaStaffRepository implements StaffRepository {
         data: { deletedAt: null },
         include: { user: true },
       });
+      // DX-359: en la misma transacción que la reactivación.
+      await writeAuditEvent(
+        tx,
+        staffStatusAuditEvent(audit, userId, 'REACTIVATED'),
+      );
       return {
         userId: updated.userId,
         fullName: updated.user.fullName,
@@ -366,6 +381,7 @@ export class PrismaStaffRepository implements StaffRepository {
   async updateById(
     userId: string,
     patch: StaffPatch,
+    audit: AuditRequestContext,
   ): Promise<UpdateStaffOutcome> {
     return this.prisma.runWithTenant(async (tx) => {
       // Solo una degradación puede retirar un ADMIN; renombrar o ascender no
@@ -382,6 +398,8 @@ export class PrismaStaffRepository implements StaffRepository {
       if (demotes && (await isLastActiveAdmin(tx, membership.role))) {
         return { kind: 'LAST_ADMIN' };
       }
+      // DX-359: el antes, leído en la transacción que lo cambia.
+      const before = await accessSnapshot(tx, membership.id);
       if (
         patch.role ||
         patch.professionalLicense !== undefined ||
@@ -415,6 +433,13 @@ export class PrismaStaffRepository implements StaffRepository {
         where: { id: membership.id },
         include: { user: true },
       });
+      const event = staffUpdateAuditEvent(
+        audit,
+        userId,
+        before,
+        await accessSnapshot(tx, membership.id),
+      );
+      if (event) await writeAuditEvent(tx, event);
       return {
         kind: 'UPDATED',
         member: {
@@ -429,7 +454,10 @@ export class PrismaStaffRepository implements StaffRepository {
     });
   }
 
-  async deactivateById(userId: string): Promise<DeactivateStaffOutcome> {
+  async deactivateById(
+    userId: string,
+    audit: AuditRequestContext,
+  ): Promise<DeactivateStaffOutcome> {
     return this.prisma.runWithTenant(async (tx) => {
       await lockActiveAdmins(tx);
       const membership = await findActiveMembership(tx, userId);
@@ -443,6 +471,11 @@ export class PrismaStaffRepository implements StaffRepository {
         where: { id: membership.id },
         data: { deletedAt: new Date() },
       });
+      // DX-359: en la misma transacción que la baja.
+      await writeAuditEvent(
+        tx,
+        staffStatusAuditEvent(audit, userId, 'DEACTIVATED'),
+      );
       return 'DEACTIVATED';
     });
   }
@@ -473,6 +506,33 @@ function findActiveMembership(
     where: { userId, deletedAt: null, user: { deletedAt: null } },
     select: { id: true, role: true },
   });
+}
+
+/**
+ * DX-359: lo que `PATCH /staff/:userId` puede cambiar de una membresía, con
+ * las sedes tal como las ve el resto del sistema (ADMIN → todas).
+ */
+async function accessSnapshot(
+  tx: Prisma.TransactionClient,
+  membershipId: string,
+): Promise<StaffAccessSnapshot> {
+  const m = await tx.clinicMembership.findUniqueOrThrow({
+    where: { id: membershipId },
+    select: {
+      role: true,
+      professionalLicense: true,
+      professionalSpecialty: true,
+      user: { select: { fullName: true } },
+      locations: MEMBERSHIP_LOCATIONS_SELECT,
+    },
+  });
+  return {
+    fullName: m.user.fullName,
+    role: m.role,
+    locationIds: allowedLocationIds(m.role, m.locations),
+    professionalLicense: m.professionalLicense,
+    professionalSpecialty: m.professionalSpecialty,
+  };
 }
 
 /**

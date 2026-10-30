@@ -22,6 +22,7 @@ import type { CountryWhitelist } from '../../../locations/domain/ports/country-w
 import { CURRENCY_WHITELIST } from '../../../treatment-plans/domain/ports/currency-whitelist.port';
 import type { CurrencyWhitelist } from '../../../treatment-plans/domain/ports/currency-whitelist.port';
 import type { ClinicLocationSettings } from '../../domain/ports/auth-repository.port';
+import type { AuditRequestMeta } from '../../../audit/domain/audit-request-context';
 import {
   type RegistrationLocationInput,
   registrationLocation,
@@ -213,10 +214,14 @@ export class RegisterClinicUseCase {
    * contraseña errónea dan el MISMO 404 genérico, y en los dos casos se
    * ejecuta un argon2 (hash ficticio si no hay pendiente). Superado eso, los
    * errores pueden ser concretos.
+   *
+   * DX-359: el alta queda auditada (CLINIC_REGISTERED) en su transacción;
+   * `request` es desde dónde se abrió el enlace.
    */
   async verify(
     token: string,
     password: string,
+    request: AuditRequestMeta,
   ): Promise<{ tenantId: string; userId: string; subdomain: string }> {
     const record = isWellFormedRegistrationToken(token)
       ? await this.pending.findPendingByTokenHash(hashRegistrationToken(token))
@@ -257,6 +262,8 @@ export class RegisterClinicUseCase {
         fullName: record.fullName,
         emailVerifiedAt: new Date(),
         location: record.location,
+        // DX-359: CLINIC_REGISTERED en la transacción del alta.
+        request,
       });
       this.logger.log({
         event: 'registration.completed',

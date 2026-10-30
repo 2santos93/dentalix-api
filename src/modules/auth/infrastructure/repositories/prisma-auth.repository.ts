@@ -1,4 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
+import { clinicRegisteredAuditEvent } from '../../domain/registration-audit';
 import { ClinicRole, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import {
@@ -122,6 +124,16 @@ export class PrismaAuthRepository implements AuthRepository {
           tenantId: tenant.id,
         })),
       });
+      // DX-359: el alta de la clínica y su ADMIN, auditada en esta misma
+      // transacción (el GUC de tenant ya es el de la clínica nueva).
+      await writeAuditEvent(
+        tx,
+        clinicRegisteredAuditEvent(input.request, {
+          tenantId: tenant.id,
+          userId: user.id,
+          locationId: location.id,
+        }),
+      );
       return { tenantId: tenant.id, userId: user.id };
     });
   }

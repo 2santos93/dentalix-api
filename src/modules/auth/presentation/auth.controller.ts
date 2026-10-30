@@ -10,7 +10,8 @@ import {
   Res,
   UnauthorizedException,
 } from '@nestjs/common';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
+import { currentRequestId } from '../../../shared/observability/request-context';
 import { ConfigService } from '@nestjs/config';
 import {
   ApiAcceptedResponse,
@@ -183,8 +184,15 @@ export class AuthController {
   @ApiConflictResponse({ description: 'Subdominio o email ya en uso' })
   verifyRegistration(
     @Body() dto: VerifyRegistrationDto,
+    @Req() req: Request,
   ): Promise<RegisterVerifiedDto> {
-    return this.registerClinic.verify(dto.token, dto.password);
+    // DX-359: el alta queda auditada (CLINIC_REGISTERED) en su transacción.
+    const userAgent = req.headers['user-agent'];
+    return this.registerClinic.verify(dto.token, dto.password, {
+      requestId: currentRequestId() ?? null,
+      ip: req.ip ?? null,
+      userAgent: userAgent ?? null,
+    });
   }
 
   /**

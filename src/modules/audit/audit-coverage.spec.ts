@@ -1260,6 +1260,49 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // depende de la query, que el decorador no lee).
   'GET /expenses/:id/attachment/url':
     'expense-receipts.use-cases.spec.ts y expenses.e2e-spec.ts',
+  // DX-359: personal y accesos. Cada repositorio escribe el evento en la
+  // MISMA transacción que el cambio (writeAuditEvent); ninguno guarda el
+  // token, su hash, el email ni el nombre.
+  // Invitar: CREATE STAFF_INVITATION con el rol (la pendiente que sustituye,
+  // VOID INVITATION_REPLACED); reenviar: UPDATE INVITATION_RESENT; retirar:
+  // VOID INVITATION_REVOKED (PENDING → REVOKED).
+  'POST /staff/invitations':
+    'invitation-audit.spec.ts, create-invitation.use-case.spec.ts y staff-access-audit.e2e-spec.ts',
+  'POST /staff/invitations/:id/resend':
+    'invitation-audit.spec.ts, resend-invitation.use-case.spec.ts y staff-access-audit.e2e-spec.ts',
+  'DELETE /staff/invitations/:id':
+    'invitation-audit.spec.ts, revoke-invitation.use-case.spec.ts y staff-access-audit.e2e-spec.ts',
+  // Aceptar (cuenta nueva, existente o reclamada): CREATE STAFF_MEMBER
+  // INVITATION_ACCEPTED con rol y sedes; el reclamo deja además su
+  // PASSWORD_RESET INVITATION_ACCOUNT_CLAIM (DX-029).
+  'POST /public/invitations/:token/accept':
+    'accept-invitation.use-case.spec.ts y staff-access-audit.e2e-spec.ts',
+  // UPDATE STAFF_MEMBER STAFF_UPDATED con el antes y el después de rol,
+  // sedes, registro profesional y especialidad (el nombre, solo en
+  // changedFields); sin evento si nada cambió.
+  'PATCH /staff/:userId':
+    'staff-audit.spec.ts, update-staff.use-case.spec.ts y staff-access-audit.e2e-spec.ts',
+  // STAFF_REACTIVATED / STAFF_DEACTIVATED con el estado antes y después.
+  'POST /staff/:userId/reactivate':
+    'staff-audit.spec.ts y staff-access-audit.e2e-spec.ts',
+  'DELETE /staff/:userId':
+    'staff-audit.spec.ts y staff-access-audit.e2e-spec.ts',
+  // DX-359: cuenta. CREATE CLINIC CLINIC_REGISTERED (el dueño, ADMIN) en la
+  // transacción del alta; PATCH /me: UPDATE STAFF_MEMBER OWN_NAME_CHANGED
+  // (sin el nombre); contraseña: PASSWORD_CHANGE SESSIONS_REVOKED, solo el
+  // hecho (en platform_audit_events con sesión de plataforma).
+  'POST /auth/register/verify':
+    'registration-audit.spec.ts y staff-access-audit.e2e-spec.ts',
+  'PATCH /me':
+    'update-my-name.use-case.spec.ts y staff-access-audit.e2e-spec.ts',
+  'POST /me/password':
+    'change-my-password.use-case.spec.ts, me-profile-repo.int-spec.ts y staff-access-audit.e2e-spec.ts',
+  // DX-359: plataforma. MFA_ENROLLMENT_STARTED y MFA_ENABLED en
+  // `platform_audit_events`, sin secreto, código ni URI.
+  'POST /platform/mfa/enrollment':
+    'platform-mfa.use-case.spec.ts y staff-access-audit.e2e-spec.ts',
+  'POST /platform/mfa/enrollment/confirm':
+    'platform-mfa.use-case.spec.ts y staff-access-audit.e2e-spec.ts',
 };
 
 /**
@@ -1293,26 +1336,8 @@ const KNOWN_UNAUDITED: Record<string, string> = {
   'POST /auth/refresh': 'rota el token de refresco',
   'POST /auth/logout': 'revoca el token de refresco',
   'POST /auth/forgot-password': 'envía el email; no enumera cuentas',
-  'POST /auth/register/verify': 'hueco: crea la clínica y su ADMIN sin evento',
-  'PATCH /me': 'hueco: cambio del nombre propio sin evento',
-  'POST /me/password': 'hueco: cambio de contraseña sin evento',
   'POST /me/avatar': 'foto de perfil propia',
   'DELETE /me/avatar': 'foto de perfil propia',
-  'POST /platform/mfa/enrollment':
-    'hueco: alta del MFA de plataforma sin platform_audit_event',
-  'POST /platform/mfa/enrollment/confirm':
-    'hueco: alta del MFA de plataforma sin platform_audit_event',
-
-  // --- Personal y accesos -------------------------------------------------
-  'POST /staff/invitations': 'hueco: invitar (rol y sedes) sin evento',
-  'POST /staff/invitations/:id/resend': 'hueco: reenviar invitación sin evento',
-  'DELETE /staff/invitations/:id': 'hueco: retirar invitación sin evento',
-  'PATCH /staff/:userId':
-    'hueco: rol, sedes, registro profesional y especialidad sin evento',
-  'POST /staff/:userId/reactivate': 'hueco: reactivar un miembro sin evento',
-  'DELETE /staff/:userId': 'hueco: desactivar un miembro sin evento',
-  'POST /public/invitations/:token/accept':
-    'hueco parcial: solo reclamar una cuenta existente deja evento (INVITATION_ACCOUNT_CLAIM); aceptar con una cuenta nueva crea usuario y membresía sin evento (DX-359)',
 
   // --- Configuración de la clínica ----------------------------------------
   'POST /locations': 'hueco: alta de sede sin evento',

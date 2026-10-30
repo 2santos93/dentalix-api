@@ -1,5 +1,7 @@
 import { ClinicRole } from '@prisma/client';
 import { ClinicInvitation } from '../entities/clinic-invitation.entity';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+import type { AuditRequestMeta } from '../../../audit/domain/audit-request-context';
 
 export const INVITATION_REPOSITORY = Symbol('INVITATION_REPOSITORY');
 
@@ -59,6 +61,11 @@ export type AcceptUserResolution =
   | { existingUserId: string }
   | { claim: { userId: string; passwordHash: string } };
 
+/**
+ * DX-359: cada escritura recibe quién la hace (`audit`) y escribe su evento de
+ * auditoría en su MISMA transacción (ver `invitation-audit.ts`): si el cambio
+ * falla no hay evento y si el evento falla no hay cambio.
+ */
 export interface InvitationRepository {
   /** Pendientes (no aceptadas, no revocadas, no borradas) del tenant en contexto. */
   listPending(): Promise<ClinicInvitation[]>;
@@ -90,11 +97,17 @@ export interface InvitationRepository {
    */
   hasOtherActiveMemberships(userId: string): Promise<boolean>;
 
-  /** Revoca la invitación PENDIENTE de ese correo, si existe. Devuelve los ids revocados. */
-  revokePendingByEmail(email: string): Promise<string[]>;
+  /**
+   * Revoca la invitación PENDIENTE de ese correo, si existe (INVITATION_REPLACED
+   * por cada una). Devuelve los ids revocados.
+   */
+  revokePendingByEmail(
+    email: string,
+    audit: AuditRequestContext,
+  ): Promise<string[]>;
 
-  /** Revoca la invitación por id. Devuelve si afectó una fila. */
-  revokeById(id: string): Promise<boolean>;
+  /** Revoca la invitación por id (INVITATION_REVOKED). Devuelve si afectó una fila. */
+  revokeById(id: string, audit: AuditRequestContext): Promise<boolean>;
 
   /** Invitación aún no aceptada ni revocada (caducada o no) por id, o `null`. */
   findPendingById(id: string): Promise<ClinicInvitation | null>;
@@ -108,6 +121,7 @@ export interface InvitationRepository {
   reissue(
     id: string,
     input: { tokenHash: string; expiresAt: Date },
+    audit: AuditRequestContext,
   ): Promise<ClinicInvitation | null>;
 
   /**
@@ -117,14 +131,18 @@ export interface InvitationRepository {
    */
   findTenantName(): Promise<string | null>;
 
-  create(input: {
-    email: string;
-    fullName: string;
-    role: ClinicRole;
-    tokenHash: string;
-    expiresAt: Date;
-    invitedById?: string;
-  }): Promise<ClinicInvitation>;
+  /** Alta de la invitación (INVITATION_SENT con el rol). */
+  create(
+    input: {
+      email: string;
+      fullName: string;
+      role: ClinicRole;
+      tokenHash: string;
+      expiresAt: Date;
+      invitedById?: string;
+    },
+    audit: AuditRequestContext,
+  ): Promise<ClinicInvitation>;
 
   /**
    * Invitaciones CREADAS en la clínica en contexto desde `since` (límite
@@ -141,12 +159,17 @@ export interface InvitationRepository {
    * (`AccountClaimConflictError`) y que no da acceso a otra clínica ni a la
    * plataforma (`AccountClaimBlockedError`). `tokenVersion` es la vigente tras
    * la transacción (la del par que se emite).
+   *
+   * DX-359: en la misma transacción, INVITATION_ACCEPTED (alta del miembro,
+   * con el usuario resuelto como actor) para las tres resoluciones; `request`
+   * es desde dónde llegó (`null` en el seed).
    */
   acceptTransactional(input: {
     invitationId: string;
     email: string;
     role: ClinicRole;
     user: AcceptUserResolution;
+    request: AuditRequestMeta | null;
   }): Promise<
     AcceptOutcome & {
       tokenVersion: number;

@@ -196,7 +196,17 @@ describe('sedes permitidas de un miembro (DX-089)', () => {
       locationIds: [A1],
       actorUserId: ACTOR,
     });
-    await update.execute({ userId: 'rec-1', role: ClinicRole.ADMIN });
+    await update.execute(
+      { userId: 'rec-1', role: ClinicRole.ADMIN },
+      {
+        tenantId: 't1',
+        locationId: null,
+        actor: { userId: ACTOR, role: ClinicRole.ADMIN },
+        requestId: null,
+        ip: null,
+        userAgent: null,
+      },
+    );
     await expect(get.execute('rec-1')).resolves.toEqual({
       all: true,
       locationIds: [],

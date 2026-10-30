@@ -22,6 +22,8 @@ import type { RegistrationNotifier } from '../../domain/ports/registration-notif
 import { hashRegistrationToken } from '../registration-token';
 
 const createClinic = jest.fn();
+// DX-359: desde dónde se abre el enlace (va al evento del alta).
+const REQ = { requestId: 'req-1', ip: '10.0.0.1', userAgent: 'jest' };
 
 function makeRepo(overrides: Partial<AuthRepository> = {}): AuthRepository {
   createClinic.mockReset();
@@ -320,7 +322,7 @@ describe('RegisterClinicUseCase (DX-029)', () => {
       expect(pending.rows).toHaveLength(1);
       expect(pending.rows[0].subdomain).toBe('sonrisa');
       await expect(
-        uc.verify(firstToken, INPUT.password),
+        uc.verify(firstToken, INPUT.password, REQ),
       ).resolves.toMatchObject({ subdomain: 'sonrisa' });
     });
 
@@ -395,10 +397,18 @@ describe('RegisterClinicUseCase (DX-029)', () => {
       return { repo, pending, uc, token: tokenFrom(verifyUrl) };
     }
 
+    it('DX-359: pasa al alta desde dónde se verificó (el evento va en su transacción), nunca la contraseña', async () => {
+      const { uc, token } = await pendingWithToken();
+      await uc.verify(token, INPUT.password, REQ);
+      expect(createClinic).toHaveBeenCalledWith(
+        expect.objectContaining({ request: REQ }),
+      );
+    });
+
     it('crea la clínica con el email VERIFICADO y consume el enlace (un solo uso)', async () => {
       const { pending, uc, token } = await pendingWithToken();
 
-      const result = await uc.verify(token, INPUT.password);
+      const result = await uc.verify(token, INPUT.password, REQ);
 
       expect(result).toEqual({
         tenantId: 't1',
@@ -413,35 +423,37 @@ describe('RegisterClinicUseCase (DX-029)', () => {
         }),
       );
       expect(pending.rows).toHaveLength(0);
-      await expect(uc.verify(token, INPUT.password)).rejects.toBeInstanceOf(
-        NotFoundException,
-      );
+      await expect(
+        uc.verify(token, INPUT.password, REQ),
+      ).rejects.toBeInstanceOf(NotFoundException);
     });
 
     it('enlace con forma inválida o desconocido -> 404', async () => {
       const { uc } = await pendingWithToken();
-      await expect(uc.verify('nope', INPUT.password)).rejects.toBeInstanceOf(
-        NotFoundException,
-      );
       await expect(
-        uc.verify('A'.repeat(43), INPUT.password),
+        uc.verify('nope', INPUT.password, REQ),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      await expect(
+        uc.verify('A'.repeat(43), INPUT.password, REQ),
       ).rejects.toBeInstanceOf(NotFoundException);
     });
 
     it('contraseña distinta de la del registro -> el MISMO 404 genérico que un enlace desconocido, y el enlace sigue sirviendo', async () => {
       const { pending, uc, token } = await pendingWithToken();
 
-      const wrong = uc.verify(token, 'otra-clave-cualquiera');
+      const wrong = uc.verify(token, 'otra-clave-cualquiera', REQ);
       await expect(wrong).rejects.toBeInstanceOf(NotFoundException);
       await expect(wrong).rejects.toThrow(REGISTRATION_LINK_INVALID);
-      await expect(uc.verify('A'.repeat(43), INPUT.password)).rejects.toThrow(
-        REGISTRATION_LINK_INVALID,
-      );
+      await expect(
+        uc.verify('A'.repeat(43), INPUT.password, REQ),
+      ).rejects.toThrow(REGISTRATION_LINK_INVALID);
       expect(createClinic).not.toHaveBeenCalled();
       expect(pending.rows).toHaveLength(1);
 
       // Quien eligió la contraseña sí puede confirmar.
-      await expect(uc.verify(token, INPUT.password)).resolves.toMatchObject({
+      await expect(
+        uc.verify(token, INPUT.password, REQ),
+      ).resolves.toMatchObject({
         subdomain: 'sonrisa',
       });
     });
@@ -457,10 +469,10 @@ describe('RegisterClinicUseCase (DX-029)', () => {
         makeNotifier(),
         password,
       );
-      await expect(uc.verify('nope', 'x')).rejects.toThrow(
+      await expect(uc.verify('nope', 'x', REQ)).rejects.toThrow(
         REGISTRATION_LINK_INVALID,
       );
-      await expect(uc.verify('A'.repeat(43), 'x')).rejects.toThrow(
+      await expect(uc.verify('A'.repeat(43), 'x', REQ)).rejects.toThrow(
         REGISTRATION_LINK_INVALID,
       );
       expect(password.verify).toHaveBeenCalledTimes(2);
@@ -469,7 +481,7 @@ describe('RegisterClinicUseCase (DX-029)', () => {
     it('enlace caducado con contraseña errónea -> 404 genérico (no confirma que el enlace existió)', async () => {
       const { pending, uc, token } = await pendingWithToken();
       pending.rows[0].expiresAt = new Date(Date.now() - 1000);
-      await expect(uc.verify(token, 'mala')).rejects.toThrow(
+      await expect(uc.verify(token, 'mala', REQ)).rejects.toThrow(
         REGISTRATION_LINK_INVALID,
       );
     });
@@ -477,15 +489,15 @@ describe('RegisterClinicUseCase (DX-029)', () => {
     it('enlace caducado -> 410', async () => {
       const { pending, uc, token } = await pendingWithToken();
       pending.rows[0].expiresAt = new Date(Date.now() - 1000);
-      await expect(uc.verify(token, INPUT.password)).rejects.toBeInstanceOf(
-        GoneException,
-      );
+      await expect(
+        uc.verify(token, INPUT.password, REQ),
+      ).rejects.toBeInstanceOf(GoneException);
     });
 
     it('el email ya tiene cuenta al verificar -> 409 en español', async () => {
       const { repo, uc, token } = await pendingWithToken();
       repo.findUserByEmail = () => Promise.resolve({ id: 'u9', fullName: 'X' });
-      await expect(uc.verify(token, INPUT.password)).rejects.toThrow(
+      await expect(uc.verify(token, INPUT.password, REQ)).rejects.toThrow(
         REGISTRATION_EMAIL_TAKEN,
       );
     });
@@ -498,9 +510,9 @@ describe('RegisterClinicUseCase (DX-029)', () => {
           clientVersion: 'x',
         }),
       );
-      await expect(uc.verify(token, INPUT.password)).rejects.toBeInstanceOf(
-        ConflictException,
-      );
+      await expect(
+        uc.verify(token, INPUT.password, REQ),
+      ).rejects.toBeInstanceOf(ConflictException);
     });
   });
 
@@ -525,7 +537,7 @@ describe('RegisterClinicUseCase (DX-029)', () => {
       });
 
       const { verifyUrl } = notifier.sendVerification.mock.calls[0][0];
-      await uc.verify(tokenFrom(verifyUrl), INPUT.password);
+      await uc.verify(tokenFrom(verifyUrl), INPUT.password, REQ);
       expect(createClinic).toHaveBeenCalledWith(
         expect.objectContaining({
           location: {
@@ -647,7 +659,7 @@ describe('RegisterClinicUseCase (DX-029)', () => {
       const consume = jest.spyOn(pending, 'consumePending');
       const { verifyUrl } = notifier.sendVerification.mock.calls[0][0];
       const error = await uc
-        .verify(tokenFrom(verifyUrl), INPUT.password)
+        .verify(tokenFrom(verifyUrl), INPUT.password, REQ)
         .catch((e: unknown) => e);
       expect(error).toBeInstanceOf(GoneException);
       expect((error as GoneException).getResponse()).toMatchObject({
