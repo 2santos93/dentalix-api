@@ -386,7 +386,7 @@ describe('casos de uso del cargo por inasistencia (DX-291)', () => {
       repo.nextVoid = 'UNCONVERTED';
       await expect(voidFee('Error')).rejects.toThrow(
         new ConflictException(
-          'Hay abonos sin convertir; registra la tasa del día antes de anular',
+          'Hay abonos todavía sin convertir a la moneda del plan; registra la tasa del día o espera un minuto y vuelve a intentarlo',
         ),
       );
     });

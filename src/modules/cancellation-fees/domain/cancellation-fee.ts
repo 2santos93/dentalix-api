@@ -44,8 +44,11 @@ export const CANCELLATION_FEE_MESSAGES = {
   alreadyVoided: 'El cargo de esta cita ya se anuló.',
   voidPaid:
     'El cargo ya está cobrado: los abonos de «Cargos administrativos» lo cubren. Anula antes el abono y después el cargo.',
+  // Vale para las dos fuentes (DX-374): en MANUAL falta registrar la tasa; en
+  // AUTOMATIC (o con la tasa ya congelada) basta el barrido de cada minuto
+  // que crea la base (DX-051, R9.3).
   voidUnconverted:
-    'Hay abonos sin convertir; registra la tasa del día antes de anular',
+    'Hay abonos todavía sin convertir a la moneda del plan; registra la tasa del día o espera un minuto y vuelve a intentarlo',
 } as const;
 
 /**

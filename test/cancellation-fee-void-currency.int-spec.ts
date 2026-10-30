@@ -10,6 +10,7 @@ import {
   type Clinic,
 } from './support/e2e-fixtures';
 import { CANCELLATION_FEE_MESSAGES } from '../src/modules/cancellation-fees/domain/cancellation-fee';
+import { PaymentAllocationJobs } from '../src/modules/payments/application/payment-allocation-jobs';
 import { civilDateIn } from '../src/shared/time/civil-day';
 
 // DX-382 (BE-046) contra Postgres: anular un cargo (SEC-050) compara lo
@@ -271,7 +272,7 @@ describe('anular un cargo compara en la moneda del plan (DX-382, int)', () => {
 
       const res = await voidFee(s(), fee.appointmentId).expect(409);
       expect((res.body as { message: string }).message).toBe(
-        'Hay abonos sin convertir; registra la tasa del día antes de anular',
+        'Hay abonos todavía sin convertir a la moneda del plan; registra la tasa del día o espera un minuto y vuelve a intentarlo',
       );
       await expect(state(fee.appointmentId, fee.itemId)).resolves.toEqual({
         voided: false,
@@ -286,6 +287,68 @@ describe('anular un cargo compara en la moneda del plan (DX-382, int)', () => {
         .send({ reason: 'Moneda equivocada' })
         .expect(200);
       await voidFee(s(), fee.appointmentId).expect(201);
+    });
+    it('con la tasa ya congelada pero la base aún pendiente del barrido: 409 «sin convertir»; tras el barrido decide con la base (revisión DX-382)', async () => {
+      const p = await patient(s());
+      const first = await charge(s(), p, s().copVersion, 100000);
+      const second = await charge(s(), p, s().copVersion, 80000);
+      const payment = await pay(s(), first.planId, 50, 'USD');
+      expect(payment.exchangeRateStatus).toBe('FROZEN');
+      // La base que el alta no llegó a crear (R9.3): la crea el barrido.
+      await raw.$executeRaw`DELETE FROM "payment_allocations" WHERE "paymentId" = ${payment.id}::uuid`;
+      await raw.$executeRaw`DELETE FROM "payment_plan_amounts" WHERE "paymentId" = ${payment.id}::uuid`;
+
+      const res = await voidFee(s(), second.appointmentId).expect(409);
+      expect((res.body as { message: string }).message).toBe(
+        CANCELLATION_FEE_MESSAGES.voidUnconverted,
+      );
+      // El texto vale para esta fuente: esperar al barrido basta.
+      expect(CANCELLATION_FEE_MESSAGES.voidUnconverted).toMatch(
+        /espera un minuto y vuelve a intentarlo/,
+      );
+
+      await app.get(PaymentAllocationJobs).sweep();
+      const base = await raw.paymentPlanAmount.findUniqueOrThrow({
+        where: { paymentId: payment.id },
+      });
+      expect(base.amount.toNumber()).toBe(200000);
+      const again = await voidFee(s(), second.appointmentId).expect(409);
+      expect((again.body as { message: string }).message).toBe(
+        CANCELLATION_FEE_MESSAGES.voidPaid,
+      );
+    });
+
+    it('anular el cargo y anular el abono a la vez no se bloquean en cruz (40P01) y nunca dejan un saldo a favor escondido (revisión DX-382)', async () => {
+      for (let round = 0; round < 4; round++) {
+        const p = await patient(s());
+        const first = await charge(s(), p, s().copVersion, 100000);
+        const second = await charge(s(), p, s().copVersion, 80000);
+        const payment = await pay(s(), first.planId, 50, 'USD');
+        const [fee, voidedPayment] = await Promise.all([
+          voidFee(s(), second.appointmentId),
+          as(
+            request(app.getHttpServer()).delete(
+              `/api/v1/payments/${payment.id}`,
+            ),
+            s().clinic,
+          ).send({ reason: 'Cobro duplicado' }),
+        ]);
+        expect(voidedPayment.status).toBe(200);
+        // O el abono se anuló antes (el cargo sale) o después (409 «ya
+        // cobrado»): nunca un 500 ni el cargo fuera con el abono vivo.
+        expect([201, 409]).toContain(fee.status);
+        if (fee.status === 409) {
+          expect((fee.body as { message: string }).message).toBe(
+            CANCELLATION_FEE_MESSAGES.voidPaid,
+          );
+        }
+        await expect(
+          state(second.appointmentId, second.itemId),
+        ).resolves.toEqual({
+          voided: fee.status === 201,
+          removed: fee.status === 201,
+        });
+      }
     });
   });
 
