@@ -114,7 +114,10 @@ export class ExchangeSettingsController {
       'con la automática, así que los saldos de antes del cambio no se mueven. ' +
       'Guardar MANUAL otra vez conserva el día. Volver a AUTOMATIC lo limpia: ' +
       'los días del periodo manual vuelven a la tasa automática hasta que cada ' +
-      'abono congele su tasa (DX-375). Evento CLINIC_SETTINGS con reason ' +
+      'abono congele su tasa (DX-375). DX-402: con MANUAL, la tasa manual de ' +
+      'un día anterior a `manualSince` sirve de tasa de respaldo a los abonos ' +
+      'de ese día que siguen sin tasa (si el proveedor no tiene la de ese ' +
+      'día). Evento CLINIC_SETTINGS con reason ' +
       'EXCHANGE_RATE_SOURCE y el antes y el después; si la fuente no cambia, ' +
       '200 sin evento.',
   })
@@ -156,7 +159,11 @@ export class ExchangeSettingsController {
     description:
       'DX-374. Unidades de la moneda por 1 USD. Se usa cuando la fuente de la ' +
       'clínica es MANUAL, para los días desde `manualSince` (se puede dejar ' +
-      'registrada antes de cambiarla). Una ' +
+      'registrada antes de cambiarla). DX-402: la de un día anterior a ' +
+      '`manualSince` sirve, con MANUAL, de tasa de respaldo a los abonos de ' +
+      'ese día que siguen sin tasa si el proveedor no tiene la de ese día ' +
+      '(GET /payments/rate-backlog/day dice cuántos); nunca cambia una tasa ' +
+      'ya congelada. Una ' +
       'tasa ya registrada para ese día y moneda no se sobrescribe: si ningún ' +
       'abono la usó, se corrige con PUT /exchange/manual-rates/:id.',
   })

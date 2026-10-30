@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { resolveLocationTimeZones } from '../../../../shared/locations/location-time-zone';
-import { civilDateIn } from '../../../../shared/time/civil-day';
+import { civilDateIn, parseCivilDate } from '../../../../shared/time/civil-day';
 import {
   frozenRateOf,
   type FrozenRateColumns,
@@ -13,6 +13,7 @@ import type {
   PaymentBaseRetryCandidate,
   PaymentBaseRetryFailure,
   PaymentBaseRetryRepository,
+  PaymentRatePendingDay,
 } from '../../domain/ports/payment-base-retry-repository.port';
 
 /** Hora UTC de la BD: las columnas son `timestamp(3)` sin zona, en UTC. */
@@ -163,5 +164,59 @@ export class PrismaPaymentBaseRetryRepository implements PaymentBaseRetryReposit
            AND r."createdAt" <= ${NOW} - make_interval(hours => ${olderThanHours}::int)`,
     );
     return { count: row.count, oldestSince: row.oldestSince };
+  }
+
+  async pendingOnDay(
+    date: string,
+    currency: string,
+  ): Promise<PaymentRatePendingDay> {
+    const tenantId = this.requireTenantId();
+    const day = parseCivilDate(date);
+    if (day === null) return { count: 0, providerRateSaved: false };
+    // El día civil de una sede cae entre las 14:00 UTC del anterior y las
+    // 12:00 UTC del siguiente (zonas de -12 a +14): con ±2 días se acota la
+    // lectura y el día exacto se decide con la zona de cada sede.
+    const from = new Date(`${day}T00:00:00Z`);
+    from.setUTCDate(from.getUTCDate() - 2);
+    const to = new Date(`${day}T00:00:00Z`);
+    to.setUTCDate(to.getUTCDate() + 3);
+    const [rows, snapshot] = await Promise.all([
+      this.prisma.runWithTenant(async (tx) => {
+        const found = await tx.$queryRaw<
+          { paidAt: Date; locationId: string }[]
+        >`
+          SELECT p."paidAt", p."locationId"
+            FROM "payment_base_retries" r
+            JOIN "payments" p
+              ON p."tenantId" = r."tenantId" AND p."id" = r."paymentId"
+            LEFT JOIN "treatment_plans" t
+              ON t."tenantId" = p."tenantId" AND t."id" = p."treatmentPlanId"
+             AND t."deletedAt" IS NULL
+            LEFT JOIN "opening_balances" o
+              ON o."tenantId" = p."tenantId" AND o."id" = p."openingBalanceId"
+           WHERE r."tenantId" = ${tenantId}::uuid
+             AND p."deletedAt" IS NULL
+             AND p."exchangeRateFrom" IS NULL
+             AND COALESCE(t."currency", o."currency") IS NOT NULL
+             AND p."currency" <> COALESCE(t."currency", o."currency")
+             AND ${currency} IN (p."currency", COALESCE(t."currency", o."currency"))
+             AND p."paidAt" >= ${from} AND p."paidAt" < ${to}`;
+        if (found.length === 0) return [];
+        const zoneOf = await resolveLocationTimeZones(
+          tx,
+          tenantId,
+          found.map((r) => r.locationId),
+        );
+        return found.filter(
+          (r) => civilDateIn(r.paidAt, zoneOf(r.locationId)) === day,
+        );
+      }),
+      // Tabla global de la caché del proveedor (sin tenant ni RLS).
+      this.prisma.exchangeRateSnapshot.findFirst({
+        where: { date: day },
+        select: { id: true },
+      }),
+    ]);
+    return { count: rows.length, providerRateSaved: snapshot !== null };
   }
 }

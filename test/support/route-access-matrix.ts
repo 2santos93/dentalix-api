@@ -500,6 +500,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // DX-380: aviso de abonos sin tasa de más de 24 h (lleva a la tasa de
   // cambio, que solo cambia el ADMIN).
   'GET /payments/rate-backlog': ADMIN_ONLY,
+  // DX-402: cuántos abonos de un día tomarían una tasa manual de respaldo.
+  'GET /payments/rate-backlog/day': ADMIN_ONLY,
   'POST /treatment-plans/:id/payment-plan': BILLING,
   'GET /treatment-plans/:id/payment-plan': BILLING,
   'DELETE /treatment-plans/:id/payment-plan': BILLING,

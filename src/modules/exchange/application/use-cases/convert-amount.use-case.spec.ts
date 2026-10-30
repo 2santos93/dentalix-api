@@ -330,6 +330,92 @@ describe('ConvertAmountUseCase', () => {
       }
     });
 
+    describe('tasa de respaldo de un día anterior a manual (DX-402)', () => {
+      const SINCE = '2026-10-30';
+      const DAY = '2026-10-28';
+
+      function backupUseCase(fetchRates: ExchangeRateProvider['fetchRates']) {
+        const tenantContext = new TenantContextService();
+        const uc = new ConvertAmountUseCase(
+          new GetRatesForDateUseCase(
+            {
+              findByDate: () => Promise.resolve([]),
+              upsertMany: () => Promise.resolve(),
+            },
+            { fetchRates },
+            makeSettings(
+              { [TENANT]: { source: 'MANUAL', manualSince: SINCE } },
+              tenantContext,
+            ),
+            makeManualRates(
+              { [TENANT]: { [DAY]: { COP: 4000 } } },
+              tenantContext,
+            ),
+            tenantContext,
+          ),
+        );
+        return { uc, tenantContext };
+      }
+
+      it('la cotización con la tasa de respaldo es MANUAL y dice desde qué día rige la manual', async () => {
+        const fetchRates = jest.fn();
+        const { uc, tenantContext } = backupUseCase(fetchRates);
+        const convert = tenantContext.run(TENANT, () =>
+          uc.memoized({ manualBackup: true }),
+        );
+        await expect(
+          tenantContext.run(TENANT, () =>
+            convert.quote({ from: 'USD', to: 'COP', date: DAY }),
+          ),
+        ).resolves.toEqual({
+          from: 'USD',
+          to: 'COP',
+          date: DAY,
+          source: 'MANUAL',
+          fromPerBase: 1,
+          toPerBase: 4000,
+          backup: { manualSince: SINCE },
+        });
+        expect(fetchRates).not.toHaveBeenCalled();
+      });
+
+      it('si la de respaldo no cubre las dos monedas, cotiza por el camino automático', async () => {
+        const fetchRates = jest
+          .fn()
+          .mockResolvedValue({ base: 'USD', rates: { COP: 3900, EUR: 0.9 } });
+        const { uc, tenantContext } = backupUseCase(fetchRates);
+        const convert = tenantContext.run(TENANT, () =>
+          uc.memoized({ manualBackup: true }),
+        );
+        await expect(
+          tenantContext.run(TENANT, () =>
+            convert.quote({ from: 'EUR', to: 'COP', date: DAY }),
+          ),
+        ).resolves.toEqual({
+          from: 'EUR',
+          to: 'COP',
+          date: DAY,
+          source: 'AUTOMATIC',
+          fromPerBase: 0.9,
+          toPerBase: 3900,
+        });
+        expect(fetchRates).toHaveBeenCalledWith(DAY);
+      });
+
+      it('sin la opción, el convertidor memoizado no usa la de respaldo', async () => {
+        const fetchRates = jest
+          .fn()
+          .mockRejectedValue(new Error('proveedor caído'));
+        const { uc, tenantContext } = backupUseCase(fetchRates);
+        const convert = tenantContext.run(TENANT, () => uc.memoized());
+        await expect(
+          tenantContext.run(TENANT, () =>
+            convert.quote({ from: 'USD', to: 'COP', date: DAY }),
+          ),
+        ).rejects.toThrow('proveedor caído');
+      });
+    });
+
     it('memoized().quote lee las tasas del día una sola vez', async () => {
       const findByDate = jest.fn(() =>
         Promise.resolve([

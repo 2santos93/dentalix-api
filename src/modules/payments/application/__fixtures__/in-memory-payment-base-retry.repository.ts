@@ -4,6 +4,7 @@ import type {
   PaymentBaseRetryCandidate,
   PaymentBaseRetryFailure,
   PaymentBaseRetryRepository,
+  PaymentRatePendingDay,
 } from '../../domain/ports/payment-base-retry-repository.port';
 
 export interface FakePaymentBaseRetry {
@@ -108,6 +109,24 @@ export class InMemoryPaymentBaseRetryRepository implements PaymentBaseRetryRepos
     return Promise.resolve({
       count: old.length,
       oldestSince: oldest.length > 0 ? new Date(oldest[0]) : null,
+    });
+  }
+
+  /** Días con tasa del proveedor guardada (DX-402). */
+  readonly providerDays = new Set<string>();
+
+  pendingOnDay(date: string, currency: string): Promise<PaymentRatePendingDay> {
+    const count = [...this.rows.values()].filter(
+      ({ candidate: c }) =>
+        c.live &&
+        !c.frozenRate &&
+        c.currency !== c.targetCurrency &&
+        c.paidOn === date &&
+        (c.currency === currency || c.targetCurrency === currency),
+    ).length;
+    return Promise.resolve({
+      count,
+      providerRateSaved: this.providerDays.has(date),
     });
   }
 }

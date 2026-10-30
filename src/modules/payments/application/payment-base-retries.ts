@@ -17,6 +17,7 @@ import {
   type PaymentBaseBacklog,
   type PaymentBaseRetryCandidate,
   type PaymentBaseRetryRepository,
+  type PaymentRatePendingDay,
 } from '../domain/ports/payment-base-retry-repository.port';
 import {
   PLAN_ALLOCATION_REPOSITORY,
@@ -24,6 +25,7 @@ import {
 } from '../domain/ports/plan-allocation-repository.port';
 import { errorName } from './payment-in-plan-currency';
 import { freezePaymentRate, paymentBaseAmount } from './payment-exchange-rate';
+import { PaymentRateBackupAudit } from './payment-rate-backup-audit';
 
 /** Lo que hizo una pasada de reintentos en la clínica del contexto. */
 export interface RetryPassResult {
@@ -46,6 +48,11 @@ type AttemptOutcome = 'RESOLVED' | PaymentBaseRetryReason;
  * los demás: va al final de la cola. Cotiza FUERA de transacción, con un
  * convertidor por pasada (un día se pide una vez); detrás, la caché negativa
  * y los presupuestos de SEC-054 acotan las llamadas al proveedor.
+ *
+ * DX-402: lee con la tasa de respaldo (`manualBackup`): con MANUAL, un abono
+ * de un día anterior a `manualSince` sin tasa del proveedor toma la tasa
+ * manual registrada para su día, y queda en la auditoría. Solo congela la de
+ * un abono que aún la espera (`freezeRate` no toca una ya congelada).
  */
 @Injectable()
 export class PaymentBaseRetries {
@@ -57,6 +64,7 @@ export class PaymentBaseRetries {
     @Inject(PLAN_ALLOCATION_REPOSITORY)
     private readonly allocations: PlanAllocationRepository,
     private readonly convertAmount: ConvertAmountUseCase,
+    private readonly backupAudit: PaymentRateBackupAudit,
   ) {}
 
   /** Clínicas con reintentos vencidos o planes por repartir (sin tenant). */
@@ -67,7 +75,7 @@ export class PaymentBaseRetries {
   /** Hasta `limit` reintentos vencidos de la clínica del contexto. */
   async retryDue(limit: number): Promise<RetryPassResult> {
     const result: RetryPassResult = { resolved: 0, withoutRate: 0, failed: 0 };
-    const convert = this.convertAmount.memoized();
+    const convert = this.convertAmount.memoized({ manualBackup: true });
     for (const candidate of await this.retries.due(limit)) {
       let outcome: AttemptOutcome;
       try {
@@ -112,6 +120,14 @@ export class PaymentBaseRetries {
   }
 
   /**
+   * DX-402: cuántos abonos pendientes de un día necesitan la tasa de esa
+   * moneda (el aviso del formulario de tasa manual).
+   */
+  pendingOnDay(date: string, currency: string): Promise<PaymentRatePendingDay> {
+    return this.retries.pendingOnDay(date, currency);
+  }
+
+  /**
    * Un intento: primero la tasa (la base nace de la tasa congelada), luego la
    * base. «Sin tasa» (también el proveedor caído o por tiempo agotado) es
    * `NO_RATE`; cualquier otro fallo se propaga y cuenta como `ERROR`.
@@ -132,6 +148,13 @@ export class PaymentBaseRetries {
       );
       if (payment.currency !== payment.targetCurrency && !frozen) {
         return 'NO_RATE';
+      }
+      if (frozen && rate?.backup) {
+        await this.backupAudit.backupRateUsed(
+          payment.paymentId,
+          rate,
+          payment.currency,
+        );
       }
       state = {
         currency: payment.currency,

@@ -13,6 +13,9 @@ import { PlanAllocationRebalancer } from '../src/modules/payments/application/pl
 import { ExchangeSourceChangeHooks } from '../src/modules/exchange/application/exchange-source-change-hooks';
 import { PaymentAllocationJobs } from '../src/modules/payments/application/payment-allocation-jobs';
 import { PaymentBaseRetries } from '../src/modules/payments/application/payment-base-retries';
+import { PaymentRateBackupAudit } from '../src/modules/payments/application/payment-rate-backup-audit';
+import { RecordAuditEventUseCase } from '../src/modules/audit/application/record-audit-event.use-case';
+import { PrismaAuditEventRepository } from '../src/modules/audit/infrastructure/prisma-audit-event.repository';
 import { PrismaPaymentBaseRetryRepository } from '../src/modules/payments/infrastructure/allocations/prisma-payment-base-retry.repository';
 import { GetPaymentAllocationsUseCase } from '../src/modules/payments/application/use-cases/get-payment-allocations.use-case';
 import { ReplacePaymentAllocationsUseCase } from '../src/modules/payments/application/use-cases/replace-payment-allocations.use-case';
@@ -95,7 +98,15 @@ const replaceAllocations = new ReplacePaymentAllocationsUseCase(
   getAllocations,
 );
 const retryRepo = new PrismaPaymentBaseRetryRepository(prisma, tenantContext);
-const retries = new PaymentBaseRetries(retryRepo, allocationRepo, convert);
+const retries = new PaymentBaseRetries(
+  retryRepo,
+  allocationRepo,
+  convert,
+  new PaymentRateBackupAudit(
+    new RecordAuditEventUseCase(new PrismaAuditEventRepository(prisma)),
+    tenantContext,
+  ),
+);
 const jobs = new PaymentAllocationJobs(
   new JobRegistry(),
   rebalancer,

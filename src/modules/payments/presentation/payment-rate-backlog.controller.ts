@@ -1,5 +1,12 @@
-import { Controller, Get, UseGuards, UseInterceptors } from '@nestjs/common';
 import {
+  Controller,
+  Get,
+  Query,
+  UseGuards,
+  UseInterceptors,
+} from '@nestjs/common';
+import {
+  ApiBadRequestResponse,
   ApiBearerAuth,
   ApiForbiddenResponse,
   ApiOkResponse,
@@ -16,7 +23,11 @@ import { EXCHANGE_RATE_SETTINGS_ROLES } from '../../auth/presentation/guards/cli
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 import { PaymentBaseRetries } from '../application/payment-base-retries';
 import type { PaymentBaseBacklog } from '../domain/ports/payment-base-retry-repository.port';
-import { PaymentRateBacklogDto } from './dto/payment-rate-backlog.dto';
+import {
+  PaymentRateBacklogDayDto,
+  PaymentRateBacklogDayQueryDto,
+  PaymentRateBacklogDto,
+} from './dto/payment-rate-backlog.dto';
 
 export const PAYMENT_RATE_BACKLOG_FORBIDDEN_MESSAGE =
   'Solo un administrador puede ver los abonos sin tasa de la clínica.';
@@ -50,5 +61,29 @@ export class PaymentRateBacklogController {
   @ApiOkResponse({ type: PaymentRateBacklogDto })
   backlog(): Promise<PaymentBaseBacklog> {
     return this.retries.backlog();
+  }
+
+  @Get('day')
+  @ApiOperation({
+    summary:
+      'Abonos sin tasa de un día que necesitan la tasa de una moneda (DX-402, solo ADMIN)',
+    description:
+      'Para el aviso del formulario de tasa manual. Con la fuente MANUAL, la ' +
+      'tasa manual de un día anterior a `manualSince` es la tasa de respaldo ' +
+      'de los abonos pendientes de ese día (sin tasa congelada) si el ' +
+      'proveedor no tiene tasa guardada de él: el barrido siguiente la ' +
+      'congela, crea la base y lo deja en la auditoría (EXCHANGE_RATE_BACKUP). ' +
+      'Nunca cambia una tasa ya congelada. Solo el recuento.',
+  })
+  @ApiOkResponse({ type: PaymentRateBacklogDayDto })
+  @ApiBadRequestResponse({
+    description:
+      'Día que no existe o moneda que no es un código de tres letras',
+  })
+  async day(
+    @Query() query: PaymentRateBacklogDayQueryDto,
+  ): Promise<PaymentRateBacklogDayDto> {
+    const pending = await this.retries.pendingOnDay(query.date, query.currency);
+    return { date: query.date, currency: query.currency, ...pending };
   }
 }

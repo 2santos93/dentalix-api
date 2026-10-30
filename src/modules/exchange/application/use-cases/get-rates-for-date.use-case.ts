@@ -77,6 +77,13 @@ export interface RatesForDate {
    * registrada ese día: una moneda ausente está «sin tasa».
    */
   rates: Record<string, number>;
+  /**
+   * DX-402: estas son las tasas manuales de un día ANTERIOR a `manualSince`
+   * que no tiene tasa del proveedor guardada: la tasa de respaldo de los
+   * abonos pendientes de ese día. Solo en la lectura que lo pide
+   * (`memoized({ manualBackup: true })`).
+   */
+  backup?: { manualSince: string };
 }
 
 function toRatesRecord(
@@ -89,8 +96,25 @@ function toRatesRecord(
   return rates;
 }
 
-/** Las tasas de un día; `memoized()` devuelve una que cachea por día. */
-export type RatesLookup = (date: string) => Promise<RatesForDate>;
+/**
+ * Las tasas de un día; `memoized()` devuelve una que cachea por día.
+ * `noBackup`: en una lectura con tasa de respaldo (DX-402), el camino
+ * automático de ese día (si la de respaldo no cubre las dos monedas).
+ */
+export type RatesLookup = (
+  date: string,
+  options?: { noBackup?: boolean },
+) => Promise<RatesForDate>;
+
+/** DX-402: la lectura del reintento de los abonos sin tasa. */
+export interface RatesLookupOptions {
+  /**
+   * Con MANUAL, un día anterior a `manualSince` sin tasa del proveedor
+   * guardada usa la tasa manual registrada para ese día, si la hay, como
+   * tasa de respaldo (sin llamar al proveedor).
+   */
+  manualBackup?: boolean;
+}
 
 /**
  * Antes de llamar al proveedor por un día que no está en caché: lanza si ese
@@ -109,6 +133,14 @@ type BeforeProviderCall = (date: string) => Promise<void>;
  *   single-flight y presupuestos; SEC-054). Un día anterior al paso a MANUAL
  *   sigue pidiéndose si falta: si no, un abono de ese día que quedó «sin
  *   tasa» al cambiar (BE-047) no la congelaría nunca en el barrido.
+ *
+ * DX-402: la lectura del reintento de los abonos sin tasa
+ * (`memoized({ manualBackup: true })`) añade la tasa de respaldo: con MANUAL,
+ * un día anterior a `manualSince` sin tasa del proveedor guardada usa la tasa
+ * manual que la clínica registró para ESE día, si la hay, sin llamar al
+ * proveedor. Así el abono que quedó «sin tasa» con la automática se resuelve
+ * cuando la clínica pasa a manual y registra la de su día. Nunca cambia una
+ * tasa ya congelada: solo la leen los abonos que aún la esperan.
  */
 @Injectable()
 export class GetRatesForDateUseCase {
@@ -158,15 +190,17 @@ export class GetRatesForDateUseCase {
    * lectura de `tenants` y una transacción por abono. Mismo resultado que
    * `execute` (un fallo de un día también se repite para ese día).
    */
-  memoized(): RatesLookup {
+  memoized(options: RatesLookupOptions = {}): RatesLookup {
     let settings: Promise<ClinicExchangeSettings | null> | undefined;
     const byDate = new Map<string, Promise<RatesForDate>>();
     const clinicSettings = () => (settings ??= this.clinicSettings());
-    return (date) => {
-      let rates = byDate.get(date);
+    return (date, lookup = {}) => {
+      const manualBackup = options.manualBackup === true && !lookup.noBackup;
+      const key = `${date}|${manualBackup}`;
+      let rates = byDate.get(key);
       if (!rates) {
-        rates = this.ratesWith(date, clinicSettings);
-        byDate.set(date, rates);
+        rates = this.ratesWith(date, clinicSettings, undefined, manualBackup);
+        byDate.set(key, rates);
       }
       return rates;
     };
@@ -182,6 +216,7 @@ export class GetRatesForDateUseCase {
     date: string,
     clinicSettings: () => Promise<ClinicExchangeSettings | null>,
     beforeProviderCall?: BeforeProviderCall,
+    manualBackup = false,
   ): Promise<RatesForDate> {
     if (!isValidRateDate(date)) throw invalidRateDate();
     const settings = await clinicSettings();
@@ -195,6 +230,10 @@ export class GetRatesForDateUseCase {
         rates: await this.manual.ratesOn(date),
       };
     }
+    if (manualBackup && settings?.source === 'MANUAL' && settings.manualSince) {
+      const backup = await this.backupRates(date, settings.manualSince);
+      if (backup) return backup;
+    }
     return {
       base: 'USD',
       source: 'AUTOMATIC',
@@ -204,6 +243,25 @@ export class GetRatesForDateUseCase {
         beforeProviderCall,
       ),
     };
+  }
+
+  /**
+   * DX-402: la tasa de respaldo de un día anterior a `manualSince`: las
+   * manuales de ese día, solo si el proveedor no tiene tasa guardada de él
+   * (si la tiene, manda la automática, como en cualquier otro abono de ese
+   * día). `null`: no hay respaldo y sigue el camino automático.
+   */
+  private async backupRates(
+    date: string,
+    manualSince: string,
+  ): Promise<RatesForDate | null> {
+    const cached = await this.repo.findByDate(date);
+    if (cached.length > 0) {
+      return { base: 'USD', source: 'AUTOMATIC', rates: toRatesRecord(cached) };
+    }
+    const rates = await this.manual.ratesOn(date);
+    if (Object.keys(rates).length === 0) return null;
+    return { base: 'USD', source: 'MANUAL', rates, backup: { manualSince } };
   }
 
   private callerInContext(): ProviderRatesCaller {

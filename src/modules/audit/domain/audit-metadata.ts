@@ -114,6 +114,13 @@ export interface AuditMetadata {
    */
   paymentReference?: AuditPaymentReference;
   /**
+   * DX-402: un abono congeló como tasa de respaldo la tasa manual de un día
+   * anterior a `manualSince` (un día sin tasa del proveedor): el día de la
+   * tasa, desde cuándo rige la manual y las monedas de la cotización. Ni
+   * importes ni la tasa (van en el abono, `resourceId`).
+   */
+  exchangeRateBackup?: AuditExchangeRateBackup;
+  /**
    * G1 (R13): moneda, zona y formato de una sede antes y después de una
    * edición, y si quedó revisada. Códigos de configuración de la sede (ISO
    * 4217, IANA, BCP 47); un lado puede traer null (sede sin configurar).
@@ -211,6 +218,15 @@ export interface AuditHealthRegistrationSide {
 export interface AuditHealthRegistrationChange {
   before: AuditHealthRegistrationSide;
   after: AuditHealthRegistrationSide;
+}
+
+export interface AuditExchangeRateBackup {
+  /** Día civil de la tasa (el del abono en su sede), AAAA-MM-DD. */
+  rateDate: string;
+  /** Desde qué día rige la tasa manual (posterior a `rateDate`). */
+  manualSince: string;
+  /** Las monedas de la cotización (ISO 4217), una o dos. */
+  currencies: string[];
 }
 
 export interface AuditPaymentReference {
@@ -988,6 +1004,26 @@ function staffAccess(value: unknown): AuditStaffAccessChange | null {
   return { ...(before ? { before } : {}), ...(after ? { after } : {}) };
 }
 
+/** DX-402: los dos días reales, el de la tasa antes del de inicio. */
+function exchangeRateBackup(value: unknown): AuditExchangeRateBackup | null {
+  if (!isRecord(value)) return null;
+  const { rateDate, manualSince, currencies } = value;
+  if (
+    typeof rateDate !== 'string' ||
+    typeof manualSince !== 'string' ||
+    parseCivilDate(rateDate) !== rateDate ||
+    parseCivilDate(manualSince) !== manualSince ||
+    rateDate >= manualSince ||
+    !Array.isArray(currencies) ||
+    currencies.length === 0 ||
+    currencies.length > 2 ||
+    !currencies.every((c) => typeof c === 'string' && CURRENCY_CODE.test(c))
+  ) {
+    return null;
+  }
+  return { rateDate, manualSince, currencies: [...(currencies as string[])] };
+}
+
 /**
  * Deja pasar solo lo que la lista admite, con el formato que admite. Lo que
  * no encaja se DESCARTA (no se trunca ni se escapa): así un valor clínico que
@@ -1027,6 +1063,8 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (safety) out.prescriptionSafety = safety;
   const referenced = paymentReference(input.paymentReference);
   if (referenced) out.paymentReference = referenced;
+  const backup = exchangeRateBackup(input.exchangeRateBackup);
+  if (backup) out.exchangeRateBackup = backup;
   const covered = coverage(input.coverage);
   if (covered) out.coverage = covered;
   const registration = healthRegistration(input.healthRegistration);
