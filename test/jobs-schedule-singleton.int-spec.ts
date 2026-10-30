@@ -216,6 +216,78 @@ describe('DX-380 · tareas programadas singleton (int)', () => {
     await a.worker.drain();
   });
 
+  const toFire = (schedule: string, job: string) => ({
+    name: schedule,
+    cron: '* * * * *',
+    job,
+    payload: {},
+    maxAttempts: 1,
+    singleton: true,
+    nextRunAfter: (now: Date) => new Date(now.getTime() + 60_000),
+  });
+
+  it('dos workers disparando el MISMO tick a la vez: un solo trabajo y ningún salto espurio', async () => {
+    const job = `${PREFIX}.race-sweep`;
+    const schedule = `${PREFIX}.race-sweep.every-minute`;
+    const sweep = slowSweep(job, schedule, true);
+    await a.worker.runOnce();
+    await moveTick(schedule, pastTick(1));
+    // Las dos transacciones de ticks, en paralelo y desde dos conexiones: la
+    // fila de la tarea bloqueada (SKIP LOCKED) hace que solo una la vea.
+    const results = await Promise.all([
+      new PrismaJobRepository(a.prisma).fireDueSchedules([
+        toFire(schedule, job),
+      ]),
+      new PrismaJobRepository(b.prisma).fireDueSchedules([
+        toFire(schedule, job),
+      ]),
+    ]);
+    expect(results.reduce((n, r) => n + r.fired, 0)).toBe(1);
+    expect(results.flatMap((r) => r.skipped)).toEqual([]);
+    expect((await jobsOf(job)).map((j) => j.state)).toEqual(['PENDING']);
+    sweep.gate.resolve();
+    await a.worker.drain();
+  });
+
+  it('un RUNNING huérfano (worker muerto) no frena la tarea para siempre: al vencer su arriendo se cierra y el tick siguiente encola', async () => {
+    const job = `${PREFIX}.orphan-sweep`;
+    const schedule = `${PREFIX}.orphan-sweep.every-minute`;
+    const sweep = slowSweep(job, schedule, true);
+    sweep.gate.resolve();
+    await a.worker.runOnce();
+    // El trabajo del tick anterior lo reclamó un worker que murió: RUNNING,
+    // su único intento gastado y el arriendo aún vigente.
+    await moveTick(schedule, pastTick(2));
+    await new PrismaJobRepository(a.prisma).fireDueSchedules([
+      toFire(schedule, job),
+    ]);
+    await owner.$executeRawUnsafe(
+      `UPDATE "jobs" SET "state" = 'RUNNING', "attempts" = 1,
+              "lockedBy" = 'int:dead:00000380',
+              "runAt" = timezone('UTC', now()) + interval '5 minutes'
+        WHERE "name" = '${job}'`,
+    );
+    // Con el arriendo vigente, el tick se salta (podría seguir vivo).
+    await moveTick(schedule, pastTick(1));
+    await b.worker.runOnce();
+    expect((await jobsOf(job)).map((j) => j.state)).toEqual(['RUNNING']);
+    // Vence el arriendo: la vuelta siguiente lo cierra (LeaseExpired) y el
+    // tick siguiente ya encola y se ejecuta.
+    await owner.$executeRawUnsafe(
+      `UPDATE "jobs" SET "runAt" = timezone('UTC', now()) - interval '1 second'
+        WHERE "name" = '${job}'`,
+    );
+    await b.worker.runOnce();
+    await moveTick(schedule, pastTick(0));
+    await b.worker.drain();
+    const after = await jobsOf(job);
+    expect(after.map((j) => [j.state, j.lastError])).toEqual([
+      ['FAILED', 'LeaseExpired'],
+      ['COMPLETED', null],
+    ]);
+    expect(sweep.started()).toBe(1);
+  });
+
   it('sin singleton (el comportamiento de antes) el segundo tick sí encola otro trabajo a la vez', async () => {
     const job = `${PREFIX}.overlap-sweep`;
     const schedule = `${PREFIX}.overlap-sweep.every-minute`;
