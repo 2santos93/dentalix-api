@@ -11,6 +11,11 @@ import {
 } from './support/e2e-fixtures';
 import { CANCELLATION_FEE_MESSAGES } from '../src/modules/cancellation-fees/domain/cancellation-fee';
 import { PaymentAllocationJobs } from '../src/modules/payments/application/payment-allocation-jobs';
+import { PaymentBaseRetries } from '../src/modules/payments/application/payment-base-retries';
+import {
+  PAYMENT_REPOSITORY,
+  type PaymentRepository,
+} from '../src/modules/payments/domain/ports/payment-repository.port';
 import { civilDateIn } from '../src/shared/time/civil-day';
 
 // DX-382 (BE-046) contra Postgres: anular un cargo (SEC-050) compara lo
@@ -197,6 +202,10 @@ describe('anular un cargo compara en la moneda del plan (DX-382, int)', () => {
     setups.set('MANUAL', await setup('manual', 'MANUAL'));
   });
 
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   afterAll(async () => {
     await app.close();
     await resetDatabase(raw);
@@ -292,11 +301,31 @@ describe('anular un cargo compara en la moneda del plan (DX-382, int)', () => {
       const p = await patient(s());
       const first = await charge(s(), p, s().copVersion, 100000);
       const second = await charge(s(), p, s().copVersion, 80000);
+      // La base que el alta no llega a crear (R9.3: p. ej. el plan cambió de
+      // moneda entre la cotización y el INSERT): el repositorio recibe el alta
+      // sin ella, como en producción, y el trigger diferido de DX-380 deja el
+      // abono en `payment_base_retries` para que la cree el barrido. Antes se
+      // borraba la base a mano tras el alta, un estado que la app no puede
+      // producir (sin DELETE en payment_plan_amounts) y que el barrido de
+      // DX-380, que solo mira esa lista, ya no recoge (OPS-049).
+      const repo = app.get<PaymentRepository>(PAYMENT_REPOSITORY, {
+        strict: false,
+      });
+      const create = repo.create.bind(repo);
+      const withoutBase = jest
+        .spyOn(repo, 'create')
+        .mockImplementationOnce((input) =>
+          create({ ...input, planAmount: null }),
+        );
       const payment = await pay(s(), first.planId, 50, 'USD');
+      expect(withoutBase).toHaveBeenCalledTimes(1);
       expect(payment.exchangeRateStatus).toBe('FROZEN');
-      // La base que el alta no llegó a crear (R9.3): la crea el barrido.
-      await raw.$executeRaw`DELETE FROM "payment_allocations" WHERE "paymentId" = ${payment.id}::uuid`;
-      await raw.$executeRaw`DELETE FROM "payment_plan_amounts" WHERE "paymentId" = ${payment.id}::uuid`;
+      await expect(
+        raw.paymentPlanAmount.count({ where: { paymentId: payment.id } }),
+      ).resolves.toBe(0);
+      await expect(
+        raw.paymentBaseRetry.count({ where: { paymentId: payment.id } }),
+      ).resolves.toBe(1);
 
       const res = await voidFee(s(), second.appointmentId).expect(409);
       expect((res.body as { message: string }).message).toBe(
@@ -307,7 +336,20 @@ describe('anular un cargo compara en la moneda del plan (DX-382, int)', () => {
         /espera un minuto y vuelve a intentarlo/,
       );
 
+      // Solo las clínicas de esta suite, como el resto de int-specs del
+      // barrido: la consulta real de clínicas con pendientes sigue corriendo.
+      const retries = app.get(PaymentBaseRetries);
+      const due = retries.dueTenantIds.bind(retries);
+      const mine = [...setups.values()].map((x) => x.clinic.tenantId);
+      jest
+        .spyOn(retries, 'dueTenantIds')
+        .mockImplementation(async () =>
+          (await due()).filter((id) => mine.includes(id)),
+        );
       await app.get(PaymentAllocationJobs).sweep();
+      await expect(
+        raw.paymentBaseRetry.count({ where: { paymentId: payment.id } }),
+      ).resolves.toBe(0);
       const base = await raw.paymentPlanAmount.findUniqueOrThrow({
         where: { paymentId: payment.id },
       });
