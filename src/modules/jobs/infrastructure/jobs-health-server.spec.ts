@@ -34,7 +34,7 @@ function hangingRepo() {
     beat: () => answer(undefined),
     statementTimeoutMs: () => answer(0),
     syncSchedules: () => answer(undefined),
-    fireDueSchedules: () => answer(0),
+    fireDueSchedules: () => answer({ fired: 0, skipped: [] }),
     failExhausted: () => answer([]),
     claim: () => answer([]),
   } as unknown as JobRepository;

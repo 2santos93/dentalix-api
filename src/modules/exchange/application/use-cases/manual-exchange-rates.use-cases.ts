@@ -14,6 +14,7 @@ import {
   PERIOD_DAY_MIN,
 } from '../../../../shared/time/civil-day';
 import type { ManualExchangeRate } from '../../domain/entities/manual-exchange-rate.entity';
+import { ExchangeSourceChangeHooks } from '../exchange-source-change-hooks';
 import {
   BASE_CURRENCY,
   MANUAL_RATE_BASE_CURRENCY_MESSAGE,
@@ -85,6 +86,7 @@ export class RegisterManualExchangeRateUseCase {
     private readonly repo: ManualExchangeRateRepository,
     @Inject(EXCHANGE_RATE_CLOCK)
     private readonly now: () => Date,
+    private readonly hooks: ExchangeSourceChangeHooks,
   ) {}
 
   async execute(
@@ -118,8 +120,9 @@ export class RegisterManualExchangeRateUseCase {
     if (date > today) {
       throw badRequest(MANUAL_RATE_FUTURE_DATE_MESSAGE, 'date');
     }
+    let saved: ManualExchangeRate;
     try {
-      return await this.repo.create({
+      saved = await this.repo.create({
         date,
         currency,
         rate: input.rate,
@@ -139,6 +142,10 @@ export class RegisterManualExchangeRateUseCase {
       }
       throw error;
     }
+    // DX-380: los abonos sin tasa de la clínica la toman en el barrido
+    // siguiente, sin esperar a su reintento escalonado.
+    await this.hooks.afterRatesChange();
+    return saved;
   }
 }
 
@@ -171,6 +178,7 @@ export class CorrectManualExchangeRateUseCase {
   constructor(
     @Inject(MANUAL_EXCHANGE_RATE_REPOSITORY)
     private readonly repo: ManualExchangeRateRepository,
+    private readonly hooks: ExchangeSourceChangeHooks,
   ) {}
 
   async execute(
@@ -180,8 +188,9 @@ export class CorrectManualExchangeRateUseCase {
     if (!isValidRate(input.rate)) {
       throw badRequest(MANUAL_RATE_MESSAGE, 'rate');
     }
+    let saved: ManualExchangeRate;
     try {
-      return await this.repo.correct(id, input.rate);
+      saved = await this.repo.correct(id, input.rate);
     } catch (error) {
       if (error instanceof ManualExchangeRateNotFoundError) {
         throw new NotFoundException(MANUAL_RATE_NOT_FOUND_MESSAGE);
@@ -196,5 +205,8 @@ export class CorrectManualExchangeRateUseCase {
       }
       throw error;
     }
+    // DX-380: como al registrarla, los abonos sin tasa la intentan ya.
+    await this.hooks.afterRatesChange();
+    return saved;
   }
 }

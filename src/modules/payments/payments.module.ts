@@ -34,6 +34,7 @@ import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 import { PaymentAllocationsModule } from './payment-allocations.module';
 import { PaymentAllocationsController } from './presentation/payment-allocations.controller';
+import { PaymentRateBacklogController } from './presentation/payment-rate-backlog.controller';
 import { GetPaymentAllocationsUseCase } from './application/use-cases/get-payment-allocations.use-case';
 import { ReplacePaymentAllocationsUseCase } from './application/use-cases/replace-payment-allocations.use-case';
 
@@ -66,6 +67,7 @@ import { ReplacePaymentAllocationsUseCase } from './application/use-cases/replac
     PaymentReceiptsController,
     // DX-051: ver y reasignar la imputación de un abono.
     PaymentAllocationsController,
+    PaymentRateBacklogController,
   ],
   providers: [
     RecordPaymentUseCase,

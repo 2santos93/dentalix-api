@@ -49,6 +49,8 @@ export class TokenMaintenanceJobs implements OnModuleInit {
       name: PURGE_EXPIRED_TOKENS_SCHEDULE,
       cron: '17 * * * *',
       job: PURGE_EXPIRED_TOKENS_JOB,
+      // DX-380 (OPS-046): sin solapar un tick con el anterior.
+      singleton: true,
     });
   }
 }

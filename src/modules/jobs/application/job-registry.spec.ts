@@ -73,7 +73,29 @@ describe('JobRegistry', () => {
         cron: '17 * * * *',
         job: 'auth.purge-expired-tokens',
         payload: {},
+        singleton: false,
       },
+    ]);
+  });
+
+  // DX-380 (OPS-046): una tarea `singleton` no dispara un tick nuevo mientras
+  // el trabajo del anterior siga en PENDING o RUNNING. Por defecto, no.
+  it('guarda `singleton` de cada tarea programada (false si no se da)', () => {
+    const registry = new JobRegistry();
+    registry.register({ name: 'a.b', handle: noop });
+    registry.schedule({
+      name: 'a.b.cada-minuto',
+      cron: '* * * * *',
+      job: 'a.b',
+      singleton: true,
+    });
+    registry.schedule({ name: 'a.b.diaria', cron: '7 3 * * *', job: 'a.b' });
+
+    expect(
+      registry.schedules().map((s) => [s.name, s.singleton] as const),
+    ).toEqual([
+      ['a.b.cada-minuto', true],
+      ['a.b.diaria', false],
     ]);
   });
 

@@ -45,6 +45,8 @@ describe('ExchangePrefetchJobs (DX-085)', () => {
         cron: '5 0 * * *',
         job: PREFETCH_RATES_JOB,
         payload: {},
+        // Reintenta con su propio backoff (no es un barrido): sin singleton.
+        singleton: false,
       },
     ]);
   });

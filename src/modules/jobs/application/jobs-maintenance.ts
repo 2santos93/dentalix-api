@@ -44,6 +44,8 @@ export class JobsMaintenance implements OnModuleInit {
       name: PURGE_FINISHED_SCHEDULE,
       cron: '41 3 * * *',
       job: PURGE_FINISHED_JOB,
+      // DX-380 (OPS-046): sin solapar un tick con el anterior.
+      singleton: true,
     });
   }
 }

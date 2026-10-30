@@ -135,6 +135,8 @@ export class LocationRegionalBackfillJob implements OnModuleInit {
       name: LOCATION_REGIONAL_BACKFILL_SCHEDULE,
       cron: LOCATION_REGIONAL_BACKFILL_CRON,
       job: LOCATION_REGIONAL_BACKFILL_JOB,
+      // DX-380 (OPS-046): sin solapar un tick con el anterior.
+      singleton: true,
     });
   }
 

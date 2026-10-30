@@ -55,6 +55,8 @@ export class EmailOutboxMaintenance implements OnModuleInit {
       name: PURGE_EMAIL_OUTBOX_SCHEDULE,
       cron: '23 4 * * *',
       job: PURGE_EMAIL_OUTBOX_JOB,
+      // DX-380 (OPS-046): sin solapar un tick con el anterior.
+      singleton: true,
     });
   }
 }

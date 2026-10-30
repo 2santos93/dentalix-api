@@ -13,6 +13,8 @@ import { PrismaExchangeRateRepository } from '../src/modules/exchange/infrastruc
 import { PrismaClinicExchangeSettingsRepository } from '../src/modules/exchange/infrastructure/repositories/prisma-clinic-exchange-settings.repository';
 import { PrismaManualExchangeRateRepository } from '../src/modules/exchange/infrastructure/repositories/prisma-manual-exchange-rate.repository';
 import { ManualExchangeRateInUseError } from '../src/modules/exchange/domain/ports/manual-exchange-rate-repository.port';
+import { PaymentBaseRetries } from '../src/modules/payments/application/payment-base-retries';
+import { PrismaPaymentBaseRetryRepository } from '../src/modules/payments/infrastructure/allocations/prisma-payment-base-retry.repository';
 import {
   REGIONAL_BOGOTA_FIXTURE,
   locationData,
@@ -55,6 +57,11 @@ const convert = new ConvertAmountUseCase(
   ),
 );
 const rebalancer = new PlanAllocationRebalancer(allocationRepo, convert);
+const retries = new PaymentBaseRetries(
+  new PrismaPaymentBaseRetryRepository(prisma, tenantContext),
+  allocationRepo,
+  convert,
+);
 
 const SUBDOMAINS = ['dx375-int-auto', 'dx375-int-manual'];
 const DAY = '2026-10-29';
@@ -359,11 +366,14 @@ describe('Tasa congelada en cada abono (DX-375, int)', () => {
     );
     expect(pending.exchangeRateStatus).toBe('MISSING');
     // Sin la tasa de ese día sigue «sin tasa» (y no se pide al proveedor).
-    await inClinic(manual, () => rebalancer.freezePendingRates(50));
+    await inClinic(manual, () => retries.retryDue(50));
     expect((await storedRate(id)).exchangeRateFrom).toBeNull();
 
+    // DX-380: registrar la tasa adelanta el reintento aplazado (el hook de
+    // las tasas de la clínica llama a `wake`).
     await registerManual(manual, OTHER_DAY, 'COP', 4100);
-    await inClinic(manual, () => rebalancer.freezePendingRates(50));
+    await inClinic(manual, () => retries.wake());
+    await inClinic(manual, () => retries.retryDue(50));
     expect(asNumbers(await storedRate(id))).toMatchObject({
       from: 4100,
       source: 'MANUAL',

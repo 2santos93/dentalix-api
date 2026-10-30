@@ -62,6 +62,7 @@ export class JobRegistry {
     this.scheduled.set(definition.name, {
       ...definition,
       payload: definition.payload ?? {},
+      singleton: definition.singleton ?? false,
     });
   }
 

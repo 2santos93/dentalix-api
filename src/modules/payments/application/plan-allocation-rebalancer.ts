@@ -6,7 +6,7 @@ import {
   type PlanAllocationRepository,
 } from '../domain/ports/plan-allocation-repository.port';
 import { errorName } from './payment-in-plan-currency';
-import { freezePaymentRate, paymentBaseAmount } from './payment-exchange-rate';
+import { freezePaymentRate } from './payment-exchange-rate';
 import type { FrozenExchangeRate } from '../domain/payment-exchange-rate';
 
 export interface DrainOptions {
@@ -25,7 +25,8 @@ export interface DrainOptions {
  * sobrantes de los abonos no fijados llenan lo libre de sus ítems (abono más
  * antiguo primero; DONE y luego ACCEPTED). Lo usan el interceptor tras cada
  * escritura, el barrido de cada minuto, la reasignación y el backfill. Todo en
- * el tenant del contexto.
+ * el tenant del contexto. Las bases y tasas que faltan las reintenta
+ * `PaymentBaseRetries` (DX-380).
  */
 @Injectable()
 export class PlanAllocationRebalancer {
@@ -113,20 +114,6 @@ export class PlanAllocationRebalancer {
     }
   }
 
-  /**
-   * DX-375: congela la tasa de hasta `limit` abonos que la esperan («sin
-   * tasa» o anteriores a DX-375), con la fuente de la clínica y el día civil
-   * de cada uno, cotizada FUERA de transacción. Uno que sigue sin tasa queda
-   * con su moneda de destino y lo reintenta la pasada siguiente; uno en su
-   * misma moneda solo recibe su moneda de destino. Un convertidor por pasada.
-   */
-  async freezePendingRates(
-    limit: number,
-  ): Promise<{ frozen: number; withoutRate: number }> {
-    const { frozen, withoutRate } = await this.freezeBatch(limit, []);
-    return { frozen, withoutRate };
-  }
-
   private async freezeBatch(
     limit: number,
     exclude: readonly string[],
@@ -162,7 +149,8 @@ export class PlanAllocationRebalancer {
 
   /**
    * DX-375 (BE-047): congela TODOS los abonos de la clínica que esperan su
-   * tasa, por lotes de `batch`, antes de cambiar la fuente de la tasa: los
+   * tasa (con la fuente de la clínica y el día civil de cada uno, cotizada
+   * FUERA de transacción), por lotes de `batch`, antes de cambiar la fuente de la tasa: los
    * anteriores a DX-375 quedan con la tasa que tenían, y el cambio no los
    * mueve. Los que siguen sin tasa se cuentan y no se repiten.
    */
@@ -178,46 +166,5 @@ export class PlanAllocationRebalancer {
       total.frozen += pass.frozen;
       total.withoutRate += pass.withoutRate;
     }
-  }
-
-  /**
-   * Bases que faltan (R9.3, R15): hasta `limit` abonos vivos sin base del
-   * tenant actual, convertidos FUERA de transacción con la tasa de su día; la
-   * base nace con su plan encolado. Sin tasa (o con el proveedor caído) se
-   * cuentan como `withoutRate` y lo reintenta la pasada siguiente.
-   */
-  async createMissingBases(
-    limit: number,
-  ): Promise<{ created: number; withoutRate: number }> {
-    const result = { created: 0, withoutRate: 0 };
-    for (const payment of await this.repo.paymentsWithoutBase(limit)) {
-      let amount: number | null;
-      try {
-        amount = await paymentBaseAmount(
-          this.convertAmount,
-          payment,
-          payment.planCurrency,
-        );
-      } catch (error) {
-        this.logger.warn({
-          event: 'payments.allocation_base_conversion_failed',
-          paymentId: payment.paymentId,
-          error: errorName(error),
-        });
-        amount = null;
-      }
-      if (amount === null) {
-        result.withoutRate += 1;
-        continue;
-      }
-      const created = await this.repo.ensureBase(
-        payment.paymentId,
-        amount,
-        payment.planCurrency,
-        payment.paidOn,
-      );
-      if (created) result.created += 1;
-    }
-    return result;
   }
 }
