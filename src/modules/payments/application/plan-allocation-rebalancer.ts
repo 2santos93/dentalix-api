@@ -5,7 +5,9 @@ import {
   PLAN_ALLOCATION_REPOSITORY,
   type PlanAllocationRepository,
 } from '../domain/ports/plan-allocation-repository.port';
-import { errorName, paymentBaseAmount } from './payment-in-plan-currency';
+import { errorName } from './payment-in-plan-currency';
+import { freezePaymentRate, paymentBaseAmount } from './payment-exchange-rate';
+import type { FrozenExchangeRate } from '../domain/payment-exchange-rate';
 
 export interface DrainOptions {
   /** Autor de las filas AUTO; `null` en el barrido. */
@@ -112,6 +114,73 @@ export class PlanAllocationRebalancer {
   }
 
   /**
+   * DX-375: congela la tasa de hasta `limit` abonos que la esperan («sin
+   * tasa» o anteriores a DX-375), con la fuente de la clínica y el día civil
+   * de cada uno, cotizada FUERA de transacción. Uno que sigue sin tasa queda
+   * con su moneda de destino y lo reintenta la pasada siguiente; uno en su
+   * misma moneda solo recibe su moneda de destino. Un convertidor por pasada.
+   */
+  async freezePendingRates(
+    limit: number,
+  ): Promise<{ frozen: number; withoutRate: number }> {
+    const { frozen, withoutRate } = await this.freezeBatch(limit, []);
+    return { frozen, withoutRate };
+  }
+
+  private async freezeBatch(
+    limit: number,
+    exclude: readonly string[],
+  ): Promise<{ frozen: number; withoutRate: number; seen: string[] }> {
+    const result = { frozen: 0, withoutRate: 0, seen: [] as string[] };
+    const convert = this.convertAmount.memoized();
+    for (const payment of await this.repo.paymentsPendingRate(limit, exclude)) {
+      result.seen.push(payment.paymentId);
+      let rate: FrozenExchangeRate | null;
+      try {
+        rate = await freezePaymentRate(convert, payment);
+      } catch (error) {
+        this.logger.warn({
+          event: 'payments.exchange_rate_freeze_failed',
+          paymentId: payment.paymentId,
+          error: errorName(error),
+        });
+        result.withoutRate += 1;
+        continue;
+      }
+      const frozen = await this.repo.freezeRate(
+        payment.paymentId,
+        payment.targetCurrency,
+        rate,
+      );
+      if (frozen) result.frozen += 1;
+      else if (payment.currency !== payment.targetCurrency) {
+        result.withoutRate += 1;
+      }
+    }
+    return result;
+  }
+
+  /**
+   * DX-375 (BE-047): congela TODOS los abonos de la clínica que esperan su
+   * tasa, por lotes de `batch`, antes de cambiar la fuente de la tasa: los
+   * anteriores a DX-375 quedan con la tasa que tenían, y el cambio no los
+   * mueve. Los que siguen sin tasa se cuentan y no se repiten.
+   */
+  async freezeAllPending(
+    batch = 200,
+  ): Promise<{ frozen: number; withoutRate: number }> {
+    const total = { frozen: 0, withoutRate: 0 };
+    const seen: string[] = [];
+    for (;;) {
+      const pass = await this.freezeBatch(batch, seen);
+      if (pass.seen.length === 0) return total;
+      seen.push(...pass.seen);
+      total.frozen += pass.frozen;
+      total.withoutRate += pass.withoutRate;
+    }
+  }
+
+  /**
    * Bases que faltan (R9.3, R15): hasta `limit` abonos vivos sin base del
    * tenant actual, convertidos FUERA de transacción con la tasa de su día; la
    * base nace con su plan encolado. Sin tasa (o con el proveedor caído) se
@@ -124,7 +193,11 @@ export class PlanAllocationRebalancer {
     for (const payment of await this.repo.paymentsWithoutBase(limit)) {
       let amount: number | null;
       try {
-        amount = await paymentBaseAmount(this.convertAmount, payment);
+        amount = await paymentBaseAmount(
+          this.convertAmount,
+          payment,
+          payment.planCurrency,
+        );
       } catch (error) {
         this.logger.warn({
           event: 'payments.allocation_base_conversion_failed',

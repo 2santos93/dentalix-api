@@ -38,8 +38,15 @@ import { invitationStatus } from '../application/invitation-token';
 import { RateLimit } from '../../../shared/security/rate-limit.decorator';
 import type { TenantHostRequest } from '../../../shared/tenancy/tenant-host-request';
 import { TenantLinkBaseService } from '../../../shared/tenancy/tenant-link-base.service';
+import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
+import {
+  auditRequestContext,
+  type AuditableRequest,
+} from '../../audit/presentation/audit-request-context';
+import type { AuditRequestContext } from '../../audit/domain/audit-request-context';
 
-type AuthenticatedRequest = TenantHostRequest & { user: JwtPayload };
+type AuthenticatedRequest = TenantHostRequest &
+  AuditableRequest & { user: JwtPayload };
 
 // Managing staff invitations is gestión-only, same as staff.controller.ts's
 // STAFF_WRITE_ROLES routes — no per-method @Roles override needed since
@@ -57,7 +64,18 @@ export class StaffInvitationsController {
     private readonly revokeInvitation: RevokeInvitationUseCase,
     private readonly resendInvitation: ResendInvitationUseCase,
     private readonly links: TenantLinkBaseService,
+    private readonly tenantContext: TenantContextService,
   ) {}
+
+  /**
+   * DX-359: quién gestiona la invitación. El repositorio escribe el evento en
+   * la transacción de cada escritura (sin token, hash ni email).
+   */
+  private auditCtx(req: AuthenticatedRequest): AuditRequestContext {
+    const ctx = auditRequestContext(req, this.tenantContext);
+    if (!ctx) throw new Error('Sin sesión de clínica detrás del RolesGuard');
+    return ctx;
+  }
 
   /**
    * Origen de la web de la clínica para el enlace del email. SEC-033: la
@@ -95,6 +113,8 @@ export class StaffInvitationsController {
   @ApiOperation({
     summary:
       'Invita a una persona: crea la invitación y encola el email con el enlace (se envía en segundo plano)',
+    description:
+      'Queda en la auditoría (CREATE de STAFF_INVITATION con el rol; la pendiente que sustituye, como VOID INVITATION_REPLACED).',
   })
   @ApiCreatedResponse({ type: CreatedInvitationDto })
   async create(
@@ -102,11 +122,10 @@ export class StaffInvitationsController {
     @Req() req: AuthenticatedRequest,
   ): Promise<CreatedInvitationDto> {
     const linkBase = await this.linkBase(req);
-    const result = await this.createInvitation.execute({
-      ...dto,
-      invitedById: req.user.sub,
-      linkBase,
-    });
+    const result = await this.createInvitation.execute(
+      { ...dto, invitedById: req.user.sub, linkBase },
+      this.auditCtx(req),
+    );
     return this.toCreatedDto(result);
   }
 
@@ -116,6 +135,8 @@ export class StaffInvitationsController {
   @ApiOperation({
     summary:
       'Reenvía una invitación pendiente: token nuevo (el anterior deja de servir), 7 días más y un email nuevo',
+    description:
+      'Queda en la auditoría (UPDATE de STAFF_INVITATION, INVITATION_RESENT), sin el token.',
   })
   @ApiOkResponse({ type: CreatedInvitationDto })
   @ApiNotFoundResponse({
@@ -126,7 +147,10 @@ export class StaffInvitationsController {
     @Req() req: AuthenticatedRequest,
   ): Promise<CreatedInvitationDto> {
     const linkBase = await this.linkBase(req);
-    const result = await this.resendInvitation.execute({ id, linkBase });
+    const result = await this.resendInvitation.execute(
+      { id, linkBase },
+      this.auditCtx(req),
+    );
     return this.toCreatedDto(result);
   }
 
@@ -138,8 +162,19 @@ export class StaffInvitationsController {
 
   @Delete(':id')
   @HttpCode(204)
+  @ApiOperation({
+    summary: 'Retira una invitación pendiente (su enlace deja de servir)',
+    description:
+      'Queda en la auditoría (VOID de STAFF_INVITATION, INVITATION_REVOKED).',
+  })
   @ApiNoContentResponse()
-  async remove(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
-    await this.revokeInvitation.execute(id);
+  @ApiNotFoundResponse({
+    description: 'No hay una invitación pendiente con ese id en esta clínica',
+  })
+  async remove(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<void> {
+    await this.revokeInvitation.execute(id, this.auditCtx(req));
   }
 }

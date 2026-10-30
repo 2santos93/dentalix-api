@@ -269,6 +269,7 @@ describe('DX-143 · reclamo de cuenta y membresías en otras clínicas (int)', (
           email,
           role: ClinicRole.ASSISTANT,
           user: { claim: { userId, passwordHash: 'NEW_HASH' } },
+          request: null,
         }),
       );
       return { invitationId, run };

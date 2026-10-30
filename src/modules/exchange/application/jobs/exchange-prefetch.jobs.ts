@@ -47,7 +47,8 @@ export class ExchangePrefetchJobs implements OnModuleInit {
         const date = isValidDateFormat(payload.date)
           ? payload.date
           : this.now().toISOString().slice(0, 10);
-        const { rates } = await this.getRates.execute(date);
+        // Del proveedor, sea cual sea la fuente de cada clínica (DX-374).
+        const rates = await this.getRates.providerRates(date);
         this.logger.log({
           event: 'exchange.prefetched',
           date,

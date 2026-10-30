@@ -31,6 +31,8 @@ function target(over: Partial<AllocationTarget> = {}): AllocationTarget {
     planCurrency: 'EUR',
     planStatus: TreatmentPlanStatus.ACCEPTED,
     base: { amount: 90, manual: false },
+    exchangeRateCurrency: null,
+    frozenRate: null,
     ...over,
   };
 }
@@ -51,6 +53,10 @@ function makeUseCase(
     findAllocationTarget,
     ensureBase: jest.fn().mockImplementation(() => {
       calls.push('ensureBase');
+      return Promise.resolve(true);
+    }),
+    freezeRate: jest.fn().mockImplementation(() => {
+      calls.push('freezeRate');
       return Promise.resolve(true);
     }),
     replaceAllocations: jest.fn().mockImplementation(() => {
@@ -79,6 +85,21 @@ function makeUseCase(
         opts.rate === undefined
           ? Promise.reject(new BadRequestException('unsupported currency: USD'))
           : Promise.resolve({ rateUsed: opts.rate }),
+      ),
+    quote: jest
+      .fn()
+      .mockImplementation(
+        (input: { from: string; to: string; date: string }) =>
+          opts.rate === undefined
+            ? Promise.reject(
+                new BadRequestException('unsupported currency: USD'),
+              )
+            : Promise.resolve({
+                ...input,
+                source: 'AUTOMATIC',
+                fromPerBase: 1,
+                toPerBase: opts.rate,
+              }),
       ),
   };
   const allocations = repo as unknown as PlanAllocationRepository;
@@ -157,6 +178,44 @@ describe('ReplacePaymentAllocationsUseCase (DX-051, spec R10)', () => {
     );
     expect(repo.ensureBase).not.toHaveBeenCalled();
     expect(repo.replaceAllocations).not.toHaveBeenCalled();
+  });
+
+  // DX-375: un abono «sin tasa» congela la tasa al imputarlo, si ya la hay, y
+  // su base sale de esa tasa congelada.
+  it('un abono sin tasa congela la tasa al imputarse y la base sale de ella', async () => {
+    const frozenRate = {
+      currency: 'EUR',
+      fromPerBase: 1,
+      toPerBase: 0.9,
+      source: 'AUTOMATIC' as const,
+      date: '2026-10-20',
+    };
+    const { uc, repo, calls } = makeUseCase(
+      [
+        target({ base: null, exchangeRateCurrency: 'EUR' }),
+        target({ base: null, exchangeRateCurrency: 'EUR', frozenRate }),
+        target(),
+      ],
+      { rate: 0.9 },
+    );
+    await uc.execute('pay-1', manual([]), 'admin-1');
+    expect(repo.freezeRate).toHaveBeenCalledWith('pay-1', 'EUR', frozenRate);
+    expect(repo.ensureBase).toHaveBeenCalledWith(
+      'pay-1',
+      90,
+      'EUR',
+      '2026-10-20',
+    );
+    expect(calls.slice(0, 3)).toEqual(['freezeRate', 'ensureBase', 'replace']);
+  });
+
+  it('un abono sin tasa que sigue sin ella: 409 sin congelar nada', async () => {
+    const { uc, repo } = makeUseCase([
+      target({ base: null, exchangeRateCurrency: 'EUR' }),
+    ]);
+    const error = await errorOf(uc.execute('pay-1', manual([]), 'admin-1'));
+    expect(error).toBeInstanceOf(ConflictException);
+    expect(repo.freezeRate).not.toHaveBeenCalled();
   });
 
   it('409 no rate when the base still does not exist after ensureBase', async () => {

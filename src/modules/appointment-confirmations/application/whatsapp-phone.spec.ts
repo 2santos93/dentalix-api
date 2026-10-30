@@ -32,4 +32,14 @@ describe('toWhatsAppNumber', () => {
     expect(toWhatsAppNumber('+1234567890123456', null)).toBeNull();
     expect(toWhatsAppNumber('llamar a la mamá', 'CO')).toBeNull();
   });
+
+  it('a country outside the provisional table never gets a calling code guessed', () => {
+    expect(toWhatsAppNumber('06 1234 5678', 'IT')).toBeNull();
+    expect(toWhatsAppNumber('0412-1234567', 'JP')).toBeNull();
+    expect(toWhatsAppNumber('+39 06 1234 5678', 'IT')).toBe('390612345678');
+  });
+
+  it('a VE country gives the 58 calling code', () => {
+    expect(toWhatsAppNumber('0412-1234567', 'VE')).toBe('584121234567');
+  });
 });

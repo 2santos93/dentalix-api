@@ -19,6 +19,17 @@ import {
   AccountClaimConflictError,
 } from '../../domain/ports/invitation-repository.port';
 import { ClinicInvitation } from '../../domain/entities/clinic-invitation.entity';
+import type {
+  AuditRequestContext,
+  AuditRequestMeta,
+} from '../../../audit/domain/audit-request-context';
+import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
+import {
+  invitationAcceptedAuditEvent,
+  invitationCreatedAuditEvent,
+  invitationResentAuditEvent,
+  invitationRevokedAuditEvent,
+} from '../../domain/invitation-audit';
 
 function mapToEntity(row: PrismaClinicInvitation): ClinicInvitation {
   return {
@@ -122,7 +133,10 @@ export class PrismaInvitationRepository implements InvitationRepository {
     );
   }
 
-  async revokePendingByEmail(email: string): Promise<string[]> {
+  async revokePendingByEmail(
+    email: string,
+    audit: AuditRequestContext,
+  ): Promise<string[]> {
     return this.prisma.runWithTenant(async (tx) => {
       const where = {
         email,
@@ -140,6 +154,13 @@ export class PrismaInvitationRepository implements InvitationRepository {
         where: { ...where, id: { in: pending.map((p) => p.id) } },
         data: { revokedAt: new Date() },
       });
+      // DX-359: la sustituida queda anulada en la auditoría, en esta tx.
+      for (const { id } of pending) {
+        await writeAuditEvent(
+          tx,
+          invitationRevokedAuditEvent(audit, id, 'REPLACED'),
+        );
+      }
       return pending.map((p) => p.id);
     });
   }
@@ -156,6 +177,7 @@ export class PrismaInvitationRepository implements InvitationRepository {
   async reissue(
     id: string,
     input: { tokenHash: string; expiresAt: Date },
+    audit: AuditRequestContext,
   ): Promise<ClinicInvitation | null> {
     return this.prisma.runWithTenant(async (tx) => {
       // Check-and-set atómico: solo una invitación pendiente (no aceptada ni
@@ -168,17 +190,24 @@ export class PrismaInvitationRepository implements InvitationRepository {
       const row = await tx.clinicInvitation.findUniqueOrThrow({
         where: { id },
       });
+      // DX-359: sin el token ni su hash.
+      await writeAuditEvent(tx, invitationResentAuditEvent(audit, id));
       return mapToEntity(row);
     });
   }
 
-  async revokeById(id: string): Promise<boolean> {
+  async revokeById(id: string, audit: AuditRequestContext): Promise<boolean> {
     return this.prisma.runWithTenant(async (tx) => {
       const result = await tx.clinicInvitation.updateMany({
         where: { id, acceptedAt: null, revokedAt: null, deletedAt: null },
         data: { revokedAt: new Date() },
       });
-      return result.count > 0;
+      if (result.count === 0) return false;
+      await writeAuditEvent(
+        tx,
+        invitationRevokedAuditEvent(audit, id, 'REVOKED'),
+      );
+      return true;
     });
   }
 
@@ -193,17 +222,20 @@ export class PrismaInvitationRepository implements InvitationRepository {
     return tenant?.name ?? null;
   }
 
-  async create(input: {
-    email: string;
-    fullName: string;
-    role: ClinicRole;
-    tokenHash: string;
-    expiresAt: Date;
-    invitedById?: string;
-  }): Promise<ClinicInvitation> {
+  async create(
+    input: {
+      email: string;
+      fullName: string;
+      role: ClinicRole;
+      tokenHash: string;
+      expiresAt: Date;
+      invitedById?: string;
+    },
+    audit: AuditRequestContext,
+  ): Promise<ClinicInvitation> {
     const tenantId = this.requireTenantId();
     const row = await this.prisma.runWithTenant(async (tx) => {
-      return tx.clinicInvitation.create({
+      const created = await tx.clinicInvitation.create({
         data: {
           tenantId,
           email: input.email,
@@ -214,6 +246,12 @@ export class PrismaInvitationRepository implements InvitationRepository {
           invitedById: input.invitedById,
         },
       });
+      // DX-359: el rol invitado; ni el email, ni el nombre, ni el hash.
+      await writeAuditEvent(
+        tx,
+        invitationCreatedAuditEvent(audit, created.id, created.role),
+      );
+      return created;
     });
     return mapToEntity(row);
   }
@@ -223,6 +261,7 @@ export class PrismaInvitationRepository implements InvitationRepository {
     email: string;
     role: ClinicRole;
     user: AcceptUserResolution;
+    request: AuditRequestMeta | null;
   }): Promise<
     AcceptOutcome & {
       tokenVersion: number;
@@ -317,7 +356,11 @@ export class PrismaInvitationRepository implements InvitationRepository {
       // token de esta sesión ya nace restringido.
       const membership = await tx.clinicMembership.findFirst({
         where: { userId },
-        select: { id: true, locations: MEMBERSHIP_LOCATIONS_SELECT },
+        select: {
+          id: true,
+          deletedAt: true,
+          locations: MEMBERSHIP_LOCATIONS_SELECT,
+        },
       });
       if (membership) {
         await tx.clinicMembership.update({
@@ -345,14 +388,28 @@ export class PrismaInvitationRepository implements InvitationRepository {
         data: { acceptedAt: new Date() },
       });
 
+      const allowedLocationIds =
+        membership && input.role !== ClinicRole.ADMIN
+          ? activeLocationIds(membership.locations)
+          : null;
+      // DX-359: el alta del miembro, por él mismo, en esta transacción y con
+      // cualquier resolución (cuenta nueva, existente o reclamada).
+      await writeAuditEvent(
+        tx,
+        invitationAcceptedAuditEvent(input.request, {
+          tenantId,
+          invitationId: input.invitationId,
+          userId,
+          role: input.role,
+          locationIds: allowedLocationIds,
+          reactivated: membership?.deletedAt != null,
+        }),
+      );
       return {
         userId,
         role: input.role,
         tokenVersion,
-        allowedLocationIds:
-          membership && input.role !== ClinicRole.ADMIN
-            ? activeLocationIds(membership.locations)
-            : null,
+        allowedLocationIds,
       };
     });
   }

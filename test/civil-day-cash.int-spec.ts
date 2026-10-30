@@ -29,13 +29,25 @@ const cash = new ListCashPaymentsUseCase(
   () => new Date('2026-10-17T15:00:00.000Z'),
 );
 // Tasa 1:1: aquí importa QUÉ abonos entran, no la conversión.
+const identityExecute = (input: {
+  amount: number;
+  from: string;
+  to: string;
+  date: string;
+}) => Promise.resolve({ ...input, result: input.amount, rateUsed: 1 });
+// DX-374: los totales piden un convertidor memoizado por cálculo.
+// DX-375: la cotización que congela un abono, también 1:1.
+const identityQuote = (input: { from: string; to: string; date: string }) =>
+  Promise.resolve({
+    ...input,
+    source: 'AUTOMATIC',
+    fromPerBase: 1,
+    toPerBase: 1,
+  });
 const identityConvert = {
-  execute: (input: {
-    amount: number;
-    from: string;
-    to: string;
-    date: string;
-  }) => Promise.resolve({ ...input, result: input.amount, rateUsed: 1 }),
+  execute: identityExecute,
+  quote: identityQuote,
+  memoized: () => ({ execute: identityExecute, quote: identityQuote }),
 } as unknown as ConvertAmountUseCase;
 const totals = new GetPaymentsTotalsUseCase(repo, identityConvert);
 const ADMIN = { userId: 'int-admin', role: ClinicRole.ADMIN };
@@ -277,6 +289,7 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
         paidAt: { civilDate: '2026-12-01' },
         receiptPlanBalance: null,
         planAmount: null,
+        frozenRate: null,
       }),
     );
     expect(created.paidAt.toISOString()).toBe('2026-12-01T11:00:00.000Z');
@@ -382,7 +395,12 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
     let legacy: string;
 
     beforeAll(async () => {
-      legacy = await legacyLocationInsert(owner, tenantA, 'Réplica antigua');
+      legacy = await legacyLocationInsert(
+        owner,
+        tenantA,
+        'Réplica antigua',
+        REGIONAL_BOGOTA_FIXTURE.country,
+      );
     });
 
     afterAll(async () => {

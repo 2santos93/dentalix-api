@@ -12,6 +12,7 @@ import {
   REGIONAL_TOKYO_FIXTURE,
   legacyLocationInsert,
   locationBody,
+  REGIONAL_BOGOTA_FIXTURE,
 } from './support/location-fixtures';
 
 // GLOBAL-G1 fase 1 (spec §3.4, R15, R20): la zona es un dato de la sede. El
@@ -142,6 +143,7 @@ describe('Horario de la sede sin zona propia (e2e, G1)', () => {
       raw,
       clinic.tenantId,
       'Antigua',
+      REGIONAL_BOGOTA_FIXTURE.country,
     );
     const res = await as(api().put('/api/v1/locations/schedule'), legacyId)
       .send({ ranges: WEEK })

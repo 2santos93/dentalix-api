@@ -24,6 +24,8 @@ import {
   type PlatformMfaEnrollment,
   type PlatformMfaStatus,
 } from '../application/use-cases/platform-mfa.use-case';
+import type { AuditRequestMeta } from '../../audit/domain/audit-request-context';
+import { currentRequestId } from '../../../shared/observability/request-context';
 import {
   ConfirmPlatformMfaDto,
   PlatformMfaEnrollmentDto,
@@ -36,6 +38,22 @@ import {
  * clínica sin membresía. Sin `TenantContextInterceptor`, como el resto de
  * `/platform/*`.
  */
+interface PlatformRequest {
+  user: PlatformJwtPayload;
+  ip?: string;
+  headers: Record<string, string | string[] | undefined>;
+}
+
+/** DX-359: desde dónde llega la petición, para `platform_audit_events`. */
+function requestMeta(req: PlatformRequest): AuditRequestMeta {
+  const userAgent = req.headers['user-agent'];
+  return {
+    requestId: currentRequestId() ?? null,
+    ip: req.ip ?? null,
+    userAgent: (Array.isArray(userAgent) ? userAgent[0] : userAgent) ?? null,
+  };
+}
+
 @ApiTags('platform')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, PlatformAdminGuard)
@@ -57,13 +75,13 @@ export class PlatformMfaController {
   @ApiOperation({
     summary:
       'Inicia el alta del MFA: genera un secreto (pendiente hasta confirmarlo) y devuelve el otpauth URI',
+    description:
+      'Queda en platform_audit_events (MFA_ENROLLMENT_STARTED) sin el secreto ni el URI.',
   })
   @ApiOkResponse({ type: PlatformMfaEnrollmentDto })
   @ApiConflictResponse({ description: 'El MFA ya está activo' })
-  start(
-    @Req() req: { user: PlatformJwtPayload },
-  ): Promise<PlatformMfaEnrollment> {
-    return this.mfa.start(req.user.sub);
+  start(@Req() req: PlatformRequest): Promise<PlatformMfaEnrollment> {
+    return this.mfa.start(req.user.sub, requestMeta(req));
   }
 
   @Post('enrollment/confirm')
@@ -71,6 +89,8 @@ export class PlatformMfaController {
   @RateLimit('auth')
   @ApiOperation({
     summary: 'Confirma el alta con un código de la app y activa el MFA',
+    description:
+      'Queda en platform_audit_events (MFA_ENABLED) sin el código ni el secreto.',
   })
   @ApiOkResponse({ type: PlatformMfaStatusDto })
   @ApiBadRequestResponse({
@@ -78,9 +98,9 @@ export class PlatformMfaController {
   })
   @ApiConflictResponse({ description: 'El MFA ya está activo' })
   confirm(
-    @Req() req: { user: PlatformJwtPayload },
+    @Req() req: PlatformRequest,
     @Body() dto: ConfirmPlatformMfaDto,
   ): Promise<PlatformMfaStatus> {
-    return this.mfa.confirm(req.user.sub, dto.code);
+    return this.mfa.confirm(req.user.sub, dto.code, requestMeta(req));
   }
 }

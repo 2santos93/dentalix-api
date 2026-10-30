@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
+import { ISO3166_COUNTRIES } from '../../prisma/reference/iso3166';
 
 /**
  * GLOBAL-G1 (spec §9, R5): ningún código deriva la zona de una sede del país
@@ -1081,6 +1082,387 @@ describe('tipos de documento genéricos (DX-327)', () => {
       expect({ snippet, holes: legacyPairHoles(snippet).length }).toEqual({
         snippet,
         holes: 0,
+      });
+    }
+  });
+});
+
+/**
+ * AC3 (DX-312, R3, pre-flight I7): ningún fichero de producción de `src/`, en
+ * ningún módulo ni capa, decide una regla por el país de la sede. Los patrones
+ * (PATTERNS §8) se aplican al fichero sin comentarios y se arman por partes.
+ * Excepciones: la proyección legada, la tabla provisional de indicativos y los
+ * legados R12 de recetas, cada uno con su cabecera G5.3.
+ *
+ * Límite conocido: las guardas miran el texto, no siguen valores. Lo que
+ * queda para la revisión:
+ * - un alias sin «country» en el nombre (`const c = location.country;
+ *   c === 'VE'`, o `const { country: c } = location`);
+ * - la comparación con una constante con nombre en minúsculas o mixta
+ *   (`country === veCode`). En MAYÚSCULAS (`=== VE_CODE`) o como miembro de
+ *   dos letras (`=== Country.VE`) sí se ve;
+ * - `Reflect.get(T, country)` y cualquier búsqueda con el país en un argumento
+ *   que no sea el primero de un método de la lista de `MEMBERSHIP_CALL`;
+ * - las reglas por país en SQL (`CASE l."country"` de
+ *   `dx_g1_backfill_location_regional`, DX-351): solo se recorre TS de `src/`.
+ *
+ * `T?.[country]`, `Object.hasOwn(T, country)` y `.findIndex`, `.filter`,
+ * `.every` y `.exec` con el país en el argumento sí se ven (revisión final
+ * de DX-312, M4).
+ */
+const COUNTRY = 'coun' + 'try';
+const LEGACY_CLINIC_COUNTRY_FILE = join(
+  SRC,
+  'shared',
+  'locations',
+  'legacy-clinic-country.ts',
+);
+const COUNTRY_CALLING_CODE_FILE = join(
+  SRC,
+  'shared',
+  'phone',
+  'country-calling-code.ts',
+);
+const COUNTRY_EXCEPTIONS = [
+  LEGACY_CLINIC_COUNTRY_FILE,
+  COUNTRY_CALLING_CODE_FILE,
+  join(PRESCRIPTIONS, 'domain', 'legacy-prescription.ts'),
+  join(PRESCRIPTIONS, 'domain', 'prescription-hash.ts'),
+];
+const COUNTRY_EXCEPTION_HEADER = 'Excepción G5.3 (DX-334)';
+const CLINIC_COUNTRY = new RegExp('\\b' + 'Clinic' + 'Country' + '\\b');
+
+/** Una expresión con «country»: `country`, `location.countryCode`, `x?.country`. */
+const C = `[\\w$.?!()\\[\\]]*${COUNTRY}[\\w$]*(?:\\??\\.[\\w$]+|\\(\\))*`;
+/**
+ * Un literal de texto no vacío, con cualquier comilla; `group` es el número
+ * de su grupo de comilla en el patrón entero.
+ */
+const L = (group: number): string => `(['"\`])[^'"\`\\n]{1,40}\\${group}`;
+/** `typeof país` compara el tipo, no el país. */
+const C_OPERAND = `(?<!typeof\\s+)${C}`;
+const countryPattern = (source: string): RegExp => new RegExp(source, 'gi');
+const COUNTRY_COMPARE = countryPattern(
+  `(?:${C_OPERAND}\\s*[!=]==?\\s*${L(1)})|(?:${L(2)}\\s*[!=]==?\\s*${C_OPERAND})`,
+);
+/**
+ * Una constante con nombre en lugar del literal: `VE_CODE` (MAYÚSCULAS, con
+ * al menos dos caracteres) o un miembro de dos letras (`Country.VE`). Sin
+ * `i`: `country === previous` o `country === other.country` no cuentan.
+ */
+const NAMED_CODE =
+  '(?:\\b[A-Z][A-Z0-9_]+\\b(?![\\w$.(])|\\b[\\w$]+\\??\\.[A-Z]{2}\\b(?![\\w$.(]))';
+/** `C_OPERAND` sin `i` en el patrón: «country» en cualquier caja, a mano. */
+const C_OPERAND_ANY_CASE = C_OPERAND.replace(
+  COUNTRY,
+  [...COUNTRY].map((ch) => `[${ch}${ch.toUpperCase()}]`).join(''),
+);
+const COUNTRY_NAMED_COMPARE = new RegExp(
+  `(?:${C_OPERAND_ANY_CASE}\\s*[!=]==?\\s*${NAMED_CODE})|(?:${NAMED_CODE}\\s*[!=]==?\\s*${C_OPERAND_ANY_CASE})`,
+  'g',
+);
+/** Un `case` de dos letras, con cualquier comilla y en cualquier caja. */
+const TWO_LETTER_CASE = /case\s*(['"`])[A-Za-z]{2}\1\s*:/i;
+const COUNTRY_LOOKUPS = [
+  `${C}\\s*\\??\\.(?:startsWith|endsWith|includes|indexOf|localeCompare|match|test)\\(`,
+  `[\\w$\\])]\\s*(?:\\?\\.\\s*)?\\[\\s*${C}\\s*\\]`,
+  `${C}\\s+in\\s+[\\w$]`,
+].map(countryPattern);
+/** `.get(país)`, salvo sobre `countries` o una `*Whitelist`. */
+const COUNTRY_GET = countryPattern(`(\\b[\\w$]+)\\??\\.get\\(\\s*${C}\\s*\\)`);
+/**
+ * Una búsqueda de pertenencia sobre cualquier receptor: un array (con nombre,
+ * en línea o con `as const`), un `Set`, `Object.keys(T)`, `Object.hasOwn` o
+ * una expresión regular. Se mira el argumento entero, no el receptor.
+ */
+const MEMBERSHIP_CALL =
+  /(\b[\w$]+)?\s*\??\.(?:includes|has|hasOwn|test|exec|indexOf|some|find|findIndex|filter|every)\s*\(/g;
+const isCountryAllowList = (receiver: string): boolean =>
+  /^(countries|\w*whitelist)$/i.test(receiver);
+const ISO_CODES: ReadonlySet<string> = new Set(
+  ISO3166_COUNTRIES.map((country) => country.code),
+);
+const COUNTRY_NAME = /colombi|espa[ñn]a|venezuel|\bCO o ES\b|campos legales/i;
+const countryNameHit = (line: string): boolean => COUNTRY_NAME.test(fold(line));
+
+/**
+ * El texto sin comentarios (`/* … *\/` y `// …`), cambiados por espacios y
+ * con los saltos de línea intactos para conservar el número de línea. Los
+ * literales de texto se saltan, para no confundir `'https://…'` con un
+ * comentario.
+ */
+const withoutComments = (text: string): string =>
+  text.replace(
+    /'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\[\s\S]|[^`\\])*`|\/\*[\s\S]*?\*\/|\/\/[^\n]*/g,
+    (token) => (token.startsWith('/') ? token.replace(/[^\n]/g, ' ') : token),
+  );
+
+/** Línea (desde 1) de cada coincidencia de `pattern` (con `g`) en `text`. */
+const matchLines = (
+  text: string,
+  pattern: RegExp,
+  accept: (match: RegExpExecArray) => boolean = () => true,
+): number[] =>
+  [...text.matchAll(pattern)]
+    .filter(accept)
+    .map((match) => text.slice(0, match.index).split('\n').length);
+
+const compareHits = (code: string): number[] => [
+  ...new Set([
+    ...matchLines(code, COUNTRY_COMPARE),
+    ...matchLines(code, COUNTRY_NAMED_COMPARE),
+  ]),
+];
+/**
+ * `switch (…country…) {` con un `case` de dos letras en su bloque, antes de
+ * otro `switch` anidado. La cabecera va equilibrada: `switch (norm(x.country))`
+ * y `switch (this.country())` también cuentan.
+ */
+const switchHits = (code: string): number[] =>
+  matchLines(code, /\bswitch\s*\(/g, (match) => {
+    const headStart = match.index + match[0].length - 1;
+    const head = callArgument(code, headStart);
+    if (!new RegExp(COUNTRY, 'i').test(head)) return false;
+    const after = code.slice(headStart + head.length + 2);
+    const brace = /^\s*\{/.exec(after);
+    if (!brace) return false;
+    const body = callArgument(after, brace[0].length - 1);
+    return TWO_LETTER_CASE.test(body.split(/\bswitch\s*\(/)[0]);
+  });
+const lookupHits = (code: string): number[] => [
+  ...new Set([
+    ...COUNTRY_LOOKUPS.flatMap((pattern) => matchLines(code, pattern)),
+    ...matchLines(code, COUNTRY_GET, (match) => !isCountryAllowList(match[1])),
+    ...matchLines(
+      code,
+      MEMBERSHIP_CALL,
+      (match) =>
+        !(match[1] && isCountryAllowList(match[1])) &&
+        new RegExp(COUNTRY, 'i').test(
+          callArgument(code, match.index + match[0].length - 1),
+        ),
+    ),
+  ]),
+];
+/**
+ * Cada objeto literal más interno con ≥ 2 claves, todas de dos letras, y ≥ 2
+ * distintas que son códigos ISO 3166-1 (en mayúsculas). Exigir que todas sean
+ * de dos letras deja pasar `{ SI, NO, NO_SE }` y `{ kind, at, by }`.
+ */
+const countryKeyedHits = (code: string): number[] =>
+  matchLines(code, /\{[^{}]*\}/g, ([object]) => {
+    const keys = [
+      ...object.matchAll(/(?:^|[,{])\s*['"]?([\w$]+)['"]?\s*:(?!:)/g),
+    ].map((key) => key[1]);
+    const isoKeys = new Set(
+      keys.map((key) => key.toUpperCase()).filter((key) => ISO_CODES.has(key)),
+    );
+    return (
+      keys.length >= 2 &&
+      keys.every((key) => /^[A-Za-z]{2}$/.test(key)) &&
+      isoKeys.size >= 2
+    );
+  });
+/** `import … from '…'`, `import('…')` o `require('…')`, también en varias líneas. */
+const IMPORT_STATEMENT =
+  /\bimport\s+(?:type\s+)?[^;'"`]*?\bfrom\s*(['"])[^'"]+\1|\bimport\s*\(\s*(['"])[^'"]+\2\s*\)|\brequire\s*\(\s*(['"])[^'"]+\3\s*\)/g;
+const FORBIDDEN_DOMAIN_IMPORT = new RegExp(
+  [
+    CLINIC_COUNTRY.source,
+    'legacy-clinic-' + COUNTRY,
+    COUNTRY + '-calling-code',
+    'whatsapp-' + 'phone',
+  ].join('|'),
+);
+const domainImportHits = (code: string): number[] =>
+  matchLines(code, IMPORT_STATEMENT, ([statement]) =>
+    FORBIDDEN_DOMAIN_IMPORT.test(statement),
+  );
+
+/** `fichero:línea` de cada coincidencia de `hits` sobre el código sin comentarios. */
+const countryOffenders = (
+  files: string[],
+  hits: (code: string) => number[],
+): string[] =>
+  files.flatMap((file) =>
+    hits(withoutComments(readFileSync(file, 'utf8'))).map(
+      (line) => `${relative(SRC, file)}:${line}`,
+    ),
+  );
+
+describe('país de la sede libre (DX-312)', () => {
+  const production = tsFiles(SRC).filter(isProduction);
+  const ruled = production.filter((file) => !COUNTRY_EXCEPTIONS.includes(file));
+  const DOMAIN = `${sep}domain${sep}`;
+  const MODULES = join(SRC, 'modules') + sep;
+
+  it('architecture: no production file compares a country with a literal, in either order and any case', () => {
+    expect(ruled.length).toBeGreaterThan(500);
+    expect(countryOffenders(ruled, compareHits)).toEqual([]);
+  });
+
+  it('architecture: no production file switches on a country with a two-letter case', () => {
+    expect(countryOffenders(ruled, switchHits)).toEqual([]);
+  });
+
+  it('architecture: no production file looks a country up in a list, a table or a string method', () => {
+    expect(countryOffenders(ruled, lookupHits)).toEqual([]);
+  });
+
+  it('architecture: no production file keys an object by country codes', () => {
+    expect(countryOffenders(ruled, countryKeyedHits)).toEqual([]);
+  });
+
+  it('architecture: no domain file imports ClinicCountry, the legacy projection, the calling-code table or whatsapp-phone', () => {
+    const domain = production.filter(
+      (file) => file.startsWith(MODULES) && file.includes(DOMAIN),
+    );
+    expect(domain.length).toBeGreaterThan(100);
+    expect(countryOffenders(domain, domainImportHits)).toEqual([]);
+  });
+
+  it('architecture: only legacy-clinic-country.ts names ClinicCountry in src', () => {
+    const naming = production.filter((file) =>
+      CLINIC_COUNTRY.test(readFileSync(file, 'utf8')),
+    );
+    expect(naming.map((file) => relative(SRC, file))).toEqual([
+      relative(SRC, LEGACY_CLINIC_COUNTRY_FILE),
+    ]);
+  });
+
+  it('architecture: the location and registration code names no country', () => {
+    const files = [
+      join(SRC, 'modules', 'locations'),
+      join(SRC, 'modules', 'auth'),
+      join(SRC, 'shared', 'locations'),
+      join(SRC, 'shared', 'phone'),
+    ]
+      .flatMap(tsFiles)
+      .filter(
+        (file) =>
+          isProduction(file) &&
+          file !== LEGACY_CLINIC_COUNTRY_FILE &&
+          file !== COUNTRY_CALLING_CODE_FILE,
+      );
+    expect(files.length).toBeGreaterThan(30);
+    expect(offending(files, countryNameHit)).toEqual([]);
+  });
+
+  it('every country exception file carries the G5.3 header', () => {
+    for (const file of COUNTRY_EXCEPTIONS) {
+      expect({
+        file: relative(SRC, file),
+        header: readFileSync(file, 'utf8')
+          .slice(0, 200)
+          .includes(COUNTRY_EXCEPTION_HEADER),
+      }).toEqual({ file: relative(SRC, file), header: true });
+    }
+  });
+
+  it('country-calling-code.ts names DX-329 as its expiry', () => {
+    const header = readFileSync(COUNTRY_CALLING_CODE_FILE, 'utf8').slice(
+      0,
+      200,
+    );
+    expect(header).toMatch(/provisional hasta DX-329/);
+  });
+
+  it('the country patterns catch each form and skip neutral text', () => {
+    /** Cada guarda que atrapa `snippet`, como si fuera un fichero de producción. */
+    const caughtBy = (snippet: string): string[] => {
+      const code = withoutComments(snippet);
+      return [
+        ['compare', compareHits(code).length > 0],
+        ['switch', switchHits(code).length > 0],
+        ['lookup', lookupHits(code).length > 0],
+        ['keys', countryKeyedHits(code).length > 0],
+        ['domainImport', domainImportHits(code).length > 0],
+        ['clinicCountry', CLINIC_COUNTRY.test(code)],
+        ['name', snippet.split('\n').some(countryNameHit)],
+      ].flatMap(([guard, hit]) => (hit ? [guard as string] : []));
+    };
+    const LOC = `location.${COUNTRY}`;
+    const VE = 'Venez' + 'uela';
+    for (const [snippet, guard] of [
+      [`if ('VE' === ${LOC}) {}`, 'compare'],
+      [`if (${LOC} === 've') {}`, 'compare'],
+      [`${COUNTRY} == "VE"`, 'compare'],
+      [`${COUNTRY} !== \`VE\``, 'compare'],
+      [`${LOC} === '${VE}'`, 'compare'],
+      [`['VE', 'CO'].includes(${LOC})`, 'lookup'],
+      [`['VE','CO'].indexOf(${COUNTRY})`, 'lookup'],
+      [`${LOC}.startsWith('V')`, 'lookup'],
+      [`TABLE[${LOC}Code]`, 'lookup'],
+      [`${COUNTRY}Code in CODES`, 'lookup'],
+      [`CURRENCY_BY_COUNTRY.get(${LOC})`, 'lookup'],
+      [`(['VE', 'CO'] as const).includes(${COUNTRY})`, 'lookup'],
+      [`ALLOWED.includes(${LOC})`, 'lookup'],
+      [`new Set(['VE', 'CO']).has(${COUNTRY})`, 'lookup'],
+      [`Object.keys(TABLE).includes(${COUNTRY})`, 'lookup'],
+      [`/^(VE|CO)$/.test(${COUNTRY})`, 'lookup'],
+      [`RULES.some((code) => code === ${LOC})`, 'lookup'],
+      [`RULES?.[${LOC}]`, 'lookup'],
+      [`RULES ?. [${COUNTRY}Code]`, 'lookup'],
+      [`Object.hasOwn(RULES, ${LOC})`, 'lookup'],
+      [`CODES.findIndex((code) => code === ${LOC})`, 'lookup'],
+      [`CODES.filter((code) => code === ${COUNTRY})`, 'lookup'],
+      [`CODES.every((code) => code !== ${COUNTRY})`, 'lookup'],
+      [`/^(VE|CO)$/.exec(${COUNTRY})`, 'lookup'],
+      [`if (${LOC} === VE_CODE) {}`, 'compare'],
+      [`if (VE_CODE !== phone${'Coun' + 'try'}) {}`, 'compare'],
+      [`${LOC}Code === Country.VE`, 'compare'],
+      [`switch (norm(${LOC})) {\n  case 'VE':\n    break;\n}`, 'switch'],
+      [`switch (this.${COUNTRY}()) {\n  case 've':\n    break;\n}`, 'switch'],
+      [`switch (${LOC}) {\n  case 'VE':\n    break;\n}`, 'switch'],
+      [`const t = { VE: 'VES', CO: 'COP' };`, 'keys'],
+      [`const t = { ve: 'VES', co: 'COP' };`, 'keys'],
+      [`const t = { 'VE': 1, "CO": 2 };`, 'keys'],
+      [
+        `import { ${'Clinic' + 'Country'} } from '@prisma/client';`,
+        'clinicCountry',
+      ],
+      [
+        `import { ${'Clinic' + 'Country'} } from '@prisma/client';`,
+        'domainImport',
+      ],
+      [`// ${'Espa' + 'na'}`, 'name'],
+      [`'${'COLOM' + 'BIA'}'`, 'name'],
+    ]) {
+      expect({ snippet, caught: caughtBy(snippet).includes(guard) }).toEqual({
+        snippet,
+        caught: true,
+      });
+    }
+    for (const snippet of [
+      // inventory/domain/stock-signing.ts:29
+      `switch (direction) {\n  case 'IN':\n    return 1;\n}`,
+      // cancellation-fees/application/cancellation-fee.use-cases.ts:280
+      `switch (status) {\n  case 'OK':\n    return true;\n}`,
+      `switch (kind(${COUNTRY})) {\n  case 'phone':\n    return 1;\n}`,
+      `switch (${COUNTRY}) {\n  default:\n    switch (mode) {\n      case 'AB':\n    }\n}`,
+      `const labels = { SI: 'Sí', NO: 'No', NO_SE: 'No sé' };`,
+      `const event = { kind: 'X', at: d, by: u };`,
+      `const where = { OR: [a, b] };`,
+      `const where = { OR: [a, b], AND: [c] };`,
+      `validateCountry(raw, countries)`,
+      `countries.has(code)`,
+      `this.${COUNTRY}Whitelist.has(${COUNTRY})`,
+      `normalizeMobile(phone, defaultCallingCode)`,
+      `callingCodeOfCountry(location.${COUNTRY})`,
+      `// ${COUNTRY} === 'CO'`,
+      `/** ${COUNTRY}Code === \`${COUNTRY}Code\` */`,
+      `${COUNTRY} === ''`,
+      `if (typeof ${COUNTRY} !== 'string') {}`,
+      `if ('string' === typeof ${COUNTRY}) {}`,
+      `if (${LOC} === dto.${COUNTRY}) {}`,
+      `if (${COUNTRY} !== previous) {}`,
+      `${COUNTRY} === MAX_LENGTH.length`,
+      `items.filter((item) => item.active)`,
+      `// País de la sede`,
+    ]) {
+      expect({ snippet, caughtBy: caughtBy(snippet) }).toEqual({
+        snippet,
+        caughtBy: [],
       });
     }
   });

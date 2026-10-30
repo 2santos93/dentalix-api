@@ -58,7 +58,7 @@ export interface ReminderOptOutRepository {
   purgeLinks(before: Date): Promise<number>;
   /** Pacientes vivos cuyo teléfono acaba en esos 8 dígitos (prefiltro indexado). */
   findByPhoneTail(tail: string): Promise<MobileCandidate[]>;
-  /** País (ClinicCountry) de la sede principal: la viva más antigua. */
+  /** País de la sede (ISO 3166-1 alfa-2) principal: la viva más antigua. */
   principalLocationCountry(): Promise<string | null>;
   clinicBranding(): Promise<OptOutClinicBranding | null>;
 }

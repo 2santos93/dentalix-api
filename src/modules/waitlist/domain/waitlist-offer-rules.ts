@@ -88,7 +88,7 @@ export type WhatsappOfferBlock = 'OPTED_OUT' | 'CHANNEL_NONE' | 'NO_OPT_IN';
  */
 export function whatsappOfferPhone(
   patient: PatientContactFields,
-  countryCode: string | null,
+  defaultCallingCode: string | null,
 ): {
   blocked: boolean;
   reason: WhatsappOfferBlock | null;
@@ -103,7 +103,7 @@ export function whatsappOfferPhone(
           ? 'NO_OPT_IN'
           : null;
   if (reason) return { blocked: true, reason, phone: null };
-  const mobile = normalizeMobile(patient.phone, countryCode);
+  const mobile = normalizeMobile(patient.phone, defaultCallingCode);
   return { blocked: false, reason: null, phone: mobile.e164?.slice(1) ?? null };
 }
 

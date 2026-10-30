@@ -628,6 +628,7 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
           raw,
           clinicA.tenantId,
           'Réplica antigua',
+          REGIONAL_BOGOTA_FIXTURE.country,
         );
       });
 

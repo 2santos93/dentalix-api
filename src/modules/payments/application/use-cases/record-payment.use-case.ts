@@ -29,7 +29,9 @@ import { CURRENCY_WHITELIST } from '../../../treatment-plans/domain/ports/curren
 import type { CurrencyWhitelist } from '../../../treatment-plans/domain/ports/currency-whitelist.port';
 import { ReceiptPlanBalanceCalculator } from '../receipts/receipt-plan-balance';
 import { ConvertAmountUseCase } from '../../../exchange/application/use-cases/convert-amount.use-case';
-import { errorName, paymentBaseAmount } from '../payment-in-plan-currency';
+import { errorName } from '../payment-in-plan-currency';
+import { freezePaymentRate, paymentBaseAmount } from '../payment-exchange-rate';
+import type { FrozenExchangeRate } from '../../domain/payment-exchange-rate';
 
 // NOTE: deliberately NO `patientId`/`treatmentPlanId` field on the input
 // object itself (`treatmentPlanId` is a separate `execute()` argument,
@@ -186,17 +188,29 @@ export class RecordPaymentUseCase {
       throw new ConflictException(notBillableMessage(plan.status));
     }
 
-    // DX-136 y DX-051 (R4): fuera de la transacción del abono (la tasa puede
-    // pedir un proveedor externo), una sola conversión para el saldo del recibo
-    // y la base. Nunca falla: sin tasa o con cualquier fallo, el recibo sale sin
-    // saldo y el abono sin imputar hasta que el barrido le cree la base (R9.3).
+    // DX-375, DX-136 y DX-051 (R4): fuera de la transacción del abono (la
+    // tasa puede pedir un proveedor externo), UNA cotización con la fuente de
+    // la clínica y el día civil del abono en su sede: es la tasa que el abono
+    // congela, y con ella salen el saldo del recibo y la base. Nunca falla:
+    // sin tasa (o con cualquier fallo) el abono se guarda «sin tasa», el
+    // recibo sin saldo y sin base, y el barrido la congela cuando la haya.
     const paidOn = await this.repo.resolvePaidOn(paidAt);
-    const converted = await this.convertToPlan({
-      amount: input.amount,
+    const frozenRate = await this.freeze({
       currency,
-      planCurrency: plan.currency,
+      targetCurrency: plan.currency,
       paidOn,
     });
+    const converted = await paymentBaseAmount(
+      this.convertAmount,
+      {
+        amount: input.amount,
+        currency,
+        paidOn,
+        exchangeRateCurrency: plan.currency,
+        frozenRate,
+      },
+      plan.currency,
+    );
     const receiptPlanBalance = await this.receiptBalance.afterPayment(
       treatmentPlanId,
       converted,
@@ -220,23 +234,23 @@ export class RecordPaymentUseCase {
       requestFingerprint: key === undefined ? undefined : requestFingerprint,
       receiptPlanBalance,
       planAmount,
+      frozenRate,
     };
 
     return this.repo.create(repoInput);
   }
 
-  /** El abono en la moneda del plan con la tasa de su `paidOn` (R3), o `null`. */
-  private async convertToPlan(payment: {
-    amount: number;
+  /** La tasa que congela el abono (DX-375), o `null` sin tasa o si algo falla. */
+  private async freeze(payment: {
     currency: string;
-    planCurrency: string;
+    targetCurrency: string;
     paidOn: string;
-  }): Promise<number | null> {
+  }): Promise<FrozenExchangeRate | null> {
     try {
-      return await paymentBaseAmount(this.convertAmount, payment);
+      return await freezePaymentRate(this.convertAmount, payment);
     } catch (error) {
       this.logger.warn({
-        event: 'payments.allocation_base_unavailable',
+        event: 'payments.exchange_rate_unavailable',
         error: errorName(error),
       });
       return null;

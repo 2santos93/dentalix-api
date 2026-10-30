@@ -1,4 +1,4 @@
-import { BadRequestException, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { TreatmentPlanItemStatus, TreatmentPlanStatus } from '@prisma/client';
 import type {
   PlanBalanceSnapshot,
@@ -51,6 +51,11 @@ function round2(value: number): number {
  * rounding behavior instead.
  */
 class FakeConvertAmountUseCase {
+  /** Como el real: el convertidor memoizado convierte igual (DX-374). */
+  memoized(): this {
+    return this;
+  }
+
   public readonly calls: FakeConvertInput[] = [];
   /** Currencies (as `from`) that should make `execute` reject with the same
    * `BadRequestException` shape `ConvertAmountUseCase` throws for an
@@ -309,10 +314,8 @@ describe('GetPlanBalanceUseCase', () => {
     expect(result.billable).toBe(1000);
     expect(result.balance).toBe(870);
     expect(result.paymentsCount).toBe(2);
-    // `listByPlan` orders DESC by paidAt (see PaymentRepository contract),
-    // so the 03-10 payment is converted before the 03-05 one.
+    // DX-375: el de USD está en la moneda del plan y no se convierte.
     expect(fakeConvert.calls).toEqual([
-      { amount: 30, from: 'USD', to: 'USD', date: '2026-03-10' },
       { amount: 400000, from: 'COP', to: 'USD', date: '2026-03-05' },
     ]);
   });
@@ -353,6 +356,7 @@ describe('GetPlanBalanceUseCase', () => {
       paid: 0,
       balance: 0,
       paymentsCount: 0,
+      paymentsWithoutRate: [],
     });
   });
 
@@ -570,6 +574,8 @@ describe('GetPlanBalanceUseCase', () => {
       amount,
       currency: 'USD',
       paidOn: '2026-03-05',
+      exchangeRateCurrency: 'USD',
+      frozenRate: null,
     });
     function seed(
       allocations: FakeAllocationRepository,
@@ -699,7 +705,14 @@ describe('GetPlanBalanceUseCase', () => {
       // Abono en COP convertido en vivo: 400000 COP = 100 USD = su base.
       seed(allocations, {
         payments: [
-          { id: 'a', amount: 400000, currency: 'COP', paidOn: '2026-03-05' },
+          {
+            id: 'a',
+            amount: 400000,
+            currency: 'COP',
+            paidOn: '2026-03-05',
+            exchangeRateCurrency: null,
+            frozenRate: null,
+          },
           pay('b', 59.9),
         ],
         bases: [
@@ -749,22 +762,64 @@ describe('GetPlanBalanceUseCase', () => {
       );
     });
 
-    it('warns when the invariant does not hold', async () => {
-      const { allocations, uc } = makeUseCase();
-      const warn = jest
-        .spyOn(Logger.prototype, 'warn')
-        .mockImplementation(() => undefined);
-      // La base guardada (99,50) difiere de la conversión en vivo (100).
+    // BE-050 (DX-375): el abono con base cuenta en `paid` por su base, así lo
+    // cobrado y el desglose por ítem no descuadran aunque la tasa cambie.
+    it('paid usa la base del abono: lo imputado más lo sin imputar es lo cobrado (BE-050)', async () => {
+      const { allocations, uc, fakeConvert } = makeUseCase();
+      fakeConvert.setRate('COP', 5000);
       seed(allocations, {
-        payments: [pay('p1', 100)],
-        bases: [{ paymentId: 'p1', amount: 99.5, manual: false }],
-        allocations: [{ paymentId: 'p1', itemId: 'i1', amount: 99.5 }],
+        payments: [
+          {
+            id: 'p1',
+            amount: 400000,
+            currency: 'COP',
+            paidOn: '2026-03-05',
+            exchangeRateCurrency: null,
+            frozenRate: null,
+          },
+        ],
+        bases: [{ paymentId: 'p1', amount: 100, manual: false }],
+        allocations: [{ paymentId: 'p1', itemId: 'i1', amount: 60 }],
       });
 
-      await expect(uc.executeWithItems('plan-1')).resolves.toBeDefined();
+      const result = await uc.executeWithItems('plan-1');
 
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining('-50 cents'));
-      warn.mockRestore();
+      expect(result.paid).toBe(100);
+      expect(result.allocated + result.unallocated).toBe(result.paid);
+      expect(fakeConvert.calls).toEqual([]);
+    });
+
+    it('un abono «sin tasa» no cuenta en paid y sale en paymentsWithoutRate (DX-375)', async () => {
+      const { allocations, uc, fakeConvert } = makeUseCase();
+      fakeConvert.setRate('COP', 4000);
+      seed(allocations, {
+        payments: [
+          pay('usd', 10),
+          {
+            id: 'cop',
+            amount: 40000,
+            currency: 'COP',
+            paidOn: '2026-03-06',
+            exchangeRateCurrency: 'USD',
+            frozenRate: null,
+          },
+        ],
+        bases: [{ paymentId: 'usd', amount: 10, manual: false }],
+      });
+
+      const result = await uc.executeWithItems('plan-1');
+
+      expect(result.paid).toBe(10);
+      expect(result.paymentsCount).toBe(2);
+      expect(result.paymentsWithoutRate).toEqual([
+        {
+          paymentId: 'cop',
+          amount: 40000,
+          currency: 'COP',
+          paidOn: '2026-03-06',
+        },
+      ]);
+      expect(fakeConvert.calls).toEqual([]);
     });
 
     it('counts payments without base', async () => {
@@ -811,6 +866,7 @@ describe('GetPlanBalanceUseCase', () => {
         'billable',
         'paid',
         'paymentsCount',
+        'paymentsWithoutRate',
         'planCurrency',
       ]);
       expect(allocations.readPlanBalanceSnapshot).not.toHaveBeenCalled();

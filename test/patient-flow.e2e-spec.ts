@@ -466,6 +466,7 @@ describe('Flujo del paciente en la clínica (e2e, DX-200)', () => {
       raw,
       clinic.tenantId,
       'Réplica antigua',
+      REGIONAL_BOGOTA_FIXTURE.country,
     );
     const noZone = await panel(clinic.adminToken, legacy).expect(409);
     expect(noZone.body).toMatchObject({

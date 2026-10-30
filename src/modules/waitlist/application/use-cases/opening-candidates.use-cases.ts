@@ -59,6 +59,7 @@ import {
   type WaitlistOfferConfig,
   type WhatsappOfferBlock,
 } from '../../domain/waitlist-offer-rules';
+import { callingCodeOfCountry } from '../../../../shared/phone/country-calling-code';
 import { WAITLIST_NOT_FOUND_MESSAGE } from '../../domain/waitlist-rules';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { assertAttendsAt } from '../../../staff/domain/provider-location';
@@ -172,8 +173,8 @@ async function requireProvider(
   assertAttendsAt(provider, locationId);
 }
 
-function contactOf(patient: CandidatePatient, country: string) {
-  const wa = whatsappOfferPhone(patient, country);
+function contactOf(patient: CandidatePatient, callingCode: string | null) {
+  const wa = whatsappOfferPhone(patient, callingCode);
   return {
     patientId: patient.id,
     patientFirstName: patient.firstName,
@@ -280,10 +281,11 @@ export class ListOpeningCandidatesUseCase {
       slotEnd: input.end,
     });
 
+    const callingCode = callingCodeOfCountry(location.country);
     const items = ranked.items.map((item): OpeningCandidate => {
       const offers = summary.get(item.source.patient.id);
       const common = {
-        ...contactOf(item.source.patient, location.country),
+        ...contactOf(item.source.patient, callingCode),
         appointmentType: item.source.appointmentType,
         offersToday: offers?.today ?? 0,
         offeredForSlot: offers?.forSlot ?? false,
@@ -452,7 +454,10 @@ export class CreateWaitlistOfferUseCase {
       }
     }
     if (input.channel === 'WA_ME') {
-      const wa = whatsappOfferPhone(patient, location.country);
+      const wa = whatsappOfferPhone(
+        patient,
+        callingCodeOfCountry(location.country),
+      );
       if (wa.reason === 'NO_OPT_IN') {
         throw new ConflictException(OFFER_WHATSAPP_NO_OPT_IN_MESSAGE);
       }

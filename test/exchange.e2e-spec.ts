@@ -29,6 +29,7 @@ interface LoginResponseBody {
 
 interface RatesResponseBody {
   base: string;
+  source: string;
   rates: Record<string, number>;
 }
 
@@ -46,6 +47,9 @@ interface ConvertResponseBody {
 // it would throw ("EXCHANGE_APP_ID is not set") instead of silently hitting
 // the network — every assertion below must hit the DB cache, never that path.
 const RATE_DATE = '2026-07-01';
+// DX-374: las tasas dependen de la fuente de la clínica, así que estas rutas
+// son de clínica (el host fija el tenant). Esta clínica no la cambia: AUTOMATIC.
+const HOST = hostFor('clinica-exchange');
 
 describe('Exchange (e2e)', () => {
   let app: INestApplication<App>;
@@ -77,9 +81,8 @@ describe('Exchange (e2e)', () => {
       ],
     });
 
-    // Auth only: exchange is not tenant-scoped, but the controller still
-    // requires a valid bearer token (JwtAuthGuard) — register+login once for
-    // the whole suite, same flow as patients.e2e-spec.ts.
+    // Register+login once for the whole suite, same flow as
+    // patients.e2e-spec.ts (DX-374: con el host de la clínica).
     await registerVerified(
       app,
       registerBody(REGIONAL_BOGOTA_FIXTURE, {
@@ -112,10 +115,15 @@ describe('Exchange (e2e)', () => {
   it('GET /exchange/rates returns the seeded snapshot (cache hit)', async () => {
     const res = await request(app.getHttpServer())
       .get(`/api/v1/exchange/rates?date=${RATE_DATE}`)
+      .set('X-Tenant-Host', HOST)
       .set('Authorization', `Bearer ${accessToken}`)
       .expect(200);
     const body = res.body as RatesResponseBody;
-    expect(body).toEqual({ base: 'USD', rates: { COP: 4000, EUR: 0.92 } });
+    expect(body).toEqual({
+      base: 'USD',
+      source: 'AUTOMATIC',
+      rates: { COP: 4000, EUR: 0.92 },
+    });
   });
 
   it('GET /exchange/convert converts USD -> COP using the seeded rate', async () => {
@@ -123,6 +131,7 @@ describe('Exchange (e2e)', () => {
       .get(
         `/api/v1/exchange/convert?amount=100&from=USD&to=COP&date=${RATE_DATE}`,
       )
+      .set('X-Tenant-Host', HOST)
       .set('Authorization', `Bearer ${accessToken}`)
       .expect(200);
     const body = res.body as ConvertResponseBody;
@@ -136,6 +145,7 @@ describe('Exchange (e2e)', () => {
       .get(
         `/api/v1/exchange/convert?amount=400000&from=COP&to=USD&date=${RATE_DATE}`,
       )
+      .set('X-Tenant-Host', HOST)
       .set('Authorization', `Bearer ${accessToken}`)
       .expect(200);
     const body = res.body as ConvertResponseBody;
@@ -147,6 +157,7 @@ describe('Exchange (e2e)', () => {
       .get(
         `/api/v1/exchange/convert?amount=250&from=EUR&to=EUR&date=${RATE_DATE}`,
       )
+      .set('X-Tenant-Host', HOST)
       .set('Authorization', `Bearer ${accessToken}`)
       .expect(200);
     const body = res.body as ConvertResponseBody;
@@ -159,6 +170,7 @@ describe('Exchange (e2e)', () => {
       .get(
         `/api/v1/exchange/convert?amount=100&from=USD&to=JPY&date=${RATE_DATE}`,
       )
+      .set('X-Tenant-Host', HOST)
       .set('Authorization', `Bearer ${accessToken}`)
       .expect(400);
   });
@@ -166,6 +178,7 @@ describe('Exchange (e2e)', () => {
   it('GET /exchange/rates rejects an invalid date format with 400', async () => {
     await request(app.getHttpServer())
       .get('/api/v1/exchange/rates?date=2026-7-1')
+      .set('X-Tenant-Host', HOST)
       .set('Authorization', `Bearer ${accessToken}`)
       .expect(400);
   });
@@ -175,6 +188,7 @@ describe('Exchange (e2e)', () => {
       .get(
         '/api/v1/exchange/convert?amount=100&from=USD&to=COP&date=not-a-date',
       )
+      .set('X-Tenant-Host', HOST)
       .set('Authorization', `Bearer ${accessToken}`)
       .expect(400);
   });

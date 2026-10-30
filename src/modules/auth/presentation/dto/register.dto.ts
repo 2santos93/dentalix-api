@@ -1,8 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { ClinicCountry } from '@prisma/client';
 import {
   IsEmail,
-  IsEnum,
   IsOptional,
   IsString,
   Matches,
@@ -57,20 +55,20 @@ export class RegisterDto {
   fullName!: string;
 
   // G1 (spec §3.5): la primera sede se registra con país, moneda, zona y
-  // formato regional, con las mismas reglas que el alta de sede. Fase 1: se
-  // acepta también la forma LEGADA (los cuatro ausentes, una web antigua); un
-  // subconjunto es 400 con el mensaje del primero que falta. Presencia y
-  // mensajes exactos los comprueba el caso de uso (la moneda se valida contra
-  // `currencies`). Fase 2 los hace obligatorios.
+  // formato regional, con las mismas reglas que el alta de sede. Sin ellos
+  // (la forma legada de una web antigua) o con un subconjunto, 400 con el
+  // mensaje del primero que falta. Presencia y mensajes exactos los comprueba
+  // el caso de uso (la moneda se valida contra `currencies`).
   @ApiPropertyOptional({
-    enum: ClinicCountry,
-    enumName: 'ClinicCountry',
+    type: String,
+    minLength: 2,
+    maxLength: 2,
     description:
-      'País de la primera sede. Obligatorio junto con los otros tres campos location*; sin los cuatro es la forma legada (fase 1).',
+      'País de la primera sede: código ISO 3166-1 alfa-2 de la lista de países. Obligatorio junto con los otros campos location*.',
   })
   @IsOptional()
-  @IsEnum(ClinicCountry, { message: COUNTRY_MISSING })
-  locationCountry?: ClinicCountry;
+  @IsString({ message: COUNTRY_MISSING })
+  locationCountry?: string;
 
   @ApiPropertyOptional({
     type: String,

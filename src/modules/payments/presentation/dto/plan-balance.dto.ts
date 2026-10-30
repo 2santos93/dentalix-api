@@ -6,6 +6,24 @@ import { TreatmentPlanItemStatus } from '@prisma/client';
 // purely for `@ApiProperty` docs, not input validation). See
 // ../../application/use-cases/get-plan-balance.use-case.ts for the field
 // semantics (billable/paid/balance rounding, paymentsCount).
+/** DX-375: un abono «sin tasa» del saldo. */
+export class PaymentWithoutRateDto {
+  @ApiProperty({ format: 'uuid' })
+  paymentId!: string;
+
+  @ApiProperty({ example: 150000, description: 'En la moneda del abono' })
+  amount!: number;
+
+  @ApiProperty({ example: 'COP' })
+  currency!: string;
+
+  @ApiProperty({
+    example: '2026-10-30',
+    description: 'Día civil del abono en su sede: el de la tasa que falta',
+  })
+  paidOn!: string;
+}
+
 export class PlanBalanceDto {
   @ApiProperty({ example: 'USD', description: 'ISO 4217 currency code' })
   planCurrency!: string;
@@ -19,7 +37,10 @@ export class PlanBalanceDto {
   @ApiProperty({
     example: 100,
     description:
-      'Sum of active payments, each converted to planCurrency at its own paidAt date',
+      'Σ de los abonos vivos en planCurrency, cada uno con la tasa que ' +
+      'congeló al registrarse (DX-375; con base de imputación, por su base). ' +
+      'Un abono anterior aún sin congelar, con la tasa de su día. Los «sin ' +
+      'tasa» (paymentsWithoutRate) no suman.',
   })
   paid!: number;
 
@@ -28,6 +49,16 @@ export class PlanBalanceDto {
 
   @ApiProperty({ example: 1 })
   paymentsCount!: number;
+
+  @ApiProperty({
+    type: [PaymentWithoutRateDto],
+    description:
+      'DX-375: abonos vivos «sin tasa» (en otra moneda y sin tasa de su día): ' +
+      'no cuentan en paid, así que el saldo está incompleto hasta que se ' +
+      'registre la tasa (Ajustes › Tasa de cambio) y el barrido la congele. ' +
+      'Vacío si no hay ninguno.',
+  })
+  paymentsWithoutRate!: PaymentWithoutRateDto[];
 }
 
 // DX-051: cobrado y pendiente por ítem, en el orden del plan. Lleva diente y

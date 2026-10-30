@@ -1,3 +1,4 @@
+import { MissingExchangeRateError } from '../../../exchange/domain/missing-exchange-rate.error';
 import {
   BadRequestException,
   ConflictException,
@@ -89,22 +90,36 @@ function makeWhitelist(allowed: string[] = ['USD', 'COP']): CurrencyWhitelist {
   };
 }
 
-/** Fake de la conversión: tasa fija por moneda de origen; anota las llamadas. */
+/**
+ * Fake de la cotización (DX-375): unidades de cada moneda por 1 USD y la
+ * fuente; anota las cotizaciones. Nunca convierte en vivo: un abono nuevo
+ * congela su tasa y se convierte con ella.
+ */
 class FakeConvertAmount {
-  public rates: Record<string, number> = {};
+  public perBase: Record<string, number> = {};
+  public source: 'AUTOMATIC' | 'MANUAL' = 'AUTOMATIC';
   public failure: Error | null = null;
-  public readonly calls: {
-    amount: number;
-    from: string;
-    to: string;
-    date: string;
-  }[] = [];
+  public readonly calls: { from: string; to: string; date: string }[] = [];
 
-  execute(input: { amount: number; from: string; to: string; date: string }) {
+  execute(): Promise<never> {
+    return Promise.reject(new Error('no debe convertir en vivo'));
+  }
+
+  quote(input: { from: string; to: string; date: string }) {
     this.calls.push(input);
     if (this.failure) return Promise.reject(this.failure);
-    const rateUsed = input.from === input.to ? 1 : this.rates[input.from];
-    return Promise.resolve({ ...input, result: 0, rateUsed });
+    const rate = (c: string) => (c === 'USD' ? 1 : this.perBase[c]);
+    if (rate(input.from) === undefined || rate(input.to) === undefined) {
+      return Promise.reject(
+        new MissingExchangeRateError(input.from, input.date),
+      );
+    }
+    return Promise.resolve({
+      ...input,
+      source: this.source,
+      fromPerBase: rate(input.from),
+      toPerBase: rate(input.to),
+    });
   }
 }
 
@@ -130,7 +145,7 @@ describe('RecordPaymentUseCase', () => {
     it('passes planAmount converted at paidOn', async () => {
       const { repo, fakeGetPlan, uc, convert } = makeUseCase();
       fakeGetPlan.plan = makePlan({ id: 'plan-1', currency: 'USD' });
-      convert.rates = { COP: 1 / 4000 };
+      convert.perBase = { COP: 4000 };
 
       await uc.execute(
         'plan-1',
@@ -139,7 +154,7 @@ describe('RecordPaymentUseCase', () => {
       );
 
       expect(convert.calls).toEqual([
-        { amount: 401_234, from: 'COP', to: 'USD', date: '2026-03-05' },
+        { from: 'COP', to: 'USD', date: '2026-03-05' },
       ]);
       expect(repo.lastCreateInput?.planAmount).toEqual({
         planCurrency: 'USD',
@@ -164,11 +179,74 @@ describe('RecordPaymentUseCase', () => {
 
       expect(payment.amount).toBe(50_000);
       expect(repo.lastCreateInput?.planAmount).toBeNull();
+      expect(repo.lastCreateInput?.frozenRate).toBeNull();
       // Sin datos del abono ni del paciente: solo el tipo del error.
       expect(warn).toHaveBeenCalledWith({
-        event: 'payments.allocation_base_unavailable',
+        event: 'payments.exchange_rate_unavailable',
         error: 'Error',
       });
+    });
+  });
+
+  // DX-375: el abono congela la tasa del día civil de su sede con la fuente
+  // de la clínica; sin tasa se guarda igual, «sin tasa», sin base ni saldo
+  // en el recibo.
+  describe('DX-375: tasa congelada en el abono', () => {
+    it('congela las dos tasas por 1 USD, la fuente y el día', async () => {
+      const { repo, fakeGetPlan, uc, convert } = makeUseCase();
+      fakeGetPlan.plan = makePlan({ id: 'plan-1', currency: 'USD' });
+      convert.perBase = { COP: 4000 };
+      convert.source = 'MANUAL';
+
+      const payment = await uc.execute(
+        'plan-1',
+        { amount: 200_000, currency: 'COP', paidAt: '2026-03-05' },
+        'user-1',
+      );
+
+      expect(repo.lastCreateInput?.frozenRate).toEqual({
+        currency: 'USD',
+        fromPerBase: 4000,
+        toPerBase: 1,
+        source: 'MANUAL',
+        date: '2026-03-05',
+      });
+      expect(payment.frozenRate?.source).toBe('MANUAL');
+      expect(repo.lastCreateInput?.planAmount?.amount).toBe(50);
+    });
+
+    it('sin tasa del día el abono se guarda «sin tasa», sin base ni saldo en el recibo', async () => {
+      const { repo, fakeGetPlan, uc, convert, receiptBalance } = makeUseCase();
+      fakeGetPlan.plan = makePlan({ id: 'plan-1', currency: 'USD' });
+      convert.source = 'MANUAL';
+
+      const payment = await uc.execute(
+        'plan-1',
+        { amount: 200_000, currency: 'COP', paidAt: '2026-03-05' },
+        'user-1',
+      );
+
+      expect(payment.amount).toBe(200_000);
+      expect(repo.lastCreateInput?.frozenRate).toBeNull();
+      expect(repo.lastCreateInput?.planAmount).toBeNull();
+      expect(receiptBalance.calls).toEqual([
+        { treatmentPlanId: 'plan-1', convertedAmount: null },
+      ]);
+    });
+
+    it('en la moneda del plan no cotiza nada', async () => {
+      const { repo, fakeGetPlan, uc, convert } = makeUseCase();
+      fakeGetPlan.plan = makePlan({ id: 'plan-1', currency: 'USD' });
+
+      await uc.execute(
+        'plan-1',
+        { amount: 10, currency: 'USD', paidAt: '2026-03-05' },
+        'user-1',
+      );
+
+      expect(convert.calls).toEqual([]);
+      expect(repo.lastCreateInput?.frozenRate).toBeNull();
+      expect(repo.lastCreateInput?.planAmount?.amount).toBe(10);
     });
   });
 

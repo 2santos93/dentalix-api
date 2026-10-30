@@ -427,6 +427,9 @@ describe('DX-324 · migraciones de la receta única y sus ajustes por clínica (
     });
     expect(rows.map((r) => r.country)).toEqual(['CO', 'ES']);
     for (const row of rows) {
+      // DX-312: la columna admite NULL; una receta legada siempre lo lleva.
+      const { country } = row;
+      if (country === null) throw new Error('receta legada sin país');
       expect({
         singleFormat: row.singleFormat,
         printQuantityInWords: row.printQuantityInWords,
@@ -442,7 +445,7 @@ describe('DX-324 · migraciones de la receta única y sus ajustes por clínica (
       });
       // Lo que hace GetPrescriptionUseCase: recalcula el hash con la fila leída.
       const readBack: PrescriptionHashInput = {
-        country: row.country,
+        country,
         issuedAt: row.issuedAt,
         dispensationDate: row.dispensationDate.toISOString().slice(0, 10),
         validUntil: row.validUntil.toISOString().slice(0, 10),
@@ -471,7 +474,7 @@ describe('DX-324 · migraciones de la receta única y sus ajustes por clínica (
       expect(computePrescriptionHash(readBack)).toBe(row.contentHash);
       expect(row.contentHash).toBe(
         computePrescriptionHash(
-          legacyContent(row.country, row.country === 'CO' ? P_CO : P_ES),
+          legacyContent(country, country === 'CO' ? P_CO : P_ES),
         ),
       );
     }

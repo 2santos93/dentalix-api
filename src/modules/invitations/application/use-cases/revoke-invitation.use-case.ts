@@ -3,6 +3,7 @@ import { INVITATION_REPOSITORY } from '../../domain/ports/invitation-repository.
 import type { InvitationRepository } from '../../domain/ports/invitation-repository.port';
 import { INVITATION_NOTIFIER } from '../../domain/ports/invitation-notifier.port';
 import type { InvitationNotifier } from '../../domain/ports/invitation-notifier.port';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 
 @Injectable()
 export class RevokeInvitationUseCase {
@@ -13,11 +14,12 @@ export class RevokeInvitationUseCase {
     private readonly notifier: InvitationNotifier,
   ) {}
 
-  async execute(id: string): Promise<void> {
+  /** DX-359: `ctx` es quién retira; el evento va en la transacción. */
+  async execute(id: string, ctx: AuditRequestContext): Promise<void> {
     // `revokeById` only affects PENDING invitations, so a `false` here
     // covers both "no such id" and "exists but already accepted/revoked" —
     // either way, there's nothing left to revoke.
-    const revoked = await this.repo.revokeById(id);
+    const revoked = await this.repo.revokeById(id, ctx);
     if (!revoked) {
       throw new NotFoundException('Invitation not found');
     }

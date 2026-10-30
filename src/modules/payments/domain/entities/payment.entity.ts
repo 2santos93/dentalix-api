@@ -1,4 +1,8 @@
 import { PaymentMethod } from '@prisma/client';
+import type {
+  FrozenExchangeRate,
+  PaymentExchangeRateStatus,
+} from '../payment-exchange-rate';
 
 /**
  * API-facing shape of a Payment (Abono) — deliberately NOT the raw Prisma
@@ -32,4 +36,13 @@ export interface Payment {
    * abonos anteriores a la numeración consecutiva («sin serie»).
    */
   receiptNumber: string | null;
+  /**
+   * DX-375: moneda a la que convierte su tasa (la del plan o la del saldo
+   * migrado); `null` en un abono anterior a DX-375 aún sin congelar.
+   */
+  exchangeRateCurrency: string | null;
+  /** DX-375: la tasa que congeló, o `null` (misma moneda, sin tasa o anterior). */
+  frozenRate: FrozenExchangeRate | null;
+  /** DX-375: `exchangeRateStatus` de las dos de arriba. */
+  exchangeRateStatus: PaymentExchangeRateStatus;
 }

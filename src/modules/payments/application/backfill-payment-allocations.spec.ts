@@ -59,6 +59,8 @@ describe('backfillPaymentAllocations', () => {
         currency: 'XXX',
         planCurrency: 'EUR',
         paidOn: '2026-10-01',
+        exchangeRateCurrency: null,
+        frozenRate: null,
       },
     ];
     const [report] = await backfillPaymentAllocations(deps, {
@@ -77,6 +79,8 @@ describe('backfillPaymentAllocations', () => {
         currency: 'USD',
         planCurrency: 'EUR',
         paidOn: '2026-10-01',
+        exchangeRateCurrency: null,
+        frozenRate: null,
       },
     ];
     const [report] = await backfillPaymentAllocations(deps, {

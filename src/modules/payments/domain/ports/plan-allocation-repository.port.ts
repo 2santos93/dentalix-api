@@ -3,6 +3,8 @@ import type {
   TreatmentPlanItemStatus,
   TreatmentPlanStatus,
 } from '@prisma/client';
+import type { PaymentRateState } from '../payment-exchange-rate';
+import type { FrozenExchangeRate } from '../payment-exchange-rate';
 import type {
   AllocatableItem,
   AllocationIncrement,
@@ -32,11 +34,23 @@ export interface RebalanceOptions {
 }
 
 /** Un abono vivo a un plan vivo que todavía no tiene base (R9.3, R15). */
-export interface PaymentWithoutBase {
+export interface PaymentWithoutBase extends PaymentRateState {
   paymentId: string;
   amount: number;
-  currency: string;
   planCurrency: string;
+  /** Día civil del abono en su sede: la fecha de la tasa (DX-097). */
+  paidOn: string;
+}
+
+/**
+ * DX-375: un abono vivo que espera su tasa: «sin tasa», o anterior a DX-375
+ * aún sin congelar (`exchangeRateCurrency` NULL, también en su misma moneda).
+ */
+export interface PaymentPendingRate {
+  paymentId: string;
+  currency: string;
+  /** La moneda del plan, o la del saldo migrado. */
+  targetCurrency: string;
   /** Día civil del abono en su sede: la fecha de la tasa (DX-097). */
   paidOn: string;
 }
@@ -58,7 +72,11 @@ export interface PlanBalanceSnapshot {
     price: number;
     discount: number;
   }[];
-  payments: { id: string; amount: number; currency: string; paidOn: string }[];
+  payments: ({
+    id: string;
+    amount: number;
+    paidOn: string;
+  } & PaymentRateState)[];
   allocations: { paymentId: string; itemId: string; amount: number }[];
   bases: { paymentId: string; amount: number; manual: boolean }[];
 }
@@ -68,13 +86,12 @@ export interface PlanBalanceSnapshot {
  * clínica. `treatmentPlanId` `null` = abono a un saldo migrado (DX-262), sin
  * plan ni base. `base` `null` = aún sin convertir (sin tasa, R15).
  */
-export interface AllocationTarget {
+export interface AllocationTarget extends PaymentRateState {
   paymentId: string;
   receiptNumber: string | null;
   treatmentPlanId: string | null;
   /** En la moneda del abono. */
   amount: number;
-  currency: string;
   /** Día civil del abono en su sede: la fecha de la tasa (DX-097). */
   paidOn: string;
   planCurrency: string | null;
@@ -146,6 +163,28 @@ export interface PlanAllocationRepository {
 
   /** Hasta `limit` abonos vivos a planes vivos sin base, los más recientes primero. */
   paymentsWithoutBase(limit: number): Promise<PaymentWithoutBase[]>;
+
+  /**
+   * DX-375: hasta `limit` abonos vivos que esperan su tasa (índice parcial
+   * payments_exchange_rate_pending_idx), los más recientes primero, sin los
+   * de `exclude` (los ya intentados en esta pasada).
+   */
+  paymentsPendingRate(
+    limit: number,
+    exclude?: readonly string[],
+  ): Promise<PaymentPendingRate[]>;
+
+  /**
+   * DX-375: congela la tasa de un abono que la esperaba: escribe la moneda de
+   * destino y, si hay, la tasa (con MANUAL, solo si las tasas manuales del día
+   * siguen iguales, que quedan FOR SHARE hasta el COMMIT). No toca un abono
+   * anulado ni uno que ya la tiene. `true` si congeló una tasa.
+   */
+  freezeRate(
+    paymentId: string,
+    targetCurrency: string,
+    frozen: FrozenExchangeRate | null,
+  ): Promise<boolean>;
 
   /** Planes vivos con al menos una base (backfill R17), por id. */
   planIdsWithBases(): Promise<string[]>;

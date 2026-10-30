@@ -3179,6 +3179,9 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       'medical-history-submissions.e2e-spec.ts',
     'POST /medical-history/submissions/:id/revoke':
       'medical-history-submissions.e2e-spec.ts',
+    // DX-375: el ADMIN de otra clínica corrige la tasa manual de A → 404.
+    'PUT /exchange/manual-rates/:id':
+      'payment-frozen-exchange-rate.e2e-spec.ts',
   };
 
   /** `MÉTODO /ruta` de un caso (las dos primeras palabras de su nombre). */

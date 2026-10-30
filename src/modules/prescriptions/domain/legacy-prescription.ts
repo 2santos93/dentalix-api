@@ -14,5 +14,6 @@ export type LegacyPrescriptionCountry = 'CO' | 'ES';
  * desempaqueta (`country`, deprecated). La fase 2 lo retira (§10.8).
  */
 export interface Phase1IssuerCompat {
-  country: LegacyPrescriptionCountry;
+  /** DX-312: `null` si la sede no es de ninguno de los dos países legados. */
+  country: LegacyPrescriptionCountry | null;
 }

@@ -1426,7 +1426,15 @@ export interface DemoPlanItem {
 
 interface DemoPayment {
   daysAgo: number;
+  /** Con él, el abono es de hace esos minutos (y `daysAgo` es 0). */
+  minutesAgo?: number;
   amount: number;
+  /**
+   * DX-375: moneda del abono si no es la del plan (`DEMO_CURRENCY`). Congela
+   * la tasa de su día con la fuente de la clínica; sin tasa (en local, sin
+   * clave del proveedor) queda «sin tasa» y la demo enseña el aviso.
+   */
+  currency?: string;
   method: PaymentMethod;
   location: DemoLocationKey;
   notes?: string;
@@ -1537,6 +1545,16 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
     payments: [
       { daysAgo: 26, amount: 400000, method: CARD, location: 'principal' },
       { daysAgo: 12, amount: 300000, method: TRANSFER, location: 'principal' },
+      // DX-375: un abono de hoy en otra moneda que la del plan.
+      {
+        daysAgo: 0,
+        minutesAgo: 30,
+        amount: 50,
+        currency: 'USD',
+        method: CASH,
+        location: 'principal',
+        notes: 'Abono en dólares.',
+      },
     ],
   },
   {

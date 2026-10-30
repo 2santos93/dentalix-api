@@ -1,3 +1,4 @@
+import { ISO3166_COUNTRIES } from '../../../../../prisma/reference/iso3166';
 import {
   BadRequestException,
   ConflictException,
@@ -7,6 +8,7 @@ import {
 import { Prisma } from '@prisma/client';
 import {
   REGISTRATION_EMAIL_TAKEN,
+  REGISTRATION_LINK_EXPIRED,
   REGISTRATION_LINK_INVALID,
   RegisterClinicUseCase,
 } from './register-clinic.use-case';
@@ -20,6 +22,8 @@ import type { RegistrationNotifier } from '../../domain/ports/registration-notif
 import { hashRegistrationToken } from '../registration-token';
 
 const createClinic = jest.fn();
+// DX-359: desde dónde se abre el enlace (va al evento del alta).
+const REQ = { requestId: 'req-1', ip: '10.0.0.1', userAgent: 'jest' };
 
 function makeRepo(overrides: Partial<AuthRepository> = {}): AuthRepository {
   createClinic.mockReset();
@@ -109,6 +113,12 @@ function makeNotifier(cooldownSeconds = 0) {
   } satisfies RegistrationNotifier;
 }
 
+/** Países de la lista de referencia (el puerto real consulta `countries`). */
+const COUNTRIES = {
+  has: (code: string) =>
+    Promise.resolve(ISO3166_COUNTRIES.some((c) => c.code === code)),
+};
+
 /** Monedas admitidas en estos tests (el puerto real consulta `currencies`). */
 const CURRENCIES = {
   has: (code: string) => Promise.resolve(['COP', 'JPY'].includes(code)),
@@ -126,12 +136,13 @@ function newUseCase(
     notifier,
     password,
     CURRENCIES,
+    COUNTRIES,
   );
 }
 
 // G1: la primera sede con sus cuatro valores (datos de test, no defaults).
 const TOKYO_LOCATION = {
-  locationCountry: 'CO' as const,
+  locationCountry: 'CO',
   locationCurrency: 'JPY',
   locationTimeZone: 'Asia/Tokyo',
   locationLocale: 'ja-JP',
@@ -148,7 +159,7 @@ const INPUT = {
   ...TOKYO_LOCATION,
 };
 
-/** Forma legada (fase 1): una web anterior a G1 no envía la sede. */
+/** Forma legada: una web anterior a G1 no envía la sede (ya no se acepta, DX-312). */
 const LEGACY_INPUT = {
   clinicName: 'Sonrisa',
   subdomain: 'Sonrisa',
@@ -311,7 +322,7 @@ describe('RegisterClinicUseCase (DX-029)', () => {
       expect(pending.rows).toHaveLength(1);
       expect(pending.rows[0].subdomain).toBe('sonrisa');
       await expect(
-        uc.verify(firstToken, INPUT.password),
+        uc.verify(firstToken, INPUT.password, REQ),
       ).resolves.toMatchObject({ subdomain: 'sonrisa' });
     });
 
@@ -386,10 +397,18 @@ describe('RegisterClinicUseCase (DX-029)', () => {
       return { repo, pending, uc, token: tokenFrom(verifyUrl) };
     }
 
+    it('DX-359: pasa al alta desde dónde se verificó (el evento va en su transacción), nunca la contraseña', async () => {
+      const { uc, token } = await pendingWithToken();
+      await uc.verify(token, INPUT.password, REQ);
+      expect(createClinic).toHaveBeenCalledWith(
+        expect.objectContaining({ request: REQ }),
+      );
+    });
+
     it('crea la clínica con el email VERIFICADO y consume el enlace (un solo uso)', async () => {
       const { pending, uc, token } = await pendingWithToken();
 
-      const result = await uc.verify(token, INPUT.password);
+      const result = await uc.verify(token, INPUT.password, REQ);
 
       expect(result).toEqual({
         tenantId: 't1',
@@ -404,35 +423,37 @@ describe('RegisterClinicUseCase (DX-029)', () => {
         }),
       );
       expect(pending.rows).toHaveLength(0);
-      await expect(uc.verify(token, INPUT.password)).rejects.toBeInstanceOf(
-        NotFoundException,
-      );
+      await expect(
+        uc.verify(token, INPUT.password, REQ),
+      ).rejects.toBeInstanceOf(NotFoundException);
     });
 
     it('enlace con forma inválida o desconocido -> 404', async () => {
       const { uc } = await pendingWithToken();
-      await expect(uc.verify('nope', INPUT.password)).rejects.toBeInstanceOf(
-        NotFoundException,
-      );
       await expect(
-        uc.verify('A'.repeat(43), INPUT.password),
+        uc.verify('nope', INPUT.password, REQ),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      await expect(
+        uc.verify('A'.repeat(43), INPUT.password, REQ),
       ).rejects.toBeInstanceOf(NotFoundException);
     });
 
     it('contraseña distinta de la del registro -> el MISMO 404 genérico que un enlace desconocido, y el enlace sigue sirviendo', async () => {
       const { pending, uc, token } = await pendingWithToken();
 
-      const wrong = uc.verify(token, 'otra-clave-cualquiera');
+      const wrong = uc.verify(token, 'otra-clave-cualquiera', REQ);
       await expect(wrong).rejects.toBeInstanceOf(NotFoundException);
       await expect(wrong).rejects.toThrow(REGISTRATION_LINK_INVALID);
-      await expect(uc.verify('A'.repeat(43), INPUT.password)).rejects.toThrow(
-        REGISTRATION_LINK_INVALID,
-      );
+      await expect(
+        uc.verify('A'.repeat(43), INPUT.password, REQ),
+      ).rejects.toThrow(REGISTRATION_LINK_INVALID);
       expect(createClinic).not.toHaveBeenCalled();
       expect(pending.rows).toHaveLength(1);
 
       // Quien eligió la contraseña sí puede confirmar.
-      await expect(uc.verify(token, INPUT.password)).resolves.toMatchObject({
+      await expect(
+        uc.verify(token, INPUT.password, REQ),
+      ).resolves.toMatchObject({
         subdomain: 'sonrisa',
       });
     });
@@ -448,10 +469,10 @@ describe('RegisterClinicUseCase (DX-029)', () => {
         makeNotifier(),
         password,
       );
-      await expect(uc.verify('nope', 'x')).rejects.toThrow(
+      await expect(uc.verify('nope', 'x', REQ)).rejects.toThrow(
         REGISTRATION_LINK_INVALID,
       );
-      await expect(uc.verify('A'.repeat(43), 'x')).rejects.toThrow(
+      await expect(uc.verify('A'.repeat(43), 'x', REQ)).rejects.toThrow(
         REGISTRATION_LINK_INVALID,
       );
       expect(password.verify).toHaveBeenCalledTimes(2);
@@ -460,7 +481,7 @@ describe('RegisterClinicUseCase (DX-029)', () => {
     it('enlace caducado con contraseña errónea -> 404 genérico (no confirma que el enlace existió)', async () => {
       const { pending, uc, token } = await pendingWithToken();
       pending.rows[0].expiresAt = new Date(Date.now() - 1000);
-      await expect(uc.verify(token, 'mala')).rejects.toThrow(
+      await expect(uc.verify(token, 'mala', REQ)).rejects.toThrow(
         REGISTRATION_LINK_INVALID,
       );
     });
@@ -468,15 +489,15 @@ describe('RegisterClinicUseCase (DX-029)', () => {
     it('enlace caducado -> 410', async () => {
       const { pending, uc, token } = await pendingWithToken();
       pending.rows[0].expiresAt = new Date(Date.now() - 1000);
-      await expect(uc.verify(token, INPUT.password)).rejects.toBeInstanceOf(
-        GoneException,
-      );
+      await expect(
+        uc.verify(token, INPUT.password, REQ),
+      ).rejects.toBeInstanceOf(GoneException);
     });
 
     it('el email ya tiene cuenta al verificar -> 409 en español', async () => {
       const { repo, uc, token } = await pendingWithToken();
       repo.findUserByEmail = () => Promise.resolve({ id: 'u9', fullName: 'X' });
-      await expect(uc.verify(token, INPUT.password)).rejects.toThrow(
+      await expect(uc.verify(token, INPUT.password, REQ)).rejects.toThrow(
         REGISTRATION_EMAIL_TAKEN,
       );
     });
@@ -489,9 +510,9 @@ describe('RegisterClinicUseCase (DX-029)', () => {
           clientVersion: 'x',
         }),
       );
-      await expect(uc.verify(token, INPUT.password)).rejects.toBeInstanceOf(
-        ConflictException,
-      );
+      await expect(
+        uc.verify(token, INPUT.password, REQ),
+      ).rejects.toBeInstanceOf(ConflictException);
     });
   });
 
@@ -516,7 +537,7 @@ describe('RegisterClinicUseCase (DX-029)', () => {
       });
 
       const { verifyUrl } = notifier.sendVerification.mock.calls[0][0];
-      await uc.verify(tokenFrom(verifyUrl), INPUT.password);
+      await uc.verify(tokenFrom(verifyUrl), INPUT.password, REQ);
       expect(createClinic).toHaveBeenCalledWith(
         expect.objectContaining({
           location: {
@@ -582,19 +603,71 @@ describe('RegisterClinicUseCase (DX-029)', () => {
       expect(pending.rows).toHaveLength(0);
     });
 
-    it('forma legada (sin los cuatro): se acepta y verify crea la clínica sin sede configurada', async () => {
+    it('registration checks locationCountry with the same messages', async () => {
+      const pending = new InMemoryPending();
+      const uc = newUseCase(makeRepo(), pending, makeNotifier(), realPassword);
+      const cases: [unknown, string][] = [
+        [null, 'Elige el país de la sede.'],
+        ['xx', 'El país «XX» no está en la lista de países.'],
+        ['x'.repeat(500), 'El país indicado no está en la lista de países.'],
+      ];
+      for (const [locationCountry, message] of cases) {
+        for (const call of [uc.execute.bind(uc), uc.accept.bind(uc)]) {
+          const error = await call({
+            ...INPUT,
+            locationCountry: locationCountry as string,
+          }).catch((e: unknown) => e);
+          expect((error as BadRequestException).getResponse()).toMatchObject({
+            message,
+            field: 'locationCountry',
+          });
+        }
+      }
+      expect(pending.rows).toHaveLength(0);
+    });
+
+    it('registration normalizes a listed country outside the old pair', async () => {
+      const pending = new InMemoryPending();
+      const uc = newUseCase(makeRepo(), pending, makeNotifier(), realPassword);
+      await uc.execute({ ...INPUT, locationCountry: ' ve ' });
+      expect(pending.rows[0].location?.country).toBe('VE');
+    });
+
+    it('legacy registration without location fields is 400 with field locationCountry', async () => {
+      const pending = new InMemoryPending();
+      const uc = newUseCase(makeRepo(), pending, makeNotifier(), realPassword);
+
+      for (const call of [uc.execute.bind(uc), uc.accept.bind(uc)]) {
+        const error = await call(LEGACY_INPUT).catch((e: unknown) => e);
+        expect(error).toBeInstanceOf(BadRequestException);
+        expect((error as BadRequestException).getResponse()).toMatchObject({
+          message: 'Elige el país de la sede.',
+          field: 'locationCountry',
+        });
+      }
+      expect(pending.rows).toHaveLength(0);
+    });
+
+    it('verify with a pending without location throws Gone before consuming it', async () => {
       const repo = makeRepo();
       const pending = new InMemoryPending();
       const notifier = makeNotifier();
       const uc = newUseCase(repo, pending, notifier, realPassword);
 
-      expect(await uc.execute(LEGACY_INPUT)).toBe('VERIFICATION_SENT');
-      expect(pending.rows[0].location).toBeNull();
+      expect(await uc.execute(INPUT)).toBe('VERIFICATION_SENT');
+      pending.rows[0].location = null;
+      const consume = jest.spyOn(pending, 'consumePending');
       const { verifyUrl } = notifier.sendVerification.mock.calls[0][0];
-      await uc.verify(tokenFrom(verifyUrl), INPUT.password);
-      expect(createClinic).toHaveBeenCalledWith(
-        expect.objectContaining({ location: null }),
-      );
+      const error = await uc
+        .verify(tokenFrom(verifyUrl), INPUT.password, REQ)
+        .catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(GoneException);
+      expect((error as GoneException).getResponse()).toMatchObject({
+        message: REGISTRATION_LINK_EXPIRED,
+      });
+      expect(consume).not.toHaveBeenCalled();
+      expect(createClinic).not.toHaveBeenCalled();
+      expect(pending.rows).toHaveLength(1);
     });
 
     it.each([

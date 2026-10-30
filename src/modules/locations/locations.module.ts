@@ -10,6 +10,8 @@ import { LOCATION_REPOSITORY } from './domain/ports/location-repository.port';
 import { PrismaLocationRepository } from './infrastructure/repositories/prisma-location.repository';
 import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
+import { COUNTRY_WHITELIST } from './domain/ports/country-whitelist.port';
+import { PrismaCountryWhitelist } from './infrastructure/adapters/prisma-country-whitelist.adapter';
 import { CURRENCY_WHITELIST } from '../treatment-plans/domain/ports/currency-whitelist.port';
 import { PrismaCurrencyWhitelist } from '../treatment-plans/infrastructure/adapters/prisma-currency-whitelist.adapter';
 import { JobsModule } from '../jobs/jobs.module';
@@ -28,6 +30,8 @@ import { LocationRegionalBackfillJob } from './infrastructure/jobs/location-regi
     { provide: LOCATION_REPOSITORY, useClass: PrismaLocationRepository },
     // G1: la moneda de la sede tiene que estar en `currencies` (spec §3.1).
     { provide: CURRENCY_WHITELIST, useClass: PrismaCurrencyWhitelist },
+    // El país de la sede tiene que estar en `countries`.
+    { provide: COUNTRY_WHITELIST, useClass: PrismaCountryWhitelist },
     LocationRegionalBackfillJob,
   ],
   // DX-122: bloqueos, pendientes y «Buscar hueco» validan que la sede del

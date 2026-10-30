@@ -1,12 +1,8 @@
-import {
-  BadRequestException,
-  Inject,
-  Injectable,
-  Logger,
-} from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { PAYMENT_REPOSITORY } from '../../domain/ports/payment-repository.port';
 import type { PaymentRepository } from '../../domain/ports/payment-repository.port';
 import { ConvertAmountUseCase } from '../../../exchange/application/use-cases/convert-amount.use-case';
+import { paymentAmountIn } from '../payment-exchange-rate';
 
 /**
  * Período en días CIVILES (YYYY-MM-DD, ambos inclusive, ya validados por quien
@@ -22,9 +18,10 @@ export interface GetPaymentsTotalsResult {
   from: string;
   to: string;
   currency: string;
-  /** Σ of each active payment's `amount`, converted to `currency` at ITS
-   * OWN civil paid date in its location's zone (never today's rate), rounded
-   * to 2 decimals. */
+  /** Σ of each active payment's `amount` converted to `currency` with the
+   * rate it froze when it was recorded (DX-375) or, for an older payment not
+   * frozen yet, at ITS OWN civil paid date in its location's zone (never
+   * today's rate), rounded to 2 decimals. */
   totalConverted: number;
   /** Number of active payments in the range (regardless of currency). */
   count: number;
@@ -37,20 +34,6 @@ export interface GetPaymentsTotalsResult {
 // sums are rounded to 2 decimals to avoid floating point drift.
 function round2(value: number): number {
   return Math.round(value * 100) / 100;
-}
-
-// `ConvertAmountUseCase` throws exactly this kind of error (see
-// convert-amount.use-case.ts) when a payment's stored currency has no rate
-// in that date's snapshot. This is the ONLY failure this use case treats as
-// "safe to skip" — anything else (a DB/infra outage inside
-// GetRatesForDateUseCase, a programming error, etc.) must propagate instead
-// of silently corrupting a financial total with no trace.
-function isUnsupportedCurrencyError(error: unknown): boolean {
-  return (
-    error instanceof BadRequestException &&
-    typeof error.message === 'string' &&
-    error.message.startsWith('unsupported currency')
-  );
 }
 
 /**
@@ -80,6 +63,9 @@ export class GetPaymentsTotalsUseCase {
 
     let totalConverted = 0;
     const byCurrency: Record<string, number> = {};
+    // DX-374: un convertidor por cálculo, que lee la fuente de la clínica y
+    // las tasas de cada día una sola vez (no una lectura por abono).
+    const convert = this.convertAmount.memoized();
 
     for (const payment of payments) {
       // Grouped in the payment's OWN currency, at its ORIGINAL (unconverted)
@@ -90,48 +76,19 @@ export class GetPaymentsTotalsUseCase {
         (byCurrency[payment.currency] ?? 0) + payment.amount,
       );
 
-      // IMP-4b: a single payment with an unsupported/stale currency must
-      // not throw and fail the ENTIRE totals computation (and,
-      // transitively, the whole dashboard/balance response) — skip it from
-      // totalConverted instead. `count` (below, from payments.length) and
-      // `byCurrency` (above) are unaffected, since neither depends on the
-      // conversion succeeding.
-      //
-      // IMP-4a follow-up: this used to memoize `rateUsed` per (date,
-      // source currency) and reapply it via `round2(amount * rateUsed)`
-      // for every payment sharing that pair. That's unsound:
-      // `ConvertAmountUseCase.rateUsed` is derived from ITS OWN
-      // already-rounded result (`result / amount`), so it is
-      // amount-dependent, not a fixed exchange rate — reusing it for a
-      // different amount reproduces that first payment's rounding error
-      // instead of rounding each payment independently, drifting the
-      // total (e.g. amounts [1,2,5,7,100,333] at a 3-units-per-USD rate:
-      // correct total is 149.33, memoized was 147.84). So every payment is
-      // converted FRESH, by its own amount and own paidAt date, exactly as
-      // before that optimization.
-      // TODO(perf): memoize the RAW rate at the GetRatesForDateUseCase/
-      // rate-repository layer (NOT the amount-dependent rateUsed) to
-      // remove the per-payment lookup without drift.
-      try {
-        // El día de la tasa es el día civil del abono en SU sede (DX-097):
-        // un abono de las 20:00 en Bogotá se convierte con la tasa de ese
-        // día, no con la del día UTC siguiente.
-        const date = payment.paidOn;
-        const { rateUsed } = await this.convertAmount.execute({
-          amount: payment.amount,
-          from: payment.currency,
-          to: currency,
-          date,
-        });
-        totalConverted += round2(payment.amount * rateUsed);
-      } catch (error) {
-        if (!isUnsupportedCurrencyError(error)) {
-          throw error;
-        }
+      // IMP-4a/4b: cada abono se convierte por su propio importe y uno sin
+      // tasa no tumba el total (no suma en `totalConverted`; `count` y
+      // `byCurrency` no cambian). DX-375: con su tasa congelada, siempre con
+      // ella; un abono anterior aún sin congelar, con la tasa de su día civil
+      // en SU sede (DX-097), como antes. Cualquier otro fallo se propaga.
+      const converted = await paymentAmountIn(convert, payment, currency);
+      if (converted === null) {
         this.logger.warn(
-          `Skipping payment ${payment.id}: unsupported currency ${payment.currency}`,
+          `Skipping payment ${payment.id}: no rate for ${payment.currency}`,
         );
+        continue;
       }
+      totalConverted += converted;
     }
 
     return {

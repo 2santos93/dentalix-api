@@ -239,8 +239,7 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
   });
 
   it('balances template carries the location currency, never COP', async () => {
-    // DX-327 (AC4). REGIONAL_TOKYO_FIXTURE: el país de la sede lo obliga el
-    // enum hasta DX-312; no decide nada.
+    // DX-327 (AC4).
     const tokyo = await raw.location.create({
       data: locationData(REGIONAL_TOKYO_FIXTURE, {
         tenantId: b.tenantId,

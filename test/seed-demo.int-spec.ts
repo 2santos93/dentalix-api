@@ -1107,7 +1107,14 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       where: { tenantId, deletedAt: null },
     });
     const sixtyDaysAgo = Date.now() - 61 * 24 * 60 * 60 * 1000;
-    expect(payments.every((p) => p.currency === 'COP')).toBe(true);
+    // DX-375: todos en COP salvo un abono de hoy en USD (tasa congelada o
+    // «sin tasa» según haya tasa del día).
+    expect(payments.filter((p) => p.currency !== 'COP')).toEqual([
+      expect.objectContaining({
+        currency: 'USD',
+        exchangeRateCurrency: 'COP',
+      }),
+    ]);
     expect(
       payments.every(
         (p) =>

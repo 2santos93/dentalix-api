@@ -47,6 +47,13 @@ model Tenant {
   prescriptionRequireClinicalRecordNumber Boolean @default(false)
   /// DX-324: días que vale la receta desde la fecha de inicio. CHECK 1..365. 30 de plataforma.
   prescriptionValidityDays                Int     @default(30)
+  /// DX-374: de dónde sale la tasa de cambio del día de la clínica: el
+  /// proveedor (AUTOMATIC, lo de siempre) o las tasas manuales que registra
+  /// el ADMIN (MANUAL). Lo cambia el ADMIN (PUT /exchange/settings, auditado).
+  exchangeRateSource        ExchangeRateSource              @default(AUTOMATIC)
+  /// DX-374: día civil (sede principal) desde el que rige la fuente MANUAL;
+  /// los anteriores siguen con la automática. NULL con AUTOMATIC (CHECK).
+  manualExchangeRatesSince  DateTime?                       @db.Date
   createdAt                 DateTime                        @default(now())
   updatedAt                 DateTime                        @updatedAt
   deletedAt                 DateTime?
@@ -126,6 +133,8 @@ model Tenant {
   // DX-316: calendario de días hábiles y festivos de cada sede.
   locationWorkingCalendars  LocationWorkingCalendar[]
   locationHolidays          LocationHoliday[]
+  // DX-374: tasas de cambio manuales de la clínica.
+  manualExchangeRates       ManualExchangeRate[]
 
   @@map("tenants")
 }
@@ -213,8 +222,11 @@ enum ClinicRole {
 /// DENTRO del tenant, no un nivel de aislamiento: el RLS por tenant sigue
 /// siendo la frontera dura. Pacientes, historia y catálogo NO llevan sede —
 /// la ficha del paciente es de la clínica (ver docs/plans/2026-08-01-multi-sede.md).
-/// País donde opera una sede (DX-013). Decide los campos legales obligatorios
-/// de la receta: CO (Dec. 780/2016 art. 2.5.3.10.16) o ES (RD 1718/2010 art. 3).
+/// Excepción G5.3 (DX-334): país de sede anterior a DX-312. La API ya no lo
+/// lee: lo mantienen los triggers locations_country_code y
+/// pending_registrations_location_country_code para las réplicas anteriores,
+/// y lo conservan las recetas legadas (prescriptions.country). La fase 2 lo
+/// renombra a LegacyPrescriptionCountry y borra las demás columnas.
 enum ClinicCountry {
   CO
   ES
@@ -225,11 +237,13 @@ model Location {
   tenantId                     String        @db.Uuid
   name                         String
   address                      String?
-  // País de la sede (DX-013): la receta se emite con las reglas del país donde
-  // se atiende. GLOBAL-G1 fase 1: el default CO se CONSERVA solo porque el
-  // INSERT de una réplica antigua no envía país; el código nuevo siempre lo
-  // escribe explícito (R1). La fase 2 lo quita (decisión 1 del dueño).
-  country                      ClinicCountry @default(CO)
+  /// DX-312: país de la sede, ISO 3166-1 alfa-2 de `countries` (columna
+  /// "countryCode"). Obligatorio y sin default. Ninguna regla lo lee; hasta
+  /// DX-329 da el indicativo de los teléfonos escritos sin «+».
+  country                      String        @map("countryCode") @db.Char(2)
+  /// Excepción G5.3 (DX-334): columna anterior a DX-312, solo para las réplicas
+  /// anteriores. La mantiene el trigger; el cliente no la lee ni la escribe.
+  legacyCountry                ClinicCountry? @map("country") @ignore
   // GLOBAL-G1 (DX-313): moneda ISO 4217 de la sede (FK a currencies). NULL solo
   // en una fila de una réplica antigua aún sin barrer: «sede sin configurar»,
   // nunca se sustituye por la moneda de su país (R19).
@@ -328,6 +342,8 @@ model Location {
   holidays                   LocationHoliday[]
   // GLOBAL-G1: moneda de la sede (locations_currency_fkey; admite NULL en fase 1).
   currencyRef                Currency?                   @relation(fields: [currency], references: [code], onDelete: Restrict, map: "locations_currency_fkey")
+  // DX-312: país de la sede (locations_country_code_fkey).
+  countryRef                 Country                     @relation(fields: [country], references: [code], onDelete: Restrict, map: "locations_country_code_fkey")
 
   // Destino de las FK compuestas (tenantId, locationId) de citas, pagos e
   // inventario: la sede tiene que ser del MISMO tenant (SEC-004).
@@ -356,6 +372,8 @@ model ClinicMembership {
   locations           MembershipLocation[]
   // DX-050: procedimientos del plan que realizó.
   performedPlanItems  TreatmentPlanItem[]
+  // DX-374: tasas de cambio manuales que registró.
+  manualExchangeRates ManualExchangeRate[]
 
   // PARTIAL unique (WHERE "deletedAt" IS NULL) — a soft-deleted membership must
   // NOT block re-adding the same user. The predicate lives in migration
@@ -1859,6 +1877,44 @@ model ExchangeRateSnapshot {
   @@map("exchange_rate_snapshots")
 }
 
+/// DX-374: de dónde sale la tasa de cambio del día de una clínica.
+enum ExchangeRateSource {
+  /// Del proveedor externo, cacheada en `exchange_rate_snapshots` (lo de siempre).
+  AUTOMATIC
+  /// De `manual_exchange_rates`: la que registra la clínica para cada día.
+  MANUAL
+}
+
+/// DX-374: tasa de cambio que la clínica fija para un día civil y una moneda,
+/// en unidades de `currency` por 1 USD (la misma base que
+/// `exchange_rate_snapshots`). Una por (clínica, día, moneda) y no se
+/// sobrescribe: la app solo tiene SELECT e INSERT. RLS FORCE por tenant; la FK
+/// compuesta al autor exige que sea miembro de la MISMA clínica, como la
+/// atribución de DX-050.
+model ManualExchangeRate {
+  id                    String   @id @default(uuid(7)) @db.Uuid
+  tenantId              String   @db.Uuid
+  /// Día civil de la tasa. CHECK 2000-01-01..2100-12-31.
+  date                  DateTime @db.Date
+  /// ISO 4217, de `currencies`; nunca USD (es la base). CHECK.
+  currency              String
+  /// Unidades de `currency` por 1 USD. CHECK > 0; hasta 8 decimales.
+  rate                  Decimal  @db.Decimal(18, 8)
+  createdById           String   @db.Uuid
+  createdByMembershipId String   @db.Uuid
+  createdAt             DateTime @default(dbgenerated("timezone('UTC'::text, now())"))
+
+  tenant      Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade, map: "manual_exchange_rates_tenantId_fkey")
+  currencyRef Currency         @relation(fields: [currency], references: [code], onDelete: Restrict, map: "manual_exchange_rates_currency_fkey")
+  createdBy   ClinicMembership @relation(fields: [tenantId, createdByMembershipId, createdById], references: [tenantId, id, userId], onDelete: Restrict, map: "manual_exchange_rates_created_by_fkey")
+
+  /// Una tasa por clínica, día y moneda. También sirve la lectura por
+  /// (clínica, día) y la lista de las últimas (recorrido hacia atrás).
+  @@unique([tenantId, date, currency], map: "manual_exchange_rates_tenant_date_currency_key")
+  @@index([tenantId, createdByMembershipId, createdById], map: "manual_exchange_rates_created_by_idx")
+  @@map("manual_exchange_rates")
+}
+
 // Catálogos de referencia GLOBALES (moneda/país/ciudad). Misma excepción que
 // ExchangeRateSnapshot: sin tenantId, sin RLS, sin deletedAt. Currency es
 // además la whitelist de códigos ISO 4217 aceptados en planes/abonos.
@@ -1870,6 +1926,8 @@ model Currency {
   // FK de `currency` (DX-042, 20261016131000_currency_fks).
   treatmentPlans             TreatmentPlan[]
   payments                   Payment[]
+  // DX-375: abonos cuya tasa congelada convierte a esta moneda.
+  paymentsExchangeRate       Payment[]                  @relation("PaymentExchangeRateCurrency")
   paymentPlans               PaymentPlan[]
   // DX-150: compromisos de pago en esa moneda.
   paymentPromises            PaymentPromise[]
@@ -1890,15 +1948,19 @@ model Currency {
   paymentPlanAmounts         PaymentPlanAmount[]
   // GLOBAL-G1 (DX-313): sedes con esa moneda.
   locations                  Location[]
+  // DX-374: tasas manuales de las clínicas en esa moneda.
+  manualExchangeRates        ManualExchangeRate[]
 
   @@map("currencies")
 }
 
 model Country {
-  code     String    @id // ISO 3166-1 alpha-2, p.ej. "CO"
-  name     String // "Colombia"
-  cities   City[]
-  patients Patient[]
+  code                 String                @id // ISO 3166-1 alfa-2 (prisma/reference/iso3166.ts)
+  name                 String // en español (CLDR)
+  cities               City[]
+  patients             Patient[]
+  locations            Location[]
+  pendingRegistrations PendingRegistration[]
 
   @@map("countries")
 }
@@ -2007,6 +2069,19 @@ model Payment {
   // en su sede. NULL sin caja abierta (o anterior a DX-027). Un trigger impide
   // asociarlo a una caja cerrada o de otra sede, y cambiarla después.
   cashSessionId          String?        @db.Uuid
+  // DX-375: la tasa que congeló el abono al registrarse (o el barrido, si se
+  // cobró sin tasa). `exchangeRateCurrency` es la moneda a la que se convierte
+  // (la del plan, o la del saldo migrado) y la escribe todo abono nuevo; NULL
+  // solo en abonos anteriores a DX-375 o de una réplica anterior, que se leen
+  // como antes (tasa de su día) hasta que el barrido los congela. Las cuatro
+  // columnas de la tasa van juntas (CHECK payments_exchange_rate_check): las
+  // dos monedas en unidades por 1 USD tal como las dio la fuente, la fuente y
+  // el día civil de la tasa. Con moneda igual a la de destino no hay tasa.
+  exchangeRateCurrency   String?
+  exchangeRateFrom       Decimal?            @db.Decimal(18, 8)
+  exchangeRateTo         Decimal?            @db.Decimal(18, 8)
+  exchangeRateSource     ExchangeRateSource?
+  exchangeRateDate       DateTime?           @db.Date
 
   // FK COMPUESTAS (SEC-004): el plan y la sede tienen que ser del MISMO tenant,
   // y `patientId` (denormalizado) tiene que ser el paciente del plan. Por
@@ -2019,6 +2094,8 @@ model Payment {
 
   // La moneda existe en el catálogo `currencies` (DX-042).
   currencyRef Currency @relation(fields: [currency], references: [code])
+  // DX-375: la moneda de destino de la tasa congelada, también del catálogo.
+  exchangeRateCurrencyRef Currency? @relation("PaymentExchangeRateCurrency", fields: [exchangeRateCurrency], references: [code], map: "payments_exchange_rate_currency_fkey")
 
   // Recibo de caja numerado (DX-136). Null en los abonos anteriores a la
   // numeración: conservan su referencia antigua REC-xxxxxxxx.
@@ -2074,6 +2151,15 @@ model Payment {
   // migración 20261018140200_dx027_cash_sessions. NO aceptes un diff de
   // migrate dev que lo vuelva completo.
   @@index([tenantId, cashSessionId], map: "payments_tenant_cash_session_idx")
+  // DX-375, parciales (el WHERE vive solo en 20261102120200, CONCURRENTLY; NO
+  // aceptes un diff de migrate dev que los vuelva completos):
+  // - abonos vivos por congelar, para el barrido: WHERE "deletedAt" IS NULL
+  //   AND "exchangeRateFrom" IS NULL AND ("exchangeRateCurrency" IS NULL OR
+  //   "currency" <> "exchangeRateCurrency");
+  // - abonos con una tasa manual congelada, para saber si una tasa manual ya
+  //   se usó (409 al cambiarla): WHERE "exchangeRateSource" = 'MANUAL'.
+  @@index([tenantId, createdAt], map: "payments_exchange_rate_pending_idx")
+  @@index([tenantId, exchangeRateDate], map: "payments_exchange_rate_manual_idx")
   @@map("payments")
 }
 
@@ -2610,10 +2696,10 @@ model Prescription {
   patientId            String             @db.Uuid
   // Quien prescribe: sale del token, nunca del cuerpo.
   professionalId       String             @db.Uuid
-  /// Excepción G5.3 (DX-334): país de la plantilla legada. En la receta única
-  /// (singleFormat) es solo un dato que se sigue escribiendo para las réplicas
-  /// anteriores (fase 1); nada lo lee para decidir. La fase 2 lo deja NULL.
-  country              ClinicCountry
+  /// Excepción G5.3 (DX-334): plantilla de la receta legada. En la receta
+  /// única, la proyección del país de la sede (CO/ES) o NULL; nada decide con
+  /// él. DX-364 deja de escribirlo.
+  country              ClinicCountry?
   /// DX-324: receta única (hash v3). false en toda receta anterior.
   singleFormat         Boolean            @default(false)
   /// DX-324: el ajuste «cantidad en letras» al emitir; NULL en las legadas.
@@ -2718,6 +2804,8 @@ enum AuditAction {
   PRINT
   // DX-136: enviar un documento por email (el recibo de caja).
   SEND
+  // DX-359: el titular cambia su contraseña desde su perfil (POST /me/password).
+  PASSWORD_CHANGE
 }
 
 // DX-009: sobre qué tipo de recurso.
@@ -2795,6 +2883,12 @@ enum AuditResourceType {
   CLINIC_SETTINGS
   // DX-316: calendario de la sede (días hábiles, festivos e importaciones).
   LOCATION_CALENDAR
+  // DX-374: tasa de cambio manual registrada por el ADMIN.
+  EXCHANGE_RATE
+  // DX-359: invitaciones al personal (invitar, reenviar, retirar) y el alta
+  // de la clínica con su ADMIN (registro verificado).
+  STAFF_INVITATION
+  CLINIC
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o
@@ -2982,8 +3076,13 @@ model PendingRegistration {
   createdAt    DateTime @default(now())
   // GLOBAL-G1: país, moneda, zona y locale de la primera sede. NULL en los
   // pendientes creados por una réplica o una web antiguas (forma legada; la
-  // fase 2 los hace obligatorios).
-  locationCountry  ClinicCountry?
+  // fase 2 los hace obligatorios). DX-312: el país es ISO 3166-1 alfa-2 de
+  // `countries` (columna "locationCountryCode").
+  locationCountry       String?        @map("locationCountryCode") @db.Char(2)
+  locationCountryRef    Country?       @relation(fields: [locationCountry], references: [code], onDelete: Restrict, map: "pending_registrations_location_country_code_fkey")
+  /// Excepción G5.3 (DX-334): columna anterior a DX-312, solo para las réplicas
+  /// anteriores. La mantiene el trigger; el cliente no la lee ni la escribe.
+  legacyLocationCountry ClinicCountry? @map("locationCountry") @ignore
   locationCurrency String?        @db.Char(3)
   locationTimeZone String?
   locationLocale   String?
@@ -3078,9 +3177,10 @@ model JobWorker {
 model PlatformAuditEvent {
   id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   actorUserId  String   @db.Uuid
-  /// `JOB_RETRIED` (CHECK en la migración).
+  /// `JOB_RETRIED`; DX-359: `MFA_ENROLLMENT_STARTED`, `MFA_ENABLED`,
+  /// `PASSWORD_CHANGE` (CHECK en la migración).
   action       String
-  /// `JOB` (CHECK en la migración).
+  /// `JOB`; DX-359: `USER` (el propio superadmin) (CHECK en la migración).
   resourceType String
   resourceId   String?  @db.Uuid
   requestId    String?

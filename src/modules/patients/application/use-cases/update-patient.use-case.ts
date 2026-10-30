@@ -17,6 +17,7 @@ import {
   type PatientCommunicationRepository,
 } from '../../domain/ports/patient-communication-repository.port';
 import { normalizeMobile } from '../../domain/communication/mobile-number';
+import { callingCodeOfCountry } from '../../../../shared/phone/country-calling-code';
 import { whatsappMobileRequiredError } from './patient-communication.use-cases';
 import { docTypeLabelInput } from '../doc-type-label-input';
 
@@ -58,9 +59,10 @@ export class UpdatePatientUseCase {
     // DX-128: un paciente con canal WhatsApp no puede quedarse con un móvil
     // inválido (el cambio de canal vive en el bloque «Comunicaciones»).
     if (patch.phone !== undefined && existing.contactChannel === 'WHATSAPP') {
-      const country =
-        (await this.communication.locationCountry()) ?? existing.countryCode;
-      if (normalizeMobile(patch.phone, country).status !== 'VALID') {
+      const callingCode = callingCodeOfCountry(
+        (await this.communication.locationCountry()) ?? existing.countryCode,
+      );
+      if (normalizeMobile(patch.phone, callingCode).status !== 'VALID') {
         throw whatsappMobileRequiredError();
       }
     }

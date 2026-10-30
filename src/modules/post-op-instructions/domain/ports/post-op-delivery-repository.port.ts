@@ -1,4 +1,4 @@
-import type { ClinicCountry, ContactChannel } from '@prisma/client';
+import type { ContactChannel } from '@prisma/client';
 import type { NoticeResponsible } from '../../../patients/domain/communication/notice-recipient';
 import type {
   PostOpDelivery,
@@ -37,7 +37,7 @@ export interface PostOpAppointmentContext {
     name: string;
     phone: string | null;
     /** Solo para el número de WhatsApp. */
-    country: ClinicCountry;
+    country: string;
     /** Zona IANA de la sede. */
     timeZone: string;
     /** G1-B: formato y reloj en crudo; los exige (409) quien pinta `{{fecha}}`. */

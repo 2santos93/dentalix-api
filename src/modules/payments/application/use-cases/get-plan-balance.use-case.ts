@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { TreatmentPlanItemStatus, TreatmentPlanStatus } from '@prisma/client';
 import { PAYMENT_REPOSITORY } from '../../domain/ports/payment-repository.port';
 import type { PaymentRepository } from '../../domain/ports/payment-repository.port';
@@ -7,7 +7,10 @@ import { isPlanBillable } from '../../../treatment-plans/domain/plan-status-mach
 import { PLAN_ALLOCATION_REPOSITORY } from '../../domain/ports/plan-allocation-repository.port';
 import type { PlanAllocationRepository } from '../../domain/ports/plan-allocation-repository.port';
 import { itemBillableCents } from '../../domain/allocation-rules';
-import { paymentInPlanCurrency } from '../payment-in-plan-currency';
+import {
+  paymentAmountIn,
+  type PaymentWithRate,
+} from '../payment-exchange-rate';
 import { ConvertAmountUseCase } from '../../../exchange/application/use-cases/convert-amount.use-case';
 
 export interface GetPlanBalanceResult {
@@ -25,14 +28,26 @@ export interface GetPlanBalanceResult {
   balance: number;
   /** Number of active payments for the plan. */
   paymentsCount: number;
+  /**
+   * DX-375: abonos vivos «sin tasa»: en otra moneda y sin tasa de su día
+   * todavía, así que no cuentan en `paid` (el saldo queda incompleto) hasta
+   * que se registre la tasa y el barrido la congele.
+   */
+  paymentsWithoutRate: PaymentWithoutRate[];
+}
+
+/** Un abono «sin tasa» del saldo (DX-375): nunca datos del paciente. */
+export interface PaymentWithoutRate {
+  paymentId: string;
+  amount: number;
+  currency: string;
+  /** Día civil del abono en su sede: el de la tasa que falta. */
+  paidOn: string;
 }
 
 /** Lo que la conversión necesita de un abono (el día civil ya resuelto). */
-interface PlanPayment {
+interface PlanPayment extends PaymentWithRate {
   id: string;
-  amount: number;
-  currency: string;
-  paidOn: string;
 }
 
 /** Cobrado y pendiente de un ítem del plan (DX-051). */
@@ -77,8 +92,6 @@ const BILLABLE_STATUSES: ReadonlySet<TreatmentPlanItemStatus> = new Set([
  */
 @Injectable()
 export class GetPlanBalanceUseCase {
-  private readonly logger = new Logger(GetPlanBalanceUseCase.name);
-
   constructor(
     @Inject(PAYMENT_REPOSITORY)
     private readonly repo: PaymentRepository,
@@ -101,7 +114,13 @@ export class GetPlanBalanceUseCase {
       await this.allocations.readPlanBalanceSnapshot(treatmentPlanId);
     if (!snapshot) throw new NotFoundException('Treatment plan not found');
     const { plan, payments } = snapshot;
-    const result = await this.compute(plan, snapshot.items, payments);
+    // BE-050: un abono con base de imputación cuenta en `paid` por su base
+    // (convertida con su tasa congelada e inmutable), así lo cobrado y el
+    // desglose por ítem salen de la MISMA cifra y no descuadran nunca.
+    const baseOf = new Map(
+      snapshot.bases.map((b) => [b.paymentId, b.amount] as const),
+    );
+    const result = await this.compute(plan, snapshot.items, payments, baseOf);
     const billablePlan = isPlanBillable(plan.status);
 
     const paidByItem = new Map<string, number>();
@@ -145,19 +164,6 @@ export class GetPlanBalanceUseCase {
       (p) => !withBase.has(p.id),
     ).length;
 
-    // Con todos los abonos con base, lo imputado más lo sin imputar es lo
-    // cobrado: si no, la base y la conversión en vivo discrepan (p. ej. una
-    // tasa corregida después). No se rompe la lectura; se deja constancia.
-    if (unconvertedPaymentsCount === 0) {
-      const diff =
-        allocatedCents + unallocatedCents - Math.round(result.paid * 100);
-      if (diff !== 0) {
-        this.logger.warn(
-          `Plan ${treatmentPlanId}: allocated + unallocated differs from paid by ${diff} cents`,
-        );
-      }
-    }
-
     return {
       ...result,
       allocated: allocatedCents / 100,
@@ -186,6 +192,7 @@ export class GetPlanBalanceUseCase {
       discount: number;
     }[],
     payments: PlanPayment[],
+    baseOf: ReadonlyMap<string, number> = new Map(),
   ): Promise<GetPlanBalanceResult> {
     // DX-109 (BE-001): un plan no cobrable (rechazado o cancelado) no debe
     // nada, la misma regla que el estado de cuenta; sus abonos siguen en
@@ -199,43 +206,28 @@ export class GetPlanBalanceUseCase {
         );
 
     let paid = 0;
+    const paymentsWithoutRate: PaymentWithoutRate[] = [];
+    // DX-374: un convertidor por cálculo, que lee la fuente de la clínica y
+    // las tasas de cada día una sola vez (no una lectura por abono). Con la
+    // tasa congelada (DX-375) ni siquiera se usa: solo los abonos anteriores
+    // aún sin congelar se convierten con la tasa de su día.
+    const convert = this.convertAmount.memoized();
 
     for (const payment of payments) {
-      // IMP-4b: a single payment with an unsupported/stale currency must
-      // not throw and fail the ENTIRE balance computation — skip it from
-      // `paid` instead. `paymentsCount` (below, from payments.length) is
-      // unaffected, since it doesn't depend on the conversion succeeding.
-      //
-      // IMP-4a follow-up: this used to memoize `rateUsed` per (date,
-      // source currency) and reapply it via `round2(amount * rateUsed)`
-      // for every payment sharing that pair. That's unsound:
-      // `ConvertAmountUseCase.rateUsed` is derived from ITS OWN
-      // already-rounded result (`result / amount`), so it is
-      // amount-dependent, not a fixed exchange rate — reusing it for a
-      // different amount reproduces that first payment's rounding error
-      // instead of rounding each payment independently, drifting the
-      // total (e.g. amounts [1,2,5,7,100,333] at a 3-units-per-USD rate:
-      // correct total is 149.33, memoized was 147.84). So every payment is
-      // converted FRESH, by its own amount and own paidAt date, exactly as
-      // before that optimization.
-      // TODO(perf): memoize the RAW rate at the GetRatesForDateUseCase/
-      // rate-repository layer (NOT the amount-dependent rateUsed) to
-      // remove the per-payment lookup without drift.
-      // DX-097: el día civil del abono en SU sede, la misma fecha de tasa
-      // que usa el dashboard (GetPaymentsTotalsUseCase). Solo «sin tasa»
-      // (moneda sin tasa o proveedor sin poder darla para esa fecha) omite
-      // el abono, que cuenta como sin convertir; cualquier otro fallo se
-      // propaga.
-      const converted = await paymentInPlanCurrency(this.convertAmount, {
-        amount: payment.amount,
-        currency: payment.currency,
-        planCurrency: plan.currency,
-        paidOn: payment.paidOn,
-      });
+      // IMP-4a/4b: cada abono se convierte por su propio importe (nunca
+      // reutilizando un `rateUsed`, que depende del importe), y uno sin tasa
+      // no tumba el saldo: no cuenta en `paid` y se informa «sin tasa»
+      // (`paymentsCount` no cambia). Cualquier otro fallo se propaga.
+      const converted =
+        baseOf.get(payment.id) ??
+        (await paymentAmountIn(convert, payment, plan.currency));
       if (converted === null) {
-        this.logger.warn(
-          `Skipping payment ${payment.id}: no rate for ${payment.currency}`,
-        );
+        paymentsWithoutRate.push({
+          paymentId: payment.id,
+          amount: payment.amount,
+          currency: payment.currency,
+          paidOn: payment.paidOn,
+        });
         continue;
       }
       paid += converted;
@@ -247,6 +239,7 @@ export class GetPlanBalanceUseCase {
       paid: round2(paid),
       balance: round2(billable - paid),
       paymentsCount: payments.length,
+      paymentsWithoutRate,
     };
   }
 }

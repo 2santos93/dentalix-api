@@ -24,6 +24,7 @@ import { TenantContextService } from '../../../../shared/tenancy/tenant-context.
 import { locationClaim } from '../../../../shared/tenancy/location-access';
 import { hashInvitationToken, invitationStatus } from '../invitation-token';
 import { InvitationStatus } from '../../domain/entities/clinic-invitation.entity';
+import type { AuditRequestMeta } from '../../../audit/domain/audit-request-context';
 
 export const INVITATION_NOT_FOUND =
   'La invitación no existe o el enlace ya no es válido (puede que te hayan enviado uno más reciente).';
@@ -49,12 +50,11 @@ export const ACCOUNT_CLAIM_AUDIT_REASON = 'INVITATION_ACCOUNT_CLAIM';
 export interface AcceptInvitationInput {
   token: string;
   password: string;
-  /** Para la auditoría del reclamo de cuenta (DX-029). */
-  meta?: {
-    ip: string | null;
-    userAgent: string | null;
-    requestId: string | null;
-  };
+  /**
+   * Para la auditoría de la aceptación (DX-359) y del reclamo de cuenta
+   * (DX-029). Sin ella (seed) los eventos van sin IP ni request id.
+   */
+  meta?: AuditRequestMeta;
 }
 
 function assertNewPassword(password: string): void {
@@ -179,6 +179,7 @@ export class AcceptInvitationUseCase {
         email: invitation.email,
         role: invitation.role,
         user: resolution,
+        request: input.meta ?? null,
       });
     } catch (err) {
       if (err instanceof AccountClaimConflictError) {

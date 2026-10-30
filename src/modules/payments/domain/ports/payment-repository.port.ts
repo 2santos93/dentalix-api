@@ -1,4 +1,5 @@
 import type { IdempotentPayment } from '../idempotency';
+import type { FrozenExchangeRate } from '../payment-exchange-rate';
 import { ClinicRole, PaymentMethod } from '@prisma/client';
 import { Payment } from '../entities/payment.entity';
 import { CashPayment } from '../entities/cash-payment.entity';
@@ -61,6 +62,15 @@ export interface CreatePaymentRepoInput {
    * fallo de la conversión o un abono a un saldo migrado).
    */
   planAmount: { planCurrency: string; amount: number; rateDate: string } | null;
+  /**
+   * DX-375: la tasa que congela el abono, cotizada FUERA de la transacción
+   * con la fuente de la clínica y el día civil del abono en su sede. Se
+   * guarda si sigue valiendo con el plan bloqueado (misma moneda de destino,
+   * mismo día y, con MANUAL, las mismas tasas manuales, que quedan FOR SHARE);
+   * si no, el abono queda «sin tasa», sin base, y lo congela el barrido.
+   * `null`: misma moneda que el destino, o sin tasa ese día.
+   */
+  frozenRate: FrozenExchangeRate | null;
 }
 
 /** Un saldo migrado vivo (DX-262) con lo que el abono necesita validar. */

@@ -105,13 +105,13 @@ de despliegue hacen falta las devDependencies para sembrar. El puerto se lee de
    | RECEPTION | `recepcion.norte@demo.dentalix.app` (solo Sede Norte — DX-089) |
 
    Contenido: 2 sedes con horario (la principal con el horario por defecto del
-   registro; "Sede Norte" con el suyo), catálogo por defecto con tarifas en COP,
+   registro; "Sede Norte" con el suyo), catálogo por defecto con tarifas en la moneda de la sede demo (hoy COP; la demo con sedes de varios países llega con DX-335),
    25 pacientes ficticios (correos `@example.com`) con historias clínicas,
    evoluciones (una corregida con una adenda — DX-038; tres con diagnóstico CIE-10 — DX-212) y odontograma (un hallazgo anulado con motivo y una paciente infantil con dentición mixta, registros temporales y de otro origen — DX-120), 5 tipos de cita con duración y color (DX-121), las 6 plantillas de evolución de ejemplo con dos evoluciones redactadas con ellas («Resina» y «Profilaxis») y ligadas a las últimas citas atendidas (DX-170), las 5 indicaciones postoperatorias de ejemplo con `POI-EXO` vinculada a «Exodoncia simple», la sede principal con teléfono y una entrega impresa de ayer (o del último día con consulta) — DX-222, ~90 citas desde el lunes de la semana pasada hasta
    el sábado de la próxima en distintos estados (las de valoración, limpieza, endodoncia, urgencia y ortodoncia con su tipo), bloqueos de agenda (vacaciones de la segunda dentista de lunes a viernes de la semana siguiente a la próxima, en todas las sedes, y el almuerzo del equipo en la sede principal el próximo día laborable, que deja agendar con aviso) y 3 «Pendientes por agendar» abiertos (las dos cancelaciones o no-shows más recientes y un alta manual urgente; las más antiguas quedan descartadas con motivo) — DX-122, y la cita agendada más lejana de la primera dentista en la sede principal marcada «Adelantar si hay hueco», que sale como candidata en «Ocupar este hueco» al cancelar una cita anterior (DX-210), la rotación de la segunda dentista entre las dos sedes (lunes, miércoles y viernes en la principal; martes y jueves en la Norte, con sus citas dentro) y una excepción el lunes que vuelve de vacaciones: no va a la principal y cubre la Norte de 7:00 a 12:00 — DX-233, planes de tratamiento en todos
    sus estados (con un presupuesto en borrador con descuentos —uno del 10 % del
    odontólogo y otro del 15 % de la administración con su motivo, que salen en
-   el informe de descuentos (DX-204)—, listo para presentar, y otro aceptado con la firma del paciente — DX-012; y dos opciones A/B de Carolina Duque —implante o puente— presentadas hace 9 días y sin cita futura, que salen en «Presupuestos por seguir» — DX-040), abonos en COP de los últimos 60 días en ambas sedes, cada uno con su recibo de caja numerado por sede (`PRI-000001`…, `NOR-000001`…; el abono duplicado anulado conserva su número y sale «ANULADO» — DX-136), un plan de
+   el informe de descuentos (DX-204)—, listo para presentar, y otro aceptado con la firma del paciente — DX-012; y dos opciones A/B de Carolina Duque —implante o puente— presentadas hace 9 días y sin cita futura, que salen en «Presupuestos por seguir» — DX-040), abonos en la moneda de la sede de los últimos 60 días en ambas sedes, cada uno con su recibo de caja numerado por sede (`PRI-000001`…, `NOR-000001`…; el abono duplicado anulado conserva su número y sale «ANULADO» — DX-136), un plan de
    pagos con cuotas e inventario por sede con ítems bajo el stock mínimo. Varios planes se abrieron hace 20, 40, 75 y 100 días (`openedDaysAgo`), así que la cartera (DX-145) tiene deudores en todos los tramos en las dos sedes. Dos de ellos tienen gestiones de cobro y uno un compromiso de pago abierto a 5 días (DX-150): se ven en la cartera, en el bloque «Cobranza» de su ficha y con el chip «Saldo vencido» en sus citas. Recepción tiene en la sede principal la caja por turno de hoy (DX-027): la de la mañana cerrada con un arqueo que no cuadra por 2.000 (con su motivo) y la de la tarde abierta con su fondo y un cobro; los abonos históricos quedan sin caja. «Recepción Norte» está restringida a la Sede Norte (DX-089): al entrar con ella la agenda, la caja, el inventario y la cartera muestran solo esa sede, y la principal da 403 (ver «Personal restringido a sedes»).
 
    - **Idempotencia**: si el tenant `demo` ya existe, no hace nada (solo vuelve a
@@ -123,8 +123,9 @@ de despliegue hacen falta las devDependencies para sembrar. El puerto se lee de
      `admin@demo.dentalix.app` como ADMIN vivo) aborta la corrida, con o sin
      `--reset`; y si algún usuario `@demo.dentalix.app` es miembro vivo de otra
      clínica, tampoco se retira nada.
-   - **Determinista**: sin azar; todo depende solo de la fecha de hoy (hora de
-     Bogotá, UTC-5 fijo).
+   - **Determinista**: sin azar; todo depende solo de la fecha de hoy (en la zona
+     de la sede demo, hoy UTC-5 fijo; con DX-335 la región de la demo será
+     configurable). Moneda, zona horaria y país dependen siempre de la sede.
    - **Conexión**: no usa `DIRECT_URL`. Levanta la app (`AppModule`) y escribe con
      los mismos casos de uso que la API (registro, invitación + aceptación, sedes,
      horarios, pacientes, planes, abonos, plan de pagos, inventario), por
@@ -174,7 +175,7 @@ de despliegue hacen falta las devDependencies para sembrar. El puerto se lee de
 
   Los campos son una lista cerrada: la ruta es la **plantilla** (nunca la URL
   con ids ni la query de búsqueda) y no se registran cuerpos, cabeceras,
-  nombres ni datos clínicos (Ley 1581 / RGPD). Además, cualquier campo
+  nombres ni datos clínicos (minimización de datos personales). Además, cualquier campo
   estructurado pasa por una redacción que oculta `Authorization`, `Cookie`,
   `Set-Cookie` y claves con `password`, `token`, `secret` o `apiKey`.
 - **Errores 5xx**: al cliente solo le llega su cuerpo (genérico si el error
@@ -202,8 +203,8 @@ de despliegue hacen falta las devDependencies para sembrar. El puerto se lee de
 
 ## Auditoría (DX-009)
 
-Registro de quién vio o cambió datos clínicos y financieros (Ley 1581, Res.
-1995/1999, RGPD), en la tabla `audit_events` (módulo `src/modules/audit`).
+Registro de quién vio o cambió datos clínicos y financieros (trazabilidad
+que piden las normas de protección de datos y de historia clínica), en la tabla `audit_events` (módulo `src/modules/audit`).
 
 - **Qué se audita**: los endpoints marcados con `@Audit({ action, resource,
   resourceId?, patient? })`: pacientes, historia clínica, evoluciones,
@@ -212,6 +213,23 @@ Registro de quién vio o cambió datos clínicos y financieros (Ley 1581, Res.
   anulaciones, planes de cuotas, estado de cuenta y el login (correcto y
   fallido). La lista exacta la fija `src/modules/audit/audit-coverage.spec.ts`.
   No se audita la búsqueda `GET /patients` ni la propia lectura del registro.
+- **Personal y cuenta (DX-359)**: invitar (`CREATE STAFF_INVITATION`, con el
+  rol), reenviar (`INVITATION_RESENT`), retirar o sustituir una invitación
+  (`VOID`, `INVITATION_REVOKED`/`INVITATION_REPLACED`), aceptarla con
+  cualquier cuenta (`CREATE STAFF_MEMBER`, `INVITATION_ACCEPTED`, actor = el
+  propio miembro), cambiar rol, sedes, registro profesional o especialidad
+  (`STAFF_UPDATED`, con `staffAccess.before`/`after` de lo que cambió; el
+  nombre, solo en `changedFields`; sin evento si nada cambia), desactivar y
+  reactivar (`STAFF_DEACTIVATED`/`STAFF_REACTIVATED`, con `statusChange`), el
+  alta de la clínica (`CREATE CLINIC`, `CLINIC_REGISTERED`), el nombre propio
+  (`OWN_NAME_CHANGED`) y la contraseña propia (`PASSWORD_CHANGE`,
+  `SESSIONS_REVOKED`: solo el hecho). Estos eventos los escribe el
+  repositorio en la **misma transacción** que el cambio (`writeAuditEvent`):
+  sin cambio no hay evento y sin evento no hay cambio. Nunca guardan
+  contraseñas, hashes, tokens de invitación o verificación, emails ni
+  nombres. El alta del MFA del superadmin (`MFA_ENROLLMENT_STARTED`,
+  `MFA_ENABLED`) y su cambio de contraseña con sesión de plataforma van a
+  `platform_audit_events` (sin clínica), con la metadata vacía.
 - **Un evento por petición** que termina bien (una sola escritura, nunca N):
   actor, rol, acción, recurso, paciente, sede activa, request id
   (`X-Request-Id`, DX-023), IP y user agent. Una petición que falla (404,
@@ -946,11 +964,10 @@ cuenta (`GET /patients/:id/account-statement`) reciben días civiles
 medianoche UTC: un abono de las 20:00 en Bogotá (01:00 UTC del día siguiente)
 cuenta en su día.
 
-- **Zona de la sede**: la de su horario (`location_schedules.timezone`); sin
-  horario, la de su país (CO → `America/Bogota`, ES → `Europe/Madrid`). Siempre
-  de la BD, nunca del cliente. `GET /locations` la publica (`timeZone`) para que
-  la web sepa qué día es «hoy» en la sede. Una sede nueva nace con el horario en
-  la zona de su país.
+- **Zona de la sede**: la zona IANA de la propia sede (`locations."timeZone"`,
+  G1), que se elige al crearla; ningún país la decide. Siempre de la BD, nunca
+  del cliente. `GET /locations` la publica (`timeZone`) para que la web sepa
+  qué día es «hoy» en la sede.
 - **Varias sedes**: en la vista consolidada cada sede corta su día en su zona;
   la consulta lleva una rama `(locationId IN (...) AND paidAt en [a, b))` por
   ZONA (no por sede), servida por `payments_tenantId_locationId_paidAt_active_idx`.
@@ -1016,12 +1033,12 @@ siguen admitiendo NULL hasta la fase 2.
 
 | Quién | Contra | Qué pasa |
 |---|---|---|
-| API antigua | BD de fase 1 | INSERT de sede sin columnas nuevas → filas NULL, las rellena el barrido; lee `location_schedules.timezone`, que el código nuevo mantiene igual a `Location.timeZone` (R20) |
-| Web antigua | API nueva | `PUT /locations/schedule` con `timezone` igual a la zona de la sede se acepta; registro sin campos de sede se acepta en la forma legada; `LocationDto` solo gana campos |
+| API antigua | BD de fase 1 | INSERT de sede sin columnas nuevas → filas NULL, las rellena el barrido (desde DX-312, el paso 0 del trigger rechaza ese INSERT); lee `location_schedules.timezone`, que el código nuevo mantiene igual a `Location.timeZone` (R20) |
+| Web antigua | API nueva | `PUT /locations/schedule` con `timezone` igual a la zona de la sede se acepta; `LocationDto` solo gana campos. El registro sin campos de sede (forma legada) es 400 con `field: locationCountry` desde DX-312 |
 | Web nueva | API antigua | `LocationDto` sin `currency` → `SedeConfigError`, nunca COP |
-| Enlace de registro de una réplica antigua | API nueva | `verify` lo acepta |
+| Enlace de registro de una réplica antigua | API nueva | Con los campos de sede, `verify` lo acepta. Sin ellos (forma legada), 410 `REGISTRATION_LINK_EXPIRED` sin consumirlo, desde DX-312 |
 | Web antigua | API antigua (`PUT /locations/schedule` con otra zona) | La zona se guarda solo en `location_schedules.timezone`, que el código nuevo no lee: se pierde. El ADMIN la corrige en Ajustes → Sedes |
-| Registro pendiente con los cuatro campos (API nueva) | `verify` en una réplica antigua | La sede nace con país CO y moneda, zona y formato NULL; el barrido la rellena según D5 y no los elegidos. Queda «por revisar»: el aviso D5 se lo muestra al ADMIN, que la corrige |
+| Registro pendiente con los cuatro campos (API nueva) | `verify` en una réplica antigua | Desde DX-312, el paso 0 del trigger de `locations` rechaza la sede sin datos regionales que crearía esa réplica: el alta se deshace entera, la respuesta es un 400 genérico, no se crea ninguna clínica y el pendiente queda consumido (ver «País de la sede ISO 3166 (DX-312)») |
 
 La lista ISO de monedas amplía las aceptadas en listas, gastos, caja y planes;
 el proveedor de tasas puede no tener alguna y esos abonos cuentan en
@@ -1030,8 +1047,8 @@ el proveedor de tasas puede no tener alguna y esos abonos cuentan en
 
 ### Fase 2 (ticket aparte)
 
-«G1 · Fase 2: cerrar las columnas regionales de la sede» (bajo DX-311; ticket
-por crear). Va en un release **posterior**, cuando no quede ninguna réplica
+«G1 · Fase 2: cerrar las columnas regionales de la sede» (DX-351, bajo
+DX-311). Va en un release **posterior**, cuando no quede ninguna réplica
 anterior a la fase 1. Precondición: `npm run g1:backfill-locations -- --check`
 (ver arriba) da 0 en las dos cifras; si no, correr
 `npm run g1:backfill-locations` y repetir. Cuenta, en todas las clínicas
@@ -1050,18 +1067,24 @@ Contenido del ticket:
   FORCE, llamar antes a `SELECT dx_g1_backfill_location_regional();` (sin
   tenant: todas las clínicas) para que una fila que quede no la tumbe; luego
   `SET NOT NULL` en
-  `locations.currency/"timeZone"/locale`; `ALTER COLUMN country DROP DEFAULT`;
+  `locations.currency/"timeZone"/locale`;
   `ALTER TABLE location_schedules DROP COLUMN timezone`; borrar los pendientes
-  legados caducados y poner NOT NULL en los cuatro `location*` de
-  `pending_registrations`; `DROP FUNCTION dx_g1_backfill_location_regional`.
-- Código: borrar el job `locations.regional-backfill`, el script
-  `g1:backfill-locations` y la rama legada de `verify`; `RegisterDto` con los
-  cuatro campos obligatorios; `PUT /locations/schedule` con `timezone` siempre
+  legados caducados y poner NOT NULL en `locationCurrency`,
+  `locationTimeZone`, `locationLocale` y `locationCountryCode` de
+  `pending_registrations` (no en `locationCountry`, la columna legada);
+  `DROP FUNCTION dx_g1_backfill_location_regional`.
+- Código: borrar el job `locations.regional-backfill` y el script
+  `g1:backfill-locations`; `PUT /locations/schedule` con `timezone` siempre
   400; quitar la doble escritura (R20); `LocationDto` sin `| null` (regenerar
   los tipos de la web); la web mantiene `SedeConfigError` solo para zona
   inválida.
 - Tests: los de fase 1 (réplica antigua, NULL, barrido) pasan a comprobar el
   NOT NULL y la ausencia de defaults.
+- **Ya hecho por DX-312** (no repetir): quitar el default del país de la sede
+  (M4), borrar la rama legada de `verify` y exigir los cuatro campos de sede
+  en el registro. **DX-351 no toca `locations."country"` ni
+  `pending_registrations."locationCountry"`**: las borra la fase 2 de DX-312
+  (ver «País de la sede ISO 3166 (DX-312)»).
 
 ## Cambiar la zona de una sede (G1, DX-313, DX-314)
 
@@ -2043,8 +2066,7 @@ confirmación firmado (DX-005); no añade otra cola ni otro transporte.
   el email `appointment-reminder` en `email_outbox` con `referenceId` = id del
   mensaje. El registro guarda ese id, nunca el cuerpo. Reprogramar la cita
   cambia la clave: lo de la hora vieja queda `RESCHEDULED` y se recalcula.
-- **Email**: fecha y hora en la zona de la sede (horario de la sede o su
-  país; 12 h en CO, 24 h en ES), sede, profesional y botón «Confirmar o
+- **Email**: fecha y hora con la zona, el formato y el reloj de la sede, sede, profesional y botón «Confirmar o
   cancelar». Nada clínico (ni motivo ni tratamiento). El enlace va al host de
   plataforma de la clínica, como los de restablecer e invitación (SEC-033,
   `TenantLinkBaseService.forTenant`): `<protocolo>://<subdominio>.<primer
@@ -2079,8 +2101,9 @@ de DX-037). Migración `20261017233300_dx128_contact_channel`.
   (motivos `OPTED_OUT`, `CHANNEL_NONE`, `CHANNEL_WHATSAPP`).
 - **Ficha**: `GET /patients/:id/communication` (4 roles) y `PATCH` (solo
   RECEPTION y ADMIN; 403 en español). El móvil se valida y normaliza a E.164
-  con el país de la sede activa o la principal (`whatsapp-phone.ts` + forma de
-  móvil de CO/ES); uno inválido se guarda con aviso, pero no puede ser canal
+  con el indicativo del país de la sede activa o la principal
+  (`country-calling-code.ts`, provisional hasta DX-329; un país sin indicativo
+  exige escribirlo con «+»); uno inválido se guarda con aviso, pero no puede ser canal
   WhatsApp (400 `WHATSAPP_REQUIRES_VALID_MOBILE`, también desde `PATCH
   /patients/:id`). Cada cambio deja un `audit_event` UPDATE de PATIENT con
   `reason: COMMUNICATION_PREFERENCES_CHANGED`, los campos y `origin`.
@@ -2269,6 +2292,160 @@ la deduce del país de una sede. Migraciones `20261028160000_dx328_enums`,
      ROLLBACK;
      ```
 
+## Tasa de cambio por clínica: automática o manual (DX-374)
+
+Porción 1 de DX-367. Cada clínica elige de dónde sale la tasa del día con la
+que se convierten saldos, totales e imputaciones: `tenants."exchangeRateSource"`
+(`AUTOMATIC` por defecto, el proveedor de siempre con su caché
+`exchange_rate_snapshots`; o `MANUAL`). Con `MANUAL` la tasa sale de
+`manual_exchange_rates`, que registra el ADMIN por día civil y moneda, en
+unidades de la moneda por 1 USD (la misma base que el proveedor). Migraciones
+`20261101120000_dx374_enums`, `20261101120100_dx374_audit_events_idx`,
+`20261101120200_dx374_tenant_exchange_rate_source`,
+`20261101120300_dx374_manual_exchange_rates`,
+`20261101120400_dx374_tenant_manual_rates_since` y
+`20261101120500_dx374_manual_exchange_rates_utc`. Sin relleno: toda clínica
+existente queda en `AUTOMATIC` y no cambia nada para ella.
+
+- **Día de inicio** (`tenants."manualExchangeRatesSince"`, DATE, CHECK: no
+  nulo si y solo si la fuente es `MANUAL`): pasar a `MANUAL` lo fija en hoy
+  en la zona de la sede principal; guardar `MANUAL` otra vez lo conserva;
+  volver a `AUTOMATIC` lo limpia. La tasa de un día D sale de las manuales
+  solo con `MANUAL` y D >= ese día; los días anteriores siguen con la
+  automática (caché y, si falta, el proveedor). Así, pasar a `MANUAL` no mueve
+  los saldos ni los totales de antes del cambio. Desde DX-375 cada abono
+  congela su tasa (sección siguiente), así que ni pasar a `MANUAL` ni volver
+  a `AUTOMATIC` mueve un abono ya cobrado.
+
+- **Lectura** (`GetRatesForDateUseCase`, la que usan todas las conversiones):
+  devuelve `{ base: 'USD', source, rates }`. Con `MANUAL` (y un día desde el
+  de inicio), `rates` trae solo las monedas con tasa registrada ESE día: una moneda que falta está «sin
+  tasa». No se toma la de otro día ni se llama al proveedor. Convertirla lanza
+  `MissingExchangeRateError` (400 `EXCHANGE_RATE_MISSING`, en español). Los
+  consumidores (`paymentInPlanCurrency`, `GetPaymentsTotalsUseCase`) la tratan
+  igual que una moneda que el proveedor no trae (`isMissingRateError`): el
+  abono queda sin base y el saldo responde 200 sin contarlo. La precarga diaria
+  (`exchange.prefetch-rates`) usa `providerRates`, que ignora la fuente de las
+  clínicas. `source` va en la respuesta para que DX-375 lo congele en cada
+  abono. El saldo del plan y los totales usan `ConvertAmountUseCase.memoized()`:
+  leen los ajustes de la clínica y las tasas de cada día una vez por cálculo,
+  no una vez por abono (mismo resultado).
+- **Endpoints**: `GET /exchange/rates` y `GET /exchange/convert` son ahora
+  rutas de clínica (los 4 roles, `TenantContextInterceptor`: hace falta el
+  host de la clínica). Solo ADMIN (`EXCHANGE_RATE_SETTINGS_ROLES`; el resto,
+  403 «Solo un administrador puede ver y cambiar la tasa de cambio de la
+  clínica.»): `GET|PUT /exchange/settings` (responde `{ source, manualSince,
+  baseCurrency }`; el cuerpo del PUT es `{ source }`),
+  `GET /exchange/manual-rates?limit=` (las últimas, día más reciente primero;
+  30 por defecto, 100 como mucho) y `POST /exchange/manual-rates`
+  (`{ date, currency, rate }`).
+- **Validación del alta**: tasa > 0, hasta 8 decimales y menos de 10.000.000;
+  moneda de `currencies` y nunca USD (es la base); día `AAAA-MM-DD` que existe,
+  desde 2000-01-01 y no posterior a hoy en la zona de la sede activa (o de la
+  principal). Una tasa ya registrada para ese día y moneda no se sobrescribe:
+  409 `MANUAL_EXCHANGE_RATE_TAKEN`; si ningún abono la usó, se corrige con
+  `PUT /exchange/manual-rates/:id` (DX-375). Se puede
+  registrar con la fuente `AUTOMATIC`, para dejar la de hoy lista antes de
+  cambiar a `MANUAL`. Quien no es miembro vivo de la clínica (acceso de
+  soporte) recibe 403.
+- **BD**: `manual_exchange_rates` con RLS FORCE y la política NULLIF; única
+  por (`tenantId`, `date`, `currency`), que sirve también la lectura del día y
+  la lista; FK de clínica, FK a `currencies` y FK compuesta del autor
+  (`tenantId`, `createdByMembershipId`, `createdById`) →
+  `clinic_memberships`; CHECKs de tasa > 0, moneda distinta de USD y día en
+  rango. La app tiene SELECT, INSERT y UPDATE solo de `rate` (DX-375).
+  `createdAt` lo pone en UTC un
+  trigger BEFORE INSERT (DX-226), aunque el INSERT mande otra hora.
+- **Auditoría**: cambiar la fuente deja un UPDATE de `CLINIC_SETTINGS` con
+  `reason: EXCHANGE_RATE_SOURCE` y `statusChange` `AUTOMATIC` → `MANUAL` (o al
+  revés), solo si cambia. Registrar una tasa deja un CREATE de `EXCHANGE_RATE`
+  (`@Audit`) con el id de la tasa.
+- **Despliegue**: `npx prisma migrate deploy` antes de la primera réplica
+  nueva. El índice de auditoría no es concurrente (tabla particionada): a una
+  hora de poco tráfico, como DX-316. Después, `npm run db:check-force`.
+- **Fuera de alcance** de DX-374, hecho en DX-375 (sección siguiente):
+  congelar en cada abono la tasa y su fuente, el aviso «sin tasa» y bloquear
+  el cambio de una tasa ya usada.
+
+## Tasa congelada en cada abono y aviso «sin tasa» (DX-375)
+
+Porción 2 de DX-367. Cada abono guarda la tasa con la que se convirtió y su
+fuente, y saldos y totales la usan siempre: cambiar la tasa (o la fuente)
+después no altera nada ya calculado.
+
+- **Cuándo se congela**: al registrar el abono (`RecordPaymentUseCase`),
+  fuera de la transacción, con la fuente de la clínica y el **día civil del
+  abono en su sede** (`paidOn`, DX-097): `ConvertAmountUseCase.quote` da las
+  dos tasas por 1 USD tal como las dio la fuente, la fuente y el día. Dentro
+  de la transacción del alta, con el plan bloqueado, se guarda si sigue
+  valiendo: la misma moneda del plan, el mismo día y, con `MANUAL`, las mismas
+  tasas manuales, que quedan `FOR SHARE` hasta el COMMIT. La base de
+  imputación (DX-051) y el saldo del recibo salen de esa misma tasa, ya
+  redondeada a los 8 decimales de la columna (lo mismo que se lee después;
+  una tasa que redondea a 0 cuenta como «sin tasa»). Si dentro ya no vale, el
+  abono queda «sin tasa» y el recibo sale sin saldo del plan.
+- **Columnas** de `payments` (todas NULL): `exchangeRateCurrency` (moneda de
+  destino: la del plan o la del saldo migrado; la escribe todo abono nuevo),
+  `exchangeRateFrom` y `exchangeRateTo` (unidades de la moneda del abono y de
+  la de destino por 1 USD, `Decimal(18,8)`), `exchangeRateSource` y
+  `exchangeRateDate`. CHECK `payments_exchange_rate_check` (las cuatro de la
+  tasa juntas, > 0 y solo con moneda distinta) y FK a `currencies`. Se guardan
+  las dos tasas por 1 USD, no el cociente: convertir con ellas da lo mismo,
+  céntimo a céntimo, que la conversión en vivo (`convertWithQuote`).
+- **Estado** de cada abono (`exchangeRateStatus` en la respuesta):
+  `NOT_NEEDED` (misma moneda), `FROZEN`, `MISSING` («sin tasa») y `LEGACY`
+  (anterior a DX-375 en otra moneda, aún sin congelar).
+- **Lectura** (`paymentAmountIn`, la única para saldo del plan, totales y
+  dashboard, base de imputación y backfill): con tasa congelada, siempre con
+  ella; `MISSING` no cuenta (`null`); `LEGACY` se convierte con la tasa de su
+  día, como antes («lectura compatible»). `GET /treatment-plans/:id/balance`
+  cuenta un abono con base de imputación **por su base** (BE-050: lo cobrado y
+  el desglose por ítem salen de la misma cifra) y devuelve
+  `paymentsWithoutRate` (`paymentId`, `amount`, `currency`, `paidOn`). El
+  estado de cuenta y la caja no convierten (siguen por moneda).
+- **Sin tasa del día**: el abono se guarda igual (201), sin base y con el
+  recibo sin saldo; el saldo lo dice en `paymentsWithoutRate` y la web enseña
+  el aviso con enlace a Ajustes › Tasa de cambio. El barrido de cada minuto
+  (`payment-allocations.sweep`) congela primero la tasa de los abonos que la
+  esperan (hasta 50 por clínica, índice parcial
+  `payments_exchange_rate_pending_idx`) y después crea sus bases. Va del más
+  reciente al más antiguo y sin reintento escalonado: con más de 50 abonos
+  que siguen sin tasa en una clínica, los más antiguos no entran en la pasada
+  aunque ya haya su tasa (hasta DX-380; mientras, los congela imputarlos a
+  mano o un cambio de fuente).
+- **Cambio de fuente** (BE-047): `PUT /exchange/settings`, si la fuente
+  cambia, congela ANTES todos los abonos pendientes de la clínica con la
+  fuente de antes (`ExchangeSourceChangeHooks`, que registra
+  `PaymentAllocationJobs`). Un abono de hoy anterior al cambio, de una sede
+  con otra zona o anterior a DX-375 conserva su tasa. Si congelar falla, la
+  fuente no cambia. Los que siguen sin tasa la toman de la fuente nueva.
+- **Tasa manual usada**: `PUT /exchange/manual-rates/:id` (`{ rate }`, solo
+  ADMIN, `@Audit` UPDATE `EXCHANGE_RATE`) corrige una tasa que ningún abono
+  congeló; una usada responde 409 `MANUAL_EXCHANGE_RATE_IN_USE` («Esta tasa ya
+  la usa al menos un abono…»). La lista marca cada tasa con `inUse`. El
+  repositorio la bloquea `FOR UPDATE` y comprueba el uso en la misma
+  transacción; el trigger `manual_exchange_rates_in_use_guard` lo impide
+  también en la BD (índice parcial `payments_exchange_rate_manual_idx`).
+  Corregir una tasa usada, con motivo y rehaciendo la base, queda fuera.
+- **Migraciones**: `20261102120000_dx375_payment_exchange_rate` (columnas,
+  CHECK y FK NOT VALID, GRANT UPDATE de `rate`, trigger),
+  `20261102120100_dx375_payment_exchange_rate_backfill` (relleno por lotes de
+  2.000 por clínica con `lock_timeout`: `exchangeRateCurrency` de los abonos
+  en la moneda de su destino), `20261102120200_…_pending_idx` y
+  `20261102120300_…_manual_idx` (CONCURRENTLY, una por fichero) y
+  `20261102120400_…_validate`. Los abonos anteriores en otra moneda no se
+  rellenan en SQL (la tasa depende de la zona de la sede, la fuente y el
+  proveedor, que viven en la API): se leen como antes y el barrido les congela
+  esa misma tasa. Compatible hacia atrás: una réplica anterior no nombra las
+  columnas nuevas y sus abonos nacen `LEGACY`.
+- **Despliegue**: `npx prisma migrate deploy` antes de la primera réplica
+  nueva; después, `npm run db:check-force`. El barrido termina de congelar los
+  abonos anteriores solo (50 por clínica y minuto).
+- **Demo**: `npm run seed:demo` deja un abono de hoy de 50 USD en el plan
+  «Endodoncia y rehabilitación de 46» (en COP). Sin clave del proveedor queda
+  «sin tasa» y enseña el aviso; para verlo congelado, pasa a `MANUAL` y
+  registra la tasa COP de hoy: el barrido lo congela en menos de un minuto.
+
 ## Tipos de documento genéricos y nombres locales (DX-327)
 
 El tipo de documento de un paciente o de un contacto es uno de cinco, iguales
@@ -2450,6 +2627,226 @@ también sobre este README. Migraciones
   - la traducción de solo lectura de los códigos anteriores no se borra
     nunca: las fotos de recibos y las filas de importación antiguas la
     necesitan.
+
+## País de la sede ISO 3166 (DX-312)
+
+El país de una sede es cualquier código ISO 3166-1 alfa-2 de la tabla
+`countries`. Ninguna regla lo lee. La moneda, lo único que puede ir ligado a
+un país, es un campo propio de la sede (G1) y no se deduce de él. Hasta
+DX-329, el país solo da
+el indicativo de los móviles escritos sin `+`
+(`src/shared/phone/country-calling-code.ts`, una tabla provisional de 24
+países; en los demás, el número se escribe con `+`). Es la fase 1 de un
+cambio sin parada (expand/contract).
+
+- **Modelo**:
+  - `locations."countryCode"` (`CHAR(2)`, `NOT NULL`, sin default), con la
+    FK `locations_country_code_fkey` a `countries.code` (`ON DELETE
+    RESTRICT`, `ON UPDATE CASCADE`). En Prisma y en el contrato HTTP el
+    campo se sigue llamando `country` (`@map("countryCode")`);
+  - `pending_registrations."locationCountryCode"`, igual pero nullable;
+  - `countries`: 250 filas (los 249 códigos ISO asignados más `XK`) con el
+    nombre en español de CLDR. La lista sale de
+    `prisma/scripts/generate-iso3166.ts`, que escribe
+    `prisma/reference/iso3166.ts` y `prisma/reference/iso3166-countries.json`
+    (la web lo copia byte a byte; lo comprueba
+    `scripts/check-api-reference-sync.mjs`). M1 la siembra y `seed.ts` la
+    repite. Cambiar la lista es regenerar, revisar el diff y crear una
+    migración nueva con el mismo `INSERT … ON CONFLICT DO UPDATE`.
+- **Validación** (`validateCountry`, `regional-settings.ts`): el código se
+  recorta y se pasa a mayúsculas. Sin país, con un código que no tiene dos
+  letras o que no está en `countries`, la respuesta es 400 con
+  `field: country` (alta y edición de sede) o `field: locationCountry`
+  (registro). En la edición, un `country` ausente no cambia nada; `null` o
+  vacío es 400.
+- **Lo guardado no se reescribe**: cambiar el país de una sede no toca
+  teléfonos, recetas ni nada guardado; solo cambia el indicativo de los
+  números nuevos escritos sin `+`.
+- **Registro**: el cuerpo sin campos de sede (la forma legada, anterior a G1)
+  es 400 con `field: locationCountry`. Un pendiente legado (sin sede) da 410
+  `REGISTRATION_LINK_EXPIRED` en `verify` y no se consume.
+- **Columnas legadas de la fase 1** (excepción G5.3, DX-334): se quedan
+  `locations."country"` y `pending_registrations."locationCountry"` (enum
+  `ClinicCountry`, ahora nullable) para las réplicas anteriores. Las mantienen
+  los triggers `locations_country_code` y
+  `pending_registrations_location_country_code`, con la proyección
+  `dx_legacy_clinic_country(code)`: el mismo valor si es uno de los dos del
+  enum y `NULL` en cualquier otro país. El cliente nuevo no las lee ni las
+  escribe (`@ignore`). En el código, el enum solo se nombra en
+  `src/shared/locations/legacy-clinic-country.ts`.
+  - **Paso 0 del trigger**: un INSERT de sede sin `"countryCode"` y sin
+    moneda, zona, formato ni revisión (la forma exacta del registro legado de
+    la API anterior) se rechaza con `check_violation`. Así una réplica
+    anterior no puede crear una clínica con el país que su cliente de Prisma
+    pone por defecto.
+  - `prescriptions.country` pasa a nullable. El CHECK
+    `prescriptions_legacy_country_present_check` exige país en las recetas
+    legadas; la receta única guarda la proyección (o `NULL`) y nada decide
+    con ella. DX-364 deja de escribirlo.
+- **Guardas**: `src/architecture/no-location-fallbacks.spec.ts`, bloque
+  «país de la sede libre (DX-312)». Ningún fichero de producción de `src/`
+  compara el país con un literal o una constante en MAYÚSCULAS, hace `switch`
+  con un `case` de dos letras, lo busca en una lista, tabla, `Set`,
+  `Object.hasOwn` o expresión regular, ni indexa un objeto por códigos de
+  país. Sus límites conocidos están en la cabecera del bloque.
+
+**Migraciones** (todas con `SET LOCAL lock_timeout = '5s'`):
+
+| Migración | Qué hace | Bloqueo | A mano |
+|---|---|---|---|
+| M1 `20261031120000_dx312_location_country_code` | Siembra `countries` (upsert, antes de los bloqueos); columnas nuevas, FK `NOT VALID`, funciones y triggers; `DROP NOT NULL` de las columnas legadas y CHECK de recetas `NOT VALID`. Sin relleno | `ACCESS EXCLUSIVE` breve en `locations`, `pending_registrations` y `prescriptions`, sin recorrer | `psql -1` |
+| M2 `20261031120100_dx312_location_country_code_backfill` | Rellena `"countryCode"` clínica por clínica, con `COMMIT` por clínica, y los pendientes. Idempotente | de fila | **sin** `-1` |
+| M3 `20261031120200_dx312_location_country_code_validate` | Valida la FK de pendientes y el CHECK de recetas; comprobación por clínica (falla con `RAISE EXCEPTION` si una sede no tiene país, tiene un código fuera de `countries` o la pareja es incoherente); después el bracket `NO FORCE` → `VALIDATE` de la FK de `locations` → `FORCE`, y el `NOT NULL` vía un CHECK validado | `ACCESS EXCLUSIVE` en `locations` **desde su `NO FORCE` hasta el `COMMIT`** | `psql -1` |
+| M4 `20261031120300_dx312_location_country_drop_default` | `ALTER COLUMN "country" DROP DEFAULT` en `locations` | `ACCESS EXCLUSIVE` breve | `psql -1` |
+
+- `prisma migrate deploy` aplica cada una en su transacción. **A mano**
+  (ensayo, sonda, operación): M1, M3 y M4 con
+  `psql -1 -v ON_ERROR_STOP=1 -f …/migration.sql`. Sin `-1`, un fallo de M3
+  después de su `NO FORCE` dejaría `locations` sin FORCE RLS, y
+  `SET LOCAL lock_timeout` no haría nada; el int
+  `test/location-country-code-migration.int-spec.ts` comprueba que, con `-1`,
+  un fallo del `VALIDATE` dentro del bracket lo deshace todo y FORCE sigue
+  puesto. M2 va **sin** `-1`: sus `COMMIT` dentro del `DO` fallan en un
+  bloque de transacción («invalid transaction termination»).
+- `locations` se lee en casi cada petición: todo en horas de poco tráfico.
+- Si una falla por `lock_timeout`: `npx prisma migrate resolve --rolled-back
+  <migración>` y repetir. Si M2 se corta, lo mismo (es idempotente). Si una
+  figura fallida pero su efecto ya está, `migrate resolve --applied`: M3 si
+  `"countryCode"` tiene `is_nullable = 'NO'` en
+  `information_schema.columns`; M4 si `column_default` de
+  `locations.country` es NULL.
+- Si M3 falla por la comprobación por clínica, no se despliega la API: se
+  investiga con la consulta posterior.
+
+**Runbook (en este orden):**
+
+1. Merge de la API antes que el de la web.
+2. Antes de `migrate deploy`, con un rol `BYPASSRLS` y solo lectura, la
+   consulta previa (a la nota de versión). La 2 tiene que dar 0; si no, se
+   espera a que caduquen (24 h). El 100 % de la API y de los workers tiene
+   que estar en DX-327 o posterior.
+
+   ```sql
+   -- 1. Países de las sedes (después deben cuadrar 1:1 con "countryCode").
+   SELECT "country"::text AS pais, ("deletedAt" IS NULL) AS viva, count(*) FROM "locations" GROUP BY 1, 2 ORDER BY 1, 2;
+   -- 2. Pendientes vivos sin sede (forma legada): debe ser 0.
+   SELECT count(*) FROM "pending_registrations" WHERE "expiresAt" > now() AND "locationCountry" IS NULL;
+   -- 3. Recetas por país y formato (no deben cambiar).
+   SELECT "country"::text, "singleFormat", count(*) FROM "prescriptions" GROUP BY 1, 2 ORDER BY 1, 2;
+   -- 4. Países sembrados.
+   SELECT count(*) FROM "countries";
+   ```
+3. `prisma migrate deploy` (M1-M4) termina **antes** del despliegue gradual.
+4. Consulta posterior: `SELECT "country"::text, "countryCode", count(*) FROM
+   "locations" GROUP BY 1, 2` solo da parejas iguales; `countries` tiene 250
+   filas (o más, si la base tenía propias); las consultas 1 y 3 dan lo mismo.
+   Y la consulta P5 (solo lectura, `BEGIN READ ONLY`, rol `BYPASSRLS`; lee
+   `"countryCode"`, así que va tras `migrate deploy` y antes de la web): qué
+   clínicas tienen sedes de qué país, para comprobar que ninguna del piloto
+   quedó con un país que no es el suyo. Si alguna lo está, la corrige su
+   ADMIN; nada se reescribe solo.
+
+   ```sql
+   SELECT t."subdomain", t."name" AS clinica, l."countryCode" AS pais,
+          count(*) FILTER (WHERE l."deletedAt" IS NULL) AS sedes_vivas,
+          count(*) FILTER (WHERE l."deletedAt" IS NOT NULL) AS sedes_borradas
+   FROM "locations" l JOIN "tenants" t ON t."id" = l."tenantId"
+   GROUP BY 1, 2, 3 ORDER BY 1, 3;
+   ```
+5. La API **y los workers** hasta el 100 %. **Solo entonces, la web**: es la
+   única que ofrece países fuera de los dos del enum, así que mientras viva
+   una réplica anterior no existe ninguna sede, receta ni pendiente de otro
+   país (salvo una llamada directa a la API nueva).
+
+**Réplica anterior contra la BD migrada** (ensayo de DX-312 con la API
+anterior entera):
+
+- Lee y escribe igual que hoy en las clínicas cuyas sedes son de los dos
+  países del enum. Sus escrituras mandan la columna legada y el trigger
+  rellena `"countryCode"`.
+- Una clínica con alguna sede (o receta) de otro país tiene la columna legada
+  a `NULL`, que su Prisma no admite: **500 solo en esa clínica y solo en las
+  lecturas autenticadas** que leen la sede (`GET /locations`, recetas, emisor,
+  bloque de comunicaciones con esa sede) y al **crear** enlaces
+  (anamnesis, postoperatorio) en esa sede. Las demás clínicas no se enteran
+  (RLS por clínica). Los **enlaces públicos ya emitidos se siguen abriendo**
+  (la anamnesis pública solo lee el id y el nombre de la sede), y también la
+  marca pública de la clínica. La baja por respuesta de WhatsApp solo falla
+  si la sede principal de la clínica es de otro país. Nunca se escribe un
+  país equivocado.
+- Un pendiente legado, o uno de otro país creado por la API nueva, que
+  confirma (`verify`) una réplica anterior: el paso 0 del trigger rechaza la
+  sede y la transacción del alta se deshace entera. La respuesta es un **400
+  genérico** (`CHECK_VIOLATION`, SQLSTATE 23514; su log dice solo «Regla de
+  BD violada (23514): -»), **no un 500**, y **no se crea nada**: ni clínica,
+  ni usuario, ni sede. El pendiente queda consumido; la persona se registra
+  de nuevo.
+- Un `PATCH` de la API anterior que mande `country` de uno de los dos
+  valores del enum sobre una sede de otro país cambia la columna legada y el
+  trigger pone `"countryCode"` a ese valor. Es una elección explícita de quien
+  llama, nunca un valor por defecto, y la web anterior no llega a esa clínica
+  (500).
+
+**Vuelta atrás**: primero la web, después la API y los workers. Antes de
+volver a la API anterior, con un rol `BYPASSRLS`:
+
+```sql
+SELECT (SELECT count(*) FROM "locations" WHERE "country" IS NULL) AS sedes,
+       (SELECT count(*) FROM "prescriptions" WHERE "country" IS NULL) AS recetas,
+       (SELECT count(*) FROM "pending_registrations"
+         WHERE "expiresAt" > now() AND "locationCountry" IS NULL) AS pendientes;
+```
+
+- **Las tres a 0**: el rollback es inocuo; el trigger mantiene al día la
+  columna legada y la API anterior ignora las nuevas.
+- **Alguna mayor que 0**: esas clínicas tendrían los 500 de arriba y esos
+  pendientes no crearían clínica. **Se sigue hacia delante.** Nunca se
+  escribe un país del enum en esas filas para poder volver: sería inventar un
+  país.
+- El trigger (con su paso 0) y M4 no se deshacen: la API anterior no
+  necesita el default (su cliente manda el país).
+- Un `prisma db seed` de la versión anterior (lo hace la CI) vuelve a poner
+  los nombres de `countries` en inglés; producción no ejecuta el seed, y el
+  `seed.ts` nuevo los deja otra vez en español.
+
+**Fase 2** (ticket aparte bajo DX-311, «G1.1 · Fase 2: fuera
+`ClinicCountry`»):
+
+- **Requisitos (todos):**
+  - 0 réplicas y 0 workers anteriores a DX-312, y 0 réplicas anteriores a
+    DX-326 (por `payers.country`);
+  - DX-364 publicado: la receta única ya no escribe `country` y el emisor no
+    tiene `phase1`;
+  - DX-351 publicado, porque borra `dx_g1_backfill_location_regional`, que
+    lee `locations."country"`; si no, esta migración la borra antes del
+    `DROP COLUMN`;
+  - `SELECT count(*) FROM pending_registrations WHERE "expiresAt" > now() AND
+    "locationCountryCode" IS NULL` = 0.
+- **Migración** (`lock_timeout`, una transacción, `psql -1` a mano):
+  - `DROP TRIGGER "locations_country_code" ON "locations"` y
+    `DROP TRIGGER "pending_registrations_location_country_code" ON
+    "pending_registrations"`;
+  - `DROP FUNCTION` de `dx_location_country_code_sync()`,
+    `dx_pending_registration_country_code_sync()` y
+    `dx_legacy_clinic_country(text)`;
+  - `DROP COLUMN` de `locations."country"`,
+    `pending_registrations."locationCountry"` y `payers."country"`
+    (DX-326);
+  - `ALTER TYPE "ClinicCountry" RENAME TO "LegacyPrescriptionCountry"` (solo
+    catálogo, sin reescribir `prescriptions`);
+  - se quedan `prescriptions.country` (nullable) y
+    `prescriptions_legacy_country_present_check`.
+- **Código:** fuera los tres campos `@ignore` (`Location.legacyCountry`,
+  `PendingRegistration.legacyLocationCountry`, `Payer.country`),
+  `legacy-clinic-country.ts` y su spec; `Prescription.country` pasa a
+  `LegacyPrescriptionCountry?`; la guarda «solo `legacy-clinic-country.ts`
+  nombra `ClinicCountry`» pasa a «`ClinicCountry` no existe ni en el esquema
+  ni en `src`».
+- **Tests:** los casos del trigger del int pasan a «no queda trigger ni
+  columna legada».
+- Tras la fase 2, ninguna sede, pendiente ni pagador tiene un enum de país.
+  Los dos valores solo sobreviven en `prescriptions.country`, como plantilla
+  congelada de las recetas legadas (excepción permanente de DX-324).
 
 ## Calendario de días hábiles y festivos de la sede (DX-316)
 

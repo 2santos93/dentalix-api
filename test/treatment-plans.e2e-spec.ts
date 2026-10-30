@@ -460,6 +460,7 @@ describe('Treatment plans (e2e)', () => {
       raw,
       clinic.tenantId,
       'Sin configurar',
+      REGIONAL_BOGOTA_FIXTURE.country,
     );
 
     // Sede activa JPY: JPY. Una moneda explícita sigue mandando.

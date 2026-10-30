@@ -426,8 +426,11 @@ describe('Listar, ver y anular', () => {
     legacy.safetyRulesVersion = null;
     legacy.safetyAlerts = null;
     legacy.safetyOverrideReason = null;
+    const { country } = legacy;
+    if (country === null) throw new Error('la receta legada lleva país');
     legacy.contentHash = computePrescriptionHash({
       ...legacy,
+      country,
       singleFormat: false,
       items: legacy.items.map(({ id: _id, ...item }) => item),
     });
@@ -447,11 +450,8 @@ describe('Listar, ver y anular', () => {
       integrityOk: false,
     });
 
-    // Legada sin país (lo impide el NOT NULL de fase 1).
-    Object.assign(row, sealed, {
-      singleFormat: false,
-      country: null as unknown as typeof row.country,
-    });
+    // Legada sin país (lo impide el CHECK prescriptions_legacy_country_present_check).
+    Object.assign(row, sealed, { singleFormat: false, country: null });
     await expect(get.execute(id)).resolves.toMatchObject({
       integrityOk: false,
     });

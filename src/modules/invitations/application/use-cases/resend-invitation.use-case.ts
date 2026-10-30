@@ -11,6 +11,7 @@ import {
   CreateInvitationResult,
   INVITATION_TTL_MS,
 } from './create-invitation.use-case';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 
 const NOT_PENDING = 'No encontramos una invitación pendiente con ese id.';
 
@@ -35,7 +36,11 @@ export class ResendInvitationUseCase {
     private readonly notifier: InvitationNotifier,
   ) {}
 
-  async execute(input: ResendInvitationInput): Promise<CreateInvitationResult> {
+  /** DX-359: `ctx` es quién reenvía; el evento va en la transacción. */
+  async execute(
+    input: ResendInvitationInput,
+    ctx: AuditRequestContext,
+  ): Promise<CreateInvitationResult> {
     const pending = await this.repo.findPendingById(input.id);
     if (!pending) {
       throw new NotFoundException(NOT_PENDING);
@@ -45,10 +50,14 @@ export class ResendInvitationUseCase {
     await this.notifier.assertCanSend(pending.email);
 
     const token = generateInvitationToken();
-    const invitation = await this.repo.reissue(input.id, {
-      tokenHash: hashInvitationToken(token),
-      expiresAt: new Date(Date.now() + INVITATION_TTL_MS),
-    });
+    const invitation = await this.repo.reissue(
+      input.id,
+      {
+        tokenHash: hashInvitationToken(token),
+        expiresAt: new Date(Date.now() + INVITATION_TTL_MS),
+      },
+      ctx,
+    );
     if (!invitation) {
       // Otra clínica (RLS), aceptada, revocada o inexistente: nada que reenviar.
       throw new NotFoundException(NOT_PENDING);

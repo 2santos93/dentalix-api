@@ -1,4 +1,5 @@
 import { Payment } from '../../../domain/entities/payment.entity';
+import { exchangeRateStatus } from '../../../domain/payment-exchange-rate';
 import type { IdempotentPayment } from '../../../domain/idempotency';
 import {
   CashRegisterPage,
@@ -21,7 +22,10 @@ import { requireLocationFormat } from '../../../../../shared/locations/location-
 // "non-deleted only" like the real Prisma repo, so it tracks `deletedAt` on
 // the stored row and strips it via `toEntity` (mirrors `mapToEntity` in
 // prisma-payment.repository.ts).
-type StoredPayment = Omit<Payment, 'paidOn' | 'receiptNumber'> & {
+type StoredPayment = Omit<
+  Payment,
+  'paidOn' | 'receiptNumber' | 'exchangeRateStatus'
+> & {
   locationId: string;
   deletedAt: Date | null;
   idempotencyKey: string | null;
@@ -79,6 +83,9 @@ export class InMemoryPaymentRepository implements PaymentRepository {
       requestFingerprint: overrides.requestFingerprint ?? null,
       deletedAt: overrides.deletedAt ?? null,
       voidAudit: overrides.voidAudit ?? null,
+      // Sin indicarlo, un abono anterior a DX-375 (se lee con la tasa de su día).
+      exchangeRateCurrency: overrides.exchangeRateCurrency ?? null,
+      frozenRate: overrides.frozenRate ?? null,
     };
     this.payments.push(row);
     return this.toEntity(row);
@@ -104,6 +111,9 @@ export class InMemoryPaymentRepository implements PaymentRepository {
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       receiptNumber: null,
+      exchangeRateCurrency: row.exchangeRateCurrency,
+      frozenRate: row.frozenRate,
+      exchangeRateStatus: exchangeRateStatus(row),
     };
   }
 
@@ -139,6 +149,11 @@ export class InMemoryPaymentRepository implements PaymentRepository {
       requestFingerprint: input.requestFingerprint ?? null,
       deletedAt: null,
       voidAudit: null,
+      // El real usa la moneda del plan bloqueado; el fake, la de la tasa o la
+      // de la base que le llegan.
+      exchangeRateCurrency:
+        input.frozenRate?.currency ?? input.planAmount?.planCurrency ?? null,
+      frozenRate: input.frozenRate,
     };
     this.payments.push(row);
     return Promise.resolve(this.toEntity(row));

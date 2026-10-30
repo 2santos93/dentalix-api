@@ -552,6 +552,8 @@ class DemoSeeder {
         locale: 'es-CO',
         hourCycle: DEMO_HOUR_CYCLE,
       },
+      // DX-359: el alta queda auditada, sin petición detrás.
+      request: null,
     });
 
     let confirmationUrl: string | undefined;
@@ -813,12 +815,23 @@ class DemoSeeder {
   private async inviteStaff(ownerId: string): Promise<string[]> {
     const ids = [ownerId];
     for (const member of DEMO_USERS.slice(1)) {
-      const { token } = await this.use(CreateInvitationUseCase).execute({
-        fullName: member.fullName,
-        email: member.email,
-        role: member.role,
-        invitedById: ownerId,
-      });
+      // DX-359: auditado como la invitación del ADMIN.
+      const { token } = await this.use(CreateInvitationUseCase).execute(
+        {
+          fullName: member.fullName,
+          email: member.email,
+          role: member.role,
+          invitedById: ownerId,
+        },
+        {
+          tenantId: this.tenantContext.getTenantId() as string,
+          locationId: null,
+          actor: { userId: ownerId, role: ClinicRole.ADMIN },
+          requestId: null,
+          ip: null,
+          userAgent: null,
+        },
+      );
       await this.use(AcceptInvitationUseCase).execute({
         token,
         password: DEMO_PASSWORD,
@@ -2223,8 +2236,11 @@ class DemoSeeder {
             planId,
             {
               amount: payment.amount,
-              currency: DEMO_CURRENCY,
-              paidAt: daysAgoAt(this.now, payment.daysAgo, 11 * 60 + i * 20),
+              currency: payment.currency ?? DEMO_CURRENCY,
+              paidAt:
+                payment.minutesAgo === undefined
+                  ? daysAgoAt(this.now, payment.daysAgo, 11 * 60 + i * 20)
+                  : new Date(this.now.getTime() - payment.minutesAgo * 60_000),
               method: payment.method,
               notes: payment.notes,
             },
@@ -2623,24 +2639,29 @@ class DemoSeeder {
     patientIds: string[],
     dentists: string[],
   ): Promise<void> {
+    const ownerCtx: AuditRequestContext = {
+      tenantId: this.tenantContext.getTenantId() as string,
+      locationId: null,
+      actor: { userId: ownerId, role: ClinicRole.ADMIN },
+      requestId: null,
+      ip: null,
+      userAgent: null,
+    };
+    // DX-359: auditado como el PATCH del ADMIN.
     for (const [index, license] of DEMO_PROFESSIONAL_LICENSES.entries()) {
-      await this.use(UpdateStaffUseCase).execute({
-        userId: dentists[index],
-        professionalLicense: license,
-        professionalSpecialty: DEMO_PROFESSIONAL_SPECIALTIES[index],
-      });
+      await this.use(UpdateStaffUseCase).execute(
+        {
+          userId: dentists[index],
+          professionalLicense: license,
+          professionalSpecialty: DEMO_PROFESSIONAL_SPECIALTIES[index],
+        },
+        ownerCtx,
+      );
     }
     // DX-324: antes de emitir, como lo haría el ADMIN en Ajustes › Recetas.
     await this.use(UpdatePrescriptionSettingsUseCase).execute(
       { ...DEMO_PRESCRIPTION_SETTINGS },
-      {
-        tenantId: this.tenantContext.getTenantId() as string,
-        locationId: null,
-        actor: { userId: ownerId, role: ClinicRole.ADMIN },
-        requestId: null,
-        ip: null,
-        userAgent: null,
-      },
+      ownerCtx,
     );
     for (const template of DEMO_PRESCRIPTION_TEMPLATES) {
       await this.use(CreatePrescriptionTemplateUseCase).execute(

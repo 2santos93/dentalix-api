@@ -10,6 +10,7 @@ import {
 } from '../../../appointment-confirmations/application/confirmation-token';
 import { RecordAuditEventUseCase } from '../../../audit/application/record-audit-event.use-case';
 import { normalizeMobile } from '../../../patients/domain/communication/mobile-number';
+import { callingCodeOfCountry } from '../../../../shared/phone/country-calling-code';
 import {
   REMINDER_OPT_OUT_REPOSITORY,
   type OptOutClinicBranding,
@@ -216,10 +217,12 @@ export class OptOutByMessageUseCase {
     if (from.status !== 'VALID') return { isOptOut: true, optedOut: [] };
 
     return this.tenantContext.run(reply.tenantId, async () => {
-      const country = await this.repo.principalLocationCountry();
+      const callingCode = callingCodeOfCountry(
+        await this.repo.principalLocationCountry(),
+      );
       const candidates = await this.repo.findByPhoneTail(digits.slice(-8));
       const matches = candidates.filter(
-        (c) => normalizeMobile(c.phone, country).e164 === from.e164,
+        (c) => normalizeMobile(c.phone, callingCode).e164 === from.e164,
       );
       const limit = this.maxMatches;
       if (matches.length > limit) {

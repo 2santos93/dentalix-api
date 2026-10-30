@@ -483,6 +483,11 @@ describe('GetDoctorDashboardUseCase', () => {
     // longer be swallowed and would (correctly) fail this test's
     // "wholesale dashboard resilience" assertion.
     class FailingForZzzConvertAmountUseCase {
+      /** Como el real: el convertidor memoizado convierte igual (DX-374). */
+      memoized(): this {
+        return this;
+      }
+
       execute(input: { amount: number; from: string; to: string }) {
         if (input.from === 'ZZZ') {
           return Promise.reject(

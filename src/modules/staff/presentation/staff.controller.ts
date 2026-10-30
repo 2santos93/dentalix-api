@@ -37,6 +37,7 @@ import {
   auditRequestContext,
   type AuditableRequest,
 } from '../../audit/presentation/audit-request-context';
+import type { AuditRequestContext } from '../../audit/domain/audit-request-context';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { ReactivateStaffUseCase } from '../application/use-cases/reactivate-staff.use-case';
 import { UpdateStaffUseCase } from '../application/use-cases/update-staff.use-case';
@@ -138,26 +139,53 @@ export class StaffController {
     return this.getStaffDetail.execute(userId);
   }
 
+  // DX-359: auditado desde el repositorio, en la transacción del cambio
+  // (STAFF_UPDATED con el antes y el después de rol, sedes, registro
+  // profesional y especialidad; sin evento si nada cambió).
   @Patch(':userId')
   @Roles(...STAFF_WRITE_ROLES)
+  @ApiOperation({
+    summary:
+      'Cambia nombre, rol, registro profesional o especialidad de un miembro',
+    description:
+      'Queda en la auditoría (STAFF_UPDATED) con los campos cambiados y, salvo el nombre, su valor anterior y nuevo. Ascender a ADMIN le da todas las sedes.',
+  })
   @ApiOkResponse({ type: StaffMemberDto })
+  @ApiNotFoundResponse({ description: 'Miembro no encontrado' })
+  @ApiConflictResponse({ description: 'Degradaría al último ADMIN' })
   update(
     @Param('userId', ParseUUIDPipe) userId: string,
     @Body() dto: UpdateStaffDto,
+    @Req() req: AuditableRequest,
   ): Promise<StaffMember> {
-    return this.updateStaff.execute({ userId, ...dto });
+    return this.updateStaff.execute({ userId, ...dto }, this.auditCtx(req));
+  }
+
+  /** Quién escribe, para el evento que el repositorio guarda (DX-359). */
+  private auditCtx(req: AuditableRequest): AuditRequestContext {
+    const ctx = auditRequestContext(req, this.tenantContext);
+    if (!ctx) throw new Error('Sin sesión de clínica detrás del RolesGuard');
+    return ctx;
   }
 
   // 200, no el 201 que Nest da por defecto en POST: reactivar no crea ningún
   // recurso, resucita una membresía que ya existía.
+  // DX-359: auditado en la transacción (STAFF_REACTIVATED, INACTIVE → ACTIVE).
   @Post(':userId/reactivate')
   @Roles(...STAFF_WRITE_ROLES)
   @HttpCode(200)
+  @ApiOperation({
+    summary: 'Reactiva un miembro desactivado',
+    description:
+      'Queda en la auditoría (STAFF_REACTIVATED) con el estado antes y después.',
+  })
   @ApiOkResponse({ type: StaffMemberDto })
+  @ApiNotFoundResponse({ description: 'No hay membresía desactivada' })
   reactivate(
     @Param('userId', ParseUUIDPipe) userId: string,
+    @Req() req: AuditableRequest,
   ): Promise<StaffMember> {
-    return this.reactivateStaff.execute(userId);
+    return this.reactivateStaff.execute(userId, this.auditCtx(req));
   }
 
   // DX-048: quitar el bloqueo por intentos fallidos de un miembro de ESTA
@@ -246,16 +274,27 @@ export class StaffController {
     });
   }
 
+  // DX-359: auditado en la transacción (STAFF_DEACTIVATED, ACTIVE → INACTIVE).
   @Delete(':userId')
   @Roles(...STAFF_WRITE_ROLES)
   @HttpCode(204)
+  @ApiOperation({
+    summary: 'Desactiva un miembro (baja lógica de su membresía)',
+    description:
+      'Queda en la auditoría (STAFF_DEACTIVATED) con el estado antes y después.',
+  })
+  @ApiNoContentResponse({ description: 'Desactivado' })
+  @ApiNotFoundResponse({ description: 'Miembro no encontrado' })
+  @ApiConflictResponse({
+    description: 'Es tu propia cuenta o el último ADMIN',
+  })
   async remove(
     @Param('userId', ParseUUIDPipe) userId: string,
-    @Req() req: AuthenticatedRequest,
+    @Req() req: AuditableRequest,
   ): Promise<void> {
-    await this.deactivateStaff.execute({
-      userId,
-      requestingUserId: req.user.sub,
-    });
+    await this.deactivateStaff.execute(
+      { userId, requestingUserId: req.user.sub },
+      this.auditCtx(req),
+    );
   }
 }

@@ -104,6 +104,8 @@ export const TENANT_TABLES = [
   'patients',
   'dental_catalog_items',
   'clinic_invitations',
+  // DX-374: tasas de cambio manuales (hijas de clinic_memberships).
+  'manual_exchange_rates',
   // DX-089: sedes de un miembro (hijas de clinic_memberships y locations).
   'membership_locations',
   'clinic_memberships',

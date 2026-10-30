@@ -111,6 +111,67 @@ describe('AcceptInvitationUseCase', () => {
     expect(invitation.email).toBe('nuevo@clinic.com'); // sanity: seedInvitation devolvió lo esperado
   });
 
+  it('DX-359: aceptar con una cuenta NUEVA deja el alta del miembro (actor = él mismo), sin contraseña, hash ni token', async () => {
+    const repo = new InMemoryInvitationRepository();
+    const invitation = repo.seedInvitation({
+      token: 'tok-nueva',
+      email: 'nueva@clinic.com',
+      role: ClinicRole.DENTIST,
+    });
+    const ctx = new TenantContextService();
+    const audit = makeAudit();
+    const uc = new AcceptInvitationUseCase(
+      repo,
+      makePassword(),
+      makeTokens(),
+      ctx,
+      audit,
+    );
+
+    await ctx.run('t1', () =>
+      uc.execute({
+        token: 'tok-nueva',
+        password: 'longenough1',
+        meta: { requestId: 'req-9', ip: '10.0.0.9', userAgent: 'móvil' },
+      }),
+    );
+
+    const user = await repo.findUserByEmailGlobal('nueva@clinic.com');
+    expect(repo.auditEvents).toEqual([
+      {
+        tenantId: 't1',
+        locationId: null,
+        actor: { kind: 'user', userId: user?.id, role: ClinicRole.DENTIST },
+        patient: null,
+        requestId: 'req-9',
+        ip: '10.0.0.9',
+        userAgent: 'móvil',
+        action: 'CREATE',
+        resourceType: 'STAFF_MEMBER',
+        resourceId: user?.id,
+        metadata: {
+          reason: 'INVITATION_ACCEPTED',
+          params: { invitationId: invitation.id },
+          staffAccess: {
+            after: { role: ClinicRole.DENTIST, locationIds: null },
+          },
+        },
+      },
+    ]);
+    // El reclamo (PASSWORD_RESET) es otro caso: aquí no hay ninguno.
+    expect(audit.recordMock).not.toHaveBeenCalled();
+    const stored = JSON.stringify(repo.auditEvents);
+    for (const secret of [
+      'longenough1',
+      'NEW_HASH',
+      'tok-nueva',
+      hashInvitationToken('tok-nueva'),
+      'nueva@clinic.com',
+    ]) {
+      expect(stored).not.toContain(secret);
+    }
+  });
+
   it('usuario EXISTENTE con contraseña correcta: NO crea usuario, NO cambia su password, crea membresía, marca aceptada, devuelve tokens', async () => {
     const repo = new InMemoryInvitationRepository();
     repo.seedUser({

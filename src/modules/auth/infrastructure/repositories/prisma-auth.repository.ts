@@ -1,4 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
+import { clinicRegisteredAuditEvent } from '../../domain/registration-audit';
 import { ClinicRole, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import {
@@ -122,72 +124,44 @@ export class PrismaAuthRepository implements AuthRepository {
           tenantId: tenant.id,
         })),
       });
+      // DX-359: el alta de la clínica y su ADMIN, auditada en esta misma
+      // transacción (el GUC de tenant ya es el de la clínica nueva).
+      await writeAuditEvent(
+        tx,
+        clinicRegisteredAuditEvent(input.request, {
+          tenantId: tenant.id,
+          userId: user.id,
+          locationId: location.id,
+        }),
+      );
       return { tenantId: tenant.id, userId: user.id };
     });
   }
 
   /**
    * G1: la «Sede principal» con país, moneda, zona y formato del registro, ya
-   * revisada (R11). Un pendiente LEGADO (`settings` null, fase 1 §3.5) la crea
-   * como lo hacía la API anterior (país por defecto de la BD) y la rellena la
-   * función D5 en esta misma transacción, sin revisar: el ADMIN verá el aviso
-   * D5. Es el único camino de código que deja al país decidir esos valores, y
-   * lo hace a través de esa función (R19). Desaparece en fase 2.
-   *
-   * G1-B fase 1 (spec §4.3): el reloj del registro se escribe si viene. Sin él
-   * (web o réplica de G1, y la rama legada) lo pone
-   * `dx_g1b_backfill_location_hour_cycle` en esta misma transacción, después
-   * de la función de G1.
+   * revisada (R11). G1-B fase 1 (spec §4.3): el reloj del registro se escribe
+   * si viene. Sin él (web o réplica de G1) lo pone
+   * `dx_g1b_backfill_location_hour_cycle` en esta misma transacción.
    */
   private async createMainLocation(
     tx: Prisma.TransactionClient,
     tenantId: string,
-    settings: ClinicLocationSettings | null,
+    settings: ClinicLocationSettings,
   ): Promise<{ id: string; timeZone: string }> {
-    if (settings) {
-      const location = await tx.location.create({
-        data: {
-          tenantId,
-          name: 'Sede principal',
-          ...settings,
-          regionalSettingsReviewedAt: new Date(),
-        },
-        select: { id: true },
-      });
-      if (settings.hourCycle === null) {
-        await this.backfillHourCycle(tx, tenantId, location.id);
-      }
-      return { id: location.id, timeZone: settings.timeZone };
-    }
-    const { id } = await tx.location.create({
-      data: { tenantId, name: 'Sede principal' },
+    const location = await tx.location.create({
+      data: {
+        tenantId,
+        name: 'Sede principal',
+        ...settings,
+        regionalSettingsReviewedAt: new Date(),
+      },
       select: { id: true },
     });
-    await tx.$queryRaw`SELECT public.dx_g1_backfill_location_regional(${tenantId}::uuid)`;
-    await this.backfillHourCycle(tx, tenantId, id);
-    const filled = await tx.location.findUniqueOrThrow({
-      where: { id },
-      select: { timeZone: true },
-    });
-    if (!filled.timeZone) {
-      // Inalcanzable mientras `ClinicCountry` sea CO/ES: la función D5 cubre
-      // los dos. Si se añade un país antes de la fase 2, la función tiene que
-      // cubrirlo; hasta entonces, se registra y falla en lugar de inventar.
-      this.logger.error({
-        event: 'registration.legacy_location_unfilled',
-        tenantId,
-        locationId: id,
-      });
-      throw new Error(
-        'La sede del registro legado quedó sin zona: la función D5 no cubre su país.',
-      );
+    if (settings.hourCycle === null) {
+      await this.backfillHourCycle(tx, tenantId, location.id);
     }
-    this.logger.log({
-      event: 'registration.legacy_location_backfilled',
-      tenantId,
-      locationId: id,
-    });
-    return { id, timeZone: filled.timeZone };
+    return { id: location.id, timeZone: settings.timeZone };
   }
 
   /** G1-B fase 1: el único que rellena un reloj NULL (R5). Desaparece en fase 2. */

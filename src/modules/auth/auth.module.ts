@@ -32,6 +32,8 @@ import { BreakGlassService } from './application/break-glass.service';
 import { BREAK_GLASS_REPOSITORY } from './domain/ports/break-glass-repository.port';
 import { PrismaBreakGlassRepository } from './infrastructure/repositories/prisma-break-glass.repository';
 import { mfaSecretCipherProvider } from '../../shared/crypto/mfa-secret-cipher';
+import { COUNTRY_WHITELIST } from '../locations/domain/ports/country-whitelist.port';
+import { PrismaCountryWhitelist } from '../locations/infrastructure/adapters/prisma-country-whitelist.adapter';
 import { CURRENCY_WHITELIST } from '../treatment-plans/domain/ports/currency-whitelist.port';
 import { PrismaCurrencyWhitelist } from '../treatment-plans/infrastructure/adapters/prisma-currency-whitelist.adapter';
 
@@ -66,6 +68,7 @@ import { PrismaCurrencyWhitelist } from '../treatment-plans/infrastructure/adapt
     { provide: REGISTRATION_NOTIFIER, useClass: EmailRegistrationNotifier },
     // G1: la moneda de la primera sede tiene que estar en `currencies`.
     { provide: CURRENCY_WHITELIST, useClass: PrismaCurrencyWhitelist },
+    { provide: COUNTRY_WHITELIST, useClass: PrismaCountryWhitelist },
     // Recuperar la contraseña por email (DX-010).
     RequestPasswordResetUseCase,
     ResetPasswordUseCase,

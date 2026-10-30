@@ -350,6 +350,7 @@ describe('Horario de los profesionales por sede (e2e, DX-233)', () => {
           raw,
           clinic.tenantId,
           'Réplica antigua',
+          REGIONAL_BOGOTA_FIXTURE.country,
         );
         try {
           const res = await roster().expect(200);

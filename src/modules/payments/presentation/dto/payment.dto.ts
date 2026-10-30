@@ -1,5 +1,13 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { PaymentMethod } from '@prisma/client';
+import {
+  PAYMENT_EXCHANGE_RATE_STATUSES,
+  type PaymentExchangeRateStatus,
+} from '../../domain/payment-exchange-rate';
+import {
+  EXCHANGE_RATE_STATUS_DESCRIPTION,
+  FrozenExchangeRateDto,
+} from './frozen-exchange-rate.dto';
 
 // Response shape for Payment endpoints -- documents the Payment entity
 // contract for Swagger (same convention as AppointmentDto / SaleDto: exists
@@ -74,4 +82,31 @@ export class PaymentDto {
       'recibo conserva la referencia antigua REC-xxxxxxxx).',
   })
   receiptNumber!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'USD',
+    description:
+      'DX-375: moneda a la que convierte la tasa del abono (la del plan o la ' +
+      'del saldo migrado); null en un abono anterior a la tasa congelada aún ' +
+      'sin congelar.',
+  })
+  exchangeRateCurrency!: string | null;
+
+  @ApiProperty({
+    type: FrozenExchangeRateDto,
+    nullable: true,
+    description:
+      'DX-375: la tasa que congeló el abono; null en su misma moneda, «sin ' +
+      'tasa» o anterior aún sin congelar.',
+  })
+  frozenRate!: FrozenExchangeRateDto | null;
+
+  @ApiProperty({
+    enum: PAYMENT_EXCHANGE_RATE_STATUSES,
+    enumName: 'PaymentExchangeRateStatus',
+    description: EXCHANGE_RATE_STATUS_DESCRIPTION,
+  })
+  exchangeRateStatus!: PaymentExchangeRateStatus;
 }

@@ -629,4 +629,37 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
       implantId,
     ]);
   });
+
+  it('the WhatsApp link of a VE location points to +58', async () => {
+    const location = await raw.location.findFirstOrThrow({
+      where: { tenantId: clinicA.tenantId },
+      select: { id: true, country: true },
+    });
+    await as(clinicA)
+      .patch(`/locations/${location.id}`, { country: 'VE' })
+      .expect(200);
+    try {
+      const id = await patient({
+        firstName: 'Valentina',
+        lastName: 'Indicativo',
+        email: 'valentina@example.com',
+        phone: '0412-1234567',
+      });
+      const appt = await appointment(id, typeId);
+      const view = (
+        await as(clinicA, reception)
+          .get(`/appointments/${appt}/post-op-instructions`)
+          .expect(200)
+      ).body as Suggestions;
+      expect(view.whatsapp).toEqual({ phone: '584121234567', reason: null });
+      const created = (
+        await deliver(reception, appt, 'WHATSAPP_LINK').expect(201)
+      ).body as Created;
+      expect(created.whatsapp?.phone).toBe('584121234567');
+    } finally {
+      await as(clinicA)
+        .patch(`/locations/${location.id}`, { country: location.country })
+        .expect(200);
+    }
+  });
 });

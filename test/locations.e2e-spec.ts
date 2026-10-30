@@ -485,7 +485,7 @@ describe('Locations / multi-sede (e2e)', () => {
       ).expect(201);
       expect(res.body).toMatchObject({
         name: 'Tokio',
-        country: 'CO',
+        country: 'JP',
         currency: 'JPY',
         timeZone: 'Asia/Tokyo',
         locale: 'ja-JP',
@@ -507,7 +507,12 @@ describe('Locations / multi-sede (e2e)', () => {
     });
 
     it('GET /locations returns null regional fields for an old-replica row, never country values', async () => {
-      const legacyId = await legacyLocationInsert(raw, tenantId, 'Antigua');
+      const legacyId = await legacyLocationInsert(
+        raw,
+        tenantId,
+        'Antigua',
+        REGIONAL_BOGOTA_FIXTURE.country,
+      );
       const res = await auth(
         request(app.getHttpServer()).get('/api/v1/locations'),
       ).expect(200);

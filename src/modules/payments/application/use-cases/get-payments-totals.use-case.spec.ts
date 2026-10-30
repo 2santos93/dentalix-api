@@ -32,6 +32,11 @@ function round2(value: number): number {
  * rounding behavior instead.
  */
 class FakeConvertAmountUseCase {
+  /** Como el real: el convertidor memoizado convierte igual (DX-374). */
+  memoized(): this {
+    return this;
+  }
+
   public readonly calls: FakeConvertInput[] = [];
   /** Currencies (as `from`) that should make `execute` reject with the same
    * `BadRequestException` shape `ConvertAmountUseCase` throws for an
@@ -127,9 +132,9 @@ describe('GetPaymentsTotalsUseCase', () => {
     expect(result.currency).toBe('USD');
     expect(result.byCurrency).toEqual({ COP: 400000, USD: 30 });
 
+    // DX-375: un abono en la moneda pedida no necesita tasa ni conversión.
     expect(fakeConvert.calls).toEqual([
       { amount: 400000, from: 'COP', to: 'USD', date: '2026-03-05' },
-      { amount: 30, from: 'USD', to: 'USD', date: '2026-03-10' },
     ]);
   });
 
@@ -222,10 +227,46 @@ describe('GetPaymentsTotalsUseCase', () => {
 
     expect(result.count).toBe(2);
     expect(result.byCurrency).toEqual({ COP: 4000, USD: 1 });
-    expect(fakeConvert.calls.map((c) => c.date).sort()).toEqual([
-      '2026-03-01',
-      '2026-03-31',
-    ]);
+    // El de USD no se convierte (DX-375): solo el COP, con su día civil.
+    expect(fakeConvert.calls.map((c) => c.date).sort()).toEqual(['2026-03-31']);
+  });
+
+  // DX-375: un abono con su tasa congelada suma con ella, aunque la tasa del
+  // día cambie después; uno «sin tasa» no suma y no convierte en vivo.
+  it('usa la tasa congelada de cada abono y no suma los que siguen sin tasa (DX-375)', async () => {
+    const { repo, fakeConvert, uc } = makeUseCase();
+    fakeConvert.setRate('COP', 5000);
+    repo.seedPayment({
+      id: 'frozen',
+      currency: 'COP',
+      amount: 400000,
+      paidAt: new Date('2026-03-05T17:00:00.000Z'),
+      exchangeRateCurrency: 'USD',
+      frozenRate: {
+        currency: 'USD',
+        fromPerBase: 4000,
+        toPerBase: 1,
+        source: 'MANUAL',
+        date: '2026-03-05',
+      },
+    });
+    repo.seedPayment({
+      id: 'missing',
+      currency: 'COP',
+      amount: 1000,
+      paidAt: new Date('2026-03-06T17:00:00.000Z'),
+      exchangeRateCurrency: 'USD',
+    });
+
+    const result = await uc.execute({
+      from: '2026-03-01',
+      to: '2026-03-31',
+      currency: 'USD',
+    });
+
+    expect(result.totalConverted).toBe(100);
+    expect(result.count).toBe(2);
+    expect(fakeConvert.calls).toEqual([]);
   });
 
   it('uppercase-normalizes the target currency', async () => {

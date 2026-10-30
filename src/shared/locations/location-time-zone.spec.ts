@@ -231,7 +231,6 @@ describe('resolveReferenceLocation (R6)', () => {
       resolveReferenceLocation(tx, TENANT, 'tokio'),
     ).resolves.toEqual({
       id: 'tokio',
-      country: 'ES',
       timeZone: 'Asia/Tokyo',
       currency: 'JPY',
       locale: 'ja-JP',
@@ -239,7 +238,6 @@ describe('resolveReferenceLocation (R6)', () => {
     });
     await expect(resolveReferenceLocation(tx, TENANT, null)).resolves.toEqual({
       id: 'principal',
-      country: 'CO',
       timeZone: 'Pacific/Auckland',
       currency: 'NZD',
       locale: 'en-NZ',

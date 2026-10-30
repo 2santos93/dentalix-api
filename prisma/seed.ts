@@ -1,6 +1,7 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { Country, State, City } from 'country-state-city';
 import { seedIcd10Codes } from '../src/modules/reference/infrastructure/seed-icd10-codes';
+import { ISO3166_COUNTRIES } from './reference/iso3166';
 import { ISO4217_CURRENCIES } from './reference/iso4217';
 
 // Corre con el rol owner (DIRECT_URL): estas tablas son globales, sin RLS.
@@ -29,16 +30,20 @@ async function seedCurrencies(): Promise<void> {
   console.log(`Seeded ${ISO4217_CURRENCIES.length} currencies`);
 }
 
+// DX-312: lista ISO 3166-1 con nombres en español, generada por
+// prisma/scripts/generate-iso3166.ts. La migración
+// 20261031120000_dx312_location_country_code siembra la misma lista con
+// `ON CONFLICT DO UPDATE`, así que existe con solo `prisma migrate deploy`.
+// Las filas que ya hubiera y no estén en la lista se quedan.
 async function seedCountries(): Promise<void> {
-  const countries = Country.getAllCountries();
-  for (const c of countries) {
+  for (const { code, name } of ISO3166_COUNTRIES) {
     await prisma.country.upsert({
-      where: { code: c.isoCode },
-      update: { name: c.name },
-      create: { code: c.isoCode, name: c.name },
+      where: { code },
+      update: { name },
+      create: { code, name },
     });
   }
-  console.log(`Seeded ${countries.length} countries`);
+  console.log(`Seeded ${ISO3166_COUNTRIES.length} countries`);
 }
 
 async function seedCities(): Promise<void> {

@@ -1,5 +1,5 @@
 import { ConflictException } from '@nestjs/common';
-import { ClinicCountry, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import type { HourCycle } from '../format/regional-format';
 import { isHourCycle } from './location-regional';
 import {
@@ -44,7 +44,6 @@ export function locationCurrencyRequired(
  */
 export interface ReferenceLocation {
   id: string;
-  country: ClinicCountry;
   timeZone: string;
   currency: string | null;
   locale: string | null;
@@ -77,7 +76,6 @@ export async function resolveReferenceLocation(
 ): Promise<ReferenceLocation> {
   const select = {
     id: true,
-    country: true,
     timeZone: true,
     currency: true,
     locale: true,
@@ -98,7 +96,6 @@ export async function resolveReferenceLocation(
   }
   return {
     id: location.id,
-    country: location.country,
     timeZone: requireLocationTimeZone(location),
     currency: location.currency,
     locale: location.locale,
