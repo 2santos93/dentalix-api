@@ -386,6 +386,21 @@ describe('Baja de recordatorios por mensaje entrante (DX-128, para DX-126)', () 
     ).resolves.toEqual({ isOptOut: true, optedOut: [PEDRO] });
   });
 
+  it('the previous reading never opts out a number the library reads as another one', async () => {
+    // Con la región, «032 12 345 67» es el fijo +39 0321 234567; la lectura
+    // de antes (+39 321 234 567) es el móvil de otra persona.
+    repo.regions = ['IT'];
+    repo.addPatient(PEDRO, { phone: '032 12 345 67' });
+    await expect(
+      useCase.execute({
+        tenantId: TENANT,
+        fromPhone: '39321234567',
+        text: 'BAJA',
+      }),
+    ).resolves.toEqual({ isOptOut: true, optedOut: [] });
+    expect(repo.patients.get(PEDRO)?.optedOutAt).toBeNull();
+  });
+
   it('the location regions are read only when the tail has candidates', async () => {
     const regions = jest.spyOn(repo, 'liveLocationPhoneRegions');
     await useCase.execute({

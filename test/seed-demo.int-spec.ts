@@ -825,6 +825,10 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     if (!pending || !callMe) {
       throw new Error('falta la confirmación pendiente o la que pide llamada');
     }
+    // La pendiente es la primera cita próxima (empatada o antes).
+    expect(pending.appointmentStart.getTime()).toBeLessThanOrEqual(
+      callMe.appointmentStart.getTime(),
+    );
 
     expect(pending.respondedAt).toBeNull();
     expect(pending.appointment.status).toBe('SCHEDULED');

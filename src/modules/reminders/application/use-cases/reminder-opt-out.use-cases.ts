@@ -219,7 +219,8 @@ function previousNationalReading(digits: string, region: PhoneRegion): string {
  * si se guardó con `+` o `00` y sus dígitos son exactamente los del
  * remitente; si alguna lectura con la región de alguna sede viva (las dos,
  * si es ambiguo) da su E.164; o, sin `+` ni `00`, si lo da la lectura de
- * antes con el indicativo de alguna de esas regiones.
+ * antes con el indicativo de una región con la que la librería no lo lee
+ * de ninguna forma: si lo lee como otro número válido, ese es el número.
  */
 function storedPhoneMatches(
   stored: string,
@@ -244,7 +245,11 @@ function storedPhoneMatches(
   return (
     international === null &&
     !/[a-z]/i.test(text) &&
-    regions.some((region) => previousNationalReading(digits, region) === from)
+    regions.some(
+      (region) =>
+        phoneReadings(stored, region).length === 0 &&
+        previousNationalReading(digits, region) === from,
+    )
   );
 }
 
