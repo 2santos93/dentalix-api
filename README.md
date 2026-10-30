@@ -4785,6 +4785,15 @@ $ npm run test:cov
 datos), nunca con `raw.<modelo>.deleteMany()` sin `where` sobre una tabla con
 hijos: choca con la FK si otro spec dejó filas hijas (p. ej. citas) y tumba el
 fichero según el orden. Lo vigila el unit `test/invariants/bare-delete-many.spec.ts`.
+Para borrar solo unas clínicas (la demo, o las de un spec que no vacía la base)
+se usa `purgeTenants(raw, ids)` (`test/support/tenant-purge.ts`, DX-396): lee
+de `pg_constraint` las tablas de clínica (FK a `tenants` o columna `tenantId`)
+y las borra hijas primero, también tras las tablas que llenan los triggers de
+DELETE de otras. Una tabla nueva entra sola; si no puede (referencia a una de
+clínica sin tener `tenantId`) o hay un ciclo, falla nombrando la tabla. Lo
+vigila `test/tenant-purge.int-spec.ts`; y el unit
+`test/invariants/e2e-tenant-purge.spec.ts`, que ningún e2e borre `tenants` a
+mano (el registro por la API siembra filas propias, como los medios de pago).
 
 **CI.** `lint` va en su propio job (con `NODE_OPTIONS=--max-old-space-size=4096`,
 su memoria máxima con `/usr/bin/time -v` y las reglas más lentas con

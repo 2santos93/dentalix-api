@@ -19,6 +19,7 @@ import {
   REGIONAL_BOGOTA_FIXTURE,
   registerBody,
 } from './support/location-fixtures';
+import { purgeTenants } from './support/tenant-purge';
 
 // DX-062: el refresh de la web viaja en una cookie HttpOnly del host de la
 // clínica (la web llama a la API por su mismo origen). Compatibilidad con el
@@ -82,16 +83,15 @@ function bodyKeys(res: request.Response): string[] {
 }
 
 async function cleanup(): Promise<void> {
-  await raw.clinicInvitation.deleteMany({
-    where: { tenant: { subdomain: { in: [SUB_A, SUB_B] } } },
-  });
-  await raw.clinicMembership.deleteMany({
-    where: { tenant: { subdomain: { in: [SUB_A, SUB_B] } } },
-  });
-  await raw.user.deleteMany({ where: { email: { endsWith: DOMAIN } } });
-  await raw.tenant.deleteMany({
+  const tenants = await raw.tenant.findMany({
     where: { subdomain: { in: [SUB_A, SUB_B] } },
+    select: { id: true },
   });
+  await purgeTenants(
+    raw,
+    tenants.map((t) => t.id),
+  );
+  await raw.user.deleteMany({ where: { email: { endsWith: DOMAIN } } });
 }
 
 describe('Refresh en cookie HttpOnly (e2e, DX-062)', () => {

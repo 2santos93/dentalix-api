@@ -18,6 +18,7 @@ import {
   locationBody,
   registerBody,
 } from './support/location-fixtures';
+import { purgeTenants } from './support/tenant-purge';
 
 // DX-042, por HTTP: topes de importes y cantidades en las DTO (400, nunca 500
 // ni redondeo), insumo único por sede y sin mayúsculas, y las tres carreras
@@ -80,34 +81,14 @@ describe('Reglas de dominio por HTTP (DX-042, e2e)', () => {
       where: { subdomain: SUBDOMAIN },
     });
     if (!tenant) return;
-    const where = { tenantId: tenant.id };
     const members = await raw.clinicMembership.findMany({
-      where,
+      where: { tenantId: tenant.id },
       select: { userId: true },
     });
-    await raw.inventoryMovement.deleteMany({ where });
-    await raw.inventoryItem.deleteMany({ where });
-    await raw.installment.deleteMany({ where });
-    await raw.paymentPlan.deleteMany({ where });
-    // DX-051: los abonos por repositorio dejan base, imputaciones e historial
-    // (borrar las imputaciones deja su movimiento: van antes).
-    await raw.paymentAllocation.deleteMany({ where });
-    await raw.paymentAllocationMovement.deleteMany({ where });
-    await raw.paymentPlanAmount.deleteMany({ where });
-    await raw.payment.deleteMany({ where });
-    await raw.toothRecord.deleteMany({ where });
-    await raw.treatmentPlanItem.deleteMany({ where });
-    await raw.treatmentPlan.deleteMany({ where });
-    await raw.dentalCatalogItem.deleteMany({ where });
-    await raw.patient.deleteMany({ where });
-    await raw.locationScheduleRange.deleteMany({ where });
-    await raw.locationSchedule.deleteMany({ where });
-    await raw.location.deleteMany({ where });
-    await raw.clinicMembership.deleteMany({ where });
+    await purgeTenants(raw, [tenant.id]);
     await raw.user.deleteMany({
       where: { id: { in: members.map((m) => m.userId) } },
     });
-    await raw.tenant.delete({ where: { id: tenant.id } });
   }
 
   beforeAll(async () => {

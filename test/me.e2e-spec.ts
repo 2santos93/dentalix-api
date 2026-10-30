@@ -14,6 +14,7 @@ import {
   REGIONAL_BOGOTA_FIXTURE,
   registerBody,
 } from './support/location-fixtures';
+import { purgeTenantsBySubdomain } from './support/tenant-purge';
 
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
@@ -55,11 +56,8 @@ describe('Me (e2e)', () => {
     await app.init();
     await app.listen(0, '127.0.0.1');
 
-    await raw.clinicMembership.deleteMany({
-      where: { tenant: { subdomain: sub } },
-    });
+    await purgeTenantsBySubdomain(raw, [sub]);
     await raw.user.deleteMany({ where: { email: 'perfil@e2e.com' } });
-    await raw.tenant.deleteMany({ where: { subdomain: sub } });
 
     await registerVerified(
       app,
@@ -74,11 +72,8 @@ describe('Me (e2e)', () => {
   });
 
   afterAll(async () => {
-    await raw.clinicMembership.deleteMany({
-      where: { tenant: { subdomain: sub } },
-    });
+    await purgeTenantsBySubdomain(raw, [sub]);
     await raw.user.deleteMany({ where: { email: 'perfil@e2e.com' } });
-    await raw.tenant.deleteMany({ where: { subdomain: sub } });
     await app.close();
     await raw.$disconnect();
   });

@@ -15,6 +15,7 @@ import {
   REGIONAL_BOGOTA_FIXTURE,
   registerBody,
 } from './support/location-fixtures';
+import { purgeTenantsBySubdomain } from './support/tenant-purge';
 
 // DX-010 (e2e): «¿Olvidaste tu contraseña?» responde SIEMPRE 202 con el mismo
 // cuerpo y sin esperar a nada; el email lleva la marca y el host de la
@@ -56,8 +57,8 @@ async function cleanup(): Promise<void> {
   await raw.clinicMembership.deleteMany({
     where: { user: { email: { endsWith: DOMAIN } } },
   });
+  await purgeTenantsBySubdomain(raw, [SUB_A, SUB_B]);
   await raw.user.deleteMany({ where: { email: { endsWith: DOMAIN } } });
-  await raw.tenant.deleteMany({ where: { subdomain: { in: [SUB_A, SUB_B] } } });
 }
 
 async function waitUntil(

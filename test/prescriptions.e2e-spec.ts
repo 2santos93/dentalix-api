@@ -23,6 +23,7 @@ import {
   registerBody,
   type RegionalFixture,
 } from './support/location-fixtures';
+import { purgeTenants } from './support/tenant-purge';
 
 // DIRECT_URL (owner, sin RLS) solo para sembrar miembros y limpiar. Fuera de
 // un contexto de tenant los triggers de inmutabilidad dejan borrar.
@@ -137,19 +138,10 @@ async function cleanup(): Promise<void> {
     where: { subdomain: { in: SUBDOMAINS } },
     select: { id: true },
   });
-  const ids = tenants.map((t) => t.id);
-  const where = { tenantId: { in: ids } };
-  await raw.prescription.deleteMany({ where });
-  await raw.prescriptionTemplate.deleteMany({ where });
-  await raw.medicalHistoryVersion.deleteMany({ where });
-  await raw.dataProcessingConsent.deleteMany({ where });
-  await raw.patient.deleteMany({ where });
-  await raw.locationScheduleRange.deleteMany({ where });
-  await raw.locationSchedule.deleteMany({ where });
-  await raw.location.deleteMany({ where });
-  await raw.clinicMembership.deleteMany({ where });
-  await raw.tenantDomain.deleteMany({ where });
-  await raw.tenant.deleteMany({ where: { id: { in: ids } } });
+  await purgeTenants(
+    raw,
+    tenants.map((t) => t.id),
+  );
   await raw.user.deleteMany({
     where: {
       OR: SUBDOMAINS.map((s) => ({ email: { endsWith: `@${s}.com` } })),
