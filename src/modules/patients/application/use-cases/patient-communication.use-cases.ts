@@ -23,6 +23,7 @@ import {
 import { civilDateIn } from '../../../../shared/time/civil-day';
 import {
   parsePhone,
+  phoneInternational,
   phoneRegionOrNull,
   type PhoneRegion,
 } from '../../../../shared/phone/phone-number';
@@ -106,7 +107,7 @@ function toView(
     phoneE164: mobile.e164,
     phoneStatus: mobile.status,
     phoneAmbiguous: mobile.ambiguous,
-    phoneInternational: parsePhone(state.phone, region)?.international ?? null,
+    phoneInternational: phoneInternational(state.phone, region),
     phoneCountry: phoneRegionOrNull(region),
     email: state.email,
     whatsappOptIn:

@@ -24,6 +24,7 @@ import {
   REGIONAL_MESSAGES,
   REGIONAL_NULL_MESSAGE,
 } from '../../domain/regional-settings';
+import { PHONE_INTERNATIONAL_DOC } from '../../../../shared/phone/with-phone-international';
 
 export const LOCATION_PHONE_MAX = 40;
 const PHONE_MESSAGE = `El teléfono admite hasta ${LOCATION_PHONE_MAX} caracteres.`;
@@ -302,6 +303,12 @@ export class LocationDto {
     description: 'DX-222: teléfono de la sede o null.',
   })
   phone!: string | null;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: PHONE_INTERNATIONAL_DOC,
+  })
+  phoneInternational!: string | null;
   @ApiProperty({
     type: String,
     nullable: true,

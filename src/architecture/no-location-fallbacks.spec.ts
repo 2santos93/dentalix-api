@@ -1495,6 +1495,8 @@ const PHONE_FUNCTIONS = [
   'parsePhone',
   'phoneReadings',
   'whatsAppDigits',
+  'phoneInternational',
+  'withPhoneInternational',
   'normalizeMobile',
   'whatsappOfferPhone',
   'normalizePhone',

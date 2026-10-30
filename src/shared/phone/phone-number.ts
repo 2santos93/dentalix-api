@@ -204,6 +204,18 @@ export function parsePhone(
 }
 
 /**
+ * El formato internacional de la librería, con su extensión, para mostrar un
+ * teléfono guardado (DX-387). `null` si la lectura es ambigua o no vale: quien
+ * lo muestra cae al texto guardado tal cual.
+ */
+export function phoneInternational(
+  text: string | null | undefined,
+  defaultRegion: PhoneRegion | null,
+): string | null {
+  return parsePhone(text, defaultRegion)?.international ?? null;
+}
+
+/**
  * Los E.164 posibles del texto: uno si es válido, los dos si es ambiguo y
  * ninguno si no vale. Solo para la baja por mensaje (R8).
  */

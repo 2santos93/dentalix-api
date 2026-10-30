@@ -41,10 +41,12 @@ import {
 } from '../application/use-cases/responsible-parties.use-cases';
 import { DocumentTypeNamesReader } from '../domain/ports/document-type-names-repository.port';
 import { resolveDocTypeInput } from '../domain/legacy-doc-type';
+import { responsiblePartyWithDocTypeName } from './doc-type-name.presenter';
+import { DefaultPhoneRegionReader } from '../domain/ports/default-phone-region-reader.port';
 import {
-  responsiblePartyWithDocTypeName,
-  type ResponsiblePartyOutput,
-} from './doc-type-name.presenter';
+  responsiblePartyWithPhoneInternational,
+  type ResponsiblePartyWithPhoneOutput,
+} from './phone-international.presenter';
 import {
   CreateResponsiblePartyDto,
   PatientResponsiblesDto,
@@ -99,15 +101,29 @@ export class PatientResponsiblePartiesController {
     private readonly removeParty: RemoveResponsiblePartyUseCase,
     // DX-327 (R17): nombres locales para el `docTypeName`, una lectura por petición.
     private readonly documentTypeNamesReader: DocumentTypeNamesReader,
+    // DX-387: región del `phoneInternational`, una lectura por petición.
+    private readonly phoneRegionReader: DefaultPhoneRegionReader,
   ) {}
+
+  /** Los nombres de documento y la región, una sola vez para todas las filas. */
+  private async presenter(): Promise<
+    (party: ResponsiblePartyView) => ResponsiblePartyWithPhoneOutput
+  > {
+    const [names, region] = await Promise.all([
+      this.documentTypeNamesReader.get(),
+      this.phoneRegionReader.defaultPhoneRegion(),
+    ]);
+    return (party) =>
+      responsiblePartyWithPhoneInternational(
+        responsiblePartyWithDocTypeName(party, names),
+        region,
+      );
+  }
 
   private async present(
     party: ResponsiblePartyView,
-  ): Promise<ResponsiblePartyOutput> {
-    return responsiblePartyWithDocTypeName(
-      party,
-      await this.documentTypeNamesReader.get(),
-    );
+  ): Promise<ResponsiblePartyWithPhoneOutput> {
+    return (await this.presenter())(party);
   }
 
   @Get()
@@ -120,17 +136,12 @@ export class PatientResponsiblePartiesController {
     @Param('patientId', uuidPipe('del paciente')) patientId: string,
   ): Promise<
     Omit<PatientResponsiblesView, 'parties'> & {
-      parties: ResponsiblePartyOutput[];
+      parties: ResponsiblePartyWithPhoneOutput[];
     }
   > {
     const view = await this.listParties.execute(patientId);
-    const names = await this.documentTypeNamesReader.get();
-    return {
-      ...view,
-      parties: view.parties.map((p) =>
-        responsiblePartyWithDocTypeName(p, names),
-      ),
-    };
+    const present = await this.presenter();
+    return { ...view, parties: view.parties.map(present) };
   }
 
   @Audit(audit('RESPONSIBLE_PARTY_ADDED'))
@@ -154,7 +165,7 @@ export class PatientResponsiblePartiesController {
     @Param('patientId', uuidPipe('del paciente')) patientId: string,
     @Body() dto: CreateResponsiblePartyDto,
     @Req() req: { user: TenantJwtPayload },
-  ): Promise<ResponsiblePartyOutput> {
+  ): Promise<ResponsiblePartyWithPhoneOutput> {
     return this.present(
       await this.createParty.execute(
         patientId,
@@ -175,7 +186,7 @@ export class PatientResponsiblePartiesController {
     @Param('patientId', uuidPipe('del paciente')) patientId: string,
     @Param('partyId', uuidPipe('del responsable')) partyId: string,
     @Body() dto: UpdateResponsiblePartyDto,
-  ): Promise<ResponsiblePartyOutput> {
+  ): Promise<ResponsiblePartyWithPhoneOutput> {
     return this.present(
       await this.updateParty.execute(patientId, partyId, {
         ...dto,
