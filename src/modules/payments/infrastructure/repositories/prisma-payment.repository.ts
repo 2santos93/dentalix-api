@@ -50,6 +50,12 @@ import {
   ReceivedPayment,
 } from '../../domain/ports/payment-repository.port';
 import { Payment } from '../../domain/entities/payment.entity';
+import { exchangeRateStatus } from '../../domain/payment-exchange-rate';
+import {
+  frozenRateData,
+  frozenRateOf,
+  manualRatesStillMatch,
+} from './frozen-exchange-rate.mapper';
 import { CashPayment } from '../../domain/entities/cash-payment.entity';
 import { formatReceiptNumber } from '../../domain/receipt-number';
 import type { ReceiptPlanBalance } from '../../domain/receipt-snapshot';
@@ -117,6 +123,13 @@ function mapToEntity(payment: PrismaPayment, timeZone: string): Payment {
           payment.receipt.number,
         )
       : null,
+    exchangeRateCurrency: payment.exchangeRateCurrency,
+    frozenRate: frozenRateOf(payment),
+    exchangeRateStatus: exchangeRateStatus({
+      currency: payment.currency,
+      exchangeRateCurrency: payment.exchangeRateCurrency,
+      frozenRate: frozenRateOf(payment),
+    }),
   };
 }
 
@@ -407,6 +420,18 @@ export class PrismaPaymentRepository implements PaymentRepository {
           : civilNoonIn(input.paidAt.civilDate, timeZone);
       // DX-027: la caja abierta de quien cobra en esta sede (bloqueada hasta
       // el COMMIT); sin caja, 409 si la clínica exige caja para el efectivo.
+      // DX-375: la moneda de destino es la del plan bloqueado (o la del saldo
+      // migrado, que es la del abono). La tasa cotizada fuera se congela solo
+      // si sigue valiendo aquí; si no, el abono queda «sin tasa» y sin base.
+      const targetCurrency = planCurrency ?? input.currency;
+      const frozen = input.frozenRate;
+      const freeze =
+        frozen !== null &&
+        frozen.currency === targetCurrency &&
+        frozen.date === civilDateIn(paidAt, timeZone) &&
+        (await manualRatesStillMatch(tx, tenantId, input.currency, frozen))
+          ? frozen
+          : null;
       const cash = await assignPaymentToCashSession(tx, {
         tenantId,
         locationId,
@@ -432,6 +457,8 @@ export class PrismaPaymentRepository implements PaymentRepository {
           idempotencyKey: input.idempotencyKey,
           idempotencyFingerprint: input.requestFingerprint,
           createdById: input.createdById,
+          exchangeRateCurrency: targetCurrency,
+          ...(freeze ? frozenRateData(freeze) : {}),
         },
       });
       // DX-027: con fecha de un día cuya caja ya cerró, es un ajuste de la
@@ -453,7 +480,9 @@ export class PrismaPaymentRepository implements PaymentRepository {
         planAmount &&
         created.treatmentPlanId &&
         planAmount.planCurrency === planCurrency &&
-        planAmount.rateDate === entity.paidOn
+        planAmount.rateDate === entity.paidOn &&
+        // DX-375: la base sale de la tasa congelada; sin ella, tampoco base.
+        (input.currency === planCurrency || freeze !== null)
       ) {
         await tx.paymentPlanAmount.create({
           data: {

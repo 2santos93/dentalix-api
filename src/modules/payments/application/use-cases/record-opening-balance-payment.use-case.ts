@@ -126,6 +126,8 @@ export class RecordOpeningBalancePaymentUseCase {
       receiptPlanBalance: null,
       // DX-051 (R1): un abono a un saldo migrado no se imputa a ítems.
       planAmount: null,
+      // Un saldo migrado se abona en su moneda: no hay tasa que congelar.
+      frozenRate: null,
     });
   }
 }

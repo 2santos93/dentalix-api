@@ -10,6 +10,7 @@ import { TenantContextService } from '../src/shared/tenancy/tenant-context.servi
 import { PrismaPaymentRepository } from '../src/modules/payments/infrastructure/repositories/prisma-payment.repository';
 import { PrismaPlanAllocationRepository } from '../src/modules/payments/infrastructure/allocations/prisma-plan-allocation.repository';
 import { PlanAllocationRebalancer } from '../src/modules/payments/application/plan-allocation-rebalancer';
+import { ExchangeSourceChangeHooks } from '../src/modules/exchange/application/exchange-source-change-hooks';
 import { PaymentAllocationJobs } from '../src/modules/payments/application/payment-allocation-jobs';
 import { GetPaymentAllocationsUseCase } from '../src/modules/payments/application/use-cases/get-payment-allocations.use-case';
 import { ReplacePaymentAllocationsUseCase } from '../src/modules/payments/application/use-cases/replace-payment-allocations.use-case';
@@ -55,7 +56,7 @@ const planRepo = new PrismaTreatmentPlanRepository(prisma, tenantContext);
 
 /** Tasas del barrido (moneda del abono → del plan); sin entrada, «sin tasa». */
 const rates: Record<string, number> = {};
-const convert = {
+const convert: ConvertAmountUseCase = {
   execute: (input: { amount: number; from: string; to: string }) => {
     const rate = input.from === input.to ? 1 : rates[input.from];
     if (rate === undefined) {
@@ -65,6 +66,23 @@ const convert = {
     }
     return Promise.resolve({ ...input, result: 0, rateUsed: rate });
   },
+  // DX-375: la cotización que congela el barrido, con la misma tasa.
+  quote: (input: { from: string; to: string; date: string }) => {
+    const rate = rates[input.from];
+    if (rate === undefined) {
+      return Promise.reject(
+        new BadRequestException(`unsupported currency: ${input.from}`),
+      );
+    }
+    return Promise.resolve({
+      ...input,
+      source: 'AUTOMATIC',
+      ...(input.from === 'USD'
+        ? { fromPerBase: 1, toPerBase: rate }
+        : { fromPerBase: 1 / rate, toPerBase: 1 }),
+    });
+  },
+  memoized: (): ConvertAmountUseCase => convert,
 } as unknown as ConvertAmountUseCase;
 const rebalancer = new PlanAllocationRebalancer(allocationRepo, convert);
 const getAllocations = new GetPaymentAllocationsUseCase(allocationRepo);
@@ -79,6 +97,7 @@ const jobs = new PaymentAllocationJobs(
   rebalancer,
   allocationRepo,
   tenantContext,
+  new ExchangeSourceChangeHooks(),
 );
 
 const SUBDOMAINS = ['dx051-races-a', 'dx051-races-b'];
@@ -256,6 +275,7 @@ function record(
         planAmount === null
           ? null
           : { planCurrency: 'EUR', amount: planAmount, rateDate: '2026-10-20' },
+      frozenRate: null,
     }),
   );
 }
@@ -1111,6 +1131,7 @@ describe('DX-051 · reparto automático con conexiones reales (int)', () => {
           createdById: a.userId,
           receiptPlanBalance: null,
           planAmount: null,
+          frozenRate: null,
         }),
       );
 

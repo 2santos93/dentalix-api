@@ -20,7 +20,8 @@ import {
   type AllocationTarget,
   type PlanAllocationRepository,
 } from '../../domain/ports/plan-allocation-repository.port';
-import { errorName, paymentBaseAmount } from '../payment-in-plan-currency';
+import { errorName } from '../payment-in-plan-currency';
+import { paymentBaseAmount } from '../payment-exchange-rate';
 import { PlanAllocationRebalancer } from '../plan-allocation-rebalancer';
 import {
   GetPaymentAllocationsUseCase,
@@ -151,12 +152,11 @@ export class ReplacePaymentAllocationsUseCase {
   private async withBase(target: AllocationTarget): Promise<AllocationTarget> {
     if (target.base) return target;
     const planCurrency = target.planCurrency as string;
-    const amount = await paymentBaseAmount(this.convertAmount, {
-      amount: target.amount,
-      currency: target.currency,
+    const amount = await paymentBaseAmount(
+      this.convertAmount,
+      target,
       planCurrency,
-      paidOn: target.paidOn,
-    });
+    );
     if (amount === null) throw noRate(target);
     await this.repo.ensureBase(
       target.paymentId,

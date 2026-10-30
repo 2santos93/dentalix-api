@@ -17,15 +17,16 @@ const round2 = (value: number): number => Math.round(value * 100) / 100;
 // proveedor o, con tasa manual, entre las que registró la clínica: DX-374), y
 // el proveedor el segundo cuando no puede dar las tasas del día. Cualquier
 // otro (caída de BD, tiempos de espera, error de programación) se propaga.
-function isNoRateError(error: unknown): boolean {
+export function isNoRateError(error: unknown): boolean {
   if (error instanceof ExchangeRateUnavailableError) return true;
   return isMissingRateError(error);
 }
 
 /**
  * Importe de un abono en la moneda de su plan, con la tasa del día en que se
- * cobró: `round2(amount × rateUsed)`. `null` si su moneda no tiene tasa. Única
- * conversión de abonos a plan (saldo, recibo, base de imputación, backfill).
+ * cobró: `round2(amount × rateUsed)`. `null` si su moneda no tiene tasa. Es la
+ * conversión EN VIVO: desde DX-375 solo la usa `paymentAmountIn` para un abono
+ * anterior aún sin congelar (o un destino distinto del congelado).
  */
 export async function paymentInPlanCurrency(
   convert: AmountConverter,
@@ -43,19 +44,6 @@ export async function paymentInPlanCurrency(
     if (isNoRateError(error)) return null;
     throw error;
   }
-}
-
-/**
- * Importe del abono para su base de imputación (spec R15): `paymentInPlanCurrency`
- * y, como la base exige `amount > 0` (CHECK), un importe que redondea a 0 cuenta
- * como «sin tasa» (`null`). Los fallos distintos de «sin tasa» se propagan.
- */
-export async function paymentBaseAmount(
-  convert: AmountConverter,
-  p: PaymentToConvert,
-): Promise<number | null> {
-  const amount = await paymentInPlanCurrency(convert, p);
-  return amount !== null && amount > 0 ? amount : null;
 }
 
 /** Solo el tipo del error para los avisos: nunca datos del abono ni del paciente. */

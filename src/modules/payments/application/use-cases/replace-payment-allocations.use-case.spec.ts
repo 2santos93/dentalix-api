@@ -31,6 +31,8 @@ function target(over: Partial<AllocationTarget> = {}): AllocationTarget {
     planCurrency: 'EUR',
     planStatus: TreatmentPlanStatus.ACCEPTED,
     base: { amount: 90, manual: false },
+    exchangeRateCurrency: null,
+    frozenRate: null,
     ...over,
   };
 }

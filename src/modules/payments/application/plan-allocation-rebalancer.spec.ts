@@ -242,6 +242,149 @@ describe('PlanAllocationRebalancer', () => {
     });
   });
 
+  // DX-375: el barrido congela la tasa de los abonos que la esperan, con la
+  // fuente de la clínica y el día civil de cada uno; la base sale de ella.
+  describe('freezePendingRates (DX-375)', () => {
+    function quoting(rates: Record<string, number>, source = 'AUTOMATIC') {
+      const convert = {
+        memoized: () => convert,
+        execute: () => Promise.reject(new Error('no debe convertir en vivo')),
+        quote: (input: { from: string; to: string; date: string }) => {
+          const perBase = (c: string) => (c === 'USD' ? 1 : rates[c]);
+          if (
+            perBase(input.from) === undefined ||
+            perBase(input.to) === undefined
+          ) {
+            return Promise.reject(
+              new BadRequestException(`unsupported currency: ${input.from}`),
+            );
+          }
+          return Promise.resolve({
+            ...input,
+            source,
+            fromPerBase: perBase(input.from),
+            toPerBase: perBase(input.to),
+          });
+        },
+      };
+      return convert as unknown as ConvertAmountUseCase;
+    }
+
+    it('congela la tasa de su día, cuenta los que siguen sin tasa y la base usa la congelada', async () => {
+      const repo = new InMemoryPlanAllocationRepository();
+      const rebalancer = new PlanAllocationRebalancer(
+        repo,
+        quoting({ COP: 4000 }),
+      );
+      repo.pendingRate = [
+        {
+          paymentId: 'cop',
+          currency: 'COP',
+          targetCurrency: 'USD',
+          paidOn: '2026-10-20',
+        },
+        {
+          paymentId: 'ves',
+          currency: 'VES',
+          targetCurrency: 'USD',
+          paidOn: '2026-10-20',
+        },
+      ];
+      repo.withoutBase = [
+        {
+          paymentId: 'cop',
+          amount: 200000,
+          currency: 'COP',
+          planCurrency: 'USD',
+          paidOn: '2026-10-20',
+          exchangeRateCurrency: 'USD',
+          frozenRate: null,
+        },
+      ];
+
+      await expect(rebalancer.freezePendingRates(50)).resolves.toEqual({
+        frozen: 1,
+        withoutRate: 1,
+      });
+      expect(repo.frozen.get('cop')).toEqual({
+        targetCurrency: 'USD',
+        rate: {
+          currency: 'USD',
+          fromPerBase: 4000,
+          toPerBase: 1,
+          source: 'AUTOMATIC',
+          date: '2026-10-20',
+        },
+      });
+      // Sin tasa también queda con su moneda de destino (deja de ser anterior).
+      expect(repo.frozen.get('ves')).toEqual({
+        targetCurrency: 'USD',
+        rate: null,
+      });
+      await expect(rebalancer.createMissingBases(50)).resolves.toEqual({
+        created: 1,
+        withoutRate: 0,
+      });
+      expect(repo.bases.get('cop')?.amount).toBe(50);
+    });
+
+    it('un abono anterior en su misma moneda solo recibe su moneda de destino', async () => {
+      const repo = new InMemoryPlanAllocationRepository();
+      const rebalancer = new PlanAllocationRebalancer(repo, quoting({}));
+      repo.pendingRate = [
+        {
+          paymentId: 'usd',
+          currency: 'USD',
+          targetCurrency: 'USD',
+          paidOn: '2026-10-20',
+        },
+      ];
+      await expect(rebalancer.freezePendingRates(50)).resolves.toEqual({
+        frozen: 0,
+        withoutRate: 0,
+      });
+      expect(repo.frozen.get('usd')).toEqual({
+        targetCurrency: 'USD',
+        rate: null,
+      });
+    });
+
+    it('freezeAllPending recorre por lotes hasta que no queda nada que congelar', async () => {
+      const repo = new InMemoryPlanAllocationRepository();
+      const rebalancer = new PlanAllocationRebalancer(
+        repo,
+        quoting({ COP: 4000 }),
+      );
+      repo.pendingRate = Array.from({ length: 5 }, (_, i) => ({
+        paymentId: `cop-${i}`,
+        currency: 'COP',
+        targetCurrency: 'USD',
+        paidOn: '2026-10-20',
+      }));
+      await expect(rebalancer.freezeAllPending(2)).resolves.toEqual({
+        frozen: 5,
+        withoutRate: 0,
+      });
+    });
+
+    it('freezeAllPending termina aunque queden abonos sin tasa', async () => {
+      const repo = new InMemoryPlanAllocationRepository();
+      const rebalancer = new PlanAllocationRebalancer(repo, quoting({}));
+      repo.pendingRate = [
+        {
+          paymentId: 'ves',
+          currency: 'VES',
+          targetCurrency: 'USD',
+          paidOn: '2026-10-20',
+        },
+      ];
+      await expect(rebalancer.freezeAllPending(2)).resolves.toEqual({
+        frozen: 0,
+        withoutRate: 1,
+      });
+    });
+  });
+
   describe('createMissingBases', () => {
     it('converts at paidOn, creates the base and counts payments without rate', async () => {
       const { repo, rebalancer } = setup({ USD: 0.9 });
@@ -252,6 +395,8 @@ describe('PlanAllocationRebalancer', () => {
           currency: 'USD',
           planCurrency: 'EUR',
           paidOn: '2026-10-20',
+          exchangeRateCurrency: null,
+          frozenRate: null,
         },
         {
           paymentId: 'gbp',
@@ -259,6 +404,8 @@ describe('PlanAllocationRebalancer', () => {
           currency: 'GBP',
           planCurrency: 'EUR',
           paidOn: '2026-10-20',
+          exchangeRateCurrency: null,
+          frozenRate: null,
         },
       ];
 
@@ -286,6 +433,8 @@ describe('PlanAllocationRebalancer', () => {
           currency: 'USD',
           planCurrency: 'EUR',
           paidOn: '2026-10-20',
+          exchangeRateCurrency: null,
+          frozenRate: null,
         },
       ];
       const warn = jest

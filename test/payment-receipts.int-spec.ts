@@ -129,6 +129,7 @@ function pay(
         balance: 800000,
       },
       planAmount: null,
+      frozenRate: null,
       ...overrides,
     }),
   );
