@@ -182,6 +182,7 @@ describe('Tasa manual de un día anterior a «manual desde» (e2e, DX-402)', () 
         currency: 'COP',
         count: 1,
         providerRateSaved: false,
+        otherRatesMissing: { count: 0, currencies: [] },
       });
     // Otra moneda, otro día u otra clínica: ninguno.
     await as(api().get(dayPreview(DAY, 'EUR')), clinic)
@@ -191,6 +192,7 @@ describe('Tasa manual de un día anterior a «manual desde» (e2e, DX-402)', () 
         currency: 'EUR',
         count: 0,
         providerRateSaved: false,
+        otherRatesMissing: { count: 0, currencies: [] },
       });
     await as(api().get(dayPreview(addCivilDays(DAY, -1), 'COP')), clinic)
       .expect(200)
@@ -313,5 +315,10 @@ describe('Tasa manual de un día anterior a «manual desde» (e2e, DX-402)', () 
     await as(api().get(dayPreview('2026-02-30', 'COP')), clinic).expect(400);
     await as(api().get(dayPreview(DAY, 'cop1')), clinic).expect(400);
     await as(api().get(`${BACKLOG}/day`), clinic).expect(400);
+    await as(api().get(dayPreview(DAY, 'cop')), clinic).expect(400);
+    await as(
+      api().get(`${BACKLOG}/day?date=${DAY}&currency=COP&currency=EUR`),
+      clinic,
+    ).expect(400);
   });
 });

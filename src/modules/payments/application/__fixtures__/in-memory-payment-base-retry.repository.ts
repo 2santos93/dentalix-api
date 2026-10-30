@@ -6,6 +6,7 @@ import type {
   PaymentBaseRetryRepository,
   PaymentRatePendingDay,
 } from '../../domain/ports/payment-base-retry-repository.port';
+import { pendingOnDayOf } from '../../domain/payment-rate-pending-day';
 
 export interface FakePaymentBaseRetry {
   candidate: PaymentBaseRetryCandidate;
@@ -114,19 +115,20 @@ export class InMemoryPaymentBaseRetryRepository implements PaymentBaseRetryRepos
 
   /** Días con tasa del proveedor guardada (DX-402). */
   readonly providerDays = new Set<string>();
+  /** Monedas con tasa manual registrada, por día (DX-402). */
+  readonly manualRates = new Map<string, Set<string>>();
 
   pendingOnDay(date: string, currency: string): Promise<PaymentRatePendingDay> {
-    const count = [...this.rows.values()].filter(
-      ({ candidate: c }) =>
-        c.live &&
-        !c.frozenRate &&
-        c.currency !== c.targetCurrency &&
-        c.paidOn === date &&
-        (c.currency === currency || c.targetCurrency === currency),
-    ).length;
-    return Promise.resolve({
-      count,
-      providerRateSaved: this.providerDays.has(date),
-    });
+    const pairs = [...this.rows.values()]
+      .map(({ candidate: c }) => c)
+      .filter((c) => c.live && !c.frozenRate && c.paidOn === date);
+    return Promise.resolve(
+      pendingOnDayOf(
+        pairs,
+        currency,
+        this.manualRates.get(date) ?? new Set(),
+        this.providerDays.has(date),
+      ),
+    );
   }
 }

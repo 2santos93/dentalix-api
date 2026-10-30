@@ -48,6 +48,18 @@ export class PaymentRateBacklogDayQueryDto {
   currency!: string;
 }
 
+/** DX-402: abonos que además necesitan la tasa manual de otra moneda. */
+export class PaymentRateOtherMissingDto {
+  @ApiProperty({ example: 0 })
+  count!: number;
+
+  @ApiProperty({
+    type: [String],
+    description: 'Las otras monedas sin tasa manual ese día (ISO 4217).',
+  })
+  currencies!: string[];
+}
+
 /**
  * DX-402: cuántos abonos pendientes de ese día necesitan la tasa de esa
  * moneda. Con la fuente manual y un día anterior a «manual desde», la tasa
@@ -64,7 +76,7 @@ export class PaymentRateBacklogDayDto {
   @ApiProperty({
     example: 1,
     description:
-      'Abonos vivos de la clínica de ese día (en su sede) que esperan su tasa y están en esa moneda o van a un plan (o saldo migrado) en esa moneda.',
+      'Abonos vivos de la clínica de ese día (en su sede) que esperan su tasa, están en esa moneda o van a un plan (o saldo migrado) en esa moneda, y cuya otra moneda es USD o ya tiene tasa manual ese día: a los que servirá de respaldo.',
   })
   count!: number;
 
@@ -74,4 +86,11 @@ export class PaymentRateBacklogDayDto {
       'Hay tasa del proveedor guardada para ese día: manda la automática y la manual de un día anterior a «manual desde» no se usa.',
   })
   providerRateSaved!: boolean;
+
+  @ApiProperty({
+    type: PaymentRateOtherMissingDto,
+    description:
+      'Abonos de ese día que necesitan esa moneda y otra distinta de USD sin tasa manual ese día: la de respaldo solo les servirá cuando se registre también la otra.',
+  })
+  otherRatesMissing!: PaymentRateOtherMissingDto;
 }

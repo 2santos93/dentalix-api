@@ -141,17 +141,24 @@ async function cleanup(): Promise<void> {
   });
 }
 
+/** Lo que dice la vista previa de un día sin tasa del proveedor. */
+const pending = (count: number, missing: string[] = [], missingCount = 0) => ({
+  count,
+  providerRateSaved: false,
+  otherRatesMissing: { count: missingCount, currencies: missing },
+});
+
 const inClinic = <T>(clinic: Clinic, fn: () => Promise<T>): Promise<T> =>
   tenantContext.run(clinic.tenantId, fn);
 
-/** Un abono en USD «sin tasa» al plan en COP, como lo deja el alta. */
-function pay(clinic: Clinic, day: string): Promise<string> {
+/** Un abono «sin tasa» (en USD por defecto) al plan en COP, como lo deja el alta. */
+function pay(clinic: Clinic, day: string, currency = 'USD'): Promise<string> {
   return inClinic(clinic, async () => {
     const payment = await paymentRepo.create({
       treatmentPlanId: clinic.planId,
       patientId: clinic.patientId,
       amount: 50,
-      currency: 'USD',
+      currency,
       paidAt: { civilDate: day },
       createdById: clinic.userId,
       receiptPlanBalance: null,
@@ -166,11 +173,12 @@ function registerRate(
   clinic: Clinic,
   date: string,
   rate: number,
+  currency = 'COP',
 ): Promise<string> {
   return inClinic(clinic, async () => {
     const saved = await manualRepo.create({
       date,
-      currency: 'COP',
+      currency,
       rate,
       createdById: clinic.userId,
     });
@@ -217,7 +225,7 @@ describe('DX-402 · tasa de respaldo de un día anterior a manual (int)', () => 
     await registerRate(clinic, DAY, 4000);
     expect(
       await inClinic(clinic, () => retries.pendingOnDay(DAY, 'COP')),
-    ).toEqual({ count: 1, providerRateSaved: false });
+    ).toEqual({ ...pending(1), providerRateSaved: false });
     await inClinic(clinic, () => retries.wake());
     expect(await inClinic(clinic, () => retries.retryDue(50))).toEqual({
       resolved: 1,
@@ -238,7 +246,7 @@ describe('DX-402 · tasa de respaldo de un día anterior a manual (int)', () => 
     ).toBeNull();
     expect(
       await inClinic(clinic, () => retries.pendingOnDay(DAY, 'COP')),
-    ).toEqual({ count: 0, providerRateSaved: false });
+    ).toEqual(pending(0));
 
     const events = await raw.auditEvent.findMany({
       where: { tenantId: clinic.tenantId, resourceId: id },
@@ -295,7 +303,7 @@ describe('DX-402 · tasa de respaldo de un día anterior a manual (int)', () => 
     await registerRate(clinic, SNAPSHOT_DAY, 4000);
     expect(
       await inClinic(clinic, () => retries.pendingOnDay(SNAPSHOT_DAY, 'COP')),
-    ).toEqual({ count: 1, providerRateSaved: true });
+    ).toEqual({ ...pending(1), providerRateSaved: true });
 
     await inClinic(clinic, () => retries.retryDue(50));
     expect(await frozenOf(id)).toEqual({
@@ -324,13 +332,53 @@ describe('DX-402 · tasa de respaldo de un día anterior a manual (int)', () => 
     expect((await frozenOf(id)).exchangeRateSource).toBeNull();
     expect(
       await inClinic(other, () => retries.pendingOnDay(DAY, 'COP')),
-    ).toEqual({ count: 0, providerRateSaved: false });
+    ).toEqual(pending(0));
     expect(
       await inClinic(mine, () => retries.pendingOnDay(DAY, 'EUR')),
-    ).toEqual({ count: 0, providerRateSaved: false });
+    ).toEqual(pending(0));
     expect(
       await inClinic(mine, () => retries.pendingOnDay(DAY, 'COP')),
-    ).toEqual({ count: 1, providerRateSaved: false });
+    ).toEqual(pending(1));
+  });
+
+  it('entre dos monedas no USD la vista previa no promete el respaldo hasta que estén las dos, igual que el barrido', async () => {
+    const clinic = await seedClinic(`${PREFIX}-cross`);
+    const id = await pay(clinic, DAY, 'EUR');
+    await registerRate(clinic, DAY, 4000);
+    expect(
+      await inClinic(clinic, () => retries.pendingOnDay(DAY, 'COP')),
+    ).toEqual(pending(0, ['EUR'], 1));
+    await inClinic(clinic, () => retries.retryDue(50));
+    expect((await frozenOf(id)).exchangeRateSource).toBeNull();
+
+    await registerRate(clinic, DAY, 0.9, 'EUR');
+    expect(
+      await inClinic(clinic, () => retries.pendingOnDay(DAY, 'COP')),
+    ).toEqual(pending(1));
+    expect(
+      await inClinic(clinic, () => retries.pendingOnDay(DAY, 'EUR')),
+    ).toEqual(pending(1));
+    await inClinic(clinic, () => retries.wake());
+    await inClinic(clinic, () => retries.retryDue(50));
+    expect(await frozenOf(id)).toMatchObject({
+      exchangeRateSource: 'MANUAL',
+      exchangeRateTo: new Prisma.Decimal(4000),
+    });
+  });
+
+  it('cuenta, como el barrido, el abono de un plan eliminado que aún espera su tasa', async () => {
+    const clinic = await seedClinic(`${PREFIX}-deleted-plan`);
+    const id = await pay(clinic, DAY);
+    await raw.treatmentPlan.update({
+      where: { id: clinic.planId },
+      data: { deletedAt: new Date() },
+    });
+    await registerRate(clinic, DAY, 4000);
+    expect(
+      await inClinic(clinic, () => retries.pendingOnDay(DAY, 'COP')),
+    ).toEqual(pending(1));
+    await inClinic(clinic, () => retries.retryDue(50));
+    expect((await frozenOf(id)).exchangeRateSource).toBe('MANUAL');
   });
 
   it('el CHECK de actor sigue rechazando otros eventos de abono sin usuario', async () => {

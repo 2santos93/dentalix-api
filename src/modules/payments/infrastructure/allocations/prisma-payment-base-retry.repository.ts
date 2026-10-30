@@ -15,6 +15,7 @@ import type {
   PaymentBaseRetryRepository,
   PaymentRatePendingDay,
 } from '../../domain/ports/payment-base-retry-repository.port';
+import { pendingOnDayOf } from '../../domain/payment-rate-pending-day';
 
 /** Hora UTC de la BD: las columnas son `timestamp(3)` sin zona, en UTC. */
 const NOW = Prisma.sql`timezone('UTC', now())`;
@@ -172,7 +173,7 @@ export class PrismaPaymentBaseRetryRepository implements PaymentBaseRetryReposit
   ): Promise<PaymentRatePendingDay> {
     const tenantId = this.requireTenantId();
     const day = parseCivilDate(date);
-    if (day === null) return { count: 0, providerRateSaved: false };
+    if (day === null) return pendingOnDayOf([], currency, new Set(), false);
     // El día civil de una sede cae entre las 14:00 UTC del anterior y las
     // 12:00 UTC del siguiente (zonas de -12 a +14): con ±2 días se acota la
     // lectura y el día exacto se decide con la zona de cada sede.
@@ -180,18 +181,25 @@ export class PrismaPaymentBaseRetryRepository implements PaymentBaseRetryReposit
     from.setUTCDate(from.getUTCDate() - 2);
     const to = new Date(`${day}T00:00:00Z`);
     to.setUTCDate(to.getUTCDate() + 3);
-    const [rows, snapshot] = await Promise.all([
+    const [{ pairs, manual }, snapshot] = await Promise.all([
       this.prisma.runWithTenant(async (tx) => {
+        // El destino, como en `due`: el plan aunque esté eliminado (el abono
+        // sigue congelando su tasa) o el saldo migrado.
         const found = await tx.$queryRaw<
-          { paidAt: Date; locationId: string }[]
+          {
+            paidAt: Date;
+            locationId: string;
+            currency: string;
+            targetCurrency: string;
+          }[]
         >`
-          SELECT p."paidAt", p."locationId"
+          SELECT p."paidAt", p."locationId", p."currency",
+                 COALESCE(t."currency", o."currency") AS "targetCurrency"
             FROM "payment_base_retries" r
             JOIN "payments" p
               ON p."tenantId" = r."tenantId" AND p."id" = r."paymentId"
             LEFT JOIN "treatment_plans" t
               ON t."tenantId" = p."tenantId" AND t."id" = p."treatmentPlanId"
-             AND t."deletedAt" IS NULL
             LEFT JOIN "opening_balances" o
               ON o."tenantId" = p."tenantId" AND o."id" = p."openingBalanceId"
            WHERE r."tenantId" = ${tenantId}::uuid
@@ -201,15 +209,23 @@ export class PrismaPaymentBaseRetryRepository implements PaymentBaseRetryReposit
              AND p."currency" <> COALESCE(t."currency", o."currency")
              AND ${currency} IN (p."currency", COALESCE(t."currency", o."currency"))
              AND p."paidAt" >= ${from} AND p."paidAt" < ${to}`;
-        if (found.length === 0) return [];
+        if (found.length === 0) return { pairs: [], manual: new Set<string>() };
         const zoneOf = await resolveLocationTimeZones(
           tx,
           tenantId,
           found.map((r) => r.locationId),
         );
-        return found.filter(
-          (r) => civilDateIn(r.paidAt, zoneOf(r.locationId)) === day,
-        );
+        // Las tasas manuales de ese día: la de respaldo necesita las dos
+        // monedas del abono (salvo la base).
+        const rates = await tx.$queryRaw<{ currency: string }[]>`
+          SELECT "currency" FROM "manual_exchange_rates"
+           WHERE "tenantId" = ${tenantId}::uuid AND "date" = ${day}::date`;
+        return {
+          pairs: found.filter(
+            (r) => civilDateIn(r.paidAt, zoneOf(r.locationId)) === day,
+          ),
+          manual: new Set(rates.map((r) => r.currency)),
+        };
       }),
       // Tabla global de la caché del proveedor (sin tenant ni RLS).
       this.prisma.exchangeRateSnapshot.findFirst({
@@ -217,6 +233,6 @@ export class PrismaPaymentBaseRetryRepository implements PaymentBaseRetryReposit
         select: { id: true },
       }),
     ]);
-    return { count: rows.length, providerRateSaved: snapshot !== null };
+    return pendingOnDayOf(pairs, currency, manual, snapshot !== null);
   }
 }

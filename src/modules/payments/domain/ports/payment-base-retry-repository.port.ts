@@ -46,7 +46,8 @@ export interface PaymentBaseBacklog {
 export interface PaymentRatePendingDay {
   /**
    * Abonos vivos de la clínica en espera de su tasa, de ese día civil (en su
-   * sede), cuya moneda o moneda de destino es la de la tasa.
+   * sede), cuya moneda o moneda de destino es la de la tasa y cuya otra
+   * moneda es la base o ya tiene tasa manual ese día: a los que servirá.
    */
   count: number;
   /**
@@ -54,6 +55,12 @@ export interface PaymentRatePendingDay {
    * (manda la automática).
    */
   providerRateSaved: boolean;
+  /**
+   * Abonos pendientes de ese día que necesitan esa moneda y OTRA que no es
+   * la base ni tiene tasa manual registrada ese día: la de respaldo solo les
+   * servirá cuando se registre también la otra (`currencies`, ISO 4217).
+   */
+  otherRatesMissing: { count: number; currencies: string[] };
 }
 
 export const PAYMENT_BASE_RETRY_REPOSITORY = Symbol(
