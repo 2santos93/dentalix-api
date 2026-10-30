@@ -12,6 +12,7 @@ import {
 const TENANT = '9f3a1b2c-0000-4000-8000-0000000000aa';
 const ANA = '5a1c7d2e-0000-4000-8000-000000000101';
 const LUIS = '5a1c7d2e-0000-4000-8000-000000000102';
+const PEDRO = '5a1c7d2e-0000-4000-8000-000000000104';
 const NOW = new Date('2026-10-20T12:00:00.000Z');
 const TOKEN = 'A'.repeat(43);
 const META = { ip: '10.0.0.9', userAgent: 'Mozilla', requestId: 'req-1' };
@@ -173,12 +174,14 @@ describe('Baja de recordatorios por mensaje entrante (DX-128, para DX-126)', () 
 
   beforeEach(() => {
     repo = new FakeReminderOptOutRepository();
+    // La región de la sede de estos casos; los de dos sedes fijan las suyas.
+    repo.regions = ['CO'];
     repo.addPatient(ANA, { phone: '310 123 4567' });
     // Mismo móvil escrito de otra forma: la madre con dos hijos, p. ej.
     repo.addPatient(LUIS, { phone: '+57 (310) 123-4567' });
     // Mismos 8 últimos dígitos, otro país: no es el mismo móvil.
     repo.addPatient('5a1c7d2e-0000-4000-8000-000000000103', {
-      phone: '+34 6 1012 34567'.replace(/\s/g, ''),
+      phone: '+34 601 23 45 67'.replace(/\s/g, ''),
     });
     audit = { record: jest.fn().mockResolvedValue(undefined) };
     useCase = new OptOutByMessageUseCase(
@@ -334,6 +337,64 @@ describe('Baja de recordatorios por mensaje entrante (DX-128, para DX-126)', () 
     });
     expect(again).toEqual({ isOptOut: true, optedOut: [] });
     expect(audit.record).toHaveBeenCalledTimes(2);
+  });
+
+  it("an opt-out reply matches a patient stored without + in any live location's region", async () => {
+    // Sin «+», ese número solo es válido con la región de la segunda sede.
+    repo.addPatient(PEDRO, { phone: '0412-1234567' });
+    const reply = { tenantId: TENANT, fromPhone: '584121234567', text: 'BAJA' };
+    await expect(useCase.execute(reply)).resolves.toEqual({
+      isOptOut: true,
+      optedOut: [],
+    });
+    repo.regions = ['CO', 'VE'];
+    await expect(useCase.execute(reply)).resolves.toEqual({
+      isOptOut: true,
+      optedOut: [PEDRO],
+    });
+  });
+
+  it('an opt-out reply from a fixed line opts the patient out', async () => {
+    repo.regions = ['VE'];
+    repo.addPatient(PEDRO, { phone: '0212-5551234' });
+    await expect(
+      useCase.execute({
+        tenantId: TENANT,
+        fromPhone: '+582125551234',
+        text: 'BAJA',
+      }),
+    ).resolves.toEqual({ isOptOut: true, optedOut: [PEDRO] });
+  });
+
+  it('an opt-out reply from a range the library does not know still matches an identical stored +number', async () => {
+    repo.addPatient(PEDRO, { phone: '+57 000 000 0000' });
+    await expect(
+      useCase.execute({
+        tenantId: TENANT,
+        fromPhone: '570000000000',
+        text: 'BAJA',
+      }),
+    ).resolves.toEqual({ isOptOut: true, optedOut: [PEDRO] });
+  });
+
+  it('an opt-out reply matches either reading of an ambiguous stored number', async () => {
+    // Con la región de la sede, se lee como +58 412… y como +84 12…
+    repo.addPatient(PEDRO, { phone: '0058 412 1234567' });
+    await expect(
+      useCase.execute({
+        tenantId: TENANT,
+        fromPhone: '584121234567',
+        text: 'BAJA',
+      }),
+    ).resolves.toEqual({ isOptOut: true, optedOut: [PEDRO] });
+    repo.addPatient(PEDRO, { phone: '0058 412 1234567' });
+    await expect(
+      useCase.execute({
+        tenantId: TENANT,
+        fromPhone: '84121234567',
+        text: 'BAJA',
+      }),
+    ).resolves.toEqual({ isOptOut: true, optedOut: [PEDRO] });
   });
 
   it('un móvil desconocido o sin dígitos suficientes no hace nada', async () => {

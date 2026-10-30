@@ -21,6 +21,10 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import { CapturingMailer } from './support/capture-mailer';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 import { MAILER } from '../src/modules/notifications/email/domain/ports/mailer.port';
 import { JobWorker } from '../src/modules/jobs/application/job-worker.service';
 import {
@@ -588,6 +592,41 @@ describe('Baja de recordatorios (e2e, DX-128)', () => {
         where: { id: patientId },
       });
       expect(row.reminderOptOutAt).toBeNull();
+    });
+
+    it('an opt-out reply finds a patient stored without + in a second-region location', async () => {
+      // Guardado tal cual: sin «+», solo es válido con la región de la
+      // segunda sede.
+      const patientId = await createPatient('329101', {
+        phone: '0414-7654321',
+      });
+      const reply = {
+        tenantId: clinic.tenantId,
+        from: '584147654321',
+        text: 'BAJA',
+      };
+      await api()
+        .post('/api/v1/test/fake-whatsapp-webhook')
+        .send(reply)
+        .expect(200, { isOptOut: true, optedOut: [] });
+      const second = await raw.location.create({
+        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+          tenantId: clinic.tenantId,
+          name: 'Sede 329 VE',
+          defaultPhoneRegion: 'VE',
+        }),
+      });
+      try {
+        await api()
+          .post('/api/v1/test/fake-whatsapp-webhook')
+          .send(reply)
+          .expect(200, { isOptOut: true, optedOut: [patientId] });
+      } finally {
+        await raw.location.update({
+          where: { id: second.id },
+          data: { deletedAt: new Date() },
+        });
+      }
     });
   });
 });

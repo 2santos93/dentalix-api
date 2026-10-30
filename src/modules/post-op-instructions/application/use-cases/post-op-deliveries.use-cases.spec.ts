@@ -711,6 +711,38 @@ describe('GetPostOpSuggestionsUseCase (DX-222)', () => {
     });
   });
 
+  it("the WhatsApp number is read with the location's default phone region", async () => {
+    const { suggestions, deliveries } = setup();
+    deliveries.contexts.set(
+      APPOINTMENT_ID,
+      appointmentContext({
+        patient: { phone: '0412-1234567' },
+        location: { defaultPhoneRegion: 'VE' },
+      }),
+    );
+    expect((await suggestions.execute(APPOINTMENT_ID)).whatsapp).toEqual({
+      phone: '584121234567',
+      reason: null,
+    });
+    deliveries.contexts.set(
+      APPOINTMENT_ID,
+      appointmentContext({ patient: { phone: '0412-1234567' } }),
+    );
+    expect((await suggestions.execute(APPOINTMENT_ID)).whatsapp).toMatchObject({
+      phone: null,
+    });
+    deliveries.contexts.set(
+      APPOINTMENT_ID,
+      appointmentContext({
+        patient: { phone: '0058 412 1234567' },
+        location: { defaultPhoneRegion: 'CO' },
+      }),
+    );
+    expect((await suggestions.execute(APPOINTMENT_ID)).whatsapp).toMatchObject({
+      phone: null,
+    });
+  });
+
   it('sin email ni teléfono: los dos canales lo explican', async () => {
     const { suggestions, deliveries } = setup();
     deliveries.contexts.set(

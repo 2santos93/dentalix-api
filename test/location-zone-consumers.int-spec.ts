@@ -355,7 +355,7 @@ describe('consumidores de la zona de la sede: día civil en Tokio (int, G1)', ()
     const repo = new PrismaPatientImportRepository(prisma, tenantContext);
     await expect(inTenant(tokyo, () => repo.batchLocation())).resolves.toEqual({
       id: tokyo,
-      country: 'JP',
+      defaultPhoneRegion: REGIONAL_TOKYO_FIXTURE.defaultPhoneRegion,
       timeZone: 'Asia/Tokyo',
       currency: 'JPY',
       locale: 'ja-JP',

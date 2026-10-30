@@ -1,4 +1,7 @@
-import { toE164Digits } from '../../../../shared/phone/e164';
+import {
+  readPhone,
+  type PhoneRegion,
+} from '../../../../shared/phone/phone-number';
 
 /** MISSING: sin móvil. INVALID: hay texto pero no es un móvil válido. */
 export type MobileStatus = 'MISSING' | 'VALID' | 'INVALID';
@@ -7,36 +10,33 @@ export interface NormalizedMobile {
   status: MobileStatus;
   /** E.164 con `+` (p. ej. `+573101234567`), solo si es VALID. */
   e164: string | null;
+  /**
+   * Los dígitos se leen como dos números válidos distintos (DX-329, C1): no
+   * se elige ninguno y hay que escribirlo con `+`.
+   */
+  ambiguous: boolean;
 }
 
 /**
- * Forma del número nacional de un MÓVIL por indicativo (DX-013, hasta DX-329):
- * con el 57, 10 dígitos que empiezan por 3; con el 34, 9 que empiezan por 6 o
- * 7. Un fijo pasa el largo de E.164 pero no recibe WhatsApp. Para el resto de
- * indicativos basta el largo E.164 de `toE164Digits`.
- */
-const MOBILE_BY_CALLING_CODE: ReadonlyArray<[string, RegExp]> = [
-  ['57', /^3\d{9}$/],
-  ['34', /^[67]\d{8}$/],
-];
-
-/**
- * Valida y normaliza el móvil del paciente (DX-128) con la regla del botón de
- * WhatsApp (`toE164Digits`, DX-005): con `+` o `00` el número ya trae su
- * indicativo; sin él se usa `defaultCallingCode`, que calcula la aplicación
- * (DX-312). Sin indicativo por defecto, un número sin `+` es INVALID.
+ * Valida y normaliza el móvil del paciente (DX-128, DX-329 R6). La librería
+ * lee el número con la región por defecto de la sede (`readPhone`) y dice si
+ * es válido y si es móvil: con `+` el número trae su indicativo; sin él, se
+ * usa la región. Sin región, un número sin `+` es INVALID. Una lectura
+ * ambigua nunca es VALID.
  */
 export function normalizeMobile(
   phone: string | null | undefined,
-  defaultCallingCode: string | null,
+  defaultRegion: PhoneRegion | null,
 ): NormalizedMobile {
-  if (!phone?.trim()) return { status: 'MISSING', e164: null };
-  const digits = toE164Digits(phone, defaultCallingCode);
-  if (!digits) return { status: 'INVALID', e164: null };
-  for (const [code, mobile] of MOBILE_BY_CALLING_CODE) {
-    if (digits.startsWith(code) && !mobile.test(digits.slice(code.length))) {
-      return { status: 'INVALID', e164: null };
-    }
+  if (!phone?.trim())
+    return { status: 'MISSING', e164: null, ambiguous: false };
+  const reading = readPhone(phone, defaultRegion);
+  if (reading.kind === 'VALID' && reading.phone.mobile) {
+    return { status: 'VALID', e164: reading.phone.e164, ambiguous: false };
   }
-  return { status: 'VALID', e164: `+${digits}` };
+  return {
+    status: 'INVALID',
+    e164: null,
+    ambiguous: reading.kind === 'AMBIGUOUS',
+  };
 }

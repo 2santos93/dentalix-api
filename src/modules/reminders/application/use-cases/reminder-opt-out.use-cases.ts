@@ -9,8 +9,11 @@ import {
   isWellFormedConfirmationToken,
 } from '../../../appointment-confirmations/application/confirmation-token';
 import { RecordAuditEventUseCase } from '../../../audit/application/record-audit-event.use-case';
-import { normalizeMobile } from '../../../patients/domain/communication/mobile-number';
-import { callingCodeOfCountry } from '../../../../shared/phone/country-calling-code';
+import {
+  parsePhone,
+  phoneReadings,
+  type PhoneRegion,
+} from '../../../../shared/phone/phone-number';
 import {
   REMINDER_OPT_OUT_REPOSITORY,
   type OptOutClinicBranding,
@@ -184,6 +187,41 @@ export interface InboundReplyResult {
 }
 
 /**
+ * El remitente en E.164 (DX-329, R8): el de la librería si lo da por válido;
+ * si no, `+` y sus dígitos tal cual, con 8 a 15 (el proveedor ya lo entrega
+ * en E.164). No se exige un móvil: darse de baja nunca es más difícil.
+ */
+function senderE164(digits: string): string | null {
+  const parsed = parsePhone(`+${digits}`, null);
+  if (parsed) return parsed.e164;
+  return digits.length >= 8 && digits.length <= 15 ? `+${digits}` : null;
+}
+
+/**
+ * ¿El número guardado es el del remitente? (DX-329, R8, pre-flight I7) Lo es
+ * si se guardó con `+` o `00` y sus dígitos son exactamente los del
+ * remitente, o si alguna lectura con la región de alguna sede viva (las dos,
+ * si es ambiguo) da su E.164.
+ */
+function storedPhoneMatches(
+  stored: string,
+  from: string,
+  regions: readonly PhoneRegion[],
+): boolean {
+  const text = stored.trim();
+  const digits = text.replace(/\D/g, '');
+  const international = text.startsWith('+')
+    ? digits
+    : digits.startsWith('00')
+      ? digits.slice(2)
+      : null;
+  if (international !== null && `+${international}` === from) return true;
+  return [null, ...regions].some((region) =>
+    phoneReadings(stored, region).includes(from),
+  );
+}
+
+/**
  * Respuesta entrante al recordatorio (DX-128), lista para que el webhook de
  * WhatsApp Business de DX-126 la invoque al recibir cada mensaje. Si es una
  * palabra de baja («BAJA», «STOP», «NO MÁS»), registra la baja de TODOS los
@@ -213,16 +251,14 @@ export class OptOutByMessageUseCase {
   async execute(reply: InboundReply): Promise<InboundReplyResult> {
     if (!isOptOutMessage(reply.text)) return { isOptOut: false, optedOut: [] };
     const digits = reply.fromPhone.replace(/\D/g, '');
-    const from = normalizeMobile(`+${digits}`, null);
-    if (from.status !== 'VALID') return { isOptOut: true, optedOut: [] };
+    const from = senderE164(digits);
+    if (!from) return { isOptOut: true, optedOut: [] };
 
     return this.tenantContext.run(reply.tenantId, async () => {
-      const callingCode = callingCodeOfCountry(
-        await this.repo.principalLocationCountry(),
-      );
+      const regions = await this.repo.liveLocationPhoneRegions();
       const candidates = await this.repo.findByPhoneTail(digits.slice(-8));
-      const matches = candidates.filter(
-        (c) => normalizeMobile(c.phone, callingCode).e164 === from.e164,
+      const matches = candidates.filter((c) =>
+        storedPhoneMatches(c.phone, from, regions),
       );
       const limit = this.maxMatches;
       if (matches.length > limit) {

@@ -9,6 +9,10 @@ import {
   type PatientImportStatus,
   type Sex,
 } from '@prisma/client';
+import {
+  phoneRegionOrNull,
+  type PhoneRegion,
+} from '../../../shared/phone/phone-number';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import {
@@ -229,10 +233,14 @@ export class BatchStateError extends Error {
   }
 }
 
-/** La sede de un lote nuevo: su país, su zona y su moneda (null: sin configurar). */
+/**
+ * La sede de un lote nuevo: la región por defecto de sus teléfonos, su zona y
+ * su moneda (null: sin configurar).
+ */
 export interface BatchLocation {
   id: string;
-  country: string;
+  /** Región con la que se leen los teléfonos sin «+» (DX-329); null: ninguna. */
+  defaultPhoneRegion: PhoneRegion | null;
   timeZone: string;
   currency: string | null;
   /** Formato y reloj en crudo: los pide quien pinta un mensaje (G1-B, I4). */
@@ -424,7 +432,7 @@ export class PrismaPatientImportRepository {
         },
         select: {
           id: true,
-          country: true,
+          defaultPhoneRegion: true,
           timeZone: true,
           currency: true,
           locale: true,
@@ -434,7 +442,7 @@ export class PrismaPatientImportRepository {
       if (!location) throw new BatchLocationError();
       return {
         id: location.id,
-        country: location.country,
+        defaultPhoneRegion: phoneRegionOrNull(location.defaultPhoneRegion),
         timeZone: requireLocationTimeZone(location),
         currency: location.currency,
         locale: location.locale,

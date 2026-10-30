@@ -29,7 +29,7 @@ export const REGIONAL_BOGOTA_FIXTURE: RegionalFixture = {
   defaultPhoneRegion: 'CO',
 };
 
-/** Sede de Tokio: su país no tiene indicativo provisional (DX-312). */
+/** Sede de Tokio: un número sin «+» se lee con su región (DX-329). */
 export const REGIONAL_TOKYO_FIXTURE: RegionalFixture = {
   country: 'JP',
   currency: 'JPY',
@@ -39,7 +39,7 @@ export const REGIONAL_TOKYO_FIXTURE: RegionalFixture = {
   defaultPhoneRegion: 'JP',
 };
 
-/** Sede con reloj de 12 h; un número sin «+» toma +1 (DX-312). */
+/** Sede con reloj de 12 h; un número sin «+» se lee con su región (DX-329). */
 export const REGIONAL_NEW_YORK_FIXTURE: RegionalFixture = {
   country: 'US',
   currency: 'USD',
@@ -49,7 +49,7 @@ export const REGIONAL_NEW_YORK_FIXTURE: RegionalFixture = {
   defaultPhoneRegion: 'US',
 };
 
-/** Sede con reloj de 24 h; su país no tiene indicativo provisional (DX-312). */
+/** Sede con reloj de 24 h; un número sin «+» se lee con su región (DX-329). */
 export const REGIONAL_BERLIN_FIXTURE: RegionalFixture = {
   country: 'DE',
   currency: 'EUR',

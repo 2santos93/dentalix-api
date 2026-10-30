@@ -9,7 +9,7 @@ import {
 import { MedicalHistorySubmissionStatus } from '@prisma/client';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { firstNameOnly } from '../../../appointment-confirmations/application/confirmation-token';
-import { toWhatsAppNumber } from '../../../appointment-confirmations/application/whatsapp-phone';
+import { whatsAppDigits } from '../../../../shared/phone/phone-number';
 import { NO_POLICY_MESSAGE } from '../../../data-consents/infrastructure/record-consents-in-tx';
 import { PATIENT_NOT_FOUND_MESSAGE } from '../../../patients/application/assert-patient-in-clinic';
 import { ANAMNESIS_QUESTIONNAIRE_VERSION } from '../../domain/anamnesis-questionnaire';
@@ -170,7 +170,7 @@ export class CreateAnamnesisRequestUseCase {
       ctx.patient.contactChannel === 'NONE';
     const phone = optedOut
       ? null
-      : toWhatsAppNumber(ctx.patient.phone, issued.locationCountry);
+      : whatsAppDigits(ctx.patient.phone, issued.locationPhoneRegion);
     return {
       id: issued.submission.id,
       patientId,

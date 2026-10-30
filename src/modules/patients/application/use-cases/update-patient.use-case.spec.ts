@@ -178,7 +178,7 @@ describe('UpdatePatientUseCase', () => {
 
   // DX-128: con canal WhatsApp, el móvil tiene que seguir siendo válido.
   describe('móvil de un paciente con canal WhatsApp', () => {
-    function setup(patient: Patient) {
+    function setup(patient: Patient, region: string | null) {
       const updates: UpdatePatientRepoInput[] = [];
       const repo = makeRepo({
         findById: (): Promise<Patient | null> => Promise.resolve(patient),
@@ -187,10 +187,12 @@ describe('UpdatePatientUseCase', () => {
           return Promise.resolve({ ...patient, ...patch });
         },
       });
+      const communication = new FakePatientCommunicationRepository();
+      communication.region = region;
       const uc = new UpdatePatientUseCase(
         repo,
         makeReferenceLookup(),
-        new FakePatientCommunicationRepository(),
+        communication,
       );
       return { uc, updates };
     }
@@ -200,6 +202,7 @@ describe('UpdatePatientUseCase', () => {
       async (phone) => {
         const { uc, updates } = setup(
           fakePatient({ contactChannel: 'WHATSAPP', phone: '+573101234567' }),
+          'CO',
         );
         const err = await uc.execute('p1', { phone }).catch((e: unknown) => e);
         expect(err).toBeInstanceOf(BadRequestException);
@@ -210,16 +213,49 @@ describe('UpdatePatientUseCase', () => {
       },
     );
 
-    it('acepta otro móvil válido (con el país de la sede)', async () => {
+    it('the WhatsApp 400 for an ambiguous number asks to write it with +', async () => {
       const { uc, updates } = setup(
         fakePatient({ contactChannel: 'WHATSAPP', phone: '+573101234567' }),
+        'CO',
+      );
+      const err = await uc
+        .execute('p1', { phone: '0058 412 1234567' })
+        .catch((e: unknown) => e);
+      expect((err as BadRequestException).getResponse()).toMatchObject({
+        code: 'WHATSAPP_REQUIRES_VALID_MOBILE',
+        message:
+          'Ese número se puede leer de dos formas. Escríbelo con + y el prefijo del país.',
+      });
+      expect(updates).toEqual([]);
+    });
+
+    it("the communication block no longer falls back to the patient's country", async () => {
+      const { uc, updates } = setup(
+        fakePatient({
+          contactChannel: 'WHATSAPP',
+          phone: '+573101234567',
+          countryCode: 'CO',
+        }),
+        null,
+      );
+      const err = await uc
+        .execute('p1', { phone: '320 765 4321' })
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(BadRequestException);
+      expect(updates).toEqual([]);
+    });
+
+    it('acepta otro móvil válido (con la región de la sede)', async () => {
+      const { uc, updates } = setup(
+        fakePatient({ contactChannel: 'WHATSAPP', phone: '+573101234567' }),
+        'CO',
       );
       await uc.execute('p1', { phone: '320 765 4321' });
       expect(updates).toEqual([{ phone: '320 765 4321' }]);
     });
 
     it('con canal EMAIL un móvil inválido se guarda (la ficha avisa)', async () => {
-      const { uc, updates } = setup(fakePatient({ phone: null }));
+      const { uc, updates } = setup(fakePatient({ phone: null }), 'CO');
       await uc.execute('p1', { phone: '123' });
       expect(updates).toEqual([{ phone: '123' }]);
     });

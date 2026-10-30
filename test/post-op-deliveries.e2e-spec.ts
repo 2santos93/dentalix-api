@@ -633,10 +633,14 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
   it('the WhatsApp link of a VE location points to +58', async () => {
     const location = await raw.location.findFirstOrThrow({
       where: { tenantId: clinicA.tenantId },
-      select: { id: true, country: true },
+      select: { id: true, country: true, defaultPhoneRegion: true },
     });
+    // DX-329 (pre-flight I2): el país ya no da el prefijo; lo da la región.
     await as(clinicA)
-      .patch(`/locations/${location.id}`, { country: 'VE' })
+      .patch(`/locations/${location.id}`, {
+        country: 'VE',
+        defaultPhoneRegion: 'VE',
+      })
       .expect(200);
     try {
       const id = await patient({
@@ -658,7 +662,10 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
       expect(created.whatsapp?.phone).toBe('584121234567');
     } finally {
       await as(clinicA)
-        .patch(`/locations/${location.id}`, { country: location.country })
+        .patch(`/locations/${location.id}`, {
+          country: location.country,
+          defaultPhoneRegion: location.defaultPhoneRegion,
+        })
         .expect(200);
     }
   });

@@ -1,5 +1,9 @@
 import { Prisma, PrismaClient } from '@prisma/client';
-import { callingCodeOfCountry } from '../src/shared/phone/country-calling-code';
+import {
+  callingCodeOf,
+  suggestedPhoneRegion,
+  type CountryCode,
+} from '../src/shared/phone/phone-number';
 import {
   REGIONAL_BERLIN_FIXTURE,
   REGIONAL_BOGOTA_FIXTURE,
@@ -86,13 +90,23 @@ describe('fixtures de sede (G1)', () => {
     }
   });
 
-  // DX-312 (pre-flight m6): con su país real, un número sin «+» de Nueva York
-  // toma +1, y Tokio y Berlín no tienen indicativo provisional.
+  // DX-329: la región por defecto de cada fixture es la que se sugiere desde
+  // su país, y da el indicativo de un número sin «+».
   it('regional fixtures change the default calling code as their country says', () => {
-    expect(callingCodeOfCountry(REGIONAL_NEW_YORK_FIXTURE.country)).toBe('1');
-    expect(callingCodeOfCountry(REGIONAL_TOKYO_FIXTURE.country)).toBeNull();
-    expect(callingCodeOfCountry(REGIONAL_BERLIN_FIXTURE.country)).toBeNull();
-    expect(callingCodeOfCountry(REGIONAL_BOGOTA_FIXTURE.country)).toBe('57');
+    const cases = [
+      [REGIONAL_NEW_YORK_FIXTURE, '1'],
+      [REGIONAL_TOKYO_FIXTURE, '81'],
+      [REGIONAL_BERLIN_FIXTURE, '49'],
+      [REGIONAL_BOGOTA_FIXTURE, '57'],
+    ] as const;
+    for (const [fixture, callingCode] of cases) {
+      expect(suggestedPhoneRegion(fixture.country)).toBe(
+        fixture.defaultPhoneRegion,
+      );
+      expect(callingCodeOf(fixture.defaultPhoneRegion as CountryCode)).toBe(
+        callingCode,
+      );
+    }
   });
 
   it('regionalSql sirve para un INSERT crudo', async () => {

@@ -1,4 +1,5 @@
 import type { ReminderOptOutSource } from '@prisma/client';
+import type { PhoneRegion } from '../../../../shared/phone/phone-number';
 
 // Como el resto del módulo: sin `tenantId` en los inputs. El tenant sale del
 // contexto (host en la página pública, trabajo de la cola, o el que fije el
@@ -58,7 +59,10 @@ export interface ReminderOptOutRepository {
   purgeLinks(before: Date): Promise<number>;
   /** Pacientes vivos cuyo teléfono acaba en esos 8 dígitos (prefiltro indexado). */
   findByPhoneTail(tail: string): Promise<MobileCandidate[]>;
-  /** País de la sede (ISO 3166-1 alfa-2) principal: la viva más antigua. */
-  principalLocationCountry(): Promise<string | null>;
+  /**
+   * Regiones por defecto del teléfono de las sedes vivas de la clínica, sin
+   * repetir y solo las que la librería admite (DX-329, R8).
+   */
+  liveLocationPhoneRegions(): Promise<PhoneRegion[]>;
   clinicBranding(): Promise<OptOutClinicBranding | null>;
 }

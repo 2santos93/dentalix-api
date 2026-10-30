@@ -10,7 +10,7 @@ import { describeDeliveryError } from '../../../notifications/email/application/
 import { RecordAuditEventUseCase } from '../../../audit/application/record-audit-event.use-case';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { firstNameOnly } from '../../../appointment-confirmations/application/confirmation-token';
-import { toWhatsAppNumber } from '../../../appointment-confirmations/application/whatsapp-phone';
+import { whatsAppDigits } from '../../../../shared/phone/phone-number';
 import { assertPatientInClinic } from '../../../patients/application/assert-patient-in-clinic';
 import {
   noticeRecipient,
@@ -198,7 +198,7 @@ function emailRecipient(
 }
 
 function whatsAppPhone(ctx: PostOpAppointmentContext): string | null {
-  return toWhatsAppNumber(ctx.patient.phone, ctx.location.country);
+  return whatsAppDigits(ctx.patient.phone, ctx.location.defaultPhoneRegion);
 }
 
 /**

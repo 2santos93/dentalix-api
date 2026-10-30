@@ -138,12 +138,26 @@ export class PatientCommunicationDto {
   phoneStatus!: 'MISSING' | 'VALID' | 'INVALID';
 
   @ApiProperty({
+    description:
+      'true si los dígitos se pueden leer como dos números válidos distintos: hay que escribirlo con + y el prefijo del país.',
+  })
+  phoneAmbiguous!: boolean;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'Número válido en formato internacional de la librería, con su extensión si la tiene. null si no es válido.',
+  })
+  phoneInternational!: string | null;
+
+  @ApiProperty({
     type: String,
     nullable: true,
     minLength: 2,
     maxLength: 2,
     description:
-      'País (ISO 3166-1 alfa-2) con el que se valida un número sin indicativo: el de la sede activa o la principal (sin sedes, el del paciente). null si no hay país o si ese país no tiene indicativo por defecto (hasta DX-329): el número se escribe con +.',
+      'Región (ISO 3166-1 alfa-2) cuyo prefijo se añade a un número escrito sin +: la de la sede activa o la principal. null si la sede no tiene prefijo por defecto.',
   })
   phoneCountry!: string | null;
 

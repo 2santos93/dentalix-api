@@ -54,11 +54,12 @@ export class InMemoryAppointmentConfirmationRepository implements AppointmentCon
       status: 'SCHEDULED' as const,
       patientFirstName: 'Ana María',
       patientPhone: '+57 310 555 0101',
-      patientCountryCode: 'CO',
       providerName: 'Dra. Pérez',
       locationId: 'loc-principal',
       locationName: 'Sede Principal',
       locationAddress: 'Calle 1 # 2-3',
+      // Sin región por defecto: cada test fija la suya (DX-329, m13).
+      locationPhoneRegion: null,
       ...overrides,
       confirmationSentAt: null,
       callbackRequestedAt: null,

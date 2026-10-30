@@ -21,8 +21,10 @@ import {
 } from './support/e2e-fixtures';
 import {
   REGIONAL_BERLIN_FIXTURE,
+  REGIONAL_BOGOTA_FIXTURE,
   REGIONAL_NEW_YORK_FIXTURE,
   REGIONAL_TOKYO_FIXTURE,
+  locationData,
 } from './support/location-fixtures';
 
 // DX-128 en HTTP real: bloque «Comunicaciones» de la ficha. Lo ven los 4
@@ -45,6 +47,8 @@ interface CommunicationBody {
   phone: string | null;
   phoneE164: string | null;
   phoneStatus: string;
+  phoneAmbiguous: boolean;
+  phoneInternational: string | null;
   phoneCountry: string | null;
   email: string | null;
   whatsappOptIn: {
@@ -137,6 +141,8 @@ describe('Comunicaciones del paciente (e2e, DX-128)', () => {
       phone: '601 234 5678',
       phoneE164: null,
       phoneStatus: 'INVALID',
+      phoneAmbiguous: false,
+      phoneInternational: '+57 601 2345678',
       phoneCountry: 'CO',
       email: 'carolina@example.com',
       whatsappOptIn: null,
@@ -543,18 +549,18 @@ describe('Comunicaciones del paciente (e2e, DX-128)', () => {
     }
   });
 
-  describe('indicativo por defecto según el país de la sede (DX-312)', () => {
+  describe('región por defecto del teléfono de la sede (DX-329)', () => {
     let phones: Clinic;
     let locationId: string;
-    let doc = 312000;
+    let doc = 329000;
 
-    const setCountry = (country: string) =>
+    const setPhoneRegion = (defaultPhoneRegion: string | null) =>
       as(
         api().patch(`/api/v1/locations/${locationId}`),
         phones.adminToken,
         phones.host,
       )
-        .send({ country })
+        .send({ defaultPhoneRegion })
         .expect(200);
 
     const newPatient = async (): Promise<string> => {
@@ -581,16 +587,22 @@ describe('Comunicaciones del paciente (e2e, DX-128)', () => {
         contactChannel: 'WHATSAPP',
       });
 
+    /** Sin canal WhatsApp: el número se guarda aunque no sea un móvil válido. */
+    const keepPhone = (id: string, phone: string) =>
+      as(api().patch(comms(id)), phones.adminToken, phones.host)
+        .send({ phone })
+        .expect(200);
+
     beforeAll(async () => {
-      phones = await registerClinic(app, 'dx312-phones');
+      phones = await registerClinic(app, 'dx329-phones');
       const location = await raw.location.findFirstOrThrow({
         where: { tenantId: phones.tenantId },
       });
       locationId = location.id;
     });
 
-    it('a location in VE normalizes a mobile written without + to +58', async () => {
-      await setCountry('VE');
+    it('a location with region VE normalizes 0412-1234567 to +58 and shows +58 412 1234567', async () => {
+      await setPhoneRegion('VE');
       const id = await newPatient();
       const res = await setPhone(id, '0412-1234567').expect(200);
       expect(res.body).toMatchObject({
@@ -598,14 +610,21 @@ describe('Comunicaciones del paciente (e2e, DX-128)', () => {
         phone: '+584121234567',
         phoneE164: '+584121234567',
         phoneStatus: 'VALID',
+        phoneAmbiguous: false,
+        phoneInternational: '+58 412 1234567',
         phoneCountry: 'VE',
       });
       const row = await raw.patient.findUniqueOrThrow({ where: { id } });
       expect(row.phone).toBe('+584121234567');
+      // La región decide, no el país de la sede (que sigue siendo otro).
+      const location = await raw.location.findUniqueOrThrow({
+        where: { id: locationId },
+      });
+      expect(location.country).not.toBe('VE');
     });
 
     it('a CO location still normalizes to +57', async () => {
-      await setCountry('CO');
+      await setPhoneRegion('CO');
       const id = await newPatient();
       const res = await setPhone(id, '310 123 4567').expect(200);
       expect(res.body).toMatchObject({
@@ -616,8 +635,26 @@ describe('Comunicaciones del paciente (e2e, DX-128)', () => {
       });
     });
 
-    it('a location without a provisional calling code rejects a mobile without + and accepts it with +', async () => {
-      await setCountry('JP');
+    it('a VE landline is not a mobile for WhatsApp', async () => {
+      await setPhoneRegion('VE');
+      const id = await newPatient();
+      const refused = await setPhone(id, '0212-5551234').expect(400);
+      expect(refused.body).toMatchObject({
+        code: 'WHATSAPP_REQUIRES_VALID_MOBILE',
+        message: NEEDS_MOBILE,
+      });
+      const kept = await keepPhone(id, '0212-5551234');
+      expect(kept.body).toMatchObject({
+        phone: '0212-5551234',
+        phoneE164: null,
+        phoneStatus: 'INVALID',
+        phoneInternational: '+58 212 5551234',
+        phoneCountry: 'VE',
+      });
+    });
+
+    it('a location without a default phone region rejects a mobile without + and accepts it with +', async () => {
+      await setPhoneRegion(null);
       const id = await newPatient();
       const refused = await setPhone(id, '0412-1234567').expect(400);
       expect(refused.body).toMatchObject({
@@ -627,6 +664,14 @@ describe('Comunicaciones del paciente (e2e, DX-128)', () => {
       expect(
         (await raw.patient.findUniqueOrThrow({ where: { id } })).phone,
       ).toBeNull();
+      const kept = await keepPhone(id, '0412-1234567');
+      expect(kept.body).toMatchObject({
+        phone: '0412-1234567',
+        phoneE164: null,
+        phoneStatus: 'INVALID',
+        phoneInternational: null,
+        phoneCountry: null,
+      });
       const res = await setPhone(id, '+58 412 1234567').expect(200);
       expect(res.body).toMatchObject({
         phone: '+584121234567',
@@ -636,55 +681,80 @@ describe('Comunicaciones del paciente (e2e, DX-128)', () => {
       });
     });
 
-    // Pre-flight m6: con su país real, las sedes de test cambian el indicativo
-    // de un número sin «+». Nueva York toma +1; Tokio y Berlín no tienen
-    // indicativo provisional: WhatsApp lo rechaza y, sin WhatsApp, se guarda
-    // tal cual, sin indicativo adivinado.
-    it('regional fixtures: a mobile without + gets +1 at New York and no guessed code at Tokyo or Berlin', async () => {
-      await setCountry(REGIONAL_NEW_YORK_FIXTURE.country);
-      const us = await newPatient();
-      const res = await setPhone(us, '212 555 0123').expect(200);
-      expect(res.body).toMatchObject({
-        phone: '+12125550123',
-        phoneE164: '+12125550123',
-        phoneStatus: 'VALID',
-        phoneCountry: REGIONAL_NEW_YORK_FIXTURE.country,
+    it('two locations with different regions read the same unprefixed number with the active one', async () => {
+      await setPhoneRegion('CO');
+      const second = await raw.location.create({
+        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+          tenantId: phones.tenantId,
+          name: 'Sede 329 VE',
+          defaultPhoneRegion: 'VE',
+        }),
       });
-
-      for (const fixture of [REGIONAL_TOKYO_FIXTURE, REGIONAL_BERLIN_FIXTURE]) {
-        await setCountry(fixture.country);
-        const id = await newPatient();
-        const refused = await setPhone(id, '0412-1234567').expect(400);
-        expect({
-          country: fixture.country,
-          body: refused.body as unknown,
-        }).toMatchObject({
-          country: fixture.country,
-          body: {
-            code: 'WHATSAPP_REQUIRES_VALID_MOBILE',
-            message: NEEDS_MOBILE,
-          },
-        });
-        expect(
-          (await raw.patient.findUniqueOrThrow({ where: { id } })).phone,
-        ).toBeNull();
-        const kept = await as(
-          api().patch(comms(id)),
-          phones.adminToken,
-          phones.host,
-        )
-          .send({ phone: '0412-1234567' })
+      const id = await newPatient();
+      await keepPhone(id, '0412-1234567');
+      const read = (activeLocation: string) =>
+        as(api().get(comms(id)), phones.adminToken, phones.host)
+          .set('X-Location-Id', activeLocation)
           .expect(200);
+      expect((await read(locationId)).body).toMatchObject({
+        phone: '0412-1234567',
+        phoneE164: null,
+        phoneStatus: 'INVALID',
+        phoneCountry: 'CO',
+      });
+      expect((await read(second.id)).body).toMatchObject({
+        phone: '0412-1234567',
+        phoneE164: '+584121234567',
+        phoneStatus: 'VALID',
+        phoneCountry: 'VE',
+      });
+    });
+
+    it('an ambiguous number answers phoneAmbiguous and is refused for WhatsApp', async () => {
+      await setPhoneRegion('CO');
+      const id = await newPatient();
+      const refused = await setPhone(id, '0058 412 1234567').expect(400);
+      expect(refused.body).toMatchObject({
+        code: 'WHATSAPP_REQUIRES_VALID_MOBILE',
+        message:
+          'Ese número se puede leer de dos formas. Escríbelo con + y el prefijo del país.',
+      });
+      const kept = await keepPhone(id, '0058 412 1234567');
+      expect(kept.body).toMatchObject({
+        phone: '0058 412 1234567',
+        phoneE164: null,
+        phoneStatus: 'INVALID',
+        phoneAmbiguous: true,
+        phoneInternational: null,
+        phoneCountry: 'CO',
+      });
+      expect(
+        (await raw.patient.findUniqueOrThrow({ where: { id } })).phone,
+      ).toBe('0058 412 1234567');
+    });
+
+    // Cada fixture regional lleva su región como dato (pre-flight I1): un
+    // número sin «+» se lee con ella.
+    it('regional fixtures read a mobile without + with their region at New York, Tokyo and Berlin', async () => {
+      const cases = [
+        [REGIONAL_NEW_YORK_FIXTURE, '212 555 0123', '+12125550123'],
+        [REGIONAL_TOKYO_FIXTURE, '090-1234-5678', '+819012345678'],
+        [REGIONAL_BERLIN_FIXTURE, '0151 23456789', '+4915123456789'],
+      ] as const;
+      for (const [fixture, typed, e164] of cases) {
+        await setPhoneRegion(fixture.defaultPhoneRegion);
+        const id = await newPatient();
+        const res = await setPhone(id, typed).expect(200);
         expect({
-          country: fixture.country,
-          body: kept.body as unknown,
+          region: fixture.defaultPhoneRegion,
+          body: res.body as unknown,
         }).toMatchObject({
-          country: fixture.country,
+          region: fixture.defaultPhoneRegion,
           body: {
-            phone: '0412-1234567',
-            phoneE164: null,
-            phoneStatus: 'INVALID',
-            phoneCountry: null,
+            phone: e164,
+            phoneE164: e164,
+            phoneStatus: 'VALID',
+            phoneCountry: fixture.defaultPhoneRegion,
           },
         });
       }

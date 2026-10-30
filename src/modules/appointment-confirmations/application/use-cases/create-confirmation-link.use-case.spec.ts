@@ -79,6 +79,27 @@ describe('CreateConfirmationLinkUseCase', () => {
     expect(result.whatsappPhone).toBeNull();
   });
 
+  it("a number without + is read with the appointment's location region", async () => {
+    const withRegion = repo.addAppointment({
+      patientPhone: '0412-1234567',
+      locationPhoneRegion: 'VE',
+    });
+    expect(
+      (await uc.execute({ appointmentId: withRegion.id })).whatsappPhone,
+    ).toBe('584121234567');
+    const withoutRegion = repo.addAppointment({ patientPhone: '0412-1234567' });
+    expect(
+      (await uc.execute({ appointmentId: withoutRegion.id })).whatsappPhone,
+    ).toBeNull();
+    const ambiguous = repo.addAppointment({
+      patientPhone: '0058 412 1234567',
+      locationPhoneRegion: 'CO',
+    });
+    expect(
+      (await uc.execute({ appointmentId: ambiguous.id })).whatsappPhone,
+    ).toBeNull();
+  });
+
   it('emitir otro enlace revoca el anterior (solo vale el último)', async () => {
     const appointment = repo.addAppointment();
     await uc.execute({ appointmentId: appointment.id });

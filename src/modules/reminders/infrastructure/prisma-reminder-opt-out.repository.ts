@@ -3,6 +3,10 @@ import { ReminderClock } from '../application/reminder-clock';
 import { optOutPositiveInteger } from '../application/opt-out-config';
 import { Injectable } from '@nestjs/common';
 import { Prisma, type ReminderOptOutSource } from '@prisma/client';
+import {
+  phoneRegionOrNull,
+  type PhoneRegion,
+} from '../../../shared/phone/phone-number';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import type {
@@ -179,15 +183,20 @@ export class PrismaReminderOptOutRepository implements ReminderOptOutRepository 
     );
   }
 
-  async principalLocationCountry(): Promise<string | null> {
-    const location = await this.prisma.runWithTenant((tx) =>
-      tx.location.findFirst({
-        where: { deletedAt: null },
-        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-        select: { country: true },
+  async liveLocationPhoneRegions(): Promise<PhoneRegion[]> {
+    const rows = await this.prisma.runWithTenant((tx) =>
+      tx.location.findMany({
+        where: { deletedAt: null, defaultPhoneRegion: { not: null } },
+        distinct: ['defaultPhoneRegion'],
+        select: { defaultPhoneRegion: true },
       }),
     );
-    return location?.country ?? null;
+    const regions = rows.map((row) =>
+      phoneRegionOrNull(row.defaultPhoneRegion),
+    );
+    return [...new Set(regions)].filter(
+      (region): region is PhoneRegion => region !== null,
+    );
   }
 
   clinicBranding(): Promise<OptOutClinicBranding | null> {

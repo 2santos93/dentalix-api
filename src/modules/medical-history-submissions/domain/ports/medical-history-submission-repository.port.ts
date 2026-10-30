@@ -48,7 +48,8 @@ export interface IssueRequestInput {
 
 export interface IssuedRequest {
   submission: MedicalHistorySubmission;
-  locationCountry: string;
+  /** Región por defecto del teléfono de la sede (DX-329); null: ninguna. */
+  locationPhoneRegion: string | null;
 }
 
 /** Lo que ve el paciente (y lo que hace falta para decidir si puede). */

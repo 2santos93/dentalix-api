@@ -21,6 +21,7 @@ import {
 import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
 import {
   locationBody,
+  locationData,
   REGIONAL_BOGOTA_FIXTURE,
 } from './support/location-fixtures';
 
@@ -916,5 +917,80 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
       orderBy: { occurredAt: 'desc' },
     });
     expect(last?.metadata).toMatchObject({ reason: 'RECEIVABLES_AGING' });
+  });
+
+  describe('región del teléfono de la sede de la deuda (DX-329, P1)', () => {
+    let sedeVe: string;
+    let deudorVe: string;
+    let deudorPrincipal: string;
+
+    beforeAll(async () => {
+      sedeVe = (
+        await raw.location.create({
+          data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+            tenantId: clinicA.tenantId,
+            name: 'Sede 329 VE',
+            defaultPhoneRegion: 'VE',
+          }),
+          select: { id: true },
+        })
+      ).id;
+      // El mismo número sin «+», en dos sedes con regiones distintas.
+      deudorVe = await patient(
+        clinicA,
+        'Veneciano',
+        'CAR-329A',
+        '0412-1234567',
+      );
+      await plan(clinicA, deudorVe, 10000, { createdDaysAgo: 3 });
+      await attended(clinicA, deudorVe, sedeVe, 6);
+      deudorPrincipal = await patient(
+        clinicA,
+        'Principal',
+        'CAR-329B',
+        '0412-1234567',
+      );
+      await plan(clinicA, deudorPrincipal, 10000, { createdDaysAgo: 3 });
+      await attended(clinicA, deudorPrincipal, sedePrincipal, 7);
+    });
+
+    const rowOf = (body: AgingPage, id: string) =>
+      body.items.find((r) => r.patient.id === id)?.patient;
+
+    it("the debtor's WhatsApp link uses the region of the debt's location", async () => {
+      const ve = (
+        await get(clinicA, `/receivables/aging?locationId=${sedeVe}`).expect(
+          200,
+        )
+      ).body as AgingPage;
+      expect(rowOf(ve, deudorVe)).toMatchObject({
+        phone: '0412-1234567',
+        whatsApp: '584121234567',
+      });
+      const principal = (
+        await get(
+          clinicA,
+          `/receivables/aging?locationId=${sedePrincipal}`,
+        ).expect(200)
+      ).body as AgingPage;
+      // La sede principal lee con su región (CO): ese número no es válido.
+      expect(rowOf(principal, deudorPrincipal)).toMatchObject({
+        phone: '0412-1234567',
+        whatsApp: null,
+      });
+    });
+
+    it("a debt whose location was soft-deleted still uses that location's region", async () => {
+      await raw.location.update({
+        where: { id: sedeVe },
+        data: { deletedAt: new Date() },
+      });
+      const all = (
+        await get(clinicA, '/receivables/aging?pageSize=100').expect(200)
+      ).body as AgingPage;
+      expect(rowOf(all, deudorVe)).toMatchObject({
+        whatsApp: '584121234567',
+      });
+    });
   });
 });

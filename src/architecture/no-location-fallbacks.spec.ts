@@ -1117,15 +1117,8 @@ const LEGACY_CLINIC_COUNTRY_FILE = join(
   'locations',
   'legacy-clinic-country.ts',
 );
-const COUNTRY_CALLING_CODE_FILE = join(
-  SRC,
-  'shared',
-  'phone',
-  'country-calling-code.ts',
-);
 const COUNTRY_EXCEPTIONS = [
   LEGACY_CLINIC_COUNTRY_FILE,
-  COUNTRY_CALLING_CODE_FILE,
   join(PRESCRIPTIONS, 'domain', 'legacy-prescription.ts'),
   join(PRESCRIPTIONS, 'domain', 'prescription-hash.ts'),
 ];
@@ -1339,10 +1332,7 @@ describe('país de la sede libre (DX-312)', () => {
     ]
       .flatMap(tsFiles)
       .filter(
-        (file) =>
-          isProduction(file) &&
-          file !== LEGACY_CLINIC_COUNTRY_FILE &&
-          file !== COUNTRY_CALLING_CODE_FILE,
+        (file) => isProduction(file) && file !== LEGACY_CLINIC_COUNTRY_FILE,
       );
     expect(files.length).toBeGreaterThan(30);
     expect(offending(files, countryNameHit)).toEqual([]);
@@ -1357,14 +1347,6 @@ describe('país de la sede libre (DX-312)', () => {
           .includes(COUNTRY_EXCEPTION_HEADER),
       }).toEqual({ file: relative(SRC, file), header: true });
     }
-  });
-
-  it('country-calling-code.ts names DX-329 as its expiry', () => {
-    const header = readFileSync(COUNTRY_CALLING_CODE_FILE, 'utf8').slice(
-      0,
-      200,
-    );
-    expect(header).toMatch(/provisional hasta DX-329/);
   });
 
   it('the country patterns catch each form and skip neutral text', () => {
@@ -1447,8 +1429,8 @@ describe('país de la sede libre (DX-312)', () => {
       `validateCountry(raw, countries)`,
       `countries.has(code)`,
       `this.${COUNTRY}Whitelist.has(${COUNTRY})`,
-      `normalizeMobile(phone, defaultCallingCode)`,
-      `callingCodeOfCountry(location.${COUNTRY})`,
+      `normalizeMobile(phone, defaultRegion)`,
+      `suggestedPhoneRegion(location.${COUNTRY})`,
       `// ${COUNTRY} === 'CO'`,
       `/** ${COUNTRY}Code === \`${COUNTRY}Code\` */`,
       `${COUNTRY} === ''`,

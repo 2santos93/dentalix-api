@@ -53,7 +53,6 @@ function details(patientId: string, name: string): DebtorDetails {
     firstName: name,
     lastName: 'Prueba',
     phone: '300 123 4567',
-    countryCode: 'CO',
     lastPayment: null,
   };
 }
@@ -72,6 +71,14 @@ class InMemoryReceivablesRepository implements ReceivablesRepository {
   locationTimeZones(): Promise<(locationId: string | null) => string> {
     const zones = locationZonesOf([NORTE]);
     return Promise.resolve((id) => zones.zoneOf(id ?? NORTE.id));
+  }
+
+  /** Región por defecto del teléfono de cada sede; null es la principal. */
+  readonly phoneRegions = new Map<string | null, string | null>();
+  locationPhoneRegions(): Promise<
+    (locationId: string | null) => string | null
+  > {
+    return Promise.resolve((id) => this.phoneRegions.get(id) ?? null);
   }
 
   loadLedgers(query: LedgersQuery): Promise<PatientLedger[]> {
@@ -126,6 +133,8 @@ describe('GetReceivablesAgingUseCase', () => {
 
   beforeEach(() => {
     repo = new InMemoryReceivablesRepository();
+    // La región por defecto del teléfono de la sede Norte (DX-329).
+    repo.phoneRegions.set(NORTE.id, 'CO');
     useCase = new GetReceivablesAgingUseCase(repo, () => NOW);
     repo.ledgers = [
       ledger('p-reciente', 100000, '2026-10-07T17:00:00.000Z'), // 10 días
@@ -191,6 +200,16 @@ describe('GetReceivablesAgingUseCase', () => {
       nextInstallment: null,
     });
     expect(repo.ledgerQueries).toEqual([{ locationId: NORTE.id }]);
+  });
+
+  it("the debtor's WhatsApp link uses the region of the debt's location", async () => {
+    repo.phoneRegions.set(NORTE.id, 'VE');
+    repo.debtors = repo.debtors.map((d) => ({ ...d, phone: '0412-1234567' }));
+    const out = await useCase.execute({ locationId: NORTE.id });
+    expect(out.items[0].patient.whatsApp).toBe('584121234567');
+    repo.phoneRegions.set(NORTE.id, null);
+    const without = await useCase.execute({ locationId: NORTE.id });
+    expect(without.items[0].patient.whatsApp).toBeNull();
   });
 
   it('filtra por antigüedad mínima (> 90 días)', async () => {

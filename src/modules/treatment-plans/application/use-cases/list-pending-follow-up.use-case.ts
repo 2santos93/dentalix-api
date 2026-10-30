@@ -4,7 +4,7 @@ import {
   type PlanOptionsRepository,
 } from '../../domain/ports/plan-options-repository.port';
 import { daysSince } from '../../domain/plan-options';
-import { toWhatsAppNumber } from '../../../appointment-confirmations/application/whatsapp-phone';
+import { whatsAppDigits } from '../../../../shared/phone/phone-number';
 import { TREATMENT_PLAN_CLOCK, type PlanClock } from '../plan-clock';
 
 export const FOLLOW_UP_DEFAULT_DAYS = 7;
@@ -86,10 +86,11 @@ export class ListPendingFollowUpUseCase {
         patientId: row.patientId,
         patientName: `${row.patientFirstName} ${row.patientLastName}`.trim(),
         patientPhone: row.patientPhone,
-        // Misma normalización que el enlace de confirmación de citas (DX-005).
-        patientWhatsApp: toWhatsAppNumber(
+        // Misma lectura que el enlace de confirmación de citas: la región de
+        // la sede del plan, nunca el país del paciente (DX-329, P1).
+        patientWhatsApp: whatsAppDigits(
           row.patientPhone,
-          row.patientCountryCode,
+          row.presentedLocationPhoneRegion,
         ),
         optionGroupId: row.optionGroupId,
         optionLabel: row.optionLabel,

@@ -20,7 +20,7 @@ import {
   summarizeCurrencies,
 } from '../compute-patient-aging';
 import { civilDateIn } from '../../../../shared/time/civil-day';
-import { toWhatsAppNumber } from '../../../appointment-confirmations/application/whatsapp-phone';
+import { whatsAppDigits } from '../../../../shared/phone/phone-number';
 
 export const RECEIVABLES_DEFAULT_PAGE_SIZE = 20;
 export const RECEIVABLES_MAX_PAGE_SIZE = 100;
@@ -319,9 +319,10 @@ export class GetReceivablesAgingUseCase {
   private async withDetails(rows: ScopedRow[]): Promise<AgingRowView[]> {
     if (rows.length === 0) return [];
     const ids = rows.map((r) => r.patientId);
-    const [debtors, collections] = await Promise.all([
+    const [debtors, collections, regionOf] = await Promise.all([
       this.repo.loadDebtors(ids),
       this.repo.loadCollections(ids),
+      this.repo.locationPhoneRegions(),
     ]);
     const details = new Map(debtors.map((d) => [d.patientId, d]));
     return rows.flatMap((row) => {
@@ -335,7 +336,8 @@ export class GetReceivablesAgingUseCase {
             id: row.patientId,
             fullName: `${d.firstName} ${d.lastName}`.trim(),
             phone: d.phone,
-            whatsApp: toWhatsAppNumber(d.phone, d.countryCode),
+            // Con la región de la sede de la deuda, nunca el país del paciente (P1).
+            whatsApp: whatsAppDigits(d.phone, regionOf(row.locationId)),
           },
           locationId: row.locationId,
           lastPayment: d.lastPayment

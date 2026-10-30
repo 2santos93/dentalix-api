@@ -41,7 +41,13 @@ const locations = {
   findById: (id: string) =>
     Promise.resolve(
       ['loc1', 'loc2'].includes(id)
-        ? { id, name: 'Sede', country: 'CO', timeZone: 'America/Bogota' }
+        ? {
+            id,
+            name: 'Sede',
+            country: 'CO',
+            defaultPhoneRegion: 'CO',
+            timeZone: 'America/Bogota',
+          }
         : null,
     ),
 } as unknown as LocationRepository;
@@ -421,6 +427,19 @@ describe('«Ocupar este hueco» (DX-210)', () => {
         ),
       );
       expect(repo.offers).toHaveLength(0);
+    });
+
+    it('an ambiguous number is never VALID, never a wa.me and never stored as E.164', async () => {
+      repo.addPatient({ id: 'p1', phone: '0058 412 1234567' });
+      await expect(
+        offer.execute({ ...base, channel: 'WA_ME' }, CTX),
+      ).rejects.toThrow(/móvil válido/);
+      addEntry('e', 'p1');
+      const [item] = (await list.execute(SLOT, RECEPTION)).items;
+      expect(item).toMatchObject({
+        whatsappBlocked: false,
+        whatsappPhone: null,
+      });
     });
 
     it('por WhatsApp sin móvil válido: 409; por WhatsApp no se anota resultado al ofrecer: 400', async () => {

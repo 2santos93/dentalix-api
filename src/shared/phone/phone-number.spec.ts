@@ -35,6 +35,8 @@ const DIGIT_SERIES: [string, number][] = [
   ['extended arabic-indic', 0x06f0],
   ['devanagari', 0x0966],
   ['mathematical bold', 0x1d7ce],
+  // Segunda de dos series seguidas (0x116d0 y 0x116da): exige el «% 10».
+  ['second of two adjacent series', 0x116da],
 ];
 
 describe('phone-number (DX-329)', () => {

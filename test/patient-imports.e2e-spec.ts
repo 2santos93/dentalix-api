@@ -1266,11 +1266,12 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
   it('an import in a VE location stores +58 numbers', async () => {
     const before = await raw.location.findUniqueOrThrow({
       where: { id: mainLocationId },
-      select: { country: true },
+      select: { country: true, defaultPhoneRegion: true },
     });
+    // DX-329 (pre-flight I2): el país ya no da el prefijo; lo da la región.
     await raw.location.update({
       where: { id: mainLocationId },
-      data: { country: 'VE' },
+      data: { country: 'VE', defaultPhoneRegion: 'VE' },
     });
     try {
       const dry = await importAndDrain(
@@ -1284,6 +1285,35 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
         select: { phone: true },
       });
       expect(stored.phone).toBe('+584121234567');
+    } finally {
+      await raw.location.update({
+        where: { id: mainLocationId },
+        data: before,
+      });
+    }
+  });
+
+  it('an import with region IT keeps the leading zero of a landline', async () => {
+    const before = await raw.location.findUniqueOrThrow({
+      where: { id: mainLocationId },
+      select: { defaultPhoneRegion: true },
+    });
+    await raw.location.update({
+      where: { id: mainLocationId },
+      data: { defaultPhoneRegion: 'IT' },
+    });
+    try {
+      const dry = await importAndDrain(
+        csvOf(['NATIONAL_ID;329001;Ilaria;Indicativo;;F;06 1234 5678;;']),
+        'it.csv',
+      );
+      expect(dry.issues).toEqual([]);
+      expect(dry.preview[0].data.phone).toBe('+390612345678');
+      const stored = await raw.patient.findFirstOrThrow({
+        where: { tenantId: a.tenantId, docNumber: '329001' },
+        select: { phone: true },
+      });
+      expect(stored.phone).toBe('+390612345678');
     } finally {
       await raw.location.update({
         where: { id: mainLocationId },
