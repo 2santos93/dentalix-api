@@ -91,6 +91,10 @@ const PAYMENT_SELECT = {
   voidedById: true,
   voidReason: true,
   receipt: { select: { seriesPrefix: true, number: true } },
+  // DX-390: una línea 2..N de un cobro dividido lleva el recibo de su línea 1.
+  splitHead: {
+    select: { receipt: { select: { seriesPrefix: true, number: true } } },
+  },
   // El paciente sale del plan o, en un abono contra un saldo migrado
   // (DX-262), del saldo.
   plan: {
@@ -874,6 +878,7 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
     names: Map<string, string>,
     timeZone: string,
   ): CashSessionPayment {
+    const receipt = row.receipt ?? row.splitHead?.receipt ?? null;
     return {
       id: row.id,
       paidAt: row.paidAt,
@@ -881,8 +886,8 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
       amount: amountOf(row.amount),
       currency: row.currency,
       method: row.method,
-      receiptNumber: row.receipt
-        ? formatReceiptNumber(row.receipt.seriesPrefix, row.receipt.number)
+      receiptNumber: receipt
+        ? formatReceiptNumber(receipt.seriesPrefix, receipt.number)
         : null,
       patient: patientOf(row),
       createdBy: row.createdById ? this.staff(row.createdById, names) : null,

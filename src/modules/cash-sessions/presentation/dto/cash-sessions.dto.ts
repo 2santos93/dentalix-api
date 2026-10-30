@@ -451,7 +451,13 @@ export class CashSessionPaymentDto {
   })
   method!: PaymentMethod | null;
 
-  @ApiProperty({ type: String, nullable: true, example: 'PRI-000012' })
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'PRI-000012',
+    description:
+      'Número del recibo del abono; una forma de pago de un cobro dividido lleva el del recibo único del cobro (DX-390). `null` si el abono es anterior a la numeración.',
+  })
   receiptNumber!: string | null;
 
   @ApiProperty({ type: CashPatientRefDto })
@@ -545,7 +551,12 @@ export class CashAdjustmentPaymentDto {
   @ApiProperty({ example: '2026-10-16' })
   paidOn!: string;
 
-  @ApiProperty({ type: String, nullable: true })
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'Número del recibo del abono; una forma de pago de un cobro dividido lleva el del recibo único del cobro (DX-390). `null` si el abono es anterior a la numeración.',
+  })
   receiptNumber!: string | null;
 }
 

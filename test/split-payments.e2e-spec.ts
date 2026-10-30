@@ -326,7 +326,7 @@ describe('Cobro dividido con un solo recibo (e2e, DX-390)', () => {
       ).expect(200)
     ).body as {
       expected: { currency: string; method: string; payments: number }[];
-      payments: { id: string }[];
+      payments: { id: string; receiptNumber: string | null }[];
     };
     const line = (currency: string, method: string) =>
       detail.expected.find(
@@ -336,6 +336,10 @@ describe('Cobro dividido con un solo recibo (e2e, DX-390)', () => {
     expect(line('COP', 'CASH')?.payments).toBe(100_000);
     expect(detail.payments.map((p) => p.id).sort()).toEqual(
       first.payments.map((p) => p.id).sort(),
+    );
+    // QA DX-390 (B1): las líneas 2..N del turno llevan el recibo del cobro.
+    expect(detail.payments.map((p) => p.receiptNumber)).toEqual(
+      first.payments.map(() => first.receiptNumber),
     );
 
     // Auditoría: un CREATE por línea, con el recibo del cobro.
@@ -497,6 +501,7 @@ describe('Cobro dividido con un solo recibo (e2e, DX-390)', () => {
       currency: 'COP',
       total: pending + 400_000,
       pending,
+      excess: 400_000,
     });
     expect((res.body as { message: string }).message).toMatch(/saldo a favor/);
     const ok = await split(
@@ -505,6 +510,21 @@ describe('Cobro dividido con un solo recibo (e2e, DX-390)', () => {
     ).expect(201);
     expect((ok.body as SplitBody).total).toBe(pending + 400_000);
     expect((await balance()).balance).toBe(-400_000);
+
+    // QA DX-390 (B2): con ese saldo a favor previo, lo pendiente es 0 y el
+    // excedente de otro cobro es solo su total, sin los 400 000 de antes.
+    const again = await split({
+      lines: [
+        { amount: 30_000, currency: 'COP', paymentMethodId: cashA },
+        { amount: 30_000, currency: 'COP', paymentMethodId: cashA },
+      ],
+    }).expect(409);
+    expect(again.body).toMatchObject({
+      code: 'SPLIT_PAYMENT_EXCEEDS_BALANCE',
+      total: 60_000,
+      pending: 0,
+      excess: 60_000,
+    });
   });
 
   // Revisión DX-390: la caja y el estado de cuenta (donde también se anula)
