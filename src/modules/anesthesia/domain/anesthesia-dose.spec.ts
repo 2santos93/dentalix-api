@@ -128,6 +128,34 @@ describe('dosis de anestesia local (DX-307)', () => {
     expect(at(140)).toBe('EXCEEDED');
   });
 
+  it('el % que se enseña nunca contradice el nivel: 99,6 % se queda en 99 y 79,6 % en 79', () => {
+    // 10 mg/kg a 10 kg: máximo 100 mg. 3 × 1,66 ml al 2 % = 99,6 mg.
+    const TEN: AnestheticSnapshot = {
+      ...LIDO,
+      mlPerCarpule: 1.66,
+      maxMgPerKg: 10,
+      maxAbsoluteMg: 1000,
+    };
+    const near = summarizeAnesthesiaDose({
+      lines: [{ anesthetic: TEN, carpules: 3 }],
+      weightKg: 10,
+      anamnesis: CLEAN,
+    });
+    expect([near.totalMg, near.level, near.percent]).toEqual([
+      99.6,
+      'WARNING',
+      99,
+    ]);
+    expect(near.byAnesthetic[0].percent).toBe(99);
+    // 2 × 1,99 ml al 2 % = 79,6 mg.
+    const below = summarizeAnesthesiaDose({
+      lines: [{ anesthetic: { ...TEN, mlPerCarpule: 1.99 }, carpules: 2 }],
+      weightKg: 10,
+      anamnesis: CLEAN,
+    });
+    expect([below.level, below.percent]).toEqual(['OK', 79]);
+  });
+
   it('varios anestésicos: el % es la suma de las fracciones de cada máximo', () => {
     // 20 kg: lidocaína 2 carp = 72/140 (51,4 %) + articaína 1 carp (1,7 ml)
     // = 68/140 (48,6 %) → 100 %: bloquea aunque cada uno por separado no.

@@ -114,8 +114,11 @@ function linesOf(records: readonly AnesthesiaAdministration[]): DoseLine[] {
 }
 
 /**
- * Peso para el cálculo: el anotado ahora; si no, el de la anamnesis vigente;
- * si no, el último que se usó en esta misma evolución.
+ * Peso para el cálculo: el anotado ahora; si no, el último PESADO en el
+ * sillón en esta misma evolución (más reciente que la anamnesis, que puede
+ * ser antigua: un niño de 15 kg con 20 kg anotados hace meses calcularía un
+ * máximo mayor del real); si no, el de la anamnesis vigente; si no, el último
+ * que se usó en esta evolución.
  */
 function resolveWeight(
   entered: number | undefined,
@@ -129,23 +132,37 @@ function resolveWeight(
     }
     return { weightKg: kg, source: 'ENTERED' };
   }
+  const latest = [...prior].reverse();
+  const measured = latest.find(
+    (r) => r.weightKg !== null && r.weightSource === 'ENTERED',
+  );
+  if (measured) return { weightKg: measured.weightKg, source: 'ENTERED' };
   const fromAnamnesis = weightForSnapshot(patient.anamnesis?.weightKg ?? null);
   if (fromAnamnesis !== null) {
     return { weightKg: fromAnamnesis, source: 'ANAMNESIS' };
   }
-  const last = [...prior].reverse().find((r) => r.weightKg !== null);
+  const last = latest.find((r) => r.weightKg !== null);
   return last
     ? { weightKg: last.weightKg, source: last.weightSource }
     : { weightKg: null, source: null };
 }
+
+/**
+ * Sin sede (evoluciones legacy) no hay zona horaria: se usa la más
+ * occidental (UTC−12), la de la fecha civil más temprana, que da la edad
+ * MENOR posible. Ante la duda, el paciente cuenta como menor y se pide peso.
+ */
+const YOUNGEST_AGE_TIME_ZONE = 'Etc/GMT+12';
 
 function ageOf(
   patient: AnesthesiaPatientContext,
   entry: AnesthesiaEntryRef,
   now: Date,
 ): number | null {
-  if (!entry.timeZone) return null;
-  return ageForSnapshot(patient.birthDate, civilDateIn(now, entry.timeZone));
+  return ageForSnapshot(
+    patient.birthDate,
+    civilDateIn(now, entry.timeZone ?? YOUNGEST_AGE_TIME_ZONE),
+  );
 }
 
 function conflictMessage(summary: AnesthesiaDoseSummary): string {

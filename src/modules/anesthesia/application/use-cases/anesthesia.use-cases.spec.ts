@@ -224,6 +224,52 @@ describe('AnesthesiaUseCases (DX-307)', () => {
     ]).toEqual([18, 'ENTERED', false]);
   });
 
+  it('el peso medido en el sillón en esta evolución manda sobre el de la anamnesis (que puede ser antiguo)', async () => {
+    // Anamnesis: 20 kg (antigua). En el sillón se pesa: 15 kg.
+    const { uc, lido } = await setup();
+    const first = await uc.record(
+      PATIENT,
+      ENTRY,
+      { ...base, anestheticId: lido.id, carpules: 1, weightKg: 15 },
+      AUTHOR,
+    );
+    expect([first.weightKg, first.weightSource]).toEqual([15, 'ENTERED']);
+    // 2 carpules más (108 mg en total): 103 % de 105 mg a 15 kg, no 77 % de
+    // 140 mg a 20 kg.
+    const next = await uc.check(PATIENT, ENTRY, {
+      anestheticId: lido.id,
+      carpules: 2,
+    });
+    expect([next.summary.weightKg, next.weightSource]).toEqual([15, 'ENTERED']);
+    expect(next.summary.level).toBe('EXCEEDED');
+    const listed = await uc.listByEntry(PATIENT, ENTRY);
+    expect(listed.summary.weightKg).toBe(15);
+    expect(listed.summary.percent).toBe(first.cumulativePercent);
+  });
+
+  it('evolución sin sede (sin zona horaria): la edad se calcula igual y un menor sin peso no se guarda', async () => {
+    const { uc, repo, lido } = await setup(patient({ anamnesis: null }));
+    repo.entries.set(ENTRY, {
+      id: ENTRY,
+      patientId: PATIENT,
+      locationId: null,
+      timeZone: null,
+    });
+    const check = await uc.check(PATIENT, ENTRY, {
+      anestheticId: lido.id,
+      carpules: 1,
+    });
+    expect([check.ageYears, check.weightRequired]).toEqual([8, true]);
+    await expect(
+      uc.record(
+        PATIENT,
+        ENTRY,
+        { ...base, anestheticId: lido.id, carpules: 1 },
+        AUTHOR,
+      ),
+    ).rejects.toThrow(PEDIATRIC_WEIGHT_REQUIRED_MESSAGE);
+  });
+
   it('alergia a anestésicos en la anamnesis: 409 hasta confirmar con motivo', async () => {
     const { uc, lido } = await setup(
       patient({

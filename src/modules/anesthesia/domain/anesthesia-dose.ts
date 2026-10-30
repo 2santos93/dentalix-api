@@ -102,6 +102,21 @@ export interface DoseInput {
 const round1 = (n: number) => Math.round(n * 10) / 10;
 const fmt = (n: number) => String(round1(n)).replace('.', ',');
 
+/**
+ * Fracción → % entero que se ENSEÑA, sin contradecir el nivel: redondear
+ * 0,996 daría «100 %» con un simple aviso (y 0,796 «80 %» sin aviso). Bajo un
+ * umbral el % se queda por debajo de él; desde el umbral, nunca por debajo.
+ */
+function percentOf(fraction: number): number {
+  const rounded = Math.round(fraction * 100);
+  for (const threshold of [DOSE_BLOCK_FRACTION, DOSE_WARNING_FRACTION]) {
+    const limit = Math.round(threshold * 100);
+    if (fraction + EPSILON >= threshold) return Math.max(rounded, limit);
+    if (rounded >= limit) return limit - 1;
+  }
+  return rounded;
+}
+
 export function isValidCarpules(value: number): boolean {
   if (!Number.isFinite(value)) return false;
   if (value < CARPULE_STEP || value > CARPULES_MAX) return false;
@@ -226,7 +241,7 @@ export function summarizeAnesthesiaDose(
       carpules: g.carpules,
       mg: g.mg,
       maxMg,
-      percent: maxMg === null ? null : Math.round((g.mg / maxMg) * 100),
+      percent: maxMg === null ? null : percentOf(g.mg / maxMg),
     };
   });
 
@@ -255,7 +270,7 @@ export function summarizeAnesthesiaDose(
       alerts.push({
         code: 'DOSE_OVER_ABSOLUTE',
         severity: 'BLOCKING',
-        message: `Tope absoluto superado: ${fmt(totalMg)} mg (${Math.round(absoluteFraction * 100)} % del tope en mg), aun sin conocer el peso.`,
+        message: `Tope absoluto superado: ${fmt(totalMg)} mg (${percentOf(absoluteFraction)} % del tope en mg), aun sin conocer el peso.`,
         source: MALAMED,
       });
     }
@@ -264,7 +279,7 @@ export function summarizeAnesthesiaDose(
       (sum, a) => sum + a.mg / (a.maxMg as number),
       0,
     );
-    percent = Math.round(fraction * 100);
+    percent = percentOf(fraction);
     const maxLabel =
       byAnesthetic.length === 1
         ? `de ${fmt(byAnesthetic[0].maxMg as number)} mg (${percent} %)`
