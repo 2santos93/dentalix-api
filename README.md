@@ -725,7 +725,7 @@ Módulo `medical-history-submissions`; migraciones
     la cita (lo que llegue antes) y anula el enlace anterior que aún esperaba.
     Devuelve la URL una única vez y `whatsapp` (`phone` + `text` para
     `wa.me`: saludo, clínica y enlace; nada clínico) o el motivo de no tenerlo
-    (sin móvil con indicativo, baja de envíos de DX-128). Cita de otro
+    (sin móvil válido, baja de envíos de DX-128). Cita de otro
     paciente 400, empezada o no agendada 422, de otra sede 403. Sin
     autorización SENSITIVE_HEALTH vigente y sin política publicada, 409.
   - `GET /patients/:patientId/medical-history/requests` (los 4 roles): los
@@ -2092,9 +2092,8 @@ de DX-037). Migración `20261017233300_dx128_contact_channel`.
   (motivos `OPTED_OUT`, `CHANNEL_NONE`, `CHANNEL_WHATSAPP`).
 - **Ficha**: `GET /patients/:id/communication` (4 roles) y `PATCH` (solo
   RECEPTION y ADMIN; 403 en español). El móvil se valida y normaliza a E.164
-  con el indicativo del país de la sede activa o la principal
-  (`country-calling-code.ts`, provisional hasta DX-329; un país sin indicativo
-  exige escribirlo con «+»); uno inválido se guarda con aviso, pero no puede ser canal
+  con la región telefónica por defecto de la sede activa o la principal
+  (DX-329; sin región, se escribe con «+»); uno inválido se guarda con aviso, pero no puede ser canal
   WhatsApp (400 `WHATSAPP_REQUIRES_VALID_MOBILE`, también desde `PATCH
   /patients/:id`). Cada cambio deja un `audit_event` UPDATE de PATIENT con
   `reason: COMMUNICATION_PREFERENCES_CHANGED`, los campos y `origin`.
@@ -2623,12 +2622,10 @@ también sobre este README. Migraciones
 
 El país de una sede es cualquier código ISO 3166-1 alfa-2 de la tabla
 `countries`. Ninguna regla lo lee. La moneda, lo único que puede ir ligado a
-un país, es un campo propio de la sede (G1) y no se deduce de él. Hasta
-DX-329, el país solo da
-el indicativo de los móviles escritos sin `+`
-(`src/shared/phone/country-calling-code.ts`, una tabla provisional de 24
-países; en los demás, el número se escribe con `+`). Es la fase 1 de un
-cambio sin parada (expand/contract).
+un país, es un campo propio de la sede (G1) y no se deduce de él. Tampoco el
+prefijo telefónico: desde DX-329 es la región telefónica de la sede, que el
+país solo sugiere al crearla (ver «Teléfonos con libphonenumber-js»). Es la
+fase 1 de un cambio sin parada (expand/contract).
 
 - **Modelo**:
   - `locations."countryCode"` (`CHAR(2)`, `NOT NULL`, sin default), con la
@@ -2651,8 +2648,7 @@ cambio sin parada (expand/contract).
   (registro). En la edición, un `country` ausente no cambia nada; `null` o
   vacío es 400.
 - **Lo guardado no se reescribe**: cambiar el país de una sede no toca
-  teléfonos, recetas ni nada guardado; solo cambia el indicativo de los
-  números nuevos escritos sin `+`.
+  teléfonos, recetas ni nada guardado, ni la región telefónica de la sede.
 - **Registro**: el cuerpo sin campos de sede (la forma legada, anterior a G1)
   es 400 con `field: locationCountry`. Un pendiente legado (sin sede) da 410
   `REGISTRATION_LINK_EXPIRED` en `verify` y no se consume.
@@ -2839,6 +2835,105 @@ SELECT (SELECT count(*) FROM "locations" WHERE "country" IS NULL) AS sedes,
   Los dos valores solo sobreviven en `prescriptions.country`, como plantilla
   congelada de las recetas legadas (excepción permanente de DX-324).
 
+## Teléfonos con libphonenumber-js (DX-329)
+
+Los teléfonos los lee `libphonenumber-js` (`1.13.15`, build `max`), y solo a
+través de `src/shared/phone/phone-number.ts`, el único fichero de `src/` que
+la importa (lo comprueba `src/architecture/no-location-fallbacks.spec.ts`).
+La librería decide qué es válido y qué es móvil. No queda ninguna tabla de
+indicativos ni regla por país: el producto es mundial y nada se decide por
+país.
+
+- **Región telefónica de la sede** (`locations."defaultPhoneRegion"`,
+  `CHAR(2)`, nullable y **sin default** en la BD, la API ni la web): la región
+  de la librería (ISO 3166-1 alfa-2, más `AC` y `TA`) cuyo prefijo se añade a
+  un número escrito sin `+`. `null` es «sin prefijo por defecto»: el número se
+  escribe con `+`, y nunca se adivina el indicativo.
+  - Al **crear** una sede (alta o registro, también la demo) sin el campo, la
+    API guarda la sugerencia `suggestedPhoneRegion(país)`: el propio país si
+    la librería lo admite, y si no, `null`. Es la única función que lee un
+    país para algo del teléfono, y es la identidad.
+  - En la **edición**, cambiar el país no toca la región. Con el campo
+    presente (también `null`), se guarda lo que llega: dos letras de
+    `phoneRegions()` o 400 con `field: 'defaultPhoneRegion'`.
+  - `locations."defaultPhoneRegionSetAt"` (marca, sin default ni contrato):
+    la API la escribe cada vez que escribe la región. Ningún relleno toca una
+    sede con marca, así que nunca pisa una región que un ADMIN vació a
+    propósito.
+  - Una región guardada que la versión instalada no admite se lee como
+    `null`.
+- **Lecturas**: un número es `VALID` (E.164, tipo, formato internacional,
+  extensión), `AMBIGUOUS` (con `00` o con el indicativo escrito sin `+`, dos
+  lecturas válidas y distintas: no se adivina, la ficha pide escribirlo con
+  `+`) o `NONE`. El canal WhatsApp, el opt-in y los huecos exigen móvil; los
+  enlaces `wa.me` aceptan cualquier número válido; la baja por «BAJA» casa
+  cualquier número que se pueda leer. Los `wa.me` de la confirmación de cita,
+  la cartera y los planes usan la región de la sede del recurso, no el país
+  de la dirección del paciente.
+- **Plantilla de importación**: el móvil de ejemplo de la región de la sede
+  activa o, sin ella (o si está borrada), de la principal. Sin región, la
+  celda va vacía.
+- **Lista de regiones**: `prisma/scripts/generate-phone-regions.ts` escribe
+  `prisma/reference/phone-regions.ts` y `phone-regions-list.json` (nombres de
+  CLDR). La web la copia byte a byte (`check-api-reference-sync.mjs`). El
+  unit `phone regions match the installed libphonenumber-js` falla si la
+  librería cambia y la lista no se regenera.
+- **Política de actualización de la librería** (D4): la versión va
+  **exacta**, sin `^`, porque `isValid()` y `getType()` dependen de los
+  metadatos de cada versión. Subirla es un PR propio que regenera
+  `phone-regions` (con Node 22.16), pasa el sync de la web y corre la suite
+  de teléfonos (unit, `test:int` y los e2e de teléfono). Los metadatos
+  atrasados son el principal riesgo de rechazar un móvil nuevo: **subirla al
+  menos una vez por trimestre**.
+- **Informe de teléfonos guardados** (`npm run phones:report`, `-- --detail`
+  para el CSV): solo lectura, con el rol de la app, clínica a clínica y por
+  lotes de 1 000 filas, cada uno en una transacción `READ ONLY`. Clasifica
+  cada teléfono de pacientes, responsables y sedes (`E164_VALID`,
+  `E164_PROBABLE_WRONG_CODE` con su propuesta, `E164_INVALID`,
+  `NATIONAL_NO_REGION`, `NATIONAL_AMBIGUOUS`, `NATIONAL_VALID`,
+  `NATIONAL_INVALID`), cuenta las banderas `CHANGED_SINCE_DX329`,
+  `WHATSAPP_NOT_MOBILE` y `HAS_EXTENSION`, y aparte los pacientes de WhatsApp
+  sin teléfono (`whatsappWithoutPhone`). Nunca imprime un número completo: a
+  lo sumo 4 dígitos, y nunca más de un tercio del número.
+  - `CHANGED_SINCE_DX329` y `WHATSAPP_NOT_MOBILE` se calculan con la región
+    de la sede principal, así que son **aproximadas en clínicas con varias
+    regiones** (`multiRegion: true`): pueden sobrar o faltar pacientes de
+    otras sedes.
+- **Runbook del despliegue** (API antes que web):
+  1. Antes de `migrate deploy`, la consulta previa (sedes vivas por
+     `countryCode`) a la nota de versión, y el 100 % de la API y de los
+     workers en DX-312 o posterior.
+  2. `prisma migrate deploy`: M1 añade las dos columnas y el CHECK
+     (`ACCESS EXCLUSIVE` breve, `lock_timeout` de 5 s; si falla, `migrate
+     resolve --rolled-back` y repetir); M2 rellena la región con el país,
+     clínica a clínica con `COMMIT` (a mano, **sin** `psql -1`), solo en
+     sedes sin región y sin marca, y sin escribir la marca.
+  3. API y workers hasta el 100 %. Después, **antes de la web**, como el
+     DBA y en una transacción, el relleno de las sedes que hayan creado
+     réplicas anteriores (el número de filas, a la nota de versión):
+     ```sql
+     UPDATE "locations" SET "defaultPhoneRegion" = "countryCode"
+      WHERE "defaultPhoneRegion" IS NULL
+        AND "defaultPhoneRegionSetAt" IS NULL;
+     ```
+     Vale igual en cualquier despliegue posterior, también tras un rollback.
+     La consulta posterior tiene que dar `sin_decidir = 0`:
+     ```sql
+     SELECT count(*) FILTER (WHERE "defaultPhoneRegion" IS NULL
+                               AND "defaultPhoneRegionSetAt" IS NULL) AS sin_decidir,
+            count(*) FILTER (WHERE "defaultPhoneRegion" IS NULL
+                               AND "defaultPhoneRegionSetAt" IS NOT NULL) AS sin_prefijo_elegido,
+            count(*) FILTER (WHERE "defaultPhoneRegion" <> "countryCode") AS distinta
+       FROM "locations";
+     ```
+  4. `npm run phones:report` (y `-- --detail` para el dueño), a la nota de
+     versión. No se corrige ningún teléfono sin una decisión del dueño.
+  5. Solo entonces, la web.
+  6. **Rollback**: primero la web y luego la API. No hay nada que deshacer
+     en la BD: la API anterior no conoce las columnas, y una sede que cree
+     queda sin región (un número sin `+` no se lee; fallo seguro) hasta el
+     relleno del paso 3.
+
 ## Calendario de días hábiles y festivos de la sede (DX-316)
 
 Cada sede tiene sus días hábiles de la semana (lunes a viernes por defecto) y
@@ -2912,7 +3007,7 @@ migraciones `20261020000000_dx222_enums`,
   `sentToResponsible`); `WHATSAPP_LINK` devuelve el número y el mensaje para
   `wa.me`, que lleva solo el saludo, la clínica y el enlace: **nunca** el
   procedimiento ni el texto clínico. La baja de envíos del paciente (DX-128),
-  la falta de email o de teléfono con indicativo dan 422 en español sin
+  la falta de email o de un teléfono válido dan 422 en español sin
   guardar nada; el tope de emails de la clínica o del destinatario da 429.
   Si el outbox falla después de guardar, la entrega queda (y auditada) con
   `emailQueued: false` para que el personal use otro canal.
@@ -3423,9 +3518,9 @@ Módulo `src/modules/patient-imports`; rutas bajo `/api/v1/patient-imports`,
   barras, en mayúsculas, hasta 30 letras y dígitos: «V-12.345.678» →
   «V12345678»; notación científica de Excel detectada); fecha DD/MM/AAAA,
   AAAA-MM-DD o serie de Excel, no futura ni anterior a 1900; sexo por alias;
-  email; teléfonos en E.164 con el indicativo del país de la **sede del lote**
-  (la de `X-Location-Id` o la de escritura; regla de `toWhatsAppNumber`,
-  DX-005) y un fijo local corto tal cual.
+  email; teléfonos en E.164 con la región telefónica de la **sede del lote**
+  (la de `X-Location-Id` o la de escritura; `readPhone`, DX-329); uno no
+  válido, ambiguo o con extensión, tal cual si tiene de 7 a 15 dígitos.
 - **Deduplicación** por (tipo, nº de documento), con la clave sin puntos ni
   guiones: dentro del fichero gana la primera fila; contra los pacientes vivos
   de la clínica, el existente se **salta** o se le **rellenan solo los campos

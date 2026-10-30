@@ -6,6 +6,7 @@ import { TenantContextService } from '../src/shared/tenancy/tenant-context.servi
 import {
   PHONE_CATEGORIES,
   classifyPhone,
+  maskPhone,
   phonesReport,
   readOnlyBatch,
   type PhonesReport,
@@ -191,6 +192,10 @@ describe('phones:report (int, DX-329 §4.6)', () => {
       phone: '0212-5551234',
       contactChannel: 'WHATSAPP',
     });
+    ids.whatsappNoPhone = await patient(tenants.ve, {
+      phone: null,
+      contactChannel: 'WHATSAPP',
+    });
     ids.responsible = await responsible(
       tenants.ve,
       ids.e164Valid,
@@ -215,6 +220,10 @@ describe('phones:report (int, DX-329 §4.6)', () => {
       whatsappOptIn: true,
     });
     ids.coMobile = await patient(tenants.co, { phone: '310 555 0101' });
+    ids.optInBlankPhone = await patient(tenants.co, {
+      phone: '  ',
+      whatsappOptIn: true,
+    });
 
     // AR.
     await location(tenants.ar, 'AR', null, 1);
@@ -348,6 +357,31 @@ describe('phones:report (int, DX-329 §4.6)', () => {
       .find((l) => l.subdomain === CLINICS.ve);
     expect(json?.flags).toMatchObject({ WHATSAPP_NOT_MOBILE: 1 });
   }, 120_000);
+
+  it('the report counts WhatsApp patients without a phone apart', async () => {
+    expect(clinic('ve').whatsappWithoutPhone).toBe(1);
+    expect(clinic('co').whatsappWithoutPhone).toBe(1);
+    expect(clinic('ar').whatsappWithoutPhone).toBe(0);
+    // No es una bandera: no tienen número que listar.
+    expect(detail(ids.whatsappNoPhone)).toBeUndefined();
+    expect(detail(ids.optInBlankPhone)).toBeUndefined();
+
+    const { stdout } = await runScript();
+    const json = stdout
+      .split('\n')
+      .filter((l) => l.startsWith('{'))
+      .map((l) => JSON.parse(l) as { subdomain?: string })
+      .find((l) => l.subdomain === CLINICS.ve);
+    expect(json).toMatchObject({ whatsappWithoutPhone: 1 });
+  }, 120_000);
+
+  it('the mask never shows more than 4 digits nor more than a third of the number', () => {
+    expect(maskPhone('+58 412 1234567')).toBe('***4567');
+    expect(maskPhone('2123 4567')).toBe('***67');
+    expect(maskPhone('12345')).toBe('***5');
+    expect(maskPhone('12')).toBe('***');
+    expect(maskPhone('')).toBe('***');
+  });
 
   it('CHANGED_SINCE_DX329 compares the old and new mobile status and E.164', () => {
     // AR `011 15…`: móvil antes y después, pero el E.164 anterior no tenía el 9.

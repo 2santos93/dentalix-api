@@ -23,6 +23,8 @@ import {
   locationData,
 } from './support/location-fixtures';
 import { MISSING_FILE_MESSAGE } from '../src/modules/patient-imports/application/patient-imports.use-cases';
+import { PrismaPatientImportRepository } from '../src/modules/patient-imports/infrastructure/prisma-patient-import.repository';
+import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 
 // DX-107 · Importación de pacientes desde CSV/XLSX en HTTP real: plantilla,
 // inspección, dry-run sin escribir, confirmación en segundo plano mientras la
@@ -1318,6 +1320,41 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
         select: { phone: true },
       });
       expect(stored.phone).toBe('+390612345678');
+    } finally {
+      await raw.location.update({
+        where: { id: mainLocationId },
+        data: before,
+      });
+    }
+  });
+
+  it('the template falls back to the principal location when the active one is soft-deleted', async () => {
+    const before = await raw.location.findUniqueOrThrow({
+      where: { id: mainLocationId },
+      select: { defaultPhoneRegion: true },
+    });
+    await raw.location.update({
+      where: { id: mainLocationId },
+      data: { defaultPhoneRegion: 'VE' },
+    });
+    const deleted = await raw.location.create({
+      data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        tenantId: a.tenantId,
+        name: 'Sede 329 borrada',
+        defaultPhoneRegion: 'CO',
+        deletedAt: new Date(),
+        isActive: false,
+      }),
+    });
+    try {
+      // La cabecera rechaza una sede borrada; la sede activa puede quedar
+      // borrada a mitad de una petición, así que se pide al repositorio.
+      const region = await app
+        .get(TenantContextService)
+        .run(a.tenantId, deleted.id, () =>
+          app.get(PrismaPatientImportRepository).templatePhoneRegion(),
+        );
+      expect(region).toBe('VE');
     } finally {
       await raw.location.update({
         where: { id: mainLocationId },

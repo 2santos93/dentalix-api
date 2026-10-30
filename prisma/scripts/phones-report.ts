@@ -72,6 +72,11 @@ export interface ClinicPhonesReport {
   batches: number;
   counts: Record<PhoneField, Partial<Record<PhoneCategory, number>>>;
   flags: Record<PhoneFlag, number>;
+  /**
+   * Pacientes de WhatsApp (canal u opt-in) sin teléfono. No es una bandera:
+   * no hay número que clasificar ni listar.
+   */
+  whatsappWithoutPhone: number;
 }
 
 /** Una fila del detalle: el número y la propuesta, enmascarados. */
@@ -257,10 +262,11 @@ function changedSinceDx329(
   return before !== after || previousE164(text, code) !== nowE164;
 }
 
-/** Solo los 4 últimos dígitos; con menos de 8, ninguno. */
+/** Los últimos dígitos: nunca más de 4 ni más de un tercio del número. */
 export function maskPhone(text: string): string {
   const digits = text.replace(/\D/g, '');
-  return digits.length >= 8 ? `***${digits.slice(-4)}` : '***';
+  const shown = Math.min(4, Math.floor(digits.length / 3));
+  return `***${shown > 0 ? digits.slice(-shown) : ''}`;
 }
 
 /** La propuesta con su indicativo (lo que cambia) y los 4 últimos dígitos. */
@@ -330,6 +336,7 @@ async function clinicReport(
     flags: Object.fromEntries(
       PHONE_FLAGS.map((flag) => [flag, 0]),
     ) as ClinicPhonesReport['flags'],
+    whatsappWithoutPhone: 0,
   };
   const onBatch = () => {
     report.batches += 1;
@@ -439,9 +446,10 @@ async function clinicReport(
       }),
     onBatch,
   )) {
+    const whatsapp =
+      p.contactChannel === 'WHATSAPP' || p.whatsappOptInAt !== null;
+    if (whatsapp && !p.phone?.trim()) report.whatsappWithoutPhone += 1;
     if (p.phone?.trim()) {
-      const whatsapp =
-        p.contactChannel === 'WHATSAPP' || p.whatsappOptInAt !== null;
       const flags: PhoneFlag[] = [];
       if (changedSinceDx329(p.phone, principal))
         flags.push('CHANGED_SINCE_DX329');
