@@ -23,6 +23,7 @@ import {
   REGIONAL_BOGOTA_FIXTURE,
   locationData,
 } from './support/location-fixtures';
+import { purgeTenants } from './support/tenant-purge';
 
 // DX-380 (OPS-045, DB-056), contra Postgres: la lista de reintentos
 // `payment_base_retries` (alta por el trigger diferido, RLS FORCE entre dos
@@ -129,23 +130,12 @@ async function cleanup(): Promise<void> {
     where: { subdomain: { startsWith: PREFIX } },
     select: { id: true },
   });
-  const ids = tenants.map((t) => t.id);
-  if (ids.length > 0) {
-    const where = { tenantId: { in: ids } };
-    await raw.paymentAllocation.deleteMany({ where });
-    await raw.paymentAllocationMovement.deleteMany({ where });
-    await raw.paymentPlanAmount.deleteMany({ where });
-    await raw.paymentReceipt.deleteMany({ where });
-    await raw.payment.deleteMany({ where });
-    await raw.planAllocationRebalanceRequest.deleteMany({ where });
-    await raw.treatmentPlan.deleteMany({ where });
-    await raw.patient.deleteMany({ where });
-    await raw.manualExchangeRate.deleteMany({ where });
-    await raw.clinicMembership.deleteMany({ where });
-    await raw.paymentReceiptCounter.deleteMany({ where });
-    await raw.location.deleteMany({ where });
-    await raw.tenant.deleteMany({ where: { id: { in: ids } } });
-  }
+  // DX-396: las tablas de clínica salen del catálogo (también
+  // payment_base_retries y las que vengan), no de una lista a mano.
+  await purgeTenants(
+    raw,
+    tenants.map((t) => t.id),
+  );
   await raw.user.deleteMany({
     where: { email: { startsWith: PREFIX } },
   });
