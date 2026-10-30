@@ -1501,6 +1501,14 @@ function currencyForExampleHit(line: string): boolean {
  */
 const PHONE_EXAMPLE = /(?<![\w+])\+[1-9]\d{0,2}(?:[\s-]?\d{2,}|…|\.\.\.)/;
 
+/**
+ * Un literal que es solo un teléfono en formato nacional, sin indicativo
+ * (`'310 000 0001'`, `"612 34 56 78"`): tres dígitos y dos grupos o más
+ * separados por espacios. Deja pasar fechas (`'2026-10-17'`) e importes
+ * (`'1 500 000'`).
+ */
+const NATIONAL_PHONE_EXAMPLE = /['"`>]\s*\(?\d{3}\)?(?: \d{2,4}){2,}\s*['"`<]/;
+
 /** Dirección con número a la colombiana o similar: `Calle 1 # 2-3`, `Cra 15 #90-20`. */
 const ADDRESS_EXAMPLE =
   /\b(?:Calle|Carrera|Cra|Cl|Kr|Avenida|Av|Diagonal|Dg|Transversal|Tv)\.?\s*\d+[A-Za-z]?\s*(?:#|N[°º.o]\.?)\s*\d/i;
@@ -1515,6 +1523,7 @@ function countryExampleHit(line: string): boolean {
     currencyExampleHit(line) ||
     currencyForExampleHit(line) ||
     PHONE_EXAMPLE.test(line) ||
+    NATIONAL_PHONE_EXAMPLE.test(line) ||
     ADDRESS_EXAMPLE.test(line) ||
     (!isComment(line) && CITY_EXAMPLE.test(line))
   );
@@ -1540,6 +1549,8 @@ describe('textos sin ejemplos de un país (DX-368)', () => {
       `hint: 'Con indicativo de país, p. ej. +${'57'} 601 555 0101'`,
       `'(p. ej. +${'34'}…)'`,
       `/** E.164 (p. ej. \`+${'57'}3101234567\`). */`,
+      `    telefono: '${'310'} 000 0001',`,
+      `  placeholder="${'612'} 34 56 78"`,
       `    direccion: '${'Calle'} 1 # 2-3',`,
       `  @ApiPropertyOptional({ example: '${'Cra'} 15 #90-20' })`,
       `    address: '${'Carrera'} 7 N° 72-10',`,
@@ -1563,6 +1574,8 @@ describe('textos sin ejemplos de un país (DX-368)', () => {
       ` * sin N+1 — paciente,`,
       ` * PUNTOS (8 % → 10 % = +2 p.p.); el resto, en % relativo (10 → 12 = +20 %).`,
       `    telefono: '+00 000 000 0001',`,
+      `    fecha: '2026-10-17',`,
+      `    importe: '1 500 000',`,
       `    direccion: 'Dirección de ejemplo 123',`,
       ` * deja un abono de las 20:00 en ${'Bogot' + 'á'} fuera de`,
       `'Incluye el indicativo del país.'`,
