@@ -18,6 +18,7 @@ import {
 } from '../src/modules/payments/domain/ports/plan-allocation-repository.port';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { seedDemo } from '../prisma/seed-demo';
+import { civilDateIn } from '../src/shared/time/civil-day';
 import { purgeDemoTenants } from './support/demo-tenant-purge';
 import {
   REGIONAL_BOGOTA_FIXTURE,
@@ -43,6 +44,12 @@ const PAID_AT = new Date('2026-10-20T12:00:00.000Z');
 // Fechas de la tasa por si la sede no está en UTC.
 const RATE_DATES = ['2026-10-19', '2026-10-20', '2026-10-21'];
 const EUR_PER_USD = 0.9;
+/**
+ * DX-375: la demo trae un abono de hoy en USD sobre un plan en COP; con la
+ * tasa COP de hoy en la caché lo congela al sembrarse, sin salir a la red.
+ */
+const DEMO_TODAY = civilDateIn(new Date(), 'America/Bogota');
+const COP_PER_USD = 4000;
 
 let app: INestApplication;
 let deps: BackfillDeps;
@@ -214,6 +221,10 @@ describe('backfill de imputaciones de abonos (DX-051, R17)', () => {
       })),
       skipDuplicates: true,
     });
+    await raw.exchangeRateSnapshot.createMany({
+      data: [{ date: DEMO_TODAY, currency: 'COP', rate: COP_PER_USD }],
+      skipDuplicates: true,
+    });
 
     ({ tenantId: demoId } = await seedDemo({ quiet: true }));
     other = await seedOtherClinic();
@@ -246,6 +257,13 @@ describe('backfill de imputaciones de abonos (DX-051, R17)', () => {
       where: {
         date: { in: RATE_DATES },
         currency: 'EUR',
+        fetchedAt: { gte: ratesCreatedAt },
+      },
+    });
+    await raw.exchangeRateSnapshot.deleteMany({
+      where: {
+        date: DEMO_TODAY,
+        currency: 'COP',
         fetchedAt: { gte: ratesCreatedAt },
       },
     });
