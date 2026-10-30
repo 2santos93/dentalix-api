@@ -3057,6 +3057,17 @@ país.
   para eso, esa sede aporta `suggestedPhoneRegion(país)`. Darse de baja nunca
   es más difícil que antes de DX-329. Guardar un número y los `wa.me` siguen
   sin prefijo.
+- **Formato internacional en las salidas** (DX-387): los pacientes (ficha,
+  `GET /patients`, la lista de retención, alta y edición), los responsables
+  (y el resumen de un paciente responsable) y las sedes devuelven, junto a
+  `phone`, `phoneInternational`: el formato internacional del adaptador
+  (`phoneInternational(texto, región)`), o `null` si no hay teléfono o no se
+  lee de una sola forma; la web muestra `phoneInternational ?? phone`. Los
+  pacientes y responsables se leen con la región de la sede activa o la
+  principal (`DefaultPhoneRegionReader`, la misma lectura que el bloque de
+  comunicaciones), una sola vez por petición y nunca por fila; cada sede, con
+  la suya, que ya viene en la fila. El personal no tiene teléfono. El campo
+  no se guarda ni se registra en ningún log.
 - **Plantilla de importación**: las celdas de teléfono van vacías (DX-368).
   Un móvil de ejemplo válido de la región de la sede se importaría si nadie
   borra la fila de ejemplo y podría ser el número de una persona real; el

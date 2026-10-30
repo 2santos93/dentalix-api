@@ -5,6 +5,7 @@ import type {
 } from '@prisma/client';
 
 import type { PhoneRegion } from '../../../../shared/phone/phone-number';
+import type { DefaultPhoneRegionReader } from './default-phone-region-reader.port';
 import type {
   NoticeResponsible,
   NoticeSettings,
@@ -73,7 +74,8 @@ export interface PatientOptOutMatchWarningView {
   maxMatches: number;
 }
 
-export interface PatientCommunicationRepository {
+/** También es el `DefaultPhoneRegionReader` del módulo (DX-387). */
+export interface PatientCommunicationRepository extends DefaultPhoneRegionReader {
   /** null si el paciente no existe (o no es de esta clínica, o se retiró). */
   find(patientId: string): Promise<PatientCommunicationState | null>;
   /** null: paciente ajeno/retirado; últimos20 avisos de comunicaciones. */

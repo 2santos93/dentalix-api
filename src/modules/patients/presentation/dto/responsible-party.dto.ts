@@ -20,6 +20,7 @@ import {
   DOC_TYPE_NAME_DESCRIPTION,
   type DocTypeInput,
 } from './doc-type-input';
+import { PHONE_INTERNATIONAL_DOC } from '../../../../shared/phone/with-phone-international';
 
 export const RESPONSIBLE_NAME_MAX = 200;
 export const RESPONSIBLE_DOC_MAX = 60;
@@ -180,6 +181,13 @@ export class ResponsiblePatientSummaryDto {
 
   @ApiProperty({ type: String, nullable: true })
   phone!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: PHONE_INTERNATIONAL_DOC,
+  })
+  phoneInternational!: string | null;
 }
 
 export class ResponsiblePartyDto {
@@ -224,6 +232,13 @@ export class ResponsiblePartyDto {
 
   @ApiProperty({ type: String, nullable: true })
   phone!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: PHONE_INTERNATIONAL_DOC,
+  })
+  phoneInternational!: string | null;
 
   @ApiProperty({
     enum: ResponsibleRelationship,

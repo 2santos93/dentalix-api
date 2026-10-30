@@ -34,6 +34,19 @@ import { PATIENT_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 import { Audit } from '../../audit/presentation/audit.decorator';
 import type { AuditedRequest } from '../../audit/presentation/audit-request';
+import {
+  withPhoneInternational,
+  type WithPhoneInternational,
+} from '../../../shared/phone/with-phone-international';
+
+type LocationOutput = WithPhoneInternational<Location>;
+
+/**
+ * DX-387: el teléfono de cada sede se lee con SU región por defecto, que ya
+ * viene en la fila: ninguna consulta más.
+ */
+const present = (location: Location): LocationOutput =>
+  withPhoneInternational(location, location.defaultPhoneRegion);
 
 /**
  * Sedes de la clínica. LEER lo puede todo el mundo (cualquier rol necesita
@@ -55,15 +68,15 @@ export class LocationsController {
 
   @Get()
   @ApiOkResponse({ type: [LocationDto] })
-  list(): Promise<Location[]> {
-    return this.listLocations.execute();
+  async list(): Promise<LocationOutput[]> {
+    return (await this.listLocations.execute()).map(present);
   }
 
   @Post()
   @Roles(ClinicRole.ADMIN)
   @ApiCreatedResponse({ type: LocationDto })
-  create(@Body() dto: CreateLocationDto): Promise<Location> {
-    return this.createLocation.execute(dto);
+  async create(@Body() dto: CreateLocationDto): Promise<LocationOutput> {
+    return present(await this.createLocation.execute(dto));
   }
 
   // Los cambios de la sede quedan auditados (campos cambiados, nunca sus
@@ -81,7 +94,7 @@ export class LocationsController {
     @Param('id') id: string,
     @Body() dto: UpdateLocationDto,
     @Req() req: AuditedRequest,
-  ): Promise<Location> {
+  ): Promise<LocationOutput> {
     const { location, healthRegistration, regionalSettings } =
       await this.updateLocation.execute(id, dto);
     if (healthRegistration || regionalSettings) {
@@ -90,6 +103,6 @@ export class LocationsController {
         ...(regionalSettings ? { regionalSettings } : {}),
       };
     }
-    return location;
+    return present(location);
   }
 }

@@ -11,6 +11,7 @@ import {
   WhatsappOptInSource,
 } from '@prisma/client';
 import { DOCUMENT_TYPES } from '../../domain/document-type';
+import { PHONE_INTERNATIONAL_DOC } from '../../../../shared/phone/with-phone-international';
 import {
   DOC_TYPE_LABEL_PROPERTY,
   DOC_TYPE_NAME_DESCRIPTION,
@@ -54,6 +55,13 @@ export class PatientDto {
 
   @ApiProperty({ type: String, nullable: true })
   phone!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: PHONE_INTERNATIONAL_DOC,
+  })
+  phoneInternational!: string | null;
 
   @ApiProperty({ type: String, nullable: true })
   email!: string | null;
