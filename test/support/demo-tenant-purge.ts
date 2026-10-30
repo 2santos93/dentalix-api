@@ -60,6 +60,8 @@ export const TENANT_TABLES = [
   'payment_plan_amounts',
   'plan_allocation_rebalance_requests',
   'payments',
+  // DX-377: medios de pago (payments."paymentMethodId" los referencia).
+  'payment_methods',
   // Después de payments (payments."cashSessionId").
   'cash_sessions',
   'treatment_plan_acceptances',

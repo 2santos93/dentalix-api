@@ -16,7 +16,10 @@ import {
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
-import { toWhatsAppNumber } from '../../appointment-confirmations/application/whatsapp-phone';
+import {
+  phoneRegionOrNull,
+  whatsAppDigits,
+} from '../../../shared/phone/phone-number';
 import {
   minimumVisitDate,
   RESERVED_APPOINTMENT_STATUSES,
@@ -276,7 +279,6 @@ export class PlanVisitsService {
                 firstName: true,
                 lastName: true,
                 phone: true,
-                countryCode: true,
               },
             },
             items: {
@@ -299,6 +301,22 @@ export class PlanVisitsService {
               },
             })
           : [];
+        // Región del teléfono de la sede del plan, también si se retiró
+        // (DX-329, P1, m17): nunca el país del paciente.
+        const regions = new Map(
+          (
+            await tx.location.findMany({
+              where: {
+                id: {
+                  in: page.flatMap((p) =>
+                    p.acceptedLocationId ? [p.acceptedLocationId] : [],
+                  ),
+                },
+              },
+              select: { id: true, defaultPhoneRegion: true },
+            })
+          ).map((l) => [l.id, phoneRegionOrNull(l.defaultPhoneRegion)]),
+        );
         const items = page.map((plan) => {
           const nextVisit = plan.items[0].visit;
           const completed = previous.filter(
@@ -320,9 +338,9 @@ export class PlanVisitsService {
             patientId: plan.patientId,
             patientName:
               `${plan.patient.firstName} ${plan.patient.lastName}`.trim(),
-            patientWhatsApp: toWhatsAppNumber(
+            patientWhatsApp: whatsAppDigits(
               plan.patient.phone,
-              plan.patient.countryCode,
+              regions.get(plan.acceptedLocationId ?? '') ?? null,
             ),
             optionLabel: plan.optionLabel,
             locationId: plan.acceptedLocationId,

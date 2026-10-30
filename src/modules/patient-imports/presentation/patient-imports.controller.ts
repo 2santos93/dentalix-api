@@ -102,7 +102,7 @@ const LOCATION_HEADER = {
   name: 'X-Location-Id',
   required: false,
   description:
-    'Sede por defecto del lote (indicativo de los teléfonos). Sin ella, la sede de escritura.',
+    'Sede por defecto del lote (su prefijo telefónico se usa con los teléfonos sin +). Sin ella, la sede de escritura.',
 };
 
 const FILE_INTERCEPTOR = FileInterceptor('file', {

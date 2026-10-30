@@ -12,7 +12,7 @@ import {
   generateConfirmationToken,
   hashConfirmationToken,
 } from '../confirmation-token';
-import { toWhatsAppNumber } from '../whatsapp-phone';
+import { whatsAppDigits } from '../../../../shared/phone/phone-number';
 import {
   PublicAppointmentView,
   toPublicAppointmentView,
@@ -98,9 +98,10 @@ export class CreateConfirmationLinkUseCase {
     return {
       token,
       expiresAt: appointment.start,
-      whatsappPhone: toWhatsAppNumber(
+      // Con la región de la sede de la cita, nunca el país del paciente (P1).
+      whatsappPhone: whatsAppDigits(
         appointment.patientPhone,
-        appointment.patientCountryCode,
+        appointment.locationPhoneRegion,
       ),
       appointment: toPublicAppointmentView(appointment),
     };

@@ -21,6 +21,10 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import { CapturingMailer } from './support/capture-mailer';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 import { MAILER } from '../src/modules/notifications/email/domain/ports/mailer.port';
 import { JobWorker } from '../src/modules/jobs/application/job-worker.service';
 import {
@@ -588,6 +592,85 @@ describe('Baja de recordatorios (e2e, DX-128)', () => {
         where: { id: patientId },
       });
       expect(row.reminderOptOutAt).toBeNull();
+    });
+
+    it('an opt-out reply finds a patient stored without + in a second-region location', async () => {
+      // Guardado tal cual: sin «+», solo es válido con la región de la
+      // segunda sede.
+      const patientId = await createPatient('329101', {
+        phone: '0414-7654321',
+      });
+      const reply = {
+        tenantId: clinic.tenantId,
+        from: '584147654321',
+        text: 'BAJA',
+      };
+      await api()
+        .post('/api/v1/test/fake-whatsapp-webhook')
+        .send(reply)
+        .expect(200, { isOptOut: true, optedOut: [] });
+      const second = await raw.location.create({
+        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+          tenantId: clinic.tenantId,
+          name: 'Sede 329 VE',
+          defaultPhoneRegion: 'VE',
+        }),
+      });
+      try {
+        await api()
+          .post('/api/v1/test/fake-whatsapp-webhook')
+          .send(reply)
+          .expect(200, { isOptOut: true, optedOut: [patientId] });
+      } finally {
+        await raw.location.update({
+          where: { id: second.id },
+          data: { deletedAt: new Date() },
+        });
+      }
+    });
+
+    it("an opt-out reply reads a location without a region with its country's suggestion, only to match", async () => {
+      const patientId = await createPatient('329102', {
+        phone: '0416-5554321',
+      });
+      const reply = {
+        tenantId: clinic.tenantId,
+        from: '584165554321',
+        text: 'BAJA',
+      };
+      // Sede VE sin región (vaciada por un ADMIN o creada por una réplica
+      // anterior): la baja casa con la sugerencia de su país.
+      const withoutRegion = await raw.location.create({
+        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+          tenantId: clinic.tenantId,
+          name: 'Sede 329 VE sin prefijo',
+          country: 'VE',
+          defaultPhoneRegion: null,
+          defaultPhoneRegionSetAt: new Date(),
+        }),
+      });
+      try {
+        await api()
+          .post('/api/v1/test/fake-whatsapp-webhook')
+          .send(reply)
+          .expect(200, { isOptOut: true, optedOut: [patientId] });
+        // Solo para casar: ni el teléfono ni la región de la sede cambian.
+        const patient = await raw.patient.findUniqueOrThrow({
+          where: { id: patientId },
+          select: { phone: true },
+        });
+        expect(patient.phone).toBe('0416-5554321');
+        const location = await raw.location.findUniqueOrThrow({
+          where: { id: withoutRegion.id },
+          select: { defaultPhoneRegion: true },
+        });
+        expect(location.defaultPhoneRegion).toBeNull();
+      } finally {
+        await raw.location.update({
+          where: { id: withoutRegion.id },
+          data: { deletedAt: new Date() },
+        });
+      }
     });
   });
 });

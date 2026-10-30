@@ -65,7 +65,6 @@ export interface DebtorDetails {
   firstName: string;
   lastName: string;
   phone: string | null;
-  countryCode: string | null;
   lastPayment: {
     paidAt: Date;
     /** IANA de la sede del abono: su día civil es el de esa sede. */

@@ -21,7 +21,8 @@ export class FakeReminderOptOutRepository implements ReminderOptOutRepository {
     string,
     { id: string; patientId: string; usedAt: Date | null; expiresAt: Date }
   >();
-  country: string | null = 'CO';
+  /** Sin regiones por defecto: cada test fija las suyas (DX-329, m13). */
+  regions: string[] = [];
   branding: OptOutClinicBranding | null = {
     name: 'Sonrisas del Norte',
     primaryColor: '#0E7490',
@@ -131,8 +132,8 @@ export class FakeReminderOptOutRepository implements ReminderOptOutRepository {
     );
   }
 
-  principalLocationCountry(): Promise<string | null> {
-    return Promise.resolve(this.country);
+  liveLocationPhoneRegions(): Promise<string[]> {
+    return Promise.resolve(this.regions);
   }
 
   clinicBranding(): Promise<OptOutClinicBranding | null> {

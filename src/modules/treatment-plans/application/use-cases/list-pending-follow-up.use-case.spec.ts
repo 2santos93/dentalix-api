@@ -12,7 +12,8 @@ function row(overrides: Partial<PendingFollowUpRow> = {}): PendingFollowUpRow {
     patientFirstName: 'Ana',
     patientLastName: 'Pérez',
     patientPhone: '300 123 4567',
-    patientCountryCode: 'CO',
+    // Sin región por defecto: cada test fija la suya (DX-329).
+    presentedLocationPhoneRegion: null,
     optionGroupId: 'plan-a',
     optionLabel: 'Opción A',
     presentedAt: new Date(NOW.getTime() - 9 * DAY),
@@ -59,7 +60,7 @@ describe('ListPendingFollowUpUseCase (DX-040)', () => {
   });
 
   it('devuelve cada fila con paciente, opción, monto en su moneda y días desde la presentación', async () => {
-    const { uc } = setup([row()]);
+    const { uc } = setup([row({ presentedLocationPhoneRegion: 'CO' })]);
     const page = await uc.execute({});
     expect(page).toEqual({
       items: [
@@ -88,10 +89,18 @@ describe('ListPendingFollowUpUseCase (DX-040)', () => {
   it('sin un teléfono utilizable para WhatsApp, patientWhatsApp es null', async () => {
     const { uc } = setup([
       row({ patientPhone: null }),
-      row({ planId: 'b', patientCountryCode: null }),
+      row({ planId: 'b', presentedLocationPhoneRegion: null }),
     ]);
     const page = await uc.execute({});
     expect(page.items.map((i) => i.patientWhatsApp)).toEqual([null, null]);
+  });
+
+  it("a patient whose country differs from the location's is read with the location's region", async () => {
+    const { uc } = setup([
+      row({ patientPhone: '0412-1234567', presentedLocationPhoneRegion: 'VE' }),
+    ]);
+    const page = await uc.execute({});
+    expect(page.items[0].patientWhatsApp).toBe('584121234567');
   });
 
   it('pagina sobre el total', async () => {

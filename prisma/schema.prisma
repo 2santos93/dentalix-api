@@ -283,6 +283,15 @@ model Location {
   // («llama a la clínica al …»). Hasta 40 caracteres (CHECK
   // locations_phone_length_check).
   phone                        String?
+  /// DX-329: región de numeración (ISO 3166-1 alfa-2 de libphonenumber-js)
+  /// cuyo prefijo se añade a un teléfono escrito sin «+». NULL: sin prefijo
+  /// por defecto (el número se escribe con «+»). Se sugiere desde el país al
+  /// crear la sede y se edita; ninguna regla lo deduce después del país.
+  defaultPhoneRegion           String?        @db.Char(2)
+  /// DX-329: cuándo la eligió la API (alta, registro o edición). NULL: la
+  /// puso el relleno o la sede la creó una réplica anterior. Ningún relleno
+  /// toca una sede con fecha (R1).
+  defaultPhoneRegionSetAt      DateTime?      @db.Timestamptz(3)
   isActive                     Boolean        @default(true)
   createdAt                    DateTime       @default(now())
   updatedAt                    DateTime       @updatedAt

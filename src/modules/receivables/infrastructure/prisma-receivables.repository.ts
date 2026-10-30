@@ -7,6 +7,7 @@ import {
   Prisma,
   TreatmentPlanStatus,
 } from '@prisma/client';
+import { phoneRegionOrNull } from '../../../shared/phone/phone-number';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { resolveLocationTimeZones } from '../../../shared/locations/location-time-zone';
@@ -189,7 +190,6 @@ interface DebtorSqlRow {
   firstName: string;
   lastName: string;
   phone: string | null;
-  countryCode: string | null;
   paidAt: Date | null;
   amount: number | null;
   currency: string | null;
@@ -235,6 +235,24 @@ export class PrismaReceivablesRepository implements ReceivablesRepository {
   locationTimeZones(): Promise<(locationId: string | null) => string> {
     const tenantId = this.tenantId();
     return this.prisma.runWithTenant((tx) => loadTenantZones(tx, tenantId));
+  }
+
+  async locationPhoneRegions(): Promise<
+    (locationId: string | null) => string | null
+  > {
+    const tenantId = this.tenantId();
+    const locations = await this.prisma.runWithTenant((tx) =>
+      tx.location.findMany({
+        where: { tenantId },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        select: { id: true, defaultPhoneRegion: true, deletedAt: true },
+      }),
+    );
+    const regions = new Map(
+      locations.map((l) => [l.id, phoneRegionOrNull(l.defaultPhoneRegion)]),
+    );
+    const principal = locations.find((l) => l.deletedAt === null)?.id;
+    return (locationId) => regions.get(locationId ?? principal ?? '') ?? null;
   }
 
   /**
@@ -297,7 +315,6 @@ export class PrismaReceivablesRepository implements ReceivablesRepository {
     return this.prisma.runWithTenant(async (tx) => {
       const rows = await tx.$queryRaw<DebtorSqlRow[]>`
         SELECT pa."id", pa."firstName", pa."lastName", pa."phone",
-               pa."countryCode",
                lp."paidAt", lp."amount", lp."currency",
                lp."locationId" AS "paymentLocationId"
           FROM "patients" pa
@@ -324,7 +341,6 @@ export class PrismaReceivablesRepository implements ReceivablesRepository {
         firstName: r.firstName,
         lastName: r.lastName,
         phone: r.phone,
-        countryCode: r.countryCode,
         lastPayment:
           r.paidAt && r.amount !== null && r.currency && r.paymentLocationId
             ? {

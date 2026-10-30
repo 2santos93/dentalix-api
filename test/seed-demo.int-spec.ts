@@ -1,3 +1,5 @@
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
@@ -522,6 +524,33 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     }
   });
 
+  it("the demo's main location gets its country as default phone region", async () => {
+    const tenantId = await liveDemoTenantId();
+    const locations = await raw.location.findMany({
+      where: { tenantId, deletedAt: null },
+    });
+    expect(locations.length).toBeGreaterThan(0);
+    const main = locations.find((l) => l.name === 'Sede principal');
+    expect(main).toBeDefined();
+    expect(main?.defaultPhoneRegion).not.toBeNull();
+    expect(main?.defaultPhoneRegion).toBe(main?.country);
+    expect(main?.defaultPhoneRegionSetAt).toBeInstanceOf(Date);
+    // La sugerencia sale de `createMainLocation`: la demo no nombra la región.
+    const demoSources = [
+      join(process.cwd(), 'prisma', 'seed-demo.ts'),
+      ...readdirSync(join(process.cwd(), 'prisma', 'demo'))
+        .filter((file) => file.endsWith('.ts'))
+        .map((file) => join(process.cwd(), 'prisma', 'demo', file)),
+    ];
+    expect(demoSources.length).toBeGreaterThan(1);
+    for (const file of demoSources) {
+      expect({
+        file,
+        names: readFileSync(file, 'utf8').includes('defaultPhoneRegion'),
+      }).toEqual({ file, names: false });
+    }
+  });
+
   it('deja tipos de cita con color y citas demo con tipo (DX-121)', async () => {
     const tenantId = await liveDemoTenantId();
     const types = await raw.appointmentType.findMany({ where: { tenantId } });
@@ -794,10 +823,20 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     const confirmations = await raw.appointmentConfirmation.findMany({
       where: { tenantId },
       include: { appointment: true },
-      orderBy: { appointmentStart: 'asc' },
+      orderBy: [{ appointmentStart: 'asc' }, { id: 'asc' }],
     });
     expect(confirmations).toHaveLength(2);
-    const [pending, callMe] = confirmations;
+    // Las dos primeras citas pueden empezar a la vez (dos odontólogos): se
+    // eligen por su respuesta, no por su posición.
+    const pending = confirmations.find((c) => c.response === null);
+    const callMe = confirmations.find((c) => c.response === 'CALL_ME');
+    if (!pending || !callMe) {
+      throw new Error('falta la confirmación pendiente o la que pide llamada');
+    }
+    // La pendiente es la primera cita próxima (empatada o antes).
+    expect(pending.appointmentStart.getTime()).toBeLessThanOrEqual(
+      callMe.appointmentStart.getTime(),
+    );
 
     expect(pending.respondedAt).toBeNull();
     expect(pending.appointment.status).toBe('SCHEDULED');

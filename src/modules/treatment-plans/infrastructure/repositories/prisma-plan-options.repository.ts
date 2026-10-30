@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma, TreatmentPlanItemStatus } from '@prisma/client';
+import { phoneRegionOrNull } from '../../../../shared/phone/phone-number';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import type {
@@ -23,7 +24,7 @@ interface FollowUpSqlRow {
   patientFirstName: string;
   patientLastName: string;
   patientPhone: string | null;
-  patientCountryCode: string | null;
+  presentedLocationPhoneRegion: string | null;
   optionGroupId: string | null;
   optionLabel: string | null;
   presentedAt: Date;
@@ -189,7 +190,7 @@ export class PrismaPlanOptionsRepository implements PlanOptionsRepository {
                  pa."firstName" AS "patientFirstName",
                  pa."lastName" AS "patientLastName",
                  pa."phone" AS "patientPhone",
-                 pa."countryCode" AS "patientCountryCode",
+                 lo."defaultPhoneRegion" AS "presentedLocationPhoneRegion",
                  p."optionGroupId",
                  p."optionLabel",
                  p."presentedAt",
@@ -199,15 +200,23 @@ export class PrismaPlanOptionsRepository implements PlanOptionsRepository {
                  count(i."id")::int AS "itemCount"
             FROM "treatment_plans" p
             JOIN "patients" pa ON pa."id" = p."patientId"
+            -- La sede de la presentación, también si se retiró (DX-329, m17).
+            LEFT JOIN "locations" lo ON lo."id" = p."presentedLocationId"
             LEFT JOIN "treatment_plan_items" i
               ON i."planId" = p."id" AND i."deletedAt" IS NULL
            WHERE ${where}
-           GROUP BY p."id", pa."id"
+           GROUP BY p."id", pa."id", lo."id"
            ORDER BY p."presentedAt" ASC, p."id" ASC
            LIMIT ${query.pageSize} OFFSET ${offset}`;
         return {
           total,
-          rows: rows.map((row) => ({ ...row, total: row.total.toNumber() })),
+          rows: rows.map((row) => ({
+            ...row,
+            presentedLocationPhoneRegion: phoneRegionOrNull(
+              row.presentedLocationPhoneRegion,
+            ),
+            total: row.total.toNumber(),
+          })),
         };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },

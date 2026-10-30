@@ -1,5 +1,6 @@
 import type { ContactChannel } from '@prisma/client';
 import { civilDateIn } from '../../../shared/time/civil-day';
+import type { PhoneRegion } from '../../../shared/phone/phone-number';
 import { normalizeMobile } from '../../patients/domain/communication/mobile-number';
 
 /** Reglas y textos de las ofertas de huecos libres (DX-210). */
@@ -88,7 +89,7 @@ export type WhatsappOfferBlock = 'OPTED_OUT' | 'CHANNEL_NONE' | 'NO_OPT_IN';
  */
 export function whatsappOfferPhone(
   patient: PatientContactFields,
-  defaultCallingCode: string | null,
+  defaultRegion: PhoneRegion | null,
 ): {
   blocked: boolean;
   reason: WhatsappOfferBlock | null;
@@ -103,7 +104,7 @@ export function whatsappOfferPhone(
           ? 'NO_OPT_IN'
           : null;
   if (reason) return { blocked: true, reason, phone: null };
-  const mobile = normalizeMobile(patient.phone, defaultCallingCode);
+  const mobile = normalizeMobile(patient.phone, defaultRegion);
   return { blocked: false, reason: null, phone: mobile.e164?.slice(1) ?? null };
 }
 

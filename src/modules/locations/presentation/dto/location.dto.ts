@@ -62,6 +62,11 @@ const LOCALE_DOC =
 const HOUR_CYCLE_DOC =
   'G1-B: reloj de la sede, h12 (12 h) o h23 (24 h), en toda hora que se pinte para ella. Nunca se deduce del formato ni del país.';
 
+// DX-329 (§4.7): sin `example`; el valor lo valida el caso de uso (400 con
+// `message` y `field`).
+const DEFAULT_PHONE_REGION_DOC =
+  'Prefijo telefónico por defecto de la sede: la región (ISO 3166-1 alfa-2) cuyo prefijo se añade a los números escritos sin +. Se sugiere desde el país al crear la sede. null: sin prefijo telefónico por defecto.';
+
 export class CreateLocationDto {
   @ApiProperty({ example: 'Sede Norte' })
   @IsString()
@@ -120,6 +125,17 @@ export class CreateLocationDto {
   @IsString({ message: 'El teléfono debe ser un texto.' })
   @MaxLength(LOCATION_PHONE_MAX, { message: PHONE_MESSAGE })
   phone?: string;
+
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    description: `${DEFAULT_PHONE_REGION_DOC} Sin el campo se sugiere desde el país de la sede, si la librería lo admite.`,
+  })
+  // Sin `@IsString`: el caso de uso valida cualquier valor
+  // (`validateDefaultPhoneRegion`) y su 400 lleva `field`. `@IsOptional` lo
+  // mantiene en la lista blanca de la ValidationPipe.
+  @IsOptional()
+  defaultPhoneRegion?: unknown;
 }
 
 export class UpdateLocationDto {
@@ -188,6 +204,15 @@ export class UpdateLocationDto {
   @IsString({ message: 'El teléfono debe ser un texto.' })
   @MaxLength(LOCATION_PHONE_MAX, { message: PHONE_MESSAGE })
   phone?: string | null;
+
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    description: `${DEFAULT_PHONE_REGION_DOC} Vacío o null lo quita; sin el campo no cambia, tampoco al cambiar el país.`,
+  })
+  // Como en el alta: sin `@IsString`, para que el 400 lleve `field`.
+  @IsOptional()
+  defaultPhoneRegion?: unknown;
 
   // `type: String`: sin él, el tipo `string | null` sale como objeto en
   // OpenAPI. `null` no es válido (400), así que el contrato es `string`.
@@ -277,6 +302,12 @@ export class LocationDto {
     description: 'DX-222: teléfono de la sede o null.',
   })
   phone!: string | null;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: DEFAULT_PHONE_REGION_DOC,
+  })
+  defaultPhoneRegion!: string | null;
   @ApiProperty() isActive!: boolean;
   @ApiProperty({
     type: String,

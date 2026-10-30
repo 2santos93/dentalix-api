@@ -9,7 +9,7 @@ import {
 import { MedicalHistorySubmissionStatus } from '@prisma/client';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { firstNameOnly } from '../../../appointment-confirmations/application/confirmation-token';
-import { toWhatsAppNumber } from '../../../appointment-confirmations/application/whatsapp-phone';
+import { whatsAppDigits } from '../../../../shared/phone/phone-number';
 import { NO_POLICY_MESSAGE } from '../../../data-consents/infrastructure/record-consents-in-tx';
 import { PATIENT_NOT_FOUND_MESSAGE } from '../../../patients/application/assert-patient-in-clinic';
 import { ANAMNESIS_QUESTIONNAIRE_VERSION } from '../../domain/anamnesis-questionnaire';
@@ -43,7 +43,7 @@ export const ANAMNESIS_NOT_PENDING_MESSAGE =
 export const ANAMNESIS_OPTED_OUT_MESSAGE =
   'El paciente dio de baja los envíos: comparte el enlace por otro medio.';
 export const ANAMNESIS_NO_WHATSAPP_MESSAGE =
-  'El paciente no tiene un teléfono con indicativo de país.';
+  'El paciente no tiene un teléfono que sirva para WhatsApp: escríbelo con + y su prefijo.';
 
 /** Historial de la ficha: los últimos envíos del paciente. */
 export const PATIENT_REQUESTS_LIMIT = 10;
@@ -170,7 +170,7 @@ export class CreateAnamnesisRequestUseCase {
       ctx.patient.contactChannel === 'NONE';
     const phone = optedOut
       ? null
-      : toWhatsAppNumber(ctx.patient.phone, issued.locationCountry);
+      : whatsAppDigits(ctx.patient.phone, issued.locationPhoneRegion);
     return {
       id: issued.submission.id,
       patientId,

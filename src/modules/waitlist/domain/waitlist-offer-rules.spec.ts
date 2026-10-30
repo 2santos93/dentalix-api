@@ -48,7 +48,7 @@ describe('ofertas de huecos (DX-210)', () => {
     };
 
     it('con permiso de WhatsApp, móvil válido y sin baja: el número para wa.me', () => {
-      expect(whatsappOfferPhone(base, '57')).toEqual({
+      expect(whatsappOfferPhone(base, 'CO')).toEqual({
         blocked: false,
         reason: null,
         phone: '573101234567',
@@ -57,24 +57,38 @@ describe('ofertas de huecos (DX-210)', () => {
 
     it('sin el permiso de WhatsApp registrado: bloqueado (se le llama)', () => {
       expect(
-        whatsappOfferPhone({ ...base, whatsappOptInAt: null }, '57'),
+        whatsappOfferPhone({ ...base, whatsappOptInAt: null }, 'CO'),
       ).toEqual({ blocked: true, reason: 'NO_OPT_IN', phone: null });
     });
 
     it('con baja de los avisos o sin canal: bloqueado aunque tenga el permiso', () => {
       expect(
-        whatsappOfferPhone({ ...base, reminderOptOutAt: new Date() }, '57'),
+        whatsappOfferPhone({ ...base, reminderOptOutAt: new Date() }, 'CO'),
       ).toEqual({ blocked: true, reason: 'OPTED_OUT', phone: null });
       expect(
-        whatsappOfferPhone({ ...base, contactChannel: 'NONE' }, '57'),
+        whatsappOfferPhone({ ...base, contactChannel: 'NONE' }, 'CO'),
       ).toEqual({ blocked: true, reason: 'CHANNEL_NONE', phone: null });
+    });
+
+    it('an ambiguous number is never VALID, never a wa.me and never stored as E.164', () => {
+      expect(
+        whatsappOfferPhone({ ...base, phone: '0058 412 1234567' }, 'CO'),
+      ).toEqual({ blocked: false, reason: null, phone: null });
+    });
+
+    it('sin región por defecto, un número sin + no recibe WhatsApp', () => {
+      expect(whatsappOfferPhone(base, null)).toEqual({
+        blocked: false,
+        reason: null,
+        phone: null,
+      });
     });
 
     it('un fijo o un número inválido no recibe WhatsApp', () => {
       expect(
-        whatsappOfferPhone({ ...base, phone: '601 555 1234' }, '57'),
+        whatsappOfferPhone({ ...base, phone: '601 555 1234' }, 'CO'),
       ).toEqual({ blocked: false, reason: null, phone: null });
-      expect(whatsappOfferPhone({ ...base, phone: null }, '57')).toEqual({
+      expect(whatsappOfferPhone({ ...base, phone: null }, 'CO')).toEqual({
         blocked: false,
         reason: null,
         phone: null,

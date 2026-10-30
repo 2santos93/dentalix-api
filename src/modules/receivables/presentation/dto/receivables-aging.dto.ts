@@ -86,14 +86,13 @@ export class AgingPatientDto {
     type: String,
     nullable: true,
     description:
-      'Teléfono tal como está en la ficha, con su indicativo de país si lo tiene.',
+      'Teléfono tal como está en la ficha, con su prefijo si lo tiene.',
   })
   phone!: string | null;
 
   @ApiProperty({
     type: String,
     nullable: true,
-    example: '573001234567',
     description:
       'Teléfono en E.164 sin "+", listo para https://wa.me/<número>; null si no hay uno utilizable',
   })

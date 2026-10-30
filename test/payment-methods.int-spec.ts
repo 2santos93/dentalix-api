@@ -31,19 +31,28 @@ interface Seeded {
   planId: string;
 }
 
-/** Clínica, sede, paciente y plan; `db` puede ser la BD desechable. */
+/**
+ * Clínica, sede, paciente y plan; `db` puede ser la BD desechable. En ella
+ * (`beforeDx377`) aún no existen las columnas de sede de DX-329, que van
+ * después: la sede se crea sin región y se pide solo su id.
+ */
 async function seedClinic(
   db: PrismaClient,
   subdomain: string,
+  beforeDx377 = false,
 ): Promise<Seeded> {
   const tenant = await db.tenant.create({
     data: { name: subdomain, subdomain },
   });
+  const { defaultPhoneRegion: _region, ...regional } = REGIONAL_BOGOTA_FIXTURE;
   const location = await db.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
-      tenantId: tenant.id,
-      name: 'Sede',
-    }),
+    data: beforeDx377
+      ? { ...regional, tenantId: tenant.id, name: 'Sede' }
+      : locationData(REGIONAL_BOGOTA_FIXTURE, {
+          tenantId: tenant.id,
+          name: 'Sede',
+        }),
+    select: { id: true },
   });
   const patient = await db.patient.create({
     data: { tenantId: tenant.id, firstName: 'Ana', lastName: subdomain },
@@ -264,8 +273,8 @@ describe('DX-377 · relleno de la migración (int, BD desechable)', () => {
     target = new PrismaClient<Prisma.PrismaClientOptions>({
       datasources: { db: { url: urlFor(db) } },
     });
-    a = await seedClinic(target, 'dx377-old-a');
-    b = await seedClinic(target, 'dx377-old-b');
+    a = await seedClinic(target, 'dx377-old-a', true);
+    b = await seedClinic(target, 'dx377-old-b', true);
     ids.cashA = await insertPayment(target, a, 'CASH');
     ids.transferA = await insertPayment(target, a, 'TRANSFER');
     ids.noneA = await insertPayment(target, a, null);

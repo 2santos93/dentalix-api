@@ -9,7 +9,11 @@ import {
   LEGACY_DOC_TYPES,
   LEGACY_DOC_TYPE_SYNONYMS,
 } from '../../patients/domain/legacy-doc-type';
-import { toE164Digits } from '../../../shared/phone/e164';
+import {
+  readPhone,
+  splitExtension,
+  type PhoneRegion,
+} from '../../../shared/phone/phone-number';
 import type { ResolvedMapping } from './column-mapping';
 import type { ImportFieldKey, ImportPatientData } from './import-fields';
 import { excelSerialToDate } from './xlsx-reader';
@@ -38,8 +42,8 @@ export interface RowIssue {
 }
 
 export interface RowContext {
-  /** Indicativo de los teléfonos sin «+» (la aplicación lo saca de la sede). */
-  defaultCallingCode: string | null;
+  /** Región de los teléfonos sin «+»: la por defecto de la sede del lote. */
+  defaultRegion: PhoneRegion | null;
   /** Hoy, día civil AAAA-MM-DD (en la zona de la sede). */
   today: string;
   /** Nombres locales de los tipos de documento de la clínica (R16, R19). */
@@ -235,17 +239,24 @@ export function parseSex(
 }
 
 /**
- * Teléfono: si es un número plausible con el indicativo por defecto (o con
- * «+»/«00»), en E.164 (`+` con indicativo y número, la regla del botón de WhatsApp,
- * DX-005); un fijo corto que no lo es, tal cual (7 a 15 dígitos).
+ * Teléfono (DX-329, R9): si la librería lo da por válido con la región de la
+ * sede (o con su «+»), en E.164 (`+` con el prefijo y el número). Con
+ * extensión, o si no es válido o se lee de dos formas, tal cual (7 a 15
+ * dígitos): nunca se guarda un E.164 que la librería no dé por válido, ni se
+ * pierde una extensión.
  */
 export function normalizePhone(
   raw: string,
-  defaultCallingCode: string | null,
+  defaultRegion: PhoneRegion | null,
 ): { value: string } | { error: string } {
   const text = raw.trim().replace(/\s+/g, ' ');
   const digits = text.replace(/\D/g, '');
-  if (/[a-z]/i.test(text.replace(/\b(ext|extension|ext\.)\b.*$/i, ''))) {
+  // Fuera de la extensión no puede haber letras. La extensión se reconoce
+  // como en el adaptador (`x3`, `extensión 3`…) o como antes de DX-329.
+  if (
+    /\p{L}/u.test(splitExtension(text).body) &&
+    /[a-z]/i.test(text.replace(/\b(ext|extension|ext\.)\b.*$/i, ''))
+  ) {
     return {
       error:
         'Teléfono no válido: solo dígitos, espacios, guiones, paréntesis y «+».',
@@ -257,10 +268,12 @@ export function normalizePhone(
         'Hay más de un teléfono en la celda: deja uno (el otro puede ir en Notas).',
     };
   }
-  // Con indicativo y número nacional completo (≥ 10 dígitos en total) va en
-  // E.164; un fijo local corto («234 5678») se deja como lo escribieron.
-  const e164 = toE164Digits(text, defaultCallingCode);
-  if (e164 && e164.length >= 10) return { value: `+${e164}` };
+  const reading = readPhone(text, defaultRegion);
+  // Con extensión, tal cual: la extensión no se pierde, y sus dígitos no
+  // cuentan para el largo de un número válido.
+  if (reading.kind === 'VALID') {
+    return { value: reading.phone.ext ? text : reading.phone.e164 };
+  }
   if (digits.length >= 7 && digits.length <= 15) return { value: text };
   return { error: 'Teléfono no válido: debe tener entre 7 y 15 dígitos.' };
 }
@@ -404,7 +417,7 @@ export function validateRow(
   ] as const) {
     const raw = clean(cell(key));
     if (raw === '') continue;
-    const phone = normalizePhone(raw, ctx.defaultCallingCode);
+    const phone = normalizePhone(raw, ctx.defaultRegion);
     if ('error' in phone) fail(key, label, phone.error, raw);
     else data[key] = phone.value;
   }

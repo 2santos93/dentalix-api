@@ -10,6 +10,7 @@ import {
   linkResponseBlock,
   type LinkCancellationPolicy,
 } from '../../domain/link-cancellation-policy';
+import { phoneRegionOrNull } from '../../../../shared/phone/phone-number';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
@@ -33,8 +34,9 @@ const APPOINTMENT_SELECT = {
   status: true,
   providerId: true,
   locationId: true,
-  patient: { select: { firstName: true, phone: true, countryCode: true } },
-  location: { select: { name: true, address: true } },
+  patient: { select: { firstName: true, phone: true } },
+  // Sin filtrar `deletedAt` (DX-329, m17): la sede de la cita da el prefijo.
+  location: { select: { name: true, address: true, defaultPhoneRegion: true } },
 } as const satisfies Prisma.AppointmentSelect;
 
 type SelectedAppointment = Prisma.AppointmentGetPayload<{
@@ -145,11 +147,11 @@ export class PrismaAppointmentConfirmationRepository implements AppointmentConfi
       status: a.status,
       patientFirstName: a.patient.firstName,
       patientPhone: a.patient.phone,
-      patientCountryCode: a.patient.countryCode,
       providerName: membership?.user.fullName ?? null,
       locationId: a.locationId,
       locationName: a.location.name,
       locationAddress: a.location.address,
+      locationPhoneRegion: phoneRegionOrNull(a.location.defaultPhoneRegion),
     };
   }
 

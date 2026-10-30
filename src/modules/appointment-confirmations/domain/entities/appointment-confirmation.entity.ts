@@ -36,12 +36,16 @@ export interface ConfirmationAppointment {
   status: AppointmentStatus;
   patientFirstName: string | null;
   patientPhone: string | null;
-  patientCountryCode: string | null;
   providerName: string | null;
   /** Sede de la cita: la restricción por sedes (DX-089) se comprueba con ella. */
   locationId: string;
   locationName: string;
   locationAddress: string | null;
+  /**
+   * Región por defecto del teléfono de la sede de la cita (DX-329, P1): con
+   * ella se lee un número sin «+». null: la sede no tiene.
+   */
+  locationPhoneRegion: string | null;
 }
 
 export interface ClinicBranding {

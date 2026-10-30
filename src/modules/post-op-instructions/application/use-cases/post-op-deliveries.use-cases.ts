@@ -10,7 +10,7 @@ import { describeDeliveryError } from '../../../notifications/email/application/
 import { RecordAuditEventUseCase } from '../../../audit/application/record-audit-event.use-case';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { firstNameOnly } from '../../../appointment-confirmations/application/confirmation-token';
-import { toWhatsAppNumber } from '../../../appointment-confirmations/application/whatsapp-phone';
+import { whatsAppDigits } from '../../../../shared/phone/phone-number';
 import { assertPatientInClinic } from '../../../patients/application/assert-patient-in-clinic';
 import {
   noticeRecipient,
@@ -59,7 +59,7 @@ export const POSTOP_NO_EMAIL_MESSAGE =
   'El paciente no tiene email ni un responsable que reciba avisos';
 export const POSTOP_OPTED_OUT_MESSAGE = 'El paciente dio de baja los envíos';
 export const POSTOP_NO_WHATSAPP_MESSAGE =
-  'El paciente no tiene un teléfono con indicativo de país';
+  'El paciente no tiene un teléfono que sirva para WhatsApp: escríbelo con + y su prefijo';
 export const POSTOP_INVALID_HOST_MESSAGE = 'Host no válido';
 export const POSTOP_DELIVERY_NOT_FOUND_MESSAGE =
   'Entrega de indicaciones no encontrada';
@@ -198,7 +198,7 @@ function emailRecipient(
 }
 
 function whatsAppPhone(ctx: PostOpAppointmentContext): string | null {
-  return toWhatsAppNumber(ctx.patient.phone, ctx.location.country);
+  return whatsAppDigits(ctx.patient.phone, ctx.location.defaultPhoneRegion);
 }
 
 /**

@@ -50,7 +50,8 @@ export function appointmentContext(
       id: 'loc-1',
       name: 'Sede Norte',
       phone: '601 555 0101',
-      country: 'CO',
+      // Sin región por defecto: cada test fija la suya (DX-329, m13).
+      defaultPhoneRegion: null,
       timeZone: 'America/Bogota',
       locale: 'es-CO',
       hourCycle: 'h23',

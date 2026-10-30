@@ -454,6 +454,72 @@ describe('DX-256 visitas y agenda', () => {
     expect((foreign.body as { items: unknown[] }).items).toHaveLength(0);
     await call('get', '/treatment-plans/unscheduled?limit=51').expect(400);
   });
+  it("the plan's WhatsApp link uses the region of its accepted location, not the patient's country", async () => {
+    const before = await raw.location.findUniqueOrThrow({
+      where: { id: otherLocation },
+      select: { defaultPhoneRegion: true },
+    });
+    const veneciana = await raw.patient.create({
+      data: {
+        tenantId: a.tenantId,
+        firstName: 'Vera',
+        lastName: 'Visitas',
+        phone: '0412-1234567',
+        countryCode: 'CO',
+      },
+    });
+    const catalog = await raw.dentalCatalogItem.findFirstOrThrow({
+      where: { tenantId: a.tenantId, code: 'VISIT' },
+    });
+    const plan = await raw.treatmentPlan.create({
+      data: {
+        tenantId: a.tenantId,
+        patientId: veneciana.id,
+        currency: 'COP',
+        status: 'ACCEPTED',
+        acceptedAt: new Date(Date.now() - 2 * DAY),
+        acceptedLocationId: otherLocation,
+        items: {
+          create: {
+            toothNumber: '11',
+            catalogItemId: catalog.id,
+            price: 100,
+            status: 'ACCEPTED',
+          },
+        },
+      },
+    });
+    const whatsAppOf = async () =>
+      (
+        (
+          await call(
+            'get',
+            `/treatment-plans/unscheduled?locationId=${otherLocation}`,
+          ).expect(200)
+        ).body as {
+          items: { planId: string; patientWhatsApp: string | null }[];
+        }
+      ).items.find((i) => i.planId === plan.id)?.patientWhatsApp;
+    try {
+      // La sede del plan lee con su región (CO): ese número no es válido.
+      expect(await whatsAppOf()).toBeNull();
+      await raw.location.update({
+        where: { id: otherLocation },
+        data: { defaultPhoneRegion: 'VE' },
+      });
+      expect(await whatsAppOf()).toBe('584121234567');
+    } finally {
+      await raw.location.update({
+        where: { id: otherLocation },
+        data: before,
+      });
+      await raw.treatmentPlan.update({
+        where: { id: plan.id },
+        data: { deletedAt: new Date() },
+      });
+    }
+  });
+
   describe('sede sin zona (réplica antigua) en la lista de toda la clínica', () => {
     let legacy: string;
     let baseline: string[];

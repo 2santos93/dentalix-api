@@ -111,7 +111,7 @@ export class PatientCommunicationController {
   @ApiOperation({
     summary: 'Cambiar canal, móvil, opt-in de WhatsApp o baja (DX-128)',
     description:
-      'Solo recepción y ADMIN. El móvil se normaliza a E.164 con el país de la sede. ' +
+      'Solo recepción y ADMIN. El móvil se normaliza a E.164; sin «+» se lee con el prefijo telefónico por defecto de la sede. ' +
       'WHATSAPP exige un móvil válido (400 `WHATSAPP_REQUIRES_VALID_MOBILE`). ' +
       'Queda en la auditoría con el autor, los campos y el origen.',
   })

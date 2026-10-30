@@ -168,7 +168,6 @@ export class ConfirmationLinkDto {
   @ApiProperty({
     type: String,
     nullable: true,
-    example: '573105550101',
     description:
       'Teléfono del paciente en E.164 sin "+", listo para https://wa.me/<número>. null si no hay uno utilizable.',
   })
