@@ -195,7 +195,7 @@ export class UpdatePatientCommunicationDto {
     nullable: true,
     maxLength: PHONE_MAX,
     description:
-      'Móvil. Se guarda en E.164 si es válido para el país de la sede; null o vacío lo borra.',
+      'Móvil. Se guarda en E.164 si es válido; sin «+» se lee con el prefijo telefónico por defecto de la sede. null o vacío lo borra.',
   })
   @IsOptional()
   @IsString({ message: 'El móvil debe ser un texto.' })
