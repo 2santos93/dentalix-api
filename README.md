@@ -2658,9 +2658,14 @@ moneda y parte por transferencia en otra: un solo cobro, un solo recibo.
   el total recalculado con ellas. Todas las líneas llevan su `receiptNumber`.
 - **Saldo a favor**: si el total en la moneda del plan (las líneas con tasa)
   supera lo pendiente, 409 `SPLIT_PAYMENT_EXCEEDS_BALANCE` con `total`,
-  `pending` y `currency`; se confirma con `confirmCreditBalance: true`. Se
-  comprueba fuera de la transacción, como el saldo del recibo: es una
-  confirmación de la caja, no una restricción.
+  `pending` y `currency`; se confirma con `confirmCreditBalance: true`. Lo
+  pendiente se lee fuera de la transacción, pero sin la confirmación la
+  transacción bloquea el plan (FOR NO KEY UPDATE) y comprueba que no entró
+  ningún abono al plan desde esa lectura: si entró (dos cobros a la vez), 409
+  `SPLIT_PAYMENT_BALANCE_CHANGED` y no se registra nada.
+- **Anular desde la caja o el estado de cuenta**: `GET /payments` y el estado
+  de cuenta traen `splitId` y `splitLines` en cada abono, para avisar antes
+  de anular que se anula el cobro entero.
 - **Idempotency-Key** del cobro entero, en la línea 1 con una huella propia
   (`splitPaymentRequestFingerprint`): repetir devuelve el cobro original; la
   misma clave con otro cuerpo, otro plan o en el endpoint del abono suelto es
