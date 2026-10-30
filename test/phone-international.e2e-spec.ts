@@ -6,6 +6,7 @@ import { createE2eApp } from './support/create-e2e-app';
 import { Clinic, registerClinic, resetDatabase } from './support/e2e-fixtures';
 import {
   REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_NEW_YORK_FIXTURE,
   locationBody,
   locationData,
 } from './support/location-fixtures';
@@ -166,6 +167,47 @@ describe('Teléfono con formato internacional (e2e, DX-387)', () => {
       const items = (res.body as { items: PhoneBody[] }).items;
       const match = items.find((p) => p.phone === '0412-1234567');
       expect(match?.phoneInternational).toBe('+58 412 1234567');
+    });
+  });
+
+  describe('aislamiento por clínica', () => {
+    it('another clinic reads with its own main location, never with an older one of this clinic nor with a foreign X-Location-Id', async () => {
+      // La sede principal de ESTA clínica (CO) es más antigua: si la lectura
+      // de la región no se filtrase por clínica, la otra la tomaría.
+      const other = await registerClinic(
+        app,
+        'dx387-telefonos-otra',
+        REGIONAL_NEW_YORK_FIXTURE,
+      );
+      const asOther = (req: request.Test) =>
+        req
+          .set('X-Tenant-Host', other.host)
+          .set('Authorization', `Bearer ${other.adminToken}`);
+      const created = await asOther(api().post('/api/v1/patients'))
+        .send({
+          firstName: 'Ana',
+          lastName: 'Aislada',
+          docType: 'NATIONAL_ID',
+          docNumber: String(doc++),
+          sex: 'F',
+          phone: '212 555 0123',
+        })
+        .expect(201);
+      expect(created.body).toMatchObject({
+        phone: '212 555 0123',
+        phoneInternational: '+1 212 555 0123',
+      });
+      const list = await asOther(api().get('/api/v1/patients')).expect(200);
+      const items = (list.body as { items: PhoneBody[] }).items;
+      expect(items.map((p) => p.phoneInternational)).toEqual([
+        '+1 212 555 0123',
+      ]);
+      // Una sede de otra clínica no es la sede activa de nadie aquí.
+      const foreign = await asOther(
+        api().get(`/api/v1/patients/${(created.body as PhoneBody).id}`),
+      ).set('X-Location-Id', veLocation);
+      expect(foreign.status).toBeGreaterThanOrEqual(400);
+      expect(JSON.stringify(foreign.body)).not.toContain('+58');
     });
   });
 
