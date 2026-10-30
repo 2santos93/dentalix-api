@@ -86,6 +86,22 @@ export class ReceiptPaymentDto {
   @ApiProperty({ enum: PaymentMethod, nullable: true })
   method!: PaymentMethod | null;
 
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    description:
+      'DX-377: nombre del medio de pago; ausente en los recibos anteriores.',
+  })
+  paymentMethodName?: string | null;
+
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    description:
+      'DX-377: referencia del pago; ausente en los recibos anteriores.',
+  })
+  reference?: string | null;
+
   @ApiProperty({ format: 'date-time' })
   paidAt!: string;
 

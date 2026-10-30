@@ -8,6 +8,7 @@ import type {
 import {
   CashCurrencyTotal,
   CashMethodTotal,
+  CashPaymentMethodTotal,
   CashPaymentView,
 } from '../../domain/entities/cash-payment.entity';
 import {
@@ -58,6 +59,8 @@ export interface CashPaymentsSummary {
   count: number;
   byCurrency: CashCurrencyTotal[];
   byMethod: CashMethodTotal[];
+  /** DX-377: total por medio de pago de la clínica y moneda. */
+  byPaymentMethod: CashPaymentMethodTotal[];
 }
 
 export interface ListCashPaymentsOutput {
@@ -117,12 +120,59 @@ function summarize(groups: CashRegisterGroup[]): CashPaymentsSummary {
       count: acc.count,
     }));
 
-  const byMethod = groups
-    .map((group) => ({
+  // DX-377: el repositorio agrupa también por medio, así que un método puede
+  // llegar en varios grupos: se suman por (método, moneda).
+  const methodCents = new Map<
+    string,
+    {
+      method: PaymentMethod | null;
+      currency: string;
+      cents: number;
+      count: number;
+    }
+  >();
+  const mediumCents = new Map<
+    string,
+    {
+      paymentMethodId: string | null;
+      name: string | null;
+      currency: string;
+      cents: number;
+      count: number;
+    }
+  >();
+  for (const group of groups) {
+    const methodKey = `${group.method ?? ''}|${group.currency}`;
+    const m = methodCents.get(methodKey) ?? {
       method: group.method,
       currency: group.currency,
-      total: toCents(group.total) / 100,
-      count: group.count,
+      cents: 0,
+      count: 0,
+    };
+    m.cents += toCents(group.total);
+    m.count += group.count;
+    methodCents.set(methodKey, m);
+
+    const medium = group.paymentMethod ?? null;
+    const mediumKey = `${medium?.id ?? ''}|${group.currency}`;
+    const p = mediumCents.get(mediumKey) ?? {
+      paymentMethodId: medium?.id ?? null,
+      name: medium?.name ?? null,
+      currency: group.currency,
+      cents: 0,
+      count: 0,
+    };
+    p.cents += toCents(group.total);
+    p.count += group.count;
+    mediumCents.set(mediumKey, p);
+  }
+
+  const byMethod = [...methodCents.values()]
+    .map((m) => ({
+      method: m.method,
+      currency: m.currency,
+      total: m.cents / 100,
+      count: m.count,
     }))
     .sort(
       (a, b) =>
@@ -130,7 +180,23 @@ function summarize(groups: CashRegisterGroup[]): CashPaymentsSummary {
         a.currency.localeCompare(b.currency),
     );
 
-  return { count, byCurrency, byMethod };
+  // Por nombre del medio; los abonos sin medio al final.
+  const byPaymentMethod = [...mediumCents.values()]
+    .map((p) => ({
+      paymentMethodId: p.paymentMethodId,
+      name: p.name,
+      currency: p.currency,
+      total: p.cents / 100,
+      count: p.count,
+    }))
+    .sort(
+      (a, b) =>
+        Number(a.name === null) - Number(b.name === null) ||
+        (a.name ?? '').localeCompare(b.name ?? '') ||
+        a.currency.localeCompare(b.currency),
+    );
+
+  return { count, byCurrency, byMethod, byPaymentMethod };
 }
 
 /**

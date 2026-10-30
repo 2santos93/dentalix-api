@@ -33,6 +33,13 @@ export interface CreatePaymentRepoInput {
   /** Instante del pago, o solo su día civil. */
   paidAt: Date | CivilPaidDay;
   method?: PaymentMethod;
+  /** DX-377: medio del catálogo ya validado (de esta clínica y activo). */
+  paymentMethodId?: string | null;
+  /** DX-377: referencia recortada y su forma normalizada para comparar. */
+  reference?: string | null;
+  referenceNormalized?: string | null;
+  /** DX-377: motivo de la confirmación de una referencia repetida. */
+  duplicateReferenceReason?: string | null;
   notes?: string;
   createdById?: string;
   /**
@@ -71,6 +78,15 @@ export interface CreatePaymentRepoInput {
    * `null`: misma moneda que el destino, o sin tasa ese día.
    */
   frozenRate: FrozenExchangeRate | null;
+}
+
+/** DX-377: un abono anterior con la misma referencia y medio. */
+export interface ReferenceMatch {
+  id: string;
+  paidAt: Date;
+  amount: number;
+  currency: string;
+  receiptNumber: string | null;
 }
 
 /** Un saldo migrado vivo (DX-262) con lo que el abono necesita validar. */
@@ -117,6 +133,11 @@ export interface ListCashRegisterParams extends CivilPeriod {
 export interface CashRegisterGroup {
   currency: string;
   method: PaymentMethod | null;
+  /**
+   * DX-377: el medio del grupo (el del abono, o el inicial de su método si es
+   * de una réplica anterior) y su nombre; ausente o `null` = sin medio.
+   */
+  paymentMethod?: { id: string; name: string } | null;
   total: number;
   count: number;
 }
@@ -181,6 +202,18 @@ export interface PaymentRepository {
    * en su moneda, o `null` (no existe, retirado u otra clínica por RLS).
    */
   findOpeningBalance(id: string): Promise<OpeningBalanceTarget | null>;
+
+  /**
+   * DX-377: abonos vivos de esta clínica (RLS) con el mismo medio y la misma
+   * referencia normalizada y `paidAt` en [from, to], del más reciente al más
+   * antiguo (como mucho 5: basta para avisar).
+   */
+  findReferenceMatches(params: {
+    paymentMethodId: string;
+    referenceNormalized: string;
+    from: Date;
+    to: Date;
+  }): Promise<ReferenceMatch[]>;
 
   /** Abonos activos contra un saldo migrado (DX-262), por `paidAt` DESC. */
   listByOpeningBalance(openingBalanceId: string): Promise<Payment[]>;

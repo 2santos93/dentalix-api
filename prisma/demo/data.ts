@@ -1436,6 +1436,11 @@ interface DemoPayment {
    */
   currency?: string;
   method: PaymentMethod;
+  /**
+   * DX-377: con ella el abono se cobra con el medio demo «Pago móvil» (pide
+   * referencia) en vez del medio inicial de `method`.
+   */
+  mobileReference?: string;
   location: DemoLocationKey;
   notes?: string;
 }
@@ -1544,7 +1549,13 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
     ],
     payments: [
       { daysAgo: 26, amount: 400000, method: CARD, location: 'principal' },
-      { daysAgo: 12, amount: 300000, method: TRANSFER, location: 'principal' },
+      {
+        daysAgo: 12,
+        amount: 300000,
+        method: TRANSFER,
+        mobileReference: '0412 7788 31',
+        location: 'principal',
+      },
       // DX-375: un abono de hoy en otra moneda que la del plan.
       {
         daysAgo: 0,
@@ -1649,7 +1660,13 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
       { code: 'PED-FLUOR', tooth: '11', status: ACCEPTED },
     ],
     payments: [
-      { daysAgo: 14, amount: 130000, method: TRANSFER, location: 'norte' },
+      {
+        daysAgo: 14,
+        amount: 130000,
+        method: TRANSFER,
+        mobileReference: '0098 1234 55',
+        location: 'norte',
+      },
     ],
   },
   {

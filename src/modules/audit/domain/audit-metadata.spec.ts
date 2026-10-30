@@ -163,6 +163,31 @@ describe('sanitizeAuditMetadata (DX-009)', () => {
     });
   });
 
+  describe('paymentReference (DX-377: referencia repetida confirmada)', () => {
+    const ID = '3f1c2b9e-7a6d-4e5f-8a9b-0c1d2e3f4a5b';
+
+    it('guarda la confirmación y solo los ids con formato de uuid', () => {
+      expect(
+        sanitizeAuditMetadata({
+          paymentReference: {
+            duplicateConfirmed: true,
+            duplicateOf: [ID, 'REF-123456', 'Ana Gómez'],
+          },
+        }),
+      ).toEqual({
+        paymentReference: { duplicateConfirmed: true, duplicateOf: [ID] },
+      });
+    });
+
+    it('descarta el motivo o la referencia aunque lleguen', () => {
+      expect(
+        sanitizeAuditMetadata({
+          paymentReference: { duplicateConfirmed: 'sí', duplicateOf: [ID] },
+        }),
+      ).toEqual({});
+    });
+  });
+
   describe('search (DX-191: búsqueda de implantes por lote/REF)', () => {
     it('guarda lote, REF y nº de filas', () => {
       expect(

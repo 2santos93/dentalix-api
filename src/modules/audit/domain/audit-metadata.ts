@@ -108,6 +108,12 @@ export interface AuditMetadata {
    */
   allocation?: AuditAllocation;
   /**
+   * DX-377: abono con referencia. Si se confirmó una referencia repetida y
+   * los ids de los abonos con los que coincidía. Ni la referencia ni el texto
+   * del motivo (van en el abono, `resourceId`).
+   */
+  paymentReference?: AuditPaymentReference;
+  /**
    * G1 (R13): moneda, zona y formato de una sede antes y después de una
    * edición, y si quedó revisada. Códigos de configuración de la sede (ISO
    * 4217, IANA, BCP 47); un lado puede traer null (sede sin configurar).
@@ -205,6 +211,11 @@ export interface AuditHealthRegistrationSide {
 export interface AuditHealthRegistrationChange {
   before: AuditHealthRegistrationSide;
   after: AuditHealthRegistrationSide;
+}
+
+export interface AuditPaymentReference {
+  duplicateConfirmed: boolean;
+  duplicateOf: string[];
 }
 
 export interface AuditPrescriptionSafety {
@@ -769,6 +780,21 @@ function prescriptionSafety(value: unknown): AuditPrescriptionSafety | null {
   return { rulesVersion, blocking, info, overridden };
 }
 
+/** Confirmación de referencia repetida y ids de los repetidos (DX-377). */
+function paymentReference(value: unknown): AuditPaymentReference | null {
+  if (!isRecord(value)) return null;
+  const { duplicateConfirmed, duplicateOf } = value;
+  if (typeof duplicateConfirmed !== 'boolean' || !Array.isArray(duplicateOf)) {
+    return null;
+  }
+  return {
+    duplicateConfirmed,
+    duplicateOf: duplicateOf
+      .filter((id): id is string => typeof id === 'string' && UUID.test(id))
+      .slice(0, 5),
+  };
+}
+
 /** Los 4 últimos del nº de afiliado: letras de cualquier alfabeto o dígitos. */
 const LAST4 = /^[\p{L}0-9]{1,4}$/u;
 
@@ -999,6 +1025,8 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (cancelled) out.cancellation = cancelled;
   const safety = prescriptionSafety(input.prescriptionSafety);
   if (safety) out.prescriptionSafety = safety;
+  const referenced = paymentReference(input.paymentReference);
+  if (referenced) out.paymentReference = referenced;
   const covered = coverage(input.coverage);
   if (covered) out.coverage = covered;
   const registration = healthRegistration(input.healthRegistration);

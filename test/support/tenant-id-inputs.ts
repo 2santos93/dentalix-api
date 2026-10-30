@@ -124,6 +124,11 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
 
 /** Ids cuyo caso «B manda el id de A» ya está en otro spec (se cita cuál). */
 export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
+  // DX-377: «un medio de pago de otra clínica no se acepta (400)».
+  'POST /treatment-plans/:id/payments body.paymentMethodId':
+    'payment-methods.e2e-spec.ts',
+  'POST /opening-balances/:id/payments body.paymentMethodId':
+    'payment-methods.e2e-spec.ts',
   // «la clínica B no puede usar la política de A para su propio paciente (409)».
   'POST /patients/:patientId/data-consents body.policyVersionId':
     'data-consents.e2e-spec.ts',

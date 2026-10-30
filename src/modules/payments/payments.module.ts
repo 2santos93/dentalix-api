@@ -1,5 +1,7 @@
 import { RecordOpeningBalancePaymentUseCase } from './application/use-cases/record-opening-balance-payment.use-case';
 import { Module } from '@nestjs/common';
+import { PaymentMethodsModule } from '../payment-methods/payment-methods.module';
+import { PaymentMethodGate } from './application/payment-method-gate';
 import { DocumentTypeNamesModule } from '../document-type-names/document-type-names.module';
 import { JwtModule } from '@nestjs/jwt';
 import { RecordPaymentUseCase } from './application/use-cases/record-payment.use-case';
@@ -56,6 +58,8 @@ import { ReplacePaymentAllocationsUseCase } from './application/use-cases/replac
     CollectionsModule,
     // DX-051: reparto de abonos entre ítems tras cada escritura.
     PaymentAllocationsModule,
+    // DX-377: el catálogo de medios de pago de la clínica.
+    PaymentMethodsModule,
   ],
   controllers: [
     PaymentsController,
@@ -67,6 +71,7 @@ import { ReplacePaymentAllocationsUseCase } from './application/use-cases/replac
     RecordPaymentUseCase,
     // DX-262: abono contra el saldo migrado.
     RecordOpeningBalancePaymentUseCase,
+    PaymentMethodGate,
     ListPaymentsUseCase,
     VoidPaymentUseCase,
     GetPlanBalanceUseCase,

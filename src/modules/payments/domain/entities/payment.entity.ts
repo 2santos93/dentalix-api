@@ -27,6 +27,21 @@ export interface Payment {
   /** Día civil (YYYY-MM-DD) de `paidAt` en la zona de la sede del abono (DX-097). */
   paidOn: string;
   method: PaymentMethod | null;
+  /**
+   * DX-377: medio de pago del catálogo de la clínica y su nombre; `null` en un
+   * abono sin método (o de una réplica anterior sin enlazar).
+   */
+  paymentMethodId: string | null;
+  paymentMethodName: string | null;
+  /** DX-377: la referencia del pago tal como la dio el pagador. */
+  reference: string | null;
+  /** DX-377: motivo con que se confirmó una referencia repetida. */
+  duplicateReferenceReason: string | null;
+  /**
+   * DX-377: solo en la respuesta del alta: los abonos con la misma referencia
+   * y medio que se confirmaron con motivo (para la auditoría).
+   */
+  duplicateReferenceOf?: string[];
   notes: string | null;
   createdById: string | null;
   createdAt: Date;

@@ -59,6 +59,9 @@ export interface ReceiptSnapshotInput {
     amount: number;
     currency: string;
     method: PaymentMethod | null;
+    /** DX-377: nombre del medio de pago y referencia (null = sin ellos). */
+    paymentMethodName?: string | null;
+    reference?: string | null;
     paidAt: Date;
     paidOn: string;
   };
@@ -106,6 +109,9 @@ export interface ReceiptSnapshot {
     amount: number;
     currency: string;
     method: PaymentMethod | null;
+    /** DX-377: ausentes en los recibos anteriores. */
+    paymentMethodName?: string | null;
+    reference?: string | null;
     paidAt: string;
     paidOn: string;
   };
@@ -159,6 +165,8 @@ export function buildReceiptSnapshot(
       amount: input.payment.amount,
       currency: input.payment.currency,
       method: input.payment.method,
+      paymentMethodName: input.payment.paymentMethodName ?? null,
+      reference: input.payment.reference ?? null,
       paidAt: input.payment.paidAt.toISOString(),
       paidOn: input.payment.paidOn,
     },

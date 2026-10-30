@@ -1,3 +1,5 @@
+import { PaymentMethodGate } from '../payment-method-gate';
+import type { PaymentMethodRepository } from '../../../payment-methods/domain/ports/payment-method-repository.port';
 import { MissingExchangeRateError } from '../../../exchange/domain/missing-exchange-rate.error';
 import {
   BadRequestException,
@@ -135,6 +137,13 @@ describe('RecordPaymentUseCase', () => {
       makeWhitelist(),
       receiptBalance as unknown as ReceiptPlanBalanceCalculator,
       convert as unknown as ConvertAmountUseCase,
+      new PaymentMethodGate(
+        {
+          findById: () => Promise.resolve(null),
+          findByLegacyMethod: () => Promise.resolve(null),
+        } as unknown as PaymentMethodRepository,
+        repo,
+      ),
     );
     return { repo, fakeGetPlan, uc, receiptBalance, convert };
   }
