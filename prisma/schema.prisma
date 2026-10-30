@@ -3205,17 +3205,23 @@ model Job {
   //     por clínica (ON CONFLICT en PrismaJobRepository.insert).
   //   jobs_tenantId_idx ("tenantId") WHERE "tenantId" IS NOT NULL -> lado
   //     hijo de la FK a tenants.
+  //   jobs_active_name_idx ("name") WHERE "state" IN ('PENDING', 'RUNNING')
+  //     -> DX-380: ¿sigue en curso el tick anterior de una tarea singleton?
   @@map("jobs")
 }
 
 /// DX-085: próximo tick de cada tarea programada (cron, UTC). Un solo worker
 /// la bloquea por tick (SKIP LOCKED) y encola su trabajo.
 model JobSchedule {
-  name      String    @id
-  cron      String
-  nextRunAt DateTime
-  lastRunAt DateTime?
-  updatedAt DateTime  @default(dbgenerated("timezone('utc'::text, now())"))
+  name          String    @id
+  cron          String
+  nextRunAt     DateTime
+  lastRunAt     DateTime?
+  updatedAt     DateTime  @default(dbgenerated("timezone('utc'::text, now())"))
+  /// DX-380 (OPS-046): ticks que una tarea `singleton` saltó porque el
+  /// trabajo del anterior seguía en PENDING o RUNNING, y el último saltado.
+  skippedCount  Int       @default(0)
+  lastSkippedAt DateTime?
 
   @@map("job_schedules")
 }

@@ -1,0 +1,11 @@
+-- DX-380 (OPS-046): ¿sigue en curso el trabajo de un tick anterior de una
+-- tarea `singleton`? `fireDueSchedules` lo pregunta por nombre del trabajo
+-- entre los PENDING y RUNNING. Parcial: solo los vivos (los terminados de 14
+-- días no entran), así que el índice es pequeño. Las réplicas anteriores no lo
+-- usan.
+-- CONCURRENTLY (DB-025): no bloquea las escrituras de la cola; por eso es la
+-- ÚNICA sentencia del fichero (Prisma la ejecuta fuera de transacción). Si
+-- falla deja un índice INVALID: DROP INDEX CONCURRENTLY "jobs_active_name_idx",
+-- `prisma migrate resolve --rolled-back 20261104120100_dx380_jobs_active_name_idx`
+-- y reintentar.
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "jobs_active_name_idx" ON "jobs" ("name") WHERE "state" IN ('PENDING', 'RUNNING');

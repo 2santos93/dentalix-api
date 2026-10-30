@@ -25,6 +25,11 @@ export interface ScheduleStatus {
   delayMs: number;
   /** Más de 2 periodos sin correr, o nunca sincronizada. */
   overdue: boolean;
+  /** DX-380: no encola un tick mientras el anterior siga en curso. */
+  singleton: boolean;
+  /** DX-380: ticks saltados por `singleton` (0 sin fila). */
+  skippedCount: number;
+  lastSkippedAt: Date | null;
 }
 
 export interface JobsStats {
@@ -77,6 +82,13 @@ export class JobsAdmin {
       ...this.registry.schedules().map((s) => [s.name, s.cron] as const),
       ...snap.schedules.map((s) => [s.name, s.cron] as const),
     ]);
+    // `singleton` es de la definición de este proceso (no se guarda en la BD).
+    const singletons = new Set(
+      this.registry
+        .schedules()
+        .filter((s) => s.singleton)
+        .map((s) => s.name),
+    );
     const schedules = [...crons]
       .sort(([a], [b]) => (a < b ? -1 : 1))
       .map(([name, cron]): ScheduleStatus => {
@@ -97,6 +109,9 @@ export class JobsAdmin {
             periodMs,
             delayMs: 0,
             overdue: true,
+            singleton: singletons.has(name),
+            skippedCount: 0,
+            lastSkippedAt: null,
           };
         }
         const delayMs = Math.max(0, now - row.nextRunAt.getTime());
@@ -108,6 +123,9 @@ export class JobsAdmin {
           periodMs,
           delayMs,
           overdue: delayMs > SCHEDULE_OVERDUE_PERIODS * periodMs,
+          singleton: singletons.has(name),
+          skippedCount: row.skippedCount,
+          lastSkippedAt: row.lastSkippedAt,
         };
       });
     const alive = snap.workers.filter((w) => w.alive);

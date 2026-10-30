@@ -52,6 +52,14 @@ export interface ScheduleDefinition {
   /** Trabajo registrado que encola en cada tick. */
   job: string;
   payload?: JobPayload;
+  /**
+   * DX-380 (OPS-046): una sola ejecución a la vez. Si el trabajo de un tick
+   * anterior de ESTA tarea sigue en PENDING o RUNNING, el tick se salta (se
+   * reprograma al siguiente sin encolar nada), queda en el log
+   * (`jobs.schedule_skipped`) y en `stats`. Para los barridos, que recorren
+   * todas las clínicas y pueden tardar más que su periodo. Default: false.
+   */
+  singleton?: boolean;
 }
 
 export interface EnqueueOptions {
@@ -162,6 +170,10 @@ export interface QueueSnapshot {
     cron: string;
     lastRunAt: Date | null;
     nextRunAt: Date;
+    /** DX-380: ticks saltados por `singleton` desde que existe la tarea. */
+    skippedCount: number;
+    /** DX-380: el último tick saltado, o null. */
+    lastSkippedAt: Date | null;
   }[];
 }
 

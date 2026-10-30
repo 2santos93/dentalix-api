@@ -311,7 +311,7 @@ export class JobWorker implements OnApplicationBootstrap, OnModuleDestroy {
       for (const s of pending) this.synced.add(s.name);
     }
     if (schedules.length === 0) return;
-    const fired = await this.repo.fireDueSchedules(
+    const { fired, skipped } = await this.repo.fireDueSchedules(
       schedules.map((s) => {
         const cron = parseCron(s.cron);
         return {
@@ -321,10 +321,15 @@ export class JobWorker implements OnApplicationBootstrap, OnModuleDestroy {
           payload: s.payload,
           maxAttempts:
             this.registry.get(s.job)?.maxAttempts ?? this.config.maxAttempts,
+          singleton: s.singleton,
           nextRunAfter: (now: Date) => cron.next(now),
         };
       }),
     );
+    for (const schedule of skipped) {
+      // OPS-046: el tick anterior sigue en curso; este no se encola.
+      this.logger.log({ event: 'jobs.schedule_skipped', schedule });
+    }
     if (fired > 0) {
       this.logger.log({ event: 'jobs.schedules_fired', count: fired });
     }

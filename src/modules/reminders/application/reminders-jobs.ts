@@ -37,6 +37,8 @@ export class RemindersJobs implements OnModuleInit {
       name: PLAN_REMINDERS_SCHEDULE,
       cron: '*/5 * * * *',
       job: PLAN_REMINDERS_JOB,
+      // DX-380 (OPS-046): sin solapar un tick con el anterior.
+      singleton: true,
     });
   }
 }

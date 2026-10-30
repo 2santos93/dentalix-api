@@ -61,6 +61,8 @@ export class PaymentAllocationJobs implements OnModuleInit {
       name: ALLOCATIONS_SWEEP_SCHEDULE,
       cron: ALLOCATIONS_SWEEP_CRON,
       job: ALLOCATIONS_SWEEP_JOB,
+      // DX-380 (OPS-046): sin solapar un tick con el anterior.
+      singleton: true,
     });
   }
 
