@@ -30,6 +30,7 @@ const LOW_LIMITS: RateLimitConfig = {
   'public-files': { limit: 2, ttlMs: 60_000 },
   'direct-upload': { limit: 2, ttlMs: 60_000 },
   'patient-import': { limit: 2, ttlMs: 60_000 },
+  'exchange-rates': { limit: 2, ttlMs: 60_000 },
   anamnesis: { limit: 4, ttlMs: 60_000 },
   'anamnesis-token': { limit: 2, ttlMs: 60_000 },
 };
@@ -294,6 +295,31 @@ describe('Rate limiting (e2e)', () => {
       }
       expectTooMany(await ask('dr-1', 'clinica-1'));
       expect((await ask('dr-2', 'clinica-1')).status).toBe(401);
+    });
+
+    it('SEC-054: leer tasas, un balde por clínica+usuario para rates y convert', async () => {
+      const bearer = (sub: string, tenantId: string): string =>
+        'Bearer ' +
+        [
+          Buffer.from('{"alg":"HS256","typ":"JWT"}').toString('base64url'),
+          Buffer.from(JSON.stringify({ sub, tenantId })).toString('base64url'),
+          'firma-invalida',
+        ].join('.');
+      const rates = (sub: string, tenantId: string) =>
+        request(app.getHttpServer())
+          .get('/api/v1/exchange/rates?date=2026-10-01')
+          .set('Authorization', bearer(sub, tenantId));
+      const convert = (sub: string, tenantId: string) =>
+        request(app.getHttpServer())
+          .get(
+            '/api/v1/exchange/convert?amount=1&from=USD&to=COP&date=2026-10-01',
+          )
+          .set('Authorization', bearer(sub, tenantId));
+      expect((await rates('rx-1', 'clinica-1')).status).toBe(401);
+      expect((await convert('rx-1', 'clinica-1')).status).toBe(401);
+      expectTooMany(await rates('rx-1', 'clinica-1'));
+      expectTooMany(await convert('rx-1', 'clinica-1'));
+      expect((await rates('rx-2', 'clinica-1')).status).toBe(401);
     });
 
     it('health nunca se limita (@SkipThrottle)', async () => {

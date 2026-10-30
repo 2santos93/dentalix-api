@@ -110,6 +110,12 @@ function throttlers(
       generateKey: (context, _ip, name) =>
         staffActorRateLimitKey(name, request(context).headers.authorization),
     },
+    {
+      // SEC-054: leer tasas, un balde por clínica + usuario para las dos rutas.
+      ...strict('exchange-rates'),
+      generateKey: (context, _ip, name) =>
+        staffActorRateLimitKey(name, request(context).headers.authorization),
+    },
   ];
 }
 
