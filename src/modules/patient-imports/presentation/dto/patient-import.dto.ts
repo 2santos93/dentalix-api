@@ -253,13 +253,15 @@ export class ImportPreviewRowDto {
 }
 
 export class BalanceCurrencyTotalDto {
-  @ApiProperty({ example: 'COP' }) currency!: string;
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
+  currency!: string;
   @ApiProperty({ description: 'Filas del archivo' }) rows!: number;
   @ApiProperty({ example: 1500000.5 }) amount!: number;
 }
 
 export class ImportedBalanceTotalDto {
-  @ApiProperty({ example: 'COP' }) currency!: string;
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
+  currency!: string;
   @ApiProperty({ description: 'Saldos migrados vivos' }) count!: number;
   @ApiProperty({ example: 1500000.5 }) amount!: number;
 }

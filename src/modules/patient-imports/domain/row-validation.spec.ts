@@ -874,7 +874,7 @@ describe('CSV de la plantilla y del informe', () => {
     expect(rows[0].data).toMatchObject({
       docType: 'NATIONAL_ID',
       birthDate: '1988-04-15',
-      phone: '+573100000001',
+      phone: '+0000000001',
     });
   });
 });

@@ -34,12 +34,12 @@ export function templateCsv(): string {
     apellidos: 'Ejemplo Gómez',
     fecha_nacimiento: '15/04/1988',
     sexo: 'F',
-    telefono: '310 000 0001',
+    telefono: '+00 000 000 0001',
     email: 'ana.ejemplo@example.com',
-    direccion: 'Calle 1 # 2-3',
+    direccion: 'Dirección de ejemplo 123',
     ocupacion: 'Docente',
     contacto_emergencia: 'Luis Ejemplo',
-    telefono_emergencia: '310 000 0002',
+    telefono_emergencia: '+00 000 000 0002',
     notas: 'Fila de ejemplo: bórrala antes de importar',
   };
   const example2: Record<string, string> = {
