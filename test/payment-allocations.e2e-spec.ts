@@ -544,6 +544,7 @@ describe('Imputación automática de abonos (DX-051, e2e)', () => {
       paid: 130,
       balance: 20,
       paymentsCount: 1,
+      paymentsWithoutRate: [],
       allocated: 130,
       unallocated: 0,
       unconvertedPaymentsCount: 0,
