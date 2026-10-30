@@ -4593,11 +4593,13 @@ automática). Ahora:
   CHECK más permisivo, NOT VALID + VALIDATE, `lock_timeout` 5 s.
 - **Aviso del formulario**: `GET /payments/rate-backlog/day?date=&currency=`
   (solo ADMIN, 403 en español al resto) da `{ date, currency, count,
-  providerRateSaved }`: cuántos abonos vivos de ese día (en su sede) esperan
-  su tasa y están en esa moneda o van a un plan (o saldo migrado) en esa
-  moneda, y si el proveedor ya tiene tasa de ese día. La web lo usa para
-  decir, al registrar una tasa anterior a «manual desde», a qué abonos se
-  aplicará o que no se usará.
+  providerRateSaved, otherRatesMissing }`: cuántos abonos vivos de ese día
+  (en su sede) esperan su tasa, están en esa moneda o van a un plan (o saldo
+  migrado) en esa moneda y tienen la otra moneda cubierta (USD o ya con tasa
+  manual ese día); cuántos necesitan además la tasa manual de otra moneda y
+  cuál (`otherRatesMissing`); y si el proveedor ya tiene tasa de ese día. La
+  web lo usa para decir, al registrar una tasa anterior a «manual desde», a
+  qué abonos se aplicará, qué otra tasa falta o que no se usará.
 - **Fuera**: la tasa de respaldo de N días (DX-384).
 
 ## Despliegue: roles de la BD (DX-113)
