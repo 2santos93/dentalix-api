@@ -1,3 +1,4 @@
+import { seedInitialPaymentMethods } from '../../../payment-methods/infrastructure/prisma-payment-method.repository';
 import { Injectable, Logger } from '@nestjs/common';
 import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
 import { clinicRegisteredAuditEvent } from '../../domain/registration-audit';
@@ -125,6 +126,8 @@ export class PrismaAuthRepository implements AuthRepository {
           tenantId: tenant.id,
         })),
       });
+      // DX-377: y con sus 4 medios de pago iniciales (uno por método antiguo).
+      await seedInitialPaymentMethods(tx, tenant.id);
       // DX-359: el alta de la clínica y su ADMIN, auditada en esta misma
       // transacción (el GUC de tenant ya es el de la clínica nueva).
       await writeAuditEvent(

@@ -8,7 +8,13 @@ import {
   IsOptional,
   IsPositive,
   IsString,
+  IsUUID,
+  MaxLength,
 } from 'class-validator';
+import {
+  DUPLICATE_REFERENCE_REASON_MAX,
+  REFERENCE_MAX,
+} from '../../../payment-methods/domain/payment-method-rules';
 import { PaymentMethod } from '@prisma/client';
 import {
   IsMoney,
@@ -61,10 +67,48 @@ export class RecordPaymentDto {
   @IsDateString()
   paidAt!: string;
 
-  @ApiPropertyOptional({ enum: PaymentMethod })
+  @ApiPropertyOptional({
+    enum: PaymentMethod,
+    description:
+      'Método antiguo (clientes anteriores a DX-377). Con `paymentMethodId` se ' +
+      'ignora: el método sale del tipo base del medio. Solo con él, el abono ' +
+      'se enlaza al medio inicial de ese método.',
+  })
   @IsOptional()
   @IsEnum(PaymentMethod)
   method?: PaymentMethod;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'Medio de pago ACTIVO del catálogo de la clínica (GET /payment-methods).',
+  })
+  @IsOptional()
+  @IsUUID()
+  paymentMethodId?: string;
+
+  @ApiPropertyOptional({
+    maxLength: REFERENCE_MAX,
+    description:
+      'Referencia del pago. Obligatoria si el medio la pide (400). Se compara ' +
+      'sin espacios y en mayúsculas: si el mismo medio ya la tiene en un abono ' +
+      'vivo de ±90 días, 409 `PAYMENT_REFERENCE_DUPLICATE` con `matches`.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(REFERENCE_MAX)
+  reference?: string;
+
+  @ApiPropertyOptional({
+    maxLength: DUPLICATE_REFERENCE_REASON_MAX,
+    description:
+      'Motivo para confirmar una referencia repetida tras el 409. Se guarda en ' +
+      'el abono; la auditoría registra la confirmación y los abonos repetidos.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(DUPLICATE_REFERENCE_REASON_MAX)
+  duplicateReferenceReason?: string;
 
   @ApiPropertyOptional()
   @IsOptional()

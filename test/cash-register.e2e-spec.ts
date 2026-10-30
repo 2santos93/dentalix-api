@@ -419,6 +419,9 @@ describe('Caja — GET /payments (e2e)', () => {
       amount: 100000,
       currency: 'COP',
       method: 'CASH',
+      // DX-377: el medio inicial de su método y sin referencia.
+      paymentMethod: { id: expect.any(String) as string, name: 'Efectivo' },
+      reference: null,
       notes: null,
       location: { id: sedePrincipal, name: 'Sede principal' },
       patient: { id: patientAna, fullName: 'Ana Gómez' },
@@ -512,6 +515,15 @@ describe('Caja — GET /payments (e2e)', () => {
       byCurrency: [{ currency: 'COP', total: 120000.5, count: 2 }],
       byMethod: [
         { method: 'CASH', currency: 'COP', total: 120000.5, count: 2 },
+      ],
+      byPaymentMethod: [
+        {
+          paymentMethodId: expect.any(String) as string,
+          name: 'Efectivo',
+          currency: 'COP',
+          total: 120000.5,
+          count: 2,
+        },
       ],
     });
   });

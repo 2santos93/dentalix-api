@@ -403,6 +403,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /appointment-types': EVERY_ROLE,
   'POST /appointment-types': ADMIN_ONLY,
   'PATCH /appointment-types/:id': ADMIN_ONLY,
+  // DX-377: medios de pago; leerlos quien cobra, escribirlos solo ADMIN.
+  'GET /payment-methods': BILLING,
+  'POST /payment-methods': ADMIN_ONLY,
+  'PATCH /payment-methods/:id': ADMIN_ONLY,
   'DELETE /appointment-types/:id': ADMIN_ONLY,
   'GET /payers': EVERY_ROLE,
   'POST /payers': roles('ADMIN', 'RECEPTION'),

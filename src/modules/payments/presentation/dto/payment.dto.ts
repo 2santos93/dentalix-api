@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { PaymentMethod } from '@prisma/client';
 import {
   PAYMENT_EXCHANGE_RATE_STATUSES,
@@ -57,8 +57,47 @@ export class PaymentDto {
   })
   paidOn!: string;
 
-  @ApiProperty({ enum: PaymentMethod, nullable: true })
+  @ApiProperty({
+    enum: PaymentMethod,
+    nullable: true,
+    description:
+      'Método antiguo, derivado del tipo base del medio (DX-377: DIGITAL se ' +
+      'guarda como TRANSFER). Se mantiene para informes y réplicas anteriores.',
+  })
   method!: PaymentMethod | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description: 'Medio de pago del catálogo de la clínica (DX-377).',
+  })
+  paymentMethodId!: string | null;
+
+  @ApiProperty({ type: String, nullable: true, example: 'Pago móvil' })
+  paymentMethodName!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'Referencia del pago tal como la dio el pagador (DX-377).',
+  })
+  reference!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'Motivo con que se confirmó una referencia repetida (DX-377); null si no se repetía.',
+  })
+  duplicateReferenceReason!: string | null;
+
+  @ApiPropertyOptional({
+    type: [String],
+    description:
+      'Solo en la respuesta del alta: ids de los abonos con la misma referencia y medio que se confirmaron con motivo.',
+  })
+  duplicateReferenceOf?: string[];
 
   @ApiProperty({ type: String, nullable: true })
   notes!: string | null;

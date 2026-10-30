@@ -32,6 +32,7 @@ import { ConvertAmountUseCase } from '../../../exchange/application/use-cases/co
 import { errorName } from '../payment-in-plan-currency';
 import { freezePaymentRate, paymentBaseAmount } from '../payment-exchange-rate';
 import type { FrozenExchangeRate } from '../../domain/payment-exchange-rate';
+import { PaymentMethodGate } from '../payment-method-gate';
 
 // NOTE: deliberately NO `patientId`/`treatmentPlanId` field on the input
 // object itself (`treatmentPlanId` is a separate `execute()` argument,
@@ -46,6 +47,12 @@ export interface RecordPaymentInput {
    */
   paidAt: string | Date;
   method?: PaymentMethod;
+  /** DX-377: medio del catálogo de la clínica (gana a `method`). */
+  paymentMethodId?: string;
+  /** DX-377: referencia del pago; obligatoria si el medio la pide. */
+  reference?: string;
+  /** DX-377: motivo para confirmar una referencia repetida (409 sin él). */
+  duplicateReferenceReason?: string;
   notes?: string;
 }
 
@@ -126,6 +133,8 @@ export class RecordPaymentUseCase {
     private readonly receiptBalance: ReceiptPlanBalanceCalculator,
     // DX-051: la base del abono (en la moneda del plan) para la imputación.
     private readonly convertAmount: ConvertAmountUseCase,
+    // DX-377: medio del catálogo, referencia y aviso de referencia repetida.
+    private readonly paymentMethodGate: PaymentMethodGate,
   ) {}
 
   /**
@@ -187,6 +196,7 @@ export class RecordPaymentUseCase {
     if (!isPlanBillable(plan.status)) {
       throw new ConflictException(notBillableMessage(plan.status));
     }
+    const payMethod = await this.paymentMethodGate.resolve(input, paidAt);
 
     // DX-375, DX-136 y DX-051 (R4): fuera de la transacción del abono (la
     // tasa puede pedir un proveedor externo), UNA cotización con la fuente de
@@ -227,7 +237,11 @@ export class RecordPaymentUseCase {
       amount: input.amount,
       currency,
       paidAt,
-      method: input.method,
+      method: payMethod.method,
+      paymentMethodId: payMethod.paymentMethodId,
+      reference: payMethod.reference,
+      referenceNormalized: payMethod.referenceNormalized,
+      duplicateReferenceReason: payMethod.duplicateReferenceReason,
       notes: input.notes,
       createdById,
       idempotencyKey: key,
@@ -237,7 +251,8 @@ export class RecordPaymentUseCase {
       frozenRate,
     };
 
-    return this.repo.create(repoInput);
+    const payment = await this.repo.create(repoInput);
+    return { ...payment, duplicateReferenceOf: payMethod.duplicateReferenceOf };
   }
 
   /** La tasa que congela el abono (DX-375), o `null` sin tasa o si algo falla. */

@@ -142,6 +142,7 @@ export class PaymentsController {
     patient: { lookup: 'treatmentPlan', param: 'id' },
     // DX-136: el recibo numerado nace con el abono (misma transacción).
     reason: 'RECEIPT_ISSUED',
+    paymentReference: true,
   })
   @Post('treatment-plans/:id/payments')
   @ApiCreatedResponse({
@@ -151,7 +152,13 @@ export class PaymentsController {
   })
   @ApiConflictResponse({
     description:
-      'El plan está rechazado o cancelado: no admite abonos (DX-109). Un plan completado sí.',
+      'El plan está rechazado o cancelado: no admite abonos (DX-109). Un plan completado sí. ' +
+      'DX-377: `code: PAYMENT_REFERENCE_DUPLICATE` si la referencia y el medio ya están en otro ' +
+      'abono vivo de ±90 días (`matches`); se confirma repitiendo con `duplicateReferenceReason`.',
+  })
+  @ApiBadRequestResponse({
+    description:
+      'DX-377: el medio pide referencia y no llegó, o el medio no es de la clínica o está desactivado.',
   })
   @ApiUnprocessableEntityResponse({
     description:
@@ -177,6 +184,9 @@ export class PaymentsController {
         currency: dto.currency,
         paidAt: dto.paidAt,
         method: dto.method,
+        paymentMethodId: dto.paymentMethodId,
+        reference: dto.reference,
+        duplicateReferenceReason: dto.duplicateReferenceReason,
         notes: dto.notes,
       },
       req.user.sub,
@@ -198,6 +208,7 @@ export class PaymentsController {
     resourceId: { response: 'id' },
     patient: { lookup: 'openingBalance', param: 'id' },
     reason: 'RECEIPT_ISSUED',
+    paymentReference: true,
   })
   @Post('opening-balances/:id/payments')
   @ApiOperation({
@@ -228,6 +239,9 @@ export class PaymentsController {
         currency: dto.currency,
         paidAt: dto.paidAt,
         method: dto.method,
+        paymentMethodId: dto.paymentMethodId,
+        reference: dto.reference,
+        duplicateReferenceReason: dto.duplicateReferenceReason,
         notes: dto.notes,
       },
       req.user.sub,

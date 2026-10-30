@@ -81,6 +81,9 @@ describe('buildReceiptSnapshot (DX-136)', () => {
         amount: 150000,
         currency: 'COP',
         method: 'CASH',
+        // DX-377: sin medio ni referencia en la entrada, nulos.
+        paymentMethodName: null,
+        reference: null,
         paidAt: '2026-10-17T17:00:00.000Z',
         paidOn: '2026-10-17',
       },

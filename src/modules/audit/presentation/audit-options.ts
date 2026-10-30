@@ -65,4 +65,10 @@ export interface AuditOptions {
    * después (ids e importes; nada del paciente).
    */
   allocation?: true;
+  /**
+   * DX-377: alta de un abono. Si la respuesta trae una referencia repetida
+   * confirmada, la metadata guarda la confirmación y los ids de los abonos
+   * repetidos; nunca la referencia ni el motivo.
+   */
+  paymentReference?: true;
 }

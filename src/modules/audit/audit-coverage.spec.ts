@@ -69,6 +69,7 @@ import {
   ScheduleRosterController,
 } from '../provider-schedule/presentation/provider-schedule.controller';
 import { ExchangeSettingsController } from '../exchange/presentation/exchange-settings.controller';
+import { PaymentMethodsController } from '../payment-methods/presentation/payment-methods.controller';
 import { AppModule } from '../../app.module';
 import {
   collectControllers,
@@ -593,6 +594,7 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: RES,
     patient: { lookup: 'openingBalance', param: 'id' },
     reason: 'RECEIPT_ISSUED',
+    paymentReference: true,
   },
   // DX-262: hoja de saldos del lote (dry-run, quitarla y su informe).
   'POST /patient-imports/:id/balances': {
@@ -768,6 +770,8 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: RES,
     patient: plan(),
     reason: 'RECEIPT_ISSUED',
+    // DX-377: confirmación de referencia repetida (ids, nunca el motivo).
+    paymentReference: true,
   },
   'GET /treatment-plans/:id/payments': {
     action: 'VIEW',
@@ -1180,6 +1184,17 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'EXCHANGE_RATE',
     resourceId: { param: 'id' },
   },
+  // DX-377: alta y cambio de un medio de pago de la clínica (solo ADMIN).
+  'POST /payment-methods': {
+    action: 'CREATE',
+    resource: 'PAYMENT_METHOD',
+    resourceId: RES,
+  },
+  'PATCH /payment-methods/:id': {
+    action: 'UPDATE',
+    resource: 'PAYMENT_METHOD',
+    resourceId: { param: 'id' },
+  },
   // SEC-009: verificar (cambia el ruteo) y eliminar un dominio personalizado.
   'POST /domains/:id/verify': {
     action: 'UPDATE',
@@ -1439,6 +1454,7 @@ const CONTROLLERS: Type[] = [
   ProviderScheduleController,
   ScheduleRosterController,
   ExchangeSettingsController,
+  PaymentMethodsController,
 ];
 
 function joinPath(...parts: string[]): string {

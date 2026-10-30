@@ -41,6 +41,8 @@ function fakeRow(
     amount: 100,
     currency: 'COP',
     method: PaymentMethod.CASH,
+    paymentMethod: null,
+    reference: null,
     notes: null,
     location: { id: 'loc-1', name: 'Sede principal' },
     patient: { id: 'pat-1', fullName: 'Ana Gómez' },
@@ -247,11 +249,100 @@ describe('ListCashPaymentsUseCase', () => {
     ]);
   });
 
+  it('DX-377: totaliza por medio y moneda; dos medios del mismo método suman en el método', async () => {
+    const efectivo = { id: 'pm-cash', name: 'Efectivo' };
+    const movil = { id: 'pm-mobile', name: 'Pago móvil' };
+    const transferencia = { id: 'pm-transfer', name: 'Transferencia' };
+    const repo = new SpyPaymentRepository({
+      items: [],
+      total: 5,
+      scopeLocation: null,
+      groups: [
+        {
+          currency: 'COP',
+          method: PaymentMethod.TRANSFER,
+          paymentMethod: movil,
+          total: 100.1,
+          count: 2,
+        },
+        {
+          currency: 'COP',
+          method: PaymentMethod.TRANSFER,
+          paymentMethod: transferencia,
+          total: 0.2,
+          count: 1,
+        },
+        {
+          currency: 'USD',
+          method: PaymentMethod.CASH,
+          paymentMethod: efectivo,
+          total: 10,
+          count: 1,
+        },
+        {
+          currency: 'COP',
+          method: null,
+          paymentMethod: null,
+          total: 5,
+          count: 1,
+        },
+      ],
+    });
+
+    const { summary } = await useCaseFor(repo).execute(RANGE);
+
+    expect(summary.byMethod).toEqual([
+      { method: PaymentMethod.CASH, currency: 'USD', total: 10, count: 1 },
+      {
+        method: PaymentMethod.TRANSFER,
+        currency: 'COP',
+        total: 100.3,
+        count: 3,
+      },
+      { method: null, currency: 'COP', total: 5, count: 1 },
+    ]);
+    expect(summary.byPaymentMethod).toEqual([
+      {
+        paymentMethodId: 'pm-cash',
+        name: 'Efectivo',
+        currency: 'USD',
+        total: 10,
+        count: 1,
+      },
+      {
+        paymentMethodId: 'pm-mobile',
+        name: 'Pago móvil',
+        currency: 'COP',
+        total: 100.1,
+        count: 2,
+      },
+      {
+        paymentMethodId: 'pm-transfer',
+        name: 'Transferencia',
+        currency: 'COP',
+        total: 0.2,
+        count: 1,
+      },
+      {
+        paymentMethodId: null,
+        name: null,
+        currency: 'COP',
+        total: 5,
+        count: 1,
+      },
+    ]);
+  });
+
   it('un período sin pagos devuelve un resumen vacío, no un error', async () => {
     const repo = new SpyPaymentRepository();
     const out = await useCaseFor(repo).execute(RANGE);
 
-    expect(out.summary).toEqual({ count: 0, byCurrency: [], byMethod: [] });
+    expect(out.summary).toEqual({
+      count: 0,
+      byCurrency: [],
+      byMethod: [],
+      byPaymentMethod: [],
+    });
     expect(out.items).toEqual([]);
   });
 
