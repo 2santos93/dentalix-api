@@ -1174,6 +1174,12 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'EXCHANGE_RATE',
     resourceId: RES,
   },
+  // DX-375: corregir una tasa manual sin usar (solo ADMIN); el id de la ruta.
+  'PUT /exchange/manual-rates/:id': {
+    action: 'UPDATE',
+    resource: 'EXCHANGE_RATE',
+    resourceId: { param: 'id' },
+  },
   // SEC-009: verificar (cambia el ruteo) y eliminar un dominio personalizado.
   'POST /domains/:id/verify': {
     action: 'UPDATE',

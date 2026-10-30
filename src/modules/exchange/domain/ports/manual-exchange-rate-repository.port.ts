@@ -27,6 +27,22 @@ export class ManualExchangeRateAuthorError extends Error {
   }
 }
 
+/** DX-375: no hay esa tasa en la clínica del contexto. */
+export class ManualExchangeRateNotFoundError extends Error {
+  constructor() {
+    super('manual exchange rate not found');
+    this.name = 'ManualExchangeRateNotFoundError';
+  }
+}
+
+/** DX-375: algún abono congeló la tasa; no se cambia. */
+export class ManualExchangeRateInUseError extends Error {
+  constructor() {
+    super('manual exchange rate already used by a payment');
+    this.name = 'ManualExchangeRateInUseError';
+  }
+}
+
 /**
  * Tasas manuales de la clínica del contexto (`manual_exchange_rates`, RLS
  * FORCE): toda lectura y escritura va con `runWithTenant`.
@@ -41,6 +57,13 @@ export interface ManualExchangeRateRepository {
    * moneda y `ManualExchangeRateAuthorError` si el autor no es miembro vivo.
    */
   create(input: NewManualExchangeRate): Promise<ManualExchangeRate>;
+  /**
+   * DX-375: cambia la tasa (solo `rate`; el día y la moneda no). Bloquea la
+   * fila FOR UPDATE y comprueba en la misma transacción que ningún abono la
+   * congeló (el alta de un abono la toma FOR SHARE). Lanza
+   * `ManualExchangeRateNotFoundError` o `ManualExchangeRateInUseError`.
+   */
+  correct(id: string, rate: number): Promise<ManualExchangeRate>;
   /** ¿Es `code` una moneda de `currencies`? */
   isKnownCurrency(code: string): Promise<boolean>;
   /**

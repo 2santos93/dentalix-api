@@ -53,6 +53,27 @@ export class RegisterManualExchangeRateDto {
   rate!: number;
 }
 
+/**
+ * DX-375: corrección de una tasa manual que ningún abono usó. Solo la tasa:
+ * el día y la moneda no cambian. El caso de uso vuelve a comprobarla.
+ */
+export class CorrectManualExchangeRateDto {
+  @ApiProperty({
+    example: 36.75,
+    exclusiveMinimum: true,
+    minimum: 0,
+    maximum: MANUAL_RATE_MAX,
+    description:
+      'La tasa corregida: unidades de la moneda por 1 USD, mayor que 0 y con hasta 8 decimales.',
+  })
+  @IsNumber({}, { message: MANUAL_RATE_MESSAGE })
+  @IsBoundedDecimal(
+    { maxDecimals: MANUAL_RATE_MAX_DECIMALS, maxAbs: MANUAL_RATE_MAX },
+    { message: MANUAL_RATE_MESSAGE },
+  )
+  rate!: number;
+}
+
 export class ListManualExchangeRatesQueryDto {
   @ApiProperty({
     required: false,
@@ -105,4 +126,12 @@ export class ManualExchangeRateDto {
 
   @ApiProperty({ type: String, format: 'date-time' })
   createdAt!: Date;
+
+  @ApiProperty({
+    example: false,
+    description:
+      'DX-375: algún abono ya congeló esta tasa (como moneda del abono o de ' +
+      'destino), así que no se puede cambiar (PUT responde 409).',
+  })
+  inUse!: boolean;
 }

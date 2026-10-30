@@ -16,4 +16,9 @@ export interface ManualExchangeRate {
     fullName: string | null;
   };
   createdAt: Date;
+  /**
+   * DX-375: algún abono vivo o anulado congeló esta tasa (como moneda del
+   * abono o de destino): ya no se puede cambiar.
+   */
+  inUse: boolean;
 }
