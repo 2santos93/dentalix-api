@@ -49,7 +49,7 @@ export class AgreementPayerDto {
   @ApiProperty({ format: 'uuid' })
   id!: string;
 
-  @ApiProperty({ example: 'Sanitas' })
+  @ApiProperty({ example: 'Aseguradora Ejemplo' })
   name!: string;
 
   @ApiProperty({
@@ -65,7 +65,7 @@ export class AgreementPriceListDto {
   @ApiProperty({ format: 'uuid' })
   id!: string;
 
-  @ApiProperty({ example: 'Lista Sanitas 2026' })
+  @ApiProperty({ example: 'Lista de precios 2026' })
   name!: string;
 
   @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
@@ -76,7 +76,7 @@ export class AgreementDto {
   @ApiProperty({ format: 'uuid' })
   id!: string;
 
-  @ApiProperty({ example: 'Convenio Sanitas' })
+  @ApiProperty({ example: 'Convenio de empresa' })
   name!: string;
 
   @ApiProperty({ type: AgreementPayerDto })
