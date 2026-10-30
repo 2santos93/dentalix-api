@@ -51,6 +51,11 @@
  *                  y con UN balde para las tres rutas (no uno por ruta):
  *                  cada lectura puede costar decenas de MB y segundos de CPU.
  *                  El tope de lecturas a la vez es aparte (`ImportReadSlotInterceptor`).
+ * - exchange-rates: leer tasas (`GET /exchange/rates` y `/exchange/convert`,
+ *                  SEC-054), por clínica + usuario y con UN balde para las
+ *                  dos rutas. Primera barrera; lo que de verdad protege la
+ *                  cuota del proveedor es el presupuesto de fallos de caché
+ *                  de `ProviderRatesGate` (`EXCHANGE_PROVIDER_*`).
  */
 export type RateLimitPolicy =
   | 'auth'
@@ -64,6 +69,7 @@ export type RateLimitPolicy =
   | 'public-files'
   | 'direct-upload'
   | 'patient-import'
+  | 'exchange-rates'
   | 'anamnesis'
   | 'anamnesis-token';
 
@@ -91,6 +97,7 @@ export const DEFAULT_RATE_LIMITS: RateLimitConfig = {
   'public-files': { limit: 300, ttlMs: MINUTE },
   'direct-upload': { limit: 60, ttlMs: MINUTE },
   'patient-import': { limit: 10, ttlMs: MINUTE },
+  'exchange-rates': { limit: 120, ttlMs: MINUTE },
   anamnesis: { limit: 20, ttlMs: MINUTE },
   'anamnesis-token': { limit: 10, ttlMs: MINUTE },
 };
@@ -130,6 +137,7 @@ export function loadRateLimitConfig(env: EnvReader): RateLimitConfig {
     'public-files': rule('public-files'),
     'direct-upload': rule('direct-upload'),
     'patient-import': rule('patient-import'),
+    'exchange-rates': rule('exchange-rates'),
     anamnesis: rule('anamnesis'),
     'anamnesis-token': rule('anamnesis-token'),
   };

@@ -521,7 +521,7 @@ describe('GET /reports/locations-comparison (DX-014)', () => {
       ],
       [
         { ...OCTOBER, currency: 'pesos' },
-        'currency debe ser un código de moneda de 3 letras (p. ej. COP).',
+        'currency debe ser un código ISO 4217 de 3 letras.',
       ],
     ])('%j → %s', async (query, message) => {
       const res = await get(

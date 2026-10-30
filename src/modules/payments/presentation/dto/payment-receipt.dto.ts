@@ -5,6 +5,7 @@ import {
   DOC_TYPE_LABEL_PROPERTY,
   DOC_TYPE_NAME_DESCRIPTION,
 } from '../../../patients/presentation/dto/doc-type-input';
+import { FrozenExchangeRateDto } from './frozen-exchange-rate.dto';
 
 // Respuesta de GET /payments/:id/receipt y POST /payments/:id/receipt/print
 // (DX-136). Solo documenta el contrato para Swagger: el caso de uso ya
@@ -79,7 +80,7 @@ export class ReceiptPaymentDto {
   @ApiProperty({ example: 150000 })
   amount!: number;
 
-  @ApiProperty({ example: 'COP' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({ enum: PaymentMethod, nullable: true })
@@ -115,7 +116,7 @@ export class ReceiptOpeningBalanceDto {
 }
 
 export class ReceiptPlanBalanceDto {
-  @ApiProperty({ example: 'COP' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({ example: 900000 })
@@ -192,6 +193,37 @@ export class ReceiptSnapshotDto {
   legalNotice!: string;
 }
 
+/**
+ * DX-376: la tasa del abono para el recibo. Sale de la tasa que congeló el
+ * abono (DX-375), no de la de hoy: reimprimir da siempre la misma.
+ */
+export class ReceiptExchangeRateDto {
+  @ApiProperty({
+    enum: ['FROZEN', 'MISSING', 'LEGACY'],
+    enumName: 'ReceiptExchangeRateStatus',
+    description:
+      'FROZEN: congeló su tasa (rate y equivalentAmount presentes). MISSING: «sin tasa» de su día. LEGACY: anterior a la tasa congelada y aún sin congelar.',
+  })
+  status!: 'FROZEN' | 'MISSING' | 'LEGACY';
+
+  @ApiProperty({
+    type: FrozenExchangeRateDto,
+    nullable: true,
+    description:
+      'La tasa congelada (moneda de destino, fuente y día); null si no la congeló.',
+  })
+  rate!: FrozenExchangeRateDto | null;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    example: 50,
+    description:
+      'El abono en la moneda de destino (`rate.currency`) con la tasa congelada, redondeado a céntimos; null sin tasa.',
+  })
+  equivalentAmount!: number | null;
+}
+
 export class PaymentReceiptDto {
   @ApiProperty({ format: 'uuid' })
   paymentId!: string;
@@ -225,6 +257,14 @@ export class PaymentReceiptDto {
 
   @ApiProperty({ type: String, nullable: true })
   voidReason!: string | null;
+
+  @ApiProperty({
+    type: ReceiptExchangeRateDto,
+    nullable: true,
+    description:
+      'DX-376: la tasa del abono y su equivalente en la moneda de su destino; null si el abono está en esa moneda.',
+  })
+  exchangeRate!: ReceiptExchangeRateDto | null;
 
   @ApiProperty({
     type: ReceiptSnapshotDto,

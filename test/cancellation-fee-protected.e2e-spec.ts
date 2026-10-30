@@ -20,6 +20,7 @@ import {
   REGIONAL_BOGOTA_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
+import { civilDateIn } from '../src/shared/time/civil-day';
 
 // SEC-050: el cargo por inasistencia o cancelación tardía (DX-291) ya no se
 // rebaja ni se anula desde el plan. Matriz rol × acción sobre el ítem del
@@ -431,6 +432,103 @@ describe('cargo por cancelación protegido en el plan (SEC-050)', () => {
         CANCELLATION_FEE_MESSAGES.voidPaid,
       );
       expect((await itemRow(fee.itemId)).deletedAt).toBeNull();
+    });
+
+    // DX-382 (BE-046): «ya cobrado» se compara en la moneda del plan, con la
+    // base de imputación de cada abono (DX-051/DX-375), no con la suma bruta
+    // de importes en monedas mezcladas. Tasa del día: 1 USD = 4.000 COP (sin
+    // EUR: un abono en EUR se guarda «sin tasa» y sin base).
+    describe('en la moneda del plan (DX-382)', () => {
+      const today = civilDateIn(new Date(), 'America/Bogota');
+
+      /** Cargos de un paciente nuevo (comparten el plan COP) y un abono. */
+      async function feesPaidWith(
+        fees: number,
+        payment: { amount: number; currency: string },
+      ) {
+        const previous = patient;
+        patient = (
+          await raw.patient.create({
+            data: {
+              tenantId: a.tenantId,
+              firstName: 'Ana',
+              lastName: 'Divisa',
+            },
+          })
+        ).id;
+        const charged = [];
+        try {
+          for (let i = 0; i < fees; i++) charged.push(await chargedFee());
+        } finally {
+          patient = previous;
+        }
+        await admin()
+          .post(`/treatment-plans/${charged[0].planId}/payments`, {
+            ...payment,
+            paidAt: new Date(Date.now() - 60_000).toISOString(),
+            method: 'CASH',
+          })
+          .expect(201);
+        return charged;
+      }
+
+      beforeAll(async () => {
+        await raw.exchangeRateSnapshot.deleteMany({ where: { date: today } });
+        await raw.exchangeRateSnapshot.create({
+          data: { date: today, currency: 'COP', rate: 4000 },
+        });
+      });
+
+      afterAll(async () => {
+        await raw.exchangeRateSnapshot.deleteMany({ where: { date: today } });
+      });
+
+      it('dos cargos de 50.000 COP y 25 USD (100.000 COP) cobrados: anular uno es 409 «ya cobrado»', async () => {
+        const [first] = await feesPaidWith(2, { amount: 25, currency: 'USD' });
+        const res = await admin()
+          .post(`/appointments/${first.appointmentId}/cancellation-fee/void`, {
+            reason: 'Error',
+          })
+          .expect(409);
+        expect((res.body as { message: string }).message).toBe(
+          CANCELLATION_FEE_MESSAGES.voidPaid,
+        );
+        expect((await itemRow(first.itemId)).deletedAt).toBeNull();
+      });
+
+      it('dos cargos de 50.000 COP y 10 USD (40.000 COP): el abono cabe en el otro y se anula', async () => {
+        const [first, second] = await feesPaidWith(2, {
+          amount: 10,
+          currency: 'USD',
+        });
+        const res = await admin()
+          .post(`/appointments/${first.appointmentId}/cancellation-fee/void`, {
+            reason: 'Error',
+          })
+          .expect(201);
+        expect((res.body as FeeView).status).toBe('VOIDED');
+        expect((await itemRow(first.itemId)).deletedAt).not.toBeNull();
+        expect((await itemRow(second.itemId)).deletedAt).toBeNull();
+      });
+
+      it('con un abono sin convertir: 409 «Hay abonos sin convertir» y nada cambia', async () => {
+        const [fee] = await feesPaidWith(1, { amount: 1, currency: 'EUR' });
+        const res = await admin()
+          .post(`/appointments/${fee.appointmentId}/cancellation-fee/void`, {
+            reason: 'Error',
+          })
+          .expect(409);
+        expect((res.body as { message: string }).message).toBe(
+          'Hay abonos todavía sin convertir a la moneda del plan; registra la tasa del día o espera un minuto y vuelve a intentarlo',
+        );
+        expect((await itemRow(fee.itemId)).deletedAt).toBeNull();
+        const view = (
+          await admin()
+            .get(`/appointments/${fee.appointmentId}/cancellation-fee`)
+            .expect(200)
+        ).body as FeeView;
+        expect(view.status).toBe('CHARGED');
+      });
     });
 
     it('RECEPTION con permiso de la política anula; restringida a otra sede (DX-089): 403', async () => {

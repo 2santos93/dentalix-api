@@ -43,7 +43,7 @@ export class PaymentDto {
   @ApiProperty({ example: 100 })
   amount!: number;
 
-  @ApiProperty({ example: 'USD', description: 'ISO 4217 currency code' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({ format: 'date-time' })
@@ -86,7 +86,6 @@ export class PaymentDto {
   @ApiProperty({
     type: String,
     nullable: true,
-    example: 'USD',
     description:
       'DX-375: moneda a la que convierte la tasa del abono (la del plan o la ' +
       'del saldo migrado); null en un abono anterior a la tasa congelada aún ' +

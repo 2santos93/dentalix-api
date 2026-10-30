@@ -213,7 +213,7 @@ export class PatientImportsController {
     'Content-Disposition',
     'attachment; filename="plantilla-pacientes.csv"',
   )
-  template(): Promise<string> {
+  template(): string {
     return this.imports.template();
   }
 

@@ -240,9 +240,10 @@ export function parseSex(
 
 /**
  * Teléfono (DX-329, R9): si la librería lo da por válido con la región de la
- * sede (o con su «+»), en E.164 (`+573101234567`). Con extensión, o si no es
- * válido o se lee de dos formas, tal cual (7 a 15 dígitos): nunca se guarda
- * un E.164 que la librería no dé por válido, ni se pierde una extensión.
+ * sede (o con su «+»), en E.164 (`+` con el prefijo y el número). Con
+ * extensión, o si no es válido o se lee de dos formas, tal cual (7 a 15
+ * dígitos): nunca se guarda un E.164 que la librería no dé por válido, ni se
+ * pierde una extensión.
  */
 export function normalizePhone(
   raw: string,

@@ -37,7 +37,7 @@ export class AgingNextInstallmentDto {
 }
 
 export class AgingCurrencyDto {
-  @ApiProperty({ example: 'COP' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({
@@ -82,7 +82,12 @@ export class AgingPatientDto {
   @ApiProperty({ example: 'Ana Pérez' })
   fullName!: string;
 
-  @ApiProperty({ type: String, nullable: true, example: '+57 300 123 4567' })
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'Teléfono tal como está en la ficha, con su indicativo de país si lo tiene.',
+  })
   phone!: string | null;
 
   @ApiProperty({
@@ -105,12 +110,12 @@ export class AgingLastPaymentDto {
   @ApiProperty()
   amount!: number;
 
-  @ApiProperty({ example: 'COP' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 }
 
 export class AgingRowNextInstallmentDto extends AgingNextInstallmentDto {
-  @ApiProperty({ example: 'COP' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 }
 
@@ -132,7 +137,7 @@ export class AgingPromiseDto {
   @ApiProperty()
   amount!: number;
 
-  @ApiProperty({ example: 'COP' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({ example: '2026-11-15', description: 'Día civil de la sede' })
@@ -207,7 +212,7 @@ export class AgingRowDto {
 }
 
 export class AgingTotalDto {
-  @ApiProperty({ example: 'COP' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({ description: 'Deudores con esta moneda' })

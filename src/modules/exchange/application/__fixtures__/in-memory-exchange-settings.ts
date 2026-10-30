@@ -2,6 +2,7 @@ import type { ExchangeRateSource } from '../../domain/exchange-rate-source';
 import type {
   ClinicExchangeSettings,
   ClinicExchangeSettingsRepository,
+  ClinicProviderWindow,
 } from '../../domain/ports/clinic-exchange-settings-repository.port';
 import {
   ManualExchangeRateAuthorError,
@@ -28,7 +29,11 @@ function tenantOf(ctx: TenantContextService): string {
 export function makeSettings(
   initial: Record<string, ExchangeRateSource | ClinicExchangeSettings>,
   ctx: TenantContextService = new TenantContextService(),
-  options: { zones?: Record<string, string> } = {},
+  options: {
+    zones?: Record<string, string>;
+    /** SEC-054: ventana del proveedor de cada clínica (por defecto, desde 2000). */
+    windows?: Record<string, ClinicProviderWindow>;
+  } = {},
 ): ClinicExchangeSettingsRepository & {
   settingsOf(tenantId: string): ClinicExchangeSettings;
   reads(): number;
@@ -66,6 +71,13 @@ export function makeSettings(
     },
     principalTimeZone: () =>
       Promise.resolve(options.zones?.[tenantOf(ctx)] ?? 'UTC'),
+    providerWindow: () =>
+      Promise.resolve(
+        options.windows?.[tenantOf(ctx)] ?? {
+          since: new Date('2000-01-01T00:00:00.000Z'),
+          timeZones: [options.zones?.[tenantOf(ctx)] ?? 'UTC'],
+        },
+      ),
   };
 }
 

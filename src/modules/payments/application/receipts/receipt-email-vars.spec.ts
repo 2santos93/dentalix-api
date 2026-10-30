@@ -61,6 +61,7 @@ const view = (
   voided: false,
   voidedAt: null,
   voidReason: null,
+  exchangeRate: null,
   snapshot,
   ...overrides,
 });

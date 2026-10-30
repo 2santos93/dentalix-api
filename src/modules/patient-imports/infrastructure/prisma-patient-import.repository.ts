@@ -451,35 +451,6 @@ export class PrismaPatientImportRepository {
     });
   }
 
-  /**
-   * Región de los teléfonos de la plantilla (DX-329): la de la sede activa
-   * o, sin ella (o borrada en blando), la principal (la primera creada y
-   * viva). Sin sede o sin región, `null`. No exige zona ni moneda: la
-   * plantilla no las usa.
-   */
-  async templatePhoneRegion(): Promise<PhoneRegion | null> {
-    const active = this.tenantContext.getLocationId();
-    const tenantId = this.tenantId();
-    const location = await this.prisma.runWithTenant(async (tx) => {
-      const live = { tenantId, deletedAt: null };
-      const select = { defaultPhoneRegion: true };
-      return (
-        (active
-          ? await tx.location.findFirst({
-              where: { ...live, id: active },
-              select,
-            })
-          : null) ??
-        (await tx.location.findFirst({
-          where: live,
-          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-          select,
-        }))
-      );
-    });
-    return phoneRegionOrNull(location?.defaultPhoneRegion);
-  }
-
   /** Formato y reloj en crudo de la sede de un lote ya creado (G1-B). */
   async locationFormatSettings(
     locationId: string,

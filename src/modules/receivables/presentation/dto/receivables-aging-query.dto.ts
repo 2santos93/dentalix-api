@@ -32,12 +32,11 @@ export class ReceivablesAgingFiltersDto {
   locationId?: string;
 
   @ApiPropertyOptional({
-    example: 'COP',
     description: 'Solo esta moneda (ISO 4217), sin convertir',
   })
   @IsOptional()
   @Matches(/^[A-Z]{3}$/, {
-    message: 'currency debe ser un código ISO 4217 de 3 letras (p. ej. COP).',
+    message: 'currency debe ser un código ISO 4217 de 3 letras.',
   })
   currency?: string;
 

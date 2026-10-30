@@ -1847,7 +1847,7 @@ de esquemas propios de una librería).
   |-------|------------|----------|
   | `auth.purge-expired-tokens.hourly` | `17 * * * *` | Borra `revoked_tokens` y `pending_registrations` vencidos y `user_tokens` caducados/usados hace > 7 días. Sustituye a la limpieza lazy de cada logout/refresh |
   | `email.purge-outbox.daily` | `23 4 * * *` | Borra de `email_outbox` los SENT/FAILED de más de `MAIL_OUTBOX_RETENTION_DAYS` (90), clínica a clínica bajo su RLS, y los de plataforma por `email_outbox_purge_platform` (DX-144) |
-  | `exchange.prefetch-rates.daily` | `5 0 * * *` | Precarga los tipos de cambio del día UTC (si hay `EXCHANGE_APP_ID`); la petición conserva el `fetch` como respaldo |
+  | `exchange.prefetch-rates.daily` | `5 0 * * *` | Precarga los tipos de cambio del día UTC (si hay `EXCHANGE_APP_ID`), fuera de los presupuestos de SEC-054; la petición conserva el `fetch` como respaldo |
   | `jobs.purge-finished.daily` | `41 3 * * *` | Borra los trabajos terminados de más de `JOBS_RETENTION_DAYS` |
   | `collections.settle-promises.hourly` | `7 * * * *` | Cierra los compromisos de pago (DX-150): `KEPT` si los abonos registrados desde el compromiso y fechados hasta su día (zona de su sede) cubren el importe; `BROKEN` desde el día siguiente. Regla diaria, barrida cada hora para respetar la medianoche de cada sede; idempotente y auditada sin usuario (`origin: JOB`). El abono que cubre un compromiso lo cierra además en el acto; anular ese abono lo reabre (DX-215). Cada cierre relee con el candado del paciente |
   | `domains.recheck-sweep.hourly` | `29 * * * *` | Re-verifica el TXT de cada dominio personalizado VERIFIED (consulta el DNS de toda la ronda y encola un `domains.recheck` por dominio, en su clínica); desactiva los que fallan `DOMAIN_RECHECK_MAX_FAILURES` veces seguidas (SEC-009). Si falla más de la mitad (y son ≥ 4), la ronda no cuenta (`domains.recheck_suspect`, DX-220) |
@@ -1978,7 +1978,15 @@ condonar) el cargo con el flujo de plan, abono y recibo de siempre.
   `voidedById` y `voidReason` y DESPUÉS retira el ítem del plan (sale del
   estado de cuenta). Una vez (409 «ya se anuló»); sin cargo generado, 409; si
   los abonos vivos del plan ya no caben en lo que queda por cobrar, 409 «Anula
-  antes el abono». La vista pasa a `status: VOIDED` con quién, cuándo y el
+  antes el abono». Esa suma va en la moneda del plan (DX-382, BE-046): cada
+  abono cuenta por su base de imputación (`payment_plan_amounts.amount`,
+  DX-051, con la tasa que congeló, DX-375), nunca por su importe en otra
+  moneda; si algún abono vivo del plan no tiene base («sin tasa», o con tasa
+  pero aún sin la base que crea el barrido de cada minuto), 409 «Hay abonos
+  todavía sin convertir a la moneda del plan; registra la tasa del día o espera
+  un minuto y vuelve a intentarlo». Candados en
+  el orden R6: plan (FOR UPDATE, para que un abono nuevo espere) → sus bases
+  ORDER BY `paymentId` → el ítem del cargo; las sumas, después. La vista pasa a `status: VOIDED` con quién, cuándo y el
   motivo. Auditoría `VOID APPOINTMENT` `CANCELLATION_FEE_VOIDED` con
   `statusChange` CHARGED → VOIDED, sin el texto. Sin Idempotency-Key (como
   condonar): repetir da 409. **Desde el plan**, el ítem de un cargo vigente
@@ -2302,7 +2310,9 @@ existente queda en `AUTOMATIC` y no cambia nada para ella.
   en la zona de la sede principal; guardar `MANUAL` otra vez lo conserva;
   volver a `AUTOMATIC` lo limpia. La tasa de un día D sale de las manuales
   solo con `MANUAL` y D >= ese día; los días anteriores siguen con la
-  automática (caché y, si falta, el proveedor). Así, pasar a `MANUAL` no mueve
+  automática (caché y, si falta, el proveedor, con las protecciones de
+  SEC-054: ventana, caché negativa, single-flight y presupuesto de la
+  clínica). Así, pasar a `MANUAL` no mueve
   los saldos ni los totales de antes del cambio. Desde DX-375 cada abono
   congela su tasa (sección siguiente), así que ni pasar a `MANUAL` ni volver
   a `AUTOMATIC` mueve un abono ya cobrado.
@@ -2315,8 +2325,8 @@ existente queda en `AUTOMATIC` y no cambia nada para ella.
   consumidores (`paymentInPlanCurrency`, `GetPaymentsTotalsUseCase`) la tratan
   igual que una moneda que el proveedor no trae (`isMissingRateError`): el
   abono queda sin base y el saldo responde 200 sin contarlo. La precarga diaria
-  (`exchange.prefetch-rates`) usa `providerRates`, que ignora la fuente de las
-  clínicas. `source` va en la respuesta para que DX-375 lo congele en cada
+  (`exchange.prefetch-rates`) usa `prefetchProviderRates`, que ignora la
+  fuente de las clínicas y queda fuera de los presupuestos de SEC-054. `source` va en la respuesta para que DX-375 lo congele en cada
   abono. El saldo del plan y los totales usan `ConvertAmountUseCase.memoized()`:
   leen los ajustes de la clínica y las tasas de cada día una vez por cálculo,
   no una vez por abono (mismo resultado).
@@ -2356,6 +2366,67 @@ existente queda en `AUTOMATIC` y no cambia nada para ella.
 - **Fuera de alcance** de DX-374, hecho en DX-375 (sección siguiente):
   congelar en cada abono la tasa y su fuente, el aviso «sin tasa» y bloquear
   el cambio de una tasa ya usada.
+
+## Cuota del proveedor de tasas (SEC-054)
+
+La cuota del proveedor (`EXCHANGE_APP_ID`) es **una para toda la
+plataforma**: si una clínica la agota, la precarga y los abonos en otra
+moneda de todas las clínicas en `AUTOMATIC` se quedan «sin tasa». Todas las
+llamadas pasan por `ProviderRatesGate`
+(`src/modules/exchange/application/provider-rates-gate.ts`), detrás de la
+caché de `exchange_rate_snapshots` de `GetRatesForDateUseCase`:
+
+- **Fechas** (`GET /exchange/rates` y `/exchange/convert`): `date` tiene que
+  ser un día que exista (`2026-02-30` o `2026-13-01`: 400 «date debe ser un
+  día que exista, con el formato AAAA-MM-DD.», también `EXCHANGE_RATE_DATE_INVALID`
+  desde el caso de uso; cubre BE-049 en estas rutas). Un día ya guardado se
+  sirve siempre; uno sin guardar solo se pide al proveedor entre el alta de la
+  clínica o su primer abono vivo (lo anterior) y hoy en la zona de sus sedes
+  (la más adelantada). Fuera de ahí, 400 `EXCHANGE_RATE_DATE_OUT_OF_RANGE`
+  con `first` y `today`, sin llamar a nadie. Las conversiones internas
+  (saldos, abonos, barridos) no aplican la ventana: sus días ya son reales.
+- **Caché negativa compartida**: un día que el proveedor no dio
+  (`ExchangeRateUnavailableError`: HTTP no 2xx, red, tiempo agotado, forma
+  inesperada) no se vuelve a pedir durante `EXCHANGE_NEGATIVE_CACHE_TTL_MS`
+  (1 h), para ninguna clínica. La aprovecha cualquier lectura
+  (`execute`, el barrido de imputaciones de DX-380 incluido). La precarga no
+  la lee (reintenta con su backoff) y un acierto la limpia.
+- **Single-flight**: N peticiones simultáneas del mismo día hacen una sola
+  llamada (y un solo guardado) y reciben la misma respuesta.
+- **Presupuestos** de fallos de caché (llamadas reales, no peticiones), en
+  ventana deslizante: por clínica `EXCHANGE_PROVIDER_CLINIC_LIMIT` en
+  `EXCHANGE_PROVIDER_CLINIC_WINDOW_MS` (30 por hora) y global
+  `EXCHANGE_PROVIDER_GLOBAL_LIMIT` en `EXCHANGE_PROVIDER_GLOBAL_WINDOW_MS`
+  (250 por día, ~75 % de la cuota diaria prorrateada del plan «Developer»;
+  ajústalo al plan contratado). Un aviso `exchange.provider_budget_half` sale
+  al pasar la mitad del global y `exchange.provider_budget_exhausted` al
+  agotar uno. Superado: `ExchangeRateBudgetExceededError` (para quien
+  convierte por dentro es «sin tasa») y, en las rutas, **429
+  `EXCHANGE_RATE_BUDGET_EXCEEDED`** con `Retry-After` y el mensaje en español.
+  La precarga diaria (`prefetchProviderRates`) ni cuenta ni se corta: las
+  peticiones de usuarios nunca la dejan sin cupo.
+- **Límite**: la caché negativa, el single-flight y los presupuestos viven en
+  memoria de cada réplica (como el rate limiting): con N réplicas el tope
+  efectivo es N veces el configurado. No hay un contador compartido en la BD
+  para esto; si se pasa a varias réplicas, divide los topes entre ellas.
+- **Fuente manual**: una clínica en `MANUAL` nunca llama al proveedor por los
+  días de su tasa manual (D >= `manualSince`). Un día anterior al cambio sin
+  snapshot sí se pide, como en `AUTOMATIC` y con sus mismos topes: así un
+  abono de ese día que quedó «sin tasa» al cambiar (BE-047) la congela en el
+  barrido.
+- **Proveedor**: `fetch` con `AbortSignal.timeout(10 s)`; los errores llevan
+  el estado HTTP y el tipo de error, nunca el cuerpo de la respuesta. En las
+  rutas, un día sin tasa del proveedor es **503 `EXCHANGE_RATE_UNAVAILABLE`**
+  («No pudimos obtener las tasas de ese día. Inténtalo de nuevo más tarde.»),
+  antes un 500 genérico.
+- **Rate limit `exchange-rates`**: 120 peticiones por minuto por clínica +
+  usuario, un balde para las dos rutas (`RATE_LIMIT_EXCHANGE_RATES_LIMIT`/`_TTL_MS`).
+- **Pruebas**: `provider-rates-gate.spec.ts` (caché negativa con reloj fijo,
+  single-flight, presupuestos), `get-rates-for-date.use-case.spec.ts`,
+  `open-exchange-rates.provider.spec.ts`, `test/exchange-provider-quota.int-spec.ts`
+  (ventana desde la BD y precarga con el global agotado) y
+  `test/exchange-provider-quota.e2e-spec.ts` (50 días antiguos → 429 sin más
+  llamadas al doble del proveedor).
 
 ## Tasa congelada en cada abono y aviso «sin tasa» (DX-375)
 
@@ -2870,9 +2941,10 @@ país.
   cualquier número que se pueda leer. Los `wa.me` de la confirmación de cita,
   la cartera y los planes usan la región de la sede del recurso, no el país
   de la dirección del paciente.
-- **Plantilla de importación**: el móvil de ejemplo de la región de la sede
-  activa o, sin ella (o si está borrada), de la principal. Sin región, la
-  celda va vacía.
+- **Plantilla de importación**: las celdas de teléfono van vacías (DX-368).
+  Un móvil de ejemplo válido de la región de la sede se importaría si nadie
+  borra la fila de ejemplo y podría ser el número de una persona real; el
+  formato lo explica la ayuda («con + y su prefijo»).
 - **Lista de regiones**: `prisma/scripts/generate-phone-regions.ts` escribe
   `prisma/reference/phone-regions.ts` y `phone-regions-list.json` (nombres de
   CLDR). La web la copia byte a byte (`check-api-reference-sync.mjs`). El

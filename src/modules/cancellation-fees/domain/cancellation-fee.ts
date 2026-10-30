@@ -44,6 +44,11 @@ export const CANCELLATION_FEE_MESSAGES = {
   alreadyVoided: 'El cargo de esta cita ya se anuló.',
   voidPaid:
     'El cargo ya está cobrado: los abonos de «Cargos administrativos» lo cubren. Anula antes el abono y después el cargo.',
+  // Vale para las dos fuentes (DX-374): en MANUAL falta registrar la tasa; en
+  // AUTOMATIC (o con la tasa ya congelada) basta el barrido de cada minuto
+  // que crea la base (DX-051, R9.3).
+  voidUnconverted:
+    'Hay abonos todavía sin convertir a la moneda del plan; registra la tasa del día o espera un minuto y vuelve a intentarlo',
 } as const;
 
 /**
@@ -178,6 +183,31 @@ export function voidBlockMessage(
     return CANCELLATION_FEE_MESSAGES.notCharged;
   if (fee.voidedAt) return CANCELLATION_FEE_MESSAGES.alreadyVoided;
   return null;
+}
+
+/**
+ * DX-382 (BE-046): ¿se puede retirar el cargo sin dejar un saldo a favor
+ * escondido? Todo en céntimos de la MONEDA DEL PLAN: cada abono vivo con su
+ * base de imputación (DX-051, convertida con la tasa que congeló, DX-375), o
+ * `null` si aún no la tiene («sin tasa»), y lo que queda por cobrar en el plan
+ * sin el ítem del cargo.
+ * - UNCONVERTED: algún abono no tiene base; no se decide con importes en otra
+ *   moneda (antes se sumaban tal cual).
+ * - PAID: lo cobrado no cabe en lo que queda: primero se anula el abono.
+ * - CLEAR: se puede anular.
+ */
+export type FeeVoidPaymentsCheck = 'CLEAR' | 'PAID' | 'UNCONVERTED';
+
+export function voidPaymentsCheck(
+  paymentBaseCents: readonly (number | null)[],
+  restCents: number,
+): FeeVoidPaymentsCheck {
+  let paidCents = 0;
+  for (const base of paymentBaseCents) {
+    if (base === null) return 'UNCONVERTED';
+    paidCents += base;
+  }
+  return paidCents > restCents ? 'PAID' : 'CLEAR';
 }
 
 /** Motivo de la condonación ya recortado, o `null` si no vale. */

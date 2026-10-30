@@ -30,6 +30,8 @@ describe('loadRateLimitConfig', () => {
     expect(cfg['invitation-email']).toEqual({ limit: 10, ttlMs: 60_000 });
     // SEC-046: leer un fichero de importación, por clínica + usuario.
     expect(cfg['patient-import']).toEqual({ limit: 10, ttlMs: 60_000 });
+    // SEC-054: leer tasas, por clínica + usuario.
+    expect(cfg['exchange-rates']).toEqual({ limit: 120, ttlMs: 60_000 });
     // DX-099: el cuestionario público de anamnesis, por IP y por token.
     expect(cfg.anamnesis).toEqual({ limit: 20, ttlMs: 60_000 });
     expect(cfg['anamnesis-token']).toEqual({ limit: 10, ttlMs: 60_000 });
@@ -43,6 +45,16 @@ describe('loadRateLimitConfig', () => {
       }),
     );
     expect(cfg['patient-import']).toEqual({ limit: 3, ttlMs: 30_000 });
+  });
+
+  it('SEC-054: lee RATE_LIMIT_EXCHANGE_RATES_LIMIT/_TTL_MS', () => {
+    const cfg = loadRateLimitConfig(
+      envOf({
+        RATE_LIMIT_EXCHANGE_RATES_LIMIT: '7',
+        RATE_LIMIT_EXCHANGE_RATES_TTL_MS: '30000',
+      }),
+    );
+    expect(cfg['exchange-rates']).toEqual({ limit: 7, ttlMs: 30_000 });
   });
 
   it('DX-099: lee el balde por token de su variable', () => {

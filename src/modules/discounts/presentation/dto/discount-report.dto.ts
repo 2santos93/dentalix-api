@@ -73,7 +73,7 @@ export class DiscountReportQueryDto extends DiscountReportFiltersDto {
 }
 
 export class DiscountReportTotalDto {
-  @ApiProperty({ example: 'COP' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({ description: 'Ítems con descuento en esta moneda' })
@@ -97,7 +97,7 @@ export class DiscountReportTotalDto {
 
 /** SEC-047: rebajas de convenio de una moneda, aparte de los totales de DX-204. */
 export class AgreementReductionTotalDto {
-  @ApiProperty({ example: 'COP' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({ description: 'Líneas con rebaja de convenio en esta moneda' })
@@ -144,7 +144,7 @@ export class DiscountReportItemDto {
   @ApiProperty({ description: 'Procedimiento del catálogo' })
   procedure!: string;
 
-  @ApiProperty({ example: 'COP' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({

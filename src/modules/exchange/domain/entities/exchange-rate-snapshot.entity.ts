@@ -12,7 +12,7 @@ export interface ExchangeRateSnapshot {
   id: string;
   /** YYYY-MM-DD, the historical day this rate applies to. */
   date: string;
-  /** ISO 4217 currency code, e.g. "COP", "EUR". */
+  /** ISO 4217 currency code (3 letters). */
   currency: string;
   /** Units of `currency` per 1 USD. */
   rate: number;

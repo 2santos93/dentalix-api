@@ -125,7 +125,7 @@ export class CreateExpenseDto {
   @IsMoney({ message: AMOUNT_MESSAGE })
   amount!: number;
 
-  @ApiProperty({ example: 'COP', description: 'Código ISO 4217' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   @Transform(toUpperCase)
   @IsISO4217CurrencyCode({ message: CURRENCY_MESSAGE })
   currency!: string;
@@ -219,7 +219,7 @@ export class UpdateExpenseDto {
   @IsMoney({ message: AMOUNT_MESSAGE })
   amount?: number;
 
-  @ApiPropertyOptional({ example: 'COP' })
+  @ApiPropertyOptional({ description: 'Código ISO 4217 de 3 letras.' })
   @NotNullable()
   @Transform(toUpperCase)
   @IsISO4217CurrencyCode({ message: CURRENCY_MESSAGE })

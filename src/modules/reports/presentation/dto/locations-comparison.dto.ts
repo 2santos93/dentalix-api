@@ -41,13 +41,12 @@ export class LocationsComparisonQueryDto {
   compare?: CompareMode;
 
   @ApiPropertyOptional({
-    example: 'COP',
     description:
       'Solo los importes en esta moneda (ISO 4217). Sin él, todas, cada una por separado: nunca se suman monedas distintas ni se convierten.',
   })
   @IsOptional()
   @Matches(CURRENCY_CODE, {
-    message: 'currency debe ser un código de moneda de 3 letras (p. ej. COP).',
+    message: 'currency debe ser un código ISO 4217 de 3 letras.',
   })
   currency?: string;
 }
@@ -117,7 +116,7 @@ export class MetricDto {
 }
 
 export class CurrencyMetricDto extends MetricDto {
-  @ApiProperty({ example: 'COP' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiPropertyOptional({

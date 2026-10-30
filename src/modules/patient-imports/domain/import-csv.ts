@@ -27,13 +27,13 @@ export function csv(lines: (string | number | null)[][]): string {
 
 /**
  * Plantilla: las columnas admitidas y dos filas de ejemplo ficticias. Los
- * teléfonos de ejemplo son `examplePhone`, el móvil de ejemplo de la región
- * de la sede en formato nacional (DX-329): enseñan que sin `+` se usa el
- * prefijo de la sede. Sin región, las celdas quedan vacías: nunca el número
- * de un país. La librería da un solo ejemplo por región, así que las dos
- * celdas lo repiten.
+ * teléfonos van vacíos (DX-368): no hay un número ficticio válido en todos los
+ * países, uno con «+» sale con la «'» de la defensa contra fórmulas y uno como
+ * `+00…` (ningún indicativo empieza por 0) se importaría como un móvil
+ * «válido» al que luego se mandarían recordatorios. El formato lo explica la
+ * ayuda de la ficha («con + y su indicativo»).
  */
-export function templateCsv(examplePhone: string | null): string {
+export function templateCsv(): string {
   const example1: Record<string, string> = {
     tipo_documento: 'NATIONAL_ID',
     numero_documento: 'DOC-1000001',
@@ -41,12 +41,10 @@ export function templateCsv(examplePhone: string | null): string {
     apellidos: 'Ejemplo Gómez',
     fecha_nacimiento: '15/04/1988',
     sexo: 'F',
-    telefono: examplePhone ?? '',
     email: 'ana.ejemplo@example.com',
-    direccion: 'Calle 1 # 2-3',
+    direccion: 'Dirección de ejemplo 123',
     ocupacion: 'Docente',
     contacto_emergencia: 'Luis Ejemplo',
-    telefono_emergencia: examplePhone ?? '',
     notas: 'Fila de ejemplo: bórrala antes de importar',
   };
   const example2: Record<string, string> = {
