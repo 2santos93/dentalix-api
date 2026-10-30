@@ -172,6 +172,27 @@ const CLOSED_VISIT_ITEMS: ErrorBody = {
   error: 'Conflict',
   message: 'Esta cita ya pasó: sus tratamientos no se cambian.',
 };
+// DX-393: las guardas de gastos y pagos de gasto (ERRCODE propios Q3930…Q3934)
+// rechazaron una escritura que dejaría el gasto incoherente. El caso de uso
+// responde antes con su propio 409/400 con el gasto bloqueado; esto es la red
+// (p. ej. otra ruta o una réplica anterior que se adelantó). Mismo texto que
+// el RAISE de la migración 20261105120000_dx393_expense_integrity.
+const conflict = (message: string): ErrorBody => ({
+  statusCode: HttpStatus.CONFLICT,
+  error: 'Conflict',
+  message,
+});
+export const EXPENSE_INTEGRITY_MESSAGES = {
+  Q3930: 'El gasto está anulado: ya no admite pagos.',
+  Q3931:
+    'El pago supera lo pendiente del gasto. Recarga el gasto y vuelve a intentarlo.',
+  Q3932:
+    'El importe no puede ser menor a lo ya pagado. Recarga el gasto y vuelve a intentarlo.',
+  Q3933:
+    'El gasto tiene pagos sin anular: anúlalos antes de anular el gasto. Recarga el gasto y vuelve a intentarlo.',
+  Q3934:
+    'La anulación de la salida no coincide con su importe o con su caja. Vuelve a intentarlo.',
+} as const;
 // Dos transacciones se cruzaron (deadlock o fallo de serialización): Postgres
 // abortó esta. Reintentar la operación la resuelve (DX-012).
 const CONCURRENCY_CONFLICT: ErrorBody = {
@@ -197,6 +218,13 @@ export const BY_SQLSTATE: Record<string, ErrorBody> = {
   '40P01': CONCURRENCY_CONFLICT, // deadlock_detected
   '40001': CONCURRENCY_CONFLICT, // serialization_failure
   Q0271: CLOSED_VISIT_ITEMS, // propio (DX-271): vínculo de una cita completada
+  // propios (DX-393): gasto anulado, tope, importe bajo lo pagado, anulación
+  // con pagos vivos y OUTFLOW_VOID que no es el de su salida.
+  Q3930: conflict(EXPENSE_INTEGRITY_MESSAGES.Q3930),
+  Q3931: conflict(EXPENSE_INTEGRITY_MESSAGES.Q3931),
+  Q3932: conflict(EXPENSE_INTEGRITY_MESSAGES.Q3932),
+  Q3933: conflict(EXPENSE_INTEGRITY_MESSAGES.Q3933),
+  Q3934: conflict(EXPENSE_INTEGRITY_MESSAGES.Q3934),
 };
 
 /**
