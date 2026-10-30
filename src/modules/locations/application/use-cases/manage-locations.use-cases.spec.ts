@@ -25,6 +25,7 @@ function makeLocation(overrides: Partial<Location> = {}): Location {
     healthRegistrationNumber: null,
     showHealthRegistrationNumber: false,
     phone: null,
+    defaultPhoneRegion: null,
     isActive: true,
     currency: 'COP',
     timeZone: 'America/Bogota',

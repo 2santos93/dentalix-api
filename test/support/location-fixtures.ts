@@ -11,6 +11,12 @@ export interface RegionalFixture {
   timeZone: string;
   locale: string;
   hourCycle: 'h12' | 'h23';
+  /**
+   * DX-329: prefijo telefónico por defecto de la sede (región de
+   * libphonenumber-js). Es un dato del fixture, no algo que se deduzca del
+   * país: así ninguna sede de test queda sin región (pre-flight I1).
+   */
+  defaultPhoneRegion: string;
 }
 
 /** Conserva las expectativas de los tests anteriores a G1 (COP, Bogotá). */
@@ -20,6 +26,7 @@ export const REGIONAL_BOGOTA_FIXTURE: RegionalFixture = {
   timeZone: 'America/Bogota',
   locale: 'es-CO',
   hourCycle: 'h23',
+  defaultPhoneRegion: 'CO',
 };
 
 /** Sede de Tokio: su país no tiene indicativo provisional (DX-312). */
@@ -29,6 +36,7 @@ export const REGIONAL_TOKYO_FIXTURE: RegionalFixture = {
   timeZone: 'Asia/Tokyo',
   locale: 'ja-JP',
   hourCycle: 'h23',
+  defaultPhoneRegion: 'JP',
 };
 
 /** Sede con reloj de 12 h; un número sin «+» toma +1 (DX-312). */
@@ -38,6 +46,7 @@ export const REGIONAL_NEW_YORK_FIXTURE: RegionalFixture = {
   timeZone: 'America/New_York',
   locale: 'en-US',
   hourCycle: 'h12',
+  defaultPhoneRegion: 'US',
 };
 
 /** Sede con reloj de 24 h; su país no tiene indicativo provisional (DX-312). */
@@ -47,9 +56,10 @@ export const REGIONAL_BERLIN_FIXTURE: RegionalFixture = {
   timeZone: 'Europe/Berlin',
   locale: 'de-DE',
   hourCycle: 'h23',
+  defaultPhoneRegion: 'DE',
 };
 
-/** `data` de `prisma.location.create`: los cinco valores más lo que pase el test. */
+/** `data` de `prisma.location.create`: los valores del fixture más lo que pase el test. */
 export function locationData<T extends object>(
   regional: RegionalFixture,
   overrides?: T,
@@ -101,20 +111,23 @@ export function regionalSql(regional: RegionalFixture): {
   values: string;
 } {
   return {
-    columns: '"countryCode", "currency", "timeZone", "locale", "hourCycle"',
+    columns:
+      '"countryCode", "currency", "timeZone", "locale", "hourCycle", "defaultPhoneRegion"',
     values: [
       quote(regional.country),
       quote(regional.currency),
       quote(regional.timeZone),
       quote(regional.locale),
       quote(regional.hourCycle),
+      quote(regional.defaultPhoneRegion),
     ].join(', '),
   };
 }
 
 /**
  * Como `regionalSql`, para una etapa anterior a DX-312: el país va en la
- * columna enum de entonces (`LEGACY_ENUM_COUNTRY`).
+ * columna enum de entonces (`LEGACY_ENUM_COUNTRY`), y sin prefijo telefónico
+ * (DX-329 es posterior).
  */
 export function legacyEnumRegionalSql(regional: RegionalFixture): {
   columns: string;

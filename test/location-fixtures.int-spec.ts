@@ -111,6 +111,32 @@ describe('fixtures de sede (G1)', () => {
     });
   });
 
+  // DX-329 (pre-flight I1): ninguna sede de test queda sin prefijo
+  // telefónico; la región es un dato del fixture.
+  it('locationData and regionalSql write the fixture default phone region', async () => {
+    const tokyo = await raw.location.create({
+      data: locationData(REGIONAL_TOKYO_FIXTURE, {
+        tenantId,
+        name: 'Prefijo Prisma',
+      }),
+    });
+    expect(tokyo.defaultPhoneRegion).toBe('JP');
+    const { columns, values } = regionalSql(REGIONAL_NEW_YORK_FIXTURE);
+    await raw.$executeRawUnsafe(
+      `INSERT INTO "locations" ("id", "tenantId", "name", ${columns}, "updatedAt")
+       VALUES (gen_random_uuid(), '${tenantId}', 'Prefijo SQL', ${values}, now())`,
+    );
+    const row = await raw.location.findFirstOrThrow({
+      where: { tenantId, name: 'Prefijo SQL' },
+    });
+    expect(row.defaultPhoneRegion).toBe('US');
+    // Ninguno escribe la marca: la región no la decidió la API.
+    expect([
+      tokyo.defaultPhoneRegionSetAt,
+      row.defaultPhoneRegionSetAt,
+    ]).toEqual([null, null]);
+  });
+
   it('g1LocationInsert escribe countryCode', async () => {
     const id = await g1LocationInsert(
       raw,

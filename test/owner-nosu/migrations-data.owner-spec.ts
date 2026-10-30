@@ -396,6 +396,20 @@ const FIXTURE_DX312 = [
      (gen_random_uuid(),'p312b@mig.test','Pendiente B','mig-p312b','P','x','${'b'.repeat(64)}',now() + interval '1 day',NULL,NULL,NULL,NULL)`,
 ];
 
+/**
+ * DX-329: prefijo telefónico por defecto de la sede, relleno por clínica
+ * desde su país con la clínica fijada (sin NO FORCE) y sin la marca de
+ * decisión. En A una sede viva y una borrada en blando, de países distintos;
+ * en B, otra.
+ */
+const DX329 = '20261103120000_dx329_location_default_phone_region';
+const FIXTURE_DX329 = [
+  `INSERT INTO "locations" ("id","tenantId","name","countryCode","deletedAt","updatedAt") VALUES
+     (gen_random_uuid(),'${T_A}','Sede 329 viva','VE',NULL,now()),
+     (gen_random_uuid(),'${T_A}','Sede 329 borrada','JP',now(),now()),
+     (gen_random_uuid(),'${T_B}','Sede 329 B','DE',NULL,now())`,
+];
+
 const STEPS: Step[] = [
   { until: '20260731115959', fixture: [] },
   // 20260731120000_structured_clinical_history y _remove_owner_role.
@@ -482,8 +496,10 @@ const STEPS: Step[] = [
   // código antiguo se queda; hasta la de DX-312.
   { until: DX312, fixture: FIXTURE_DX327 },
   // dx312: país ISO en columna propia, relleno por clínica y validación; la
-  // columna antigua se queda.
-  { until: '99999999999999', fixture: FIXTURE_DX312 },
+  // columna antigua se queda; hasta la de DX-329.
+  { until: DX329, fixture: FIXTURE_DX312 },
+  // dx329: prefijo telefónico por defecto de la sede y su relleno por clínica.
+  { until: '99999999999999', fixture: FIXTURE_DX329 },
 ];
 
 describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-nosu)', () => {
@@ -1456,6 +1472,60 @@ describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-no
         );
       }),
     ).rejects.toThrow(/23514[\s\S]*DX-312: una sede necesita país/);
+  }, 180_000);
+
+  it('owner-nosu default phone region migrations fill every location without NO FORCE', async () => {
+    const snapshot = (): Promise<string> =>
+      scalar<string>(
+        `SELECT count(*) || ':' || md5(string_agg("id" || ':' || "tenantId" || ':'
+                  || "countryCode" || ':' || "updatedAt", ',' ORDER BY "id")) AS v
+           FROM "locations"`,
+      );
+    let before = '';
+    await run(STEPS[27], async () => {
+      before = await snapshot();
+    });
+    // Ninguna sede cambia de país ni de `updatedAt`.
+    expect(await snapshot()).toBe(before);
+    // Todas (también la borrada y las de B) tienen su país como región, y
+    // ninguna la marca de decisión: la puso el relleno.
+    expect(
+      await scalar<string>(
+        `SELECT count(*) || ':' || count(*) FILTER (
+                  WHERE "defaultPhoneRegion" IS DISTINCT FROM "countryCode"
+                     OR "defaultPhoneRegionSetAt" IS NOT NULL) AS v
+           FROM "locations"`,
+      ),
+    ).toMatch(/^\d+:0$/);
+    expect(
+      await scalar<string>(
+        `SELECT string_agg("name" || '=' || "countryCode" || '/'
+                  || coalesce("defaultPhoneRegion", '-'), ',' ORDER BY "name") AS v
+           FROM "locations" WHERE "name" LIKE 'Sede 329%'`,
+      ),
+    ).toBe('Sede 329 B=DE/DE,Sede 329 borrada=JP/JP,Sede 329 viva=VE/VE');
+    // El owner solo ve la sede de B con la clínica fijada: el relleno la
+    // alcanzó porque recorre las clínicas, no porque se salte la RLS.
+    const asOwner = (sql: string): string =>
+      execFileSync(
+        'psql',
+        [psqlUrl(ownerUrlFor(env, db)), '-X', '-q', '-A', '-t', '-c', sql],
+        { encoding: 'utf8' },
+      ).trim();
+    const sedeB = `SELECT count(*) || ':' || coalesce(string_agg("defaultPhoneRegion", ','), '-')
+                     FROM "locations" WHERE "name" = 'Sede 329 B'`;
+    expect(asOwner(sedeB)).toBe('0:-');
+    expect(
+      asOwner(
+        `SELECT set_config('app.current_tenant', '${T_B}', false) IS NULL; ${sedeB}`,
+      ),
+    ).toBe('f\n1:DE');
+    expect(
+      await scalar<boolean>(
+        `SELECT relforcerowsecurity AS v FROM pg_class
+          WHERE oid = 'public.locations'::regclass`,
+      ),
+    ).toBe(true);
   }, 180_000);
 
   it('al terminar: FORCE en toda tabla con RLS y todo es del owner', async () => {

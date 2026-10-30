@@ -13,6 +13,11 @@ export interface Location {
   showHealthRegistrationNumber: boolean;
   /** DX-222: teléfono de la sede para las indicaciones postoperatorias, o null. */
   phone: string | null;
+  /**
+   * DX-329: región de numeración cuyo prefijo toma un teléfono escrito sin
+   * «+»; `null` = sin prefijo por defecto. Nunca se deduce del país.
+   */
+  defaultPhoneRegion: string | null;
   isActive: boolean;
   /**
    * G1: moneda ISO 4217, zona IANA y locale BCP 47 de la sede. La zona es la
