@@ -2,6 +2,8 @@ import {
   Body,
   Controller,
   Get,
+  Param,
+  ParseUUIDPipe,
   Post,
   Put,
   Query,
@@ -15,6 +17,7 @@ import {
   ApiConflictResponse,
   ApiCreatedResponse,
   ApiForbiddenResponse,
+  ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
@@ -40,19 +43,23 @@ import {
   type ExchangeRateSettings,
 } from '../application/use-cases/exchange-rate-settings.use-cases';
 import {
+  CorrectManualExchangeRateUseCase,
   ListManualExchangeRatesUseCase,
   RegisterManualExchangeRateUseCase,
 } from '../application/use-cases/manual-exchange-rates.use-cases';
 import type { ManualExchangeRate } from '../domain/entities/manual-exchange-rate.entity';
 import {
   MANUAL_RATE_DUPLICATE_MESSAGE,
+  MANUAL_RATE_IN_USE_MESSAGE,
   MANUAL_RATE_NOT_A_MEMBER_MESSAGE,
+  MANUAL_RATE_NOT_FOUND_MESSAGE,
 } from '../domain/exchange-rate-source';
 import {
   ExchangeRateSettingsDto,
   UpdateExchangeRateSettingsDto,
 } from './dto/exchange-rate-settings.dto';
 import {
+  CorrectManualExchangeRateDto,
   ListManualExchangeRatesQueryDto,
   ManualExchangeRateDto,
   RegisterManualExchangeRateDto,
@@ -84,6 +91,7 @@ export class ExchangeSettingsController {
     private readonly updateSettings: UpdateExchangeRateSettingsUseCase,
     private readonly listManualRates: ListManualExchangeRatesUseCase,
     private readonly registerManualRate: RegisterManualExchangeRateUseCase,
+    private readonly correctManualRate: CorrectManualExchangeRateUseCase,
     private readonly tenantContext: TenantContextService,
   ) {}
 
@@ -149,7 +157,8 @@ export class ExchangeSettingsController {
       'DX-374. Unidades de la moneda por 1 USD. Se usa cuando la fuente de la ' +
       'clínica es MANUAL, para los días desde `manualSince` (se puede dejar ' +
       'registrada antes de cambiarla). Una ' +
-      'tasa ya registrada para ese día y moneda no se sobrescribe.',
+      'tasa ya registrada para ese día y moneda no se sobrescribe: si ningún ' +
+      'abono la usó, se corrige con PUT /exchange/manual-rates/:id.',
   })
   @ApiCreatedResponse({ type: ManualExchangeRateDto })
   @ApiBadRequestResponse({
@@ -166,5 +175,34 @@ export class ExchangeSettingsController {
       { date: dto.date, currency: dto.currency, rate: dto.rate },
       req.user.sub,
     );
+  }
+
+  @Audit({
+    action: 'UPDATE',
+    resource: 'EXCHANGE_RATE',
+    resourceId: { param: 'id' },
+  })
+  @Put('manual-rates/:id')
+  @ApiOperation({
+    summary:
+      'Corrige una tasa manual que ningún abono usó; queda en la auditoría',
+    description:
+      'DX-375. Solo cambia la tasa (unidades de la moneda por 1 USD); el día ' +
+      'y la moneda no. Cada abono congela la tasa con que se convirtió al ' +
+      'registrarse, así que una tasa que ya usa algún abono no se cambia: ' +
+      '409 MANUAL_EXCHANGE_RATE_IN_USE (también lo impide la BD). Corregir ' +
+      'una sin usar sí afecta a los abonos que la congelen después.',
+  })
+  @ApiOkResponse({ type: ManualExchangeRateDto })
+  @ApiBadRequestResponse({
+    description: 'Tasa que no es > 0 con hasta 8 decimales',
+  })
+  @ApiNotFoundResponse({ description: MANUAL_RATE_NOT_FOUND_MESSAGE })
+  @ApiConflictResponse({ description: MANUAL_RATE_IN_USE_MESSAGE })
+  correct(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CorrectManualExchangeRateDto,
+  ): Promise<ManualExchangeRate> {
+    return this.correctManualRate.execute(id, { rate: dto.rate });
   }
 }

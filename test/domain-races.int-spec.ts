@@ -275,6 +275,7 @@ describe('Carreras cerradas en una transacción (DX-042, int)', () => {
           idempotencyKey,
           receiptPlanBalance: null,
           planAmount: null,
+          frozenRate: null,
         }),
       );
     }

@@ -37,7 +37,12 @@ export const MANUAL_RATE_DATE_MESSAGE =
 export const MANUAL_RATE_FUTURE_DATE_MESSAGE =
   'No se puede registrar la tasa de un día que aún no ha llegado en la sede.';
 export const MANUAL_RATE_DUPLICATE_MESSAGE =
-  'Ya hay una tasa registrada para esa moneda en ese día. Por ahora no se puede cambiar.';
+  'Ya hay una tasa registrada para esa moneda en ese día. Si ningún abono la usó, corrígela en la lista.';
+/** DX-375: una tasa manual que ya congeló algún abono no se cambia. */
+export const MANUAL_RATE_IN_USE_MESSAGE =
+  'Esta tasa ya la usa al menos un abono y no se puede cambiar: el saldo de esos abonos se calculó con ella.';
+export const MANUAL_RATE_NOT_FOUND_MESSAGE =
+  'No encontramos esa tasa de cambio en la clínica.';
 export const MANUAL_RATE_NOT_A_MEMBER_MESSAGE =
   'Solo un miembro de la clínica puede registrar una tasa de cambio.';
 

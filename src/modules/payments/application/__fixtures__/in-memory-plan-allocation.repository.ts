@@ -1,3 +1,4 @@
+import type { FrozenExchangeRate } from '../../domain/payment-exchange-rate';
 import type {
   AllocatableItem,
   AllocationIncrement,
@@ -5,6 +6,7 @@ import type {
 import type {
   AllocationTarget,
   PaymentAllocationsSnapshot,
+  PaymentPendingRate,
   PaymentWithoutBase,
   PlanBalanceSnapshot,
   PlanAllocationRepository,
@@ -57,6 +59,13 @@ export class InMemoryPlanAllocationRepository implements PlanAllocationRepositor
     { amount: number; currency: string; rateDate: string }
   >();
   withoutBase: PaymentWithoutBase[] = [];
+  /** DX-375: abonos que esperan su tasa. */
+  pendingRate: PaymentPendingRate[] = [];
+  /** DX-375: lo que congeló el barrido, por abono. */
+  readonly frozen = new Map<
+    string,
+    { targetCurrency: string; rate: FrozenExchangeRate | null }
+  >();
   tenants: string[] = [];
 
   allocatedCents(filter: { paymentId?: string; itemId?: string }): number {
@@ -152,6 +161,36 @@ export class InMemoryPlanAllocationRepository implements PlanAllocationRepositor
         .filter((p) => !this.bases.has(p.paymentId))
         .slice(0, limit),
     );
+  }
+
+  paymentsPendingRate(
+    limit: number,
+    exclude: readonly string[] = [],
+  ): Promise<PaymentPendingRate[]> {
+    return Promise.resolve(
+      this.pendingRate
+        .filter(
+          (p) =>
+            !this.frozen.get(p.paymentId)?.rate &&
+            !exclude.includes(p.paymentId),
+        )
+        .slice(0, limit),
+    );
+  }
+
+  freezeRate(
+    paymentId: string,
+    targetCurrency: string,
+    frozen: FrozenExchangeRate | null,
+  ): Promise<boolean> {
+    if (this.frozen.get(paymentId)?.rate) return Promise.resolve(false);
+    this.frozen.set(paymentId, { targetCurrency, rate: frozen });
+    for (const p of this.withoutBase) {
+      if (p.paymentId !== paymentId) continue;
+      p.exchangeRateCurrency = targetCurrency;
+      p.frozenRate = frozen;
+    }
+    return Promise.resolve(frozen !== null);
   }
 
   planIdsWithBases(): Promise<string[]> {

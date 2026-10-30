@@ -14,6 +14,7 @@ import {
   type ClinicExchangeSettingsRepository,
 } from '../../domain/ports/clinic-exchange-settings-repository.port';
 import { EXCHANGE_RATE_CLOCK } from './manual-exchange-rates.use-cases';
+import { ExchangeSourceChangeHooks } from '../exchange-source-change-hooks';
 
 export interface ExchangeRateSettings extends ClinicExchangeSettings {
   /** Moneda base de todas las tasas (unidades de cada moneda por 1 de ella). */
@@ -45,9 +46,14 @@ export class GetExchangeRateSettingsUseCase {
  * Pasar a MANUAL fija `manualSince` = hoy en la sede principal: la tasa
  * manual rige desde ese día y los anteriores siguen con la automática, así
  * que los saldos de antes del cambio no se mueven. Guardar MANUAL otra vez
- * conserva el día. Volver a AUTOMATIC lo limpia: los días del periodo manual
- * vuelven a convertirse con la tasa automática hasta que cada abono congele
- * su tasa (DX-375).
+ * conserva el día. Volver a AUTOMATIC lo limpia.
+ *
+ * DX-375 (BE-047): antes de cambiar la fuente se congela la tasa de todos los
+ * abonos de la clínica que la esperaban, con la fuente de ANTES
+ * (`ExchangeSourceChangeHooks`): un abono ya cobrado, también uno de hoy
+ * anterior al cambio o de una sede con otra zona, conserva su tasa. Los que
+ * siguen sin tasa la tomarán de la fuente nueva. Si congelar falla, la fuente
+ * no cambia.
  */
 @Injectable()
 export class UpdateExchangeRateSettingsUseCase {
@@ -57,6 +63,7 @@ export class UpdateExchangeRateSettingsUseCase {
     private readonly audit: RecordAuditEventUseCase,
     @Inject(EXCHANGE_RATE_CLOCK)
     private readonly now: () => Date,
+    private readonly hooks: ExchangeSourceChangeHooks,
   ) {}
 
   async execute(
@@ -72,6 +79,9 @@ export class UpdateExchangeRateSettingsUseCase {
       input.source === 'MANUAL'
         ? civilDateIn(this.now(), await this.settings.principalTimeZone())
         : null;
+    if ((await this.settings.get()).source !== input.source) {
+      await this.hooks.beforeSourceChange();
+    }
     const { before, after } = await this.settings.set((current) =>
       input.source === 'MANUAL'
         ? {

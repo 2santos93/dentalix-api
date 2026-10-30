@@ -1926,6 +1926,8 @@ model Currency {
   // FK de `currency` (DX-042, 20261016131000_currency_fks).
   treatmentPlans             TreatmentPlan[]
   payments                   Payment[]
+  // DX-375: abonos cuya tasa congelada convierte a esta moneda.
+  paymentsExchangeRate       Payment[]                  @relation("PaymentExchangeRateCurrency")
   paymentPlans               PaymentPlan[]
   // DX-150: compromisos de pago en esa moneda.
   paymentPromises            PaymentPromise[]
@@ -2067,6 +2069,19 @@ model Payment {
   // en su sede. NULL sin caja abierta (o anterior a DX-027). Un trigger impide
   // asociarlo a una caja cerrada o de otra sede, y cambiarla después.
   cashSessionId          String?        @db.Uuid
+  // DX-375: la tasa que congeló el abono al registrarse (o el barrido, si se
+  // cobró sin tasa). `exchangeRateCurrency` es la moneda a la que se convierte
+  // (la del plan, o la del saldo migrado) y la escribe todo abono nuevo; NULL
+  // solo en abonos anteriores a DX-375 o de una réplica anterior, que se leen
+  // como antes (tasa de su día) hasta que el barrido los congela. Las cuatro
+  // columnas de la tasa van juntas (CHECK payments_exchange_rate_check): las
+  // dos monedas en unidades por 1 USD tal como las dio la fuente, la fuente y
+  // el día civil de la tasa. Con moneda igual a la de destino no hay tasa.
+  exchangeRateCurrency   String?
+  exchangeRateFrom       Decimal?            @db.Decimal(18, 8)
+  exchangeRateTo         Decimal?            @db.Decimal(18, 8)
+  exchangeRateSource     ExchangeRateSource?
+  exchangeRateDate       DateTime?           @db.Date
 
   // FK COMPUESTAS (SEC-004): el plan y la sede tienen que ser del MISMO tenant,
   // y `patientId` (denormalizado) tiene que ser el paciente del plan. Por
@@ -2079,6 +2094,8 @@ model Payment {
 
   // La moneda existe en el catálogo `currencies` (DX-042).
   currencyRef Currency @relation(fields: [currency], references: [code])
+  // DX-375: la moneda de destino de la tasa congelada, también del catálogo.
+  exchangeRateCurrencyRef Currency? @relation("PaymentExchangeRateCurrency", fields: [exchangeRateCurrency], references: [code], map: "payments_exchange_rate_currency_fkey")
 
   // Recibo de caja numerado (DX-136). Null en los abonos anteriores a la
   // numeración: conservan su referencia antigua REC-xxxxxxxx.
@@ -2134,6 +2151,15 @@ model Payment {
   // migración 20261018140200_dx027_cash_sessions. NO aceptes un diff de
   // migrate dev que lo vuelva completo.
   @@index([tenantId, cashSessionId], map: "payments_tenant_cash_session_idx")
+  // DX-375, parciales (el WHERE vive solo en 20261102120200, CONCURRENTLY; NO
+  // aceptes un diff de migrate dev que los vuelva completos):
+  // - abonos vivos por congelar, para el barrido: WHERE "deletedAt" IS NULL
+  //   AND "exchangeRateFrom" IS NULL AND ("exchangeRateCurrency" IS NULL OR
+  //   "currency" <> "exchangeRateCurrency");
+  // - abonos con una tasa manual congelada, para saber si una tasa manual ya
+  //   se usó (409 al cambiarla): WHERE "exchangeRateSource" = 'MANUAL'.
+  @@index([tenantId, createdAt], map: "payments_exchange_rate_pending_idx")
+  @@index([tenantId, exchangeRateDate], map: "payments_exchange_rate_manual_idx")
   @@map("payments")
 }
 

@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Inject,
   Injectable,
+  NotFoundException,
 } from '@nestjs/common';
 import { decimalPlaces } from '../../../../shared/validation/bounded-decimal';
 import {
@@ -20,6 +21,8 @@ import {
   MANUAL_RATE_DATE_MESSAGE,
   MANUAL_RATE_DUPLICATE_MESSAGE,
   MANUAL_RATE_FUTURE_DATE_MESSAGE,
+  MANUAL_RATE_IN_USE_MESSAGE,
+  MANUAL_RATE_NOT_FOUND_MESSAGE,
   MANUAL_RATE_MAX,
   MANUAL_RATE_MAX_DECIMALS,
   MANUAL_RATE_MESSAGE,
@@ -30,6 +33,8 @@ import {
 import {
   MANUAL_EXCHANGE_RATE_REPOSITORY,
   ManualExchangeRateAuthorError,
+  ManualExchangeRateInUseError,
+  ManualExchangeRateNotFoundError,
   ManualExchangeRateTakenError,
   type ManualExchangeRateRepository,
 } from '../../domain/ports/manual-exchange-rate-repository.port';
@@ -68,7 +73,8 @@ export const EXCHANGE_RATE_CLOCK = Symbol('EXCHANGE_RATE_CLOCK');
 /**
  * Registra la tasa de un día y una moneda de la clínica del contexto (solo
  * ADMIN, lo exige la ruta; lo audita `@Audit`). Una tasa ya registrada no se
- * sobrescribe (409): corregirla llega con DX-375. Se puede registrar con la
+ * sobrescribe (409): si ningún abono la usó, se corrige con
+ * `CorrectManualExchangeRateUseCase` (DX-375). Se puede registrar con la
  * fuente AUTOMATIC (así la clínica deja la de hoy lista antes de cambiar a
  * MANUAL); solo se usa con MANUAL.
  */
@@ -150,5 +156,45 @@ export class ListManualExchangeRatesUseCase {
       MANUAL_RATES_LIST_MAX,
     );
     return this.repo.listRecent(limit);
+  }
+}
+
+/**
+ * DX-375: corrige la tasa de una tasa manual de la clínica del contexto (solo
+ * ADMIN, lo exige la ruta; lo audita `@Audit`), solo si ningún abono la congeló
+ * todavía: una tasa usada responde 409 `MANUAL_EXCHANGE_RATE_IN_USE` (el
+ * trigger `manual_exchange_rates_in_use_guard` lo garantiza también en la BD).
+ * El día y la moneda no cambian.
+ */
+@Injectable()
+export class CorrectManualExchangeRateUseCase {
+  constructor(
+    @Inject(MANUAL_EXCHANGE_RATE_REPOSITORY)
+    private readonly repo: ManualExchangeRateRepository,
+  ) {}
+
+  async execute(
+    id: string,
+    input: { rate: number },
+  ): Promise<ManualExchangeRate> {
+    if (!isValidRate(input.rate)) {
+      throw badRequest(MANUAL_RATE_MESSAGE, 'rate');
+    }
+    try {
+      return await this.repo.correct(id, input.rate);
+    } catch (error) {
+      if (error instanceof ManualExchangeRateNotFoundError) {
+        throw new NotFoundException(MANUAL_RATE_NOT_FOUND_MESSAGE);
+      }
+      if (error instanceof ManualExchangeRateInUseError) {
+        throw new ConflictException({
+          statusCode: 409,
+          error: 'Conflict',
+          code: 'MANUAL_EXCHANGE_RATE_IN_USE',
+          message: MANUAL_RATE_IN_USE_MESSAGE,
+        });
+      }
+      throw error;
+    }
   }
 }

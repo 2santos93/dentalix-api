@@ -20,11 +20,13 @@ import {
   UpdateExchangeRateSettingsUseCase,
 } from './application/use-cases/exchange-rate-settings.use-cases';
 import {
+  CorrectManualExchangeRateUseCase,
   ListManualExchangeRatesUseCase,
   EXCHANGE_RATE_CLOCK,
   RegisterManualExchangeRateUseCase,
 } from './application/use-cases/manual-exchange-rates.use-cases';
 import { ExchangeSettingsController } from './presentation/exchange-settings.controller';
+import { ExchangeSourceChangeHooks } from './application/exchange-source-change-hooks';
 
 // ConfigModule (ConfigService, used by OpenExchangeRatesProvider) and
 // PrismaModule (PrismaService, used by PrismaExchangeRateRepository) are both
@@ -51,6 +53,8 @@ import { ExchangeSettingsController } from './presentation/exchange-settings.con
     UpdateExchangeRateSettingsUseCase,
     ListManualExchangeRatesUseCase,
     RegisterManualExchangeRateUseCase,
+    CorrectManualExchangeRateUseCase,
+    ExchangeSourceChangeHooks,
     { provide: EXCHANGE_RATE_CLOCK, useValue: () => new Date() },
     {
       provide: CLINIC_EXCHANGE_SETTINGS_REPOSITORY,
@@ -73,6 +77,8 @@ import { ExchangeSettingsController } from './presentation/exchange-settings.con
   // GetPaymentsTotals) can inject ConvertAmountUseCase to convert each
   // payment at its own paidAt date without duplicating the exchange
   // lookup/conversion logic.
-  exports: [ConvertAmountUseCase],
+  // DX-375: ExchangeSourceChangeHooks, para que los pagos congelen la tasa
+  // de sus abonos pendientes antes de un cambio de fuente.
+  exports: [ConvertAmountUseCase, ExchangeSourceChangeHooks],
 })
 export class ExchangeModule {}

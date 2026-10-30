@@ -142,23 +142,27 @@ describe('manual_exchange_rates (DX-374, int)', () => {
     ).resolves.toBe(1);
   });
 
-  it('la app no puede cambiar ni borrar una tasa registrada', async () => {
+  // DX-375: la app puede corregir SOLO la tasa (de una que ningún abono usó;
+  // la usada la frena el trigger, ver payment-frozen-exchange-rate.int-spec);
+  // ni el día, ni la moneda, ni borrarla.
+  it('la app solo puede corregir la tasa: ni el día, ni la moneda, ni borrarla', async () => {
     await expect(
       asApp(b.tenantId, (tx) =>
         tx.$executeRawUnsafe(
-          `UPDATE "manual_exchange_rates" SET "rate" = 1 WHERE "tenantId" = $1::uuid`,
+          `UPDATE "manual_exchange_rates" SET "rate" = 41 WHERE "tenantId" = $1::uuid AND "currency" = 'VES'`,
           b.tenantId,
         ),
       ),
-    ).rejects.toThrow(/permission denied/);
-    await expect(
-      asApp(b.tenantId, (tx) =>
-        tx.$executeRawUnsafe(
-          `DELETE FROM "manual_exchange_rates" WHERE "tenantId" = $1::uuid`,
-          b.tenantId,
-        ),
-      ),
-    ).rejects.toThrow(/permission denied/);
+    ).resolves.toBe(1);
+    for (const sql of [
+      `UPDATE "manual_exchange_rates" SET "currency" = 'EUR' WHERE "tenantId" = $1::uuid`,
+      `UPDATE "manual_exchange_rates" SET "date" = DATE '2026-10-01' WHERE "tenantId" = $1::uuid`,
+      `DELETE FROM "manual_exchange_rates" WHERE "tenantId" = $1::uuid`,
+    ]) {
+      await expect(
+        asApp(b.tenantId, (tx) => tx.$executeRawUnsafe(sql, b.tenantId)),
+      ).rejects.toThrow(/permission denied/);
+    }
   });
 
   it.each([

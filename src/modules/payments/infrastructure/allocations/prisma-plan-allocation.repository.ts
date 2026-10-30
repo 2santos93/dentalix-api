@@ -32,11 +32,20 @@ import {
   allocationViolationMessage,
 } from '../../domain/allocation-messages';
 import { formatReceiptNumber } from '../../domain/receipt-number';
+import type { FrozenExchangeRate } from '../../domain/payment-exchange-rate';
+import {
+  FROZEN_RATE_SELECT,
+  frozenRateData,
+  frozenRateOf,
+  manualRatesStillMatch,
+  type FrozenRateColumns,
+} from '../repositories/frozen-exchange-rate.mapper';
 import type {
   AllocationItemOption,
   AllocationTarget,
   PaymentAllocationsSnapshot,
   ReplaceAllocationsInput,
+  PaymentPendingRate,
   PaymentWithoutBase,
   PlanBalanceSnapshot,
   PlanAllocationRepository,
@@ -379,6 +388,7 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
             currency: true,
             paidAt: true,
             locationId: true,
+            ...FROZEN_RATE_SELECT,
           },
         });
         // DX-097: la fecha de la tasa es el día civil del abono en SU sede.
@@ -414,6 +424,8 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
             amount: Number(p.amount),
             currency: p.currency,
             paidOn: civilDateIn(p.paidAt, zoneOf(p.locationId)),
+            exchangeRateCurrency: p.exchangeRateCurrency,
+            frozenRate: frozenRateOf(p),
           })),
           allocations: allocations.map((a) => ({
             paymentId: a.paymentId,
@@ -463,16 +475,18 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
       const rows = await tx.$queryRaw<
-        {
+        ({
           id: string;
           amount: Prisma.Decimal;
           currency: string;
           paidAt: Date;
           locationId: string;
           planCurrency: string;
-        }[]
+        } & FrozenRateColumns)[]
       >`
         SELECT p."id", p."amount", p."currency", p."paidAt", p."locationId",
+               p."exchangeRateCurrency", p."exchangeRateFrom",
+               p."exchangeRateTo", p."exchangeRateSource", p."exchangeRateDate",
                t."currency" AS "planCurrency"
           FROM "payments" p
           JOIN "treatment_plans" t
@@ -498,7 +512,98 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
         currency: r.currency,
         planCurrency: r.planCurrency,
         paidOn: civilDateIn(r.paidAt, zoneOf(r.locationId)),
+        exchangeRateCurrency: r.exchangeRateCurrency,
+        frozenRate: frozenRateOf(r),
       }));
+    });
+  }
+
+  async paymentsPendingRate(
+    limit: number,
+    exclude: readonly string[] = [],
+  ): Promise<PaymentPendingRate[]> {
+    const tenantId = this.requireTenantId();
+    return this.prisma.runWithTenant(async (tx) => {
+      // El WHERE es el del índice parcial payments_exchange_rate_pending_idx.
+      const rows = await tx.$queryRaw<
+        {
+          id: string;
+          currency: string;
+          paidAt: Date;
+          locationId: string;
+          targetCurrency: string | null;
+        }[]
+      >`
+        SELECT p."id", p."currency", p."paidAt", p."locationId",
+               COALESCE(t."currency", o."currency") AS "targetCurrency"
+          FROM "payments" p
+          LEFT JOIN "treatment_plans" t
+            ON t."tenantId" = p."tenantId" AND t."id" = p."treatmentPlanId"
+          LEFT JOIN "opening_balances" o
+            ON o."tenantId" = p."tenantId" AND o."id" = p."openingBalanceId"
+         WHERE p."tenantId" = ${tenantId}::uuid
+           AND p."deletedAt" IS NULL
+           AND p."exchangeRateFrom" IS NULL
+           AND (p."exchangeRateCurrency" IS NULL
+                OR p."currency" <> p."exchangeRateCurrency")
+           AND p."id" <> ALL (${[...exclude]}::uuid[])
+         ORDER BY p."createdAt" DESC, p."id" DESC
+         LIMIT ${limit}::int`;
+      if (rows.length === 0) return [];
+      const zoneOf = await resolveLocationTimeZones(
+        tx,
+        tenantId,
+        rows.map((r) => r.locationId),
+      );
+      return rows.flatMap((r) =>
+        r.targetCurrency === null
+          ? []
+          : [
+              {
+                paymentId: r.id,
+                currency: r.currency,
+                targetCurrency: r.targetCurrency,
+                paidOn: civilDateIn(r.paidAt, zoneOf(r.locationId)),
+              },
+            ],
+      );
+    });
+  }
+
+  async freezeRate(
+    paymentId: string,
+    targetCurrency: string,
+    frozen: FrozenExchangeRate | null,
+  ): Promise<boolean> {
+    const tenantId = this.requireTenantId();
+    return this.prisma.runWithTenant(async (tx) => {
+      const [payment] = await tx.$queryRaw<{ currency: string }[]>`
+        SELECT "currency" FROM "payments"
+         WHERE "tenantId" = ${tenantId}::uuid AND "id" = ${paymentId}::uuid`;
+      if (!payment) return false;
+      const rate =
+        frozen !== null &&
+        frozen.currency === targetCurrency &&
+        (await manualRatesStillMatch(tx, tenantId, payment.currency, frozen))
+          ? frozen
+          : null;
+      const written = await tx.payment.updateMany({
+        where: {
+          tenantId,
+          id: paymentId,
+          deletedAt: null,
+          exchangeRateFrom: null,
+          OR: [
+            { exchangeRateCurrency: null },
+            { exchangeRateCurrency: targetCurrency },
+          ],
+        },
+        data: {
+          exchangeRateCurrency: targetCurrency,
+          ...(rate ? frozenRateData(rate) : {}),
+        },
+      });
+      return written.count > 0 && rate !== null;
     });
   }
 
@@ -623,6 +728,7 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
         locationId: true,
         treatmentPlanId: true,
         receipt: { select: { seriesPrefix: true, number: true } },
+        ...FROZEN_RATE_SELECT,
       },
     });
     if (!payment) return null;
@@ -657,6 +763,8 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
       planCurrency: plan?.currency ?? null,
       planStatus: plan?.status ?? null,
       base: base ? { amount: Number(base.amount), manual: base.manual } : null,
+      exchangeRateCurrency: payment.exchangeRateCurrency,
+      frozenRate: frozenRateOf(payment),
     };
   }
 

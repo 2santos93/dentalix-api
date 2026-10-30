@@ -280,6 +280,7 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'PUT /exchange/settings': ADMIN_ONLY,
   'GET /exchange/manual-rates': ADMIN_ONLY,
   'POST /exchange/manual-rates': ADMIN_ONLY,
+  'PUT /exchange/manual-rates/:id': ADMIN_ONLY,
   // DX-324: ajustes de la receta de la clínica; los cambia solo el ADMIN.
   'GET /prescriptions/settings': CLINICAL,
   'PUT /prescriptions/settings': ADMIN_ONLY,

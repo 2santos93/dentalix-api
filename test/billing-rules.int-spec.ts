@@ -93,9 +93,18 @@ const acceptSigned = new AcceptTreatmentPlanUseCase(
 const identityExecute = (input: { amount: number }) =>
   Promise.resolve({ ...input, result: input.amount, rateUsed: 1 });
 // DX-374: el saldo pide un convertidor memoizado por cálculo.
+// DX-375: la cotización que congela un abono, también 1:1.
+const identityQuote = (input: { from: string; to: string; date: string }) =>
+  Promise.resolve({
+    ...input,
+    source: 'AUTOMATIC',
+    fromPerBase: 1,
+    toPerBase: 1,
+  });
 const identityConvert = {
   execute: identityExecute,
-  memoized: () => ({ execute: identityExecute }),
+  quote: identityQuote,
+  memoized: () => ({ execute: identityExecute, quote: identityQuote }),
 } as unknown as ConvertAmountUseCase;
 const balance = new GetPlanBalanceUseCase(
   paymentRepo,
@@ -295,6 +304,7 @@ describe('DX-109 · reglas de cobro contra Postgres (int)', () => {
             paidAt: NOW,
             receiptPlanBalance: null,
             planAmount: null,
+            frozenRate: null,
           }),
         ),
       ).rejects.toMatchObject({ status: 409 });

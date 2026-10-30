@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  NotFoundException,
 } from '@nestjs/common';
 import {
   MANUAL_RATE_BASE_CURRENCY_MESSAGE,
@@ -10,11 +11,13 @@ import {
   MANUAL_RATE_DUPLICATE_MESSAGE,
   MANUAL_RATE_FUTURE_DATE_MESSAGE,
   MANUAL_RATE_MESSAGE,
+  MANUAL_RATE_IN_USE_MESSAGE,
   MANUAL_RATE_NOT_A_MEMBER_MESSAGE,
 } from '../../domain/exchange-rate-source';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { makeManualRates } from '../__fixtures__/in-memory-exchange-settings';
 import {
+  CorrectManualExchangeRateUseCase,
   ListManualExchangeRatesUseCase,
   RegisterManualExchangeRateUseCase,
 } from './manual-exchange-rates.use-cases';
@@ -192,4 +195,75 @@ describe('Tasas de cambio manuales (DX-374)', () => {
     );
     expect(limited).toHaveLength(1);
   });
+});
+
+// DX-375: corregir una tasa manual que ningún abono usó; una ya usada (algún
+// abono la congeló) no se cambia: 409 en español.
+describe('Corregir una tasa manual (DX-375)', () => {
+  const A = '88888888-8888-4888-8888-888888888888';
+  const B = '99999999-9999-4999-8999-999999999999';
+  const tenantContext = new TenantContextService();
+  let manual: ReturnType<typeof makeManualRates>;
+  const correct = () => new CorrectManualExchangeRateUseCase(manual);
+  const inClinic = <T>(tenant: string, fn: () => Promise<T>) =>
+    tenantContext.run(tenant, fn);
+  const idOf = (tenant: string, currency: string) =>
+    manual.rows(tenant).find((r) => r.currency === currency)?.id ?? '';
+
+  beforeEach(() => {
+    manual = makeManualRates(
+      {
+        [A]: { '2026-10-29': { VES: 36, EUR: 0.9 } },
+        [B]: { '2026-10-29': { VES: 40 } },
+      },
+      tenantContext,
+    );
+  });
+
+  it('corrige una tasa sin usar y la lista la marca como no usada', async () => {
+    const saved = await inClinic(A, () =>
+      correct().execute(idOf(A, 'VES'), { rate: 36.5 }),
+    );
+    expect(saved).toMatchObject({ currency: 'VES', rate: 36.5, inUse: false });
+    expect(manual.rows(B)[0].rate).toBe(40);
+  });
+
+  it('una tasa que ya usa un abono responde 409 y no cambia', async () => {
+    manual.markUsed(A, '2026-10-29', 'VES');
+    const run = inClinic(A, () =>
+      correct().execute(idOf(A, 'VES'), { rate: 37 }),
+    );
+    await expect(run).rejects.toBeInstanceOf(ConflictException);
+    await expect(run).rejects.toMatchObject({
+      response: {
+        code: 'MANUAL_EXCHANGE_RATE_IN_USE',
+        message: MANUAL_RATE_IN_USE_MESSAGE,
+      },
+    });
+    expect(manual.rows(A).find((r) => r.currency === 'VES')?.rate).toBe(36);
+    const list = await inClinic(A, () =>
+      new ListManualExchangeRatesUseCase(manual).execute({}),
+    );
+    expect(list.map((r) => [r.currency, r.inUse])).toEqual([
+      ['EUR', false],
+      ['VES', true],
+    ]);
+  });
+
+  it('una tasa de otra clínica es 404', async () => {
+    await expect(
+      inClinic(A, () => correct().execute(idOf(B, 'VES'), { rate: 41 })),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it.each([0, -1, 1.123456789, Number.NaN])(
+    'rechaza la tasa %p con 400 en español',
+    async (rate) => {
+      await expect(
+        inClinic(A, () => correct().execute(idOf(A, 'VES'), { rate })),
+      ).rejects.toMatchObject({
+        response: { message: MANUAL_RATE_MESSAGE, field: 'rate' },
+      });
+    },
+  );
 });

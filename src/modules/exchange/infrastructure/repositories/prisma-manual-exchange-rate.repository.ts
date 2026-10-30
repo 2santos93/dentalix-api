@@ -6,6 +6,8 @@ import { resolveReferenceLocation } from '../../../../shared/locations/reference
 import type { ManualExchangeRate } from '../../domain/entities/manual-exchange-rate.entity';
 import {
   ManualExchangeRateAuthorError,
+  ManualExchangeRateInUseError,
+  ManualExchangeRateNotFoundError,
   ManualExchangeRateTakenError,
   type ManualExchangeRateRepository,
   type NewManualExchangeRate,
@@ -28,7 +30,7 @@ const toDateColumn = (day: string): Date => new Date(`${day}T00:00:00.000Z`);
 const fromDateColumn = (value: Date): string =>
   value.toISOString().slice(0, 10);
 
-function mapToEntity(row: Row): ManualExchangeRate {
+function mapToEntity(row: Row, inUse: boolean): ManualExchangeRate {
   return {
     id: row.id,
     date: fromDateColumn(row.date),
@@ -39,7 +41,31 @@ function mapToEntity(row: Row): ManualExchangeRate {
       fullName: row.createdBy.user.fullName,
     },
     createdAt: row.createdAt,
+    inUse,
   };
+}
+
+/**
+ * DX-375: las tasas manuales (día, moneda) que ya congeló algún abono de la
+ * clínica, de entre `days`: un abono con fuente MANUAL de ese día cuya moneda
+ * o moneda de destino es esa (índice parcial payments_exchange_rate_manual_idx;
+ * el mismo criterio que el trigger manual_exchange_rates_in_use_guard).
+ */
+async function usedRateKeys(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  days: string[],
+): Promise<Set<string>> {
+  if (days.length === 0) return new Set();
+  const rows = await tx.$queryRaw<{ day: string; currency: string }[]>`
+    SELECT DISTINCT to_char(p."exchangeRateDate", 'YYYY-MM-DD') AS "day",
+           c."currency"
+      FROM "payments" p
+      CROSS JOIN LATERAL (VALUES (p."currency"), (p."exchangeRateCurrency")) AS c("currency")
+     WHERE p."tenantId" = ${tenantId}::uuid
+       AND p."exchangeRateSource" = 'MANUAL'::"ExchangeRateSource"
+       AND p."exchangeRateDate" = ANY (${days}::date[])`;
+  return new Set(rows.map((r) => `${r.day}|${r.currency}`));
 }
 
 /**
@@ -75,15 +101,23 @@ export class PrismaManualExchangeRateRepository implements ManualExchangeRateRep
 
   async listRecent(limit: number): Promise<ManualExchangeRate[]> {
     const tenantId = this.tenantId();
-    const rows = await this.prisma.runWithTenant(tenantId, (tx) =>
-      tx.manualExchangeRate.findMany({
+    return this.prisma.runWithTenant(tenantId, async (tx) => {
+      const rows = await tx.manualExchangeRate.findMany({
         where: { tenantId },
         orderBy: [{ date: 'desc' }, { currency: 'asc' }],
         take: limit,
         select: ROW_SELECT,
-      }),
-    );
-    return rows.map(mapToEntity);
+      });
+      const used = await usedRateKeys(tx, tenantId, [
+        ...new Set(rows.map((r) => fromDateColumn(r.date))),
+      ]);
+      return rows.map((row) =>
+        mapToEntity(
+          row,
+          used.has(`${fromDateColumn(row.date)}|${row.currency}`),
+        ),
+      );
+    });
   }
 
   async create(input: NewManualExchangeRate): Promise<ManualExchangeRate> {
@@ -109,7 +143,7 @@ export class PrismaManualExchangeRateRepository implements ManualExchangeRateRep
           select: ROW_SELECT,
         });
       });
-      return mapToEntity(row);
+      return mapToEntity(row, false);
     } catch (error) {
       // Única violación posible: (tenant, día, moneda), también con dos
       // altas a la vez.
@@ -121,6 +155,30 @@ export class PrismaManualExchangeRateRepository implements ManualExchangeRateRep
       }
       throw error;
     }
+  }
+
+  async correct(id: string, rate: number): Promise<ManualExchangeRate> {
+    const tenantId = this.tenantId();
+    return this.prisma.runWithTenant(tenantId, async (tx) => {
+      // FOR UPDATE: un abono que la está congelando la tiene FOR SHARE; o
+      // termina antes (y aquí se ve) o espera y ya no la encuentra igual.
+      const [locked] = await tx.$queryRaw<{ date: string; currency: string }[]>`
+        SELECT to_char("date", 'YYYY-MM-DD') AS "date", "currency"
+          FROM "manual_exchange_rates"
+         WHERE "tenantId" = ${tenantId}::uuid AND "id" = ${id}::uuid
+           FOR UPDATE`;
+      if (!locked) throw new ManualExchangeRateNotFoundError();
+      const used = await usedRateKeys(tx, tenantId, [locked.date]);
+      if (used.has(`${locked.date}|${locked.currency}`)) {
+        throw new ManualExchangeRateInUseError();
+      }
+      const row = await tx.manualExchangeRate.update({
+        where: { id, tenantId },
+        data: { rate: new Prisma.Decimal(rate) },
+        select: ROW_SELECT,
+      });
+      return mapToEntity(row, false);
+    });
   }
 
   async isKnownCurrency(code: string): Promise<boolean> {

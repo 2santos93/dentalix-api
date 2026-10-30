@@ -2,7 +2,8 @@ import { Logger } from '@nestjs/common';
 import { ConvertAmountUseCase } from '../../exchange/application/use-cases/convert-amount.use-case';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import type { PlanAllocationRepository } from '../domain/ports/plan-allocation-repository.port';
-import { errorName, paymentBaseAmount } from './payment-in-plan-currency';
+import { errorName } from './payment-in-plan-currency';
+import { paymentBaseAmount } from './payment-exchange-rate';
 import { PlanAllocationRebalancer } from './plan-allocation-rebalancer';
 
 /** Tope de abonos sin base por clínica y pasada (el `LIMIT` del repositorio es `int`). */
@@ -90,7 +91,11 @@ async function createBases(
   for (const payment of payments) {
     let amount: number | null;
     try {
-      amount = await paymentBaseAmount(deps.convertAmount, payment);
+      amount = await paymentBaseAmount(
+        deps.convertAmount,
+        payment,
+        payment.planCurrency,
+      );
     } catch (error) {
       logger.warn({
         event: 'payments.allocation_backfill_conversion_failed',

@@ -5,6 +5,8 @@ import type {
 } from '../../domain/ports/clinic-exchange-settings-repository.port';
 import {
   ManualExchangeRateAuthorError,
+  ManualExchangeRateInUseError,
+  ManualExchangeRateNotFoundError,
   ManualExchangeRateTakenError,
   type ManualExchangeRateRepository,
   type NewManualExchangeRate,
@@ -86,8 +88,17 @@ export function makeManualRates(
   options: ManualOptions = {},
 ): ManualExchangeRateRepository & {
   rows(tenantId: string): ManualExchangeRate[];
+  /** Un abono congeló la tasa de ese día y moneda (DX-375). */
+  markUsed(tenantId: string, date: string, currency: string): void;
 } {
   const store = new Map<string, ManualExchangeRate[]>();
+  const used = new Set<string>();
+  const usedKey = (tenant: string, date: string, currency: string) =>
+    `${tenant}|${date}|${currency}`;
+  const withUse = (tenant: string, row: ManualExchangeRate) => ({
+    ...row,
+    inUse: used.has(usedKey(tenant, row.date, row.currency)),
+  });
   let seq = 0;
   const add = (
     tenant: string,
@@ -106,6 +117,7 @@ export function makeManualRates(
         fullName: 'Dra. Admin',
       },
       createdAt: new Date(Date.UTC(2026, 9, 30, 12, 0, seq)),
+      inUse: false,
     };
     store.set(tenant, [...(store.get(tenant) ?? []), row]);
     return row;
@@ -122,6 +134,9 @@ export function makeManualRates(
   );
   return {
     rows: (tenantId) => store.get(tenantId) ?? [],
+    markUsed: (tenantId, date, currency) => {
+      used.add(usedKey(tenantId, date, currency));
+    },
     ratesOn: (date) => {
       const out: Record<string, number> = {};
       for (const row of store.get(tenantOf(ctx)) ?? []) {
@@ -137,7 +152,8 @@ export function makeManualRates(
               ? x.currency.localeCompare(y.currency)
               : y.date.localeCompare(x.date),
           )
-          .slice(0, limit),
+          .slice(0, limit)
+          .map((row) => withUse(tenantOf(ctx), row)),
       ),
     create: (input) => {
       const tenant = tenantOf(ctx);
@@ -153,6 +169,16 @@ export function makeManualRates(
         return Promise.reject(new ManualExchangeRateTakenError());
       }
       return Promise.resolve(add(tenant, input));
+    },
+    correct: (id, rate) => {
+      const tenant = tenantOf(ctx);
+      const row = (store.get(tenant) ?? []).find((r) => r.id === id);
+      if (!row) return Promise.reject(new ManualExchangeRateNotFoundError());
+      if (used.has(usedKey(tenant, row.date, row.currency))) {
+        return Promise.reject(new ManualExchangeRateInUseError());
+      }
+      row.rate = rate;
+      return Promise.resolve(withUse(tenant, row));
     },
     isKnownCurrency: (code) => Promise.resolve(currencies.has(code)),
     referenceTimeZone: () =>

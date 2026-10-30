@@ -7,17 +7,22 @@ import {
 } from '../domain/ports/plan-allocation-repository.port';
 import { errorName } from './payment-in-plan-currency';
 import { PlanAllocationRebalancer } from './plan-allocation-rebalancer';
+import { ExchangeSourceChangeHooks } from '../../exchange/application/exchange-source-change-hooks';
 
 export const ALLOCATIONS_SWEEP_JOB = 'payment-allocations.sweep';
 /**
  * Cada minuto (un ejecutor por tick con N workers): recoge lo que el
- * interceptor no drenó (más de 5 planes, un fallo o un proceso caído) y crea
- * las bases de los abonos que se cobraron sin tasa en cuanto la hay.
+ * interceptor no drenó (más de 5 planes, un fallo o un proceso caído),
+ * congela la tasa de los abonos que se cobraron sin tasa en cuanto la hay
+ * (DX-375) y crea sus bases.
  */
 export const ALLOCATIONS_SWEEP_SCHEDULE =
   'payment-allocations.sweep.every-minute';
 export const ALLOCATIONS_SWEEP_CRON = '* * * * *';
-/** Bases por clínica y pasada: la conversión puede pedir un proveedor externo. */
+/**
+ * Tasas y bases por clínica y pasada: la conversión puede pedir un proveedor
+ * externo.
+ */
 export const MISSING_BASES_PER_SWEEP = 50;
 
 /**
@@ -36,9 +41,15 @@ export class PaymentAllocationJobs implements OnModuleInit {
     @Inject(PLAN_ALLOCATION_REPOSITORY)
     private readonly repo: PlanAllocationRepository,
     private readonly tenantContext: TenantContextService,
+    private readonly sourceChangeHooks: ExchangeSourceChangeHooks,
   ) {}
 
   onModuleInit(): void {
+    // BE-047 (DX-375): antes de que la clínica del contexto cambie la fuente
+    // de su tasa, todos sus abonos pendientes congelan la de antes.
+    this.sourceChangeHooks.register(async () => {
+      await this.rebalancer.freezeAllPending();
+    });
     this.registry.register({
       name: ALLOCATIONS_SWEEP_JOB,
       maxAttempts: 1,
@@ -57,6 +68,17 @@ export class PaymentAllocationJobs implements OnModuleInit {
   async sweep(): Promise<void> {
     for (const tenantId of await this.repo.tenantIds()) {
       await this.tenantContext.run(tenantId, async () => {
+        // DX-375: antes que las bases, la tasa de los abonos que la esperan
+        // («sin tasa» o anteriores): la base nace de la tasa congelada.
+        try {
+          await this.rebalancer.freezePendingRates(MISSING_BASES_PER_SWEEP);
+        } catch (error) {
+          this.logger.warn({
+            event: 'payments.exchange_rates_freeze_failed',
+            tenantId,
+            error: errorName(error),
+          });
+        }
         try {
           await this.rebalancer.createMissingBases(MISSING_BASES_PER_SWEEP);
         } catch (error) {

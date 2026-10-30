@@ -26,6 +26,7 @@ import {
   MANUAL_RATE_MESSAGE,
 } from '../src/modules/exchange/domain/exchange-rate-source';
 import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
+import { PaymentAllocationJobs } from '../src/modules/payments/application/payment-allocation-jobs';
 
 // DX-374 en HTTP real: la fuente de la tasa es por clínica (AUTOMATIC por
 // defecto) y solo el ADMIN la cambia y registra tasas manuales; cada cambio
@@ -79,6 +80,7 @@ interface BalanceBody {
   billable: number;
   paid: number;
   paymentsCount: number;
+  paymentsWithoutRate: { paymentId: string; currency: string }[];
 }
 
 describe('Tasa de cambio por clínica (e2e, DX-374)', () => {
@@ -326,11 +328,21 @@ describe('Tasa de cambio por clínica (e2e, DX-374)', () => {
   });
 
   it('un abono de hoy en COP sin tasa manual se guarda y queda sin tasa; el saldo responde 200', async () => {
-    await payCop(80000, new Date(Date.now() - 60_000).toISOString());
+    const res = await payCop(
+      80000,
+      new Date(Date.now() - 60_000).toISOString(),
+    );
+    expect(res.body).toMatchObject({
+      exchangeRateStatus: 'MISSING',
+      frozenRate: null,
+    });
     await expect(balance()).resolves.toMatchObject({
       billable: 100,
       paid: 10,
       paymentsCount: 2,
+      paymentsWithoutRate: [
+        { paymentId: (res.body as { id: string }).id, currency: 'COP' },
+      ],
     });
   });
 
@@ -442,10 +454,18 @@ describe('Tasa de cambio por clínica (e2e, DX-374)', () => {
       source: 'AUTOMATIC',
       rates: PROVIDER,
     });
-    // El abono de hoy vuelve a convertirse con la automática: 80.000 / 4.000 = 20.
+    // DX-375: el abono de hoy seguía «sin tasa» (antes de cambiar se
+    // congelaron los pendientes con la manual, y no había COP de hoy); el
+    // barrido le congela ahora la automática: 80.000 / 4.000 = 20.
+    await expect(balance()).resolves.toMatchObject({
+      paid: 10,
+      paymentsCount: 2,
+    });
+    await app.get(PaymentAllocationJobs).sweep();
     await expect(balance()).resolves.toMatchObject({
       paid: 30,
       paymentsCount: 2,
+      paymentsWithoutRate: [],
     });
   });
 });

@@ -36,9 +36,18 @@ const identityExecute = (input: {
   date: string;
 }) => Promise.resolve({ ...input, result: input.amount, rateUsed: 1 });
 // DX-374: los totales piden un convertidor memoizado por cálculo.
+// DX-375: la cotización que congela un abono, también 1:1.
+const identityQuote = (input: { from: string; to: string; date: string }) =>
+  Promise.resolve({
+    ...input,
+    source: 'AUTOMATIC',
+    fromPerBase: 1,
+    toPerBase: 1,
+  });
 const identityConvert = {
   execute: identityExecute,
-  memoized: () => ({ execute: identityExecute }),
+  quote: identityQuote,
+  memoized: () => ({ execute: identityExecute, quote: identityQuote }),
 } as unknown as ConvertAmountUseCase;
 const totals = new GetPaymentsTotalsUseCase(repo, identityConvert);
 const ADMIN = { userId: 'int-admin', role: ClinicRole.ADMIN };
@@ -280,6 +289,7 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
         paidAt: { civilDate: '2026-12-01' },
         receiptPlanBalance: null,
         planAmount: null,
+        frozenRate: null,
       }),
     );
     expect(created.paidAt.toISOString()).toBe('2026-12-01T11:00:00.000Z');
