@@ -27,6 +27,17 @@ export const SPLIT_PAYMENT_EXCEEDS_BALANCE = 'SPLIT_PAYMENT_EXCEEDS_BALANCE';
 export const SPLIT_PAYMENT_EXCEEDS_BALANCE_MESSAGE =
   'El total del cobro supera lo pendiente del plan. Confirma que el excedente queda como saldo a favor del paciente.';
 
+/**
+ * 409 con código estable (revisión DX-390): sin `confirmCreditBalance`, otro
+ * abono llegó al plan entre la lectura de lo pendiente y la transacción del
+ * cobro (p. ej. dos cobros a la vez). No se registra nada: repetir la petición
+ * (con la misma Idempotency-Key) vuelve a leer lo pendiente.
+ */
+export const SPLIT_PAYMENT_BALANCE_CHANGED = 'SPLIT_PAYMENT_BALANCE_CHANGED';
+
+export const SPLIT_PAYMENT_BALANCE_CHANGED_MESSAGE =
+  'Lo pendiente del plan cambió mientras se registraba el cobro (entró otro abono). No se registró nada: revisa el total y vuelve a intentarlo.';
+
 const toCents = (value: number): number => Math.round(value * 100);
 
 /**

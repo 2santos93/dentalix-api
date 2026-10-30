@@ -97,6 +97,15 @@ export interface CreateSplitPaymentRepoInput {
   requestFingerprint?: string;
   /** Saldo del plan tras el cobro entero, para la foto del recibo. */
   receiptPlanBalance: ReceiptPlanBalance | null;
+  /**
+   * Revisión DX-390: sin `confirmCreditBalance`, lo pendiente se leyó fuera
+   * de la transacción. Con esto, la transacción bloquea el plan (FOR NO KEY
+   * UPDATE: espera a los abonos en curso al plan y los pone en fila) y, si el
+   * plan tiene más abonos (vivos o anulados) que `planPaymentsSeen`, contados
+   * ANTES de leer lo pendiente, es 409 `SPLIT_PAYMENT_BALANCE_CHANGED` y no
+   * se registra nada.
+   */
+  balanceGuard?: { planPaymentsSeen: number };
 }
 
 /** DX-390: un cobro dividido registrado, con sus líneas en orden. */
@@ -252,6 +261,13 @@ export interface PaymentRepository {
    * o `null`.
    */
   findSplit(splitId: string): Promise<SplitPaymentRecord | null>;
+
+  /**
+   * Revisión DX-390: cuántos abonos tiene el plan, vivos o anulados (solo
+   * crece: un abono nunca se borra). La guarda del saldo a favor del cobro
+   * dividido (`CreateSplitPaymentRepoInput.balanceGuard`).
+   */
+  countPlanPayments(treatmentPlanId: string): Promise<number>;
 
   /**
    * DX-262: el saldo migrado vivo (no retirado) de esta clínica con lo abonado

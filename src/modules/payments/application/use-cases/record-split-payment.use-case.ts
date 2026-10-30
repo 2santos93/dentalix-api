@@ -155,10 +155,18 @@ export class RecordSplitPaymentUseCase {
     assertDistinctReferences(prepared);
 
     const converted = prepared.map((line) => line.converted);
+    const confirmCreditBalance = input.confirmCreditBalance === true;
+    // Revisión DX-390: lo pendiente se lee fuera de la transacción. Sin la
+    // confirmación, cuántos abonos tenía el plan ANTES de leerlo: la
+    // transacción bloquea el plan y, si llegó otro (dos cobros a la vez), 409
+    // sin registrar nada, en vez de dejar un saldo a favor sin confirmar.
+    const planPaymentsSeen = confirmCreditBalance
+      ? undefined
+      : await this.repo.countPlanPayments(treatmentPlanId);
     const receiptPlanBalance = await this.balanceAfter(
       treatmentPlanId,
       converted,
-      input.confirmCreditBalance === true,
+      confirmCreditBalance,
     );
 
     const lines: CreatePaymentRepoInput[] = input.lines.map((line, index) => {
@@ -192,6 +200,9 @@ export class RecordSplitPaymentUseCase {
       idempotencyKey: key,
       requestFingerprint: key === undefined ? undefined : requestFingerprint,
       receiptPlanBalance,
+      ...(planPaymentsSeen === undefined
+        ? {}
+        : { balanceGuard: { planPaymentsSeen } }),
     });
     const result = this.toResult(record, plan.currency);
     return {
@@ -269,8 +280,9 @@ export class RecordSplitPaymentUseCase {
    * Saldo del plan tras el cobro, para el recibo, y la regla del saldo a
    * favor: con lo que se sabe del total (las líneas con tasa), si supera lo
    * pendiente hace falta `confirmCreditBalance` (409). Como el saldo del
-   * recibo de un abono suelto, se lee fuera de la transacción: es una
-   * confirmación de la caja, no una restricción. Si el saldo no se puede leer,
+   * recibo de un abono suelto, se lee fuera de la transacción; la
+   * transacción comprueba que ningún abono llegó entretanto
+   * (`balanceGuard`). Si el saldo no se puede leer,
    * el cobro sigue (sin saldo en el recibo); si alguna línea está «sin tasa»,
    * el recibo sale sin saldo.
    */

@@ -169,6 +169,12 @@ export class InMemoryPaymentRepository implements PaymentRepository {
     });
   }
 
+  countPlanPayments(treatmentPlanId: string): Promise<number> {
+    return Promise.resolve(
+      this.payments.filter((p) => p.treatmentPlanId === treatmentPlanId).length,
+    );
+  }
+
   findSplit(splitId: string): Promise<SplitPaymentRecord | null> {
     const rows = this.payments
       .filter((p) => p.splitId === splitId)

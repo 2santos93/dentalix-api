@@ -62,6 +62,10 @@ import {
 } from './frozen-exchange-rate.mapper';
 import { CashPayment } from '../../domain/entities/cash-payment.entity';
 import { formatReceiptNumber } from '../../domain/receipt-number';
+import {
+  SPLIT_PAYMENT_BALANCE_CHANGED,
+  SPLIT_PAYMENT_BALANCE_CHANGED_MESSAGE,
+} from '../../domain/split-payment';
 import type { ReceiptPlanBalance } from '../../domain/receipt-snapshot';
 import {
   issuePaymentReceipt,
@@ -211,6 +215,10 @@ const CASH_PAYMENT_SELECT = {
       patient: { select: { id: true, firstName: true, lastName: true } },
     },
   },
+  // DX-390: el cobro dividido y cuántas líneas tiene (la línea 1 también se
+  // apunta a sí misma), aunque el filtro de la caja deje ver solo una.
+  splitId: true,
+  splitHead: { select: { _count: { select: { splitLines: true } } } },
 } satisfies Prisma.PaymentSelect;
 
 type PrismaCashPayment = Prisma.PaymentGetPayload<{
@@ -263,6 +271,8 @@ function mapToCashPayment(
     openingBalance: row.openingBalance
       ? { id: row.openingBalance.id, concept: row.openingBalance.concept }
       : null,
+    splitId: row.splitId,
+    splitLines: row.splitHead?._count.splitLines ?? null,
   };
 }
 
@@ -500,6 +510,13 @@ export class PrismaPaymentRepository implements PaymentRepository {
   ): Promise<SplitPaymentRecord> {
     const splitId = randomUUID();
     return this.prisma.runWithTenant(async (tx) => {
+      if (input.balanceGuard) {
+        await this.assertPlanPaymentsUnchanged(
+          tx,
+          input.lines[0]?.treatmentPlanId ?? null,
+          input.balanceGuard.planPaymentsSeen,
+        );
+      }
       const lines: InsertedLine[] = [];
       for (const [index, line] of input.lines.entries()) {
         lines.push(
@@ -861,6 +878,48 @@ export class PrismaPaymentRepository implements PaymentRepository {
       if (!row || !payment) return null;
       return { payment, requestFingerprint: row.idempotencyFingerprint };
     });
+  }
+
+  /**
+   * Revisión DX-390: la guarda del saldo a favor sin confirmar. Bloquea el
+   * plan FOR NO KEY UPDATE ANTES que nada (el primer bloqueo de la
+   * transacción, el mismo orden «plan primero» de todo escritor de abonos, R6):
+   * espera a cualquier abono en curso al plan (que lo tiene FOR SHARE) y pone
+   * en fila otro cobro dividido. Con el plan bloqueado, la cuenta ve todo lo
+   * confirmado: si creció desde la lectura de lo pendiente, 409. NO KEY: no
+   * choca con el FOR KEY SHARE de las FK que apuntan al plan.
+   */
+  private async assertPlanPaymentsUnchanged(
+    tx: Prisma.TransactionClient,
+    treatmentPlanId: string | null,
+    planPaymentsSeen: number,
+  ): Promise<void> {
+    if (!treatmentPlanId) return;
+    const tenantId = this.requireTenantId();
+    await tx.$queryRaw`
+      SELECT 1 FROM "treatment_plans"
+       WHERE "tenantId" = ${tenantId}::uuid AND "id" = ${treatmentPlanId}::uuid
+         FOR NO KEY UPDATE`;
+    const count = await tx.payment.count({
+      where: { tenantId, treatmentPlanId },
+    });
+    if (count !== planPaymentsSeen) {
+      throw new ConflictException({
+        statusCode: 409,
+        error: 'Conflict',
+        code: SPLIT_PAYMENT_BALANCE_CHANGED,
+        message: SPLIT_PAYMENT_BALANCE_CHANGED_MESSAGE,
+      });
+    }
+  }
+
+  async countPlanPayments(treatmentPlanId: string): Promise<number> {
+    // Vivos y anulados (un abono nunca se borra): la cuenta solo crece.
+    return this.prisma.runWithTenant((tx) =>
+      tx.payment.count({
+        where: { tenantId: this.requireTenantId(), treatmentPlanId },
+      }),
+    );
   }
 
   async findSplit(splitId: string): Promise<SplitPaymentRecord | null> {

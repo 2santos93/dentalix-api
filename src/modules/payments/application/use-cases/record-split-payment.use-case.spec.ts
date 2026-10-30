@@ -364,6 +364,42 @@ describe('RecordSplitPaymentUseCase (DX-390)', () => {
     });
   });
 
+  // Revisión DX-390: lo pendiente se lee fuera de la transacción; sin la
+  // confirmación, el repositorio comprueba dentro (con el plan bloqueado) que
+  // ningún abono llegó al plan desde esa lectura.
+  it('sin confirmar, pasa al repositorio cuántos abonos tenía el plan ANTES de leer lo pendiente; confirmado, no', async () => {
+    const { uc, repo } = makeUseCase();
+    await uc.execute('plan-1', twoLines());
+    const seen = repo.lastSplitInput?.balanceGuard?.planPaymentsSeen;
+    expect(seen).toEqual(expect.any(Number));
+
+    // Cuenta también los anulados (solo crece).
+    repo.seedPayment({ treatmentPlanId: 'plan-1' });
+    repo.seedPayment({ treatmentPlanId: 'plan-1', deletedAt: new Date() });
+    await uc.execute(
+      'plan-1',
+      twoLines({
+        lines: twoLines().lines.map((l, i) =>
+          i === 0 ? { ...l, reference: 'TR-002' } : l,
+        ),
+      }),
+    );
+    expect(repo.lastSplitInput?.balanceGuard?.planPaymentsSeen).toBe(
+      (seen ?? 0) + 4,
+    );
+
+    await uc.execute(
+      'plan-1',
+      twoLines({
+        confirmCreditBalance: true,
+        lines: twoLines().lines.map((l, i) =>
+          i === 0 ? { ...l, reference: 'TR-003' } : l,
+        ),
+      }),
+    );
+    expect(repo.lastSplitInput?.balanceGuard).toBeUndefined();
+  });
+
   it('un plan rechazado o cancelado → 409; uno de otra clínica → 404', async () => {
     const { uc, setPlan } = makeUseCase();
     setPlan(makePlan({ status: TreatmentPlanStatus.CANCELLED }));

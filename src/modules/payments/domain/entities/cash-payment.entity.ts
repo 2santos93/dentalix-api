@@ -40,6 +40,13 @@ export interface CashPayment {
   } | null;
   /** Saldo migrado del abono (DX-262), o `null` si es a un plan. */
   openingBalance: { id: string; concept: string } | null;
+  /**
+   * DX-390: el cobro dividido del abono (el id de su línea 1) y cuántas
+   * formas de pago tiene; `null` en un abono de una sola forma de pago.
+   * Anular una línea anula el cobro entero: la caja lo avisa antes.
+   */
+  splitId: string | null;
+  splitLines: number | null;
 }
 
 /**

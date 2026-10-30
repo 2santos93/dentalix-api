@@ -36,6 +36,7 @@ const PROVIDER = { COP: 4000 };
 
 interface PaymentBody {
   id: string;
+  patientId: string;
   amount: number;
   currency: string;
   method: string | null;
@@ -504,6 +505,52 @@ describe('Cobro dividido con un solo recibo (e2e, DX-390)', () => {
     ).expect(201);
     expect((ok.body as SplitBody).total).toBe(pending + 400_000);
     expect((await balance()).balance).toBe(-400_000);
+  });
+
+  // Revisión DX-390: la caja y el estado de cuenta (donde también se anula)
+  // dicen de qué cobro es cada línea y cuántas tiene, para avisar antes de
+  // anular que se anula el cobro entero. Aunque el filtro deje ver solo una.
+  it('la caja y el estado de cuenta dicen el cobro de cada línea y cuántas tiene', async () => {
+    const ids = first.payments.map((p) => p.id);
+    const cash = (
+      await as(
+        api().get(
+          `/api/v1/payments?from=${TODAY}&to=${TODAY}&paymentMethodId=${transferA}`,
+        ),
+        a,
+        receptionA,
+      ).expect(200)
+    ).body as {
+      items: {
+        id: string;
+        splitId: string | null;
+        splitLines: number | null;
+      }[];
+    };
+    const cashLine = cash.items.find((item) => item.id === ids[2]);
+    expect(cashLine).toMatchObject({ splitId: first.id, splitLines: 3 });
+    expect(cash.items.filter((item) => ids.includes(item.id))).toHaveLength(1);
+
+    const statement = (
+      await as(
+        api().get(
+          `/api/v1/patients/${first.payments[0].patientId}/account-statement`,
+        ),
+        a,
+        receptionA,
+      ).expect(200)
+    ).body as {
+      movements: {
+        id: string;
+        splitId: string | null;
+        splitLines: number | null;
+      }[];
+    };
+    const lines = statement.movements.filter((m) => ids.includes(m.id));
+    expect(lines).toHaveLength(3);
+    for (const movement of lines) {
+      expect(movement).toMatchObject({ splitId: first.id, splitLines: 3 });
+    }
   });
 
   it('anular una línea anula el cobro entero y su recibo, con un evento VOID por línea', async () => {

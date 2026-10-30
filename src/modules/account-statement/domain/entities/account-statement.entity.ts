@@ -46,6 +46,8 @@ export interface StatementPaymentRow {
   paymentMethod: StatementPaymentMethodRef | null;
   /** DX-395: referencia del pago tal como se tecleó, o `null`. */
   reference: string | null;
+  /** DX-390: el cobro dividido del abono (id de su línea 1), o `null`. */
+  splitId?: string | null;
   location: { id: string; name: string };
   /** Quién registró el abono (`null` en abonos antiguos sin autor). */
   createdById: string | null;
@@ -201,6 +203,12 @@ export interface StatementMovement {
   paymentMethod: StatementPaymentMethodRef | null;
   /** DX-395: referencia del pago, o `null`. */
   reference: string | null;
+  /**
+   * DX-390: el cobro dividido del abono (id de su línea 1) y cuántas formas de
+   * pago tiene; `null` en un abono suelto. Anular una anula el cobro entero.
+   */
+  splitId: string | null;
+  splitLines: number | null;
   location: { id: string; name: string };
   /** `null` si el abono es contra un saldo migrado (DX-262). */
   treatmentPlanId: string | null;

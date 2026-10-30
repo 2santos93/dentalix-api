@@ -296,6 +296,25 @@ export class AccountStatementMovementDto {
   })
   reference!: string | null;
 
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description:
+      'DX-390: el cobro dividido del abono (el id de su línea 1); `null` en ' +
+      'un abono de una sola forma de pago. Anular una línea anula el cobro entero.',
+  })
+  splitId!: string | null;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    example: 2,
+    description:
+      'DX-390: cuántas formas de pago tiene su cobro dividido; `null` en un abono suelto.',
+  })
+  splitLines!: number | null;
+
   @ApiProperty({ type: AccountStatementLocationRefDto })
   location!: AccountStatementLocationRefDto;
 

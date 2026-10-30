@@ -337,6 +337,13 @@ export function computeAccountStatement(
 
   // --- Movimientos ----------------------------------------------------------
   // DX-097: el día de cada abono es el de SU sede, no el día UTC.
+  // DX-390: cuántas líneas tiene cada cobro dividido (todas las del paciente:
+  // el filtro de fechas no parte un cobro, que lleva un solo día).
+  const splitLines = new Map<string, number>();
+  for (const p of snapshot.payments) {
+    if (p.splitId)
+      splitLines.set(p.splitId, (splitLines.get(p.splitId) ?? 0) + 1);
+  }
   const movements: StatementMovement[] = snapshot.payments
     .map((p) => ({ p, paidOn: civilDateIn(p.paidAt, p.timeZone) }))
     .filter(({ paidOn }) =>
@@ -351,6 +358,8 @@ export function computeAccountStatement(
       method: p.method,
       paymentMethod: p.paymentMethod,
       reference: p.reference,
+      splitId: p.splitId ?? null,
+      splitLines: p.splitId ? (splitLines.get(p.splitId) ?? null) : null,
       location: p.location,
       treatmentPlanId: p.treatmentPlanId,
       openingBalanceId: p.openingBalanceId ?? null,

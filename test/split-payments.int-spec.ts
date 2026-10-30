@@ -397,4 +397,64 @@ describe('DX-390 · cobro dividido con un solo recibo (int)', () => {
     });
     expect(receipt.voidReason).toBe('Duplicado');
   });
+
+  // Revisión DX-390: lo pendiente se lee fuera de la transacción; sin
+  // `confirmCreditBalance`, la transacción bloquea el plan y comprueba que
+  // ningún abono llegó al plan entre la lectura y el alta (dos cobros a la vez
+  // no dejan saldo a favor sin confirmarlo).
+  it('saldo a favor sin confirmar: si otro abono llegó al plan tras leer lo pendiente, 409 y no queda ninguna línea', async () => {
+    const seen = await tenantContext.run(a.tenantId, a.locationId, () =>
+      payments.countPlanPayments(a.planId),
+    );
+    // Otro cobro entra entre la lectura de lo pendiente y la transacción.
+    await split(a, { lines: [line(a, { amount: 8 }), line(a, { amount: 9 })] });
+    const counter = await counterOf(a.tenantId);
+    const rowsBefore = await raw.payment.count({
+      where: { tenantId: a.tenantId },
+    });
+
+    await expect(
+      split(a, {
+        lines: [line(a, { amount: 10 }), line(a, { amount: 11 })],
+        balanceGuard: { planPaymentsSeen: seen },
+      }),
+    ).rejects.toMatchObject({
+      response: { code: 'SPLIT_PAYMENT_BALANCE_CHANGED' },
+    });
+    expect(await raw.payment.count({ where: { tenantId: a.tenantId } })).toBe(
+      rowsBefore,
+    );
+    expect(await counterOf(a.tenantId)).toBe(counter);
+
+    // Con la cuenta al día, el cobro entra.
+    const fresh = await tenantContext.run(a.tenantId, a.locationId, () =>
+      payments.countPlanPayments(a.planId),
+    );
+    const record = await split(a, {
+      lines: [line(a, { amount: 10 }), line(a, { amount: 11 })],
+      balanceGuard: { planPaymentsSeen: fresh },
+    });
+    expect(record.payments).toHaveLength(2);
+  });
+
+  it('dos cobros simultáneos sin confirmar con la misma lectura de lo pendiente: entra uno y el otro es 409', async () => {
+    const seen = await tenantContext.run(a.tenantId, a.locationId, () =>
+      payments.countPlanPayments(a.planId),
+    );
+    const results = await Promise.allSettled([
+      split(a, {
+        lines: [line(a, { amount: 12 }), line(a, { amount: 13 })],
+        balanceGuard: { planPaymentsSeen: seen },
+      }),
+      split(a, {
+        lines: [line(a, { amount: 14 }), line(a, { amount: 15 })],
+        balanceGuard: { planPaymentsSeen: seen },
+      }),
+    ]);
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    const [rejected] = results.filter((r) => r.status === 'rejected');
+    expect(rejected).toMatchObject({
+      reason: { response: { code: 'SPLIT_PAYMENT_BALANCE_CHANGED' } },
+    });
+  });
 });
