@@ -874,8 +874,20 @@ describe('CSV de la plantilla y del informe', () => {
     expect(rows[0].data).toMatchObject({
       docType: 'NATIONAL_ID',
       birthDate: '1988-04-15',
-      phone: '+0000000001',
     });
+    expect(rows[0].data).not.toHaveProperty('phone');
+    expect(rows[0].data).not.toHaveProperty('emergencyContactPhone');
+  });
+
+  it("la plantilla no trae teléfonos de ejemplo ni celdas con la «'» antifórmulas (DX-368)", () => {
+    const template = templateCsv();
+    const table = toTable(parseCsv(Buffer.from(template, 'utf8')).records);
+    for (const column of ['telefono', 'telefono_emergencia']) {
+      const index = table.headers.indexOf(column);
+      expect(index).toBeGreaterThanOrEqual(0);
+      for (const row of table.rows) expect(row.cells[index] ?? '').toBe('');
+    }
+    expect(template).not.toContain('"\'');
   });
 });
 
