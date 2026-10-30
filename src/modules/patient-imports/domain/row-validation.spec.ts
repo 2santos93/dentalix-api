@@ -12,6 +12,7 @@ import {
 } from './column-mapping';
 import { dedupeRows } from './dedupe';
 import { fieldsToRevert, fillEmpty, type FillablePatient } from './fill-empty';
+import { examplePhone } from '../../../shared/phone/phone-number';
 import { csvCell, issuesCsv, templateCsv } from './import-csv';
 import { IMPORT_FIELDS, type ImportPatientData } from './import-fields';
 import {
@@ -900,7 +901,9 @@ describe('CSV de la plantilla y del informe', () => {
   });
 
   it('la plantilla trae las columnas admitidas y se puede volver a leer con su mapeo sugerido', () => {
-    const table = toTable(parseCsv(Buffer.from(templateCsv(), 'utf8')).records);
+    const table = toTable(
+      parseCsv(Buffer.from(templateCsv(examplePhone('CO')), 'utf8')).records,
+    );
     expect(table.headers).toEqual(IMPORT_FIELDS.map((f) => f.header));
     const mapping = resolveMapping(table.headers, {
       columns: suggestMapping(table.headers),
@@ -916,7 +919,7 @@ describe('CSV de la plantilla y del informe', () => {
     expect(rows[0].data).toMatchObject({
       docType: 'NATIONAL_ID',
       birthDate: '1988-04-15',
-      phone: '+573100000001',
+      phone: '+573211234567',
     });
   });
 });

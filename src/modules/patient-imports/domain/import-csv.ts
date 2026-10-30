@@ -25,8 +25,15 @@ export function csv(lines: (string | number | null)[][]): string {
   return BOM + lines.map((l) => l.map(csvCell).join(',')).join('\r\n') + '\r\n';
 }
 
-/** Plantilla: las columnas admitidas y dos filas de ejemplo ficticias. */
-export function templateCsv(): string {
+/**
+ * Plantilla: las columnas admitidas y dos filas de ejemplo ficticias. Los
+ * teléfonos de ejemplo son `examplePhone`, el móvil de ejemplo de la región
+ * de la sede en formato nacional (DX-329): enseñan que sin `+` se usa el
+ * prefijo de la sede. Sin región, las celdas quedan vacías: nunca el número
+ * de un país. La librería da un solo ejemplo por región, así que las dos
+ * celdas lo repiten.
+ */
+export function templateCsv(examplePhone: string | null): string {
   const example1: Record<string, string> = {
     tipo_documento: 'NATIONAL_ID',
     numero_documento: 'DOC-1000001',
@@ -34,12 +41,12 @@ export function templateCsv(): string {
     apellidos: 'Ejemplo Gómez',
     fecha_nacimiento: '15/04/1988',
     sexo: 'F',
-    telefono: '310 000 0001',
+    telefono: examplePhone ?? '',
     email: 'ana.ejemplo@example.com',
     direccion: 'Calle 1 # 2-3',
     ocupacion: 'Docente',
     contacto_emergencia: 'Luis Ejemplo',
-    telefono_emergencia: '310 000 0002',
+    telefono_emergencia: examplePhone ?? '',
     notas: 'Fila de ejemplo: bórrala antes de importar',
   };
   const example2: Record<string, string> = {

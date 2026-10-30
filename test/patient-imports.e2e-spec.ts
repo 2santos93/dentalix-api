@@ -18,6 +18,10 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import { legacyStoredDocType } from '../src/modules/patients/domain/legacy-doc-type';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 import { MISSING_FILE_MESSAGE } from '../src/modules/patient-imports/application/patient-imports.use-cases';
 
 // DX-107 · Importación de pacientes desde CSV/XLSX en HTTP real: plantilla,
@@ -1315,6 +1319,55 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
       });
       expect(stored.phone).toBe('+390612345678');
     } finally {
+      await raw.location.update({
+        where: { id: mainLocationId },
+        data: before,
+      });
+    }
+  });
+
+  it("the template shows the example of the location's region and nothing without one", async () => {
+    const before = await raw.location.findUniqueOrThrow({
+      where: { id: mainLocationId },
+      select: { defaultPhoneRegion: true },
+    });
+    await raw.location.update({
+      where: { id: mainLocationId },
+      data: { defaultPhoneRegion: 'VE' },
+    });
+    const withoutRegion = await raw.location.create({
+      data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        tenantId: a.tenantId,
+        name: 'Sede 329 sin prefijo',
+        defaultPhoneRegion: null,
+      }),
+    });
+    const phoneCells = async (locationId: string) => {
+      const res = await as(
+        api().get('/api/v1/patient-imports/template'),
+        a.adminToken,
+      )
+        .set('X-Location-Id', locationId)
+        .expect(200);
+      const [header, first] = res.text
+        .replace(/^\uFEFF/, '')
+        .split('\r\n')
+        .map((line) => line.split(','));
+      return ['"telefono"', '"telefono_emergencia"'].map(
+        (name) => first[header.indexOf(name)],
+      );
+    };
+    try {
+      expect(await phoneCells(mainLocationId)).toEqual([
+        '"0412-1234567"',
+        '"0412-1234567"',
+      ]);
+      expect(await phoneCells(withoutRegion.id)).toEqual(['""', '""']);
+    } finally {
+      await raw.location.update({
+        where: { id: withoutRegion.id },
+        data: { deletedAt: new Date(), isActive: false },
+      });
       await raw.location.update({
         where: { id: mainLocationId },
         data: before,

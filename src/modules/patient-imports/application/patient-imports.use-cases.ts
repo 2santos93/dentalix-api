@@ -48,6 +48,7 @@ import {
 } from '../domain/tabular-file';
 import { locationCurrencyRequired } from '../../../shared/locations/reference-location';
 import { requireLocationFormat } from '../../../shared/locations/location-regional';
+import { examplePhone } from '../../../shared/phone/phone-number';
 import {
   BatchLocationError,
   BatchStateError,
@@ -312,8 +313,9 @@ export class PatientImportsService {
     private readonly documentTypeNames: DocumentTypeNamesReader,
   ) {}
 
-  template(): string {
-    return templateCsv();
+  /** Con el móvil de ejemplo de la región de la sede activa o principal. */
+  async template(): Promise<string> {
+    return templateCsv(examplePhone(await this.repo.templatePhoneRegion()));
   }
 
   /**

@@ -99,6 +99,40 @@ describe('PatientImportsService: sede del lote antes que el fichero (G1-B)', () 
   });
 });
 
+describe('PatientImportsService: plantilla con el ejemplo de la sede (DX-329)', () => {
+  const templateOf = async (region: string | null) => {
+    const uc = new PatientImportsService(
+      {
+        templatePhoneRegion: () => Promise.resolve(region),
+      } as unknown as PrismaPatientImportRepository,
+      {} as JobQueue,
+      new FixedDocumentTypeNamesReader(),
+    );
+    const [header, first, second] = (await uc.template())
+      .replace(/^\uFEFF/, '')
+      .split('\r\n')
+      .map((line) => line.split(','));
+    const cell = (row: string[], name: string) =>
+      row[header.indexOf(`"${name}"`)];
+    return { header, first, second, cell };
+  };
+
+  it("the template shows a national example of the location's region", async () => {
+    const { first, second, cell } = await templateOf('VE');
+    expect(cell(first, 'telefono')).toBe('"0412-1234567"');
+    expect(cell(first, 'telefono_emergencia')).toBe('"0412-1234567"');
+    expect(cell(second, 'telefono')).toBe('""');
+  });
+
+  it('without a region the template leaves the phone cells empty', async () => {
+    const { header, first, cell } = await templateOf(null);
+    expect(header).toContain('"telefono"');
+    expect(cell(first, 'telefono')).toBe('""');
+    expect(cell(first, 'telefono_emergencia')).toBe('""');
+    expect(first.join(',')).not.toMatch(/\d{3}[ -]?\d{3}[ -]?\d{4}/);
+  });
+});
+
 describe('PatientImportsService: tipos de documento genéricos (DX-327)', () => {
   it('a stored legacy default type is read as its generic type', () => {
     const batch = (columnMapping: unknown) => ({ columnMapping }) as BatchRow;
