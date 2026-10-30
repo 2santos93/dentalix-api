@@ -69,7 +69,7 @@ export class PaymentPlanDto {
   @ApiProperty({ example: 'clx0987654321' })
   treatmentPlanId!: string;
 
-  @ApiProperty({ example: 'USD', description: 'ISO 4217 currency code' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({ enum: ['ACTIVE', 'COMPLETED', 'CANCELLED'] })

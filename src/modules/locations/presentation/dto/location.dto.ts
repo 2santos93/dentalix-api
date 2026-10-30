@@ -68,7 +68,10 @@ export class CreateLocationDto {
   @MinLength(1)
   name!: string;
 
-  @ApiPropertyOptional({ example: 'Cra 15 #90-20' })
+  @ApiPropertyOptional({
+    description:
+      'Dirección postal de la sede, texto libre en el formato local.',
+  })
   @IsOptional()
   @IsString()
   address?: string;
@@ -78,7 +81,7 @@ export class CreateLocationDto {
   @IsString({ message: COUNTRY_MISSING })
   country?: string;
 
-  @ApiProperty({ type: String, example: 'EUR', description: CURRENCY_DOC })
+  @ApiProperty({ type: String, description: CURRENCY_DOC })
   @IsOptional()
   @IsString({ message: REGIONAL_MESSAGES.currencyMissing })
   currency?: string;
@@ -139,7 +142,6 @@ export class UpdateLocationDto {
   @ApiPropertyOptional({
     type: String,
     nullable: true,
-    example: 'NRS 28/1234-AB',
     maxLength: HEALTH_REGISTRATION_NUMBER_MAX,
     description: `${HEALTH_REGISTRATION_DOC} Vacío o null lo quita; sin el campo no cambia.`,
   })
@@ -191,7 +193,6 @@ export class UpdateLocationDto {
   // OpenAPI. `null` no es válido (400), así que el contrato es `string`.
   @ApiPropertyOptional({
     type: String,
-    example: 'EUR',
     description: CURRENCY_DOC,
   })
   // `null` se rechaza en el caso de uso (400 con el campo); ausente no cambia.
@@ -280,7 +281,6 @@ export class LocationDto {
   @ApiProperty({
     type: String,
     nullable: true,
-    example: 'EUR',
     description: `${CURRENCY_DOC} null = sede sin configurar (fase 1).`,
   })
   currency!: string | null;

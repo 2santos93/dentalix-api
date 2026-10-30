@@ -12,7 +12,6 @@ import { IsOptional, IsString } from 'class-validator';
 export class CreateTreatmentPlanDto {
   @ApiPropertyOptional({
     type: String,
-    example: 'EUR',
     description:
       'ISO 4217 (si se omite, la moneda de la sede activa o la común de la clínica)',
   })

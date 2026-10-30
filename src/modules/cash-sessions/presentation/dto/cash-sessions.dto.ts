@@ -36,8 +36,7 @@ function trim({ value }: { value: unknown }): unknown {
 }
 
 const CURRENCY_PATTERN = /^[A-Za-z]{3}$/;
-const CURRENCY_MESSAGE =
-  'currency debe ser un código ISO 4217 de 3 letras (p. ej. COP).';
+const CURRENCY_MESSAGE = 'currency debe ser un código ISO 4217 de 3 letras.';
 const METHOD_MESSAGE = 'method debe ser CASH, CARD, TRANSFER u OTHER.';
 const AMOUNT_OPTIONS = {
   maxDecimalPlaces: 2,
@@ -52,7 +51,7 @@ const MAX_COUNT_LINES = CASH_MAX_CURRENCIES * 4;
 // ---------------------------------------------------------------------------
 
 export class CashFloatInputDto {
-  @ApiProperty({ example: 'COP', description: 'ISO 4217' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   @Matches(CURRENCY_PATTERN, { message: CURRENCY_MESSAGE })
   currency!: string;
 
@@ -102,7 +101,7 @@ export class OpenCashSessionDto {
 }
 
 export class CashCountInputDto {
-  @ApiProperty({ example: 'COP', description: 'ISO 4217' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   @Matches(CURRENCY_PATTERN, { message: CURRENCY_MESSAGE })
   currency!: string;
 
@@ -177,7 +176,7 @@ export class ReopenCashSessionDto {
 }
 
 export class CreateCashAdjustmentDto {
-  @ApiProperty({ example: 'COP', description: 'ISO 4217' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   @Matches(CURRENCY_PATTERN, { message: CURRENCY_MESSAGE })
   currency!: string;
 
@@ -306,7 +305,7 @@ export class CashLocationRefDto {
 }
 
 export class CashMoneyDto {
-  @ApiProperty({ example: 'COP' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty()
@@ -322,7 +321,7 @@ export class CashPatientRefDto {
 }
 
 export class CashExpectedLineDto {
-  @ApiProperty({ example: 'COP' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({ enum: PaymentMethod, enumName: 'PaymentMethod' })
@@ -357,7 +356,7 @@ export class CashExpectedLineDto {
 }
 
 export class CashClosingLineDto {
-  @ApiProperty({ example: 'COP' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({ enum: PaymentMethod, enumName: 'PaymentMethod' })
@@ -442,7 +441,7 @@ export class CashSessionPaymentDto {
   @ApiProperty()
   amount!: number;
 
-  @ApiProperty({ example: 'COP' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({
@@ -495,7 +494,7 @@ export class CashOutflowDto {
   @ApiProperty()
   amount!: number;
 
-  @ApiProperty({ example: 'COP' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({ format: 'date-time' })
@@ -573,7 +572,7 @@ export class CashAdjustmentDto {
   })
   kind!: CashAdjustmentKind;
 
-  @ApiProperty({ example: 'COP' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({ enum: PaymentMethod, enumName: 'PaymentMethod' })

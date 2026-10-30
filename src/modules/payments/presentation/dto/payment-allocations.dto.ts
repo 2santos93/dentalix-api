@@ -86,7 +86,7 @@ export class PaymentAllocationsDto {
   @ApiProperty({ example: 100, description: 'En la moneda del abono' })
   paymentAmount!: number;
 
-  @ApiProperty({ example: 'USD' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   paymentCurrency!: string;
 
   @ApiProperty({
@@ -95,7 +95,7 @@ export class PaymentAllocationsDto {
   })
   paidOn!: string;
 
-  @ApiProperty({ example: 'EUR' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   planCurrency!: string;
 
   @ApiProperty({

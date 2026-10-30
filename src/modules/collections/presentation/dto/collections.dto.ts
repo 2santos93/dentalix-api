@@ -73,9 +73,9 @@ export class CreatePaymentPromiseDto {
   })
   amount!: number;
 
-  @ApiProperty({ example: 'COP', description: 'ISO 4217' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   @Matches(/^[A-Za-z]{3}$/, {
-    message: 'currency debe ser un código ISO 4217 de 3 letras (p. ej. COP).',
+    message: 'currency debe ser un código ISO 4217 de 3 letras.',
   })
   currency!: string;
 
@@ -150,7 +150,7 @@ export class PaymentPromiseDto {
   @ApiProperty()
   amount!: number;
 
-  @ApiProperty({ example: 'COP' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({ example: '2026-11-15', description: 'Día civil de la sede' })
@@ -198,7 +198,7 @@ export class PatientCollectionsDto {
 }
 
 export class OverdueAmountDto {
-  @ApiProperty({ example: 'COP' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({

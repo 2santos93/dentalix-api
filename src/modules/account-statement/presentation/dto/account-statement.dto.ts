@@ -76,7 +76,7 @@ export class AccountStatementNextInstallmentDto {
 }
 
 export class AccountStatementCurrencySummaryDto {
-  @ApiProperty({ example: 'COP', description: 'ISO 4217' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({
@@ -127,7 +127,7 @@ export class AccountStatementOpeningBalanceDto {
   @ApiProperty({ format: 'uuid' })
   id!: string;
 
-  @ApiProperty({ example: 'COP' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({ example: 150000 })
@@ -162,7 +162,7 @@ export class AccountStatementOpeningBalanceDto {
 }
 
 export class AccountStatementOtherCurrencyDto {
-  @ApiProperty({ example: 'USD' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({ example: 50 })
@@ -176,7 +176,7 @@ export class AccountStatementPlanDto {
   @ApiProperty({ enum: TreatmentPlanStatus })
   status!: TreatmentPlanStatus;
 
-  @ApiProperty({ example: 'COP' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({
@@ -256,7 +256,7 @@ export class AccountStatementMovementDto {
   @ApiProperty({ example: 150000 })
   amount!: number;
 
-  @ApiProperty({ example: 'COP' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({ enum: PaymentMethod, nullable: true })
@@ -330,7 +330,7 @@ export class AccountStatementInstallmentDto {
   @ApiProperty({ format: 'uuid' })
   treatmentPlanId!: string;
 
-  @ApiProperty({ example: 'COP' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({ enum: ['DOWN_PAYMENT', 'INSTALLMENT'] })
@@ -413,7 +413,7 @@ export class AccountStatementDto {
 // ---------------------------------------------------------------------------
 
 export class FamilyCurrencyAmountsDto {
-  @ApiProperty({ example: 'COP' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({ description: 'Igual que `summary[].budgeted` individual' })

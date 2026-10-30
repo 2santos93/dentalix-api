@@ -42,7 +42,6 @@ export class DashboardQueryDto {
   to!: string;
 
   @ApiProperty({
-    example: 'USD',
     description:
       'ISO 4217 currency code every payment amount is converted into.',
   })

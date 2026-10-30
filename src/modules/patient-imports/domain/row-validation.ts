@@ -236,7 +236,7 @@ export function parseSex(
 
 /**
  * Teléfono: si es un número plausible con el indicativo por defecto (o con
- * «+»/«00»), en E.164 (`+573101234567`, la regla del botón de WhatsApp,
+ * «+»/«00»), en E.164 (`+` con indicativo y número, la regla del botón de WhatsApp,
  * DX-005); un fijo corto que no lo es, tal cual (7 a 15 dígitos).
  */
 export function normalizePhone(
