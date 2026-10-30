@@ -21,7 +21,8 @@ import {
   type PlanAllocationRepository,
 } from '../../domain/ports/plan-allocation-repository.port';
 import { errorName } from '../payment-in-plan-currency';
-import { paymentBaseAmount } from '../payment-exchange-rate';
+import { freezePaymentRate, paymentBaseAmount } from '../payment-exchange-rate';
+import { exchangeRateStatus } from '../../domain/payment-exchange-rate';
 import { PlanAllocationRebalancer } from '../plan-allocation-rebalancer';
 import {
   GetPaymentAllocationsUseCase,
@@ -152,9 +153,10 @@ export class ReplacePaymentAllocationsUseCase {
   private async withBase(target: AllocationTarget): Promise<AllocationTarget> {
     if (target.base) return target;
     const planCurrency = target.planCurrency as string;
+    const rated = await this.withFrozenRate(target, planCurrency);
     const amount = await paymentBaseAmount(
       this.convertAmount,
-      target,
+      rated,
       planCurrency,
     );
     if (amount === null) throw noRate(target);
@@ -169,6 +171,26 @@ export class ReplacePaymentAllocationsUseCase {
     );
     if (!reread.base) throw noRate(reread);
     return reread;
+  }
+
+  /**
+   * DX-375: un abono «sin tasa» congela aquí la tasa de su día si ya la hay
+   * (lo mismo que haría el barrido), y la base sale de ella. Sin tasa sigue
+   * igual y el llamador responde 409.
+   */
+  private async withFrozenRate(
+    target: AllocationTarget,
+    planCurrency: string,
+  ): Promise<AllocationTarget> {
+    if (exchangeRateStatus(target) !== 'MISSING') return target;
+    const rate = await freezePaymentRate(this.convertAmount, {
+      currency: target.currency,
+      targetCurrency: planCurrency,
+      paidOn: target.paidOn,
+    });
+    if (!rate) return target;
+    await this.repo.freezeRate(target.paymentId, planCurrency, rate);
+    return checkTarget(await this.repo.findAllocationTarget(target.paymentId));
   }
 }
 
