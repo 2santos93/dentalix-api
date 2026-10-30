@@ -1765,7 +1765,7 @@ de esquemas propios de una librería).
   | `queue.running`, `runningExpired` | RUNNING y los que tienen el arriendo vencido |
   | `queue.failedLast24h` | FAILED en las últimas 24 h |
   | `workers.alive`, `lastBeatAt`, `recent[]` | Workers con latido de menos de 60 s; los 50 más recientes |
-  | `schedules[]` | Por tarea: `cron`, `lastRunAt`, `nextRunAt`, `periodMs`, `delayMs` y `overdue` (más de **2 periodos** sin correr, o sin sincronizar: `nextRunAt` null) |
+  | `schedules[]` | Por tarea: `cron`, `lastRunAt`, `nextRunAt`, `periodMs`, `delayMs` y `overdue` (más de **2 periodos** sin correr, o sin sincronizar: `nextRunAt` null). DX-380: `singleton`, `skippedCount` y `lastSkippedAt` (ticks saltados porque el anterior seguía en curso) |
 
   ```bash
   curl -s -H "Authorization: Bearer $PLATFORM_TOKEN" \
@@ -1842,6 +1842,21 @@ de esquemas propios de una librería).
   recupera todos: corre una vez y sigue. Durante un despliegue que cambia un
   cron, solo dispara la tarea la réplica cuyo cron coincide con el de la
   fila. Las iniciales:
+
+  **Una ejecución a la vez (DX-380, OPS-046).** Con `singleton: true`, si el
+  trabajo de un tick anterior de la tarea sigue en `PENDING` o `RUNNING`, el
+  tick no encola nada: la tarea pasa al tick siguiente y suma un salto
+  (`job_schedules."skippedCount"` y `"lastSkippedAt"`), en la misma
+  transacción de `fireDueSchedules` y con la fila de la tarea bloqueada. Queda
+  en el log (`jobs.schedule_skipped`, con el nombre de la tarea) y en
+  `stats`. Así un barrido que tarda más que su periodo no se solapa consigo
+  mismo ni llena los huecos del worker. Lo usan el barrido de imputaciones,
+  el regional de G1, los recordatorios, los compromisos de pago y las purgas
+  (tokens, emails, enlaces de baja y trabajos terminados). Un `RUNNING` cuyo
+  worker murió frena los ticks hasta que otro lo retoma o lo cierra
+  `failExhausted` (el arriendo, 300 s). El índice parcial
+  `jobs_active_name_idx` (`name` de los `PENDING`/`RUNNING`) acota la
+  comprobación. Una réplica anterior a DX-380 sigue disparando cada tick.
 
   | Tarea | Cron (UTC) | Qué hace |
   |-------|------------|----------|
@@ -2389,7 +2404,7 @@ caché de `exchange_rate_snapshots` de `GetRatesForDateUseCase`:
   (`ExchangeRateUnavailableError`: HTTP no 2xx, red, tiempo agotado, forma
   inesperada) no se vuelve a pedir durante `EXCHANGE_NEGATIVE_CACHE_TTL_MS`
   (1 h), para ninguna clínica. La aprovecha cualquier lectura
-  (`execute`, el barrido de imputaciones de DX-380 incluido). La precarga no
+  (`execute`, también el reintento de los abonos sin base de DX-380). La precarga no
   la lee (reintenta con su backoff) y un acierto la limpia.
 - **Single-flight**: N peticiones simultáneas del mismo día hacen una sola
   llamada (y un solo guardado) y reciben la misma respuesta.
@@ -2468,12 +2483,8 @@ después no altera nada ya calculado.
   recibo sin saldo; el saldo lo dice en `paymentsWithoutRate` y la web enseña
   el aviso con enlace a Ajustes › Tasa de cambio. El barrido de cada minuto
   (`payment-allocations.sweep`) congela primero la tasa de los abonos que la
-  esperan (hasta 50 por clínica, índice parcial
-  `payments_exchange_rate_pending_idx`) y después crea sus bases. Va del más
-  reciente al más antiguo y sin reintento escalonado: con más de 50 abonos
-  que siguen sin tasa en una clínica, los más antiguos no entran en la pasada
-  aunque ya haya su tasa (hasta DX-380; mientras, los congela imputarlos a
-  mano o un cambio de fuente).
+  esperan y después crea sus bases, con el reintento escalonado de DX-380
+  (sección siguiente): hasta 50 por clínica, el que venció antes primero.
 - **Cambio de fuente** (BE-047): `PUT /exchange/settings`, si la fuente
   cambia, congela ANTES todos los abonos pendientes de la clínica con la
   fuente de antes (`ExchangeSourceChangeHooks`, que registra
@@ -4485,15 +4496,53 @@ migración `20261026100300_dx051_payment_allocations` («una migración con NO
 FORCE no se ve afectado»), que quedó incompleto y no se corrige en el fichero
 porque la migración ya está aplicada.
 
-### Coste conocido del barrido
+### Abonos sin base: reintento escalonado y lista de trabajo (DX-380)
 
-El barrido busca los abonos sin base con un recorrido secuencial de
-`payments` (unos 13 ms con 20 000 abonos vivos en una clínica). Un índice no
-lo arregla: con pocas bases por crear, la búsqueda recorre igual todas las
-filas. El arreglo real es una lista de trabajo (un marcador de «base
-pendiente» o una cola alimentada al saltar una base). Es un seguimiento
-conocido, no un defecto: abordarlo al llegar a unos **200 000 abonos por
-clínica** o si el p95 del barrido pasa de **1 s**.
+Antes, el barrido recorría todas las clínicas cada minuto, buscaba los abonos
+sin base con un Seq Scan de `payments` (DB-056) y reintentaba los mismos 50
+(los más recientes) para siempre, con una llamada al proveedor por cada día
+sin snapshot (OPS-045). Ahora:
+
+- **Lista de trabajo** `payment_base_retries` (RLS FORCE, FK compuesta
+  `("tenantId", "paymentId")` → `payments("tenantId", "id")`, índice único
+  nuevo `payments_tenant_id_key`): una fila por abono vivo que espera su tasa
+  o, si es a un plan vivo, su base. La crea el trigger DIFERIDO
+  `payments_base_retry_enroll` al confirmar el alta (también la de una
+  réplica anterior) y la borra el barrido cuando el abono ya tiene las dos.
+  Columnas: `attempts`, `nextAttemptAt`, `lastReason` (`NO_RATE`: sin tasa,
+  también el proveedor caído, por tiempo agotado o sin presupuesto;
+  `ERROR`: otro fallo) y `createdAt` (desde cuándo espera).
+- **Selección** por clínica: `"nextAttemptAt" <= now() ORDER BY
+  "nextAttemptAt"` (índice `payment_base_retries_due_idx`), hasta 50. Un
+  intento fallido se aplaza **1 min → 5 → 30 → 2 h → 24 h** (tope) desde la
+  hora de la BD: un abono atascado va al final y no tapa a los resolubles.
+- **Solo las clínicas con pendientes**: `dx_payment_allocation_sweep_tenants()`
+  (SECURITY INVOKER, fija el tenant de cada clínica para respetar la RLS)
+  devuelve, en una sentencia, las clínicas vivas con un reintento vencido o un
+  plan por repartir. Las demás no abren transacción.
+- **Adelantar el reintento**: registrar o corregir una tasa manual y cambiar
+  la fuente (`ExchangeSourceChangeHooks.afterRatesChange`) ponen ya los
+  reintentos aplazados de la clínica: el barrido siguiente los intenta.
+- **Proveedor** (SEC-054, ya hecho): el `fetch` se corta a los 10 s y el
+  fallo es «sin tasa»; la caché negativa (1 h, `EXCHANGE_NEGATIVE_CACHE_TTL_MS`)
+  y el single-flight dejan **una llamada por día y réplica** con el proveedor
+  caído, aunque lo pidan N clínicas; con fuente MANUAL no se llama nunca por
+  los días de su tasa manual.
+- **Aviso al ADMIN**: `GET /payments/rate-backlog` (solo ADMIN, 403 en
+  español al resto) da `{ count, oldestSince }` de los abonos vivos que llevan
+  más de 24 h pendientes; la web lo enseña en el panel («N abonos sin tasa
+  desde el …») con enlace a Ajustes › Tasa de cambio. Sin datos del abono ni
+  del paciente.
+- **Logs**: `payments.allocation_retry_failed` (`paymentId`, `attempts`, tipo
+  de error) y `payments.allocation_retries_failed` (`tenantId`); nunca
+  importes ni nombres.
+- **Migraciones** (aditivas): `20261104120200_dx380_payments_tenant_id_key`
+  (CONCURRENTLY), `20261104120300_dx380_payment_base_retries` (tabla, RLS,
+  trigger y funciones; `lock_timeout` 5 s) y
+  `20261104120400_dx380_payment_base_retries_backfill` (los abonos que ya
+  esperaban, por lotes de 2.000 y clínica; entran en la primera pasada).
+  Una réplica anterior sigue con su barrido de siempre (todas las clínicas)
+  durante el despliegue. Después, `npm run db:check-force`.
 
 ## Despliegue: roles de la BD (DX-113)
 
