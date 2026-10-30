@@ -30,6 +30,15 @@ const NOTICE = {
 
 const PAYMENT_ID = '3f1c2b9e-8a4d-4c1e-9f0a-1b2c3d4e5f60';
 
+// DX-376: la tasa del abono tal como la guarda (DX-375). En la moneda del
+// plan no hay tasa que imprimir.
+const SAME_CURRENCY_RATE: PaymentReceiptSource['rate'] = {
+  amount: 50000,
+  currency: 'COP',
+  exchangeRateCurrency: 'COP',
+  frozenRate: null,
+};
+
 const snapshotInput: Omit<ReceiptSnapshotInput, 'planBalance'> = {
   clinic: { name: 'Clínica Demo', legalName: null, taxId: null, address: null },
   location: { id: 'loc-1', name: 'Sede Norte', address: null },
@@ -105,6 +114,7 @@ const issued = (
   treatmentPlanId: 'plan-1',
   patientEmail: 'ana@example.com',
   notice: NOTICE,
+  rate: SAME_CURRENCY_RATE,
   receipt: {
     seriesPrefix: 'NOR',
     number: 123,
@@ -128,6 +138,7 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
       voided: false,
       voidedAt: null,
       voidReason: null,
+      exchangeRate: null,
       snapshot: {
         ...issuedSnapshot,
         patient: {
@@ -200,6 +211,7 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
       treatmentPlanId: 'plan-1',
       patientEmail: null,
       notice: NOTICE,
+      rate: SAME_CURRENCY_RATE,
       legacy: {
         issuedAt: new Date('2025-01-10T17:05:00.000Z'),
         voidedAt: null,
@@ -231,6 +243,7 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
         treatmentPlanId: 'plan-1',
         patientEmail: null,
         notice: NOTICE,
+        rate: SAME_CURRENCY_RATE,
         legacy: {
           issuedAt: new Date(),
           voidedAt: new Date('2025-02-01T12:00:00.000Z'),
@@ -242,6 +255,58 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
     ).execute(PAYMENT_ID);
     expect(view.snapshot.planBalance).toBeNull();
     expect(view.voided).toBe(true);
+  });
+
+  describe('DX-376: la tasa congelada del abono', () => {
+    const FROZEN = {
+      currency: 'USD',
+      fromPerBase: 36.5,
+      toPerBase: 1,
+      source: 'MANUAL' as const,
+      date: '2026-10-30',
+    };
+    const inVes = (frozenRate: typeof FROZEN | null): PaymentReceiptSource => ({
+      ...issued(),
+      rate: {
+        amount: 1825,
+        currency: 'VES',
+        exchangeRateCurrency: 'USD',
+        frozenRate,
+      },
+    });
+
+    it('un abono en otra moneda trae la tasa congelada, su fuente, su día y el equivalente en la moneda del plan', async () => {
+      const view = await makeUseCase(inVes(FROZEN)).execute(PAYMENT_ID);
+      expect(view.exchangeRate).toEqual({
+        status: 'FROZEN',
+        rate: FROZEN,
+        equivalentAmount: 50,
+      });
+    });
+
+    it('la reimpresión usa la tasa congelada aunque la del día cambie: no convierte en vivo', async () => {
+      // La foto y la tasa congelada no dependen del saldo ni de la tasa de hoy.
+      const first = await makeUseCase(inVes(FROZEN)).execute(PAYMENT_ID);
+      const again = await makeUseCase(inVes(FROZEN), {
+        billable: 1,
+        paid: 999,
+      }).execute(PAYMENT_ID);
+      expect(again.exchangeRate).toEqual(first.exchangeRate);
+    });
+
+    it('un abono «sin tasa» lo dice, sin tasa ni equivalente', async () => {
+      const view = await makeUseCase(inVes(null)).execute(PAYMENT_ID);
+      expect(view.exchangeRate).toEqual({
+        status: 'MISSING',
+        rate: null,
+        equivalentAmount: null,
+      });
+    });
+
+    it('un abono en la moneda del plan no trae tasa', async () => {
+      const view = await makeUseCase(issued()).execute(PAYMENT_ID);
+      expect(view.exchangeRate).toBeNull();
+    });
   });
 
   it('un abono que no existe (o de otra clínica) es 404 en español', async () => {
