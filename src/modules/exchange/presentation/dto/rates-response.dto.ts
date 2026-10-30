@@ -20,9 +20,8 @@ export class RatesResponseDto {
   @ApiProperty({
     type: 'object',
     additionalProperties: { type: 'number' },
-    example: { COP: 4000, EUR: 0.92 },
     description:
-      'Units of each currency per 1 USD, for the requested date. Con fuente MANUAL solo trae las monedas con tasa registrada ese día: una moneda que NO aparece está «sin tasa» (no se inventa, no se toma la de otro día ni se pide al proveedor) y convertirla responde 400 EXCHANGE_RATE_MISSING.',
+      'Units of each currency per 1 USD, for the requested date, keyed by its ISO 4217 code (3 letters). Con fuente MANUAL solo trae las monedas con tasa registrada ese día: una moneda que NO aparece está «sin tasa» (no se inventa, no se toma la de otro día ni se pide al proveedor) y convertirla responde 400 EXCHANGE_RATE_MISSING.',
   })
   rates!: Record<string, number>;
 }

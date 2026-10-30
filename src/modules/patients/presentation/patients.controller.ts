@@ -105,16 +105,26 @@ import {
   withDocTypeName,
   type WithDocTypeName,
 } from './doc-type-name.presenter';
+import { DefaultPhoneRegionReader } from '../domain/ports/default-phone-region-reader.port';
+import {
+  withPhoneInternational,
+  type WithPhoneInternational,
+} from '../../../shared/phone/with-phone-international';
 
 export const CLINIC_SETTINGS_FORBIDDEN_MESSAGE =
   'Solo un administrador puede cambiar la mayoría de edad.';
 
 type ListPatientsWithCoverageOutput = Omit<ListPatientsOutput, 'items'> & {
-  items: WithDocTypeName<Patient & { coverage: CoverageSummary }>[];
+  items: WithPhoneInternational<
+    WithDocTypeName<Patient & { coverage: CoverageSummary }>
+  >[];
 };
 
-/** DX-327 (R17): cada paciente de la respuesta con su `docTypeName`. */
-type PatientOutput = WithDocTypeName<Patient>;
+/**
+ * DX-327 (R17): cada paciente de la respuesta con su `docTypeName`. DX-387:
+ * y con su `phoneInternational`.
+ */
+type PatientOutput = WithPhoneInternational<WithDocTypeName<Patient>>;
 type PatientPageOutput = Omit<ListPatientsOutput, 'items'> & {
   items: PatientOutput[];
 };
@@ -152,6 +162,8 @@ export class PatientsController {
     private readonly updateDocumentTypeNames: UpdateDocumentTypeNamesUseCase,
     // DX-327 (R17): nombres locales para el `docTypeName`, una lectura por petición.
     private readonly documentTypeNamesReader: DocumentTypeNamesReader,
+    // DX-387: región del `phoneInternational`, una lectura por petición.
+    private readonly phoneRegionReader: DefaultPhoneRegionReader,
     private readonly tenantContext: TenantContextService,
   ) {}
 
@@ -191,20 +203,34 @@ export class PatientsController {
     return this.presentOne(patient);
   }
 
-  /** DX-327 (R17): un paciente con su `docTypeName`. */
-  private async presentOne(patient: Patient): Promise<PatientOutput> {
-    return withDocTypeName(patient, await this.documentTypeNamesReader.get());
+  /**
+   * Los nombres de documento (DX-327, R17) y la región del teléfono de la
+   * sede (DX-387), una sola vez por petición para todas las filas.
+   */
+  private async presenter(): Promise<
+    <T extends Patient>(
+      patient: T,
+    ) => WithPhoneInternational<WithDocTypeName<T>>
+  > {
+    const [names, region] = await Promise.all([
+      this.documentTypeNamesReader.get(),
+      this.phoneRegionReader.defaultPhoneRegion(),
+    ]);
+    return (patient) =>
+      withPhoneInternational(withDocTypeName(patient, names), region);
   }
 
-  /** Una página con un solo `get()` de los nombres, no uno por fila. */
+  /** Un paciente con su `docTypeName` y su `phoneInternational`. */
+  private async presentOne(patient: Patient): Promise<PatientOutput> {
+    return (await this.presenter())(patient);
+  }
+
+  /** Una página con una sola lectura de nombres y región, no una por fila. */
   private async presentPage<T extends { items: Patient[] }>(
     page: T,
   ): Promise<Omit<T, 'items'> & { items: PatientOutput[] }> {
-    const names = await this.documentTypeNamesReader.get();
-    return {
-      ...page,
-      items: page.items.map((p) => withDocTypeName(p, names)),
-    };
+    const present = await this.presenter();
+    return { ...page, items: page.items.map((p) => present(p)) };
   }
 
   @Get()
@@ -222,17 +248,14 @@ export class PatientsController {
       page: query.page,
       pageSize: query.pageSize,
     });
-    const [coverage, names] = await Promise.all([
+    const [coverage, present] = await Promise.all([
       this.coverageFlags.forPatients(result.items.map((p) => p.id)),
-      this.documentTypeNamesReader.get(),
+      this.presenter(),
     ]);
     return {
       ...result,
       items: result.items.map((p) =>
-        withDocTypeName(
-          { ...p, coverage: coverage.get(p.id) ?? NO_COVERAGE },
-          names,
-        ),
+        present({ ...p, coverage: coverage.get(p.id) ?? NO_COVERAGE }),
       ),
     };
   }

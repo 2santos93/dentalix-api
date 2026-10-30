@@ -27,6 +27,12 @@ import {
 } from './application/use-cases/manual-exchange-rates.use-cases';
 import { ExchangeSettingsController } from './presentation/exchange-settings.controller';
 import { ExchangeSourceChangeHooks } from './application/exchange-source-change-hooks';
+import { ConfigService } from '@nestjs/config';
+import {
+  loadProviderRatesLimits,
+  PROVIDER_RATES_LIMITS,
+  ProviderRatesGate,
+} from './application/provider-rates-gate';
 
 // ConfigModule (ConfigService, used by OpenExchangeRatesProvider) and
 // PrismaModule (PrismaService, used by PrismaExchangeRateRepository) are both
@@ -56,6 +62,16 @@ import { ExchangeSourceChangeHooks } from './application/exchange-source-change-
     CorrectManualExchangeRateUseCase,
     ExchangeSourceChangeHooks,
     { provide: EXCHANGE_RATE_CLOCK, useValue: () => new Date() },
+    // SEC-054: caché negativa, single-flight y presupuestos de las llamadas
+    // al proveedor (una instancia por proceso: compartida por todas las
+    // clínicas). Un test cambia los topes con overrideProvider.
+    ProviderRatesGate,
+    {
+      provide: PROVIDER_RATES_LIMITS,
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) =>
+        loadProviderRatesLimits((key) => config.get<string>(key)),
+    },
     {
       provide: CLINIC_EXCHANGE_SETTINGS_REPOSITORY,
       useClass: PrismaClinicExchangeSettingsRepository,

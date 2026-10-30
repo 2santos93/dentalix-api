@@ -31,7 +31,6 @@ export class ExchangeRateSettingsDto extends UpdateExchangeRateSettingsDto {
   manualSince!: string | null;
 
   @ApiProperty({
-    example: 'USD',
     description:
       'Moneda base de las tasas: cada tasa son unidades de la moneda por 1 de esta. No lleva tasa propia.',
   })

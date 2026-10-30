@@ -25,6 +25,10 @@ export interface CashPayment {
   amount: number;
   currency: string;
   method: PaymentMethod | null;
+  /** DX-377: medio del catálogo (o el inicial de su método) y su nombre. */
+  paymentMethod: { id: string; name: string } | null;
+  /** DX-377: referencia del pago, tal como la dio el pagador. */
+  reference: string | null;
   notes: string | null;
   location: { id: string; name: string };
   patient: { id: string; fullName: string };
@@ -58,6 +62,19 @@ export interface CashPaymentView extends CashPayment {
 
 /** Total del período en UNA moneda, sin convertir. */
 export interface CashCurrencyTotal {
+  currency: string;
+  total: number;
+  count: number;
+}
+
+/**
+ * DX-377: total del período por medio de pago y moneda. Un abono de una
+ * réplica anterior (sin medio) cuenta en el medio inicial de su método;
+ * `paymentMethodId: null` = abono sin método.
+ */
+export interface CashPaymentMethodTotal {
+  paymentMethodId: string | null;
+  name: string | null;
   currency: string;
   total: number;
   count: number;

@@ -21,7 +21,12 @@ import {
   type NoticeRecipient,
 } from '../../domain/communication/notice-recipient';
 import { civilDateIn } from '../../../../shared/time/civil-day';
-import { callingCodeOfCountry } from '../../../../shared/phone/country-calling-code';
+import {
+  parsePhone,
+  phoneInternational,
+  phoneRegionOrNull,
+  type PhoneRegion,
+} from '../../../../shared/phone/phone-number';
 import {
   PATIENT_COMMUNICATION_REPOSITORY,
   PATIENT_NOT_FOUND_MESSAGE,
@@ -32,7 +37,10 @@ import {
 } from '../../domain/ports/patient-communication-repository.port';
 
 export const WHATSAPP_NEEDS_VALID_MOBILE =
-  'Para elegir WhatsApp el paciente necesita un móvil válido. Revisa el número (si es de otro país, escríbelo con + y su indicativo).';
+  'Para elegir WhatsApp el paciente necesita un móvil válido. Revisa el número o escríbelo con + y su prefijo.';
+/** El mismo 400 para un número que se lee de dos formas (DX-329, R10). */
+export const WHATSAPP_AMBIGUOUS_NUMBER =
+  'Ese número se puede leer de dos formas. Escríbelo con + y su prefijo.';
 const OPT_IN_SOURCE_REQUIRED =
   'Indica dónde aceptó el paciente que le escriban por WhatsApp: en persona, por enlace o por mensaje.';
 
@@ -49,10 +57,17 @@ export interface PatientCommunicationView {
   phoneE164: string | null;
   phoneStatus: MobileStatus;
   /**
-   * País con el que se validó (el de la sede, o el del paciente), solo si
-   * tiene indicativo por defecto (DX-312, R9); si no, `null`.
+   * Los dígitos se leen como dos números válidos distintos (DX-329, R10): hay
+   * que escribirlo con `+`.
    */
-  phoneCountry: string | null;
+  phoneAmbiguous: boolean;
+  /** Formato internacional de la librería, con su extensión; null si no es válido. */
+  phoneInternational: string | null;
+  /**
+   * Región con la que se leyó (la por defecto de la sede activa o la
+   * principal), o `null` si la sede no tiene prefijo por defecto.
+   */
+  phoneCountry: PhoneRegion | null;
   email: string | null;
   whatsappOptIn: {
     at: Date;
@@ -79,12 +94,11 @@ export interface UpdatePatientCommunicationInput {
 
 function toView(
   state: PatientCommunicationState,
-  country: string | null,
+  region: PhoneRegion | null,
   clinicDefaultChannel: ContactChannel,
   now: Date,
 ): PatientCommunicationView {
-  const callingCode = callingCodeOfCountry(country);
-  const mobile = normalizeMobile(state.phone, callingCode);
+  const mobile = normalizeMobile(state.phone, region);
   return {
     patientId: state.patientId,
     contactChannel: state.contactChannel,
@@ -92,7 +106,9 @@ function toView(
     phone: state.phone,
     phoneE164: mobile.e164,
     phoneStatus: mobile.status,
-    phoneCountry: callingCode ? country : null,
+    phoneAmbiguous: mobile.ambiguous,
+    phoneInternational: phoneInternational(state.phone, region),
+    phoneCountry: phoneRegionOrNull(region),
     email: state.email,
     whatsappOptIn:
       state.whatsappOptInAt && state.whatsappOptInSource
@@ -115,22 +131,33 @@ function toView(
   };
 }
 
-/** 400 `WHATSAPP_REQUIRES_VALID_MOBILE`, también para la edición general. */
-export function whatsappMobileRequiredError(): BadRequestException {
+/**
+ * 400 `WHATSAPP_REQUIRES_VALID_MOBILE`, también para la edición general. Si
+ * el número se lee de dos formas, el mismo código pide escribirlo con `+`.
+ */
+export function whatsappMobileRequiredError(
+  ambiguous = false,
+): BadRequestException {
   return new BadRequestException({
     statusCode: 400,
     error: 'Bad Request',
     code: 'WHATSAPP_REQUIRES_VALID_MOBILE',
-    message: WHATSAPP_NEEDS_VALID_MOBILE,
+    message: ambiguous
+      ? WHATSAPP_AMBIGUOUS_NUMBER
+      : WHATSAPP_NEEDS_VALID_MOBILE,
   });
 }
 
-/** País del móvil: el de la sede (DX-128) o, sin sedes, el del paciente. */
-async function phoneCountry(
-  repo: PatientCommunicationRepository,
-  state: PatientCommunicationState,
-): Promise<string | null> {
-  return (await repo.locationCountry()) ?? state.countryCode;
+/**
+ * Lo que se guarda al escribir el móvil (DX-329, R9 bis): el E.164 si es un
+ * móvil válido sin extensión; si no, el texto tal cual.
+ */
+export function storedMobile(
+  typed: string | null,
+  region: PhoneRegion | null,
+): string | null {
+  const mobile = normalizeMobile(typed, region);
+  return mobile.e164 && !parsePhone(typed, region)?.ext ? mobile.e164 : typed;
 }
 
 @Injectable()
@@ -144,11 +171,11 @@ export class GetPatientCommunicationUseCase {
   async execute(patientId: string): Promise<PatientCommunicationView> {
     const state = await this.repo.find(patientId);
     if (!state) throw new NotFoundException(PATIENT_NOT_FOUND_MESSAGE);
-    const [country, clinicDefault] = await Promise.all([
-      phoneCountry(this.repo, state),
+    const [region, clinicDefault] = await Promise.all([
+      this.repo.defaultPhoneRegion(),
       this.repo.clinicDefaultChannel(),
     ]);
-    return toView(state, country, clinicDefault, this.clock());
+    return toView(state, region, clinicDefault, this.clock());
   }
 }
 
@@ -156,9 +183,10 @@ export class GetPatientCommunicationUseCase {
  * Cambia el canal, el móvil, el opt-in de WhatsApp o la baja de los
  * recordatorios desde la ficha (DX-128; solo recepción y ADMIN, lo exige el
  * controlador). Reglas:
- * - El móvil se normaliza a E.164 con el país de la sede al guardar; uno
- *   inválido se guarda tal cual (la ficha avisa), salvo que el canal sea o
- *   pase a ser WHATSAPP: entonces 400 en español y no se guarda nada.
+ * - El móvil se normaliza a E.164 con la región de la sede al guardar; uno
+ *   inválido, ambiguo o con extensión se guarda tal cual (la ficha avisa),
+ *   salvo que el canal sea o pase a ser WHATSAPP sin un móvil válido:
+ *   entonces 400 en español y no se guarda nada.
  * - El opt-in de WhatsApp exige su origen y un móvil válido; guarda fecha,
  *   origen y quién lo registró. Retirarlo borra los tres.
  * - La baja anotada por recepción queda con origen STAFF; quitarla reactiva
@@ -183,29 +211,25 @@ export class UpdatePatientCommunicationUseCase {
   ): Promise<PatientCommunicationView> {
     const state = await this.repo.find(patientId);
     if (!state) throw new NotFoundException(PATIENT_NOT_FOUND_MESSAGE);
-    const [locationCountry, clinicDefault] = await Promise.all([
-      this.repo.locationCountry(),
+    const [region, clinicDefault] = await Promise.all([
+      this.repo.defaultPhoneRegion(),
       this.repo.clinicDefaultChannel(),
     ]);
     const now = this.clock();
     const saved = await this.repo.update(
       patientId,
       (state) => {
-        const callingCode = callingCodeOfCountry(
-          locationCountry ?? state.countryCode,
-        );
         const patch: PatientCommunicationPatch = {};
         let phone = state.phone;
         if (input.phone !== undefined) {
           const typed = input.phone?.trim() || null;
-          const mobile = normalizeMobile(typed, callingCode);
-          phone = mobile.e164 ?? typed;
+          phone = storedMobile(typed, region);
           if (phone !== state.phone) {
             patch.phone = phone;
           }
         }
-        const mobileValid =
-          normalizeMobile(phone, callingCode).status === 'VALID';
+        const mobile = normalizeMobile(phone, region);
+        const mobileValid = mobile.status === 'VALID';
 
         const channel = input.contactChannel ?? state.contactChannel;
         if (
@@ -213,7 +237,7 @@ export class UpdatePatientCommunicationUseCase {
           (input.contactChannel !== undefined || input.phone !== undefined) &&
           !mobileValid
         ) {
-          throw whatsappMobileRequiredError();
+          throw whatsappMobileRequiredError(mobile.ambiguous);
         }
         if (channel !== state.contactChannel) {
           patch.contactChannel = channel;
@@ -223,7 +247,7 @@ export class UpdatePatientCommunicationUseCase {
           if (!input.whatsappOptInSource) {
             throw new BadRequestException(OPT_IN_SOURCE_REQUIRED);
           }
-          if (!mobileValid) throw whatsappMobileRequiredError();
+          if (!mobileValid) throw whatsappMobileRequiredError(mobile.ambiguous);
           patch.whatsappOptInAt = now;
           patch.whatsappOptInSource = input.whatsappOptInSource;
           patch.whatsappOptInById = ctx.actor.userId;
@@ -245,9 +269,8 @@ export class UpdatePatientCommunicationUseCase {
       },
       input.reminderOptOut === false ? now : undefined,
     );
-    const country = locationCountry ?? saved.state.countryCode;
     if (!saved.changedFields.length)
-      return toView(saved.state, country, clinicDefault, now);
+      return toView(saved.state, region, clinicDefault, now);
     const origin: AuditOrigin =
       saved.changedFields.includes('whatsappOptIn') &&
       input.whatsappOptIn === true
@@ -270,7 +293,7 @@ export class UpdatePatientCommunicationUseCase {
         changedFields: saved.changedFields,
       },
     });
-    return toView(saved.state, country, clinicDefault, now);
+    return toView(saved.state, region, clinicDefault, now);
   }
 }
 

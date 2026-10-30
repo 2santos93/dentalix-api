@@ -18,6 +18,7 @@ import {
   REGIONAL_BOGOTA_FIXTURE,
   registerBody,
 } from './support/location-fixtures';
+import { purgeTenantsBySubdomain } from './support/tenant-purge';
 
 // DX-088 (e2e): invitar encola el email con el enlace del host de la clínica
 // y responde sin esperar al proveedor; «Reenviar invitación» regenera el
@@ -75,17 +76,10 @@ class ScriptedMailer implements Mailer {
 }
 
 async function cleanup(): Promise<void> {
-  await raw.clinicInvitation.deleteMany({
-    where: { tenant: { subdomain: SUB } },
-  });
-  await raw.clinicMembership.deleteMany({
-    where: { tenant: { subdomain: SUB } },
-  });
+  await purgeTenantsBySubdomain(raw, [SUB]);
   await raw.user.deleteMany({
     where: { email: { endsWith: '@mail-e2e.test' } },
   });
-  // email_outbox cae en cascada con el tenant.
-  await raw.tenant.deleteMany({ where: { subdomain: SUB } });
 }
 
 describe('Email de invitación (e2e, DX-088)', () => {

@@ -57,13 +57,17 @@ export class PendingFollowUpItemDto {
   @ApiProperty({ example: 'Ana Pérez' })
   patientName!: string;
 
-  @ApiProperty({ type: String, nullable: true, example: '+57 300 123 4567' })
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'Teléfono tal como está en la ficha, con su prefijo si lo tiene.',
+  })
   patientPhone!: string | null;
 
   @ApiProperty({
     type: String,
     nullable: true,
-    example: '573001234567',
     description:
       'Teléfono en E.164 sin "+", listo para https://wa.me/<número>; null si no hay uno utilizable',
   })
@@ -84,7 +88,9 @@ export class PendingFollowUpItemDto {
   @ApiProperty({ description: 'Días completos desde la presentación' })
   daysSincePresented!: number;
 
-  @ApiProperty({ example: 'COP', description: 'Moneda del plan (ISO 4217)' })
+  @ApiProperty({
+    description: 'Moneda del plan (código ISO 4217 de 3 letras).',
+  })
   currency!: string;
 
   @ApiProperty({

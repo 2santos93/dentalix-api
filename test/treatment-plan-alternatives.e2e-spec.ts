@@ -504,6 +504,49 @@ describe('Alternativas de plan y presupuestos por seguir (e2e, DX-040)', () => {
       ]);
     });
 
+    it("the pending plan's WhatsApp link uses the region of the presented location, not the patient's country", async () => {
+      const plan = await raw.treatmentPlan.findUniqueOrThrow({
+        where: { id: dueNorth },
+        select: { patientId: true },
+      });
+      const before = await raw.location.findUniqueOrThrow({
+        where: { id: northLocationA },
+        select: { defaultPhoneRegion: true },
+      });
+      await raw.patient.update({
+        where: { id: plan.patientId },
+        data: { phone: '0412-1234567', countryCode: 'CO' },
+      });
+      const read = async () =>
+        (
+          (
+            await as(clinicA, tokens.RECEPTION)
+              .get('/treatment-plans/pending-follow-up')
+              .set('X-Location-Id', northLocationA)
+              .expect(200)
+          ).body as FollowUpPage
+        ).items[0];
+      expect(await read()).toMatchObject({
+        planId: dueNorth,
+        patientWhatsApp: null,
+      });
+      await raw.location.update({
+        where: { id: northLocationA },
+        data: { defaultPhoneRegion: 'VE' },
+      });
+      try {
+        expect(await read()).toMatchObject({
+          planId: dueNorth,
+          patientWhatsApp: '584121234567',
+        });
+      } finally {
+        await raw.location.update({
+          where: { id: northLocationA },
+          data: before,
+        });
+      }
+    });
+
     it('olderThanDays, paginado y tope de pageSize', async () => {
       const recentToo = await as(clinicA)
         .get('/treatment-plans/pending-follow-up?olderThanDays=1')

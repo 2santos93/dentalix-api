@@ -2,7 +2,7 @@ import { HttpException, HttpStatus } from '@nestjs/common';
 
 // Esperas largas (p. ej. la de recuperar la contraseña, 15 min) en minutos, redondeando
 // hacia arriba para no invitar a reintentar antes de tiempo.
-function humanWait(seconds: number): string {
+export function humanWait(seconds: number): string {
   if (seconds < 120)
     return `${seconds} ${seconds === 1 ? 'segundo' : 'segundos'}`;
   return `${Math.ceil(seconds / 60)} minutos`;

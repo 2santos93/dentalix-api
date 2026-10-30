@@ -13,7 +13,8 @@ import type {
 export class FakePatientCommunicationRepository implements PatientCommunicationRepository {
   readonly patients = new Map<string, PatientCommunicationState>();
   readonly staff = new Map<string, string>();
-  country: string | null = 'CO';
+  /** Sin región por defecto: cada test fija la suya (DX-329, m13). */
+  region: string | null = null;
   defaultChannel: ContactChannel = 'EMAIL';
   readonly updates: PatientCommunicationPatch[] = [];
 
@@ -52,8 +53,8 @@ export class FakePatientCommunicationRepository implements PatientCommunicationR
     return Promise.resolve(this.patients.has(patientId) ? [] : null);
   }
 
-  locationCountry(): Promise<string | null> {
-    return Promise.resolve(this.country);
+  defaultPhoneRegion(): Promise<string | null> {
+    return Promise.resolve(this.region);
   }
 
   clinicDefaultChannel(): Promise<ContactChannel> {

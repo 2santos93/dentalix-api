@@ -97,8 +97,8 @@ export class ExpenseCashSession implements ExpenseCashLink {
    * abierta de quien anula en esa sede, o pendiente de la siguiente que se
    * abra. Copia de `recordVoidAdjustment` (abonos), con el signo contrario.
    *
-   * Lo que el trigger de ajustes NO comprueba (que la caja de origen sea la
-   * del pago, el importe y la moneda) se toma aquí de la fila del pago.
+   * La caja de origen, el importe y la moneda se toman aquí de la fila del
+   * pago; desde DX-393 el trigger de ajustes también lo exige (Q3934, 409).
    */
   async onPaymentVoided(
     tx: Prisma.TransactionClient,

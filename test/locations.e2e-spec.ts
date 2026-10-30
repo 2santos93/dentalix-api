@@ -672,4 +672,186 @@ describe('Locations / multi-sede (e2e)', () => {
         .expect(403);
     });
   });
+
+  describe('prefijo telefónico de la sede (DX-329)', () => {
+    let auth: (r: request.Test) => request.Test;
+    let tenantId: string;
+    const post = (body: object) =>
+      auth(request(app.getHttpServer()).post('/api/v1/locations')).send(body);
+    const patch = (id: string, body: object) =>
+      auth(request(app.getHttpServer()).patch(`/api/v1/locations/${id}`)).send(
+        body,
+      );
+    const row = (id: string) =>
+      raw.location.findUniqueOrThrow({ where: { id } });
+    /** El cuerpo de alta SIN región: `locationBody` la manda y la sugerencia no se vería. */
+    const withoutRegion = (name: string, country: string) => {
+      const { defaultPhoneRegion: _omit, ...rest } = locationBody(
+        REGIONAL_TOKYO_FIXTURE,
+        { name, country },
+      );
+      void _omit;
+      return rest;
+    };
+    const idOf = (res: request.Response) => (res.body as { id: string }).id;
+
+    beforeAll(async () => {
+      const clinic = await registerAndLogin(app, {
+        clinicName: 'Clinica Prefijo',
+        subdomain: 'prefijo-sede',
+        email: 'owner@prefijo-sede.com',
+      });
+      tenantId = clinic.tenantId;
+      const host = hostFor(clinic.subdomain);
+      auth = (r) =>
+        r
+          .set('X-Tenant-Host', host)
+          .set('Authorization', `Bearer ${clinic.accessToken}`);
+    });
+
+    it('POST /locations without defaultPhoneRegion suggests the country', async () => {
+      const res = await post(withoutRegion('Sugerida', 'VE')).expect(201);
+      expect(res.body).toMatchObject({ defaultPhoneRegion: 'VE' });
+      expect((await row(idOf(res))).defaultPhoneRegionSetAt).toBeInstanceOf(
+        Date,
+      );
+    });
+
+    it('POST /locations with defaultPhoneRegion null stores none', async () => {
+      const res = await post({
+        ...withoutRegion('Sin prefijo', 'VE'),
+        defaultPhoneRegion: null,
+      }).expect(201);
+      expect(
+        (res.body as { defaultPhoneRegion: unknown }).defaultPhoneRegion,
+      ).toBeNull();
+      // La marca distingue «nadie decidió» de «sin prefijo, a propósito».
+      expect((await row(idOf(res))).defaultPhoneRegionSetAt).toBeInstanceOf(
+        Date,
+      );
+    });
+
+    it('POST /locations with another region stores it', async () => {
+      const res = await post({
+        ...withoutRegion('Otra región', 'VE'),
+        defaultPhoneRegion: ' co ',
+      }).expect(201);
+      expect(res.body).toMatchObject({
+        country: 'VE',
+        defaultPhoneRegion: 'CO',
+      });
+    });
+
+    it('POST /locations in a country without phone metadata stores none', async () => {
+      const res = await post(withoutRegion('Antártida', 'AQ')).expect(201);
+      const stored = await row(idOf(res));
+      expect(stored.defaultPhoneRegion).toBeNull();
+      expect(stored.defaultPhoneRegionSetAt).toBeInstanceOf(Date);
+    });
+
+    it('PATCH /locations/:id changing the country keeps the default phone region', async () => {
+      const id = idOf(
+        await post(withoutRegion('Cambia país', 'VE')).expect(201),
+      );
+      const before = await row(id);
+      const res = await patch(id, { country: 'JP' }).expect(200);
+      expect(res.body).toMatchObject({
+        country: 'JP',
+        defaultPhoneRegion: 'VE',
+      });
+      expect((await row(id)).defaultPhoneRegionSetAt).toEqual(
+        before.defaultPhoneRegionSetAt,
+      );
+    });
+
+    it('PATCH /locations/:id with an unknown region is 400 with field defaultPhoneRegion', async () => {
+      const id = idOf(
+        await post(withoutRegion('Región mala', 'VE')).expect(201),
+      );
+      const unknown = await patch(id, { defaultPhoneRegion: 'AQ' }).expect(400);
+      expect(unknown.body).toMatchObject({
+        field: 'defaultPhoneRegion',
+        message: 'El prefijo telefónico «AQ» no está en la lista.',
+      });
+      const text = await patch(id, {
+        defaultPhoneRegion: 'x'.repeat(300),
+      }).expect(400);
+      expect(text.body).toMatchObject({
+        field: 'defaultPhoneRegion',
+        message: 'El prefijo telefónico indicado no está en la lista.',
+      });
+      // Lo que no es texto: el mismo 400 con `field`, no el de la
+      // ValidationPipe (M9 de la revisión final).
+      for (const value of [58, true, { code: 'VE' }, ['VE']]) {
+        const notText = await patch(id, { defaultPhoneRegion: value }).expect(
+          400,
+        );
+        expect(notText.body).toMatchObject({
+          field: 'defaultPhoneRegion',
+          message: 'El prefijo telefónico indicado no está en la lista.',
+        });
+      }
+      expect((await row(id)).defaultPhoneRegion).toBe('VE');
+    });
+
+    it('POST /locations with a defaultPhoneRegion that is not text is 400 with field', async () => {
+      const res = await post({
+        ...withoutRegion('Región numérica', 'VE'),
+        defaultPhoneRegion: 58,
+      }).expect(400);
+      expect(res.body).toMatchObject({
+        field: 'defaultPhoneRegion',
+        message: 'El prefijo telefónico indicado no está en la lista.',
+      });
+    });
+
+    it('PATCH /locations/:id with defaultPhoneRegion null clears it and does not mark the regional settings as reviewed', async () => {
+      const id = idOf(await post(withoutRegion('Se vacía', 'VE')).expect(201));
+      // Una sede por revisar: lo regional sigue sin confirmar.
+      await raw.location.update({
+        where: { id },
+        data: { regionalSettingsReviewedAt: null },
+      });
+      const res = await patch(id, { defaultPhoneRegion: null }).expect(200);
+      expect(
+        (res.body as { defaultPhoneRegion: unknown }).defaultPhoneRegion,
+      ).toBeNull();
+      expect((await row(id)).regionalSettingsReviewedAt).toBeNull();
+      const empty = await patch(id, { defaultPhoneRegion: 'co' }).expect(200);
+      expect(empty.body).toMatchObject({ defaultPhoneRegion: 'CO' });
+      expect((await row(id)).regionalSettingsReviewedAt).toBeNull();
+      await patch(id, { defaultPhoneRegion: '' }).expect(200);
+      expect((await row(id)).defaultPhoneRegion).toBeNull();
+    });
+
+    it('the PATCH audit lists defaultPhoneRegion among the changed fields without values', async () => {
+      const id = idOf(await post(withoutRegion('Auditada', 'VE')).expect(201));
+      await patch(id, { defaultPhoneRegion: 'CO' }).expect(200);
+      const events = await raw.auditEvent.findMany({
+        where: { tenantId, action: 'UPDATE', resourceId: id },
+      });
+      expect(events).toHaveLength(1);
+      expect(events[0].metadata).toEqual({
+        changedFields: ['defaultPhoneRegion'],
+        params: { id },
+      });
+    });
+
+    it('creating and editing with the field set the decision mark; editing without it leaves the mark alone', async () => {
+      const id = idOf(await post(withoutRegion('Marca', 'VE')).expect(201));
+      const created = (await row(id)).defaultPhoneRegionSetAt;
+      expect(created).toBeInstanceOf(Date);
+      await patch(id, { name: 'Marca renombrada' }).expect(200);
+      expect((await row(id)).defaultPhoneRegionSetAt).toEqual(created);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      await patch(id, { defaultPhoneRegion: 'CO' }).expect(200);
+      const edited = (await row(id)).defaultPhoneRegionSetAt!;
+      expect(edited.getTime()).toBeGreaterThan(created!.getTime());
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      await patch(id, { defaultPhoneRegion: null }).expect(200);
+      expect(
+        (await row(id)).defaultPhoneRegionSetAt!.getTime(),
+      ).toBeGreaterThan(edited.getTime());
+    });
+  });
 });

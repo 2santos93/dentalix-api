@@ -12,6 +12,11 @@ import { PrismaPlanAllocationRepository } from '../src/modules/payments/infrastr
 import { PlanAllocationRebalancer } from '../src/modules/payments/application/plan-allocation-rebalancer';
 import { ExchangeSourceChangeHooks } from '../src/modules/exchange/application/exchange-source-change-hooks';
 import { PaymentAllocationJobs } from '../src/modules/payments/application/payment-allocation-jobs';
+import { PaymentBaseRetries } from '../src/modules/payments/application/payment-base-retries';
+import { PaymentRateBackupAudit } from '../src/modules/payments/application/payment-rate-backup-audit';
+import { RecordAuditEventUseCase } from '../src/modules/audit/application/record-audit-event.use-case';
+import { PrismaAuditEventRepository } from '../src/modules/audit/infrastructure/prisma-audit-event.repository';
+import { PrismaPaymentBaseRetryRepository } from '../src/modules/payments/infrastructure/allocations/prisma-payment-base-retry.repository';
 import { GetPaymentAllocationsUseCase } from '../src/modules/payments/application/use-cases/get-payment-allocations.use-case';
 import { ReplacePaymentAllocationsUseCase } from '../src/modules/payments/application/use-cases/replace-payment-allocations.use-case';
 import { JobRegistry } from '../src/modules/jobs/application/job-registry';
@@ -92,10 +97,20 @@ const replaceAllocations = new ReplacePaymentAllocationsUseCase(
   convert,
   getAllocations,
 );
+const retryRepo = new PrismaPaymentBaseRetryRepository(prisma, tenantContext);
+const retries = new PaymentBaseRetries(
+  retryRepo,
+  allocationRepo,
+  convert,
+  new PaymentRateBackupAudit(
+    new RecordAuditEventUseCase(new PrismaAuditEventRepository(prisma)),
+    tenantContext,
+  ),
+);
 const jobs = new PaymentAllocationJobs(
   new JobRegistry(),
   rebalancer,
-  allocationRepo,
+  retries,
   tenantContext,
   new ExchangeSourceChangeHooks(),
 );
@@ -625,7 +640,7 @@ describe('DX-051 · reparto automático con conexiones reales (int)', () => {
         });
 
         const outcomes = await Promise.all([
-          settle(inTenant(a, () => rebalancer.createMissingBases(50))),
+          settle(inTenant(a, () => retries.retryDue(50))),
           settle(drain(a, planId)),
           settle(voidPayment(a, voided)),
           settle(updateItem(a, itemA, { discount: 10 })),
@@ -1101,14 +1116,20 @@ describe('DX-051 · reparto automático con conexiones reales (int)', () => {
   describe('barrido', () => {
     const mine = () => [a.tenantId, b.tenantId];
 
-    beforeEach(() => {
+    beforeEach(async () => {
+      // DX-380: cada prueba del barrido parte sin reintentos pendientes (los
+      // abonos sin tasa de las pruebas anteriores irían antes en la cola).
+      await raw.paymentBaseRetry.deleteMany({
+        where: { tenantId: { in: mine() } },
+      });
       // Solo las clínicas de esta suite: la BD de test es compartida. La
       // consulta real de clínicas sigue corriendo.
-      const all = new PrismaPlanAllocationRepository(prisma, tenantContext);
+      // DX-380: las de la consulta real (con algo pendiente) de esta suite.
+      const all = new PrismaPaymentBaseRetryRepository(prisma, tenantContext);
       jest
-        .spyOn(allocationRepo, 'tenantIds')
+        .spyOn(retryRepo, 'dueTenantIds')
         .mockImplementation(async () =>
-          (await all.tenantIds()).filter((id) => mine().includes(id)),
+          (await all.dueTenantIds()).filter((id) => mine().includes(id)),
         );
     });
 
@@ -1140,7 +1161,14 @@ describe('DX-051 · reparto automático con conexiones reales (int)', () => {
         await raw.paymentPlanAmount.count({ where: { paymentId: payment.id } }),
       ).toBe(0);
 
+      // DX-380: el intento fallido lo aplazó 1 min; pasa ese minuto.
       rates.USD = 0.9;
+      await raw.paymentBaseRetry.update({
+        where: {
+          tenantId_paymentId: { tenantId: a.tenantId, paymentId: payment.id },
+        },
+        data: { nextAttemptAt: new Date(Date.now() - 1000) },
+      });
       await jobs.sweep();
 
       const base = await raw.paymentPlanAmount.findUniqueOrThrow({

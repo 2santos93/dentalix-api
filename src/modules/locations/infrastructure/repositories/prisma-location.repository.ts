@@ -11,6 +11,15 @@ import {
   UpdateLocationRepoInput,
 } from '../../domain/ports/location-repository.port';
 
+/** DX-329: escribir la región (también null) deja la marca de quién decidió. */
+function withDecisionMark(
+  patch: UpdateLocationRepoInput,
+): UpdateLocationRepoInput & { defaultPhoneRegionSetAt?: Date } {
+  return patch.defaultPhoneRegion === undefined
+    ? patch
+    : { ...patch, defaultPhoneRegionSetAt: new Date() };
+}
+
 @Injectable()
 export class PrismaLocationRepository implements LocationRepository {
   private readonly logger = new Logger('Locations');
@@ -44,6 +53,9 @@ export class PrismaLocationRepository implements LocationRepository {
           // R11: quien crea la sede eligió sus valores; no queda «por revisar».
           regionalSettingsReviewedAt: new Date(),
           phone: input.phone,
+          // DX-329: la API nueva decidió la región, también si es «ninguna».
+          defaultPhoneRegion: input.defaultPhoneRegion,
+          defaultPhoneRegionSetAt: new Date(),
         },
       });
       // Una sede nueva nace con horario por defecto, igual que la que se crea al
@@ -90,7 +102,7 @@ export class PrismaLocationRepository implements LocationRepository {
     return this.prisma.runWithTenant(async (tx) => {
       const result = await tx.location.updateMany({
         where: { id, deletedAt: null },
-        data: patch,
+        data: withDecisionMark(patch),
       });
       if (result.count === 0) return null;
       return tx.location.findFirst({ where: { id, deletedAt: null } });
@@ -147,7 +159,7 @@ export class PrismaLocationRepository implements LocationRepository {
       const updated = await tx.location.update({
         where: { id },
         data: {
-          ...patch,
+          ...withDecisionMark(patch),
           currency: write.currency,
           timeZone: write.timeZone,
           locale: write.locale,

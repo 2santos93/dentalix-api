@@ -11,10 +11,12 @@ import { PatientsModule } from './modules/patients/patients.module';
 import { DentalCatalogModule } from './modules/dental-catalog/dental-catalog.module';
 import { MedicalHistoryModule } from './modules/medical-history/medical-history.module';
 import { ClinicalEntriesModule } from './modules/clinical-entries/clinical-entries.module';
+import { AnesthesiaModule } from './modules/anesthesia/anesthesia.module';
 import { ClinicalNoteTemplatesModule } from './modules/clinical-note-templates/clinical-note-templates.module';
 import { OdontogramModule } from './modules/odontogram/odontogram.module';
 import { AppointmentsModule } from './modules/appointments/appointments.module';
 import { AppointmentTypesModule } from './modules/appointment-types/appointment-types.module';
+import { PaymentMethodsModule } from './modules/payment-methods/payment-methods.module';
 import { PayersModule } from './modules/payers/payers.module';
 import { PriceListsModule } from './modules/price-lists/price-lists.module';
 import { AgreementsModule } from './modules/agreements/agreements.module';
@@ -85,10 +87,12 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     DentalCatalogModule,
     MedicalHistoryModule,
     ClinicalEntriesModule,
+    AnesthesiaModule,
     ClinicalNoteTemplatesModule,
     OdontogramModule,
     AppointmentsModule,
     AppointmentTypesModule,
+    PaymentMethodsModule,
     PayersModule,
     PriceListsModule,
     AgreementsModule,

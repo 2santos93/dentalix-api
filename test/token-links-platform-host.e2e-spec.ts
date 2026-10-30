@@ -14,6 +14,7 @@ import {
   REGIONAL_BOGOTA_FIXTURE,
   registerBody,
 } from './support/location-fixtures';
+import { purgeTenantsBySubdomain } from './support/tenant-purge';
 
 // SEC-033 / DX-143 (e2e): los enlaces con un token que da control de la
 // cuenta GLOBAL (restablecer la contraseña, invitación que puede reclamar una
@@ -45,17 +46,11 @@ class RecordingMailer implements Mailer {
 }
 
 async function cleanup(): Promise<void> {
-  await raw.clinicInvitation.deleteMany({
-    where: { tenant: { subdomain: SUB } },
-  });
-  await raw.clinicMembership.deleteMany({
-    where: { tenant: { subdomain: SUB } },
-  });
   await raw.tenantDomain.deleteMany({
     where: { host: { in: [CUSTOM_HOST, PENDING_HOST] } },
   });
+  await purgeTenantsBySubdomain(raw, [SUB]);
   await raw.user.deleteMany({ where: { email: { endsWith: DOMAIN } } });
-  await raw.tenant.deleteMany({ where: { subdomain: SUB } });
 }
 
 async function waitUntil(

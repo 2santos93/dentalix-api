@@ -36,13 +36,8 @@ export interface ListQueryArgs {
   todays: { ids: string[]; days: string[] };
 }
 
-/**
- * Base de la lista: cada gasto con lo pagado (UNA agregación lateral por
- * fila, sin N+1), su estado derivado y si está vencido con el «hoy» de SU
- * sede. Filtra por todo lo que sale de columnas; el estado se filtra fuera,
- * sobre lo derivado. Mismas reglas que `expenseStatus`.
- */
-function baseCte(args: ListQueryArgs): Prisma.Sql {
+/** Lo que se filtra por columnas del gasto (`e`); el estado va aparte. */
+function expenseWhere(args: ListQueryArgs): Prisma.Sql {
   const { filters, scope, tenantId } = args;
   const where: Prisma.Sql[] = [Prisma.sql`e."tenantId" = ${tenantId}::uuid`];
   if (scope !== undefined) {
@@ -68,9 +63,42 @@ function baseCte(args: ListQueryArgs): Prisma.Sql {
       Prisma.sql`position(${categoryKey(filters.query)} in public.dx_search_normalize(coalesce(e."supplier", '') || ' ' || coalesce(e."description", ''))) > 0`,
     );
   }
+  return Prisma.join(where, ' AND ');
+}
+
+/**
+ * Orden de la lista. Es el de los índices `expenses_tenant_invoice_created_idx`
+ * y `expenses_tenant_location_invoice_created_idx` (DX-393): la página sale
+ * del índice sin ordenar la clínica entera.
+ */
+const ORDER = Prisma.sql`"invoiceDate" DESC, "createdAt" DESC, "id" DESC`;
+
+/** ¿Filtra por algo derivado de los pagos (estado o vencido)? */
+function filtersDerived(filters: ExpenseListFilters): boolean {
+  return filters.status !== undefined || filters.overdue !== undefined;
+}
+
+function pageWindow(filters: ExpenseListFilters): Prisma.Sql {
+  const { page, pageSize } = filters;
+  return Prisma.sql`LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}`;
+}
+
+/**
+ * Base de la lista: cada gasto de `picked` con lo pagado (UNA agregación
+ * lateral por fila, sin N+1), su estado derivado y si está vencido con el
+ * «hoy» de SU sede. Mismas reglas que `expenseStatus`.
+ *
+ * DX-393 (DB-059): sin filtro de estado ni de vencido, `picked` ya es la
+ * página (`LIMIT` dentro, por el índice), así que solo se suman los pagos de
+ * los gastos que se devuelven. Con esos filtros la suma decide qué filas
+ * entran: `picked` son todos los gastos que pasan los filtros de columnas.
+ */
+function baseCte(args: ListQueryArgs, picked: Prisma.Sql): Prisma.Sql {
   return Prisma.sql`
     WITH loc_today AS (
       SELECT t.id, t.day FROM unnest(${args.todays.ids}::uuid[], ${args.todays.days}::date[]) AS t(id, day)
+    ), picked AS (
+      SELECT e.* FROM "expenses" e WHERE ${expenseWhere(args)} ${picked}
     ), base AS (
       SELECT e."id", e."locationId", e."category", e."supplier", e."description",
              (e."amount" * 100)::bigint AS "amountCents", e."currency",
@@ -88,7 +116,7 @@ function baseCte(args: ListQueryArgs): Prisma.Sql {
               AND p."paidCents" < e."amount" * 100
               AND e."dueDate" IS NOT NULL
               AND e."dueDate" < t.day) AS "overdue"
-        FROM "expenses" e
+        FROM picked e
         CROSS JOIN LATERAL (
           SELECT COALESCE(SUM(ROUND(x."amount" * 100)), 0)::bigint AS "paidCents"
             FROM "expense_payments" x
@@ -96,7 +124,6 @@ function baseCte(args: ListQueryArgs): Prisma.Sql {
              AND x."voidedAt" IS NULL
         ) p
         LEFT JOIN loc_today t ON t.id = e."locationId"
-       WHERE ${Prisma.join(where, ' AND ')}
     )`;
 }
 
@@ -114,14 +141,21 @@ function derivedFilter(filters: ExpenseListFilters): Prisma.Sql {
 }
 
 export function pageQuery(args: ListQueryArgs): Prisma.Sql {
-  const { page, pageSize } = args.filters;
-  return Prisma.sql`${baseCte(args)}
-    SELECT * FROM base WHERE ${derivedFilter(args.filters)}
-     ORDER BY "invoiceDate" DESC, "createdAt" DESC, "id" DESC
-     LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}`;
+  const { filters } = args;
+  if (!filtersDerived(filters)) {
+    return Prisma.sql`${baseCte(args, Prisma.sql`ORDER BY ${ORDER} ${pageWindow(filters)}`)}
+      SELECT * FROM base ORDER BY ${ORDER}`;
+  }
+  return Prisma.sql`${baseCte(args, Prisma.empty)}
+    SELECT * FROM base WHERE ${derivedFilter(filters)}
+     ORDER BY ${ORDER} ${pageWindow(filters)}`;
 }
 
+/** Total de la lista; sin filtro derivado no suma ningún pago. */
 export function countQuery(args: ListQueryArgs): Prisma.Sql {
-  return Prisma.sql`${baseCte(args)}
+  if (!filtersDerived(args.filters)) {
+    return Prisma.sql`SELECT count(*)::int AS "total" FROM "expenses" e WHERE ${expenseWhere(args)}`;
+  }
+  return Prisma.sql`${baseCte(args, Prisma.empty)}
     SELECT count(*)::int AS "total" FROM base WHERE ${derivedFilter(args.filters)}`;
 }

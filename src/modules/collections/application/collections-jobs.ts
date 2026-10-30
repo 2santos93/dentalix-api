@@ -30,6 +30,8 @@ export class CollectionsJobs implements OnModuleInit {
       name: SETTLE_PROMISES_SCHEDULE,
       cron: SETTLE_PROMISES_CRON,
       job: SETTLE_PROMISES_JOB,
+      // DX-380 (OPS-046): sin solapar un tick con el anterior.
+      singleton: true,
     });
   }
 }

@@ -44,7 +44,7 @@ export class PriceListDto {
   @ApiProperty({ example: 'Convenio Sura EPS' })
   name!: string;
 
-  @ApiProperty({ example: 'COP', description: 'Código ISO 4217' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({
@@ -81,7 +81,6 @@ export class CreatePriceListDto {
   name!: string;
 
   @ApiProperty({
-    example: 'COP',
     description: 'Código ISO 4217 de `currencies`.',
   })
   @IsString({ message: CURRENCY_MESSAGE })
@@ -112,7 +111,6 @@ export class UpdatePriceListDto {
   name?: string;
 
   @ApiPropertyOptional({
-    example: 'COP',
     description: 'Con precios cargados, otra moneda da 409.',
   })
   @NotNullable()

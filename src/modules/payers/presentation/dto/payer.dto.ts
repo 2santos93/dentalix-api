@@ -36,7 +36,7 @@ export class PayerDto {
   @ApiProperty({ format: 'uuid' })
   id!: string;
 
-  @ApiProperty({ example: 'Sanitas' })
+  @ApiProperty({ example: 'Aseguradora Ejemplo' })
   name!: string;
 
   @ApiProperty({ enum: PAYER_TYPES, enumName: 'PayerType' })

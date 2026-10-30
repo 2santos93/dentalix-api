@@ -15,6 +15,17 @@ export interface ClinicExchangeSettings {
   manualSince: string | null;
 }
 
+/**
+ * SEC-054: desde cuándo puede necesitar la clínica una tasa del proveedor y
+ * en qué zonas cuenta «hoy».
+ */
+export interface ClinicProviderWindow {
+  /** Lo anterior entre el alta de la clínica y su primer abono vivo. */
+  since: Date;
+  /** Zonas IANA válidas de sus sedes no borradas (vacío si no tiene). */
+  timeZones: string[];
+}
+
 /** Ajustes de tasa de cambio de la clínica del contexto. */
 export interface ClinicExchangeSettingsRepository {
   get(): Promise<ClinicExchangeSettings>;
@@ -28,4 +39,6 @@ export interface ClinicExchangeSettingsRepository {
   ): Promise<{ before: ClinicExchangeSettings; after: ClinicExchangeSettings }>;
   /** Zona IANA de la sede principal (la activa más antigua, R6). */
   principalTimeZone(): Promise<string>;
+  /** SEC-054: ver `ClinicProviderWindow`. */
+  providerWindow(): Promise<ClinicProviderWindow>;
 }

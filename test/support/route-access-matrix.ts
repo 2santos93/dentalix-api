@@ -208,6 +208,21 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'PATCH /patients/:patientId/clinical-entries/:entryId': CLINICAL,
   'PUT /patients/:patientId/clinical-entries/:entryId': CLINICAL,
   'DELETE /patients/:patientId/clinical-entries/:entryId': CLINICAL,
+  // DX-307: anestesia local en la evolución y catálogo de anestésicos.
+  'GET /patients/:patientId/anesthesia': CLINICAL,
+  'GET /patients/:patientId/clinical-entries/:entryId/anesthesia': CLINICAL,
+  'POST /patients/:patientId/clinical-entries/:entryId/anesthesia': PRESCRIBERS,
+  'POST /patients/:patientId/clinical-entries/:entryId/anesthesia/check':
+    PRESCRIBERS,
+  'PATCH /patients/:patientId/clinical-entries/:entryId/anesthesia/:id':
+    CLINICAL,
+  'PUT /patients/:patientId/clinical-entries/:entryId/anesthesia/:id': CLINICAL,
+  'DELETE /patients/:patientId/clinical-entries/:entryId/anesthesia/:id':
+    CLINICAL,
+  'GET /anesthetics': CLINICAL,
+  'POST /anesthetics': ADMIN_ONLY,
+  'POST /anesthetics/samples': ADMIN_ONLY,
+  'PATCH /anesthetics/:id': ADMIN_ONLY,
   // DX-170: plantillas de evolución. Leerlas, quien documenta (sin recepción);
   // crear, editar, desactivar y cargar las de ejemplo, solo ADMIN.
   'GET /clinical-note-templates': CLINICAL,
@@ -403,6 +418,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /appointment-types': EVERY_ROLE,
   'POST /appointment-types': ADMIN_ONLY,
   'PATCH /appointment-types/:id': ADMIN_ONLY,
+  // DX-377: medios de pago; leerlos quien cobra, escribirlos solo ADMIN.
+  'GET /payment-methods': BILLING,
+  'POST /payment-methods': ADMIN_ONLY,
+  'PATCH /payment-methods/:id': ADMIN_ONLY,
   'DELETE /appointment-types/:id': ADMIN_ONLY,
   'GET /payers': EVERY_ROLE,
   'POST /payers': roles('ADMIN', 'RECEPTION'),
@@ -477,6 +496,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // 2026-07-30-payment-plans-cuotas.md; estado de cuenta: loop/informes/DX-011.md;
   // planes cobrables: loop/informes/DX-067.md.
   'GET /payments': BILLING,
+  // DX-395: la caja en CSV, mismos roles que la caja.
+  'GET /payments.csv': BILLING,
   'POST /treatment-plans/:id/payments': BILLING,
   // DX-262: abono contra el saldo migrado (los mismos roles que cobran).
   'POST /opening-balances/:id/payments': BILLING,
@@ -491,6 +512,11 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // (solo ADMIN, spec R10).
   'GET /payments/:id/allocations': BILLING,
   'PUT /payments/:id/allocations': ADMIN_ONLY,
+  // DX-380: aviso de abonos sin tasa de más de 24 h (lleva a la tasa de
+  // cambio, que solo cambia el ADMIN).
+  'GET /payments/rate-backlog': ADMIN_ONLY,
+  // DX-402: cuántos abonos de un día tomarían una tasa manual de respaldo.
+  'GET /payments/rate-backlog/day': ADMIN_ONLY,
   'POST /treatment-plans/:id/payment-plan': BILLING,
   'GET /treatment-plans/:id/payment-plan': BILLING,
   'DELETE /treatment-plans/:id/payment-plan': BILLING,

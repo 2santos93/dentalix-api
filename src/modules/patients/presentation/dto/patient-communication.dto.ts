@@ -125,7 +125,7 @@ export class PatientCommunicationDto {
     type: String,
     nullable: true,
     description:
-      'E.164 (+ seguido del indicativo y el número, sin espacios), solo si es un móvil válido.',
+      'E.164 (+ seguido del prefijo y el número, sin espacios), solo si es un móvil válido.',
   })
   phoneE164!: string | null;
 
@@ -133,9 +133,23 @@ export class PatientCommunicationDto {
     enum: ['MISSING', 'VALID', 'INVALID'],
     enumName: 'MobileStatus',
     description:
-      'MISSING: sin móvil. INVALID: no es un móvil válido para el país de la sede (no puede ser canal WhatsApp).',
+      'MISSING: sin móvil. INVALID: no es un móvil válido con el prefijo de la sede (no puede ser canal WhatsApp).',
   })
   phoneStatus!: 'MISSING' | 'VALID' | 'INVALID';
+
+  @ApiProperty({
+    description:
+      'true si los dígitos se pueden leer como dos números válidos distintos: hay que escribirlo con + y su prefijo.',
+  })
+  phoneAmbiguous!: boolean;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'Número válido en formato internacional de la librería, con su extensión si la tiene. null si no es válido.',
+  })
+  phoneInternational!: string | null;
 
   @ApiProperty({
     type: String,
@@ -143,7 +157,7 @@ export class PatientCommunicationDto {
     minLength: 2,
     maxLength: 2,
     description:
-      'País (ISO 3166-1 alfa-2) con el que se valida un número sin indicativo: el de la sede activa o la principal (sin sedes, el del paciente). null si no hay país o si ese país no tiene indicativo por defecto (hasta DX-329): el número se escribe con +.',
+      'Región (ISO 3166-1 alfa-2) cuyo prefijo se añade a un número escrito sin +: la de la sede activa o la principal. null si la sede no tiene prefijo por defecto.',
   })
   phoneCountry!: string | null;
 
@@ -181,7 +195,7 @@ export class UpdatePatientCommunicationDto {
     nullable: true,
     maxLength: PHONE_MAX,
     description:
-      'Móvil. Se guarda en E.164 si es válido para el país de la sede; null o vacío lo borra.',
+      'Móvil. Se guarda en E.164 si es válido; sin «+» se lee con el prefijo telefónico por defecto de la sede. null o vacío lo borra.',
   })
   @IsOptional()
   @IsString({ message: 'El móvil debe ser un texto.' })

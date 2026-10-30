@@ -1,6 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import type { CountryWhitelist } from './ports/country-whitelist.port';
 import type { CurrencyWhitelist } from '../../treatment-plans/domain/ports/currency-whitelist.port';
+import { isPhoneRegion } from '../../../shared/phone/phone-number';
 import { canonicalTimeZoneName } from '../../../shared/time/canonical-time-zone';
 import type { HourCycle } from '../../../shared/format/regional-format';
 import {
@@ -58,6 +59,16 @@ export interface RegionalError {
   message: string;
 }
 
+/**
+ * DX-329: el error de la región telefónica, aparte de `RegionalError`: no es
+ * un campo de G1 ni del registro (pre-flight I3), así que `registration-location`
+ * no tiene que conocerlo.
+ */
+export interface DefaultPhoneRegionError {
+  field: 'defaultPhoneRegion';
+  message: string;
+}
+
 export const REGIONAL_MESSAGES = {
   currencyMissing: 'Elige la moneda de la sede.',
   currencyUnknown: (code: string) =>
@@ -95,6 +106,14 @@ export const COUNTRY_UNKNOWN = (code: string) =>
 /** Cualquier otro texto: no se repite lo recibido (puede ser larguísimo). */
 export const COUNTRY_INVALID =
   'El país indicado no está en la lista de países.';
+
+/** DX-329: dos letras que la librería de teléfonos no admite como región. */
+export const DEFAULT_PHONE_REGION_UNKNOWN = (code: string) =>
+  `El prefijo telefónico «${code}» no está en la lista.`;
+
+/** Cualquier otro texto: no se repite lo recibido (puede ser larguísimo). */
+export const DEFAULT_PHONE_REGION_INVALID =
+  'El prefijo telefónico indicado no está en la lista.';
 
 /**
  * 400 con el mensaje exacto y el campo del cuerpo al que se refiere, para que
@@ -309,4 +328,40 @@ export async function validateRegionalSettings(
   const hourCycle = validateHourCycle(input.hourCycle);
   if (typeof hourCycle !== 'string') return hourCycle;
   return { currency, timeZone, locale, hourCycle };
+}
+
+/**
+ * DX-329 (R3): la región cuyo prefijo toma un teléfono escrito sin «+». `null`
+ * o vacío es «sin prefijo por defecto». Si no, dos letras, recortadas y en
+ * mayúsculas, de la lista de la librería. `stored` es la región ya guardada de
+ * la sede (PATCH): la misma, aunque la versión instalada ya no la admita, se
+ * devuelve tal cual, como `validateTimeZone`. Nunca se deduce del país.
+ * Recibe el cuerpo sin tipar: lo que no es texto (un número, un objeto) es el
+ * mismo 400 con `field`, no el de la ValidationPipe.
+ */
+export function validateDefaultPhoneRegion(
+  raw: unknown,
+  stored?: string | null,
+): string | null | DefaultPhoneRegionError {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw !== 'string') {
+    return {
+      field: 'defaultPhoneRegion',
+      message: DEFAULT_PHONE_REGION_INVALID,
+    };
+  }
+  if (blank(raw)) return null;
+  const code = raw.trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(code)) {
+    return {
+      field: 'defaultPhoneRegion',
+      message: DEFAULT_PHONE_REGION_INVALID,
+    };
+  }
+  if (isPhoneRegion(code)) return code;
+  if (stored === code) return code;
+  return {
+    field: 'defaultPhoneRegion',
+    message: DEFAULT_PHONE_REGION_UNKNOWN(code),
+  };
 }

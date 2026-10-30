@@ -1,7 +1,15 @@
 import { BadRequestException } from '@nestjs/common';
 import { GetRatesForDateUseCase } from './get-rates-for-date.use-case';
 import { ExchangeRateRepository } from '../../domain/ports/exchange-rate-repository.port';
-import { ExchangeRateProvider } from '../../domain/ports/exchange-rate-provider.port';
+import {
+  ExchangeRateBudgetExceededError,
+  ExchangeRateProvider,
+  ExchangeRateUnavailableError,
+} from '../../domain/ports/exchange-rate-provider.port';
+import {
+  DEFAULT_PROVIDER_RATES_LIMITS,
+  ProviderRatesGate,
+} from '../provider-rates-gate';
 import { ExchangeRateSnapshot } from '../../domain/entities/exchange-rate-snapshot.entity';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
@@ -254,7 +262,7 @@ describe('GetRatesForDateUseCase', () => {
       return { uc, fetchRates, tenantContext, settings };
     }
 
-    it('un día anterior al inicio usa la tasa automática', async () => {
+    it('un día anterior al inicio usa la tasa automática (la guardada)', async () => {
       const { uc, tenantContext } = setup();
       await expect(
         tenantContext.run(C, () => uc.execute('2026-10-29')),
@@ -296,6 +304,461 @@ describe('GetRatesForDateUseCase', () => {
       ]);
       expect(settings.reads()).toBe(1);
       expect(results[0]).toBe(results[2]);
+    });
+  });
+
+  // DX-402: la tasa manual de un día anterior a `manualSince` es la tasa de
+  // respaldo de los abonos pendientes de ese día sin tasa del proveedor. Solo
+  // la lectura que lo pide (`memoized({ manualBackup: true })`, el reintento
+  // de los abonos sin tasa); el resto de lecturas no cambia.
+  describe('tasa de respaldo de un día anterior a manual (DX-402)', () => {
+    const SINCE = '2026-10-30';
+    const C = '99999999-9999-4999-8999-999999999999';
+
+    function setup(options: { snapshotOn28?: boolean } = {}) {
+      const repo = makeInMemoryRepo();
+      if (options.snapshotOn28) repo.seed('2026-10-28', { COP: 3900 });
+      const fetchRates = jest
+        .fn()
+        .mockRejectedValue(new ExchangeRateUnavailableError('caído'));
+      const tenantContext = new TenantContextService();
+      const uc = new GetRatesForDateUseCase(
+        repo,
+        makeProvider(fetchRates),
+        makeSettings(
+          { [C]: { source: 'MANUAL', manualSince: SINCE } },
+          tenantContext,
+        ),
+        makeManualRates(
+          { [C]: { '2026-10-28': { COP: 4000 } } },
+          tenantContext,
+        ),
+        tenantContext,
+      );
+      return { uc, fetchRates, tenantContext };
+    }
+
+    it('sin snapshot del proveedor, la manual de ese día sirve de respaldo y no se llama al proveedor', async () => {
+      const { uc, tenantContext, fetchRates } = setup();
+      const lookup = tenantContext.run(C, () =>
+        uc.memoized({ manualBackup: true }),
+      );
+      await expect(
+        tenantContext.run(C, () => lookup('2026-10-28')),
+      ).resolves.toEqual({
+        base: 'USD',
+        source: 'MANUAL',
+        rates: { COP: 4000 },
+        backup: { manualSince: SINCE },
+      });
+      expect(fetchRates).not.toHaveBeenCalled();
+    });
+
+    it('con snapshot del proveedor ese día, manda el snapshot', async () => {
+      const { uc, tenantContext } = setup({ snapshotOn28: true });
+      const lookup = tenantContext.run(C, () =>
+        uc.memoized({ manualBackup: true }),
+      );
+      await expect(
+        tenantContext.run(C, () => lookup('2026-10-28')),
+      ).resolves.toEqual({
+        base: 'USD',
+        source: 'AUTOMATIC',
+        rates: { COP: 3900 },
+      });
+    });
+
+    it('sin la opción, un día anterior sigue el camino automático (y sin tasa falla)', async () => {
+      const { uc, tenantContext, fetchRates } = setup();
+      await expect(
+        tenantContext.run(C, () => uc.execute('2026-10-28')),
+      ).rejects.toBeInstanceOf(ExchangeRateUnavailableError);
+      expect(fetchRates).toHaveBeenCalledTimes(1);
+    });
+
+    it('`noBackup` en la lectura de respaldo vuelve al camino automático', async () => {
+      const { uc, tenantContext, fetchRates } = setup();
+      const lookup = tenantContext.run(C, () =>
+        uc.memoized({ manualBackup: true }),
+      );
+      await expect(
+        tenantContext.run(C, () => lookup('2026-10-28', { noBackup: true })),
+      ).rejects.toBeInstanceOf(ExchangeRateUnavailableError);
+      expect(fetchRates).toHaveBeenCalledTimes(1);
+    });
+
+    it('un día sin tasa manual registrada sigue el camino automático', async () => {
+      const { uc, tenantContext, fetchRates } = setup();
+      const lookup = tenantContext.run(C, () =>
+        uc.memoized({ manualBackup: true }),
+      );
+      await expect(
+        tenantContext.run(C, () => lookup('2026-10-27')),
+      ).rejects.toBeInstanceOf(ExchangeRateUnavailableError);
+      expect(fetchRates).toHaveBeenCalledWith('2026-10-27');
+    });
+
+    it('con la fuente automática no hay respaldo: las manuales no se usan', async () => {
+      const repo = makeInMemoryRepo();
+      const fetchRates = jest
+        .fn()
+        .mockRejectedValue(new ExchangeRateUnavailableError('caído'));
+      const tenantContext = new TenantContextService();
+      const uc = new GetRatesForDateUseCase(
+        repo,
+        makeProvider(fetchRates),
+        makeSettings({}, tenantContext),
+        makeManualRates(
+          { [C]: { '2026-10-28': { COP: 4000 } } },
+          tenantContext,
+        ),
+        tenantContext,
+      );
+      const lookup = tenantContext.run(C, () =>
+        uc.memoized({ manualBackup: true }),
+      );
+      await expect(
+        tenantContext.run(C, () => lookup('2026-10-28')),
+      ).rejects.toBeInstanceOf(ExchangeRateUnavailableError);
+    });
+
+    it('el día de inicio y los siguientes no son respaldo: son la manual de siempre', async () => {
+      const { uc, tenantContext } = setup();
+      const lookup = tenantContext.run(C, () =>
+        uc.memoized({ manualBackup: true }),
+      );
+      await expect(tenantContext.run(C, () => lookup(SINCE))).resolves.toEqual({
+        base: 'USD',
+        source: 'MANUAL',
+        rates: {},
+      });
+    });
+  });
+
+  // SEC-054: la cuota del proveedor es una sola para toda la plataforma.
+  describe('cuota del proveedor (SEC-054)', () => {
+    const A = '33333333-3333-4333-8333-333333333333';
+    const M = '44444444-4444-4444-8444-444444444444';
+    // 2026-10-30 12:00 UTC; en Pacific/Kiritimati (UTC+14) ya es el 31.
+    const NOW = new Date('2026-10-30T12:00:00.000Z');
+
+    function setup(
+      options: {
+        fetchRates?: ExchangeRateProvider['fetchRates'];
+        clinicLimit?: number;
+        timeZones?: string[];
+      } = {},
+    ) {
+      const repo = makeInMemoryRepo();
+      repo.seed('2020-01-02', { COP: 3200 });
+      const fetchRates = jest.fn(
+        options.fetchRates ??
+          ((date: string) =>
+            Promise.resolve({
+              base: 'USD' as const,
+              rates: { COP: 4000 + date.length },
+            })),
+      );
+      const tenantContext = new TenantContextService();
+      const clock = () => NOW;
+      const gate = new ProviderRatesGate(
+        {
+          ...DEFAULT_PROVIDER_RATES_LIMITS,
+          clinic: {
+            limit: options.clinicLimit ?? 30,
+            windowMs: 60 * 60_000,
+          },
+        },
+        clock,
+      );
+      const window = {
+        // Alta el 2026-09-01; su primer abono, anterior, el 2026-08-15.
+        since: new Date('2026-08-15T15:00:00.000Z'),
+        timeZones: options.timeZones ?? ['America/Bogota'],
+      };
+      const settings = makeSettings(
+        { [M]: { source: 'MANUAL', manualSince: '2026-10-01' } },
+        tenantContext,
+        { windows: { [A]: window, [M]: window } },
+      );
+      const uc = new GetRatesForDateUseCase(
+        repo,
+        makeProvider(fetchRates),
+        settings,
+        makeManualRates({}, tenantContext),
+        tenantContext,
+        gate,
+        clock,
+      );
+      const asA = <T>(fn: () => Promise<T>) => tenantContext.run(A, fn);
+      const asM = <T>(fn: () => Promise<T>) => tenantContext.run(M, fn);
+      return { uc, repo, fetchRates, asA, asM, settings };
+    }
+
+    async function badRequestBody(promise: Promise<unknown>) {
+      const error = await promise.catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(BadRequestException);
+      return (error as BadRequestException).getResponse() as {
+        code: string;
+        message: string;
+      };
+    }
+
+    it.each(['2026-02-30', '2026-13-01', '2026-00-10', '2025-02-29'])(
+      'una fecha imposible (%s) es 400 en español y no llama a nadie',
+      async (date) => {
+        const { uc, fetchRates, asA } = setup();
+        for (const read of [
+          () => uc.forRequest(date),
+          () => uc.execute(date),
+        ]) {
+          const body = await badRequestBody(asA(read));
+          expect(body.code).toBe('EXCHANGE_RATE_DATE_INVALID');
+          expect(body.message).toBe(
+            'date debe ser un día que exista, con el formato AAAA-MM-DD.',
+          );
+        }
+        expect(fetchRates).not.toHaveBeenCalled();
+      },
+    );
+
+    it('con MANUAL, una fecha imposible también es 400 (no el día siguiente)', async () => {
+      const { uc, asM } = setup();
+      const body = await badRequestBody(asM(() => uc.forRequest('2026-02-30')));
+      expect(body.code).toBe('EXCHANGE_RATE_DATE_INVALID');
+    });
+
+    it.each([
+      ['antes del primer abono', '2026-08-14'],
+      ['muy antiguo', '2001-01-04'],
+    ])(
+      'fuera de la ventana de la clínica (%s): 400 sin llamar al proveedor',
+      async (_label, date) => {
+        const { uc, fetchRates, asA } = setup();
+        const body = await badRequestBody(asA(() => uc.forRequest(date)));
+        expect(body).toMatchObject({
+          code: 'EXCHANGE_RATE_DATE_OUT_OF_RANGE',
+          message:
+            'No hay tasa guardada de ese día y solo se piden al proveedor los días entre el 2026-08-15 (alta de la clínica o su primer abono) y hoy, 2026-10-30.',
+        });
+        expect(fetchRates).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(['1900-01-01', '1999-12-31', '2101-01-01', '2999-12-31'])(
+      'fuera de PERIOD_DAY_MIN..MAX (%s): 400 con las dos fuentes, sin leer ni llamar (DX-383)',
+      async (date) => {
+        const { uc, repo, fetchRates, asA, asM } = setup();
+        repo.seed(date, { COP: 1 });
+        for (const as of [asA, asM]) {
+          const body = await badRequestBody(as(() => uc.forRequest(date)));
+          expect(body).toMatchObject({
+            code: 'EXCHANGE_RATE_DATE_INVALID',
+            message:
+              'date tiene que ser un día entre el 2000-01-01 y el 2100-12-31.',
+          });
+        }
+        expect(fetchRates).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([
+      ['mañana', '2026-10-31'],
+      ['muy futuro', '2099-01-01'],
+    ])(
+      'un día futuro en la zona de la sede (%s): 400 con las dos fuentes, aunque esté guardado (DX-383)',
+      async (_label, date) => {
+        const { uc, repo, fetchRates, asA, asM } = setup();
+        // Un snapshot futuro (p. ej. de la precarga en UTC) tampoco se sirve.
+        repo.seed(date, { COP: 1 });
+        for (const as of [asA, asM]) {
+          const body = await badRequestBody(as(() => uc.forRequest(date)));
+          expect(body).toMatchObject({
+            code: 'EXCHANGE_RATE_DATE_FUTURE',
+            message:
+              'Ese día aún no ha llegado en las sedes de la clínica: no tiene tasa. Hoy es 2026-10-30.',
+            today: '2026-10-30',
+          });
+        }
+        expect(fetchRates).not.toHaveBeenCalled();
+      },
+    );
+
+    it('«hoy» de una sede más adelantada no es futuro, con las dos fuentes (DX-383)', async () => {
+      const { uc, fetchRates, asA, asM } = setup({
+        timeZones: ['America/Bogota', 'Pacific/Kiritimati'],
+      });
+      await expect(asM(() => uc.forRequest('2026-10-31'))).resolves.toEqual({
+        base: 'USD',
+        source: 'MANUAL',
+        rates: {},
+      });
+      const body = await badRequestBody(asA(() => uc.forRequest('2026-11-01')));
+      expect(body).toMatchObject({
+        code: 'EXCHANGE_RATE_DATE_FUTURE',
+        today: '2026-10-31',
+      });
+      expect(fetchRates).not.toHaveBeenCalled();
+    });
+
+    it('un día que ya llegó en todo el planeta no lee la ventana; uno sin guardar, una vez (DX-383)', async () => {
+      const { uc, fetchRates, asA, asM, settings } = setup({
+        timeZones: ['America/Bogota', 'Pacific/Kiritimati'],
+      });
+      const providerWindow = jest.spyOn(settings, 'providerWindow');
+      // Guardado, con MANUAL, y hoy (en UTC−12 ya es el 30): sin leer la ventana.
+      await asA(() => uc.forRequest('2020-01-02'));
+      await asM(() => uc.forRequest('2026-10-15'));
+      await asM(() => uc.forRequest('2026-10-30'));
+      expect(providerWindow).not.toHaveBeenCalled();
+      // Sin guardar: la ventana se lee una sola vez antes de pedirlo.
+      await asA(() => uc.forRequest('2026-10-01'));
+      expect(providerWindow).toHaveBeenCalledTimes(1);
+      // Un día que aún no llegó en alguna zona sí mira las sedes (y en
+      // Kiritimati el 31 ya es hoy), una sola lectura aunque lo pida.
+      providerWindow.mockClear();
+      await asA(() => uc.forRequest('2026-10-31'));
+      expect(providerWindow).toHaveBeenCalledTimes(1);
+      expect(fetchRates).toHaveBeenCalledTimes(2);
+    });
+
+    it('los bordes de la ventana sí se piden', async () => {
+      const { uc, fetchRates, asA } = setup();
+      await asA(() => uc.forRequest('2026-08-15'));
+      await asA(() => uc.forRequest('2026-10-30'));
+      expect(fetchRates).toHaveBeenCalledTimes(2);
+    });
+
+    it('«hoy» es el de la sede más adelantada', async () => {
+      const { uc, fetchRates, asA } = setup({
+        timeZones: ['America/Bogota', 'Pacific/Kiritimati'],
+      });
+      await asA(() => uc.forRequest('2026-10-31'));
+      expect(fetchRates).toHaveBeenCalledWith('2026-10-31');
+    });
+
+    it('un día ya guardado se sirve aunque quede fuera de la ventana', async () => {
+      const { uc, fetchRates, asA } = setup();
+      await expect(asA(() => uc.forRequest('2020-01-02'))).resolves.toEqual({
+        base: 'USD',
+        source: 'AUTOMATIC',
+        rates: { COP: 3200 },
+      });
+      expect(fetchRates).not.toHaveBeenCalled();
+    });
+
+    it('la lectura interna (abonos, saldos) no aplica la ventana', async () => {
+      const { uc, fetchRates, asA } = setup();
+      await asA(() => uc.execute('2026-08-01'));
+      expect(fetchRates).toHaveBeenCalledWith('2026-08-01');
+    });
+
+    it('caché negativa: un día que el proveedor no tiene no se vuelve a pedir', async () => {
+      const { uc, fetchRates, asA } = setup({
+        fetchRates: () =>
+          Promise.reject(new ExchangeRateUnavailableError('HTTP 400')),
+      });
+      for (let i = 0; i < 5; i += 1) {
+        await expect(
+          asA(() => uc.forRequest('2026-10-01')),
+        ).rejects.toBeInstanceOf(ExchangeRateUnavailableError);
+        await expect(
+          asA(() => uc.execute('2026-10-01')),
+        ).rejects.toBeInstanceOf(ExchangeRateUnavailableError);
+      }
+      expect(fetchRates).toHaveBeenCalledTimes(1);
+    });
+
+    it('single-flight: peticiones simultáneas del mismo día, una llamada y un guardado', async () => {
+      const { uc, repo, fetchRates, asA } = setup({ clinicLimit: 1 });
+      const upsert = jest.spyOn(repo, 'upsertMany');
+      const results = await asA(() =>
+        Promise.all(
+          Array.from({ length: 20 }, () => uc.forRequest('2026-10-01')),
+        ),
+      );
+      expect(fetchRates).toHaveBeenCalledTimes(1);
+      expect(upsert).toHaveBeenCalledTimes(1);
+      expect(new Set(results.map((r) => r.rates.COP)).size).toBe(1);
+    });
+
+    it('presupuesto de la clínica: superado, ExchangeRateBudgetExceededError sin llamar', async () => {
+      const { uc, fetchRates, asA } = setup({ clinicLimit: 2 });
+      await asA(() => uc.forRequest('2026-10-01'));
+      await asA(() => uc.forRequest('2026-10-02'));
+      await expect(
+        asA(() => uc.forRequest('2026-10-03')),
+      ).rejects.toBeInstanceOf(ExchangeRateBudgetExceededError);
+      // Para quien convierte por dentro es «sin tasa».
+      await expect(asA(() => uc.execute('2026-10-03'))).rejects.toBeInstanceOf(
+        ExchangeRateUnavailableError,
+      );
+      expect(fetchRates).toHaveBeenCalledTimes(2);
+      // Los días ya guardados siguen saliendo.
+      await expect(
+        asA(() => uc.forRequest('2026-10-01')),
+      ).resolves.toBeDefined();
+    });
+
+    it('la precarga diaria queda fuera del presupuesto', async () => {
+      const { uc, fetchRates, asA } = setup({ clinicLimit: 1 });
+      await asA(() => uc.forRequest('2026-10-01'));
+      await expect(
+        asA(() => uc.prefetchProviderRates('2026-10-30')),
+      ).resolves.toBeDefined();
+      expect(fetchRates).toHaveBeenCalledTimes(2);
+    });
+
+    it('una clínica en MANUAL nunca llama al proveedor por los días de su tasa manual', async () => {
+      const { uc, fetchRates, asM } = setup();
+      await expect(asM(() => uc.forRequest('2026-10-15'))).resolves.toEqual({
+        base: 'USD',
+        source: 'MANUAL',
+        rates: {},
+      });
+      await expect(asM(() => uc.execute('2026-10-30'))).resolves.toEqual({
+        base: 'USD',
+        source: 'MANUAL',
+        rates: {},
+      });
+      // El día anterior al cambio que ya está guardado se lee de la caché.
+      await expect(asM(() => uc.execute('2020-01-02'))).resolves.toEqual({
+        base: 'USD',
+        source: 'AUTOMATIC',
+        rates: { COP: 3200 },
+      });
+      expect(fetchRates).not.toHaveBeenCalled();
+    });
+
+    // Revisión de SEC-054: un día anterior al paso a MANUAL sigue con la tasa
+    // automática (DX-374) y, si falta, se pide al proveedor con las mismas
+    // protecciones que AUTOMATIC. Si no, un abono de ese día que quedó «sin
+    // tasa» al cambiar (BE-047) no la congelaría nunca en el barrido.
+    it('con MANUAL, un día anterior al cambio sin guardar se pide al proveedor (una vez)', async () => {
+      const { uc, repo, fetchRates, asM } = setup();
+      await expect(asM(() => uc.execute('2026-09-15'))).resolves.toEqual({
+        base: 'USD',
+        source: 'AUTOMATIC',
+        rates: { COP: 4010 },
+      });
+      await expect(asM(() => uc.forRequest('2026-09-15'))).resolves.toEqual({
+        base: 'USD',
+        source: 'AUTOMATIC',
+        rates: { COP: 4010 },
+      });
+      expect(fetchRates).toHaveBeenCalledTimes(1);
+      expect(await repo.findByDate('2026-09-15')).toHaveLength(1);
+    });
+
+    it('con MANUAL, un día anterior al cambio pasa por la ventana y el presupuesto de la clínica', async () => {
+      const { uc, fetchRates, asM } = setup({ clinicLimit: 1 });
+      const body = await badRequestBody(asM(() => uc.forRequest('2026-08-01')));
+      expect(body.code).toBe('EXCHANGE_RATE_DATE_OUT_OF_RANGE');
+      await asM(() => uc.forRequest('2026-09-15'));
+      await expect(asM(() => uc.execute('2026-09-16'))).rejects.toBeInstanceOf(
+        ExchangeRateBudgetExceededError,
+      );
+      expect(fetchRates).toHaveBeenCalledTimes(1);
     });
   });
 });

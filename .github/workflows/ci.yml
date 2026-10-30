@@ -199,12 +199,23 @@ jobs:
         if: ${{ !cancelled() && steps.db.outcome == 'success' }}
         run: npm run test:int
 
+  # DX-396 (TST-044): la e2e en serie pasaba de 18 min y GitHub la cancelaba a
+  # los 20, y «cancelled» escondía rojos. Ahora va repartida con `jest --shard`
+  # en una matriz: mismos servicios, env y pasos en cada shard. `total` y
+  # `timeout` son de un solo valor (no multiplican jobs) para que el número de
+  # shards y el tope vivan en un único sitio. Tope: ~9 min por shard medidos →
+  # 20 min deja más del 40 % de margen; el último paso avisa al pasar del 70 %.
+  # `e2e-shards` comprueba que cada spec corre en exactamente un shard.
   e2e:
-    name: E2E (Postgres 16)
+    name: E2E ${{ matrix.shard }}/${{ matrix.total }} (Postgres 16)
     runs-on: ubuntu-24.04
-    # PR29 / run 40949683123: 129 suites PASS (1110 s cronometrados), sin
-    # FAIL, antes de agotar los 20 min; margen para setup y carga SEC-046.
-    timeout-minutes: 30
+    timeout-minutes: ${{ matrix.timeout }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+        total: [3]
+        timeout: [20]
     services:
       postgres:
         image: postgres:16
@@ -247,6 +258,10 @@ jobs:
       S3_TEST_SECRET_ACCESS_KEY: dentalix-minio-local
       REQUIRE_S3_TESTS: '1'
     steps:
+      # Epoch del arranque: lo lee el paso final que publica la duración.
+      - name: Marcar el inicio del job
+        run: echo "JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
@@ -256,6 +271,22 @@ jobs:
 
       - run: npm ci
       - run: npx prisma generate
+
+      # La lista de specs de ESTE shard (rutas relativas, una por línea), para
+      # que `e2e-shards` compruebe la unión. Se sube aunque fallen los tests.
+      - name: Specs del shard
+        run: |
+          npx jest --config ./test/jest-e2e.json --listTests \
+            --shard=${{ matrix.shard }}/${{ matrix.total }} \
+            | sed "s|^$GITHUB_WORKSPACE/||" | sort > e2e-shard-${{ matrix.shard }}.txt
+          echo "Shard ${{ matrix.shard }}/${{ matrix.total }}: $(wc -l < e2e-shard-${{ matrix.shard }}.txt) specs"
+          cat e2e-shard-${{ matrix.shard }}.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: e2e-shard-${{ matrix.shard }}
+          path: e2e-shard-${{ matrix.shard }}.txt
+          if-no-files-found: error
+          retention-days: 7
 
       # DX-084/DX-251: MinIO como paso y no como `services:` (la imagen necesita
       # `server /data`, que un servicio de Actions no puede pasar). Imagen fijada
@@ -290,17 +321,57 @@ jobs:
         id: db
         if: ${{ !cancelled() && (success() || steps.s3.outcome == 'failure') }}
         run: npm run db:test:setup
-      - name: test:e2e
+      - name: test:e2e (shard ${{ matrix.shard }}/${{ matrix.total }})
         if: ${{ !cancelled() && steps.db.outcome == 'success' }}
-        run: npm run test:e2e
+        run: npm run test:e2e -- --shard=${{ matrix.shard }}/${{ matrix.total }}
       # SEC-046: la prueba de carga de la importación (20 lecturas en paralelo,
       # pico de RSS < +300 MB) va aparte porque tarda ~1 min; fuera de CI solo
-      # corre con RUN_SLOW_TESTS=1.
+      # corre con RUN_SLOW_TESTS=1. Corre solo en el shard al que le toca su
+      # spec (`jest --shard` no reparte una lista de un único fichero).
       - name: test:e2e de carga (SEC-046)
         if: ${{ !cancelled() && steps.db.outcome == 'success' }}
         env:
           RUN_SLOW_TESTS: '1'
-        run: npm run test:e2e -- test/patient-imports-load
+        run: |
+          if grep -qx 'test/patient-imports-load.e2e-spec.ts' e2e-shard-${{ matrix.shard }}.txt; then
+            npm run test:e2e -- test/patient-imports-load
+          else
+            echo "La prueba de carga corre en otro shard."
+          fi
+
+      - name: Duración del shard
+        if: ${{ always() }}
+        run: .github/scripts/report-job-duration.sh "E2E ${{ matrix.shard }}/${{ matrix.total }}" ${{ matrix.timeout }}
+
+  # DX-396: cada spec e2e corre en exactamente un shard. Compara la unión de
+  # las listas que subió cada shard con `jest --listTests` completo: falla si
+  # un spec falta, sobra o se repite (p. ej. si `total` no cuadra con `shard`).
+  e2e-shards:
+    name: E2E, reparto de specs entre shards
+    needs: e2e
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: e2e-shard-*
+          path: e2e-shards
+          merge-multiple: true
+      - name: Cada spec e2e en exactamente un shard
+        run: |
+          npx jest --config ./test/jest-e2e.json --listTests \
+            | sed "s|^$GITHUB_WORKSPACE/||" | sort > e2e-all.txt
+          .github/scripts/check-e2e-shards.sh e2e-all.txt e2e-shards/e2e-shard-*.txt
+
 
   # DX-113: en un Postgres gestionado (RDS, Cloud SQL…) el owner de las tablas
   # NO es superusuario ni tiene BYPASSRLS, y con RLS FORCE queda sujeto a la

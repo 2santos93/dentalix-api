@@ -163,6 +163,31 @@ describe('sanitizeAuditMetadata (DX-009)', () => {
     });
   });
 
+  describe('paymentReference (DX-377: referencia repetida confirmada)', () => {
+    const ID = '3f1c2b9e-7a6d-4e5f-8a9b-0c1d2e3f4a5b';
+
+    it('guarda la confirmación y solo los ids con formato de uuid', () => {
+      expect(
+        sanitizeAuditMetadata({
+          paymentReference: {
+            duplicateConfirmed: true,
+            duplicateOf: [ID, 'REF-123456', 'Ana Gómez'],
+          },
+        }),
+      ).toEqual({
+        paymentReference: { duplicateConfirmed: true, duplicateOf: [ID] },
+      });
+    });
+
+    it('descarta el motivo o la referencia aunque lleguen', () => {
+      expect(
+        sanitizeAuditMetadata({
+          paymentReference: { duplicateConfirmed: 'sí', duplicateOf: [ID] },
+        }),
+      ).toEqual({});
+    });
+  });
+
   describe('search (DX-191: búsqueda de implantes por lote/REF)', () => {
     it('guarda lote, REF y nº de filas', () => {
       expect(
@@ -937,6 +962,61 @@ describe('sanitizeAuditMetadata — accesos de un miembro del personal (DX-359)'
       'ADMIN',
     ]) {
       expect(sanitizeAuditMetadata({ staffAccess })).toEqual({});
+    }
+  });
+});
+
+describe('sanitizeAuditMetadata — tasa de respaldo de un día sin tasa (DX-402)', () => {
+  it('guarda el día de la tasa, desde cuándo rige la manual y las monedas', () => {
+    expect(
+      sanitizeAuditMetadata({
+        reason: 'EXCHANGE_RATE_BACKUP',
+        origin: 'JOB',
+        exchangeRateBackup: {
+          rateDate: '2026-10-28',
+          manualSince: '2026-10-30',
+          currencies: ['COP', 'USD'],
+          amount: 50,
+          patientName: 'Ana',
+        },
+      }),
+    ).toEqual({
+      reason: 'EXCHANGE_RATE_BACKUP',
+      origin: 'JOB',
+      exchangeRateBackup: {
+        rateDate: '2026-10-28',
+        manualSince: '2026-10-30',
+        currencies: ['COP', 'USD'],
+      },
+    });
+  });
+
+  it('un día que no existe, un día de la tasa no anterior o una moneda rara no pasan', () => {
+    for (const exchangeRateBackup of [
+      {
+        rateDate: '2026-02-30',
+        manualSince: '2026-10-30',
+        currencies: ['COP'],
+      },
+      {
+        rateDate: '2026-10-30',
+        manualSince: '2026-10-30',
+        currencies: ['COP'],
+      },
+      {
+        rateDate: '2026-10-28',
+        manualSince: '2026-10-30',
+        currencies: ['cop'],
+      },
+      { rateDate: '2026-10-28', manualSince: '2026-10-30', currencies: [] },
+      {
+        rateDate: '2026-10-28',
+        manualSince: '2026-10-30',
+        currencies: ['COP', 'EUR', 'VES'],
+      },
+      '2026-10-28',
+    ]) {
+      expect(sanitizeAuditMetadata({ exchangeRateBackup })).toEqual({});
     }
   });
 });

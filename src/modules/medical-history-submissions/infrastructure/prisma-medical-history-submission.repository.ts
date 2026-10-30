@@ -211,9 +211,12 @@ export class PrismaMedicalHistorySubmissionRepository implements MedicalHistoryS
       });
       const location = await tx.location.findFirstOrThrow({
         where: { id: locationId },
-        select: { country: true },
+        select: { defaultPhoneRegion: true },
       });
-      return { submission: toEntity(row), locationCountry: location.country };
+      return {
+        submission: toEntity(row),
+        locationPhoneRegion: location.defaultPhoneRegion,
+      };
     });
   }
 

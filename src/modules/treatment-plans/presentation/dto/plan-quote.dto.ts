@@ -106,7 +106,7 @@ export class PlanQuoteItemDto {
 }
 
 export class PlanQuoteTotalDto {
-  @ApiProperty({ example: 'COP' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({ description: 'Σ precios' })
@@ -196,7 +196,7 @@ export class PlanQuoteDocumentDto {
   @ApiProperty({ enum: TreatmentPlanStatus })
   planStatus!: TreatmentPlanStatus;
 
-  @ApiProperty({ example: 'COP' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty()

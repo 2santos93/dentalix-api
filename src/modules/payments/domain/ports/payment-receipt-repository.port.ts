@@ -3,6 +3,7 @@ import type {
   ReceiptSnapshotInput,
 } from '../receipt-snapshot';
 
+import type { PaymentRateState } from '../payment-exchange-rate';
 import type {
   NoticeSettings,
   NoticePatientFields,
@@ -51,6 +52,12 @@ interface ReceiptSourceBase {
   /** Email ACTUAL del paciente (para enviarle el recibo), o null si no tiene. */
   patientEmail: string | null;
   notice: ReceiptNoticeData;
+  /**
+   * DX-376: el importe del abono y su tasa tal como la guarda hoy (DX-375).
+   * No va en la foto: un abono «sin tasa» la congela después, y la tasa
+   * congelada ya no cambia nunca, así que reimprimir da siempre la misma.
+   */
+  rate: PaymentRateState & { amount: number };
 }
 
 export type PaymentReceiptSource =

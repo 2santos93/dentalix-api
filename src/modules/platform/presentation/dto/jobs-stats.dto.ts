@@ -82,6 +82,23 @@ export class JobScheduleStatusDto {
       'Con retraso: más de 2 periodos sin correr, o nunca sincronizada',
   })
   overdue!: boolean;
+  @ApiProperty({
+    description:
+      'DX-380: una sola ejecución a la vez (no encola un tick mientras el anterior siga PENDING o RUNNING)',
+  })
+  singleton!: boolean;
+  @ApiProperty({
+    description:
+      'DX-380: ticks saltados porque el anterior seguía en curso (0 si la tarea no está sincronizada)',
+  })
+  skippedCount!: number;
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description: 'DX-380: el último tick saltado, o null',
+  })
+  lastSkippedAt!: Date | null;
 }
 
 /** GET /platform/jobs/stats (DX-220). Nunca payloads ni datos de pacientes. */

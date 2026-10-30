@@ -290,6 +290,8 @@ export class VoidCancellationFeeUseCase {
         throw new ConflictException(CANCELLATION_FEE_MESSAGES.alreadyVoided);
       case 'PAID':
         throw new ConflictException(CANCELLATION_FEE_MESSAGES.voidPaid);
+      case 'UNCONVERTED':
+        throw new ConflictException(CANCELLATION_FEE_MESSAGES.voidUnconverted);
     }
   }
 }

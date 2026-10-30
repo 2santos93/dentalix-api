@@ -18,15 +18,15 @@ const ctx: JobContext = {
 
 function setup(appId: string | undefined) {
   const registry = new JobRegistry();
-  const providerRates = jest.fn(() => Promise.resolve({}));
+  const prefetchProviderRates = jest.fn(() => Promise.resolve({}));
   const jobs = new ExchangePrefetchJobs(
     registry,
-    { providerRates } as unknown as GetRatesForDateUseCase,
+    { prefetchProviderRates } as unknown as GetRatesForDateUseCase,
     { get: () => appId } as never,
     () => new Date('2026-10-16T00:05:00.000Z'),
   );
   jobs.onModuleInit();
-  return { registry, providerRates };
+  return { registry, prefetchProviderRates };
 }
 
 describe('ExchangePrefetchJobs (DX-085)', () => {
@@ -45,33 +45,35 @@ describe('ExchangePrefetchJobs (DX-085)', () => {
         cron: '5 0 * * *',
         job: PREFETCH_RATES_JOB,
         payload: {},
+        // Reintenta con su propio backoff (no es un barrido): sin singleton.
+        singleton: false,
       },
     ]);
   });
 
   it('precarga el día UTC de hoy con el caso de uso de la petición (cache-then-fetch)', async () => {
-    const { registry, providerRates } = setup('app-id');
+    const { registry, prefetchProviderRates } = setup('app-id');
     await registry.get(PREFETCH_RATES_JOB)!.handle({}, ctx);
-    expect(providerRates).toHaveBeenCalledWith('2026-10-16');
+    expect(prefetchProviderRates).toHaveBeenCalledWith('2026-10-16');
   });
 
   it('acepta un día concreto en el payload', async () => {
-    const { registry, providerRates } = setup('app-id');
+    const { registry, prefetchProviderRates } = setup('app-id');
     await registry.get(PREFETCH_RATES_JOB)!.handle({ date: '2026-10-15' }, ctx);
-    expect(providerRates).toHaveBeenCalledWith('2026-10-15');
+    expect(prefetchProviderRates).toHaveBeenCalledWith('2026-10-15');
   });
 
   it('sin EXCHANGE_APP_ID no llama al proveedor y no falla (no hay nada que reintentar)', async () => {
-    const { registry, providerRates } = setup('');
+    const { registry, prefetchProviderRates } = setup('');
     await expect(
       registry.get(PREFETCH_RATES_JOB)!.handle({}, ctx),
     ).resolves.toBeUndefined();
-    expect(providerRates).not.toHaveBeenCalled();
+    expect(prefetchProviderRates).not.toHaveBeenCalled();
   });
 
   it('un fallo del proveedor se propaga para que la cola lo reintente', async () => {
-    const { registry, providerRates } = setup('app-id');
-    providerRates.mockRejectedValueOnce(new Error('503'));
+    const { registry, prefetchProviderRates } = setup('app-id');
+    prefetchProviderRates.mockRejectedValueOnce(new Error('503'));
     await expect(
       registry.get(PREFETCH_RATES_JOB)!.handle({}, ctx),
     ).rejects.toThrow('503');

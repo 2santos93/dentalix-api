@@ -70,6 +70,8 @@ import { OVERLAP_MESSAGES } from '../src/modules/appointments/application/appoin
 import { ListAppointmentsUseCase } from '../src/modules/appointments/application/use-cases/list-appointments.use-case';
 import { CreateAppointmentTypeUseCase } from '../src/modules/appointment-types/application/use-cases/appointment-types.use-cases';
 import { LoadSampleNoteTemplatesUseCase } from '../src/modules/clinical-note-templates/application/use-cases/clinical-note-templates.use-cases';
+import { AnestheticCatalogUseCases } from '../src/modules/anesthesia/application/use-cases/anesthetic-catalog.use-cases';
+import { AnesthesiaUseCases } from '../src/modules/anesthesia/application/use-cases/anesthesia.use-cases';
 import { UpdateReminderSettingsUseCase } from '../src/modules/reminders/application/use-cases/reminder-settings.use-cases';
 import { CreateConfirmationLinkUseCase } from '../src/modules/appointment-confirmations/application/use-cases/create-confirmation-link.use-case';
 import { RespondConfirmationUseCase } from '../src/modules/appointment-confirmations/application/use-cases/respond-confirmation.use-case';
@@ -91,6 +93,7 @@ import {
 import { PlanAllocationRebalancer } from '../src/modules/payments/application/plan-allocation-rebalancer';
 import { GetPaymentAllocationsUseCase } from '../src/modules/payments/application/use-cases/get-payment-allocations.use-case';
 import { RecordPaymentUseCase } from '../src/modules/payments/application/use-cases/record-payment.use-case';
+import { CreatePaymentMethodUseCase } from '../src/modules/payment-methods/application/payment-methods.use-cases';
 import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
 import {
   CreateCollectionNoteUseCase,
@@ -170,6 +173,7 @@ import {
   DEMO_CLINICAL_ADDENDA,
   DEMO_COMMUNICATION,
   DEMO_TEMPLATE_EVOLUTIONS,
+  DEMO_ANESTHESIA,
   DEMO_CONSENT_TEMPLATES,
   DEMO_APPOINTMENT_TYPES,
   DEMO_LUNCH,
@@ -409,6 +413,7 @@ class DemoSeeder {
   private readonly tenantContext: TenantContextService;
   /** "Hoy" de referencia para fechar los datos (no para decidir pasado/futuro). */
   private readonly now = new Date();
+  private mobileMethodId: string | null = null;
 
   constructor(private readonly app: INestApplicationContext) {
     this.prisma = app.get(PrismaService);
@@ -573,6 +578,25 @@ class DemoSeeder {
     return { tenantId, confirmationUrl };
   }
 
+  /**
+   * DX-377: el medio demo «Pago móvil» (tipo digital, pide referencia), además
+   * de los 4 iniciales que el alta ya creó. Nombre genérico: ni país ni banco.
+   */
+  private async mobilePaymentMethod(
+    tenantId: string,
+    ownerId: string,
+  ): Promise<string> {
+    if (this.mobileMethodId) return this.mobileMethodId;
+    const created = await this.inTenant(tenantId, undefined, () =>
+      this.use(CreatePaymentMethodUseCase).execute(
+        { name: 'Pago móvil', kind: 'DIGITAL', requiresReference: true },
+        ownerId,
+      ),
+    );
+    this.mobileMethodId = created.id;
+    return created.id;
+  }
+
   private inTenant<T>(
     tenantId: string,
     locationId: string | undefined,
@@ -661,6 +685,10 @@ class DemoSeeder {
 
     await this.inTenant(tenantId, undefined, () =>
       this.createTemplateEvolutions(ownerId, attended),
+    );
+
+    await this.inTenant(tenantId, undefined, () =>
+      this.createAnesthesia(ownerId, patientIds, dentists[0]),
     );
 
     await this.inTenant(tenantId, undefined, () =>
@@ -1572,6 +1600,44 @@ class DemoSeeder {
   }
 
   /**
+   * DX-307: el ADMIN carga los anestésicos sugeridos (como el botón de
+   * Ajustes) y la primera dentista registra en una evolución de la paciente
+   * infantil la anestesia de una exodoncia, por los mismos casos de uso que la
+   * API (dosis calculada con el peso de la anamnesis).
+   */
+  private async createAnesthesia(
+    ownerId: string,
+    patientIds: string[],
+    dentistId: string,
+  ): Promise<void> {
+    const products = await this.use(AnestheticCatalogUseCases).loadSamples(
+      ownerId,
+    );
+    const product = products.find(
+      (p) => p.sampleCode === DEMO_ANESTHESIA.sampleCode,
+    );
+    const patientId = patientIds[DEMO_ANESTHESIA.patientIndex];
+    if (!product || !patientId) return;
+    const entry = await this.use(CreateClinicalEntryUseCase).execute(
+      patientId,
+      { reason: DEMO_ANESTHESIA.reason, notes: DEMO_ANESTHESIA.notes },
+      dentistId,
+    );
+    await this.use(AnesthesiaUseCases).record(
+      patientId,
+      entry.id,
+      {
+        anestheticId: product.id,
+        carpules: DEMO_ANESTHESIA.carpules,
+        technique: DEMO_ANESTHESIA.technique,
+        site: DEMO_ANESTHESIA.site,
+        lot: DEMO_ANESTHESIA.lot,
+      },
+      dentistId,
+    );
+  }
+
+  /**
    * DX-222: el ADMIN carga las indicaciones postoperatorias de ejemplo (como el
    * botón de Ajustes) y las vincula a procedimientos y tipos de cita; el
    * odontólogo de la última cita atendida de un día anterior entrega impresas
@@ -2231,10 +2297,21 @@ class DemoSeeder {
       }
 
       for (const [i, payment] of spec.payments.entries()) {
+        // DX-377: con referencia, por el medio demo «Pago móvil».
+        const mobile = payment.mobileReference
+          ? {
+              paymentMethodId: await this.mobilePaymentMethod(
+                tenantId,
+                ownerId,
+              ),
+              reference: payment.mobileReference,
+            }
+          : {};
         await this.inTenant(tenantId, locations[payment.location], () =>
           this.use(RecordPaymentUseCase).execute(
             planId,
             {
+              ...mobile,
               amount: payment.amount,
               currency: payment.currency ?? DEMO_CURRENCY,
               paidAt:

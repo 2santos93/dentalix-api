@@ -1,3 +1,5 @@
+import { PaymentMethodGate } from '../src/modules/payments/application/payment-method-gate';
+import { PrismaPaymentMethodRepository } from '../src/modules/payment-methods/infrastructure/prisma-payment-method.repository';
 import {
   gate,
   settle,
@@ -118,6 +120,10 @@ const recordPayment = new RecordPaymentUseCase(
   whitelist,
   new ReceiptPlanBalanceCalculator(balance),
   identityConvert,
+  new PaymentMethodGate(
+    new PrismaPaymentMethodRepository(prisma, tenantContext),
+    paymentRepo,
+  ),
 );
 
 const PNG =

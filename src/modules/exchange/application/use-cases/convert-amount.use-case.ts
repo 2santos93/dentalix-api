@@ -1,8 +1,10 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import {
   GetRatesForDateUseCase,
-  isValidDateFormat,
+  invalidRateDate,
+  isValidRateDate,
   type RatesLookup,
+  type RatesLookupOptions,
 } from './get-rates-for-date.use-case';
 import { MissingExchangeRateError } from '../../domain/missing-exchange-rate.error';
 import { BASE_CURRENCY } from '../../domain/exchange-rate-source';
@@ -74,12 +76,22 @@ export class ConvertAmountUseCase implements AmountConverter {
   }
 
   /**
+   * SEC-054: la conversión de `GET /exchange/convert`, que solo pide al
+   * proveedor los días de la ventana de la clínica (`forRequest`).
+   */
+  forRequest(input: ConvertAmountInput): Promise<ConvertAmountResult> {
+    return this.convertWith(input, (date) =>
+      this.getRatesForDate.forRequest(date),
+    );
+  }
+
+  /**
    * Un convertidor para UN caso de uso de UNA clínica (saldo, totales): lee
    * los ajustes y las tasas de cada día una sola vez. Cada abono se sigue
    * convirtiendo por su importe (sin reutilizar `rateUsed`, ver IMP-4a).
    */
-  memoized(): AmountConverter {
-    const lookup = this.getRatesForDate.memoized();
+  memoized(options: RatesLookupOptions = {}): AmountConverter {
+    const lookup = this.getRatesForDate.memoized(options);
     return {
       execute: (input) => this.convertWith(input, lookup),
       quote: (input) => this.quoteWith(input, lookup),
@@ -90,11 +102,17 @@ export class ConvertAmountUseCase implements AmountConverter {
     input: QuoteInput,
     ratesFor: RatesLookup,
   ): Promise<ExchangeRateQuote> {
-    if (!isValidDateFormat(input.date)) {
-      throw new BadRequestException('date must match YYYY-MM-DD');
-    }
+    if (!isValidRateDate(input.date)) throw invalidRateDate();
     const { from, to, date } = input;
-    const { rates, source } = await ratesFor(date);
+    let read = await ratesFor(date);
+    // DX-402: la tasa de respaldo solo vale si cubre las dos monedas; si no,
+    // la cotización entera sale del camino automático (una sola fuente).
+    const covered = (currency: string) =>
+      currency === BASE_CURRENCY || read.rates[currency] !== undefined;
+    if (read.backup && !(covered(from) && covered(to))) {
+      read = await ratesFor(date, { noBackup: true });
+    }
+    const { rates, source, backup } = read;
     // DX-374: con tasa manual, una moneda ausente es la tasa que la clínica
     // aún no registró ese día (error de dominio en español); con el
     // proveedor, una moneda que no trae.
@@ -110,16 +128,22 @@ export class ConvertAmountUseCase implements AmountConverter {
     };
     const fromPerBase = perBase(from);
     const toPerBase = perBase(to);
-    return { from, to, date, source, fromPerBase, toPerBase };
+    return {
+      from,
+      to,
+      date,
+      source,
+      fromPerBase,
+      toPerBase,
+      ...(backup ? { backup } : {}),
+    };
   }
 
   private async convertWith(
     input: ConvertAmountInput,
     ratesFor: RatesLookup,
   ): Promise<ConvertAmountResult> {
-    if (!isValidDateFormat(input.date)) {
-      throw new BadRequestException('date must match YYYY-MM-DD');
-    }
+    if (!isValidRateDate(input.date)) throw invalidRateDate();
     if (!isFiniteNonNegativeAmount(input.amount)) {
       throw new BadRequestException('amount must be a finite number >= 0');
     }

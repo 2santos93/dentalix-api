@@ -25,7 +25,14 @@ export function csv(lines: (string | number | null)[][]): string {
   return BOM + lines.map((l) => l.map(csvCell).join(',')).join('\r\n') + '\r\n';
 }
 
-/** Plantilla: las columnas admitidas y dos filas de ejemplo ficticias. */
+/**
+ * Plantilla: las columnas admitidas y dos filas de ejemplo ficticias. Los
+ * teléfonos van vacíos (DX-368): no hay un número ficticio válido en todos los
+ * países, uno con «+» sale con la «'» de la defensa contra fórmulas y uno como
+ * `+00…` (ningún indicativo empieza por 0) se importaría como un móvil
+ * «válido» al que luego se mandarían recordatorios. El formato lo explica la
+ * ayuda de la ficha («con + y su indicativo»).
+ */
 export function templateCsv(): string {
   const example1: Record<string, string> = {
     tipo_documento: 'NATIONAL_ID',
@@ -34,12 +41,10 @@ export function templateCsv(): string {
     apellidos: 'Ejemplo Gómez',
     fecha_nacimiento: '15/04/1988',
     sexo: 'F',
-    telefono: '310 000 0001',
     email: 'ana.ejemplo@example.com',
-    direccion: 'Calle 1 # 2-3',
+    direccion: 'Dirección de ejemplo 123',
     ocupacion: 'Docente',
     contacto_emergencia: 'Luis Ejemplo',
-    telefono_emergencia: '310 000 0002',
     notas: 'Fila de ejemplo: bórrala antes de importar',
   };
   const example2: Record<string, string> = {

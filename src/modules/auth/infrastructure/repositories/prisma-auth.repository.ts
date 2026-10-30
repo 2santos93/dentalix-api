@@ -1,3 +1,4 @@
+import { seedInitialPaymentMethods } from '../../../payment-methods/infrastructure/prisma-payment-method.repository';
 import { Injectable, Logger } from '@nestjs/common';
 import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
 import { clinicRegisteredAuditEvent } from '../../domain/registration-audit';
@@ -9,6 +10,7 @@ import {
 } from '../../../../shared/locations/membership-locations';
 import { seedDefaultBusinessHours } from '../../../../shared/locations/default-business-hours';
 import { DEFAULT_DENTAL_CATALOG } from '../../../../shared/catalog/default-dental-catalog';
+import { suggestedPhoneRegion } from '../../../../shared/phone/phone-number';
 import { PLATFORM_DEFAULT_MAJORITY_AGE } from '../../../patients/domain/responsible-parties/majority-age';
 import { PLATFORM_DEFAULT_PRESCRIPTION_SETTINGS } from '../../../prescriptions/domain/prescription-settings';
 import {
@@ -124,6 +126,8 @@ export class PrismaAuthRepository implements AuthRepository {
           tenantId: tenant.id,
         })),
       });
+      // DX-377: y con sus 4 medios de pago iniciales (uno por método antiguo).
+      await seedInitialPaymentMethods(tx, tenant.id);
       // DX-359: el alta de la clínica y su ADMIN, auditada en esta misma
       // transacción (el GUC de tenant ya es el de la clínica nueva).
       await writeAuditEvent(
@@ -154,6 +158,9 @@ export class PrismaAuthRepository implements AuthRepository {
         tenantId,
         name: 'Sede principal',
         ...settings,
+        // DX-329 (R2, I3): la sugerencia sale del país, aquí y no en el puerto.
+        defaultPhoneRegion: suggestedPhoneRegion(settings.country),
+        defaultPhoneRegionSetAt: new Date(),
         regionalSettingsReviewedAt: new Date(),
       },
       select: { id: true },

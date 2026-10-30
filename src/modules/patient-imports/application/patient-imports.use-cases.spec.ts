@@ -29,7 +29,7 @@ function makeUseCases(batchLocation: () => Promise<BatchLocation>) {
 
 const location = (overrides: Partial<BatchLocation> = {}): BatchLocation => ({
   id: 'loc-1',
-  country: 'CO',
+  defaultPhoneRegion: null,
   timeZone: 'America/New_York',
   currency: 'USD',
   locale: 'en-US',

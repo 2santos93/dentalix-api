@@ -18,7 +18,6 @@ export class BillablePlanDto {
   status!: TreatmentPlanStatus;
 
   @ApiProperty({
-    example: 'COP',
     description: 'Moneda del plan (la del saldo y la del plan de cuotas)',
   })
   currency!: string;

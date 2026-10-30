@@ -142,14 +142,37 @@ function importBatchOf(body: unknown): Record<string, unknown> | null {
   };
 }
 
-/** DX-300: códigos de los avisos de la receta emitida y si se confirmaron. */
-function prescriptionSafetyOf(body: unknown): Record<string, unknown> | null {
+/** DX-377: la confirmación de una referencia repetida del abono, si la hubo. */
+function paymentReferenceOf(body: unknown): Record<string, unknown> | null {
+  if (typeof body !== 'object' || body === null) return null;
+  const b = body as {
+    duplicateReferenceReason?: unknown;
+    duplicateReferenceOf?: unknown;
+  };
+  if (!Array.isArray(b.duplicateReferenceOf)) return null;
+  if (b.duplicateReferenceOf.length === 0) return null;
+  return {
+    duplicateConfirmed:
+      typeof b.duplicateReferenceReason === 'string' &&
+      b.duplicateReferenceReason !== '',
+    duplicateOf: b.duplicateReferenceOf,
+  };
+}
+
+/**
+ * DX-300: códigos de los avisos de la receta emitida y si se confirmaron.
+ * DX-307: la anestesia de una evolución trae lo mismo con `overrideReason`.
+ */
+function prescriptionSafetyOf(
+  body: unknown,
+  reasonKey: 'safetyOverrideReason' | 'overrideReason' = 'safetyOverrideReason',
+): Record<string, unknown> | null {
   if (typeof body !== 'object' || body === null) return null;
   const b = body as {
     safetyRulesVersion?: unknown;
     safetyAlerts?: unknown;
-    safetyOverrideReason?: unknown;
-  };
+  } & Record<string, unknown>;
+  const reason = b[reasonKey];
   if (!Array.isArray(b.safetyAlerts)) return null;
   const codes = (severity: string) =>
     (b.safetyAlerts as unknown[]).flatMap((a) =>
@@ -165,9 +188,7 @@ function prescriptionSafetyOf(body: unknown): Record<string, unknown> | null {
     rulesVersion: b.safetyRulesVersion,
     blocking: codes('BLOCKING'),
     info: codes('INFO'),
-    overridden:
-      typeof b.safetyOverrideReason === 'string' &&
-      b.safetyOverrideReason !== '',
+    overridden: typeof reason === 'string' && reason !== '',
   };
 }
 
@@ -288,8 +309,19 @@ export function buildAuditDraft(
       ...(options.prescriptionSafety
         ? { prescriptionSafety: prescriptionSafetyOf(responseBody) }
         : {}),
+      ...(options.anesthesiaSafety
+        ? {
+            anesthesiaSafety: prescriptionSafetyOf(
+              responseBody,
+              'overrideReason',
+            ),
+          }
+        : {}),
       ...(options.coverage ? { coverage: coverageOf(responseBody) } : {}),
       ...(options.allocation ? { allocation: allocationOf(responseBody) } : {}),
+      ...(options.paymentReference
+        ? { paymentReference: paymentReferenceOf(responseBody) }
+        : {}),
     }),
   };
 }

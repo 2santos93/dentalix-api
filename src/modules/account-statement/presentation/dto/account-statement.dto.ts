@@ -76,7 +76,7 @@ export class AccountStatementNextInstallmentDto {
 }
 
 export class AccountStatementCurrencySummaryDto {
-  @ApiProperty({ example: 'COP', description: 'ISO 4217' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({
@@ -127,7 +127,7 @@ export class AccountStatementOpeningBalanceDto {
   @ApiProperty({ format: 'uuid' })
   id!: string;
 
-  @ApiProperty({ example: 'COP' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({ example: 150000 })
@@ -162,7 +162,7 @@ export class AccountStatementOpeningBalanceDto {
 }
 
 export class AccountStatementOtherCurrencyDto {
-  @ApiProperty({ example: 'USD' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({ example: 50 })
@@ -176,7 +176,7 @@ export class AccountStatementPlanDto {
   @ApiProperty({ enum: TreatmentPlanStatus })
   status!: TreatmentPlanStatus;
 
-  @ApiProperty({ example: 'COP' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({
@@ -233,6 +233,14 @@ export class AccountStatementVoidedByDto {
   fullName!: string | null;
 }
 
+export class AccountStatementPaymentMethodRefDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({ example: 'Pago móvil' })
+  name!: string;
+}
+
 export class AccountStatementMovementDto {
   @ApiProperty({ format: 'uuid' })
   id!: string;
@@ -256,11 +264,37 @@ export class AccountStatementMovementDto {
   @ApiProperty({ example: 150000 })
   amount!: number;
 
-  @ApiProperty({ example: 'COP' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
-  @ApiProperty({ enum: PaymentMethod, nullable: true })
+  @ApiProperty({
+    enum: PaymentMethod,
+    nullable: true,
+    description:
+      'Método antiguo, derivado del tipo base del medio (un medio digital ' +
+      'es TRANSFER). Para mostrar, usar `paymentMethod.name`.',
+  })
   method!: PaymentMethod | null;
+
+  @ApiProperty({
+    type: AccountStatementPaymentMethodRefDto,
+    nullable: true,
+    description:
+      'DX-395: medio de pago de la clínica con que se cobró (también los ' +
+      'propios, como «Pago móvil»). Un abono de una réplica anterior sin ' +
+      'medio lleva el medio inicial de su método; `null` si no tiene método.',
+  })
+  paymentMethod!: AccountStatementPaymentMethodRefDto | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'ABC 123',
+    description:
+      'DX-395: referencia del pago tal como se tecleó, o `null`. Solo la ven ' +
+      'los roles de cobro (este endpoint) y el paciente en su estado de cuenta.',
+  })
+  reference!: string | null;
 
   @ApiProperty({ type: AccountStatementLocationRefDto })
   location!: AccountStatementLocationRefDto;
@@ -330,7 +364,7 @@ export class AccountStatementInstallmentDto {
   @ApiProperty({ format: 'uuid' })
   treatmentPlanId!: string;
 
-  @ApiProperty({ example: 'COP' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({ enum: ['DOWN_PAYMENT', 'INSTALLMENT'] })
@@ -413,7 +447,7 @@ export class AccountStatementDto {
 // ---------------------------------------------------------------------------
 
 export class FamilyCurrencyAmountsDto {
-  @ApiProperty({ example: 'COP' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({ description: 'Igual que `summary[].budgeted` individual' })

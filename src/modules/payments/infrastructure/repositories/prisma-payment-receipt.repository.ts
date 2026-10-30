@@ -9,6 +9,10 @@ import type {
 } from '../../domain/ports/payment-receipt-repository.port';
 import { parseReceiptSnapshot } from '../../domain/receipt-snapshot';
 import {
+  FROZEN_RATE_SELECT,
+  frozenRateOf,
+} from './frozen-exchange-rate.mapper';
+import {
   loadNoticeSettings,
   loadNoticeResponsibles,
 } from '../../../patients/infrastructure/notices/notice-context';
@@ -33,12 +37,16 @@ const RECEIPT_SOURCE_SELECT = {
   amount: true,
   currency: true,
   method: true,
+  reference: true,
+  paymentMethod: { select: { name: true } },
   paidAt: true,
   createdAt: true,
   createdById: true,
   deletedAt: true,
   voidedAt: true,
   voidReason: true,
+  // DX-376: la tasa congelada del abono (DX-375), para el equivalente.
+  ...FROZEN_RATE_SELECT,
   receipt: {
     select: {
       seriesPrefix: true,
@@ -109,6 +117,12 @@ export class PrismaPaymentReceiptRepository implements PaymentReceiptRepository 
           responsibles,
           settings,
         },
+        rate: {
+          amount: payment.amount.toNumber(),
+          currency: payment.currency,
+          exchangeRateCurrency: payment.exchangeRateCurrency,
+          frozenRate: frozenRateOf(payment),
+        },
       };
       if (payment.receipt) {
         return {
@@ -171,6 +185,8 @@ export class PrismaPaymentReceiptRepository implements PaymentReceiptRepository 
               amount: payment.amount.toNumber(),
               currency: payment.currency,
               method: payment.method,
+              paymentMethodName: payment.paymentMethod?.name ?? null,
+              reference: payment.reference,
               paidAt: payment.paidAt,
               paidOn: civilDateIn(payment.paidAt, zoneOf(payment.locationId)),
             },

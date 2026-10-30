@@ -38,6 +38,8 @@ function payment(
     currency: 'COP',
     paidAt: new Date('2026-02-01T00:00:00.000Z'),
     method: 'CASH',
+    paymentMethod: null,
+    reference: null,
     location: SEDE,
     createdById: 'u-recep',
     createdAt: new Date('2026-02-01T14:00:00.000Z'),
@@ -187,6 +189,35 @@ describe('computeAccountStatement', () => {
       voidedAt: null,
       voidedBy: null,
       voidReason: null,
+    });
+  });
+
+  it('DX-395: cada movimiento lleva el medio de la clínica y la referencia del abono', () => {
+    const mobile = { id: 'pm-mobile', name: 'Pago móvil' };
+    const out = computeAccountStatement(
+      snapshot({
+        plans: [plan('tp-1', { billable: 1000 })],
+        payments: [
+          payment('tp-1', 300, {
+            method: 'TRANSFER',
+            paymentMethod: mobile,
+            reference: 'ABC 123',
+          }),
+          payment('tp-1', 200, { method: null }),
+        ],
+      }),
+      { today: TODAY },
+    );
+
+    expect(out.movements.find((m) => m.amount === 300)).toMatchObject({
+      method: 'TRANSFER',
+      paymentMethod: mobile,
+      reference: 'ABC 123',
+    });
+    expect(out.movements.find((m) => m.amount === 200)).toMatchObject({
+      method: null,
+      paymentMethod: null,
+      reference: null,
     });
   });
 

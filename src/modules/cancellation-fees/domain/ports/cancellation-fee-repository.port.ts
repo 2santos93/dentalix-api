@@ -94,12 +94,18 @@ export interface VoidFeeInput {
  * - OK: cargo anulado y su ítem retirado del plan, en una transacción.
  * - NOT_CHARGED / ALREADY_VOIDED: no hay cargo que anular (o ya se anuló:
  *   otra petición ganó).
- * - PAID: los abonos vivos del plan ya no caben en lo que queda por cobrar.
+ * - PAID: los abonos vivos del plan ya no caben en lo que queda por cobrar
+ *   (en la moneda del plan, con sus bases de imputación: DX-382).
+ * - UNCONVERTED: algún abono vivo del plan aún no tiene base en la moneda del
+ *   plan («sin tasa»): no se decide sin ella.
  * - STALE: la cita se retiró entre la lectura y la escritura.
  */
 export type FeeVoidOutcome =
   | { outcome: 'OK'; fee: CancellationFeeRecord }
-  | { outcome: 'NOT_CHARGED' | 'ALREADY_VOIDED' | 'PAID' | 'STALE' };
+  | {
+      outcome:
+        'NOT_CHARGED' | 'ALREADY_VOIDED' | 'PAID' | 'UNCONVERTED' | 'STALE';
+    };
 
 /**
  * - OK: registrado (y, en el cargo, el plan/ítem creado) en una transacción.

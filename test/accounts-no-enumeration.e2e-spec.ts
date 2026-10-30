@@ -13,6 +13,7 @@ import {
   REGIONAL_BOGOTA_FIXTURE,
   registerBody,
 } from './support/location-fixtures';
+import { purgeTenantsBySubdomain } from './support/tenant-purge';
 
 // DX-029 (SEC-006/SEC-007): ningún endpoint público ni de ADMIN deja saber si
 // un email arbitrario tiene cuenta, el token de la invitación solo viaja por
@@ -40,17 +41,11 @@ async function cleanup(): Promise<void> {
     'dx143-otra',
     'dx143-invita',
   ];
-  await raw.clinicInvitation.deleteMany({
-    where: { tenant: { subdomain: { in: subs } } },
-  });
-  await raw.clinicMembership.deleteMany({
-    where: { tenant: { subdomain: { in: subs } } },
-  });
+  await purgeTenantsBySubdomain(raw, subs);
   await raw.user.deleteMany({ where: { email: { endsWith: DOMAIN } } });
   await raw.pendingRegistration.deleteMany({
     where: { email: { endsWith: DOMAIN } },
   });
-  await raw.tenant.deleteMany({ where: { subdomain: { in: subs } } });
 }
 
 describe('Cuentas sin enumeración (e2e, DX-029)', () => {

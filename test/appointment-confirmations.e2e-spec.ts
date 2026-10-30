@@ -244,6 +244,48 @@ describe('Confirmación de cita por enlace (e2e)', () => {
       ).not.toBeNull();
     });
 
+    it("a patient without country and a number without + gets a WhatsApp link from the appointment's location", async () => {
+      const patient = await createPatient(clinicA, '329001');
+      await raw.patient.update({
+        where: { id: patient },
+        data: { phone: '310 555 0101', countryCode: null },
+      });
+      const appt = await createAppointment(clinicA, patient);
+      const { body } = await newLink(clinicA, appt.id);
+      expect(body.whatsappPhone).toBe('573105550101');
+    });
+
+    it("a patient whose country differs from the location's is read with the location's region", async () => {
+      const patient = await createPatient(clinicA, '329002');
+      await raw.patient.update({
+        where: { id: patient },
+        data: { phone: '0412-1234567', countryCode: 'VE' },
+      });
+      const appt = await createAppointment(clinicA, patient);
+      // Con la región de la sede (CO), ese número no es válido: sin enlace.
+      expect((await newLink(clinicA, appt.id)).body.whatsappPhone).toBeNull();
+      const location = await raw.appointment.findUniqueOrThrow({
+        where: { id: appt.id },
+        select: {
+          location: { select: { id: true, defaultPhoneRegion: true } },
+        },
+      });
+      await raw.location.update({
+        where: { id: location.location.id },
+        data: { defaultPhoneRegion: 'VE' },
+      });
+      try {
+        expect((await newLink(clinicA, appt.id)).body.whatsappPhone).toBe(
+          '584121234567',
+        );
+      } finally {
+        await raw.location.update({
+          where: { id: location.location.id },
+          data: { defaultPhoneRegion: location.location.defaultPhoneRegion },
+        });
+      }
+    });
+
     it('en BD solo queda el hash del token', async () => {
       const appt = await createAppointment(clinicA, patientA);
       const { token } = await newLink(clinicA, appt.id);

@@ -4,6 +4,8 @@ import type {
   WhatsappOptInSource,
 } from '@prisma/client';
 
+import type { PhoneRegion } from '../../../../shared/phone/phone-number';
+import type { DefaultPhoneRegionReader } from './default-phone-region-reader.port';
 import type {
   NoticeResponsible,
   NoticeSettings,
@@ -22,7 +24,10 @@ export interface PatientCommunicationState {
   responsibles: NoticeResponsible[];
   /** DX-203, DX-328: zona de la sede y mayoría de edad de la clínica. */
   noticeSettings: NoticeSettings;
-  /** País de residencia del paciente (respaldo si la clínica no tiene sede). */
+  /**
+   * País de residencia del paciente. No decide cómo se lee su teléfono: eso
+   * lo hace la región de la sede (DX-329, P1).
+   */
   countryCode: string | null;
   phone: string | null;
   email: string | null;
@@ -69,7 +74,8 @@ export interface PatientOptOutMatchWarningView {
   maxMatches: number;
 }
 
-export interface PatientCommunicationRepository {
+/** También es el `DefaultPhoneRegionReader` del módulo (DX-387). */
+export interface PatientCommunicationRepository extends DefaultPhoneRegionReader {
   /** null si el paciente no existe (o no es de esta clínica, o se retiró). */
   find(patientId: string): Promise<PatientCommunicationState | null>;
   /** null: paciente ajeno/retirado; últimos20 avisos de comunicaciones. */
@@ -77,12 +83,13 @@ export interface PatientCommunicationRepository {
     patientId: string,
   ): Promise<PatientOptOutMatchWarningView[] | null>;
   /**
-   * País de la sede (ISO 3166-1 alfa-2) con el que se valida el móvil: el de
-   * la sede activa de la petición (X-Location-Id) o, en la vista consolidada,
-   * el de la sede principal (la viva más antigua). null si la clínica no tiene
-   * sedes.
+   * Región por defecto del teléfono (DX-329) con la que se lee el móvil: la
+   * de la sede activa de la petición (X-Location-Id) o, en la vista
+   * consolidada, la de la sede principal (la viva más antigua). null si la
+   * sede no tiene prefijo por defecto, si la librería no lo admite o si la
+   * clínica no tiene sedes.
    */
-  locationCountry(): Promise<string | null>;
+  defaultPhoneRegion(): Promise<PhoneRegion | null>;
   /** Canal con el que nacen los pacientes de la clínica. */
   clinicDefaultChannel(): Promise<ContactChannel>;
   /** Aplica bajo lock y devuelve estado/diff efectivos (404 si ya no existe). */

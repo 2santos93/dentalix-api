@@ -50,6 +50,8 @@ import { CashSessionsController } from '../cash-sessions/presentation/cash-sessi
 import { ScheduleBlocksController } from '../schedule-blocks/presentation/schedule-blocks.controller';
 import { StaffController } from '../staff/presentation/staff.controller';
 import { ClinicalNoteTemplatesController } from '../clinical-note-templates/presentation/clinical-note-templates.controller';
+import { AnesthesiaController } from '../anesthesia/presentation/anesthesia.controller';
+import { AnestheticsController } from '../anesthesia/presentation/anesthetics.controller';
 import { DomainsController } from '../domains/presentation/domains.controller';
 import { PostOpTemplatesController } from '../post-op-instructions/presentation/post-op-templates.controller';
 import { AppointmentPostOpController } from '../post-op-instructions/presentation/appointment-post-op.controller';
@@ -69,6 +71,7 @@ import {
   ScheduleRosterController,
 } from '../provider-schedule/presentation/provider-schedule.controller';
 import { ExchangeSettingsController } from '../exchange/presentation/exchange-settings.controller';
+import { PaymentMethodsController } from '../payment-methods/presentation/payment-methods.controller';
 import { AppModule } from '../../app.module';
 import {
   collectControllers,
@@ -319,6 +322,49 @@ const EXPECTED: Record<string, AuditOptions> = {
     action: 'VIEW',
     resource: 'CLINICAL_ENTRY',
     patient: P,
+  },
+  // DX-307: anestesia local en la evolución. Registrarla guarda los CÓDIGOS
+  // de los avisos de dosis/alergia y si se confirmaron; la previsualización
+  // lee la anamnesis vigente (peso y alergias).
+  'GET /patients/:patientId/anesthesia': {
+    action: 'VIEW',
+    resource: 'ANESTHESIA_ADMINISTRATION',
+    patient: P,
+  },
+  'GET /patients/:patientId/clinical-entries/:entryId/anesthesia': {
+    action: 'VIEW',
+    resource: 'ANESTHESIA_ADMINISTRATION',
+    resourceId: { param: 'entryId' },
+    patient: P,
+  },
+  'POST /patients/:patientId/clinical-entries/:entryId/anesthesia/check': {
+    action: 'VIEW',
+    resource: 'MEDICAL_HISTORY',
+    patient: P,
+    reason: 'ANESTHESIA_DOSE_CHECK',
+  },
+  'POST /patients/:patientId/clinical-entries/:entryId/anesthesia': {
+    action: 'CREATE',
+    resource: 'ANESTHESIA_ADMINISTRATION',
+    resourceId: RES,
+    patient: P,
+    anesthesiaSafety: true,
+  },
+  // DX-307: catálogo de anestésicos (sin paciente); desactivar es un PATCH.
+  'POST /anesthetics': {
+    action: 'CREATE',
+    resource: 'ANESTHETIC_PRODUCT',
+    resourceId: RES,
+  },
+  'POST /anesthetics/samples': {
+    action: 'CREATE',
+    resource: 'ANESTHETIC_PRODUCT',
+    reason: 'SAMPLE_ANESTHETICS',
+  },
+  'PATCH /anesthetics/:id': {
+    action: 'UPDATE',
+    resource: 'ANESTHETIC_PRODUCT',
+    resourceId: { param: 'id' },
   },
   // DX-212: los cambios del catálogo y de la sede.
   'POST /catalog/items': {
@@ -593,6 +639,7 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: RES,
     patient: { lookup: 'openingBalance', param: 'id' },
     reason: 'RECEIPT_ISSUED',
+    paymentReference: true,
   },
   // DX-262: hoja de saldos del lote (dry-run, quitarla y su informe).
   'POST /patient-imports/:id/balances': {
@@ -761,6 +808,8 @@ const EXPECTED: Record<string, AuditOptions> = {
   },
 
   'GET /payments': { action: 'VIEW', resource: 'PAYMENT' },
+  // DX-395: descargar la caja en CSV (con medio y referencia).
+  'GET /payments.csv': { action: 'EXPORT', resource: 'PAYMENT' },
   // DX-136: el recibo numerado se emite en la misma transacción que el abono.
   'POST /treatment-plans/:id/payments': {
     action: 'CREATE',
@@ -768,6 +817,8 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: RES,
     patient: plan(),
     reason: 'RECEIPT_ISSUED',
+    // DX-377: confirmación de referencia repetida (ids, nunca el motivo).
+    paymentReference: true,
   },
   'GET /treatment-plans/:id/payments': {
     action: 'VIEW',
@@ -1180,6 +1231,17 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'EXCHANGE_RATE',
     resourceId: { param: 'id' },
   },
+  // DX-377: alta y cambio de un medio de pago de la clínica (solo ADMIN).
+  'POST /payment-methods': {
+    action: 'CREATE',
+    resource: 'PAYMENT_METHOD',
+    resourceId: RES,
+  },
+  'PATCH /payment-methods/:id': {
+    action: 'UPDATE',
+    resource: 'PAYMENT_METHOD',
+    resourceId: { param: 'id' },
+  },
   // SEC-009: verificar (cambia el ruteo) y eliminar un dominio personalizado.
   'POST /domains/:id/verify': {
     action: 'UPDATE',
@@ -1336,6 +1398,12 @@ const KNOWN_UNAUDITED: Record<string, string> = {
     'siempre rechaza: una evolución firmada no se edita',
   'DELETE /patients/:patientId/clinical-entries/:entryId':
     'siempre rechaza: una evolución firmada no se borra',
+  'PATCH /patients/:patientId/clinical-entries/:entryId/anesthesia/:id':
+    'siempre rechaza: la anestesia registrada no se edita (DX-307)',
+  'PUT /patients/:patientId/clinical-entries/:entryId/anesthesia/:id':
+    'siempre rechaza: la anestesia registrada no se edita (DX-307)',
+  'DELETE /patients/:patientId/clinical-entries/:entryId/anesthesia/:id':
+    'siempre rechaza: la anestesia registrada no se borra (DX-307)',
 
   // --- Sesión y cuenta propia ---------------------------------------------
   'POST /auth/register': 'pide el enlace de verificación; aún no hay clínica',
@@ -1392,6 +1460,8 @@ const CONTROLLERS: Type[] = [
   PatientAgreementsController,
   MedicalHistoryController,
   ClinicalEntriesController,
+  AnesthesiaController,
+  AnestheticsController,
   DentalCatalogController,
   PriceListsController,
   AgreementsController,
@@ -1439,6 +1509,7 @@ const CONTROLLERS: Type[] = [
   ProviderScheduleController,
   ScheduleRosterController,
   ExchangeSettingsController,
+  PaymentMethodsController,
 ];
 
 function joinPath(...parts: string[]): string {

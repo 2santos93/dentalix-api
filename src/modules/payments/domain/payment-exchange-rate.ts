@@ -15,6 +15,12 @@ export interface FrozenExchangeRate {
   source: ExchangeRateSource;
   /** Día civil de la tasa: el del abono en su sede. */
   date: string;
+  /**
+   * DX-402: es la tasa manual de un día anterior a `manualSince` (la de
+   * respaldo de un día sin tasa del proveedor). No se guarda en el abono
+   * (su fuente queda MANUAL y su día, el del abono): solo para auditarlo.
+   */
+  backup?: { manualSince: string };
 }
 
 /**

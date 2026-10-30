@@ -1,3 +1,5 @@
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
@@ -23,7 +25,8 @@ import {
   DEMO_PRESCRIPTION_SETTINGS,
   DEMO_PROFESSIONAL_SPECIALTIES,
 } from '../prisma/demo/data';
-import { TENANT_TABLES, purgeDemoTenants } from './support/demo-tenant-purge';
+import { purgeDemoTenants } from './support/demo-tenant-purge';
+import { tenantTablesInDeleteOrder } from './support/tenant-purge';
 import { hostFor } from './support/tenant-host';
 import { PAYER_TYPES } from '../src/modules/payers/domain/payer-type';
 import { storedPayerType } from '../src/modules/payers/domain/legacy-payer-type';
@@ -49,9 +52,22 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 
 type Counts = Record<string, number>;
 
+/**
+ * Tablas de clínica que se comparan: todas las del catálogo (DX-396) menos el
+ * registro de auditoría y la cola de correo, que crecen o se vacían con cada
+ * acción (login, reset, despacho) sin que eso sea duplicar datos de la demo.
+ */
+const NOT_SEED_DATA = new Set(['audit_events', 'email_outbox']);
+
+async function seedDataTables(): Promise<string[]> {
+  return (await tenantTablesInDeleteOrder(raw)).filter(
+    (t) => !NOT_SEED_DATA.has(t),
+  );
+}
+
 async function countsFor(tenantId: string): Promise<Counts> {
   const out: Counts = {};
-  for (const table of TENANT_TABLES) {
+  for (const table of await seedDataTables()) {
     const rows = await raw.$queryRawUnsafe<{ n: number }[]>(
       `SELECT count(*)::int AS n FROM "${table}" WHERE "tenantId" = $1::uuid`,
       tenantId,
@@ -63,7 +79,7 @@ async function countsFor(tenantId: string): Promise<Counts> {
 
 async function countsOutside(tenantIds: string[]): Promise<Counts> {
   const out: Counts = {};
-  for (const table of TENANT_TABLES) {
+  for (const table of await seedDataTables()) {
     const rows = await raw.$queryRawUnsafe<{ n: number }[]>(
       `SELECT count(*)::int AS n FROM "${table}" WHERE NOT ("tenantId" = ANY($1::uuid[]))`,
       tenantIds,
@@ -522,6 +538,33 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     }
   });
 
+  it("the demo's main location gets its country as default phone region", async () => {
+    const tenantId = await liveDemoTenantId();
+    const locations = await raw.location.findMany({
+      where: { tenantId, deletedAt: null },
+    });
+    expect(locations.length).toBeGreaterThan(0);
+    const main = locations.find((l) => l.name === 'Sede principal');
+    expect(main).toBeDefined();
+    expect(main?.defaultPhoneRegion).not.toBeNull();
+    expect(main?.defaultPhoneRegion).toBe(main?.country);
+    expect(main?.defaultPhoneRegionSetAt).toBeInstanceOf(Date);
+    // La sugerencia sale de `createMainLocation`: la demo no nombra la región.
+    const demoSources = [
+      join(process.cwd(), 'prisma', 'seed-demo.ts'),
+      ...readdirSync(join(process.cwd(), 'prisma', 'demo'))
+        .filter((file) => file.endsWith('.ts'))
+        .map((file) => join(process.cwd(), 'prisma', 'demo', file)),
+    ];
+    expect(demoSources.length).toBeGreaterThan(1);
+    for (const file of demoSources) {
+      expect({
+        file,
+        names: readFileSync(file, 'utf8').includes('defaultPhoneRegion'),
+      }).toEqual({ file, names: false });
+    }
+  });
+
   it('deja tipos de cita con color y citas demo con tipo (DX-121)', async () => {
     const tenantId = await liveDemoTenantId();
     const types = await raw.appointmentType.findMany({ where: { tenantId } });
@@ -794,10 +837,20 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     const confirmations = await raw.appointmentConfirmation.findMany({
       where: { tenantId },
       include: { appointment: true },
-      orderBy: { appointmentStart: 'asc' },
+      orderBy: [{ appointmentStart: 'asc' }, { id: 'asc' }],
     });
     expect(confirmations).toHaveLength(2);
-    const [pending, callMe] = confirmations;
+    // Las dos primeras citas pueden empezar a la vez (dos odontólogos): se
+    // eligen por su respuesta, no por su posición.
+    const pending = confirmations.find((c) => c.response === null);
+    const callMe = confirmations.find((c) => c.response === 'CALL_ME');
+    if (!pending || !callMe) {
+      throw new Error('falta la confirmación pendiente o la que pide llamada');
+    }
+    // La pendiente es la primera cita próxima (empatada o antes).
+    expect(pending.appointmentStart.getTime()).toBeLessThanOrEqual(
+      callMe.appointmentStart.getTime(),
+    );
 
     expect(pending.respondedAt).toBeNull();
     expect(pending.appointment.status).toBe('SCHEDULED');

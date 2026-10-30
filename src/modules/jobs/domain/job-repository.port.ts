@@ -37,8 +37,21 @@ export interface ScheduleToFire {
   job: string;
   payload: JobPayload;
   maxAttempts: number;
+  /**
+   * DX-380: no dispara si un trabajo de un tick anterior de esta tarea sigue
+   * en PENDING o RUNNING (ver ScheduleDefinition.singleton).
+   */
+  singleton: boolean;
   /** Próximo tick posterior a `now` (hora de la BD). */
   nextRunAfter: (now: Date) => Date;
+}
+
+/** Lo que hizo `fireDueSchedules` en una vuelta. */
+export interface FiredSchedules {
+  /** Tareas que encolaron su trabajo. */
+  fired: number;
+  /** Tareas `singleton` cuyo tick se saltó (el anterior sigue en curso). */
+  skipped: string[];
 }
 
 /** Persistencia de la cola (DX-085). Ver PrismaJobRepository. */
@@ -94,9 +107,13 @@ export interface JobRepository {
    * su trabajo con idempotencyKey `schedule:<nombre>:<tick>` y las mueve al
    * siguiente tick, todo en una transacción. Una tarea cuyo cron en la BD no
    * es el de esta réplica (despliegue escalonado) no la toca: la dispara la
-   * réplica que la sincronizó. Devuelve cuántas disparó.
+   * réplica que la sincronizó. DX-380: una tarea `singleton` con un trabajo
+   * de un tick anterior en PENDING o RUNNING no encola: pasa al siguiente
+   * tick y suma un salto (`skippedCount`, `lastSkippedAt`), en la misma
+   * transacción y con la fila de la tarea bloqueada. Devuelve cuántas
+   * disparó y cuáles saltó.
    */
-  fireDueSchedules(schedules: ScheduleToFire[]): Promise<number>;
+  fireDueSchedules(schedules: ScheduleToFire[]): Promise<FiredSchedules>;
   listFailed(limit: number): Promise<FailedJob[]>;
   /** Borra COMPLETED y FAILED terminados antes de `before`. */
   purgeFinished(before: Date): Promise<number>;

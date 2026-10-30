@@ -16,6 +16,7 @@ import {
   type WorkerRow,
 } from '../domain/job';
 import type {
+  FiredSchedules,
   JobRepository,
   NewJob,
   ScheduleSync,
@@ -218,8 +219,10 @@ export class PrismaJobRepository implements JobRepository {
     }
   }
 
-  fireDueSchedules(schedules: ScheduleToFire[]): Promise<number> {
-    if (schedules.length === 0) return Promise.resolve(0);
+  fireDueSchedules(schedules: ScheduleToFire[]): Promise<FiredSchedules> {
+    if (schedules.length === 0) {
+      return Promise.resolve({ fired: 0, skipped: [] });
+    }
     const byName = new Map(schedules.map((s) => [s.name, s]));
     return this.prisma.$transaction(async (tx) => {
       const due = await tx.$queryRaw<
@@ -231,11 +234,26 @@ export class PrismaJobRepository implements JobRepository {
            AND "nextRunAt" <= ${NOW}
          FOR UPDATE SKIP LOCKED`;
       let fired = 0;
+      const skipped: string[] = [];
       for (const row of due) {
         const s = byName.get(row.name);
         // Despliegue escalonado: la fila tiene el cron de otra réplica (la que
         // sincronizó la versión vigente). Esta no la dispara ni la reprograma.
         if (!s || s.cron !== row.cron) continue;
+        // DX-380 (OPS-046): con la fila de la tarea bloqueada, el trabajo de
+        // su tick anterior (confirmado: se encoló en la transacción que movió
+        // el tick) sigue en curso. Este tick no encola y pasa al siguiente.
+        if (s.singleton && (await this.scheduleInFlight(tx, s))) {
+          skipped.push(s.name);
+          await tx.$executeRaw`
+            UPDATE "job_schedules"
+               SET "lastSkippedAt" = "nextRunAt",
+                   "skippedCount" = "skippedCount" + 1,
+                   "nextRunAt" = ${utc(s.nextRunAfter(row.now))},
+                   "updatedAt" = ${NOW}
+             WHERE "name" = ${s.name}`;
+          continue;
+        }
         fired += 1;
         // La clave por tick es la segunda red: aunque dos workers llegaran
         // a disparar el mismo tick, solo habría un trabajo.
@@ -258,8 +276,30 @@ export class PrismaJobRepository implements JobRepository {
                  "updatedAt" = ${NOW}
            WHERE "name" = ${s.name}`;
       }
-      return fired;
+      return { fired, skipped };
     });
+  }
+
+  /**
+   * ¿Hay un trabajo de un tick de esta tarea en PENDING o RUNNING? Los de la
+   * tarea son los de plataforma con su clave `schedule:<nombre>:<tick>`; el
+   * índice parcial `jobs_active_name_idx` (solo PENDING y RUNNING) lo acota
+   * a los vivos de ese trabajo. Un RUNNING cuyo worker murió cuenta hasta que
+   * otro lo retoma o lo cierra `failExhausted`.
+   */
+  private async scheduleInFlight(
+    tx: Prisma.TransactionClient,
+    s: ScheduleToFire,
+  ): Promise<boolean> {
+    const [{ active }] = await tx.$queryRaw<{ active: boolean }[]>`
+      SELECT EXISTS (
+        SELECT 1 FROM "jobs"
+         WHERE "name" = ${s.job}
+           AND "state" IN ('PENDING', 'RUNNING')
+           AND "tenantId" IS NULL
+           AND starts_with("idempotencyKey", ${`schedule:${s.name}:`})
+      ) AS "active"`;
+    return active;
   }
 
   async listFailed(limit: number): Promise<FailedJob[]> {
@@ -365,7 +405,14 @@ export class PrismaJobRepository implements JobRepository {
        ORDER BY "lastBeatAt" DESC
        LIMIT ${SNAPSHOT_WORKERS}`;
     const schedules = await this.prisma.jobSchedule.findMany({
-      select: { name: true, cron: true, lastRunAt: true, nextRunAt: true },
+      select: {
+        name: true,
+        cron: true,
+        lastRunAt: true,
+        nextRunAt: true,
+        skippedCount: true,
+        lastSkippedAt: true,
+      },
       orderBy: { name: 'asc' },
     });
     return { ...queue, failedLast24h, workers, schedules };

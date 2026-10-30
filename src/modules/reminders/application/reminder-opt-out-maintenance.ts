@@ -45,6 +45,8 @@ export class ReminderOptOutMaintenance implements OnModuleInit {
       name: PURGE_OPT_OUT_LINKS_SCHEDULE,
       cron: '23 4 * * *',
       job: PURGE_OPT_OUT_LINKS_JOB,
+      // DX-380 (OPS-046): sin solapar un tick con el anterior.
+      singleton: true,
     });
   }
 }

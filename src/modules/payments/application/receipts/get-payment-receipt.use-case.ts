@@ -5,7 +5,12 @@ import type {
   PaymentReceiptSource,
   ReceiptNoticeData,
 } from '../../domain/ports/payment-receipt-repository.port';
-import type { PaymentReceiptView } from '../../domain/entities/payment-receipt.entity';
+import type {
+  PaymentReceiptView,
+  ReceiptExchangeRate,
+} from '../../domain/entities/payment-receipt.entity';
+import { exchangeRateStatus } from '../../domain/payment-exchange-rate';
+import { convertWithQuote } from '../../../exchange/domain/exchange-rate-quote';
 import {
   buildReceiptSnapshot,
   receiptPatientView,
@@ -28,6 +33,31 @@ function viewSnapshot(
   names: ClinicDocumentTypeNames,
 ): ReceiptViewSnapshot {
   return { ...snapshot, patient: receiptPatientView(snapshot, names) };
+}
+
+/**
+ * DX-376: la tasa del recibo sale de la que congeló el abono (DX-375), nunca
+ * de la tasa de hoy: reimprimirlo da el mismo equivalente aunque la tasa
+ * cambie después.
+ */
+function receiptExchangeRate(
+  rate: PaymentReceiptSource['rate'],
+): ReceiptExchangeRate | null {
+  const status = exchangeRateStatus(rate);
+  if (status === 'NOT_NEEDED') return null;
+  const frozen = rate.frozenRate;
+  return {
+    status,
+    rate: frozen,
+    equivalentAmount: frozen
+      ? convertWithQuote(rate.amount, {
+          from: rate.currency,
+          to: frozen.currency,
+          fromPerBase: frozen.fromPerBase,
+          toPerBase: frozen.toPerBase,
+        })
+      : null,
+  };
 }
 
 export interface LoadedPaymentReceipt {
@@ -91,6 +121,7 @@ export class GetPaymentReceiptUseCase {
       voided: receipt.voidedAt !== null,
       voidedAt: receipt.voidedAt,
       voidReason: receipt.voidReason,
+      exchangeRate: receiptExchangeRate(source.rate),
       snapshot: viewSnapshot(receipt.snapshot, names),
     };
   }
@@ -110,6 +141,7 @@ export class GetPaymentReceiptUseCase {
       voided: legacy.voidedAt !== null,
       voidedAt: legacy.voidedAt,
       voidReason: legacy.voidReason,
+      exchangeRate: receiptExchangeRate(source.rate),
       snapshot: viewSnapshot(
         buildReceiptSnapshot(
           {

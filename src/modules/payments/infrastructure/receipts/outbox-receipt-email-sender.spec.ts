@@ -58,6 +58,7 @@ const receipt: PaymentReceiptView = {
   voided: false,
   voidedAt: null,
   voidReason: null,
+  exchangeRate: null,
   snapshot,
 };
 

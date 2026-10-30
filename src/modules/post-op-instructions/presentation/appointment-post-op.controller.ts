@@ -105,7 +105,7 @@ export class AppointmentPostOpController {
   })
   @ApiUnprocessableEntityResponse({
     description:
-      'Sin email ni responsable que reciba avisos, sin teléfono con indicativo, o el paciente dio de baja los envíos',
+      'Sin email ni responsable que reciba avisos, sin un teléfono que sirva para WhatsApp, o el paciente dio de baja los envíos',
   })
   @ApiTooManyRequestsResponse({
     description: 'Tope de emails de la clínica o del destinatario',

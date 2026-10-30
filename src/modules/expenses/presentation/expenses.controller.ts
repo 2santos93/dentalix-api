@@ -78,7 +78,7 @@ import {
   ExpenseReceiptUrlDto,
   ExpenseSummaryDto,
 } from './dto/expense.dto';
-import { CSV_RESPONSE, sendCsv } from './csv-response';
+import { CSV_RESPONSE, sendCsv } from '../../../shared/csv/csv-response';
 
 interface AuthenticatedRequest {
   user: TenantJwtPayload;

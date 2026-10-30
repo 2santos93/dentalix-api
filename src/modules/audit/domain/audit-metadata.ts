@@ -88,6 +88,13 @@ export interface AuditMetadata {
    */
   prescriptionSafety?: AuditPrescriptionSafety;
   /**
+   * DX-307: avisos de la anestesia registrada en una evolución (dosis máxima
+   * por peso, tope absoluto, alergia): versión de las reglas, CÓDIGOS y si se
+   * confirmaron con motivo. Mismo formato que `prescriptionSafety`; ni los mg,
+   * ni el texto del aviso ni el del motivo (van sellados en el registro).
+   */
+  anesthesiaSafety?: AuditPrescriptionSafety;
+  /**
    * SEC-049: alta, cambio o verificación de una cobertura: el tipo de
    * pagador, los 4 últimos caracteres alfanuméricos del nº de afiliado (null
    * si no hay o es más corto) y si quedó verificada. Nunca el número entero.
@@ -107,6 +114,19 @@ export interface AuditMetadata {
    * nada del paciente.
    */
   allocation?: AuditAllocation;
+  /**
+   * DX-377: abono con referencia. Si se confirmó una referencia repetida y
+   * los ids de los abonos con los que coincidía. Ni la referencia ni el texto
+   * del motivo (van en el abono, `resourceId`).
+   */
+  paymentReference?: AuditPaymentReference;
+  /**
+   * DX-402: un abono congeló como tasa de respaldo la tasa manual de un día
+   * anterior a `manualSince` (un día sin tasa del proveedor): el día de la
+   * tasa, desde cuándo rige la manual y las monedas de la cotización. Ni
+   * importes ni la tasa (van en el abono, `resourceId`).
+   */
+  exchangeRateBackup?: AuditExchangeRateBackup;
   /**
    * G1 (R13): moneda, zona y formato de una sede antes y después de una
    * edición, y si quedó revisada. Códigos de configuración de la sede (ISO
@@ -205,6 +225,20 @@ export interface AuditHealthRegistrationSide {
 export interface AuditHealthRegistrationChange {
   before: AuditHealthRegistrationSide;
   after: AuditHealthRegistrationSide;
+}
+
+export interface AuditExchangeRateBackup {
+  /** Día civil de la tasa (el del abono en su sede), AAAA-MM-DD. */
+  rateDate: string;
+  /** Desde qué día rige la tasa manual (posterior a `rateDate`). */
+  manualSince: string;
+  /** Las monedas de la cotización (ISO 4217), una o dos. */
+  currencies: string[];
+}
+
+export interface AuditPaymentReference {
+  duplicateConfirmed: boolean;
+  duplicateOf: string[];
 }
 
 export interface AuditPrescriptionSafety {
@@ -769,6 +803,21 @@ function prescriptionSafety(value: unknown): AuditPrescriptionSafety | null {
   return { rulesVersion, blocking, info, overridden };
 }
 
+/** Confirmación de referencia repetida y ids de los repetidos (DX-377). */
+function paymentReference(value: unknown): AuditPaymentReference | null {
+  if (!isRecord(value)) return null;
+  const { duplicateConfirmed, duplicateOf } = value;
+  if (typeof duplicateConfirmed !== 'boolean' || !Array.isArray(duplicateOf)) {
+    return null;
+  }
+  return {
+    duplicateConfirmed,
+    duplicateOf: duplicateOf
+      .filter((id): id is string => typeof id === 'string' && UUID.test(id))
+      .slice(0, 5),
+  };
+}
+
 /** Los 4 últimos del nº de afiliado: letras de cualquier alfabeto o dígitos. */
 const LAST4 = /^[\p{L}0-9]{1,4}$/u;
 
@@ -962,6 +1011,26 @@ function staffAccess(value: unknown): AuditStaffAccessChange | null {
   return { ...(before ? { before } : {}), ...(after ? { after } : {}) };
 }
 
+/** DX-402: los dos días reales, el de la tasa antes del de inicio. */
+function exchangeRateBackup(value: unknown): AuditExchangeRateBackup | null {
+  if (!isRecord(value)) return null;
+  const { rateDate, manualSince, currencies } = value;
+  if (
+    typeof rateDate !== 'string' ||
+    typeof manualSince !== 'string' ||
+    parseCivilDate(rateDate) !== rateDate ||
+    parseCivilDate(manualSince) !== manualSince ||
+    rateDate >= manualSince ||
+    !Array.isArray(currencies) ||
+    currencies.length === 0 ||
+    currencies.length > 2 ||
+    !currencies.every((c) => typeof c === 'string' && CURRENCY_CODE.test(c))
+  ) {
+    return null;
+  }
+  return { rateDate, manualSince, currencies: [...(currencies as string[])] };
+}
+
 /**
  * Deja pasar solo lo que la lista admite, con el formato que admite. Lo que
  * no encaja se DESCARTA (no se trunca ni se escapa): así un valor clínico que
@@ -999,6 +1068,12 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (cancelled) out.cancellation = cancelled;
   const safety = prescriptionSafety(input.prescriptionSafety);
   if (safety) out.prescriptionSafety = safety;
+  const anesthesia = prescriptionSafety(input.anesthesiaSafety);
+  if (anesthesia) out.anesthesiaSafety = anesthesia;
+  const referenced = paymentReference(input.paymentReference);
+  if (referenced) out.paymentReference = referenced;
+  const backup = exchangeRateBackup(input.exchangeRateBackup);
+  if (backup) out.exchangeRateBackup = backup;
   const covered = coverage(input.coverage);
   if (covered) out.coverage = covered;
   const registration = healthRegistration(input.healthRegistration);

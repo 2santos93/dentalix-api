@@ -16,6 +16,12 @@ export interface ExchangeRateQuote {
   fromPerBase: number;
   /** Unidades de `to` por 1 USD. */
   toPerBase: number;
+  /**
+   * DX-402: la tasa es la manual de un día anterior a `manualSince` (la de
+   * respaldo de un día sin tasa del proveedor). No se guarda en el abono:
+   * sirve para auditar que se usó.
+   */
+  backup?: { manualSince: string };
 }
 
 /**

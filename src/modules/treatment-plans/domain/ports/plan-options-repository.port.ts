@@ -36,8 +36,11 @@ export interface PendingFollowUpRow {
   patientFirstName: string;
   patientLastName: string;
   patientPhone: string | null;
-  /** País del paciente (ISO 3166-1 alfa-2): da el indicativo para WhatsApp. */
-  patientCountryCode: string | null;
+  /**
+   * Región por defecto del teléfono de la sede de la presentación (DX-329,
+   * P1): con ella se lee un número sin «+» para WhatsApp. null: no tiene.
+   */
+  presentedLocationPhoneRegion: string | null;
   optionGroupId: string | null;
   optionLabel: string | null;
   presentedAt: Date;

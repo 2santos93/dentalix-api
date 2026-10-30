@@ -59,3 +59,43 @@ describe('RecordPaymentDto amount bounds', () => {
     expect(errors.find((e) => e.property === 'amount')).toBeDefined();
   });
 });
+
+// DX-395: la referencia y el motivo demasiado largos dan 400 en español (el
+// mensaje del gate), no el de class-validator en inglés.
+describe('RecordPaymentDto referencia y motivo (DX-395)', () => {
+  const base = { amount: 10, currency: 'USD', paidAt: '2026-07-01' };
+  const messagesOf = async (body: Record<string, unknown>, property: string) =>
+    (await validate(plainToInstance(RecordPaymentDto, { ...base, ...body })))
+      .filter((e) => e.property === property)
+      .flatMap((e) => Object.values(e.constraints ?? {}));
+
+  it('una referencia de 61 caracteres: mensaje en español', async () => {
+    expect(
+      await messagesOf({ reference: '1'.repeat(61) }, 'reference'),
+    ).toEqual(['La referencia admite como mucho 60 caracteres.']);
+    expect(
+      await messagesOf({ reference: '1'.repeat(60) }, 'reference'),
+    ).toEqual([]);
+  });
+
+  it('un motivo de 301 caracteres: mensaje en español', async () => {
+    expect(
+      await messagesOf(
+        { duplicateReferenceReason: 'm'.repeat(301) },
+        'duplicateReferenceReason',
+      ),
+    ).toEqual(['El motivo admite como mucho 300 caracteres.']);
+  });
+
+  it('una referencia o un motivo que no son texto: mensaje en español', async () => {
+    expect(await messagesOf({ reference: 123 }, 'reference')).toContain(
+      'La referencia tiene que ser texto.',
+    );
+    expect(
+      await messagesOf(
+        { duplicateReferenceReason: 5 },
+        'duplicateReferenceReason',
+      ),
+    ).toContain('El motivo tiene que ser texto.');
+  });
+});

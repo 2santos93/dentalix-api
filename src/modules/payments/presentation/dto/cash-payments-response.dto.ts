@@ -45,6 +45,14 @@ export class CashOpeningBalanceRefDto {
   concept!: string;
 }
 
+export class CashPaymentMethodRefDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({ example: 'Pago móvil' })
+  name!: string;
+}
+
 export class CashPaymentDto {
   @ApiProperty({ format: 'uuid' })
   id!: string;
@@ -79,8 +87,8 @@ export class CashPaymentDto {
     example: '2026-10-16',
     description:
       'Día civil (YYYY-MM-DD) de `paidAt` en la zona IANA de la sede del ' +
-      'abono (DX-097): el día de caja en que cuenta. Un abono a las 20:00 en ' +
-      'Bogotá es de ese día aunque en UTC ya sea el siguiente.',
+      'abono (DX-097): el día de caja en que cuenta. Un abono a las 20:00 de ' +
+      'una sede en UTC−5 es de ese día aunque en UTC ya sea el siguiente.',
   })
   paidOn!: string;
 
@@ -101,11 +109,22 @@ export class CashPaymentDto {
   @ApiProperty({ example: 150000 })
   amount!: number;
 
-  @ApiProperty({ example: 'COP', description: 'ISO 4217 currency code' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({ enum: PaymentMethod, nullable: true })
   method!: PaymentMethod | null;
+
+  @ApiProperty({
+    type: CashPaymentMethodRefDto,
+    nullable: true,
+    description:
+      'DX-377: medio de pago (el inicial de su método si el abono es de una réplica anterior).',
+  })
+  paymentMethod!: CashPaymentMethodRefDto | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  reference!: string | null;
 
   @ApiProperty({ type: String, nullable: true })
   notes!: string | null;
@@ -132,7 +151,7 @@ export class CashPaymentDto {
 }
 
 export class CashCurrencyTotalDto {
-  @ApiProperty({ example: 'COP' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({ example: 350000, description: 'Suma sin convertir' })
@@ -150,7 +169,31 @@ export class CashMethodTotalDto {
   })
   method!: PaymentMethod | null;
 
-  @ApiProperty({ example: 'COP' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
+  currency!: string;
+
+  @ApiProperty({ example: 200000 })
+  total!: number;
+
+  @ApiProperty({ example: 2 })
+  count!: number;
+}
+
+export class CashPaymentMethodTotalDto {
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description:
+      'Medio de pago (DX-377). Un abono de una réplica anterior cuenta en el ' +
+      'medio inicial de su método; `null` = abonos sin método.',
+  })
+  paymentMethodId!: string | null;
+
+  @ApiProperty({ type: String, nullable: true, example: 'Pago móvil' })
+  name!: string | null;
+
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({ example: 200000 })
@@ -176,6 +219,12 @@ export class CashPaymentsSummaryDto {
     description: 'Total por método y moneda.',
   })
   byMethod!: CashMethodTotalDto[];
+
+  @ApiProperty({
+    type: [CashPaymentMethodTotalDto],
+    description: 'DX-377: total por medio de pago de la clínica y moneda.',
+  })
+  byPaymentMethod!: CashPaymentMethodTotalDto[];
 }
 
 export class CashScopeDto {

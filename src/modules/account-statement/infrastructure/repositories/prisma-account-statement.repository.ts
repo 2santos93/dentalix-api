@@ -9,6 +9,10 @@ import {
 import { resolveLocationTimeZones } from '../../../../shared/locations/location-time-zone';
 import { BillablePlanRow } from '../../domain/entities/billable-plan.entity';
 import { NON_BILLABLE_PLAN_STATUSES } from '../../../treatment-plans/domain/plan-status-machine';
+import {
+  catalogOf,
+  methodRefOf,
+} from '../../../payment-methods/domain/method-catalog';
 
 // Mismo "facturable" que GetPlanBalanceUseCase: un ítem PROPOSED aún no se debe.
 const BILLABLE_ITEM_STATUSES: TreatmentPlanItemStatus[] = [
@@ -37,7 +41,7 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
    * tenga el paciente (sin N+1): paciente, planes, suma de ítems por plan
    * (`groupBy`), abonos con su sede (Prisma resuelve la relación con un `IN`
    * para todas las filas), planes de pago con sus cuotas (ídem) y saldos
-   * migrados vivos (DX-262), más el nombre
+   * migrados vivos (DX-262), el catálogo de medios de pago (DX-395), más el nombre
    * de la clínica, y el nombre de quienes anularon abonos (una consulta más,
    * solo si hay anulaciones con autor).
    *
@@ -121,6 +125,8 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
                 currency: true,
                 paidAt: true,
                 method: true,
+                paymentMethodId: true,
+                reference: true,
                 createdById: true,
                 createdAt: true,
                 deletedAt: true,
@@ -166,6 +172,17 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
               orderBy: [{ asOfDate: 'asc' }, { id: 'asc' }],
             }),
           ]);
+
+        // DX-395: el catálogo de medios de la clínica (RLS y `tenantId`),
+        // corto, para nombrar el medio de cada abono; también los inactivos,
+        // porque un abono antiguo conserva el suyo. Un abono sin medio de una
+        // réplica anterior se nombra con el inicial de su método, como la caja.
+        const catalog = catalogOf(
+          await tx.clinicPaymentMethod.findMany({
+            where: { tenantId },
+            select: { id: true, name: true, legacyMethod: true },
+          }),
+        );
 
         // Nombre de quien anuló cada abono (SEC-013): UNA consulta para todos.
         // El usuario es global; su nombre se lee a través de la membresía, que
@@ -227,6 +244,8 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
               currency: p.currency,
               paidAt: p.paidAt,
               method: p.method,
+              paymentMethod: methodRefOf(catalog, p.paymentMethodId, p.method),
+              reference: p.reference,
               location: p.location,
               createdById: p.createdById,
               createdAt: p.createdAt,

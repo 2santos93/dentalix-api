@@ -80,7 +80,11 @@ export class PublicCancellationPolicyDto {
   @ApiProperty({ type: Number, nullable: true })
   suggestedFee!: number | null;
 
-  @ApiProperty({ type: String, nullable: true, example: 'COP' })
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'Código ISO 4217 de 3 letras.',
+  })
   currency!: string | null;
 }
 
@@ -164,7 +168,6 @@ export class ConfirmationLinkDto {
   @ApiProperty({
     type: String,
     nullable: true,
-    example: '573105550101',
     description:
       'Teléfono del paciente en E.164 sin "+", listo para https://wa.me/<número>. null si no hay uno utilizable.',
   })

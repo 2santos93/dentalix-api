@@ -442,6 +442,8 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     medicalHistory: {
       ...healthy,
       habits: { higieneOral: { cepilladoPorDia: 2, cremaConFluor: true } },
+      // DX-307: el peso con el que se calcula la dosis máxima de anestésico.
+      vitalSigns: { peso: 32 },
     },
   },
   {
@@ -1060,6 +1062,23 @@ export const DEMO_CLINICAL_ADDENDA: readonly DemoClinicalAddendum[] = [
 ];
 
 /**
+ * DX-307: anestesia local de ejemplo. La paciente infantil (Sofía, 32 kg en la
+ * anamnesis) tiene una exodoncia de 75 con 2 carpules de lidocaína 2 % con
+ * epinefrina: 72 mg de 224 mg (32 %), sin aviso. Por índice de DEMO_PATIENTS.
+ */
+export const DEMO_ANESTHESIA = {
+  patientIndex: 8,
+  notes:
+    'Exodoncia de 75 por reabsorción radicular incompleta. Hemostasia con gasa; indicaciones a la madre.',
+  reason: 'Exodoncia simple',
+  sampleCode: 'LIDOCAINE_2_EPI',
+  carpules: 2,
+  technique: 'NERVE_BLOCK',
+  site: '75 (alveolar inferior izquierdo)',
+  lot: 'LDC-2610-A',
+} as const;
+
+/**
  * DX-170: evoluciones redactadas con las plantillas de ejemplo y ligadas a las
  * últimas citas atendidas (la más reciente primero). Respuestas por etiqueta;
  * las preguntas sin respuesta toman su valor por defecto.
@@ -1436,6 +1455,11 @@ interface DemoPayment {
    */
   currency?: string;
   method: PaymentMethod;
+  /**
+   * DX-377: con ella el abono se cobra con el medio demo «Pago móvil» (pide
+   * referencia) en vez del medio inicial de `method`.
+   */
+  mobileReference?: string;
   location: DemoLocationKey;
   notes?: string;
 }
@@ -1544,7 +1568,13 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
     ],
     payments: [
       { daysAgo: 26, amount: 400000, method: CARD, location: 'principal' },
-      { daysAgo: 12, amount: 300000, method: TRANSFER, location: 'principal' },
+      {
+        daysAgo: 12,
+        amount: 300000,
+        method: TRANSFER,
+        mobileReference: '0412 7788 31',
+        location: 'principal',
+      },
       // DX-375: un abono de hoy en otra moneda que la del plan.
       {
         daysAgo: 0,
@@ -1649,7 +1679,13 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
       { code: 'PED-FLUOR', tooth: '11', status: ACCEPTED },
     ],
     payments: [
-      { daysAgo: 14, amount: 130000, method: TRANSFER, location: 'norte' },
+      {
+        daysAgo: 14,
+        amount: 130000,
+        method: TRANSFER,
+        mobileReference: '0098 1234 55',
+        location: 'norte',
+      },
     ],
   },
   {

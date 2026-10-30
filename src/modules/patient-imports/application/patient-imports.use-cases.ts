@@ -48,7 +48,6 @@ import {
 } from '../domain/tabular-file';
 import { locationCurrencyRequired } from '../../../shared/locations/reference-location';
 import { requireLocationFormat } from '../../../shared/locations/location-regional';
-import { callingCodeOfCountry } from '../../../shared/phone/country-calling-code';
 import {
   BatchLocationError,
   BatchStateError,
@@ -376,7 +375,7 @@ export class PatientImportsService {
     // guardadas ya llevan el tipo: el worker no los necesita.
     const clinicNames = await this.documentTypeNames.get();
     const ctx = {
-      defaultCallingCode: callingCodeOfCountry(location.country),
+      defaultRegion: location.defaultPhoneRegion,
       today: civilDateIn(new Date(), location.timeZone),
       clinicNames,
     };

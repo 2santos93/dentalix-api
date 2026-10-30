@@ -14,7 +14,7 @@ export class PaymentWithoutRateDto {
   @ApiProperty({ example: 150000, description: 'En la moneda del abono' })
   amount!: number;
 
-  @ApiProperty({ example: 'COP' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 
   @ApiProperty({
@@ -25,7 +25,7 @@ export class PaymentWithoutRateDto {
 }
 
 export class PlanBalanceDto {
-  @ApiProperty({ example: 'USD', description: 'ISO 4217 currency code' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   planCurrency!: string;
 
   @ApiProperty({

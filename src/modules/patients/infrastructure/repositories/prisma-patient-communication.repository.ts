@@ -1,6 +1,10 @@
 import { effectiveCommunicationChanges } from '../../domain/communication/communication-changes';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { ContactChannel, Prisma } from '@prisma/client';
+import {
+  phoneRegionOrNull,
+  type PhoneRegion,
+} from '../../../../shared/phone/phone-number';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
@@ -114,16 +118,16 @@ export class PrismaPatientCommunicationRepository implements PatientCommunicatio
     });
   }
 
-  async locationCountry(): Promise<string | null> {
+  async defaultPhoneRegion(): Promise<PhoneRegion | null> {
     const active = this.tenantContext.getLocationId();
     const location = await this.prisma.runWithTenant((tx) =>
       tx.location.findFirst({
         where: { deletedAt: null, ...(active ? { id: active } : {}) },
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-        select: { country: true },
+        select: { defaultPhoneRegion: true },
       }),
     );
-    return location?.country ?? null;
+    return phoneRegionOrNull(location?.defaultPhoneRegion);
   }
 
   async clinicDefaultChannel(): Promise<ContactChannel> {

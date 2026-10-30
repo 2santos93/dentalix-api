@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { JobRegistry } from '../../../jobs/application/job-registry';
 import {
   GetRatesForDateUseCase,
-  isValidDateFormat,
+  isValidRateDate,
 } from '../use-cases/get-rates-for-date.use-case';
 
 export const PREFETCH_RATES_JOB = 'exchange.prefetch-rates';
@@ -18,7 +18,8 @@ export const PREFETCH_RATES_SCHEDULE = 'exchange.prefetch-rates.daily';
  * un día cuya precarga aún no pudo hacerse): quitarlo rompería conversiones.
  *
  * Sin EXCHANGE_APP_ID (desarrollo, CI) no hace nada. Un fallo del proveedor
- * se reintenta con backoff (5 intentos desde 5 min).
+ * se reintenta con backoff (5 intentos desde 5 min): la precarga no lee la
+ * caché negativa ni gasta los presupuestos de las peticiones (SEC-054).
  */
 @Injectable()
 export class ExchangePrefetchJobs implements OnModuleInit {
@@ -44,11 +45,12 @@ export class ExchangePrefetchJobs implements OnModuleInit {
           });
           return;
         }
-        const date = isValidDateFormat(payload.date)
+        const date = isValidRateDate(payload.date)
           ? payload.date
           : this.now().toISOString().slice(0, 10);
-        // Del proveedor, sea cual sea la fuente de cada clínica (DX-374).
-        const rates = await this.getRates.providerRates(date);
+        // Del proveedor, sea cual sea la fuente de cada clínica (DX-374), y
+        // fuera de los presupuestos de las peticiones (SEC-054).
+        const rates = await this.getRates.prefetchProviderRates(date);
         this.logger.log({
           event: 'exchange.prefetched',
           date,

@@ -13,6 +13,11 @@ export interface Location {
   showHealthRegistrationNumber: boolean;
   /** DX-222: teléfono de la sede para las indicaciones postoperatorias, o null. */
   phone: string | null;
+  /**
+   * DX-329: región de numeración cuyo prefijo toma un teléfono escrito sin
+   * «+»; `null` = sin prefijo por defecto. Nunca se deduce del país.
+   */
+  defaultPhoneRegion: string | null;
   isActive: boolean;
   /**
    * G1: moneda ISO 4217, zona IANA y locale BCP 47 de la sede. La zona es la
@@ -51,6 +56,11 @@ export interface CreateLocationRepoInput {
    */
   hourCycle: HourCycle | null;
   phone?: string;
+  /**
+   * DX-329: ya validada o sugerida; null = sin prefijo por defecto. El
+   * repositorio escribe la marca de decisión en la misma fila.
+   */
+  defaultPhoneRegion: string | null;
 }
 
 export interface UpdateLocationRepoInput {
@@ -62,6 +72,11 @@ export interface UpdateLocationRepoInput {
   showHealthRegistrationNumber?: boolean;
   /** DX-222: ya recortado; null lo quita. */
   phone?: string | null;
+  /**
+   * DX-329: ya validada; null la quita y ausente no la toca. Con el campo
+   * presente el repositorio escribe también la marca de decisión.
+   */
+  defaultPhoneRegion?: string | null;
   isActive?: boolean;
 }
 

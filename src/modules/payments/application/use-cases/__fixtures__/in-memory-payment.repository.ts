@@ -12,6 +12,7 @@ import {
   PaymentVoidAudit,
   PaymentVoidTarget,
   ReceivedPayment,
+  ReferenceMatch,
 } from '../../../domain/ports/payment-repository.port';
 import { civilDateIn, civilNoonIn } from '../../../../../shared/time/civil-day';
 import type { RegionalFormat } from '../../../../../shared/format/regional-format';
@@ -24,9 +25,10 @@ import { requireLocationFormat } from '../../../../../shared/locations/location-
 // prisma-payment.repository.ts).
 type StoredPayment = Omit<
   Payment,
-  'paidOn' | 'receiptNumber' | 'exchangeRateStatus'
+  'paidOn' | 'receiptNumber' | 'exchangeRateStatus' | 'duplicateReferenceOf'
 > & {
   locationId: string;
+  referenceNormalized: string | null;
   deletedAt: Date | null;
   idempotencyKey: string | null;
   requestFingerprint: string | null;
@@ -75,6 +77,11 @@ export class InMemoryPaymentRepository implements PaymentRepository {
       currency: overrides.currency ?? 'USD',
       paidAt: overrides.paidAt ?? NOW,
       method: overrides.method ?? null,
+      paymentMethodId: overrides.paymentMethodId ?? null,
+      paymentMethodName: overrides.paymentMethodName ?? null,
+      reference: overrides.reference ?? null,
+      referenceNormalized: overrides.referenceNormalized ?? null,
+      duplicateReferenceReason: overrides.duplicateReferenceReason ?? null,
       notes: overrides.notes ?? null,
       createdById: overrides.createdById ?? null,
       createdAt: overrides.createdAt ?? NOW,
@@ -106,6 +113,10 @@ export class InMemoryPaymentRepository implements PaymentRepository {
       paidAt: row.paidAt,
       paidOn: civilDateIn(row.paidAt, this.timeZone),
       method: row.method,
+      paymentMethodId: row.paymentMethodId,
+      paymentMethodName: row.paymentMethodName,
+      reference: row.reference,
+      duplicateReferenceReason: row.duplicateReferenceReason,
       notes: row.notes,
       createdById: row.createdById,
       createdAt: row.createdAt,
@@ -141,6 +152,11 @@ export class InMemoryPaymentRepository implements PaymentRepository {
           ? input.paidAt
           : civilNoonIn(input.paidAt.civilDate, this.timeZone),
       method: input.method ?? null,
+      paymentMethodId: input.paymentMethodId ?? null,
+      paymentMethodName: null,
+      reference: input.reference ?? null,
+      referenceNormalized: input.referenceNormalized ?? null,
+      duplicateReferenceReason: input.duplicateReferenceReason ?? null,
       notes: input.notes ?? null,
       createdById: input.createdById ?? null,
       createdAt: NOW,
@@ -157,6 +173,34 @@ export class InMemoryPaymentRepository implements PaymentRepository {
     };
     this.payments.push(row);
     return Promise.resolve(this.toEntity(row));
+  }
+
+  findReferenceMatches(params: {
+    paymentMethodId: string;
+    referenceNormalized: string;
+    from: Date;
+    to: Date;
+  }): Promise<ReferenceMatch[]> {
+    return Promise.resolve(
+      this.payments
+        .filter(
+          (p) =>
+            p.deletedAt === null &&
+            p.paymentMethodId === params.paymentMethodId &&
+            p.referenceNormalized === params.referenceNormalized &&
+            p.paidAt >= params.from &&
+            p.paidAt <= params.to,
+        )
+        .sort((a, b) => b.paidAt.getTime() - a.paidAt.getTime())
+        .slice(0, 5)
+        .map((p) => ({
+          id: p.id,
+          paidAt: p.paidAt,
+          amount: p.amount,
+          currency: p.currency,
+          receiptNumber: null,
+        })),
+    );
   }
 
   /** Test helper: saldos migrados que conoce el fake (DX-262). */

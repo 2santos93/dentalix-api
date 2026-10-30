@@ -13,6 +13,8 @@ import {
   HAS_PAYMENTS_MESSAGE,
   IDEMPOTENCY_KEY_REUSED_MESSAGE,
 } from '../src/modules/expenses/domain/expense-rules';
+import { EXPENSE_REPOSITORY } from '../src/modules/expenses/domain/ports/expense-repository.port';
+import { EXPENSE_INTEGRITY_MESSAGES } from '../src/shared/prisma/prisma-exception.filter';
 import { FILE_STORAGE } from '../src/shared/storage/file-storage.port';
 import type { FileStoragePort } from '../src/shared/storage/file-storage.port';
 import { createE2eApp } from './support/create-e2e-app';
@@ -1023,6 +1025,107 @@ describe('Gastos de la sede (e2e, DX-274)', () => {
           JSON.stringify(x.metadata).includes('EXPENSE_VOIDED'),
         ),
       ).toBe(true);
+    });
+  });
+
+  describe('la BD como red: 409 en español aunque la app lea un gasto viejo (DX-393)', () => {
+    // La app comprueba todo con el gasto `FOR UPDATE` y responde antes; aquí
+    // se le da una lectura VIEJA (como una ruta o una réplica que se salte
+    // esas comprobaciones) para que la escritura llegue a la BD y la frenen
+    // sus guardas. La respuesta es el 409 en español del filtro de errores.
+    interface RepositoryReads {
+      lockExpense(
+        tx: Prisma.TransactionClient,
+        id: string,
+      ): Promise<{ voidedAt: Date | null }>;
+      paymentTotals(
+        tx: Prisma.TransactionClient,
+        id: string,
+      ): Promise<{ liveCents: number; paymentCount: number }>;
+      voidOnePayment(...args: unknown[]): Promise<unknown>;
+      findById(
+        id: string,
+        now: Date,
+      ): Promise<{ voidedAt: string | Date | null } | null>;
+    }
+    const repository = () => app.get<RepositoryReads>(EXPENSE_REPOSITORY);
+    afterEach(() => jest.restoreAllMocks());
+
+    /** La próxima lectura de lo pagado dice que no hay nada pagado. */
+    function staleTotals(): void {
+      jest
+        .spyOn(repository(), 'paymentTotals')
+        .mockResolvedValueOnce({ liveCents: 0, paymentCount: 0 });
+    }
+
+    it('un pago sobre un gasto anulado: 409 y ningún pago', async () => {
+      const e = await createExpense({ amount: 100000 });
+      await call('post', `/expenses/${e.id}/void`)
+        .send({ reason: 'Factura duplicada' })
+        .expect(200);
+      // Viejas las dos lecturas: la del caso de uso y la del gasto bloqueado.
+      const repo = repository();
+      const find = repo.findById.bind(repo);
+      jest.spyOn(repo, 'findById').mockImplementationOnce(async (id, now) => {
+        const current = await find(id, now);
+        return current && { ...current, voidedAt: null };
+      });
+      const lock = repo.lockExpense.bind(repo);
+      jest
+        .spyOn(repo, 'lockExpense')
+        .mockImplementationOnce(async (tx, id) => ({
+          ...(await lock(tx, id)),
+          voidedAt: null,
+        }));
+      const res = await pay(e.id, { amount: 1000, method: 'CARD' }).expect(409);
+      expect(res.body).toEqual({
+        statusCode: 409,
+        error: 'Conflict',
+        message: EXPENSE_INTEGRITY_MESSAGES.Q3930,
+      });
+      expect(
+        await raw.expensePayment.count({ where: { expenseId: e.id } }),
+      ).toBe(0);
+    });
+
+    it('un pago que pasa lo pendiente: 409 y nada nuevo', async () => {
+      const e = await createExpense({ amount: 100000 });
+      await pay(e.id, { amount: 80000, method: 'CARD' }).expect(201);
+      staleTotals();
+      const res = await pay(e.id, { amount: 50000, method: 'CARD' }).expect(
+        409,
+      );
+      expect(messageOf(res)).toBe(EXPENSE_INTEGRITY_MESSAGES.Q3931);
+      expect((await detail(e.id)).paidAmount).toBe(80000);
+    });
+
+    it('rebajar el importe por debajo de lo pagado: 409 y el importe no cambia', async () => {
+      const e = await createExpense({ amount: 100000 });
+      await pay(e.id, { amount: 80000, method: 'CARD' }).expect(201);
+      staleTotals();
+      const res = await call('patch', `/expenses/${e.id}`)
+        .send({ amount: 10000 })
+        .expect(409);
+      expect(messageOf(res)).toBe(EXPENSE_INTEGRITY_MESSAGES.Q3932);
+      expect((await detail(e.id)).amount).toBe(100000);
+    });
+
+    it('anular un gasto con un pago vivo: 409 y todo sigue como estaba', async () => {
+      const e = await createExpense({ amount: 100000 });
+      await pay(e.id, { amount: 80000, method: 'CARD' }).expect(201);
+      // La app anula cada pago antes que el gasto; aquí se salta ese paso.
+      jest
+        .spyOn(repository(), 'voidOnePayment')
+        .mockResolvedValueOnce(undefined);
+      const res = await call('post', `/expenses/${e.id}/void`)
+        .send({ reason: 'Factura duplicada' })
+        .expect(409);
+      expect(messageOf(res)).toBe(EXPENSE_INTEGRITY_MESSAGES.Q3933);
+      expect(await detail(e.id)).toMatchObject({
+        status: 'PARTIAL',
+        paidAmount: 80000,
+        voidedAt: null,
+      });
     });
   });
 

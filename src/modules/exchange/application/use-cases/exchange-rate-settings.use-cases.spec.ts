@@ -111,6 +111,27 @@ describe('Fuente de la tasa de la clínica (DX-374)', () => {
     expect(audit.record).not.toHaveBeenCalled();
   });
 
+  // DX-380: después de cambiar la fuente (ya guardada) se adelantan los
+  // reintentos de los abonos sin tasa; si no cambia, nada.
+  it('tras cambiar la fuente avisa de que cambiaron las tasas, y solo si cambia', async () => {
+    const seen: string[] = [];
+    hooks.registerAfterRatesChange(() => {
+      seen.push(settings.settingsOf(TENANT).source);
+      return Promise.resolve();
+    });
+    await inClinic(() => update().execute({ source: 'AUTOMATIC' }, ctx));
+    await inClinic(() => update().execute({ source: 'MANUAL' }, ctx));
+
+    expect(seen).toEqual(['MANUAL']);
+  });
+
+  it('un fallo al avisar no deshace el cambio de fuente', async () => {
+    hooks.registerAfterRatesChange(() => Promise.reject(new Error('caída')));
+    await expect(
+      inClinic(() => update().execute({ source: 'MANUAL' }, ctx)),
+    ).resolves.toMatchObject({ source: 'MANUAL' });
+  });
+
   // BE-047 (DX-375): antes de cambiar la fuente se congela la tasa de los
   // abonos que la esperaban, con la fuente de ANTES: ningún abono ya cobrado
   // cambia de tasa por el cambio.

@@ -36,8 +36,8 @@ export interface PostOpAppointmentContext {
     id: string;
     name: string;
     phone: string | null;
-    /** Solo para el número de WhatsApp. */
-    country: string;
+    /** Región por defecto del teléfono (DX-329): solo para el número de WhatsApp. */
+    defaultPhoneRegion: string | null;
     /** Zona IANA de la sede. */
     timeZone: string;
     /** G1-B: formato y reloj en crudo; los exige (409) quien pinta `{{fecha}}`. */

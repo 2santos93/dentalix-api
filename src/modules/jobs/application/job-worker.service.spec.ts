@@ -1,7 +1,10 @@
 import { Logger } from '@nestjs/common';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import type { ClaimedJob } from '../domain/job';
-import type { JobRepository } from '../domain/job-repository.port';
+import type {
+  JobRepository,
+  ScheduleToFire,
+} from '../domain/job-repository.port';
 import type { JobsConfig } from '../infrastructure/jobs-config';
 import { JobRegistry } from './job-registry';
 import { JobWorker } from './job-worker.service';
@@ -48,7 +51,7 @@ function fakeRepo(queue: ClaimedJob[]) {
       return Promise.resolve(true);
     }),
     syncSchedules: jest.fn(() => Promise.resolve()),
-    fireDueSchedules: jest.fn(() => Promise.resolve(0)),
+    fireDueSchedules: jest.fn(() => Promise.resolve({ fired: 0, skipped: [] })),
     listFailed: jest.fn(),
     purgeFinished: jest.fn(),
     failExhausted: jest.fn(() => Promise.resolve([])),
@@ -391,5 +394,57 @@ describe('JobWorker (unit)', () => {
         3 * config.pollIntervalMs + 30_000,
       );
     });
+  });
+
+  // DX-380 (OPS-046): el worker pasa `singleton` de cada tarea al repositorio
+  // y deja en el log cada tick saltado, con el nombre de la tarea y nada más.
+  it('dispara las tareas con su `singleton` y avisa de cada tick saltado (jobs.schedule_skipped)', async () => {
+    const fire = jest.fn((schedules: ScheduleToFire[]) =>
+      Promise.resolve({
+        fired: schedules.length - 1,
+        skipped: ['unit.sweep.every-minute'],
+      }),
+    );
+    const repo: JobRepository = {
+      ...fakeRepo([]).repo,
+      fireDueSchedules: fire,
+    };
+    const registry = new JobRegistry();
+    registry.register({ name: 'unit.sweep', handle: () => Promise.resolve() });
+    registry.schedule({
+      name: 'unit.sweep.every-minute',
+      cron: '* * * * *',
+      job: 'unit.sweep',
+      singleton: true,
+    });
+    registry.schedule({
+      name: 'unit.sweep.daily',
+      cron: '7 3 * * *',
+      job: 'unit.sweep',
+    });
+    const log = jest.spyOn(Logger.prototype, 'log');
+    const worker = new JobWorker(
+      registry,
+      repo,
+      new TenantContextService(),
+      config,
+    );
+
+    await worker.runOnce();
+
+    const [schedules] = fire.mock.calls[0];
+    expect(schedules.map((s) => [s.name, s.singleton])).toEqual([
+      ['unit.sweep.every-minute', true],
+      ['unit.sweep.daily', false],
+    ]);
+    expect(log).toHaveBeenCalledWith({
+      event: 'jobs.schedule_skipped',
+      schedule: 'unit.sweep.every-minute',
+    });
+    expect(log).toHaveBeenCalledWith({
+      event: 'jobs.schedules_fired',
+      count: 1,
+    });
+    log.mockRestore();
   });
 });

@@ -28,8 +28,8 @@ import { parseCsv } from './csv-parser';
 import { toTable } from './tabular-file';
 
 const TODAY = '2026-10-21';
-/** Sin indicativo por defecto: estos casos no tienen teléfono (R14, ningún país). */
-const NO_CALLING_CODE = null;
+/** Sin región por defecto: estos casos no tienen teléfono (R14, ningún país). */
+const NO_REGION = null;
 /** Una clínica sin nombres locales (como empiezan todas, R16). */
 const NO_NAMES: ClinicDocumentTypeNames = {};
 
@@ -135,35 +135,77 @@ describe('normalización de campos', () => {
     expect(parseSex('?')).toBeNull();
   });
 
-  it('teléfono en E.164 con el indicativo por defecto de la sede; un fijo corto tal cual', () => {
-    expect(normalizePhone('310 123 4567', '57')).toEqual({
+  it('teléfono en E.164 con la región por defecto de la sede; un fijo corto tal cual', () => {
+    expect(normalizePhone('310 123 4567', 'CO')).toEqual({
       value: '+573101234567',
     });
-    expect(normalizePhone('+34 612 345 678', '57')).toEqual({
+    expect(normalizePhone('+34 612 345 678', 'CO')).toEqual({
       value: '+34612345678',
     });
-    expect(normalizePhone('612345678', '34')).toEqual({
+    expect(normalizePhone('612345678', 'ES')).toEqual({
       value: '+34612345678',
     });
-    expect(normalizePhone('2345678', '57')).toEqual({ value: '2345678' });
+    expect(normalizePhone('2345678', 'CO')).toEqual({ value: '2345678' });
     expect(
-      errorOf(normalizePhone('310 123 4567 / 601 234 5678', '57')),
+      errorOf(normalizePhone('310 123 4567 / 601 234 5678', 'CO')),
     ).toMatch(/más de un teléfono/);
-    expect(normalizePhone('llamar', '57')).toHaveProperty('error');
-    expect(normalizePhone('123', '57')).toHaveProperty('error');
+    expect(normalizePhone('llamar', 'CO')).toHaveProperty('error');
+    expect(normalizePhone('123', 'CO')).toHaveProperty('error');
   });
 
-  it('a phone without + takes the default calling code, and without one it is never rewritten', () => {
-    expect(normalizePhone('0412-1234567', '58')).toEqual({
+  it('a phone without + takes the default region, and without one it is never rewritten', () => {
+    expect(normalizePhone('0412-1234567', 'VE')).toEqual({
       value: '+584121234567',
     });
-    // Sin indicativo por defecto no se quita el 0 ni se inventa un indicativo.
+    // Sin región por defecto no se quita el 0 ni se inventa un indicativo.
     expect(normalizePhone('06 1234 5678', null)).toEqual({
       value: '06 1234 5678',
     });
     expect(normalizePhone('+39 06 1234 5678', null)).toEqual({
       value: '+390612345678',
     });
+  });
+
+  it('the import stores E.164 only for a valid number', () => {
+    // Válido como +, pero la librería no lo da por válido: tal cual.
+    expect(normalizePhone('+57 412 1234567', 'CO')).toEqual({
+      value: '+57 412 1234567',
+    });
+    // La región conserva el 0 que forma parte del número.
+    expect(normalizePhone('06 1234 5678', 'IT')).toEqual({
+      value: '+390612345678',
+    });
+    expect(normalizePhone('234 5678', 'IT')).toEqual({ value: '234 5678' });
+  });
+
+  it('an ambiguous number is never VALID, never a wa.me and never stored as E.164', () => {
+    expect(normalizePhone('0058 412 1234567', 'CO')).toEqual({
+      value: '0058 412 1234567',
+    });
+    expect(normalizePhone('49 151 23456789', 'DE')).toEqual({
+      value: '49 151 23456789',
+    });
+  });
+
+  it('a number with an extension is stored as typed', () => {
+    expect(normalizePhone('0212-5551234 ext 3', 'VE')).toEqual({
+      value: '0212-5551234 ext 3',
+    });
+    expect(normalizePhone('+58 212 5551234 ext. 12', null)).toEqual({
+      value: '+58 212 5551234 ext. 12',
+    }); // 12 dígitos del número más 4 de la extensión: válido, tal cual.
+    expect(normalizePhone('+58 212 5551234 ext 1234', null)).toEqual({
+      value: '+58 212 5551234 ext 1234',
+    });
+    // La extensión se reconoce como en el adaptador.
+    expect(normalizePhone('0212-5551234 x3', 'VE')).toEqual({
+      value: '0212-5551234 x3',
+    });
+    expect(normalizePhone('0212-5551234 extensión 3', 'VE')).toEqual({
+      value: '0212-5551234 extensión 3',
+    });
+    // Una letra fuera de la extensión sigue siendo un error.
+    expect(normalizePhone('0212-5551234 casa', 'VE')).toHaveProperty('error');
   });
 });
 
@@ -181,7 +223,7 @@ function typeError(raw: string, clinicNames: ClinicDocumentTypeNames): string {
     { rowNumber: 2, cells: [raw, 'RX-1', 'A', 'B'] },
     mapping,
     {
-      defaultCallingCode: NO_CALLING_CODE,
+      defaultRegion: NO_REGION,
       today: TODAY,
       clinicNames,
     },
@@ -368,7 +410,7 @@ describe('tipos de documento de la importación (DX-327)', () => {
         { rowNumber: 2, cells: ['V-12.345.678', 'A', 'B'] },
         mapping,
         {
-          defaultCallingCode: NO_CALLING_CODE,
+          defaultRegion: NO_REGION,
           today: TODAY,
           clinicNames: NO_NAMES,
         },
@@ -498,7 +540,7 @@ describe('validateRow', () => {
     },
     defaultDocType: 'NATIONAL_ID',
   });
-  const ctx = { defaultCallingCode: '57', today: TODAY, clinicNames: NO_NAMES };
+  const ctx = { defaultRegion: 'CO', today: TODAY, clinicNames: NO_NAMES };
 
   it('fila válida normalizada; tipo vacío usa el de por defecto', () => {
     const r = validateRow(
@@ -865,7 +907,7 @@ describe('CSV de la plantilla y del informe', () => {
     });
     const rows = table.rows.map((row) =>
       validateRow(row, mapping, {
-        defaultCallingCode: '57',
+        defaultRegion: 'CO',
         today: TODAY,
         clinicNames: NO_NAMES,
       }),
@@ -874,8 +916,20 @@ describe('CSV de la plantilla y del informe', () => {
     expect(rows[0].data).toMatchObject({
       docType: 'NATIONAL_ID',
       birthDate: '1988-04-15',
-      phone: '+573100000001',
     });
+    expect(rows[0].data).not.toHaveProperty('phone');
+    expect(rows[0].data).not.toHaveProperty('emergencyContactPhone');
+  });
+
+  it("la plantilla no trae teléfonos de ejemplo ni celdas con la «'» antifórmulas (DX-368)", () => {
+    const template = templateCsv();
+    const table = toTable(parseCsv(Buffer.from(template, 'utf8')).records);
+    for (const column of ['telefono', 'telefono_emergencia']) {
+      const index = table.headers.indexOf(column);
+      expect(index).toBeGreaterThanOrEqual(0);
+      for (const row of table.rows) expect(row.cells[index] ?? '').toBe('');
+    }
+    expect(template).not.toContain('"\'');
   });
 });
 
@@ -888,7 +942,7 @@ describe('fila con más celdas que la cabecera', () => {
     const r = validateRow(
       { rowNumber: 5, cells: ['1020', 'Ana', 'Pérez'], extraCells: true },
       mapping,
-      { defaultCallingCode: '57', today: TODAY, clinicNames: NO_NAMES },
+      { defaultRegion: 'CO', today: TODAY, clinicNames: NO_NAMES },
     );
     expect(r.data).toBeNull();
     expect(r.issues).toEqual([

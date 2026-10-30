@@ -11,7 +11,9 @@ export class PriceQuoteQueryDto {
   })
   catalogItemId!: string;
 
-  @ApiProperty({ example: 'COP', description: 'Moneda del plan (ISO 4217)' })
+  @ApiProperty({
+    description: 'Moneda del plan (código ISO 4217 de 3 letras).',
+  })
   @Transform(({ value }: { value: unknown }) =>
     typeof value === 'string' ? value.trim().toUpperCase() : value,
   )
@@ -53,6 +55,6 @@ export class PriceQuoteDto {
   })
   allowDiscount!: boolean;
 
-  @ApiProperty({ example: 'COP' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
 }

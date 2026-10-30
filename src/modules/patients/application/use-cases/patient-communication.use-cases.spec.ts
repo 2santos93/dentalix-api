@@ -30,6 +30,8 @@ describe('Bloque «Comunicaciones» de la ficha (DX-128)', () => {
 
   beforeEach(() => {
     repo = new FakePatientCommunicationRepository();
+    // La región de la sede de estos casos; los que leen sin región la quitan.
+    repo.region = 'CO';
     repo.staff.set(RECEPTION, 'Rosa Recepción');
     audit = { record: jest.fn().mockResolvedValue(undefined) };
     const clock = () => NOW;
@@ -50,6 +52,8 @@ describe('Bloque «Comunicaciones» de la ficha (DX-128)', () => {
         phone: '310 123 4567',
         phoneE164: '+573101234567',
         phoneStatus: 'VALID',
+        phoneAmbiguous: false,
+        phoneInternational: '+57 310 1234567',
         phoneCountry: 'CO',
         email: 'ana@example.com',
         whatsappOptIn: null,
@@ -104,39 +108,125 @@ describe('Bloque «Comunicaciones» de la ficha (DX-128)', () => {
       });
     });
 
-    it('sin sede, valida con el país del paciente', async () => {
-      repo.country = null;
+    it("the communication block no longer falls back to the patient's country", async () => {
+      repo.region = null;
       repo.add(ANA, { phone: '612 34 56 78', countryCode: 'ES' });
       await expect(get.execute(ANA)).resolves.toMatchObject({
-        phoneE164: '+34612345678',
-        phoneCountry: 'ES',
+        phoneE164: null,
+        phoneStatus: 'INVALID',
+        phoneInternational: null,
+        phoneCountry: null,
       });
     });
 
-    it('the communication view names the country only when it has a calling code', async () => {
-      repo.country = 'VE';
+    it("saving no longer falls back to the patient's country", async () => {
+      repo.region = null;
+      repo.add(ANA, { countryCode: 'ES' });
+      await expect(
+        update.execute(
+          ANA,
+          { phone: '612 34 56 78', contactChannel: 'WHATSAPP' },
+          ctx,
+        ),
+      ).rejects.toThrow(BadRequestException);
+      expect(repo.updates).toEqual([]);
+      await expect(
+        update.execute(ANA, { phone: '612 34 56 78' }, ctx),
+      ).resolves.toMatchObject({
+        phone: '612 34 56 78',
+        phoneE164: null,
+        phoneStatus: 'INVALID',
+      });
+      expect(repo.updates.at(-1)).toEqual({ phone: '612 34 56 78' });
+    });
+
+    it('the communication view gives the international format and the region used', async () => {
+      repo.region = 'VE';
       repo.add(ANA, { phone: '0412-1234567' });
       await expect(get.execute(ANA)).resolves.toMatchObject({
         phoneE164: '+584121234567',
         phoneStatus: 'VALID',
+        phoneAmbiguous: false,
+        phoneInternational: '+58 412 1234567',
         phoneCountry: 'VE',
       });
-      repo.country = 'JP';
+      // Un fijo es válido (se pinta) pero no es un móvil.
+      repo.add(ANA, { phone: '0212-5551234' });
       await expect(get.execute(ANA)).resolves.toMatchObject({
         phoneE164: null,
         phoneStatus: 'INVALID',
+        phoneInternational: '+58 212 5551234',
+        phoneCountry: 'VE',
+      });
+      repo.region = null;
+      repo.add(ANA, { phone: '0412-1234567' });
+      await expect(get.execute(ANA)).resolves.toMatchObject({
+        phoneE164: null,
+        phoneStatus: 'INVALID',
+        phoneInternational: null,
         phoneCountry: null,
       });
       repo.add(ANA, { phone: '+58 412 1234567' });
       await expect(get.execute(ANA)).resolves.toMatchObject({
         phoneE164: '+584121234567',
         phoneStatus: 'VALID',
+        phoneInternational: '+58 412 1234567',
         phoneCountry: null,
       });
     });
 
-    it('saving at a location without a calling code keeps a mobile without + as typed and refuses WhatsApp', async () => {
-      repo.country = 'JP';
+    it('an ambiguous number is never VALID, never a wa.me and never stored as E.164', async () => {
+      repo.add(ANA, { phone: '0058 412 1234567' });
+      await expect(get.execute(ANA)).resolves.toMatchObject({
+        phoneE164: null,
+        phoneStatus: 'INVALID',
+        phoneAmbiguous: true,
+        phoneInternational: null,
+        phoneCountry: 'CO',
+      });
+      repo.add(ANA, { phone: null });
+      await expect(
+        update.execute(ANA, { phone: '0058 412 1234567' }, ctx),
+      ).resolves.toMatchObject({
+        phone: '0058 412 1234567',
+        phoneE164: null,
+        phoneAmbiguous: true,
+      });
+      expect(repo.updates.at(-1)).toEqual({ phone: '0058 412 1234567' });
+    });
+
+    it('the WhatsApp 400 for an ambiguous number asks to write it with +', async () => {
+      repo.add(ANA);
+      const err = await update
+        .execute(
+          ANA,
+          { phone: '0058 412 1234567', contactChannel: 'WHATSAPP' },
+          ctx,
+        )
+        .catch((e: unknown) => e);
+      expect((err as BadRequestException).getResponse()).toMatchObject({
+        code: 'WHATSAPP_REQUIRES_VALID_MOBILE',
+        message:
+          'Ese número se puede leer de dos formas. Escríbelo con + y su prefijo.',
+      });
+      expect(repo.updates).toEqual([]);
+    });
+
+    it('a number with an extension is stored as typed', async () => {
+      repo.region = 'VE';
+      repo.add(ANA);
+      await expect(
+        update.execute(ANA, { phone: '0412-1234567 ext 3' }, ctx),
+      ).resolves.toMatchObject({
+        phone: '0412-1234567 ext 3',
+        phoneStatus: 'VALID',
+        phoneInternational: '+58 412 1234567 ext. 3',
+      });
+      expect(repo.updates.at(-1)).toEqual({ phone: '0412-1234567 ext 3' });
+    });
+
+    it('saving at a location without a default phone region keeps a mobile without + as typed and refuses WhatsApp', async () => {
+      repo.region = null;
       repo.add(ANA);
       await expect(
         update.execute(

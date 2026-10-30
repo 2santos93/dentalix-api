@@ -1,0 +1,13 @@
+-- DX-380: destino de la FK compuesta por clínica de `payment_base_retries`
+-- ("tenantId", "paymentId") → payments("tenantId", "id"). El único que ya
+-- existe ("tenantId", "id", "treatmentPlanId") no sirve: un abono a un saldo
+-- migrado (DX-262) no tiene plan, y una FK con una columna NULL no se
+-- comprueba (MATCH SIMPLE). Un índice único no parcial basta como destino de
+-- una FK.
+-- CONCURRENTLY (DB-025): no bloquea las escrituras de los abonos; por eso es
+-- la ÚNICA sentencia del fichero (Prisma la ejecuta fuera de transacción).
+-- No puede fallar por datos ("id" ya es la clave primaria). Si se corta deja
+-- un índice INVALID: DROP INDEX CONCURRENTLY "payments_tenant_id_key",
+-- `prisma migrate resolve --rolled-back 20261104120200_dx380_payments_tenant_id_key`
+-- y reintentar.
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS "payments_tenant_id_key" ON "payments" ("tenantId", "id");

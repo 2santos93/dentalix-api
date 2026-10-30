@@ -761,17 +761,31 @@ describe('gastos, pagos de gasto y salidas de caja: tablas, RLS e inmutabilidad 
   });
 
   describe('OUTFLOW_VOID en los ajustes de caja', () => {
-    /** Una salida de la caja ABIERTA, para anularla en otra caja. */
+    /**
+     * Una salida de una caja que después se CIERRA, ya anulada (como la app,
+     * antes del ajuste): el ajuste la devuelve con su importe y contra su caja.
+     */
     async function outflow() {
+      const session = await open(a.locationId, thirdUserId);
       const { payment } = await pay({
         method: 'CASH',
-        cashSessionId: openSession,
+        cashSessionId: session.id,
       });
-      return payment;
+      await close(session.id);
+      return asA((tx) =>
+        tx.expensePayment.update({
+          where: { id: payment.id },
+          data: {
+            voidedAt: new Date(),
+            voidedById: userId,
+            voidReason: 'Salida registrada por error',
+          },
+        }),
+      );
     }
 
     function adjustment(
-      payment: { id: string },
+      payment: { id: string; cashSessionId: string | null },
       extra: Partial<Prisma.CashSessionAdjustmentUncheckedCreateInput> = {},
     ): Prisma.CashSessionAdjustmentUncheckedCreateInput {
       return {
@@ -779,7 +793,7 @@ describe('gastos, pagos de gasto y salidas de caja: tablas, RLS e inmutabilidad 
         locationId: a.locationId,
         kind: 'OUTFLOW_VOID',
         expensePaymentId: payment.id,
-        originalSessionId: closedSession,
+        originalSessionId: payment.cashSessionId,
         currency: 'COP',
         method: 'CASH',
         amount: 10_000,
@@ -808,15 +822,21 @@ describe('gastos, pagos de gasto y salidas de caja: tablas, RLS e inmutabilidad 
       const p = await outflow();
       const bad: Partial<Prisma.CashSessionAdjustmentUncheckedCreateInput>[] = [
         { expensePaymentId: null },
-        { amount: -10_000 },
-        { amount: 0 },
-        { originalSessionId: null },
         { reason: null },
         { method: 'CARD' },
       ];
       for (const extra of bad) {
         await expect(create(adjustment(p, extra))).rejects.toThrow(
           /cash_session_adjustments_kind_check/,
+        );
+      }
+      // Importe ≤ 0 o sin caja original: ya no es el de su salida, y la
+      // guarda de DX-393 lo para antes que el CHECK.
+      const notItsOutflow: Partial<Prisma.CashSessionAdjustmentUncheckedCreateInput>[] =
+        [{ amount: -10_000 }, { amount: 0 }, { originalSessionId: null }];
+      for (const extra of notItsOutflow) {
+        await expect(create(adjustment(p, extra))).rejects.toThrow(
+          /no coincide con su importe o con su caja/,
         );
       }
       const plan = await raw.patient.create({

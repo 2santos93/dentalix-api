@@ -16,6 +16,7 @@ import {
 } from '../../domain/exchange-rate-source';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { makeManualRates } from '../__fixtures__/in-memory-exchange-settings';
+import { ExchangeSourceChangeHooks } from '../exchange-source-change-hooks';
 import {
   CorrectManualExchangeRateUseCase,
   ListManualExchangeRatesUseCase,
@@ -31,12 +32,14 @@ describe('Tasas de cambio manuales (DX-374)', () => {
   const NOW = new Date(Date.UTC(2026, 9, 30, 3, 0));
   const tenantContext = new TenantContextService();
   let manual: ReturnType<typeof makeManualRates>;
+  let hooks: ExchangeSourceChangeHooks;
   const register = () =>
-    new RegisterManualExchangeRateUseCase(manual, () => NOW);
+    new RegisterManualExchangeRateUseCase(manual, () => NOW, hooks);
   const inClinic = <T>(tenant: string, fn: () => Promise<T>) =>
     tenantContext.run(tenant, fn);
 
   beforeEach(() => {
+    hooks = new ExchangeSourceChangeHooks();
     manual = makeManualRates({}, tenantContext, {
       zones: { [A]: 'America/Caracas', [B]: 'UTC' },
       members: { [A]: [ADMIN], [B]: [ADMIN] },
@@ -57,6 +60,30 @@ describe('Tasas de cambio manuales (DX-374)', () => {
     });
     expect(manual.rows(A)).toHaveLength(1);
     expect(manual.rows(B)).toHaveLength(0);
+  });
+
+  // DX-380: con la tasa del día ya registrada, los abonos sin tasa de la
+  // clínica no esperan a su backoff: el barrido siguiente los congela.
+  it('tras registrar la tasa avisa (en la clínica del contexto) de que cambiaron sus tasas', async () => {
+    const seen: (string | undefined)[] = [];
+    hooks.registerAfterRatesChange(() => {
+      seen.push(tenantContext.getTenantId());
+      return Promise.resolve();
+    });
+    await inClinic(A, () =>
+      register().execute(
+        { date: '2026-10-29', currency: 'VES', rate: 36 },
+        ADMIN,
+      ),
+    );
+    const duplicate = inClinic(A, () =>
+      register().execute(
+        { date: '2026-10-29', currency: 'VES', rate: 37 },
+        ADMIN,
+      ),
+    );
+    await expect(duplicate).rejects.toBeInstanceOf(ConflictException);
+    expect(seen).toEqual([A]);
   });
 
   it('una tasa ya registrada para ese día y moneda no se sobrescribe: 409 en español', async () => {
@@ -204,7 +231,13 @@ describe('Corregir una tasa manual (DX-375)', () => {
   const B = '99999999-9999-4999-8999-999999999999';
   const tenantContext = new TenantContextService();
   let manual: ReturnType<typeof makeManualRates>;
-  const correct = () => new CorrectManualExchangeRateUseCase(manual);
+  const hooks = new ExchangeSourceChangeHooks();
+  const woken: (string | undefined)[] = [];
+  hooks.registerAfterRatesChange(() => {
+    woken.push(tenantContext.getTenantId());
+    return Promise.resolve();
+  });
+  const correct = () => new CorrectManualExchangeRateUseCase(manual, hooks);
   const inClinic = <T>(tenant: string, fn: () => Promise<T>) =>
     tenantContext.run(tenant, fn);
   const idOf = (tenant: string, currency: string) =>
@@ -226,6 +259,8 @@ describe('Corregir una tasa manual (DX-375)', () => {
     );
     expect(saved).toMatchObject({ currency: 'VES', rate: 36.5, inUse: false });
     expect(manual.rows(B)[0].rate).toBe(40);
+    // DX-380: la corrección adelanta los reintentos de la clínica.
+    expect(woken).toEqual([A]);
   });
 
   it('una tasa que ya usa un abono responde 409 y no cambia', async () => {

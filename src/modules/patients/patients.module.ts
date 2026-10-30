@@ -20,6 +20,7 @@ import {
   UpdatePatientCommunicationUseCase,
 } from './application/use-cases/patient-communication.use-cases';
 import { PATIENT_COMMUNICATION_REPOSITORY } from './domain/ports/patient-communication-repository.port';
+import { DefaultPhoneRegionReader } from './domain/ports/default-phone-region-reader.port';
 import { PrismaPatientCommunicationRepository } from './infrastructure/repositories/prisma-patient-communication.repository';
 import { CreatePatientUseCase } from './application/use-cases/create-patient.use-case';
 import { ListPatientsUseCase } from './application/use-cases/list-patients.use-case';
@@ -113,6 +114,12 @@ import { PatientAgreementsModule } from '../patient-agreements/patient-agreement
     {
       provide: PATIENT_COMMUNICATION_REPOSITORY,
       useClass: PrismaPatientCommunicationRepository,
+    },
+    // DX-387: la misma lectura de la región, para el `phoneInternational` de
+    // pacientes y responsables (una vez por petición).
+    {
+      provide: DefaultPhoneRegionReader,
+      useExisting: PATIENT_COMMUNICATION_REPOSITORY,
     },
     TokenService,
     // TenantContextInterceptor only depends on the @Global TenantContextService;

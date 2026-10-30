@@ -33,6 +33,14 @@ export interface ReceivablesRepository {
   locationTimeZones(): Promise<(locationId: string | null) => string>;
 
   /**
+   * Región por defecto del teléfono de cada sede de la clínica (incluidas las
+   * retiradas; DX-329, P1, m17), con la que se lee un número sin «+» de una
+   * deuda; sin sede, la de la principal (la viva más antigua). null: la sede
+   * no tiene.
+   */
+  locationPhoneRegions(): Promise<(locationId: string | null) => string | null>;
+
+  /**
    * Lo financiero de cada DEUDOR vivo de la clínica (de la sede pedida):
    * planes vivos con su facturable, abonos vivos sumados por plan y moneda, y
    * planes de pago con sus cuotas. Lo lee del resumen por paciente que

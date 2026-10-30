@@ -11,6 +11,24 @@ export class ExchangeRateUnavailableError extends Error {
   }
 }
 
+/**
+ * SEC-054: se agotó el presupuesto de llamadas al proveedor (el de la clínica
+ * o el global de la plataforma). Para quien convierte es «sin tasa», como
+ * cualquier `ExchangeRateUnavailableError`; las rutas de tasas lo devuelven
+ * como 429 con `Retry-After`.
+ */
+export class ExchangeRateBudgetExceededError extends ExchangeRateUnavailableError {
+  constructor(
+    readonly scope: 'CLINIC' | 'GLOBAL',
+    readonly retryAfterSeconds: number,
+  ) {
+    super(
+      `Presupuesto ${scope === 'CLINIC' ? 'de la clínica' : 'global'} de llamadas al proveedor de tasas agotado`,
+    );
+    this.name = 'ExchangeRateBudgetExceededError';
+  }
+}
+
 export const EXCHANGE_RATE_PROVIDER = Symbol('EXCHANGE_RATE_PROVIDER');
 
 /**
