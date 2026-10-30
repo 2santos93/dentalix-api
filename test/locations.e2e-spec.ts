@@ -780,7 +780,29 @@ describe('Locations / multi-sede (e2e)', () => {
         field: 'defaultPhoneRegion',
         message: 'El prefijo telefónico indicado no está en la lista.',
       });
+      // Lo que no es texto: el mismo 400 con `field`, no el de la
+      // ValidationPipe (M9 de la revisión final).
+      for (const value of [58, true, { code: 'VE' }, ['VE']]) {
+        const notText = await patch(id, { defaultPhoneRegion: value }).expect(
+          400,
+        );
+        expect(notText.body).toMatchObject({
+          field: 'defaultPhoneRegion',
+          message: 'El prefijo telefónico indicado no está en la lista.',
+        });
+      }
       expect((await row(id)).defaultPhoneRegion).toBe('VE');
+    });
+
+    it('POST /locations with a defaultPhoneRegion that is not text is 400 with field', async () => {
+      const res = await post({
+        ...withoutRegion('Región numérica', 'VE'),
+        defaultPhoneRegion: 58,
+      }).expect(400);
+      expect(res.body).toMatchObject({
+        field: 'defaultPhoneRegion',
+        message: 'El prefijo telefónico indicado no está en la lista.',
+      });
     });
 
     it('PATCH /locations/:id with defaultPhoneRegion null clears it and does not mark the regional settings as reviewed', async () => {

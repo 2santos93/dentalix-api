@@ -1,4 +1,5 @@
-import { execFileSync } from 'node:child_process';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
@@ -530,17 +531,24 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     });
     expect(locations.length).toBeGreaterThan(0);
     const main = locations.find((l) => l.name === 'Sede principal');
+    expect(main).toBeDefined();
+    expect(main?.defaultPhoneRegion).not.toBeNull();
     expect(main?.defaultPhoneRegion).toBe(main?.country);
     expect(main?.defaultPhoneRegionSetAt).toBeInstanceOf(Date);
-    // La sugerencia sale de `createMainLocation`: la demo no se toca.
-    // (`--quiet` sale con 1, y `execFileSync` lanza, si hay diferencia).
-    expect(() =>
-      execFileSync(
-        'git',
-        ['diff', '--quiet', '--', 'prisma/seed-demo.ts', 'prisma/demo'],
-        { cwd: process.cwd() },
-      ),
-    ).not.toThrow();
+    // La sugerencia sale de `createMainLocation`: la demo no nombra la región.
+    const demoSources = [
+      join(process.cwd(), 'prisma', 'seed-demo.ts'),
+      ...readdirSync(join(process.cwd(), 'prisma', 'demo'))
+        .filter((file) => file.endsWith('.ts'))
+        .map((file) => join(process.cwd(), 'prisma', 'demo', file)),
+    ];
+    expect(demoSources.length).toBeGreaterThan(1);
+    for (const file of demoSources) {
+      expect({
+        file,
+        names: readFileSync(file, 'utf8').includes('defaultPhoneRegion'),
+      }).toEqual({ file, names: false });
+    }
   });
 
   it('deja tipos de cita con color y citas demo con tipo (DX-121)', async () => {

@@ -1092,8 +1092,9 @@ describe('tipos de documento genéricos (DX-327)', () => {
  * AC3 (DX-312, R3, pre-flight I7): ningún fichero de producción de `src/`, en
  * ningún módulo ni capa, decide una regla por el país de la sede. Los patrones
  * (PATTERNS §8) se aplican al fichero sin comentarios y se arman por partes.
- * Excepciones: la proyección legada, la tabla provisional de indicativos y los
- * legados R12 de recetas, cada uno con su cabecera G5.3.
+ * Excepciones: la proyección legada y los legados R12 de recetas, cada uno
+ * con su cabecera G5.3. (La tabla provisional de indicativos y su excepción
+ * las borró DX-329.)
  *
  * Límite conocido: las guardas miran el texto, no siguen valores. Lo que
  * queda para la revisión:
@@ -1456,14 +1457,29 @@ describe('país de la sede libre (DX-312)', () => {
  * - solo el adaptador importa la librería, en cualquier forma de
  *   `IMPORT_STATEMENT`;
  * - ninguna función de teléfono recibe un país como región. Su argumento de
- *   región (el segundo; el primero en `examplePhone`) sale de `callArgument`,
- *   equilibrado y en varias líneas, y no nombra «country».
- *   `suggestedPhoneRegion(país)` no está en la lista: es la sugerencia de R2;
+ *   región (el segundo; el primero en `examplePhone`, `phoneRegionOrNull` y
+ *   `callingCodeOf`) sale de `callArgument`, equilibrado y en varias líneas,
+ *   y no nombra «country». `suggestedPhoneRegion(país)` no está en la lista:
+ *   es la sugerencia de R2, y su cuerpo puede pasar el país a
+ *   `phoneRegionOrNull`;
  * - no queda tabla de indicativos ni patrón de móvil por indicativo: ni los
  *   nombres retirados, ni un objeto `{ VE: '58' }` (claves de dos letras en
  *   mayúsculas, valores de 1-3 dígitos), ni pares `['57', /…/]`;
  * - el módulo de teléfono y el dominio no nombran un país: `countryNameHit`
- *   o un nombre de la lista ISO entera, sin tildes.
+ *   o un nombre de la lista ISO entera, en español o en inglés
+ *   (`Intl.DisplayNames('en')`), sin tildes. Solo el literal `'Reunión'` se
+ *   salta (el tipo de bloque de agenda).
+ *
+ * Límites conocidos (las guardas miran el texto, no siguen valores):
+ * - un alias o una variable con otro nombre (`const r = patient.countryCode;
+ *   parsePhone(p, r)`, `const { country: c } = location`);
+ * - una importación de la librería con un especificador dinámico o en
+ *   plantilla (`require(\`…\`)`, `import(nombre)`);
+ * - los nombres de país en otras lenguas que no sean español ni inglés, y
+ *   fuera del módulo de teléfono y del dominio;
+ * - los comentarios (se quitan antes de mirar) y lo que no es `src/`: el
+ *   informe `prisma/scripts/phones-report.ts` importa la librería y guarda
+ *   una tabla de 24 indicativos solo para comparar.
  */
 const PHONE_ADAPTER = join(SRC, 'shared', 'phone', 'phone-number.ts');
 const PHONE_LIBRARY_SPECIFIER = new RegExp(
@@ -1483,7 +1499,15 @@ const PHONE_FUNCTIONS = [
   'whatsappOfferPhone',
   'normalizePhone',
   'examplePhone',
+  'phoneRegionOrNull',
+  'callingCodeOf',
 ];
+/** Las funciones cuyo primer argumento es la región. */
+const REGION_FIRST = new Set([
+  'examplePhone',
+  'phoneRegionOrNull',
+  'callingCodeOf',
+]);
 const PHONE_CALL = new RegExp(`\\b(${PHONE_FUNCTIONS.join('|')})\\s*\\(`, 'g');
 /** Los argumentos de primer nivel de lo que devuelve `callArgument`. */
 function topLevelArguments(inside: string): string[] {
@@ -1500,14 +1524,46 @@ function topLevelArguments(inside: string): string[] {
   }
   return [...parts, inside.slice(start)];
 }
-const countryRegionHits = (code: string): number[] =>
-  matchLines(code, PHONE_CALL, (match) => {
+/**
+ * Lo que ocupa el cuerpo de cada `function suggestedPhoneRegion(…) {…}`. Las
+ * declaraciones (`function callingCodeOf(region: CountryCode)`) no son
+ * llamadas y se saltan.
+ */
+function suggestionBodies(code: string): [number, number][] {
+  return [...code.matchAll(/\bfunction\s+suggestedPhoneRegion\s*\(/g)].map(
+    (match) => {
+      const params = match.index + match[0].length - 1;
+      const open = code.indexOf(
+        '{',
+        params + callArgument(code, params).length + 2,
+      );
+      return [open, open + callArgument(code, open).length + 1];
+    },
+  );
+}
+const countryRegionHits = (code: string): number[] => {
+  const bodies = suggestionBodies(code);
+  return matchLines(code, PHONE_CALL, (match) => {
+    if (
+      /\bfunction\s+$/.test(
+        code.slice(Math.max(0, match.index - 20), match.index),
+      ) ||
+      (match[1] === 'phoneRegionOrNull' &&
+        bodies.some(([from, to]) => match.index > from && match.index < to))
+    ) {
+      return false;
+    }
     const args = topLevelArguments(
       callArgument(code, match.index + match[0].length - 1),
     );
-    const region = args[match[1] === 'examplePhone' ? 0 : 1] ?? '';
+    // Sin el tipo de un `as` (`region as CountryCode`): el tipo no es un país.
+    const region = (args[REGION_FIRST.has(match[1]) ? 0 : 1] ?? '').replace(
+      /\bas\s+[A-Z][\w.]*/g,
+      '',
+    );
     return new RegExp(COUNTRY, 'i').test(region);
   });
+};
 
 const RETIRED_PHONE_NAMES = new RegExp(
   '\\b(?:' +
@@ -1539,22 +1595,34 @@ const callingCodeTableHits = (code: string): number[] => [
   ]),
 ];
 
-/**
- * Nombres de la lista ISO que también son palabras corrientes del código:
- * «Reunión» es el tipo de bloque de agenda (`schedule-block-rules.ts`).
- */
-const ISO_NAME_HOMONYMS = new Set(['Reunion']);
+/** Los nombres de la lista ISO en español (CLDR) y en inglés, sin tildes. */
+const ENGLISH_REGION_NAMES = new Intl.DisplayNames('en', { type: 'region' });
+const ISO_COUNTRY_NAMES = [
+  ...new Set(
+    ISO3166_COUNTRIES.flatMap((country) => [
+      fold(country.name),
+      fold(ENGLISH_REGION_NAMES.of(country.code) ?? country.name),
+    ]),
+  ),
+];
 const ISO_COUNTRY_NAME = new RegExp(
   '(?<![\\p{L}\\p{N}_$])(?:' +
-    ISO3166_COUNTRIES.map((country) => fold(country.name))
-      .filter((name) => !ISO_NAME_HOMONYMS.has(name))
-      .map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-      .join('|') +
+    ISO_COUNTRY_NAMES.map((name) =>
+      name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+    ).join('|') +
     ')(?![\\p{L}\\p{N}_$])',
   'iu',
 );
-const phoneCountryNameHit = (line: string): boolean =>
-  countryNameHit(line) || ISO_COUNTRY_NAME.test(fold(line));
+/**
+ * El literal `'Reunión'`, y solo él: es el tipo de bloque de agenda
+ * (`schedule-block-rules.ts`), no el territorio. «Reunión» en cualquier otro
+ * sitio sí cuenta.
+ */
+const MEETING_LITERAL = /(['"`])Reunión\1/gu;
+const phoneCountryNameHit = (line: string): boolean => {
+  const text = line.normalize('NFC').replace(MEETING_LITERAL, "''");
+  return countryNameHit(text) || ISO_COUNTRY_NAME.test(fold(text));
+};
 const phoneNameHits = (code: string): number[] =>
   code
     .split('\n')
@@ -1615,6 +1683,12 @@ describe('teléfono con libphonenumber (DX-329)', () => {
       [`normalizeMobile(p, patient.${COUNTRY}Code)`, 'region'],
       [`whatsAppDigits(p, x?.${COUNTRY})`, 'region'],
       [`examplePhone(${LOC})`, 'region'],
+      [`phoneRegionOrNull(patient.${COUNTRY}Code)`, 'region'],
+      [`callingCodeOf(${LOC} as CountryCode)`, 'region'],
+      [
+        `parsePhone(\`+\${callingCodeOf(patient.${COUNTRY}Code)}\${d}\`, null)`,
+        'region',
+      ],
       [`{ VE: '58', CO: '57' }`, 'table'],
       [`[['57', /^3\\d{9}$/]]`, 'table'],
       [`const n = ${'toE164' + 'Digits'}(p);`, 'table'],
@@ -1624,6 +1698,12 @@ describe('teléfono con libphonenumber (DX-329)', () => {
       [`export { isValidPhoneNumber } from '${PHONE_LIBRARY}'`, 'import'],
       [`const x = '${'Venez' + 'uela'}';`, 'name'],
       [`const x = '${'Per' + 'ú'}';`, 'name'],
+      [`const x = '${'Bra' + 'zil'}';`, 'name'],
+      [`const x = '${'Germ' + 'any'}';`, 'name'],
+      [`const x = '${'Sp' + 'ain'}';`, 'name'],
+      [`const x = 'Reunión de la isla';`, 'name'],
+      [`const x = '${'Réun' + 'ion'}';`, 'name'],
+      [`const ${'Reun' + 'ion'} = 1;`, 'name'],
     ]) {
       expect({ snippet, caught: caughtBy(snippet).includes(guard) }).toEqual({
         snippet,
@@ -1633,6 +1713,9 @@ describe('teléfono con libphonenumber (DX-329)', () => {
     for (const snippet of [
       `parsePhone(p, location.defaultPhoneRegion)`,
       `suggestedPhoneRegion(${COUNTRY})`,
+      `export function suggestedPhoneRegion(\n  ${COUNTRY}: string | null,\n): PhoneRegion | null {\n  return phoneRegionOrNull(${COUNTRY});\n}`,
+      `phoneRegionOrNull(location.defaultPhoneRegion)`,
+      `callingCodeOf(region as CountryCode)`,
       `normalizeMobile(p, region)`,
       `normalizePhone(patch.phone)`,
       `{ SI: 'Sí', NO: 'No' }`,

@@ -20,7 +20,6 @@ import {
 } from '../../domain/health-registration';
 import {
   COUNTRY_MISSING,
-  DEFAULT_PHONE_REGION_INVALID,
   HOUR_CYCLES,
   REGIONAL_MESSAGES,
   REGIONAL_NULL_MESSAGE,
@@ -132,11 +131,11 @@ export class CreateLocationDto {
     nullable: true,
     description: `${DEFAULT_PHONE_REGION_DOC} Sin el campo se sugiere el país si admite prefijo.`,
   })
-  // `@IsOptional` deja pasar `null` y la ausencia; solo un valor presente se
-  // valida como texto, y su lista la da el caso de uso.
+  // Sin `@IsString`: el caso de uso valida cualquier valor
+  // (`validateDefaultPhoneRegion`) y su 400 lleva `field`. `@IsOptional` lo
+  // mantiene en la lista blanca de la ValidationPipe.
   @IsOptional()
-  @IsString({ message: DEFAULT_PHONE_REGION_INVALID })
-  defaultPhoneRegion?: string | null;
+  defaultPhoneRegion?: unknown;
 }
 
 export class UpdateLocationDto {
@@ -211,9 +210,9 @@ export class UpdateLocationDto {
     nullable: true,
     description: `${DEFAULT_PHONE_REGION_DOC} Vacío o null lo quita; sin el campo no cambia, tampoco al cambiar el país.`,
   })
+  // Como en el alta: sin `@IsString`, para que el 400 lleve `field`.
   @IsOptional()
-  @IsString({ message: DEFAULT_PHONE_REGION_INVALID })
-  defaultPhoneRegion?: string | null;
+  defaultPhoneRegion?: unknown;
 
   // `type: String`: sin él, el tipo `string | null` sale como objeto en
   // OpenAPI. `null` no es válido (400), así que el contrato es `string`.

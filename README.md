@@ -2926,13 +2926,26 @@ país.
     país para algo del teléfono, y es la identidad.
   - En la **edición**, cambiar el país no toca la región. Con el campo
     presente (también `null`), se guarda lo que llega: dos letras de
-    `phoneRegions()` o 400 con `field: 'defaultPhoneRegion'`.
+    `phoneRegions()` o 400 con `field: 'defaultPhoneRegion'`. Lo que no es
+    texto (un número, un objeto) da el mismo 400 con `field`, en el alta y en
+    la edición.
   - `locations."defaultPhoneRegionSetAt"` (marca, sin default ni contrato):
     la API la escribe cada vez que escribe la región. Ningún relleno toca una
     sede con marca, así que nunca pisa una región que un ADMIN vació a
     propósito.
   - Una región guardada que la versión instalada no admite se lee como
-    `null`.
+    `null`: todas las lecturas pasan por `phoneRegionOrNull`. El relleno M2
+    copia el país aunque la librería no lo numere (`AQ`, `BV`, `GS`, `HM`,
+    `PN`, `TF`, `UM`), mientras que una sede nueva de esos países se crea con
+    `null`. Las dos se comportan igual, como «sin prefijo». La migración
+    aplicada no se cambia; la consulta para contarlas va en la nota de
+    versión:
+    ```sql
+    SELECT "defaultPhoneRegion", count(*) FROM "locations"
+     WHERE "deletedAt" IS NULL
+       AND "defaultPhoneRegion" IN ('AQ','BV','GS','HM','PN','TF','UM')
+     GROUP BY 1;
+    ```
 - **Lecturas**: un número es `VALID` (E.164, tipo, formato internacional,
   extensión), `AMBIGUOUS` (con `00` o con el indicativo escrito sin `+`, dos
   lecturas válidas y distintas: no se adivina, la ficha pide escribirlo con
@@ -2941,6 +2954,23 @@ país.
   cualquier número que se pueda leer. Los `wa.me` de la confirmación de cita,
   la cartera y los planes usan la región de la sede del recurso, no el país
   de la dirección del paciente.
+- **Clínicas con sedes de regiones distintas**: un número guardado sin `+`
+  se lee con la región de cada sede candidata: la del recurso en los `wa.me`
+  y todas las sedes vivas en la baja por mensaje. «Nunca el número de otra
+  persona» vale **por región**: unos mismos dígitos pueden ser un móvil
+  válido en dos regiones (p. ej. un número nacional de una sede que en la
+  otra se lee como móvil de allí). En esas clínicas conviene guardar los
+  números con `+`; el informe las marca con `multiRegion: true`. Riesgo
+  residual aceptado en la baja: el remitente tiene que compartir los 8
+  últimos dígitos y escribir al número de la clínica, y lo peor que pasa es
+  una baja de recordatorios, que es reversible, queda auditada y tiene el
+  tope `REMINDER_OPT_OUT_MESSAGE_MAX_MATCHES`. DX-224 (E.164 congelado con
+  la región en la que se escribió) lo cierra.
+- **Baja por mensaje con una sede sin región** (vaciada por un ADMIN o
+  creada por una réplica anterior al relleno): para casar la baja, y solo
+  para eso, esa sede aporta `suggestedPhoneRegion(país)`. Darse de baja nunca
+  es más difícil que antes de DX-329. Guardar un número y los `wa.me` siguen
+  sin prefijo.
 - **Plantilla de importación**: las celdas de teléfono van vacías (DX-368).
   Un móvil de ejemplo válido de la región de la sede se importaría si nadie
   borra la fila de ejemplo y podría ser el número de una persona real; el

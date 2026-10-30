@@ -125,7 +125,7 @@ export class PatientCommunicationDto {
     type: String,
     nullable: true,
     description:
-      'E.164 (+ seguido del indicativo y el número, sin espacios), solo si es un móvil válido.',
+      'E.164 (+ seguido del prefijo y el número, sin espacios), solo si es un móvil válido.',
   })
   phoneE164!: string | null;
 
@@ -139,7 +139,7 @@ export class PatientCommunicationDto {
 
   @ApiProperty({
     description:
-      'true si los dígitos se pueden leer como dos números válidos distintos: hay que escribirlo con + y el prefijo del país.',
+      'true si los dígitos se pueden leer como dos números válidos distintos: hay que escribirlo con + y su prefijo.',
   })
   phoneAmbiguous!: boolean;
 

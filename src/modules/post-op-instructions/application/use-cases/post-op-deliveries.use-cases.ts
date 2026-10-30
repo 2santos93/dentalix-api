@@ -59,7 +59,7 @@ export const POSTOP_NO_EMAIL_MESSAGE =
   'El paciente no tiene email ni un responsable que reciba avisos';
 export const POSTOP_OPTED_OUT_MESSAGE = 'El paciente dio de baja los envíos';
 export const POSTOP_NO_WHATSAPP_MESSAGE =
-  'El paciente no tiene un teléfono con indicativo de país';
+  'El paciente no tiene un teléfono que sirva para WhatsApp: escríbelo con + y su prefijo';
 export const POSTOP_INVALID_HOST_MESSAGE = 'Host no válido';
 export const POSTOP_DELIVERY_NOT_FOUND_MESSAGE =
   'Entrega de indicaciones no encontrada';

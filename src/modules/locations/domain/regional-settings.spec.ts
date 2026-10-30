@@ -243,6 +243,15 @@ describe('validateDefaultPhoneRegion (DX-329)', () => {
     }
   });
 
+  it('a value that is not text is the same 400 with field', () => {
+    for (const raw of [58, true, {}, ['VE'], { code: 'VE' }]) {
+      expect(validateDefaultPhoneRegion(raw)).toEqual({
+        field: 'defaultPhoneRegion',
+        message: 'El prefijo telefónico indicado no está en la lista.',
+      });
+    }
+  });
+
   it('a stored region the library no longer supports is accepted unchanged on edit', () => {
     // «AQ» no está en la librería: solo vale si es el valor ya guardado.
     expect(validateDefaultPhoneRegion('aq', 'AQ')).toBe('AQ');

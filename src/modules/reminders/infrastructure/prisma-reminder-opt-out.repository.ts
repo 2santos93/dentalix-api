@@ -5,6 +5,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma, type ReminderOptOutSource } from '@prisma/client';
 import {
   phoneRegionOrNull,
+  suggestedPhoneRegion,
   type PhoneRegion,
 } from '../../../shared/phone/phone-number';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
@@ -186,13 +187,19 @@ export class PrismaReminderOptOutRepository implements ReminderOptOutRepository 
   async liveLocationPhoneRegions(): Promise<PhoneRegion[]> {
     const rows = await this.prisma.runWithTenant((tx) =>
       tx.location.findMany({
-        where: { deletedAt: null, defaultPhoneRegion: { not: null } },
-        distinct: ['defaultPhoneRegion'],
-        select: { defaultPhoneRegion: true },
+        where: { deletedAt: null },
+        distinct: ['defaultPhoneRegion', 'country'],
+        select: { defaultPhoneRegion: true, country: true },
       }),
     );
-    const regions = rows.map((row) =>
-      phoneRegionOrNull(row.defaultPhoneRegion),
+    // Sin región (vaciada por un ADMIN o creada por una réplica anterior),
+    // la sugerencia de su país: darse de baja nunca es más difícil que antes
+    // de DX-329 (M2 de la revisión final). Solo para casar una baja; guardar
+    // y los `wa.me` siguen sin prefijo.
+    const regions = rows.map(
+      (row) =>
+        phoneRegionOrNull(row.defaultPhoneRegion) ??
+        suggestedPhoneRegion(row.country),
     );
     return [...new Set(regions)].filter(
       (region): region is PhoneRegion => region !== null,

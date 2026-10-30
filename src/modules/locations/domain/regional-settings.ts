@@ -336,11 +336,20 @@ export async function validateRegionalSettings(
  * mayúsculas, de la lista de la librería. `stored` es la región ya guardada de
  * la sede (PATCH): la misma, aunque la versión instalada ya no la admita, se
  * devuelve tal cual, como `validateTimeZone`. Nunca se deduce del país.
+ * Recibe el cuerpo sin tipar: lo que no es texto (un número, un objeto) es el
+ * mismo 400 con `field`, no el de la ValidationPipe.
  */
 export function validateDefaultPhoneRegion(
-  raw: string | null | undefined,
+  raw: unknown,
   stored?: string | null,
 ): string | null | DefaultPhoneRegionError {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw !== 'string') {
+    return {
+      field: 'defaultPhoneRegion',
+      message: DEFAULT_PHONE_REGION_INVALID,
+    };
+  }
   if (blank(raw)) return null;
   const code = raw.trim().toUpperCase();
   if (!/^[A-Z]{2}$/.test(code)) {

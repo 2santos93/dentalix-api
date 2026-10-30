@@ -60,8 +60,11 @@ export interface ReminderOptOutRepository {
   /** Pacientes vivos cuyo teléfono acaba en esos 8 dígitos (prefiltro indexado). */
   findByPhoneTail(tail: string): Promise<MobileCandidate[]>;
   /**
-   * Regiones por defecto del teléfono de las sedes vivas de la clínica, sin
-   * repetir y solo las que la librería admite (DX-329, R8).
+   * Regiones con las que se casa una baja por mensaje (DX-329, R8): la región
+   * por defecto del teléfono de cada sede viva de la clínica o, si no tiene
+   * (o la librería no la admite), la sugerencia de su país
+   * (`suggestedPhoneRegion`). Sin repetir y solo las que la librería admite.
+   * Nunca sirve para guardar un número ni para un `wa.me`.
    */
   liveLocationPhoneRegions(): Promise<PhoneRegion[]>;
   clinicBranding(): Promise<OptOutClinicBranding | null>;

@@ -207,7 +207,7 @@ describe('Bloque «Comunicaciones» de la ficha (DX-128)', () => {
       expect((err as BadRequestException).getResponse()).toMatchObject({
         code: 'WHATSAPP_REQUIRES_VALID_MOBILE',
         message:
-          'Ese número se puede leer de dos formas. Escríbelo con + y el prefijo del país.',
+          'Ese número se puede leer de dos formas. Escríbelo con + y su prefijo.',
       });
       expect(repo.updates).toEqual([]);
     });

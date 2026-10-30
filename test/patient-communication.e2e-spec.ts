@@ -38,7 +38,7 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 const FORBIDDEN =
   'Solo recepción o un administrador pueden cambiar el canal de comunicación del paciente.';
 const NEEDS_MOBILE =
-  'Para elegir WhatsApp el paciente necesita un móvil válido. Revisa el número (si es de otro país, escríbelo con + y su indicativo).';
+  'Para elegir WhatsApp el paciente necesita un móvil válido. Revisa el número o escríbelo con + y su prefijo.';
 
 interface CommunicationBody {
   patientId: string;
@@ -717,7 +717,7 @@ describe('Comunicaciones del paciente (e2e, DX-128)', () => {
       expect(refused.body).toMatchObject({
         code: 'WHATSAPP_REQUIRES_VALID_MOBILE',
         message:
-          'Ese número se puede leer de dos formas. Escríbelo con + y el prefijo del país.',
+          'Ese número se puede leer de dos formas. Escríbelo con + y su prefijo.',
       });
       const kept = await keepPhone(id, '0058 412 1234567');
       expect(kept.body).toMatchObject({

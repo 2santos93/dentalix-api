@@ -36,10 +36,10 @@ import {
 } from '../../domain/ports/patient-communication-repository.port';
 
 export const WHATSAPP_NEEDS_VALID_MOBILE =
-  'Para elegir WhatsApp el paciente necesita un móvil válido. Revisa el número (si es de otro país, escríbelo con + y su indicativo).';
+  'Para elegir WhatsApp el paciente necesita un móvil válido. Revisa el número o escríbelo con + y su prefijo.';
 /** El mismo 400 para un número que se lee de dos formas (DX-329, R10). */
 export const WHATSAPP_AMBIGUOUS_NUMBER =
-  'Ese número se puede leer de dos formas. Escríbelo con + y el prefijo del país.';
+  'Ese número se puede leer de dos formas. Escríbelo con + y su prefijo.';
 const OPT_IN_SOURCE_REQUIRED =
   'Indica dónde aceptó el paciente que le escriban por WhatsApp: en persona, por enlace o por mensaje.';
 

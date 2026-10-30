@@ -43,7 +43,7 @@ export const ANAMNESIS_NOT_PENDING_MESSAGE =
 export const ANAMNESIS_OPTED_OUT_MESSAGE =
   'El paciente dio de baja los envíos: comparte el enlace por otro medio.';
 export const ANAMNESIS_NO_WHATSAPP_MESSAGE =
-  'El paciente no tiene un teléfono con indicativo de país.';
+  'El paciente no tiene un teléfono que sirva para WhatsApp: escríbelo con + y su prefijo.';
 
 /** Historial de la ficha: los últimos envíos del paciente. */
 export const PATIENT_REQUESTS_LIMIT = 10;

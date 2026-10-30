@@ -99,7 +99,8 @@ export class CreateLocationUseCase {
     locale?: string;
     hourCycle?: string;
     phone?: string;
-    defaultPhoneRegion?: string | null;
+    // Sin tipar: lo valida `validateDefaultPhoneRegion` (400 con `field`).
+    defaultPhoneRegion?: unknown;
   }): Promise<Location> {
     const country = await validateCountry(input.country, this.countries);
     if (typeof country !== 'string') {
@@ -242,7 +243,8 @@ export class UpdateLocationUseCase {
       timeZone?: string | null;
       locale?: string | null;
       hourCycle?: string | null;
-      defaultPhoneRegion?: string | null;
+      // Sin tipar: lo valida `validateDefaultPhoneRegion` (400 con `field`).
+      defaultPhoneRegion?: unknown;
       confirmRegionalSettings?: true;
       confirmRegionalChange?: true;
     },

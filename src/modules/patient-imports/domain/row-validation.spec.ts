@@ -900,9 +900,7 @@ describe('CSV de la plantilla y del informe', () => {
   });
 
   it('la plantilla trae las columnas admitidas y se puede volver a leer con su mapeo sugerido', () => {
-    const table = toTable(
-      parseCsv(Buffer.from(templateCsv(), 'utf8')).records,
-    );
+    const table = toTable(parseCsv(Buffer.from(templateCsv(), 'utf8')).records);
     expect(table.headers).toEqual(IMPORT_FIELDS.map((f) => f.header));
     const mapping = resolveMapping(table.headers, {
       columns: suggestMapping(table.headers),
