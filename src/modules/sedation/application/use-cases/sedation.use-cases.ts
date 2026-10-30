@@ -193,8 +193,15 @@ export class SedationUseCases {
           intervalMinutes: sheet.vitalsIntervalMinutes,
           checklistDone: sheet.checklist !== null,
           discharged: sheet.discharge !== null,
-          agentTimes: sheet.agents.map((a) => a.administeredAt),
-          vitals: sheet.vitals,
+          agentTimes: sheet.agents.map((a) => ({
+            at: a.administeredAt,
+            recordedAt: a.createdAt,
+          })),
+          vitals: sheet.vitals.map((v) => ({
+            phase: v.phase,
+            takenAt: v.takenAt,
+            recordedAt: v.createdAt,
+          })),
         },
         this.now(),
       ),

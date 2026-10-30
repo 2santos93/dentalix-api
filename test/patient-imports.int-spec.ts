@@ -501,6 +501,8 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       'reminder_opt_out_links.patientId',
       // DX-214: el aviso auditable es actividad durable y debe bloquear undo.
       'reminder_opt_out_match_warnings.patientId',
+      // DX-407: la hoja de sedación cuelga de una evolución, como la anestesia.
+      'sedation_records.patientId',
       'tooth_records.patientId',
       'treatment_plans.patientId',
       'waitlist_offers.patientId',

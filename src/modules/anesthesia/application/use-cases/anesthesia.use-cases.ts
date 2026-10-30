@@ -117,13 +117,15 @@ function linesOf(records: readonly AnesthesiaAdministration[]): DoseLine[] {
  * Peso para el cálculo: el anotado ahora; si no, el último PESADO en el
  * sillón en esta misma evolución (más reciente que la anamnesis, que puede
  * ser antigua: un niño de 15 kg con 20 kg anotados hace meses calcularía un
- * máximo mayor del real); si no, el de la anamnesis vigente; si no, el último
- * que se usó en esta evolución.
+ * máximo mayor del real); si no, el pesado hoy en la valoración de la hoja de
+ * sedación de esta evolución (DX-407, también del sillón); si no, el de la
+ * anamnesis vigente; si no, el último que se usó en esta evolución.
  */
 function resolveWeight(
   entered: number | undefined,
   patient: AnesthesiaPatientContext,
   prior: readonly AnesthesiaAdministration[],
+  entry: AnesthesiaEntryRef,
 ): { weightKg: number | null; source: WeightSource | null } {
   if (entered !== undefined) {
     const kg = weightForSnapshot(entered);
@@ -137,6 +139,8 @@ function resolveWeight(
     (r) => r.weightKg !== null && r.weightSource === 'ENTERED',
   );
   if (measured) return { weightKg: measured.weightKg, source: 'ENTERED' };
+  const sedation = weightForSnapshot(entry.sedationWeightKg ?? null);
+  if (sedation !== null) return { weightKg: sedation, source: 'ENTERED' };
   const fromAnamnesis = weightForSnapshot(patient.anamnesis?.weightKg ?? null);
   if (fromAnamnesis !== null) {
     return { weightKg: fromAnamnesis, source: 'ANAMNESIS' };
@@ -222,7 +226,7 @@ export class AnesthesiaUseCases {
     if (input && !isValidCarpules(input.carpules)) {
       throw new BadRequestException(CARPULES_INVALID_MESSAGE);
     }
-    const weight = resolveWeight(input?.weightKg, patient, prior);
+    const weight = resolveWeight(input?.weightKg, patient, prior, entry);
     const lines = linesOf(prior);
     if (input && product) {
       lines.push({ anesthetic: snapshotOf(product), carpules: input.carpules });

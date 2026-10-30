@@ -4623,7 +4623,8 @@ sustituyen la ficha técnica del fabricante.
 - **Cálculo en el servidor**: mg = carpules × ml × % × 10; máximo =
   min(mg/kg × peso, tope); con varios anestésicos, suma de fracciones del
   máximo de cada uno. Peso: el anotado en el sillón; si no, el último pesado
-  en el sillón en esa evolución; si no, `vitalSigns.peso` de la anamnesis
+  en el sillón en esa evolución; si no, el de la valoración de sedación de esa
+  evolución (DX-407); si no, `vitalSigns.peso` de la anamnesis
   vigente; si no, el ya usado en esa evolución. El % que se enseña no
   contradice el nivel (99,6 % se muestra 99 %, no 100 %). ≥ 80 % avisa
   (`DOSE_NEAR_MAX`); ≥ 100 % (`DOSE_OVER_MAX`, o `DOSE_OVER_ABSOLUTE` sin peso)
@@ -4677,9 +4678,14 @@ y plantilla en `domain/sedation-template.ts`. Contenido de la hoja de la AAPD
 - **Reglas**: lo que falta responde 400 con `problems: [{code, message}]`.
   Orden: valoración → checklist (antes solo la toma basal) → fármacos y
   tomas → egreso, que cierra la hoja (luego todo es 409). En sedación moderada,
-  operador = monitor exige justificación. `watch` (en cada respuesta): con la
-  sedación en curso, `nextDueAt` = última toma (o inicio) + intervalo y
-  `overdue` si pasa sin toma; `missedIntervals` cuenta los huecos pasados.
+  operador = monitor exige justificación. Un IMC fuera de 5–150 es un error de
+  peso o talla (`BMI_IMPLAUSIBLE`). Un Aldrete anotado < 9 no da el alta
+  aunque se marquen los criterios (`ALDRETE_BELOW_MINIMUM`), ni un nivel de
+  sedación moderado o profundo al alta (`DISCHARGE_SEDATION_LEVEL`). `watch`
+  (en cada respuesta): con la sedación en curso, `nextDueAt` = última toma (o
+  inicio) + intervalo y `overdue` si pasa sin toma; `missedIntervals` cuenta
+  los huecos pasados. Una toma o fármaco con hora posterior a su registro
+  cuenta desde que se registró (la tolerancia de reloj no aplaza el aviso).
   Cada escritura bloquea la hoja (`FOR UPDATE`).
 - **Roles**: valoración, checklist, fármacos y egreso, DENTIST y ADMIN; las
   tomas, también ASSISTANT (en esta porción en todas las clínicas; DX-409 lo
@@ -4691,8 +4697,8 @@ y plantilla en `domain/sedation-template.ts`. Contenido de la hoja de la AAPD
   `PATCH/PUT/DELETE …/sedation` → 405 que remite a la adenda. Auditoría:
   `CREATE SEDATION_RECORD` con `metadata.reason` `SEDATION_ASSESSMENT|
 CHECKLIST|AGENT|VITALS|DISCHARGE`, sin constantes, dosis ni textos.
-- **Migraciones** `20261104130300_dx407_enums`,
-  `…130400_dx407_audit_events_idx` y `…130500_dx407_sedation`: aditivas
+- **Migraciones** `20261105130000_dx407_enums`,
+  `…130100_dx407_audit_events_idx` y `…130200_dx407_sedation`: aditivas
   (tipos, cinco tablas y el único `patient_consents (tenantId, patientId, id)`
   que sirve de destino a la FK del consentimiento).
 - **Demo**: `seed:demo` añade a Sofía (32 kg) una evolución «Restauraciones

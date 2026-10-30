@@ -152,6 +152,23 @@ describe('reglas de la hoja de sedación (DX-407)', () => {
       },
     );
 
+    it('peso y talla que dan un IMC imposible se rechazan (no llegan a la BD)', () => {
+      expect(
+        assessmentProblems(assessment({ weightKg: 200, heightCm: 50 }), T).map(
+          (p) => p.code,
+        ),
+      ).toEqual(['BMI_IMPLAUSIBLE']);
+      expect(
+        assessmentProblems(assessment({ weightKg: 3, heightCm: 250 }), T).map(
+          (p) => p.code,
+        ),
+      ).toEqual(['BMI_IMPLAUSIBLE']);
+      // Un lactante de 3,5 kg y 50 cm (IMC 14) es válido.
+      expect(
+        assessmentProblems(assessment({ weightKg: 3.5, heightCm: 50 }), T),
+      ).toEqual([]);
+    });
+
     it('una justificación de menos de 10 caracteres no cuenta', () => {
       expect(
         assessmentProblems(
@@ -309,6 +326,31 @@ describe('reglas de la hoja de sedación (DX-407)', () => {
       expect(watch.missedIntervals).toBe(1);
     });
 
+    it('una toma con hora posterior a cuando se registró cuenta desde que se registró (no aplaza el aviso)', () => {
+      // A los 8 min se anota una toma «de las 12» (reloj adelantado o error
+      // al teclear): la próxima vence a los 13, no a los 17.
+      const watch = vitalsWatch(
+        {
+          ...base,
+          vitals: [{ phase: 'INTRA', takenAt: at(12), recordedAt: at(8) }],
+        },
+        at(14),
+      );
+      expect(watch.nextDueAt).toEqual(at(13));
+      expect(watch).toMatchObject({ overdue: true, overdueMinutes: 1 });
+      // Un fármaco con hora futura tampoco retrasa el inicio.
+      const agent = vitalsWatch(
+        {
+          ...base,
+          agentTimes: [{ at: at(4), recordedAt: at(0) }],
+          vitals: [],
+        },
+        at(6),
+      );
+      expect(agent.startedAt).toEqual(at(0));
+      expect(agent.overdue).toBe(true);
+    });
+
     it('con el egreso firmado deja de vigilar', () => {
       expect(vitalsWatch({ ...base, discharged: true }, at(60))).toMatchObject({
         active: false,
@@ -394,7 +436,37 @@ describe('reglas de la hoja de sedación (DX-407)', () => {
           T,
           ctx,
         ).map((p) => p.code),
-      ).toEqual(['DISCHARGE_CRITERIA']);
+      ).toEqual(['ALDRETE_BELOW_MINIMUM']);
+    });
+
+    it('un Aldrete anotado por debajo del mínimo impide el alta aunque se marquen los criterios', () => {
+      expect(
+        dischargeProblems(discharge({ aldreteScore: 7 }), T, ctx).map(
+          (p) => p.code,
+        ),
+      ).toEqual(['ALDRETE_BELOW_MINIMUM']);
+      expect(
+        dischargeProblems(discharge({ aldreteScore: 10 }), T, ctx),
+      ).toEqual([]);
+    });
+
+    it('no se da el alta con el paciente en sedación moderada o profunda', () => {
+      for (const sedationLevel of ['MODERATE', 'DEEP'] as const) {
+        expect(
+          dischargeProblems(
+            discharge({ vitals: { ...goodVitals, sedationLevel } }),
+            T,
+            ctx,
+          ).map((p) => p.code),
+        ).toEqual(['DISCHARGE_SEDATION_LEVEL']);
+      }
+      expect(
+        dischargeProblems(
+          discharge({ vitals: { ...goodVitals, sedationLevel: 'MINIMAL' } }),
+          T,
+          ctx,
+        ),
+      ).toEqual([]);
     });
 
     it('exige constantes al alta, a quién se entrega e indicaciones entregadas', () => {

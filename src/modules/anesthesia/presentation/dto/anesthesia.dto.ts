@@ -137,7 +137,7 @@ export class AnesthesiaDoseCheckDto {
     minimum: 0.1,
     maximum: 399,
     description:
-      'Peso anotado en el sillón (kg). Sin él: el último pesado en el sillón en esta evolución; si no, el de la anamnesis vigente; si no, el ya usado en esta evolución.',
+      'Peso anotado en el sillón (kg). Sin él: el último pesado en el sillón en esta evolución; si no, el de la valoración de sedación de esta evolución; si no, el de la anamnesis vigente; si no, el ya usado en esta evolución.',
   })
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 1 })

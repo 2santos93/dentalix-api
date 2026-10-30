@@ -380,6 +380,19 @@ describe('SedationUseCases (DX-407)', () => {
       expect(after.watch.nextDueAt).toEqual(at(5));
       expect(after.watch.missedIntervals).toBe(1);
     });
+
+    it('una toma anotada con hora futura (tolerancia de reloj) no aplaza el aviso', async () => {
+      const { uc } = await inProgress();
+      // Se registra ahora una toma «de dentro de 4 min»: la próxima vence a
+      // los 5 min de AHORA (cuando se registró), no a los 9.
+      const view = await uc.addVitals(
+        PATIENT,
+        ENTRY,
+        { phase: 'INTRA', takenAt: at(4), ...vitals },
+        ASSISTANT,
+      );
+      expect(view.watch.nextDueAt).toEqual(at(5));
+    });
   });
 
   describe('egreso', () => {
@@ -397,11 +410,22 @@ describe('SedationUseCases (DX-407)', () => {
           uc.discharge(
             PATIENT,
             ENTRY,
-            dischargeBody({ criteria: [], aldreteScore: 8 }),
+            dischargeBody({ criteria: [] }),
             DENTIST,
           ),
         ),
       ).toEqual(['DISCHARGE_CRITERIA']);
+      // Un Aldrete anotado bajo el mínimo tampoco cierra, ni con los criterios.
+      expect(
+        await problemsOf(
+          uc.discharge(
+            PATIENT,
+            ENTRY,
+            dischargeBody({ aldreteScore: 8 }),
+            DENTIST,
+          ),
+        ),
+      ).toEqual(['ALDRETE_BELOW_MINIMUM']);
       expect(repo.sheets[0].discharge).toBeNull();
     });
 

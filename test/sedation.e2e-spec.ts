@@ -354,6 +354,26 @@ describe('Hoja de sedación en la evolución (DX-407, e2e)', () => {
       );
     });
 
+    it('la anestesia de la evolución usa el peso de hoy de la valoración, no el de la anamnesis', async () => {
+      const products = (
+        await call(a, 'post', '/anesthetics/samples', a.adminToken).expect(201)
+      ).body as { id: string; activeIngredient: string }[];
+      const lido = products.find((p) => /lidoca/i.test(p.activeIngredient));
+      if (!lido) throw new Error('sin lidocaína de ejemplo');
+      const res = await call(
+        a,
+        'post',
+        `/patients/${child}/clinical-entries/${childEntry}/anesthesia/check`,
+        dentist.token,
+      )
+        .send({ anestheticId: lido.id, carpules: 1 })
+        .expect(200);
+      expect(res.body).toMatchObject({
+        summary: { weightKg: 15 },
+        weightSource: 'ENTERED',
+      });
+    });
+
     it('una segunda hoja en la misma evolución: 409', async () => {
       await call(a, 'post', sheet(child, childEntry), dentist.token)
         .send(ASSESSMENT)
@@ -557,7 +577,6 @@ describe('Hoja de sedación en la evolución (DX-407, e2e)', () => {
         .send(
           body({
             criteria: CRITERIA.slice(1).map((code) => ({ code, met: true })),
-            aldreteScore: 8,
             instructionsDelivered: false,
           }),
         )
@@ -565,6 +584,25 @@ describe('Hoja de sedación en la evolución (DX-407, e2e)', () => {
       expect(problems(res.body)).toEqual([
         'DISCHARGE_CRITERIA',
         'INSTRUCTIONS',
+      ]);
+      // Revisión: un Aldrete anotado < 9 no cierra aunque se marquen los 6
+      // criterios, ni con el paciente aún en sedación moderada.
+      const low = await call(
+        a,
+        'post',
+        `${sheet(child, childEntry)}/discharge`,
+        dentist.token,
+      )
+        .send(
+          body({
+            aldreteScore: 7,
+            vitals: { ...VITALS, sedationLevel: 'MODERATE' },
+          }),
+        )
+        .expect(400);
+      expect(problems(low.body)).toEqual([
+        'ALDRETE_BELOW_MINIMUM',
+        'DISCHARGE_SEDATION_LEVEL',
       ]);
       expect(
         await raw.sedationDischarge.count({ where: { tenantId: a.tenantId } }),
@@ -656,6 +694,34 @@ describe('Hoja de sedación en la evolución (DX-407, e2e)', () => {
       );
       expect(JSON.stringify(events.map((e) => e.metadata))).not.toMatch(
         /Laura|Midazolam|spo2|aldrete/i,
+      );
+    });
+
+    it('dos egresos a la vez: uno cierra (201), el otro 409, y queda un solo egreso', async () => {
+      const entry = await createEntry(a, other, dentist.token);
+      await call(a, 'post', sheet(other, entry), dentist.token)
+        .send({ ...ASSESSMENT, grade: 'MINIMAL' })
+        .expect(201);
+      await call(a, 'post', `${sheet(other, entry)}/checklist`, dentist.token)
+        .send({
+          items: CHECKLIST_CODES.map((code) => ({ code, checked: true })),
+        })
+        .expect(201);
+      const results = await Promise.all(
+        [0, 1].map(() =>
+          call(a, 'post', `${sheet(other, entry)}/discharge`, dentist.token)
+            .send(body())
+            .then((r) => r.status),
+        ),
+      );
+      expect(results.sort()).toEqual([201, 409]);
+      const record = await raw.sedationRecord.findFirstOrThrow({
+        where: { tenantId: a.tenantId, clinicalEntryId: entry },
+        include: { discharge: true, vitals: true },
+      });
+      expect(record.discharge).not.toBeNull();
+      expect(record.vitals.filter((v) => v.phase === 'DISCHARGE')).toHaveLength(
+        1,
       );
     });
 
@@ -790,7 +856,8 @@ describe('Hoja de sedación en la evolución (DX-407, e2e)', () => {
       }
       expect(
         await raw.sedationVitals.count({ where: { tenantId: a.tenantId } }),
-      ).toBe(4);
+        // 4 de la hoja de Martina + la toma al alta del egreso concurrente.
+      ).toBe(5);
     });
   });
 });

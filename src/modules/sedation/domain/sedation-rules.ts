@@ -32,6 +32,17 @@ export const NALOXONE_MAX_MG = 2;
 export const FLUMAZENIL_MG_PER_KG = 0.01;
 export const FLUMAZENIL_MAX_MG = 0.2;
 
+/**
+ * IMC plausible (kg/m²): fuera de este rango, el peso o la talla están mal
+ * anotados (p. ej. 200 kg con 50 cm daría 800). Un lactante ronda 13–18 y la
+ * obesidad extrema documentada no llega a 150.
+ */
+export const BMI_MIN = 5;
+export const BMI_MAX = 150;
+
+/** Niveles de sedación con los que no se da el alta. */
+const NOT_DISCHARGEABLE_LEVELS: readonly SedationLevel[] = ['MODERATE', 'DEEP'];
+
 /** Mínimo de una justificación o interconsulta para que cuente. */
 export const SEDATION_REASON_MIN = 10;
 
@@ -168,6 +179,15 @@ export function assessmentProblems(
       assessmentFieldMissing(field, input)
     ) {
       problems.push({ code: field, message: ASSESSMENT_MESSAGES[field] });
+    }
+    if (field === 'HEIGHT') {
+      const bmi = bodyMassIndex(input.weightKg, input.heightCm);
+      if (bmi !== null && (bmi < BMI_MIN || bmi > BMI_MAX)) {
+        problems.push({
+          code: 'BMI_IMPLAUSIBLE',
+          message: `Con ${input.weightKg} kg y ${input.heightCm} cm el IMC sería ${bmi}: revisa el peso y la talla.`,
+        });
+      }
     }
     if (
       field === 'ASA' &&
@@ -317,13 +337,35 @@ export function vitalsProblems(
 // Aviso de intervalo sin toma
 // ---------------------------------------------------------------------------
 
+/** Un fármaco con su hora y, si se sabe, cuándo se registró. */
+export interface SedationTimedEvent {
+  at: Date;
+  recordedAt?: Date;
+}
+
 export interface SedationTimeline {
   intervalMinutes: number;
   checklistDone: boolean;
   discharged: boolean;
-  /** Hora de cada fármaco administrado. */
-  agentTimes: readonly Date[];
-  vitals: readonly { phase: SedationVitalsPhase; takenAt: Date }[];
+  /** Hora de cada fármaco administrado (y cuándo se registró). */
+  agentTimes: readonly (Date | SedationTimedEvent)[];
+  vitals: readonly {
+    phase: SedationVitalsPhase;
+    takenAt: Date;
+    /** Cuándo se registró (hora del servidor). */
+    recordedAt?: Date;
+  }[];
+}
+
+/**
+ * Hora con la que cuenta la vigilancia: la anotada, pero nunca posterior a
+ * cuando se registró (la tolerancia de reloj deja anotar hasta 5 min «en el
+ * futuro»; contarla así aplazaría el aviso sin que haya habido toma).
+ */
+function effectiveMs(at: Date, recordedAt: Date | undefined): number {
+  return recordedAt === undefined
+    ? at.getTime()
+    : Math.min(at.getTime(), recordedAt.getTime());
 }
 
 export interface VitalsWatch {
@@ -349,13 +391,17 @@ export interface VitalsWatch {
 export function vitalsWatch(state: SedationTimeline, now: Date): VitalsWatch {
   const intervalMs = state.intervalMinutes * MINUTE_MS;
   const starts = [
-    ...state.agentTimes.map((t) => t.getTime()),
+    ...state.agentTimes.map((t) =>
+      t instanceof Date ? t.getTime() : effectiveMs(t.at, t.recordedAt),
+    ),
     ...state.vitals
       .filter((v) => v.phase === 'INTRA')
-      .map((v) => v.takenAt.getTime()),
+      .map((v) => effectiveMs(v.takenAt, v.recordedAt)),
   ];
   const startedMs = starts.length > 0 ? Math.min(...starts) : null;
-  const allTaken = state.vitals.map((v) => v.takenAt.getTime());
+  const allTaken = state.vitals.map((v) =>
+    effectiveMs(v.takenAt, v.recordedAt),
+  );
   const lastTakenMs = allTaken.length > 0 ? Math.max(...allTaken) : null;
   const lastTakenAt = lastTakenMs === null ? null : new Date(lastTakenMs);
 
@@ -524,13 +570,33 @@ export function dischargeProblems(
   const aldreteOk =
     input.aldreteScore !== undefined &&
     input.aldreteScore >= template.aldreteMinimum;
-  if (!allMet && !aldreteOk) {
+  if (
+    input.aldreteScore !== undefined &&
+    input.aldreteScore < template.aldreteMinimum
+  ) {
+    // Un Aldrete anotado bajo el mínimo dice que el paciente NO está listo:
+    // marcar los criterios no lo compensa.
+    problems.push({
+      code: 'ALDRETE_BELOW_MINIMUM',
+      message: `El Aldrete modificado anotado (${input.aldreteScore}) es menor que ${template.aldreteMinimum}: el paciente aún no cumple el alta.`,
+    });
+  } else if (!allMet && !aldreteOk) {
     problems.push({
       code: 'DISCHARGE_CRITERIA',
       message: `Marca los ${template.dischargeCriteria.length} criterios de alta o anota un Aldrete modificado ≥ ${template.aldreteMinimum}.`,
     });
   }
   problems.push(...vitalsProblems(input.vitals, template));
+  if (
+    input.vitals.sedationLevel !== undefined &&
+    NOT_DISCHARGEABLE_LEVELS.includes(input.vitals.sedationLevel)
+  ) {
+    problems.push({
+      code: 'DISCHARGE_SEDATION_LEVEL',
+      message:
+        'Con el paciente en sedación moderada o profunda no se da el alta: espera a que esté despierto o en sedación mínima.',
+    });
+  }
   if (
     !filled(input.handedOverToName) ||
     !filled(input.handedOverToRelationship)

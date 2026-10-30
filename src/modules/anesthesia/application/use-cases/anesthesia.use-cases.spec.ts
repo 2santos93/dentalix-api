@@ -247,6 +247,35 @@ describe('AnesthesiaUseCases (DX-307)', () => {
     expect(listed.summary.percent).toBe(first.cumulativePercent);
   });
 
+  it('DX-407: sin peso anotado usa el pesado hoy en la valoración de sedación de la evolución, no el de la anamnesis', async () => {
+    // Anamnesis: 20 kg (antigua). La valoración de sedación de ESTA evolución
+    // pesó hoy 15 kg: 3 carpules de lidocaína (108 mg) son el 103 % de 105 mg,
+    // no el 77 % de 140 mg.
+    const { repo, uc, lido } = await setup();
+    repo.entries.set(ENTRY, {
+      ...repo.entries.get(ENTRY)!,
+      sedationWeightKg: 15,
+    });
+    const check = await uc.check(PATIENT, ENTRY, {
+      anestheticId: lido.id,
+      carpules: 3,
+    });
+    expect([check.summary.weightKg, check.weightSource]).toEqual([
+      15,
+      'ENTERED',
+    ]);
+    expect(check.summary.level).toBe('EXCEEDED');
+    // Lo anotado ahora sigue mandando.
+    const entered = await uc.check(PATIENT, ENTRY, {
+      anestheticId: lido.id,
+      carpules: 1,
+      weightKg: 16,
+    });
+    expect(entered.summary.weightKg).toBe(16);
+    const listed = await uc.listByEntry(PATIENT, ENTRY);
+    expect(listed.summary.weightKg).toBe(15);
+  });
+
   it('evolución sin sede (sin zona horaria): la edad se calcula igual y un menor sin peso no se guarda', async () => {
     const { uc, repo, lido } = await setup(patient({ anamnesis: null }));
     repo.entries.set(ENTRY, {

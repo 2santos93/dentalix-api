@@ -91,6 +91,7 @@ export class InMemoryAnesthesiaRepository implements AnesthesiaRepository {
             id: entry.id,
             locationId: entry.locationId,
             timeZone: entry.timeZone,
+            sedationWeightKg: entry.sedationWeightKg ?? null,
           }
         : null,
     );

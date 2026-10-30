@@ -2,7 +2,7 @@
 --
 -- DX-102 (audit_events particionada) exige un índice parcial
 -- "audit_events_resource_<valor>_idx" por cada valor de "AuditResourceType".
--- Va en su PROPIA migración: el valor se añadió en 20261104130300_dx407_enums
+-- Va en su PROPIA migración: el valor se añadió en 20261105130000_dx407_enums
 -- y Postgres no deja usar un valor de enum nuevo en la misma transacción que
 -- lo crea.
 --
@@ -10,7 +10,7 @@
 -- mientras se construye. Se despliega a una hora de poco tráfico, como DX-307.
 --
 -- lock_timeout 5 s: acota la ESPERA del bloqueo. Si falla: `npx prisma migrate
--- resolve --rolled-back 20261104130400_dx407_audit_events_idx` y repetir
+-- resolve --rolled-back 20261105130100_dx407_audit_events_idx` y repetir
 -- `migrate deploy`.
 --
 -- Aditiva; se propaga a cada partición. IF NOT EXISTS: idempotente.
