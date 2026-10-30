@@ -9,6 +9,7 @@ import {
   PrismaPatientImportRepository,
 } from '../src/modules/patient-imports/infrastructure/prisma-patient-import.repository';
 import type { ImportPatientData } from '../src/modules/patient-imports/domain/import-fields';
+import { ANESTHESIA_DOSE_RULES_VERSION } from '../src/modules/anesthesia/domain/anesthesia-dose';
 import {
   REGIONAL_BOGOTA_FIXTURE,
   locationData,
@@ -44,6 +45,10 @@ async function purge(): Promise<void> {
     const where = { tenantId: { in: ids } };
     // DX-214: aviso append-only; limpieza solo con conexión administrativa.
     await raw.reminderOptOutMatchWarning.deleteMany({ where });
+    // DX-307/DX-412: anestesia y evolución, append-only como el aviso.
+    await raw.anesthesiaAdministration.deleteMany({ where });
+    await raw.anestheticProduct.deleteMany({ where });
+    await raw.clinicalEntry.deleteMany({ where });
     await raw.appointment.deleteMany({ where });
     await raw.patientDentitionEvent.deleteMany({ where });
     await raw.patientAgreement.deleteMany({ where });
@@ -468,6 +473,8 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
     // Si este test falla, una tabla nueva apunta a pacientes: el deshacer ya
     // la mira sola; revisa que deba bloquearlo y añádela aquí.
     expect(refs.map((r) => `${r.table}.${r.column}`)).toEqual([
+      // DX-307/DX-412: la anestesia registrada es historia clínica: bloquea.
+      'anesthesia_administrations.patientId',
       'appointment_waitlist.patientId',
       'appointments.patientId',
       'clinical_entries.patientId',
@@ -516,6 +523,102 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
     await expect(
       inTenant(a, () => repo.undo(batch!.id, a.userId)),
     ).rejects.toMatchObject({ patients: 1 });
+  });
+
+  it('DX-412: la anestesia registrada (DX-307) bloquea deshacer el lote como el resto de la historia clínica, sin tocar nada', async () => {
+    const batch = await prepared(a, [person('8885')]);
+    await runAll(a, batch!.id);
+    const created = await raw.patient.findFirstOrThrow({
+      where: { importBatchId: batch!.id },
+    });
+    const product = await raw.anestheticProduct.create({
+      data: {
+        tenantId: a.tenantId,
+        name: 'Lidocaína 2 % con epinefrina',
+        activeIngredient: 'lidocaína',
+        concentrationPct: 2,
+        vasoconstrictor: 'epinefrina 1:100.000',
+        mlPerCarpule: 1.8,
+        maxMgPerKg: 7,
+        maxAbsoluteMg: 500,
+      },
+    });
+    const entry = await raw.clinicalEntry.create({
+      data: {
+        tenantId: a.tenantId,
+        patientId: created.id,
+        locationId: a.locationId,
+        entryDate: new Date(),
+        notes: 'Exodoncia 48',
+        performedById: a.userId,
+      },
+    });
+    const anesthesia = await raw.anesthesiaAdministration.create({
+      data: {
+        tenantId: a.tenantId,
+        patientId: created.id,
+        clinicalEntryId: entry.id,
+        locationId: a.locationId,
+        anestheticId: product.id,
+        anestheticName: product.name,
+        activeIngredient: product.activeIngredient,
+        concentrationPct: product.concentrationPct,
+        vasoconstrictor: product.vasoconstrictor,
+        mlPerCarpule: product.mlPerCarpule,
+        maxMgPerKg: product.maxMgPerKg,
+        maxAbsoluteMg: product.maxAbsoluteMg,
+        carpules: 2,
+        doseMg: 72,
+        technique: 'NERVE_BLOCK',
+        administeredAt: new Date(),
+        weightKg: 70,
+        weightSource: 'ENTERED',
+        cumulativeMg: 72,
+        cumulativePercent: 15,
+        safetyRulesVersion: ANESTHESIA_DOSE_RULES_VERSION,
+        safetyAlerts: [],
+        authorId: a.userId,
+      },
+    });
+
+    // La revisión del deshacer corre como la app (RLS FORCE, sin DELETE en
+    // la tabla) y cuenta al paciente una sola vez aunque tenga evolución y
+    // anestesia.
+    await expect(
+      inTenant(a, () => repo.undo(batch!.id, a.userId)),
+    ).rejects.toMatchObject({ patients: 1 });
+    expect(
+      (await raw.patient.findUniqueOrThrow({ where: { id: created.id } }))
+        .deletedAt,
+    ).toBeNull();
+    expect(
+      (
+        await raw.patientImportBatch.findUniqueOrThrow({
+          where: { id: batch!.id },
+        })
+      ).status,
+    ).toBe('COMPLETED');
+    await expect(
+      raw.anesthesiaAdministration.findUniqueOrThrow({
+        where: { id: anesthesia.id },
+      }),
+    ).resolves.toMatchObject({
+      patientId: created.id,
+      clinicalEntryId: entry.id,
+    });
+    // Otra clínica no ve esa anestesia (RLS) ni puede deshacer el lote.
+    await expect(
+      inTenant(b, () =>
+        prisma.runWithTenant((tx) =>
+          tx.anesthesiaAdministration.count({
+            where: { patientId: created.id },
+          }),
+        ),
+      ),
+    ).resolves.toBe(0);
+    await expect(
+      inTenant(b, () => repo.undo(batch!.id, b.userId)),
+    ).rejects.toThrow();
   });
 
   it('DX-214: un aviso durable bloquea deshacer el lote y conserva paciente, filas y avisos bajo RLS', async () => {

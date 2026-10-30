@@ -171,7 +171,10 @@ describe('db:check-force (DX-134)', () => {
       ['--transpile-only', 'prisma/check-force.ts'],
       {
         cwd: ROOT,
-        env: { PATH: process.env.PATH ?? '' },
+        // Vacías y no ausentes: al importar @prisma/client se carga el `.env`
+        // de la raíz (solo los que no están en el entorno), y en local apunta
+        // a la base de desarrollo; sin él (la CI) daría lo mismo (DX-412).
+        env: { PATH: process.env.PATH ?? '', DATABASE_URL: '', DIRECT_URL: '' },
         encoding: 'utf8',
       },
     );
