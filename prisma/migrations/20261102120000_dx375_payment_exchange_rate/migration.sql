@@ -15,8 +15,9 @@
 --   "exchangeRateDate"     día civil de la tasa (el del abono en su sede).
 -- Las cuatro de la tasa van juntas y solo cuando la moneda del abono es otra
 -- (CHECK payments_exchange_rate_check). La moneda de destino es del catálogo
--- (FK payments_exchange_rate_currency_fkey). Los dos van NOT VALID aquí y se
--- validan en 20261102120400, sin bloquear las escrituras.
+-- (FK payments_exchange_rate_currency_fkey). Los dos van NOT VALID: el CHECK
+-- se valida en 20261102120400, sin bloquear las escrituras; la FK se queda
+-- NOT VALID (comprueba toda fila nueva o cambiada; ver 20261102120400).
 --
 -- Compatible hacia atrás: una réplica anterior no selecciona ni escribe las
 -- columnas nuevas (Prisma solo nombra las de su esquema), y sus abonos nacen
