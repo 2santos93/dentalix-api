@@ -7,5 +7,5 @@
 -- No puede fallar por datos (todas las filas tienen "splitId" NULL). Si se
 -- corta deja un índice INVALID: DROP INDEX CONCURRENTLY
 -- "payments_tenant_split_line_key", `prisma migrate resolve --rolled-back
--- 20261104140100_dx390_payments_split_idx` y reintentar.
+-- 20261105130100_dx390_payments_split_idx` y reintentar.
 CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS "payments_tenant_split_line_key" ON "payments" ("tenantId", "splitId", "splitLine") WHERE "splitId" IS NOT NULL;

@@ -2648,8 +2648,8 @@ moneda y parte por transferencia en otra: un solo cobro, un solo recibo.
   (`tenantId`, `splitId`) → `payments`, NOT VALID como las de DX-375/DX-377;
   CHECK `payments_split_check`; único parcial
   `payments_tenant_split_line_key`. Migraciones
-  `20261104140000_dx390_payment_split`, `…140100_dx390_payments_split_idx`
-  (CONCURRENTLY) y `…140200_dx390_payment_split_validate`.
+  `20261105130000_dx390_payment_split`, `…130100_dx390_payments_split_idx`
+  (CONCURRENTLY) y `…130200_dx390_payment_split_validate`.
 - **Recibo**: la línea 1 lleva el recibo (`payment_receipts.paymentId`) y la
   foto añade `split: { lines, total }` (cada línea con su medio, referencia y
   equivalente en la moneda del plan; el total es `null` si alguna quedó «sin

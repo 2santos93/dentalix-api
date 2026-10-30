@@ -13,13 +13,13 @@
 -- Compatible hacia atrás: solo AÑADE columnas NULL sin DEFAULT, un CHECK y una
 -- FK NOT VALID. Una réplica anterior no nombra las columnas: sus abonos nacen
 -- de una sola forma de pago, como hasta ahora. El índice de las líneas va en
--- 20261104140100 (CONCURRENTLY) y el CHECK se valida en 20261104140200; la FK
+-- 20261105130100 (CONCURRENTLY) y el CHECK se valida en 20261105130200; la FK
 -- se queda NOT VALID (ver allí).
 --
 -- ADD COLUMN y ADD CONSTRAINT NOT VALID toman un ACCESS EXCLUSIVE breve sobre
 -- payments, sin leerla. lock_timeout 5 s: si una transacción larga lo retiene,
 -- falla limpia (`prisma migrate resolve --rolled-back
--- 20261104140000_dx390_payment_split` y de nuevo el deploy).
+-- 20261105130000_dx390_payment_split` y de nuevo el deploy).
 
 SET LOCAL lock_timeout = '5s';
 

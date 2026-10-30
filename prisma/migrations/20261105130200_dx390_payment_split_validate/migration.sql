@@ -1,4 +1,4 @@
--- DX-390: valida el CHECK payments_split_check que 20261104140000 añadió NOT
+-- DX-390: valida el CHECK payments_split_check que 20261105130000 añadió NOT
 -- VALID. VALIDATE de un CHECK toma SHARE UPDATE EXCLUSIVE: lee la tabla sin
 -- bloquear las escrituras de los abonos. Todas las filas anteriores tienen las
 -- dos columnas a NULL, así que cumplen.
@@ -10,7 +10,7 @@
 -- test/migrations/fk-under-force.spec.ts).
 --
 -- lock_timeout 5 s; para reintentar, `prisma migrate resolve --rolled-back
--- 20261104140200_dx390_payment_split_validate` y `deploy`.
+-- 20261105130200_dx390_payment_split_validate` y `deploy`.
 
 SET LOCAL lock_timeout = '5s';
 

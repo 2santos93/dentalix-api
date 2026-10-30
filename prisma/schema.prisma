@@ -2212,7 +2212,7 @@ model Payment {
   @@unique([tenantId, id, treatmentPlanId], map: "payments_tenant_id_plan_key")
   // DX-390: las líneas de un cobro dividido, una por número (y lado hijo de
   // la FK payments_split_fkey). PARCIAL (WHERE "splitId" IS NOT NULL, solo en
-  // 20261104140100, CONCURRENTLY): NO aceptes un diff de migrate dev que lo
+  // 20261105130100, CONCURRENTLY): NO aceptes un diff de migrate dev que lo
   // vuelva completo.
   @@unique([tenantId, splitId, splitLine], map: "payments_tenant_split_line_key")
   // DX-262: índice PARCIAL que Prisma no expresa (no se declara):
