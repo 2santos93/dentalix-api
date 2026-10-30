@@ -1,5 +1,8 @@
 import { BadRequestException } from '@nestjs/common';
-import { ConvertAmountUseCase } from './convert-amount.use-case';
+import {
+  ConvertAmountUseCase,
+  convertWithQuote,
+} from './convert-amount.use-case';
 import { GetRatesForDateUseCase } from './get-rates-for-date.use-case';
 import { ExchangeRateRepository } from '../../domain/ports/exchange-rate-repository.port';
 import { ExchangeRateProvider } from '../../domain/ports/exchange-rate-provider.port';
@@ -255,6 +258,103 @@ describe('ConvertAmountUseCase', () => {
         'No hay tasa de EUR para el día 2026-07-22: la clínica usa tasa manual y aún no la registró.',
       );
       expect(fetchRates).not.toHaveBeenCalled();
+    });
+  });
+
+  // DX-375: la cotización que congela un abono: las dos tasas por 1 USD tal
+  // como las dio la fuente, la fuente y el día. Convertir con ella da lo
+  // mismo, céntimo a céntimo, que `execute`.
+  describe('quote (DX-375)', () => {
+    const TENANT = '44444444-4444-4444-8444-444444444444';
+
+    it('devuelve las tasas por 1 USD de las dos monedas y la fuente automática', async () => {
+      const uc = makeSeededUseCase({ COP: 4000, EUR: 0.9 });
+      await expect(
+        uc.quote({ from: 'COP', to: 'EUR', date: DATE }),
+      ).resolves.toEqual({
+        from: 'COP',
+        to: 'EUR',
+        date: DATE,
+        source: 'AUTOMATIC',
+        fromPerBase: 4000,
+        toPerBase: 0.9,
+      });
+    });
+
+    it('la moneda base vale 1 y no se busca', async () => {
+      const uc = makeSeededUseCase({ COP: 4000 });
+      await expect(
+        uc.quote({ from: 'USD', to: 'COP', date: DATE }),
+      ).resolves.toMatchObject({ fromPerBase: 1, toPerBase: 4000 });
+    });
+
+    it('con tasa manual la fuente es MANUAL y una moneda sin tasa lanza MissingExchangeRateError', async () => {
+      const tenantContext = new TenantContextService();
+      const repo: ExchangeRateRepository = {
+        findByDate: () => Promise.reject(new Error('no debe leer la caché')),
+        upsertMany: () =>
+          Promise.reject(new Error('no debe escribir la caché')),
+      };
+      const uc = new ConvertAmountUseCase(
+        new GetRatesForDateUseCase(
+          repo,
+          { fetchRates: jest.fn() },
+          makeSettings({ [TENANT]: 'MANUAL' }, tenantContext),
+          makeManualRates({ [TENANT]: { [DATE]: { VES: 40 } } }, tenantContext),
+          tenantContext,
+        ),
+      );
+      await expect(
+        tenantContext.run(TENANT, () =>
+          uc.quote({ from: 'VES', to: 'USD', date: DATE }),
+        ),
+      ).resolves.toMatchObject({ source: 'MANUAL', fromPerBase: 40 });
+      await expect(
+        tenantContext.run(TENANT, () =>
+          uc.quote({ from: 'COP', to: 'USD', date: DATE }),
+        ),
+      ).rejects.toBeInstanceOf(MissingExchangeRateError);
+    });
+
+    it('convertWithQuote da el mismo resultado que execute', async () => {
+      const uc = makeSeededUseCase({ COP: 3950.5, EUR: 0.91234567 });
+      const quote = await uc.quote({ from: 'COP', to: 'EUR', date: DATE });
+      for (const amount of [1, 2, 5, 7, 100, 333, 1234567.89]) {
+        const { result } = await uc.execute({
+          amount,
+          from: 'COP',
+          to: 'EUR',
+          date: DATE,
+        });
+        expect(convertWithQuote(amount, quote)).toBe(result);
+      }
+    });
+
+    it('memoized().quote lee las tasas del día una sola vez', async () => {
+      const findByDate = jest.fn(() =>
+        Promise.resolve([
+          {
+            id: 'x',
+            date: DATE,
+            currency: 'COP',
+            rate: 4000,
+            fetchedAt: new Date(0),
+          },
+        ]),
+      );
+      const uc = new ConvertAmountUseCase(
+        ratesUseCase(
+          {
+            findByDate,
+            upsertMany: () => Promise.reject(new Error('no')),
+          },
+          { fetchRates: () => Promise.reject(new Error('no')) },
+        ),
+      );
+      const convert = uc.memoized();
+      await convert.quote({ from: 'COP', to: 'USD', date: DATE });
+      await convert.execute({ amount: 5, from: 'COP', to: 'USD', date: DATE });
+      expect(findByDate).toHaveBeenCalledTimes(1);
     });
   });
 
