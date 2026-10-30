@@ -205,24 +205,58 @@ describe('manual_exchange_rates (DX-374, int)', () => {
     ).rejects.toThrow(/manual_exchange_rates_created_by_fkey/);
   });
 
-  it('"createdAt" lo pone la BD en UTC', async () => {
+  it('"createdAt" lo pone la BD en UTC (trigger), aunque el INSERT mande otra hora', async () => {
     const [row] = await asApp(a.tenantId, async (tx) => {
       await tx.$executeRawUnsafe(`SET LOCAL TIME ZONE 'America/Caracas'`);
       await insertRate(tx, a, { date: '2026-10-04', currency: 'COP' });
+      await tx.$executeRawUnsafe(
+        `INSERT INTO "manual_exchange_rates"
+           ("id", "tenantId", "date", "currency", "rate", "createdById", "createdByMembershipId", "createdAt")
+         VALUES (gen_random_uuid(), $1::uuid, DATE '2026-10-05', 'COP', 1, $2::uuid, $3::uuid, '2001-01-01')`,
+        a.tenantId,
+        a.userId,
+        a.membershipId,
+      );
       return tx.$queryRaw<{ drift: number }[]>`
         SELECT abs(extract(epoch FROM ("createdAt" - (now() AT TIME ZONE 'UTC'))))::float AS drift
           FROM "manual_exchange_rates"
-         WHERE "tenantId" = ${a.tenantId}::uuid AND "date" = DATE '2026-10-04'`;
+         WHERE "tenantId" = ${a.tenantId}::uuid AND "date" IN (DATE '2026-10-04', DATE '2026-10-05')
+         ORDER BY drift DESC`;
     });
     expect(row.drift).toBeLessThan(1);
   });
 
-  it('una clínica existente queda en AUTOMATIC (default de la columna)', async () => {
+  it('una clínica existente queda en AUTOMATIC y sin día de inicio (defaults)', async () => {
     const tenant = await raw.tenant.findUniqueOrThrow({
       where: { id: a.tenantId },
-      select: { exchangeRateSource: true },
+      select: { exchangeRateSource: true, manualExchangeRatesSince: true },
     });
-    expect(tenant.exchangeRateSource).toBe('AUTOMATIC');
+    expect(tenant).toEqual({
+      exchangeRateSource: 'AUTOMATIC',
+      manualExchangeRatesSince: null,
+    });
+  });
+
+  it('la fuente MANUAL exige día de inicio y AUTOMATIC no lo admite (CHECK)', async () => {
+    await expect(
+      raw.$executeRawUnsafe(
+        `UPDATE "tenants" SET "exchangeRateSource" = 'MANUAL' WHERE "id" = $1::uuid`,
+        a.tenantId,
+      ),
+    ).rejects.toThrow(/tenants_manual_exchange_rates_since_check/);
+    await expect(
+      raw.$executeRawUnsafe(
+        `UPDATE "tenants" SET "manualExchangeRatesSince" = DATE '2026-10-30' WHERE "id" = $1::uuid`,
+        a.tenantId,
+      ),
+    ).rejects.toThrow(/tenants_manual_exchange_rates_since_check/);
+    await expect(
+      raw.$executeRawUnsafe(
+        `UPDATE "tenants" SET "exchangeRateSource" = 'MANUAL',
+                "manualExchangeRatesSince" = DATE '2026-10-30' WHERE "id" = $1::uuid`,
+        a.tenantId,
+      ),
+    ).resolves.toBe(1);
   });
 
   it('EXCHANGE_RATE es un valor de AuditResourceType con su índice parcial', async () => {

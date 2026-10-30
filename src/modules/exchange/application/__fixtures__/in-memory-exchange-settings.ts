@@ -1,5 +1,8 @@
 import type { ExchangeRateSource } from '../../domain/exchange-rate-source';
-import type { ClinicExchangeSettingsRepository } from '../../domain/ports/clinic-exchange-settings-repository.port';
+import type {
+  ClinicExchangeSettings,
+  ClinicExchangeSettingsRepository,
+} from '../../domain/ports/clinic-exchange-settings-repository.port';
 import {
   ManualExchangeRateAuthorError,
   ManualExchangeRateTakenError,
@@ -16,25 +19,51 @@ function tenantOf(ctx: TenantContextService): string {
 }
 
 /**
- * Fuente de cada clínica en memoria, por tenant del contexto (como la fila de
- * `tenants`). Una clínica sin entrada está en AUTOMATIC, el default.
+ * Ajustes de tasa de cada clínica en memoria, por tenant del contexto (como
+ * la fila de `tenants`). Una clínica sin entrada está en AUTOMATIC, el
+ * default; dar solo `'MANUAL'` es MANUAL desde 2000-01-01 (todo día manual).
  */
 export function makeSettings(
-  initial: Record<string, ExchangeRateSource>,
+  initial: Record<string, ExchangeRateSource | ClinicExchangeSettings>,
   ctx: TenantContextService = new TenantContextService(),
+  options: { zones?: Record<string, string> } = {},
 ): ClinicExchangeSettingsRepository & {
-  sourceOf(tenantId: string): ExchangeRateSource;
+  settingsOf(tenantId: string): ClinicExchangeSettings;
+  reads(): number;
 } {
-  const store = new Map(Object.entries(initial));
+  const AUTOMATIC: ClinicExchangeSettings = {
+    source: 'AUTOMATIC',
+    manualSince: null,
+  };
+  const store = new Map<string, ClinicExchangeSettings>(
+    Object.entries(initial).map(([tenant, value]) => [
+      tenant,
+      typeof value === 'string'
+        ? {
+            source: value,
+            manualSince: value === 'MANUAL' ? '2000-01-01' : null,
+          }
+        : value,
+    ]),
+  );
+  let reads = 0;
+  const current = (tenant: string) => store.get(tenant) ?? AUTOMATIC;
   return {
-    sourceOf: (tenantId) => store.get(tenantId) ?? 'AUTOMATIC',
-    getSource: () => Promise.resolve(store.get(tenantOf(ctx)) ?? 'AUTOMATIC'),
-    setSource: (next) => {
-      const tenant = tenantOf(ctx);
-      const before = store.get(tenant) ?? 'AUTOMATIC';
-      store.set(tenant, next);
-      return Promise.resolve({ before, after: next });
+    settingsOf: current,
+    reads: () => reads,
+    get: () => {
+      reads += 1;
+      return Promise.resolve({ ...current(tenantOf(ctx)) });
     },
+    set: (next) => {
+      const tenant = tenantOf(ctx);
+      const before = current(tenant);
+      const after = next({ ...before });
+      store.set(tenant, after);
+      return Promise.resolve({ before, after });
+    },
+    principalTimeZone: () =>
+      Promise.resolve(options.zones?.[tenantOf(ctx)] ?? 'UTC'),
   };
 }
 

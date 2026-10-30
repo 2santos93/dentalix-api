@@ -199,6 +199,9 @@ export class GetPlanBalanceUseCase {
         );
 
     let paid = 0;
+    // DX-374: un convertidor por cálculo, que lee la fuente de la clínica y
+    // las tasas de cada día una sola vez (no una lectura por abono).
+    const convert = this.convertAmount.memoized();
 
     for (const payment of payments) {
       // IMP-4b: a single payment with an unsupported/stale currency must
@@ -218,15 +221,14 @@ export class GetPlanBalanceUseCase {
       // correct total is 149.33, memoized was 147.84). So every payment is
       // converted FRESH, by its own amount and own paidAt date, exactly as
       // before that optimization.
-      // TODO(perf): memoize the RAW rate at the GetRatesForDateUseCase/
-      // rate-repository layer (NOT the amount-dependent rateUsed) to
-      // remove the per-payment lookup without drift.
+      // The RAW rates are memoized per day (`convert`, DX-374), never the
+      // amount-dependent rateUsed.
       // DX-097: el día civil del abono en SU sede, la misma fecha de tasa
       // que usa el dashboard (GetPaymentsTotalsUseCase). Solo «sin tasa»
       // (moneda sin tasa o proveedor sin poder darla para esa fecha) omite
       // el abono, que cuenta como sin convertir; cualquier otro fallo se
       // propaga.
-      const converted = await paymentInPlanCurrency(this.convertAmount, {
+      const converted = await paymentInPlanCurrency(convert, {
         amount: payment.amount,
         currency: payment.currency,
         planCurrency: plan.currency,

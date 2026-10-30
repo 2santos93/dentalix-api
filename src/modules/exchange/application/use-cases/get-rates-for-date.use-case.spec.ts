@@ -226,4 +226,76 @@ describe('GetRatesForDateUseCase', () => {
       ).resolves.toEqual({ COP: 4000, VES: 36.5 });
     });
   });
+
+  // Revisión de DX-374: la fuente MANUAL rige desde el día en que se eligió;
+  // los días anteriores siguen con la tasa automática (no cambian los saldos
+  // de antes del cambio).
+  describe('día de inicio de la tasa manual', () => {
+    const SINCE = '2026-10-30';
+    const C = '88888888-8888-4888-8888-888888888888';
+
+    function setup() {
+      const repo = makeInMemoryRepo();
+      repo.seed('2026-10-29', { VES: 35 });
+      repo.seed(SINCE, { VES: 36.5 });
+      const fetchRates = jest.fn();
+      const tenantContext = new TenantContextService();
+      const settings = makeSettings(
+        { [C]: { source: 'MANUAL', manualSince: SINCE } },
+        tenantContext,
+      );
+      const uc = new GetRatesForDateUseCase(
+        repo,
+        makeProvider(fetchRates),
+        settings,
+        makeManualRates({ [C]: { [SINCE]: { VES: 40 } } }, tenantContext),
+        tenantContext,
+      );
+      return { uc, fetchRates, tenantContext, settings };
+    }
+
+    it('un día anterior al inicio usa la tasa automática', async () => {
+      const { uc, tenantContext } = setup();
+      await expect(
+        tenantContext.run(C, () => uc.execute('2026-10-29')),
+      ).resolves.toEqual({
+        base: 'USD',
+        source: 'AUTOMATIC',
+        rates: { VES: 35 },
+      });
+    });
+
+    it('el día de inicio y los siguientes usan la manual', async () => {
+      const { uc, tenantContext, fetchRates } = setup();
+      await expect(
+        tenantContext.run(C, () => uc.execute(SINCE)),
+      ).resolves.toEqual({ base: 'USD', source: 'MANUAL', rates: { VES: 40 } });
+      await expect(
+        tenantContext.run(C, () => uc.execute('2026-10-31')),
+      ).resolves.toEqual({ base: 'USD', source: 'MANUAL', rates: {} });
+      expect(fetchRates).not.toHaveBeenCalled();
+    });
+
+    it('memoized() lee los ajustes una vez y cada día una vez, con el mismo resultado', async () => {
+      const { uc, tenantContext, settings } = setup();
+      const findSpy = jest.fn();
+      const lookup = tenantContext.run(C, () => uc.memoized());
+      const results = await tenantContext.run(C, () =>
+        Promise.all(
+          ['2026-10-29', SINCE, '2026-10-29', SINCE].map((d) => {
+            findSpy(d);
+            return lookup(d);
+          }),
+        ),
+      );
+      expect(results.map((r) => r.source)).toEqual([
+        'AUTOMATIC',
+        'MANUAL',
+        'AUTOMATIC',
+        'MANUAL',
+      ]);
+      expect(settings.reads()).toBe(1);
+      expect(results[0]).toBe(results[2]);
+    });
+  });
 });

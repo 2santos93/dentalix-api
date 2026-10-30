@@ -2275,13 +2275,25 @@ que se convierten saldos, totales e imputaciones: `tenants."exchangeRateSource"`
 `manual_exchange_rates`, que registra el ADMIN por día civil y moneda, en
 unidades de la moneda por 1 USD (la misma base que el proveedor). Migraciones
 `20261101120000_dx374_enums`, `20261101120100_dx374_audit_events_idx`,
-`20261101120200_dx374_tenant_exchange_rate_source` y
-`20261101120300_dx374_manual_exchange_rates`. Sin relleno: toda clínica
+`20261101120200_dx374_tenant_exchange_rate_source`,
+`20261101120300_dx374_manual_exchange_rates`,
+`20261101120400_dx374_tenant_manual_rates_since` y
+`20261101120500_dx374_manual_exchange_rates_utc`. Sin relleno: toda clínica
 existente queda en `AUTOMATIC` y no cambia nada para ella.
 
+- **Día de inicio** (`tenants."manualExchangeRatesSince"`, DATE, CHECK: no
+  nulo si y solo si la fuente es `MANUAL`): pasar a `MANUAL` lo fija en hoy
+  en la zona de la sede principal; guardar `MANUAL` otra vez lo conserva;
+  volver a `AUTOMATIC` lo limpia. La tasa de un día D sale de las manuales
+  solo con `MANUAL` y D >= ese día; los días anteriores siguen con la
+  automática (caché y, si falta, el proveedor). Así, pasar a `MANUAL` no mueve
+  los saldos ni los totales de antes del cambio. Al volver a `AUTOMATIC`, los
+  días del periodo manual vuelven a convertirse con la tasa automática hasta
+  que DX-375 congele la tasa en cada abono.
+
 - **Lectura** (`GetRatesForDateUseCase`, la que usan todas las conversiones):
-  devuelve `{ base: 'USD', source, rates }`. Con `MANUAL`, `rates` trae solo
-  las monedas con tasa registrada ESE día: una moneda que falta está «sin
+  devuelve `{ base: 'USD', source, rates }`. Con `MANUAL` (y un día desde el
+  de inicio), `rates` trae solo las monedas con tasa registrada ESE día: una moneda que falta está «sin
   tasa». No se toma la de otro día ni se llama al proveedor. Convertirla lanza
   `MissingExchangeRateError` (400 `EXCHANGE_RATE_MISSING`, en español). Los
   consumidores (`paymentInPlanCurrency`, `GetPaymentsTotalsUseCase`) la tratan
@@ -2289,12 +2301,15 @@ existente queda en `AUTOMATIC` y no cambia nada para ella.
   abono queda sin base y el saldo responde 200 sin contarlo. La precarga diaria
   (`exchange.prefetch-rates`) usa `providerRates`, que ignora la fuente de las
   clínicas. `source` va en la respuesta para que DX-375 lo congele en cada
-  abono.
+  abono. El saldo del plan y los totales usan `ConvertAmountUseCase.memoized()`:
+  leen los ajustes de la clínica y las tasas de cada día una vez por cálculo,
+  no una vez por abono (mismo resultado).
 - **Endpoints**: `GET /exchange/rates` y `GET /exchange/convert` son ahora
   rutas de clínica (los 4 roles, `TenantContextInterceptor`: hace falta el
   host de la clínica). Solo ADMIN (`EXCHANGE_RATE_SETTINGS_ROLES`; el resto,
   403 «Solo un administrador puede ver y cambiar la tasa de cambio de la
-  clínica.»): `GET|PUT /exchange/settings` (`{ source }`),
+  clínica.»): `GET|PUT /exchange/settings` (responde `{ source, manualSince,
+  baseCurrency }`; el cuerpo del PUT es `{ source }`),
   `GET /exchange/manual-rates?limit=` (las últimas, día más reciente primero;
   30 por defecto, 100 como mucho) y `POST /exchange/manual-rates`
   (`{ date, currency, rate }`).
@@ -2311,7 +2326,8 @@ existente queda en `AUTOMATIC` y no cambia nada para ella.
   la lista; FK de clínica, FK a `currencies` y FK compuesta del autor
   (`tenantId`, `createdByMembershipId`, `createdById`) →
   `clinic_memberships`; CHECKs de tasa > 0, moneda distinta de USD y día en
-  rango. La app solo tiene SELECT e INSERT. `createdAt` lo pone la BD en UTC.
+  rango. La app solo tiene SELECT e INSERT. `createdAt` lo pone en UTC un
+  trigger BEFORE INSERT (DX-226), aunque el INSERT mande otra hora.
 - **Auditoría**: cambiar la fuente deja un UPDATE de `CLINIC_SETTINGS` con
   `reason: EXCHANGE_RATE_SOURCE` y `statusChange` `AUTOMATIC` → `MANUAL` (o al
   revés), solo si cambia. Registrar una tasa deja un CREATE de `EXCHANGE_RATE`

@@ -51,6 +51,11 @@ function round2(value: number): number {
  * rounding behavior instead.
  */
 class FakeConvertAmountUseCase {
+  /** Como el real: el convertidor memoizado convierte igual (DX-374). */
+  memoized(): this {
+    return this;
+  }
+
   public readonly calls: FakeConvertInput[] = [];
   /** Currencies (as `from`) that should make `execute` reject with the same
    * `BadRequestException` shape `ConvertAmountUseCase` throws for an

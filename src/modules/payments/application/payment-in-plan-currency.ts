@@ -1,6 +1,6 @@
 import { ExchangeRateUnavailableError } from '../../exchange/domain/ports/exchange-rate-provider.port';
 import { isMissingRateError } from '../../exchange/domain/missing-exchange-rate.error';
-import { ConvertAmountUseCase } from '../../exchange/application/use-cases/convert-amount.use-case';
+import type { AmountConverter } from '../../exchange/application/use-cases/convert-amount.use-case';
 
 export interface PaymentToConvert {
   amount: number;
@@ -28,7 +28,7 @@ function isNoRateError(error: unknown): boolean {
  * conversión de abonos a plan (saldo, recibo, base de imputación, backfill).
  */
 export async function paymentInPlanCurrency(
-  convert: ConvertAmountUseCase,
+  convert: AmountConverter,
   p: PaymentToConvert,
 ): Promise<number | null> {
   try {
@@ -51,7 +51,7 @@ export async function paymentInPlanCurrency(
  * como «sin tasa» (`null`). Los fallos distintos de «sin tasa» se propagan.
  */
 export async function paymentBaseAmount(
-  convert: ConvertAmountUseCase,
+  convert: AmountConverter,
   p: PaymentToConvert,
 ): Promise<number | null> {
   const amount = await paymentInPlanCurrency(convert, p);

@@ -257,4 +257,46 @@ describe('ConvertAmountUseCase', () => {
       expect(fetchRates).not.toHaveBeenCalled();
     });
   });
+
+  // Revisión de DX-374: un convertidor memoizado por caso de uso (saldo,
+  // totales) lee la caché una vez por día y da los mismos resultados.
+  it('memoized() convierte igual y lee las tasas de cada día una sola vez', async () => {
+    const findByDate = jest.fn((date: string) =>
+      Promise.resolve(
+        date === DATE
+          ? [
+              {
+                id: 'x',
+                date: DATE,
+                currency: 'COP',
+                rate: 4000,
+                fetchedAt: new Date(0),
+              },
+            ]
+          : [],
+      ),
+    );
+    const repo: ExchangeRateRepository = {
+      findByDate,
+      upsertMany: () => Promise.reject(new Error('should not be called')),
+    };
+    const provider: ExchangeRateProvider = {
+      fetchRates: () => Promise.reject(new Error('should not be called')),
+    };
+    const uc = new ConvertAmountUseCase(ratesUseCase(repo, provider));
+    const convert = uc.memoized();
+    const amounts = [1, 2, 5, 7, 100, 333];
+    const memo = await Promise.all(
+      amounts.map((amount) =>
+        convert.execute({ amount, from: 'COP', to: 'USD', date: DATE }),
+      ),
+    );
+    expect(findByDate).toHaveBeenCalledTimes(1);
+    const fresh = await Promise.all(
+      amounts.map((amount) =>
+        uc.execute({ amount, from: 'COP', to: 'USD', date: DATE }),
+      ),
+    );
+    expect(memo).toEqual(fresh);
+  });
 });

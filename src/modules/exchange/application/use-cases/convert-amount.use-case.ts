@@ -2,6 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import {
   GetRatesForDateUseCase,
   isValidDateFormat,
+  type RatesLookup,
 } from './get-rates-for-date.use-case';
 import { MissingExchangeRateError } from '../../domain/missing-exchange-rate.error';
 
@@ -22,6 +23,11 @@ export interface ConvertAmountResult {
   rateUsed: number;
 }
 
+/** Lo que necesita quien convierte: `ConvertAmountUseCase` o su versión memoizada. */
+export interface AmountConverter {
+  execute(input: ConvertAmountInput): Promise<ConvertAmountResult>;
+}
+
 function isFiniteNonNegativeAmount(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0;
 }
@@ -35,10 +41,29 @@ function isFiniteNonNegativeAmount(value: unknown): value is number {
  * fuente de la clínica del contexto (proveedor o tasa manual).
  */
 @Injectable()
-export class ConvertAmountUseCase {
+export class ConvertAmountUseCase implements AmountConverter {
   constructor(private readonly getRatesForDate: GetRatesForDateUseCase) {}
 
-  async execute(input: ConvertAmountInput): Promise<ConvertAmountResult> {
+  execute(input: ConvertAmountInput): Promise<ConvertAmountResult> {
+    return this.convertWith(input, (date) =>
+      this.getRatesForDate.execute(date),
+    );
+  }
+
+  /**
+   * Un convertidor para UN caso de uso de UNA clínica (saldo, totales): lee
+   * los ajustes y las tasas de cada día una sola vez. Cada abono se sigue
+   * convirtiendo por su importe (sin reutilizar `rateUsed`, ver IMP-4a).
+   */
+  memoized(): AmountConverter {
+    const lookup = this.getRatesForDate.memoized();
+    return { execute: (input) => this.convertWith(input, lookup) };
+  }
+
+  private async convertWith(
+    input: ConvertAmountInput,
+    ratesFor: RatesLookup,
+  ): Promise<ConvertAmountResult> {
     if (!isValidDateFormat(input.date)) {
       throw new BadRequestException('date must match YYYY-MM-DD');
     }
@@ -52,7 +77,7 @@ export class ConvertAmountUseCase {
       return { amount, from, to, date, result: amount, rateUsed: 1 };
     }
 
-    const { rates, source } = await this.getRatesForDate.execute(date);
+    const { rates, source } = await ratesFor(date);
     // DX-374: con tasa manual, una moneda ausente es la tasa que la clínica
     // aún no registró ese día (error de dominio en español); con el
     // proveedor, una moneda que no trae.

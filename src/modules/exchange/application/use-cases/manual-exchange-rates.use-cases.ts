@@ -59,8 +59,11 @@ function badRequest(message: string, field: string): BadRequestException {
   });
 }
 
-/** Reloj inyectable para los tests (como `PRESCRIPTION_CLOCK`). */
-export const MANUAL_EXCHANGE_RATE_CLOCK = Symbol('MANUAL_EXCHANGE_RATE_CLOCK');
+/**
+ * Reloj de la tasa de cambio (como `PRESCRIPTION_CLOCK`): decide qué día es
+ * «hoy» al registrar una tasa y al pasar a MANUAL. Inyectable para los tests.
+ */
+export const EXCHANGE_RATE_CLOCK = Symbol('EXCHANGE_RATE_CLOCK');
 
 /**
  * Registra la tasa de un día y una moneda de la clínica del contexto (solo
@@ -74,7 +77,7 @@ export class RegisterManualExchangeRateUseCase {
   constructor(
     @Inject(MANUAL_EXCHANGE_RATE_REPOSITORY)
     private readonly repo: ManualExchangeRateRepository,
-    @Inject(MANUAL_EXCHANGE_RATE_CLOCK)
+    @Inject(EXCHANGE_RATE_CLOCK)
     private readonly now: () => Date,
   ) {}
 

@@ -21,7 +21,7 @@ import {
 } from './application/use-cases/exchange-rate-settings.use-cases';
 import {
   ListManualExchangeRatesUseCase,
-  MANUAL_EXCHANGE_RATE_CLOCK,
+  EXCHANGE_RATE_CLOCK,
   RegisterManualExchangeRateUseCase,
 } from './application/use-cases/manual-exchange-rates.use-cases';
 import { ExchangeSettingsController } from './presentation/exchange-settings.controller';
@@ -51,7 +51,7 @@ import { ExchangeSettingsController } from './presentation/exchange-settings.con
     UpdateExchangeRateSettingsUseCase,
     ListManualExchangeRatesUseCase,
     RegisterManualExchangeRateUseCase,
-    { provide: MANUAL_EXCHANGE_RATE_CLOCK, useValue: () => new Date() },
+    { provide: EXCHANGE_RATE_CLOCK, useValue: () => new Date() },
     {
       provide: CLINIC_EXCHANGE_SETTINGS_REPOSITORY,
       useClass: PrismaClinicExchangeSettingsRepository,

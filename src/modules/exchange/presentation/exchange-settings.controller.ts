@@ -48,7 +48,10 @@ import {
   MANUAL_RATE_DUPLICATE_MESSAGE,
   MANUAL_RATE_NOT_A_MEMBER_MESSAGE,
 } from '../domain/exchange-rate-source';
-import { ExchangeRateSettingsDto } from './dto/exchange-rate-settings.dto';
+import {
+  ExchangeRateSettingsDto,
+  UpdateExchangeRateSettingsDto,
+} from './dto/exchange-rate-settings.dto';
 import {
   ListManualExchangeRatesQueryDto,
   ManualExchangeRateDto,
@@ -98,17 +101,21 @@ export class ExchangeSettingsController {
     summary:
       'Cambia la fuente de la tasa de cambio de la clínica; queda en la auditoría',
     description:
-      'DX-374. Aplica desde la siguiente lectura de tasas (saldos, totales, ' +
-      'conversiones); los abonos ya cobrados no cambian. Evento ' +
-      'CLINIC_SETTINGS con reason EXCHANGE_RATE_SOURCE y el antes y el ' +
-      'después. Si nada cambia, 200 sin evento de auditoría.',
+      'DX-374. Pasar a MANUAL fija `manualSince` = hoy en la sede principal: ' +
+      'desde ese día la tasa sale de las manuales y los días anteriores siguen ' +
+      'con la automática, así que los saldos de antes del cambio no se mueven. ' +
+      'Guardar MANUAL otra vez conserva el día. Volver a AUTOMATIC lo limpia: ' +
+      'los días del periodo manual vuelven a la tasa automática hasta que cada ' +
+      'abono congele su tasa (DX-375). Evento CLINIC_SETTINGS con reason ' +
+      'EXCHANGE_RATE_SOURCE y el antes y el después; si la fuente no cambia, ' +
+      '200 sin evento.',
   })
   @ApiOkResponse({ type: ExchangeRateSettingsDto })
   @ApiBadRequestResponse({
     description: 'Fuente que no es AUTOMATIC ni MANUAL',
   })
   updateClinicSettings(
-    @Body() dto: ExchangeRateSettingsDto,
+    @Body() dto: UpdateExchangeRateSettingsDto,
     @Req() req: AuditableRequest,
   ): Promise<ExchangeRateSettings> {
     const ctx = auditRequestContext(req, this.tenantContext);
@@ -140,7 +147,8 @@ export class ExchangeSettingsController {
       'Registra la tasa de cambio de un día y una moneda; queda en la auditoría',
     description:
       'DX-374. Unidades de la moneda por 1 USD. Se usa cuando la fuente de la ' +
-      'clínica es MANUAL (se puede dejar registrada antes de cambiarla). Una ' +
+      'clínica es MANUAL, para los días desde `manualSince` (se puede dejar ' +
+      'registrada antes de cambiarla). Una ' +
       'tasa ya registrada para ese día y moneda no se sobrescribe.',
   })
   @ApiCreatedResponse({ type: ManualExchangeRateDto })

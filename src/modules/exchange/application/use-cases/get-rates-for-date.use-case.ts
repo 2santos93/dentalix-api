@@ -6,6 +6,7 @@ import type { ExchangeRateProvider } from '../../domain/ports/exchange-rate-prov
 import { ExchangeRateSnapshot } from '../../domain/entities/exchange-rate-snapshot.entity';
 import {
   CLINIC_EXCHANGE_SETTINGS_REPOSITORY,
+  type ClinicExchangeSettings,
   type ClinicExchangeSettingsRepository,
 } from '../../domain/ports/clinic-exchange-settings-repository.port';
 import {
@@ -48,13 +49,17 @@ function toRatesRecord(
   return rates;
 }
 
+/** Las tasas de un día; `memoized()` devuelve una que cachea por día. */
+export type RatesLookup = (date: string) => Promise<RatesForDate>;
+
 /**
  * Tasas de un día para la clínica del contexto (DX-374):
- * - fuente AUTOMATIC (o sin clínica en el contexto, p. ej. la precarga
- *   diaria): cache-then-fetch del proveedor (ver `providerRates`);
- * - fuente MANUAL: las tasas que la clínica registró para ESE día. Una moneda
- *   sin tasa no aparece y nunca se pide al proveedor ni se toma la de otro
- *   día.
+ * - fuente MANUAL y día >= `manualSince`: las tasas que la clínica registró
+ *   para ESE día. Una moneda sin tasa no aparece y nunca se pide al proveedor
+ *   ni se toma la de otro día;
+ * - cualquier otro caso (AUTOMATIC, un día anterior al paso a MANUAL o sin
+ *   clínica en el contexto, p. ej. la precarga diaria): cache-then-fetch del
+ *   proveedor (ver `providerRates`), como siempre.
  */
 @Injectable()
 export class GetRatesForDateUseCase {
@@ -70,13 +75,48 @@ export class GetRatesForDateUseCase {
     private readonly tenantContext: TenantContextService,
   ) {}
 
-  async execute(date: string): Promise<RatesForDate> {
+  execute(date: string): Promise<RatesForDate> {
+    return this.ratesWith(date, () => this.clinicSettings());
+  }
+
+  /**
+   * Una lectura que cachea, para UN caso de uso de UNA clínica (saldo,
+   * totales): los ajustes se leen una vez y cada día una vez, en vez de una
+   * lectura de `tenants` y una transacción por abono. Mismo resultado que
+   * `execute` (un fallo de un día también se repite para ese día).
+   */
+  memoized(): RatesLookup {
+    let settings: Promise<ClinicExchangeSettings | null> | undefined;
+    const byDate = new Map<string, Promise<RatesForDate>>();
+    const clinicSettings = () => (settings ??= this.clinicSettings());
+    return (date) => {
+      let rates = byDate.get(date);
+      if (!rates) {
+        rates = this.ratesWith(date, clinicSettings);
+        byDate.set(date, rates);
+      }
+      return rates;
+    };
+  }
+
+  private clinicSettings(): Promise<ClinicExchangeSettings | null> {
+    return this.tenantContext.getTenantId() === undefined
+      ? Promise.resolve(null)
+      : this.settings.get();
+  }
+
+  private async ratesWith(
+    date: string,
+    clinicSettings: () => Promise<ClinicExchangeSettings | null>,
+  ): Promise<RatesForDate> {
     if (!isValidDateFormat(date)) {
       throw new BadRequestException('date must match YYYY-MM-DD');
     }
+    const settings = await clinicSettings();
     if (
-      this.tenantContext.getTenantId() !== undefined &&
-      (await this.settings.getSource()) === 'MANUAL'
+      settings?.source === 'MANUAL' &&
+      settings.manualSince !== null &&
+      date >= settings.manualSince
     ) {
       return {
         base: 'USD',
