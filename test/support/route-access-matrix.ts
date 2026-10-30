@@ -501,6 +501,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /treatment-plans/:id/payments': BILLING,
   // DX-262: abono contra el saldo migrado (los mismos roles que cobran).
   'POST /opening-balances/:id/payments': BILLING,
+  // DX-390: cobro dividido (los mismos roles que cobran).
+  'POST /treatment-plans/:id/split-payments': BILLING,
   'GET /treatment-plans/:id/payments': BILLING,
   'GET /treatment-plans/:id/balance': BILLING,
   'DELETE /payments/:id': BILLING,

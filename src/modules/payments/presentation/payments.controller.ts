@@ -41,6 +41,15 @@ import { CSV_RESPONSE, sendCsv } from '../../../shared/csv/csv-response';
 import { CashPaymentsResponseDto } from './dto/cash-payments-response.dto';
 import { RecordPaymentUseCase } from '../application/use-cases/record-payment.use-case';
 import { RecordOpeningBalancePaymentUseCase } from '../application/use-cases/record-opening-balance-payment.use-case';
+import {
+  RecordSplitPaymentUseCase,
+  type SplitPaymentResult,
+} from '../application/use-cases/record-split-payment.use-case';
+import {
+  RecordSplitPaymentDto,
+  SplitPaymentDto,
+} from './dto/record-split-payment.dto';
+import { RecordAuditEventUseCase } from '../../audit/application/record-audit-event.use-case';
 import { OPENING_BALANCE_NOT_FOUND_MESSAGE } from '../domain/opening-balance-payment';
 import { ListPaymentsUseCase } from '../application/use-cases/list-payments.use-case';
 import { VoidPaymentUseCase } from '../application/use-cases/void-payment.use-case';
@@ -100,6 +109,10 @@ export class PaymentsController {
     // DX-150: el abono que cubre un compromiso de pago lo cierra en el acto.
     private readonly settlePromises: SettlePaymentPromises,
     private readonly tenantContext: TenantContextService,
+    // DX-390: el cobro dividido.
+    private readonly recordSplitPayment: RecordSplitPaymentUseCase,
+    // DX-390: el VOID de las otras líneas de un cobro dividido.
+    private readonly audit: RecordAuditEventUseCase,
   ) {}
 
   /**
@@ -260,6 +273,89 @@ export class PaymentsController {
     action: 'CREATE',
     resource: 'PAYMENT',
     resourceId: { response: 'id' },
+    patient: { lookup: 'treatmentPlan', param: 'id' },
+    // DX-390: un evento por línea (su abono y su referencia repetida).
+    reason: 'SPLIT_RECEIPT_ISSUED',
+    paymentReference: true,
+    splitPayment: true,
+  })
+  @Post('treatment-plans/:id/split-payments')
+  @ApiOperation({
+    summary:
+      'Cobro dividido en varias formas de pago con un solo recibo (DX-390)',
+    description:
+      'De 2 a 5 líneas (medio, moneda, importe y referencia), el mismo día. ' +
+      'Cada línea es un abono con las reglas de siempre: su medio (referencia ' +
+      'obligatoria y aviso de repetida, DX-377), su moneda (tasa congelada del ' +
+      'día, DX-375) y su caja (el efectivo entra en la caja abierta de quien ' +
+      'cobra, en su moneda, DX-027). Todas se registran en UNA transacción, ' +
+      'con UN recibo numerado que lleva todas las líneas y el total en la ' +
+      'moneda del plan: si una línea falla, no queda ninguna. Una ' +
+      'Idempotency-Key para el cobro entero. Para un solo medio, ' +
+      '`POST /treatment-plans/:id/payments`. Anular una línea ' +
+      '(`DELETE /payments/:id`) anula el cobro entero y su recibo.',
+  })
+  @ApiCreatedResponse({
+    type: SplitPaymentDto,
+    description:
+      'El cobro, con su recibo y un abono por línea. Repetir la MISMA petición con la misma Idempotency-Key devuelve el cobro original.',
+  })
+  @ApiConflictResponse({
+    description:
+      'Plan rechazado o cancelado (DX-109). `code: PAYMENT_REFERENCE_DUPLICATE` con `line` (desde 0) ' +
+      'si la referencia de una línea ya está en otro abono vivo de ±90 días: se confirma con su ' +
+      '`duplicateReferenceReason`. `code: SPLIT_PAYMENT_EXCEEDS_BALANCE` (con `total`, `pending` y ' +
+      '`currency`, la del plan) si el total supera lo pendiente: se confirma con `confirmCreditBalance`. ' +
+      'Sin caja abierta, si la clínica la exige para el efectivo (DX-027).',
+  })
+  @ApiBadRequestResponse({
+    description:
+      'Menos de 2 o más de 5 líneas, una línea sin medio, un medio de otra clínica o desactivado, ' +
+      'una referencia que falta, o dos líneas con el mismo medio y referencia.',
+  })
+  @ApiNotFoundResponse({
+    description: 'El plan no existe o es de otra clínica',
+  })
+  @ApiUnprocessableEntityResponse({
+    description:
+      'La Idempotency-Key ya se usó con otro plan, otro cuerpo o un abono suelto: genera una clave nueva.',
+  })
+  async createSplit(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RecordSplitPaymentDto,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<SplitPaymentResult> {
+    const split = await this.recordSplitPayment.execute(
+      id,
+      {
+        paidAt: dto.paidAt,
+        notes: dto.notes,
+        confirmCreditBalance: dto.confirmCreditBalance,
+        lines: dto.lines.map((line) => ({
+          amount: line.amount,
+          currency: line.currency,
+          paymentMethodId: line.paymentMethodId,
+          reference: line.reference,
+          duplicateReferenceReason: line.duplicateReferenceReason,
+        })),
+      },
+      req.user.sub,
+      idempotencyKey,
+    );
+    // DX-150: como un abono suelto, el cobro puede cumplir el compromiso.
+    const context = auditRequestContext(req, this.tenantContext);
+    const [head] = split.payments;
+    if (context && head) {
+      await this.settlePromises.afterPayment(head.patientId, context);
+    }
+    return split;
+  }
+
+  @Audit({
+    action: 'CREATE',
+    resource: 'PAYMENT',
+    resourceId: { response: 'id' },
     patient: { lookup: 'openingBalance', param: 'id' },
     reason: 'RECEIPT_ISSUED',
     paymentReference: true,
@@ -365,7 +461,7 @@ export class PaymentsController {
   @ApiNotFoundResponse({
     description: 'El abono no existe, ya está anulado o es de otra clínica',
   })
-  remove(
+  async remove(
     @Param('id') id: string,
     @Body() dto: VoidPaymentDto,
     @Req() req: AuthenticatedRequest,
@@ -373,7 +469,7 @@ export class PaymentsController {
     // DX-215: la sede, el request id, la IP y el user agent van al evento del
     // compromiso de pago que se reabre al anular el abono que lo cumplía.
     const context = auditRequestContext(req, this.tenantContext);
-    return this.voidPayment.execute({
+    const otherLines = await this.voidPayment.execute({
       paymentId: id,
       reason: dto.reason,
       actor: { userId: req.user.sub, role: req.user.role },
@@ -384,5 +480,27 @@ export class PaymentsController {
         userAgent: context.userAgent,
       },
     });
+    // DX-390: las otras líneas de su cobro dividido se anularon con él; cada
+    // una deja su evento (el de la pedida lo escribe `@Audit`).
+    if (!context) return;
+    for (const lineId of otherLines) {
+      await this.audit.record({
+        tenantId: context.tenantId,
+        locationId: context.locationId,
+        actor: {
+          kind: 'user',
+          userId: context.actor.userId,
+          role: context.actor.role,
+        },
+        action: 'VOID',
+        resourceType: 'PAYMENT',
+        resourceId: lineId,
+        patient: { kind: 'payment', id: lineId },
+        requestId: context.requestId,
+        ip: context.ip,
+        userAgent: context.userAgent,
+        metadata: { reason: 'SPLIT_PAYMENT_VOIDED' },
+      });
+    }
   }
 }

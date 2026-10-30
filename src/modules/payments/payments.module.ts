@@ -1,3 +1,4 @@
+import { RecordSplitPaymentUseCase } from './application/use-cases/record-split-payment.use-case';
 import { RecordOpeningBalancePaymentUseCase } from './application/use-cases/record-opening-balance-payment.use-case';
 import { Module } from '@nestjs/common';
 import { PaymentMethodsModule } from '../payment-methods/payment-methods.module';
@@ -71,6 +72,8 @@ import { ReplacePaymentAllocationsUseCase } from './application/use-cases/replac
   ],
   providers: [
     RecordPaymentUseCase,
+    // DX-390: cobro dividido en varias formas de pago con un solo recibo.
+    RecordSplitPaymentUseCase,
     // DX-262: abono contra el saldo migrado.
     RecordOpeningBalancePaymentUseCase,
     PaymentMethodGate,

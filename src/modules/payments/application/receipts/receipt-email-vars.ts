@@ -32,6 +32,26 @@ function targetLabel(
     : `Plan del ${planDay}`;
 }
 
+/** DX-390: el total en la moneda del plan o, sin él, la suma de las líneas. */
+function splitAmountLabel(
+  split: NonNullable<PaymentReceiptView['split']>,
+  fmt: RegionalFormat,
+): string {
+  if (split.total.amount !== null) {
+    return fmt.money(split.total.amount, split.total.currency);
+  }
+  return split.lines
+    .map((line) => fmt.money(line.amount, line.currency))
+    .join(' + ');
+}
+
+function lineMethodLabel(
+  line: NonNullable<PaymentReceiptView['split']>['lines'][number],
+): string {
+  if (line.paymentMethodName) return line.paymentMethodName;
+  return line.method ? METHOD_LABELS[line.method] : 'Sin especificar';
+}
+
 /**
  * Variables del email del recibo (DX-136), sacadas SOLO de la foto del
  * recibo: el email dice lo mismo que la pantalla y el papel. El documento va
@@ -59,11 +79,16 @@ export function receiptEmailVars(
       : `${clinic.legalName} · NIT/NIF ${clinic.taxId}`,
     // El nombre visible ya resuelto al leer el recibo (DX-327, R18).
     patientDocLabel: documentText(patient.docTypeName, patient.docNumberMasked),
-    amountLabel: fmt.money(payment.amount, payment.currency),
+    // DX-390: un cobro dividido dice su total y sus formas de pago.
+    amountLabel: receipt.split
+      ? splitAmountLabel(receipt.split, fmt)
+      : fmt.money(payment.amount, payment.currency),
     paidOnLabel: fmt.civilDate(payment.paidOn),
-    methodLabel: payment.method
-      ? METHOD_LABELS[payment.method]
-      : 'Sin especificar',
+    methodLabel: receipt.split
+      ? receipt.split.lines.map(lineMethodLabel).join(' + ')
+      : payment.method
+        ? METHOD_LABELS[payment.method]
+        : 'Sin especificar',
     planLabel: targetLabel(
       plan,
       snapshot.openingBalance ?? null,

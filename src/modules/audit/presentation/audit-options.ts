@@ -77,4 +77,10 @@ export interface AuditOptions {
    * repetidos; nunca la referencia ni el motivo.
    */
   paymentReference?: true;
+  /**
+   * DX-390: cobro dividido. La respuesta trae `payments` (un abono por
+   * línea): se registra UN evento por línea, con su id como `resourceId` y,
+   * con `paymentReference`, la confirmación de SU referencia repetida.
+   */
+  splitPayment?: true;
 }

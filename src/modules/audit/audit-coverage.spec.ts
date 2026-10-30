@@ -632,6 +632,16 @@ const EXPECTED: Record<string, AuditOptions> = {
     reason: 'IMPORT_UNDONE',
     importBatch: true,
   },
+  // DX-390: cobro dividido (un evento por línea, con su recibo único).
+  'POST /treatment-plans/:id/split-payments': {
+    action: 'CREATE',
+    resource: 'PAYMENT',
+    resourceId: RES,
+    patient: { lookup: 'treatmentPlan', param: 'id' },
+    reason: 'SPLIT_RECEIPT_ISSUED',
+    paymentReference: true,
+    splitPayment: true,
+  },
   // DX-262: abono contra el saldo migrado (con su recibo de caja).
   'POST /opening-balances/:id/payments': {
     action: 'CREATE',

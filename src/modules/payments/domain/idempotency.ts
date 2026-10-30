@@ -79,6 +79,44 @@ export function paymentRequestFingerprint(
   return createHash('sha256').update(JSON.stringify(normalized)).digest('hex');
 }
 
+/** DX-390: lo que identifica un cobro dividido: el plan, el día, las líneas. */
+export interface SplitPaymentRequestShape {
+  paidAt: unknown;
+  notes?: unknown;
+  lines: {
+    amount: unknown;
+    currency: unknown;
+    paymentMethodId?: string;
+    reference?: string;
+  }[];
+}
+
+/**
+ * DX-390: huella de un cobro dividido, con la misma normalización que la de un
+ * abono. Lleva una marca propia: nunca coincide con la de un abono suelto, así
+ * que la misma clave en el otro endpoint es 422. Ni el motivo de una
+ * referencia repetida ni la confirmación del saldo a favor cuentan: el
+ * reintento tras esos 409 es la misma petición.
+ */
+export function splitPaymentRequestFingerprint(
+  treatmentPlanId: string,
+  input: SplitPaymentRequestShape,
+): string {
+  const normalized = [
+    'split',
+    treatmentPlanId.toLowerCase(),
+    normalizePaidAt(input.paidAt),
+    input.notes ?? null,
+    input.lines.map((line) => [
+      normalizeAmount(line.amount),
+      normalizeCurrency(line.currency),
+      line.paymentMethodId ?? null,
+      line.reference?.trim() ?? null,
+    ]),
+  ];
+  return createHash('sha256').update(JSON.stringify(normalized)).digest('hex');
+}
+
 /**
  * El destino de un abono para la idempotencia: el id del plan (como siempre,
  * así las huellas anteriores siguen valiendo) o `ob:<id>` si es contra un

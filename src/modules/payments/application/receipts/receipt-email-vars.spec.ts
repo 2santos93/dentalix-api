@@ -62,6 +62,7 @@ const view = (
   voidedAt: null,
   voidReason: null,
   exchangeRate: null,
+  split: null,
   snapshot,
   ...overrides,
 });
@@ -97,6 +98,51 @@ describe('receiptEmailVars (DX-136)', () => {
       legalNotice: 'Este documento no es factura',
     });
     expect(JSON.stringify(vars)).not.toContain('1012345678');
+  });
+
+  it('DX-390: un cobro dividido dice su total en la moneda del plan y sus formas de pago', () => {
+    const line = {
+      line: 1,
+      method: 'TRANSFER' as const,
+      paymentMethodName: 'Pago móvil',
+      reference: 'PM-1',
+      exchangeRate: null,
+    };
+    const split = {
+      lines: [
+        {
+          ...line,
+          paymentId: 'l1',
+          amount: 50,
+          currency: 'USD',
+          equivalentAmount: 200000,
+        },
+        {
+          ...line,
+          paymentId: 'l2',
+          line: 2,
+          method: 'CASH' as const,
+          paymentMethodName: null,
+          reference: null,
+          amount: 100000,
+          currency: 'COP',
+          equivalentAmount: 100000,
+        },
+      ],
+      total: { currency: 'COP', amount: 300000 },
+    };
+    const vars = receiptEmailVars(view({ split }), SEDE_ZONE, SEDE_FMT);
+    expect(vars.amountLabel).toBe(SEDE_FMT.money(300000, 'COP'));
+    expect(vars.methodLabel).toBe('Pago móvil + Efectivo');
+
+    const withoutRate = receiptEmailVars(
+      view({ split: { ...split, total: { currency: 'COP', amount: null } } }),
+      SEDE_ZONE,
+      SEDE_FMT,
+    );
+    expect(withoutRate.amountLabel).toBe(
+      `${SEDE_FMT.money(50, 'USD')} + ${SEDE_FMT.money(100000, 'COP')}`,
+    );
   });
 
   it('the email prints the frozen display name from the snapshot', () => {

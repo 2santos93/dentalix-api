@@ -5,6 +5,7 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { Prisma, TreatmentPlanStatus } from '@prisma/client';
 import {
   isPlanBillable,
@@ -41,6 +42,7 @@ import {
   CashRegisterRow,
   CivilPeriod,
   CreatePaymentRepoInput,
+  CreateSplitPaymentRepoInput,
   ListCashRegisterParams,
   ListPaymentsReceivedInRangeParams,
   OpeningBalanceTarget,
@@ -49,6 +51,7 @@ import {
   PaymentVoidTarget,
   ReceivedPayment,
   ReferenceMatch,
+  SplitPaymentRecord,
 } from '../../domain/ports/payment-repository.port';
 import { Payment } from '../../domain/entities/payment.entity';
 import { exchangeRateStatus } from '../../domain/payment-exchange-rate';
@@ -60,7 +63,10 @@ import {
 import { CashPayment } from '../../domain/entities/cash-payment.entity';
 import { formatReceiptNumber } from '../../domain/receipt-number';
 import type { ReceiptPlanBalance } from '../../domain/receipt-snapshot';
-import { issuePaymentReceipt } from '../receipts/issue-payment-receipt';
+import {
+  issuePaymentReceipt,
+  type ReceiptPaymentRow,
+} from '../receipts/issue-payment-receipt';
 import {
   assignPaymentToCashSession,
   recordLatePaymentAdjustment,
@@ -80,8 +86,14 @@ import {
 
 // DX-136: cada abono se lee con la serie y el número de su recibo (o sin
 // recibo, si es anterior a la numeración).
+const RECEIPT_NUMBER_SELECT = {
+  select: { seriesPrefix: true, number: true },
+} as const;
+
 const PAYMENT_INCLUDE = {
-  receipt: { select: { seriesPrefix: true, number: true } },
+  receipt: RECEIPT_NUMBER_SELECT,
+  // DX-390: una línea de un cobro dividido lleva el recibo de su línea 1.
+  splitHead: { select: { receipt: RECEIPT_NUMBER_SELECT } },
   // DX-377: el nombre del medio de pago del catálogo.
   paymentMethod: { select: { name: true } },
 } satisfies Prisma.PaymentInclude;
@@ -89,6 +101,20 @@ const PAYMENT_INCLUDE = {
 type PrismaPayment = Prisma.PaymentGetPayload<{
   include: typeof PAYMENT_INCLUDE;
 }>;
+
+/** Una línea recién insertada, con lo que su recibo necesita (DX-390). */
+interface InsertedLine {
+  entity: Payment;
+  /** La moneda de destino: la del plan bloqueado (o la del saldo migrado). */
+  planCurrency: string;
+  /** La línea en la moneda del plan (su base); `null` si quedó «sin tasa». */
+  equivalentAmount: number | null;
+  /** La tasa cotizada fuera ya no valía con el plan bloqueado. */
+  rateInvalidated: boolean;
+  /** Saldo del saldo migrado tras el abono (DX-262); `null` a un plan. */
+  targetBalance: ReceiptPlanBalance | null;
+  receiptRow: ReceiptPaymentRow;
+}
 
 /** El filtro de un período civil y la zona con que se leyó cada sede. */
 interface PeriodScope {
@@ -107,6 +133,14 @@ function isUniqueViolation(error: unknown): boolean {
     error instanceof Prisma.PrismaClientKnownRequestError &&
     error.code === 'P2002'
   );
+}
+
+function receiptNumberOf(
+  receipt: { seriesPrefix: string; number: number } | null,
+): string | null {
+  return receipt
+    ? formatReceiptNumber(receipt.seriesPrefix, receipt.number)
+    : null;
 }
 
 function mapToEntity(payment: PrismaPayment, timeZone: string): Payment {
@@ -129,12 +163,11 @@ function mapToEntity(payment: PrismaPayment, timeZone: string): Payment {
     createdById: payment.createdById,
     createdAt: payment.createdAt,
     updatedAt: payment.updatedAt,
-    receiptNumber: payment.receipt
-      ? formatReceiptNumber(
-          payment.receipt.seriesPrefix,
-          payment.receipt.number,
-        )
-      : null,
+    splitId: payment.splitId,
+    splitLine: payment.splitLine,
+    receiptNumber: receiptNumberOf(
+      payment.receipt ?? payment.splitHead?.receipt ?? null,
+    ),
     exchangeRateCurrency: payment.exchangeRateCurrency,
     frozenRate: frozenRateOf(payment),
     exchangeRateStatus: exchangeRateStatus({
@@ -404,152 +437,279 @@ export class PrismaPaymentRepository implements PaymentRepository {
   }
 
   private async insert(input: CreatePaymentRepoInput): Promise<Payment> {
-    const tenantId = this.requireTenantId();
-    const payment = await this.prisma.runWithTenant(async (tx) => {
-      // DB-014: el plan se vuelve a validar DENTRO de la transacción del
-      // INSERT, vivo y con el paciente del abono, y queda bloqueado en modo
-      // compartido (FOR SHARE) hasta el COMMIT: nadie puede retirarlo entre la
-      // comprobación y el alta. La FK compuesta no mira `deletedAt`.
-      //
-      // DX-109 (BE-013): en el MISMO SELECT bloqueante se lee el estado: un
-      // plan rechazado o cancelado no admite abonos (409), y nadie puede
-      // rechazarlo o cancelarlo entre esta lectura y el INSERT. COMPLETED sí.
-      const targetBalance = input.openingBalanceId
-        ? await this.lockOpeningBalance(tx, input)
-        : null;
-      // DX-051: la moneda del plan bloqueado, la de la base del abono.
-      const planCurrency = input.openingBalanceId
-        ? null
-        : await this.lockPlan(tx, input);
-      // Sede del request si el cliente la fijó (X-Location-Id, ya validada
-      // contra esta clínica); si no, la de escritura de la sesión: la sede por
-      // defecto sin restricción (lo de siempre) o la primera permitida
-      // (DX-089).
-      const locationId = await this.tenantContext.writeLocationId(tx);
-      // DX-097: un pago con solo el día se guarda al mediodía de ESA sede, así
-      // cae en su día de caja (medianoche UTC sería la tarde del día anterior
-      // en Bogotá).
-      const timeZone = (
-        await resolveLocationTimeZones(tx, tenantId, [locationId])
-      )(locationId);
-      const paidAt =
-        input.paidAt instanceof Date
-          ? input.paidAt
-          : civilNoonIn(input.paidAt.civilDate, timeZone);
-      // DX-027: la caja abierta de quien cobra en esta sede (bloqueada hasta
-      // el COMMIT); sin caja, 409 si la clínica exige caja para el efectivo.
-      // DX-375: la moneda de destino es la del plan bloqueado (o la del saldo
-      // migrado, que es la del abono). La tasa cotizada fuera se congela solo
-      // si sigue valiendo aquí; si no, el abono queda «sin tasa» y sin base.
-      const targetCurrency = planCurrency ?? input.currency;
-      const frozen = input.frozenRate;
-      const freeze =
-        frozen !== null &&
-        frozen.currency === targetCurrency &&
-        frozen.date === civilDateIn(paidAt, timeZone) &&
-        (await manualRatesStillMatch(tx, tenantId, input.currency, frozen))
-          ? frozen
-          : null;
-      const cash = await assignPaymentToCashSession(tx, {
-        tenantId,
-        locationId,
-        userId: input.createdById,
-        method: input.method,
-        paidAt,
-        timeZone,
-        now: new Date(),
-      });
-      const created = await tx.payment.create({
-        data: {
-          locationId,
-          tenantId,
-          cashSessionId: cash.cashSessionId,
-          treatmentPlanId: input.treatmentPlanId,
-          openingBalanceId: input.openingBalanceId ?? null,
-          patientId: input.patientId,
-          amount: input.amount,
-          currency: input.currency,
-          paidAt,
-          method: input.method,
-          paymentMethodId: input.paymentMethodId ?? null,
-          reference: input.reference ?? null,
-          referenceNormalized: input.referenceNormalized ?? null,
-          duplicateReferenceReason: input.duplicateReferenceReason ?? null,
-          notes: input.notes,
-          idempotencyKey: input.idempotencyKey,
-          idempotencyFingerprint: input.requestFingerprint,
-          createdById: input.createdById,
-          exchangeRateCurrency: targetCurrency,
-          ...(freeze ? frozenRateData(freeze) : {}),
-        },
-        include: { paymentMethod: { select: { name: true } } },
-      });
-      // DX-027: con fecha de un día cuya caja ya cerró, es un ajuste de la
-      // caja abierta (o pendiente), con enlace a la cerrada.
-      if (cash.late && created.createdById) {
-        await recordLatePaymentAdjustment(
-          tx,
-          { ...created, createdById: created.createdById },
-          cash.late,
-        );
-      }
-      const entity = mapToEntity({ ...created, receipt: null }, timeZone);
-      // DX-051 (R4): la base del abono nace con él si se convirtió a la moneda
-      // que el plan tiene con su fila bloqueada y con el día civil con que se
-      // guardó; el plan queda encolado y el reparto corre tras el COMMIT. Si
-      // no, el barrido la crea después (R9.3).
-      const planAmount = input.planAmount;
-      if (
-        planAmount &&
-        created.treatmentPlanId &&
-        planAmount.planCurrency === planCurrency &&
-        planAmount.rateDate === entity.paidOn &&
-        // DX-375: la base sale de la tasa congelada; sin ella, tampoco base.
-        (input.currency === planCurrency || freeze !== null)
-      ) {
-        await tx.paymentPlanAmount.create({
-          data: {
-            paymentId: created.id,
-            tenantId,
-            treatmentPlanId: created.treatmentPlanId,
-            amount: planAmount.amount,
-            currency: planAmount.planCurrency,
-            rateDate: new Date(`${planAmount.rateDate}T00:00:00.000Z`),
-          },
-          select: { paymentId: true },
-        });
-        await enqueuePlanRebalance(tx, tenantId, created.treatmentPlanId);
-      }
+    return this.prisma.runWithTenant(async (tx) => {
+      const line = await this.insertLine(tx, input, null);
       // DX-136: el recibo numerado nace en la MISMA transacción que el abono.
       const receiptNumber = await issuePaymentReceipt(
         tx,
-        {
-          id: created.id,
-          tenantId,
-          locationId,
-          treatmentPlanId: created.treatmentPlanId,
-          openingBalanceId: created.openingBalanceId,
-          patientId: created.patientId,
-          amount: entity.amount,
-          currency: created.currency,
-          method: created.method,
-          paymentMethodName: created.paymentMethod?.name ?? null,
-          reference: created.reference,
-          paidAt: created.paidAt,
-          paidOn: entity.paidOn,
-          createdById: created.createdById,
-        },
+        line.receiptRow,
         // Revisión DX-375: el saldo del recibo salió de la tasa cotizada
         // fuera; si aquí ya no vale, el abono queda «sin tasa» y el saldo no
         // lo cuenta, así que el recibo sale sin saldo (como sin tasa).
-        targetBalance ??
-          (frozen !== null && freeze === null
-            ? null
-            : input.receiptPlanBalance),
+        line.targetBalance ??
+          (line.rateInvalidated ? null : input.receiptPlanBalance),
       );
-      return { ...entity, receiptNumber };
+      return { ...line.entity, receiptNumber };
     });
-    return payment;
+  }
+
+  async createSplit(
+    input: CreateSplitPaymentRepoInput,
+  ): Promise<SplitPaymentRecord> {
+    try {
+      return await this.insertSplit(input);
+    } catch (error) {
+      // DB-014, como `create`: dos reintentos simultáneos del mismo cobro; el
+      // segundo choca con el único parcial de la clave en la línea 1.
+      if (input.idempotencyKey && isUniqueViolation(error)) {
+        const original = await this.findByIdempotencyKey(input.idempotencyKey);
+        const head = original?.payment;
+        if (original && head) {
+          if (
+            head.splitId !== head.id ||
+            (input.requestFingerprint !== undefined &&
+              !isSameRequest(
+                original,
+                paymentTargetKey(head),
+                input.requestFingerprint,
+              )) ||
+            head.treatmentPlanId !== input.lines[0]?.treatmentPlanId
+          ) {
+            throw new UnprocessableEntityException(
+              IDEMPOTENCY_KEY_REUSED_MESSAGE,
+            );
+          }
+          const split = await this.findSplit(head.id);
+          if (split) return split;
+        }
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * DX-390: las líneas en orden, cada una con las mismas reglas que un abono
+   * suelto (`insertLine`: plan bloqueado, caja de quien cobra, tasa congelada
+   * y base), y después UN recibo con todas, en la MISMA transacción: un fallo
+   * en cualquier línea (o en el recibo) deshace el cobro entero, también el
+   * número del contador. La línea 1 lleva el recibo y la Idempotency-Key, y
+   * su id es el del cobro (`splitId`, también en ella misma).
+   */
+  private async insertSplit(
+    input: CreateSplitPaymentRepoInput,
+  ): Promise<SplitPaymentRecord> {
+    const splitId = randomUUID();
+    return this.prisma.runWithTenant(async (tx) => {
+      const lines: InsertedLine[] = [];
+      for (const [index, line] of input.lines.entries()) {
+        lines.push(
+          await this.insertLine(
+            tx,
+            {
+              ...line,
+              idempotencyKey: index === 0 ? input.idempotencyKey : undefined,
+              requestFingerprint:
+                index === 0 ? input.requestFingerprint : undefined,
+            },
+            {
+              id: index === 0 ? splitId : undefined,
+              splitId,
+              line: index + 1,
+            },
+          ),
+        );
+      }
+      const [head] = lines;
+      const receiptNumber = await issuePaymentReceipt(
+        tx,
+        {
+          ...head.receiptRow,
+          split: {
+            lines: lines.map((l, index) => ({
+              paymentId: l.entity.id,
+              line: index + 1,
+              amount: l.entity.amount,
+              currency: l.entity.currency,
+              method: l.entity.method,
+              paymentMethodName: l.entity.paymentMethodName,
+              reference: l.entity.reference,
+              equivalentAmount: l.equivalentAmount,
+            })),
+            planCurrency: head.planCurrency,
+          },
+        },
+        // Como en `insert`: si la tasa de alguna línea ya no vale aquí, esa
+        // línea queda «sin tasa» y el recibo sale sin saldo.
+        lines.some((l) => l.rateInvalidated) ? null : input.receiptPlanBalance,
+      );
+      return {
+        splitId,
+        receiptNumber,
+        payments: lines.map((l) => ({ ...l.entity, receiptNumber })),
+      };
+    });
+  }
+
+  /**
+   * Un abono dentro de la transacción que lo registra (el suelto o una línea
+   * de un cobro dividido, DX-390), sin el recibo: lo emite quien llama.
+   */
+  private async insertLine(
+    tx: Prisma.TransactionClient,
+    input: CreatePaymentRepoInput,
+    split: { id?: string; splitId: string; line: number } | null,
+  ): Promise<InsertedLine> {
+    const tenantId = this.requireTenantId();
+    // DB-014: el plan se vuelve a validar DENTRO de la transacción del
+    // INSERT, vivo y con el paciente del abono, y queda bloqueado en modo
+    // compartido (FOR SHARE) hasta el COMMIT: nadie puede retirarlo entre la
+    // comprobación y el alta. La FK compuesta no mira `deletedAt`.
+    //
+    // DX-109 (BE-013): en el MISMO SELECT bloqueante se lee el estado: un
+    // plan rechazado o cancelado no admite abonos (409), y nadie puede
+    // rechazarlo o cancelarlo entre esta lectura y el INSERT. COMPLETED sí.
+    const targetBalance = input.openingBalanceId
+      ? await this.lockOpeningBalance(tx, input)
+      : null;
+    // DX-051: la moneda del plan bloqueado, la de la base del abono.
+    const planCurrency = input.openingBalanceId
+      ? null
+      : await this.lockPlan(tx, input);
+    // Sede del request si el cliente la fijó (X-Location-Id, ya validada
+    // contra esta clínica); si no, la de escritura de la sesión: la sede por
+    // defecto sin restricción (lo de siempre) o la primera permitida
+    // (DX-089).
+    const locationId = await this.tenantContext.writeLocationId(tx);
+    // DX-097: un pago con solo el día se guarda al mediodía de ESA sede, así
+    // cae en su día de caja (medianoche UTC sería la tarde del día anterior
+    // en Bogotá).
+    const timeZone = (
+      await resolveLocationTimeZones(tx, tenantId, [locationId])
+    )(locationId);
+    const paidAt =
+      input.paidAt instanceof Date
+        ? input.paidAt
+        : civilNoonIn(input.paidAt.civilDate, timeZone);
+    // DX-027: la caja abierta de quien cobra en esta sede (bloqueada hasta
+    // el COMMIT); sin caja, 409 si la clínica exige caja para el efectivo.
+    // DX-375: la moneda de destino es la del plan bloqueado (o la del saldo
+    // migrado, que es la del abono). La tasa cotizada fuera se congela solo
+    // si sigue valiendo aquí; si no, el abono queda «sin tasa» y sin base.
+    const targetCurrency = planCurrency ?? input.currency;
+    const frozen = input.frozenRate;
+    const freeze =
+      frozen !== null &&
+      frozen.currency === targetCurrency &&
+      frozen.date === civilDateIn(paidAt, timeZone) &&
+      (await manualRatesStillMatch(tx, tenantId, input.currency, frozen))
+        ? frozen
+        : null;
+    const cash = await assignPaymentToCashSession(tx, {
+      tenantId,
+      locationId,
+      userId: input.createdById,
+      method: input.method,
+      paidAt,
+      timeZone,
+      now: new Date(),
+    });
+    const created = await tx.payment.create({
+      data: {
+        ...(split?.id ? { id: split.id } : {}),
+        locationId,
+        tenantId,
+        cashSessionId: cash.cashSessionId,
+        treatmentPlanId: input.treatmentPlanId,
+        openingBalanceId: input.openingBalanceId ?? null,
+        patientId: input.patientId,
+        amount: input.amount,
+        currency: input.currency,
+        paidAt,
+        method: input.method,
+        paymentMethodId: input.paymentMethodId ?? null,
+        reference: input.reference ?? null,
+        referenceNormalized: input.referenceNormalized ?? null,
+        duplicateReferenceReason: input.duplicateReferenceReason ?? null,
+        splitId: split?.splitId ?? null,
+        splitLine: split?.line ?? null,
+        notes: input.notes,
+        idempotencyKey: input.idempotencyKey,
+        idempotencyFingerprint: input.requestFingerprint,
+        createdById: input.createdById,
+        exchangeRateCurrency: targetCurrency,
+        ...(freeze ? frozenRateData(freeze) : {}),
+      },
+      include: { paymentMethod: { select: { name: true } } },
+    });
+    // DX-027: con fecha de un día cuya caja ya cerró, es un ajuste de la
+    // caja abierta (o pendiente), con enlace a la cerrada.
+    if (cash.late && created.createdById) {
+      await recordLatePaymentAdjustment(
+        tx,
+        { ...created, createdById: created.createdById },
+        cash.late,
+      );
+    }
+    const entity = mapToEntity(
+      { ...created, receipt: null, splitHead: null },
+      timeZone,
+    );
+    // DX-051 (R4): la base del abono nace con él si se convirtió a la moneda
+    // que el plan tiene con su fila bloqueada y con el día civil con que se
+    // guardó; el plan queda encolado y el reparto corre tras el COMMIT. Si
+    // no, el barrido la crea después (R9.3).
+    const planAmount = input.planAmount;
+    const withBase =
+      planAmount !== null &&
+      created.treatmentPlanId !== null &&
+      planAmount.planCurrency === planCurrency &&
+      planAmount.rateDate === entity.paidOn &&
+      // DX-375: la base sale de la tasa congelada; sin ella, tampoco base.
+      (input.currency === planCurrency || freeze !== null);
+    if (withBase && planAmount && created.treatmentPlanId) {
+      await tx.paymentPlanAmount.create({
+        data: {
+          paymentId: created.id,
+          tenantId,
+          treatmentPlanId: created.treatmentPlanId,
+          amount: planAmount.amount,
+          currency: planAmount.planCurrency,
+          rateDate: new Date(`${planAmount.rateDate}T00:00:00.000Z`),
+        },
+        select: { paymentId: true },
+      });
+      await enqueuePlanRebalance(tx, tenantId, created.treatmentPlanId);
+    }
+    return {
+      entity,
+      planCurrency: targetCurrency,
+      // DX-390: lo que la línea suma en la moneda del plan para el recibo
+      // (la base, con la tasa congelada aquí); `null` si quedó «sin tasa».
+      equivalentAmount:
+        input.currency === targetCurrency
+          ? entity.amount
+          : withBase && planAmount
+            ? planAmount.amount
+            : null,
+      rateInvalidated: frozen !== null && freeze === null,
+      targetBalance,
+      receiptRow: {
+        id: created.id,
+        tenantId,
+        locationId,
+        treatmentPlanId: created.treatmentPlanId,
+        openingBalanceId: created.openingBalanceId,
+        patientId: created.patientId,
+        amount: entity.amount,
+        currency: created.currency,
+        method: created.method,
+        paymentMethodName: created.paymentMethod?.name ?? null,
+        reference: created.reference,
+        paidAt: created.paidAt,
+        paidOn: entity.paidOn,
+        createdById: created.createdById,
+      },
+    };
   }
 
   /**
@@ -703,6 +863,26 @@ export class PrismaPaymentRepository implements PaymentRepository {
     });
   }
 
+  async findSplit(splitId: string): Promise<SplitPaymentRecord | null> {
+    // payments_tenant_split_line_key; RLS acota a la clínica. Sin filtrar por
+    // `deletedAt`, como `findByIdempotencyKey`: el reintento devuelve el cobro
+    // tal como quedó.
+    return this.prisma.runWithTenant(async (tx) => {
+      const rows = await tx.payment.findMany({
+        where: { tenantId: this.requireTenantId(), splitId },
+        include: PAYMENT_INCLUDE,
+        orderBy: { splitLine: 'asc' },
+      });
+      if (rows.length === 0) return null;
+      const payments = await this.toEntities(tx, rows);
+      return {
+        splitId,
+        receiptNumber: payments[0].receiptNumber,
+        payments,
+      };
+    });
+  }
+
   // OJO: listByPlan/listByPatient NO filtran por sede a propósito. El plan y
   // el paciente son de la CLÍNICA, no de una sede; filtrarlos haría que el
   // saldo del paciente cambiara según desde qué sede se mire, que es
@@ -739,7 +919,8 @@ export class PrismaPaymentRepository implements PaymentRepository {
           paidAt: true,
           amount: true,
           currency: true,
-          receipt: { select: { seriesPrefix: true, number: true } },
+          receipt: RECEIPT_NUMBER_SELECT,
+          splitHead: { select: { receipt: RECEIPT_NUMBER_SELECT } },
         },
         orderBy: [{ paidAt: 'desc' }, { id: 'desc' }],
         take: 5,
@@ -749,9 +930,9 @@ export class PrismaPaymentRepository implements PaymentRepository {
         paidAt: row.paidAt,
         amount: row.amount.toNumber(),
         currency: row.currency,
-        receiptNumber: row.receipt
-          ? formatReceiptNumber(row.receipt.seriesPrefix, row.receipt.number)
-          : null,
+        receiptNumber: receiptNumberOf(
+          row.receipt ?? row.splitHead?.receipt ?? null,
+        ),
       }));
     });
   }
@@ -821,11 +1002,26 @@ export class PrismaPaymentRepository implements PaymentRepository {
           createdById: true,
           createdAt: true,
           locationId: true,
+          splitId: true,
         },
       });
       if (!payment) {
         return null;
       }
+      // DX-390: las líneas vivas de su cobro dividido, que se anulan juntas.
+      const splitPaymentIds = payment.splitId
+        ? (
+            await tx.payment.findMany({
+              where: {
+                tenantId: this.requireTenantId(),
+                splitId: payment.splitId,
+                deletedAt: null,
+              },
+              select: { id: true },
+              orderBy: { splitLine: 'asc' },
+            })
+          ).map((line) => line.id)
+        : [];
       // "Hoy" es el día civil de la sede del abono (su horario), nunca el
       // UTC del servidor; ver `resolveLocationTimeZones`.
       const timeZoneOf = await resolveLocationTimeZones(
@@ -838,6 +1034,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
         createdById: payment.createdById,
         createdAt: payment.createdAt,
         timeZone: timeZoneOf(payment.locationId),
+        splitPaymentIds,
       };
     });
   }
@@ -853,48 +1050,37 @@ export class PrismaPaymentRepository implements PaymentRepository {
     // goes in the SAME statement, so a voided row never lacks it.
     return this.prisma.runWithTenant(async (tx) => {
       const tenantId = this.requireTenantId();
-      // DX-051 (R12, pre-flight C1): plan FOR SHARE, la fila del abono, su
-      // base FOR UPDATE y los ítems de sus imputaciones ANTES de anularlo. Un reparto
-      // concurrente o espera a esta anulación (y al leer la liveness tras su
-      // bloqueo ya lo ve anulado) o termina antes (y el DELETE de abajo borra
-      // lo que imputó).
-      const planId = await lockPaymentAllocations(tx, tenantId, id);
-      const result = await tx.payment.updateMany({
+      // DX-390: una línea de un cobro dividido se anula con todas sus líneas
+      // vivas y su recibo único (un recibo, una anulación).
+      const target = await tx.payment.findFirst({
         where: { id, deletedAt: null },
-        data: {
-          deletedAt: audit.voidedAt,
-          voidedAt: audit.voidedAt,
-          voidedById: audit.voidedById,
-          voidReason: audit.reason,
-        },
+        select: { splitId: true },
       });
-      if (result.count === 0) return false;
-      if (planId) await removeVoidedAllocations(tx, tenantId, id, planId);
-      // DX-027: si contaba en una caja ya cerrada, la anulación es un ajuste
-      // en la caja abierta de quien anula (la cerrada no cambia).
-      await recordVoidAdjustment(tx, {
-        tenantId: this.requireTenantId(),
-        paymentId: id,
-        voidedById: audit.voidedById,
-      });
-      // DX-215 (BE-032): cada compromiso de pago CUMPLIDO del paciente en
-      // su moneda para el que contaba este abono, si ya no queda cubierto, vuelve a OPEN (o
-      // BROKEN pasada su fecha), auditado, en esta misma transacción.
-      await reopenPromiseOnVoid(tx, {
-        tenantId: this.requireTenantId(),
-        paymentId: id,
-        now: audit.voidedAt,
-        actor: { userId: audit.voidedById, role: audit.voidedByRole },
-        locationId: audit.request?.locationId ?? null,
-        requestId: audit.request?.requestId ?? null,
-        ip: audit.request?.ip ?? null,
-        userAgent: audit.request?.userAgent ?? null,
-      });
+      if (!target) return false;
+      const lineIds = target.splitId
+        ? (
+            await tx.payment.findMany({
+              where: { tenantId, splitId: target.splitId, deletedAt: null },
+              select: { id: true },
+              orderBy: { splitLine: 'asc' },
+            })
+          ).map((line) => line.id)
+        : [id];
+      // Siempre en el orden de las líneas: dos anulaciones simultáneas de
+      // líneas del mismo cobro bloquean en el mismo orden (sin interbloqueo).
+      // La que llega segunda no anula la línea pedida y responde 404.
+      let voided = false;
+      for (const lineId of lineIds) {
+        const done = await this.voidLine(tx, lineId, audit);
+        if (lineId === id) voided = done;
+      }
+      if (!voided) return false;
       // DX-136: el recibo conserva su número y queda marcado ANULADO con la
       // misma fecha, autor y motivo, en la misma transacción. Los abonos
-      // anteriores a la numeración no tienen recibo (0 filas).
+      // anteriores a la numeración no tienen recibo (0 filas). DX-390: el de
+      // un cobro dividido es el de su línea 1.
       await tx.paymentReceipt.updateMany({
-        where: { paymentId: id, voidedAt: null },
+        where: { paymentId: target.splitId ?? id, voidedAt: null },
         data: {
           voidedAt: audit.voidedAt,
           voidedById: audit.voidedById,
@@ -903,6 +1089,56 @@ export class PrismaPaymentRepository implements PaymentRepository {
       });
       return true;
     });
+  }
+
+  /**
+   * Anula un abono vivo en la transacción de `softDelete`: su imputación, su
+   * ajuste de caja y los compromisos que cumplía. `false` si ya no estaba vivo.
+   */
+  private async voidLine(
+    tx: Prisma.TransactionClient,
+    lineId: string,
+    audit: PaymentVoidAudit,
+  ): Promise<boolean> {
+    const tenantId = this.requireTenantId();
+    // DX-051 (R12, pre-flight C1): plan FOR SHARE, la fila del abono, su
+    // base FOR UPDATE y los ítems de sus imputaciones ANTES de anularlo. Un reparto
+    // concurrente o espera a esta anulación (y al leer la liveness tras su
+    // bloqueo ya lo ve anulado) o termina antes (y el DELETE de abajo borra
+    // lo que imputó).
+    const planId = await lockPaymentAllocations(tx, tenantId, lineId);
+    const result = await tx.payment.updateMany({
+      where: { id: lineId, deletedAt: null },
+      data: {
+        deletedAt: audit.voidedAt,
+        voidedAt: audit.voidedAt,
+        voidedById: audit.voidedById,
+        voidReason: audit.reason,
+      },
+    });
+    if (result.count === 0) return false;
+    if (planId) await removeVoidedAllocations(tx, tenantId, lineId, planId);
+    // DX-027: si contaba en una caja ya cerrada, la anulación es un ajuste
+    // en la caja abierta de quien anula (la cerrada no cambia).
+    await recordVoidAdjustment(tx, {
+      tenantId: this.requireTenantId(),
+      paymentId: lineId,
+      voidedById: audit.voidedById,
+    });
+    // DX-215 (BE-032): cada compromiso de pago CUMPLIDO del paciente en
+    // su moneda para el que contaba este abono, si ya no queda cubierto, vuelve a OPEN (o
+    // BROKEN pasada su fecha), auditado, en esta misma transacción.
+    await reopenPromiseOnVoid(tx, {
+      tenantId: this.requireTenantId(),
+      paymentId: lineId,
+      now: audit.voidedAt,
+      actor: { userId: audit.voidedById, role: audit.voidedByRole },
+      locationId: audit.request?.locationId ?? null,
+      requestId: audit.request?.requestId ?? null,
+      ip: audit.request?.ip ?? null,
+      userAgent: audit.request?.userAgent ?? null,
+    });
+    return true;
   }
 
   async listReceivedInRange(

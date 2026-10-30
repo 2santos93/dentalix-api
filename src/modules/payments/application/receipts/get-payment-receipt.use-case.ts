@@ -8,7 +8,9 @@ import type {
 import type {
   PaymentReceiptView,
   ReceiptExchangeRate,
+  ReceiptSplitView,
 } from '../../domain/entities/payment-receipt.entity';
+import { splitTotal } from '../../domain/split-payment';
 import { exchangeRateStatus } from '../../domain/payment-exchange-rate';
 import { convertWithQuote } from '../../../exchange/domain/exchange-rate-quote';
 import {
@@ -57,6 +59,35 @@ function receiptExchangeRate(
           toPerBase: frozen.toPerBase,
         })
       : null,
+  };
+}
+
+/**
+ * DX-390: las líneas de la foto con la tasa congelada de hoy de cada una, y el
+ * total con esas tasas: una línea «sin tasa» al emitir que el barrido ya
+ * congeló suma igual que al reimprimir cualquier otro recibo (DX-376).
+ */
+function receiptSplitView(
+  snapshot: ReceiptSnapshot,
+  rates: PaymentReceiptSource['splitRates'],
+): ReceiptSplitView | null {
+  const split = snapshot.split;
+  if (!split) return null;
+  const lines = split.lines.map((line) => {
+    const rate = rates.find((r) => r.paymentId === line.paymentId);
+    const exchangeRate = rate ? receiptExchangeRate(rate) : null;
+    const equivalentAmount =
+      line.currency === split.total.currency
+        ? line.amount
+        : (exchangeRate?.equivalentAmount ?? line.equivalentAmount);
+    return { ...line, exchangeRate, equivalentAmount };
+  });
+  return {
+    lines,
+    total: {
+      currency: split.total.currency,
+      amount: splitTotal(lines.map((line) => line.equivalentAmount)),
+    },
   };
 }
 
@@ -111,6 +142,7 @@ export class GetPaymentReceiptUseCase {
     names: ClinicDocumentTypeNames,
   ): PaymentReceiptView {
     const { receipt } = source;
+    const split = receiptSplitView(receipt.snapshot, source.splitRates);
     return {
       paymentId: source.paymentId,
       reference: formatReceiptNumber(receipt.seriesPrefix, receipt.number),
@@ -121,7 +153,8 @@ export class GetPaymentReceiptUseCase {
       voided: receipt.voidedAt !== null,
       voidedAt: receipt.voidedAt,
       voidReason: receipt.voidReason,
-      exchangeRate: receiptExchangeRate(source.rate),
+      exchangeRate: split ? null : receiptExchangeRate(source.rate),
+      split,
       snapshot: viewSnapshot(receipt.snapshot, names),
     };
   }
@@ -142,6 +175,7 @@ export class GetPaymentReceiptUseCase {
       voidedAt: legacy.voidedAt,
       voidReason: legacy.voidReason,
       exchangeRate: receiptExchangeRate(source.rate),
+      split: null,
       snapshot: viewSnapshot(
         buildReceiptSnapshot(
           {

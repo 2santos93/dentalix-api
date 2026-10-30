@@ -102,6 +102,25 @@ export class PaymentDto {
   @ApiProperty({ type: String, nullable: true })
   notes!: string | null;
 
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description:
+      'DX-390: el cobro dividido del abono (el id de su línea 1, que lleva el ' +
+      'recibo único); null en un abono de una sola forma de pago.',
+  })
+  splitId!: string | null;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    minimum: 1,
+    maximum: 5,
+    description: 'DX-390: número de la línea en su cobro dividido (1–5).',
+  })
+  splitLine!: number | null;
+
   @ApiProperty({ type: String, format: 'uuid', nullable: true })
   createdById!: string | null;
 
@@ -118,7 +137,8 @@ export class PaymentDto {
     description:
       'Número del recibo de caja (DX-136): serie de la sede y consecutivo. ' +
       'null en los abonos anteriores a la numeración («sin serie»; su ' +
-      'recibo conserva la referencia antigua REC-xxxxxxxx).',
+      'recibo conserva la referencia antigua REC-xxxxxxxx). DX-390: todas ' +
+      'las líneas de un cobro dividido llevan el número de su recibo único.',
   })
   receiptNumber!: string | null;
 

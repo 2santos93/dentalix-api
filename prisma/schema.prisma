@@ -2151,6 +2151,14 @@ model Payment {
   reference                String?
   referenceNormalized      String?
   duplicateReferenceReason String?
+  // DX-390: cobro dividido en varias formas de pago con un solo recibo. Cada
+  // línea es un abono; `splitId` es el id de la línea 1 (la que lleva el
+  // recibo y la Idempotency-Key del cobro), también en ella misma, y
+  // `splitLine` su número (1–5). NULL en un abono de una sola forma de pago
+  // (CHECK payments_split_check: las dos juntas, 1–5, y la línea 1 es la de
+  // `splitId`).
+  splitId                  String?             @db.Uuid
+  splitLine                Int?                @db.SmallInt
 
   // FK COMPUESTAS (SEC-004): el plan y la sede tienen que ser del MISMO tenant,
   // y `patientId` (denormalizado) tiene que ser el paciente del plan. Por
@@ -2183,6 +2191,11 @@ model Payment {
   // DX-380: su reintento si se quedó sin tasa o sin base (una fila como mucho).
   baseRetry           PaymentBaseRetry?
 
+  // DX-390: la línea 1 del cobro dividido (de la MISMA clínica: FK compuesta
+  // NOT VALID, como payments_payment_method_fkey) y, en ella, todas sus líneas.
+  splitHead  Payment?  @relation("PaymentSplit", fields: [tenantId, splitId], references: [tenantId, id], onDelete: Restrict, map: "payments_split_fkey")
+  splitLines Payment[] @relation("PaymentSplit")
+
   // Idempotency dedup for POST payments. Prisma's `@@unique` would emit a FULL
   // unique index; the migration 20260731160000_add_payment_idempotency_key
   // instead creates it PARTIAL (WHERE "idempotencyKey" IS NOT NULL) so NULL
@@ -2197,6 +2210,11 @@ model Payment {
   // DX-051: destino de las FK de la base y de la imputación (solo abonos a
   // planes; CONCURRENTLY en 20261026100100).
   @@unique([tenantId, id, treatmentPlanId], map: "payments_tenant_id_plan_key")
+  // DX-390: las líneas de un cobro dividido, una por número (y lado hijo de
+  // la FK payments_split_fkey). PARCIAL (WHERE "splitId" IS NOT NULL, solo en
+  // 20261104140100, CONCURRENTLY): NO aceptes un diff de migrate dev que lo
+  // vuelva completo.
+  @@unique([tenantId, splitId, splitLine], map: "payments_tenant_split_line_key")
   // DX-262: índice PARCIAL que Prisma no expresa (no se declara):
   //   payments_tenant_opening_balance_idx ("tenantId", "openingBalanceId")
   //     WHERE "openingBalanceId" IS NOT NULL
