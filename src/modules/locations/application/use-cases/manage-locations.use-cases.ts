@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import { suggestedPhoneRegion } from '../../../../shared/phone/phone-number';
 import { canonicalTimeZoneName } from '../../../../shared/time/canonical-time-zone';
 import { LOCATION_REPOSITORY } from '../../domain/ports/location-repository.port';
 import type {
@@ -30,6 +31,7 @@ import {
   regionalBadRequest,
   validateCountry,
   validateCurrency,
+  validateDefaultPhoneRegion,
   validateHourCycle,
   validateLocale,
   validateRegionalSettings,
@@ -97,6 +99,7 @@ export class CreateLocationUseCase {
     locale?: string;
     hourCycle?: string;
     phone?: string;
+    defaultPhoneRegion?: string | null;
   }): Promise<Location> {
     const country = await validateCountry(input.country, this.countries);
     if (typeof country !== 'string') {
@@ -106,12 +109,25 @@ export class CreateLocationUseCase {
     if (isRegionalError(regional)) {
       throw regionalBadRequest(regional.field, regional.message);
     }
+    // DX-329 (R2, R3): sin el campo, el país si la librería lo admite; con el
+    // campo (también null), lo que llega, validado. Nunca pisa la elección.
+    let defaultPhoneRegion: string | null;
+    if (input.defaultPhoneRegion === undefined) {
+      defaultPhoneRegion = suggestedPhoneRegion(country);
+    } else {
+      const checked = validateDefaultPhoneRegion(input.defaultPhoneRegion);
+      if (checked !== null && typeof checked !== 'string') {
+        throw regionalBadRequest(checked.field, checked.message);
+      }
+      defaultPhoneRegion = checked;
+    }
     return this.repo.create({
       name: input.name.trim(),
       address: input.address?.trim() || undefined,
       country,
       ...regional,
       phone: input.phone?.trim() || undefined,
+      defaultPhoneRegion,
     });
   }
 }
@@ -226,6 +242,7 @@ export class UpdateLocationUseCase {
       timeZone?: string | null;
       locale?: string | null;
       hourCycle?: string | null;
+      defaultPhoneRegion?: string | null;
       confirmRegionalSettings?: true;
       confirmRegionalChange?: true;
     },
@@ -255,6 +272,19 @@ export class UpdateLocationUseCase {
       country = checked;
     }
     const regional = await this.validateProvided(patch, current.timeZone);
+    // DX-329: ausente no cambia; null o vacío lo quita. No es parte de lo
+    // regional: no marca la sede como revisada ni pide confirmar.
+    let defaultPhoneRegion: string | null | undefined;
+    if (patch.defaultPhoneRegion !== undefined) {
+      const checked = validateDefaultPhoneRegion(
+        patch.defaultPhoneRegion,
+        current.defaultPhoneRegion,
+      );
+      if (checked !== null && typeof checked !== 'string') {
+        throw regionalBadRequest(checked.field, checked.message);
+      }
+      defaultPhoneRegion = checked;
+    }
     const touchesRegional =
       Object.keys(regional).length > 0 ||
       patch.currency !== undefined ||
@@ -273,6 +303,7 @@ export class UpdateLocationUseCase {
       ),
       showHealthRegistrationNumber: patch.showHealthRegistrationNumber,
       phone: normalizePhone(patch.phone),
+      defaultPhoneRegion,
       isActive: patch.isActive,
     };
 

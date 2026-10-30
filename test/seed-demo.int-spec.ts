@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
@@ -520,6 +521,26 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     for (const schedule of schedules) {
       expect(schedule.timezone).toBe('America/Bogota');
     }
+  });
+
+  it("the demo's main location gets its country as default phone region", async () => {
+    const tenantId = await liveDemoTenantId();
+    const locations = await raw.location.findMany({
+      where: { tenantId, deletedAt: null },
+    });
+    expect(locations.length).toBeGreaterThan(0);
+    const main = locations.find((l) => l.name === 'Sede principal');
+    expect(main?.defaultPhoneRegion).toBe(main?.country);
+    expect(main?.defaultPhoneRegionSetAt).toBeInstanceOf(Date);
+    // La sugerencia sale de `createMainLocation`: la demo no se toca.
+    // (`--quiet` sale con 1, y `execFileSync` lanza, si hay diferencia).
+    expect(() =>
+      execFileSync(
+        'git',
+        ['diff', '--quiet', '--', 'prisma/seed-demo.ts', 'prisma/demo'],
+        { cwd: process.cwd() },
+      ),
+    ).not.toThrow();
   });
 
   it('deja tipos de cita con color y citas demo con tipo (DX-121)', async () => {

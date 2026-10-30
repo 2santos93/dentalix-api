@@ -5,6 +5,7 @@ import {
   isRegionalError,
   normalizeLocale,
   validateCountry,
+  validateDefaultPhoneRegion,
   validateHourCycle,
   validateRegionalSettings,
   validateTimeZone,
@@ -221,5 +222,35 @@ describe('validateCountry (DX-312)', () => {
         message: 'El país indicado no está en la lista de países.',
       });
     }
+  });
+});
+
+describe('validateDefaultPhoneRegion (DX-329)', () => {
+  it('validateDefaultPhoneRegion trims, uppercases and checks the library list', () => {
+    expect(validateDefaultPhoneRegion(' ve ')).toBe('VE');
+    expect(validateDefaultPhoneRegion(null)).toBeNull();
+    expect(validateDefaultPhoneRegion('')).toBeNull();
+    expect(validateDefaultPhoneRegion('   ')).toBeNull();
+    expect(validateDefaultPhoneRegion('AQ')).toEqual({
+      field: 'defaultPhoneRegion',
+      message: 'El prefijo telefónico «AQ» no está en la lista.',
+    });
+    for (const raw of ['VEN', '1', 'V', 'a'.repeat(500)]) {
+      expect(validateDefaultPhoneRegion(raw)).toEqual({
+        field: 'defaultPhoneRegion',
+        message: 'El prefijo telefónico indicado no está en la lista.',
+      });
+    }
+  });
+
+  it('a stored region the library no longer supports is accepted unchanged on edit', () => {
+    // «AQ» no está en la librería: solo vale si es el valor ya guardado.
+    expect(validateDefaultPhoneRegion('aq', 'AQ')).toBe('AQ');
+    expect(validateDefaultPhoneRegion('AQ', 'VE')).toMatchObject({
+      field: 'defaultPhoneRegion',
+    });
+    expect(validateDefaultPhoneRegion('AQ', null)).toMatchObject({
+      field: 'defaultPhoneRegion',
+    });
   });
 });

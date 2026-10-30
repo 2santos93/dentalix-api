@@ -20,6 +20,7 @@ import {
 } from '../../domain/health-registration';
 import {
   COUNTRY_MISSING,
+  DEFAULT_PHONE_REGION_INVALID,
   HOUR_CYCLES,
   REGIONAL_MESSAGES,
   REGIONAL_NULL_MESSAGE,
@@ -61,6 +62,11 @@ const LOCALE_DOC =
 // `message` y `field`), en el orden moneda, zona, formato y reloj.
 const HOUR_CYCLE_DOC =
   'G1-B: reloj de la sede, h12 (12 h) o h23 (24 h), en toda hora que se pinte para ella. Nunca se deduce del formato ni del país.';
+
+// DX-329 (§4.7): sin `example`; el valor lo valida el caso de uso (400 con
+// `message` y `field`).
+const DEFAULT_PHONE_REGION_DOC =
+  'Región cuyo prefijo telefónico se añade a los números escritos sin +. Se sugiere desde el país al crear la sede. null: sin prefijo por defecto.';
 
 export class CreateLocationDto {
   @ApiProperty({ example: 'Sede Norte' })
@@ -117,6 +123,17 @@ export class CreateLocationDto {
   @IsString({ message: 'El teléfono debe ser un texto.' })
   @MaxLength(LOCATION_PHONE_MAX, { message: PHONE_MESSAGE })
   phone?: string;
+
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    description: `${DEFAULT_PHONE_REGION_DOC} Sin el campo se sugiere el país si admite prefijo.`,
+  })
+  // `@IsOptional` deja pasar `null` y la ausencia; solo un valor presente se
+  // valida como texto, y su lista la da el caso de uso.
+  @IsOptional()
+  @IsString({ message: DEFAULT_PHONE_REGION_INVALID })
+  defaultPhoneRegion?: string | null;
 }
 
 export class UpdateLocationDto {
@@ -186,6 +203,15 @@ export class UpdateLocationDto {
   @IsString({ message: 'El teléfono debe ser un texto.' })
   @MaxLength(LOCATION_PHONE_MAX, { message: PHONE_MESSAGE })
   phone?: string | null;
+
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    description: `${DEFAULT_PHONE_REGION_DOC} Vacío o null lo quita; sin el campo no cambia, tampoco al cambiar el país.`,
+  })
+  @IsOptional()
+  @IsString({ message: DEFAULT_PHONE_REGION_INVALID })
+  defaultPhoneRegion?: string | null;
 
   // `type: String`: sin él, el tipo `string | null` sale como objeto en
   // OpenAPI. `null` no es válido (400), así que el contrato es `string`.
@@ -276,6 +302,12 @@ export class LocationDto {
     description: 'DX-222: teléfono de la sede o null.',
   })
   phone!: string | null;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: DEFAULT_PHONE_REGION_DOC,
+  })
+  defaultPhoneRegion!: string | null;
   @ApiProperty() isActive!: boolean;
   @ApiProperty({
     type: String,

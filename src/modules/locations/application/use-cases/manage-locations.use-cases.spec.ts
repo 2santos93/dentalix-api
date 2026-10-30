@@ -136,7 +136,14 @@ describe('CreateLocationUseCase', () => {
     await uc.execute({ name: '  Sede Norte  ', address: '   ', ...TOKYO });
 
     expect(created).toEqual([
-      { name: 'Sede Norte', address: undefined, phone: undefined, ...TOKYO },
+      {
+        name: 'Sede Norte',
+        address: undefined,
+        phone: undefined,
+        // DX-329: sin el campo, el alta sugiere el país (CO).
+        defaultPhoneRegion: 'CO',
+        ...TOKYO,
+      },
     ]);
   });
 
@@ -914,5 +921,115 @@ describe('teléfono de la sede (DX-222)', () => {
         response: { message: 'La zona horaria «Nope/Zone» no existe.' },
       });
     });
+  });
+});
+
+describe('prefijo telefónico de la sede (DX-329)', () => {
+  const created = () => {
+    const create = jest.fn((input: Partial<Location>) =>
+      Promise.resolve(makeLocation(input)),
+    );
+    return { create, uc: createUseCase(makeRepo({ create })) };
+  };
+
+  it('create suggests the country when the field is absent, none when the library has no metadata', async () => {
+    const { create, uc } = created();
+    await uc.execute({ name: 'Sede', ...TOKYO, country: 've' });
+    await uc.execute({ name: 'Antártida', ...TOKYO, country: 'AQ' });
+    expect(create.mock.calls.map(([i]) => i.defaultPhoneRegion)).toEqual([
+      'VE',
+      null,
+    ]);
+  });
+
+  it('create stores an explicit region (not the country) or null, validated', async () => {
+    const { create, uc } = created();
+    await uc.execute({
+      name: 'Sede',
+      ...TOKYO,
+      country: 'VE',
+      defaultPhoneRegion: ' co ',
+    });
+    await uc.execute({
+      name: 'Sede',
+      ...TOKYO,
+      country: 'VE',
+      defaultPhoneRegion: null,
+    });
+    expect(create.mock.calls.map(([i]) => i.defaultPhoneRegion)).toEqual([
+      'CO',
+      null,
+    ]);
+    const bad = await uc
+      .execute({ name: 'Sede', ...TOKYO, defaultPhoneRegion: 'VEN' })
+      .catch((e: BadRequestException) => e);
+    expect(bad).toBeInstanceOf(BadRequestException);
+    expect((bad as BadRequestException).getResponse()).toMatchObject({
+      field: 'defaultPhoneRegion',
+      message: 'El prefijo telefónico indicado no está en la lista.',
+    });
+    expect(create).toHaveBeenCalledTimes(2);
+  });
+
+  it('update leaves the region alone when absent, also when the country changes', async () => {
+    const update = jest.fn((_id: string, patch: object) =>
+      Promise.resolve(makeLocation({ ...patch })),
+    );
+    const uc = updateUseCase(
+      makeRepo({
+        findById: () =>
+          Promise.resolve(makeLocation({ defaultPhoneRegion: 'CO' })),
+        update,
+      }),
+    );
+    await uc.execute('loc-1', { country: 'VE' });
+    expect(
+      (update.mock.calls[0][1] as { defaultPhoneRegion?: unknown })
+        .defaultPhoneRegion,
+    ).toBeUndefined();
+  });
+
+  it.each([
+    [null, null],
+    ['', null],
+    [' ve ', 'VE'],
+  ])(
+    'update with %p stores %p without touching the regional review',
+    async (raw, expected) => {
+      const update = jest.fn((_id: string, patch: object) =>
+        Promise.resolve(makeLocation({ ...patch })),
+      );
+      const updateRegional = jest.fn();
+      const uc = updateUseCase(makeRepo({ update, updateRegional }));
+      const result = await uc.execute('loc-1', { defaultPhoneRegion: raw });
+      expect(update.mock.calls[0][1]).toMatchObject({
+        defaultPhoneRegion: expected,
+      });
+      expect(updateRegional).not.toHaveBeenCalled();
+      expect(result.regionalSettings).toBeNull();
+    },
+  );
+
+  it('update with an unknown region is 400 naming the field; a stored one is accepted unchanged', async () => {
+    const update = jest.fn((_id: string, patch: object) =>
+      Promise.resolve(makeLocation({ ...patch })),
+    );
+    const repo = (stored: string | null) =>
+      makeRepo({
+        findById: () =>
+          Promise.resolve(makeLocation({ defaultPhoneRegion: stored })),
+        update,
+      });
+    const error = await updateUseCase(repo(null))
+      .execute('loc-1', { defaultPhoneRegion: 'AQ' })
+      .catch((e: BadRequestException) => e);
+    expect((error as BadRequestException).getResponse()).toMatchObject({
+      field: 'defaultPhoneRegion',
+      message: 'El prefijo telefónico «AQ» no está en la lista.',
+    });
+    await updateUseCase(repo('AQ')).execute('loc-1', {
+      defaultPhoneRegion: 'AQ',
+    });
+    expect(update.mock.calls[0][1]).toMatchObject({ defaultPhoneRegion: 'AQ' });
   });
 });

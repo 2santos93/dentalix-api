@@ -251,6 +251,20 @@ describe('Auth (e2e)', () => {
       expect(await legacyScheduleZone(location.id)).toBe('Asia/Tokyo');
     });
 
+    it("a registered clinic's main location gets its country as default phone region", async () => {
+      const { body } = await registerVerified(
+        app,
+        clinicRegisterBody(REGIONAL_TOKYO_FIXTURE, {
+          ...base('prefijo-ve'),
+          locationCountry: 'VE',
+        }),
+      );
+      const location = await mainLocation(body.tenantId);
+      expect(location.country).toBe('VE');
+      expect(location.defaultPhoneRegion).toBe('VE');
+      expect(location.defaultPhoneRegionSetAt).toBeInstanceOf(Date);
+    });
+
     it('registration without locationCountry is 400 with field locationCountry', async () => {
       const missing = base('pais-falta');
       const res = await api()
