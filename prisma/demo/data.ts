@@ -442,6 +442,8 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     medicalHistory: {
       ...healthy,
       habits: { higieneOral: { cepilladoPorDia: 2, cremaConFluor: true } },
+      // DX-307: el peso con el que se calcula la dosis máxima de anestésico.
+      vitalSigns: { peso: 32 },
     },
   },
   {
@@ -1058,6 +1060,23 @@ export const DEMO_CLINICAL_ADDENDA: readonly DemoClinicalAddendum[] = [
     text: 'La TA al ingreso fue 125/85, no 135/85. El resto de la nota se mantiene.',
   },
 ];
+
+/**
+ * DX-307: anestesia local de ejemplo. La paciente infantil (Sofía, 32 kg en la
+ * anamnesis) tiene una exodoncia de 75 con 2 carpules de lidocaína 2 % con
+ * epinefrina: 72 mg de 224 mg (32 %), sin aviso. Por índice de DEMO_PATIENTS.
+ */
+export const DEMO_ANESTHESIA = {
+  patientIndex: 8,
+  notes:
+    'Exodoncia de 75 por reabsorción radicular incompleta. Hemostasia con gasa; indicaciones a la madre.',
+  reason: 'Exodoncia simple',
+  sampleCode: 'LIDOCAINE_2_EPI',
+  carpules: 2,
+  technique: 'NERVE_BLOCK',
+  site: '75 (alveolar inferior izquierdo)',
+  lot: 'LDC-2610-A',
+} as const;
 
 /**
  * DX-170: evoluciones redactadas con las plantillas de ejemplo y ligadas a las

@@ -4429,6 +4429,49 @@ la prescripción: no sustituye el juicio clínico.
   con NULL y su hash se sigue calculando con el formato v1 (test de regresión
   con el valor de DX-013 en `prescription-hash.spec.ts`).
 
+## Anestesia local en la evolución (DX-307)
+
+Módulo `anesthesia`; regla en `src/modules/anesthesia/domain/anesthesia-dose.ts`
+(versión `ANESTHESIA_DOSE_V1`). Es una ayuda: los valores del catálogo no
+sustituyen la ficha técnica del fabricante.
+
+- **Catálogo por clínica** (`anesthetic_products`): principio activo,
+  concentración (%), vasoconstrictor, ml por carpule, mg/kg máximo y tope
+  absoluto en mg. Son DATOS editables por el ADMIN (`POST/PATCH /anesthetics`,
+  se desactivan, no se borran); `POST /anesthetics/samples` carga los 5
+  sugeridos (lidocaína 2 % 7 mg/kg máx. 500; articaína 4 % 7/500 en carpule de
+  1,7 ml; mepivacaína 3 % 6,6/400; prilocaína 4 % 8/600; bupivacaína 0,5 %
+  1,3/90; fuente: Malamed, *Handbook of Local Anesthesia*, 7.ª ed., citada en
+  `domain/sample-anesthetics.ts`). Leerlo: DENTIST, ASSISTANT y ADMIN.
+- **Registro** (`anesthesia_administrations`, ligado a la evolución, su
+  paciente y su sede): anestésico (con COPIA de los valores del catálogo),
+  carpules (de 0,25 en 0,25), técnica, zona/dientes, lote, hora, autor, peso
+  usado y su origen, mg, acumulado de la evolución, avisos y motivo.
+  Inalterable como la evolución (trigger de DX-038, sin DELETE para la app;
+  `PATCH/PUT/DELETE` → 405 que remite a la adenda). RLS FORZADA por tenant y
+  FK compuestas. Registran DENTIST y ADMIN; la asistente lo ve; recepción no.
+- **Cálculo en el servidor**: mg = carpules × ml × % × 10; máximo =
+  min(mg/kg × peso, tope); con varios anestésicos, suma de fracciones del
+  máximo de cada uno. Peso: el anotado en el sillón, si no `vitalSigns.peso`
+  de la anamnesis vigente, si no el ya usado en esa evolución. ≥ 80 % avisa
+  (`DOSE_NEAR_MAX`); ≥ 100 % (`DOSE_OVER_MAX`, o `DOSE_OVER_ABSOLUTE` sin peso)
+  y la alergia a anestésicos/amidas de la anamnesis (`ALLERGY_ANESTHETIC*`,
+  con `allergy-match` de la receta) son bloqueantes: 409 salvo
+  `overrideReason` (10–500), que queda sellado y en el `audit_event` CREATE
+  (`metadata.anesthesiaSafety`: versión, códigos y si se confirmó; nunca mg
+  ni textos). Sin peso se guarda con «Dosis máxima no calculada: falta el
+  peso»; en menores de 12 años sin peso, 400 hasta anotarlo. El registro
+  bloquea la evolución (`FOR UPDATE`) para que dos altas simultáneas no pasen
+  ambas bajo el máximo.
+- **Rutas**: `GET /patients/:id/anesthesia` (ficha),
+  `GET|POST /patients/:id/clinical-entries/:entryId/anesthesia` y
+  `POST …/anesthesia/check` (previsualización, auditada como `VIEW
+  MEDICAL_HISTORY` con `reason: ANESTHESIA_DOSE_CHECK`).
+- **Migraciones** `20261104130000_dx307_enums`, `…130100_dx307_audit_events_idx`
+  y `…130200_dx307_anesthesia`: aditivas (dos tablas y un tipo nuevos).
+- **Demo**: `seed:demo` carga los sugeridos y una exodoncia de la paciente
+  infantil (Sofía, 32 kg) con 2 carpules de lidocaína (72 de 224 mg, 32 %).
+
 ## Imputación de abonos a ítems (DX-051)
 
 Cada abono a un plan se reparte entre los ítems `DONE` y `ACCEPTED` del plan

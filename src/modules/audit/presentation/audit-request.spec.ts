@@ -181,6 +181,44 @@ describe('buildAuditDraft (DX-009)', () => {
     });
   });
 
+  it('anestesia (DX-307): códigos de los avisos de dosis y si se confirmaron; ni mg ni motivo', () => {
+    const draft = buildAuditDraft(
+      {
+        action: 'CREATE',
+        resource: 'ANESTHESIA_ADMINISTRATION',
+        resourceId: { response: 'id' },
+        patient: { param: 'patientId' },
+        anesthesiaSafety: true,
+      },
+      req({ params: { patientId: PATIENT } }),
+      {
+        id: ENTRY,
+        doseMg: 204,
+        safetyRulesVersion: 'ANESTHESIA_DOSE_V1',
+        safetyAlerts: [
+          {
+            code: 'DOSE_OVER_MAX',
+            severity: 'BLOCKING',
+            message: 'Dosis máxima superada: 204 mg de 140 mg',
+          },
+          { code: 'WEIGHT_MISSING', severity: 'INFO', message: 'x' },
+        ],
+        overrideReason: 'Exodoncia compleja',
+      },
+      scope,
+    );
+    expect(draft?.metadata).toEqual({
+      params: { patientId: PATIENT },
+      anesthesiaSafety: {
+        rulesVersion: 'ANESTHESIA_DOSE_V1',
+        blocking: ['DOSE_OVER_MAX'],
+        info: ['WEIGHT_MISSING'],
+        overridden: true,
+      },
+    });
+    expect(JSON.stringify(draft?.metadata)).not.toMatch(/204|Exodoncia/);
+  });
+
   it('búsqueda por lote (DX-191): lote/REF de la query y filas de la respuesta', () => {
     const options: AuditOptions = {
       action: 'EXPORT',
