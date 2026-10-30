@@ -65,7 +65,7 @@ const HOUR_CYCLE_DOC =
 // DX-329 (§4.7): sin `example`; el valor lo valida el caso de uso (400 con
 // `message` y `field`).
 const DEFAULT_PHONE_REGION_DOC =
-  'Región cuyo prefijo telefónico se añade a los números escritos sin +. Se sugiere desde el país al crear la sede. null: sin prefijo por defecto.';
+  'Prefijo telefónico por defecto de la sede: la región (ISO 3166-1 alfa-2) cuyo prefijo se añade a los números escritos sin +. Se sugiere desde el país al crear la sede. null: sin prefijo telefónico por defecto.';
 
 export class CreateLocationDto {
   @ApiProperty({ example: 'Sede Norte' })
@@ -129,7 +129,7 @@ export class CreateLocationDto {
   @ApiPropertyOptional({
     type: String,
     nullable: true,
-    description: `${DEFAULT_PHONE_REGION_DOC} Sin el campo se sugiere el país si admite prefijo.`,
+    description: `${DEFAULT_PHONE_REGION_DOC} Sin el campo se sugiere desde el país de la sede, si la librería lo admite.`,
   })
   // Sin `@IsString`: el caso de uso valida cualquier valor
   // (`validateDefaultPhoneRegion`) y su 400 lleva `field`. `@IsOptional` lo

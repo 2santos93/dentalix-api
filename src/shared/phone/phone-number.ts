@@ -1,14 +1,12 @@
 import {
   getCountries,
   getCountryCallingCode,
-  getExampleNumber,
   isSupportedCountry,
   parsePhoneNumberFromString,
   type CountryCode,
   type NumberType,
   type PhoneNumber,
 } from 'libphonenumber-js/max';
-import mobileExamples from 'libphonenumber-js/mobile/examples';
 
 /**
  * El único punto de `src/` que usa `libphonenumber-js` (DX-329, R11). Con el
@@ -225,11 +223,4 @@ export function whatsAppDigits(
   defaultRegion: PhoneRegion | null,
 ): string | null {
   return parsePhone(text, defaultRegion)?.digits ?? null;
-}
-
-/** Un móvil de ejemplo de la región, en formato nacional, o `null`. */
-export function examplePhone(region: PhoneRegion | null): string | null {
-  const code = phoneRegionOrNull(region) as CountryCode | null;
-  if (!code) return null;
-  return getExampleNumber(code, mobileExamples)?.formatNational() ?? null;
 }

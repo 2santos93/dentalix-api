@@ -1457,7 +1457,7 @@ describe('país de la sede libre (DX-312)', () => {
  * - solo el adaptador importa la librería, en cualquier forma de
  *   `IMPORT_STATEMENT`;
  * - ninguna función de teléfono recibe un país como región. Su argumento de
- *   región (el segundo; el primero en `examplePhone`, `phoneRegionOrNull` y
+ *   región (el segundo; el primero en `phoneRegionOrNull` y
  *   `callingCodeOf`) sale de `callArgument`, equilibrado y en varias líneas,
  *   y no nombra «country». `suggestedPhoneRegion(país)` no está en la lista:
  *   es la sugerencia de R2, y su cuerpo puede pasar el país a
@@ -1498,16 +1498,11 @@ const PHONE_FUNCTIONS = [
   'normalizeMobile',
   'whatsappOfferPhone',
   'normalizePhone',
-  'examplePhone',
   'phoneRegionOrNull',
   'callingCodeOf',
 ];
 /** Las funciones cuyo primer argumento es la región. */
-const REGION_FIRST = new Set([
-  'examplePhone',
-  'phoneRegionOrNull',
-  'callingCodeOf',
-]);
+const REGION_FIRST = new Set(['phoneRegionOrNull', 'callingCodeOf']);
 const PHONE_CALL = new RegExp(`\\b(${PHONE_FUNCTIONS.join('|')})\\s*\\(`, 'g');
 /** Los argumentos de primer nivel de lo que devuelve `callArgument`. */
 function topLevelArguments(inside: string): string[] {
@@ -1682,7 +1677,6 @@ describe('teléfono con libphonenumber (DX-329)', () => {
       [`whatsAppDigits(\n  ctx.patient.phone,\n  ctx.${LOC},\n)`, 'region'],
       [`normalizeMobile(p, patient.${COUNTRY}Code)`, 'region'],
       [`whatsAppDigits(p, x?.${COUNTRY})`, 'region'],
-      [`examplePhone(${LOC})`, 'region'],
       [`phoneRegionOrNull(patient.${COUNTRY}Code)`, 'region'],
       [`callingCodeOf(${LOC} as CountryCode)`, 'region'],
       [

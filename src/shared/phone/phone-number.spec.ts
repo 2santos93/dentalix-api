@@ -2,7 +2,6 @@ import { getExampleNumber, type CountryCode } from 'libphonenumber-js/max';
 import mobileExamples from 'libphonenumber-js/mobile/examples';
 import {
   callingCodeOf,
-  examplePhone,
   isPhoneRegion,
   parsePhone,
   phoneReadings,
@@ -355,12 +354,6 @@ describe('phone-number (DX-329)', () => {
   it('callingCodeOf derives the code', () => {
     expect(callingCodeOf('PR')).toBe('1');
     expect(callingCodeOf('VE')).toBe('58');
-  });
-
-  it('examplePhone gives a national mobile of the region', () => {
-    expect(examplePhone('VE')).toBe('0412-1234567');
-    expect(examplePhone(null)).toBeNull();
-    expect(examplePhone('AQ')).toBeNull();
   });
 
   describe('the previous rule (DX-312), to compare', () => {
