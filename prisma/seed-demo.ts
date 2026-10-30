@@ -2236,8 +2236,11 @@ class DemoSeeder {
             planId,
             {
               amount: payment.amount,
-              currency: DEMO_CURRENCY,
-              paidAt: daysAgoAt(this.now, payment.daysAgo, 11 * 60 + i * 20),
+              currency: payment.currency ?? DEMO_CURRENCY,
+              paidAt:
+                payment.minutesAgo === undefined
+                  ? daysAgoAt(this.now, payment.daysAgo, 11 * 60 + i * 20)
+                  : new Date(this.now.getTime() - payment.minutesAgo * 60_000),
               method: payment.method,
               notes: payment.notes,
             },
