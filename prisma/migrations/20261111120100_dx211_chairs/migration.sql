@@ -13,8 +13,9 @@
 --
 -- Reglas en la BD (la API responde antes con 400/404/409 en español; esto es
 -- la red):
---   * Nombre ÚNICO por sede entre TODOS sus sillones, activos o no
---     (chairs_location_name_key). Decisión DX-211: las citas de un sillón
+--   * Nombre ÚNICO por sede entre TODOS sus sillones, activos o no, SIN
+--     distinguir mayúsculas (chairs_location_name_key, sobre lower(name)):
+--     «Sillón 1» y «sillón 1» son el mismo. Decisión DX-211: las citas de un sillón
 --     desactivado siguen mostrando su nombre con «(inactivo)»; dos «Sillón 1»
 --     en la misma sede (uno inactivo) serían ambiguos en la agenda y en la
 --     historia. Para reutilizar el nombre se reactiva el sillón.
@@ -27,7 +28,11 @@
 --         dos van juntos o ninguno (CHECK).
 --   * appointments (tenantId, locationId, chairId) → chairs(tenantId,
 --     locationId, id): el sillón es de la MISMA clínica y de la MISMA SEDE que
---     la cita. Con "chairId" NULL la FK no mira nada (MATCH SIMPLE).
+--     la cita. Con "chairId" NULL la FK no mira nada (MATCH SIMPLE). Se crea
+--     NOT VALID (solo catálogo: no recorre `appointments` con el ACCESS
+--     EXCLUSIVE de esta migración) y se valida en
+--     20261111120150_dx211_appointments_chair_fk_validate, que solo toma
+--     SHARE UPDATE EXCLUSIVE. Las filas nuevas ya se comprueban desde aquí.
 --   * EXCLUDE appointments_no_overlap_per_chair: dos citas vivas y no
 --     canceladas no ocupan el mismo sillón a la vez (rango medio abierto
 --     [start, end), como DX-036). Incluye "tenantId" (las constraints saltan
@@ -36,16 +41,17 @@
 --     pacientes en él.
 --   * RLS FORCE por tenant en `chairs`, con NULLIF como el resto.
 --
--- FK bajo FORCE (DX-134): añadir la FK de `appointments` valida leyendo la
--- hija con la RLS del owner, así que se quita FORCE a `appointments` en esta
--- misma transacción y se devuelve al final (`chairs` recibe FORCE después).
+-- FK bajo FORCE (DX-134): la FK se añade NOT VALID (no valida filas aquí) y
+-- su VALIDATE va en la migración siguiente con NO FORCE/FORCE de la hija y
+-- la referenciada, como exige la regla.
 --
--- Bloqueo: ADD COLUMN sin DEFAULT es solo catálogo. La FK nueva recorre
--- `appointments` sin reescribirla (todas las filas con "chairId" NULL, no hay
--- nada que comprobar). ADD ... EXCLUDE construye un índice GiST PARCIAL
--- (WHERE "chairId" IS NOT NULL): no entra ninguna fila existente, así que el
--- ACCESS EXCLUSIVE dura lo que el recorrido de la tabla, sin inserciones en el
--- índice. lock_timeout evita quedar encolado detrás de una transacción larga.
+-- Bloqueo: ADD COLUMN sin DEFAULT y la FK NOT VALID son solo catálogo.
+-- ADD ... EXCLUDE construye un índice GiST PARCIAL (WHERE "chairId" IS NOT
+-- NULL) con ACCESS EXCLUSIVE sobre `appointments`: recorre la tabla una vez
+-- pero no entra ninguna fila (todas tienen "chairId" NULL). Medido en local
+-- (Postgres 16) con 60 000 citas: ~20 ms (ver «Coste medido» abajo), el
+-- mismo orden que el patrón aceptado en DX-036/DX-470 para estas EXCLUDE.
+-- lock_timeout evita quedar encolado detrás de una transacción larga.
 -- El índice de la agenda por sillón va aparte, CONCURRENTLY
 -- (20261111120200_dx211_appointments_chair_idx).
 --
@@ -105,10 +111,11 @@ CREATE TABLE "chairs" (
 -- Destino de la FK compuesta de appointments (sillón de la MISMA sede).
 CREATE UNIQUE INDEX "chairs_tenant_location_id_key"
   ON "chairs"("tenantId", "locationId", "id");
--- Un nombre por sede (activos o no) y lado hijo de la FK a la sede (prefijo
--- tenantId, locationId): sirve también la lista por sede.
+-- Un nombre por sede (activos o no), sin distinguir mayúsculas. Es también
+-- el lado hijo de la FK a la sede (prefijo tenantId, locationId) y sirve la
+-- lista por sede. Índice de expresión: schema.prisma no lo declara.
 CREATE UNIQUE INDEX "chairs_location_name_key"
-  ON "chairs"("tenantId", "locationId", "name");
+  ON "chairs"("tenantId", "locationId", lower("name"));
 -- Lado hijo de la FK al profesional por defecto.
 CREATE INDEX "chairs_default_provider_idx"
   ON "chairs"("tenantId", "defaultProviderMembershipId", "defaultProviderId");
@@ -128,14 +135,13 @@ GRANT SELECT, INSERT, UPDATE ON "chairs" TO dentalix_app;
 -- ---------------------------------------------------------------------------
 ALTER TABLE "appointments" ADD COLUMN "chairId" UUID;
 
--- FK compuesta con la SEDE de la cita. Bajo NO FORCE en la hija (DX-134);
--- `chairs` aún no tiene FORCE. FORCE de vuelta al final.
-ALTER TABLE "appointments" NO FORCE ROW LEVEL SECURITY;
+-- FK compuesta con la SEDE de la cita, NOT VALID: solo catálogo. La valida
+-- 20261111120150_dx211_appointments_chair_fk_validate.
 ALTER TABLE "appointments"
   ADD CONSTRAINT "appointments_chair_fkey"
     FOREIGN KEY ("tenantId", "locationId", "chairId")
     REFERENCES "chairs"("tenantId", "locationId", "id")
-    ON DELETE RESTRICT ON UPDATE CASCADE;
+    ON DELETE RESTRICT ON UPDATE CASCADE NOT VALID;
 
 -- Anti-solape por sillón (mismo patrón que appointments_no_overlap_per_provider).
 ALTER TABLE "appointments"
@@ -148,7 +154,14 @@ ALTER TABLE "appointments"
   WHERE ("chairId" IS NOT NULL AND "deletedAt" IS NULL AND "status" <> 'CANCELLED');
 
 ALTER TABLE "chairs" FORCE ROW LEVEL SECURITY;
-ALTER TABLE "appointments" FORCE ROW LEVEL SECURITY;
 
 -- Restricción EXCLUDE NO gestionada por Prisma (como las de DX-036):
 -- schema.prisma no puede modelarla, así que no hay drift.
+
+-- Coste medido (DX-211, revisión M1): en una base local de Postgres 16 con
+-- 60 000 citas vivas de una clínica, `ADD CONSTRAINT
+-- appointments_no_overlap_per_chair` tardó ~20 ms y el VALIDATE de
+-- la FK (migración siguiente) ~1 ms. La EXCLUDE no se puede crear
+-- CONCURRENTLY; con la tabla de una clínica de tamaño modesto el bloqueo es
+-- de milisegundos, como el de DX-036/DX-470.
+

@@ -1,6 +1,9 @@
 import { ConflictException } from '@nestjs/common';
 import type { Chair } from '../../domain/entities/chair.entity';
-import { DUPLICATE_CHAIR_NAME_MESSAGE } from '../../domain/chair-rules';
+import {
+  DUPLICATE_CHAIR_NAME_MESSAGE,
+  sameChairName,
+} from '../../domain/chair-rules';
 import type {
   ChairRepository,
   CreateChairRepoInput,
@@ -10,7 +13,7 @@ import type {
 /**
  * Repositorio de sillones en memoria con estado: los tests afirman sobre
  * `rows` como un e2e lo haría sobre la tabla. El nombre es único por sede
- * (exacto, como el índice de la BD).
+ * (sin distinguir mayúsculas, como el índice de la BD).
  */
 export class InMemoryChairRepository implements ChairRepository {
   readonly rows: Chair[] = [];
@@ -62,7 +65,10 @@ export class InMemoryChairRepository implements ChairRepository {
   private assertUniqueName(locationId: string, name: string, id?: string) {
     if (
       this.rows.some(
-        (r) => r.locationId === locationId && r.name === name && r.id !== id,
+        (r) =>
+          r.locationId === locationId &&
+          sameChairName(r.name, name) &&
+          r.id !== id,
       )
     ) {
       throw new ConflictException(DUPLICATE_CHAIR_NAME_MESSAGE);

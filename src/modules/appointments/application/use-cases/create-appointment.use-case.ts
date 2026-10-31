@@ -90,7 +90,8 @@ type ResolvedAppointmentInput = CreateAppointmentInput & { end: Date };
 export const APPOINTMENT_TYPE_UNAVAILABLE_MESSAGE =
   'El tipo de cita no existe o está desactivado';
 
-export const PROVIDER_REQUIRED_MESSAGE =
+export const PROVIDER_REQUIRED_MESSAGE = 'Elige un profesional';
+export const CHAIR_WITHOUT_PROVIDER_MESSAGE =
   'Elige un profesional: el sillón no tiene profesional por defecto';
 
 @Injectable()
@@ -230,7 +231,9 @@ export class CreateAppointmentUseCase {
         : null;
     const providerId = resolveAppointmentProviderId(input.providerId, chair);
     if (providerId === null) {
-      throw new BadRequestException(PROVIDER_REQUIRED_MESSAGE);
+      throw new BadRequestException(
+        chair ? CHAIR_WITHOUT_PROVIDER_MESSAGE : PROVIDER_REQUIRED_MESSAGE,
+      );
     }
     const provider = await this.staff.findById(providerId);
     if (!provider) {

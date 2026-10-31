@@ -336,6 +336,132 @@ describe('sillón de la cita (DX-211)', () => {
     });
   });
 
+  describe('revisión: cambiar solo el sillón (A1) y canceladas (M2)', () => {
+    it('cambiar solo el sillón con la misma hora y profesional no es reagendar: conserva la confirmación', async () => {
+      const one = seedChair({ name: 'Sillón 1' });
+      const two = seedChair({ name: 'Sillón 2' });
+      const sentAt = new Date('2026-01-02T00:00:00.000Z');
+      const mine = repo.seed({
+        chairId: one.id,
+        providerId: 'dra',
+        start: at('15:00'),
+        end: at('15:30'),
+        confirmationSentAt: sentAt,
+      });
+      const spy = jest.spyOn(repo, 'update');
+      const moved = await update.execute(mine.id, {
+        chairId: two.id,
+        start: at('15:00'),
+        end: at('15:30'),
+        providerId: 'dra',
+      });
+      expect(moved).toMatchObject({
+        chairId: two.id,
+        confirmationSentAt: sentAt,
+      });
+      const patch = spy.mock.calls[0][1];
+      expect(patch.revokeConfirmations).toBeUndefined();
+      expect(patch).not.toHaveProperty('confirmationSentAt');
+    });
+
+    it('se cambia el sillón de una cita de hoy ya empezada (en la clínica), aunque su hora ya pasó', async () => {
+      const one = seedChair({ name: 'Sillón 1' });
+      const two = seedChair({ name: 'Sillón 2' });
+      const started = new Date(Date.now() - 10 * 60_000);
+      const mine = repo.seed({
+        chairId: one.id,
+        start: started,
+        end: new Date(started.getTime() + 30 * 60_000),
+        status: AppointmentStatus.IN_CHAIR,
+        arrivedAt: started,
+        seatedAt: started,
+      });
+      await expect(
+        update.execute(mine.id, {
+          chairId: two.id,
+          start: mine.start,
+          end: mine.end,
+          providerId: mine.providerId,
+        }),
+      ).resolves.toMatchObject({
+        chairId: two.id,
+        status: AppointmentStatus.IN_CHAIR,
+      });
+    });
+
+    it('asignar un sillón de otra sede o desactivado a una cita cancelada también se rechaza', async () => {
+      const mine = repo.seed({ status: AppointmentStatus.CANCELLED });
+      const off = seedChair({ active: false });
+      const sur = seedChair({ locationId: 'sur' });
+      await expect(
+        update.execute(mine.id, { chairId: off.id }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(
+        update.execute(mine.id, { chairId: sur.id }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('una cancelada sí puede pasar a un sillón activo ocupado (no lo ocupa)', async () => {
+      const chair = seedChair({});
+      repo.seed({ chairId: chair.id, start: at('15:00'), end: at('15:30') });
+      const mine = repo.seed({
+        status: AppointmentStatus.CANCELLED,
+        patientId: 'p9',
+        start: at('15:00'),
+        end: at('15:30'),
+      });
+      await expect(
+        update.execute(mine.id, { chairId: chair.id }),
+      ).resolves.toMatchObject({ chairId: chair.id });
+    });
+
+    it('reactivar una cancelada cuyo sillón se desactivó exige un sillón activo', async () => {
+      const chair = seedChair({ name: 'Viejo' });
+      const mine = repo.seed({
+        chairId: chair.id,
+        status: AppointmentStatus.CANCELLED,
+        start: at('18:00'),
+        end: at('18:30'),
+      });
+      chairs.rows.find((c) => c.id === chair.id)!.active = false;
+      await expect(
+        update.execute(mine.id, { status: AppointmentStatus.SCHEDULED }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'El sillón «Viejo» está desactivado: elige otro sillón',
+        ),
+      );
+    });
+
+    it('reactivar una cancelada cuyo sillón se ocupó mientras tanto: 409', async () => {
+      const chair = seedChair({ name: 'Sillón 1' });
+      const mine = repo.seed({
+        chairId: chair.id,
+        status: AppointmentStatus.CANCELLED,
+        start: at('19:00'),
+        end: at('19:30'),
+      });
+      repo.seed({
+        chairId: chair.id,
+        patientId: 'p7',
+        providerId: 'otro',
+        start: at('19:00'),
+        end: at('19:30'),
+      });
+      await expect(
+        update.execute(mine.id, { status: AppointmentStatus.SCHEDULED }),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+  });
+
+  describe('revisión: mensaje sin profesional (B2)', () => {
+    it('sin sillón ni profesional pide elegir un profesional', async () => {
+      await expect(book({ providerId: undefined })).rejects.toThrow(
+        new BadRequestException('Elige un profesional'),
+      );
+    });
+  });
+
   describe('listar', () => {
     it('chairIds filtra por sillones de la sede; uno ajeno o de otra sede es 400', async () => {
       const one = seedChair({ name: 'Sillón 1' });

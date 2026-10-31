@@ -25,7 +25,10 @@ import {
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
-import { Roles } from '../../auth/presentation/guards/roles.decorator';
+import {
+  Roles,
+  RolesDeniedMessage,
+} from '../../auth/presentation/guards/roles.decorator';
 import {
   APPOINTMENT_ROLES,
   CHAIR_WRITE_ROLES,
@@ -48,6 +51,10 @@ import {
   ReorderChairsDto,
   UpdateChairDto,
 } from './dto/chair.dto';
+
+/** 403 en español para quien no es ADMIN (la web lo enseña tal cual). */
+export const CHAIR_WRITE_FORBIDDEN_MESSAGE =
+  'Solo administración gestiona los sillones.';
 
 interface AuthenticatedRequest {
   user: JwtPayload;
@@ -95,6 +102,7 @@ export class ChairsController {
   })
   @Post()
   @Roles(...CHAIR_WRITE_ROLES)
+  @RolesDeniedMessage(CHAIR_WRITE_FORBIDDEN_MESSAGE)
   @ApiCreatedResponse({ type: ChairDto })
   @ApiBadRequestResponse({
     description:
@@ -106,7 +114,9 @@ export class ChairsController {
   @ApiConflictResponse({
     description: 'Ya existe un sillón con ese nombre en la sede',
   })
-  @ApiForbiddenResponse({ description: 'Solo ADMIN, en una sede permitida' })
+  @ApiForbiddenResponse({
+    description: `${CHAIR_WRITE_FORBIDDEN_MESSAGE} (o sede no permitida)`,
+  })
   create(
     @Body() dto: CreateChairDto,
     @Req() req: AuthenticatedRequest,
@@ -125,6 +135,7 @@ export class ChairsController {
   @Audit({ action: 'UPDATE', resource: 'CHAIR', reason: 'CHAIR_ORDER' })
   @Put('order')
   @Roles(...CHAIR_WRITE_ROLES)
+  @RolesDeniedMessage(CHAIR_WRITE_FORBIDDEN_MESSAGE)
   @ApiOkResponse({
     type: [ChairDto],
     description: 'Los sillones de la sede en el orden nuevo.',
@@ -133,7 +144,9 @@ export class ChairsController {
     description: 'No son todos los sillones de la sede, o alguno se repite',
   })
   @ApiNotFoundResponse({ description: 'Sede no encontrada en esta clínica' })
-  @ApiForbiddenResponse({ description: 'Solo ADMIN, en una sede permitida' })
+  @ApiForbiddenResponse({
+    description: `${CHAIR_WRITE_FORBIDDEN_MESSAGE} (o sede no permitida)`,
+  })
   reorder(
     @Body() dto: ReorderChairsDto,
     @Req() req: AuthenticatedRequest,
@@ -147,6 +160,7 @@ export class ChairsController {
   @Audit({ action: 'UPDATE', resource: 'CHAIR', resourceId: { param: 'id' } })
   @Patch(':id')
   @Roles(...CHAIR_WRITE_ROLES)
+  @RolesDeniedMessage(CHAIR_WRITE_FORBIDDEN_MESSAGE)
   @ApiOkResponse({ type: ChairDto })
   @ApiBadRequestResponse({ description: 'Campo inválido' })
   @ApiNotFoundResponse({
@@ -155,7 +169,9 @@ export class ChairsController {
   @ApiConflictResponse({
     description: 'Ya existe un sillón con ese nombre en la sede',
   })
-  @ApiForbiddenResponse({ description: 'Solo ADMIN, en una sede permitida' })
+  @ApiForbiddenResponse({
+    description: `${CHAIR_WRITE_FORBIDDEN_MESSAGE} (o sede no permitida)`,
+  })
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateChairDto,
@@ -181,13 +197,16 @@ export class ChairsController {
   @Post(':id/deactivate')
   @HttpCode(200)
   @Roles(...CHAIR_WRITE_ROLES)
+  @RolesDeniedMessage(CHAIR_WRITE_FORBIDDEN_MESSAGE)
   @ApiOkResponse({
     type: ChairDto,
     description:
       'Desactivado (no se borra): deja de ofrecerse para citas nuevas y de salir como columna; sus citas lo conservan.',
   })
   @ApiNotFoundResponse({ description: 'Sillón no encontrado en esta clínica' })
-  @ApiForbiddenResponse({ description: 'Solo ADMIN, en una sede permitida' })
+  @ApiForbiddenResponse({
+    description: `${CHAIR_WRITE_FORBIDDEN_MESSAGE} (o sede no permitida)`,
+  })
   deactivate(
     @Param('id', ParseUUIDPipe) id: string,
     @Req() req: AuthenticatedRequest,
@@ -204,9 +223,12 @@ export class ChairsController {
   @Post(':id/reactivate')
   @HttpCode(200)
   @Roles(...CHAIR_WRITE_ROLES)
+  @RolesDeniedMessage(CHAIR_WRITE_FORBIDDEN_MESSAGE)
   @ApiOkResponse({ type: ChairDto })
   @ApiNotFoundResponse({ description: 'Sillón no encontrado en esta clínica' })
-  @ApiForbiddenResponse({ description: 'Solo ADMIN, en una sede permitida' })
+  @ApiForbiddenResponse({
+    description: `${CHAIR_WRITE_FORBIDDEN_MESSAGE} (o sede no permitida)`,
+  })
   reactivate(
     @Param('id', ParseUUIDPipe) id: string,
     @Req() req: AuthenticatedRequest,

@@ -202,7 +202,12 @@ export class UpdateChairUseCase {
     if (input.sortOrder !== undefined) {
       assertValid(chairSortOrderError(input.sortOrder));
     }
-    if (input.defaultProviderId) {
+    // Solo se valida (y se escribe) si CAMBIA: renombrar un sillón cuyo
+    // profesional por defecto ya no está disponible no debe fallar por él.
+    const providerChanges =
+      input.defaultProviderId !== undefined &&
+      input.defaultProviderId !== chair.defaultProviderId;
+    if (providerChanges && input.defaultProviderId) {
       await assertDefaultProvider(
         this.staff,
         input.defaultProviderId,
@@ -212,7 +217,7 @@ export class UpdateChairUseCase {
     return this.repo.update(id, {
       name,
       sortOrder: input.sortOrder,
-      defaultProviderId: input.defaultProviderId,
+      defaultProviderId: providerChanges ? input.defaultProviderId : undefined,
       updatedById: actorId,
     });
   }

@@ -224,9 +224,12 @@ describe('Sillones por sede y anti-solape por sillón (e2e, DX-211)', () => {
         assistant.token,
       ).expect(200);
       for (const token of [dentist.token, reception.token, assistant.token]) {
-        await as(api().post('/api/v1/chairs'), token)
+        const denied = await as(api().post('/api/v1/chairs'), token)
           .send({ locationId: norte, name: 'Intruso' })
           .expect(403);
+        expect((denied.body as { message: string }).message).toBe(
+          'Solo administración gestiona los sillones.',
+        );
         await as(api().patch(`/api/v1/chairs/${chair.id}`), token)
           .send({ name: 'Intruso' })
           .expect(403);
@@ -498,6 +501,95 @@ describe('Sillones por sede y anti-solape por sillón (e2e, DX-211)', () => {
         api().post(`/api/v1/chairs/${chair.id}/reactivate`),
         clinic.adminToken,
       ).expect(200);
+    });
+  });
+
+  describe('revisión: cambiar solo el sillón no es reagendar (A1)', () => {
+    let one: ChairBody;
+    let two: ChairBody;
+
+    beforeAll(async () => {
+      [one, two] = (
+        await as(
+          api().get('/api/v1/chairs').query({ locationId: norte }),
+          clinic.adminToken,
+        ).expect(200)
+      ).body as ChairBody[];
+    });
+
+    function moveChair(
+      appt: { id: string; start: string; end: string; providerId: string },
+      chairId: string,
+    ) {
+      // Lo que manda «Mover a…»: fecha, hora y profesional iguales y el sillón nuevo.
+      return as(
+        api().patch(`/api/v1/appointments/${appt.id}`),
+        reception.token,
+      ).send({
+        start: appt.start,
+        end: appt.end,
+        providerId: appt.providerId,
+        chairId,
+      });
+    }
+
+    it('tras cambiar solo el sillón, el enlace de confirmación sin responder sigue vigente', async () => {
+      const appt = (
+        await book({
+          chairId: one.id,
+          patientId: patients[2],
+          start: at('12:00'),
+          end: at('12:30'),
+        }).expect(201)
+      ).body as AppointmentBody & { start: string; end: string };
+      await as(
+        api().post(`/api/v1/appointments/${appt.id}/confirmation-link`),
+        reception.token,
+      ).expect(201);
+      const moved = await moveChair(appt, two.id).expect(200);
+      expect((moved.body as AppointmentBody).chairId).toBe(two.id);
+      const confirmations = await raw.appointmentConfirmation.findMany({
+        where: { appointmentId: appt.id },
+      });
+      expect(confirmations).toHaveLength(1);
+      expect(confirmations[0].revokedAt).toBeNull();
+      const row = await raw.appointment.findUniqueOrThrow({
+        where: { id: appt.id },
+      });
+      expect(row.confirmationSentAt).not.toBeNull();
+    });
+
+    it('se cambia el sillón de una cita de hoy con el paciente ya en la clínica', async () => {
+      const appt = (
+        await book({
+          chairId: one.id,
+          patientId: patients[3],
+          start: at('13:00'),
+          end: at('13:30'),
+        }).expect(201)
+      ).body as AppointmentBody & { start: string; end: string };
+      // Se trae a HOY (empezó hace 5 min) por `raw`: agendar en el pasado no se puede.
+      const start = new Date(Date.now() - 5 * 60_000);
+      const end = new Date(start.getTime() + 30 * 60_000);
+      await raw.appointment.update({
+        where: { id: appt.id },
+        data: { start, end },
+      });
+      await as(api().patch(`/api/v1/appointments/${appt.id}`), reception.token)
+        .send({ status: 'ARRIVED' })
+        .expect(200);
+      const moved = await moveChair(
+        {
+          ...appt,
+          start: start.toISOString(),
+          end: end.toISOString(),
+        },
+        two.id,
+      ).expect(200);
+      expect(moved.body as AppointmentBody & { status: string }).toMatchObject({
+        chairId: two.id,
+        status: 'ARRIVED',
+      });
     });
   });
 

@@ -2668,8 +2668,10 @@ model Chair {
 
   // Destino de la FK compuesta de appointments: el sillón de la MISMA sede.
   @@unique([tenantId, locationId, id], map: "chairs_tenant_location_id_key")
-  // Un nombre por sede; también la lista por sede y el lado hijo de la FK a la sede.
-  @@unique([tenantId, locationId, name], map: "chairs_location_name_key")
+  // Un nombre por sede SIN distinguir mayúsculas: índice único de expresión
+  // ("tenantId", "locationId", lower(name)) en la migración, que Prisma no
+  // expresa (también es el lado hijo de la FK a la sede y la lista por sede).
+  // NO aceptar un diff de migrate dev que lo recree sobre `name` a secas.
   @@index([tenantId, defaultProviderMembershipId, defaultProviderId], map: "chairs_default_provider_idx")
   @@map("chairs")
 }

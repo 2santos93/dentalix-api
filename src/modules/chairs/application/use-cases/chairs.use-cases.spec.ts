@@ -194,6 +194,23 @@ describe('sillones (DX-211)', () => {
       });
     });
 
+    it('reenviar el mismo profesional por defecto no lo vuelve a validar (aunque ya no esté disponible)', async () => {
+      const chair = repo.seed({
+        locationId: 'norte',
+        defaultProviderId: 'nadie',
+      });
+      await expect(
+        update.execute(
+          chair.id,
+          { name: 'Gabinete B', defaultProviderId: 'nadie' },
+          'admin',
+        ),
+      ).resolves.toMatchObject({
+        name: 'Gabinete B',
+        defaultProviderId: 'nadie',
+      });
+    });
+
     it('renombrar al nombre de otro sillón de la sede es 409; a su propio nombre, no', async () => {
       const one = await create.execute(
         { locationId: 'norte', name: 'Sillón 1' },

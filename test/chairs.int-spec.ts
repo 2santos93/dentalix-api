@@ -229,6 +229,10 @@ describe('sillones en la BD (int, DX-211)', () => {
       await expect(
         raw.chair.create({ data: chairRow(a, { name: 'Único' }) }),
       ).rejects.toThrow(/chairs_location_name_key|Unique constraint/);
+      // Sin distinguir mayúsculas (índice sobre lower(name)).
+      await expect(
+        raw.chair.create({ data: chairRow(a, { name: 'ÚNICO' }) }),
+      ).rejects.toThrow(/chairs_location_name_key|Unique constraint/);
       await expect(
         raw.chair.create({
           data: chairRow(a, { locationId: a.sur, name: 'Único' }),
@@ -382,9 +386,12 @@ describe('sillones en la BD (int, DX-211)', () => {
     });
 
     it('appointments_chair_fkey es (tenantId, locationId, chairId) → chairs, RESTRICT al borrar', async () => {
-      const [row] = await raw.$queryRaw<{ def: string }[]>`
-        SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint
+      const [row] = await raw.$queryRaw<{ def: string; validated: boolean }[]>`
+        SELECT pg_get_constraintdef(oid) AS def, convalidated AS validated
+        FROM pg_constraint
         WHERE conname = 'appointments_chair_fkey'`;
+      // Nació NOT VALID y la migración siguiente la validó (revisión M1).
+      expect(row.validated).toBe(true);
       expect(row.def).toBe(
         'FOREIGN KEY ("tenantId", "locationId", "chairId") REFERENCES chairs("tenantId", "locationId", id) ON UPDATE CASCADE ON DELETE RESTRICT',
       );

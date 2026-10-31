@@ -349,6 +349,17 @@ export class UpdateAppointmentUseCase {
     // decide (sin saltos imposibles, permisos por rol) y aquí se fijan las
     // horas con el reloj del servidor; el cambio va condicionado al estado
     // leído, así que dos personas a la vez no se pisan (la segunda, 409).
+    // Reagendar = cambiar DE VERDAD la hora o el profesional respecto a lo
+    // guardado (DX-121: «Mover a…» y el arrastre). DX-211: «Mover a…» manda
+    // siempre fecha, hora y profesional; si solo cambia el sillón no es un
+    // reagendado (ni revoca la confirmación ni mira pasado u horario).
+    const moves =
+      (patch.start !== undefined &&
+        patch.start.getTime() !== existing.start.getTime()) ||
+      (patch.end !== undefined &&
+        patch.end.getTime() !== existing.end.getTime()) ||
+      (patch.providerId !== undefined &&
+        patch.providerId !== existing.providerId);
     const nextStatus =
       patch.status !== undefined && patch.status !== existing.status
         ? patch.status
@@ -364,13 +375,7 @@ export class UpdateAppointmentUseCase {
     // borra sus datos (coherente con la CHECK de la tabla).
     // B1: el aviso se cuenta contra el inicio de la cita; cancelar y mover en
     // el mismo cambio no tiene sentido y daría un aviso incoherente.
-    if (
-      nextStatus === AppointmentStatus.CANCELLED &&
-      (patch.start !== undefined ||
-        patch.end !== undefined ||
-        (patch.providerId !== undefined &&
-          patch.providerId !== existing.providerId))
-    ) {
+    if (nextStatus === AppointmentStatus.CANCELLED && moves) {
       throw new BadRequestException(CANCELLATION_MESSAGES.cancelAndMove);
     }
     const cancellationPatch =
@@ -398,11 +403,7 @@ export class UpdateAppointmentUseCase {
       patch.chairId !== undefined && patch.chairId !== existing.chairId;
     const nextChairId =
       patch.chairId !== undefined ? patch.chairId : existing.chairId;
-    const isReschedule =
-      patch.start !== undefined ||
-      patch.end !== undefined ||
-      (patch.providerId !== undefined &&
-        patch.providerId !== existing.providerId);
+    const isReschedule = moves;
     if (isReschedule) {
       const nextStart = patch.start ?? existing.start;
       const nextEnd = patch.end ?? existing.end;
@@ -510,24 +511,30 @@ export class UpdateAppointmentUseCase {
       }
     }
 
-    // DX-211: el sillón de la cita al cambiarlo o al reagendarla (el de antes
-    // o el nuevo): de su sede, activo y libre en la franja final. Una cita
-    // cancelada no ocupa el sillón (la EXCLUDE tampoco la cuenta).
+    // DX-211: el sillón de la cita al cambiarlo, al reagendarla o al
+    // reactivar una cancelada: de su sede y activo, aunque la cita esté o pase
+    // a cancelada. Que esté libre solo se mira si la cita lo ocupará (una
+    // cancelada no cuenta, como en la EXCLUDE).
+    const finalStatus = patch.status ?? existing.status;
+    const reactivatesCancelled =
+      existing.status === AppointmentStatus.CANCELLED &&
+      finalStatus !== AppointmentStatus.CANCELLED;
     if (
       nextChairId !== null &&
-      (chairChanged || isReschedule) &&
-      (patch.status ?? existing.status) !== AppointmentStatus.CANCELLED
+      (chairChanged || isReschedule || reactivatesCancelled)
     ) {
       const chair = await this.requireChairs().load(nextChairId, {
         locationId: existing.locationId,
         requireActive: true,
       });
-      await this.requireChairs().assertFree(chair, {
-        locationId: existing.locationId,
-        start: patch.start ?? existing.start,
-        end: patch.end ?? existing.end,
-        excludeId: existing.id,
-      });
+      if (finalStatus !== AppointmentStatus.CANCELLED) {
+        await this.requireChairs().assertFree(chair, {
+          locationId: existing.locationId,
+          start: patch.start ?? existing.start,
+          end: patch.end ?? existing.end,
+          excludeId: existing.id,
+        });
+      }
     }
 
     // Race-proof backstop for the DB's EXCLUDE constraint
