@@ -19,6 +19,8 @@ export interface PublicSlotOffer {
   appointmentId: string | null;
   outcome: WaitlistOfferOutcome;
   expiresAt: Date | null;
+  /** DX-461: el paciente está archivado; el enlace ya no sirve. */
+  patientArchived: boolean;
   /** Cuándo se creó: para saber si otra oferta ganó el hueco después. */
   createdAt: Date;
   slotStart: Date;
@@ -66,6 +68,8 @@ export interface SlotOfferRepository {
    * mueve la marcada «Adelantar si hay hueco») con el anti-solape de la BD,
    * marca la oferta ACCEPTED, las demás pendientes del hueco TAKEN_BY_OTHER y
    * lo audita todo con origen PUBLIC_LINK. Exactamente una aceptación gana.
+   * DX-461: antes, comparte el candado del paciente (el que toma archivar):
+   * con el paciente archivado responde EXPIRED sin escribir nada.
    */
   accept(
     offer: PublicSlotOffer,
@@ -80,7 +84,10 @@ export interface SlotOfferRepository {
    * Devuelve cuántas cambió.
    */
   expireDue(tenantId: string, now: Date, limit: number): Promise<number>;
-  /** Rechaza si sigue pendiente y vigente (si caducó, la marca EXPIRED). */
+  /**
+   * Rechaza si sigue pendiente y vigente (si caducó, la marca EXPIRED). Con
+   * el paciente archivado (DX-461), EXPIRED sin escribir nada.
+   */
   decline(
     offer: PublicSlotOffer,
     now: Date,

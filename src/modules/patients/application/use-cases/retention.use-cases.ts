@@ -1,4 +1,13 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+import {
+  totalLivePublicLinks,
+  type LivePublicLinkCounts,
+} from '../../domain/live-public-links';
+import {
+  PATIENT_PUBLIC_LINKS_READER,
+  type PatientPublicLinksReader,
+} from '../../domain/ports/patient-public-links.port';
 import type { RetentionExtension } from '@prisma/client';
 import {
   PATIENT_REPOSITORY,
@@ -22,6 +31,7 @@ export const RETENTION_CLOCK = Symbol('RETENTION_CLOCK');
  * `CLINICAL_RECORD_RETENTION` si la HC sigue en retención legal; un paciente
  * sin atenciones clínicas (p. ej. un duplicado recién creado) se archiva,
  * salvo que tenga citas abiertas (409 `PATIENT_HAS_PENDING_APPOINTMENTS`).
+ * DX-461: al archivar se anulan sus enlaces públicos vivos (ver el repo).
  */
 @Injectable()
 export class ArchivePatientUseCase {
@@ -30,12 +40,38 @@ export class ArchivePatientUseCase {
     @Inject(RETENTION_CLOCK) private readonly now: Clock,
   ) {}
 
-  execute(id: string): Promise<void> {
+  execute(id: string, ctx: AuditRequestContext): Promise<void> {
     const now = this.now();
-    return this.repo.archive(id, (state) => {
-      assertNotUnderRetention(state, now);
-      assertNoPendingAppointments(state.pendingAppointments);
-    });
+    return this.repo.archive(
+      id,
+      (state) => {
+        assertNotUnderRetention(state, now);
+        assertNoPendingAppointments(state.pendingAppointments);
+      },
+      { now, ctx },
+    );
+  }
+}
+
+export type LivePublicLinksSummary = LivePublicLinkCounts & { total: number };
+
+/**
+ * DX-461: cuántos enlaces públicos vivos anularía archivar al paciente, para
+ * avisarlo en el diálogo antes de confirmar. 404 si no existe en la clínica
+ * (o ya está archivado).
+ */
+@Injectable()
+export class CountPatientLivePublicLinksUseCase {
+  constructor(
+    @Inject(PATIENT_PUBLIC_LINKS_READER)
+    private readonly links: PatientPublicLinksReader,
+    @Inject(RETENTION_CLOCK) private readonly now: Clock,
+  ) {}
+
+  async execute(patientId: string): Promise<LivePublicLinksSummary> {
+    const counts = await this.links.countLive(patientId, this.now());
+    if (!counts) throw new NotFoundException('Patient not found');
+    return { ...counts, total: totalLivePublicLinks(counts) };
   }
 }
 

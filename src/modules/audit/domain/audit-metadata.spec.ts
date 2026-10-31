@@ -1110,3 +1110,36 @@ describe('sanitizeAuditMetadata — hueco reservado saltado (DX-446)', () => {
     }
   });
 });
+
+describe('sanitizeAuditMetadata — enlaces anulados al archivar (DX-461)', () => {
+  const revokedLinks = {
+    slotOffers: 1,
+    consentSignatures: 2,
+    budgetSignatures: 0,
+    signedPdfCopies: 1,
+    anamnesis: 3,
+  };
+
+  it('conserva el número de enlaces anulados por tipo', () => {
+    expect(
+      sanitizeAuditMetadata({
+        reason: 'PATIENT_ARCHIVED_LINKS_REVOKED',
+        revokedLinks,
+      }),
+    ).toEqual({ reason: 'PATIENT_ARCHIVED_LINKS_REVOKED', revokedLinks });
+  });
+
+  it('descarta el bloque entero con tokens, claves ajenas o números raros', () => {
+    for (const bad of [
+      { ...revokedLinks, token: 'abc' },
+      { ...revokedLinks, slotOffers: -1 },
+      { ...revokedLinks, anamnesis: 1.5 },
+      { ...revokedLinks, consentSignatures: '2' },
+      { ...revokedLinks, signedPdfCopies: 1_000_001 },
+      { slotOffers: 1 },
+      'muchos',
+    ]) {
+      expect(sanitizeAuditMetadata({ revokedLinks: bad })).toEqual({});
+    }
+  });
+});

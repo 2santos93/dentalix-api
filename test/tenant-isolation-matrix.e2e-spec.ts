@@ -1068,6 +1068,13 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       path: () => `/patients/${a.patientId}`,
       status: 404,
     },
+    // DX-461: contar los enlaces públicos vivos antes de archivar.
+    {
+      name: 'GET /patients/:id/live-public-links',
+      verb: 'get',
+      path: () => `/patients/${a.patientId}/live-public-links`,
+      status: 404,
+    },
     {
       name: 'PATCH /patients/:id/retention',
       verb: 'patch',

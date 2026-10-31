@@ -1,3 +1,4 @@
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { DocumentType, RetentionExtension, Sex } from '@prisma/client';
 import { Patient } from '../entities/patient.entity';
 import type { MedicalHistoryVersionData } from '../../../medical-history/domain/ports/medical-history-repository.port';
@@ -127,6 +128,16 @@ export interface PatientArchiveState extends PatientRetentionState {
 }
 
 /**
+ * DX-461: con qué se anulan los enlaces públicos vivos al archivar: la hora
+ * (la de `deletedAt` y la de cada anulación) y quién archiva y desde dónde
+ * (el audit_event con el número de enlaces por tipo).
+ */
+export interface ArchiveRevocation {
+  now: Date;
+  ctx: AuditRequestContext;
+}
+
+/**
  * Campos NO clínicos que vacía la supresión parcial (DX-039): contacto y notas
  * administrativas. Se conserva la identificación que exige la HC (Res.
  * 1995/1999: nombre, documento, nacimiento, sexo, residencia, estado civil,
@@ -167,11 +178,15 @@ export interface PatientRepository {
    * paciente bloqueado (FOR UPDATE: una evolución concurrente mueve
    * `last_attention_at` en esa misma fila), llama a `assertCanArchive`, que
    * lanza si la HC sigue en retención o hay citas abiertas. 404 si no existe
-   * en el tenant.
+   * en el tenant. DX-461: en esa misma transacción anula sus enlaces
+   * públicos vivos (oferta de hueco, firma y presupuesto a distancia, copia
+   * del PDF y anamnesis) y, si anuló alguno, deja un audit_event con cuántos
+   * de cada tipo.
    */
   archive(
     id: string,
     assertCanArchive: (state: PatientArchiveState) => void,
+    revocation: ArchiveRevocation,
   ): Promise<void>;
   /** Cambia la retención extendida y deja el rastro con motivo y autor. */
   setRetentionExtension(

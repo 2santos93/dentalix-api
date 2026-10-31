@@ -7,6 +7,7 @@ import { DocumentType, Prisma, RetentionExtension } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
+  ArchiveRevocation,
   CreatePatientRepoInput,
   ListPatientsParams,
   ListPatientsResult,
@@ -23,6 +24,12 @@ import {
 } from '../../domain/retention/clinical-record-retention';
 import { Patient } from '../../domain/entities/patient.entity';
 import { livePatientWithDoc, lockPatientDocs } from '../patient-doc-lock';
+import { revokeLivePublicLinks } from '../patient-public-links';
+import {
+  PATIENT_ARCHIVED_LINKS_REVOKED_REASON,
+  totalLivePublicLinks,
+} from '../../domain/live-public-links';
+import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
 import {
   legacyStoredDocType,
   type LegacyDocType,
@@ -430,7 +437,9 @@ export class PrismaPatientRepository implements PatientRepository {
   async archive(
     id: string,
     assertCanArchive: (state: PatientArchiveState) => void,
+    revocation: ArchiveRevocation,
   ): Promise<void> {
+    const tenantId = this.requireTenantId();
     await this.prisma.runWithTenant(async (tx) => {
       const retention = await lockRetentionState(tx, id);
       // Todas las sedes: el paciente es de la clínica, no de una sede.
@@ -447,7 +456,38 @@ export class PrismaPatientRepository implements PatientRepository {
       assertCanArchive({ ...retention, pendingAppointments });
       await tx.patient.update({
         where: { id },
-        data: { deletedAt: new Date() },
+        data: { deletedAt: revocation.now },
+      });
+      // DX-461: sus enlaces públicos vivos dejan de servir en ESTA
+      // transacción (con el paciente bloqueado): o se archiva y se anulan, o
+      // nada. Las rutas públicas que respondan después ya lo ven archivado.
+      const { ctx, now } = revocation;
+      const revoked = await revokeLivePublicLinks(tx, {
+        tenantId,
+        patientId: id,
+        now,
+        actorId: ctx.actor.userId,
+      });
+      if (totalLivePublicLinks(revoked) === 0) return;
+      await writeAuditEvent(tx, {
+        tenantId,
+        locationId: ctx.locationId,
+        actor: {
+          kind: 'user',
+          userId: ctx.actor.userId,
+          role: ctx.actor.role,
+        },
+        action: 'UPDATE',
+        resourceType: 'PATIENT',
+        resourceId: id,
+        patient: { kind: 'patient', id },
+        requestId: ctx.requestId,
+        ip: ctx.ip,
+        userAgent: ctx.userAgent,
+        metadata: {
+          reason: PATIENT_ARCHIVED_LINKS_REVOKED_REASON,
+          revokedLinks: revoked,
+        },
       });
     });
   }

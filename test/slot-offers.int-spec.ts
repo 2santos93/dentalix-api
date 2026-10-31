@@ -681,7 +681,7 @@ describe('oferta de hueco por enlace (int, DX-435)', () => {
       const seen = await inClinic(a, () => getOffer.execute(token));
       expect(seen).toMatchObject({
         state: 'EXPIRED',
-        message: 'Esta oferta caducó',
+        message: 'Este enlace ya no está disponible',
       });
       expect(await outcomeOf(offerId)).toBe('PENDING');
       const tried = await inClinic(a, () => acceptOffer.execute(token, META));

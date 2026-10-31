@@ -21,6 +21,7 @@ import {
   ApiCreatedResponse,
   ApiNoContentResponse,
   ApiForbiddenResponse,
+  ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
@@ -64,12 +65,15 @@ import {
   ClinicalRecordRetentionErrorDto,
   ListRetentionExpiringQueryDto,
   ListRetentionExpiringResponseDto,
+  LivePublicLinksDto,
   PartialSuppressionDto,
   SetRetentionExtensionDto,
 } from './dto/retention.dto';
 import {
   ArchivePatientUseCase,
+  CountPatientLivePublicLinksUseCase,
   ListRetentionExpiringUseCase,
+  type LivePublicLinksSummary,
   PartiallySuppressPatientUseCase,
   RETENTION_EXPIRING_MAX_PAGE_SIZE,
   SetRetentionExtensionUseCase,
@@ -146,6 +150,7 @@ export class PatientsController {
     private readonly getPatient: GetPatientUseCase,
     private readonly updatePatient: UpdatePatientUseCase,
     private readonly archivePatient: ArchivePatientUseCase,
+    private readonly countLivePublicLinks: CountPatientLivePublicLinksUseCase,
     private readonly setRetention: SetRetentionExtensionUseCase,
     private readonly partiallySuppress: PartiallySuppressPatientUseCase,
     private readonly listRetentionExpiring: ListRetentionExpiringUseCase,
@@ -447,7 +452,12 @@ export class PatientsController {
       '`CLINICAL_RECORD_RETENTION` con la fecha hasta la que se conserva. Un ' +
       'paciente sin atenciones clínicas se archiva, salvo que tenga citas ' +
       'programadas o confirmadas (409 `PATIENT_HAS_PENDING_APPOINTMENTS`: ' +
-      'hay que cancelarlas o cerrarlas antes).',
+      'hay que cancelarlas o cerrarlas antes). DX-461: en la misma ' +
+      'transacción anula sus enlaces públicos vivos (ofertas de hueco, firma ' +
+      'y presupuesto a distancia, copia del PDF firmado y anamnesis): sus ' +
+      'rutas públicas responden como a un enlace caducado y desarchivar no ' +
+      'los reactiva. Si anuló alguno, queda un audit_event (UPDATE de ' +
+      'PATIENT, `PATIENT_ARCHIVED_LINKS_REVOKED`) con cuántos de cada tipo.',
   })
   @ApiNoContentResponse({ description: 'Paciente archivado' })
   @ApiConflictResponse({
@@ -457,8 +467,34 @@ export class PatientsController {
       '(`PATIENT_HAS_PENDING_APPOINTMENTS`, sin `retentionUntil`)',
   })
   @ApiForbiddenResponse({ description: 'Rol distinto de ADMIN' })
-  async archive(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
-    await this.archivePatient.execute(id);
+  async archive(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: AuditableRequest,
+  ): Promise<void> {
+    const ctx = auditRequestContext(req, this.tenantContext);
+    if (!ctx) throw new Error('Sin sesión de clínica detrás del RolesGuard');
+    await this.archivePatient.execute(id, ctx);
+  }
+
+  @Get(':id/live-public-links')
+  @Roles(...PATIENT_RETENTION_ROLES)
+  @ApiOperation({
+    summary: 'Enlaces públicos vivos que anularía archivar (solo ADMIN)',
+    description:
+      'DX-461. Para avisar en el diálogo de archivar: cuántas ofertas de ' +
+      'hueco, firmas y presupuestos a distancia, copias del PDF firmado y ' +
+      'anamnesis enviados siguen sirviendo hoy (sin usar, sin anular y sin ' +
+      'caducar), en todas las sedes: el paciente es de la clínica. Solo ' +
+      'números. 404 si el paciente no existe en la clínica o ya está ' +
+      'archivado.',
+  })
+  @ApiOkResponse({ type: LivePublicLinksDto })
+  @ApiNotFoundResponse({ description: 'Paciente inexistente o archivado' })
+  @ApiForbiddenResponse({ description: 'Rol distinto de ADMIN' })
+  livePublicLinks(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<LivePublicLinksSummary> {
+    return this.countLivePublicLinks.execute(id);
   }
 
   @Audit({

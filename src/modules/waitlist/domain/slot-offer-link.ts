@@ -106,7 +106,9 @@ export const SLOT_OFFER_MESSAGES: Record<PublicSlotOfferState, string> = {
   OPEN: 'Este hueco está libre para ti',
   ACCEPTED: 'Listo: el hueco es tuyo',
   DECLINED: 'Rechazaste esta oferta',
-  EXPIRED: 'Esta oferta caducó',
+  // DX-461: caducada, anulada al archivar al paciente o dada por perdida
+  // dicen lo mismo (sin pistas de cuál de ellas es).
+  EXPIRED: 'Este enlace ya no está disponible',
   TAKEN: 'Este hueco ya se ocupó',
   UNAVAILABLE: 'Este hueco ya no está disponible',
 };
@@ -135,13 +137,20 @@ export const OFFER_LINK_RESOLVED_MESSAGE =
  * Estado público de la oferta. El resultado guardado manda; una PENDING
  * pasada `expiresAt` es EXPIRED aunque nadie la haya marcado (abrir el enlace
  * no escribe nada), y con el hueco ya ocupado por otra vía, UNAVAILABLE.
- * NO_ANSWER (recepción la dio por perdida) se ve como caducada.
+ * NO_ANSWER (recepción la dio por perdida) se ve como caducada. DX-461: con
+ * el paciente archivado, también (defensa en profundidad: archivar ya anula
+ * la oferta, pero un archivado anterior pudo dejarla viva).
  */
 export function publicSlotOfferState(
-  offer: { outcome: WaitlistOfferOutcome; expiresAt: Date | null },
+  offer: {
+    outcome: WaitlistOfferOutcome;
+    expiresAt: Date | null;
+    patientArchived?: boolean;
+  },
   now: Date,
   slotTaken: boolean,
 ): PublicSlotOfferState {
+  if (offer.patientArchived) return 'EXPIRED';
   switch (offer.outcome) {
     case 'ACCEPTED':
       return 'ACCEPTED';

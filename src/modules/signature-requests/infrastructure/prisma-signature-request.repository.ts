@@ -416,7 +416,9 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
       const row = await tx.signatureRequest.findFirst({
-        where: { tokenHash },
+        // DX-461: el enlace de un paciente archivado no existe para la ruta
+        // pública («Enlace no válido», igual que caducado o anulado).
+        where: { tokenHash, patient: { deletedAt: null } },
         include: {
           location: {
             select: { id: true, timeZone: true, locale: true, hourCycle: true },
@@ -453,8 +455,14 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
     return this.prisma.runWithTenant(async (tx) => {
       // Serializa los pasos sobre un mismo enlace (códigos a la vez, doble
       // firma): el siguiente espera aquí y decide con lo ya confirmado.
+      // DX-461: con el paciente archivado no se decide nada (null = enlace no
+      // válido). Archivar ya anula la solicitud en su transacción; esto cubre
+      // un archivado anterior que la dejó viva.
       const locked = await tx.$queryRaw<{ id: string }[]>`
-        SELECT "id" FROM "signature_requests" WHERE "id" = ${id}::uuid FOR UPDATE`;
+        SELECT sr."id" FROM "signature_requests" sr
+          JOIN "patients" p ON p."id" = sr."patientId"
+         WHERE sr."id" = ${id}::uuid AND p."deletedAt" IS NULL
+         FOR UPDATE OF sr`;
       if (locked.length === 0) return null;
       const row = await tx.signatureRequest.findUniqueOrThrow({
         where: { id },
