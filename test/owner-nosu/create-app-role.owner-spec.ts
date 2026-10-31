@@ -167,11 +167,11 @@ describe('DX-134 · create-app-role.sql idempotente sin app_password (owner-nosu
 
   // DX-431 (OPS-012): el script fija los topes de la sesión de la app; los
   // comprueba conectado COMO la app (lo que ve una conexión nueva del pool).
-  it('DX-431: la app arranca con statement_timeout 15s e idle_in_transaction_session_timeout 30s', () => {
+  it('DX-431: la app arranca con statement_timeout 15s e idle_in_transaction_session_timeout 150s', () => {
     expect(asApp('primera-134', 'SHOW statement_timeout')).toBe('15s');
     expect(
       asApp('primera-134', 'SHOW idle_in_transaction_session_timeout'),
-    ).toBe('30s');
+    ).toBe('150s');
   });
 
   it('DX-431: repetir el script devuelve los topes a su valor si alguien los quitó', async () => {

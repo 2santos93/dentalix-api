@@ -5487,34 +5487,60 @@ Runbook completo (orden backup → `migrate deploy` → API gradual → web →
 
 Para que una petición o una transacción colgada no agote el pool:
 
-| Variable / ajuste                                       | Default           | Efecto                                                                                                                                                                  |
-| ------------------------------------------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `HTTP_KEEP_ALIVE_TIMEOUT_MS`                            | 65000             | Inactividad tras la que la API cierra una conexión keep-alive. MAYOR que la del balanceador hacia la API (60 s típicos) y que la del proxy de la web (5 s, DX-284).     |
-| `HTTP_HEADERS_TIMEOUT_MS`                               | keep-alive + 1000 | Plazo de las cabeceras; mayor que el keep-alive.                                                                                                                        |
-| `HTTP_REQUEST_TIMEOUT_MS`                               | 130000            | Plazo de la petición ENTERA (cabeceras + cuerpo): vencido, `408 Request Timeout` y se cierra. ≥ cabeceras; en producción > `UPLOAD_MAX_DURATION_MS`.                    |
-| `TENANT_TX_TIMEOUT_MS`                                  | 5000              | Tope de cada transacción interactiva (`runWithTenant` y `$transaction(async …)`); < `SHUTDOWN_TIMEOUT_MS`. Una llamada con su propio `timeout` (lotes de DX-107) manda. |
-| `TENANT_TX_MAX_WAIT_MS`                                 | 2000              | Espera por una conexión del pool para empezar la transacción.                                                                                                           |
-| `statement_timeout` de `dentalix_app`                   | 15s               | Lo fija `create-app-role.sql` (por rol).                                                                                                                                |
-| `idle_in_transaction_session_timeout` de `dentalix_app` | 30s               | Lo fija `create-app-role.sql` (por rol).                                                                                                                                |
+| Variable / ajuste                                       | Default           | Efecto                                                                                                                                                                                                                                                                                                                           |
+| ------------------------------------------------------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `HTTP_KEEP_ALIVE_TIMEOUT_MS`                            | 65000             | Inactividad tras la que la API cierra una conexión keep-alive. MAYOR que la del balanceador hacia la API (60 s típicos) y que la del proxy de la web (5 s, DX-284).                                                                                                                                                              |
+| `HTTP_HEADERS_TIMEOUT_MS`                               | keep-alive + 1000 | Plazo de las cabeceras; mayor que el keep-alive.                                                                                                                                                                                                                                                                                 |
+| `HTTP_REQUEST_TIMEOUT_MS`                               | 130000            | Plazo de la petición ENTERA (cabeceras + cuerpo): vencido, `408 Request Timeout` y se cierra. ≥ cabeceras; en producción ≥ `UPLOAD_MAX_DURATION_MS` + 10 s (fuera de producción, solo un aviso en el log).                                                                                                                       |
+| `TENANT_TX_TIMEOUT_MS`                                  | 5000              | Tope de cada transacción interactiva (`runWithTenant` y `$transaction(async …)`); < `SHUTDOWN_TIMEOUT_MS`. Una llamada con su propio `timeout` (lotes de DX-107) manda.                                                                                                                                                          |
+| `TENANT_TX_MAX_WAIT_MS`                                 | 2000              | Espera por una conexión del pool para empezar la transacción.                                                                                                                                                                                                                                                                    |
+| `statement_timeout` de `dentalix_app`                   | 15s               | Lo fija `create-app-role.sql` (por rol).                                                                                                                                                                                                                                                                                         |
+| `idle_in_transaction_session_timeout` de `dentalix_app` | 150s              | Lo fija `create-app-role.sql` (por rol). Mayor que la transacción más larga que permite el código (120 s: `LONG_TX` de la importación y el máximo de `TENANT_TX_TIMEOUT_MS`), para no cortar nunca una transacción viva: Prisma ya las deshace antes. Recoge las abandonadas fuera de su control (proceso caído, `psql` manual). |
 
 - `src/config/http-server-timeouts.ts` los aplica al servidor HTTP (main.ts y
   los e2e, vía `configureApp`), y también la cadencia con la que Node los
   revisa (una décima parte del menor plazo, hasta 30 s).
-- Una transacción que pasa de su tope (Prisma `P2028`, también al agotar
-  `TENANT_TX_MAX_WAIT_MS`) o una sentencia cancelada por `statement_timeout`
-  (`57014`) responden **503** con `code: "TRANSACTION_TIMEOUT"`, el mensaje
-  «La operación tardó demasiado y se canceló sin guardar cambios. Vuelve a
-  intentarlo en unos segundos.» y el `requestId`, con un `warn` en el log que
-  dice qué tope fue; nunca el 500 genérico.
+- Cortes por tiempo → **503** con `Retry-After: 5` y `requestId`, un `warn`
+  en el log que dice qué tope fue, y nunca el 500 genérico:
+  - `code: "TRANSACTION_TIMEOUT"` («La operación tardó demasiado y se canceló
+    sin guardar cambios. Vuelve a intentarlo en unos segundos.»): la
+    transacción expiró o no consiguió conexión a tiempo (`P2028` con ese
+    mensaje), o Postgres cerró la sesión por
+    `idle_in_transaction_session_timeout` (`25P03`). Cualquier otro `P2028`
+    sigue siendo un 500.
+  - `code: "STATEMENT_TIMEOUT"` («La operación tardó demasiado y se canceló.
+    Vuelve a intentarlo en unos segundos.»): Postgres canceló una sentencia por
+    `statement_timeout` (`57014`). Sin «sin guardar cambios»: fuera de una
+    transacción, lo de sentencias anteriores ya quedó guardado.
 - `validateEnv` no deja arrancar con un valor fuera de rango ni con las
   relaciones rotas, y dice cuál.
 - `create-app-role.sql` fija los dos topes de `dentalix_app` en cada ejecución
   (idempotente). Si el owner no tiene ADMIN OPTION sobre el rol (lo creó otro),
   avisa con un `WARNING` con los `ALTER ROLE` que tiene que ejecutar un admin.
   El job `owner-nosu` de la CI comprueba `SHOW statement_timeout` = `15s` e
-  `idle_in_transaction_session_timeout` = `30s` conectado como `dentalix_app`.
+  `idle_in_transaction_session_timeout` = `150s` conectado como `dentalix_app`.
+- **Tras ejecutar `create-app-role.sql`**, los topes valen para las conexiones
+  NUEVAS: reinicia la API (despliegue gradual) y, si lo hay, PgBouncer (o
+  `RECONNECT` en su consola), y comprueba como la app:
+  `psql "${DATABASE_URL%%\?*}" -tAc 'SHOW statement_timeout'` → `15s` y
+  `... 'SHOW idle_in_transaction_session_timeout'` → `150s`.
+- **Scripts de mantenimiento largos** que corren como `dentalix_app`
+  (`npm run allocations:backfill`, `npm run phones:report`,
+  `npm run g1:backfill-locations`): trabajan por lotes, pero si una sentencia
+  no cabe en 15 s (una clínica enorme, sale `57014` en el log), quita el tope
+  SOLO para esa ejecución, nunca en el rol:
+  - Con Prisma (estos scripts), en la URL de esa ejecución:
+    `DATABASE_URL="${DATABASE_URL}&options=-c%20statement_timeout%3D0" npm run allocations:backfill`
+    (`options` lo pasa Prisma a Postgres como en `PGOPTIONS`; afecta solo a
+    las conexiones de ese proceso).
+  - En `psql`, para la sesión: `SET statement_timeout = 0;` o, solo dentro de
+    una transacción, `BEGIN; SET LOCAL statement_timeout = 0; …; COMMIT;`
+    (vuelve al de rol al terminar).
+  - En código, el mismo `SET LOCAL statement_timeout = …` como primera
+    sentencia de la transacción (`tx.$executeRaw`) acota o amplía solo esa.
 - e2e: `test/production-timeouts.e2e-spec.ts` (408 de un cliente lento, 503
-  de una transacción que se pasa).
+  `TRANSACTION_TIMEOUT` de una transacción que se pasa y 503
+  `STATEMENT_TIMEOUT` de una sentencia cortada por `statement_timeout`).
 
 ## Resources
 

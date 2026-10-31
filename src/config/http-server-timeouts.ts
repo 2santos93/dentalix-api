@@ -1,4 +1,4 @@
-import type { INestApplication } from '@nestjs/common';
+import { Logger, type INestApplication } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Server } from 'node:http';
 import {
@@ -22,9 +22,10 @@ import {
  *   cabeceras. Mayor que el keep-alive, o Node corta una conexión reutilizada.
  * - `HTTP_REQUEST_TIMEOUT_MS` (130 s): plazo para recibir la petición ENTERA
  *   (cabeceras y cuerpo); vencido, Node responde 408 y cierra. Corta a los
- *   clientes lentos (slowloris). En producción, mayor que
- *   `UPLOAD_MAX_DURATION_MS` (120 s), para que una subida lenta reciba antes
- *   el error propio de la subida (DX-259). No acota lo que tarda la API en
+ *   clientes lentos (slowloris). En producción, al menos
+ *   `UPLOAD_MAX_DURATION_MS` (120 s) + 10 s, para que una subida lenta reciba
+ *   antes el error propio de la subida (DX-259); fuera de producción, solo un
+ *   aviso en el log. No acota lo que tarda la API en
  *   responder: eso lo acotan `TENANT_TX_TIMEOUT_MS` y el `statement_timeout`.
  */
 export interface HttpServerTimeouts {
@@ -37,6 +38,11 @@ export const DEFAULT_HTTP_KEEP_ALIVE_TIMEOUT_MS = 65_000;
 /** Sin `HTTP_HEADERS_TIMEOUT_MS`: el keep-alive más esto. */
 export const HEADERS_OVER_KEEP_ALIVE_MS = 1_000;
 export const DEFAULT_HTTP_REQUEST_TIMEOUT_MS = 130_000;
+/**
+ * Margen de la petición entera sobre la subida más larga: la subida corta
+ * con su propio error y aún da tiempo a responderlo antes del 408.
+ */
+export const REQUEST_OVER_UPLOAD_MARGIN_MS = 10_000;
 
 export const HTTP_TIMEOUT_LIMITS = {
   HTTP_KEEP_ALIVE_TIMEOUT_MS: [1_000, 600_000],
@@ -94,13 +100,40 @@ export function httpServerTimeoutProblems(get: Get, isProd: boolean): string[] {
       `HTTP_REQUEST_TIMEOUT_MS (${t.requestTimeoutMs}) debe ser mayor o igual que HTTP_HEADERS_TIMEOUT_MS (${t.headersTimeoutMs}): la petición entera incluye sus cabeceras.`,
     );
   }
-  const uploadMaxMs = loadUploadTimeouts(get).maxDurationMs;
-  if (isProd && t.requestTimeoutMs <= uploadMaxMs) {
+  const margin = uploadMarginShortfall(get, t);
+  if (isProd && margin) {
     problems.push(
-      `HTTP_REQUEST_TIMEOUT_MS (${t.requestTimeoutMs}) debe ser mayor que UPLOAD_MAX_DURATION_MS (${uploadMaxMs}) en producción: si no, una subida lenta acaba en un 408 sin explicación en vez del error de la subida.`,
+      `HTTP_REQUEST_TIMEOUT_MS (${t.requestTimeoutMs}) debe ser al menos UPLOAD_MAX_DURATION_MS (${margin.uploadMaxMs}) + ${REQUEST_OVER_UPLOAD_MARGIN_MS} ms en producción: si no, una subida lenta acaba en un 408 sin explicación en vez del error de la subida.`,
     );
   }
   return problems;
+}
+
+/** La subida más larga, si la petición entera no le deja el margen. */
+function uploadMarginShortfall(
+  get: Get,
+  t: HttpServerTimeouts,
+): { uploadMaxMs: number } | null {
+  const uploadMaxMs = loadUploadTimeouts(get).maxDurationMs;
+  return t.requestTimeoutMs < uploadMaxMs + REQUEST_OVER_UPLOAD_MARGIN_MS
+    ? { uploadMaxMs }
+    : null;
+}
+
+/**
+ * Avisos que no impiden arrancar: fuera de producción (desarrollo, e2e con
+ * plazos cortos), la falta de margen sobre la subida solo se avisa; en
+ * producción es un problema de `httpServerTimeoutProblems`.
+ */
+export function httpServerTimeoutWarnings(get: Get, isProd: boolean): string[] {
+  if (isProd || httpServerTimeoutProblems(get, false).length > 0) return [];
+  const t = loadHttpServerTimeouts(get);
+  const margin = uploadMarginShortfall(get, t);
+  return margin
+    ? [
+        `HTTP_REQUEST_TIMEOUT_MS (${t.requestTimeoutMs}) es menor que UPLOAD_MAX_DURATION_MS (${margin.uploadMaxMs}) + ${REQUEST_OVER_UPLOAD_MARGIN_MS} ms: una subida lenta acabaría en 408 en vez de en su propio error. En producción la API no arrancaría.`,
+      ]
+    : [];
 }
 
 /**
@@ -134,11 +167,22 @@ export function applyHttpServerTimeouts(
   ).connectionsCheckingInterval = connectionsCheckingIntervalMs(t);
 }
 
-/** Lo aplica al servidor HTTP de la app (main.ts y los e2e, vía configureApp). */
+/**
+ * Lo aplica al servidor HTTP de la app (main.ts y los e2e, vía configureApp)
+ * y deja en el log los avisos de `httpServerTimeoutWarnings`.
+ */
 export function applyAppHttpServerTimeouts(app: INestApplication): void {
   const config = app.get(ConfigService);
+  const get = (key: string) => config.get<string>(key);
   applyHttpServerTimeouts(
     app.getHttpServer() as Server,
-    loadHttpServerTimeouts((key) => config.get<string>(key)),
+    loadHttpServerTimeouts(get),
   );
+  const logger = new Logger('HttpServerTimeouts');
+  for (const warning of httpServerTimeoutWarnings(
+    get,
+    get('NODE_ENV') === 'production',
+  )) {
+    logger.warn(warning);
+  }
 }

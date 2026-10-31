@@ -2,6 +2,7 @@ import {
   DEFAULT_TENANT_TX_MAX_WAIT_MS,
   DEFAULT_TENANT_TX_TIMEOUT_MS,
   loadTransactionConfig,
+  transactionConfigFor,
   transactionConfigProblems,
 } from './transaction-config';
 
@@ -31,7 +32,7 @@ describe('loadTransactionConfig (DX-431)', () => {
     ).toEqual({ timeoutMs: 8_000, maxWaitMs: 3_000 });
   });
 
-  it('sin ConfigService (int-specs que crean PrismaService a mano), los recomendados', () => {
+  it('sin variables ni nada que leer, los recomendados', () => {
     expect(loadTransactionConfig(() => undefined)).toEqual({
       timeoutMs: DEFAULT_TENANT_TX_TIMEOUT_MS,
       maxWaitMs: DEFAULT_TENANT_TX_MAX_WAIT_MS,
@@ -78,5 +79,38 @@ describe('transactionConfigProblems (DX-431)', () => {
         SHUTDOWN_MS,
       ),
     ).toEqual([]);
+  });
+});
+
+describe('transactionConfigFor (DX-431): lo que usa PrismaService', () => {
+  const KEYS = ['TENANT_TX_TIMEOUT_MS', 'TENANT_TX_MAX_WAIT_MS'] as const;
+  const saved = KEYS.map((key) => process.env[key]);
+
+  afterEach(() => {
+    KEYS.forEach((key, i) => {
+      if (saved[i] === undefined) delete process.env[key];
+      else process.env[key] = saved[i];
+    });
+  });
+
+  it('con ConfigService, lo lee de él', () => {
+    process.env.TENANT_TX_TIMEOUT_MS = '9000';
+    const config = {
+      get: (key: string) =>
+        key === 'TENANT_TX_TIMEOUT_MS' ? '7000' : undefined,
+    };
+    expect(transactionConfigFor(config)).toEqual({
+      timeoutMs: 7_000,
+      maxWaitMs: DEFAULT_TENANT_TX_MAX_WAIT_MS,
+    });
+  });
+
+  it('sin ConfigService (scripts e int-specs que crean PrismaService a mano), lo lee de process.env', () => {
+    process.env.TENANT_TX_TIMEOUT_MS = '9000';
+    process.env.TENANT_TX_MAX_WAIT_MS = '4000';
+    expect(transactionConfigFor(undefined)).toEqual({
+      timeoutMs: 9_000,
+      maxWaitMs: 4_000,
+    });
   });
 });

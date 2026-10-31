@@ -8,7 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { guardHardDeletes } from './no-hard-delete';
-import { loadTransactionConfig } from './transaction-config';
+import { transactionConfigFor } from './transaction-config';
 
 export interface RunWithTenantOptions {
   isolationLevel?: Prisma.TransactionIsolationLevel;
@@ -34,14 +34,16 @@ export class PrismaService
   /**
    * DX-431: `timeout`/`maxWait` de TODA transacción interactiva salen del
    * entorno (`TENANT_TX_TIMEOUT_MS`, `TENANT_TX_MAX_WAIT_MS`; ver
-   * transaction-config.ts). Sin ConfigService (int-specs que crean el
-   * servicio a mano), los valores recomendados.
+   * transaction-config.ts). Sin ConfigService (scripts e int-specs que crean
+   * el servicio a mano), de `process.env`.
    */
   constructor(
     private readonly tenantContext: TenantContextService,
     @Optional() config?: ConfigService,
   ) {
-    const tx = loadTransactionConfig((key) => config?.get<string>(key));
+    const tx = transactionConfigFor(
+      config && { get: (key: string) => config.get<string>(key) },
+    );
     super({
       transactionOptions: { timeout: tx.timeoutMs, maxWait: tx.maxWaitMs },
     });

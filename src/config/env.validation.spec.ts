@@ -826,12 +826,12 @@ describe('validateEnv', () => {
       ).toContain('debe ser menor que SHUTDOWN_TIMEOUT_MS');
     });
 
-    it('en producción la petición entera tiene que durar más que UPLOAD_MAX_DURATION_MS', () => {
+    it('en producción la petición entera tiene que durar al menos UPLOAD_MAX_DURATION_MS + 10 s', () => {
       expect(() =>
         validateEnv(baseEnv({ HTTP_REQUEST_TIMEOUT_MS: '100000' })),
       ).not.toThrow();
-      expect(errorOf(prodEnv({ HTTP_REQUEST_TIMEOUT_MS: '100000' }))).toContain(
-        'debe ser mayor que UPLOAD_MAX_DURATION_MS (120000)',
+      expect(errorOf(prodEnv({ HTTP_REQUEST_TIMEOUT_MS: '125000' }))).toContain(
+        'debe ser al menos UPLOAD_MAX_DURATION_MS (120000) + 10000 ms',
       );
     });
   });

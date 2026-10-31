@@ -10,6 +10,7 @@ import {
   applyHttpServerTimeouts,
   connectionsCheckingIntervalMs,
   httpServerTimeoutProblems,
+  httpServerTimeoutWarnings,
   loadHttpServerTimeouts,
 } from './http-server-timeouts';
 
@@ -103,18 +104,23 @@ describe('httpServerTimeoutProblems (DX-431)', () => {
     ]);
   });
 
-  it('en producción la petición entera tiene que durar más que la subida más larga (UPLOAD_MAX_DURATION_MS)', () => {
-    const env = envOf({ HTTP_REQUEST_TIMEOUT_MS: '120000' });
-    expect(httpServerTimeoutProblems(env, false)).toEqual([]);
-    expect(httpServerTimeoutProblems(env, true)).toEqual([
+  it('en producción la petición entera tiene que durar al menos 10 s más que la subida más larga (UPLOAD_MAX_DURATION_MS)', () => {
+    // Por defecto: 130 s = 120 s de subida + 10 s de margen.
+    expect(httpServerTimeoutProblems(envOf({}), true)).toEqual([]);
+    expect(
+      httpServerTimeoutProblems(
+        envOf({ HTTP_REQUEST_TIMEOUT_MS: '129999' }),
+        true,
+      ),
+    ).toEqual([
       expect.stringContaining(
-        'HTTP_REQUEST_TIMEOUT_MS (120000) debe ser mayor que UPLOAD_MAX_DURATION_MS (120000)',
+        'HTTP_REQUEST_TIMEOUT_MS (129999) debe ser al menos UPLOAD_MAX_DURATION_MS (120000) + 10000 ms',
       ),
     ]);
     expect(
       httpServerTimeoutProblems(
         envOf({
-          HTTP_REQUEST_TIMEOUT_MS: '120000',
+          HTTP_REQUEST_TIMEOUT_MS: '70000',
           UPLOAD_MAX_DURATION_MS: '60000',
         }),
         true,
@@ -122,6 +128,14 @@ describe('httpServerTimeoutProblems (DX-431)', () => {
     ).toEqual([]);
   });
 
+  it('fuera de producción ese margen no impide arrancar (los e2e usan plazos de 2 s)', () => {
+    expect(
+      httpServerTimeoutProblems(
+        envOf({ HTTP_REQUEST_TIMEOUT_MS: '120000' }),
+        false,
+      ),
+    ).toEqual([]);
+  });
   it('un valor inválido no arrastra errores de relación con los demás', () => {
     expect(
       httpServerTimeoutProblems(
@@ -132,6 +146,30 @@ describe('httpServerTimeoutProblems (DX-431)', () => {
         true,
       ),
     ).toHaveLength(2);
+  });
+});
+
+describe('httpServerTimeoutWarnings (DX-431)', () => {
+  const E2E_LIKE = {
+    HTTP_KEEP_ALIVE_TIMEOUT_MS: '1000',
+    HTTP_HEADERS_TIMEOUT_MS: '1500',
+    HTTP_REQUEST_TIMEOUT_MS: '2000',
+  };
+
+  it('fuera de producción avisa si la petición entera no deja 10 s de margen sobre la subida', () => {
+    expect(httpServerTimeoutWarnings(envOf(E2E_LIKE), false)).toEqual([
+      expect.stringContaining(
+        'HTTP_REQUEST_TIMEOUT_MS (2000) es menor que UPLOAD_MAX_DURATION_MS (120000) + 10000 ms',
+      ),
+    ]);
+  });
+
+  it('sin avisos con el margen, con valores inválidos (ya son error) o en producción (ahí es error)', () => {
+    expect(httpServerTimeoutWarnings(envOf({}), false)).toEqual([]);
+    expect(
+      httpServerTimeoutWarnings(envOf({ HTTP_REQUEST_TIMEOUT_MS: 'x' }), false),
+    ).toEqual([]);
+    expect(httpServerTimeoutWarnings(envOf(E2E_LIKE), true)).toEqual([]);
   });
 });
 

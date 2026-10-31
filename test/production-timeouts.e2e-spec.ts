@@ -12,7 +12,10 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { createE2eApp } from './support/create-e2e-app';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
-import { TRANSACTION_TIMEOUT_MESSAGE } from '../src/shared/prisma/prisma-exception.filter';
+import {
+  STATEMENT_TIMEOUT_MESSAGE,
+  TRANSACTION_TIMEOUT_MESSAGE,
+} from '../src/shared/prisma/prisma-exception.filter';
 
 // DX-431 (OPS-011, OPS-012): con plazos de producción bajos
 // (support/with-production-timeouts-env.ts), la app montada como main.ts
@@ -58,6 +61,19 @@ class TransactionTimeoutController {
       },
       { timeout: 10 * TX_TIMEOUT_MS },
     );
+    return { done: true };
+  }
+
+  /**
+   * El `statement_timeout` de `dentalix_app` (15 s en producción) bajado a
+   * 100 ms SOLO en esta transacción: Postgres cancela la sentencia (57014).
+   */
+  @Get('slow-statement')
+  async slowStatement(): Promise<{ done: true }> {
+    await this.prisma.runWithTenant(randomUUID(), async (tx) => {
+      await tx.$executeRawUnsafe(`SET LOCAL statement_timeout = '100ms'`);
+      await tx.$executeRawUnsafe('SELECT pg_sleep(1)');
+    });
     return { done: true };
   }
 
@@ -174,7 +190,8 @@ describe('Límites de producción: timeouts HTTP y de transacción (DX-431, e2e)
     it('una transacción que lo excede aborta con 503 TRANSACTION_TIMEOUT en español, no con un 500', async () => {
       const res = await request(app.getHttpServer())
         .get('/api/v1/test-tx-timeout/slow')
-        .expect(503);
+        .expect(503)
+        .expect('Retry-After', '5');
 
       expect(res.body).toEqual({
         statusCode: 503,
@@ -186,6 +203,21 @@ describe('Límites de producción: timeouts HTTP y de transacción (DX-431, e2e)
       expect(TRANSACTION_TIMEOUT_MESSAGE).toBe(
         'La operación tardó demasiado y se canceló sin guardar cambios. Vuelve a intentarlo en unos segundos.',
       );
+    });
+
+    it('una sentencia cortada por statement_timeout (57014) responde 503 STATEMENT_TIMEOUT, no un 500', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/v1/test-tx-timeout/slow-statement')
+        .expect(503)
+        .expect('Retry-After', '5');
+
+      expect(res.body).toEqual({
+        statusCode: 503,
+        error: 'Service Unavailable',
+        code: 'STATEMENT_TIMEOUT',
+        message: STATEMENT_TIMEOUT_MESSAGE,
+        requestId: expect.any(String) as unknown,
+      });
     });
 
     it('una transacción dentro del plazo responde 200, y el pool sigue libre tras el corte', async () => {

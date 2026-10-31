@@ -46,6 +46,19 @@ export function loadTransactionConfig(get: Get): TransactionConfig {
 }
 
 /**
+ * Lo que usa PrismaService: del ConfigService si lo hay (la app) y, si no
+ * (scripts de mantenimiento e int-specs que crean el servicio a mano), de
+ * `process.env`, para que la misma variable valga en los dos casos.
+ */
+export function transactionConfigFor(
+  config: { get(key: string): string | undefined } | undefined,
+): TransactionConfig {
+  return loadTransactionConfig((key) =>
+    config ? config.get(key) : process.env[key],
+  );
+}
+
+/**
  * Problemas de configuración para `validateEnv`. `shutdownTimeoutMs` es el
  * tope del apagado ordenado (`SHUTDOWN_TIMEOUT_MS`): una transacción en vuelo
  * tiene que poder terminar dentro de él.

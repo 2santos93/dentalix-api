@@ -96,20 +96,27 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO dentalix_
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO dentalix_app;
 
 -- DX-431 (OPS-012): topes de la sesión de la app, para que una sentencia o una
--- transacción colgada no retenga su conexión del pool: statement_timeout 15 s
--- (corta una sentencia; la API responde 503 TRANSACTION_TIMEOUT) e
--- idle_in_transaction_session_timeout 30 s (cierra la sesión que deja una
--- transacción abierta sin hacer nada). Por rol: valen para toda conexión de
--- dentalix_app, también a través de PgBouncer. Idempotente: se fijan siempre a
--- estos valores. El owner puede si creó el rol (CREATEROLE le da ADMIN OPTION);
--- si lo creó otro (p. ej. un superusuario) solo avisa, con lo que tiene que
--- ejecutar un admin.
+-- transacción colgada no retenga su conexión del pool:
+--   statement_timeout 15 s: corta una sentencia (la API responde 503
+--     STATEMENT_TIMEOUT).
+--   idle_in_transaction_session_timeout 150 s: cierra la sesión que deja una
+--     transacción abierta sin hacer nada. Mayor que la transacción más larga
+--     que permite el código (120 s: LONG_TX de la importación de pacientes,
+--     DX-107, y el máximo de TENANT_TX_TIMEOUT_MS), para no cortar nunca una
+--     transacción viva de la API: Prisma ya las deshace antes. Recoge las que
+--     quedan abiertas fuera de su control (un proceso caído, un psql manual).
+-- Por rol: valen para toda conexión NUEVA de dentalix_app, también a través
+-- de PgBouncer; las conexiones ya abiertas siguen con los valores anteriores
+-- hasta reiniciar la API (y PgBouncer). Idempotente: se fijan siempre a
+-- estos valores. El owner puede si creó el rol (CREATEROLE le da ADMIN
+-- OPTION); si lo creó otro (p. ej. un superusuario) solo avisa, con lo que
+-- tiene que ejecutar un admin.
 DO $$
 BEGIN
   ALTER ROLE dentalix_app SET statement_timeout = '15s';
-  ALTER ROLE dentalix_app SET idle_in_transaction_session_timeout = '30s';
+  ALTER ROLE dentalix_app SET idle_in_transaction_session_timeout = '150s';
 EXCEPTION WHEN insufficient_privilege THEN
-  RAISE WARNING 'DX-431: % no puede fijar los timeouts de dentalix_app (no tiene ADMIN OPTION sobre el rol). Un admin del clúster debe ejecutar: ALTER ROLE dentalix_app SET statement_timeout = ''15s''; ALTER ROLE dentalix_app SET idle_in_transaction_session_timeout = ''30s'';', current_user;
+  RAISE WARNING 'DX-431: % no puede fijar los timeouts de dentalix_app (no tiene ADMIN OPTION sobre el rol). Un admin del clúster debe ejecutar: ALTER ROLE dentalix_app SET statement_timeout = ''15s''; ALTER ROLE dentalix_app SET idle_in_transaction_session_timeout = ''150s'';', current_user;
 END
 $$;
 
