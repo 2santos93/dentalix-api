@@ -9,6 +9,7 @@ const HIGH_LIMIT = '100000';
 for (const policy of [
   'GLOBAL',
   'AUTH',
+  'SUBDOMAIN_CHECK',
   'LOGIN_BURST',
   'INVITATION',
   'PASSWORD',

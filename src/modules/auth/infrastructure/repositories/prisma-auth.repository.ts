@@ -58,8 +58,11 @@ export class PrismaAuthRepository implements AuthRepository {
   async findTenantBySubdomain(
     subdomain: string,
   ): Promise<{ id: string } | null> {
+    // Sin filtrar `deletedAt`: `tenants.subdomain` es UNIQUE en toda la tabla,
+    // así que una clínica dada de baja también ocupa su dirección (antes el
+    // registro decía «libre» y el alta chocaba con la clave única).
     return this.prisma.tenant.findFirst({
-      where: { subdomain, deletedAt: null },
+      where: { subdomain },
       select: { id: true },
     });
   }

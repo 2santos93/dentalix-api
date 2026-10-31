@@ -110,6 +110,10 @@ export interface AuthRepository {
   ): Promise<{ id: string; fullName: string } | null>;
   /** Usuario + hash + flag de plataforma, sin exigir membresía. */
   findUserForAuth(email: string): Promise<AuthUserRecord | null>;
+  /**
+   * Clínica que OCUPA `subdomain`, también si está dada de baja (la columna es
+   * UNIQUE en toda la tabla). `null` = la dirección está libre.
+   */
   findTenantBySubdomain(subdomain: string): Promise<{ id: string } | null>;
   createClinicWithOwner(
     input: CreateClinicWithOwnerInput,

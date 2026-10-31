@@ -1,124 +1,820 @@
 [
-  { "locale": "en-US", "hourCycle": "h12", "op": "date", "args": ["2026-10-27T20:05:00Z", "America/New_York"], "expected": "10/27/2026" },
-  { "locale": "en-US", "hourCycle": "h12", "op": "time", "args": ["2026-10-27T20:05:00Z", "America/New_York"], "expected": "4:05 p. m." },
-  { "locale": "en-US", "hourCycle": "h12", "op": "dateTime", "args": ["2026-10-27T20:05:00Z", "America/New_York"], "expected": "10/27/2026 4:05 p. m." },
-  { "locale": "en-US", "hourCycle": "h12", "op": "longDateTime", "args": ["2026-10-27T20:05:00Z", "America/New_York"], "expected": "martes 27 de octubre de 2026 a las 4:05 p. m." },
-  { "locale": "en-US", "hourCycle": "h12", "op": "time", "args": ["2026-03-05T09:30:00Z", "America/New_York"], "expected": "4:30 a. m." },
-  { "locale": "en-US", "hourCycle": "h12", "op": "time", "args": ["2026-10-27T20:05:00Z", "Asia/Kolkata"], "expected": "1:35 a. m." },
-  { "locale": "en-US", "hourCycle": "h12", "op": "date", "args": ["2026-10-27T20:05:00Z", "Asia/Kolkata"], "expected": "10/28/2026" },
-  { "locale": "en-US", "hourCycle": "h12", "op": "number", "args": [1234.5], "expected": "1,234.5" },
-  { "locale": "en-US", "hourCycle": "h12", "op": "number", "args": [1234.567], "expected": "1,234.57" },
-  { "locale": "en-US", "hourCycle": "h12", "op": "number", "args": [5, { "min": 2, "max": 2 }], "expected": "5.00" },
-  { "locale": "en-US", "hourCycle": "h12", "op": "percent", "args": [12.5], "expected": "12.5%" },
-  { "locale": "en-US", "hourCycle": "h12", "op": "percent", "args": [12.5, 0], "expected": "13%" },
-  { "locale": "en-US", "hourCycle": "h12", "op": "money", "args": [1234.5, "USD"], "expected": "$1,234.50" },
-  { "locale": "en-US", "hourCycle": "h12", "op": "money", "args": [1234, "USD"], "expected": "$1,234.00" },
-  { "locale": "en-US", "hourCycle": "h12", "op": "money", "args": [1234, "JPY"], "expected": "¥1,234" },
-  { "locale": "en-US", "hourCycle": "h12", "op": "money", "args": [1234.5, "JPY"], "expected": "¥1,234.50" },
-  { "locale": "en-US", "hourCycle": "h12", "op": "money", "args": [150000, "VND"], "expected": "₫150,000" },
-  { "locale": "en-US", "hourCycle": "h12", "op": "money", "args": [1234, "COP"], "expected": "COP\u00a01,234.00" },
-  { "locale": "en-US", "hourCycle": "h12", "op": "money", "args": [1234.5, "KWD"], "expected": "KWD\u00a01,234.50" },
-  { "locale": "en-US", "hourCycle": "h12", "op": "money", "args": [1234.5, "XYZ"], "expected": "XYZ\u00a01,234.50" },
-  { "locale": "en-US", "hourCycle": "h12", "op": "money", "args": [1234.5, "US"], "expected": "US 1,234.50" },
-  { "locale": "en-US", "hourCycle": "h12", "op": "clock", "args": [15, 5], "expected": "3:05 p. m." },
-  { "locale": "en-US", "hourCycle": "h12", "op": "clock", "args": [0, 0], "expected": "12:00 a. m." },
-  { "locale": "en-US", "hourCycle": "h12", "op": "clock", "args": [12, 0], "expected": "12:00 p. m." },
-  { "locale": "en-US", "hourCycle": "h23", "op": "time", "args": ["2026-10-27T20:05:00Z", "America/New_York"], "expected": "16:05" },
-  { "locale": "en-US", "hourCycle": "h23", "op": "time", "args": ["2026-03-05T09:30:00Z", "America/New_York"], "expected": "04:30" },
-  { "locale": "en-US", "hourCycle": "h23", "op": "longDateTime", "args": ["2026-03-05T09:30:00Z", "America/New_York"], "expected": "jueves 5 de marzo de 2026 a las 04:30" },
-  { "locale": "en-US", "hourCycle": "h23", "op": "dayMonth", "args": ["2026-10-27T20:05:00Z", "America/New_York"], "expected": "10/27" },
-  { "locale": "en-US", "hourCycle": "h23", "op": "civilDate", "args": ["2026-10-27"], "expected": "10/27/2026" },
-  { "locale": "en-US", "hourCycle": "h23", "op": "longDate", "args": ["2026-10-27T20:05:00Z", "America/New_York"], "expected": "martes 27 de octubre de 2026" },
-  { "locale": "en-US", "hourCycle": "h23", "op": "longDate", "args": ["2026-10-27T20:05:00Z", "America/New_York", { "weekday": false }], "expected": "27 de octubre de 2026" },
-  { "locale": "en-US", "hourCycle": "h23", "op": "clock", "args": [15, 5], "expected": "15:05" },
-  { "locale": "en-US", "hourCycle": "h23", "op": "clock", "args": [0, 0], "expected": "00:00" },
-  { "locale": "en-US", "hourCycle": "h23", "op": "clock", "args": [9, 5], "expected": "09:05" },
-  { "locale": "en-US", "hourCycle": "h23", "op": "wallParts", "args": ["2026-10-27T20:05:00Z", "America/New_York"], "expected": { "year": 2026, "month": 10, "day": 27, "hour": 16, "minute": 5 } },
+  {
+    "locale": "en-US",
+    "hourCycle": "h12",
+    "op": "date",
+    "args": ["2026-10-27T20:05:00Z", "America/New_York"],
+    "expected": "10/27/2026"
+  },
+  {
+    "locale": "en-US",
+    "hourCycle": "h12",
+    "op": "time",
+    "args": ["2026-10-27T20:05:00Z", "America/New_York"],
+    "expected": "4:05 p. m."
+  },
+  {
+    "locale": "en-US",
+    "hourCycle": "h12",
+    "op": "dateTime",
+    "args": ["2026-10-27T20:05:00Z", "America/New_York"],
+    "expected": "10/27/2026 4:05 p. m."
+  },
+  {
+    "locale": "en-US",
+    "hourCycle": "h12",
+    "op": "longDateTime",
+    "args": ["2026-10-27T20:05:00Z", "America/New_York"],
+    "expected": "martes 27 de octubre de 2026 a las 4:05 p. m."
+  },
+  {
+    "locale": "en-US",
+    "hourCycle": "h12",
+    "op": "time",
+    "args": ["2026-03-05T09:30:00Z", "America/New_York"],
+    "expected": "4:30 a. m."
+  },
+  {
+    "locale": "en-US",
+    "hourCycle": "h12",
+    "op": "time",
+    "args": ["2026-10-27T20:05:00Z", "Asia/Kolkata"],
+    "expected": "1:35 a. m."
+  },
+  {
+    "locale": "en-US",
+    "hourCycle": "h12",
+    "op": "date",
+    "args": ["2026-10-27T20:05:00Z", "Asia/Kolkata"],
+    "expected": "10/28/2026"
+  },
+  {
+    "locale": "en-US",
+    "hourCycle": "h12",
+    "op": "number",
+    "args": [1234.5],
+    "expected": "1,234.5"
+  },
+  {
+    "locale": "en-US",
+    "hourCycle": "h12",
+    "op": "number",
+    "args": [1234.567],
+    "expected": "1,234.57"
+  },
+  {
+    "locale": "en-US",
+    "hourCycle": "h12",
+    "op": "number",
+    "args": [5, { "min": 2, "max": 2 }],
+    "expected": "5.00"
+  },
+  {
+    "locale": "en-US",
+    "hourCycle": "h12",
+    "op": "percent",
+    "args": [12.5],
+    "expected": "12.5%"
+  },
+  {
+    "locale": "en-US",
+    "hourCycle": "h12",
+    "op": "percent",
+    "args": [12.5, 0],
+    "expected": "13%"
+  },
+  {
+    "locale": "en-US",
+    "hourCycle": "h12",
+    "op": "money",
+    "args": [1234.5, "USD"],
+    "expected": "$1,234.50"
+  },
+  {
+    "locale": "en-US",
+    "hourCycle": "h12",
+    "op": "money",
+    "args": [1234, "USD"],
+    "expected": "$1,234.00"
+  },
+  {
+    "locale": "en-US",
+    "hourCycle": "h12",
+    "op": "money",
+    "args": [1234, "JPY"],
+    "expected": "¥1,234"
+  },
+  {
+    "locale": "en-US",
+    "hourCycle": "h12",
+    "op": "money",
+    "args": [1234.5, "JPY"],
+    "expected": "¥1,234.50"
+  },
+  {
+    "locale": "en-US",
+    "hourCycle": "h12",
+    "op": "money",
+    "args": [150000, "VND"],
+    "expected": "₫150,000"
+  },
+  {
+    "locale": "en-US",
+    "hourCycle": "h12",
+    "op": "money",
+    "args": [1234, "COP"],
+    "expected": "COP\u00a01,234.00"
+  },
+  {
+    "locale": "en-US",
+    "hourCycle": "h12",
+    "op": "money",
+    "args": [1234.5, "KWD"],
+    "expected": "KWD\u00a01,234.50"
+  },
+  {
+    "locale": "en-US",
+    "hourCycle": "h12",
+    "op": "money",
+    "args": [1234.5, "XYZ"],
+    "expected": "XYZ\u00a01,234.50"
+  },
+  {
+    "locale": "en-US",
+    "hourCycle": "h12",
+    "op": "money",
+    "args": [1234.5, "US"],
+    "expected": "US 1,234.50"
+  },
+  {
+    "locale": "en-US",
+    "hourCycle": "h12",
+    "op": "clock",
+    "args": [15, 5],
+    "expected": "3:05 p. m."
+  },
+  {
+    "locale": "en-US",
+    "hourCycle": "h12",
+    "op": "clock",
+    "args": [0, 0],
+    "expected": "12:00 a. m."
+  },
+  {
+    "locale": "en-US",
+    "hourCycle": "h12",
+    "op": "clock",
+    "args": [12, 0],
+    "expected": "12:00 p. m."
+  },
+  {
+    "locale": "en-US",
+    "hourCycle": "h23",
+    "op": "time",
+    "args": ["2026-10-27T20:05:00Z", "America/New_York"],
+    "expected": "16:05"
+  },
+  {
+    "locale": "en-US",
+    "hourCycle": "h23",
+    "op": "time",
+    "args": ["2026-03-05T09:30:00Z", "America/New_York"],
+    "expected": "04:30"
+  },
+  {
+    "locale": "en-US",
+    "hourCycle": "h23",
+    "op": "longDateTime",
+    "args": ["2026-03-05T09:30:00Z", "America/New_York"],
+    "expected": "jueves 5 de marzo de 2026 a las 04:30"
+  },
+  {
+    "locale": "en-US",
+    "hourCycle": "h23",
+    "op": "dayMonth",
+    "args": ["2026-10-27T20:05:00Z", "America/New_York"],
+    "expected": "10/27"
+  },
+  {
+    "locale": "en-US",
+    "hourCycle": "h23",
+    "op": "civilDate",
+    "args": ["2026-10-27"],
+    "expected": "10/27/2026"
+  },
+  {
+    "locale": "en-US",
+    "hourCycle": "h23",
+    "op": "longDate",
+    "args": ["2026-10-27T20:05:00Z", "America/New_York"],
+    "expected": "martes 27 de octubre de 2026"
+  },
+  {
+    "locale": "en-US",
+    "hourCycle": "h23",
+    "op": "longDate",
+    "args": ["2026-10-27T20:05:00Z", "America/New_York", { "weekday": false }],
+    "expected": "27 de octubre de 2026"
+  },
+  {
+    "locale": "en-US",
+    "hourCycle": "h23",
+    "op": "clock",
+    "args": [15, 5],
+    "expected": "15:05"
+  },
+  {
+    "locale": "en-US",
+    "hourCycle": "h23",
+    "op": "clock",
+    "args": [0, 0],
+    "expected": "00:00"
+  },
+  {
+    "locale": "en-US",
+    "hourCycle": "h23",
+    "op": "clock",
+    "args": [9, 5],
+    "expected": "09:05"
+  },
+  {
+    "locale": "en-US",
+    "hourCycle": "h23",
+    "op": "wallParts",
+    "args": ["2026-10-27T20:05:00Z", "America/New_York"],
+    "expected": {
+      "year": 2026,
+      "month": 10,
+      "day": 27,
+      "hour": 16,
+      "minute": 5
+    }
+  },
 
-  { "locale": "en-US-u-hc-h12", "hourCycle": "h23", "op": "time", "args": ["2026-10-27T20:05:00Z", "America/New_York"], "expected": "16:05" },
-  { "locale": "en-US-u-hc-h12", "hourCycle": "h23", "op": "clock", "args": [15, 5], "expected": "15:05" },
-  { "locale": "de-DE-u-hc-h23", "hourCycle": "h12", "op": "time", "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"], "expected": "9:05 p. m." },
+  {
+    "locale": "en-US-u-hc-h12",
+    "hourCycle": "h23",
+    "op": "time",
+    "args": ["2026-10-27T20:05:00Z", "America/New_York"],
+    "expected": "16:05"
+  },
+  {
+    "locale": "en-US-u-hc-h12",
+    "hourCycle": "h23",
+    "op": "clock",
+    "args": [15, 5],
+    "expected": "15:05"
+  },
+  {
+    "locale": "de-DE-u-hc-h23",
+    "hourCycle": "h12",
+    "op": "time",
+    "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"],
+    "expected": "9:05 p. m."
+  },
 
-  { "locale": "ja-JP", "hourCycle": "h12", "op": "time", "args": ["2026-10-27T20:05:00Z", "Asia/Tokyo"], "expected": "5:05 a. m." },
-  { "locale": "ja-JP", "hourCycle": "h12", "op": "date", "args": ["2026-10-27T20:05:00Z", "Asia/Tokyo"], "expected": "2026/10/28" },
-  { "locale": "ja-JP", "hourCycle": "h12", "op": "longDateTime", "args": ["2026-10-27T20:05:00Z", "Asia/Tokyo"], "expected": "miércoles 28 de octubre de 2026 a las 5:05 a. m." },
-  { "locale": "ja-JP", "hourCycle": "h12", "op": "money", "args": [1234, "JPY"], "expected": "￥1,234" },
-  { "locale": "ja-JP", "hourCycle": "h12", "op": "money", "args": [1234.5, "JPY"], "expected": "￥1,234.50" },
-  { "locale": "ja-JP", "hourCycle": "h12", "op": "clock", "args": [15, 5], "expected": "3:05 p. m." },
-  { "locale": "ja-JP", "hourCycle": "h23", "op": "time", "args": ["2026-10-27T20:05:00Z", "Asia/Tokyo"], "expected": "05:05" },
-  { "locale": "ja-JP", "hourCycle": "h23", "op": "dateTime", "args": ["2026-10-27T20:05:00Z", "Asia/Tokyo"], "expected": "2026/10/28 05:05" },
-  { "locale": "ja-JP", "hourCycle": "h23", "op": "dayMonth", "args": ["2026-10-27T20:05:00Z", "Asia/Tokyo"], "expected": "10/28" },
-  { "locale": "ja-JP", "hourCycle": "h23", "op": "civilDate", "args": ["2026-10-27"], "expected": "2026/10/27" },
-  { "locale": "ja-JP", "hourCycle": "h23", "op": "number", "args": [1234.5], "expected": "1,234.5" },
+  {
+    "locale": "ja-JP",
+    "hourCycle": "h12",
+    "op": "time",
+    "args": ["2026-10-27T20:05:00Z", "Asia/Tokyo"],
+    "expected": "5:05 a. m."
+  },
+  {
+    "locale": "ja-JP",
+    "hourCycle": "h12",
+    "op": "date",
+    "args": ["2026-10-27T20:05:00Z", "Asia/Tokyo"],
+    "expected": "2026/10/28"
+  },
+  {
+    "locale": "ja-JP",
+    "hourCycle": "h12",
+    "op": "longDateTime",
+    "args": ["2026-10-27T20:05:00Z", "Asia/Tokyo"],
+    "expected": "miércoles 28 de octubre de 2026 a las 5:05 a. m."
+  },
+  {
+    "locale": "ja-JP",
+    "hourCycle": "h12",
+    "op": "money",
+    "args": [1234, "JPY"],
+    "expected": "￥1,234"
+  },
+  {
+    "locale": "ja-JP",
+    "hourCycle": "h12",
+    "op": "money",
+    "args": [1234.5, "JPY"],
+    "expected": "￥1,234.50"
+  },
+  {
+    "locale": "ja-JP",
+    "hourCycle": "h12",
+    "op": "clock",
+    "args": [15, 5],
+    "expected": "3:05 p. m."
+  },
+  {
+    "locale": "ja-JP",
+    "hourCycle": "h23",
+    "op": "time",
+    "args": ["2026-10-27T20:05:00Z", "Asia/Tokyo"],
+    "expected": "05:05"
+  },
+  {
+    "locale": "ja-JP",
+    "hourCycle": "h23",
+    "op": "dateTime",
+    "args": ["2026-10-27T20:05:00Z", "Asia/Tokyo"],
+    "expected": "2026/10/28 05:05"
+  },
+  {
+    "locale": "ja-JP",
+    "hourCycle": "h23",
+    "op": "dayMonth",
+    "args": ["2026-10-27T20:05:00Z", "Asia/Tokyo"],
+    "expected": "10/28"
+  },
+  {
+    "locale": "ja-JP",
+    "hourCycle": "h23",
+    "op": "civilDate",
+    "args": ["2026-10-27"],
+    "expected": "2026/10/27"
+  },
+  {
+    "locale": "ja-JP",
+    "hourCycle": "h23",
+    "op": "number",
+    "args": [1234.5],
+    "expected": "1,234.5"
+  },
 
-  { "locale": "de-DE", "hourCycle": "h12", "op": "time", "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"], "expected": "9:05 p. m." },
-  { "locale": "de-DE", "hourCycle": "h12", "op": "longDateTime", "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"], "expected": "martes 27 de octubre de 2026 a las 9:05 p. m." },
-  { "locale": "de-DE", "hourCycle": "h12", "op": "dateTime", "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"], "expected": "27.10.2026 9:05 p. m." },
-  { "locale": "de-DE", "hourCycle": "h23", "op": "time", "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"], "expected": "21:05" },
-  { "locale": "de-DE", "hourCycle": "h23", "op": "date", "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"], "expected": "27.10.2026" },
-  { "locale": "de-DE", "hourCycle": "h23", "op": "dayMonth", "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"], "expected": "27.10." },
-  { "locale": "de-DE", "hourCycle": "h23", "op": "dateTime", "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"], "expected": "27.10.2026 21:05" },
-  { "locale": "de-DE", "hourCycle": "h23", "op": "time", "args": ["2026-03-05T09:30:00Z", "Europe/Berlin"], "expected": "10:30" },
-  { "locale": "de-DE", "hourCycle": "h23", "op": "number", "args": [1234.5], "expected": "1.234,5" },
-  { "locale": "de-DE", "hourCycle": "h23", "op": "percent", "args": [12.5], "expected": "12,5\u00a0%" },
-  { "locale": "de-DE", "hourCycle": "h23", "op": "money", "args": [1234.5, "EUR"], "expected": "1.234,50\u00a0€" },
-  { "locale": "de-DE", "hourCycle": "h23", "op": "money", "args": [1234.5, "KWD"], "expected": "1.234,50\u00a0KWD" },
-  { "locale": "de-DE", "hourCycle": "h23", "op": "money", "args": [1234.5, "XYZ"], "expected": "1.234,50\u00a0XYZ" },
+  {
+    "locale": "de-DE",
+    "hourCycle": "h12",
+    "op": "time",
+    "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"],
+    "expected": "9:05 p. m."
+  },
+  {
+    "locale": "de-DE",
+    "hourCycle": "h12",
+    "op": "longDateTime",
+    "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"],
+    "expected": "martes 27 de octubre de 2026 a las 9:05 p. m."
+  },
+  {
+    "locale": "de-DE",
+    "hourCycle": "h12",
+    "op": "dateTime",
+    "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"],
+    "expected": "27.10.2026 9:05 p. m."
+  },
+  {
+    "locale": "de-DE",
+    "hourCycle": "h23",
+    "op": "time",
+    "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"],
+    "expected": "21:05"
+  },
+  {
+    "locale": "de-DE",
+    "hourCycle": "h23",
+    "op": "date",
+    "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"],
+    "expected": "27.10.2026"
+  },
+  {
+    "locale": "de-DE",
+    "hourCycle": "h23",
+    "op": "dayMonth",
+    "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"],
+    "expected": "27.10."
+  },
+  {
+    "locale": "de-DE",
+    "hourCycle": "h23",
+    "op": "dateTime",
+    "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"],
+    "expected": "27.10.2026 21:05"
+  },
+  {
+    "locale": "de-DE",
+    "hourCycle": "h23",
+    "op": "time",
+    "args": ["2026-03-05T09:30:00Z", "Europe/Berlin"],
+    "expected": "10:30"
+  },
+  {
+    "locale": "de-DE",
+    "hourCycle": "h23",
+    "op": "number",
+    "args": [1234.5],
+    "expected": "1.234,5"
+  },
+  {
+    "locale": "de-DE",
+    "hourCycle": "h23",
+    "op": "percent",
+    "args": [12.5],
+    "expected": "12,5\u00a0%"
+  },
+  {
+    "locale": "de-DE",
+    "hourCycle": "h23",
+    "op": "money",
+    "args": [1234.5, "EUR"],
+    "expected": "1.234,50\u00a0€"
+  },
+  {
+    "locale": "de-DE",
+    "hourCycle": "h23",
+    "op": "money",
+    "args": [1234.5, "KWD"],
+    "expected": "1.234,50\u00a0KWD"
+  },
+  {
+    "locale": "de-DE",
+    "hourCycle": "h23",
+    "op": "money",
+    "args": [1234.5, "XYZ"],
+    "expected": "1.234,50\u00a0XYZ"
+  },
 
-  { "locale": "fr-FR", "hourCycle": "h12", "op": "time", "args": ["2026-03-05T09:30:00Z", "Europe/Berlin"], "expected": "10:30 a. m." },
-  { "locale": "fr-FR", "hourCycle": "h12", "op": "number", "args": [1234.5], "expected": "1\u202f234,5" },
-  { "locale": "fr-FR", "hourCycle": "h12", "op": "money", "args": [1234.5, "EUR"], "expected": "1\u202f234,50\u00a0€" },
-  { "locale": "fr-FR", "hourCycle": "h23", "op": "time", "args": ["2026-03-05T09:30:00Z", "Europe/Berlin"], "expected": "10:30" },
-  { "locale": "fr-FR", "hourCycle": "h23", "op": "date", "args": ["2026-03-05T09:30:00Z", "Europe/Berlin"], "expected": "05/03/2026" },
-  { "locale": "fr-FR", "hourCycle": "h23", "op": "percent", "args": [12.5], "expected": "12,5\u00a0%" },
-  { "locale": "fr-FR", "hourCycle": "h23", "op": "money", "args": [150000, "VND"], "expected": "150\u202f000\u00a0₫" },
+  {
+    "locale": "fr-FR",
+    "hourCycle": "h12",
+    "op": "time",
+    "args": ["2026-03-05T09:30:00Z", "Europe/Berlin"],
+    "expected": "10:30 a. m."
+  },
+  {
+    "locale": "fr-FR",
+    "hourCycle": "h12",
+    "op": "number",
+    "args": [1234.5],
+    "expected": "1\u202f234,5"
+  },
+  {
+    "locale": "fr-FR",
+    "hourCycle": "h12",
+    "op": "money",
+    "args": [1234.5, "EUR"],
+    "expected": "1\u202f234,50\u00a0€"
+  },
+  {
+    "locale": "fr-FR",
+    "hourCycle": "h23",
+    "op": "time",
+    "args": ["2026-03-05T09:30:00Z", "Europe/Berlin"],
+    "expected": "10:30"
+  },
+  {
+    "locale": "fr-FR",
+    "hourCycle": "h23",
+    "op": "date",
+    "args": ["2026-03-05T09:30:00Z", "Europe/Berlin"],
+    "expected": "05/03/2026"
+  },
+  {
+    "locale": "fr-FR",
+    "hourCycle": "h23",
+    "op": "percent",
+    "args": [12.5],
+    "expected": "12,5\u00a0%"
+  },
+  {
+    "locale": "fr-FR",
+    "hourCycle": "h23",
+    "op": "money",
+    "args": [150000, "VND"],
+    "expected": "150\u202f000\u00a0₫"
+  },
 
-  { "locale": "pt-BR", "hourCycle": "h12", "op": "time", "args": ["2026-10-27T20:05:00Z", "America/New_York"], "expected": "4:05 p. m." },
-  { "locale": "pt-BR", "hourCycle": "h12", "op": "money", "args": [1234.5, "USD"], "expected": "US$\u00a01.234,50" },
-  { "locale": "pt-BR", "hourCycle": "h23", "op": "time", "args": ["2026-10-27T20:05:00Z", "America/New_York"], "expected": "16:05" },
-  { "locale": "pt-BR", "hourCycle": "h23", "op": "date", "args": ["2026-10-27T20:05:00Z", "America/New_York"], "expected": "27/10/2026" },
-  { "locale": "pt-BR", "hourCycle": "h23", "op": "number", "args": [1234.5], "expected": "1.234,5" },
-  { "locale": "pt-BR", "hourCycle": "h23", "op": "percent", "args": [12.5], "expected": "12,5%" },
-  { "locale": "pt-BR", "hourCycle": "h23", "op": "money", "args": [1234.5, "EUR"], "expected": "€\u00a01.234,50" },
+  {
+    "locale": "pt-BR",
+    "hourCycle": "h12",
+    "op": "time",
+    "args": ["2026-10-27T20:05:00Z", "America/New_York"],
+    "expected": "4:05 p. m."
+  },
+  {
+    "locale": "pt-BR",
+    "hourCycle": "h12",
+    "op": "money",
+    "args": [1234.5, "USD"],
+    "expected": "US$\u00a01.234,50"
+  },
+  {
+    "locale": "pt-BR",
+    "hourCycle": "h23",
+    "op": "time",
+    "args": ["2026-10-27T20:05:00Z", "America/New_York"],
+    "expected": "16:05"
+  },
+  {
+    "locale": "pt-BR",
+    "hourCycle": "h23",
+    "op": "date",
+    "args": ["2026-10-27T20:05:00Z", "America/New_York"],
+    "expected": "27/10/2026"
+  },
+  {
+    "locale": "pt-BR",
+    "hourCycle": "h23",
+    "op": "number",
+    "args": [1234.5],
+    "expected": "1.234,5"
+  },
+  {
+    "locale": "pt-BR",
+    "hourCycle": "h23",
+    "op": "percent",
+    "args": [12.5],
+    "expected": "12,5%"
+  },
+  {
+    "locale": "pt-BR",
+    "hourCycle": "h23",
+    "op": "money",
+    "args": [1234.5, "EUR"],
+    "expected": "€\u00a01.234,50"
+  },
 
-  { "locale": "ar-EG", "hourCycle": "h12", "op": "time", "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"], "expected": "9:05 p. m." },
-  { "locale": "ar-EG", "hourCycle": "h12", "op": "date", "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"], "expected": "27/10/2026" },
-  { "locale": "ar-EG", "hourCycle": "h12", "op": "percent", "args": [12.5], "expected": "12.5%" },
-  { "locale": "ar-EG", "hourCycle": "h12", "op": "money", "args": [1234.5, "EUR"], "expected": "1,234.50\u00a0€" },
-  { "locale": "ar-EG", "hourCycle": "h23", "op": "time", "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"], "expected": "21:05" },
-  { "locale": "ar-EG", "hourCycle": "h23", "op": "dateTime", "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"], "expected": "27/10/2026 21:05" },
-  { "locale": "ar-EG", "hourCycle": "h23", "op": "dayMonth", "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"], "expected": "27/10" },
-  { "locale": "ar-EG", "hourCycle": "h23", "op": "number", "args": [1234.5], "expected": "1,234.5" },
+  {
+    "locale": "ar-EG",
+    "hourCycle": "h12",
+    "op": "time",
+    "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"],
+    "expected": "9:05 p. m."
+  },
+  {
+    "locale": "ar-EG",
+    "hourCycle": "h12",
+    "op": "date",
+    "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"],
+    "expected": "27/10/2026"
+  },
+  {
+    "locale": "ar-EG",
+    "hourCycle": "h12",
+    "op": "percent",
+    "args": [12.5],
+    "expected": "12.5%"
+  },
+  {
+    "locale": "ar-EG",
+    "hourCycle": "h12",
+    "op": "money",
+    "args": [1234.5, "EUR"],
+    "expected": "1,234.50\u00a0€"
+  },
+  {
+    "locale": "ar-EG",
+    "hourCycle": "h23",
+    "op": "time",
+    "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"],
+    "expected": "21:05"
+  },
+  {
+    "locale": "ar-EG",
+    "hourCycle": "h23",
+    "op": "dateTime",
+    "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"],
+    "expected": "27/10/2026 21:05"
+  },
+  {
+    "locale": "ar-EG",
+    "hourCycle": "h23",
+    "op": "dayMonth",
+    "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"],
+    "expected": "27/10"
+  },
+  {
+    "locale": "ar-EG",
+    "hourCycle": "h23",
+    "op": "number",
+    "args": [1234.5],
+    "expected": "1,234.5"
+  },
 
-  { "locale": "th-TH", "hourCycle": "h23", "op": "date", "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"], "expected": "27/10/2026" },
-  { "locale": "th-TH", "hourCycle": "h23", "op": "civilDate", "args": ["2026-10-27"], "expected": "27/10/2026" },
-  { "locale": "th-TH", "hourCycle": "h23", "op": "time", "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"], "expected": "21:05" },
-  { "locale": "th-TH", "hourCycle": "h12", "op": "time", "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"], "expected": "9:05 p. m." },
-  { "locale": "th-TH", "hourCycle": "h23", "op": "wallParts", "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"], "expected": { "year": 2026, "month": 10, "day": 27, "hour": 21, "minute": 5 } },
-  { "locale": "fa-IR", "hourCycle": "h23", "op": "date", "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"], "expected": "2026/10/27" },
-  { "locale": "fa-IR", "hourCycle": "h23", "op": "number", "args": [1234.5], "expected": "1,234.5" },
-  { "locale": "fa-IR", "hourCycle": "h23", "op": "longDate", "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"], "expected": "martes 27 de octubre de 2026" },
-  { "locale": "he-IL-u-ca-hebrew", "hourCycle": "h23", "op": "date", "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"], "expected": "27.10.2026" },
-  { "locale": "he-IL-u-ca-hebrew", "hourCycle": "h23", "op": "dayMonth", "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"], "expected": "27.10" },
-  { "locale": "he-IL-u-ca-hebrew", "hourCycle": "h23", "op": "longDate", "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"], "expected": "martes 27 de octubre de 2026" },
-  { "locale": "he-IL-u-ca-hebrew", "hourCycle": "h23", "op": "wallParts", "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"], "expected": { "year": 2026, "month": 10, "day": 27, "hour": 21, "minute": 5 } },
-  { "locale": "ja-JP-u-ca-japanese", "hourCycle": "h23", "op": "date", "args": ["2026-10-27T20:05:00Z", "Asia/Tokyo"], "expected": "2026/10/28" },
-  { "locale": "en-US-u-nu-arab", "hourCycle": "h23", "op": "number", "args": [1234.5], "expected": "1,234.5" },
+  {
+    "locale": "th-TH",
+    "hourCycle": "h23",
+    "op": "date",
+    "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"],
+    "expected": "27/10/2026"
+  },
+  {
+    "locale": "th-TH",
+    "hourCycle": "h23",
+    "op": "civilDate",
+    "args": ["2026-10-27"],
+    "expected": "27/10/2026"
+  },
+  {
+    "locale": "th-TH",
+    "hourCycle": "h23",
+    "op": "time",
+    "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"],
+    "expected": "21:05"
+  },
+  {
+    "locale": "th-TH",
+    "hourCycle": "h12",
+    "op": "time",
+    "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"],
+    "expected": "9:05 p. m."
+  },
+  {
+    "locale": "th-TH",
+    "hourCycle": "h23",
+    "op": "wallParts",
+    "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"],
+    "expected": {
+      "year": 2026,
+      "month": 10,
+      "day": 27,
+      "hour": 21,
+      "minute": 5
+    }
+  },
+  {
+    "locale": "fa-IR",
+    "hourCycle": "h23",
+    "op": "date",
+    "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"],
+    "expected": "2026/10/27"
+  },
+  {
+    "locale": "fa-IR",
+    "hourCycle": "h23",
+    "op": "number",
+    "args": [1234.5],
+    "expected": "1,234.5"
+  },
+  {
+    "locale": "fa-IR",
+    "hourCycle": "h23",
+    "op": "longDate",
+    "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"],
+    "expected": "martes 27 de octubre de 2026"
+  },
+  {
+    "locale": "he-IL-u-ca-hebrew",
+    "hourCycle": "h23",
+    "op": "date",
+    "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"],
+    "expected": "27.10.2026"
+  },
+  {
+    "locale": "he-IL-u-ca-hebrew",
+    "hourCycle": "h23",
+    "op": "dayMonth",
+    "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"],
+    "expected": "27.10"
+  },
+  {
+    "locale": "he-IL-u-ca-hebrew",
+    "hourCycle": "h23",
+    "op": "longDate",
+    "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"],
+    "expected": "martes 27 de octubre de 2026"
+  },
+  {
+    "locale": "he-IL-u-ca-hebrew",
+    "hourCycle": "h23",
+    "op": "wallParts",
+    "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"],
+    "expected": {
+      "year": 2026,
+      "month": 10,
+      "day": 27,
+      "hour": 21,
+      "minute": 5
+    }
+  },
+  {
+    "locale": "ja-JP-u-ca-japanese",
+    "hourCycle": "h23",
+    "op": "date",
+    "args": ["2026-10-27T20:05:00Z", "Asia/Tokyo"],
+    "expected": "2026/10/28"
+  },
+  {
+    "locale": "en-US-u-nu-arab",
+    "hourCycle": "h23",
+    "op": "number",
+    "args": [1234.5],
+    "expected": "1,234.5"
+  },
 
-  { "locale": "da-DK", "hourCycle": "h23", "op": "time", "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"], "expected": "21:05" },
-  { "locale": "da-DK", "hourCycle": "h12", "op": "time", "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"], "expected": "9:05 p. m." },
-  { "locale": "da-DK", "hourCycle": "h23", "op": "clock", "args": [9, 5], "expected": "09:05" },
-  { "locale": "da-DK", "hourCycle": "h23", "op": "date", "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"], "expected": "27.10.2026" },
+  {
+    "locale": "da-DK",
+    "hourCycle": "h23",
+    "op": "time",
+    "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"],
+    "expected": "21:05"
+  },
+  {
+    "locale": "da-DK",
+    "hourCycle": "h12",
+    "op": "time",
+    "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"],
+    "expected": "9:05 p. m."
+  },
+  {
+    "locale": "da-DK",
+    "hourCycle": "h23",
+    "op": "clock",
+    "args": [9, 5],
+    "expected": "09:05"
+  },
+  {
+    "locale": "da-DK",
+    "hourCycle": "h23",
+    "op": "date",
+    "args": ["2026-10-27T20:05:00Z", "Europe/Berlin"],
+    "expected": "27.10.2026"
+  },
 
-  { "locale": "en-US", "hourCycle": "h23", "op": "wallParts", "args": ["2026-10-27T10:59:00Z", "Pacific/Auckland"], "expected": { "year": 2026, "month": 10, "day": 27, "hour": 23, "minute": 59 } },
-  { "locale": "en-US", "hourCycle": "h23", "op": "wallParts", "args": ["2026-10-27T11:00:00Z", "Pacific/Auckland"], "expected": { "year": 2026, "month": 10, "day": 28, "hour": 0, "minute": 0 } },
-  { "locale": "en-US", "hourCycle": "h12", "op": "time", "args": ["2026-10-27T11:00:00Z", "Pacific/Auckland"], "expected": "12:00 a. m." },
-  { "locale": "en-US", "hourCycle": "h12", "op": "longDateTime", "args": ["2026-10-27T11:00:00Z", "Pacific/Auckland"], "expected": "miércoles 28 de octubre de 2026 a las 12:00 a. m." },
+  {
+    "locale": "en-US",
+    "hourCycle": "h23",
+    "op": "wallParts",
+    "args": ["2026-10-27T10:59:00Z", "Pacific/Auckland"],
+    "expected": {
+      "year": 2026,
+      "month": 10,
+      "day": 27,
+      "hour": 23,
+      "minute": 59
+    }
+  },
+  {
+    "locale": "en-US",
+    "hourCycle": "h23",
+    "op": "wallParts",
+    "args": ["2026-10-27T11:00:00Z", "Pacific/Auckland"],
+    "expected": { "year": 2026, "month": 10, "day": 28, "hour": 0, "minute": 0 }
+  },
+  {
+    "locale": "en-US",
+    "hourCycle": "h12",
+    "op": "time",
+    "args": ["2026-10-27T11:00:00Z", "Pacific/Auckland"],
+    "expected": "12:00 a. m."
+  },
+  {
+    "locale": "en-US",
+    "hourCycle": "h12",
+    "op": "longDateTime",
+    "args": ["2026-10-27T11:00:00Z", "Pacific/Auckland"],
+    "expected": "miércoles 28 de octubre de 2026 a las 12:00 a. m."
+  },
 
-  { "locale": "en-US", "hourCycle": "h12", "op": "civilLongDate", "args": ["2027-05-03"], "expected": "lunes 3 de mayo de 2027" },
-  { "locale": "en-US", "hourCycle": "h12", "op": "civilLongDate", "args": ["2027-05-03", { "weekday": false, "year": false }], "expected": "3 de mayo" },
-  { "locale": "en-US", "hourCycle": "h12", "op": "weekdayName", "args": [0], "expected": "domingo" },
-  { "locale": "de-DE", "hourCycle": "h23", "op": "civilLongDate", "args": ["2027-05-03"], "expected": "lunes 3 de mayo de 2027" },
-  { "locale": "de-DE", "hourCycle": "h23", "op": "civilLongDate", "args": ["2027-05-03", { "weekday": false, "year": false }], "expected": "3 de mayo" },
-  { "locale": "de-DE", "hourCycle": "h23", "op": "weekdayName", "args": [0], "expected": "domingo" }
+  {
+    "locale": "en-US",
+    "hourCycle": "h12",
+    "op": "civilLongDate",
+    "args": ["2027-05-03"],
+    "expected": "lunes 3 de mayo de 2027"
+  },
+  {
+    "locale": "en-US",
+    "hourCycle": "h12",
+    "op": "civilLongDate",
+    "args": ["2027-05-03", { "weekday": false, "year": false }],
+    "expected": "3 de mayo"
+  },
+  {
+    "locale": "en-US",
+    "hourCycle": "h12",
+    "op": "weekdayName",
+    "args": [0],
+    "expected": "domingo"
+  },
+  {
+    "locale": "de-DE",
+    "hourCycle": "h23",
+    "op": "civilLongDate",
+    "args": ["2027-05-03"],
+    "expected": "lunes 3 de mayo de 2027"
+  },
+  {
+    "locale": "de-DE",
+    "hourCycle": "h23",
+    "op": "civilLongDate",
+    "args": ["2027-05-03", { "weekday": false, "year": false }],
+    "expected": "3 de mayo"
+  },
+  {
+    "locale": "de-DE",
+    "hourCycle": "h23",
+    "op": "weekdayName",
+    "args": [0],
+    "expected": "domingo"
+  }
 ]

@@ -62,6 +62,7 @@ function throttlers(
     // `default` = límite global, por IP, en cada ruta.
     { name: 'default', limit: cfg.global.limit, ttl: cfg.global.ttlMs },
     strict('auth'),
+    strict('subdomain-check'),
     strict('refresh'),
     strict('login-burst'),
     strict('invitation'),

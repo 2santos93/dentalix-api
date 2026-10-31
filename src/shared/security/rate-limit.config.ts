@@ -12,6 +12,11 @@
  *                  de seguridad contra abuso/scraping, holgada porque una
  *                  clínica entera suele salir por UNA IP (NAT).
  * - auth:          register y su verificación; por IP.
+ * - subdomain-check: ¿está libre esta dirección web? (`GET
+ *                  /public/subdomains/:slug/availability`), por IP. La web
+ *                  pregunta con debounce mientras se escribe en el registro;
+ *                  30/min da para escribir y corregir, y frena a quien barra
+ *                  direcciones (aunque libre/ocupada ya es público: es el host).
  * - refresh:       renovar sesión; por IP. Holgado: la web renueva en cada
  *                  carga de página (DX-062) y una clínica sale por UNA IP; el
  *                  refresh es un JWT firmado, no hay nada que adivinar.
@@ -72,6 +77,7 @@
  */
 export type RateLimitPolicy =
   | 'auth'
+  | 'subdomain-check'
   | 'login-burst'
   | 'invitation'
   | 'password'
@@ -106,6 +112,7 @@ const MINUTE = 60_000;
 export const DEFAULT_RATE_LIMITS: RateLimitConfig = {
   global: { limit: 1000, ttlMs: MINUTE },
   auth: { limit: 20, ttlMs: MINUTE },
+  'subdomain-check': { limit: 30, ttlMs: MINUTE },
   'login-burst': { limit: 60, ttlMs: MINUTE },
   invitation: { limit: 10, ttlMs: MINUTE },
   password: { limit: 5, ttlMs: 15 * MINUTE },
@@ -152,6 +159,7 @@ export function loadRateLimitConfig(env: EnvReader): RateLimitConfig {
   return {
     global: rule('global'),
     auth: rule('auth'),
+    'subdomain-check': rule('subdomain-check'),
     'login-burst': rule('login-burst'),
     invitation: rule('invitation'),
     password: rule('password'),
