@@ -157,6 +157,30 @@ export interface AuditMetadata {
    * contraseña.
    */
   staffAccess?: AuditStaffAccessChange;
+  /**
+   * DX-439: un pendiente de «Pendiente de cerrar» descartado: la sección y el
+   * código del motivo. La cita (y el ítem) van en `params`; el texto de
+   * «Otro» nunca (queda en `closing_queue_dismissals`, `resourceId`).
+   */
+  closingQueueDismissal?: AuditClosingQueueDismissal;
+}
+
+export const AUDIT_CLOSING_QUEUE_SECTIONS = [
+  'OUTCOME',
+  'EVOLUTION',
+  'TREATMENT',
+] as const;
+export const AUDIT_CLOSING_DISMISSAL_REASONS = [
+  'PATIENT_DECLINED_TODAY',
+  'PAPER_NOTE',
+  'DUPLICATE_APPOINTMENT',
+  'OTHER',
+] as const;
+
+/** Descarte de un pendiente de cierre en la auditoría (DX-439): solo códigos. */
+export interface AuditClosingQueueDismissal {
+  section: (typeof AUDIT_CLOSING_QUEUE_SECTIONS)[number];
+  reasonCode: (typeof AUDIT_CLOSING_DISMISSAL_REASONS)[number];
 }
 
 /** Un lado del cambio de accesos de un miembro (DX-359). */
@@ -796,6 +820,18 @@ function cancellation(value: unknown): AuditCancellation | null {
   return { byKind: kind, reasonCode: reason, noticeMinutes, lateCancellation };
 }
 
+/** El descarte entero con su forma, o nada (DX-439). */
+function closingQueueDismissal(
+  value: unknown,
+): AuditClosingQueueDismissal | null {
+  if (!isRecord(value)) return null;
+  const { section, reasonCode, ...rest } = value;
+  const s = AUDIT_CLOSING_QUEUE_SECTIONS.find((v) => v === section);
+  const r = AUDIT_CLOSING_DISMISSAL_REASONS.find((v) => v === reasonCode);
+  if (Object.keys(rest).length > 0 || !s || !r) return null;
+  return { section: s, reasonCode: r };
+}
+
 const MAX_SAFETY_CODES = 50;
 
 function safetyCodes(value: unknown): string[] | null {
@@ -1140,5 +1176,7 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (calendar) out.locationCalendar = calendar;
   const access = staffAccess(input.staffAccess);
   if (access) out.staffAccess = access;
+  const dismissed = closingQueueDismissal(input.closingQueueDismissal);
+  if (dismissed) out.closingQueueDismissal = dismissed;
   return out;
 }

@@ -1059,3 +1059,26 @@ describe('sanitizeAuditMetadata — tasa de respaldo de un día sin tasa (DX-402
     }
   });
 });
+
+describe('sanitizeAuditMetadata — descarte de «Pendiente de cerrar» (DX-439)', () => {
+  it('conserva la sección y el código del motivo', () => {
+    const closingQueueDismissal = {
+      section: 'TREATMENT',
+      reasonCode: 'PATIENT_DECLINED_TODAY',
+    };
+    expect(sanitizeAuditMetadata({ closingQueueDismissal })).toEqual({
+      closingQueueDismissal,
+    });
+  });
+
+  it('descarta el descarte entero con el texto del motivo o códigos ajenos', () => {
+    for (const closingQueueDismissal of [
+      { section: 'OUTCOME', reasonCode: 'OTHER', reasonText: 'Se fue' },
+      { section: 'OTRA', reasonCode: 'OTHER' },
+      { section: 'OUTCOME', reasonCode: 'Se fue' },
+      'OUTCOME',
+    ]) {
+      expect(sanitizeAuditMetadata({ closingQueueDismissal })).toEqual({});
+    }
+  });
+});

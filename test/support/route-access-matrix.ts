@@ -595,6 +595,11 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /reports/production-by-procedure': roles('ADMIN', 'DENTIST'),
   'GET /reports/production-by-procedure.csv': roles('ADMIN', 'DENTIST'),
   'GET /reports/production-by-procedure/items': roles('ADMIN', 'DENTIST'),
+  // DX-439: «Pendiente de cerrar». ADMIN todo; DENTIST evolución y
+  // tratamiento de sus citas; RECEPTION el desenlace (lo acota el caso de uso).
+  'GET /closing-queue': roles('ADMIN', 'DENTIST', 'RECEPTION'),
+  'GET /closing-queue/count': roles('ADMIN', 'DENTIST', 'RECEPTION'),
+  'POST /closing-queue/dismissals': roles('ADMIN', 'DENTIST', 'RECEPTION'),
   // DX-150: cobranza (gestiones y compromisos de pago), mismo dato financiero.
   'POST /patients/:id/collection-notes': BILLING,
   'POST /patients/:id/payment-promises': BILLING,

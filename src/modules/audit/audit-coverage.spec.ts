@@ -48,6 +48,7 @@ import { CancellationPolicyController } from '../cancellation-policies/presentat
 import { CancellationFeeController } from '../cancellation-fees/presentation/cancellation-fee.controller';
 import { DiscountReportController } from '../discounts/presentation/discount-report.controller';
 import { ProductionByProcedureController } from '../reports/presentation/production-by-procedure.controller';
+import { ClosingQueueController } from '../closing-queue/presentation/closing-queue.controller';
 import { CollectionsController } from '../collections/presentation/collections.controller';
 import { CashSessionsController } from '../cash-sessions/presentation/cash-sessions.controller';
 import { ScheduleBlocksController } from '../schedule-blocks/presentation/schedule-blocks.controller';
@@ -1135,6 +1136,12 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'TREATMENT_PLAN_ITEM',
     reason: 'PRODUCTION_REPORT',
   },
+  // DX-439: «Pendiente de cerrar» lleva los nombres de muchos pacientes.
+  'GET /closing-queue': {
+    action: 'VIEW',
+    resource: 'APPOINTMENT',
+    reason: 'CLOSING_QUEUE',
+  },
   // DX-150: cobranza. La nota se audita sin su texto (solo los nombres de los
   // campos); el cambio de estado del compromiso lo audita SettlePaymentPromises.
   'POST /patients/:id/collection-notes': {
@@ -1536,6 +1543,11 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
     'platform-mfa.use-case.spec.ts y staff-access-audit.e2e-spec.ts',
   'POST /platform/mfa/enrollment/confirm':
     'platform-mfa.use-case.spec.ts y staff-access-audit.e2e-spec.ts',
+  // DX-439: CREATE CLOSING_QUEUE_DISMISSAL (CLOSING_QUEUE_DISMISSED) en la
+  // transacción del descarte, con la sección y el código del motivo y la cita
+  // (y el ítem) en `params`; nunca el texto de «Otro».
+  'POST /closing-queue/dismissals':
+    'closing-queue.use-cases.spec.ts y closing-queue.e2e-spec.ts',
 };
 
 /**
@@ -1664,6 +1676,7 @@ const CONTROLLERS: Type[] = [
   CancellationFeeController,
   DiscountReportController,
   ProductionByProcedureController,
+  ClosingQueueController,
   CollectionsController,
   CashSessionsController,
   ExpenseReportsController,
