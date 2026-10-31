@@ -123,6 +123,8 @@ model Tenant {
   consentCountersignatures                PatientConsentCountersignature[]
   // DX-422: estado del PDF firmado de cada consentimiento a distancia.
   signedConsentPdfs                       SignedConsentPdf[]
+  // DX-443: enlaces de un solo uso de la copia del PDF firmado.
+  signedConsentPdfLinks                   SignedConsentPdfLink[]
   // DX-151: documentos de los pacientes.
   patientDocuments                        PatientDocument[]
   // DX-233: horario de cada profesional por sede y sus excepciones por fecha.
@@ -244,6 +246,8 @@ model User {
   // DX-243: firma a distancia (quién la envía, el profesional que firmará, quién
   // la anula) y las firmas del profesional que añadió después.
   signatureRequestsCreated          SignatureRequest[]               @relation("SignatureRequestCreatedBy")
+  // DX-443: «Reenviar copia» del PDF firmado.
+  signedConsentPdfLinksCreated      SignedConsentPdfLink[]
   signatureRequestsProfessional     SignatureRequest[]               @relation("SignatureRequestProfessional")
   signatureRequestsRevoked          SignatureRequest[]               @relation("SignatureRequestRevokedBy")
   consentCountersignatures          PatientConsentCountersignature[]
@@ -2910,11 +2914,15 @@ model SignedConsentPdf {
   documentId    String?                @db.Uuid
   createdAt     DateTime               @default(now())
   updatedAt     DateTime               @default(now())
+  /// DX-443: al quedar READY se envía la copia al paciente (false en los del
+  /// barrido retroactivo: esos solo se envían con «Reenviar copia»).
+  notifyPatient Boolean                @default(true)
 
-  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  patient  Patient          @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "signed_consent_pdfs_patient_fkey")
-  consent  PatientConsent   @relation(fields: [tenantId, consentId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, map: "signed_consent_pdfs_consent_fkey")
-  document PatientDocument? @relation(fields: [tenantId, documentId], references: [tenantId, id], onDelete: Restrict, map: "signed_consent_pdfs_document_fkey")
+  tenant   Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patient  Patient                @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "signed_consent_pdfs_patient_fkey")
+  consent  PatientConsent         @relation(fields: [tenantId, consentId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, map: "signed_consent_pdfs_consent_fkey")
+  document PatientDocument?       @relation(fields: [tenantId, documentId], references: [tenantId, id], onDelete: Restrict, map: "signed_consent_pdfs_document_fkey")
+  links    SignedConsentPdfLink[]
 
   @@unique([tenantId, consentId, patientId], map: "signed_consent_pdfs_consent_key")
   @@unique([tenantId, documentId], map: "signed_consent_pdfs_document_key")
@@ -2926,6 +2934,33 @@ enum SignedConsentPdfStatus {
   PENDING
   READY
   FAILED
+}
+
+/// DX-443: enlace de un solo uso para que el paciente (o su responsable)
+/// descargue su copia del PDF firmado. Solo el sha256 del token; uno vivo por
+/// consentimiento (índice parcial `signed_consent_pdf_links_live_key`).
+/// Trigger `signed_consent_pdf_links_guard`: solo se marca usado o invalidado,
+/// una vez; sin DELETE. RLS FORCE.
+model SignedConsentPdfLink {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String    @db.Uuid
+  patientId   String    @db.Uuid
+  consentId   String    @db.Uuid
+  tokenHash   String    @unique(map: "signed_consent_pdf_links_token_hash_key")
+  expiresAt   DateTime
+  /// NULL: el envío automático al quedar READY.
+  createdById String?   @db.Uuid
+  createdAt   DateTime  @default(now())
+  usedAt      DateTime?
+  revokedAt   DateTime?
+
+  tenant    Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  signedPdf SignedConsentPdf @relation(fields: [tenantId, consentId, patientId], references: [tenantId, consentId, patientId], onDelete: Restrict, map: "signed_consent_pdf_links_pdf_fkey")
+  createdBy User?            @relation(fields: [createdById], references: [id], onDelete: Restrict, map: "signed_consent_pdf_links_created_by_fkey")
+
+  @@index([tenantId, consentId, patientId, createdAt], map: "signed_consent_pdf_links_sent_idx")
+  @@index([createdById], map: "signed_consent_pdf_links_created_by_idx")
+  @@map("signed_consent_pdf_links")
 }
 
 // ---------------------------------------------------------------------------
@@ -3336,6 +3371,8 @@ enum EmailTemplate {
   SIGNATURE_BUDGET_ACCEPTED @map("signature-budget-accepted")
   // DX-435: oferta de un hueco libre con enlace para aceptarlo.
   SLOT_OFFER                @map("slot-offer")
+  // DX-443: copia del PDF firmado con un enlace de un solo uso.
+  SIGNED_CONSENT_COPY       @map("signed-consent-copy")
 }
 
 /// Registro de envíos de email (patrón outbox). NUNCA guarda el destinatario

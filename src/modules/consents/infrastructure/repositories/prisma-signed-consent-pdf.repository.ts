@@ -60,7 +60,7 @@ export class PrismaSignedConsentPdfRepository
               },
             },
           },
-          signedPdf: { select: { status: true } },
+          signedPdf: { select: { status: true, notifyPatient: true } },
         },
       });
       if (!row?.signatureRequest) return null;
@@ -83,6 +83,7 @@ export class PrismaSignedConsentPdfRepository
         locationId: request.locationId,
         professionalUserId: request.professionalUserId,
         status: row.signedPdf?.status ?? 'PENDING',
+        notifyPatient: row.signedPdf?.notifyPatient ?? true,
         source: complete
           ? {
               consentId: row.id,
@@ -116,6 +117,7 @@ export class PrismaSignedConsentPdfRepository
 
   async archive(
     input: ArchiveSignedConsentPdfInput,
+    onArchived?: (tx: Prisma.TransactionClient) => Promise<void>,
   ): Promise<'ARCHIVED' | 'ALREADY_READY'> {
     const tenantId = this.tenantId();
     try {
@@ -149,7 +151,10 @@ export class PrismaSignedConsentPdfRepository
             lastErrorCode: null,
           },
         });
-        if (updated.count === 1) return;
+        if (updated.count === 1) {
+          await onArchived?.(tx);
+          return;
+        }
         const exists = await tx.signedConsentPdf.findFirst({
           where: { consentId: input.consentId, patientId: input.patientId },
           select: { id: true },
@@ -165,6 +170,7 @@ export class PrismaSignedConsentPdfRepository
             attempts: 1,
           },
         });
+        await onArchived?.(tx);
       });
       return 'ARCHIVED';
     } catch (error) {

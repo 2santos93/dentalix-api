@@ -933,6 +933,42 @@ la clínica (DX-012/DX-040). Migraciones `20261106160000_dx415_enums` y
   de lenguas de Europa occidental. Un texto con otros alfabetos queda `FAILED`
   con `UNSUPPORTED_CHARACTERS` hasta que se embeba una fuente Unicode.
 
+### Copia del PDF firmado al paciente y PDF retroactivos (DX-443)
+
+- Al archivar el PDF (`READY`), la MISMA transacción encola
+  `consents.signed-pdf-copy` (outbox; clave `consents.signed-pdf-copy:<id>`).
+  El trabajo crea un enlace de un solo uso en `signed_consent_pdf_links`
+  (token aleatorio de 256 bits que solo viaja en el email; en la BD, su
+  SHA-256) y envía por el outbox de DX-088 la plantilla `signed-consent-copy`
+  al email de la firma a distancia (el paciente o su responsable). Sin nada
+  clínico: ni el título ni el procedimiento. El host del enlace es el de
+  plataforma de la clínica (`TenantLinkBaseService`, SEC-033).
+- Caducidad: `SIGNED_PDF_COPY_LINK_TTL_HOURS` (1–720; 168 por defecto). Un
+  valor inválido impide arrancar.
+- Rutas públicas (invariante de DX-207: la clínica sale solo del host; límite
+  por IP `copy-link` y por token `copy-token`, `RATE_LIMIT_COPY_LINK_*` /
+  `RATE_LIMIT_COPY_TOKEN_*`):
+  - `GET /public/signed-consent-copies/:token`: solo lee (`AVAILABLE` o `USED`).
+  - `POST /public/signed-consent-copies/:token/download`: gasta el enlace
+    (UPDATE condicional) y devuelve una URL firmada de 60 s del PDF; en la
+    misma transacción, `audit_events` EXPORT de CONSENT, origen `PUBLIC_LINK`,
+    reason `SIGNED_PDF_COPY_DOWNLOADED`, sin usuario. Ya usado: 410
+    `SIGNED_PDF_COPY_LINK_USED`.
+  - Caducado, invalidado, inventado o de otra clínica: el mismo 404 genérico.
+- `POST /patients/:id/consents/:consentId/signed-pdf/copy` («Reenviar copia»,
+  los cuatro roles): enlace nuevo; el anterior se invalida en la misma
+  transacción (índice único parcial: uno vivo por consentimiento). Topes del
+  outbox (429), 409 si el PDF no está listo, 404 de otra clínica; auditado como
+  SEND de CONSENT, `SIGNED_PDF_COPY_RESENT`. La lista de la ficha trae
+  `signedPdfCopySentAt`.
+- Retroactivo: la tarea programada `consents.signed-pdf-backfill` (cada 15
+  min, un solo ejecutor) busca por clínica los consentimientos a distancia
+  completos SIN fila en `signed_consent_pdfs` (de antes de DX-422 o de una
+  réplica antigua), en lotes de 100, y les crea el estado `PENDING` con
+  `notifyPatient = false` y su `consents.signed-pdf` con la clave de siempre
+  (`ON CONFLICT DO NOTHING`): repetirlo no duplica nada. Esos PDF no se envían
+  solos al paciente; la clínica puede usar «Reenviar copia».
+
 ## Flujo del paciente en la clínica (DX-200)
 
 - **Estados nuevos** de la cita: `ARRIVED` (llegó, en espera), `IN_CHAIR`

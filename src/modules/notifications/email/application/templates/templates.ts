@@ -16,6 +16,7 @@ import {
   SignatureCodeEmailVars,
   SignatureRequestEmailVars,
   SlotOfferEmailVars,
+  SignedConsentCopyEmailVars,
 } from '../../domain/email-message';
 import { EmailBlock, renderLayout } from './layout';
 import { endSentence } from '../../../../../shared/format/end-sentence';
@@ -397,6 +398,31 @@ function slotOffer(
   });
 }
 
+function signedConsentCopy(
+  vars: SignedConsentCopyEmailVars,
+  brand: EmailBrand | null,
+): RenderedEmail {
+  const onBehalf = vars.patientFirstName
+    ? ` que firmaste en nombre de ${vars.patientFirstName}`
+    : ' que firmaste';
+  return renderLayout({
+    brand,
+    subject: `Tu copia del documento firmado en ${vars.clinicName}`,
+    heading: `Hola, ${vars.recipientFirstName}`,
+    blocks: [
+      {
+        kind: 'paragraph',
+        text: `${vars.clinicName} te envía la copia en PDF del documento${onBehalf} a distancia. Ábrela y descárgala desde el enlace.`,
+      },
+      {
+        kind: 'note',
+        text: `El enlace caduca el ${vars.expiresAtLabel} y solo sirve una vez: guarda el PDF al descargarlo. Si necesitas otra copia, pídesela a la clínica. Si no esperabas este correo, no lo abras y avisa a la clínica.`,
+      },
+    ],
+    action: { label: 'Descargar mi copia', url: vars.url },
+  });
+}
+
 type Renderer<T extends EmailTemplateName> = (
   vars: EmailVarsByTemplate[T],
   brand: EmailBrand | null,
@@ -414,6 +440,7 @@ const RENDERERS: { [T in EmailTemplateName]: Renderer<T> } = {
   'signature-code': signatureCode,
   'signature-budget-accepted': signatureBudgetAccepted,
   'slot-offer': slotOffer,
+  'signed-consent-copy': signedConsentCopy,
 };
 
 /**

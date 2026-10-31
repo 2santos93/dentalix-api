@@ -151,6 +151,14 @@ export class SignatureRequestDto {
       'DX-422: documento del paciente con el PDF firmado (READY): se descarga con GET /patients/:patientId/documents/:id/url/download',
   })
   signedPdfDocumentId!: string | null;
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description:
+      'DX-443: último envío de la copia del PDF firmado al paciente (o a su responsable) por email, con un enlace de un solo uso; null si aún no se envió (o es de antes de DX-443). Se reenvía con POST /patients/:patientId/consents/:consentId/signed-pdf/copy',
+  })
+  signedPdfCopySentAt!: Date | null;
 }
 
 export class SignatureRequestCreatedDto extends SignatureRequestDto {

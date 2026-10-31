@@ -57,7 +57,18 @@ const LIST_INCLUDE = {
       id: true,
       ipAddress: true,
       countersignature: { select: { signedAt: true } },
-      signedPdf: { select: { status: true, documentId: true } },
+      signedPdf: {
+        select: {
+          status: true,
+          documentId: true,
+          // DX-443: el último envío de la copia (signed_consent_pdf_links_sent_idx).
+          links: {
+            select: { createdAt: true },
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+          },
+        },
+      },
     },
   },
   budgetAcceptance: { select: { id: true, ipAddress: true } },
@@ -120,7 +131,13 @@ function toListRow(row: ListRow): SignatureRequestListRow {
           id: consent.id,
           ipAddress: consent.ipAddress,
           countersignedAt: consent.countersignature?.signedAt ?? null,
-          signedPdf: consent.signedPdf,
+          signedPdf: consent.signedPdf
+            ? {
+                status: consent.signedPdf.status,
+                documentId: consent.signedPdf.documentId,
+                copySentAt: consent.signedPdf.links[0]?.createdAt ?? null,
+              }
+            : null,
         }
       : null,
     budgetAcceptance,

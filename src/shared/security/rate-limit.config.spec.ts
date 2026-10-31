@@ -41,6 +41,9 @@ describe('loadRateLimitConfig', () => {
     // DX-435: la oferta de hueco pública, por IP y por token.
     expect(cfg['slot-offer']).toEqual({ limit: 20, ttlMs: 60_000 });
     expect(cfg['slot-token']).toEqual({ limit: 10, ttlMs: 60_000 });
+    // DX-443: la copia pública del PDF firmado, por IP y por token.
+    expect(cfg['copy-link']).toEqual({ limit: 20, ttlMs: 60_000 });
+    expect(cfg['copy-token']).toEqual({ limit: 10, ttlMs: 60_000 });
   });
 
   it('SEC-046: lee RATE_LIMIT_PATIENT_IMPORT_LIMIT/_TTL_MS', () => {

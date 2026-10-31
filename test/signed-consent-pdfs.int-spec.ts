@@ -4,10 +4,6 @@ import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { InMemoryFileStorage } from '../src/shared/storage/__fixtures__/in-memory-file-storage';
 import { PrismaSignatureRequestRepository } from '../src/modules/signature-requests/infrastructure/prisma-signature-request.repository';
-import {
-  generateSignatureToken,
-  hashSignatureToken,
-} from '../src/modules/signature-requests/domain/signature-token';
 import { PrismaPatientConsentRepository } from '../src/modules/consents/infrastructure/repositories/prisma-patient-consent.repository';
 import { PrismaSignedConsentPdfRepository } from '../src/modules/consents/infrastructure/repositories/prisma-signed-consent-pdf.repository';
 import { PdfkitSignedConsentPdfRenderer } from '../src/modules/consents/infrastructure/pdf/signed-consent-pdf.renderer';
@@ -17,16 +13,12 @@ import {
 } from '../src/modules/consents/application/signed-consent-pdf.service';
 import { RecordAuditEventUseCase } from '../src/modules/audit/application/record-audit-event.use-case';
 import { PrismaAuditEventRepository } from '../src/modules/audit/infrastructure/prisma-audit-event.repository';
-import {
-  computeCountersignatureHash,
-  computeRemoteConsentHash,
-} from '../src/modules/consents/domain/consent-hash';
 import type { JobContext } from '../src/modules/jobs/domain/job';
 import { resetDatabase } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
-  locationData,
-} from './support/location-fixtures';
+  signedConsentFixtures,
+  type Seeded,
+} from './support/signed-consent-fixtures';
 
 // DX-422 contra Postgres: el estado del PDF firmado (signed_consent_pdfs) con
 // RLS FORCE y FK compuestas; nace PENDING con la firma del profesional (en
@@ -41,179 +33,8 @@ const requests = new PrismaSignatureRequestRepository(prisma, tenantContext);
 const consents = new PrismaPatientConsentRepository(prisma, tenantContext);
 const pdfs = new PrismaSignedConsentPdfRepository(prisma, tenantContext);
 
-const PNG =
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
-
-interface Seeded {
-  tenantId: string;
-  locationId: string;
-  patientId: string;
-  templateId: string;
-  userId: string;
-}
-
-async function seedClinic(subdomain: string): Promise<Seeded> {
-  const tenant = await owner.tenant.create({
-    data: { name: `Clínica ${subdomain}`, subdomain },
-  });
-  const location = await owner.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
-      tenantId: tenant.id,
-      name: `Sede ${subdomain}`,
-    }),
-  });
-  const user = await owner.user.create({
-    data: {
-      email: `${subdomain}@int.test`,
-      passwordHash: 'x',
-      fullName: `Dra. ${subdomain}`,
-    },
-  });
-  await owner.clinicMembership.create({
-    data: { tenantId: tenant.id, userId: user.id, role: 'DENTIST' },
-  });
-  const patient = await owner.patient.create({
-    data: {
-      tenantId: tenant.id,
-      firstName: 'Ana',
-      lastName: 'Int',
-      docNumber: randomUUID().slice(0, 12),
-    },
-  });
-  const template = await owner.consentTemplate.create({
-    data: { tenantId: tenant.id, title: 'Exodoncia', body: 'Texto' },
-  });
-  return {
-    tenantId: tenant.id,
-    locationId: location.id,
-    patientId: patient.id,
-    templateId: template.id,
-    userId: user.id,
-  };
-}
-
-const asClinic = <T>(tenantId: string, fn: () => Promise<T>): Promise<T> =>
-  tenantContext.run(tenantId, fn);
-
-/** Envía, firma (con el hash real) y devuelve el consentimiento a distancia. */
-async function remoteSigned(s: Seeded): Promise<string> {
-  const now = new Date();
-  const token = generateSignatureToken();
-  const { id } = await asClinic(s.tenantId, () =>
-    requests.create({
-      locationId: s.locationId,
-      patientId: s.patientId,
-      type: 'CONSENT',
-      channel: 'EMAIL',
-      templateId: s.templateId,
-      templateVersion: 1,
-      treatmentPlanId: null,
-      title: 'Consentimiento — Exodoncia',
-      body: 'Yo, Ana Int, autorizo la exodoncia.\n\nRiesgos: sangrado, ¿dudas? ¡sí!',
-      professionalUserId: s.userId,
-      professionalName: 'Dra. Int',
-      signerType: 'PATIENT',
-      signerName: 'Ana Int',
-      signerDocument: null,
-      destination: 'ana@example.com',
-      destinationMasked: 'an***@example.com',
-      tokenHash: hashSignatureToken(token),
-      expiresAt: new Date(now.getTime() + 72 * 3600_000),
-      createdById: s.userId,
-      createdAt: now,
-    }),
-  );
-  const at = new Date();
-  await asClinic(s.tenantId, () =>
-    requests.withLockedRequest(
-      id,
-      { ipAddress: '203.0.113.7', userAgent: 'int', requestId: null },
-      (r) => ({
-        write: {
-          patch: { openedAt: at, verifiedAt: at, signedAt: at },
-          audit: [{ action: 'SIGN', reason: 'SIGNATURE_PATIENT_SIGNED' }],
-          consent: {
-            templateId: r.templateId!,
-            templateVersion: 1,
-            treatmentPlanId: null,
-            title: r.title,
-            body: r.body,
-            signerType: 'PATIENT',
-            signerName: r.signerName,
-            signerDocument: null,
-            professionalName: r.professionalName,
-            patientSignature: PNG,
-            contentHash: computeRemoteConsentHash({
-              title: r.title,
-              body: r.body,
-              templateVersion: 1,
-              signerType: 'PATIENT',
-              signerName: r.signerName,
-              signerDocument: null,
-              professionalName: r.professionalName,
-              patientSignature: PNG,
-              signedAt: at,
-              channel: 'EMAIL',
-              destinationMasked: r.destinationMasked,
-              sentAt: r.createdAt,
-              openedAt: at,
-              verifiedAt: at,
-              ipAddress: '203.0.113.7',
-              userAgent: 'int',
-            }),
-            signedAt: at,
-            recordedById: r.createdById,
-            ipAddress: '203.0.113.7',
-            userAgent: 'int',
-            remoteChannel: 'EMAIL',
-            remoteDestinationMasked: r.destinationMasked,
-            remoteSentAt: r.createdAt,
-            remoteOpenedAt: at,
-            remoteVerifiedAt: at,
-          },
-        },
-        result: null,
-      }),
-    ),
-  );
-  const consent = await owner.patientConsent.findFirstOrThrow({
-    where: { signatureRequestId: id },
-  });
-  return consent.id;
-}
-
-async function countersign(
-  s: Seeded,
-  consentId: string,
-  onCompleted: (tx: Prisma.TransactionClient) => Promise<void> = () =>
-    Promise.resolve(),
-): Promise<void> {
-  const consent = await owner.patientConsent.findFirstOrThrow({
-    where: { id: consentId },
-  });
-  const signedAt = new Date();
-  await asClinic(s.tenantId, () =>
-    consents.countersign(
-      {
-        patientId: s.patientId,
-        consentId,
-        professionalUserId: s.userId,
-        professionalName: consent.professionalName,
-        professionalSignature: PNG,
-        contentHash: computeCountersignatureHash({
-          consentHash: consent.contentHash,
-          professionalName: consent.professionalName,
-          professionalSignature: PNG,
-          signedAt,
-        }),
-        signedAt,
-        ipAddress: '198.51.100.1',
-        userAgent: 'int-pro',
-      },
-      onCompleted,
-    ),
-  );
-}
+const { seedClinic, asClinic, remoteSigned, countersign } =
+  signedConsentFixtures({ owner, tenantContext, requests, consents });
 
 const jobContext = (tenantId: string, attempt = 1): JobContext => ({
   jobId: randomUUID(),
@@ -236,6 +57,8 @@ describe('PDF firmado en Postgres (DX-422)', () => {
       new RecordAuditEventUseCase(new PrismaAuditEventRepository(prisma)),
       tenantContext,
     ),
+    // DX-443: el envío de la copia se prueba en signed-pdf-copies.int-spec.ts.
+    { schedule: () => Promise.resolve() },
   );
   const generate = (s: Seeded, consentId: string) =>
     asClinic(s.tenantId, () =>

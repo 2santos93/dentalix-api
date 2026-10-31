@@ -576,6 +576,14 @@ const EXPECTED: Record<string, AuditOptions> = {
     patient: P,
     reason: 'SIGNED_PDF_RETRY',
   },
+  // DX-443: «Reenviar copia» del PDF firmado al paciente.
+  'POST /patients/:patientId/consents/:id/signed-pdf/copy': {
+    action: 'SEND',
+    resource: 'CONSENT',
+    resourceId: { param: 'id' },
+    patient: P,
+    reason: 'SIGNED_PDF_COPY_RESENT',
+  },
   // DX-243: enviar a firmar a distancia y anular el enlace.
   'POST /patients/:patientId/signature-requests': {
     action: 'SEND',
@@ -1455,6 +1463,11 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // WAITLIST_OFFER, origen PUBLIC_LINK, en la transacción del repositorio).
   'POST /public/slot-offers/:token/accept': 'slot-offers.int-spec.ts',
   'POST /public/slot-offers/:token/decline': 'slot-offers.int-spec.ts',
+  // DX-443: descargar la copia del PDF firmado desde el enlace (EXPORT de
+  // CONSENT, origen PUBLIC_LINK, sin actor, en la transacción que gasta el
+  // enlace).
+  'POST /public/signed-consent-copies/:token/download':
+    'signed-pdf-copies.int-spec.ts',
   // DX-361: confirmación de cita por enlace, en la transacción de la
   // escritura y sin token, hash ni URL. Recepción: UPDATE APPOINTMENT origen
   // STAFF, CONFIRMATION_LINK_CREATED o _RESENT; el paciente (sin usuario):

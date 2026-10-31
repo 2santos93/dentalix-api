@@ -629,19 +629,27 @@ describe('enlace público, código y firma (DX-243)', () => {
       // DX-422: sin la firma del profesional no hay PDF firmado.
       signedPdfStatus: null,
       signedPdfDocumentId: null,
+      signedPdfCopySentAt: null,
     });
     // DX-422: completo ⇒ la ficha ve el estado del PDF y, listo, su documento.
     ctx.repo.countersigned.add(consent.id);
     ctx.repo.signedPdfs.set(consent.id, {
       status: 'READY',
       documentId: 'doc-pdf-1',
+      copySentAt: new Date('2026-10-31T10:00:00.000Z'),
     });
     expect((await ctx.list.execute('p1'))[0]).toMatchObject({
       status: 'COMPLETE',
       signedPdfStatus: 'READY',
       signedPdfDocumentId: 'doc-pdf-1',
+      // DX-443: «Copia enviada al paciente el …».
+      signedPdfCopySentAt: new Date('2026-10-31T10:00:00.000Z'),
     });
-    ctx.repo.signedPdfs.set(consent.id, { status: 'FAILED', documentId: null });
+    ctx.repo.signedPdfs.set(consent.id, {
+      status: 'FAILED',
+      documentId: null,
+      copySentAt: null,
+    });
     expect((await ctx.list.execute('p1'))[0]).toMatchObject({
       signedPdfStatus: 'FAILED',
       signedPdfDocumentId: null,

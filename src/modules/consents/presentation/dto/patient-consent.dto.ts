@@ -199,3 +199,26 @@ export class SignedConsentPdfRetryDto {
   @ApiProperty({ enum: ['PENDING'], enumName: 'SignedConsentPdfRetryStatus' })
   status!: 'PENDING';
 }
+
+/** DX-443: respuesta de «Reenviar copia». */
+export class SignedPdfCopyResentDto {
+  @ApiProperty({
+    format: 'date-time',
+    description: 'Hora del envío: «Copia enviada al paciente el …».',
+  })
+  sentAt!: Date;
+
+  @ApiProperty({
+    format: 'date-time',
+    description:
+      'Hasta cuándo vale el enlace nuevo (SIGNED_PDF_COPY_LINK_TTL_HOURS; 168 h por defecto). El anterior ya no sirve.',
+  })
+  expiresAt!: Date;
+
+  @ApiProperty({
+    example: 'la***@example.com',
+    description:
+      'Adónde se envió (el email de la firma a distancia), enmascarado.',
+  })
+  destinationMasked!: string;
+}

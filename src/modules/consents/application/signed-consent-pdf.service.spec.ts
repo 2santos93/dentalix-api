@@ -1,5 +1,6 @@
 import { ConflictException, Logger, NotFoundException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
+import type { Prisma } from '@prisma/client';
 import { InMemoryFileStorage } from '../../../shared/storage/__fixtures__/in-memory-file-storage';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import type { JobContext } from '../../jobs/domain/job';
@@ -78,9 +79,14 @@ class FakeRepo implements SignedConsentPdfRepository {
     locationId: LOCATION,
     professionalUserId: PRO,
     status: 'PENDING',
+    notifyPatient: true,
     source: signedSource(),
   };
   archived: ArchiveSignedConsentPdfInput[] = [];
+  /** DX-443: lo que se hace en la transacción del archivo. */
+  onArchived: (
+    ((tx: Prisma.TransactionClient) => Promise<void>) | undefined
+  )[] = [];
   failures: { code: string; final: boolean }[] = [];
   archiveError: Error | null = null;
 
@@ -89,9 +95,11 @@ class FakeRepo implements SignedConsentPdfRepository {
   }
   archive(
     input: ArchiveSignedConsentPdfInput,
+    onArchived?: (tx: Prisma.TransactionClient) => Promise<void>,
   ): Promise<'ARCHIVED' | 'ALREADY_READY'> {
     if (this.archiveError) return Promise.reject(this.archiveError);
     this.archived.push(input);
+    this.onArchived.push(onArchived);
     return Promise.resolve('ARCHIVED');
   }
   recordFailure(
@@ -127,12 +135,20 @@ function setup() {
   const renderer = new FakeRenderer();
   const tenant = new TenantContextService();
   const audit = new FakeAudit();
+  const copies: string[] = [];
+  const copyQueue = {
+    schedule: (_tx: Prisma.TransactionClient, consentId: string) => {
+      copies.push(consentId);
+      return Promise.resolve();
+    },
+  };
   const service = new GenerateSignedConsentPdf(
     repo,
     storage,
     renderer,
     tenant,
     audit,
+    copyQueue,
   );
   const run = (attempt = 1, max = 5) =>
     tenant.run(TENANT, () =>
@@ -140,7 +156,7 @@ function setup() {
     );
   const exhausted = () =>
     tenant.run(TENANT, () => service.exhausted({ consentId: CONSENT }));
-  return { repo, storage, renderer, run, audit, exhausted };
+  return { repo, storage, renderer, run, audit, exhausted, copies };
 }
 
 class FakeAudit {
@@ -152,6 +168,25 @@ class FakeAudit {
 }
 
 describe('GenerateSignedConsentPdf (DX-422)', () => {
+  it('DX-443: al archivar encola la copia al paciente EN la transacción del archivo', async () => {
+    const { repo, run, copies } = setup();
+    await run();
+    expect(repo.onArchived).toHaveLength(1);
+    const onArchived = repo.onArchived[0];
+    expect(onArchived).toBeDefined();
+    expect(copies).toEqual([]);
+    await onArchived!({} as Prisma.TransactionClient);
+    expect(copies).toEqual([CONSENT]);
+  });
+
+  it('DX-443: uno del barrido retroactivo se archiva sin escribir al paciente', async () => {
+    const { repo, run } = setup();
+    repo.job = { ...repo.job!, notifyPatient: false };
+    await run();
+    expect(repo.archived).toHaveLength(1);
+    expect(repo.onArchived).toEqual([undefined]);
+  });
+
   it('se registra con un nombre de la cola', () => {
     expect(SIGNED_CONSENT_PDF_JOB).toBe('consents.signed-pdf');
   });
@@ -260,6 +295,7 @@ describe('GenerateSignedConsentPdf (DX-422)', () => {
       new FakeRenderer(),
       tenant,
       new FakeAudit(),
+      { schedule: () => Promise.resolve() },
     );
     await tenant.run(TENANT, () => service.exhausted({ consentId: 'x' }));
     expect(repo.failures).toEqual([]);
@@ -290,6 +326,7 @@ describe('GenerateSignedConsentPdf (DX-422)', () => {
       new FakeRenderer(),
       tenant,
       new FakeAudit(),
+      { schedule: () => Promise.resolve() },
     );
     await expect(
       tenant.run(TENANT, () => service.handle({ consentId: 'x' }, ctx())),

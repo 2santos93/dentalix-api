@@ -52,6 +52,9 @@
  *                  aceptar y rechazar), por IP (enumeración de tokens).
  * - slot-token:    las mismas rutas, por TOKEN (sin IP), como
  *                  signature-token.
+ * - copy-link:     las rutas públicas de la copia del PDF firmado (DX-443:
+ *                  ver el enlace y descargar), por IP (enumeración de tokens).
+ * - copy-token:    las mismas rutas, por TOKEN (sin IP), como slot-token.
  * - public-files:  servir los avatares (`GET /files/avatars/:name`), por IP
  *                  (DX-259). Ruta anónima que llega al bucket; con la caché
  *                  del navegador (clave versionada, `immutable`) el uso
@@ -85,7 +88,9 @@ export type RateLimitPolicy =
   | 'signature'
   | 'signature-token'
   | 'slot-offer'
-  | 'slot-token';
+  | 'slot-token'
+  | 'copy-link'
+  | 'copy-token';
 
 export interface RateLimitRule {
   limit: number;
@@ -118,6 +123,8 @@ export const DEFAULT_RATE_LIMITS: RateLimitConfig = {
   'signature-token': { limit: 10, ttlMs: MINUTE },
   'slot-offer': { limit: 20, ttlMs: MINUTE },
   'slot-token': { limit: 10, ttlMs: MINUTE },
+  'copy-link': { limit: 20, ttlMs: MINUTE },
+  'copy-token': { limit: 10, ttlMs: MINUTE },
 };
 
 type EnvReader = (key: string) => string | undefined;
@@ -162,5 +169,7 @@ export function loadRateLimitConfig(env: EnvReader): RateLimitConfig {
     'signature-token': rule('signature-token'),
     'slot-offer': rule('slot-offer'),
     'slot-token': rule('slot-token'),
+    'copy-link': rule('copy-link'),
+    'copy-token': rule('copy-token'),
   };
 }
