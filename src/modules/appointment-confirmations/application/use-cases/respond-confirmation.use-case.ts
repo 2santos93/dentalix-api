@@ -8,6 +8,7 @@ import {
 import { APPOINTMENT_CONFIRMATION_REPOSITORY } from '../../domain/ports/appointment-confirmation-repository.port';
 import type { AppointmentConfirmationRepository } from '../../domain/ports/appointment-confirmation-repository.port';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import type { AuditRequestMeta } from '../../../audit/domain/audit-request-context';
 import { confirmationState } from '../confirmation-token';
 import { findConfirmationByToken } from '../find-confirmation-by-token';
 import {
@@ -41,6 +42,8 @@ const EXPIRED = 'Este enlace ya no es válido';
  *
  * Un solo uso: tras responder, el enlace solo muestra la respuesta (409 si se
  * intenta otra vez). 410 si caducó o la cita cambió desde que se emitió.
+ * DX-361: la respuesta registrada deja su evento de auditoría (el paciente,
+ * origen LINK) en la misma transacción; un 404/409/410 no deja ninguno.
  */
 @Injectable()
 export class RespondConfirmationUseCase {
@@ -54,6 +57,7 @@ export class RespondConfirmationUseCase {
     token: string,
     action: ConfirmationAction,
     policyInput: RespondPolicyInput = {},
+    request: AuditRequestMeta | null = null,
   ): Promise<PublicConfirmationView> {
     const { confirmation, appointment, policy } = await findConfirmationByToken(
       this.tenantContext,
@@ -92,6 +96,7 @@ export class RespondConfirmationUseCase {
       expectedStatus: confirmation.appointmentStatus,
       acknowledgePolicy,
       shownPolicyVersionId: policyInput.policyVersionId,
+      request,
     });
     if (outcome === 'ALREADY_USED')
       throw new ConflictException(ALREADY_RESPONDED);

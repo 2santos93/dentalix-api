@@ -8,6 +8,10 @@ import {
   ConfirmationAppointment,
 } from '../entities/appointment-confirmation.entity';
 import type { LinkCancellationPolicy } from '../link-cancellation-policy';
+import type {
+  AuditRequestContext,
+  AuditRequestMeta,
+} from '../../../audit/domain/audit-request-context';
 
 // Sin `tenantId` en ningún input: el tenant sale SIEMPRE del contexto del
 // request (JWT + host en la ruta autenticada, solo host en la pública), igual
@@ -25,6 +29,11 @@ export interface IssueConfirmationInput {
   /** false = el automático conserva los enlaces ya enviados. Default: true. */
   revokePrevious?: boolean;
   now: Date;
+  /**
+   * DX-361: quién lo pide (recepción). Con él, la emisión deja su evento de
+   * auditoría en la misma transacción; el recordatorio automático no lo pasa.
+   */
+  audit?: AuditRequestContext;
 }
 
 export interface RespondConfirmationInput {
@@ -39,6 +48,11 @@ export interface RespondConfirmationInput {
   acknowledgePolicy?: boolean;
   /** DX-291: la versión que le mostró la página (sin enviar: no se compara). */
   shownPolicyVersionId?: string | null;
+  /**
+   * DX-361: desde dónde respondió el paciente. Una respuesta registrada deja
+   * SIEMPRE su evento de auditoría en la misma transacción.
+   */
+  request?: AuditRequestMeta | null;
 }
 
 /**
@@ -71,7 +85,8 @@ export interface AppointmentConfirmationRepository {
 
   /**
    * En una transacción: conserva o revoca los enlaces pendientes según
-   * revokePrevious, crea el nuevo y marca `appointments.confirmationSentAt`.
+   * revokePrevious, crea el nuevo, marca `appointments.confirmationSentAt` y,
+   * con `audit`, escribe el evento (reenvío si la cita ya tenía uno enviado).
    */
   issue(input: IssueConfirmationInput): Promise<void>;
 

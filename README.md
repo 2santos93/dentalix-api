@@ -246,6 +246,17 @@ resourceId?, patient? })`: pacientes, historia clínica, evoluciones,
   nombres. El alta del MFA del superadmin (`MFA_ENROLLMENT_STARTED`,
   `MFA_ENABLED`) y su cambio de contraseña con sesión de plataforma van a
   `platform_audit_events` (sin clínica), con la metadata vacía.
+- **Confirmación de cita por enlace (DX-361)**: generar o reenviar el enlace
+  (`POST /appointments/:id/confirmation-link`) deja `UPDATE APPOINTMENT` con
+  el usuario, `origin` `STAFF` y `CONFIRMATION_LINK_CREATED` (o
+  `CONFIRMATION_LINK_RESENT` si la cita ya tenía uno enviado); la respuesta
+  del paciente (`POST /public/appointment-confirmations/:token`) deja el
+  mismo evento **sin usuario**, `origin` `LINK` y
+  `CONFIRMATION_LINK_CONFIRMED`/`_CANCELLED`/`_CALL_REQUESTED` (con el estado
+  antes y después y, al cancelar, el aviso), en la clínica de la cita. Los
+  dos, en la misma transacción que el cambio y sin el token, su hash ni la
+  URL; un enlace desconocido, caducado o ya usado no deja evento. El enlace
+  del recordatorio automático no se audita (no hay usuario).
 - **Un evento por petición** que termina bien (una sola escritura, nunca N):
   actor, rol, acción, recurso, paciente, sede activa, request id
   (`X-Request-Id`, DX-023), IP y user agent. Una petición que falla (404,

@@ -96,6 +96,15 @@ async function resolvePatientId(
           })
         )?.patientId ?? null
       );
+    case 'appointment':
+      return (
+        (
+          await tx.appointment.findFirst({
+            where,
+            select: { patientId: true },
+          })
+        )?.patientId ?? null
+      );
     case 'postOpDelivery':
       return (
         (

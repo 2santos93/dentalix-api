@@ -28,8 +28,8 @@ describe('Enlace público de confirmación (Get + Respond)', () => {
   }
 
   beforeEach(() => {
-    repo = new InMemoryAppointmentConfirmationRepository();
     ctx = new TenantContextService();
+    repo = new InMemoryAppointmentConfirmationRepository(ctx);
     create = new CreateConfirmationLinkUseCase(repo, ctx);
     get = new GetPublicConfirmationUseCase(ctx, repo);
     respond = new RespondConfirmationUseCase(ctx, repo);
@@ -197,6 +197,71 @@ describe('Enlace público de confirmación (Get + Respond)', () => {
       await expect(
         inTenant(() => respond.execute('B'.repeat(43), 'confirm')),
       ).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
+  // DX-361: la respuesta del paciente deja un evento en la cita.
+  describe('auditoría', () => {
+    const request = { requestId: 'req-1', ip: '10.0.0.9', userAgent: 'móvil' };
+
+    it.each([
+      ['confirm', 'CONFIRMATION_LINK_CONFIRMED'],
+      ['cancel', 'CONFIRMATION_LINK_CANCELLED'],
+      ['call_me', 'CONFIRMATION_LINK_CALL_REQUESTED'],
+    ] as const)(
+      '%s deja %s en la cita, sin usuario, origen LINK, en el tenant del contexto y sin el token',
+      async (action, reason) => {
+        const { appointment, token } = await issue();
+
+        await inTenant(() => respond.execute(token, action, {}, request));
+
+        expect(repo.auditEvents).toEqual([
+          expect.objectContaining({
+            tenantId: TENANT,
+            locationId: appointment.locationId,
+            actor: { kind: 'patient' },
+            action: 'UPDATE',
+            resourceType: 'APPOINTMENT',
+            resourceId: appointment.id,
+            requestId: 'req-1',
+            ip: '10.0.0.9',
+            metadata: expect.objectContaining({
+              origin: 'LINK',
+              reason,
+            }) as unknown,
+          }),
+        ]);
+        expect(JSON.stringify(repo.auditEvents)).not.toContain(token);
+      },
+    );
+
+    it('token desconocido, caducado, revocado o ya usado: sin evento', async () => {
+      await expect(
+        inTenant(() => respond.execute('B'.repeat(43), 'confirm')),
+      ).rejects.toBeInstanceOf(NotFoundException);
+
+      const expired = await issue();
+      repo.confirmations.find(
+        (c) => c.appointmentId === expired.appointment.id,
+      )!.expiresAt = new Date(Date.now() - 1);
+      await expect(
+        inTenant(() => respond.execute(expired.token, 'confirm')),
+      ).rejects.toBeInstanceOf(GoneException);
+
+      const revoked = await issue();
+      await create.execute({ appointmentId: revoked.appointment.id });
+      await expect(
+        inTenant(() => respond.execute(revoked.token, 'confirm')),
+      ).rejects.toBeInstanceOf(GoneException);
+
+      const used = await issue();
+      await inTenant(() => respond.execute(used.token, 'confirm'));
+      repo.auditEvents.length = 0;
+      await expect(
+        inTenant(() => respond.execute(used.token, 'cancel')),
+      ).rejects.toBeInstanceOf(ConflictException);
+
+      expect(repo.auditEvents).toEqual([]);
     });
   });
 

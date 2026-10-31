@@ -313,7 +313,7 @@ export class AuditMetadataDto {
     enum: AUDIT_ORIGINS,
     enumName: 'AuditOrigin',
     description:
-      'DX-128: de dónde salió un cambio de canal, opt-in o baja de recordatorios (en persona, enlace, mensaje del paciente o anotado por el personal).',
+      'DX-128: de dónde salió un cambio de canal, opt-in o baja de recordatorios (en persona, enlace, mensaje del paciente o anotado por el personal). DX-361: en la confirmación de cita por enlace, STAFF = recepción generó o reenvió el enlace; LINK = el paciente respondió desde él.',
   })
   origin?: AuditOrigin;
 

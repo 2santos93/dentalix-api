@@ -22,7 +22,9 @@ export type AuditPatientRef = {
     // DX-262: el saldo migrado al que se abona.
     | 'openingBalance'
     // DX-099: el envío de anamnesis que se revisa o se anula.
-    | 'medicalHistorySubmission';
+    | 'medicalHistorySubmission'
+    // DX-361: la cita del enlace de confirmación (borrada en blando incluida).
+    | 'appointment';
   id: string;
 };
 
