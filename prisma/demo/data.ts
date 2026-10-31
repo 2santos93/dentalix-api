@@ -1062,9 +1062,12 @@ export const DEMO_CLINICAL_ADDENDA: readonly DemoClinicalAddendum[] = [
 ];
 
 /**
- * DX-307: anestesia local de ejemplo. La paciente infantil (Sofía, 32 kg en la
- * anamnesis) tiene una exodoncia de 75 con 2 carpules de lidocaína 2 % con
- * epinefrina: 72 mg de 224 mg (32 %), sin aviso. Por índice de DEMO_PATIENTS.
+ * DX-307: anestesia local de ejemplo. La paciente infantil (Sofía, 11 años y
+ * 32 kg en la anamnesis) tiene una exodoncia de 75 con 2 carpules de
+ * lidocaína 2 % con epinefrina. DX-420: con el máximo pediátrico de la AAPD
+ * (4,4 mg/kg) son 72 de 140,8 mg (51 %) y 0,036 mg de epinefrina, sin aviso;
+ * al abrirla después, la hoja de sedación del mismo día (DEMO_SEDATION) baja
+ * el máximo un 30 % (98,6 mg, 73 %) y lo dice. Por índice de DEMO_PATIENTS.
  */
 export const DEMO_ANESTHESIA = {
   patientIndex: 8,
