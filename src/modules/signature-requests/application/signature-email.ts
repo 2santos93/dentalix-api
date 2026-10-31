@@ -1,6 +1,7 @@
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { EmailOutbox } from '../../notifications/email/application/email-outbox.service';
 import type {
+  SignatureBudgetAcceptedEmailVars,
   SignatureCodeEmailVars,
   SignatureRequestEmailVars,
 } from '../../notifications/email/domain/email-message';
@@ -11,8 +12,9 @@ export const SIGNATURE_EMAIL_SENDER = Symbol('SIGNATURE_EMAIL_SENDER');
 
 /**
  * Emails de la firma a distancia (DX-243) por el outbox (DX-088): el del
- * enlace, al enviarla, y el del código, cuando el paciente lo pide. El texto
- * de los dos va sin nada clínico (ver las plantillas).
+ * enlace, al enviarla, y el del código, cuando el paciente lo pide; DX-415, la
+ * confirmación al aceptar un presupuesto. El texto va sin nada clínico (ver
+ * las plantillas).
  */
 export interface SignatureEmailSender {
   /** Topes del outbox por destinatario y clínica: pasarlos es un 429 en español. */
@@ -26,6 +28,12 @@ export interface SignatureEmailSender {
     to: string;
     referenceId: string;
     vars: SignatureCodeEmailVars;
+  }): Promise<void>;
+  /** DX-415: confirma al paciente que su aceptación quedó registrada. */
+  sendBudgetAccepted(input: {
+    to: string;
+    referenceId: string;
+    vars: SignatureBudgetAcceptedEmailVars;
   }): Promise<void>;
   /** Cancela el email del enlace aún pendiente (al anular la solicitud). */
   cancelPendingLink(referenceId: string): Promise<void>;
@@ -87,6 +95,20 @@ export class OutboxSignatureEmailSender implements SignatureEmailSender {
       tenantId: tenantIdOf(this.tenantContext),
       to: input.to,
       template: 'signature-code',
+      vars: input.vars,
+      referenceId: input.referenceId,
+    });
+  }
+
+  async sendBudgetAccepted(input: {
+    to: string;
+    referenceId: string;
+    vars: SignatureBudgetAcceptedEmailVars;
+  }): Promise<void> {
+    await this.outbox.enqueue({
+      tenantId: tenantIdOf(this.tenantContext),
+      to: input.to,
+      template: 'signature-budget-accepted',
       vars: input.vars,
       referenceId: input.referenceId,
     });

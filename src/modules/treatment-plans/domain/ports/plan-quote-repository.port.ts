@@ -1,4 +1,8 @@
-import type { DocumentType, TreatmentPlanStatus } from '@prisma/client';
+import type {
+  DocumentType,
+  SignatureRequestChannel,
+  TreatmentPlanStatus,
+} from '@prisma/client';
 import type { QuoteLocation, QuoteSourceItem } from '../plan-quote';
 
 /** La aceptación firmada tal como está guardada (DX-012). */
@@ -12,6 +16,20 @@ export interface StoredPlanAcceptance {
   acceptedAt: Date;
   acceptedByName: string;
   acceptanceHash: string;
+  ipAddress: string | null;
+  userAgent: string | null;
+  /** DX-415: aceptado por el paciente a distancia; `null` en la clínica. */
+  remote: PlanAcceptanceRemoteEvidence | null;
+}
+
+/** Evidencias de la aceptación a distancia, congeladas al firmar (DX-415). */
+export interface PlanAcceptanceRemoteEvidence {
+  signatureRequestId: string;
+  channel: SignatureRequestChannel;
+  destinationMasked: string;
+  sentAt: Date;
+  openedAt: Date;
+  verifiedAt: Date;
 }
 
 /**

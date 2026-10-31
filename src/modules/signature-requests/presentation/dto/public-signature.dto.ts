@@ -1,5 +1,9 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { ConsentSignerType, SignatureRequestType } from '@prisma/client';
+import {
+  ConsentSignerType,
+  SignatureRequestType,
+  ToothSurface,
+} from '@prisma/client';
 import {
   Equals,
   IsBoolean,
@@ -62,6 +66,68 @@ export class SignatureSessionDto {
   @ApiProperty({ format: 'date-time' }) sessionExpiresAt!: Date;
 }
 
+class PublicBudgetLocationDto {
+  @ApiProperty() name!: string;
+  @ApiProperty({ type: String, nullable: true }) address!: string | null;
+}
+
+class PublicBudgetPatientDto {
+  @ApiProperty() name!: string;
+  @ApiProperty({ type: String, nullable: true }) document!: string | null;
+}
+
+class PublicBudgetAgreementDto {
+  @ApiProperty() name!: string;
+  @ApiProperty() payerName!: string;
+}
+
+class PublicBudgetItemDto {
+  @ApiProperty() toothNumber!: string;
+  @ApiProperty({ enum: ToothSurface, enumName: 'ToothSurface', isArray: true })
+  surfaces!: ToothSurface[];
+  @ApiProperty() procedure!: string;
+  @ApiProperty() quantity!: number;
+  @ApiProperty() unitPrice!: number;
+  @ApiProperty() discount!: number;
+  @ApiProperty() subtotal!: number;
+  @ApiProperty({ type: Number, nullable: true }) listPrice!: number | null;
+  @ApiProperty({ type: String, nullable: true })
+  agreementName!: string | null;
+}
+
+class PublicBudgetTotalDto {
+  @ApiProperty() currency!: string;
+  @ApiProperty() gross!: number;
+  @ApiProperty() discount!: number;
+  @ApiProperty() net!: number;
+  @ApiProperty() agreementSaving!: number;
+}
+
+/**
+ * DX-415: el presupuesto exacto que se envió (la foto, sin ids internos).
+ * Importes en `currency`, con el formato de la sede (`location.locale`).
+ */
+export class PublicBudgetDto {
+  @ApiProperty({ description: 'Moneda ISO 4217 del plan' })
+  currency!: string;
+  @ApiProperty() clinicName!: string;
+  @ApiProperty({ type: PublicBudgetLocationDto })
+  location!: PublicBudgetLocationDto;
+  @ApiProperty({ type: PublicBudgetPatientDto })
+  patient!: PublicBudgetPatientDto;
+  @ApiProperty({ type: String, nullable: true })
+  professionalName!: string | null;
+  @ApiProperty({ type: PublicBudgetAgreementDto, nullable: true })
+  agreement!: PublicBudgetAgreementDto | null;
+  @ApiProperty({ example: '2026-10-31', description: 'YYYY-MM-DD (sede)' })
+  issuedOn!: string;
+  @ApiProperty({ example: '2026-11-30' }) validUntil!: string;
+  @ApiProperty() validityDays!: number;
+  @ApiProperty({ type: [PublicBudgetItemDto] }) items!: PublicBudgetItemDto[];
+  @ApiProperty({ type: [PublicBudgetTotalDto] })
+  totals!: PublicBudgetTotalDto[];
+}
+
 export class PublicSignatureDocumentDto {
   @ApiProperty({ enum: SignatureRequestType, enumName: 'SignatureRequestType' })
   type!: SignatureRequestType;
@@ -84,6 +150,13 @@ export class PublicSignatureDocumentDto {
   clinic!: PublicSignatureClinicDto;
   @ApiProperty({ type: PublicSignatureLocationDto })
   location!: PublicSignatureLocationDto;
+  @ApiProperty({
+    type: PublicBudgetDto,
+    nullable: true,
+    description:
+      'BUDGET: el presupuesto que se acepta (el texto `body` son sus condiciones); CONSENT: null',
+  })
+  budget!: PublicBudgetDto | null;
 }
 
 export class SignPublicSignatureDto {

@@ -1869,34 +1869,44 @@ model DiscountPolicy {
 // moneda del plan aceptado (20261016213000_treatment_plan_acceptances).
 // ---------------------------------------------------------------------------
 model TreatmentPlanAcceptance {
-  id             String   @id @default(uuid()) @db.Uuid
-  tenantId       String   @db.Uuid
-  planId         String   @db.Uuid
-  patientId      String   @db.Uuid
-  locationId     String   @db.Uuid
-  signerName     String
+  id                      String                   @id @default(uuid()) @db.Uuid
+  tenantId                String                   @db.Uuid
+  planId                  String                   @db.Uuid
+  patientId               String                   @db.Uuid
+  locationId              String                   @db.Uuid
+  signerName              String
   // PNG en base64 (sin prefijo data:). Tope: 200 KB decodificados (CHECK).
-  signature      String
+  signature               String
   // El presupuesto tal como se mostró y se firmó (plan-quote.ts).
-  content        Json
+  content                 Json
   // SHA-256 (hex) del contenido presentado.
-  contentHash    String
+  contentHash             String
   // SHA-256 (hex) de contentHash + firmante + firma + acceptedAt.
-  acceptanceHash String
-  acceptedAt     DateTime
-  acceptedById   String   @db.Uuid
-  ipAddress      String?
-  userAgent      String?
-  createdAt      DateTime @default(now())
+  acceptanceHash          String
+  acceptedAt              DateTime
+  acceptedById            String                   @db.Uuid
+  ipAddress               String?
+  userAgent               String?
+  createdAt               DateTime                 @default(now())
+  // DX-415: aceptada a distancia por enlace con código. Evidencias congeladas
+  // (todas o ninguna, CHECK).
+  signatureRequestId      String?                  @db.Uuid
+  remoteChannel           SignatureRequestChannel?
+  remoteDestinationMasked String?
+  remoteSentAt            DateTime?
+  remoteOpenedAt          DateTime?
+  remoteVerifiedAt        DateTime?
 
   // FK COMPUESTAS (SEC-004): plan del MISMO tenant y del MISMO paciente; sede
   // del MISMO tenant.
-  plan       TreatmentPlan @relation(fields: [tenantId, planId, patientId], references: [tenantId, id, patientId])
-  location   Location      @relation(fields: [tenantId, locationId], references: [tenantId, id])
-  acceptedBy User          @relation(fields: [acceptedById], references: [id])
+  plan             TreatmentPlan     @relation(fields: [tenantId, planId, patientId], references: [tenantId, id, patientId])
+  signatureRequest SignatureRequest? @relation(fields: [tenantId, signatureRequestId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, map: "treatment_plan_acceptances_signature_request_fkey")
+  location         Location          @relation(fields: [tenantId, locationId], references: [tenantId, id])
+  acceptedBy       User              @relation(fields: [acceptedById], references: [id])
 
   // Una aceptación por plan (volver a firmar: 409).
   @@unique([tenantId, planId, patientId], map: "treatment_plan_acceptances_plan_key")
+  @@unique([tenantId, signatureRequestId, patientId], map: "treatment_plan_acceptances_signature_request_key")
   @@index([tenantId, patientId])
   @@index([tenantId, locationId])
   @@index([acceptedById])
@@ -2808,16 +2818,21 @@ model SignatureRequest {
   createdById        String                  @db.Uuid
   createdAt          DateTime                @default(now())
   updatedAt          DateTime                @updatedAt
+  /// DX-415 (BUDGET): la foto exacta del presupuesto enviado (plan-quote.ts)
+  /// y su SHA-256. Si el plan vivo deja de coincidir, el enlace no sirve.
+  budgetContent      Json?
+  budgetContentHash  String?
 
-  tenant        Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  patient       Patient          @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "signature_requests_patient_fkey")
-  location      Location         @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "signature_requests_location_fkey")
-  template      ConsentTemplate? @relation(fields: [tenantId, templateId], references: [tenantId, id], onDelete: Restrict, map: "signature_requests_template_fkey")
-  treatmentPlan TreatmentPlan?   @relation(fields: [tenantId, treatmentPlanId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, map: "signature_requests_plan_fkey")
-  professional  User             @relation("SignatureRequestProfessional", fields: [professionalUserId], references: [id], onDelete: Restrict, map: "signature_requests_professional_fkey")
-  createdBy     User             @relation("SignatureRequestCreatedBy", fields: [createdById], references: [id], onDelete: Restrict, map: "signature_requests_created_by_fkey")
-  revokedBy     User?            @relation("SignatureRequestRevokedBy", fields: [revokedById], references: [id], onDelete: Restrict, map: "signature_requests_revoked_by_fkey")
-  consent       PatientConsent?
+  tenant           Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patient          Patient                  @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "signature_requests_patient_fkey")
+  location         Location                 @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "signature_requests_location_fkey")
+  template         ConsentTemplate?         @relation(fields: [tenantId, templateId], references: [tenantId, id], onDelete: Restrict, map: "signature_requests_template_fkey")
+  treatmentPlan    TreatmentPlan?           @relation(fields: [tenantId, treatmentPlanId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, map: "signature_requests_plan_fkey")
+  professional     User                     @relation("SignatureRequestProfessional", fields: [professionalUserId], references: [id], onDelete: Restrict, map: "signature_requests_professional_fkey")
+  createdBy        User                     @relation("SignatureRequestCreatedBy", fields: [createdById], references: [id], onDelete: Restrict, map: "signature_requests_created_by_fkey")
+  revokedBy        User?                    @relation("SignatureRequestRevokedBy", fields: [revokedById], references: [id], onDelete: Restrict, map: "signature_requests_revoked_by_fkey")
+  consent          PatientConsent?
+  budgetAcceptance TreatmentPlanAcceptance?
 
   @@unique([tenantId, id, patientId], map: "signature_requests_tenant_id_patient_key")
   @@index([tenantId, patientId, createdAt(sort: Desc)], map: "signature_requests_patient_idx")
@@ -3254,17 +3269,19 @@ enum EmailOutboxStatus {
 }
 
 enum EmailTemplate {
-  INVITATION           @map("invitation")
-  PASSWORD_RESET       @map("password-reset")
-  EMAIL_VERIFY         @map("email-verify")
-  REGISTRATION_NOTICE  @map("registration-notice")
-  APPOINTMENT_REMINDER @map("appointment-reminder")
-  PAYMENT_RECEIPT      @map("payment-receipt")
+  INVITATION                @map("invitation")
+  PASSWORD_RESET            @map("password-reset")
+  EMAIL_VERIFY              @map("email-verify")
+  REGISTRATION_NOTICE       @map("registration-notice")
+  APPOINTMENT_REMINDER      @map("appointment-reminder")
+  PAYMENT_RECEIPT           @map("payment-receipt")
   // DX-222: enlace a las indicaciones postoperatorias.
-  POST_OP_INSTRUCTIONS @map("post-op-instructions")
+  POST_OP_INSTRUCTIONS      @map("post-op-instructions")
   // DX-243: firma a distancia (el enlace y el código de verificación).
-  SIGNATURE_REQUEST    @map("signature-request")
-  SIGNATURE_CODE       @map("signature-code")
+  SIGNATURE_REQUEST         @map("signature-request")
+  SIGNATURE_CODE            @map("signature-code")
+  // DX-415: confirmación de la aceptación del presupuesto a distancia.
+  SIGNATURE_BUDGET_ACCEPTED @map("signature-budget-accepted")
 }
 
 /// Registro de envíos de email (patrón outbox). NUNCA guarda el destinatario

@@ -20,6 +20,7 @@ export const EMAIL_TEMPLATES = [
   'post-op-instructions',
   'signature-request',
   'signature-code',
+  'signature-budget-accepted',
 ] as const;
 export type EmailTemplateName = (typeof EMAIL_TEMPLATES)[number];
 
@@ -188,6 +189,17 @@ export interface SignatureCodeEmailVars {
   expiresInMinutes: number;
 }
 
+/**
+ * DX-415: confirmación de que la aceptación del presupuesto quedó registrada.
+ * Nada clínico ni importes: quién, qué clínica y cuándo.
+ */
+export interface SignatureBudgetAcceptedEmailVars {
+  recipientFirstName: string;
+  clinicName: string;
+  /** Hora de la aceptación, ya formateada en la zona y el formato de la sede. */
+  acceptedAtLabel: string;
+}
+
 export interface EmailVarsByTemplate {
   invitation: InvitationEmailVars;
   'password-reset': PasswordResetEmailVars;
@@ -198,6 +210,7 @@ export interface EmailVarsByTemplate {
   'post-op-instructions': PostOpInstructionsEmailVars;
   'signature-request': SignatureRequestEmailVars;
   'signature-code': SignatureCodeEmailVars;
+  'signature-budget-accepted': SignatureBudgetAcceptedEmailVars;
 }
 
 /** Lo que el remitente produce para una plantilla: asunto, HTML y texto. */

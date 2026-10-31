@@ -599,6 +599,10 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
         acceptedByName: 'Dra. Laura Gómez',
         acceptanceHash: expect.stringMatching(/^[0-9a-f]{64}$/) as string,
         integrityOk: true,
+        // Firmada en la clínica: sin evidencias del enlace (DX-415).
+        remote: null,
+        ipAddress: expect.any(String) as string,
+        userAgent: 'tableta-recepcion',
       });
       expect(
         new Date(quote.acceptance!.acceptedAt).getTime(),

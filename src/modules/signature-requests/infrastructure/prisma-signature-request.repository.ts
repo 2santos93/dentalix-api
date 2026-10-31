@@ -1,11 +1,21 @@
 import { Injectable } from '@nestjs/common';
-import { ClinicRole, Prisma, TreatmentPlanStatus } from '@prisma/client';
+import {
+  ClinicRole,
+  Prisma,
+  SignatureRequestType,
+  TreatmentPlanStatus,
+} from '@prisma/client';
 import { CLINICAL_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { resolveReferenceLocation } from '../../../shared/locations/reference-location';
 import { requireLocationTimeZone } from '../../../shared/locations/location-time-zone';
 import { writeAuditEvent } from '../../audit/infrastructure/prisma-audit-event.repository';
+import {
+  acceptPlanInTx,
+  lockPlanGroup,
+} from '../../treatment-plans/infrastructure/repositories/plan-option-group';
+import { readPlanQuoteSource } from '../../treatment-plans/infrastructure/repositories/prisma-plan-quote.repository';
 import {
   loadNoticeResponsibles,
   loadTenantMajorityAge,
@@ -15,15 +25,18 @@ import type {
   SignatureRequestListRow,
   SignatureRequestRecord,
 } from '../domain/entities/signature-request.entity';
-import type {
-  CreateSignatureRequestRepoInput,
-  LockedWrite,
-  PublicRequestEvidence,
-  RevokeOutcome,
-  SignaturePlanOption,
-  SignatureProfessional,
-  SignatureRecipientContext,
-  SignatureRequestRepository,
+import {
+  RemoteBudgetChangedError,
+  type BudgetSource,
+  type CreateSignatureRequestRepoInput,
+  type LockedWrite,
+  type PublicRequestEvidence,
+  type RemoteBudgetAcceptanceInsert,
+  type RevokeOutcome,
+  type SignaturePlanOption,
+  type SignatureProfessional,
+  type SignatureRecipientContext,
+  type SignatureRequestRepository,
 } from '../domain/ports/signature-request-repository.port';
 
 /**
@@ -46,6 +59,7 @@ const LIST_INCLUDE = {
       countersignature: { select: { signedAt: true } },
     },
   },
+  budgetAcceptance: { select: { id: true, ipAddress: true } },
 } satisfies Prisma.SignatureRequestInclude;
 
 type ListRow = Prisma.SignatureRequestGetPayload<{
@@ -90,11 +104,13 @@ function toRecord(
     revokedAt: row.revokedAt,
     createdById: row.createdById,
     createdAt: row.createdAt,
+    budgetContent: row.budgetContent,
+    budgetContentHash: row.budgetContentHash,
   };
 }
 
 function toListRow(row: ListRow): SignatureRequestListRow {
-  const { createdBy, consent, ...request } = row;
+  const { createdBy, consent, budgetAcceptance, ...request } = row;
   return {
     request: toRecord(request),
     sentByName: createdBy.fullName,
@@ -105,6 +121,7 @@ function toListRow(row: ListRow): SignatureRequestListRow {
           countersignedAt: consent.countersignature?.signedAt ?? null,
         }
       : null,
+    budgetAcceptance,
   };
 }
 
@@ -274,12 +291,16 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
   ): Promise<{ id: string; supersededIds: string[] }> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
-      // La anterior del mismo paciente y plantilla que aún esperaba deja de
-      // servir: un solo enlace vivo por documento.
+      // La anterior del mismo paciente y plantilla (o, BUDGET, del mismo
+      // plan) que aún esperaba deja de servir: un solo enlace vivo por
+      // documento.
       const pending = await tx.signatureRequest.findMany({
         where: {
           patientId: input.patientId,
-          templateId: input.templateId,
+          type: input.type,
+          ...(input.type === SignatureRequestType.BUDGET
+            ? { treatmentPlanId: input.treatmentPlanId }
+            : { templateId: input.templateId }),
           signedAt: null,
           revokedAt: null,
         },
@@ -348,6 +369,28 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
     });
   }
 
+  async loadBudget(
+    patientId: string,
+    planId: string,
+    locationId?: string,
+  ): Promise<BudgetSource | null> {
+    const tenantId = this.requireTenantId();
+    return this.prisma.runWithTenant(
+      async (tx) => {
+        const at = locationId ?? (await this.tenantContext.writeLocationId(tx));
+        const [quote, location] = await Promise.all([
+          readPlanQuoteSource(tx, tenantId, patientId, planId, at),
+          tx.location.findFirst({
+            where: { id: at },
+            select: { id: true, locale: true, hourCycle: true },
+          }),
+        ]);
+        return quote && location ? { quote, location } : null;
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+  }
+
   async findByTokenHash(
     tokenHash: string,
   ): Promise<PublicSignatureContext | null> {
@@ -401,6 +444,9 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
       const { write, result } = decide(request);
       if (!write) return result;
 
+      if (write.budget) {
+        await this.acceptBudget(tx, tenantId, request, write.budget);
+      }
       await tx.signatureRequest.update({ where: { id }, data: write.patch });
       if (write.consent) {
         await tx.patientConsent.create({
@@ -431,5 +477,75 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
       }
       return result;
     });
+  }
+
+  /**
+   * DX-415: la misma aceptación que la firma en la clínica (DX-012/DX-040),
+   * con el plan y su grupo bloqueados en orden de id: se relee el presupuesto
+   * y, si sigue siendo el enviado, se inserta la aceptación con sus
+   * evidencias y `acceptPlanInTx` pasa el plan a ACCEPTED, sus ítems a
+   * aceptados y rechaza las demás opciones abiertas del grupo. Si no, se
+   * deshace todo (`RemoteBudgetChangedError`).
+   */
+  private async acceptBudget(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    request: SignatureRequestRecord,
+    budget: RemoteBudgetAcceptanceInsert,
+  ): Promise<void> {
+    const locked = await lockPlanGroup(tx, budget.planId);
+    if (!locked) throw new RemoteBudgetChangedError();
+    const source = await readPlanQuoteSource(
+      tx,
+      tenantId,
+      request.patientId,
+      budget.planId,
+      budget.locationId,
+    );
+    if (!source || !budget.stillMatches(source)) {
+      throw new RemoteBudgetChangedError();
+    }
+    const { planId, locationId } = budget;
+    try {
+      await tx.treatmentPlanAcceptance.create({
+        data: {
+          tenantId,
+          planId,
+          patientId: request.patientId,
+          locationId,
+          signatureRequestId: request.id,
+          signerName: budget.signerName,
+          signature: budget.signature,
+          content: budget.content,
+          contentHash: budget.contentHash,
+          acceptanceHash: budget.acceptanceHash,
+          acceptedAt: budget.acceptedAt,
+          acceptedById: budget.acceptedById,
+          ipAddress: budget.ipAddress,
+          userAgent: budget.userAgent,
+          remoteChannel: budget.remoteChannel,
+          remoteDestinationMasked: budget.remoteDestinationMasked,
+          remoteSentAt: budget.remoteSentAt,
+          remoteOpenedAt: budget.remoteOpenedAt,
+          remoteVerifiedAt: budget.remoteVerifiedAt,
+        },
+      });
+    } catch (error) {
+      // Otra firma (en la clínica o por otro enlace) llegó antes.
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        throw new RemoteBudgetChangedError();
+      }
+      throw error;
+    }
+    await acceptPlanInTx(
+      tx,
+      locked,
+      budget.acceptedAt,
+      budget.acceptedById,
+      locationId,
+    );
   }
 }

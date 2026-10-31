@@ -12,9 +12,13 @@ import { InMemoryPatientConsentRepository } from '../../../consents/application/
 import { ConsentDocumentRenderer } from '../../../consents/application/use-cases/patient-consents.use-cases';
 import { computeRemoteConsentHash } from '../../../consents/domain/consent-hash';
 import type {
+  SignatureBudgetAcceptedEmailVars,
   SignatureCodeEmailVars,
   SignatureRequestEmailVars,
 } from '../../../notifications/email/domain/email-message';
+import { quoteSource } from '../../../treatment-plans/application/use-cases/__fixtures__/in-memory-plan-quote.repository';
+import { computeQuoteHash } from '../../../treatment-plans/domain/plan-quote';
+import { RemoteBudgetCheck } from '../remote-budget';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import type { SignatureRecipientContext } from '../../domain/ports/signature-request-repository.port';
 import { deriveSignatureCodeKey } from '../../domain/signature-code';
@@ -34,7 +38,7 @@ import {
   GetSignatureRequestOptionsUseCase,
   ListPatientSignatureRequestsUseCase,
   RevokeSignatureRequestUseCase,
-  SIGNATURE_BUDGET_NOT_AVAILABLE_MESSAGE,
+  SIGNATURE_BUDGET_PLAN_REQUIRED_MESSAGE,
   SIGNATURE_PROFESSIONAL_INVALID_MESSAGE,
   SIGNATURE_PROFESSIONAL_REQUIRED_MESSAGE,
 } from './signature-requests.use-cases';
@@ -89,7 +93,15 @@ function setup() {
   const links: { to: string; vars: SignatureRequestEmailVars }[] = [];
   const codes: { to: string; vars: SignatureCodeEmailVars }[] = [];
   const cancelled: string[] = [];
+  const confirmations: {
+    to: string;
+    vars: SignatureBudgetAcceptedEmailVars;
+  }[] = [];
   const email: SignatureEmailSender = {
+    sendBudgetAccepted: (input) => {
+      confirmations.push(input);
+      return Promise.resolve();
+    },
     assertCanSend: () => Promise.resolve(),
     sendLink: (input) => {
       links.push(input);
@@ -109,7 +121,9 @@ function setup() {
     'secreto-de-prueba-con-mas-de-32-caracteres',
   );
   const inTenant = <T>(fn: () => Promise<T>) => tenantContext.run('t1', fn);
+  const budgets = new RemoteBudgetCheck(repo, names);
   return {
+    confirmations,
     repo,
     consents,
     template,
@@ -141,17 +155,35 @@ function setup() {
       tenantContext,
       clock,
     ),
-    view: new GetPublicSignatureUseCase(tenantContext, repo, clock),
+    view: new GetPublicSignatureUseCase(tenantContext, repo, budgets, clock),
     code: new RequestSignatureCodeUseCase(
       tenantContext,
       repo,
+      budgets,
       email,
       key,
       clock,
     ),
-    verify: new VerifySignatureCodeUseCase(tenantContext, repo, key, clock),
-    document: new GetPublicSignatureDocumentUseCase(tenantContext, repo, clock),
-    sign: new SignPublicSignatureUseCase(tenantContext, repo, clock),
+    verify: new VerifySignatureCodeUseCase(
+      tenantContext,
+      repo,
+      budgets,
+      key,
+      clock,
+    ),
+    document: new GetPublicSignatureDocumentUseCase(
+      tenantContext,
+      repo,
+      budgets,
+      clock,
+    ),
+    sign: new SignPublicSignatureUseCase(
+      tenantContext,
+      repo,
+      budgets,
+      email,
+      clock,
+    ),
     inTenant,
   };
 }
@@ -212,14 +244,6 @@ describe('enviar a firmar a distancia (DX-243)', () => {
       patientFirstName: null,
     });
     expect(JSON.stringify(mail.vars)).not.toMatch(/exodoncia/i);
-  });
-
-  it('BUDGET aún no está disponible: 400 en español y no se crea nada', async () => {
-    const ctx = setup();
-    await expect(send(ctx, DENTIST, { type: 'BUDGET' })).rejects.toThrow(
-      new BadRequestException(SIGNATURE_BUDGET_NOT_AVAILABLE_MESSAGE),
-    );
-    expect(ctx.repo.rows).toHaveLength(0);
   });
 
   it('recepción tiene que elegir el profesional que firmará; uno que no es clínico es 400', async () => {
@@ -683,5 +707,248 @@ describe('enlace público, código y firma (DX-243)', () => {
     await expect(ctx.revoke.execute('p1', id, 'r')).rejects.toBeInstanceOf(
       ConflictException,
     );
+  });
+});
+
+/** Un plan «Presentado» del paciente p1 con su presupuesto (DX-415). */
+function presentedBudget(ctx: Ctx, planId = 'plan-1') {
+  const budget = {
+    quote: quoteSource({
+      plan: {
+        id: planId,
+        patientId: 'p1',
+        status: 'PRESENTED',
+        currency: 'COP',
+      },
+    }),
+    location: { id: 'loc-1', locale: 'es-CO', hourCycle: 'h12' },
+  };
+  ctx.repo.budgets.set(planId, budget);
+  return budget;
+}
+
+async function sendBudget(ctx: Ctx, planId = 'plan-1') {
+  return ctx.create.execute(
+    'p1',
+    { type: 'BUDGET', channel: 'EMAIL', treatmentPlanId: planId },
+    RECEPTION,
+    LINK,
+  );
+}
+
+async function verifiedBudget(ctx: Ctx) {
+  await sendBudget(ctx);
+  const token = tokenOf(ctx);
+  await ctx.inTenant(() => ctx.code.execute(token, EVIDENCE));
+  const code = ctx.codes.at(-1)!.vars.code;
+  const session = await ctx.inTenant(() =>
+    ctx.verify.execute(token, code, EVIDENCE),
+  );
+  return { token, session: session.sessionToken };
+}
+
+describe('presupuesto a distancia (DX-415)', () => {
+  it('congela la foto del presupuesto presentado y su hash; el email no lleva importes ni procedimientos', async () => {
+    const ctx = setup();
+    presentedBudget(ctx);
+    const created = await sendBudget(ctx);
+    const [row] = ctx.repo.rows;
+    expect(row).toMatchObject({
+      type: 'BUDGET',
+      treatmentPlanId: 'plan-1',
+      templateId: null,
+      templateVersion: null,
+      professionalUserId: 'reception-1',
+      professionalName: 'Dra. Gómez',
+    });
+    const content = row.budgetContent as { issuedOn: string; items: unknown[] };
+    expect(content.issuedOn).toBe('2026-10-30');
+    expect(content.items).toHaveLength(2);
+    expect(row.budgetContentHash).toBe(
+      computeQuoteHash(row.budgetContent as never),
+    );
+    expect(created).toMatchObject({
+      type: 'BUDGET',
+      status: 'SENT',
+      treatmentPlanId: 'plan-1',
+      emailQueued: true,
+    });
+    expect(JSON.stringify(ctx.links[0].vars)).not.toMatch(
+      /implante|resina|3500000|presupuesto/i,
+    );
+  });
+
+  it('sin plan es 400; de otro paciente, 404; aceptado, rechazado o borrador, 409 en español; nada se crea', async () => {
+    const ctx = setup();
+    await expect(
+      ctx.create.execute(
+        'p1',
+        { type: 'BUDGET', channel: 'EMAIL' },
+        DENTIST,
+        LINK,
+      ),
+    ).rejects.toThrow(
+      new BadRequestException(SIGNATURE_BUDGET_PLAN_REQUIRED_MESSAGE),
+    );
+    await expect(sendBudget(ctx, 'plan-x')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    const budget = presentedBudget(ctx);
+    for (const [status, label] of [
+      ['ACCEPTED', 'Aceptado'],
+      ['REJECTED', 'Rechazado'],
+      ['DRAFT', 'Borrador'],
+    ] as const) {
+      budget.quote = {
+        ...budget.quote,
+        plan: { ...budget.quote.plan, status },
+      };
+      await expect(sendBudget(ctx)).rejects.toThrow(
+        new ConflictException(
+          `Solo se envía a aceptar un presupuesto «Presentado»: este está «${label}».`,
+        ),
+      );
+    }
+    expect(ctx.repo.rows).toHaveLength(0);
+  });
+
+  it('enviarlo otra vez anula el enlace anterior del mismo plan', async () => {
+    const ctx = setup();
+    presentedBudget(ctx);
+    await sendBudget(ctx);
+    await sendBudget(ctx);
+    expect(ctx.repo.rows[0].revokedAt).not.toBeNull();
+    expect(ctx.cancelled).toEqual([ctx.repo.rows[0].id]);
+  });
+
+  it('tras verificar el código el paciente ve ítems, totales y condiciones del presupuesto enviado', async () => {
+    const ctx = setup();
+    presentedBudget(ctx);
+    const { token, session } = await verifiedBudget(ctx);
+    const doc = await ctx.inTenant(() => ctx.document.execute(token, session));
+    expect(doc.type).toBe('BUDGET');
+    expect(doc.body).toMatch(/Al firmar aceptas este presupuesto/);
+    expect(doc.signerDocumentRequired).toBe(false);
+    expect(doc.budget).toMatchObject({
+      currency: 'COP',
+      issuedOn: '2026-10-30',
+      validUntil: '2026-11-29',
+      totals: [{ gross: 3680000, discount: 350000, net: 3330000 }],
+    });
+    expect(doc.budget?.items[0]).toEqual(
+      expect.objectContaining({ procedure: 'Implante', subtotal: 3150000 }),
+    );
+    expect(doc.budget?.items[0]).not.toHaveProperty('id');
+  });
+
+  it('si el plan cambia tras el envío (precio, ítem o estado), el enlace es «Enlace no válido»', async () => {
+    for (const change of [
+      (q: ReturnType<typeof presentedBudget>['quote']) => ({
+        ...q,
+        items: q.items.map((i, n) => (n === 0 ? { ...i, price: 3600000 } : i)),
+      }),
+      (q: ReturnType<typeof presentedBudget>['quote']) => ({
+        ...q,
+        items: q.items.slice(1),
+      }),
+      (q: ReturnType<typeof presentedBudget>['quote']) => ({
+        ...q,
+        plan: { ...q.plan, status: 'CANCELLED' as const },
+      }),
+    ]) {
+      const ctx = setup();
+      const budget = presentedBudget(ctx);
+      const { token, session } = await verifiedBudget(ctx);
+      budget.quote = change(budget.quote);
+      await expect(ctx.inTenant(() => ctx.view.execute(token))).rejects.toThrow(
+        new NotFoundException(SIGNATURE_LINK_INVALID_MESSAGE),
+      );
+      await expect(
+        ctx.inTenant(() => ctx.document.execute(token, session)),
+      ).rejects.toThrow(SIGNATURE_LINK_INVALID_MESSAGE);
+    }
+  });
+
+  it('el día siguiente el mismo presupuesto sigue valiendo (la emisión es la de la foto)', async () => {
+    const ctx = setup();
+    presentedBudget(ctx);
+    const { token } = await verifiedBudget(ctx);
+    ctx.advance(30 * 3600_000);
+    await expect(
+      ctx.inTenant(() => ctx.view.execute(token)),
+    ).resolves.toMatchObject({ type: 'BUDGET' });
+  });
+
+  it('al firmar registra la aceptación con evidencias, el plan pasa a ACCEPTED, la ficha lo ve completo y llega la confirmación', async () => {
+    const ctx = setup();
+    const budget = presentedBudget(ctx);
+    const { token, session } = await verifiedBudget(ctx);
+    ctx.advance(60_000);
+    const copy = await ctx.inTenant(() =>
+      ctx.sign.execute(
+        token,
+        session,
+        { signature: PNG, accepted: true },
+        EVIDENCE,
+      ),
+    );
+    const [row] = ctx.repo.rows;
+    expect(ctx.repo.acceptances).toHaveLength(1);
+    const [acceptance] = ctx.repo.acceptances;
+    expect(acceptance).toMatchObject({
+      planId: 'plan-1',
+      signatureRequestId: row.id,
+      signerName: 'Ana Pérez',
+      contentHash: row.budgetContentHash,
+      acceptedById: 'reception-1',
+      ipAddress: '203.0.113.7',
+      userAgent: 'Mobile',
+      remoteChannel: 'EMAIL',
+      remoteDestinationMasked: 'an***@example.com',
+      remoteSentAt: SENT_AT,
+      remoteOpenedAt: SENT_AT,
+      remoteVerifiedAt: SENT_AT,
+    });
+    expect(acceptance.content).toEqual(row.budgetContent);
+    expect(copy.contentHash).toBe(acceptance.acceptanceHash);
+    expect(budget.quote.plan.status).toBe('ACCEPTED');
+    expect(ctx.repo.consents).toHaveLength(0);
+    const [summary] = await ctx.list.execute('p1');
+    expect(summary).toMatchObject({
+      status: 'COMPLETE',
+      budgetAcceptanceId: acceptance.id,
+      signedIpAddress: '203.0.113.7',
+    });
+    expect(ctx.confirmations).toHaveLength(1);
+    expect(ctx.confirmations[0].to).toBe('ana.perez@example.com');
+    expect(JSON.stringify(ctx.confirmations[0].vars)).not.toMatch(
+      /implante|resina|3330000/i,
+    );
+    // El enlace ya está usado.
+    await expect(ctx.inTenant(() => ctx.view.execute(token))).rejects.toThrow(
+      SIGNATURE_LINK_INVALID_MESSAGE,
+    );
+  });
+
+  it('si el plan cambia entre ver y firmar, no se acepta nada', async () => {
+    const ctx = setup();
+    const budget = presentedBudget(ctx);
+    const { token, session } = await verifiedBudget(ctx);
+    const sign = ctx.inTenant(() =>
+      ctx.sign.execute(
+        token,
+        session,
+        { signature: PNG, accepted: true },
+        EVIDENCE,
+      ),
+    );
+    budget.quote = {
+      ...budget.quote,
+      items: budget.quote.items.map((i) => ({ ...i, discount: 0 })),
+    };
+    await expect(sign).rejects.toThrow(SIGNATURE_LINK_INVALID_MESSAGE);
+    expect(ctx.repo.acceptances).toHaveLength(0);
+    expect(ctx.repo.rows[0].signedAt).toBeNull();
+    expect(ctx.confirmations).toHaveLength(0);
   });
 });

@@ -118,6 +118,9 @@ export class InMemoryPlanQuoteRepository implements PlanQuoteRepository {
         acceptedAt: row.acceptedAt,
         acceptedByName: this.acceptedByName,
         acceptanceHash: row.acceptanceHash,
+        ipAddress: row.ipAddress,
+        userAgent: row.userAgent,
+        remote: null,
       },
     };
     this.sources.set(planId, accepted);

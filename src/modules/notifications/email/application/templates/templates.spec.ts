@@ -587,5 +587,24 @@ describe('plantillas reservadas para otras tareas', () => {
       expect(email.text).toContain('Caduca en 10 minutos');
       expect(email.html).not.toContain('href=');
     });
+
+    it('la confirmación del presupuesto aceptado (DX-415): quién, clínica y hora; sin importes ni enlace', () => {
+      const email = renderEmail(
+        'signature-budget-accepted',
+        {
+          recipientFirstName: 'Laura',
+          clinicName: 'Sonrisas del Norte',
+          acceptedAtLabel: '31/10/2026 9:30 a. m.',
+        },
+        brand,
+      );
+      expect(email.subject).toBe('Sonrisas del Norte recibió tu aceptación');
+      expect(email.text).toContain('Hola, Laura');
+      expect(email.text).toContain(
+        'El 31/10/2026 9:30 a. m. registramos tu aceptación',
+      );
+      expect(email.html).not.toContain('href=');
+      expect(email.text).not.toMatch(/\$|\bCOP\b|implante|tratamiento/i);
+    });
   });
 });

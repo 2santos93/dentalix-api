@@ -21,7 +21,7 @@ import { EmailDispatcher } from '../src/modules/notifications/email/application/
 import { SIGNATURE_CLOCK } from '../src/modules/signature-requests/application/signature-clock';
 import { SIGNATURE_LINK_INVALID_MESSAGE } from '../src/modules/signature-requests/application/use-cases/public-signature.use-cases';
 import {
-  SIGNATURE_BUDGET_NOT_AVAILABLE_MESSAGE,
+  SIGNATURE_BUDGET_PLAN_REQUIRED_MESSAGE,
   SIGNATURE_PROFESSIONAL_INVALID_MESSAGE,
 } from '../src/modules/signature-requests/application/use-cases/signature-requests.use-cases';
 
@@ -31,7 +31,8 @@ import {
 // → el profesional firma en la app y el consentimiento queda «Completo».
 // Además: 5 fallos bloquean el enlace, caducado/usado/anulado/bloqueado dicen
 // lo mismo («Enlace no válido»), un menor firma por medio de su responsable,
-// BUDGET es 400 y la clínica B no toca nada de A (ni por ruta, ni por ids en
+// BUDGET sin plan es 400 (el flujo del presupuesto está en
+// remote-budget.e2e-spec.ts, DX-415) y la clínica B no toca nada de A (ni por ruta, ni por ids en
 // el cuerpo, ni con el token de A en su host). El reloj del módulo se adelanta
 // para caducar. DIRECT_URL (superusuario, sin RLS) solo lee para comprobar.
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
@@ -593,7 +594,7 @@ describe('Firma a distancia de consentimientos (e2e, DX-243)', () => {
     });
   });
 
-  it('BUDGET aún no: 400 en español; un profesional que no es de la clínica: 400; nada se crea', async () => {
+  it('BUDGET sin plan: 400 en español; sin profesional: 400; nada se crea', async () => {
     const before = await raw.signatureRequest.count();
     const budget = await as(clinicA, reception)
       .post(`/patients/${patientId}/signature-requests`, {
@@ -604,7 +605,7 @@ describe('Firma a distancia de consentimientos (e2e, DX-243)', () => {
       })
       .expect(400);
     expect(budget.body).toMatchObject({
-      message: SIGNATURE_BUDGET_NOT_AVAILABLE_MESSAGE,
+      message: SIGNATURE_BUDGET_PLAN_REQUIRED_MESSAGE,
     });
     const missing = await as(clinicA, reception)
       .post(`/patients/${patientId}/signature-requests`, {

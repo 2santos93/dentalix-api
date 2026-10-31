@@ -13,7 +13,7 @@ const TYPE_PROPERTY = {
   enum: SignatureRequestType,
   enumName: 'SignatureRequestType',
   description:
-    'CONSENT = consentimiento informado. BUDGET (presupuesto) está reservado: hoy responde 400.',
+    'CONSENT = consentimiento informado. BUDGET = presupuesto de un plan «Presentado» para que el paciente lo acepte a distancia (DX-415).',
 };
 const CHANNEL_PROPERTY = {
   enum: SignatureRequestChannel,
@@ -43,7 +43,8 @@ export class CreateSignatureRequestDto {
 
   @ApiPropertyOptional({
     format: 'uuid',
-    description: 'Plan del paciente: rellena {{tratamiento}}.',
+    description:
+      'Plan del paciente. CONSENT: rellena {{tratamiento}} (opcional). BUDGET: el plan «Presentado» cuyo presupuesto se envía (obligatorio).',
   })
   @IsOptional()
   @IsUUID()
@@ -73,6 +74,14 @@ export class SignatureRequestDto {
   templateId!: string | null;
   @ApiProperty({ type: Number, nullable: true })
   templateVersion!: number | null;
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description:
+      'BUDGET: el plan cuyo presupuesto se envió. CONSENT: el plan de {{tratamiento}}, si lo hubo.',
+  })
+  treatmentPlanId!: string | null;
   @ApiProperty() title!: string;
   @ApiProperty({ description: 'Destino enmascarado (an***@dominio)' })
   destinationMasked!: string;
@@ -110,6 +119,14 @@ export class SignatureRequestDto {
     description: 'IP desde la que firmó el paciente (evidencia)',
   })
   signedIpAddress!: string | null;
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description:
+      'BUDGET (DX-415): la aceptación del plan que produjo la firma del paciente',
+  })
+  budgetAcceptanceId!: string | null;
   @ApiProperty({
     type: String,
     format: 'date-time',

@@ -3,24 +3,29 @@ import type {
   SignatureRequestListRow,
   SignatureRequestRecord,
 } from '../../domain/entities/signature-request.entity';
-import type {
-  CreateSignatureRequestRepoInput,
-  LockedWrite,
-  PublicRequestEvidence,
-  PublicSignatureAuditEvent,
-  RemoteConsentInsert,
-  RevokeOutcome,
-  SignaturePlanOption,
-  SignatureProfessional,
-  SignatureRecipientContext,
-  SignatureRequestRepository,
+import { TreatmentPlanStatus } from '@prisma/client';
+import {
+  RemoteBudgetChangedError,
+  type BudgetSource,
+  type CreateSignatureRequestRepoInput,
+  type LockedWrite,
+  type PublicRequestEvidence,
+  type PublicSignatureAuditEvent,
+  type RemoteBudgetAcceptanceInsert,
+  type RemoteConsentInsert,
+  type RevokeOutcome,
+  type SignaturePlanOption,
+  type SignatureProfessional,
+  type SignatureRecipientContext,
+  type SignatureRequestRepository,
 } from '../../domain/ports/signature-request-repository.port';
 
 /**
  * Repositorio de firma a distancia en memoria (DX-243). `recipients` hace de
  * la RLS: un paciente que no está ahí «es de otra clínica». Guarda los
  * consentimientos que produce la firma y los eventos del paciente, como la
- * transacción real.
+ * transacción real. DX-415: `budgets` son los presupuestos por plan; aceptar
+ * uno lo pasa a ACCEPTED o, si ya no coincide, no escribe nada.
  */
 export class InMemorySignatureRequestRepository implements SignatureRequestRepository {
   readonly rows: SignatureRequestRecord[] = [];
@@ -34,6 +39,11 @@ export class InMemorySignatureRequestRepository implements SignatureRequestRepos
     evidence: PublicRequestEvidence;
   })[] = [];
   readonly countersigned = new Set<string>();
+  readonly budgets = new Map<string, BudgetSource>();
+  readonly acceptances: (Omit<RemoteBudgetAcceptanceInsert, 'stillMatches'> & {
+    id: string;
+    signatureRequestId: string;
+  })[] = [];
   professionals: SignatureProfessional[] = [
     { id: 'dentist-1', fullName: 'Dra. Laura Gómez', role: 'DENTIST' },
   ];
@@ -75,6 +85,13 @@ export class InMemorySignatureRequestRepository implements SignatureRequestRepos
     return Promise.resolve([...this.completed]);
   }
 
+  loadBudget(patientId: string, planId: string): Promise<BudgetSource | null> {
+    const budget = this.budgets.get(planId);
+    return Promise.resolve(
+      budget && budget.quote.plan.patientId === patientId ? budget : null,
+    );
+  }
+
   create(
     input: CreateSignatureRequestRepoInput,
   ): Promise<{ id: string; supersededIds: string[] }> {
@@ -82,7 +99,10 @@ export class InMemorySignatureRequestRepository implements SignatureRequestRepos
     for (const row of this.rows) {
       if (
         row.patientId === input.patientId &&
-        row.templateId === input.templateId &&
+        row.type === input.type &&
+        (input.type === 'BUDGET'
+          ? row.treatmentPlanId === input.treatmentPlanId
+          : row.templateId === input.templateId) &&
         !row.signedAt &&
         !row.revokedAt
       ) {
@@ -95,6 +115,8 @@ export class InMemorySignatureRequestRepository implements SignatureRequestRepos
       id,
       tenantId: 't1',
       ...input,
+      budgetContent: input.budgetContent ?? null,
+      budgetContentHash: input.budgetContentHash ?? null,
       codeHash: null,
       codeExpiresAt: null,
       codeSentAt: null,
@@ -115,6 +137,9 @@ export class InMemorySignatureRequestRepository implements SignatureRequestRepos
     const consent = this.consents.find(
       (c) => c.signatureRequestId === request.id,
     );
+    const acceptance = this.acceptances.find(
+      (a) => a.signatureRequestId === request.id,
+    );
     return {
       request: { ...request },
       sentByName: 'Recepción Demo',
@@ -126,6 +151,9 @@ export class InMemorySignatureRequestRepository implements SignatureRequestRepos
               ? consent.signedAt
               : null,
           }
+        : null,
+      budgetAcceptance: acceptance
+        ? { id: acceptance.id, ipAddress: acceptance.ipAddress }
         : null,
     };
   }
@@ -182,6 +210,22 @@ export class InMemorySignatureRequestRepository implements SignatureRequestRepos
     const row = this.rows.find((r) => r.id === id);
     if (!row) return Promise.resolve(null);
     const { write, result } = decide({ ...row });
+    if (write?.budget) {
+      const { stillMatches, ...acceptance } = write.budget;
+      const budget = this.budgets.get(acceptance.planId);
+      if (!budget || !stillMatches(budget.quote)) {
+        return Promise.reject(new RemoteBudgetChangedError());
+      }
+      this.acceptances.push({
+        id: `pa-${this.acceptances.length + 1}`,
+        signatureRequestId: row.id,
+        ...acceptance,
+      });
+      budget.quote = {
+        ...budget.quote,
+        plan: { ...budget.quote.plan, status: TreatmentPlanStatus.ACCEPTED },
+      };
+    }
     if (write) {
       Object.assign(row, write.patch);
       if (write.consent) {
