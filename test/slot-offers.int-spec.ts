@@ -221,6 +221,47 @@ describe('oferta de hueco por enlace (int, DX-435)', () => {
       expect(index.indexdef).toMatch(/UNIQUE/);
     });
 
+    it('el CHECK de actor de audit_events es la unión: admite los eventos sin usuario de DX-422 y los de DX-435, y nada más', async () => {
+      const insert = (action: string, resourceType: string, metadata: string) =>
+        owner.$executeRaw`INSERT INTO "audit_events" ("id","tenantId","action","resourceType","resourceId","patientId","metadata")
+          VALUES (gen_random_uuid(), ${a.tenantId}::uuid, ${action}::"AuditAction", ${resourceType}::"AuditResourceType",
+                  gen_random_uuid(), ${a.patientIds[0]}::uuid, ${metadata}::jsonb)`;
+      // DX-422 (main): el trabajo del PDF firmado.
+      await expect(
+        insert(
+          'VIEW',
+          'CONSENT',
+          '{"origin":"JOB","reason":"SIGNED_PDF_INTEGRITY_MISMATCH"}',
+        ),
+      ).resolves.toBe(1);
+      // DX-435: la oferta y la cita desde el enlace.
+      await expect(
+        insert(
+          'UPDATE',
+          'WAITLIST_OFFER',
+          '{"origin":"PUBLIC_LINK","reason":"SLOT_OFFER_EXPIRED"}',
+        ),
+      ).resolves.toBe(1);
+      await expect(
+        insert(
+          'CREATE',
+          'APPOINTMENT',
+          '{"origin":"PUBLIC_LINK","reason":"SLOT_OFFER_ACCEPTED"}',
+        ),
+      ).resolves.toBe(1);
+      // Otro motivo sin usuario: no.
+      await expect(
+        insert(
+          'UPDATE',
+          'WAITLIST_OFFER',
+          '{"origin":"PUBLIC_LINK","reason":"OTRA_COSA"}',
+        ),
+      ).rejects.toThrow(/audit_events_actor_check/);
+      const [check] = await owner.$queryRaw<{ convalidated: boolean }[]>`
+        SELECT convalidated FROM pg_constraint WHERE conname = 'audit_events_actor_check'`;
+      expect(check.convalidated).toBe(true);
+    });
+
     it('waitlist_offers sigue con RLS ENABLE + FORCE', async () => {
       const [flags] = await owner.$queryRaw<
         { relrowsecurity: boolean; relforcerowsecurity: boolean }[]

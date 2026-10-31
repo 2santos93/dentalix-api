@@ -8,9 +8,9 @@
 --   EmailTemplate         slot-offer (el email con el enlace).
 --
 -- ADD VALUE va en su propio fichero: un valor nuevo no se puede usar en la
--- misma transacción que lo crea (los usan los CHECK de 20261107130100).
+-- misma transacción que lo crea (los usan los CHECK de 20261107140100).
 --
--- Fecha: posterior a la última migración existente (20261107120100, DX-427).
+-- Fecha: posterior a la última migración existente (20261107130200, DX-422).
 --
 -- Compatible hacia atrás: solo AÑADE valores que el código anterior no conoce
 -- ni usa.

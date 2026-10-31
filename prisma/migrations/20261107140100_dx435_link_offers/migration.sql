@@ -12,7 +12,9 @@
 --   waitlist_offers_tenant_provider_slot_pending_idx  índice PARCIAL de las
 --                     ofertas pendientes de un hueco de un profesional (al
 --                     aceptar se pasan a TAKEN_BY_OTHER y el panel las cuenta).
---   audit_events_actor_check     admite actor NULL en los eventos del enlace
+--   audit_events_actor_check     redefinido como la UNIÓN del de main (con el
+--                     evento de sistema de DX-422, 20261107130100) y lo de
+--                     esta tarea: admite actor NULL en los eventos del enlace
 --                     de la oferta (UPDATE de WAITLIST_OFFER, origen
 --                     PUBLIC_LINK, reason SLOT_OFFER_*) y en la cita que
 --                     crea o adelanta al aceptarla (CREATE/UPDATE de
@@ -26,7 +28,7 @@
 -- Bloqueo: los ADD COLUMN y los ADD CONSTRAINT toman ACCESS EXCLUSIVE un
 -- instante. waitlist_offers es pequeña (ofertas de recepción) y su CHECK se
 -- valida aquí mismo; el de audit_events va NOT VALID y su VALIDATE en la
--- migración siguiente (20261107130200), con SHARE UPDATE EXCLUSIVE (molde de
+-- migración siguiente (20261107140200), con SHARE UPDATE EXCLUSIVE (molde de
 -- DX-361). lock_timeout evita quedar encolado tras una transacción larga.
 
 SET LOCAL lock_timeout = '5s';
@@ -108,6 +110,15 @@ ALTER TABLE "audit_events" ADD CONSTRAINT "audit_events_actor_check"
         AND "metadata" ->> 'reason' IN ('CONFIRMATION_LINK_CONFIRMED',
                                         'CONFIRMATION_LINK_CANCELLED',
                                         'CONFIRMATION_LINK_CALL_REQUESTED')) IS TRUE
+    -- DX-422: el trabajo del PDF firmado encontró un consentimiento cuyo
+    -- hash no casa con lo guardado (no se archiva nada). Solo ids.
+    OR ("action" = 'VIEW'
+        AND "resourceType" = 'CONSENT'
+        AND "actorRole" IS NULL
+        AND "resourceId" IS NOT NULL
+        AND "patientId" IS NOT NULL
+        AND "metadata" ->> 'origin' = 'JOB'
+        AND "metadata" ->> 'reason' = 'SIGNED_PDF_INTEGRITY_MISMATCH') IS TRUE
     -- DX-435: el paciente acepta o rechaza la oferta de hueco desde el
     -- enlace, el enlace caduca o el hueco se lo queda otro paciente.
     OR ("action" = 'UPDATE'
