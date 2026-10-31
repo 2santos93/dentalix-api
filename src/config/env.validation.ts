@@ -31,6 +31,9 @@
  * DX-259: `S3_CONNECT_TIMEOUT_MS`, `S3_REQUEST_TIMEOUT_MS`, `S3_MAX_SOCKETS`,
  * `S3_MAX_ATTEMPTS` (cliente S3) y `UPLOAD_MAX_CONCURRENCY` (subidas que pasan
  * por la API a la vez en cada réplica).
+ * DX-431: plazos del servidor HTTP (`HTTP_KEEP_ALIVE_TIMEOUT_MS`,
+ * `HTTP_HEADERS_TIMEOUT_MS`, `HTTP_REQUEST_TIMEOUT_MS`) y de las
+ * transacciones interactivas (`TENANT_TX_TIMEOUT_MS`, `TENANT_TX_MAX_WAIT_MS`).
  */
 
 import {
@@ -57,7 +60,9 @@ import {
 } from '../modules/domains/infrastructure/domains-config';
 import { RECHECK_MAX_FAILURES_LIMIT } from '../modules/domains/domain/rules/tenant-domain-rules';
 import { parseMfaEncryptionKey } from '../shared/crypto/mfa-secret-cipher';
-import { shutdownConfigProblems } from './shutdown-config';
+import { loadShutdownConfig, shutdownConfigProblems } from './shutdown-config';
+import { httpServerTimeoutProblems } from './http-server-timeouts';
+import { transactionConfigProblems } from '../shared/prisma/transaction-config';
 import { providerRatesLimitsProblems } from '../modules/exchange/application/provider-rates-limits';
 import {
   BREAK_GLASS_MAX_TTL_MINUTES,
@@ -708,9 +713,14 @@ export function validateEnv(env: Env): Env {
   problems.push(...domainProblems(env));
   problems.push(...breakGlassProblems(env, isProd));
   problems.push(...storageProblems(env, isProd));
-  problems.push(...shutdownConfigProblems((key) => str(env, key)));
+  const get = (key: string) => str(env, key);
+  problems.push(...shutdownConfigProblems(get));
+  problems.push(...httpServerTimeoutProblems(get, isProd));
+  problems.push(
+    ...transactionConfigProblems(get, loadShutdownConfig(get).timeoutMs),
+  );
   // SEC-054/SEC-058: topes del proveedor de tasas (y que cuadren entre sí).
-  problems.push(...providerRatesLimitsProblems((key) => str(env, key)));
+  problems.push(...providerRatesLimitsProblems(get));
 
   if (problems.length > 0) {
     throw new Error(

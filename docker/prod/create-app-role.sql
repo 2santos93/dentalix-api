@@ -95,6 +95,24 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO dentalix_app;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO dentalix_app;
 
+-- DX-431 (OPS-012): topes de la sesión de la app, para que una sentencia o una
+-- transacción colgada no retenga su conexión del pool: statement_timeout 15 s
+-- (corta una sentencia; la API responde 503 TRANSACTION_TIMEOUT) e
+-- idle_in_transaction_session_timeout 30 s (cierra la sesión que deja una
+-- transacción abierta sin hacer nada). Por rol: valen para toda conexión de
+-- dentalix_app, también a través de PgBouncer. Idempotente: se fijan siempre a
+-- estos valores. El owner puede si creó el rol (CREATEROLE le da ADMIN OPTION);
+-- si lo creó otro (p. ej. un superusuario) solo avisa, con lo que tiene que
+-- ejecutar un admin.
+DO $$
+BEGIN
+  ALTER ROLE dentalix_app SET statement_timeout = '15s';
+  ALTER ROLE dentalix_app SET idle_in_transaction_session_timeout = '30s';
+EXCEPTION WHEN insufficient_privilege THEN
+  RAISE WARNING 'DX-431: % no puede fijar los timeouts de dentalix_app (no tiene ADMIN OPTION sobre el rol). Un admin del clúster debe ejecutar: ALTER ROLE dentalix_app SET statement_timeout = ''15s''; ALTER ROLE dentalix_app SET idle_in_transaction_session_timeout = ''30s'';', current_user;
+END
+$$;
+
 -- DX-236: repetir el bootstrap sobre una base migrada no puede reabrir DML
 -- sobre referencia global. En una base nueva las crea/revoca la migración.
 DO $$

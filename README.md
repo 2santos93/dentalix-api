@@ -5483,6 +5483,39 @@ Runbook completo (orden backup → `migrate deploy` → API gradual → web →
 - Swagger (`/docs`) no se publica con `NODE_ENV=production` salvo
   `SWAGGER_ENABLED="true"` (SEC-019).
 
+### Límites de producción: timeouts HTTP, de transacción y de la BD (DX-431)
+
+Para que una petición o una transacción colgada no agote el pool:
+
+| Variable / ajuste                                       | Default           | Efecto                                                                                                                                                                  |
+| ------------------------------------------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `HTTP_KEEP_ALIVE_TIMEOUT_MS`                            | 65000             | Inactividad tras la que la API cierra una conexión keep-alive. MAYOR que la del balanceador hacia la API (60 s típicos) y que la del proxy de la web (5 s, DX-284).     |
+| `HTTP_HEADERS_TIMEOUT_MS`                               | keep-alive + 1000 | Plazo de las cabeceras; mayor que el keep-alive.                                                                                                                        |
+| `HTTP_REQUEST_TIMEOUT_MS`                               | 130000            | Plazo de la petición ENTERA (cabeceras + cuerpo): vencido, `408 Request Timeout` y se cierra. ≥ cabeceras; en producción > `UPLOAD_MAX_DURATION_MS`.                    |
+| `TENANT_TX_TIMEOUT_MS`                                  | 5000              | Tope de cada transacción interactiva (`runWithTenant` y `$transaction(async …)`); < `SHUTDOWN_TIMEOUT_MS`. Una llamada con su propio `timeout` (lotes de DX-107) manda. |
+| `TENANT_TX_MAX_WAIT_MS`                                 | 2000              | Espera por una conexión del pool para empezar la transacción.                                                                                                           |
+| `statement_timeout` de `dentalix_app`                   | 15s               | Lo fija `create-app-role.sql` (por rol).                                                                                                                                |
+| `idle_in_transaction_session_timeout` de `dentalix_app` | 30s               | Lo fija `create-app-role.sql` (por rol).                                                                                                                                |
+
+- `src/config/http-server-timeouts.ts` los aplica al servidor HTTP (main.ts y
+  los e2e, vía `configureApp`), y también la cadencia con la que Node los
+  revisa (una décima parte del menor plazo, hasta 30 s).
+- Una transacción que pasa de su tope (Prisma `P2028`, también al agotar
+  `TENANT_TX_MAX_WAIT_MS`) o una sentencia cancelada por `statement_timeout`
+  (`57014`) responden **503** con `code: "TRANSACTION_TIMEOUT"`, el mensaje
+  «La operación tardó demasiado y se canceló sin guardar cambios. Vuelve a
+  intentarlo en unos segundos.» y el `requestId`, con un `warn` en el log que
+  dice qué tope fue; nunca el 500 genérico.
+- `validateEnv` no deja arrancar con un valor fuera de rango ni con las
+  relaciones rotas, y dice cuál.
+- `create-app-role.sql` fija los dos topes de `dentalix_app` en cada ejecución
+  (idempotente). Si el owner no tiene ADMIN OPTION sobre el rol (lo creó otro),
+  avisa con un `WARNING` con los `ALTER ROLE` que tiene que ejecutar un admin.
+  El job `owner-nosu` de la CI comprueba `SHOW statement_timeout` = `15s` e
+  `idle_in_transaction_session_timeout` = `30s` conectado como `dentalix_app`.
+- e2e: `test/production-timeouts.e2e-spec.ts` (408 de un cliente lento, 503
+  de una transacción que se pasa).
+
 ## Resources
 
 Check out a few resources that may come in handy when working with NestJS:

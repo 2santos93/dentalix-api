@@ -4,6 +4,7 @@ import {
   BY_SQLSTATE,
   EXPENSE_INTEGRITY_MESSAGES,
   PrismaExceptionFilter,
+  TRANSACTION_TIMEOUT_MESSAGE,
   conflictMessageForTarget,
 } from './prisma-exception.filter';
 import { requestContext } from '../observability/request-context';
@@ -340,6 +341,85 @@ describe('PrismaExceptionFilter', () => {
     jest.restoreAllMocks();
   });
 
+  // DX-431: la transacción interactiva superó TENANT_TX_TIMEOUT_MS (o no
+  // consiguió conexión en TENANT_TX_MAX_WAIT_MS), o Postgres canceló la
+  // sentencia por el statement_timeout de dentalix_app (57014). No es un fallo
+  // del código: 503 tipado en español, sin el 500 genérico.
+  const TIMEOUT_BODY = {
+    statusCode: 503,
+    error: 'Service Unavailable',
+    code: 'TRANSACTION_TIMEOUT',
+    message: TRANSACTION_TIMEOUT_MESSAGE,
+  };
+
+  it.each([
+    [
+      'la transacción expiró',
+      'Transaction API error: Transaction already closed: A commit cannot be executed on an expired transaction. The timeout for this transaction was 500 ms, however 1503 ms passed since the start of the transaction.',
+    ],
+    [
+      'no hubo conexión a tiempo (maxWait)',
+      'Transaction API error: Unable to start a transaction in the given time.',
+    ],
+  ])(
+    'P2028 (%s) → 503 TRANSACTION_TIMEOUT en español, con el request id y un warn',
+    (_case, message) => {
+      const filter = new PrismaExceptionFilter();
+      const { host, status, json } = mockHost();
+      const warnSpy = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
+      const errorSpy = jest
+        .spyOn(Logger.prototype, 'error')
+        .mockImplementation(() => undefined);
+
+      requestContext.run({ requestId: 'req-tx-0001' }, () =>
+        filter.catch(
+          new Prisma.PrismaClientKnownRequestError(message, {
+            code: 'P2028',
+            clientVersion: '6.19.3',
+          }),
+          host,
+        ),
+      );
+
+      expect(status).toHaveBeenCalledWith(503);
+      expect(bodyOf(json)).toEqual({
+        ...TIMEOUT_BODY,
+        requestId: 'req-tx-0001',
+      });
+      expect(TRANSACTION_TIMEOUT_MESSAGE).toMatch(/sin guardar/);
+      expect(errorSpy).not.toHaveBeenCalled();
+      // El log dice qué tope fue (timeout o maxWait), para diagnosticarlo.
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining(`(P2028), 503 TRANSACTION_TIMEOUT: ${message}`),
+      );
+      jest.restoreAllMocks();
+    },
+  );
+
+  it('una sentencia cancelada por statement_timeout (57014) → el mismo 503, sin el DETAIL', () => {
+    const filter = new PrismaExceptionFilter();
+    const { host, status, json } = mockHost();
+    const warnSpy = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+
+    filter.catch(
+      unknownPg(
+        '57014',
+        'canceling statement due to statement timeout',
+        SECRET_DETAIL,
+      ),
+      host,
+    );
+
+    expect(status).toHaveBeenCalledWith(503);
+    expect(bodyOf(json)).toEqual(TIMEOUT_BODY);
+    expect(JSON.stringify(warnSpy.mock.calls)).not.toMatch(/Ana Pérez/);
+    jest.restoreAllMocks();
+  });
+
   it.each([
     ['23514', 400],
     ['23503', 409],
@@ -409,8 +489,8 @@ describe('PrismaExceptionFilter', () => {
     );
     filter.catch(
       new Prisma.PrismaClientKnownRequestError(
-        'Transaction already closed: A query cannot be executed on an expired transaction. The timeout for this transaction was 5000 ms.',
-        { code: 'P2028', clientVersion: '6.19.3' },
+        'Too many database connections opened: FATAL: sorry, too many clients already',
+        { code: 'P2037', clientVersion: '6.19.3' },
       ),
       host,
     );
@@ -424,7 +504,7 @@ describe('PrismaExceptionFilter', () => {
 
     const logged = errorSpy.mock.calls.map((c) => String(c[0])).join('\n');
     expect(logged).toContain('could not read block 12');
-    expect(logged).toContain('Transaction already closed');
+    expect(logged).toContain('too many clients already');
     expect(logged).toContain('duplicate key value');
     expect(logged).not.toMatch(/Ana Pérez|1234567|quoted|ana@paciente/);
     errorSpy.mockRestore();

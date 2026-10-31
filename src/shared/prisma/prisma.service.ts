@@ -1,17 +1,28 @@
-import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  OnModuleDestroy,
+  OnModuleInit,
+  Optional,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { guardHardDeletes } from './no-hard-delete';
+import { loadTransactionConfig } from './transaction-config';
 
 export interface RunWithTenantOptions {
   isolationLevel?: Prisma.TransactionIsolationLevel;
   /**
-   * Tope de la transacción interactiva en ms (Prisma: 5000 por defecto). Solo
-   * para escrituras por lotes acotadas (DX-107: dry-run de 10.000 filas y
-   * deshacer un lote), nunca para esperar a un usuario.
+   * Tope de la transacción interactiva en ms (por defecto
+   * `TENANT_TX_TIMEOUT_MS`, 5000; DX-431). Solo para escrituras por lotes
+   * acotadas (DX-107: dry-run de 10.000 filas y deshacer un lote), nunca para
+   * esperar a un usuario.
    */
   timeout?: number;
-  /** Espera máxima por una conexión del pool, en ms (Prisma: 2000). */
+  /**
+   * Espera máxima por una conexión del pool, en ms (por defecto
+   * `TENANT_TX_MAX_WAIT_MS`, 2000).
+   */
   maxWait?: number;
 }
 
@@ -20,8 +31,20 @@ export class PrismaService
   extends PrismaClient
   implements OnModuleInit, OnModuleDestroy
 {
-  constructor(private readonly tenantContext: TenantContextService) {
-    super();
+  /**
+   * DX-431: `timeout`/`maxWait` de TODA transacción interactiva salen del
+   * entorno (`TENANT_TX_TIMEOUT_MS`, `TENANT_TX_MAX_WAIT_MS`; ver
+   * transaction-config.ts). Sin ConfigService (int-specs que crean el
+   * servicio a mano), los valores recomendados.
+   */
+  constructor(
+    private readonly tenantContext: TenantContextService,
+    @Optional() config?: ConfigService,
+  ) {
+    const tx = loadTransactionConfig((key) => config?.get<string>(key));
+    super({
+      transactionOptions: { timeout: tx.timeoutMs, maxWait: tx.maxWaitMs },
+    });
   }
 
   async onModuleInit(): Promise<void> {

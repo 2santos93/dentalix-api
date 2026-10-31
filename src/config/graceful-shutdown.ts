@@ -24,7 +24,7 @@ function delay(ms: number): Promise<void> {
 /**
  * Deja de aceptar conexiones y espera a que terminen las peticiones en vuelo.
  * `server.close()` no corta las conexiones keep-alive que se quedan ociosas al
- * acabar su respuesta (esperarían a `keepAliveTimeout`, 65 s): se cierran en
+ * acabar su respuesta (esperarían a `HTTP_KEEP_ALIVE_TIMEOUT_MS`, 65 s): se cierran en
  * cuanto se quedan ociosas. Resuelve `false` si vence `deadline` (entonces
  * corta todas las conexiones).
  */

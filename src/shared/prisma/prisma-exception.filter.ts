@@ -26,6 +26,10 @@ import { stackWithoutMessage } from '../observability/safe-stack';
  * sin el `DETAIL` de Postgres: CHECK (23514) y desbordamiento numérico (22003)
  * → 400; FK (P2003 / 23503) y los triggers de inmutabilidad (23001) → 409. Las violaciones de EXCLUDE (23P01) las
  * mapean los casos de uso de citas antes de llegar aquí.
+ *
+ * DX-431: una transacción que pasa de su tope (P2028) o una sentencia
+ * cancelada por `statement_timeout` (57014) → 503 con `code:
+ * "TRANSACTION_TIMEOUT"` y el request id, nunca el 500 genérico.
  */
 
 // Maps a Prisma unique-index name (or column list) in `meta.target` to a
@@ -132,6 +136,8 @@ interface HttpishResponse {
 interface ErrorBody {
   statusCode: number;
   error: string;
+  /** Código de dominio estable para el cliente (p. ej. `TRANSACTION_TIMEOUT`). */
+  code?: string;
   message: string;
   /** Solo en los 500 (DX-023): para encontrar la petición en el log. */
   requestId?: string;
@@ -200,6 +206,18 @@ const CONCURRENCY_CONFLICT: ErrorBody = {
   error: 'Conflict',
   message:
     'Otra operación sobre los mismos datos se cruzó con esta. Vuelve a intentarlo.',
+};
+export const TRANSACTION_TIMEOUT_MESSAGE =
+  'La operación tardó demasiado y se canceló sin guardar cambios. Vuelve a intentarlo en unos segundos.';
+// DX-431 (OPS-012): la transacción interactiva pasó de TENANT_TX_TIMEOUT_MS o
+// no consiguió conexión del pool en TENANT_TX_MAX_WAIT_MS (P2028), o Postgres
+// canceló una sentencia por el statement_timeout de dentalix_app (57014). Se
+// deshizo todo: es un estado previsto de carga, no un fallo del código.
+const TRANSACTION_TIMEOUT: ErrorBody = {
+  statusCode: HttpStatus.SERVICE_UNAVAILABLE,
+  error: 'Service Unavailable',
+  code: 'TRANSACTION_TIMEOUT',
+  message: TRANSACTION_TIMEOUT_MESSAGE,
 };
 const INTERNAL_ERROR: ErrorBody = {
   statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
@@ -348,6 +366,19 @@ export class PrismaExceptionFilter implements ExceptionFilter {
     }
 
     const sqlState = sqlStateOf(exception);
+    if (prismaCode === 'P2028' || sqlState === '57014') {
+      // El mensaje dice qué tope fue (timeout, maxWait o statement_timeout);
+      // sin el DETAIL de Postgres.
+      this.logger.warn(
+        `Transacción o sentencia cortada por tiempo (${prismaCode ?? sqlState}), 503 TRANSACTION_TIMEOUT: ${redactedPrismaMessage(exception.message)}`,
+      );
+      const requestId = currentRequestId();
+      send(
+        requestId ? { ...TRANSACTION_TIMEOUT, requestId } : TRANSACTION_TIMEOUT,
+      );
+      return;
+    }
+
     const generic =
       prismaCode === 'P2003'
         ? FK_VIOLATION

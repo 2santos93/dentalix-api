@@ -467,6 +467,17 @@ jobs:
           echo "pacientes: $total en la base; dentalix_app sin clínica ve $seen"
           test "$total" -gt 0
           test "$seen" = 0
+      # DX-431 (OPS-012): create-app-role.sql fija los topes de la sesión de la
+      # app; conectado COMO dentalix_app, tras migrar y sembrar (seed:demo ya
+      # corrió con ellos).
+      - name: dentalix_app con statement_timeout 15s e idle_in_transaction_session_timeout 30s
+        run: |
+          app_url="${DATABASE_URL%%\?*}"
+          st="$(psql "$app_url" -tAc 'SHOW statement_timeout')"
+          idle="$(psql "$app_url" -tAc 'SHOW idle_in_transaction_session_timeout')"
+          echo "dentalix_app: statement_timeout=$st idle_in_transaction_session_timeout=$idle"
+          test "$st" = 15s
+          test "$idle" = 30s
       # DX-134: la comprobación del runbook tras desplegar (README), como el owner.
       - name: Comprobar FORCE tras migrar (db:check-force)
         run: npm run db:check-force
