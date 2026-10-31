@@ -401,13 +401,20 @@ export class GetRatesForDateUseCase {
       return toRatesRecord(cached);
     }
     await beforeProviderCall?.(date);
-    return this.gate.fetch(date, caller, async () => {
-      // Otra petición pudo guardarlo entre la lectura de arriba y esta.
-      const stored = await this.repo.findByDate(date);
-      if (stored.length > 0) return toRatesRecord(stored);
-      const fetched = await this.provider.fetchRates(date);
-      await this.repo.upsertMany(date, fetched.rates);
-      return fetched.rates;
-    });
+    return this.gate.fetch(
+      date,
+      caller,
+      async () => {
+        const fetched = await this.provider.fetchRates(date);
+        await this.repo.upsertMany(date, fetched.rates);
+        return fetched.rates;
+      },
+      // Otra petición (u otra réplica) pudo guardarlo entre la lectura de
+      // arriba y esta: se mira antes de gastar presupuesto (SEC-058).
+      async () => {
+        const stored = await this.repo.findByDate(date);
+        return stored.length > 0 ? toRatesRecord(stored) : null;
+      },
+    );
   }
 }

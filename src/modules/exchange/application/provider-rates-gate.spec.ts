@@ -442,6 +442,21 @@ describe('ProviderRatesGate (SEC-054)', () => {
       expect(fromB).toEqual({ status: 'fulfilled', value: { COP: 3900 } });
       expect(load).toHaveBeenCalledTimes(1);
     });
+
+    it('un día que otra réplica ya guardó no gasta cupo ni llama', async () => {
+      const { gate } = setup({ clinicDaily: 1 });
+      const load = ok();
+      const stored = jest.fn(() => Promise.resolve({ COP: 3950 }));
+      await expect(gate.fetch('2000-03-01', A, load, stored)).resolves.toEqual({
+        COP: 3950,
+      });
+      expect(load).not.toHaveBeenCalled();
+      // El cupo diario (1) sigue entero para un día sin guardar.
+      await expect(
+        gate.fetch('2000-03-02', A, load, () => Promise.resolve(null)),
+      ).resolves.toEqual({ COP: 4000 });
+      expect(load).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('configuración por entorno', () => {

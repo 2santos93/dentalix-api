@@ -37,6 +37,9 @@ function forget<K>(map: Map<K, unknown>, key: K): void {
   map.delete(key);
 }
 
+/** Las tasas del día si ya están guardadas; `null` si no. */
+export type StoredRates = () => Promise<Record<string, number> | null>;
+
 /** Por encima de esto se purgan las entradas caducadas al escribir. */
 const SWEEP_THRESHOLD = 1000;
 
@@ -93,10 +96,15 @@ export class ProviderRatesGate {
   // `async`: un tope superado sale como promesa rechazada, no como excepción
   // síncrona. El cuerpo corre sin esperas hasta registrar la llamada en vuelo
   // (el gasto del presupuesto va DENTRO de ella).
+  //
+  // `stored` (opcional): mira si el día ya está guardado (otra réplica o
+  // petición lo guardó tras la primera lectura de quien llama). Se mira justo
+  // ANTES de gastar presupuesto: un día que ya está no gasta cupo sin llamar.
   async fetch(
     date: string,
     caller: ProviderRatesCaller,
     load: () => Promise<Record<string, number>>,
+    stored?: StoredRates,
   ): Promise<Record<string, number>> {
     const pending = this.inFlight.get(date);
     if (pending) {
@@ -105,7 +113,7 @@ export class ProviderRatesGate {
           error instanceof ExchangeRateBudgetExceededError &&
           !sameCaller(pending.caller, caller)
         ) {
-          return this.fetch(date, caller, load);
+          return this.fetch(date, caller, load, stored);
         }
         throw error;
       });
@@ -114,7 +122,7 @@ export class ProviderRatesGate {
     if (caller.kind !== 'PREFETCH') {
       this.assertNotKnownUnavailable(date, this.now().getTime());
     }
-    const call = this.run(date, caller, load);
+    const call = this.run(date, caller, load, stored);
     this.inFlight.set(date, { caller, call });
     return call;
   }
@@ -123,8 +131,14 @@ export class ProviderRatesGate {
     date: string,
     caller: ProviderRatesCaller,
     load: () => Promise<Record<string, number>>,
+    stored: StoredRates | undefined,
   ): Promise<Record<string, number>> {
     try {
+      const already = stored ? await stored() : null;
+      if (already) {
+        forget(this.unavailableUntil, date);
+        return already;
+      }
       if (caller.kind !== 'PREFETCH') await this.spendBudget(caller);
       const rates = await load();
       forget(this.unavailableUntil, date);
