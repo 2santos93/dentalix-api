@@ -5,12 +5,15 @@ import { DEMO_ROTATION } from './data';
  * Calendario de la clínica demo. Todo es función pura de "hoy" (sin azar), así
  * que dos corridas el mismo día producen exactamente las mismas citas.
  *
- * Las sedes demo están en America/Bogota, que es UTC-5 FIJO (Colombia no usa
- * horario de verano desde 1993). Por eso aquí se puede pasar de hora de pared a
- * instante con un offset constante, sin librería de zonas.
+ * Las sedes demo están en America/Caracas: UTC−4 todo el año (Venezuela no
+ * tiene horario de verano desde 2016). Por eso aquí se puede pasar de hora de
+ * pared a instante con un desfase constante, sin librería de zonas. Si se
+ * cambia la zona, tiene que ser otra de desfase FIJO y
+ * `DEMO_UTC_OFFSET_MINUTES` su desfase (minutos que hay que sumar a la hora
+ * de pared para llegar a UTC: 240 en UTC−4).
  */
-export const DEMO_TIMEZONE = 'America/Bogota';
-const BOGOTA_OFFSET_MINUTES = 5 * 60;
+export const DEMO_TIMEZONE = 'America/Caracas';
+const DEMO_UTC_OFFSET_MINUTES = 240;
 const MINUTE_MS = 60 * 1000;
 const DAY_MS = 24 * 60 * MINUTE_MS;
 
@@ -23,9 +26,9 @@ interface LocalDay {
   weekday: number;
 }
 
-/** El día de pared en Bogotá desplazado `offset` días desde `now`. */
-function bogotaDay(now: Date, offset: number): LocalDay {
-  const wall = new Date(now.getTime() - BOGOTA_OFFSET_MINUTES * MINUTE_MS);
+/** El día de pared de la sede desplazado `offset` días desde `now`. */
+function sedeDay(now: Date, offset: number): LocalDay {
+  const wall = new Date(now.getTime() - DEMO_UTC_OFFSET_MINUTES * MINUTE_MS);
   const todayMidnight = Date.UTC(
     wall.getUTCFullYear(),
     wall.getUTCMonth(),
@@ -35,30 +38,30 @@ function bogotaDay(now: Date, offset: number): LocalDay {
   return { offset, utcMidnight, weekday: new Date(utcMidnight).getUTCDay() };
 }
 
-/** Instante de las `minuteOfDay` (hora de pared de Bogotá) de ese día. */
+/** Instante de las `minuteOfDay` (hora de pared de la sede) de ese día. */
 function at(day: LocalDay, minuteOfDay: number): Date {
   return new Date(
-    day.utcMidnight + (minuteOfDay + BOGOTA_OFFSET_MINUTES) * MINUTE_MS,
+    day.utcMidnight + (minuteOfDay + DEMO_UTC_OFFSET_MINUTES) * MINUTE_MS,
   );
 }
 
-/** Instante "hace `daysAgo` días a las `minuteOfDay`" (hora de Bogotá). */
+/** Instante "hace `daysAgo` días a las `minuteOfDay`" (hora de la sede). */
 export function daysAgoAt(
   now: Date,
   daysAgo: number,
   minuteOfDay: number,
 ): Date {
-  return at(bogotaDay(now, -daysAgo), minuteOfDay);
+  return at(sedeDay(now, -daysAgo), minuteOfDay);
 }
 
 /**
- * DX-122: días desde hoy (Bogotá) hasta el lunes de la semana siguiente a la
+ * DX-122: días desde hoy (en la sede) hasta el lunes de la semana siguiente a la
  * próxima, el primer lunes FUERA del calendario de citas de la demo (que llega
  * hasta el sábado de la semana próxima): ahí caen las vacaciones de ejemplo
  * sin pisar ninguna cita.
  */
 export function daysUntilMondayAfterNext(now: Date): number {
-  const daysSinceMonday = (bogotaDay(now, 0).weekday + 6) % 7;
+  const daysSinceMonday = (sedeDay(now, 0).weekday + 6) % 7;
   return 14 - daysSinceMonday;
 }
 
@@ -74,18 +77,18 @@ export function daysUntilRotationCover(now: Date): number {
 /** DX-122: días desde hoy hasta el próximo día laborable (lunes a viernes). */
 export function daysUntilNextWeekday(now: Date): number {
   let offset = 1;
-  while ([0, 6].includes(bogotaDay(now, offset).weekday)) offset++;
+  while ([0, 6].includes(sedeDay(now, offset).weekday)) offset++;
   return offset;
 }
 
 /**
- * DX-446: desfases (0 = hoy, en Bogotá) de los `count` próximos días
+ * DX-446: desfases (0 = hoy, en la sede) de los `count` próximos días
  * laborables (lun–vie), empezando por hoy si lo es.
  */
 export function upcomingWeekdayOffsets(now: Date, count: number): number[] {
   const offsets: number[] = [];
   for (let offset = 0; offsets.length < count; offset++) {
-    if (![0, 6].includes(bogotaDay(now, offset).weekday)) offsets.push(offset);
+    if (![0, 6].includes(sedeDay(now, offset).weekday)) offsets.push(offset);
   }
   return offsets;
 }
@@ -159,7 +162,7 @@ export function planAppointments(
   patientCount: number,
   fits: (location: DemoLocationKey, start: Date, end: Date) => boolean,
 ): PlannedAppointment[] {
-  const today = bogotaDay(now, 0);
+  const today = sedeDay(now, 0);
   const daysSinceMonday = (today.weekday + 6) % 7;
   const firstOffset = -daysSinceMonday - 7;
   const lastOffset = firstOffset + 19; // sábado de la semana próxima
@@ -173,7 +176,7 @@ export function planAppointments(
   const planned: PlannedAppointment[] = [];
 
   for (let offset = firstOffset; offset <= lastOffset; offset++) {
-    const day = bogotaDay(now, offset);
+    const day = sedeDay(now, offset);
     if (day.weekday === 0) continue; // domingo cerrado
     const dayIndex = offset - firstOffset;
 
@@ -279,7 +282,7 @@ export function planInClinicToday(
   now: Date,
   ranges: readonly WallRange[],
 ): PlannedInClinic[] {
-  const today = bogotaDay(now, 0);
+  const today = sedeDay(now, 0);
   const open = ranges
     .filter((r) => r.weekday === today.weekday)
     .sort((a, b) => a.startMinute - b.startMinute);
@@ -287,7 +290,7 @@ export function planInClinicToday(
   const first = open[0].startMinute;
   const last = Math.max(...open.map((r) => r.endMinute)) - IN_CLINIC_MINUTES;
   const nowMinute = Math.floor(
-    (now.getTime() - today.utcMidnight) / MINUTE_MS - BOGOTA_OFFSET_MINUTES,
+    (now.getTime() - today.utcMidnight) / MINUTE_MS - DEMO_UTC_OFFSET_MINUTES,
   );
   const fits = (m: number) =>
     open.some(
@@ -319,10 +322,10 @@ export function planInClinicToday(
 /** DX-014: una cita atendida de la historia de «Comparar sedes». */
 export interface PlannedHistoryVisit {
   month: 'previous' | 'current';
-  /** Días respecto de hoy (Bogotá): siempre en el pasado (≥ 1). */
+  /** Días respecto de hoy (en la sede): siempre en el pasado (≥ 1). */
   daysAgo: number;
   location: DemoLocationKey;
-  /** Minutos de pared desde las 00:00 en Bogotá. */
+  /** Minutos de pared desde las 00:00 en la sede. */
   startMinute: number;
   durationMinutes: number;
   /** Índice del paciente en `DEMO_PATIENTS`. */
@@ -341,7 +344,7 @@ export interface HistoryTemplate {
 
 /**
  * DX-014: un día con actividad en cada sede en el MES ANTERIOR y en el ACTUAL
- * (calendario de Bogotá), para que «Comparar sedes» compare algo cualquier
+ * (calendario de la sede), para que «Comparar sedes» compare algo cualquier
  * día del mes. El calendario normal (lunes de la semana pasada → sábado de la
  * próxima) puede no tocar el mes anterior.
  *  - Mes anterior: el mismo día del mes que hoy (o su último día), y si es
@@ -357,7 +360,7 @@ export function planComparisonHistory(
   now: Date,
   template: HistoryTemplate,
 ): PlannedHistoryVisit[] {
-  const today = bogotaDay(now, 0);
+  const today = sedeDay(now, 0);
   const date = new Date(today.utcMidnight);
   const year = date.getUTCFullYear();
   const month = date.getUTCMonth();
@@ -433,7 +436,7 @@ export function planClosingQueueExamples(
   ranges: readonly WallRange[],
 ): PlannedClosingExample[] {
   for (let daysAgo = 1; daysAgo <= 7; daysAgo++) {
-    const day = bogotaDay(now, -daysAgo);
+    const day = sedeDay(now, -daysAgo);
     const open = ranges.filter((r) => r.weekday === day.weekday);
     if (open.length === 0) continue;
     const close = Math.max(...open.map((r) => r.endMinute));
