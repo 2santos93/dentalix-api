@@ -308,6 +308,30 @@ describe('Copia del PDF firmado en Postgres (DX-443)', () => {
     ).rejects.toThrow(/Unique constraint/);
   });
 
+  it('dos reenvíos a la vez se serializan: ninguno choca con el índice parcial y queda un solo enlace vivo', async () => {
+    const { consentId } = await readyWithCopy(a);
+    const target = await asClinic(a.tenantId, () =>
+      copies.loadTarget(consentId, a.patientId),
+    );
+    const results = await Promise.allSettled(
+      [1, 2, 3].map(() =>
+        asClinic(a.tenantId, () => sender.send(target!, a.userId)),
+      ),
+    );
+    expect(results.map((r) => r.status)).toEqual([
+      'fulfilled',
+      'fulfilled',
+      'fulfilled',
+    ]);
+    const live = await owner.signedConsentPdfLink.count({
+      where: { consentId, usedAt: null, revokedAt: null },
+    });
+    expect(live).toBe(1);
+    expect(
+      await owner.signedConsentPdfLink.count({ where: { consentId } }),
+    ).toBe(4);
+  });
+
   it('RLS: desde otra clínica el enlace y el consentimiento no existen', async () => {
     const { consentId, token } = await readyWithCopy(a);
     await expect(

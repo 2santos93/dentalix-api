@@ -13,6 +13,11 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationBody,
+} from './support/location-fixtures';
+import { LOCATION_NOT_ALLOWED_CODE } from '../src/shared/tenancy/location-access';
 import { MAILER } from '../src/modules/notifications/email/domain/ports/mailer.port';
 import {
   MAIL_CONFIG,
@@ -651,6 +656,37 @@ describe('Firma a distancia de consentimientos (e2e, DX-243)', () => {
     await as(clinicB)
       .post(`/patients/${patientId}/consents/${consentId}/signed-pdf/copy`)
       .expect(404);
+    // SEC-045: una auxiliar restringida a otra sede de A no reenvía la copia de un
+    // envío hecho desde la sede principal (403, sin enlace nuevo ni email).
+    const otherLocation = (
+      (
+        await as(clinicA)
+          .post(
+            '/locations',
+            locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede DX-443' }),
+          )
+          .expect(201)
+      ).body as { id: string }
+    ).id;
+    const restricted = await seedMember(raw, clinicA, ClinicRole.ASSISTANT);
+    await as(clinicA)
+      .put(`/staff/${restricted.userId}/locations`, {
+        locationIds: [otherLocation],
+      })
+      .expect(200);
+    const restrictedToken = await loginAs(app, clinicA.host, restricted.email);
+    const linksBefore = await raw.signedConsentPdfLink.count({
+      where: { consentId },
+    });
+    mailer.clear();
+    const denied = await as(clinicA, restrictedToken)
+      .post(`/patients/${patientId}/consents/${consentId}/signed-pdf/copy`)
+      .expect(403);
+    expect(denied.body).toMatchObject({ code: LOCATION_NOT_ALLOWED_CODE });
+    expect(await raw.signedConsentPdfLink.count({ where: { consentId } })).toBe(
+      linksBefore,
+    );
+    await copy(clinicA.host, latestToken).expect(200);
     // El modal ya avisa de que este paciente lo firmó (sin bloquear).
     const after = await as(clinicA, reception)
       .get(`/patients/${patientId}/signature-requests/options`)
