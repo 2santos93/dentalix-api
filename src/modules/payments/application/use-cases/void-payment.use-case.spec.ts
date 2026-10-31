@@ -40,6 +40,38 @@ const RECEPTION = { userId: 'u-recep', role: ClinicRole.RECEPTION };
 const REASON = 'Cobro duplicado por error';
 
 describe('VoidPaymentUseCase', () => {
+  it('DX-390: una línea de un cobro dividido anula el cobro entero y devuelve las otras líneas', async () => {
+    const repo = new InMemoryPaymentRepository();
+    const head = repo.seedPayment({ id: 'line-1', amount: 100 });
+    repo.seedPayment({ id: 'line-2', amount: 50 });
+    repo.seedPayment({ id: 'single', amount: 10 });
+    // Las dos líneas del cobro (seedPayment no conoce el cobro).
+    const split = { splitId: head.id };
+    Object.assign(
+      (repo as unknown as { payments: Record<string, unknown>[] }).payments[0],
+      { ...split, splitLine: 1 },
+    );
+    Object.assign(
+      (repo as unknown as { payments: Record<string, unknown>[] }).payments[1],
+      { ...split, splitLine: 2 },
+    );
+    const uc = new VoidPaymentUseCase(repo, clock);
+
+    const others = await uc.execute({
+      paymentId: 'line-2',
+      reason: REASON,
+      actor: ADMIN,
+    });
+
+    expect(others).toEqual(['line-1']);
+    expect(repo.voidAuditOf('line-1')?.reason).toBe(REASON);
+    expect(repo.voidAuditOf('line-2')?.reason).toBe(REASON);
+    expect(repo.voidAuditOf('single')).toBeNull();
+    await expect(
+      uc.execute({ paymentId: 'single', reason: REASON, actor: ADMIN }),
+    ).resolves.toEqual([]);
+  });
+
   it('soft-deletes an existing payment, excluding it from active listings', async () => {
     const repo = new InMemoryPaymentRepository();
     const payment = repo.seedPayment({

@@ -56,6 +56,8 @@ function fakeRow(
       createdAt: new Date('2026-09-01T00:00:00.000Z'),
     },
     openingBalance: null,
+    splitId: null,
+    splitLines: null,
     ...overrides,
   };
   return { payment, voidSubject };

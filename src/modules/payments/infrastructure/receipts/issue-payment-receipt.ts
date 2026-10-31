@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import {
   buildReceiptSnapshot,
   type ReceiptPlanBalance,
+  type ReceiptSplitLine,
 } from '../../domain/receipt-snapshot';
 import { formatReceiptNumber } from '../../domain/receipt-number';
 import { readDocumentTypeNames } from '../../../patients/infrastructure/repositories/prisma-document-type-names.repository';
@@ -24,6 +25,11 @@ export interface ReceiptPaymentRow {
   paidAt: Date;
   paidOn: string;
   createdById: string | null;
+  /**
+   * DX-390: el cobro dividido cuyo recibo único emite su línea 1: todas sus
+   * líneas y la moneda del plan del total.
+   */
+  split?: { lines: ReceiptSplitLine[]; planCurrency: string };
 }
 
 /**
@@ -142,6 +148,7 @@ export async function issuePaymentReceipt(
         : null,
       planBalance,
       cashier,
+      split: payment.split ?? null,
     },
     // El nombre visible queda congelado en la foto (DX-327, R18).
     names,

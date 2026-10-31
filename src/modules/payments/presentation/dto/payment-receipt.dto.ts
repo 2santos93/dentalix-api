@@ -153,6 +153,60 @@ export class ReceiptCashierDto {
   fullName!: string;
 }
 
+/** DX-390: una forma de pago del cobro dividido en la foto del recibo. */
+export class ReceiptSplitLineDto {
+  @ApiProperty({ format: 'uuid', description: 'El abono de la línea.' })
+  paymentId!: string;
+
+  @ApiProperty({ minimum: 1, maximum: 5 })
+  line!: number;
+
+  @ApiProperty({ example: 50 })
+  amount!: number;
+
+  @ApiProperty({ description: 'Código ISO 4217 de la línea.' })
+  currency!: string;
+
+  @ApiProperty({ enum: PaymentMethod, nullable: true })
+  method!: PaymentMethod | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  paymentMethodName!: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  reference!: string | null;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description:
+      'La línea en la moneda del plan con su tasa congelada; null «sin tasa».',
+  })
+  equivalentAmount!: number | null;
+}
+
+/** DX-390: total del cobro dividido en la moneda del plan. */
+export class ReceiptSplitTotalDto {
+  @ApiProperty({ description: 'Moneda del plan.' })
+  currency!: string;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description: 'null si alguna línea está «sin tasa».',
+  })
+  amount!: number | null;
+}
+
+/** DX-390: el cobro dividido en la foto del recibo. */
+export class ReceiptSnapshotSplitDto {
+  @ApiProperty({ type: [ReceiptSplitLineDto] })
+  lines!: ReceiptSplitLineDto[];
+
+  @ApiProperty({ type: ReceiptSplitTotalDto })
+  total!: ReceiptSplitTotalDto;
+}
+
 export class ReceiptSnapshotDto {
   @ApiProperty({ enum: [1] })
   version!: 1;
@@ -205,6 +259,14 @@ export class ReceiptSnapshotDto {
   })
   cashier!: ReceiptCashierDto | null;
 
+  @ApiPropertyOptional({
+    type: ReceiptSnapshotSplitDto,
+    nullable: true,
+    description:
+      'DX-390: las formas de pago del cobro dividido y su total al emitir; ausente o null en un abono suelto (`payment` es entonces su línea 1).',
+  })
+  split?: ReceiptSnapshotSplitDto | null;
+
   @ApiProperty({ example: 'Este documento no es factura' })
   legalNotice!: string;
 }
@@ -238,6 +300,25 @@ export class ReceiptExchangeRateDto {
       'El abono en la moneda de destino (`rate.currency`) con la tasa congelada, redondeado a céntimos; null sin tasa.',
   })
   equivalentAmount!: number | null;
+}
+
+/** DX-390: una forma de pago del recibo, con su tasa congelada de hoy. */
+export class ReceiptSplitViewLineDto extends ReceiptSplitLineDto {
+  @ApiProperty({
+    type: ReceiptExchangeRateDto,
+    nullable: true,
+    description: 'Como `exchangeRate` del recibo, para esta línea.',
+  })
+  exchangeRate!: ReceiptExchangeRateDto | null;
+}
+
+/** DX-390: las formas de pago del recibo y su total con las tasas de hoy. */
+export class ReceiptSplitDto {
+  @ApiProperty({ type: [ReceiptSplitViewLineDto] })
+  lines!: ReceiptSplitViewLineDto[];
+
+  @ApiProperty({ type: ReceiptSplitTotalDto })
+  total!: ReceiptSplitTotalDto;
 }
 
 export class PaymentReceiptDto {
@@ -278,9 +359,17 @@ export class PaymentReceiptDto {
     type: ReceiptExchangeRateDto,
     nullable: true,
     description:
-      'DX-376: la tasa del abono y su equivalente en la moneda de su destino; null si el abono está en esa moneda.',
+      'DX-376: la tasa del abono y su equivalente en la moneda de su destino; null si el abono está en esa moneda o es un cobro dividido (DX-390: cada línea lleva la suya en `split`).',
   })
   exchangeRate!: ReceiptExchangeRateDto | null;
+
+  @ApiProperty({
+    type: ReceiptSplitDto,
+    nullable: true,
+    description:
+      'DX-390: el cobro dividido del recibo (todas sus formas de pago, cada una con su tasa congelada, y el total en la moneda del plan); null en un abono suelto. El recibo de cualquier línea es el del cobro.',
+  })
+  split!: ReceiptSplitDto | null;
 
   @ApiProperty({
     type: ReceiptSnapshotDto,

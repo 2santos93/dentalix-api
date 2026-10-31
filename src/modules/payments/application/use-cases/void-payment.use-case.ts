@@ -37,13 +37,19 @@ export class VoidPaymentUseCase {
     private readonly now: PaymentClock,
   ) {}
 
-  async execute(input: VoidPaymentInput): Promise<void> {
+  /**
+   * Devuelve los ids de las OTRAS líneas que se anularon con él (DX-390: un
+   * cobro dividido se anula entero); `[]` en un abono suelto.
+   */
+  async execute(input: VoidPaymentInput): Promise<string[]> {
     const target = await this.repo.findVoidTarget(input.paymentId);
     if (!target) {
       throw new NotFoundException('Payment not found');
     }
 
     const now = this.now();
+    // DX-390: todas las líneas de un cobro dividido las registró la misma
+    // persona en la misma petición; la regla se mira en la pedida.
     this.assertActorMayVoid(target, input.actor, now);
 
     // Soft-delete only — never a hard delete on a domain table. A voided
@@ -69,6 +75,7 @@ export class VoidPaymentUseCase {
     if (!voided) {
       throw new NotFoundException('Payment not found');
     }
+    return target.splitPaymentIds.filter((id) => id !== input.paymentId);
   }
 
   /** La regla vive en `voidDenial` (dominio); aquí solo se traduce a 403. */

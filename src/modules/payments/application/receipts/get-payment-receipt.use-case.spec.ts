@@ -115,6 +115,7 @@ const issued = (
   patientEmail: 'ana@example.com',
   notice: NOTICE,
   rate: SAME_CURRENCY_RATE,
+  splitRates: [],
   receipt: {
     seriesPrefix: 'NOR',
     number: 123,
@@ -139,6 +140,7 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
       voidedAt: null,
       voidReason: null,
       exchangeRate: null,
+      split: null,
       snapshot: {
         ...issuedSnapshot,
         patient: {
@@ -212,6 +214,7 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
       patientEmail: null,
       notice: NOTICE,
       rate: SAME_CURRENCY_RATE,
+      splitRates: [],
       legacy: {
         issuedAt: new Date('2025-01-10T17:05:00.000Z'),
         voidedAt: null,
@@ -244,6 +247,7 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
         patientEmail: null,
         notice: NOTICE,
         rate: SAME_CURRENCY_RATE,
+        splitRates: [],
         legacy: {
           issuedAt: new Date(),
           voidedAt: new Date('2025-02-01T12:00:00.000Z'),
@@ -306,6 +310,85 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
     it('un abono en la moneda del plan no trae tasa', async () => {
       const view = await makeUseCase(issued()).execute(PAYMENT_ID);
       expect(view.exchangeRate).toBeNull();
+    });
+  });
+
+  describe('DX-390: el recibo único de un cobro dividido', () => {
+    const FROZEN = {
+      currency: 'COP',
+      fromPerBase: 1,
+      toPerBase: 4000,
+      source: 'AUTOMATIC' as const,
+      date: '2026-10-30',
+    };
+    const line = (n: number, amount: number, currency: string) => ({
+      paymentId: `line-${n}`,
+      line: n,
+      amount,
+      currency,
+      method: n === 1 ? ('TRANSFER' as const) : ('CASH' as const),
+      paymentMethodName: n === 1 ? 'Transferencia' : 'Efectivo',
+      reference: n === 1 ? 'TR-1' : null,
+      // La línea en USD se emitió «sin tasa».
+      equivalentAmount: currency === 'COP' ? amount : null,
+    });
+    const splitSnapshot = buildReceiptSnapshot(
+      {
+        ...snapshotInput,
+        planBalance: null,
+        split: {
+          lines: [line(1, 50, 'USD'), line(2, 100000, 'COP')],
+          planCurrency: 'COP',
+        },
+      },
+      NO_LOCAL_NAMES,
+    );
+    const source = (usdRate: typeof FROZEN | null): PaymentReceiptSource => ({
+      ...issued({ snapshot: splitSnapshot }),
+      paymentId: 'line-1',
+      splitRates: [
+        {
+          paymentId: 'line-1',
+          amount: 50,
+          currency: 'USD',
+          exchangeRateCurrency: 'COP',
+          frozenRate: usdRate,
+        },
+        {
+          paymentId: 'line-2',
+          amount: 100000,
+          currency: 'COP',
+          exchangeRateCurrency: 'COP',
+          frozenRate: null,
+        },
+      ],
+    });
+
+    it('la foto guarda las líneas y el total al emitir (null si alguna estaba sin tasa)', () => {
+      expect(splitSnapshot.split?.lines).toHaveLength(2);
+      expect(splitSnapshot.split?.total).toEqual({
+        currency: 'COP',
+        amount: null,
+      });
+    });
+
+    it('sale con todas las líneas, la tasa congelada de hoy de cada una y el total en la moneda del plan', async () => {
+      const view = await makeUseCase(source(FROZEN)).execute('line-2');
+      expect(view.exchangeRate).toBeNull();
+      expect(view.split?.lines.map((l) => l.equivalentAmount)).toEqual([
+        200000, 100000,
+      ]);
+      expect(view.split?.lines[0].exchangeRate).toMatchObject({
+        status: 'FROZEN',
+        equivalentAmount: 200000,
+      });
+      expect(view.split?.total).toEqual({ currency: 'COP', amount: 300000 });
+    });
+
+    it('mientras una línea siga sin tasa, el total es null', async () => {
+      const view = await makeUseCase(source(null)).execute('line-1');
+      expect(view.split?.lines[0].exchangeRate?.status).toBe('MISSING');
+      expect(view.split?.total.amount).toBeNull();
     });
   });
 

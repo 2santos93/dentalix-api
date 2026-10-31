@@ -1,5 +1,6 @@
 import type { DocumentType, PaymentMethod } from '@prisma/client';
 import { maskDocument } from '../../../shared/privacy/mask-document';
+import { splitTotal } from './split-payment';
 import {
   documentTypeName,
   type ClinicDocumentTypeNames,
@@ -41,6 +42,31 @@ export interface ReceiptOpeningBalance {
   asOfDate: string;
 }
 
+/**
+ * DX-390: una forma de pago de un cobro dividido, tal como sale en su recibo
+ * único. `equivalentAmount`: la línea en la moneda del plan con su tasa
+ * congelada al emitir; `null` si quedó «sin tasa».
+ */
+export interface ReceiptSplitLine {
+  paymentId: string;
+  line: number;
+  amount: number;
+  currency: string;
+  method: PaymentMethod | null;
+  paymentMethodName: string | null;
+  reference: string | null;
+  equivalentAmount: number | null;
+}
+
+/**
+ * DX-390: las formas de pago del cobro y su total en la moneda del plan
+ * (`amount` `null` si alguna línea quedó «sin tasa» al emitir).
+ */
+export interface ReceiptSplit {
+  lines: ReceiptSplitLine[];
+  total: { currency: string; amount: number | null };
+}
+
 /** Lo que se lee, en la transacción del abono, para congelar el recibo. */
 export interface ReceiptSnapshotInput {
   clinic: ReceiptClinicData;
@@ -75,6 +101,8 @@ export interface ReceiptSnapshotInput {
    */
   planBalance: ReceiptPlanBalance | null;
   cashier: { id: string; fullName: string } | null;
+  /** DX-390: las líneas de un cobro dividido (ausente en un abono suelto). */
+  split?: { lines: ReceiptSplitLine[]; planCurrency: string } | null;
 }
 
 /**
@@ -121,6 +149,12 @@ export interface ReceiptSnapshot {
   openingBalance?: ReceiptOpeningBalance | null;
   planBalance: ReceiptPlanBalance | null;
   cashier: { id: string; fullName: string } | null;
+  /**
+   * DX-390: el cobro dividido del recibo, con todas sus formas de pago y el
+   * total en la moneda del plan. Ausente o `null` en un abono suelto y en los
+   * recibos anteriores; `payment` es entonces su línea 1.
+   */
+  split?: ReceiptSplit | null;
   legalNotice: string;
 }
 
@@ -180,7 +214,20 @@ export function buildReceiptSnapshot(
     openingBalance: input.openingBalance ?? null,
     planBalance: input.planBalance,
     cashier: input.cashier,
+    ...(input.split ? { split: receiptSplit(input.split) } : {}),
     legalNotice: RECEIPT_LEGAL_NOTICE,
+  };
+}
+
+/** DX-390: las líneas y su total al céntimo (`null` si alguna no tiene tasa). */
+function receiptSplit(split: {
+  lines: ReceiptSplitLine[];
+  planCurrency: string;
+}): ReceiptSplit {
+  const equivalents = split.lines.map((line) => line.equivalentAmount);
+  return {
+    lines: split.lines,
+    total: { currency: split.planCurrency, amount: splitTotal(equivalents) },
   };
 }
 

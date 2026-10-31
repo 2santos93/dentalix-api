@@ -5,6 +5,7 @@ import {
   CashRegisterPage,
   CivilPaidDay,
   CreatePaymentRepoInput,
+  CreateSplitPaymentRepoInput,
   ListCashRegisterParams,
   ListPaymentsReceivedInRangeParams,
   OpeningBalanceTarget,
@@ -13,6 +14,7 @@ import {
   PaymentVoidTarget,
   ReceivedPayment,
   ReferenceMatch,
+  SplitPaymentRecord,
 } from '../../../domain/ports/payment-repository.port';
 import { civilDateIn, civilNoonIn } from '../../../../../shared/time/civil-day';
 import type { RegionalFormat } from '../../../../../shared/format/regional-format';
@@ -81,6 +83,8 @@ export class InMemoryPaymentRepository implements PaymentRepository {
       referenceNormalized: overrides.referenceNormalized ?? null,
       duplicateReferenceReason: overrides.duplicateReferenceReason ?? null,
       notes: overrides.notes ?? null,
+      splitId: overrides.splitId ?? null,
+      splitLine: overrides.splitLine ?? null,
       createdById: overrides.createdById ?? null,
       createdAt: overrides.createdAt ?? NOW,
       updatedAt: overrides.updatedAt ?? NOW,
@@ -116,6 +120,8 @@ export class InMemoryPaymentRepository implements PaymentRepository {
       reference: row.reference,
       duplicateReferenceReason: row.duplicateReferenceReason,
       notes: row.notes,
+      splitId: row.splitId,
+      splitLine: row.splitLine,
       createdById: row.createdById,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
@@ -136,8 +142,60 @@ export class InMemoryPaymentRepository implements PaymentRepository {
 
   create(input: CreatePaymentRepoInput): Promise<Payment> {
     this.lastCreateInput = input;
+    return Promise.resolve(this.toEntity(this.insertRow(input, null)));
+  }
+
+  /** Test helper: lo último que recibió `createSplit` (DX-390). */
+  lastSplitInput: CreateSplitPaymentRepoInput | null = null;
+
+  createSplit(input: CreateSplitPaymentRepoInput): Promise<SplitPaymentRecord> {
+    this.lastSplitInput = input;
+    const splitId = `payment-${++seq}`;
+    const rows = input.lines.map((line, index) =>
+      this.insertRow(
+        {
+          ...line,
+          idempotencyKey: index === 0 ? input.idempotencyKey : undefined,
+          requestFingerprint:
+            index === 0 ? input.requestFingerprint : undefined,
+        },
+        { id: index === 0 ? splitId : undefined, splitId, line: index + 1 },
+      ),
+    );
+    return Promise.resolve({
+      splitId,
+      receiptNumber: null,
+      payments: rows.map((row) => this.toEntity(row)),
+    });
+  }
+
+  countPlanPayments(treatmentPlanId: string): Promise<number> {
+    return Promise.resolve(
+      this.payments.filter((p) => p.treatmentPlanId === treatmentPlanId).length,
+    );
+  }
+
+  findSplit(splitId: string): Promise<SplitPaymentRecord | null> {
+    const rows = this.payments
+      .filter((p) => p.splitId === splitId)
+      .sort((a, b) => (a.splitLine ?? 0) - (b.splitLine ?? 0));
+    return Promise.resolve(
+      rows.length === 0
+        ? null
+        : {
+            splitId,
+            receiptNumber: null,
+            payments: rows.map((row) => this.toEntity(row)),
+          },
+    );
+  }
+
+  private insertRow(
+    input: CreatePaymentRepoInput,
+    split: { id?: string; splitId: string; line: number } | null,
+  ): StoredPayment {
     const row: StoredPayment = {
-      id: `payment-${++seq}`,
+      id: split?.id ?? `payment-${++seq}`,
       tenantId: 't1',
       treatmentPlanId: input.treatmentPlanId,
       openingBalanceId: input.openingBalanceId ?? null,
@@ -155,6 +213,8 @@ export class InMemoryPaymentRepository implements PaymentRepository {
       referenceNormalized: input.referenceNormalized ?? null,
       duplicateReferenceReason: input.duplicateReferenceReason ?? null,
       notes: input.notes ?? null,
+      splitId: split?.splitId ?? null,
+      splitLine: split?.line ?? null,
       createdById: input.createdById ?? null,
       createdAt: NOW,
       updatedAt: NOW,
@@ -169,7 +229,7 @@ export class InMemoryPaymentRepository implements PaymentRepository {
       frozenRate: input.frozenRate,
     };
     this.payments.push(row);
-    return Promise.resolve(this.toEntity(row));
+    return row;
   }
 
   findReferenceMatches(params: {
@@ -308,6 +368,7 @@ export class InMemoryPaymentRepository implements PaymentRepository {
             createdById: row.createdById,
             createdAt: row.createdAt,
             timeZone: this.timeZone,
+            splitPaymentIds: this.liveSplitLines(row).map((p) => p.id),
           }
         : null,
     );
@@ -322,9 +383,19 @@ export class InMemoryPaymentRepository implements PaymentRepository {
     if (!row) {
       return Promise.resolve(false);
     }
-    row.deletedAt = audit.voidedAt;
-    row.voidAudit = audit;
+    // DX-390: como el real, una línea de un cobro dividido anula el cobro.
+    for (const line of row.splitId ? this.liveSplitLines(row) : [row]) {
+      line.deletedAt = audit.voidedAt;
+      line.voidAudit = audit;
+    }
     return Promise.resolve(true);
+  }
+
+  private liveSplitLines(row: StoredPayment): StoredPayment[] {
+    if (!row.splitId) return [];
+    return this.payments
+      .filter((p) => p.splitId === row.splitId && p.deletedAt === null)
+      .sort((a, b) => (a.splitLine ?? 0) - (b.splitLine ?? 0));
   }
 
   // Mismo criterio que el repo real: el día civil de `paidAt` en la zona de

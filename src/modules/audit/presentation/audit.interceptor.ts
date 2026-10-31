@@ -13,7 +13,7 @@ import { RecordAuditEventUseCase } from '../application/record-audit-event.use-c
 import type { AuditActorRef } from '../domain/audit-event';
 import { AUDIT_OPTIONS, type AuditOptions } from './audit-options';
 import {
-  buildAuditDraft,
+  buildAuditDrafts,
   isBreakGlassLogin,
   loginActor,
   type AuditedRequest,
@@ -81,14 +81,15 @@ export class AuditInterceptor implements NestInterceptor {
     return next.handle().pipe(
       concatMap(async (body: unknown) => {
         if (req.skipAudit) return body;
-        const draft = buildAuditDraft(
+        // DX-390: un cobro dividido deja un evento por línea.
+        const drafts = buildAuditDrafts(
           options,
           req,
           body,
           scope,
           options.search ? resultCountOf(context) : null,
         );
-        if (draft) await this.recorder.record(draft);
+        for (const draft of drafts) await this.recorder.record(draft);
         return body;
       }),
     );

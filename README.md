@@ -2621,6 +2621,64 @@ Seguimiento de DX-377.
   despliega antes, basta con repetirla (`prisma migrate resolve
 --rolled-back 20261103130000_dx395_payments_relink_reference` y `deploy`).
 
+## Cobro dividido en varias formas de pago con un solo recibo (DX-390)
+
+Porción 3 de DX-377. Un paciente paga una visita con parte en efectivo en una
+moneda y parte por transferencia en otra: un solo cobro, un solo recibo.
+
+- **`POST /treatment-plans/:id/split-payments`** (roles de cobro, auditado):
+  `{ paidAt, notes?, confirmCreditBalance?, lines: [{ amount, currency,
+  paymentMethodId, reference?, duplicateReferenceReason? }] }` con 2–5 líneas
+  y el mismo día para todas. El abono de un solo medio sigue siendo
+  `POST /treatment-plans/:id/payments`, sin cambios.
+- **Un abono por línea**, con las validaciones de siempre
+  (`RecordPaymentUseCase.prepareLine`): medio ACTIVO de la clínica
+  (obligatorio en cada línea), referencia si el medio la pide, aviso de
+  referencia repetida (409 `PAYMENT_REFERENCE_DUPLICATE` con `line`, desde 0,
+  que se confirma con el `duplicateReferenceReason` de esa línea), tasa
+  congelada de su moneda (DX-375) y base para la imputación (DX-051). Dos
+  líneas con el mismo medio y la misma referencia: 400.
+- **Una transacción**: `PrismaPaymentRepository.createSplit` inserta las
+  líneas (plan bloqueado, caja de quien cobra: el efectivo entra en la caja
+  abierta en su moneda, DX-027) y emite UN recibo numerado con todas. Si una
+  línea falla (p. ej. efectivo sin caja abierta cuando la clínica la exige),
+  no queda ninguna ni se gasta número.
+- **Modelo**: `payments.splitId` (el id de la línea 1, también en ella misma)
+  y `payments.splitLine` (1–5). FK compuesta `payments_split_fkey`
+  (`tenantId`, `splitId`) → `payments`, NOT VALID como las de DX-375/DX-377;
+  CHECK `payments_split_check`; único parcial
+  `payments_tenant_split_line_key`. Migraciones
+  `20261105130000_dx390_payment_split`, `…130100_dx390_payments_split_idx`
+  (CONCURRENTLY) y `…130200_dx390_payment_split_validate`.
+- **Recibo**: la línea 1 lleva el recibo (`payment_receipts.paymentId`) y la
+  foto añade `split: { lines, total }` (cada línea con su medio, referencia y
+  equivalente en la moneda del plan; el total es `null` si alguna quedó «sin
+  tasa»). `GET /payments/:id/receipt` de CUALQUIER línea devuelve ese recibo,
+  con `split.lines[].exchangeRate` (la tasa congelada de hoy de cada línea) y
+  el total recalculado con ellas. Todas las líneas llevan su `receiptNumber`.
+- **Saldo a favor**: si el total en la moneda del plan (las líneas con tasa)
+  supera lo pendiente, 409 `SPLIT_PAYMENT_EXCEEDS_BALANCE` con `total`,
+  `pending` (nunca bajo 0: un saldo a favor previo cuenta como 0 pendiente),
+  `excess` (lo que este cobro supera lo pendiente, sin sumar el saldo a favor
+  previo) y `currency`; se confirma con `confirmCreditBalance: true`. Lo
+  pendiente se lee fuera de la transacción, pero sin la confirmación la
+  transacción bloquea el plan (FOR NO KEY UPDATE) y comprueba que no entró
+  ningún abono al plan desde esa lectura: si entró (dos cobros a la vez), 409
+  `SPLIT_PAYMENT_BALANCE_CHANGED` y no se registra nada.
+- **Anular desde la caja o el estado de cuenta**: `GET /payments` y el estado
+  de cuenta traen `splitId` y `splitLines` en cada abono, para avisar antes
+  de anular que se anula el cobro entero.
+- **Idempotency-Key** del cobro entero, en la línea 1 con una huella propia
+  (`splitPaymentRequestFingerprint`): repetir devuelve el cobro original; la
+  misma clave con otro cuerpo, otro plan o en el endpoint del abono suelto es
+  422. Ni el motivo ni la confirmación entran en la huella.
+- **Auditoría por línea**: `@Audit({ splitPayment: true })` deja un `CREATE`
+  de `PAYMENT` por línea (`reason: SPLIT_RECEIPT_ISSUED`, su
+  `paymentReference`).
+- **Anular** (`DELETE /payments/:id`) una línea anula el cobro entero y su
+  recibo en la misma transacción (un recibo, una anulación), con un `VOID`
+  por línea (`SPLIT_PAYMENT_VOIDED` en las demás).
+
 ## Tipos de documento genéricos y nombres locales (DX-327)
 
 El tipo de documento de un paciente o de un contacto es uno de cinco, iguales

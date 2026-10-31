@@ -1,5 +1,6 @@
 import {
   buildAuditDraft,
+  buildAuditDrafts,
   isBreakGlassLogin,
   loginActor,
   type AuditedRequest,
@@ -488,6 +489,66 @@ describe('buildAuditDraft (DX-009)', () => {
       scope,
     );
     expect(draft?.userAgent).toBe('A');
+  });
+});
+
+describe('buildAuditDrafts (DX-390)', () => {
+  const LINE_1 = '66666666-6666-4666-8666-666666666666';
+  const LINE_2 = '77777777-7777-4777-8777-777777777777';
+  const DUPLICATE = '88888888-8888-4888-8888-888888888888';
+  const split: AuditOptions = {
+    action: 'CREATE',
+    resource: 'PAYMENT',
+    resourceId: { response: 'id' },
+    patient: { lookup: 'treatmentPlan', param: 'id' },
+    reason: 'SPLIT_RECEIPT_ISSUED',
+    paymentReference: true,
+    splitPayment: true,
+  };
+
+  it('un cobro dividido deja un evento por línea, con su abono y SU referencia repetida', () => {
+    const drafts = buildAuditDrafts(
+      split,
+      req({ params: { id: PLAN } }),
+      {
+        id: LINE_1,
+        payments: [
+          { id: LINE_1, duplicateReferenceOf: [] },
+          {
+            id: LINE_2,
+            duplicateReferenceReason: 'El banco lo repitió',
+            duplicateReferenceOf: [DUPLICATE],
+          },
+        ],
+      },
+      scope,
+    );
+
+    expect(drafts.map((d) => d.resourceId)).toEqual([LINE_1, LINE_2]);
+    expect(
+      drafts.every((d) => d.metadata.reason === 'SPLIT_RECEIPT_ISSUED'),
+    ).toBe(true);
+    expect(drafts[0].patient).toEqual({ kind: 'treatmentPlan', id: PLAN });
+    expect(drafts[0].metadata.paymentReference).toBeUndefined();
+    expect(drafts[1].metadata.paymentReference).toEqual({
+      duplicateConfirmed: true,
+      duplicateOf: [DUPLICATE],
+    });
+    // Nunca el texto del motivo.
+    expect(JSON.stringify(drafts)).not.toContain('El banco');
+  });
+
+  it('sin `splitPayment` es el evento de siempre', () => {
+    const { splitPayment: _omit, ...single } = split;
+    void _omit;
+    const drafts = buildAuditDrafts(
+      single,
+      req({ params: { id: PLAN } }),
+      { id: LINE_1 },
+      scope,
+    );
+    expect(drafts).toHaveLength(1);
+    expect(drafts[0].resourceId).toBe(LINE_1);
   });
 });
 

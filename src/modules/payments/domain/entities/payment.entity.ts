@@ -43,6 +43,13 @@ export interface Payment {
    */
   duplicateReferenceOf?: string[];
   notes: string | null;
+  /**
+   * DX-390: el cobro dividido del abono (el id de su línea 1, que lleva el
+   * recibo) y su número de línea (1–5); `null` en un abono de una sola forma
+   * de pago.
+   */
+  splitId: string | null;
+  splitLine: number | null;
   createdById: string | null;
   createdAt: Date;
   updatedAt: Date;

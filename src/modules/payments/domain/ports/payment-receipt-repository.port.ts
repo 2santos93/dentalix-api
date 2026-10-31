@@ -58,6 +58,12 @@ interface ReceiptSourceBase {
    * congelada ya no cambia nunca, así que reimprimir da siempre la misma.
    */
   rate: PaymentRateState & { amount: number };
+  /**
+   * DX-390: la tasa de HOY de cada línea de su cobro dividido (la congelada,
+   * DX-375), en orden; `[]` en un abono suelto. `paymentId` es el de la línea
+   * 1: el recibo de cualquier línea es el del cobro.
+   */
+  splitRates: (PaymentRateState & { paymentId: string; amount: number })[];
 }
 
 export type PaymentReceiptSource =

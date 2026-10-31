@@ -326,6 +326,40 @@ export function buildAuditDraft(
   };
 }
 
+/**
+ * Los eventos de una petición que terminó bien: el de `buildAuditDraft` o,
+ * en un cobro dividido (DX-390, `splitPayment`), uno por línea de la
+ * respuesta (`payments`), cada uno con su abono y su referencia.
+ */
+export function buildAuditDrafts(
+  options: AuditOptions,
+  req: AuditedRequest,
+  responseBody: unknown,
+  scope: AuditScope,
+  resultCount: number | null = null,
+): AuditEventDraft[] {
+  if (!options.splitPayment) {
+    const draft = buildAuditDraft(
+      options,
+      req,
+      responseBody,
+      scope,
+      resultCount,
+    );
+    return draft ? [draft] : [];
+  }
+  const lines =
+    typeof responseBody === 'object' &&
+    responseBody !== null &&
+    Array.isArray((responseBody as { payments?: unknown }).payments)
+      ? (responseBody as { payments: unknown[] }).payments
+      : [];
+  return lines.flatMap((line) => {
+    const draft = buildAuditDraft(options, req, line, scope, resultCount);
+    return draft ? [draft] : [];
+  });
+}
+
 const ROLES = new Set<string>(Object.values(ClinicRole));
 
 /**

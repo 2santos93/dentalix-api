@@ -1,0 +1,11 @@
+-- DX-390: las líneas de un cobro dividido, una por número (el recibo, el
+-- reintento idempotente y la anulación las leen por "splitId"). Sirve también
+-- de lado hijo de la FK compuesta payments_split_fkey. PARCIAL: solo los
+-- abonos de un cobro dividido.
+-- CONCURRENTLY (DB-025): no bloquea las escrituras de los abonos; por eso es
+-- la ÚNICA sentencia del fichero (Prisma la ejecuta fuera de transacción).
+-- No puede fallar por datos (todas las filas tienen "splitId" NULL). Si se
+-- corta deja un índice INVALID: DROP INDEX CONCURRENTLY
+-- "payments_tenant_split_line_key", `prisma migrate resolve --rolled-back
+-- 20261105130100_dx390_payments_split_idx` y reintentar.
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS "payments_tenant_split_line_key" ON "payments" ("tenantId", "splitId", "splitLine") WHERE "splitId" IS NOT NULL;

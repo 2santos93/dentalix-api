@@ -3158,6 +3158,8 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     'POST /patient-imports/:id/undo': 'patient-imports.e2e-spec.ts',
     // DX-262: abonar al saldo migrado de otra clínica → 404.
     'POST /opening-balances/:id/payments': 'opening-balances.e2e-spec.ts',
+    // DX-390: B → 404 al cobrar dividido en el plan de A, y no ve su recibo.
+    'POST /treatment-plans/:id/split-payments': 'split-payments.e2e-spec.ts',
     // DX-262: la hoja de saldos del lote de otra clínica → 404.
     'POST /patient-imports/:id/balances': 'opening-balances.e2e-spec.ts',
     'DELETE /patient-imports/:id/balances': 'opening-balances.e2e-spec.ts',
