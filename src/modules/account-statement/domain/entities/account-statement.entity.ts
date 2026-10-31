@@ -124,10 +124,22 @@ export type BalanceOpeningRow = Pick<
 > &
   Partial<Pick<StatementOpeningBalanceRow, 'concept' | 'importBatchId'>>;
 
+/**
+ * DX-253: suma de los asientos del saldo a favor (traspasos y devoluciones)
+ * de un plan en una moneda, con signo.
+ */
+export interface BalanceCreditRow {
+  treatmentPlanId: string;
+  currency: string;
+  amount: number;
+}
+
 /** Entrada mínima de `computeBalances`; `StatementSnapshot` la cumple. */
 export interface BalanceSnapshot {
   plans: StatementPlanRow[];
   payments: readonly BalancePaymentRow[];
+  /** DX-253: asientos del saldo a favor por plan y moneda; sin ellos, ninguno. */
+  creditEntries?: readonly BalanceCreditRow[];
   paymentPlans: StatementPaymentPlanRow[];
   /** Saldos migrados vivos (DX-262); sin ellos, ninguno. */
   openingBalances?: readonly BalanceOpeningRow[];
@@ -141,6 +153,8 @@ export interface StatementSnapshot {
   paymentPlans: StatementPaymentPlanRow[];
   /** Saldos migrados vivos del paciente (DX-262). */
   openingBalances?: StatementOpeningBalanceRow[];
+  /** DX-253: asientos del saldo a favor por plan y moneda. */
+  creditEntries?: BalanceCreditRow[];
 }
 
 // ---------------------------------------------------------------------------
@@ -168,6 +182,12 @@ export interface StatementCurrencySummary {
    */
   openingPending: number;
   paid: number;
+  /**
+   * DX-253: Σ asientos del saldo a favor de la moneda, con signo (una
+   * devolución resta; un traspaso entre planes del paciente suma 0).
+   * `balance = budgeted + openingBalance − paid − creditMovements`.
+   */
+  creditMovements: number;
   balance: number;
   overdueCount: number;
   overdueAmount: number;
@@ -187,7 +207,13 @@ export interface StatementPlanLine {
   paid: number;
   /** Abonos vivos del plan hechos en otra moneda (no se convierten). */
   paidOtherCurrencies: { currency: string; amount: number }[];
-  /** `(countsTowardsBalance ? budgeted : 0) - paid`. */
+  /**
+   * DX-253: Σ de los asientos del saldo a favor del plan en su moneda, con
+   * signo (traspasos recibidos − traspasos dados − devoluciones). Los abonos
+   * originales no cambian: esta cifra se suma a ellos.
+   */
+  creditMovements: number;
+  /** `(countsTowardsBalance ? budgeted : 0) - paid - creditMovements`. */
   balance: number;
 }
 

@@ -36,7 +36,8 @@ export class ReceiptPlanBalanceCalculator {
         currency: before.planCurrency,
         billable: before.billable,
         paid,
-        balance: round2(before.billable - paid),
+        // DX-253: el saldo a favor traspasado o devuelto también cuenta.
+        balance: round2(before.billable - paid - before.creditMovements),
       };
     } catch (error) {
       this.warnUnavailable(errorName(error));

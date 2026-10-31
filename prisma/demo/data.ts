@@ -1531,6 +1531,12 @@ export interface DemoPlan {
    * del primer abono (o hoy, sin abonos).
    */
   doneAt?: DemoLocationKey;
+  /**
+   * DX-253: el plan se cancela DESPUÉS de sus abonos (un plan cancelado no
+   * admite abonos), así lo abonado queda como saldo a favor del paciente para
+   * probar «Aplicar a otro plan» y «Devolver».
+   */
+  cancelledAfterPayments?: true;
   /** Plan de pagos (cuotas) sobre el total facturable del plan. */
   paymentPlan?: {
     downPayment: number;
@@ -1667,6 +1673,21 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
       { code: 'CX-CORDAL-INCL', tooth: '48', status: PROPOSED },
     ],
     payments: [],
+  },
+  {
+    // DX-253: abonado y luego cancelado → 300.000 a favor del paciente, que
+    // tiene vivo el tratamiento periodontal de abajo (destino del traspaso).
+    patientIndex: 6,
+    dentistIndex: 1,
+    status: TreatmentPlanStatus.ACCEPTED,
+    notes: 'Blanqueamiento: el paciente desistió tras pagarlo (saldo a favor).',
+    doneAt: 'norte',
+    openedDaysAgo: 40,
+    items: [{ code: 'IMPL-CORONA', tooth: '11', status: ACCEPTED }],
+    payments: [
+      { daysAgo: 30, amount: 300000, method: CASH, location: 'norte' },
+    ],
+    cancelledAfterPayments: true,
   },
   {
     patientIndex: 6,

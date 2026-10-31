@@ -117,6 +117,18 @@ export const PAYMENT_ROLES: ClinicRole[] = [
   ClinicRole.RECEPTION,
 ];
 
+// Saldo a favor del paciente (DX-253): traspasar a otro plan y devolver. Dato
+// financiero como los abonos: ADMIN siempre y RECEPTION hasta el tope de la
+// clínica (lo aplica el caso de uso); DENTIST/ASSISTANT no. El tope de
+// recepción solo lo cambia ADMIN.
+export const PATIENT_CREDIT_ROLES: ClinicRole[] = [
+  ClinicRole.ADMIN,
+  ClinicRole.RECEPTION,
+];
+export const PATIENT_CREDIT_POLICY_WRITE_ROLES: ClinicRole[] = [
+  ClinicRole.ADMIN,
+];
+
 // Reasignar a qué ítems del plan va un abono (DX-051, spec R10): solo
 // gestión. Recepción ve la imputación (PAYMENT_ROLES) pero no la cambia.
 export const PAYMENT_ALLOCATION_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];

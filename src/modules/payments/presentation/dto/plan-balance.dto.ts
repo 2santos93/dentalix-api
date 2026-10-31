@@ -44,7 +44,17 @@ export class PlanBalanceDto {
   })
   paid!: number;
 
-  @ApiProperty({ example: 200, description: 'billable - paid' })
+  @ApiProperty({
+    example: 0,
+    description:
+      'DX-253: Σ traspasos y devoluciones de saldo a favor del plan en planCurrency, con signo (los abonos no cambian).',
+  })
+  creditMovements!: number;
+
+  @ApiProperty({
+    example: 200,
+    description: 'billable - paid - creditMovements',
+  })
   balance!: number;
 
   @ApiProperty({ example: 1 })

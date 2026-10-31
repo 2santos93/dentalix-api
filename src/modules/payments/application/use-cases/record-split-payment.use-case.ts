@@ -322,7 +322,7 @@ export class RecordSplitPaymentUseCase {
       currency: before.planCurrency,
       billable: before.billable,
       paid,
-      balance: round2(before.billable - paid),
+      balance: round2(before.billable - paid - before.creditMovements),
     };
   }
 

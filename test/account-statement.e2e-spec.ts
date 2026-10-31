@@ -352,6 +352,7 @@ describe('Estado de cuenta — GET /patients/:patientId/account-statement (e2e)'
         openingBalance: 0,
         openingPending: 0,
         paid: 200000,
+        creditMovements: 0,
         balance: 300000,
         overdueCount: 0,
         overdueAmount: 0,
@@ -365,6 +366,7 @@ describe('Estado de cuenta — GET /patients/:patientId/account-statement (e2e)'
         openingPending: 0,
         // 300 + 50 del cancelado; el anulado (100) no suma.
         paid: 350,
+        creditMovements: 0,
         balance: 850,
         // 700 en 3 cuotas (233.33/233.33/233.34) con 300 abonados: la 1 pagada,
         // la 2 con 166.66 pendiente y la 3 entera.

@@ -79,7 +79,9 @@ export class GetPaymentPlanUseCase {
     // Reuse the exact multi-currency "paid" total (converted to plan currency
     // by each payment's own paidAt date) instead of re-implementing it.
     const balance = await this.getPlanBalance.execute(treatmentPlanId);
-    const paidTotal = round2(balance.paid);
+    // DX-253: un traspaso de saldo a favor cubre cuotas como un abono; una
+    // devolución deja de cubrirlas.
+    const paidTotal = round2(balance.paid + balance.creditMovements);
 
     const tramos = this.buildTramos(plan);
     const derived = deriveStatuses(tramos, paidTotal, this.now());

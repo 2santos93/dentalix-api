@@ -32,6 +32,7 @@ function makeUseCase(paid: number) {
         billable: 300,
         paid,
         balance: 300 - paid,
+        creditMovements: 0,
         paymentsCount: 1,
       }),
     ),

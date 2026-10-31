@@ -149,6 +149,15 @@ model Tenant {
   // DX-374: tasas de cambio manuales de la clínica.
   manualExchangeRates                     ManualExchangeRate[]
 
+  // DX-253: tope de RECEPTION para traspasar o devolver saldo a favor (0 =
+  // no puede; ADMIN no tiene tope).
+  creditReceptionMaxAmount Decimal                      @default(0) @db.Decimal(14, 2)
+  creditTransfers          PatientCreditTransfer[]
+  creditRefunds            PatientCreditRefund[]
+  creditRefundPayments     PatientCreditRefundPayment[]
+  creditEntries            PatientCreditEntry[]
+  creditRefundCounters     PatientCreditRefundCounter[]
+
   @@map("tenants")
 }
 
@@ -387,6 +396,10 @@ model Location {
 
   // Destino de las FK compuestas (tenantId, locationId) de citas, pagos e
   // inventario: la sede tiene que ser del MISMO tenant (SEC-004).
+  // DX-253
+  creditTransfers PatientCreditTransfer[]
+  creditRefunds   PatientCreditRefund[]
+
   @@unique([tenantId, id], map: "locations_tenant_id_key")
   @@unique([tenantId, receiptPrefix], map: "locations_tenant_receipt_prefix_key")
   // DX-043 (DB-017): sin @@index([tenantId]); era prefijo exacto de
@@ -1677,6 +1690,12 @@ model TreatmentPlan {
   // Destinos de FK compuestas (SEC-004): (tenantId, id) para los ítems del
   // plan; (tenantId, id, patientId) para pagos y planes de pago, que además
   // garantiza que su `patientId` denormalizado sea el del plan.
+  // DX-253: saldo a favor (traspasos, devoluciones y sus asientos).
+  creditTransfersOut PatientCreditTransfer[] @relation("CreditTransferSource")
+  creditTransfersIn  PatientCreditTransfer[] @relation("CreditTransferTarget")
+  creditRefunds      PatientCreditRefund[]   @relation("CreditRefundPlan")
+  creditEntries      PatientCreditEntry[]    @relation("CreditEntryPlan")
+
   @@unique([tenantId, id], map: "treatment_plans_tenant_id_key")
   @@unique([tenantId, id, patientId], map: "treatment_plans_tenant_id_patient_key")
   @@index([tenantId, patientId])
@@ -2003,6 +2022,10 @@ model Currency {
   // DX-374: tasas manuales de las clínicas en esa moneda.
   manualExchangeRates        ManualExchangeRate[]
 
+  creditTransfers PatientCreditTransfer[] @relation("CreditTransferCurrency")
+  creditRefunds   PatientCreditRefund[]   @relation("CreditRefundCurrency")
+  creditEntries   PatientCreditEntry[]    @relation("CreditEntryCurrency")
+
   @@map("currencies")
 }
 
@@ -2237,6 +2260,9 @@ model Payment {
   // non-null key is unique per tenant. Same name+columns as declared here, so
   // migrate status/deploy see no drift. Do NOT accept a migrate-dev diff that
   // recreates this as a full index.
+  // DX-253: devoluciones que lo citan como abono de referencia.
+  creditRefundRefs PatientCreditRefundPayment[]
+
   @@unique([tenantId, idempotencyKey], map: "payments_tenant_idempotency_key")
   // DX-380: destino de la FK compuesta por clínica de `payment_base_retries`
   // (el único con "treatmentPlanId" no sirve para un abono a un saldo migrado).
@@ -3167,6 +3193,9 @@ enum AuditResourceType {
   SEDATION_RECORD
   // DX-243: firma a distancia (enviar, abrir, verificar, bloquear, firmar, anular).
   SIGNATURE_REQUEST
+  // DX-253: saldo a favor del paciente (traspaso, devolución y su
+  // comprobante, tope de recepción).
+  PATIENT_CREDIT
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o
@@ -4369,6 +4398,9 @@ model CashSession {
   originatedAdjustments CashSessionAdjustment[] @relation("CashAdjustmentOriginal")
   // DX-274: pagos de gastos hechos desde el cajón (salidas de caja).
   expensePayments       ExpensePayment[]
+
+  // DX-253: devoluciones de saldo a favor en efectivo (egreso de la caja).
+  creditRefunds PatientCreditRefund[]
 
   @@unique([tenantId, id], map: "cash_sessions_tenant_id_key")
   @@index([tenantId, locationId, openedAt(sort: Desc), id(sort: Desc)], map: "cash_sessions_tenant_location_opened_idx")
@@ -5679,4 +5711,164 @@ model SedationDischarge {
   @@unique([tenantId, sedationRecordId], map: "sedation_discharges_record_key")
   @@index([tenantId, sedationRecordId, vitalsId], map: "sedation_discharges_vitals_idx")
   @@map("sedation_discharges")
+}
+
+// ---------------------------------------------------------------------------
+// DX-253: saldo a favor del paciente — traspaso a otro plan y devolución.
+//
+// El saldo a favor de un plan es lo abonado (en su moneda) por encima de lo
+// facturable (0 si el plan está cancelado o rechazado). No se mueve tocando
+// los abonos: cada traspaso o devolución deja ASIENTOS inmutables en
+// `patient_credit_entries` (con signo, en la moneda del plan) y el saldo
+// (estado de cuenta, saldo del plan, cartera) los suma a lo abonado. Un
+// traspaso son dos asientos enlazados (TRANSFER_OUT en el origen y
+// TRANSFER_IN en el destino); una devolución, uno (REFUND en el origen).
+// Todo append-only (triggers de 20261106130000_dx253_patient_credit): sin
+// UPDATE ni DELETE salvo la limpieza de un superusuario.
+// ---------------------------------------------------------------------------
+
+enum PatientCreditEntryKind {
+  TRANSFER_OUT
+  TRANSFER_IN
+  REFUND
+}
+
+/// Traspaso de saldo a favor entre dos planes del MISMO paciente (FK compuesta
+/// con `patientId` a los dos planes).
+model PatientCreditTransfer {
+  id                     String   @id @default(uuid()) @db.Uuid
+  tenantId               String   @db.Uuid
+  locationId             String   @db.Uuid
+  patientId              String   @db.Uuid
+  sourcePlanId           String   @db.Uuid
+  targetPlanId           String   @db.Uuid
+  currency               String
+  amount                 Decimal  @db.Decimal(14, 2)
+  reason                 String?
+  /// Puntero suave a User, como `Payment.createdById`.
+  createdById            String   @db.Uuid
+  /// La pone la BD (trigger), en UTC.
+  createdAt              DateTime @default(now())
+  idempotencyKey         String?
+  idempotencyFingerprint String?
+
+  tenant      Tenant               @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  location    Location             @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "patient_credit_transfers_location_fkey")
+  sourcePlan  TreatmentPlan        @relation("CreditTransferSource", fields: [tenantId, sourcePlanId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, onUpdate: Restrict, map: "patient_credit_transfers_source_plan_fkey")
+  targetPlan  TreatmentPlan        @relation("CreditTransferTarget", fields: [tenantId, targetPlanId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, onUpdate: Restrict, map: "patient_credit_transfers_target_plan_fkey")
+  currencyRef Currency             @relation("CreditTransferCurrency", fields: [currency], references: [code], map: "patient_credit_transfers_currency_fkey")
+  entries     PatientCreditEntry[]
+
+  @@unique([tenantId, id], map: "patient_credit_transfers_tenant_id_key")
+  /// Único parcial por clínica (WHERE "idempotencyKey" IS NOT NULL, solo SQL).
+  @@unique([tenantId, idempotencyKey], map: "patient_credit_transfers_tenant_idempotency_key")
+  @@index([tenantId, patientId, createdAt(sort: Desc)], map: "patient_credit_transfers_tenant_patient_idx")
+  @@index([tenantId, sourcePlanId], map: "patient_credit_transfers_tenant_source_idx")
+  @@index([tenantId, targetPlanId], map: "patient_credit_transfers_tenant_target_idx")
+  @@index([tenantId, locationId], map: "patient_credit_transfers_tenant_location_idx")
+  @@index([currency], map: "patient_credit_transfers_currency_idx")
+  @@map("patient_credit_transfers")
+}
+
+/// Devolución de saldo a favor al paciente, con comprobante numerado por sede
+/// (serie propia `DEV-<serie de la sede>`, distinta de la del recibo DX-136).
+/// En efectivo con caja abierta es un egreso de esa caja (`cashSessionId`).
+model PatientCreditRefund {
+  id                     String        @id @default(uuid()) @db.Uuid
+  tenantId               String        @db.Uuid
+  locationId             String        @db.Uuid
+  patientId              String        @db.Uuid
+  treatmentPlanId        String        @db.Uuid
+  currency               String
+  amount                 Decimal       @db.Decimal(14, 2)
+  method                 PaymentMethod
+  reason                 String
+  cashSessionId          String?       @db.Uuid
+  seriesPrefix           String
+  number                 Int
+  /// Foto inmutable del comprobante (clínica, sede, paciente, plan, abonos
+  /// de referencia, quién devolvió): se imprime sin releer nada.
+  snapshot               Json
+  createdById            String        @db.Uuid
+  createdAt              DateTime      @default(now())
+  idempotencyKey         String?
+  idempotencyFingerprint String?
+
+  tenant      Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  location    Location                     @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "patient_credit_refunds_location_fkey")
+  plan        TreatmentPlan                @relation("CreditRefundPlan", fields: [tenantId, treatmentPlanId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, onUpdate: Restrict, map: "patient_credit_refunds_plan_fkey")
+  cashSession CashSession?                 @relation(fields: [tenantId, cashSessionId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "patient_credit_refunds_cash_session_fkey")
+  currencyRef Currency                     @relation("CreditRefundCurrency", fields: [currency], references: [code], map: "patient_credit_refunds_currency_fkey")
+  entries     PatientCreditEntry[]
+  payments    PatientCreditRefundPayment[]
+
+  @@unique([tenantId, id], map: "patient_credit_refunds_tenant_id_key")
+  /// Destino de la FK de los abonos de referencia (del MISMO plan).
+  @@unique([tenantId, id, treatmentPlanId], map: "patient_credit_refunds_tenant_id_plan_key")
+  @@unique([tenantId, seriesPrefix, number], map: "patient_credit_refunds_tenant_series_number_key")
+  @@unique([tenantId, idempotencyKey], map: "patient_credit_refunds_tenant_idempotency_key")
+  @@index([tenantId, patientId, createdAt(sort: Desc)], map: "patient_credit_refunds_tenant_patient_idx")
+  @@index([tenantId, treatmentPlanId, patientId], map: "patient_credit_refunds_tenant_plan_idx")
+  @@index([tenantId, cashSessionId], map: "patient_credit_refunds_tenant_cash_session_idx")
+  @@index([tenantId, locationId, createdAt(sort: Desc)], map: "patient_credit_refunds_tenant_location_idx")
+  @@index([currency], map: "patient_credit_refunds_currency_idx")
+  @@map("patient_credit_refunds")
+}
+
+/// Abonos de referencia de una devolución: del MISMO plan (FK compuesta).
+model PatientCreditRefundPayment {
+  tenantId        String @db.Uuid
+  refundId        String @db.Uuid
+  paymentId       String @db.Uuid
+  treatmentPlanId String @db.Uuid
+
+  tenant  Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  refund  PatientCreditRefund @relation(fields: [tenantId, refundId, treatmentPlanId], references: [tenantId, id, treatmentPlanId], onDelete: Restrict, onUpdate: Restrict, map: "patient_credit_refund_payments_refund_fkey")
+  payment Payment             @relation(fields: [tenantId, paymentId, treatmentPlanId], references: [tenantId, id, treatmentPlanId], onDelete: Restrict, onUpdate: Restrict, map: "patient_credit_refund_payments_payment_fkey")
+
+  @@id([refundId, paymentId])
+  @@index([tenantId, refundId, treatmentPlanId], map: "patient_credit_refund_payments_refund_idx")
+  @@index([tenantId, paymentId, treatmentPlanId], map: "patient_credit_refund_payments_payment_idx")
+  @@map("patient_credit_refund_payments")
+}
+
+/// Asiento del saldo a favor de un plan, con signo y en la moneda del plan:
+/// lo que el saldo suma a lo abonado. Exactamente uno de `transferId` y
+/// `refundId` (CHECK), con el signo que pide su `kind`.
+model PatientCreditEntry {
+  id              String                 @id @default(uuid()) @db.Uuid
+  tenantId        String                 @db.Uuid
+  patientId       String                 @db.Uuid
+  treatmentPlanId String                 @db.Uuid
+  currency        String
+  amount          Decimal                @db.Decimal(14, 2)
+  kind            PatientCreditEntryKind
+  transferId      String?                @db.Uuid
+  refundId        String?                @db.Uuid
+  createdAt       DateTime               @default(now())
+
+  tenant      Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  plan        TreatmentPlan          @relation("CreditEntryPlan", fields: [tenantId, treatmentPlanId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, onUpdate: Restrict, map: "patient_credit_entries_plan_fkey")
+  transfer    PatientCreditTransfer? @relation(fields: [tenantId, transferId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "patient_credit_entries_transfer_fkey")
+  refund      PatientCreditRefund?   @relation(fields: [tenantId, refundId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "patient_credit_entries_refund_fkey")
+  currencyRef Currency               @relation("CreditEntryCurrency", fields: [currency], references: [code], map: "patient_credit_entries_currency_fkey")
+
+  @@index([tenantId, treatmentPlanId, patientId], map: "patient_credit_entries_tenant_plan_idx")
+  @@index([tenantId, patientId], map: "patient_credit_entries_tenant_patient_idx")
+  @@index([tenantId, transferId], map: "patient_credit_entries_tenant_transfer_idx")
+  @@index([tenantId, refundId], map: "patient_credit_entries_tenant_refund_idx")
+  @@index([currency], map: "patient_credit_entries_currency_idx")
+  @@map("patient_credit_entries")
+}
+
+/// Contador del comprobante de devolución por clínica y serie (una por sede).
+model PatientCreditRefundCounter {
+  tenantId     String @db.Uuid
+  seriesPrefix String
+  lastNumber   Int
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  @@id([tenantId, seriesPrefix])
+  @@map("patient_credit_refund_counters")
 }

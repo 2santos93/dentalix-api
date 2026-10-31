@@ -510,6 +510,33 @@ export class CashOutflowDto {
   createdBy!: CashStaffRefDto;
 }
 
+/** DX-253: devolución de saldo a favor en efectivo (egreso de la caja). */
+export class CashCreditRefundDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({ example: 'DEV-BOG-000001' })
+  number!: string;
+
+  @ApiProperty()
+  amount!: number;
+
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
+  currency!: string;
+
+  @ApiProperty()
+  reason!: string;
+
+  @ApiProperty({ format: 'date-time' })
+  createdAt!: Date;
+
+  @ApiProperty({ type: CashStaffRefDto })
+  createdBy!: CashStaffRefDto;
+
+  @ApiProperty({ type: CashPatientRefDto })
+  patient!: CashPatientRefDto;
+}
+
 export class CashVoidedOutflowDto extends CashOutflowDto {
   @ApiProperty({ type: String, format: 'date-time', nullable: true })
   voidedAt!: Date | null;
@@ -723,6 +750,13 @@ export class CashSessionDetailDto extends CashSessionSummaryDto {
       'Salidas anuladas: no restan salvo si se anularon con la caja cerrada',
   })
   voidedOutflows!: CashVoidedOutflowDto[];
+
+  @ApiProperty({
+    type: [CashCreditRefundDto],
+    description:
+      'DX-253: devoluciones de saldo a favor en efectivo del turno: restan en el esperado de CASH (dentro de «Salidas»).',
+  })
+  creditRefunds!: CashCreditRefundDto[];
 
   @ApiProperty({
     type: [CashAdjustmentDto],

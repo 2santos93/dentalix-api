@@ -122,6 +122,7 @@ describe('computeAccountStatement', () => {
         openingBalance: 0,
         openingPending: 0,
         paid: 300.3,
+        creditMovements: 0,
         balance: 1200.2,
         overdueCount: 0,
         overdueAmount: 0,
@@ -547,6 +548,7 @@ describe('computeAccountStatement', () => {
           openingBalance: 250.5,
           openingPending: 250.5,
           paid: 300,
+          creditMovements: 0,
           balance: 950.5,
           overdueCount: 0,
           overdueAmount: 0,
@@ -637,5 +639,85 @@ describe('computeAccountStatement', () => {
         openingBalanceId: 'ob-1',
       });
     });
+  });
+});
+
+describe('computeAccountStatement — saldo a favor (DX-253)', () => {
+  const cancelled = plan('origen', { status: 'CANCELLED', billable: 500_000 });
+  const live = plan('destino', { billable: 400_000 });
+
+  it('traspaso: el origen cancelado queda con 100.000 a favor y el destino baja 200.000, sin tocar los abonos', () => {
+    const paid = payment('origen', 300_000);
+    const out = computeAccountStatement(
+      snapshot({
+        plans: [cancelled, live],
+        payments: [paid],
+        creditEntries: [
+          { treatmentPlanId: 'origen', currency: 'COP', amount: -200_000 },
+          { treatmentPlanId: 'destino', currency: 'COP', amount: 200_000 },
+        ],
+      }),
+      { today: TODAY },
+    );
+    const origin = out.plans.find((p) => p.id === 'origen')!;
+    const target = out.plans.find((p) => p.id === 'destino')!;
+    expect(origin).toMatchObject({
+      paid: 300_000,
+      creditMovements: -200_000,
+      balance: -100_000,
+    });
+    expect(target).toMatchObject({
+      paid: 0,
+      creditMovements: 200_000,
+      balance: 200_000,
+    });
+    // Los abonos no cambian: el único movimiento sigue siendo el original.
+    expect(out.movements.map((m) => [m.id, m.amount])).toEqual([
+      [paid.id, 300_000],
+    ]);
+    // Traspaso dentro del paciente: el saldo total no cambia (400.000 − 300.000).
+    expect(out.summary[0]).toMatchObject({
+      currency: 'COP',
+      paid: 300_000,
+      creditMovements: 0,
+      balance: 100_000,
+    });
+  });
+
+  it('devolución: el saldo a favor baja y el resumen la resta', () => {
+    const out = computeAccountStatement(
+      snapshot({
+        plans: [cancelled],
+        payments: [payment('origen', 300_000)],
+        creditEntries: [
+          { treatmentPlanId: 'origen', currency: 'COP', amount: -300_000 },
+        ],
+      }),
+      { today: TODAY },
+    );
+    expect(out.plans[0].balance).toBe(0);
+    expect(out.summary[0]).toMatchObject({
+      paid: 300_000,
+      creditMovements: -300_000,
+      balance: 0,
+    });
+  });
+
+  it('una anulación sigue sin sumar y el traspaso recibido cubre cuotas', () => {
+    const out = computeAccountStatement(
+      snapshot({
+        plans: [plan('p', { billable: 300 })],
+        payments: [payment('p', 50, { voidedAt: TODAY })],
+        paymentPlans: [paymentPlan('p')],
+        creditEntries: [{ treatmentPlanId: 'p', currency: 'COP', amount: 100 }],
+      }),
+      { today: TODAY },
+    );
+    expect(out.plans[0]).toMatchObject({ paid: 0, balance: 200 });
+    expect(out.installments.map((i) => i.status)).toEqual([
+      'PAID',
+      'OVERDUE',
+      'PENDING',
+    ]);
   });
 });
