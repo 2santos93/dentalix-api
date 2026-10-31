@@ -4,6 +4,7 @@ import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaPatientRepository } from '../src/modules/patients/infrastructure/repositories/prisma-patient.repository';
 import { PrismaPatientPublicLinksRepository } from '../src/modules/patients/infrastructure/repositories/prisma-patient-public-links.repository';
+import { PrismaMedicalHistorySubmissionRepository } from '../src/modules/medical-history-submissions/infrastructure/prisma-medical-history-submission.repository';
 import { PrismaSignatureRequestRepository } from '../src/modules/signature-requests/infrastructure/prisma-signature-request.repository';
 import { PrismaPatientConsentRepository } from '../src/modules/consents/infrastructure/repositories/prisma-patient-consent.repository';
 import { assertNoPendingAppointments } from '../src/modules/patients/application/retention-guard';
@@ -11,9 +12,11 @@ import { PATIENT_ARCHIVED_LINKS_REVOKED_REASON } from '../src/modules/patients/d
 import type { AuditRequestContext } from '../src/modules/audit/domain/audit-request-context';
 import { resetDatabase } from './support/e2e-fixtures';
 import {
+  PNG,
   signedConsentFixtures,
   type Seeded,
 } from './support/signed-consent-fixtures';
+import { computeRemoteConsentHash } from '../src/modules/consents/domain/consent-hash';
 
 // DX-461 contra Postgres (rol dentalix_app, RLS FORCE): archivar un paciente
 // anula en LA MISMA transacción sus enlaces públicos vivos —oferta de hueco,
@@ -30,6 +33,10 @@ const patients = new PrismaPatientRepository(prisma, tenantContext);
 const links = new PrismaPatientPublicLinksRepository(prisma, tenantContext);
 const requests = new PrismaSignatureRequestRepository(prisma, tenantContext);
 const consents = new PrismaPatientConsentRepository(prisma, tenantContext);
+const submissions = new PrismaMedicalHistorySubmissionRepository(
+  prisma,
+  tenantContext,
+);
 const { seedClinic, asClinic, remoteSigned } = signedConsentFixtures({
   owner,
   tenantContext,
@@ -184,6 +191,34 @@ async function anamnesis(
       },
     })
   ).id;
+}
+
+/**
+ * «Archivar» a mano en el orden del repo (paciente FOR UPDATE, luego sus
+ * enlaces) con una pausa en medio, para que la ruta pública llegue con el
+ * paciente ya bloqueado. `revoke` anula el enlace con la `tx` de archivar.
+ */
+async function archiveSlowly(
+  patientId: string,
+  revoke: (tx: Prisma.TransactionClient) => Promise<unknown>,
+): Promise<{ archiving: Promise<void> }> {
+  let locked!: () => void;
+  const patientLocked = new Promise<void>((r) => (locked = r));
+  const archiving = owner.$transaction(
+    async (tx) => {
+      await tx.$queryRaw`SELECT 1 FROM "patients" WHERE "id" = ${patientId}::uuid FOR UPDATE`;
+      locked();
+      await new Promise((r) => setTimeout(r, 500));
+      await revoke(tx);
+      await tx.patient.update({
+        where: { id: patientId },
+        data: { deletedAt: new Date() },
+      });
+    },
+    { timeout: 10_000 },
+  );
+  await patientLocked;
+  return { archiving };
 }
 
 /**
@@ -432,6 +467,129 @@ describe('Archivar un paciente anula sus enlaces públicos (DX-461, Postgres)', 
       patients.archive(p, noAssert, { now: new Date(), ctx: ctxOf(a) }),
     );
     expect(await revokedEvents(a, p)).toHaveLength(0);
+  });
+
+  it('carrera firmar ↔ archivar: la firma espera al archivado y ve el enlace anulado (sin deadlock)', async () => {
+    const p = await newPatient(a, 'Carrera');
+    const sr = await signatureRequest(a, p, 'CONSENT', inHours(48));
+    const { archiving } = await archiveSlowly(p, (tx) =>
+      tx.signatureRequest.updateMany({
+        where: { id: sr, signedAt: null, revokedAt: null },
+        data: { revokedAt: new Date(), revokedById: a.userId },
+      }),
+    );
+    const at = new Date();
+    const signing = asClinic(a.tenantId, () =>
+      requests.withLockedRequest(
+        sr,
+        { ipAddress: '203.0.113.7', userAgent: 'int', requestId: null },
+        (r) => ({
+          write: {
+            patch: { openedAt: at, verifiedAt: at, signedAt: at },
+            audit: [{ action: 'SIGN', reason: 'SIGNATURE_PATIENT_SIGNED' }],
+            consent: {
+              templateId: r.templateId!,
+              templateVersion: 1,
+              treatmentPlanId: null,
+              title: r.title,
+              body: r.body,
+              signerType: 'PATIENT',
+              signerName: r.signerName,
+              signerDocument: null,
+              professionalName: r.professionalName,
+              patientSignature: PNG,
+              contentHash: computeRemoteConsentHash({
+                title: r.title,
+                body: r.body,
+                templateVersion: 1,
+                signerType: 'PATIENT',
+                signerName: r.signerName,
+                signerDocument: null,
+                professionalName: r.professionalName,
+                patientSignature: PNG,
+                signedAt: at,
+                channel: 'EMAIL',
+                destinationMasked: r.destinationMasked,
+                sentAt: r.createdAt,
+                openedAt: at,
+                verifiedAt: at,
+                ipAddress: '203.0.113.7',
+                userAgent: 'int',
+              }),
+              signedAt: at,
+              recordedById: r.createdById,
+              ipAddress: '203.0.113.7',
+              userAgent: 'int',
+              remoteChannel: 'EMAIL',
+              remoteDestinationMasked: r.destinationMasked,
+              remoteSentAt: r.createdAt,
+              remoteOpenedAt: at,
+              remoteVerifiedAt: at,
+            },
+          },
+          result: 'firmado',
+        }),
+      ),
+    );
+    const [archived, signed] = await Promise.allSettled([archiving, signing]);
+    expect(archived.status).toBe('fulfilled');
+    expect(signed).toEqual({ status: 'fulfilled', value: null });
+    const row = await owner.signatureRequest.findUniqueOrThrow({
+      where: { id: sr },
+    });
+    expect(row.signedAt).toBeNull();
+    expect(row.revokedAt).not.toBeNull();
+    expect(
+      await owner.patientConsent.count({ where: { signatureRequestId: sr } }),
+    ).toBe(0);
+  });
+
+  it('carrera responder anamnesis ↔ archivar: espera al archivado y no escribe (sin deadlock)', async () => {
+    const p = await newPatient(a, 'CarreraAnamnesis');
+    const form = await anamnesis(a, p, inHours(24));
+    const policy = await owner.privacyPolicyVersion.create({
+      data: {
+        tenantId: a.tenantId,
+        version: 1,
+        policyText: 'Política',
+        generalText: 'General',
+        sensitiveHealthText: 'Salud',
+        marketingText: 'Marketing',
+        contentHash: hash(),
+        publishedById: a.userId,
+      },
+    });
+    const { archiving } = await archiveSlowly(p, (tx) =>
+      tx.medicalHistorySubmission.updateMany({
+        where: { id: form, status: 'PENDING_PATIENT' },
+        data: { status: 'EXPIRED', revokedAt: new Date() },
+      }),
+    );
+    const submitting = asClinic(a.tenantId, () =>
+      submissions.submit({
+        id: form,
+        patientId: p,
+        answers: {} as never,
+        now: new Date(),
+        consentPolicyVersionId: policy.id,
+        evidence: { ipAddress: '203.0.113.7', userAgent: 'int' },
+        requestId: null,
+      }),
+    );
+    const [archived, submitted] = await Promise.allSettled([
+      archiving,
+      submitting,
+    ]);
+    expect(archived.status).toBe('fulfilled');
+    expect(submitted).toEqual({ status: 'fulfilled', value: 'GONE' });
+    expect(
+      await owner.medicalHistorySubmission.findUniqueOrThrow({
+        where: { id: form },
+      }),
+    ).toMatchObject({ status: 'EXPIRED', submittedAt: null });
+    expect(
+      await owner.dataProcessingConsent.count({ where: { patientId: p } }),
+    ).toBe(0);
   });
 
   it('contar: null para un paciente archivado o de otra clínica (RLS)', async () => {
