@@ -1,6 +1,7 @@
 import type { ScheduleBlockKind } from '@prisma/client';
 import type {
   AffectedAppointment,
+  ReservedTypeRef,
   ScheduleBlock,
 } from '../entities/schedule-block.entity';
 
@@ -32,6 +33,9 @@ export interface CreateScheduleBlockRepoInput extends ScheduleBlockScope {
   kind: ScheduleBlockKind;
   allowsBooking: boolean;
   note: string | null;
+  /** DX-446: solo en `RESERVED`; por defecto, `[]` y `null`. */
+  reservedForTypeIds?: string[];
+  releaseAtMinute?: number | null;
   createdById: string;
 }
 
@@ -41,6 +45,8 @@ export interface UpdateScheduleBlockRepoInput {
   kind?: ScheduleBlockKind;
   allowsBooking?: boolean;
   note?: string | null;
+  reservedForTypeIds?: string[];
+  releaseAtMinute?: number | null;
   updatedById: string;
 }
 
@@ -64,6 +70,16 @@ export interface AffectingBlocks {
   locale: string | null;
   hourCycle: string | null;
   blocks: ScheduleBlock[];
+  /** DX-446: los tipos que nombran los bloques `RESERVED` de `blocks`. */
+  reservedTypes: ReservedTypeRef[];
+}
+
+/** DX-446: tipos reservados y zona de las sedes de unos bloques. */
+export interface ReservedContext {
+  /** Tipos vivos (activos o no) de ESTA clínica entre los pedidos (RLS). */
+  types: ReservedTypeRef[];
+  /** Zona IANA válida de cada sede pedida que la tenga. */
+  timeZones: ReadonlyMap<string, string>;
 }
 
 export interface AffectedAppointmentsPage {
@@ -96,4 +112,12 @@ export interface ScheduleBlockRepository {
     scope: ScheduleBlockScope & { start: Date; end: Date },
     limit: number,
   ): Promise<AffectedAppointmentsPage>;
+  /**
+   * DX-446: tipos de cita (de esta clínica, bajo RLS; uno ajeno no sale) y
+   * zonas de sede para validar y pintar los bloques `RESERVED`.
+   */
+  reservedContext(
+    typeIds: readonly string[],
+    locationIds: readonly string[],
+  ): Promise<ReservedContext>;
 }

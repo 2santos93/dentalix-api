@@ -15,6 +15,7 @@ import {
   type PaymentAllocationsSnapshot,
   type PlanAllocationRepository,
 } from '../../domain/ports/plan-allocation-repository.port';
+import { fromCents } from '../../../../shared/money/money';
 
 /** La imputación de un abono (spec §5.2 `PaymentAllocationsDto`). */
 export interface PaymentAllocationsView {
@@ -50,8 +51,6 @@ export interface PaymentAllocationsView {
     free: number;
   }[];
 }
-
-const fromCents = (cents: number): number => cents / 100;
 
 /**
  * GET /payments/:id/allocations (DX-051): a qué ítems va el abono, lo que

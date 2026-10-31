@@ -166,6 +166,42 @@ describe('diferencias entre la versión vigente y la propuesta (DX-099)', () => 
     ]);
   });
 
+  it('una condición que la vigente no recogía estaba «Sin responder», nunca «No»', () => {
+    const current = version({
+      conditions: [
+        {
+          codigo: 'ASMA',
+          etiqueta: 'Asma',
+          estado: 'DESCONOCE',
+          esAlerta: false,
+        },
+        { codigo: 'RENAL', etiqueta: 'Renal', estado: 'SI', esAlerta: false },
+      ],
+    });
+    const diff = diffMedicalHistory(current, {
+      conditions: [
+        { codigo: 'ASMA', etiqueta: 'Asma', estado: 'NO', esAlerta: false },
+        {
+          codigo: 'HIPERTENSION',
+          etiqueta: 'Hipertensión',
+          estado: 'NO',
+          esAlerta: false,
+        },
+      ],
+    });
+    const conditions = diff.entries.filter((e) => e.section === 'CONDITIONS');
+    expect(
+      conditions.map((e) => [e.change, e.label, e.before, e.after]),
+    ).toEqual([
+      ['REMOVED', 'Renal', 'Sí', 'Sin responder'],
+      ['CHANGED', 'Asma', 'No sabe', 'No'],
+      ['ADDED', 'Hipertensión', 'Sin responder', 'No'],
+    ]);
+    expect(
+      conditions.some((e) => e.before === 'No' && e.change === 'ADDED'),
+    ).toBe(false);
+  });
+
   it('sin cambios: ninguna entrada', () => {
     const current = version({
       medications: [{ nombre: 'Losartán', esAlerta: false }],

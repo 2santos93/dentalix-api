@@ -2272,6 +2272,8 @@ export interface DemoAppointmentType {
   durationMinutes: number;
   color: string;
   reasons: readonly string[];
+  /** DX-446: tipo de urgencia (los huecos reservados son para él). */
+  isUrgent?: boolean;
 }
 
 export const DEMO_APPOINTMENT_TYPES: readonly DemoAppointmentType[] = [
@@ -2294,10 +2296,11 @@ export const DEMO_APPOINTMENT_TYPES: readonly DemoAppointmentType[] = [
     reasons: ['Endodoncia (sesión de seguimiento)'],
   },
   {
-    name: 'Urgencia',
+    name: 'Consulta de urgencia',
     durationMinutes: 30,
     color: '#DC2626',
     reasons: ['Urgencia: dolor dental'],
+    isUrgent: true,
   },
   {
     name: 'Control de ortodoncia',
@@ -2344,6 +2347,22 @@ export const DEMO_ROTATION = {
     ranges: [{ startMinute: 7 * 60, endMinute: 12 * 60 }],
     note: 'Cubre la Sede Norte',
   },
+} as const;
+
+/**
+ * DX-446: hueco «Urgencias» reservado para «Consulta de urgencia» en la agenda
+ * de la primera dentista (sede principal), de 15:00 a 15:30 los próximos días
+ * laborables (hoy incluido si lo es). Se libera a las 11:00 de la sede: pasada
+ * esa hora la agenda lo muestra «Libre desde 11:00» y admite cualquier tipo.
+ */
+export const DEMO_RESERVED_URGENCY = {
+  dentistIndex: 0,
+  days: 5,
+  startMinute: 15 * 60,
+  endMinute: 15 * 60 + 30,
+  releaseAtMinute: 11 * 60,
+  typeName: 'Consulta de urgencia',
+  note: 'Urgencias',
 } as const;
 
 export const DEMO_LUNCH = {

@@ -615,6 +615,7 @@ describe('Cobro dividido con un solo recibo (e2e, DX-390)', () => {
       .expect(404);
   });
 
+  // ISOLATION_COVERS: POST /treatment-plans/:id/split-payments
   it('aislamiento: la clínica B no cobra en el plan de A (404) ni ve sus recibos', async () => {
     await as(api().post(`/api/v1/treatment-plans/${planA}/split-payments`), b)
       .send({

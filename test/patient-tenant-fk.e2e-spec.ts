@@ -204,6 +204,10 @@ describe('Pertenencia del paciente al tenant en endpoints clínicos (SEC-004, e2
   });
 
   describe.each(ENDPOINTS)('$name', (endpoint) => {
+    // ISOLATION_COVERS: POST /patients/:patientId/clinical-entries
+    // ISOLATION_COVERS: POST /patients/:patientId/treatment-plans
+    // ISOLATION_COVERS: PUT /patients/:patientId/medical-history
+    // ISOLATION_COVERS: POST /patients/:patientId/tooth-records
     it('con token de la clínica A y paciente de la clínica B: 404 y nada insertado', async () => {
       const res = await send(endpoint, patientB).expect(404);
       expect((res.body as { message: string }).message).toBe(

@@ -621,6 +621,10 @@ describe('Consentimientos informados — /consent-templates y /patients/:id/cons
   });
 
   describe('aislamiento entre clínicas', () => {
+    // ISOLATION_COVERS: GET /patients/:patientId/consents
+    // ISOLATION_COVERS: GET /patients/:patientId/consents/preview
+    // ISOLATION_COVERS: POST /patients/:patientId/consents
+    // ISOLATION_COVERS: GET /patients/:patientId/consents/:id
     it('la clínica B no ve ni crea consentimientos sobre pacientes de A', async () => {
       const [consent] = await raw.patientConsent.findMany({
         where: { patientId: patientA },

@@ -1,4 +1,5 @@
 import type { PaymentMethod } from '@prisma/client';
+import { fromCents, toCents } from '../../../shared/money/money';
 
 /*
  * Arqueo de una caja (DX-027): lo que DEBERÍA haber por (moneda, método) y la
@@ -20,13 +21,10 @@ export function methodBucket(method: PaymentMethod | null): PaymentMethod {
   return method ?? 'OTHER';
 }
 
-export function centsOf(amount: number): number {
-  return Math.round(amount * 100);
-}
+/** Alias de la caja de `toCents` (src/shared/money). */
+export const centsOf = toCents;
 
-export function fromCents(cents: number): number {
-  return cents / 100;
-}
+export { fromCents };
 
 export interface ArqueoSource {
   /** Fondo inicial por moneda: siempre en efectivo. */

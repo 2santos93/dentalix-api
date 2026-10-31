@@ -376,6 +376,7 @@ describe('Planes cobrables — GET /patients/:patientId/billable-plans (e2e, DX-
       .expect([]);
   });
 
+  // ISOLATION_COVERS: GET /patients/:patientId/billable-plans
   it('aísla por clínica: paciente de otro tenant -> 404, igual que un UUID inexistente', async () => {
     await as(clinicB).get(`/patients/${patientId}/billable-plans`).expect(404);
     await as(clinicA, reception)

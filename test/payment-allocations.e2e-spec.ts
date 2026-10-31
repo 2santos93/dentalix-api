@@ -407,8 +407,9 @@ describe('Imputación automática de abonos (DX-051, e2e)', () => {
     const itemB = await addItem(planId, 80);
     await setStatus(planId, itemA, 'DONE');
     await expectDrained('ítem realizado');
+    // DX-054: un ítem DONE ya no cambia de precio; se edita el aceptado.
     await api()
-      .patch(`/treatment-plans/${planId}/items/${itemA}`, { price: 90 })
+      .patch(`/treatment-plans/${planId}/items/${itemB}`, { price: 90 })
       .expect(200);
     await expectDrained('edición de ítem');
     const paymentId = await pay(planId, 150);
@@ -547,6 +548,8 @@ describe('Imputación automática de abonos (DX-051, e2e)', () => {
       creditMovements: 0,
       paymentsCount: 1,
       paymentsWithoutRate: [],
+      // DX-054: el proveedor de tasas respondió a tiempo (o no hizo falta).
+      rateProviderTimedOut: false,
       allocated: 130,
       unallocated: 0,
       unconvertedPaymentsCount: 0,

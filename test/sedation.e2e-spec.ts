@@ -790,6 +790,10 @@ describe('Hoja de sedación en la evolución (DX-407, e2e)', () => {
   });
 
   describe('permisos y aislamiento', () => {
+    // ISOLATION_COVERS: GET /patients/:patientId/sedation
+    // ISOLATION_COVERS: GET /patients/:patientId/clinical-entries/:entryId/sedation
+    // ISOLATION_COVERS: POST /patients/:patientId/clinical-entries/:entryId/sedation
+    // ISOLATION_COVERS: POST /patients/:patientId/clinical-entries/:entryId/sedation/vitals
     it('paciente o evolución de otra clínica, o evolución de otro paciente: 404', async () => {
       await call(b, 'get', sheet(child, childEntry), b.adminToken).expect(404);
       await call(b, 'post', sheet(child, childEntry), b.adminToken)
@@ -803,6 +807,79 @@ describe('Hoja de sedación en la evolución (DX-407, e2e)', () => {
       );
       await call(a, 'get', sheet(child, otherEntry), dentist.token).expect(404);
       await call(a, 'get', sheet(patientB, entryB), a.adminToken).expect(404);
+    });
+
+    // DX-451: sobre una hoja ABIERTA de A (sin checklist y luego con él), para
+    // que una fuga respondiera 201 y no un 404 o 409 por el estado de la hoja.
+    // ISOLATION_COVERS: POST /patients/:patientId/clinical-entries/:entryId/sedation/checklist
+    // ISOLATION_COVERS: POST /patients/:patientId/clinical-entries/:entryId/sedation/agents
+    // ISOLATION_COVERS: POST /patients/:patientId/clinical-entries/:entryId/sedation/discharge
+    it('la clínica B no añade checklist, fármaco ni egreso a la hoja abierta de A: 404 y la hoja de A no cambia', async () => {
+      const entry = await createEntry(a, other, dentist.token);
+      await call(a, 'post', sheet(other, entry), dentist.token)
+        .send({ ...ASSESSMENT, grade: 'MINIMAL' })
+        .expect(201);
+      const sheetOfA = () =>
+        raw.sedationRecord.findFirstOrThrow({
+          where: { tenantId: a.tenantId, clinicalEntryId: entry },
+          include: {
+            checklist: true,
+            agents: true,
+            vitals: true,
+            discharge: true,
+          },
+        });
+      const snapshot = async () => ({
+        sheet: await sheetOfA(),
+        audit: await raw.auditEvent.count({ where: { patientId: other } }),
+        rowsOfB: await raw.sedationRecord.count({
+          where: { tenantId: b.tenantId },
+        }),
+      });
+      const attack = async (part: string, body: object) => {
+        const before = await snapshot();
+        const res = await call(
+          b,
+          'post',
+          `${sheet(other, entry)}/${part}`,
+          b.adminToken,
+        )
+          .send(body)
+          .expect(404);
+        expect((res.body as { message: string }).message).toBe(
+          'Paciente no encontrado',
+        );
+        expect(await snapshot()).toEqual(before);
+      };
+      const checklist = {
+        items: CHECKLIST_CODES.map((code) => ({ code, checked: true })),
+      };
+
+      await attack('checklist', checklist);
+      expect((await sheetOfA()).checklist).toBeNull();
+
+      // Con el checklist de A hecho, el fármaco y el egreso ya serían posibles.
+      await call(a, 'post', `${sheet(other, entry)}/checklist`, dentist.token)
+        .send(checklist)
+        .expect(201);
+      await attack('agents', {
+        kind: 'NITROUS_OXIDE',
+        n2oPercent: 30,
+        flowLpm: 6,
+      });
+      await attack('discharge', {
+        criteria: CRITERIA.map((code) => ({ code, met: true })),
+        vitals: { ...VITALS, sedationLevel: 'AWAKE' },
+        handedOverToName: 'Intrusa',
+        handedOverToRelationship: 'Otra',
+        instructionsDelivered: true,
+        monitorId: b.adminUserId,
+      });
+      const after = await sheetOfA();
+      expect({ agents: after.agents, discharge: after.discharge }).toEqual({
+        agents: [],
+        discharge: null,
+      });
     });
 
     it('una evolución sin hoja: 404 al añadir checklist, fármaco, toma o egreso', async () => {

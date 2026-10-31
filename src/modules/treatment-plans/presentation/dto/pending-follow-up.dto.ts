@@ -11,6 +11,30 @@ const MAX_DAYS = 3650;
 // Tope de página: evita un OFFSET desorbitado (una lista de llamadas no llega ahí).
 const MAX_PAGE = 100000;
 
+// Query de GET /treatment-plans/pending-follow-up/count (Inicio, I1): el
+// mismo filtro de antigüedad que la lista, sin paginar.
+export class PendingFollowUpCountQueryDto {
+  @ApiPropertyOptional({
+    minimum: 0,
+    maximum: MAX_DAYS,
+    default: FOLLOW_UP_DEFAULT_DAYS,
+    description: 'Presentados hace MÁS de N días',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'olderThanDays debe ser un número entero de días.' })
+  @Min(0, { message: 'olderThanDays no puede ser negativo.' })
+  @Max(MAX_DAYS, { message: `olderThanDays admite hasta ${MAX_DAYS} días.` })
+  olderThanDays?: number;
+}
+
+export class PendingFollowUpCountDto {
+  @ApiProperty({
+    description: 'Planes por seguir con esos filtros (todas las páginas)',
+  })
+  total!: number;
+}
+
 // Query de GET /treatment-plans/pending-follow-up (DX-040).
 export class PendingFollowUpQueryDto {
   @ApiPropertyOptional({

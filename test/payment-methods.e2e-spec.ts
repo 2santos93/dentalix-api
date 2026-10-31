@@ -173,6 +173,7 @@ describe('Medios de pago y referencia repetida (e2e, DX-377)', () => {
       .expect(409);
   });
 
+  // ISOLATION_COVERS: PATCH /payment-methods/:id
   it('otra clínica no edita el medio de A (404)', async () => {
     await as(
       api().patch(`/api/v1/payment-methods/${mobile.get(a.tenantId)}`),

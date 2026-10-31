@@ -388,6 +388,16 @@ export const PRODUCTION_REPORT_ROLES: ClinicRole[] = [
   ClinicRole.ADMIN,
 ];
 
+// «Pendiente de cerrar» (DX-439): el desenlace de las citas pasadas es del
+// mostrador (RECEPTION, de sus sedes); la evolución y el tratamiento sin
+// marcar, del odontólogo (solo sus citas); ADMIN ve todo. La asistente no
+// tiene lista propia. Lo acota por sección el caso de uso.
+export const CLOSING_QUEUE_ROLES: ClinicRole[] = [
+  ClinicRole.ADMIN,
+  ClinicRole.DENTIST,
+  ClinicRole.RECEPTION,
+];
+
 // Medios de pago de la clínica (DX-377) — crear y editar: solo gestión.
 // Leerlos (selector del modal de abono): PAYMENT_ROLES.
 export const PAYMENT_METHOD_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
@@ -416,4 +426,13 @@ export const SEDATION_VITALS_ROLES: ClinicRole[] = [
   ClinicRole.DENTIST,
   ClinicRole.ADMIN,
   ClinicRole.ASSISTANT,
+];
+
+// Agenda de contingencia por sede (DX-339) — descargar el PDF de hoy y mañana
+// y la copia nocturna: quien recibe y llama a los pacientes si cae el sistema
+// (recepción) y gestión. Odontólogos y asistentes no: lleva los teléfonos de
+// todos los pacientes del día.
+export const CONTINGENCY_AGENDA_ROLES: ClinicRole[] = [
+  ClinicRole.ADMIN,
+  ClinicRole.RECEPTION,
 ];

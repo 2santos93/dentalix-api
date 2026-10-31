@@ -765,6 +765,7 @@ describe('Recetas — /patients/:id/prescriptions, /prescriptions, /prescription
       ).toEqual(['NO_ANAMNESIS']);
     });
 
+    // ISOLATION_COVERS: POST /patients/:patientId/prescriptions/safety-check
     it('la previsualización: solo quien emite, 404 desde otra clínica, 400 en español', async () => {
       await as(clinicA, assistantA)
         .post(`${rxPath(warfarinA)}/safety-check`, { items: [] })
@@ -1551,6 +1552,10 @@ describe('Recetas — /patients/:id/prescriptions, /prescriptions, /prescription
   });
 
   describe('aislamiento entre clínicas', () => {
+    // ISOLATION_COVERS: GET /patients/:patientId/prescriptions
+    // ISOLATION_COVERS: POST /patients/:patientId/prescriptions
+    // ISOLATION_COVERS: GET /prescriptions/:id
+    // ISOLATION_COVERS: POST /prescriptions/:id/void
     it('la clínica B recibe 404 sobre el paciente y la receta de A', async () => {
       await as(clinicB).get(rxPath(patientA)).expect(404);
       await as(clinicB)

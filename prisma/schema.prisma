@@ -68,6 +68,11 @@ model Tenant {
   emailOutbox                             EmailOutbox[]
   clinicalEntryAddenda                    ClinicalEntryAddendum[]
   anestheticProducts                      AnestheticProduct[]
+  // DX-439: descartes de «Pendiente de cerrar».
+  closingQueueDismissals                  ClosingQueueDismissal[]
+  appointmentReservedOverrides            AppointmentReservedOverride[]
+  // DX-339: copia nocturna de la agenda de contingencia de cada sede.
+  contingencyAgendaSnapshots              ContingencyAgendaSnapshot[]
   anesthesiaAdministrations               AnesthesiaAdministration[]
   // DX-407: hoja de sedación consciente en la evolución.
   sedationRecords                         SedationRecord[]
@@ -216,6 +221,9 @@ model User {
   tokens                            UserToken[]
   clinicalEntryAddenda              ClinicalEntryAddendum[]
   anesthesiaAdministrations         AnesthesiaAdministration[]
+  // DX-439: pendientes de «Pendiente de cerrar» que descartó.
+  closingQueueDismissals            ClosingQueueDismissal[]
+  appointmentReservedOverrides      AppointmentReservedOverride[]
   // DX-407: hoja de sedación (autor de cada parte; operador y monitor del egreso).
   sedationRecordsAuthored           SedationRecord[]
   sedationChecklists                SedationChecklist[]
@@ -397,6 +405,8 @@ model Location {
   // festivos.
   workingCalendar            LocationWorkingCalendar?
   holidays                   LocationHoliday[]
+  // DX-339: última copia nocturna de la agenda de contingencia (1:1).
+  contingencyAgendaSnapshot  ContingencyAgendaSnapshot?
   // GLOBAL-G1: moneda de la sede (locations_currency_fkey; admite NULL en fase 1).
   currencyRef                Currency?                   @relation(fields: [currency], references: [code], onDelete: Restrict, map: "locations_currency_fkey")
   // DX-312: país de la sede (locations_country_code_fkey).
@@ -1223,26 +1233,29 @@ model Appointment {
   updatedAt           DateTime                @updatedAt
   deletedAt           DateTime?
 
-  planItems                 AppointmentPlanItem[]
+  planItems                    AppointmentPlanItem[]
   // DX-273: salidas de COMPLETED, con su motivo.
-  statusReversals           AppointmentStatusReversal[]
-  confirmations             AppointmentConfirmation[]
+  statusReversals              AppointmentStatusReversal[]
+  confirmations                AppointmentConfirmation[]
   // DX-210: ofertas de hueco hechas a esta cita para adelantarla.
-  waitlistOffers            WaitlistOffer[]
-  outboundMessages          OutboundMessage[]
+  waitlistOffers               WaitlistOffer[]
+  outboundMessages             OutboundMessage[]
   // DX-122: la entrada de «Pendientes por agendar» que creó su cancelación o
   // no-show, y la que se resolvió agendando esta cita.
-  waitlistSourced           AppointmentWaitlistEntry[]  @relation("WaitlistSource")
-  waitlistResolved          AppointmentWaitlistEntry[]  @relation("WaitlistResolved")
-  reminders                 AppointmentReminder[]
+  waitlistSourced              AppointmentWaitlistEntry[]    @relation("WaitlistSource")
+  waitlistResolved             AppointmentWaitlistEntry[]    @relation("WaitlistResolved")
+  reminders                    AppointmentReminder[]
   // DX-170: evoluciones documentadas en esta cita.
-  clinicalEntries           ClinicalEntry[]
+  clinicalEntries              ClinicalEntry[]
   // DX-222: indicaciones postoperatorias entregadas por esta cita.
-  postOpDeliveries          PostOpInstructionDelivery[]
+  postOpDeliveries             PostOpInstructionDelivery[]
   // DX-099: anamnesis enviadas para esta cita.
-  medicalHistorySubmissions MedicalHistorySubmission[]
+  medicalHistorySubmissions    MedicalHistorySubmission[]
   // DX-291: cargo por inasistencia o cancelación tardía (o su condonación).
-  cancellationFee           CancellationFee?
+  cancellationFee              CancellationFee?
+  // DX-439: pendientes de cierre descartados de esta cita.
+  closingQueueDismissals       ClosingQueueDismissal[]
+  appointmentReservedOverrides AppointmentReservedOverride[]
 
   // FK COMPUESTA a propósito: exige que el paciente sea del MISMO tenant.
   // Antes era `[patientId] -> [id]`, que solo garantizaba "el paciente existe
@@ -1308,6 +1321,8 @@ model AppointmentType {
   // `#RRGGBB` (CHECK en la migración): nunca CSS libre.
   color           String
   active          Boolean   @default(true)
+  // DX-446: tipo de urgencia (los huecos RESERVED lo ofrecen primero).
+  isUrgent        Boolean   @default(false)
   createdById     String?   @db.Uuid
   updatedById     String?   @db.Uuid
   createdAt       DateTime  @default(now())
@@ -1338,28 +1353,37 @@ enum ScheduleBlockKind {
   MEETING
   LUNCH
   OTHER
+  // DX-446: hueco reservado para ciertos tipos de cita (urgencias).
+  RESERVED
 }
 
 model ScheduleBlock {
-  id            String            @id @default(uuid()) @db.Uuid
-  tenantId      String            @db.Uuid
+  id                 String            @id @default(uuid()) @db.Uuid
+  tenantId           String            @db.Uuid
   // NULL = el profesional en todas las sedes (CHECK: sede o profesional).
-  locationId    String?           @db.Uuid
+  locationId         String?           @db.Uuid
   // Usuario del personal (como `Appointment.providerId`, sin FK: la membresía
   // solo tiene un único PARCIAL). NULL = toda la sede.
-  providerId    String?           @db.Uuid
+  providerId         String?           @db.Uuid
   // [start, end) medio abierto, como las citas. CHECK end > start.
-  start         DateTime
-  end           DateTime
-  kind          ScheduleBlockKind
-  allowsBooking Boolean           @default(false)
+  start              DateTime
+  end                DateTime
+  kind               ScheduleBlockKind
+  allowsBooking      Boolean           @default(false)
   // Hasta 200 caracteres (CHECK); la API rechaza antes con 400.
-  note          String?
-  createdById   String?           @db.Uuid
-  updatedById   String?           @db.Uuid
-  createdAt     DateTime          @default(now())
-  updatedAt     DateTime          @updatedAt
-  deletedAt     DateTime?
+  note               String?
+  // DX-446: tipos de cita que SÍ caben en un bloque RESERVED (1..20; vacío en
+  // los demás tipos, CHECK). Sin FK (uuid[]): un trigger exige que sean de la
+  // misma clínica.
+  reservedForTypeIds String[]          @default([]) @db.Uuid
+  // DX-446: «Liberar a partir de»: minutos desde las 00:00 (hora de pared de
+  // la sede) del día del bloque, 0..1439. Solo en RESERVED (CHECK).
+  releaseAtMinute    Int?
+  createdById        String?           @db.Uuid
+  updatedById        String?           @db.Uuid
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  deletedAt          DateTime?
 
   tenant   Tenant    @relation(fields: [tenantId], references: [id])
   // FK COMPUESTA: la sede tiene que ser del MISMO tenant (SEC-004).
@@ -1736,6 +1760,8 @@ model TreatmentPlanItem {
   appointmentLinks  AppointmentPlanItem[]
   // DX-291: el cargo por inasistencia que creó este ítem (si lo es).
   cancellationFees  CancellationFee[]
+  // DX-439: «sin marcar como hecho» descartado de «Pendiente de cerrar».
+  closingDismissals ClosingQueueDismissal[]
   id                String                  @id @default(uuid()) @db.Uuid
   tenantId          String                  @db.Uuid
   planId            String                  @db.Uuid
@@ -3295,6 +3321,8 @@ enum AuditResourceType {
   ANESTHESIA_ADMINISTRATION
   // DX-407: hoja de sedación de una evolución (cada parte que se añade).
   SEDATION_RECORD
+  // DX-439: descarte de un pendiente de «Pendiente de cerrar» (con motivo).
+  CLOSING_QUEUE_DISMISSAL
   // DX-243: firma a distancia (enviar, abrir, verificar, bloquear, firmar, anular).
   SIGNATURE_REQUEST
   // DX-253: saldo a favor del paciente (traspaso, devolución y su
@@ -4000,12 +4028,12 @@ model PatientDocument {
   voidReason   String?
   createdAt    DateTime                @default(now())
 
-  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenant           Tenant            @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   // FK COMPUESTAS (SEC-004): paciente y sede del MISMO tenant.
-  patient    Patient  @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict)
-  location   Location @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict)
-  uploadedBy User     @relation("PatientDocumentUploadedBy", fields: [uploadedById], references: [id], onDelete: Restrict)
-  voidedBy   User?    @relation("PatientDocumentVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
+  patient          Patient           @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict)
+  location         Location          @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict)
+  uploadedBy       User              @relation("PatientDocumentUploadedBy", fields: [uploadedById], references: [id], onDelete: Restrict)
+  voidedBy         User?             @relation("PatientDocumentVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
   // DX-422: el PDF firmado que archiva (si lo generó el servidor).
   signedConsentPdf SignedConsentPdf?
 
@@ -5528,27 +5556,27 @@ enum AnesthesiaTechnique {
 /// cada registro de anestesia copia los suyos. Se desactiva, no se borra.
 /// `sampleCode`: clave del ejemplo cargado («Cargar sugeridos» no duplica).
 model AnestheticProduct {
-  id               String   @id @default(uuid()) @db.Uuid
-  tenantId         String   @db.Uuid
-  name             String
-  activeIngredient String
-  concentrationPct Decimal  @db.Decimal(4, 2)
-  vasoconstrictor  String?
-  mlPerCarpule     Decimal  @db.Decimal(3, 2)
-  maxMgPerKg       Decimal  @db.Decimal(4, 2)
-  maxAbsoluteMg    Decimal  @db.Decimal(6, 1)
+  id                      String   @id @default(uuid()) @db.Uuid
+  tenantId                String   @db.Uuid
+  name                    String
+  activeIngredient        String
+  concentrationPct        Decimal  @db.Decimal(4, 2)
+  vasoconstrictor         String?
+  mlPerCarpule            Decimal  @db.Decimal(3, 2)
+  maxMgPerKg              Decimal  @db.Decimal(4, 2)
+  maxAbsoluteMg           Decimal  @db.Decimal(6, 1)
   /// DX-420: mg/kg en menores de 12 años (null = el de adulto), edad mínima
   /// en años (null = sin mínimo) y mg de epinefrina por carpule (0 = sin
   /// epinefrina; null = no se sabe). Valores por defecto revisables.
   pediatricMaxMgPerKg     Decimal? @db.Decimal(4, 2)
   minAgeYears             Int?     @db.SmallInt
   epinephrineMgPerCarpule Decimal? @db.Decimal(5, 4)
-  sampleCode       String?
-  active           Boolean  @default(true)
-  createdById      String?  @db.Uuid
-  updatedById      String?  @db.Uuid
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  sampleCode              String?
+  active                  Boolean  @default(true)
+  createdById             String?  @db.Uuid
+  updatedById             String?  @db.Uuid
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
 
   tenant          Tenant                     @relation(fields: [tenantId], references: [id])
   administrations AnesthesiaAdministration[]
@@ -5570,19 +5598,19 @@ model AnestheticProduct {
 /// motivo de la confirmación. FK compuestas: evolución del mismo paciente y
 /// clínica, anestésico y sede de la misma clínica.
 model AnesthesiaAdministration {
-  id                 String              @id @default(uuid()) @db.Uuid
-  tenantId           String              @db.Uuid
-  patientId          String              @db.Uuid
-  clinicalEntryId    String              @db.Uuid
-  locationId         String?             @db.Uuid
-  anestheticId       String              @db.Uuid
-  anestheticName     String
-  activeIngredient   String
-  concentrationPct   Decimal             @db.Decimal(4, 2)
-  vasoconstrictor    String?
-  mlPerCarpule       Decimal             @db.Decimal(3, 2)
-  maxMgPerKg         Decimal             @db.Decimal(4, 2)
-  maxAbsoluteMg      Decimal             @db.Decimal(6, 1)
+  id                      String              @id @default(uuid()) @db.Uuid
+  tenantId                String              @db.Uuid
+  patientId               String              @db.Uuid
+  clinicalEntryId         String              @db.Uuid
+  locationId              String?             @db.Uuid
+  anestheticId            String              @db.Uuid
+  anestheticName          String
+  activeIngredient        String
+  concentrationPct        Decimal             @db.Decimal(4, 2)
+  vasoconstrictor         String?
+  mlPerCarpule            Decimal             @db.Decimal(3, 2)
+  maxMgPerKg              Decimal             @db.Decimal(4, 2)
+  maxAbsoluteMg           Decimal             @db.Decimal(6, 1)
   // DX-420: copia de los valores pediátricos y de epinefrina del catálogo
   // (null en los registros anteriores), la epinefrina de esta dosis y la
   // acumulada del paciente en la ventana, en mg.
@@ -5591,22 +5619,22 @@ model AnesthesiaAdministration {
   epinephrineMgPerCarpule Decimal?            @db.Decimal(5, 4)
   epinephrineMg           Decimal?            @db.Decimal(6, 4)
   cumulativeEpinephrineMg Decimal?            @db.Decimal(6, 4)
-  carpules           Decimal             @db.Decimal(4, 2)
-  doseMg             Decimal             @db.Decimal(6, 1)
-  technique          AnesthesiaTechnique
-  site               String?
-  lot                String?
-  administeredAt     DateTime
-  weightKg           Decimal?            @db.Decimal(4, 1)
+  carpules                Decimal             @db.Decimal(4, 2)
+  doseMg                  Decimal             @db.Decimal(6, 1)
+  technique               AnesthesiaTechnique
+  site                    String?
+  lot                     String?
+  administeredAt          DateTime
+  weightKg                Decimal?            @db.Decimal(4, 1)
   // ANAMNESIS (vitalSigns.peso) o ENTERED (lo anotó quien registra).
-  weightSource       String?
-  cumulativeMg       Decimal             @db.Decimal(7, 1)
-  cumulativePercent  Int?
-  safetyRulesVersion String
-  safetyAlerts       Json
-  overrideReason     String?
-  authorId           String              @db.Uuid
-  createdAt          DateTime            @default(now())
+  weightSource            String?
+  cumulativeMg            Decimal             @db.Decimal(7, 1)
+  cumulativePercent       Int?
+  safetyRulesVersion      String
+  safetyAlerts            Json
+  overrideReason          String?
+  authorId                String              @db.Uuid
+  createdAt               DateTime            @default(now())
 
   tenant     Tenant            @relation(fields: [tenantId], references: [id])
   patient    Patient           @relation(fields: [tenantId, patientId], references: [tenantId, id])
@@ -6027,4 +6055,105 @@ model ExchangeProviderClinicBudget {
 
   @@id([tenantId, quota])
   @@map("exchange_provider_clinic_budgets")
+}
+
+// DX-439: sección de «Pendiente de cerrar». OUTCOME = cita pasada sin
+// desenlace (SCHEDULED/CONFIRMED); EVOLUTION = atendida sin evolución viva;
+// TREATMENT = atendida con un ítem ligado activo que sigue en ACCEPTED.
+enum ClosingQueueSection {
+  OUTCOME
+  EVOLUTION
+  TREATMENT
+}
+
+// DX-439: motivo (lista cerrada) de un descarte. OTHER exige texto (3–200).
+enum ClosingDismissalReason {
+  PATIENT_DECLINED_TODAY
+  PAPER_NOTE
+  DUPLICATE_APPOINTMENT
+  OTHER
+}
+
+/// DX-439: un pendiente de «Pendiente de cerrar» descartado a mano, con su
+/// motivo. Saca ese pendiente (sección + cita [+ ítem]) de la lista sin tocar
+/// la cita, la historia ni el plan; el descarte queda además en
+/// `audit_events` (CLOSING_QUEUE_DISMISSAL). Append-only (trigger + REVOKE),
+/// RLS FORCE por tenant y FK COMPUESTAS a la cita y al ítem del MISMO
+/// paciente y clínica. `createdAt` lo pone la BD.
+///
+/// Solo SQL (Prisma no los expresa):
+///   closing_queue_dismissals_pending_key UNIQUE ("tenantId", section,
+///     "appointmentId", "planItemId") NULLS NOT DISTINCT -> un descarte por
+///     pendiente, y el NOT EXISTS de la lista.
+///   CHECK closing_queue_dismissals_item_check: ítem solo y siempre en TREATMENT.
+///   CHECK closing_queue_dismissals_reason_text_check: texto 3–200 (sin
+///     espacios de los bordes) con OTHER; sin texto con los demás motivos.
+model ClosingQueueDismissal {
+  id            String                 @id @default(uuid()) @db.Uuid
+  tenantId      String                 @db.Uuid
+  section       ClosingQueueSection
+  patientId     String                 @db.Uuid
+  appointmentId String                 @db.Uuid
+  planItemId    String?                @db.Uuid
+  reasonCode    ClosingDismissalReason
+  reasonText    String?                @db.VarChar(200)
+  createdById   String                 @db.Uuid
+  createdAt     DateTime               @default(now())
+
+  tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  appointment Appointment        @relation(fields: [tenantId, patientId, appointmentId], references: [tenantId, patientId, id], onDelete: Restrict, onUpdate: Restrict, map: "closing_queue_dismissals_appointment_fkey")
+  planItem    TreatmentPlanItem? @relation(fields: [tenantId, patientId, planItemId], references: [tenantId, patientId, id], onDelete: Restrict, onUpdate: Restrict, map: "closing_queue_dismissals_plan_item_fkey")
+  createdBy   User               @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, id], map: "closing_queue_dismissals_tenant_id_key")
+  @@index([tenantId, patientId, appointmentId], map: "closing_queue_dismissals_tenant_appointment_idx")
+  @@index([tenantId, patientId, planItemId], map: "closing_queue_dismissals_tenant_plan_item_idx")
+  @@index([createdById], map: "closing_queue_dismissals_created_by_idx")
+  @@map("closing_queue_dismissals")
+}
+
+/// DX-446: «Agendar igualmente» en un hueco reservado: los bloques saltados y
+/// el motivo (5–300, una línea). El texto vive aquí, nunca en `audit_event`
+/// (que solo lleva el id de esta fila). Append-only, RLS FORCE.
+model AppointmentReservedOverride {
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @db.Uuid
+  patientId     String   @db.Uuid
+  appointmentId String   @db.Uuid
+  blockIds      String[] @db.Uuid
+  reason        String   @db.VarChar(300)
+  createdById   String   @db.Uuid
+  createdAt     DateTime @default(now())
+
+  tenant      Tenant      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  appointment Appointment @relation(fields: [tenantId, patientId, appointmentId], references: [tenantId, patientId, id], onDelete: Restrict, onUpdate: Restrict, map: "appointment_reserved_overrides_appointment_fkey")
+  createdBy   User        @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, id], map: "appointment_reserved_overrides_tenant_id_key")
+  @@index([tenantId, patientId, appointmentId], map: "appointment_reserved_overrides_tenant_appointment_idx")
+  @@index([createdById], map: "appointment_reserved_overrides_created_by_idx")
+  @@map("appointment_reserved_overrides")
+}
+
+/// DX-339: la ÚLTIMA copia nocturna de la agenda de contingencia de una sede
+/// (citas de hoy y mañana en PDF). Una fila por sede, sobrescrita cada noche;
+/// el PDF vive en el almacén privado bajo `storageKey` y solo lo sirve la API
+/// (por rol y sede, auditado). RLS FORCE; sin DELETE para la app.
+model ContingencyAgendaSnapshot {
+  tenantId         String   @db.Uuid
+  locationId       String   @db.Uuid
+  /// «Hoy» (día civil en la zona de la sede) al generarla: cubre ese día y el siguiente.
+  forDate          DateTime @db.Date
+  generatedAt      DateTime @db.Timestamptz(3)
+  appointmentCount Int
+  sizeBytes        Int
+  storageKey       String
+  createdAt        DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime @default(now()) @updatedAt @db.Timestamptz(3)
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  location Location @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "contingency_agenda_snapshots_location_fkey")
+
+  @@id([tenantId, locationId])
+  @@map("contingency_agenda_snapshots")
 }

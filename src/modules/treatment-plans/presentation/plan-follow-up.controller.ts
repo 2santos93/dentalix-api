@@ -19,6 +19,8 @@ import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context
 import { Audit } from '../../audit/presentation/audit.decorator';
 import { ListPendingFollowUpUseCase } from '../application/use-cases/list-pending-follow-up.use-case';
 import {
+  PendingFollowUpCountDto,
+  PendingFollowUpCountQueryDto,
   PendingFollowUpPageDto,
   PendingFollowUpQueryDto,
 } from './dto/pending-follow-up.dto';
@@ -60,5 +62,31 @@ export class PlanFollowUpController {
       page: query.page,
       pageSize: query.pageSize,
     });
+  }
+
+  // Inicio (I1): solo el número, sin pacientes ni montos, así que no lleva
+  // @Audit (mismo criterio que GET /closing-queue/count). Mismos filtros,
+  // alcance de sede y roles que la lista.
+  @Get('pending-follow-up/count')
+  @ApiHeader({
+    name: 'X-Location-Id',
+    required: false,
+    description:
+      'Solo los presentados en esta sede; sin ella, toda la clínica (vista consolidada)',
+  })
+  @ApiOkResponse({
+    type: PendingFollowUpCountDto,
+    description:
+      'Cuántos planes saldrían en «Presupuestos por seguir» con los mismos filtros',
+  })
+  async count(
+    @Query() query: PendingFollowUpCountQueryDto,
+  ): Promise<PendingFollowUpCountDto> {
+    const page = await this.listPendingFollowUp.execute({
+      olderThanDays: query.olderThanDays,
+      page: 1,
+      pageSize: 1,
+    });
+    return { total: page.total };
   }
 }

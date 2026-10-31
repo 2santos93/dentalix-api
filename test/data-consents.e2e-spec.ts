@@ -548,6 +548,7 @@ describe('Autorización de datos — /privacy-policies y /patients/:id/data-cons
       expect(await currentPolicy(clinicB)).toBeNull();
     });
 
+    // ISOLATION_COVERS: POST /patients/:patientId/data-consents
     it('la clínica B no lee ni escribe las autorizaciones de un paciente de A (404)', async () => {
       await as(clinicB).get(`/patients/${patientA}/data-consents`).expect(404);
       await as(clinicB).post('/privacy-policies', POLICY).expect(201);

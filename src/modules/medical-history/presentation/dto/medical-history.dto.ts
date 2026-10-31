@@ -32,7 +32,11 @@ export class MedicalHistoryDto {
   @ApiProperty({ type: [AllergyDto] })
   allergies!: AllergyDto[];
 
-  @ApiProperty({ type: [ConditionDto] })
+  @ApiProperty({
+    type: [ConditionDto],
+    description:
+      'Solo las condiciones que se contestaron (Sí / No / No sabe). Una condición del checklist que no figura está «Sin responder»: nunca se interpreta como «No».',
+  })
   conditions!: ConditionDto[];
 
   @ApiProperty({ type: [MedicationDto] })

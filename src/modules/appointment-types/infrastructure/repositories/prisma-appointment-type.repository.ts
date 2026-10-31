@@ -21,6 +21,7 @@ function mapToEntity(row: PrismaAppointmentType): AppointmentType {
     durationMinutes: row.durationMinutes,
     color: row.color,
     active: row.active,
+    isUrgent: row.isUrgent,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -95,6 +96,7 @@ export class PrismaAppointmentTypeRepository implements AppointmentTypeRepositor
             durationMinutes: input.durationMinutes,
             color: input.color,
             active: input.active,
+            isUrgent: input.isUrgent ?? false,
             createdById: input.createdById,
             updatedById: input.createdById,
           },
@@ -118,6 +120,7 @@ export class PrismaAppointmentTypeRepository implements AppointmentTypeRepositor
             durationMinutes: input.durationMinutes,
             color: input.color,
             active: input.active,
+            isUrgent: input.isUrgent,
             updatedById: input.updatedById,
           },
         }),

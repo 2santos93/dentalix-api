@@ -65,7 +65,11 @@ export class ConditionDto {
   @IsString()
   etiqueta!: string;
 
-  @ApiProperty({ enum: CONDITION_STATUSES })
+  @ApiProperty({
+    enum: CONDITION_STATUSES,
+    description:
+      'SI = la tiene, NO = no la tiene (respuesta explícita), DESCONOCE = el paciente no lo sabe. «Sin responder» no es un estado: la condición se omite de la lista.',
+  })
   @IsEnum(CONDITION_STATUSES)
   estado!: ConditionStatus;
 

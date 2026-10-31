@@ -48,6 +48,10 @@ export const LOCATION_BY_REQUEST_MESSAGE =
   'La sede donde se realizó es la sede activa al marcarlo como realizado.';
 export const PERFORMED_LOCATION_NOT_FOUND_MESSAGE =
   'La sede no es de esta clínica.';
+export const APPOINTMENT_ONLY_WHEN_MARKING_DONE_MESSAGE =
+  'La cita solo se indica al marcar un procedimiento como realizado.';
+export const DONE_APPOINTMENT_NOT_LINKED_MESSAGE =
+  'Esa cita no está atendida o no lleva este procedimiento: márcalo realizado desde su cita atendida.';
 export const REVERT_DONE_FORBIDDEN_MESSAGE =
   'Solo un administrador o quien lo realizó puede quitarle «Realizado» a un procedimiento.';
 
@@ -77,7 +81,9 @@ export interface AttributionActor {
  * Cambio de atribución que aplica el repositorio en la transacción del ítem:
  *  - SET: pasa a DONE; la sede la pone el repositorio (`X-Location-Id` o la
  *    de escritura de la sesión) y comprueba que el profesional sea un miembro
- *    vivo de la clínica, que atienda y que atienda en esa sede;
+ *    vivo de la clínica, que atienda y que atienda en esa sede. Con
+ *    `appointmentId` (DX-439, cerrar desde «Pendiente de cerrar»), la sede y
+ *    la fecha son las de esa cita atendida que lleva el ítem;
  *  - CORRECT: un ADMIN cambia quién, cuándo o dónde (lo que no venga, se
  *    queda); el repositorio comprueba que la sede sea de la clínica y de las
  *    permitidas al usuario (DX-089);
@@ -85,7 +91,13 @@ export interface AttributionActor {
  * CORRECT y CLEAR dejan un evento de auditoría con el antes y el después.
  */
 export type ItemAttributionChange =
-  | { kind: 'SET'; performedById: string; completedAt: Date }
+  | {
+      kind: 'SET';
+      performedById: string;
+      completedAt: Date;
+      /** DX-439: la cita atendida de la que salen sede y fecha. */
+      appointmentId?: string;
+    }
   | {
       kind: 'CORRECT';
       performedById?: string;

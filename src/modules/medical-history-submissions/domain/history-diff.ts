@@ -55,8 +55,14 @@ const SEVERITY_LABELS: Record<AllergySeverity, string> = {
 const STATUS_LABELS: Record<ConditionStatus, string> = {
   SI: 'Sí',
   NO: 'No',
-  DESCONOCE: 'Desconoce',
+  DESCONOCE: 'No sabe',
 };
+/**
+ * Una condición que la versión no recoge no se preguntó (o no se contestó):
+ * se dice «Sin responder», nunca «No» — un hallazgo negativo que nadie
+ * registró no puede aparecer en la HC.
+ */
+export const UNANSWERED_CONDITION = 'Sin responder';
 const YES = 'Sí';
 const NO = 'No';
 const NONE = 'Ninguna';
@@ -165,7 +171,9 @@ function diffConditions(
         section: 'CONDITIONS',
         label: c.etiqueta,
         change: 'ADDED',
-        before: null,
+        // Con versión previa, la condición que no figuraba estaba «Sin
+        // responder»; sin versión previa no hay nada con qué comparar.
+        before: before === null ? null : UNANSWERED_CONDITION,
         after: conditionValue(c),
         affirmative,
       });
@@ -189,7 +197,7 @@ function diffConditions(
       label: old.etiqueta,
       change: 'REMOVED',
       before: conditionValue(old),
-      after: null,
+      after: UNANSWERED_CONDITION,
       affirmative: old.estado === 'SI',
     });
   }

@@ -86,6 +86,28 @@ describe('deriveSafetyFlags', () => {
     expect(safetyFlags.profilaxisAntibiotica).toBe(true);
   });
 
+  it('las banderas solo se encienden con un «Sí» explícito: No, No sabe y Sin responder (ausente) no', () => {
+    for (const estado of ['NO', 'DESCONOCE'] as const) {
+      const { safetyFlags, hasCriticalAlert } = deriveSafetyFlags({
+        conditions: [
+          { codigo: 'DIABETES', etiqueta: 'Diabetes', estado, esAlerta: false },
+          {
+            codigo: 'PROTESIS_VALVULAR',
+            etiqueta: 'Prótesis valvular',
+            estado,
+            esAlerta: false,
+          },
+        ],
+      });
+      expect(safetyFlags.diabetes).toBe(false);
+      expect(safetyFlags.profilaxisAntibiotica).toBe(false);
+      expect(hasCriticalAlert).toBe(false);
+    }
+    const unanswered = deriveSafetyFlags({ conditions: [] });
+    expect(unanswered.safetyFlags.diabetes).toBe(false);
+    expect(unanswered.hasCriticalAlert).toBe(false);
+  });
+
   it('hasCriticalAlert es false cuando no hay banderas ni alergias de alerta', () => {
     const { safetyFlags, hasCriticalAlert } = deriveSafetyFlags({
       allergies: [

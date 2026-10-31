@@ -9,6 +9,8 @@ import { GetAppointmentUseCase } from './application/use-cases/get-appointment.u
 import { UpdateAppointmentUseCase } from './application/use-cases/update-appointment.use-case';
 import { APPOINTMENT_REPOSITORY } from './domain/ports/appointment-repository.port';
 import { PrismaAppointmentRepository } from './infrastructure/repositories/prisma-appointment.repository';
+import { RESERVED_OVERRIDE_REPOSITORY } from './domain/ports/reserved-override-repository.port';
+import { PrismaReservedOverrideRepository } from './infrastructure/repositories/prisma-reserved-override.repository';
 import { TokenService } from '../../shared/crypto/token.service';
 import { PatientsModule } from '../patients/patients.module';
 import { StaffModule } from '../staff/staff.module';
@@ -72,6 +74,11 @@ import { MedicalHistoryModule } from '../medical-history/medical-history.module'
     // listing it here makes it resolvable for @UseInterceptors on AppointmentsController.
     TenantContextInterceptor,
     { provide: APPOINTMENT_REPOSITORY, useClass: PrismaAppointmentRepository },
+    // DX-446: motivo de «Agendar igualmente» en un hueco reservado.
+    {
+      provide: RESERVED_OVERRIDE_REPOSITORY,
+      useClass: PrismaReservedOverrideRepository,
+    },
     // DX-279: asistencia del paciente (resumen de 12 meses e insignia).
     PatientAttendanceFlags,
     GetPatientAttendanceUseCase,

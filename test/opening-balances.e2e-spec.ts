@@ -272,6 +272,7 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
     );
   });
 
+  // ISOLATION_COVERS: POST /patient-imports/:id/balances
   it('otra clínica no ve el lote: 404 al subirle saldos', async () => {
     await attach(
       `/${batch.id}/balances`,
@@ -282,6 +283,7 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
     ).expect(404);
   });
 
+  // ISOLATION_COVERS: GET /patient-imports/:id/balances/errors.csv
   it('dry-run: total por moneda y errores por fila en español, sin escribir nada', async () => {
     const res = await attach(
       `/${batch.id}/balances`,
@@ -357,6 +359,13 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
     ).expect(200);
     expect(report.text).toContain('Sumada a otra fila');
     expect(report.text).toContain('El importe debe ser mayor que 0.');
+    // DX-451: otra clínica no descarga el informe de errores del lote de A.
+    const foreign = await as(
+      api().get(`/api/v1/patient-imports/${batch.id}/balances/errors.csv`),
+      b.adminToken,
+      b,
+    ).expect(404);
+    expect(foreign.text).not.toContain('Sumada a otra fila');
   });
 
   it('una hoja sin la columna de moneda: 400 en español', async () => {
@@ -500,6 +509,7 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
     );
   });
 
+  // ISOLATION_COVERS: POST /opening-balances/:id/payments
   it('abono contra el saldo migrado (revisión C1): recibo de caja, estado de cuenta y cartera con lo pendiente', async () => {
     const ana = await patientByDoc('111111');
     const ob = (await statementOf(ana.id)).openingBalances[0];
@@ -671,6 +681,7 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
     });
   });
 
+  // ISOLATION_COVERS: POST /patient-imports/:id/balances/undo
   it('retirar SOLO los saldos del lote aunque sus pacientes ya tengan citas', async () => {
     const res = await attach(
       '',
@@ -825,6 +836,7 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
     });
   });
 
+  // ISOLATION_COVERS: DELETE /patient-imports/:id/balances
   it('quitar la hoja de saldos de un dry-run; en un lote ya importado, 409', async () => {
     const res = await attach(
       '',
@@ -837,6 +849,13 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
       csv(BALANCES_HEADER, ['333333;10;COP;;']),
       'saldos.csv',
     ).expect(201);
+    // DX-451: otra clínica no quita la hoja del lote de A (404) y sigue ahí.
+    await as(
+      api().delete(`/api/v1/patient-imports/${second.id}/balances`),
+      b.adminToken,
+      b,
+    ).expect(404);
+    expect((await getBatch(second.id)).balances).not.toBeNull();
     const cleared = await as(
       api().delete(`/api/v1/patient-imports/${second.id}/balances`),
       a.adminToken,

@@ -20,6 +20,7 @@ export const SCHEDULE_BLOCK_KIND_LABELS: Record<ScheduleBlockKind, string> = {
   [ScheduleBlockKind.MEETING]: 'Reunión',
   [ScheduleBlockKind.LUNCH]: 'Almuerzo',
   [ScheduleBlockKind.OTHER]: 'Bloqueo',
+  [ScheduleBlockKind.RESERVED]: 'Reservado',
 };
 
 export const SCHEDULE_BLOCK_NOT_FOUND_MESSAGE = 'Bloqueo no encontrado';

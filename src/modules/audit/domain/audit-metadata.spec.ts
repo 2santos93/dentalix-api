@@ -1059,3 +1059,54 @@ describe('sanitizeAuditMetadata — tasa de respaldo de un día sin tasa (DX-402
     }
   });
 });
+
+describe('sanitizeAuditMetadata — descarte de «Pendiente de cerrar» (DX-439)', () => {
+  it('conserva la sección y el código del motivo', () => {
+    const closingQueueDismissal = {
+      section: 'TREATMENT',
+      reasonCode: 'PATIENT_DECLINED_TODAY',
+    };
+    expect(sanitizeAuditMetadata({ closingQueueDismissal })).toEqual({
+      closingQueueDismissal,
+    });
+  });
+
+  it('descarta el descarte entero con el texto del motivo o códigos ajenos', () => {
+    for (const closingQueueDismissal of [
+      { section: 'OUTCOME', reasonCode: 'OTHER', reasonText: 'Se fue' },
+      { section: 'OTRA', reasonCode: 'OTHER' },
+      { section: 'OUTCOME', reasonCode: 'Se fue' },
+      'OUTCOME',
+    ]) {
+      expect(sanitizeAuditMetadata({ closingQueueDismissal })).toEqual({});
+    }
+  });
+});
+
+describe('sanitizeAuditMetadata — hueco reservado saltado (DX-446)', () => {
+  const blockId = '0190f2a4-7b1c-7d2e-8f3a-123456789abc';
+  const overrideId = '0190f2a4-7b1c-7d2e-8f3a-cba987654321';
+
+  it('guarda la fila del override y los bloques', () => {
+    expect(
+      sanitizeAuditMetadata({
+        reservedSlotOverride: { overrideId, blockIds: [blockId] },
+      }),
+    ).toEqual({
+      reservedSlotOverride: { overrideId, blockIds: [blockId] },
+    });
+  });
+
+  it('el motivo (texto libre), sin uuids o con claves extra, no queda nada', () => {
+    for (const reservedSlotOverride of [
+      { overrideId, blockIds: [blockId], reason: 'Dolor agudo' },
+      { overrideId, blockIds: ['no-uuid'] },
+      { overrideId, blockIds: [] },
+      { overrideId: 'no-uuid', blockIds: [blockId] },
+      { blockIds: [blockId] },
+      { overrideId, blockIds: [blockId], patient: 'Ana' },
+    ]) {
+      expect(sanitizeAuditMetadata({ reservedSlotOverride })).toEqual({});
+    }
+  });
+});

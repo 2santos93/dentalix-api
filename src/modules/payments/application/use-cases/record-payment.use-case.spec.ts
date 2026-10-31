@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { TreatmentPlanStatus } from '@prisma/client';
 import { RecordPaymentUseCase } from './record-payment.use-case';
+import { PAID_AT_IN_FUTURE_MESSAGE } from '../../domain/paid-at-window';
 import { InMemoryPaymentRepository } from './__fixtures__/in-memory-payment.repository';
 import { GetTreatmentPlanUseCase } from '../../../treatment-plans/application/use-cases/get-treatment-plan.use-case';
 import { TreatmentPlanDetail } from '../../../treatment-plans/domain/entities/treatment-plan.entity';
@@ -125,6 +126,9 @@ class FakeConvertAmount {
   }
 }
 
+/** Reloj fijo de los abonos (DX-054): las fechas de este spec son anteriores. */
+const RECORD_NOW = new Date('2026-10-31T15:00:00.000Z');
+
 describe('RecordPaymentUseCase', () => {
   function makeUseCase() {
     const repo = new InMemoryPaymentRepository();
@@ -144,9 +148,34 @@ describe('RecordPaymentUseCase', () => {
         } as unknown as PaymentMethodRepository,
         repo,
       ),
+      () => RECORD_NOW,
     );
     return { repo, fakeGetPlan, uc, receiptBalance, convert };
   }
+
+  describe('DX-054: fecha del abono en el futuro', () => {
+    it('más de 24 h por delante del reloj → 400 en español, sin leer el plan ni registrar', async () => {
+      const { repo, fakeGetPlan, uc } = makeUseCase();
+      fakeGetPlan.plan = makePlan({ id: 'plan-1', currency: 'USD' });
+      for (const paidAt of ['2026-11-01T15:00:00.001Z', '2026-11-03']) {
+        await expect(
+          uc.execute('plan-1', { amount: 10, currency: 'USD', paidAt }),
+        ).rejects.toThrow(new BadRequestException(PAID_AT_IN_FUTURE_MESSAGE));
+      }
+      expect(repo.lastCreateInput).toBeNull();
+    });
+
+    it('hasta 24 h por delante (otra zona, reloj desfasado) se registra', async () => {
+      const { repo, fakeGetPlan, uc } = makeUseCase();
+      fakeGetPlan.plan = makePlan({ id: 'plan-1', currency: 'USD' });
+      await uc.execute('plan-1', {
+        amount: 10,
+        currency: 'USD',
+        paidAt: '2026-11-01T15:00:00.000Z',
+      });
+      expect(repo.lastCreateInput).not.toBeNull();
+    });
+  });
 
   describe('DX-051: base del abono en la moneda del plan', () => {
     afterEach(() => jest.restoreAllMocks());

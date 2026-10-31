@@ -341,6 +341,8 @@ describe('Anamnesis previa a la cita por enlace (e2e, DX-099)', () => {
       expect(invalid.headers['cache-control']).toBe('no-store');
     });
 
+    // ISOLATION_COVERS: GET /public/medical-history/:token
+    // ISOLATION_COVERS: POST /public/medical-history/:token
     it('el token de A en el host de B → 404', async () => {
       await publicGet(clinicB.host, link.token).expect(404);
       await publicPost(clinicB.host, link.token, validBody()).expect(404);
@@ -710,6 +712,12 @@ describe('Anamnesis previa a la cita por enlace (e2e, DX-099)', () => {
   });
 
   describe('aislamiento por clínica y por sede', () => {
+    // ISOLATION_COVERS: POST /patients/:patientId/medical-history/requests
+    // ISOLATION_COVERS: GET /patients/:patientId/medical-history/requests
+    // ISOLATION_COVERS: GET /medical-history/submissions/:id
+    // ISOLATION_COVERS: POST /medical-history/submissions/:id/accept
+    // ISOLATION_COVERS: POST /medical-history/submissions/:id/reject
+    // ISOLATION_COVERS: POST /medical-history/submissions/:id/revoke
     it('B no ve, no crea, no revisa ni anula nada de A (404) y no toca el envío de A', async () => {
       const { created } = await createLink(receptionToken, {});
       const before = await raw.medicalHistorySubmission.findUniqueOrThrow({

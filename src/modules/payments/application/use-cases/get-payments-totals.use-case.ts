@@ -3,6 +3,7 @@ import { PAYMENT_REPOSITORY } from '../../domain/ports/payment-repository.port';
 import type { PaymentRepository } from '../../domain/ports/payment-repository.port';
 import { ConvertAmountUseCase } from '../../../exchange/application/use-cases/convert-amount.use-case';
 import { paymentAmountIn } from '../payment-exchange-rate';
+import { round2 } from '../../../../shared/money/money';
 
 /**
  * Período en días CIVILES (YYYY-MM-DD, ambos inclusive, ya validados por quien
@@ -28,12 +29,6 @@ export interface GetPaymentsTotalsResult {
   /** Breakdown of the ORIGINAL (unconverted) amounts grouped by each
    * payment's own currency, e.g. `{ COP: 500000, USD: 30 }`. */
   byCurrency: Record<string, number>;
-}
-
-// Same rounding policy as CreateSaleUseCase/ConvertAmountUseCase: monetary
-// sums are rounded to 2 decimals to avoid floating point drift.
-function round2(value: number): number {
-  return Math.round(value * 100) / 100;
 }
 
 /**

@@ -430,7 +430,7 @@ export class TreatmentPlansController {
     description: `${DISCOUNT_FORBIDDEN}. DX-050: cambiar quién o cuándo de un ítem DONE (solo ADMIN); sacarlo de DONE (solo ADMIN o quien lo realizó)`,
   })
   @ApiConflictResponse({
-    description: `${DISCOUNT_LOCKED_CONFLICT}; ${FEE_ITEM_CONFLICT}; firmado: solo admite avanzar el estado (no volver a PROPOSED); completado: solo admite marcar como DONE un ítem ACCEPTED sin otro cambio; cerrado: DX-050 admite además corregir quién, cuándo o dónde (DX-305) de un ítem DONE, sin otro cambio`,
+    description: `${DISCOUNT_LOCKED_CONFLICT}; ${FEE_ITEM_CONFLICT}; firmado: solo admite avanzar el estado (no volver a PROPOSED); completado: solo admite marcar como DONE un ítem ACCEPTED sin otro cambio; cerrado: DX-050 admite además corregir quién, cuándo o dónde (DX-305) de un ítem DONE, sin otro cambio; DX-054: cambiar el \`price\` de un ítem DONE (también en la misma petición que lo saca de DONE; repetir el mismo precio no cuenta): primero se devuelve a ACCEPTED`,
   })
   @ApiUnprocessableEntityResponse({ description: DISCOUNT_UNPROCESSABLE })
   updateItem(
@@ -455,6 +455,7 @@ export class TreatmentPlansController {
         completedAt:
           dto.completedAt === undefined ? undefined : new Date(dto.completedAt),
         performedLocationId: dto.performedLocationId,
+        appointmentId: dto.appointmentId,
       },
       actorRole(req),
       auditRequestContext(req, this.tenantContext),
