@@ -263,4 +263,53 @@ describe('UpdateTreatmentPlanUseCase', () => {
       ).resolves.toMatchObject({ status: COMPLETED, notes: 'Cargos' });
     });
   });
+
+  describe('plan con asientos de saldo a favor (DX-438)', () => {
+    const CREDIT_LOCKED =
+      'El plan tiene saldo a favor traspasado o devuelto: su moneda ya no cambia, porque ese saldo está en la moneda actual del plan.';
+    function creditPlan(status: TreatmentPlanStatus) {
+      const ctx = setup();
+      // Recibió un traspaso: tiene asientos, pero ningún abono.
+      const plan = ctx.repo.seedPlan({ status, currency: 'COP' });
+      ctx.repo.creditEntryPlanIds.add(plan.id);
+      return { ...ctx, plan };
+    }
+
+    it.each([DRAFT, PRESENTED])(
+      'en %s sin abonos, cambiar la moneda es 409 con código propio y no escribe',
+      async (status) => {
+        const { repo, uc, plan } = creditPlan(status);
+        const error: unknown = await uc
+          .execute(plan.id, { currency: 'usd', notes: 'después' }, DENTIST)
+          .catch((e: unknown) => e);
+        expect(error).toBeInstanceOf(ConflictException);
+        expect((error as ConflictException).getResponse()).toEqual({
+          statusCode: 409,
+          error: 'Conflict',
+          code: 'PLAN_CURRENCY_LOCKED_BY_CREDIT',
+          message: CREDIT_LOCKED,
+        });
+        expect(repo.stored(plan.id).currency).toBe('COP');
+        expect(repo.stored(plan.id).notes).not.toBe('después');
+      },
+    );
+
+    it('la misma moneda, las notas o cancelarlo sí pasan', async () => {
+      const { uc, plan } = creditPlan(DRAFT);
+      await expect(
+        uc.execute(plan.id, { currency: 'cop', notes: 'Notas' }, DENTIST),
+      ).resolves.toMatchObject({ currency: 'COP', notes: 'Notas' });
+      await expect(
+        uc.execute(plan.id, { status: CANCELLED }, DENTIST),
+      ).resolves.toMatchObject({ status: CANCELLED, currency: 'COP' });
+    });
+
+    it('sin asientos ni abonos la moneda de un borrador sí cambia', async () => {
+      const { repo, uc } = setup();
+      const plan = repo.seedPlan({ status: DRAFT, currency: 'COP' });
+      await expect(
+        uc.execute(plan.id, { currency: 'USD' }, DENTIST),
+      ).resolves.toMatchObject({ currency: 'USD' });
+    });
+  });
 });

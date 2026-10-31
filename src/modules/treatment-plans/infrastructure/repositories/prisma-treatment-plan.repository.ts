@@ -323,7 +323,7 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
         throw new NotFoundException('Plan de tratamiento no encontrado');
       }
 
-      const [livePayment, activePaymentPlan] = await Promise.all([
+      const [livePayment, activePaymentPlan, creditEntry] = await Promise.all([
         tx.payment.findFirst({
           where: { treatmentPlanId: id, deletedAt: null, voidedAt: null },
           select: { id: true },
@@ -332,10 +332,17 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
           where: { treatmentPlanId: id, status: 'ACTIVE', deletedAt: null },
           select: { id: true },
         }),
+        // DX-438: con el plan bloqueado (FOR UPDATE), un traspaso en curso
+        // (FOR NO KEY UPDATE del plan) ya confirmó su asiento o espera.
+        tx.patientCreditEntry.findFirst({
+          where: { tenantId: current.tenantId, treatmentPlanId: id },
+          select: { id: true },
+        }),
       ]);
       const change = decide(mapToEntityWithItems(current), {
         hasLivePayments: livePayment !== null,
         hasActivePaymentPlan: activePaymentPlan !== null,
+        hasCreditEntries: creditEntry !== null,
       });
       const data: Prisma.TreatmentPlanUncheckedUpdateInput = {
         status: change.status,

@@ -124,7 +124,7 @@ export class PatientCreditController {
   @ApiNotFoundResponse({ description: 'Plan inexistente o de otra clínica.' })
   @ApiConflictResponse({
     description:
-      'El destino está cancelado o rechazado, o el saldo cambió a la vez.',
+      'El destino está cancelado o rechazado, o el saldo cambió a la vez (también si el origen o el destino cambió de moneda antes del bloqueo, DX-438).',
   })
   @ApiUnprocessableEntityResponse({
     description: 'La Idempotency-Key ya se usó con otro cuerpo.',
@@ -168,7 +168,7 @@ export class PatientCreditController {
   @ApiNotFoundResponse({ description: 'Plan inexistente o de otra clínica.' })
   @ApiConflictResponse({
     description:
-      'El saldo cambió a la vez (otra devolución) o falta la caja abierta exigida.',
+      'El saldo cambió a la vez (otra devolución, o el plan cambió de moneda antes del bloqueo, DX-438) o falta la caja abierta exigida.',
   })
   @ApiUnprocessableEntityResponse({
     description: 'La Idempotency-Key ya se usó con otro cuerpo.',

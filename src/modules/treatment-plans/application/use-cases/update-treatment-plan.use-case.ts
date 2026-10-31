@@ -45,6 +45,15 @@ export const USE_PLAN_ACTIONS_MESSAGE =
   'Para presentar o rechazar un plan usa sus acciones «Presentar» y «Rechazar».';
 export const CURRENCY_LOCKED_BY_PAYMENTS_MESSAGE =
   'El plan tiene abonos registrados: su moneda ya no cambia. Anula los abonos antes de cambiarla.';
+/**
+ * DX-438: los asientos del saldo a favor están en la moneda del plan y los
+ * saldos solo suman los de su moneda actual: cambiarla haría desaparecer ese
+ * saldo. Vale aunque el plan no tenga abonos (un borrador que recibió un
+ * traspaso). La red es el trigger `treatment_plans_credit_currency_locked`.
+ */
+export const CURRENCY_LOCKED_BY_CREDIT_CODE = 'PLAN_CURRENCY_LOCKED_BY_CREDIT';
+export const CURRENCY_LOCKED_BY_CREDIT_MESSAGE =
+  'El plan tiene saldo a favor traspasado o devuelto: su moneda ya no cambia, porque ese saldo está en la moneda actual del plan.';
 export const CURRENCY_LOCKED_BY_PAYMENT_PLAN_MESSAGE =
   'El plan tiene un plan de cuotas activo: cancélalo antes de cambiar la moneda.';
 /** Motivo que queda en el plan de cuotas cancelado junto a su plan (DX-109). */
@@ -153,7 +162,8 @@ export class UpdateTreatmentPlanUseCase {
         if (currency !== existing.currency) {
           // Aceptado con firma (DX-012): los importes firmados no cambian de
           // moneda. Cerrado, cobrado o financiado (DX-109): tampoco, porque
-          // el saldo y las cuotas se calculan en esta moneda.
+          // el saldo y las cuotas se calculan en esta moneda. Con saldo a favor
+          // en asientos (DX-438), tampoco: esos asientos son de esta moneda.
           if (existing.acceptance) {
             throw new ConflictException(SIGNED_PLAN_HEADER_LOCKED_MESSAGE);
           }
@@ -164,6 +174,14 @@ export class UpdateTreatmentPlanUseCase {
           }
           if (facts.hasLivePayments) {
             throw new ConflictException(CURRENCY_LOCKED_BY_PAYMENTS_MESSAGE);
+          }
+          if (facts.hasCreditEntries) {
+            throw new ConflictException({
+              statusCode: 409,
+              error: 'Conflict',
+              code: CURRENCY_LOCKED_BY_CREDIT_CODE,
+              message: CURRENCY_LOCKED_BY_CREDIT_MESSAGE,
+            });
           }
           if (facts.hasActivePaymentPlan) {
             throw new ConflictException(

@@ -315,6 +315,35 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
     expect(payment.treatmentPlanId).toBe(origin);
   });
 
+  it('DX-438: el destino sin abonos que recibió el traspaso no cambia de moneda (409 PLAN_CURRENCY_LOCKED_BY_CREDIT) y su saldo sigue visible', async () => {
+    const plan = await raw.treatmentPlan.findUniqueOrThrow({
+      where: { id: target },
+      select: { status: true },
+    });
+    expect(['DRAFT', 'PRESENTED']).toContain(plan.status);
+    expect(
+      await raw.payment.count({ where: { treatmentPlanId: target } }),
+    ).toBe(0);
+    const res = await as(api().patch(`/api/v1/treatment-plans/${target}`), a)
+      .send({ currency: 'USD' })
+      .expect(409);
+    expect(res.body).toMatchObject({
+      code: 'PLAN_CURRENCY_LOCKED_BY_CREDIT',
+      message:
+        'El plan tiene saldo a favor traspasado o devuelto: su moneda ya no cambia, porque ese saldo está en la moneda actual del plan.',
+    });
+    const balance = (
+      await as(
+        api().get(`/api/v1/treatment-plans/${target}/balance`),
+        a,
+      ).expect(200)
+    ).body as { planCurrency: string; creditMovements: number };
+    expect(balance).toMatchObject({
+      planCurrency: 'COP',
+      creditMovements: 200_000,
+    });
+  });
+
   it('traspaso a un plan cancelado (409) o más que el saldo (400)', async () => {
     await transfer({
       targetPlanId: target,

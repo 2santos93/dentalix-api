@@ -120,12 +120,14 @@ export interface PatientCreditRepository {
   findRefundByKey(key: string): Promise<CreditRefundRecord | null>;
   /**
    * En UNA transacción: bloquea los dos planes (orden por id), recalcula el
-   * saldo a favor del origen y guarda el traspaso y sus dos asientos. 409 si
-   * el saldo ya no alcanza.
+   * saldo a favor del origen y guarda el traspaso y sus dos asientos. 409
+   * (`CREDIT_CHANGED_MESSAGE`) si el saldo ya no alcanza o si el origen o el
+   * destino ya no están en `input.currency` (DX-438).
    */
   createTransfer(input: CreateTransferInput): Promise<CreditTransferRecord>;
   /**
-   * En UNA transacción: bloquea el plan, recalcula, valida los abonos de
+   * En UNA transacción: bloquea el plan, recalcula (409 si el saldo no
+   * alcanza o el plan ya no está en `input.currency`), valida los abonos de
    * referencia (400), asigna la caja (efectivo; 409 si se exige y no hay),
    * numera el comprobante y guarda la devolución con su asiento.
    */
