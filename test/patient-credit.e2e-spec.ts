@@ -501,6 +501,10 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
     ).rejects.toThrow(/registro contable/);
   });
 
+  // ISOLATION_COVERS: POST /treatment-plans/:id/credit-transfers
+  // ISOLATION_COVERS: POST /treatment-plans/:id/credit-refunds
+  // ISOLATION_COVERS: GET /credit-refunds/:id
+  // ISOLATION_COVERS: GET /patients/:id/credit-movements
   it('otra clínica: 404 sobre el plan y el comprobante de A', async () => {
     const refundId = (
       await raw.patientCreditRefund.findFirstOrThrow({

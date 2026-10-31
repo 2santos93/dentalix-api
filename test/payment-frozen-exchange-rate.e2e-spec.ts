@@ -308,6 +308,7 @@ describe('Tasa congelada en cada abono (e2e, DX-375)', () => {
     await expect(balance(manual)).resolves.toMatchObject({ paid: 50 });
   });
 
+  // ISOLATION_COVERS: PUT /exchange/manual-rates/:id
   it('una tasa manual sin usar se corrige y queda en la auditoría', async () => {
     const ves = await registerRate(manual, {
       date: TODAY,

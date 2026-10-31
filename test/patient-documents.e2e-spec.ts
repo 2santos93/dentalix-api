@@ -809,6 +809,12 @@ describe('Documentos del paciente — /patients/:patientId/documents (DX-151, e2
   });
 
   describe('aislamiento entre clínicas', () => {
+    // ISOLATION_COVERS: POST /patients/:patientId/documents
+    // ISOLATION_COVERS: GET /patients/:patientId/documents
+    // ISOLATION_COVERS: GET /patients/:patientId/documents/:id
+    // ISOLATION_COVERS: GET /patients/:patientId/documents/:id/url/inline
+    // ISOLATION_COVERS: GET /patients/:patientId/documents/:id/url/download
+    // ISOLATION_COVERS: POST /patients/:patientId/documents/:id/void
     it('B → 404 en lista, detalle, URL, subida y anulación, sin cambios en A', async () => {
       const before = await raw.patientDocument.findMany({
         where: { tenantId: a.tenantId },

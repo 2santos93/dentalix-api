@@ -386,6 +386,12 @@ describe('Periodontograma — /patients/:id/perio-exams (e2e)', () => {
       .expect(403);
   });
 
+  // ISOLATION_COVERS: GET /patients/:patientId/perio-exams
+  // ISOLATION_COVERS: POST /patients/:patientId/perio-exams
+  // ISOLATION_COVERS: GET /patients/:patientId/perio-exams/:id
+  // ISOLATION_COVERS: PUT /patients/:patientId/perio-exams/:id/measures
+  // ISOLATION_COVERS: POST /patients/:patientId/perio-exams/:id/finalize
+  // ISOLATION_COVERS: DELETE /patients/:patientId/perio-exams/:id
   it('aislamiento: la clínica B no lee ni escribe exámenes de pacientes de A', async () => {
     const examId = await draftExamOfA();
     await as(clinicB).get(path(patientA)).expect(404);

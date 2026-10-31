@@ -18,6 +18,12 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
+import {
+  exemptedRoutes,
+  exemptionProblems,
+  readTestSpec,
+  type IsolationExemption,
+} from './support/isolation-exemptions';
 import { ROUTE_ACCESS } from './support/route-access-matrix';
 import {
   ID_INPUTS_IN_MATRIX,
@@ -27,6 +33,9 @@ import { CapturingMailer } from './support/capture-mailer';
 import { EmailDispatcher } from '../src/modules/notifications/email/application/email-dispatcher.service';
 import { MAILER } from '../src/modules/notifications/email/domain/ports/mailer.port';
 import { CONFIRMATION_LINK_NOT_FOUND_MESSAGE } from '../src/modules/appointment-confirmations/application/find-confirmation-by-token';
+import { ANESTHESIA_IMMUTABLE_MESSAGE } from '../src/modules/anesthesia/presentation/anesthesia.controller';
+import { CLINICAL_ENTRY_IMMUTABLE_MESSAGE } from '../src/modules/clinical-entries/presentation/clinical-entries.controller';
+import { SEDATION_IMMUTABLE_MESSAGE } from '../src/modules/sedation/presentation/sedation.controller';
 import {
   LOCATION_BY_REQUEST_MESSAGE,
   PERFORMED_LOCATION_NOT_FOUND_MESSAGE,
@@ -3120,6 +3129,41 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       message: 'Cita no encontrada',
     },
     // ======================================================================
+    // DX-451: la HC es inalterable (DX-038). PATCH/PUT/DELETE de la evolución
+    // y de sus hojas de sedación y anestesia responden 405 a cualquiera: B
+    // con los ids de A recibe el mismo 405 y nada de A cambia.
+    // ======================================================================
+    ...(['patch', 'put', 'delete'] as const).flatMap(
+      (verb): IsolationCase[] => {
+        const entry = () =>
+          `/patients/${a.patientId}/clinical-entries/${a.clinicalEntryId}`;
+        const VERB = verb.toUpperCase();
+        return [
+          {
+            name: `${VERB} /patients/:patientId/clinical-entries/:entryId`,
+            verb,
+            path: entry,
+            status: 405,
+            message: CLINICAL_ENTRY_IMMUTABLE_MESSAGE,
+          },
+          {
+            name: `${VERB} /patients/:patientId/clinical-entries/:entryId/sedation`,
+            verb,
+            path: () => `${entry()}/sedation`,
+            status: 405,
+            message: SEDATION_IMMUTABLE_MESSAGE,
+          },
+          {
+            name: `${VERB} /patients/:patientId/clinical-entries/:entryId/anesthesia/:id`,
+            verb,
+            path: () => `${entry()}/anesthesia/${randomUUID()}`,
+            status: 405,
+            message: ANESTHESIA_IMMUTABLE_MESSAGE,
+          },
+        ];
+      },
+    ),
+    // ======================================================================
     // DX-207: rutas públicas por token. El token de A, sin sesión, en el host
     // de B: «no existe» (y nada de A cambia). Que el mismo token SÍ vale en
     // el host de A lo comprueba «control: los tokens de A valen en su host».
@@ -3181,187 +3225,278 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
 
   /**
    * Rutas con roles y `:param` cuyo aislamiento entre clínicas ya prueba otro
-   * spec (B → 404 sobre el recurso de A). Cada una cita dónde.
+   * spec (B → 404 sobre el recurso de A). Cada exención cita el spec, dice qué
+   * comprueba («B → …») y el spec lo declara con `// ISOLATION_COVERS: RUTA`
+   * encima del test que la ataca (DX-451, test/support/isolation-exemptions.ts).
+   * Una PR que sube el número de exenciones lo justifica en su descripción.
    */
-  const COVERED_ELSEWHERE: Record<string, string> = {
-    // DX-307: paciente/evolución/anestésico de otra clínica → 404; las
-    // ediciones responden siempre 405 (inalterable).
-    'GET /patients/:patientId/anesthesia': 'anesthesia.e2e-spec.ts',
-    'GET /patients/:patientId/clinical-entries/:entryId/anesthesia':
-      'anesthesia.e2e-spec.ts',
-    'POST /patients/:patientId/clinical-entries/:entryId/anesthesia':
-      'anesthesia.e2e-spec.ts',
-    'POST /patients/:patientId/clinical-entries/:entryId/anesthesia/check':
-      'anesthesia.e2e-spec.ts',
-    'PATCH /patients/:patientId/clinical-entries/:entryId/anesthesia/:id':
-      'anesthesia.e2e-spec.ts',
-    'PUT /patients/:patientId/clinical-entries/:entryId/anesthesia/:id':
-      'anesthesia.e2e-spec.ts',
-    'DELETE /patients/:patientId/clinical-entries/:entryId/anesthesia/:id':
-      'anesthesia.e2e-spec.ts',
-    'PATCH /anesthetics/:id': 'anesthesia.e2e-spec.ts',
-    // DX-407: paciente/evolución de otra clínica → 404; las ediciones
-    // responden siempre 405 (inalterable).
-    'GET /patients/:patientId/sedation': 'sedation.e2e-spec.ts',
-    'GET /patients/:patientId/clinical-entries/:entryId/sedation':
-      'sedation.e2e-spec.ts',
-    'POST /patients/:patientId/clinical-entries/:entryId/sedation':
-      'sedation.e2e-spec.ts',
-    'POST /patients/:patientId/clinical-entries/:entryId/sedation/checklist':
-      'sedation.e2e-spec.ts',
-    'POST /patients/:patientId/clinical-entries/:entryId/sedation/agents':
-      'sedation.e2e-spec.ts',
-    'POST /patients/:patientId/clinical-entries/:entryId/sedation/vitals':
-      'sedation.e2e-spec.ts',
-    'POST /patients/:patientId/clinical-entries/:entryId/sedation/discharge':
-      'sedation.e2e-spec.ts',
-    'PATCH /patients/:patientId/clinical-entries/:entryId/sedation':
-      'sedation.e2e-spec.ts',
-    'PUT /patients/:patientId/clinical-entries/:entryId/sedation':
-      'sedation.e2e-spec.ts',
-    'DELETE /patients/:patientId/clinical-entries/:entryId/sedation':
-      'sedation.e2e-spec.ts',
-    // DX-377: la clínica B no edita el medio de pago de A (404).
-    'PATCH /payment-methods/:id': 'payment-methods.e2e-spec.ts',
-    // DX-214: recepción consulta avisos de A; administrador de B obtiene 404
-    // y no se añade ningún evento VIEW a la auditoría de A.
-    'GET /patients/:id/communication/opt-out-warnings':
-      'reminder-opt-out.e2e-spec.ts',
-    // Contra el paciente de A; los casos de aquí (cita y plantilla de A) van
-    // sobre el paciente de B y prueban los ids del cuerpo (DX-207).
-    'POST /patients/:patientId/clinical-entries':
-      'patient-tenant-fk.e2e-spec.ts',
-    // DX-256: «guarda dos visitas; recepción no organiza y clínica ajena no
-    // encuentra el plan» prueba GET/PATCH B → 404 y snapshot de plan, ítems,
-    // intervalos, aceptación y hash del presupuesto de A sin cambios.
-    'GET /treatment-plans/:id/visits': 'plan-visits.e2e-spec.ts',
-    'PATCH /treatment-plans/:id/visits': 'plan-visits.e2e-spec.ts',
-    'POST /patients/:patientId/treatment-plans':
-      'patient-tenant-fk.e2e-spec.ts',
-    'PUT /patients/:patientId/medical-history': 'patient-tenant-fk.e2e-spec.ts',
-    'POST /patients/:patientId/tooth-records': 'patient-tenant-fk.e2e-spec.ts',
-    // DX-120: B → 404 sobre el paciente y el registro de A.
-    'POST /patients/:patientId/tooth-records/:recordId/void':
-      'odontogram-dentition.e2e-spec.ts',
-    'GET /patients/:patientId/dentition': 'odontogram-dentition.e2e-spec.ts',
-    'POST /patients/:patientId/dentition-events':
-      'odontogram-dentition.e2e-spec.ts',
-    'POST /patients/:patientId/clinical-entries/:entryId/addenda':
-      'clinical-entry-addenda.e2e-spec.ts',
-    'GET /patients/:patientId/clinical-entries/:entryId/addenda':
-      'clinical-entry-addenda.e2e-spec.ts',
-    // Responden 405 a cualquiera sin leer ni tocar datos (HC inalterable).
-    'PATCH /patients/:patientId/clinical-entries/:entryId':
-      'clinical-entry-addenda.e2e-spec.ts',
-    'PUT /patients/:patientId/clinical-entries/:entryId':
-      'clinical-entry-addenda.e2e-spec.ts',
-    'DELETE /patients/:patientId/clinical-entries/:entryId':
-      'clinical-entry-addenda.e2e-spec.ts',
-    'GET /patients/:patientId/perio-exams': 'perio-exams.e2e-spec.ts',
-    'POST /patients/:patientId/perio-exams': 'perio-exams.e2e-spec.ts',
-    'GET /patients/:patientId/perio-exams/:id': 'perio-exams.e2e-spec.ts',
-    'PUT /patients/:patientId/perio-exams/:id/measures':
-      'perio-exams.e2e-spec.ts',
-    'POST /patients/:patientId/perio-exams/:id/finalize':
-      'perio-exams.e2e-spec.ts',
-    'DELETE /patients/:patientId/perio-exams/:id': 'perio-exams.e2e-spec.ts',
-    'GET /patients/:patientId/consents': 'patient-consents.e2e-spec.ts',
-    'GET /patients/:patientId/consents/preview': 'patient-consents.e2e-spec.ts',
-    'POST /patients/:patientId/consents': 'patient-consents.e2e-spec.ts',
-    'GET /patients/:patientId/consents/:id': 'patient-consents.e2e-spec.ts',
-    'POST /patients/:patientId/data-consents': 'data-consents.e2e-spec.ts',
-    'GET /patients/:patientId/prescriptions': 'prescriptions.e2e-spec.ts',
-    'POST /patients/:patientId/prescriptions': 'prescriptions.e2e-spec.ts',
-    // DX-300: B → 404 sobre el paciente de A en la previsualización de avisos.
-    'POST /patients/:patientId/prescriptions/safety-check':
-      'prescriptions.e2e-spec.ts',
-    'GET /prescriptions/:id': 'prescriptions.e2e-spec.ts',
-    'POST /prescriptions/:id/void': 'prescriptions.e2e-spec.ts',
-    // DX-191: B → 404 sobre el paciente y el implante de A, y la búsqueda por
-    // lote no devuelve los de A.
-    'GET /patients/:patientId/implants': 'implants.e2e-spec.ts',
-    'POST /patients/:patientId/implants': 'implants.e2e-spec.ts',
-    'GET /patients/:patientId/implant-card': 'implants.e2e-spec.ts',
-    'POST /patients/:patientId/implant-card/print': 'implants.e2e-spec.ts',
-    'POST /implants/:id/void': 'implants.e2e-spec.ts',
-    // DX-151: B → 404 en lista, detalle, URL, subida y anulación del documento
-    // de A, sin cambios en sus filas.
-    // DX-107: lote de importación de otra clínica → 404.
-    'GET /patient-imports/:id': 'patient-imports.e2e-spec.ts',
-    'GET /patient-imports/:id/errors.csv': 'patient-imports.e2e-spec.ts',
-    'POST /patient-imports/:id/confirm': 'patient-imports.e2e-spec.ts',
-    'POST /patient-imports/:id/undo': 'patient-imports.e2e-spec.ts',
-    // DX-262: abonar al saldo migrado de otra clínica → 404.
-    'POST /opening-balances/:id/payments': 'opening-balances.e2e-spec.ts',
-    // DX-390: B → 404 al cobrar dividido en el plan de A, y no ve su recibo.
-    'POST /treatment-plans/:id/split-payments': 'split-payments.e2e-spec.ts',
-    // DX-253: B → 404 sobre el plan, el comprobante y el paciente de A.
-    'POST /treatment-plans/:id/credit-transfers': 'patient-credit.e2e-spec.ts',
-    'POST /treatment-plans/:id/credit-refunds': 'patient-credit.e2e-spec.ts',
-    'GET /credit-refunds/:id': 'patient-credit.e2e-spec.ts',
-    'GET /patients/:id/credit-movements': 'patient-credit.e2e-spec.ts',
-    // DX-262: la hoja de saldos del lote de otra clínica → 404.
-    'POST /patient-imports/:id/balances': 'opening-balances.e2e-spec.ts',
-    'DELETE /patient-imports/:id/balances': 'opening-balances.e2e-spec.ts',
-    'POST /patient-imports/:id/balances/undo': 'opening-balances.e2e-spec.ts',
-    'GET /patient-imports/:id/balances/errors.csv':
-      'opening-balances.e2e-spec.ts',
-    'POST /patients/:patientId/documents': 'patient-documents.e2e-spec.ts',
-    'POST /patients/:patientId/documents/upload-url':
-      'patient-documents-direct-disk.e2e-spec.ts',
-    'POST /patients/:patientId/documents/:id/complete':
-      'patient-documents-direct-disk.e2e-spec.ts',
-    'GET /patients/:patientId/documents': 'patient-documents.e2e-spec.ts',
-    'GET /patients/:patientId/documents/:id': 'patient-documents.e2e-spec.ts',
-    'GET /patients/:patientId/documents/:id/url/inline':
-      'patient-documents.e2e-spec.ts',
-    'GET /patients/:patientId/documents/:id/url/download':
-      'patient-documents.e2e-spec.ts',
-    'POST /patients/:patientId/documents/:id/void':
-      'patient-documents.e2e-spec.ts',
-    'GET /patients/:patientId/account-statement':
-      'account-statement.e2e-spec.ts',
-    // DX-203: B → 404 sobre el pagador de A (y el familiar no suma de otra).
-    'GET /patients/:patientId/family-account-statement':
-      'patient-responsible-parties.e2e-spec.ts',
-    'GET /patients/:patientId/billable-plans': 'billable-plans.e2e-spec.ts',
-    // DX-099: B → 404 sobre el paciente, el envío y el token de A, sin tocar
-    // el envío ni la HC de A.
-    'POST /patients/:patientId/medical-history/requests':
-      'medical-history-submissions.e2e-spec.ts',
-    'GET /patients/:patientId/medical-history/requests':
-      'medical-history-submissions.e2e-spec.ts',
-    'GET /medical-history/submissions/:id':
-      'medical-history-submissions.e2e-spec.ts',
-    'POST /medical-history/submissions/:id/accept':
-      'medical-history-submissions.e2e-spec.ts',
-    'POST /medical-history/submissions/:id/reject':
-      'medical-history-submissions.e2e-spec.ts',
-    'POST /medical-history/submissions/:id/revoke':
-      'medical-history-submissions.e2e-spec.ts',
-    // DX-243: B → 404 sobre el paciente, la solicitud y el consentimiento de
-    // A (opciones, lista, enviar, anular y firma del profesional), sin tocar
-    // nada de A.
-    'GET /patients/:patientId/signature-requests/options':
-      'signature-requests.e2e-spec.ts',
-    'GET /patients/:patientId/signature-requests':
-      'signature-requests.e2e-spec.ts',
-    'POST /patients/:patientId/signature-requests':
-      'signature-requests.e2e-spec.ts',
-    'POST /patients/:patientId/signature-requests/:id/revoke':
-      'signature-requests.e2e-spec.ts',
-    'POST /patients/:patientId/consents/:id/countersign':
-      'signature-requests.e2e-spec.ts',
-    // DX-422: reintentar el PDF firmado de A desde la clínica B → 404.
-    'POST /patients/:patientId/consents/:id/signed-pdf/retry':
-      'signature-requests.e2e-spec.ts',
-    // DX-443: reenviar la copia del PDF firmado de A desde la clínica B → 404.
-    'POST /patients/:patientId/consents/:id/signed-pdf/copy':
-      'signature-requests.e2e-spec.ts',
-    // DX-375: el ADMIN de otra clínica corrige la tasa manual de A → 404.
-    'PUT /exchange/manual-rates/:id':
-      'payment-frozen-exchange-rate.e2e-spec.ts',
-  };
+  const COVERED_ELSEWHERE: readonly IsolationExemption[] = [
+    {
+      spec: 'anesthesia.e2e-spec.ts',
+      checks:
+        'B → 404 en la ficha del paciente de A; y en sentido inverso, A → 404 al leer la anestesia de la evolución de B, al registrar con la evolución de B y al editar el anestésico de B',
+      routes: [
+        'GET /patients/:patientId/anesthesia',
+        'GET /patients/:patientId/clinical-entries/:entryId/anesthesia',
+        'POST /patients/:patientId/clinical-entries/:entryId/anesthesia',
+        'PATCH /anesthetics/:id',
+      ],
+    },
+    {
+      spec: 'anesthesia.e2e-spec.ts',
+      checks:
+        'B → 404 «Paciente no encontrado» al previsualizar la dosis en la evolución de A con su propio anestésico, sin resumen, y ni los registros ni la auditoría del paciente de A cambian (DX-451)',
+      routes: [
+        'POST /patients/:patientId/clinical-entries/:entryId/anesthesia/check',
+      ],
+    },
+    {
+      spec: 'sedation.e2e-spec.ts',
+      checks:
+        'B → 404 al leer y abrir la hoja de A, añadirle constantes y leer la ficha del paciente de A',
+      routes: [
+        'GET /patients/:patientId/sedation',
+        'GET /patients/:patientId/clinical-entries/:entryId/sedation',
+        'POST /patients/:patientId/clinical-entries/:entryId/sedation',
+        'POST /patients/:patientId/clinical-entries/:entryId/sedation/vitals',
+      ],
+    },
+    {
+      spec: 'sedation.e2e-spec.ts',
+      checks:
+        'B → 404 «Paciente no encontrado» con un cuerpo válido sobre la hoja ABIERTA de A (sin checklist, y luego con él), y la hoja, la auditoría del paciente de A y las hojas de B no cambian (DX-451)',
+      routes: [
+        'POST /patients/:patientId/clinical-entries/:entryId/sedation/checklist',
+        'POST /patients/:patientId/clinical-entries/:entryId/sedation/agents',
+        'POST /patients/:patientId/clinical-entries/:entryId/sedation/discharge',
+      ],
+    },
+    {
+      spec: 'payment-methods.e2e-spec.ts',
+      checks: 'B → 404 al editar (desactivar) el medio de pago de A (DX-377)',
+      routes: ['PATCH /payment-methods/:id'],
+    },
+    {
+      spec: 'reminder-opt-out.e2e-spec.ts',
+      checks:
+        'B → 404 al consultar los avisos del paciente de A y no se añade ningún evento VIEW a la auditoría de A (DX-214)',
+      routes: ['GET /patients/:id/communication/opt-out-warnings'],
+    },
+    {
+      // Los casos de aquí (cita y plantilla de A) van sobre el paciente de B
+      // y prueban los ids del cuerpo (DX-207).
+      spec: 'patient-tenant-fk.e2e-spec.ts',
+      checks:
+        'B → 404 «Paciente no encontrado» con el paciente de la otra clínica y nada insertado (lo prueba A sobre el paciente de B)',
+      routes: [
+        'POST /patients/:patientId/clinical-entries',
+        'POST /patients/:patientId/treatment-plans',
+        'PUT /patients/:patientId/medical-history',
+        'POST /patients/:patientId/tooth-records',
+      ],
+    },
+    {
+      spec: 'plan-visits.e2e-spec.ts',
+      checks:
+        'B → 404 en GET y PATCH de las visitas del plan de A, con plan, ítems, intervalos, aceptación y hash del presupuesto de A sin cambios (DX-256)',
+      routes: [
+        'GET /treatment-plans/:id/visits',
+        'PATCH /treatment-plans/:id/visits',
+      ],
+    },
+    {
+      spec: 'odontogram-dentition.e2e-spec.ts',
+      checks:
+        'B → 404 al ver o cambiar la dentición del paciente de A (sin escribir eventos) y al anular su registro (DX-120)',
+      routes: [
+        'POST /patients/:patientId/tooth-records/:recordId/void',
+        'GET /patients/:patientId/dentition',
+        'POST /patients/:patientId/dentition-events',
+      ],
+    },
+    {
+      spec: 'clinical-entry-addenda.e2e-spec.ts',
+      checks:
+        'B → 404 al listar las adendas de la evolución de A; A → 404 al añadir una adenda en la evolución de B, sin crear nada',
+      routes: [
+        'POST /patients/:patientId/clinical-entries/:entryId/addenda',
+        'GET /patients/:patientId/clinical-entries/:entryId/addenda',
+      ],
+    },
+    {
+      spec: 'perio-exams.e2e-spec.ts',
+      checks:
+        'B → 404 al listar, crear, leer, medir, finalizar y borrar exámenes del paciente de A, y B no tiene ningún examen',
+      routes: [
+        'GET /patients/:patientId/perio-exams',
+        'POST /patients/:patientId/perio-exams',
+        'GET /patients/:patientId/perio-exams/:id',
+        'PUT /patients/:patientId/perio-exams/:id/measures',
+        'POST /patients/:patientId/perio-exams/:id/finalize',
+        'DELETE /patients/:patientId/perio-exams/:id',
+      ],
+    },
+    {
+      spec: 'patient-consents.e2e-spec.ts',
+      checks:
+        'B → 404 al listar, leer, previsualizar y firmar consentimientos del paciente de A, y B no guarda ninguno',
+      routes: [
+        'GET /patients/:patientId/consents',
+        'GET /patients/:patientId/consents/preview',
+        'POST /patients/:patientId/consents',
+        'GET /patients/:patientId/consents/:id',
+      ],
+    },
+    {
+      spec: 'data-consents.e2e-spec.ts',
+      checks:
+        'B → 404 al registrar autorizaciones del paciente de A con su propia política, y A sigue con una sola',
+      routes: ['POST /patients/:patientId/data-consents'],
+    },
+    {
+      spec: 'prescriptions.e2e-spec.ts',
+      checks:
+        'B → 404 al listar y emitir recetas del paciente de A, leer y anular su receta y previsualizar avisos (DX-300)',
+      routes: [
+        'GET /patients/:patientId/prescriptions',
+        'POST /patients/:patientId/prescriptions',
+        'POST /patients/:patientId/prescriptions/safety-check',
+        'GET /prescriptions/:id',
+        'POST /prescriptions/:id/void',
+      ],
+    },
+    {
+      spec: 'implants.e2e-spec.ts',
+      checks:
+        'B → 404 sobre el paciente y el implante de A (lista, alta, tarjeta, impresión y anulación) y el implante sigue sin anular (DX-191)',
+      routes: [
+        'GET /patients/:patientId/implants',
+        'POST /patients/:patientId/implants',
+        'GET /patients/:patientId/implant-card',
+        'POST /patients/:patientId/implant-card/print',
+        'POST /implants/:id/void',
+      ],
+    },
+    {
+      spec: 'patient-imports.e2e-spec.ts',
+      checks:
+        'B → 404 al ver, confirmar, deshacer y descargar los errores del lote de A, y no lo lista (DX-107)',
+      routes: [
+        'GET /patient-imports/:id',
+        'GET /patient-imports/:id/errors.csv',
+        'POST /patient-imports/:id/confirm',
+        'POST /patient-imports/:id/undo',
+      ],
+    },
+    {
+      spec: 'opening-balances.e2e-spec.ts',
+      checks:
+        'B → 404 al abonar al saldo migrado de A y en la hoja de saldos de su lote: subirla, quitarla (sigue ahí), deshacerla y descargar sus errores (DX-262, DX-451)',
+      routes: [
+        'POST /opening-balances/:id/payments',
+        'POST /patient-imports/:id/balances',
+        'DELETE /patient-imports/:id/balances',
+        'POST /patient-imports/:id/balances/undo',
+        'GET /patient-imports/:id/balances/errors.csv',
+      ],
+    },
+    {
+      spec: 'split-payments.e2e-spec.ts',
+      checks:
+        'B → 404 al cobrar dividido en el plan de A, y no ve su recibo (DX-390)',
+      routes: ['POST /treatment-plans/:id/split-payments'],
+    },
+    {
+      spec: 'patient-credit.e2e-spec.ts',
+      checks:
+        'B → 404 sobre el plan, el comprobante y el paciente de A: traslado, devolución, comprobante y movimientos (DX-253)',
+      routes: [
+        'POST /treatment-plans/:id/credit-transfers',
+        'POST /treatment-plans/:id/credit-refunds',
+        'GET /credit-refunds/:id',
+        'GET /patients/:id/credit-movements',
+      ],
+    },
+    {
+      spec: 'patient-documents.e2e-spec.ts',
+      checks:
+        'B → 404 en lista, detalle, URL, subida y anulación del documento de A, sin filas ni objetos nuevos y sin cambios en A (DX-151)',
+      routes: [
+        'POST /patients/:patientId/documents',
+        'GET /patients/:patientId/documents',
+        'GET /patients/:patientId/documents/:id',
+        'GET /patients/:patientId/documents/:id/url/inline',
+        'GET /patients/:patientId/documents/:id/url/download',
+        'POST /patients/:patientId/documents/:id/void',
+      ],
+    },
+    {
+      spec: 'patient-documents-direct-disk.e2e-spec.ts',
+      checks:
+        'B → 404 en upload-url y complete del paciente o del documento de A, y el de A sigue pendiente',
+      routes: [
+        'POST /patients/:patientId/documents/upload-url',
+        'POST /patients/:patientId/documents/:id/complete',
+      ],
+    },
+    {
+      spec: 'account-statement.e2e-spec.ts',
+      checks:
+        'B → 404 en el estado de cuenta del paciente de A, igual que un UUID inexistente',
+      routes: ['GET /patients/:patientId/account-statement'],
+    },
+    {
+      spec: 'patient-responsible-parties.e2e-spec.ts',
+      checks:
+        'B → 404 en el estado de cuenta familiar del pagador de A (DX-203)',
+      routes: ['GET /patients/:patientId/family-account-statement'],
+    },
+    {
+      spec: 'billable-plans.e2e-spec.ts',
+      checks:
+        'B → 404 en los planes cobrables del paciente de A, igual que un UUID inexistente',
+      routes: ['GET /patients/:patientId/billable-plans'],
+    },
+    {
+      spec: 'medical-history-submissions.e2e-spec.ts',
+      checks:
+        'B → 404 sobre el paciente y el envío de A (lista, alta, detalle, aceptar, rechazar y anular) sin tocar el envío de A (DX-099)',
+      routes: [
+        'POST /patients/:patientId/medical-history/requests',
+        'GET /patients/:patientId/medical-history/requests',
+        'GET /medical-history/submissions/:id',
+        'POST /medical-history/submissions/:id/accept',
+        'POST /medical-history/submissions/:id/reject',
+        'POST /medical-history/submissions/:id/revoke',
+      ],
+    },
+    {
+      spec: 'signature-requests.e2e-spec.ts',
+      checks:
+        'B → 404 sobre el paciente, la solicitud y el consentimiento de A (opciones, lista, enviar, anular y firma del profesional) sin tocar la solicitud de A (DX-243)',
+      routes: [
+        'GET /patients/:patientId/signature-requests/options',
+        'GET /patients/:patientId/signature-requests',
+        'POST /patients/:patientId/signature-requests',
+        'POST /patients/:patientId/signature-requests/:id/revoke',
+        'POST /patients/:patientId/consents/:id/countersign',
+      ],
+    },
+    {
+      spec: 'signature-requests.e2e-spec.ts',
+      checks:
+        'B → 404 al reintentar el PDF firmado de A (DX-422) y al reenviar su copia (DX-443)',
+      routes: [
+        'POST /patients/:patientId/consents/:id/signed-pdf/retry',
+        'POST /patients/:patientId/consents/:id/signed-pdf/copy',
+      ],
+    },
+    {
+      spec: 'payment-frozen-exchange-rate.e2e-spec.ts',
+      checks: 'B → 404 al corregir la tasa manual sin usar de A (DX-375)',
+      routes: ['PUT /exchange/manual-rates/:id'],
+    },
+  ];
 
   /** `MÉTODO /ruta` de un caso (las dos primeras palabras de su nombre). */
   const routeOf = (c: IsolationCase): string =>
@@ -3373,14 +3508,13 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     const covered = new Set(
       cases.filter((c) => !c.queryIds && !c.bodyIds && !c.public).map(routeOf),
     );
+    const exempt = exemptedRoutes(COVERED_ELSEWHERE);
     const byId = Object.entries(ROUTE_ACCESS)
       .filter(([key, access]) => access.kind === 'roles' && key.includes('/:'))
       .map(([key]) => key);
     expect({
-      sinCubrir: byId.filter(
-        (k) => !covered.has(k) && !(k in COVERED_ELSEWHERE),
-      ),
-      exencionSobrante: Object.keys(COVERED_ELSEWHERE).filter(
+      sinCubrir: byId.filter((k) => !covered.has(k) && !exempt.includes(k)),
+      exencionSobrante: exempt.filter(
         (k) => covered.has(k) || !byId.includes(k),
       ),
     }).toEqual({ sinCubrir: [], exencionSobrante: [] });
@@ -3388,41 +3522,86 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
 
   /**
    * DX-207: rutas públicas por `:token` cuyo caso «token de A en el host de
-   * B → 404 sin tocar nada de A» ya está en otro spec.
+   * B → 404 sin tocar nada de A» ya está en otro spec (mismas reglas que
+   * `COVERED_ELSEWHERE`).
    */
-  const PUBLIC_TOKEN_COVERED_ELSEWHERE: Record<string, string> = {
-    // «en el host de otra clínica, o con un token inventado, 404» y la baja
-    // de A sigue sin registrar.
-    'GET /public/reminder-opt-outs/:token': 'reminder-opt-out.e2e-spec.ts',
-    'POST /public/reminder-opt-outs/:token': 'reminder-opt-out.e2e-spec.ts',
-    // «el token de A en el host de B → 404» y la apertura sigue sin marcar.
-    'GET /public/post-op-instructions/:token':
-      'public-post-op-instructions.e2e-spec.ts',
-    'POST /public/post-op-instructions/:token/opened':
-      'public-post-op-instructions.e2e-spec.ts',
-    // DX-243: «el token de A en el host de B → Enlace no válido» en las cinco
-    // rutas, sin abrir, enviar código, verificar ni firmar nada de A.
-    // DX-435: «el token de A en el contexto de B → 404» en ver, aceptar y
-    // rechazar la oferta de hueco, sin crear cita ni cambiar la oferta de A.
-    'GET /public/slot-offers/:token': 'slot-offers.int-spec.ts',
-    'POST /public/slot-offers/:token/accept': 'slot-offers.int-spec.ts',
-    'POST /public/slot-offers/:token/decline': 'slot-offers.int-spec.ts',
-    // DX-443: el enlace de la copia desde el host de otra clínica → 404.
-    'GET /public/signed-consent-copies/:token':
-      'signature-requests.e2e-spec.ts',
-    'POST /public/signed-consent-copies/:token/download':
-      'signature-requests.e2e-spec.ts',
-    'GET /public/sign/:token': 'signature-requests.e2e-spec.ts',
-    'POST /public/sign/:token/code': 'signature-requests.e2e-spec.ts',
-    'POST /public/sign/:token/verify': 'signature-requests.e2e-spec.ts',
-    'GET /public/sign/:token/document': 'signature-requests.e2e-spec.ts',
-    'POST /public/sign/:token/sign': 'signature-requests.e2e-spec.ts',
-    // «el token de A en el host de B → 404» (GET y POST del formulario).
-    'GET /public/medical-history/:token':
-      'medical-history-submissions.e2e-spec.ts',
-    'POST /public/medical-history/:token':
-      'medical-history-submissions.e2e-spec.ts',
-  };
+  const PUBLIC_TOKEN_COVERED_ELSEWHERE: readonly IsolationExemption[] = [
+    {
+      spec: 'reminder-opt-out.e2e-spec.ts',
+      checks:
+        'B → 404 con el token de A en su host, igual que uno inventado, y la baja de A sigue sin registrar',
+      routes: [
+        'GET /public/reminder-opt-outs/:token',
+        'POST /public/reminder-opt-outs/:token',
+      ],
+    },
+    {
+      spec: 'public-post-op-instructions.e2e-spec.ts',
+      checks:
+        'B → 404 con el token de A en su host, igual que uno inventado, y la apertura sigue sin marcar',
+      routes: [
+        'GET /public/post-op-instructions/:token',
+        'POST /public/post-op-instructions/:token/opened',
+      ],
+    },
+    {
+      // Prueba de integración: los casos de uso con el contexto de B.
+      spec: 'slot-offers.int-spec.ts',
+      checks:
+        'B → 404 con el token de A al ver, aceptar y rechazar la oferta de hueco, sin crear cita ni cambiar la oferta de A (DX-435)',
+      routes: [
+        'GET /public/slot-offers/:token',
+        'POST /public/slot-offers/:token/accept',
+        'POST /public/slot-offers/:token/decline',
+      ],
+    },
+    {
+      spec: 'signature-requests.e2e-spec.ts',
+      checks:
+        'B → 404 con el enlace de la copia del PDF firmado de A en su host, al abrirlo y al descargarlo (DX-443)',
+      routes: [
+        'GET /public/signed-consent-copies/:token',
+        'POST /public/signed-consent-copies/:token/download',
+      ],
+    },
+    {
+      spec: 'signature-requests.e2e-spec.ts',
+      checks:
+        'B → 404 «Enlace no válido» con el token de A en las cinco rutas, sin abrir, enviar código, verificar ni firmar nada de A (DX-243)',
+      routes: [
+        'GET /public/sign/:token',
+        'POST /public/sign/:token/code',
+        'POST /public/sign/:token/verify',
+        'GET /public/sign/:token/document',
+        'POST /public/sign/:token/sign',
+      ],
+    },
+    {
+      spec: 'medical-history-submissions.e2e-spec.ts',
+      checks:
+        'B → 404 con el token de A en su host al abrir y al enviar el formulario (DX-099)',
+      routes: [
+        'GET /public/medical-history/:token',
+        'POST /public/medical-history/:token',
+      ],
+    },
+  ];
+
+  it('DX-451: cada exención cita un spec que existe, declara la ruta y la ataca, y dice qué comprueba («B → …»)', () => {
+    const all = [...COVERED_ELSEWHERE, ...PUBLIC_TOKEN_COVERED_ELSEWHERE];
+    console.info(
+      `Exenciones de la matriz de aislamiento: ${exemptedRoutes(all).length} (${exemptedRoutes(COVERED_ELSEWHERE).length} con sesión + ${exemptedRoutes(PUBLIC_TOKEN_COVERED_ELSEWHERE).length} públicas por token)`,
+    );
+    expect(exemptionProblems(all, readTestSpec(__dirname))).toEqual({
+      duplicada: [],
+      sinComentarioB: [],
+      specInexistente: [],
+      sinMarcador: [],
+      marcadorSinTest: [],
+      specSinRuta: [],
+      marcadorHuerfano: [],
+    });
+  });
 
   it('DX-207: cada id por query/cuerpo de la lista de la matriz tiene su caso, y ningún caso sobra', () => {
     const fromCases = cases.flatMap((c) => [
@@ -3438,7 +3617,7 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     expect(TENANT_ISOLATION_MATRIX_SPEC).toBe(path.basename(__filename));
   });
 
-  it('DX-207: cada ruta pública por :token tiene su caso «token de A en el host de B» (aquí o en el spec citado)', async () => {
+  it('DX-207: cada ruta pública por :token tiene su caso «token de A en el host de B» (aquí o en el spec citado)', () => {
     const byToken = Object.entries(ROUTE_ACCESS)
       .filter(
         ([key, access]) =>
@@ -3448,19 +3627,13 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       )
       .map(([key]) => key);
     const covered = new Set(cases.filter((c) => c.public).map(routeOf));
+    const exempt = exemptedRoutes(PUBLIC_TOKEN_COVERED_ELSEWHERE);
     expect({
-      sinCubrir: byToken.filter(
-        (k) => !covered.has(k) && !(k in PUBLIC_TOKEN_COVERED_ELSEWHERE),
-      ),
-      exencionSobrante: Object.keys(PUBLIC_TOKEN_COVERED_ELSEWHERE).filter(
+      sinCubrir: byToken.filter((k) => !covered.has(k) && !exempt.includes(k)),
+      exencionSobrante: exempt.filter(
         (k) => covered.has(k) || !byToken.includes(k),
       ),
     }).toEqual({ sinCubrir: [], exencionSobrante: [] });
-    for (const spec of new Set(Object.values(PUBLIC_TOKEN_COVERED_ELSEWHERE))) {
-      await expect(
-        fs.access(path.join(__dirname, spec)),
-      ).resolves.toBeUndefined();
-    }
   });
 
   it.each(cases.map((c) => [c.name, c] as const))(

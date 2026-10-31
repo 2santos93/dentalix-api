@@ -242,6 +242,7 @@ describe('Anestesia local en la evolución (DX-307, e2e)', () => {
       await call(a, 'get', '/anesthetics', receptionA).expect(403);
     });
 
+    // ISOLATION_COVERS: PATCH /anesthetics/:id
     it('un anestésico de otra clínica es 404', async () => {
       await call(a, 'patch', `/anesthetics/${catalogB[0].id}`, a.adminToken)
         .send({ maxMgPerKg: 4.4 })
@@ -499,6 +500,9 @@ describe('Anestesia local en la evolución (DX-307, e2e)', () => {
         .expect(404);
     });
 
+    // ISOLATION_COVERS: GET /patients/:patientId/anesthesia
+    // ISOLATION_COVERS: GET /patients/:patientId/clinical-entries/:entryId/anesthesia
+    // ISOLATION_COVERS: POST /patients/:patientId/clinical-entries/:entryId/anesthesia
     it('paciente o evolución de otra clínica, o evolución de otro paciente: 404', async () => {
       await call(a, 'get', anesthesia(patientB, entryB), dentistA.token).expect(
         404,
@@ -515,6 +519,37 @@ describe('Anestesia local en la evolución (DX-307, e2e)', () => {
         `/patients/${child}/anesthesia`,
         b.adminToken,
       ).expect(404);
+    });
+
+    // DX-451: la previsualización no guarda, pero lee la anamnesis de A (peso,
+    // edad, alergias) y su acumulado; B manda su propio anestésico para que
+    // el 404 solo pueda venir del paciente o la evolución de A.
+    // ISOLATION_COVERS: POST /patients/:patientId/clinical-entries/:entryId/anesthesia/check
+    it('la clínica B no previsualiza la dosis en la evolución de A: 404 sin datos de A y nada de A cambia', async () => {
+      const snapshot = async () => ({
+        records: await raw.anesthesiaAdministration.findMany({
+          where: { tenantId: a.tenantId },
+          orderBy: { id: 'asc' },
+        }),
+        audit: await raw.auditEvent.count({ where: { patientId: child } }),
+      });
+      const before = await snapshot();
+      const res = await call(
+        b,
+        'post',
+        `${anesthesia(child, childEntry)}/check`,
+        b.adminToken,
+      )
+        .send({
+          anestheticId: byCode(catalogB, 'LIDOCAINE_2_EPI').id,
+          carpules: 1,
+        })
+        .expect(404);
+      expect((res.body as { message: string }).message).toBe(
+        'Paciente no encontrado',
+      );
+      expect(res.body).not.toHaveProperty('summary');
+      expect(await snapshot()).toEqual(before);
     });
 
     it('un odontólogo restringido a otra sede: 403 en la evolución y no la ve en la ficha', async () => {
