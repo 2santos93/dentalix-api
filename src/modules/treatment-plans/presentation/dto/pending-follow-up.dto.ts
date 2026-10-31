@@ -30,7 +30,8 @@ export class PendingFollowUpCountQueryDto {
 
 export class PendingFollowUpCountDto {
   @ApiProperty({
-    description: 'Planes por seguir con esos filtros (todas las páginas)',
+    description:
+      'Presupuestos por seguir con esos filtros (todas las páginas), contando las opciones A/B de un plan como uno solo',
   })
   total!: number;
 }
@@ -127,10 +128,17 @@ export class PendingFollowUpItemDto {
 }
 
 export class PendingFollowUpPageDto {
-  @ApiProperty({ type: [PendingFollowUpItemDto] })
+  @ApiProperty({
+    type: [PendingFollowUpItemDto],
+    description:
+      'Las opciones de los grupos de esta página: las de un mismo grupo (`optionGroupId`) salen seguidas y nunca se parten entre páginas',
+  })
   items!: PendingFollowUpItemDto[];
 
-  @ApiProperty()
+  @ApiProperty({
+    description:
+      'Grupos por seguir (un plan suelto es su propio grupo): lo que se pagina con page/pageSize',
+  })
   total!: number;
 
   @ApiProperty()

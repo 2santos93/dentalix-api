@@ -625,6 +625,50 @@ describe('Alternativas de plan y presupuestos por seguir (e2e, DX-040)', () => {
       expect(still.status).toBe('PRESENTED');
     });
 
+    it('D2: pagina por grupo de opciones (A/B juntas, nunca partidas) y total = grupos', async () => {
+      const groupPatient = await patient(clinicA, 'Opciones');
+      const optionA = await planWithItem(
+        clinicA,
+        groupPatient,
+        catalogA,
+        5300000,
+      );
+      const alt = await as(clinicA)
+        .post(`/treatment-plans/${optionA}/alternatives`, {})
+        .expect(201);
+      const optionB = (alt.body as Plan).id;
+      // A, la más antigua de toda la lista; B, presentada después que `due`.
+      await presentDaysAgo(optionA, 30, mainLocationA);
+      await presentDaysAgo(optionB, 8, mainLocationA);
+      try {
+        const page1 = await as(clinicA, tokens.RECEPTION)
+          .get('/treatment-plans/pending-follow-up?page=1&pageSize=1')
+          .expect(200);
+        const body = page1.body as FollowUpPage;
+        // Las dos opciones en la MISMA página aunque pageSize = 1.
+        expect(body.items.map((i) => i.planId)).toEqual([optionA, optionB]);
+        expect(body.total).toBe(3);
+        const all = await as(clinicA, tokens.RECEPTION)
+          .get('/treatment-plans/pending-follow-up')
+          .expect(200);
+        expect((all.body as FollowUpPage).items.map((i) => i.planId)).toEqual([
+          optionA,
+          optionB,
+          dueNorth,
+          due,
+        ]);
+        const count = await as(clinicA, tokens.RECEPTION)
+          .get('/treatment-plans/pending-follow-up/count')
+          .expect(200);
+        expect(count.body).toEqual({ total: 3 });
+      } finally {
+        await raw.treatmentPlan.updateMany({
+          where: { id: { in: [optionA, optionB] } },
+          data: { status: 'CANCELLED' },
+        });
+      }
+    });
+
     it('al rechazarlo desde la lista, sale de ella', async () => {
       await as(clinicA, tokens.RECEPTION)
         .post(`/treatment-plans/${due}/reject`, { reason: 'PRICE' })

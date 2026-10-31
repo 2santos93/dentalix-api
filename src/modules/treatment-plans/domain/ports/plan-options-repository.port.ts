@@ -73,6 +73,10 @@ export interface PlanOptionsRepository {
    * cita futura agendada o confirmada, de los más antiguos a los más nuevos.
    * Bajo la RLS de la clínica y, si el request trae sede, solo los presentados
    * en esa sede (vista consolidada: todas).
+   *
+   * D2: pagina por GRUPO de opciones (`optionGroupId`, o el propio plan si es
+   * suelto): las opciones de un grupo salen juntas y en la misma página, el
+   * grupo ordenado por su presentación más antigua. `total` = grupos.
    */
   listPendingFollowUp(
     query: PendingFollowUpQuery,
