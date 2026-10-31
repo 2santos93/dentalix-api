@@ -46,6 +46,8 @@ export class PrismaSignedPdfCopyRepository
           id: consentId,
           ...(patientId ? { patientId } : {}),
           signatureRequestId: { not: null },
+          // A un paciente dado de baja (borrado lógico) no se le escribe.
+          patient: { deletedAt: null },
         },
         select: {
           id: true,
@@ -95,6 +97,15 @@ export class PrismaSignedPdfCopyRepository
   async issueLink(input: IssueSignedPdfCopyLinkInput): Promise<{ id: string }> {
     const tenantId = this.tenantId();
     return this.prisma.runWithTenant(async (tx) => {
+      // Serializa los envíos del mismo consentimiento (dos «Reenviar copia»
+      // a la vez, o uno con el envío automático): sin este bloqueo, los dos
+      // invalidan el mismo enlace y el segundo INSERT choca con el índice
+      // parcial (500). Con él, el segundo espera y ve el enlace del primero.
+      await tx.$executeRaw`
+        SELECT 1 FROM "signed_consent_pdfs"
+        WHERE "consentId" = ${input.consentId}::uuid
+          AND "patientId" = ${input.patientId}::uuid
+        FOR UPDATE`;
       // El anterior deja de servir en la MISMA transacción (y el índice
       // parcial signed_consent_pdf_links_live_key impide dos vivos).
       await tx.signedConsentPdfLink.updateMany({

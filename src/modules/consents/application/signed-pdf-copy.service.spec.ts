@@ -2,8 +2,10 @@ import {
   ConflictException,
   GoneException,
   HttpException,
+  ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
+import { locationNotAllowed } from '../../../shared/tenancy/location-access';
 import type { Prisma } from '@prisma/client';
 import type { AuditRequestMeta } from '../../audit/domain/audit-request-context';
 import type {
@@ -101,7 +103,13 @@ class FakeRepo implements SignedPdfCopyRepository {
   }
 }
 
-function setup(opts: { base?: string | null; tenantId?: string | null } = {}) {
+function setup(
+  opts: {
+    base?: string | null;
+    tenantId?: string | null;
+    allowedLocations?: string[];
+  } = {},
+) {
   const repo = new FakeRepo();
   const emails: {
     to: string;
@@ -132,7 +140,15 @@ function setup(opts: { base?: string | null; tenantId?: string | null } = {}) {
     },
   };
   const tenantId = opts.tenantId === undefined ? 't1' : opts.tenantId;
-  const tenantContext = { getTenantId: () => tenantId ?? undefined };
+  const allowedLocations = opts.allowedLocations;
+  const tenantContext = {
+    getTenantId: () => tenantId ?? undefined,
+    assertLocationAllowed: (locationId: string) => {
+      if (allowedLocations && !allowedLocations.includes(locationId)) {
+        throw locationNotAllowed();
+      }
+    },
+  };
   const config = { ttlHours: 48 };
   const clock = () => NOW;
   const sender = new SignedPdfCopySender(
@@ -158,7 +174,7 @@ function setup(opts: { base?: string | null; tenantId?: string | null } = {}) {
     linkBaseCalls,
     signedUrls,
     job: new SendSignedPdfCopyJob(repo, sender),
-    resend: new ResendSignedPdfCopyUseCase(repo, sender, email),
+    resend: new ResendSignedPdfCopyUseCase(repo, sender, email, tenantContext),
     get: new GetPublicSignedPdfCopyUseCase(repo, tenantContext, clock),
     download: new DownloadSignedPdfCopyUseCase(
       repo,
@@ -280,6 +296,16 @@ describe('copia del PDF firmado al paciente (DX-443)', () => {
         NotFoundException,
       );
       expect(ctx.repo.issued).toEqual([]);
+    });
+
+    it('403 si el envío es de una sede no permitida al usuario (SEC-045)', async () => {
+      const ctx = setup({ allowedLocations: ['loc-2'] });
+      await expect(ctx.resend.execute('p1', uuid, 'u1')).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+      expect(ctx.quotaChecks).toEqual([]);
+      expect(ctx.repo.issued).toEqual([]);
+      expect(ctx.emails).toEqual([]);
     });
 
     it('409 si el PDF aún no está archivado', async () => {

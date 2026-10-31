@@ -255,7 +255,8 @@ export interface SignedPdfCopyResent {
 /**
  * «Reenviar copia» desde la ficha: enlace nuevo (el anterior deja de servir
  * en la misma transacción) y email. 404 si el consentimiento no es de este
- * paciente en esta clínica; 409 si el PDF no está archivado; 429 con el tope
+ * paciente en esta clínica; 403 si su envío es de una sede no permitida al
+ * usuario; 409 si el PDF no está archivado; 429 con el tope
  * del outbox ANTES de tocar nada.
  */
 @Injectable()
@@ -267,6 +268,11 @@ export class ResendSignedPdfCopyUseCase {
     private readonly sender: Pick<SignedPdfCopySender, 'send'>,
     @Inject(SIGNED_PDF_COPY_EMAIL_SENDER)
     private readonly email: Pick<SignedPdfCopyEmailSender, 'assertCanSend'>,
+    @Inject(TenantContextService)
+    private readonly tenantContext: Pick<
+      TenantContextService,
+      'assertLocationAllowed'
+    >,
   ) {}
 
   async execute(
@@ -277,6 +283,9 @@ export class ResendSignedPdfCopyUseCase {
   ): Promise<SignedPdfCopyResent> {
     const target = await this.repo.loadTarget(consentId, patientId);
     if (!target) throw new NotFoundException(CONSENT_NOT_FOUND_MESSAGE);
+    // SEC-045: un envío hecho desde una sede no permitida al usuario es 403,
+    // como revocar la solicitud de firma (antes de mirar el estado del PDF).
+    this.tenantContext.assertLocationAllowed(target.location.id);
     if (!target.ready) {
       throw new ConflictException(SIGNED_PDF_COPY_NOT_READY_MESSAGE);
     }
