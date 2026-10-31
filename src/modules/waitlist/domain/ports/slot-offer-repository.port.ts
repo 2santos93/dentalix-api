@@ -19,6 +19,8 @@ export interface PublicSlotOffer {
   appointmentId: string | null;
   outcome: WaitlistOfferOutcome;
   expiresAt: Date | null;
+  /** Cuándo se creó: para saber si otra oferta ganó el hueco después. */
+  createdAt: Date;
   slotStart: Date;
   /** Cuándo terminaría la cita del candidato si acepta (su duración, no el hueco entero). */
   appointmentEnd: Date;
@@ -70,6 +72,14 @@ export interface SlotOfferRepository {
     now: Date,
     meta: AuditRequestMeta,
   ): Promise<SlotOfferResolution>;
+  /** Clínicas vivas (el barrido de caducadas las recorre todas). */
+  tenantIds(): Promise<string[]>;
+  /**
+   * Barrido: pasa a EXPIRED (auditado, SLOT_OFFER_EXPIRED) hasta `limit`
+   * ofertas con enlace PENDING de la clínica cuyo `expiresAt` ya pasó.
+   * Devuelve cuántas cambió.
+   */
+  expireDue(tenantId: string, now: Date, limit: number): Promise<number>;
   /** Rechaza si sigue pendiente y vigente (si caducó, la marca EXPIRED). */
   decline(
     offer: PublicSlotOffer,

@@ -23,6 +23,8 @@ export class InMemoryOpeningCandidatesRepository implements OpeningCandidatesRep
   readonly offers: WaitlistOffer[] = [];
   /** DX-435: hash del token de cada oferta con enlace (nunca el texto plano). */
   readonly tokenHashes = new Map<string, string>();
+  /** Citas vivas de los profesionales (para «hueco ya ocupado»). */
+  readonly busy: { providerId: string; start: Date; end: Date }[] = [];
   private seq = 1;
 
   addPatient(
@@ -171,6 +173,14 @@ export class InMemoryOpeningCandidatesRepository implements OpeningCandidatesRep
 
   findOffer(id: string): Promise<WaitlistOffer | null> {
     return Promise.resolve(this.offers.find((o) => o.id === id) ?? null);
+  }
+
+  providerBusy(providerId: string, start: Date, end: Date): Promise<boolean> {
+    return Promise.resolve(
+      this.busy.some(
+        (b) => b.providerId === providerId && b.start < end && b.end > start,
+      ),
+    );
   }
 
   linkOffersForSlot(params: {

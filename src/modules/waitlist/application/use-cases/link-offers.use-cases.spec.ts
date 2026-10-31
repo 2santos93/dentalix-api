@@ -1,4 +1,8 @@
-import { ConflictException, BadRequestException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { CreateWaitlistOfferUseCase } from './opening-candidates.use-cases';
 import { CreateLinkOfferUseCase } from './link-offers.use-cases';
 import { InMemoryOpeningCandidatesRepository } from '../__fixtures__/in-memory-opening-candidates';
@@ -12,6 +16,8 @@ import type { SlotOfferEmailSender } from '../slot-offer-email';
 import type { SlotOfferRepository } from '../../domain/ports/slot-offer-repository.port';
 import type { SlotOfferEmailVars } from '../../../notifications/email/domain/email-message';
 import {
+  LINK_OFFER_EMAIL_FAILED_MESSAGE,
+  LINK_OFFER_SLOT_TAKEN_MESSAGE,
   LINK_OFFER_TOO_LATE_MESSAGE,
   OFFER_EMAIL_BLOCKED_MESSAGE,
   OFFER_EMAIL_MISSING_MESSAGE,
@@ -66,6 +72,7 @@ describe('«Enviar oferta con enlace» (DX-435)', () => {
   let sent: { to: string; referenceId: string; vars: SlotOfferEmailVars }[];
   let useCase: CreateLinkOfferUseCase;
   let leadMinutes: number;
+  let sendFails: boolean;
 
   const base = {
     locationId: 'loc1',
@@ -78,6 +85,7 @@ describe('«Enviar oferta con enlace» (DX-435)', () => {
   beforeEach(() => {
     now = local('2026-10-19', '08:00');
     leadMinutes = 0;
+    sendFails = false;
     repo = new InMemoryOpeningCandidatesRepository();
     repo.addPatient({ id: 'p1', firstName: 'Ana María', lastName: 'Pérez' });
     drafts = [];
@@ -85,6 +93,7 @@ describe('«Enviar oferta con enlace» (DX-435)', () => {
     const email: SlotOfferEmailSender = {
       assertCanSend: () => Promise.resolve(),
       send: (input) => {
+        if (sendFails) return Promise.reject(new Error('outbox caído'));
         sent.push(input);
         return Promise.resolve();
       },
@@ -111,6 +120,7 @@ describe('«Enviar oferta con enlace» (DX-435)', () => {
       staff,
       slotOffers,
       email,
+      audit,
       {
         get expiryLeadMinutes() {
           return leadMinutes;
@@ -220,5 +230,41 @@ describe('«Enviar oferta con enlace» (DX-435)', () => {
     await expect(
       create.execute({ ...base, channel: 'LINK_EMAIL' }, CTX),
     ).rejects.toThrow(BadRequestException);
+  });
+
+  it('si no se puede encolar el email, la oferta queda sin efecto (EXPIRED, auditada) y recepción ve el error', async () => {
+    sendFails = true;
+    await expect(
+      useCase.execute({ ...base, channel: 'LINK_EMAIL' }, LINK, CTX),
+    ).rejects.toThrow(
+      new ServiceUnavailableException(LINK_OFFER_EMAIL_FAILED_MESSAGE),
+    );
+    expect(repo.offers).toHaveLength(1);
+    expect(repo.offers[0]).toMatchObject({
+      outcome: 'EXPIRED',
+      outcomeById: 'u-rec',
+    });
+    expect(drafts.map((d) => d.metadata)).toEqual([
+      { reason: 'OFFER_LINK_EMAIL' },
+      { reason: 'OFFER_LINK_EMAIL_FAILED' },
+    ]);
+  });
+
+  it('sobre un hueco ya ocupado no se crea la oferta con enlace (409) ni gasta el tope', async () => {
+    repo.busy.push({
+      providerId: 'drx',
+      start: local('2026-10-20', '10:15'),
+      end: local('2026-10-20', '10:45'),
+    });
+    await expect(
+      useCase.execute({ ...base, channel: 'LINK_WA_ME' }, LINK, CTX),
+    ).rejects.toThrow(new ConflictException(LINK_OFFER_SLOT_TAKEN_MESSAGE));
+    expect(repo.offers).toHaveLength(0);
+    // Otro profesional u otra hora: sí.
+    repo.busy[0].end = local('2026-10-20', '10:00');
+    repo.busy[0].start = local('2026-10-20', '09:30');
+    await expect(
+      useCase.execute({ ...base, channel: 'LINK_WA_ME' }, LINK, CTX),
+    ).resolves.toMatchObject({ outcome: 'PENDING' });
   });
 });

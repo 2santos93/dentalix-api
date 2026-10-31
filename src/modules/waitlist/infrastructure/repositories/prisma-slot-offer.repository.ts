@@ -35,7 +35,8 @@ function offerAuditEvent(
     patientId: string;
   },
   reason: (typeof SLOT_OFFER_AUDIT_REASONS)[keyof typeof SLOT_OFFER_AUDIT_REASONS],
-  meta: AuditRequestMeta,
+  /** `null`: el evento no es de quien hizo la petición (otra oferta, el barrido). */
+  meta: AuditRequestMeta | null,
   byPatient: boolean,
 ): AuditEventDraft {
   return {
@@ -46,10 +47,51 @@ function offerAuditEvent(
     resourceType: 'WAITLIST_OFFER',
     resourceId: offer.id,
     patient: { kind: 'patient', id: offer.patientId },
+    requestId: meta?.requestId ?? null,
+    ip: meta?.ip ?? null,
+    userAgent: meta?.userAgent ?? null,
+    metadata: { origin: 'PUBLIC_LINK', reason },
+  };
+}
+
+type Slot = { start: Date; end: Date; providerId: string };
+const slotOf = (s: Slot) => ({
+  start: s.start.toISOString(),
+  end: s.end.toISOString(),
+  providerId: s.providerId,
+});
+
+/**
+ * La cita creada (CREATE) o adelantada (UPDATE, con la hora anterior y la
+ * nueva) desde el enlace: el paciente, origen PUBLIC_LINK.
+ */
+function appointmentAuditEvent(
+  offer: PublicSlotOffer,
+  appointmentId: string,
+  before: Slot | null,
+  meta: AuditRequestMeta,
+): AuditEventDraft {
+  const after: Slot = {
+    start: offer.slotStart,
+    end: offer.appointmentEnd,
+    providerId: offer.providerId,
+  };
+  return {
+    tenantId: offer.tenantId,
+    locationId: offer.locationId,
+    actor: { kind: 'patient' },
+    action: before ? 'UPDATE' : 'CREATE',
+    resourceType: 'APPOINTMENT',
+    resourceId: appointmentId,
+    patient: { kind: 'appointment', id: appointmentId },
     requestId: meta.requestId,
     ip: meta.ip,
     userAgent: meta.userAgent,
-    metadata: { origin: 'PUBLIC_LINK', reason },
+    metadata: {
+      origin: 'PUBLIC_LINK',
+      reason: SLOT_OFFER_AUDIT_REASONS.ACCEPTED,
+      ...(before ? { move: { from: slotOf(before), to: slotOf(after) } } : {}),
+    },
   };
 }
 
@@ -127,6 +169,7 @@ export class PrismaSlotOfferRepository implements SlotOfferRepository {
           appointmentId: row.appointmentId,
           outcome: row.outcome,
           expiresAt: row.expiresAt,
+          createdAt: row.createdAt,
           slotStart: row.slotStart,
           appointmentEnd: new Date(row.slotStart.getTime() + durationMs),
           patientFirstName: row.patient.firstName,
@@ -210,28 +253,42 @@ export class PrismaSlotOfferRepository implements SlotOfferRepository {
       }
       return { state, appointmentId: null };
     }
-    // ¿Ganó otra oferta del mismo hueco? (con el candado, ya está confirmada)
-    const winner = await tx.waitlistOffer.findFirst({
-      where: {
-        id: { not: offer.id },
-        providerId: offer.providerId,
-        outcome: 'ACCEPTED',
-        slotStart: { lt: offer.appointmentEnd },
-        slotEnd: { gt: offer.slotStart },
-      },
-      select: { id: true },
-    });
-    if (winner) {
-      await this.resolve(tx, offer, 'TAKEN_BY_OTHER', now, meta, false);
+    // Hueco ocupado (con el candado, ya es firme): «ya se ocupó» solo si lo
+    // ganó otra oferta con enlace DESPUÉS de crearse esta; una aceptación
+    // vieja cuya cita se canceló no cuenta, porque entonces el hueco no
+    // estaría ocupado. Si lo ocupó otra vía, «ya no está disponible».
+    if (await this.takenIn(tx, offer)) {
+      const winner = await tx.waitlistOffer.findFirst({
+        where: {
+          id: { not: offer.id },
+          locationId: offer.locationId,
+          providerId: offer.providerId,
+          channel: { in: ['LINK_WA_ME', 'LINK_EMAIL'] },
+          outcome: 'ACCEPTED',
+          outcomeAt: { gte: offer.createdAt },
+          slotStart: { lt: offer.appointmentEnd },
+          slotEnd: { gt: offer.slotStart },
+        },
+        select: { id: true },
+      });
+      if (!winner) return { state: 'UNAVAILABLE', appointmentId: null };
+      await this.resolve(tx, offer, 'TAKEN_BY_OTHER', now, null, false);
       return { state: 'TAKEN', appointmentId: null };
     }
-    if (await this.takenIn(tx, offer)) {
-      return { state: 'UNAVAILABLE', appointmentId: null };
-    }
 
+    const before = offer.appointmentId
+      ? await tx.appointment.findFirst({
+          where: { id: offer.appointmentId, deletedAt: null },
+          select: { start: true, end: true, providerId: true },
+        })
+      : null;
     const appointmentId = offer.appointmentId
       ? await this.moveAppointment(tx, offer)
       : await this.createAppointment(tx, offer);
+    await writeAuditEvent(
+      tx,
+      appointmentAuditEvent(offer, appointmentId, before, meta),
+    );
 
     await this.resolve(tx, offer, 'ACCEPTED', now, meta, true);
     // Las demás ofertas pendientes de este hueco (de cualquier canal) se
@@ -255,10 +312,11 @@ export class PrismaSlotOfferRepository implements SlotOfferRepository {
       for (const sibling of siblings) {
         await writeAuditEvent(
           tx,
+          // Sin la IP ni el UA del que aceptó: el evento es de otra oferta.
           offerAuditEvent(
             sibling,
             SLOT_OFFER_AUDIT_REASONS.TAKEN_BY_OTHER,
-            meta,
+            null,
             false,
           ),
         );
@@ -286,6 +344,46 @@ export class PrismaSlotOfferRepository implements SlotOfferRepository {
     });
   }
 
+  async tenantIds(): Promise<string[]> {
+    // `tenants` no tiene RLS: el barrido recorre las clínicas vivas.
+    const rows = await this.prisma.tenant.findMany({
+      where: { deletedAt: null },
+      select: { id: true },
+    });
+    return rows.map((r) => r.id);
+  }
+
+  expireDue(tenantId: string, now: Date, limit: number): Promise<number> {
+    return this.prisma.runWithTenant(tenantId, async (tx) => {
+      // Lo sirve waitlist_offers_tenant_provider_slot_pending_idx (parcial
+      // PENDING). El UPDATE es condicional: si una aceptación en curso la
+      // resuelve antes, el barrido no la toca.
+      const due = await tx.waitlistOffer.findMany({
+        where: { outcome: 'PENDING', expiresAt: { lte: now } },
+        select: { id: true, locationId: true, patientId: true },
+        orderBy: { expiresAt: 'asc' },
+        take: limit,
+      });
+      for (const row of due) {
+        const { count } = await tx.waitlistOffer.updateMany({
+          where: { id: row.id, outcome: 'PENDING' },
+          data: { outcome: 'EXPIRED', outcomeAt: now },
+        });
+        if (count === 0) continue;
+        await writeAuditEvent(
+          tx,
+          offerAuditEvent(
+            { ...row, tenantId },
+            SLOT_OFFER_AUDIT_REASONS.EXPIRED,
+            null,
+            false,
+          ),
+        );
+      }
+      return due.length;
+    });
+  }
+
   /** Relee la oferta con la fila bloqueada (la verdad de la transacción). */
   private async lockOffer(
     tx: Tx,
@@ -306,7 +404,7 @@ export class PrismaSlotOfferRepository implements SlotOfferRepository {
     offer: PublicSlotOffer,
     outcome: 'ACCEPTED' | 'DECLINED' | 'EXPIRED' | 'TAKEN_BY_OTHER',
     now: Date,
-    meta: AuditRequestMeta,
+    meta: AuditRequestMeta | null,
     byPatient: boolean,
   ): Promise<void> {
     const { count } = await tx.waitlistOffer.updateMany({

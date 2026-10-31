@@ -3,7 +3,9 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
+import { RecordAuditEventUseCase } from '../../../audit/application/record-audit-event.use-case';
 import {
   LOCATION_REPOSITORY,
   type LocationRepository,
@@ -26,6 +28,7 @@ import {
 } from '../../domain/ports/slot-offer-repository.port';
 import {
   LINK_OFFER_CONFIG,
+  LINK_OFFER_EMAIL_FAILED_MESSAGE,
   LINK_OFFER_TOO_LATE_MESSAGE,
   OFFER_EMAIL_BLOCKED_MESSAGE,
   OFFER_EMAIL_MISSING_MESSAGE,
@@ -90,6 +93,7 @@ export class CreateLinkOfferUseCase {
     private readonly slotOffers: SlotOfferRepository,
     @Inject(SLOT_OFFER_EMAIL_SENDER)
     private readonly email: SlotOfferEmailSender,
+    private readonly audit: RecordAuditEventUseCase,
     @Inject(LINK_OFFER_CONFIG)
     private readonly config: LinkOfferConfig,
     @Inject(OPENING_CLOCK)
@@ -140,19 +144,27 @@ export class CreateLinkOfferUseCase {
         this.staff.findById(created.providerId),
         this.slotOffers.findClinicBranding(),
       ]);
-      await this.email.send({
-        to: patient.email!.trim(),
-        referenceId: created.id,
-        vars: {
-          patientFirstName: firstNameOnly(patient.firstName),
-          clinicName: clinic?.name ?? location.name,
-          slotLabel: format.longDateTime(created.slotStart, timeZone),
-          locationName: location.name,
-          providerName: provider?.fullName ?? null,
-          url,
-          expiresAtLabel: format.longDateTime(expiresAt, timeZone),
-        },
-      });
+      try {
+        await this.email.send({
+          to: patient.email!.trim(),
+          referenceId: created.id,
+          vars: {
+            patientFirstName: firstNameOnly(patient.firstName),
+            clinicName: clinic?.name ?? location.name,
+            slotLabel: format.longDateTime(created.slotStart, timeZone),
+            locationName: location.name,
+            providerName: provider?.fullName ?? null,
+            url,
+            expiresAtLabel: format.longDateTime(expiresAt, timeZone),
+          },
+        });
+      } catch {
+        // Sin email no hay enlace que aceptar: la oferta no puede quedar
+        // PENDING («Oferta enviada») sin haberse enviado. Queda sin efecto
+        // (EXPIRED, anotada por quien la envió y auditada) y se avisa.
+        await this.markUndelivered(created.id, created.patientId, ctx);
+        throw new ServiceUnavailableException(LINK_OFFER_EMAIL_FAILED_MESSAGE);
+      }
       return { ...created, url: null, whatsappPhone: null };
     }
     const wa = whatsappOfferPhone(
@@ -160,5 +172,31 @@ export class CreateLinkOfferUseCase {
       phoneRegionOrNull(location.defaultPhoneRegion),
     );
     return { ...created, url, whatsappPhone: wa.phone };
+  }
+
+  private async markUndelivered(
+    offerId: string,
+    patientId: string,
+    ctx: AuditRequestContext,
+  ): Promise<void> {
+    const updated = await this.repo.recordOutcome(
+      offerId,
+      'EXPIRED',
+      ctx.actor.userId,
+    );
+    if (!updated) return;
+    await this.audit.record({
+      tenantId: ctx.tenantId,
+      locationId: updated.locationId,
+      actor: { kind: 'user', userId: ctx.actor.userId, role: ctx.actor.role },
+      action: 'UPDATE',
+      resourceType: 'WAITLIST_OFFER',
+      resourceId: offerId,
+      patient: { kind: 'patient', id: patientId },
+      requestId: ctx.requestId,
+      ip: ctx.ip,
+      userAgent: ctx.userAgent,
+      metadata: { reason: 'OFFER_LINK_EMAIL_FAILED' },
+    });
   }
 }

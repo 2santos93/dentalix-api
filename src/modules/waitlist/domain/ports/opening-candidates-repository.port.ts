@@ -150,6 +150,11 @@ export interface OpeningCandidatesRepository {
     cap: number,
   ): Promise<{ offer: WaitlistOffer; offersToday: number } | null>;
   findOffer(id: string): Promise<WaitlistOffer | null>;
+  /**
+   * DX-435: ¿tiene el profesional una cita viva (no cancelada) que pisa
+   * [start, end)? Una oferta con enlace sobre un hueco ya ocupado no se crea.
+   */
+  providerBusy(providerId: string, start: Date, end: Date): Promise<boolean>;
   /** DX-435: ofertas con enlace del hueco (mismo profesional, solapadas). */
   linkOffersForSlot(params: {
     locationId: string;

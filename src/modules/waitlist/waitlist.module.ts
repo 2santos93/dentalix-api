@@ -13,6 +13,9 @@ import { WaitlistController } from './presentation/waitlist.controller';
 import { PublicSlotOffersController } from './presentation/public-slot-offers.controller';
 import { PublicTenantContextInterceptor } from '../../shared/tenancy/public-tenant-context.interceptor';
 import { EmailModule } from '../notifications/email/email.module';
+import { JobsModule } from '../jobs/jobs.module';
+import { ExpireSlotOffers } from './application/expire-slot-offers';
+import { WaitlistJobs } from './application/waitlist-jobs';
 import { LocationScheduleModule } from '../location-schedule/location-schedule.module';
 import { ScheduleBlocksModule } from '../schedule-blocks/schedule-blocks.module';
 import { CreateLinkOfferUseCase } from './application/use-cases/link-offers.use-cases';
@@ -74,6 +77,8 @@ import { PrismaWaitlistRepository } from './infrastructure/repositories/prisma-w
     // DX-435: email de la oferta con enlace (outbox, DX-088) y reglas de
     // agenda al aceptar desde el enlace (horario de la sede y bloqueos).
     EmailModule,
+    // DX-435: barrido de ofertas con enlace caducadas.
+    JobsModule,
     LocationScheduleModule,
     ScheduleBlocksModule,
   ],
@@ -113,6 +118,8 @@ import { PrismaWaitlistRepository } from './infrastructure/repositories/prisma-w
     GetPublicSlotOfferUseCase,
     AcceptSlotOfferUseCase,
     DeclineSlotOfferUseCase,
+    ExpireSlotOffers,
+    WaitlistJobs,
     { provide: SLOT_OFFER_REPOSITORY, useClass: PrismaSlotOfferRepository },
     { provide: SLOT_OFFER_EMAIL_SENDER, useClass: OutboxSlotOfferEmailSender },
     // Minutos antes del hueco en que caduca el enlace

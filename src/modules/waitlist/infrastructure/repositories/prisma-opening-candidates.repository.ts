@@ -325,6 +325,23 @@ export class PrismaOpeningCandidatesRepository implements OpeningCandidatesRepos
     });
   }
 
+  providerBusy(providerId: string, start: Date, end: Date): Promise<boolean> {
+    return this.prisma.runWithTenant(async (tx) => {
+      // appointments_tenantId_providerId_start_idx
+      const row = await tx.appointment.findFirst({
+        where: {
+          providerId,
+          deletedAt: null,
+          status: { not: 'CANCELLED' },
+          start: { lt: end },
+          end: { gt: start },
+        },
+        select: { id: true },
+      });
+      return row !== null;
+    });
+  }
+
   linkOffersForSlot(params: {
     locationId: string;
     providerId: string;

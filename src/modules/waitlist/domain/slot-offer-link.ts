@@ -120,6 +120,10 @@ export const LINK_OFFER_OUTCOME_MESSAGE =
   'Una oferta con enlace nace pendiente: la responde el paciente desde el enlace.';
 export const LINK_OFFER_HOST_MESSAGE =
   'No se pudo armar el enlace de la clínica desde esta dirección.';
+export const LINK_OFFER_SLOT_TAKEN_MESSAGE =
+  'Este hueco ya está ocupado: ya no se puede ofrecer por enlace.';
+export const LINK_OFFER_EMAIL_FAILED_MESSAGE =
+  'No pudimos enviar el correo: la oferta quedó sin efecto. Intenta de nuevo en un momento.';
 export const OFFER_EMAIL_BLOCKED_MESSAGE =
   'Este paciente no recibe correos de la clínica (se dio de baja o no quiere avisos). Llámalo.';
 export const OFFER_EMAIL_MISSING_MESSAGE =

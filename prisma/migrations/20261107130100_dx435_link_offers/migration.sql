@@ -14,7 +14,9 @@
 --                     aceptar se pasan a TAKEN_BY_OTHER y el panel las cuenta).
 --   audit_events_actor_check     admite actor NULL en los eventos del enlace
 --                     de la oferta (UPDATE de WAITLIST_OFFER, origen
---                     PUBLIC_LINK, reason SLOT_OFFER_*), y solo en ellos.
+--                     PUBLIC_LINK, reason SLOT_OFFER_*) y en la cita que
+--                     crea o adelanta al aceptarla (CREATE/UPDATE de
+--                     APPOINTMENT, reason SLOT_OFFER_ACCEPTED), y solo en ellos.
 --
 -- Compatible hacia atrás: columnas NULL sin default (sin reescritura), un
 -- CHECK que las filas existentes cumplen (canales WA_ME/PHONE sin token), un
@@ -118,5 +120,14 @@ ALTER TABLE "audit_events" ADD CONSTRAINT "audit_events_actor_check"
                                         'SLOT_OFFER_DECLINED',
                                         'SLOT_OFFER_EXPIRED',
                                         'SLOT_OFFER_TAKEN_BY_OTHER')) IS TRUE
+    -- DX-435: la cita que crea (CREATE) o adelanta (UPDATE) la aceptación
+    -- desde el enlace, con el paciente de la cita.
+    OR ("action" IN ('CREATE', 'UPDATE')
+        AND "resourceType" = 'APPOINTMENT'
+        AND "actorRole" IS NULL
+        AND "resourceId" IS NOT NULL
+        AND "patientId" IS NOT NULL
+        AND "metadata" ->> 'origin' = 'PUBLIC_LINK'
+        AND "metadata" ->> 'reason' = 'SLOT_OFFER_ACCEPTED') IS TRUE
   ) NOT VALID;
 

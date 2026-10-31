@@ -67,6 +67,7 @@ import {
 import { WAITLIST_NOT_FOUND_MESSAGE } from '../../domain/waitlist-rules';
 import {
   LINK_OFFER_OUTCOME_MESSAGE,
+  LINK_OFFER_SLOT_TAKEN_MESSAGE,
   LINK_OFFER_TOO_LATE_MESSAGE,
   OFFER_EMAIL_BLOCKED_MESSAGE,
   OFFER_EMAIL_MISSING_MESSAGE,
@@ -528,6 +529,18 @@ export class CreateWaitlistOfferUseCase {
     // DX-435: con menos de 20 minutos no da tiempo a ver el enlace y llegar.
     if (linked && !linkOfferWindowOpen(input.slotStart, now)) {
       throw new ConflictException(LINK_OFFER_TOO_LATE_MESSAGE);
+    }
+    // Sobre un hueco ya ocupado (p. ej. recepción lo llenó a mano) el enlace
+    // nacería sin efecto y gastaría el tope del día: 409.
+    if (
+      linked &&
+      (await this.repo.providerBusy(
+        input.providerId,
+        input.slotStart,
+        input.slotEnd,
+      ))
+    ) {
+      throw new ConflictException(LINK_OFFER_SLOT_TAKEN_MESSAGE);
     }
     const location = await requireLocation(
       this.locations,

@@ -14,6 +14,7 @@ import {
   DeclineSlotOfferUseCase,
   GetPublicSlotOfferUseCase,
 } from '../src/modules/waitlist/application/use-cases/public-slot-offers.use-cases';
+import { ExpireSlotOffers } from '../src/modules/waitlist/application/expire-slot-offers';
 import type { LocationScheduleRepository } from '../src/modules/location-schedule/domain/ports/location-schedule-repository.port';
 import {
   SLOT_OFFER_NOT_FOUND_MESSAGE,
@@ -402,7 +403,26 @@ describe('oferta de hueco por enlace (int, DX-435)', () => {
           ],
         ].sort(),
       );
-      expect(events.every((e) => e.ip === '10.0.0.9')).toBe(true);
+      // La IP y el UA son del que aceptó: solo en su evento, no en los de
+      // los demás (revisión DX-435, punto 4).
+      for (const e of events) {
+        if (e.resourceId === first.offerId) {
+          expect([e.ip, e.userAgent]).toEqual(['10.0.0.9', 'móvil']);
+        } else {
+          expect([e.ip, e.userAgent]).toEqual([null, null]);
+        }
+      }
+      // La cita creada queda en la auditoría: CREATE de APPOINTMENT desde el
+      // enlace (revisión DX-435, punto 2); la hora es la de la cita.
+      const [created] = await owner.auditEvent.findMany({
+        where: { resourceType: 'APPOINTMENT', resourceId: appointments[0].id },
+      });
+      expect(created).toMatchObject({
+        action: 'CREATE',
+        actorUserId: null,
+        patientId: a.patientIds[0],
+        metadata: { origin: 'PUBLIC_LINK', reason: 'SLOT_OFFER_ACCEPTED' },
+      });
     });
 
     it('dos aceptaciones simultáneas: exactamente una gana y la otra recibe «ocupado», sin error', async () => {
@@ -481,6 +501,81 @@ describe('oferta de hueco por enlace (int, DX-435)', () => {
         }),
       ).toBe(0);
       expect(await outcomeOf(offer.id)).toBe('ACCEPTED');
+      // UPDATE de APPOINTMENT con la hora anterior y la nueva.
+      const [event] = await owner.auditEvent.findMany({
+        where: { resourceType: 'APPOINTMENT', resourceId: later.id },
+      });
+      expect(event).toMatchObject({
+        action: 'UPDATE',
+        actorUserId: null,
+        patientId: a.patientIds[0],
+        metadata: {
+          origin: 'PUBLIC_LINK',
+          reason: 'SLOT_OFFER_ACCEPTED',
+          move: {
+            from: {
+              start: at('14:00', FAR).toISOString(),
+              end: at('14:45', FAR).toISOString(),
+              providerId: DOCTOR,
+            },
+            to: {
+              start: at('15:00').toISOString(),
+              end: at('15:45').toISOString(),
+              providerId: DOCTOR,
+            },
+          },
+        },
+      });
+    });
+
+    it('aceptar → cancelar la cita → volver a ofrecer el hueco → aceptar da ACCEPTED (la oferta vieja no lo bloquea)', async () => {
+      const first = await offerToEntry(a, 0);
+      const won = await inClinic(a, () =>
+        acceptOffer.execute(first.token, META),
+      );
+      expect(won.state).toBe('ACCEPTED');
+      await owner.appointment.updateMany({
+        where: { tenantId: a.tenantId },
+        data: {
+          status: 'CANCELLED',
+          cancelledAt: new Date(),
+          cancelledByKind: 'STAFF_FOR_PATIENT',
+          cancelReasonCode: 'ILLNESS',
+          noticeMinutes: 600,
+          lateCancellation: false,
+        },
+      });
+      const again = await offerToEntry(a, 1);
+      const result = await inClinic(a, () =>
+        acceptOffer.execute(again.token, META),
+      );
+      expect(result.state).toBe('ACCEPTED');
+      expect(await outcomeOf(again.offerId)).toBe('ACCEPTED');
+    });
+
+    it('con el hueco ocupado: TAKEN solo si otra oferta con enlace ganó después de crearse esta; si no, UNAVAILABLE', async () => {
+      const winner = await offerToEntry(a, 0);
+      expect(
+        (await inClinic(a, () => acceptOffer.execute(winner.token, META)))
+          .state,
+      ).toBe('ACCEPTED');
+      // Creada DESPUÉS de que ganara la otra: el hueco lo ocupó otra vía.
+      const late = await offerToEntry(a, 1);
+      expect(
+        (await inClinic(a, () => acceptOffer.execute(late.token, META))).state,
+      ).toBe('UNAVAILABLE');
+      expect(await outcomeOf(late.offerId)).toBe('PENDING');
+      // Creada ANTES de que ganara (y que el barrido de hermanas no alcanzó):
+      // «Este hueco ya se ocupó» y queda TAKEN_BY_OTHER.
+      const early = await offerToEntry(a, 2);
+      await owner.waitlistOffer.update({
+        where: { id: early.offerId },
+        data: { createdAt: new Date(Date.now() - 60 * 60_000) },
+      });
+      expect(
+        (await inClinic(a, () => acceptOffer.execute(early.token, META))).state,
+      ).toBe('TAKEN');
+      expect(await outcomeOf(early.offerId)).toBe('TAKEN_BY_OTHER');
     });
   });
 
@@ -569,6 +664,40 @@ describe('oferta de hueco por enlace (int, DX-435)', () => {
       expect(won.state).toBe('ACCEPTED');
       // La rechazada no pasa a TAKEN_BY_OTHER.
       expect(await outcomeOf(one.offerId)).toBe('DECLINED');
+    });
+  });
+
+  describe('barrido de caducadas (revisión DX-435, punto 3)', () => {
+    it('pasa a EXPIRED las PENDING vencidas de todas las clínicas, audita SLOT_OFFER_EXPIRED y no toca las vigentes', async () => {
+      const due = await offerToEntry(a, 0, {
+        expiresAt: new Date(Date.now() - 60_000),
+      });
+      const dueB = await offerToEntry(b, 0, {
+        expiresAt: new Date(Date.now() - 60_000),
+      });
+      const alive = await offerToEntry(a, 1);
+      const sweep = new ExpireSlotOffers(repo, clock);
+      const result = await sweep.run();
+      expect(result.expired).toBeGreaterThanOrEqual(2);
+      expect(await outcomeOf(due.offerId)).toBe('EXPIRED');
+      expect(await outcomeOf(dueB.offerId)).toBe('EXPIRED');
+      expect(await outcomeOf(alive.offerId)).toBe('PENDING');
+      const [event] = await owner.auditEvent.findMany({
+        where: { resourceId: due.offerId },
+      });
+      expect(event).toMatchObject({
+        tenantId: a.tenantId,
+        action: 'UPDATE',
+        actorUserId: null,
+        ip: null,
+        patientId: a.patientIds[0],
+        metadata: { origin: 'PUBLIC_LINK', reason: 'SLOT_OFFER_EXPIRED' },
+      });
+      // Idempotente: otra pasada no vuelve a auditar.
+      await sweep.run();
+      expect(
+        await owner.auditEvent.count({ where: { resourceId: due.offerId } }),
+      ).toBe(1);
     });
   });
 });
