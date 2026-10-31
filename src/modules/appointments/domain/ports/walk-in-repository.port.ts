@@ -44,6 +44,13 @@ export interface WalkInWriteResult {
 
 export interface WalkInRepository {
   /**
+   * Id del paciente vivo de la clínica (del contexto) con ese documento
+   * normalizado (la misma clave que el alta, DX-107/DX-287), o null. Es la
+   * consulta previa que deja avisar del duplicado ANTES de buscar hueco; la
+   * transacción de `create` lo vuelve a comprobar con el candado tomado.
+   */
+  findLivePatientIdByDoc(docNumber: string): Promise<string | null>;
+  /**
    * Paciente (si es nuevo), cita ARRIVED, motivo del sobrecupo y sus
    * `audit_event`: todo o nada. Un documento de otro paciente vivo da 409
    * `PATIENT_DUPLICATE` con su id; un solape (carrera), el 23P01 de la EXCLUDE.

@@ -376,7 +376,42 @@ describe('«Atender sin cita» (e2e, DX-470)', () => {
     expect(res.body).toMatchObject({
       code: 'PATIENT_DUPLICATE',
       existingPatientId,
+      existingPatient: {
+        id: existingPatientId,
+        firstName: 'Berta',
+        lastName: 'Urgencia',
+      },
     });
+    expect(
+      await raw.patient.count({ where: { tenantId: clinic.tenantId } }),
+    ).toBe(patients);
+  });
+
+  it('documento repetido sin hueco reservado: el duplicado sale ANTES que el sobrecupo', async () => {
+    const patients = await raw.patient.count({
+      where: { tenantId: clinic.tenantId },
+    });
+    // El reservado de las 15:00 ya lo ocupó la primera llegada: sin motivo,
+    // antes daba NO_RESERVED_SLOT y el duplicado solo tras escribirlo.
+    const res = await walkIn(reception.token, {
+      newPatient: {
+        firstName: 'Berta',
+        lastName: 'Tecleada',
+        phone: '+58 412 555 0104',
+        docNumber: '470001',
+      },
+      providerId: dentist.userId,
+    }).expect(409);
+    expect(res.body).toMatchObject({
+      code: 'PATIENT_DUPLICATE',
+      existingPatientId,
+      existingPatient: {
+        id: existingPatientId,
+        firstName: 'Berta',
+        lastName: 'Urgencia',
+      },
+    });
+    expect(res.body).not.toHaveProperty('canOverbook');
     expect(
       await raw.patient.count({ where: { tenantId: clinic.tenantId } }),
     ).toBe(patients);

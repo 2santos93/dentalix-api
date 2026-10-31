@@ -27,7 +27,8 @@ const TRIAGE_FLAGS_MESSAGE = `Las señales de triaje deben ser de: ${TRIAGE_FLAG
 /**
  * Alta mínima (DX-470): nombre, apellido y teléfono. El documento es
  * opcional; si viene y ya lo tiene otro paciente vivo de la clínica, 409
- * `PATIENT_DUPLICATE` con su id (la misma detección que el alta normal).
+ * `PATIENT_DUPLICATE` con su id y su nombre (`existingPatient`), antes de
+ * buscar hueco (la misma detección que el alta normal).
  */
 export class WalkInNewPatientDto {
   @ApiProperty({ minLength: 1, maxLength: 100 })

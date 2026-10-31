@@ -17,6 +17,7 @@ import type {
 import type { AppointmentWriteResult } from '../../domain/entities/appointment.entity';
 import {
   NO_RESERVED_SLOT_CODE,
+  PATIENT_DUPLICATE_CODE,
   WALK_IN_MESSAGES,
   findReservedSlot,
   floorToMinute,
@@ -42,6 +43,7 @@ import type { ScheduleBlockRepository } from '../../../schedule-blocks/domain/po
 import { PATIENT_REPOSITORY } from '../../../patients/domain/ports/patient-repository.port';
 import type { PatientRepository } from '../../../patients/domain/ports/patient-repository.port';
 import { docTypeLabelInput } from '../../../patients/application/doc-type-label-input';
+import { DOC_TAKEN_MESSAGE } from '../../../patients/infrastructure/repositories/prisma-patient.repository';
 import { STAFF_REPOSITORY } from '../../../staff/domain/ports/staff-repository.port';
 import type { StaffRepository } from '../../../staff/domain/ports/staff-repository.port';
 import { assertAttendsAt } from '../../../staff/domain/provider-location';
@@ -140,6 +142,13 @@ export class CreateWalkInUseCase {
       if (!(await this.patients.findById(patient.id))) {
         throw new NotFoundException('Paciente no encontrado');
       }
+    } else if (patient.data.docNumber !== undefined) {
+      // El duplicado ANTES que el hueco: si no, el mostrador escribiría el
+      // motivo del sobrecupo para luego enterarse de que ya era paciente.
+      const existingId = await this.walkIns.findLivePatientIdByDoc(
+        patient.data.docNumber,
+      );
+      if (existingId !== null) throw await this.duplicate(existingId);
     }
     const provider = await this.staff.findById(input.providerId);
     if (!provider) throw new NotFoundException('Profesional no encontrado');
@@ -247,6 +256,10 @@ export class CreateWalkInUseCase {
         overbookId: written.overbookId,
       };
     } catch (error) {
+      // Carrera: otra alta del mismo documento entre la consulta previa y la
+      // transacción. El 409 lleva igualmente al existente.
+      const racedId = duplicateWithoutPatient(error);
+      if (racedId !== null) throw await this.duplicate(racedId);
       const scope = overlapExclusionScope(error);
       if (scope === 'provider') {
         throw new ConflictException(WALK_IN_MESSAGES.slotTaken);
@@ -254,6 +267,32 @@ export class CreateWalkInUseCase {
       if (scope !== null) throw new ConflictException(OVERLAP_MESSAGES[scope]);
       throw error;
     }
+  }
+
+  /**
+   * 409 `PATIENT_DUPLICATE` con el id y el nombre del paciente existente,
+   * para que el mostrador vea a quién va a atender. Quien llega aquí tiene un
+   * rol de WALK_IN_ROLES, todos dentro de PATIENT_ROLES (leen cualquier
+   * paciente de su clínica), y `findById` solo ve la clínica del contexto.
+   */
+  private async duplicate(existingId: string): Promise<ConflictException> {
+    const existing = await this.patients.findById(existingId);
+    return new ConflictException({
+      statusCode: 409,
+      error: 'Conflict',
+      code: PATIENT_DUPLICATE_CODE,
+      message: DOC_TAKEN_MESSAGE,
+      existingPatientId: existingId,
+      ...(existing
+        ? {
+            existingPatient: {
+              id: existing.id,
+              firstName: existing.firstName,
+              lastName: existing.lastName,
+            },
+          }
+        : {}),
+    });
   }
 
   /** Exactamente uno: el paciente existente o el alta mínima. */
@@ -351,4 +390,15 @@ export class CreateWalkInUseCase {
       busy,
     });
   }
+}
+
+/** El id del 409 `PATIENT_DUPLICATE` de la transacción (que no trae nombre). */
+function duplicateWithoutPatient(error: unknown): string | null {
+  if (!(error instanceof ConflictException)) return null;
+  const body = error.getResponse() as Record<string, unknown>;
+  return body.code === PATIENT_DUPLICATE_CODE &&
+    typeof body.existingPatientId === 'string' &&
+    body.existingPatient === undefined
+    ? body.existingPatientId
+    : null;
 }

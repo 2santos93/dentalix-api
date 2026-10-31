@@ -8,6 +8,7 @@ import {
   DOC_TAKEN_MESSAGE,
   insertPatientRowInTx,
 } from '../../../patients/infrastructure/repositories/prisma-patient.repository';
+import { livePatientWithDoc } from '../../../patients/infrastructure/patient-doc-lock';
 import { PATIENT_DUPLICATE_CODE } from '../../domain/walk-in';
 import type {
   WalkInRepository,
@@ -38,6 +39,14 @@ export class PrismaWalkInRepository implements WalkInRepository {
     private readonly prisma: PrismaService,
     private readonly tenantContext: TenantContextService,
   ) {}
+
+  async findLivePatientIdByDoc(docNumber: string): Promise<string | null> {
+    const tenantId = this.tenantContext.getTenantId();
+    if (!tenantId) throw new Error('No tenant in context');
+    return this.prisma.runWithTenant((tx) =>
+      livePatientWithDoc(tx, tenantId, docNumber),
+    );
+  }
 
   async create(
     input: WalkInWrite,

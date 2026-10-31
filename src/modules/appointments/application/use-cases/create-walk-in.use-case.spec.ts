@@ -24,7 +24,14 @@ import type {
 } from '../../domain/ports/walk-in-repository.port';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { PROVIDER_NOT_AT_LOCATION_MESSAGE } from '../../../staff/domain/provider-location';
-import { NO_RESERVED_SLOT_CODE, WALK_IN_MESSAGES } from '../../domain/walk-in';
+import {
+  NO_RESERVED_SLOT_CODE,
+  PATIENT_DUPLICATE_CODE,
+  WALK_IN_MESSAGES,
+  WALK_IN_ROLES,
+} from '../../domain/walk-in';
+import { PATIENT_ROLES } from '../../../auth/presentation/guards/clinic-role-sets';
+import { DOC_TAKEN_MESSAGE } from '../../../patients/infrastructure/repositories/prisma-patient.repository';
 
 // DX-470: «Atender sin cita». Martes 10 nov 2026 en Bogotá (UTC−5): las
 // 10:07:42 del reloj del servidor son las 15:07:42 UTC.
@@ -44,6 +51,8 @@ function setup(
   options: {
     patientExists?: boolean;
     provider?: { userId: string; locationIds: string[] | null } | null;
+    /** Paciente vivo de la clínica con ese documento normalizado. */
+    docOwner?: { id: string; firstName: string; lastName: string } | null;
   } = {},
 ) {
   const appointments = new InMemoryAppointmentRepository();
@@ -57,7 +66,12 @@ function setup(
   const cleaning = types.seed({ name: 'Limpieza', durationMinutes: 30 });
   const writes: WalkInWrite[] = [];
   let failWith: Error | null = null;
+  const docLookups: string[] = [];
   const walkIns: WalkInRepository = {
+    findLivePatientIdByDoc: (docNumber) => {
+      docLookups.push(docNumber);
+      return Promise.resolve(options.docOwner?.id ?? null);
+    },
     create: (input) => {
       writes.push(input);
       if (failWith) return Promise.reject(failWith);
@@ -85,8 +99,14 @@ function setup(
     },
   };
   const patients = {
-    findById: () =>
-      Promise.resolve(options.patientExists === false ? null : { id: 'p1' }),
+    findById: (id: string) =>
+      Promise.resolve(
+        options.docOwner && id === options.docOwner.id
+          ? options.docOwner
+          : options.patientExists === false
+            ? null
+            : { id: 'p1' },
+      ),
   } as unknown as PatientRepository;
   const provider =
     options.provider === undefined
@@ -127,6 +147,7 @@ function setup(
     urgent,
     cleaning,
     writes,
+    docLookups,
     reserved,
     fail: (error: Error) => {
       failWith = error;
@@ -237,6 +258,122 @@ describe('CreateWalkInUseCase (DX-470)', () => {
       canOverbook: true,
     });
     expect(writes).toHaveLength(0);
+  });
+
+  it('alta mínima con documento repetido y sin hueco: 409 PATIENT_DUPLICATE con el existente ANTES del sobrecupo', async () => {
+    const owner = {
+      id: 'p-dup',
+      firstName: 'Sebastián',
+      lastName: 'Niño Cabrera',
+    };
+    const { uc, writes, docLookups } = setup({ docOwner: owner });
+    // Sin ningún reservado: antes pedía el motivo del sobrecupo primero.
+    const error = await uc
+      .execute(
+        {
+          newPatient: { ...NEW_PATIENT, docNumber: ' DEMO-0024 ' },
+          providerId: 'prov1',
+        },
+        CTX,
+      )
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ConflictException);
+    expect((error as ConflictException).getResponse()).toEqual({
+      statusCode: 409,
+      error: 'Conflict',
+      code: PATIENT_DUPLICATE_CODE,
+      message: DOC_TAKEN_MESSAGE,
+      existingPatientId: 'p-dup',
+      existingPatient: {
+        id: 'p-dup',
+        firstName: 'Sebastián',
+        lastName: 'Niño Cabrera',
+      },
+    });
+    expect(docLookups).toEqual(['DEMO-0024']);
+    expect(writes).toHaveLength(0);
+  });
+
+  it('documento repetido también con motivo de sobrecupo o con hueco: el duplicado manda', async () => {
+    const owner = { id: 'p-dup', firstName: 'Sebastián', lastName: 'Niño' };
+    const { uc, writes, reserved } = setup({ docOwner: owner });
+    reserved('17:00', '18:00');
+    for (const extra of [{}, { overbookReason: 'Dolor agudo' }]) {
+      const error = await uc
+        .execute(
+          {
+            newPatient: { ...NEW_PATIENT, docNumber: '470.001' },
+            providerId: 'prov1',
+            ...extra,
+          },
+          CTX,
+        )
+        .catch((e: unknown) => e);
+      expect((error as ConflictException).getResponse()).toMatchObject({
+        code: PATIENT_DUPLICATE_CODE,
+        existingPatient: { id: 'p-dup', firstName: 'Sebastián' },
+      });
+    }
+    expect(writes).toHaveLength(0);
+  });
+
+  it('sin documento o con un documento libre: no se busca duplicado o sigue al hueco', async () => {
+    const { uc, writes, docLookups, reserved } = setup();
+    reserved('17:00', '18:00');
+    await uc.execute({ newPatient: NEW_PATIENT, providerId: 'prov1' }, CTX);
+    expect(docLookups).toEqual([]);
+    await expect(
+      uc.execute(
+        {
+          newPatient: { ...NEW_PATIENT, docNumber: 'LIBRE-1' },
+          providerId: 'prov1',
+        },
+        CTX,
+      ),
+    ).resolves.toMatchObject({ patientCreated: true });
+    expect(docLookups).toEqual(['LIBRE-1']);
+    expect(writes).toHaveLength(2);
+  });
+
+  it('carrera: el duplicado que detecta la transacción también trae al existente', async () => {
+    const owner = { id: 'p-dup', firstName: 'Sebastián', lastName: 'Niño' };
+    const { uc, reserved, fail } = setup();
+    reserved('17:00', '18:00');
+    // La consulta previa no lo vio (otra alta en paralelo); la transacción sí.
+    fail(
+      new ConflictException({
+        statusCode: 409,
+        error: 'Conflict',
+        code: PATIENT_DUPLICATE_CODE,
+        message: DOC_TAKEN_MESSAGE,
+        existingPatientId: 'p-dup',
+      }),
+    );
+    const patients = (uc as unknown as { patients: { findById: unknown } })
+      .patients;
+    patients.findById = () => Promise.resolve(owner);
+    const error = await uc
+      .execute(
+        {
+          newPatient: { ...NEW_PATIENT, docNumber: 'X-1' },
+          providerId: 'prov1',
+        },
+        CTX,
+      )
+      .catch((e: unknown) => e);
+    expect((error as ConflictException).getResponse()).toMatchObject({
+      code: PATIENT_DUPLICATE_CODE,
+      existingPatientId: 'p-dup',
+      existingPatient: {
+        id: 'p-dup',
+        firstName: 'Sebastián',
+        lastName: 'Niño',
+      },
+    });
+  });
+
+  it('quien puede «Atender sin cita» puede leer pacientes: el 409 puede nombrar al existente', () => {
+    for (const role of WALK_IN_ROLES) expect(PATIENT_ROLES).toContain(role);
   });
 
   it('sobrecupo con motivo: ahora, anotado aunque el profesional esté ocupado', async () => {
