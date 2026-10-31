@@ -8,6 +8,7 @@ import type {
   TreatmentPlanStatus,
 } from '@prisma/client';
 import type { NoticeResponsible } from '../../../patients/domain/communication/notice-recipient';
+import type { PlanQuoteSource } from '../../../treatment-plans/domain/ports/plan-quote-repository.port';
 import type {
   PublicSignatureContext,
   SignatureRequestListRow,
@@ -59,11 +60,15 @@ export interface CreateSignatureRequestRepoInput {
   patientId: string;
   type: SignatureRequestType;
   channel: SignatureRequestChannel;
-  templateId: string;
-  templateVersion: number;
+  /** CONSENT: plantilla y versión; BUDGET: null. */
+  templateId: string | null;
+  templateVersion: number | null;
   treatmentPlanId: string | null;
   title: string;
   body: string;
+  /** BUDGET (DX-415): la foto del presupuesto y su hash; CONSENT: sin ellos. */
+  budgetContent?: object;
+  budgetContentHash?: string;
   professionalUserId: string;
   professionalName: string;
   signerType: ConsentSignerType;
@@ -130,11 +135,54 @@ export interface RemoteConsentInsert {
   remoteVerifiedAt: Date;
 }
 
+/**
+ * DX-415: la aceptación del presupuesto a distancia. Se escribe en la MISMA
+ * transacción que la firma, con el plan y su grupo bloqueados: si el plan ya
+ * no es el que se envió (`stillMatches` falso), nada se escribe y el
+ * repositorio lanza `RemoteBudgetChangedError`.
+ */
+export interface RemoteBudgetAcceptanceInsert {
+  planId: string;
+  /** Sede de la solicitud: la del presupuesto enviado. */
+  locationId: string;
+  /** ¿El plan vivo (bloqueado) sigue siendo el presupuesto enviado? */
+  stillMatches: (source: PlanQuoteSource) => boolean;
+  signerName: string;
+  signature: string;
+  content: object;
+  contentHash: string;
+  acceptanceHash: string;
+  acceptedAt: Date;
+  /** Quien envió el enlace (el paciente no es un usuario). */
+  acceptedById: string;
+  ipAddress: string | null;
+  userAgent: string | null;
+  remoteChannel: SignatureRequestChannel;
+  remoteDestinationMasked: string;
+  remoteSentAt: Date;
+  remoteOpenedAt: Date;
+  remoteVerifiedAt: Date;
+}
+
+/** El plan dejó de ser el presupuesto enviado: «Enlace no válido». */
+export class RemoteBudgetChangedError extends Error {
+  constructor() {
+    super('El presupuesto cambió desde el envío');
+  }
+}
+
 /** Lo que el caso de uso decide con la fila bloqueada. */
 export interface LockedWrite {
   patch: SignatureRequestPatch;
   audit: PublicSignatureAuditEvent[];
   consent?: RemoteConsentInsert;
+  budget?: RemoteBudgetAcceptanceInsert;
+}
+
+/** El presupuesto de un plan con el formato de su sede (DX-415). */
+export interface BudgetSource {
+  quote: PlanQuoteSource;
+  location: { id: string; locale: string | null; hourCycle: string | null };
 }
 
 export interface PublicRequestEvidence {
@@ -178,7 +226,8 @@ export interface SignatureRequestRepository {
 
   /**
    * Inserta la solicitud y anula, en la misma transacción, las del mismo
-   * paciente y plantilla que aún esperaban al paciente. Devuelve el id y los
+   * paciente y plantilla (o, BUDGET, del mismo plan) que aún esperaban al
+   * paciente. Devuelve el id y los
    * ids anulados (para cancelar sus emails pendientes).
    */
   create(
@@ -199,6 +248,17 @@ export interface SignatureRequestRepository {
     revokedById: string;
     now: Date;
   }): Promise<RevokeOutcome>;
+
+  /**
+   * DX-415: el presupuesto del plan del paciente, compuesto en la sede
+   * `locationId` (la de la solicitud) o, sin ella, en la de escritura del
+   * request. `null` si el plan o el paciente no son de esta clínica.
+   */
+  loadBudget(
+    patientId: string,
+    planId: string,
+    locationId?: string,
+  ): Promise<BudgetSource | null>;
 
   /** PÚBLICO: por hash del token, bajo la RLS de la clínica del host. */
   findByTokenHash(tokenHash: string): Promise<PublicSignatureContext | null>;

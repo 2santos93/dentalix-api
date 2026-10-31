@@ -12,6 +12,7 @@ import {
   RegistrationNoticeEmailVars,
   ReminderCancellationPolicyVars,
   RenderedEmail,
+  SignatureBudgetAcceptedEmailVars,
   SignatureCodeEmailVars,
   SignatureRequestEmailVars,
 } from '../../domain/email-message';
@@ -342,6 +343,32 @@ function signatureCode(
   });
 }
 
+function signatureBudgetAccepted(
+  vars: SignatureBudgetAcceptedEmailVars,
+  brand: EmailBrand | null,
+): RenderedEmail {
+  return renderLayout({
+    brand,
+    subject: `${vars.clinicName} recibió tu aceptación`,
+    heading: `Hola, ${vars.recipientFirstName}`,
+    blocks: [
+      {
+        kind: 'paragraph',
+        text: `El ${vars.acceptedAtLabel} registramos tu aceptación del presupuesto que te envió ${vars.clinicName}.`,
+      },
+      {
+        kind: 'paragraph',
+        text: 'La copia firmada la puedes guardar o imprimir desde la página en la que firmaste; la clínica también la tiene.',
+      },
+      {
+        kind: 'note',
+        text: 'Si no fuiste tú, avisa a la clínica cuanto antes.',
+      },
+    ],
+    action: null,
+  });
+}
+
 type Renderer<T extends EmailTemplateName> = (
   vars: EmailVarsByTemplate[T],
   brand: EmailBrand | null,
@@ -357,6 +384,7 @@ const RENDERERS: { [T in EmailTemplateName]: Renderer<T> } = {
   'post-op-instructions': postOpInstructions,
   'signature-request': signatureRequest,
   'signature-code': signatureCode,
+  'signature-budget-accepted': signatureBudgetAccepted,
 };
 
 /**

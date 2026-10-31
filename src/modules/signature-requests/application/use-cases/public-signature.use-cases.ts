@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   HttpException,
   HttpStatus,
@@ -19,11 +20,16 @@ import {
 } from '../../../consents/domain/signature-image';
 import { describeDeliveryError } from '../../../notifications/email/application/retry-policy';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import { requireLocationFormat } from '../../../../shared/locations/location-regional';
+import { computeAcceptanceHash } from '../../../treatment-plans/domain/plan-quote';
+import type { QuoteContent } from '../../../treatment-plans/domain/plan-quote';
+import { RemoteBudgetCheck, sentBudget } from '../remote-budget';
 import type {
   PublicSignatureContext,
   SignatureRequestRecord,
 } from '../../domain/entities/signature-request.entity';
 import {
+  RemoteBudgetChangedError,
   SIGNATURE_REQUEST_REPOSITORY,
   type LockedWrite,
   type PublicRequestEvidence,
@@ -80,6 +86,12 @@ export const SIGNATURE_NOT_READ_MESSAGE =
   'Confirma que leíste el documento completo antes de firmar.';
 export const SIGNATURE_DOCUMENT_REQUIRED_MESSAGE =
   'Escribe tu documento de identidad: firmas como responsable del paciente.';
+/**
+ * 409 al aceptar un presupuesto que la clínica no puede cerrar así (otra
+ * opción del grupo ya cobrada o con trabajo hecho): sin detalles internos.
+ */
+export const SIGNATURE_BUDGET_NOT_ACCEPTABLE_MESSAGE =
+  'No pudimos registrar tu aceptación: la clínica tiene que revisar este presupuesto. Contacta con ella.';
 
 const SIGNER_DOCUMENT_MAX = 60;
 
@@ -132,11 +144,14 @@ export function sessionMatches(
 /**
  * Búsqueda común de las rutas públicas. El tenant sale SOLO del host: sin
  * clínica en contexto, o con un token que no puede ser nuestro, es 404 sin
- * tocar la base. La RLS hace que un token de otra clínica no exista.
+ * tocar la base. La RLS hace que un token de otra clínica no exista. DX-415:
+ * un presupuesto que cambió desde el envío (o que ya no está «Presentado»)
+ * responde igual, «Enlace no válido».
  */
 async function findLive(
   tenantContext: TenantContextService,
   repo: SignatureRequestRepository,
+  budgets: RemoteBudgetCheck,
   token: string,
   now: Date,
 ): Promise<PublicSignatureContext> {
@@ -145,6 +160,7 @@ async function findLive(
   }
   const ctx = await repo.findByTokenHash(hashSignatureToken(token));
   if (!ctx || !isLinkUsable(ctx.request, now)) throw invalidLink();
+  if (!(await budgets.isStillValid(ctx.request))) throw invalidLink();
   return ctx;
 }
 
@@ -194,13 +210,14 @@ export class GetPublicSignatureUseCase {
     private readonly tenantContext: TenantContextService,
     @Inject(SIGNATURE_REQUEST_REPOSITORY)
     private readonly repo: SignatureRequestRepository,
+    private readonly budgets: RemoteBudgetCheck,
     @Inject(SIGNATURE_CLOCK) private readonly clock: SignatureClock,
   ) {}
 
   async execute(token: string): Promise<PublicSignatureView> {
     const now = this.clock();
     return viewOf(
-      await findLive(this.tenantContext, this.repo, token, now),
+      await findLive(this.tenantContext, this.repo, this.budgets, token, now),
       now,
     );
   }
@@ -225,6 +242,7 @@ export class RequestSignatureCodeUseCase {
     private readonly tenantContext: TenantContextService,
     @Inject(SIGNATURE_REQUEST_REPOSITORY)
     private readonly repo: SignatureRequestRepository,
+    private readonly budgets: RemoteBudgetCheck,
     @Inject(SIGNATURE_EMAIL_SENDER)
     private readonly email: SignatureEmailSender,
     @Inject(SIGNATURE_CODE_KEY) private readonly codeKey: Buffer,
@@ -236,7 +254,13 @@ export class RequestSignatureCodeUseCase {
     evidence: PublicRequestEvidence,
   ): Promise<PublicSignatureView> {
     const now = this.clock();
-    const ctx = await findLive(this.tenantContext, this.repo, token, now);
+    const ctx = await findLive(
+      this.tenantContext,
+      this.repo,
+      this.budgets,
+      token,
+      now,
+    );
     const outcome = await this.repo.withLockedRequest<CodeOutcome>(
       ctx.request.id,
       evidence,
@@ -338,6 +362,7 @@ export class VerifySignatureCodeUseCase {
     private readonly tenantContext: TenantContextService,
     @Inject(SIGNATURE_REQUEST_REPOSITORY)
     private readonly repo: SignatureRequestRepository,
+    private readonly budgets: RemoteBudgetCheck,
     @Inject(SIGNATURE_CODE_KEY) private readonly codeKey: Buffer,
     @Inject(SIGNATURE_CLOCK) private readonly clock: SignatureClock,
   ) {}
@@ -348,7 +373,13 @@ export class VerifySignatureCodeUseCase {
     evidence: PublicRequestEvidence,
   ): Promise<VerifiedSignatureSession> {
     const now = this.clock();
-    const ctx = await findLive(this.tenantContext, this.repo, token, now);
+    const ctx = await findLive(
+      this.tenantContext,
+      this.repo,
+      this.budgets,
+      token,
+      now,
+    );
     const outcome = await this.repo.withLockedRequest<VerifyOutcome>(
       ctx.request.id,
       evidence,
@@ -445,6 +476,44 @@ export class VerifySignatureCodeUseCase {
   }
 }
 
+/**
+ * DX-415: el presupuesto tal como se envió (la foto), sin ids internos: lo
+ * que el paciente lee y acepta. Los importes se pintan con la moneda de la
+ * foto y el formato de la sede (`location`).
+ */
+export interface PublicBudgetView {
+  currency: string;
+  clinicName: string;
+  location: { name: string; address: string | null };
+  patient: QuoteContent['patient'];
+  professionalName: string | null;
+  agreement: QuoteContent['agreement'];
+  issuedOn: string;
+  validUntil: string;
+  validityDays: number;
+  items: Omit<QuoteContent['items'][number], 'id'>[];
+  totals: QuoteContent['totals'];
+}
+
+function budgetViewOf(content: QuoteContent): PublicBudgetView {
+  return {
+    currency: content.currency,
+    clinicName: content.clinicName,
+    location: {
+      name: content.location.name,
+      address: content.location.address,
+    },
+    patient: content.patient,
+    professionalName: content.professionalName,
+    agreement: content.agreement,
+    issuedOn: content.issuedOn,
+    validUntil: content.validUntil,
+    validityDays: content.validityDays,
+    items: content.items.map(({ id: _id, ...item }) => item),
+    totals: content.totals,
+  };
+}
+
 export interface PublicSignatureDocument {
   type: SignatureRequestType;
   title: string;
@@ -460,10 +529,13 @@ export interface PublicSignatureDocument {
   expiresAt: Date;
   clinic: PublicSignatureContext['clinic'];
   location: PublicSignatureContext['location'];
+  /** BUDGET (DX-415): el presupuesto que se acepta; CONSENT: null. */
+  budget: PublicBudgetView | null;
 }
 
 function documentOf(ctx: PublicSignatureContext): PublicSignatureDocument {
   const { request } = ctx;
+  const budget = sentBudget(request);
   return {
     type: request.type,
     title: request.title,
@@ -471,14 +543,32 @@ function documentOf(ctx: PublicSignatureContext): PublicSignatureDocument {
     templateVersion: request.templateVersion,
     signerType: request.signerType,
     signerName: request.signerName,
-    signerDocumentRequired:
-      request.signerType === 'GUARDIAN' && !request.signerDocument,
+    signerDocumentRequired: documentRequired(request),
     professionalName: request.professionalName,
     sentAt: request.createdAt,
     expiresAt: request.expiresAt,
     clinic: ctx.clinic,
     location: ctx.location,
+    budget: budget ? budgetViewOf(budget) : null,
   };
+}
+
+/**
+ * Firma un responsable sin documento registrado: lo escribe al firmar. Solo
+ * en consentimientos: la aceptación del presupuesto (como en la clínica)
+ * guarda el nombre de quien firma.
+ */
+function documentRequired(
+  request: Pick<
+    SignatureRequestRecord,
+    'type' | 'signerType' | 'signerDocument'
+  >,
+): boolean {
+  return (
+    request.type === 'CONSENT' &&
+    request.signerType === 'GUARDIAN' &&
+    !request.signerDocument
+  );
 }
 
 /** PÚBLICO: el documento completo, solo con la sesión del código verificado. */
@@ -488,6 +578,7 @@ export class GetPublicSignatureDocumentUseCase {
     private readonly tenantContext: TenantContextService,
     @Inject(SIGNATURE_REQUEST_REPOSITORY)
     private readonly repo: SignatureRequestRepository,
+    private readonly budgets: RemoteBudgetCheck,
     @Inject(SIGNATURE_CLOCK) private readonly clock: SignatureClock,
   ) {}
 
@@ -496,7 +587,13 @@ export class GetPublicSignatureDocumentUseCase {
     session: string | undefined,
   ): Promise<PublicSignatureDocument> {
     const now = this.clock();
-    const ctx = await findLive(this.tenantContext, this.repo, token, now);
+    const ctx = await findLive(
+      this.tenantContext,
+      this.repo,
+      this.budgets,
+      token,
+      now,
+    );
     if (!sessionMatches(ctx.request, session, now)) throw sessionRequired();
     return documentOf(ctx);
   }
@@ -527,7 +624,7 @@ type SignOutcome =
     };
 
 /**
- * PÚBLICO: el paciente (o su responsable) firma. La firma se guarda en
+ * PÚBLICO: el paciente (o su responsable) firma. CONSENT: la firma se guarda en
  * patient_consents con su hash y sus evidencias (canal, destino enmascarado,
  * envío, apertura, verificación, IP, navegador y `signedAt` del servidor):
  * inmutable. El enlace queda usado. Solo cuenta como «Completo» cuando
@@ -535,10 +632,15 @@ type SignOutcome =
  */
 @Injectable()
 export class SignPublicSignatureUseCase {
+  private readonly logger = new Logger('SignatureRequests');
+
   constructor(
     private readonly tenantContext: TenantContextService,
     @Inject(SIGNATURE_REQUEST_REPOSITORY)
     private readonly repo: SignatureRequestRepository,
+    private readonly budgets: RemoteBudgetCheck,
+    @Inject(SIGNATURE_EMAIL_SENDER)
+    private readonly email: SignatureEmailSender,
     @Inject(SIGNATURE_CLOCK) private readonly clock: SignatureClock,
   ) {}
 
@@ -549,15 +651,19 @@ export class SignPublicSignatureUseCase {
     evidence: PublicRequestEvidence,
   ): Promise<PublicSignedCopy> {
     const now = this.clock();
-    const ctx = await findLive(this.tenantContext, this.repo, token, now);
+    const ctx = await findLive(
+      this.tenantContext,
+      this.repo,
+      this.budgets,
+      token,
+      now,
+    );
     if (!sessionMatches(ctx.request, session, now)) throw sessionRequired();
     if (!input.accepted)
       throw new BadRequestException(SIGNATURE_NOT_READ_MESSAGE);
     const typedDocument = input.signerDocument?.trim() ?? '';
-    const documentRequired =
-      ctx.request.signerType === 'GUARDIAN' && !ctx.request.signerDocument;
     if (
-      documentRequired &&
+      documentRequired(ctx.request) &&
       (typedDocument === '' || typedDocument.length > SIGNER_DOCUMENT_MAX)
     ) {
       throw new BadRequestException(SIGNATURE_DOCUMENT_REQUIRED_MESSAGE);
@@ -579,6 +685,9 @@ export class SignPublicSignatureUseCase {
       throw error;
     }
 
+    if (ctx.request.type === 'BUDGET') {
+      return this.acceptBudget(ctx, session, signature, evidence, now);
+    }
     const outcome = await this.repo.withLockedRequest<SignOutcome>(
       ctx.request.id,
       evidence,
@@ -667,5 +776,146 @@ export class SignPublicSignatureUseCase {
       signedAt: outcome.signedAt,
       contentHash: outcome.contentHash,
     };
+  }
+
+  /**
+   * DX-415: el paciente acepta el presupuesto. En UNA transacción, con el
+   * enlace bloqueado y luego el plan y su grupo: se comprueba que el plan
+   * sigue siendo la foto enviada y se registra la aceptación como en la
+   * clínica (DX-012: foto, hash, firma, hora del servidor y un segundo hash
+   * que lo sella) con las evidencias del enlace; el plan pasa a ACCEPTED y las
+   * demás opciones abiertas del grupo a REJECTED (DX-040). Después, un email
+   * de confirmación sin datos clínicos.
+   */
+  private async acceptBudget(
+    ctx: PublicSignatureContext,
+    session: string | undefined,
+    signature: string,
+    evidence: PublicRequestEvidence,
+    now: Date,
+  ): Promise<PublicSignedCopy> {
+    const stillMatches = await this.budgets.matcher(ctx.request);
+    let outcome: SignOutcome | null;
+    try {
+      outcome = await this.repo.withLockedRequest<SignOutcome>(
+        ctx.request.id,
+        evidence,
+        (request) => {
+          if (!isLinkUsable(request, now)) {
+            return { write: null, result: { kind: 'INVALID' } };
+          }
+          const content = sentBudget(request);
+          if (
+            !sessionMatches(request, session, now) ||
+            !request.openedAt ||
+            !request.verifiedAt ||
+            !content ||
+            !request.treatmentPlanId ||
+            !request.budgetContentHash
+          ) {
+            return { write: null, result: { kind: 'SESSION' } };
+          }
+          const acceptanceHash = computeAcceptanceHash({
+            contentHash: request.budgetContentHash,
+            signerName: request.signerName,
+            signature,
+            acceptedAt: now,
+          });
+          return {
+            write: {
+              patch: {
+                signedAt: now,
+                sessionHash: null,
+                sessionExpiresAt: null,
+                codeHash: null,
+                codeExpiresAt: null,
+              },
+              audit: [{ action: 'SIGN', reason: 'SIGNATURE_PATIENT_SIGNED' }],
+              budget: {
+                planId: request.treatmentPlanId,
+                locationId: request.locationId,
+                stillMatches,
+                signerName: request.signerName,
+                signature,
+                content,
+                contentHash: request.budgetContentHash,
+                acceptanceHash,
+                acceptedAt: now,
+                acceptedById: request.createdById,
+                ipAddress: evidence.ipAddress,
+                userAgent: evidence.userAgent?.slice(0, 512) ?? null,
+                remoteChannel: request.channel,
+                remoteDestinationMasked: request.destinationMasked,
+                remoteSentAt: request.createdAt,
+                remoteOpenedAt: request.openedAt,
+                remoteVerifiedAt: request.verifiedAt,
+              },
+            },
+            result: {
+              kind: 'SIGNED',
+              signedAt: now,
+              contentHash: acceptanceHash,
+              signerDocument: request.signerDocument,
+            },
+          };
+        },
+      );
+    } catch (error) {
+      if (error instanceof RemoteBudgetChangedError) throw invalidLink();
+      // Otra opción del grupo ya aceptada, cobrada o con trabajo hecho
+      // (acceptPlanInTx): la clínica lo resuelve; al paciente, sin detalles.
+      if (error instanceof ConflictException) {
+        throw new ConflictException(SIGNATURE_BUDGET_NOT_ACCEPTABLE_MESSAGE);
+      }
+      throw error;
+    }
+    if (!outcome || outcome.kind === 'INVALID') throw invalidLink();
+    if (outcome.kind === 'SESSION') throw sessionRequired();
+    await this.confirmBudgetAccepted(ctx, outcome.signedAt);
+    return {
+      ...documentOf(ctx),
+      signerDocumentRequired: false,
+      signerDocument: outcome.signerDocument,
+      signedAt: outcome.signedAt,
+      contentHash: outcome.contentHash,
+    };
+  }
+
+  /**
+   * Email de confirmación de la aceptación: sin importes ni procedimientos.
+   * La aceptación ya está registrada: si el outbox falla, se registra en el
+   * log (sin destinatario) y el paciente tiene su copia en pantalla.
+   */
+  private async confirmBudgetAccepted(
+    ctx: PublicSignatureContext,
+    acceptedAt: Date,
+  ): Promise<void> {
+    const { request } = ctx;
+    try {
+      const format = requireLocationFormat({
+        id: request.locationId,
+        locale: ctx.location.locale,
+        hourCycle: ctx.location.hourCycle,
+      });
+      await this.email.sendBudgetAccepted({
+        to: request.destination,
+        referenceId: request.id,
+        vars: {
+          recipientFirstName:
+            firstNameOnly(request.signerName) ?? request.signerName,
+          clinicName: ctx.clinic.name,
+          acceptedAtLabel: format.longDateTime(
+            acceptedAt,
+            ctx.location.timeZone,
+          ),
+        },
+      });
+    } catch (err) {
+      this.logger.warn({
+        event: 'signature_request.budget_confirmation_not_enqueued',
+        signatureRequestId: request.id,
+        error: describeDeliveryError(err),
+      });
+    }
   }
 }

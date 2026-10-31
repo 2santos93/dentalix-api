@@ -18,6 +18,7 @@ import {
   PLAN_QUOTE_REPOSITORY,
   type NewPlanAcceptance,
   type PlanQuoteRepository,
+  type PlanAcceptanceRemoteEvidence,
   type PlanQuoteSource,
 } from '../../domain/ports/plan-quote-repository.port';
 import {
@@ -51,6 +52,10 @@ export interface PlanQuoteAcceptanceView {
   acceptanceHash: string;
   /** `true` si la foto y la firma guardadas coinciden con sus hashes. */
   integrityOk: boolean;
+  /** DX-415: aceptado a distancia por enlace con código (evidencias). */
+  remote: PlanAcceptanceRemoteEvidence | null;
+  ipAddress: string | null;
+  userAgent: string | null;
 }
 
 /** El presupuesto para verlo o imprimirlo. */
@@ -86,6 +91,11 @@ function todayIn(timeZone: string, now: Date): string {
   }).format(now);
 }
 
+/** Hoy (`YYYY-MM-DD`) en la zona de la sede del presupuesto. */
+export function quoteIssuedOn(source: PlanQuoteSource, now: Date): string {
+  return todayIn(source.location.timeZone, now);
+}
+
 /**
  * El presupuesto VIVO del plan, emitido hoy en la zona de la sede, con el
  * nombre visible de hoy del documento (DX-327, R17). Al aceptar se congela
@@ -94,6 +104,20 @@ function todayIn(timeZone: string, now: Date): string {
 function liveContent(
   source: PlanQuoteSource,
   now: Date,
+  names: ClinicDocumentTypeNames,
+): QuoteContent {
+  return composeQuoteContent(source, quoteIssuedOn(source, now), names);
+}
+
+/**
+ * El presupuesto del plan tal como está AHORA, emitido el día `issuedOn`.
+ * DX-415: con el `issuedOn` de la foto enviada, su hash es el de la foto si y
+ * solo si nada del presupuesto cambió (ítems, precios, convenio, paciente,
+ * sede, profesional).
+ */
+export function composeQuoteContent(
+  source: PlanQuoteSource,
+  issuedOn: string,
   names: ClinicDocumentTypeNames,
 ): QuoteContent {
   const { patient } = source;
@@ -118,7 +142,7 @@ function liveContent(
       professionalName: source.professionalName,
       items: source.items,
     },
-    todayIn(source.location.timeZone, now),
+    issuedOn,
   );
 }
 
@@ -173,6 +197,9 @@ function toDocument(
       acceptedByName: stored.acceptedByName,
       acceptanceHash: stored.acceptanceHash,
       integrityOk,
+      remote: stored.remote,
+      ipAddress: stored.ipAddress,
+      userAgent: stored.userAgent,
     },
   };
 }

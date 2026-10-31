@@ -1,13 +1,18 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Inject,
   Injectable,
   Logger,
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { SignatureRequestChannel, SignatureRequestType } from '@prisma/client';
+import {
+  SignatureRequestChannel,
+  SignatureRequestType,
+  TreatmentPlanStatus,
+} from '@prisma/client';
 import { describeDeliveryError } from '../../../notifications/email/application/retry-policy';
 import {
   CONSENT_TEMPLATE_REPOSITORY,
@@ -15,6 +20,13 @@ import {
 } from '../../../consents/domain/ports/consent-template-repository.port';
 import { ConsentDocumentRenderer } from '../../../consents/application/use-cases/patient-consents.use-cases';
 import { usesVariable } from '../../../consents/domain/render-consent';
+import {
+  composeQuoteContent,
+  PLAN_NOT_FOUND_MESSAGE,
+  quoteIssuedOn,
+} from '../../../treatment-plans/application/use-cases/plan-quote.use-cases';
+import { computeQuoteHash } from '../../../treatment-plans/domain/plan-quote';
+import { PLAN_STATUS_LABELS } from '../../../treatment-plans/domain/plan-status-machine';
 import {
   documentText,
   documentTypeName,
@@ -53,9 +65,27 @@ import {
   SIGNATURE_EMAIL_SENDER,
   type SignatureEmailSender,
 } from '../signature-email';
+import type { SignatureRequestEmailVars } from '../../../notifications/email/domain/email-message';
 
-export const SIGNATURE_BUDGET_NOT_AVAILABLE_MESSAGE =
-  'La firma a distancia de presupuestos aún no está disponible: envía un consentimiento.';
+export const SIGNATURE_BUDGET_PLAN_REQUIRED_MESSAGE =
+  'Elige el presupuesto que quieres enviar a aceptar.';
+export const SIGNATURE_BUDGET_ROLE_MESSAGE =
+  'Solo el odontólogo o la administración envían un presupuesto a aceptar.';
+export const SIGNATURE_BUDGET_EMPTY_MESSAGE =
+  'El presupuesto no tiene ítems: agrega al menos un procedimiento antes de enviarlo.';
+/** 409: solo un presupuesto «Presentado» (y sin aceptar) se envía a aceptar. */
+export function budgetNotPresentedMessage(status: TreatmentPlanStatus): string {
+  return `Solo se envía a aceptar un presupuesto «Presentado»: este está «${PLAN_STATUS_LABELS[status]}».`;
+}
+/** Título de la solicitud BUDGET (la ficha y la página pública). */
+export const BUDGET_REQUEST_TITLE = 'Presupuesto de tratamiento';
+/**
+ * Condiciones que acepta el paciente al firmar (se congelan en la solicitud,
+ * como el texto de un consentimiento). Los importes, la validez y la moneda
+ * van en la foto del presupuesto.
+ */
+export const BUDGET_ACCEPTANCE_TERMS =
+  'Al firmar aceptas este presupuesto y el plan de tratamiento que describe, con los importes, descuentos y la moneda indicados. El presupuesto es válido hasta la fecha que figura en él; si la clínica cambia algún ítem o precio, este enlace deja de servir y recibirás uno nuevo. Si el presupuesto tenía otras opciones, aceptar esta las rechaza.';
 export const SIGNATURE_TEMPLATE_REQUIRED_MESSAGE =
   'Elige la plantilla del consentimiento que quieres enviar.';
 export const SIGNATURE_INVALID_HOST_MESSAGE = 'Host no válido';
@@ -75,6 +105,13 @@ export interface SignatureActor {
   userId: string;
   /** Rol clínico: puede ser el profesional que firma (si no elige otro). */
   clinical: boolean;
+  /**
+   * DX-415: decide el plan (TREATMENT_PLAN_DECISION_ROLES: odontólogo y
+   * ADMIN). Solo él envía un presupuesto a aceptar: al firmarlo el paciente,
+   * el plan pasa a ACCEPTED a nombre de quien lo envió, y la asistente y
+   * recepción no aceptan planes (DX-040).
+   */
+  decidesPlans: boolean;
 }
 
 /** Fila de la ficha con su estado efectivo (caducar depende de la hora). */
@@ -91,14 +128,22 @@ export function toSignatureRequestSummary(
     channel: request.channel,
     templateId: request.templateId,
     templateVersion: request.templateVersion,
+    treatmentPlanId: request.treatmentPlanId,
     title: request.title,
     destinationMasked: request.destinationMasked,
     signerType: request.signerType,
     signerName: request.signerName,
     professionalUserId: request.professionalUserId,
     professionalName: request.professionalName,
+    // Un presupuesto queda completo con la firma del paciente: no lleva
+    // firma del profesional (la aceptación en la clínica tampoco).
     status: signatureRequestStatus(
-      { ...request, countersigned: consent?.countersignedAt != null },
+      {
+        ...request,
+        countersigned:
+          request.type === SignatureRequestType.BUDGET ||
+          consent?.countersignedAt != null,
+      },
       now,
     ),
     sentAt: request.createdAt,
@@ -111,7 +156,9 @@ export function toSignatureRequestSummary(
     signedAt: request.signedAt,
     revokedAt: request.revokedAt,
     consentId: consent?.id ?? null,
-    signedIpAddress: consent?.ipAddress ?? null,
+    signedIpAddress:
+      consent?.ipAddress ?? row.budgetAcceptance?.ipAddress ?? null,
+    budgetAcceptanceId: row.budgetAcceptance?.id ?? null,
     countersignedAt: consent?.countersignedAt ?? null,
   };
 }
@@ -269,6 +316,10 @@ export interface CreatedSignatureRequest extends SignatureRequestSummary {
  * Anula la solicitud anterior del mismo paciente y plantilla que aún
  * esperaba. Nada que falle deja una solicitud a medias: todo se comprueba
  * antes de escribir.
+ *
+ * BUDGET (DX-415): congela la FOTO del presupuesto de un plan «Presentado»
+ * (la misma que firma la aceptación en la clínica, DX-012) y su hash; anula
+ * el enlace anterior del mismo plan que aún esperaba.
  */
 @Injectable()
 export class CreateSignatureRequestUseCase {
@@ -291,8 +342,8 @@ export class CreateSignatureRequestUseCase {
     actor: SignatureActor,
     link: { protocol: string; host: string | null },
   ): Promise<CreatedSignatureRequest> {
-    if (input.type !== SignatureRequestType.CONSENT) {
-      throw new BadRequestException(SIGNATURE_BUDGET_NOT_AVAILABLE_MESSAGE);
+    if (input.type === SignatureRequestType.BUDGET) {
+      return this.createBudget(patientId, input, actor, link);
     }
     if (!input.templateId) {
       throw new BadRequestException(SIGNATURE_TEMPLATE_REQUIRED_MESSAGE);
@@ -363,29 +414,140 @@ export class CreateSignatureRequestUseCase {
       createdById: actor.userId,
       createdAt: now,
     });
+    return this.finishCreate(created, now, {
+      to: recipient.email,
+      vars: {
+        recipientFirstName: recipient.greetingName,
+        patientFirstName: recipient.patientFirstName,
+        clinicName: prepared.context.clinicName,
+        url: buildSignatureUrl(link.protocol, link.host, token),
+        expiresAtLabel: format.longDateTime(
+          expiresAt,
+          prepared.context.timeZone,
+        ),
+      },
+    });
+  }
+
+  /**
+   * DX-415: envía a aceptar el presupuesto de un plan «Presentado». La sede es
+   * la del presupuesto (la activa o, sin ella, la principal); el profesional
+   * que nombra el presupuesto es el que creó el plan, y la solicitud queda a
+   * nombre de quien la envía (no hay firma del profesional después).
+   */
+  private async createBudget(
+    patientId: string,
+    input: CreateSignatureRequestInput,
+    actor: SignatureActor,
+    link: { protocol: string; host: string | null },
+  ): Promise<CreatedSignatureRequest> {
+    if (!actor.decidesPlans) {
+      throw new ForbiddenException(SIGNATURE_BUDGET_ROLE_MESSAGE);
+    }
+    if (!input.treatmentPlanId) {
+      throw new BadRequestException(SIGNATURE_BUDGET_PLAN_REQUIRED_MESSAGE);
+    }
+    if (!link.host) {
+      throw new BadRequestException(SIGNATURE_INVALID_HOST_MESSAGE);
+    }
+    const ctx = await this.repo.loadRecipientContext(patientId);
+    if (!ctx) throw new NotFoundException(PATIENT_NOT_FOUND_MESSAGE);
+    const budget = await this.repo.loadBudget(patientId, input.treatmentPlanId);
+    if (!budget) throw new NotFoundException(PLAN_NOT_FOUND_MESSAGE);
+    const { quote } = budget;
+    // SEC-045: como el consentimiento, no se escribe en una sede ajena.
+    this.tenantContext.assertLocationAllowed(quote.location.id);
+    if (
+      quote.plan.status !== TreatmentPlanStatus.PRESENTED ||
+      quote.acceptance
+    ) {
+      throw new ConflictException(
+        budgetNotPresentedMessage(
+          quote.acceptance ? TreatmentPlanStatus.ACCEPTED : quote.plan.status,
+        ),
+      );
+    }
+    if (quote.items.length === 0) {
+      throw new BadRequestException(SIGNATURE_BUDGET_EMPTY_MESSAGE);
+    }
+
+    const now = this.clock();
+    const names = await this.documentTypeNames.get();
+    const content = composeQuoteContent(
+      quote,
+      quoteIssuedOn(quote, now),
+      names,
+    );
+    const recipient = decideRecipient(
+      ctx,
+      names,
+      content.patient.document,
+      now,
+    );
+    if (!recipient.ok) {
+      throw new UnprocessableEntityException(recipient.reason);
+    }
+    const format = requireLocationFormat(budget.location);
+    await this.email.assertCanSend(recipient.email);
+
+    const token = generateSignatureToken();
+    const expiresAt = signatureLinkExpiry(now);
+    const created = await this.repo.create({
+      locationId: quote.location.id,
+      patientId,
+      type: SignatureRequestType.BUDGET,
+      channel: input.channel,
+      templateId: null,
+      templateVersion: null,
+      treatmentPlanId: quote.plan.id,
+      title: BUDGET_REQUEST_TITLE,
+      body: BUDGET_ACCEPTANCE_TERMS,
+      budgetContent: content,
+      budgetContentHash: computeQuoteHash(content),
+      professionalUserId: actor.userId,
+      professionalName: (content.professionalName ?? content.clinicName).slice(
+        0,
+        200,
+      ),
+      signerType: recipient.signerType,
+      signerName: recipient.signerName,
+      signerDocument: recipient.signerDocument,
+      destination: recipient.email,
+      destinationMasked: maskEmail(recipient.email),
+      tokenHash: hashSignatureToken(token),
+      expiresAt,
+      createdById: actor.userId,
+      createdAt: now,
+    });
+    return this.finishCreate(created, now, {
+      to: recipient.email,
+      vars: {
+        recipientFirstName: recipient.greetingName,
+        patientFirstName: recipient.patientFirstName,
+        clinicName: content.clinicName,
+        url: buildSignatureUrl(link.protocol, link.host, token),
+        expiresAtLabel: format.longDateTime(expiresAt, quote.location.timeZone),
+      },
+    });
+  }
+
+  /**
+   * Tras guardar: cancela los emails de las solicitudes anuladas y encola el
+   * del enlace. Un fallo del outbox no convierte la solicitud ya guardada en
+   * un 500 (un reintento duplicaría el envío); la ficha lo dice y se puede
+   * anular y enviar otra. Nunca se registra la URL ni el destinatario.
+   */
+  private async finishCreate(
+    created: { id: string; supersededIds: string[] },
+    now: Date,
+    link: { to: string; vars: SignatureRequestEmailVars },
+  ): Promise<CreatedSignatureRequest> {
     for (const id of created.supersededIds) {
       await this.cancelPendingEmail(id);
     }
-
-    // La solicitud ya está guardada: un fallo del outbox no la convierte en
-    // un 500 (un reintento duplicaría el envío); la ficha lo dice y se puede
-    // anular y enviar otra. Nunca se registra la URL ni el destinatario.
     let emailQueued = false;
     try {
-      await this.email.sendLink({
-        to: recipient.email,
-        referenceId: created.id,
-        vars: {
-          recipientFirstName: recipient.greetingName,
-          patientFirstName: recipient.patientFirstName,
-          clinicName: prepared.context.clinicName,
-          url: buildSignatureUrl(link.protocol, link.host, token),
-          expiresAtLabel: format.longDateTime(
-            expiresAt,
-            prepared.context.timeZone,
-          ),
-        },
-      });
+      await this.email.sendLink({ ...link, referenceId: created.id });
       emailQueued = true;
     } catch (err) {
       this.logger.warn({
@@ -394,7 +556,6 @@ export class CreateSignatureRequestUseCase {
         error: describeDeliveryError(err),
       });
     }
-
     const row = await this.repo.findById(created.id);
     if (!row) throw new NotFoundException(SIGNATURE_REQUEST_NOT_FOUND_MESSAGE);
     return { ...toSignatureRequestSummary(row, now), emailQueued };

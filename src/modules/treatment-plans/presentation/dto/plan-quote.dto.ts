@@ -1,5 +1,9 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { ToothSurface, TreatmentPlanStatus } from '@prisma/client';
+import {
+  SignatureRequestChannel,
+  ToothSurface,
+  TreatmentPlanStatus,
+} from '@prisma/client';
 import { IsString, Matches, MaxLength } from 'class-validator';
 
 // Margen sobre el base64 de 200 KB (273068) para el prefijo `data:`; el tope
@@ -161,6 +165,39 @@ export class PlanQuoteAcceptanceDto {
       'false si la foto o la firma guardadas no coinciden con sus hashes',
   })
   integrityOk!: boolean;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'IP desde la que se firmó (evidencia)',
+  })
+  ipAddress!: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  userAgent!: string | null;
+
+  @ApiProperty({
+    type: () => PlanQuoteRemoteAcceptanceDto,
+    nullable: true,
+    description:
+      'DX-415: «Aceptado a distancia» por el paciente con enlace y código; null si se firmó en la clínica.',
+  })
+  remote!: PlanQuoteRemoteAcceptanceDto | null;
+}
+
+/** Evidencias de la aceptación a distancia (DX-415), congeladas al firmar. */
+export class PlanQuoteRemoteAcceptanceDto {
+  @ApiProperty({ format: 'uuid' }) signatureRequestId!: string;
+  @ApiProperty({
+    enum: SignatureRequestChannel,
+    enumName: 'SignatureRequestChannel',
+  })
+  channel!: SignatureRequestChannel;
+  @ApiProperty({ description: 'Destino enmascarado (an***@dominio)' })
+  destinationMasked!: string;
+  @ApiProperty({ format: 'date-time' }) sentAt!: Date;
+  @ApiProperty({ format: 'date-time' }) openedAt!: Date;
+  @ApiProperty({ format: 'date-time' }) verifiedAt!: Date;
 }
 
 /**

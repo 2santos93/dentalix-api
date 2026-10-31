@@ -45,6 +45,10 @@ export interface SignatureRequestRecord {
   revokedAt: Date | null;
   createdById: string;
   createdAt: Date;
+  /** DX-415 (BUDGET): la foto del presupuesto enviado (JSONB, plan-quote.ts). */
+  budgetContent: unknown;
+  /** SHA-256 de esa foto (`computeQuoteHash`). */
+  budgetContentHash: string | null;
 }
 
 /** Lo que ve la ficha: estado y evidencias, sin texto, destino ni hashes. */
@@ -57,6 +61,8 @@ export interface SignatureRequestSummary {
   channel: SignatureRequestChannel;
   templateId: string | null;
   templateVersion: number | null;
+  /** El plan del presupuesto (BUDGET) o el que rellenó {{tratamiento}}. */
+  treatmentPlanId: string | null;
   title: string;
   destinationMasked: string;
   signerType: ConsentSignerType;
@@ -77,6 +83,8 @@ export interface SignatureRequestSummary {
   consentId: string | null;
   /** IP desde la que firmó el paciente (evidencia). */
   signedIpAddress: string | null;
+  /** DX-415: la aceptación del plan que produjo la firma (BUDGET). */
+  budgetAcceptanceId: string | null;
   /** Cuándo firmó el profesional en la app (Completo). */
   countersignedAt: Date | null;
 }
@@ -90,6 +98,8 @@ export interface SignatureRequestListRow {
     ipAddress: string | null;
     countersignedAt: Date | null;
   } | null;
+  /** DX-415: la aceptación del plan que produjo la firma (BUDGET). */
+  budgetAcceptance: { id: string; ipAddress: string | null } | null;
 }
 
 /** Marca de la clínica y formato de la sede para la página pública. */

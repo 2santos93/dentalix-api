@@ -38,6 +38,7 @@ import { Audit } from '../../audit/presentation/audit.decorator';
 import {
   CLINICAL_ROLES,
   SIGNATURE_REQUEST_ROLES,
+  TREATMENT_PLAN_DECISION_ROLES,
 } from '../../auth/presentation/guards/clinic-role-sets';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { Roles } from '../../auth/presentation/guards/roles.decorator';
@@ -63,6 +64,9 @@ function actorOf(req: AuthenticatedRequest): SignatureActor {
     userId: req.user.sub,
     clinical:
       isTenantPayload(req.user) && CLINICAL_ROLES.includes(req.user.role),
+    decidesPlans:
+      isTenantPayload(req.user) &&
+      TREATMENT_PLAN_DECISION_ROLES.includes(req.user.role),
   };
 }
 
@@ -127,20 +131,28 @@ export class PatientSignatureRequestsController {
   })
   @Post()
   @ApiOperation({
-    summary: 'Enviar un consentimiento a firmar a distancia (email)',
+    summary:
+      'Enviar un consentimiento a firmar o un presupuesto a aceptar a distancia (email)',
     description:
-      'Congela el texto (plantilla, paciente, plan, profesional) y envía por email un enlace de un solo uso que caduca a las 72 h; el documento solo se ve tras un código de 6 dígitos. Un menor (mayoría de la clínica) firma por medio de su responsable. Anula la solicitud anterior del mismo paciente y plantilla aún sin firmar. BUDGET responde 400 (llega con DX-415).',
+      'Congela el texto (plantilla, paciente, plan, profesional) y envía por email un enlace de un solo uso que caduca a las 72 h; el documento solo se ve tras un código de 6 dígitos. Un menor (mayoría de la clínica) firma por medio de su responsable. Anula la solicitud anterior del mismo paciente y plantilla aún sin firmar. BUDGET (DX-415): solo odontólogo o ADMIN; congela la foto del presupuesto de un plan «Presentado» y su hash, y anula el enlace anterior del mismo plan; si el plan cambia después, el enlace deja de servir.',
   })
   @ApiCreatedResponse({ type: SignatureRequestCreatedDto })
   @ApiBadRequestResponse({
     description:
-      'BUDGET (aún no disponible), sin plantilla, plantilla desactivada, profesional no válido o host no válido',
+      'BUDGET sin plan o sin ítems, sin plantilla, plantilla desactivada, profesional no válido o host no válido',
   })
   @ApiUnprocessableEntityResponse({
     description:
       'Sin email, menor sin responsable o paciente dado de baja de los envíos',
   })
-  @ApiConflictResponse({ description: 'La sede no tiene formato regional' })
+  @ApiForbiddenResponse({
+    description:
+      'BUDGET enviado por un rol que no decide el plan (asistente o recepción), o desde una sede no permitida',
+  })
+  @ApiConflictResponse({
+    description:
+      'La sede no tiene formato regional, o BUDGET de un plan que no está «Presentado» (o ya aceptado)',
+  })
   create(
     @Param('patientId', ParseUUIDPipe) patientId: string,
     @Body() dto: CreateSignatureRequestDto,

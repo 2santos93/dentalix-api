@@ -11,6 +11,7 @@ import {
   SIGNATURE_CLOCK,
   SIGNATURE_CODE_KEY,
 } from './application/signature-clock';
+import { RemoteBudgetCheck } from './application/remote-budget';
 import {
   OutboxSignatureEmailSender,
   SIGNATURE_EMAIL_SENDER,
@@ -38,7 +39,8 @@ import { PublicSignatureController } from './presentation/public-signature.contr
  * DX-243: firma a distancia por enlace con código de verificación. Rutas del
  * personal (opciones del modal, enviar, listar, anular) y públicas del
  * paciente (estado, código, verificación, documento y firma). La firma del
- * profesional que completa el consentimiento vive en ConsentsModule.
+ * profesional que completa el consentimiento vive en ConsentsModule. DX-415:
+ * también presupuestos (BUDGET), que al firmarse aceptan el plan.
  */
 @Module({
   imports: [
@@ -58,6 +60,7 @@ import { PublicSignatureController } from './presentation/public-signature.contr
     VerifySignatureCodeUseCase,
     GetPublicSignatureDocumentUseCase,
     SignPublicSignatureUseCase,
+    RemoteBudgetCheck,
     { provide: SIGNATURE_CLOCK, useValue: () => new Date() },
     {
       // HMAC del código con una clave derivada de un secreto del servidor

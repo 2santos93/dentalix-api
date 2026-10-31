@@ -790,8 +790,8 @@ migraciones `20261105150000_dx243_enums`,
 `20261105150100_dx243_audit_events_idx` y
 `20261105150200_dx243_signature_requests`.
 
-- **Tabla `signature_requests`**: tipo (`CONSENT`; `BUDGET` reservado para
-  DX-415, hoy 400), canal (`EMAIL`), sede, plantilla y versión, plan
+- **Tabla `signature_requests`**: tipo (`CONSENT`; `BUDGET`, ver «Presupuesto
+  a distancia (DX-415)» abajo), canal (`EMAIL`), sede, plantilla y versión, plan
   opcional, el documento **congelado** al enviar (título y texto ya
   resueltos), profesional que firmará, firmante (`PATIENT` o `GUARDIAN` con su
   nombre), destino y destino enmascarado, `tokenHash` (SHA-256),
@@ -844,6 +844,48 @@ migraciones `20261105150000_dx243_enums`,
   origen `LINK` en la misma transacción.
 - **Pendiente**: el PDF firmado al paciente (no hay generación de PDF en el
   servidor; la página pública ofrece imprimir/guardar la copia al firmar).
+
+### Presupuesto a distancia (DX-415)
+
+El presupuesto de un plan **«Presentado»** se envía por el mismo enlace con
+código; al firmar, el plan queda aceptado con las reglas de la aceptación en
+la clínica (DX-012/DX-040). Migraciones `20261106160000_dx415_enums` y
+`20261106160100_dx415_remote_budget`.
+
+- `POST /patients/:patientId/signature-requests` con `type: BUDGET` y
+  `treatmentPlanId` (obligatorio, 400 sin él; 404 si no es del paciente o de
+  la clínica; **409** «Solo se envía a aceptar un presupuesto «Presentado»:
+  este está «…»» si está en borrador, aceptado, rechazado, completado o
+  cancelado; 400 sin ítems). Congela la **foto** del presupuesto
+  (`composeQuoteContent`, la misma que imprime y firma `…/quote`) emitida hoy
+  en la sede del request, en `budgetContent`, y su SHA-256 en
+  `budgetContentHash` (CHECK `signature_requests_budget_check`; el guard las
+  congela). `title` y `body` son el título fijo y las condiciones que acepta.
+  Anula el enlace anterior del mismo plan aún sin firmar. Sin profesional que
+  firme después: la solicitud queda a nombre de quien la envía.
+- **Validez del enlace**: cada ruta pública recompone el presupuesto vivo con
+  el `issuedOn` de la foto (`budgetStillMatches`); si cambió algo (ítems,
+  precios, descuentos, convenio, paciente, sede, profesional) o el plan ya no
+  está «Presentado» o está aceptado, responde 404 «Enlace no válido».
+- `GET /public/sign/:token/document` trae `budget` (la foto sin ids: ítems,
+  totales, moneda, validez, convenio) y `body` (las condiciones).
+- `POST /public/sign/:token/sign`: en UNA transacción, con la solicitud
+  bloqueada y después el plan y su grupo (`lockPlanGroup`, orden de id), se
+  vuelve a comprobar la foto y se inserta la aceptación en
+  `treatment_plan_acceptances` (foto, hash, firma, `acceptanceHash`, IP, UA y
+  las evidencias `signatureRequestId`, `remoteChannel`,
+  `remoteDestinationMasked`, `remoteSentAt/OpenedAt/VerifiedAt`; CHECK
+  `treatment_plan_acceptances_remote_check`, FK compuesta e índice único por
+  solicitud); `acceptPlanInTx` pasa el plan a ACCEPTED, sus ítems a aceptados
+  y las demás opciones abiertas del grupo a REJECTED (`OTHER_OPTION_ACCEPTED`).
+  Si el plan cambió: 404 «Enlace no válido» y nada se escribe; si otra opción
+  ya cobrada lo impide: 409 sin detalles internos. Después se encola el email
+  `signature-budget-accepted` (sin importes ni procedimientos).
+- La ficha: el listado de solicitudes trae `treatmentPlanId`,
+  `budgetAcceptanceId` y estado `COMPLETE` al firmar; `GET …/quote` trae en
+  `acceptance` `remote` (las evidencias), `ipAddress` y `userAgent`.
+- **Pendiente** (DX-422): el PDF del presupuesto firmado generado en el
+  servidor; hoy el paciente imprime o guarda la copia desde la página.
 
 ## Flujo del paciente en la clínica (DX-200)
 
