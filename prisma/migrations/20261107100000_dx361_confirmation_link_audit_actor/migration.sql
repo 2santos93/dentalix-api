@@ -19,10 +19,11 @@
 -- esos eventos. No hay tabla ni columna nueva.
 --
 -- Bloqueo: el DROP/ADD CONSTRAINT toma ACCESS EXCLUSIVE sobre audit_events
--- (y sus particiones) hasta el COMMIT, sin reescribir; NOT VALID + VALIDATE
--- recorre las filas sin bloquear escrituras más de lo necesario. lock_timeout
--- evita quedar encolado tras una transacción larga (mismo molde que DX-402 y
--- DX-243).
+-- (y sus particiones) hasta el COMMIT, pero NOT VALID no recorre filas, así
+-- que dura milisegundos. El VALIDATE va en la migración siguiente
+-- (20261107100100), en su propia transacción con SHARE UPDATE EXCLUSIVE: lee
+-- la tabla sin bloquear la escritura de auditoría (molde de DX-390).
+-- lock_timeout evita quedar encolado tras una transacción larga.
 
 SET LOCAL lock_timeout = '5s';
 
@@ -87,4 +88,3 @@ ALTER TABLE "audit_events" ADD CONSTRAINT "audit_events_actor_check"
                                         'CONFIRMATION_LINK_CANCELLED',
                                         'CONFIRMATION_LINK_CALL_REQUESTED')) IS TRUE
   ) NOT VALID;
-ALTER TABLE "audit_events" VALIDATE CONSTRAINT "audit_events_actor_check";
