@@ -162,6 +162,42 @@ describeWithBackupTools(
     );
 
     it(
+      'el manifiesto lista al owner aunque sea superusuario (el owner de la CI lo es)',
+      () => {
+        // En postgres:16 de la CI el owner `dentalix` es superusuario; si el
+        // manifiesto lo omitiera, --create-missing-roles no lo crearía en un
+        // clúster nuevo. Base vacía cuyo owner es el admin (superusuario).
+        const suDb = `${PREFIX}su_${process.pid}`;
+        psql(cfg.adminUrl, `CREATE DATABASE ${suDb}`);
+        try {
+          const r = spawnSync(
+            'bash',
+            [
+              '-c',
+              '. "$1"; printf "%s;\\n" "$DX_COUNTS_SQL" | psql "$2" -X -A -t -q -v ON_ERROR_STOP=1',
+              '_',
+              join(SCRIPTS, 'lib', 'dx082-common.sh'),
+              pgUrl(cfg.adminUrl, suDb),
+            ],
+            { encoding: 'utf8' },
+          );
+          expect(r.status).toBe(0);
+          const m = JSON.parse(r.stdout) as { owner: string; roles: string[] };
+          expect(
+            psql(
+              cfg.adminUrl,
+              `SELECT rolsuper FROM pg_roles WHERE rolname = '${m.owner}'`,
+            ),
+          ).toBe('t');
+          expect(m.roles).toContain(m.owner);
+        } finally {
+          psql(cfg.adminUrl, `DROP DATABASE IF EXISTS ${suDb} WITH (FORCE)`);
+        }
+      },
+      SLOW,
+    );
+
+    it(
       'restore-check.sh restaura en una base temporal, cuadra conteos, migraciones y FORCE, y la borra',
       () => {
         const r = restoreCheck(dumpFile);

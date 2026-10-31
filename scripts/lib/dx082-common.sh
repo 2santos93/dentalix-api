@@ -30,7 +30,10 @@ dx_now_ms() {
 }
 
 dx_pct_decode() {
-  local s="${1//%/\\x}"
+  # Primero las «\» literales (una contraseña sin codificar puede llevarlas):
+  # si no, `%b` las tomaría por escapes (\n, \t, \0…) y cambiaría el valor.
+  local s="${1//\\/\\\\}"
+  s="${s//%/\\x}"
   printf '%b' "$s"
 }
 
@@ -176,13 +179,14 @@ SELECT json_build_object(
   $$last_migration$$, CASE WHEN to_regclass($$public._prisma_migrations$$) IS NULL THEN NULL ELSE
     (xpath($$/row/m/text()$$, query_to_xml($$SELECT max(migration_name) AS m FROM public._prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL$$, false, true, $$$$)))[1]::text END,
   $$roles$$, (SELECT coalesce(json_agg(r.rolname ORDER BY r.rolname), $$[]$$::json) FROM pg_roles r
-     WHERE r.rolname NOT LIKE $$pg\_%$$ AND NOT r.rolsuper AND (
+     WHERE r.rolname NOT LIKE $$pg\_%$$ AND (
        r.oid = (SELECT datdba FROM pg_database WHERE datname = current_database())
-       OR EXISTS (SELECT 1 FROM pg_policy p WHERE r.oid = ANY (p.polroles))
-       OR EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace, aclexplode(c.relacl) a
-                   WHERE n.nspname = $$public$$ AND (a.grantee = r.oid OR c.relowner = r.oid))
-       OR EXISTS (SELECT 1 FROM pg_proc f JOIN pg_namespace n ON n.oid = f.pronamespace
-                   WHERE n.nspname = $$public$$ AND f.proowner = r.oid))),
+       OR NOT r.rolsuper AND (
+         EXISTS (SELECT 1 FROM pg_policy p WHERE r.oid = ANY (p.polroles))
+         OR EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace, aclexplode(c.relacl) a
+                     WHERE n.nspname = $$public$$ AND (a.grantee = r.oid OR c.relowner = r.oid))
+         OR EXISTS (SELECT 1 FROM pg_proc f JOIN pg_namespace n ON n.oid = f.pronamespace
+                     WHERE n.nspname = $$public$$ AND f.proowner = r.oid)))),
   $$database_settings$$, (SELECT coalesce(json_object_agg(split_part(c, $$=$$, 1), substr(c, strpos(c, $$=$$) + 1)), $${}$$::json)
      FROM pg_db_role_setting s, unnest(s.setconfig) AS c
      WHERE s.setrole = 0 AND s.setdatabase = (SELECT oid FROM pg_database WHERE datname = current_database())),
