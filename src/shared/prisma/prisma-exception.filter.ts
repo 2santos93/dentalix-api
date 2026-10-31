@@ -203,6 +203,17 @@ export const EXPENSE_INTEGRITY_MESSAGES = {
   Q3934:
     'La anulación de la salida no coincide con su importe o con su caja. Vuelve a intentarlo.',
 } as const;
+// DX-427: `dx427_*_not_before_entry` rechazó una hora de anestesia, de un
+// fármaco de sedación o de una toma anterior a la fecha de la evolución
+// (ERRCODE propio Q4270). Mismo texto que el RAISE de la migración
+// 20261107120000_dx427_anesthesia_sedation_checks.
+export const CLINICAL_TIME_BEFORE_ENTRY_MESSAGE =
+  'La hora no puede ser anterior a la fecha de la evolución.';
+const CLINICAL_TIME_BEFORE_ENTRY: ErrorBody = {
+  statusCode: HttpStatus.BAD_REQUEST,
+  error: 'Bad Request',
+  message: CLINICAL_TIME_BEFORE_ENTRY_MESSAGE,
+};
 // Dos transacciones se cruzaron (deadlock o fallo de serialización): Postgres
 // abortó esta. Reintentar la operación la resuelve (DX-012).
 const CONCURRENCY_CONFLICT: ErrorBody = {
@@ -270,6 +281,7 @@ export const BY_SQLSTATE: Record<string, ErrorBody> = {
   Q3932: conflict(EXPENSE_INTEGRITY_MESSAGES.Q3932),
   Q3933: conflict(EXPENSE_INTEGRITY_MESSAGES.Q3933),
   Q3934: conflict(EXPENSE_INTEGRITY_MESSAGES.Q3934),
+  Q4270: CLINICAL_TIME_BEFORE_ENTRY, // propio (DX-427): hora clínica anterior a la evolución
 };
 
 /**

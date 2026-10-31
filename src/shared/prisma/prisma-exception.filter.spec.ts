@@ -2,6 +2,7 @@ import { ArgumentsHost, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import {
   BY_SQLSTATE,
+  CLINICAL_TIME_BEFORE_ENTRY_MESSAGE,
   EXPENSE_INTEGRITY_MESSAGES,
   PrismaExceptionFilter,
   STATEMENT_TIMEOUT_MESSAGE,
@@ -280,6 +281,26 @@ describe('PrismaExceptionFilter', () => {
     jest.restoreAllMocks();
   });
 
+  it('turns the clinical time guard (Q4270, DX-427) into a 400 in Spanish, without the DETAIL', () => {
+    const filter = new PrismaExceptionFilter();
+    const { host, status, json } = mockHost();
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+    filter.catch(
+      unknownPg('Q4270', CLINICAL_TIME_BEFORE_ENTRY_MESSAGE, SECRET_DETAIL),
+      host,
+    );
+
+    expect(status).toHaveBeenCalledWith(400);
+    expect(bodyOf(json)).toEqual({
+      statusCode: 400,
+      error: 'Bad Request',
+      message: 'La hora no puede ser anterior a la fecha de la evolución.',
+    });
+    expect(JSON.stringify(bodyOf(json))).not.toContain(SECRET_DETAIL);
+    jest.restoreAllMocks();
+  });
+
   it.each(Object.entries(EXPENSE_INTEGRITY_MESSAGES))(
     'turns the expense integrity guard %s (DX-393) into a 409 in Spanish, without the DETAIL',
     (code, message) => {
@@ -303,6 +324,7 @@ describe('PrismaExceptionFilter', () => {
   it('own SQLSTATEs live in an implementation class (I–Z or 5–9), never A–H', () => {
     const own = Object.keys(BY_SQLSTATE).filter((code) => !/^\d{2}/.test(code));
     expect(own).toContain('Q0271');
+    expect(own).toContain('Q4270');
     expect(own).toEqual(
       expect.arrayContaining(Object.keys(EXPENSE_INTEGRITY_MESSAGES)),
     );

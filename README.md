@@ -4989,6 +4989,62 @@ CHECKLIST|AGENT|VITALS|DISCHARGE`, sin constantes, dosis ni textos.
   intraoperatorias cada 5 min y egreso hace 20 con el asistente como
   monitor).
 
+### Reglas de la anestesia y de la sedación en la BD (DX-427)
+
+Defensa en profundidad (DB-064): la base rechaza lo que la app ya no escribe,
+también por SQL directo o desde una réplica antigua.
+
+- **CHECK** en `anesthesia_administrations`: `doseMg` entre 0 (excluido) y
+  10.000 mg (20 carpules × 5 ml × 10 %, los máximos del catálogo y
+  `CARPULES_MAX`); `doseMg` = carpules × ml × concentración × 10 con ± 0,1 por
+  el redondeo de `lineMg`; el acumulado incluye la dosis (`cumulativeMg ≥
+  doseMg`, % ≥ 0, epinefrina acumulada ≥ la de la dosis). La dosis del fármaco
+  de sedación ya la acotaba `sedation_agent_administrations_kind_shape`.
+- **Hora no futura**: la hora clínica (anestesia, valoración, checklist,
+  fármaco, toma y egreso) ≤ `createdAt` (hora del servidor de la BD) + 15 min.
+  La app rechaza antes, con su reloj y 5 min de tolerancia; los 10 min de más
+  cubren el desfase entre la API y la base.
+- **No antes de la evolución**: trigger `BEFORE INSERT` (SECURITY INVOKER,
+  bajo la RLS de la fila) en la anestesia, el fármaco y la toma: la hora no
+  puede ser anterior a `entryDate` − 36 h (el día civil entero en cualquier
+  zona). SQLSTATE propio `Q4270` → **400** «La hora no puede ser anterior a la
+  fecha de la evolución.» (`PrismaExceptionFilter`). Los CHECK que fallen
+  llegan como el 400 genérico de DX-042, nunca 500.
+- **Migraciones** `20261107120000_dx427_anesthesia_sedation_checks` (CHECK
+  `NOT VALID`, funciones y triggers; bloqueo de milisegundos) y
+  `…120100_dx427_anesthesia_sedation_validate` (`VALIDATE` en su propia
+  transacción, `SHARE UPDATE EXCLUSIVE`). Consulta previa opcional (debe dar
+  0 filas; como owner):
+
+  ```sql
+  SELECT 'anestesia', id FROM anesthesia_administrations
+  WHERE NOT ("doseMg" > 0 AND "doseMg" <= 10000
+    AND abs("doseMg" - round("carpules" * "mlPerCarpule" * "concentrationPct" * 10, 1)) <= 0.1
+    AND "cumulativeMg" >= "doseMg"
+    AND ("cumulativePercent" IS NULL OR "cumulativePercent" >= 0)
+    AND ("cumulativeEpinephrineMg" IS NULL OR "epinephrineMg" IS NULL
+         OR "cumulativeEpinephrineMg" + 0.0001 >= "epinephrineMg")
+    AND "administeredAt" <= "createdAt" + interval '15 minutes')
+  UNION ALL SELECT 'fármaco', id FROM sedation_agent_administrations
+    WHERE "administeredAt" > "createdAt" + interval '15 minutes'
+  UNION ALL SELECT 'toma', id FROM sedation_vitals
+    WHERE "takenAt" > "createdAt" + interval '15 minutes'
+  UNION ALL SELECT 'egreso', id FROM sedation_discharges
+    WHERE "dischargedAt" > "createdAt" + interval '15 minutes'
+  UNION ALL SELECT 'valoración', id FROM sedation_records
+    WHERE "assessedAt" > "createdAt" + interval '15 minutes'
+  UNION ALL SELECT 'checklist', id FROM sedation_checklists
+    WHERE "checkedAt" > "createdAt" + interval '15 minutes';
+  ```
+
+  Si el `VALIDATE` falla (por `lock_timeout` o por una fila así), `npx prisma
+  migrate resolve --rolled-back 20261107120100_dx427_anesthesia_sedation_validate`
+  y `deploy` de nuevo: la primera migración ya protege las escrituras nuevas.
+  Una fila incoherente no se corrige (es inalterable): se documenta con una
+  adenda y se decide con el responsable clínico.
+- **Pruebas**: `test/anesthesia-sedation-checks.int-spec.ts` (INSERT crudos
+  con `dentalix_app`) y `test/migrations/dx427-additive.spec.ts`.
+
 ## Imputación de abonos a ítems (DX-051)
 
 Cada abono a un plan se reparte entre los ítems `DONE` y `ACCEPTED` del plan
