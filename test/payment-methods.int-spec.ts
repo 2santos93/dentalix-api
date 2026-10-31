@@ -41,9 +41,12 @@ async function seedClinic(
   subdomain: string,
   beforeDx377 = false,
 ): Promise<Seeded> {
-  const tenant = await db.tenant.create({
-    data: { name: subdomain, subdomain },
-  });
+  // SQL y no `db.tenant.create`: la BD está migrada solo hasta esta migración y
+  // el cliente insertaría columnas de tenant posteriores (p. ej. DX-253).
+  const [tenant] = await db.$queryRaw<{ id: string }[]>`
+    INSERT INTO "tenants" ("id", "name", "subdomain", "updatedAt")
+    VALUES (gen_random_uuid(), ${subdomain}, ${subdomain}, now())
+    RETURNING "id"`;
   const { defaultPhoneRegion: _region, ...regional } = REGIONAL_BOGOTA_FIXTURE;
   const location = await db.location.create({
     data: beforeDx377
