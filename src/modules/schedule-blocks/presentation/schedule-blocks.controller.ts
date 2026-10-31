@@ -42,7 +42,10 @@ import {
   UpdateScheduleBlockUseCase,
   type ScheduleBlockActor,
 } from '../application/use-cases/schedule-blocks.use-cases';
-import type { ScheduleBlock } from '../domain/entities/schedule-block.entity';
+import type {
+  ScheduleBlock,
+  ScheduleBlockView,
+} from '../domain/entities/schedule-block.entity';
 import type { AffectedAppointmentsPage } from '../domain/ports/schedule-block-repository.port';
 import {
   AffectedAppointmentsPageDto,
@@ -50,6 +53,7 @@ import {
   CreateScheduleBlockDto,
   ListScheduleBlocksQueryDto,
   ScheduleBlockDto,
+  ScheduleBlockListItemDto,
   UpdateScheduleBlockDto,
 } from './dto/schedule-block.dto';
 
@@ -83,12 +87,14 @@ export class ScheduleBlocksController {
   ) {}
 
   @Get()
-  @ApiOkResponse({ type: [ScheduleBlockDto] })
+  @ApiOkResponse({ type: [ScheduleBlockListItemDto] })
   @ApiBadRequestResponse({
     description: 'Rango vacío o de más de 92 días',
   })
   @ApiNotFoundResponse({ description: 'Sede o profesional de otra clínica' })
-  list(@Query() query: ListScheduleBlocksQueryDto): Promise<ScheduleBlock[]> {
+  list(
+    @Query() query: ListScheduleBlocksQueryDto,
+  ): Promise<ScheduleBlockView[]> {
     return this.listBlocks.execute({
       from: new Date(query.from),
       to: new Date(query.to),
@@ -128,12 +134,15 @@ export class ScheduleBlocksController {
   @ApiCreatedResponse({ type: ScheduleBlockDto })
   @ApiBadRequestResponse({
     description:
-      'Sin sede ni profesional, fin no posterior al inicio, más de 366 días o nota inválida',
+      'Sin sede ni profesional, fin no posterior al inicio, más de 366 días, nota inválida, o reservado mal formado (DX-446: sin tipos, sin sede, más de un día, liberación tras el inicio, tipo desactivado)',
   })
   @ApiForbiddenResponse({
     description: 'Asistente, o un odontólogo que bloquea otra agenda o la sede',
   })
-  @ApiNotFoundResponse({ description: 'Sede o profesional de otra clínica' })
+  @ApiNotFoundResponse({
+    description:
+      'Sede, profesional o tipo de cita reservado (DX-446) de otra clínica',
+  })
   @ApiConflictResponse({
     description:
       'Hay citas dentro del rango y no vino `confirmAffected: true` (no se tocan)',
@@ -151,6 +160,8 @@ export class ScheduleBlocksController {
         kind: dto.kind,
         allowsBooking: dto.allowsBooking,
         note: dto.note,
+        reservedForTypeIds: dto.reservedForTypeIds,
+        releaseAtMinute: dto.releaseAtMinute,
         confirmAffected: dto.confirmAffected,
       },
       actorOf(req),
@@ -186,6 +197,8 @@ export class ScheduleBlocksController {
         kind: dto.kind,
         allowsBooking: dto.allowsBooking,
         note: dto.note,
+        reservedForTypeIds: dto.reservedForTypeIds,
+        releaseAtMinute: dto.releaseAtMinute,
         confirmAffected: dto.confirmAffected,
       },
       actorOf(req),

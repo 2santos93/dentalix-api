@@ -22,6 +22,7 @@ export class InMemoryAppointmentTypeRepository implements AppointmentTypeReposit
       durationMinutes: 90,
       color: '#7C3AED',
       active: true,
+      isUrgent: false,
       createdAt: new Date('2026-10-01T00:00:00.000Z'),
       updatedAt: new Date('2026-10-01T00:00:00.000Z'),
       ...partial,
@@ -51,6 +52,7 @@ export class InMemoryAppointmentTypeRepository implements AppointmentTypeReposit
         durationMinutes: input.durationMinutes,
         color: input.color,
         active: input.active,
+        isUrgent: input.isUrgent ?? false,
       }),
     );
   }
@@ -67,6 +69,7 @@ export class InMemoryAppointmentTypeRepository implements AppointmentTypeReposit
     }
     if (input.color !== undefined) row.color = input.color;
     if (input.active !== undefined) row.active = input.active;
+    if (input.isUrgent !== undefined) row.isUrgent = input.isUrgent;
     return Promise.resolve({ ...row });
   }
 

@@ -163,6 +163,14 @@ export interface AuditMetadata {
    * «Otro» nunca (queda en `closing_queue_dismissals`, `resourceId`).
    */
   closingQueueDismissal?: AuditClosingQueueDismissal;
+  /**
+   * DX-446: cita agendada o movida a un hueco reservado saltándose la reserva
+   * (ADMIN u odontólogo): los bloques saltados y el MOTIVO escrito por quien
+   * lo hizo. Es texto de agenda pedido por la especificación («Agendar
+   * igualmente» exige motivo y queda auditado); 5–300 caracteres sin saltos de
+   * línea ni caracteres de control. La pantalla lo pide sin datos clínicos.
+   */
+  reservedSlotOverride?: AuditReservedSlotOverride;
 }
 
 export const AUDIT_CLOSING_QUEUE_SECTIONS = [
@@ -181,6 +189,12 @@ export const AUDIT_CLOSING_DISMISSAL_REASONS = [
 export interface AuditClosingQueueDismissal {
   section: (typeof AUDIT_CLOSING_QUEUE_SECTIONS)[number];
   reasonCode: (typeof AUDIT_CLOSING_DISMISSAL_REASONS)[number];
+}
+
+/** Hueco reservado saltado con permiso (DX-446). */
+export interface AuditReservedSlotOverride {
+  blockIds: string[];
+  reason: string;
 }
 
 /** Un lado del cambio de accesos de un miembro (DX-359). */
@@ -433,6 +447,8 @@ const PROFESSIONAL_LICENSE = /^[^\p{Cc}\p{Cf}\u2028\u2029]{1,60}$/u;
 const PROFESSIONAL_SPECIALTY = /^[^\p{Cc}\p{Cf}\u2028\u2029]{1,80}$/u;
 /** Tope de sedes por lado: las de una clínica, con holgura. */
 const MAX_STAFF_LOCATIONS = 200;
+const OVERRIDE_REASON = /^[^\p{Cc}\p{Cf}\u2028\u2029]{5,300}$/u;
+const MAX_OVERRIDE_BLOCKS = 20;
 const MAX_FIELDS = 50;
 /** Tope de tramos por lado (7 días × 7 tramos × varias sedes). */
 const MAX_SCHEDULE_ENTRIES = 500;
@@ -1124,6 +1140,29 @@ function exchangeRateBackup(value: unknown): AuditExchangeRateBackup | null {
  * no encaja se DESCARTA (no se trunca ni se escapa): así un valor clínico que
  * llegara por error a cualquier clave nunca acaba en la tabla.
  */
+/** Bloques (uuids) y motivo con la forma admitida, o nada (DX-446). */
+function reservedSlotOverride(
+  value: unknown,
+): AuditReservedSlotOverride | null {
+  if (!isRecord(value)) return null;
+  const { blockIds, reason, ...rest } = value;
+  if (
+    Object.keys(rest).length > 0 ||
+    !Array.isArray(blockIds) ||
+    blockIds.length === 0 ||
+    blockIds.length > MAX_OVERRIDE_BLOCKS ||
+    !blockIds.every((id) => typeof id === 'string' && UUID.test(id)) ||
+    typeof reason !== 'string' ||
+    !OVERRIDE_REASON.test(reason)
+  ) {
+    return null;
+  }
+  return {
+    blockIds: (blockIds as string[]).map((id) => id.toLowerCase()),
+    reason,
+  };
+}
+
 export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (!isRecord(input)) return {};
   const out: AuditMetadata = {};
@@ -1178,5 +1217,7 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (access) out.staffAccess = access;
   const dismissed = closingQueueDismissal(input.closingQueueDismissal);
   if (dismissed) out.closingQueueDismissal = dismissed;
+  const overridden = reservedSlotOverride(input.reservedSlotOverride);
+  if (overridden) out.reservedSlotOverride = overridden;
   return out;
 }

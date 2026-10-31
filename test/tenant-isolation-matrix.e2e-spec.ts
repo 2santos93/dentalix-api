@@ -269,6 +269,8 @@ interface SeedB {
   /** DX-051: abono propio de B y la versión de su imputación (PUT de B). */
   paymentId: string;
   allocationVersion: string;
+  /** DX-446: bloqueo propio de B (B lo pasa a reservado con un tipo de A). */
+  scheduleBlockId: string;
 }
 
 function futureAt(daysAhead: number, hourUtc: number): string {
@@ -813,7 +815,15 @@ async function seedBExtras(
     body: 'Superficie {{Superficie}}',
     prompts: [{ label: 'Superficie', type: 'ONE', options: ['O', 'M'] }],
   });
+  const sedes = await api(app, b, 'get', '/locations').expect(200);
+  const scheduleBlock = await create(app, b, '/schedule-blocks', {
+    locationId: (sedes.body as IdBody[])[0].id,
+    start: futureAt(61, 13),
+    end: futureAt(61, 14),
+    kind: 'MEETING',
+  });
   return {
+    scheduleBlockId: scheduleBlock.id,
     payerId: payer.id,
     coverageId: coverage.id,
     priceListId: priceList.id,
@@ -2788,6 +2798,34 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       status: 404,
       message,
     })),
+    // DX-446: un hueco reservado de B con un tipo de cita de A.
+    {
+      name: 'POST /schedule-blocks body.reservedForTypeIds[] de A',
+      verb: 'post',
+      path: () => '/schedule-blocks',
+      body: () => ({
+        locationId: b.locationId,
+        start: futureAt(70, 15),
+        end: futureAt(70, 16),
+        kind: 'RESERVED',
+        reservedForTypeIds: [a.appointmentTypeId],
+      }),
+      bodyIds: ['reservedForTypeIds[]'],
+      status: 404,
+      message: 'Tipo de cita no encontrado',
+    },
+    {
+      name: 'PATCH /schedule-blocks/:id body.reservedForTypeIds[] de A',
+      verb: 'patch',
+      path: () => `/schedule-blocks/${b.scheduleBlockId}`,
+      body: () => ({
+        kind: 'RESERVED',
+        reservedForTypeIds: [a.appointmentTypeId],
+      }),
+      bodyIds: ['reservedForTypeIds[]'],
+      status: 404,
+      message: 'Tipo de cita no encontrado',
+    },
     {
       name: 'PUT /providers/:providerId/schedule body.locations[].locationId de A',
       verb: 'put',

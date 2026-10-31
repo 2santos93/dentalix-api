@@ -146,4 +146,18 @@ export class UpdateAppointmentDto {
   @IsOptional()
   @IsBoolean()
   wantsEarlier?: boolean;
+
+  @ApiPropertyOptional({
+    minLength: 5,
+    maxLength: 300,
+    description:
+      'DX-446: «Mover igualmente» en un hueco reservado (bloque RESERVED) con un tipo no permitido y sin liberar. Solo ADMIN y DENTIST (403 para el resto); 5–300 caracteres en una línea. Queda en `audit_event` (`reservedSlotOverride`).',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(300, {
+    message:
+      'El motivo para agendar en un hueco reservado debe tener entre 5 y 300 caracteres.',
+  })
+  overrideReason?: string;
 }

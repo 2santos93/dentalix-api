@@ -341,8 +341,9 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(firstCounts.expense_payments).toBe(3);
     // DX-121: 5 tipos de cita con color.
     expect(firstCounts.appointment_types).toBe(5);
-    // DX-122: vacaciones y almuerzo; pendientes del calendario + uno manual.
-    expect(firstCounts.schedule_blocks).toBe(2);
+    // DX-122: vacaciones y almuerzo; DX-446: 5 huecos «Urgencias»;
+    // pendientes del calendario + uno manual.
+    expect(firstCounts.schedule_blocks).toBe(7);
     expect(firstCounts.appointment_waitlist).toBeGreaterThanOrEqual(3);
     expect(result.confirmationUrl).toMatch(
       /^http:\/\/demo\.localhost:3001\/confirmar\/[A-Za-z0-9_-]{43}$/,
@@ -756,10 +757,38 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     ]);
   });
 
+  it('deja «Urgencias» 15:00–15:30 reservado para «Consulta de urgencia» los próximos 5 días laborables, liberado a las 11:00 (DX-446)', async () => {
+    const tenantId = await liveDemoTenantId();
+    const urgent = await raw.appointmentType.findFirstOrThrow({
+      where: { tenantId, name: 'Consulta de urgencia' },
+    });
+    expect(urgent.isUrgent).toBe(true);
+    const reserved = await raw.scheduleBlock.findMany({
+      where: { tenantId, kind: 'RESERVED', deletedAt: null },
+      orderBy: { start: 'asc' },
+    });
+    expect(reserved).toHaveLength(5);
+    for (const block of reserved) {
+      expect(block).toMatchObject({
+        reservedForTypeIds: [urgent.id],
+        releaseAtMinute: 660,
+        allowsBooking: false,
+        note: 'Urgencias',
+      });
+      expect(block.end.getTime() - block.start.getTime()).toBe(30 * 60_000);
+      // 15:00 de Bogotá (UTC−5) = 20:00 UTC.
+      expect(block.start.getUTCHours()).toBe(20);
+      expect([0, 6]).not.toContain(
+        new Date(block.start.getTime() - 5 * 3_600_000).getUTCDay(),
+      );
+    }
+  });
+
   it('deja un bloqueo de vacaciones, uno de almuerzo y 3 pendientes abiertos (DX-122)', async () => {
     const tenantId = await liveDemoTenantId();
+    // Los reservados de DX-446 tienen su propio caso.
     const blocks = await raw.scheduleBlock.findMany({
-      where: { tenantId },
+      where: { tenantId, kind: { not: 'RESERVED' } },
       orderBy: { start: 'asc' },
     });
     expect(blocks.map((b) => [b.kind, b.allowsBooking])).toEqual([

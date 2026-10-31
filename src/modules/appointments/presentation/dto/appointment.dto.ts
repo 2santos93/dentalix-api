@@ -327,6 +327,15 @@ export class VisitMinimumChangeDto {
   anchorAppointmentIdAfter!: string | null;
 }
 
+/** DX-446: reserva saltada con permiso (bloques y motivo). */
+export class ReservedOverrideDto {
+  @ApiProperty({ type: [String], format: 'uuid' })
+  blockIds!: string[];
+
+  @ApiProperty()
+  reason!: string;
+}
+
 /** DX-273: resultado de sacar una cita de COMPLETED. */
 export class CompletedExitDto {
   @ApiProperty({
@@ -373,6 +382,13 @@ export class AppointmentWriteDto extends AppointmentDto {
       'DX-273: solo al sacar la cita de COMPLETED. El motivo y cómo queda el mínimo de la visita siguiente de cada plan afectado.',
   })
   completedExit?: CompletedExitDto;
+
+  @ApiPropertyOptional({
+    type: () => ReservedOverrideDto,
+    description:
+      'DX-446: solo si la cita se agendó o movió a un hueco reservado saltándose la reserva (con `overrideReason`); queda en `audit_event`.',
+  })
+  reservedOverride?: ReservedOverrideDto;
 }
 
 /**

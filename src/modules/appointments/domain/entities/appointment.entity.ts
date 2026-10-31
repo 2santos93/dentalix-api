@@ -108,6 +108,12 @@ export interface AppointmentWriteResult extends Appointment {
    * intervalo mínimo de la visita siguiente de cada plan afectado.
    */
   completedExit?: CompletedExit;
+  /**
+   * DX-446: la cita se agendó o movió a un hueco reservado saltándose la
+   * reserva (con permiso y motivo): los bloques y el motivo, que quedan en
+   * `audit_event`. Ausente en cualquier otro caso.
+   */
+  reservedOverride?: { blockIds: string[]; reason: string };
 }
 
 /** Un tratamiento de la cita reservado en otra cita (DX-273). */

@@ -73,6 +73,9 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
   'GET /schedule-blocks/affected-appointments ?providerId',
   'POST /schedule-blocks body.locationId',
   'POST /schedule-blocks body.providerId',
+  // DX-446: tipos de cita de un hueco reservado.
+  'POST /schedule-blocks body.reservedForTypeIds[]',
+  'PATCH /schedule-blocks/:id body.reservedForTypeIds[]',
   'PUT /providers/:providerId/schedule body.locations[].locationId',
   'POST /providers/:providerId/schedule-overrides body.locationId',
   'GET /schedule/roster ?locationId',

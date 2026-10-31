@@ -131,6 +131,7 @@ import {
   daysAgoAt,
   daysUntilMondayAfterNext,
   daysUntilNextWeekday,
+  upcomingWeekdayOffsets,
   daysUntilRotationCover,
   planAppointments,
   planComparisonHistory,
@@ -181,6 +182,7 @@ import {
   DEMO_CONSENT_TEMPLATES,
   DEMO_APPOINTMENT_TYPES,
   DEMO_LUNCH,
+  DEMO_RESERVED_URGENCY,
   DEMO_ROTATION,
   DEMO_VACATION,
   DEMO_WAITLIST,
@@ -808,6 +810,16 @@ class DemoSeeder {
     // su plan en la cola, y la demo termina con la cola vacía.
     await this.allocatePayments(tenantId, ownerId);
 
+    // DX-446 al final: el hueco reservado no puede cambiar las citas que la
+    // demo ya agendó (las que caen dentro se quedan, como al crearlo a mano).
+    await this.createReservedUrgencySlots(
+      tenantId,
+      locations,
+      dentists,
+      receptionId,
+      typeByReason,
+    );
+
     return this.requestConfirmations(tenantId, receptionId);
   }
 
@@ -1340,6 +1352,7 @@ class DemoSeeder {
           name: spec.name,
           durationMinutes: spec.durationMinutes,
           color: spec.color,
+          isUrgent: spec.isUrgent ?? false,
         },
         ownerId,
       );
@@ -1959,6 +1972,45 @@ class DemoSeeder {
           farthest.id,
           { wantsEarlier: true },
           ctx,
+        );
+      }
+    });
+  }
+
+  /**
+   * DX-446: «Urgencias» 15:00–15:30 reservado para «Consulta de urgencia» los
+   * próximos días laborables, liberado a las 11:00. Recepción lo crea por el
+   * mismo caso de uso que la agenda (validaciones, auditoría), confirmando
+   * las citas que ya caigan dentro.
+   */
+  private async createReservedUrgencySlots(
+    tenantId: string,
+    locations: Record<DemoLocationKey, string>,
+    dentists: string[],
+    receptionId: string,
+    typeByReason: Map<string, string>,
+  ): Promise<void> {
+    const spec = DEMO_RESERVED_URGENCY;
+    const urgent = DEMO_APPOINTMENT_TYPES.find((t) => t.name === spec.typeName);
+    const typeId = urgent && typeByReason.get(urgent.reasons[0]);
+    if (!typeId) throw new Error(`Falta el tipo «${spec.typeName}»`);
+    const actor = { userId: receptionId, role: ClinicRole.RECEPTION };
+    await this.inTenant(tenantId, undefined, async () => {
+      const blocks = this.use(CreateScheduleBlockUseCase);
+      for (const offset of upcomingWeekdayOffsets(this.now, spec.days)) {
+        await blocks.execute(
+          {
+            providerId: dentists[spec.dentistIndex],
+            locationId: locations.principal,
+            start: daysAgoAt(this.now, -offset, spec.startMinute),
+            end: daysAgoAt(this.now, -offset, spec.endMinute),
+            kind: ScheduleBlockKind.RESERVED,
+            reservedForTypeIds: [typeId],
+            releaseAtMinute: spec.releaseAtMinute,
+            note: spec.note,
+            confirmAffected: true,
+          },
+          actor,
         );
       }
     });

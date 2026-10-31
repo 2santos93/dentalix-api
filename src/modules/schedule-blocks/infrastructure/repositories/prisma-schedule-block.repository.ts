@@ -3,7 +3,11 @@ import { AppointmentStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { resolveLocationTimeZones } from '../../../../shared/locations/location-time-zone';
-import type { ScheduleBlock } from '../../domain/entities/schedule-block.entity';
+import { loadLocationZones } from '../../../../shared/locations/location-time-zone';
+import type {
+  ReservedTypeRef,
+  ScheduleBlock,
+} from '../../domain/entities/schedule-block.entity';
 import { IN_CLINIC_STATUSES } from '../../../appointments/domain/patient-flow';
 import type {
   AffectingBlocks,
@@ -11,6 +15,7 @@ import type {
   AffectedAppointmentsPage,
   CreateScheduleBlockRepoInput,
   ListScheduleBlocksParams,
+  ReservedContext,
   ScheduleBlockRepository,
   ScheduleBlockScope,
   UpdateScheduleBlockRepoInput,
@@ -31,6 +36,8 @@ function mapToEntity(row: PrismaScheduleBlock): ScheduleBlock {
     kind: row.kind,
     allowsBooking: row.allowsBooking,
     note: row.note,
+    reservedForTypeIds: row.reservedForTypeIds,
+    releaseAtMinute: row.releaseAtMinute,
     createdById: row.createdById,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -70,6 +77,19 @@ function affectedAppointmentsWhere(
     providerId: scope.providerId,
     ...(scope.locationId !== null ? { locationId: scope.locationId } : {}),
   };
+}
+
+/** DX-446: tipos vivos (activos o no) de la clínica en contexto (RLS). */
+async function findTypeRefs(
+  tx: Prisma.TransactionClient,
+  ids: readonly string[],
+): Promise<ReservedTypeRef[]> {
+  if (ids.length === 0) return [];
+  return tx.appointmentType.findMany({
+    where: { id: { in: [...ids] }, deletedAt: null },
+    select: { id: true, name: true, color: true, isUrgent: true, active: true },
+    orderBy: { name: 'asc' },
+  });
 }
 
 @Injectable()
@@ -134,6 +154,8 @@ export class PrismaScheduleBlockRepository implements ScheduleBlockRepository {
           kind: input.kind,
           allowsBooking: input.allowsBooking,
           note: input.note,
+          reservedForTypeIds: input.reservedForTypeIds,
+          releaseAtMinute: input.releaseAtMinute,
           createdById: input.createdById,
           updatedById: input.createdById,
         },
@@ -156,6 +178,8 @@ export class PrismaScheduleBlockRepository implements ScheduleBlockRepository {
           kind: patch.kind,
           allowsBooking: patch.allowsBooking,
           note: patch.note,
+          reservedForTypeIds: patch.reservedForTypeIds,
+          releaseAtMinute: patch.releaseAtMinute,
           updatedById: patch.updatedById,
         },
       }),
@@ -199,12 +223,14 @@ export class PrismaScheduleBlockRepository implements ScheduleBlockRepository {
               where: { id: locationId, tenantId },
               select: { locale: true, hourCycle: true },
             });
+      const typeIds = [...new Set(rows.flatMap((r) => r.reservedForTypeIds))];
       return {
         locationId,
         timeZone: zoneOf(locationId),
         locale: regional?.locale ?? null,
         hourCycle: regional?.hourCycle ?? null,
         blocks: rows.map(mapToEntity),
+        reservedTypes: await findTypeRefs(tx, typeIds),
       };
     });
   }
@@ -257,6 +283,20 @@ export class PrismaScheduleBlockRepository implements ScheduleBlockRepository {
           patientLastName: r.patient.lastName,
         })),
         total,
+      };
+    });
+  }
+
+  reservedContext(
+    typeIds: readonly string[],
+    locationIds: readonly string[],
+  ): Promise<ReservedContext> {
+    const tenantId = this.requireTenantId();
+    return this.prisma.runWithTenant(async (tx) => {
+      const zones = await loadLocationZones(tx, tenantId, locationIds);
+      return {
+        types: await findTypeRefs(tx, typeIds),
+        timeZones: zones.configured,
       };
     });
   }

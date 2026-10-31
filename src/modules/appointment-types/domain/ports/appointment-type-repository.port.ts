@@ -6,6 +6,8 @@ export interface CreateAppointmentTypeRepoInput {
   durationMinutes: number;
   color: string;
   active: boolean;
+  /** DX-446: por defecto, false. */
+  isUrgent?: boolean;
   createdById?: string;
 }
 
@@ -14,6 +16,7 @@ export interface UpdateAppointmentTypeRepoInput {
   durationMinutes?: number;
   color?: string;
   active?: boolean;
+  isUrgent?: boolean;
   updatedById?: string;
 }
 

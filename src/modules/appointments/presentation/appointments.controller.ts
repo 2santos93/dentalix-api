@@ -141,6 +141,35 @@ export class AppointmentsController {
     return auditRequestContext(req, this.tenantContext);
   }
 
+  /**
+   * DX-446: cita agendada o movida saltándose un hueco reservado. Se audita
+   * aparte del evento HTTP genérico, con los bloques y el motivo, y no viaja
+   * en la respuesta más que como `reservedOverride`.
+   */
+  private async auditReservedOverride(
+    appointment: AppointmentWriteResult,
+    action: 'CREATE' | 'UPDATE',
+    ctx: AppointmentAuditContext | undefined,
+  ): Promise<void> {
+    if (!appointment.reservedOverride || !ctx) return;
+    await this.audit.record({
+      tenantId: ctx.tenantId,
+      locationId: ctx.locationId,
+      actor: { kind: 'user', userId: ctx.actor.userId, role: ctx.actor.role },
+      action,
+      resourceType: 'APPOINTMENT',
+      resourceId: appointment.id,
+      patient: { kind: 'patient', id: appointment.patientId },
+      requestId: ctx.requestId,
+      ip: ctx.ip,
+      userAgent: ctx.userAgent,
+      metadata: {
+        reason: 'RESERVED_SLOT_OVERRIDE',
+        reservedSlotOverride: appointment.reservedOverride,
+      },
+    });
+  }
+
   /** La escritura explícita de vínculos es distinta de la traza HTTP genérica. */
   private async auditPlanItems(
     appointment: AppointmentWriteResult,
@@ -185,14 +214,14 @@ export class AppointmentsController {
   })
   @ApiConflictResponse({
     description:
-      'Solape con otra cita, o el horario está bloqueado para ese profesional o la sede (DX-122)',
+      'Solape con otra cita, el horario está bloqueado para ese profesional o la sede (DX-122), o es un hueco reservado para otros tipos y aún sin liberar (DX-446: `code: RESERVED_SLOT`, `canOverride` dice si quien agenda puede reintentar con `overrideReason`)',
   })
   @ApiUnprocessableEntityResponse({
     description: 'Fuera del horario de atención de la sede',
   })
   @ApiForbiddenResponse({
     description:
-      'DX-210: `wantsEarlier` solo lo marcan RECEPTION, DENTIST y ADMIN',
+      'DX-210: `wantsEarlier` solo lo marcan RECEPTION, DENTIST y ADMIN. DX-446: `overrideReason` solo lo envían ADMIN y DENTIST',
   })
   async create(
     @Body() dto: CreateAppointmentDto,
@@ -216,7 +245,10 @@ export class AppointmentsController {
       appointmentTypeId: dto.appointmentTypeId,
       wantsEarlier: dto.wantsEarlier,
       planItemIds: dto.planItemIds,
+      actorRole: ctx?.actor.role ?? null,
+      overrideReason: dto.overrideReason,
     });
+    await this.auditReservedOverride(created, 'CREATE', ctx);
     // DX-210: nacer marcada «Adelantar si hay hueco» también queda auditado.
     if (created.wantsEarlier && ctx) {
       await this.audit.record({
@@ -401,14 +433,14 @@ export class AppointmentsController {
   })
   @ApiForbiddenResponse({
     description:
-      'Rol sin permiso de agenda, sin permiso para ese paso del flujo en la clínica (DX-200), o RECEPTION/ASSISTANT sacando una cita de COMPLETED (DX-273)',
+      'Rol sin permiso de agenda, sin permiso para ese paso del flujo en la clínica (DX-200), o RECEPTION/ASSISTANT sacando una cita de COMPLETED (DX-273), o `overrideReason` sin ser ADMIN ni DENTIST (DX-446)',
   })
   @ApiNotFoundResponse({
     description: 'Cita o profesional no encontrados en esta clínica',
   })
   @ApiConflictResponse({
     description:
-      'Solape con otra cita del profesional o del paciente (también si otro movimiento ganó la carrera), el nuevo horario está bloqueado (DX-122), o un salto imposible del flujo en la clínica o la cita cambió mientras tanto (DX-200)',
+      'Solape con otra cita del profesional o del paciente (también si otro movimiento ganó la carrera), el nuevo horario está bloqueado (DX-122) o reservado sin liberar (DX-446, `RESERVED_SLOT`), o un salto imposible del flujo en la clínica o la cita cambió mientras tanto (DX-200)',
   })
   @ApiUnprocessableEntityResponse({
     description: 'Fuera del horario de atención de la sede de la cita',
@@ -436,9 +468,11 @@ export class AppointmentsController {
           reasonCode: dto.cancelReasonCode,
           reasonText: dto.cancelReasonText,
         },
+        overrideReason: dto.overrideReason,
       },
       ctx,
     );
+    await this.auditReservedOverride(updated, 'UPDATE', ctx);
     await this.auditPlanItems(updated, dto.planItemIds, 'UPDATE', ctx);
     return updated;
   }
