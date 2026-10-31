@@ -83,6 +83,7 @@ export function toSignatureRequestSummary(
   return {
     id: request.id,
     patientId: request.patientId,
+    locationId: request.locationId,
     type: request.type,
     channel: request.channel,
     templateId: request.templateId,

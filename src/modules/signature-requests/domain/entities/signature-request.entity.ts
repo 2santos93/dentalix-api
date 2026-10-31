@@ -51,6 +51,8 @@ export interface SignatureRequestRecord {
 export interface SignatureRequestSummary {
   id: string;
   patientId: string;
+  /** Sede desde la que se envió: sus horas se pintan con su reloj. */
+  locationId: string;
   type: SignatureRequestType;
   channel: SignatureRequestChannel;
   templateId: string | null;

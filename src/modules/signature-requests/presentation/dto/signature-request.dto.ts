@@ -60,6 +60,11 @@ export class CreateSignatureRequestDto {
 export class SignatureRequestDto {
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty({ format: 'uuid' }) patientId!: string;
+  @ApiProperty({
+    format: 'uuid',
+    description: 'Sede desde la que se envió (sus horas, con su reloj)',
+  })
+  locationId!: string;
   @ApiProperty(TYPE_PROPERTY) type!: SignatureRequestType;
   @ApiProperty(CHANNEL_PROPERTY) channel!: SignatureRequestChannel;
   @ApiProperty({ type: String, format: 'uuid', nullable: true })
