@@ -16,10 +16,6 @@ import {
   loadNoticeSettings,
   loadNoticeResponsibles,
 } from '../notices/notice-context';
-import {
-  legacyStoredDocType,
-  type LegacyDocType,
-} from '../../domain/legacy-doc-type';
 
 const SUMMARY_SELECT = {
   id: true,
@@ -70,23 +66,15 @@ function toSummary(p: SummaryRow): ResponsiblePatientSummary {
   };
 }
 
-/**
- * DX-327 (R5): el alta de un contacto escribe el tipo genérico y su código
- * anterior (o los dos NULL sin tipo).
- */
+/** El alta de un contacto: su `docType` va a la columna `documentType`. */
 function contactCreateData({ docType, ...rest }: ResponsibleContactFields) {
   return {
     ...rest,
     documentType: docType,
-    docType: docType === null ? null : legacyStoredDocType(docType),
-  } satisfies {
-    documentType: DocumentType | null;
-    docType: LegacyDocType | null;
-  };
+  } satisfies { documentType: DocumentType | null };
 }
 
 /**
- * R5: la edición escribe solo el genérico; el trigger ajusta el anterior.
  * R7: con `docType` y sin `docTypeLabel`, la etiqueta se borra solo si el
  * tipo cambia respecto del GUARDADO (`stored`, de la fila bloqueada).
  */

@@ -262,12 +262,11 @@ describe('Cobertura verificable para asignar un convenio (e2e, SEC-049)', () => 
       }
     });
 
-    it('legacy EMPRESA payer audits as EMPLOYER', async () => {
-      // Excepción G5.3 (DX-334): tipos de pagador anteriores a DX-326.
+    it('an EMPLOYER payer inserted by SQL audits as EMPLOYER', async () => {
       const rows = await raw.$queryRaw<{ id: string }[]>`
         INSERT INTO "payers" ("id", "tenantId", "name", "type", "updatedAt")
         VALUES (gen_random_uuid(), ${clinic.tenantId}::uuid, 'Empresa Alfa',
-                'EMPRESA'::"PayerType", now())
+                'EMPLOYER'::"PayerType", now())
         RETURNING "id"`;
       const patient = await createPatient('Auditada legado');
       await as(api().post(coverages(patient)), tokens.RECEPTION)
@@ -292,7 +291,7 @@ describe('Cobertura verificable para asignar un convenio (e2e, SEC-049)', () => 
           patientId: patient,
           payerId: payer,
           isPrimary: true,
-          migratedFromInsurerEps: true,
+          migratedFromLegacyInsurer: true,
         },
         select: { id: true },
       });
@@ -303,7 +302,7 @@ describe('Cobertura verificable para asignar un convenio (e2e, SEC-049)', () => 
         expect.objectContaining({
           id: migrated.id,
           memberNumber: null,
-          migratedFromInsurerEps: true,
+          migratedFromLegacyInsurer: true,
           declaredById: null,
           verifiedAt: null,
           verifiedById: null,

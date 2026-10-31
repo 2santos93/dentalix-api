@@ -15,11 +15,9 @@ import {
 import { AppModule } from '../src/app.module';
 import { setupSwagger } from '../src/config/swagger';
 import {
-  LEGACY_PAYER_TYPES,
-  storedPayerType,
-  type LegacyStoredPayerType,
-} from '../src/modules/payers/domain/legacy-payer-type';
-import { PAYER_TYPES } from '../src/modules/payers/domain/payer-type';
+  PAYER_TYPES,
+  type PayerType,
+} from '../src/modules/payers/domain/payer-type';
 import { CANCELLATION_FEE_MESSAGES } from '../src/modules/cancellation-fees/domain/cancellation-fee';
 
 // DX-291 (porción 2 de DX-279): la política en el enlace público con
@@ -453,10 +451,7 @@ describe('Cargo por inasistencia y política en el enlace (DX-291)', () => {
     });
 
     /** Paciente con una cobertura viva del pagador `stored`; la cita, sin asistir. */
-    async function noShowCoveredBy(
-      stored: LegacyStoredPayerType,
-      label: string,
-    ) {
+    async function noShowCoveredBy(stored: PayerType, label: string) {
       const covered = (
         await raw.patient.create({
           data: {
@@ -494,15 +489,7 @@ describe('Cargo por inasistencia y política en el enlace (DX-291)', () => {
     it.each(PAYER_TYPES)(
       'a patient with an active coverage is charged like any other (DX-321): %s',
       async (type) => {
-        await expectCharged(await noShowCoveredBy(storedPayerType(type), type));
-      },
-    );
-
-    it.each(Object.keys(LEGACY_PAYER_TYPES) as LegacyStoredPayerType[])(
-      'legacy codes are charged like any other: %s',
-      async (code) => {
-        // Excepción G5.3 (DX-334): tipos de pagador anteriores a DX-326.
-        await expectCharged(await noShowCoveredBy(code, `legado ${code}`));
+        await expectCharged(await noShowCoveredBy(type, type));
       },
     );
 

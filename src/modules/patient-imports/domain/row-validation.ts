@@ -5,10 +5,7 @@ import {
   documentTypeKey,
   type ClinicDocumentTypeNames,
 } from '../../patients/domain/document-type';
-import {
-  LEGACY_DOC_TYPES,
-  LEGACY_DOC_TYPE_SYNONYMS,
-} from '../../patients/domain/legacy-doc-type';
+import { IMPORT_DOC_TYPE_ALIASES } from '../../patients/domain/legacy-document-codes';
 import {
   readPhone,
   splitExtension,
@@ -105,8 +102,8 @@ export function parseDocType(
   for (const type of DOCUMENT_TYPES) {
     if (GENERIC_DOC_TYPE_NAMES[type].includes(key)) return type;
   }
-  for (const [code, synonyms] of LEGACY_DOC_TYPE_SYNONYMS) {
-    if (synonyms.includes(key)) return LEGACY_DOC_TYPES[code];
+  for (const [type, aliases] of IMPORT_DOC_TYPE_ALIASES) {
+    if (aliases.includes(key)) return type;
   }
   return null;
 }

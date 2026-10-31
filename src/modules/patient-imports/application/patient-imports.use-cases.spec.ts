@@ -118,7 +118,7 @@ describe('PatientImportsService: tipos de documento genéricos (DX-327)', () => 
     ).toEqual({ columns: {}, defaultDocType: 'TAX_ID' });
   });
 
-  it('the dry-run reads the clinic names once per batch and stores both default types', async () => {
+  it('the dry-run reads the clinic names once per batch and stores the generic default type', async () => {
     const names = new FixedDocumentTypeNamesReader({ TAX_ID: 'Nombre Local' });
     let saved: NewBatch | undefined;
     const repo = {
@@ -170,9 +170,9 @@ describe('PatientImportsService: tipos de documento genéricos (DX-327)', () => 
       'PASSPORT',
     ]);
     expect(saved?.columnMapping).toMatchObject({
-      defaultDocType: 'OTHER',
       defaultDocumentType: 'TAX_ID',
     });
+    expect(saved?.columnMapping).not.toHaveProperty('defaultDocType');
     expect(detail.columnMapping.defaultDocType).toBe('TAX_ID');
   });
 });

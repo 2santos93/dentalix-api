@@ -398,7 +398,7 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
           const migrated = coverages.seed({
             patientId: PATIENT,
             payerId: cortesiaPayer.id,
-            migratedFromInsurerEps: true,
+            migratedFromLegacyInsurer: true,
           });
           const out = await assign.execute(
             PATIENT,
@@ -413,12 +413,12 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
         const otherPayer = coverages.seed({
           patientId: PATIENT,
           payerId: sanavida.id,
-          migratedFromInsurerEps: true,
+          migratedFromLegacyInsurer: true,
         });
         const otherPatient = coverages.seed({
           patientId: 'otro-paciente',
           payerId: cortesiaPayer.id,
-          migratedFromInsurerEps: true,
+          migratedFromLegacyInsurer: true,
         });
         for (const coverageId of [
           otherPayer.id,
@@ -438,7 +438,7 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
         const expired = coverages.seed({
           patientId: PATIENT,
           payerId: cortesiaPayer.id,
-          migratedFromInsurerEps: true,
+          migratedFromLegacyInsurer: true,
           validTo: '2026-10-19',
         });
         await expect(

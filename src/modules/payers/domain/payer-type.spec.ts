@@ -32,8 +32,8 @@ describe('payer-type', () => {
     },
   );
 
-  it.each(['OTRO', 'EPS_CO'])(
-    'legacy codes are not domain types: isExternalPayer throws (%s)',
+  it.each(['OTRO', 'PUBLIC'])(
+    'other codes are not domain types: isExternalPayer throws (%s)',
     (code) => {
       expect(() => isExternalPayer(code as unknown as PayerType)).toThrow(code);
     },

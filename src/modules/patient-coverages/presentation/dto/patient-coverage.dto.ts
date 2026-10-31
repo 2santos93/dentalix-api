@@ -95,7 +95,7 @@ export class PatientCoverageDto {
     description:
       'Copiada de la aseguradora en texto libre de la ficha (DX-153); la API no la crea. SEC-047: habilita a cualquier rol a asignar un convenio de pagador OTHER.',
   })
-  migratedFromInsurerEps!: boolean;
+  migratedFromLegacyInsurer!: boolean;
 
   @ApiProperty({
     format: 'uuid',

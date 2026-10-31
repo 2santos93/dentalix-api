@@ -579,7 +579,7 @@ describe('Listas de precios (e2e, DX-105)', () => {
         data: {
           tenantId: clinic.tenantId,
           name: 'Sanavida',
-          type: 'EPS_CO',
+          type: 'PUBLIC_SYSTEM',
         },
       });
       const agreement = await raw.agreement.create({

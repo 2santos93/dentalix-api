@@ -713,10 +713,10 @@ describe('Implantes — /patients/:id/implants, /implant-card, /implants (DX-191
       ]);
     });
 
-    it('legacy TI patient seeded by SQL prints «Documento nacional …» in the lot search', async () => {
+    it('a patient with the frozen legacy code MINOR_ID prints «Documento nacional …» in the lot search', async () => {
       const [{ id }] = await raw.$queryRaw<{ id: string }[]>`
-        INSERT INTO "patients" ("id","tenantId","firstName","lastName","docType","docNumber","updatedAt")
-        VALUES (gen_random_uuid(), ${a.tenantId}::uuid, 'Anterior', 'Implante', 'TI', 'IMPL-41', now())
+        INSERT INTO "patients" ("id","tenantId","firstName","lastName","documentType","legacyDocumentCode","docNumber","updatedAt")
+        VALUES (gen_random_uuid(), ${a.tenantId}::uuid, 'Anterior', 'Implante', 'NATIONAL_ID', 'MINOR_ID', 'IMPL-41', now())
         RETURNING "id"::text AS "id"`;
       await call(a, dentist.token, 'post', `/patients/${id}/implants`, {
         ...IMPLANT,

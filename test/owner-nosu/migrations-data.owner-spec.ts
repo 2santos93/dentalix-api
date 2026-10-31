@@ -410,6 +410,13 @@ const FIXTURE_DX329 = [
      (gen_random_uuid(),'${T_B}','Sede 329 B','DE',NULL,now())`,
 ];
 
+/**
+ * Sin Colombia (DX-323): los pagadores de FIXTURE_DX326 pasan a su genérico,
+ * el código de documento de FIXTURE_DX327 se renombra en su sitio y las
+ * columnas de la aseguradora antigua cambian de nombre. Sin fixture propio.
+ */
+const SIN_COLOMBIA = '20261110130000_sin_colombia_identificadores';
+
 const STEPS: Step[] = [
   { until: '20260731115959', fixture: [] },
   // 20260731120000_structured_clinical_history y _remove_owner_role.
@@ -499,8 +506,12 @@ const STEPS: Step[] = [
   // columna antigua se queda; y las siguientes (las de DX-377, medios de
   // pago, sin fixture propio) hasta la de DX-329.
   { until: DX329, fixture: FIXTURE_DX312 },
-  // dx329: prefijo telefónico por defecto de la sede y su relleno por clínica.
-  { until: '99999999999999', fixture: FIXTURE_DX329 },
+  // dx329: prefijo telefónico por defecto de la sede y su relleno por clínica,
+  // hasta la que retira los códigos anteriores.
+  { until: SIN_COLOMBIA, fixture: FIXTURE_DX329 },
+  // sin_colombia_identificadores: tipos de pagador y código de documento
+  // anteriores traducidos o renombrados; y las siguientes.
+  { until: '99999999999999' },
 ];
 
 describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-nosu)', () => {
@@ -1527,6 +1538,76 @@ describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-no
           WHERE oid = 'public.locations'::regclass`,
       ),
     ).toBe(true);
+  }, 180_000);
+
+  it('owner-nosu sin-Colombia identifiers keep every row, translate the payer type and rename the legacy document code', async () => {
+    const payers = (): Promise<string> =>
+      scalar<string>(
+        `SELECT string_agg(p."id" || ':' || p."name" || ':' || p."type"::text, ','
+                ORDER BY p."id") AS v
+           FROM "payers" p`,
+      );
+    const docs = (column: string): Promise<string> =>
+      scalar<string>(
+        `SELECT string_agg(coalesce("${column}"::text, '-') || '/'
+                  || coalesce("documentType"::text, '-'), ','
+                ORDER BY "id") AS v
+           FROM ((SELECT "id", "${column}", "documentType" FROM "patients")
+                 UNION ALL
+                 (SELECT "id", "${column}", "documentType"
+                    FROM "patient_responsible_parties")) s`,
+      );
+    let payersBefore = '';
+    let docsBefore = '';
+    await run(STEPS[28], async () => {
+      payersBefore = await payers();
+      docsBefore = await docs('docType');
+    });
+    const translate: Record<string, string> = {
+      MUTUA_ES: 'INSURER',
+      PREPAGADA_CO: 'PREPAID_PLAN',
+      EPS_CO: 'PUBLIC_SYSTEM',
+      EMPRESA: 'EMPLOYER',
+      OTRO: 'OTHER',
+    };
+    expect(await payers()).toBe(
+      payersBefore.replace(
+        /:(MUTUA_ES|PREPAGADA_CO|EPS_CO|EMPRESA|OTRO)(?=,|$)/g,
+        (_m, code: string) => `:${translate[code]}`,
+      ),
+    );
+    const rename: Record<string, string> = {
+      CC: 'NATIONAL_ID',
+      TI: 'MINOR_ID',
+      CE: 'FOREIGNER_ID',
+    };
+    expect(await docs('legacyDocumentCode')).toBe(
+      docsBefore.replace(
+        /(^|,)(CC|TI|CE)\//g,
+        (_m, sep: string, code: string) => `${sep}${rename[code]}/`,
+      ),
+    );
+    expect(docsBefore).toMatch(/(^|,)TI\/NATIONAL_ID/);
+    expect(
+      await scalar<number>(
+        `SELECT count(*)::int AS v FROM pg_trigger
+          WHERE tgname IN ('patients_document_type',
+                           'patient_responsible_parties_document_type')`,
+      ),
+    ).toBe(0);
+    expect(
+      await scalar<string>(
+        `SELECT string_agg(relname || '=' || relforcerowsecurity, ','
+                ORDER BY relname) AS v
+           FROM pg_class
+          WHERE oid IN ('public.patients'::regclass,
+                        'public.patient_responsible_parties'::regclass,
+                        'public.patient_coverages'::regclass,
+                        'public.payers'::regclass)`,
+      ),
+    ).toBe(
+      'patient_coverages=true,patient_responsible_parties=true,patients=true,payers=true',
+    );
   }, 180_000);
 
   it('al terminar: FORCE en toda tabla con RLS y todo es del owner', async () => {

@@ -17,7 +17,6 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
-import { legacyStoredDocType } from '../src/modules/patients/domain/legacy-doc-type';
 import { MISSING_FILE_MESSAGE } from '../src/modules/patient-imports/application/patient-imports.use-cases';
 
 // DX-107 · Importación de pacientes desde CSV/XLSX en HTTP real: plantilla,
@@ -1002,17 +1001,15 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
       {
         docNumber: string;
         documentType: string;
-        docType: string;
         docTypeLabel: string | null;
       }[]
     >`
-      SELECT "docNumber", "documentType"::text AS "documentType",
-             "docType"::text AS "docType", "docTypeLabel"
+      SELECT "docNumber", "documentType"::text AS "documentType", "docTypeLabel"
         FROM "patients"
        WHERE "import_batch_id" = ${importBatchId}::uuid
        ORDER BY "docNumber"`;
 
-  it('a file with generic types imports every type and its legacy projection is stored', async () => {
+  it('a file with generic types imports every type and stores only the generic one', async () => {
     const bytes = csvOf([
       'NATIONAL_ID;RX-5001;Uno;Genérico;;;;;',
       'Pasaporte;RX-5002;Dos;Genérico;;;;;',
@@ -1030,8 +1027,7 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
       'TAX_ID',
       'OTHER',
     ]);
-    // Filas preparadas de la fase 1: el código anterior para un worker
-    // anterior, el genérico para el nuevo, y ninguna etiqueta.
+    // Filas preparadas: solo el genérico, sin código anterior ni etiqueta.
     const rows = await raw.patientImportRow.findMany({
       where: { batchId: dry.id },
       orderBy: { rowNumber: 'asc' },
@@ -1039,14 +1035,14 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
     expect(
       rows.map((r) => {
         const data = r.data as Record<string, unknown>;
-        return [data.docType, data.documentType, 'docTypeLabel' in data];
+        return [data.documentType, 'docType' in data, 'docTypeLabel' in data];
       }),
     ).toEqual([
-      ['CC', 'NATIONAL_ID', false],
-      ['PASSPORT', 'PASSPORT', false],
-      ['CE', 'RESIDENCE_PERMIT', false],
-      ['OTHER', 'TAX_ID', false],
-      ['OTHER', 'OTHER', false],
+      ['NATIONAL_ID', false, false],
+      ['PASSPORT', false, false],
+      ['RESIDENCE_PERMIT', false, false],
+      ['TAX_ID', false, false],
+      ['OTHER', false, false],
     ]);
     await as(
       api().post(`/api/v1/patient-imports/${dry.id}/confirm`),
@@ -1059,31 +1055,26 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
       {
         docNumber: 'RX5001',
         documentType: 'NATIONAL_ID',
-        docType: legacyStoredDocType('NATIONAL_ID'),
         docTypeLabel: null,
       },
       {
         docNumber: 'RX5002',
         documentType: 'PASSPORT',
-        docType: 'PASSPORT',
         docTypeLabel: null,
       },
       {
         docNumber: 'RX5003',
         documentType: 'RESIDENCE_PERMIT',
-        docType: legacyStoredDocType('RESIDENCE_PERMIT'),
         docTypeLabel: null,
       },
       {
         docNumber: 'RX5004',
         documentType: 'TAX_ID',
-        docType: 'OTHER',
         docTypeLabel: null,
       },
       {
         docNumber: 'RX5005',
         documentType: 'OTHER',
-        docType: 'OTHER',
         docTypeLabel: null,
       },
     ]);
@@ -1162,7 +1153,6 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
       {
         docNumber: 'RX7001',
         documentType: 'NATIONAL_ID',
-        docType: legacyStoredDocType('NATIONAL_ID'),
         docTypeLabel: null,
       },
     ]);
@@ -1249,7 +1239,6 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
         {
           docNumber: 'RX8001',
           documentType: 'NATIONAL_ID',
-          docType: legacyStoredDocType('NATIONAL_ID'),
           docTypeLabel: null,
         },
       ]);

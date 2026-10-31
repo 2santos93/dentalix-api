@@ -110,7 +110,7 @@ describe('PrismaResponsiblePartyRepository (DX-327, fase 1)', () => {
     return { repo, writes, locks };
   }
 
-  it('a contact is created with the legacy pair and edited with the generic type only', async () => {
+  it('a contact is created and edited with the generic type only', async () => {
     const { repo, writes } = fakeRepository();
     const base = {
       responsiblePatientId: null,
@@ -144,14 +144,14 @@ describe('PrismaResponsiblePartyRepository (DX-327, fase 1)', () => {
     );
     expect(writes[0]).toMatchObject({
       documentType: 'TAX_ID',
-      docType: 'OTHER',
       docTypeLabel: 'ID local',
     });
+    expect(writes[0]).not.toHaveProperty('docType');
     expect(writes[1]).toMatchObject({
       documentType: null,
-      docType: null,
       docTypeLabel: null,
     });
+    expect(writes[1]).not.toHaveProperty('docType');
     expect(writes[2]).not.toHaveProperty('documentType');
     expect(writes[2]).not.toHaveProperty('docType');
 

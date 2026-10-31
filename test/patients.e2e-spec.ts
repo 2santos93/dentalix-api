@@ -14,7 +14,6 @@ import {
   type RegionalFixture,
 } from './support/location-fixtures';
 import { DOCUMENT_TYPES } from '../src/modules/patients/domain/document-type';
-import { legacyStoredDocType } from '../src/modules/patients/domain/legacy-doc-type';
 import { DocumentTypeNamesReader } from '../src/modules/patients/domain/ports/document-type-names-repository.port';
 
 // `raw` es una conexión de ADMINISTRACIÓN exclusiva para el cleanup en
@@ -238,38 +237,40 @@ describe('Patients (e2e)', () => {
           },
         })
       ).id;
-      // La columna sigue en la BD hasta la fase 2; el cliente Prisma ya no la
-      // ve, así que se siembra en crudo.
+      // La columna sigue en la BD, congelada; el cliente Prisma no la ve, así
+      // que se siembra en crudo.
       await raw.$executeRaw`
-        UPDATE patients SET "insurerEps" = 'Texto anterior' WHERE id = ${patientId}::uuid`;
+        UPDATE patients SET "legacyInsurerName" = 'Texto anterior' WHERE id = ${patientId}::uuid`;
     });
 
-    function insurerEpsInDb(): Promise<{ insurerEps: string | null }[]> {
+    function legacyInsurerInDb(): Promise<
+      { legacyInsurerName: string | null }[]
+    > {
       return raw.$queryRaw`
-        SELECT "insurerEps" FROM patients WHERE id = ${patientId}::uuid`;
+        SELECT "legacyInsurerName" FROM patients WHERE id = ${patientId}::uuid`;
     }
 
-    it('GET /patients/:id has no insurerEps key', async () => {
+    it('GET /patients/:id has no legacy insurer key', async () => {
       const res = await request(app.getHttpServer())
         .get(`/api/v1/patients/${patientId}`)
         .set('X-Tenant-Host', hostFor(clinic.subdomain))
         .set('Authorization', `Bearer ${clinic.accessToken}`)
         .expect(200);
-      expect(res.body).not.toHaveProperty('insurerEps');
+      expect(res.body).not.toHaveProperty('legacyInsurerName');
     });
 
-    it('PATCH with insurerEps is 200 and ignored', async () => {
+    it('PATCH with the legacy insurer is 200 and ignored', async () => {
       const res = await request(app.getHttpServer())
         .patch(`/api/v1/patients/${patientId}`)
         .set('X-Tenant-Host', hostFor(clinic.subdomain))
         .set('Authorization', `Bearer ${clinic.accessToken}`)
-        .send({ occupation: 'Docente', insurerEps: 'Surco' })
+        .send({ occupation: 'Docente', legacyInsurerName: 'Surco' })
         .expect(200);
       const body = res.body as Record<string, unknown>;
       expect(body.occupation).toBe('Docente');
-      expect(body).not.toHaveProperty('insurerEps');
-      expect(await insurerEpsInDb()).toEqual([
-        { insurerEps: 'Texto anterior' },
+      expect(body).not.toHaveProperty('legacyInsurerName');
+      expect(await legacyInsurerInDb()).toEqual([
+        { legacyInsurerName: 'Texto anterior' },
       ]);
     });
   });
@@ -567,8 +568,8 @@ describe('Patients (e2e)', () => {
     expect(await keyOf(other.id)).toBe('80100201');
   });
 
-  // DX-327: tipos de documento genéricos, nombre libre (R7), entrada anterior
-  // (R9), fase 1 en la BD (R4–R5) y nombre visible (R17). La sede es
+  // DX-327: tipos de documento genéricos, nombre libre (R7), sin códigos
+  // anteriores (migración 20261110130000) y nombre visible (R17). La sede es
   // REGIONAL_TOKYO_FIXTURE.
   describe('DX-327: tipos de documento genéricos', () => {
     interface DocPatient {
@@ -580,7 +581,6 @@ describe('Patients (e2e)', () => {
     }
     interface DocRow {
       documentType: string;
-      docType: string;
       docTypeLabel: string | null;
       docKey: string | null;
     }
@@ -621,8 +621,7 @@ describe('Patients (e2e)', () => {
     };
     const sqlRow = async (id: string): Promise<DocRow> => {
       const [row] = await raw.$queryRaw<DocRow[]>`
-        SELECT "documentType"::text AS "documentType", "docType"::text AS "docType",
-               "docTypeLabel", "docKey"
+        SELECT "documentType"::text AS "documentType", "docTypeLabel", "docKey"
           FROM "patients" WHERE "id" = ${id}::uuid`;
       return row;
     };
@@ -655,11 +654,8 @@ describe('Patients (e2e)', () => {
           docType,
           docTypeLabel: null,
         });
-        // Fase 1: el genérico y la proyección anterior para las réplicas
-        // anteriores, que leen solo "docType" (R5, §7).
         expect(await sqlRow(created.id)).toMatchObject({
           documentType: docType,
-          docType: legacyStoredDocType(docType),
           docTypeLabel: null,
         });
 
@@ -671,7 +667,6 @@ describe('Patients (e2e)', () => {
         });
         expect(await sqlRow(created.id)).toMatchObject({
           documentType: next,
-          docType: legacyStoredDocType(next),
           docTypeLabel: null,
         });
       }
@@ -756,34 +751,10 @@ describe('Patients (e2e)', () => {
       );
     });
 
-    it('legacy codes in the body are accepted as their generic type with no label during the rollout', async () => {
-      for (const [code, type] of [
-        ['CC', 'NATIONAL_ID'],
-        ['TI', 'NATIONAL_ID'],
-        ['CE', 'RESIDENCE_PERMIT'],
-      ] as const) {
-        const created = (await create({ docType: code }).expect(201))
-          .body as DocPatient;
-        expect(created).toMatchObject({ docType: type, docTypeLabel: null });
-        expect(await sqlRow(created.id)).toMatchObject({
-          documentType: type,
-          docTypeLabel: null,
-        });
+    it('a retired document code in the body is 400 (no translation since 20261110130000)', async () => {
+      for (const code of ['CC', 'TI', 'CE']) {
+        await create({ docType: code }).expect(400);
       }
-      const labelled = (
-        await create({ docType: 'CE', docTypeLabel: 'ID local' }).expect(201)
-      ).body as DocPatient;
-      expect(labelled).toMatchObject({
-        docType: 'RESIDENCE_PERMIT',
-        docTypeLabel: 'ID local',
-      });
-      // Una edición anterior que reenvía su código no cambia el tipo genérico:
-      // la etiqueta se queda (pre-flight I1).
-      await patch(labelled.id, { docType: 'CE', phone: '+81 3 5555 0100' });
-      expect(await detail(labelled.id)).toMatchObject({
-        docType: 'RESIDENCE_PERMIT',
-        docTypeLabel: 'ID local',
-      });
     });
 
     it("docTypeName is the patient's label, then the clinic's local name, then the generic name", async () => {
@@ -873,18 +844,18 @@ describe('Patients (e2e)', () => {
       }
     });
 
-    it('legacy rows written by an older API read back generic with no label', async () => {
-      const [{ id }] = await raw.$queryRaw<{ id: string }[]>`
-        INSERT INTO "patients" ("id","tenantId","firstName","lastName","docType","docNumber","updatedAt")
-        VALUES (gen_random_uuid(), ${clinic.tenantId}::uuid, 'Anterior', 'Fila', 'TI', 'RX-5001', now())
-        RETURNING "id"::text AS "id"`;
-      expect(await detail(id)).toMatchObject({
-        docType: 'NATIONAL_ID',
-        docTypeLabel: null,
-        docTypeName: 'Documento nacional',
-      });
-      expect(await listed(id, 'RX-5001')).toMatchObject({
-        docType: 'NATIONAL_ID',
+    it('the frozen legacy column is NULL on new rows and no trigger rewrites the type', async () => {
+      const created = (
+        await create({ docType: 'PASSPORT', docNumber: 'RX-5001' }).expect(201)
+      ).body as DocPatient;
+      const [row] = await raw.$queryRaw<{ legacy: string | null }[]>`
+        SELECT "legacyDocumentCode"::text AS legacy FROM "patients"
+         WHERE "id" = ${created.id}::uuid`;
+      expect(row.legacy).toBeNull();
+      await raw.$executeRaw`UPDATE "patients" SET "legacyDocumentCode" = 'MINOR_ID'
+        WHERE "id" = ${created.id}::uuid`;
+      expect(await detail(created.id)).toMatchObject({
+        docType: 'PASSPORT',
         docTypeLabel: null,
       });
     });

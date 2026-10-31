@@ -12,11 +12,6 @@ import { join } from 'node:path';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { DOCUMENT_TYPES } from '../src/modules/patients/domain/document-type';
 import {
-  LEGACY_CODES,
-  LEGACY_DOC_TYPES,
-  legacyStoredDocType,
-} from '../src/modules/patients/domain/legacy-doc-type';
-import {
   LEGACY_ENUM_COUNTRY,
   REGIONAL_TOKYO_FIXTURE,
 } from './support/location-fixtures';
@@ -37,6 +32,7 @@ const BACKFILL = '20261030120100_dx327_document_type_backfill';
 const VALIDATE = '20261030120200_dx327_document_type_validate';
 const DX327_MIGRATIONS = [DX327, BACKFILL, VALIDATE];
 const ROOT = join(__dirname, '..');
+const RETIRED = '20261110130000_sin_colombia_identificadores';
 const LIVE_IDX = 'patients_tenant_doc_key_live_idx';
 
 function urlFor(db: string): string {
@@ -120,6 +116,16 @@ const R3: Record<string, string> = {
   TI: 'NATIONAL_ID',
   CE: 'RESIDENCE_PERMIT',
   PASSPORT: 'PASSPORT',
+  OTHER: 'OTHER',
+};
+
+/** Los códigos de entonces y la proyección inversa de R5 (primer código del tipo). */
+const LEGACY_CODES = Object.keys(R3);
+const R5: Record<string, string> = {
+  NATIONAL_ID: 'CC',
+  PASSPORT: 'PASSPORT',
+  RESIDENCE_PERMIT: 'CE',
+  TAX_ID: 'OTHER',
   OTHER: 'OTHER',
 };
 
@@ -414,7 +420,11 @@ describe('DX-327 · migraciones del tipo de documento genérico (int)', () => {
     lookupsBefore = await lookups();
     ambiguousBefore = await ambiguous();
     planBefore = await livePlan();
-    for (const name of all.filter((n) => n >= DX327)) copy(name);
+    // Hasta la migración que retira los códigos anteriores (20261110130000),
+    // que tiene su propio test (sin-colombia-identifiers-migration.int-spec).
+    for (const name of all.filter((n) => n >= DX327 && n < RETIRED)) {
+      copy(name);
+    }
     migrateDeploy(dir, urlFor(db));
   }, 240_000);
 
@@ -1089,13 +1099,13 @@ describe('DX-327 · migraciones del tipo de documento genérico (int)', () => {
     ]);
   });
 
-  it('the SQL legacy functions match LEGACY_DOC_TYPES', async () => {
+  it('the SQL legacy functions match R3 and R5', async () => {
     for (const code of LEGACY_CODES) {
       const [row] = await target.$queryRawUnsafe<{ t: string }[]>(
         `SELECT public.dx_doc_type_from_legacy($1::public."DocType")::text AS t`,
         code,
       );
-      expect({ code, t: row.t }).toEqual({ code, t: LEGACY_DOC_TYPES[code] });
+      expect({ code, t: row.t }).toEqual({ code, t: R3[code] });
     }
     for (const type of DOCUMENT_TYPES) {
       const [row] = await target.$queryRawUnsafe<{ code: string }[]>(
@@ -1104,7 +1114,7 @@ describe('DX-327 · migraciones del tipo de documento genérico (int)', () => {
       );
       expect({ type, code: row.code }).toEqual({
         type,
-        code: legacyStoredDocType(type),
+        code: R5[type],
       });
     }
     // Ninguna función de la migración compone una etiqueta.

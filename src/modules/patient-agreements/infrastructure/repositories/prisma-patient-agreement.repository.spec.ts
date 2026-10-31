@@ -1,8 +1,6 @@
 /**
- * Excepción G5.3 (DX-334): tipos de pagador anteriores a DX-326.
- *
  * El pagador del convenio asignado llega con su tipo genérico: SEC-047 mira
- * ese tipo, así que un `OTRO` guardado tiene que salir `OTHER` (interno).
+ * ese tipo (OTHER es interno).
  */
 import {
   toEntity,
@@ -40,13 +38,13 @@ function row(
   };
 }
 
-describe('mapper de asignaciones de convenio (DX-326, fase 1)', () => {
-  it('legacy code in a patient agreement row maps to its generic type', () => {
-    expect(toEntity(row('OTRO')).agreement.payer).toEqual({
+describe('mapper de asignaciones de convenio (DX-326)', () => {
+  it('the payer of a patient agreement row keeps its generic type', () => {
+    expect(toEntity(row('OTHER')).agreement.payer).toEqual({
       id: 'payer-1',
       name: 'Cortesía',
       type: 'OTHER',
     });
-    expect(toEntity(row('EMPRESA')).agreement.payer.type).toBe('EMPLOYER');
+    expect(toEntity(row('EMPLOYER')).agreement.payer.type).toBe('EMPLOYER');
   });
 });

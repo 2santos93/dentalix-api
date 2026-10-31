@@ -30,10 +30,6 @@ import {
   totalLivePublicLinks,
 } from '../../domain/live-public-links';
 import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
-import {
-  legacyStoredDocType,
-  type LegacyDocType,
-} from '../../domain/legacy-doc-type';
 import { IN_CLINIC_STATUSES } from '../../../appointments/domain/patient-flow';
 import {
   recordConsentsInTx,
@@ -43,31 +39,22 @@ import {
 export type PrismaPatient = Prisma.PatientGetPayload<Record<string, never>>;
 
 /**
- * DX-327 (R5): un alta de fase 1 escribe el tipo genérico y su código
- * anterior. Sin el anterior, el trigger tomaría el DEFAULT de la columna
- * anterior y un OTHER quedaría NATIONAL_ID.
+ * DX-327: el alta escribe siempre el tipo; sin él la columna tomaría su
+ * DEFAULT 'OTHER'.
  */
-export type LegacyDocPair = {
-  documentType: DocumentType;
-  docType: LegacyDocType;
-};
+export type DocTypeColumn = { documentType: DocumentType };
 
-/** Columnas del documento de un alta (R5) con la etiqueta libre (R7). */
+/** Columnas del documento de un alta: el tipo y la etiqueta libre (R7). */
 export function patientDocFields(
   type: DocumentType,
   label: string | null,
-): LegacyDocPair & { docTypeLabel: string | null } {
-  return {
-    documentType: type,
-    docType: legacyStoredDocType(type),
-    docTypeLabel: label,
-  };
+): DocTypeColumn & { docTypeLabel: string | null } {
+  return { documentType: type, docTypeLabel: label };
 }
 
 /**
- * R5: un cambio escribe solo las columnas nuevas (el trigger ajusta la
- * anterior). Nunca se pasa el `patch` tal cual: su `docType` es el genérico.
- * R7: con `docType` y sin `docTypeLabel`, la etiqueta se borra solo si el
+ * Nunca se pasa el `patch` tal cual: su `docType` va a la columna
+ * `documentType`. R7: con `docType` y sin `docTypeLabel`, la etiqueta se borra solo si el
  * tipo genérico cambia respecto del GUARDADO (`stored`, leído con la fila
  * bloqueada en la misma transacción que la escritura).
  */
@@ -195,7 +182,7 @@ export async function insertPatientRowInTx(
       emergencyContactRelationship: input.emergencyContactRelationship,
       emergencyContactPhone: input.emergencyContactPhone,
       createdById: input.createdById,
-    } satisfies Prisma.PatientUncheckedCreateInput & LegacyDocPair,
+    } satisfies Prisma.PatientUncheckedCreateInput & DocTypeColumn,
   });
 }
 

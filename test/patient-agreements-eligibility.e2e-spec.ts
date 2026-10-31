@@ -289,7 +289,7 @@ describe('Elegibilidad para asignar un convenio (e2e, SEC-047)', () => {
       // La API no crea coberturas migradas: solo el relleno de DX-153.
       await raw.patientCoverage.update({
         where: { id: coverageId },
-        data: { migratedFromInsurerEps: true },
+        data: { migratedFromLegacyInsurer: true },
       });
       await as(api().put(url(patient)), tokens[role])
         .send({ agreementId: agreementOf.interno, coverageId })
@@ -304,13 +304,12 @@ describe('Elegibilidad para asignar un convenio (e2e, SEC-047)', () => {
     },
   );
 
-  it('legacy OTRO payer stays internal: a RECEPTION assignment is 403', async () => {
-    // Excepción G5.3 (DX-334): tipos de pagador anteriores a DX-326. Un
-    // pagador guardado con el código anterior OTRO se lee OTHER (interno):
-    // SEC-047 sigue pidiendo ADMIN para su convenio.
+  it('an OTHER payer inserted by SQL stays internal: a RECEPTION assignment is 403', async () => {
+    // Un pagador OTHER (interno, también los que eran OTRO antes de la
+    // migración 20261110130000): SEC-047 sigue pidiendo ADMIN para su convenio.
     const [{ id: payerId }] = await raw.$queryRaw<{ id: string }[]>`
       INSERT INTO "payers" ("id", "tenantId", "name", "type", "updatedAt")
-      VALUES (gen_random_uuid(), ${clinic.tenantId}::uuid, 'Cortesía empleados', 'OTRO', now())
+      VALUES (gen_random_uuid(), ${clinic.tenantId}::uuid, 'Cortesía empleados', 'OTHER', now())
       RETURNING id::text AS id`;
     const agreementId = await post(clinic, '/api/v1/agreements', {
       name: 'Cortesía empleados 100 %',
@@ -344,14 +343,13 @@ describe('Elegibilidad para asignar un convenio (e2e, SEC-047)', () => {
     ).toBe('OTHER');
   });
 
-  it('legacy EPS_CO payer stays external: an assignment without coverage is 400', async () => {
-    // Excepción G5.3 (DX-334): tipos de pagador anteriores a DX-326. Un
-    // pagador guardado con el código anterior EPS_CO se lee PUBLIC_SYSTEM
-    // (externo): SEC-047 pide cobertura viva, también a ADMIN.
+  it('a PUBLIC_SYSTEM payer inserted by SQL with a country stays external: an assignment without coverage is 400', async () => {
+    // Un pagador PUBLIC_SYSTEM guardado antes de DX-326, con país (externo):
+    // SEC-047 pide cobertura viva, también a ADMIN.
     const [{ id: payerId }] = await raw.$queryRaw<{ id: string }[]>`
       INSERT INTO "payers" ("id", "tenantId", "name", "type", "country", "updatedAt")
       VALUES (gen_random_uuid(), ${clinic.tenantId}::uuid, 'Plan Sur antiguo',
-              'EPS_CO', 'CO', now())
+              'PUBLIC_SYSTEM', 'ES', now())
       RETURNING id::text AS id`;
     const agreementId = await post(clinic, '/api/v1/agreements', {
       name: 'Plan Sur antiguo 100 %',
@@ -376,12 +374,12 @@ describe('Elegibilidad para asignar un convenio (e2e, SEC-047)', () => {
     await as(
       api().patch(`/api/v1/patients/${patient}/coverages/${coverageId}`),
       tokens.ADMIN,
-    ).send({ migratedFromInsurerEps: true });
+    ).send({ migratedFromLegacyInsurer: true });
     const row = await raw.patientCoverage.findUniqueOrThrow({
       where: { id: coverageId },
-      select: { migratedFromInsurerEps: true },
+      select: { migratedFromLegacyInsurer: true },
     });
-    expect(row.migratedFromInsurerEps).toBe(false);
+    expect(row.migratedFromLegacyInsurer).toBe(false);
   });
 
   it('una cobertura viva de OTRO pagador no habilita el convenio: 400', async () => {

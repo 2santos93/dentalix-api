@@ -6,7 +6,6 @@ import {
   type ReceiptSnapshot,
   type ReceiptSnapshotInput,
 } from './receipt-snapshot';
-import { legacyStoredDocType } from '../../patients/domain/legacy-doc-type';
 import { NO_LOCAL_NAMES } from '../../document-type-names/__fixtures__/fixed-document-type-names.reader';
 
 const LOCAL = { ...NO_LOCAL_NAMES, NATIONAL_ID: 'Documento A' };
@@ -70,7 +69,6 @@ describe('buildReceiptSnapshot (DX-136)', () => {
       patient: {
         id: 'pat-1',
         fullName: 'Carolina Duque',
-        docType: legacyStoredDocType('NATIONAL_ID'),
         documentType: 'NATIONAL_ID',
         docTypeLabel: null,
         docTypeName: 'Documento nacional',
@@ -162,7 +160,6 @@ describe('buildReceiptSnapshot (DX-136)', () => {
     expect(snapshot.patient).toEqual({
       id: 'pat-1',
       fullName: 'Ana Ruiz',
-      docType: legacyStoredDocType('NATIONAL_ID'),
       documentType: 'NATIONAL_ID',
       docTypeLabel: null,
       docTypeName: 'Documento nacional',
@@ -188,7 +185,7 @@ describe('buildReceiptSnapshot (DX-136)', () => {
 });
 
 describe('receiptPatientView (DX-327)', () => {
-  it('a new snapshot carries the legacy code, the generic type, the label and the frozen display name', () => {
+  it('a new snapshot carries the generic type, the label and the frozen display name, and no old code', () => {
     const labelled = buildReceiptSnapshot(
       input({
         patient: {
@@ -201,11 +198,11 @@ describe('receiptPatientView (DX-327)', () => {
     );
     expect(labelled.version).toBe(1);
     expect(labelled.patient).toMatchObject({
-      docType: legacyStoredDocType('TAX_ID'),
       documentType: 'TAX_ID',
       docTypeLabel: 'ID local',
       docTypeName: 'ID local',
     });
+    expect(labelled.patient).not.toHaveProperty('docType');
 
     const local = buildReceiptSnapshot(input(), LOCAL);
     expect(local.patient.docTypeName).toBe('Documento A');
@@ -223,8 +220,8 @@ describe('receiptPatientView (DX-327)', () => {
     });
   });
 
-  it("legacy snapshot with CC reads as NATIONAL_ID with no label and the clinic's current name, or the generic one", () => {
-    // Tal como la guardó la versión anterior: solo el código.
+  it("an old snapshot with only the old code reads as NATIONAL_ID with no label and the clinic's current name, or the generic one", () => {
+    // Tal como la guardó la versión anterior a DX-327: solo el código.
     const legacy = parseReceiptSnapshot({
       ...JSON.parse(JSON.stringify(buildReceiptSnapshot(input(), LOCAL))),
       patient: {

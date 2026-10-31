@@ -1,8 +1,4 @@
-/**
- * Excepción G5.3 (DX-334): tipos de pagador anteriores a DX-326.
- *
- * El pagador de una cobertura llega con su tipo genérico y sin país (spec R4, R8).
- */
+/** El pagador de una cobertura llega con su tipo genérico y sin país (DX-326, spec R4, R8). */
 import {
   toEntity,
   type PatientCoverageRow,
@@ -23,7 +19,7 @@ function row(type: PatientCoverageRow['payer']['type']): PatientCoverageRow {
     validTo: null,
     isPrimary: true,
     notes: null,
-    migratedFromInsurerEps: false,
+    migratedFromLegacyInsurer: false,
     createdById: null,
     updatedById: null,
     declaredById: null,
@@ -36,15 +32,15 @@ function row(type: PatientCoverageRow['payer']['type']): PatientCoverageRow {
   };
 }
 
-describe('mapper de coberturas (DX-326, fase 1)', () => {
-  it('legacy code in a coverage row maps to its generic type and the payer has no country', () => {
-    const coverage = toEntity(row('EPS_CO'), new Map());
+describe('mapper de coberturas (DX-326)', () => {
+  it('the payer of a coverage row keeps its generic type and has no country', () => {
+    const coverage = toEntity(row('PUBLIC_SYSTEM'), new Map());
     expect(coverage.payer).toEqual({
       id: 'payer-1',
       name: 'Surco Salud',
       type: 'PUBLIC_SYSTEM',
       active: true,
     });
-    expect(toEntity(row('OTRO'), new Map()).payer.type).toBe('OTHER');
+    expect(toEntity(row('OTHER'), new Map()).payer.type).toBe('OTHER');
   });
 });

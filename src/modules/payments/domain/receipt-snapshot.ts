@@ -5,11 +5,7 @@ import {
   documentTypeName,
   type ClinicDocumentTypeNames,
 } from '../../patients/domain/document-type';
-import {
-  docTypeFromStored,
-  legacyStoredDocType,
-  type LegacyDocType,
-} from '../../patients/domain/legacy-doc-type';
+import { docTypeFromStored } from '../../patients/domain/legacy-document-codes';
 
 /** Pie legal por defecto del recibo de caja (DX-136). */
 export const RECEIPT_LEGAL_NOTICE = 'Este documento no es factura';
@@ -118,15 +114,16 @@ export interface ReceiptSnapshot {
   /** Falta la razón social o el identificador fiscal: el recibo dice «Datos fiscales pendientes». */
   fiscalDataPending: boolean;
   /**
-   * DX-327 (fase 1, R5, R6 y R18): `docType` sigue siendo el código anterior
-   * para las réplicas anteriores; las fotos nuevas añaden el tipo genérico, la
-   * etiqueta y el nombre visible congelado. Las anteriores solo tienen el
-   * código. Se lee SIEMPRE con `receiptPatientView`.
+   * DX-327 (R6 y R18): las fotos llevan el tipo genérico, la etiqueta y el
+   * nombre visible congelado. Las emitidas antes de la migración
+   * 20261110130000 llevan además (o solo, las anteriores a DX-327) el código
+   * anterior en `docType`; la foto es inmutable y no se reescribe. Se lee
+   * SIEMPRE con `receiptPatientView`.
    */
   patient: {
     id: string;
     fullName: string;
-    docType: LegacyDocType;
+    docType?: string;
     documentType?: DocumentType;
     docTypeLabel?: string | null;
     docTypeName?: string;
@@ -188,7 +185,6 @@ export function buildReceiptSnapshot(
     patient: {
       id: input.patient.id,
       fullName: `${input.patient.firstName.trim()} ${input.patient.lastName.trim()}`,
-      docType: legacyStoredDocType(docType),
       documentType: docType,
       docTypeLabel,
       docTypeName: documentTypeName(docType, docTypeLabel, clinicNames),
@@ -274,7 +270,9 @@ export function receiptPatientView(
   clinicNames: ClinicDocumentTypeNames,
 ): ReceiptPatientView {
   const { patient } = snapshot;
-  const docType = docTypeFromStored(patient.documentType ?? patient.docType);
+  const docType = docTypeFromStored(
+    String(patient.documentType ?? patient.docType),
+  );
   const docTypeLabel = patient.docTypeLabel ?? null;
   return {
     id: patient.id,

@@ -1,9 +1,5 @@
 import type { DocumentType } from '@prisma/client';
-import {
-  docTypeFromStored,
-  legacyStoredDocType,
-  type LegacyDocType,
-} from '../../patients/domain/legacy-doc-type';
+import { docTypeFromStored } from '../../patients/domain/legacy-document-codes';
 import {
   IMPORT_FIELDS,
   fieldLabel,
@@ -29,15 +25,9 @@ export interface ResolvedMapping {
   defaultDocType: DocumentType | null;
 }
 
-/**
- * Mapeo guardado en el lote (DX-327, fase 1, pre-flight M3):
- * `defaultDocType` lleva el código anterior, para la API y la web anteriores
- * durante el despliegue, y `defaultDocumentType` el genérico, que es el que
- * lee la API nueva. La fase 2 deja de escribir el anterior.
- */
+/** Mapeo guardado en el lote: las columnas y el tipo por defecto, genérico. */
 export type StoredColumnMapping = {
   columns: ColumnMapping;
-  defaultDocType: LegacyDocType | null;
   defaultDocumentType: DocumentType | null;
 };
 
@@ -45,16 +35,13 @@ export function storedColumnMapping(
   columns: ColumnMapping,
   defaultDocType: DocumentType | null,
 ): StoredColumnMapping {
-  return {
-    columns,
-    defaultDocType: defaultDocType && legacyStoredDocType(defaultDocType),
-    defaultDocumentType: defaultDocType,
-  };
+  return { columns, defaultDocumentType: defaultDocType };
 }
 
 /**
- * Lee el mapeo guardado: prefiere el genérico y, si falta (lote de la API
- * anterior), traduce el código anterior (R6, sin etiqueta).
+ * Lee el mapeo guardado. Un lote anterior a la migración 20261110130000
+ * puede traer, además o en su lugar, el código anterior en `defaultDocType`
+ * (`docTypeFromStored`, sin etiqueta).
  */
 export function readStoredColumnMapping(raw: unknown): {
   columns: ColumnMapping;

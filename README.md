@@ -3132,13 +3132,15 @@ para cualquier clínica y país: `NATIONAL_ID` («Documento nacional»),
 `PASSPORT` («Pasaporte»), `RESIDENCE_PERMIT` («Permiso de residencia»),
 `TAX_ID` («Identificación fiscal») y `OTHER` («Otro documento»). Ningún código
 nombra el documento de un país. Los códigos anteriores a DX-327 solo se
-traducen en `src/modules/patients/domain/legacy-doc-type.ts` (excepción G5.3),
-y la guarda `src/architecture/no-location-fallbacks.spec.ts` lo comprueba,
-también sobre este README. Migraciones
+LEEN en `src/modules/patients/domain/legacy-document-codes.ts` (excepción
+G5.3: JSON ya guardado y alias de los ficheros de importación), y la guarda
+`src/architecture/no-location-fallbacks.spec.ts` lo comprueba, también sobre
+este README. Migraciones
 `20261030120000_dx327_document_type`,
 `20261030120100_dx327_document_type_backfill`,
-`20261030120200_dx327_document_type_validate` y
-`20261030120300_dx327_tenant_document_type_names`.
+`20261030120200_dx327_document_type_validate`,
+`20261030120300_dx327_tenant_document_type_names` y, la fase 2,
+`20261110130000_sin_colombia_identificadores`.
 
 - **Pacientes y contactos**: `docType` (uno de los cinco; el alta lo exige y
   no propone ninguno), `docTypeLabel` y `docTypeName`.
@@ -3150,10 +3152,9 @@ también sobre este README. Migraciones
     genérico. Es el que imprimen las recetas, consentimientos, presupuestos,
     recibos, tarjetas de implante y el estado de cuenta nuevos. Lo ya emitido
     conserva su texto y su hash.
-  - Durante la fase 1, los cuerpos de alta y edición (pacientes, contactos y
-    el `defaultDocType` de la importación) aceptan también los códigos
-    anteriores, para la web anterior. Se traducen a su genérico, sin etiqueta.
-    OpenAPI publica solo los cinco genéricos.
+  - Los cuerpos de alta y edición (pacientes, contactos y el
+    `defaultDocType` de la importación) solo aceptan los cinco genéricos:
+    cualquier otro código es 400.
 - **Nombres locales de la clínica**: `tenants."docTypeNameNationalId"`,
   `…Passport`, `…ResidencePermit`, `…TaxId` y `…Other`, todos nullable y
   sin relleno. Todas las clínicas, también las nuevas y la demo, empiezan sin
@@ -3186,16 +3187,19 @@ también sobre este README. Migraciones
   `reason: DOCUMENT_TYPE_NAMES_SETTINGS` y `changedFields` con los tipos que
   cambiaron (nunca los textos). Guardar lo mismo responde 200 sin evento.
 - **Importación**: la columna de tipo reconoce, en este orden, los nombres
-  locales de la clínica, los códigos y nombres genéricos, y los sinónimos de
-  los archivos de siempre. Dos filas con el mismo número y el mismo tipo
+  locales de la clínica, los códigos y nombres genéricos, y los alias de
+  ficheros de otro software (`IMPORT_DOC_TYPE_ALIASES`). Dos filas con el mismo número y el mismo tipo
   genérico son el mismo paciente. Ver «Importación de pacientes» abajo.
 - **BD**: `patients."documentType"` (con `DEFAULT 'OTHER'`) y
   `"docTypeLabel"`, y lo mismo, nullable, en `patient_responsible_parties`.
-  Durante la fase 1 se queda la columna anterior `"docType"`, para las réplicas
-  anteriores. La API la escribe solo al crear, y el trigger
-  `dx_document_type_sync` mantiene coherentes las dos columnas. El trigger
-  nunca escribe una etiqueta: solo la conserva o la pone a `NULL`.
-- **Despliegue** (orden obligatorio):
+  La columna anterior quedó congelada como `"legacyDocumentCode"` (enum
+  `LegacyDocumentCode`: NATIONAL_ID, MINOR_ID, FOREIGNER_ID, PASSPORT, OTHER;
+  `@ignore`, sin DEFAULT, NULL en las filas nuevas) desde la fase 2: nadie la
+  lee ni la escribe, y se conserva porque es lo único que distingue el
+  documento de un menor (MINOR_ID) del de un adulto en las filas anteriores.
+  El trigger y las funciones de la fase 1 ya no existen.
+- **Despliegue de la fase 1** (histórico, orden obligatorio; las consultas
+  nombran la columna con su nombre de entonces, `"docType"`):
   1. **Antes de `migrate deploy`**, en cada entorno, se ejecuta la consulta
      previa (solo lectura) y se guarda en la nota de versión. Hace falta un
      rol con `BYPASSRLS` (el del DBA); con el owner `NOBYPASSRLS` devuelve 0
@@ -3298,15 +3302,16 @@ dx_doc_type_coherent("docType", "documentType")`, y lo mismo en
   Un `TAX_ID` se ve como «Documento …» en la web anterior. No se revierte
   ninguna migración. Al volver a la versión nueva, todo está coherente.
 
-- **Fase 2** (ticket aparte, con 0 réplicas y 0 workers anteriores):
-  - se quitan la columna anterior, el trigger, las funciones y el enum
-    `DocType`;
-  - antes de borrar la columna, hay que recrear
-    `patient_responsible_parties_kind_check` sin ella, porque `DROP COLUMN`
-    borra en silencio todo CHECK que la nombra;
-  - la traducción de solo lectura de los códigos anteriores no se borra
-    nunca: las fotos de recibos y las filas de importación antiguas la
-    necesitan.
+- **Fase 2** (`20261110130000_sin_colombia_identificadores`, web y API a la
+  vez, sin réplicas anteriores): retira el trigger y las cuatro funciones y
+  renombra en su sitio la columna y el enum anteriores (`RENAME VALUE`: cada
+  fila conserva su valor). La API deja de escribir el código anterior en la
+  columna y en los JSON nuevos (foto del recibo, filas y mapeo de la
+  importación). La traducción de solo lectura de los códigos anteriores no se
+  borra: las fotos de recibos (inmutables) y las filas de importación
+  antiguas la necesitan. Si algún día se borra la columna congelada, antes
+  hay que recrear `patient_responsible_parties_kind_check` sin ella, porque
+  `DROP COLUMN` borra en silencio todo CHECK que la nombra.
 
 ## País de la sede ISO 3166 (DX-312)
 
@@ -3779,20 +3784,20 @@ migraciones `20261020000000_dx222_enums`,
 Con qué pagador, plan y afiliado se atiende cada paciente: un catálogo de
 pagadores por clínica (aseguradoras, planes prepago, sistema público, empresas) y hasta 5
 coberturas por paciente, una principal. Sustituye al texto libre
-`patients."insurerEps"`. Módulos `payers` y `patient-coverages`; migraciones
+`patients."legacyInsurerName"`. Módulos `payers` y `patient-coverages`; migraciones
 `20261020210000_dx153_enums`, `20261020210100_dx153_payers_and_coverages` y
 `20261020210200_dx153_insurer_eps_backfill`.
 
-- **Tablas**: `payers` (nombre, `type` MUTUA_ES | PREPAGADA_CO | EPS_CO |
-  EMPRESA | OTRO, `country`, `active`) y `patient_coverages` (paciente,
+- **Tablas**: `payers` (nombre, `type` INSURER | PREPAID_PLAN |
+  PUBLIC_SYSTEM | EMPLOYER | OTHER desde DX-326, `active`; la columna
+  `country` quedó @ignore) y `patient_coverages` (paciente,
   pagador, plan, nº de afiliado, titular, vigencia `validFrom`/`validTo`,
   `isPrimary`, notas). Ambas con RLS FORCE y FK compuestas por `tenantId`
   (un pagador o paciente de otra clínica es imposible en la BD). Se quitan en
   blando.
 - **Reglas**: nombre de pagador único por clínica entre pagadores vivos
   (mayúsculas y tildes se comprueban en la API; 409 en español, con mensaje
-  propio si el que coincide está desactivado); CHECK de tipo y país (EPS_CO y
-  PREPAGADA_CO solo con país CO); `validTo` no anterior a `validFrom`; hasta 5
+  propio si el que coincide está desactivado); `validTo` no anterior a `validFrom`; hasta 5
   coberturas vivas por paciente; la primera es principal aunque no se pida y
   `isPrimary: true` en otra desmarca la anterior en la misma transacción
   (con candado por paciente); la principal no se puede desmarcar sin marcar
@@ -3815,11 +3820,11 @@ coberturas por paciente, una principal. Sustituye al texto libre
   verificada; nunca el nº entero ni el titular. El catálogo de pagadores no
   se audita. El GET de coberturas tampoco (la ficha ya se audita).
 - **Relleno**: la migración `…_insurer_eps_backfill` crea un pagador por
-  clínica y texto normalizado (tipo OTRO, sin país; el ADMIN lo reclasifica) y
-  una cobertura principal por paciente con `insurerEps` no vacío, marcada
-  `migratedFromInsurerEps`. Es idempotente, incluye archivados y no toca
-  `insurerEps`. Esa columna queda legada, sin lectores desde DX-322; DROP en
-  fase 2. La API ya no la lee, no la escribe ni la expone (`@ignore` en el
+  clínica y texto normalizado (tipo «otro», hoy OTHER, sin país; el ADMIN lo
+  reclasifica) y una cobertura principal por paciente con texto de
+  aseguradora no vacío, marcada `migratedFromLegacyInsurer`. Es idempotente, incluye archivados y no toca el
+  texto. Esa columna queda congelada como `"legacyInsurerName"`, sin lectores
+  desde DX-322 (renombrada en `20261110130000`). La API ya no la lee, no la escribe ni la expone (`@ignore` en el
   esquema), y un cliente antiguo que la mande no da error: se descarta.
 - **Demo**: `npm run seed:demo` crea 8 pagadores (Sura EPS, Sanitas,
   Compensar, Nueva EPS, Famisanar, Salud Total, Coomeva, Empresa Alfa) y una cobertura
@@ -3863,18 +3868,18 @@ de precios) que fijan el precio de cada ítem del plan al añadirlo. Módulos
   clínicos.
 - **Elegibilidad al asignar (SEC-047)**: como la rebaja de convenio no cuenta
   como descuento discrecional, asignar un convenio no puede saltarse el tope
-  por rol de DX-204. Un convenio de un **pagador externo** (tipo MUTUA_ES,
-  PREPAGADA_CO, EPS_CO o EMPRESA) exige `coverageId` con una cobertura del
+  por rol de DX-204. Un convenio de un **pagador externo** (tipo INSURER,
+  PREPAID_PLAN, PUBLIC_SYSTEM o EMPLOYER) exige `coverageId` con una cobertura del
   paciente, de ese pagador, sin retirar y **vigente hoy** (día civil de la
   sede), para cualquier rol, ADMIN incluido: si no, 400 en español. Un
-  convenio **interno** (pagador de tipo OTRO: cortesía, empleados, socios)
+  convenio **interno** (pagador de tipo OTHER: cortesía, empleados, socios)
   lo asigna ADMIN, con la cobertura opcional (si viene, se valida igual). Otro
-  rol solo si manda una cobertura **migrada** (`migratedFromInsurerEps`, que
+  rol solo si manda una cobertura **migrada** (`migratedFromLegacyInsurer`, que
   solo crea el relleno de DX-153 y la API no puede marcar) del paciente y de
   ese pagador, vigente; si no, 403 en español con la pista de pedir al
   administrador que reclasifique el pagador. `GET /agreements`, la
   asignación y las coberturas devuelven `payer.type` y
-  `migratedFromInsurerEps` para que la web sepa qué pedir. Matriz en
+  `migratedFromLegacyInsurer` para que la web sepa qué pedir. Matriz en
   `test/patient-agreements-eligibility.e2e-spec.ts`.
 - **Cobertura verificable (SEC-049)**: cierra el riesgo que SEC-047 dejaba
   aceptado (cualquier rol creaba la cobertura con solo `{ payerId }` y
@@ -3934,7 +3939,7 @@ de precios) que fijan el precio de cada ítem del plan al añadirlo. Módulos
   ```sql
   SELECT t."name" AS clinica, py."name" AS pagador, a."name" AS convenio,
          count(DISTINCT pa."patientId") FILTER (WHERE pa."deletedAt" IS NULL) AS pacientes_asignados,
-         count(DISTINCT pc."patientId") FILTER (WHERE pc."migratedFromInsurerEps") AS pacientes_con_cobertura_migrada
+         count(DISTINCT pc."patientId") FILTER (WHERE pc."migratedFromLegacyInsurer") AS pacientes_con_cobertura_migrada
     FROM "agreements" a
     JOIN "payers" py ON py."tenantId" = a."tenantId" AND py."id" = a."payerId"
     JOIN "tenants" t ON t."id" = a."tenantId"

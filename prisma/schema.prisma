@@ -511,13 +511,14 @@ model ClinicInvitation {
   @@map("clinic_invitations")
 }
 
-/// Excepción G5.3 (DX-334): tipos de documento anteriores a DX-327. La API ya
-/// no los lee; los mantiene el trigger *_document_type para las réplicas
-/// anteriores (migración 20261030120000). La fase 2 borra el enum.
-enum DocType {
-  CC
-  TI
-  CE
+/// Código de documento guardado antes de DX-327, congelado y con nombres
+/// genéricos (migración 20261110130000). Nadie lo lee ni lo escribe; se
+/// conserva porque es lo único que distingue el documento de un menor
+/// (MINOR_ID) del de un adulto en las filas anteriores. NULL en las nuevas.
+enum LegacyDocumentCode {
+  NATIONAL_ID
+  MINOR_ID
+  FOREIGNER_ID
   PASSPORT
   OTHER
 }
@@ -543,11 +544,9 @@ model Patient {
   tenantId                     String                @db.Uuid
   firstName                    String
   lastName                     String
-  /// Excepción G5.3 (DX-334): código anterior a DX-327, solo para las réplicas
-  /// anteriores. La API lo escribe al crear (proyección de R3) y no lo lee.
-  docType                      DocType               @default(CC)
-  /// DX-327: el tipo. DEFAULT 'OTHER' solo para quien no lo da (R10): el
-  /// trigger patients_document_type lo deriva del código anterior.
+  /// Código anterior a DX-327, congelado (ver `LegacyDocumentCode`).
+  legacyDocumentCode           LegacyDocumentCode?   @ignore
+  /// DX-327: el tipo. DEFAULT 'OTHER' solo para quien no lo da (R10).
   documentType                 DocumentType          @default(OTHER)
   /// DX-327: nombre libre del documento (1–40, recortado); se imprime en
   /// lugar del tipo. Solo lo escribe la clínica.
@@ -571,10 +570,9 @@ model Patient {
   // Identificación ampliada.
   maritalStatus                String?
   occupation                   String?
-  /// DX-322 fase 1: columna LEGADA. Solo la leen réplicas anteriores a esta
-  /// unidad. El dato vive en patient_coverages (migratedFromInsurerEps, DX-153).
-  /// Fase 2 (ticket aparte) la borra con DROP COLUMN.
-  insurerEps                   String?               @ignore
+  /// DX-322: aseguradora en texto libre anterior a DX-153, congelada. Nadie la
+  /// lee: el dato vive en patient_coverages (migratedFromLegacyInsurer).
+  legacyInsurerName            String?               @ignore
   physicianName                String?
   physicianPhone               String?
   // Contacto de emergencia / tutor.
@@ -4213,9 +4211,8 @@ model PatientResponsibleParty {
   responsiblePatientId String?                 @db.Uuid
   /// Contacto sin ficha: NULL los cinco si es un paciente.
   fullName             String?
-  /// Excepción G5.3 (DX-334): código anterior a DX-327, solo para las réplicas
-  /// anteriores. La API lo escribe al crear (proyección de R3) y no lo lee.
-  docType              DocType?
+  /// Código anterior a DX-327, congelado (ver `LegacyDocumentCode`).
+  legacyDocumentCode   LegacyDocumentCode?     @ignore
   /// DX-327: el tipo (NULL si es un paciente; un contacto puede no tenerlo).
   documentType         DocumentType?
   /// DX-327: nombre libre del documento (1–40); exige tipo.
@@ -4251,16 +4248,9 @@ model PatientResponsibleParty {
 // Pagadores y coberturas del paciente (DX-153)
 // ---------------------------------------------------------------------------
 
-/// Tipo de pagador. La API solo usa los cinco genéricos (DX-326). Los cinco
-/// primeros son los códigos anteriores: en fase 1 la BD los sigue guardando
-/// para las réplicas anteriores, y la API los traduce al leer y al escribir
-/// (src/modules/payers/domain/legacy-payer-type.ts). La fase 2 los retira.
+/// Tipo de pagador (DX-326): cinco genéricos, para cualquier clínica. La
+/// migración 20261110130000 tradujo los códigos anteriores y los retiró.
 enum PayerType {
-  MUTUA_ES
-  PREPAGADA_CO
-  EPS_CO
-  EMPRESA
-  OTRO
   INSURER
   PREPAID_PLAN
   PUBLIC_SYSTEM
@@ -4310,37 +4300,37 @@ model Payer {
 /// (`deletedAt`). RLS FORCE y FK COMPUESTAS por tenant.
 /// PARCIALES (no declarables en Prisma, no generan drift):
 ///   patient_coverages_one_primary_key    UNIQUE ("tenantId", "patientId") WHERE "isPrimary" AND "deletedAt" IS NULL
-///   patient_coverages_migrated_key       UNIQUE ("tenantId", "patientId") WHERE "migratedFromInsurerEps"
+///   patient_coverages_migrated_key       UNIQUE ("tenantId", "patientId") WHERE "migratedFromLegacyInsurer"
 ///   patient_coverages_tenant_payer_live_idx ("tenantId", "payerId", "patientId") WHERE "deletedAt" IS NULL
 /// CHECK patient_coverages_valid_range_check: "validTo" >= "validFrom" si ambos existen.
 model PatientCoverage {
-  id                     String    @id @default(uuid()) @db.Uuid
-  tenantId               String    @db.Uuid
-  patientId              String    @db.Uuid
-  payerId                String    @db.Uuid
-  planName               String?
-  memberNumber           String?
-  policyHolderName       String?
-  validFrom              DateTime? @db.Date
-  validTo                DateTime? @db.Date
-  isPrimary              Boolean   @default(false)
-  notes                  String?
-  /// Copiado de la columna legada `patients."insurerEps"` por la migración.
-  /// Excepción G5.3 (DX-334): marca histórica de SEC-047; no es un supuesto de país.
-  migratedFromInsurerEps Boolean   @default(false)
+  id                        String    @id @default(uuid()) @db.Uuid
+  tenantId                  String    @db.Uuid
+  patientId                 String    @db.Uuid
+  payerId                   String    @db.Uuid
+  planName                  String?
+  memberNumber              String?
+  policyHolderName          String?
+  validFrom                 DateTime? @db.Date
+  validTo                   DateTime? @db.Date
+  isPrimary                 Boolean   @default(false)
+  notes                     String?
+  /// Copiado de la columna legada `patients."legacyInsurerName"` por la
+  /// migración de DX-153 (marca histórica de SEC-047).
+  migratedFromLegacyInsurer Boolean   @default(false)
   /// Punteros suaves a User, como `Payment.createdById`.
-  createdById            String?   @db.Uuid
-  updatedById            String?   @db.Uuid
+  createdById               String?   @db.Uuid
+  updatedById               String?   @db.Uuid
   /// SEC-049: quién puso por última vez el pagador o el nº de afiliado
   /// (puntero suave). NULL en las anteriores: vale `createdById`.
-  declaredById           String?   @db.Uuid
+  declaredById              String?   @db.Uuid
   /// SEC-049: un ADMIN comprobó el nº de afiliado (puntero suave y fecha, los
   /// dos o ninguno: CHECK). Cambiar el pagador o el número la borra.
-  verifiedById           String?   @db.Uuid
-  verifiedAt             DateTime?
-  createdAt              DateTime  @default(now())
-  updatedAt              DateTime  @updatedAt
-  deletedAt              DateTime?
+  verifiedById              String?   @db.Uuid
+  verifiedAt                DateTime?
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
+  deletedAt                 DateTime?
 
   tenant     Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   patient    Patient            @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "patient_coverages_patient_fkey")

@@ -18,7 +18,6 @@ import {
   PAYER_NAME_MESSAGE,
   PAYER_NAME_MIN,
 } from '../../domain/payer-rules';
-import { legacyPayerTypeAlias } from '../../domain/legacy-payer-type';
 import { PAYER_TYPES, type PayerType } from '../../domain/payer-type';
 
 const TYPE_MESSAGE = `El tipo de pagador debe ser uno de: ${PAYER_TYPES.join(', ')}.`;
@@ -59,11 +58,9 @@ export class CreatePayerDto {
   @Length(PAYER_NAME_MIN, PAYER_NAME_MAX, { message: PAYER_NAME_MESSAGE })
   name!: string;
 
-  // Fase 1 de DX-326 (R9): un código anterior de la web anterior pasa a su
-  // genérico antes de validar. Un campo que ya no existe en el cuerpo lo
-  // descarta `whitelist`, como cualquier campo desconocido (R8).
+  // Un campo que ya no existe en el cuerpo lo descarta `whitelist`, como
+  // cualquier campo desconocido (R8).
   @ApiProperty({ enum: PAYER_TYPES, enumName: 'PayerType' })
-  @Transform(({ value }) => legacyPayerTypeAlias(value))
   @IsIn(PAYER_TYPES, { message: TYPE_MESSAGE })
   type!: PayerType;
 }
@@ -79,7 +76,6 @@ export class UpdatePayerDto extends PartialType(
 
   @ApiPropertyOptional({ enum: PAYER_TYPES, enumName: 'PayerType' })
   @NotNullable()
-  @Transform(({ value }) => legacyPayerTypeAlias(value))
   @IsIn(PAYER_TYPES, { message: TYPE_MESSAGE })
   type?: PayerType;
 

@@ -5,9 +5,9 @@ import {
   storedImportRowData,
 } from './prisma-patient-import.repository';
 
-// DX-327 (R5, R6, spec §4.7): las filas preparadas de la importación llevan
-// el código anterior (para un worker anterior durante el despliegue) y el
-// tipo genérico, y ninguna etiqueta; el lector las traduce sin etiqueta.
+// DX-327 (R6, spec §4.7): las filas preparadas de la importación llevan el
+// tipo genérico y ninguna etiqueta; el lector traduce sin etiqueta las filas
+// preparadas antes de 20261110130000 (con el código anterior).
 const row = (docType: ImportPatientData['docType']): ImportPatientData => ({
   docType,
   docNumber: 'RX1',
@@ -16,19 +16,18 @@ const row = (docType: ImportPatientData['docType']): ImportPatientData => ({
 });
 
 describe('filas de la importación (DX-327)', () => {
-  it('import rows are stored with the legacy code and the generic type, and no label', () => {
+  it('import rows are stored with the generic type only, and no label', () => {
     expect(storedImportRowData(row('NATIONAL_ID'))).toStrictEqual({
-      docType: 'CC',
       documentType: 'NATIONAL_ID',
       docNumber: 'RX1',
       firstName: 'Ana',
       lastName: 'Ejemplo',
     });
-    // Caso documentado (spec §7): un worker anterior lee el código anterior
-    // y crea el paciente OTHER; el genérico TAX_ID solo lo lee la API nueva.
-    expect(storedImportRowData(row('TAX_ID'))).toMatchObject({
-      docType: 'OTHER',
+    expect(storedImportRowData(row('TAX_ID'))).toStrictEqual({
       documentType: 'TAX_ID',
+      docNumber: 'RX1',
+      firstName: 'Ana',
+      lastName: 'Ejemplo',
     });
     for (const stored of [
       storedImportRowData(row('PASSPORT')),
@@ -38,8 +37,8 @@ describe('filas de la importación (DX-327)', () => {
     }
   });
 
-  it('legacy stored import rows with CC are read as NATIONAL_ID with no label', () => {
-    // Fila escrita por la API anterior: solo el código.
+  it('import rows prepared before 20261110130000 with the old code are read as their generic type with no label', () => {
+    // Fila escrita por la API anterior a DX-327: solo el código.
     expect(
       importRowDataFromJson({
         docType: 'CC',
@@ -59,7 +58,11 @@ describe('filas de la importación (DX-327)', () => {
     expect(importRowDataFromJson({ docType: 'CE' }).docType).toBe(
       'RESIDENCE_PERMIT',
     );
-    // Fila de la API nueva: manda el genérico, aunque el código diga OTHER.
+    // Fila de fase 1: manda el genérico, aunque el código diga OTHER.
+    expect(
+      importRowDataFromJson({ docType: 'OTHER', documentType: 'TAX_ID' })
+        .docType,
+    ).toBe('TAX_ID');
     expect(
       importRowDataFromJson(storedImportRowData(row('TAX_ID'))),
     ).toStrictEqual(row('TAX_ID'));
@@ -82,12 +85,12 @@ describe('filas de la importación (DX-327)', () => {
     );
     expect(created).toMatchObject({
       documentType: 'TAX_ID',
-      docType: 'OTHER',
       docNumber: 'RX1',
       birthDate: new Date('1990-05-03T00:00:00.000Z'),
       sex: 'F',
       createdAt: now,
     });
     expect(created).not.toHaveProperty('docTypeLabel');
+    expect(created).not.toHaveProperty('docType');
   });
 });

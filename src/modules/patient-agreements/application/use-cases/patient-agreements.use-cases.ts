@@ -164,7 +164,7 @@ export class AssignPatientAgreementUseCase {
           ? null
           : await this.coverages.findById(patientId, coverageId);
       if (
-        !migrated?.migratedFromInsurerEps ||
+        !migrated?.migratedFromLegacyInsurer ||
         migrated.payer.id !== agreement.payer.id
       ) {
         throw new ForbiddenException(INTERNAL_AGREEMENT_ADMIN_ONLY_MESSAGE);

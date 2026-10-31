@@ -10,7 +10,6 @@ import {
 } from '../../domain/ports/patient-repository.port';
 import { ReferenceLookup } from '../../domain/ports/reference-lookup.port';
 import { FakePatientCommunicationRepository } from '../__fixtures__/fake-patient-communication.repository';
-import { resolveDocTypeInput } from '../../domain/legacy-doc-type';
 
 function fakePatient(overrides: Partial<Patient> = {}): Patient {
   return {
@@ -295,12 +294,6 @@ describe('UpdatePatientUseCase', () => {
         { docType: 'PASSPORT' },
         { docType: 'TAX_ID', docTypeLabel: 'Fiscal A' },
       ]);
-    });
-
-    it('legacy CC resent for a national ID reaches the repository as its generic type', async () => {
-      const { uc, updates } = setup(labelled());
-      await uc.execute('p1', { docType: resolveDocTypeInput('CC') });
-      expect(updates).toEqual([{ docType: 'NATIONAL_ID' }]);
     });
 
     it('a label alone is normalized; empty clears it', async () => {

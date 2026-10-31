@@ -604,16 +604,16 @@ describe('sanitizeAuditMetadata — cancelación de una cita (DX-279)', () => {
     ).toEqual({});
   });
 
-  it('legacy payer type codes still pass the CODE format', () => {
-    // Excepción G5.3 (DX-334): tipos de pagador anteriores a DX-326. Los
-    // eventos anteriores guardan el código antiguo y no se reescriben (R12).
+  it('payer type codes pass the CODE format', () => {
+    // Los eventos anteriores guardan el código de entonces y no se reescriben
+    // (R12): cualquier código en mayúsculas con guiones bajos pasa.
     expect(
       sanitizeAuditMetadata({
-        coverage: { payerType: 'EPS_CO', verified: true },
+        coverage: { payerType: 'PUBLIC_SYSTEM', verified: true },
       }),
     ).toEqual({
       coverage: {
-        payerType: 'EPS_CO',
+        payerType: 'PUBLIC_SYSTEM',
         memberNumberLast4: null,
         verified: true,
       },

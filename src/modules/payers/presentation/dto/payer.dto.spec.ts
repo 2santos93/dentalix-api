@@ -25,25 +25,13 @@ describe('DTOs de pagadores (DX-153)', () => {
     },
   );
 
-  it('legacy type codes in the body become their generic type', async () => {
-    // Excepción G5.3 (DX-334): tipos de pagador anteriores a DX-326.
-    const legacy = {
-      MUTUA_ES: 'INSURER',
-      PREPAGADA_CO: 'PREPAID_PLAN',
-      EPS_CO: 'PUBLIC_SYSTEM',
-      EMPRESA: 'EMPLOYER',
-      OTRO: 'OTHER',
-    };
-    for (const [code, generic] of Object.entries(legacy)) {
-      const create = plainToInstance(CreatePayerDto, {
-        name: 'Surco',
-        type: code,
-      });
-      expect(await validate(create)).toEqual([]);
-      expect(create.type).toBe(generic);
-      const update = plainToInstance(UpdatePayerDto, { type: code });
-      expect(await validate(update)).toEqual([]);
-      expect(update.type).toBe(generic);
+  it('a retired type code in the body is 400, not translated', async () => {
+    // Desde la migración 20261110130000 solo existen los cinco genéricos.
+    for (const type of ['OTRO', 'EMPRESA']) {
+      expect(await messages(CreatePayerDto, { name: 'Surco', type })).toEqual([
+        'El tipo de pagador debe ser uno de: INSURER, PREPAID_PLAN, PUBLIC_SYSTEM, EMPLOYER, OTHER.',
+      ]);
+      expect((await messages(UpdatePayerDto, { type })).length).toBe(1);
     }
   });
 

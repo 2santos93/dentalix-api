@@ -3,7 +3,7 @@ import type { DocumentType } from '@prisma/client';
 /**
  * DX-327: tipos de documento del paciente, iguales para cualquier clínica y
  * sin país (R2). El nombre que ve cada clínica sale de `documentTypeName`
- * (R17); los códigos anteriores viven solo en `legacy-doc-type.ts`.
+ * (R17); los códigos anteriores solo se leen en `legacy-document-codes.ts`.
  */
 export const DOCUMENT_TYPES = [
   'NATIONAL_ID',

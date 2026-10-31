@@ -13,7 +13,6 @@ import { civilDateIn } from '../../../../shared/time/civil-day';
 import { AGREEMENT_NOT_FOUND_MESSAGE } from '../../../agreements/domain/agreement-rules';
 import { COVERAGE_NOT_FOUND_MESSAGE } from '../../../patient-coverages/domain/coverage-rules';
 import type { PatientAgreement } from '../../domain/entities/patient-agreement.entity';
-import { payerTypeFromStored } from '../../../payers/domain/legacy-payer-type';
 import {
   AGREEMENT_RACE_MESSAGE,
   COVERAGE_PAYER_MISMATCH_MESSAGE,
@@ -71,7 +70,7 @@ export function toEntity(row: Row): PatientAgreement {
       payer: {
         id: row.agreement.payer.id,
         name: row.agreement.payer.name,
-        type: payerTypeFromStored(row.agreement.payer.type),
+        type: row.agreement.payer.type,
       },
     },
     coverageId: row.coverageId,
@@ -211,10 +210,10 @@ export class PrismaPatientAgreementRepository implements PatientAgreementReposit
               payerId: string;
               verifiedAt: Date | null;
               declaredById: string | null;
-              migratedFromInsurerEps: boolean;
+              migratedFromLegacyInsurer: boolean;
             }[]
           >`
-            SELECT "payerId", "verifiedAt", "migratedFromInsurerEps",
+            SELECT "payerId", "verifiedAt", "migratedFromLegacyInsurer",
                    COALESCE("declaredById", "createdById") AS "declaredById"
             FROM "patient_coverages"
             WHERE id = ${input.coverageId}::uuid
