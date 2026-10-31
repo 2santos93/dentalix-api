@@ -55,7 +55,7 @@ repo="$(cd "$here/.." && pwd)"
 . "$here/lib/dx082-common.sh"
 
 usage() {
-  sed -n '2,53p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,48p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 file=''

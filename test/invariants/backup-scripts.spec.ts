@@ -234,6 +234,43 @@ describe('backup-db.sh (DX-082) con stubs', () => {
     expect(files.filter((f) => f.startsWith(monthly))).toHaveLength(3);
     expect(files.filter((f) => f.endsWith('.dump.age'))).toHaveLength(2);
   });
+
+  it('--prune solo toca su serie: una copia de otro prefijo que empieza igual no «sustituye» a la suya', () => {
+    // `dentalix-prod_staging_*` casa con el glob `dentalix-prod_*`. Ayer:
+    // prod a las 03:00 y staging a las 04:00. Si se mezclaran, la de prod
+    // saldría como superseded-same-day y se borraría.
+    const y = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+    const day = y.replace(/-/g, '');
+    // La de las 00:00 es la primera del mes (o la sustituye la de las 03:00),
+    // así la de las 03:00 solo se conserva como la última de su día.
+    const first = `dentalix-prod_${day}T000000Z`;
+    const prod = `dentalix-prod_${day}T030000Z`;
+    const other = `dentalix-prod_staging_${day}T040000Z`;
+    for (const base of [first, prod, other]) {
+      for (const ext of ['.dump.age', '.dump.age.sha256', '.manifest.json']) {
+        writeFileSync(join(out, `${base}${ext}`), 'x');
+      }
+    }
+    const r = run(
+      'backup-db.sh',
+      ['--out-dir', out, '--prefix', 'dentalix-prod', '--prune'],
+      { BACKUP_DATABASE_URL: URL, ...recipients() },
+    );
+    expect(r.status).toBe(0);
+    const files = readdirSync(out);
+    expect(files.filter((f) => f.startsWith(prod))).toHaveLength(3);
+    expect(files.filter((f) => f.startsWith(other))).toHaveLength(3);
+  });
+
+  it('una contraseña con «\\» sin codificar llega intacta a libpq', () => {
+    const pass = 'p\\nq%40r';
+    const r = run('backup-db.sh', ['--out-dir', out], {
+      BACKUP_DATABASE_URL: `postgresql://u:${pass}@h/dentalix`,
+      ...recipients(),
+    });
+    expect(r.status).toBe(0);
+    expect(stubLog()).toContain('PGPASSWORD=p\\nq@r\n');
+  });
 });
 
 describe('restore-check.sh (DX-082) sin BD', () => {

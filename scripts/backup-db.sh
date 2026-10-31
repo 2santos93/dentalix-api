@@ -41,7 +41,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$here/lib/dx082-common.sh"
 
 usage() {
-  sed -n '2,42p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,35p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 out_dir=''
@@ -177,7 +177,10 @@ dx_log "Copia: $dump ($bytes bytes cifrados, $tables tablas, $rows filas; pg_dum
 
 status=0
 if ((prune == 1)); then
-  listing="$(find "$out_dir" -maxdepth 1 -type f -name "${prefix}_*.dump.age" -printf '%f\n' | sort)"
+  # Solo ESTA serie: con --prefix dentalix-a, el glob `dentalix-a_*` también
+  # casaría con las copias de `dentalix-a_staging`.
+  listing="$(find "$out_dir" -maxdepth 1 -type f -name "${prefix}_*.dump.age" -printf '%f\n' |
+    grep -E "^${prefix//./\\.}_[0-9]{8}T[0-9]{6}Z\.dump\.age\$" | sort || true)"
   if plan="$(printf '%s\n' "$listing" | "$here/backup-retention.sh" --daily "$daily" --monthly "$monthly")"; then
     deleted=0
     review=0

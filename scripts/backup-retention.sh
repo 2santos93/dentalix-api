@@ -13,6 +13,10 @@
 # Solo se reconoce `<algo>_AAAAMMDDTHHMMSSZ.dump.age` (lo que escribe
 # backup-db.sh); todo lo demás (sidecars .sha256/.manifest.json, otros
 # ficheros) es `keep unrecognized`: nunca se borra lo que no se entiende.
+# Cada serie (todo lo que va antes de `_AAAAMMDDTHHMMSSZ.dump.age`, ruta
+# incluida) se evalúa por separado: copias de otra base (`dentalix-a` y
+# `dentalix-a_staging`) o de otra carpeta (`db/daily/` y `db/monthly/`) no
+# se «sustituyen» entre sí.
 #
 # Política (días y meses en UTC, contados desde --now):
 #   - diaria: la ÚLTIMA copia de cada uno de los N últimos días (hoy incluido);
@@ -32,7 +36,7 @@
 set -euo pipefail
 
 usage() {
-  sed -n '2,31p' "$0" | sed 's/^# \{0,1\}//' >&2
+  sed -n '2,35p' "$0" | sed 's/^# \{0,1\}//' >&2
 }
 
 now_iso=''
@@ -72,6 +76,7 @@ now_month=$((10#$(date -u -d "@$now" +%Y) * 12 + 10#$(date -u -d "@$now" +%m) - 
 
 names=()
 epochs=()
+series=()
 while IFS= read -r line || [[ -n "$line" ]]; do
   line="${line%$'\r'}"
   [[ -n "$line" ]] || continue
@@ -80,10 +85,12 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     m=("${BASH_REMATCH[@]}")
     if e="$(date -u -d "${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}:${m[6]}" +%s 2>/dev/null)"; then
       epochs+=("$e")
+      series+=("${line%_*}")
       continue
     fi
   fi
   epochs+=('')
+  series+=('')
 done
 
 ((${#names[@]} > 0)) || exit 0
@@ -101,10 +108,12 @@ for i in "${!names[@]}"; do
   [[ -z "$newest" || e -gt newest ]] && newest="$e"
   d=$((e / 86400))
   mo=$((10#$(date -u -d "@$e" +%Y) * 12 + 10#$(date -u -d "@$e" +%m) - 1))
-  j="${last_of_day[$d]-}"
-  if [[ -z "$j" ]] || ((e >= ${epochs[$j]})); then last_of_day[$d]="$i"; fi
-  j="${first_of_month[$mo]-}"
-  if [[ -z "$j" ]] || ((e < ${epochs[$j]})); then first_of_month[$mo]="$i"; fi
+  kd="${series[$i]}|$d"
+  km="${series[$i]}|$mo"
+  j="${last_of_day[$kd]-}"
+  if [[ -z "$j" ]] || ((e >= ${epochs[$j]})); then last_of_day[$kd]="$i"; fi
+  j="${first_of_month[$km]-}"
+  if [[ -z "$j" ]] || ((e < ${epochs[$j]})); then first_of_month[$km]="$i"; fi
 done
 
 if [[ -n "$newest" ]] && ((now - newest > max_age_hours * 3600)); then
@@ -123,8 +132,8 @@ for i in "${!names[@]}"; do
   mo=$((10#$(date -u -d "@$e" +%Y) * 12 + 10#$(date -u -d "@$e" +%m) - 1))
   is_daily=0
   is_monthly=0
-  if ((today - d < daily)) && [[ "${last_of_day[$d]}" == "$i" ]]; then is_daily=1; fi
-  if [[ "${first_of_month[$mo]}" == "$i" ]]; then
+  if ((today - d < daily)) && [[ "${last_of_day[${series[$i]}|$d]}" == "$i" ]]; then is_daily=1; fi
+  if [[ "${first_of_month[${series[$i]}|$mo]}" == "$i" ]]; then
     if ((now_month - mo < monthly)); then is_monthly=1; else is_monthly=2; fi
   fi
   if ((is_daily == 1 && is_monthly == 1)); then

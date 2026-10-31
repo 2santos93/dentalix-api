@@ -183,6 +183,27 @@ describe('backup-retention.sh (DX-082): 35 diarias + 12 mensuales', () => {
     expect(r.stderr).toContain('futuro');
   });
 
+  it('cada serie (prefijo y carpeta) va aparte: una copia de otra base o de otra carpeta no «sustituye» a otra', () => {
+    // `dentalix-dentalix` y `dentalix-dentalix_staging` (base con «_»): el
+    // mismo día, ninguna es superseded-same-day de la otra.
+    const prod = backup('2026-10-30T03:00:00Z');
+    const staging = backup('2026-10-30T04:00:00Z', 'dentalix-dentalix_staging');
+    // La misma copia en db/daily/ y en db/monthly/ (runbook): la de monthly/
+    // es la primera de su mes en SU carpeta y no sale como delete.
+    const oldDaily = `db/daily/${backup('2026-08-01T03:00:00Z')}`;
+    const oldMonthly = `db/monthly/${backup('2026-08-01T03:00:00Z')}`;
+    const r = retention(
+      [prod, staging, oldDaily, oldMonthly, backup('2026-10-31T03:00:00Z')],
+      NOW,
+    );
+    expect(r.status).toBe(0);
+    expect(r.byName.get(prod)?.action).toBe('keep');
+    expect(r.byName.get(staging)?.action).toBe('keep');
+    expect(r.byName.get(oldDaily)?.action).toBe('keep');
+    expect(r.byName.get(oldMonthly)?.action).toBe('keep');
+    expect(r.lines.some((l) => l.action === 'delete')).toBe(false);
+  });
+
   it('rechaza argumentos inválidos con código 2', () => {
     expect(retention([], ['--daily', '0']).status).toBe(2);
     expect(retention([], ['--now', 'ayer']).status).toBe(2);
