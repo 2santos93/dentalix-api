@@ -2533,7 +2533,7 @@ caché de `exchange_rate_snapshots` de `GetRatesForDateUseCase`:
   diaria (`prefetchProviderRates`) ni cuenta ni se corta: las peticiones de
   usuarios nunca la dejan sin cupo.
 - **BD y RLS** (SEC-058, migración
-  `20261106120000_sec058_exchange_provider_budgets`):
+  `20261106150000_sec058_exchange_provider_budgets`):
   - `exchange_provider_clinic_budgets` (`tenantId`, `quota` `HOUR`/`DAY`/
     `SWEEP`, `windowStart`, `calls`): una fila por cupo que se reutiliza al
     cambiar de ventana (no crece). RLS FORCE por tenant: la app solo lee y
