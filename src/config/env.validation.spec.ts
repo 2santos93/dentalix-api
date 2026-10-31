@@ -632,6 +632,42 @@ describe('validateEnv', () => {
     });
   });
 
+  describe('presupuesto del proveedor de tasas (SEC-058)', () => {
+    it('acepta los topes por defecto y unos que cuadran', () => {
+      expect(() => validateEnv(baseEnv())).not.toThrow();
+      expect(() =>
+        validateEnv(
+          baseEnv({
+            EXCHANGE_PROVIDER_GLOBAL_LIMIT: '1000',
+            EXCHANGE_PROVIDER_SWEEP_RESERVE: '100',
+            EXCHANGE_PROVIDER_CLINIC_DAILY_LIMIT: '150',
+          }),
+        ),
+      ).not.toThrow();
+    });
+
+    it('no arranca con una reserva del barrido que se come el global', () => {
+      expect(() =>
+        validateEnv(
+          baseEnv({
+            EXCHANGE_PROVIDER_GLOBAL_LIMIT: '40',
+            EXCHANGE_PROVIDER_SWEEP_RESERVE: '40',
+          }),
+        ),
+      ).toThrow(
+        'EXCHANGE_PROVIDER_SWEEP_RESERVE (40) debe ser menor que EXCHANGE_PROVIDER_GLOBAL_LIMIT (40)',
+      );
+    });
+
+    it('no arranca con un tope que no es un entero positivo', () => {
+      expect(() =>
+        validateEnv(baseEnv({ EXCHANGE_PROVIDER_NEW_CLINIC_DAYS: '0' })),
+      ).toThrow(
+        'EXCHANGE_PROVIDER_NEW_CLINIC_DAYS debe ser un entero entre 1 y 3650',
+      );
+    });
+  });
+
   describe('trabajos en segundo plano (DX-085)', () => {
     it('acepta APP_ROLE api, worker y all (y sin definir)', () => {
       for (const role of [undefined, 'api', 'worker', 'all', 'WORKER']) {

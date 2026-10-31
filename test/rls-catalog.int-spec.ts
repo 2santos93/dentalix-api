@@ -64,6 +64,13 @@ const PLATFORM_TABLES: Record<string, string> = {
   // trabajo), append-only y sin el payload del trabajo. Las acciones sobre
   // una clínica van a audit_events, con RLS.
   platform_audit_events: 'auditoría de acciones de plataforma del superadmin',
+  // SEC-058: el contador GLOBAL del presupuesto del proveedor de tasas (una
+  // fila). dentalix_app no tiene ningún privilegio sobre ella: solo la toca
+  // dx_exchange_provider_spend_global (SECURITY DEFINER, incrementa con
+  // tope). Los contadores de cada clínica van aparte, con RLS FORCE
+  // (exchange_provider_clinic_budgets). Ver exchange-provider-budget.int-spec.
+  exchange_provider_budget:
+    'contador global del presupuesto del proveedor de tasas',
 };
 
 /**

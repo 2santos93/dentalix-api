@@ -58,6 +58,7 @@ import {
 import { RECHECK_MAX_FAILURES_LIMIT } from '../modules/domains/domain/rules/tenant-domain-rules';
 import { parseMfaEncryptionKey } from '../shared/crypto/mfa-secret-cipher';
 import { shutdownConfigProblems } from './shutdown-config';
+import { providerRatesLimitsProblems } from '../modules/exchange/application/provider-rates-limits';
 import {
   BREAK_GLASS_MAX_TTL_MINUTES,
   BREAK_GLASS_MFA_COOLDOWN_MAX_MINUTES,
@@ -708,6 +709,8 @@ export function validateEnv(env: Env): Env {
   problems.push(...breakGlassProblems(env, isProd));
   problems.push(...storageProblems(env, isProd));
   problems.push(...shutdownConfigProblems((key) => str(env, key)));
+  // SEC-054/SEC-058: topes del proveedor de tasas (y que cuadren entre sí).
+  problems.push(...providerRatesLimitsProblems((key) => str(env, key)));
 
   if (problems.length > 0) {
     throw new Error(

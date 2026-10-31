@@ -5,6 +5,7 @@ import { errorName } from './payment-in-plan-currency';
 import { PaymentBaseRetries } from './payment-base-retries';
 import { PlanAllocationRebalancer } from './plan-allocation-rebalancer';
 import { ExchangeSourceChangeHooks } from '../../exchange/application/exchange-source-change-hooks';
+import { ProviderRatesCallerScope } from '../../exchange/application/provider-rates-caller-scope';
 
 export const ALLOCATIONS_SWEEP_JOB = 'payment-allocations.sweep';
 /**
@@ -40,6 +41,7 @@ export class PaymentAllocationJobs implements OnModuleInit {
     private readonly retries: PaymentBaseRetries,
     private readonly tenantContext: TenantContextService,
     private readonly sourceChangeHooks: ExchangeSourceChangeHooks,
+    private readonly ratesCallerScope: ProviderRatesCallerScope,
   ) {}
 
   onModuleInit(): void {
@@ -69,22 +71,30 @@ export class PaymentAllocationJobs implements OnModuleInit {
     });
   }
 
-  /** Clínicas con pendientes; una que falla no deja sin barrido a las demás. */
+  /**
+   * Clínicas con pendientes; una que falla no deja sin barrido a las demás.
+   * SEC-058: sus llamadas al proveedor de tasas gastan del cupo reservado
+   * del barrido, no del de las peticiones de la clínica.
+   */
   async sweep(): Promise<void> {
     for (const tenantId of await this.retries.dueTenantIds()) {
-      await this.tenantContext.run(tenantId, async () => {
-        try {
-          await this.retries.retryDue(MISSING_BASES_PER_SWEEP);
-        } catch (error) {
-          this.logger.warn({
-            event: 'payments.allocation_retries_failed',
-            tenantId,
-            error: errorName(error),
-          });
-        }
-        // Nunca lanza: cada plan que falla deja su propio aviso.
-        await this.rebalancer.drainPending({ actorId: null });
+      await this.tenantContext.run(tenantId, () =>
+        this.ratesCallerScope.asSweep(() => this.sweepClinic(tenantId)),
+      );
+    }
+  }
+
+  private async sweepClinic(tenantId: string): Promise<void> {
+    try {
+      await this.retries.retryDue(MISSING_BASES_PER_SWEEP);
+    } catch (error) {
+      this.logger.warn({
+        event: 'payments.allocation_retries_failed',
+        tenantId,
+        error: errorName(error),
       });
     }
+    // Nunca lanza: cada plan que falla deja su propio aviso.
+    await this.rebalancer.drainPending({ actorId: null });
   }
 }

@@ -14,6 +14,7 @@ import { PaymentAllocationJobs } from '../src/modules/payments/application/payme
 import { GetRatesForDateUseCase } from '../src/modules/exchange/application/use-cases/get-rates-for-date.use-case';
 import { ConvertAmountUseCase } from '../src/modules/exchange/application/use-cases/convert-amount.use-case';
 import { ExchangeSourceChangeHooks } from '../src/modules/exchange/application/exchange-source-change-hooks';
+import { ProviderRatesCallerScope } from '../src/modules/exchange/application/provider-rates-caller-scope';
 import { PrismaExchangeRateRepository } from '../src/modules/exchange/infrastructure/repositories/prisma-exchange-rate.repository';
 import { PrismaClinicExchangeSettingsRepository } from '../src/modules/exchange/infrastructure/repositories/prisma-clinic-exchange-settings.repository';
 import { PrismaManualExchangeRateRepository } from '../src/modules/exchange/infrastructure/repositories/prisma-manual-exchange-rate.repository';
@@ -91,6 +92,7 @@ const jobs = new PaymentAllocationJobs(
   retries,
   tenantContext,
   new ExchangeSourceChangeHooks(),
+  new ProviderRatesCallerScope(),
 );
 
 const PREFIX = 'dx380-int';

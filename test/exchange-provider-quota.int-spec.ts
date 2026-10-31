@@ -198,7 +198,9 @@ describe('Cuota del proveedor de tasas (SEC-054, int)', () => {
     const gate = new ProviderRatesGate(
       {
         ...DEFAULT_PROVIDER_RATES_LIMITS,
-        global: { limit: 2, windowMs: 24 * 60 * 60_000 },
+        // 2 para las peticiones y 1 reservada para el barrido (SEC-058).
+        global: { limit: 3, windowMs: 24 * 60 * 60_000 },
+        sweep: { reserve: 1, clinicLimit: 1 },
       },
       clock,
     );
@@ -212,7 +214,7 @@ describe('Cuota del proveedor de tasas (SEC-054, int)', () => {
       clock,
     );
 
-    // Las peticiones de dos clínicas agotan el global (2).
+    // Las peticiones de dos clínicas agotan su parte del global (2).
     await tenantContext.run(a.tenantId, () => rates.execute(USER_DAYS[0]));
     await tenantContext.run(b.tenantId, () => rates.execute(USER_DAYS[1]));
     const blocked = await tenantContext
