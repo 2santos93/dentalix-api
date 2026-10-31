@@ -9,7 +9,7 @@ import { civilDateIn, zonedWallTime } from '../../../shared/time/civil-day';
  * - cualquier otra, solo si ya pasó «Liberar a partir de» (`releaseAtMinute`,
  *   hora de PARED de la sede del día del bloque, con el reloj del servidor);
  * - o si quien agenda tiene permiso de saltarse la reserva y da un motivo
- *   (queda en `audit_event`).
+ *   (queda en `appointment_reserved_overrides`; la auditoría, solo su id).
  */
 
 /** Tope de tipos por bloque (CHECK `schedule_blocks_reserved_check`). */
@@ -112,14 +112,6 @@ export interface ReservedBlockShape extends ReservedBlockFields {
   allowsBooking: boolean;
 }
 
-/** Minutos desde las 00:00 de pared de `instant` en `timeZone`. */
-function wallMinute(instant: Date, timeZone: string): number {
-  const day = civilDateIn(instant, timeZone);
-  return Math.round(
-    (instant.getTime() - zonedWallTime(day, 0, timeZone).getTime()) / 60_000,
-  );
-}
-
 /**
  * Forma de un bloque según su tipo (la CHECK de la tabla, con mensajes en
  * español, más lo que la CHECK no puede saber: la zona de la sede). Un
@@ -162,7 +154,10 @@ export function reservedBlockShapeError(
     ) {
       return 'Indica una hora válida para «Liberar a partir de».';
     }
-    if (block.releaseAtMinute >= wallMinute(block.start, timeZone)) {
+    // Comparar instantes (no minutos de pared restados a la medianoche): el
+    // día de un cambio de hora tiene 23 o 25 horas.
+    const release = releaseInstant(block, timeZone);
+    if (release !== null && release.getTime() >= block.start.getTime()) {
       return '«Liberar a partir de» tiene que ser antes del inicio del hueco reservado.';
     }
   }

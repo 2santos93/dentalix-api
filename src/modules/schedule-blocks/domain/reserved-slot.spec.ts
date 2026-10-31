@@ -195,6 +195,33 @@ describe('reservedBlockShapeError (DX-446)', () => {
     ).toMatch(/hora válida/);
   });
 
+  it('en un cambio de hora de Madrid compara la hora de pared, no las horas transcurridas', () => {
+    // 29-03-2026: el día tiene 23 h. 14:30 de pared es antes de las 15:00.
+    const spring = {
+      ...base,
+      start: new Date('2026-03-29T15:00:00+02:00'),
+      end: new Date('2026-03-29T15:30:00+02:00'),
+    };
+    expect(
+      reservedBlockShapeError(
+        { ...spring, releaseAtMinute: 14 * 60 + 30 },
+        'Europe/Madrid',
+      ),
+    ).toBeNull();
+    // 25-10-2026: el día tiene 25 h. 15:30 de pared NO es antes de las 15:00.
+    const autumn = {
+      ...base,
+      start: new Date('2026-10-25T15:00:00+01:00'),
+      end: new Date('2026-10-25T15:30:00+01:00'),
+    };
+    expect(
+      reservedBlockShapeError(
+        { ...autumn, releaseAtMinute: 15 * 60 + 30 },
+        'Europe/Madrid',
+      ),
+    ).toMatch(/antes del inicio/);
+  });
+
   it('los demás tipos no llevan tipos reservados ni liberación', () => {
     expect(
       reservedBlockShapeError(

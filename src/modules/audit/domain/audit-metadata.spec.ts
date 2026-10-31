@@ -1085,25 +1085,26 @@ describe('sanitizeAuditMetadata — descarte de «Pendiente de cerrar» (DX-439)
 
 describe('sanitizeAuditMetadata — hueco reservado saltado (DX-446)', () => {
   const blockId = '0190f2a4-7b1c-7d2e-8f3a-123456789abc';
+  const overrideId = '0190f2a4-7b1c-7d2e-8f3a-cba987654321';
 
-  it('guarda los bloques y el motivo', () => {
+  it('guarda la fila del override y los bloques', () => {
     expect(
       sanitizeAuditMetadata({
-        reservedSlotOverride: { blockIds: [blockId], reason: 'Dolor agudo' },
+        reservedSlotOverride: { overrideId, blockIds: [blockId] },
       }),
     ).toEqual({
-      reservedSlotOverride: { blockIds: [blockId], reason: 'Dolor agudo' },
+      reservedSlotOverride: { overrideId, blockIds: [blockId] },
     });
   });
 
-  it('sin uuids, con un motivo corto, largo, con saltos de línea o claves extra, no queda nada', () => {
+  it('el motivo (texto libre), sin uuids o con claves extra, no queda nada', () => {
     for (const reservedSlotOverride of [
-      { blockIds: ['no-uuid'], reason: 'Dolor agudo' },
-      { blockIds: [], reason: 'Dolor agudo' },
-      { blockIds: [blockId], reason: 'ay' },
-      { blockIds: [blockId], reason: 'x'.repeat(301) },
-      { blockIds: [blockId], reason: 'Dolor\nagudo' },
-      { blockIds: [blockId], reason: 'Dolor agudo', patient: 'Ana' },
+      { overrideId, blockIds: [blockId], reason: 'Dolor agudo' },
+      { overrideId, blockIds: ['no-uuid'] },
+      { overrideId, blockIds: [] },
+      { overrideId: 'no-uuid', blockIds: [blockId] },
+      { blockIds: [blockId] },
+      { overrideId, blockIds: [blockId], patient: 'Ana' },
     ]) {
       expect(sanitizeAuditMetadata({ reservedSlotOverride })).toEqual({});
     }

@@ -82,11 +82,13 @@ function affectedAppointmentsWhere(
 /** DX-446: tipos vivos (activos o no) de la clínica en contexto (RLS). */
 async function findTypeRefs(
   tx: Prisma.TransactionClient,
+  tenantId: string,
   ids: readonly string[],
 ): Promise<ReservedTypeRef[]> {
   if (ids.length === 0) return [];
   return tx.appointmentType.findMany({
-    where: { id: { in: [...ids] }, deletedAt: null },
+    // tenantId explícito además de RLS (defensa en profundidad, SEC-004).
+    where: { id: { in: [...ids] }, tenantId, deletedAt: null },
     select: { id: true, name: true, color: true, isUrgent: true, active: true },
     orderBy: { name: 'asc' },
   });
@@ -230,7 +232,7 @@ export class PrismaScheduleBlockRepository implements ScheduleBlockRepository {
         locale: regional?.locale ?? null,
         hourCycle: regional?.hourCycle ?? null,
         blocks: rows.map(mapToEntity),
-        reservedTypes: await findTypeRefs(tx, typeIds),
+        reservedTypes: await findTypeRefs(tx, tenantId, typeIds),
       };
     });
   }
@@ -295,7 +297,7 @@ export class PrismaScheduleBlockRepository implements ScheduleBlockRepository {
     return this.prisma.runWithTenant(async (tx) => {
       const zones = await loadLocationZones(tx, tenantId, locationIds);
       return {
-        types: await findTypeRefs(tx, typeIds),
+        types: await findTypeRefs(tx, tenantId, typeIds),
         timeZones: zones.configured,
       };
     });

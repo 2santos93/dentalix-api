@@ -70,6 +70,7 @@ model Tenant {
   anestheticProducts                      AnestheticProduct[]
   // DX-439: descartes de «Pendiente de cerrar».
   closingQueueDismissals                  ClosingQueueDismissal[]
+  appointmentReservedOverrides            AppointmentReservedOverride[]
   anesthesiaAdministrations               AnesthesiaAdministration[]
   // DX-407: hoja de sedación consciente en la evolución.
   sedationRecords                         SedationRecord[]
@@ -220,6 +221,7 @@ model User {
   anesthesiaAdministrations         AnesthesiaAdministration[]
   // DX-439: pendientes de «Pendiente de cerrar» que descartó.
   closingQueueDismissals            ClosingQueueDismissal[]
+  appointmentReservedOverrides      AppointmentReservedOverride[]
   // DX-407: hoja de sedación (autor de cada parte; operador y monitor del egreso).
   sedationRecordsAuthored           SedationRecord[]
   sedationChecklists                SedationChecklist[]
@@ -1227,28 +1229,29 @@ model Appointment {
   updatedAt           DateTime                @updatedAt
   deletedAt           DateTime?
 
-  planItems                 AppointmentPlanItem[]
+  planItems                    AppointmentPlanItem[]
   // DX-273: salidas de COMPLETED, con su motivo.
-  statusReversals           AppointmentStatusReversal[]
-  confirmations             AppointmentConfirmation[]
+  statusReversals              AppointmentStatusReversal[]
+  confirmations                AppointmentConfirmation[]
   // DX-210: ofertas de hueco hechas a esta cita para adelantarla.
-  waitlistOffers            WaitlistOffer[]
-  outboundMessages          OutboundMessage[]
+  waitlistOffers               WaitlistOffer[]
+  outboundMessages             OutboundMessage[]
   // DX-122: la entrada de «Pendientes por agendar» que creó su cancelación o
   // no-show, y la que se resolvió agendando esta cita.
-  waitlistSourced           AppointmentWaitlistEntry[]  @relation("WaitlistSource")
-  waitlistResolved          AppointmentWaitlistEntry[]  @relation("WaitlistResolved")
-  reminders                 AppointmentReminder[]
+  waitlistSourced              AppointmentWaitlistEntry[]    @relation("WaitlistSource")
+  waitlistResolved             AppointmentWaitlistEntry[]    @relation("WaitlistResolved")
+  reminders                    AppointmentReminder[]
   // DX-170: evoluciones documentadas en esta cita.
-  clinicalEntries           ClinicalEntry[]
+  clinicalEntries              ClinicalEntry[]
   // DX-222: indicaciones postoperatorias entregadas por esta cita.
-  postOpDeliveries          PostOpInstructionDelivery[]
+  postOpDeliveries             PostOpInstructionDelivery[]
   // DX-099: anamnesis enviadas para esta cita.
-  medicalHistorySubmissions MedicalHistorySubmission[]
+  medicalHistorySubmissions    MedicalHistorySubmission[]
   // DX-291: cargo por inasistencia o cancelación tardía (o su condonación).
-  cancellationFee           CancellationFee?
+  cancellationFee              CancellationFee?
   // DX-439: pendientes de cierre descartados de esta cita.
-  closingQueueDismissals    ClosingQueueDismissal[]
+  closingQueueDismissals       ClosingQueueDismissal[]
+  appointmentReservedOverrides AppointmentReservedOverride[]
 
   // FK COMPUESTA a propósito: exige que el paciente sea del MISMO tenant.
   // Antes era `[patientId] -> [id]`, que solo garantizaba "el paciente existe
@@ -6103,4 +6106,27 @@ model ClosingQueueDismissal {
   @@index([tenantId, patientId, planItemId], map: "closing_queue_dismissals_tenant_plan_item_idx")
   @@index([createdById], map: "closing_queue_dismissals_created_by_idx")
   @@map("closing_queue_dismissals")
+}
+
+/// DX-446: «Agendar igualmente» en un hueco reservado: los bloques saltados y
+/// el motivo (5–300, una línea). El texto vive aquí, nunca en `audit_event`
+/// (que solo lleva el id de esta fila). Append-only, RLS FORCE.
+model AppointmentReservedOverride {
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @db.Uuid
+  patientId     String   @db.Uuid
+  appointmentId String   @db.Uuid
+  blockIds      String[] @db.Uuid
+  reason        String   @db.VarChar(300)
+  createdById   String   @db.Uuid
+  createdAt     DateTime @default(now())
+
+  tenant      Tenant      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  appointment Appointment @relation(fields: [tenantId, patientId, appointmentId], references: [tenantId, patientId, id], onDelete: Restrict, onUpdate: Restrict, map: "appointment_reserved_overrides_appointment_fkey")
+  createdBy   User        @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, id], map: "appointment_reserved_overrides_tenant_id_key")
+  @@index([tenantId, patientId, appointmentId], map: "appointment_reserved_overrides_tenant_appointment_idx")
+  @@index([createdById], map: "appointment_reserved_overrides_created_by_idx")
+  @@map("appointment_reserved_overrides")
 }

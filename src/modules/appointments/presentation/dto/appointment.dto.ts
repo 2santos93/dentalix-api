@@ -386,7 +386,7 @@ export class AppointmentWriteDto extends AppointmentDto {
   @ApiPropertyOptional({
     type: () => ReservedOverrideDto,
     description:
-      'DX-446: solo si la cita se agendó o movió a un hueco reservado saltándose la reserva (con `overrideReason`); queda en `audit_event`.',
+      'DX-446: solo si la cita se agendó o movió a un hueco reservado saltándose la reserva (con `overrideReason`). El motivo queda en `appointment_reserved_overrides`, no en `audit_event`.',
   })
   reservedOverride?: ReservedOverrideDto;
 }

@@ -110,8 +110,8 @@ export interface AppointmentWriteResult extends Appointment {
   completedExit?: CompletedExit;
   /**
    * DX-446: la cita se agendó o movió a un hueco reservado saltándose la
-   * reserva (con permiso y motivo): los bloques y el motivo, que quedan en
-   * `audit_event`. Ausente en cualquier otro caso.
+   * reserva (con permiso y motivo): los bloques y el motivo (este en
+   * `appointment_reserved_overrides`, nunca en `audit_event`). Ausente en cualquier otro caso.
    */
   reservedOverride?: { blockIds: string[]; reason: string };
 }

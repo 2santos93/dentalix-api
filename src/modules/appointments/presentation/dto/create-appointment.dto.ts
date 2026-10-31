@@ -83,7 +83,7 @@ export class CreateAppointmentDto {
     minLength: 5,
     maxLength: 300,
     description:
-      'DX-446: «Agendar igualmente» en un hueco reservado (bloque RESERVED) con un tipo no permitido y sin liberar. Solo ADMIN y DENTIST (403 para el resto); 5–300 caracteres en una línea. Queda en `audit_event` (`reservedSlotOverride`).',
+      'DX-446: «Agendar igualmente» en un hueco reservado (bloque RESERVED) con un tipo no permitido y sin liberar. Solo ADMIN y DENTIST (403 para el resto); 5–300 caracteres en una línea. El motivo queda en `appointment_reserved_overrides`; `audit_event` (`reservedSlotOverride`) solo guarda el id de esa fila y los bloques.',
   })
   @IsOptional()
   @IsString()

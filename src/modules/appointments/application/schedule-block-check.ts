@@ -33,7 +33,7 @@ export interface ReservedSlotContext {
   overrideReason?: string;
 }
 
-/** DX-446: reserva saltada con permiso; se deja en `audit_event`. */
+/** DX-446: reserva saltada con permiso (motivo en `appointment_reserved_overrides`). */
 export interface ReservedOverride {
   blockIds: string[];
   reason: string;

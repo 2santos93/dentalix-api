@@ -6,6 +6,7 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Inject,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -98,6 +99,10 @@ import { auditRequestContext } from '../../audit/presentation/audit-request-cont
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import type { AppointmentAuditContext } from '../application/use-cases/update-appointment.use-case';
+import {
+  RESERVED_OVERRIDE_REPOSITORY,
+  type ReservedOverrideRepository,
+} from '../domain/ports/reserved-override-repository.port';
 
 interface AuthenticatedRequest {
   user: JwtPayload;
@@ -132,6 +137,9 @@ export class AppointmentsController {
     private readonly listInClinic: ListInClinicUseCase,
     // DX-279: insignia «inasistencias · cancelaciones tardías» de las tarjetas.
     private readonly attendanceFlags: PatientAttendanceFlags,
+    // DX-446: motivo de «Agendar igualmente» fuera de la auditoría.
+    @Inject(RESERVED_OVERRIDE_REPOSITORY)
+    private readonly reservedOverrides: ReservedOverrideRepository,
   ) {}
 
   /** Quién escribe, para los `audit_event` de los casos de uso (DX-121/122). */
@@ -142,9 +150,10 @@ export class AppointmentsController {
   }
 
   /**
-   * DX-446: cita agendada o movida saltándose un hueco reservado. Se audita
-   * aparte del evento HTTP genérico, con los bloques y el motivo, y no viaja
-   * en la respuesta más que como `reservedOverride`.
+   * DX-446: cita agendada o movida saltándose un hueco reservado. El motivo
+   * va a `appointment_reserved_overrides` y el `audit_event` (aparte del
+   * evento HTTP genérico) solo lleva el id de esa fila y los bloques: nada de
+   * texto libre en la auditoría (DX-009). En la respuesta, `reservedOverride`.
    */
   private async auditReservedOverride(
     appointment: AppointmentWriteResult,
@@ -152,22 +161,17 @@ export class AppointmentsController {
     ctx: AppointmentAuditContext | undefined,
   ): Promise<void> {
     if (!appointment.reservedOverride || !ctx) return;
-    await this.audit.record({
-      tenantId: ctx.tenantId,
-      locationId: ctx.locationId,
-      actor: { kind: 'user', userId: ctx.actor.userId, role: ctx.actor.role },
-      action,
-      resourceType: 'APPOINTMENT',
-      resourceId: appointment.id,
-      patient: { kind: 'patient', id: appointment.patientId },
-      requestId: ctx.requestId,
-      ip: ctx.ip,
-      userAgent: ctx.userAgent,
-      metadata: {
-        reason: 'RESERVED_SLOT_OVERRIDE',
-        reservedSlotOverride: appointment.reservedOverride,
+    await this.reservedOverrides.record(
+      {
+        appointmentId: appointment.id,
+        patientId: appointment.patientId,
+        locationId: appointment.locationId,
+        blockIds: appointment.reservedOverride.blockIds,
+        reason: appointment.reservedOverride.reason,
+        action,
       },
-    });
+      ctx,
+    );
   }
 
   /** La escritura explícita de vínculos es distinta de la traza HTTP genérica. */

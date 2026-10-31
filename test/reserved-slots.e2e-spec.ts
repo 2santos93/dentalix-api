@@ -430,11 +430,23 @@ describe('Huecos reservados para urgencias (e2e, DX-446)', () => {
       action: 'CREATE',
       metadata: {
         reason: 'RESERVED_SLOT_OVERRIDE',
-        reservedSlotOverride: {
-          blockIds: [blockId],
-          reason: 'Paciente con dolor agudo',
-        },
+        reservedSlotOverride: { blockIds: [blockId] },
       },
+    });
+    // El motivo (texto libre) no va a la auditoría: queda en su tabla, con
+    // el id que la auditoría nombra (DX-009).
+    expect(JSON.stringify(override?.metadata)).not.toContain('dolor');
+    const overrideId = (
+      override?.metadata as { reservedSlotOverride: { overrideId: string } }
+    ).reservedSlotOverride.overrideId;
+    await expect(
+      raw.appointmentReservedOverride.findUnique({ where: { id: overrideId } }),
+    ).resolves.toMatchObject({
+      tenantId: caracas.tenantId,
+      appointmentId: id,
+      blockIds: [blockId],
+      reason: 'Paciente con dolor agudo',
+      createdById: dentist.userId,
     });
     await cancel(id);
   });
