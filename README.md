@@ -786,9 +786,9 @@ El consentimiento se envía por email y el paciente (o, si es menor, su
 responsable) lo firma desde el móvil tras verificar un código de 6 dígitos; el
 profesional firma después en la app y solo entonces cuenta como «Completo».
 Módulo `signature-requests` (y la firma del profesional en `consents`);
-migraciones `20261105130000_dx243_enums`,
-`20261105130100_dx243_audit_events_idx` y
-`20261105130200_dx243_signature_requests`.
+migraciones `20261105150000_dx243_enums`,
+`20261105150100_dx243_audit_events_idx` y
+`20261105150200_dx243_signature_requests`.
 
 - **Tabla `signature_requests`**: tipo (`CONSENT`; `BUDGET` reservado para
   DX-415, hoy 400), canal (`EMAIL`), sede, plantilla y versión, plan
