@@ -33,6 +33,9 @@ import {
   PROVIDER_RATES_LIMITS,
   ProviderRatesGate,
 } from './application/provider-rates-gate';
+import { PROVIDER_RATES_BUDGET } from './application/provider-rates-budget';
+import { ProviderRatesCallerScope } from './application/provider-rates-caller-scope';
+import { PrismaProviderRatesBudget } from './infrastructure/repositories/prisma-provider-rates-budget';
 
 // ConfigModule (ConfigService, used by OpenExchangeRatesProvider) and
 // PrismaModule (PrismaService, used by PrismaExchangeRateRepository) are both
@@ -66,6 +69,10 @@ import {
     // al proveedor (una instancia por proceso: compartida por todas las
     // clínicas). Un test cambia los topes con overrideProvider.
     ProviderRatesGate,
+    // SEC-058: los contadores del presupuesto, en la BD (los de todas las
+    // réplicas), y el ámbito del barrido de reintentos (su cupo reservado).
+    { provide: PROVIDER_RATES_BUDGET, useClass: PrismaProviderRatesBudget },
+    ProviderRatesCallerScope,
     {
       provide: PROVIDER_RATES_LIMITS,
       inject: [ConfigService],
@@ -95,6 +102,12 @@ import {
   // lookup/conversion logic.
   // DX-375: ExchangeSourceChangeHooks, para que los pagos congelen la tasa
   // de sus abonos pendientes antes de un cambio de fuente.
-  exports: [ConvertAmountUseCase, ExchangeSourceChangeHooks],
+  // SEC-058: ProviderRatesCallerScope, para que el barrido de pagos gaste de
+  // su cupo reservado.
+  exports: [
+    ConvertAmountUseCase,
+    ExchangeSourceChangeHooks,
+    ProviderRatesCallerScope,
+  ],
 })
 export class ExchangeModule {}

@@ -128,6 +128,22 @@ export interface CashOutflow {
   createdBy: StaffRef;
 }
 
+/**
+ * DX-253: devolución de saldo a favor en efectivo desde el cajón: un egreso
+ * de la caja (resta en el esperado de CASH). Inmutable: no se anula.
+ */
+export interface CashCreditRefund {
+  id: string;
+  /** Número del comprobante de devolución (`DEV-BOG-000001`). */
+  number: string;
+  amount: number;
+  currency: string;
+  reason: string;
+  createdAt: Date;
+  createdBy: StaffRef;
+  patient: { id: string; fullName: string };
+}
+
 export interface CashVoidedOutflow extends CashOutflow {
   voidedAt: Date | null;
   voidedBy: StaffRef | null;
@@ -201,6 +217,8 @@ export interface CashSessionDetail extends CashSessionSummary {
   outflows: CashOutflow[];
   /** Salidas anuladas (las anuladas con la caja cerrada siguen restando). */
   voidedOutflows: CashVoidedOutflow[];
+  /** DX-253: devoluciones de saldo a favor en efectivo (restan en CASH). */
+  creditRefunds: CashCreditRefund[];
   adjustments: CashAdjustmentView[];
   /** Ajustes que nacieron de esta caja ya cerrada y cuentan en otra. */
   laterAdjustments: CashAdjustmentView[];

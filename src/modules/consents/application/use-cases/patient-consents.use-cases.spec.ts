@@ -1,14 +1,20 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
 import { FixedDocumentTypeNamesReader } from '../../../document-type-names/__fixtures__/fixed-document-type-names.reader';
 import { InMemoryConsentTemplateRepository } from '../__fixtures__/in-memory-consent-templates';
 import { InMemoryPatientConsentRepository } from '../__fixtures__/in-memory-patient-consents';
 import { patientsInClinic } from '../../../patients/application/__fixtures__/patients-in-clinic.fake';
-import { computeConsentHash } from '../../domain/consent-hash';
 import {
+  computeConsentHash,
+  computeCountersignatureHash,
+  computeRemoteConsentHash,
+} from '../../domain/consent-hash';
+import {
+  CountersignPatientConsentUseCase,
   GetPatientConsentUseCase,
   ListPatientConsentsUseCase,
   PreviewPatientConsentUseCase,
@@ -409,5 +415,139 @@ describe('ListPatientConsentsUseCase / GetPatientConsentUseCase', () => {
     await expect(get.execute('p1', 'pc-999')).rejects.toThrow(
       NotFoundException,
     );
+  });
+});
+
+describe('CountersignPatientConsentUseCase (DX-243)', () => {
+  const REMOTE = {
+    signatureRequestId: 'sr-1',
+    channel: 'EMAIL' as const,
+    destinationMasked: 'an***@example.com',
+    sentAt: new Date('2026-10-16T12:00:00.000Z'),
+    openedAt: new Date('2026-10-16T13:00:00.000Z'),
+    verifiedAt: new Date('2026-10-16T13:01:00.000Z'),
+    professionalUserId: 'dentist-1',
+  };
+
+  function remoteSetup() {
+    const ctx = setup();
+    const base = {
+      tenantId: 't1',
+      patientId: 'p1',
+      templateId: ctx.template.id,
+      templateVersion: 1,
+      treatmentPlanId: null,
+      title: 'Consentimiento de exodoncia',
+      body: 'Yo, Ana Pérez, autorizo…',
+      signerType: 'PATIENT' as const,
+      signerName: 'Ana Pérez',
+      signerDocument: null,
+      professionalName: 'Dra. Laura Gómez',
+      patientSignature: PNG_A,
+      signedAt: new Date('2026-10-16T13:05:00.000Z'),
+      recordedById: 'reception-1',
+      ipAddress: '203.0.113.7',
+      userAgent: 'Mobile',
+    };
+    const contentHash = computeRemoteConsentHash({
+      ...base,
+      channel: REMOTE.channel,
+      destinationMasked: REMOTE.destinationMasked,
+      sentAt: REMOTE.sentAt,
+      openedAt: REMOTE.openedAt,
+      verifiedAt: REMOTE.verifiedAt,
+    });
+    const consent = ctx.consents.seedRemote(
+      { id: 'pc-remote', contentHash, ...base },
+      REMOTE,
+      'Dra. Laura Gómez',
+    );
+    const scheduled: string[] = [];
+    const countersign = new CountersignPatientConsentUseCase(
+      ctx.consents,
+      () => NOW,
+      {
+        schedule: (_tx, consentId) => {
+          scheduled.push(consentId);
+          return Promise.resolve();
+        },
+      },
+    );
+    return { ...ctx, consent, countersign, scheduled };
+  }
+
+  it('el profesional que lo envió firma en la app: queda completo, con su hash encadenado e íntegro', async () => {
+    const ctx = remoteSetup();
+    expect((await ctx.list.execute('p1'))[0]).toMatchObject({
+      complete: false,
+      professionalSignedAt: null,
+    });
+    const summary = await ctx.countersign.execute(
+      'p1',
+      'pc-remote',
+      { professionalSignature: `data:image/png;base64,${PNG_B}` },
+      META,
+    );
+    expect(summary).toMatchObject({
+      complete: true,
+      professionalSignedAt: NOW,
+    });
+    const stored = ctx.consents.countersignatures.get('pc-remote');
+    expect(stored?.contentHash).toBe(
+      computeCountersignatureHash({
+        consentHash: ctx.consent.contentHash,
+        professionalName: 'Dra. Laura Gómez',
+        professionalSignature: PNG_B,
+        signedAt: NOW,
+      }),
+    );
+    const doc = await ctx.get.execute('p1', 'pc-remote');
+    expect(doc.integrityOk).toBe(true);
+    expect(doc.professionalSignature).toBe(PNG_B);
+    // DX-422: completo ⇒ se encola (en la misma transacción) el PDF firmado.
+    expect(ctx.scheduled).toEqual(['pc-remote']);
+  });
+
+  it('el detalle detecta una firma del paciente alterada a distancia', async () => {
+    const ctx = remoteSetup();
+    ctx.consents.rows[0] = { ...ctx.consents.rows[0], body: 'alterado' };
+    expect((await ctx.get.execute('p1', 'pc-remote')).integrityOk).toBe(false);
+  });
+
+  it('otro profesional: 403; uno firmado en pantalla o ya completo: 409; ajeno: 404', async () => {
+    const ctx = remoteSetup();
+    const input = { professionalSignature: PNG_B };
+    await expect(
+      ctx.countersign.execute('p1', 'pc-remote', input, {
+        ...META,
+        recordedById: 'dentist-2',
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      ctx.countersign.execute('p2', 'pc-remote', input, META),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    const onScreen = await ctx.sign.execute(
+      'p1',
+      signInput(ctx.template.id),
+      META,
+    );
+    await expect(
+      ctx.countersign.execute('p1', onScreen.id, input, META),
+    ).rejects.toBeInstanceOf(ConflictException);
+    await expect(
+      ctx.countersign.execute(
+        'p1',
+        'pc-remote',
+        { professionalSignature: 'x' },
+        META,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(ctx.scheduled).toEqual([]);
+    await ctx.countersign.execute('p1', 'pc-remote', input, META);
+    await expect(
+      ctx.countersign.execute('p1', 'pc-remote', input, META),
+    ).rejects.toBeInstanceOf(ConflictException);
+    // El segundo intento (409) no encola otro PDF.
+    expect(ctx.scheduled).toEqual(['pc-remote']);
   });
 });

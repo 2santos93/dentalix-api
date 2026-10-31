@@ -1,84 +1,35 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import {
   ExchangeRateBudgetExceededError,
   ExchangeRateUnavailableError,
 } from '../domain/ports/exchange-rate-provider.port';
 import { EXCHANGE_RATE_CLOCK } from './use-cases/manual-exchange-rates.use-cases';
+import {
+  PROVIDER_RATES_LIMITS,
+  type ProviderRatesLimits,
+} from './provider-rates-limits';
+import {
+  type BudgetCaller,
+  type BudgetVerdict,
+  InMemoryProviderRatesBudget,
+  PROVIDER_RATES_BUDGET,
+  type ProviderRatesBudget,
+} from './provider-rates-budget';
 
-const MINUTE = 60_000;
-const HOUR = 60 * MINUTE;
-
-/** Topes de las llamadas al proveedor de tasas (SEC-054); ver `.env.example`. */
-export interface ProviderRatesLimits {
-  /** Cuánto se recuerda que un día no lo tiene el proveedor (o falló). */
-  negativeTtlMs: number;
-  /** Llamadas por clínica en la ventana (fallos de caché, no peticiones). */
-  clinic: { limit: number; windowMs: number };
-  /**
-   * Llamadas de todas las clínicas juntas en la ventana. La precarga diaria
-   * no cuenta ni se corta: es la reserva del plan contratado.
-   */
-  global: { limit: number; windowMs: number };
-}
-
-export const PROVIDER_RATES_LIMITS = Symbol('PROVIDER_RATES_LIMITS');
-
-// El global por defecto es ~75 % de la cuota diaria prorrateada del plan
-// «Developer» de Open Exchange Rates (10.000/mes); con otro plan se ajusta.
-export const DEFAULT_PROVIDER_RATES_LIMITS: ProviderRatesLimits = {
-  negativeTtlMs: HOUR,
-  clinic: { limit: 30, windowMs: HOUR },
-  global: { limit: 250, windowMs: 24 * HOUR },
-};
-
-type EnvReader = (key: string) => string | undefined;
-
-function positiveInt(env: EnvReader, key: string, fallback: number): number {
-  const raw = env(key);
-  if (raw == null || raw === '') return fallback;
-  if (!/^\d+$/.test(raw) || Number(raw) <= 0) {
-    throw new Error(
-      `Invalid env var ${key}: expected a positive integer, got "${raw}"`,
-    );
-  }
-  return Number(raw);
-}
-
-export function loadProviderRatesLimits(env: EnvReader): ProviderRatesLimits {
-  const d = DEFAULT_PROVIDER_RATES_LIMITS;
-  return {
-    negativeTtlMs: positiveInt(
-      env,
-      'EXCHANGE_NEGATIVE_CACHE_TTL_MS',
-      d.negativeTtlMs,
-    ),
-    clinic: {
-      limit: positiveInt(env, 'EXCHANGE_PROVIDER_CLINIC_LIMIT', d.clinic.limit),
-      windowMs: positiveInt(
-        env,
-        'EXCHANGE_PROVIDER_CLINIC_WINDOW_MS',
-        d.clinic.windowMs,
-      ),
-    },
-    global: {
-      limit: positiveInt(env, 'EXCHANGE_PROVIDER_GLOBAL_LIMIT', d.global.limit),
-      windowMs: positiveInt(
-        env,
-        'EXCHANGE_PROVIDER_GLOBAL_WINDOW_MS',
-        d.global.windowMs,
-      ),
-    },
-  };
-}
+export {
+  DEFAULT_PROVIDER_RATES_LIMITS,
+  loadProviderRatesLimits,
+  PROVIDER_RATES_LIMITS,
+  providerRatesLimitsProblems,
+  type ProviderRatesLimits,
+} from './provider-rates-limits';
 
 /**
- * Quién provoca la llamada: una clínica (la del contexto), la plataforma sin
- * clínica (un script, un job sin tenant) o la precarga diaria.
+ * Quién provoca la llamada: los que gastan del presupuesto (`BudgetCaller`:
+ * una clínica, el barrido de reintentos de una clínica o la plataforma sin
+ * clínica) o la precarga diaria, que no gasta.
  */
-export type ProviderRatesCaller =
-  | { kind: 'CLINIC'; tenantId: string }
-  | { kind: 'PLATFORM' }
-  | { kind: 'PREFETCH' };
+export type ProviderRatesCaller = BudgetCaller | { kind: 'PREFETCH' };
 
 /** Saca una entrada de un mapa en memoria (no la BD: no es un borrado duro). */
 function forget<K>(map: Map<K, unknown>, key: K): void {
@@ -86,40 +37,17 @@ function forget<K>(map: Map<K, unknown>, key: K): void {
   map.delete(key);
 }
 
+/** Las tasas del día si ya están guardadas; `null` si no. */
+export type StoredRates = () => Promise<Record<string, number> | null>;
+
 /** Por encima de esto se purgan las entradas caducadas al escribir. */
 const SWEEP_THRESHOLD = 1000;
 
-/** Marcas de tiempo de las llamadas dentro de una ventana deslizante. */
-class SlidingWindow {
-  private calls: number[] = [];
-
-  constructor(
-    readonly limit: number,
-    private readonly windowMs: number,
-  ) {}
-
-  count(now: number): number {
-    const since = now - this.windowMs;
-    if (this.calls.length > 0 && this.calls[0] <= since) {
-      this.calls = this.calls.filter((at) => at > since);
-    }
-    return this.calls.length;
-  }
-
-  isFull(now: number): boolean {
-    return this.count(now) >= this.limit;
-  }
-
-  /** Segundos hasta que la llamada más antigua sale de la ventana. */
-  retryAfterSeconds(now: number): number {
-    const oldest = this.calls[0] ?? now;
-    return Math.max(1, Math.ceil((oldest + this.windowMs - now) / 1000));
-  }
-
-  record(now: number): void {
-    this.calls.push(now);
-  }
-}
+const sameCaller = (a: ProviderRatesCaller, b: ProviderRatesCaller) =>
+  a.kind === b.kind &&
+  (a.kind === 'CLINIC' || a.kind === 'SWEEP'
+    ? a.tenantId === (b as { tenantId: string }).tenantId
+    : true);
 
 /**
  * La puerta de TODAS las llamadas al proveedor de tasas (SEC-054), cuya cuota
@@ -127,74 +55,99 @@ class SlidingWindow {
  * snapshots); aquí, en este orden:
  *
  * 1. single-flight: si el día ya se está pidiendo, se espera esa respuesta
- *    (sin gastar presupuesto);
+ *    (sin gastar presupuesto). Si esa llamada no entró por el presupuesto de
+ *    OTRA clínica, quien esperaba lo intenta con el suyo;
  * 2. caché negativa compartida: un día que el proveedor no tuvo o en que
  *    falló (`ExchangeRateUnavailableError`) no se pide otra vez durante
  *    `negativeTtlMs`, para ninguna clínica. La precarga no la lee (reintenta
  *    con su propio backoff) y un acierto la limpia;
- * 3. presupuesto de la clínica y global (ventanas deslizantes): superado,
- *    `ExchangeRateBudgetExceededError` sin llamar. La precarga no cuenta ni
- *    se corta: las peticiones de usuarios nunca la dejan sin cupo.
+ * 3. presupuesto (SEC-058, `ProviderRatesBudget`): los cupos de la clínica
+ *    (por hora, por día o el de clínica nueva, y el de su barrido) y el
+ *    global, en contadores de la BD compartidos por todas las réplicas.
+ *    Superado, `ExchangeRateBudgetExceededError` sin llamar. La precarga no
+ *    cuenta ni se corta: las peticiones de usuarios nunca la dejan sin cupo.
  *
- * Vive en memoria del proceso (como el rate limiting, `security.module.ts`):
- * con varias réplicas cada una tiene su caché y sus contadores, así que el
- * tope efectivo es el configurado por el número de réplicas.
+ * La caché negativa y el single-flight siguen en memoria del proceso: con
+ * varias réplicas, un mismo día puede pedirse una vez en cada una (y gasta
+ * presupuesto en cada una).
  */
 @Injectable()
 export class ProviderRatesGate {
   private readonly logger = new Logger('Exchange');
   private readonly inFlight = new Map<
     string,
-    Promise<Record<string, number>>
+    { caller: ProviderRatesCaller; call: Promise<Record<string, number>> }
   >();
   private readonly unavailableUntil = new Map<string, number>();
-  private readonly clinics = new Map<string, SlidingWindow>();
-  private readonly global: SlidingWindow;
-  private globalWarned = false;
 
   constructor(
     @Inject(PROVIDER_RATES_LIMITS)
     private readonly limits: ProviderRatesLimits,
     @Inject(EXCHANGE_RATE_CLOCK)
     private readonly now: () => Date,
-  ) {
-    this.global = new SlidingWindow(
-      limits.global.limit,
-      limits.global.windowMs,
-    );
-  }
+    @Optional()
+    @Inject(PROVIDER_RATES_BUDGET)
+    private readonly budget: ProviderRatesBudget = new InMemoryProviderRatesBudget(
+      limits,
+      now,
+    ),
+  ) {}
 
   // `async`: un tope superado sale como promesa rechazada, no como excepción
-  // síncrona. El cuerpo corre sin esperas hasta registrar la llamada en vuelo.
+  // síncrona. El cuerpo corre sin esperas hasta registrar la llamada en vuelo
+  // (el gasto del presupuesto va DENTRO de ella).
+  //
+  // `stored` (opcional): mira si el día ya está guardado (otra réplica o
+  // petición lo guardó tras la primera lectura de quien llama). Se mira justo
+  // ANTES de gastar presupuesto: un día que ya está no gasta cupo sin llamar.
   async fetch(
     date: string,
     caller: ProviderRatesCaller,
     load: () => Promise<Record<string, number>>,
+    stored?: StoredRates,
   ): Promise<Record<string, number>> {
     const pending = this.inFlight.get(date);
-    if (pending) return pending;
-
-    const now = this.now().getTime();
-    if (caller.kind !== 'PREFETCH') {
-      this.assertNotKnownUnavailable(date, now);
-      this.spendBudget(caller, now);
+    if (pending) {
+      return pending.call.catch((error: unknown) => {
+        if (
+          error instanceof ExchangeRateBudgetExceededError &&
+          !sameCaller(pending.caller, caller)
+        ) {
+          return this.fetch(date, caller, load, stored);
+        }
+        throw error;
+      });
     }
 
-    const call = this.run(date, load);
-    this.inFlight.set(date, call);
+    if (caller.kind !== 'PREFETCH') {
+      this.assertNotKnownUnavailable(date, this.now().getTime());
+    }
+    const call = this.run(date, caller, load, stored);
+    this.inFlight.set(date, { caller, call });
     return call;
   }
 
   private async run(
     date: string,
+    caller: ProviderRatesCaller,
     load: () => Promise<Record<string, number>>,
+    stored: StoredRates | undefined,
   ): Promise<Record<string, number>> {
     try {
+      const already = stored ? await stored() : null;
+      if (already) {
+        forget(this.unavailableUntil, date);
+        return already;
+      }
+      if (caller.kind !== 'PREFETCH') await this.spendBudget(caller);
       const rates = await load();
       forget(this.unavailableUntil, date);
       return rates;
     } catch (error) {
-      if (error instanceof ExchangeRateUnavailableError) {
+      if (
+        error instanceof ExchangeRateUnavailableError &&
+        !(error instanceof ExchangeRateBudgetExceededError)
+      ) {
         this.rememberUnavailable(date);
       }
       throw error;
@@ -224,67 +177,55 @@ export class ProviderRatesGate {
     this.unavailableUntil.set(date, now + this.limits.negativeTtlMs);
   }
 
-  /** Comprueba los dos presupuestos y, si hay hueco en ambos, gasta uno de cada. */
-  private spendBudget(
-    caller: Exclude<ProviderRatesCaller, { kind: 'PREFETCH' }>,
-    now: number,
+  /** Gasta una llamada de todos los cupos que tocan, o lanza el 429 interno. */
+  private async spendBudget(caller: BudgetCaller): Promise<void> {
+    const verdict = await this.budget.spend(caller);
+    const tenantId = caller.kind === 'PLATFORM' ? undefined : caller.tenantId;
+    if (!verdict.spent) {
+      this.logger.warn({
+        event: 'exchange.provider_budget_exhausted',
+        scope: verdict.scope,
+        caller: caller.kind,
+        quota: verdict.quota?.kind,
+        tenantId,
+      });
+      throw new ExchangeRateBudgetExceededError(
+        verdict.scope,
+        verdict.retryAfterSeconds,
+      );
+    }
+    this.warnOnThresholds(caller, tenantId, verdict);
+  }
+
+  /**
+   * Los avisos salen en la llamada que cruza el umbral, una sola vez por
+   * ventana aunque haya varias réplicas (el contador es el de la BD): la
+   * mitad del global y cada cupo diario de una clínica que se llena (el
+   * aviso de consumo anómalo; solo ids y recuentos).
+   */
+  private warnOnThresholds(
+    caller: BudgetCaller,
+    tenantId: string | undefined,
+    verdict: Extract<BudgetVerdict, { spent: true }>,
   ): void {
-    const clinic =
-      caller.kind === 'CLINIC' ? this.clinicWindow(caller.tenantId, now) : null;
-    if (clinic?.isFull(now)) {
-      this.logger.warn({
-        event: 'exchange.provider_budget_exhausted',
-        scope: 'CLINIC',
-        tenantId: caller.kind === 'CLINIC' ? caller.tenantId : undefined,
-      });
-      throw new ExchangeRateBudgetExceededError(
-        'CLINIC',
-        clinic.retryAfterSeconds(now),
-      );
-    }
-    if (this.global.isFull(now)) {
-      this.logger.warn({
-        event: 'exchange.provider_budget_exhausted',
-        scope: 'GLOBAL',
-      });
-      throw new ExchangeRateBudgetExceededError(
-        'GLOBAL',
-        this.global.retryAfterSeconds(now),
-      );
-    }
-    clinic?.record(now);
-    this.global.record(now);
-    this.warnAtHalfGlobal(now);
-  }
-
-  private clinicWindow(tenantId: string, now: number): SlidingWindow {
-    let window = this.clinics.get(tenantId);
-    if (!window) {
-      if (this.clinics.size >= SWEEP_THRESHOLD) {
-        for (const [id, w] of this.clinics) {
-          if (w.count(now) === 0) forget(this.clinics, id);
-        }
-      }
-      window = new SlidingWindow(
-        this.limits.clinic.limit,
-        this.limits.clinic.windowMs,
-      );
-      this.clinics.set(tenantId, window);
-    }
-    return window;
-  }
-
-  // Aviso (una vez por subida) al pasar la mitad del presupuesto global.
-  private warnAtHalfGlobal(now: number): void {
-    const used = this.global.count(now);
-    const half = used * 2 >= this.global.limit;
-    if (half && !this.globalWarned) {
+    if (verdict.globalUsed === Math.ceil(this.limits.global.limit / 2)) {
       this.logger.warn({
         event: 'exchange.provider_budget_half',
-        used,
-        limit: this.global.limit,
+        used: verdict.globalUsed,
+        limit: this.limits.global.limit,
       });
     }
-    this.globalWarned = half;
+    for (const quota of verdict.filled) {
+      if (quota.kind === 'HOUR') continue;
+      this.logger.warn({
+        event: 'exchange.provider_clinic_quota_exhausted',
+        tenantId,
+        caller: caller.kind,
+        quota: quota.kind,
+        newClinic: quota.newClinic,
+        limit: quota.limit,
+        windowMs: quota.windowMs,
+      });
+    }
   }
 }

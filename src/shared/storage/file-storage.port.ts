@@ -1,4 +1,5 @@
 import type { Readable } from 'node:stream';
+import { transliterateToAscii } from './ascii-filename';
 import { isServableContentType } from './content-type';
 
 export const FILE_STORAGE = Symbol('FILE_STORAGE');
@@ -241,7 +242,8 @@ function sanitizeFilename(filename: string): string {
  * expande (U+FDFA son 18 letras), así que se recorta otra vez al final.
  */
 function asciiFallback(filename: string): string {
-  const ascii = Array.from(filename.normalize('NFKD').replace(/[̀-ͯ]/g, ''))
+  // DX-422: las rayas y comillas tipográficas se transliteran (no «_»).
+  const ascii = Array.from(transliterateToAscii(filename))
     .map((c) => (/^[\x20\x21\x23-\x5b\x5d-\x7e]$/.test(c) ? c : '_'))
     .join('');
   return capLength(ascii, MAX_FILENAME_LENGTH);

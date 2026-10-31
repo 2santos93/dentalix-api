@@ -4,11 +4,14 @@ import { parseCron } from '../../jobs/domain/cron';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { PaymentAllocationJobs } from './payment-allocation-jobs';
 import { ExchangeSourceChangeHooks } from '../../exchange/application/exchange-source-change-hooks';
+import { ProviderRatesCallerScope } from '../../exchange/application/provider-rates-caller-scope';
 import type { PlanAllocationRebalancer } from './plan-allocation-rebalancer';
 import type { PaymentBaseRetries } from './payment-base-retries';
 
 function setup() {
   const tenantContext = new TenantContextService();
+  const ratesCallerScope = new ProviderRatesCallerScope();
+  const sweepScopes: boolean[] = [];
   const calls: string[] = [];
   const rebalancer = {
     freezeAllPending: jest.fn(() => {
@@ -29,6 +32,7 @@ function setup() {
     dueTenantIds: jest.fn(() => Promise.resolve([...due])),
     retryDue: jest.fn((limit: number) => {
       calls.push(`retry:${tenantContext.getTenantId()}:${limit}`);
+      sweepScopes.push(ratesCallerScope.isSweep());
       return Promise.resolve({ resolved: 0, withoutRate: 0, failed: 0 });
     }),
     wake: jest.fn(() => {
@@ -44,6 +48,7 @@ function setup() {
     retries as unknown as PaymentBaseRetries,
     tenantContext,
     hooks,
+    ratesCallerScope,
   );
   return {
     registry,
@@ -54,6 +59,8 @@ function setup() {
     calls,
     hooks,
     tenantContext,
+    ratesCallerScope,
+    sweepScopes,
   };
 }
 
@@ -118,6 +125,17 @@ describe('PaymentAllocationJobs (DX-051)', () => {
 
     expect(run).toHaveBeenCalledTimes(1);
     expect(calls).toEqual(['retry:t42:50', 'drain:t42:null:undefined']);
+  });
+
+  // SEC-058: el barrido gasta del cupo reservado del proveedor de tasas.
+  it('reintenta dentro del ámbito del barrido, y fuera de él no lo está', async () => {
+    const { jobs, due, sweepScopes, ratesCallerScope } = setup();
+    due.push('t1', 't2');
+
+    await jobs.sweep();
+
+    expect(sweepScopes).toEqual([true, true]);
+    expect(ratesCallerScope.isSweep()).toBe(false);
   });
 
   it('si los reintentos fallan, drena igual y sigue con las demás clínicas', async () => {

@@ -35,6 +35,15 @@ describe('loadRateLimitConfig', () => {
     // DX-099: el cuestionario público de anamnesis, por IP y por token.
     expect(cfg.anamnesis).toEqual({ limit: 20, ttlMs: 60_000 });
     expect(cfg['anamnesis-token']).toEqual({ limit: 10, ttlMs: 60_000 });
+    // DX-243: la firma a distancia pública, por IP y por token.
+    expect(cfg.signature).toEqual({ limit: 20, ttlMs: 60_000 });
+    expect(cfg['signature-token']).toEqual({ limit: 10, ttlMs: 60_000 });
+    // DX-435: la oferta de hueco pública, por IP y por token.
+    expect(cfg['slot-offer']).toEqual({ limit: 20, ttlMs: 60_000 });
+    expect(cfg['slot-token']).toEqual({ limit: 10, ttlMs: 60_000 });
+    // DX-443: la copia pública del PDF firmado, por IP y por token.
+    expect(cfg['copy-link']).toEqual({ limit: 20, ttlMs: 60_000 });
+    expect(cfg['copy-token']).toEqual({ limit: 10, ttlMs: 60_000 });
   });
 
   it('SEC-046: lee RATE_LIMIT_PATIENT_IMPORT_LIMIT/_TTL_MS', () => {
@@ -67,6 +76,18 @@ describe('loadRateLimitConfig', () => {
     );
     expect(cfg.anamnesis.limit).toBe(5);
     expect(cfg['anamnesis-token']).toEqual({ limit: 3, ttlMs: 1000 });
+  });
+
+  it('DX-243: lee los baldes de la firma a distancia de sus variables', () => {
+    const cfg = loadRateLimitConfig(
+      envOf({
+        RATE_LIMIT_SIGNATURE_LIMIT: '6',
+        RATE_LIMIT_SIGNATURE_TOKEN_LIMIT: '2',
+        RATE_LIMIT_SIGNATURE_TOKEN_TTL_MS: '1000',
+      }),
+    );
+    expect(cfg.signature.limit).toBe(6);
+    expect(cfg['signature-token']).toEqual({ limit: 2, ttlMs: 1000 });
   });
 
   it('lee límite y ventana de cada política desde el entorno', () => {

@@ -6,6 +6,7 @@ import type {
 } from '../entities';
 import type { AnesthesiaAnamnesis, DoseAlert } from '../anesthesia-dose';
 import type { SampleAnesthetic } from '../sample-anesthetics';
+import type { DoseWindow, WindowAdministration } from '../anesthesia-window';
 
 export const ANESTHESIA_REPOSITORY = Symbol('ANESTHESIA_REPOSITORY');
 
@@ -17,6 +18,13 @@ export interface AnestheticProductInput {
   mlPerCarpule: number;
   maxMgPerKg: number;
   maxAbsoluteMg: number;
+  /**
+   * DX-420: sin valor, null (el máximo de adulto; sin edad mínima). La
+   * epinefrina sin valor la deduce el caso de uso del vasoconstrictor.
+   */
+  pediatricMaxMgPerKg?: number | null;
+  minAgeYears?: number | null;
+  epinephrineMgPerCarpule?: number | null;
 }
 
 export type AnestheticProductPatch = Partial<AnestheticProductInput> & {
@@ -30,12 +38,24 @@ export interface AnesthesiaEntryRef {
   locationId: string | null;
   /** Zona IANA de esa sede: decide la edad del paciente «hoy». */
   timeZone: string | null;
+  /**
+   * DX-407: peso medido hoy en la valoración de la hoja de sedación de ESTA
+   * evolución (null si no tiene hoja o no se pesó). Es del sillón, del día:
+   * manda sobre la anamnesis, que puede ser antigua.
+   */
+  sedationWeightKg?: number | null;
 }
 
 /** Lo que el cálculo lee del paciente: nacimiento y anamnesis VIGENTE. */
 export interface AnesthesiaPatientContext {
   birthDate: Date | null;
-  anamnesis: (AnesthesiaAnamnesis & { weightKg: number | null }) | null;
+  anamnesis:
+    | (AnesthesiaAnamnesis & {
+        weightKg: number | null;
+        /** DX-420: condición cardiovascular marcada «Sí» (tope de epinefrina). */
+        cardiac: boolean;
+      })
+    | null;
 }
 
 /** Fila nueva; tenant, id y `createdAt` los ponen el repositorio y la BD. */
@@ -54,10 +74,20 @@ export interface NewAnesthesiaAdministration {
   weightSource: WeightSource | null;
   cumulativeMg: number;
   cumulativePercent: number | null;
+  epinephrineMg: number | null;
+  cumulativeEpinephrineMg: number | null;
   safetyRulesVersion: string;
   safetyAlerts: DoseAlert[];
   overrideReason: string | null;
   authorId: string;
+}
+
+/** Lo ya registrado que decide un registro nuevo (leído bajo el bloqueo). */
+export interface AnesthesiaRecordPrior {
+  /** De ESTA evolución, en orden de administración (para el peso). */
+  entry: AnesthesiaAdministration[];
+  /** Del paciente en la ventana (DX-418), de cualquier evolución y sede. */
+  window: AnesthesiaAdministration[];
 }
 
 export interface AnesthesiaRepository {
@@ -95,16 +125,38 @@ export interface AnesthesiaRepository {
   ): Promise<AnesthesiaAdministration[]>;
   listByPatient(patientId: string): Promise<AnesthesiaAdministration[]>;
   /**
-   * Append-only. Bloquea la evolución (FOR UPDATE) para que dos registros
-   * simultáneos no pasen los dos por debajo del máximo, lee lo ya registrado
-   * y llama a `build`, que decide (o lanza) con ese acumulado; inserta lo que
-   * devuelva, en la MISMA transacción.
+   * DX-418: administraciones del paciente con `administeredAt` dentro del
+   * rango cerrado `[from, to]`, en TODAS sus evoluciones y sedes de esta clínica (nunca de
+   * otra: RLS), con el nombre del profesional y de la sede para el desglose.
+   * En orden de administración.
+   */
+  listPatientWindow(
+    patientId: string,
+    window: DoseWindow,
+  ): Promise<WindowAdministration[]>;
+  /**
+   * DX-420: ¿tiene el paciente hoja de sedación (DX-407) en ESTA evolución o
+   * con hora clínica (valoración, o alta de la hoja si es anterior a la
+   * columna) dentro del rango cerrado `range`, en cualquier sede?
+   */
+  hasSedation(
+    patientId: string,
+    entryId: string,
+    range: DoseWindow,
+  ): Promise<boolean>;
+  /**
+   * Append-only. Bloquea al PACIENTE (DX-418; en DX-307 era la evolución)
+   * para que dos registros simultáneos, en la misma o en otra evolución o
+   * sede, no pasen los dos por debajo del máximo; lee lo ya registrado (la
+   * evolución y la ventana) y llama a `build`, que decide (o lanza) con ese
+   * acumulado; inserta lo que devuelva, en la MISMA transacción.
    */
   record(
     patientId: string,
     entryId: string,
+    window: DoseWindow,
     build: (
-      prior: AnesthesiaAdministration[],
+      prior: AnesthesiaRecordPrior,
     ) => NewAnesthesiaAdministration | Promise<NewAnesthesiaAdministration>,
   ): Promise<AnesthesiaAdministration>;
 }

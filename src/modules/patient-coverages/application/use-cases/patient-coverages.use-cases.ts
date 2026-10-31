@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import type { ClinicRole } from '@prisma/client';
 import type { Payer } from '../../../payers/domain/entities/payer.entity';
 import {
   PAYER_REPOSITORY,
@@ -23,6 +24,7 @@ import {
   validateCoverageDates,
   type CoverageStatus,
 } from '../../domain/coverage-rules';
+import type { CoverageValidity } from '../../domain/coverage-declaration-rules';
 import type { PatientCoverage } from '../../domain/entities/patient-coverage.entity';
 import {
   memberNumberChanged,
@@ -56,6 +58,28 @@ export interface CreatePatientCoverageInput {
 }
 
 export type UpdatePatientCoverageInput = Partial<CreatePatientCoverageInput>;
+
+/** Quién edita: su rol decide si cambiar la vigencia redeclara (SEC-053). */
+export interface CoverageEditor {
+  userId: string;
+  role: ClinicRole;
+}
+
+/**
+ * SEC-053: la vigencia antes y después de una edición que la cambió, y si esa
+ * edición borró la verificación del ADMIN. Va al evento de auditoría.
+ */
+export interface CoverageValidityChange {
+  before: CoverageValidity;
+  after: CoverageValidity;
+  verificationCleared: boolean;
+}
+
+export interface UpdatedPatientCoverage {
+  coverage: PatientCoverageView;
+  /** `null` si la vigencia guardada no cambió. */
+  validityChange: CoverageValidityChange | null;
+}
 
 const withStatus = (
   c: PatientCoverage,
@@ -184,6 +208,9 @@ export class CreatePatientCoverageUseCase {
  * SEC-049: si cambia el pagador o el nº de afiliado, el resultado debe cumplir
  * el nº obligatorio del pagador (400), y el repositorio borra la verificación.
  * Una cobertura anterior sin nº se sigue editando en lo demás sin pedirlo.
+ * SEC-053: si quien edita no es ADMIN, cambiar la vigencia de una cobertura de
+ * pagador externo también la borra (`coverageRedeclared`, con el candado).
+ * Devuelve además la vigencia antes y después si cambió, para la auditoría.
  */
 @Injectable()
 export class UpdatePatientCoverageUseCase {
@@ -198,8 +225,8 @@ export class UpdatePatientCoverageUseCase {
     patientId: string,
     coverageId: string,
     input: UpdatePatientCoverageInput,
-    updatedById: string,
-  ): Promise<PatientCoverageView> {
+    editor: CoverageEditor,
+  ): Promise<UpdatedPatientCoverage> {
     const current = await loadCoverage(this.repo, patientId, coverageId);
 
     const nextFrom =
@@ -234,7 +261,7 @@ export class UpdatePatientCoverageUseCase {
       throw new BadRequestException(COVERAGE_PRIMARY_REQUIRED_MESSAGE);
     }
 
-    await this.repo.update(coverageId, {
+    const result = await this.repo.update(coverageId, {
       payerId: input.payerId,
       planName:
         input.planName === undefined
@@ -253,11 +280,27 @@ export class UpdatePatientCoverageUseCase {
           : normalizeCoverageText(input.notes),
       isPrimary:
         input.isPrimary === true && !current.isPrimary ? true : undefined,
-      updatedById,
+      updatedById: editor.userId,
+      editorRole: editor.role,
     });
-    const saved = await this.repo.findById(patientId, coverageId);
-    if (!saved) throw new NotFoundException(COVERAGE_NOT_FOUND_MESSAGE);
-    return withStatus(saved, await this.repo.clinicToday(this.clock()));
+    if (!result) throw new NotFoundException(COVERAGE_NOT_FOUND_MESSAGE);
+    const { coverage: saved, previous } = result;
+    const validityChanged =
+      saved.validFrom !== previous.validFrom ||
+      saved.validTo !== previous.validTo;
+    return {
+      coverage: withStatus(saved, await this.repo.clinicToday(this.clock())),
+      validityChange: validityChanged
+        ? {
+            before: {
+              validFrom: previous.validFrom,
+              validTo: previous.validTo,
+            },
+            after: { validFrom: saved.validFrom, validTo: saved.validTo },
+            verificationCleared: previous.verified && saved.verifiedAt === null,
+          }
+        : null,
+    };
   }
 }
 

@@ -16,6 +16,7 @@ import { PatientCoveragesController } from '../patient-coverages/presentation/pa
 import { PatientResponsiblePartiesController } from '../patients/presentation/patient-responsible-parties.controller';
 import { MedicalHistoryController } from '../medical-history/presentation/medical-history.controller';
 import { PatientAnamnesisRequestsController } from '../medical-history-submissions/presentation/patient-anamnesis-requests.controller';
+import { PatientSignatureRequestsController } from '../signature-requests/presentation/patient-signature-requests.controller';
 import { MedicalHistorySubmissionsController } from '../medical-history-submissions/presentation/medical-history-submissions.controller';
 import { ClinicalEntriesController } from '../clinical-entries/presentation/clinical-entries.controller';
 import { DentalCatalogController } from '../dental-catalog/presentation/dental-catalog.controller';
@@ -42,9 +43,11 @@ import { PaymentPlansController } from '../payment-plans/presentation/payment-pl
 import { AccountStatementController } from '../account-statement/presentation/account-statement.controller';
 import { ReceivablesController } from '../receivables/presentation/receivables.controller';
 import { DiscountPolicyController } from '../discounts/presentation/discount-policy.controller';
+import { PatientCreditController } from '../patient-credit/presentation/patient-credit.controller';
 import { CancellationPolicyController } from '../cancellation-policies/presentation/cancellation-policy.controller';
 import { CancellationFeeController } from '../cancellation-fees/presentation/cancellation-fee.controller';
 import { DiscountReportController } from '../discounts/presentation/discount-report.controller';
+import { ProductionByProcedureController } from '../reports/presentation/production-by-procedure.controller';
 import { CollectionsController } from '../collections/presentation/collections.controller';
 import { CashSessionsController } from '../cash-sessions/presentation/cash-sessions.controller';
 import { ScheduleBlocksController } from '../schedule-blocks/presentation/schedule-blocks.controller';
@@ -52,6 +55,7 @@ import { StaffController } from '../staff/presentation/staff.controller';
 import { ClinicalNoteTemplatesController } from '../clinical-note-templates/presentation/clinical-note-templates.controller';
 import { AnesthesiaController } from '../anesthesia/presentation/anesthesia.controller';
 import { AnestheticsController } from '../anesthesia/presentation/anesthetics.controller';
+import { SedationController } from '../sedation/presentation/sedation.controller';
 import { DomainsController } from '../domains/presentation/domains.controller';
 import { PostOpTemplatesController } from '../post-op-instructions/presentation/post-op-templates.controller';
 import { AppointmentPostOpController } from '../post-op-instructions/presentation/appointment-post-op.controller';
@@ -350,6 +354,54 @@ const EXPECTED: Record<string, AuditOptions> = {
     patient: P,
     anesthesiaSafety: true,
   },
+  // DX-407: hoja de sedación. Cada parte es un CREATE de la hoja con un
+  // código que la distingue; ni constantes, ni dosis, ni textos.
+  'GET /patients/:patientId/sedation': {
+    action: 'VIEW',
+    resource: 'SEDATION_RECORD',
+    patient: P,
+  },
+  'GET /patients/:patientId/clinical-entries/:entryId/sedation': {
+    action: 'VIEW',
+    resource: 'SEDATION_RECORD',
+    resourceId: { param: 'entryId' },
+    patient: P,
+  },
+  'POST /patients/:patientId/clinical-entries/:entryId/sedation': {
+    action: 'CREATE',
+    resource: 'SEDATION_RECORD',
+    resourceId: RES,
+    patient: P,
+    reason: 'SEDATION_ASSESSMENT',
+  },
+  'POST /patients/:patientId/clinical-entries/:entryId/sedation/checklist': {
+    action: 'CREATE',
+    resource: 'SEDATION_RECORD',
+    resourceId: RES,
+    patient: P,
+    reason: 'SEDATION_CHECKLIST',
+  },
+  'POST /patients/:patientId/clinical-entries/:entryId/sedation/agents': {
+    action: 'CREATE',
+    resource: 'SEDATION_RECORD',
+    resourceId: RES,
+    patient: P,
+    reason: 'SEDATION_AGENT',
+  },
+  'POST /patients/:patientId/clinical-entries/:entryId/sedation/vitals': {
+    action: 'CREATE',
+    resource: 'SEDATION_RECORD',
+    resourceId: RES,
+    patient: P,
+    reason: 'SEDATION_VITALS',
+  },
+  'POST /patients/:patientId/clinical-entries/:entryId/sedation/discharge': {
+    action: 'CREATE',
+    resource: 'SEDATION_RECORD',
+    resourceId: RES,
+    patient: P,
+    reason: 'SEDATION_DISCHARGE',
+  },
   // DX-307: catálogo de anestésicos (sin paciente); desactivar es un PATCH.
   'POST /anesthetics': {
     action: 'CREATE',
@@ -508,6 +560,45 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: RES,
     patient: P,
   },
+  // DX-243: el profesional firma en la app uno firmado a distancia.
+  'POST /patients/:patientId/consents/:id/countersign': {
+    action: 'SIGN',
+    resource: 'CONSENT',
+    resourceId: { param: 'id' },
+    patient: P,
+    reason: 'CONSENT_COUNTERSIGNED',
+  },
+  // DX-422: reintentar el PDF firmado que la cola no pudo generar.
+  'POST /patients/:patientId/consents/:id/signed-pdf/retry': {
+    action: 'UPDATE',
+    resource: 'CONSENT',
+    resourceId: { param: 'id' },
+    patient: P,
+    reason: 'SIGNED_PDF_RETRY',
+  },
+  // DX-443: «Reenviar copia» del PDF firmado al paciente.
+  'POST /patients/:patientId/consents/:id/signed-pdf/copy': {
+    action: 'SEND',
+    resource: 'CONSENT',
+    resourceId: { param: 'id' },
+    patient: P,
+    reason: 'SIGNED_PDF_COPY_RESENT',
+  },
+  // DX-243: enviar a firmar a distancia y anular el enlace.
+  'POST /patients/:patientId/signature-requests': {
+    action: 'SEND',
+    resource: 'SIGNATURE_REQUEST',
+    resourceId: RES,
+    patient: P,
+    reason: 'SIGNATURE_REQUEST_SENT',
+  },
+  'POST /patients/:patientId/signature-requests/:id/revoke': {
+    action: 'UPDATE',
+    resource: 'SIGNATURE_REQUEST',
+    resourceId: { param: 'id' },
+    patient: P,
+    reason: 'SIGNATURE_REQUEST_REVOKED',
+  },
   'GET /patients/:patientId/consents/:id': {
     action: 'VIEW',
     resource: 'CONSENT',
@@ -631,6 +722,16 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: { param: 'id' },
     reason: 'IMPORT_UNDONE',
     importBatch: true,
+  },
+  // DX-390: cobro dividido (un evento por línea, con su recibo único).
+  'POST /treatment-plans/:id/split-payments': {
+    action: 'CREATE',
+    resource: 'PAYMENT',
+    resourceId: RES,
+    patient: { lookup: 'treatmentPlan', param: 'id' },
+    reason: 'SPLIT_RECEIPT_ISSUED',
+    paymentReference: true,
+    splitPayment: true,
   },
   // DX-262: abono contra el saldo migrado (con su recibo de caja).
   'POST /opening-balances/:id/payments': {
@@ -919,6 +1020,40 @@ const EXPECTED: Record<string, AuditOptions> = {
   // DX-204: política de descuentos (solo ADMIN) e informe de descuentos (lista
   // de muchos pacientes, sin paciente en el evento) y su CSV.
   'PUT /discount-policy': { action: 'UPDATE', resource: 'DISCOUNT_POLICY' },
+  // DX-253: saldo a favor — traspaso, devolución (con su comprobante) y el
+  // tope de recepción. El importe y el motivo quedan en la fila inmutable
+  // del movimiento (`resourceId`).
+  'POST /treatment-plans/:id/credit-transfers': {
+    action: 'CREATE',
+    resource: 'PATIENT_CREDIT',
+    resourceId: RES,
+    patient: { lookup: 'treatmentPlan', param: 'id' },
+    reason: 'CREDIT_TRANSFER',
+  },
+  'POST /treatment-plans/:id/credit-refunds': {
+    action: 'CREATE',
+    resource: 'PATIENT_CREDIT',
+    resourceId: RES,
+    patient: { lookup: 'treatmentPlan', param: 'id' },
+    reason: 'CREDIT_REFUND',
+  },
+  'GET /credit-refunds/:id': {
+    action: 'VIEW',
+    resource: 'PATIENT_CREDIT',
+    resourceId: { param: 'id' },
+    patient: { response: 'patientId' },
+    reason: 'CREDIT_REFUND_RECEIPT',
+  },
+  'GET /patients/:id/credit-movements': {
+    action: 'VIEW',
+    resource: 'PATIENT_CREDIT',
+    patient: { param: 'id' },
+  },
+  'PUT /patient-credit/policy': {
+    action: 'UPDATE',
+    resource: 'PATIENT_CREDIT',
+    reason: 'POLICY',
+  },
   // DX-279: nueva versión de la política de cancelación de una sede.
   'POST /locations/:id/cancellation-policy': {
     action: 'CREATE',
@@ -993,6 +1128,12 @@ const EXPECTED: Record<string, AuditOptions> = {
     action: 'EXPORT',
     resource: 'TREATMENT_PLAN_ITEM',
     reason: 'DISCOUNT_REPORT',
+  },
+  // DX-423: el detalle de una fila lleva el nombre de cada paciente.
+  'GET /reports/production-by-procedure/items': {
+    action: 'VIEW',
+    resource: 'TREATMENT_PLAN_ITEM',
+    reason: 'PRODUCTION_REPORT',
   },
   // DX-150: cobranza. La nota se audita sin su texto (solo los nombres de los
   // campos); el cambio de estado del compromiso lo audita SettlePaymentPromises.
@@ -1311,6 +1452,30 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // REMINDER_OPT_OUT del paciente por el enlace (solo si de verdad se da de baja).
   'POST /public/reminder-opt-outs/:token':
     'reminder-opt-out.use-cases.spec.ts y reminder-opt-out.e2e-spec.ts',
+  // DX-243: el paciente por el enlace, en la transacción de cada paso:
+  // SIGNATURE_LINK_OPENED y SIGNATURE_CODE_SENT al pedir el código,
+  // SIGNATURE_CODE_VERIFIED o SIGNATURE_LINK_LOCKED al verificarlo y
+  // SIGNATURE_PATIENT_SIGNED al firmar (con el consentimiento).
+  'POST /public/sign/:token/code': 'signature-requests.e2e-spec.ts',
+  'POST /public/sign/:token/verify': 'signature-requests.e2e-spec.ts',
+  'POST /public/sign/:token/sign': 'signature-requests.e2e-spec.ts',
+  // DX-435: aceptar y rechazar la oferta de hueco desde el enlace (UPDATE de
+  // WAITLIST_OFFER, origen PUBLIC_LINK, en la transacción del repositorio).
+  'POST /public/slot-offers/:token/accept': 'slot-offers.int-spec.ts',
+  'POST /public/slot-offers/:token/decline': 'slot-offers.int-spec.ts',
+  // DX-443: descargar la copia del PDF firmado desde el enlace (EXPORT de
+  // CONSENT, origen PUBLIC_LINK, sin actor, en la transacción que gasta el
+  // enlace).
+  'POST /public/signed-consent-copies/:token/download':
+    'signed-pdf-copies.int-spec.ts',
+  // DX-361: confirmación de cita por enlace, en la transacción de la
+  // escritura y sin token, hash ni URL. Recepción: UPDATE APPOINTMENT origen
+  // STAFF, CONFIRMATION_LINK_CREATED o _RESENT; el paciente (sin usuario):
+  // origen LINK, CONFIRMATION_LINK_CONFIRMED, _CANCELLED o _CALL_REQUESTED.
+  'POST /appointments/:id/confirmation-link':
+    'confirmation-audit.spec.ts, create-confirmation-link.use-case.spec.ts, appointment-confirmations-audit.int-spec.ts y appointment-confirmations.e2e-spec.ts',
+  'POST /public/appointment-confirmations/:token':
+    'confirmation-audit.spec.ts, respond-confirmation.use-case.spec.ts, appointment-confirmations-audit.int-spec.ts y appointment-confirmations.e2e-spec.ts',
   // ANAMNESIS_SUBMITTED (y el consentimiento) en la transacción del envío.
   'POST /public/medical-history/:token':
     'medical-history-submissions.e2e-spec.ts',
@@ -1404,6 +1569,12 @@ const KNOWN_UNAUDITED: Record<string, string> = {
     'siempre rechaza: la anestesia registrada no se edita (DX-307)',
   'DELETE /patients/:patientId/clinical-entries/:entryId/anesthesia/:id':
     'siempre rechaza: la anestesia registrada no se borra (DX-307)',
+  'PATCH /patients/:patientId/clinical-entries/:entryId/sedation':
+    'siempre rechaza: la hoja de sedación no se edita (DX-407)',
+  'PUT /patients/:patientId/clinical-entries/:entryId/sedation':
+    'siempre rechaza: la hoja de sedación no se edita (DX-407)',
+  'DELETE /patients/:patientId/clinical-entries/:entryId/sedation':
+    'siempre rechaza: la hoja de sedación no se borra (DX-407)',
 
   // --- Sesión y cuenta propia ---------------------------------------------
   'POST /auth/register': 'pide el enlace de verificación; aún no hay clínica',
@@ -1442,10 +1613,6 @@ const KNOWN_UNAUDITED: Record<string, string> = {
     'hueco: movimientos de inventario sin evento',
 
   // --- Citas y enlaces al paciente -----------------------------------------
-  'POST /appointments/:id/confirmation-link':
-    'hueco: emitir el enlace de confirmación sin evento',
-  'POST /public/appointment-confirmations/:token':
-    'hueco: la respuesta del paciente cambia la cita sin evento',
   'POST /public/post-op-instructions/:token/opened':
     'marca la apertura de la indicación; sin evento',
 };
@@ -1454,6 +1621,7 @@ const CONTROLLERS: Type[] = [
   AuthController,
   PatientsController,
   PatientAnamnesisRequestsController,
+  PatientSignatureRequestsController,
   MedicalHistorySubmissionsController,
   PatientResponsiblePartiesController,
   PatientCoveragesController,
@@ -1462,6 +1630,7 @@ const CONTROLLERS: Type[] = [
   ClinicalEntriesController,
   AnesthesiaController,
   AnestheticsController,
+  SedationController,
   DentalCatalogController,
   PriceListsController,
   AgreementsController,
@@ -1490,9 +1659,11 @@ const CONTROLLERS: Type[] = [
   AccountStatementController,
   ReceivablesController,
   DiscountPolicyController,
+  PatientCreditController,
   CancellationPolicyController,
   CancellationFeeController,
   DiscountReportController,
+  ProductionByProcedureController,
   CollectionsController,
   CashSessionsController,
   ExpenseReportsController,

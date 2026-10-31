@@ -2,6 +2,7 @@ import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { HealthController } from './health/health.controller';
+import { ShutdownState } from './shared/lifecycle/shutdown-state';
 import { ConfigModule } from './config/config.module';
 import { PrismaModule } from './shared/prisma/prisma.module';
 import { TenantContextModule } from './shared/tenancy/tenant-context.module';
@@ -12,6 +13,7 @@ import { DentalCatalogModule } from './modules/dental-catalog/dental-catalog.mod
 import { MedicalHistoryModule } from './modules/medical-history/medical-history.module';
 import { ClinicalEntriesModule } from './modules/clinical-entries/clinical-entries.module';
 import { AnesthesiaModule } from './modules/anesthesia/anesthesia.module';
+import { SedationModule } from './modules/sedation/sedation.module';
 import { ClinicalNoteTemplatesModule } from './modules/clinical-note-templates/clinical-note-templates.module';
 import { OdontogramModule } from './modules/odontogram/odontogram.module';
 import { AppointmentsModule } from './modules/appointments/appointments.module';
@@ -37,6 +39,7 @@ import { PaymentPlansModule } from './modules/payment-plans/payment-plans.module
 import { AccountStatementModule } from './modules/account-statement/account-statement.module';
 import { ReceivablesModule } from './modules/receivables/receivables.module';
 import { DiscountsModule } from './modules/discounts/discounts.module';
+import { PatientCreditModule } from './modules/patient-credit/patient-credit.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { CollectionsModule } from './modules/collections/collections.module';
 import { CashSessionsModule } from './modules/cash-sessions/cash-sessions.module';
@@ -53,6 +56,7 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { ConsentsModule } from './modules/consents/consents.module';
 import { PostOpInstructionsModule } from './modules/post-op-instructions/post-op-instructions.module';
 import { MedicalHistorySubmissionsModule } from './modules/medical-history-submissions/medical-history-submissions.module';
+import { SignatureRequestsModule } from './modules/signature-requests/signature-requests.module';
 import { PeriodontalModule } from './modules/periodontal/periodontal.module';
 import { PrescriptionsModule } from './modules/prescriptions/prescriptions.module';
 import { ImplantsModule } from './modules/implants/implants.module';
@@ -88,6 +92,7 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     MedicalHistoryModule,
     ClinicalEntriesModule,
     AnesthesiaModule,
+    SedationModule,
     ClinicalNoteTemplatesModule,
     OdontogramModule,
     AppointmentsModule,
@@ -112,6 +117,8 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     AccountStatementModule,
     ReceivablesModule,
     DiscountsModule,
+    // DX-253: saldo a favor (traspaso y devolución).
+    PatientCreditModule,
     ReportsModule,
     // DX-150: cobranza (notas, compromisos de pago y marca «Saldo vencido»).
     CollectionsModule,
@@ -137,6 +144,8 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     PostOpInstructionsModule,
     // DX-099: anamnesis previa a la cita por enlace seguro.
     MedicalHistorySubmissionsModule,
+    // DX-243: firma a distancia de consentimientos por enlace con código.
+    SignatureRequestsModule,
     PeriodontalModule,
     PrescriptionsModule,
     ImplantsModule,
@@ -151,7 +160,7 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     RemindersModule,
   ],
   controllers: [AppController, HealthController],
-  providers: [AppService],
+  providers: [AppService, ShutdownState],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {

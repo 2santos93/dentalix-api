@@ -22,7 +22,10 @@ import {
   type RawRecord,
 } from './tabular-file';
 import {
+  MAX_CELLS_PER_ROW,
   MAX_XLSX_TOTAL_BYTES,
+  MAX_XML_STEPS,
+  type ReadXlsxOptions,
   decodeXmlText,
   excelSerialToDate,
   readXlsx,
@@ -72,9 +75,12 @@ function rawBook(
 const inline = (ref: string, text: string) =>
   `<c r="${ref}" t="inlineStr"><is><t>${text}</t></is></c>`;
 
-async function collect(bytes: Buffer): Promise<RawRecord[]> {
+async function collect(
+  bytes: Buffer,
+  options?: ReadXlsxOptions,
+): Promise<RawRecord[]> {
   const out: RawRecord[] = [];
-  for await (const record of await readXlsx(bytes)) out.push(record);
+  for await (const record of await readXlsx(bytes, options)) out.push(record);
   return out;
 }
 
@@ -673,11 +679,34 @@ describe('XLSX: topes de estructura y event loop (revisión 2026-10-23, B1)', ()
   });
 
   it('muchas filas anchas que respetan el tope por fila: presupuesto global, sin bloquear', async () => {
-    const row = `<row>${'<c/>'.repeat(16_000)}</row>`;
-    await expectRejectedYielding(
-      rawBook(sheetWith(row.repeat(400))),
-      /demasiado complej/,
+    // DX-209: el mecanismo del presupuesto global con un presupuesto MENOR
+    // (8 filas llenas): con el de producción el lector tenía que dar 4 M
+    // pasos (celda a celda por un generador asíncrono) y en una CI cargada
+    // pasaba de 60 s. Que el tope de producción salta con su valor lo prueba
+    // el caso de <cx/> de abajo, y que no corta un libro real, el de 10.000
+    // pacientes.
+    const perRow = MAX_CELLS_PER_ROW + 1; // la fila es un paso más sus celdas
+    const maxXmlSteps = 8 * perRow;
+    expect(maxXmlSteps).toBeLessThan(MAX_XML_STEPS);
+    const rows = Math.floor(maxXmlSteps / perRow) + 1;
+    const row = `<row>${'<c/>'.repeat(MAX_CELLS_PER_ROW)}</row>`;
+
+    // Cada fila llena hasta el tope por fila es válida: dos menos que el
+    // límite (holgura para la cabecera y el libro) se leen enteras…
+    const fits = await collect(rawBook(sheetWith(row.repeat(rows - 2))), {
+      maxXmlSteps,
+    });
+    expect(fits).toHaveLength(2 + rows - 2);
+
+    // …y solo la suma pasa del presupuesto: 400, cediendo el hilo.
+    const book = rawBook(sheetWith(row.repeat(rows)));
+    expect(book.length).toBeLessThan(200 * 1024);
+    const { outcome, maxPerTurn, total } = await watchTurns(() =>
+      collect(book, { maxXmlSteps }),
     );
+    expect(outcome).toBeInstanceOf(ImportFileError);
+    expect((outcome as Error).message).toMatch(/demasiado complej/);
+    expectYieldsTheThread({ maxPerTurn, total });
   });
 
   it('etiquetas que se parecen (<cx/>) también cuentan y ceden el hilo', async () => {

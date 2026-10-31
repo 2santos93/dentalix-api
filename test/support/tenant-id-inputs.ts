@@ -103,6 +103,13 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
   'GET /reports/discounts ?professionalId',
   'GET /reports/discounts.csv ?locationId',
   'GET /reports/discounts.csv ?professionalId',
+  'GET /reports/production-by-procedure ?locationId',
+  'GET /reports/production-by-procedure ?professionalId',
+  'GET /reports/production-by-procedure.csv ?locationId',
+  'GET /reports/production-by-procedure.csv ?professionalId',
+  'GET /reports/production-by-procedure/items ?catalogItemId',
+  'GET /reports/production-by-procedure/items ?locationId',
+  'GET /reports/production-by-procedure/items ?professionalId',
   'GET /receivables/aging ?locationId',
   'GET /receivables/aging ?providerId',
   'GET /receivables/aging.csv ?locationId',
@@ -124,16 +131,38 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
 
 /** Ids cuyo caso «B manda el id de A» ya está en otro spec (se cita cuál). */
 export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
+  // DX-243: «B manda la plantilla, el plan o el profesional de A → 404/400 y
+  // no se crea nada».
+  'POST /patients/:patientId/signature-requests body.templateId':
+    'signature-requests.e2e-spec.ts',
+  'POST /patients/:patientId/signature-requests body.treatmentPlanId':
+    'signature-requests.e2e-spec.ts',
+  'POST /patients/:patientId/signature-requests body.professionalId':
+    'signature-requests.e2e-spec.ts',
   // DX-307: «un anestésico de otra clínica no se acepta (404)».
   'POST /patients/:patientId/clinical-entries/:entryId/anesthesia body.anestheticId':
     'anesthesia.e2e-spec.ts',
   'POST /patients/:patientId/clinical-entries/:entryId/anesthesia/check body.anestheticId':
     'anesthesia.e2e-spec.ts',
+  // DX-407: «un consentimiento o un monitor de otra clínica no se acepta».
+  'POST /patients/:patientId/clinical-entries/:entryId/sedation body.consentId':
+    'sedation.e2e-spec.ts',
+  'POST /patients/:patientId/clinical-entries/:entryId/sedation/discharge body.monitorId':
+    'sedation.e2e-spec.ts',
   // DX-377: «un medio de pago de otra clínica no se acepta (400)».
   'POST /treatment-plans/:id/payments body.paymentMethodId':
     'payment-methods.e2e-spec.ts',
   'POST /opening-balances/:id/payments body.paymentMethodId':
     'payment-methods.e2e-spec.ts',
+  // DX-390: «un medio de otra clínica en una línea del cobro no se acepta (400)».
+  'POST /treatment-plans/:id/split-payments body.lines[].paymentMethodId':
+    'split-payments.e2e-spec.ts',
+  // DX-253: «un plan de destino o un abono de referencia de otra clínica no
+  // se aceptan (404 / 400) y no guardan nada».
+  'POST /treatment-plans/:id/credit-transfers body.targetPlanId':
+    'patient-credit.e2e-spec.ts',
+  'POST /treatment-plans/:id/credit-refunds body.paymentIds[]':
+    'patient-credit.e2e-spec.ts',
   // DX-395: «filtrar la caja (y su CSV) por un medio de otra clínica es 400».
   'GET /payments ?paymentMethodId': 'payment-method-statement.e2e-spec.ts',
   'GET /payments.csv ?paymentMethodId': 'payment-method-statement.e2e-spec.ts',

@@ -32,6 +32,7 @@ import {
   ProviderRatesGate,
   type ProviderRatesCaller,
 } from '../provider-rates-gate';
+import { ProviderRatesCallerScope } from '../provider-rates-caller-scope';
 import { EXCHANGE_RATE_CLOCK } from './manual-exchange-rates.use-cases';
 
 /**
@@ -210,6 +211,8 @@ export class GetRatesForDateUseCase {
     @Optional()
     @Inject(EXCHANGE_RATE_CLOCK)
     private readonly now: () => Date = () => new Date(),
+    @Optional()
+    private readonly callerScope: ProviderRatesCallerScope = new ProviderRatesCallerScope(),
   ) {}
 
   /** La lectura de quien convierte por dentro (saldos, abonos, barridos). */
@@ -325,10 +328,12 @@ export class GetRatesForDateUseCase {
     return { base: 'USD', source: 'MANUAL', rates, backup: { manualSince } };
   }
 
+  /** SEC-058: dentro del barrido de reintentos, gasta de su cupo reservado. */
   private callerInContext(): ProviderRatesCaller {
     const tenantId = this.tenantContext.getTenantId();
-    return tenantId === undefined
-      ? { kind: 'PLATFORM' }
+    if (tenantId === undefined) return { kind: 'PLATFORM' };
+    return this.callerScope.isSweep()
+      ? { kind: 'SWEEP', tenantId }
       : { kind: 'CLINIC', tenantId };
   }
 
@@ -368,7 +373,8 @@ export class GetRatesForDateUseCase {
    * Re-invoking for the same date after a miss is a hit — no duplicate fetch,
    * no duplicate rows (repo.upsertMany is idempotent on `@@unique([date,
    * currency])`). No mira la fuente de ninguna clínica; el fallo de caché
-   * cuenta en el presupuesto de la clínica del contexto (SEC-054).
+   * cuenta en el presupuesto de la clínica del contexto (SEC-054), o en el
+   * de su barrido de reintentos (SEC-058).
    */
   providerRates(date: string): Promise<Record<string, number>> {
     if (!isValidRateDate(date)) return Promise.reject(invalidRateDate());
@@ -395,13 +401,20 @@ export class GetRatesForDateUseCase {
       return toRatesRecord(cached);
     }
     await beforeProviderCall?.(date);
-    return this.gate.fetch(date, caller, async () => {
-      // Otra petición pudo guardarlo entre la lectura de arriba y esta.
-      const stored = await this.repo.findByDate(date);
-      if (stored.length > 0) return toRatesRecord(stored);
-      const fetched = await this.provider.fetchRates(date);
-      await this.repo.upsertMany(date, fetched.rates);
-      return fetched.rates;
-    });
+    return this.gate.fetch(
+      date,
+      caller,
+      async () => {
+        const fetched = await this.provider.fetchRates(date);
+        await this.repo.upsertMany(date, fetched.rates);
+        return fetched.rates;
+      },
+      // Otra petición (u otra réplica) pudo guardarlo entre la lectura de
+      // arriba y esta: se mira antes de gastar presupuesto (SEC-058).
+      async () => {
+        const stored = await this.repo.findByDate(date);
+        return stored.length > 0 ? toRatesRecord(stored) : null;
+      },
+    );
   }
 }

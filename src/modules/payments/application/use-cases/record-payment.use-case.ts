@@ -32,7 +32,11 @@ import { ConvertAmountUseCase } from '../../../exchange/application/use-cases/co
 import { errorName } from '../payment-in-plan-currency';
 import { freezePaymentRate, paymentBaseAmount } from '../payment-exchange-rate';
 import type { FrozenExchangeRate } from '../../domain/payment-exchange-rate';
-import { PaymentMethodGate } from '../payment-method-gate';
+import {
+  PaymentMethodGate,
+  type PaymentMethodRequest,
+  type ResolvedPaymentMethod,
+} from '../payment-method-gate';
 
 // NOTE: deliberately NO `patientId`/`treatmentPlanId` field on the input
 // object itself (`treatmentPlanId` is a separate `execute()` argument,
@@ -54,6 +58,16 @@ export interface RecordPaymentInput {
   /** DX-377: motivo para confirmar una referencia repetida (409 sin él). */
   duplicateReferenceReason?: string;
   notes?: string;
+}
+
+/** Lo que `prepareLine` resuelve de un abono antes de su transacción. */
+export interface PreparedPaymentLine {
+  method: ResolvedPaymentMethod;
+  /** Día civil del abono en la sede donde se registra (DX-097). */
+  paidOn: string;
+  frozenRate: FrozenExchangeRate | null;
+  /** El abono en la moneda del plan con esa tasa; `null` sin tasa. */
+  converted: number | null;
 }
 
 const CIVIL_DATE_SHAPE = /^\d{4}-\d{2}-\d{2}$/;
@@ -174,18 +188,7 @@ export class RecordPaymentUseCase {
       }
     }
 
-    if (!isFinitePositive(input.amount)) {
-      throw new BadRequestException('amount must be a finite number > 0');
-    }
-
-    if (!input.currency || input.currency.trim() === '') {
-      throw new BadRequestException('currency is required');
-    }
-    const currency = input.currency.trim().toUpperCase();
-    if (!(await this.whitelist.has(currency))) {
-      throw new BadRequestException(`Unknown currency: ${currency}`);
-    }
-
+    const currency = await this.validCurrency(input);
     const paidAt = normalizePaidAt(input.paidAt);
 
     // Throws NotFoundException when the plan is absent, soft-deleted, or
@@ -196,31 +199,12 @@ export class RecordPaymentUseCase {
     if (!isPlanBillable(plan.status)) {
       throw new ConflictException(notBillableMessage(plan.status));
     }
-    const payMethod = await this.paymentMethodGate.resolve(input, paidAt);
-
-    // DX-375, DX-136 y DX-051 (R4): fuera de la transacción del abono (la
-    // tasa puede pedir un proveedor externo), UNA cotización con la fuente de
-    // la clínica y el día civil del abono en su sede: es la tasa que el abono
-    // congela, y con ella salen el saldo del recibo y la base. Nunca falla:
-    // sin tasa (o con cualquier fallo) el abono se guarda «sin tasa», el
-    // recibo sin saldo y sin base, y el barrido la congela cuando la haya.
-    const paidOn = await this.repo.resolvePaidOn(paidAt);
-    const frozenRate = await this.freeze({
-      currency,
-      targetCurrency: plan.currency,
+    const {
+      method: payMethod,
       paidOn,
-    });
-    const converted = await paymentBaseAmount(
-      this.convertAmount,
-      {
-        amount: input.amount,
-        currency,
-        paidOn,
-        exchangeRateCurrency: plan.currency,
-        frozenRate,
-      },
-      plan.currency,
-    );
+      frozenRate,
+      converted,
+    } = await this.prepareLine(plan, input, currency, paidAt);
     const receiptPlanBalance = await this.receiptBalance.afterPayment(
       treatmentPlanId,
       converted,
@@ -253,6 +237,68 @@ export class RecordPaymentUseCase {
 
     const payment = await this.repo.create(repoInput);
     return { ...payment, duplicateReferenceOf: payMethod.duplicateReferenceOf };
+  }
+
+  /**
+   * El importe (> 0) y la moneda (de la lista blanca, en mayúsculas) de un
+   * abono: 400 si no valen.
+   */
+  async validCurrency(input: {
+    amount: number;
+    currency: string;
+  }): Promise<string> {
+    if (!isFinitePositive(input.amount)) {
+      throw new BadRequestException('amount must be a finite number > 0');
+    }
+    if (!input.currency || input.currency.trim() === '') {
+      throw new BadRequestException('currency is required');
+    }
+    const currency = input.currency.trim().toUpperCase();
+    if (!(await this.whitelist.has(currency))) {
+      throw new BadRequestException(`Unknown currency: ${currency}`);
+    }
+    return currency;
+  }
+
+  /**
+   * Lo que un abono a un plan resuelve FUERA de su transacción (DX-390: el
+   * abono suelto y cada línea de un cobro dividido, con las mismas reglas):
+   * el medio, la referencia y el aviso de repetida (DX-377), el día civil en
+   * la sede, la tasa que congela (DX-375) y su importe en la moneda del plan
+   * (la base, DX-051), o `null` sin tasa.
+   */
+  async prepareLine(
+    plan: { currency: string },
+    input: PaymentMethodRequest & { amount: number },
+    currency: string,
+    paidAt: Date | CivilPaidDay,
+  ): Promise<PreparedPaymentLine> {
+    const method = await this.paymentMethodGate.resolve(input, paidAt);
+
+    // DX-375, DX-136 y DX-051 (R4): fuera de la transacción del abono (la
+    // tasa puede pedir un proveedor externo), UNA cotización con la fuente de
+    // la clínica y el día civil del abono en su sede: es la tasa que el abono
+    // congela, y con ella salen el saldo del recibo y la base. Nunca falla:
+    // sin tasa (o con cualquier fallo) el abono se guarda «sin tasa», el
+    // recibo sin saldo y sin base, y el barrido la congela cuando la haya.
+    const paidOn = await this.repo.resolvePaidOn(paidAt);
+    const frozenRate = await this.freeze({
+      currency,
+      targetCurrency: plan.currency,
+      paidOn,
+    });
+    const converted = await paymentBaseAmount(
+      this.convertAmount,
+      {
+        amount: input.amount,
+        currency,
+        paidOn,
+        exchangeRateCurrency: plan.currency,
+        frozenRate,
+      },
+      plan.currency,
+    );
+    return { method, paidOn, frozenRate, converted };
   }
 
   /** La tasa que congela el abono (DX-375), o `null` sin tasa o si algo falla. */

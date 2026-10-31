@@ -149,7 +149,7 @@ describe('sanitizeAuditMetadata (DX-009)', () => {
   });
 
   describe('origin (DX-128: de dónde salió un cambio de comunicación)', () => {
-    it.each(['IN_PERSON', 'LINK', 'MESSAGE', 'STAFF', 'JOB'])(
+    it.each(['IN_PERSON', 'LINK', 'MESSAGE', 'STAFF', 'JOB', 'PUBLIC_LINK'])(
       'guarda %s',
       (origin) => {
         expect(sanitizeAuditMetadata({ origin })).toEqual({ origin });
@@ -636,6 +636,45 @@ describe('sanitizeAuditMetadata — cancelación de una cita (DX-279)', () => {
         verified: false,
       },
     });
+  });
+});
+
+describe('sanitizeAuditMetadata — vigencia de una cobertura (SEC-053)', () => {
+  it('conserva las fechas (o null) antes y después y si borró la verificación', () => {
+    const coverageValidity = {
+      before: { validFrom: '2025-01-01', validTo: '2026-06-30' },
+      after: { validFrom: '2025-01-01', validTo: null },
+      verificationCleared: true,
+    };
+    expect(sanitizeAuditMetadata({ coverageValidity })).toEqual({
+      coverageValidity,
+    });
+  });
+
+  it('descarta el cambio entero si un lado o el booleano no tienen la forma admitida', () => {
+    const ok = { validFrom: null, validTo: '2026-06-30' };
+    for (const coverageValidity of [
+      { before: ok, verificationCleared: false },
+      { before: ok, after: ok },
+      { before: ok, after: ok, verificationCleared: 'sí' },
+      {
+        before: ok,
+        after: { validFrom: null, validTo: '2026-02-30' },
+        verificationCleared: false,
+      },
+      {
+        before: ok,
+        after: { validFrom: null, validTo: '30/06/2026' },
+        verificationCleared: false,
+      },
+      {
+        before: ok,
+        after: { ...ok, memberNumber: '1020304050' },
+        verificationCleared: false,
+      },
+    ]) {
+      expect(sanitizeAuditMetadata({ coverageValidity })).toEqual({});
+    }
   });
 });
 

@@ -6,12 +6,35 @@ import {
 import { TreatmentPlanItemDto } from './treatment-plan-item.dto';
 
 /** Quién aceptó con firma el presupuesto y cuándo (DX-012). */
+/** DX-415: evidencias de la aceptación a distancia por enlace con código. */
+export class TreatmentPlanRemoteAcceptanceDto {
+  @ApiProperty({ description: 'Destino enmascarado (an***@dominio)' })
+  destinationMasked!: string;
+  @ApiProperty({ format: 'date-time' }) sentAt!: Date;
+  @ApiProperty({ format: 'date-time' }) openedAt!: Date;
+  @ApiProperty({ format: 'date-time' }) verifiedAt!: Date;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'IP desde la que firmó',
+  })
+  ipAddress!: string | null;
+}
+
 export class TreatmentPlanAcceptanceSummaryDto {
   @ApiProperty()
   signerName!: string;
 
   @ApiProperty({ format: 'date-time' })
   acceptedAt!: Date;
+
+  @ApiProperty({
+    type: TreatmentPlanRemoteAcceptanceDto,
+    nullable: true,
+    description:
+      '«Aceptado a distancia» (DX-415): el paciente firmó por el enlace con código; null si se firmó en la clínica.',
+  })
+  remote!: TreatmentPlanRemoteAcceptanceDto | null;
 }
 
 // Response shape for TreatmentPlan endpoints — documents the

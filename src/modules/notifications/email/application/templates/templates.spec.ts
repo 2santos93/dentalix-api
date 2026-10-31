@@ -529,4 +529,154 @@ describe('plantillas reservadas para otras tareas', () => {
       ),
     ).toThrow('Idioma de email no soportado');
   });
+  describe('signature-request y signature-code (DX-243)', () => {
+    const URL = 'https://sonrisas.dentalix.app/firmar/abc';
+
+    it('el enlace: saluda, dice que se pedirá un código y cuándo caduca; nada clínico', () => {
+      const email = renderEmail(
+        'signature-request',
+        {
+          recipientFirstName: 'Laura',
+          patientFirstName: null,
+          clinicName: 'Sonrisas del Norte',
+          url: URL,
+          expiresAtLabel: '02/11/2026 9:30 a. m.',
+        },
+        brand,
+      );
+      expect(email.subject).toBe(
+        'Sonrisas del Norte te envió un documento para firmar',
+      );
+      expect(email.text).toContain('Hola, Laura');
+      expect(email.text).toContain('código de 6 dígitos');
+      expect(email.text).toContain('El enlace caduca el 02/11/2026 9:30 a. m.');
+      expect(email.html).toContain(`href="${URL}"`);
+      expect(email.text).toContain(`Ver y firmar: ${URL}`);
+      expect(email.text).not.toMatch(/consentimiento|exodoncia|tratamiento/i);
+    });
+
+    it('al responsable de un menor: le dice de quién es el documento', () => {
+      const email = renderEmail(
+        'signature-request',
+        {
+          recipientFirstName: 'Claudia',
+          patientFirstName: 'Sofía',
+          clinicName: 'Sonrisas del Norte',
+          url: URL,
+          expiresAtLabel: '02/11/2026 09:30',
+        },
+        brand,
+      );
+      expect(email.text).toContain('Hola, Claudia');
+      expect(email.text).toContain('un documento de Sofía');
+    });
+
+    it('el código: solo el código, su caducidad y el aviso de no compartirlo; sin enlace', () => {
+      const email = renderEmail(
+        'signature-code',
+        {
+          recipientFirstName: 'Laura',
+          clinicName: 'Sonrisas del Norte',
+          code: '012345',
+          expiresInMinutes: 10,
+        },
+        brand,
+      );
+      expect(email.subject).toBe('Tu código para firmar en Sonrisas del Norte');
+      expect(email.text).toContain('Tu código de verificación es: 012345');
+      expect(email.text).toContain('Caduca en 10 minutos');
+      expect(email.html).not.toContain('href=');
+    });
+
+    it('la confirmación del presupuesto aceptado (DX-415): quién, clínica y hora; sin importes ni enlace', () => {
+      const email = renderEmail(
+        'signature-budget-accepted',
+        {
+          recipientFirstName: 'Laura',
+          clinicName: 'Sonrisas del Norte',
+          acceptedAtLabel: '31/10/2026 9:30 a. m.',
+        },
+        brand,
+      );
+      expect(email.subject).toBe('Sonrisas del Norte recibió tu aceptación');
+      expect(email.text).toContain('Hola, Laura');
+      expect(email.text).toContain(
+        'El 31/10/2026 9:30 a. m. registramos tu aceptación',
+      );
+      expect(email.html).not.toContain('href=');
+      expect(email.text).not.toMatch(/\$|\bCOP\b|implante|tratamiento/i);
+    });
+
+    it('la oferta de hueco por enlace (DX-435): cuándo, dónde y con quién; sin nada clínico', () => {
+      const email = renderEmail(
+        'slot-offer',
+        {
+          patientFirstName: 'Laura',
+          clinicName: 'Sonrisas del Norte',
+          slotLabel: 'lunes 2 de noviembre, 10:00 a. m.',
+          locationName: 'Sede Centro',
+          providerName: 'Dra. Gómez',
+          url: 'https://demo.dentalix.app/hueco/abc',
+          expiresAtLabel: '02/11/2026 10:00 a. m.',
+        },
+        brand,
+      );
+      expect(email.subject).toBe(
+        'Sonrisas del Norte tiene un hueco libre para ti',
+      );
+      expect(email.text).toContain('Hola, Laura');
+      expect(email.text).toContain('lunes 2 de noviembre, 10:00 a. m.');
+      expect(email.text).toContain('Sede Centro');
+      expect(email.text).toContain('Dra. Gómez');
+      expect(email.text).toContain('el primero que lo acepte');
+      expect(email.text).toContain('02/11/2026 10:00 a. m.');
+      expect(email.html).toContain(
+        'href="https://demo.dentalix.app/hueco/abc"',
+      );
+      expect(email.text).not.toMatch(/tratamiento|motivo/i);
+    });
+
+    it('la copia del PDF firmado (DX-443): enlace de un solo uso, sin título ni nada clínico', () => {
+      const email = renderEmail(
+        'signed-consent-copy',
+        {
+          recipientFirstName: 'Marta',
+          patientFirstName: 'Lucía',
+          clinicName: 'Sonrisas del Norte',
+          url: 'https://demo.dentalix.app/copia/abc',
+          expiresAtLabel: '07/11/2026 9:30 a. m.',
+        },
+        brand,
+      );
+      expect(email.subject).toBe(
+        'Tu copia del documento firmado en Sonrisas del Norte',
+      );
+      expect(email.text).toContain('Hola, Marta');
+      expect(email.text).toContain('firmaste en nombre de Lucía');
+      expect(email.text).toContain('07/11/2026 9:30 a. m.');
+      expect(email.text).toContain('solo sirve una vez');
+      expect(email.html).toContain(
+        'href="https://demo.dentalix.app/copia/abc"',
+      );
+      expect(email.text).not.toMatch(
+        /consentimiento|tratamiento|procedimiento|exodoncia|diagn/i,
+      );
+    });
+
+    it('la copia del PDF firmado al propio paciente no nombra a nadie más', () => {
+      const email = renderEmail(
+        'signed-consent-copy',
+        {
+          recipientFirstName: 'Laura',
+          patientFirstName: null,
+          clinicName: 'Sonrisas del Norte',
+          url: 'https://demo.dentalix.app/copia/abc',
+          expiresAtLabel: '07/11/2026 9:30 a. m.',
+        },
+        brand,
+      );
+      expect(email.text).toContain('Hola, Laura');
+      expect(email.text).not.toContain('en nombre de');
+    });
+  });
 });

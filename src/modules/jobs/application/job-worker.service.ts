@@ -8,7 +8,7 @@ import {
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { describeJobError, jobRetryDelayMs } from '../domain/backoff';
 import { parseCron } from '../domain/cron';
-import type { ClaimedJob, JobContext } from '../domain/job';
+import type { ClaimedJob, ExhaustedJob, JobContext } from '../domain/job';
 import { JOB_REPOSITORY } from '../domain/job-repository.port';
 import type { JobRepository } from '../domain/job-repository.port';
 import { JOBS_CONFIG } from '../infrastructure/jobs-config';
@@ -291,6 +291,33 @@ export class JobWorker implements OnApplicationBootstrap, OnModuleDestroy {
         attempt: job.attempts,
         error: 'LeaseExpired',
       });
+      await this.notifyExhausted(job);
+    }
+  }
+
+  /** DX-422: el `onExhausted` del trabajo, bajo su tenant; nunca rompe la vuelta. */
+  private async notifyExhausted(job: ExhaustedJob): Promise<void> {
+    const onExhausted = this.registry.get(job.name)?.onExhausted;
+    if (!onExhausted) return;
+    const context = {
+      jobId: job.id,
+      tenantId: job.tenantId,
+      attempts: job.attempts,
+    };
+    try {
+      await (job.tenantId
+        ? this.tenantContext.run(job.tenantId, () =>
+            onExhausted(job.payload, context),
+          )
+        : onExhausted(job.payload, context));
+    } catch (err) {
+      this.logger.warn({
+        event: 'jobs.exhausted_hook_failed',
+        jobId: job.id,
+        job: job.name,
+        tenantId: job.tenantId,
+        error: describeJobError(err),
+      });
     }
   }
 
@@ -365,6 +392,7 @@ export class JobWorker implements OnApplicationBootstrap, OnModuleDestroy {
           ...fields,
           error: 'LeaseExpired',
         });
+        await this.notifyExhausted(job);
         return;
       }
       const attempt: RunningAttempt = {

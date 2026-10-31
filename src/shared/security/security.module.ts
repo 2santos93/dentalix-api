@@ -95,6 +95,36 @@ function throttlers(
           request(context).params?.token,
         ),
     },
+    // DX-243: la firma a distancia pública, por IP y por token.
+    strict('signature'),
+    {
+      ...strict('signature-token'),
+      generateKey: (context, _ip, name) =>
+        publicTokenRateLimitKey(
+          routePrefix(context, name),
+          request(context).params?.token,
+        ),
+    },
+    // DX-435: la oferta de hueco pública, por IP y por token.
+    strict('slot-offer'),
+    {
+      ...strict('slot-token'),
+      generateKey: (context, _ip, name) =>
+        publicTokenRateLimitKey(
+          routePrefix(context, name),
+          request(context).params?.token,
+        ),
+    },
+    // DX-443: la copia pública del PDF firmado, por IP y por token.
+    strict('copy-link'),
+    {
+      ...strict('copy-token'),
+      generateKey: (context, _ip, name) =>
+        publicTokenRateLimitKey(
+          routePrefix(context, name),
+          request(context).params?.token,
+        ),
+    },
     {
       ...strict('direct-upload'),
       generateKey: (context, _ip, name) =>

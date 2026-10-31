@@ -88,8 +88,14 @@ export class PrismaPaymentReceiptRepository implements PaymentReceiptRepository 
 
   findByPaymentId(paymentId: string): Promise<PaymentReceiptSource | null> {
     return this.prisma.runWithTenant(async (tx) => {
-      const payment = await tx.payment.findFirst({
+      // DX-390: una línea de un cobro dividido tiene el recibo de su línea 1.
+      const line = await tx.payment.findFirst({
         where: { id: paymentId },
+        select: { splitId: true },
+      });
+      if (!line) return null;
+      const payment = await tx.payment.findFirst({
+        where: { id: line.splitId ?? paymentId },
         select: RECEIPT_SOURCE_SELECT,
       });
       if (!payment) return null;
@@ -123,6 +129,26 @@ export class PrismaPaymentReceiptRepository implements PaymentReceiptRepository 
           exchangeRateCurrency: payment.exchangeRateCurrency,
           frozenRate: frozenRateOf(payment),
         },
+        splitRates: line.splitId
+          ? (
+              await tx.payment.findMany({
+                where: { tenantId: payment.tenantId, splitId: line.splitId },
+                select: {
+                  id: true,
+                  amount: true,
+                  currency: true,
+                  ...FROZEN_RATE_SELECT,
+                },
+                orderBy: { splitLine: 'asc' },
+              })
+            ).map((row) => ({
+              paymentId: row.id,
+              amount: row.amount.toNumber(),
+              currency: row.currency,
+              exchangeRateCurrency: row.exchangeRateCurrency,
+              frozenRate: frozenRateOf(row),
+            }))
+          : [],
       };
       if (payment.receipt) {
         return {

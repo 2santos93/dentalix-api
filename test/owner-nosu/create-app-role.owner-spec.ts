@@ -52,12 +52,15 @@ describe('DX-134 · create-app-role.sql idempotente sin app_password (owner-nosu
 
   const asOwner = (args: string[]) => psql(ownerUrlFor(env, db), args);
 
-  function canLogin(password: string): boolean {
+  function asApp(password: string, sql: string): string {
     const u = new URL(ownerUrlFor(env, db));
     u.username = appRole;
     u.password = password;
-    return psql(u.toString(), ['-tAc', 'SELECT 1']).out.trim() === '1';
+    return psql(u.toString(), ['-tAc', sql]).out.trim();
   }
+
+  const canLogin = (password: string): boolean =>
+    asApp(password, 'SELECT 1') === '1';
 
   async function roleExists(): Promise<boolean> {
     const rows = await admin.$queryRaw<
@@ -160,6 +163,27 @@ describe('DX-134 · create-app-role.sql idempotente sin app_password (owner-nosu
     expect(r.status).toBe(0);
     expect(canLogin('primera-134')).toBe(true);
     expect(canLogin('otra-134')).toBe(false);
+  });
+
+  // DX-431 (OPS-012): el script fija los topes de la sesión de la app; los
+  // comprueba conectado COMO la app (lo que ve una conexión nueva del pool).
+  it('DX-431: la app arranca con statement_timeout 15s e idle_in_transaction_session_timeout 150s', () => {
+    expect(asApp('primera-134', 'SHOW statement_timeout')).toBe('15s');
+    expect(
+      asApp('primera-134', 'SHOW idle_in_transaction_session_timeout'),
+    ).toBe('150s');
+  });
+
+  it('DX-431: repetir el script devuelve los topes a su valor si alguien los quitó', async () => {
+    await admin.$executeRawUnsafe(
+      `ALTER ROLE "${appRole}" SET statement_timeout = 0`,
+    );
+    expect(asApp('primera-134', 'SHOW statement_timeout')).toBe('0');
+
+    const r = asOwner(['-f', copy]);
+    expect(r.status).toBe(0);
+    expect(r.out).not.toContain('DX-431');
+    expect(asApp('primera-134', 'SHOW statement_timeout')).toBe('15s');
   });
 
   it('el script real, sin app_password, sobre una base nueva con dentalix_app ya en el clúster', async () => {

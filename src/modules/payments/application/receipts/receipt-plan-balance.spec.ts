@@ -16,6 +16,7 @@ function makeCalculator(
       return Promise.resolve({
         ...before,
         balance: before.billable - before.paid,
+        creditMovements: 0,
         paymentsCount: 1,
       });
     },

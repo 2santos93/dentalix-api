@@ -107,6 +107,13 @@ export class AccountStatementCurrencySummaryDto {
   paid!: number;
 
   @ApiProperty({
+    example: 0,
+    description:
+      'DX-253: Σ traspasos y devoluciones de saldo a favor en esta moneda, con signo. balance = budgeted + openingBalance − paid − creditMovements',
+  })
+  creditMovements!: number;
+
+  @ApiProperty({
     example: 1950000,
     description: 'budgeted + openingBalance - paid (negativo = saldo a favor)',
   })
@@ -199,6 +206,13 @@ export class AccountStatementPlanDto {
     description: 'Abonos vivos en la moneda del plan',
   })
   paid!: number;
+
+  @ApiProperty({
+    example: -200000,
+    description:
+      'DX-253: Σ asientos del saldo a favor del plan en su moneda, con signo (traspasos recibidos − dados − devoluciones). Los abonos no cambian.',
+  })
+  creditMovements!: number;
 
   @ApiProperty({
     type: [AccountStatementOtherCurrencyDto],
@@ -295,6 +309,25 @@ export class AccountStatementMovementDto {
       'los roles de cobro (este endpoint) y el paciente en su estado de cuenta.',
   })
   reference!: string | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description:
+      'DX-390: el cobro dividido del abono (el id de su línea 1); `null` en ' +
+      'un abono de una sola forma de pago. Anular una línea anula el cobro entero.',
+  })
+  splitId!: string | null;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    example: 2,
+    description:
+      'DX-390: cuántas formas de pago tiene su cobro dividido; `null` en un abono suelto.',
+  })
+  splitLines!: number | null;
 
   @ApiProperty({ type: AccountStatementLocationRefDto })
   location!: AccountStatementLocationRefDto;

@@ -26,6 +26,8 @@ function row(overrides: Partial<CashPaymentView> = {}): CashPaymentView {
       createdAt: new Date('2026-09-01T15:00:00.000Z'),
     },
     openingBalance: null,
+    splitId: null,
+    splitLines: null,
     canVoid: false,
     registeredOn: '2026-10-15',
     registeredToday: false,

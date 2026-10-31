@@ -140,6 +140,68 @@ describe('JobWorker (unit)', () => {
     expect(calls).toEqual(['fail j1 4 LeaseExpired']);
   });
 
+  it('DX-422: un trabajo agotado al reclamarlo avisa a su onExhausted (bajo su tenant) sin ejecutar el handler', async () => {
+    const { repo, calls } = fakeRepo([
+      job({ attempts: 4, tenantId: 't-1', payload: { consentId: 'c1' } }),
+    ]);
+    const tenantContext = new TenantContextService();
+    const handle = jest.fn(() => Promise.resolve());
+    const seen: unknown[] = [];
+    const registry = new JobRegistry();
+    registry.register({
+      name: 'unit.job',
+      handle,
+      onExhausted: (payload, ctx) => {
+        seen.push([payload, ctx.tenantId, tenantContext.getTenantId()]);
+        return Promise.resolve();
+      },
+    });
+    const worker = new JobWorker(registry, repo, tenantContext, config);
+    await worker.runOnce();
+    expect(handle).not.toHaveBeenCalled();
+    expect(calls).toEqual(['fail j1 4 LeaseExpired']);
+    expect(seen).toEqual([[{ consentId: 'c1' }, 't-1', 't-1']]);
+  });
+
+  it('DX-422: los RUNNING agotados que cierra failExhausted también avisan a onExhausted; si el aviso falla, la vuelta sigue', async () => {
+    const { repo } = fakeRepo([]);
+    (repo.failExhausted as jest.Mock).mockResolvedValue([
+      {
+        id: 'x1',
+        name: 'unit.job',
+        tenantId: 't-1',
+        attempts: 5,
+        payload: { consentId: 'c1' },
+      },
+      {
+        id: 'x2',
+        name: 'unit.job',
+        tenantId: 't-2',
+        attempts: 5,
+        payload: { consentId: 'c2' },
+      },
+    ]);
+    const tenantContext = new TenantContextService();
+    const seen: unknown[] = [];
+    const registry = new JobRegistry();
+    registry.register({
+      name: 'unit.job',
+      handle: () => Promise.resolve(),
+      onExhausted: (payload) => {
+        seen.push([payload, tenantContext.getTenantId()]);
+        return payload.consentId === 'c1'
+          ? Promise.reject(new Error('db'))
+          : Promise.resolve();
+      },
+    });
+    const worker = new JobWorker(registry, repo, tenantContext, config);
+    await expect(worker.runOnce()).resolves.toBeDefined();
+    expect(seen).toEqual([
+      [{ consentId: 'c1' }, 't-1'],
+      [{ consentId: 'c2' }, 't-2'],
+    ]);
+  });
+
   it('corre el handler bajo el tenant del trabajo (y sin tenant si es de plataforma)', async () => {
     const tenantContext = new TenantContextService();
     const seen: (string | undefined)[] = [];

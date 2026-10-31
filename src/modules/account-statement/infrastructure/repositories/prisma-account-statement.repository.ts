@@ -82,96 +82,110 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
           deletedAt: null,
         };
 
-        const [tenant, plans, itemSums, payments, paymentPlans, openings] =
-          await Promise.all([
-            // `tenants` no tiene RLS (tabla global): se acota por el tenant del
-            // contexto, igual que PrismaTenantBrandingRepository.
-            tx.tenant.findFirst({
-              where: { id: tenantId, deletedAt: null },
-              select: { name: true, logoUrl: true },
-            }),
-            tx.treatmentPlan.findMany({
-              where: livePlan,
-              select: {
-                id: true,
-                status: true,
-                currency: true,
-                createdAt: true,
+        const [
+          tenant,
+          plans,
+          itemSums,
+          payments,
+          paymentPlans,
+          openings,
+          creditSums,
+        ] = await Promise.all([
+          // `tenants` no tiene RLS (tabla global): se acota por el tenant del
+          // contexto, igual que PrismaTenantBrandingRepository.
+          tx.tenant.findFirst({
+            where: { id: tenantId, deletedAt: null },
+            select: { name: true, logoUrl: true },
+          }),
+          tx.treatmentPlan.findMany({
+            where: livePlan,
+            select: {
+              id: true,
+              status: true,
+              currency: true,
+              createdAt: true,
+            },
+            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          }),
+          tx.treatmentPlanItem.groupBy({
+            by: ['planId'],
+            where: {
+              deletedAt: null,
+              status: { in: BILLABLE_ITEM_STATUSES },
+              plan: livePlan,
+            },
+            _sum: { price: true, discount: true },
+          }),
+          // Anulados INCLUIDOS (sin filtro de deletedAt): el estado de cuenta
+          // los lista marcados; el cálculo no los suma.
+          // DX-262: también los abonos contra un saldo migrado (sin plan).
+          tx.payment.findMany({
+            where: {
+              patientId,
+              OR: [{ plan: livePlan }, { openingBalanceId: { not: null } }],
+            },
+            select: {
+              id: true,
+              treatmentPlanId: true,
+              openingBalanceId: true,
+              amount: true,
+              currency: true,
+              paidAt: true,
+              method: true,
+              paymentMethodId: true,
+              reference: true,
+              splitId: true,
+              createdById: true,
+              createdAt: true,
+              deletedAt: true,
+              voidedById: true,
+              voidReason: true,
+              location: { select: { id: true, name: true } },
+            },
+          }),
+          // Un plan de pagos cancelado lleva status CANCELLED + deletedAt
+          // (PrismaPaymentPlanRepository.cancel): fuera.
+          tx.paymentPlan.findMany({
+            where: {
+              patientId,
+              deletedAt: null,
+              status: { not: 'CANCELLED' },
+              plan: livePlan,
+            },
+            select: {
+              id: true,
+              treatmentPlanId: true,
+              currency: true,
+              status: true,
+              downPayment: true,
+              startDate: true,
+              installments: {
+                select: { sequence: true, dueDate: true, amount: true },
+                orderBy: { sequence: 'asc' },
               },
-              orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-            }),
-            tx.treatmentPlanItem.groupBy({
-              by: ['planId'],
-              where: {
-                deletedAt: null,
-                status: { in: BILLABLE_ITEM_STATUSES },
-                plan: livePlan,
-              },
-              _sum: { price: true, discount: true },
-            }),
-            // Anulados INCLUIDOS (sin filtro de deletedAt): el estado de cuenta
-            // los lista marcados; el cálculo no los suma.
-            // DX-262: también los abonos contra un saldo migrado (sin plan).
-            tx.payment.findMany({
-              where: {
-                patientId,
-                OR: [{ plan: livePlan }, { openingBalanceId: { not: null } }],
-              },
-              select: {
-                id: true,
-                treatmentPlanId: true,
-                openingBalanceId: true,
-                amount: true,
-                currency: true,
-                paidAt: true,
-                method: true,
-                paymentMethodId: true,
-                reference: true,
-                createdById: true,
-                createdAt: true,
-                deletedAt: true,
-                voidedById: true,
-                voidReason: true,
-                location: { select: { id: true, name: true } },
-              },
-            }),
-            // Un plan de pagos cancelado lleva status CANCELLED + deletedAt
-            // (PrismaPaymentPlanRepository.cancel): fuera.
-            tx.paymentPlan.findMany({
-              where: {
-                patientId,
-                deletedAt: null,
-                status: { not: 'CANCELLED' },
-                plan: livePlan,
-              },
-              select: {
-                id: true,
-                treatmentPlanId: true,
-                currency: true,
-                status: true,
-                downPayment: true,
-                startDate: true,
-                installments: {
-                  select: { sequence: true, dueDate: true, amount: true },
-                  orderBy: { sequence: 'asc' },
-                },
-              },
-            }),
-            // DX-262: saldos migrados vivos (los de un lote deshecho, fuera).
-            tx.openingBalance.findMany({
-              where: { patientId, voidedAt: null },
-              select: {
-                id: true,
-                currency: true,
-                amount: true,
-                asOfDate: true,
-                asOfDateApproximate: true,
-                concept: true,
-                importBatchId: true,
-              },
-              orderBy: [{ asOfDate: 'asc' }, { id: 'asc' }],
-            }),
-          ]);
+            },
+          }),
+          // DX-262: saldos migrados vivos (los de un lote deshecho, fuera).
+          tx.openingBalance.findMany({
+            where: { patientId, voidedAt: null },
+            select: {
+              id: true,
+              currency: true,
+              amount: true,
+              asOfDate: true,
+              asOfDateApproximate: true,
+              concept: true,
+              importBatchId: true,
+            },
+            orderBy: [{ asOfDate: 'asc' }, { id: 'asc' }],
+          }),
+          // DX-253: asientos del saldo a favor, sumados por plan y moneda.
+          tx.patientCreditEntry.groupBy({
+            by: ['treatmentPlanId', 'currency'],
+            where: { patientId, plan: livePlan },
+            _sum: { amount: true },
+          }),
+        ]);
 
         // DX-395: el catálogo de medios de la clínica (RLS y `tenantId`),
         // corto, para nombrar el medio de cada abono; también los inactivos,
@@ -246,6 +260,7 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
               method: p.method,
               paymentMethod: methodRefOf(catalog, p.paymentMethodId, p.method),
               reference: p.reference,
+              splitId: p.splitId,
               location: p.location,
               createdById: p.createdById,
               createdAt: p.createdAt,
@@ -276,6 +291,11 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
               ...o,
               amount: o.amount.toNumber(),
               asOfDate: o.asOfDate.toISOString().slice(0, 10),
+            })),
+            creditEntries: creditSums.map((c) => ({
+              treatmentPlanId: c.treatmentPlanId,
+              currency: c.currency,
+              amount: c._sum.amount?.toNumber() ?? 0,
             })),
           },
         };
@@ -324,7 +344,7 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
           status: { notIn: [...NON_BILLABLE_PLAN_STATUSES] },
         };
 
-        const [plans, itemSums, paidSums, activePaymentPlans] =
+        const [plans, itemSums, paidSums, activePaymentPlans, creditSums] =
           await Promise.all([
             tx.treatmentPlan.findMany({
               where: billablePlan,
@@ -359,6 +379,13 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
               },
               select: { treatmentPlanId: true },
             }),
+            // DX-253: el saldo a favor traspasado o devuelto cuenta como
+            // abonado del plan (en su moneda).
+            tx.patientCreditEntry.groupBy({
+              by: ['treatmentPlanId', 'currency'],
+              where: { patientId, plan: billablePlan },
+              _sum: { amount: true },
+            }),
           ]);
 
         const billableByPlan = new Map(
@@ -377,6 +404,15 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
             currency: row.currency,
             amount: row._sum.amount?.toNumber() ?? 0,
           });
+          paidByPlan.set(row.treatmentPlanId, list);
+        }
+        for (const row of creditSums) {
+          const list = paidByPlan.get(row.treatmentPlanId) ?? [];
+          const amount = row._sum.amount?.toNumber() ?? 0;
+          const same = list.find((p) => p.currency === row.currency);
+          if (same)
+            same.amount = Math.round((same.amount + amount) * 100) / 100;
+          else list.push({ currency: row.currency, amount });
           paidByPlan.set(row.treatmentPlanId, list);
         }
         const withActivePaymentPlan = new Set(

@@ -34,9 +34,12 @@ async function seedClinic(
   db: PrismaClient,
   subdomain: string,
 ): Promise<Seeded> {
-  const tenant = await db.tenant.create({
-    data: { name: subdomain, subdomain },
-  });
+  // SQL y no `db.tenant.create`: la BD está migrada solo hasta esta migración y
+  // el cliente insertaría columnas de tenant posteriores (p. ej. DX-253).
+  const [tenant] = await db.$queryRaw<{ id: string }[]>`
+    INSERT INTO "tenants" ("id", "name", "subdomain", "updatedAt")
+    VALUES (gen_random_uuid(), ${subdomain}, ${subdomain}, now())
+    RETURNING "id"`;
   const location = await db.location.create({
     data: locationData(REGIONAL_BOGOTA_FIXTURE, {
       tenantId: tenant.id,

@@ -12,7 +12,8 @@ import {
   REGISTRATION_LINK_INVALID,
   RegisterClinicUseCase,
 } from './register-clinic.use-case';
-import { PasswordService } from '../../../../shared/crypto/password.service';
+import type { PasswordService } from '../../../../shared/crypto/password.service';
+import { TestPasswordHasher } from '../../../../shared/testing/test-password-hasher';
 import { AuthRepository } from '../../domain/ports/auth-repository.port';
 import type {
   PendingRegistrationRecord,
@@ -174,7 +175,7 @@ function tokenFrom(url: string): string {
 }
 
 describe('RegisterClinicUseCase (DX-029)', () => {
-  const realPassword = new PasswordService();
+  const realPassword = new TestPasswordHasher();
 
   it('email NUEVO: no crea nada aún; guarda el pendiente (hash, nunca la clave) y envía el enlace', async () => {
     const repo = makeRepo();

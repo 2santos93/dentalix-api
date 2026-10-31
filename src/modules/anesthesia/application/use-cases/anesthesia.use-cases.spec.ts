@@ -36,7 +36,12 @@ function patient(
 ): AnesthesiaPatientContext {
   return {
     birthDate: new Date('2018-03-01T00:00:00.000Z'),
-    anamnesis: { allergens: [], anestheticAllergyFlag: false, weightKg: 20 },
+    anamnesis: {
+      allergens: [],
+      anestheticAllergyFlag: false,
+      weightKg: 20,
+      cardiac: false,
+    },
     ...overrides,
   };
 }
@@ -44,6 +49,7 @@ function patient(
 async function setup(
   ctx: AnesthesiaPatientContext = patient(),
   allowed: 'ALL' | string[] = 'ALL',
+  { pediatricValues = false }: { pediatricValues?: boolean } = {},
 ) {
   const repo = new InMemoryAnesthesiaRepository();
   repo.patients.set(PATIENT, ctx);
@@ -55,6 +61,12 @@ async function setup(
   });
   const catalog = new AnestheticCatalogUseCases(repo);
   const [lido, arti] = await catalog.loadSamples(AUTHOR);
+  // Los criterios de DX-307 y DX-418 se escribieron con el máximo de adulto
+  // (lidocaína 7 mg/kg) para un niño: aquí la clínica no tiene valores
+  // pediátricos salvo que el test de DX-420 los pida.
+  if (!pediatricValues) {
+    for (const p of repo.products) p.pediatricMaxMgPerKg = null;
+  }
   // El criterio de DX-307 usa articaína en carpules de 1,7 ml.
   const uc = new AnesthesiaUseCases(repo, tenantContext(allowed));
   uc.now = () => NOW;
@@ -173,6 +185,7 @@ describe('AnesthesiaUseCases (DX-307)', () => {
           allergens: [],
           anestheticAllergyFlag: false,
           weightKg: null,
+          cardiac: false,
         },
       }),
     );
@@ -247,6 +260,35 @@ describe('AnesthesiaUseCases (DX-307)', () => {
     expect(listed.summary.percent).toBe(first.cumulativePercent);
   });
 
+  it('DX-407: sin peso anotado usa el pesado hoy en la valoración de sedación de la evolución, no el de la anamnesis', async () => {
+    // Anamnesis: 20 kg (antigua). La valoración de sedación de ESTA evolución
+    // pesó hoy 15 kg: 3 carpules de lidocaína (108 mg) son el 103 % de 105 mg,
+    // no el 77 % de 140 mg.
+    const { repo, uc, lido } = await setup();
+    repo.entries.set(ENTRY, {
+      ...repo.entries.get(ENTRY)!,
+      sedationWeightKg: 15,
+    });
+    const check = await uc.check(PATIENT, ENTRY, {
+      anestheticId: lido.id,
+      carpules: 3,
+    });
+    expect([check.summary.weightKg, check.weightSource]).toEqual([
+      15,
+      'ENTERED',
+    ]);
+    expect(check.summary.level).toBe('EXCEEDED');
+    // Lo anotado ahora sigue mandando.
+    const entered = await uc.check(PATIENT, ENTRY, {
+      anestheticId: lido.id,
+      carpules: 1,
+      weightKg: 16,
+    });
+    expect(entered.summary.weightKg).toBe(16);
+    const listed = await uc.listByEntry(PATIENT, ENTRY);
+    expect(listed.summary.weightKg).toBe(15);
+  });
+
   it('evolución sin sede (sin zona horaria): la edad se calcula igual y un menor sin peso no se guarda', async () => {
     const { uc, repo, lido } = await setup(patient({ anamnesis: null }));
     repo.entries.set(ENTRY, {
@@ -277,6 +319,7 @@ describe('AnesthesiaUseCases (DX-307)', () => {
           allergens: ['Mepivacaína'],
           anestheticAllergyFlag: false,
           weightKg: 20,
+          cardiac: false,
         },
       }),
     );
@@ -377,6 +420,324 @@ describe('AnesthesiaUseCases (DX-307)', () => {
   });
 });
 
+describe('acumulado del paciente en 24 h (DX-418)', () => {
+  const ENTRY_2 = '66666666-6666-4666-8666-666666666666';
+  const OTRO_AUTOR = '77777777-7777-4777-8777-777777777777';
+  const HOUR = 3_600_000;
+
+  /** Segunda evolución del mismo paciente, en otra sede de la clínica. */
+  async function twoEntries() {
+    const ctx = await setup();
+    ctx.repo.entries.set(ENTRY_2, {
+      id: ENTRY_2,
+      patientId: PATIENT,
+      locationId: OTRA_SEDE,
+      timeZone: 'America/Mexico_City',
+    });
+    ctx.repo.authorNames.set(AUTHOR, 'Dra. Ana');
+    ctx.repo.authorNames.set(OTRO_AUTOR, 'Dr. Luis');
+    ctx.repo.locationNames.set(SEDE, 'Centro');
+    ctx.repo.locationNames.set(OTRA_SEDE, 'Norte');
+    return ctx;
+  }
+
+  it('criterio: 20 kg, 3 carpules de lidocaína en E1 (77 %) y 3 en E2 → 409 con 216 mg (154 %); con motivo se guarda', async () => {
+    const { uc, lido } = await twoEntries();
+    const first = await uc.record(
+      PATIENT,
+      ENTRY,
+      { ...base, anestheticId: lido.id, carpules: 3 },
+      AUTHOR,
+    );
+    expect(first.cumulativePercent).toBe(77);
+    expect(first.safetyAlerts).toEqual([]);
+
+    const check = await uc.check(PATIENT, ENTRY_2, {
+      anestheticId: lido.id,
+      carpules: 3,
+    });
+    expect(check.summary).toEqual(
+      expect.objectContaining({
+        totalMg: 216,
+        percent: 154,
+        level: 'EXCEEDED',
+      }),
+    );
+    expect(check.window.pendingMg).toBe(108);
+    expect(check.window.parts).toEqual([
+      expect.objectContaining({
+        clinicalEntryId: ENTRY,
+        current: false,
+        authorName: 'Dra. Ana',
+        locationName: 'Centro',
+        mg: 108,
+        percent: 77,
+      }),
+    ]);
+
+    const err = await uc
+      .record(
+        PATIENT,
+        ENTRY_2,
+        { ...base, anestheticId: lido.id, carpules: 3 },
+        OTRO_AUTOR,
+      )
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ConflictException);
+    expect(
+      ((err as ConflictException).getResponse() as { message: string }).message,
+    ).toContain('216 mg de 140 mg (154 %)');
+
+    const saved = await uc.record(
+      PATIENT,
+      ENTRY_2,
+      {
+        ...base,
+        anestheticId: lido.id,
+        carpules: 3,
+        overrideReason: 'Segunda cirugía urgente, valorado con la madre',
+      },
+      OTRO_AUTOR,
+    );
+    expect(saved).toEqual(
+      expect.objectContaining({
+        cumulativeMg: 216,
+        cumulativePercent: 154,
+        safetyRulesVersion: 'ANESTHESIA_DOSE_V3',
+        overrideReason: 'Segunda cirugía urgente, valorado con la madre',
+      }),
+    );
+  });
+
+  it('cruzar el 80 % entre dos evoluciones avisa (sin bloquear)', async () => {
+    const { uc, lido } = await twoEntries();
+    await uc.record(
+      PATIENT,
+      ENTRY,
+      { ...base, anestheticId: lido.id, carpules: 2 },
+      AUTHOR,
+    );
+    const saved = await uc.record(
+      PATIENT,
+      ENTRY_2,
+      { ...base, anestheticId: lido.id, carpules: 1.5 },
+      OTRO_AUTOR,
+    );
+    expect(saved.cumulativePercent).toBe(90);
+    expect(saved.overrideReason).toBeNull();
+    expect(saved.safetyAlerts.map((a) => a.code)).toEqual(['DOSE_NEAR_MAX']);
+  });
+
+  it('la evolución lista sus registros y el acumulado del paciente, desglosado por evolución y profesional', async () => {
+    const { uc, lido } = await twoEntries();
+    await uc.record(
+      PATIENT,
+      ENTRY,
+      { ...base, anestheticId: lido.id, carpules: 1 },
+      AUTHOR,
+    );
+    await uc.record(
+      PATIENT,
+      ENTRY_2,
+      { ...base, anestheticId: lido.id, carpules: 1 },
+      OTRO_AUTOR,
+    );
+    await uc.record(
+      PATIENT,
+      ENTRY_2,
+      { ...base, anestheticId: lido.id, carpules: 0.5 },
+      AUTHOR,
+    );
+    const listed = await uc.listByEntry(PATIENT, ENTRY_2);
+    expect(listed.records).toHaveLength(2);
+    expect(listed.summary.totalMg).toBe(90);
+    expect(listed.window).toEqual(
+      expect.objectContaining({ hours: 24, pendingMg: null }),
+    );
+    expect(
+      listed.window.parts.map((p) => [p.authorName, p.current, p.mg]),
+    ).toEqual([
+      ['Dra. Ana', false, 36],
+      ['Dr. Luis', true, 36],
+      ['Dra. Ana', true, 18],
+    ]);
+  });
+
+  it('ventana móvil: lo de hace 23 h cuenta; lo de hace 25 h, no', async () => {
+    const { uc, lido, repo } = await twoEntries();
+    await uc.record(
+      PATIENT,
+      ENTRY,
+      {
+        ...base,
+        anestheticId: lido.id,
+        carpules: 3,
+        administeredAt: new Date(NOW.getTime() - 25 * HOUR),
+      },
+      AUTHOR,
+    );
+    const old = await uc.check(PATIENT, ENTRY_2, {
+      anestheticId: lido.id,
+      carpules: 1,
+    });
+    expect(old.summary.totalMg).toBe(36);
+    repo.records[0] = {
+      ...repo.records[0],
+      administeredAt: new Date(NOW.getTime() - 23 * HOUR),
+    };
+    const recent = await uc.check(PATIENT, ENTRY_2, {
+      anestheticId: lido.id,
+      carpules: 1,
+    });
+    expect(recent.summary.totalMg).toBe(144);
+    expect(recent.summary.percent).toBe(103);
+  });
+
+  it('la ventana se centra en la hora anotada: anotada tarde ve también lo puesto después', async () => {
+    const { uc, lido } = await twoEntries();
+    await uc.record(
+      PATIENT,
+      ENTRY,
+      { ...base, anestheticId: lido.id, carpules: 3 },
+      AUTHOR,
+    );
+    const lateEntry = {
+      anestheticId: lido.id,
+      carpules: 3,
+      administeredAt: new Date(NOW.getTime() - 3 * HOUR),
+    };
+    const check = await uc.check(PATIENT, ENTRY_2, lateEntry);
+    expect(check.summary.percent).toBe(154);
+    // La peor ventana de 24 h que contiene la hora anotada: la que acaba en
+    // la dosis de las 15:00, no un tramo de 48 h.
+    expect(check.window.from).toEqual(new Date(NOW.getTime() - 24 * HOUR));
+    expect(check.window.to).toEqual(NOW);
+    await expect(
+      uc.record(PATIENT, ENTRY_2, { ...base, ...lateEntry }, OTRO_AUTOR),
+    ).rejects.toBeInstanceOf(ConflictException);
+    await expect(
+      uc.check(PATIENT, ENTRY_2, {
+        ...lateEntry,
+        administeredAt: new Date(NOW.getTime() + HOUR),
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('anotada tarde: suma la peor ventana de 24 h que la contiene, nunca dos dosis a más de 24 h entre sí', async () => {
+    const { uc, lido } = await twoEntries();
+    // A (hace 28 h 30 min) y B (hace 15 min) distan más de 24 h: ninguna
+    // ventana de 24 h las tiene a las dos.
+    await uc.record(
+      PATIENT,
+      ENTRY,
+      {
+        ...base,
+        anestheticId: lido.id,
+        carpules: 2,
+        administeredAt: new Date(NOW.getTime() - 28.5 * HOUR),
+      },
+      AUTHOR,
+    );
+    await uc.record(
+      PATIENT,
+      ENTRY,
+      {
+        ...base,
+        anestheticId: lido.id,
+        carpules: 2,
+        administeredAt: new Date(NOW.getTime() - 0.25 * HOUR),
+      },
+      AUTHOR,
+    );
+    // Anotada tarde (hace 5 h) entre las dos: A + C = B + C = 77 %, no 128 %.
+    const late = {
+      anestheticId: lido.id,
+      carpules: 1,
+      administeredAt: new Date(NOW.getTime() - 5 * HOUR),
+    };
+    const check = await uc.check(PATIENT, ENTRY_2, late);
+    expect(check.summary.totalMg).toBe(108);
+    expect(check.summary.percent).toBe(77);
+    expect(check.window.parts).toHaveLength(1);
+    expect(check.window.to.getTime() - check.window.from.getTime()).toBe(
+      24 * HOUR,
+    );
+    const saved = await uc.record(
+      PATIENT,
+      ENTRY_2,
+      { ...base, ...late },
+      OTRO_AUTOR,
+    );
+    expect(saved.cumulativePercent).toBe(77);
+    expect(saved.overrideReason).toBeNull();
+
+    // Si la de después la empuja por encima, esa ventana es la que decide.
+    const worse = await uc.check(PATIENT, ENTRY_2, {
+      ...late,
+      carpules: 2,
+      administeredAt: new Date(NOW.getTime() - 4 * HOUR),
+    });
+    // Ventana que acaba en B: B (72) + C (36) + nueva (72) = 180 mg.
+    expect(worse.summary.totalMg).toBe(180);
+    expect(worse.summary.level).toBe('EXCEEDED');
+    expect(worse.window.to).toEqual(new Date(NOW.getTime() - 0.25 * HOUR));
+  });
+
+  it('la cota de hace justo 24 h cuenta en la previsualización y en el GET', async () => {
+    const { uc, lido, repo } = await twoEntries();
+    await uc.record(
+      PATIENT,
+      ENTRY,
+      {
+        ...base,
+        anestheticId: lido.id,
+        carpules: 1,
+        administeredAt: new Date(NOW.getTime() - 24 * HOUR),
+      },
+      AUTHOR,
+    );
+    expect(repo.records).toHaveLength(1);
+    const listed = await uc.listByEntry(PATIENT, ENTRY_2);
+    expect(listed.summary.totalMg).toBe(36);
+    expect(listed.window.from).toEqual(new Date(NOW.getTime() - 24 * HOUR));
+    expect(listed.window.to).toEqual(NOW);
+  });
+
+  it('un miembro de otra sede también ve lo puesto en esta (la seguridad del paciente manda)', async () => {
+    const { uc, lido, repo } = await twoEntries();
+    await uc.record(
+      PATIENT,
+      ENTRY,
+      { ...base, anestheticId: lido.id, carpules: 3 },
+      AUTHOR,
+    );
+    const north = new AnesthesiaUseCases(repo, tenantContext([OTRA_SEDE]));
+    north.now = () => NOW;
+    const check = await north.check(PATIENT, ENTRY_2, {
+      anestheticId: lido.id,
+      carpules: 3,
+    });
+    expect(check.summary.percent).toBe(154);
+    expect(check.window.parts[0].locationName).toBe('Centro');
+  });
+
+  it('sin peso anotado usa el pesado en el sillón hoy en otra evolución antes que la anamnesis', async () => {
+    const { uc, lido } = await twoEntries();
+    await uc.record(
+      PATIENT,
+      ENTRY,
+      { ...base, anestheticId: lido.id, carpules: 1, weightKg: 15 },
+      AUTHOR,
+    );
+    const check = await uc.check(PATIENT, ENTRY_2, {
+      anestheticId: lido.id,
+      carpules: 1,
+    });
+    expect(check.summary.weightKg).toBe(15);
+    expect(check.weightSource).toBe('ENTERED');
+  });
+});
+
 describe('AnestheticCatalogUseCases (DX-307)', () => {
   it('cargar sugeridos crea los 5 una sola vez', async () => {
     const { repo } = await setup();
@@ -418,5 +779,203 @@ describe('AnestheticCatalogUseCases (DX-307)', () => {
     await expect(
       catalog.update(PATIENT, { active: false }, AUTHOR),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+});
+
+describe('máximos pediátricos, edad mínima, sedación y epinefrina (DX-420)', () => {
+  const HOUR = 3_600_000;
+  const codes = (alerts: { code: string }[]) => alerts.map((a) => a.code);
+  const pediatric = (ctx: AnesthesiaPatientContext = patient()) =>
+    setup(ctx, 'ALL', { pediatricValues: true });
+  const conflictOf = async (p: Promise<unknown>) => {
+    const err = await p.catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ConflictException);
+    return (err as ConflictException).getResponse() as {
+      message: string;
+      safetyAlerts: { code: string }[];
+    };
+  };
+
+  it('niño de 20 kg con lidocaína: máximo 88 mg (4,4 mg/kg, AAPD) y quedan X mg ≈ Y carpules', async () => {
+    const { uc, lido } = await pediatric();
+    const check = await uc.check(PATIENT, ENTRY, {
+      anestheticId: lido.id,
+      carpules: 1,
+    });
+    expect(check.ageYears).toBe(8);
+    expect(check.summary.byAnesthetic[0]).toEqual(
+      expect.objectContaining({ maxMg: 88, maxMgPerKg: 4.4, percent: 41 }),
+    );
+    expect(check.summary.byAnesthetic[0].maxSource).toContain('AAPD');
+    expect(check.summary.remaining).toEqual(
+      expect.objectContaining({ mg: 52, carpules: 1.25, mlPerCarpule: 1.8 }),
+    );
+  });
+
+  it('articaína a un niño de 3 años: 409 por edad mínima; con motivo se guarda y lo sella', async () => {
+    const { uc, arti, repo } = await pediatric(
+      patient({ birthDate: new Date('2023-06-01T00:00:00.000Z') }),
+    );
+    const body = await conflictOf(
+      uc.record(
+        PATIENT,
+        ENTRY,
+        { ...base, anestheticId: arti.id, carpules: 0.5 },
+        AUTHOR,
+      ),
+    );
+    expect(codes(body.safetyAlerts)).toContain('AGE_BELOW_MINIMUM');
+    expect(body.message).toContain('menores de 4 años');
+    expect(repo.records).toHaveLength(0);
+    const saved = await uc.record(
+      PATIENT,
+      ENTRY,
+      {
+        ...base,
+        anestheticId: arti.id,
+        carpules: 0.5,
+        overrideReason: 'Sin alternativa disponible, valorado con la madre',
+      },
+      AUTHOR,
+    );
+    expect(saved.overrideReason).toContain('Sin alternativa');
+    expect(saved.minAgeYears).toBe(4);
+    expect(codes(saved.safetyAlerts)).toContain('AGE_BELOW_MINIMUM');
+  });
+
+  it('con hoja de sedación ese día el máximo baja un 30 % y lo dice', async () => {
+    const { uc, lido, repo } = await pediatric();
+    repo.sedations.push({
+      patientId: PATIENT,
+      entryId: 'otra-evolucion',
+      at: new Date(NOW.getTime() - 3 * HOUR),
+    });
+    const check = await uc.check(PATIENT, ENTRY, {
+      anestheticId: lido.id,
+      carpules: 1,
+    });
+    // 4,4 × 20 = 88 → × 0,7 = 61,6 mg.
+    expect(check.summary.byAnesthetic[0].maxMg).toBe(61.6);
+    expect(check.summary.adjustment.sedation).toBe(true);
+    expect(codes(check.summary.alerts)).toContain('DOSE_REDUCED_SEDATION');
+  });
+
+  it('una sedación de hace 2 días no reduce', async () => {
+    const { uc, lido, repo } = await pediatric();
+    repo.sedations.push({
+      patientId: PATIENT,
+      entryId: 'otra-evolucion',
+      at: new Date(NOW.getTime() - 48 * HOUR),
+    });
+    const check = await uc.check(PATIENT, ENTRY, {
+      anestheticId: lido.id,
+      carpules: 1,
+    });
+    expect(check.summary.byAnesthetic[0].maxMg).toBe(88);
+  });
+
+  it('cardiópata en la anamnesis: tope de epinefrina 0,04 mg; 3 carpules → 409; con motivo sella la epinefrina', async () => {
+    const { uc, lido, repo } = await pediatric(
+      patient({
+        birthDate: new Date('1960-01-01T00:00:00.000Z'),
+        anamnesis: {
+          allergens: [],
+          anestheticAllergyFlag: false,
+          weightKg: 80,
+          cardiac: true,
+        },
+      }),
+    );
+    const body = await conflictOf(
+      uc.record(
+        PATIENT,
+        ENTRY,
+        { ...base, anestheticId: lido.id, carpules: 3 },
+        AUTHOR,
+      ),
+    );
+    expect(codes(body.safetyAlerts)).toEqual(['EPINEPHRINE_OVER_MAX']);
+    expect(body.message).toContain('0,054 mg de 0,04 mg');
+    expect(repo.records).toHaveLength(0);
+    const saved = await uc.record(
+      PATIENT,
+      ENTRY,
+      {
+        ...base,
+        anestheticId: lido.id,
+        carpules: 3,
+        overrideReason: 'Cardiólogo consultado, exodoncia múltiple',
+      },
+      AUTHOR,
+    );
+    expect(saved).toEqual(
+      expect.objectContaining({
+        epinephrineMg: 0.054,
+        cumulativeEpinephrineMg: 0.054,
+        epinephrineMgPerCarpule: 0.018,
+        safetyRulesVersion: 'ANESTHESIA_DOSE_V3',
+      }),
+    );
+    expect(saved.summary.epinephrine).toEqual(
+      expect.objectContaining({
+        maxMg: 0.04,
+        cardiac: true,
+        level: 'EXCEEDED',
+      }),
+    );
+  });
+
+  it('la epinefrina se acumula entre evoluciones (ventana de DX-418) y deduce la de registros antiguos', async () => {
+    const { uc, lido, repo } = await pediatric(
+      patient({
+        birthDate: new Date('1960-01-01T00:00:00.000Z'),
+        anamnesis: {
+          allergens: [],
+          anestheticAllergyFlag: false,
+          weightKg: 80,
+          cardiac: true,
+        },
+      }),
+    );
+    await uc.record(
+      PATIENT,
+      ENTRY,
+      { ...base, anestheticId: lido.id, carpules: 1 },
+      AUTHOR,
+    );
+    // Un registro anterior a DX-420: sin epinefrina por carpule copiada.
+    repo.records[0].epinephrineMgPerCarpule = null;
+    const check = await uc.check(PATIENT, ENTRY, {
+      anestheticId: lido.id,
+      carpules: 1,
+    });
+    expect(check.summary.epinephrine).toEqual(
+      expect.objectContaining({
+        totalMg: 0.036,
+        maxMg: 0.04,
+        level: 'WARNING',
+      }),
+    );
+    expect(check.summary.remaining).toEqual(
+      // 0,004 mg / 0,018 por carpule = 0,22 → ni un cuarto de carpule.
+      expect.objectContaining({
+        limitedBy: 'EPINEPHRINE',
+        carpules: 0,
+        mg: 8,
+        epinephrineMg: 0.004,
+      }),
+    );
+  });
+
+  it('sin fecha de nacimiento: aviso explícito, máximos de adulto, sin bloquear', async () => {
+    const { uc, arti } = await pediatric(patient({ birthDate: null }));
+    const saved = await uc.record(
+      PATIENT,
+      ENTRY,
+      { ...base, anestheticId: arti.id, carpules: 1 },
+      AUTHOR,
+    );
+    expect(codes(saved.safetyAlerts)).toContain('AGE_UNKNOWN');
+    expect(saved.overrideReason).toBeNull();
   });
 });

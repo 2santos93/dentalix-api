@@ -72,6 +72,8 @@ import { CreateAppointmentTypeUseCase } from '../src/modules/appointment-types/a
 import { LoadSampleNoteTemplatesUseCase } from '../src/modules/clinical-note-templates/application/use-cases/clinical-note-templates.use-cases';
 import { AnestheticCatalogUseCases } from '../src/modules/anesthesia/application/use-cases/anesthetic-catalog.use-cases';
 import { AnesthesiaUseCases } from '../src/modules/anesthesia/application/use-cases/anesthesia.use-cases';
+import { SedationUseCases } from '../src/modules/sedation/application/use-cases/sedation.use-cases';
+import { PLATFORM_SEDATION_TEMPLATE } from '../src/modules/sedation/domain/sedation-template';
 import { UpdateReminderSettingsUseCase } from '../src/modules/reminders/application/use-cases/reminder-settings.use-cases';
 import { CreateConfirmationLinkUseCase } from '../src/modules/appointment-confirmations/application/use-cases/create-confirmation-link.use-case';
 import { RespondConfirmationUseCase } from '../src/modules/appointment-confirmations/application/use-cases/respond-confirmation.use-case';
@@ -174,6 +176,7 @@ import {
   DEMO_COMMUNICATION,
   DEMO_TEMPLATE_EVOLUTIONS,
   DEMO_ANESTHESIA,
+  DEMO_SEDATION,
   DEMO_CONSENT_TEMPLATES,
   DEMO_APPOINTMENT_TYPES,
   DEMO_LUNCH,
@@ -689,6 +692,10 @@ class DemoSeeder {
 
     await this.inTenant(tenantId, undefined, () =>
       this.createAnesthesia(ownerId, patientIds, dentists[0]),
+    );
+
+    await this.inTenant(tenantId, undefined, () =>
+      this.createSedation(patientIds, dentists[0], userIds[4]),
     );
 
     await this.inTenant(tenantId, undefined, () =>
@@ -1638,6 +1645,99 @@ class DemoSeeder {
   }
 
   /**
+   * DX-407: una hoja de sedación completa (valoración → checklist → N2O →
+   * constantes → egreso) en una evolución nueva de la paciente infantil, por
+   * los mismos casos de uso que la API: la dentista seda y firma el egreso;
+   * el asistente toma las constantes y monitoriza.
+   */
+  private async createSedation(
+    patientIds: string[],
+    dentistId: string,
+    assistantId: string,
+  ): Promise<void> {
+    const patientId = patientIds[DEMO_SEDATION.patientIndex];
+    if (!patientId || !assistantId) return;
+    const minutesAgo = (m: number) => new Date(this.now.getTime() - m * 60_000);
+    const entry = await this.use(CreateClinicalEntryUseCase).execute(
+      patientId,
+      { reason: DEMO_SEDATION.reason, notes: DEMO_SEDATION.notes },
+      dentistId,
+    );
+    const sedation = this.use(SedationUseCases);
+    await sedation.assess(
+      patientId,
+      entry.id,
+      {
+        ...DEMO_SEDATION.assessment,
+        assessedAt: minutesAgo(DEMO_SEDATION.assessedMinutesAgo),
+      },
+      dentistId,
+    );
+    await sedation.addVitals(
+      patientId,
+      entry.id,
+      {
+        phase: 'BASELINE',
+        takenAt: minutesAgo(DEMO_SEDATION.baselineMinutesAgo),
+        ...DEMO_SEDATION.vitals,
+        sedationLevel: 'AWAKE',
+      },
+      assistantId,
+    );
+    await sedation.check(
+      patientId,
+      entry.id,
+      PLATFORM_SEDATION_TEMPLATE.checklist.map((i) => ({
+        code: i.code,
+        checked: true,
+      })),
+      dentistId,
+      minutesAgo(DEMO_SEDATION.checkedMinutesAgo),
+    );
+    await sedation.addAgent(
+      patientId,
+      entry.id,
+      {
+        kind: 'NITROUS_OXIDE',
+        n2oPercent: DEMO_SEDATION.n2o.n2oPercent,
+        flowLpm: DEMO_SEDATION.n2o.flowLpm,
+        administeredAt: minutesAgo(DEMO_SEDATION.n2o.minutesAgo),
+      },
+      dentistId,
+    );
+    for (const m of DEMO_SEDATION.intraMinutesAgo) {
+      await sedation.addVitals(
+        patientId,
+        entry.id,
+        {
+          phase: 'INTRA',
+          takenAt: minutesAgo(m),
+          ...DEMO_SEDATION.vitals,
+          sedationLevel: 'MINIMAL',
+        },
+        assistantId,
+      );
+    }
+    await sedation.discharge(
+      patientId,
+      entry.id,
+      {
+        criteria: PLATFORM_SEDATION_TEMPLATE.dischargeCriteria.map((c) => ({
+          code: c.code,
+          met: true,
+        })),
+        vitals: { ...DEMO_SEDATION.vitals, sedationLevel: 'AWAKE' },
+        dischargedAt: minutesAgo(DEMO_SEDATION.dischargeMinutesAgo),
+        handedOverToName: DEMO_SEDATION.assessment.escortName,
+        handedOverToRelationship: DEMO_SEDATION.assessment.escortRelationship,
+        instructionsDelivered: true,
+        monitorId: assistantId,
+      },
+      dentistId,
+    );
+  }
+
+  /**
    * DX-222: el ADMIN carga las indicaciones postoperatorias de ejemplo (como el
    * botón de Ajustes) y las vincula a procedimientos y tipos de cita; el
    * odontólogo de la última cita atendida de un día anterior entrega impresas
@@ -2322,6 +2422,16 @@ class DemoSeeder {
               notes: payment.notes,
             },
             receptionId,
+          ),
+        );
+      }
+
+      if (spec.cancelledAfterPayments) {
+        await this.inTenant(tenantId, undefined, () =>
+          this.use(UpdateTreatmentPlanUseCase).execute(
+            planId,
+            { status: TreatmentPlanStatus.CANCELLED },
+            { role: ClinicRole.DENTIST },
           ),
         );
       }

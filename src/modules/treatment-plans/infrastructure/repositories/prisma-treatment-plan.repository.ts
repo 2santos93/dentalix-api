@@ -28,6 +28,7 @@ import {
 } from './plan-option-group';
 import {
   TreatmentPlan,
+  TreatmentPlanAcceptanceSummary,
   TreatmentPlanWithItems,
 } from '../../domain/entities/treatment-plan.entity';
 import { TreatmentPlanItem } from '../../domain/entities/treatment-plan-item.entity';
@@ -50,8 +51,51 @@ type PrismaTreatmentPlanItem = Prisma.TreatmentPlanItemGetPayload<
   Record<string, never>
 >;
 export const ACCEPTANCE_SUMMARY = {
-  select: { signerName: true, acceptedAt: true },
+  select: {
+    signerName: true,
+    acceptedAt: true,
+    ipAddress: true,
+    signatureRequestId: true,
+    remoteDestinationMasked: true,
+    remoteSentAt: true,
+    remoteOpenedAt: true,
+    remoteVerifiedAt: true,
+  },
 } satisfies Prisma.TreatmentPlanAcceptanceDefaultArgs;
+
+/** El resumen de la aceptación (DX-012) con sus evidencias a distancia (DX-415). */
+export function toAcceptanceSummary(
+  acceptance: Prisma.TreatmentPlanAcceptanceGetPayload<
+    typeof ACCEPTANCE_SUMMARY
+  >,
+): TreatmentPlanAcceptanceSummary {
+  const {
+    signatureRequestId,
+    remoteDestinationMasked,
+    remoteSentAt,
+    remoteOpenedAt,
+    remoteVerifiedAt,
+  } = acceptance;
+  return {
+    signerName: acceptance.signerName,
+    acceptedAt: acceptance.acceptedAt,
+    // Todas o ninguna (CHECK treatment_plan_acceptances_remote_check).
+    remote:
+      signatureRequestId &&
+      remoteDestinationMasked &&
+      remoteSentAt &&
+      remoteOpenedAt &&
+      remoteVerifiedAt
+        ? {
+            destinationMasked: remoteDestinationMasked,
+            sentAt: remoteSentAt,
+            openedAt: remoteOpenedAt,
+            verifiedAt: remoteVerifiedAt,
+            ipAddress: acceptance.ipAddress,
+          }
+        : null,
+  };
+}
 
 /**
  * SEC-050: el cargo VIGENTE (generado y sin anular) del que es ítem, si lo
@@ -90,7 +134,9 @@ const ITEMS_WITH_ATTRIBUTION = {
 
 type PrismaTreatmentPlanWithItems = PrismaTreatmentPlan & {
   items: PrismaItemWithAttribution[];
-  acceptance: { signerName: string; acceptedAt: Date } | null;
+  acceptance: Prisma.TreatmentPlanAcceptanceGetPayload<
+    typeof ACCEPTANCE_SUMMARY
+  > | null;
 };
 
 export function mapToEntity(plan: PrismaTreatmentPlan): TreatmentPlan {
@@ -188,12 +234,7 @@ export function mapToEntityWithItems(
   return {
     ...mapToEntity(plan),
     items: plan.items.map(mapItemToEntity),
-    acceptance: plan.acceptance
-      ? {
-          signerName: plan.acceptance.signerName,
-          acceptedAt: plan.acceptance.acceptedAt,
-        }
-      : null,
+    acceptance: plan.acceptance ? toAcceptanceSummary(plan.acceptance) : null,
   };
 }
 
@@ -282,7 +323,7 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
         throw new NotFoundException('Plan de tratamiento no encontrado');
       }
 
-      const [livePayment, activePaymentPlan] = await Promise.all([
+      const [livePayment, activePaymentPlan, creditEntry] = await Promise.all([
         tx.payment.findFirst({
           where: { treatmentPlanId: id, deletedAt: null, voidedAt: null },
           select: { id: true },
@@ -291,10 +332,17 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
           where: { treatmentPlanId: id, status: 'ACTIVE', deletedAt: null },
           select: { id: true },
         }),
+        // DX-438: con el plan bloqueado (FOR UPDATE), un traspaso en curso
+        // (FOR NO KEY UPDATE del plan) ya confirmó su asiento o espera.
+        tx.patientCreditEntry.findFirst({
+          where: { tenantId: current.tenantId, treatmentPlanId: id },
+          select: { id: true },
+        }),
       ]);
       const change = decide(mapToEntityWithItems(current), {
         hasLivePayments: livePayment !== null,
         hasActivePaymentPlan: activePaymentPlan !== null,
+        hasCreditEntries: creditEntry !== null,
       });
       const data: Prisma.TreatmentPlanUncheckedUpdateInput = {
         status: change.status,

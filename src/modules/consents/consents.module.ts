@@ -1,7 +1,51 @@
 import { Module } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { TokenService } from '../../shared/crypto/token.service';
+import { StorageModule } from '../../shared/storage/storage.module';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
+import { JobsModule } from '../jobs/jobs.module';
+import { EmailModule } from '../notifications/email/email.module';
+import {
+  BackfillSignedConsentPdfs,
+  DownloadSignedPdfCopyUseCase,
+  GetPublicSignedPdfCopyUseCase,
+  OutboxSignedPdfCopyEmailSender,
+  ResendSignedPdfCopyUseCase,
+  SIGNED_PDF_COPY_EMAIL_SENDER,
+  SendSignedPdfCopyJob,
+  SignedPdfCopyJobs,
+  SignedPdfCopyQueue,
+  SignedPdfCopySender,
+} from './application/signed-pdf-copy.service';
+import {
+  SIGNED_CONSENT_PDF_BACKFILL_REPOSITORY,
+  SIGNED_PDF_COPY_REPOSITORY,
+  SIGNED_PDF_COPY_SCHEDULER,
+} from './domain/ports/signed-pdf-copy-repository.port';
+import {
+  SIGNED_PDF_COPY_CONFIG,
+  loadSignedPdfCopyConfig,
+} from './domain/signed-pdf-copy-link';
+import { PrismaSignedPdfCopyRepository } from './infrastructure/repositories/prisma-signed-pdf-copy.repository';
+import { PublicSignedPdfCopiesController } from './presentation/public-signed-pdf-copies.controller';
+import { PublicTenantContextInterceptor } from '../../shared/tenancy/public-tenant-context.interceptor';
+import {
+  GenerateSignedConsentPdf,
+  RetrySignedConsentPdfUseCase,
+  SignedConsentPdfAudit,
+  SignedConsentPdfJobs,
+  SignedConsentPdfQueue,
+} from './application/signed-consent-pdf.service';
+import {
+  SIGNED_CONSENT_PDF_REPOSITORY,
+  SIGNED_CONSENT_PDF_SCHEDULER,
+} from './domain/ports/signed-consent-pdf-repository.port';
+import {
+  PdfkitSignedConsentPdfRenderer,
+  SIGNED_CONSENT_PDF_RENDERER,
+} from './infrastructure/pdf/signed-consent-pdf.renderer';
+import { PrismaSignedConsentPdfRepository } from './infrastructure/repositories/prisma-signed-consent-pdf.repository';
 import { PatientsModule } from '../patients/patients.module';
 import { DocumentTypeNamesModule } from '../document-type-names/document-type-names.module';
 import { ConsentTemplatesController } from './presentation/consent-templates.controller';
@@ -13,6 +57,8 @@ import {
 } from './application/use-cases/consent-templates.use-cases';
 import {
   CONSENT_CLOCK,
+  ConsentDocumentRenderer,
+  CountersignPatientConsentUseCase,
   GetPatientConsentUseCase,
   ListPatientConsentsUseCase,
   PreviewPatientConsentUseCase,
@@ -26,11 +72,27 @@ import { PrismaPatientConsentRepository } from './infrastructure/repositories/pr
 /**
  * Consentimientos informados (DX-006): plantillas por clínica y consentimientos
  * firmados en pantalla, append-only. PatientsModule exporta PATIENT_REPOSITORY
- * para el 404 de "paciente de otra clínica" del listado.
+ * para el 404 de "paciente de otra clínica" del listado. DX-243: la firma del
+ * profesional de los firmados a distancia, y exporta el render del documento
+ * para el módulo de firma a distancia. DX-422: genera en la cola el PDF firmado
+ * de uno completo a distancia y lo archiva en los documentos del paciente.
+ * DX-443: envía al paciente su copia por un enlace de un solo uso (ruta
+ * pública por token, DX-207) y genera con efecto retroactivo los que faltan.
  */
 @Module({
-  imports: [JwtModule.register({}), PatientsModule, DocumentTypeNamesModule],
-  controllers: [ConsentTemplatesController, PatientConsentsController],
+  imports: [
+    JwtModule.register({}),
+    PatientsModule,
+    DocumentTypeNamesModule,
+    JobsModule,
+    StorageModule,
+    EmailModule,
+  ],
+  controllers: [
+    ConsentTemplatesController,
+    PatientConsentsController,
+    PublicSignedPdfCopiesController,
+  ],
   providers: [
     ListConsentTemplatesUseCase,
     CreateConsentTemplateUseCase,
@@ -39,6 +101,8 @@ import { PrismaPatientConsentRepository } from './infrastructure/repositories/pr
     PreviewPatientConsentUseCase,
     SignPatientConsentUseCase,
     GetPatientConsentUseCase,
+    CountersignPatientConsentUseCase,
+    ConsentDocumentRenderer,
     TokenService,
     TenantContextInterceptor,
     { provide: CONSENT_CLOCK, useValue: () => new Date() },
@@ -50,6 +114,56 @@ import { PrismaPatientConsentRepository } from './infrastructure/repositories/pr
       provide: PATIENT_CONSENT_REPOSITORY,
       useClass: PrismaPatientConsentRepository,
     },
+    // DX-422: PDF firmado generado en el servidor y archivado en la ficha.
+    GenerateSignedConsentPdf,
+    SignedConsentPdfAudit,
+    RetrySignedConsentPdfUseCase,
+    SignedConsentPdfJobs,
+    SignedConsentPdfQueue,
+    {
+      provide: SIGNED_CONSENT_PDF_SCHEDULER,
+      useExisting: SignedConsentPdfQueue,
+    },
+    {
+      provide: SIGNED_CONSENT_PDF_REPOSITORY,
+      useClass: PrismaSignedConsentPdfRepository,
+    },
+    {
+      provide: SIGNED_CONSENT_PDF_RENDERER,
+      useValue: new PdfkitSignedConsentPdfRenderer(),
+    },
+    // DX-443: copia al paciente por enlace de un solo uso y barrido retroactivo.
+    PublicTenantContextInterceptor,
+    SignedPdfCopySender,
+    SendSignedPdfCopyJob,
+    ResendSignedPdfCopyUseCase,
+    GetPublicSignedPdfCopyUseCase,
+    DownloadSignedPdfCopyUseCase,
+    BackfillSignedConsentPdfs,
+    SignedPdfCopyJobs,
+    SignedPdfCopyQueue,
+    PrismaSignedPdfCopyRepository,
+    { provide: SIGNED_PDF_COPY_SCHEDULER, useExisting: SignedPdfCopyQueue },
+    {
+      provide: SIGNED_PDF_COPY_REPOSITORY,
+      useExisting: PrismaSignedPdfCopyRepository,
+    },
+    {
+      provide: SIGNED_CONSENT_PDF_BACKFILL_REPOSITORY,
+      useExisting: PrismaSignedPdfCopyRepository,
+    },
+    {
+      provide: SIGNED_PDF_COPY_EMAIL_SENDER,
+      useClass: OutboxSignedPdfCopyEmailSender,
+    },
+    {
+      provide: SIGNED_PDF_COPY_CONFIG,
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) =>
+        loadSignedPdfCopyConfig((key) => config.get<string>(key)),
+    },
   ],
+  // DX-243: la firma a distancia congela el texto con el mismo render.
+  exports: [ConsentDocumentRenderer, CONSENT_TEMPLATE_REPOSITORY],
 })
 export class ConsentsModule {}

@@ -246,6 +246,17 @@ resourceId?, patient? })`: pacientes, historia clínica, evoluciones,
   nombres. El alta del MFA del superadmin (`MFA_ENROLLMENT_STARTED`,
   `MFA_ENABLED`) y su cambio de contraseña con sesión de plataforma van a
   `platform_audit_events` (sin clínica), con la metadata vacía.
+- **Confirmación de cita por enlace (DX-361)**: generar o reenviar el enlace
+  (`POST /appointments/:id/confirmation-link`) deja `UPDATE APPOINTMENT` con
+  el usuario, `origin` `STAFF` y `CONFIRMATION_LINK_CREATED` (o
+  `CONFIRMATION_LINK_RESENT` si la cita ya tenía uno enviado); la respuesta
+  del paciente (`POST /public/appointment-confirmations/:token`) deja el
+  mismo evento **sin usuario**, `origin` `LINK` y
+  `CONFIRMATION_LINK_CONFIRMED`/`_CANCELLED`/`_CALL_REQUESTED` (con el estado
+  antes y después y, al cancelar, el aviso), en la clínica de la cita. Los
+  dos, en la misma transacción que el cambio y sin el token, su hash ni la
+  URL; un enlace desconocido, caducado o ya usado no deja evento. El enlace
+  del recordatorio automático no se audita (no hay usuario).
 - **Un evento por petición** que termina bien (una sola escritura, nunca N):
   actor, rol, acción, recurso, paciente, sede activa, request id
   (`X-Request-Id`, DX-023), IP y user agent. Una petición que falla (404,
@@ -780,6 +791,184 @@ Módulo `medical-history-submissions`; migraciones
   penicilina, asma, anticonceptivo, alcohol los fines de semana) y queda en
   «Anamnesis por revisar» de la sede principal.
 
+## Firma a distancia de consentimientos (DX-243)
+
+El consentimiento se envía por email y el paciente (o, si es menor, su
+responsable) lo firma desde el móvil tras verificar un código de 6 dígitos; el
+profesional firma después en la app y solo entonces cuenta como «Completo».
+Módulo `signature-requests` (y la firma del profesional en `consents`);
+migraciones `20261105150000_dx243_enums`,
+`20261105150100_dx243_audit_events_idx` y
+`20261105150200_dx243_signature_requests`.
+
+- **Tabla `signature_requests`**: tipo (`CONSENT`; `BUDGET`, ver «Presupuesto
+  a distancia (DX-415)» abajo), canal (`EMAIL`), sede, plantilla y versión, plan
+  opcional, el documento **congelado** al enviar (título y texto ya
+  resueltos), profesional que firmará, firmante (`PATIENT` o `GUARDIAN` con su
+  nombre), destino y destino enmascarado, `tokenHash` (SHA-256),
+  `codeHash` (HMAC-SHA256 con clave HKDF de `JWT_ACCESS_SECRET`; nunca en
+  claro), intentos (5 → `lockedAt`), envíos del código (5, cada 60 s),
+  `sessionHash` (la sesión de 30 min del navegador que verificó), caducidad
+  (72 h) y `openedAt`/`verifiedAt`/`signedAt`/`revokedAt`. RLS FORCE, FK
+  compuestas, CHECK de forma y de estado; el trigger
+  `signature_requests_guard` congela una solicitud firmada o anulada y su
+  documento, destino y token; sin borrado duro.
+- **`patient_consents`**: la firma del paciente a distancia es una fila más
+  (inmutable), con `signatureRequestId` y las evidencias congeladas
+  (`remoteChannel`, `remoteDestinationMasked`, `remoteSentAt`,
+  `remoteOpenedAt`, `remoteVerifiedAt`, IP y UA), `professionalSignature`
+  NULL y su `contentHash` (`computeRemoteConsentHash`: texto exacto, versión
+  de la plantilla, firmante, firma, `signedAt` del servidor y evidencias).
+  La firma del profesional va en **`patient_consent_countersignatures`**
+  (append-only, una por consentimiento, hash encadenado). El listado de
+  consentimientos trae `remote`, `professionalSignedAt` y `complete`; el
+  detalle comprueba los dos hashes (`integrityOk`) y da `remoteIpAddress`.
+- **Personal** (los 4 roles, como la anamnesis por enlace):
+  - `GET /patients/:patientId/signature-requests/options`: plantillas activas
+    (con `usesTreatment` y `lastCompletedAt`, la última vez que el paciente la
+    completó), profesionales que pueden firmar un consentimiento como
+    profesional (la misma regla que la firma en la clínica: `CLINICAL_ROLES`,
+    membresía y usuario vivos, con su rol), profesional por defecto (quien
+    envía solo si está en esa lista), los planes del paciente sin cancelar
+    (estado, alternativa y fecha; también para recepción, que ya ve los
+    presupuestos) y a quién iría (enmascarado) o por qué no (sin email, menor
+    sin responsable, baja de envíos).
+  - `POST /patients/:patientId/signature-requests` (`type`, `channel`,
+    `templateId`, `treatmentPlanId?`, `professionalId?`; recepción debe elegir
+    el profesional; uno que no puede firmar es 400 en español; el plan debe
+    ser del paciente y de la clínica, si no 404): congela el texto, anula la anterior del mismo paciente y
+    plantilla aún sin firmar y encola el email (topes del outbox de DX-088:
+    429). Un menor según la mayoría de la clínica (DX-328) va a su
+    responsable (DX-203).
+  - `GET …/signature-requests` y `POST …/:id/revoke` (409 si ya está firmada
+    o anulada).
+  - `POST /patients/:patientId/consents/:id/countersign` (CLINICAL_ROLES, y
+    solo el profesional elegido al enviarlo; 403 si no, 409 si no es a
+    distancia o ya está firmada).
+- **Públicas** (`/public/sign/:token`, tenant del host, `no-store`,
+  `no-referrer`, rate limit `signature` por IP y `signature-token` por token):
+  `GET` (estado mínimo, sin documento), `POST …/code` (apertura + código por
+  email), `POST …/verify` (`{ code }` → `sessionToken`), `GET …/document` y
+  `POST …/sign` (cabecera `X-Signature-Session`). Desconocido, de otra
+  clínica, caducado, usado, anulado o bloqueado responden igual: 404
+  «Enlace no válido». Los pasos del paciente se auditan sin actor y con
+  origen `LINK` en la misma transacción.
+- **Pendiente**: el PDF firmado al paciente (no hay generación de PDF en el
+  servidor; la página pública ofrece imprimir/guardar la copia al firmar).
+
+### Presupuesto a distancia (DX-415)
+
+El presupuesto de un plan **«Presentado»** se envía por el mismo enlace con
+código; al firmar, el plan queda aceptado con las reglas de la aceptación en
+la clínica (DX-012/DX-040). Migraciones `20261106160000_dx415_enums` y
+`20261106160100_dx415_remote_budget`.
+
+- `POST /patients/:patientId/signature-requests` con `type: BUDGET` y
+  `treatmentPlanId` (obligatorio, 400 sin él; 404 si no es del paciente o de
+  la clínica; **409** «Solo se envía a aceptar un presupuesto «Presentado»:
+  este está «…»» si está en borrador, aceptado, rechazado, completado o
+  cancelado; 400 sin ítems). Congela la **foto** del presupuesto
+  (`composeQuoteContent`, la misma que imprime y firma `…/quote`) emitida hoy
+  en la sede del request, en `budgetContent`, y su SHA-256 en
+  `budgetContentHash` (CHECK `signature_requests_budget_check`; el guard las
+  congela). `title` y `body` son el título fijo y las condiciones que acepta.
+  Anula el enlace anterior del mismo plan aún sin firmar. Sin profesional que
+  firme después: la solicitud queda a nombre de quien la envía.
+- **Validez del enlace**: cada ruta pública recompone el presupuesto vivo con
+  el `issuedOn` de la foto (`budgetStillMatches`); si cambió algo (ítems,
+  precios, descuentos, convenio, paciente, sede, profesional) o el plan ya no
+  está «Presentado» o está aceptado, responde 404 «Enlace no válido».
+- `GET /public/sign/:token/document` trae `budget` (la foto sin ids: ítems,
+  totales, moneda, validez, convenio) y `body` (las condiciones).
+- `POST /public/sign/:token/sign`: en UNA transacción, con la solicitud
+  bloqueada y después el plan y su grupo (`lockPlanGroup`, orden de id), se
+  vuelve a comprobar la foto y se inserta la aceptación en
+  `treatment_plan_acceptances` (foto, hash, firma, `acceptanceHash`, IP, UA y
+  las evidencias `signatureRequestId`, `remoteChannel`,
+  `remoteDestinationMasked`, `remoteSentAt/OpenedAt/VerifiedAt`; CHECK
+  `treatment_plan_acceptances_remote_check`, FK compuesta e índice único por
+  solicitud); `acceptPlanInTx` pasa el plan a ACCEPTED, sus ítems a aceptados
+  y las demás opciones abiertas del grupo a REJECTED (`OTHER_OPTION_ACCEPTED`).
+  Si el plan cambió: 404 «Enlace no válido» y nada se escribe; si otra opción
+  ya cobrada lo impide: 409 sin detalles internos. Después se encola el email
+  `signature-budget-accepted` (sin importes ni procedimientos).
+- La ficha: el listado de solicitudes trae `treatmentPlanId`,
+  `budgetAcceptanceId` y estado `COMPLETE` al firmar; `GET …/quote` trae en
+  `acceptance` `remote` (las evidencias), `ipAddress` y `userAgent`.
+- **Pendiente** (DX-422): el PDF del presupuesto firmado generado en el
+  servidor; hoy el paciente imprime o guarda la copia desde la página.
+
+### PDF firmado generado en el servidor (DX-422)
+
+- Cuando el profesional firma en la app un consentimiento firmado a distancia
+  (queda **Completo**), en la MISMA transacción nace su fila en
+  `signed_consent_pdfs` (`PENDING`) y se encola `consents.signed-pdf` (outbox,
+  DX-085; payload solo con el id).
+- El trabajo relee todo bajo el tenant, **comprueba los dos hashes guardados**
+  (firma del paciente con sus evidencias y firma del profesional encadenada) y
+  genera con **pdfkit** (JS puro, sin binarios nativos ni navegador, versión
+  fijada) el documento con el texto congelado tal cual, las dos firmas y una
+  **página de evidencias**: documento y versión de la plantilla, id, las dos
+  huellas SHA-256, canal y destino enmascarado, envío, apertura, código
+  verificado, firma del paciente/responsable y del profesional en la zona IANA y
+  el formato de la sede desde la que se envió (con el instante UTC exacto al
+  lado), IP y navegador de quien firmó. Además adjunta `texto-firmado.txt`
+  (título y texto exactos en UTF-8). Determinista: un reintento da los mismos
+  bytes.
+- Se archiva en `patient_documents` (categoría `SIGNED_CONSENT`, autor el
+  profesional, sede del envío; inalterable por el trigger de DX-151) y el
+  estado pasa a `READY` (fila congelada por `signed_consent_pdfs_guard`; la app
+  no tiene DELETE). Se descarga como cualquier documento
+  (`GET /patients/:id/documents/:docId/url/download`, URL firmada y auditada).
+- Reintentos: backoff exponencial de la cola, 6 intentos; el último deja
+  `FAILED` con un código técnico (`lastErrorCode`, nunca un mensaje). Un origen
+  inválido (hash que no casa, sede sin zona o formato, texto que las fuentes
+  estándar no pintan: `UNSUPPORTED_CHARACTERS`) es `FAILED` sin reintento: nunca
+  se archiva un documento alterado. `POST /patients/:id/consents/:consentId/signed-pdf/retry`
+  (los cuatro roles, 202; 409 si no está en error; 404 de otra clínica) lo
+  vuelve a encolar.
+- La lista de la ficha (`GET …/signature-requests`) trae `signedPdfStatus` y
+  `signedPdfDocumentId`.
+- Fuentes: Helvetica (WinAnsi), que cubre el español, el portugués y el resto
+  de lenguas de Europa occidental. Un texto con otros alfabetos queda `FAILED`
+  con `UNSUPPORTED_CHARACTERS` hasta que se embeba una fuente Unicode.
+
+### Copia del PDF firmado al paciente y PDF retroactivos (DX-443)
+
+- Al archivar el PDF (`READY`), la MISMA transacción encola
+  `consents.signed-pdf-copy` (outbox; clave `consents.signed-pdf-copy:<id>`).
+  El trabajo crea un enlace de un solo uso en `signed_consent_pdf_links`
+  (token aleatorio de 256 bits que solo viaja en el email; en la BD, su
+  SHA-256) y envía por el outbox de DX-088 la plantilla `signed-consent-copy`
+  al email de la firma a distancia (el paciente o su responsable). Sin nada
+  clínico: ni el título ni el procedimiento. El host del enlace es el de
+  plataforma de la clínica (`TenantLinkBaseService`, SEC-033).
+- Caducidad: `SIGNED_PDF_COPY_LINK_TTL_HOURS` (1–720; 168 por defecto). Un
+  valor inválido impide arrancar.
+- Rutas públicas (invariante de DX-207: la clínica sale solo del host; límite
+  por IP `copy-link` y por token `copy-token`, `RATE_LIMIT_COPY_LINK_*` /
+  `RATE_LIMIT_COPY_TOKEN_*`):
+  - `GET /public/signed-consent-copies/:token`: solo lee (`AVAILABLE` o `USED`).
+  - `POST /public/signed-consent-copies/:token/download`: gasta el enlace
+    (UPDATE condicional) y devuelve una URL firmada de 60 s del PDF; en la
+    misma transacción, `audit_events` EXPORT de CONSENT, origen `PUBLIC_LINK`,
+    reason `SIGNED_PDF_COPY_DOWNLOADED`, sin usuario. Ya usado: 410
+    `SIGNED_PDF_COPY_LINK_USED`.
+  - Caducado, invalidado, inventado o de otra clínica: el mismo 404 genérico.
+- `POST /patients/:id/consents/:consentId/signed-pdf/copy` («Reenviar copia»,
+  los cuatro roles): enlace nuevo; el anterior se invalida en la misma
+  transacción (índice único parcial: uno vivo por consentimiento). Topes del
+  outbox (429), 409 si el PDF no está listo, 404 de otra clínica; auditado como
+  SEND de CONSENT, `SIGNED_PDF_COPY_RESENT`. La lista de la ficha trae
+  `signedPdfCopySentAt`.
+- Retroactivo: la tarea programada `consents.signed-pdf-backfill` (cada 15
+  min, un solo ejecutor) busca por clínica los consentimientos a distancia
+  completos SIN fila en `signed_consent_pdfs` (de antes de DX-422 o de una
+  réplica antigua), en lotes de 100, y les crea el estado `PENDING` con
+  `notifyPatient = false` y su `consents.signed-pdf` con la clave de siempre
+  (`ON CONFLICT DO NOTHING`): repetirlo no duplica nada. Esos PDF no se envían
+  solos al paciente; la clínica puede usar «Reenviar copia».
+
 ## Flujo del paciente en la clínica (DX-200)
 
 - **Estados nuevos** de la cita: `ARRIVED` (llegó, en espera), `IN_CHAIR`
@@ -1132,6 +1321,61 @@ true`: 409 `LOCATION_REGIONAL_CHANGE_UNCONFIRMED`.
   `location_schedules.timezone` (columna legada de la fase 1, R20).
 - Auditoría: `metadata.regionalSettings = { before, after, reviewed }`.
 
+## Saldo a favor (DX-253, DX-438)
+
+El saldo a favor de un plan (lo abonado de más, o lo de un plan cancelado o
+rechazado) se mueve con `POST /api/v1/treatment-plans/:id/credit-transfers`
+(a otro plan vivo del mismo paciente, en la misma moneda) y
+`POST /api/v1/treatment-plans/:id/credit-refunds` (devolución al paciente).
+Cada movimiento deja asientos en `patient_credit_entries`, **en la moneda del
+plan**, y todas las lecturas (`readPlanCredit`, la guarda de anulación de
+abonos, `patient_ledgers` y el estado de cuenta) suman solo los asientos cuya
+moneda es la **actual** del plan.
+
+**Regla (DX-438, DB-066): un plan con asientos de saldo a favor no cambia de
+moneda**, tenga o no abonos (un borrador o presentado que solo recibió un
+traspaso también). Si cambiara, sus asientos quedarían en la moneda vieja y el
+saldo desaparecería de todos los saldos sin error.
+
+- **App**: `PATCH /api/v1/treatment-plans/:id` con otra `currency` responde
+  409 `code: PLAN_CURRENCY_LOCKED_BY_CREDIT` («El plan tiene saldo a favor
+  traspasado o devuelto: su moneda ya no cambia…»). Se decide con el plan
+  bloqueado (`FOR UPDATE`), que espera a cualquier traspaso en curso.
+- **Bajo el bloqueo del traspaso** (`FOR NO KEY UPDATE` de origen y destino)
+  se comprueba otra vez que los dos siguen en la moneda del traspaso; la
+  devolución, que el plan sigue en la suya. Si un cambio de moneda se
+  confirmó entre la lectura y el bloqueo: 409 con el mensaje de
+  `CREDIT_CHANGED_MESSAGE` y no se escribe nada.
+- **BD (red)**: trigger `treatment_plans_credit_currency_locked`
+  (`BEFORE UPDATE OF currency`, solo si la moneda cambia) → `restrict_violation`
+  (409 genérico en la API) si existe algún asiento del plan. Bajo la RLS de la
+  sesión: dentalix_app (siempre con su clínica) y el superusuario lo ven; un
+  owner sin superusuario y sin `app.current_tenant` no ve los asientos, así
+  que el mantenimiento a mano fija la clínica antes. Migración aditiva
+  `20261107150000_dx438_credit_currency_lock` (solo función + trigger).
+- **Diagnóstico** (solo lectura): `prisma/scripts/credit-currency-report.sql`
+  lista los asientos en otra moneda que su plan (`ENTRY_CURRENCY_MISMATCH`, con
+  clínica, paciente, plan, asiento, tipo, importe y las dos monedas). Debe dar
+  0 filas. Por clínica, como la app:
+
+  ```sql
+  BEGIN;
+  SET LOCAL ROLE dentalix_app;
+  SELECT pg_catalog.set_config('app.current_tenant', '<tenantId>', true);
+  \i prisma/scripts/credit-currency-report.sql
+  ROLLBACK;
+  ```
+
+  O todas las clínicas con un rol `BYPASSRLS` o superusuario:
+  `psql "<URL sin ?schema>" -X -v ON_ERROR_STOP=1 -f prisma/scripts/credit-currency-report.sql`.
+  Sin clínica fijada ni `BYPASSRLS` no da un falso «todo bien»: devuelve solo
+  la fila `NO_CLINIC_VISIBLE`. Corregir un asiento huérfano es decisión de la
+  clínica (la conversión entre monedas está fuera de alcance).
+
+Pruebas: `test/patient-credit-plan-currency.int-spec.ts` (PATCH tras un
+traspaso, la carrera antes del bloqueo, la carrera real, el trigger y el
+diagnóstico) y el caso DX-438 de `test/patient-credit.e2e-spec.ts`.
+
 ## Cartera por antigüedad (DX-145, DX-155)
 
 `GET /api/v1/receivables/aging` (ADMIN y RECEPTION; 403 en español al resto):
@@ -1397,6 +1641,61 @@ moneda). Errores 400 en español.
   su abono), para ver la comparación cualquier día del mes
   (`planComparisonHistory`). Si hoy es el primer día abierto del mes, el mes
   actual solo tiene lo de hoy.
+
+## Reportes: «Producción por procedimiento» (DX-423)
+
+Mismo módulo. `GET /api/v1/reports/production-by-procedure`, su `.csv` y
+`GET /api/v1/reports/production-by-procedure/items` (detalle de una fila).
+Roles `PRODUCTION_REPORT_ROLES`: ADMIN ve todo el equipo; un DENTIST solo lo
+que realizó él (pedir `professionalId` de otro → 403 «Solo puedes ver tu
+propia producción.»); RECEPTION y ASSISTANT → 403. Filtros: `from`/`to`
+(días civiles, `checkPeriodDays`; como mucho **24 meses por calendario**:
+`to` anterior a `from` + 24 meses), `locationId` (403 «No tienes acceso a esta
+sede.» tanto si no es de las del usuario como si no es de la clínica: no se
+dice qué sedes existen),
+`professionalId` y `category` (texto del catálogo).
+
+- **Qué cuenta**: ítems `DONE`, vivos, de planes vivos, con `completedAt` en
+  el período (días civiles en la zona de la sede) y `performedLocationId` en
+  las sedes que ve quien consulta (claim `loc`, DX-089): cuenta la sede donde
+  se REALIZÓ, no la del paciente. Propuestos, aceptados sin hacer y los de
+  planes cancelados que no se hicieron no cuentan. **Un procedimiento hecho
+  en un plan que después se canceló SÍ cuenta** (se hizo), igual que en
+  «Comparar sedes»: los totales de los dos reportes coinciden (e2e).
+- **Columnas** por procedimiento (categoría y código) y moneda del plan:
+  cantidad, bruto (Σ precio), descuentos (Σ descuento), neto, honorario medio
+  (neto ÷ cantidad), medio de catálogo (Σ `basePrice`, el precio de catálogo
+  congelado en el ítem por DX-105, ÷ los ítems que lo tienen) y diferencia %
+  ((Σ neto − Σ catálogo) ÷ Σ catálogo, solo sobre los ítems con catálogo).
+  Subtotal por categoría y total **por moneda**; nunca se mezclan monedas.
+- **«Sin atribuir»** (como DX-305), en dos partes:
+  - **Sin sede, con fecha** (`completedAt` en el período y sin
+    `performedLocationId`): una línea «Sin atribuir» de la tabla, por moneda,
+    **filtrada por el período** como el resto (con la ventana de las zonas de
+    las sedes visibles). Solo la ve quien ve todas las sedes sin elegir una.
+  - **Sin fecha** (`completedAt` nulo, con o sin sede): **no dependen del
+    período** (no caen en ninguno). Van en `undated`: la pantalla los avisa
+    bajo la tabla (también con el período vacío) y el CSV los pone al final
+    como «Sin fecha (fuera del período)». No cuentan para `hasActivity`: un
+    período sin realizados sale vacío aunque los haya.
+- **Opciones de filtro**: profesionales = quien figura como autor de algún
+  realizado vivo en las sedes que ve quien consulta (ex-miembros incluidos;
+  un miembro restringido no ve el resto del equipo); categorías del catálogo,
+  recortadas (el filtro compara con `btrim`).
+- **CSV**: período y filtros en la cabecera, después las mismas filas,
+  subtotales, totales y «Sin atribuir» que la pantalla. Sin nombres de
+  paciente (tampoco el JSON del reporte); no se audita, como «Comparar sedes».
+- **Detalle** (`/items`, con `catalogItemId` y `currency` de la fila,
+  paginado): paciente, fecha, profesional, sede (con su zona, para fechar el
+  ítem) y diente de cada ítem. Un paciente eliminado sale sin nombre ni id.
+  Lleva nombres de paciente: auditado (VIEW de `TREATMENT_PLAN_ITEM`,
+  `reason: PRODUCTION_REPORT`).
+- **Rendimiento**: 200.000 realizados en 24 meses como `dentalix_app` en
+  `docs/perf/DX-423.md` (`test/perf/dx423-seed.sql`, `dx423-bench.ts`). Sin
+  índice nuevo: el de DX-014 sirve los períodos cortos y 24 meses es un
+  recorrido. Los instantes van a la consulta como `timestamp` UTC
+  (`utcTimestamp`): un `Date` de Prisma llega como `timestamptz` y el
+  planificador perdía la estimación (bucle anidado de 200.000 vueltas).
 
 ## Recibo de caja por abono (DX-136)
 
@@ -2445,22 +2744,59 @@ caché de `exchange_rate_snapshots` de `GetRatesForDateUseCase`:
   la lee (reintenta con su backoff) y un acierto la limpia.
 - **Single-flight**: N peticiones simultáneas del mismo día hacen una sola
   llamada (y un solo guardado) y reciben la misma respuesta.
-- **Presupuestos** de fallos de caché (llamadas reales, no peticiones), en
-  ventana deslizante: por clínica `EXCHANGE_PROVIDER_CLINIC_LIMIT` en
-  `EXCHANGE_PROVIDER_CLINIC_WINDOW_MS` (30 por hora) y global
-  `EXCHANGE_PROVIDER_GLOBAL_LIMIT` en `EXCHANGE_PROVIDER_GLOBAL_WINDOW_MS`
-  (250 por día, ~75 % de la cuota diaria prorrateada del plan «Developer»;
-  ajústalo al plan contratado). Un aviso `exchange.provider_budget_half` sale
-  al pasar la mitad del global y `exchange.provider_budget_exhausted` al
-  agotar uno. Superado: `ExchangeRateBudgetExceededError` (para quien
-  convierte por dentro es «sin tasa») y, en las rutas, **429
-  `EXCHANGE_RATE_BUDGET_EXCEEDED`** con `Retry-After` y el mensaje en español.
-  La precarga diaria (`prefetchProviderRates`) ni cuenta ni se corta: las
-  peticiones de usuarios nunca la dejan sin cupo.
-- **Límite**: la caché negativa, el single-flight y los presupuestos viven en
-  memoria de cada réplica (como el rate limiting): con N réplicas el tope
-  efectivo es N veces el configurado. No hay un contador compartido en la BD
-  para esto; si se pasa a varias réplicas, divide los topes entre ellas.
+- **Presupuestos** de fallos de caché (llamadas reales, no peticiones),
+  en **contadores de la BD compartidos por todas las réplicas** (SEC-058) y
+  ventanas **fijas** alineadas a la época (con 24 h, el día UTC). Una
+  llamada gasta de todos los cupos que le tocan o de ninguno:
+
+  | Cupo | Quién | Variable (por defecto) | Ventana |
+  | --- | --- | --- | --- |
+  | Clínica por hora | peticiones y conversiones de la clínica | `EXCHANGE_PROVIDER_CLINIC_LIMIT` (30) | `EXCHANGE_PROVIDER_CLINIC_WINDOW_MS` (1 h) |
+  | Clínica por día | ídem | `EXCHANGE_PROVIDER_CLINIC_DAILY_LIMIT` (40) | la global |
+  | Clínica nueva | ídem, si el alta (`tenants.createdAt`) es de hace menos de `EXCHANGE_PROVIDER_NEW_CLINIC_DAYS` (30) días | `EXCHANGE_PROVIDER_NEW_CLINIC_LIMIT` (5), en vez del diario | la global |
+  | Barrido de una clínica | el reintento de sus abonos sin tasa (DX-380) | `EXCHANGE_PROVIDER_SWEEP_CLINIC_LIMIT` (10) | la global |
+  | Global | todas las clínicas juntas | `EXCHANGE_PROVIDER_GLOBAL_LIMIT` (250, ~75 % de la cuota diaria prorrateada del plan «Developer»; ajústalo al plan contratado) | `EXCHANGE_PROVIDER_GLOBAL_WINDOW_MS` (24 h) |
+  | Reserva del barrido | solo el barrido: las demás paran en global − reserva (200) | `EXCHANGE_PROVIDER_SWEEP_RESERVE` (50) | la global |
+
+  Sin clínica en el contexto (un script, un job sin tenant) solo gasta del
+  global sin la reserva. El barrido se reconoce por el ámbito que abre
+  `PaymentAllocationJobs.sweep()` (`ProviderRatesCallerScope.asSweep`), nunca
+  por algo que mande el cliente. La API no arranca si una variable no es un
+  entero >= 1 o si no cuadran (reserva < global, barrido de una clínica <=
+  reserva, diario <= global − reserva, clínica nueva <= diario).
+  Avisos (log `warn`, solo ids y recuentos, una vez por ventana aunque haya
+  varias réplicas): `exchange.provider_budget_half` al pasar la mitad del
+  global, `exchange.provider_clinic_quota_exhausted` cuando una clínica llena
+  su cupo diario, el de clínica nueva o el de su barrido (consumo anómalo), y
+  `exchange.provider_budget_exhausted` en cada llamada rechazada. Superado:
+  `ExchangeRateBudgetExceededError` (para quien convierte por dentro es «sin
+  tasa»: el abono se guarda pendiente de tasa y lo reintenta el barrido) y,
+  en las rutas, **429 `EXCHANGE_RATE_BUDGET_EXCEEDED`** con `Retry-After` (lo
+  que falta para acabar la ventana) y el mensaje en español. La precarga
+  diaria (`prefetchProviderRates`) ni cuenta ni se corta: las peticiones de
+  usuarios nunca la dejan sin cupo.
+- **BD y RLS** (SEC-058, migración
+  `20261106150000_sec058_exchange_provider_budgets`):
+  - `exchange_provider_clinic_budgets` (`tenantId`, `quota` `HOUR`/`DAY`/
+    `SWEEP`, `windowStart`, `calls`): una fila por cupo que se reutiliza al
+    cambiar de ventana (no crece). RLS FORCE por tenant: la app solo lee y
+    gasta los de la clínica del contexto; SELECT, INSERT y UPDATE, sin
+    DELETE.
+  - `exchange_provider_budget`: el contador global, tabla de plataforma (sin
+    clínica ni RLS) sobre la que `dentalix_app` no tiene **ningún**
+    privilegio. Solo se toca con `dx_exchange_provider_spend_global(ventana,
+    tope)` (SECURITY DEFINER, `search_path` fijo, EXECUTE solo para la app):
+    suma una llamada si cabe y devuelve el recuento, o NULL si está lleno; no
+    lee ni pone a cero, y rechaza una ventana de más de un día en el futuro.
+  - Cada llamada es una transacción con `app.current_tenant`: primero los
+    cupos de la clínica y luego el global, cada uno con `INSERT … ON CONFLICT
+    DO UPDATE … WHERE calls < tope RETURNING calls`. El candado de fila
+    serializa a las réplicas (nunca pasan juntas del tope) y un cupo lleno
+    deshace los anteriores. `PrismaProviderRatesBudget`
+    (`src/modules/exchange/infrastructure/repositories/`).
+- **Límite**: la caché negativa y el single-flight siguen en memoria de cada
+  réplica (como el rate limiting): con N réplicas, un mismo día puede pedirse
+  una vez en cada una, y cada una gasta del presupuesto compartido.
 - **Fuente manual**: una clínica en `MANUAL` nunca llama al proveedor por los
   días de su tasa manual (D >= `manualSince`). Un día anterior al cambio sin
   snapshot sí se pide, como en `AUTOMATIC` y con sus mismos topes: así un
@@ -2478,7 +2814,15 @@ caché de `exchange_rate_snapshots` de `GetRatesForDateUseCase`:
   `open-exchange-rates.provider.spec.ts`, `test/exchange-provider-quota.int-spec.ts`
   (ventana desde la BD y precarga con el global agotado) y
   `test/exchange-provider-quota.e2e-spec.ts` (50 días antiguos → 429 sin más
-  llamadas al doble del proveedor).
+  llamadas al doble del proveedor). SEC-058: los cupos, la reserva y los
+  avisos en `provider-rates-gate.spec.ts`;
+  `test/exchange-provider-budget.int-spec.ts` (dos réplicas con su propio
+  `PrismaService` a la vez: el total nunca pasa del tope; una clínica con la
+  ventana abierta en el 2000 no deja sin tasa a otra; la reserva del barrido;
+  el tope de clínica nueva; la app no ve los contadores de otra clínica ni el
+  global) y `test/exchange-provider-budget.e2e-spec.ts` (429 en español con
+  el cupo agotado, el abono se guarda pendiente de tasa y el barrido la
+  congela con su reserva).
 
 ## Tasa congelada en cada abono y aviso «sin tasa» (DX-375)
 
@@ -2629,6 +2973,64 @@ Seguimiento de DX-377.
   Desplegarla cuando ya no quede ninguna réplica anterior a DX-377; si se
   despliega antes, basta con repetirla (`prisma migrate resolve
 --rolled-back 20261103130000_dx395_payments_relink_reference` y `deploy`).
+
+## Cobro dividido en varias formas de pago con un solo recibo (DX-390)
+
+Porción 3 de DX-377. Un paciente paga una visita con parte en efectivo en una
+moneda y parte por transferencia en otra: un solo cobro, un solo recibo.
+
+- **`POST /treatment-plans/:id/split-payments`** (roles de cobro, auditado):
+  `{ paidAt, notes?, confirmCreditBalance?, lines: [{ amount, currency,
+  paymentMethodId, reference?, duplicateReferenceReason? }] }` con 2–5 líneas
+  y el mismo día para todas. El abono de un solo medio sigue siendo
+  `POST /treatment-plans/:id/payments`, sin cambios.
+- **Un abono por línea**, con las validaciones de siempre
+  (`RecordPaymentUseCase.prepareLine`): medio ACTIVO de la clínica
+  (obligatorio en cada línea), referencia si el medio la pide, aviso de
+  referencia repetida (409 `PAYMENT_REFERENCE_DUPLICATE` con `line`, desde 0,
+  que se confirma con el `duplicateReferenceReason` de esa línea), tasa
+  congelada de su moneda (DX-375) y base para la imputación (DX-051). Dos
+  líneas con el mismo medio y la misma referencia: 400.
+- **Una transacción**: `PrismaPaymentRepository.createSplit` inserta las
+  líneas (plan bloqueado, caja de quien cobra: el efectivo entra en la caja
+  abierta en su moneda, DX-027) y emite UN recibo numerado con todas. Si una
+  línea falla (p. ej. efectivo sin caja abierta cuando la clínica la exige),
+  no queda ninguna ni se gasta número.
+- **Modelo**: `payments.splitId` (el id de la línea 1, también en ella misma)
+  y `payments.splitLine` (1–5). FK compuesta `payments_split_fkey`
+  (`tenantId`, `splitId`) → `payments`, NOT VALID como las de DX-375/DX-377;
+  CHECK `payments_split_check`; único parcial
+  `payments_tenant_split_line_key`. Migraciones
+  `20261105130000_dx390_payment_split`, `…130100_dx390_payments_split_idx`
+  (CONCURRENTLY) y `…130200_dx390_payment_split_validate`.
+- **Recibo**: la línea 1 lleva el recibo (`payment_receipts.paymentId`) y la
+  foto añade `split: { lines, total }` (cada línea con su medio, referencia y
+  equivalente en la moneda del plan; el total es `null` si alguna quedó «sin
+  tasa»). `GET /payments/:id/receipt` de CUALQUIER línea devuelve ese recibo,
+  con `split.lines[].exchangeRate` (la tasa congelada de hoy de cada línea) y
+  el total recalculado con ellas. Todas las líneas llevan su `receiptNumber`.
+- **Saldo a favor**: si el total en la moneda del plan (las líneas con tasa)
+  supera lo pendiente, 409 `SPLIT_PAYMENT_EXCEEDS_BALANCE` con `total`,
+  `pending` (nunca bajo 0: un saldo a favor previo cuenta como 0 pendiente),
+  `excess` (lo que este cobro supera lo pendiente, sin sumar el saldo a favor
+  previo) y `currency`; se confirma con `confirmCreditBalance: true`. Lo
+  pendiente se lee fuera de la transacción, pero sin la confirmación la
+  transacción bloquea el plan (FOR NO KEY UPDATE) y comprueba que no entró
+  ningún abono al plan desde esa lectura: si entró (dos cobros a la vez), 409
+  `SPLIT_PAYMENT_BALANCE_CHANGED` y no se registra nada.
+- **Anular desde la caja o el estado de cuenta**: `GET /payments` y el estado
+  de cuenta traen `splitId` y `splitLines` en cada abono, para avisar antes
+  de anular que se anula el cobro entero.
+- **Idempotency-Key** del cobro entero, en la línea 1 con una huella propia
+  (`splitPaymentRequestFingerprint`): repetir devuelve el cobro original; la
+  misma clave con otro cuerpo, otro plan o en el endpoint del abono suelto es
+  422. Ni el motivo ni la confirmación entran en la huella.
+- **Auditoría por línea**: `@Audit({ splitPayment: true })` deja un `CREATE`
+  de `PAYMENT` por línea (`reason: SPLIT_RECEIPT_ISSUED`, su
+  `paymentReference`).
+- **Anular** (`DELETE /payments/:id`) una línea anula el cobro entero y su
+  recibo en la misma transacción (un recibo, una anulación), con un `VOID`
+  por línea (`SPLIT_PAYMENT_VOIDED` en las demás).
 
 ## Tipos de documento genéricos y nombres locales (DX-327)
 
@@ -3399,6 +3801,17 @@ de precios) que fijan el precio de cada ítem del plan al añadirlo. Módulos
     Cambiar el pagador o el nº de afiliado **borra la verificación** y deja
     la cobertura declarada por quien la edita (`declaredById`; en las
     anteriores, `createdById`).
+  - **Vigencia (SEC-053, BE-048)**: si quien edita no es ADMIN, cambiar
+    `validFrom` o `validTo` de una cobertura de pagador externo también la
+    redeclara (sin verificar y declarada por él), igual que el pagador o el
+    nº: ya no se alarga ni se quita el fin de una cobertura verificada y
+    vencida para asignarse el convenio. Un ADMIN corrige la vigencia sin
+    perder la verificación. Reenviar las mismas fechas, las notas, el plan, el
+    titular o la principal no la tocan. La regla es una
+    (`coverageRedeclared`) y la decide el repositorio con el candado del
+    paciente tomado, sobre lo guardado, en la misma escritura. El evento
+    `COVERAGE_CHANGED` lleva `coverageValidity` (fechas antes y después y si
+    borró la verificación) cuando la vigencia cambió.
   - Al asignar, un rol que no es ADMIN no puede usar una cobertura cuyo
     pagador o nº declaró él mismo si no está verificada (403 en español que
     dice qué falta). Sí puede si la verificó un ADMIN, si la registró otro
@@ -3544,11 +3957,12 @@ migraciones `20261020200000_dx151_enums`,
   objeto huérfano se borra en el acto (es lo único que se borra).
 - **CSP de la web**: la web ve los PDF en un `iframe` y las imágenes en
   `<img>` desde la URL firmada, así que su CSP añade a `frame-src` e
-  `img-src` el origen de los ficheros: `NEXT_PUBLIC_FILES_ORIGIN` (variable
-  de la **web**, no de la API; por defecto el origen de la API, que es el de
-  `/files/signed` con el disco). Con S3 en producción, pon ahí el origen del
-  bucket (`https://<bucket>.s3.<región>.amazonaws.com` o el de R2). La API no
-  tiene variables nuevas.
+  `img-src` el origen de los ficheros: `FILES_ORIGIN` (variable de servidor
+  de la **web**, leída en runtime desde DX-083, no de la API; por defecto
+  el origen de la API, que es el de `/files/signed` con el disco). Con S3
+  en producción, pon ahí el origen del bucket
+  (`https://<bucket>.s3.<región>.amazonaws.com` o el de R2). La API no tiene
+  variables nuevas.
 - **Pendiente tras DX-089**: la sede de escritura la resuelve solo
   `PrismaPatientDocumentRepository.resolveWriteLocationId` (hoy la activa o
   la principal); cuando DX-089 llegue a main pasa a
@@ -4495,8 +4909,8 @@ file://cors.json` con `{"CORSRules": [...]}`; GET no hace falta: el visor
   pasa a R2, hay que implementar antes un modo de PUT prefirmado (con
   `Content-Length` y `x-amz-checksum-sha256` firmados) en
   `createDirectUpload` (tarea aparte del tech lead; informe DX-259).
-- **Web**: `NEXT_PUBLIC_FILES_ORIGIN` = origen del bucket (CSP `connect-src`,
-  `frame-src`, `img-src`).
+- **Web**: `FILES_ORIGIN` (antes `NEXT_PUBLIC_FILES_ORIGIN`, DX-083) = origen
+  del bucket (CSP `connect-src`, `frame-src`, `img-src`).
 - La política IAM de DX-084 sirve (`CopyObject` usa `s3:GetObject` del origen
   y `s3:PutObject` del destino); añade `s3:ListBucket` sobre el bucket para el
   `HeadBucket` del arranque.
@@ -4574,7 +4988,8 @@ sustituyen la ficha técnica del fabricante.
 - **Cálculo en el servidor**: mg = carpules × ml × % × 10; máximo =
   min(mg/kg × peso, tope); con varios anestésicos, suma de fracciones del
   máximo de cada uno. Peso: el anotado en el sillón; si no, el último pesado
-  en el sillón en esa evolución; si no, `vitalSigns.peso` de la anamnesis
+  en el sillón en esa evolución; si no, el de la valoración de sedación de esa
+  evolución (DX-407); si no, `vitalSigns.peso` de la anamnesis
   vigente; si no, el ya usado en esa evolución. El % que se enseña no
   contradice el nivel (99,6 % se muestra 99 %, no 100 %). ≥ 80 % avisa
   (`DOSE_NEAR_MAX`); ≥ 100 % (`DOSE_OVER_MAX`, o `DOSE_OVER_ABSOLUTE` sin peso)
@@ -4595,7 +5010,179 @@ MEDICAL_HISTORY` con `reason: ANESTHESIA_DOSE_CHECK`).
 - **Migraciones** `20261104130000_dx307_enums`, `…130100_dx307_audit_events_idx`
   y `…130200_dx307_anesthesia`: aditivas (dos tablas y un tipo nuevos).
 - **Demo**: `seed:demo` carga los sugeridos y una exodoncia de la paciente
-  infantil (Sofía, 32 kg) con 2 carpules de lidocaína (72 de 224 mg, 32 %).
+  infantil (Sofía, 11 años, 32 kg) con 2 carpules de lidocaína (DX-420: 72 de
+  140,8 mg con el máximo pediátrico, 51 %; con su hoja de sedación del mismo
+  día, 98,6 mg y 73 %).
+- **DX-418**: el acumulado y el tope son del PACIENTE en la ventana de 24 h
+  que contiene la administración (todas sus evoluciones y sedes; versión
+  `ANESTHESIA_DOSE_V2`; `domain/anesthesia-window.ts`).
+- **DX-420 · pediatría, edad mínima, sedación y epinefrina** (versión
+  `ANESTHESIA_DOSE_V3`; reglas y fuentes en `domain/anesthesia-limits.ts`):
+  - Catálogo con `pediatricMaxMgPerKg` (null = el de adulto), `minAgeYears`
+    (null = sin mínimo) y `epinephrineMgPerCarpule` (ml × 1000 / dilución:
+    1:100.000 × 1,8 ml = 0,018 mg; 0 sin epinefrina; null = no se sabe). Los
+    sugeridos traen la tabla de la AAPD (lidocaína y mepivacaína 4,4 mg/kg;
+    articaína desde 4 años; bupivacaína desde 12). Sin epinefrina en el alta o
+    al cambiar el vasoconstrictor o el volumen, se deduce del texto.
+  - «Pediátrico» = menor de 12 años cumplidos (`PEDIATRIC_AGE_LIMIT`, el
+    mismo corte que pide el peso). −30 % del máximo (también del tope
+    absoluto) en menores de 6 meses y si el paciente tiene hoja de sedación
+    (DX-407) en esa evolución o con hora en las 24 h de la anestesia; las dos
+    se multiplican. Avisos `PEDIATRIC_MAX`, `DOSE_REDUCED_INFANT`,
+    `DOSE_REDUCED_SEDATION` con su fuente.
+  - Edad mínima del anestésico NUEVO (`AGE_BELOW_MINIMUM`) y epinefrina
+    acumulada en la misma ventana ≥ 0,2 mg, o ≥ 0,04 mg con cardiopatía en la
+    anamnesis (`CARDIOPATIA`, `HIPERTENSION`, `VALVULOPATIA`,
+    `PROTESIS_VALVULAR` marcadas «Sí»; `EPINEPHRINE_OVER_MAX`) son
+    bloqueantes con el mismo 409 + `overrideReason`. Sin fecha de nacimiento
+    (`AGE_UNKNOWN`) o sin anamnesis (`EPINEPHRINE_CARDIAC_UNKNOWN`), aviso
+    informativo y valores de adulto sano.
+  - `summary.adjustment`, `summary.epinephrine` y `summary.remaining`
+    («quedan X mg ≈ Y carpules» del anestésico previsualizado, en cuartos
+    hacia abajo y sin llegar al 100 %, que ya exige motivo; manda lo que se
+    agote antes, dosis o epinefrina). Cada
+    registro copia los tres valores del catálogo, la epinefrina de la dosis y
+    la acumulada. Los registros anteriores no se tocan (append-only): su
+    epinefrina se deduce del vasoconstrictor y su máximo es el de adulto.
+  - Migraciones `20261106141959_dx420_unforce_anesthetic_products`,
+    `…142000_dx420_anesthesia_pediatric_epinephrine` (columnas nulas, CHECK
+    de rangos y relleno de los valores por defecto revisables en el catálogo
+    de todas las clínicas) y `…142001_dx420_reforce_anesthetic_products`.
+
+## Hoja de sedación consciente en la evolución (DX-407)
+
+Módulo `sedation` (porción 2 de DX-307); reglas en
+`src/modules/sedation/domain/sedation-rules.ts` (versión `SEDATION_RULES_V1`)
+y plantilla en `domain/sedation-template.ts`. Contenido de la hoja de la AAPD
+(2024) y la guía de la ADA (2025): dentalix-docs, `INVESTIGACION.md`,
+«Matriz 93».
+
+- **Plantilla de plataforma** (`SEDATION_PLATFORM_V1`), fija en el código y
+  servida por el puerto `SEDATION_TEMPLATE_SOURCE`: valoración obligatoria
+  (ASA, ayuno, Mallampati, peso, talla, acompañante, consentimiento), 6 ítems
+  de checklist (5 obligatorios), constantes obligatorias (SpO₂, FC, TA, FR,
+  nivel de sedación; CO₂ opcional), intervalo de constantes de **5 min**, 6
+  criterios de alta y Aldrete modificado ≥ 9. Cada hoja guarda la versión y el
+  intervalo; el checklist y el egreso copian los textos. DX-409 la sustituirá
+  por la plantilla de cada clínica implementando el mismo puerto.
+- **Tablas** (las cinco inalterables con el trigger de DX-038, fecha del
+  servidor, sin DELETE/TRUNCATE para la app, RLS FORZADA y FK compuestas):
+  `sedation_records` (una por evolución: grado, ASA I–V + E, interconsulta o
+  justificación con ASA ≥ III, ayuno en h, Mallampati, peso, talla, IMC y
+  reversores calculados —naloxona 0,1 mg/kg máx. 2 mg; flumazenil 0,01 mg/kg
+  máx. 0,2 mg—, acompañante, consentimiento, hora clínica `assessedAt` y, si
+  se cita, el `patient_consents` firmado del MISMO paciente),
+  `sedation_checklists` (uno por hoja; hora clínica `checkedAt` y autor),
+  `sedation_agent_administrations` (N₂O con % y flujo, oral
+  u otro con dosis, unidad, vía, hora y autor), `sedation_vitals` (basal,
+  intraoperatoria o al alta) y `sedation_discharges` (uno por hoja; criterios
+  o Aldrete, la toma al alta por FK de la MISMA hoja, hora, a quién se
+  entrega, indicaciones entregadas, operador = quien lo firma, monitor).
+- **Reglas**: lo que falta responde 400 con `problems: [{code, message}]`.
+  Orden: valoración → checklist (antes solo la toma basal) → fármacos y
+  tomas → egreso, que cierra la hoja (luego todo es 409). En sedación moderada,
+  operador = monitor exige justificación. Horas: las de valoración,
+  checklist, toma, fármaco y egreso las anota quien registra (por defecto,
+  ahora; nunca futuras, con 5 min de tolerancia de reloj) y `createdAt` es
+  siempre la del servidor; el checklist no puede ser anterior a la valoración
+  (400) y el egreso no puede ser anterior a la última toma o fármaco. Las
+  hojas anteriores a `assessedAt`/`checkedAt` (nulas) leen `createdAt`. Un
+  valor fuera de rango responde 400 con el rango («El N₂O tiene que estar
+  entre 10 y 70 %.»). Un IMC fuera de 5–150 es un error de
+  peso o talla (`BMI_IMPLAUSIBLE`). Un Aldrete anotado < 9 no da el alta
+  aunque se marquen los criterios (`ALDRETE_BELOW_MINIMUM`), ni un nivel de
+  sedación moderado o profundo al alta (`DISCHARGE_SEDATION_LEVEL`). `watch`
+  (en cada respuesta): con la sedación en curso, `nextDueAt` = última toma (o
+  inicio) + intervalo y `overdue` si pasa sin toma; `missedIntervals` cuenta
+  los intervalos vencidos sin toma entre el inicio y la última toma: en cada
+  hueco entre dos marcas vence una toma a cada múltiplo del intervalo y las
+  que vencen antes de la toma siguiente se pasaron, ⌈hueco / intervalo⌉ − 1
+  (20 min con intervalo de 5 → 3: vencían a los 5, 10, 15 y 20, y la del 20
+  llegó a su hora). El hueco abierto hasta ahora no cuenta: lo dice
+  `overdue`. Una toma o fármaco con hora posterior a su registro
+  cuenta desde que se registró (la tolerancia de reloj no aplaza el aviso).
+  Cada escritura bloquea la hoja (`FOR UPDATE`).
+- **Roles**: valoración, checklist, fármacos y egreso, DENTIST y ADMIN; las
+  tomas, también ASSISTANT (en esta porción en todas las clínicas; DX-409 lo
+  hará configurable); leer, los tres; recepción, nada. Sede restringida
+  (DX-089): 403 en la evolución y fuera de la ficha.
+- **Rutas**: `GET /patients/:id/sedation` (ficha),
+  `GET|POST /patients/:id/clinical-entries/:entryId/sedation` (hoja y
+  plantilla / valoración) y `POST …/sedation/{checklist,agents,vitals,discharge}`;
+  `PATCH/PUT/DELETE …/sedation` → 405 que remite a la adenda. Auditoría:
+  `CREATE SEDATION_RECORD` con `metadata.reason` `SEDATION_ASSESSMENT|
+CHECKLIST|AGENT|VITALS|DISCHARGE`, sin constantes, dosis ni textos.
+- **Migraciones** `20261105140000_dx407_enums`,
+  `…140100_dx407_audit_events_idx`, `…140200_dx407_sedation` y
+  `…140300_dx407_sedation_clinical_times`: aditivas (tipos, cinco tablas, el
+  único `patient_consents (tenantId, patientId, id)` que sirve de destino a la
+  FK del consentimiento y las dos columnas nulas de hora clínica, sin
+  reescritura).
+- **Demo**: `seed:demo` añade a Sofía (32 kg) una evolución «Restauraciones
+  bajo sedación con óxido nitroso» con la hoja completa y sus horas en orden
+  (valoración hace 60 min, checklist 57, toma basal 55, N₂O 30 % 50, 3
+  intraoperatorias cada 5 min y egreso hace 20 con el asistente como
+  monitor).
+
+### Reglas de la anestesia y de la sedación en la BD (DX-427)
+
+Defensa en profundidad (DB-064): la base rechaza lo que la app ya no escribe,
+también por SQL directo o desde una réplica antigua.
+
+- **CHECK** en `anesthesia_administrations`: `doseMg` entre 0 (excluido) y
+  10.000 mg (20 carpules × 5 ml × 10 %, los máximos del catálogo y
+  `CARPULES_MAX`); `doseMg` = carpules × ml × concentración × 10 con ± 0,1 por
+  el redondeo de `lineMg`; el acumulado incluye la dosis (`cumulativeMg ≥
+  doseMg`, % ≥ 0, epinefrina acumulada ≥ la de la dosis). La dosis del fármaco
+  de sedación ya la acotaba `sedation_agent_administrations_kind_shape`.
+- **Hora no futura**: la hora clínica (anestesia, valoración, checklist,
+  fármaco, toma y egreso) ≤ `createdAt` (hora del servidor de la BD) + 15 min.
+  La app rechaza antes, con su reloj y 5 min de tolerancia; los 10 min de más
+  cubren el desfase entre la API y la base.
+- **No antes de la evolución**: trigger `BEFORE INSERT` (SECURITY INVOKER,
+  bajo la RLS de la fila) en la anestesia, el fármaco y la toma: la hora no
+  puede ser anterior a `entryDate` − 36 h (el día civil entero en cualquier
+  zona). SQLSTATE propio `Q4270` → **400** «La hora no puede ser anterior a la
+  fecha de la evolución.» (`PrismaExceptionFilter`). Los CHECK que fallen
+  llegan como el 400 genérico de DX-042, nunca 500.
+- **Migraciones** `20261107120000_dx427_anesthesia_sedation_checks` (CHECK
+  `NOT VALID`, funciones y triggers; bloqueo de milisegundos) y
+  `…120100_dx427_anesthesia_sedation_validate` (`VALIDATE` en su propia
+  transacción, `SHARE UPDATE EXCLUSIVE`). Consulta previa opcional (debe dar
+  0 filas; como owner):
+
+  ```sql
+  SELECT 'anestesia', id FROM anesthesia_administrations
+  WHERE NOT ("doseMg" > 0 AND "doseMg" <= 10000
+    AND abs("doseMg" - round("carpules" * "mlPerCarpule" * "concentrationPct" * 10, 1)) <= 0.1
+    AND "cumulativeMg" >= "doseMg"
+    AND ("cumulativePercent" IS NULL OR "cumulativePercent" >= 0)
+    AND ("cumulativeEpinephrineMg" IS NULL OR "epinephrineMg" IS NULL
+         OR "cumulativeEpinephrineMg" + 0.0001 >= "epinephrineMg")
+    AND "administeredAt" <= "createdAt" + interval '15 minutes')
+  UNION ALL SELECT 'fármaco', id FROM sedation_agent_administrations
+    WHERE "administeredAt" > "createdAt" + interval '15 minutes'
+  UNION ALL SELECT 'toma', id FROM sedation_vitals
+    WHERE "takenAt" > "createdAt" + interval '15 minutes'
+  UNION ALL SELECT 'egreso', id FROM sedation_discharges
+    WHERE "dischargedAt" > "createdAt" + interval '15 minutes'
+  UNION ALL SELECT 'valoración', id FROM sedation_records
+    WHERE "assessedAt" > "createdAt" + interval '15 minutes'
+  UNION ALL SELECT 'checklist', id FROM sedation_checklists
+    WHERE "checkedAt" > "createdAt" + interval '15 minutes';
+  ```
+
+  La consulta es **obligatoria antes de desplegar**. Si el `VALIDATE` falla
+  por `lock_timeout`, `npx prisma migrate resolve --rolled-back
+  20261107120100_dx427_anesthesia_sedation_validate` y `deploy` de nuevo. Si
+  la consulta devuelve filas, el `VALIDATE` fallará en cada despliegue (las
+  filas son inalterables y no se corrigen): marca la migración como aplicada
+  con `npx prisma migrate resolve --applied
+  20261107120100_dx427_anesthesia_sedation_validate`, de modo que los CHECK
+  quedan `NOT VALID` pero siguen protegiendo cada escritura nueva, documenta
+  cada fila con una adenda y abre una incidencia con el responsable clínico.
+- **Pruebas**: `test/anesthesia-sedation-checks.int-spec.ts` (INSERT crudos
+  con `dentalix_app`) y `test/migrations/dx427-additive.spec.ts`.
 
 ## Imputación de abonos a ítems (DX-051)
 
@@ -5124,18 +5711,86 @@ y `docker-compose.yml` (`minio/minio` ya no se puede descargar de Docker Hub);
 si la imagen no se descarga, el paso queda en rojo con un error que lo dice y
 el resto de la suite sigue corriendo.
 
-## Deployment
+## Imagen de producción y apagado ordenado (DX-083)
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+Runbook completo (orden backup → `migrate deploy` → API gradual → web →
+`/health/ready`, y valores de timeouts y pool): `dentalix-docs/docs/operacion/despliegue.md`.
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+- `docker build -t dentalix-api .` — multi-etapa: build con devDependencies;
+  runtime con `npm ci --omit=dev`, sin `.env` (`.dockerignore`), usuario
+  `node` y `CMD node dist/main`. La CI la construye en cada PR (job
+  «Imagen Docker») y le pasa `.github/scripts/docker-smoke-api.sh`.
+- En la imagen: `npx prisma migrate deploy` (job con `DIRECT_URL`),
+  `npm run seed:prod` y `npm run audit:purge:prod`. Son el seed y la purga
+  compilados por `npm run build:scripts` a `dist/scripts` (las ciudades de
+  `country-state-city`, devDependency, van a `cities.json`). En desarrollo
+  siguen `npx prisma db seed` y `npm run audit:purge` con ts-node.
+- SIGTERM/SIGINT (`src/config/graceful-shutdown.ts`): `/health/ready` da 503
+  al momento, espera `SHUTDOWN_DRAIN_MS` atendiendo, cierra el servidor HTTP
+  (las peticiones y transacciones en vuelo terminan) y después `app.close()`
+  (email, worker, `$disconnect`), con el tope `SHUTDOWN_TIMEOUT_MS`. El
+  worker (`APP_ROLE=worker`) sigue con `enableShutdownHooks`.
+- Swagger (`/docs`) no se publica con `NODE_ENV=production` salvo
+  `SWAGGER_ENABLED="true"` (SEC-019).
 
-```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
-```
+### Límites de producción: timeouts HTTP, de transacción y de la BD (DX-431)
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+Para que una petición o una transacción colgada no agote el pool:
+
+| Variable / ajuste                                       | Default           | Efecto                                                                                                                                                                                                                                                                                                                           |
+| ------------------------------------------------------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `HTTP_KEEP_ALIVE_TIMEOUT_MS`                            | 65000             | Inactividad tras la que la API cierra una conexión keep-alive. MAYOR que la del balanceador hacia la API (60 s típicos) y que la del proxy de la web (5 s, DX-284).                                                                                                                                                              |
+| `HTTP_HEADERS_TIMEOUT_MS`                               | keep-alive + 1000 | Plazo de las cabeceras; mayor que el keep-alive.                                                                                                                                                                                                                                                                                 |
+| `HTTP_REQUEST_TIMEOUT_MS`                               | 130000            | Plazo de la petición ENTERA (cabeceras + cuerpo): vencido, `408 Request Timeout` y se cierra. ≥ cabeceras; en producción ≥ `UPLOAD_MAX_DURATION_MS` + 10 s (fuera de producción, solo un aviso en el log).                                                                                                                       |
+| `TENANT_TX_TIMEOUT_MS`                                  | 5000              | Tope de cada transacción interactiva (`runWithTenant` y `$transaction(async …)`); < `SHUTDOWN_TIMEOUT_MS`. Una llamada con su propio `timeout` (lotes de DX-107) manda.                                                                                                                                                          |
+| `TENANT_TX_MAX_WAIT_MS`                                 | 2000              | Espera por una conexión del pool para empezar la transacción.                                                                                                                                                                                                                                                                    |
+| `statement_timeout` de `dentalix_app`                   | 15s               | Lo fija `create-app-role.sql` (por rol).                                                                                                                                                                                                                                                                                         |
+| `idle_in_transaction_session_timeout` de `dentalix_app` | 150s              | Lo fija `create-app-role.sql` (por rol). Mayor que la transacción más larga que permite el código (120 s: `LONG_TX` de la importación y el máximo de `TENANT_TX_TIMEOUT_MS`), para no cortar nunca una transacción viva: Prisma ya las deshace antes. Recoge las abandonadas fuera de su control (proceso caído, `psql` manual). |
+
+- `src/config/http-server-timeouts.ts` los aplica al servidor HTTP (main.ts y
+  los e2e, vía `configureApp`), y también la cadencia con la que Node los
+  revisa (una décima parte del menor plazo, hasta 30 s).
+- Cortes por tiempo → **503** con `Retry-After: 5` y `requestId`, un `warn`
+  en el log que dice qué tope fue, y nunca el 500 genérico:
+  - `code: "TRANSACTION_TIMEOUT"` («La operación tardó demasiado y se canceló
+    sin guardar cambios. Vuelve a intentarlo en unos segundos.»): la
+    transacción expiró o no consiguió conexión a tiempo (`P2028` con ese
+    mensaje), o Postgres cerró la sesión por
+    `idle_in_transaction_session_timeout` (`25P03`). Cualquier otro `P2028`
+    sigue siendo un 500.
+  - `code: "STATEMENT_TIMEOUT"` («La operación tardó demasiado y se canceló.
+    Vuelve a intentarlo en unos segundos.»): Postgres canceló una sentencia por
+    `statement_timeout` (`57014`). Sin «sin guardar cambios»: fuera de una
+    transacción, lo de sentencias anteriores ya quedó guardado.
+- `validateEnv` no deja arrancar con un valor fuera de rango ni con las
+  relaciones rotas, y dice cuál.
+- `create-app-role.sql` fija los dos topes de `dentalix_app` en cada ejecución
+  (idempotente). Si el owner no tiene ADMIN OPTION sobre el rol (lo creó otro),
+  avisa con un `WARNING` con los `ALTER ROLE` que tiene que ejecutar un admin.
+  El job `owner-nosu` de la CI comprueba `SHOW statement_timeout` = `15s` e
+  `idle_in_transaction_session_timeout` = `150s` conectado como `dentalix_app`.
+- **Tras ejecutar `create-app-role.sql`**, los topes valen para las conexiones
+  NUEVAS: reinicia la API (despliegue gradual) y, si lo hay, PgBouncer (o
+  `RECONNECT` en su consola), y comprueba como la app:
+  `psql "${DATABASE_URL%%\?*}" -tAc 'SHOW statement_timeout'` → `15s` y
+  `... 'SHOW idle_in_transaction_session_timeout'` → `150s`.
+- **Scripts de mantenimiento largos** que corren como `dentalix_app`
+  (`npm run allocations:backfill`, `npm run phones:report`,
+  `npm run g1:backfill-locations`): trabajan por lotes, pero si una sentencia
+  no cabe en 15 s (una clínica enorme, sale `57014` en el log), quita el tope
+  SOLO para esa ejecución, nunca en el rol:
+  - Con Prisma (estos scripts), en la URL de esa ejecución:
+    `DATABASE_URL="${DATABASE_URL}&options=-c%20statement_timeout%3D0" npm run allocations:backfill`
+    (`options` lo pasa Prisma a Postgres como en `PGOPTIONS`; afecta solo a
+    las conexiones de ese proceso).
+  - En `psql`, para la sesión: `SET statement_timeout = 0;` o, solo dentro de
+    una transacción, `BEGIN; SET LOCAL statement_timeout = 0; …; COMMIT;`
+    (vuelve al de rol al terminar).
+  - En código, el mismo `SET LOCAL statement_timeout = …` como primera
+    sentencia de la transacción (`tx.$executeRaw`) acota o amplía solo esa.
+- e2e: `test/production-timeouts.e2e-spec.ts` (408 de un cliente lento, 503
+  `TRANSACTION_TIMEOUT` de una transacción que se pasa y 503
+  `STATEMENT_TIMEOUT` de una sentencia cortada por `statement_timeout`).
 
 ## Resources
 

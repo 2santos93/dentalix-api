@@ -132,12 +132,19 @@ describe('Confirmación de cita por enlace (e2e)', () => {
     return (res.body as { id: string }).id;
   }
 
-  /** Cita futura nueva (cada llamada en su propia media hora, sin solapes). */
+  /**
+   * Cita futura nueva (cada llamada en su propia media hora, sin solapes):
+   * de 08:00 a 19:30 del día ancla (las 20:00 quedan para el reagendado) y,
+   * agotado, desde las 08:00 de los días siguientes.
+   */
   async function createAppointment(clinic: Clinic, patientId: string) {
-    const startMinutes = 8 * 60 + slot * 30;
+    const SLOTS_PER_DAY = 24;
+    const day = Math.floor(slot / SLOTS_PER_DAY);
+    const startMinutes = 8 * 60 + (slot % SLOTS_PER_DAY) * 30;
     slot++;
-    const hhmm = (m: number) =>
-      `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+    const start = new Date(
+      Date.parse(at('00:00')) + day * DAY_MS + startMinutes * 60_000,
+    );
     const res = await request(server)
       .post('/api/v1/appointments')
       .set('X-Tenant-Host', clinic.host)
@@ -145,8 +152,8 @@ describe('Confirmación de cita por enlace (e2e)', () => {
       .send({
         patientId,
         providerId: clinic.userId,
-        start: at(hhmm(startMinutes)),
-        end: at(hhmm(startMinutes + 30)),
+        start: start.toISOString(),
+        end: new Date(start.getTime() + 30 * 60_000).toISOString(),
         reason: 'Endodoncia molar 36',
         notes: 'Alergia a la penicilina',
       })
@@ -556,6 +563,181 @@ describe('Confirmación de cita por enlace (e2e)', () => {
       const appt = await createAppointment(clinicA, patientA);
       const { token } = await newLink(clinicA, appt.id);
       await respond(clinicA.host, token, 'borrar').expect(400);
+    });
+  });
+
+  // DX-361: generar/reenviar (recepción) y responder (el paciente) quedan en
+  // la auditoría de la clínica de la cita, sin token, hash ni URL.
+  describe('auditoría (DX-361)', () => {
+    const eventsOf = (appointmentId: string) =>
+      raw.auditEvent.findMany({
+        where: {
+          resourceId: appointmentId,
+          resourceType: 'APPOINTMENT',
+          metadata: {
+            path: ['reason'],
+            string_starts_with: 'CONFIRMATION_LINK_',
+          },
+        },
+        orderBy: [{ occurredAt: 'asc' }, { id: 'asc' }],
+      });
+
+    function expectNoLinkData(events: unknown, links: LinkBody[]) {
+      const text = JSON.stringify(events);
+      for (const link of links) {
+        const token = link.url.split('/confirmar/')[1];
+        expect(text).not.toContain(token);
+        expect(text).not.toContain(sha256(token));
+        expect(text).not.toContain(link.url);
+      }
+      expect(text).not.toContain('/confirmar/');
+    }
+
+    it('generar y reenviar: evento de la cita con quién lo hizo y origen STAFF; el ADMIN lo ve en el registro', async () => {
+      const appt = await createAppointment(clinicA, patientA);
+      const reception = await seedMember(
+        clinicA,
+        ClinicRole.RECEPTION,
+        'recepcion-dx361@confirma-a.com',
+      );
+      const receptionId = (
+        await raw.user.findUniqueOrThrow({
+          where: { email: 'recepcion-dx361@confirma-a.com' },
+        })
+      ).id;
+
+      const first = (
+        await generateLink(clinicA, appt.id, reception).expect(201)
+      ).body as LinkBody;
+      const second = (await newLink(clinicA, appt.id)).body;
+
+      const events = await eventsOf(appt.id);
+      expect(events).toEqual([
+        expect.objectContaining({
+          tenantId: clinicA.tenantId,
+          actorUserId: receptionId,
+          actorRole: 'RECEPTION',
+          action: 'UPDATE',
+          patientId: patientA,
+          metadata: { origin: 'STAFF', reason: 'CONFIRMATION_LINK_CREATED' },
+        }),
+        expect.objectContaining({
+          actorUserId: clinicA.userId,
+          actorRole: 'ADMIN',
+          metadata: { origin: 'STAFF', reason: 'CONFIRMATION_LINK_RESENT' },
+        }),
+      ]);
+      expectNoLinkData(events, [first, second]);
+
+      const page = (
+        await request(server)
+          .get(
+            `/api/v1/audit-events?patientId=${patientA}&resourceType=APPOINTMENT&limit=100`,
+          )
+          .set('X-Tenant-Host', clinicA.host)
+          .set('Authorization', `Bearer ${clinicA.accessToken}`)
+          .expect(200)
+      ).body as {
+        items: { resourceId: string; metadata: { reason?: string } }[];
+      };
+      expect(
+        page.items
+          .filter((e) => e.resourceId === appt.id)
+          .map((e) => e.metadata.reason)
+          .sort(),
+      ).toEqual(['CONFIRMATION_LINK_CREATED', 'CONFIRMATION_LINK_RESENT']);
+    });
+
+    it('un intento rechazado (cita de otra clínica, cita cancelada) no deja evento', async () => {
+      const apptB = await createAppointment(clinicB, patientB);
+      await generateLink(clinicA, apptB.id).expect(404);
+      expect(await eventsOf(apptB.id)).toEqual([]);
+
+      const cancelled = await createAppointment(clinicA, patientA);
+      await request(server)
+        .patch(`/api/v1/appointments/${cancelled.id}`)
+        .set('X-Tenant-Host', clinicA.host)
+        .set('Authorization', `Bearer ${clinicA.accessToken}`)
+        .send({ status: 'CANCELLED', ...STAFF_CANCELLATION })
+        .expect(200);
+      await generateLink(clinicA, cancelled.id).expect(409);
+      expect(await eventsOf(cancelled.id)).toEqual([]);
+    });
+
+    it.each([
+      ['confirm', 'CONFIRMATION_LINK_CONFIRMED'],
+      ['cancel', 'CONFIRMATION_LINK_CANCELLED'],
+      ['call_me', 'CONFIRMATION_LINK_CALL_REQUESTED'],
+    ])(
+      'el paciente responde %s: evento sin usuario, origen LINK, en la clínica de la cita, sin datos del enlace',
+      async (action, reason) => {
+        const appt = await createAppointment(clinicA, patientA);
+        const { body } = await newLink(clinicA, appt.id);
+        const token = body.url.split('/confirmar/')[1];
+
+        await respond(clinicA.host, token, action)
+          .set('User-Agent', 'Paciente/1.0')
+          .expect(200);
+
+        const events = await eventsOf(appt.id);
+        expect(events).toHaveLength(2);
+        expect(events[1]).toEqual(
+          expect.objectContaining({
+            tenantId: clinicA.tenantId,
+            actorUserId: null,
+            actorRole: null,
+            action: 'UPDATE',
+            resourceType: 'APPOINTMENT',
+            resourceId: appt.id,
+            patientId: patientA,
+            userAgent: 'Paciente/1.0',
+            metadata: expect.objectContaining({
+              origin: 'LINK',
+              reason,
+            }) as unknown,
+          }),
+        );
+        expectNoLinkData(events, [body]);
+        // Ni un evento en la otra clínica.
+        expect(
+          await raw.auditEvent.count({
+            where: { tenantId: clinicB.tenantId, resourceId: appt.id },
+          }),
+        ).toBe(0);
+      },
+    );
+
+    it('token inválido, de otra clínica, caducado, revocado o ya usado: ningún evento del paciente', async () => {
+      const patientEvents = () =>
+        raw.auditEvent.count({
+          where: {
+            tenantId: clinicA.tenantId,
+            resourceType: 'APPOINTMENT',
+            actorUserId: null,
+          },
+        });
+      const before = await patientEvents();
+
+      await respond(clinicA.host, 'A'.repeat(43), 'confirm').expect(404);
+
+      const appt = await createAppointment(clinicA, patientA);
+      const { token: first } = await newLink(clinicA, appt.id);
+      await respond(clinicB.host, first, 'confirm').expect(404);
+      const { token: second } = await newLink(clinicA, appt.id);
+      await respond(clinicA.host, first, 'confirm').expect(410);
+
+      await raw.appointmentConfirmation.updateMany({
+        where: { tokenHash: sha256(second) },
+        data: { expiresAt: new Date(Date.now() - 1000) },
+      });
+      await respond(clinicA.host, second, 'confirm').expect(410);
+      expect(await patientEvents()).toBe(before);
+
+      const used = await createAppointment(clinicA, patientA);
+      const { token: once } = await newLink(clinicA, used.id);
+      await respond(clinicA.host, once, 'confirm').expect(200);
+      await respond(clinicA.host, once, 'cancel').expect(409);
+      expect(await patientEvents()).toBe(before + 1);
     });
   });
 

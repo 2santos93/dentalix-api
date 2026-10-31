@@ -1062,9 +1062,12 @@ export const DEMO_CLINICAL_ADDENDA: readonly DemoClinicalAddendum[] = [
 ];
 
 /**
- * DX-307: anestesia local de ejemplo. La paciente infantil (Sofía, 32 kg en la
- * anamnesis) tiene una exodoncia de 75 con 2 carpules de lidocaína 2 % con
- * epinefrina: 72 mg de 224 mg (32 %), sin aviso. Por índice de DEMO_PATIENTS.
+ * DX-307: anestesia local de ejemplo. La paciente infantil (Sofía, 11 años y
+ * 32 kg en la anamnesis) tiene una exodoncia de 75 con 2 carpules de
+ * lidocaína 2 % con epinefrina. DX-420: con el máximo pediátrico de la AAPD
+ * (4,4 mg/kg) son 72 de 140,8 mg (51 %) y 0,036 mg de epinefrina, sin aviso;
+ * al abrirla después, la hoja de sedación del mismo día (DEMO_SEDATION) baja
+ * el máximo un 30 % (98,6 mg, 73 %) y lo dice. Por índice de DEMO_PATIENTS.
  */
 export const DEMO_ANESTHESIA = {
   patientIndex: 8,
@@ -1076,6 +1079,47 @@ export const DEMO_ANESTHESIA = {
   technique: 'NERVE_BLOCK',
   site: '75 (alveolar inferior izquierdo)',
   lot: 'LDC-2610-A',
+} as const;
+
+/**
+ * DX-407: hoja de sedación consciente completa en una evolución de la misma
+ * paciente infantil (restauraciones con óxido nitroso): valoración, checklist,
+ * N2O, una toma basal, tres intraoperatorias cada 5 min y egreso firmado por
+ * la dentista con la asistente como monitor. Minutos relativos al seed.
+ */
+export const DEMO_SEDATION = {
+  patientIndex: 8,
+  reason: 'Restauraciones bajo sedación con óxido nitroso',
+  notes:
+    'Resinas en 55 y 65 bajo sedación mínima con N2O al 30 %. Colaboradora; sin incidencias.',
+  assessment: {
+    grade: 'MINIMAL',
+    asaClass: 'I',
+    asaEmergency: false,
+    fastingClearLiquidsHours: 2,
+    fastingSolidsHours: 6,
+    mallampati: 1,
+    weightKg: 32,
+    heightCm: 138,
+    escortName: 'Claudia Navarro',
+    escortRelationship: 'Madre',
+    consentConfirmed: true,
+  },
+  // Horas en orden (QA DX-407): valoración < checklist < toma basal < N2O <
+  // tomas intraoperatorias < egreso, todas en el pasado de la siembra.
+  assessedMinutesAgo: 60,
+  checkedMinutesAgo: 57,
+  baselineMinutesAgo: 55,
+  n2o: { n2oPercent: 30, flowLpm: 6, minutesAgo: 50 },
+  intraMinutesAgo: [45, 40, 35],
+  dischargeMinutesAgo: 20,
+  vitals: {
+    spo2: 98,
+    heartRate: 92,
+    systolic: 102,
+    diastolic: 64,
+    respiratoryRate: 20,
+  },
 } as const;
 
 /**
@@ -1490,6 +1534,12 @@ export interface DemoPlan {
    * del primer abono (o hoy, sin abonos).
    */
   doneAt?: DemoLocationKey;
+  /**
+   * DX-253: el plan se cancela DESPUÉS de sus abonos (un plan cancelado no
+   * admite abonos), así lo abonado queda como saldo a favor del paciente para
+   * probar «Aplicar a otro plan» y «Devolver».
+   */
+  cancelledAfterPayments?: true;
   /** Plan de pagos (cuotas) sobre el total facturable del plan. */
   paymentPlan?: {
     downPayment: number;
@@ -1626,6 +1676,21 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
       { code: 'CX-CORDAL-INCL', tooth: '48', status: PROPOSED },
     ],
     payments: [],
+  },
+  {
+    // DX-253: abonado y luego cancelado → 300.000 a favor del paciente, que
+    // tiene vivo el tratamiento periodontal de abajo (destino del traspaso).
+    patientIndex: 6,
+    dentistIndex: 1,
+    status: TreatmentPlanStatus.ACCEPTED,
+    notes: 'Blanqueamiento: el paciente desistió tras pagarlo (saldo a favor).',
+    doneAt: 'norte',
+    openedDaysAgo: 40,
+    items: [{ code: 'IMPL-CORONA', tooth: '11', status: ACCEPTED }],
+    payments: [
+      { daysAgo: 30, amount: 300000, method: CASH, location: 'norte' },
+    ],
+    cancelledAfterPayments: true,
   },
   {
     patientIndex: 6,

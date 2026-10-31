@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "./dist/scripts",
+    "incremental": false,
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": [
+    "prisma/seed.ts",
+    "prisma/audit-purge.ts",
+    "prisma/scripts/export-cities.ts"
+  ],
+  "exclude": ["node_modules", "dist", "**/*spec.ts"]
+}

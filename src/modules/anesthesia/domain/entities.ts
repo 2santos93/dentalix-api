@@ -11,6 +11,12 @@ export interface AnestheticProduct {
   mlPerCarpule: number;
   maxMgPerKg: number;
   maxAbsoluteMg: number;
+  /** DX-420: mg/kg en menores de 12 años; null = el de adulto. */
+  pediatricMaxMgPerKg: number | null;
+  /** DX-420: edad mínima en años; null = sin mínimo. */
+  minAgeYears: number | null;
+  /** DX-420: mg de epinefrina por carpule; 0 sin epinefrina; null = no se sabe. */
+  epinephrineMgPerCarpule: number | null;
   /** Clave del ejemplo del que salió; null si lo creó la clínica. */
   sampleCode: string | null;
   active: boolean;
@@ -39,6 +45,10 @@ export interface AnesthesiaAdministration {
   mlPerCarpule: number;
   maxMgPerKg: number;
   maxAbsoluteMg: number;
+  /** DX-420: copia del catálogo; null en registros anteriores. */
+  pediatricMaxMgPerKg: number | null;
+  minAgeYears: number | null;
+  epinephrineMgPerCarpule: number | null;
   carpules: number;
   doseMg: number;
   technique: AnesthesiaTechnique;
@@ -48,9 +58,15 @@ export interface AnesthesiaAdministration {
   administeredAt: Date;
   weightKg: number | null;
   weightSource: WeightSource | null;
-  /** mg y % acumulados de la evolución CON este registro. */
+  /**
+   * mg y % acumulados CON este registro: de la evolución en V1 (DX-307); del
+   * paciente en la ventana de 24 h en V2 (DX-418). Ver `safetyRulesVersion`.
+   */
   cumulativeMg: number;
   cumulativePercent: number | null;
+  /** DX-420: epinefrina de esta dosis y acumulada (V3); null antes. */
+  epinephrineMg: number | null;
+  cumulativeEpinephrineMg: number | null;
   safetyRulesVersion: string;
   safetyAlerts: DoseAlert[];
   /** Motivo con el que se confirmó un aviso bloqueante; null si no hubo. */

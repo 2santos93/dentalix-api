@@ -12,6 +12,11 @@ import {
   RegistrationNoticeEmailVars,
   ReminderCancellationPolicyVars,
   RenderedEmail,
+  SignatureBudgetAcceptedEmailVars,
+  SignatureCodeEmailVars,
+  SignatureRequestEmailVars,
+  SlotOfferEmailVars,
+  SignedConsentCopyEmailVars,
 } from '../../domain/email-message';
 import { EmailBlock, renderLayout } from './layout';
 import { endSentence } from '../../../../../shared/format/end-sentence';
@@ -291,6 +296,133 @@ function postOpInstructions(
   });
 }
 
+function signatureRequest(
+  vars: SignatureRequestEmailVars,
+  brand: EmailBrand | null,
+): RenderedEmail {
+  const clinic = vars.clinicName;
+  const patient = vars.patientFirstName?.trim() || null;
+  return renderLayout({
+    brand,
+    subject: `${clinic} te envió un documento para firmar`,
+    heading: `Hola, ${vars.recipientFirstName}`,
+    blocks: [
+      {
+        kind: 'paragraph',
+        text: patient
+          ? `${clinic} te envió un documento de ${patient} para que lo leas y lo firmes desde tu teléfono o tu computador.`
+          : `${clinic} te envió un documento para que lo leas y lo firmes desde tu teléfono o tu computador.`,
+      },
+      {
+        kind: 'paragraph',
+        text: 'Al abrir el enlace te pediremos un código de 6 dígitos que te enviaremos a este mismo correo.',
+      },
+      {
+        kind: 'note',
+        text: `El enlace caduca el ${vars.expiresAtLabel} y solo sirve una vez. Si no esperabas este correo, no lo abras y avisa a la clínica.`,
+      },
+    ],
+    action: { label: 'Ver y firmar', url: vars.url },
+  });
+}
+
+function signatureCode(
+  vars: SignatureCodeEmailVars,
+  brand: EmailBrand | null,
+): RenderedEmail {
+  return renderLayout({
+    brand,
+    subject: `Tu código para firmar en ${vars.clinicName}`,
+    heading: `Hola, ${vars.recipientFirstName}`,
+    blocks: [
+      { kind: 'paragraph', text: `Tu código de verificación es: ${vars.code}` },
+      {
+        kind: 'note',
+        text: `Caduca en ${plural(vars.expiresInMinutes, 'minuto', 'minutos')}. No lo compartas con nadie: la clínica nunca te lo pedirá. Si no lo pediste tú, ignora este correo.`,
+      },
+    ],
+    action: null,
+  });
+}
+
+function signatureBudgetAccepted(
+  vars: SignatureBudgetAcceptedEmailVars,
+  brand: EmailBrand | null,
+): RenderedEmail {
+  return renderLayout({
+    brand,
+    subject: `${vars.clinicName} recibió tu aceptación`,
+    heading: `Hola, ${vars.recipientFirstName}`,
+    blocks: [
+      {
+        kind: 'paragraph',
+        text: `El ${vars.acceptedAtLabel} registramos tu aceptación del presupuesto que te envió ${vars.clinicName}.`,
+      },
+      {
+        kind: 'paragraph',
+        text: 'La copia firmada la puedes guardar o imprimir desde la página en la que firmaste; la clínica también la tiene.',
+      },
+      {
+        kind: 'note',
+        text: 'Si no fuiste tú, avisa a la clínica cuanto antes.',
+      },
+    ],
+    action: null,
+  });
+}
+
+function slotOffer(
+  vars: SlotOfferEmailVars,
+  brand: EmailBrand | null,
+): RenderedEmail {
+  const withProvider = vars.providerName ? ` con ${vars.providerName}` : '';
+  return renderLayout({
+    brand,
+    subject: `${vars.clinicName} tiene un hueco libre para ti`,
+    heading: `Hola, ${vars.patientFirstName}`,
+    blocks: [
+      {
+        kind: 'paragraph',
+        text: `Se liberó un hueco el ${vars.slotLabel} en ${vars.locationName}${withProvider}.`,
+      },
+      {
+        kind: 'paragraph',
+        text: 'Si te viene bien, ábrelo y acéptalo: se lo queda el primero que lo acepte. Si no, puedes rechazarlo desde el mismo enlace.',
+      },
+      {
+        kind: 'note',
+        text: `La oferta caduca el ${vars.expiresAtLabel} y el enlace solo sirve una vez. Si no esperabas este correo, ignóralo.`,
+      },
+    ],
+    action: { label: 'Ver el hueco', url: vars.url },
+  });
+}
+
+function signedConsentCopy(
+  vars: SignedConsentCopyEmailVars,
+  brand: EmailBrand | null,
+): RenderedEmail {
+  const onBehalf = vars.patientFirstName
+    ? ` que firmaste en nombre de ${vars.patientFirstName}`
+    : ' que firmaste';
+  return renderLayout({
+    brand,
+    subject: `Tu copia del documento firmado en ${vars.clinicName}`,
+    heading: `Hola, ${vars.recipientFirstName}`,
+    blocks: [
+      {
+        kind: 'paragraph',
+        text: `${vars.clinicName} te envía la copia en PDF del documento${onBehalf} a distancia. Ábrela y descárgala desde el enlace.`,
+      },
+      {
+        kind: 'note',
+        text: `El enlace caduca el ${vars.expiresAtLabel} y solo sirve una vez: guarda el PDF al descargarlo. Si necesitas otra copia, pídesela a la clínica. Si no esperabas este correo, no lo abras y avisa a la clínica.`,
+      },
+    ],
+    action: { label: 'Descargar mi copia', url: vars.url },
+  });
+}
+
 type Renderer<T extends EmailTemplateName> = (
   vars: EmailVarsByTemplate[T],
   brand: EmailBrand | null,
@@ -304,6 +436,11 @@ const RENDERERS: { [T in EmailTemplateName]: Renderer<T> } = {
   'registration-notice': registrationNotice,
   'payment-receipt': paymentReceipt,
   'post-op-instructions': postOpInstructions,
+  'signature-request': signatureRequest,
+  'signature-code': signatureCode,
+  'signature-budget-accepted': signatureBudgetAccepted,
+  'slot-offer': slotOffer,
+  'signed-consent-copy': signedConsentCopy,
 };
 
 /**

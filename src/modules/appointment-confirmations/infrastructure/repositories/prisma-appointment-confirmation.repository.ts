@@ -5,7 +5,15 @@ import {
   Prisma,
 } from '@prisma/client';
 import { enqueueWaitlistFromAppointment } from '../../../waitlist/infrastructure/waitlist-transitions';
-import { computeCancellationNotice } from '../../../cancellation-policies/domain/cancellation-policy';
+import {
+  computeCancellationNotice,
+  type CancellationNotice,
+} from '../../../cancellation-policies/domain/cancellation-policy';
+import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
+import {
+  confirmationLinkAuditEvent,
+  confirmationResponseAuditEvent,
+} from '../../domain/confirmation-audit';
 import {
   linkResponseBlock,
   type LinkCancellationPolicy,
@@ -171,7 +179,9 @@ export class PrismaAppointmentConfirmationRepository implements AppointmentConfi
     const tenantId = this.requireTenantId();
     await this.prisma.runWithTenant(async (tx) => {
       // Mismo orden de locks que respond: primero cita, después enlaces.
-      await tx.$queryRaw`SELECT "id" FROM "appointments"
+      const [locked] = await tx.$queryRaw<
+        { locationId: string; confirmationSentAt: Date | null }[]
+      >`SELECT "locationId", "confirmationSentAt" FROM "appointments"
         WHERE "id" = ${input.appointmentId}::uuid FOR UPDATE`;
       // Recepción sustituye; los automáticos conservan lo ya enviado.
       if (input.revokePrevious !== false)
@@ -204,6 +214,18 @@ export class PrismaAppointmentConfirmationRepository implements AppointmentConfi
           ...(input.keepCallbackRequest ? {} : { callbackRequestedAt: null }),
         },
       });
+      // DX-361: recepción genera o reenvía (la cita ya tenía un enlace
+      // enviado, el «Reenviar» de la agenda); sin token ni URL.
+      if (input.audit && locked) {
+        await writeAuditEvent(
+          tx,
+          confirmationLinkAuditEvent(
+            { ...input.audit, tenantId },
+            { id: input.appointmentId, locationId: locked.locationId },
+            locked.confirmationSentAt !== null,
+          ),
+        );
+      }
     });
   }
 
@@ -257,16 +279,22 @@ export class PrismaAppointmentConfirmationRepository implements AppointmentConfi
    * enlace no lo pide); cancelar tarde sin aceptar la política, o con otra
    * versión que la que vio el paciente, deshace todo (PolicyBlockError). Toda
    * respuesta guarda la versión vigente como la comunicada al paciente. Si no
-   * hay que tocar la cita, el UPDATE condicional no cambia nada.
+   * hay que tocar la cita, el UPDATE condicional no cambia nada. Devuelve
+   * además la clínica, la sede y el aviso de la cita para su evento (DX-361).
    */
   private async policyPatch(
     tx: Prisma.TransactionClient,
     input: RespondConfirmationInput,
     respondedAt: Date,
-  ): Promise<Prisma.AppointmentUpdateManyMutationInput> {
+  ): Promise<{
+    patch: Prisma.AppointmentUpdateManyMutationInput;
+    tenantId: string;
+    locationId: string;
+    notice: CancellationNotice | null;
+  }> {
     const appointment = await tx.appointment.findFirstOrThrow({
       where: { id: input.appointmentId },
-      select: { locationId: true },
+      select: { tenantId: true, locationId: true },
     });
     const policy = await currentLinkPolicy(tx, appointment.locationId);
     const cancelling =
@@ -286,15 +314,20 @@ export class PrismaAppointmentConfirmationRepository implements AppointmentConfi
     });
     if (block) throw new PolicyBlockError(block);
     return {
-      ...(policy ? { policyVersionId: policy.id } : {}),
-      ...(cancelling
-        ? {
-            cancelledAt: respondedAt,
-            cancelledByKind: 'PATIENT_LINK' as const,
-            noticeMinutes: notice.noticeMinutes,
-            lateCancellation: notice.lateCancellation,
-          }
-        : {}),
+      patch: {
+        ...(policy ? { policyVersionId: policy.id } : {}),
+        ...(cancelling
+          ? {
+              cancelledAt: respondedAt,
+              cancelledByKind: 'PATIENT_LINK' as const,
+              noticeMinutes: notice.noticeMinutes,
+              lateCancellation: notice.lateCancellation,
+            }
+          : {}),
+      },
+      tenantId: appointment.tenantId,
+      locationId: appointment.locationId,
+      notice: cancelling ? notice : null,
     };
   }
 
@@ -337,6 +370,7 @@ export class PrismaAppointmentConfirmationRepository implements AppointmentConfi
 
         // La cita solo se toca si sigue como al emitir el enlace; si no,
         // no se registra ninguna respuesta.
+        const policy = await this.policyPatch(tx, input, claimed.respondedAt);
         const updated = await tx.appointment.updateMany({
           where: {
             id: input.appointmentId,
@@ -346,10 +380,24 @@ export class PrismaAppointmentConfirmationRepository implements AppointmentConfi
           },
           data: {
             ...appointmentPatchFor(input.response, claimed.respondedAt),
-            ...(await this.policyPatch(tx, input, claimed.respondedAt)),
+            ...policy.patch,
           },
         });
         if (updated.count === 0) throw new StaleAppointmentError();
+        // DX-361: el paciente respondió desde el enlace. En el tenant de la
+        // cita leída bajo RLS (la del host; nunca un dato del cliente). Sin
+        // token, hash ni URL; si algo de abajo falla, se deshace con todo.
+        await writeAuditEvent(
+          tx,
+          confirmationResponseAuditEvent(input.request ?? null, {
+            tenantId: policy.tenantId,
+            appointmentId: input.appointmentId,
+            locationId: policy.locationId,
+            response: input.response,
+            statusBefore: input.expectedStatus,
+            notice: policy.notice,
+          }),
+        );
         // Una respuesta cierra todos los enlaces vivos en el mismo COMMIT.
         await tx.appointmentConfirmation.updateMany({
           where: {

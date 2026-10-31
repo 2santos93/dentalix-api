@@ -16,6 +16,8 @@ export const LOCATION_ID = '22222222-2222-4222-8222-222222222222';
  * hora del servidor y la anulación única.
  */
 export class InMemoryPatientDocumentRepository implements PatientDocumentRepository {
+  /** DX-422: documentos que son el PDF firmado de un consentimiento. */
+  readonly signedConsentPdfIds = new Set<string>();
   readonly rows = new Map<string, PatientDocument>();
   readonly users = new Map<string, string>();
   /** Día civil que devuelve `clinicToday`. */
@@ -94,6 +96,9 @@ export class InMemoryPatientDocumentRepository implements PatientDocumentReposit
     const row = this.rows.get(id);
     if (!row) return Promise.resolve('NOT_FOUND');
     if (row.voidedAt) return Promise.resolve('ALREADY_VOIDED');
+    if (this.signedConsentPdfIds.has(id)) {
+      return Promise.resolve('SIGNED_CONSENT_PDF');
+    }
     row.voidedAt = new Date('2026-10-17T16:00:00.000Z');
     row.voidedById = input.voidedById;
     row.voidReason = input.reason;

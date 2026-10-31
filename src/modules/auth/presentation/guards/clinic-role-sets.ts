@@ -117,6 +117,18 @@ export const PAYMENT_ROLES: ClinicRole[] = [
   ClinicRole.RECEPTION,
 ];
 
+// Saldo a favor del paciente (DX-253): traspasar a otro plan y devolver. Dato
+// financiero como los abonos: ADMIN siempre y RECEPTION hasta el tope de la
+// clínica (lo aplica el caso de uso); DENTIST/ASSISTANT no. El tope de
+// recepción solo lo cambia ADMIN.
+export const PATIENT_CREDIT_ROLES: ClinicRole[] = [
+  ClinicRole.ADMIN,
+  ClinicRole.RECEPTION,
+];
+export const PATIENT_CREDIT_POLICY_WRITE_ROLES: ClinicRole[] = [
+  ClinicRole.ADMIN,
+];
+
 // Reasignar a qué ítems del plan va un abono (DX-051, spec R10): solo
 // gestión. Recepción ve la imputación (PAYMENT_ROLES) pero no la cambia.
 export const PAYMENT_ALLOCATION_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
@@ -350,6 +362,16 @@ export const ANAMNESIS_REQUEST_ROLES: ClinicRole[] = [
   ClinicRole.RECEPTION,
   ClinicRole.ADMIN,
 ];
+// Firma a distancia (DX-243) — ENVIAR un consentimiento a firmar por enlace,
+// ver su estado en la ficha y ANULARLO: los cuatro roles, como la anamnesis
+// por enlace (recepción lo envía antes de la cita). La lista no lleva el
+// texto del documento. FIRMAR como profesional: CLINICAL_ROLES (consentimientos).
+export const SIGNATURE_REQUEST_ROLES: ClinicRole[] = [
+  ClinicRole.DENTIST,
+  ClinicRole.ASSISTANT,
+  ClinicRole.RECEPTION,
+  ClinicRole.ADMIN,
+];
 export const ANAMNESIS_REVIEW_DECISION_ROLES: ClinicRole[] = [
   ClinicRole.DENTIST,
   ClinicRole.ADMIN,
@@ -358,6 +380,13 @@ export const ANAMNESIS_REVIEW_DECISION_ROLES: ClinicRole[] = [
 // citas y ocupación de todas las sedes, frente a otro período: la mirada del
 // dueño. Solo gestión, como el dashboard (DASHBOARD_ROLES).
 export const REPORT_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+
+// «Producción por procedimiento» (DX-423): ADMIN ve la de todo el equipo; un
+// DENTIST, solo la suya (lo acota el caso de uso). Asistente y recepción no.
+export const PRODUCTION_REPORT_ROLES: ClinicRole[] = [
+  ClinicRole.DENTIST,
+  ClinicRole.ADMIN,
+];
 
 // Medios de pago de la clínica (DX-377) — crear y editar: solo gestión.
 // Leerlos (selector del modal de abono): PAYMENT_ROLES.
@@ -373,3 +402,18 @@ export const ANESTHESIA_WRITE_ROLES: ClinicRole[] = [
   ClinicRole.ADMIN,
 ];
 export const ANESTHETIC_CATALOG_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+
+// Hoja de sedación en la evolución (DX-407) — valoración previa, checklist,
+// fármacos y egreso: quien seda (odontólogo) y gestión. Las tomas de
+// constantes, además, la asistente que monitoriza. En esta porción la
+// asistente las registra en todas las clínicas; DX-409 lo hará configurable
+// por clínica. Leer la hoja: CLINICAL_ROLES; recepción, nada.
+export const SEDATION_WRITE_ROLES: ClinicRole[] = [
+  ClinicRole.DENTIST,
+  ClinicRole.ADMIN,
+];
+export const SEDATION_VITALS_ROLES: ClinicRole[] = [
+  ClinicRole.DENTIST,
+  ClinicRole.ADMIN,
+  ClinicRole.ASSISTANT,
+];

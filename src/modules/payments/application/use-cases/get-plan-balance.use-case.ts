@@ -1,4 +1,9 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
 import { TreatmentPlanItemStatus, TreatmentPlanStatus } from '@prisma/client';
 import { PAYMENT_REPOSITORY } from '../../domain/ports/payment-repository.port';
 import type { PaymentRepository } from '../../domain/ports/payment-repository.port';
@@ -12,6 +17,10 @@ import {
   type PaymentWithRate,
 } from '../payment-exchange-rate';
 import { ConvertAmountUseCase } from '../../../exchange/application/use-cases/convert-amount.use-case';
+import {
+  PLAN_CREDIT_READER,
+  type PlanCreditReader,
+} from '../../domain/ports/plan-credit-reader.port';
 
 export interface GetPlanBalanceResult {
   planCurrency: string;
@@ -24,8 +33,13 @@ export interface GetPlanBalanceResult {
    * `planCurrency` at ITS OWN `paidAt` date (never today's rate). Rounded
    * to 2 decimals. */
   paid: number;
-  /** `billable - paid`, rounded to 2 decimals. */
+  /** `billable - paid - creditMovements`, rounded to 2 decimals. */
   balance: number;
+  /**
+   * DX-253: Σ traspasos y devoluciones de saldo a favor del plan en su
+   * moneda, con signo. No cambia los abonos ni `paid`.
+   */
+  creditMovements: number;
   /** Number of active payments for the plan. */
   paymentsCount: number;
   /**
@@ -99,6 +113,10 @@ export class GetPlanBalanceUseCase {
     private readonly convertAmount: ConvertAmountUseCase,
     @Inject(PLAN_ALLOCATION_REPOSITORY)
     private readonly allocations: PlanAllocationRepository,
+    // DX-253: sin lector (tests que no lo proveen), ningún asiento.
+    @Optional()
+    @Inject(PLAN_CREDIT_READER)
+    private readonly credit?: PlanCreditReader,
   ) {}
 
   /**
@@ -120,7 +138,12 @@ export class GetPlanBalanceUseCase {
     const baseOf = new Map(
       snapshot.bases.map((b) => [b.paymentId, b.amount] as const),
     );
-    const result = await this.compute(plan, snapshot.items, payments, baseOf);
+    const result = await this.compute(
+      { ...plan, id: treatmentPlanId },
+      snapshot.items,
+      payments,
+      baseOf,
+    );
     const billablePlan = isPlanBillable(plan.status);
 
     const paidByItem = new Map<string, number>();
@@ -185,7 +208,7 @@ export class GetPlanBalanceUseCase {
   }
 
   private async compute(
-    plan: { status: TreatmentPlanStatus; currency: string },
+    plan: { id: string; status: TreatmentPlanStatus; currency: string },
     planItems: {
       status: TreatmentPlanItemStatus;
       price: number;
@@ -233,11 +256,15 @@ export class GetPlanBalanceUseCase {
       paid += converted;
     }
 
+    const creditMovements = this.credit
+      ? round2(await this.credit.netCredit(plan.id, plan.currency))
+      : 0;
     return {
       planCurrency: plan.currency,
       billable,
       paid: round2(paid),
-      balance: round2(billable - paid),
+      creditMovements,
+      balance: round2(billable - paid - creditMovements),
       paymentsCount: payments.length,
       paymentsWithoutRate,
     };

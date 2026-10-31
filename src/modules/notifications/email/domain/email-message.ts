@@ -18,6 +18,11 @@ export const EMAIL_TEMPLATES = [
   'registration-notice',
   'payment-receipt',
   'post-op-instructions',
+  'signature-request',
+  'signature-code',
+  'signature-budget-accepted',
+  'slot-offer',
+  'signed-consent-copy',
 ] as const;
 export type EmailTemplateName = (typeof EMAIL_TEMPLATES)[number];
 
@@ -161,6 +166,75 @@ export interface PostOpInstructionsEmailVars {
   responsibleName: string | null;
 }
 
+/**
+ * DX-243: enlace para firmar un documento a distancia. Nada clínico: ni el
+ * título del documento ni el procedimiento; solo quién lo envía, a quién y el
+ * enlace (el documento se ve tras verificar el código).
+ */
+export interface SignatureRequestEmailVars {
+  /** Nombre de pila de quien firma (el paciente o su responsable). */
+  recipientFirstName: string;
+  /** Va al responsable de un menor: el nombre de pila del paciente. */
+  patientFirstName: string | null;
+  clinicName: string;
+  /** Enlace público (`/firmar/<token>`). */
+  url: string;
+  /** Caducidad del enlace, ya formateada en la zona y el formato de la sede. */
+  expiresAtLabel: string;
+}
+
+/** DX-243: el código de 6 dígitos que abre el documento. Solo el código. */
+export interface SignatureCodeEmailVars {
+  recipientFirstName: string;
+  clinicName: string;
+  code: string;
+  expiresInMinutes: number;
+}
+
+/**
+ * DX-415: confirmación de que la aceptación del presupuesto quedó registrada.
+ * Nada clínico ni importes: quién, qué clínica y cuándo.
+ */
+export interface SignatureBudgetAcceptedEmailVars {
+  recipientFirstName: string;
+  clinicName: string;
+  /** Hora de la aceptación, ya formateada en la zona y el formato de la sede. */
+  acceptedAtLabel: string;
+}
+
+/**
+ * DX-435: un hueco libre con enlace para aceptarlo (el primero que acepta se
+ * lo queda). Cuándo, dónde y con quién; nada clínico.
+ */
+export interface SlotOfferEmailVars {
+  patientFirstName: string;
+  clinicName: string;
+  /** Inicio del hueco, ya formateado en la zona y el formato de la sede. */
+  slotLabel: string;
+  locationName: string;
+  providerName: string | null;
+  /** Enlace público (`/hueco/<token>`). */
+  url: string;
+  expiresAtLabel: string;
+}
+
+/**
+ * DX-443: la copia del PDF firmado a distancia, con un enlace de un solo uso.
+ * Nada clínico: ni el título del documento ni el procedimiento; quién lo
+ * envía, a quién y el enlace (el PDF se descarga desde la página).
+ */
+export interface SignedConsentCopyEmailVars {
+  /** Nombre de pila de quien firmó (el paciente o su responsable). */
+  recipientFirstName: string;
+  /** Firmó el responsable de un menor: el nombre de pila del paciente. */
+  patientFirstName: string | null;
+  clinicName: string;
+  /** Enlace público (`/copia/<token>`). */
+  url: string;
+  /** Caducidad del enlace, ya formateada en la zona y el formato de la sede. */
+  expiresAtLabel: string;
+}
+
 export interface EmailVarsByTemplate {
   invitation: InvitationEmailVars;
   'password-reset': PasswordResetEmailVars;
@@ -169,6 +243,11 @@ export interface EmailVarsByTemplate {
   'registration-notice': RegistrationNoticeEmailVars;
   'payment-receipt': PaymentReceiptEmailVars;
   'post-op-instructions': PostOpInstructionsEmailVars;
+  'signature-request': SignatureRequestEmailVars;
+  'signature-code': SignatureCodeEmailVars;
+  'signature-budget-accepted': SignatureBudgetAcceptedEmailVars;
+  'slot-offer': SlotOfferEmailVars;
+  'signed-consent-copy': SignedConsentCopyEmailVars;
 }
 
 /** Lo que el remitente produce para una plantilla: asunto, HTML y texto. */

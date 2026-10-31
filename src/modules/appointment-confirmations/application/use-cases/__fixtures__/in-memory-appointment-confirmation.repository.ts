@@ -16,6 +16,13 @@ import {
   linkResponseBlock,
   type LinkCancellationPolicy,
 } from '../../../domain/link-cancellation-policy';
+import {
+  confirmationLinkAuditEvent,
+  confirmationResponseAuditEvent,
+} from '../../../domain/confirmation-audit';
+import { computeCancellationNotice } from '../../../../cancellation-policies/domain/cancellation-policy';
+import type { AuditEventDraft } from '../../../../audit/domain/audit-event';
+import type { TenantContextService } from '../../../../../shared/tenancy/tenant-context.service';
 
 type StoredConfirmation = AppointmentConfirmation & { tokenHash: string };
 
@@ -39,11 +46,16 @@ export class InMemoryAppointmentConfirmationRepository implements AppointmentCon
   /** DX-291: política vigente de la sede (una sola sede en el doble). */
   policy: LinkCancellationPolicy | null = null;
   readonly confirmations: StoredConfirmation[] = [];
+  /** DX-361: eventos que el repositorio Prisma escribe en la transacción. */
+  readonly auditEvents: AuditEventDraft[] = [];
   branding: ClinicBranding | null = {
     name: 'Clínica Sonrisa',
     primaryColor: '#0E7490',
     logoUrl: null,
   };
+
+  /** El tenant de los eventos de la respuesta sale del contexto, como en Prisma. */
+  constructor(private readonly tenantContext?: TenantContextService) {}
 
   addAppointment(overrides: Partial<ConfirmationAppointment> = {}) {
     const start = overrides.start ?? new Date(Date.now() + 24 * 3600_000);
@@ -75,6 +87,16 @@ export class InMemoryAppointmentConfirmationRepository implements AppointmentCon
   }
 
   issue(input: IssueConfirmationInput): Promise<void> {
+    const issuedFor = this.appointments.get(input.appointmentId);
+    if (input.audit && issuedFor) {
+      this.auditEvents.push(
+        confirmationLinkAuditEvent(
+          input.audit,
+          issuedFor,
+          issuedFor.confirmationSentAt !== null,
+        ),
+      );
+    }
     for (const c of this.confirmations) {
       if (
         input.revokePrevious !== false &&
@@ -165,6 +187,24 @@ export class InMemoryAppointmentConfirmationRepository implements AppointmentCon
         link.response = input.response;
       }
     }
+    this.auditEvents.push(
+      confirmationResponseAuditEvent(input.request ?? null, {
+        tenantId: this.tenantContext?.getTenantId() ?? 'tenant-en-memoria',
+        appointmentId: appointment.id,
+        locationId: appointment.locationId,
+        response: input.response,
+        statusBefore: appointment.status,
+        notice:
+          input.response === 'CANCEL'
+            ? computeCancellationNotice({
+                start: appointment.start,
+                cancelledAt: input.now,
+                byKind: 'PATIENT_LINK',
+                noticeHours: this.policy?.noticeHours ?? null,
+              })
+            : null,
+      }),
+    );
     if (input.response === 'CONFIRM') appointment.status = 'CONFIRMED';
     if (input.response === 'CANCEL') appointment.status = 'CANCELLED';
     if (input.response === 'CALL_ME')

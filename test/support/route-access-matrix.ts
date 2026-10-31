@@ -114,6 +114,19 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // DX-099: cuestionario de anamnesis por enlace (el paciente, sin sesión).
   'GET /public/medical-history/:token': PUBLIC_TENANT,
   'POST /public/medical-history/:token': PUBLIC_TENANT,
+  // DX-243: firma a distancia por enlace con código (el paciente, sin sesión).
+  'GET /public/sign/:token': PUBLIC_TENANT,
+  'POST /public/sign/:token/code': PUBLIC_TENANT,
+  'POST /public/sign/:token/verify': PUBLIC_TENANT,
+  'GET /public/sign/:token/document': PUBLIC_TENANT,
+  'POST /public/sign/:token/sign': PUBLIC_TENANT,
+  // DX-435: la oferta de hueco por enlace.
+  'GET /public/slot-offers/:token': PUBLIC_TENANT,
+  'POST /public/slot-offers/:token/accept': PUBLIC_TENANT,
+  'POST /public/slot-offers/:token/decline': PUBLIC_TENANT,
+  // DX-443: la copia del PDF firmado por enlace de un solo uso.
+  'GET /public/signed-consent-copies/:token': PUBLIC_TENANT,
+  'POST /public/signed-consent-copies/:token/download': PUBLIC_TENANT,
 
   // --- Cualquier sesión (sin rol de clínica) -------------------------------
   // dentalix-docs/docs/plans/2026-07-28-user-profile.md (/me) y
@@ -223,6 +236,22 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /anesthetics': ADMIN_ONLY,
   'POST /anesthetics/samples': ADMIN_ONLY,
   'PATCH /anesthetics/:id': ADMIN_ONLY,
+  // DX-407: hoja de sedación. Valoración, checklist, fármacos y egreso:
+  // odontólogo y gestión; las tomas de constantes, también la asistente.
+  'GET /patients/:patientId/sedation': CLINICAL,
+  'GET /patients/:patientId/clinical-entries/:entryId/sedation': CLINICAL,
+  'POST /patients/:patientId/clinical-entries/:entryId/sedation': PRESCRIBERS,
+  'POST /patients/:patientId/clinical-entries/:entryId/sedation/checklist':
+    PRESCRIBERS,
+  'POST /patients/:patientId/clinical-entries/:entryId/sedation/agents':
+    PRESCRIBERS,
+  'POST /patients/:patientId/clinical-entries/:entryId/sedation/vitals':
+    CLINICAL,
+  'POST /patients/:patientId/clinical-entries/:entryId/sedation/discharge':
+    PRESCRIBERS,
+  'PATCH /patients/:patientId/clinical-entries/:entryId/sedation': CLINICAL,
+  'PUT /patients/:patientId/clinical-entries/:entryId/sedation': CLINICAL,
+  'DELETE /patients/:patientId/clinical-entries/:entryId/sedation': CLINICAL,
   // DX-170: plantillas de evolución. Leerlas, quien documenta (sin recepción);
   // crear, editar, desactivar y cargar las de ejemplo, solo ADMIN.
   'GET /clinical-note-templates': CLINICAL,
@@ -267,6 +296,19 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /patients/:patientId/consents/preview': CLINICAL,
   'POST /patients/:patientId/consents': CLINICAL,
   'GET /patients/:patientId/consents/:id': CLINICAL,
+  // DX-243: firma del profesional de uno firmado a distancia (el que lo envió
+  // a firmar; el caso de uso lo comprueba). Enviar a firmar, verlo en la ficha
+  // y anularlo: los cuatro roles (recepción lo envía), como la anamnesis.
+  'POST /patients/:patientId/consents/:id/countersign': CLINICAL,
+  // DX-422: reintentar el PDF firmado que no se pudo generar: los cuatro
+  // roles, como el bloque de firma a distancia de la ficha (nada clínico).
+  'POST /patients/:patientId/consents/:id/signed-pdf/retry': EVERY_ROLE,
+  // DX-443: «Reenviar copia» del PDF firmado, los cuatro roles (nada clínico).
+  'POST /patients/:patientId/consents/:id/signed-pdf/copy': EVERY_ROLE,
+  'GET /patients/:patientId/signature-requests/options': EVERY_ROLE,
+  'GET /patients/:patientId/signature-requests': EVERY_ROLE,
+  'POST /patients/:patientId/signature-requests': EVERY_ROLE,
+  'POST /patients/:patientId/signature-requests/:id/revoke': EVERY_ROLE,
 
   // --- Autorización de datos, Ley 1581 (DX-037) ----------------------------
   // loop/informes/DX-037.md.
@@ -501,6 +543,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /treatment-plans/:id/payments': BILLING,
   // DX-262: abono contra el saldo migrado (los mismos roles que cobran).
   'POST /opening-balances/:id/payments': BILLING,
+  // DX-390: cobro dividido (los mismos roles que cobran).
+  'POST /treatment-plans/:id/split-payments': BILLING,
   'GET /treatment-plans/:id/payments': BILLING,
   'GET /treatment-plans/:id/balance': BILLING,
   'DELETE /payments/:id': BILLING,
@@ -530,6 +574,14 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /receivables/aging.csv': ADMIN_ONLY,
   // Descuentos (loop/informes/DX-204.md): la política la leen quienes editan
   // ítems de plan y la cambia ADMIN; el informe y su CSV, solo ADMIN.
+  // DX-253: saldo a favor (loop/informes/DX-253.md): financiero, ADMIN y
+  // recepción (con tope); el tope solo lo cambia ADMIN.
+  'POST /treatment-plans/:id/credit-transfers': BILLING,
+  'POST /treatment-plans/:id/credit-refunds': BILLING,
+  'GET /credit-refunds/:id': BILLING,
+  'GET /patients/:id/credit-movements': BILLING,
+  'GET /patient-credit/policy': BILLING,
+  'PUT /patient-credit/policy': ADMIN_ONLY,
   'GET /discount-policy': CLINICAL,
   'PUT /discount-policy': ADMIN_ONLY,
   'GET /reports/discounts': ADMIN_ONLY,
@@ -538,6 +590,11 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // del dueño sobre producción, cobros y citas de todas las sedes. Solo ADMIN.
   'GET /reports/locations-comparison': ADMIN_ONLY,
   'GET /reports/locations-comparison.csv': ADMIN_ONLY,
+  // DX-423: producción por procedimiento. ADMIN ve todo el equipo; DENTIST,
+  // solo lo suyo (lo acota el caso de uso). El detalle lleva pacientes.
+  'GET /reports/production-by-procedure': roles('ADMIN', 'DENTIST'),
+  'GET /reports/production-by-procedure.csv': roles('ADMIN', 'DENTIST'),
+  'GET /reports/production-by-procedure/items': roles('ADMIN', 'DENTIST'),
   // DX-150: cobranza (gestiones y compromisos de pago), mismo dato financiero.
   'POST /patients/:id/collection-notes': BILLING,
   'POST /patients/:id/payment-promises': BILLING,

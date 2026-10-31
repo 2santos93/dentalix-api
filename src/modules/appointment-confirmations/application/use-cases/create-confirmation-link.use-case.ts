@@ -18,6 +18,7 @@ import {
   toPublicAppointmentView,
 } from '../public-confirmation-view';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 
 /** Solo una cita que todavía va a ocurrir tiene algo que confirmar. */
 const CONFIRMABLE: ReadonlySet<AppointmentStatus> = new Set([
@@ -33,6 +34,8 @@ export interface CreateConfirmationLinkInput {
    * «pide llamada» pendiente, que recepción todavía tiene que atender.
    */
   automatic?: boolean;
+  /** DX-361: recepción (con sesión) deja el evento de auditoría. */
+  audit?: AuditRequestContext;
 }
 
 export interface CreateConfirmationLinkResult {
@@ -93,6 +96,7 @@ export class CreateConfirmationLinkUseCase {
       keepCallbackRequest: input.automatic === true,
       revokePrevious: input.automatic !== true,
       now,
+      audit: input.audit,
     });
 
     return {

@@ -11,6 +11,7 @@ import { PrismaPaymentRepository } from '../src/modules/payments/infrastructure/
 import { PrismaPlanAllocationRepository } from '../src/modules/payments/infrastructure/allocations/prisma-plan-allocation.repository';
 import { PlanAllocationRebalancer } from '../src/modules/payments/application/plan-allocation-rebalancer';
 import { ExchangeSourceChangeHooks } from '../src/modules/exchange/application/exchange-source-change-hooks';
+import { ProviderRatesCallerScope } from '../src/modules/exchange/application/provider-rates-caller-scope';
 import { PaymentAllocationJobs } from '../src/modules/payments/application/payment-allocation-jobs';
 import { PaymentBaseRetries } from '../src/modules/payments/application/payment-base-retries';
 import { PaymentRateBackupAudit } from '../src/modules/payments/application/payment-rate-backup-audit';
@@ -113,6 +114,7 @@ const jobs = new PaymentAllocationJobs(
   retries,
   tenantContext,
   new ExchangeSourceChangeHooks(),
+  new ProviderRatesCallerScope(),
 );
 
 const SUBDOMAINS = ['dx051-races-a', 'dx051-races-b'];

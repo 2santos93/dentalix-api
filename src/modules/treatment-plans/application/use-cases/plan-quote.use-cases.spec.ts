@@ -223,6 +223,10 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
         acceptedAt: NOW,
       }),
       integrityOk: true,
+      // Firmada en la clínica: sin evidencias del enlace (DX-415).
+      remote: null,
+      ipAddress: '10.0.0.1',
+      userAgent: 'jest',
     });
   });
 
@@ -317,6 +321,9 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
           signature: PNG,
           acceptedAt,
           acceptedByName: 'Dra. Gómez',
+          ipAddress: null,
+          userAgent: null,
+          remote: null,
           acceptanceHash: computeAcceptanceHash({
             contentHash,
             signerName: 'Ana Pérez',

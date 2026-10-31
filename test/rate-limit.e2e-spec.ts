@@ -33,6 +33,12 @@ const LOW_LIMITS: RateLimitConfig = {
   'exchange-rates': { limit: 2, ttlMs: 60_000 },
   anamnesis: { limit: 4, ttlMs: 60_000 },
   'anamnesis-token': { limit: 2, ttlMs: 60_000 },
+  signature: { limit: 4, ttlMs: 60_000 },
+  'signature-token': { limit: 2, ttlMs: 60_000 },
+  'slot-offer': { limit: 4, ttlMs: 60_000 },
+  'slot-token': { limit: 2, ttlMs: 60_000 },
+  'copy-link': { limit: 4, ttlMs: 60_000 },
+  'copy-token': { limit: 2, ttlMs: 60_000 },
 };
 
 // JWT con `sub` pero sin firma válida: JwtAuthGuard lo rechaza (401), pero el
@@ -207,6 +213,25 @@ describe('Rate limiting (e2e)', () => {
         .post(`/api/v1/public/medical-history/${tokenA}`)
         .send({});
       expect(submit.status).not.toBe(429);
+    });
+
+    it('public/sign/:token (DX-243): 429 por token y por IP (balde por ruta)', async () => {
+      const view = (token: string) =>
+        request(app.getHttpServer()).get(`/api/v1/public/sign/${token}`);
+      const tokenA = 'D'.repeat(43);
+      // Por token: el mismo enlace admite 2 y el tercero es 429…
+      for (let i = 0; i < LOW_LIMITS['signature-token'].limit; i++) {
+        expect((await view(tokenA)).status).not.toBe(429);
+      }
+      expectTooMany(await view(tokenA));
+      // …pero otro token (misma IP) sigue pasando hasta el tope por IP (4).
+      expect((await view('E'.repeat(43))).status).not.toBe(429);
+      expectTooMany(await view('F'.repeat(43)));
+      // Verificar el código tiene su propio balde.
+      const verify = await request(app.getHttpServer())
+        .post(`/api/v1/public/sign/${tokenA}/verify`)
+        .send({ code: '000000' });
+      expect(verify.status).not.toBe(429);
     });
 
     it('recuperar la contraseña (DX-010): 429 por IP en pedir, comprobar y restablecer (balde por ruta)', async () => {

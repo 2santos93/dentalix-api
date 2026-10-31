@@ -2361,6 +2361,67 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
         },
       },
     ]),
+    // DX-423: producción por procedimiento. Una sede de A es 403; el
+    // profesional o el procedimiento de A dan un reporte vacío.
+    ...(
+      [
+        '/reports/production-by-procedure',
+        '/reports/production-by-procedure.csv',
+        '/reports/production-by-procedure/items',
+      ] as const
+    ).flatMap((route): IsolationCase[] => {
+      const range = `from=${day(-30)}&to=${day(0)}&`;
+      const items = route.endsWith('/items');
+      // El procedimiento propio de B (se lee al correr el caso, no al definirlo).
+      const extra = () => (items ? `catalogItemId=${b.catalogItemId}&` : '');
+      const empty = (body: unknown, text: string) => {
+        if (route.endsWith('.csv')) {
+          // Cabecera y columnas, sin ninguna fila.
+          expect(text.trim().split('\r\n')).toHaveLength(8);
+        } else if (items) {
+          expect(body).toMatchObject({ items: [], total: 0 });
+        } else {
+          expect(body).toMatchObject({
+            rows: [],
+            totals: [],
+            unattributed: [],
+            hasActivity: false,
+          });
+        }
+      };
+      return [
+        {
+          name: `GET ${route} ?locationId de A`,
+          verb: 'get',
+          path: () => `${route}?${range}${extra()}locationId=${a.locationId}`,
+          queryIds: ['locationId'],
+          // El mismo 403 que una sede no permitida: no dice si existe.
+          status: 403,
+          message: 'No tienes acceso a esta sede.',
+        },
+        {
+          name: `GET ${route} ?professionalId de A`,
+          verb: 'get',
+          path: () =>
+            `${route}?${range}${extra()}professionalId=${a.dentistUserId}`,
+          queryIds: ['professionalId'],
+          status: 200,
+          expectBody: empty,
+        },
+        ...(items
+          ? [
+              {
+                name: `GET ${route} ?catalogItemId de A`,
+                verb: 'get' as const,
+                path: () => `${route}?${range}catalogItemId=${a.catalogItemId}`,
+                queryIds: ['catalogItemId'],
+                status: 200,
+                expectBody: empty,
+              },
+            ]
+          : []),
+      ];
+    }),
     {
       name: 'GET /cash-sessions/current ?locationId de A',
       verb: 'get',
@@ -3086,6 +3147,27 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     'DELETE /patients/:patientId/clinical-entries/:entryId/anesthesia/:id':
       'anesthesia.e2e-spec.ts',
     'PATCH /anesthetics/:id': 'anesthesia.e2e-spec.ts',
+    // DX-407: paciente/evolución de otra clínica → 404; las ediciones
+    // responden siempre 405 (inalterable).
+    'GET /patients/:patientId/sedation': 'sedation.e2e-spec.ts',
+    'GET /patients/:patientId/clinical-entries/:entryId/sedation':
+      'sedation.e2e-spec.ts',
+    'POST /patients/:patientId/clinical-entries/:entryId/sedation':
+      'sedation.e2e-spec.ts',
+    'POST /patients/:patientId/clinical-entries/:entryId/sedation/checklist':
+      'sedation.e2e-spec.ts',
+    'POST /patients/:patientId/clinical-entries/:entryId/sedation/agents':
+      'sedation.e2e-spec.ts',
+    'POST /patients/:patientId/clinical-entries/:entryId/sedation/vitals':
+      'sedation.e2e-spec.ts',
+    'POST /patients/:patientId/clinical-entries/:entryId/sedation/discharge':
+      'sedation.e2e-spec.ts',
+    'PATCH /patients/:patientId/clinical-entries/:entryId/sedation':
+      'sedation.e2e-spec.ts',
+    'PUT /patients/:patientId/clinical-entries/:entryId/sedation':
+      'sedation.e2e-spec.ts',
+    'DELETE /patients/:patientId/clinical-entries/:entryId/sedation':
+      'sedation.e2e-spec.ts',
     // DX-377: la clínica B no edita el medio de pago de A (404).
     'PATCH /payment-methods/:id': 'payment-methods.e2e-spec.ts',
     // DX-214: recepción consulta avisos de A; administrador de B obtiene 404
@@ -3158,6 +3240,13 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     'POST /patient-imports/:id/undo': 'patient-imports.e2e-spec.ts',
     // DX-262: abonar al saldo migrado de otra clínica → 404.
     'POST /opening-balances/:id/payments': 'opening-balances.e2e-spec.ts',
+    // DX-390: B → 404 al cobrar dividido en el plan de A, y no ve su recibo.
+    'POST /treatment-plans/:id/split-payments': 'split-payments.e2e-spec.ts',
+    // DX-253: B → 404 sobre el plan, el comprobante y el paciente de A.
+    'POST /treatment-plans/:id/credit-transfers': 'patient-credit.e2e-spec.ts',
+    'POST /treatment-plans/:id/credit-refunds': 'patient-credit.e2e-spec.ts',
+    'GET /credit-refunds/:id': 'patient-credit.e2e-spec.ts',
+    'GET /patients/:id/credit-movements': 'patient-credit.e2e-spec.ts',
     // DX-262: la hoja de saldos del lote de otra clínica → 404.
     'POST /patient-imports/:id/balances': 'opening-balances.e2e-spec.ts',
     'DELETE /patient-imports/:id/balances': 'opening-balances.e2e-spec.ts',
@@ -3197,6 +3286,25 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       'medical-history-submissions.e2e-spec.ts',
     'POST /medical-history/submissions/:id/revoke':
       'medical-history-submissions.e2e-spec.ts',
+    // DX-243: B → 404 sobre el paciente, la solicitud y el consentimiento de
+    // A (opciones, lista, enviar, anular y firma del profesional), sin tocar
+    // nada de A.
+    'GET /patients/:patientId/signature-requests/options':
+      'signature-requests.e2e-spec.ts',
+    'GET /patients/:patientId/signature-requests':
+      'signature-requests.e2e-spec.ts',
+    'POST /patients/:patientId/signature-requests':
+      'signature-requests.e2e-spec.ts',
+    'POST /patients/:patientId/signature-requests/:id/revoke':
+      'signature-requests.e2e-spec.ts',
+    'POST /patients/:patientId/consents/:id/countersign':
+      'signature-requests.e2e-spec.ts',
+    // DX-422: reintentar el PDF firmado de A desde la clínica B → 404.
+    'POST /patients/:patientId/consents/:id/signed-pdf/retry':
+      'signature-requests.e2e-spec.ts',
+    // DX-443: reenviar la copia del PDF firmado de A desde la clínica B → 404.
+    'POST /patients/:patientId/consents/:id/signed-pdf/copy':
+      'signature-requests.e2e-spec.ts',
     // DX-375: el ADMIN de otra clínica corrige la tasa manual de A → 404.
     'PUT /exchange/manual-rates/:id':
       'payment-frozen-exchange-rate.e2e-spec.ts',
@@ -3239,6 +3347,23 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       'public-post-op-instructions.e2e-spec.ts',
     'POST /public/post-op-instructions/:token/opened':
       'public-post-op-instructions.e2e-spec.ts',
+    // DX-243: «el token de A en el host de B → Enlace no válido» en las cinco
+    // rutas, sin abrir, enviar código, verificar ni firmar nada de A.
+    // DX-435: «el token de A en el contexto de B → 404» en ver, aceptar y
+    // rechazar la oferta de hueco, sin crear cita ni cambiar la oferta de A.
+    'GET /public/slot-offers/:token': 'slot-offers.int-spec.ts',
+    'POST /public/slot-offers/:token/accept': 'slot-offers.int-spec.ts',
+    'POST /public/slot-offers/:token/decline': 'slot-offers.int-spec.ts',
+    // DX-443: el enlace de la copia desde el host de otra clínica → 404.
+    'GET /public/signed-consent-copies/:token':
+      'signature-requests.e2e-spec.ts',
+    'POST /public/signed-consent-copies/:token/download':
+      'signature-requests.e2e-spec.ts',
+    'GET /public/sign/:token': 'signature-requests.e2e-spec.ts',
+    'POST /public/sign/:token/code': 'signature-requests.e2e-spec.ts',
+    'POST /public/sign/:token/verify': 'signature-requests.e2e-spec.ts',
+    'GET /public/sign/:token/document': 'signature-requests.e2e-spec.ts',
+    'POST /public/sign/:token/sign': 'signature-requests.e2e-spec.ts',
     // «el token de A en el host de B → 404» (GET y POST del formulario).
     'GET /public/medical-history/:token':
       'medical-history-submissions.e2e-spec.ts',

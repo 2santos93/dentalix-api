@@ -355,6 +355,7 @@ describe('GetPlanBalanceUseCase', () => {
       billable: 0,
       paid: 0,
       balance: 0,
+      creditMovements: 0,
       paymentsCount: 0,
       paymentsWithoutRate: [],
     });
@@ -864,6 +865,7 @@ describe('GetPlanBalanceUseCase', () => {
       expect(Object.keys(result).sort()).toEqual([
         'balance',
         'billable',
+        'creditMovements',
         'paid',
         'paymentsCount',
         'paymentsWithoutRate',

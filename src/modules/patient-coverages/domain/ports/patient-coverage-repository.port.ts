@@ -1,3 +1,5 @@
+import type { ClinicRole } from '@prisma/client';
+import type { CoverageValidity } from '../coverage-declaration-rules';
 import type { PatientCoverage } from '../entities/patient-coverage.entity';
 
 export const PATIENT_COVERAGE_REPOSITORY = Symbol(
@@ -39,6 +41,17 @@ export interface UpdateCoverageRepoPatch {
   notes?: string | null;
   isPrimary?: true;
   updatedById: string;
+  /** SEC-053: con un rol no ADMIN, cambiar la vigencia también redeclara. */
+  editorRole: ClinicRole;
+}
+
+/**
+ * Lo escrito y lo que había justo antes, leído con el candado tomado: la
+ * vigencia y si estaba verificada (SEC-053, para el antes/después auditado).
+ */
+export interface CoverageUpdateResult {
+  coverage: PatientCoverage;
+  previous: CoverageValidity & { verified: boolean };
 }
 
 /** Lo mínimo de la cobertura principal viva que necesita el resumen (sin `memberNumber`). */
@@ -74,14 +87,15 @@ export interface PatientCoverageRepository {
   create(input: CreateCoverageRepoInput): Promise<PatientCoverage>;
   /**
    * Igual que `create` para `patch.isPrimary: true`: edición y marca, o nada.
-   * SEC-049: si cambia el pagador o el nº de afiliado (comparado con lo
-   * guardado, con el candado tomado), borra la verificación y el editor pasa a
-   * ser quien lo declaró (`declaredById`).
+   * SEC-049/SEC-053: si la edición redeclara la cobertura
+   * (`coverageRedeclared`, comparado con lo guardado con el candado tomado),
+   * borra la verificación y el editor pasa a ser quien lo declaró
+   * (`declaredById`), en la misma escritura.
    */
   update(
     id: string,
     patch: UpdateCoverageRepoPatch,
-  ): Promise<PatientCoverage | null>;
+  ): Promise<CoverageUpdateResult | null>;
   /**
    * SEC-049: la marca verificada por `verifiedById` ahora, con el candado del
    * paciente tomado. 409 si el nº guardado ya no es `checkedMemberNumber` o

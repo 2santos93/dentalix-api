@@ -451,7 +451,13 @@ export class CashSessionPaymentDto {
   })
   method!: PaymentMethod | null;
 
-  @ApiProperty({ type: String, nullable: true, example: 'PRI-000012' })
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'PRI-000012',
+    description:
+      'Número del recibo del abono; una forma de pago de un cobro dividido lleva el del recibo único del cobro (DX-390). `null` si el abono es anterior a la numeración.',
+  })
   receiptNumber!: string | null;
 
   @ApiProperty({ type: CashPatientRefDto })
@@ -504,6 +510,33 @@ export class CashOutflowDto {
   createdBy!: CashStaffRefDto;
 }
 
+/** DX-253: devolución de saldo a favor en efectivo (egreso de la caja). */
+export class CashCreditRefundDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({ example: 'DEV-BOG-000001' })
+  number!: string;
+
+  @ApiProperty()
+  amount!: number;
+
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
+  currency!: string;
+
+  @ApiProperty()
+  reason!: string;
+
+  @ApiProperty({ format: 'date-time' })
+  createdAt!: Date;
+
+  @ApiProperty({ type: CashStaffRefDto })
+  createdBy!: CashStaffRefDto;
+
+  @ApiProperty({ type: CashPatientRefDto })
+  patient!: CashPatientRefDto;
+}
+
 export class CashVoidedOutflowDto extends CashOutflowDto {
   @ApiProperty({ type: String, format: 'date-time', nullable: true })
   voidedAt!: Date | null;
@@ -545,7 +578,12 @@ export class CashAdjustmentPaymentDto {
   @ApiProperty({ example: '2026-10-16' })
   paidOn!: string;
 
-  @ApiProperty({ type: String, nullable: true })
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'Número del recibo del abono; una forma de pago de un cobro dividido lleva el del recibo único del cobro (DX-390). `null` si el abono es anterior a la numeración.',
+  })
   receiptNumber!: string | null;
 }
 
@@ -712,6 +750,13 @@ export class CashSessionDetailDto extends CashSessionSummaryDto {
       'Salidas anuladas: no restan salvo si se anularon con la caja cerrada',
   })
   voidedOutflows!: CashVoidedOutflowDto[];
+
+  @ApiProperty({
+    type: [CashCreditRefundDto],
+    description:
+      'DX-253: devoluciones de saldo a favor en efectivo del turno: restan en el esperado de CASH (dentro de «Salidas»).',
+  })
+  creditRefunds!: CashCreditRefundDto[];
 
   @ApiProperty({
     type: [CashAdjustmentDto],

@@ -69,6 +69,12 @@ model Tenant {
   clinicalEntryAddenda                    ClinicalEntryAddendum[]
   anestheticProducts                      AnestheticProduct[]
   anesthesiaAdministrations               AnesthesiaAdministration[]
+  // DX-407: hoja de sedación consciente en la evolución.
+  sedationRecords                         SedationRecord[]
+  sedationChecklists                      SedationChecklist[]
+  sedationAgentAdministrations            SedationAgentAdministration[]
+  sedationVitals                          SedationVitals[]
+  sedationDischarges                      SedationDischarge[]
   // DX-212: diagnósticos CIE-10 de las evoluciones.
   clinicalEntryDiagnoses                  ClinicalEntryDiagnosis[]
   dentitionEvents                         PatientDentitionEvent[]
@@ -112,6 +118,13 @@ model Tenant {
   postOpDeliveries                        PostOpInstructionDelivery[]
   // DX-099: anamnesis enviadas por enlace al paciente.
   medicalHistorySubmissions               MedicalHistorySubmission[]
+  // DX-243: solicitudes de firma a distancia y firmas del profesional.
+  signatureRequests                       SignatureRequest[]
+  consentCountersignatures                PatientConsentCountersignature[]
+  // DX-422: estado del PDF firmado de cada consentimiento a distancia.
+  signedConsentPdfs                       SignedConsentPdf[]
+  // DX-443: enlaces de un solo uso de la copia del PDF firmado.
+  signedConsentPdfLinks                   SignedConsentPdfLink[]
   // DX-151: documentos de los pacientes.
   patientDocuments                        PatientDocument[]
   // DX-233: horario de cada profesional por sede y sus excepciones por fecha.
@@ -139,6 +152,17 @@ model Tenant {
   locationHolidays                        LocationHoliday[]
   // DX-374: tasas de cambio manuales de la clínica.
   manualExchangeRates                     ManualExchangeRate[]
+  // SEC-058: contadores de la clínica en el presupuesto del proveedor de tasas.
+  exchangeProviderClinicBudgets           ExchangeProviderClinicBudget[]
+
+  // DX-253: tope de RECEPTION para traspasar o devolver saldo a favor (0 =
+  // no puede; ADMIN no tiene tope).
+  creditReceptionMaxAmount Decimal                      @default(0) @db.Decimal(14, 2)
+  creditTransfers          PatientCreditTransfer[]
+  creditRefunds            PatientCreditRefund[]
+  creditRefundPayments     PatientCreditRefundPayment[]
+  creditEntries            PatientCreditEntry[]
+  creditRefundCounters     PatientCreditRefundCounter[]
 
   @@map("tenants")
 }
@@ -179,39 +203,54 @@ model User {
   privacyPoliciesPublished          PrivacyPolicyVersion[]
   dataConsentsRecorded              DataProcessingConsent[]
   perioExamsPerformed               PerioExam[]
-  prescriptionsIssued               Prescription[]              @relation("PrescriptionProfessional")
-  prescriptionsVoided               Prescription[]              @relation("PrescriptionVoidedBy")
+  prescriptionsIssued               Prescription[]                   @relation("PrescriptionProfessional")
+  prescriptionsVoided               Prescription[]                   @relation("PrescriptionVoidedBy")
   // DX-191: implantes colocados, anulados y tarjetas entregadas.
-  implantsPlaced                    PatientImplant[]            @relation("PatientImplantProfessional")
-  implantsVoided                    PatientImplant[]            @relation("PatientImplantVoidedBy")
-  implantCardsDelivered             PatientImplant[]            @relation("PatientImplantCardDeliveredBy")
+  implantsPlaced                    PatientImplant[]                 @relation("PatientImplantProfessional")
+  implantsVoided                    PatientImplant[]                 @relation("PatientImplantVoidedBy")
+  implantCardsDelivered             PatientImplant[]                 @relation("PatientImplantCardDeliveredBy")
   // DX-151: documentos del paciente subidos y anulados.
-  uploadedPatientDocuments          PatientDocument[]           @relation("PatientDocumentUploadedBy")
-  voidedPatientDocuments            PatientDocument[]           @relation("PatientDocumentVoidedBy")
+  uploadedPatientDocuments          PatientDocument[]                @relation("PatientDocumentUploadedBy")
+  voidedPatientDocuments            PatientDocument[]                @relation("PatientDocumentVoidedBy")
   planAcceptancesRecorded           TreatmentPlanAcceptance[]
   tokens                            UserToken[]
   clinicalEntryAddenda              ClinicalEntryAddendum[]
   anesthesiaAdministrations         AnesthesiaAdministration[]
+  // DX-407: hoja de sedación (autor de cada parte; operador y monitor del egreso).
+  sedationRecordsAuthored           SedationRecord[]
+  sedationChecklists                SedationChecklist[]
+  sedationAgentsAdministered        SedationAgentAdministration[]
+  sedationVitalsTaken               SedationVitals[]
+  sedationDischargesOperated        SedationDischarge[]              @relation("SedationDischargeOperator")
+  sedationDischargesMonitored       SedationDischarge[]              @relation("SedationDischargeMonitor")
   dentitionEventsRecorded           PatientDentitionEvent[]
   retentionActions                  PatientRetentionAction[]
   platformAccesses                  PlatformAccessAudit[]
   // DX-204: descuentos dados en ítems de plan y cambios de la política.
-  planItemDiscounts                 TreatmentPlanItem[]         @relation("TreatmentPlanItemDiscountBy")
+  planItemDiscounts                 TreatmentPlanItem[]              @relation("TreatmentPlanItemDiscountBy")
   discountPoliciesUpdated           DiscountPolicy[]
   // DX-220: acciones de plataforma del superadmin (reencolar un trabajo).
   platformAuditEvents               PlatformAuditEvent[]
   // DX-222: indicaciones postoperatorias entregadas.
   postOpDeliveries                  PostOpInstructionDelivery[]
   // DX-099: enlaces de anamnesis creados y envíos revisados.
-  medicalHistorySubmissionsCreated  MedicalHistorySubmission[]  @relation("MedicalHistorySubmissionCreatedBy")
-  medicalHistorySubmissionsReviewed MedicalHistorySubmission[]  @relation("MedicalHistorySubmissionReviewedBy")
+  medicalHistorySubmissionsCreated  MedicalHistorySubmission[]       @relation("MedicalHistorySubmissionCreatedBy")
+  medicalHistorySubmissionsReviewed MedicalHistorySubmission[]       @relation("MedicalHistorySubmissionReviewedBy")
   // DX-273: salidas de citas de COMPLETED (con motivo).
-  appointmentStatusReversals        AppointmentStatusReversal[] @relation("AppointmentStatusReversalActor")
+  appointmentStatusReversals        AppointmentStatusReversal[]      @relation("AppointmentStatusReversalActor")
   // DX-279: versiones de la política de cancelación que creó.
   cancellationPolicyVersions        CancellationPolicyVersion[]
-  cancellationFees                  CancellationFee[]           @relation("CancellationFeeCreatedBy")
+  cancellationFees                  CancellationFee[]                @relation("CancellationFeeCreatedBy")
   // SEC-050: cargos por inasistencia que anuló (con motivo).
-  cancellationFeesVoided            CancellationFee[]           @relation("CancellationFeeVoidedBy")
+  cancellationFeesVoided            CancellationFee[]                @relation("CancellationFeeVoidedBy")
+  // DX-243: firma a distancia (quién la envía, el profesional que firmará, quién
+  // la anula) y las firmas del profesional que añadió después.
+  signatureRequestsCreated          SignatureRequest[]               @relation("SignatureRequestCreatedBy")
+  // DX-443: «Reenviar copia» del PDF firmado.
+  signedConsentPdfLinksCreated      SignedConsentPdfLink[]
+  signatureRequestsProfessional     SignatureRequest[]               @relation("SignatureRequestProfessional")
+  signatureRequestsRevoked          SignatureRequest[]               @relation("SignatureRequestRevokedBy")
+  consentCountersignatures          PatientConsentCountersignature[]
 
   @@map("users")
 }
@@ -302,6 +341,7 @@ model Location {
 
   clinicalEntries            ClinicalEntry[]
   anesthesiaAdministrations  AnesthesiaAdministration[]
+  sedationRecords            SedationRecord[]
   appointments               Appointment[]
   payments                   Payment[]
   inventoryItems             InventoryItem[]
@@ -342,6 +382,8 @@ model Location {
   postOpDeliveries           PostOpInstructionDelivery[]
   // DX-099: anamnesis por revisar de la sede.
   medicalHistorySubmissions  MedicalHistorySubmission[]
+  // DX-243: solicitudes de firma a distancia enviadas desde la sede.
+  signatureRequests          SignatureRequest[]
   // DX-105: listas y convenios de la sede.
   priceLists                 PriceList[]
   agreements                 Agreement[]
@@ -362,6 +404,10 @@ model Location {
 
   // Destino de las FK compuestas (tenantId, locationId) de citas, pagos e
   // inventario: la sede tiene que ser del MISMO tenant (SEC-004).
+  // DX-253
+  creditTransfers PatientCreditTransfer[]
+  creditRefunds   PatientCreditRefund[]
+
   @@unique([tenantId, id], map: "locations_tenant_id_key")
   @@unique([tenantId, receiptPrefix], map: "locations_tenant_receipt_prefix_key")
   // DX-043 (DB-017): sin @@index([tenantId]); era prefijo exacto de
@@ -572,7 +618,7 @@ model Patient {
   // por tenant (patients_import_batch_fkey).
   importBatchId                String?               @map("import_batch_id") @db.Uuid
 
-  importBatch                 PatientImportBatch?          @relation(fields: [tenantId, importBatchId], references: [tenantId, id], onDelete: Restrict, map: "patients_import_batch_fkey")
+  importBatch                 PatientImportBatch?              @relation(fields: [tenantId, importBatchId], references: [tenantId, id], onDelete: Restrict, map: "patients_import_batch_fkey")
   // DX-107: filas de importación que lo crearon o le rellenaron campos vacíos.
   importRows                  PatientImportRow[]
   // DX-262: saldos migrados y su hoja de saldos.
@@ -584,6 +630,8 @@ model Patient {
   clinicalEntries             ClinicalEntry[]
   clinicalEntryAddenda        ClinicalEntryAddendum[]
   anesthesiaAdministrations   AnesthesiaAdministration[]
+  // DX-407: hojas de sedación de sus evoluciones.
+  sedationRecords             SedationRecord[]
   dentitionEvents             PatientDentitionEvent[]
   toothRecords                ToothRecord[]
   appointments                Appointment[]
@@ -609,8 +657,8 @@ model Patient {
   reminderOptOutMatchWarnings ReminderOptOutMatchWarning[]
   reminderOptOutLinks         ReminderOptOutLink[]
   // DX-203: sus responsables (de pago y avisos) y de quién es responsable.
-  responsibleParties          PatientResponsibleParty[]    @relation("PatientResponsibleParties")
-  responsibleFor              PatientResponsibleParty[]    @relation("ResponsiblePatient")
+  responsibleParties          PatientResponsibleParty[]        @relation("PatientResponsibleParties")
+  responsibleFor              PatientResponsibleParty[]        @relation("ResponsiblePatient")
   // DX-153: sus coberturas (pagador, plan, afiliado, vigencia).
   coverages                   PatientCoverage[]
   // DX-105: asignaciones de convenio (una viva; las retiradas son el historial).
@@ -619,8 +667,13 @@ model Patient {
   postOpDeliveries            PostOpInstructionDelivery[]
   // DX-099: anamnesis enviadas por enlace.
   medicalHistorySubmissions   MedicalHistorySubmission[]
-  country                     Country?                     @relation(fields: [countryCode], references: [code])
-  city                        City?                        @relation(fields: [cityId], references: [id])
+  // DX-243: solicitudes de firma a distancia y firmas del profesional.
+  signatureRequests           SignatureRequest[]
+  consentCountersignatures    PatientConsentCountersignature[]
+  // DX-422: PDF firmado de sus consentimientos a distancia.
+  signedConsentPdfs           SignedConsentPdf[]
+  country                     Country?                         @relation(fields: [countryCode], references: [code])
+  city                        City?                            @relation(fields: [cityId], references: [id])
 
   @@unique([tenantId, docNumber], map: "patients_tenant_doc_key")
   // Requisito de las FK COMPUESTAS de Appointment, TreatmentPlan,
@@ -803,6 +856,8 @@ model ClinicalEntry {
   addenda     ClinicalEntryAddendum[]
   // DX-307: anestesia local registrada en la evolución (append-only).
   anesthesia  AnesthesiaAdministration[]
+  // DX-407: hoja de sedación de la evolución (una como mucho, append-only).
+  sedation    SedationRecord[]
   // DX-212: diagnósticos CIE-10, creados en la misma transacción que la
   // evolución e inalterables como ella.
   diagnoses   ClinicalEntryDiagnosis[]
@@ -1389,6 +1444,9 @@ model AppointmentWaitlistEntry {
 enum WaitlistOfferChannel {
   WA_ME
   PHONE
+  // DX-435: oferta con enlace público que el paciente acepta solo.
+  LINK_WA_ME
+  LINK_EMAIL
 }
 
 enum WaitlistOfferOutcome {
@@ -1396,6 +1454,9 @@ enum WaitlistOfferOutcome {
   ACCEPTED
   DECLINED
   NO_ANSWER
+  // DX-435: el enlace caducó sin respuesta, u otro paciente se quedó el hueco.
+  EXPIRED
+  TAKEN_BY_OTHER
 }
 
 model WaitlistOffer {
@@ -1417,6 +1478,11 @@ model WaitlistOffer {
   createdById     String               @db.Uuid
   outcomeById     String?              @db.Uuid
   outcomeAt       DateTime?
+  // DX-435: solo en los canales con enlace (CHECK). sha256 del token de un
+  // solo uso (el texto plano viaja únicamente en el enlace) y cuándo deja de
+  // valer: al empezar el hueco, o antes si se configura.
+  tokenHash       String?              @unique(map: "waitlist_offers_token_hash_key")
+  expiresAt       DateTime?
   createdAt       DateTime             @default(now())
   updatedAt       DateTime             @updatedAt
 
@@ -1634,6 +1700,8 @@ model TreatmentPlan {
   payments                    Payment[]
   paymentPlans                PaymentPlan[]
   consents                    PatientConsent[]
+  // DX-243: consentimientos enviados a firmar a distancia con este plan.
+  signatureRequests           SignatureRequest[]
   // Aceptación firmada del presupuesto (DX-012): como mucho una por plan.
   acceptance                  TreatmentPlanAcceptance?
   // DX-051: imputaciones a sus ítems y cola de repartos pendientes.
@@ -1643,6 +1711,12 @@ model TreatmentPlan {
   // Destinos de FK compuestas (SEC-004): (tenantId, id) para los ítems del
   // plan; (tenantId, id, patientId) para pagos y planes de pago, que además
   // garantiza que su `patientId` denormalizado sea el del plan.
+  // DX-253: saldo a favor (traspasos, devoluciones y sus asientos).
+  creditTransfersOut PatientCreditTransfer[] @relation("CreditTransferSource")
+  creditTransfersIn  PatientCreditTransfer[] @relation("CreditTransferTarget")
+  creditRefunds      PatientCreditRefund[]   @relation("CreditRefundPlan")
+  creditEntries      PatientCreditEntry[]    @relation("CreditEntryPlan")
+
   @@unique([tenantId, id], map: "treatment_plans_tenant_id_key")
   @@unique([tenantId, id, patientId], map: "treatment_plans_tenant_id_patient_key")
   @@index([tenantId, patientId])
@@ -1814,34 +1888,44 @@ model DiscountPolicy {
 // moneda del plan aceptado (20261016213000_treatment_plan_acceptances).
 // ---------------------------------------------------------------------------
 model TreatmentPlanAcceptance {
-  id             String   @id @default(uuid()) @db.Uuid
-  tenantId       String   @db.Uuid
-  planId         String   @db.Uuid
-  patientId      String   @db.Uuid
-  locationId     String   @db.Uuid
-  signerName     String
+  id                      String                   @id @default(uuid()) @db.Uuid
+  tenantId                String                   @db.Uuid
+  planId                  String                   @db.Uuid
+  patientId               String                   @db.Uuid
+  locationId              String                   @db.Uuid
+  signerName              String
   // PNG en base64 (sin prefijo data:). Tope: 200 KB decodificados (CHECK).
-  signature      String
+  signature               String
   // El presupuesto tal como se mostró y se firmó (plan-quote.ts).
-  content        Json
+  content                 Json
   // SHA-256 (hex) del contenido presentado.
-  contentHash    String
+  contentHash             String
   // SHA-256 (hex) de contentHash + firmante + firma + acceptedAt.
-  acceptanceHash String
-  acceptedAt     DateTime
-  acceptedById   String   @db.Uuid
-  ipAddress      String?
-  userAgent      String?
-  createdAt      DateTime @default(now())
+  acceptanceHash          String
+  acceptedAt              DateTime
+  acceptedById            String                   @db.Uuid
+  ipAddress               String?
+  userAgent               String?
+  createdAt               DateTime                 @default(now())
+  // DX-415: aceptada a distancia por enlace con código. Evidencias congeladas
+  // (todas o ninguna, CHECK).
+  signatureRequestId      String?                  @db.Uuid
+  remoteChannel           SignatureRequestChannel?
+  remoteDestinationMasked String?
+  remoteSentAt            DateTime?
+  remoteOpenedAt          DateTime?
+  remoteVerifiedAt        DateTime?
 
   // FK COMPUESTAS (SEC-004): plan del MISMO tenant y del MISMO paciente; sede
   // del MISMO tenant.
-  plan       TreatmentPlan @relation(fields: [tenantId, planId, patientId], references: [tenantId, id, patientId])
-  location   Location      @relation(fields: [tenantId, locationId], references: [tenantId, id])
-  acceptedBy User          @relation(fields: [acceptedById], references: [id])
+  plan             TreatmentPlan     @relation(fields: [tenantId, planId, patientId], references: [tenantId, id, patientId])
+  signatureRequest SignatureRequest? @relation(fields: [tenantId, signatureRequestId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, map: "treatment_plan_acceptances_signature_request_fkey")
+  location         Location          @relation(fields: [tenantId, locationId], references: [tenantId, id])
+  acceptedBy       User              @relation(fields: [acceptedById], references: [id])
 
   // Una aceptación por plan (volver a firmar: 409).
   @@unique([tenantId, planId, patientId], map: "treatment_plan_acceptances_plan_key")
+  @@unique([tenantId, signatureRequestId, patientId], map: "treatment_plan_acceptances_signature_request_key")
   @@index([tenantId, patientId])
   @@index([tenantId, locationId])
   @@index([acceptedById])
@@ -1968,6 +2052,10 @@ model Currency {
   locations                  Location[]
   // DX-374: tasas manuales de las clínicas en esa moneda.
   manualExchangeRates        ManualExchangeRate[]
+
+  creditTransfers PatientCreditTransfer[] @relation("CreditTransferCurrency")
+  creditRefunds   PatientCreditRefund[]   @relation("CreditRefundCurrency")
+  creditEntries   PatientCreditEntry[]    @relation("CreditEntryCurrency")
 
   @@map("currencies")
 }
@@ -2151,6 +2239,14 @@ model Payment {
   reference                String?
   referenceNormalized      String?
   duplicateReferenceReason String?
+  // DX-390: cobro dividido en varias formas de pago con un solo recibo. Cada
+  // línea es un abono; `splitId` es el id de la línea 1 (la que lleva el
+  // recibo y la Idempotency-Key del cobro), también en ella misma, y
+  // `splitLine` su número (1–5). NULL en un abono de una sola forma de pago
+  // (CHECK payments_split_check: las dos juntas, 1–5, y la línea 1 es la de
+  // `splitId`).
+  splitId                  String?             @db.Uuid
+  splitLine                Int?                @db.SmallInt
 
   // FK COMPUESTAS (SEC-004): el plan y la sede tienen que ser del MISMO tenant,
   // y `patientId` (denormalizado) tiene que ser el paciente del plan. Por
@@ -2183,6 +2279,11 @@ model Payment {
   // DX-380: su reintento si se quedó sin tasa o sin base (una fila como mucho).
   baseRetry           PaymentBaseRetry?
 
+  // DX-390: la línea 1 del cobro dividido (de la MISMA clínica: FK compuesta
+  // NOT VALID, como payments_payment_method_fkey) y, en ella, todas sus líneas.
+  splitHead  Payment?  @relation("PaymentSplit", fields: [tenantId, splitId], references: [tenantId, id], onDelete: Restrict, map: "payments_split_fkey")
+  splitLines Payment[] @relation("PaymentSplit")
+
   // Idempotency dedup for POST payments. Prisma's `@@unique` would emit a FULL
   // unique index; the migration 20260731160000_add_payment_idempotency_key
   // instead creates it PARTIAL (WHERE "idempotencyKey" IS NOT NULL) so NULL
@@ -2190,6 +2291,9 @@ model Payment {
   // non-null key is unique per tenant. Same name+columns as declared here, so
   // migrate status/deploy see no drift. Do NOT accept a migrate-dev diff that
   // recreates this as a full index.
+  // DX-253: devoluciones que lo citan como abono de referencia.
+  creditRefundRefs PatientCreditRefundPayment[]
+
   @@unique([tenantId, idempotencyKey], map: "payments_tenant_idempotency_key")
   // DX-380: destino de la FK compuesta por clínica de `payment_base_retries`
   // (el único con "treatmentPlanId" no sirve para un abono a un saldo migrado).
@@ -2197,6 +2301,11 @@ model Payment {
   // DX-051: destino de las FK de la base y de la imputación (solo abonos a
   // planes; CONCURRENTLY en 20261026100100).
   @@unique([tenantId, id, treatmentPlanId], map: "payments_tenant_id_plan_key")
+  // DX-390: las líneas de un cobro dividido, una por número (y lado hijo de
+  // la FK payments_split_fkey). PARCIAL (WHERE "splitId" IS NOT NULL, solo en
+  // 20261105130100, CONCURRENTLY): NO aceptes un diff de migrate dev que lo
+  // vuelva completo.
+  @@unique([tenantId, splitId, splitLine], map: "payments_tenant_split_line_key")
   // DX-262: índice PARCIAL que Prisma no expresa (no se declara):
   //   payments_tenant_opening_balance_idx ("tenantId", "openingBalanceId")
   //     WHERE "openingBalanceId" IS NOT NULL
@@ -2583,8 +2692,10 @@ model ConsentTemplate {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  tenant   Tenant           @relation(fields: [tenantId], references: [id])
-  consents PatientConsent[]
+  tenant            Tenant             @relation(fields: [tenantId], references: [id])
+  consents          PatientConsent[]
+  // DX-243: enviados a firmar a distancia con esta plantilla.
+  signatureRequests SignatureRequest[]
 
   // Destino de la FK compuesta de PatientConsent (SEC-004).
   @@unique([tenantId, id], map: "consent_templates_tenant_id_key")
@@ -2602,43 +2713,254 @@ enum ConsentSignerType {
 // de la migración rechaza cualquier UPDATE, y el DELETE dentro de un contexto
 // de tenant (la app); el puerto del repositorio no tiene ni update ni delete.
 model PatientConsent {
-  id                    String            @id @default(uuid()) @db.Uuid
-  tenantId              String            @db.Uuid
-  patientId             String            @db.Uuid
-  templateId            String            @db.Uuid
-  templateVersion       Int
-  treatmentPlanId       String?           @db.Uuid
+  id                      String                   @id @default(uuid()) @db.Uuid
+  tenantId                String                   @db.Uuid
+  patientId               String                   @db.Uuid
+  templateId              String                   @db.Uuid
+  templateVersion         Int
+  treatmentPlanId         String?                  @db.Uuid
   // Foto del documento tal como se firmó.
-  title                 String
-  body                  String
-  signerType            ConsentSignerType
+  title                   String
+  body                    String
+  signerType              ConsentSignerType
   // Quien firma: el paciente o su tutor (nombre y documento en el momento de
   // la firma).
-  signerName            String
-  signerDocument        String?
-  professionalName      String
+  signerName              String
+  signerDocument          String?
+  professionalName        String
   // PNG en base64 (sin prefijo data:). Tope: 200 KB decodificados (CHECK).
-  patientSignature      String
-  professionalSignature String
+  patientSignature        String
+  // DX-243: NULL solo en una firma a distancia (`signatureRequestId`): el
+  // profesional firma después, en `patient_consent_countersignatures`.
+  professionalSignature   String?
   // SHA-256 (hex) de texto + firmante + firmas + signedAt (consent-hash.ts).
-  contentHash           String
+  contentHash             String
   // Hora del servidor, nunca del cliente.
-  signedAt              DateTime
-  recordedById          String            @db.Uuid
-  ipAddress             String?
-  userAgent             String?
-  createdAt             DateTime          @default(now())
+  signedAt                DateTime
+  recordedById            String                   @db.Uuid
+  ipAddress               String?
+  userAgent               String?
+  createdAt               DateTime                 @default(now())
+  // DX-243: firma a distancia. Evidencias congeladas del enlace (canal,
+  // destino enmascarado, envío, apertura y verificación del código); todas
+  // NULL en una firma en pantalla y todas presentes en una a distancia (CHECK).
+  signatureRequestId      String?                  @db.Uuid
+  remoteChannel           SignatureRequestChannel?
+  remoteDestinationMasked String?
+  remoteSentAt            DateTime?
+  remoteOpenedAt          DateTime?
+  remoteVerifiedAt        DateTime?
 
   // FK COMPUESTAS (SEC-004): paciente, plantilla y plan del MISMO tenant; el
   // plan, además, del MISMO paciente (mismo criterio que Payment).
-  patient       Patient         @relation(fields: [tenantId, patientId], references: [tenantId, id])
-  template      ConsentTemplate @relation(fields: [tenantId, templateId], references: [tenantId, id])
-  treatmentPlan TreatmentPlan?  @relation(fields: [tenantId, treatmentPlanId, patientId], references: [tenantId, id, patientId])
+  patient          Patient                         @relation(fields: [tenantId, patientId], references: [tenantId, id])
+  template         ConsentTemplate                 @relation(fields: [tenantId, templateId], references: [tenantId, id])
+  treatmentPlan    TreatmentPlan?                  @relation(fields: [tenantId, treatmentPlanId, patientId], references: [tenantId, id, patientId])
+  // DX-407: consentimiento de sedación citado en la valoración previa.
+  sedationRecords  SedationRecord[]
+  // DX-243: la solicitud, de la MISMA clínica y del MISMO paciente.
+  signatureRequest SignatureRequest?               @relation(fields: [tenantId, signatureRequestId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, map: "patient_consents_signature_request_fkey")
+  countersignature PatientConsentCountersignature?
+  // DX-422: el PDF firmado generado en el servidor (solo a distancia).
+  signedPdf        SignedConsentPdf?
 
+  // DX-407: destino de la FK compuesta (tenantId, patientId, consentId) de
+  // sedation_records: el consentimiento es del MISMO paciente y clínica.
+  @@unique([tenantId, patientId, id], map: "patient_consents_tenant_patient_id_key")
+  // DX-243: destino de la FK compuesta de la firma del profesional.
+  @@unique([tenantId, id, patientId], map: "patient_consents_tenant_id_patient_key")
+  // Una solicitud produce como mucho un consentimiento (el id ya fija clínica y paciente).
+  @@unique([tenantId, signatureRequestId, patientId], map: "patient_consents_signature_request_key")
   @@index([tenantId, patientId, signedAt])
   @@index([tenantId, templateId])
   @@index([tenantId, treatmentPlanId, patientId])
   @@map("patient_consents")
+}
+
+// ---------------------------------------------------------------------------
+// Firma a distancia (DX-243). Una solicitud lleva al paciente (o a su
+// responsable, si es menor) un enlace de un solo uso por email; el documento
+// solo se ve tras verificar un código de 6 dígitos (5 intentos → bloqueado).
+// Del token y del código solo se guarda el hash (SHA-256 / HMAC). El texto que
+// verá y firmará se congela al enviarla. Tipos CONSENT y BUDGET (el segundo
+// llega con DX-415; hoy la API lo rechaza).
+// ---------------------------------------------------------------------------
+enum SignatureRequestType {
+  CONSENT
+  BUDGET
+}
+
+enum SignatureRequestChannel {
+  EMAIL
+}
+
+model SignatureRequest {
+  id                 String                  @id @default(uuid()) @db.Uuid
+  tenantId           String                  @db.Uuid
+  /// Sede desde la que se envía: da la zona y el formato de las fechas.
+  locationId         String                  @db.Uuid
+  patientId          String                  @db.Uuid
+  type               SignatureRequestType
+  channel            SignatureRequestChannel
+  /// CONSENT: plantilla y versión del texto congelado (CHECK).
+  templateId         String?                 @db.Uuid
+  templateVersion    Int?
+  treatmentPlanId    String?                 @db.Uuid
+  /// El documento exacto que verá y firmará (variables ya resueltas).
+  title              String
+  body               String
+  /// El profesional que firmará después en la app (y que nombra el texto).
+  professionalUserId String                  @db.Uuid
+  professionalName   String
+  /// Quién firma: el paciente o, si es menor, su responsable (DX-203/DX-328).
+  signerType         ConsentSignerType
+  signerName         String
+  signerDocument     String?
+  /// Adónde va (para reenviar el código) y cómo se muestra (`an***@dominio`).
+  destination        String
+  destinationMasked  String
+  tokenHash          String                  @unique
+  /// HMAC-SHA256 del código vigente; NULL hasta pedirlo.
+  codeHash           String?
+  codeExpiresAt      DateTime?
+  codeSentAt         DateTime?
+  codeSendCount      Int                     @default(0)
+  failedAttempts     Int                     @default(0)
+  lockedAt           DateTime?
+  /// Sesión del navegador que verificó el código (hash), con su caducidad.
+  sessionHash        String?
+  sessionExpiresAt   DateTime?
+  expiresAt          DateTime
+  openedAt           DateTime?
+  verifiedAt         DateTime?
+  signedAt           DateTime?
+  revokedAt          DateTime?
+  revokedById        String?                 @db.Uuid
+  createdById        String                  @db.Uuid
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+  /// DX-415 (BUDGET): la foto exacta del presupuesto enviado (plan-quote.ts)
+  /// y su SHA-256. Si el plan vivo deja de coincidir, el enlace no sirve.
+  budgetContent      Json?
+  budgetContentHash  String?
+
+  tenant           Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patient          Patient                  @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "signature_requests_patient_fkey")
+  location         Location                 @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "signature_requests_location_fkey")
+  template         ConsentTemplate?         @relation(fields: [tenantId, templateId], references: [tenantId, id], onDelete: Restrict, map: "signature_requests_template_fkey")
+  treatmentPlan    TreatmentPlan?           @relation(fields: [tenantId, treatmentPlanId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, map: "signature_requests_plan_fkey")
+  professional     User                     @relation("SignatureRequestProfessional", fields: [professionalUserId], references: [id], onDelete: Restrict, map: "signature_requests_professional_fkey")
+  createdBy        User                     @relation("SignatureRequestCreatedBy", fields: [createdById], references: [id], onDelete: Restrict, map: "signature_requests_created_by_fkey")
+  revokedBy        User?                    @relation("SignatureRequestRevokedBy", fields: [revokedById], references: [id], onDelete: Restrict, map: "signature_requests_revoked_by_fkey")
+  consent          PatientConsent?
+  budgetAcceptance TreatmentPlanAcceptance?
+
+  @@unique([tenantId, id, patientId], map: "signature_requests_tenant_id_patient_key")
+  @@index([tenantId, patientId, createdAt(sort: Desc)], map: "signature_requests_patient_idx")
+  @@index([tenantId, locationId], map: "signature_requests_location_idx")
+  @@index([tenantId, templateId], map: "signature_requests_template_idx")
+  @@index([tenantId, treatmentPlanId], map: "signature_requests_plan_idx")
+  @@index([professionalUserId], map: "signature_requests_professional_idx")
+  @@index([createdById], map: "signature_requests_created_by_idx")
+  @@index([revokedById], map: "signature_requests_revoked_by_idx")
+  @@map("signature_requests")
+}
+
+/// Firma del profesional que completa un consentimiento firmado a distancia
+/// (DX-243). Append-only e inmutable, como el consentimiento: una por
+/// consentimiento, solo si este no la tiene ya (trigger).
+model PatientConsentCountersignature {
+  id                    String   @id @default(uuid()) @db.Uuid
+  tenantId              String   @db.Uuid
+  patientId             String   @db.Uuid
+  consentId             String   @db.Uuid
+  professionalUserId    String   @db.Uuid
+  professionalName      String
+  /// PNG en base64 (sin prefijo data:). Tope: 200 KB decodificados (CHECK).
+  professionalSignature String
+  /// SHA-256 del hash del consentimiento + profesional + firma + signedAt.
+  contentHash           String
+  signedAt              DateTime
+  ipAddress             String?
+  userAgent             String?
+  createdAt             DateTime @default(now())
+
+  tenant       Tenant         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patient      Patient        @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "patient_consent_countersignatures_patient_fkey")
+  consent      PatientConsent @relation(fields: [tenantId, consentId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, map: "patient_consent_countersignatures_consent_fkey")
+  professional User           @relation(fields: [professionalUserId], references: [id], onDelete: Restrict, map: "patient_consent_countersignatures_professional_fkey")
+
+  // Una firma del profesional por consentimiento (y lado hijo de su FK).
+  @@unique([tenantId, consentId, patientId], map: "patient_consent_countersignatures_consent_key")
+  @@index([tenantId, patientId], map: "patient_consent_countersignatures_patient_idx")
+  @@index([professionalUserId], map: "patient_consent_countersignatures_professional_idx")
+  @@map("patient_consent_countersignatures")
+}
+
+/// DX-422: estado de la generación del PDF firmado de un consentimiento a
+/// distancia ya completo. PENDING (en la cola o reintentando), READY (archivado
+/// en `patient_documents`, inalterable) o FAILED (intentos agotados; la ficha
+/// ofrece reintentar). Trigger `signed_consent_pdfs_guard`: una fila READY no
+/// cambia y nunca cambia de consentimiento; sin DELETE. RLS FORCE.
+model SignedConsentPdf {
+  id            String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId      String                 @db.Uuid
+  patientId     String                 @db.Uuid
+  consentId     String                 @db.Uuid
+  status        SignedConsentPdfStatus @default(PENDING)
+  attempts      Int                    @default(0)
+  /// Código técnico del último error (CHECK), nunca un mensaje.
+  lastErrorCode String?
+  documentId    String?                @db.Uuid
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @default(now())
+  /// DX-443: al quedar READY se envía la copia al paciente (false en los del
+  /// barrido retroactivo: esos solo se envían con «Reenviar copia»).
+  notifyPatient Boolean                @default(true)
+
+  tenant   Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patient  Patient                @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "signed_consent_pdfs_patient_fkey")
+  consent  PatientConsent         @relation(fields: [tenantId, consentId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, map: "signed_consent_pdfs_consent_fkey")
+  document PatientDocument?       @relation(fields: [tenantId, documentId], references: [tenantId, id], onDelete: Restrict, map: "signed_consent_pdfs_document_fkey")
+  links    SignedConsentPdfLink[]
+
+  @@unique([tenantId, consentId, patientId], map: "signed_consent_pdfs_consent_key")
+  @@unique([tenantId, documentId], map: "signed_consent_pdfs_document_key")
+  @@index([tenantId, patientId], map: "signed_consent_pdfs_patient_idx")
+  @@map("signed_consent_pdfs")
+}
+
+enum SignedConsentPdfStatus {
+  PENDING
+  READY
+  FAILED
+}
+
+/// DX-443: enlace de un solo uso para que el paciente (o su responsable)
+/// descargue su copia del PDF firmado. Solo el sha256 del token; uno vivo por
+/// consentimiento (índice parcial `signed_consent_pdf_links_live_key`).
+/// Trigger `signed_consent_pdf_links_guard`: solo se marca usado o invalidado,
+/// una vez; sin DELETE. RLS FORCE.
+model SignedConsentPdfLink {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String    @db.Uuid
+  patientId   String    @db.Uuid
+  consentId   String    @db.Uuid
+  tokenHash   String    @unique(map: "signed_consent_pdf_links_token_hash_key")
+  expiresAt   DateTime
+  /// NULL: el envío automático al quedar READY.
+  createdById String?   @db.Uuid
+  createdAt   DateTime  @default(now())
+  usedAt      DateTime?
+  revokedAt   DateTime?
+
+  tenant    Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  signedPdf SignedConsentPdf @relation(fields: [tenantId, consentId, patientId], references: [tenantId, consentId, patientId], onDelete: Restrict, map: "signed_consent_pdf_links_pdf_fkey")
+  createdBy User?            @relation(fields: [createdById], references: [id], onDelete: Restrict, map: "signed_consent_pdf_links_created_by_fkey")
+
+  @@index([tenantId, consentId, patientId, createdAt], map: "signed_consent_pdf_links_sent_idx")
+  @@index([createdById], map: "signed_consent_pdf_links_created_by_idx")
+  @@map("signed_consent_pdf_links")
 }
 
 // ---------------------------------------------------------------------------
@@ -2971,6 +3293,13 @@ enum AuditResourceType {
   // DX-307: catálogo de anestésicos locales y anestesia de una evolución.
   ANESTHETIC_PRODUCT
   ANESTHESIA_ADMINISTRATION
+  // DX-407: hoja de sedación de una evolución (cada parte que se añade).
+  SEDATION_RECORD
+  // DX-243: firma a distancia (enviar, abrir, verificar, bloquear, firmar, anular).
+  SIGNATURE_REQUEST
+  // DX-253: saldo a favor del paciente (traspaso, devolución y su
+  // comprobante, tope de recepción).
+  PATIENT_CREDIT
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o
@@ -3027,14 +3356,23 @@ enum EmailOutboxStatus {
 }
 
 enum EmailTemplate {
-  INVITATION           @map("invitation")
-  PASSWORD_RESET       @map("password-reset")
-  EMAIL_VERIFY         @map("email-verify")
-  REGISTRATION_NOTICE  @map("registration-notice")
-  APPOINTMENT_REMINDER @map("appointment-reminder")
-  PAYMENT_RECEIPT      @map("payment-receipt")
+  INVITATION                @map("invitation")
+  PASSWORD_RESET            @map("password-reset")
+  EMAIL_VERIFY              @map("email-verify")
+  REGISTRATION_NOTICE       @map("registration-notice")
+  APPOINTMENT_REMINDER      @map("appointment-reminder")
+  PAYMENT_RECEIPT           @map("payment-receipt")
   // DX-222: enlace a las indicaciones postoperatorias.
-  POST_OP_INSTRUCTIONS @map("post-op-instructions")
+  POST_OP_INSTRUCTIONS      @map("post-op-instructions")
+  // DX-243: firma a distancia (el enlace y el código de verificación).
+  SIGNATURE_REQUEST         @map("signature-request")
+  SIGNATURE_CODE            @map("signature-code")
+  // DX-415: confirmación de la aceptación del presupuesto a distancia.
+  SIGNATURE_BUDGET_ACCEPTED @map("signature-budget-accepted")
+  // DX-435: oferta de un hueco libre con enlace para aceptarlo.
+  SLOT_OFFER                @map("slot-offer")
+  // DX-443: copia del PDF firmado con un enlace de un solo uso.
+  SIGNED_CONSENT_COPY       @map("signed-consent-copy")
 }
 
 /// Registro de envíos de email (patrón outbox). NUNCA guarda el destinatario
@@ -3668,6 +4006,8 @@ model PatientDocument {
   location   Location @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict)
   uploadedBy User     @relation("PatientDocumentUploadedBy", fields: [uploadedById], references: [id], onDelete: Restrict)
   voidedBy   User?    @relation("PatientDocumentVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
+  // DX-422: el PDF firmado que archiva (si lo generó el servidor).
+  signedConsentPdf SignedConsentPdf?
 
   @@unique([tenantId, id], map: "patient_documents_tenant_id_key")
   @@index([tenantId, patientId, uploadedAt(sort: Desc)], map: "patient_documents_patient_uploaded_idx")
@@ -4170,6 +4510,9 @@ model CashSession {
   originatedAdjustments CashSessionAdjustment[] @relation("CashAdjustmentOriginal")
   // DX-274: pagos de gastos hechos desde el cajón (salidas de caja).
   expensePayments       ExpensePayment[]
+
+  // DX-253: devoluciones de saldo a favor en efectivo (egreso de la caja).
+  creditRefunds PatientCreditRefund[]
 
   @@unique([tenantId, id], map: "cash_sessions_tenant_id_key")
   @@index([tenantId, locationId, openedAt(sort: Desc), id(sort: Desc)], map: "cash_sessions_tenant_location_opened_idx")
@@ -5194,6 +5537,12 @@ model AnestheticProduct {
   mlPerCarpule     Decimal  @db.Decimal(3, 2)
   maxMgPerKg       Decimal  @db.Decimal(4, 2)
   maxAbsoluteMg    Decimal  @db.Decimal(6, 1)
+  /// DX-420: mg/kg en menores de 12 años (null = el de adulto), edad mínima
+  /// en años (null = sin mínimo) y mg de epinefrina por carpule (0 = sin
+  /// epinefrina; null = no se sabe). Valores por defecto revisables.
+  pediatricMaxMgPerKg     Decimal? @db.Decimal(4, 2)
+  minAgeYears             Int?     @db.SmallInt
+  epinephrineMgPerCarpule Decimal? @db.Decimal(5, 4)
   sampleCode       String?
   active           Boolean  @default(true)
   createdById      String?  @db.Uuid
@@ -5234,6 +5583,14 @@ model AnesthesiaAdministration {
   mlPerCarpule       Decimal             @db.Decimal(3, 2)
   maxMgPerKg         Decimal             @db.Decimal(4, 2)
   maxAbsoluteMg      Decimal             @db.Decimal(6, 1)
+  // DX-420: copia de los valores pediátricos y de epinefrina del catálogo
+  // (null en los registros anteriores), la epinefrina de esta dosis y la
+  // acumulada del paciente en la ventana, en mg.
+  pediatricMaxMgPerKg     Decimal?            @db.Decimal(4, 2)
+  minAgeYears             Int?                @db.SmallInt
+  epinephrineMgPerCarpule Decimal?            @db.Decimal(5, 4)
+  epinephrineMg           Decimal?            @db.Decimal(6, 4)
+  cumulativeEpinephrineMg Decimal?            @db.Decimal(6, 4)
   carpules           Decimal             @db.Decimal(4, 2)
   doseMg             Decimal             @db.Decimal(6, 1)
   technique          AnesthesiaTechnique
@@ -5259,8 +5616,415 @@ model AnesthesiaAdministration {
   author     User              @relation(fields: [authorId], references: [id])
 
   @@index([tenantId, patientId, clinicalEntryId, administeredAt], map: "anesthesia_administrations_entry_idx")
+  // DX-418: acumulado del paciente en la ventana de 24 h (todas sus evoluciones).
+  @@index([tenantId, patientId, administeredAt], map: "anesthesia_administrations_patient_time_idx")
   @@index([tenantId, anestheticId], map: "anesthesia_administrations_anesthetic_idx")
   // PARCIAL (WHERE "locationId" IS NOT NULL), no declarable en Prisma:
   //   anesthesia_administrations_location_idx ("tenantId", "locationId")
   @@map("anesthesia_administrations")
+}
+
+// DX-407: hoja de sedación consciente en la evolución.
+enum SedationGrade {
+  MINIMAL
+  MODERATE
+}
+
+enum AsaClass {
+  I
+  II
+  III
+  IV
+  V
+}
+
+enum SedationVitalsPhase {
+  BASELINE
+  INTRA
+  DISCHARGE
+}
+
+enum SedationLevel {
+  AWAKE
+  MINIMAL
+  MODERATE
+  DEEP
+}
+
+enum SedationAgentKind {
+  NITROUS_OXIDE
+  ORAL
+  OTHER
+}
+
+enum SedationRoute {
+  INHALED
+  ORAL
+  SUBLINGUAL
+  INTRANASAL
+  INTRAMUSCULAR
+  INTRAVENOUS
+  SUBMUCOSAL
+}
+
+enum SedationDoseUnit {
+  MG
+  MCG
+  ML
+}
+
+/// Hoja de sedación de una evolución (DX-407): la valoración previa. Una por
+/// evolución. APPEND-ONLY como la evolución (DX-038: trigger que rechaza
+/// UPDATE/DELETE/TRUNCATE; corregir = adenda) y RLS forzada. Guarda la versión
+/// de la plantilla (hoy la de plataforma; DX-409 la hará por clínica) y el
+/// intervalo de constantes con que se abrió, el IMC y los reversores por peso
+/// que calculó el servidor. El checklist, los fármacos, las constantes y el
+/// egreso son filas propias, también inalterables.
+model SedationRecord {
+  id                       String        @id @default(uuid()) @db.Uuid
+  tenantId                 String        @db.Uuid
+  patientId                String        @db.Uuid
+  clinicalEntryId          String        @db.Uuid
+  locationId               String?       @db.Uuid
+  templateVersion          String
+  rulesVersion             String
+  vitalsIntervalMinutes    Int
+  grade                    SedationGrade
+  asaClass                 AsaClass?
+  asaEmergency             Boolean       @default(false)
+  highAsaInterconsultation String?
+  highAsaJustification     String?
+  fastingClearLiquidsHours Decimal?      @db.Decimal(3, 1)
+  fastingSolidsHours       Decimal?      @db.Decimal(3, 1)
+  mallampati               Int?          @db.SmallInt
+  weightKg                 Decimal?      @db.Decimal(4, 1)
+  heightCm                 Decimal?      @db.Decimal(4, 1)
+  bmi                      Decimal?      @db.Decimal(4, 1)
+  naloxoneMg               Decimal?      @db.Decimal(4, 2)
+  flumazenilMg             Decimal?      @db.Decimal(4, 3)
+  escortName               String?
+  escortRelationship       String?
+  consentConfirmed         Boolean
+  consentId                String?       @db.Uuid
+  authorId                 String        @db.Uuid
+  /// Hora clínica de la valoración (la anota quien la hace; por defecto, ahora).
+  /// Nula en las hojas anteriores a la columna: se lee `createdAt`.
+  assessedAt               DateTime?
+  createdAt                DateTime      @default(now())
+
+  tenant    Tenant                        @relation(fields: [tenantId], references: [id])
+  patient   Patient                       @relation(fields: [tenantId, patientId], references: [tenantId, id])
+  entry     ClinicalEntry                 @relation(fields: [tenantId, patientId, clinicalEntryId], references: [tenantId, patientId, id])
+  location  Location?                     @relation(fields: [tenantId, locationId], references: [tenantId, id])
+  consent   PatientConsent?               @relation(fields: [tenantId, patientId, consentId], references: [tenantId, patientId, id])
+  author    User                          @relation(fields: [authorId], references: [id])
+  checklist SedationChecklist?
+  agents    SedationAgentAdministration[]
+  vitals    SedationVitals[]
+  discharge SedationDischarge?
+
+  @@unique([tenantId, patientId, clinicalEntryId], map: "sedation_records_entry_key")
+  // Destino de las FK compuestas de las tablas hijas.
+  @@unique([tenantId, id], map: "sedation_records_tenant_id_key")
+  // PARCIALES (WHERE ... IS NOT NULL), no declarables en Prisma:
+  //   sedation_records_location_idx ("tenantId", "locationId")
+  //   sedation_records_consent_idx ("tenantId", "patientId", "consentId")
+  @@map("sedation_records")
+}
+
+/// Checklist previo de una hoja (DX-407): copia de los ítems de la plantilla
+/// con su marca, su hora clínica (`checkedAt`, nunca anterior a la valoración;
+/// nula en los anteriores a la columna, que usan `createdAt`, la del servidor)
+/// y el autor quien lo marcó. Uno por hoja; inalterable.
+model SedationChecklist {
+  id               String    @id @default(uuid()) @db.Uuid
+  tenantId         String    @db.Uuid
+  sedationRecordId String    @db.Uuid
+  items            Json
+  checkedAt        DateTime?
+  authorId         String    @db.Uuid
+  createdAt        DateTime  @default(now())
+
+  tenant Tenant         @relation(fields: [tenantId], references: [id])
+  record SedationRecord @relation(fields: [tenantId, sedationRecordId], references: [tenantId, id])
+  author User           @relation(fields: [authorId], references: [id])
+
+  @@unique([tenantId, sedationRecordId], map: "sedation_checklists_record_key")
+  @@map("sedation_checklists")
+}
+
+/// Fármaco de sedación administrado (DX-407): N2O con % y flujo, oral u otro
+/// con dosis, unidad y vía; hora y quién. Append-only.
+model SedationAgentAdministration {
+  id               String            @id @default(uuid()) @db.Uuid
+  tenantId         String            @db.Uuid
+  sedationRecordId String            @db.Uuid
+  kind             SedationAgentKind
+  drugName         String?
+  dose             Decimal?          @db.Decimal(8, 2)
+  doseUnit         SedationDoseUnit?
+  route            SedationRoute
+  n2oPercent       Int?              @db.SmallInt
+  flowLpm          Decimal?          @db.Decimal(3, 1)
+  administeredAt   DateTime
+  authorId         String            @db.Uuid
+  createdAt        DateTime          @default(now())
+
+  tenant Tenant         @relation(fields: [tenantId], references: [id])
+  record SedationRecord @relation(fields: [tenantId, sedationRecordId], references: [tenantId, id])
+  author User           @relation(fields: [authorId], references: [id])
+
+  @@index([tenantId, sedationRecordId, administeredAt], map: "sedation_agent_administrations_record_idx")
+  @@map("sedation_agent_administrations")
+}
+
+/// Toma de constantes de una hoja (DX-407): basal, intraoperatoria o al alta.
+/// Append-only.
+model SedationVitals {
+  id               String              @id @default(uuid()) @db.Uuid
+  tenantId         String              @db.Uuid
+  sedationRecordId String              @db.Uuid
+  phase            SedationVitalsPhase
+  takenAt          DateTime
+  spo2             Int?                @db.SmallInt
+  heartRate        Int?                @db.SmallInt
+  systolic         Int?                @db.SmallInt
+  diastolic        Int?                @db.SmallInt
+  respiratoryRate  Int?                @db.SmallInt
+  etco2            Int?                @db.SmallInt
+  sedationLevel    SedationLevel?
+  authorId         String              @db.Uuid
+  createdAt        DateTime            @default(now())
+
+  tenant    Tenant              @relation(fields: [tenantId], references: [id])
+  record    SedationRecord      @relation(fields: [tenantId, sedationRecordId], references: [tenantId, id])
+  author    User                @relation(fields: [authorId], references: [id])
+  discharge SedationDischarge[]
+
+  // Destino de la FK compuesta del egreso (constantes de la MISMA hoja).
+  @@unique([tenantId, sedationRecordId, id], map: "sedation_vitals_tenant_record_id_key")
+  @@index([tenantId, sedationRecordId, takenAt], map: "sedation_vitals_record_idx")
+  @@map("sedation_vitals")
+}
+
+/// Egreso de una hoja (DX-407): criterios de alta (copia de la plantilla) o
+/// Aldrete modificado, constantes al alta, hora, a quién se entrega,
+/// indicaciones entregadas, operador (quien lo firma) y quien monitorizó; si
+/// son la misma persona en sedación moderada, la justificación. Uno por hoja:
+/// cierra la hoja. Inalterable.
+model SedationDischarge {
+  id                       String   @id @default(uuid()) @db.Uuid
+  tenantId                 String   @db.Uuid
+  sedationRecordId         String   @db.Uuid
+  criteria                 Json
+  aldreteScore             Int?     @db.SmallInt
+  vitalsId                 String   @db.Uuid
+  dischargedAt             DateTime
+  handedOverToName         String
+  handedOverToRelationship String
+  instructionsDelivered    Boolean
+  operatorId               String   @db.Uuid
+  monitorId                String   @db.Uuid
+  sameMonitorJustification String?
+  createdAt                DateTime @default(now())
+
+  tenant   Tenant         @relation(fields: [tenantId], references: [id])
+  record   SedationRecord @relation(fields: [tenantId, sedationRecordId], references: [tenantId, id])
+  vitals   SedationVitals @relation(fields: [tenantId, sedationRecordId, vitalsId], references: [tenantId, sedationRecordId, id], map: "sedation_discharges_vitals_fkey")
+  operator User           @relation("SedationDischargeOperator", fields: [operatorId], references: [id])
+  monitor  User           @relation("SedationDischargeMonitor", fields: [monitorId], references: [id])
+
+  @@unique([tenantId, sedationRecordId], map: "sedation_discharges_record_key")
+  @@index([tenantId, sedationRecordId, vitalsId], map: "sedation_discharges_vitals_idx")
+  @@map("sedation_discharges")
+}
+
+// ---------------------------------------------------------------------------
+// DX-253: saldo a favor del paciente — traspaso a otro plan y devolución.
+//
+// El saldo a favor de un plan es lo abonado (en su moneda) por encima de lo
+// facturable (0 si el plan está cancelado o rechazado). No se mueve tocando
+// los abonos: cada traspaso o devolución deja ASIENTOS inmutables en
+// `patient_credit_entries` (con signo, en la moneda del plan) y el saldo
+// (estado de cuenta, saldo del plan, cartera) los suma a lo abonado. Un
+// traspaso son dos asientos enlazados (TRANSFER_OUT en el origen y
+// TRANSFER_IN en el destino); una devolución, uno (REFUND en el origen).
+// Todo append-only (triggers de 20261106130000_dx253_patient_credit): sin
+// UPDATE ni DELETE salvo la limpieza de un superusuario.
+// ---------------------------------------------------------------------------
+
+enum PatientCreditEntryKind {
+  TRANSFER_OUT
+  TRANSFER_IN
+  REFUND
+}
+
+/// Traspaso de saldo a favor entre dos planes del MISMO paciente (FK compuesta
+/// con `patientId` a los dos planes).
+model PatientCreditTransfer {
+  id                     String   @id @default(uuid()) @db.Uuid
+  tenantId               String   @db.Uuid
+  locationId             String   @db.Uuid
+  patientId              String   @db.Uuid
+  sourcePlanId           String   @db.Uuid
+  targetPlanId           String   @db.Uuid
+  currency               String
+  amount                 Decimal  @db.Decimal(14, 2)
+  reason                 String?
+  /// Puntero suave a User, como `Payment.createdById`.
+  createdById            String   @db.Uuid
+  /// La pone la BD (trigger), en UTC.
+  createdAt              DateTime @default(now())
+  idempotencyKey         String?
+  idempotencyFingerprint String?
+
+  tenant      Tenant               @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  location    Location             @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "patient_credit_transfers_location_fkey")
+  sourcePlan  TreatmentPlan        @relation("CreditTransferSource", fields: [tenantId, sourcePlanId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, onUpdate: Restrict, map: "patient_credit_transfers_source_plan_fkey")
+  targetPlan  TreatmentPlan        @relation("CreditTransferTarget", fields: [tenantId, targetPlanId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, onUpdate: Restrict, map: "patient_credit_transfers_target_plan_fkey")
+  currencyRef Currency             @relation("CreditTransferCurrency", fields: [currency], references: [code], map: "patient_credit_transfers_currency_fkey")
+  entries     PatientCreditEntry[]
+
+  @@unique([tenantId, id], map: "patient_credit_transfers_tenant_id_key")
+  /// Único parcial por clínica (WHERE "idempotencyKey" IS NOT NULL, solo SQL).
+  @@unique([tenantId, idempotencyKey], map: "patient_credit_transfers_tenant_idempotency_key")
+  @@index([tenantId, patientId, createdAt(sort: Desc)], map: "patient_credit_transfers_tenant_patient_idx")
+  @@index([tenantId, sourcePlanId], map: "patient_credit_transfers_tenant_source_idx")
+  @@index([tenantId, targetPlanId], map: "patient_credit_transfers_tenant_target_idx")
+  @@index([tenantId, locationId], map: "patient_credit_transfers_tenant_location_idx")
+  @@index([currency], map: "patient_credit_transfers_currency_idx")
+  @@map("patient_credit_transfers")
+}
+
+/// Devolución de saldo a favor al paciente, con comprobante numerado por sede
+/// (serie propia `DEV-<serie de la sede>`, distinta de la del recibo DX-136).
+/// En efectivo con caja abierta es un egreso de esa caja (`cashSessionId`).
+model PatientCreditRefund {
+  id                     String        @id @default(uuid()) @db.Uuid
+  tenantId               String        @db.Uuid
+  locationId             String        @db.Uuid
+  patientId              String        @db.Uuid
+  treatmentPlanId        String        @db.Uuid
+  currency               String
+  amount                 Decimal       @db.Decimal(14, 2)
+  method                 PaymentMethod
+  reason                 String
+  cashSessionId          String?       @db.Uuid
+  seriesPrefix           String
+  number                 Int
+  /// Foto inmutable del comprobante (clínica, sede, paciente, plan, abonos
+  /// de referencia, quién devolvió): se imprime sin releer nada.
+  snapshot               Json
+  createdById            String        @db.Uuid
+  createdAt              DateTime      @default(now())
+  idempotencyKey         String?
+  idempotencyFingerprint String?
+
+  tenant      Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  location    Location                     @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "patient_credit_refunds_location_fkey")
+  plan        TreatmentPlan                @relation("CreditRefundPlan", fields: [tenantId, treatmentPlanId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, onUpdate: Restrict, map: "patient_credit_refunds_plan_fkey")
+  cashSession CashSession?                 @relation(fields: [tenantId, cashSessionId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "patient_credit_refunds_cash_session_fkey")
+  currencyRef Currency                     @relation("CreditRefundCurrency", fields: [currency], references: [code], map: "patient_credit_refunds_currency_fkey")
+  entries     PatientCreditEntry[]
+  payments    PatientCreditRefundPayment[]
+
+  @@unique([tenantId, id], map: "patient_credit_refunds_tenant_id_key")
+  /// Destino de la FK de los abonos de referencia (del MISMO plan).
+  @@unique([tenantId, id, treatmentPlanId], map: "patient_credit_refunds_tenant_id_plan_key")
+  @@unique([tenantId, seriesPrefix, number], map: "patient_credit_refunds_tenant_series_number_key")
+  @@unique([tenantId, idempotencyKey], map: "patient_credit_refunds_tenant_idempotency_key")
+  @@index([tenantId, patientId, createdAt(sort: Desc)], map: "patient_credit_refunds_tenant_patient_idx")
+  @@index([tenantId, treatmentPlanId, patientId], map: "patient_credit_refunds_tenant_plan_idx")
+  @@index([tenantId, cashSessionId], map: "patient_credit_refunds_tenant_cash_session_idx")
+  @@index([tenantId, locationId, createdAt(sort: Desc)], map: "patient_credit_refunds_tenant_location_idx")
+  @@index([currency], map: "patient_credit_refunds_currency_idx")
+  @@map("patient_credit_refunds")
+}
+
+/// Abonos de referencia de una devolución: del MISMO plan (FK compuesta).
+model PatientCreditRefundPayment {
+  tenantId        String @db.Uuid
+  refundId        String @db.Uuid
+  paymentId       String @db.Uuid
+  treatmentPlanId String @db.Uuid
+
+  tenant  Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  refund  PatientCreditRefund @relation(fields: [tenantId, refundId, treatmentPlanId], references: [tenantId, id, treatmentPlanId], onDelete: Restrict, onUpdate: Restrict, map: "patient_credit_refund_payments_refund_fkey")
+  payment Payment             @relation(fields: [tenantId, paymentId, treatmentPlanId], references: [tenantId, id, treatmentPlanId], onDelete: Restrict, onUpdate: Restrict, map: "patient_credit_refund_payments_payment_fkey")
+
+  @@id([refundId, paymentId])
+  @@index([tenantId, refundId, treatmentPlanId], map: "patient_credit_refund_payments_refund_idx")
+  @@index([tenantId, paymentId, treatmentPlanId], map: "patient_credit_refund_payments_payment_idx")
+  @@map("patient_credit_refund_payments")
+}
+
+/// Asiento del saldo a favor de un plan, con signo y en la moneda del plan:
+/// lo que el saldo suma a lo abonado. Exactamente uno de `transferId` y
+/// `refundId` (CHECK), con el signo que pide su `kind`.
+model PatientCreditEntry {
+  id              String                 @id @default(uuid()) @db.Uuid
+  tenantId        String                 @db.Uuid
+  patientId       String                 @db.Uuid
+  treatmentPlanId String                 @db.Uuid
+  currency        String
+  amount          Decimal                @db.Decimal(14, 2)
+  kind            PatientCreditEntryKind
+  transferId      String?                @db.Uuid
+  refundId        String?                @db.Uuid
+  createdAt       DateTime               @default(now())
+
+  tenant      Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  plan        TreatmentPlan          @relation("CreditEntryPlan", fields: [tenantId, treatmentPlanId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, onUpdate: Restrict, map: "patient_credit_entries_plan_fkey")
+  transfer    PatientCreditTransfer? @relation(fields: [tenantId, transferId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "patient_credit_entries_transfer_fkey")
+  refund      PatientCreditRefund?   @relation(fields: [tenantId, refundId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "patient_credit_entries_refund_fkey")
+  currencyRef Currency               @relation("CreditEntryCurrency", fields: [currency], references: [code], map: "patient_credit_entries_currency_fkey")
+
+  @@index([tenantId, treatmentPlanId, patientId], map: "patient_credit_entries_tenant_plan_idx")
+  @@index([tenantId, patientId], map: "patient_credit_entries_tenant_patient_idx")
+  @@index([tenantId, transferId], map: "patient_credit_entries_tenant_transfer_idx")
+  @@index([tenantId, refundId], map: "patient_credit_entries_tenant_refund_idx")
+  @@index([currency], map: "patient_credit_entries_currency_idx")
+  @@map("patient_credit_entries")
+}
+
+/// Contador del comprobante de devolución por clínica y serie (una por sede).
+model PatientCreditRefundCounter {
+  tenantId     String @db.Uuid
+  seriesPrefix String
+  lastNumber   Int
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  @@id([tenantId, seriesPrefix])
+  @@map("patient_credit_refund_counters")
+}
+
+/// SEC-058: contador GLOBAL del presupuesto de llamadas al proveedor de tasas,
+/// compartido por todas las réplicas (una fila, `scope = 'GLOBAL'`, en ventana
+/// fija). Tabla de PLATAFORMA sin RLS ni columna de clínica: dentalix_app no
+/// tiene ningún privilegio sobre ella y solo la toca con la función SECURITY
+/// DEFINER `dx_exchange_provider_spend_global` (incrementa con tope).
+model ExchangeProviderBudget {
+  scope       String   @id
+  windowStart DateTime
+  calls       Int
+  updatedAt   DateTime @default(dbgenerated("timezone('UTC'::text, now())"))
+
+  @@map("exchange_provider_budget")
+}
+
+/// SEC-058: contadores de una clínica en el presupuesto del proveedor de
+/// tasas (`HOUR`, `DAY` y `SWEEP`, en ventana fija). RLS FORCE por tenant: la
+/// app solo ve y gasta los de la clínica del contexto. Cae con la clínica.
+model ExchangeProviderClinicBudget {
+  tenantId    String   @db.Uuid
+  quota       String
+  windowStart DateTime
+  calls       Int
+  updatedAt   DateTime @default(dbgenerated("timezone('UTC'::text, now())"))
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@id([tenantId, quota])
+  @@map("exchange_provider_clinic_budgets")
 }

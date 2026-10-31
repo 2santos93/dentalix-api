@@ -148,6 +148,26 @@ export class CashPaymentDto {
     description: 'Saldo migrado del abono (DX-262); null si es a un plan',
   })
   openingBalance!: CashOpeningBalanceRefDto | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description:
+      'DX-390: el cobro dividido del abono (el id de su línea 1); `null` en ' +
+      'un abono de una sola forma de pago. Anular una línea anula el cobro entero.',
+  })
+  splitId!: string | null;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    example: 2,
+    description:
+      'DX-390: cuántas formas de pago tiene su cobro dividido (también las ' +
+      'que el filtro no muestra); `null` en un abono suelto.',
+  })
+  splitLines!: number | null;
 }
 
 export class CashCurrencyTotalDto {

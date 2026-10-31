@@ -80,6 +80,43 @@ export interface CreatePaymentRepoInput {
   frozenRate: FrozenExchangeRate | null;
 }
 
+/**
+ * DX-390: un cobro dividido, ya validado y cotizado línea a línea por el caso
+ * de uso. El repositorio inserta todas las líneas y emite UN recibo en la
+ * MISMA transacción: si una falla, no queda ninguna (ni recibo, ni número).
+ */
+export interface CreateSplitPaymentRepoInput {
+  /**
+   * Las líneas en orden (2–5), a un plan, con el mismo plan, paciente, día y
+   * autor. Su `receiptPlanBalance`, `idempotencyKey` y `requestFingerprint`
+   * no se usan: son del cobro (abajo).
+   */
+  lines: CreatePaymentRepoInput[];
+  /** La Idempotency-Key del cobro: va en la línea 1, con la huella. */
+  idempotencyKey?: string;
+  requestFingerprint?: string;
+  /** Saldo del plan tras el cobro entero, para la foto del recibo. */
+  receiptPlanBalance: ReceiptPlanBalance | null;
+  /**
+   * Revisión DX-390: sin `confirmCreditBalance`, lo pendiente se leyó fuera
+   * de la transacción. Con esto, la transacción bloquea el plan (FOR NO KEY
+   * UPDATE: espera a los abonos en curso al plan y los pone en fila) y, si el
+   * plan tiene más abonos (vivos o anulados) que `planPaymentsSeen`, contados
+   * ANTES de leer lo pendiente, es 409 `SPLIT_PAYMENT_BALANCE_CHANGED` y no
+   * se registra nada.
+   */
+  balanceGuard?: { planPaymentsSeen: number };
+}
+
+/** DX-390: un cobro dividido registrado, con sus líneas en orden. */
+export interface SplitPaymentRecord {
+  /** El id de la línea 1 (la del recibo). */
+  splitId: string;
+  /** El número del recibo único del cobro; `null` no ocurre en uno nuevo. */
+  receiptNumber: string | null;
+  payments: Payment[];
+}
+
 /** DX-377: un abono anterior con la misma referencia y medio. */
 export interface ReferenceMatch {
   id: string;
@@ -173,6 +210,12 @@ export interface PaymentVoidTarget extends VoidSubject {
   id: string;
   /** Sede persistida del abono, para autorizar antes de escribir. */
   locationId: string;
+  /**
+   * DX-390: si es una línea de un cobro dividido, los ids de sus líneas vivas
+   * en orden (ella incluida): se anulan juntas, con su recibo. `[]` en un
+   * abono de una sola forma de pago.
+   */
+  splitPaymentIds: string[];
 }
 
 /** Desde dónde se anula: para el `audit_event` de la reapertura (DX-215). */
@@ -204,6 +247,29 @@ export interface PaymentRepository {
    * devuelve el abono ORIGINAL en vez de fallar.
    */
   create(input: CreatePaymentRepoInput): Promise<Payment>;
+
+  /**
+   * DX-390: inserta las líneas de un cobro dividido y su recibo único en UNA
+   * transacción (todas o ninguna). Cada línea pasa por lo mismo que `create`
+   * (plan bloqueado, caja, tasa congelada, base). Si otra petición con la
+   * misma clave se le adelantó, devuelve ese cobro (o 422 si es otra
+   * petición).
+   */
+  createSplit(input: CreateSplitPaymentRepoInput): Promise<SplitPaymentRecord>;
+
+  /**
+   * DX-390: el cobro dividido cuya línea 1 es `splitId`, con todas sus
+   * líneas (también anuladas: es lo que devuelve un reintento idempotente),
+   * o `null`.
+   */
+  findSplit(splitId: string): Promise<SplitPaymentRecord | null>;
+
+  /**
+   * Revisión DX-390: cuántos abonos tiene el plan, vivos o anulados (solo
+   * crece: un abono nunca se borra). La guarda del saldo a favor del cobro
+   * dividido (`CreateSplitPaymentRepoInput.balanceGuard`).
+   */
+  countPlanPayments(treatmentPlanId: string): Promise<number>;
 
   /**
    * DX-262: el saldo migrado vivo (no retirado) de esta clínica con lo abonado
@@ -281,6 +347,9 @@ export interface PaymentRepository {
    * (TOCTOU race). Returns `true` if this call actually voided the payment,
    * `false` if it was already voided or doesn't exist (never throws for that
    * case -- the use case decides 404). Never a hard delete.
+   *
+   * DX-390: a line of a split payment voids ALL its live lines and their
+   * single receipt, in the same transaction (one receipt, one void).
    *
    * DX-215: in the SAME transaction, re-evaluates every KEPT payment promise
    * of the patient in the payment's currency that this payment counted for

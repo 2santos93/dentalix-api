@@ -432,6 +432,9 @@ describe('Caja — GET /payments (e2e)', () => {
       },
       // DX-262: abono a un plan, no a un saldo migrado.
       openingBalance: null,
+      // DX-390: un abono suelto no es de ningún cobro dividido.
+      splitId: null,
+      splitLines: null,
     });
   });
 

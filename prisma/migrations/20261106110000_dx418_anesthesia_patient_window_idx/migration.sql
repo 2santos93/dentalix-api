@@ -1,0 +1,15 @@
+-- DX-418: el acumulado de anestesia local es del PACIENTE en una ventana
+-- móvil de 24 h (todas sus evoluciones y sedes de la clínica), no de la
+-- evolución. La consulta filtra por (tenant, paciente, "administeredAt") y
+-- ordena por "administeredAt": el índice de DX-307 empieza por la evolución y
+-- no sirve para el rango.
+--
+-- CONCURRENTLY (DB-025): no bloquea los registros de anestesia (escritura
+-- clínica en el sillón) mientras se construye; por eso es la ÚNICA sentencia
+-- del fichero (Prisma la ejecuta fuera de transacción, como DX-377 y DX-390).
+-- Aditiva, sin cambios de datos. IF NOT EXISTS: idempotente. Si falla deja
+-- un índice INVALID: DROP INDEX CONCURRENTLY
+-- "anesthesia_administrations_patient_time_idx", `npx prisma migrate resolve
+-- --rolled-back 20261106110000_dx418_anesthesia_patient_window_idx` y repetir
+-- `migrate deploy`.
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "anesthesia_administrations_patient_time_idx" ON "anesthesia_administrations" ("tenantId", "patientId", "administeredAt");

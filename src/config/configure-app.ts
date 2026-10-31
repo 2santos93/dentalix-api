@@ -4,7 +4,7 @@ import { applyObservability } from '../shared/observability/apply-observability'
 import { applySecurity } from '../shared/security/apply-security';
 import { SecuritySettings } from '../shared/security/security-settings';
 import { applyBodyLimits } from './body-limits';
-import { applyAppHttpKeepAlive } from './http-keep-alive';
+import { applyAppHttpServerTimeouts } from './http-server-timeouts';
 
 export interface ConfigureAppOptions {
   /** Logger propio (los e2e escriben en memoria); default: por entorno. */
@@ -25,8 +25,9 @@ export interface ConfigureAppOptions {
  * 3. Tope de cuerpo ampliado solo para la firma de consentimientos (DX-006),
  *    antes de que Nest monte su parser en `init()`.
  * 4. Prefijo `api/v1` y ValidationPipe global.
- * 5. Keep-alive del servidor HTTP más largo que el del proxy de la web
- *    (DX-284, ver http-keep-alive.ts).
+ * 5. Plazos del servidor HTTP (keep-alive, cabeceras y petición entera) del
+ *    entorno: keep-alive más largo que el del proxy de la web (DX-284) y 408
+ *    a los clientes lentos (DX-431). Ver http-server-timeouts.ts.
  *
  * Swagger queda fuera: se monta después (main.ts, e2e de cabeceras).
  */
@@ -39,5 +40,5 @@ export function configureApp(
   applyBodyLimits(app);
   app.setGlobalPrefix('api/v1');
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
-  applyAppHttpKeepAlive(app);
+  applyAppHttpServerTimeouts(app);
 }

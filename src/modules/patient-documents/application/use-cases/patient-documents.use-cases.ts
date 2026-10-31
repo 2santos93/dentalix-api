@@ -98,6 +98,8 @@ export const DOWNLOAD_ONLY_MESSAGE = 'Este tipo solo se puede descargar.';
 export const VOID_FORBIDDEN_MESSAGE =
   'Solo quien subió el documento o un administrador puede anularlo.';
 export const DOCUMENT_ALREADY_VOIDED_MESSAGE = 'El documento ya está anulado.';
+export const SIGNED_CONSENT_PDF_VOID_MESSAGE =
+  'Este es el PDF firmado de un consentimiento: es la prueba de la firma y no se puede anular.';
 
 /**
  * Lo que importa del fichero de multer (sin acoplar el caso de uso a él).
@@ -912,6 +914,9 @@ export class VoidPatientDocumentUseCase {
     }
     if (outcome === 'ALREADY_VOIDED') {
       throw new ConflictException(DOCUMENT_ALREADY_VOIDED_MESSAGE);
+    }
+    if (outcome === 'SIGNED_CONSENT_PDF') {
+      throw new ConflictException(SIGNED_CONSENT_PDF_VOID_MESSAGE);
     }
     const voided = await this.repo.findById(patientId, id);
     if (!voided) throw new NotFoundException(DOCUMENT_NOT_FOUND_MESSAGE);

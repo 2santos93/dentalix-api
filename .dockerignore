@@ -1,0 +1,20 @@
+# DX-083: el contexto de `docker build` lleva solo lo que compila la imagen.
+# Nada de .env (las variables se dan al contenedor en runtime), ni ficheros
+# subidos en local (storage*), ni builds ni dependencias locales (se instalan
+# dentro), ni tests.
+.git
+.github
+.sdd
+node_modules
+dist
+coverage
+.env*
+!.env.example
+storage*
+test
+docs
+**/*.spec.ts
+*.log
+docker-compose.yml
+Dockerfile
+.dockerignore

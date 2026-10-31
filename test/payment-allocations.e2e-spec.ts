@@ -543,6 +543,8 @@ describe('Imputación automática de abonos (DX-051, e2e)', () => {
       billable: 150,
       paid: 130,
       balance: 20,
+      // DX-253: sin traspasos ni devoluciones de saldo a favor.
+      creditMovements: 0,
       paymentsCount: 1,
       paymentsWithoutRate: [],
       allocated: 130,

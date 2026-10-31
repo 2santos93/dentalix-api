@@ -5,6 +5,7 @@ import {
   HttpCode,
   Param,
   Post,
+  Req,
   UseInterceptors,
 } from '@nestjs/common';
 import {
@@ -13,6 +14,7 @@ import {
   ApiGoneResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
+  ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
 import { GetPublicConfirmationUseCase } from '../application/use-cases/get-public-confirmation.use-case';
@@ -23,6 +25,8 @@ import {
 } from './dto/appointment-confirmation.dto';
 import { RateLimit } from '../../../shared/security/rate-limit.decorator';
 import { PublicTenantContextInterceptor } from '../../../shared/tenancy/public-tenant-context.interceptor';
+import type { TenantHostRequest } from '../../../shared/tenancy/tenant-host-request';
+import { currentRequestId } from '../../../shared/observability/request-context';
 
 // PÚBLICO — sin JwtAuthGuard: quien abre el enlace es el paciente. El tenant
 // sale SOLO del host (PublicTenantContextInterceptor + TenantHostMiddleware),
@@ -53,6 +57,11 @@ export class PublicAppointmentConfirmationsController {
 
   @Post(':token')
   @HttpCode(200)
+  @ApiOperation({
+    summary: 'El paciente confirma, cancela o pide que lo llamen',
+    description:
+      'DX-361: una respuesta registrada queda en la auditoría de la clínica de la cita como UPDATE de APPOINTMENT, sin usuario (el paciente), origen LINK y `reason` CONFIRMATION_LINK_CONFIRMED, CONFIRMATION_LINK_CANCELLED o CONFIRMATION_LINK_CALL_REQUESTED. Sin el token ni la URL; un enlace desconocido, caducado o ya usado no deja evento.',
+  })
   @ApiOkResponse({ type: PublicAppointmentConfirmationDto })
   @ApiNotFoundResponse({ description: 'Token desconocido o de otra clínica.' })
   @ApiBadRequestResponse({
@@ -69,10 +78,22 @@ export class PublicAppointmentConfirmationsController {
   respond(
     @Param('token') token: string,
     @Body() dto: RespondAppointmentConfirmationDto,
+    @Req() req: TenantHostRequest & { ip?: string },
   ): Promise<PublicAppointmentConfirmationDto> {
-    return this.respondConfirmation.execute(token, dto.action, {
-      acknowledgePolicy: dto.acknowledgePolicy,
-      policyVersionId: dto.policyVersionId,
-    });
+    const userAgent = req.headers['user-agent'];
+    return this.respondConfirmation.execute(
+      token,
+      dto.action,
+      {
+        acknowledgePolicy: dto.acknowledgePolicy,
+        policyVersionId: dto.policyVersionId,
+      },
+      {
+        requestId: currentRequestId() ?? null,
+        ip: req.ip ?? null,
+        userAgent:
+          (Array.isArray(userAgent) ? userAgent[0] : userAgent) ?? null,
+      },
+    );
   }
 }

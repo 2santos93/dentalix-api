@@ -2,8 +2,12 @@ import { ArgumentsHost, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import {
   BY_SQLSTATE,
+  CLINICAL_TIME_BEFORE_ENTRY_MESSAGE,
   EXPENSE_INTEGRITY_MESSAGES,
   PrismaExceptionFilter,
+  STATEMENT_TIMEOUT_MESSAGE,
+  TIMEOUT_RETRY_AFTER_SECONDS,
+  TRANSACTION_TIMEOUT_MESSAGE,
   conflictMessageForTarget,
 } from './prisma-exception.filter';
 import { requestContext } from '../observability/request-context';
@@ -12,13 +16,15 @@ function mockHost(): {
   host: ArgumentsHost;
   status: jest.Mock;
   json: jest.Mock;
+  setHeader: jest.Mock;
 } {
   const json = jest.fn();
   const status = jest.fn(() => ({ json }));
+  const setHeader = jest.fn();
   const host = {
-    switchToHttp: () => ({ getResponse: () => ({ status }) }),
+    switchToHttp: () => ({ getResponse: () => ({ status, setHeader }) }),
   } as unknown as ArgumentsHost;
-  return { host, status, json };
+  return { host, status, json, setHeader };
 }
 
 function p2002(
@@ -275,6 +281,27 @@ describe('PrismaExceptionFilter', () => {
     jest.restoreAllMocks();
   });
 
+  it('turns the clinical time guard (Q4270, DX-427) into a 400 in Spanish, without the DETAIL', () => {
+    const filter = new PrismaExceptionFilter();
+    const { host, status, json } = mockHost();
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+    filter.catch(
+      unknownPg('Q4270', CLINICAL_TIME_BEFORE_ENTRY_MESSAGE, SECRET_DETAIL),
+      host,
+    );
+
+    expect(status).toHaveBeenCalledWith(400);
+    expect(bodyOf(json)).toEqual({
+      statusCode: 400,
+      error: 'Bad Request',
+      message:
+        'La hora no puede ser anterior a la fecha de la evolución. Indica la fecha de atención correcta en la evolución.',
+    });
+    expect(JSON.stringify(bodyOf(json))).not.toContain(SECRET_DETAIL);
+    jest.restoreAllMocks();
+  });
+
   it.each(Object.entries(EXPENSE_INTEGRITY_MESSAGES))(
     'turns the expense integrity guard %s (DX-393) into a 409 in Spanish, without the DETAIL',
     (code, message) => {
@@ -298,6 +325,7 @@ describe('PrismaExceptionFilter', () => {
   it('own SQLSTATEs live in an implementation class (I–Z or 5–9), never A–H', () => {
     const own = Object.keys(BY_SQLSTATE).filter((code) => !/^\d{2}/.test(code));
     expect(own).toContain('Q0271');
+    expect(own).toContain('Q4270');
     expect(own).toEqual(
       expect.arrayContaining(Object.keys(EXPENSE_INTEGRITY_MESSAGES)),
     );
@@ -337,6 +365,174 @@ describe('PrismaExceptionFilter', () => {
     );
     expect(status).toHaveBeenCalledWith(409);
     expect(bodyOf(json)).toEqual(CONCURRENCY_BODY);
+    jest.restoreAllMocks();
+  });
+
+  // DX-431: la transacción interactiva superó TENANT_TX_TIMEOUT_MS (o no
+  // consiguió conexión en TENANT_TX_MAX_WAIT_MS), Postgres cerró la sesión
+  // por idle_in_transaction_session_timeout (25P03) o canceló la sentencia
+  // por el statement_timeout de dentalix_app (57014). No es un fallo del
+  // código: 503 tipado en español con Retry-After, sin el 500 genérico.
+  const TIMEOUT_BODY = {
+    statusCode: 503,
+    error: 'Service Unavailable',
+    code: 'TRANSACTION_TIMEOUT',
+    message: TRANSACTION_TIMEOUT_MESSAGE,
+  };
+
+  it.each([
+    [
+      'la transacción expiró',
+      'Transaction API error: Transaction already closed: A commit cannot be executed on an expired transaction. The timeout for this transaction was 500 ms, however 1503 ms passed since the start of the transaction.',
+    ],
+    [
+      'una consulta sobre la transacción expirada',
+      'Transaction already closed: A query cannot be executed on an expired transaction. The timeout for this transaction was 5000 ms, however 5012 ms passed since the start of the transaction.',
+    ],
+    [
+      'no hubo conexión a tiempo (maxWait)',
+      'Transaction API error: Unable to start a transaction in the given time.',
+    ],
+  ])(
+    'P2028 (%s) → 503 TRANSACTION_TIMEOUT en español, con Retry-After, el request id y un warn',
+    (_case, message) => {
+      const filter = new PrismaExceptionFilter();
+      const { host, status, json, setHeader } = mockHost();
+      const warnSpy = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
+      const errorSpy = jest
+        .spyOn(Logger.prototype, 'error')
+        .mockImplementation(() => undefined);
+
+      requestContext.run({ requestId: 'req-tx-0001' }, () =>
+        filter.catch(
+          new Prisma.PrismaClientKnownRequestError(message, {
+            code: 'P2028',
+            clientVersion: '6.19.3',
+          }),
+          host,
+        ),
+      );
+
+      expect(status).toHaveBeenCalledWith(503);
+      expect(setHeader).toHaveBeenCalledWith(
+        'Retry-After',
+        String(TIMEOUT_RETRY_AFTER_SECONDS),
+      );
+      expect(bodyOf(json)).toEqual({
+        ...TIMEOUT_BODY,
+        requestId: 'req-tx-0001',
+      });
+      expect(TRANSACTION_TIMEOUT_MESSAGE).toMatch(/sin guardar cambios/);
+      expect(errorSpy).not.toHaveBeenCalled();
+      // El log dice qué tope fue (timeout o maxWait), para diagnosticarlo.
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining(`(P2028), 503 TRANSACTION_TIMEOUT: ${message}`),
+      );
+      jest.restoreAllMocks();
+    },
+  );
+
+  it('otro P2028 que no es de tiempo (p. ej. transacción ya cerrada por otro error) sigue siendo un 500 con nivel error', () => {
+    const filter = new PrismaExceptionFilter();
+    const { host, status, json, setHeader } = mockHost();
+    const errorSpy = jest
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
+    const warnSpy = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+
+    filter.catch(
+      new Prisma.PrismaClientKnownRequestError(
+        'Transaction API error: Transaction already closed: Could not perform operation.',
+        { code: 'P2028', clientVersion: '6.19.3' },
+      ),
+      host,
+    );
+
+    expect(status).toHaveBeenCalledWith(500);
+    expect(bodyOf(json)).toMatchObject({ statusCode: 500 });
+    expect(setHeader).not.toHaveBeenCalled();
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Prisma error P2028'),
+      expect.any(String),
+    );
+    jest.restoreAllMocks();
+  });
+
+  it('una sentencia cancelada por statement_timeout (57014) → 503 STATEMENT_TIMEOUT sin prometer que no se guardó nada, y sin el DETAIL', () => {
+    const filter = new PrismaExceptionFilter();
+    const { host, status, json, setHeader } = mockHost();
+    const warnSpy = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+
+    filter.catch(
+      unknownPg(
+        '57014',
+        'canceling statement due to statement timeout',
+        SECRET_DETAIL,
+      ),
+      host,
+    );
+
+    expect(status).toHaveBeenCalledWith(503);
+    expect(setHeader).toHaveBeenCalledWith(
+      'Retry-After',
+      String(TIMEOUT_RETRY_AFTER_SECONDS),
+    );
+    expect(bodyOf(json)).toEqual({
+      statusCode: 503,
+      error: 'Service Unavailable',
+      code: 'STATEMENT_TIMEOUT',
+      message: STATEMENT_TIMEOUT_MESSAGE,
+    });
+    expect(STATEMENT_TIMEOUT_MESSAGE).not.toMatch(/sin guardar/);
+    expect(JSON.stringify(warnSpy.mock.calls)).not.toMatch(/Ana Pérez/);
+    jest.restoreAllMocks();
+  });
+
+  it('una consulta cruda cortada por statement_timeout (P2010 con meta.code 57014) → el mismo 503', () => {
+    const filter = new PrismaExceptionFilter();
+    const { host, status, json } = mockHost();
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+    filter.catch(
+      new Prisma.PrismaClientKnownRequestError(
+        'Raw query failed. Code: `57014`. Message: `ERROR: canceling statement due to statement timeout`',
+        {
+          code: 'P2010',
+          clientVersion: '6.19.3',
+          meta: { code: '57014' },
+        },
+      ),
+      host,
+    );
+
+    expect(status).toHaveBeenCalledWith(503);
+    expect(bodyOf(json)).toMatchObject({ code: 'STATEMENT_TIMEOUT' });
+    jest.restoreAllMocks();
+  });
+
+  it('una sesión cerrada por idle_in_transaction_session_timeout (25P03) → 503 TRANSACTION_TIMEOUT', () => {
+    const filter = new PrismaExceptionFilter();
+    const { host, status, json } = mockHost();
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+    filter.catch(
+      unknownPg(
+        '25P03',
+        'terminating connection due to idle-in-transaction timeout',
+        SECRET_DETAIL,
+      ),
+      host,
+    );
+
+    expect(status).toHaveBeenCalledWith(503);
+    expect(bodyOf(json)).toEqual(TIMEOUT_BODY);
     jest.restoreAllMocks();
   });
 
@@ -409,8 +605,8 @@ describe('PrismaExceptionFilter', () => {
     );
     filter.catch(
       new Prisma.PrismaClientKnownRequestError(
-        'Transaction already closed: A query cannot be executed on an expired transaction. The timeout for this transaction was 5000 ms.',
-        { code: 'P2028', clientVersion: '6.19.3' },
+        'Too many database connections opened: FATAL: sorry, too many clients already',
+        { code: 'P2037', clientVersion: '6.19.3' },
       ),
       host,
     );
@@ -424,7 +620,7 @@ describe('PrismaExceptionFilter', () => {
 
     const logged = errorSpy.mock.calls.map((c) => String(c[0])).join('\n');
     expect(logged).toContain('could not read block 12');
-    expect(logged).toContain('Transaction already closed');
+    expect(logged).toContain('too many clients already');
     expect(logged).toContain('duplicate key value');
     expect(logged).not.toMatch(/Ana Pérez|1234567|quoted|ana@paciente/);
     errorSpy.mockRestore();
