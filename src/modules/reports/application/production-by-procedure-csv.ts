@@ -145,6 +145,18 @@ export function toProductionByProcedureCsv(
       '',
     ]);
   }
+  // Sin fecha: fuera de cualquier período; la pantalla lo avisa bajo la tabla.
+  for (const undated of report.undated) {
+    body.push([
+      text('Sin fecha (fuera del período)'),
+      text(''),
+      text(''),
+      text(''),
+      ...amounts({ ...undated, averageNet: 0 }, false),
+      '',
+      '',
+    ]);
+  }
   const lines = [...header, ...body].map((cells) => cells.join(','));
   return `\uFEFF${lines.join('\r\n')}\r\n`;
 }

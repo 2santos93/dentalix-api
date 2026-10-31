@@ -193,13 +193,17 @@ describe('Producción por procedimiento en la BD (DX-423, int)', () => {
       asB.run(b.tenantId, () =>
         Promise.all([
           crossed.aggregate(OCTOBER, { locationIds: [b.main, b.other] }),
-          crossed.unattributed({ locationIds: [b.main, b.other] }, true),
+          crossed.unattributed(
+            OCTOBER,
+            { locationIds: [b.main, b.other] },
+            true,
+          ),
           crossed.listCategories(),
         ]),
       ),
     );
     expect(sums).toEqual([]);
-    expect(pending).toEqual([]);
+    expect(pending).toEqual({ inPeriod: [], undated: [] });
     // Ni las categorías del catálogo de B.
     expect(categories).toEqual([]);
   });
@@ -222,7 +226,9 @@ describe('Producción por procedimiento en la BD (DX-423, int)', () => {
         averageNet: 100,
       },
     ]);
-    expect(asDentist.unattributed).toEqual([
+    // Su realizado sin fecha no es del período: aviso aparte.
+    expect(asDentist.unattributed).toEqual([]);
+    expect(asDentist.undated).toEqual([
       { currency: 'COP', count: 1, gross: 7, discounts: 0, net: 7 },
     ]);
     const asAdmin = await context.run(a.tenantId, () =>
@@ -245,6 +251,7 @@ describe('Producción por procedimiento en la BD (DX-423, int)', () => {
     );
     expect(restricted.totals[0]).toMatchObject({ count: 1, net: 100 });
     expect(restricted.unattributed).toEqual([]);
+    expect(restricted.undated).toEqual([]);
     expect(restricted.options.locations.map((l) => l.id)).toEqual([a.main]);
   });
 
@@ -417,5 +424,72 @@ describe('Producción por procedimiento en la BD (DX-423, int)', () => {
       price: 40,
     });
     expect(JSON.stringify(page.items)).not.toContain('Borrado');
+  });
+
+  it('«Sin atribuir» con fecha y sin sede: cuenta solo en su período; sin fecha, aparte', async () => {
+    const plan = await raw.treatmentPlan.findFirstOrThrow({
+      where: { tenantId: a.tenantId },
+    });
+    const dentist = await raw.clinicMembership.findFirstOrThrow({
+      where: { tenantId: a.tenantId, userId: a.dentistId },
+    });
+    for (const [price, completedAt] of [
+      [15, '2026-10-10T15:00:00Z'],
+      [90000, '2020-01-10T15:00:00Z'],
+    ] as const) {
+      await raw.treatmentPlanItem.create({
+        data: {
+          tenantId: a.tenantId,
+          planId: plan.id,
+          toothNumber: '47',
+          catalogItemId: a.catalogItemId,
+          price,
+          status: 'DONE',
+          performedById: a.dentistId,
+          performedByMembershipId: dentist.id,
+          completedAt: new Date(completedAt),
+        },
+      });
+    }
+    const october = await context.run(a.tenantId, () =>
+      repo.unattributed(OCTOBER, { locationIds: [a.main, a.other] }, true),
+    );
+    expect(october.inPeriod).toEqual([
+      { currency: 'COP', count: 1, gross: 15, discounts: 0 },
+    ]);
+    expect(october.undated).toEqual([
+      { currency: 'COP', count: 1, gross: 7, discounts: 0 },
+    ]);
+    // Enero de 2020: el de 90.000 sin sede, y nada más del período.
+    const january = await context.run(a.tenantId, () =>
+      useCase.execute({
+        from: '2020-01-01',
+        to: '2020-01-31',
+        actor: { userId: a.dentistId, role: ClinicRole.ADMIN },
+        allowedLocationIds: 'ALL',
+      }),
+    );
+    expect(january.unattributed).toEqual([
+      { currency: 'COP', count: 1, gross: 90000, discounts: 0, net: 90000 },
+    ]);
+    const february = await context.run(a.tenantId, () =>
+      useCase.execute({
+        from: '2020-02-01',
+        to: '2020-02-29',
+        actor: { userId: a.dentistId, role: ClinicRole.ADMIN },
+        allowedLocationIds: 'ALL',
+      }),
+    );
+    // Período sin nada: vacío, con el aviso de lo que no tiene fecha.
+    expect(february.hasActivity).toBe(false);
+    expect(february.unattributed).toEqual([]);
+    expect(february.undated).toEqual([
+      { currency: 'COP', count: 1, gross: 7, discounts: 0, net: 7 },
+    ]);
+    // Con una sede elegida, lo que no tiene sede no es de ella.
+    const atMain = await context.run(a.tenantId, () =>
+      repo.unattributed(OCTOBER, { locationIds: [a.main] }, false),
+    );
+    expect(atMain).toEqual({ inPeriod: [], undated: [] });
   });
 });

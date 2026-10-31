@@ -35,10 +35,11 @@ class FakeRepo implements ProductionByProcedureRepository {
   ];
   sums: ProcedureSums[] = [];
   pending: UnattributedSums[] = [];
+  undated: UnattributedSums[] = [];
   items: ProductionItemRow[] = [];
   calls: {
     aggregate?: [CivilPeriod, ProductionScope];
-    unattributed?: [ProductionScope, boolean];
+    unattributed?: [CivilPeriod, ProductionScope, boolean];
     listItems?: [CivilPeriod, ProductionScope, { skip: number; take: number }];
     listProfessionals?: string[];
   } = {};
@@ -62,9 +63,13 @@ class FakeRepo implements ProductionByProcedureRepository {
     this.calls.aggregate = [period, scope];
     return Promise.resolve(this.sums);
   }
-  unattributed(scope: ProductionScope, includeWithoutLocation: boolean) {
-    this.calls.unattributed = [scope, includeWithoutLocation];
-    return Promise.resolve(this.pending);
+  unattributed(
+    period: CivilPeriod,
+    scope: ProductionScope,
+    includeWithoutLocation: boolean,
+  ) {
+    this.calls.unattributed = [period, scope, includeWithoutLocation];
+    return Promise.resolve({ inPeriod: this.pending, undated: this.undated });
   }
   listItems(
     period: CivilPeriod,
@@ -110,7 +115,11 @@ describe('GetProductionByProcedureUseCase (DX-423)', () => {
       allowedLocationIds: 'ALL',
     });
     expect(repo.calls.aggregate).toEqual([OCTOBER, { locationIds: [A, B] }]);
-    expect(repo.calls.unattributed).toEqual([{ locationIds: [A, B] }, true]);
+    expect(repo.calls.unattributed).toEqual([
+      OCTOBER,
+      { locationIds: [A, B] },
+      true,
+    ]);
     expect(r.scope).toBe('CLINIC');
     expect(r.rows[0]).toMatchObject({ net: 260, averageNet: 86.67 });
     expect(r.unattributed).toEqual([
@@ -141,7 +150,7 @@ describe('GetProductionByProcedureUseCase (DX-423)', () => {
       locationIds: [A, B],
       professionalId: 'u-dent',
     });
-    expect(repo.calls.unattributed?.[0].professionalId).toBe('u-dent');
+    expect(repo.calls.unattributed?.[1].professionalId).toBe('u-dent');
     expect(r.scope).toBe('OWN');
     expect(r.options.professionals).toEqual([
       { userId: 'u-dent', fullName: 'Dra. Ana' },
@@ -175,7 +184,7 @@ describe('GetProductionByProcedureUseCase (DX-423)', () => {
       category: 'Operatoria',
     });
     // Con una sede elegida, los «Sin atribuir» sin sede no son de ella.
-    expect(repo.calls.unattributed?.[1]).toBe(false);
+    expect(repo.calls.unattributed?.[2]).toBe(false);
     expect(r.filters).toEqual({
       locationId: B,
       locationName: 'Sede B',
@@ -201,7 +210,11 @@ describe('GetProductionByProcedureUseCase (DX-423)', () => {
       allowedLocationIds: [A],
     });
     expect(repo.calls.aggregate?.[1].locationIds).toEqual([A]);
-    expect(repo.calls.unattributed).toEqual([{ locationIds: [A] }, false]);
+    expect(repo.calls.unattributed).toEqual([
+      OCTOBER,
+      { locationIds: [A] },
+      false,
+    ]);
   });
 
   it('sede de otra clínica y sede no permitida: el mismo 403 (no dice qué sedes existen)', async () => {
@@ -274,6 +287,21 @@ describe('GetProductionByProcedureUseCase (DX-423)', () => {
         allowedLocationIds: 'ALL',
       }),
     ).resolves.toBeDefined();
+  });
+
+  it('solo realizados sin fecha: aviso aparte (undated) y el período sigue vacío', async () => {
+    repo.undated = [{ currency: 'COP', count: 1, gross: 90000, discounts: 0 }];
+    const r = await useCase.execute({
+      from: '2020-01-01',
+      to: '2020-01-31',
+      actor: ADMIN,
+      allowedLocationIds: 'ALL',
+    });
+    expect(r.hasActivity).toBe(false);
+    expect(r.unattributed).toEqual([]);
+    expect(r.undated).toEqual([
+      { currency: 'COP', count: 1, gross: 90000, discounts: 0, net: 90000 },
+    ]);
   });
 
   it('sin producción ni «Sin atribuir»: hasActivity false', async () => {

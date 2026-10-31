@@ -65,6 +65,7 @@ function report(
     unattributed: [
       { currency: 'COP', count: 2, gross: 150, discounts: 10, net: 140 },
     ],
+    undated: [],
     hasActivity: true,
     ...overrides,
   };
@@ -157,6 +158,27 @@ describe('toProductionByProcedureCsv (DX-423)', () => {
     // 100 ÷ 3 = 33,33: con decimales, como la pantalla.
     expect(out).toContain(
       '"Procedimiento","Prevención","P2","Sellante","CLP",3,100,0,100,33.33,,',
+    );
+  });
+
+  it('realizados sin fecha: al final, como «Sin fecha», igual que el aviso bajo la tabla', () => {
+    const out = lines(
+      toProductionByProcedureCsv(
+        report({
+          undated: [
+            {
+              currency: 'COP',
+              count: 1,
+              gross: 90000,
+              discounts: 0,
+              net: 90000,
+            },
+          ],
+        }),
+      ),
+    );
+    expect(out[out.length - 1]).toBe(
+      '"Sin fecha (fuera del período)","","","","COP",1,90000.00,0.00,90000.00,,,',
     );
   });
 

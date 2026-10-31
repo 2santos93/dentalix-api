@@ -1542,11 +1542,16 @@ dice qué sedes existen),
   congelado en el ítem por DX-105, ÷ los ítems que lo tienen) y diferencia %
   ((Σ neto − Σ catálogo) ÷ Σ catálogo, solo sobre los ítems con catálogo).
   Subtotal por categoría y total **por moneda**; nunca se mezclan monedas.
-- **«Sin atribuir»** (como DX-305): DONE sin `completedAt` o sin
-  `performedLocationId`, por moneda. **No dependen del período**: sin fecha no
-  caen en ninguno, así que salen igual con cualquier `from`/`to` (sí respetan
-  sede, profesional y categoría). Los que no tienen sede solo los ve quien ve
-  todas las sedes sin elegir una.
+- **«Sin atribuir»** (como DX-305), en dos partes:
+  - **Sin sede, con fecha** (`completedAt` en el período y sin
+    `performedLocationId`): una línea «Sin atribuir» de la tabla, por moneda,
+    **filtrada por el período** como el resto (con la ventana de las zonas de
+    las sedes visibles). Solo la ve quien ve todas las sedes sin elegir una.
+  - **Sin fecha** (`completedAt` nulo, con o sin sede): **no dependen del
+    período** (no caen en ninguno). Van en `undated`: la pantalla los avisa
+    bajo la tabla (también con el período vacío) y el CSV los pone al final
+    como «Sin fecha (fuera del período)». No cuentan para `hasActivity`: un
+    período sin realizados sale vacío aunque los haya.
 - **Opciones de filtro**: profesionales = quien figura como autor de algún
   realizado vivo en las sedes que ve quien consulta (ex-miembros incluidos;
   un miembro restringido no ve el resto del equipo); categorías del catálogo,

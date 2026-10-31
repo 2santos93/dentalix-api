@@ -79,14 +79,20 @@ export interface ProductionByProcedureRepository {
     scope: ProductionScope,
   ): Promise<ProcedureSums[]>;
   /**
-   * Σ por moneda de los DONE vivos sin `completedAt` o sin
-   * `performedLocationId` («Sin atribuir»): los que tienen sede, si es una de
-   * `scope.locationIds`; los que no, solo con `includeWithoutLocation`.
+   * «Sin atribuir» (DX-305), Σ por moneda de los DONE vivos de planes vivos:
+   *  - `inPeriod`: con `completedAt` en el período pero sin sede de
+   *    realización; solo con `includeWithoutLocation` (no son de ninguna
+   *    sede). El período se corta con la ventana de las zonas de
+   *    `scope.locationIds`.
+   *  - `undated`: sin `completedAt` (no caen en ningún período): los que
+   *    tienen sede, si es una de `scope.locationIds`; los que no, solo con
+   *    `includeWithoutLocation`.
    */
   unattributed(
+    period: CivilPeriod,
     scope: ProductionScope,
     includeWithoutLocation: boolean,
-  ): Promise<UnattributedSums[]>;
+  ): Promise<{ inPeriod: UnattributedSums[]; undated: UnattributedSums[] }>;
   /** Los ítems de un procedimiento (y moneda) del agregado, paginados. */
   listItems(
     period: CivilPeriod,

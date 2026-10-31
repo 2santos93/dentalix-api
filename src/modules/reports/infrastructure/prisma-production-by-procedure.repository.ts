@@ -261,35 +261,57 @@ export class PrismaProductionByProcedureRepository implements ProductionByProced
   }
 
   async unattributed(
+    period: CivilPeriod,
     scope: ProductionScope,
     includeWithoutLocation: boolean,
-  ): Promise<UnattributedSums[]> {
+  ): Promise<{ inPeriod: UnattributedSums[]; undated: UnattributedSums[] }> {
     const tenantId = this.requireTenantId();
     const ids = [...scope.locationIds];
-    if (ids.length === 0 && !includeWithoutLocation) return [];
-    const where = includeWithoutLocation
+    if (ids.length === 0 && !includeWithoutLocation) {
+      return { inPeriod: [], undated: [] };
+    }
+    const visible = includeWithoutLocation
       ? Prisma.sql`(i."performedLocationId" IS NULL OR i."performedLocationId" = ANY(${ids}::uuid[]))`
       : Prisma.sql`i."performedLocationId" = ANY(${ids}::uuid[])`;
-    const rows = await this.prisma.runWithTenant(
-      (tx) =>
-        tx.$queryRaw<UnattributedRow[]>`
-        SELECT p."currency", count(*) AS "count",
+    return this.prisma.runWithTenant(async (tx) => {
+      // Con fecha y sin sede: no tienen zona propia; se cortan con la
+      // ventana del período en las zonas de las sedes que se ven (una sola
+      // zona, lo normal, es exacta).
+      const branches =
+        includeWithoutLocation && ids.length > 0
+          ? await this.branches(tx, tenantId, period, ids)
+          : [];
+      const window = branches.length > 0 ? periodWindow(branches) : null;
+      const withoutLocation = window
+        ? Prisma.sql`OR (i."performedLocationId" IS NULL
+                     AND i."completedAt" >= ${utcTimestamp(window.start)}
+                     AND i."completedAt" < ${utcTimestamp(window.end)})`
+        : Prisma.empty;
+      const rows = await tx.$queryRaw<
+        (UnattributedRow & { undated: boolean })[]
+      >`
+        SELECT p."currency", (i."completedAt" IS NULL) AS "undated",
+               count(*) AS "count",
                sum(i."price") AS "gross", sum(i."discount") AS "discounts"
           FROM "treatment_plan_items" i
           JOIN "treatment_plans" p
             ON p."tenantId" = i."tenantId" AND p."id" = i."planId"
          WHERE i."tenantId" = ${tenantId}::uuid
            AND ${common(scope)}
-           AND (i."completedAt" IS NULL OR i."performedLocationId" IS NULL)
-           AND ${where}
-         GROUP BY 1`,
-    );
-    return rows.map((r) => ({
-      currency: r.currency,
-      count: Number(r.count),
-      gross: dec(r.gross),
-      discounts: dec(r.discounts),
-    }));
+           AND ((i."completedAt" IS NULL AND ${visible})
+                ${withoutLocation})
+         GROUP BY 1, 2`;
+      const sums = (undated: boolean) =>
+        rows
+          .filter((r) => r.undated === undated)
+          .map((r) => ({
+            currency: r.currency,
+            count: Number(r.count),
+            gross: dec(r.gross),
+            discounts: dec(r.discounts),
+          }));
+      return { inPeriod: sums(false), undated: sums(true) };
+    });
   }
 
   async listItems(

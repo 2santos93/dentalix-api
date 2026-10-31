@@ -29,6 +29,7 @@ import {
   type ProductionLocation,
   type ProductionProfessional,
   type ProductionScope,
+  type UnattributedSums,
 } from '../../domain/ports/production-by-procedure-repository.port';
 
 /** Tope del período por calendario: «hasta» anterior a «desde» + 24 meses. */
@@ -84,8 +85,16 @@ export interface ProductionByProcedure extends ProcedureProduction {
     professionals: ProductionProfessional[];
     categories: string[];
   };
-  /** Realizados «Sin atribuir» (sin fecha o sin sede, DX-305), por moneda. */
+  /**
+   * «Sin atribuir» del período (DX-305): realizados con fecha en el período
+   * y sin sede de realización, por moneda. Son una línea de la tabla.
+   */
   unattributed: UnattributedTotals[];
+  /**
+   * Realizados sin fecha (`completedAt` nulo), por moneda: no son de ningún
+   * período; la pantalla los avisa bajo la tabla y el CSV en «Sin fecha».
+   */
+  undated: UnattributedTotals[];
   hasActivity: boolean;
 }
 
@@ -108,6 +117,19 @@ export interface ProductionItems {
 }
 
 export const PRODUCTION_ITEMS_PAGE_SIZE = 25;
+
+function totalsOf(sums: readonly UnattributedSums[]): UnattributedTotals[] {
+  return sums
+    .filter((p) => p.count > 0)
+    .map((p) => ({
+      currency: p.currency,
+      count: p.count,
+      gross: money(p.gross),
+      discounts: money(p.discounts),
+      net: money(p.gross - p.discounts),
+    }))
+    .sort((a, b) => a.currency.localeCompare(b.currency));
+}
 
 const money = (value: number) =>
   Math.round((value + Number.EPSILON) * 100) / 100;
@@ -208,23 +230,19 @@ export class GetProductionByProcedureUseCase {
       scope.locationIds.length === 0
         ? Promise.resolve([])
         : this.repo.aggregate(resolved.period, scope),
-      this.repo.unattributed(scope, resolved.includeWithoutLocation),
+      this.repo.unattributed(
+        resolved.period,
+        scope,
+        resolved.includeWithoutLocation,
+      ),
       // Quien realizó algo en las sedes que ve (ex-miembros incluidos), no
       // todo el equipo: a un miembro restringido no se le enseña el resto.
       this.repo.listProfessionals(resolved.locations.map((l) => l.id)),
       this.repo.listCategories(),
     ]);
     const production = buildProcedureProduction(sums);
-    const unattributed = pending
-      .filter((p) => p.count > 0)
-      .map((p) => ({
-        currency: p.currency,
-        count: p.count,
-        gross: money(p.gross),
-        discounts: money(p.discounts),
-        net: money(p.gross - p.discounts),
-      }))
-      .sort((a, b) => a.currency.localeCompare(b.currency));
+    const unattributed = totalsOf(pending.inPeriod);
+    const undated = totalsOf(pending.undated);
     const visibleProfessionals =
       resolved.kind === 'OWN'
         ? professionals.filter((p) => p.userId === input.actor.userId)
@@ -251,6 +269,8 @@ export class GetProductionByProcedureUseCase {
       },
       ...production,
       unattributed,
+      undated,
+      // Lo sin fecha no es del período: con solo eso, el período está vacío.
       hasActivity: production.rows.length > 0 || unattributed.length > 0,
     };
   }

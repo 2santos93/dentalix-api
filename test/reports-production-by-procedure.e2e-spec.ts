@@ -341,6 +341,22 @@ describe('GET /reports/production-by-procedure (DX-423)', () => {
       by: uno,
       locationId: sur,
     });
+    // Con fecha y sin sede: «Sin atribuir» de SU período (octubre)…
+    await item({
+      patientId: p3,
+      catalogItemId: profilaxis,
+      currency: 'COP',
+      price: 15,
+      completedAt: at('11'),
+    });
+    // …y este, de enero de 2020: no sale en octubre.
+    await item({
+      patientId: p3,
+      catalogItemId: profilaxis,
+      currency: 'COP',
+      price: 90000,
+      completedAt: '2020-01-10T15:00:00Z',
+    });
 
     // DX-089: un ADMIN no se restringe (409), pero el reporte respeta `loc`.
     const issue = async (loc: string[]) =>
@@ -431,12 +447,32 @@ describe('GET /reports/production-by-procedure (DX-423)', () => {
     ]);
   });
 
-  it('borrados, propuestos, aceptados sin hacer y cancelados no cuentan; sin fecha o sin sede salen en «Sin atribuir»', async () => {
+  it('borrados, propuestos, aceptados sin hacer y cancelados no cuentan; sin sede (con fecha del período) en «Sin atribuir», sin fecha aparte', async () => {
     const r = await report();
     expect(r.unattributed).toEqual([
+      { currency: 'COP', count: 1, gross: 15, discounts: 0, net: 15 },
+    ]);
+    expect(r.undated).toEqual([
       { currency: 'COP', count: 2, gross: 95, discounts: 0, net: 95 },
     ]);
     expect(r.hasActivity).toBe(true);
+  });
+
+  it('un período sin realizados está vacío aunque haya «sin fecha»; el «sin sede» de ese período sí sale', async () => {
+    const february = await report({ from: '2020-02-01', to: '2020-02-29' });
+    expect(february).toMatchObject({
+      rows: [],
+      totals: [],
+      unattributed: [],
+      hasActivity: false,
+    });
+    expect(february.undated).toEqual([
+      { currency: 'COP', count: 2, gross: 95, discounts: 0, net: 95 },
+    ]);
+    const january = await report({ from: '2020-01-01', to: '2020-01-31' });
+    expect(january.unattributed).toEqual([
+      { currency: 'COP', count: 1, gross: 90000, discounts: 0, net: 90000 },
+    ]);
   });
 
   it('el total coincide con la producción de «Comparar sedes» del mismo período', async () => {
@@ -463,6 +499,7 @@ describe('GET /reports/production-by-procedure (DX-423)', () => {
     ]);
     // Restringido: ni el «Sin atribuir» sin sede ni el de la Sur.
     expect(principalOnly.unattributed).toEqual([]);
+    expect(principalOnly.undated).toEqual([]);
 
     const norteOnly = await report({}, onlyNorte);
     expect(norteOnly.rows.map((x) => [x.code, x.currency])).toEqual([
@@ -485,7 +522,8 @@ describe('GET /reports/production-by-procedure (DX-423)', () => {
     expect(atNorte.unattributed).toEqual([]);
 
     const atSur = await report({ locationId: sur });
-    expect(atSur.unattributed).toEqual([
+    expect(atSur.unattributed).toEqual([]);
+    expect(atSur.undated).toEqual([
       { currency: 'COP', count: 1, gross: 25, discounts: 0, net: 25 },
     ]);
 
@@ -510,7 +548,8 @@ describe('GET /reports/production-by-procedure (DX-423)', () => {
       ['RES-1', 'COP', 2, 200],
       ['PRO-1', 'COP', 1, 40],
     ]);
-    expect(own.unattributed).toEqual([
+    expect(own.unattributed).toEqual([]);
+    expect(own.undated).toEqual([
       { currency: 'COP', count: 1, gross: 25, discounts: 0, net: 25 },
     ]);
     expect(own.options.professionals).toEqual([
