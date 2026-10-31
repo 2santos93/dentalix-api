@@ -18,10 +18,8 @@ import {
 } from './support/e2e-fixtures';
 import { heldInClinicMessage } from '../src/modules/appointments/domain/plan-item-reservation';
 import { regionalFormat } from '../src/shared/format/regional-format';
-import {
-  REGIONAL_BOGOTA_FIXTURE,
-  locationData,
-} from './support/location-fixtures';
+import { locationData } from './support/location-fixtures';
+import { sedeTodayFixture } from './support/sede-clock';
 
 /**
  * DX-273 (revisión DX-271, I1 e I2):
@@ -38,9 +36,15 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 });
 const MIN = 60000;
 const DAY = 86400000;
-const ZONE = 'America/Bogota';
+/**
+ * DX-449: la sede de A está en Bogotá salvo cerca de su medianoche, cuando pasa
+ * a una zona donde ahora es mediodía: las citas «de hoy que ya empezaron»
+ * caben antes de «ahora» sin cruzar de día, corra la CI a la hora que corra.
+ */
+const SEDE = sedeTodayFixture();
+const ZONE = SEDE.timeZone;
 
-/** Día civil YYYY-MM-DD en Bogotá. */
+/** Día civil YYYY-MM-DD en la sede. */
 function civil(instant: Date): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: ZONE }).format(instant);
 }
@@ -49,12 +53,6 @@ function civil(instant: Date): string {
 function plusDays(day: string, days: number): string {
   const d = new Date(`${day}T12:00:00.000Z`);
   return new Date(d.getTime() + days * DAY).toISOString().slice(0, 10);
-}
-
-/** Minutos que lleva el día en Bogotá (UTC-5 fijo). */
-function minutesIntoBogotaDay(now: Date): number {
-  const local = new Date(now.getTime() - 5 * 60 * MIN);
-  return local.getUTCHours() * 60 + local.getUTCMinutes();
 }
 
 interface ReservedElsewhere {
@@ -174,15 +172,13 @@ describe('DX-273 salida de «Completada» y reservas en otra cita', () => {
       orderBy: { occurredAt: 'asc' },
     });
   /**
-   * Cita de hoy en Bogotá que ya empezó (su reserva venció: el ítem se puede
-   * agendar en otra), de 5 min y en su propio hueco, sin cruzar la medianoche.
+   * Cita de hoy en la sede que ya empezó (su reserva venció: el ítem se puede
+   * agendar en otra), de 5 min y en su propio hueco. La zona de la sede deja
+   * al menos 3 h desde su medianoche (DX-449): ningún hueco se recorta.
    */
   let todaySlot = 0;
   const todayAppointment = (location = locationId) => {
-    const lateBy = Math.max(
-      1,
-      Math.min(2 + 6 * todaySlot++, minutesIntoBogotaDay(new Date()) - 6),
-    );
+    const lateBy = 2 + 6 * todaySlot++;
     return rawAppointment(
       new Date(Date.now() - lateBy * MIN),
       'SCHEDULED',
@@ -221,8 +217,15 @@ describe('DX-273 salida de «Completada» y reservas en otra cita', () => {
     await resetDatabase(raw);
     a = await registerClinic(app, 'dx273-e2e');
     b = await registerClinic(app, 'dx273-e2e-b');
-    const location = await raw.location.findFirstOrThrow({
-      where: { tenantId: a.tenantId },
+    const location = await raw.location.update({
+      where: {
+        id: (
+          await raw.location.findFirstOrThrow({
+            where: { tenantId: a.tenantId },
+          })
+        ).id,
+      },
+      data: { timeZone: ZONE },
     });
     locationId = location.id;
     locationName = location.name;
@@ -513,8 +516,8 @@ describe('DX-273 salida de «Completada» y reservas en otra cita', () => {
         locationId,
         locationName,
         timeZone: ZONE,
-        locale: REGIONAL_BOGOTA_FIXTURE.locale,
-        hourCycle: REGIONAL_BOGOTA_FIXTURE.hourCycle,
+        locale: SEDE.locale,
+        hourCycle: SEDE.hourCycle,
       };
       expect(
         (arrived.body as { planItemsReservedElsewhere: ReservedElsewhere[] })
@@ -922,7 +925,7 @@ describe('DX-273 salida de «Completada» y reservas en otra cita', () => {
           start,
           timeZone: ZONE,
           locationName,
-          fmt: regionalFormat(REGIONAL_BOGOTA_FIXTURE),
+          fmt: regionalFormat(SEDE),
         });
       const claim = (appointmentId: string, itemId: string) =>
         call(
@@ -1109,7 +1112,7 @@ describe('DX-273 salida de «Completada» y reservas en otra cita', () => {
       } = await acceptedItems(1);
       await accept(planId);
       const north = await raw.location.create({
-        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        data: locationData(SEDE, {
           tenantId: a.tenantId,
           name: 'Sede Norte DX273',
         }),
