@@ -124,6 +124,7 @@ const recordPayment = new RecordPaymentUseCase(
     new PrismaPaymentMethodRepository(prisma, tenantContext),
     paymentRepo,
   ),
+  () => NOW,
 );
 
 const PNG =

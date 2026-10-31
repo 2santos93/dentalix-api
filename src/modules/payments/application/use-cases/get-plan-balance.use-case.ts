@@ -18,6 +18,10 @@ import {
 } from '../payment-exchange-rate';
 import { ConvertAmountUseCase } from '../../../exchange/application/use-cases/convert-amount.use-case';
 import {
+  CONVERSION_TIMED_OUT,
+  conversionDeadline,
+} from '../conversion-deadline';
+import {
   PLAN_CREDIT_READER,
   type PlanCreditReader,
 } from '../../domain/ports/plan-credit-reader.port';
@@ -48,6 +52,13 @@ export interface GetPlanBalanceResult {
    * que se registre la tasa y el barrido la congele.
    */
   paymentsWithoutRate: PaymentWithoutRate[];
+  /**
+   * DX-054: el proveedor de tasas no respondió dentro del plazo del saldo
+   * (`BALANCE_CONVERSION_BUDGET_MS`): los abonos que esperaban su tasa salen
+   * en `paymentsWithoutRate` y no suman. Volver a pedir el saldo lo completa
+   * cuando el proveedor responda. `false` en el caso normal.
+   */
+  rateProviderTimedOut: boolean;
 }
 
 /** Un abono «sin tasa» del saldo (DX-375): nunca datos del paciente. */
@@ -235,25 +246,35 @@ export class GetPlanBalanceUseCase {
     // tasa congelada (DX-375) ni siquiera se usa: solo los abonos anteriores
     // aún sin congelar se convierten con la tasa de su día.
     const convert = this.convertAmount.memoized();
-
-    for (const payment of payments) {
-      // IMP-4a/4b: cada abono se convierte por su propio importe (nunca
-      // reutilizando un `rateUsed`, que depende del importe), y uno sin tasa
-      // no tumba el saldo: no cuenta en `paid` y se informa «sin tasa»
-      // (`paymentsCount` no cambia). Cualquier otro fallo se propaga.
-      const converted =
-        baseOf.get(payment.id) ??
-        (await paymentAmountIn(convert, payment, plan.currency));
-      if (converted === null) {
-        paymentsWithoutRate.push({
-          paymentId: payment.id,
-          amount: payment.amount,
-          currency: payment.currency,
-          paidOn: payment.paidOn,
-        });
-        continue;
+    // DX-054: un proveedor lento o colgado no retiene el saldo: todas las
+    // conversiones en vivo comparten un plazo y lo que no llegue sale «sin
+    // tasa», como un abono que el proveedor no puede convertir.
+    const deadline = conversionDeadline();
+    try {
+      for (const payment of payments) {
+        // IMP-4a/4b: cada abono se convierte por su propio importe (nunca
+        // reutilizando un `rateUsed`, que depende del importe), y uno sin tasa
+        // no tumba el saldo: no cuenta en `paid` y se informa «sin tasa»
+        // (`paymentsCount` no cambia). Cualquier otro fallo se propaga.
+        const base = baseOf.get(payment.id);
+        const converted =
+          base ??
+          (await deadline.race(
+            paymentAmountIn(convert, payment, plan.currency),
+          ));
+        if (converted === null || converted === CONVERSION_TIMED_OUT) {
+          paymentsWithoutRate.push({
+            paymentId: payment.id,
+            amount: payment.amount,
+            currency: payment.currency,
+            paidOn: payment.paidOn,
+          });
+          continue;
+        }
+        paid += converted;
       }
-      paid += converted;
+    } finally {
+      deadline.dispose();
     }
 
     const creditMovements = this.credit
@@ -267,6 +288,7 @@ export class GetPlanBalanceUseCase {
       balance: round2(billable - paid - creditMovements),
       paymentsCount: payments.length,
       paymentsWithoutRate,
+      rateProviderTimedOut: deadline.timedOut,
     };
   }
 }

@@ -30,7 +30,11 @@ import {
   touchesDiscount,
   type DiscountActor,
 } from './item-discount';
-import { isClosedPlanItemChangeAllowed } from '../../domain/plan-status-machine';
+import {
+  DONE_ITEM_PRICE_LOCKED_MESSAGE,
+  isClosedPlanItemChangeAllowed,
+  isDoneItemPriceChange,
+} from '../../domain/plan-status-machine';
 import {
   APPOINTMENT_ONLY_WHEN_MARKING_DONE_MESSAGE,
   decideAttribution,
@@ -175,6 +179,11 @@ export class UpdateTreatmentPlanItemUseCase {
           !isAttributionCorrection(plan.status, item.status, patch)
         ) {
           assertPlanOpenForItems(plan);
+        }
+        // DX-054: lo realizado no cambia de precio (ni al salir de DONE en la
+        // misma petición), con el ítem leído bloqueado.
+        if (isDoneItemPriceChange(item.status, item.price, patch.price)) {
+          throw new ConflictException(DONE_ITEM_PRICE_LOCKED_MESSAGE);
         }
         // DX-050: con el ítem bloqueado, quién lo realizó, cuándo, y quién
         // puede cambiarlo (400/403 antes de escribir nada).

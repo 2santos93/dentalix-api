@@ -1,6 +1,8 @@
-import { TreatmentPlanStatus } from '@prisma/client';
+import { TreatmentPlanItemStatus, TreatmentPlanStatus } from '@prisma/client';
 import {
+  DONE_ITEM_PRICE_LOCKED_MESSAGE,
   canTransition,
+  isDoneItemPriceChange,
   PLAN_STATUS_LABELS,
   PLAN_STATUS_TRANSITIONS,
   planTransitionError,
@@ -86,6 +88,27 @@ describe('máquina de estados del plan de tratamiento (DX-040)', () => {
     );
     expect(planTransitionError(REJECTED, ACCEPTED)).toBe(
       'Un plan «Rechazado» no puede pasar a «Aceptado».',
+    );
+  });
+});
+
+describe('precio de un ítem realizado (DX-054)', () => {
+  const { PROPOSED, ACCEPTED: ITEM_ACCEPTED, DONE } = TreatmentPlanItemStatus;
+
+  it('un ítem DONE no cambia de precio', () => {
+    expect(isDoneItemPriceChange(DONE, 300, 250)).toBe(true);
+  });
+
+  it('repetir el precio, omitirlo o un ítem no realizado no es cambio bloqueado', () => {
+    expect(isDoneItemPriceChange(DONE, 300, 300)).toBe(false);
+    expect(isDoneItemPriceChange(DONE, 300, undefined)).toBe(false);
+    expect(isDoneItemPriceChange(ITEM_ACCEPTED, 300, 250)).toBe(false);
+    expect(isDoneItemPriceChange(PROPOSED, 300, 250)).toBe(false);
+  });
+
+  it('el mensaje es en español y dice cómo corregirlo', () => {
+    expect(DONE_ITEM_PRICE_LOCKED_MESSAGE).toBe(
+      'El procedimiento ya está realizado: su precio no se cambia. Para corregirlo, devuélvelo antes a «Aceptado».',
     );
   });
 });

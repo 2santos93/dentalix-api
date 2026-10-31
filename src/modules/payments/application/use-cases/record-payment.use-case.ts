@@ -8,6 +8,11 @@ import {
 } from '@nestjs/common';
 import { PaymentMethod } from '@prisma/client';
 import { PAYMENT_REPOSITORY } from '../../domain/ports/payment-repository.port';
+import { PAYMENT_CLOCK, type PaymentClock } from './void-payment.use-case';
+import {
+  PAID_AT_IN_FUTURE_MESSAGE,
+  isPaidAtTooFarInFuture,
+} from '../../domain/paid-at-window';
 import type {
   CivilPaidDay,
   CreatePaymentRepoInput,
@@ -149,7 +154,22 @@ export class RecordPaymentUseCase {
     private readonly convertAmount: ConvertAmountUseCase,
     // DX-377: medio del catálogo, referencia y aviso de referencia repetida.
     private readonly paymentMethodGate: PaymentMethodGate,
+    // DX-054: la fecha del abono no puede ir más de 24 h por delante.
+    @Inject(PAYMENT_CLOCK)
+    private readonly now: PaymentClock,
   ) {}
+
+  /**
+   * `normalizePaidAt` más la ventana de DX-054 (400 si va a más de 24 h en
+   * el futuro). La usan el abono suelto y el repartido.
+   */
+  checkedPaidAt(value: string | Date): Date | CivilPaidDay {
+    const paidAt = normalizePaidAt(value);
+    if (isPaidAtTooFarInFuture(paidAt, this.now())) {
+      throw new BadRequestException(PAID_AT_IN_FUTURE_MESSAGE);
+    }
+    return paidAt;
+  }
 
   /**
    * `createdById` is a separate argument (not part of `input`) — it comes
@@ -189,7 +209,7 @@ export class RecordPaymentUseCase {
     }
 
     const currency = await this.validCurrency(input);
-    const paidAt = normalizePaidAt(input.paidAt);
+    const paidAt = this.checkedPaidAt(input.paidAt);
 
     // Throws NotFoundException when the plan is absent, soft-deleted, or
     // belongs to another tenant — never re-derived here.
