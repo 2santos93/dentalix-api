@@ -302,6 +302,9 @@ describe('oferta de hueco por enlace (int, DX-435)', () => {
   });
 
   describe('rutas públicas: aislamiento y minimización', () => {
+    // ISOLATION_COVERS: GET /public/slot-offers/:token
+    // ISOLATION_COVERS: POST /public/slot-offers/:token/accept
+    // ISOLATION_COVERS: POST /public/slot-offers/:token/decline
     it('un token de otra clínica, inventado o mal formado da el mismo 404', async () => {
       const { token, offerId } = await offerToEntry(a, 0);
       const notFound = new NotFoundException(SLOT_OFFER_NOT_FOUND_MESSAGE);

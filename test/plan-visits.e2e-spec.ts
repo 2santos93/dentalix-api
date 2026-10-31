@@ -110,6 +110,8 @@ describe('DX-256 visitas y agenda', () => {
     await app?.close();
     await raw.$disconnect();
   });
+  // ISOLATION_COVERS: GET /treatment-plans/:id/visits
+  // ISOLATION_COVERS: PATCH /treatment-plans/:id/visits
   it('guarda dos visitas; recepción no organiza y clínica ajena no encuentra el plan', async () => {
     const body = {
       items: itemIds.map((itemId, n) => ({

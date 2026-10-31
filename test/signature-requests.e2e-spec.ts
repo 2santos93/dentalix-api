@@ -264,6 +264,10 @@ describe('Firma a distancia de consentimientos (e2e, DX-243)', () => {
     offsetMs = 0;
   });
 
+  // ISOLATION_COVERS: POST /patients/:patientId/consents/:id/signed-pdf/retry
+  // ISOLATION_COVERS: POST /patients/:patientId/consents/:id/signed-pdf/copy
+  // ISOLATION_COVERS: GET /public/signed-consent-copies/:token
+  // ISOLATION_COVERS: POST /public/signed-consent-copies/:token/download
   it('enviar → código → verificar → firmar → firma del profesional: Completo, con evidencias e íntegro', async () => {
     // Recepción ve en el modal a quién iría y quién puede firmar.
     const options = await as(clinicA, reception)
@@ -847,6 +851,11 @@ describe('Firma a distancia de consentimientos (e2e, DX-243)', () => {
   });
 
   describe('aislamiento entre clínicas (DX-207)', () => {
+    // ISOLATION_COVERS: GET /patients/:patientId/signature-requests/options
+    // ISOLATION_COVERS: GET /patients/:patientId/signature-requests
+    // ISOLATION_COVERS: POST /patients/:patientId/signature-requests
+    // ISOLATION_COVERS: POST /patients/:patientId/signature-requests/:id/revoke
+    // ISOLATION_COVERS: POST /patients/:patientId/consents/:id/countersign
     it('B no ve, no envía, no anula ni firma como profesional sobre lo de A', async () => {
       const { created } = await send();
       const before = await raw.signatureRequest.findUniqueOrThrow({
@@ -929,6 +938,11 @@ describe('Firma a distancia de consentimientos (e2e, DX-243)', () => {
       expect(await countB()).toBe(0);
     });
 
+    // ISOLATION_COVERS: GET /public/sign/:token
+    // ISOLATION_COVERS: POST /public/sign/:token/code
+    // ISOLATION_COVERS: POST /public/sign/:token/verify
+    // ISOLATION_COVERS: GET /public/sign/:token/document
+    // ISOLATION_COVERS: POST /public/sign/:token/sign
     it('el token de A en el host de B → «Enlace no válido» en las cinco rutas, sin tocar nada de A', async () => {
       const { created, token } = await send();
       const code = await requestCode(token);

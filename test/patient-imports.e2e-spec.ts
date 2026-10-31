@@ -340,6 +340,10 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
     expect(events.map((e) => e.action)).toEqual(['CREATE', 'EXPORT']);
   });
 
+  // ISOLATION_COVERS: GET /patient-imports/:id
+  // ISOLATION_COVERS: GET /patient-imports/:id/errors.csv
+  // ISOLATION_COVERS: POST /patient-imports/:id/confirm
+  // ISOLATION_COVERS: POST /patient-imports/:id/undo
   it('aislamiento: otra clínica no ve ni confirma el lote (404) ni lo lista', async () => {
     await as(
       api().get(`/api/v1/patient-imports/${firstBatch.id}`),

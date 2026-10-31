@@ -200,6 +200,8 @@ describe('Documentos: subida directa con el almacén en disco (DX-259, e2e)', ()
     expect(slots.active).toBe(0);
   });
 
+  // ISOLATION_COVERS: POST /patients/:patientId/documents/upload-url
+  // ISOLATION_COVERS: POST /patients/:patientId/documents/:id/complete
   it('otra clínica: upload-url y complete del paciente o del documento de A → 404, sin tocar nada', async () => {
     const bytes = Buffer.concat([pdfFixture(), Buffer.from('% f\n')]);
     const ticket = await ask(bytes);
