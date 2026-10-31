@@ -143,6 +143,10 @@ jobs:
       S3_TEST_ACCESS_KEY_ID: dentalix-minio
       S3_TEST_SECRET_ACCESS_KEY: dentalix-minio-local
       REQUIRE_S3_TESTS: '1'
+      # DX-082: con REQUIRE_BACKUP_TESTS=1 los tests de copias y restauración
+      # (test/backup) fallan si falta pg_dump, age o un superusuario, en vez de
+      # saltarse. `dentalix` es el superusuario del servicio postgres:16.
+      REQUIRE_BACKUP_TESTS: '1'
     steps:
       - uses: actions/checkout@v4
 
@@ -153,6 +157,14 @@ jobs:
 
       - run: npm ci
       - run: npx prisma generate
+
+      # DX-082: age cifra las copias; no viene en el runner (pg_dump y
+      # pg_restore 16 sí).
+      - name: Instalar age (copias, DX-082)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends age
+          age --version && pg_dump --version
 
       # DX-084/DX-251: MinIO como paso y no como `services:` (la imagen necesita
       # `server /data`, que un servicio de Actions no puede pasar). Imagen fijada
