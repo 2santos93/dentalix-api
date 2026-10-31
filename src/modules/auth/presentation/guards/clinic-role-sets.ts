@@ -381,6 +381,13 @@ export const ANAMNESIS_REVIEW_DECISION_ROLES: ClinicRole[] = [
 // dueño. Solo gestión, como el dashboard (DASHBOARD_ROLES).
 export const REPORT_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 
+// «Producción por procedimiento» (DX-423): ADMIN ve la de todo el equipo; un
+// DENTIST, solo la suya (lo acota el caso de uso). Asistente y recepción no.
+export const PRODUCTION_REPORT_ROLES: ClinicRole[] = [
+  ClinicRole.DENTIST,
+  ClinicRole.ADMIN,
+];
+
 // Medios de pago de la clínica (DX-377) — crear y editar: solo gestión.
 // Leerlos (selector del modal de abono): PAYMENT_ROLES.
 export const PAYMENT_METHOD_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];

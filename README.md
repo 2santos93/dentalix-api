@@ -1516,6 +1516,48 @@ moneda). Errores 400 en español.
   (`planComparisonHistory`). Si hoy es el primer día abierto del mes, el mes
   actual solo tiene lo de hoy.
 
+## Reportes: «Producción por procedimiento» (DX-423)
+
+Mismo módulo. `GET /api/v1/reports/production-by-procedure`, su `.csv` y
+`GET /api/v1/reports/production-by-procedure/items` (detalle de una fila).
+Roles `PRODUCTION_REPORT_ROLES`: ADMIN ve todo el equipo; un DENTIST solo lo
+que realizó él (pedir `professionalId` de otro → 403 «Solo puedes ver tu
+propia producción.»); RECEPTION y ASSISTANT → 403. Filtros: `from`/`to`
+(días civiles, como mucho **24 meses** = 731 días, `checkPeriodDays`),
+`locationId` (400 si no es de la clínica, 403 si no es de las del usuario),
+`professionalId` y `category` (texto del catálogo).
+
+- **Qué cuenta**: ítems `DONE`, vivos, de planes vivos, con `completedAt` en
+  el período (días civiles en la zona de la sede) y `performedLocationId` en
+  las sedes que ve quien consulta (claim `loc`, DX-089): cuenta la sede donde
+  se REALIZÓ, no la del paciente. Propuestos, aceptados sin hacer y los de
+  planes cancelados que no se hicieron no cuentan. Un DONE de un plan
+  cancelado después de hacerlo sí cuenta (se hizo), igual que en «Comparar
+  sedes»: los totales de los dos reportes coinciden (e2e).
+- **Columnas** por procedimiento (categoría y código) y moneda del plan:
+  cantidad, bruto (Σ precio), descuentos (Σ descuento), neto, honorario medio
+  (neto ÷ cantidad), medio de catálogo (Σ `basePrice`, el precio de catálogo
+  congelado en el ítem por DX-105, ÷ los ítems que lo tienen) y diferencia %
+  ((Σ neto − Σ catálogo) ÷ Σ catálogo, solo sobre los ítems con catálogo).
+  Subtotal por categoría y total **por moneda**; nunca se mezclan monedas.
+- **«Sin atribuir»** (como DX-305): DONE sin `completedAt` o sin
+  `performedLocationId`, por moneda, sea cual sea el período (no tienen
+  fecha). Los que no tienen sede solo los ve quien ve todas las sedes sin
+  elegir una.
+- **CSV**: período y filtros en la cabecera, después las mismas filas,
+  subtotales, totales y «Sin atribuir» que la pantalla. Sin nombres de
+  paciente (tampoco el JSON del reporte); no se audita, como «Comparar sedes».
+- **Detalle** (`/items`, con `catalogItemId` y `currency` de la fila,
+  paginado): paciente, fecha, profesional, sede y diente de cada ítem.
+  Lleva nombres de paciente: auditado (VIEW de `TREATMENT_PLAN_ITEM`,
+  `reason: PRODUCTION_REPORT`).
+- **Rendimiento**: 200.000 realizados en 24 meses como `dentalix_app` en
+  `docs/perf/DX-423.md` (`test/perf/dx423-seed.sql`, `dx423-bench.ts`). Sin
+  índice nuevo: el de DX-014 sirve los períodos cortos y 24 meses es un
+  recorrido. Los instantes van a la consulta como `timestamp` UTC
+  (`utcTimestamp`): un `Date` de Prisma llega como `timestamptz` y el
+  planificador perdía la estimación (bucle anidado de 200.000 vueltas).
+
 ## Recibo de caja por abono (DX-136)
 
 Cada abono nuevo nace con su **recibo de caja numerado por sede** (`NOR-000123`),

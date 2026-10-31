@@ -578,6 +578,11 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // del dueño sobre producción, cobros y citas de todas las sedes. Solo ADMIN.
   'GET /reports/locations-comparison': ADMIN_ONLY,
   'GET /reports/locations-comparison.csv': ADMIN_ONLY,
+  // DX-423: producción por procedimiento. ADMIN ve todo el equipo; DENTIST,
+  // solo lo suyo (lo acota el caso de uso). El detalle lleva pacientes.
+  'GET /reports/production-by-procedure': roles('ADMIN', 'DENTIST'),
+  'GET /reports/production-by-procedure.csv': roles('ADMIN', 'DENTIST'),
+  'GET /reports/production-by-procedure/items': roles('ADMIN', 'DENTIST'),
   // DX-150: cobranza (gestiones y compromisos de pago), mismo dato financiero.
   'POST /patients/:id/collection-notes': BILLING,
   'POST /patients/:id/payment-promises': BILLING,

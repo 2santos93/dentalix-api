@@ -47,6 +47,7 @@ import { PatientCreditController } from '../patient-credit/presentation/patient-
 import { CancellationPolicyController } from '../cancellation-policies/presentation/cancellation-policy.controller';
 import { CancellationFeeController } from '../cancellation-fees/presentation/cancellation-fee.controller';
 import { DiscountReportController } from '../discounts/presentation/discount-report.controller';
+import { ProductionByProcedureController } from '../reports/presentation/production-by-procedure.controller';
 import { CollectionsController } from '../collections/presentation/collections.controller';
 import { CashSessionsController } from '../cash-sessions/presentation/cash-sessions.controller';
 import { ScheduleBlocksController } from '../schedule-blocks/presentation/schedule-blocks.controller';
@@ -1112,6 +1113,12 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'TREATMENT_PLAN_ITEM',
     reason: 'DISCOUNT_REPORT',
   },
+  // DX-423: el detalle de una fila lleva el nombre de cada paciente.
+  'GET /reports/production-by-procedure/items': {
+    action: 'VIEW',
+    resource: 'TREATMENT_PLAN_ITEM',
+    reason: 'PRODUCTION_REPORT',
+  },
   // DX-150: cobranza. La nota se audita sin su texto (solo los nombres de los
   // campos); el cambio de estado del compromiso lo audita SettlePaymentPromises.
   'POST /patients/:id/collection-notes': {
@@ -1631,6 +1638,7 @@ const CONTROLLERS: Type[] = [
   CancellationPolicyController,
   CancellationFeeController,
   DiscountReportController,
+  ProductionByProcedureController,
   CollectionsController,
   CashSessionsController,
   ExpenseReportsController,

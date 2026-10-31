@@ -2361,6 +2361,66 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
         },
       },
     ]),
+    // DX-423: producción por procedimiento. Una sede de A es 400; el
+    // profesional o el procedimiento de A dan un reporte vacío.
+    ...(
+      [
+        '/reports/production-by-procedure',
+        '/reports/production-by-procedure.csv',
+        '/reports/production-by-procedure/items',
+      ] as const
+    ).flatMap((route): IsolationCase[] => {
+      const range = `from=${day(-30)}&to=${day(0)}&`;
+      const items = route.endsWith('/items');
+      // El procedimiento propio de B (se lee al correr el caso, no al definirlo).
+      const extra = () => (items ? `catalogItemId=${b.catalogItemId}&` : '');
+      const empty = (body: unknown, text: string) => {
+        if (route.endsWith('.csv')) {
+          // Cabecera y columnas, sin ninguna fila.
+          expect(text.trim().split('\r\n')).toHaveLength(8);
+        } else if (items) {
+          expect(body).toMatchObject({ items: [], total: 0 });
+        } else {
+          expect(body).toMatchObject({
+            rows: [],
+            totals: [],
+            unattributed: [],
+            hasActivity: false,
+          });
+        }
+      };
+      return [
+        {
+          name: `GET ${route} ?locationId de A`,
+          verb: 'get',
+          path: () => `${route}?${range}${extra()}locationId=${a.locationId}`,
+          queryIds: ['locationId'],
+          status: 400,
+          message: 'La sede no es de esta clínica.',
+        },
+        {
+          name: `GET ${route} ?professionalId de A`,
+          verb: 'get',
+          path: () =>
+            `${route}?${range}${extra()}professionalId=${a.dentistUserId}`,
+          queryIds: ['professionalId'],
+          status: 200,
+          expectBody: empty,
+        },
+        ...(items
+          ? [
+              {
+                name: `GET ${route} ?catalogItemId de A`,
+                verb: 'get' as const,
+                path: () => `${route}?${range}catalogItemId=${a.catalogItemId}`,
+                queryIds: ['catalogItemId'],
+                status: 200,
+                expectBody: empty,
+              },
+            ]
+          : []),
+      ];
+    }),
     {
       name: 'GET /cash-sessions/current ?locationId de A',
       verb: 'get',
