@@ -107,7 +107,7 @@ de despliegue hacen falta las devDependencies para sembrar. El puerto se lee de
    | RECEPTION | `recepcion.norte@demo.dentalix.app` (solo Sede Norte — DX-089) |
 
    Contenido: 2 sedes con horario (la principal con el horario por defecto del
-   registro; "Sede Norte" con el suyo), catálogo por defecto con tarifas en la moneda de la sede demo (hoy COP; la demo con sedes de varios países llega con DX-335),
+   registro; "Sede Norte" con el suyo), catálogo por defecto con tarifas en la moneda de la sede demo (la demo no es de ningún país: sede principal en USD y Sede Norte en EUR, zona UTC, formato `es-419`, teléfonos del tramo ficticio +1 NXX 555-01XX; ver `prisma/demo/data.ts`),
    25 pacientes ficticios (correos `@example.com`) con historias clínicas,
    evoluciones (una corregida con una adenda — DX-038; tres con diagnóstico CIE-10 — DX-212) y odontograma (un hallazgo anulado con motivo y una paciente infantil con dentición mixta, registros temporales y de otro origen — DX-120), 5 tipos de cita con duración y color (DX-121), las 6 plantillas de evolución de ejemplo con dos evoluciones redactadas con ellas («Resina» y «Profilaxis») y ligadas a las últimas citas atendidas (DX-170), las 5 indicaciones postoperatorias de ejemplo con `POI-EXO` vinculada a «Exodoncia simple», la sede principal con teléfono y una entrega impresa de ayer (o del último día con consulta) — DX-222, ~90 citas desde el lunes de la semana pasada hasta
    el sábado de la próxima en distintos estados (las de valoración, limpieza, endodoncia, urgencia y ortodoncia con su tipo), bloqueos de agenda (vacaciones de la segunda dentista de lunes a viernes de la semana siguiente a la próxima, en todas las sedes, y el almuerzo del equipo en la sede principal el próximo día laborable, que deja agendar con aviso) y 3 «Pendientes por agendar» abiertos (las dos cancelaciones o no-shows más recientes y un alta manual urgente; las más antiguas quedan descartadas con motivo) — DX-122, y la cita agendada más lejana de la primera dentista en la sede principal marcada «Adelantar si hay hueco», que sale como candidata en «Ocupar este hueco» al cancelar una cita anterior (DX-210), la rotación de la segunda dentista entre las dos sedes (lunes, miércoles y viernes en la principal; martes y jueves en la Norte, con sus citas dentro) y una excepción el lunes que vuelve de vacaciones: no va a la principal y cubre la Norte de 7:00 a 12:00 — DX-233, planes de tratamiento en todos
@@ -1304,7 +1304,8 @@ siguen admitiendo NULL hasta la fase 2.
 La lista ISO de monedas amplía las aceptadas en listas, gastos, caja y planes;
 el proveedor de tasas puede no tener alguna y esos abonos cuentan en
 `unconvertedPaymentsCount`. La demo (`npm run seed:demo`) crea sus sedes con
-`COP`, `America/Bogota`, `es-CO` y `CO` explícitos y ya revisadas.
+valores explícitos y ya revisadas, sin sabor de ningún país: `USD` (la Norte,
+`EUR`), `UTC`, `es-419` y `US` (el país es obligatorio y no hay uno neutro).
 
 ### Fase 2 (ticket aparte)
 
@@ -2358,7 +2359,7 @@ suggestedFee?, currency?, patientText?, receptionCanCharge? }`, que crea la
   consulta para todo el lote (índice parcial
   `appointments_tenant_patient_incidents_idx`), y omite `cancelReasonText`.
 - **Demo**: la sede principal tiene una política de 24 h con cargo sugerido de
-  50.000 COP, y Daniela Montoya Arango tiene dos inasistencias y una
+  50 USD, y Daniela Montoya Arango tiene dos inasistencias y una
   cancelación con 5 h de aviso la semana pasada (insignia en su ficha y en sus
   citas). Las cancelaciones del calendario se registran avisadas por el
   paciente con 2 días.
@@ -2989,10 +2990,10 @@ después no altera nada ya calculado.
 - **Despliegue**: `npx prisma migrate deploy` antes de la primera réplica
   nueva; después, `npm run db:check-force`. El barrido termina de congelar los
   abonos anteriores solo (50 por clínica y minuto).
-- **Demo**: `npm run seed:demo` deja un abono de hoy de 50 USD en el plan
-  «Endodoncia y rehabilitación de 46» (en COP). Sin clave del proveedor queda
+- **Demo**: `npm run seed:demo` deja un abono de hoy de 45 EUR en el plan
+  «Endodoncia y rehabilitación de 46» (en USD). Sin clave del proveedor queda
   «sin tasa» y enseña el aviso; para verlo congelado, pasa a `MANUAL` y
-  registra la tasa COP de hoy: el barrido lo congela en menos de un minuto.
+  registra la tasa EUR de hoy: el barrido lo congela en menos de un minuto.
 
 ## Medios de pago de la clínica y referencia del pago (DX-377)
 
@@ -3773,7 +3774,7 @@ migraciones `20261020000000_dx222_enums`,
 - **Demo**: las 5 de ejemplo; `POI-EXO` vinculada a «Exodoncia simple»
   (`CX-EXO-SIMPLE`), `POI-CORDAL` a la exodoncia quirúrgica y los cordales,
   `POI-ENDO` al tipo de cita «Endodoncia»; la sede principal con teléfono
-  `+57 601 555 0101`, y una entrega impresa de `POI-EXO` para la última cita
+  `+1 202 555 0100` (tramo ficticio), y una entrega impresa de `POI-EXO` para la última cita
   atendida de un día anterior.
 
 ## Pagadores y coberturas del paciente (DX-153)
@@ -3823,8 +3824,10 @@ coberturas por paciente, una principal. Sustituye al texto libre
   `insurerEps`. Esa columna queda legada, sin lectores desde DX-322; DROP en
   fase 2. La API ya no la lee, no la escribe ni la expone (`@ignore` en el
   esquema), y un cliente antiguo que la mande no da error: se descarta.
-- **Demo**: `npm run seed:demo` crea 8 pagadores (Sura EPS, Sanitas,
-  Compensar, Nueva EPS, Famisanar, Salud Total, Coomeva, Empresa Alfa) y una cobertura
+- **Demo**: `npm run seed:demo` crea 8 pagadores ficticios y sin país
+  (Aseguradora Demo, Plan Prepagado Demo, Seguro Público Demo, Seguros
+  Horizonte Demo, Mutual Bienestar Demo, Salud Vital Demo, Previsión Premium
+  Demo y Empresa Alfa) y una cobertura
   principal por paciente que tenía aseguradora, con una vencida y una
   pendiente para ver los tres estados. El seed omite una clínica demo ya creada.
 - **Tests**: `payers.e2e-spec.ts`, `patient-coverages.e2e-spec.ts`,
@@ -3961,8 +3964,8 @@ de precios) que fijan el precio de cada ítem del plan al añadirlo. Módulos
   compara con el hash de su propia versión, así que las firmadas antes
   siguen con `integrityOk: true`.
 - **Demo**: `npm run seed:demo` crea las listas «Tarifa Sede Norte» (5
-  precios, sede Norte) y «Convenio Alfa» (3), el pagador «Empresa Alfa», los
-  convenios «Sura EPS −15 %» y «Empresa Alfa lista» y los asigna a tres
+  precios en EUR, sede Norte) y «Convenio Alfa» (3, en USD), el pagador
+  «Empresa Alfa», los convenios «Aseguradora Demo −15 %» y «Empresa Alfa lista» y los asigna a tres
   pacientes. Se crean al final para no cambiar los precios de los planes de la
   demo.
 - **Tests**: `plan-quote.spec.ts`, `price-lists.e2e-spec.ts`,

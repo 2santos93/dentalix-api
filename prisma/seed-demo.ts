@@ -194,8 +194,11 @@ import {
   DEMO_PROFESSIONAL_SPECIALTIES,
   DEMO_PRESCRIPTION_SETTINGS,
   demoPerioMeasures,
+  DEMO_COUNTRY,
   DEMO_CURRENCY,
   DEMO_HOUR_CYCLE,
+  DEMO_LOCALE,
+  DEMO_NORTE_CURRENCY,
   DEMO_COMPARISON_HISTORY,
   DEMO_EMAIL_DOMAIN,
   DEMO_INVENTORY,
@@ -557,10 +560,10 @@ class DemoSeeder {
       // EXPLÍCITOS (nada se deduce); nace revisada, sin aviso D5. G1-B: y
       // su reloj, sin pasar por la función de backfill (spec G1-B §4.5).
       location: {
-        country: 'CO',
+        country: DEMO_COUNTRY,
         currency: DEMO_CURRENCY,
         timeZone: DEMO_TIMEZONE,
-        locale: 'es-CO',
+        locale: DEMO_LOCALE,
         hourCycle: DEMO_HOUR_CYCLE,
       },
       // DX-359: el alta queda auditada, sin petición detrás.
@@ -942,10 +945,11 @@ class DemoSeeder {
     // le pone el suyo con el caso de uso de /settings/horarios.
     const norte = await this.use(CreateLocationUseCase).execute({
       ...DEMO_LOCATIONS.norte,
-      country: 'CO',
-      currency: DEMO_CURRENCY,
+      country: DEMO_COUNTRY,
+      // La Sede Norte cobra en otra moneda: la demo multimoneda tiene dos.
+      currency: DEMO_NORTE_CURRENCY,
       timeZone: DEMO_TIMEZONE,
-      locale: 'es-CO',
+      locale: DEMO_LOCALE,
       hourCycle: DEMO_HOUR_CYCLE,
     });
     await this.inTenant(tenantId, norte.id, () =>
@@ -1008,7 +1012,7 @@ class DemoSeeder {
         const created = await this.use(CreatePriceListUseCase).execute(
           {
             name: spec.name,
-            currency: DEMO_CURRENCY,
+            currency: spec.currency,
             locationId: spec.locationKey ? locations[spec.locationKey] : null,
           },
           receptionId,
@@ -1094,7 +1098,7 @@ class DemoSeeder {
     }
   }
 
-  /** Tarifas COP en el catálogo por defecto; devuelve código → id. */
+  /** Tarifas (USD) en el catálogo por defecto; devuelve código → id. */
   private async priceCatalog(tenantId: string): Promise<Map<string, string>> {
     const items = await this.prisma.runWithTenant(tenantId, (tx) =>
       tx.dentalCatalogItem.findMany({
@@ -1130,16 +1134,12 @@ class DemoSeeder {
       DEMO_MEDICAL_ALERTS.backdated.map((b) => b.patientIndex),
     );
     for (const [index, p] of DEMO_PATIENTS.entries()) {
-      const { city: cityName, birthDate, ...withHistory } = p;
+      // Sin país ni ciudad: la demo no es de ningún país.
+      const { birthDate, ...withHistory } = p;
       // DX-247: la anamnesis antigua la siembra `createBackdatedAnamneses`.
       const rest = backdated.has(index)
         ? { ...withHistory, medicalHistory: undefined }
         : withHistory;
-      const city = await this.prisma.city.findFirst({
-        where: { countryCode: 'CO', name: cityName },
-        orderBy: { id: 'asc' },
-        select: { id: true },
-      });
       const revokesMarketing = index === 1;
       const decisions: ConsentDecision[] = [
         { scope: 'GENERAL', granted: true },
@@ -1151,8 +1151,6 @@ class DemoSeeder {
       const patient = await this.use(CreatePatientUseCase).execute({
         ...rest,
         birthDate: new Date(`${birthDate}T00:00:00.000Z`),
-        countryCode: city ? 'CO' : undefined,
-        cityId: city?.id,
         dataConsents: { policyVersionId, decisions },
         // SEC-005: la anamnesis inicial solo la escribe un rol clínico. El
         // paciente que llega con anamnesis lo da de alta el odontólogo; el
@@ -2324,6 +2322,10 @@ class DemoSeeder {
         visit.startMinute + visit.durationMinutes,
       );
       const patientId = patientIds[visit.patientIndex];
+      // Cada sede cobra su historia en su moneda (la Norte, en EUR con su
+      // lista de precios): «Comparar sedes» enseña una cifra por moneda.
+      const sedeCurrency =
+        visit.location === 'norte' ? DEMO_NORTE_CURRENCY : DEMO_CURRENCY;
       await this.inTenant(tenantId, locations[visit.location], async () => {
         const appointment = await this.use(
           CreateAppointmentUseCase,
@@ -2340,7 +2342,7 @@ class DemoSeeder {
         });
         const plan = await this.use(CreateTreatmentPlanUseCase).execute({
           patientId,
-          currency: DEMO_CURRENCY,
+          currency: sedeCurrency,
           notes: 'Control y procedimiento del día.',
           createdById: dentistId,
         });
@@ -2377,7 +2379,7 @@ class DemoSeeder {
           plan.id,
           {
             amount: Number(item.price) - Number(item.discount),
-            currency: DEMO_CURRENCY,
+            currency: sedeCurrency,
             paidAt: new Date(end.getTime() + 10 * 60 * 1000),
             method: PaymentMethod.CARD,
           },
@@ -2608,7 +2610,7 @@ class DemoSeeder {
   /**
    * DX-027: la caja por turno de recepción en la sede principal, por los
    * mismos casos de uso que la API: el turno de la mañana, cerrado con una
-   * diferencia de 2.000 en efectivo explicada, y el de la tarde abierto con su
+   * diferencia de 2 USD en efectivo explicada, y el de la tarde abierto con su
    * fondo y un cobro. Va DESPUÉS de los abonos históricos, que quedan sin caja
    * (como los de antes de DX-027). Los ajustes de caja de la clínica quedan
    * como por defecto (sin «exigir caja abierta» ni «arqueo ciego»).
@@ -2643,7 +2645,7 @@ class DemoSeeder {
             0,
           ) - p.payments.reduce((sum, pay) => sum + pay.amount.toNumber(), 0);
       const plan = [...plans].sort((a, b) => pending(b) - pending(a))[0];
-      if (!plan || pending(plan) < 80_000) {
+      if (!plan || pending(plan) < 80) {
         throw new Error(
           'La demo no tiene un plan aceptado con saldo para la caja',
         );
@@ -2663,19 +2665,19 @@ class DemoSeeder {
 
       const morning = await this.use(OpenCashSessionUseCase).execute(
         {
-          floats: [{ currency: DEMO_CURRENCY, amount: 200_000 }],
+          floats: [{ currency: DEMO_CURRENCY, amount: 200 }],
           notes: 'Turno de mañana',
         },
         actor,
       );
-      await charge(40_000, 'CASH');
-      await charge(25_000, 'CARD');
+      await charge(40, 'CASH');
+      await charge(25, 'CARD');
       await this.use(CloseCashSessionUseCase).execute(
         morning.id,
         {
           counts: [
-            { currency: DEMO_CURRENCY, method: 'CASH', counted: 238_000 },
-            { currency: DEMO_CURRENCY, method: 'CARD', counted: 25_000 },
+            { currency: DEMO_CURRENCY, method: 'CASH', counted: 238 },
+            { currency: DEMO_CURRENCY, method: 'CARD', counted: 25 },
           ],
           differenceReason: 'Se entregó cambio de más a un paciente.',
         },
@@ -2684,12 +2686,12 @@ class DemoSeeder {
 
       await this.use(OpenCashSessionUseCase).execute(
         {
-          floats: [{ currency: DEMO_CURRENCY, amount: 150_000 }],
+          floats: [{ currency: DEMO_CURRENCY, amount: 150 }],
           notes: 'Turno de tarde',
         },
         actor,
       );
-      await charge(15_000, 'CASH');
+      await charge(15, 'CASH');
     });
   }
 
@@ -2766,7 +2768,7 @@ class DemoSeeder {
           amount: promise.amount,
           currency: DEMO_CURRENCY,
           dueDate: addCivilDays(
-            civilDateIn(this.now, 'America/Bogota'),
+            civilDateIn(this.now, DEMO_TIMEZONE),
             promise.dueInDays,
           ),
         },

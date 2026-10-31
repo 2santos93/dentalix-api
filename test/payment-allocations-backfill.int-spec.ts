@@ -46,13 +46,12 @@ const PAID_AT = new Date('2026-10-20T12:00:00.000Z');
 const RATE_DATES = ['2026-10-19', '2026-10-20', '2026-10-21'];
 const EUR_PER_USD = 0.9;
 /**
- * DX-375: la demo trae un abono en USD de hace 30 min sobre un plan en COP;
- * con la tasa COP de su día en la caché lo congela al sembrarse, sin salir a
- * la red. DX-449: pasada la medianoche de Bogotá ese abono es de AYER, así que
- * se siembra la tasa de cada día que toca la última hora (uno o dos).
+ * DX-375: la demo trae un abono en EUR de hace 30 min sobre un plan en USD;
+ * con la tasa EUR de su día en la caché lo congela al sembrarse, sin salir a
+ * la red. DX-449: pasada la medianoche de la sede ese abono es de AYER, así
+ * que se siembra la tasa de cada día que toca la última hora (uno o dos).
  */
 const DEMO_RATE_DAYS = civilDaysSince(60, DEMO_TIMEZONE);
-const COP_PER_USD = 4000;
 
 let app: INestApplication;
 let deps: BackfillDeps;
@@ -227,8 +226,8 @@ describe('backfill de imputaciones de abonos (DX-051, R17)', () => {
     await raw.exchangeRateSnapshot.createMany({
       data: DEMO_RATE_DAYS.map((date) => ({
         date,
-        currency: 'COP',
-        rate: COP_PER_USD,
+        currency: 'EUR',
+        rate: EUR_PER_USD,
       })),
       skipDuplicates: true,
     });
@@ -270,7 +269,7 @@ describe('backfill de imputaciones de abonos (DX-051, R17)', () => {
     await raw.exchangeRateSnapshot.deleteMany({
       where: {
         date: { in: DEMO_RATE_DAYS },
-        currency: 'COP',
+        currency: 'EUR',
         fetchedAt: { gte: ratesCreatedAt },
       },
     });

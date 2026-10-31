@@ -277,7 +277,7 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     // (asignarlo exige una cobertura viva del pagador).
     expect(firstCounts.patient_coverages).toBe(DEMO_COVERAGES.length + 1);
     // DX-105: dos listas (Sede Norte y Convenio Alfa), sus 5 + 3 precios, dos
-    // convenios (Sura −15 % y Empresa Alfa lista) y tres pacientes asignados.
+    // convenios (Aseguradora Demo −15 % y Empresa Alfa lista) y tres pacientes asignados.
     expect(firstCounts.price_lists).toBe(2);
     expect(firstCounts.price_list_items).toBe(8);
     expect(firstCounts.agreements).toBe(2);
@@ -521,12 +521,16 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     });
     expect(locations).toHaveLength(2);
     for (const location of locations) {
-      expect(location.currency).toBe('COP');
-      expect(location.timeZone).toBe('America/Bogota');
-      expect(location.locale).toBe('es-CO');
+      // Demo sin país: USD en la principal y EUR en la Norte (multimoneda),
+      // zona UTC y formato es-419; el país es obligatorio y va en US.
+      expect(location.currency).toBe(
+        location.name === 'Sede Norte' ? 'EUR' : 'USD',
+      );
+      expect(location.timeZone).toBe('UTC');
+      expect(location.locale).toBe('es-419');
       // G1-B: reloj explícito, el que la demo ya pintaba.
       expect(location.hourCycle).toBe('h23');
-      expect(location.country).toBe('CO');
+      expect(location.country).toBe('US');
       // El backfill D5 deja esto en NULL: la demo lo fija ella misma.
       expect(location.regionalSettingsReviewedAt).toBeInstanceOf(Date);
     }
@@ -542,7 +546,7 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       where: { tenantId },
     });
     for (const schedule of schedules) {
-      expect(schedule.timezone).toBe('America/Bogota');
+      expect(schedule.timezone).toBe('UTC');
     }
   });
 
@@ -675,7 +679,7 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     const principal = await raw.location.findFirstOrThrow({
       where: { tenantId, name: 'Sede principal' },
     });
-    expect(principal.phone).toBe('+57 601 555 0101');
+    expect(principal.phone).toBe('+1 202 555 0100');
 
     const deliveries = await raw.postOpInstructionDelivery.findMany({
       where: { tenantId },
@@ -698,15 +702,13 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       patientId: delivery.patientId,
     });
     // Cita de un día anterior (ayer, o el último día con consulta): empezó
-    // antes de la medianoche de hoy en Bogotá (UTC-5 fijo).
-    const bogotaWall = new Date(Date.now() - 5 * 3600 * 1000);
-    const todayStart =
-      Date.UTC(
-        bogotaWall.getUTCFullYear(),
-        bogotaWall.getUTCMonth(),
-        bogotaWall.getUTCDate(),
-      ) +
-      5 * 3600 * 1000;
+    // antes de la medianoche de hoy en la sede (UTC).
+    const now = new Date();
+    const todayStart = Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate(),
+    );
     expect(delivery.appointment.start.getTime()).toBeLessThan(todayStart);
     await expect(
       raw.auditEvent.count({
@@ -870,12 +872,10 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       ),
       overrides: [],
     };
-    // «Hoy» es el día civil de la clínica (Bogotá), no el de UTC: entre las
-    // 19:00 y las 24:00 de Bogotá ya es mañana en UTC (DX-251).
+    // «Hoy» es el día civil de la clínica (su zona, hoy UTC), no el del
+    // proceso (DX-251).
     const civilDay = (d: Date): string =>
-      new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(
-        d,
-      );
+      new Intl.DateTimeFormat('en-CA', { timeZone: 'UTC' }).format(d);
     const today = civilDay(new Date());
     const theirs = await raw.appointment.findMany({
       where: { tenantId, providerId, deletedAt: null },
@@ -884,13 +884,7 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     const outside = theirs.filter(
       (a) =>
         civilDay(a.start) !== today &&
-        !providerWorksAt(
-          snapshot,
-          a.locationId,
-          a.start,
-          a.end,
-          'America/Bogota',
-        ),
+        !providerWorksAt(snapshot, a.locationId, a.start, a.end, 'UTC'),
     );
     expect(outside).toEqual([]);
   });
@@ -1048,7 +1042,7 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(policies[0]).toMatchObject({
       version: 1,
       noticeHours: 24,
-      currency: 'COP',
+      currency: 'USD',
     });
     const late = await raw.appointment.findMany({
       where: { tenantId, lateCancellation: true },
@@ -1215,7 +1209,7 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     const closing = await raw.cashSessionClosingLine.findFirstOrThrow({
       where: { tenantId, method: 'CASH' },
     });
-    expect(Number(closing.difference)).toBe(-2000);
+    expect(Number(closing.difference)).toBe(-2);
   });
 
   it('planes, pagos, plan de pagos e inventario son coherentes', async () => {
@@ -1228,18 +1222,31 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(new Set(plans.flatMap((p) => p.items.map((i) => i.status)))).toEqual(
       new Set(['PROPOSED', 'ACCEPTED', 'DONE']),
     );
-    expect(plans.every((p) => p.currency === 'COP')).toBe(true);
+    // Todos en USD salvo la historia de «Comparar sedes» de la Sede Norte,
+    // que se cobra en su moneda (EUR).
+    expect(
+      plans
+        .filter((p) => p.currency !== 'USD')
+        .map((p) => [p.currency, p.notes]),
+    ).toEqual(
+      plans
+        .filter((p) => p.currency !== 'USD')
+        .map(() => ['EUR', 'Control y procedimiento del día.']),
+    );
+    expect(plans.some((p) => p.currency === 'EUR')).toBe(true);
 
     const payments = await raw.payment.findMany({
       where: { tenantId, deletedAt: null },
     });
     const sixtyDaysAgo = Date.now() - 61 * 24 * 60 * 60 * 1000;
-    // DX-375: todos en COP salvo un abono de hoy en USD (tasa congelada o
-    // «sin tasa» según haya tasa del día).
-    expect(payments.filter((p) => p.currency !== 'COP')).toEqual([
+    // DX-375: todos en la moneda de su plan salvo un abono de hoy en EUR a un
+    // plan en USD (tasa congelada o «sin tasa» según haya tasa del día).
+    expect(
+      payments.filter((p) => p.currency !== p.exchangeRateCurrency),
+    ).toEqual([
       expect.objectContaining({
-        currency: 'USD',
-        exchangeRateCurrency: 'COP',
+        currency: 'EUR',
+        exchangeRateCurrency: 'USD',
       }),
     ]);
     expect(
@@ -1254,7 +1261,7 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       3,
     );
     // Ningún plan cobra más de lo facturable (ítems ACCEPTED|DONE), salvo el
-    // que deja DX-051 con 60000 de más para enseñar lo «sin imputar».
+    // que deja DX-051 con 60 de más para enseñar lo «sin imputar».
     const overpaid = plans.filter((plan) => {
       const billable = plan.items
         .filter((i) => i.status !== 'PROPOSED')
@@ -1335,11 +1342,11 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
   it('DX-014: las dos sedes tienen actividad en el mes anterior y en el actual', async () => {
     const tenantId = await liveDemoTenantId();
     const month = (d: Date): string =>
-      new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' })
+      new Intl.DateTimeFormat('en-CA', { timeZone: 'UTC' })
         .format(d)
         .slice(0, 7);
     const today = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'America/Bogota',
+      timeZone: 'UTC',
     }).format(new Date());
     const [y, m, d] = today.split('-').map(Number);
     const current = today.slice(0, 7);
@@ -1514,9 +1521,9 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     const body = res.body as {
       summary: { currency: string; balance: number; overdueCount: number }[];
     };
-    const cop = body.summary.find((s) => s.currency === 'COP');
-    expect(cop?.balance).toBeGreaterThan(0);
-    expect(cop?.overdueCount).toBeGreaterThanOrEqual(1);
+    const usd = body.summary.find((s) => s.currency === 'USD');
+    expect(usd?.balance).toBeGreaterThan(0);
+    expect(usd?.overdueCount).toBeGreaterThanOrEqual(1);
   });
 
   it('una segunda corrida no duplica nada', async () => {
