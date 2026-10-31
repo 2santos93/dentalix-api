@@ -24,6 +24,7 @@ describe('DX-054: invariantes del saldo y del plan (e2e)', () => {
   let clinic: Clinic;
   let planId: string;
   let doneItemId: string;
+  let patientId: string;
 
   const api = () => request(app.getHttpServer());
   const as = (req: request.Test) =>
@@ -47,6 +48,7 @@ describe('DX-054: invariantes del saldo y del plan (e2e)', () => {
         sex: Sex.F,
       })
       .expect(201);
+    patientId = (patient.body as { id: string }).id;
     const catalog = await as(api().post('/api/v1/catalog/items'))
       .send({
         code: 'DX054-RES',
@@ -82,6 +84,34 @@ describe('DX-054: invariantes del saldo y del plan (e2e)', () => {
     await resetDatabase(raw);
     await app.close();
     await raw.$disconnect();
+  });
+
+  it('PATCH con transición no permitida (CANCELLED→ACCEPTED, COMPLETED→DRAFT) → 409 en español', async () => {
+    const newPlan = async () =>
+      (
+        (
+          await as(api().post(`/api/v1/patients/${patientId}/treatment-plans`))
+            .send({ currency: 'USD' })
+            .expect(201)
+        ).body as { id: string }
+      ).id;
+    const patchStatus = (id: string, status: string) =>
+      as(api().patch(`/api/v1/treatment-plans/${id}`)).send({ status });
+
+    const cancelled = await newPlan();
+    await patchStatus(cancelled, 'CANCELLED').expect(200);
+    const toAccepted = await patchStatus(cancelled, 'ACCEPTED').expect(409);
+    expect((toAccepted.body as { message: string }).message).toBe(
+      'Un plan «Cancelado» no puede pasar a «Aceptado».',
+    );
+
+    const completed = await newPlan();
+    await patchStatus(completed, 'ACCEPTED').expect(200);
+    await patchStatus(completed, 'COMPLETED').expect(200);
+    const toDraft = await patchStatus(completed, 'DRAFT').expect(409);
+    expect((toDraft.body as { message: string }).message).toBe(
+      'Un plan «Completado» no puede pasar a «Borrador».',
+    );
   });
 
   it('cambiar el precio de un ítem realizado → 409 en español; repetirlo o cambiar notas, 200', async () => {
