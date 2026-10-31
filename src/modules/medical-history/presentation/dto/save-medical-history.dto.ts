@@ -41,7 +41,11 @@ export class SaveMedicalHistoryDto {
   @Type(() => AllergyDto)
   allergies?: AllergyDto[];
 
-  @ApiPropertyOptional({ type: [ConditionDto] })
+  @ApiPropertyOptional({
+    type: [ConditionDto],
+    description:
+      'Solo las condiciones que se contestaron (Sí / No / No sabe). Una condición del checklist que no figura está «Sin responder»: nunca se interpreta como «No».',
+  })
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
