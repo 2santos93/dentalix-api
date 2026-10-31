@@ -6,21 +6,29 @@ import { GetLocationsComparisonUseCase } from './application/use-cases/get-locat
 import { LOCATIONS_COMPARISON_REPOSITORY } from './domain/ports/locations-comparison-repository.port';
 import { PrismaLocationsComparisonRepository } from './infrastructure/prisma-locations-comparison.repository';
 import { LocationsComparisonController } from './presentation/locations-comparison.controller';
+import { GetProductionByProcedureUseCase } from './application/use-cases/get-production-by-procedure.use-case';
+import { PRODUCTION_BY_PROCEDURE_REPOSITORY } from './domain/ports/production-by-procedure-repository.port';
+import { PrismaProductionByProcedureRepository } from './infrastructure/prisma-production-by-procedure.repository';
+import { ProductionByProcedureController } from './presentation/production-by-procedure.controller';
 
-// Reportes de gestión (DX-014). Primera pestaña: «Comparar sedes». Los
-// indicadores se definen en `domain/kpi-definitions.ts`; las siguientes
-// pestañas (cartera, no-show, productividad) se añaden como controladores
-// bajo el mismo prefijo `reports`.
+// Reportes de gestión (DX-014). Pestañas: «Comparar sedes» (indicadores en
+// `domain/kpi-definitions.ts`) y «Producción por procedimiento» (DX-423); las
+// siguientes se añaden como controladores bajo el mismo prefijo `reports`.
 @Module({
   imports: [JwtModule.register({})],
-  controllers: [LocationsComparisonController],
+  controllers: [LocationsComparisonController, ProductionByProcedureController],
   providers: [
     GetLocationsComparisonUseCase,
+    GetProductionByProcedureUseCase,
     TokenService,
     TenantContextInterceptor,
     {
       provide: LOCATIONS_COMPARISON_REPOSITORY,
       useClass: PrismaLocationsComparisonRepository,
+    },
+    {
+      provide: PRODUCTION_BY_PROCEDURE_REPOSITORY,
+      useClass: PrismaProductionByProcedureRepository,
     },
   ],
 })

@@ -4,10 +4,8 @@ import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import type { AllowedLocations } from '../../../shared/tenancy/location-access';
 import { loadPeriodLocationZones } from '../../../shared/locations/location-time-zone';
-import {
-  civilPeriodByZone,
-  type ZonedPeriodBranch,
-} from '../../../shared/time/civil-day';
+import { civilPeriodByZone } from '../../../shared/time/civil-day';
+import { inPeriod } from './zoned-period-sql';
 import type { CivilPeriod } from '../domain/comparison-period';
 import type { PeriodAggregates } from '../domain/kpi-definitions';
 import {
@@ -100,26 +98,6 @@ const attendingSchedule = Prisma.sql`EXISTS (
 /** `sede|profesional`: clave de un horario de profesional en una sede. */
 const key = (locationId: string, providerId: string) =>
   `${locationId}|${providerId}`;
-
-/**
- * `(sede IN (…) AND instante en [inicio, fin))`, una rama por ZONA (DX-097):
- * cada sede corta sus días a la medianoche de su zona, y la consulta sigue
- * pudiendo usar el índice (tenantId, sede, instante). Sin sedes, FALSE.
- */
-function inPeriod(
-  location: Prisma.Sql,
-  instant: Prisma.Sql,
-  branches: readonly ZonedPeriodBranch[],
-): Prisma.Sql {
-  if (branches.length === 0) return Prisma.sql`FALSE`;
-  return Prisma.sql`(${Prisma.join(
-    branches.map(
-      (b) =>
-        Prisma.sql`(${location} = ANY(${b.locationIds}::uuid[]) AND ${instant} >= ${b.start} AND ${instant} < ${b.end})`,
-    ),
-    ' OR ',
-  )})`;
-}
 
 function emptyAggregates(): PeriodAggregates & {
   production: Map<string, number>;
