@@ -7,6 +7,7 @@ import {
 import { CURRENCY_DIGITS } from '../../../prisma/reference/currency-digits';
 import { computeBalances } from '../../modules/account-statement/application/compute-account-statement';
 import { discountForPercent } from '../../modules/discounts/domain/discount-policy';
+import { percentPrice } from '../../modules/treatment-plans/domain/pricing/resolve-item-price';
 import { ReceiptPlanBalanceCalculator } from '../../modules/payments/application/receipts/receipt-plan-balance';
 import type { ConvertAmountUseCase } from '../../modules/exchange/application/use-cases/convert-amount.use-case';
 import { GetPlanBalanceUseCase } from '../../modules/payments/application/use-cases/get-plan-balance.use-case';
@@ -18,40 +19,84 @@ import type { TreatmentPlanRepository } from '../../modules/treatment-plans/doma
 import { buildQuoteContent } from '../../modules/treatment-plans/domain/plan-quote';
 import { linesTotal, roundingDigits, unitCents } from './line-rounding';
 import { REFERENCE_CURRENCY_DIGITS } from './__fixtures__/reference-currency-digits';
+import {
+  oldBillable,
+  oldDiscountForPercent,
+  oldPercentPrice,
+  oldPlanTotal,
+} from './__fixtures__/pre-dx340-oracle';
 
-// DX-340: para miles de planes aleatorios (todos sus ítems cobrables), el
-// presupuesto, el detalle del plan, el saldo (`/balance`), el recibo y el
-// estado de cuenta dan el MISMO total, que es la suma de las líneas
-// redondeadas a los decimales de la moneda. JPY (0), EUR (2) y RSD (ISO 2,
-// redondeo 0). Las monedas de 3 decimales (KWD, BHD…) no caben en
-// Decimal(14,2): no están en el catálogo y se rechazan de forma explícita.
+// DX-340: para miles de planes aleatorios, con ítems cobrables (ACCEPTED,
+// DONE) y no cobrables (PROPOSED), descuentos en bloque y descuentos
+// manuales con céntimos (también en JPY), cada documento da lo MISMO que el
+// código de origin/main, copiado y congelado en `pre-dx340-oracle.ts` (no se
+// compara el código nuevo consigo mismo):
+//   - presupuesto y detalle del plan = total de main (todos los ítems);
+//   - saldo (`/balance`), recibo y estado de cuenta (Σ en Decimal, como la
+//     BD) = cobrable de main (solo ACCEPTED/DONE).
+// En JPY (0), EUR (2) y RSD (ISO 2, redondeo 0) con miles de planes, y en
+// TODAS las monedas del catálogo con menos. Además, descuento en bloque y
+// precio por convenio = los de main en todas las monedas. Las de 3 decimales
+// (KWD, BHD…) no caben en Decimal(14,2): fuera del catálogo y rechazadas.
 
 const PLAN_ID = 'plan-1';
 
+type ItemStatus = 'PROPOSED' | 'ACCEPTED' | 'DONE';
+
 interface Line {
+  status: ItemStatus;
   price: number;
   discount: number;
 }
 
-/** Un ítem: precio en unidades ISO de la moneda y, a veces, un % en bloque. */
+const BILLABLE: ReadonlySet<ItemStatus> = new Set(['ACCEPTED', 'DONE']);
+
+/**
+ * Un ítem: precio en unidades ISO de la moneda (o con céntimos, que los
+ * campos admiten en cualquier moneda, DX-241), un estado cualquiera y un
+ * descuento nulo, en bloque (con la regla de main) o manual con céntimos.
+ */
 function lineArb(currency: string): fc.Arbitrary<Line> {
   const { minorUnits, roundingDigits: digits } =
     REFERENCE_CURRENCY_DIGITS.of(currency);
   const minorCents = Number(unitCents(roundingDigits(minorUnits)));
   return fc
     .record({
+      status: fc.constantFrom<ItemStatus>('PROPOSED', 'ACCEPTED', 'DONE'),
       units: fc.integer({ min: 0, max: 50_000_000 / minorCents }),
-      percent: fc.option(fc.integer({ min: 1, max: 10_000 }), {
+      extraCents: fc.option(fc.integer({ min: 1, max: 99 }), {
         nil: undefined,
       }),
+      discount: fc.oneof(
+        fc.constant({ kind: 'none' as const }),
+        fc
+          .integer({ min: 1, max: 10_000 })
+          .map((bp) => ({ kind: 'bulk' as const, bp })),
+        fc
+          .integer({ min: 0, max: 10_000 })
+          .map((bp) => ({ kind: 'manual' as const, bp })),
+      ),
     })
-    .map(({ units, percent }) => {
-      const price = (units * minorCents) / 100;
-      const discount =
-        percent === undefined
-          ? 0
-          : discountForPercent(price, percent / 100, digits, 100);
-      return { price, discount };
+    .map(({ status, units, extraCents, discount }) => {
+      const price = (units * minorCents + (extraCents ?? 0)) / 100;
+      let amount = 0;
+      if (discount.kind === 'bulk') {
+        const fromMain = oldDiscountForPercent(
+          price,
+          discount.bp / 100,
+          currency,
+          100,
+        );
+        expect(discountForPercent(price, discount.bp / 100, digits, 100)).toBe(
+          fromMain,
+        );
+        amount = fromMain;
+      } else if (discount.kind === 'manual') {
+        // Un descuento tecleado a mano, con céntimos, hasta el precio.
+        amount =
+          Math.floor((Math.round(price * 100) * discount.bp) / 10000) / 100;
+      }
+      return { status, price, discount: amount };
     });
 }
 
@@ -63,10 +108,7 @@ function planOf(currency: string, lines: Line[]): TreatmentPlanWithItems {
     acceptance: null,
     items: lines.map((line, i) => ({
       id: `item-${i}`,
-      status:
-        i % 2 === 0
-          ? TreatmentPlanItemStatus.ACCEPTED
-          : TreatmentPlanItemStatus.DONE,
+      status: TreatmentPlanItemStatus[line.status],
       price: line.price,
       discount: line.discount,
     })),
@@ -102,12 +144,12 @@ function quoteNet(currency: string, lines: Line[]): number {
 
 /** El estado de cuenta: Σ precio − Σ descuento en Decimal, como la BD. */
 function statementBudgeted(currency: string, lines: Line[]): number {
-  const sum = (key: keyof Line) =>
-    lines.reduce(
+  const billable = lines.filter((line) => BILLABLE.has(line.status));
+  const sum = (key: 'price' | 'discount') =>
+    billable.reduce(
       (acc, line) => acc.plus(new Prisma.Decimal(line[key])),
       new Prisma.Decimal(0),
     );
-  const billable = sum('price').minus(sum('discount')).toNumber();
   return computeBalances(
     {
       plans: [
@@ -116,7 +158,7 @@ function statementBudgeted(currency: string, lines: Line[]): number {
           status: TreatmentPlanStatus.ACCEPTED,
           currency,
           createdAt: new Date('2026-10-01T00:00:00Z'),
-          billable,
+          billable: sum('price').minus(sum('discount')).toNumber(),
         },
       ],
       payments: [],
@@ -151,34 +193,66 @@ async function documents(currency: string, lines: Line[]) {
   };
 }
 
-describe('presupuesto = plan = saldo = recibo = estado de cuenta (DX-340)', () => {
+async function expectSameAsMain(currency: string, lines: Line[]) {
+  const total = oldPlanTotal(lines);
+  const billable = oldBillable(lines);
+  expect(await documents(currency, lines)).toEqual({
+    quote: total,
+    plan: total,
+    balance: billable,
+    receipt: billable,
+    statement: billable,
+  });
+  // Y la regla nueva lo explica: suma exacta de las líneas.
+  expect(linesTotal(lines)).toBe(total);
+  expect(linesTotal(lines.filter((l) => BILLABLE.has(l.status)))).toBe(
+    billable,
+  );
+}
+
+describe('presupuesto = plan = saldo = recibo = estado de cuenta = main (DX-340)', () => {
   it.each(['JPY', 'EUR', 'RSD'])(
-    '%s: miles de planes aleatorios, el total es la suma de las líneas',
+    '%s: miles de planes aleatorios dan lo mismo que el código congelado de main',
     async (currency) => {
-      const digits = REFERENCE_CURRENCY_DIGITS.roundingDigits(currency);
       await fc.assert(
         fc.asyncProperty(
           fc.array(lineArb(currency), { maxLength: 25 }),
-          async (lines) => {
-            const total = linesTotal(lines);
-            expect(await documents(currency, lines)).toEqual({
-              quote: total,
-              plan: total,
-              balance: total,
-              receipt: total,
-              statement: total,
-            });
-            // Cada descuento ya está en la unidad de redondeo de la moneda.
-            for (const { discount } of lines) {
-              const cents = BigInt(Math.round(discount * 100));
-              expect(cents % unitCents(digits)).toBe(0n);
-            }
-          },
+          (lines) => expectSameAsMain(currency, lines),
         ),
         { numRuns: 2000 },
       );
     },
   );
+
+  it('todas las monedas del catálogo: documentos = main', async () => {
+    for (const { code } of CURRENCY_DIGITS) {
+      await fc.assert(
+        fc.asyncProperty(fc.array(lineArb(code), { maxLength: 12 }), (lines) =>
+          expectSameAsMain(code, lines),
+        ),
+        { numRuns: 40 },
+      );
+    }
+  });
+
+  it('todas las monedas del catálogo: descuento en bloque y precio por convenio = main', () => {
+    const price = fc.integer({ min: 0, max: 99_999_999 }).map((c) => c / 100);
+    const percent = fc.integer({ min: 0, max: 10_000 }).map((bp) => bp / 100);
+    for (const { code } of CURRENCY_DIGITS) {
+      const digits = REFERENCE_CURRENCY_DIGITS.roundingDigits(code);
+      fc.assert(
+        fc.property(price, percent, percent, (p, pct, cap) => {
+          expect(discountForPercent(p, pct, digits, cap)).toBe(
+            oldDiscountForPercent(p, pct, code, cap),
+          );
+          expect(percentPrice(p, pct, digits)).toBe(
+            oldPercentPrice(p, pct, code),
+          );
+        }),
+        { numRuns: 300 },
+      );
+    }
+  });
 
   it('una moneda de 3 decimales no cabe: fuera del catálogo y rechazada', () => {
     for (const code of ['KWD', 'BHD', 'JOD', 'OMR', 'TND', 'IQD', 'LYD']) {

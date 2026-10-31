@@ -81,7 +81,7 @@ export class ExpenseReportsController {
     return toExpensesCsv(
       items,
       locationNames,
-      await this.currencyDigits.table(),
+      await this.currencyDigits.table(items.map((i) => i.currency)),
     );
   }
 }

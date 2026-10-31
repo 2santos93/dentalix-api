@@ -3,6 +3,10 @@ import { Prisma, PrismaClient, Sex } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { CURRENCY_DIGITS } from '../prisma/reference/currency-digits';
+import {
+  oldBillable,
+  oldPlanTotal,
+} from '../src/shared/money/__fixtures__/pre-dx340-oracle';
 import { PAYMENT_CLOCK } from '../src/modules/payments/application/use-cases/void-payment.use-case';
 import {
   type Clinic,
@@ -235,6 +239,84 @@ describe('DX-340: redondeo único por línea (e2e)', () => {
           }
         ).snapshot.planBalance,
       ).toEqual({ currency, billable: total, paid: payment, balance: pending });
+    },
+  );
+
+  // Revisión DX-340 (M2): con ítems no cobrables (PROPOSED) y descuentos
+  // manuales con céntimos (también en JPY, que los campos admiten: DX-241),
+  // el estado de cuenta (Σ en SQL real) = `/balance` = lo que daba main
+  // (oráculo congelado), y el detalle del plan = total de main.
+  it.each([
+    {
+      currency: 'JPY',
+      lines: [
+        { price: 12345, discount: 12.34, status: 'ACCEPTED' as const },
+        { price: 1000.5, discount: 0.99, status: 'DONE' as const },
+        { price: 999, discount: 0.01, status: 'PROPOSED' as const },
+      ],
+    },
+    {
+      currency: 'EUR',
+      lines: [
+        { price: 0.1, discount: 0, status: 'ACCEPTED' as const },
+        { price: 0.2, discount: 0.01, status: 'DONE' as const },
+        { price: 123.45, discount: 9.25, status: 'ACCEPTED' as const },
+        { price: 50, discount: 1, status: 'PROPOSED' as const },
+      ],
+    },
+    {
+      currency: 'RSD',
+      lines: [
+        { price: 123.45, discount: 9, status: 'ACCEPTED' as const },
+        { price: 99.99, discount: 0.99, status: 'DONE' as const },
+        { price: 10, discount: 0, status: 'PROPOSED' as const },
+      ],
+    },
+  ])(
+    '$currency: estado de cuenta (SQL) = /balance = main, con ítems no cobrables y descuentos con céntimos',
+    async ({ currency, lines }) => {
+      const plan = await as(
+        api().post(`/api/v1/patients/${patientId}/treatment-plans`),
+      )
+        .send({ currency })
+        .expect(201);
+      const planId = (plan.body as { id: string }).id;
+      for (const [i, line] of lines.entries()) {
+        const item = await as(
+          api().post(`/api/v1/treatment-plans/${planId}/items`),
+        )
+          .send({
+            toothNumber: String(31 + i),
+            catalogItemId,
+            price: line.price,
+            discount: line.discount,
+          })
+          .expect(201);
+        if (line.status !== 'PROPOSED') {
+          const id = (item.body as { id: string }).id;
+          await as(api().patch(`/api/v1/treatment-plans/${planId}/items/${id}`))
+            .send({ status: line.status })
+            .expect(200);
+        }
+      }
+      const billable = oldBillable(lines);
+      const detail = await as(
+        api().get(`/api/v1/treatment-plans/${planId}`),
+      ).expect(200);
+      expect((detail.body as { total: number }).total).toBe(
+        oldPlanTotal(lines),
+      );
+      const balance = await as(
+        api().get(`/api/v1/treatment-plans/${planId}/balance`),
+      ).expect(200);
+      expect((balance.body as { billable: number }).billable).toBe(billable);
+      const statement = await as(
+        api().get(`/api/v1/patients/${patientId}/account-statement`),
+      ).expect(200);
+      const line = (
+        statement.body as { plans: { id: string; budgeted: number }[] }
+      ).plans.find((p) => p.id === planId);
+      expect(line?.budgeted).toBe(billable);
     },
   );
 });

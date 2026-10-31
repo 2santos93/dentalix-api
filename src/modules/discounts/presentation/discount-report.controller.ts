@@ -147,6 +147,9 @@ export class DiscountReportController {
     );
     // Dato personal: ni el navegador ni un proxy lo guardan.
     res.setHeader('Cache-Control', 'no-store');
-    return toDiscountReportCsv(rows, await this.currencyDigits.table());
+    return toDiscountReportCsv(
+      rows,
+      await this.currencyDigits.table(rows.map((r) => r.currency)),
+    );
   }
 }

@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { ISO4217_CURRENCIES } from '../../../prisma/reference/iso4217';
 import { CURRENCY_DIGITS } from '../../../prisma/reference/currency-digits';
 import { CLDR_ZERO_FORMAT_DIGITS } from './cldr-format-digits';
+import { PRE_DX340_ZERO_DECIMAL_CURRENCIES } from '../money/__fixtures__/pre-dx340-oracle';
 
 const cldrDigitsZero = ISO4217_CURRENCIES.filter((c) => c.cldrDigits === 0).map(
   (c) => c.code,
@@ -62,14 +63,9 @@ describe('dígitos de formato CLDR (DX-340)', () => {
   it('la regla de redondeo congelada es la lista anterior a DX-340 (sin cambios)', () => {
     // ZERO_DECIMAL_CURRENCIES de la API y la web antes de DX-340: CLDR 47 ∪
     // conjunto anterior a G1. Ningún descuento ni precio nuevo cambia.
-    const previous = new Set([
-      ...cldrDigitsZero,
-      'COP',
-      'CLP',
-      'JPY',
-      'KRW',
-      'PYG',
-    ]);
+    // Los 29 códigos en literal (oráculo congelado de main).
+    const previous = PRE_DX340_ZERO_DECIMAL_CURRENCIES;
+    expect(previous.size).toBe(29);
     expect(
       CURRENCY_DIGITS.filter((c) => c.roundingDigits === 0)
         .map((c) => c.code)

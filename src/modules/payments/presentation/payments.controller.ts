@@ -207,7 +207,10 @@ export class PaymentsController {
       { userId: req.user.sub, role: req.user.role },
     );
     sendCsv(res, `caja-${from}-${to}.csv`);
-    return toCashPaymentsCsv(items, await this.currencyDigits.table());
+    return toCashPaymentsCsv(
+      items,
+      await this.currencyDigits.table(items.map((i) => i.currency)),
+    );
   }
 
   @Audit({

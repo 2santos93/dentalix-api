@@ -83,9 +83,14 @@ export class ApplyBulkDiscountUseCase {
       input.discountReason !== undefined ||
       input.discountReasonNote !== undefined;
     const noDiscount = await this.noDiscountCatalogItems(planId, input.itemIds);
-    // La moneda del plan se lee con su fila bloqueada: se carga la tabla
-    // entera (~150 filas, en caché) para no consultar dentro de la transacción.
-    const digits = await this.currencyDigits.table();
+    // La moneda del plan se lee con su fila bloqueada, dentro de la
+    // transacción; la tabla de decimales se carga antes (en caché) con la
+    // moneda que el plan tiene ahora, para que una moneda dada de alta
+    // después no falte dentro de la transacción.
+    const current = await this.repo.findPlanById(planId);
+    const digits = await this.currencyDigits.table(
+      current ? [current.currency] : [],
+    );
     let skippedNoDiscount = 0;
     // BE-036: el estado del plan se valida con su fila bloqueada, dentro de
     // la transacción, junto a los ítems.

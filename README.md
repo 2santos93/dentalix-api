@@ -1632,17 +1632,24 @@ se vuelve a redondear. Código: `src/shared/money/line-rounding.ts`
 `discountForPercent` (descuentos), `percentPrice` (convenios),
 `GetTreatmentPlanUseCase` (total del plan), `buildQuoteContent`
 (presupuesto), `GetPlanBalanceUseCase` (saldo y, con él, recibo y plan de
-pagos) e `itemBillableCents` (imputaciones). El estado de cuenta suma en la BD
-(`Σ price − Σ discount` en `numeric`), que da lo mismo; lo comprueban
-`src/shared/money/documents-agree.property.spec.ts` (fast-check, 2 000 planes
-aleatorios por moneda en JPY, EUR y RSD) y `test/currency-rounding.e2e-spec.ts`
-(Postgres: plan JPY y plan EUR, detalle = `/balance` = estado de cuenta =
-recibo).
+pagos) e `itemBillableCents` (imputaciones). **No usan el helper, pero son
+equivalentes:** el estado de cuenta suma en la BD (`Σ price − Σ discount` en
+`numeric`, exacto) y la caja suma los abonos guardados en céntimos (no hay
+líneas que redondear). Lo comprueban `src/shared/money/documents-agree.property.spec.ts`
+(fast-check contra un **oráculo congelado** con el código de origin/main,
+`__fixtures__/pre-dx340-oracle.ts`: 2 000 planes por moneda en JPY, EUR y RSD
+y 40 en cada moneda del catálogo, con ítems PROPOSED no cobrables y descuentos
+manuales con céntimos; descuento en bloque y precio por convenio = main en
+todas las monedas) y `test/currency-rounding.e2e-spec.ts` (Postgres: plan JPY
+y EUR con descuento en bloque, detalle = `/balance` = estado de cuenta =
+recibo; y JPY, EUR y RSD con ítems no cobrables y descuentos con céntimos,
+estado de cuenta en SQL = `/balance` = main).
 
 **Fuente única de decimales: la tabla `currencies`** (migraciones
 `20261111100000_dx340_currency_digits` y `…100_backfill`), leída por
-`CURRENCY_DIGITS_CATALOG` (`src/shared/money/currency-digits.ts`, una lectura
-por proceso). Ningún módulo tiene ya una lista de monedas sin decimales para
+`CURRENCY_DIGITS_CATALOG` (`src/shared/money/currency-digits.ts`; la tabla se
+guarda en memoria 5 minutos, `CURRENCY_DIGITS_TTL_MS`, y una moneda que falte
+se relee en el acto). Ningún módulo tiene ya una lista de monedas sin decimales para
 redondear (se borró `currency-decimals.ts` y su `ZERO_DECIMAL_CURRENCIES`).
 Contrato: `GET /currencies` y `GET /public/currencies` devuelven `minorUnits`
 y `roundingDigits`; `GET /treatment-plans/:id` devuelve `currencyDigits` (la
@@ -1671,8 +1678,16 @@ ALL, COP, IRR, KPW, LAK, LBP, MGA, MMK, RSD, SOS, SYP, YER. Caso de referencia:
 **9,26 RSD** si se redondeara a sus 2 minor units ISO (CLDR 48.1 separa
 `digits` 2 y `cashDigits` 0). Se mantiene 0 porque cambiarlo alteraría
 resultados actuales; pasar RSD/COP (u otra) a 2 es una **decisión pendiente
-del dueño**: sería una migración de datos de `rounding_digits` (sin tocar
-código ni documentos), compatible con los contratos (el campo ya existe).
+del dueño**, compatible con los contratos (el campo ya existe) y sin tocar
+documentos guardados. Cómo se aplica, en este orden: (1) cambiar la regla en
+`prisma/scripts/generate-currency-digits.ts` y regenerar
+`prisma/reference/currency-digits.ts`; (2) una migración de datos
+`UPDATE "currencies" SET "rounding_digits" = … WHERE "code" IN (…)`; (3)
+desplegar. Las réplicas leen el valor nuevo en ≤ 5 minutos (caché con TTL)
+o al reiniciar. El seed **no** pisa los decimales de una moneda que ya existe
+(solo los escribe al crearla), así que volver a sembrar no deshace el cambio;
+el oráculo congelado de los tests fallará a propósito para esa moneda y hay
+que actualizar el test con la decisión.
 
 **Límite de precisión.** Los importes son `Decimal(14,2)` (`Decimal(12,2)` en
 algunas tablas): ninguna moneda puede tener más de 2 decimales. Las de 3 de

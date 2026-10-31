@@ -211,7 +211,7 @@ export class ExpensesController {
     sendCsv(res, `gastos-resumen-${summary.from}-${summary.to}.csv`);
     return toExpensesSummaryCsv(
       summary.rows,
-      await this.currencyDigits.table(),
+      await this.currencyDigits.table(summary.rows.map((r) => r.currency)),
     );
   }
 
