@@ -7,7 +7,7 @@ import { findAllergyMatches } from '../../prescriptions/domain/allergy-match';
  *  - mg de una línea = carpules × ml por carpule × concentración (%) × 10
  *    (una solución al 1 % tiene 10 mg/ml).
  *  - máximo de un anestésico = min(mg/kg × peso, tope absoluto en mg).
- *  - con varios anestésicos en la misma evolución, la fracción del máximo es
+ *  - con varios anestésicos en la ventana, la fracción del máximo es
  *    la SUMA de mg_i / máximo_i (Malamed, cap. 18: las dosis de los
  *    anestésicos locales son aditivas).
  *  - ≥ 80 % → aviso; ≥ 100 % → bloqueo blando: se guarda solo con motivo.
@@ -20,8 +20,12 @@ import { findAllergyMatches } from '../../prescriptions/domain/allergy-match';
  *
  * Versionado: `ANESTHESIA_DOSE_RULES_VERSION` va en cada registro. Cambiar un
  * umbral, una regla o un texto obliga a subir la versión.
+ *  - V1 (DX-307): las líneas eran las de UNA evolución.
+ *  - V2 (DX-418): las líneas son todas las del paciente en la ventana de
+ *    24 h que contiene la administración con más acumulado, en cualquier
+ *    evolución y sede de la clínica (`anesthesia-window.ts`).
  */
-export const ANESTHESIA_DOSE_RULES_VERSION = 'ANESTHESIA_DOSE_V1';
+export const ANESTHESIA_DOSE_RULES_VERSION = 'ANESTHESIA_DOSE_V2';
 
 /** Fracción del máximo desde la que se avisa. */
 export const DOSE_WARNING_FRACTION = 0.8;

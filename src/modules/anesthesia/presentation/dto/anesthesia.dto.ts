@@ -144,6 +144,15 @@ export class AnesthesiaDoseCheckDto {
   @Min(0.1)
   @Max(399)
   weightKg?: number;
+
+  @ApiPropertyOptional({
+    format: 'date-time',
+    description:
+      'Hora de la administración; por defecto, ahora. No puede ser futura. Decide la ventana de 24 h del acumulado del paciente, que la contiene (DX-418): manda la misma al previsualizar y al guardar.',
+  })
+  @IsOptional()
+  @IsDateString()
+  administeredAt?: string;
 }
 
 export class RecordAnesthesiaDto extends AnesthesiaDoseCheckDto {
@@ -162,14 +171,6 @@ export class RecordAnesthesiaDto extends AnesthesiaDoseCheckDto {
   @IsString()
   @MaxLength(60)
   lot?: string;
-
-  @ApiPropertyOptional({
-    format: 'date-time',
-    description: 'Hora de la administración; por defecto, ahora',
-  })
-  @IsOptional()
-  @IsDateString()
-  administeredAt?: string;
 
   @ApiPropertyOptional({
     minLength: OVERRIDE_REASON_MIN,
@@ -201,9 +202,12 @@ export class AnestheticDoseDto {
 }
 
 export class AnesthesiaDoseSummaryDto {
-  @ApiProperty({ example: 'ANESTHESIA_DOSE_V1' }) rulesVersion!: string;
+  @ApiProperty({ example: 'ANESTHESIA_DOSE_V2' }) rulesVersion!: string;
   @ApiProperty({ type: Number, nullable: true }) weightKg!: number | null;
-  @ApiProperty({ description: 'mg acumulados de la evolución' })
+  @ApiProperty({
+    description:
+      'mg acumulados del PACIENTE en la ventana de 24 h (DX-418): todas sus evoluciones, sedes y profesionales de la clínica',
+  })
   totalMg!: number;
   @ApiProperty({ type: [AnestheticDoseDto] })
   byAnesthetic!: AnestheticDoseDto[];
@@ -218,14 +222,77 @@ export class AnesthesiaDoseSummaryDto {
   @ApiProperty({ type: [DoseAlertDto] }) alerts!: DoseAlertDto[];
 }
 
+export class AnesthesiaDoseWindowPartDto {
+  @ApiProperty({ format: 'uuid' }) clinicalEntryId!: string;
+  @ApiProperty({ description: 'Es la evolución consultada' })
+  current!: boolean;
+  @ApiProperty({ format: 'uuid' }) authorId!: string;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'Profesional que la registró',
+  })
+  authorName!: string | null;
+  @ApiProperty({ type: String, format: 'uuid', nullable: true })
+  locationId!: string | null;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'Sede (cuentan también las de otra sede de la clínica)',
+  })
+  locationName!: string | null;
+  @ApiProperty({ format: 'date-time' }) firstAdministeredAt!: Date;
+  @ApiProperty({ format: 'date-time' }) lastAdministeredAt!: Date;
+  @ApiProperty() carpules!: number;
+  @ApiProperty() mg!: number;
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description:
+      'Parte del máximo que aporta, en % (redondeada: las partes pueden no sumar el total); null sin peso',
+  })
+  percent!: number | null;
+}
+
+export class AnesthesiaDoseWindowDto {
+  @ApiProperty({
+    example: 24,
+    description:
+      'DX-418: ventana MÓVIL de 24 h, no el día civil de la sede: las dosis máximas de anestésico local son por sesión / 24 h, y con el día civil 3 carpules a las 23:30 y 3 a las 00:30 empezarían de cero. Es la ventana de 24 h que contiene la administración con más acumulado: «ahora», las últimas 24 h; anotada tarde, puede ser la que acaba en una dosis posterior ya registrada. Nunca suma dosis a más de 24 h entre sí.',
+  })
+  hours!: number;
+  @ApiProperty({ format: 'date-time', description: 'Inicio (incluido)' })
+  from!: Date;
+  @ApiProperty({ format: 'date-time', description: 'Fin (incluido)' })
+  to!: Date;
+  @ApiProperty({
+    type: [AnesthesiaDoseWindowPartDto],
+    description:
+      'Lo ya registrado, por evolución y profesional, en orden de administración',
+  })
+  parts!: AnesthesiaDoseWindowPartDto[];
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description: 'mg de la dosis previsualizada (sin guardar); null si no hay',
+  })
+  pendingMg!: number | null;
+}
+
 export class AnesthesiaCheckDto {
-  @ApiProperty({ type: AnesthesiaDoseSummaryDto })
+  @ApiProperty({
+    type: AnesthesiaDoseSummaryDto,
+    description:
+      'Acumulado del paciente en la ventana de 24 h CON la dosis previsualizada',
+  })
   summary!: AnesthesiaDoseSummaryDto;
   @ApiProperty({ type: Number, nullable: true }) ageYears!: number | null;
   @ApiProperty({ enum: ['ANAMNESIS', 'ENTERED'], nullable: true })
   weightSource!: 'ANAMNESIS' | 'ENTERED' | null;
   @ApiProperty({ description: 'Menor de 12 años sin peso: hay que anotarlo' })
   weightRequired!: boolean;
+  @ApiProperty({ type: AnesthesiaDoseWindowDto })
+  window!: AnesthesiaDoseWindowDto;
 }
 
 export class AnesthesiaAdministrationDto {
@@ -253,7 +320,11 @@ export class AnesthesiaAdministrationDto {
   @ApiProperty({ type: Number, nullable: true }) weightKg!: number | null;
   @ApiProperty({ enum: ['ANAMNESIS', 'ENTERED'], nullable: true })
   weightSource!: 'ANAMNESIS' | 'ENTERED' | null;
-  @ApiProperty() cumulativeMg!: number;
+  @ApiProperty({
+    description:
+      'mg acumulados CON este registro: de la evolución con ANESTHESIA_DOSE_V1; del paciente en 24 h con ANESTHESIA_DOSE_V2 (DX-418)',
+  })
+  cumulativeMg!: number;
   @ApiProperty({ type: Number, nullable: true })
   cumulativePercent!: number | null;
   @ApiProperty() safetyRulesVersion!: string;
@@ -270,12 +341,20 @@ export class RecordedAnesthesiaDto extends AnesthesiaAdministrationDto {
 }
 
 export class EntryAnesthesiaDto {
-  @ApiProperty({ type: [AnesthesiaAdministrationDto] })
+  @ApiProperty({
+    type: [AnesthesiaAdministrationDto],
+    description: 'Lo registrado en esta evolución',
+  })
   records!: AnesthesiaAdministrationDto[];
-  @ApiProperty({ type: AnesthesiaDoseSummaryDto })
+  @ApiProperty({
+    type: AnesthesiaDoseSummaryDto,
+    description: 'Acumulado del paciente en las últimas 24 h (DX-418)',
+  })
   summary!: AnesthesiaDoseSummaryDto;
   @ApiProperty({ type: Number, nullable: true }) ageYears!: number | null;
   @ApiProperty() weightRequired!: boolean;
+  @ApiProperty({ type: AnesthesiaDoseWindowDto })
+  window!: AnesthesiaDoseWindowDto;
 }
 
 export class AnesthesiaConflictDto {
