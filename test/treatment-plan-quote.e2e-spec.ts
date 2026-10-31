@@ -642,12 +642,18 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
         .expect(200);
       const plan = res.body as {
         status: string;
-        acceptance: { signerName: string; acceptedAt: string } | null;
+        acceptance: {
+          signerName: string;
+          acceptedAt: string;
+          remote: unknown;
+        } | null;
       };
       expect(plan.status).toBe('ACCEPTED');
       expect(plan.acceptance).toEqual({
         signerName: 'Ana Presupuesto',
         acceptedAt: expect.any(String) as string,
+        // Firmado en la clínica (DX-415: `remote` solo a distancia).
+        remote: null,
       });
     });
 

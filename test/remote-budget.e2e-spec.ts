@@ -276,6 +276,17 @@ describe('Presupuesto a distancia (e2e, DX-415)', () => {
       },
     });
 
+    const detail = await as(clinicA)
+      .get(`/treatment-plans/${planId}`)
+      .expect(200);
+    expect(detail.body).toMatchObject({
+      status: 'ACCEPTED',
+      acceptance: {
+        signerName: 'Marta Ríos',
+        remote: { destinationMasked: 'ma***@example.com' },
+      },
+    });
+
     const list = await as(clinicA, reception)
       .get(`/patients/${patientId}/signature-requests`)
       .expect(200);

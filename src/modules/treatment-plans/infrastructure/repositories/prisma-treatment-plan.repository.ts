@@ -28,6 +28,7 @@ import {
 } from './plan-option-group';
 import {
   TreatmentPlan,
+  TreatmentPlanAcceptanceSummary,
   TreatmentPlanWithItems,
 } from '../../domain/entities/treatment-plan.entity';
 import { TreatmentPlanItem } from '../../domain/entities/treatment-plan-item.entity';
@@ -50,8 +51,51 @@ type PrismaTreatmentPlanItem = Prisma.TreatmentPlanItemGetPayload<
   Record<string, never>
 >;
 export const ACCEPTANCE_SUMMARY = {
-  select: { signerName: true, acceptedAt: true },
+  select: {
+    signerName: true,
+    acceptedAt: true,
+    ipAddress: true,
+    signatureRequestId: true,
+    remoteDestinationMasked: true,
+    remoteSentAt: true,
+    remoteOpenedAt: true,
+    remoteVerifiedAt: true,
+  },
 } satisfies Prisma.TreatmentPlanAcceptanceDefaultArgs;
+
+/** El resumen de la aceptación (DX-012) con sus evidencias a distancia (DX-415). */
+export function toAcceptanceSummary(
+  acceptance: Prisma.TreatmentPlanAcceptanceGetPayload<
+    typeof ACCEPTANCE_SUMMARY
+  >,
+): TreatmentPlanAcceptanceSummary {
+  const {
+    signatureRequestId,
+    remoteDestinationMasked,
+    remoteSentAt,
+    remoteOpenedAt,
+    remoteVerifiedAt,
+  } = acceptance;
+  return {
+    signerName: acceptance.signerName,
+    acceptedAt: acceptance.acceptedAt,
+    // Todas o ninguna (CHECK treatment_plan_acceptances_remote_check).
+    remote:
+      signatureRequestId &&
+      remoteDestinationMasked &&
+      remoteSentAt &&
+      remoteOpenedAt &&
+      remoteVerifiedAt
+        ? {
+            destinationMasked: remoteDestinationMasked,
+            sentAt: remoteSentAt,
+            openedAt: remoteOpenedAt,
+            verifiedAt: remoteVerifiedAt,
+            ipAddress: acceptance.ipAddress,
+          }
+        : null,
+  };
+}
 
 /**
  * SEC-050: el cargo VIGENTE (generado y sin anular) del que es ítem, si lo
@@ -90,7 +134,9 @@ const ITEMS_WITH_ATTRIBUTION = {
 
 type PrismaTreatmentPlanWithItems = PrismaTreatmentPlan & {
   items: PrismaItemWithAttribution[];
-  acceptance: { signerName: string; acceptedAt: Date } | null;
+  acceptance: Prisma.TreatmentPlanAcceptanceGetPayload<
+    typeof ACCEPTANCE_SUMMARY
+  > | null;
 };
 
 export function mapToEntity(plan: PrismaTreatmentPlan): TreatmentPlan {
@@ -188,12 +234,7 @@ export function mapToEntityWithItems(
   return {
     ...mapToEntity(plan),
     items: plan.items.map(mapItemToEntity),
-    acceptance: plan.acceptance
-      ? {
-          signerName: plan.acceptance.signerName,
-          acceptedAt: plan.acceptance.acceptedAt,
-        }
-      : null,
+    acceptance: plan.acceptance ? toAcceptanceSummary(plan.acceptance) : null,
   };
 }
 

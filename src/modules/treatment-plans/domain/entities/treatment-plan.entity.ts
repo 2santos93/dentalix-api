@@ -46,6 +46,17 @@ export interface TreatmentPlan {
 export interface TreatmentPlanAcceptanceSummary {
   signerName: string;
   acceptedAt: Date;
+  /**
+   * DX-415: el paciente lo aceptó a distancia por enlace con código; sus
+   * evidencias. `null` si se firmó en la clínica.
+   */
+  remote: {
+    destinationMasked: string;
+    sentAt: Date;
+    openedAt: Date;
+    verifiedAt: Date;
+    ipAddress: string | null;
+  } | null;
 }
 
 /**
