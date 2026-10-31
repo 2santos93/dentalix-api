@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { Prisma, type TreatmentPlanStatus } from '@prisma/client';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
@@ -16,7 +17,9 @@ import {
 import {
   CREDIT_CASH_SESSION_REQUIRED_MESSAGE,
   CREDIT_CHANGED_MESSAGE,
+  CREDIT_IDEMPOTENCY_REUSED_MESSAGE,
   CREDIT_PAYMENT_NOT_OF_PLAN_MESSAGE,
+  CREDIT_TARGET_NOT_BILLABLE_MESSAGE,
   formatRefundNumber,
   fromCents,
   planCreditCents,
@@ -100,6 +103,19 @@ function toRefund(row: RefundRow): CreditRefundRecord {
     paymentIds: payments.map((p) => p.paymentId),
     snapshot: snapshot as unknown as RefundReceiptSnapshot,
   };
+}
+
+/**
+ * La otra petición con la misma clave ganó la carrera: si su cuerpo era otro,
+ * 422 (igual que la repetición secuencial del caso de uso), nunca su resultado.
+ */
+function sameRequestOrThrow<
+  T extends { idempotencyFingerprint: string | null },
+>(existing: T, fingerprint: string): T {
+  if (existing.idempotencyFingerprint !== fingerprint) {
+    throw new UnprocessableEntityException(CREDIT_IDEMPOTENCY_REUSED_MESSAGE);
+  }
+  return existing;
 }
 
 function isUniqueViolation(error: unknown): boolean {
@@ -255,6 +271,13 @@ export class PrismaPatientCreditRepository implements PatientCreditRepository {
         if (!source || source.creditCents < input.amountCents) {
           throw new ConflictException(CREDIT_CHANGED_MESSAGE);
         }
+        // El destino se pudo cancelar o rechazar entre la lectura del caso de
+        // uso y el bloqueo: se relee bajo el bloqueo (el cambio de estado
+        // espera a este COMMIT o ya está confirmado).
+        const target = await this.planCredit(tx, tenantId, input.targetPlanId);
+        if (!target || !isPlanBillable(target.status)) {
+          throw new ConflictException(CREDIT_TARGET_NOT_BILLABLE_MESSAGE);
+        }
         const locationId = await this.tenantContext.writeLocationId(tx);
         const amount = new Prisma.Decimal(fromCents(input.amountCents));
         const transfer = await tx.patientCreditTransfer.create({
@@ -304,7 +327,7 @@ export class PrismaPatientCreditRepository implements PatientCreditRepository {
       // Dos peticiones con la misma clave a la vez: la otra ya entró.
       if (input.idempotencyKey && isUniqueViolation(error)) {
         const existing = await this.findTransferByKey(input.idempotencyKey);
-        if (existing) return existing;
+        if (existing) return sameRequestOrThrow(existing, input.fingerprint);
       }
       throw error;
     }
@@ -513,7 +536,7 @@ export class PrismaPatientCreditRepository implements PatientCreditRepository {
     } catch (error) {
       if (input.idempotencyKey && isUniqueViolation(error)) {
         const existing = await this.findRefundByKey(input.idempotencyKey);
-        if (existing) return existing;
+        if (existing) return sameRequestOrThrow(existing, input.fingerprint);
       }
       throw error;
     }

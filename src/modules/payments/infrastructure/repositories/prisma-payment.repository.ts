@@ -76,6 +76,7 @@ import {
   recordLatePaymentAdjustment,
   recordVoidAdjustment,
 } from '../../../cash-sessions/infrastructure/payment-cash-session';
+import { assertVoidKeepsPatientCredit } from '../credit/void-credit-guard';
 import { reopenPromiseOnVoid } from '../../../collections/infrastructure/prisma-collections.repository';
 import {
   enqueuePlanRebalance,
@@ -1125,6 +1126,10 @@ export class PrismaPaymentRepository implements PaymentRepository {
             })
           ).map((line) => line.id)
         : [id];
+      // DX-253: ni un abono de referencia de una devolución ni el que deja
+      // al descubierto saldo a favor ya traspasado o devuelto se anulan
+      // (409). Bloquea sus planes como el traspaso y la devolución.
+      await assertVoidKeepsPatientCredit(tx, tenantId, lineIds);
       // Siempre en el orden de las líneas: dos anulaciones simultáneas de
       // líneas del mismo cobro bloquean en el mismo orden (sin interbloqueo).
       // La que llega segunda no anula la línea pedida y responde 404.

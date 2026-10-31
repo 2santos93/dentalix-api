@@ -464,6 +464,12 @@ export class PaymentsController {
   @ApiNotFoundResponse({
     description: 'El abono no existe, ya está anulado o es de otra clínica',
   })
+  @ApiConflictResponse({
+    description:
+      'DX-253: el abono (o una línea de su cobro dividido) es referencia de ' +
+      'una devolución de saldo a favor, o del plan ya se traspasó o devolvió ' +
+      'saldo a favor y sin este abono quedaría al descubierto',
+  })
   async remove(
     @Param('id') id: string,
     @Body() dto: VoidPaymentDto,

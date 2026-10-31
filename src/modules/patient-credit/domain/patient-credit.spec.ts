@@ -9,9 +9,94 @@ import {
   refundFingerprint,
   refundSeriesOf,
   transferFingerprint,
+  voidRefundReferenceMessage,
+  voidUncoversMovedCredit,
 } from './patient-credit';
 
 describe('saldo a favor (DX-253)', () => {
+  describe('voidUncoversMovedCredit (anular un abono)', () => {
+    // Plan cancelado con 300.000 abonados en dos abonos (200.000 + 100.000).
+    const cancelled = { billableCents: 0, paidCents: 30_000_000 };
+
+    it('sin salidas de saldo a favor, anular es lo de siempre', () => {
+      expect(
+        voidUncoversMovedCredit({
+          ...cancelled,
+          entriesCents: 0,
+          outflowCents: 0,
+          voidedCents: 20_000_000,
+        }),
+      ).toBe(false);
+    });
+
+    it('tras traspasar 200.000, anular 100.000 deja justo 0: se permite', () => {
+      expect(
+        voidUncoversMovedCredit({
+          ...cancelled,
+          entriesCents: -20_000_000,
+          outflowCents: 20_000_000,
+          voidedCents: 10_000_000,
+        }),
+      ).toBe(false);
+    });
+
+    it('tras traspasar 200.000, anular 200.000 lo deja al descubierto: 409', () => {
+      expect(
+        voidUncoversMovedCredit({
+          ...cancelled,
+          entriesCents: -20_000_000,
+          outflowCents: 20_000_000,
+          voidedCents: 20_000_000,
+        }),
+      ).toBe(true);
+    });
+
+    it('plan vivo: cuenta el facturable (devuelto el exceso, anular deja deuda)', () => {
+      expect(
+        voidUncoversMovedCredit({
+          billableCents: 50_000,
+          paidCents: 80_000,
+          entriesCents: -30_000,
+          outflowCents: 30_000,
+          voidedCents: 1,
+        }),
+      ).toBe(true);
+    });
+
+    it('lo recibido por traspaso cubre: anular un abono del destino sin salidas', () => {
+      expect(
+        voidUncoversMovedCredit({
+          billableCents: 40_000_000,
+          paidCents: 1_000_000,
+          entriesCents: 20_000_000,
+          outflowCents: 0,
+          voidedCents: 1_000_000,
+        }),
+      ).toBe(false);
+    });
+
+    it('cobro dividido: suma todas las líneas anuladas', () => {
+      const base = {
+        billableCents: 0,
+        paidCents: 15_000_000,
+        entriesCents: -10_000_000,
+        outflowCents: 10_000_000,
+      };
+      expect(voidUncoversMovedCredit({ ...base, voidedCents: 5_000_000 })).toBe(
+        false,
+      );
+      expect(
+        voidUncoversMovedCredit({ ...base, voidedCents: 15_000_000 }),
+      ).toBe(true);
+    });
+
+    it('el 409 de un abono de referencia nombra la devolución', () => {
+      expect(voidRefundReferenceMessage('DEV-BOG-000007')).toMatch(
+        /^No se puede anular: .*DEV-BOG-000007/,
+      );
+    });
+  });
+
   describe('planCreditCents', () => {
     it('plan cancelado: todo lo abonado queda a favor', () => {
       expect(

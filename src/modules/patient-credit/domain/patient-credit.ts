@@ -49,6 +49,13 @@ export const CREDIT_IDEMPOTENCY_INVALID_MESSAGE =
 export const CREDIT_ROLE_FORBIDDEN_MESSAGE =
   'Tu rol no mueve saldo a favor: solo administración y recepción.';
 
+/** 409 al anular un abono que es referencia de una devolución (DX-253). */
+export function voidRefundReferenceMessage(refundNumber: string): string {
+  return `No se puede anular: el abono es referencia de la devolución ${refundNumber}, que no se deshace. Pide a administración que revise el caso.`;
+}
+export const VOID_MOVED_CREDIT_MESSAGE =
+  'No se puede anular: parte del saldo a favor de este plan ya se traspasó o se devolvió y, sin este abono, el plan quedaría debiendo ese dinero. Pide a administración que revise el caso.';
+
 /** 403 de RECEPTION por encima del tope de la clínica (mismo patrón que DX-204). */
 export function receptionCapMessage(capCents: number): string {
   return capCents === 0
@@ -78,6 +85,31 @@ export function planCreditCents(input: PlanCreditInput): number {
   return Math.max(
     0,
     input.paidCents + input.entriesCents - input.billableCents,
+  );
+}
+
+export interface VoidCreditInput extends PlanCreditInput {
+  /** Σ de lo que ya SALIÓ del plan (traspasos dados + devoluciones), > 0. */
+  outflowCents: number;
+  /** Lo que se anula ahora en la moneda del plan (todas las líneas). */
+  voidedCents: number;
+}
+
+/**
+ * ¿Deja la anulación al descubierto saldo a favor ya traspasado o devuelto?
+ * Regla (DX-253): si del plan ya salió dinero (traspaso o devolución), tras
+ * anular el abono el saldo a favor neto del plan no puede quedar negativo:
+ * abonado vivo − anulado + asientos − facturable ≥ 0. Sin salidas, anular es
+ * lo de siempre (la deuda que quede es real).
+ */
+export function voidUncoversMovedCredit(input: VoidCreditInput): boolean {
+  if (input.outflowCents <= 0 || input.voidedCents <= 0) return false;
+  return (
+    input.paidCents -
+      input.voidedCents +
+      input.entriesCents -
+      input.billableCents <
+    0
   );
 }
 

@@ -541,4 +541,129 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
     });
     expect(events).toBeGreaterThanOrEqual(4);
   });
+  describe('anular un abono cuyo saldo a favor ya salió del plan (409)', () => {
+    const voidPayment = (paymentId: string, token = a.adminToken) =>
+      as(api().delete(`/api/v1/payments/${paymentId}`), a, token).send({
+        reason: 'Registrado por error',
+      });
+    const isLive = async (paymentId: string): Promise<boolean> =>
+      (
+        await raw.payment.findUniqueOrThrow({
+          where: { id: paymentId },
+          select: { deletedAt: true },
+        })
+      ).deletedAt === null;
+    const cancel = (planId: string) =>
+      as(api().patch(`/api/v1/treatment-plans/${planId}`), a)
+        .send({ status: 'CANCELLED' })
+        .expect(200);
+    const transferFrom = (planId: string, amount: number) =>
+      as(api().post(`/api/v1/treatment-plans/${planId}/credit-transfers`), a)
+        .send({ targetPlanId: target, amount, currency: 'COP' })
+        .expect(201);
+
+    it('el abono de referencia de una devolución no se anula', async () => {
+      const res = await voidPayment(originPayment).expect(409);
+      expect((res.body as { message: string }).message).toMatch(
+        /^No se puede anular: el abono es referencia de la devolución DEV-[A-Z0-9]+-000001/,
+      );
+      expect(await isLive(originPayment)).toBe(true);
+    });
+
+    it('si sin el abono el saldo traspasado queda al descubierto: 409; si alcanza, se anula', async () => {
+      const plan = await seedPlan(100_000, 'ANULA');
+      const big = await pay(plan, 60_000);
+      const small = await pay(plan, 40_000);
+      await cancel(plan);
+      await transferFrom(plan, 50_000);
+
+      // 60.000 + 40.000 − 50.000 = 50.000 a favor: anular 40.000 deja 10.000.
+      await voidPayment(small).expect(200);
+      // Sin los 60.000, el plan habría dado 50.000 que no tiene.
+      const res = await voidPayment(big).expect(409);
+      expect((res.body as { message: string }).message).toMatch(
+        /ya se traspasó o se devolvió/,
+      );
+      expect(await isLive(big)).toBe(true);
+      const line = (await planLines()).find((p) => p.id === plan);
+      expect(line).toMatchObject({
+        paid: 60_000,
+        creditMovements: -50_000,
+        balance: -10_000,
+      });
+    });
+
+    it('cobro dividido (DX-390): anular una línea mira el cobro entero y no anula ninguna', async () => {
+      const plan = await seedPlan(100_000, 'DIVIDIDO');
+      const methods = (
+        await as(api().get('/api/v1/payment-methods'), a).expect(200)
+      ).body as { id: string; legacyMethod: string | null }[];
+      const split = (
+        await as(
+          api().post(`/api/v1/treatment-plans/${plan}/split-payments`),
+          a,
+        )
+          .send({
+            paidAt: TODAY,
+            lines: [
+              {
+                amount: 30_000,
+                currency: 'COP',
+                paymentMethodId: methods.find((m) => m.legacyMethod === 'CARD')!
+                  .id,
+                reference: 'DX253-T1',
+              },
+              {
+                amount: 20_000,
+                currency: 'COP',
+                paymentMethodId: methods.find(
+                  (m) => m.legacyMethod === 'TRANSFER',
+                )!.id,
+                reference: 'DX253-T2',
+              },
+            ],
+          })
+          .expect(201)
+      ).body as { payments: { id: string }[] };
+      const [first, second] = split.payments.map((p) => p.id);
+      await cancel(plan);
+      // Solo 10.000 salen, pero la línea 2 arrastra la 1: 50.000 anulados.
+      await transferFrom(plan, 10_000);
+      await voidPayment(second).expect(409);
+      expect(await isLive(first)).toBe(true);
+      expect(await isLive(second)).toBe(true);
+    });
+
+    it('un abono de un plan sin salidas se sigue anulando', async () => {
+      const plan = await seedPlan(100_000, 'LIBRE');
+      const payment = await pay(plan, 5_000);
+      await voidPayment(payment).expect(200);
+      expect(await isLive(payment)).toBe(false);
+    });
+
+    it('anulación y devolución a la vez sobre el mismo saldo: nunca las dos', async () => {
+      const plan = await seedPlan(100_000, 'CARRERA');
+      const payment = await pay(plan, 30_000);
+      await cancel(plan);
+      const [voided, refunded] = await Promise.all([
+        voidPayment(payment),
+        as(
+          api().post(`/api/v1/treatment-plans/${plan}/credit-refunds`),
+          a,
+        ).send({
+          amount: 30_000,
+          currency: 'COP',
+          method: 'TRANSFER',
+          reason: 'Devolución en carrera',
+          paymentIds: [payment],
+        }),
+      ]);
+      const statuses = [voided.status, refunded.status];
+      // O se anula primero (la devolución ve 0 a favor o el abono anulado), o
+      // se devuelve primero (la anulación ve la referencia): una sola gana.
+      expect(statuses.filter((code) => code < 300)).toHaveLength(1);
+      const line = (await planLines()).find((p) => p.id === plan);
+      expect(line?.balance).toBe(0);
+    });
+  });
 });
