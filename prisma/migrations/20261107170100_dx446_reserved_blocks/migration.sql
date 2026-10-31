@@ -60,7 +60,7 @@ ALTER TABLE "schedule_blocks"
 CREATE OR REPLACE FUNCTION schedule_blocks_reserved_types_same_tenant()
 RETURNS trigger
 LANGUAGE plpgsql
-SET search_path = public
+SET search_path = public, pg_temp
 AS $$
 DECLARE
   wanted integer;
