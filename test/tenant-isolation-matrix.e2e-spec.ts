@@ -1068,6 +1068,13 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       path: () => `/patients/${a.patientId}`,
       status: 404,
     },
+    // DX-461: contar los enlaces públicos vivos antes de archivar.
+    {
+      name: 'GET /patients/:id/live-public-links',
+      verb: 'get',
+      path: () => `/patients/${a.patientId}/live-public-links`,
+      status: 404,
+    },
     {
       name: 'PATCH /patients/:id/retention',
       verb: 'patch',
@@ -2755,6 +2762,44 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
         providerId: clinicB.adminUserId,
         start: futureAt(9, 15),
         end: futureAt(9, 16),
+        ...patch(),
+      }),
+      bodyIds: [field],
+      status,
+      message,
+    })),
+    // DX-470: «Atender sin cita» de B con un id de A (sobrecupo: no
+    // depende de los huecos reservados de B).
+    ...(
+      [
+        [
+          'patientId',
+          () => ({ patientId: a.patientId }),
+          404,
+          'Paciente no encontrado',
+        ],
+        [
+          'providerId',
+          () => ({ providerId: a.dentistUserId }),
+          404,
+          'Profesional no encontrado',
+        ],
+        [
+          'appointmentTypeId',
+          () => ({ appointmentTypeId: a.appointmentTypeId }),
+          400,
+          'El tipo de cita elegido no es de urgencia o está desactivado.',
+        ],
+      ] as const
+    ).map(([field, patch, status, message]): IsolationCase => ({
+      name: `POST /appointments/walk-in body.${field} de A`,
+      verb: 'post',
+      path: () => '/appointments/walk-in',
+      body: () => ({
+        patientId: b.patientId,
+        providerId: clinicB.adminUserId,
+        overbookReason: 'Urgencia de prueba',
+        triageFlags: ['PAIN'],
         ...patch(),
       }),
       bodyIds: [field],

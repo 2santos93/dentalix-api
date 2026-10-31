@@ -238,9 +238,21 @@ describe('retención legal de la HC (DX-039, int)', () => {
     const p = await newPatient(tenantA, 'Archivo');
     await entry(tenantA, p, '2026-02-01T10:00:00Z');
     const now = new Date('2026-10-16T12:00:00Z');
+    // DX-461: quién archiva (para anular sus enlaces y auditarlo).
+    const revocation = {
+      now,
+      ctx: {
+        tenantId: tenantA,
+        locationId: null,
+        actor: { userId, role: 'ADMIN' as const },
+        requestId: null,
+        ip: null,
+        userAgent: null,
+      },
+    };
     await expect(
       tenantContext.run(tenantA, () =>
-        repo.archive(p, (s) => assertNotUnderRetention(s, now)),
+        repo.archive(p, (s) => assertNotUnderRetention(s, now), revocation),
       ),
     ).rejects.toMatchObject({
       response: {
@@ -253,7 +265,7 @@ describe('retención legal de la HC (DX-039, int)', () => {
 
     const fresh = await newPatient(tenantA, 'Duplicado');
     await tenantContext.run(tenantA, () =>
-      repo.archive(fresh, (s) => assertNotUnderRetention(s, now)),
+      repo.archive(fresh, (s) => assertNotUnderRetention(s, now), revocation),
     );
     expect(
       (await raw.patient.findUniqueOrThrow({ where: { id: fresh } })).deletedAt,

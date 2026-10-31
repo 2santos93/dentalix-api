@@ -66,6 +66,10 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
   'PATCH /appointments/:id body.planItemIds[]',
   'PATCH /appointments/:id body.providerId',
   'PATCH /appointments/:id/opening body.providerId',
+  // DX-470: «Atender sin cita».
+  'POST /appointments/walk-in body.appointmentTypeId',
+  'POST /appointments/walk-in body.patientId',
+  'POST /appointments/walk-in body.providerId',
   'PUT /staff/:userId/locations body.locationIds[]',
   'GET /schedule-blocks ?locationId',
   'GET /schedule-blocks ?providerIds[]',

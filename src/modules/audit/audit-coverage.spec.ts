@@ -1457,6 +1457,9 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // DX-200: ARRIVAL_UNDONE con el estado al que vuelve.
   'POST /appointments/:id/undo-arrival':
     'patient-flow.use-case.spec.ts y patient-flow.e2e-spec.ts',
+  // DX-470: WALK_IN_PATIENT, WALK_IN_ARRIVAL y WALK_IN_OVERBOOK en la misma
+  // transacción que el alta y la cita (todo o nada).
+  'POST /appointments/walk-in': 'walk-in.int-spec.ts y walk-in.e2e-spec.ts',
   // Adelantar al hueco: APPOINTMENT_MOVED, como cualquier reagendado.
   'PATCH /appointments/:id/opening': 'update-appointment.use-case.spec.ts',
   // Lista de espera: WAITLIST_MANUAL, WAITLIST_DISMISSED y WAITLIST_SCHEDULED.

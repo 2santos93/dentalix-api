@@ -7,6 +7,7 @@ import { DocumentType, Prisma, RetentionExtension } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
+  ArchiveRevocation,
   CreatePatientRepoInput,
   ListPatientsParams,
   ListPatientsResult,
@@ -23,6 +24,12 @@ import {
 } from '../../domain/retention/clinical-record-retention';
 import { Patient } from '../../domain/entities/patient.entity';
 import { livePatientWithDoc, lockPatientDocs } from '../patient-doc-lock';
+import { revokeLivePublicLinks } from '../patient-public-links';
+import {
+  PATIENT_ARCHIVED_LINKS_REVOKED_REASON,
+  totalLivePublicLinks,
+} from '../../domain/live-public-links';
+import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
 import {
   legacyStoredDocType,
   type LegacyDocType,
@@ -124,12 +131,72 @@ async function assertDocFree(
   tenantId: string,
   docNumber: string | null | undefined,
   exceptId?: string,
+  onTaken: (existingId: string) => Error = () =>
+    new ConflictException(DOC_TAKEN_MESSAGE),
 ): Promise<void> {
   if (!docNumber) return;
   await lockPatientDocs(tx, tenantId, [docNumber]);
-  if (await livePatientWithDoc(tx, tenantId, docNumber, exceptId)) {
-    throw new ConflictException(DOC_TAKEN_MESSAGE);
-  }
+  const existingId = await livePatientWithDoc(
+    tx,
+    tenantId,
+    docNumber,
+    exceptId,
+  );
+  if (existingId) throw onTaken(existingId);
+}
+
+/** Lo que el alta mínima de «Atender sin cita» (DX-470) escribe del paciente. */
+export type PatientRowInput = Pick<
+  CreatePatientRepoInput,
+  'firstName' | 'lastName' | 'docType' | 'docTypeLabel' | 'docNumber' | 'sex'
+> &
+  Partial<CreatePatientRepoInput>;
+
+/**
+ * La fila del paciente de un alta, dentro de la transacción de quien llama:
+ * el documento libre en la clínica (DX-107, mismo candado que la
+ * importación) y el canal por defecto de la clínica (DX-128). La usan el alta
+ * normal y la de «Atender sin cita» (DX-470), que decide con `onDocTaken` qué
+ * error da un documento que ya tiene otro paciente vivo.
+ */
+export async function insertPatientRowInTx(
+  tx: TxClient,
+  tenantId: string,
+  input: PatientRowInput,
+  onDocTaken?: (existingId: string) => Error,
+): Promise<PrismaPatient> {
+  await assertDocFree(tx, tenantId, input.docNumber, undefined, onDocTaken);
+  // `tenants` no tiene RLS: se lee por el id del contexto.
+  const clinic = await tx.tenant.findUniqueOrThrow({
+    where: { id: tenantId },
+    select: { defaultContactChannel: true },
+  });
+  return tx.patient.create({
+    data: {
+      tenantId,
+      contactChannel: clinic.defaultContactChannel,
+      firstName: input.firstName,
+      lastName: input.lastName,
+      ...patientDocFields(input.docType, input.docTypeLabel),
+      docNumber: input.docNumber,
+      birthDate: input.birthDate,
+      sex: input.sex,
+      phone: input.phone,
+      email: input.email,
+      address: input.address,
+      countryCode: input.countryCode,
+      cityId: input.cityId,
+      notes: input.notes,
+      maritalStatus: input.maritalStatus,
+      occupation: input.occupation,
+      physicianName: input.physicianName,
+      physicianPhone: input.physicianPhone,
+      emergencyContactName: input.emergencyContactName,
+      emergencyContactRelationship: input.emergencyContactRelationship,
+      emergencyContactPhone: input.emergencyContactPhone,
+      createdById: input.createdById,
+    } satisfies Prisma.PatientUncheckedCreateInput & LegacyDocPair,
+  });
 }
 
 export function mapToEntity(patient: PrismaPatient, now = new Date()): Patient {
@@ -212,39 +279,8 @@ export class PrismaPatientRepository implements PatientRepository {
   async create(input: CreatePatientRepoInput): Promise<Patient> {
     const tenantId = this.requireTenantId();
     const patient = await this.prisma.runWithTenant(async (tx) => {
-      // DX-128: el paciente nace con el canal por defecto de su clínica
-      // (`tenants` no tiene RLS: se lee por el id del contexto).
-      await assertDocFree(tx, tenantId, input.docNumber);
-      const clinic = await tx.tenant.findUniqueOrThrow({
-        where: { id: tenantId },
-        select: { defaultContactChannel: true },
-      });
-      const created = await tx.patient.create({
-        data: {
-          tenantId,
-          contactChannel: clinic.defaultContactChannel,
-          firstName: input.firstName,
-          lastName: input.lastName,
-          ...patientDocFields(input.docType, input.docTypeLabel),
-          docNumber: input.docNumber,
-          birthDate: input.birthDate,
-          sex: input.sex,
-          phone: input.phone,
-          email: input.email,
-          address: input.address,
-          countryCode: input.countryCode,
-          cityId: input.cityId,
-          notes: input.notes,
-          maritalStatus: input.maritalStatus,
-          occupation: input.occupation,
-          physicianName: input.physicianName,
-          physicianPhone: input.physicianPhone,
-          emergencyContactName: input.emergencyContactName,
-          emergencyContactRelationship: input.emergencyContactRelationship,
-          emergencyContactPhone: input.emergencyContactPhone,
-          createdById: input.createdById,
-        } satisfies Prisma.PatientUncheckedCreateInput & LegacyDocPair,
-      });
+      // DX-128: el paciente nace con el canal por defecto de su clínica.
+      const created = await insertPatientRowInTx(tx, tenantId, input);
 
       if (input.medicalHistory) {
         const { data, safetyFlags, hasCriticalAlert } = input.medicalHistory;
@@ -430,7 +466,9 @@ export class PrismaPatientRepository implements PatientRepository {
   async archive(
     id: string,
     assertCanArchive: (state: PatientArchiveState) => void,
+    revocation: ArchiveRevocation,
   ): Promise<void> {
+    const tenantId = this.requireTenantId();
     await this.prisma.runWithTenant(async (tx) => {
       const retention = await lockRetentionState(tx, id);
       // Todas las sedes: el paciente es de la clínica, no de una sede.
@@ -447,7 +485,38 @@ export class PrismaPatientRepository implements PatientRepository {
       assertCanArchive({ ...retention, pendingAppointments });
       await tx.patient.update({
         where: { id },
-        data: { deletedAt: new Date() },
+        data: { deletedAt: revocation.now },
+      });
+      // DX-461: sus enlaces públicos vivos dejan de servir en ESTA
+      // transacción (con el paciente bloqueado): o se archiva y se anulan, o
+      // nada. Las rutas públicas que respondan después ya lo ven archivado.
+      const { ctx, now } = revocation;
+      const revoked = await revokeLivePublicLinks(tx, {
+        tenantId,
+        patientId: id,
+        now,
+        actorId: ctx.actor.userId,
+      });
+      if (totalLivePublicLinks(revoked) === 0) return;
+      await writeAuditEvent(tx, {
+        tenantId,
+        locationId: ctx.locationId,
+        actor: {
+          kind: 'user',
+          userId: ctx.actor.userId,
+          role: ctx.actor.role,
+        },
+        action: 'UPDATE',
+        resourceType: 'PATIENT',
+        resourceId: id,
+        patient: { kind: 'patient', id },
+        requestId: ctx.requestId,
+        ip: ctx.ip,
+        userAgent: ctx.userAgent,
+        metadata: {
+          reason: PATIENT_ARCHIVED_LINKS_REVOKED_REASON,
+          revokedLinks: revoked,
+        },
       });
     });
   }

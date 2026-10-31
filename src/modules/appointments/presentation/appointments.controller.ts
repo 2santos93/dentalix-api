@@ -52,6 +52,12 @@ import {
 } from '../../medical-history/domain/medical-alert-flags';
 import { OpeningsDto, OpeningsQueryDto } from './dto/openings.dto';
 import { InClinicQueryDto, InClinicViewDto } from './dto/in-clinic.dto';
+import { CreateWalkInDto, WalkInResultDto } from './dto/walk-in.dto';
+import {
+  CreateWalkInUseCase,
+  type WalkInResult,
+} from '../application/use-cases/create-walk-in.use-case';
+import { WALK_IN_MESSAGES, WALK_IN_ROLES } from '../domain/walk-in';
 import {
   ListInClinicUseCase,
   type InClinicItem,
@@ -140,6 +146,8 @@ export class AppointmentsController {
     // DX-446: motivo de «Agendar igualmente» fuera de la auditoría.
     @Inject(RESERVED_OVERRIDE_REPOSITORY)
     private readonly reservedOverrides: ReservedOverrideRepository,
+    // DX-470: «Atender sin cita».
+    private readonly createWalkIn: CreateWalkInUseCase,
   ) {}
 
   /** Quién escribe, para los `audit_event` de los casos de uso (DX-121/122). */
@@ -290,7 +298,10 @@ export class AppointmentsController {
     @Query() query: ListAppointmentsQueryDto,
     @Req() req: { user: JwtPayload },
   ): Promise<
-    (Omit<Appointment, 'notes' | 'cancelReasonText'> & {
+    (Omit<
+      Appointment,
+      'notes' | 'cancelReasonText' | 'triageFlags' | 'triageNote'
+    > & {
       balance: OverdueBalance;
       coverage: CoverageSummary;
       medicalAlerts: MedicalAlertFlags;
@@ -313,8 +324,16 @@ export class AppointmentsController {
     // DX-247: el estado de la anamnesis el día civil de CADA cita en su sede.
     const medical = await this.medicalAlertFlags.forAppointments(appointments);
     const attendance = await this.attendanceFlags.forPatients(patientIds);
+    // DX-470: el triaje (datos de salud) no sale en la agenda: solo en GET
+    // /appointments/:id y en el panel «En clínica».
     return appointments.map(
-      ({ notes: _notes, cancelReasonText: _text, ...a }) => ({
+      ({
+        notes: _notes,
+        cancelReasonText: _text,
+        triageFlags: _flags,
+        triageNote: _note,
+        ...a
+      }) => ({
         ...a,
         balance: flags.get(a.patientId) ?? {
           hasOverdue: false,
@@ -324,6 +343,49 @@ export class AppointmentsController {
         medicalAlerts: medical.get(a.id) ?? NO_ANAMNESIS_FLAGS,
         attendance: attendance.get(a.patientId) ?? NO_INCIDENTS,
       }),
+    );
+  }
+
+  @Post('walk-in')
+  @Roles(...WALK_IN_ROLES)
+  @RolesDeniedMessage(WALK_IN_MESSAGES.forbidden)
+  @ApiCreatedResponse({
+    type: WalkInResultDto,
+    description:
+      'DX-470 «Atender sin cita», en una transacción: el paciente (existente por `patientId`, o alta mínima `newPatient` con nombre, apellido y teléfono) y una cita de tipo urgente DESDE AHORA ya en «En clínica» (ARRIVED, `arrivedAt` = reloj del servidor, `walkIn`), con las señales y la nota de triaje. Va al primer hueco RESERVED libre de hoy del profesional que admite el tipo urgente (DX-446); con `overbookReason`, en sobrecupo ahora (`overbooked`, motivo en `appointment_reserved_overrides`). Sede: la de X-Location-Id (o la de escritura de la sesión), entre las permitidas al usuario; autor, el del token. Queda en auditoría (`WALK_IN_PATIENT`, `WALK_IN_ARRIVAL`, `WALK_IN_OVERBOOK`) sin el triaje ni el motivo.',
+  })
+  @ApiBadRequestResponse({
+    description:
+      'Datos inválidos: ni `patientId` ni `newPatient` (o los dos), señales fuera de las 6, nota de más de 200, motivo del sobrecupo fuera de 5–300, tipo no urgente o desactivado, o el profesional no atiende en la sede',
+  })
+  @ApiForbiddenResponse({
+    description:
+      'Solo RECEPTION, ASSISTANT y ADMIN (marcan la llegada); sede no permitida (`LOCATION_NOT_ALLOWED`)',
+  })
+  @ApiNotFoundResponse({
+    description: 'Paciente o profesional que no son de esta clínica',
+  })
+  @ApiConflictResponse({
+    description:
+      '`NO_RESERVED_SLOT` (`canOverbook`): no queda hueco reservado libre hoy, se puede reintentar con `overbookReason`; `PATIENT_DUPLICATE` (`existingPatientId` y `existingPatient` con `id`, `firstName`, `lastName`): el documento del alta mínima ya es de otro paciente (se comprueba antes que el hueco); sin tipo urgente activo; un bloqueo que no deja agendar; el paciente ya está en otra cita a esa hora; u otra persona ocupó el hueco a la vez',
+  })
+  async walkIn(
+    @Body() dto: CreateWalkInDto,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<WalkInResult> {
+    const ctx = this.auditContext(req);
+    if (!ctx) throw new Error('Sin sesión de clínica detrás del RolesGuard');
+    return this.createWalkIn.execute(
+      {
+        patientId: dto.patientId,
+        newPatient: dto.newPatient,
+        providerId: dto.providerId,
+        appointmentTypeId: dto.appointmentTypeId,
+        triageFlags: dto.triageFlags,
+        triageNote: dto.triageNote,
+        overbookReason: dto.overbookReason,
+      },
+      ctx,
     );
   }
 

@@ -179,6 +179,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // retención extendida, supresión parcial e historias que salen de
   // retención, solo gestión.
   'DELETE /patients/:id': ADMIN_ONLY,
+  // DX-461: cuántos enlaces públicos vivos anularía archivar.
+  'GET /patients/:id/live-public-links': ADMIN_ONLY,
   'PATCH /patients/:id/retention': ADMIN_ONLY,
   'POST /patients/:id/partial-suppression': ADMIN_ONLY,
   'GET /patients/retention/expiring': ADMIN_ONLY,
@@ -521,6 +523,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
     'ASSISTANT',
     'RECEPTION',
   ),
+  // DX-470 «Atender sin cita» (loop/informes/DX-470.md): marca la llegada en
+  // el mismo paso, así que es del mostrador (como «Llegó»); el alta mínima
+  // que lo acompaña es de PATIENT_ROLES, que incluye a los tres.
+  'POST /appointments/walk-in': roles('ADMIN', 'ASSISTANT', 'RECEPTION'),
   // DX-273 «Traer a esta cita» (loop/informes/DX-273.md): quien ve la agenda;
   // que la cita esté en la clínica y la sede de la otra cita los mira el caso
   // de uso (409 / 403).

@@ -9,6 +9,10 @@ import { MAX_HOLIDAYS_PER_FILE } from '../../location-calendar/domain/holiday-ru
 import { parseCivilDate } from '../../../shared/time/civil-day';
 import { ClinicRole } from '@prisma/client';
 import { round2 } from '../../../shared/money/money';
+import {
+  LIVE_PUBLIC_LINK_KINDS,
+  type LivePublicLinkCounts,
+} from '../../patients/domain/live-public-links';
 
 export interface AuditMetadata {
   /** Campos que traía la petición de escritura (nombres, nunca valores). */
@@ -171,6 +175,11 @@ export interface AuditMetadata {
    * tabla, como el «Otro» de DX-439).
    */
   reservedSlotOverride?: AuditReservedSlotOverride;
+  /**
+   * DX-461: enlaces públicos vivos que se anularon al archivar al paciente,
+   * cuántos de cada tipo. Solo números: ni tokens, ni destinatarios, ni ids.
+   */
+  revokedLinks?: LivePublicLinkCounts;
 }
 
 export const AUDIT_CLOSING_QUEUE_SECTIONS = [
@@ -847,6 +856,35 @@ function closingQueueDismissal(
   return { section: s, reasonCode: r };
 }
 
+/** Tope de enlaces de un tipo en un evento: muy por encima de lo real. */
+const MAX_REVOKED_LINKS = 1_000_000;
+
+/** Exactamente los tipos de enlace, cada uno un natural acotado, o nada (DX-461). */
+function revokedLinks(value: unknown): LivePublicLinkCounts | null {
+  if (!isRecord(value)) return null;
+  const keys = Object.keys(value);
+  if (
+    keys.length !== LIVE_PUBLIC_LINK_KINDS.length ||
+    keys.some((k) => !(LIVE_PUBLIC_LINK_KINDS as readonly string[]).includes(k))
+  ) {
+    return null;
+  }
+  const out = {} as LivePublicLinkCounts;
+  for (const kind of LIVE_PUBLIC_LINK_KINDS) {
+    const n = value[kind];
+    if (
+      typeof n !== 'number' ||
+      !Number.isInteger(n) ||
+      n < 0 ||
+      n > MAX_REVOKED_LINKS
+    ) {
+      return null;
+    }
+    out[kind] = n;
+  }
+  return out;
+}
+
 const MAX_SAFETY_CODES = 50;
 
 function safetyCodes(value: unknown): string[] | null {
@@ -1218,5 +1256,7 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (dismissed) out.closingQueueDismissal = dismissed;
   const overridden = reservedSlotOverride(input.reservedSlotOverride);
   if (overridden) out.reservedSlotOverride = overridden;
+  const revoked = revokedLinks(input.revokedLinks);
+  if (revoked) out.revokedLinks = revoked;
   return out;
 }
