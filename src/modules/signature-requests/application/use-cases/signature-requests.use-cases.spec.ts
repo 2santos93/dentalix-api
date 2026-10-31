@@ -39,6 +39,7 @@ import {
   ListPatientSignatureRequestsUseCase,
   RevokeSignatureRequestUseCase,
   SIGNATURE_BUDGET_PLAN_REQUIRED_MESSAGE,
+  SIGNATURE_BUDGET_ROLE_MESSAGE,
   SIGNATURE_PROFESSIONAL_INVALID_MESSAGE,
   SIGNATURE_PROFESSIONAL_REQUIRED_MESSAGE,
 } from './signature-requests.use-cases';
@@ -51,8 +52,17 @@ const EVIDENCE = {
   userAgent: 'Mobile',
   requestId: null,
 };
-const DENTIST = { userId: 'dentist-1', clinical: true };
-const RECEPTION = { userId: 'reception-1', clinical: false };
+const DENTIST = { userId: 'dentist-1', clinical: true, decidesPlans: true };
+const RECEPTION = {
+  userId: 'reception-1',
+  clinical: false,
+  decidesPlans: false,
+};
+const ASSISTANT = {
+  userId: 'assistant-1',
+  clinical: true,
+  decidesPlans: false,
+};
 const LINK = { protocol: 'https', host: 'demo.dentalix.app' };
 
 function recipient(
@@ -369,8 +379,13 @@ describe('opciones del modal «Enviar a firmar» (QA DX-243)', () => {
     expect(asReception.defaultProfessionalId).toBeNull();
     // Un clínico que ya no es miembro vivo (no está en la lista) no queda por defecto.
     expect(
-      (await ctx.options.execute('p1', { userId: 'gone-1', clinical: true }))
-        .defaultProfessionalId,
+      (
+        await ctx.options.execute('p1', {
+          userId: 'gone-1',
+          clinical: true,
+          decidesPlans: true,
+        })
+      ).defaultProfessionalId,
     ).toBeNull();
     expect(
       (await ctx.options.execute('p1', DENTIST)).defaultProfessionalId,
@@ -386,7 +401,7 @@ describe('opciones del modal «Enviar a firmar» (QA DX-243)', () => {
     );
     // Un clínico que ya no está en la clínica tampoco se usa por defecto.
     await expect(
-      send(ctx, { userId: 'gone-1', clinical: true }),
+      send(ctx, { userId: 'gone-1', clinical: true, decidesPlans: true }),
     ).rejects.toThrow(SIGNATURE_PROFESSIONAL_INVALID_MESSAGE);
     expect(ctx.repo.rows).toHaveLength(0);
   });
@@ -727,11 +742,11 @@ function presentedBudget(ctx: Ctx, planId = 'plan-1') {
   return budget;
 }
 
-async function sendBudget(ctx: Ctx, planId = 'plan-1') {
+async function sendBudget(ctx: Ctx, planId = 'plan-1', actor = DENTIST) {
   return ctx.create.execute(
     'p1',
     { type: 'BUDGET', channel: 'EMAIL', treatmentPlanId: planId },
-    RECEPTION,
+    actor,
     LINK,
   );
 }
@@ -758,7 +773,7 @@ describe('presupuesto a distancia (DX-415)', () => {
       treatmentPlanId: 'plan-1',
       templateId: null,
       templateVersion: null,
-      professionalUserId: 'reception-1',
+      professionalUserId: 'dentist-1',
       professionalName: 'Dra. Gómez',
     });
     const content = row.budgetContent as { issuedOn: string; items: unknown[] };
@@ -776,6 +791,18 @@ describe('presupuesto a distancia (DX-415)', () => {
     expect(JSON.stringify(ctx.links[0].vars)).not.toMatch(
       /implante|resina|3500000|presupuesto/i,
     );
+  });
+
+  it('solo quien decide el plan (odontólogo o ADMIN) lo envía: recepción y asistente, 403 en español; nada se crea', async () => {
+    const ctx = setup();
+    presentedBudget(ctx);
+    for (const actor of [RECEPTION, ASSISTANT]) {
+      await expect(sendBudget(ctx, 'plan-1', actor)).rejects.toThrow(
+        new ForbiddenException(SIGNATURE_BUDGET_ROLE_MESSAGE),
+      );
+    }
+    expect(ctx.repo.rows).toHaveLength(0);
+    expect(ctx.links).toHaveLength(0);
   });
 
   it('sin plan es 400; de otro paciente, 404; aceptado, rechazado o borrador, 409 en español; nada se crea', async () => {
@@ -900,7 +927,7 @@ describe('presupuesto a distancia (DX-415)', () => {
       signatureRequestId: row.id,
       signerName: 'Ana Pérez',
       contentHash: row.budgetContentHash,
-      acceptedById: 'reception-1',
+      acceptedById: 'dentist-1',
       ipAddress: '203.0.113.7',
       userAgent: 'Mobile',
       remoteChannel: 'EMAIL',

@@ -127,7 +127,8 @@ describe('Presupuesto a distancia (e2e, DX-415)', () => {
 
   async function send(planId: string): Promise<{ id: string; token: string }> {
     mailer.clear();
-    const res = await as(clinicA, reception)
+    // Lo envía quien decide el plan (ADMIN aquí; DENTIST también).
+    const res = await as(clinicA)
       .post(`/patients/${patientId}/signature-requests`, {
         type: 'BUDGET',
         channel: 'EMAIL',
@@ -313,7 +314,7 @@ describe('Presupuesto a distancia (e2e, DX-415)', () => {
   it('solo un plan «Presentado»: borrador y aceptado son 409 en español; nada se crea', async () => {
     const draft = await newPlan();
     const before = await raw.signatureRequest.count();
-    const res = await as(clinicA, reception)
+    const res = await as(clinicA)
       .post(`/patients/${patientId}/signature-requests`, {
         type: 'BUDGET',
         channel: 'EMAIL',
@@ -328,13 +329,30 @@ describe('Presupuesto a distancia (e2e, DX-415)', () => {
     await as(clinicA)
       .patch(`/treatment-plans/${accepted}`, { status: 'ACCEPTED' })
       .expect(200);
-    await as(clinicA, reception)
+    await as(clinicA)
       .post(`/patients/${patientId}/signature-requests`, {
         type: 'BUDGET',
         channel: 'EMAIL',
         treatmentPlanId: accepted,
       })
       .expect(409);
+    expect(await raw.signatureRequest.count()).toBe(before);
+  });
+
+  it('recepción no envía un presupuesto a aceptar (no decide el plan): 403 en español; nada se crea', async () => {
+    const planId = await presentedPlan();
+    const before = await raw.signatureRequest.count();
+    const res = await as(clinicA, reception)
+      .post(`/patients/${patientId}/signature-requests`, {
+        type: 'BUDGET',
+        channel: 'EMAIL',
+        treatmentPlanId: planId,
+      })
+      .expect(403);
+    expect(res.body).toMatchObject({
+      message:
+        'Solo el odontólogo o la administración envían un presupuesto a aceptar.',
+    });
     expect(await raw.signatureRequest.count()).toBe(before);
   });
 

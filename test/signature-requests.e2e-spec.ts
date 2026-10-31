@@ -596,7 +596,8 @@ describe('Firma a distancia de consentimientos (e2e, DX-243)', () => {
 
   it('BUDGET sin plan: 400 en español; sin profesional: 400; nada se crea', async () => {
     const before = await raw.signatureRequest.count();
-    const budget = await as(clinicA, reception)
+    // Recepción no envía presupuestos (403, remote-budget.e2e-spec): ADMIN.
+    const budget = await as(clinicA)
       .post(`/patients/${patientId}/signature-requests`, {
         type: 'BUDGET',
         channel: 'EMAIL',

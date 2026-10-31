@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Inject,
   Injectable,
   Logger,
@@ -68,6 +69,8 @@ import type { SignatureRequestEmailVars } from '../../../notifications/email/dom
 
 export const SIGNATURE_BUDGET_PLAN_REQUIRED_MESSAGE =
   'Elige el presupuesto que quieres enviar a aceptar.';
+export const SIGNATURE_BUDGET_ROLE_MESSAGE =
+  'Solo el odontólogo o la administración envían un presupuesto a aceptar.';
 export const SIGNATURE_BUDGET_EMPTY_MESSAGE =
   'El presupuesto no tiene ítems: agrega al menos un procedimiento antes de enviarlo.';
 /** 409: solo un presupuesto «Presentado» (y sin aceptar) se envía a aceptar. */
@@ -102,6 +105,13 @@ export interface SignatureActor {
   userId: string;
   /** Rol clínico: puede ser el profesional que firma (si no elige otro). */
   clinical: boolean;
+  /**
+   * DX-415: decide el plan (TREATMENT_PLAN_DECISION_ROLES: odontólogo y
+   * ADMIN). Solo él envía un presupuesto a aceptar: al firmarlo el paciente,
+   * el plan pasa a ACCEPTED a nombre de quien lo envió, y la asistente y
+   * recepción no aceptan planes (DX-040).
+   */
+  decidesPlans: boolean;
 }
 
 /** Fila de la ficha con su estado efectivo (caducar depende de la hora). */
@@ -431,6 +441,9 @@ export class CreateSignatureRequestUseCase {
     actor: SignatureActor,
     link: { protocol: string; host: string | null },
   ): Promise<CreatedSignatureRequest> {
+    if (!actor.decidesPlans) {
+      throw new ForbiddenException(SIGNATURE_BUDGET_ROLE_MESSAGE);
+    }
     if (!input.treatmentPlanId) {
       throw new BadRequestException(SIGNATURE_BUDGET_PLAN_REQUIRED_MESSAGE);
     }
