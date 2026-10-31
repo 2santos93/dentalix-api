@@ -125,11 +125,11 @@ describe('regionalFormat', () => {
     expect(fmt.date(AT_1505_UTC, 'UTC')).toBe('27/10/2026');
   });
 
-  it('money: JPY integer without decimals, JPY with cents 2, a 2-decimal previousSet currency with 2', () => {
+  it('money: JPY integer without decimals, JPY with cents 2, COP (rounds to 0, CLDR formats with 2) with 2', () => {
     const fmt = regionalFormat({ locale: 'en-US', hourCycle: 'h12' });
     expect(fmt.money(1234, 'JPY')).toBe('¥1,234');
     expect(fmt.money(1234.5, 'JPY')).toBe('¥1,234.50');
-    // COP está en previousSet (redondeo) pero ISO le da 2 decimales: se pinta con 2.
+    // COP redondea a 0 (currencies.rounding_digits) pero su formato CLDR 47 tiene 2: se pinta con 2.
     expect(fmt.money(1234, 'COP')).toBe('COP\u00a01,234.00');
   });
 

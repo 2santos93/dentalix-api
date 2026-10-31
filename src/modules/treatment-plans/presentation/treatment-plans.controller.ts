@@ -5,6 +5,7 @@ import {
   ForbiddenException,
   Get,
   HttpCode,
+  Inject,
   Param,
   Patch,
   Post,
@@ -13,6 +14,11 @@ import {
   UseInterceptors,
   ParseUUIDPipe,
 } from '@nestjs/common';
+import {
+  CURRENCY_DIGITS_CATALOG,
+  type CurrencyDigits,
+  type CurrencyDigitsCatalog,
+} from '../../../shared/money/currency-digits';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
@@ -137,6 +143,9 @@ export class TreatmentPlansController {
     private readonly createPlanAlternative: CreatePlanAlternativeUseCase,
     private readonly applyBulkDiscount: ApplyBulkDiscountUseCase,
     private readonly tenantContext: TenantContextService,
+    // DX-340: decimales de la moneda del plan, para la web.
+    @Inject(CURRENCY_DIGITS_CATALOG)
+    private readonly currencyDigits: CurrencyDigitsCatalog,
   ) {}
 
   @Audit({
@@ -190,8 +199,12 @@ export class TreatmentPlansController {
   })
   @Get('treatment-plans/:id')
   @ApiOkResponse({ type: TreatmentPlanDto })
-  get(@Param('id', ParseUUIDPipe) id: string): Promise<TreatmentPlanDetail> {
-    return this.getTreatmentPlan.execute(id);
+  async get(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<TreatmentPlanDetail & { currencyDigits: CurrencyDigits }> {
+    const plan = await this.getTreatmentPlan.execute(id);
+    const digits = await this.currencyDigits.table([plan.currency]);
+    return { ...plan, currencyDigits: digits.of(plan.currency) };
   }
 
   @Audit({
