@@ -96,10 +96,12 @@ class XmlBudget {
   private steps = 0;
   private sinceRest = 0;
 
+  constructor(private readonly maxSteps: number) {}
+
   step(): void {
     this.steps += 1;
     this.sinceRest += 1;
-    if (this.steps > MAX_XML_STEPS) {
+    if (this.steps > this.maxSteps) {
       throw new ImportFileError(TOO_COMPLEX_MESSAGE);
     }
   }
@@ -552,6 +554,15 @@ async function firstSheetPath(
 }
 
 /**
+ * Solo para tests (DX-209): un presupuesto de pasos MENOR que
+ * `MAX_XML_STEPS`, para probar el mecanismo del tope global sin dar 4 M
+ * pasos. Producción llama sin opciones; un valor mayor se ignora.
+ */
+export interface ReadXlsxOptions {
+  maxXmlSteps?: number;
+}
+
+/**
  * Lee la primera hoja del libro: descomprime (asíncrono, con tope) y
  * devuelve un generador ASÍNCRONO de registros con su número de fila (cede
  * el hilo cada `YIELD_STEPS` pasos del escáner, también dentro de una
@@ -561,12 +572,16 @@ async function firstSheetPath(
  */
 export async function readXlsx(
   bytes: Buffer,
+  options: ReadXlsxOptions = {},
 ): Promise<AsyncIterable<RawRecord>> {
   const entries = readEntries(bytes);
   if (entries.has('EncryptionInfo'))
     throw new ImportFileError(ENCRYPTED_MESSAGE);
   const inflater = new Inflater(bytes, entries);
-  const budget = new XmlBudget();
+  // Solo se puede BAJAR: ningún llamador sube el tope de producción.
+  const budget = new XmlBudget(
+    Math.min(options.maxXmlSteps ?? MAX_XML_STEPS, MAX_XML_STEPS),
+  );
   const workbook = await inflater.part('xl/workbook.xml');
   if (!workbook) throw new ImportFileError(NOT_XLSX_MESSAGE);
   const date1904 =

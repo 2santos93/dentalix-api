@@ -25,6 +25,7 @@ import {
   MAX_CELLS_PER_ROW,
   MAX_XLSX_TOTAL_BYTES,
   MAX_XML_STEPS,
+  type ReadXlsxOptions,
   decodeXmlText,
   excelSerialToDate,
   readXlsx,
@@ -74,9 +75,12 @@ function rawBook(
 const inline = (ref: string, text: string) =>
   `<c r="${ref}" t="inlineStr"><is><t>${text}</t></is></c>`;
 
-async function collect(bytes: Buffer): Promise<RawRecord[]> {
+async function collect(
+  bytes: Buffer,
+  options?: ReadXlsxOptions,
+): Promise<RawRecord[]> {
   const out: RawRecord[] = [];
-  for await (const record of await readXlsx(bytes)) out.push(record);
+  for await (const record of await readXlsx(bytes, options)) out.push(record);
   return out;
 }
 
@@ -603,23 +607,8 @@ async function watchTurns<T>(work: () => Promise<T>): Promise<{
  */
 const MAX_SEARCHES_PER_TURN = 64 * 1024;
 
-/*
- * DX-209: presupuesto de TIEMPO de los casos de abajo. Lo que prueban no
- * depende del reloj: cuentan búsquedas por vuelta del event loop
- * (`watchTurns`) y el error del tope, igual en una máquina libre que cargada.
- * Pero el trabajo es real e incompresible: para pasar el presupuesto global
- * el lector tiene que dar `MAX_XML_STEPS` (4 M) pasos. En local, libre, el
- * más caro tarda ~4 s; con la suite entera en paralelo y la CPU compartida
- * (otras suites, `stress-ng`) pasó de 60 s (run 41136232999 de la CI, y en
- * local 158 s de suite con él en rojo). Un timeout tampoco protege de nada
- * aquí: un bucle que no cede el hilo no deja ni que salte (el temporizador
- * no corre), y los topes garantizan que la lectura termina. Por eso un
- * margen holgado y explícito en vez del de 60 s.
- */
-const XLSX_CAPS_TIMEOUT_MS = 300_000;
-
 describe('XLSX: topes de estructura y event loop (revisión 2026-10-23, B1)', () => {
-  jest.setTimeout(XLSX_CAPS_TIMEOUT_MS);
+  jest.setTimeout(60_000);
 
   const HEAD =
     `<row r="1">${inline('A1', 'nombres')}${inline('B1', 'apellidos')}</row>` +
@@ -690,17 +679,34 @@ describe('XLSX: topes de estructura y event loop (revisión 2026-10-23, B1)', ()
   });
 
   it('muchas filas anchas que respetan el tope por fila: presupuesto global, sin bloquear', async () => {
-    // DX-209: las MÍNIMAS filas llenas hasta el tope por fila que pasan el
-    // presupuesto global (cada fila es un paso más sus celdas): 245 × 16.384
-    // en vez de 400 × 16.000. Cada fila sola es válida; solo la suma no.
-    const rows = Math.floor(MAX_XML_STEPS / (MAX_CELLS_PER_ROW + 1)) + 1;
-    expect(rows * (MAX_CELLS_PER_ROW + 1)).toBeGreaterThan(MAX_XML_STEPS);
-    expect((rows - 1) * (MAX_CELLS_PER_ROW + 1)).toBeLessThan(MAX_XML_STEPS);
+    // DX-209: el mecanismo del presupuesto global con un presupuesto MENOR
+    // (8 filas llenas): con el de producción el lector tenía que dar 4 M
+    // pasos (celda a celda por un generador asíncrono) y en una CI cargada
+    // pasaba de 60 s. Que el tope de producción salta con su valor lo prueba
+    // el caso de <cx/> de abajo, y que no corta un libro real, el de 10.000
+    // pacientes.
+    const perRow = MAX_CELLS_PER_ROW + 1; // la fila es un paso más sus celdas
+    const maxXmlSteps = 8 * perRow;
+    expect(maxXmlSteps).toBeLessThan(MAX_XML_STEPS);
+    const rows = Math.floor(maxXmlSteps / perRow) + 1;
     const row = `<row>${'<c/>'.repeat(MAX_CELLS_PER_ROW)}</row>`;
-    await expectRejectedYielding(
-      rawBook(sheetWith(row.repeat(rows))),
-      /demasiado complej/,
+
+    // Cada fila llena hasta el tope por fila es válida: dos menos que el
+    // límite (holgura para la cabecera y el libro) se leen enteras…
+    const fits = await collect(rawBook(sheetWith(row.repeat(rows - 2))), {
+      maxXmlSteps,
+    });
+    expect(fits).toHaveLength(2 + rows - 2);
+
+    // …y solo la suma pasa del presupuesto: 400, cediendo el hilo.
+    const book = rawBook(sheetWith(row.repeat(rows)));
+    expect(book.length).toBeLessThan(200 * 1024);
+    const { outcome, maxPerTurn, total } = await watchTurns(() =>
+      collect(book, { maxXmlSteps }),
     );
+    expect(outcome).toBeInstanceOf(ImportFileError);
+    expect((outcome as Error).message).toMatch(/demasiado complej/);
+    expectYieldsTheThread({ maxPerTurn, total });
   });
 
   it('etiquetas que se parecen (<cx/>) también cuentan y ceden el hilo', async () => {
