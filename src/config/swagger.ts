@@ -9,3 +9,13 @@ export function setupSwagger(app: INestApplication): void {
     .build();
   SwaggerModule.setup('docs', app, SwaggerModule.createDocument(app, config));
 }
+
+/**
+ * SEC-019 (DX-083): `/docs` y `/docs-json` describen todas las rutas; en
+ * producción solo se publican con `SWAGGER_ENABLED="true"` explícito.
+ */
+export function swaggerEnabled(
+  get: (key: string) => string | undefined,
+): boolean {
+  return get('NODE_ENV') !== 'production' || get('SWAGGER_ENABLED') === 'true';
+}

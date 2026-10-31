@@ -455,6 +455,18 @@ jobs:
         run: npx prisma migrate deploy
       - run: npx prisma db seed
       - run: npm run seed:demo
+      # DX-083: con la base sembrada, dentalix_app (DATABASE_URL) no ve ningún
+      # paciente sin `app.current_tenant`, aunque los hay (el admin del
+      # clúster, superusuario, sí los ve).
+      - name: dentalix_app no se salta la RLS sin app.current_tenant
+        env:
+          PGPASSWORD: postgres
+        run: |
+          total="$(psql -h localhost -U postgres -d dentalix_nosu -tAc 'SELECT count(*) FROM patients')"
+          seen="$(psql "${DATABASE_URL%%\?*}" -tAc 'SELECT count(*) FROM patients')"
+          echo "pacientes: $total en la base; dentalix_app sin clínica ve $seen"
+          test "$total" -gt 0
+          test "$seen" = 0
       # DX-134: la comprobación del runbook tras desplegar (README), como el owner.
       - name: Comprobar FORCE tras migrar (db:check-force)
         run: npm run db:check-force
@@ -469,3 +481,44 @@ jobs:
       # owners en el mismo clúster (DX-134) y membresías en otras clínicas
       # vistas por la app (DX-143).
       - run: npm run test:owner-nosu
+
+  # DX-083: la imagen de producción (Dockerfile) se construye en cada PR, SIN
+  # publicarla, y pasa la prueba de humo contra el Postgres del job (clúster
+  # nuevo): owner distinto de `dentalix`, create-app-role.sql, migrate deploy,
+  # seed y audit:purge desde la imagen (sin devDependencies), la API con
+  # NODE_ENV=production responde /api/v1/health y sale con 0 tras SIGTERM.
+  docker-image:
+    name: Imagen Docker (build y humo)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: docker build (sin publicar)
+        run: docker build -t dentalix-api:ci .
+      - name: Sin .env, sin devDependencies y sin root en la imagen
+        run: |
+          docker run --rm dentalix-api:ci sh -c '
+            test "$(id -u)" != 0 &&
+            ! ls -a /app | grep -q "^\.env" &&
+            test ! -e node_modules/ts-node &&
+            test ! -e node_modules/country-state-city &&
+            test ! -e node_modules/@nestjs/cli &&
+            test -f dist/main.js && test -f dist/scripts/prisma/seed.js'
+      - name: Prueba de humo de la imagen
+        env:
+          PG_ADMIN_URL: postgresql://postgres:postgres@localhost:5432/postgres
+        run: .github/scripts/docker-smoke-api.sh dentalix-api:ci

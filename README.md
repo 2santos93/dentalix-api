@@ -5325,18 +5325,27 @@ y `docker-compose.yml` (`minio/minio` ya no se puede descargar de Docker Hub);
 si la imagen no se descarga, el paso queda en rojo con un error que lo dice y
 el resto de la suite sigue corriendo.
 
-## Deployment
+## Imagen de producción y apagado ordenado (DX-083)
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+Runbook completo (orden backup → `migrate deploy` → API gradual → web →
+`/health/ready`, y valores de timeouts y pool): `dentalix-docs/docs/operacion/despliegue.md`.
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
-
-```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
-```
-
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+- `docker build -t dentalix-api .` — multi-etapa: build con devDependencies;
+  runtime con `npm ci --omit=dev`, sin `.env` (`.dockerignore`), usuario
+  `node` y `CMD node dist/main`. La CI la construye en cada PR (job
+  «Imagen Docker») y le pasa `.github/scripts/docker-smoke-api.sh`.
+- En la imagen: `npx prisma migrate deploy` (job con `DIRECT_URL`),
+  `npm run seed:prod` y `npm run audit:purge:prod`. Son el seed y la purga
+  compilados por `npm run build:scripts` a `dist/scripts` (las ciudades de
+  `country-state-city`, devDependency, van a `cities.json`). En desarrollo
+  siguen `npx prisma db seed` y `npm run audit:purge` con ts-node.
+- SIGTERM/SIGINT (`src/config/graceful-shutdown.ts`): `/health/ready` da 503
+  al momento, espera `SHUTDOWN_DRAIN_MS` atendiendo, cierra el servidor HTTP
+  (las peticiones y transacciones en vuelo terminan) y después `app.close()`
+  (email, worker, `$disconnect`), con el tope `SHUTDOWN_TIMEOUT_MS`. El
+  worker (`APP_ROLE=worker`) sigue con `enableShutdownHooks`.
+- Swagger (`/docs`) no se publica con `NODE_ENV=production` salvo
+  `SWAGGER_ENABLED="true"` (SEC-019).
 
 ## Resources
 

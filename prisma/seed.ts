@@ -1,6 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client';
-import { Country, State, City } from 'country-state-city';
 import { seedIcd10Codes } from '../src/modules/reference/infrastructure/seed-icd10-codes';
+import { loadCitySeedRows } from './reference/cities';
 import { ISO3166_COUNTRIES } from './reference/iso3166';
 import { ISO4217_CURRENCIES } from './reference/iso4217';
 
@@ -54,26 +54,15 @@ async function seedCities(): Promise<void> {
     console.log(`Cities already seeded (${existing}); skipping`);
     return;
   }
-  const countries = Country.getAllCountries();
+  // En la imagen de runtime, del JSON que deja build:scripts (DX-083); en
+  // desarrollo, de country-state-city. Agrupadas por país, como siempre.
+  const data = loadCitySeedRows();
   let total = 0;
-  for (const country of countries) {
-    // Mapa stateCode -> nombre para poblar `region` (informativo).
-    const stateName = new Map(
-      State.getStatesOfCountry(country.isoCode).map((s) => [s.isoCode, s.name]),
-    );
-    const cities = City.getCitiesOfCountry(country.isoCode) ?? [];
-    if (cities.length === 0) continue;
-    const data = cities.map((city) => ({
-      countryCode: country.isoCode,
-      name: city.name,
-      region: city.stateCode ? (stateName.get(city.stateCode) ?? null) : null,
-    }));
-    // Lotes para no exceder límites de parámetros.
-    for (let i = 0; i < data.length; i += 5000) {
-      const batch = data.slice(i, i + 5000);
-      await prisma.city.createMany({ data: batch });
-      total += batch.length;
-    }
+  // Lotes para no exceder límites de parámetros.
+  for (let i = 0; i < data.length; i += 5000) {
+    const batch = data.slice(i, i + 5000);
+    await prisma.city.createMany({ data: batch });
+    total += batch.length;
   }
   console.log(`Seeded ${total} cities`);
 }
