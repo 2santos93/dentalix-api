@@ -31,7 +31,7 @@
 --     la cita. Con "chairId" NULL la FK no mira nada (MATCH SIMPLE). Se crea
 --     NOT VALID (solo catálogo: no recorre `appointments` con el ACCESS
 --     EXCLUSIVE de esta migración) y se valida en
---     20261111120150_dx211_appointments_chair_fk_validate, que solo toma
+--     20261111170150_dx211_appointments_chair_fk_validate, que solo toma
 --     SHARE UPDATE EXCLUSIVE. Las filas nuevas ya se comprueban desde aquí.
 --   * EXCLUDE appointments_no_overlap_per_chair: dos citas vivas y no
 --     canceladas no ocupan el mismo sillón a la vez (rango medio abierto
@@ -53,7 +53,7 @@
 -- mismo orden que el patrón aceptado en DX-036/DX-470 para estas EXCLUDE.
 -- lock_timeout evita quedar encolado detrás de una transacción larga.
 -- El índice de la agenda por sillón va aparte, CONCURRENTLY
--- (20261111120200_dx211_appointments_chair_idx).
+-- (20261111170200_dx211_appointments_chair_idx).
 --
 -- Compatible hacia atrás: tabla nueva y vacía y una columna NULL que el código
 -- anterior no lee ni escribe (sus INSERT la dejan NULL).
@@ -136,7 +136,7 @@ GRANT SELECT, INSERT, UPDATE ON "chairs" TO dentalix_app;
 ALTER TABLE "appointments" ADD COLUMN "chairId" UUID;
 
 -- FK compuesta con la SEDE de la cita, NOT VALID: solo catálogo. La valida
--- 20261111120150_dx211_appointments_chair_fk_validate.
+-- 20261111170150_dx211_appointments_chair_fk_validate.
 ALTER TABLE "appointments"
   ADD CONSTRAINT "appointments_chair_fkey"
     FOREIGN KEY ("tenantId", "locationId", "chairId")

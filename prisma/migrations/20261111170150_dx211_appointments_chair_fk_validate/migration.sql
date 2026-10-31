@@ -1,5 +1,5 @@
 -- DX-211 (revisión M1): valida la FK appointments_chair_fkey que
--- 20261111120100_dx211_chairs añadió NOT VALID.
+-- 20261111170100_dx211_chairs añadió NOT VALID.
 --
 -- VALIDATE CONSTRAINT solo toma SHARE UPDATE EXCLUSIVE sobre `appointments`
 -- (no bloquea lecturas ni escrituras) y recorre la tabla una vez; todas las
