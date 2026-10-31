@@ -28,7 +28,7 @@ const trimmed = ({ value }: { value: unknown }) =>
 export class ProductionByProcedureQueryDto {
   @ApiProperty({
     example: '2026-10-01',
-    description: `Primer día del período (AAAA-MM-DD, en la zona de la sede donde se realizó). Como mucho 24 meses (731 días); las dos fechas entre ${PERIOD_DAY_MIN} y ${PERIOD_DAY_MAX} (400 si no).`,
+    description: `Primer día del período (AAAA-MM-DD, en la zona de la sede donde se realizó). Como mucho 24 meses por calendario («to» anterior a «from» + 24 meses); las dos fechas entre ${PERIOD_DAY_MIN} y ${PERIOD_DAY_MAX} (400 si no).`,
   })
   @Matches(CIVIL_DATE, { message: 'from debe ser una fecha AAAA-MM-DD.' })
   from!: string;
@@ -40,7 +40,7 @@ export class ProductionByProcedureQueryDto {
   @ApiPropertyOptional({
     format: 'uuid',
     description:
-      'Solo lo realizado en esta sede (400 si no es de la clínica; 403 si no es de las del usuario). Sin él, todas las sedes que ve. La cabecera X-Location-Id no acota.',
+      'Solo lo realizado en esta sede (403 si no es de las del usuario o no es de la clínica: la misma respuesta, sin decir qué sedes existen). Sin él, todas las sedes que ve. La cabecera X-Location-Id no acota.',
   })
   @IsOptional()
   @IsUUID('all', { message: 'locationId debe ser un UUID.' })
@@ -284,11 +284,16 @@ export class ProductionItemDto {
   @ApiProperty({ type: String, format: 'date-time' })
   completedAt!: Date;
 
-  @ApiProperty({ format: 'uuid' })
-  patientId!: string;
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description: 'null = paciente eliminado (no se nombra ni se enlaza)',
+  })
+  patientId!: string | null;
 
-  @ApiProperty()
-  patientName!: string;
+  @ApiProperty({ type: String, nullable: true })
+  patientName!: string | null;
 
   @ApiProperty({ type: String, format: 'uuid', nullable: true })
   professionalId!: string | null;
@@ -301,6 +306,12 @@ export class ProductionItemDto {
 
   @ApiProperty()
   locationName!: string;
+
+  @ApiProperty({
+    example: 'America/Bogota',
+    description: 'Zona de la sede donde se realizó: la fecha se pinta con ella',
+  })
+  timeZone!: string;
 
   @ApiProperty({ example: '16' })
   toothNumber!: string;

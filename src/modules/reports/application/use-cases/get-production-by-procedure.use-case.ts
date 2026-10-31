@@ -14,7 +14,10 @@ import {
   checkPeriodDays,
   PERIOD_DAY_OUT_OF_RANGE_MESSAGE,
 } from '../../../../shared/time/civil-day';
-import type { CivilPeriod } from '../../domain/comparison-period';
+import {
+  shiftCivilYears,
+  type CivilPeriod,
+} from '../../domain/comparison-period';
 import {
   buildProcedureProduction,
   type ProcedureProduction,
@@ -28,8 +31,8 @@ import {
   type ProductionScope,
 } from '../../domain/ports/production-by-procedure-repository.port';
 
-/** 24 meses: dos años, con un 29 de febrero. */
-export const PRODUCTION_MAX_DAYS = 731;
+/** Tope del período por calendario: «hasta» anterior a «desde» + 24 meses. */
+export const PRODUCTION_MAX_MONTHS = 24;
 
 export const PRODUCTION_INVALID_PERIOD_MESSAGE =
   'El período no es válido: usa fechas AAAA-MM-DD con «desde» anterior o igual a «hasta».';
@@ -37,8 +40,6 @@ export const PRODUCTION_PERIOD_TOO_LONG_MESSAGE =
   'El período admite como mucho 24 meses.';
 export const PRODUCTION_OWN_ONLY_MESSAGE =
   'Solo puedes ver tu propia producción.';
-export const PRODUCTION_UNKNOWN_LOCATION_MESSAGE =
-  'La sede no es de esta clínica.';
 
 export interface ProductionActor {
   userId: string;
@@ -142,7 +143,8 @@ export class GetProductionByProcedureUseCase {
           : PRODUCTION_INVALID_PERIOD_MESSAGE,
       );
     }
-    if (period.days > PRODUCTION_MAX_DAYS) {
+    // 24 meses por calendario (el 29/02 + 24 meses cae en el 28/02).
+    if (period.to >= shiftCivilYears(period.from, PRODUCTION_MAX_MONTHS / 12)) {
       throw new BadRequestException(PRODUCTION_PERIOD_TOO_LONG_MESSAGE);
     }
     return { from: period.from, to: period.to };
@@ -168,13 +170,14 @@ export class GetProductionByProcedureUseCase {
   private async resolve(input: ProductionFiltersInput): Promise<ResolvedScope> {
     const period = this.period(input.from, input.to);
     const { professionalId, kind } = this.professionalOf(input);
-    if (input.locationId !== undefined) {
-      if (!(await this.repo.locationInClinic(input.locationId))) {
-        throw new BadRequestException(PRODUCTION_UNKNOWN_LOCATION_MESSAGE);
-      }
-      if (!isLocationAllowed(input.allowedLocationIds, input.locationId)) {
-        throw locationNotAllowed();
-      }
+    // Sede ajena a la clínica o no permitida: el MISMO 403, para no decir
+    // qué sedes existen.
+    if (
+      input.locationId !== undefined &&
+      (!isLocationAllowed(input.allowedLocationIds, input.locationId) ||
+        !(await this.repo.locationInClinic(input.locationId)))
+    ) {
+      throw locationNotAllowed();
     }
     const locations = await this.repo.listLocations(input.allowedLocationIds);
     const locationIds = locations
@@ -206,7 +209,9 @@ export class GetProductionByProcedureUseCase {
         ? Promise.resolve([])
         : this.repo.aggregate(resolved.period, scope),
       this.repo.unattributed(scope, resolved.includeWithoutLocation),
-      this.repo.listProfessionals(),
+      // Quien realizó algo en las sedes que ve (ex-miembros incluidos), no
+      // todo el equipo: a un miembro restringido no se le enseña el resto.
+      this.repo.listProfessionals(resolved.locations.map((l) => l.id)),
       this.repo.listCategories(),
     ]);
     const production = buildProcedureProduction(sums);

@@ -3,6 +3,7 @@ import {
   type AmountTotals,
 } from '../domain/production-by-procedure';
 import type { ProductionByProcedure } from './use-cases/get-production-by-procedure.use-case';
+import { ISO_ZERO_DECIMAL_CURRENCIES } from '../../../shared/money/currency-decimals';
 
 /*
  * CSV de «Producción por procedimiento» (DX-423): las MISMAS filas y en el
@@ -43,17 +44,30 @@ function num(value: number | null, decimals: number): string {
   return value === null ? '' : value.toFixed(decimals);
 }
 
+/**
+ * Un importe con los decimales que pinta la pantalla (`moneyWithCode` de la
+ * web): 0 en una moneda sin unidad menor (ISO 4217) si el importe es entero;
+ * si no, 2.
+ */
+function money(value: number | null, currency: string): string {
+  if (value === null) return '';
+  const zero =
+    ISO_ZERO_DECIMAL_CURRENCIES.has(currency.toUpperCase()) &&
+    Number.isInteger(value);
+  return value.toFixed(zero ? 0 : 2);
+}
+
 const categoryName = (category: string | null) =>
   category ?? UNCATEGORIZED_LABEL;
 
 function amounts(t: AmountTotals, average: boolean): string[] {
   return [
-    t.currency,
+    text(t.currency),
     String(t.count),
-    num(t.gross, 2),
-    num(t.discounts, 2),
-    num(t.net, 2),
-    average ? num(t.averageNet, 2) : '',
+    money(t.gross, t.currency),
+    money(t.discounts, t.currency),
+    money(t.net, t.currency),
+    average ? money(t.averageNet, t.currency) : '',
   ];
 }
 
@@ -91,7 +105,7 @@ export function toProductionByProcedureCsv(
         text(row.code),
         text(row.label),
         ...amounts(row, true),
-        num(row.catalogAverage, 2),
+        money(row.catalogAverage, row.currency),
         num(row.differencePercent, 1),
       ]);
     }

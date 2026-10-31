@@ -14,10 +14,8 @@ import type {
 import {
   GetProductionByProcedureUseCase,
   PRODUCTION_INVALID_PERIOD_MESSAGE,
-  PRODUCTION_MAX_DAYS,
   PRODUCTION_OWN_ONLY_MESSAGE,
   PRODUCTION_PERIOD_TOO_LONG_MESSAGE,
-  PRODUCTION_UNKNOWN_LOCATION_MESSAGE,
 } from './get-production-by-procedure.use-case';
 import { LOCATION_NOT_ALLOWED_MESSAGE } from '../../../../shared/tenancy/location-access';
 
@@ -42,6 +40,7 @@ class FakeRepo implements ProductionByProcedureRepository {
     aggregate?: [CivilPeriod, ProductionScope];
     unattributed?: [ProductionScope, boolean];
     listItems?: [CivilPeriod, ProductionScope, { skip: number; take: number }];
+    listProfessionals?: string[];
   } = {};
 
   listLocations(allowed: AllowedLocations) {
@@ -52,7 +51,8 @@ class FakeRepo implements ProductionByProcedureRepository {
   locationInClinic(id: string) {
     return Promise.resolve(this.locations.some((l) => l.id === id));
   }
-  listProfessionals() {
+  listProfessionals(locationIds: readonly string[]) {
+    this.calls.listProfessionals = [...locationIds];
     return Promise.resolve(this.professionals);
   }
   listCategories() {
@@ -185,6 +185,15 @@ describe('GetProductionByProcedureUseCase (DX-423)', () => {
     });
   });
 
+  it('miembro restringido a A: los profesionales salen de lo realizado en A, no del equipo entero', async () => {
+    await useCase.execute({
+      ...OCTOBER,
+      actor: ADMIN,
+      allowedLocationIds: [A],
+    });
+    expect(repo.calls.listProfessionals).toEqual([A]);
+  });
+
   it('miembro restringido a A: solo A, y sin los «Sin atribuir» sin sede', async () => {
     await useCase.execute({
       ...OCTOBER,
@@ -195,7 +204,7 @@ describe('GetProductionByProcedureUseCase (DX-423)', () => {
     expect(repo.calls.unattributed).toEqual([{ locationIds: [A] }, false]);
   });
 
-  it('sede de otra clínica: 400; sede de la clínica no permitida: 403', async () => {
+  it('sede de otra clínica y sede no permitida: el mismo 403 (no dice qué sedes existen)', async () => {
     await expect(
       useCase.execute({
         ...OCTOBER,
@@ -203,9 +212,12 @@ describe('GetProductionByProcedureUseCase (DX-423)', () => {
         actor: ADMIN,
         allowedLocationIds: 'ALL',
       }),
-    ).rejects.toEqual(
-      new BadRequestException(PRODUCTION_UNKNOWN_LOCATION_MESSAGE),
-    );
+    ).rejects.toMatchObject({
+      status: 403,
+      response: expect.objectContaining({
+        message: LOCATION_NOT_ALLOWED_MESSAGE,
+      }) as unknown,
+    });
     await expect(
       useCase.execute({
         ...OCTOBER,
@@ -221,7 +233,7 @@ describe('GetProductionByProcedureUseCase (DX-423)', () => {
     });
   });
 
-  it(`período al revés: 400; de más de ${PRODUCTION_MAX_DAYS} días (24 meses): 400`, async () => {
+  it('período al revés: 400; de más de 24 meses por calendario: 400', async () => {
     await expect(
       useCase.execute({
         from: '2026-10-31',
@@ -236,6 +248,17 @@ describe('GetProductionByProcedureUseCase (DX-423)', () => {
       useCase.execute({
         from: '2024-10-31',
         to: '2026-11-01',
+        actor: ADMIN,
+        allowedLocationIds: 'ALL',
+      }),
+    ).rejects.toEqual(
+      new BadRequestException(PRODUCTION_PERIOD_TOO_LONG_MESSAGE),
+    );
+    // 24 meses y un día: 731 días, pero «hasta» ya no es anterior a «desde» + 24 meses.
+    await expect(
+      useCase.execute({
+        from: '2025-01-01',
+        to: '2027-01-01',
         actor: ADMIN,
         allowedLocationIds: 'ALL',
       }),
@@ -286,6 +309,7 @@ describe('GetProductionByProcedureUseCase (DX-423)', () => {
           professionalName: 'Dra. Ana',
           locationId: A,
           locationName: 'Sede A',
+          timeZone: 'America/Bogota',
           toothNumber: '16',
           currency: 'COP',
           price: 80,

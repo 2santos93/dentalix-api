@@ -87,15 +87,15 @@ describe('toProductionByProcedureCsv (DX-423)', () => {
       '"Importes","Por moneda, sin convertir"',
       '',
       PRODUCTION_CSV_COLUMNS.map((c) => `"${c}"`).join(','),
-      '"Procedimiento","Operatoria","D2391","Resina",COP,3,280.00,20.00,260.00,86.67,100.00,-13.3',
-      '"Procedimiento","Operatoria","D2391","Resina",USD,1,50.00,0.00,50.00,50.00,,',
-      '"Subtotal","Operatoria","","",COP,3,280.00,20.00,260.00,86.67,,',
-      '"Subtotal","Operatoria","","",USD,1,50.00,0.00,50.00,50.00,,',
-      `"Procedimiento","Sin categoría","'=HYPERLINK(""x"")","'+Blanqueamiento",COP,1,100.00,0.00,100.00,100.00,80.00,25.0`,
-      '"Subtotal","Sin categoría","","",COP,1,100.00,0.00,100.00,100.00,,',
-      '"Total","","","",COP,4,380.00,20.00,360.00,90.00,,',
-      '"Total","","","",USD,1,50.00,0.00,50.00,50.00,,',
-      '"Sin atribuir","","","",COP,2,150.00,10.00,140.00,,,',
+      '"Procedimiento","Operatoria","D2391","Resina","COP",3,280.00,20.00,260.00,86.67,100.00,-13.3',
+      '"Procedimiento","Operatoria","D2391","Resina","USD",1,50.00,0.00,50.00,50.00,,',
+      '"Subtotal","Operatoria","","","COP",3,280.00,20.00,260.00,86.67,,',
+      '"Subtotal","Operatoria","","","USD",1,50.00,0.00,50.00,50.00,,',
+      `"Procedimiento","Sin categoría","'=HYPERLINK(""x"")","'+Blanqueamiento","COP",1,100.00,0.00,100.00,100.00,80.00,25.0`,
+      '"Subtotal","Sin categoría","","","COP",1,100.00,0.00,100.00,100.00,,',
+      '"Total","","","","COP",4,380.00,20.00,360.00,90.00,,',
+      '"Total","","","","USD",1,50.00,0.00,50.00,50.00,,',
+      '"Sin atribuir","","","","COP",2,150.00,10.00,140.00,,,',
     ]);
   });
 
@@ -117,6 +117,47 @@ describe('toProductionByProcedureCsv (DX-423)', () => {
       '"Profesional","Solo tu producción (Dra. Ana)"',
       '"Categoría","Operatoria"',
     ]);
+  });
+
+  it('decimales como la pantalla: una moneda sin unidad menor (CLP) va sin decimales si el importe es entero', () => {
+    const clp = buildProcedureProduction([
+      {
+        catalogItemId: 'c9',
+        code: 'P1',
+        label: 'Profilaxis',
+        category: 'Prevención',
+        currency: 'CLP',
+        count: 3,
+        gross: 90000,
+        discounts: 0,
+        catalogCount: 3,
+        catalogSum: 90000,
+        catalogPricedNet: 90000,
+      },
+      {
+        catalogItemId: 'c8',
+        code: 'P2',
+        label: 'Sellante',
+        category: 'Prevención',
+        currency: 'CLP',
+        count: 3,
+        gross: 100,
+        discounts: 0,
+        catalogCount: 0,
+        catalogSum: 0,
+        catalogPricedNet: 0,
+      },
+    ]);
+    const out = lines(
+      toProductionByProcedureCsv(report({ ...clp, unattributed: [] })),
+    );
+    expect(out).toContain(
+      '"Procedimiento","Prevención","P1","Profilaxis","CLP",3,90000,0,90000,30000,30000,0.0',
+    );
+    // 100 ÷ 3 = 33,33: con decimales, como la pantalla.
+    expect(out).toContain(
+      '"Procedimiento","Prevención","P2","Sellante","CLP",3,100,0,100,33.33,,',
+    );
   });
 
   it('sin actividad: cabecera y columnas, sin filas', () => {

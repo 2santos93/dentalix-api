@@ -1523,17 +1523,19 @@ Mismo módulo. `GET /api/v1/reports/production-by-procedure`, su `.csv` y
 Roles `PRODUCTION_REPORT_ROLES`: ADMIN ve todo el equipo; un DENTIST solo lo
 que realizó él (pedir `professionalId` de otro → 403 «Solo puedes ver tu
 propia producción.»); RECEPTION y ASSISTANT → 403. Filtros: `from`/`to`
-(días civiles, como mucho **24 meses** = 731 días, `checkPeriodDays`),
-`locationId` (400 si no es de la clínica, 403 si no es de las del usuario),
+(días civiles, `checkPeriodDays`; como mucho **24 meses por calendario**:
+`to` anterior a `from` + 24 meses), `locationId` (403 «No tienes acceso a esta
+sede.» tanto si no es de las del usuario como si no es de la clínica: no se
+dice qué sedes existen),
 `professionalId` y `category` (texto del catálogo).
 
 - **Qué cuenta**: ítems `DONE`, vivos, de planes vivos, con `completedAt` en
   el período (días civiles en la zona de la sede) y `performedLocationId` en
   las sedes que ve quien consulta (claim `loc`, DX-089): cuenta la sede donde
   se REALIZÓ, no la del paciente. Propuestos, aceptados sin hacer y los de
-  planes cancelados que no se hicieron no cuentan. Un DONE de un plan
-  cancelado después de hacerlo sí cuenta (se hizo), igual que en «Comparar
-  sedes»: los totales de los dos reportes coinciden (e2e).
+  planes cancelados que no se hicieron no cuentan. **Un procedimiento hecho
+  en un plan que después se canceló SÍ cuenta** (se hizo), igual que en
+  «Comparar sedes»: los totales de los dos reportes coinciden (e2e).
 - **Columnas** por procedimiento (categoría y código) y moneda del plan:
   cantidad, bruto (Σ precio), descuentos (Σ descuento), neto, honorario medio
   (neto ÷ cantidad), medio de catálogo (Σ `basePrice`, el precio de catálogo
@@ -1541,14 +1543,20 @@ propia producción.»); RECEPTION y ASSISTANT → 403. Filtros: `from`/`to`
   ((Σ neto − Σ catálogo) ÷ Σ catálogo, solo sobre los ítems con catálogo).
   Subtotal por categoría y total **por moneda**; nunca se mezclan monedas.
 - **«Sin atribuir»** (como DX-305): DONE sin `completedAt` o sin
-  `performedLocationId`, por moneda, sea cual sea el período (no tienen
-  fecha). Los que no tienen sede solo los ve quien ve todas las sedes sin
-  elegir una.
+  `performedLocationId`, por moneda. **No dependen del período**: sin fecha no
+  caen en ninguno, así que salen igual con cualquier `from`/`to` (sí respetan
+  sede, profesional y categoría). Los que no tienen sede solo los ve quien ve
+  todas las sedes sin elegir una.
+- **Opciones de filtro**: profesionales = quien figura como autor de algún
+  realizado vivo en las sedes que ve quien consulta (ex-miembros incluidos;
+  un miembro restringido no ve el resto del equipo); categorías del catálogo,
+  recortadas (el filtro compara con `btrim`).
 - **CSV**: período y filtros en la cabecera, después las mismas filas,
   subtotales, totales y «Sin atribuir» que la pantalla. Sin nombres de
   paciente (tampoco el JSON del reporte); no se audita, como «Comparar sedes».
 - **Detalle** (`/items`, con `catalogItemId` y `currency` de la fila,
-  paginado): paciente, fecha, profesional, sede y diente de cada ítem.
+  paginado): paciente, fecha, profesional, sede (con su zona, para fechar el
+  ítem) y diente de cada ítem. Un paciente eliminado sale sin nombre ni id.
   Lleva nombres de paciente: auditado (VIEW de `TREATMENT_PLAN_ITEM`,
   `reason: PRODUCTION_REPORT`).
 - **Rendimiento**: 200.000 realizados en 24 meses como `dentalix_app` en

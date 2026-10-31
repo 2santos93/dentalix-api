@@ -36,12 +36,15 @@ export interface UnattributedSums {
 export interface ProductionItemRow {
   id: string;
   completedAt: Date;
-  patientId: string;
-  patientName: string;
+  /** null = paciente eliminado: no se nombra ni se enlaza. */
+  patientId: string | null;
+  patientName: string | null;
   professionalId: string | null;
   professionalName: string | null;
   locationId: string;
   locationName: string;
+  /** Zona de la sede donde se realizó: la fecha se pinta con ella. */
+  timeZone: string;
   toothNumber: string;
   currency: string;
   price: number;
@@ -57,8 +60,13 @@ export interface ProductionByProcedureRepository {
   listLocations(allowed: AllowedLocations): Promise<ProductionLocation[]>;
   /** ¿Es una sede viva de la clínica en contexto? */
   locationInClinic(locationId: string): Promise<boolean>;
-  /** Miembros vivos que atienden (DENTIST o ADMIN), por nombre. */
-  listProfessionals(): Promise<ProductionProfessional[]>;
+  /**
+   * Quien figura como autor de algún realizado vivo en esas sedes (también
+   * ex-miembros), por nombre.
+   */
+  listProfessionals(
+    locationIds: readonly string[],
+  ): Promise<ProductionProfessional[]>;
   /** Categorías de los procedimientos del catálogo de la clínica. */
   listCategories(): Promise<string[]>;
   /**

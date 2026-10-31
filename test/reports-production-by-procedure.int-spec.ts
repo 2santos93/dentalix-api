@@ -261,6 +261,161 @@ describe('Producción por procedimiento en la BD (DX-423, int)', () => {
     expect(page.items[0]).toMatchObject({
       patientName: 'Paciente dx423-a',
       currency: 'COP',
+      // La zona de la sede donde se realizó: la web fecha cada ítem con ella.
+      timeZone: 'America/Bogota',
     });
+  });
+
+  it('profesionales: solo quien realizó algo en esas sedes, ex-miembros incluidos', async () => {
+    const onlyMain = await context.run(a.tenantId, () =>
+      repo.listProfessionals([a.main]),
+    );
+    expect(onlyMain.map((p) => p.userId)).toEqual([a.dentistId]);
+    // Un ex-miembro (membresía retirada) con un realizado en la principal.
+    const user = await raw.user.create({
+      data: {
+        email: `ex-${a.tenantId}@example.com`,
+        passwordHash: 'x',
+        fullName: 'Aaa Ex Miembro',
+      },
+    });
+    const membership = await raw.clinicMembership.create({
+      data: {
+        tenantId: a.tenantId,
+        userId: user.id,
+        role: 'DENTIST',
+        deletedAt: new Date(),
+      },
+    });
+    await raw.treatmentPlanItem.create({
+      data: {
+        tenantId: a.tenantId,
+        planId: (
+          await raw.treatmentPlan.findFirstOrThrow({
+            where: { tenantId: a.tenantId },
+          })
+        ).id,
+        toothNumber: '11',
+        catalogItemId: a.catalogItemId,
+        price: 1,
+        status: 'DONE',
+        performedById: user.id,
+        performedByMembershipId: membership.id,
+        performedLocationId: a.main,
+        completedAt: new Date('2026-09-05T15:00:00Z'),
+      },
+    });
+    const withEx = await context.run(a.tenantId, () =>
+      repo.listProfessionals([a.main]),
+    );
+    expect(withEx.map((p) => p.fullName)).toEqual([
+      'Aaa Ex Miembro',
+      'Dra. Reportes',
+    ]);
+    // Nada de otra clínica, aunque se pidan sus sedes.
+    const crossed = await context.run(a.tenantId, () =>
+      repo.listProfessionals([b.main, b.other]),
+    );
+    expect(crossed).toEqual([]);
+  });
+
+  it('categorías recortadas: el filtro y la lista ignoran los blancos de los extremos', async () => {
+    const spaced = await raw.dentalCatalogItem.create({
+      data: {
+        tenantId: a.tenantId,
+        code: 'ENDO-SP',
+        kind: 'PROCEDURE',
+        labelEs: 'Endodoncia',
+        category: '  Endodoncia ',
+        color: '#123456',
+      },
+    });
+    const plan = await raw.treatmentPlan.findFirstOrThrow({
+      where: { tenantId: a.tenantId },
+    });
+    const dentist = await raw.clinicMembership.findFirstOrThrow({
+      where: { tenantId: a.tenantId, userId: a.dentistId },
+    });
+    await raw.treatmentPlanItem.create({
+      data: {
+        tenantId: a.tenantId,
+        planId: plan.id,
+        toothNumber: '36',
+        catalogItemId: spaced.id,
+        price: 300,
+        status: 'DONE',
+        performedById: a.dentistId,
+        performedByMembershipId: dentist.id,
+        performedLocationId: a.main,
+        completedAt: new Date('2026-10-06T15:00:00Z'),
+      },
+    });
+    const categories = await context.run(a.tenantId, () =>
+      repo.listCategories(),
+    );
+    expect(categories).toEqual(['Endodoncia', 'Operatoria']);
+    const sums = await context.run(a.tenantId, () =>
+      repo.aggregate(OCTOBER, {
+        locationIds: [a.main],
+        category: 'Endodoncia',
+      }),
+    );
+    expect(sums).toEqual([
+      expect.objectContaining({ category: 'Endodoncia', gross: 300 }),
+    ]);
+  });
+
+  it('paciente eliminado: el detalle no lo nombra (paciente null)', async () => {
+    const patient = await raw.patient.create({
+      data: {
+        tenantId: a.tenantId,
+        firstName: 'Borrado',
+        lastName: 'Eliminado',
+        deletedAt: new Date(),
+      },
+    });
+    const plan = await raw.treatmentPlan.create({
+      data: {
+        tenantId: a.tenantId,
+        patientId: patient.id,
+        currency: 'USD',
+        status: 'ACCEPTED',
+      },
+    });
+    const dentist = await raw.clinicMembership.findFirstOrThrow({
+      where: { tenantId: a.tenantId, userId: a.dentistId },
+    });
+    await raw.treatmentPlanItem.create({
+      data: {
+        tenantId: a.tenantId,
+        planId: plan.id,
+        toothNumber: '21',
+        catalogItemId: a.catalogItemId,
+        price: 40,
+        status: 'DONE',
+        performedById: a.dentistId,
+        performedByMembershipId: dentist.id,
+        performedLocationId: a.main,
+        completedAt: new Date('2026-10-07T15:00:00Z'),
+      },
+    });
+    const page = await context.run(a.tenantId, () =>
+      repo.listItems(
+        OCTOBER,
+        {
+          locationIds: [a.main],
+          catalogItemId: a.catalogItemId,
+          currency: 'USD',
+        },
+        { skip: 0, take: 10 },
+      ),
+    );
+    expect(page.total).toBe(1);
+    expect(page.items[0]).toMatchObject({
+      patientId: null,
+      patientName: null,
+      price: 40,
+    });
+    expect(JSON.stringify(page.items)).not.toContain('Borrado');
   });
 });

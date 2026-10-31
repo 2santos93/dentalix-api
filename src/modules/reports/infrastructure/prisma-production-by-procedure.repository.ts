@@ -44,12 +44,13 @@ interface UnattributedRow {
 interface ItemRow {
   id: string;
   completedAt: Date;
-  patientId: string;
-  patientName: string;
+  patientId: string | null;
+  patientName: string | null;
   professionalId: string | null;
   professionalName: string | null;
   locationId: string;
   locationName: string;
+  timeZone: string;
   toothNumber: string;
   currency: string;
   price: Prisma.Decimal;
@@ -73,7 +74,7 @@ function common(scope: ProductionScope): Prisma.Sql {
                  ? Prisma.sql`AND EXISTS (
                  SELECT 1 FROM "dental_catalog_items" c
                   WHERE c."tenantId" = i."tenantId" AND c."id" = i."catalogItemId"
-                    AND c."category" = ${scope.category})`
+                    AND btrim(c."category") = ${scope.category})`
                  : Prisma.empty
              }`;
 }
@@ -119,24 +120,36 @@ export class PrismaProductionByProcedureRepository implements ProductionByProced
     return found !== null;
   }
 
-  async listProfessionals(): Promise<ProductionProfessional[]> {
+  /**
+   * Quien figura en algún realizado vivo de esas sedes. Va por las membresías
+   * (también las retiradas: un ex-miembro sigue firmando su producción) con un
+   * EXISTS sobre el índice de quien lo realizó, que para en el primero.
+   */
+  async listProfessionals(
+    locationIds: readonly string[],
+  ): Promise<ProductionProfessional[]> {
     const tenantId = this.requireTenantId();
-    const rows = await this.prisma.runWithTenant((tx) =>
-      tx.clinicMembership.findMany({
-        where: {
-          tenantId,
-          deletedAt: null,
-          role: { in: ['DENTIST', 'ADMIN'] },
-          user: { deletedAt: null },
-        },
-        select: { userId: true, user: { select: { fullName: true } } },
-      }),
+    const ids = [...locationIds];
+    if (ids.length === 0) return [];
+    const rows = await this.prisma.runWithTenant(
+      (tx) =>
+        tx.$queryRaw<ProductionProfessional[]>`
+        SELECT DISTINCT m."userId", u."fullName"
+          FROM "clinic_memberships" m
+          JOIN "users" u ON u."id" = m."userId"
+         WHERE m."tenantId" = ${tenantId}::uuid
+           AND EXISTS (
+             SELECT 1 FROM "treatment_plan_items" i
+              WHERE i."tenantId" = m."tenantId"
+                AND i."performedByMembershipId" = m."id"
+                AND i."performedById" = m."userId"
+                AND i."status" = 'DONE'
+                AND i."deletedAt" IS NULL
+                AND i."performedLocationId" = ANY(${ids}::uuid[]))`,
     );
-    return rows
-      .map((r) => ({ userId: r.userId, fullName: r.user.fullName }))
-      .sort((a, b) =>
-        a.fullName.localeCompare(b.fullName, 'es', { sensitivity: 'base' }),
-      );
+    return rows.sort((a, b) =>
+      a.fullName.localeCompare(b.fullName, 'es', { sensitivity: 'base' }),
+    );
   }
 
   async listCategories(): Promise<string[]> {
@@ -153,10 +166,12 @@ export class PrismaProductionByProcedureRepository implements ProductionByProced
         select: { category: true },
       }),
     );
-    return rows
-      .map((r) => r.category)
-      .filter((c): c is string => c !== null && c.trim() !== '')
-      .sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
+    // Recortadas, como las agrupa el reporte (`btrim`) y como filtra.
+    return [
+      ...new Set(
+        rows.map((r) => r.category?.trim() ?? '').filter((c) => c !== ''),
+      ),
+    ].sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
   }
 
   /**
@@ -308,16 +323,19 @@ export class PrismaProductionByProcedureRepository implements ProductionByProced
       const [{ total }] = await tx.$queryRaw<{ total: bigint }[]>`
         SELECT count(*) AS "total" ${items} ${filter}`;
       const rows = await tx.$queryRaw<ItemRow[]>`
-        SELECT i."id", i."completedAt", i."patientId",
+        SELECT i."id", i."completedAt",
+               -- Un paciente eliminado no se nombra ni se enlaza.
+               pt."id" AS "patientId",
                btrim(pt."firstName" || ' ' || pt."lastName") AS "patientName",
                i."performedById" AS "professionalId",
                u."fullName" AS "professionalName",
                i."performedLocationId" AS "locationId",
-               l."name" AS "locationName",
+               l."name" AS "locationName", l."timeZone",
                i."toothNumber", p."currency", i."price", i."discount"
           ${items}
-          JOIN "patients" pt
+          LEFT JOIN "patients" pt
             ON pt."tenantId" = i."tenantId" AND pt."id" = i."patientId"
+           AND pt."deletedAt" IS NULL
           JOIN "locations" l
             ON l."tenantId" = i."tenantId" AND l."id" = i."performedLocationId"
           LEFT JOIN "users" u ON u."id" = i."performedById"

@@ -58,8 +58,7 @@ const SCOPE =
   'ADMIN ve todo el equipo; un DENTIST, solo lo suyo. Los realizados sin fecha o sin sede salen en `unattributed` («Sin atribuir», DX-305). ' +
   'Sin nombres de paciente.';
 
-const BAD_REQUEST =
-  'Período inválido o de más de 24 meses, o sede que no es de esta clínica';
+const BAD_REQUEST = 'Período inválido o de más de 24 meses';
 const FORBIDDEN = `${PRODUCTION_REPORT_FORBIDDEN_MESSAGE} / ${PRODUCTION_OWN_ONLY_MESSAGE} / sede fuera de las del usuario`;
 
 // «Producción por procedimiento» (DX-423). El agregado y el CSV no llevan

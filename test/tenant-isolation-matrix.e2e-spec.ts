@@ -2361,7 +2361,7 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
         },
       },
     ]),
-    // DX-423: producción por procedimiento. Una sede de A es 400; el
+    // DX-423: producción por procedimiento. Una sede de A es 403; el
     // profesional o el procedimiento de A dan un reporte vacío.
     ...(
       [
@@ -2395,8 +2395,9 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
           verb: 'get',
           path: () => `${route}?${range}${extra()}locationId=${a.locationId}`,
           queryIds: ['locationId'],
-          status: 400,
-          message: 'La sede no es de esta clínica.',
+          // El mismo 403 que una sede no permitida: no dice si existe.
+          status: 403,
+          message: 'No tienes acceso a esta sede.',
         },
         {
           name: `GET ${route} ?professionalId de A`,

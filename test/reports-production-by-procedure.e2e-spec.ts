@@ -562,6 +562,30 @@ describe('GET /reports/production-by-procedure (DX-423)', () => {
       { from: '2026-10-31', to: '2026-10-01' },
       a.adminToken,
     ).expect(400);
+    // Por calendario: 24 meses y un día (731 días) ya no caben.
+    await get(
+      ROUTE,
+      { from: '2025-01-01', to: '2027-01-01' },
+      a.adminToken,
+    ).expect(400);
+  });
+
+  it('sede de otra clínica: el mismo 403 que una sede no permitida (no dice qué sedes existen)', async () => {
+    const foreign = await raw.location.findFirstOrThrow({
+      where: { tenantId: b.tenantId },
+      select: { id: true },
+    });
+    const ajena = await get(
+      ROUTE,
+      { ...OCTOBER, locationId: foreign.id },
+      a.adminToken,
+    ).expect(403);
+    const noPermitida = await get(
+      ROUTE,
+      { ...OCTOBER, locationId: principal },
+      onlyNorte,
+    ).expect(403);
+    expect(ajena.body).toEqual(noPermitida.body);
   });
 
   it('el CSV tiene las mismas filas y totales que la pantalla, con período y filtros en la cabecera y sin pacientes', async () => {
@@ -597,7 +621,7 @@ describe('GET /reports/production-by-procedure (DX-423)', () => {
     expect(totals).toEqual(
       r.totals.map(
         (t) =>
-          `"Total","","","",${t.currency},${t.count},${t.gross.toFixed(2)},${t.discounts.toFixed(2)},${t.net.toFixed(2)},${t.averageNet.toFixed(2)},,`,
+          `"Total","","","","${t.currency}",${t.count},${t.gross.toFixed(2)},${t.discounts.toFixed(2)},${t.net.toFixed(2)},${t.averageNet.toFixed(2)},,`,
       ),
     );
     expect(res.text).not.toMatch(/Alfa|Beta|Gama/);
@@ -622,6 +646,7 @@ describe('GET /reports/production-by-procedure (DX-423)', () => {
     expect(detail.items[0]).toMatchObject({
       professionalName: 'Dr. Dos',
       completedAt: '2026-10-07T15:00:00.000Z',
+      timeZone: 'America/Bogota',
     });
     const events = await raw.auditEvent.findMany({
       where: {
