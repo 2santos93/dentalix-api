@@ -46,8 +46,13 @@ const TOKYO = REGIONAL_TOKYO_FIXTURE.timeZone;
  * pasada la medianoche de Bogotá).
  */
 const NOW = new Date(
-  process.env.RECEIVABLES_E2E_NOW ?? '2024-03-01T04:59:59.000Z',
+  process.env.RECEIVABLES_E2E_NOW || '2024-03-01T04:59:59.000Z',
 );
+if (Number.isNaN(NOW.getTime())) {
+  throw new Error(
+    `RECEIVABLES_E2E_NOW no es un instante ISO: ${process.env.RECEIVABLES_E2E_NOW}`,
+  );
+}
 const today = (): string => civilDateIn(NOW, BOGOTA);
 /** Medianoche UTC del día civil de hace `n` días (como guarda las cuotas la API). */
 const dueDaysAgo = (n: number): Date =>
@@ -965,12 +970,23 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
       },
       select: { id: true },
     });
-    // El plan nace a la 01:00 de Tokio de hace 10 días de Tokio: en Bogotá
-    // (14 h antes) todavía es la tarde del día anterior.
+    // El plan nace hace 10 días de Tokio, a una hora elegida para que contar
+    // en la zona de Bogotá (14 h detrás) dé OTRA edad, sea cual sea NOW: si
+    // hoy es el mismo día civil en las dos, nace a la 01:00 de Tokio (en
+    // Bogotá, aún el día anterior: 11 días); si Bogotá va un día por detrás
+    // (antes de las 14:00 de Tokio, como el NOW por defecto), a las 20:00
+    // (en Bogotá, el mismo día: 9 días).
     const tokioToday = civilDateIn(NOW, TOKYO);
+    const sameDay = tokioToday === today();
     const createdAt = new Date(
-      `${addCivilDays(tokioToday, -10)}T01:00:00+09:00`,
+      `${addCivilDays(tokioToday, -10)}T${sameDay ? '01' : '20'}:00:00+09:00`,
     );
+    const ageIn = (zone: string, day: string) =>
+      Math.round(
+        (Date.parse(day) - Date.parse(civilDateIn(createdAt, zone))) / 86400000,
+      );
+    expect(ageIn(TOKYO, tokioToday)).toBe(10);
+    expect(ageIn(BOGOTA, today())).not.toBe(10);
     const deudor = await patient(clinicE, 'Tokiota', 'CAR-E1');
     await plan(clinicE, deudor, 70000, { createdAt, catalog: catalogE.id });
     const lastVisit = new Date(createdAt.getTime() + 2 * 60 * 60 * 1000);
