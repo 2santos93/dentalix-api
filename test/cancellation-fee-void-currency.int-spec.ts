@@ -16,7 +16,8 @@ import {
   PAYMENT_REPOSITORY,
   type PaymentRepository,
 } from '../src/modules/payments/domain/ports/payment-repository.port';
-import { civilDateIn } from '../src/shared/time/civil-day';
+import { EXCHANGE_RATE_CLOCK } from '../src/modules/exchange/application/use-cases/manual-exchange-rates.use-cases';
+import { fixedSedeDay } from './support/sede-clock';
 
 // DX-382 (BE-046) contra Postgres: anular un cargo (SEC-050) compara lo
 // cobrado en la MONEDA DEL PLAN, con la base de imputación de cada abono
@@ -30,8 +31,14 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
-const ZONE = 'America/Bogota';
-const TODAY = civilDateIn(new Date(), ZONE);
+/**
+ * «Hoy» FIJO: el día anterior al real, a mediodía de la sede, que la API ve
+ * por su EXCHANGE_RATE_CLOCK (la tasa manual y su `manualSince`); los abonos
+ * son de ese mediodía y no caen en «ayer» si la suite cruza la medianoche de
+ * Bogotá (DX-209, TST-049).
+ */
+const SEDE_DAY = fixedSedeDay();
+const TODAY = SEDE_DAY.day;
 const HOUR = 3_600_000;
 
 interface FeeView {
@@ -165,7 +172,7 @@ describe('anular un cargo compara en la moneda del plan (DX-382, int)', () => {
       await post(s.clinic, `/treatment-plans/${planId}/payments`, {
         amount,
         currency,
-        paidAt: new Date(Date.now() - 60_000).toISOString(),
+        paidAt: SEDE_DAY.before(60).toISOString(),
         method: 'CASH',
       }).expect(201)
     ).body as { id: string; exchangeRateStatus: string };
@@ -189,7 +196,12 @@ describe('anular un cargo compara en la moneda del plan (DX-382, int)', () => {
   }
 
   beforeAll(async () => {
-    app = await createE2eApp();
+    app = await createE2eApp({
+      override: (builder) =>
+        builder
+          .overrideProvider(EXCHANGE_RATE_CLOCK)
+          .useValue(() => SEDE_DAY.at),
+    });
     await resetDatabase(raw);
     await raw.exchangeRateSnapshot.deleteMany({ where: { date: TODAY } });
     await raw.exchangeRateSnapshot.createMany({

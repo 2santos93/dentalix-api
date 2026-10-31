@@ -2,17 +2,15 @@ import { UnauthorizedException } from '@nestjs/common';
 import { ClinicRole } from '@prisma/client';
 import { LoginUseCase } from './login.use-case';
 import { AuthRepository } from '../../domain/ports/auth-repository.port';
-import {
-  DUMMY_PASSWORD_HASH,
-  PasswordService,
-} from '../../../../shared/crypto/password.service';
+import { DUMMY_PASSWORD_HASH } from '../../../../shared/crypto/password.service';
+import { TestPasswordHasher } from '../../../../shared/testing/test-password-hasher';
 
 // Un miembro de la clínica nunca pasa por el break-glass (SEC-008).
 const unusedBreakGlass = {
   open: () => Promise.reject(new Error('break-glass no esperado')),
 } as never;
 
-const password = new PasswordService();
+const password = new TestPasswordHasher();
 
 function makeRepo(
   membership: Awaited<ReturnType<AuthRepository['findMembership']>>,

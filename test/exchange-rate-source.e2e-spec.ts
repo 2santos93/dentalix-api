@@ -25,7 +25,9 @@ import {
   MANUAL_RATE_FUTURE_DATE_MESSAGE,
   MANUAL_RATE_MESSAGE,
 } from '../src/modules/exchange/domain/exchange-rate-source';
-import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
+import { addCivilDays } from '../src/shared/time/civil-day';
+import { EXCHANGE_RATE_CLOCK } from '../src/modules/exchange/application/use-cases/manual-exchange-rates.use-cases';
+import { fixedSedeDay } from './support/sede-clock';
 import { PaymentAllocationJobs } from '../src/modules/payments/application/payment-allocation-jobs';
 
 // DX-374 en HTTP real: la fuente de la tasa es por clínica (AUTOMATIC por
@@ -40,10 +42,14 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
-/** Zona de las dos sedes (REGIONAL_BOGOTA_FIXTURE). */
-const ZONE = 'America/Bogota';
-/** Hoy y ayer en la sede: el paso a MANUAL fija hoy como día de inicio. */
-const TODAY = civilDateIn(new Date(), ZONE);
+/**
+ * «Hoy» y ayer en la sede: el paso a MANUAL fija hoy como día de inicio. Hoy
+ * es un día FIJO (el anterior al real, a mediodía de la sede) que la API ve
+ * por su EXCHANGE_RATE_CLOCK: cruzar la medianoche no lo mueve (DX-209,
+ * TST-049).
+ */
+const SEDE_DAY = fixedSedeDay();
+const TODAY = SEDE_DAY.day;
 const YESTERDAY = addCivilDays(TODAY, -1);
 const SETTINGS = '/api/v1/exchange/settings';
 const MANUAL = '/api/v1/exchange/manual-rates';
@@ -129,7 +135,12 @@ describe('Tasa de cambio por clínica (e2e, DX-374)', () => {
     });
 
   beforeAll(async () => {
-    app = await createE2eApp();
+    app = await createE2eApp({
+      override: (builder) =>
+        builder
+          .overrideProvider(EXCHANGE_RATE_CLOCK)
+          .useValue(() => SEDE_DAY.at),
+    });
     await resetDatabase(raw);
     await raw.exchangeRateSnapshot.deleteMany({
       where: { date: { in: [YESTERDAY, TODAY] } },
@@ -328,10 +339,7 @@ describe('Tasa de cambio por clínica (e2e, DX-374)', () => {
   });
 
   it('un abono de hoy en COP sin tasa manual se guarda y queda sin tasa; el saldo responde 200', async () => {
-    const res = await payCop(
-      80000,
-      new Date(Date.now() - 60_000).toISOString(),
-    );
+    const res = await payCop(80000, SEDE_DAY.before(60).toISOString());
     expect(res.body).toMatchObject({
       exchangeRateStatus: 'MISSING',
       frozenRate: null,

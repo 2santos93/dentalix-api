@@ -16,7 +16,7 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
-import { civilDateIn } from '../src/shared/time/civil-day';
+import { fixedSedeDay } from './support/sede-clock';
 
 // DX-377 en HTTP real: cada clínica nace con sus 4 medios iniciales; solo el
 // ADMIN gestiona el catálogo (403 en español para recepción); un medio que
@@ -29,8 +29,13 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
-const ZONE = 'America/Bogota';
-const TODAY = civilDateIn(new Date(), ZONE);
+/**
+ * Día de los abonos y de la caja: uno FIJO en el pasado reciente (el anterior
+ * al real), no el de la carga del módulo frente a la hora del abono: una
+ * corrida que cruce la medianoche de Bogotá ya no deja el abono fuera del
+ * rango de la caja (DX-209, TST-049).
+ */
+const TODAY = fixedSedeDay().day;
 
 interface MethodBody {
   id: string;

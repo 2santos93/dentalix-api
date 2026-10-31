@@ -8,10 +8,10 @@ import {
   AuthRepository,
   AuthUserRecord,
 } from '../../domain/ports/auth-repository.port';
-import { PasswordService } from '../../../../shared/crypto/password.service';
+import { TestPasswordHasher } from '../../../../shared/testing/test-password-hasher';
 import { IssuablePayload } from '../../../../shared/crypto/token.service';
 
-const password = new PasswordService();
+const password = new TestPasswordHasher();
 
 /**
  * Repo con NINGUNA membresía (`findMembership` → null): es exactamente la
