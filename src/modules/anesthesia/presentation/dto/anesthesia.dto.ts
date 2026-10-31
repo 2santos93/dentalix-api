@@ -319,7 +319,10 @@ export class EpinephrineSummaryDto {
 export class DoseRemainingDto {
   @ApiProperty() name!: string;
   @ApiProperty({ description: 'mg que quedan de este anestésico' }) mg!: number;
-  @ApiProperty({ description: 'En cuartos de carpule, hacia abajo' })
+  @ApiProperty({
+    description:
+      'En cuartos de carpule, hacia abajo y sin llegar al 100 % (que ya exige motivo)',
+  })
   carpules!: number;
   @ApiProperty({ example: 1.8 }) mlPerCarpule!: number;
   @ApiProperty({ enum: ['DOSE', 'EPINEPHRINE'] })

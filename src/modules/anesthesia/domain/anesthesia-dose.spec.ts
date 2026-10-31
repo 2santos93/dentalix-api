@@ -615,4 +615,51 @@ describe('máximos pediátricos, edad mínima, sedación y epinefrina (DX-420)',
     });
     expect(noWeight.remaining).toBeNull();
   });
+
+  it('«quedan» no ofrece la dosis que llega justo al 100 % (exige motivo)', () => {
+    // Prilocaína sin epinefrina, adulto de 63 kg: 8 × 63 = 504 mg = 7
+    // carpules exactos de 72 mg.
+    const s = summarizeAnesthesiaDose({
+      lines: [{ anesthetic: PRILO, carpules: 0.25 }],
+      weightKg: 63,
+      anamnesis: CLEAN,
+      patient: ADULT,
+      pending: PRILO,
+    });
+    // 504 − 18 = 486 mg = 6,75 carpules exactos → 6,5 (6,75 ya sería el 100 %).
+    expect(s.remaining).toEqual(
+      expect.objectContaining({ mg: 486, carpules: 6.5, limitedBy: 'DOSE' }),
+    );
+    const at100 = summarizeAnesthesiaDose({
+      lines: [{ anesthetic: PRILO, carpules: 7 }],
+      weightKg: 63,
+      anamnesis: CLEAN,
+      patient: ADULT,
+    });
+    expect(at100.level).toBe('EXCEEDED');
+  });
+
+  it('la epinefrina se suma línea a línea aunque el grupo sea el mismo anestésico', () => {
+    // Un registro con la dilución sin leer (null) y otro ya corregido en el
+    // catálogo (0,018): mismo grupo de dosis, epinefrina distinta.
+    const unknown = {
+      ...LIDO,
+      vasoconstrictor: 'Con epinefrina',
+      epinephrineMgPerCarpule: null,
+    };
+    const fixed = { ...unknown, epinephrineMgPerCarpule: 0.018 };
+    const s = summarizeAnesthesiaDose({
+      lines: [
+        { anesthetic: unknown, carpules: 1 },
+        { anesthetic: fixed, carpules: 2 },
+        { anesthetic: unknown, carpules: 1 },
+      ],
+      weightKg: 70,
+      anamnesis: CLEAN,
+      patient: ADULT,
+    });
+    expect(s.byAnesthetic).toHaveLength(1);
+    expect(s.epinephrine.totalMg).toBe(0.036);
+    expect(codes(s).filter((c) => c === 'EPINEPHRINE_UNKNOWN')).toHaveLength(1);
+  });
 });

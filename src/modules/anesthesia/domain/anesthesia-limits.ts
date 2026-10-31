@@ -122,7 +122,8 @@ const norm = (s: string) =>
  * 1:N son 1 g en N ml → 1000 / N mg/ml × ml del carpule (1:100.000 →
  * 0,01 mg/ml; 1,8 ml → 0,018 mg). Sin vasoconstrictor u otro distinto de la
  * epinefrina (felipresina, noradrenalina) → 0. Epinefrina sin dilución
- * legible → null: la clínica debe anotarla en el catálogo.
+ * legible, o que daría más de 0,2 mg por carpule → null: la clínica debe
+ * anotarla en el catálogo.
  */
 export function epinephrineFromLabel(
   vasoconstrictor: string | null,
@@ -134,7 +135,11 @@ export function epinephrineFromLabel(
   const match = /1\s*:\s*(\d{1,3}(?:[.\s]\d{3})+|\d+)/.exec(text);
   const dilution = match ? Number(match[1].replace(/[.\s]/g, '')) : NaN;
   if (!Number.isFinite(dilution) || dilution <= 0) return null;
-  return Math.round(((mlPerCarpule * 1000) / dilution) * 10000) / 10000;
+  const mg = Math.round(((mlPerCarpule * 1000) / dilution) * 10000) / 10000;
+  // Más de un tope de adulto en un solo carpule no es una dilución real
+  // (p. ej. «1:1000» por error): no se sabe, como sin dilución. Además el
+  // CHECK de la tabla no admite más de 0,2 mg (la migración usa el mismo corte).
+  return mg > EPINEPHRINE_MAX_MG ? null : mg;
 }
 
 export function epinephrineMaxMg(cardiac: boolean | null): number {

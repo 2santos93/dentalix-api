@@ -131,7 +131,7 @@ export interface EpinephrineSummary {
 export interface DoseRemaining {
   name: string;
   mg: number;
-  /** En cuartos de carpule, hacia abajo. */
+  /** En cuartos de carpule, hacia abajo y por debajo del 100 %. */
   carpules: number;
   mlPerCarpule: number;
   /** Qué límite se agota antes (con la epinefrina, `mg` son los que caben con ella). */
@@ -413,25 +413,35 @@ function adjustmentAlerts(
   return alerts;
 }
 
+/**
+ * Epinefrina LÍNEA A LÍNEA, no por grupo: dos registros del mismo anestésico
+ * (misma clave de dosis) pueden llevar distinta epinefrina por carpule si la
+ * clínica la corrigió en el catálogo entre uno y otro, y el grupo solo
+ * conserva la copia del primero.
+ */
 function summarizeEpinephrine(
-  groups: Group[],
+  lines: readonly DoseLine[],
   anamnesis: AnesthesiaAnamnesis | null,
   patient: DosePatient | null,
 ): { summary: EpinephrineSummary; alerts: DoseAlert[] } {
   const alerts: DoseAlert[] = [];
+  const unknown = new Set<string>();
   let totalMg = 0;
-  for (const g of groups) {
-    const perCarpule = epinephrinePerCarpule(g.anesthetic);
+  for (const line of lines) {
+    const perCarpule = epinephrinePerCarpule(line.anesthetic);
     if (perCarpule === null) {
-      alerts.push({
-        code: 'EPINEPHRINE_UNKNOWN',
-        severity: 'INFO',
-        message: `No se ha podido sumar la epinefrina de ${g.anesthetic.name}: falta su dilución o los mg por carpule en el catálogo.`,
-        source: EPINEPHRINE_SOURCE,
-      });
+      unknown.add(line.anesthetic.name);
     } else {
-      totalMg += perCarpule * g.carpules;
+      totalMg += perCarpule * line.carpules;
     }
+  }
+  for (const name of unknown) {
+    alerts.push({
+      code: 'EPINEPHRINE_UNKNOWN',
+      severity: 'INFO',
+      message: `No se ha podido sumar la epinefrina de ${name}: falta su dilución o los mg por carpule en el catálogo.`,
+      source: EPINEPHRINE_SOURCE,
+    });
   }
   totalMg = round4(totalMg);
   const cardiac = anamnesis === null ? null : (patient?.cardiac ?? false);
@@ -472,9 +482,25 @@ function summarizeEpinephrine(
   };
 }
 
+/** Tolerancia de coma flotante al contar cuartos de carpule. */
+const STEP_TOLERANCE = 1e-6;
+
+/**
+ * Cuartos de carpule que caben ESTRICTAMENTE por debajo de `limit` carpules:
+ * llegar justo al 100 % ya exige motivo (DX-307), así que «quedan» no ofrece
+ * la dosis que lo alcanza. Nunca negativo.
+ */
+function carpulesBelow(limit: number): number {
+  if (!(limit > 0)) return 0;
+  const steps = Math.ceil(limit / CARPULE_STEP - STEP_TOLERANCE) - 1;
+  return Math.max(0, steps) * CARPULE_STEP;
+}
+
 /**
  * Lo que queda del anestésico nuevo hasta el máximo (la suma de fracciones
- * se reparte en sus mg) y hasta el tope de epinefrina; manda el menor.
+ * se reparte en sus mg) y hasta el tope de epinefrina; manda el menor. Los
+ * carpules se cuentan con los valores SIN redondear (redondear antes los mg
+ * podía subir un cuarto de carpule por encima del máximo).
  */
 function remainingOf(
   pending: AnestheticSnapshot,
@@ -482,19 +508,21 @@ function remainingOf(
   maxMg: number,
   epinephrine: EpinephrineSummary,
 ): DoseRemaining {
-  let mg = round1(Math.max(0, 1 - fraction) * maxMg);
+  const rawMg = Math.max(0, 1 - fraction) * maxMg;
   const perCarpuleMg = lineMg(pending, 1);
-  let carpules = perCarpuleMg > 0 ? mg / perCarpuleMg : 0;
+  let rawCarpules = perCarpuleMg > 0 ? rawMg / perCarpuleMg : 0;
+  let mg = round1(rawMg);
   let limitedBy: DoseRemaining['limitedBy'] = 'DOSE';
   const epinephrineMg = round4(
     Math.max(0, epinephrine.maxMg - epinephrine.totalMg),
   );
   const epiPerCarpule = epinephrinePerCarpule(pending);
   if (epiPerCarpule) {
-    const byEpinephrine = epinephrineMg / epiPerCarpule;
-    if (byEpinephrine < carpules) {
+    const byEpinephrine =
+      Math.max(0, epinephrine.maxMg - epinephrine.totalMg) / epiPerCarpule;
+    if (byEpinephrine < rawCarpules) {
       // Los mg que caben con la epinefrina que queda, no los del anestésico.
-      carpules = byEpinephrine;
+      rawCarpules = byEpinephrine;
       mg = round1(byEpinephrine * perCarpuleMg);
       limitedBy = 'EPINEPHRINE';
     }
@@ -502,7 +530,7 @@ function remainingOf(
   return {
     name: pending.name,
     mg,
-    carpules: Math.floor(carpules / CARPULE_STEP + EPSILON) * CARPULE_STEP,
+    carpules: carpulesBelow(rawCarpules),
     mlPerCarpule: pending.mlPerCarpule,
     limitedBy,
     epinephrineMg,
@@ -598,7 +626,11 @@ export function summarizeAnesthesiaDose(
   }
 
   alerts.push(...adjustmentAlerts(groups, adjustment, patient, pending));
-  const epinephrine = summarizeEpinephrine(groups, input.anamnesis, patient);
+  const epinephrine = summarizeEpinephrine(
+    input.lines,
+    input.anamnesis,
+    patient,
+  );
   alerts.push(...epinephrine.alerts);
   alerts.push(...allergyAlerts(groups, input.anamnesis));
 

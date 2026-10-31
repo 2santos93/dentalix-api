@@ -64,6 +64,9 @@ describe('límites de la anestesia por paciente (DX-420)', () => {
     expect(epinephrineFromLabel('Felipresina 0,03 UI/ml', 1.8)).toBe(0);
     expect(epinephrineFromLabel('Noradrenalina 1:25.000', 1.8)).toBe(0);
     expect(epinephrineFromLabel('Con epinefrina', 1.8)).toBeNull();
+    // Más de 0,2 mg en un carpule no es una dilución real («1:1000»).
+    expect(epinephrineFromLabel('Epinefrina 1:1000', 1.8)).toBeNull();
+    expect(epinephrineFromLabel('Epinefrina 1:9000', 1.8)).toBe(0.2);
   });
 
   it('tope de epinefrina por cita: 0,2 mg; 0,04 mg en el cardiópata', () => {
