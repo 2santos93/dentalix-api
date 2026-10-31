@@ -639,12 +639,12 @@ describe('Caja — GET /payments (e2e)', () => {
         ids[key] = row.id;
       };
       // 20/12 a las 20:00 en Bogotá = 21/12 01:00 UTC.
-      await seedAt('decNightBogota', sedePrincipal, '2026-12-21T01:00:00.000Z');
+      await seedAt('decNightBogota', sedePrincipal, '2025-12-21T01:00:00.000Z');
       // 21/12 a las 00:30 en Madrid = 20/12 23:30 UTC = 20/12 18:30 en Bogotá.
       await seedAt(
         'decMadridAfterMidnight',
         sedeMadrid,
-        '2026-12-20T23:30:00.000Z',
+        '2025-12-20T23:30:00.000Z',
       );
     });
 
@@ -664,17 +664,17 @@ describe('Caja — GET /payments (e2e)', () => {
 
     it('un abono a las 20:00 de Bogotá sale en la caja de ese día (con su paidOn) y no en la del siguiente', async () => {
       const day = await getA(
-        { from: '2026-12-20', to: '2026-12-20' },
+        { from: '2025-12-20', to: '2025-12-20' },
         sedePrincipal,
       ).expect(200);
       const body = day.body as CashBody & {
         items: (CashRow & { paidOn: string })[];
       };
       expect(body.items.map((r) => r.id)).toEqual([ids.decNightBogota]);
-      expect(body.items[0].paidOn).toBe('2026-12-20');
+      expect(body.items[0].paidOn).toBe('2025-12-20');
 
       const next = await getA(
-        { from: '2026-12-21', to: '2026-12-21' },
+        { from: '2025-12-21', to: '2025-12-21' },
         sedePrincipal,
       ).expect(200);
       expect((next.body as CashBody).items).toEqual([]);
@@ -685,20 +685,20 @@ describe('Caja — GET /payments (e2e)', () => {
         request(app.getHttpServer())
           .post(`/api/v1/treatment-plans/${planAna}/payments`)
           .set('X-Location-Id', sedeMadrid)
-          .send({ amount: 5, currency: 'COP', paidAt: '2026-12-22' }),
+          .send({ amount: 5, currency: 'COP', paidAt: '2025-12-22' }),
       ).expect(201);
       const payment = created.body as { id: string; paidAt: string };
       // 12:00 en Madrid (CET, UTC+1) = 11:00 UTC.
-      expect(payment.paidAt).toBe('2026-12-22T11:00:00.000Z');
+      expect(payment.paidAt).toBe('2025-12-22T11:00:00.000Z');
 
       const day = await getA(
-        { from: '2026-12-22', to: '2026-12-22' },
+        { from: '2025-12-22', to: '2025-12-22' },
         sedeMadrid,
       ).expect(200);
       const items = (day.body as { items: { id: string; paidOn: string }[] })
         .items;
       expect(items).toEqual([
-        expect.objectContaining({ id: payment.id, paidOn: '2026-12-22' }),
+        expect.objectContaining({ id: payment.id, paidOn: '2025-12-22' }),
       ]);
     });
 
@@ -709,7 +709,7 @@ describe('Caja — GET /payments (e2e)', () => {
           .send({
             amount: 6,
             currency: 'COP',
-            paidAt: '2026-12-23T00:00:00.000Z',
+            paidAt: '2025-12-23T00:00:00.000Z',
           }),
       ).expect(201);
       const payment = created.body as {
@@ -717,8 +717,8 @@ describe('Caja — GET /payments (e2e)', () => {
         paidAt: string;
         paidOn: string;
       };
-      expect(payment.paidAt).toBe('2026-12-23T17:00:00.000Z');
-      expect(payment.paidOn).toBe('2026-12-23');
+      expect(payment.paidAt).toBe('2025-12-23T17:00:00.000Z');
+      expect(payment.paidOn).toBe('2025-12-23');
 
       const list = await authA(
         request(app.getHttpServer()).get(
@@ -728,24 +728,24 @@ describe('Caja — GET /payments (e2e)', () => {
       const row = (list.body as { id: string; paidOn: string }[]).find(
         (p) => p.id === payment.id,
       );
-      expect(row?.paidOn).toBe('2026-12-23');
+      expect(row?.paidOn).toBe('2025-12-23');
 
       // Una hora sin Z ni desfase se rechaza (se leería en la zona del servidor).
       await authA(
         request(app.getHttpServer())
           .post(`/api/v1/treatment-plans/${planAna}/payments`)
-          .send({ amount: 6, currency: 'COP', paidAt: '2026-12-23T20:00:00' }),
+          .send({ amount: 6, currency: 'COP', paidAt: '2025-12-23T20:00:00' }),
       ).expect(400);
     });
 
     it('vista consolidada: cada sede corta el día en su zona', async () => {
-      const dec20 = await getA({ from: '2026-12-20', to: '2026-12-20' }).expect(
+      const dec20 = await getA({ from: '2025-12-20', to: '2025-12-20' }).expect(
         200,
       );
       expect((dec20.body as CashBody).items.map((r) => r.id)).toEqual([
         ids.decNightBogota,
       ]);
-      const dec21 = await getA({ from: '2026-12-21', to: '2026-12-21' }).expect(
+      const dec21 = await getA({ from: '2025-12-21', to: '2025-12-21' }).expect(
         200,
       );
       expect((dec21.body as CashBody).items.map((r) => r.id)).toEqual([
