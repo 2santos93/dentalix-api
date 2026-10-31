@@ -98,7 +98,7 @@ dump="$base.dump.age"
 [[ ! -e "$out_dir/$dump" ]] || dx_die "ya existe $dump en --out-dir" 2
 work="$(mktemp -d "$out_dir/.${base}.XXXXXX")"
 snap_pid=''
-# shellcheck disable=SC2329 # la invoca el trap EXIT
+# shellcheck disable=SC2317,SC2329 # la invoca el trap EXIT (SC2317 en shellcheck < 0.10)
 cleanup() {
   if [[ -n "$snap_pid" ]]; then kill "$snap_pid" 2>/dev/null || true; fi
   rm -rf "$work"
