@@ -204,6 +204,29 @@ describe('ClosingQueueUseCases (DX-439)', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
+  it('una sede sin zona no se omite en silencio: sale en locationsWithoutZone', async () => {
+    const { repo, scopes } = fakeRepo();
+    repo.listLocations.mockResolvedValueOnce([
+      { id: MAIN, name: 'Principal', timeZone: 'America/Bogota' },
+      { id: NORTH, name: 'Norte', timeZone: null },
+    ]);
+    const q = await new ClosingQueueUseCases(repo, () => NOW).list(
+      query(ClinicRole.ADMIN),
+    );
+    expect(q.locationsWithoutZone).toEqual([{ id: NORTH, name: 'Norte' }]);
+    expect(scopes.outcome[0].branches.flatMap((b) => b.locationIds)).toEqual([
+      MAIN,
+    ]);
+  });
+
+  it('el contador no calcula «en clínica»', async () => {
+    const { repo } = fakeRepo();
+    await new ClosingQueueUseCases(repo, () => NOW).count(
+      query(ClinicRole.ADMIN),
+    );
+    expect(repo.staleInClinic).not.toHaveBeenCalled();
+  });
+
   it('el contador del menú suma solo las secciones del rol', async () => {
     const { repo } = fakeRepo();
     const c = await new ClosingQueueUseCases(repo, () => NOW).count(

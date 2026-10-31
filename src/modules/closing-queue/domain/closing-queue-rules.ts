@@ -85,20 +85,24 @@ export type ClosingPeriodCheck =
   | { ok: false; problem: 'INVALID' | 'OUT_OF_RANGE' | 'TOO_LONG' };
 
 /**
- * El período pedido (ambos opcionales). Con los dos, desde ≤ hasta y como
- * mucho `CLOSING_QUEUE_MAX_DAYS`; con uno solo, el otro es el de por defecto.
+ * El período pedido (ambos opcionales), como mucho `CLOSING_QUEUE_MAX_DAYS`
+ * días. Con los dos, desde ≤ hasta; con solo «desde», el «hasta» es ayer
+ * (`today` − 1) y el tope se mide contra él, para que no se salte omitiendo
+ * «hasta». Con solo «hasta», el «desde» por defecto es 14 días antes.
  */
 export function checkClosingPeriod(
   from: string | undefined,
   to: string | undefined,
+  today: string,
 ): ClosingPeriodCheck {
   if (from === undefined && to === undefined) return { ok: true };
   const check = checkPeriodDays(from ?? to!, to ?? from!);
   if (!check.ok) return { ok: false, problem: check.problem };
+  const last = to !== undefined ? check.to : addCivilDays(today, -1);
   if (
     from !== undefined &&
-    to !== undefined &&
-    civilDaysInclusive(check.from, check.to) > CLOSING_QUEUE_MAX_DAYS
+    last >= check.from &&
+    civilDaysInclusive(check.from, last) > CLOSING_QUEUE_MAX_DAYS
   ) {
     return { ok: false, problem: 'TOO_LONG' };
   }
@@ -111,15 +115,17 @@ export function checkClosingPeriod(
 
 /**
  * Los instantes `[inicio, fin)` de la lista, una rama por ZONA (como los
- * reportes, DX-097): en cada zona «hoy» es su día civil en `now`; por defecto
- * se miran los `CLOSING_QUEUE_DEFAULT_DAYS` días hasta ayer y «hasta» nunca
- * pasa de ayer, así que una cita de hoy no sale nunca. Una zona en la que el
+ * reportes, DX-097): en cada zona «hoy» es su día civil en `now`; «hasta»
+ * nunca pasa de ayer, así que una cita de hoy no sale nunca, y sin «desde» se
+ * miran los `CLOSING_QUEUE_DEFAULT_DAYS` días que acaban en «hasta». Una zona en la que el
  * período queda vacío (empieza hoy o después) no deja rama.
  */
 export function closingWindow(
   now: Date,
   zoneByLocation: ReadonlyMap<string, string>,
   period: { from?: string; to?: string },
+  /** Tope de días de la rama (la lista); sin él, sin tope (el descarte). */
+  maxDays?: number,
 ): ZonedPeriodBranch[] {
   const byZone = new Map<string, string[]>();
   for (const [locationId, timeZone] of zoneByLocation) {
@@ -130,12 +136,17 @@ export function closingWindow(
     .flatMap(([timeZone, locationIds]) => {
       const today = civilDateIn(now, timeZone);
       const yesterday = addCivilDays(today, -1);
-      const from =
-        period.from ?? addCivilDays(today, -CLOSING_QUEUE_DEFAULT_DAYS);
       const to =
         period.to !== undefined && period.to < yesterday
           ? period.to
           : yesterday;
+      // Sin «desde»: los 14 días que acaban en «hasta».
+      const requested =
+        period.from ?? addCivilDays(to, -(CLOSING_QUEUE_DEFAULT_DAYS - 1));
+      // El tope se aplica en la zona de la rama («hoy» cambia de una a otra).
+      const floor =
+        maxDays !== undefined ? addCivilDays(to, -(maxDays - 1)) : requested;
+      const from = requested < floor ? floor : requested;
       if (from > to) return [];
       return [
         {
@@ -185,7 +196,9 @@ export function checkDismissal(
   let reasonText: string | null = null;
   if (input.reasonCode === 'OTHER') {
     const text = (input.reasonText ?? '').trim();
-    if (text.length < DISMISSAL_TEXT_MIN || text.length > DISMISSAL_TEXT_MAX) {
+    // Caracteres (puntos de código), como `char_length` del CHECK de la BD.
+    const length = [...text].length;
+    if (length < DISMISSAL_TEXT_MIN || length > DISMISSAL_TEXT_MAX) {
       return { ok: false, problem: 'REASON_TEXT' };
     }
     reasonText = text;

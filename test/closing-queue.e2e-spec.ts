@@ -37,7 +37,7 @@ import {
  *  - norte: CONFIRMED del Dr. Dos en la Norte → sección 1;
  *  - sinEvolucion: COMPLETED de la Dra. → sección 2;
  *  - deDos: COMPLETED del Dr. Dos → sección 2 (solo ADMIN);
- *  - conItem: COMPLETED de la Dra., con evolución y un ítem ACCEPTED ligado → sección 3;
+ *  - conItem: COMPLETED de la Dra. en la Norte, con evolución y un ítem ACCEPTED ligado → sección 3;
  *  - hoy: SCHEDULED de hoy → ninguna.
  */
 
@@ -194,7 +194,7 @@ describe('«Pendiente de cerrar» (DX-439, e2e)', () => {
       status: 'COMPLETED',
     });
     conItem = await appointment({
-      locationId: principal,
+      locationId: norte,
       providerId: dentistId,
       start: yesterdayAt(14),
       status: 'COMPLETED',
@@ -204,7 +204,7 @@ describe('«Pendiente de cerrar» (DX-439, e2e)', () => {
         tenantId: a.tenantId,
         patientId: patient,
         appointmentId: conItem,
-        locationId: principal,
+        locationId: norte,
         entryDate: yesterdayAt(14),
         notes: 'Resina 16',
         performedById: dentistId,
@@ -315,6 +315,25 @@ describe('«Pendiente de cerrar» (DX-439, e2e)', () => {
         .expect(403);
     });
 
+    it('sin locationId, la sede activa de la cabecera X-Location-Id acota la lista', async () => {
+      const res = await api(a, tokens.ADMIN!)
+        .get(ROUTE)
+        .set('X-Location-Id', norte)
+        .expect(200);
+      const q = res.body as ClosingQueue;
+      expect(ids(q.outcome)).toEqual([norteCita]);
+      expect(ids(q.evolution)).toEqual([]);
+      expect(ids(q.treatment)).toEqual([conItem]);
+    });
+
+    it('solo «desde» más de 92 días atrás: 400 (el tope no se salta sin «hasta»)', async () => {
+      const from = addCivilDays(today(), -120);
+      await api(a, tokens.ADMIN!).get(ROUTE, { from }).expect(400);
+      await api(a, tokens.ADMIN!)
+        .get(ROUTE, { from: addCivilDays(today(), -30) })
+        .expect(200);
+    });
+
     it('ASSISTANT: 403 con el mensaje en español', async () => {
       const res = await api(a, tokens.ASSISTANT!).get(ROUTE).expect(403);
       expect((res.body as { message: string }).message).toBe(
@@ -366,6 +385,52 @@ describe('«Pendiente de cerrar» (DX-439, e2e)', () => {
           where: { tenantId: b.tenantId },
         }),
       ).toBe(0);
+      // Marcar DONE un ítem de B «desde» la cita de A: la cita no existe para
+      // B (RLS) → 409 y el ítem sigue sin realizar.
+      const bPatient = await raw.patient.create({
+        data: { tenantId: b.tenantId, firstName: 'Paciente', lastName: 'B' },
+      });
+      const bCatalog = await raw.dentalCatalogItem.create({
+        data: {
+          tenantId: b.tenantId,
+          code: 'RES-B',
+          kind: 'PROCEDURE',
+          labelEs: 'Resina',
+          color: '#123456',
+        },
+      });
+      const bPlan = await raw.treatmentPlan.create({
+        data: {
+          tenantId: b.tenantId,
+          patientId: bPatient.id,
+          currency: 'COP',
+          status: 'ACCEPTED',
+        },
+      });
+      const bItem = await raw.treatmentPlanItem.create({
+        data: {
+          tenantId: b.tenantId,
+          planId: bPlan.id,
+          toothNumber: '11',
+          catalogItemId: bCatalog.id,
+          price: 10,
+          status: 'ACCEPTED',
+        },
+      });
+      await api(b, b.adminToken)
+        .patch(`/treatment-plans/${bPlan.id}/items/${bItem.id}`, {
+          status: 'DONE',
+          performedById: b.adminUserId,
+          appointmentId: conItem,
+        })
+        .expect(409);
+      expect(
+        (
+          await raw.treatmentPlanItem.findUniqueOrThrow({
+            where: { id: bItem.id },
+          })
+        ).status,
+      ).toBe('ACCEPTED');
     });
 
     it('período inválido: 400', async () => {
@@ -419,6 +484,20 @@ describe('«Pendiente de cerrar» (DX-439, e2e)', () => {
         appointmentId: norteCita,
         reasonCode: 'DUPLICATE_APPOINTMENT',
       }).expect(403);
+      await dismiss(tokens.RECEPTION!, {
+        section: 'EVOLUTION',
+        appointmentId: sinEvolucion,
+        reasonCode: 'PAPER_NOTE',
+      }).expect(403);
+    });
+
+    it('el ítem de otra cita de la misma clínica no está pendiente en esta: 409', async () => {
+      await dismiss(tokens.ADMIN!, {
+        section: 'TREATMENT',
+        appointmentId: sinEvolucion,
+        planItemId: itemId,
+        reasonCode: 'PATIENT_DECLINED_TODAY',
+      }).expect(409);
     });
 
     it('con «Otro» y texto: sale de la lista, deja un audit_event sin el texto y no toca la cita', async () => {
@@ -530,13 +609,43 @@ describe('«Pendiente de cerrar» (DX-439, e2e)', () => {
       expect(q.evolution!.total).toBe(0);
     });
 
-    it('ítem marcado DONE: sale de la sección 3', async () => {
+    it('DONE con appointmentId: sin pasar a DONE, 400; con una cita que no lo lleva, 409', async () => {
+      await api(a, tokens.DENTIST!)
+        .patch(`/treatment-plans/${planId}/items/${itemId}`, {
+          appointmentId: conItem,
+        })
+        .expect(400);
       await api(a, tokens.DENTIST!)
         .patch(`/treatment-plans/${planId}/items/${itemId}`, {
           status: 'DONE',
           performedById: dentistId,
+          appointmentId: sinEvolucion,
         })
+        .expect(409);
+      const item = await raw.treatmentPlanItem.findUniqueOrThrow({
+        where: { id: itemId },
+      });
+      expect(item.status).toBe('ACCEPTED');
+    });
+
+    it('ítem marcado DONE desde la cita: sede y hora de la cita (no la activa ni la de hoy) y sale de la sección 3', async () => {
+      await api(a, tokens.DENTIST!)
+        .patch(`/treatment-plans/${planId}/items/${itemId}`, {
+          status: 'DONE',
+          performedById: dentistId,
+          appointmentId: conItem,
+        })
+        .set('X-Location-Id', principal)
         .expect(200);
+      const item = await raw.treatmentPlanItem.findUniqueOrThrow({
+        where: { id: itemId },
+      });
+      expect(item).toMatchObject({
+        status: 'DONE',
+        performedById: dentistId,
+        performedLocationId: norte,
+        completedAt: yesterdayAt(14),
+      });
       const q = await queue(tokens.DENTIST!);
       expect(q.treatment!.total).toBe(0);
       expect(q.total).toBe(0);

@@ -37,7 +37,7 @@ export class ClosingQueueQueryDto {
 
   @ApiPropertyOptional({
     example: '2026-10-17',
-    description: `Primer día (AAAA-MM-DD, en la zona de la sede de cada cita). Por defecto, hoy − ${CLOSING_QUEUE_DEFAULT_DAYS} días.`,
+    description: `Primer día (AAAA-MM-DD, en la zona de la sede de cada cita). Por defecto, los ${CLOSING_QUEUE_DEFAULT_DAYS} días que acaban en «hasta». El período, con «hasta» o sin él (entonces hasta ayer), es como mucho de ${CLOSING_QUEUE_MAX_DAYS} días: 400 si no.`,
   })
   @IsOptional()
   @Matches(CIVIL_DATE, { message: 'from debe ser una fecha AAAA-MM-DD.' })
@@ -45,7 +45,7 @@ export class ClosingQueueQueryDto {
 
   @ApiPropertyOptional({
     example: '2026-10-30',
-    description: `Último día (inclusive). Por defecto y como mucho, AYER en la zona de cada sede: las citas de hoy nunca salen. Con las dos fechas, como mucho ${CLOSING_QUEUE_MAX_DAYS} días (400 si no).`,
+    description: `Último día (inclusive). Por defecto y como mucho, AYER en la zona de cada sede: las citas de hoy nunca salen. Como mucho ${CLOSING_QUEUE_MAX_DAYS} días desde «desde» (400 si no).`,
   })
   @IsOptional()
   @Matches(CIVIL_DATE, { message: 'to debe ser una fecha AAAA-MM-DD.' })
@@ -216,6 +216,13 @@ export class ClosingQueueDto {
     description: 'Sedes que puede filtrar el usuario',
   })
   locations!: ClosingLocationOptionDto[];
+
+  @ApiProperty({
+    type: [ClosingLocationOptionDto],
+    description:
+      'Sedes del alcance sin zona horaria válida: sin «hoy» sus citas no se pueden listar; se configura la zona en Ajustes → Sedes',
+  })
+  locationsWithoutZone!: ClosingLocationOptionDto[];
 }
 
 export class ClosingQueueCountDto {
@@ -265,7 +272,7 @@ export class CreateClosingDismissalDto {
   @ApiPropertyOptional({
     minLength: DISMISSAL_TEXT_MIN,
     maxLength: DISMISSAL_TEXT_MAX,
-    description: `Obligatorio con OTHER (${DISMISSAL_TEXT_MIN}–${DISMISSAL_TEXT_MAX} caracteres); con otro motivo no se guarda`,
+    description: `Obligatorio con OTHER (${DISMISSAL_TEXT_MIN}–${DISMISSAL_TEXT_MAX} caracteres, contados como caracteres y no como unidades UTF-16; sin espacios de los bordes); con otro motivo no se guarda`,
   })
   @ValidateIf((o: CreateClosingDismissalDto) => o.reasonText !== undefined)
   @IsString({ message: 'reasonText debe ser un texto.' })

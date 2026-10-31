@@ -134,6 +134,9 @@ export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
   // DX-439: «B manda la sede, el profesional, la cita o el ítem de A → 403 o
   // lista sin filas de A, y 404 sin descarte».
   'GET /closing-queue ?locationId': 'closing-queue.e2e-spec.ts',
+  // DX-439: marcar DONE «desde» la cita atendida de A con el ítem de B → 409.
+  'PATCH /treatment-plans/:id/items/:itemId body.appointmentId':
+    'closing-queue.e2e-spec.ts',
   'GET /closing-queue ?professionalId': 'closing-queue.e2e-spec.ts',
   'GET /closing-queue/count ?locationId': 'closing-queue.e2e-spec.ts',
   'GET /closing-queue/count ?professionalId': 'closing-queue.e2e-spec.ts',

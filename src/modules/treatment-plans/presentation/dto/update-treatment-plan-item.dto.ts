@@ -81,6 +81,15 @@ export class UpdateTreatmentPlanItemDto extends DiscountReasonFieldsDto {
   @IsUUID('all', { message: 'performedLocationId debe ser un UUID.' })
   performedLocationId?: string;
 
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'DX-439: SOLO al pasar a DONE, la cita ATENDIDA (COMPLETED, viva) que lleva el ítem (vínculo vivo): la sede donde se realizó y la fecha de realización son las de la cita (su sede y su inicio), no la sede activa ni la hora actual. 400 sin pasar a DONE; 409 si la cita no está atendida o no lleva el ítem; 403 si su sede no es de las permitidas al usuario (DX-089)',
+  })
+  @IsOptional()
+  @IsUUID('all', { message: 'appointmentId debe ser un UUID.' })
+  appointmentId?: string;
+
   @ApiPropertyOptional({ enum: ToothSurface, isArray: true })
   @IsOptional()
   @IsArray()

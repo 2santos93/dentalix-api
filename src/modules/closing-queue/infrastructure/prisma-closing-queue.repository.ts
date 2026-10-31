@@ -86,7 +86,8 @@ function page<T, R extends { total: bigint }>(
  * Las lecturas de «Pendiente de cerrar» (DX-439) bajo RLS (dentalix_app con la
  * clínica fijada por runWithTenant) y con `tenantId` explícito además. Las
  * tres secciones parten de la misma ventana de citas vivas por sede y zona,
- * que sirve el índice parcial `appointments_tenant_location_closing_idx`.
+ * que sirven `appointments_tenant_start_live_idx` (por clínica) o
+ * `appointments_tenantId_providerId_start_idx` (por profesional).
  */
 @Injectable()
 export class PrismaClosingQueueRepository implements ClosingQueueRepository {
@@ -192,7 +193,7 @@ export class PrismaClosingQueueRepository implements ClosingQueueRepository {
     // es la RESERVA, y una atendida ya no reserva) ni se puede retirar
     // (DX-271): es lo que se hizo en esa visita. El ítem es de ESTA cita
     // mientras su vínculo siga vivo y ninguna otra cita viva lo tenga: ni
-    // reservado ahora (`active`, p. ej. se pasó a la próxima visita) ni
+    // reservado ahora (p. ej. se pasó a la próxima visita) ni
     // atendido después (sale solo en la última atendida). Ítem y plan vivos.
     const rows = await this.prisma.runWithTenant(
       (tx) => tx.$queryRaw<TreatmentSqlRow[]>`
@@ -223,7 +224,12 @@ export class PrismaClosingQueueRepository implements ClosingQueueRepository {
               AND other."appointmentId" <> a."id"
               AND other."deletedAt" IS NULL
               AND a2."deletedAt" IS NULL
-              AND (other."active"
+              -- La reserva REAL, con la misma condición que el trigger
+              -- dx256_link_reservation: la columna "active" solo se
+              -- recalcula al escribir y puede haber vencido con el reloj.
+              AND ((a2."status" IN ('ARRIVED', 'IN_CHAIR', 'READY_FOR_CHECKOUT')
+                    OR (a2."status" IN ('SCHEDULED', 'CONFIRMED')
+                        AND a2."start" >= timezone('UTC', now())))
                    OR (a2."status" = 'COMPLETED'
                        AND (a2."start", a2."id") > (a."start", a."id"))))
          ${scope.planItemId !== undefined ? Prisma.sql`AND i."id" = ${scope.planItemId}::uuid` : Prisma.empty}

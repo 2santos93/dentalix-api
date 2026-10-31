@@ -455,6 +455,7 @@ export class TreatmentPlansController {
         completedAt:
           dto.completedAt === undefined ? undefined : new Date(dto.completedAt),
         performedLocationId: dto.performedLocationId,
+        appointmentId: dto.appointmentId,
       },
       actorRole(req),
       auditRequestContext(req, this.tenantContext),

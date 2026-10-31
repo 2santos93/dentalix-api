@@ -212,6 +212,9 @@ describe('«Pendiente de cerrar» en la BD (DX-439, int)', () => {
   let itemId: string;
   let movedItem: string;
   let bAppointment: string;
+  let laterFirst: string;
+  let laterSecond: string;
+  let laterItem: string;
 
   beforeAll(async () => {
     await prisma.onModuleInit();
@@ -279,6 +282,29 @@ describe('«Pendiente de cerrar» en la BD (DX-439, int)', () => {
         planItemId: moved,
       },
     });
+    // Un ítem ligado a dos atendidas (empezado el 22/10 y seguido el 25/10):
+    // sale solo en la última.
+    laterFirst = await appointment(a, {
+      locationId: a.caracas,
+      start: '2026-10-22T15:00:00Z',
+      status: 'COMPLETED',
+    });
+    await entry(a, laterFirst, false);
+    laterItem = await linkedItem(a, laterFirst);
+    laterSecond = await appointment(a, {
+      locationId: a.caracas,
+      start: '2026-10-25T15:00:00Z',
+      status: 'COMPLETED',
+    });
+    await entry(a, laterSecond, false);
+    await raw.appointmentPlanItem.create({
+      data: {
+        tenantId: a.tenantId,
+        patientId: a.patientId,
+        appointmentId: laterSecond,
+        planItemId: laterItem,
+      },
+    });
     bAppointment = await appointment(b, {
       locationId: b.caracas,
       start: '2026-10-30T15:00:00Z',
@@ -330,12 +356,20 @@ describe('«Pendiente de cerrar» en la BD (DX-439, int)', () => {
     const q = await list(a);
     expect(q.treatment!.items).toEqual([
       expect.objectContaining({
+        appointmentId: laterSecond,
+        planItemId: laterItem,
+      }),
+      expect.objectContaining({
         appointmentId: withItem,
         planItemId: itemId,
         procedureLabel: 'Resina',
         toothNumber: '16',
       }),
     ]);
+    // El mismo ítem atendido después en otra cita COMPLETED: no sale en la primera.
+    expect(q.treatment!.items.map((i) => i.appointmentId)).not.toContain(
+      laterFirst,
+    );
     expect(q.treatment!.items.map((i) => i.appointmentId)).not.toContain(
       movedItem,
     );

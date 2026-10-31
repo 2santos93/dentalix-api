@@ -55,28 +55,58 @@ describe('«Pendiente de cerrar» — reglas (DX-439)', () => {
 
   describe('período', () => {
     it('sin fechas vale (por defecto); con fechas, AAAA-MM-DD y desde ≤ hasta', () => {
-      expect(checkClosingPeriod(undefined, undefined)).toEqual({ ok: true });
-      expect(checkClosingPeriod('2026-10-01', '2026-10-30')).toEqual({
+      expect(checkClosingPeriod(undefined, undefined, '2026-11-01')).toEqual({
+        ok: true,
+      });
+      expect(
+        checkClosingPeriod('2026-10-01', '2026-10-30', '2026-11-01'),
+      ).toEqual({
         ok: true,
         from: '2026-10-01',
         to: '2026-10-30',
       });
-      expect(checkClosingPeriod('2026-10-30', '2026-10-01')).toEqual({
+      expect(
+        checkClosingPeriod('2026-10-30', '2026-10-01', '2026-11-01'),
+      ).toEqual({
         ok: false,
         problem: 'INVALID',
       });
-      expect(checkClosingPeriod('30/10/2026', undefined)).toEqual({
+      expect(checkClosingPeriod('30/10/2026', undefined, '2026-11-01')).toEqual(
+        {
+          ok: false,
+          problem: 'INVALID',
+        },
+      );
+    });
+    it('con un solo extremo, el tope de 92 días también vale contra hoy', () => {
+      const today = '2026-11-01';
+      // Del 31/07 a ayer (31/10) son 93 días; del 01/08, 92.
+      expect(checkClosingPeriod('2026-07-31', undefined, today)).toEqual({
         ok: false,
-        problem: 'INVALID',
+        problem: 'TOO_LONG',
+      });
+      expect(checkClosingPeriod('2026-08-01', undefined, today)).toEqual({
+        ok: true,
+        from: '2026-08-01',
+      });
+      // Solo «hasta»: el «desde» por defecto (hasta − 14) nunca pasa del tope.
+      expect(checkClosingPeriod(undefined, '2026-06-01', today)).toEqual({
+        ok: true,
+        to: '2026-06-01',
       });
     });
+
     it('como mucho 92 días', () => {
-      expect(checkClosingPeriod('2026-01-01', '2026-04-02')).toEqual({
+      expect(
+        checkClosingPeriod('2026-01-01', '2026-04-02', '2026-11-01'),
+      ).toEqual({
         ok: true,
         from: '2026-01-01',
         to: '2026-04-02',
       });
-      expect(checkClosingPeriod('2026-01-01', '2026-04-03')).toEqual({
+      expect(
+        checkClosingPeriod('2026-01-01', '2026-04-03', '2026-11-01'),
+      ).toEqual({
         ok: false,
         problem: 'TOO_LONG',
       });
@@ -121,6 +151,29 @@ describe('«Pendiente de cerrar» — reglas (DX-439)', () => {
       );
       expect(caracas.start).toEqual(new Date('2026-10-30T04:00:00Z'));
       expect(caracas.end).toEqual(new Date('2026-10-31T04:00:00Z'));
+    });
+
+    it('solo «hasta»: los 14 días que acaban en él', () => {
+      const now = new Date('2026-11-01T00:30:00Z');
+      const [caracas] = closingWindow(
+        now,
+        new Map([['caracas', 'America/Caracas']]),
+        { to: '2026-10-20' },
+      );
+      expect(caracas.start).toEqual(new Date('2026-10-07T04:00:00Z'));
+      expect(caracas.end).toEqual(new Date('2026-10-21T04:00:00Z'));
+    });
+
+    it('con tope, un «desde» lejano se recorta a 92 días en la zona de la rama', () => {
+      const now = new Date('2026-11-01T00:30:00Z');
+      const [caracas] = closingWindow(
+        now,
+        new Map([['caracas', 'America/Caracas']]),
+        { from: '2026-01-01' },
+        92,
+      );
+      // Ayer en Caracas = 30/10; 92 días acaban ahí y empiezan el 31/07.
+      expect(caracas.start).toEqual(new Date('2026-07-31T04:00:00Z'));
     });
 
     it('un período que empieza hoy o después no deja rama en esa zona', () => {
@@ -171,6 +224,27 @@ describe('«Pendiente de cerrar» — reglas (DX-439)', () => {
         ok: true,
         value: { ...other, planItemId: null, reasonText: 'Se registra mañana' },
       });
+    });
+
+    it('«Otro» cuenta caracteres, no unidades UTF-16 (como char_length en la BD)', () => {
+      const other = { ...base, reasonCode: 'OTHER' as const };
+      expect(checkDismissal({ ...other, reasonText: '👍👍' })).toEqual({
+        ok: false,
+        problem: 'REASON_TEXT',
+      });
+      expect(checkDismissal({ ...other, reasonText: '👍👍👍' })).toEqual({
+        ok: true,
+        value: { ...other, planItemId: null, reasonText: '👍👍👍' },
+      });
+      expect(
+        checkDismissal({ ...other, reasonText: '👍'.repeat(200) }),
+      ).toEqual({
+        ok: true,
+        value: { ...other, planItemId: null, reasonText: '👍'.repeat(200) },
+      });
+      expect(
+        checkDismissal({ ...other, reasonText: '👍'.repeat(201) }),
+      ).toEqual({ ok: false, problem: 'REASON_TEXT' });
     });
 
     it('el tratamiento lleva su ítem; las otras secciones, no', () => {

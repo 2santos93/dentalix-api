@@ -17,6 +17,7 @@ import {
 } from '../../../shared/tenancy/location-access';
 import { requireLocationTimeZone } from '../../../shared/locations/location-time-zone';
 import {
+  civilDateIn,
   isValidTimeZone,
   PERIOD_DAY_MIN,
   PERIOD_DAY_OUT_OF_RANGE_MESSAGE,
@@ -27,6 +28,7 @@ import {
   checkClosingPeriod,
   checkDismissal,
   CLOSING_QUEUE_DEFAULT_DAYS,
+  CLOSING_QUEUE_MAX_DAYS,
   CLOSING_QUEUE_SECTION_LIMIT,
   closingProfessional,
   closingWindow,
@@ -40,6 +42,7 @@ import {
   CLOSING_QUEUE_REPOSITORY,
   DismissalExistsError,
   type ClosingAppointmentRow,
+  type ClosingLocation,
   type ClosingQueueRepository,
   type ClosingScope,
   type ClosingTreatmentRow,
@@ -104,6 +107,11 @@ export interface ClosingQueue {
   staleInClinic: number | null;
   total: number;
   locations: { id: string; name: string }[];
+  /**
+   * Sedes sin zona horaria válida: sin «hoy» no se pueden cortar sus días y
+   * sus citas no salen; la pantalla lo avisa (configurar la zona en Ajustes).
+   */
+  locationsWithoutZone: { id: string; name: string }[];
 }
 
 export interface ClosingQueueCount {
@@ -126,6 +134,7 @@ interface Resolved {
   sections: ClosingQueueSection[];
   scope: ClosingScope;
   locations: { id: string; name: string }[];
+  locationsWithoutZone: { id: string; name: string }[];
   from: string | null;
   to: string | null;
 }
@@ -154,7 +163,13 @@ export class ClosingQueueUseCases {
     if (!professional.ok) {
       throw new ForbiddenException(CLOSING_OWN_ONLY_MESSAGE);
     }
-    const period = checkClosingPeriod(query.from, query.to);
+    // «Hoy» de referencia para el tope con solo «desde»; cada rama vuelve a
+    // recortarse en su zona (`closingWindow` con el tope).
+    const period = checkClosingPeriod(
+      query.from,
+      query.to,
+      civilDateIn(this.now(), 'UTC'),
+    );
     if (!period.ok) {
       throw new BadRequestException(
         period.problem === 'OUT_OF_RANGE'
@@ -180,15 +195,17 @@ export class ClosingQueueUseCases {
     // Una sede pedida necesita su zona (409 si no la tiene); entre varias, una
     // sin zona no tiene «hoy» y se queda fuera.
     if (locationId !== undefined) requireLocationTimeZone(picked[0]);
+    const hasZone = (l: ClosingLocation) =>
+      l.timeZone !== null && isValidTimeZone(l.timeZone);
     const zones = new Map(
-      picked
-        .filter((l) => l.timeZone !== null && isValidTimeZone(l.timeZone))
-        .map((l) => [l.id, l.timeZone!] as const),
+      picked.filter(hasZone).map((l) => [l.id, l.timeZone!] as const),
     );
-    const branches = closingWindow(this.now(), zones, {
-      from: period.from,
-      to: period.to,
-    });
+    const branches = closingWindow(
+      this.now(),
+      zones,
+      { from: period.from, to: period.to },
+      CLOSING_QUEUE_MAX_DAYS,
+    );
     return {
       sections,
       scope: {
@@ -198,6 +215,9 @@ export class ClosingQueueUseCases {
           : {}),
       },
       locations: all.map((l) => ({ id: l.id, name: l.name })),
+      locationsWithoutZone: picked
+        .filter((l) => !hasZone(l))
+        .map((l) => ({ id: l.id, name: l.name })),
       from: period.from ?? null,
       to: period.to ?? null,
     };
@@ -216,7 +236,7 @@ export class ClosingQueueUseCases {
     return read(scope, limit);
   }
 
-  private async read(resolved: Resolved, limit: number) {
+  private async read(resolved: Resolved, limit: number, withStale: boolean) {
     const { sections, scope } = resolved;
     const has = (s: ClosingQueueSection) => sections.includes(s);
     const [outcome, evolution, treatment, stale] = await Promise.all([
@@ -238,7 +258,7 @@ export class ClosingQueueUseCases {
         (s, l) => this.repo.treatment(s, l),
         limit,
       ),
-      has('OUTCOME') && scope.branches.length > 0
+      withStale && has('OUTCOME') && scope.branches.length > 0
         ? this.repo.staleInClinic(scope)
         : Promise.resolve(has('OUTCOME') ? 0 : null),
     ]);
@@ -249,7 +269,7 @@ export class ClosingQueueUseCases {
 
   async list(query: ClosingQueueQuery): Promise<ClosingQueue> {
     const resolved = await this.resolve(query);
-    const r = await this.read(resolved, CLOSING_QUEUE_SECTION_LIMIT);
+    const r = await this.read(resolved, CLOSING_QUEUE_SECTION_LIMIT, true);
     const view = <T>(page: SectionPage<T> | null): ClosingSection<T> | null =>
       page === null ? null : { total: page.total, items: page.rows };
     return {
@@ -263,12 +283,14 @@ export class ClosingQueueUseCases {
       staleInClinic: r.stale,
       total: r.total,
       locations: resolved.locations,
+      locationsWithoutZone: resolved.locationsWithoutZone,
     };
   }
 
   /** El contador del menú: mismos filtros, sin filas. */
   async count(query: ClosingQueueQuery): Promise<ClosingQueueCount> {
-    const r = await this.read(await this.resolve(query), 1);
+    // Sin el contador de «en clínica»: el menú no lo usa.
+    const r = await this.read(await this.resolve(query), 1, false);
     return {
       total: r.total,
       outcome: r.outcome?.total ?? null,
