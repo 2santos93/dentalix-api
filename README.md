@@ -1997,6 +1997,15 @@ la Sede Norte, por ejemplo). Por defecto nadie está restringido.
   ajena, inactiva o borrada da 400 «Alguna sede no existe en esta clínica.» sin
   escribir nada. `GET /staff` y la ficha del miembro traen `locationIds`
   (`null` = todas). Otra clínica: 404.
+- **Anulaciones y stock (DX-089-bis)**: anular un abono o registrar un
+  movimiento de inventario exige acceso a la sede persistida del recurso,
+  incluso sin cabecera o desde el consolidado. Una sede no permitida da
+  403 `LOCATION_NOT_ALLOWED` sin modificar abonos, compromisos ni stock.
+  Las reglas de autoría, día de anulación y caja siguen vigentes.
+- **Asignación tras invitar**: `POST /invitations` y `PATCH /staff/:userId`
+  no aceptan `locationIds`; se asignan con el `PUT` dedicado anterior.
+  Este es el contrato vigente, aunque el texto antiguo del ticket mencionara
+  esos campos en invitación y actualización.
 - **Invariante del ADMIN**: no se puede restringir (`PUT` → 409 «El ADMIN
   siempre tiene todas las sedes y no se puede restringir.»). Ascender a ADMIN
   (`PATCH /staff/:userId`) borra sus filas en la misma transacción, y también
