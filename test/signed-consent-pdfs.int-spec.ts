@@ -169,7 +169,12 @@ describe('PDF firmado en Postgres (DX-422)', () => {
     ).resolves.toBeNull();
     await expect(
       asClinic(b.tenantId, () =>
-        pdfs.requestRetry(a.patientId, consentId, () => Promise.resolve()),
+        pdfs.requestRetry(
+          a.patientId,
+          consentId,
+          () => undefined,
+          () => Promise.resolve(),
+        ),
       ),
     ).resolves.toBe('NOT_FOUND');
     expect(
@@ -222,19 +227,55 @@ describe('PDF firmado en Postgres (DX-422)', () => {
       pdfs.recordFailure(consentId, { code: 'STORAGE_ERROR', final: true }),
     );
     const enqueued: number[] = [];
+    const authorized: (string | null)[] = [];
     const retry = () =>
       asClinic(a.tenantId, () =>
-        pdfs.requestRetry(a.patientId, consentId, (_tx, attempt) => {
-          enqueued.push(attempt);
-          return Promise.resolve();
-        }),
+        pdfs.requestRetry(
+          a.patientId,
+          consentId,
+          (locationId) => {
+            authorized.push(locationId);
+          },
+          (_tx, attempt) => {
+            enqueued.push(attempt);
+            return Promise.resolve();
+          },
+        ),
       );
     await expect(retry()).resolves.toBe('RETRYING');
     await expect(retry()).resolves.toBe('NOT_FAILED');
     expect(enqueued).toEqual([2]);
+    // SEC-060: se autoriza con la sede del envío a firmar, en cada intento.
+    const sent = await owner.patientConsent.findFirstOrThrow({
+      where: { id: consentId },
+      select: { signatureRequest: { select: { locationId: true } } },
+    });
+    expect(authorized).toEqual([
+      sent.signatureRequest!.locationId,
+      sent.signatureRequest!.locationId,
+    ]);
     expect(
       await owner.signedConsentPdf.findFirstOrThrow({ where: { consentId } }),
     ).toMatchObject({ status: 'PENDING', lastErrorCode: null });
+    // Si la autorización lanza, nada cambia (ni estado ni cola).
+    await asClinic(a.tenantId, () =>
+      pdfs.recordFailure(consentId, { code: 'STORAGE_ERROR', final: true }),
+    );
+    await expect(
+      asClinic(a.tenantId, () =>
+        pdfs.requestRetry(
+          a.patientId,
+          consentId,
+          () => {
+            throw new Error('sede no permitida');
+          },
+          () => Promise.reject(new Error('no debe encolar')),
+        ),
+      ),
+    ).rejects.toThrow('sede no permitida');
+    expect(
+      await owner.signedConsentPdf.findFirstOrThrow({ where: { consentId } }),
+    ).toMatchObject({ status: 'FAILED' });
   });
 
   it('CHECK: READY exige documento y el código de error es técnico', async () => {

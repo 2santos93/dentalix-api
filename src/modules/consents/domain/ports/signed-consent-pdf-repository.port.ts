@@ -63,9 +63,15 @@ export interface SignedConsentPdfRepository {
 
 /** Lo que usa la ficha para reintentar uno FAILED (con la cola en su tx). */
 export interface SignedConsentPdfRetryRepository {
+  /**
+   * `authorize` recibe la sede desde la que se envió a firmar (NULL si el
+   * consentimiento no tuvo envío a distancia) y lanza para abortar antes de
+   * cambiar el estado (SEC-060).
+   */
   requestRetry(
     patientId: string,
     consentId: string,
+    authorize: (locationId: string | null) => void,
     enqueue: (tx: Prisma.TransactionClient, attempt: number) => Promise<void>,
   ): Promise<RetrySignedConsentPdfOutcome>;
 }

@@ -271,8 +271,8 @@ export const SIGNED_PDF_NOT_FAILED_MESSAGE =
 /**
  * «Reintentar» desde la ficha cuando la cola agotó los intentos (FAILED):
  * vuelve a PENDING y encola otro trabajo, en una transacción. 404 si el
- * consentimiento no es de este paciente en esta clínica (RLS); 409 si no está
- * en error.
+ * consentimiento no es de este paciente en esta clínica (RLS); 403 si se
+ * envió desde una sede no permitida al usuario; 409 si no está en error.
  */
 @Injectable()
 export class RetrySignedConsentPdfUseCase {
@@ -281,6 +281,11 @@ export class RetrySignedConsentPdfUseCase {
     private readonly repo: SignedConsentPdfRetryRepository,
     @Inject(SignedConsentPdfQueue)
     private readonly queue: Pick<SignedConsentPdfQueue, 'retry'>,
+    @Inject(TenantContextService)
+    private readonly tenantContext: Pick<
+      TenantContextService,
+      'assertLocationAllowed'
+    >,
   ) {}
 
   async execute(
@@ -290,6 +295,11 @@ export class RetrySignedConsentPdfUseCase {
     const outcome = await this.repo.requestRetry(
       patientId,
       consentId,
+      // SEC-060 (SEC-045): un envío hecho desde una sede no permitida al
+      // usuario es 403, sin reencolar (ni, por tanto, avisar al paciente).
+      (locationId) => {
+        if (locationId) this.tenantContext.assertLocationAllowed(locationId);
+      },
       (tx, attempt) => this.queue.retry(tx, consentId, attempt),
     );
     if (outcome === 'NOT_FOUND') {

@@ -683,6 +683,20 @@ describe('Firma a distancia de consentimientos (e2e, DX-243)', () => {
       .post(`/patients/${patientId}/consents/${consentId}/signed-pdf/copy`)
       .expect(403);
     expect(denied.body).toMatchObject({ code: LOCATION_NOT_ALLOWED_CODE });
+    // SEC-060: «Reintentar» el PDF también respeta la sede del envío: 403
+    // (antes que el 409 de «ya archivado») y el PDF sigue como estaba.
+    const retryDenied = await as(clinicA, restrictedToken)
+      .post(`/patients/${patientId}/consents/${consentId}/signed-pdf/retry`)
+      .expect(403);
+    expect(retryDenied.body).toMatchObject({
+      code: LOCATION_NOT_ALLOWED_CODE,
+    });
+    expect(
+      await raw.signedConsentPdf.findFirst({
+        where: { consentId },
+        select: { status: true },
+      }),
+    ).toMatchObject({ status: 'READY' });
     expect(await raw.signedConsentPdfLink.count({ where: { consentId } })).toBe(
       linksBefore,
     );
