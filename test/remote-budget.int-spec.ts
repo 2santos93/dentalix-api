@@ -16,6 +16,10 @@ import {
   quoteIssuedOn,
 } from '../src/modules/treatment-plans/application/use-cases/plan-quote.use-cases';
 import { computeQuoteHash } from '../src/modules/treatment-plans/domain/plan-quote';
+import {
+  acceptPlanInTx,
+  lockPlanGroup,
+} from '../src/modules/treatment-plans/infrastructure/repositories/plan-option-group';
 import { resetDatabase } from './support/e2e-fixtures';
 import {
   REGIONAL_BOGOTA_FIXTURE,
@@ -276,6 +280,66 @@ describe('presupuesto a distancia en Postgres (DX-415)', () => {
       (await owner.treatmentPlan.findUniqueOrThrow({ where: { id: planId } }))
         .status,
     ).toBe('PRESENTED');
+  });
+
+  it('carrera: la clínica acepta con firma mientras el paciente firma a distancia; queda UNA aceptación, la de la clínica, y el enlace no se usa', async () => {
+    const planId = await presentedPlan(a);
+    const { id, request } = await sendBudget(a, planId);
+    let releaseClinic!: () => void;
+    const clinicHolds = new Promise<void>((resolve) => {
+      releaseClinic = resolve;
+    });
+    let clinicLocked!: () => void;
+    const lockedByClinic = new Promise<void>((resolve) => {
+      clinicLocked = resolve;
+    });
+    // La aceptación en la clínica (DX-012): bloquea el grupo, escribe su
+    // aceptación y acepta el plan; espera con el bloqueo puesto.
+    const clinic = asClinic(a.tenantId, () =>
+      prisma.runWithTenant(async (tx) => {
+        const locked = await lockPlanGroup(tx, planId);
+        if (!locked) throw new Error('sin plan');
+        clinicLocked();
+        await clinicHolds;
+        const at = new Date();
+        await tx.treatmentPlanAcceptance.create({
+          data: {
+            tenantId: a.tenantId,
+            planId,
+            patientId: a.patientId,
+            locationId: a.locationId,
+            signerName: 'Ana Clínica',
+            signature: PNG,
+            content: request.budgetContent as unknown as Prisma.InputJsonObject,
+            contentHash: request.budgetContentHash,
+            acceptanceHash: HASH,
+            acceptedAt: at,
+            acceptedById: a.userId,
+          },
+        });
+        await acceptPlanInTx(tx, locked, at, a.userId, a.locationId);
+      }),
+    );
+    await lockedByClinic;
+    // El paciente firma: bloquea su enlace y espera al grupo del plan.
+    const remote = signBudget(a, id, planId);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    releaseClinic();
+    await expect(clinic).resolves.toBeUndefined();
+    await expect(remote).rejects.toBeInstanceOf(RemoteBudgetChangedError);
+
+    const acceptances = await owner.treatmentPlanAcceptance.findMany({
+      where: { planId },
+      select: { signatureRequestId: true, signerName: true },
+    });
+    expect(acceptances).toEqual([
+      { signatureRequestId: null, signerName: 'Ana Clínica' },
+    ]);
+    const after = await owner.signatureRequest.findUniqueOrThrow({
+      where: { id },
+      select: { signedAt: true },
+    });
+    expect(after.signedAt).toBeNull();
   });
 
   it('CHECK: un BUDGET lleva plan, foto y hash; un CONSENT no lleva foto', async () => {
