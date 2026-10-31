@@ -1006,7 +1006,11 @@ describe('pagadores y coberturas (int, DX-153)', () => {
             data: { verifiedById: admin, verifiedAt: new Date() },
           });
         });
-        await edit;
+        // Leyó con el candado: vio la verificación que se acababa de hacer
+        // (fuera del candado habría leído «sin verificar»).
+        expect(await edit).toMatchObject({
+          previous: { verified: true },
+        });
         expect(await stored(id)).toMatchObject({
           validTo: new Date('2027-06-30T00:00:00.000Z'),
           verifiedAt: null,

@@ -709,7 +709,9 @@ describe('Cobertura verificable para asignar un convenio (e2e, SEC-049)', () => 
         await patch(
           foreignPatient,
           foreignCoverage,
-          { validTo: null },
+          // Un cambio de verdad (la ajena no tiene fin): si se colara, se
+          // vería en `validTo` y en la verificación.
+          { validTo: '2030-12-31' },
           tokens[role],
         ).expect(404);
       }
