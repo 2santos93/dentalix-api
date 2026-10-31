@@ -3346,6 +3346,11 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       'public-post-op-instructions.e2e-spec.ts',
     // DX-243: «el token de A en el host de B → Enlace no válido» en las cinco
     // rutas, sin abrir, enviar código, verificar ni firmar nada de A.
+    // DX-435: «el token de A en el contexto de B → 404» en ver, aceptar y
+    // rechazar la oferta de hueco, sin crear cita ni cambiar la oferta de A.
+    'GET /public/slot-offers/:token': 'slot-offers.int-spec.ts',
+    'POST /public/slot-offers/:token/accept': 'slot-offers.int-spec.ts',
+    'POST /public/slot-offers/:token/decline': 'slot-offers.int-spec.ts',
     'GET /public/sign/:token': 'signature-requests.e2e-spec.ts',
     'POST /public/sign/:token/code': 'signature-requests.e2e-spec.ts',
     'POST /public/sign/:token/verify': 'signature-requests.e2e-spec.ts',

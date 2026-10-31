@@ -378,6 +378,7 @@ describe('«Ocupar este hueco» (DX-210)', () => {
           createdById: 'u',
           outcomeById: 'u',
           outcomeAt: new Date(),
+          expiresAt: null,
           createdAt: new Date(),
         });
       }

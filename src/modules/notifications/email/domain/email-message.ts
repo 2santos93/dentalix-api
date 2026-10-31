@@ -21,6 +21,7 @@ export const EMAIL_TEMPLATES = [
   'signature-request',
   'signature-code',
   'signature-budget-accepted',
+  'slot-offer',
 ] as const;
 export type EmailTemplateName = (typeof EMAIL_TEMPLATES)[number];
 
@@ -200,6 +201,22 @@ export interface SignatureBudgetAcceptedEmailVars {
   acceptedAtLabel: string;
 }
 
+/**
+ * DX-435: un hueco libre con enlace para aceptarlo (el primero que acepta se
+ * lo queda). Cuándo, dónde y con quién; nada clínico.
+ */
+export interface SlotOfferEmailVars {
+  patientFirstName: string;
+  clinicName: string;
+  /** Inicio del hueco, ya formateado en la zona y el formato de la sede. */
+  slotLabel: string;
+  locationName: string;
+  providerName: string | null;
+  /** Enlace público (`/hueco/<token>`). */
+  url: string;
+  expiresAtLabel: string;
+}
+
 export interface EmailVarsByTemplate {
   invitation: InvitationEmailVars;
   'password-reset': PasswordResetEmailVars;
@@ -211,6 +228,7 @@ export interface EmailVarsByTemplate {
   'signature-request': SignatureRequestEmailVars;
   'signature-code': SignatureCodeEmailVars;
   'signature-budget-accepted': SignatureBudgetAcceptedEmailVars;
+  'slot-offer': SlotOfferEmailVars;
 }
 
 /** Lo que el remitente produce para una plantilla: asunto, HTML y texto. */

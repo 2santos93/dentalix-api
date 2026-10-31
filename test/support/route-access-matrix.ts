@@ -120,6 +120,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /public/sign/:token/verify': PUBLIC_TENANT,
   'GET /public/sign/:token/document': PUBLIC_TENANT,
   'POST /public/sign/:token/sign': PUBLIC_TENANT,
+  // DX-435: la oferta de hueco por enlace.
+  'GET /public/slot-offers/:token': PUBLIC_TENANT,
+  'POST /public/slot-offers/:token/accept': PUBLIC_TENANT,
+  'POST /public/slot-offers/:token/decline': PUBLIC_TENANT,
 
   // --- Cualquier sesión (sin rol de clínica) -------------------------------
   // dentalix-docs/docs/plans/2026-07-28-user-profile.md (/me) y

@@ -15,6 +15,7 @@ import {
   SignatureBudgetAcceptedEmailVars,
   SignatureCodeEmailVars,
   SignatureRequestEmailVars,
+  SlotOfferEmailVars,
 } from '../../domain/email-message';
 import { EmailBlock, renderLayout } from './layout';
 import { endSentence } from '../../../../../shared/format/end-sentence';
@@ -369,6 +370,33 @@ function signatureBudgetAccepted(
   });
 }
 
+function slotOffer(
+  vars: SlotOfferEmailVars,
+  brand: EmailBrand | null,
+): RenderedEmail {
+  const withProvider = vars.providerName ? ` con ${vars.providerName}` : '';
+  return renderLayout({
+    brand,
+    subject: `${vars.clinicName} tiene un hueco libre para ti`,
+    heading: `Hola, ${vars.patientFirstName}`,
+    blocks: [
+      {
+        kind: 'paragraph',
+        text: `Se liberó un hueco el ${vars.slotLabel} en ${vars.locationName}${withProvider}.`,
+      },
+      {
+        kind: 'paragraph',
+        text: 'Si te viene bien, ábrelo y acéptalo: se lo queda el primero que lo acepte. Si no, puedes rechazarlo desde el mismo enlace.',
+      },
+      {
+        kind: 'note',
+        text: `La oferta caduca el ${vars.expiresAtLabel} y el enlace solo sirve una vez. Si no esperabas este correo, ignóralo.`,
+      },
+    ],
+    action: { label: 'Ver el hueco', url: vars.url },
+  });
+}
+
 type Renderer<T extends EmailTemplateName> = (
   vars: EmailVarsByTemplate[T],
   brand: EmailBrand | null,
@@ -385,6 +413,7 @@ const RENDERERS: { [T in EmailTemplateName]: Renderer<T> } = {
   'signature-request': signatureRequest,
   'signature-code': signatureCode,
   'signature-budget-accepted': signatureBudgetAccepted,
+  'slot-offer': slotOffer,
 };
 
 /**

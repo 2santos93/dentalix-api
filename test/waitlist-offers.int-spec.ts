@@ -319,7 +319,12 @@ describe('huecos libres → candidatos y ofertas (int, DX-210)', () => {
         }),
       );
       expect(Object.fromEntries(summary)).toEqual({
-        [a.patientIds[1]]: { today: 1, forSlot: true, pendingOfferId: null },
+        [a.patientIds[1]]: {
+          today: 1,
+          forSlot: true,
+          pendingOfferId: null,
+          linkOffer: null,
+        },
       });
     });
 
