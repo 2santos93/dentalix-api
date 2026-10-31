@@ -1285,6 +1285,61 @@ true`: 409 `LOCATION_REGIONAL_CHANGE_UNCONFIRMED`.
   `location_schedules.timezone` (columna legada de la fase 1, R20).
 - Auditoría: `metadata.regionalSettings = { before, after, reviewed }`.
 
+## Saldo a favor (DX-253, DX-438)
+
+El saldo a favor de un plan (lo abonado de más, o lo de un plan cancelado o
+rechazado) se mueve con `POST /api/v1/treatment-plans/:id/credit-transfers`
+(a otro plan vivo del mismo paciente, en la misma moneda) y
+`POST /api/v1/treatment-plans/:id/credit-refunds` (devolución al paciente).
+Cada movimiento deja asientos en `patient_credit_entries`, **en la moneda del
+plan**, y todas las lecturas (`readPlanCredit`, la guarda de anulación de
+abonos, `patient_ledgers` y el estado de cuenta) suman solo los asientos cuya
+moneda es la **actual** del plan.
+
+**Regla (DX-438, DB-066): un plan con asientos de saldo a favor no cambia de
+moneda**, tenga o no abonos (un borrador o presentado que solo recibió un
+traspaso también). Si cambiara, sus asientos quedarían en la moneda vieja y el
+saldo desaparecería de todos los saldos sin error.
+
+- **App**: `PATCH /api/v1/treatment-plans/:id` con otra `currency` responde
+  409 `code: PLAN_CURRENCY_LOCKED_BY_CREDIT` («El plan tiene saldo a favor
+  traspasado o devuelto: su moneda ya no cambia…»). Se decide con el plan
+  bloqueado (`FOR UPDATE`), que espera a cualquier traspaso en curso.
+- **Bajo el bloqueo del traspaso** (`FOR NO KEY UPDATE` de origen y destino)
+  se comprueba otra vez que los dos siguen en la moneda del traspaso; la
+  devolución, que el plan sigue en la suya. Si un cambio de moneda se
+  confirmó entre la lectura y el bloqueo: 409 con el mensaje de
+  `CREDIT_CHANGED_MESSAGE` y no se escribe nada.
+- **BD (red)**: trigger `treatment_plans_credit_currency_locked`
+  (`BEFORE UPDATE OF currency`, solo si la moneda cambia) → `restrict_violation`
+  (409 genérico en la API) si existe algún asiento del plan. Bajo la RLS de la
+  sesión: dentalix_app (siempre con su clínica) y el superusuario lo ven; un
+  owner sin superusuario y sin `app.current_tenant` no ve los asientos, así
+  que el mantenimiento a mano fija la clínica antes. Migración aditiva
+  `20261107150000_dx438_credit_currency_lock` (solo función + trigger).
+- **Diagnóstico** (solo lectura): `prisma/scripts/credit-currency-report.sql`
+  lista los asientos en otra moneda que su plan (`ENTRY_CURRENCY_MISMATCH`, con
+  clínica, paciente, plan, asiento, tipo, importe y las dos monedas). Debe dar
+  0 filas. Por clínica, como la app:
+
+  ```sql
+  BEGIN;
+  SET LOCAL ROLE dentalix_app;
+  SELECT pg_catalog.set_config('app.current_tenant', '<tenantId>', true);
+  \i prisma/scripts/credit-currency-report.sql
+  ROLLBACK;
+  ```
+
+  O todas las clínicas con un rol `BYPASSRLS` o superusuario:
+  `psql "<URL sin ?schema>" -X -v ON_ERROR_STOP=1 -f prisma/scripts/credit-currency-report.sql`.
+  Sin clínica fijada ni `BYPASSRLS` no da un falso «todo bien»: devuelve solo
+  la fila `NO_CLINIC_VISIBLE`. Corregir un asiento huérfano es decisión de la
+  clínica (la conversión entre monedas está fuera de alcance).
+
+Pruebas: `test/patient-credit-plan-currency.int-spec.ts` (PATCH tras un
+traspaso, la carrera antes del bloqueo, la carrera real, el trigger y el
+diagnóstico) y el caso DX-438 de `test/patient-credit.e2e-spec.ts`.
+
 ## Cartera por antigüedad (DX-145, DX-155)
 
 `GET /api/v1/receivables/aging` (ADMIN y RECEPTION; 403 en español al resto):

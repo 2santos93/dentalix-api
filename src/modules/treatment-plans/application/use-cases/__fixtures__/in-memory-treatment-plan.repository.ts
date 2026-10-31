@@ -83,6 +83,8 @@ export class InMemoryTreatmentPlanRepository
   readonly livePaymentPlanIds = new Set<string>();
   /** Planes con un plan de cuotas ACTIVO (DX-109). */
   readonly activePaymentPlanIds = new Set<string>();
+  /** Planes con asientos de saldo a favor (DX-438; son de otro módulo). */
+  readonly creditEntryPlanIds = new Set<string>();
   /** Cancelaciones de planes de cuotas hechas junto a su plan (DX-109). */
   readonly paymentPlanCancellations: {
     planId: string;
@@ -325,6 +327,7 @@ export class InMemoryTreatmentPlanRepository
     const change = decide(current, {
       hasLivePayments: this.livePaymentPlanIds.has(id),
       hasActivePaymentPlan: this.activePaymentPlanIds.has(id),
+      hasCreditEntries: this.creditEntryPlanIds.has(id),
     });
     const siblings = this.liveSiblings(row);
     if (change.acceptedAt) {

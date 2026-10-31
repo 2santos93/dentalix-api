@@ -95,6 +95,11 @@ export interface PlanFacts {
   hasLivePayments: boolean;
   /** ¿Tiene un plan de cuotas ACTIVO? (DX-109) */
   hasActivePaymentPlan: boolean;
+  /**
+   * ¿Tiene algún asiento de saldo a favor (traspaso dado o recibido, o
+   * devolución)? Están en la moneda del plan (DX-253, DX-438).
+   */
+  hasCreditEntries: boolean;
 }
 
 // NOTE: deliberately NO `tenantId`/`id`/`status` field — a newly added item

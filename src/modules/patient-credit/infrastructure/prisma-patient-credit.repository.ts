@@ -269,13 +269,21 @@ export class PrismaPatientCreditRepository implements PatientCreditRepository {
           input.targetPlanId,
         ]);
         const source = await this.planCredit(tx, tenantId, input.sourcePlanId);
-        if (!source || source.creditCents < input.amountCents) {
+        if (
+          !source ||
+          source.currency !== input.currency ||
+          source.creditCents < input.amountCents
+        ) {
           throw new ConflictException(CREDIT_CHANGED_MESSAGE);
         }
-        // El destino se pudo cancelar o rechazar entre la lectura del caso de
-        // uso y el bloqueo: se relee bajo el bloqueo (el cambio de estado
-        // espera a este COMMIT o ya está confirmado).
+        // El destino se pudo cancelar, rechazar o cambiar de moneda entre la
+        // lectura del caso de uso y el bloqueo: se relee bajo el bloqueo (el
+        // cambio espera a este COMMIT o ya está confirmado). Un asiento en
+        // otra moneda que la del plan no contaría en ningún saldo (DX-438).
         const target = await this.planCredit(tx, tenantId, input.targetPlanId);
+        if (target && target.currency !== input.currency) {
+          throw new ConflictException(CREDIT_CHANGED_MESSAGE);
+        }
         if (!target || !isPlanBillable(target.status)) {
           throw new ConflictException(CREDIT_TARGET_NOT_BILLABLE_MESSAGE);
         }
@@ -340,7 +348,13 @@ export class PrismaPatientCreditRepository implements PatientCreditRepository {
       return await this.prisma.runWithTenant(async (tx) => {
         await this.lockPlans(tx, tenantId, [input.planId]);
         const plan = await this.planCredit(tx, tenantId, input.planId);
-        if (!plan || plan.creditCents < input.amountCents) {
+        // DX-438: el saldo se leyó en la moneda del plan; si cambió antes del
+        // bloqueo, la devolución saldría en una moneda que ya no es la suya.
+        if (
+          !plan ||
+          plan.currency !== input.currency ||
+          plan.creditCents < input.amountCents
+        ) {
           throw new ConflictException(CREDIT_CHANGED_MESSAGE);
         }
         const paymentIds = [...new Set(input.paymentIds)].sort();
