@@ -5,14 +5,15 @@ import { DEMO_ROTATION } from './data';
  * Calendario de la clínica demo. Todo es función pura de "hoy" (sin azar), así
  * que dos corridas el mismo día producen exactamente las mismas citas.
  *
- * Las sedes demo están en UTC: una zona sin país y sin horario de verano. Por
- * eso aquí se puede pasar de hora de pared a instante con un desfase
- * constante, sin librería de zonas. Si se cambia la zona, tiene que ser otra
- * de desfase FIJO y `DEMO_UTC_OFFSET_MINUTES` su desfase (minutos que hay que
- * sumar a la hora de pared para llegar a UTC; p. ej. 300 en UTC−5).
+ * Las sedes demo están en America/Caracas: UTC−4 todo el año (Venezuela no
+ * tiene horario de verano desde 2016). Por eso aquí se puede pasar de hora de
+ * pared a instante con un desfase constante, sin librería de zonas. Si se
+ * cambia la zona, tiene que ser otra de desfase FIJO y
+ * `DEMO_UTC_OFFSET_MINUTES` su desfase (minutos que hay que sumar a la hora
+ * de pared para llegar a UTC: 240 en UTC−4).
  */
-export const DEMO_TIMEZONE = 'UTC';
-const DEMO_UTC_OFFSET_MINUTES = 0;
+export const DEMO_TIMEZONE = 'America/Caracas';
+const DEMO_UTC_OFFSET_MINUTES = 240;
 const MINUTE_MS = 60 * 1000;
 const DAY_MS = 24 * 60 * MINUTE_MS;
 
@@ -81,13 +82,13 @@ export function daysUntilNextWeekday(now: Date): number {
 }
 
 /**
- * DX-446: desfases (0 = hoy, en Bogotá) de los `count` próximos días
+ * DX-446: desfases (0 = hoy, en la sede) de los `count` próximos días
  * laborables (lun–vie), empezando por hoy si lo es.
  */
 export function upcomingWeekdayOffsets(now: Date, count: number): number[] {
   const offsets: number[] = [];
   for (let offset = 0; offsets.length < count; offset++) {
-    if (![0, 6].includes(bogotaDay(now, offset).weekday)) offsets.push(offset);
+    if (![0, 6].includes(sedeDay(now, offset).weekday)) offsets.push(offset);
   }
   return offsets;
 }
@@ -435,7 +436,7 @@ export function planClosingQueueExamples(
   ranges: readonly WallRange[],
 ): PlannedClosingExample[] {
   for (let daysAgo = 1; daysAgo <= 7; daysAgo++) {
-    const day = bogotaDay(now, -daysAgo);
+    const day = sedeDay(now, -daysAgo);
     const open = ranges.filter((r) => r.weekday === day.weekday);
     if (open.length === 0) continue;
     const close = Math.max(...open.map((r) => r.endMinute));

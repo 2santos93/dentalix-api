@@ -97,6 +97,8 @@ import { GetPaymentAllocationsUseCase } from '../src/modules/payments/applicatio
 import { RecordPaymentUseCase } from '../src/modules/payments/application/use-cases/record-payment.use-case';
 import { CreatePaymentMethodUseCase } from '../src/modules/payment-methods/application/payment-methods.use-cases';
 import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
+import { RegisterManualExchangeRateUseCase } from '../src/modules/exchange/application/use-cases/manual-exchange-rates.use-cases';
+import { UpdateDocumentTypeNamesUseCase } from '../src/modules/patients/application/use-cases/document-type-names.use-cases';
 import {
   CreateCollectionNoteUseCase,
   CreatePaymentPromiseUseCase,
@@ -198,8 +200,12 @@ import {
   DEMO_CURRENCY,
   DEMO_HOUR_CYCLE,
   DEMO_LOCALE,
-  DEMO_NORTE_CURRENCY,
   DEMO_COMPARISON_HISTORY,
+  DEMO_DOCUMENT_TYPE_NAMES,
+  DEMO_MANUAL_RATE_DAYS,
+  DEMO_RATE_CURRENCY,
+  demoVes,
+  demoVesPerUsd,
   DEMO_EMAIL_DOMAIN,
   DEMO_INVENTORY,
   DEMO_LOCATIONS,
@@ -588,6 +594,62 @@ class DemoSeeder {
   }
 
   /**
+   * DX-374: la clínica demo cobra parte en bolívares con la tasa MANUAL del
+   * día (la que registra cada mañana, como hacen las clínicas venezolanas).
+   * La fuente pasa a MANUAL desde hace `DEMO_MANUAL_RATE_DAYS - 1` días (toda
+   * la historia de abonos; el caso de uso la fijaría en hoy, así que se pone
+   * directamente: `tenants` no tiene RLS) y se registran las tasas de cada
+   * uno de esos días por el caso de uso de Ajustes › Tasa de cambio. Va antes
+   * de cualquier abono: todos los de VES congelan la tasa de su día.
+   */
+  private async setUpExchangeRates(
+    tenantId: string,
+    ownerId: string,
+  ): Promise<void> {
+    const today = civilDateIn(this.now, DEMO_TIMEZONE);
+    const oldest = DEMO_MANUAL_RATE_DAYS - 1;
+    await this.prisma.tenant.update({
+      where: { id: tenantId },
+      data: {
+        exchangeRateSource: 'MANUAL',
+        manualExchangeRatesSince: new Date(
+          `${addCivilDays(today, -oldest)}T00:00:00Z`,
+        ),
+      },
+    });
+    await this.inTenant(tenantId, undefined, async () => {
+      for (let daysAgo = oldest; daysAgo >= 0; daysAgo--) {
+        await this.use(RegisterManualExchangeRateUseCase).execute(
+          {
+            date: addCivilDays(today, -daysAgo),
+            currency: DEMO_RATE_CURRENCY,
+            rate: demoVesPerUsd(daysAgo),
+          },
+          ownerId,
+        );
+      }
+    });
+  }
+
+  /** DX-327: los nombres locales de los documentos (dato de la clínica). */
+  private async setUpDocumentTypeNames(
+    tenantId: string,
+    ownerId: string,
+  ): Promise<void> {
+    await this.use(UpdateDocumentTypeNamesUseCase).execute(
+      DEMO_DOCUMENT_TYPE_NAMES,
+      {
+        tenantId,
+        locationId: null,
+        actor: { userId: ownerId, role: ClinicRole.ADMIN },
+        requestId: null,
+        ip: null,
+        userAgent: null,
+      },
+    );
+  }
+
+  /**
    * DX-377: el medio demo «Pago móvil» (tipo digital, pide referencia), además
    * de los 4 iniciales que el alta ya creó. Nombre genérico: ni país ni banco.
    */
@@ -636,6 +698,10 @@ class DemoSeeder {
     );
     await this.inTenant(tenantId, undefined, () =>
       this.restrictStaffLocations(ownerId, userIds, locations),
+    );
+    await this.setUpExchangeRates(tenantId, ownerId);
+    await this.inTenant(tenantId, undefined, () =>
+      this.setUpDocumentTypeNames(tenantId, ownerId),
     );
     const hours = await this.readBusinessHours(tenantId, locations);
 
@@ -946,8 +1012,8 @@ class DemoSeeder {
     const norte = await this.use(CreateLocationUseCase).execute({
       ...DEMO_LOCATIONS.norte,
       country: DEMO_COUNTRY,
-      // La Sede Norte cobra en otra moneda: la demo multimoneda tiene dos.
-      currency: DEMO_NORTE_CURRENCY,
+      // Como la principal: la clínica trabaja en USD en sus dos sedes.
+      currency: DEMO_CURRENCY,
       timeZone: DEMO_TIMEZONE,
       locale: DEMO_LOCALE,
       hourCycle: DEMO_HOUR_CYCLE,
@@ -2322,10 +2388,8 @@ class DemoSeeder {
         visit.startMinute + visit.durationMinutes,
       );
       const patientId = patientIds[visit.patientIndex];
-      // Cada sede cobra su historia en su moneda (la Norte, en EUR con su
-      // lista de precios): «Comparar sedes» enseña una cifra por moneda.
-      const sedeCurrency =
-        visit.location === 'norte' ? DEMO_NORTE_CURRENCY : DEMO_CURRENCY;
+      // Las dos sedes cobran en USD (la Norte, con su lista de precios).
+      const sedeCurrency = DEMO_CURRENCY;
       await this.inTenant(tenantId, locations[visit.location], async () => {
         const appointment = await this.use(
           CreateAppointmentUseCase,
@@ -2611,7 +2675,7 @@ class DemoSeeder {
    * DX-027: la caja por turno de recepción en la sede principal, por los
    * mismos casos de uso que la API: el turno de la mañana, cerrado con una
    * diferencia de 2 USD en efectivo explicada, y el de la tarde abierto con su
-   * fondo y un cobro. Va DESPUÉS de los abonos históricos, que quedan sin caja
+   * fondo en USD y en VES y un cobro en cada moneda. Va DESPUÉS de los abonos históricos, que quedan sin caja
    * (como los de antes de DX-027). Los ajustes de caja de la clínica quedan
    * como por defecto (sin «exigir caja abierta» ni «arqueo ciego»).
    */
@@ -2632,30 +2696,47 @@ class DemoSeeder {
             items: { select: { price: true, discount: true, status: true } },
             payments: {
               where: { deletedAt: null },
-              select: { amount: true },
+              select: {
+                amount: true,
+                currency: true,
+                exchangeRateFrom: true,
+                exchangeRateTo: true,
+              },
             },
           },
         }),
       );
+      // Lo cobrado en USD: los abonos en VES, con su tasa congelada.
+      const inUsd = (pay: (typeof plans)[number]['payments'][number]) =>
+        pay.currency === DEMO_CURRENCY ||
+        !pay.exchangeRateFrom ||
+        !pay.exchangeRateTo
+          ? pay.amount.toNumber()
+          : (pay.amount.toNumber() * pay.exchangeRateTo.toNumber()) /
+            pay.exchangeRateFrom.toNumber();
       const pending = (p: (typeof plans)[number]) =>
         p.items
           .filter((i) => i.status !== 'PROPOSED')
           .reduce(
             (sum, i) => sum + i.price.toNumber() - i.discount.toNumber(),
             0,
-          ) - p.payments.reduce((sum, pay) => sum + pay.amount.toNumber(), 0);
+          ) - p.payments.reduce((sum, pay) => sum + inUsd(pay), 0);
       const plan = [...plans].sort((a, b) => pending(b) - pending(a))[0];
       if (!plan || pending(plan) < 80) {
         throw new Error(
           'La demo no tiene un plan aceptado con saldo para la caja',
         );
       }
-      const charge = (amount: number, method: 'CASH' | 'CARD') =>
+      const charge = (
+        amount: number,
+        method: 'CASH' | 'CARD',
+        currency: string = DEMO_CURRENCY,
+      ) =>
         this.use(RecordPaymentUseCase).execute(
           plan.id,
           {
             amount,
-            currency: DEMO_CURRENCY,
+            currency,
             paidAt: this.now,
             method,
             notes: 'Cobro en caja (turno demo).',
@@ -2684,14 +2765,21 @@ class DemoSeeder {
         actor,
       );
 
+      // La de la tarde, abierta, cuenta en las dos monedas: fondo en USD y en
+      // bolívares (para dar cambio) y un cobro en efectivo en Bs. (10 USD a
+      // la tasa de hoy), como una caja venezolana.
       await this.use(OpenCashSessionUseCase).execute(
         {
-          floats: [{ currency: DEMO_CURRENCY, amount: 150 }],
+          floats: [
+            { currency: DEMO_CURRENCY, amount: 150 },
+            { currency: DEMO_RATE_CURRENCY, amount: demoVes(20, 0) },
+          ],
           notes: 'Turno de tarde',
         },
         actor,
       );
       await charge(15, 'CASH');
+      await charge(demoVes(10, 0), 'CASH', DEMO_RATE_CURRENCY);
     });
   }
 

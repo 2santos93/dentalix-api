@@ -26,6 +26,7 @@ import {
   DEMO_PROFESSIONAL_SPECIALTIES,
 } from '../prisma/demo/data';
 import { purgeDemoTenants } from './support/demo-tenant-purge';
+import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
 import { tenantTablesInDeleteOrder } from './support/tenant-purge';
 import { hostFor } from './support/tenant-host';
 import { PAYER_TYPES } from '../src/modules/payers/domain/payer-type';
@@ -330,9 +331,10 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     // DX-150: tres gestiones de cobro y un compromiso abierto.
     expect(firstCounts.collection_notes).toBe(3);
     expect(firstCounts.payment_promises).toBe(1);
-    // DX-027: un turno cerrado con arqueo (2 líneas) y otro abierto.
+    // DX-027: un turno cerrado con arqueo (2 líneas) y otro abierto; V1: el
+    // abierto con fondo en USD y en VES.
     expect(firstCounts.cash_sessions).toBe(2);
-    expect(firstCounts.cash_session_floats).toBe(2);
+    expect(firstCounts.cash_session_floats).toBe(3);
     expect(firstCounts.cash_session_closings).toBe(1);
     expect(firstCounts.cash_session_closing_lines).toBe(2);
     // DX-274: tres gastos (uno con pago completo, uno parcial, uno pendiente)
@@ -394,20 +396,31 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
         tenant.prescriptionRequireClinicalRecordNumber,
       validityDays: tenant.prescriptionValidityDays,
     }).toEqual(DEMO_PRESCRIPTION_SETTINGS);
-    // DX-324: los ajustes los fija el ADMIN por su caso de uso, auditado.
+    // DX-324: los ajustes los fija el ADMIN por su caso de uso, auditado
+    // (V1: además del de los nombres de los documentos).
     const settingsEvents = await raw.auditEvent.findMany({
       where: { tenantId, resourceType: 'CLINIC_SETTINGS' },
       select: { action: true, actorRole: true, metadata: true },
     });
-    expect(settingsEvents).toEqual([
-      expect.objectContaining({
-        action: 'UPDATE',
-        actorRole: ClinicRole.ADMIN,
-        metadata: expect.objectContaining({
-          reason: 'PRESCRIPTION_SETTINGS',
-        }) as unknown,
-      }),
-    ]);
+    expect(settingsEvents).toHaveLength(2);
+    expect(settingsEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: 'UPDATE',
+          actorRole: ClinicRole.ADMIN,
+          metadata: expect.objectContaining({
+            reason: 'PRESCRIPTION_SETTINGS',
+          }) as unknown,
+        }),
+        expect.objectContaining({
+          action: 'UPDATE',
+          actorRole: ClinicRole.ADMIN,
+          metadata: expect.objectContaining({
+            reason: 'DOCUMENT_TYPE_NAMES_SETTINGS',
+          }) as unknown,
+        }),
+      ]),
+    );
 
     const rx = await raw.prescription.findFirstOrThrow({
       where: { tenantId },
@@ -433,10 +446,11 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     );
   });
 
-  it('the demo clinic has no local document type names', async () => {
-    // R16 (pre-flight M18): toda clínica empieza sin nombres locales, también
-    // la demo; ni siembra ni valor por defecto los rellena, y no hay evento
-    // DOCUMENT_TYPE_NAMES_SETTINGS.
+  it('the demo clinic names its documents as a Venezuelan clinic does, through the audited settings use case', async () => {
+    // R16 (pre-flight M18): toda clínica empieza sin nombres locales y ningún
+    // valor por defecto los rellena. La demo (V1, clínica venezolana) los pone
+    // como lo haría su ADMIN en Ajustes: solo el documento nacional, con su
+    // evento DOCUMENT_TYPE_NAMES_SETTINGS; los demás siguen sin nombre.
     const tenantId = await liveDemoTenantId();
     const tenant = await raw.tenant.findUniqueOrThrow({
       where: { id: tenantId },
@@ -449,7 +463,7 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       },
     });
     expect(tenant).toEqual({
-      docTypeNameNationalId: null,
+      docTypeNameNationalId: 'Cédula de identidad',
       docTypeNamePassport: null,
       docTypeNameResidencePermit: null,
       docTypeNameTaxId: null,
@@ -459,13 +473,14 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       where: { tenantId, resourceType: 'CLINIC_SETTINGS' },
       select: { metadata: true },
     });
+    const meta = events.map(
+      (e) => e.metadata as { reason?: string; changedFields?: string[] } | null,
+    );
     expect(
-      events.filter(
-        (e) =>
-          (e.metadata as { reason?: string } | null)?.reason ===
-          'DOCUMENT_TYPE_NAMES_SETTINGS',
-      ),
-    ).toEqual([]);
+      meta
+        .filter((m) => m?.reason === 'DOCUMENT_TYPE_NAMES_SETTINGS')
+        .map((m) => m?.changedFields),
+    ).toEqual([['NATIONAL_ID']]);
   });
 
   it('demo patients and contacts use generic types, neutral numbers and no label', async () => {
@@ -521,16 +536,15 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     });
     expect(locations).toHaveLength(2);
     for (const location of locations) {
-      // Demo sin país: USD en la principal y EUR en la Norte (multimoneda),
-      // zona UTC y formato es-419; el país es obligatorio y va en US.
-      expect(location.currency).toBe(
-        location.name === 'Sede Norte' ? 'EUR' : 'USD',
-      );
-      expect(location.timeZone).toBe('UTC');
-      expect(location.locale).toBe('es-419');
+      // V1: clínica venezolana que trabaja en USD en sus dos sedes, en hora
+      // de Caracas y con el formato es-VE.
+      expect(location.currency).toBe('USD');
+      expect(location.timeZone).toBe('America/Caracas');
+      expect(location.locale).toBe('es-VE');
       // G1-B: reloj explícito, el que la demo ya pintaba.
       expect(location.hourCycle).toBe('h23');
-      expect(location.country).toBe('US');
+      expect(location.country).toBe('VE');
+      expect(location.defaultPhoneRegion).toBe('VE');
       // El backfill D5 deja esto en NULL: la demo lo fija ella misma.
       expect(location.regionalSettingsReviewedAt).toBeInstanceOf(Date);
     }
@@ -546,7 +560,7 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       where: { tenantId },
     });
     for (const schedule of schedules) {
-      expect(schedule.timezone).toBe('UTC');
+      expect(schedule.timezone).toBe('America/Caracas');
     }
   });
 
@@ -679,7 +693,7 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     const principal = await raw.location.findFirstOrThrow({
       where: { tenantId, name: 'Sede principal' },
     });
-    expect(principal.phone).toBe('+1 202 555 0100');
+    expect(principal.phone).toBe('+58 212 555 0100');
 
     const deliveries = await raw.postOpInstructionDelivery.findMany({
       where: { tenantId },
@@ -702,13 +716,12 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       patientId: delivery.patientId,
     });
     // Cita de un día anterior (ayer, o el último día con consulta): empezó
-    // antes de la medianoche de hoy en la sede (UTC).
-    const now = new Date();
-    const todayStart = Date.UTC(
-      now.getUTCFullYear(),
-      now.getUTCMonth(),
-      now.getUTCDate(),
-    );
+    // antes de la medianoche de hoy en la sede (Caracas, UTC−4 fijo).
+    const CARACAS_MS = 4 * 3_600_000;
+    const wall = new Date(Date.now() - CARACAS_MS);
+    const todayStart =
+      Date.UTC(wall.getUTCFullYear(), wall.getUTCMonth(), wall.getUTCDate()) +
+      CARACAS_MS;
     expect(delivery.appointment.start.getTime()).toBeLessThan(todayStart);
     await expect(
       raw.auditEvent.count({
@@ -778,10 +791,10 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
         note: 'Urgencias',
       });
       expect(block.end.getTime() - block.start.getTime()).toBe(30 * 60_000);
-      // 15:00 de Bogotá (UTC−5) = 20:00 UTC.
-      expect(block.start.getUTCHours()).toBe(20);
+      // 15:00 de Caracas (UTC−4) = 19:00 UTC.
+      expect(block.start.getUTCHours()).toBe(19);
       expect([0, 6]).not.toContain(
-        new Date(block.start.getTime() - 5 * 3_600_000).getUTCDay(),
+        new Date(block.start.getTime() - 4 * 3_600_000).getUTCDay(),
       );
     }
   });
@@ -872,10 +885,12 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       ),
       overrides: [],
     };
-    // «Hoy» es el día civil de la clínica (su zona, hoy UTC), no el del
+    // «Hoy» es el día civil de la clínica (su zona, Caracas), no el del
     // proceso (DX-251).
     const civilDay = (d: Date): string =>
-      new Intl.DateTimeFormat('en-CA', { timeZone: 'UTC' }).format(d);
+      new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Caracas' }).format(
+        d,
+      );
     const today = civilDay(new Date());
     const theirs = await raw.appointment.findMany({
       where: { tenantId, providerId, deletedAt: null },
@@ -884,7 +899,13 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     const outside = theirs.filter(
       (a) =>
         civilDay(a.start) !== today &&
-        !providerWorksAt(snapshot, a.locationId, a.start, a.end, 'UTC'),
+        !providerWorksAt(
+          snapshot,
+          a.locationId,
+          a.start,
+          a.end,
+          'America/Caracas',
+        ),
     );
     expect(outside).toEqual([]);
   });
@@ -1156,9 +1177,11 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     const tenantId = await liveDemoTenantId();
     const payments = await raw.payment.findMany({
       where: { tenantId, cashSessionId: { not: null } },
-      select: { paidAt: true },
+      select: { paidAt: true, currency: true },
     });
-    expect(payments).toHaveLength(3);
+    // Tres en USD y, en el turno abierto, uno en efectivo en bolívares (V1).
+    expect(payments).toHaveLength(4);
+    expect(payments.filter((p) => p.currency === 'VES')).toHaveLength(1);
     for (const payment of payments) {
       expect(payment.paidAt.getTime()).toBeGreaterThanOrEqual(
         seededBetween.start,
@@ -1222,33 +1245,63 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(new Set(plans.flatMap((p) => p.items.map((i) => i.status)))).toEqual(
       new Set(['PROPOSED', 'ACCEPTED', 'DONE']),
     );
-    // Todos en USD salvo la historia de «Comparar sedes» de la Sede Norte,
-    // que se cobra en su moneda (EUR).
-    expect(
-      plans
-        .filter((p) => p.currency !== 'USD')
-        .map((p) => [p.currency, p.notes]),
-    ).toEqual(
-      plans
-        .filter((p) => p.currency !== 'USD')
-        .map(() => ['EUR', 'Control y procedimiento del día.']),
-    );
-    expect(plans.some((p) => p.currency === 'EUR')).toBe(true);
+    // V1: todos los planes en USD, también los de la Sede Norte.
+    expect(plans.length).toBeGreaterThan(0);
+    expect(plans.every((p) => p.currency === 'USD')).toBe(true);
 
     const payments = await raw.payment.findMany({
       where: { tenantId, deletedAt: null },
     });
     const sixtyDaysAgo = Date.now() - 61 * 24 * 60 * 60 * 1000;
-    // DX-375: todos en la moneda de su plan salvo un abono de hoy en EUR a un
-    // plan en USD (tasa congelada o «sin tasa» según haya tasa del día).
-    expect(
-      payments.filter((p) => p.currency !== p.exchangeRateCurrency),
-    ).toEqual([
-      expect.objectContaining({
-        currency: 'EUR',
+    // DX-375 / V1: los abonos en otra moneda son en bolívares sobre planes en
+    // USD (dos «Pago móvil», uno en efectivo de hoy y el cobro en Bs. de la
+    // caja abierta), y todos congelan la tasa MANUAL de su día (ninguno «sin
+    // tasa»): VES por USD = 250 − 0,5 × (días atrás − 1), 250 hoy y ayer.
+    const foreign = payments.filter(
+      (p) => p.currency !== p.exchangeRateCurrency,
+    );
+    expect(foreign).toHaveLength(4);
+    const today = civilDateIn(new Date(), 'America/Caracas');
+    for (const p of foreign) {
+      expect(p).toMatchObject({
+        currency: 'VES',
         exchangeRateCurrency: 'USD',
-      }),
-    ]);
+        exchangeRateSource: 'MANUAL',
+      });
+      const day = p.exchangeRateDate!.toISOString().slice(0, 10);
+      expect(day).toBe(civilDateIn(p.paidAt, 'America/Caracas'));
+      const daysAgo = Math.round(
+        (Date.parse(today) - Date.parse(day)) / 86_400_000,
+      );
+      expect(Number(p.exchangeRateFrom)).toBe(
+        250 - 0.5 * Math.max(0, daysAgo - 1),
+      );
+      expect(Number(p.exchangeRateTo)).toBe(1);
+      // Importes exactos: un número entero de USD a la tasa del día.
+      const usd = Number(p.amount) / Number(p.exchangeRateFrom);
+      expect(Math.abs(usd - Math.round(usd))).toBeLessThan(1e-9);
+    }
+    expect(
+      foreign
+        .map((p) => Math.round(Number(p.amount) / Number(p.exchangeRateFrom)))
+        .sort((a, b) => a - b),
+    ).toEqual([10, 45, 130, 300]);
+    const settings = await raw.tenant.findUniqueOrThrow({
+      where: { id: tenantId },
+      select: { exchangeRateSource: true, manualExchangeRatesSince: true },
+    });
+    expect(settings.exchangeRateSource).toBe('MANUAL');
+    expect(settings.manualExchangeRatesSince!.toISOString().slice(0, 10)).toBe(
+      addCivilDays(today, -60),
+    );
+    const rates = await raw.manualExchangeRate.findMany({
+      where: { tenantId },
+      orderBy: { date: 'asc' },
+    });
+    expect(rates).toHaveLength(61);
+    expect(new Set(rates.map((r) => r.currency))).toEqual(new Set(['VES']));
+    expect(rates.at(-1)!.date.toISOString().slice(0, 10)).toBe(today);
+    expect(Number(rates.at(-1)!.rate)).toBe(250);
     expect(
       payments.every(
         (p) =>
@@ -1266,9 +1319,18 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       const billable = plan.items
         .filter((i) => i.status !== 'PROPOSED')
         .reduce((s, i) => s + Number(i.price) - Number(i.discount), 0);
+      // En USD: los abonos en VES, con su tasa congelada.
       const paid = payments
         .filter((p) => p.treatmentPlanId === plan.id)
-        .reduce((s, p) => s + Number(p.amount), 0);
+        .reduce(
+          (s, p) =>
+            s +
+            (p.currency === 'USD'
+              ? Number(p.amount)
+              : (Number(p.amount) * Number(p.exchangeRateTo)) /
+                Number(p.exchangeRateFrom)),
+          0,
+        );
       return paid > billable;
     });
     expect(overpaid.map((plan) => plan.notes)).toEqual(['Resinas en molares.']);
@@ -1342,11 +1404,11 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
   it('DX-014: las dos sedes tienen actividad en el mes anterior y en el actual', async () => {
     const tenantId = await liveDemoTenantId();
     const month = (d: Date): string =>
-      new Intl.DateTimeFormat('en-CA', { timeZone: 'UTC' })
+      new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Caracas' })
         .format(d)
         .slice(0, 7);
     const today = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'UTC',
+      timeZone: 'America/Caracas',
     }).format(new Date());
     const [y, m, d] = today.split('-').map(Number);
     const current = today.slice(0, 7);

@@ -1,24 +1,24 @@
 Tipo de documento;Número de documento;Nombre;Apellidos;Fecha de nacimiento;Sexo;Celular;Correo;Dirección;Observaciones
-Documento nacional;DEMO-I001;Valentina;Ríos Cárdenas;01/01/1960;F;404 555 0100;valentina0@example.com;Calle Demo 1001;Importado de la hoja anterior
-Documento nacional;DEMO.I002;Santiago;Mejía López;02/02/1962;M;404 555 0101;santiago1@example.com;Calle Demo 1102;Importado de la hoja anterior
-Documento nacional;demo i003;Isabella;Moreno Díaz;03/03/1964;F;404 555 0102;isabella2@example.com;Calle Demo 1203;Importado de la hoja anterior
-Documento nacional;DEMO-I004;Mateo;Castaño Ruiz;04/04/1966;M;404 555 0103;mateo3@example.com;Calle Demo 1304;Importado de la hoja anterior
-Documento nacional;DEMO.I005;Mariana;Ospina Vélez;05/05/1968;F;404 555 0104;mariana4@example.com;Calle Demo 1405;Importado de la hoja anterior
-Documento nacional;demo i006;Samuel;Restrepo Gil;06/06/1970;M;404 555 0105;samuel5@example.com;Calle Demo 1506;Importado de la hoja anterior
-Documento nacional;DEMO-I007;Sofía;Zapata Arango;07/07/1972;F;404 555 0106;sofia6@example.com;Calle Demo 1607;Importado de la hoja anterior
-Documento nacional;DEMO.I008;Emiliano;Quintero Salazar;08/08/1974;M;404 555 0107;emiliano7@example.com;Calle Demo 1708;Importado de la hoja anterior
-Documento nacional;demo i009;Gabriela;Henao Duque;09/09/1976;F;404 555 0108;gabriela8@example.com;Calle Demo 1809;Importado de la hoja anterior
-Documento nacional;DEMO-I010;Tomás;Muñoz Rendón;10/10/1978;M;404 555 0109;tomas9@example.com;Calle Demo 1910;Importado de la hoja anterior
-Documento nacional;DEMO.I011;Antonella;Giraldo Toro;11/11/1980;F;404 555 0110;antonella10@example.com;Calle Demo 2011;Importado de la hoja anterior
-Documento nacional;demo i012;Martín;Arias Bedoya;12/12/1982;M;404 555 0111;martin11@example.com;Calle Demo 2112;Importado de la hoja anterior
-Documento nacional;DEMO-I013;Luciana;Cardona Mesa;13/01/1984;F;404 555 0112;luciana12@example.com;Calle Demo 2213;Importado de la hoja anterior
-Documento nacional;DEMO.I014;Jerónimo;Vargas Pineda;14/02/1986;M;404 555 0113;jeronimo13@example.com;Calle Demo 2314;Importado de la hoja anterior
-Documento nacional;demo i015;Salomé;Montoya Uribe;15/03/1988;F;404 555 0114;salome14@example.com;Calle Demo 2415;Importado de la hoja anterior
-Documento nacional;DEMO-I016;Daniel;Agudelo Ramírez;16/04/1990;M;404 555 0115;daniel15@example.com;Calle Demo 2516;Importado de la hoja anterior
-Documento nacional;DEMO.I017;Emma;Correa Gómez;17/05/1992;F;404 555 0116;emma16@example.com;Calle Demo 2617;Importado de la hoja anterior
-Documento nacional;demo i018;Juan José;Hoyos Ochoa;18/06/1994;M;404 555 0117;juan.jose17@example.com;Calle Demo 2718;Importado de la hoja anterior
-Documento nacional;DEMO-I019;Victoria;Patiño Lara;19/07/1996;F;404 555 0118;victoria18@example.com;Calle Demo 2819;Importado de la hoja anterior
-Documento nacional;DEMO.I020;Simón;Escobar Ríos;20/08/1998;M;404 555 0119;simon19@example.com;Calle Demo 2920;Importado de la hoja anterior
+Documento nacional;DEMO-I001;Valentina;Ríos Cárdenas;01/01/1960;F;0416 555 0300;valentina0@example.com;Calle Demo 1001;Importado de la hoja anterior
+Documento nacional;DEMO.I002;Santiago;Mejía López;02/02/1962;M;0416 555 0301;santiago1@example.com;Calle Demo 1102;Importado de la hoja anterior
+Documento nacional;demo i003;Isabella;Moreno Díaz;03/03/1964;F;0416 555 0302;isabella2@example.com;Calle Demo 1203;Importado de la hoja anterior
+Documento nacional;DEMO-I004;Mateo;Castaño Ruiz;04/04/1966;M;0416 555 0303;mateo3@example.com;Calle Demo 1304;Importado de la hoja anterior
+Documento nacional;DEMO.I005;Mariana;Ospina Vélez;05/05/1968;F;0416 555 0304;mariana4@example.com;Calle Demo 1405;Importado de la hoja anterior
+Documento nacional;demo i006;Samuel;Restrepo Gil;06/06/1970;M;0416 555 0305;samuel5@example.com;Calle Demo 1506;Importado de la hoja anterior
+Documento nacional;DEMO-I007;Sofía;Zapata Arango;07/07/1972;F;0416 555 0306;sofia6@example.com;Calle Demo 1607;Importado de la hoja anterior
+Documento nacional;DEMO.I008;Emiliano;Quintero Salazar;08/08/1974;M;0416 555 0307;emiliano7@example.com;Calle Demo 1708;Importado de la hoja anterior
+Documento nacional;demo i009;Gabriela;Henao Duque;09/09/1976;F;0416 555 0308;gabriela8@example.com;Calle Demo 1809;Importado de la hoja anterior
+Documento nacional;DEMO-I010;Tomás;Muñoz Rendón;10/10/1978;M;0416 555 0309;tomas9@example.com;Calle Demo 1910;Importado de la hoja anterior
+Documento nacional;DEMO.I011;Antonella;Giraldo Toro;11/11/1980;F;0416 555 0310;antonella10@example.com;Calle Demo 2011;Importado de la hoja anterior
+Documento nacional;demo i012;Martín;Arias Bedoya;12/12/1982;M;0416 555 0311;martin11@example.com;Calle Demo 2112;Importado de la hoja anterior
+Documento nacional;DEMO-I013;Luciana;Cardona Mesa;13/01/1984;F;0416 555 0312;luciana12@example.com;Calle Demo 2213;Importado de la hoja anterior
+Documento nacional;DEMO.I014;Jerónimo;Vargas Pineda;14/02/1986;M;0416 555 0313;jeronimo13@example.com;Calle Demo 2314;Importado de la hoja anterior
+Documento nacional;demo i015;Salomé;Montoya Uribe;15/03/1988;F;0416 555 0314;salome14@example.com;Calle Demo 2415;Importado de la hoja anterior
+Documento nacional;DEMO-I016;Daniel;Agudelo Ramírez;16/04/1990;M;0416 555 0315;daniel15@example.com;Calle Demo 2516;Importado de la hoja anterior
+Documento nacional;DEMO.I017;Emma;Correa Gómez;17/05/1992;F;0416 555 0316;emma16@example.com;Calle Demo 2617;Importado de la hoja anterior
+Documento nacional;demo i018;Juan José;Hoyos Ochoa;18/06/1994;M;0416 555 0317;juan.jose17@example.com;Calle Demo 2718;Importado de la hoja anterior
+Documento nacional;DEMO-I019;Victoria;Patiño Lara;19/07/1996;F;0416 555 0318;victoria18@example.com;Calle Demo 2819;Importado de la hoja anterior
+Documento nacional;DEMO.I020;Simón;Escobar Ríos;20/08/1998;M;0416 555 0319;simon19@example.com;Calle Demo 2920;Importado de la hoja anterior
 Documento nacional;DEMOI001;Valentina;Ríos Cárdenas;;F;;;;Repetida: mismo documento que la fila 2
 Documento nacional;DEMO-0001;Paciente;De la demo;;;;;;Ya existe en la clínica demo
 Documento nacional;DEMO-I021;;SinNombre;31/02/1990;Q;llamar;no-es-un-correo;;Fila con errores

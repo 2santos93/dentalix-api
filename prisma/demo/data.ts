@@ -23,11 +23,15 @@ import {
   type AnamnesisAnswers,
 } from '../../src/modules/medical-history-submissions/domain/anamnesis-questionnaire';
 
-// Datos FICTICIOS de la clínica demo, sin país: nombres, direcciones y
-// documentos inventados, sin leyes, aseguradoras ni formatos de ningún país.
-// Los correos usan example.com (RFC 2606) y los teléfonos, el tramo
-// +1 NXX 555-0100…0199 que la numeración norteamericana reserva para ficción
-// (válidos para libphonenumber, nunca asignados a nadie).
+// Datos FICTICIOS de la clínica demo: una clínica venezolana que trabaja en
+// USD (el país, la zona, el formato y los nombres locales de los documentos
+// son DATOS de la clínica; el código no sabe de Venezuela). Nombres,
+// direcciones y documentos inventados, sin leyes ni aseguradoras reales. Los
+// correos usan example.com (RFC 2606). Los teléfonos son venezolanos con el
+// abonado 555-01XX/02XX/03XX: Venezuela no reserva un tramo para ficción, así
+// que se usa el bloque «555» que se reconoce como ficticio; son válidos para
+// libphonenumber (los 04XX, tipo MOBILE) y la app nunca escribe a un teléfono
+// sola (WhatsApp es un enlace `wa.me` que abre una persona).
 
 export const DEMO_SUBDOMAIN = 'demo';
 export const DEMO_CLINIC_NAME = 'Clínica Demo';
@@ -36,25 +40,59 @@ export const DEMO_EMAIL_DOMAIN = 'demo.dentalix.app';
 /** Contraseña común de todos los usuarios demo (se imprime al terminar). */
 export const DEMO_PASSWORD = 'DemoDentalix2026!';
 /**
- * Configuración regional de las sedes demo. La API exige país, moneda, zona y
- * formato explícitos (sin valores por defecto), así que la demo usa los más
- * neutros que siguen ejercitando el producto:
- *  - moneda USD en la sede principal (planes, abonos, caja, gastos) y EUR en
- *    la Sede Norte, para que la demo multimoneda tenga dos monedas de sede;
- *  - zona UTC: sin país y sin horario de verano (el calendario demo pasa de
- *    hora de pared a instante con un desfase fijo, ver `calendar.ts`);
- *  - formato `es-419` (español de Latinoamérica, sin país);
- *  - país US: el campo es obligatorio y no admite un valor «sin país»; es el
- *    de USD y el del tramo de teléfonos ficticios, así que los teléfonos
- *    escritos sin «+» se leen en ese mismo tramo. Ninguna regla lo lee aparte
- *    de la región telefónica por defecto.
+ * Configuración regional de las sedes demo (DATOS: la API exige país, moneda,
+ * zona y formato explícitos, sin valores por defecto). La demo es una clínica
+ * venezolana que trabaja en USD, como la mayoría de las de su primer mercado:
+ *  - país VE en las dos sedes;
+ *  - moneda USD en las dos (planes, listas de precios, caja, gastos). La
+ *    multimoneda se ve como en Venezuela: parte de los abonos se cobra en
+ *    bolívares (VES) con la tasa manual del día que registra la clínica
+ *    (`DEMO_RATE_CURRENCY`, `demoVesPerUsd`), y la caja abierta tiene fondo
+ *    en las dos monedas;
+ *  - zona America/Caracas: UTC−4 fijo, sin horario de verano desde 2016, así
+ *    que el calendario demo pasa de hora de pared a instante con un desfase
+ *    constante (ver `calendar.ts`);
+ *  - formato `es-VE` (12.345,67 · 31/10/2026).
  */
-export const DEMO_COUNTRY = 'US';
-/** Moneda de la clínica: planes y abonos van en USD. */
+export const DEMO_COUNTRY = 'VE';
+/** Moneda de la clínica y de sus dos sedes: planes y abonos van en USD. */
 export const DEMO_CURRENCY = 'USD';
-/** Moneda propia de la Sede Norte (su lista de precios y su historia de «Comparar sedes»). */
-export const DEMO_NORTE_CURRENCY = 'EUR';
-export const DEMO_LOCALE = 'es-419';
+export const DEMO_LOCALE = 'es-VE';
+/**
+ * La otra moneda de la demo: los bolívares de los abonos por «Pago móvil» o
+ * en efectivo en Bs. Su tasa es MANUAL (la que la clínica registra cada día,
+ * DX-374), desde `DEMO_MANUAL_RATE_DAYS` días atrás.
+ */
+export const DEMO_RATE_CURRENCY = 'VES';
+/** Días de tasas manuales sembradas (hoy incluido): cubren toda la historia de abonos. */
+export const DEMO_MANUAL_RATE_DAYS = 61;
+/**
+ * Tasa FICTICIA de la demo (VES por 1 USD) del día `daysAgo`: 250,00 hoy y
+ * ayer, y 0,50 menos por cada día anterior (220,50 hace 60 días, la más antigua). Hoy y ayer
+ * valen lo mismo para que el abono en bolívares «de hace 30 min» dé la misma
+ * cifra en USD aunque la siembra cruce la medianoche de la sede (DX-449).
+ */
+export function demoVesPerUsd(daysAgo: number): number {
+  return 250 - 0.5 * Math.max(0, daysAgo - 1);
+}
+/** El importe en VES que vale `usd` con la tasa demo del día `daysAgo`. */
+export function demoVes(usd: number, daysAgo: number): number {
+  return Math.round(usd * demoVesPerUsd(daysAgo) * 100) / 100;
+}
+/**
+ * DX-327 / V1: nombre local del documento nacional, como lo llaman las
+ * clínicas venezolanas: dato de la clínica, puesto por el caso de uso de
+ * Ajustes (lo haría su ADMIN) y editable. Los demás tipos se quedan con el
+ * nombre genérico. Es la ÚNICA línea de la demo con un nombre de documento de
+ * un país: excepción nombrada de `no-location-fallbacks.spec.ts`.
+ */
+export const DEMO_DOCUMENT_TYPE_NAMES = {
+  NATIONAL_ID: 'Cédula de identidad',
+  PASSPORT: null,
+  RESIDENCE_PERMIT: null,
+  TAX_ID: null,
+  OTHER: null,
+} as const;
 /**
  * G1-B (DX-350): reloj de las sedes demo, explícito (nunca un default): 24 h,
  * el que la demo pinta hoy en pantalla (spec G1-B §4.5).
@@ -117,11 +155,11 @@ export const DEMO_LOCATIONS: Record<
   // La crea el registro con el nombre "Sede principal"; el seed le pone dirección.
   principal: {
     name: 'Sede principal',
-    address: 'Av. Central 1450, Consultorio 302',
+    address: 'Av. Principal, Edif. Torre Demo, piso 3, consultorio 302',
   },
   norte: {
     name: 'Sede Norte',
-    address: 'Av. del Norte 820, Local 4',
+    address: 'Calle Los Mangos, C.C. Demo Norte, local 4',
   },
 };
 
@@ -138,7 +176,7 @@ export const NORTE_SCHEDULE: ScheduleRange[] = [
  * DX-222: teléfono de la sede principal, el que las indicaciones
  * postoperatorias muestran para urgencias (`{{telefono_sede}}`). Ficticio.
  */
-export const DEMO_PRINCIPAL_PHONE = '+1 202 555 0100';
+export const DEMO_PRINCIPAL_PHONE = '+58 212 555 0100';
 
 /** Tarifas (USD) que la clínica demo pone a los ítems del catálogo por defecto. */
 export const DEMO_PRICES: Record<string, number> = {
@@ -207,14 +245,14 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0001',
     birthDate: '1992-03-14',
     sex: Sex.F,
-    phone: '+1 202 555 0101',
+    phone: '+58 414 555 0101',
     email: 'laura.castro@example.com',
     address: 'Calle Los Almendros 127, Apto 501',
     occupation: 'Diseñadora gráfica',
     maritalStatus: 'Soltera',
     emergencyContactName: 'Rosa Jiménez',
     emergencyContactRelationship: 'Madre',
-    emergencyContactPhone: '+1 303 555 0101',
+    emergencyContactPhone: '+58 424 555 0201',
     medicalHistory: {
       ...healthy,
       habits: {
@@ -235,14 +273,14 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0002',
     birthDate: '1968-11-02',
     sex: Sex.M,
-    phone: '+1 202 555 0102',
+    phone: '+58 424 555 0102',
     email: 'jorge.ramirez@example.com',
     address: 'Av. Las Palmas 853',
     occupation: 'Contador',
     maritalStatus: 'Casado',
     emergencyContactName: 'Gloria Ospina',
     emergencyContactRelationship: 'Esposa',
-    emergencyContactPhone: '+1 303 555 0102',
+    emergencyContactPhone: '+58 424 555 0202',
     medicalHistory: {
       allergies: [],
       conditions: [
@@ -285,7 +323,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0003',
     birthDate: '1998-07-21',
     sex: Sex.F,
-    phone: '+1 202 555 0103',
+    phone: '+58 416 555 0103',
     email: 'natalia.vargas@example.com',
     address: 'Calle Los Robles 53',
     occupation: 'Estudiante de medicina',
@@ -298,7 +336,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0004',
     birthDate: '1975-01-30',
     sex: Sex.M,
-    phone: '+1 202 555 0104',
+    phone: '+58 426 555 0104',
     email: 'hector.molina@example.com',
     address: 'Av. del Parque 642',
     occupation: 'Conductor',
@@ -335,7 +373,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0005',
     birthDate: '1995-09-09',
     sex: Sex.F,
-    phone: '+1 202 555 0105',
+    phone: '+58 412 555 0105',
     email: 'daniela.montoya@example.com',
     address: 'Calle Los Cedros 10',
     occupation: 'Abogada',
@@ -347,7 +385,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0006',
     birthDate: '2001-04-18',
     sex: Sex.M,
-    phone: '+1 202 555 0106',
+    phone: '+58 414 555 0106',
     email: 'santiago.pardo@example.com',
     address: 'Av. Libertad 1180',
     occupation: 'Ingeniero de software',
@@ -359,14 +397,14 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0007',
     birthDate: '1960-12-05',
     sex: Sex.F,
-    phone: '+1 202 555 0107',
+    phone: '+58 424 555 0107',
     email: 'martha.becerra@example.com',
     address: 'Calle Las Acacias 145',
     occupation: 'Pensionada',
     maritalStatus: 'Viuda',
     emergencyContactName: 'Felipe Becerra',
     emergencyContactRelationship: 'Hijo',
-    emergencyContactPhone: '+1 303 555 0107',
+    emergencyContactPhone: '+58 424 555 0207',
     medicalHistory: {
       allergies: [
         {
@@ -408,7 +446,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0008',
     birthDate: '1955-06-27',
     sex: Sex.M,
-    phone: '+1 202 555 0108',
+    phone: '+58 416 555 0108',
     email: 'ricardo.salcedo@example.com',
     address: 'Pasaje Los Olivos 23',
     occupation: 'Comerciante',
@@ -442,12 +480,12 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0009',
     birthDate: '2015-02-11',
     sex: Sex.F,
-    phone: '+1 202 555 0109',
+    phone: '+58 426 555 0109',
     email: 'familia.ortiz@example.com',
     address: 'Calle Los Pinos 160',
     emergencyContactName: 'Claudia Navarro',
     emergencyContactRelationship: 'Madre',
-    emergencyContactPhone: '+1 303 555 0109',
+    emergencyContactPhone: '+58 424 555 0209',
     medicalHistory: {
       ...healthy,
       habits: { higieneOral: { cepilladoPorDia: 2, cremaConFluor: true } },
@@ -462,7 +500,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0010',
     birthDate: '1993-10-03',
     sex: Sex.F,
-    phone: '+1 202 555 0110',
+    phone: '+58 412 555 0110',
     email: 'carolina.duque@example.com',
     address: 'Av. del Río 1020',
     occupation: 'Docente',
@@ -480,7 +518,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0011',
     birthDate: '1988-08-16',
     sex: Sex.M,
-    phone: '+1 202 555 0111',
+    phone: '+58 414 555 0111',
     email: 'felipe.arias@example.com',
     address: 'Calle Las Flores 5',
     occupation: 'Chef',
@@ -492,7 +530,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0012',
     birthDate: '1990-05-25',
     sex: Sex.F,
-    phone: '+1 202 555 0112',
+    phone: '+58 424 555 0112',
     email: 'juliana.guerrero@example.com',
     address: 'Calle Los Sauces 72',
     occupation: 'Periodista',
@@ -531,7 +569,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0013',
     birthDate: '2012-09-30',
     sex: Sex.M,
-    phone: '+1 202 555 0113',
+    phone: '+58 416 555 0113',
     email: 'familia.cifuentes@example.com',
     address: 'Av. Principal 2415',
   },
@@ -542,7 +580,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0014',
     birthDate: '1979-03-08',
     sex: Sex.F,
-    phone: '+1 202 555 0114',
+    phone: '+58 426 555 0114',
     email: 'anamaria.zapata@example.com',
     address: 'Calle Los Laureles 33',
     occupation: 'Administradora de empresas',
@@ -555,7 +593,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0015',
     birthDate: '1970-07-12',
     sex: Sex.M,
-    phone: '+1 202 555 0115',
+    phone: '+58 412 555 0115',
     email: 'luis.pena@example.com',
     address: 'Av. del Mar 728',
     occupation: 'Ingeniero civil',
@@ -567,7 +605,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0016',
     birthDate: '2004-12-19',
     sex: Sex.F,
-    phone: '+1 202 555 0116',
+    phone: '+58 414 555 0116',
     email: 'valeria.suarez@example.com',
     address: 'Calle Las Camelias 116',
     occupation: 'Estudiante',
@@ -579,7 +617,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0017',
     birthDate: '1966-02-22',
     sex: Sex.M,
-    phone: '+1 202 555 0117',
+    phone: '+58 424 555 0117',
     email: 'gustavo.rios@example.com',
     address: 'Av. Los Jardines 361',
     occupation: 'Agricultor',
@@ -605,7 +643,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0018',
     birthDate: '1997-06-06',
     sex: Sex.F,
-    phone: '+1 202 555 0118',
+    phone: '+58 416 555 0118',
     email: 'isabella.moreno@example.com',
     address: 'Calle Los Nogales 63',
     occupation: 'Fotógrafa',
@@ -617,7 +655,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0019',
     birthDate: '1986-01-17',
     sex: Sex.M,
-    phone: '+1 202 555 0119',
+    phone: '+58 426 555 0119',
     email: 'alejandro.fuentes@example.com',
     address: 'Av. Las Américas 1346',
     occupation: 'Médico veterinario',
@@ -629,7 +667,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0020',
     birthDate: '1999-11-28',
     sex: Sex.F,
-    phone: '+1 202 555 0120',
+    phone: '+58 412 555 0120',
     email: 'camila.rincon@example.com',
     address: 'Calle Los Álamos 26',
     occupation: 'Asesora comercial',
@@ -641,7 +679,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0021',
     birthDate: '1991-04-04',
     sex: Sex.M,
-    phone: '+1 202 555 0121',
+    phone: '+58 414 555 0121',
     email: 'diego.lozano@example.com',
     address: 'Av. Universidad 1345',
     occupation: 'Mecánico',
@@ -653,7 +691,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0022',
     birthDate: '1982-08-31',
     sex: Sex.F,
-    phone: '+1 202 555 0122',
+    phone: '+58 424 555 0122',
     email: 'paula.cortes@example.com',
     address: 'Calle Las Magnolias 100',
     occupation: 'Enfermera',
@@ -677,7 +715,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0023',
     birthDate: '1996-01-23',
     sex: Sex.F,
-    phone: '+1 202 555 0124',
+    phone: '+58 426 555 0124',
     email: 'mariajose.escobar@example.com',
     address: 'Av. del Sol 150',
     occupation: 'Arquitecta',
@@ -689,7 +727,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0024',
     birthDate: '2000-03-15',
     sex: Sex.M,
-    phone: '+1 202 555 0125',
+    phone: '+58 412 555 0125',
     email: 'sebastian.nino@example.com',
     address: 'Calle Los Jazmines 45',
     occupation: 'Músico',
@@ -729,7 +767,7 @@ export const DEMO_ALFA_PAYER = {
 
 /**
  * DX-105: listas de precios. «Tarifa Sede Norte» es la lista activa de la
- * Sede Norte, en su moneda (EUR, 5 precios); «Convenio Alfa» es de toda la
+ * Sede Norte (USD, 5 precios); «Convenio Alfa» es de toda la
  * clínica, en USD, y solo la usa
  * el convenio «Empresa Alfa lista» (3 precios). Los códigos son los de
  * `DEMO_PRICES`, y todos los precios quedan por debajo del de catálogo.
@@ -739,7 +777,7 @@ export const DEMO_PRICE_LISTS = [
     key: 'norte',
     name: 'Tarifa Sede Norte',
     locationKey: 'norte',
-    currency: DEMO_NORTE_CURRENCY,
+    currency: DEMO_CURRENCY,
     prices: {
       'IMG-CONSULTA': 75,
       'PREV-PROFILAXIS': 110,
@@ -1489,9 +1527,9 @@ interface DemoPayment {
   minutesAgo?: number;
   amount: number;
   /**
-   * DX-375: moneda del abono si no es la del plan (`DEMO_CURRENCY`). Congela
-   * la tasa de su día con la fuente de la clínica; sin tasa (en local, sin
-   * clave del proveedor) queda «sin tasa» y la demo enseña el aviso.
+   * DX-375: moneda del abono si no es la del plan (`DEMO_CURRENCY`): VES, que
+   * congela la tasa manual de su día (la demo las siembra todas, así que
+   * ninguno queda «sin tasa» y la demo no depende del proveedor).
    */
   currency?: string;
   method: PaymentMethod;
@@ -1614,22 +1652,25 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
     ],
     payments: [
       { daysAgo: 26, amount: 400, method: CARD, location: 'principal' },
+      // DX-377: «Pago móvil» en bolívares (300 USD a la tasa de su día).
       {
         daysAgo: 12,
-        amount: 300,
+        amount: demoVes(300, 12),
+        currency: DEMO_RATE_CURRENCY,
         method: TRANSFER,
         mobileReference: '7788 3104 21',
         location: 'principal',
       },
-      // DX-375: un abono de hoy en otra moneda que la del plan.
+      // DX-375: un abono de hoy en otra moneda que la del plan: efectivo en
+      // bolívares (45 USD a la tasa de hoy).
       {
         daysAgo: 0,
         minutesAgo: 30,
-        amount: 45,
-        currency: 'EUR',
+        amount: demoVes(45, 0),
+        currency: DEMO_RATE_CURRENCY,
         method: CASH,
         location: 'principal',
-        notes: 'Abono en euros.',
+        notes: 'Abono en bolívares.',
       },
     ],
   },
@@ -1740,7 +1781,8 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
     payments: [
       {
         daysAgo: 14,
-        amount: 130,
+        amount: demoVes(130, 14),
+        currency: DEMO_RATE_CURRENCY,
         method: TRANSFER,
         mobileReference: '1234 5598 00',
         location: 'norte',
@@ -2417,7 +2459,7 @@ export const DEMO_COMMUNICATION = [
   },
   { patientIndex: 2, input: { contactChannel: 'NONE' } },
   { patientIndex: 3, input: { reminderOptOut: true } },
-  { patientIndex: 4, input: { phone: '601 555 0105' } },
+  { patientIndex: 4, input: { phone: '0414 555 0405' } },
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -2459,7 +2501,7 @@ export const DEMO_RESPONSIBLES: readonly DemoResponsible[] = [
       docType: 'NATIONAL_ID',
       docNumber: 'DEMO-C01',
       email: 'claudia.navarro@example.com',
-      phone: '+1 303 555 0109',
+      phone: '+58 424 555 0209',
     },
     relationship: 'MOTHER',
     isPayer: false,
@@ -2478,7 +2520,7 @@ export const DEMO_RESPONSIBLES: readonly DemoResponsible[] = [
       fullName: 'Óscar Cifuentes',
       docType: 'NATIONAL_ID',
       docNumber: 'DEMO-C02',
-      phone: '+1 303 555 0113',
+      phone: '+58 424 555 0213',
     },
     relationship: 'FATHER',
     isPayer: false,
