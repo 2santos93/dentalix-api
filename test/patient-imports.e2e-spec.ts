@@ -23,7 +23,7 @@ import { MISSING_FILE_MESSAGE } from '../src/modules/patient-imports/application
 // DX-107 · Importación de pacientes desde CSV/XLSX en HTTP real: plantilla,
 // inspección, dry-run sin escribir, confirmación en segundo plano mientras la
 // clínica sigue operando, deduplicación, «actualizar vacíos», deshacer,
-// informe de errores con fórmulas neutralizadas, autorización Ley 1581
+// informe de errores con fórmulas neutralizadas, autorización de datos
 // pendiente, solo ADMIN, auditoría y aislamiento entre clínicas.
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },

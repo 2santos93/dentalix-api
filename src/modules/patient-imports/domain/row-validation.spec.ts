@@ -671,7 +671,7 @@ describe('dedupeRows', () => {
     ]);
   });
 
-  it('existente con supresión parcial (Ley 1581): el aviso de la fila lo dice (revisión I2)', () => {
+  it('existente con supresión parcial (DX-039): el aviso de la fila lo dice (revisión I2)', () => {
     const r = dedupeRows(
       [
         { rowNumber: 2, data: data('NATIONAL_ID', '111') },
@@ -831,7 +831,7 @@ describe('«Actualizar solo campos vacíos»', () => {
     });
   });
 
-  it('paciente con supresión parcial: nunca rellena los campos suprimidos (Ley 1581, revisión I2)', () => {
+  it('paciente con supresión parcial: nunca rellena los campos suprimidos (DX-039, revisión I2)', () => {
     const suppressed: FillablePatient = {
       ...patient,
       phone: null,

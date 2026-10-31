@@ -878,7 +878,7 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
     ).toEqual([]);
   });
 
-  it('«actualizar vacíos» no rellena los datos suprimidos de un paciente (Ley 1581) y el dry-run lo avisa (revisión I2)', async () => {
+  it('«actualizar vacíos» no rellena los datos suprimidos de un paciente (DX-039) y el dry-run lo avisa (revisión I2)', async () => {
     const suppressed = await raw.patient.create({
       data: {
         tenantId: a.tenantId,

@@ -371,7 +371,7 @@ describe('buildAuditDraft (DX-009)', () => {
       },
       req({
         params: { id: PATIENT },
-        body: { reason: 'Reclamo del titular por Ley 1581' },
+        body: { reason: 'Reclamo del titular de los datos' },
       }),
       { id: PATIENT },
       scope,

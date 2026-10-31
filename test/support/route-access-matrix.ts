@@ -312,7 +312,7 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /patients/:patientId/signature-requests': EVERY_ROLE,
   'POST /patients/:patientId/signature-requests/:id/revoke': EVERY_ROLE,
 
-  // --- Autorización de datos, Ley 1581 (DX-037) ----------------------------
+  // --- Autorización de datos (DX-037) ----------------------------
   // loop/informes/DX-037.md.
   'GET /patients/:patientId/data-consents': EVERY_ROLE,
   'POST /patients/:patientId/data-consents': EVERY_ROLE,

@@ -128,12 +128,12 @@ describe('PartiallySuppressPatientUseCase', () => {
       repo as unknown as PatientRepository,
       clock,
     ).execute('p1', {
-      reason: '  Reclamo Ley 1581 del titular  ',
+      reason: '  Reclamo del titular de los datos  ',
       actorId: 'u1',
     });
     expect(repo.partiallySuppress).toHaveBeenCalledWith(
       'p1',
-      expect.objectContaining({ reason: 'Reclamo Ley 1581 del titular' }),
+      expect.objectContaining({ reason: 'Reclamo del titular de los datos' }),
     );
   });
 
@@ -146,7 +146,7 @@ describe('PartiallySuppressPatientUseCase', () => {
       new PartiallySuppressPatientUseCase(
         repo as unknown as PatientRepository,
         clock,
-      ).execute('p1', { reason: 'Reclamo Ley 1581', actorId: 'u1' }),
+      ).execute('p1', { reason: 'Reclamo del titular', actorId: 'u1' }),
     ).rejects.toBeInstanceOf(ConflictException);
   });
 });
