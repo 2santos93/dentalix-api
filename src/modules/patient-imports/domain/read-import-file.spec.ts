@@ -22,7 +22,9 @@ import {
   type RawRecord,
 } from './tabular-file';
 import {
+  MAX_CELLS_PER_ROW,
   MAX_XLSX_TOTAL_BYTES,
+  MAX_XML_STEPS,
   decodeXmlText,
   excelSerialToDate,
   readXlsx,
@@ -601,8 +603,23 @@ async function watchTurns<T>(work: () => Promise<T>): Promise<{
  */
 const MAX_SEARCHES_PER_TURN = 64 * 1024;
 
+/*
+ * DX-209: presupuesto de TIEMPO de los casos de abajo. Lo que prueban no
+ * depende del reloj: cuentan búsquedas por vuelta del event loop
+ * (`watchTurns`) y el error del tope, igual en una máquina libre que cargada.
+ * Pero el trabajo es real e incompresible: para pasar el presupuesto global
+ * el lector tiene que dar `MAX_XML_STEPS` (4 M) pasos. En local, libre, el
+ * más caro tarda ~4 s; con la suite entera en paralelo y la CPU compartida
+ * (otras suites, `stress-ng`) pasó de 60 s (run 41136232999 de la CI, y en
+ * local 158 s de suite con él en rojo). Un timeout tampoco protege de nada
+ * aquí: un bucle que no cede el hilo no deja ni que salte (el temporizador
+ * no corre), y los topes garantizan que la lectura termina. Por eso un
+ * margen holgado y explícito en vez del de 60 s.
+ */
+const XLSX_CAPS_TIMEOUT_MS = 300_000;
+
 describe('XLSX: topes de estructura y event loop (revisión 2026-10-23, B1)', () => {
-  jest.setTimeout(60_000);
+  jest.setTimeout(XLSX_CAPS_TIMEOUT_MS);
 
   const HEAD =
     `<row r="1">${inline('A1', 'nombres')}${inline('B1', 'apellidos')}</row>` +
@@ -673,9 +690,15 @@ describe('XLSX: topes de estructura y event loop (revisión 2026-10-23, B1)', ()
   });
 
   it('muchas filas anchas que respetan el tope por fila: presupuesto global, sin bloquear', async () => {
-    const row = `<row>${'<c/>'.repeat(16_000)}</row>`;
+    // DX-209: las MÍNIMAS filas llenas hasta el tope por fila que pasan el
+    // presupuesto global (cada fila es un paso más sus celdas): 245 × 16.384
+    // en vez de 400 × 16.000. Cada fila sola es válida; solo la suma no.
+    const rows = Math.floor(MAX_XML_STEPS / (MAX_CELLS_PER_ROW + 1)) + 1;
+    expect(rows * (MAX_CELLS_PER_ROW + 1)).toBeGreaterThan(MAX_XML_STEPS);
+    expect((rows - 1) * (MAX_CELLS_PER_ROW + 1)).toBeLessThan(MAX_XML_STEPS);
+    const row = `<row>${'<c/>'.repeat(MAX_CELLS_PER_ROW)}</row>`;
     await expectRejectedYielding(
-      rawBook(sheetWith(row.repeat(400))),
+      rawBook(sheetWith(row.repeat(rows))),
       /demasiado complej/,
     );
   });
