@@ -45,7 +45,11 @@ export class InMemorySignatureRequestRepository implements SignatureRequestRepos
   /** DX-422: estado del PDF firmado por consentimiento. */
   readonly signedPdfs = new Map<
     string,
-    { status: SignedConsentPdfStatus; documentId: string | null }
+    {
+      status: SignedConsentPdfStatus;
+      documentId: string | null;
+      copySentAt: Date | null;
+    }
   >();
   readonly budgets = new Map<string, BudgetSource>();
   readonly acceptances: (Omit<RemoteBudgetAcceptanceInsert, 'stillMatches'> & {

@@ -635,5 +635,48 @@ describe('plantillas reservadas para otras tareas', () => {
       );
       expect(email.text).not.toMatch(/tratamiento|motivo/i);
     });
+
+    it('la copia del PDF firmado (DX-443): enlace de un solo uso, sin título ni nada clínico', () => {
+      const email = renderEmail(
+        'signed-consent-copy',
+        {
+          recipientFirstName: 'Marta',
+          patientFirstName: 'Lucía',
+          clinicName: 'Sonrisas del Norte',
+          url: 'https://demo.dentalix.app/copia/abc',
+          expiresAtLabel: '07/11/2026 9:30 a. m.',
+        },
+        brand,
+      );
+      expect(email.subject).toBe(
+        'Tu copia del documento firmado en Sonrisas del Norte',
+      );
+      expect(email.text).toContain('Hola, Marta');
+      expect(email.text).toContain('firmaste en nombre de Lucía');
+      expect(email.text).toContain('07/11/2026 9:30 a. m.');
+      expect(email.text).toContain('solo sirve una vez');
+      expect(email.html).toContain(
+        'href="https://demo.dentalix.app/copia/abc"',
+      );
+      expect(email.text).not.toMatch(
+        /consentimiento|tratamiento|procedimiento|exodoncia|diagn/i,
+      );
+    });
+
+    it('la copia del PDF firmado al propio paciente no nombra a nadie más', () => {
+      const email = renderEmail(
+        'signed-consent-copy',
+        {
+          recipientFirstName: 'Laura',
+          patientFirstName: null,
+          clinicName: 'Sonrisas del Norte',
+          url: 'https://demo.dentalix.app/copia/abc',
+          expiresAtLabel: '07/11/2026 9:30 a. m.',
+        },
+        brand,
+      );
+      expect(email.text).toContain('Hola, Laura');
+      expect(email.text).not.toContain('en nombre de');
+    });
   });
 });

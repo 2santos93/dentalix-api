@@ -115,6 +115,16 @@ function throttlers(
           request(context).params?.token,
         ),
     },
+    // DX-443: la copia pública del PDF firmado, por IP y por token.
+    strict('copy-link'),
+    {
+      ...strict('copy-token'),
+      generateKey: (context, _ip, name) =>
+        publicTokenRateLimitKey(
+          routePrefix(context, name),
+          request(context).params?.token,
+        ),
+    },
     {
       ...strict('direct-upload'),
       generateKey: (context, _ip, name) =>

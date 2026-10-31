@@ -22,6 +22,7 @@ export const EMAIL_TEMPLATES = [
   'signature-code',
   'signature-budget-accepted',
   'slot-offer',
+  'signed-consent-copy',
 ] as const;
 export type EmailTemplateName = (typeof EMAIL_TEMPLATES)[number];
 
@@ -217,6 +218,23 @@ export interface SlotOfferEmailVars {
   expiresAtLabel: string;
 }
 
+/**
+ * DX-443: la copia del PDF firmado a distancia, con un enlace de un solo uso.
+ * Nada clínico: ni el título del documento ni el procedimiento; quién lo
+ * envía, a quién y el enlace (el PDF se descarga desde la página).
+ */
+export interface SignedConsentCopyEmailVars {
+  /** Nombre de pila de quien firmó (el paciente o su responsable). */
+  recipientFirstName: string;
+  /** Firmó el responsable de un menor: el nombre de pila del paciente. */
+  patientFirstName: string | null;
+  clinicName: string;
+  /** Enlace público (`/copia/<token>`). */
+  url: string;
+  /** Caducidad del enlace, ya formateada en la zona y el formato de la sede. */
+  expiresAtLabel: string;
+}
+
 export interface EmailVarsByTemplate {
   invitation: InvitationEmailVars;
   'password-reset': PasswordResetEmailVars;
@@ -229,6 +247,7 @@ export interface EmailVarsByTemplate {
   'signature-code': SignatureCodeEmailVars;
   'signature-budget-accepted': SignatureBudgetAcceptedEmailVars;
   'slot-offer': SlotOfferEmailVars;
+  'signed-consent-copy': SignedConsentCopyEmailVars;
 }
 
 /** Lo que el remitente produce para una plantilla: asunto, HTML y texto. */

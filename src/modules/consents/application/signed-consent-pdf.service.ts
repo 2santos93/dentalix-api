@@ -25,6 +25,10 @@ import {
   type SignedConsentPdfScheduler,
 } from '../domain/ports/signed-consent-pdf-repository.port';
 import {
+  SIGNED_PDF_COPY_SCHEDULER,
+  type SignedPdfCopyScheduler,
+} from '../domain/ports/signed-pdf-copy-repository.port';
+import {
   SignedConsentPdfSourceError,
   buildSignedConsentPdfModel,
   signedConsentPdfErrorCode,
@@ -117,6 +121,8 @@ export class GenerateSignedConsentPdf {
     private readonly tenantContext: TenantContextService,
     @Inject(SignedConsentPdfAudit)
     private readonly audit: Pick<SignedConsentPdfAudit, 'integrityMismatch'>,
+    @Inject(SIGNED_PDF_COPY_SCHEDULER)
+    private readonly copies: SignedPdfCopyScheduler,
   ) {}
 
   /**
@@ -156,23 +162,30 @@ export class GenerateSignedConsentPdf {
       const documentId = randomUUID();
       storageKey = storageKeyFor(tenantId, documentId, 'application/pdf');
       await this.storage.save(storageKey, pdf, 'application/pdf');
-      const outcome = await this.repo.archive({
-        consentId,
-        patientId: job.patientId,
-        documentId,
-        locationId: job.locationId,
-        uploadedById: job.professionalUserId,
-        originalName: signedConsentPdfFileName(
-          model.title,
-          model.completedAt,
-          // buildSignedConsentPdfModel ya exigió la zona.
-          job.source.location.timeZone ?? 'UTC',
-        ),
-        mimeType: 'application/pdf',
-        sizeBytes: pdf.length,
-        sha256: createHash('sha256').update(pdf).digest('hex'),
-        storageKey,
-      });
+      const outcome = await this.repo.archive(
+        {
+          consentId,
+          patientId: job.patientId,
+          documentId,
+          locationId: job.locationId,
+          uploadedById: job.professionalUserId,
+          originalName: signedConsentPdfFileName(
+            model.title,
+            model.completedAt,
+            // buildSignedConsentPdfModel ya exigió la zona.
+            job.source.location.timeZone ?? 'UTC',
+          ),
+          mimeType: 'application/pdf',
+          sizeBytes: pdf.length,
+          sha256: createHash('sha256').update(pdf).digest('hex'),
+          storageKey,
+        },
+        // DX-443: la copia al paciente se encola con el archivo (outbox); los
+        // del barrido retroactivo no le escriben.
+        job.notifyPatient
+          ? (tx) => this.copies.schedule(tx, consentId)
+          : undefined,
+      );
       // Otro intento lo archivó antes: este objeto no tiene fila.
       if (outcome === 'ALREADY_READY') await this.discard(storageKey);
     } catch (error) {

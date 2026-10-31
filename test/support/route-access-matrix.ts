@@ -124,6 +124,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /public/slot-offers/:token': PUBLIC_TENANT,
   'POST /public/slot-offers/:token/accept': PUBLIC_TENANT,
   'POST /public/slot-offers/:token/decline': PUBLIC_TENANT,
+  // DX-443: la copia del PDF firmado por enlace de un solo uso.
+  'GET /public/signed-consent-copies/:token': PUBLIC_TENANT,
+  'POST /public/signed-consent-copies/:token/download': PUBLIC_TENANT,
 
   // --- Cualquier sesión (sin rol de clínica) -------------------------------
   // dentalix-docs/docs/plans/2026-07-28-user-profile.md (/me) y
@@ -300,6 +303,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // DX-422: reintentar el PDF firmado que no se pudo generar: los cuatro
   // roles, como el bloque de firma a distancia de la ficha (nada clínico).
   'POST /patients/:patientId/consents/:id/signed-pdf/retry': EVERY_ROLE,
+  // DX-443: «Reenviar copia» del PDF firmado, los cuatro roles (nada clínico).
+  'POST /patients/:patientId/consents/:id/signed-pdf/copy': EVERY_ROLE,
   'GET /patients/:patientId/signature-requests/options': EVERY_ROLE,
   'GET /patients/:patientId/signature-requests': EVERY_ROLE,
   'POST /patients/:patientId/signature-requests': EVERY_ROLE,

@@ -1,9 +1,35 @@
 import { Module } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { TokenService } from '../../shared/crypto/token.service';
 import { StorageModule } from '../../shared/storage/storage.module';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 import { JobsModule } from '../jobs/jobs.module';
+import { EmailModule } from '../notifications/email/email.module';
+import {
+  BackfillSignedConsentPdfs,
+  DownloadSignedPdfCopyUseCase,
+  GetPublicSignedPdfCopyUseCase,
+  OutboxSignedPdfCopyEmailSender,
+  ResendSignedPdfCopyUseCase,
+  SIGNED_PDF_COPY_EMAIL_SENDER,
+  SendSignedPdfCopyJob,
+  SignedPdfCopyJobs,
+  SignedPdfCopyQueue,
+  SignedPdfCopySender,
+} from './application/signed-pdf-copy.service';
+import {
+  SIGNED_CONSENT_PDF_BACKFILL_REPOSITORY,
+  SIGNED_PDF_COPY_REPOSITORY,
+  SIGNED_PDF_COPY_SCHEDULER,
+} from './domain/ports/signed-pdf-copy-repository.port';
+import {
+  SIGNED_PDF_COPY_CONFIG,
+  loadSignedPdfCopyConfig,
+} from './domain/signed-pdf-copy-link';
+import { PrismaSignedPdfCopyRepository } from './infrastructure/repositories/prisma-signed-pdf-copy.repository';
+import { PublicSignedPdfCopiesController } from './presentation/public-signed-pdf-copies.controller';
+import { PublicTenantContextInterceptor } from '../../shared/tenancy/public-tenant-context.interceptor';
 import {
   GenerateSignedConsentPdf,
   RetrySignedConsentPdfUseCase,
@@ -50,6 +76,8 @@ import { PrismaPatientConsentRepository } from './infrastructure/repositories/pr
  * profesional de los firmados a distancia, y exporta el render del documento
  * para el módulo de firma a distancia. DX-422: genera en la cola el PDF firmado
  * de uno completo a distancia y lo archiva en los documentos del paciente.
+ * DX-443: envía al paciente su copia por un enlace de un solo uso (ruta
+ * pública por token, DX-207) y genera con efecto retroactivo los que faltan.
  */
 @Module({
   imports: [
@@ -58,8 +86,13 @@ import { PrismaPatientConsentRepository } from './infrastructure/repositories/pr
     DocumentTypeNamesModule,
     JobsModule,
     StorageModule,
+    EmailModule,
   ],
-  controllers: [ConsentTemplatesController, PatientConsentsController],
+  controllers: [
+    ConsentTemplatesController,
+    PatientConsentsController,
+    PublicSignedPdfCopiesController,
+  ],
   providers: [
     ListConsentTemplatesUseCase,
     CreateConsentTemplateUseCase,
@@ -98,6 +131,36 @@ import { PrismaPatientConsentRepository } from './infrastructure/repositories/pr
     {
       provide: SIGNED_CONSENT_PDF_RENDERER,
       useValue: new PdfkitSignedConsentPdfRenderer(),
+    },
+    // DX-443: copia al paciente por enlace de un solo uso y barrido retroactivo.
+    PublicTenantContextInterceptor,
+    SignedPdfCopySender,
+    SendSignedPdfCopyJob,
+    ResendSignedPdfCopyUseCase,
+    GetPublicSignedPdfCopyUseCase,
+    DownloadSignedPdfCopyUseCase,
+    BackfillSignedConsentPdfs,
+    SignedPdfCopyJobs,
+    SignedPdfCopyQueue,
+    PrismaSignedPdfCopyRepository,
+    { provide: SIGNED_PDF_COPY_SCHEDULER, useExisting: SignedPdfCopyQueue },
+    {
+      provide: SIGNED_PDF_COPY_REPOSITORY,
+      useExisting: PrismaSignedPdfCopyRepository,
+    },
+    {
+      provide: SIGNED_CONSENT_PDF_BACKFILL_REPOSITORY,
+      useExisting: PrismaSignedPdfCopyRepository,
+    },
+    {
+      provide: SIGNED_PDF_COPY_EMAIL_SENDER,
+      useClass: OutboxSignedPdfCopyEmailSender,
+    },
+    {
+      provide: SIGNED_PDF_COPY_CONFIG,
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) =>
+        loadSignedPdfCopyConfig((key) => config.get<string>(key)),
     },
   ],
   // DX-243: la firma a distancia congela el texto con el mismo render.

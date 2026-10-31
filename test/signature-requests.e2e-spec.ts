@@ -13,6 +13,11 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationBody,
+} from './support/location-fixtures';
+import { LOCATION_NOT_ALLOWED_CODE } from '../src/shared/tenancy/location-access';
 import { MAILER } from '../src/modules/notifications/email/domain/ports/mailer.port';
 import {
   MAIL_CONFIG,
@@ -44,6 +49,7 @@ const ADULT_EMAIL = 'laura.castro@example.com';
 const GUARDIAN_EMAIL = 'claudia.navarro@example.com';
 const TOKEN_IN_TEXT = /\/firmar\/([A-Za-z0-9_-]{43})/;
 const CODE_IN_TEXT = /Tu código de verificación es: (\d{6})/;
+const COPY_IN_TEXT = /\/copia\/([A-Za-z0-9_-]{43})/;
 const HOUR_MS = 60 * 60 * 1000;
 const SIGNATURE = `data:image/png;base64,${signaturePng(300, 100).toString('base64')}`;
 const UA = 'Mozilla/5.0 (iPhone) e2e';
@@ -66,6 +72,7 @@ interface SignatureRequestView {
   countersignedAt: string | null;
   signedPdfStatus: 'PENDING' | 'READY' | 'FAILED' | null;
   signedPdfDocumentId: string | null;
+  signedPdfCopySentAt: string | null;
   emailQueued?: boolean;
 }
 
@@ -543,6 +550,143 @@ describe('Firma a distancia de consentimientos (e2e, DX-243)', () => {
     await as(clinicB)
       .get(`/patients/${patientId}/documents/${pdfId}/url/download`)
       .expect(404);
+
+    // DX-443: al quedar READY sale la copia al paciente por email, con un
+    // enlace de un solo uso y sin nada clínico.
+    await app.get(JobWorker).drain();
+    await dispatcher.whenIdle();
+    const copyToken = (await mailer.waitFor(ADULT_EMAIL, COPY_IN_TEXT))[1];
+    const copyEmail = mailer.sent.find((m) => m.text.includes(copyToken))!;
+    expect(`${copyEmail.subject} ${copyEmail.text}`).not.toMatch(
+      /Exodoncia|Consentimiento informado|tratamiento/i,
+    );
+    const copySentAt = (await listA())[0].signedPdfCopySentAt;
+    expect(copySentAt).toEqual(expect.any(String));
+    const copy = (host: string, path = '') =>
+      server()
+        .get(`/api/v1/public/signed-consent-copies/${path}`)
+        .set('X-Tenant-Host', host);
+    const downloadCopy = (host: string, token: string) =>
+      server()
+        .post(`/api/v1/public/signed-consent-copies/${token}/download`)
+        .set('X-Tenant-Host', host)
+        .set('User-Agent', UA);
+    // Desde otra clínica, inventado o mal formado: el mismo 404 genérico.
+    const unknownCopy = await copy(clinicA.host, 'A'.repeat(43)).expect(404);
+    const otherClinic = await copy(clinicB.host, copyToken).expect(404);
+    expect(otherClinic.body).toEqual(unknownCopy.body);
+    await downloadCopy(clinicB.host, copyToken).expect(404);
+    await copy(clinicA.host, 'corto').expect(404);
+    // Abrir solo lee (los previsualizadores no lo gastan).
+    for (let i = 0; i < 2; i++) {
+      const opened = await copy(clinicA.host, copyToken).expect(200);
+      expect(opened.body).toMatchObject({
+        state: 'AVAILABLE',
+        clinic: { name: expect.any(String) as string },
+      });
+      expect(JSON.stringify(opened.body)).not.toMatch(/Exodoncia|Laura/);
+    }
+    const got = await downloadCopy(clinicA.host, copyToken).expect(200);
+    const copyUrl = new URL((got.body as { url: string }).url);
+    const copyFile = await server()
+      .get(`${copyUrl.pathname}${copyUrl.search}`)
+      .buffer(true)
+      .parse((res, cb) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (c: Buffer) => chunks.push(c));
+        res.on('end', () => cb(null, Buffer.concat(chunks)));
+      })
+      .expect(200);
+    expect((copyFile.body as Buffer).subarray(0, 5).toString()).toBe('%PDF-');
+    // Una sola vez: después, «enlace usado».
+    const usedAgain = await downloadCopy(clinicA.host, copyToken).expect(410);
+    expect(usedAgain.body).toMatchObject({
+      code: 'SIGNED_PDF_COPY_LINK_USED',
+      message:
+        'Este enlace ya se usó. Si necesitas otra copia, pídesela a la clínica.',
+    });
+    await expect(
+      copy(clinicA.host, copyToken).expect(200),
+    ).resolves.toMatchObject({ body: { state: 'USED' } });
+    expect(
+      await raw.auditEvent.count({
+        where: {
+          tenantId: clinicA.tenantId,
+          resourceId: consentId,
+          action: 'EXPORT',
+          actorUserId: null,
+          metadata: { path: ['origin'], equals: 'PUBLIC_LINK' },
+        },
+      }),
+    ).toBe(1);
+    // «Reenviar copia»: enlace nuevo, el anterior ya no vale, auditado.
+    mailer.clear();
+    const resent = await as(clinicA, reception)
+      .post(`/patients/${patientId}/consents/${consentId}/signed-pdf/copy`)
+      .expect(200);
+    expect(resent.body).toMatchObject({
+      sentAt: expect.any(String) as string,
+      expiresAt: expect.any(String) as string,
+      destinationMasked: expect.stringContaining('***') as string,
+    });
+    expect(JSON.stringify(resent.body)).not.toContain('/copia/');
+    await dispatcher.whenIdle();
+    const resentToken = (await mailer.waitFor(ADULT_EMAIL, COPY_IN_TEXT))[1];
+    expect(resentToken).not.toBe(copyToken);
+    mailer.clear();
+    await as(clinicA, reception)
+      .post(`/patients/${patientId}/consents/${consentId}/signed-pdf/copy`)
+      .expect(200);
+    await dispatcher.whenIdle();
+    const latestToken = (await mailer.waitFor(ADULT_EMAIL, COPY_IN_TEXT))[1];
+    await copy(clinicA.host, resentToken).expect(404);
+    await downloadCopy(clinicA.host, resentToken).expect(404);
+    await copy(clinicA.host, latestToken).expect(200);
+    expect(
+      await raw.auditEvent.count({
+        where: {
+          tenantId: clinicA.tenantId,
+          resourceId: consentId,
+          action: 'SEND',
+          metadata: { path: ['reason'], equals: 'SIGNED_PDF_COPY_RESENT' },
+        },
+      }),
+    ).toBe(2);
+    expect((await listA())[0].signedPdfCopySentAt).not.toBe(copySentAt);
+    await as(clinicB)
+      .post(`/patients/${patientId}/consents/${consentId}/signed-pdf/copy`)
+      .expect(404);
+    // SEC-045: una auxiliar restringida a otra sede de A no reenvía la copia de un
+    // envío hecho desde la sede principal (403, sin enlace nuevo ni email).
+    const otherLocation = (
+      (
+        await as(clinicA)
+          .post(
+            '/locations',
+            locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede DX-443' }),
+          )
+          .expect(201)
+      ).body as { id: string }
+    ).id;
+    const restricted = await seedMember(raw, clinicA, ClinicRole.ASSISTANT);
+    await as(clinicA)
+      .put(`/staff/${restricted.userId}/locations`, {
+        locationIds: [otherLocation],
+      })
+      .expect(200);
+    const restrictedToken = await loginAs(app, clinicA.host, restricted.email);
+    const linksBefore = await raw.signedConsentPdfLink.count({
+      where: { consentId },
+    });
+    mailer.clear();
+    const denied = await as(clinicA, restrictedToken)
+      .post(`/patients/${patientId}/consents/${consentId}/signed-pdf/copy`)
+      .expect(403);
+    expect(denied.body).toMatchObject({ code: LOCATION_NOT_ALLOWED_CODE });
+    expect(await raw.signedConsentPdfLink.count({ where: { consentId } })).toBe(
+      linksBefore,
+    );
+    await copy(clinicA.host, latestToken).expect(200);
     // El modal ya avisa de que este paciente lo firmó (sin bloquear).
     const after = await as(clinicA, reception)
       .get(`/patients/${patientId}/signature-requests/options`)

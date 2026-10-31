@@ -95,6 +95,8 @@ export interface SignatureRequestSummary {
   signedPdfStatus: SignedConsentPdfStatus | null;
   /** El documento del paciente con el PDF, si está READY. */
   signedPdfDocumentId: string | null;
+  /** DX-443: último envío de la copia al paciente (automático o reenvío). */
+  signedPdfCopySentAt: Date | null;
 }
 
 /** Fila del listado: la solicitud con lo que hace falta para su estado. */
@@ -108,6 +110,7 @@ export interface SignatureRequestListRow {
     signedPdf: {
       status: SignedConsentPdfStatus;
       documentId: string | null;
+      copySentAt: Date | null;
     } | null;
   } | null;
   /** DX-415: la aceptación del plan que produjo la firma (BUDGET). */
