@@ -37,7 +37,7 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=lib/dx082-common.sh
+# shellcheck source=SCRIPTDIR/lib/dx082-common.sh
 . "$here/lib/dx082-common.sh"
 
 usage() {
@@ -98,6 +98,7 @@ dump="$base.dump.age"
 [[ ! -e "$out_dir/$dump" ]] || dx_die "ya existe $dump en --out-dir" 2
 work="$(mktemp -d "$out_dir/.${base}.XXXXXX")"
 snap_pid=''
+# shellcheck disable=SC2329 # la invoca el trap EXIT
 cleanup() {
   if [[ -n "$snap_pid" ]]; then kill "$snap_pid" 2>/dev/null || true; fi
   rm -rf "$work"
@@ -109,6 +110,7 @@ started="$(dx_now_ms)"
 # Sesión que exporta la instantánea: el conteo y pg_dump ven los mismos datos.
 # row_security=off hace que un rol sin BYPASSRLS falle en vez de contar 0.
 coproc SNAP { exec psql -X -q -A -t -v ON_ERROR_STOP=1 -v VERBOSITY=terse 2>"$work/psql.err"; }
+# shellcheck disable=SC2153 # SNAP_PID lo define el coproc SNAP
 snap_pid="$SNAP_PID"
 exec {snap_out}>&"${SNAP[1]}" {snap_in}<&"${SNAP[0]}"
 printf '%s\n' \

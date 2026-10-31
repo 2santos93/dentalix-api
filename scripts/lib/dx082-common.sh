@@ -162,7 +162,7 @@ dx_pg_errors() {
 # usan los tests con stubs. Se ejecuta en la transacción del snapshot que
 # exporta backup-db.sh (mismos datos que el volcado) y, en restore-check, en
 # la BD restaurada.
-# shellcheck disable=SC2016
+# shellcheck disable=SC2016,SC2034 # la usan los scripts que cargan esta librería
 DX_COUNTS_SQL='
 WITH /* dx082_manifest */ t AS (
   SELECT n.nspname || $$.$$ || c.relname AS name,

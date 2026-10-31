@@ -51,7 +51,7 @@ set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="$(cd "$here/.." && pwd)"
-# shellcheck source=lib/dx082-common.sh
+# shellcheck source=SCRIPTDIR/lib/dx082-common.sh
 . "$here/lib/dx082-common.sh"
 
 usage() {
@@ -131,6 +131,7 @@ SELECT format('DROP DATABASE IF EXISTS %I WITH (FORCE)', :'db') \gexec
 SQL
 }
 
+# shellcheck disable=SC2329 # la invoca el trap EXIT
 finalize() {
   local rc=$? c sep='' checks_json='{' event
   set +e
