@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma, type CashSessionStatus } from '@prisma/client';
+import { formatRefundNumber } from '../../patient-credit/domain/patient-credit';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import {
@@ -21,6 +22,7 @@ import type {
   CashAdjustmentView,
   CashClosingView,
   CashExpectedLine,
+  CashCreditRefund,
   CashOutflow,
   CashSessionPayment,
   CashSessionSummary,
@@ -466,6 +468,7 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
           later,
           closings,
           reopenings,
+          creditRefunds,
         ] = await Promise.all([
           this.arqueoSource(tx, tenantId, id),
           tx.payment.findMany({
@@ -509,6 +512,22 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
             where: { tenantId, sessionId: id },
             orderBy: { sequence: 'desc' },
           }),
+          tx.patientCreditRefund.findMany({
+            where: { tenantId, cashSessionId: id },
+            select: {
+              id: true,
+              seriesPrefix: true,
+              number: true,
+              amount: true,
+              currency: true,
+              reason: true,
+              createdAt: true,
+              createdById: true,
+              patientId: true,
+              snapshot: true,
+            },
+            orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+          }),
         ]);
         const timeZone = (
           await resolveLocationTimeZones(tx, tenantId, [session.locationId])
@@ -518,6 +537,7 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
           ...(session.closedById ? [session.closedById] : []),
           ...payments.flatMap((p) => [p.createdById, p.voidedById]),
           ...outflows.flatMap((o) => [o.createdById, o.voidedById]),
+          ...creditRefunds.map((r) => r.createdById),
           ...[...adjustments, ...later].flatMap((a) => [
             a.createdById,
             a.originalSession?.openedById,
@@ -555,6 +575,21 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
             bookedAsAdjustment: p.cashAdjustments.length > 0,
           })),
           outflows: liveOutflows.map((o) => this.toOutflow(o, names)),
+          creditRefunds: creditRefunds.map((r): CashCreditRefund => ({
+            id: r.id,
+            number: formatRefundNumber(r.seriesPrefix, r.number),
+            amount: amountOf(r.amount),
+            currency: r.currency,
+            reason: r.reason,
+            createdAt: r.createdAt,
+            createdBy: this.staff(r.createdById, names),
+            patient: {
+              id: r.patientId,
+              fullName:
+                (r.snapshot as { patient?: { fullName?: string } }).patient
+                  ?.fullName ?? '',
+            },
+          })),
           voidedOutflows: voidedOutflows.map((o): CashVoidedOutflow => ({
             ...this.toOutflow(o, names),
             voidedAt: o.voidedAt,
@@ -590,25 +625,32 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
     tenantId: string,
     sessionId: string,
   ): Promise<ArqueoSource> {
-    const [floats, payments, adjustments, outflows] = await Promise.all([
-      tx.cashSessionFloat.findMany({
-        where: { tenantId, sessionId },
-        select: { currency: true, amount: true },
-      }),
-      tx.payment.findMany({
-        where: { tenantId, ...countedPayments(sessionId) },
-        select: { currency: true, method: true, amount: true },
-      }),
-      tx.cashSessionAdjustment.findMany({
-        where: { tenantId, sessionId },
-        select: { currency: true, method: true, amount: true },
-      }),
-      // El CHECK de la BD garantiza que un pago con caja es en efectivo.
-      tx.expensePayment.findMany({
-        where: { tenantId, ...countedOutflows(sessionId) },
-        select: { currency: true, amount: true },
-      }),
-    ]);
+    const [floats, payments, adjustments, outflows, refunds] =
+      await Promise.all([
+        tx.cashSessionFloat.findMany({
+          where: { tenantId, sessionId },
+          select: { currency: true, amount: true },
+        }),
+        tx.payment.findMany({
+          where: { tenantId, ...countedPayments(sessionId) },
+          select: { currency: true, method: true, amount: true },
+        }),
+        tx.cashSessionAdjustment.findMany({
+          where: { tenantId, sessionId },
+          select: { currency: true, method: true, amount: true },
+        }),
+        // El CHECK de la BD garantiza que un pago con caja es en efectivo.
+        tx.expensePayment.findMany({
+          where: { tenantId, ...countedOutflows(sessionId) },
+          select: { currency: true, amount: true },
+        }),
+        // DX-253: devoluciones de saldo a favor en efectivo (inmutables: sin
+        // anulación, así que todas restan en su caja; CHECK: solo CASH).
+        tx.patientCreditRefund.findMany({
+          where: { tenantId, cashSessionId: sessionId },
+          select: { currency: true, amount: true },
+        }),
+      ]);
     const cents = (value: Prisma.Decimal) => centsOf(value.toNumber());
     return {
       floats: floats.map((f) => ({
@@ -625,7 +667,7 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
         method: a.method,
         cents: cents(a.amount),
       })),
-      outflows: outflows.map((o) => ({
+      outflows: [...outflows, ...refunds].map((o) => ({
         currency: o.currency,
         cents: cents(o.amount),
       })),

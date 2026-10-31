@@ -107,6 +107,13 @@ export class AccountStatementCurrencySummaryDto {
   paid!: number;
 
   @ApiProperty({
+    example: 0,
+    description:
+      'DX-253: Σ traspasos y devoluciones de saldo a favor en esta moneda, con signo. balance = budgeted + openingBalance − paid − creditMovements',
+  })
+  creditMovements!: number;
+
+  @ApiProperty({
     example: 1950000,
     description: 'budgeted + openingBalance - paid (negativo = saldo a favor)',
   })
@@ -199,6 +206,13 @@ export class AccountStatementPlanDto {
     description: 'Abonos vivos en la moneda del plan',
   })
   paid!: number;
+
+  @ApiProperty({
+    example: -200000,
+    description:
+      'DX-253: Σ asientos del saldo a favor del plan en su moneda, con signo (traspasos recibidos − dados − devoluciones). Los abonos no cambian.',
+  })
+  creditMovements!: number;
 
   @ApiProperty({
     type: [AccountStatementOtherCurrencyDto],

@@ -12,6 +12,8 @@ import {
   VoidPaymentUseCase,
 } from './application/use-cases/void-payment.use-case';
 import { GetPlanBalanceUseCase } from './application/use-cases/get-plan-balance.use-case';
+import { PLAN_CREDIT_READER } from './domain/ports/plan-credit-reader.port';
+import { PrismaPlanCreditReader } from './infrastructure/credit/prisma-plan-credit-reader';
 import { GetPaymentsTotalsUseCase } from './application/use-cases/get-payments-totals.use-case';
 import { ListCashPaymentsUseCase } from './application/use-cases/list-cash-payments.use-case';
 import { PAYMENT_REPOSITORY } from './domain/ports/payment-repository.port';
@@ -80,6 +82,8 @@ import { ReplacePaymentAllocationsUseCase } from './application/use-cases/replac
     ListPaymentsUseCase,
     VoidPaymentUseCase,
     GetPlanBalanceUseCase,
+    // DX-253: asientos del saldo a favor en el saldo del plan.
+    { provide: PLAN_CREDIT_READER, useClass: PrismaPlanCreditReader },
     GetPaymentsTotalsUseCase,
     ListCashPaymentsUseCase,
     // DX-051: imputación de un abono a los ítems de su plan.

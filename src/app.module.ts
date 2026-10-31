@@ -39,6 +39,7 @@ import { PaymentPlansModule } from './modules/payment-plans/payment-plans.module
 import { AccountStatementModule } from './modules/account-statement/account-statement.module';
 import { ReceivablesModule } from './modules/receivables/receivables.module';
 import { DiscountsModule } from './modules/discounts/discounts.module';
+import { PatientCreditModule } from './modules/patient-credit/patient-credit.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { CollectionsModule } from './modules/collections/collections.module';
 import { CashSessionsModule } from './modules/cash-sessions/cash-sessions.module';
@@ -116,6 +117,8 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     AccountStatementModule,
     ReceivablesModule,
     DiscountsModule,
+    // DX-253: saldo a favor (traspaso y devolución).
+    PatientCreditModule,
     ReportsModule,
     // DX-150: cobranza (notas, compromisos de pago y marca «Saldo vencido»).
     CollectionsModule,

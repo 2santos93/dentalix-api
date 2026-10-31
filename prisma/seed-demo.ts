@@ -2426,6 +2426,16 @@ class DemoSeeder {
         );
       }
 
+      if (spec.cancelledAfterPayments) {
+        await this.inTenant(tenantId, undefined, () =>
+          this.use(UpdateTreatmentPlanUseCase).execute(
+            planId,
+            { status: TreatmentPlanStatus.CANCELLED },
+            { role: ClinicRole.DENTIST },
+          ),
+        );
+      }
+
       // SEC-013: el plan financiado enseña además un abono anulado con autor y
       // motivo (un cobro registrado dos veces que la administradora anuló), para
       // ver «Anulado por …: motivo» en el estado de cuenta demo.

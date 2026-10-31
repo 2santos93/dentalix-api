@@ -43,6 +43,7 @@ import { PaymentPlansController } from '../payment-plans/presentation/payment-pl
 import { AccountStatementController } from '../account-statement/presentation/account-statement.controller';
 import { ReceivablesController } from '../receivables/presentation/receivables.controller';
 import { DiscountPolicyController } from '../discounts/presentation/discount-policy.controller';
+import { PatientCreditController } from '../patient-credit/presentation/patient-credit.controller';
 import { CancellationPolicyController } from '../cancellation-policies/presentation/cancellation-policy.controller';
 import { CancellationFeeController } from '../cancellation-fees/presentation/cancellation-fee.controller';
 import { DiscountReportController } from '../discounts/presentation/discount-report.controller';
@@ -1002,6 +1003,40 @@ const EXPECTED: Record<string, AuditOptions> = {
   // DX-204: política de descuentos (solo ADMIN) e informe de descuentos (lista
   // de muchos pacientes, sin paciente en el evento) y su CSV.
   'PUT /discount-policy': { action: 'UPDATE', resource: 'DISCOUNT_POLICY' },
+  // DX-253: saldo a favor — traspaso, devolución (con su comprobante) y el
+  // tope de recepción. El importe y el motivo quedan en la fila inmutable
+  // del movimiento (`resourceId`).
+  'POST /treatment-plans/:id/credit-transfers': {
+    action: 'CREATE',
+    resource: 'PATIENT_CREDIT',
+    resourceId: RES,
+    patient: { lookup: 'treatmentPlan', param: 'id' },
+    reason: 'CREDIT_TRANSFER',
+  },
+  'POST /treatment-plans/:id/credit-refunds': {
+    action: 'CREATE',
+    resource: 'PATIENT_CREDIT',
+    resourceId: RES,
+    patient: { lookup: 'treatmentPlan', param: 'id' },
+    reason: 'CREDIT_REFUND',
+  },
+  'GET /credit-refunds/:id': {
+    action: 'VIEW',
+    resource: 'PATIENT_CREDIT',
+    resourceId: { param: 'id' },
+    patient: { response: 'patientId' },
+    reason: 'CREDIT_REFUND_RECEIPT',
+  },
+  'GET /patients/:id/credit-movements': {
+    action: 'VIEW',
+    resource: 'PATIENT_CREDIT',
+    patient: { param: 'id' },
+  },
+  'PUT /patient-credit/policy': {
+    action: 'UPDATE',
+    resource: 'PATIENT_CREDIT',
+    reason: 'POLICY',
+  },
   // DX-279: nueva versión de la política de cancelación de una sede.
   'POST /locations/:id/cancellation-policy': {
     action: 'CREATE',
@@ -1588,6 +1623,7 @@ const CONTROLLERS: Type[] = [
   AccountStatementController,
   ReceivablesController,
   DiscountPolicyController,
+  PatientCreditController,
   CancellationPolicyController,
   CancellationFeeController,
   DiscountReportController,

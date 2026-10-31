@@ -63,6 +63,7 @@ function record(extra: Partial<CashSessionRecord> = {}): CashSessionRecord {
     voidedPayments: [],
     outflows: [],
     voidedOutflows: [],
+    creditRefunds: [],
     adjustments: [],
     laterAdjustments: [],
     closing: null,

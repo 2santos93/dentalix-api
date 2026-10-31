@@ -3181,6 +3181,11 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     'POST /opening-balances/:id/payments': 'opening-balances.e2e-spec.ts',
     // DX-390: B → 404 al cobrar dividido en el plan de A, y no ve su recibo.
     'POST /treatment-plans/:id/split-payments': 'split-payments.e2e-spec.ts',
+    // DX-253: B → 404 sobre el plan, el comprobante y el paciente de A.
+    'POST /treatment-plans/:id/credit-transfers': 'patient-credit.e2e-spec.ts',
+    'POST /treatment-plans/:id/credit-refunds': 'patient-credit.e2e-spec.ts',
+    'GET /credit-refunds/:id': 'patient-credit.e2e-spec.ts',
+    'GET /patients/:id/credit-movements': 'patient-credit.e2e-spec.ts',
     // DX-262: la hoja de saldos del lote de otra clínica → 404.
     'POST /patient-imports/:id/balances': 'opening-balances.e2e-spec.ts',
     'DELETE /patient-imports/:id/balances': 'opening-balances.e2e-spec.ts',

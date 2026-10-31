@@ -61,6 +61,10 @@ export interface ComputeAccountStatementOptions {
  *   `balance = budgeted + openingBalance − paid`. Un abono va a un plan O a
  *   un saldo migrado: el de un saldo cuenta en `paid` de su moneda y en el
  *   abonado/pendiente de ese saldo, nunca en un plan ni en sus cuotas.
+ * - Saldo a favor (DX-253): los traspasos y devoluciones son asientos con
+ *   signo en la moneda del plan (`creditEntries`) que se suman a lo abonado
+ *   del plan (y de su moneda en el resumen) sin tocar los abonos:
+ *   `balance = budgeted + openingBalance − paid − creditMovements`.
  * - Próxima cuota = la de vencimiento más cercano que todavía no venció ni está
  *   pagada (las vencidas ya se cuentan aparte).
  */
@@ -88,6 +92,7 @@ interface CurrencyAccumulator {
   openingCents: number;
   openingPendingCents: number;
   paidCents: number;
+  creditCents: number;
   overdueCount: number;
   overdueCents: number;
   next: StatementNextInstallment | null;
@@ -100,6 +105,7 @@ function emptyAccumulator(): CurrencyAccumulator {
     openingCents: 0,
     openingPendingCents: 0,
     paidCents: 0,
+    creditCents: 0,
     overdueCount: 0,
     overdueCents: 0,
     next: null,
@@ -179,6 +185,20 @@ export function computeBalances(
   };
 
   const paidByPlan = paidByPlanAndCurrency(snapshot.payments);
+  // DX-253: asientos del saldo a favor por plan y moneda (con signo).
+  const creditByPlan = new Map<string, Map<string, number>>();
+  for (const entry of snapshot.creditEntries ?? []) {
+    const byCurrency =
+      creditByPlan.get(entry.treatmentPlanId) ?? new Map<string, number>();
+    byCurrency.set(
+      entry.currency,
+      (byCurrency.get(entry.currency) ?? 0) + toCents(entry.amount),
+    );
+    creditByPlan.set(entry.treatmentPlanId, byCurrency);
+    acc(entry.currency).creditCents += toCents(entry.amount);
+  }
+  const creditOf = (planId: string, currency: string): number =>
+    creditByPlan.get(planId)?.get(currency) ?? 0;
   const planById = new Map(snapshot.plans.map((p) => [p.id, p]));
 
   // --- Planes -------------------------------------------------------------
@@ -187,6 +207,7 @@ export function computeBalances(
     const budgetedCents = toCents(plan.billable);
     const paidMap = paidByPlan.get(plan.id) ?? new Map<string, number>();
     const paidCents = paidMap.get(plan.currency) ?? 0;
+    const creditCents = creditOf(plan.id, plan.currency);
     if (counts) {
       acc(plan.currency).budgetedCents += budgetedCents;
     }
@@ -202,7 +223,10 @@ export function computeBalances(
         .filter(([currency]) => currency !== plan.currency)
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([currency, cents]) => ({ currency, amount: fromCents(cents) })),
-      balance: fromCents((counts ? budgetedCents : 0) - paidCents),
+      creditMovements: fromCents(creditCents),
+      balance: fromCents(
+        (counts ? budgetedCents : 0) - paidCents - creditCents,
+      ),
     };
   });
 
@@ -248,9 +272,11 @@ export function computeBalances(
     if (!treatmentPlan || !countsTowardsBalance(treatmentPlan.status)) {
       continue;
     }
+    // DX-253: un traspaso recibido cubre cuotas como un abono; una
+    // devolución deja de cubrirlas.
     const paidCents =
-      paidByPlan.get(paymentPlan.treatmentPlanId)?.get(paymentPlan.currency) ??
-      0;
+      (paidByPlan.get(paymentPlan.treatmentPlanId)?.get(paymentPlan.currency) ??
+        0) + creditOf(paymentPlan.treatmentPlanId, paymentPlan.currency);
     const derived = deriveStatuses(
       buildTramos(paymentPlan),
       fromCents(paidCents),
@@ -308,6 +334,7 @@ export function computeBalances(
         a.budgetedCents !== 0 ||
         a.openingCents !== 0 ||
         a.paidCents !== 0 ||
+        a.creditCents !== 0 ||
         a.hasInstallments,
     )
     .sort(([a], [b]) => a.localeCompare(b))
@@ -317,7 +344,10 @@ export function computeBalances(
       openingBalance: fromCents(a.openingCents),
       openingPending: fromCents(a.openingPendingCents),
       paid: fromCents(a.paidCents),
-      balance: fromCents(a.budgetedCents + a.openingCents - a.paidCents),
+      creditMovements: fromCents(a.creditCents),
+      balance: fromCents(
+        a.budgetedCents + a.openingCents - a.paidCents - a.creditCents,
+      ),
       overdueCount: a.overdueCount,
       overdueAmount: fromCents(a.overdueCents),
       nextInstallment: a.next,

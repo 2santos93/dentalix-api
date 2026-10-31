@@ -128,6 +128,7 @@ function makeUseCase() {
         billable: balance.billable,
         paid: balance.paid,
         balance: balance.billable - balance.paid,
+        creditMovements: 0,
         paymentsCount: 1,
         paymentsWithoutRate: [],
       }),

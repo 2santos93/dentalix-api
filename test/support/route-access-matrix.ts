@@ -562,6 +562,14 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /receivables/aging.csv': ADMIN_ONLY,
   // Descuentos (loop/informes/DX-204.md): la política la leen quienes editan
   // ítems de plan y la cambia ADMIN; el informe y su CSV, solo ADMIN.
+  // DX-253: saldo a favor (loop/informes/DX-253.md): financiero, ADMIN y
+  // recepción (con tope); el tope solo lo cambia ADMIN.
+  'POST /treatment-plans/:id/credit-transfers': BILLING,
+  'POST /treatment-plans/:id/credit-refunds': BILLING,
+  'GET /credit-refunds/:id': BILLING,
+  'GET /patients/:id/credit-movements': BILLING,
+  'GET /patient-credit/policy': BILLING,
+  'PUT /patient-credit/policy': ADMIN_ONLY,
   'GET /discount-policy': CLINICAL,
   'PUT /discount-policy': ADMIN_ONLY,
   'GET /reports/discounts': ADMIN_ONLY,
