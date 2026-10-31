@@ -3597,6 +3597,7 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       sinComentarioB: [],
       specInexistente: [],
       sinMarcador: [],
+      marcadorSinTest: [],
       specSinRuta: [],
       marcadorHuerfano: [],
     });

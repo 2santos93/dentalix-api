@@ -48,6 +48,7 @@ const NONE = {
   sinComentarioB: [],
   specInexistente: [],
   sinMarcador: [],
+  marcadorSinTest: [],
   specSinRuta: [],
   marcadorHuerfano: [],
 };
@@ -111,6 +112,51 @@ describe('guardia de exenciones de la matriz de aislamiento (DX-451)', () => {
       ).specSinRuta,
     ).toEqual([`${CHECKLIST} → sedation.e2e-spec.ts`]);
   });
+
+  it.each([
+    [
+      'suelto al principio del fichero',
+      (spec: string) =>
+        spec.replace(`  // ISOLATION_COVERS: ${AGENTS}\n`, '') +
+        `\n// ISOLATION_COVERS: ${AGENTS}\nconst x = 1;`,
+    ],
+    [
+      'encima de un it.skip',
+      (spec: string) =>
+        spec.replace(/(ISOLATION_COVERS: [^\n]*agents\n\s*)it\(/, '$1it.skip('),
+    ],
+    [
+      'encima de un describe',
+      (spec: string) =>
+        spec.replace(
+          /(ISOLATION_COVERS: [^\n]*agents\n\s*)it\(/,
+          '$1describe(',
+        ),
+    ],
+    [
+      'con código en medio',
+      (spec: string) =>
+        spec.replace(
+          /(ISOLATION_COVERS: [^\n]*agents\n)/,
+          '$1  const y = 2;\n',
+        ),
+    ],
+  ])(
+    'control: un marcador %s (no encima de un test activo) falla',
+    (_label, mutate) => {
+      const mutated = mutate(SPEC);
+      expect(mutated).not.toBe(SPEC);
+      expect(
+        exemptionProblems(
+          [exemption()],
+          files({ 'sedation.e2e-spec.ts': mutated }),
+        ),
+      ).toEqual({
+        ...NONE,
+        marcadorSinTest: [`${AGENTS} → sedation.e2e-spec.ts`],
+      });
+    },
+  );
 
   it.each([
     ['vacío', ''],
