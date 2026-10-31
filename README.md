@@ -4751,14 +4751,15 @@ MEDICAL_HISTORY` con `reason: ANESTHESIA_DOSE_CHECK`).
     informativo y valores de adulto sano.
   - `summary.adjustment`, `summary.epinephrine` y `summary.remaining`
     («quedan X mg ≈ Y carpules» del anestésico previsualizado, en cuartos
-    hacia abajo; manda lo que se agote antes, dosis o epinefrina). Cada
+    hacia abajo y sin llegar al 100 %, que ya exige motivo; manda lo que se
+    agote antes, dosis o epinefrina). Cada
     registro copia los tres valores del catálogo, la epinefrina de la dosis y
     la acumulada. Los registros anteriores no se tocan (append-only): su
     epinefrina se deduce del vasoconstrictor y su máximo es el de adulto.
-  - Migraciones `20261106115959_dx420_unforce_anesthetic_products`,
-    `…120000_dx420_anesthesia_pediatric_epinephrine` (columnas nulas, CHECK
+  - Migraciones `20261106141959_dx420_unforce_anesthetic_products`,
+    `…142000_dx420_anesthesia_pediatric_epinephrine` (columnas nulas, CHECK
     de rangos y relleno de los valores por defecto revisables en el catálogo
-    de todas las clínicas) y `…120001_dx420_reforce_anesthetic_products`.
+    de todas las clínicas) y `…142001_dx420_reforce_anesthetic_products`.
 
 ## Hoja de sedación consciente en la evolución (DX-407)
 
