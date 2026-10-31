@@ -132,7 +132,9 @@ describe('«Enviar oferta con enlace» (DX-435)', () => {
     expect(view.url).toBeNull();
     expect(sent).toHaveLength(1);
     const url = sent[0].vars.url;
-    expect(url).toMatch(/^https:\/\/demo\.dentalix\.app\/hueco\/[A-Za-z0-9_-]{43}$/);
+    expect(url).toMatch(
+      /^https:\/\/demo\.dentalix\.app\/hueco\/[A-Za-z0-9_-]{43}$/,
+    );
     const token = url.split('/').pop()!;
     expect(repo.tokenHashes.get(view.id)).toBe(hashSlotOfferToken(token));
     expect(sent[0].to).toBe('p1@example.com');
@@ -200,7 +202,9 @@ describe('«Enviar oferta con enlace» (DX-435)', () => {
     await useCase.execute({ ...base, channel: 'LINK_WA_ME' }, LINK, CTX);
     await expect(
       useCase.execute({ ...base, channel: 'LINK_EMAIL' }, LINK, CTX),
-    ).rejects.toThrow(new ConflictException('Ya se le ofrecieron 2 huecos hoy'));
+    ).rejects.toThrow(
+      new ConflictException('Ya se le ofrecieron 2 huecos hoy'),
+    );
   });
 
   it('la oferta con enlace no se crea por la ruta de anotar (sin token)', async () => {

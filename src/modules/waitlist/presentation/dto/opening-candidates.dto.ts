@@ -176,7 +176,8 @@ export class OpeningCandidateDto {
     description:
       'DX-435: su última oferta con enlace de este hueco: `OPEN` enviada y vigente, `ACCEPTED`, `DECLINED`, `EXPIRED` (caducó) o `TAKEN` (otro aceptó antes). null si no se le envió enlace.',
   })
-  linkOfferState!: 'OPEN' | 'ACCEPTED' | 'DECLINED' | 'EXPIRED' | 'TAKEN' | null;
+  linkOfferState!:
+    'OPEN' | 'ACCEPTED' | 'DECLINED' | 'EXPIRED' | 'TAKEN' | null;
 }
 
 export class LinkOfferAcceptedByDto {
@@ -194,7 +195,10 @@ export class LinkOfferAcceptedByDto {
 }
 
 export class SlotLinkOffersDto {
-  @ApiProperty({ description: 'Enviadas, sin respuesta y aún vigentes («Oferta enviada (n)»).' })
+  @ApiProperty({
+    description:
+      'Enviadas, sin respuesta y aún vigentes («Oferta enviada (n)»).',
+  })
   pending!: number;
 
   @ApiProperty({ description: 'Enviadas en total para este hueco.' })
@@ -208,7 +212,8 @@ export class SlotLinkOffersDto {
   acceptedBy!: LinkOfferAcceptedByDto | null;
 
   @ApiProperty({
-    description: '«Caducado»: todas caducaron o se rechazaron sin que nadie aceptara.',
+    description:
+      '«Caducado»: todas caducaron o se rechazaron sin que nadie aceptara.',
   })
   expired!: boolean;
 }
@@ -362,7 +367,8 @@ export class WaitlistOfferDto {
     type: String,
     format: 'date-time',
     nullable: true,
-    description: 'DX-435: cuándo deja de valer el enlace (solo canales con enlace).',
+    description:
+      'DX-435: cuándo deja de valer el enlace (solo canales con enlace).',
   })
   expiresAt!: Date | null;
 

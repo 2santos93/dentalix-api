@@ -28,7 +28,12 @@ type Tx = Prisma.TransactionClient;
 class SlotGoneError extends Error {}
 
 function offerAuditEvent(
-  offer: { id: string; tenantId: string; locationId: string; patientId: string },
+  offer: {
+    id: string;
+    tenantId: string;
+    locationId: string;
+    patientId: string;
+  },
   reason: (typeof SLOT_OFFER_AUDIT_REASONS)[keyof typeof SLOT_OFFER_AUDIT_REASONS],
   meta: AuditRequestMeta,
   byPatient: boolean,
@@ -49,10 +54,7 @@ function offerAuditEvent(
 }
 
 /** Choca con una cita viva (no cancelada) en [start, end). */
-function liveOverlap(
-  start: Date,
-  end: Date,
-): Prisma.AppointmentWhereInput {
+function liveOverlap(start: Date, end: Date): Prisma.AppointmentWhereInput {
   return {
     deletedAt: null,
     status: { not: 'CANCELLED' },
@@ -159,10 +161,7 @@ export class PrismaSlotOfferRepository implements SlotOfferRepository {
     const clash = await tx.appointment.findFirst({
       where: {
         ...window,
-        OR: [
-          { providerId: offer.providerId },
-          { patientId: offer.patientId },
-        ],
+        OR: [{ providerId: offer.providerId }, { patientId: offer.patientId }],
         ...(offer.appointmentId ? { id: { not: offer.appointmentId } } : {}),
       },
       select: { id: true },
@@ -317,7 +316,12 @@ export class PrismaSlotOfferRepository implements SlotOfferRepository {
     if (count === 0) return;
     await writeAuditEvent(
       tx,
-      offerAuditEvent(offer, SLOT_OFFER_AUDIT_REASONS[outcome], meta, byPatient),
+      offerAuditEvent(
+        offer,
+        SLOT_OFFER_AUDIT_REASONS[outcome],
+        meta,
+        byPatient,
+      ),
     );
   }
 

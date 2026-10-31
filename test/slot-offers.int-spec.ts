@@ -242,7 +242,9 @@ describe('oferta de hueco por enlace (int, DX-435)', () => {
         createdById: STAFF,
       };
       await expect(
-        owner.waitlistOffer.create({ data: { ...data, channel: 'LINK_EMAIL' } }),
+        owner.waitlistOffer.create({
+          data: { ...data, channel: 'LINK_EMAIL' },
+        }),
       ).rejects.toThrow(/waitlist_offers_link_check/);
       await expect(
         owner.waitlistOffer.create({
@@ -270,9 +272,9 @@ describe('oferta de hueco por enlace (int, DX-435)', () => {
       await expect(
         inClinic(a, () => getOffer.execute(generateSlotOfferToken())),
       ).rejects.toThrow(notFound);
-      await expect(inClinic(a, () => getOffer.execute('corto'))).rejects.toThrow(
-        notFound,
-      );
+      await expect(
+        inClinic(a, () => getOffer.execute('corto')),
+      ).rejects.toThrow(notFound);
       // Y en la clínica B el intento no tocó nada.
       expect(
         await owner.appointment.count({ where: { tenantId: a.tenantId } }),
@@ -309,7 +311,9 @@ describe('oferta de hueco por enlace (int, DX-435)', () => {
       const second = await offerToEntry(a, 1);
       const third = await offerToEntry(a, 2);
 
-      const won = await inClinic(a, () => acceptOffer.execute(first.token, META));
+      const won = await inClinic(a, () =>
+        acceptOffer.execute(first.token, META),
+      );
       expect(won.state).toBe('ACCEPTED');
       expect(won.message).toBe('Listo: el hueco es tuyo');
 
@@ -348,7 +352,9 @@ describe('oferta de hueco por enlace (int, DX-435)', () => {
       }
       expect(await outcomeOf(first.offerId)).toBe('ACCEPTED');
       // El mismo enlace otra vez: sigue siendo suyo, sin otra cita.
-      const again = await inClinic(a, () => acceptOffer.execute(first.token, META));
+      const again = await inClinic(a, () =>
+        acceptOffer.execute(first.token, META),
+      );
       expect(again.state).toBe('ACCEPTED');
       expect(
         await owner.appointment.count({ where: { tenantId: a.tenantId } }),
@@ -369,9 +375,27 @@ describe('oferta de hueco por enlace (int, DX-435)', () => {
           .sort(),
       ).toEqual(
         [
-          [first.offerId, null, 'PUBLIC_LINK', 'SLOT_OFFER_ACCEPTED', a.patientIds[0]],
-          [second.offerId, null, 'PUBLIC_LINK', 'SLOT_OFFER_TAKEN_BY_OTHER', a.patientIds[1]],
-          [third.offerId, null, 'PUBLIC_LINK', 'SLOT_OFFER_TAKEN_BY_OTHER', a.patientIds[2]],
+          [
+            first.offerId,
+            null,
+            'PUBLIC_LINK',
+            'SLOT_OFFER_ACCEPTED',
+            a.patientIds[0],
+          ],
+          [
+            second.offerId,
+            null,
+            'PUBLIC_LINK',
+            'SLOT_OFFER_TAKEN_BY_OTHER',
+            a.patientIds[1],
+          ],
+          [
+            third.offerId,
+            null,
+            'PUBLIC_LINK',
+            'SLOT_OFFER_TAKEN_BY_OTHER',
+            a.patientIds[2],
+          ],
         ].sort(),
       );
       expect(events.every((e) => e.ip === '10.0.0.9')).toBe(true);
@@ -487,7 +511,10 @@ describe('oferta de hueco por enlace (int, DX-435)', () => {
       const { token } = await offerToEntry(a, 0);
       // El pre-chequeo no ve la cita (recepción la escribe justo después).
       jest
-        .spyOn(repo as unknown as { takenIn: () => Promise<boolean> }, 'takenIn')
+        .spyOn(
+          repo as unknown as { takenIn: () => Promise<boolean> },
+          'takenIn',
+        )
         .mockResolvedValue(false);
       await owner.appointment.create({
         data: {

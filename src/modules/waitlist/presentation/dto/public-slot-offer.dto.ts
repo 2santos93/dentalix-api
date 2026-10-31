@@ -29,7 +29,8 @@ export class PublicSlotOfferDetailsDto {
     type: String,
     nullable: true,
     example: 'es-CO',
-    description: 'Locale de la sede: la página pinta el día y la hora como la sede.',
+    description:
+      'Locale de la sede: la página pinta el día y la hora como la sede.',
   })
   locale!: string | null;
 
@@ -65,7 +66,8 @@ export class PublicSlotOfferDto {
     description:
       '`OPEN` se puede aceptar; `ACCEPTED` el hueco es suyo; `DECLINED` la rechazó; `EXPIRED` caducó; `TAKEN` otro paciente aceptó antes («Este hueco ya se ocupó»); `UNAVAILABLE` la clínica lo ocupó o bloqueó por otra vía.',
   })
-  state!: 'OPEN' | 'ACCEPTED' | 'DECLINED' | 'EXPIRED' | 'TAKEN' | 'UNAVAILABLE';
+  state!:
+    'OPEN' | 'ACCEPTED' | 'DECLINED' | 'EXPIRED' | 'TAKEN' | 'UNAVAILABLE';
 
   @ApiProperty({ description: 'El mensaje para el paciente, en español.' })
   message!: string;

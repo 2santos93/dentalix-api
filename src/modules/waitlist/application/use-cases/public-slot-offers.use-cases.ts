@@ -26,7 +26,10 @@ import {
   type PublicSlotOffer,
   type SlotOfferRepository,
 } from '../../domain/ports/slot-offer-repository.port';
-import { OPENING_CLOCK, type OpeningClock } from './opening-candidates.use-cases';
+import {
+  OPENING_CLOCK,
+  type OpeningClock,
+} from './opening-candidates.use-cases';
 
 /**
  * Lo único que la página pública ve: nombre de pila, cuándo, con quién y

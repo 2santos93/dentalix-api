@@ -90,8 +90,9 @@ describe('enlace de la oferta de hueco (DX-435)', () => {
     });
 
     it('el resultado guardado manda', () => {
-      const s = (outcome: Parameters<typeof publicSlotOfferState>[0]['outcome']) =>
-        publicSlotOfferState({ outcome, expiresAt: slotStart }, now, true);
+      const s = (
+        outcome: Parameters<typeof publicSlotOfferState>[0]['outcome'],
+      ) => publicSlotOfferState({ outcome, expiresAt: slotStart }, now, true);
       expect(s('ACCEPTED')).toBe('ACCEPTED');
       expect(s('DECLINED')).toBe('DECLINED');
       expect(s('TAKEN_BY_OTHER')).toBe('TAKEN');
@@ -141,7 +142,9 @@ describe('enlace de la oferta de hueco (DX-435)', () => {
 
     it('con email y sin baja, se le puede escribir', () => {
       expect(emailOfferBlock(base)).toBeNull();
-      expect(emailOfferBlock({ ...base, contactChannel: 'WHATSAPP' })).toBeNull();
+      expect(
+        emailOfferBlock({ ...base, contactChannel: 'WHATSAPP' }),
+      ).toBeNull();
     });
 
     it('baja, canal «Ninguno» o sin email: no', () => {

@@ -24,7 +24,7 @@
 -- Bloqueo: los ADD COLUMN y los ADD CONSTRAINT toman ACCESS EXCLUSIVE un
 -- instante. waitlist_offers es pequeña (ofertas de recepción) y su CHECK se
 -- valida aquí mismo; el de audit_events va NOT VALID y su VALIDATE en la
--- migración siguiente (20261107110200), con SHARE UPDATE EXCLUSIVE (molde de
+-- migración siguiente (20261107130200), con SHARE UPDATE EXCLUSIVE (molde de
 -- DX-361). lock_timeout evita quedar encolado tras una transacción larga.
 
 SET LOCAL lock_timeout = '5s';

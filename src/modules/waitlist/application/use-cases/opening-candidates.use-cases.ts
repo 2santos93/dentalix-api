@@ -263,7 +263,8 @@ export function summarizeLinkOffers(
         }
       : null,
     expired:
-      rows.length > 0 && states.every((s) => s === 'EXPIRED' || s === 'DECLINED'),
+      rows.length > 0 &&
+      states.every((s) => s === 'EXPIRED' || s === 'DECLINED'),
   };
 }
 
