@@ -2501,22 +2501,59 @@ caché de `exchange_rate_snapshots` de `GetRatesForDateUseCase`:
   la lee (reintenta con su backoff) y un acierto la limpia.
 - **Single-flight**: N peticiones simultáneas del mismo día hacen una sola
   llamada (y un solo guardado) y reciben la misma respuesta.
-- **Presupuestos** de fallos de caché (llamadas reales, no peticiones), en
-  ventana deslizante: por clínica `EXCHANGE_PROVIDER_CLINIC_LIMIT` en
-  `EXCHANGE_PROVIDER_CLINIC_WINDOW_MS` (30 por hora) y global
-  `EXCHANGE_PROVIDER_GLOBAL_LIMIT` en `EXCHANGE_PROVIDER_GLOBAL_WINDOW_MS`
-  (250 por día, ~75 % de la cuota diaria prorrateada del plan «Developer»;
-  ajústalo al plan contratado). Un aviso `exchange.provider_budget_half` sale
-  al pasar la mitad del global y `exchange.provider_budget_exhausted` al
-  agotar uno. Superado: `ExchangeRateBudgetExceededError` (para quien
-  convierte por dentro es «sin tasa») y, en las rutas, **429
-  `EXCHANGE_RATE_BUDGET_EXCEEDED`** con `Retry-After` y el mensaje en español.
-  La precarga diaria (`prefetchProviderRates`) ni cuenta ni se corta: las
-  peticiones de usuarios nunca la dejan sin cupo.
-- **Límite**: la caché negativa, el single-flight y los presupuestos viven en
-  memoria de cada réplica (como el rate limiting): con N réplicas el tope
-  efectivo es N veces el configurado. No hay un contador compartido en la BD
-  para esto; si se pasa a varias réplicas, divide los topes entre ellas.
+- **Presupuestos** de fallos de caché (llamadas reales, no peticiones),
+  en **contadores de la BD compartidos por todas las réplicas** (SEC-058) y
+  ventanas **fijas** alineadas a la época (con 24 h, el día UTC). Una
+  llamada gasta de todos los cupos que le tocan o de ninguno:
+
+  | Cupo | Quién | Variable (por defecto) | Ventana |
+  | --- | --- | --- | --- |
+  | Clínica por hora | peticiones y conversiones de la clínica | `EXCHANGE_PROVIDER_CLINIC_LIMIT` (30) | `EXCHANGE_PROVIDER_CLINIC_WINDOW_MS` (1 h) |
+  | Clínica por día | ídem | `EXCHANGE_PROVIDER_CLINIC_DAILY_LIMIT` (40) | la global |
+  | Clínica nueva | ídem, si el alta (`tenants.createdAt`) es de hace menos de `EXCHANGE_PROVIDER_NEW_CLINIC_DAYS` (30) días | `EXCHANGE_PROVIDER_NEW_CLINIC_LIMIT` (5), en vez del diario | la global |
+  | Barrido de una clínica | el reintento de sus abonos sin tasa (DX-380) | `EXCHANGE_PROVIDER_SWEEP_CLINIC_LIMIT` (10) | la global |
+  | Global | todas las clínicas juntas | `EXCHANGE_PROVIDER_GLOBAL_LIMIT` (250, ~75 % de la cuota diaria prorrateada del plan «Developer»; ajústalo al plan contratado) | `EXCHANGE_PROVIDER_GLOBAL_WINDOW_MS` (24 h) |
+  | Reserva del barrido | solo el barrido: las demás paran en global − reserva (200) | `EXCHANGE_PROVIDER_SWEEP_RESERVE` (50) | la global |
+
+  Sin clínica en el contexto (un script, un job sin tenant) solo gasta del
+  global sin la reserva. El barrido se reconoce por el ámbito que abre
+  `PaymentAllocationJobs.sweep()` (`ProviderRatesCallerScope.asSweep`), nunca
+  por algo que mande el cliente. La API no arranca si una variable no es un
+  entero >= 1 o si no cuadran (reserva < global, barrido de una clínica <=
+  reserva, diario <= global − reserva, clínica nueva <= diario).
+  Avisos (log `warn`, solo ids y recuentos, una vez por ventana aunque haya
+  varias réplicas): `exchange.provider_budget_half` al pasar la mitad del
+  global, `exchange.provider_clinic_quota_exhausted` cuando una clínica llena
+  su cupo diario, el de clínica nueva o el de su barrido (consumo anómalo), y
+  `exchange.provider_budget_exhausted` en cada llamada rechazada. Superado:
+  `ExchangeRateBudgetExceededError` (para quien convierte por dentro es «sin
+  tasa»: el abono se guarda pendiente de tasa y lo reintenta el barrido) y,
+  en las rutas, **429 `EXCHANGE_RATE_BUDGET_EXCEEDED`** con `Retry-After` (lo
+  que falta para acabar la ventana) y el mensaje en español. La precarga
+  diaria (`prefetchProviderRates`) ni cuenta ni se corta: las peticiones de
+  usuarios nunca la dejan sin cupo.
+- **BD y RLS** (SEC-058, migración
+  `20261106120000_sec058_exchange_provider_budgets`):
+  - `exchange_provider_clinic_budgets` (`tenantId`, `quota` `HOUR`/`DAY`/
+    `SWEEP`, `windowStart`, `calls`): una fila por cupo que se reutiliza al
+    cambiar de ventana (no crece). RLS FORCE por tenant: la app solo lee y
+    gasta los de la clínica del contexto; SELECT, INSERT y UPDATE, sin
+    DELETE.
+  - `exchange_provider_budget`: el contador global, tabla de plataforma (sin
+    clínica ni RLS) sobre la que `dentalix_app` no tiene **ningún**
+    privilegio. Solo se toca con `dx_exchange_provider_spend_global(ventana,
+    tope)` (SECURITY DEFINER, `search_path` fijo, EXECUTE solo para la app):
+    suma una llamada si cabe y devuelve el recuento, o NULL si está lleno; no
+    lee ni pone a cero, y rechaza una ventana de más de un día en el futuro.
+  - Cada llamada es una transacción con `app.current_tenant`: primero los
+    cupos de la clínica y luego el global, cada uno con `INSERT … ON CONFLICT
+    DO UPDATE … WHERE calls < tope RETURNING calls`. El candado de fila
+    serializa a las réplicas (nunca pasan juntas del tope) y un cupo lleno
+    deshace los anteriores. `PrismaProviderRatesBudget`
+    (`src/modules/exchange/infrastructure/repositories/`).
+- **Límite**: la caché negativa y el single-flight siguen en memoria de cada
+  réplica (como el rate limiting): con N réplicas, un mismo día puede pedirse
+  una vez en cada una, y cada una gasta del presupuesto compartido.
 - **Fuente manual**: una clínica en `MANUAL` nunca llama al proveedor por los
   días de su tasa manual (D >= `manualSince`). Un día anterior al cambio sin
   snapshot sí se pide, como en `AUTOMATIC` y con sus mismos topes: así un
@@ -2534,7 +2571,15 @@ caché de `exchange_rate_snapshots` de `GetRatesForDateUseCase`:
   `open-exchange-rates.provider.spec.ts`, `test/exchange-provider-quota.int-spec.ts`
   (ventana desde la BD y precarga con el global agotado) y
   `test/exchange-provider-quota.e2e-spec.ts` (50 días antiguos → 429 sin más
-  llamadas al doble del proveedor).
+  llamadas al doble del proveedor). SEC-058: los cupos, la reserva y los
+  avisos en `provider-rates-gate.spec.ts`;
+  `test/exchange-provider-budget.int-spec.ts` (dos réplicas con su propio
+  `PrismaService` a la vez: el total nunca pasa del tope; una clínica con la
+  ventana abierta en el 2000 no deja sin tasa a otra; la reserva del barrido;
+  el tope de clínica nueva; la app no ve los contadores de otra clínica ni el
+  global) y `test/exchange-provider-budget.e2e-spec.ts` (429 en español con
+  el cupo agotado, el abono se guarda pendiente de tasa y el barrido la
+  congela con su reserva).
 
 ## Tasa congelada en cada abono y aviso «sin tasa» (DX-375)
 
