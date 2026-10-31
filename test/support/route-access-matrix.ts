@@ -223,6 +223,22 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /anesthetics': ADMIN_ONLY,
   'POST /anesthetics/samples': ADMIN_ONLY,
   'PATCH /anesthetics/:id': ADMIN_ONLY,
+  // DX-407: hoja de sedación. Valoración, checklist, fármacos y egreso:
+  // odontólogo y gestión; las tomas de constantes, también la asistente.
+  'GET /patients/:patientId/sedation': CLINICAL,
+  'GET /patients/:patientId/clinical-entries/:entryId/sedation': CLINICAL,
+  'POST /patients/:patientId/clinical-entries/:entryId/sedation': PRESCRIBERS,
+  'POST /patients/:patientId/clinical-entries/:entryId/sedation/checklist':
+    PRESCRIBERS,
+  'POST /patients/:patientId/clinical-entries/:entryId/sedation/agents':
+    PRESCRIBERS,
+  'POST /patients/:patientId/clinical-entries/:entryId/sedation/vitals':
+    CLINICAL,
+  'POST /patients/:patientId/clinical-entries/:entryId/sedation/discharge':
+    PRESCRIBERS,
+  'PATCH /patients/:patientId/clinical-entries/:entryId/sedation': CLINICAL,
+  'PUT /patients/:patientId/clinical-entries/:entryId/sedation': CLINICAL,
+  'DELETE /patients/:patientId/clinical-entries/:entryId/sedation': CLINICAL,
   // DX-170: plantillas de evolución. Leerlas, quien documenta (sin recepción);
   // crear, editar, desactivar y cargar las de ejemplo, solo ADMIN.
   'GET /clinical-note-templates': CLINICAL,

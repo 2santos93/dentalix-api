@@ -4634,7 +4634,8 @@ sustituyen la ficha técnica del fabricante.
 - **Cálculo en el servidor**: mg = carpules × ml × % × 10; máximo =
   min(mg/kg × peso, tope); con varios anestésicos, suma de fracciones del
   máximo de cada uno. Peso: el anotado en el sillón; si no, el último pesado
-  en el sillón en esa evolución; si no, `vitalSigns.peso` de la anamnesis
+  en el sillón en esa evolución; si no, el de la valoración de sedación de esa
+  evolución (DX-407); si no, `vitalSigns.peso` de la anamnesis
   vigente; si no, el ya usado en esa evolución. El % que se enseña no
   contradice el nivel (99,6 % se muestra 99 %, no 100 %). ≥ 80 % avisa
   (`DOSE_NEAR_MAX`); ≥ 100 % (`DOSE_OVER_MAX`, o `DOSE_OVER_ABSOLUTE` sin peso)
@@ -4656,6 +4657,81 @@ MEDICAL_HISTORY` con `reason: ANESTHESIA_DOSE_CHECK`).
   y `…130200_dx307_anesthesia`: aditivas (dos tablas y un tipo nuevos).
 - **Demo**: `seed:demo` carga los sugeridos y una exodoncia de la paciente
   infantil (Sofía, 32 kg) con 2 carpules de lidocaína (72 de 224 mg, 32 %).
+
+## Hoja de sedación consciente en la evolución (DX-407)
+
+Módulo `sedation` (porción 2 de DX-307); reglas en
+`src/modules/sedation/domain/sedation-rules.ts` (versión `SEDATION_RULES_V1`)
+y plantilla en `domain/sedation-template.ts`. Contenido de la hoja de la AAPD
+(2024) y la guía de la ADA (2025): dentalix-docs, `INVESTIGACION.md`,
+«Matriz 93».
+
+- **Plantilla de plataforma** (`SEDATION_PLATFORM_V1`), fija en el código y
+  servida por el puerto `SEDATION_TEMPLATE_SOURCE`: valoración obligatoria
+  (ASA, ayuno, Mallampati, peso, talla, acompañante, consentimiento), 6 ítems
+  de checklist (5 obligatorios), constantes obligatorias (SpO₂, FC, TA, FR,
+  nivel de sedación; CO₂ opcional), intervalo de constantes de **5 min**, 6
+  criterios de alta y Aldrete modificado ≥ 9. Cada hoja guarda la versión y el
+  intervalo; el checklist y el egreso copian los textos. DX-409 la sustituirá
+  por la plantilla de cada clínica implementando el mismo puerto.
+- **Tablas** (las cinco inalterables con el trigger de DX-038, fecha del
+  servidor, sin DELETE/TRUNCATE para la app, RLS FORZADA y FK compuestas):
+  `sedation_records` (una por evolución: grado, ASA I–V + E, interconsulta o
+  justificación con ASA ≥ III, ayuno en h, Mallampati, peso, talla, IMC y
+  reversores calculados —naloxona 0,1 mg/kg máx. 2 mg; flumazenil 0,01 mg/kg
+  máx. 0,2 mg—, acompañante, consentimiento, hora clínica `assessedAt` y, si
+  se cita, el `patient_consents` firmado del MISMO paciente),
+  `sedation_checklists` (uno por hoja; hora clínica `checkedAt` y autor),
+  `sedation_agent_administrations` (N₂O con % y flujo, oral
+  u otro con dosis, unidad, vía, hora y autor), `sedation_vitals` (basal,
+  intraoperatoria o al alta) y `sedation_discharges` (uno por hoja; criterios
+  o Aldrete, la toma al alta por FK de la MISMA hoja, hora, a quién se
+  entrega, indicaciones entregadas, operador = quien lo firma, monitor).
+- **Reglas**: lo que falta responde 400 con `problems: [{code, message}]`.
+  Orden: valoración → checklist (antes solo la toma basal) → fármacos y
+  tomas → egreso, que cierra la hoja (luego todo es 409). En sedación moderada,
+  operador = monitor exige justificación. Horas: las de valoración,
+  checklist, toma, fármaco y egreso las anota quien registra (por defecto,
+  ahora; nunca futuras, con 5 min de tolerancia de reloj) y `createdAt` es
+  siempre la del servidor; el checklist no puede ser anterior a la valoración
+  (400) y el egreso no puede ser anterior a la última toma o fármaco. Las
+  hojas anteriores a `assessedAt`/`checkedAt` (nulas) leen `createdAt`. Un
+  valor fuera de rango responde 400 con el rango («El N₂O tiene que estar
+  entre 10 y 70 %.»). Un IMC fuera de 5–150 es un error de
+  peso o talla (`BMI_IMPLAUSIBLE`). Un Aldrete anotado < 9 no da el alta
+  aunque se marquen los criterios (`ALDRETE_BELOW_MINIMUM`), ni un nivel de
+  sedación moderado o profundo al alta (`DISCHARGE_SEDATION_LEVEL`). `watch`
+  (en cada respuesta): con la sedación en curso, `nextDueAt` = última toma (o
+  inicio) + intervalo y `overdue` si pasa sin toma; `missedIntervals` cuenta
+  los intervalos vencidos sin toma entre el inicio y la última toma: en cada
+  hueco entre dos marcas vence una toma a cada múltiplo del intervalo y las
+  que vencen antes de la toma siguiente se pasaron, ⌈hueco / intervalo⌉ − 1
+  (20 min con intervalo de 5 → 3: vencían a los 5, 10, 15 y 20, y la del 20
+  llegó a su hora). El hueco abierto hasta ahora no cuenta: lo dice
+  `overdue`. Una toma o fármaco con hora posterior a su registro
+  cuenta desde que se registró (la tolerancia de reloj no aplaza el aviso).
+  Cada escritura bloquea la hoja (`FOR UPDATE`).
+- **Roles**: valoración, checklist, fármacos y egreso, DENTIST y ADMIN; las
+  tomas, también ASSISTANT (en esta porción en todas las clínicas; DX-409 lo
+  hará configurable); leer, los tres; recepción, nada. Sede restringida
+  (DX-089): 403 en la evolución y fuera de la ficha.
+- **Rutas**: `GET /patients/:id/sedation` (ficha),
+  `GET|POST /patients/:id/clinical-entries/:entryId/sedation` (hoja y
+  plantilla / valoración) y `POST …/sedation/{checklist,agents,vitals,discharge}`;
+  `PATCH/PUT/DELETE …/sedation` → 405 que remite a la adenda. Auditoría:
+  `CREATE SEDATION_RECORD` con `metadata.reason` `SEDATION_ASSESSMENT|
+CHECKLIST|AGENT|VITALS|DISCHARGE`, sin constantes, dosis ni textos.
+- **Migraciones** `20261105140000_dx407_enums`,
+  `…140100_dx407_audit_events_idx`, `…140200_dx407_sedation` y
+  `…140300_dx407_sedation_clinical_times`: aditivas (tipos, cinco tablas, el
+  único `patient_consents (tenantId, patientId, id)` que sirve de destino a la
+  FK del consentimiento y las dos columnas nulas de hora clínica, sin
+  reescritura).
+- **Demo**: `seed:demo` añade a Sofía (32 kg) una evolución «Restauraciones
+  bajo sedación con óxido nitroso» con la hoja completa y sus horas en orden
+  (valoración hace 60 min, checklist 57, toma basal 55, N₂O 30 % 50, 3
+  intraoperatorias cada 5 min y egreso hace 20 con el asistente como
+  monitor).
 
 ## Imputación de abonos a ítems (DX-051)
 

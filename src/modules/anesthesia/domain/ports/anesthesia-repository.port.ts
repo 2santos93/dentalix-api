@@ -30,6 +30,12 @@ export interface AnesthesiaEntryRef {
   locationId: string | null;
   /** Zona IANA de esa sede: decide la edad del paciente «hoy». */
   timeZone: string | null;
+  /**
+   * DX-407: peso medido hoy en la valoración de la hoja de sedación de ESTA
+   * evolución (null si no tiene hoja o no se pesó). Es del sillón, del día:
+   * manda sobre la anamnesis, que puede ser antigua.
+   */
+  sedationWeightKg?: number | null;
 }
 
 /** Lo que el cálculo lee del paciente: nacimiento y anamnesis VIGENTE. */

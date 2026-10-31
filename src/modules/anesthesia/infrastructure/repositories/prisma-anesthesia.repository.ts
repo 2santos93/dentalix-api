@@ -281,13 +281,19 @@ export class PrismaAnesthesiaRepository implements AnesthesiaRepository {
           id: true,
           locationId: true,
           location: { select: { timeZone: true } },
+          // DX-407: el peso del sillón de la valoración de sedación (una
+          // hoja por evolución como mucho).
+          sedation: { select: { weightKg: true }, take: 1 },
         },
       });
       if (!entry) return null;
+      const sedationWeight = entry.sedation[0]?.weightKg ?? null;
       return {
         id: entry.id,
         locationId: entry.locationId,
         timeZone: entry.location?.timeZone ?? null,
+        sedationWeightKg:
+          sedationWeight === null ? null : Number(sedationWeight),
       };
     });
   }

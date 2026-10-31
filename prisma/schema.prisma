@@ -69,6 +69,12 @@ model Tenant {
   clinicalEntryAddenda                    ClinicalEntryAddendum[]
   anestheticProducts                      AnestheticProduct[]
   anesthesiaAdministrations               AnesthesiaAdministration[]
+  // DX-407: hoja de sedación consciente en la evolución.
+  sedationRecords                         SedationRecord[]
+  sedationChecklists                      SedationChecklist[]
+  sedationAgentAdministrations            SedationAgentAdministration[]
+  sedationVitals                          SedationVitals[]
+  sedationDischarges                      SedationDischarge[]
   // DX-212: diagnósticos CIE-10 de las evoluciones.
   clinicalEntryDiagnoses                  ClinicalEntryDiagnosis[]
   dentitionEvents                         PatientDentitionEvent[]
@@ -179,39 +185,46 @@ model User {
   privacyPoliciesPublished          PrivacyPolicyVersion[]
   dataConsentsRecorded              DataProcessingConsent[]
   perioExamsPerformed               PerioExam[]
-  prescriptionsIssued               Prescription[]              @relation("PrescriptionProfessional")
-  prescriptionsVoided               Prescription[]              @relation("PrescriptionVoidedBy")
+  prescriptionsIssued               Prescription[]                @relation("PrescriptionProfessional")
+  prescriptionsVoided               Prescription[]                @relation("PrescriptionVoidedBy")
   // DX-191: implantes colocados, anulados y tarjetas entregadas.
-  implantsPlaced                    PatientImplant[]            @relation("PatientImplantProfessional")
-  implantsVoided                    PatientImplant[]            @relation("PatientImplantVoidedBy")
-  implantCardsDelivered             PatientImplant[]            @relation("PatientImplantCardDeliveredBy")
+  implantsPlaced                    PatientImplant[]              @relation("PatientImplantProfessional")
+  implantsVoided                    PatientImplant[]              @relation("PatientImplantVoidedBy")
+  implantCardsDelivered             PatientImplant[]              @relation("PatientImplantCardDeliveredBy")
   // DX-151: documentos del paciente subidos y anulados.
-  uploadedPatientDocuments          PatientDocument[]           @relation("PatientDocumentUploadedBy")
-  voidedPatientDocuments            PatientDocument[]           @relation("PatientDocumentVoidedBy")
+  uploadedPatientDocuments          PatientDocument[]             @relation("PatientDocumentUploadedBy")
+  voidedPatientDocuments            PatientDocument[]             @relation("PatientDocumentVoidedBy")
   planAcceptancesRecorded           TreatmentPlanAcceptance[]
   tokens                            UserToken[]
   clinicalEntryAddenda              ClinicalEntryAddendum[]
   anesthesiaAdministrations         AnesthesiaAdministration[]
+  // DX-407: hoja de sedación (autor de cada parte; operador y monitor del egreso).
+  sedationRecordsAuthored           SedationRecord[]
+  sedationChecklists                SedationChecklist[]
+  sedationAgentsAdministered        SedationAgentAdministration[]
+  sedationVitalsTaken               SedationVitals[]
+  sedationDischargesOperated        SedationDischarge[]           @relation("SedationDischargeOperator")
+  sedationDischargesMonitored       SedationDischarge[]           @relation("SedationDischargeMonitor")
   dentitionEventsRecorded           PatientDentitionEvent[]
   retentionActions                  PatientRetentionAction[]
   platformAccesses                  PlatformAccessAudit[]
   // DX-204: descuentos dados en ítems de plan y cambios de la política.
-  planItemDiscounts                 TreatmentPlanItem[]         @relation("TreatmentPlanItemDiscountBy")
+  planItemDiscounts                 TreatmentPlanItem[]           @relation("TreatmentPlanItemDiscountBy")
   discountPoliciesUpdated           DiscountPolicy[]
   // DX-220: acciones de plataforma del superadmin (reencolar un trabajo).
   platformAuditEvents               PlatformAuditEvent[]
   // DX-222: indicaciones postoperatorias entregadas.
   postOpDeliveries                  PostOpInstructionDelivery[]
   // DX-099: enlaces de anamnesis creados y envíos revisados.
-  medicalHistorySubmissionsCreated  MedicalHistorySubmission[]  @relation("MedicalHistorySubmissionCreatedBy")
-  medicalHistorySubmissionsReviewed MedicalHistorySubmission[]  @relation("MedicalHistorySubmissionReviewedBy")
+  medicalHistorySubmissionsCreated  MedicalHistorySubmission[]    @relation("MedicalHistorySubmissionCreatedBy")
+  medicalHistorySubmissionsReviewed MedicalHistorySubmission[]    @relation("MedicalHistorySubmissionReviewedBy")
   // DX-273: salidas de citas de COMPLETED (con motivo).
-  appointmentStatusReversals        AppointmentStatusReversal[] @relation("AppointmentStatusReversalActor")
+  appointmentStatusReversals        AppointmentStatusReversal[]   @relation("AppointmentStatusReversalActor")
   // DX-279: versiones de la política de cancelación que creó.
   cancellationPolicyVersions        CancellationPolicyVersion[]
-  cancellationFees                  CancellationFee[]           @relation("CancellationFeeCreatedBy")
+  cancellationFees                  CancellationFee[]             @relation("CancellationFeeCreatedBy")
   // SEC-050: cargos por inasistencia que anuló (con motivo).
-  cancellationFeesVoided            CancellationFee[]           @relation("CancellationFeeVoidedBy")
+  cancellationFeesVoided            CancellationFee[]             @relation("CancellationFeeVoidedBy")
 
   @@map("users")
 }
@@ -302,6 +315,7 @@ model Location {
 
   clinicalEntries            ClinicalEntry[]
   anesthesiaAdministrations  AnesthesiaAdministration[]
+  sedationRecords            SedationRecord[]
   appointments               Appointment[]
   payments                   Payment[]
   inventoryItems             InventoryItem[]
@@ -584,6 +598,8 @@ model Patient {
   clinicalEntries             ClinicalEntry[]
   clinicalEntryAddenda        ClinicalEntryAddendum[]
   anesthesiaAdministrations   AnesthesiaAdministration[]
+  // DX-407: hojas de sedación de sus evoluciones.
+  sedationRecords             SedationRecord[]
   dentitionEvents             PatientDentitionEvent[]
   toothRecords                ToothRecord[]
   appointments                Appointment[]
@@ -803,6 +819,8 @@ model ClinicalEntry {
   addenda     ClinicalEntryAddendum[]
   // DX-307: anestesia local registrada en la evolución (append-only).
   anesthesia  AnesthesiaAdministration[]
+  // DX-407: hoja de sedación de la evolución (una como mucho, append-only).
+  sedation    SedationRecord[]
   // DX-212: diagnósticos CIE-10, creados en la misma transacción que la
   // evolución e inalterables como ella.
   diagnoses   ClinicalEntryDiagnosis[]
@@ -2649,10 +2667,15 @@ model PatientConsent {
 
   // FK COMPUESTAS (SEC-004): paciente, plantilla y plan del MISMO tenant; el
   // plan, además, del MISMO paciente (mismo criterio que Payment).
-  patient       Patient         @relation(fields: [tenantId, patientId], references: [tenantId, id])
-  template      ConsentTemplate @relation(fields: [tenantId, templateId], references: [tenantId, id])
-  treatmentPlan TreatmentPlan?  @relation(fields: [tenantId, treatmentPlanId, patientId], references: [tenantId, id, patientId])
+  patient         Patient          @relation(fields: [tenantId, patientId], references: [tenantId, id])
+  template        ConsentTemplate  @relation(fields: [tenantId, templateId], references: [tenantId, id])
+  treatmentPlan   TreatmentPlan?   @relation(fields: [tenantId, treatmentPlanId, patientId], references: [tenantId, id, patientId])
+  // DX-407: consentimiento de sedación citado en la valoración previa.
+  sedationRecords SedationRecord[]
 
+  // DX-407: destino de la FK compuesta (tenantId, patientId, consentId) de
+  // sedation_records: el consentimiento es del MISMO paciente y clínica.
+  @@unique([tenantId, patientId, id], map: "patient_consents_tenant_patient_id_key")
   @@index([tenantId, patientId, signedAt])
   @@index([tenantId, templateId])
   @@index([tenantId, treatmentPlanId, patientId])
@@ -2989,6 +3012,8 @@ enum AuditResourceType {
   // DX-307: catálogo de anestésicos locales y anestesia de una evolución.
   ANESTHETIC_PRODUCT
   ANESTHESIA_ADMINISTRATION
+  // DX-407: hoja de sedación de una evolución (cada parte que se añade).
+  SEDATION_RECORD
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o
@@ -5281,4 +5306,219 @@ model AnesthesiaAdministration {
   // PARCIAL (WHERE "locationId" IS NOT NULL), no declarable en Prisma:
   //   anesthesia_administrations_location_idx ("tenantId", "locationId")
   @@map("anesthesia_administrations")
+}
+
+// DX-407: hoja de sedación consciente en la evolución.
+enum SedationGrade {
+  MINIMAL
+  MODERATE
+}
+
+enum AsaClass {
+  I
+  II
+  III
+  IV
+  V
+}
+
+enum SedationVitalsPhase {
+  BASELINE
+  INTRA
+  DISCHARGE
+}
+
+enum SedationLevel {
+  AWAKE
+  MINIMAL
+  MODERATE
+  DEEP
+}
+
+enum SedationAgentKind {
+  NITROUS_OXIDE
+  ORAL
+  OTHER
+}
+
+enum SedationRoute {
+  INHALED
+  ORAL
+  SUBLINGUAL
+  INTRANASAL
+  INTRAMUSCULAR
+  INTRAVENOUS
+  SUBMUCOSAL
+}
+
+enum SedationDoseUnit {
+  MG
+  MCG
+  ML
+}
+
+/// Hoja de sedación de una evolución (DX-407): la valoración previa. Una por
+/// evolución. APPEND-ONLY como la evolución (DX-038: trigger que rechaza
+/// UPDATE/DELETE/TRUNCATE; corregir = adenda) y RLS forzada. Guarda la versión
+/// de la plantilla (hoy la de plataforma; DX-409 la hará por clínica) y el
+/// intervalo de constantes con que se abrió, el IMC y los reversores por peso
+/// que calculó el servidor. El checklist, los fármacos, las constantes y el
+/// egreso son filas propias, también inalterables.
+model SedationRecord {
+  id                       String        @id @default(uuid()) @db.Uuid
+  tenantId                 String        @db.Uuid
+  patientId                String        @db.Uuid
+  clinicalEntryId          String        @db.Uuid
+  locationId               String?       @db.Uuid
+  templateVersion          String
+  rulesVersion             String
+  vitalsIntervalMinutes    Int
+  grade                    SedationGrade
+  asaClass                 AsaClass?
+  asaEmergency             Boolean       @default(false)
+  highAsaInterconsultation String?
+  highAsaJustification     String?
+  fastingClearLiquidsHours Decimal?      @db.Decimal(3, 1)
+  fastingSolidsHours       Decimal?      @db.Decimal(3, 1)
+  mallampati               Int?          @db.SmallInt
+  weightKg                 Decimal?      @db.Decimal(4, 1)
+  heightCm                 Decimal?      @db.Decimal(4, 1)
+  bmi                      Decimal?      @db.Decimal(4, 1)
+  naloxoneMg               Decimal?      @db.Decimal(4, 2)
+  flumazenilMg             Decimal?      @db.Decimal(4, 3)
+  escortName               String?
+  escortRelationship       String?
+  consentConfirmed         Boolean
+  consentId                String?       @db.Uuid
+  authorId                 String        @db.Uuid
+  /// Hora clínica de la valoración (la anota quien la hace; por defecto, ahora).
+  /// Nula en las hojas anteriores a la columna: se lee `createdAt`.
+  assessedAt               DateTime?
+  createdAt                DateTime      @default(now())
+
+  tenant    Tenant                        @relation(fields: [tenantId], references: [id])
+  patient   Patient                       @relation(fields: [tenantId, patientId], references: [tenantId, id])
+  entry     ClinicalEntry                 @relation(fields: [tenantId, patientId, clinicalEntryId], references: [tenantId, patientId, id])
+  location  Location?                     @relation(fields: [tenantId, locationId], references: [tenantId, id])
+  consent   PatientConsent?               @relation(fields: [tenantId, patientId, consentId], references: [tenantId, patientId, id])
+  author    User                          @relation(fields: [authorId], references: [id])
+  checklist SedationChecklist?
+  agents    SedationAgentAdministration[]
+  vitals    SedationVitals[]
+  discharge SedationDischarge?
+
+  @@unique([tenantId, patientId, clinicalEntryId], map: "sedation_records_entry_key")
+  // Destino de las FK compuestas de las tablas hijas.
+  @@unique([tenantId, id], map: "sedation_records_tenant_id_key")
+  // PARCIALES (WHERE ... IS NOT NULL), no declarables en Prisma:
+  //   sedation_records_location_idx ("tenantId", "locationId")
+  //   sedation_records_consent_idx ("tenantId", "patientId", "consentId")
+  @@map("sedation_records")
+}
+
+/// Checklist previo de una hoja (DX-407): copia de los ítems de la plantilla
+/// con su marca, su hora clínica (`checkedAt`, nunca anterior a la valoración;
+/// nula en los anteriores a la columna, que usan `createdAt`, la del servidor)
+/// y el autor quien lo marcó. Uno por hoja; inalterable.
+model SedationChecklist {
+  id               String    @id @default(uuid()) @db.Uuid
+  tenantId         String    @db.Uuid
+  sedationRecordId String    @db.Uuid
+  items            Json
+  checkedAt        DateTime?
+  authorId         String    @db.Uuid
+  createdAt        DateTime  @default(now())
+
+  tenant Tenant         @relation(fields: [tenantId], references: [id])
+  record SedationRecord @relation(fields: [tenantId, sedationRecordId], references: [tenantId, id])
+  author User           @relation(fields: [authorId], references: [id])
+
+  @@unique([tenantId, sedationRecordId], map: "sedation_checklists_record_key")
+  @@map("sedation_checklists")
+}
+
+/// Fármaco de sedación administrado (DX-407): N2O con % y flujo, oral u otro
+/// con dosis, unidad y vía; hora y quién. Append-only.
+model SedationAgentAdministration {
+  id               String            @id @default(uuid()) @db.Uuid
+  tenantId         String            @db.Uuid
+  sedationRecordId String            @db.Uuid
+  kind             SedationAgentKind
+  drugName         String?
+  dose             Decimal?          @db.Decimal(8, 2)
+  doseUnit         SedationDoseUnit?
+  route            SedationRoute
+  n2oPercent       Int?              @db.SmallInt
+  flowLpm          Decimal?          @db.Decimal(3, 1)
+  administeredAt   DateTime
+  authorId         String            @db.Uuid
+  createdAt        DateTime          @default(now())
+
+  tenant Tenant         @relation(fields: [tenantId], references: [id])
+  record SedationRecord @relation(fields: [tenantId, sedationRecordId], references: [tenantId, id])
+  author User           @relation(fields: [authorId], references: [id])
+
+  @@index([tenantId, sedationRecordId, administeredAt], map: "sedation_agent_administrations_record_idx")
+  @@map("sedation_agent_administrations")
+}
+
+/// Toma de constantes de una hoja (DX-407): basal, intraoperatoria o al alta.
+/// Append-only.
+model SedationVitals {
+  id               String              @id @default(uuid()) @db.Uuid
+  tenantId         String              @db.Uuid
+  sedationRecordId String              @db.Uuid
+  phase            SedationVitalsPhase
+  takenAt          DateTime
+  spo2             Int?                @db.SmallInt
+  heartRate        Int?                @db.SmallInt
+  systolic         Int?                @db.SmallInt
+  diastolic        Int?                @db.SmallInt
+  respiratoryRate  Int?                @db.SmallInt
+  etco2            Int?                @db.SmallInt
+  sedationLevel    SedationLevel?
+  authorId         String              @db.Uuid
+  createdAt        DateTime            @default(now())
+
+  tenant    Tenant              @relation(fields: [tenantId], references: [id])
+  record    SedationRecord      @relation(fields: [tenantId, sedationRecordId], references: [tenantId, id])
+  author    User                @relation(fields: [authorId], references: [id])
+  discharge SedationDischarge[]
+
+  // Destino de la FK compuesta del egreso (constantes de la MISMA hoja).
+  @@unique([tenantId, sedationRecordId, id], map: "sedation_vitals_tenant_record_id_key")
+  @@index([tenantId, sedationRecordId, takenAt], map: "sedation_vitals_record_idx")
+  @@map("sedation_vitals")
+}
+
+/// Egreso de una hoja (DX-407): criterios de alta (copia de la plantilla) o
+/// Aldrete modificado, constantes al alta, hora, a quién se entrega,
+/// indicaciones entregadas, operador (quien lo firma) y quien monitorizó; si
+/// son la misma persona en sedación moderada, la justificación. Uno por hoja:
+/// cierra la hoja. Inalterable.
+model SedationDischarge {
+  id                       String   @id @default(uuid()) @db.Uuid
+  tenantId                 String   @db.Uuid
+  sedationRecordId         String   @db.Uuid
+  criteria                 Json
+  aldreteScore             Int?     @db.SmallInt
+  vitalsId                 String   @db.Uuid
+  dischargedAt             DateTime
+  handedOverToName         String
+  handedOverToRelationship String
+  instructionsDelivered    Boolean
+  operatorId               String   @db.Uuid
+  monitorId                String   @db.Uuid
+  sameMonitorJustification String?
+  createdAt                DateTime @default(now())
+
+  tenant   Tenant         @relation(fields: [tenantId], references: [id])
+  record   SedationRecord @relation(fields: [tenantId, sedationRecordId], references: [tenantId, id])
+  vitals   SedationVitals @relation(fields: [tenantId, sedationRecordId, vitalsId], references: [tenantId, sedationRecordId, id], map: "sedation_discharges_vitals_fkey")
+  operator User           @relation("SedationDischargeOperator", fields: [operatorId], references: [id])
+  monitor  User           @relation("SedationDischargeMonitor", fields: [monitorId], references: [id])
+
+  @@unique([tenantId, sedationRecordId], map: "sedation_discharges_record_key")
+  @@index([tenantId, sedationRecordId, vitalsId], map: "sedation_discharges_vitals_idx")
+  @@map("sedation_discharges")
 }

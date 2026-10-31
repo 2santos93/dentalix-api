@@ -1079,6 +1079,47 @@ export const DEMO_ANESTHESIA = {
 } as const;
 
 /**
+ * DX-407: hoja de sedación consciente completa en una evolución de la misma
+ * paciente infantil (restauraciones con óxido nitroso): valoración, checklist,
+ * N2O, una toma basal, tres intraoperatorias cada 5 min y egreso firmado por
+ * la dentista con la asistente como monitor. Minutos relativos al seed.
+ */
+export const DEMO_SEDATION = {
+  patientIndex: 8,
+  reason: 'Restauraciones bajo sedación con óxido nitroso',
+  notes:
+    'Resinas en 55 y 65 bajo sedación mínima con N2O al 30 %. Colaboradora; sin incidencias.',
+  assessment: {
+    grade: 'MINIMAL',
+    asaClass: 'I',
+    asaEmergency: false,
+    fastingClearLiquidsHours: 2,
+    fastingSolidsHours: 6,
+    mallampati: 1,
+    weightKg: 32,
+    heightCm: 138,
+    escortName: 'Claudia Navarro',
+    escortRelationship: 'Madre',
+    consentConfirmed: true,
+  },
+  // Horas en orden (QA DX-407): valoración < checklist < toma basal < N2O <
+  // tomas intraoperatorias < egreso, todas en el pasado de la siembra.
+  assessedMinutesAgo: 60,
+  checkedMinutesAgo: 57,
+  baselineMinutesAgo: 55,
+  n2o: { n2oPercent: 30, flowLpm: 6, minutesAgo: 50 },
+  intraMinutesAgo: [45, 40, 35],
+  dischargeMinutesAgo: 20,
+  vitals: {
+    spo2: 98,
+    heartRate: 92,
+    systolic: 102,
+    diastolic: 64,
+    respiratoryRate: 20,
+  },
+} as const;
+
+/**
  * DX-170: evoluciones redactadas con las plantillas de ejemplo y ligadas a las
  * últimas citas atendidas (la más reciente primero). Respuestas por etiqueta;
  * las preguntas sin respuesta toman su valor por defecto.
