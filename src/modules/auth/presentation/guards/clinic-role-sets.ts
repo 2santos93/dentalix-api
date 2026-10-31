@@ -427,3 +427,12 @@ export const SEDATION_VITALS_ROLES: ClinicRole[] = [
   ClinicRole.ADMIN,
   ClinicRole.ASSISTANT,
 ];
+
+// Agenda de contingencia por sede (DX-339) — descargar el PDF de hoy y mañana
+// y la copia nocturna: quien recibe y llama a los pacientes si cae el sistema
+// (recepción) y gestión. Odontólogos y asistentes no: lleva los teléfonos de
+// todos los pacientes del día.
+export const CONTINGENCY_AGENDA_ROLES: ClinicRole[] = [
+  ClinicRole.ADMIN,
+  ClinicRole.RECEPTION,
+];

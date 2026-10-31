@@ -42,6 +42,7 @@ import { DiscountsModule } from './modules/discounts/discounts.module';
 import { PatientCreditModule } from './modules/patient-credit/patient-credit.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { ClosingQueueModule } from './modules/closing-queue/closing-queue.module';
+import { ContingencyAgendaModule } from './modules/contingency-agenda/contingency-agenda.module';
 import { CollectionsModule } from './modules/collections/collections.module';
 import { CashSessionsModule } from './modules/cash-sessions/cash-sessions.module';
 import { DataConsentsModule } from './modules/data-consents/data-consents.module';
@@ -122,6 +123,7 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     PatientCreditModule,
     ReportsModule,
     ClosingQueueModule,
+    ContingencyAgendaModule,
     // DX-150: cobranza (notas, compromisos de pago y marca «Saldo vencido»).
     CollectionsModule,
     // DX-027: caja por turno (apertura, cierre con arqueo, reapertura).

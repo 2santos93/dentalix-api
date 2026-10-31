@@ -49,6 +49,7 @@ import { CancellationFeeController } from '../cancellation-fees/presentation/can
 import { DiscountReportController } from '../discounts/presentation/discount-report.controller';
 import { ProductionByProcedureController } from '../reports/presentation/production-by-procedure.controller';
 import { ClosingQueueController } from '../closing-queue/presentation/closing-queue.controller';
+import { ContingencyAgendaController } from '../contingency-agenda/presentation/contingency-agenda.controller';
 import { CollectionsController } from '../collections/presentation/collections.controller';
 import { CashSessionsController } from '../cash-sessions/presentation/cash-sessions.controller';
 import { ScheduleBlocksController } from '../schedule-blocks/presentation/schedule-blocks.controller';
@@ -1142,6 +1143,20 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'APPOINTMENT',
     reason: 'CLOSING_QUEUE',
   },
+  // DX-339: agenda de contingencia (PDF con nombres y teléfonos de los
+  // pacientes de hoy y mañana de la sede): cada descarga, con la sede.
+  'GET /locations/:locationId/contingency-agenda': {
+    action: 'EXPORT',
+    resource: 'LOCATION',
+    resourceId: { param: 'locationId' },
+    reason: 'CONTINGENCY_AGENDA_DOWNLOADED',
+  },
+  'GET /locations/:locationId/contingency-agenda/nightly/pdf': {
+    action: 'EXPORT',
+    resource: 'LOCATION',
+    resourceId: { param: 'locationId' },
+    reason: 'CONTINGENCY_AGENDA_NIGHTLY_DOWNLOADED',
+  },
   // DX-150: cobranza. La nota se audita sin su texto (solo los nombres de los
   // campos); el cambio de estado del compromiso lo audita SettlePaymentPromises.
   'POST /patients/:id/collection-notes': {
@@ -1677,6 +1692,7 @@ const CONTROLLERS: Type[] = [
   DiscountReportController,
   ProductionByProcedureController,
   ClosingQueueController,
+  ContingencyAgendaController,
   CollectionsController,
   CashSessionsController,
   ExpenseReportsController,

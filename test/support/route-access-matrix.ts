@@ -603,6 +603,18 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /closing-queue': roles('ADMIN', 'DENTIST', 'RECEPTION'),
   'GET /closing-queue/count': roles('ADMIN', 'DENTIST', 'RECEPTION'),
   'POST /closing-queue/dismissals': roles('ADMIN', 'DENTIST', 'RECEPTION'),
+  // DX-339: agenda de contingencia por sede (PDF de hoy y mañana con los
+  // teléfonos de los pacientes): recepción y gestión; la sede la acota el
+  // caso de uso (DX-089).
+  'GET /locations/:locationId/contingency-agenda': roles('ADMIN', 'RECEPTION'),
+  'GET /locations/:locationId/contingency-agenda/nightly': roles(
+    'ADMIN',
+    'RECEPTION',
+  ),
+  'GET /locations/:locationId/contingency-agenda/nightly/pdf': roles(
+    'ADMIN',
+    'RECEPTION',
+  ),
   // DX-150: cobranza (gestiones y compromisos de pago), mismo dato financiero.
   'POST /patients/:id/collection-notes': BILLING,
   'POST /patients/:id/payment-promises': BILLING,
