@@ -35,6 +35,7 @@ import {
   ListPatientSignatureRequestsUseCase,
   RevokeSignatureRequestUseCase,
   SIGNATURE_BUDGET_NOT_AVAILABLE_MESSAGE,
+  SIGNATURE_PROFESSIONAL_INVALID_MESSAGE,
   SIGNATURE_PROFESSIONAL_REQUIRED_MESSAGE,
 } from './signature-requests.use-cases';
 
@@ -110,6 +111,7 @@ function setup() {
   const inTenant = <T>(fn: () => Promise<T>) => tenantContext.run('t1', fn);
   return {
     repo,
+    consents,
     template,
     tenantContext,
     links,
@@ -324,6 +326,94 @@ describe('enviar a firmar a distancia (DX-243)', () => {
     await expect(ctx.options.execute('p2', DENTIST)).rejects.toBeInstanceOf(
       NotFoundException,
     );
+  });
+});
+
+describe('opciones del modal «Enviar a firmar» (QA DX-243)', () => {
+  it('solo ofrece profesionales que firman como en la clínica (roles clínicos, con su rol); el por defecto es quien envía solo si es uno de ellos', async () => {
+    const ctx = setup();
+    ctx.repo.professionals = [
+      { id: 'dentist-1', fullName: 'Dra. Laura Gómez', role: 'DENTIST' },
+      { id: 'assistant-1', fullName: 'Ana Ruiz', role: 'ASSISTANT' },
+    ];
+    const asReception = await ctx.options.execute('p1', RECEPTION);
+    expect(asReception.professionals.map((p) => p.id)).toEqual([
+      'dentist-1',
+      'assistant-1',
+    ]);
+    expect(asReception.professionals[0]).toMatchObject({ role: 'DENTIST' });
+    expect(asReception.defaultProfessionalId).toBeNull();
+    // Un clínico que ya no es miembro vivo (no está en la lista) no queda por defecto.
+    expect(
+      (await ctx.options.execute('p1', { userId: 'gone-1', clinical: true }))
+        .defaultProfessionalId,
+    ).toBeNull();
+    expect(
+      (await ctx.options.execute('p1', DENTIST)).defaultProfessionalId,
+    ).toBe('dentist-1');
+  });
+
+  it('enviar con un profesional no elegible es 400 en español y no crea nada', async () => {
+    const ctx = setup();
+    await expect(
+      send(ctx, DENTIST, { professionalId: 'reception-1' }),
+    ).rejects.toThrow(
+      new BadRequestException(SIGNATURE_PROFESSIONAL_INVALID_MESSAGE),
+    );
+    // Un clínico que ya no está en la clínica tampoco se usa por defecto.
+    await expect(
+      send(ctx, { userId: 'gone-1', clinical: true }),
+    ).rejects.toThrow(SIGNATURE_PROFESSIONAL_INVALID_MESSAGE);
+    expect(ctx.repo.rows).toHaveLength(0);
+  });
+
+  it('ofrece los planes vivos del paciente (sin cancelados) a cualquier rol que envía, y si la plantilla usa {{tratamiento}}', async () => {
+    const ctx = setup();
+    ctx.repo.plans = [
+      {
+        id: 'plan-1',
+        status: 'PRESENTED',
+        optionLabel: 'Opción A: implante',
+        createdAt: new Date('2026-10-20T15:00:00.000Z'),
+      },
+    ];
+    const options = await ctx.options.execute('p1', RECEPTION);
+    expect(options.plans).toEqual([
+      {
+        id: 'plan-1',
+        status: 'PRESENTED',
+        optionLabel: 'Opción A: implante',
+        createdAt: new Date('2026-10-20T15:00:00.000Z'),
+      },
+    ]);
+    expect(options.templates[0]).toMatchObject({ usesTreatment: false });
+  });
+
+  it('dice cuándo el paciente ya completó cada plantilla (la última vez)', async () => {
+    const ctx = setup();
+    const signedAt = new Date('2026-10-01T16:00:00.000Z');
+    ctx.repo.completed = [{ templateId: ctx.template.id, signedAt }];
+    const options = await ctx.options.execute('p1', RECEPTION);
+    expect(options.templates[0]).toMatchObject({
+      id: ctx.template.id,
+      lastCompletedAt: signedAt,
+    });
+  });
+
+  it('recepción puede asociar un plan del paciente; uno de otro paciente es 404', async () => {
+    const ctx = setup();
+    ctx.consents.plans['plan-1'] = { patientId: 'p1', items: [] };
+    await send(ctx, RECEPTION, {
+      professionalId: 'dentist-1',
+      treatmentPlanId: 'plan-1',
+    });
+    expect(ctx.repo.rows[0].treatmentPlanId).toBe('plan-1');
+    await expect(
+      send(ctx, RECEPTION, {
+        professionalId: 'dentist-1',
+        treatmentPlanId: 'plan-de-otro',
+      }),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 });
 

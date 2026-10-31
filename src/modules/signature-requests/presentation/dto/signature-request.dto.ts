@@ -1,8 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ClinicRole,
   ConsentSignerType,
   SignatureRequestChannel,
   SignatureRequestType,
+  TreatmentPlanStatus,
 } from '@prisma/client';
 import { IsEnum, IsOptional, IsUUID } from 'class-validator';
 import { SIGNATURE_REQUEST_STATUSES } from '../../domain/signature-request-status';
@@ -129,11 +131,38 @@ class SignatureTemplateOptionDto {
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty() title!: string;
   @ApiProperty() version!: number;
+  @ApiProperty({
+    description:
+      'El texto usa {{tratamiento}}: sin plan, el documento dirá «No especificado»',
+  })
+  usesTreatment!: boolean;
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description:
+      'Última vez que el paciente lo firmó y quedó completo (con la firma del profesional)',
+  })
+  lastCompletedAt!: Date | null;
 }
 
 class SignatureProfessionalOptionDto {
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty() fullName!: string;
+  @ApiProperty({ enum: ClinicRole, enumName: 'ClinicRole' }) role!: ClinicRole;
+}
+
+class SignaturePlanOptionDto {
+  @ApiProperty({ format: 'uuid' }) id!: string;
+  @ApiProperty({ enum: TreatmentPlanStatus, enumName: 'TreatmentPlanStatus' })
+  status!: TreatmentPlanStatus;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'Nombre de la alternativa (DX-040)',
+  })
+  optionLabel!: string | null;
+  @ApiProperty({ format: 'date-time' }) createdAt!: Date;
 }
 
 class SignatureRecipientOptionDto {
@@ -159,10 +188,25 @@ class SignatureRecipientOptionDto {
 export class SignatureRequestOptionsDto {
   @ApiProperty({ type: [SignatureTemplateOptionDto] })
   templates!: SignatureTemplateOptionDto[];
-  @ApiProperty({ type: [SignatureProfessionalOptionDto] })
+  @ApiProperty({
+    type: [SignatureProfessionalOptionDto],
+    description:
+      'Quienes pueden firmar un consentimiento como profesional (la regla de la firma en la clínica: odontólogo, asistente, administrador)',
+  })
   professionals!: SignatureProfessionalOptionDto[];
-  @ApiProperty({ type: String, format: 'uuid', nullable: true })
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description: 'Quien envía, solo si está en `professionals`',
+  })
   defaultProfessionalId!: string | null;
+  @ApiProperty({
+    type: [SignaturePlanOptionDto],
+    description:
+      'Planes del paciente sin cancelar (para {{tratamiento}}), más recientes primero',
+  })
+  plans!: SignaturePlanOptionDto[];
   @ApiProperty({ type: SignatureRecipientOptionDto })
   recipient!: SignatureRecipientOptionDto;
 }

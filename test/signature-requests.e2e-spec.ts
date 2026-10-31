@@ -75,6 +75,7 @@ describe('Firma a distancia de consentimientos (e2e, DX-243)', () => {
   let reception: string;
   let dentist: string;
   let dentistId: string;
+  let receptionId: string;
   let templateId: string;
   let planId: string;
   let patientId: string;
@@ -189,6 +190,7 @@ describe('Firma a distancia de consentimientos (e2e, DX-243)', () => {
     clinicB = await registerClinic(app, 'dx243-firma-b');
     const receptionist = await seedMember(raw, clinicA, ClinicRole.RECEPTION);
     reception = await loginAs(app, clinicA.host, receptionist.email);
+    receptionId = receptionist.userId;
     const doctor = await seedMember(raw, clinicA, ClinicRole.DENTIST);
     dentist = await loginAs(app, clinicA.host, doctor.email);
     dentistId = doctor.userId;
@@ -257,14 +259,45 @@ describe('Firma a distancia de consentimientos (e2e, DX-243)', () => {
       .get(`/patients/${patientId}/signature-requests/options`)
       .expect(200);
     expect(options.body).toMatchObject({
-      templates: [{ id: templateId, version: 1 }],
+      templates: [
+        {
+          id: templateId,
+          version: 1,
+          usesTreatment: true,
+          lastCompletedAt: null,
+        },
+      ],
       defaultProfessionalId: null,
+      // Recepción también elige el plan que rellena {{tratamiento}}.
+      plans: [{ id: planId, status: 'DRAFT', optionLabel: null }],
       recipient: {
         allowed: true,
         destinationMasked: 'la***@example.com',
         signerType: 'PATIENT',
         minor: false,
       },
+    });
+
+    // Solo quien firma un consentimiento como profesional (roles clínicos).
+    const professionals = (
+      options.body as { professionals: { id: string; role: string }[] }
+    ).professionals;
+    expect(professionals).toContainEqual(
+      expect.objectContaining({ id: dentistId, role: 'DENTIST' }),
+    );
+    expect(professionals.map((p) => p.id)).not.toContain(receptionId);
+    expect(professionals.every((p) => p.role !== 'RECEPTION')).toBe(true);
+    // Y la API rechaza a quien no puede firmar.
+    const notEligible = await as(clinicA, reception)
+      .post(`/patients/${patientId}/signature-requests`, {
+        type: 'CONSENT',
+        channel: 'EMAIL',
+        templateId,
+        professionalId: receptionId,
+      })
+      .expect(400);
+    expect(notEligible.body).toMatchObject({
+      message: SIGNATURE_PROFESSIONAL_INVALID_MESSAGE,
     });
 
     const { created, token } = await send();
@@ -442,6 +475,14 @@ describe('Firma a distancia de consentimientos (e2e, DX-243)', () => {
       status: 'COMPLETE',
       countersignedAt: expect.any(String) as string,
     });
+    // El modal ya avisa de que este paciente lo firmó (sin bloquear).
+    const after = await as(clinicA, reception)
+      .get(`/patients/${patientId}/signature-requests/options`)
+      .expect(200);
+    expect(
+      (after.body as { templates: { lastCompletedAt: string | null }[] })
+        .templates[0].lastCompletedAt,
+    ).toBe(consent.signedAt.toISOString());
     const document = await as(clinicA, dentist)
       .get(`/patients/${patientId}/consents/${consentId}`)
       .expect(200);

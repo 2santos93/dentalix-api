@@ -14,6 +14,7 @@ import {
   type ConsentTemplateRepository,
 } from '../../../consents/domain/ports/consent-template-repository.port';
 import { ConsentDocumentRenderer } from '../../../consents/application/use-cases/patient-consents.use-cases';
+import { usesVariable } from '../../../consents/domain/render-consent';
 import {
   documentText,
   documentTypeName,
@@ -31,6 +32,8 @@ import type {
 } from '../../domain/entities/signature-request.entity';
 import {
   SIGNATURE_REQUEST_REPOSITORY,
+  type SignaturePlanOption,
+  type SignatureProfessional,
   type SignatureRecipientContext,
   type SignatureRequestRepository,
 } from '../../domain/ports/signature-request-repository.port';
@@ -57,7 +60,7 @@ export const SIGNATURE_TEMPLATE_REQUIRED_MESSAGE =
   'Elige la plantilla del consentimiento que quieres enviar.';
 export const SIGNATURE_INVALID_HOST_MESSAGE = 'Host no válido';
 export const SIGNATURE_PROFESSIONAL_INVALID_MESSAGE =
-  'Elige un profesional de la clínica con rol clínico: es quien firmará después en la app.';
+  'Ese profesional no puede firmar consentimientos en esta clínica: elige un odontólogo, asistente o administrador activo.';
 export const SIGNATURE_PROFESSIONAL_REQUIRED_MESSAGE =
   'Elige el profesional que firmará el consentimiento después en la app.';
 export const SIGNATURE_REQUEST_NOT_FOUND_MESSAGE =
@@ -144,10 +147,21 @@ function decideRecipient(
 }
 
 export interface SignatureRequestOptions {
-  templates: { id: string; title: string; version: number }[];
-  professionals: { id: string; fullName: string }[];
-  /** El propio usuario si tiene rol clínico; si no, null (debe elegir). */
+  templates: {
+    id: string;
+    title: string;
+    version: number;
+    /** El texto pinta {{tratamiento}}: sin plan dirá «No especificado». */
+    usesTreatment: boolean;
+    /** La última vez que el paciente lo firmó y quedó completo (o null). */
+    lastCompletedAt: Date | null;
+  }[];
+  /** Quienes firman un consentimiento como profesional (CLINICAL_ROLES). */
+  professionals: SignatureProfessional[];
+  /** El propio usuario si es uno de ellos; si no, null (debe elegir). */
   defaultProfessionalId: string | null;
+  /** Planes del paciente para {{tratamiento}}, también para recepción. */
+  plans: SignaturePlanOption[];
   recipient: {
     allowed: boolean;
     /** Por qué no se puede enviar (sin email, menor sin responsable, baja). */
@@ -162,8 +176,10 @@ export interface SignatureRequestOptions {
 /**
  * `GET /patients/:patientId/signature-requests/options`: lo que necesita el
  * modal «Enviar a firmar», también para recepción (que no lee las plantillas
- * ni la ficha clínica): plantillas activas (título y versión), profesionales
- * que pueden firmar y a quién iría (enmascarado) o por qué no se puede.
+ * ni la ficha clínica): plantillas activas (título, versión, si usan
+ * {{tratamiento}} y si el paciente ya las completó), profesionales que pueden
+ * firmar, planes del paciente (estado y fecha, como los ve recepción en
+ * «Presupuestos») y a quién iría (enmascarado) o por qué no se puede.
  */
 @Injectable()
 export class GetSignatureRequestOptionsUseCase {
@@ -182,23 +198,35 @@ export class GetSignatureRequestOptionsUseCase {
   ): Promise<SignatureRequestOptions> {
     const ctx = await this.repo.loadRecipientContext(patientId);
     if (!ctx) throw new NotFoundException(PATIENT_NOT_FOUND_MESSAGE);
-    const [templates, professionals, names] = await Promise.all([
-      this.templates.list({ active: true }),
-      this.repo.listProfessionals(),
-      this.documentTypeNames.get(),
-    ]);
+    const [templates, professionals, plans, completed, names] =
+      await Promise.all([
+        this.templates.list({ active: true }),
+        this.repo.listProfessionals(),
+        this.repo.listPlans(patientId),
+        this.repo.listCompletedConsents(patientId),
+        this.documentTypeNames.get(),
+      ]);
+    const lastCompleted = new Map<string, Date>();
+    for (const c of completed) {
+      const seen = lastCompleted.get(c.templateId);
+      if (!seen || c.signedAt > seen)
+        lastCompleted.set(c.templateId, c.signedAt);
+    }
     const recipient = decideRecipient(ctx, names, null, this.clock());
     return {
       templates: templates.map((t) => ({
         id: t.id,
         title: t.title,
         version: t.version,
+        usesTreatment: usesVariable(t.body, 'tratamiento'),
+        lastCompletedAt: lastCompleted.get(t.id) ?? null,
       })),
       professionals,
-      defaultProfessionalId:
-        actor.clinical && professionals.some((p) => p.id === actor.userId)
-          ? actor.userId
-          : null,
+      // Solo si quien envía puede firmar como profesional (la misma lista).
+      defaultProfessionalId: professionals.some((p) => p.id === actor.userId)
+        ? actor.userId
+        : null,
+      plans,
       recipient: recipient.ok
         ? {
             allowed: true,

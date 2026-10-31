@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { ClinicRole, Prisma } from '@prisma/client';
+import { ClinicRole, Prisma, TreatmentPlanStatus } from '@prisma/client';
+import { CLINICAL_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { resolveReferenceLocation } from '../../../shared/locations/reference-location';
@@ -19,16 +20,22 @@ import type {
   LockedWrite,
   PublicRequestEvidence,
   RevokeOutcome,
+  SignaturePlanOption,
+  SignatureProfessional,
   SignatureRecipientContext,
   SignatureRequestRepository,
 } from '../domain/ports/signature-request-repository.port';
 
-/** Quien puede firmar como profesional: los roles clínicos (CLINICAL_ROLES). */
-const PROFESSIONAL_ROLES: ClinicRole[] = [
-  ClinicRole.ADMIN,
-  ClinicRole.DENTIST,
-  ClinicRole.ASSISTANT,
-];
+/**
+ * Quien puede firmar un consentimiento como profesional: la MISMA regla que
+ * la firma en la clínica (`patient-consents.controller`, CLINICAL_ROLES), con
+ * la membresía y el usuario vivos.
+ */
+const PROFESSIONAL_ROLES: ClinicRole[] = CLINICAL_ROLES;
+const PROFESSIONAL_SELECT = {
+  role: true,
+  user: { select: { id: true, fullName: true } },
+} as const;
 
 const LIST_INCLUDE = {
   createdBy: { select: { fullName: true } },
@@ -195,7 +202,7 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
 
   async findProfessional(
     userId: string,
-  ): Promise<{ id: string; fullName: string } | null> {
+  ): Promise<SignatureProfessional | null> {
     const tenantId = this.requireTenantId();
     const membership = await this.prisma.runWithTenant((tx) =>
       tx.clinicMembership.findFirst({
@@ -204,23 +211,62 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
           userId,
           deletedAt: null,
           role: { in: PROFESSIONAL_ROLES },
+          user: { deletedAt: null },
         },
-        select: { user: { select: { id: true, fullName: true } } },
+        select: PROFESSIONAL_SELECT,
       }),
     );
-    return membership ? membership.user : null;
+    return membership ? { ...membership.user, role: membership.role } : null;
   }
 
-  async listProfessionals(): Promise<{ id: string; fullName: string }[]> {
+  async listProfessionals(): Promise<SignatureProfessional[]> {
     const tenantId = this.requireTenantId();
     const rows = await this.prisma.runWithTenant((tx) =>
       tx.clinicMembership.findMany({
-        where: { tenantId, deletedAt: null, role: { in: PROFESSIONAL_ROLES } },
+        where: {
+          tenantId,
+          deletedAt: null,
+          role: { in: PROFESSIONAL_ROLES },
+          user: { deletedAt: null },
+        },
         orderBy: [{ user: { fullName: 'asc' } }, { userId: 'asc' }],
-        select: { user: { select: { id: true, fullName: true } } },
+        select: PROFESSIONAL_SELECT,
       }),
     );
-    return rows.map((r) => r.user);
+    return rows.map((r) => ({ ...r.user, role: r.role }));
+  }
+
+  listPlans(patientId: string): Promise<SignaturePlanOption[]> {
+    return this.prisma.runWithTenant((tx) =>
+      tx.treatmentPlan.findMany({
+        where: {
+          patientId,
+          deletedAt: null,
+          status: { not: TreatmentPlanStatus.CANCELLED },
+        },
+        orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+        select: { id: true, status: true, optionLabel: true, createdAt: true },
+      }),
+    );
+  }
+
+  listCompletedConsents(
+    patientId: string,
+  ): Promise<{ templateId: string; signedAt: Date }[]> {
+    // Completo = firmado en la clínica (lleva la firma del profesional) o a
+    // distancia con la firma del profesional después.
+    return this.prisma.runWithTenant((tx) =>
+      tx.patientConsent.findMany({
+        where: {
+          patientId,
+          OR: [
+            { professionalSignature: { not: null } },
+            { countersignature: { isNot: null } },
+          ],
+        },
+        select: { templateId: true, signedAt: true },
+      }),
+    );
   }
 
   create(

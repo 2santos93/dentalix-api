@@ -813,13 +813,19 @@ migraciones `20261105150000_dx243_enums`,
   consentimientos trae `remote`, `professionalSignedAt` y `complete`; el
   detalle comprueba los dos hashes (`integrityOk`) y da `remoteIpAddress`.
 - **Personal** (los 4 roles, como la anamnesis por enlace):
-  - `GET /patients/:patientId/signature-requests/options`: plantillas activas,
-    profesionales con rol clínico, profesional por defecto y a quién iría
-    (enmascarado) o por qué no (sin email, menor sin responsable, baja de
-    envíos).
+  - `GET /patients/:patientId/signature-requests/options`: plantillas activas
+    (con `usesTreatment` y `lastCompletedAt`, la última vez que el paciente la
+    completó), profesionales que pueden firmar un consentimiento como
+    profesional (la misma regla que la firma en la clínica: `CLINICAL_ROLES`,
+    membresía y usuario vivos, con su rol), profesional por defecto (quien
+    envía solo si está en esa lista), los planes del paciente sin cancelar
+    (estado, alternativa y fecha; también para recepción, que ya ve los
+    presupuestos) y a quién iría (enmascarado) o por qué no (sin email, menor
+    sin responsable, baja de envíos).
   - `POST /patients/:patientId/signature-requests` (`type`, `channel`,
     `templateId`, `treatmentPlanId?`, `professionalId?`; recepción debe elegir
-    el profesional): congela el texto, anula la anterior del mismo paciente y
+    el profesional; uno que no puede firmar es 400 en español; el plan debe
+    ser del paciente y de la clínica, si no 404): congela el texto, anula la anterior del mismo paciente y
     plantilla aún sin firmar y encola el email (topes del outbox de DX-088:
     429). Un menor según la mayoría de la clínica (DX-328) va a su
     responsable (DX-203).

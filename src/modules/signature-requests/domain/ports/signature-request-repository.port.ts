@@ -1,9 +1,11 @@
 import type {
+  ClinicRole,
   ConsentSignerType,
   ContactChannel,
   DocumentType,
   SignatureRequestChannel,
   SignatureRequestType,
+  TreatmentPlanStatus,
 } from '@prisma/client';
 import type { NoticeResponsible } from '../../../patients/domain/communication/notice-recipient';
 import type {
@@ -35,6 +37,21 @@ export interface SignatureRecipientContext {
   majorityAge: number;
   /** Zona de la sede activa o, sin ella, de la principal: da «hoy». */
   timeZone: string;
+}
+
+/** Quien puede firmar como profesional, con su rol (el modal lo muestra). */
+export interface SignatureProfessional {
+  id: string;
+  fullName: string;
+  role: ClinicRole;
+}
+
+/** Un plan del paciente para rellenar {{tratamiento}} (sin datos clínicos). */
+export interface SignaturePlanOption {
+  id: string;
+  status: TreatmentPlanStatus;
+  optionLabel: string | null;
+  createdAt: Date;
 }
 
 export interface CreateSignatureRequestRepoInput {
@@ -139,15 +156,25 @@ export interface SignatureRequestRepository {
   ): Promise<SignatureRecipientContext | null>;
 
   /**
-   * Un miembro VIVO de la clínica con rol clínico (puede firmar como
-   * profesional); `null` si no lo es.
+   * Un miembro VIVO de la clínica que puede firmar un consentimiento como
+   * profesional (la regla de la firma en la clínica: CLINICAL_ROLES); `null`
+   * si no lo es.
    */
-  findProfessional(
-    userId: string,
-  ): Promise<{ id: string; fullName: string } | null>;
+  findProfessional(userId: string): Promise<SignatureProfessional | null>;
 
-  /** Miembros vivos con rol clínico, por nombre (el selector del modal). */
-  listProfessionals(): Promise<{ id: string; fullName: string }[]>;
+  /** Los mismos miembros, por nombre (el selector del modal). */
+  listProfessionals(): Promise<SignatureProfessional[]>;
+
+  /** Planes vivos del paciente que no están cancelados, más recientes primero. */
+  listPlans(patientId: string): Promise<SignaturePlanOption[]>;
+
+  /**
+   * Consentimientos COMPLETOS del paciente (en la clínica, o a distancia con
+   * la firma del profesional): plantilla y hora de la firma del paciente.
+   */
+  listCompletedConsents(
+    patientId: string,
+  ): Promise<{ templateId: string; signedAt: Date }[]>;
 
   /**
    * Inserta la solicitud y anula, en la misma transacción, las del mismo

@@ -10,6 +10,8 @@ import type {
   PublicSignatureAuditEvent,
   RemoteConsentInsert,
   RevokeOutcome,
+  SignaturePlanOption,
+  SignatureProfessional,
   SignatureRecipientContext,
   SignatureRequestRepository,
 } from '../../domain/ports/signature-request-repository.port';
@@ -32,9 +34,11 @@ export class InMemorySignatureRequestRepository implements SignatureRequestRepos
     evidence: PublicRequestEvidence;
   })[] = [];
   readonly countersigned = new Set<string>();
-  professionals: { id: string; fullName: string }[] = [
-    { id: 'dentist-1', fullName: 'Dra. Laura Gómez' },
+  professionals: SignatureProfessional[] = [
+    { id: 'dentist-1', fullName: 'Dra. Laura Gómez', role: 'DENTIST' },
   ];
+  plans: SignaturePlanOption[] = [];
+  completed: { templateId: string; signedAt: Date }[] = [];
   clinic = { name: 'Clínica Demo', logoUrl: null, primaryColor: '#0E7490' };
   location = {
     timeZone: 'America/Bogota',
@@ -53,16 +57,22 @@ export class InMemorySignatureRequestRepository implements SignatureRequestRepos
     return Promise.resolve(this.recipients[patientId] ?? null);
   }
 
-  findProfessional(
-    userId: string,
-  ): Promise<{ id: string; fullName: string } | null> {
+  findProfessional(userId: string): Promise<SignatureProfessional | null> {
     return Promise.resolve(
       this.professionals.find((p) => p.id === userId) ?? null,
     );
   }
 
-  listProfessionals(): Promise<{ id: string; fullName: string }[]> {
+  listProfessionals(): Promise<SignatureProfessional[]> {
     return Promise.resolve([...this.professionals]);
+  }
+
+  listPlans(): Promise<SignaturePlanOption[]> {
+    return Promise.resolve([...this.plans]);
+  }
+
+  listCompletedConsents(): Promise<{ templateId: string; signedAt: Date }[]> {
+    return Promise.resolve([...this.completed]);
   }
 
   create(
