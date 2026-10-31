@@ -1811,8 +1811,8 @@ describe('textos sin leyes ni autoridades (DX-325)', () => {
     const files = [
       ...tsFiles(SRC).filter(isProduction),
       join(PRISMA_DIR, 'seed.ts'),
-      // La demo (`prisma/demo/**`, `seed-demo.ts`) la neutraliza otra rama
-      // (chore/demo-neutral); se suma a esta lista cuando llegue a main.
+      // La demo (`prisma/demo/**`, `seed*.ts`): neutra desde V1.
+      ...demoFiles().filter((file) => file.endsWith('.ts')),
     ];
     expect(files.length).toBeGreaterThan(500);
     expect(files.map((file) => relative(ROOT, file))).toEqual(
@@ -2013,9 +2013,11 @@ describe('sin Colombia (DX-323, DX-325)', () => {
           file !== IANA_ZONE_NAMES_FILE,
       ),
       join(PRISMA_DIR, 'schema.prisma'),
-      join(PRISMA_DIR, 'seed.ts'),
+      // Semilla de referencia y demo (datos, CSV y `seed*.ts`, V1).
+      ...demoFiles(),
     ];
     expect(files.length).toBeGreaterThan(500);
+    expect(files).toContain(join(PRISMA_DIR, 'seed-demo.ts'));
     const hits = files.flatMap((file) =>
       readFileSync(file, 'utf8')
         .split('\n')
