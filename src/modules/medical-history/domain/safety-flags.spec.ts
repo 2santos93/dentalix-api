@@ -3,13 +3,26 @@ import { deriveSafetyFlags } from './safety-flags';
 describe('deriveSafetyFlags', () => {
   it('marca embarazo desde la entrada explícita y copia las semanas', () => {
     const { safetyFlags, hasCriticalAlert } = deriveSafetyFlags({
-      embarazo: true,
+      pregnancy: 'SI',
       semanasEmbarazo: 12,
     });
     expect(safetyFlags.embarazo).toBe(true);
     expect(safetyFlags.semanasEmbarazo).toBe(12);
     expect(hasCriticalAlert).toBe(true);
   });
+
+  it.each(['NO', 'DESCONOCE', undefined] as const)(
+    'embarazo %p: sin alerta ni semanas (solo un «Sí» explícito la enciende)',
+    (pregnancy) => {
+      const { safetyFlags, hasCriticalAlert } = deriveSafetyFlags({
+        pregnancy,
+        semanasEmbarazo: 12,
+      });
+      expect(safetyFlags.embarazo).toBe(false);
+      expect(safetyFlags.semanasEmbarazo).toBeUndefined();
+      expect(hasCriticalAlert).toBe(false);
+    },
+  );
 
   it('deriva alergia a anestésico/penicilina/látex por palabra clave del alérgeno', () => {
     const { safetyFlags } = deriveSafetyFlags({

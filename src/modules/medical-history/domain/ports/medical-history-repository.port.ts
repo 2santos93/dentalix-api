@@ -1,4 +1,5 @@
 import {
+  AnswerStatus,
   MedicalHistory,
   Allergy,
   Condition,
@@ -11,8 +12,8 @@ import {
 
 // NO `tenantId`/`version`/`id`/`safetyFlags`/`hasCriticalAlert`: tenant de
 // contexto, version calculada por el repo, banderas derivadas en el dominio.
-// `embarazo`/`semanasEmbarazo` SÍ son entrada (no se derivan de las listas);
-// alimentan `deriveSafetyFlags`.
+// `pregnancy`/`semanasEmbarazo` SÍ son entrada (no se derivan de las listas);
+// alimentan `deriveSafetyFlags` (la bandera `embarazo` solo con «Sí").
 export interface MedicalHistoryVersionData {
   allergies?: Allergy[];
   conditions?: Condition[];
@@ -23,7 +24,8 @@ export interface MedicalHistoryVersionData {
   vitalSigns?: VitalSigns;
   familyHistory?: string;
   notes?: string;
-  embarazo?: boolean;
+  /** Embarazo tri-estado; ausente = sin responder. */
+  pregnancy?: AnswerStatus;
   semanasEmbarazo?: number;
 }
 

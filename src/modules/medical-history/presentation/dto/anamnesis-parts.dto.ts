@@ -1,5 +1,16 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsEnum, IsOptional, IsString } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import {
+  IsBoolean,
+  IsEnum,
+  IsIn,
+  IsNumber,
+  IsOptional,
+  IsString,
+  MaxLength,
+  Min,
+  ValidateNested,
+} from 'class-validator';
 import type {
   AllergySeverity,
   AllergyType,
@@ -15,9 +26,9 @@ import type {
  * `openapi-typescript` emits `Record<string, never>`, which is useless for
  * typing a client (the web app had to hand-write the whole shape).
  *
- * `Allergy`/`Condition`/`Medication` are the VALIDATED input classes (they
- * carry class-validator decorators and are `@ValidateNested`-ed by the save
- * DTO). The rest are DOCUMENTATION-ONLY: the backend still accepts those
+ * `Allergy`/`Condition`/`Medication` and the habits (tri-state) are the
+ * VALIDATED input classes (they carry class-validator decorators and are
+ * `@ValidateNested`-ed by the save DTO). The rest are DOCUMENTATION-ONLY: the backend still accepts those
  * sections as free JSON, so adding validators here would tighten the contract
  * — a separate decision from documenting it.
  */
@@ -108,60 +119,149 @@ export class MedicationDto {
   esAlerta!: boolean;
 }
 
-/* ── Documentación únicamente (secciones aceptadas como JSON libre) ─────── */
+/* ── Hábitos: tri-estado y VALIDADOS ─────────────────────────────────────── */
+
+const ANSWER_DESCRIPTION =
+  'SI / NO / DESCONOCE («No sabe»). Ausente = «Sin responder» (nunca se lee como «No»).';
+
+/**
+ * Un cliente anterior manda booleanos (`true` = Sí, `false` = No): se
+ * traducen ANTES de validar para que una pestaña abierta durante un despliegue
+ * no pierda lo que se escribió. Lo demás se valida como tri-estado.
+ */
+const legacyAnswer = ({ value }: { value: unknown }): unknown =>
+  value === true ? 'SI' : value === false ? 'NO' : value;
+
+/**
+ * Tabaquismo/alcohol de la forma anterior (`{ activo: boolean }`): se deduce
+ * `estado`. Va en la propiedad PADRE: class-transformer no llama al
+ * `@Transform` de una clave que no viene (`estado`).
+ */
+const legacyEstado = ({ value }: { value: unknown }): unknown => {
+  if (typeof value !== 'object' || value === null) return value;
+  const record = value as { estado?: unknown; activo?: unknown };
+  if (record.estado === undefined) {
+    record.estado = legacyAnswer({ value: record.activo });
+  }
+  return value;
+};
 
 export class SmokingDto {
-  @ApiProperty()
-  activo!: boolean;
+  @ApiProperty({ enum: CONDITION_STATUSES, description: ANSWER_DESCRIPTION })
+  @IsIn(CONDITION_STATUSES)
+  estado!: ConditionStatus;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ minimum: 0, description: 'Solo con «Sí».' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
   porDia?: number;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ minimum: 0, description: 'Solo con «Sí».' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
   anios?: number;
 }
 
 export class AlcoholDto {
-  @ApiProperty()
-  activo!: boolean;
+  @ApiProperty({ enum: CONDITION_STATUSES, description: ANSWER_DESCRIPTION })
+  @IsIn(CONDITION_STATUSES)
+  estado!: ConditionStatus;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ description: 'Solo con «Sí».' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
   frecuencia?: string;
 }
 
 export class OralHygieneDto {
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ minimum: 0 })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
   cepilladoPorDia?: number;
 
-  @ApiPropertyOptional()
-  hilo?: boolean;
+  @ApiPropertyOptional({
+    enum: CONDITION_STATUSES,
+    description: ANSWER_DESCRIPTION,
+  })
+  @IsOptional()
+  @Transform(legacyAnswer)
+  @IsIn(CONDITION_STATUSES)
+  hilo?: ConditionStatus;
 
-  @ApiPropertyOptional()
-  enjuague?: boolean;
+  @ApiPropertyOptional({
+    enum: CONDITION_STATUSES,
+    description: ANSWER_DESCRIPTION,
+  })
+  @IsOptional()
+  @Transform(legacyAnswer)
+  @IsIn(CONDITION_STATUSES)
+  enjuague?: ConditionStatus;
 
-  @ApiPropertyOptional()
-  cremaConFluor?: boolean;
+  @ApiPropertyOptional({
+    enum: CONDITION_STATUSES,
+    description: ANSWER_DESCRIPTION,
+  })
+  @IsOptional()
+  @Transform(legacyAnswer)
+  @IsIn(CONDITION_STATUSES)
+  cremaConFluor?: ConditionStatus;
 }
 
+/**
+ * Hábitos tri-estado. Las versiones guardadas antes (booleanos) se devuelven
+ * ya en esta forma: true «Sí», false «No», ausente «Sin responder».
+ */
 export class HabitsDto {
   @ApiPropertyOptional({ type: SmokingDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => SmokingDto)
+  @Transform(legacyEstado)
   tabaquismo?: SmokingDto;
 
   @ApiPropertyOptional({ type: AlcoholDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => AlcoholDto)
+  @Transform(legacyEstado)
   alcohol?: AlcoholDto;
 
-  @ApiPropertyOptional()
-  sustancias?: boolean;
+  @ApiPropertyOptional({
+    enum: CONDITION_STATUSES,
+    description: ANSWER_DESCRIPTION,
+  })
+  @IsOptional()
+  @Transform(legacyAnswer)
+  @IsIn(CONDITION_STATUSES)
+  sustancias?: ConditionStatus;
 
-  @ApiPropertyOptional()
-  bruxismo?: boolean;
+  @ApiPropertyOptional({
+    enum: CONDITION_STATUSES,
+    description: ANSWER_DESCRIPTION,
+  })
+  @IsOptional()
+  @Transform(legacyAnswer)
+  @IsIn(CONDITION_STATUSES)
+  bruxismo?: ConditionStatus;
 
   @ApiPropertyOptional({ type: OralHygieneDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => OralHygieneDto)
   higieneOral?: OralHygieneDto;
 
   @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
   dieta?: string;
 }
+
+/* ── Documentación únicamente (secciones aceptadas como JSON libre) ─────── */
 
 export class DentalHistoryDto {
   @ApiPropertyOptional()
@@ -231,7 +331,10 @@ export class VitalSignsDto {
 
 /** DERIVADO por el backend (`deriveSafetyFlags`); nunca se acepta del cliente. */
 export class SafetyFlagsDto {
-  @ApiProperty()
+  @ApiProperty({
+    description:
+      'DERIVADA: true solo con un «Sí» explícito al embarazo (`pregnancy`). No dice si se contestó «No».',
+  })
   embarazo!: boolean;
 
   @ApiPropertyOptional()

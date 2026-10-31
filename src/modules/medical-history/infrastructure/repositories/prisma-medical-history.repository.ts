@@ -12,13 +12,16 @@ import {
   Allergy,
   Condition,
   Medication,
-  Habits,
   DentalHistory,
   Surgery,
   VitalSigns,
   SafetyFlags,
 } from '../../domain/entities/medical-history.entity';
 import { deriveSafetyFlags } from '../../domain/safety-flags';
+import {
+  readStoredHabits,
+  readStoredPregnancy,
+} from '../../domain/anamnesis-answers';
 import { lockPatientAnamnesis } from './anamnesis-lock';
 
 type PrismaMedicalHistoryVersion = Prisma.MedicalHistoryVersionGetPayload<
@@ -39,6 +42,7 @@ const EMPTY_FLAGS: SafetyFlags = {
 export function mapMedicalHistoryVersion(
   row: PrismaMedicalHistoryVersion,
 ): MedicalHistory {
+  const safetyFlags = (row.safetyFlags as SafetyFlags | null) ?? EMPTY_FLAGS;
   return {
     id: row.id,
     tenantId: row.tenantId,
@@ -47,13 +51,16 @@ export function mapMedicalHistoryVersion(
     allergies: (row.allergies as Allergy[] | null) ?? [],
     conditions: (row.conditions as Condition[] | null) ?? [],
     medications: (row.medications as Medication[] | null) ?? [],
-    habits: (row.habits as Habits | null) ?? null,
+    // Versiones anteriores a la forma tri-estado: se LEEN como se registraron
+    // (true «Sí», false «No»); la fila no se toca (append-only).
+    habits: readStoredHabits(row.habits),
+    pregnancy: readStoredPregnancy(row.pregnancy, safetyFlags),
     dentalHistory: (row.dentalHistory as DentalHistory | null) ?? null,
     surgeries: (row.surgeries as Surgery[] | null) ?? [],
     vitalSigns: (row.vitalSigns as VitalSigns | null) ?? null,
     familyHistory: row.familyHistory,
     notes: row.notes,
-    safetyFlags: (row.safetyFlags as SafetyFlags | null) ?? EMPTY_FLAGS,
+    safetyFlags,
     hasCriticalAlert: row.hasCriticalAlert,
     source: row.source,
     createdById: row.createdById,
@@ -112,6 +119,7 @@ export async function insertMedicalHistoryVersionInTx(
       conditions: (data.conditions ?? []) as unknown as Prisma.InputJsonValue,
       medications: (data.medications ?? []) as unknown as Prisma.InputJsonValue,
       habits: (data.habits ?? Prisma.JsonNull) as Prisma.InputJsonValue,
+      pregnancy: data.pregnancy ?? null,
       dentalHistory: (data.dentalHistory ??
         Prisma.JsonNull) as Prisma.InputJsonValue,
       surgeries: (data.surgeries ?? []) as unknown as Prisma.InputJsonValue,

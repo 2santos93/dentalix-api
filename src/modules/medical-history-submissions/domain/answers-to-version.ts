@@ -205,27 +205,34 @@ function medicationsFrom(
   return [...meds, { nombre, esAlerta: true }];
 }
 
+/**
+ * Hábitos del cuestionario: lo respondido se guarda tal cual (Sí / No / No sé
+ * → «No sabe», como las condiciones). Antes «No sé» conservaba lo anterior
+ * porque los hábitos eran booleanos y no podían decir «no sabe». Lo que el
+ * cuestionario no pregunta (sustancias, higiene, dieta) sigue igual.
+ */
 function habitsFrom(
   answers: AnamnesisAnswers,
   previous: Habits | null,
 ): Habits {
   const habits: Habits = { ...(previous ?? {}) };
   const { tabaquismo, alcohol, bruxismo } = answers.habits;
-  if (tabaquismo.answer === 'SI') {
-    habits.tabaquismo = {
-      activo: true,
-      ...(tabaquismo.porDia !== undefined ? { porDia: tabaquismo.porDia } : {}),
-    };
-  } else if (tabaquismo.answer === 'NO') {
-    habits.tabaquismo = { activo: false };
-  }
+  habits.tabaquismo =
+    tabaquismo.answer === 'SI'
+      ? {
+          estado: 'SI',
+          ...(tabaquismo.porDia !== undefined
+            ? { porDia: tabaquismo.porDia }
+            : {}),
+        }
+      : { estado: CONDITION_STATUS[tabaquismo.answer] };
   if (alcohol.answer === 'SI') {
     const frecuencia = clean(alcohol.frecuencia);
-    habits.alcohol = { activo: true, ...(frecuencia ? { frecuencia } : {}) };
-  } else if (alcohol.answer === 'NO') {
-    habits.alcohol = { activo: false };
+    habits.alcohol = { estado: 'SI', ...(frecuencia ? { frecuencia } : {}) };
+  } else {
+    habits.alcohol = { estado: CONDITION_STATUS[alcohol.answer] };
   }
-  if (bruxismo.answer !== 'NO_SE') habits.bruxismo = bruxismo.answer === 'SI';
+  habits.bruxismo = CONDITION_STATUS[bruxismo.answer];
   return habits;
 }
 
@@ -258,16 +265,11 @@ export function proposeVersionFromAnswers(
   answers: AnamnesisAnswers,
   current: MedicalHistory | null,
 ): MedicalHistoryVersionData {
-  const pregnancy = answers.pregnancy;
-  const embarazo =
-    pregnancy.answer === 'NO_SE'
-      ? (current?.safetyFlags.embarazo ?? false)
-      : pregnancy.answer === 'SI';
-  const semanasEmbarazo = !embarazo
-    ? undefined
-    : pregnancy.answer === 'SI'
-      ? pregnancy.semanas
-      : current?.safetyFlags.semanasEmbarazo;
+  // Embarazo: lo respondido (Sí / No / No sé → «No sabe»). La bandera de
+  // alerta solo la enciende un «Sí» (deriveSafetyFlags).
+  const pregnancy = CONDITION_STATUS[answers.pregnancy.answer];
+  const semanasEmbarazo =
+    pregnancy === 'SI' ? answers.pregnancy.semanas : undefined;
   return {
     allergies: allergiesFrom(answers, current?.allergies ?? []),
     conditions: conditionsFrom(answers, current?.conditions ?? []),
@@ -278,7 +280,7 @@ export function proposeVersionFromAnswers(
     vitalSigns: current?.vitalSigns ?? undefined,
     familyHistory: current?.familyHistory ?? undefined,
     notes: current?.notes ?? undefined,
-    embarazo,
+    pregnancy,
     ...(semanasEmbarazo !== undefined ? { semanasEmbarazo } : {}),
   };
 }

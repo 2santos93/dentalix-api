@@ -13,6 +13,10 @@ import {
   type MedicalHistoryVersionData,
 } from '../../../medical-history/domain/ports/medical-history-repository.port';
 import { deriveSafetyFlags } from '../../../medical-history/domain/safety-flags';
+import {
+  toVersionData,
+  type MedicalHistoryInput,
+} from '../../../medical-history/domain/anamnesis-answers';
 import type { AnamnesisAnswers } from '../../domain/anamnesis-questionnaire';
 import {
   countAffirmativeAnswers,
@@ -156,21 +160,9 @@ export class GetAnamnesisReviewUseCase {
 
 /** Solo los campos conocidos (como el guardado del personal). */
 function normalizeAdjusted(
-  data: MedicalHistoryVersionData,
+  data: MedicalHistoryInput,
 ): MedicalHistoryVersionData {
-  return {
-    allergies: data.allergies,
-    conditions: data.conditions,
-    medications: data.medications,
-    habits: data.habits,
-    dentalHistory: data.dentalHistory,
-    surgeries: data.surgeries,
-    vitalSigns: data.vitalSigns,
-    familyHistory: data.familyHistory,
-    notes: data.notes,
-    embarazo: data.embarazo,
-    semanasEmbarazo: data.semanasEmbarazo,
-  };
+  return toVersionData(data);
 }
 
 /**
@@ -191,7 +183,7 @@ export class AcceptAnamnesisUseCase {
   async execute(
     id: string,
     reviewerId: string,
-    adjusted?: MedicalHistoryVersionData,
+    adjusted?: MedicalHistoryInput,
   ): Promise<SubmissionListItem> {
     const detail = await this.repo.findDetail(id);
     if (!detail) {

@@ -296,6 +296,7 @@ export class PrismaPatientRepository implements PatientRepository {
             medications: (data.medications ??
               []) as unknown as Prisma.InputJsonValue,
             habits: (data.habits ?? Prisma.JsonNull) as Prisma.InputJsonValue,
+            pregnancy: data.pregnancy ?? null,
             dentalHistory: (data.dentalHistory ??
               Prisma.JsonNull) as Prisma.InputJsonValue,
             surgeries: (data.surgeries ??

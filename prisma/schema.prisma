@@ -716,6 +716,13 @@ model Patient {
   @@map("patients")
 }
 
+/// Respuesta tri-estado de la anamnesis (como `Condition.estado`).
+enum AnamnesisAnswer {
+  SI
+  NO
+  DESCONOCE
+}
+
 model MedicalHistoryVersion {
   id               String               @id @default(uuid()) @db.Uuid
   tenantId         String               @db.Uuid
@@ -725,12 +732,19 @@ model MedicalHistoryVersion {
   allergies        Json?
   conditions       Json?
   medications      Json?
+  // Hábitos: forma tri-estado ('SI'|'NO'|'DESCONOCE') desde la migración
+  // 20261111100000; las filas anteriores conservan sus booleanos y se leen con
+  // `readStoredHabits` (true «Sí», false «No»). Nunca se reescriben.
   habits           Json?
   dentalHistory    Json?
   surgeries        Json?
   vitalSigns       Json?
   familyHistory    String?
   notes            String?
+  /// Embarazo tri-estado; NULL = sin responder. NULL también en las versiones
+  /// anteriores a la columna: ahí manda `safetyFlags.embarazo` (solo guardaba
+  /// el «Sí»), ver `readStoredPregnancy`.
+  pregnancy        AnamnesisAnswer?
   // Banderas denormalizadas — calculadas en el dominio (deriveSafetyFlags).
   safetyFlags      Json?
   hasCriticalAlert Boolean              @default(false)

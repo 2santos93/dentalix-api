@@ -1,4 +1,5 @@
 import type {
+  AnswerStatus,
   Allergy,
   AllergySeverity,
   AllergyType,
@@ -64,7 +65,6 @@ const STATUS_LABELS: Record<ConditionStatus, string> = {
  */
 export const UNANSWERED_CONDITION = 'Sin responder';
 const YES = 'Sí';
-const NO = 'No';
 const NONE = 'Ninguna';
 
 /** Clave de emparejamiento: sin tildes, mayúsculas ni espacios de más. */
@@ -239,25 +239,35 @@ function diffScalar(
   }
 }
 
+function answerText(estado: AnswerStatus, detail?: string): string {
+  if (estado !== 'SI') return STATUS_LABELS[estado];
+  return detail ? `${YES} (${detail})` : YES;
+}
 function smoking(h: Habits | null | undefined): string | undefined {
   const t = h?.tabaquismo;
   if (!t) return undefined;
-  if (!t.activo) return NO;
-  return t.porDia !== undefined ? `${YES} (${t.porDia} al día)` : YES;
+  return answerText(
+    t.estado,
+    t.porDia !== undefined ? `${t.porDia} al día` : undefined,
+  );
 }
 function alcohol(h: Habits | null | undefined): string | undefined {
   const a = h?.alcohol;
   if (!a) return undefined;
-  if (!a.activo) return NO;
-  return a.frecuencia ? `${YES} (${a.frecuencia})` : YES;
+  return answerText(a.estado, a.frecuencia);
 }
 function bruxism(h: Habits | null | undefined): string | undefined {
-  if (h?.bruxismo === undefined) return undefined;
-  return h.bruxismo ? YES : NO;
+  return h?.bruxismo ? answerText(h.bruxismo) : undefined;
 }
-function pregnancy(embarazo: boolean, semanas: number | undefined): string {
-  if (!embarazo) return NO;
-  return semanas !== undefined ? `${YES} (${semanas} semanas)` : YES;
+function pregnancy(
+  estado: AnswerStatus | null | undefined,
+  semanas: number | undefined,
+): string | undefined {
+  if (!estado) return undefined;
+  return answerText(
+    estado,
+    semanas !== undefined ? `${semanas} semanas` : undefined,
+  );
 }
 
 /**
@@ -317,15 +327,9 @@ export function diffMedicalHistory(
     out,
     'PREGNANCY',
     'Embarazo',
-    current
-      ? pregnancy(
-          current.safetyFlags.embarazo,
-          current.safetyFlags.semanasEmbarazo,
-        )
-      : undefined,
-    proposed.embarazo === undefined
-      ? undefined
-      : pregnancy(proposed.embarazo, proposed.semanasEmbarazo),
+    // Sin responder en la vigente = «nuevo» (no un «No» que nadie registró).
+    pregnancy(current?.pregnancy, current?.safetyFlags.semanasEmbarazo),
+    pregnancy(proposed.pregnancy, proposed.semanasEmbarazo),
   );
   diffList(
     out,

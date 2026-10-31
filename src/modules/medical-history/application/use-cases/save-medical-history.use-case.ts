@@ -1,9 +1,10 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { MEDICAL_HISTORY_REPOSITORY } from '../../domain/ports/medical-history-repository.port';
-import type {
-  MedicalHistoryRepository,
-  MedicalHistoryVersionData,
-} from '../../domain/ports/medical-history-repository.port';
+import type { MedicalHistoryRepository } from '../../domain/ports/medical-history-repository.port';
+import {
+  toVersionData,
+  type MedicalHistoryInput,
+} from '../../domain/anamnesis-answers';
 import { MedicalHistory } from '../../domain/entities/medical-history.entity';
 import { PATIENT_REPOSITORY } from '../../../patients/domain/ports/patient-repository.port';
 import type { PatientRepository } from '../../../patients/domain/ports/patient-repository.port';
@@ -13,7 +14,9 @@ import { assertPatientInClinic } from '../../../patients/application/assert-pati
 // `hasCriticalAlert` fields — same rationale as MedicalHistoryVersionData
 // (tenant from context, version computed by the repository, flags derived in
 // the domain). This is the shape the controller's DTO maps into.
-export type SaveMedicalHistoryInput = MedicalHistoryVersionData;
+// Acepta también la forma de un cliente anterior (`embarazo`, hábitos
+// booleanos): `toVersionData` la traduce.
+export type SaveMedicalHistoryInput = MedicalHistoryInput;
 
 @Injectable()
 export class SaveMedicalHistoryUseCase {
@@ -36,24 +39,12 @@ export class SaveMedicalHistoryUseCase {
    */
   async execute(
     patientId: string,
-    data: MedicalHistoryVersionData,
+    data: MedicalHistoryInput,
     createdById?: string,
   ): Promise<MedicalHistory> {
     await assertPatientInClinic(this.patients, patientId);
 
-    const normalized: MedicalHistoryVersionData = {
-      allergies: data.allergies,
-      conditions: data.conditions,
-      medications: data.medications,
-      habits: data.habits,
-      dentalHistory: data.dentalHistory,
-      surgeries: data.surgeries,
-      vitalSigns: data.vitalSigns,
-      familyHistory: data.familyHistory,
-      notes: data.notes,
-      embarazo: data.embarazo,
-      semanasEmbarazo: data.semanasEmbarazo,
-    };
+    const normalized = toVersionData(data);
     return this.repo.createVersion(patientId, normalized, createdById);
   }
 }

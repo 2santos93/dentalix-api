@@ -43,6 +43,7 @@ class InMemoryMedicalHistoryRepository implements MedicalHistoryRepository {
       conditions: data.conditions ?? [],
       medications: data.medications ?? [],
       habits: data.habits ?? null,
+      pregnancy: data.pregnancy ?? null,
       dentalHistory: data.dentalHistory ?? null,
       surgeries: data.surgeries ?? [],
       vitalSigns: data.vitalSigns ?? null,
@@ -158,6 +159,32 @@ describe('SaveMedicalHistoryUseCase', () => {
     expect(result.safetyFlags.diabetes).toBe(true);
     expect(result.safetyFlags.embarazo).toBe(true);
     expect(result.hasCriticalAlert).toBe(true);
+  });
+
+  it('embarazo y hábitos tri-estado: un «No» elegido se guarda como «No» (antes volvía «Sin responder») y no enciende la alerta', async () => {
+    const uc = new SaveMedicalHistoryUseCase(
+      new InMemoryMedicalHistoryRepository(),
+      patientsInClinic('p1'),
+    );
+
+    const result = await uc.execute(
+      'p1',
+      {
+        pregnancy: 'NO',
+        semanasEmbarazo: 10,
+        habits: { bruxismo: 'DESCONOCE', tabaquismo: { estado: 'NO' } },
+      },
+      'user-1',
+    );
+
+    expect(result.pregnancy).toBe('NO');
+    expect(result.safetyFlags.embarazo).toBe(false);
+    expect(result.safetyFlags.semanasEmbarazo).toBeUndefined();
+    expect(result.hasCriticalAlert).toBe(false);
+    expect(result.habits).toEqual({
+      bruxismo: 'DESCONOCE',
+      tabaquismo: { estado: 'NO' },
+    });
   });
 
   it('never forwards a tenantId/version sneaked into the input to the repository (tenant/version come from context/computation, not input)', async () => {
