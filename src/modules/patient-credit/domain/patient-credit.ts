@@ -40,7 +40,7 @@ export const CREDIT_PAYMENTS_REQUIRED_MESSAGE =
 export const CREDIT_PAYMENT_NOT_OF_PLAN_MESSAGE =
   'Un abono de referencia no es de este plan, está anulado o no existe.';
 export const CREDIT_CHANGED_MESSAGE =
-  'El saldo a favor cambió mientras se registraba (otro traspaso o devolución): revisa el saldo y vuelve a intentarlo.';
+  'El saldo a favor o el plan cambiaron mientras se registraba (otro traspaso, otra devolución o un cambio de moneda del plan): revisa el saldo y vuelve a intentarlo.';
 export const CREDIT_CASH_SESSION_REQUIRED_MESSAGE =
   'Esta clínica exige caja abierta para mover efectivo: abre tu caja en esta sede antes de devolver en efectivo.';
 export const CREDIT_IDEMPOTENCY_REUSED_MESSAGE =

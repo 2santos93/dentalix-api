@@ -34,7 +34,7 @@
 
 SET LOCAL lock_timeout = '5s';
 
-CREATE OR REPLACE FUNCTION public."treatment_plans_credit_currency_locked"() RETURNS trigger
+CREATE FUNCTION public."treatment_plans_credit_currency_locked"() RETURNS trigger
 LANGUAGE plpgsql
 SET search_path = pg_catalog, pg_temp
 AS $$

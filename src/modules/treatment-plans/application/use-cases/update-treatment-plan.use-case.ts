@@ -172,9 +172,8 @@ export class UpdateTreatmentPlanUseCase {
               closedPlanCurrencyMessage(existing.status),
             );
           }
-          if (facts.hasLivePayments) {
-            throw new ConflictException(CURRENCY_LOCKED_BY_PAYMENTS_MESSAGE);
-          }
+          // Antes que los abonos: con asientos, anular los abonos no
+          // desbloquearía la moneda y ese mensaje engañaría.
           if (facts.hasCreditEntries) {
             throw new ConflictException({
               statusCode: 409,
@@ -182,6 +181,9 @@ export class UpdateTreatmentPlanUseCase {
               code: CURRENCY_LOCKED_BY_CREDIT_CODE,
               message: CURRENCY_LOCKED_BY_CREDIT_MESSAGE,
             });
+          }
+          if (facts.hasLivePayments) {
+            throw new ConflictException(CURRENCY_LOCKED_BY_PAYMENTS_MESSAGE);
           }
           if (facts.hasActivePaymentPlan) {
             throw new ConflictException(

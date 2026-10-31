@@ -273,6 +273,70 @@ describe('DX-438 · saldo a favor y cambio de moneda del plan (int)', () => {
     expect(await movements(a)).toEqual(before);
   });
 
+  it('carrera: el ORIGEN cambia de moneda (confirmado) entre la lectura y el bloqueo del traspaso → 409 y no escribe nada', async () => {
+    // Origen vivo sin ítems ni asientos: sus 1.000 COP abonados son saldo a
+    // favor, y sin asientos nada impide cambiarle la moneda. También tiene un
+    // abono de 1.000 USD: tras el cambio a USD el saldo seguiría alcanzando,
+    // así que solo la comprobación de la moneda del origen lo detiene (sin
+    // ella saldría un TRANSFER_OUT en COP de un plan en USD).
+    const source = await raw.treatmentPlan.create({
+      data: {
+        tenantId: a.tenantId,
+        patientId: a.patientId,
+        currency: 'COP',
+        status: 'DRAFT',
+      },
+    });
+    await raw.payment.create({
+      data: {
+        tenantId: a.tenantId,
+        locationId: a.locationId,
+        treatmentPlanId: source.id,
+        patientId: a.patientId,
+        amount: 1_000,
+        currency: 'COP',
+        paidAt: new Date(),
+        method: 'CASH',
+      },
+    });
+    await raw.payment.create({
+      data: {
+        tenantId: a.tenantId,
+        locationId: a.locationId,
+        treatmentPlanId: source.id,
+        patientId: a.patientId,
+        amount: 1_000,
+        currency: 'USD',
+        paidAt: new Date(),
+        method: 'CASH',
+      },
+    });
+    const target = await draftPlan(a);
+    const racing: PatientCreditRepository = Object.create(
+      credit,
+    ) as PatientCreditRepository;
+    racing.createTransfer = async (input) => {
+      await asApp(
+        a,
+        (tx) =>
+          tx.$executeRaw`UPDATE "treatment_plans" SET "currency" = 'USD' WHERE "id" = ${source.id}::uuid`,
+      );
+      return credit.createTransfer(input);
+    };
+    const before = await movements(a);
+
+    const error: unknown = await inContext(a, () =>
+      new TransferCreditUseCase(racing).execute(
+        source.id,
+        { targetPlanId: target, amount: 500, currency: 'COP' },
+        { role: ClinicRole.ADMIN, userId },
+      ),
+    ).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ConflictException);
+    expect((error as ConflictException).message).toBe(CREDIT_CHANGED_MESSAGE);
+    expect(await movements(a)).toEqual(before);
+  });
+
   it('carrera real: traspaso y PATCH de moneda simultáneos sobre el mismo destino nunca dejan un asiento en otra moneda', async () => {
     const target = await draftPlan(a);
     const [transfer, patch] = await Promise.allSettled([
@@ -399,15 +463,40 @@ describe('DX-438 · saldo a favor y cambio de moneda del plan (int)', () => {
       ).resolves.toBe(1);
     });
 
-    it('los asientos de otra clínica no bloquean (filtra por tenantId)', async () => {
-      const other = await draftPlan(b);
+    it('los asientos de la clínica B no bloquean el cambio de moneda de un plan sin asientos de la clínica A (también sin RLS)', async () => {
+      const bPlan = await draftPlan(b);
+      await inContext(b, () =>
+        credit.createTransfer(transferInput(b.sourcePlan, bPlan, 100)),
+      );
+      expect(
+        await raw.patientCreditEntry.count({
+          where: { tenantId: b.tenantId, treatmentPlanId: bPlan },
+        }),
+      ).toBe(1);
+      const aPlan = await draftPlan(a);
+      // Como dentalix_app de A…
       await expect(
         asApp(
-          b,
+          a,
           (tx) =>
-            tx.$executeRaw`UPDATE "treatment_plans" SET "currency" = 'USD' WHERE "id" = ${other}::uuid`,
+            tx.$executeRaw`UPDATE "treatment_plans" SET "currency" = 'USD' WHERE "id" = ${aPlan}::uuid`,
         ),
       ).resolves.toBe(1);
+      // …y como superusuario, que ve los asientos de B: la búsqueda va por
+      // la clínica y el plan de la fila.
+      await expect(
+        raw.$executeRaw`UPDATE "treatment_plans" SET "currency" = 'COP' WHERE "id" = ${aPlan}::uuid`,
+      ).resolves.toBe(1);
+      // El de B sigue bloqueado.
+      expect(
+        await sqlState(
+          asApp(
+            b,
+            (tx) =>
+              tx.$executeRaw`UPDATE "treatment_plans" SET "currency" = 'USD' WHERE "id" = ${bPlan}::uuid`,
+          ),
+        ),
+      ).toBe('23001');
     });
   });
 

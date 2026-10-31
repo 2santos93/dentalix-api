@@ -304,6 +304,19 @@ describe('UpdateTreatmentPlanUseCase', () => {
       ).resolves.toMatchObject({ status: CANCELLED, currency: 'COP' });
     });
 
+    it('con asientos y además abonos vivos, el 409 es el del saldo a favor (anular los abonos no lo desbloquearía)', async () => {
+      const { repo, uc, plan } = creditPlan(PRESENTED);
+      repo.livePaymentPlanIds.add(plan.id);
+      const error: unknown = await uc
+        .execute(plan.id, { currency: 'USD' }, DENTIST)
+        .catch((e: unknown) => e);
+      expect((error as ConflictException).getResponse()).toMatchObject({
+        code: 'PLAN_CURRENCY_LOCKED_BY_CREDIT',
+        message: CREDIT_LOCKED,
+      });
+      expect(repo.stored(plan.id).currency).toBe('COP');
+    });
+
     it('sin asientos ni abonos la moneda de un borrador sí cambia', async () => {
       const { repo, uc } = setup();
       const plan = repo.seedPlan({ status: DRAFT, currency: 'COP' });
