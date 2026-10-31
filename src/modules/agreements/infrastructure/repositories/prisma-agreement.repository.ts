@@ -7,7 +7,6 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { Agreement } from '../../domain/entities/agreement.entity';
-import { payerTypeFromStored } from '../../../payers/domain/legacy-payer-type';
 import {
   AgreementRepository,
   CreateAgreementRepoInput,
@@ -60,7 +59,7 @@ export function mapToEntity(row: PrismaAgreement): Agreement {
     payer: {
       id: row.payer.id,
       name: row.payer.name,
-      type: payerTypeFromStored(row.payer.type),
+      type: row.payer.type,
     },
     kind: row.kind,
     percent: row.percent ? row.percent.toNumber() : null,

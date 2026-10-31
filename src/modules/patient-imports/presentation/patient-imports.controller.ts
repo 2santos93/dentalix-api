@@ -62,7 +62,6 @@ import {
 } from '../domain/import-fields';
 import type { ColumnMapping } from '../domain/column-mapping';
 import { DOCUMENT_TYPES } from '../../patients/domain/document-type';
-import { resolveDocTypeInput } from '../../patients/domain/legacy-doc-type';
 import {
   ACTIVE_IMPORT_MESSAGE,
   BALANCES_NOT_EDITABLE_MESSAGE,
@@ -325,10 +324,7 @@ export class PatientImportsController {
         columns: parseMappingField(dto.mapping),
         // `@IsOptional` deja pasar un `null` de JSON: cuenta como ausente
         // (400 por el archivo que falta), nunca como un tipo por resolver.
-        defaultDocType:
-          dto.defaultDocType == null
-            ? undefined
-            : resolveDocTypeInput(dto.defaultDocType),
+        defaultDocType: dto.defaultDocType ?? undefined,
       },
       req.user.sub,
     );

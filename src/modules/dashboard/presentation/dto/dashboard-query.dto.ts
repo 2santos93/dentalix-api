@@ -20,7 +20,7 @@ function toUpperCase({ value }: { value: unknown }): unknown {
 // semiabierto `[from, to)`: `to` es el día SIGUIENTE al último incluido (la web
 // manda «Hasta» + 1). Cada sede corta los días a medianoche de SU zona IANA
 // (la de su horario en BD, nunca la del cliente; DX-097), así un abono de las
-// 20:00 en Bogotá cuenta en su día aunque en UTC ya sea el siguiente.
+// 20:00 en una sede a UTC−5 cuenta en su día aunque en UTC ya sea el siguiente.
 export class DashboardQueryDto {
   @ApiProperty({
     example: '2026-07-01',

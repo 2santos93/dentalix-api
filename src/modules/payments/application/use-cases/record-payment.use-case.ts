@@ -96,8 +96,8 @@ function isUtcMidnight(instant: Date): boolean {
  * DX-097: `YYYY-MM-DD` es un día civil (el formulario de abono), y también una
  * medianoche UTC exacta (clientes antiguos, ver `isUtcMidnight`); cualquier
  * otra fecha ISO con hora es un instante y debe traer `Z` o desfase. Sin esta
- * distinción, `new Date` leería el día como medianoche UTC, que en Bogotá es
- * la tarde del día ANTERIOR.
+ * distinción, `new Date` leería el día como medianoche UTC, que en una sede
+ * al oeste de UTC es la tarde del día ANTERIOR.
  */
 export function normalizePaidAt(value: string | Date): Date | CivilPaidDay {
   if (typeof value === 'string' && CIVIL_DATE_SHAPE.test(value)) {

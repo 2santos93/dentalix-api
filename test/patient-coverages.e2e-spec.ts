@@ -51,8 +51,8 @@ describe('Coberturas del paciente (e2e, DX-153)', () => {
   let clinic: Clinic;
   let other: Clinic;
   const tokens = {} as Record<ClinicRole, string>;
-  let sanitas: string;
-  let sura: string;
+  let sanavida: string;
+  let surco: string;
   let foreignPayer: string;
   let patient: string;
   let foreignPatient: string;
@@ -127,12 +127,12 @@ describe('Coberturas del paciente (e2e, DX-153)', () => {
       const member = await seedMember(raw, clinic, role);
       tokens[role] = await loginAs(app, clinic.host, member.email);
     }
-    sanitas = await createPayer(clinic, {
-      name: 'Sanitas',
+    sanavida = await createPayer(clinic, {
+      name: 'Sanavida',
       type: 'PUBLIC_SYSTEM',
     });
-    sura = await createPayer(clinic, {
-      name: 'Sura',
+    surco = await createPayer(clinic, {
+      name: 'Surco',
       type: 'PUBLIC_SYSTEM',
     });
     foreignPayer = await createPayer(other, { name: 'Ajena', type: 'OTHER' });
@@ -152,7 +152,7 @@ describe('Coberturas del paciente (e2e, DX-153)', () => {
 
   it('la primera cobertura es principal aunque no se pida, con el pagador anidado y estado ACTIVE', async () => {
     const res = await add(patient, {
-      payerId: sanitas,
+      payerId: sanavida,
       planName: ' Plan Oro ',
       memberNumber: 'AFI-778899',
       policyHolderName: 'Luis Ortiz',
@@ -163,8 +163,8 @@ describe('Coberturas del paciente (e2e, DX-153)', () => {
     expect(res.body).toMatchObject({
       patientId: patient,
       payer: {
-        id: sanitas,
-        name: 'Sanitas',
+        id: sanavida,
+        name: 'Sanavida',
         type: 'PUBLIC_SYSTEM',
         active: true,
       },
@@ -181,12 +181,12 @@ describe('Coberturas del paciente (e2e, DX-153)', () => {
 
   it('una vencida y una por empezar derivan su estado; la segunda no es principal', async () => {
     const expired = await add(patient, {
-      payerId: sura,
+      payerId: surco,
       validTo: dayFromNow(-2),
     }).expect(201);
     expect(expired.body).toMatchObject({ isPrimary: false, status: 'EXPIRED' });
     const future = await add(patient, {
-      payerId: sura,
+      payerId: surco,
       validFrom: dayFromNow(2),
     }).expect(201);
     expect(future.body).toMatchObject({
@@ -262,7 +262,7 @@ describe('Coberturas del paciente (e2e, DX-153)', () => {
 
   it('validaciones del alta: fechas, formato, pagador desactivado, inexistente o de otra clínica', async () => {
     const bad = await add(patient, {
-      payerId: sura,
+      payerId: surco,
       validFrom: '2026-05-02',
       validTo: '2026-05-01',
     }).expect(400);
@@ -270,45 +270,47 @@ describe('Coberturas del paciente (e2e, DX-153)', () => {
       'La fecha de fin no puede ser anterior a la de inicio.',
     );
     const format = await add(patient, {
-      payerId: sura,
+      payerId: surco,
       validFrom: '01/05/2026',
     }).expect(400);
     expect(JSON.stringify(format.body)).toContain(
       'La fecha debe tener el formato AAAA-MM-DD.',
     );
-    await add(patient, { payerId: sura, validFrom: '2026-02-30' }).expect(400);
+    await add(patient, { payerId: surco, validFrom: '2026-02-30' }).expect(400);
 
     const foreign = await add(patient, { payerId: foreignPayer }).expect(400);
     expect((foreign.body as { message: string }).message).toBe(
       'Pagador no encontrado.',
     );
 
-    await as(api().patch(`/api/v1/payers/${sura}`), tokens.ADMIN)
+    await as(api().patch(`/api/v1/payers/${surco}`), tokens.ADMIN)
       .send({ active: false })
       .expect(200);
-    const off = await add(patient, { payerId: sura }).expect(400);
+    const off = await add(patient, { payerId: surco }).expect(400);
     expect((off.body as { message: string }).message).toBe(
       'Ese pagador está desactivado.',
     );
     // Con el mismo pagador ya desactivado, editar otros campos vale.
-    const [, withSura] = (await list(patient)).filter(
-      (c) => c.payer.id === sura,
+    const [, withSurco] = (await list(patient)).filter(
+      (c) => c.payer.id === surco,
     );
     await as(
-      api().patch(`${coverages(patient)}/${withSura.id}`),
+      api().patch(`${coverages(patient)}/${withSurco.id}`),
       tokens.RECEPTION,
     )
       .send({ planName: 'Sigue' })
       .expect(200);
     // Cambiar a un pagador desactivado, no.
-    const firstCov = (await list(patient)).find((c) => c.payer.id === sanitas)!;
+    const firstCov = (await list(patient)).find(
+      (c) => c.payer.id === sanavida,
+    )!;
     await as(
       api().patch(`${coverages(patient)}/${firstCov.id}`),
       tokens.RECEPTION,
     )
-      .send({ payerId: sura })
+      .send({ payerId: surco })
       .expect(400);
-    await as(api().patch(`/api/v1/payers/${sura}`), tokens.ADMIN)
+    await as(api().patch(`/api/v1/payers/${surco}`), tokens.ADMIN)
       .send({ active: true })
       .expect(200);
   });
@@ -316,9 +318,9 @@ describe('Coberturas del paciente (e2e, DX-153)', () => {
   it('tope de 5 coberturas vivas: la sexta es 400', async () => {
     const full = await createPatient(clinic, { firstName: 'Tope' });
     for (let i = 0; i < 5; i++) {
-      await add(full, { payerId: sanitas }).expect(201);
+      await add(full, { payerId: sanavida }).expect(201);
     }
-    const res = await add(full, { payerId: sanitas }).expect(400);
+    const res = await add(full, { payerId: sanavida }).expect(400);
     expect((res.body as { message: string }).message).toBe(
       'Un paciente admite hasta 5 coberturas.',
     );
@@ -327,9 +329,10 @@ describe('Coberturas del paciente (e2e, DX-153)', () => {
 
   it('retirar la principal promueve la más antigua de las que quedan; retirar la última deja cero', async () => {
     const p = await createPatient(clinic, { firstName: 'Retiro' });
-    const a = (await add(p, { payerId: sanitas }).expect(201)).body as Coverage;
-    const b = (await add(p, { payerId: sura }).expect(201)).body as Coverage;
-    const c = (await add(p, { payerId: sura }).expect(201)).body as Coverage;
+    const a = (await add(p, { payerId: sanavida }).expect(201))
+      .body as Coverage;
+    const b = (await add(p, { payerId: surco }).expect(201)).body as Coverage;
+    const c = (await add(p, { payerId: surco }).expect(201)).body as Coverage;
     expect([a.isPrimary, b.isPrimary, c.isPrimary]).toEqual([
       true,
       false,
@@ -353,14 +356,14 @@ describe('Coberturas del paciente (e2e, DX-153)', () => {
     expect(await list(p)).toEqual([]);
     await as(api().delete(`${coverages(p)}/${b.id}`), tokens.ADMIN).expect(404);
     // Una nueva vuelve a ser principal.
-    expect((await add(p, { payerId: sura }).expect(201)).body).toMatchObject({
+    expect((await add(p, { payerId: surco }).expect(201)).body).toMatchObject({
       isPrimary: true,
     });
   });
 
   it('un paciente de otra clínica da 404 en las cuatro rutas', async () => {
     await as(api().get(coverages(foreignPatient)), tokens.ADMIN).expect(404);
-    await add(foreignPatient, { payerId: sanitas }, tokens.ADMIN).expect(404);
+    await add(foreignPatient, { payerId: sanavida }, tokens.ADMIN).expect(404);
     const mine = (await list(patient))[0];
     await as(
       api().patch(`${coverages(foreignPatient)}/${mine.id}`),
@@ -388,7 +391,7 @@ describe('Coberturas del paciente (e2e, DX-153)', () => {
       ClinicRole.RECEPTION,
     ]) {
       await as(api().get(coverages(p)), tokens[role]).expect(200);
-      await add(p, { payerId: sanitas }, tokens[role]).expect(201);
+      await add(p, { payerId: sanavida }, tokens[role]).expect(201);
     }
     expect(await list(p)).toHaveLength(4);
   });
@@ -407,7 +410,7 @@ describe('Coberturas del paciente (e2e, DX-153)', () => {
     const p = await createPatient(clinic, { firstName: 'Auditada' });
     const created = (
       await add(p, {
-        payerId: sanitas,
+        payerId: sanavida,
         memberNumber: 'AFI-SECRETO-4455',
         policyHolderName: 'Titular Secreto',
         planName: 'Plan Secreto',
@@ -483,13 +486,13 @@ describe('Coberturas del paciente (e2e, DX-153)', () => {
     const token = await loginAs(app, clinic.host, 'restringida@dx153-cov.test');
 
     const p = await createPatient(clinic, { firstName: 'Lectura' });
-    await add(p, { payerId: sanitas, isPrimary: true }).expect(201);
+    await add(p, { payerId: sanavida, isPrimary: true }).expect(201);
     const detail = await as(api().get(`/api/v1/patients/${p}`), token).expect(
       200,
     );
     expect(
       (detail.body as { coverage: { payerName: string } }).coverage,
-    ).toMatchObject({ payerName: 'Sanitas' });
+    ).toMatchObject({ payerName: 'Sanavida' });
     await as(api().get(coverages(p)), token).expect(200);
   });
 });

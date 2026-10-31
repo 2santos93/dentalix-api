@@ -29,9 +29,7 @@ import { purgeDemoTenants } from './support/demo-tenant-purge';
 import { tenantTablesInDeleteOrder } from './support/tenant-purge';
 import { hostFor } from './support/tenant-host';
 import { PAYER_TYPES } from '../src/modules/payers/domain/payer-type';
-import { storedPayerType } from '../src/modules/payers/domain/legacy-payer-type';
 import { DOCUMENT_TYPES } from '../src/modules/patients/domain/document-type';
-import { legacyStoredDocType } from '../src/modules/patients/domain/legacy-doc-type';
 
 // Este spec escribe y BORRA EN DURO: solo puede correr contra una base de test.
 for (const key of ['DATABASE_URL', 'DIRECT_URL'] as const) {
@@ -363,7 +361,7 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       demo.map((payer) => payer.name).sort(),
     );
     for (const payer of demo) {
-      // La demo pide tipos genéricos; la fase 1 los guarda con el código anterior.
+      // La demo pide tipos genéricos y la BD los guarda tal cual.
       expect(PAYER_TYPES).toContain(payer.type);
       const row = rows.find((r) => r.name === payer.name);
       expect({
@@ -372,7 +370,7 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
         country: row?.country,
       }).toEqual({
         name: payer.name,
-        type: storedPayerType(payer.type),
+        type: payer.type,
         country: null,
       });
     }
@@ -470,11 +468,9 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
 
   it('demo patients and contacts use generic types, neutral numbers and no label', async () => {
     // DX-327 (spec §4.9, R14): tipos genéricos, números `DEMO-…`, sin
-    // etiqueta libre y sin registro sanitario de un país. La siembra pasa por
-    // los escritores de R5: la columna antigua es la proyección del genérico.
+    // etiqueta libre y sin registro sanitario de un país.
     const tenantId = await liveDemoTenantId();
     const pair = {
-      docType: true,
       documentType: true,
       docTypeLabel: true,
       docNumber: true,
@@ -496,12 +492,10 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
         docNumber: row.docNumber?.startsWith('DEMO-'),
         documentType: DOCUMENT_TYPES.includes(documentType),
         docTypeLabel: row.docTypeLabel,
-        docType: row.docType,
       }).toEqual({
         docNumber: true,
         documentType: true,
         docTypeLabel: null,
-        docType: legacyStoredDocType(documentType),
       });
     }
     const implants = await raw.patientImplant.findMany({

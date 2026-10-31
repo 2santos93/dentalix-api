@@ -16,7 +16,7 @@ const prisma = new PrismaClient<Prisma.PrismaClientOptions>({
 // solo `prisma migrate deploy`; el upsert de abajo permite actualizar
 // name/symbol sin una migración nueva. A propósito: la migración inserta con
 // `ON CONFLICT DO NOTHING`, así que en una base solo migrada las 10 monedas de
-// 2026-07 (USD, COP, EUR…) conservan su nombre y símbolo de entonces, y el
+// 2026-07 (USD, EUR, MXN…) conservan su nombre y símbolo de entonces, y el
 // seed los cambia por los de `Intl`. Solo es texto de presentación: el código
 // y los decimales no cambian.
 async function seedCurrencies(): Promise<void> {

@@ -155,5 +155,5 @@ export class UpdatePatientDto {
   emergencyContactPhone?: string;
 
   // DX-203: guardianName/guardianDocNumber son de solo lectura (DEPRECADO):
-  // el acudiente se gestiona como responsable. Si llegan, se descartan.
+  // el tutor se gestiona como responsable. Si llegan, se descartan.
 }

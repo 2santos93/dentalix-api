@@ -21,7 +21,6 @@ import { memberNumberChanged } from '../../domain/member-number-rules';
 import { coverageRedeclared } from '../../domain/coverage-declaration-rules';
 import { isExternalPayer } from '../../../payers/domain/payer-type';
 import type { PatientCoverage } from '../../domain/entities/patient-coverage.entity';
-import { payerTypeFromStored } from '../../../payers/domain/legacy-payer-type';
 import type {
   CoverageUpdateResult,
   CreateCoverageRepoInput,
@@ -79,7 +78,7 @@ export function toEntity(
     payer: {
       id: row.payer.id,
       name: row.payer.name,
-      type: payerTypeFromStored(row.payer.type),
+      type: row.payer.type,
       active: row.payer.active,
     },
     planName: row.planName,
@@ -89,7 +88,7 @@ export function toEntity(
     validTo: row.validTo ? toDateOnly(row.validTo) : null,
     isPrimary: row.isPrimary,
     notes: row.notes,
-    migratedFromInsurerEps: row.migratedFromInsurerEps,
+    migratedFromLegacyInsurer: row.migratedFromLegacyInsurer,
     declaredById: row.declaredById ?? row.createdById,
     verifiedAt: row.verifiedAt,
     verifiedById: row.verifiedById,
@@ -370,9 +369,7 @@ export class PrismaPatientCoverageRepository implements PatientCoverageRepositor
             memberNumber: live.memberNumber,
             validFrom: previous.validFrom,
             validTo: previous.validTo,
-            externalPayer: isExternalPayer(
-              payerTypeFromStored(live.payer.type),
-            ),
+            externalPayer: isExternalPayer(live.payer.type),
           },
           patch,
           patch.editorRole,

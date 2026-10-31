@@ -225,7 +225,7 @@ export class CreateClinicalEntryUseCase {
  * Día de la cita en la zona de su sede, como fecha civil (medianoche UTC): la
  * misma convención que la fecha de atención elegida a mano en la web, que la
  * ficha lee en UTC. Su instante (`start`) daría el día siguiente en una cita de
- * la tarde-noche de Bogotá.
+ * la tarde-noche en una sede al oeste de UTC.
  */
 function appointmentDay(appointment: ClinicalEntryAppointmentRef): Date {
   return new Date(

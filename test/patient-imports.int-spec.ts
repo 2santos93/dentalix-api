@@ -353,6 +353,8 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
         tenantId: a.tenantId,
         firstName: 'Lleno',
         lastName: 'Parcial',
+        // Sin el trigger de DX-327, la columna toma su DEFAULT 'OTHER'.
+        documentType: 'NATIONAL_ID',
         docNumber: '4444',
         phone: '3001112222',
       },
@@ -686,7 +688,7 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       where: { importBatchId: batch!.id },
     });
     const payer = await raw.payer.create({
-      data: { tenantId: a.tenantId, name: 'Mutua DX-107', type: 'OTRO' },
+      data: { tenantId: a.tenantId, name: 'Mutua DX-107', type: 'OTHER' },
     });
     const agreement = await raw.agreement.create({
       data: {
@@ -878,12 +880,14 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
     ).toEqual([]);
   });
 
-  it('«actualizar vacíos» no rellena los datos suprimidos de un paciente (Ley 1581) y el dry-run lo avisa (revisión I2)', async () => {
+  it('«actualizar vacíos» no rellena los datos suprimidos de un paciente (DX-039) y el dry-run lo avisa (revisión I2)', async () => {
     const suppressed = await raw.patient.create({
       data: {
         tenantId: a.tenantId,
         firstName: 'Suprimido',
         lastName: 'Parcial',
+        // Sin el trigger de DX-327, la columna toma su DEFAULT 'OTHER'.
+        documentType: 'NATIONAL_ID',
         docNumber: '8181',
         partiallySuppressedAt: new Date(),
       },
@@ -940,7 +944,6 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
         lastName: 'Genérico',
         docNumber: 'RX-9191',
         documentType: 'TAX_ID',
-        docType: 'OTHER',
         docTypeLabel: 'ID local',
       },
     });

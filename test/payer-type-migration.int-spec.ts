@@ -28,6 +28,7 @@ const DX326 = '20261029120000_dx326_payer_type_generic_values';
 const ENUM_MIGRATION = DX326;
 const CHECK_MIGRATION = '20261029120100_dx326_payers_drop_type_country_check';
 const ROOT = join(__dirname, '..');
+const RETIRED = '20261110130000_sin_colombia_identificadores';
 
 function urlFor(db: string): string {
   const url = new URL(process.env.DIRECT_URL as string);
@@ -163,7 +164,11 @@ describe('DX-326 · migraciones de los tipos de pagador genéricos (int)', () =>
     });
     for (const sql of SEED) await target.$executeRawUnsafe(sql);
     before = await target.$queryRawUnsafe<PayerRow[]>(SNAPSHOT);
-    for (const name of all.filter((n) => n >= DX326)) copy(name);
+    // Hasta la migración que retira los códigos anteriores (20261110130000),
+    // que tiene su propio test (sin-colombia-identifiers-migration.int-spec).
+    for (const name of all.filter((n) => n >= DX326 && n < RETIRED)) {
+      copy(name);
+    }
     migrateDeploy(dir, urlFor(db));
   }, 240_000);
 

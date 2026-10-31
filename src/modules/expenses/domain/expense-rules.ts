@@ -121,7 +121,7 @@ export function validateAmount(amount: unknown): number {
 }
 
 /**
- * «1.234,50 COP»: miles con punto y coma decimal solo si hay céntimos. Es el
+ * «1.234,50 USD»: miles con punto y coma decimal solo si hay céntimos. Es el
  * formato del mensaje de tope (R2), el mismo que ve la clínica en pantalla.
  */
 export function formatMoney(cents: number, currency: string): string {

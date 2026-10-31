@@ -737,11 +737,12 @@ describe('Responsables de pago y avisos (e2e, DX-203)', () => {
       const [row] = await raw.$queryRaw<
         {
           documentType: string | null;
-          docType: string | null;
+          legacy: string | null;
           docTypeLabel: string | null;
         }[]
       >`
-        SELECT "documentType"::text AS "documentType", "docType"::text AS "docType", "docTypeLabel"
+        SELECT "documentType"::text AS "documentType",
+               "legacyDocumentCode"::text AS "legacy", "docTypeLabel"
           FROM "patient_responsible_parties" WHERE "id" = ${id}::uuid`;
       return row;
     };
@@ -778,10 +779,10 @@ describe('Responsables de pago y avisos (e2e, DX-203)', () => {
         docTypeLabel: 'ID local',
         docTypeName: 'ID local',
       });
-      // Fase 1: el alta escribe la pareja (TAX_ID no tiene código anterior).
+      // Solo el genérico: la columna anterior, congelada, queda NULL.
       expect(await sqlRow(contact.id)).toEqual({
         documentType: 'TAX_ID',
-        docType: 'OTHER',
+        legacy: null,
         docTypeLabel: 'ID local',
       });
 
@@ -796,7 +797,7 @@ describe('Responsables de pago y avisos (e2e, DX-203)', () => {
       await dialogEdit(patientId, contact.id, 'PASSPORT');
       expect(await sqlRow(contact.id)).toEqual({
         documentType: 'PASSPORT',
-        docType: 'PASSPORT',
+        legacy: null,
         docTypeLabel: null,
       });
       await at(api().patch(`${parties(patientId)}/${contact.id}`))
@@ -807,7 +808,7 @@ describe('Responsables de pago y avisos (e2e, DX-203)', () => {
         .expect(200);
       expect(await sqlRow(contact.id)).toEqual({
         documentType: null,
-        docType: null,
+        legacy: null,
         docTypeLabel: null,
       });
       const res = await at(api().patch(`${parties(patientId)}/${contact.id}`))
@@ -818,13 +819,15 @@ describe('Responsables de pago y avisos (e2e, DX-203)', () => {
       );
     });
 
-    it('legacy contact edit resending CC for a national ID keeps the label', async () => {
+    it('a contact edit with a retired document code is 400 and keeps the label', async () => {
       const patientId = await freshPatient();
       const contact = await addContact(patientId, {
         docType: 'NATIONAL_ID',
         docTypeLabel: 'ID local',
       });
-      await dialogEdit(patientId, contact.id, 'CC');
+      await at(api().patch(`${parties(patientId)}/${contact.id}`))
+        .send({ docType: 'CC' })
+        .expect(400);
       expect((await partiesOf(patientId))[0]).toMatchObject({
         docType: 'NATIONAL_ID',
         docTypeLabel: 'ID local',
@@ -895,13 +898,13 @@ describe('Responsables de pago y avisos (e2e, DX-203)', () => {
       expect(typeless).toMatchObject({ docType: null, docTypeName: null });
     });
 
-    it('legacy contact TI reads back as NATIONAL_ID with no label', async () => {
+    it('a contact whose frozen legacy column says MINOR_ID reads its generic type with no label', async () => {
       const patientId = await freshPatient();
       await raw.$executeRaw`
         INSERT INTO "patient_responsible_parties"
-          ("id","tenantId","patientId","fullName","docType","relationship","updatedAt")
+          ("id","tenantId","patientId","fullName","documentType","legacyDocumentCode","relationship","updatedAt")
         VALUES (gen_random_uuid(), ${tokyo.tenantId}::uuid, ${patientId}::uuid,
-                'Contacto anterior', 'TI', 'OTHER', now())`;
+                'Contacto anterior', 'NATIONAL_ID', 'MINOR_ID', 'OTHER', now())`;
       expect(await partiesOf(patientId)).toEqual([
         expect.objectContaining({
           kind: 'CONTACT',
@@ -910,12 +913,6 @@ describe('Responsables de pago y avisos (e2e, DX-203)', () => {
           docTypeName: 'Documento nacional',
         }),
       ]);
-      // La API nueva lo crea con el código anterior también.
-      const created = await addContact(patientId, { docType: 'TI' });
-      expect(created).toMatchObject({
-        docType: 'NATIONAL_ID',
-        docTypeLabel: null,
-      });
     });
   });
 });

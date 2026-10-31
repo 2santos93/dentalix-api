@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { ISO3166_COUNTRIES } from '../../prisma/reference/iso3166';
 import { ISO4217_CURRENCIES } from '../../prisma/reference/iso4217';
@@ -387,9 +387,9 @@ describe('receta sin reglas nacionales (DX-324)', () => {
 
 /**
  * DX-326 (spec §6.8, R8, R10, R11): los pagadores no tienen país y los códigos
- * de tipo anteriores a DX-326 viven solo en `legacy-payer-type.ts`. Los
- * literales de los controles se arman por partes: este fichero es una de las
- * excepciones de R10, pero su código de producción no los nombra.
+ * de tipo anteriores a DX-326 ya no existen en ningún sitio de `src` (la
+ * migración 20261110130000 los tradujo y los quitó del enum). Los literales
+ * de los controles se arman por partes.
  */
 const PAYER_MODULES = [
   'payers',
@@ -397,21 +397,12 @@ const PAYER_MODULES = [
   'patient-agreements',
   'patient-coverages',
 ].map((name) => join(SRC, 'modules', name));
-const LEGACY_PAYER_TYPE_FILE = join(
-  SRC,
-  'modules',
-  'payers',
-  'domain',
-  'legacy-payer-type.ts',
-);
 const PAYER_REPOSITORIES = [
   'payers/infrastructure/repositories/prisma-payer.repository.ts',
   'agreements/infrastructure/repositories/prisma-agreement.repository.ts',
   'patient-agreements/infrastructure/repositories/prisma-patient-agreement.repository.ts',
   'patient-coverages/infrastructure/repositories/prisma-patient-coverage.repository.ts',
 ].map((path) => join(SRC, 'modules', ...path.split('/')));
-const R10_HEADER =
-  'Excepción G5.3 (DX-334): tipos de pagador anteriores a DX-326';
 /** Los códigos antiguos en código (spec §6.8). */
 const LEGACY_PAYER_CODE =
   /\b(MUTUA_ES|PREPAGADA_CO|EPS_CO)\b|['"](EMPRESA|OTRO)['"]|PayerType\.(EMPRESA|OTRO)/;
@@ -457,16 +448,24 @@ describe('pagadores sin país (DX-326)', () => {
     );
   });
 
-  it('architecture: payer modules name no legacy payer type outside legacy-payer-type.ts', () => {
-    const files = payerProduction.filter(
-      (file) => file !== LEGACY_PAYER_TYPE_FILE,
+  it('architecture: no production file names a retired payer type, and legacy-payer-type.ts is gone', () => {
+    const files = tsFiles(SRC).filter(isProduction);
+    expect(files.length).toBeGreaterThan(500);
+    // El código, en todo `src`; la prosa («tipo OTRO»), en los módulos de
+    // pagadores (fuera de ellos «OTRO paciente» es la palabra).
+    expect(offending(files, (line) => LEGACY_PAYER_CODE.test(line))).toEqual(
+      [],
     );
-    expect(files.length).toBeGreaterThan(20);
-    expect(offending(files, legacyPayerTypeHit)).toEqual([]);
+    expect(offending(payerProduction, legacyPayerTypeHit)).toEqual([]);
+    expect(
+      existsSync(
+        join(SRC, 'modules', 'payers', 'domain', 'legacy-payer-type.ts'),
+      ),
+    ).toBe(false);
   });
 
-  it('architecture: only legacy-payer-type.ts and the four payer repositories name the stored payer enum', () => {
-    const allowed = [LEGACY_PAYER_TYPE_FILE, ...PAYER_REPOSITORIES];
+  it('architecture: only the four payer repositories name the stored payer enum', () => {
+    const allowed = PAYER_REPOSITORIES;
     expect(PAYER_REPOSITORIES).toHaveLength(4);
     const files = tsFiles(SRC).filter(
       (file) => isProduction(file) && !allowed.includes(file),
@@ -503,14 +502,6 @@ describe('pagadores sin país (DX-326)', () => {
         'payer: { ...payer, relationship: null }',
       ].map(hits),
     ).toEqual([0, 0, 0, 0]);
-  });
-
-  it('legacy-payer-type.ts carries the G5.3 header', () => {
-    expect(
-      readFileSync(LEGACY_PAYER_TYPE_FILE, 'utf8')
-        .slice(0, 200)
-        .includes(R10_HEADER),
-    ).toBe(true);
   });
 
   it('the legacy payer type patterns catch each code and skip neutral text', () => {
@@ -578,38 +569,38 @@ describe('pagadores sin país (DX-326)', () => {
 });
 
 /**
- * DX-327 (spec §6.8, R1, R4, R5, R13, pre-flight M1): los tipos de documento
- * son genéricos. Los códigos anteriores y los nombres de un país viven solo en
- * `legacy-doc-type.ts`; el enum guardado lo nombran ese fichero y los tres
- * escritores de R5; hay un solo mapa de etiquetas y un solo resolvedor de
- * nombres. Además de la producción de `src` (`.ts`, y `.sql` y `.json`), se
- * recorren la demo (`prisma/demo/**`, datos y CSV), `prisma/seed*.ts`,
- * `schema.prisma` y el `README.md` (la ayuda del desarrollador, spec §4.9).
- * Las líneas se comparan plegadas (sin tildes) y sin distinguir mayúsculas:
- * «Cedula» y `'ti'` cuentan igual que «Cédula» y `'TI'`.
+ * DX-327 (spec §6.8, R1, R4, R13, pre-flight M1) y sin Colombia (DX-323): los
+ * tipos de documento son genéricos. Los códigos anteriores y los nombres de
+ * un país viven solo en `legacy-document-codes.ts` (lectores de JSON ya
+ * guardado y alias de los ficheros de importación); ningún fichero nombra el
+ * enum antiguo ni la columna congelada; hay un solo mapa de etiquetas y un
+ * solo resolvedor de nombres. Además de la producción de `src` (`.ts`, y
+ * `.sql` y `.json`), se recorren la demo (`prisma/demo/**`, datos y CSV),
+ * `prisma/seed*.ts`, `schema.prisma` y el `README.md` (la ayuda del
+ * desarrollador, spec §4.9). Las líneas se comparan plegadas (sin tildes) y
+ * sin distinguir mayúsculas: «Cedula» y `'ti'` cuentan igual que «Cédula» y
+ * `'TI'`.
  *
- * Fuera por construcción, y es a propósito: los tests (los `legacy …` nombran
- * los códigos anteriores; los vectores de hash fijan textos ya emitidos con
- * «CC …») y las migraciones (traducen los códigos guardados). Los literales
- * de los controles se arman por partes.
+ * Fuera por construcción, y es a propósito: los tests (los de migraciones
+ * nombran los códigos anteriores; los vectores de hash fijan textos ya
+ * emitidos con «CC …») y las migraciones (traducen los códigos guardados).
+ * Los literales de los controles se arman por partes.
  */
 const ROOT = join(SRC, '..');
 const PRISMA_DIR = join(ROOT, 'prisma');
 const PATIENTS_DOMAIN = join(SRC, 'modules', 'patients', 'domain');
-const LEGACY_DOC_TYPE_FILE = join(PATIENTS_DOMAIN, 'legacy-doc-type.ts');
+const LEGACY_DOCUMENT_CODES_FILE = join(
+  PATIENTS_DOMAIN,
+  'legacy-document-codes.ts',
+);
 const DOCUMENT_TYPE_FILE = join(PATIENTS_DOMAIN, 'document-type.ts');
 const DOCUMENT_TYPE_NAME_FILES = [
   'patients/domain/document-type.ts',
   'patients/domain/document-type-names.ts',
   'patients/infrastructure/repositories/prisma-document-type-names.repository.ts',
 ].map((path) => join(SRC, 'modules', ...path.split('/')));
-const DOC_TYPE_LEGACY_WRITERS = [
-  'patients/infrastructure/repositories/prisma-patient.repository.ts',
-  'patients/infrastructure/repositories/prisma-responsible-party.repository.ts',
-  'patient-imports/infrastructure/prisma-patient-import.repository.ts',
-].map((path) => join(SRC, 'modules', ...path.split('/')));
 const R13_HEADER =
-  'Excepción G5.3 (DX-334): tipos de documento anteriores a DX-327';
+  'Excepción G5.3 (DX-334): códigos de documento anteriores a DX-327';
 
 /** Todo fichero bajo `dir` (la demo trae CSV además de `.ts`). */
 function allFiles(dir: string): string[] {
@@ -674,28 +665,15 @@ const COUNTRY_DOC_ACRONYM = new RegExp(
   'i',
 );
 /**
- * Excepción hasta DX-019: la línea fiscal impresa del recibo («Razón social ·
- * NIT/NIF …»), la única línea que lo imprime. Sale de aquí con DX-019.
+ * El enum antiguo (`DocType`, hoy `LegacyDocumentCode`) o su columna
+ * (`docType` en SQL, hoy `legacyDocumentCode`), con cualquiera de los dos
+ * nombres: nadie los lee ni los escribe (migración 20261110130000).
  */
-const RECEIPT_FISCAL_LINE = {
-  file: join(
-    SRC,
-    'modules',
-    'payments',
-    'application',
-    'receipts',
-    'receipt-email-vars.ts',
-  ),
-  line: (text: string): boolean => /· NIT\/NIF \$\{clinic\.taxId\}`/.test(text),
-};
+const FROZEN_DOC_CODE =
+  /\bLegacyDocumentCode\b|\blegacyDocumentCode\b|"docType"|\$Enums\s*(?:\.\s*DocType\b|\[\s*['"]DocType['"]\s*\])|\{[^}]*\bDocType\b[^}]*\}\s*=\s*\$Enums\b/;
 /** `DocType` en un import de `@prisma/client` (también de varias líneas). */
 const PRISMA_DOC_TYPE_IMPORT =
   /import\s+(?:type\s+)?\{[^}]*\bDocType\b[^}]*\}\s*from\s*'@prisma\/client'/g;
-/** El enum guardado por su nombre en `$Enums`. */
-const PRISMA_DOC_TYPE_ENUM =
-  /\$Enums\s*(?:\.\s*DocType\b|\[\s*['"]DocType['"]\s*\])|\{[^}]*\bDocType\b[^}]*\}\s*=\s*\$Enums\b/;
-/** La columna antigua en SQL crudo (R4). */
-const LEGACY_DOC_TYPE_COLUMN = /"docType"/;
 const DOC_TYPE_LABEL_MAP =
   /\b(?:const|let)\s+DOC_TYPE_LABELS?\b|PASSPORT:\s*'Pasaporte'/;
 /** La demo: además, el enum por su nombre y una línea CSV con un código. */
@@ -709,35 +687,20 @@ const demoCountryDocumentHit = (line: string): boolean =>
   DEMO_COUNTRY_DOCUMENT.test(fold(line));
 /**
  * Un nombre largo de documento (spec §6.8). Sobre el código sin comentarios:
- * la cabecera G5.3 y la prosa llevan tildes. Las claves de sinónimo
+ * la cabecera G5.3 y la prosa llevan tildes. Las claves de alias
  * normalizadas (`tarjetadeidentidad`) no lo cumplen: van sin tildes ni
  * espacios, y las comprueba `isLegacyKeyLiteral`.
  */
 const LONG_DOCUMENT_NAME =
   /[Cc][ée]dula de|[Tt]arjeta de|[Ee]xtranjería|[ÁÉÍÓÚáéíóú]/;
-/** Literal de `legacy-doc-type.ts`: un código (`CC`, `PASSPORT`) o una clave normalizada. */
+/** Literal de `legacy-document-codes.ts`: un código (`CC`, `PASSPORT`) o una clave normalizada. */
 const isLegacyKeyLiteral = (literal: string): boolean =>
   /^(?:[A-Z_]+|[a-z0-9]+)$/.test(literal);
 /** Una línea que traduce un código y nombra la etiqueta a la vez. */
 const LEGACY_TRANSLATION =
-  /\b(?:docTypeFromCode|docTypeFromStored|resolveDocTypeInput)\s*\(|\bLEGACY_DOC_TYPES\b/;
+  /\b(?:docTypeFromCode|docTypeFromStored)\s*\(|\bIMPORT_DOC_TYPE_ALIASES\b/;
 const DOC_TYPE_NAME_RESOLUTION =
   /DOC_TYPE_LABEL\[|docTypeName(?:NationalId|Passport|ResidencePermit|TaxId|Other)\b/;
-/**
- * Un alta de paciente o responsable por Prisma (pre-flight M1, M3): la llamada
- * (`create`, `createMany`, `createManyAndReturn`, `upsert`) o el alta anidada
- * desde una relación (`patient: { create … }`, `responsibleParties: {
- * createMany … }`).
- */
-const PATIENT_CREATE =
-  /\b(?:patient|patientResponsibleParty)\.(?:create|createMany|createManyAndReturn|upsert)\s*\(|\b(?:patient|responsiblePatient|responsibleParties|responsibleFor)\s*:\s*\{/g;
-/** Un INSERT crudo en las dos tablas, hasta el `;` o el fin del literal. */
-const RAW_PATIENT_INSERT =
-  /INSERT\s+INTO\s+(?:public\.)?"?(?:patients|patient_responsible_parties)"?[\s(][^;`]*/gi;
-
-/** Línea sin su comentario (`//`, `/*`, ` *`); para `legacy-doc-type.ts`. */
-const codeOnly = (line: string): string =>
-  /^\s*(\/\/|\/?\*)/.test(line) ? '' : line.replace(/\s\/\/.*$/, '');
 
 const CLOSING: Record<string, string> = { '(': ')', '{': '}', '[': ']' };
 
@@ -756,61 +719,11 @@ function callArgument(text: string, start: number): string {
   return text.slice(start + 1);
 }
 
-/** Los valores de `create:`/`createMany:` dentro de `body` (con llaves). */
-function createValues(body: string): string[] {
-  return [...body.matchAll(/\bcreate(?:Many)?\s*:\s*[[{]/g)].map((match) =>
-    callArgument(body, match.index + match[0].length - 1),
-  );
-}
+/** Línea sin su comentario (`//`, `/*`, ` *`); para `legacy-document-codes.ts`. */
+const codeOnly = (line: string): string =>
+  /^\s*(\/\/|\/?\*)/.test(line) ? '' : line.replace(/\s\/\/.*$/, '');
 
-/**
- * Lo que da de alta cada forma: el argumento entero de `create*`; de `upsert`
- * y de una relación, solo sus `create` (el `update` puede cambiar el tipo
- * genérico solo, R5 es para los INSERT).
- */
-function createdData(match: RegExpExecArray, text: string): string[] {
-  const body = callArgument(text, match.index + match[0].length - 1);
-  if (/\.(?:create|createMany|createManyAndReturn)\s*\($/.test(match[0])) {
-    return [body];
-  }
-  return createValues(body);
-}
-
-/** Un alta con `documentType` y sin `docType`: el hueco OTHER (spec §3.3). */
-const writesDocumentTypeAlone = (argument: string): boolean =>
-  /\bdocumentType\b/.test(argument) && !/\bdocType\b/.test(argument);
-
-/**
- * Dónde empieza cada alta de paciente o responsable sin la pareja de R5, por
- * Prisma o por un INSERT crudo que nombra `"documentType"` sin `"docType"`.
- */
-function legacyPairHoles(text: string): number[] {
-  return [
-    ...[...text.matchAll(PATIENT_CREATE)].flatMap((match) =>
-      createdData(match, text).some(writesDocumentTypeAlone)
-        ? [match.index]
-        : [],
-    ),
-    ...[...text.matchAll(RAW_PATIENT_INSERT)].flatMap((match) =>
-      /"documentType"/.test(match[0]) && !/"docType"/.test(match[0])
-        ? [match.index]
-        : [],
-    ),
-  ];
-}
-
-/** `fichero:línea` de cada hueco de `legacyPairHoles`. */
-function patientCreatesWithoutLegacyPair(files: string[]): string[] {
-  return files.flatMap((file) => {
-    const text = readFileSync(file, 'utf8');
-    return legacyPairHoles(text).map(
-      (index) =>
-        `${relative(SRC, file)}:${text.slice(0, index).split('\n').length}`,
-    );
-  });
-}
-
-describe('tipos de documento genéricos (DX-327)', () => {
+describe('tipos de documento genéricos (DX-327, DX-323)', () => {
   const production = tsFiles(SRC).filter(isProduction);
 
   /** Lo que recorren las dos guardas de nombres (M2). */
@@ -822,46 +735,36 @@ describe('tipos de documento genéricos (DX-327)', () => {
     join(ROOT, 'README.md'),
   ];
 
-  it('architecture: no legacy document type or name outside legacy-doc-type.ts', () => {
-    const files = scanned().filter((file) => file !== LEGACY_DOC_TYPE_FILE);
+  it('architecture: no legacy document type or name outside legacy-document-codes.ts', () => {
+    const files = scanned().filter(
+      (file) => file !== LEGACY_DOCUMENT_CODES_FILE,
+    );
     expect(files.length).toBeGreaterThan(500);
     expect(productionDataFiles().length).toBeGreaterThan(0);
     expect(offending(files, legacyDocTypeHit)).toEqual([]);
   });
 
-  it("architecture: no other country's document acronym outside legacy-doc-type.ts", () => {
-    // Excepciones, una por una: `legacy-doc-type.ts` (sinónimos de los
-    // archivos de importación de siempre, R13) y la línea fiscal del recibo
-    // hasta DX-019. Los tests y las migraciones no se recorren (ver arriba).
-    const files = scanned().filter((file) => file !== LEGACY_DOC_TYPE_FILE);
-    const fiscal = readFileSync(RECEIPT_FISCAL_LINE.file, 'utf8')
-      .split('\n')
-      .filter(RECEIPT_FISCAL_LINE.line);
-    expect(fiscal).toHaveLength(1);
+  it("architecture: no other country's document acronym outside legacy-document-codes.ts", () => {
+    // Única excepción: `legacy-document-codes.ts` (alias de los ficheros de
+    // importación, R13). Los tests y las migraciones no se recorren.
+    const files = scanned().filter(
+      (file) => file !== LEGACY_DOCUMENT_CODES_FILE,
+    );
     expect(
-      offending(
-        files,
-        (line) =>
-          COUNTRY_DOC_ACRONYM.test(fold(line)) &&
-          !RECEIPT_FISCAL_LINE.line(line),
-      ),
+      offending(files, (line) => COUNTRY_DOC_ACRONYM.test(fold(line))),
     ).toEqual([]);
   });
 
-  it('architecture: only legacy-doc-type.ts and the three insert writers name the stored legacy enum', () => {
-    expect(DOC_TYPE_LEGACY_WRITERS).toHaveLength(3);
-    const allowed = [LEGACY_DOC_TYPE_FILE, ...DOC_TYPE_LEGACY_WRITERS];
-    const files = production.filter((file) => !allowed.includes(file));
+  it('architecture: no production, demo or seed file names the frozen document code, its enum or its column', () => {
+    const files = [
+      ...production,
+      ...demoFiles().filter((file) => file.endsWith('.ts')),
+    ];
     expect([
-      ...offending(files, (line) => PRISMA_DOC_TYPE_ENUM.test(line)),
+      ...offending(files, (line) => FROZEN_DOC_CODE.test(line)),
       ...offendingMatches(files, PRISMA_DOC_TYPE_IMPORT, () => true),
     ]).toEqual([]);
-  });
-
-  it('architecture: no raw SQL names the legacy docType column', () => {
-    expect(
-      offending(production, (line) => LEGACY_DOC_TYPE_COLUMN.test(line)),
-    ).toEqual([]);
+    expect(existsSync(join(PATIENTS_DOMAIN, 'legacy-doc-type.ts'))).toBe(false);
   });
 
   it('architecture: one document label map', () => {
@@ -874,9 +777,9 @@ describe('tipos de documento genéricos (DX-327)', () => {
     ).toEqual([]);
   });
 
-  it('legacy-doc-type.ts carries the G5.3 header', () => {
+  it('legacy-document-codes.ts carries the G5.3 header', () => {
     expect(
-      readFileSync(LEGACY_DOC_TYPE_FILE, 'utf8')
+      readFileSync(LEGACY_DOCUMENT_CODES_FILE, 'utf8')
         .slice(0, 200)
         .includes(R13_HEADER),
     ).toBe(true);
@@ -889,18 +792,20 @@ describe('tipos de documento genéricos (DX-327)', () => {
   });
 
   it('architecture: no code derives a document label from a legacy code', () => {
-    const legacyCode = readFileSync(LEGACY_DOC_TYPE_FILE, 'utf8')
+    const legacyCode = readFileSync(LEGACY_DOCUMENT_CODES_FILE, 'utf8')
       .split('\n')
       .map(codeOnly);
     expect(
       legacyCode.flatMap((line, i) =>
-        LONG_DOCUMENT_NAME.test(line) ? [`legacy-doc-type.ts:${i + 1}`] : [],
+        LONG_DOCUMENT_NAME.test(line)
+          ? [`legacy-document-codes.ts:${i + 1}`]
+          : [],
       ),
     ).toEqual([]);
     const literals = legacyCode
       .filter((line) => !/^\s*import\b|\bfrom\s+'/.test(line))
       .flatMap((line) => [...line.matchAll(/'([^']*)'/g)].map((m) => m[1]));
-    expect(literals.length).toBeGreaterThan(30);
+    expect(literals.length).toBeGreaterThan(20);
     expect(literals.filter((literal) => !isLegacyKeyLiteral(literal))).toEqual(
       [],
     );
@@ -911,24 +816,6 @@ describe('tipos de documento genéricos (DX-327)', () => {
           line.includes('docTypeLabel') && LEGACY_TRANSLATION.test(line),
       ),
     ).toEqual([]);
-  });
-
-  it('nothing creates a patient with documentType and no docType', () => {
-    // Producción, la demo y los seeds además de los tests (M3): un cuarto
-    // escritor que mande solo `documentType: 'OTHER'` acabaría como CC por el
-    // DEFAULT anterior y el paso 3 del trigger, sin error.
-    const files = [
-      ...production,
-      ...demoFiles().filter((file) => file.endsWith('.ts')),
-      ...tsFiles(join(ROOT, 'test')),
-      ...tsFiles(SRC).filter((file) => file.endsWith('.spec.ts')),
-    ];
-    expect(files.length).toBeGreaterThan(800);
-    const creates = files.flatMap((file) => [
-      ...readFileSync(file, 'utf8').matchAll(PATIENT_CREATE),
-    ]);
-    expect(creates.length).toBeGreaterThan(100);
-    expect(patientCreatesWithoutLegacyPair(files)).toEqual([]);
   });
 
   it('architecture: one document type name resolver', () => {
@@ -943,24 +830,26 @@ describe('tipos de documento genéricos (DX-327)', () => {
   it('the document type patterns catch each legacy form and skip neutral text', () => {
     const caught = (line: string): boolean =>
       legacyDocTypeHit(line) ||
-      LEGACY_DOC_TYPE_COLUMN.test(line) ||
-      PRISMA_DOC_TYPE_ENUM.test(line) ||
+      FROZEN_DOC_CODE.test(line) ||
       [...line.matchAll(PRISMA_DOC_TYPE_IMPORT)].length > 0;
     for (const line of [
       "docType: 'C" + "C',",
       'DocType.' + 'TI',
-      'C\u00e9dula de ciudadan\u00eda',
+      'Cédula de ciudadanía',
       // M1: sin tilde, en mayúsculas o con la tilde descompuesta.
       "label: 'Ced" + "ula'",
-      'C\u00c9DULA',
-      'Ce\u0301dula',
+      'CÉDULA',
+      'Cédula',
       "if (code === 't" + "i')",
       'case "c' + 'e":',
-      'EXTRANJER\u00cdA',
+      'EXTRANJERÍA',
       'con marcado ' + 'CE',
       'INVI' + 'MA 2019',
       'Tarjeta' + ' de identidad',
       'SELECT p."doc' + 'Type" FROM patients p',
+      'SELECT "legacy' + 'DocumentCode" FROM patients',
+      'select: { legacy' + 'DocumentCode: true }',
+      'import { Legacy' + "DocumentCode } from '@prisma/client';",
       'import { Doc' + "Type } from '@prisma/client';",
       'import {\n  Doc' + 'Type,\n  Prisma,\n} from ' + "'@prisma/client';",
       '$Enums.Doc' + 'Type',
@@ -972,7 +861,6 @@ describe('tipos de documento genéricos (DX-327)', () => {
       'docType: dto.docType,',
       "enumName: 'DocType',",
       "import { DocumentType } from '@prisma/client';",
-      "import type { LegacyDocType } from './legacy-doc-type';",
       'Documento nacional 123',
       'const ticket = 1;',
       'proceder con la cita',
@@ -1021,15 +909,19 @@ describe('tipos de documento genéricos (DX-327)', () => {
       });
     }
     expect(
-      RECEIPT_FISCAL_LINE.line(
-        '      : `${clinic.legalName} · NIT/NIF ${clinic.taxId}`,',
+      COUNTRY_DOC_ACRONYM.test(
+        fold(
+          '      : `${clinic.legalName} · NI' + 'T/NI' + 'F ${clinic.taxId}`,',
+        ),
       ),
     ).toBe(true);
-    expect(RECEIPT_FISCAL_LINE.line('// NIT/NIF de la cl\u00ednica')).toBe(
-      false,
-    );
+    expect(
+      COUNTRY_DOC_ACRONYM.test(
+        fold('      : `${clinic.legalName} · Id. fiscal ${clinic.taxId}`,'),
+      ),
+    ).toBe(false);
     expect(LONG_DOCUMENT_NAME.test('Tarjeta' + ' de identidad')).toBe(true);
-    expect(LONG_DOCUMENT_NAME.test('Extranjer\u00eda')).toBe(true);
+    expect(LONG_DOCUMENT_NAME.test('Extranjería')).toBe(true);
     expect(isLegacyKeyLiteral('tarjetade' + 'identidad')).toBe(true);
     expect(isLegacyKeyLiteral('Tarjeta de ' + 'identidad')).toBe(false);
     expect(
@@ -1037,54 +929,6 @@ describe('tipos de documento genéricos (DX-327)', () => {
     ).toBe(true);
     expect(DOC_TYPE_NAME_RESOLUTION.test('DOC_TYPE_LABEL[type]')).toBe(true);
     expect(DOC_TYPE_NAME_RESOLUTION.test('DOC_TYPE_LABEL_MAX')).toBe(false);
-    const create = 'raw.patient' + '.create';
-    expect(
-      writesDocumentTypeAlone(
-        callArgument(
-          `${create}({ data: { documentType: 'OTHER', docNumber: '1' } })`,
-          create.length,
-        ),
-      ),
-    ).toBe(true);
-    expect(
-      writesDocumentTypeAlone(
-        callArgument(
-          `${create}({ data: { documentType: 'OTHER', docType: legacyStoredDocType('OTHER') } })`,
-          create.length,
-        ),
-      ),
-    ).toBe(false);
-    // M3: cada forma de alta con solo `documentType` es un hueco; con la
-    // pareja, un helper o solo en el `update`, no.
-    // Armados por partes: esta guarda también se recorre a sí misma.
-    const P = 'pati' + 'ent';
-    const prisma = `tx.${P}`;
-    for (const snippet of [
-      `${prisma}.createMany({ data: [{ documentType: 'OTHER' }] })`,
-      `${prisma}.createManyAndReturn({ data: rows.map(() => ({ documentType: 'OTHER' })) })`,
-      `${prisma}.upsert({ where: { id }, update: {}, create: { documentType: 'OTHER' } })`,
-      `tx.appointment.create({ data: { ${P}: { create: { documentType: 'OTHER' } } } })`,
-      `${prisma}.update({ where: { id }, data: { responsible${'Parties'}: { createMany: { data: [{ documentType: 'OTHER' }] } } } })`,
-      `INSERT INTO "${P}s" ("id", "documentType") VALUES ($1, 'OTHER')`,
-      `insert into ${P}_responsible_parties ("id", "documentType") values ($1, $2)`,
-    ]) {
-      expect({ snippet, holes: legacyPairHoles(snippet).length }).toEqual({
-        snippet,
-        holes: 1,
-      });
-    }
-    for (const snippet of [
-      `${prisma}.createManyAndReturn({ data: rows.map(importedPatientData) })`,
-      `${prisma}.upsert({ where: { id }, update: { documentType: 'OTHER' }, create: { documentType: 'OTHER', docType: 'OTHER' } })`,
-      `tx.appointment.findMany({ where: { ${P}: { documentType: 'OTHER' } } })`,
-      `INSERT INTO "${P}s" ("id", "docType", "documentType") VALUES ($1, $2, $3)`,
-      `INSERT INTO "${P}s" ("id", "firstName") VALUES ($1, $2)`,
-    ]) {
-      expect({ snippet, holes: legacyPairHoles(snippet).length }).toEqual({
-        snippet,
-        holes: 0,
-      });
-    }
   });
 });
 
@@ -1840,6 +1684,309 @@ describe('textos sin ejemplos de un país (DX-368)', () => {
       `'Incluye el indicativo del país.'`,
     ]) {
       expect({ line, caught: countryExampleHit(line) }).toEqual({
+        line,
+        caught: false,
+      });
+    }
+  });
+});
+
+/**
+ * DX-325: ningún texto de producción ni la demo cita una ley, una norma con
+ * número o una autoridad de datos o sanitaria. Los comentarios quedan fuera:
+ * son de DX-371. El nombre `AUTHORITY` ya lo usa DX-327 en este módulo.
+ */
+const NUM = String.raw`(?:n\.?[º°o]\.?\s*|no\.\s*)?`;
+/** Regímenes por su sigla y normas con número, en español, inglés y portugués. */
+const LAW_CITATION = new RegExp(
+  String.raw`\b(?:h[aá]beas\s+data|lgpd|gdpr|rgpd|hipaa|ccpa|lopdgdd|lopd|lfpdppp|pipeda)\b` +
+    String.raw`|\b(?:ley|decreto|reglamento|real\s+decreto|law|lei)\s+(?:org[aá]nica\s+|estatutaria\s+|\(ue\)\s+)?${NUM}\d` +
+    String.raw`|\bresoluci[oó]n\s+${NUM}\d+\s*(?:de\s+\d{4}|\/\d{4})` +
+    String.raw`|\bley\s+de\s+protecci[oó]n\s+de\s+datos|\bregulation\s+\(eu\)|\bart[ií]culo\s+\d` +
+    String.raw`|\b(?:Res|[Aa]rt)\.\s*\d|\bDec\.\s*\d{3,}`,
+  'i',
+);
+/** Autoridades de datos o sanitarias por su sigla o nombre; sensible a mayúsculas. */
+const LAW_AUTHORITY = new RegExp(
+  String.raw`\b(?:SIC|IN` +
+    String.raw`VIMA|AEPD|AEMPS|ANMAT|COFEPRIS|ANVISA|DIGEMID|INHRR|SACS|ANPD|CNIL)\b` +
+    String.raw`|\bRD\s*\d|Superintendencia`,
+);
+const citesLaw = (line: string): boolean =>
+  LAW_CITATION.test(line) || LAW_AUTHORITY.test(line);
+
+describe('textos sin leyes ni autoridades (DX-325)', () => {
+  const citesLawInCode = (line: string): boolean =>
+    !isComment(line) && citesLaw(line);
+
+  it('architecture: no production text or seed cites a law or an authority', () => {
+    const files = [
+      ...tsFiles(SRC).filter(isProduction),
+      join(PRISMA_DIR, 'seed.ts'),
+      // La demo (`prisma/demo/**`, `seed-demo.ts`) la neutraliza otra rama
+      // (chore/demo-neutral); se suma a esta lista cuando llegue a main.
+    ];
+    expect(files.length).toBeGreaterThan(500);
+    expect(files.map((file) => relative(ROOT, file))).toEqual(
+      expect.arrayContaining([
+        join(
+          'src',
+          'modules',
+          'data-consents',
+          'application',
+          'use-cases',
+          'publish-privacy-policy.use-case.ts',
+        ),
+        join('prisma', 'seed.ts'),
+      ]),
+    );
+    expect(offending(files, citesLawInCode)).toEqual([]);
+  });
+
+  it('the law patterns catch each citation and skip neutral text', () => {
+    for (const line of [
+      `'${'De' + 'c. 1377'} de 2013, art. 6'`,
+      `'${'Le' + 'y 1581'} de 2012'`,
+      `'${'Le' + 'y No. 1581'}'`,
+      `'${'Re' + 's. 839'}/2017'`,
+      `'${'Re' + 's. 4816'}/2008'`,
+      `'${'R' + 'D 192'}/2023'`,
+      `'${'Reglamento' + ' (UE) 2017'}/745'`,
+      `'${'Regulation' + ' (EU)'} 2016/679'`,
+      `'${'Superinten' + 'dencia'} de Industria y Comercio'`,
+      `'ante la ${'S' + 'IC'}'`,
+      `'Registro ${'IN' + 'VIMA'}'`,
+      `'${'Real Decreto' + ' 1718'}/2010'`,
+      `'${'Resolución' + ' 1995'} de 1999'`,
+      `'${'Resolución' + ' No. 5'} de 2020'`,
+      `'${'artículo' + ' 6'}'`,
+      `'${'Ley de Protección' + ' de Datos'} Personales'`,
+      `'${'Law' + ' No. 25'}.326'`,
+      `'${'Lei' + ' 13'}.709'`,
+      `'registro ${'IN' + 'HRR'}'`,
+      `'permiso ${'SA' + 'CS'}'`,
+      `'${'AN' + 'PD'}'`,
+      `'${'CN' + 'IL'}'`,
+    ]) {
+      expect({ line, caught: citesLawInCode(line) }).toEqual({
+        line,
+        caught: true,
+      });
+    }
+    for (const line of [
+      `'la resolución de precios del plan'`,
+      `'Resolución del precio por convenio'`,
+      `'Resolución 1920×1080'`,
+      `'Resolución 300 ppp'`,
+      `'Dec. 31'`,
+      `'Leyenda del odontograma'`,
+      `'ley de oferta y demanda'`,
+      `'(sic)'`,
+      `'basic'`,
+      `'artículos de limpieza'`,
+      `// ${'Le' + 'y 1581'}`,
+    ]) {
+      expect({ line, caught: citesLawInCode(line) }).toEqual({
+        line,
+        caught: false,
+      });
+    }
+  });
+});
+
+/**
+ * DX-323/DX-325: Dentalix es un producto mundial; ningún país es el de por
+ * defecto. Ni el código de producción ni sus comentarios, el esquema o el seed
+ * de referencia nombran Colombia, sus leyes y autoridades, su zona, locale o
+ * prefijo, sus aseguradoras y siglas sanitarias o fiscales, ni sus ciudades.
+ * A diferencia de la guarda de leyes (DX-325), aquí los comentarios también
+ * cuentan: un comentario que justifica el código con una ley de un país es lo
+ * que vuelve a colar la regla. Los literales se arman por partes para que este
+ * fichero no se cite a sí mismo.
+ */
+const COLOMBIA_TERMS: ReadonlyArray<[string, RegExp]> = [
+  ['país', new RegExp('colombi', 'i')],
+  [
+    'zona o ciudad',
+    new RegExp(
+      'bogot[aá]|medell[ií]n|barranquilla|antioquia|cundinamarca',
+      'i',
+    ),
+  ],
+  ['locale', new RegExp('\\bes-' + 'CO\\b')],
+  ['prefijo', new RegExp('(?<![\\w+])\\+' + '57\\b')],
+  [
+    'ley o autoridad',
+    new RegExp(
+      [
+        '\\b15' + '81\\b',
+        '\\b13' + '77\\b',
+        'superinten' + 'dencia',
+        '83' + '9/2017',
+        '19' + '95/1999',
+        '48' + '16/2008',
+        'decreto\\s+7' + '80',
+      ].join('|'),
+      'i',
+    ),
+  ],
+  [
+    'aseguradora',
+    new RegExp(
+      '\\b(?:' +
+        [
+          'fami' + 'sanar',
+          'sani' + 'tas',
+          'nueva ' + 'eps',
+          'su' + 'ra',
+          'compen' + 'sar',
+          'coo' + 'meva',
+          'salud ' + 'total',
+        ].join('|') +
+        ')\\b',
+      'i',
+    ),
+  ],
+  [
+    'sigla nacional',
+    new RegExp(
+      '\\b(?:' +
+        [
+          'EP' + 'S',
+          'RI' + 'PS',
+          'CU' + 'PS',
+          'RE' + 'PS',
+          'DI' + 'AN',
+          'NI' + 'T',
+        ].join('|') +
+        ')\\b',
+    ),
+  ],
+  ['figura legal de un país', new RegExp('acudi' + 'ente', 'i')],
+  [
+    'identificador interno',
+    new RegExp(
+      '\\b(?:MUTUA' +
+        '_ES|PREPAGADA' +
+        '_CO|EPS' +
+        '_CO)\\b|[Ii]nsurer' +
+        'Eps',
+    ),
+  ],
+  [
+    'valor por defecto',
+    new RegExp('@default\\("(?:CO' + 'P|America/' + 'Bogota|es-' + 'CO)"\\)'),
+  ],
+];
+
+function colombiaHit(line: string): string | null {
+  const hit = COLOMBIA_TERMS.find(([, pattern]) => pattern.test(line));
+  return hit ? hit[0] : null;
+}
+
+/**
+ * Los tests que prueban la migración de datos antiguos tienen que nombrar los
+ * valores que traducen (DX-153, DX-326 y la propia 20261110130000). Ninguno
+ * más.
+ */
+const OLD_IDENTIFIER_TESTS = [
+  'test/payer-type-migration.int-spec.ts',
+  'test/sin-colombia-identifiers-migration.int-spec.ts',
+  'test/owner-nosu/migrations-data.owner-spec.ts',
+  'test/patient-coverages.int-spec.ts',
+].map((path) => join(ROOT, ...path.split('/')));
+
+describe('sin Colombia (DX-323, DX-325)', () => {
+  it('architecture: no test, README or doc names a Colombian internal identifier, outside the migration tests', () => {
+    const files = [
+      ...tsFiles(join(ROOT, 'test')),
+      ...tsFiles(SRC).filter((file) => file.endsWith('.spec.ts')),
+      join(ROOT, 'README.md'),
+      ...allFiles(join(ROOT, 'docs')),
+    ].filter(
+      (file) =>
+        !OLD_IDENTIFIER_TESTS.includes(file) &&
+        file !== join(SRC, 'architecture', 'no-location-fallbacks.spec.ts'),
+    );
+    expect(files.length).toBeGreaterThan(500);
+    for (const file of OLD_IDENTIFIER_TESTS)
+      expect(existsSync(file)).toBe(true);
+    expect(
+      offending(files, (line) => colombiaHit(line) === 'identificador interno'),
+    ).toEqual([]);
+  });
+
+  it('architecture: no production line, comment, schema or reference seed is Colombian', () => {
+    const files = [
+      ...tsFiles(SRC).filter(
+        (file) =>
+          isProduction(file) &&
+          // Lista generada de TODAS las zonas IANA: referencia mundial.
+          file !== IANA_ZONE_NAMES_FILE,
+      ),
+      join(PRISMA_DIR, 'schema.prisma'),
+      join(PRISMA_DIR, 'seed.ts'),
+    ];
+    expect(files.length).toBeGreaterThan(500);
+    const hits = files.flatMap((file) =>
+      readFileSync(file, 'utf8')
+        .split('\n')
+        .flatMap((line, i) => {
+          const kind = colombiaHit(line);
+          return kind ? [`${relative(ROOT, file)}:${i + 1} (${kind})`] : [];
+        }),
+    );
+    expect(hits).toEqual([]);
+  });
+
+  it('the Colombia patterns catch each retired form and skip neutral text', () => {
+    for (const line of [
+      `// ${'Colom' + 'bia'} (UTC-5)`,
+      `  @ApiProperty({ example: 'America/${'Bogo' + 'ta'}' })`,
+      ` * 20:00 en ${'Bogo' + 'tá'}`,
+      `    example: '${'es-' + 'CO'}',`,
+      `  phone: '+${'57'} 300 000 0000',`,
+      ` * (${'Ley ' + '1581'} / RGPD)`,
+      ` * (${'Dec. ' + '1377'}, art. 6)`,
+      ` * ${'Res. ' + '839'}/2017`,
+      ` * ${'Res. ' + '1995'}/1999 art. 18`,
+      `  @ApiProperty({ example: 'Convenio ${'Su' + 'ra'} ${'EP' + 'S'}' })`,
+      `'${'Fami' + 'sanar'}'`,
+      `'el código ${'RE' + 'PS'} de la sede'`,
+      `  : \`\${clinic.legalName} · ${'NI' + 'T'}/NIF \${clinic.taxId}\``,
+      `// el ${'acudi' + 'ente'} se gestiona como responsable`,
+      `  timezone String @default("America/${'Bogo' + 'ta'}")`,
+      `  currency String @default("${'CO' + 'P'}")`,
+      `'${'medel' + 'lín'}'`,
+      `  ${'EPS' + '_CO'}`,
+      `type: '${'PREPAGADA' + '_CO'}'`,
+      `${'MUTUA' + '_ES'},`,
+      `  migratedFrom${'Insurer' + 'Eps'}: true,`,
+      `UPDATE patients SET "${'insurer' + 'Eps'}" = 'x'`,
+    ]) {
+      expect({ line, caught: colombiaHit(line) !== null }).toEqual({
+        line,
+        caught: true,
+      });
+    }
+    for (const line of [
+      `  @ApiProperty({ example: 'UTC' })`,
+      `    example: 'es',`,
+      `const ZERO = ['COP', 'CLP', 'JPY'];`,
+      `  'nit',`,
+      `  PUBLIC_SYSTEM`,
+      `  migratedFromLegacyInsurer: true,`,
+      `const steps = ['EPSILON'];`,
+      `  repsHabilitationCode?: never;`,
+      `  : \`\${clinic.legalName} · Id. fiscal \${clinic.taxId}\``,
+      ` * 20:00 en una sede a UTC−5`,
+      `'Tutor legal'`,
+      `  timezone String @default("UTC")`,
+      `'+00 000 000 0001'`,
+      `'surable'`,
+      `const steps = 3;`,
+    ]) {
+      expect({ line, caught: colombiaHit(line) !== null }).toEqual({
         line,
         caught: false,
       });

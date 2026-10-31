@@ -1,8 +1,4 @@
-/**
- * Excepción G5.3 (DX-334): tipos de pagador anteriores a DX-326.
- *
- * El pagador de un convenio llega con su tipo genérico (spec R4).
- */
+/** El pagador de un convenio llega con su tipo genérico (DX-326, spec R4). */
 import {
   mapToEntity,
   type PrismaAgreement,
@@ -14,7 +10,7 @@ function row(type: PrismaAgreement['payer']['type']): PrismaAgreement {
   return {
     id: 'agreement-1',
     tenantId: 'tenant-1',
-    name: 'Convenio Sura',
+    name: 'Convenio Surco',
     payerId: 'payer-1',
     kind: 'PERCENT_DISCOUNT',
     percent: null,
@@ -29,19 +25,19 @@ function row(type: PrismaAgreement['payer']['type']): PrismaAgreement {
     createdAt: AT,
     updatedAt: AT,
     deletedAt: null,
-    payer: { id: 'payer-1', name: 'Sura EPS', type },
+    payer: { id: 'payer-1', name: 'Surco Salud', type },
     priceList: null,
     _count: { assignments: 0 },
   };
 }
 
-describe('mapper de convenios (DX-326, fase 1)', () => {
-  it('legacy code in an agreement row maps to its generic type', () => {
-    expect(mapToEntity(row('EPS_CO')).payer).toEqual({
+describe('mapper de convenios (DX-326)', () => {
+  it('the payer of an agreement row keeps its generic type', () => {
+    expect(mapToEntity(row('PUBLIC_SYSTEM')).payer).toEqual({
       id: 'payer-1',
-      name: 'Sura EPS',
+      name: 'Surco Salud',
       type: 'PUBLIC_SYSTEM',
     });
-    expect(mapToEntity(row('OTRO')).payer.type).toBe('OTHER');
+    expect(mapToEntity(row('OTHER')).payer.type).toBe('OTHER');
   });
 });

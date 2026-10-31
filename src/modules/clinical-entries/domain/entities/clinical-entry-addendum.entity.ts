@@ -1,5 +1,6 @@
 /**
- * Adenda (nota aclaratoria) de una evolución — DX-038, Res. 1995/1999 art. 18.
+ * Adenda (nota aclaratoria) de una evolución — DX-038: la evolución original nunca se
+ * reescribe; la corrección queda al lado, con autor y fecha.
  *
  * Corrige un asiento de la historia clínica SIN tocarlo: el original queda
  * intacto y la adenda se lista debajo, con su motivo, su autor y la fecha en

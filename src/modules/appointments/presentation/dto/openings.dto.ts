@@ -63,7 +63,7 @@ export class OpeningDto {
 }
 
 export class OpeningsDto {
-  @ApiProperty({ example: 'America/Bogota' })
+  @ApiProperty({ example: 'UTC' })
   timeZone!: string;
 
   @ApiProperty()

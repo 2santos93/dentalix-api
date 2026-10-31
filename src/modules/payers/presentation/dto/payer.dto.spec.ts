@@ -18,32 +18,20 @@ describe('DTOs de pagadores (DX-153)', () => {
   it.each(PAYER_TYPES)(
     'type accepts the five generic types (%s)',
     async (type) => {
-      expect(await messages(CreatePayerDto, { name: 'Sura', type })).toEqual(
+      expect(await messages(CreatePayerDto, { name: 'Surco', type })).toEqual(
         [],
       );
       expect(await messages(UpdatePayerDto, { type })).toEqual([]);
     },
   );
 
-  it('legacy type codes in the body become their generic type', async () => {
-    // Excepción G5.3 (DX-334): tipos de pagador anteriores a DX-326.
-    const legacy = {
-      MUTUA_ES: 'INSURER',
-      PREPAGADA_CO: 'PREPAID_PLAN',
-      EPS_CO: 'PUBLIC_SYSTEM',
-      EMPRESA: 'EMPLOYER',
-      OTRO: 'OTHER',
-    };
-    for (const [code, generic] of Object.entries(legacy)) {
-      const create = plainToInstance(CreatePayerDto, {
-        name: 'Sura',
-        type: code,
-      });
-      expect(await validate(create)).toEqual([]);
-      expect(create.type).toBe(generic);
-      const update = plainToInstance(UpdatePayerDto, { type: code });
-      expect(await validate(update)).toEqual([]);
-      expect(update.type).toBe(generic);
+  it('a retired type code in the body is 400, not translated', async () => {
+    // Desde la migración 20261110130000 solo existen los cinco genéricos.
+    for (const type of ['OTRO', 'EMPRESA']) {
+      expect(await messages(CreatePayerDto, { name: 'Surco', type })).toEqual([
+        'El tipo de pagador debe ser uno de: INSURER, PREPAID_PLAN, PUBLIC_SYSTEM, EMPLOYER, OTHER.',
+      ]);
+      expect((await messages(UpdatePayerDto, { type })).length).toBe(1);
     }
   });
 
@@ -56,7 +44,7 @@ describe('DTOs de pagadores (DX-153)', () => {
 
   it('an unknown type is 400 with the generic list', async () => {
     for (const type of ['XX', 'constructor', '']) {
-      const out = await messages(CreatePayerDto, { name: 'Sura', type });
+      const out = await messages(CreatePayerDto, { name: 'Surco', type });
       expect(out).toEqual([
         'El tipo de pagador debe ser uno de: INSURER, PREPAID_PLAN, PUBLIC_SYSTEM, EMPLOYER, OTHER.',
       ]);

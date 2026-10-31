@@ -161,8 +161,8 @@ describe('Rebaja de convenio en el informe de descuentos (e2e, SEC-047)', () => 
       color: '#2A2B3C',
       defaultPrice: 2000000,
     });
-    const sura = await create('/payers', {
-      name: 'Sura EPS',
+    const surco = await create('/payers', {
+      name: 'Surco Salud',
       type: 'PUBLIC_SYSTEM',
     });
     const cortesia = await create('/payers', {
@@ -170,8 +170,8 @@ describe('Rebaja de convenio en el informe de descuentos (e2e, SEC-047)', () => 
       type: 'OTHER',
     });
     const suraAgreement = await create('/agreements', {
-      name: 'Sura EPS −25 %',
-      payerId: sura,
+      name: 'Surco Salud −25 %',
+      payerId: surco,
       kind: 'PERCENT_DISCOUNT',
       percent: 25,
     });
@@ -182,12 +182,12 @@ describe('Rebaja de convenio en el informe de descuentos (e2e, SEC-047)', () => 
       percent: 100,
     });
 
-    // Recepción registra la cobertura de Sura, el ADMIN la verifica (SEC-049)
+    // Recepción registra la cobertura de Surco, el ADMIN la verifica (SEC-049)
     // y recepción asigna el convenio con ella.
-    const suraPatient = await createPatient('Sura');
+    const suraPatient = await createPatient('Surco');
     const coverageId = await create(
       `/patients/${suraPatient}/coverages`,
-      { payerId: sura, memberNumber: '1020304050' },
+      { payerId: surco, memberNumber: '1020304050' },
       reception.token,
     );
     await as(clinicA)
@@ -224,11 +224,11 @@ describe('Rebaja de convenio en el informe de descuentos (e2e, SEC-047)', () => 
 
   it('el ítem resuelto por convenio aparece con su rebaja, quién asignó el convenio y quién creó el ítem', async () => {
     const out = await report(clinicA);
-    const sura = out.items.find((i) => i.itemId === suraItem);
-    expect(sura).toMatchObject({
-      patientName: 'Sura Convenio',
+    const surco = out.items.find((i) => i.itemId === suraItem);
+    expect(surco).toMatchObject({
+      patientName: 'Surco Convenio',
       priceSource: 'AGREEMENT_PERCENT',
-      agreementName: 'Sura EPS −25 %',
+      agreementName: 'Surco Salud −25 %',
       basePrice: 2000000,
       catalogPrice: 1500000,
       price: 1500000,
@@ -299,12 +299,14 @@ describe('Rebaja de convenio en el informe de descuentos (e2e, SEC-047)', () => 
     expect(lines[0]).toContain(
       'Convenio,Precio sin convenio,Rebaja por convenio,Convenio asignado por,Ítem creado por',
     );
-    const sura = lines.find((l) => l.includes('Sura EPS −25 %'));
-    expect(sura).toContain(
-      '"Sura EPS −25 %",2000000,500000,"Miembro RECEPTION","Miembro DENTIST"',
+    const surco = lines.find((l) => l.includes('Surco Salud −25 %'));
+    expect(surco).toContain(
+      '"Surco Salud −25 %",2000000,500000,"Miembro RECEPTION","Miembro DENTIST"',
     );
     // B5: motivo «Convenio …» y el autor real en «Dado por».
-    expect(sura).toContain('"Convenio Sura EPS −25 %","","Miembro RECEPTION"');
+    expect(surco).toContain(
+      '"Convenio Surco Salud −25 %","","Miembro RECEPTION"',
+    );
   });
 
   it('otra clínica no ve esas rebajas', async () => {
@@ -356,7 +358,7 @@ describe('Rebaja de convenio en el informe de descuentos (e2e, SEC-047)', () => 
       },
     ]);
 
-    // Otro ítem solo de convenio para el paciente de Sura.
+    // Otro ítem solo de convenio para el paciente de Surco.
     const suraPatient = await raw.treatmentPlanItem.findUniqueOrThrow({
       where: { id: suraItem },
       select: { patientId: true },

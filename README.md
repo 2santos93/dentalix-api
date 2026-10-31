@@ -683,7 +683,7 @@ UPDATE … WHERE` no en espera) y el login correcto lo borra después. Si se
   «sin alertas»), `alerts` (códigos de las banderas derivadas en el orden del
   banner de la ficha; `alergiaMarcada` = otra alergia marcada como alerta, sin
   el alérgeno) y `anamnesisReviewedAt`. Nunca alergias, condiciones,
-  medicamentos ni notas (Ley 1581 / RGPD); los leen los cuatro roles que ven
+  medicamentos ni notas (minimización de datos); los leen los cuatro roles que ven
   la agenda. Por lote: una lectura de la vigencia y UNA consulta (versión
   vigente + última confirmación por paciente, con `LATERAL ... LIMIT 1` sobre
   `mhv_tenant_patient_version_key` y `medical_history_reviews_tenant_patient_idx`).
@@ -1222,7 +1222,7 @@ UPDATE`, que no estorba a las FK), así que dos «Traer» del mismo
 La caja (`GET /payments`), el dashboard (`GET /dashboard`) y el estado de
 cuenta (`GET /patients/:id/account-statement`) reciben días civiles
 `YYYY-MM-DD` y los cortan a **medianoche de la zona IANA de cada sede**, no a
-medianoche UTC: un abono de las 20:00 en Bogotá (01:00 UTC del día siguiente)
+medianoche UTC: un abono de las 20:00 en una sede a UTC−5 (01:00 UTC del día siguiente)
 cuenta en su día.
 
 - **Zona de la sede**: la zona IANA de la propia sede (`locations."timeZone"`,
@@ -1880,11 +1880,10 @@ moneda y método, módulo `src/modules/cash-sessions`, tablas `cash_sessions`,
 
 ## Códigos clínicos: CIE-10 (DX-212)
 
-Diagnósticos CIE-10 (estándar internacional) en la evolución y código de
-habilitación REPS de la sede. DX-318 y DX-320 (epic DX-311, producto global)
+Diagnósticos CIE-10 (estándar internacional) en la evolución. DX-318 y DX-320 (epic DX-311, producto global)
 retiraron el indicador «listo para RDA» (`GET /clinical-entries/:id/rda-readiness`
 y su variante por lotes `GET /patients/:id/clinical-entries/rda-readiness`,
-ahora 404 y fuera del contrato OpenAPI) y el código CUPS del catálogo
+ahora 404 y fuera del contrato OpenAPI) y el código de procedimiento nacional del catálogo
 (columna `dental_catalog_items.cupsCode` borrada en
 `20261024173000_dx320_drop_catalog_cups_code`). El catálogo se identifica solo
 por su código interno: no hay «código externo del procedimiento» (decisión
@@ -1911,7 +1910,7 @@ D4). Un cliente antiguo que aún mande `cupsCode` en `POST`/`PATCH
   Sin diagnóstico la evolución se sigue guardando. Una corrección es una adenda
   en la evolución y una evolución nueva con el diagnóstico. RLS FORCE, FK
   compuesta a la evolución (misma clínica y paciente) y RESTRICT al código.
-- El código REPS de la sede se borró en DX-319 (ver «Nº de registro
+- El código de habilitación nacional de la sede se borró en DX-319 (ver «Nº de registro
   sanitario de la sede»).
 - **Sede de la evolución** (DX-232, `clinical_entries."locationId"`): la de la
   cita ligada o, sin cita, la sede activa de la petición (`X-Location-Id`; sin
@@ -1920,8 +1919,8 @@ D4). Un cliente antiguo que aún mande `cupsCode` en `POST`/`PATCH
 
 ## Nº de registro sanitario de la sede (DX-319)
 
-Sustituye al código REPS de la sede (DX-212), que solo servía en Colombia
-(DX-311: Dentalix es global, ninguna regla depende del país).
+Sustituye al código de habilitación nacional de la sede (DX-212), que solo
+servía en un país (DX-311: Dentalix es global, ninguna regla depende del país).
 
 - **`locations.healthRegistrationNumber`**: texto libre opcional, sin formato
   ni validación por país, hasta 64 caracteres (CHECK
@@ -1930,7 +1929,7 @@ Sustituye al código REPS de la sede (DX-212), que solo servía en Colombia
   lo recorta; vacío o `null` lo quita y sin el campo no cambia. Va en la
   respuesta de la sede (`GET /locations`).
 - **`locations.showHealthRegistrationNumber`** (por defecto `false`): si el nº
-  sale en los documentos de la sede. Hoy ningún documento imprimía el REPS, así
+  sale en los documentos de la sede. Hoy ningún documento imprimía el código antiguo, así
   que ninguno lo imprime aún; DX-306 (justificantes) lo usará como campo
   opcional, solo con el booleano activo.
 - **Auditoría**: el `UPDATE` de `LOCATION` lleva, además de los campos
@@ -1939,14 +1938,13 @@ Sustituye al código REPS de la sede (DX-212), que solo servía en Colombia
   metadata: un dato público de la sede, nunca de un paciente; el saneado admite
   1–64 caracteres sin caracteres de control. El handler lo deja en
   `req.auditMetadata`, que el interceptor sanea y no deja pisar sus campos.
-- **`repsHabilitationCode` en el cuerpo → 400** («El código REPS ya no
+- **`repsHabilitationCode` en el cuerpo → 400** («repsHabilitationCode ya no
   existe…»): la ValidationPipe global solo descartaría el campo y una web
   antigua mostraría «Guardado» sin guardar nada.
 - **Migraciones**: `20261024174000_dx319_location_health_registration` añade
   las dos columnas (compatible hacia atrás) y
-  `20261024174100_dx319_drop_location_reps` **copia el REPS existente** al nº
-  de registro sanitario (en Colombia es el registro de la sede; así el ADMIN
-  no lo pierde) solo donde no hay nº y sin activar la impresión, y luego hace
+  `20261024174100_dx319_drop_location_reps` **copia el código antiguo** al nº
+  de registro sanitario (así el ADMIN no lo pierde) solo donde no hay nº y sin activar la impresión, y luego hace
   `DROP COLUMN IF EXISTS` (solo lo referenciaba su CHECK; ni vistas, ni
   funciones, ni índices, ni RLS). Con FORCE quitado durante la copia (owner
   sin BYPASSRLS) e idempotente. El nº nuevo no admite saltos de línea ni
@@ -1965,8 +1963,8 @@ null` da 400.
 
 ## Registro de implantes (DX-191)
 
-Ficha de cada implante, pilar, injerto o membrana colocado (Res. 4816/2008
-art. 31 en CO; Reglamento (UE) 2017/745 art. 18 y RD 192/2023 art. 36 en ES),
+Ficha de cada implante, pilar, injerto o membrana colocado (trazabilidad de
+productos sanitarios implantados, sin citar la norma de ningún país),
 módulo `src/modules/implants`, tabla `patient_implants`.
 
 - **Alta** `POST /patients/:id/implants` (DENTIST y ADMIN; el resto 403 en
@@ -2566,7 +2564,7 @@ LINK`; `audit_events_actor_check` admite actor NULL solo para eso y el
 
 ## Responsable de pago y grupo familiar (DX-203)
 
-Quién paga y quién recibe los avisos de un paciente (el acudiente de un
+Quién paga y quién recibe los avisos de un paciente (el tutor de un
 menor, la madre que paga a sus hijos), como el garante de Open Dental o
 Dentrix. Módulo `patients`, tabla `patient_responsible_parties`; migraciones
 `20261018150000_dx203_patient_responsible_parties` y
@@ -2612,7 +2610,7 @@ Dentrix. Módulo `patients`, tabla `patient_responsible_parties`; migraciones
   individual, sobre la misma lectura) y el total en céntimos. Solo importes y
   nombres; solo lectura (no hay abono familiar). Auditoría VIEW de
   ACCOUNT_STATEMENT con `reason: FAMILY_ACCOUNT_STATEMENT`.
-- **Acudiente antiguo**: `patients.guardianName/guardianDocNumber` quedan
+- **Tutor antiguo**: `patients.guardianName/guardianDocNumber` quedan
   DEPRECADOS y de solo lectura (la API ya no los escribe; un cliente antiguo
   que los mande no da error). La migración copió cada valor a un contacto
   responsable `LEGAL_GUARDIAN` que recibe avisos y no paga, de forma
@@ -3134,13 +3132,15 @@ para cualquier clínica y país: `NATIONAL_ID` («Documento nacional»),
 `PASSPORT` («Pasaporte»), `RESIDENCE_PERMIT` («Permiso de residencia»),
 `TAX_ID` («Identificación fiscal») y `OTHER` («Otro documento»). Ningún código
 nombra el documento de un país. Los códigos anteriores a DX-327 solo se
-traducen en `src/modules/patients/domain/legacy-doc-type.ts` (excepción G5.3),
-y la guarda `src/architecture/no-location-fallbacks.spec.ts` lo comprueba,
-también sobre este README. Migraciones
+LEEN en `src/modules/patients/domain/legacy-document-codes.ts` (excepción
+G5.3: JSON ya guardado y alias de los ficheros de importación), y la guarda
+`src/architecture/no-location-fallbacks.spec.ts` lo comprueba, también sobre
+este README. Migraciones
 `20261030120000_dx327_document_type`,
 `20261030120100_dx327_document_type_backfill`,
-`20261030120200_dx327_document_type_validate` y
-`20261030120300_dx327_tenant_document_type_names`.
+`20261030120200_dx327_document_type_validate`,
+`20261030120300_dx327_tenant_document_type_names` y, la fase 2,
+`20261110130000_sin_colombia_identificadores`.
 
 - **Pacientes y contactos**: `docType` (uno de los cinco; el alta lo exige y
   no propone ninguno), `docTypeLabel` y `docTypeName`.
@@ -3152,10 +3152,9 @@ también sobre este README. Migraciones
     genérico. Es el que imprimen las recetas, consentimientos, presupuestos,
     recibos, tarjetas de implante y el estado de cuenta nuevos. Lo ya emitido
     conserva su texto y su hash.
-  - Durante la fase 1, los cuerpos de alta y edición (pacientes, contactos y
-    el `defaultDocType` de la importación) aceptan también los códigos
-    anteriores, para la web anterior. Se traducen a su genérico, sin etiqueta.
-    OpenAPI publica solo los cinco genéricos.
+  - Los cuerpos de alta y edición (pacientes, contactos y el
+    `defaultDocType` de la importación) solo aceptan los cinco genéricos:
+    cualquier otro código es 400.
 - **Nombres locales de la clínica**: `tenants."docTypeNameNationalId"`,
   `…Passport`, `…ResidencePermit`, `…TaxId` y `…Other`, todos nullable y
   sin relleno. Todas las clínicas, también las nuevas y la demo, empiezan sin
@@ -3188,16 +3187,19 @@ también sobre este README. Migraciones
   `reason: DOCUMENT_TYPE_NAMES_SETTINGS` y `changedFields` con los tipos que
   cambiaron (nunca los textos). Guardar lo mismo responde 200 sin evento.
 - **Importación**: la columna de tipo reconoce, en este orden, los nombres
-  locales de la clínica, los códigos y nombres genéricos, y los sinónimos de
-  los archivos de siempre. Dos filas con el mismo número y el mismo tipo
+  locales de la clínica, los códigos y nombres genéricos, y los alias de
+  ficheros de otro software (`IMPORT_DOC_TYPE_ALIASES`). Dos filas con el mismo número y el mismo tipo
   genérico son el mismo paciente. Ver «Importación de pacientes» abajo.
 - **BD**: `patients."documentType"` (con `DEFAULT 'OTHER'`) y
   `"docTypeLabel"`, y lo mismo, nullable, en `patient_responsible_parties`.
-  Durante la fase 1 se queda la columna anterior `"docType"`, para las réplicas
-  anteriores. La API la escribe solo al crear, y el trigger
-  `dx_document_type_sync` mantiene coherentes las dos columnas. El trigger
-  nunca escribe una etiqueta: solo la conserva o la pone a `NULL`.
-- **Despliegue** (orden obligatorio):
+  La columna anterior quedó congelada como `"legacyDocumentCode"` (enum
+  `LegacyDocumentCode`: NATIONAL_ID, MINOR_ID, FOREIGNER_ID, PASSPORT, OTHER;
+  `@ignore`, sin DEFAULT, NULL en las filas nuevas) desde la fase 2: nadie la
+  lee ni la escribe, y se conserva porque es lo único que distingue el
+  documento de un menor (MINOR_ID) del de un adulto en las filas anteriores.
+  El trigger y las funciones de la fase 1 ya no existen.
+- **Despliegue de la fase 1** (histórico, orden obligatorio; las consultas
+  nombran la columna con su nombre de entonces, `"docType"`):
   1. **Antes de `migrate deploy`**, en cada entorno, se ejecuta la consulta
      previa (solo lectura) y se guarda en la nota de versión. Hace falta un
      rol con `BYPASSRLS` (el del DBA); con el owner `NOBYPASSRLS` devuelve 0
@@ -3300,15 +3302,16 @@ dx_doc_type_coherent("docType", "documentType")`, y lo mismo en
   Un `TAX_ID` se ve como «Documento …» en la web anterior. No se revierte
   ninguna migración. Al volver a la versión nueva, todo está coherente.
 
-- **Fase 2** (ticket aparte, con 0 réplicas y 0 workers anteriores):
-  - se quitan la columna anterior, el trigger, las funciones y el enum
-    `DocType`;
-  - antes de borrar la columna, hay que recrear
-    `patient_responsible_parties_kind_check` sin ella, porque `DROP COLUMN`
-    borra en silencio todo CHECK que la nombra;
-  - la traducción de solo lectura de los códigos anteriores no se borra
-    nunca: las fotos de recibos y las filas de importación antiguas la
-    necesitan.
+- **Fase 2** (`20261110130000_sin_colombia_identificadores`, web y API a la
+  vez, sin réplicas anteriores): retira el trigger y las cuatro funciones y
+  renombra en su sitio la columna y el enum anteriores (`RENAME VALUE`: cada
+  fila conserva su valor). La API deja de escribir el código anterior en la
+  columna y en los JSON nuevos (foto del recibo, filas y mapeo de la
+  importación). La traducción de solo lectura de los códigos anteriores no se
+  borra: las fotos de recibos (inmutables) y las filas de importación
+  antiguas la necesitan. Si algún día se borra la columna congelada, antes
+  hay que recrear `patient_responsible_parties_kind_check` sin ella, porque
+  `DROP COLUMN` borra en silencio todo CHECK que la nombra.
 
 ## País de la sede ISO 3166 (DX-312)
 
@@ -3779,22 +3782,22 @@ migraciones `20261020000000_dx222_enums`,
 ## Pagadores y coberturas del paciente (DX-153)
 
 Con qué pagador, plan y afiliado se atiende cada paciente: un catálogo de
-pagadores por clínica (EPS, prepagadas, mutuas, empresas) y hasta 5
+pagadores por clínica (aseguradoras, planes prepago, sistema público, empresas) y hasta 5
 coberturas por paciente, una principal. Sustituye al texto libre
-`patients."insurerEps"`. Módulos `payers` y `patient-coverages`; migraciones
+`patients."legacyInsurerName"`. Módulos `payers` y `patient-coverages`; migraciones
 `20261020210000_dx153_enums`, `20261020210100_dx153_payers_and_coverages` y
 `20261020210200_dx153_insurer_eps_backfill`.
 
-- **Tablas**: `payers` (nombre, `type` MUTUA_ES | PREPAGADA_CO | EPS_CO |
-  EMPRESA | OTRO, `country`, `active`) y `patient_coverages` (paciente,
+- **Tablas**: `payers` (nombre, `type` INSURER | PREPAID_PLAN |
+  PUBLIC_SYSTEM | EMPLOYER | OTHER desde DX-326, `active`; la columna
+  `country` quedó @ignore) y `patient_coverages` (paciente,
   pagador, plan, nº de afiliado, titular, vigencia `validFrom`/`validTo`,
   `isPrimary`, notas). Ambas con RLS FORCE y FK compuestas por `tenantId`
   (un pagador o paciente de otra clínica es imposible en la BD). Se quitan en
   blando.
 - **Reglas**: nombre de pagador único por clínica entre pagadores vivos
   (mayúsculas y tildes se comprueban en la API; 409 en español, con mensaje
-  propio si el que coincide está desactivado); CHECK de tipo y país (EPS_CO y
-  PREPAGADA_CO solo con país CO); `validTo` no anterior a `validFrom`; hasta 5
+  propio si el que coincide está desactivado); `validTo` no anterior a `validFrom`; hasta 5
   coberturas vivas por paciente; la primera es principal aunque no se pida y
   `isPrimary: true` en otra desmarca la anterior en la misma transacción
   (con candado por paciente); la principal no se puede desmarcar sin marcar
@@ -3817,11 +3820,11 @@ coberturas por paciente, una principal. Sustituye al texto libre
   verificada; nunca el nº entero ni el titular. El catálogo de pagadores no
   se audita. El GET de coberturas tampoco (la ficha ya se audita).
 - **Relleno**: la migración `…_insurer_eps_backfill` crea un pagador por
-  clínica y texto normalizado (tipo OTRO, sin país; el ADMIN lo reclasifica) y
-  una cobertura principal por paciente con `insurerEps` no vacío, marcada
-  `migratedFromInsurerEps`. Es idempotente, incluye archivados y no toca
-  `insurerEps`. Esa columna queda legada, sin lectores desde DX-322; DROP en
-  fase 2. La API ya no la lee, no la escribe ni la expone (`@ignore` en el
+  clínica y texto normalizado (tipo «otro», hoy OTHER, sin país; el ADMIN lo
+  reclasifica) y una cobertura principal por paciente con texto de
+  aseguradora no vacío, marcada `migratedFromLegacyInsurer`. Es idempotente, incluye archivados y no toca el
+  texto. Esa columna queda congelada como `"legacyInsurerName"`, sin lectores
+  desde DX-322 (renombrada en `20261110130000`). La API ya no la lee, no la escribe ni la expone (`@ignore` en el
   esquema), y un cliente antiguo que la mande no da error: se descarta.
 - **Demo**: `npm run seed:demo` crea 8 pagadores (Sura EPS, Sanitas,
   Compensar, Nueva EPS, Famisanar, Salud Total, Coomeva, Empresa Alfa) y una cobertura
@@ -3865,18 +3868,18 @@ de precios) que fijan el precio de cada ítem del plan al añadirlo. Módulos
   clínicos.
 - **Elegibilidad al asignar (SEC-047)**: como la rebaja de convenio no cuenta
   como descuento discrecional, asignar un convenio no puede saltarse el tope
-  por rol de DX-204. Un convenio de un **pagador externo** (tipo MUTUA_ES,
-  PREPAGADA_CO, EPS_CO o EMPRESA) exige `coverageId` con una cobertura del
+  por rol de DX-204. Un convenio de un **pagador externo** (tipo INSURER,
+  PREPAID_PLAN, PUBLIC_SYSTEM o EMPLOYER) exige `coverageId` con una cobertura del
   paciente, de ese pagador, sin retirar y **vigente hoy** (día civil de la
   sede), para cualquier rol, ADMIN incluido: si no, 400 en español. Un
-  convenio **interno** (pagador de tipo OTRO: cortesía, empleados, socios)
+  convenio **interno** (pagador de tipo OTHER: cortesía, empleados, socios)
   lo asigna ADMIN, con la cobertura opcional (si viene, se valida igual). Otro
-  rol solo si manda una cobertura **migrada** (`migratedFromInsurerEps`, que
+  rol solo si manda una cobertura **migrada** (`migratedFromLegacyInsurer`, que
   solo crea el relleno de DX-153 y la API no puede marcar) del paciente y de
   ese pagador, vigente; si no, 403 en español con la pista de pedir al
   administrador que reclasifique el pagador. `GET /agreements`, la
   asignación y las coberturas devuelven `payer.type` y
-  `migratedFromInsurerEps` para que la web sepa qué pedir. Matriz en
+  `migratedFromLegacyInsurer` para que la web sepa qué pedir. Matriz en
   `test/patient-agreements-eligibility.e2e-spec.ts`.
 - **Cobertura verificable (SEC-049)**: cierra el riesgo que SEC-047 dejaba
   aceptado (cualquier rol creaba la cobertura con solo `{ payerId }` y
@@ -3936,7 +3939,7 @@ de precios) que fijan el precio de cada ítem del plan al añadirlo. Módulos
   ```sql
   SELECT t."name" AS clinica, py."name" AS pagador, a."name" AS convenio,
          count(DISTINCT pa."patientId") FILTER (WHERE pa."deletedAt" IS NULL) AS pacientes_asignados,
-         count(DISTINCT pc."patientId") FILTER (WHERE pc."migratedFromInsurerEps") AS pacientes_con_cobertura_migrada
+         count(DISTINCT pc."patientId") FILTER (WHERE pc."migratedFromLegacyInsurer") AS pacientes_con_cobertura_migrada
     FROM "agreements" a
     JOIN "payers" py ON py."tenantId" = a."tenantId" AND py."id" = a."payerId"
     JOIN "tenants" t ON t."id" = a."tenantId"
@@ -4386,7 +4389,7 @@ WHERE "deletedAt" IS NULL AND "docNumber" IS NOT NULL`: bajo RLS FORCE es
   `patient-imports.expire-validated.daily`; desde entonces `errors.csv` da
   **410**. `filledValues` (lo rellenado) se conserva mientras se pueda
   deshacer.
-- **Ley 1581 / RGPD (DX-037)**: los importados nacen **sin** autorización de
+- **Autorización de datos (DX-037)**: los importados nacen **sin** autorización de
   datos registrada (`data_processing_consents` vacía, `dataConsentAccepted`
   false) y la ficha la marca «Pendiente». La importación no inventa
   consentimientos. `patients.import_batch_id` dice qué lote creó a cada uno.
@@ -4424,7 +4427,7 @@ WHERE "deletedAt" IS NULL AND "docNumber" IS NOT NULL`: bajo RLS FORCE es
   estilos, ≤ 1 M de cadenas compartidas y 4 M de pasos del escáner por
   fichero (400 en español), cediendo el hilo cada 8.192 pasos; CSV
   Windows-1252 decodificado en nativo.
-- **Supresión parcial (Ley 1581)**: «Actualizar solo campos vacíos» nunca
+- **Supresión parcial (DX-039)**: «Actualizar solo campos vacíos» nunca
   rellena los campos suprimidos de un paciente con `partially_suppressed_at`
   (el dry-run lo avisa en la fila).
 - **Probar a mano**: `prisma/demo/pacientes-importacion-ejemplo.csv` (25 filas
@@ -5562,7 +5565,7 @@ dentalix_email_dispatcher`) o repón la política como en
   función de `public` vuelve a usar `CURRENT_TIMESTAMP` o `now()` sin UTC. Aun así, `dentalix_app` (y el owner, y los roles
   NOLOGIN) tiene que arrancar con `TimeZone = UTC`: cualquier hora que la BD
   calcule con la zona de la sesión (`CURRENT_TIMESTAMP` en un `DEFAULT`, SQL
-  a mano, un trigger futuro) se desfasaría (con `America/Bogota`, 5 h). La
+  a mano, un trigger futuro) se desfasaría (con una sesión a UTC−5, 5 h). La
   migración `20261019090000_dx226_server_time_utc_receipt_series` hace
   `ALTER ROLE … SET timezone = 'UTC'` en `dentalix_app`, el dueño de la base,
   `dentalix_owner` y los roles NOLOGIN, y `ALTER DATABASE <base> SET timezone

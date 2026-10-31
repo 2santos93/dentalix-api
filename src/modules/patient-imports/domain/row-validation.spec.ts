@@ -3,7 +3,6 @@ import {
   DOCUMENT_TYPES,
   type ClinicDocumentTypeNames,
 } from '../../patients/domain/document-type';
-import { LEGACY_DOC_NUMBER_HEADER_SYNONYMS } from '../../patients/domain/legacy-doc-type';
 import {
   readStoredColumnMapping,
   resolveMapping,
@@ -274,14 +273,14 @@ describe('tipos de documento de la importación (DX-327)', () => {
     ['Cédula de extranjería', 'RESIDENCE_PERMIT'],
     ['Extranjería', 'RESIDENCE_PERMIT'],
   ])(
-    'legacy synonyms map to their generic type with no label (%s → %s)',
+    'import aliases from other software map to their generic type with no label (%s → %s)',
     (raw, type) => {
       // parseDocType devuelve solo el tipo: no hay etiqueta que derivar (Q3).
       expect(parseDocType(raw, NO_NAMES)).toBe(type);
     },
   );
 
-  it('legacy dni and nit still map to OTHER; rut is not a type', () => {
+  it('alias dni and nit map to OTHER; rut is not a type', () => {
     expect(parseDocType('DNI', NO_NAMES)).toBe('OTHER');
     expect(parseDocType('NIT', NO_NAMES)).toBe('OTHER');
     expect(parseDocType('RC', NO_NAMES)).toBe('OTHER');
@@ -292,12 +291,7 @@ describe('tipos de documento de la importación (DX-327)', () => {
     );
   });
 
-  it('legacy number header synonyms still recognize the number column', () => {
-    expect([...LEGACY_DOC_NUMBER_HEADER_SYNONYMS]).toEqual([
-      'cedula',
-      'dni',
-      'rut',
-    ]);
+  it('number header synonyms cedula, dni and rut recognize the number column', () => {
     for (const header of ['Cédula', 'DNI', 'RUT']) {
       expect(suggestMapping([header, 'Nombre', 'Apellidos'])).toMatchObject({
         docNumber: header,
@@ -308,7 +302,7 @@ describe('tipos de documento de la importación (DX-327)', () => {
     }
     const docNumber = IMPORT_FIELDS.find((f) => f.key === 'docNumber')!;
     expect(docNumber.synonyms).toEqual(
-      expect.arrayContaining([...LEGACY_DOC_NUMBER_HEADER_SYNONYMS]),
+      expect.arrayContaining(['cedula', 'dni', 'rut']),
     );
   });
 
@@ -355,28 +349,21 @@ describe('tipos de documento de la importación (DX-327)', () => {
     },
   );
 
-  it('a stored mapping keeps the legacy default for older replicas and reads the generic one', () => {
+  it('a stored mapping keeps only the generic default and still reads an old batch', () => {
     const columns = { docNumber: 'doc' };
     expect(storedColumnMapping(columns, 'NATIONAL_ID')).toEqual({
       columns,
-      defaultDocType: 'CC',
       defaultDocumentType: 'NATIONAL_ID',
-    });
-    // TAX_ID no tiene código anterior: la réplica anterior lee OTHER.
-    expect(storedColumnMapping(columns, 'TAX_ID')).toMatchObject({
-      defaultDocType: 'OTHER',
-      defaultDocumentType: 'TAX_ID',
     });
     expect(storedColumnMapping(columns, null)).toEqual({
       columns,
-      defaultDocType: null,
       defaultDocumentType: null,
     });
-    // La API nueva prefiere el genérico…
+    // Se lee el genérico…
     expect(
       readStoredColumnMapping(storedColumnMapping(columns, 'TAX_ID')),
     ).toEqual({ columns, defaultDocType: 'TAX_ID' });
-    // …y un lote de la API anterior (solo el código) se traduce (R6).
+    // …y un lote anterior a 20261110130000 (solo el código) se traduce (R6).
     expect(readStoredColumnMapping({ columns, defaultDocType: 'TI' })).toEqual({
       columns,
       defaultDocType: 'NATIONAL_ID',
@@ -671,7 +658,7 @@ describe('dedupeRows', () => {
     ]);
   });
 
-  it('existente con supresión parcial (Ley 1581): el aviso de la fila lo dice (revisión I2)', () => {
+  it('existente con supresión parcial (DX-039): el aviso de la fila lo dice (revisión I2)', () => {
     const r = dedupeRows(
       [
         { rowNumber: 2, data: data('NATIONAL_ID', '111') },
@@ -831,7 +818,7 @@ describe('«Actualizar solo campos vacíos»', () => {
     });
   });
 
-  it('paciente con supresión parcial: nunca rellena los campos suprimidos (Ley 1581, revisión I2)', () => {
+  it('paciente con supresión parcial: nunca rellena los campos suprimidos (DX-039, revisión I2)', () => {
     const suppressed: FillablePatient = {
       ...patient,
       phone: null,

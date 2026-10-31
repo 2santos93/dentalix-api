@@ -17,8 +17,8 @@ describe('PatientAgreementFlags', () => {
       () => new Date('2026-10-20T15:00:00Z'),
     );
     agreementId = agreements.seed({
-      name: 'Convenio Sura',
-      payer: { id: 'payer-sura', name: 'Sura', type: 'PUBLIC_SYSTEM' },
+      name: 'Convenio Surco',
+      payer: { id: 'payer-surco', name: 'Surco', type: 'PUBLIC_SYSTEM' },
     }).id;
   });
 
@@ -57,21 +57,21 @@ describe('PatientAgreementFlags', () => {
     repo.seed({ patientId: 'p-1', agreementId, validFrom, validTo });
     expect(await flags.forPatient('p-1')).toEqual({
       status,
-      agreementName: 'Convenio Sura',
-      payerName: 'Sura',
+      agreementName: 'Convenio Surco',
+      payerName: 'Surco',
     });
   });
 
   it('la vigencia del convenio también cuenta, y un convenio inactivo gana', async () => {
     const expired = agreements.seed({
       name: 'Vencido',
-      payer: { id: 'p', name: 'Sura', type: 'PUBLIC_SYSTEM' },
+      payer: { id: 'p', name: 'Surco', type: 'PUBLIC_SYSTEM' },
       validTo: '2026-10-19',
     });
     repo.seed({ patientId: 'p-1', agreementId: expired.id });
     const inactive = agreements.seed({
       name: 'Apagado',
-      payer: { id: 'p', name: 'Sura', type: 'PUBLIC_SYSTEM' },
+      payer: { id: 'p', name: 'Surco', type: 'PUBLIC_SYSTEM' },
       active: false,
       validTo: '2026-10-19',
     });

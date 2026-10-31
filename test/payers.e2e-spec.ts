@@ -197,9 +197,7 @@ describe('Pagadores (e2e, DX-153)', () => {
     expect(await names('?includeInactive=true')).toContain('Plan Sur Z');
   });
 
-  it('legacy web PATCH with country null is 200 and the response has no country', async () => {
-    // Excepción G5.3 (DX-334): tipos de pagador anteriores a DX-326. El PATCH
-    // exacto de la web anterior: nombre, tipo antiguo y country null.
+  it('a PATCH with country null is 200 and the response has no country', async () => {
     const empresa = await createPayer({
       name: 'Empresa Beta',
       type: 'EMPLOYER',
@@ -208,68 +206,32 @@ describe('Pagadores (e2e, DX-153)', () => {
       api().patch(`/api/v1/payers/${empresa.id}`),
       tokens.ADMIN,
     )
-      .send({ name: 'Empresa Beta', type: 'EMPRESA', country: null })
+      .send({ name: 'Empresa Beta', type: 'EMPLOYER', country: null })
       .expect(200);
     expect((ok.body as PayerBody).type).toBe('EMPLOYER');
     expect(ok.body).not.toHaveProperty('country');
   });
 
-  it('legacy type codes in the body are accepted as their generic type during the rollout', async () => {
-    // Excepción G5.3 (DX-334): tipos de pagador anteriores a DX-326.
-    const LEGACY = [
-      ['MUTUA_ES', 'INSURER'],
-      ['PREPAGADA_CO', 'PREPAID_PLAN'],
-      ['EPS_CO', 'PUBLIC_SYSTEM'],
-      ['EMPRESA', 'EMPLOYER'],
-      ['OTRO', 'OTHER'],
-    ] as const;
-    for (const [code, type] of LEGACY) {
-      const payer = await createPayer({
-        name: `Legado ${code}`,
-        type: code,
-        country: 'CO',
-      });
-      expect(payer.type).toBe(type);
-      const patched = await as(
-        api().patch(`/api/v1/payers/${payer.id}`),
-        tokens.ADMIN,
-      )
-        .send({ type: code, country: null })
-        .expect(200);
-      expect((patched.body as PayerBody).type).toBe(type);
-      await as(api().delete(`/api/v1/payers/${payer.id}`), tokens.ADMIN).expect(
-        204,
-      );
+  it('a retired type code in the body is 400 (no translation since 20261110130000)', async () => {
+    for (const code of ['OTRO', 'EMPRESA']) {
+      await as(api().post('/api/v1/payers'), tokens.ADMIN)
+        .send({ name: `Retirado ${code}`, type: code })
+        .expect(400);
     }
   });
 
-  it('legacy codes are stored for new payers during phase 1', async () => {
-    // Excepción G5.3 (DX-334): tipos de pagador anteriores a DX-326.
-    // Fase 1 (R5): la BD guarda el código anterior de cada tipo genérico, al
-    // crear y al editar, y nunca un código nuevo; `country` queda NULL.
-    const LEGACY = {
-      INSURER: 'MUTUA_ES',
-      PREPAID_PLAN: 'PREPAGADA_CO',
-      PUBLIC_SYSTEM: 'EPS_CO',
-      EMPLOYER: 'EMPRESA',
-      OTHER: 'OTRO',
-    } as const;
+  it('new and edited payers store the generic type as it is, and no country', async () => {
     const stored = async (id: string) =>
       (
         await raw.$queryRaw<{ type: string; country: string | null }[]>`
           SELECT "type"::text AS type, "country"::text AS country
           FROM "payers" WHERE id = ${id}::uuid`
       )[0];
-    const types = Object.keys(LEGACY) as (keyof typeof LEGACY)[];
-    for (const [i, type] of types.entries()) {
-      const payer = await createPayer({ name: `Fase uno ${type}`, type });
+    for (const [i, type] of PAYER_TYPES.entries()) {
+      const payer = await createPayer({ name: `Genérico ${type}`, type });
       expect(payer.type).toBe(type);
-      expect(await stored(payer.id)).toEqual({
-        type: LEGACY[type],
-        country: null,
-      });
-      // Editar hacia el siguiente tipo también guarda su código anterior.
-      const next = types[(i + 1) % types.length];
+      expect(await stored(payer.id)).toEqual({ type, country: null });
+      const next = PAYER_TYPES[(i + 1) % PAYER_TYPES.length];
       const res = await as(
         api().patch(`/api/v1/payers/${payer.id}`),
         tokens.ADMIN,
@@ -277,15 +239,11 @@ describe('Pagadores (e2e, DX-153)', () => {
         .send({ type: next })
         .expect(200);
       expect((res.body as PayerBody).type).toBe(next);
-      expect((await stored(payer.id)).type).toBe(LEGACY[next]);
+      expect((await stored(payer.id)).type).toBe(next);
       await as(api().delete(`/api/v1/payers/${payer.id}`), tokens.ADMIN).expect(
         204,
       );
     }
-    const generic = await raw.$queryRaw<{ n: number }[]>`
-      SELECT count(*)::int AS n FROM "payers"
-      WHERE "type"::text IN ('INSURER', 'PREPAID_PLAN', 'PUBLIC_SYSTEM', 'EMPLOYER', 'OTHER')`;
-    expect(generic[0].n).toBe(0);
   });
 
   it('el PATCH con name, type o active en null da 400, nunca 500', async () => {
@@ -313,22 +271,25 @@ describe('Pagadores (e2e, DX-153)', () => {
   });
 
   it('un nombre que coincide con un pagador DESACTIVADO da un 409 que lo dice', async () => {
-    const off = await createPayer({ name: 'Colsanitas Off', type: 'OTHER' });
+    const off = await createPayer({ name: 'Colsanavida Off', type: 'OTHER' });
     await as(api().patch(`/api/v1/payers/${off.id}`), tokens.ADMIN)
       .send({ active: false })
       .expect(200);
     const res = await as(api().post('/api/v1/payers'), tokens.RECEPTION)
-      .send({ name: 'colsanitas off', type: 'OTHER' })
+      .send({ name: 'colsanavida off', type: 'OTHER' })
       .expect(409);
     expect((res.body as { message: string }).message).toBe(
       'Ya existe un pagador con ese nombre, pero está desactivado; pídele a administración que lo reactive.',
     );
-    const other = await createPayer({ name: 'Colsanitas Otro', type: 'OTHER' });
+    const other = await createPayer({
+      name: 'Colsanavida Otro',
+      type: 'OTHER',
+    });
     const renamed = await as(
       api().patch(`/api/v1/payers/${other.id}`),
       tokens.ADMIN,
     )
-      .send({ name: 'COLSANITAS OFF' })
+      .send({ name: 'COLSANAVIDA OFF' })
       .expect(409);
     expect((renamed.body as { message: string }).message).toContain(
       'está desactivado',
@@ -430,16 +391,16 @@ describe('Pagadores (e2e, DX-153)', () => {
     expect(await storedCountry(created.id)).toBeNull();
   });
 
-  it('legacy payer stored with a country keeps it when the API edits the payer', async () => {
-    // Excepción G5.3 (DX-334): tipos de pagador anteriores a DX-326. Un
-    // pagador guardado antes con país conserva ese dato: la API no lo toca.
-    const legacy = await insertPayer('Plan Sur Antiguo', 'EPS_CO', 'CO');
+  it('a payer stored with a country keeps it when the API edits the payer', async () => {
+    // Un pagador guardado antes de DX-326 con país conserva ese dato: la API
+    // no lo toca.
+    const legacy = await insertPayer('Plan Sur Antiguo', 'PUBLIC_SYSTEM', 'ES');
     const res = await as(api().patch(`/api/v1/payers/${legacy}`), tokens.ADMIN)
       .send({ name: 'Plan Sur Renombrado', country: 'ES' })
       .expect(200);
     expect(res.body).not.toHaveProperty('country');
     expect((res.body as PayerBody).type).toBe('PUBLIC_SYSTEM');
-    expect(await storedCountry(legacy)).toBe('CO');
+    expect(await storedCountry(legacy)).toBe('ES');
   });
 
   it.each<[string, RegionalFixture]>([
@@ -479,9 +440,12 @@ describe('Pagadores (e2e, DX-153)', () => {
     },
   );
 
-  it('legacy payer rows read back with their generic type, same id and coverages', async () => {
-    // Excepción G5.3 (DX-334): tipos de pagador anteriores a DX-326.
-    const id = await insertPayer('Sistema Público Antiguo', 'EPS_CO', 'CO');
+  it('a payer row inserted by SQL reads back with its type, same id and coverages', async () => {
+    const id = await insertPayer(
+      'Sistema Público Antiguo',
+      'PUBLIC_SYSTEM',
+      'ES',
+    );
     const patientId = await newPatient('9002');
     await raw.$executeRaw`
       INSERT INTO "patient_coverages" ("id", "tenantId", "patientId", "payerId", "updatedAt")

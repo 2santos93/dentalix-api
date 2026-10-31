@@ -6,7 +6,7 @@ import {
   normalizeDocumentTypeName,
   validateDocumentTypeNames,
 } from './document-type-names';
-import { LEGACY_DOC_TYPES, LEGACY_DOC_TYPE_SYNONYMS } from './legacy-doc-type';
+import { IMPORT_DOC_TYPE_ALIASES } from './legacy-document-codes';
 import { GENERIC_DOC_TYPE_NAMES } from './document-type';
 
 const NONE = {
@@ -185,14 +185,13 @@ describe('document-type-names (DX-327, R16)', () => {
     expect(validateDocumentTypeNames(names)).toEqual({ ok: true, names: NONE });
   });
 
-  it('legacy synonyms are not checked at save time', () => {
+  it('import aliases are not checked at save time', () => {
     // Un sinónimo antiguo que no es código ni nombre genérico de ningún tipo
     // se acepta como nombre de un tipo distinto del suyo (la clínica no los
     // ve; en la importación gana el nombre de la clínica, R19).
     const generic = new Set(Object.values(GENERIC_DOC_TYPE_NAMES).flat());
     let checked = 0;
-    for (const [code, keys] of LEGACY_DOC_TYPE_SYNONYMS) {
-      const own = LEGACY_DOC_TYPES[code];
+    for (const [own, keys] of IMPORT_DOC_TYPE_ALIASES) {
       const target = DOCUMENT_TYPES.find((t) => t !== own)!;
       for (const key of keys.filter((k) => !generic.has(k))) {
         expect(documentTypeKey(key)).toBe(key);

@@ -13,7 +13,6 @@ import {
 } from './support/e2e-fixtures';
 import { MAILER } from '../src/modules/notifications/email/domain/ports/mailer.port';
 import { EmailDispatcher } from '../src/modules/notifications/email/application/email-dispatcher.service';
-import { legacyStoredDocType } from '../src/modules/patients/domain/legacy-doc-type';
 
 // DX-136: recibo de caja por abono — emitir, reimprimir, anular y enviar, de
 // punta a punta por HTTP. DIRECT_URL (superusuario, sin RLS) solo siembra un
@@ -466,7 +465,7 @@ describe('Recibo de caja por abono (e2e, DX-136)', () => {
       return email?.text ?? '';
     }
 
-    it('a new receipt shows the free label, and its snapshot keeps the legacy code for older replicas', async () => {
+    it('a new receipt shows the free label, and its snapshot keeps only the generic type', async () => {
       await as(clinicA)
         .patch(`/patients/${patientId}`, { docTypeLabel: 'ID local' })
         .expect(200);
@@ -478,16 +477,17 @@ describe('Recibo de caja por abono (e2e, DX-136)', () => {
         docTypeName: 'ID local',
         docNumberMasked: '******5678',
       });
-      expect(await storedPatient(id)).toMatchObject({
-        docType: legacyStoredDocType('NATIONAL_ID'),
+      const stored = await storedPatient(id);
+      expect(stored).toMatchObject({
         documentType: 'NATIONAL_ID',
         docTypeLabel: 'ID local',
         docTypeName: 'ID local',
       });
+      expect(stored).not.toHaveProperty('docType');
       expect(await emailText(id)).toContain('Documento: ID local ******5678');
     });
 
-    it('legacy receipt snapshot with CC reprints with the generic type and no label', async () => {
+    it('a receipt issued before 20261110130000 with only the old code reprints with the generic type and no label', async () => {
       const { id } = await pay(receptionToken, 2);
       // La foto como la guardaba la versión anterior: solo el código. El
       // trigger la hace inmutable; aquí se reescribe sin triggers.

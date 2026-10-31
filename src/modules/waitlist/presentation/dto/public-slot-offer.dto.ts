@@ -22,13 +22,13 @@ export class PublicSlotOfferDetailsDto {
   @ApiProperty({ format: 'date-time' })
   end!: Date;
 
-  @ApiProperty({ example: 'America/Bogota' })
+  @ApiProperty({ example: 'UTC' })
   timeZone!: string;
 
   @ApiProperty({
     type: String,
     nullable: true,
-    example: 'es-CO',
+    example: 'es',
     description:
       'Locale de la sede: la página pinta el día y la hora como la sede.',
   })

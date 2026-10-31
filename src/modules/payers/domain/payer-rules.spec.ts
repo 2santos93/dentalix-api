@@ -7,7 +7,7 @@ import {
 
 describe('reglas de pagadores (DX-153)', () => {
   describe('nombre', () => {
-    it.each(['Sanitas', 'AB', 'x'.repeat(120), '  Sura  '])(
+    it.each(['Sanavida', 'AB', 'x'.repeat(120), '  Surco  '])(
       'acepta %j',
       (name) => {
         expect(validatePayerName(name)).toBeNull();
@@ -27,7 +27,7 @@ describe('reglas de pagadores (DX-153)', () => {
     it('la clave ignora mayúsculas, tildes y espacios de más', () => {
       expect(payerNameKey('  SEGUROS   Bolívar ')).toBe('seguros bolivar');
       expect(payerNameKey('Adeslas')).toBe(payerNameKey('ADESLAS'));
-      expect(payerNameKey('Nueva EPS')).not.toBe(payerNameKey('NuevaEPS'));
+      expect(payerNameKey('Nueva Salud')).not.toBe(payerNameKey('NuevaEPS'));
     });
   });
 });

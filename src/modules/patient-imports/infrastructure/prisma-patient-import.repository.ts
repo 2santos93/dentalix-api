@@ -20,12 +20,8 @@ import {
   resolveLocationTimeZones,
 } from '../../../shared/locations/location-time-zone';
 import { lockPatientDocs } from '../../patients/infrastructure/patient-doc-lock';
-import {
-  docTypeFromStored,
-  legacyStoredDocType,
-  type LegacyDocType,
-} from '../../patients/domain/legacy-doc-type';
-import type { LegacyDocPair } from '../../patients/infrastructure/repositories/prisma-patient.repository';
+import { docTypeFromStored } from '../../patients/domain/legacy-document-codes';
+import type { DocTypeColumn } from '../../patients/infrastructure/repositories/prisma-patient.repository';
 import type { ExistingPatientDoc } from '../domain/dedupe';
 import {
   balancePatientsByDocSql,
@@ -84,30 +80,25 @@ export const UNDO_IGNORED_TABLES: ReadonlySet<string> = new Set([
 const BALANCE_INSERT_CHUNK = 500;
 
 /**
- * JSON de una fila preparada (DX-327, fase 1, R6): `docType` lleva el código
- * anterior, que es lo que lee un worker anterior durante el despliegue (un
- * TAX_ID le llega como OTHER, spec §7), y `documentType` el genérico. Sin
+ * JSON de una fila preparada: `documentType` lleva el tipo genérico. Sin
  * etiqueta: la importación no tiene esa columna.
  */
 export type StoredImportRowData = Omit<ImportPatientData, 'docType'> & {
-  docType: LegacyDocType;
   documentType: DocumentType;
 };
 
 export function storedImportRowData(
   data: ImportPatientData,
 ): StoredImportRowData {
-  return {
-    ...data,
-    docType: legacyStoredDocType(data.docType),
-    documentType: data.docType,
-  };
+  const { docType, ...rest } = data;
+  return { ...rest, documentType: docType };
 }
 
 /**
- * Lee el JSON de una fila preparada: prefiere el genérico; una fila de la API
- * anterior (solo el código) se traduce con R6, sin etiqueta. Un código
- * desconocido lanza: la fila queda FAILED.
+ * Lee el JSON de una fila preparada. Una fila preparada antes de la migración
+ * 20261110130000 puede traer, además o en su lugar, el código anterior en
+ * `docType` (`docTypeFromStored`). Un código desconocido lanza: la fila queda
+ * FAILED.
  */
 export function importRowDataFromJson(
   json: Prisma.JsonValue,
@@ -123,11 +114,7 @@ export function importRowDataFromJson(
   };
 }
 
-/**
- * Datos del paciente que crea una fila nueva: la pareja de R5 (genérico y
- * código anterior, para que el trigger no lo tome por un escritor anterior)
- * y ninguna etiqueta.
- */
+/** Datos del paciente que crea una fila nueva: el tipo y ninguna etiqueta. */
 export function importedPatientData(
   data: ImportPatientData,
   base: {
@@ -146,7 +133,6 @@ export function importedPatientData(
     firstName: data.firstName,
     lastName: data.lastName,
     documentType: data.docType,
-    docType: legacyStoredDocType(data.docType),
     docNumber: data.docNumber,
     birthDate: data.birthDate
       ? new Date(`${data.birthDate}T00:00:00.000Z`)
@@ -161,7 +147,7 @@ export function importedPatientData(
     notes: data.notes ?? null,
     createdAt: base.now,
     updatedAt: base.now,
-  } satisfies Prisma.PatientCreateManyInput & LegacyDocPair;
+  } satisfies Prisma.PatientCreateManyInput & DocTypeColumn;
 }
 
 /** Lo que el dry-run deja preparado: una fila por paciente a crear o a rellenar. */

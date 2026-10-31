@@ -25,8 +25,8 @@ import {
 
 // Uppercase-normalizes ISO 4217 codes, same convention as ConvertQueryDto
 // (exchange module) / the deleted CreateSaleDto -- snapshots/rates are always
-// looked up uppercase, so this keeps `currency=cop` behaving the same as
-// `currency=COP`.
+// looked up uppercase, so this keeps `currency=usd` behaving the same as
+// `currency=USD`.
 function toUpperCase({ value }: { value: unknown }): unknown {
   return typeof value === 'string' ? value.toUpperCase() : value;
 }

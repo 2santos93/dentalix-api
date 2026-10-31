@@ -52,7 +52,7 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
     ),
   );
   const payer = await raw.payer.create({
-    data: { tenantId, name: 'Sanitas', type: 'EPS_CO' },
+    data: { tenantId, name: 'Sanavida', type: 'PUBLIC_SYSTEM' },
   });
   const location = await raw.location.create({
     data: locationData(REGIONAL_BOGOTA_FIXTURE, {

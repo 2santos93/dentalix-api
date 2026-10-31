@@ -300,7 +300,7 @@ describe('SEC-032 · search_path fijo en funciones de trigger y SECURITY DEFINER
     });
   });
 
-  describe('consentimientos y autorizaciones Ley 1581 (dx_forbid_consent_mutation)', () => {
+  describe('consentimientos y autorizaciones de datos (dx_forbid_consent_mutation)', () => {
     it('data_processing_consents: rechaza el DELETE aunque una tabla temporal suplante pg_roles', async () => {
       await expect(
         asApp(

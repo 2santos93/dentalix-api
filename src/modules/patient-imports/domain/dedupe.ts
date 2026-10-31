@@ -19,7 +19,7 @@ export interface ExistingPatientDoc {
   /** Etiqueta libre del paciente: su nombre visible en los mensajes (R17). */
   docTypeLabel: string | null;
   docKey: string;
-  /** Pidió la supresión parcial de sus datos (Ley 1581): no se rellenan. */
+  /** Pidió la supresión parcial de sus datos (DX-039): no se rellenan. */
   partiallySuppressed?: boolean;
 }
 

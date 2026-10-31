@@ -14,8 +14,8 @@ import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 import { PatientsModule } from '../patients/patients.module';
 
-// DX-037: autorización de tratamiento de datos (Ley 1581) versionada y con
-// prueba. JwtModule + TokenService + TenantContextInterceptor: mismo cableado
+// DX-037: autorización de tratamiento de datos versionada y con prueba.
+// JwtModule + TokenService + TenantContextInterceptor: mismo cableado
 // que MedicalHistoryModule. PatientsModule exporta PATIENT_REPOSITORY para
 // validar que el paciente de la ruta sea de esta clínica (SEC-004).
 @Module({

@@ -1,13 +1,12 @@
 export const AUDIT_PARTITION_CONFIG = Symbol('AUDIT_PARTITION_CONFIG');
 
 /**
- * Retención mínima del registro de auditoría: 180 meses (15 años). Es la
- * conservación mínima de la historia clínica (Res. 1995/1999 art. 15,
- * modificado por la Res. 839/2017: 15 años desde la última atención), y el
- * registro es la evidencia de quién accedió a ella (custodia y
- * confidencialidad, Res. 1995/1999 arts. 14-16; principio de seguridad y
- * deber de conservar prueba, Ley 1581/2012 arts. 4 y 17). La misma cota la
- * aplica la BD en `audit_events_purge`.
+ * Retención mínima del registro de auditoría: 180 meses (15 años), el mismo
+ * plazo mínimo por defecto de la historia clínica
+ * (`CLINICAL_RECORD_RETENTION_YEARS`): el registro es la evidencia de quién
+ * accedió a ella (custodia, confidencialidad y prueba de seguridad), así que
+ * no puede borrarse antes que la historia. La misma cota la aplica la BD en
+ * `audit_events_purge`.
  */
 export const AUDIT_MIN_RETENTION_MONTHS = 180;
 const DEFAULT_MONTHS_AHEAD = 12;

@@ -40,7 +40,6 @@ import {
   type PatientResponsiblesView,
 } from '../application/use-cases/responsible-parties.use-cases';
 import { DocumentTypeNamesReader } from '../domain/ports/document-type-names-repository.port';
-import { resolveDocTypeInput } from '../domain/legacy-doc-type';
 import { responsiblePartyWithDocTypeName } from './doc-type-name.presenter';
 import { DefaultPhoneRegionReader } from '../domain/ports/default-phone-region-reader.port';
 import {
@@ -53,7 +52,6 @@ import {
   ResponsiblePartyDto,
   UpdateResponsiblePartyDto,
 } from './dto/responsible-party.dto';
-import type { DocTypeInput } from './dto/doc-type-input';
 import type { ResponsiblePartyView } from '../domain/ports/responsible-party-repository.port';
 
 const uuidPipe = (what: string) =>
@@ -61,13 +59,6 @@ const uuidPipe = (what: string) =>
     exceptionFactory: () =>
       new BadRequestException(`El identificador ${what} no es válido.`),
   });
-
-/**
- * DX-327 (R9): un código anterior llega como su genérico, sin etiqueta; ausente
- * y null (quitar el tipo) se conservan.
- */
-const docTypeOf = (type: DocTypeInput | null | undefined) =>
-  type === undefined || type === null ? type : resolveDocTypeInput(type);
 
 // Auditoría (DX-203): UPDATE de PATIENT con el motivo y los NOMBRES de los
 // campos enviados, nunca su contenido (datos de un tercero).
@@ -167,11 +158,7 @@ export class PatientResponsiblePartiesController {
     @Req() req: { user: TenantJwtPayload },
   ): Promise<ResponsiblePartyWithPhoneOutput> {
     return this.present(
-      await this.createParty.execute(
-        patientId,
-        { ...dto, docType: docTypeOf(dto.docType) },
-        req.user.sub,
-      ),
+      await this.createParty.execute(patientId, dto, req.user.sub),
     );
   }
 
@@ -188,10 +175,7 @@ export class PatientResponsiblePartiesController {
     @Body() dto: UpdateResponsiblePartyDto,
   ): Promise<ResponsiblePartyWithPhoneOutput> {
     return this.present(
-      await this.updateParty.execute(patientId, partyId, {
-        ...dto,
-        docType: docTypeOf(dto.docType),
-      }),
+      await this.updateParty.execute(patientId, partyId, dto),
     );
   }
 

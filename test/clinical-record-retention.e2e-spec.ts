@@ -19,7 +19,7 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
-const REASON = 'Reclamo del titular por Ley 1581';
+const REASON = 'Reclamo del titular de los datos';
 
 interface PatientBody {
   id: string;
@@ -269,7 +269,7 @@ describe('Retención legal de la historia clínica (DX-039, e2e)', () => {
     expect(event.metadata).toMatchObject({
       reason: 'RETENTION_EXTENSION_CHANGED',
     });
-    expect(JSON.stringify(event.metadata)).not.toContain('Ley 1581');
+    expect(JSON.stringify(event.metadata)).not.toContain(REASON);
   });
 
   it('supresión parcial: vacía lo no clínico, conserva la HC; sin retención da 409', async () => {

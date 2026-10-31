@@ -1,6 +1,11 @@
 import type { RetentionExtension } from '@prisma/client';
 
-/** Res. 839/2017, art. 1: 15 años desde la fecha de la última atención. */
+/**
+ * Plazo mínimo de conservación por defecto: 15 años desde la última atención.
+ * Es un valor prudente (iguala o supera el que exigen muchas normativas
+ * sanitarias); cada paciente puede ampliarlo a 30 años o a permanente
+ * (`RetentionExtension`). Si la norma local pide más, se amplía por paciente.
+ */
 export const CLINICAL_RECORD_RETENTION_YEARS = 15;
 
 const YEARS: Record<Exclude<RetentionExtension, 'PERMANENT'>, number> = {
@@ -18,7 +23,7 @@ const YEARS: Record<Exclude<RetentionExtension, 'PERMANENT'>, number> = {
  *   de febrero termina el 28 de febrero del año final si no es bisiesto (nunca
  *   salta a marzo: el plazo no se alarga un día por el calendario).
  *
- * El día civil se toma en UTC: una atención a última hora en Colombia (UTC-5)
+ * El día civil se toma en UTC: una atención a última hora en una sede a UTC−5
  * cae al día siguiente en UTC, lo que solo alarga la retención un día — el
  * error va siempre del lado de conservar.
  */

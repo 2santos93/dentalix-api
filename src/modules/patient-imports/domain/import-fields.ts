@@ -1,7 +1,7 @@
 import type { DocumentType } from '@prisma/client';
 import type { RegionalFormat } from '../../../shared/format/regional-format';
 import { documentTypeKey } from '../../patients/domain/document-type';
-import { LEGACY_DOC_NUMBER_HEADER_SYNONYMS } from '../../patients/domain/legacy-doc-type';
+import { IMPORT_DOC_NUMBER_HEADER_ALIASES } from '../../patients/domain/legacy-document-codes';
 
 /**
  * Campos de la ficha que admite la importación de pacientes (DX-107), en el
@@ -11,7 +11,7 @@ import { LEGACY_DOC_NUMBER_HEADER_SYNONYMS } from '../../patients/domain/legacy-
  * reconoce en un Excel de otro software.
  *
  * Fuera a propósito: país y ciudad (catálogo con ids), aseguradora (DX-153),
- * acudiente (DX-203), historia clínica, saldo (DX-262) y citas (DX-263).
+ * tutor (DX-203), historia clínica, saldo (DX-262) y citas (DX-263).
  */
 export const IMPORT_FIELDS = [
   {
@@ -44,7 +44,7 @@ export const IMPORT_FIELDS = [
       'numeroidentificacion',
       'numerodeidentificacion',
       'identificacion',
-      ...LEGACY_DOC_NUMBER_HEADER_SYNONYMS,
+      ...IMPORT_DOC_NUMBER_HEADER_ALIASES,
     ],
   },
   {

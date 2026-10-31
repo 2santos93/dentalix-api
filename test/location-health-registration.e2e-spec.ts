@@ -193,7 +193,9 @@ describe('Nº de registro sanitario de la sede (DX-319, e2e)', () => {
         name: 'Con REPS',
         repsHabilitationCode: value,
       }).expect(400);
-      expect(JSON.stringify(res.body)).toContain('El código REPS ya no existe');
+      expect(JSON.stringify(res.body)).toContain(
+        'repsHabilitationCode ya no existe',
+      );
     }
     const after = await raw.location.findUniqueOrThrow({
       where: { id: location.id },

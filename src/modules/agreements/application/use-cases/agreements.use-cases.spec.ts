@@ -86,27 +86,27 @@ describe('casos de uso de convenios (DX-105)', () => {
     );
     remove = new DeleteAgreementUseCase(repo);
 
-    payerId = payers.seed({ name: 'Sanitas' }).id;
-    listId = priceLists.seed({ name: 'Lista Sanitas', currency: 'COP' }).id;
-    repo.payers.set(payerId, 'Sanitas');
-    repo.priceLists.set(listId, { name: 'Lista Sanitas', currency: 'COP' });
+    payerId = payers.seed({ name: 'Sanavida' }).id;
+    listId = priceLists.seed({ name: 'Lista Sanavida', currency: 'COP' }).id;
+    repo.payers.set(payerId, 'Sanavida');
+    repo.priceLists.set(listId, { name: 'Lista Sanavida', currency: 'COP' });
   });
 
   describe('listar', () => {
     it('por defecto solo los activos, por nombre; includeInactive suma los desactivados y nunca los retirados', async () => {
-      repo.seed({ name: 'Sura' });
+      repo.seed({ name: 'Surco' });
       repo.seed({ name: 'Allianz' });
-      repo.seed({ name: 'Colsanitas', active: false });
+      repo.seed({ name: 'Colsanavida', active: false });
       const retired = repo.seed({ name: 'Retirado' });
       repo.deleted.add(retired.id);
 
       expect((await list.execute({})).map((a) => a.name)).toEqual([
         'Allianz',
-        'Sura',
+        'Surco',
       ]);
       expect(
         (await list.execute({ includeInactive: true })).map((a) => a.name),
-      ).toEqual(['Allianz', 'Colsanitas', 'Sura']);
+      ).toEqual(['Allianz', 'Colsanavida', 'Surco']);
     });
   });
 
@@ -114,7 +114,7 @@ describe('casos de uso de convenios (DX-105)', () => {
     it('descuento porcentual: normaliza el nombre y nace activo', async () => {
       const created = await create.execute(
         {
-          name: '  Convenio   Sanitas ',
+          name: '  Convenio   Sanavida ',
           payerId,
           kind: 'PERCENT_DISCOUNT',
           percent: 12.5,
@@ -124,8 +124,8 @@ describe('casos de uso de convenios (DX-105)', () => {
         'u1',
       );
       expect(created).toMatchObject({
-        name: 'Convenio Sanitas',
-        payer: { id: payerId, name: 'Sanitas' },
+        name: 'Convenio Sanavida',
+        payer: { id: payerId, name: 'Sanavida' },
         kind: 'PERCENT_DISCOUNT',
         percent: 12.5,
         percentByCategory: null,
@@ -149,7 +149,7 @@ describe('casos de uso de convenios (DX-105)', () => {
         kind: 'PRICE_LIST',
         percent: null,
         percentByCategory: null,
-        priceList: { id: listId, name: 'Lista Sanitas', currency: 'COP' },
+        priceList: { id: listId, name: 'Lista Sanavida', currency: 'COP' },
         locationId: SEDE,
       });
     });
@@ -417,7 +417,7 @@ describe('casos de uso de convenios (DX-105)', () => {
       const a = repo.seed({
         kind: 'PRICE_LIST',
         percent: null,
-        priceList: { id: listId, name: 'Lista Sanitas', currency: 'COP' },
+        priceList: { id: listId, name: 'Lista Sanavida', currency: 'COP' },
       });
       await expect(
         update.execute(a.id, { kind: 'PERCENT_DISCOUNT' }),
@@ -447,7 +447,7 @@ describe('casos de uso de convenios (DX-105)', () => {
         name: 'Por lista',
         kind: 'PRICE_LIST',
         percent: null,
-        priceList: { id: listId, name: 'Lista Sanitas', currency: 'COP' },
+        priceList: { id: listId, name: 'Lista Sanavida', currency: 'COP' },
       });
       await expect(update.execute(byList.id, { percent: 5 })).rejects.toThrow(
         new BadRequestException(AGREEMENT_PERCENT_FORBIDDEN_MESSAGE),
@@ -508,7 +508,7 @@ describe('casos de uso de convenios (DX-105)', () => {
 
     it('cambiar de pagador exige uno vivo y activo; el mismo no se comprueba', async () => {
       const a = repo.seed({
-        payer: { id: payerId, name: 'Sanitas', type: 'PUBLIC_SYSTEM' },
+        payer: { id: payerId, name: 'Sanavida', type: 'PUBLIC_SYSTEM' },
       });
       const off = payers.seed({ name: 'Apagado', active: false });
       await expect(update.execute(a.id, { payerId: off.id })).rejects.toThrow(
@@ -525,7 +525,7 @@ describe('casos de uso de convenios (DX-105)', () => {
       const a = repo.seed({
         kind: 'PRICE_LIST',
         percent: null,
-        priceList: { id: listId, name: 'Lista Sanitas', currency: 'COP' },
+        priceList: { id: listId, name: 'Lista Sanavida', currency: 'COP' },
       });
       const off = priceLists.seed({ name: 'Apagada', active: false });
       await expect(

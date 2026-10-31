@@ -324,7 +324,8 @@ model Location {
   receiptPrefix                String?
   // DX-319: nº de registro sanitario de la sede, texto libre sin formato por
   // país (hasta 64 caracteres, CHECK locations_health_registration_number_check).
-  // Sustituye al código REPS (DX-212), que se copió aquí antes de borrarlo.
+  // Sustituye al código de habilitación nacional (DX-212), que se copió aquí
+  // antes de borrarlo.
   // Solo lo edita ADMIN.
   healthRegistrationNumber     String?
   // DX-319: si el nº sale en los documentos de la sede. Por defecto no.
@@ -510,13 +511,14 @@ model ClinicInvitation {
   @@map("clinic_invitations")
 }
 
-/// Excepción G5.3 (DX-334): tipos de documento anteriores a DX-327. La API ya
-/// no los lee; los mantiene el trigger *_document_type para las réplicas
-/// anteriores (migración 20261030120000). La fase 2 borra el enum.
-enum DocType {
-  CC
-  TI
-  CE
+/// Código de documento guardado antes de DX-327, congelado y con nombres
+/// genéricos (migración 20261110130000). Nadie lo lee ni lo escribe; se
+/// conserva porque es lo único que distingue el documento de un menor
+/// (MINOR_ID) del de un adulto en las filas anteriores. NULL en las nuevas.
+enum LegacyDocumentCode {
+  NATIONAL_ID
+  MINOR_ID
+  FOREIGNER_ID
   PASSPORT
   OTHER
 }
@@ -542,11 +544,9 @@ model Patient {
   tenantId                     String                @db.Uuid
   firstName                    String
   lastName                     String
-  /// Excepción G5.3 (DX-334): código anterior a DX-327, solo para las réplicas
-  /// anteriores. La API lo escribe al crear (proyección de R3) y no lo lee.
-  docType                      DocType               @default(CC)
-  /// DX-327: el tipo. DEFAULT 'OTHER' solo para quien no lo da (R10): el
-  /// trigger patients_document_type lo deriva del código anterior.
+  /// Código anterior a DX-327, congelado (ver `LegacyDocumentCode`).
+  legacyDocumentCode           LegacyDocumentCode?   @ignore
+  /// DX-327: el tipo. DEFAULT 'OTHER' solo para quien no lo da (R10).
   documentType                 DocumentType          @default(OTHER)
   /// DX-327: nombre libre del documento (1–40, recortado); se imprime en
   /// lugar del tipo. Solo lo escribe la clínica.
@@ -561,7 +561,7 @@ model Patient {
   cityId                       Int?
   notes                        String?
   // DEPRECADO (DX-037): resumen DERIVADO de la última fila GENERAL de
-  // `data_processing_consents`, que es la prueba de la autorización Ley 1581.
+  // `data_processing_consents`, que es la prueba de la autorización del paciente.
   // Se sigue escribiendo (en la misma transacción que la fila) solo para no
   // romper a los clientes que lo leen; nunca es la fuente de verdad.
   dataConsentAccepted          Boolean               @default(false)
@@ -570,17 +570,16 @@ model Patient {
   // Identificación ampliada.
   maritalStatus                String?
   occupation                   String?
-  /// DX-322 fase 1: columna LEGADA. Solo la leen réplicas anteriores a esta
-  /// unidad. El dato vive en patient_coverages (migratedFromInsurerEps, DX-153).
-  /// Fase 2 (ticket aparte) la borra con DROP COLUMN.
-  insurerEps                   String?               @ignore
+  /// DX-322: aseguradora en texto libre anterior a DX-153, congelada. Nadie la
+  /// lee: el dato vive en patient_coverages (migratedFromLegacyInsurer).
+  legacyInsurerName            String?               @ignore
   physicianName                String?
   physicianPhone               String?
-  // Contacto de emergencia / acudiente.
+  // Contacto de emergencia / tutor.
   emergencyContactName         String?
   emergencyContactRelationship String?
   emergencyContactPhone        String?
-  // DEPRECADO (DX-203): solo lectura. El acudiente vive ahora en
+  // DEPRECADO (DX-203): solo lectura. El tutor vive ahora en
   // `patient_responsible_parties` (la migración 20261018150100 copió cada
   // valor a un contacto responsable con `migratedFromGuardian`). La API ya no
   // los escribe; se conservan para no perder el dato ni romper a quien los lee.
@@ -595,7 +594,7 @@ model Patient {
   // (dx_search_normalize). La calcula Postgres; la app nunca la escribe ni la
   // lee (@ignore): se consulta solo desde dx_patient_search_ids/_count. Ver
   // docs/adr/0001-busqueda-pacientes-rls.md.
-  // DX-039: retención legal de la HC (Res. 839/2017). `lastAttentionAt` lo
+  // DX-039: retención de la HC (15 años por defecto, ampliable). `lastAttentionAt` lo
   // mantienen triggers de BD (evolución insertada / cita COMPLETED) y nunca
   // retrocede; la app solo lo lee. `retentionExtended` lo cambia solo ADMIN
   // (rastro en patient_retention_actions + audit_events).
@@ -947,7 +946,7 @@ model ClinicalNoteTemplatePrompt {
   @@map("clinical_note_template_prompts")
 }
 
-/// Adenda (nota aclaratoria) de una evolución — DX-038, Res. 1995/1999 art. 18.
+/// Adenda (nota aclaratoria) de una evolución — DX-038: el original no se reescribe.
 /// Corrige sin tocar el original: texto + motivo, autor (del JWT) y fecha del
 /// servidor de BD. APPEND-ONLY en la BD (trigger) y RLS forzada por tenant.
 /// FK compuestas: la evolución debe ser de la misma clínica y del mismo paciente.
@@ -980,7 +979,7 @@ enum ClinicalDiagnosisKind {
 /// transacción que su evolución (trigger) y es INALTERABLE como ella (DX-038):
 /// una corrección es una adenda y un diagnóstico nuevo en otra evolución.
 /// Posición 0 = PRINCIPAL; 1..3 = relacionados (CHECK + único por evolución).
-/// Dato de salud sensible (Ley 1581): RLS forzada por tenant y FK compuesta a
+/// Dato de salud sensible: RLS forzada por tenant y FK compuesta a
 /// la evolución (misma clínica y mismo paciente).
 model ClinicalEntryDiagnosis {
   id              String                @id @default(uuid()) @db.Uuid
@@ -1585,7 +1584,7 @@ model AppointmentConfirmation {
   @@map("appointment_confirmations")
 }
 
-// DX-037: autorización de tratamiento de datos (Ley 1581 / Dec. 1377).
+// DX-037: autorización de tratamiento de datos, explícita y por finalidad.
 // GENERAL = datos personales; SENSITIVE_HEALTH = datos sensibles de salud
 // (exige consentimiento expreso y separado); MARKETING = finalidades
 // comerciales (recordatorios comerciales, campañas), siempre opcional.
@@ -2565,7 +2564,7 @@ model LocationSchedule {
   /// código nuevo no la lee nunca (la zona es `Location.timeZone`, R4) y la
   /// mantiene igual a `Location.timeZone` (doble escritura, R20). Fase 2 la
   /// borra.
-  timezone   String    @default("America/Bogota")
+  timezone   String    @default("UTC")
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
   deletedAt  DateTime?
@@ -3495,7 +3494,7 @@ model UserToken {
 }
 
 // DX-039: retención legal extendida de la historia clínica.
-//   NONE      -> 15 años desde la última atención (Res. 839/2017).
+//   NONE      -> 15 años desde la última atención (plazo por defecto).
 //   DOUBLE    -> 30 años (casos especiales que doblan el plazo).
 //   PERMANENT -> nunca se libera (p. ej. víctimas de violaciones de DD. HH./DIH).
 enum RetentionExtension {
@@ -4195,7 +4194,7 @@ enum OutboundRecipientKind {
   RESPONSIBLE
 }
 
-/// DX-203: responsable de pago y/o de los avisos de un paciente (el acudiente
+/// DX-203: responsable de pago y/o de los avisos de un paciente (el tutor
 /// de un menor, la madre que paga a sus hijos). Es OTRO paciente de la clínica
 /// (`responsiblePatientId`) o un contacto sin ficha (nombre, documento, email
 /// y teléfono): CHECK en la BD, una de las dos formas. Datos de un tercero
@@ -4212,9 +4211,8 @@ model PatientResponsibleParty {
   responsiblePatientId String?                 @db.Uuid
   /// Contacto sin ficha: NULL los cinco si es un paciente.
   fullName             String?
-  /// Excepción G5.3 (DX-334): código anterior a DX-327, solo para las réplicas
-  /// anteriores. La API lo escribe al crear (proyección de R3) y no lo lee.
-  docType              DocType?
+  /// Código anterior a DX-327, congelado (ver `LegacyDocumentCode`).
+  legacyDocumentCode   LegacyDocumentCode?     @ignore
   /// DX-327: el tipo (NULL si es un paciente; un contacto puede no tenerlo).
   documentType         DocumentType?
   /// DX-327: nombre libre del documento (1–40); exige tipo.
@@ -4250,16 +4248,9 @@ model PatientResponsibleParty {
 // Pagadores y coberturas del paciente (DX-153)
 // ---------------------------------------------------------------------------
 
-/// Tipo de pagador. La API solo usa los cinco genéricos (DX-326). Los cinco
-/// primeros son los códigos anteriores: en fase 1 la BD los sigue guardando
-/// para las réplicas anteriores, y la API los traduce al leer y al escribir
-/// (src/modules/payers/domain/legacy-payer-type.ts). La fase 2 los retira.
+/// Tipo de pagador (DX-326): cinco genéricos, para cualquier clínica. La
+/// migración 20261110130000 tradujo los códigos anteriores y los retiró.
 enum PayerType {
-  MUTUA_ES
-  PREPAGADA_CO
-  EPS_CO
-  EMPRESA
-  OTRO
   INSURER
   PREPAID_PLAN
   PUBLIC_SYSTEM
@@ -4309,37 +4300,37 @@ model Payer {
 /// (`deletedAt`). RLS FORCE y FK COMPUESTAS por tenant.
 /// PARCIALES (no declarables en Prisma, no generan drift):
 ///   patient_coverages_one_primary_key    UNIQUE ("tenantId", "patientId") WHERE "isPrimary" AND "deletedAt" IS NULL
-///   patient_coverages_migrated_key       UNIQUE ("tenantId", "patientId") WHERE "migratedFromInsurerEps"
+///   patient_coverages_migrated_key       UNIQUE ("tenantId", "patientId") WHERE "migratedFromLegacyInsurer"
 ///   patient_coverages_tenant_payer_live_idx ("tenantId", "payerId", "patientId") WHERE "deletedAt" IS NULL
 /// CHECK patient_coverages_valid_range_check: "validTo" >= "validFrom" si ambos existen.
 model PatientCoverage {
-  id                     String    @id @default(uuid()) @db.Uuid
-  tenantId               String    @db.Uuid
-  patientId              String    @db.Uuid
-  payerId                String    @db.Uuid
-  planName               String?
-  memberNumber           String?
-  policyHolderName       String?
-  validFrom              DateTime? @db.Date
-  validTo                DateTime? @db.Date
-  isPrimary              Boolean   @default(false)
-  notes                  String?
-  /// Copiado de la columna legada `patients."insurerEps"` por la migración.
-  /// Excepción G5.3 (DX-334): marca histórica de SEC-047; no es un supuesto de país.
-  migratedFromInsurerEps Boolean   @default(false)
+  id                        String    @id @default(uuid()) @db.Uuid
+  tenantId                  String    @db.Uuid
+  patientId                 String    @db.Uuid
+  payerId                   String    @db.Uuid
+  planName                  String?
+  memberNumber              String?
+  policyHolderName          String?
+  validFrom                 DateTime? @db.Date
+  validTo                   DateTime? @db.Date
+  isPrimary                 Boolean   @default(false)
+  notes                     String?
+  /// Copiado de la columna legada `patients."legacyInsurerName"` por la
+  /// migración de DX-153 (marca histórica de SEC-047).
+  migratedFromLegacyInsurer Boolean   @default(false)
   /// Punteros suaves a User, como `Payment.createdById`.
-  createdById            String?   @db.Uuid
-  updatedById            String?   @db.Uuid
+  createdById               String?   @db.Uuid
+  updatedById               String?   @db.Uuid
   /// SEC-049: quién puso por última vez el pagador o el nº de afiliado
   /// (puntero suave). NULL en las anteriores: vale `createdById`.
-  declaredById           String?   @db.Uuid
+  declaredById              String?   @db.Uuid
   /// SEC-049: un ADMIN comprobó el nº de afiliado (puntero suave y fecha, los
   /// dos o ninguno: CHECK). Cambiar el pagador o el número la borra.
-  verifiedById           String?   @db.Uuid
-  verifiedAt             DateTime?
-  createdAt              DateTime  @default(now())
-  updatedAt              DateTime  @updatedAt
-  deletedAt              DateTime?
+  verifiedById              String?   @db.Uuid
+  verifiedAt                DateTime?
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
+  deletedAt                 DateTime?
 
   tenant     Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   patient    Patient            @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "patient_coverages_patient_fkey")
