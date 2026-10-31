@@ -16,7 +16,10 @@ import {
   paymentAmountIn,
   type PaymentWithRate,
 } from '../payment-exchange-rate';
-import { ConvertAmountUseCase } from '../../../exchange/application/use-cases/convert-amount.use-case';
+import {
+  type AmountConverter,
+  ConvertAmountUseCase,
+} from '../../../exchange/application/use-cases/convert-amount.use-case';
 import {
   CONVERSION_TIMED_OUT,
   conversionDeadline,
@@ -240,11 +243,21 @@ export class GetPlanBalanceUseCase {
     // las tasas de cada día una sola vez (no una lectura por abono). Con la
     // tasa congelada (DX-375) ni siquiera se usa: solo los abonos anteriores
     // aún sin congelar se convierten con la tasa de su día.
-    const convert = this.convertAmount.memoized();
+    const memoized = this.convertAmount.memoized();
     // DX-054: un proveedor lento o colgado no retiene el saldo: todas las
     // conversiones en vivo comparten un plazo y lo que no llegue sale «sin
     // tasa», como un abono que el proveedor no puede convertir.
     const deadline = conversionDeadline();
+    // Vencido el plazo no se lanza ni una petición más a un proveedor que ya
+    // no responde a tiempo: la conversión en vivo queda pendiente y `race`
+    // la da por vencida al instante. Lo que no pide tasa (misma moneda, tasa
+    // congelada) no pasa por aquí y sigue sumando.
+    const never = <T>(): Promise<T> => new Promise<T>(() => undefined);
+    const convert: AmountConverter = {
+      execute: (input) =>
+        deadline.timedOut ? never() : memoized.execute(input),
+      quote: (input) => (deadline.timedOut ? never() : memoized.quote(input)),
+    };
     try {
       for (const payment of payments) {
         // IMP-4a/4b: cada abono se convierte por su propio importe (nunca

@@ -301,6 +301,15 @@ export class RecordSplitPaymentUseCase {
       });
       return null;
     }
+    // DX-054: proveedor de tasas fuera de plazo → `paid` previo incompleto:
+    // ni guarda de exceso ni saldo en el recibo (como un saldo ilegible).
+    if (before.rateProviderTimedOut) {
+      this.logger.warn({
+        event: 'payment_receipt.balance_unavailable',
+        error: 'RateProviderTimedOut',
+      });
+      return null;
+    }
     const known = knownSplitTotal(converted);
     if (!confirmCreditBalance && exceedsPending(known, before.balance)) {
       throw new ConflictException({

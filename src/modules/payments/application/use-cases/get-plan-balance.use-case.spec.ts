@@ -572,6 +572,27 @@ describe('GetPlanBalanceUseCase', () => {
       expect(result.rateProviderTimedOut).toBe(true);
     });
 
+    it('vencido el plazo no se pide ninguna conversión más al proveedor', async () => {
+      const { repo, fakeGetPlan, fakeConvert, uc } = makeUseCase();
+      fakeConvert.hangingFrom.add('COP');
+      fakeGetPlan.plan = makePlan({ currency: 'USD' });
+      for (const day of ['2026-03-05', '2026-03-06', '2026-03-07']) {
+        repo.seedPayment({
+          treatmentPlanId: 'plan-1',
+          amount: 400000,
+          currency: 'COP',
+          paidAt: new Date(`${day}T12:00:00.000Z`),
+        });
+      }
+
+      const pending = uc.execute('plan-1');
+      await jest.advanceTimersByTimeAsync(BALANCE_CONVERSION_BUDGET_MS);
+      const result = await pending;
+
+      expect(fakeConvert.calls).toHaveLength(1);
+      expect(result.paymentsWithoutRate).toHaveLength(3);
+    });
+
     it('sin conversiones lentas no marca nada ni deja temporizadores vivos', async () => {
       const { repo, fakeGetPlan, uc } = makeUseCase();
       fakeGetPlan.plan = makePlan({ currency: 'USD' });

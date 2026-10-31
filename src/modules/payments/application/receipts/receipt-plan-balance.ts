@@ -30,6 +30,12 @@ export class ReceiptPlanBalanceCalculator {
         return null;
       }
       const before = await this.getPlanBalance.execute(treatmentPlanId);
+      // DX-054: con el proveedor de tasas fuera de plazo el `paid` previo
+      // está incompleto; el recibo (que se congela) sale sin saldo.
+      if (before.rateProviderTimedOut) {
+        this.warnUnavailable('RateProviderTimedOut');
+        return null;
+      }
       const paid = round2(before.paid + convertedAmount);
       return {
         currency: before.planCurrency,

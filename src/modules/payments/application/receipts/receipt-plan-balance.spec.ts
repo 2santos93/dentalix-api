@@ -2,7 +2,14 @@ import { ReceiptPlanBalanceCalculator } from './receipt-plan-balance';
 import type { GetPlanBalanceUseCase } from '../use-cases/get-plan-balance.use-case';
 
 function makeCalculator(
-  before: { planCurrency: string; billable: number; paid: number } | Error = {
+  before:
+    | {
+        planCurrency: string;
+        billable: number;
+        paid: number;
+        rateProviderTimedOut?: boolean;
+      }
+    | Error = {
     planCurrency: 'COP',
     billable: 900000,
     paid: 300000,
@@ -18,6 +25,7 @@ function makeCalculator(
         balance: before.billable - before.paid,
         creditMovements: 0,
         paymentsCount: 1,
+        rateProviderTimedOut: before.rateProviderTimedOut ?? false,
       });
     },
   } as unknown as GetPlanBalanceUseCase;
@@ -57,6 +65,16 @@ describe('ReceiptPlanBalanceCalculator (DX-136)', () => {
     const { calculator, balanceCalls } = makeCalculator();
     await expect(calculator.afterPayment('plan-1', null)).resolves.toBeNull();
     expect(balanceCalls).toEqual([]);
+  });
+
+  it('DX-054: con el proveedor de tasas fuera de plazo (saldo previo incompleto), null', async () => {
+    const { calculator } = makeCalculator({
+      planCurrency: 'COP',
+      billable: 900000,
+      paid: 0,
+      rateProviderTimedOut: true,
+    });
+    await expect(calculator.afterPayment('plan-1', 10)).resolves.toBeNull();
   });
 
   it('si el saldo previo no se puede leer, null', async () => {

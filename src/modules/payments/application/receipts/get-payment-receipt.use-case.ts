@@ -197,6 +197,8 @@ export class GetPaymentReceiptUseCase {
   ): Promise<ReceiptPlanBalance | null> {
     try {
       const balance = await this.getPlanBalance.execute(treatmentPlanId);
+      // DX-054: saldo incompleto (proveedor de tasas fuera de plazo) → sin saldo.
+      if (balance.rateProviderTimedOut) return null;
       return {
         currency: balance.planCurrency,
         billable: balance.billable,
