@@ -2550,6 +2550,30 @@ model RevokedToken {
   @@map("revoked_tokens")
 }
 
+/// Familia de refresh tokens: UNA por inicio de sesión (claim `sid` del refresh
+/// token). Cada /auth/refresh rota el token vigente (`currentJti`) y deja el
+/// anterior en `previousJti`. Reusar un token ya rotado fuera de la gracia
+/// (`rotatedAt` + JWT_REFRESH_REUSE_GRACE_SECONDS) es señal de robo: se revoca
+/// la familia entera (`revokedAt`). Dentro de la gracia, el token anterior
+/// recibe OTRA copia del vigente (mismo `jti`, mismo `exp`): cubre la respuesta
+/// perdida (recarga con el refresh en vuelo) sin abrir una segunda cadena.
+/// Tabla GLOBAL (sin tenant ni RLS), como `revoked_tokens`; se purga cuando
+/// vence el último token de la familia (`expiresAt`).
+model RefreshSession {
+  id          String    @id @db.Uuid
+  userId      String    @db.Uuid
+  currentJti  String
+  previousJti String?
+  rotatedAt   DateTime?
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([expiresAt])
+  @@index([userId])
+  @@map("refresh_sessions")
+}
+
 /// Configuración de horario de atención de una SEDE (una fila por sede).
 /// Vive en su propia tabla, no como columnas de `Location`, para no tocar un
 /// modelo que el trabajo multi-sede está modificando en paralelo

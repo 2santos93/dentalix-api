@@ -1,6 +1,7 @@
 import type { AuditRequestMeta } from '../../../audit/domain/audit-request-context';
 import { ClinicRole } from '@prisma/client';
 import type { HourCycle } from '../../../locations/domain/regional-settings';
+import type { RefreshRotationDecision } from '../refresh-rotation';
 
 /** G1: país, moneda, zona y formato regional de la primera sede, ya validados. */
 export interface ClinicLocationSettings {
@@ -80,6 +81,27 @@ export interface SessionState {
   } | null;
 }
 
+/** Lo que pide /auth/refresh al rotar un token de una familia (`sid`). */
+export interface RotateRefreshSessionInput {
+  sid: string;
+  userId: string;
+  /** `jti`/`exp` del token que se presenta. */
+  presentedJti: string;
+  presentedExpiresAt: Date;
+  /** `jti`/`exp` del token nuevo, ya firmado, si se rota. */
+  nextJti: string;
+  nextExpiresAt: Date;
+  graceMs: number;
+}
+
+/**
+ * Resultado de la rotación. En `grace`, `currentJti`/`currentExpiresAt` son
+ * los del token VIGENTE de la familia: el caso de uso reemite ese mismo token.
+ */
+export type RefreshSessionRotation =
+  | { decision: Exclude<RefreshRotationDecision, 'grace'> }
+  | { decision: 'grace'; currentJti: string; currentExpiresAt: Date };
+
 export const AUTH_REPOSITORY = Symbol('AUTH_REPOSITORY');
 
 export interface AuthRepository {
@@ -112,4 +134,21 @@ export interface AuthRepository {
    * refresh concurrente perdido, o sesión cerrada con logout).
    */
   consumeRefreshToken(jti: string, expiresAt: Date): Promise<boolean>;
+  /**
+   * Rota el token de una familia (ver `domain/refresh-rotation.ts`) de forma
+   * atómica: bloquea la fila de la familia (dos refresh a la vez se
+   * serializan), decide y, si toca, guarda la rotación o la revocación por
+   * reuso. Una familia sin fila (su primer refresh) nace con el token
+   * presentado como vigente.
+   */
+  rotateRefreshSession(
+    input: RotateRefreshSessionInput,
+  ): Promise<RefreshSessionRotation>;
+  /** Revoca una familia entera (logout). Idempotente. */
+  revokeRefreshSession(
+    sid: string,
+    userId: string,
+    presentedJti: string,
+    expiresAt: Date,
+  ): Promise<void>;
 }

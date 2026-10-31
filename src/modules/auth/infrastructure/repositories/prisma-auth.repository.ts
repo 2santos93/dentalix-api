@@ -4,6 +4,7 @@ import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-even
 import { clinicRegisteredAuditEvent } from '../../domain/registration-audit';
 import { ClinicRole, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
+import { decideRefreshRotation } from '../../domain/refresh-rotation';
 import {
   MEMBERSHIP_LOCATIONS_SELECT,
   activeLocationIds,
@@ -19,6 +20,8 @@ import {
   ClinicLocationSettings,
   CreateClinicWithOwnerInput,
   MembershipRecord,
+  RefreshSessionRotation,
+  RotateRefreshSessionInput,
   SessionState,
 } from '../../domain/ports/auth-repository.port';
 
@@ -280,4 +283,115 @@ export class PrismaAuthRepository implements AuthRepository {
     }
     return true;
   }
+
+  async rotateRefreshSession(
+    input: RotateRefreshSessionInput,
+  ): Promise<RefreshSessionRotation> {
+    // Un solo reloj (el de la API, el mismo que firma `exp`) para guardar
+    // `rotatedAt` y para medir la gracia.
+    const now = new Date();
+    return this.prisma.$transaction(async (tx) => {
+      // Primer refresh de la familia: nace con el token presentado como
+      // vigente (el del login). Si ya existe, no se toca aquí
+      // (skipDuplicates = ON CONFLICT DO NOTHING).
+      await tx.refreshSession.createMany({
+        data: [
+          {
+            id: input.sid,
+            userId: input.userId,
+            currentJti: input.presentedJti,
+            expiresAt: input.presentedExpiresAt,
+          },
+        ],
+        skipDuplicates: true,
+      });
+      // FOR UPDATE: un segundo refresh de la misma familia espera a que este
+      // termine y decide con la rotación ya guardada.
+      const rows = await tx.$queryRaw<RefreshSessionRow[]>`
+        SELECT "userId", "currentJti", "previousJti", "rotatedAt", "expiresAt", "revokedAt"
+          FROM "refresh_sessions"
+         WHERE "id" = ${input.sid}::uuid
+         FOR UPDATE`;
+      const row = rows[0];
+      // Un `sid` de otro usuario no es de esta sesión: se rechaza sin tocar la
+      // familia ajena (no debería pasar: el token va firmado).
+      if (!row || row.userId !== input.userId) return { decision: 'reused' };
+      const decision = decideRefreshRotation(
+        row,
+        input.presentedJti,
+        now,
+        input.graceMs,
+      );
+      if (decision === 'rotate') {
+        await tx.refreshSession.update({
+          where: { id: input.sid },
+          data: {
+            previousJti: row.currentJti,
+            currentJti: input.nextJti,
+            rotatedAt: now,
+            // Nunca encoge: la fila vive hasta que vence el ÚLTIMO token de la
+            // familia (si no, la purga dejaría renacer una familia con un
+            // token viejo aún vigente).
+            expiresAt:
+              input.nextExpiresAt > row.expiresAt
+                ? input.nextExpiresAt
+                : row.expiresAt,
+          },
+        });
+        return { decision };
+      }
+      if (decision === 'grace') {
+        return {
+          decision,
+          currentJti: row.currentJti,
+          currentExpiresAt: row.expiresAt,
+        };
+      }
+      if (decision === 'reused') {
+        await tx.refreshSession.update({
+          where: { id: input.sid },
+          data: { revokedAt: now },
+        });
+      }
+      return { decision };
+    });
+  }
+
+  async revokeRefreshSession(
+    sid: string,
+    userId: string,
+    presentedJti: string,
+    expiresAt: Date,
+  ): Promise<void> {
+    const now = new Date();
+    // La fila se queda hasta que vence el último token de la familia, para
+    // que cualquier copia que quede responda 401 (y no nazca otra familia).
+    await this.prisma.$transaction([
+      this.prisma.refreshSession.createMany({
+        data: [
+          {
+            id: sid,
+            userId,
+            currentJti: presentedJti,
+            expiresAt,
+            revokedAt: now,
+          },
+        ],
+        skipDuplicates: true,
+      }),
+      this.prisma.refreshSession.updateMany({
+        where: { id: sid, userId, revokedAt: null },
+        data: { revokedAt: now },
+      }),
+    ]);
+  }
+}
+
+interface RefreshSessionRow {
+  userId: string;
+  currentJti: string;
+  previousJti: string | null;
+  rotatedAt: Date | null;
+  expiresAt: Date;
+  revokedAt: Date | null;
 }

@@ -43,6 +43,7 @@ function setup(opts: {
   verifyError?: boolean;
   state: SessionState | null;
   consumed?: boolean;
+  rotation?: object;
 }) {
   const tokens = {
     verifyRefresh: opts.verifyError
@@ -50,16 +51,32 @@ function setup(opts: {
       : jest.fn().mockResolvedValue(opts.payload ?? tenantPayload),
     issue: jest
       .fn()
-      .mockResolvedValue({ accessToken: 'new-acc', refreshToken: 'new-ref' }),
+      .mockResolvedValueOnce({
+        accessToken: 'new-acc',
+        refreshToken: 'new-ref',
+      })
+      .mockResolvedValue({
+        accessToken: 'grace-acc',
+        refreshToken: 'grace-ref',
+      }),
+    refreshClaims: jest.fn().mockReturnValue({
+      sid: 'fam-1',
+      jti: 'jti-2',
+      expiresAt: new Date((EXP + 60) * 1000),
+    }),
   };
   const repo = {
     findSessionState: jest.fn().mockResolvedValue(opts.state),
     consumeRefreshToken: jest.fn().mockResolvedValue(opts.consumed ?? true),
+    rotateRefreshSession: jest
+      .fn()
+      .mockResolvedValue(opts.rotation ?? { decision: 'rotate' }),
   };
   const uc = new RefreshUseCase(
     tokens as never,
     repo as never,
     new SessionClaimsService(repo as unknown as AuthRepository),
+    30_000,
   );
   return { uc, tokens, repo };
 }
@@ -353,6 +370,102 @@ describe('RefreshUseCase', () => {
       await uc.execute({ refreshToken: 'old-ref', expectedTenantId: null });
 
       expect(tokens.issue).toHaveBeenCalled();
+    });
+  });
+
+  describe('familia de refresh (claim sid): rotación, gracia y reuso', () => {
+    const familyPayload = { ...tenantPayload, sid: 'fam-1' };
+
+    it('rota dentro de la familia: firma con el mismo sid y guarda la rotación', async () => {
+      const { uc, tokens, repo } = setup({
+        payload: familyPayload,
+        state: activeMember(ClinicRole.ADMIN),
+      });
+
+      const result = await uc.execute({ refreshToken: 'old-ref' });
+
+      expect(result).toEqual({
+        accessToken: 'new-acc',
+        refreshToken: 'new-ref',
+      });
+      expect(tokens.issue).toHaveBeenCalledWith(
+        expect.objectContaining({ sub: 'u1', tv: 0 }),
+        { sid: 'fam-1' },
+      );
+      expect(repo.rotateRefreshSession).toHaveBeenCalledWith({
+        sid: 'fam-1',
+        userId: 'u1',
+        presentedJti: 'jti-1',
+        presentedExpiresAt: new Date(EXP * 1000),
+        nextJti: 'jti-2',
+        nextExpiresAt: new Date((EXP + 60) * 1000),
+        graceMs: 30_000,
+      });
+      // La denylist es solo para los refresh anteriores a las familias.
+      expect(repo.consumeRefreshToken).not.toHaveBeenCalled();
+    });
+
+    it('gracia (respuesta perdida): reemite el token VIGENTE, mismo jti y exp', async () => {
+      const current = new Date((EXP + 30) * 1000);
+      const { uc, tokens } = setup({
+        payload: familyPayload,
+        state: activeMember(ClinicRole.ADMIN),
+        rotation: {
+          decision: 'grace',
+          currentJti: 'jti-current',
+          currentExpiresAt: current,
+        },
+      });
+
+      const result = await uc.execute({ refreshToken: 'old-ref' });
+
+      expect(result).toEqual({
+        accessToken: 'grace-acc',
+        refreshToken: 'grace-ref',
+      });
+      expect(tokens.issue).toHaveBeenLastCalledWith(
+        expect.objectContaining({ sub: 'u1' }),
+        { sid: 'fam-1', jti: 'jti-current', expiresAt: current },
+      );
+    });
+
+    it.each(['reused', 'revoked'])('%s → 401', async (decision) => {
+      const { uc } = setup({
+        payload: familyPayload,
+        state: activeMember(ClinicRole.ADMIN),
+        rotation: { decision },
+      });
+
+      await expect(
+        uc.execute({ refreshToken: 'old-ref' }),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+    });
+
+    it('no toca la familia si la sesión ya no vale (tv o membresía)', async () => {
+      const { uc, repo } = setup({
+        payload: familyPayload,
+        state: activeMember(ClinicRole.ADMIN, 1),
+      });
+
+      await expect(
+        uc.execute({ refreshToken: 'old-ref' }),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+      expect(repo.rotateRefreshSession).not.toHaveBeenCalled();
+    });
+
+    it('un refresh sin sid (anterior a las familias) usa la denylist y el par nuevo ya nace en una familia', async () => {
+      const { uc, tokens, repo } = setup({
+        state: activeMember(ClinicRole.ADMIN),
+      });
+
+      await uc.execute({ refreshToken: 'old-ref' });
+
+      expect(repo.consumeRefreshToken).toHaveBeenCalled();
+      expect(repo.rotateRefreshSession).not.toHaveBeenCalled();
+      // Sin opciones: TokenService firma con un sid nuevo.
+      expect(tokens.issue).toHaveBeenCalledWith(
+        expect.objectContaining({ sub: 'u1' }),
+      );
     });
   });
 

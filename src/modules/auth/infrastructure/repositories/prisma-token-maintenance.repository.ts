@@ -24,6 +24,10 @@ export class PrismaTokenMaintenanceRepository implements TokenMaintenanceReposit
     const revokedTokens = await this.prisma.$executeRaw`
       DELETE FROM "revoked_tokens"
        WHERE "expiresAt" < ${now} - interval '5 minutes'`;
+    // La familia se borra cuando vence su ÚLTIMO token (mismo margen).
+    const refreshSessions = await this.prisma.$executeRaw`
+      DELETE FROM "refresh_sessions"
+       WHERE "expiresAt" < ${now} - interval '5 minutes'`;
     const pendingRegistrations = await this.prisma.$executeRaw`
       DELETE FROM "pending_registrations" WHERE "expiresAt" < ${now}`;
     const userTokens = await this.prisma.$executeRaw`
@@ -35,6 +39,12 @@ export class PrismaTokenMaintenanceRepository implements TokenMaintenanceReposit
       DELETE FROM "login_throttles"
        WHERE "lastFailureAt" < ${now} - make_interval(secs => ${loginThrottleStaleMs / 1000}::double precision)
          AND ("blockedUntil" IS NULL OR "blockedUntil" <= ${now})`;
-    return { revokedTokens, userTokens, pendingRegistrations, loginThrottles };
+    return {
+      revokedTokens,
+      refreshSessions,
+      userTokens,
+      pendingRegistrations,
+      loginThrottles,
+    };
   }
 }

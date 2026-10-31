@@ -4,6 +4,8 @@ export const TOKEN_MAINTENANCE_REPOSITORY = Symbol(
 
 export interface PurgedTokens {
   revokedTokens: number;
+  /** Familias de refresh cuyo último token ya venció. */
+  refreshSessions: number;
   userTokens: number;
   pendingRegistrations: number;
   /** DX-048: contadores de fallos de login ya olvidados. */
@@ -20,6 +22,7 @@ export interface TokenMaintenanceRepository {
    * Con la hora de la BD, no la del worker (revisión H7):
    * - `revoked_tokens` vencidos hace más de 5 min: el refresh token ya es
    *   inválido por su TTL; el margen cubre un reloj de la API atrasado.
+   *   Igual `refresh_sessions` (su `expiresAt` es el del último token).
    * - `pending_registrations` caducadas: guardan un email y un hash de
    *   contraseña, no se conservan.
    * - `user_tokens` caducados, usados o invalidados hace más de
