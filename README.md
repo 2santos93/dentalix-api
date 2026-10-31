@@ -1256,6 +1256,14 @@ siguen admitiendo NULL hasta la fase 2.
    migración solo añade columnas NULL, rellena las sedes existentes y añade
    restricciones que admiten NULL, así que el código anterior sigue
    funcionando. Las filas rellenadas quedan «por revisar» (aviso D5 al ADMIN).
+   Desde `20261111110000_regional_backfill_por_pais` (Z1), el barrido
+   (`dx_g1_backfill_location_regional`) deriva moneda, zona y formato del
+   país de la sede (`"countryCode"`) con una tabla de TODOS los países
+   (`prisma/reference/country-regional-defaults.json`, generada por
+   `prisma/scripts/generate-country-regional-defaults.ts` con las reglas de la
+   propuesta de la web): ningún país tiene un caso propio. La zona del horario
+   vivo manda; un país con varias zonas no propone ninguna (se elige en
+   Ajustes) y un dato que no existe queda NULL.
 2. Despliegue _rolling_ de la API nueva. Después, la web nueva.
 3. Cuando ya no quede ninguna réplica antigua:
 
