@@ -98,19 +98,13 @@ describe('a quién va la firma a distancia (DX-243)', () => {
     ).toMatchObject({ signerType: 'GUARDIAN', signerName: 'Claudia Navarro' });
   });
 
-  it('un menor con responsable sin email: al email de la ficha, firmando el responsable', () => {
+  it('un menor con responsable sin email no se envía al email de la ficha (podría ser el del menor)', () => {
     expect(
       resolveSignatureRecipient({
         ...minor,
         responsibles: [{ ...mother, email: null, documentText: null }],
       }),
-    ).toMatchObject({
-      ok: true,
-      signerType: 'GUARDIAN',
-      signerName: 'Claudia Navarro',
-      signerDocument: null,
-      email: 'familia@example.com',
-    });
+    ).toEqual({ ok: false, reason: SIGNATURE_MINOR_NO_RESPONSIBLE_MESSAGE });
   });
 
   it('un menor sin responsable registrado no se envía (ni al contacto de emergencia)', () => {

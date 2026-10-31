@@ -71,6 +71,10 @@ export function applySecurity(
       // Modo de transporte del refresh (DX-062): `cookie` = la web guarda el
       // refresh en la cookie HttpOnly y no lo recibe en el body.
       'X-Refresh-Transport',
+      // Sesión del código verificado de la firma a distancia (DX-243): la
+      // página pública /firmar la manda para ver y firmar el documento. Sin
+      // ella el navegador corta en el preflight los dos últimos pasos.
+      'X-Signature-Session',
     ],
     // El cliente necesita leer cuánto esperar tras un 429.
     exposedHeaders: ['Retry-After'],

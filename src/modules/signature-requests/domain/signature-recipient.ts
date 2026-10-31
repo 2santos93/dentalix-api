@@ -10,7 +10,7 @@ export const SIGNATURE_OPTED_OUT_MESSAGE =
 export const SIGNATURE_NO_EMAIL_MESSAGE =
   'El paciente no tiene email: añádelo en su ficha para enviarle el documento.';
 export const SIGNATURE_MINOR_NO_RESPONSIBLE_MESSAGE =
-  'El paciente es menor de edad: registra en su ficha un responsable que reciba avisos para enviarle el documento.';
+  'El paciente es menor de edad: registra en su ficha un responsable que reciba avisos y tenga email para enviarle el documento.';
 
 export interface SignatureRecipientInput {
   patient: {
@@ -53,10 +53,12 @@ const clean = (email: string | null): string | null => email?.trim() || null;
  * A quién va la firma a distancia (DX-243). Un adulto firma por sí mismo y
  * solo con SU email (nunca se le manda a un responsable). Un menor, según la
  * mayoría de edad de la clínica (DX-328) en el día civil de la sede, firma por
- * medio de su responsable registrado (DX-203) que recibe avisos: al email del
- * responsable o, si no tiene, al de la ficha (como los avisos); queda
- * signerType GUARDIAN con el nombre del responsable. Sin responsable no se
- * envía. La baja de los envíos (DX-128) lo impide siempre.
+ * medio de su responsable registrado (DX-203) que recibe avisos, y SOLO al
+ * email del propio responsable: el código prueba que firma quien dice
+ * (signerType GUARDIAN con su nombre). A diferencia de los avisos, nunca cae
+ * en el email de la ficha del menor (podría ser el del propio menor). Sin
+ * responsable con email no se envía. La baja de los envíos (DX-128) lo impide
+ * siempre.
  */
 export function resolveSignatureRecipient(
   input: SignatureRecipientInput,
@@ -97,11 +99,9 @@ export function resolveSignatureRecipient(
     (r) => r.id === notice.responsiblePartyId,
   );
   const email = clean(notice.email);
-  if (
-    !responsible ||
-    !email ||
-    (notice.kind !== 'RESPONSIBLE' && notice.kind !== 'GUARDIAN')
-  ) {
+  // Solo RESPONSIBLE: el email es el del responsable. GUARDIAN/CONTACT irían
+  // al email de la ficha del menor.
+  if (!responsible || !email || notice.kind !== 'RESPONSIBLE') {
     return { ok: false, reason: SIGNATURE_MINOR_NO_RESPONSIBLE_MESSAGE };
   }
   return {

@@ -111,6 +111,7 @@ function setup() {
   return {
     repo,
     template,
+    tenantContext,
     links,
     codes,
     cancelled,
@@ -232,6 +233,17 @@ describe('enviar a firmar a distancia (DX-243)', () => {
       professionalUserId: 'dentist-1',
       createdById: 'reception-1',
     });
+  });
+
+  it('SEC-045: un miembro restringido a otra sede no envía (la solicitud iría a una sede que no es suya)', async () => {
+    const ctx = setup();
+    await expect(
+      ctx.tenantContext.run('t1', undefined, () => send(ctx), ['loc-2']),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(ctx.repo.rows).toHaveLength(0);
+    expect(ctx.links).toHaveLength(0);
+    await ctx.tenantContext.run('t1', undefined, () => send(ctx), ['loc-1']);
+    expect(ctx.repo.rows[0].locationId).toBe('loc-1');
   });
 
   it('un menor: va al responsable, que firma como GUARDIAN con su nombre', async () => {

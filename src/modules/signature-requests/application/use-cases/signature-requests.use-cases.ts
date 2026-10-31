@@ -291,6 +291,10 @@ export class CreateSignatureRequestUseCase {
       professional.id,
       now,
     );
+    // SEC-045: la solicitud se guarda en la sede del texto (la activa o, sin
+    // ella, la principal); un miembro restringido no escribe en otra sede
+    // (después no podría ni anularla).
+    this.tenantContext.assertLocationAllowed(prepared.context.location.id);
     const ctx = await this.repo.loadRecipientContext(patientId);
     if (!ctx) throw new NotFoundException(PATIENT_NOT_FOUND_MESSAGE);
     const recipient = decideRecipient(

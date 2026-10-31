@@ -496,7 +496,10 @@ describe('Firma a distancia de consentimientos (e2e, DX-243)', () => {
   it('caducado (72 h) o anulado: «Enlace no válido» sin revelar datos', async () => {
     const { created, token } = await send();
     offsetMs = 72 * HOUR_MS;
+    // La MISMA respuesta que un token bien formado que nunca existió.
+    const unknown = await pub(clinicA.host).get('A'.repeat(43)).expect(404);
     const expired = await pub(clinicA.host).get(token).expect(404);
+    expect(expired.body).toEqual(unknown.body);
     expect(expired.body).toEqual(
       expect.objectContaining({ message: SIGNATURE_LINK_INVALID_MESSAGE }),
     );
@@ -517,7 +520,8 @@ describe('Firma a distancia de consentimientos (e2e, DX-243)', () => {
       )
       .expect(200);
     expect(revoked.body).toMatchObject({ status: 'REVOKED' });
-    await pub(clinicA.host).get(second.token).expect(404);
+    const revokedLink = await pub(clinicA.host).get(second.token).expect(404);
+    expect(revokedLink.body).toEqual(unknown.body);
     await as(clinicA, reception)
       .post(
         `/patients/${patientId}/signature-requests/${second.created.id}/revoke`,
