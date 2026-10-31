@@ -19,10 +19,12 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
+import { RECEIVABLES_CLOCK } from '../src/modules/receivables/application/use-cases/get-receivables-aging.use-case';
 import {
   locationBody,
   locationData,
   REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_TOKYO_FIXTURE,
 } from './support/location-fixtures';
 
 // DX-145 · Cartera por antigüedad. Siembra CONTROLADA por DIRECT_URL (owner,
@@ -33,7 +35,20 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 });
 
 const BOGOTA = 'America/Bogota';
-const today = (): string => civilDateIn(new Date(), BOGOTA);
+const TOKYO = REGIONAL_TOKYO_FIXTURE.timeZone;
+/**
+ * DX-209 (TST-025): la cartera corre con un instante FIJO (RECEIVABLES_CLOCK)
+ * y todo se siembra respecto a él, no al día real: una corrida que cruza la
+ * medianoche de la sede ya no mueve los tramos. Por defecto, el último
+ * segundo del 29/02/2024 en Bogotá (04:59:59 UTC del 1/03): el día civil de
+ * la sede no es el de UTC y es un 29 de febrero. `RECEIVABLES_E2E_NOW`
+ * cambia el instante sin tocar las aserciones (p. ej. 2024-03-01T05:00:01Z,
+ * pasada la medianoche de Bogotá).
+ */
+const NOW = new Date(
+  process.env.RECEIVABLES_E2E_NOW ?? '2024-03-01T04:59:59.000Z',
+);
+const today = (): string => civilDateIn(NOW, BOGOTA);
 /** Medianoche UTC del día civil de hace `n` días (como guarda las cuotas la API). */
 const dueDaysAgo = (n: number): Date =>
   new Date(`${addCivilDays(today(), -n)}T00:00:00.000Z`);
@@ -142,6 +157,8 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
     price: number,
     options: {
       createdDaysAgo?: number;
+      /** Instante exacto de creación (manda sobre `createdDaysAgo`). */
+      createdAt?: Date;
       status?: TreatmentPlanStatus;
       catalog?: string;
     } = {},
@@ -152,7 +169,8 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
         patientId,
         currency: 'COP',
         status: options.status ?? TreatmentPlanStatus.ACCEPTED,
-        createdAt: noonDaysAgo(options.createdDaysAgo ?? 0),
+        createdAt:
+          options.createdAt ?? noonDaysAgo(options.createdDaysAgo ?? 0),
         items: {
           create: {
             toothNumber: '11',
@@ -210,7 +228,10 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
   }
 
   beforeAll(async () => {
-    app = await createE2eApp();
+    app = await createE2eApp({
+      override: (builder) =>
+        builder.overrideProvider(RECEIVABLES_CLOCK).useValue(() => NOW),
+    });
     await resetDatabase(raw);
     clinicA = await registerClinic(app, 'cartera-a');
     clinicB = await registerClinic(app, 'cartera-b');
@@ -917,6 +938,80 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
       orderBy: { occurredAt: 'desc' },
     });
     expect(last?.metadata).toMatchObject({ reason: 'RECEIVABLES_AGING' });
+  });
+
+  it('DX-209: una sede en UTC+9 cuenta los días y el «al día» en SU zona, y la consolidada en la de la principal (UTC−5)', async () => {
+    const clinicE = await registerClinic(app, 'cartera-e');
+    const sedeBogota = (
+      (await get(clinicE, '/locations').expect(200)).body as { id: string }[]
+    )[0].id;
+    const sedeTokio = (
+      await raw.location.create({
+        data: locationData(REGIONAL_TOKYO_FIXTURE, {
+          tenantId: clinicE.tenantId,
+          name: 'Sede Tokio',
+        }),
+        select: { id: true },
+      })
+    ).id;
+    const catalogE = await raw.dentalCatalogItem.create({
+      data: {
+        tenantId: clinicE.tenantId,
+        code: 'CARTERA-E',
+        kind: CatalogKind.PROCEDURE,
+        labelEs: 'Resina',
+        color: '#2A2B3C',
+        defaultPrice: 1,
+      },
+      select: { id: true },
+    });
+    // El plan nace a la 01:00 de Tokio de hace 10 días de Tokio: en Bogotá
+    // (14 h antes) todavía es la tarde del día anterior.
+    const tokioToday = civilDateIn(NOW, TOKYO);
+    const createdAt = new Date(
+      `${addCivilDays(tokioToday, -10)}T01:00:00+09:00`,
+    );
+    const deudor = await patient(clinicE, 'Tokiota', 'CAR-E1');
+    await plan(clinicE, deudor, 70000, { createdAt, catalog: catalogE.id });
+    const lastVisit = new Date(createdAt.getTime() + 2 * 60 * 60 * 1000);
+    await raw.appointment.create({
+      data: {
+        tenantId: clinicE.tenantId,
+        locationId: sedeTokio,
+        patientId: deudor,
+        providerId: clinicE.adminUserId,
+        start: lastVisit,
+        end: new Date(lastVisit.getTime() + 30 * 60 * 1000),
+        status: AppointmentStatus.COMPLETED,
+      },
+    });
+
+    const tokio = (
+      await get(clinicE, `/receivables/aging?locationId=${sedeTokio}`).expect(
+        200,
+      )
+    ).body as AgingPage;
+    expect(tokio.asOf).toBe(tokioToday);
+    expect(tokio.items.map((r) => r.patient.id)).toEqual([deudor]);
+    expect(tokio.items[0]).toMatchObject({
+      locationId: sedeTokio,
+      oldestAgeDays: 10,
+      ageApproximate: true,
+    });
+    expect(tokio.items[0].currencies[0].buckets.days0to30).toBe(70000);
+
+    // Sin sede: el «al día» es el de la sede principal (Bogotá), pero la edad
+    // de la deuda sigue en la zona de la sede de la deuda.
+    const all = (await get(clinicE, '/receivables/aging').expect(200))
+      .body as AgingPage;
+    expect(all.asOf).toBe(today());
+    expect(all.items[0]).toMatchObject({ oldestAgeDays: 10 });
+    const bogota = (
+      await get(clinicE, `/receivables/aging?locationId=${sedeBogota}`).expect(
+        200,
+      )
+    ).body as AgingPage;
+    expect(bogota).toMatchObject({ asOf: today(), items: [], total: 0 });
   });
 
   describe('región del teléfono de la sede de la deuda (DX-329, P1)', () => {
