@@ -3,6 +3,7 @@ import { Type } from 'class-transformer';
 import {
   IsArray,
   IsBoolean,
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -10,11 +11,12 @@ import {
   ValidateNested,
 } from 'class-validator';
 import type {
-  Habits,
+  AnswerStatus,
   DentalHistory,
   Surgery,
   VitalSigns,
 } from '../../domain/entities/medical-history.entity';
+import { ANSWER_STATUSES } from '../../domain/anamnesis-answers';
 // Las partes viven en un archivo compartido para que el MISMO esquema
 // documente request y response (ver anamnesis-parts.dto.ts).
 import {
@@ -59,13 +61,15 @@ export class SaveMedicalHistoryDto {
   @Type(() => MedicationDto)
   medications?: MedicationDto[];
 
-  // habits/dentalHistory/vitalSigns/surgeries: objetos libres validados como
-  // JSON (v1) — se validan por forma en el frontend; aquí se aceptan tal
-  // cual (tipados con las interfaces de dominio para que el DTO sea
-  // estructuralmente compatible con `MedicalHistoryVersionData`).
+  // Hábitos tri-estado, validados (los booleanos de un cliente anterior se
+  // traducen antes: ver HabitsDto). dentalHistory/vitalSigns/surgeries:
+  // objetos libres validados como JSON (v1) — se validan por forma en el
+  // frontend; aquí se aceptan tal cual.
   @ApiPropertyOptional({ type: HabitsDto })
   @IsOptional()
-  habits?: Habits;
+  @ValidateNested()
+  @Type(() => HabitsDto)
+  habits?: HabitsDto;
 
   @ApiPropertyOptional({ type: DentalHistoryDto })
   @IsOptional()
@@ -90,12 +94,26 @@ export class SaveMedicalHistoryDto {
   @IsString()
   notes?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({
+    enum: ANSWER_STATUSES,
+    enumName: 'AnamnesisAnswerStatus',
+    description:
+      'Embarazo: SI / NO / DESCONOCE («No sabe»). Ausente = «Sin responder». Solo el «Sí» enciende la alerta.',
+  })
+  @IsOptional()
+  @IsIn(ANSWER_STATUSES)
+  pregnancy?: AnswerStatus;
+
+  @ApiPropertyOptional({
+    deprecated: true,
+    description:
+      'Deprecado: usar `pregnancy`. Solo `true` dice algo («Sí»); `false` se trata como sin responder. Si viene `pregnancy`, manda `pregnancy`.',
+  })
   @IsOptional()
   @IsBoolean()
   embarazo?: boolean;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ description: 'Solo con `pregnancy` = SI.' })
   @IsOptional()
   @IsInt()
   @Min(0)

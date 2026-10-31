@@ -715,6 +715,13 @@ model Patient {
   @@map("patients")
 }
 
+/// Respuesta tri-estado de la anamnesis (como `Condition.estado`).
+enum AnamnesisAnswerStatus {
+  SI
+  NO
+  DESCONOCE
+}
+
 model MedicalHistoryVersion {
   id               String               @id @default(uuid()) @db.Uuid
   tenantId         String               @db.Uuid
@@ -724,12 +731,19 @@ model MedicalHistoryVersion {
   allergies        Json?
   conditions       Json?
   medications      Json?
+  // Hábitos: forma tri-estado ('SI'|'NO'|'DESCONOCE') desde la migración
+  // 20261111100000; las filas anteriores conservan sus booleanos y se leen con
+  // `readStoredHabits` (true «Sí», false «No»). Nunca se reescriben.
   habits           Json?
   dentalHistory    Json?
   surgeries        Json?
   vitalSigns       Json?
   familyHistory    String?
   notes            String?
+  /// Embarazo tri-estado; NULL = sin responder. NULL también en las versiones
+  /// anteriores a la columna: ahí manda `safetyFlags.embarazo` (solo guardaba
+  /// el «Sí»), ver `readStoredPregnancy`.
+  pregnancy        AnamnesisAnswerStatus?
   // Banderas denormalizadas — calculadas en el dominio (deriveSafetyFlags).
   safetyFlags      Json?
   hasCriticalAlert Boolean              @default(false)
@@ -2547,6 +2561,30 @@ model RevokedToken {
 
   @@index([expiresAt])
   @@map("revoked_tokens")
+}
+
+/// Familia de refresh tokens: UNA por inicio de sesión (claim `sid` del refresh
+/// token). Cada /auth/refresh rota el token vigente (`currentJti`) y deja el
+/// anterior en `previousJti`. Reusar un token ya rotado fuera de la gracia
+/// (`rotatedAt` + JWT_REFRESH_REUSE_GRACE_SECONDS) es señal de robo: se revoca
+/// la familia entera (`revokedAt`). Dentro de la gracia, el token anterior
+/// recibe OTRA copia del vigente (mismo `jti`, mismo `exp`): cubre la respuesta
+/// perdida (recarga con el refresh en vuelo) sin abrir una segunda cadena.
+/// Tabla GLOBAL (sin tenant ni RLS), como `revoked_tokens`; se purga cuando
+/// vence el último token de la familia (`expiresAt`).
+model RefreshSession {
+  id          String    @id @db.Uuid
+  userId      String    @db.Uuid
+  currentJti  String
+  previousJti String?
+  rotatedAt   DateTime?
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([expiresAt])
+  @@index([userId])
+  @@map("refresh_sessions")
 }
 
 /// Configuración de horario de atención de una SEDE (una fila por sede).

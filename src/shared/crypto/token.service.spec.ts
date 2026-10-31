@@ -104,4 +104,43 @@ describe('TokenService', () => {
     const db = await svc.verifyRefresh(b.refreshToken);
     expect(da.jti).not.toBe(db.jti);
   });
+
+  it('starts a new refresh family (`sid`) on each plain issue (login)', async () => {
+    const a = await svc.verifyRefresh((await svc.issue(payload)).refreshToken);
+    const b = await svc.verifyRefresh((await svc.issue(payload)).refreshToken);
+    expect(typeof a.sid).toBe('string');
+    expect(a.sid).not.toBe(b.sid);
+  });
+
+  it('keeps the family on rotation and returns its claims', async () => {
+    const { refreshToken } = await svc.issue(payload, { sid: 'fam-1' });
+    const decoded = await svc.verifyRefresh(refreshToken);
+    expect(decoded.sid).toBe('fam-1');
+    const claims = svc.refreshClaims(refreshToken);
+    expect(claims).toEqual({
+      sid: 'fam-1',
+      jti: decoded.jti,
+      expiresAt: new Date(decoded.exp * 1000),
+    });
+  });
+
+  it('re-issues the CURRENT refresh (same jti and exp) for the grace path', async () => {
+    const original = await svc.verifyRefresh(
+      (await svc.issue(payload, { sid: 'fam-1' })).refreshToken,
+    );
+    const again = await svc.issue(payload, {
+      sid: 'fam-1',
+      jti: original.jti,
+      expiresAt: new Date(original.exp * 1000),
+    });
+    const decoded = await svc.verifyRefresh(again.refreshToken);
+    expect(decoded.jti).toBe(original.jti);
+    expect(decoded.exp).toBe(original.exp);
+    expect(decoded.sid).toBe('fam-1');
+    // El access token sí es nuevo (y no lleva familia).
+    const access = (await svc.verifyAccess(again.accessToken)) as {
+      sid?: string;
+    };
+    expect(access.sid).toBeUndefined();
+  });
 });

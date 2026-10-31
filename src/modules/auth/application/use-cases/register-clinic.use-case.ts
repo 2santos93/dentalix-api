@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   GoneException,
   Inject,
@@ -7,6 +8,11 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import {
+  normalizeSubdomain,
+  SUBDOMAIN_FORMAT_MESSAGE,
+  subdomainRuleVerdict,
+} from '../../../../shared/tenancy/subdomain-rules';
 import { AUTH_REPOSITORY } from '../../domain/ports/auth-repository.port';
 import type { AuthRepository } from '../../domain/ports/auth-repository.port';
 import { REGISTRATION_REPOSITORY } from '../../domain/ports/registration-repository.port';
@@ -61,6 +67,38 @@ export type RegisterOutcome =
   | 'PENDING_KEPT';
 
 export const SUBDOMAIN_TAKEN = 'Ese subdominio ya está en uso. Elige otro.';
+
+/**
+ * 409 `SUBDOMAIN_RESERVED`: una dirección de la plataforma (www, api…), que el
+ * router de hosts nunca resuelve a una clínica. Antes se aceptaba y dejaba una
+ * clínica inalcanzable.
+ */
+export function subdomainReserved(): ConflictException {
+  return new ConflictException({
+    statusCode: 409,
+    error: 'Conflict',
+    code: 'SUBDOMAIN_RESERVED',
+    message: 'Esa dirección está reservada para la plataforma. Elige otra.',
+  });
+}
+
+/** Lo común de accept/execute: dirección normalizada, válida y libre. */
+async function assertRegistrableSubdomain(
+  repo: AuthRepository,
+  raw: string,
+): Promise<string> {
+  const subdomain = normalizeSubdomain(raw);
+  const verdict = subdomainRuleVerdict(subdomain);
+  // El DTO ya filtra el formato; esto cubre a quien llame sin él.
+  if (verdict === 'invalid') {
+    throw new BadRequestException(SUBDOMAIN_FORMAT_MESSAGE);
+  }
+  if (verdict === 'reserved') throw subdomainReserved();
+  if (await repo.findTenantBySubdomain(subdomain)) {
+    throw new ConflictException(SUBDOMAIN_TAKEN);
+  }
+  return subdomain;
+}
 
 // Genérico a propósito (DX-029, R2): no distingue un enlace inválido o usado
 // de una contraseña que no es la del registro.
@@ -124,10 +162,10 @@ export class RegisterClinicUseCase {
       this.currencies,
       this.countries,
     );
-    const subdomain = input.subdomain.trim().toLowerCase();
-    if (await this.repo.findTenantBySubdomain(subdomain)) {
-      throw new ConflictException(SUBDOMAIN_TAKEN);
-    }
+    const subdomain = await assertRegistrableSubdomain(
+      this.repo,
+      input.subdomain,
+    );
     const passwordHash = await this.password.hash(input.password);
     this.process({ ...input, subdomain }, passwordHash, location).catch(
       (err: unknown) => {
@@ -147,10 +185,10 @@ export class RegisterClinicUseCase {
       this.currencies,
       this.countries,
     );
-    const subdomain = input.subdomain.trim().toLowerCase();
-    if (await this.repo.findTenantBySubdomain(subdomain)) {
-      throw new ConflictException(SUBDOMAIN_TAKEN);
-    }
+    const subdomain = await assertRegistrableSubdomain(
+      this.repo,
+      input.subdomain,
+    );
     const passwordHash = await this.password.hash(input.password);
     return this.process({ ...input, subdomain }, passwordHash, location);
   }
@@ -240,6 +278,9 @@ export class RegisterClinicUseCase {
     // crear una clínica: caduca sin consumirlo y sin crear nada (DX-312, R7).
     if (record.location === null) {
       throw new GoneException(REGISTRATION_LINK_EXPIRED);
+    }
+    if (subdomainRuleVerdict(record.subdomain) !== 'ok') {
+      throw subdomainReserved();
     }
     if (await this.repo.findTenantBySubdomain(record.subdomain)) {
       throw new ConflictException(

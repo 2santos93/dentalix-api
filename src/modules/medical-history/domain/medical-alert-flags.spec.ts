@@ -16,7 +16,7 @@ function snapshot(
     allergies?: Allergy[];
     conditions?: Condition[];
     medications?: { nombre: string; esAlerta: boolean }[];
-    embarazo?: boolean;
+    pregnancy?: 'SI' | 'NO' | 'DESCONOCE';
   },
   createdAt = RECENT,
 ): AnamnesisSnapshot {
@@ -79,7 +79,7 @@ describe('deriveMedicalAlertFlags (DX-247)', () => {
   it('las alertas salen en el orden del banner de la ficha', () => {
     const flags = deriveMedicalAlertFlags(
       snapshot({
-        embarazo: true,
+        pregnancy: 'SI',
         conditions: [
           valvulopatia,
           {

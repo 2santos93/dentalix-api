@@ -176,8 +176,8 @@ const healthy: MedicalHistoryVersionData = {
   conditions: [],
   medications: [],
   habits: {
-    tabaquismo: { activo: false },
-    higieneOral: { cepilladoPorDia: 3, hilo: true, cremaConFluor: true },
+    tabaquismo: { estado: 'NO' },
+    higieneOral: { cepilladoPorDia: 3, hilo: 'SI', cremaConFluor: 'SI' },
   },
 };
 
@@ -201,8 +201,8 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     medicalHistory: {
       ...healthy,
       habits: {
-        tabaquismo: { activo: true, porDia: 5, anios: 8 },
-        higieneOral: { cepilladoPorDia: 2, hilo: false },
+        tabaquismo: { estado: 'SI', porDia: 5, anios: 8 },
+        higieneOral: { cepilladoPorDia: 2, hilo: 'NO' },
       },
       dentalHistory: {
         motivoConsulta: 'Sensibilidad al frío en molares inferiores',
@@ -441,7 +441,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     emergencyContactPhone: '+57 318 555 0209',
     medicalHistory: {
       ...healthy,
-      habits: { higieneOral: { cepilladoPorDia: 2, cremaConFluor: true } },
+      habits: { higieneOral: { cepilladoPorDia: 2, cremaConFluor: 'SI' } },
       // DX-307: el peso con el que se calcula la dosis máxima de anestésico.
       vitalSigns: { peso: 32 },
     },
@@ -460,7 +460,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     occupation: 'Docente',
     medicalHistory: {
       ...healthy,
-      embarazo: true,
+      pregnancy: 'SI',
       semanasEmbarazo: 20,
       notes: 'Embarazo de 20 semanas: evitar radiografías no urgentes.',
     },
@@ -594,7 +594,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
       ],
       conditions: [],
       medications: [],
-      habits: { tabaquismo: { activo: true, porDia: 10, anios: 30 } },
+      habits: { tabaquismo: { estado: 'SI', porDia: 10, anios: 30 } },
     },
   },
   {

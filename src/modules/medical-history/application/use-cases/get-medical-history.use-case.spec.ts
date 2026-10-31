@@ -16,6 +16,7 @@ function fakeVersion(
     conditions: [],
     medications: [],
     habits: null,
+    pregnancy: null,
     dentalHistory: null,
     surgeries: [],
     vitalSigns: null,

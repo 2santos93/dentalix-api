@@ -29,6 +29,8 @@ function makeRepo(user: AuthUserRecord | null): AuthRepository {
     revokeToken: jest.fn(),
     findSessionState: jest.fn(),
     consumeRefreshToken: jest.fn(),
+    rotateRefreshSession: jest.fn(),
+    revokeRefreshSession: jest.fn(),
   };
 }
 

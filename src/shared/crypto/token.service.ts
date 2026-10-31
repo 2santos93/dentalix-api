@@ -52,8 +52,31 @@ export interface SessionVersionClaim {
 
 export type IssuablePayload = JwtPayload & SessionVersionClaim;
 
+/**
+ * Claim `sid` del REFRESH token: la familia (un inicio de sesión) a la que
+ * pertenece. /auth/refresh la usa para la rotación con detección de reuso y
+ * gracia (`modules/auth/domain/refresh-rotation.ts`). Los refresh emitidos
+ * antes de existir no lo traen: rotan por la denylist de un solo uso.
+ */
+export interface RefreshFamilyClaim {
+  sid: string;
+}
+
 export type VerifiedRefreshPayload = JwtPayload &
-  Partial<SessionVersionClaim> & { jti: string; exp: number };
+  Partial<SessionVersionClaim> &
+  Partial<RefreshFamilyClaim> & { jti: string; exp: number };
+
+/**
+ * Cómo firmar el refresh. Sin nada, uno nuevo de una familia nueva (login).
+ * `sid` = rotación dentro de la familia. `jti` + `expiresAt` = reemitir el
+ * token VIGENTE de la familia (gracia del refresh): mismo `jti`, mismo `exp`,
+ * así que no alarga la sesión ni abre otra cadena.
+ */
+export interface RefreshIssueOptions {
+  sid?: string;
+  jti?: string;
+  expiresAt?: Date;
+}
 
 /** Narrowing: ¿es un token de plataforma (superadmin, sin tenant)? */
 export function isPlatformPayload(
@@ -82,6 +105,7 @@ export class TokenService {
 
   async issue(
     payload: IssuablePayload,
+    refresh: RefreshIssueOptions = {},
   ): Promise<{ accessToken: string; refreshToken: string }> {
     // expiresIn config values are human-readable ms durations ("900s", "30d").
     // jsonwebtoken accepts them at runtime; cast to satisfy its branded StringValue type.
@@ -91,17 +115,45 @@ export class TokenService {
         'JWT_ACCESS_TTL',
       ) as JwtSignOptions['expiresIn'],
     });
-    const refreshToken = await this.jwt.signAsync(payload, {
-      secret: this.config.getOrThrow<string>('JWT_REFRESH_SECRET'),
-      expiresIn: this.config.getOrThrow<string>(
-        'JWT_REFRESH_TTL',
-      ) as JwtSignOptions['expiresIn'],
-      // jwtid → claim `jti`: identifica ESTE refresh token. /auth/refresh lo
-      // consume (un solo uso) y /auth/logout lo revoca. El access token no lo
-      // lleva (no se revoca: muere por TTL).
-      jwtid: randomUUID(),
-    });
+    const fixedExp = refresh.expiresAt
+      ? Math.floor(refresh.expiresAt.getTime() / 1000)
+      : undefined;
+    const refreshToken = await this.jwt.signAsync(
+      {
+        ...payload,
+        sid: refresh.sid ?? randomUUID(),
+        ...(fixedExp !== undefined ? { exp: fixedExp } : {}),
+      },
+      {
+        secret: this.config.getOrThrow<string>('JWT_REFRESH_SECRET'),
+        ...(fixedExp !== undefined
+          ? {}
+          : {
+              expiresIn: this.config.getOrThrow<string>(
+                'JWT_REFRESH_TTL',
+              ) as JwtSignOptions['expiresIn'],
+            }),
+        // jwtid → claim `jti`: identifica ESTE refresh token. /auth/refresh lo
+        // rota (un solo uso) y /auth/logout revoca su familia. El access token
+        // no lo lleva (no se revoca: muere por TTL).
+        jwtid: refresh.jti ?? randomUUID(),
+      },
+    );
     return { accessToken, refreshToken };
+  }
+
+  /** `sid`/`jti`/`exp` de un refresh que la propia API acaba de firmar. */
+  refreshClaims(refreshToken: string): {
+    sid: string;
+    jti: string;
+    expiresAt: Date;
+  } {
+    const { sid, jti, exp } = this.jwt.decode<{
+      sid: string;
+      jti: string;
+      exp: number;
+    }>(refreshToken);
+    return { sid, jti, expiresAt: new Date(exp * 1000) };
   }
 
   /**

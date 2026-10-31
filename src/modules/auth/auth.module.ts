@@ -1,6 +1,9 @@
 import { Module } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { AuthController } from './presentation/auth.controller';
+import { PublicSubdomainsController } from './presentation/public-subdomains.controller';
+import { CheckSubdomainAvailabilityUseCase } from './application/use-cases/check-subdomain-availability.use-case';
 import { SessionCookieService } from './presentation/session-cookie.service';
 import { RegisterClinicUseCase } from './application/use-cases/register-clinic.use-case';
 import { LoginUseCase } from './application/use-cases/login.use-case';
@@ -8,6 +11,11 @@ import { RefreshUseCase } from './application/use-cases/refresh.use-case';
 import { LogoutUseCase } from './application/use-cases/logout.use-case';
 import { SessionClaimsService } from './application/session-claims.service';
 import { AUTH_REPOSITORY } from './domain/ports/auth-repository.port';
+import {
+  REFRESH_REUSE_GRACE_ENV,
+  REFRESH_REUSE_GRACE_MS,
+  loadRefreshReuseGraceMs,
+} from './domain/refresh-rotation';
 import { PrismaAuthRepository } from './infrastructure/repositories/prisma-auth.repository';
 import { PasswordService } from '../../shared/crypto/password.service';
 import { TokenService } from '../../shared/crypto/token.service';
@@ -45,11 +53,25 @@ import { PrismaCurrencyWhitelist } from '../treatment-plans/infrastructure/adapt
     JobsModule,
     LoginLockoutModule,
   ],
-  controllers: [AuthController, PasswordResetController],
+  controllers: [
+    AuthController,
+    PasswordResetController,
+    PublicSubdomainsController,
+  ],
   providers: [
     RegisterClinicUseCase,
+    // Disponibilidad de la dirección web mientras se escribe el registro.
+    CheckSubdomainAvailabilityUseCase,
     LoginUseCase,
     RefreshUseCase,
+    // Gracia del token anterior en la rotación del refresh (validada al
+    // arrancar por validateEnv).
+    {
+      provide: REFRESH_REUSE_GRACE_MS,
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) =>
+        loadRefreshReuseGraceMs(config.get<string>(REFRESH_REUSE_GRACE_ENV)),
+    },
     LogoutUseCase,
     SessionClaimsService,
     SessionCookieService,

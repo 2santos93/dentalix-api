@@ -25,6 +25,8 @@ function makeRepo(
     revokeToken: jest.fn(),
     findSessionState: jest.fn(),
     consumeRefreshToken: jest.fn(),
+    rotateRefreshSession: jest.fn(),
+    revokeRefreshSession: jest.fn(),
   };
 }
 

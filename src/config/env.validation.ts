@@ -69,6 +69,10 @@ import {
   BREAK_GLASS_MFA_COOLDOWN_MAX_MINUTES,
   BREAK_GLASS_MIN_TTL_MINUTES,
 } from '../modules/auth/domain/break-glass';
+import {
+  REFRESH_REUSE_GRACE_ENV,
+  refreshReuseGraceProblems,
+} from '../modules/auth/domain/refresh-rotation';
 
 const REQUIRED = [
   'DATABASE_URL',
@@ -713,6 +717,9 @@ export function validateEnv(env: Env): Env {
   problems.push(...domainProblems(env));
   problems.push(...breakGlassProblems(env, isProd));
   problems.push(...storageProblems(env, isProd));
+  problems.push(
+    ...refreshReuseGraceProblems(str(env, REFRESH_REUSE_GRACE_ENV)),
+  );
   const get = (key: string) => str(env, key);
   problems.push(...shutdownConfigProblems(get));
   problems.push(...httpServerTimeoutProblems(get, isProd));

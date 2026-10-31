@@ -23,6 +23,7 @@ function version(overrides: Partial<MedicalHistory> = {}): MedicalHistory {
     conditions: [],
     medications: [],
     habits: null,
+    pregnancy: null,
     dentalHistory: null,
     surgeries: [],
     vitalSigns: null,
@@ -56,9 +57,9 @@ describe('diferencias entre la versión vigente y la propuesta (DX-099)', () => 
         },
       ],
       medications: [{ nombre: 'Warfarina', dosis: '5 mg', esAlerta: true }],
-      habits: { tabaquismo: { activo: false } },
+      habits: { tabaquismo: { estado: 'NO' } },
       surgeries: [],
-      embarazo: false,
+      pregnancy: 'NO',
     };
     const diff = diffMedicalHistory(null, proposed);
     expect(diff.hasPreviousVersion).toBe(false);
@@ -101,7 +102,7 @@ describe('diferencias entre la versión vigente y la propuesta (DX-099)', () => 
         { codigo: 'ASMA', etiqueta: 'Asma', estado: 'NO', esAlerta: false },
       ],
       medications: [{ nombre: 'Losartán', esAlerta: false }],
-      habits: { bruxismo: true },
+      habits: { bruxismo: 'SI' },
       safetyFlags: FLAGS,
     });
     const proposed: MedicalHistoryVersionData = {
@@ -129,9 +130,8 @@ describe('diferencias entre la versión vigente y la propuesta (DX-099)', () => 
         { codigo: 'ASMA', etiqueta: 'Asma', estado: 'NO', esAlerta: false },
       ],
       medications: [{ nombre: 'Losartán', esAlerta: false }],
-      habits: { bruxismo: true },
+      habits: { bruxismo: 'SI' },
       surgeries: [],
-      embarazo: false,
     };
     const diff = diffMedicalHistory(current, proposed);
     expect(diff.hasPreviousVersion).toBe(true);
@@ -148,13 +148,16 @@ describe('diferencias entre la versión vigente y la propuesta (DX-099)', () => 
   });
 
   it('embarazo y hábitos con su detalle', () => {
-    const current = version({ habits: { tabaquismo: { activo: false } } });
+    const current = version({
+      habits: { tabaquismo: { estado: 'NO' } },
+      pregnancy: 'NO',
+    });
     const diff = diffMedicalHistory(current, {
       habits: {
-        tabaquismo: { activo: true, porDia: 10 },
-        alcohol: { activo: true, frecuencia: 'Fines de semana' },
+        tabaquismo: { estado: 'SI', porDia: 10 },
+        alcohol: { estado: 'SI', frecuencia: 'Fines de semana' },
       },
-      embarazo: true,
+      pregnancy: 'SI',
       semanasEmbarazo: 12,
     });
     expect(
@@ -163,6 +166,21 @@ describe('diferencias entre la versión vigente y la propuesta (DX-099)', () => 
       ['CHANGED', 'Tabaquismo', 'No', 'Sí (10 al día)'],
       ['ADDED', 'Alcohol', null, 'Sí (Fines de semana)'],
       ['CHANGED', 'Embarazo', 'No', 'Sí (12 semanas)'],
+    ]);
+  });
+
+  it('«No sabe» en hábitos y embarazo; un embarazo sin responder en la vigente es «nuevo», nunca «No»', () => {
+    const current = version({ habits: { bruxismo: 'SI' } });
+    const diff = diffMedicalHistory(current, {
+      habits: { bruxismo: 'DESCONOCE', tabaquismo: { estado: 'DESCONOCE' } },
+      pregnancy: 'DESCONOCE',
+    });
+    expect(
+      diff.entries.map((e) => [e.change, e.label, e.before, e.after]),
+    ).toEqual([
+      ['CHANGED', 'Bruxismo', 'Sí', 'No sabe'],
+      ['ADDED', 'Tabaquismo', null, 'No sabe'],
+      ['ADDED', 'Embarazo', null, 'No sabe'],
     ]);
   });
 
@@ -211,7 +229,6 @@ describe('diferencias entre la versión vigente y la propuesta (DX-099)', () => 
       conditions: [],
       medications: [{ nombre: 'Losartán', esAlerta: false }],
       surgeries: [],
-      embarazo: false,
     });
     expect(diff.entries).toEqual([]);
   });
