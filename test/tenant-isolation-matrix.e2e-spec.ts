@@ -1160,6 +1160,25 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       path: () => `/appointments/${a.appointmentId}/reminders`,
       status: 404,
     },
+    // --- agenda de contingencia de la sede (DX-339) ---
+    {
+      name: 'GET /locations/:locationId/contingency-agenda',
+      verb: 'get',
+      path: () => `/locations/${a.locationId}/contingency-agenda`,
+      status: 404,
+    },
+    {
+      name: 'GET /locations/:locationId/contingency-agenda/nightly',
+      verb: 'get',
+      path: () => `/locations/${a.locationId}/contingency-agenda/nightly`,
+      status: 404,
+    },
+    {
+      name: 'GET /locations/:locationId/contingency-agenda/nightly/pdf',
+      verb: 'get',
+      path: () => `/locations/${a.locationId}/contingency-agenda/nightly/pdf`,
+      status: 404,
+    },
     // --- política de cancelación y asistencia (DX-279) ---
     {
       name: 'GET /locations/:id/cancellation-policy',

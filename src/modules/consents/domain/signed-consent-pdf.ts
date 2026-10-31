@@ -6,6 +6,7 @@ import {
   regionalFormat,
   type RegionalFormat,
 } from '../../../shared/format/regional-format';
+import { isWinAnsiChar } from '../../../shared/pdf/win-ansi';
 import { transliterateToAscii } from '../../../shared/storage/ascii-filename';
 import { civilDateIn } from '../../../shared/time/civil-day';
 import {
@@ -95,29 +96,19 @@ const CHANNEL_LABELS: Record<SignatureRequestChannel, string> = {
 
 const NOT_RECORDED = 'No registrado';
 
-/**
- * Lo que las fuentes estándar del PDF (WinAnsi) pintan tal cual: ASCII
- * imprimible, Latin-1 y los 27 signos de 0x80–0x9F (€, —, “”, …), más los
- * saltos de línea (\n o \r\n). El español, el portugués, el francés y el
- * resto de lenguas de Europa occidental caben enteros.
- */
-const WIN_ANSI_EXTRA = new Set('€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ'.split(''));
-
 const THIN_SPACES = /[\u2007\u2009\u202f]/g;
 
+/**
+ * Lo que las fuentes estándar del PDF (WinAnsi, `isWinAnsiChar`) pintan tal
+ * cual, más los saltos de línea (\n o \r\n).
+ */
 function isWinAnsiPrintable(text: string): boolean {
   const chars = [...text];
   return chars.every((ch, i) => {
-    const code = ch.codePointAt(0) ?? 0;
     // B5: el tabulador no avanza igual que en pantalla y un \r suelto no es
     // un salto de línea: no se pintarían tal cual. \r\n sí (un salto).
     if (ch === '\r') return chars[i + 1] === '\n';
-    return (
-      ch === '\n' ||
-      (code >= 0x20 && code <= 0x7e) ||
-      (code >= 0xa0 && code <= 0xff) ||
-      WIN_ANSI_EXTRA.has(ch)
-    );
+    return ch === '\n' || isWinAnsiChar(ch);
   });
 }
 

@@ -2015,6 +2015,52 @@ la Sede Norte, por ejemplo). Por defecto nadie está restringido.
   solo atiende en la Sede Norte; la recepción de siempre
   (`recepcion@demo.dentalix.app`) sigue con todas.
 
+## Agenda de contingencia por sede (DX-339)
+
+Si cae la nube o internet, recepción necesita saber a quién espera hoy y
+mañana y cómo llamarle. Módulo `src/modules/contingency-agenda`.
+
+- **Qué lleva** (PDF A4 apaisado, pdfkit con las fuentes estándar como el PDF
+  firmado de DX-422): las citas de HOY y MAÑANA de una sede (días civiles en
+  su zona IANA), sin canceladas ni inasistencias, ordenadas por hora y
+  profesional: hora de inicio y fin (zona, locale y reloj de la sede),
+  paciente, teléfono (formato internacional con la región de la sede, o el
+  texto guardado), profesional, tipo de cita y alertas NO clínicas: confirmada
+  / sin confirmar / en la clínica / atendida, «Primera visita» (sin ninguna
+  cita atendida antes), «Pidió que le llamen» (DX-005) y «Alerta médica: ver
+  ficha» como sí/no (alerta crítica o premedicación de DX-247, sin detalle).
+  Nunca notas ni motivo de la cita ni nada de la historia clínica. Cabecera con
+  clínica, sede, teléfono de la sede y «Generada el … (zona)»; pie con la sede
+  y «Página X de Y» en cada hoja. Un carácter que la fuente no pinta se
+  translitera o sale como «?» (`shared/pdf/win-ansi.ts`).
+- **Endpoints** (ADMIN y RECEPTION; la sede tiene que ser de la clínica —si
+  no, 404— y permitida al usuario —DX-089, si no 403 `LOCATION_NOT_ALLOWED`—;
+  sede sin zona o sin formato: 409 con su código):
+  - `GET /locations/:locationId/contingency-agenda`: el PDF generado en ese
+    momento (`attachment`, `agenda-contingencia-<sede>-<día>.pdf`,
+    `Cache-Control: private, no-store`).
+  - `GET /locations/:locationId/contingency-agenda/nightly`: estado de la copia
+    nocturna (`available`, `current` = es la de hoy en la sede, `forDate`,
+    `generatedAt`, `appointmentCount`). Sin pacientes; no se audita.
+  - `GET /locations/:locationId/contingency-agenda/nightly/pdf`: la última copia
+    tal cual se generó; 404 si aún no hay.
+- **Auditoría**: cada descarga correcta deja `audit_events` EXPORT de
+  `LOCATION` con la sede como recurso y `reason`
+  `CONTINGENCY_AGENDA_DOWNLOADED` o `CONTINGENCY_AGENDA_NIGHTLY_DOWNLOADED`.
+- **Copia nocturna**: la tarea `contingency.nightly-sweep.hourly` (ver «Trabajos
+  en segundo plano») encola, desde las 02:00 de cada sede, un
+  `contingency.nightly-agenda` por sede (payload solo con el id). El trabajo
+  guarda el PDF en el almacén PRIVADO (`contingency-agendas/<clínica>/<sede>.pdf`,
+  se sobrescribe: solo la última) y la fila de la sede en
+  `contingency_agenda_snapshots` (RLS FORCE, FK compuesta a la sede, sin
+  DELETE para la app). Una noche perdida se recupera en el tick siguiente del
+  mismo día; una sede sin zona, formato o reloj se salta hasta configurarla.
+- **Email a la sede: no**. Las sedes no tienen dirección de email propia y el
+  outbox de DX-088 no admite adjuntos; además, mandar por correo una lista con
+  nombres y teléfonos de pacientes multiplica las copias fuera del sistema. La
+  copia nocturna queda en la app (descarga auditada).
+- **Web**: botón «Agenda de contingencia» en la agenda (ADMIN y RECEPTION).
+
 ## Trabajos en segundo plano (DX-085)
 
 Cola y tareas programadas sobre la Postgres que ya existe (módulo
@@ -2181,6 +2227,7 @@ idempotencyKey, tenantId })`. Con `tx` (la de `runWithTenant`) el trabajo
   | `jobs.purge-finished.daily`          | `41 3 * * *` | Borra los trabajos terminados de más de `JOBS_RETENTION_DAYS`                                                                                                                                                                                                                                                                                                                                                                                                              |
   | `collections.settle-promises.hourly` | `7 * * * *`  | Cierra los compromisos de pago (DX-150): `KEPT` si los abonos registrados desde el compromiso y fechados hasta su día (zona de su sede) cubren el importe; `BROKEN` desde el día siguiente. Regla diaria, barrida cada hora para respetar la medianoche de cada sede; idempotente y auditada sin usuario (`origin: JOB`). El abono que cubre un compromiso lo cierra además en el acto; anular ese abono lo reabre (DX-215). Cada cierre relee con el candado del paciente |
   | `domains.recheck-sweep.hourly`       | `29 * * * *` | Re-verifica el TXT de cada dominio personalizado VERIFIED (consulta el DNS de toda la ronda y encola un `domains.recheck` por dominio, en su clínica); desactiva los que fallan `DOMAIN_RECHECK_MAX_FAILURES` veces seguidas (SEC-009). Si falla más de la mitad (y son ≥ 4), la ronda no cuenta (`domains.recheck_suspect`, DX-220)                                                                                                                                       |
+  | `contingency.nightly-sweep.hourly`   | `47 * * * *` | Agenda de contingencia (DX-339): por clínica, cada sede con zona, formato y reloj cuya copia no es la de HOY en su zona y en la que ya son las 02:00 recibe su `contingency.nightly-agenda` (clave `contingency.nightly:<sede>:<día>`); el trabajo genera el PDF de hoy y mañana y sobrescribe la copia de la sede |
 
 - **Tablas**: `jobs` y `job_schedules` son de PLATAFORMA, sin RLS (exención
   documentada en `test/rls-catalog.int-spec.ts`): un worker reclama trabajos de
