@@ -153,6 +153,77 @@ describe('CreateConfirmationLinkUseCase', () => {
     expect(repo.confirmations).toHaveLength(0);
   });
 
+  // DX-361: recepción genera o reenvía el enlace → evento en la cita.
+  describe('auditoría', () => {
+    const audit = {
+      tenantId: 't-1',
+      locationId: null,
+      actor: { userId: 'user-1', role: 'RECEPTION' as const },
+      requestId: 'req-1',
+      ip: '10.0.0.1',
+      userAgent: 'jest',
+    };
+
+    it('generar deja CONFIRMATION_LINK_CREATED y reenviar CONFIRMATION_LINK_RESENT, con la cita, quién y origen STAFF', async () => {
+      const appointment = repo.addAppointment({ locationId: 'loc-norte' });
+
+      const first = await uc.execute({
+        appointmentId: appointment.id,
+        createdById: 'user-1',
+        audit,
+      });
+      const second = await uc.execute({
+        appointmentId: appointment.id,
+        createdById: 'user-1',
+        audit,
+      });
+
+      expect(repo.auditEvents).toEqual([
+        expect.objectContaining({
+          tenantId: 't-1',
+          locationId: 'loc-norte',
+          actor: { kind: 'user', userId: 'user-1', role: 'RECEPTION' },
+          action: 'UPDATE',
+          resourceType: 'APPOINTMENT',
+          resourceId: appointment.id,
+          metadata: { origin: 'STAFF', reason: 'CONFIRMATION_LINK_CREATED' },
+        }),
+        expect.objectContaining({
+          resourceId: appointment.id,
+          metadata: { origin: 'STAFF', reason: 'CONFIRMATION_LINK_RESENT' },
+        }),
+      ]);
+      const text = JSON.stringify(repo.auditEvents);
+      for (const token of [first.token, second.token]) {
+        expect(text).not.toContain(token);
+        expect(text).not.toContain(hashConfirmationToken(token));
+      }
+    });
+
+    it('el recordatorio automático no pasa contexto: sin evento', async () => {
+      const appointment = repo.addAppointment();
+      await uc.execute({ appointmentId: appointment.id, automatic: true });
+      expect(repo.auditEvents).toEqual([]);
+    });
+
+    it('si no se emite (404, 409, 400) no queda evento', async () => {
+      await expect(
+        uc.execute({ appointmentId: 'nope', audit }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      const cancelled = repo.addAppointment({ status: 'CANCELLED' });
+      await expect(
+        uc.execute({ appointmentId: cancelled.id, audit }),
+      ).rejects.toBeInstanceOf(ConflictException);
+      const started = repo.addAppointment({
+        start: new Date(Date.now() - 60_000),
+      });
+      await expect(
+        uc.execute({ appointmentId: started.id, audit }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(repo.auditEvents).toEqual([]);
+    });
+  });
+
   // SEC-045: la restricción por sedes de DX-089, como GET /appointments/:id.
   describe('sedes permitidas', () => {
     const asMemberOf = <T>(locationIds: string[], fn: () => Promise<T>) =>

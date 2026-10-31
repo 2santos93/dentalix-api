@@ -10,7 +10,12 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { ApiBearerAuth, ApiCreatedResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiCreatedResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 import { CreateConfirmationLinkUseCase } from '../application/use-cases/create-confirmation-link.use-case';
 import { ConfirmationLinkDto } from './dto/appointment-confirmation.dto';
 import { buildConfirmationUrl, safeLinkHost } from './confirmation-url';
@@ -22,6 +27,8 @@ import { APPOINTMENT_ROLES } from '../../auth/presentation/guards/clinic-role-se
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 import type { TenantHostRequest } from '../../../shared/tenancy/tenant-host-request';
 import type { JwtPayload } from '../../../shared/crypto/token.service';
+import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
+import { auditRequestContext } from '../../audit/presentation/audit-request-context';
 
 type AuthenticatedRequest = TenantHostRequest & { user: JwtPayload };
 
@@ -39,12 +46,19 @@ export class ConfirmationLinksController {
 
   constructor(
     private readonly createLink: CreateConfirmationLinkUseCase,
+    private readonly tenantContext: TenantContextService,
     config: ConfigService,
   ) {
     this.protocol = resolvePublicWebProtocol((key) => config.get<string>(key));
   }
 
   @Post(':id/confirmation-link')
+  @ApiOperation({
+    summary:
+      'Genera (o reenvía) el enlace de confirmación de la cita; el anterior deja de valer',
+    description:
+      'DX-361: queda en la auditoría como UPDATE de APPOINTMENT (la cita), origen STAFF y `reason` CONFIRMATION_LINK_CREATED, o CONFIRMATION_LINK_RESENT si la cita ya tenía un enlace enviado. Sin el token ni la URL.',
+  })
   @ApiCreatedResponse({ type: ConfirmationLinkDto })
   async create(
     @Param('id', ParseUUIDPipe) id: string,
@@ -64,6 +78,7 @@ export class ConfirmationLinksController {
     const result = await this.createLink.execute({
       appointmentId: id,
       createdById: req.user.sub,
+      audit: auditRequestContext(req, this.tenantContext),
     });
     return {
       url: buildConfirmationUrl(this.protocol, host, result.token),

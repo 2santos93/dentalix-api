@@ -1436,6 +1436,14 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   'POST /public/sign/:token/code': 'signature-requests.e2e-spec.ts',
   'POST /public/sign/:token/verify': 'signature-requests.e2e-spec.ts',
   'POST /public/sign/:token/sign': 'signature-requests.e2e-spec.ts',
+  // DX-361: confirmación de cita por enlace, en la transacción de la
+  // escritura y sin token, hash ni URL. Recepción: UPDATE APPOINTMENT origen
+  // STAFF, CONFIRMATION_LINK_CREATED o _RESENT; el paciente (sin usuario):
+  // origen LINK, CONFIRMATION_LINK_CONFIRMED, _CANCELLED o _CALL_REQUESTED.
+  'POST /appointments/:id/confirmation-link':
+    'confirmation-audit.spec.ts, create-confirmation-link.use-case.spec.ts, appointment-confirmations-audit.int-spec.ts y appointment-confirmations.e2e-spec.ts',
+  'POST /public/appointment-confirmations/:token':
+    'confirmation-audit.spec.ts, respond-confirmation.use-case.spec.ts, appointment-confirmations-audit.int-spec.ts y appointment-confirmations.e2e-spec.ts',
   // ANAMNESIS_SUBMITTED (y el consentimiento) en la transacción del envío.
   'POST /public/medical-history/:token':
     'medical-history-submissions.e2e-spec.ts',
@@ -1573,10 +1581,6 @@ const KNOWN_UNAUDITED: Record<string, string> = {
     'hueco: movimientos de inventario sin evento',
 
   // --- Citas y enlaces al paciente -----------------------------------------
-  'POST /appointments/:id/confirmation-link':
-    'hueco: emitir el enlace de confirmación sin evento',
-  'POST /public/appointment-confirmations/:token':
-    'hueco: la respuesta del paciente cambia la cita sin evento',
   'POST /public/post-op-instructions/:token/opened':
     'marca la apertura de la indicación; sin evento',
 };
