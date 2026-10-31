@@ -101,6 +101,12 @@ export interface AuditMetadata {
    */
   coverage?: AuditCoverage;
   /**
+   * SEC-053: una edición de la cobertura que cambió su vigencia: las fechas
+   * (días civiles o null = abierta) antes y después y si borró la
+   * verificación del ADMIN. Solo fechas y un booleano: nada del paciente.
+   */
+  coverageValidity?: AuditCoverageValidityChange;
+  /**
    * DX-319: nº de registro sanitario de una sede y si sale en los documentos,
    * antes y después. Es la única excepción de texto: un dato público de la
    * SEDE (el que se imprime para el paciente), nunca de un paciente; hasta 64
@@ -214,6 +220,18 @@ export interface AuditCoverage {
   payerType: string;
   memberNumberLast4: string | null;
   verified: boolean;
+}
+
+/** Vigencia de una cobertura en un evento (SEC-053). */
+export interface AuditCoverageValidity {
+  validFrom: string | null;
+  validTo: string | null;
+}
+
+export interface AuditCoverageValidityChange {
+  before: AuditCoverageValidity;
+  after: AuditCoverageValidity;
+  verificationCleared: boolean;
 }
 
 /** Un lado del cambio del nº de registro sanitario de la sede (DX-319). */
@@ -842,6 +860,38 @@ function coverage(value: unknown): AuditCoverage | null {
   };
 }
 
+/** Día civil que existe, `null` (abierta) o `undefined` si no vale. */
+function civilDateOrNull(value: unknown): string | null | undefined {
+  if (value === null) return null;
+  return typeof value === 'string' &&
+    CIVIL_DATE.test(value) &&
+    parseCivilDate(value) === value
+    ? value
+    : undefined;
+}
+
+function coverageValiditySide(value: unknown): AuditCoverageValidity | null {
+  if (!isRecord(value)) return null;
+  const { validFrom, validTo, ...rest } = value;
+  const from = civilDateOrNull(validFrom);
+  const to = civilDateOrNull(validTo);
+  if (Object.keys(rest).length > 0 || from === undefined || to === undefined) {
+    return null;
+  }
+  return { validFrom: from, validTo: to };
+}
+
+/** Los dos lados con la forma admitida y el booleano, o nada (SEC-053). */
+function coverageValidity(value: unknown): AuditCoverageValidityChange | null {
+  if (!isRecord(value)) return null;
+  const before = coverageValiditySide(value.before);
+  const after = coverageValiditySide(value.after);
+  if (!before || !after || typeof value.verificationCleared !== 'boolean') {
+    return null;
+  }
+  return { before, after, verificationCleared: value.verificationCleared };
+}
+
 /** Una línea con exactamente esa forma, o `null`. */
 function allocationLine(value: unknown): AuditAllocationLine | null {
   if (!isRecord(value)) return null;
@@ -1076,6 +1126,8 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (backup) out.exchangeRateBackup = backup;
   const covered = coverage(input.coverage);
   if (covered) out.coverage = covered;
+  const validity = coverageValidity(input.coverageValidity);
+  if (validity) out.coverageValidity = validity;
   const registration = healthRegistration(input.healthRegistration);
   if (registration) out.healthRegistration = registration;
   const reallocated = allocation(input.allocation);

@@ -46,6 +46,8 @@ const VERIFY_ADMIN_ONLY =
 const VERIFY_STALE =
   'El pagador o el nº de afiliado de esta cobertura cambió mientras lo revisabas: vuelve a abrirla y compruébalo.';
 const COVERAGE_NOT_FOUND = 'Cobertura no encontrada.';
+const NOT_LIVE =
+  'La cobertura elegida no está vigente hoy: revisa sus fechas o elige otra.';
 
 const NUMBER = '1020304050';
 
@@ -528,6 +530,194 @@ describe('Cobertura verificable para asignar un convenio (e2e, SEC-049)', () => 
       expect(message(noNumber)).toBe(
         'Escribe antes el nº de afiliado: sin él no se puede verificar la cobertura.',
       );
+    });
+  });
+
+  // SEC-053 (BE-048): la verificación del ADMIN avala ESA vigencia. Quien no
+  // es ADMIN y alarga o quita el fin de una cobertura verificada y vencida la
+  // deja «Sin verificar» y declarada por él: ya no le habilita el convenio.
+  describe('vigencia de una cobertura verificada (SEC-053)', () => {
+    const vigencia = { validFrom: '2025-01-01', validTo: '2025-12-31' };
+
+    /** La crea y la verifica el ADMIN, vencida desde 2025. */
+    async function verifiedExpired(label: string): Promise<{
+      patient: string;
+      coverageId: string;
+    }> {
+      const patient = await createPatient(label);
+      const coverageId = await post(
+        coverages(patient),
+        { payerId: payer, memberNumber: NUMBER, ...vigencia },
+        tokens.ADMIN,
+      );
+      await verify(patient, coverageId).expect(200);
+      return { patient, coverageId };
+    }
+
+    const patch = (
+      patient: string,
+      coverageId: string,
+      body: Record<string, unknown>,
+      token: string,
+    ) =>
+      as(api().patch(`${coverages(patient)}/${coverageId}`), token).send(body);
+
+    const changedEvents = async (patient: string) =>
+      (await coverageEvents(patient)).filter(
+        (e) =>
+          (e.metadata as { reason?: string }).reason === 'COVERAGE_CHANGED',
+      );
+
+    it.each(ROLES)(
+      '%s alarga o quita el fin de una cobertura verificada y vencida',
+      async (role) => {
+        const { patient, coverageId } = await verifiedExpired(
+          `Vigencia ${role}`,
+        );
+        // Vencida: nadie asigna con ella.
+        const expired = await assign(patient, coverageId, tokens[role]).expect(
+          400,
+        );
+        expect(message(expired)).toBe(NOT_LIVE);
+
+        const res = await patch(
+          patient,
+          coverageId,
+          { validTo: null },
+          tokens[role],
+        ).expect(200);
+        const admin = role === ClinicRole.ADMIN;
+        expect(res.body).toMatchObject({
+          validTo: null,
+          status: 'ACTIVE',
+          ...(admin
+            ? {
+                verifiedById: clinic.adminUserId,
+                declaredById: clinic.adminUserId,
+              }
+            : {
+                verifiedAt: null,
+                verifiedById: null,
+                verifiedByName: null,
+                declaredById: userIds[role],
+              }),
+        });
+        // Lo mismo en la ficha.
+        const listed = await as(api().get(coverages(patient)), tokens[role])
+          .expect(200)
+          .then((r) => (r.body as { verifiedAt: string | null }[])[0]);
+        expect(listed.verifiedAt === null).toBe(!admin);
+
+        const assigned = await assign(patient, coverageId, tokens[role]);
+        if (admin) {
+          expect(assigned.status).toBe(200);
+        } else {
+          expect(assigned.status).toBe(403);
+          expect(message(assigned)).toBe(SELF_DECLARED);
+          expect(
+            await raw.patientAgreement.count({
+              where: { patientId: patient, deletedAt: null },
+            }),
+          ).toBe(0);
+        }
+
+        const events = await changedEvents(patient);
+        expect(events).toEqual([
+          expect.objectContaining({
+            actorRole: role,
+            actorUserId: userIds[role],
+            metadata: expect.objectContaining({
+              changedFields: ['validTo'],
+              coverage: expect.objectContaining({ verified: admin }) as unknown,
+              coverageValidity: {
+                before: vigencia,
+                after: { validFrom: '2025-01-01', validTo: null },
+                verificationCleared: !admin,
+              },
+            }) as unknown,
+          }),
+        ]);
+      },
+    );
+
+    it.each([ClinicRole.DENTIST, ClinicRole.ASSISTANT, ClinicRole.RECEPTION])(
+      '%s mueve el inicio: también queda sin verificar',
+      async (role) => {
+        const { patient, coverageId } = await verifiedExpired(`Inicio ${role}`);
+        await patch(
+          patient,
+          coverageId,
+          { validFrom: '2024-06-01' },
+          tokens[role],
+        )
+          .expect(200)
+          .then((r) =>
+            expect(r.body).toMatchObject({
+              verifiedAt: null,
+              declaredById: userIds[role],
+            }),
+          );
+      },
+    );
+
+    it('cambiar solo las notas (o reenviar la misma vigencia) no afecta a la verificación ni lleva vigencia al evento', async () => {
+      const { patient, coverageId } = await verifiedExpired('Solo notas');
+      for (const role of [
+        ClinicRole.DENTIST,
+        ClinicRole.ASSISTANT,
+        ClinicRole.RECEPTION,
+      ]) {
+        await patch(
+          patient,
+          coverageId,
+          { notes: `Revisada por ${role}`, ...vigencia },
+          tokens[role],
+        )
+          .expect(200)
+          .then((r) =>
+            expect(r.body).toMatchObject({
+              verifiedById: clinic.adminUserId,
+              declaredById: clinic.adminUserId,
+            }),
+          );
+      }
+      const events = await changedEvents(patient);
+      expect(events).toHaveLength(3);
+      for (const e of events) {
+        expect(e.metadata).not.toHaveProperty('coverageValidity');
+      }
+    });
+
+    it('la reproducción de BE-048: recepción quita el fin y se asigna el convenio del 100 % → 403; tras verificar de nuevo, 200', async () => {
+      const { patient, coverageId } = await verifiedExpired('BE-048');
+      await patch(
+        patient,
+        coverageId,
+        { validTo: null },
+        tokens.RECEPTION,
+      ).expect(200);
+      const res = await assign(patient, coverageId, tokens.RECEPTION).expect(
+        403,
+      );
+      expect(message(res)).toBe(SELF_DECLARED);
+      await verify(patient, coverageId).expect(200);
+      await assign(patient, coverageId, tokens.RECEPTION).expect(200);
+    });
+
+    it('otra clínica no edita la vigencia de una cobertura ajena (404) y la verificación sigue', async () => {
+      for (const role of ROLES) {
+        await patch(
+          foreignPatient,
+          foreignCoverage,
+          { validTo: null },
+          tokens[role],
+        ).expect(404);
+      }
+      const row = await raw.patientCoverage.findUniqueOrThrow({
+        where: { id: foreignCoverage },
+        select: { verifiedById: true, validTo: true },
+      });
+      expect(row).toEqual({ verifiedById: other.adminUserId, validTo: null });
     });
   });
 
