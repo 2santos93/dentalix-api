@@ -85,6 +85,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // 2026-07-28-logout.md; cookie de refresh: loop/informes/DX-062.md.
   'POST /auth/register': PUBLIC,
   'POST /auth/register/verify': PUBLIC,
+  // ¿Está libre esta dirección web? (registro, mientras se escribe): sin
+  // sesión ni clínica; límite propio `subdomain-check` por IP.
+  'GET /public/subdomains/:slug/availability': PUBLIC,
   'POST /auth/login': PUBLIC,
   'POST /auth/refresh': PUBLIC,
   'POST /auth/logout': PUBLIC,
