@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type {
   AnesthesiaEntryRef,
   AnesthesiaPatientContext,
+  AnesthesiaRecordPrior,
   AnesthesiaRepository,
   AnestheticProductInput,
   AnestheticProductPatch,
@@ -12,6 +13,11 @@ import type {
   AnestheticProduct,
 } from '../../domain/entities';
 import type { SampleAnesthetic } from '../../domain/sample-anesthetics';
+import {
+  type DoseWindow,
+  isInDoseWindow,
+  type WindowAdministration,
+} from '../../domain/anesthesia-window';
 
 /** Repositorio en memoria de una sola clínica para los unit de DX-307. */
 export class InMemoryAnesthesiaRepository implements AnesthesiaRepository {
@@ -19,6 +25,9 @@ export class InMemoryAnesthesiaRepository implements AnesthesiaRepository {
   records: AnesthesiaAdministration[] = [];
   patients = new Map<string, AnesthesiaPatientContext>();
   entries = new Map<string, AnesthesiaEntryRef & { patientId: string }>();
+  /** Nombres de profesionales y sedes para el desglose (DX-418). */
+  authorNames = new Map<string, string>();
+  locationNames = new Map<string, string>();
 
   listProducts(includeInactive: boolean): Promise<AnestheticProduct[]> {
     return Promise.resolve(
@@ -111,14 +120,41 @@ export class InMemoryAnesthesiaRepository implements AnesthesiaRepository {
     );
   }
 
+  listPatientWindow(
+    patientId: string,
+    window: DoseWindow,
+  ): Promise<WindowAdministration[]> {
+    return Promise.resolve(
+      this.records
+        .filter(
+          (r) =>
+            r.patientId === patientId &&
+            isInDoseWindow(r.administeredAt, window),
+        )
+        .sort((a, b) => a.administeredAt.getTime() - b.administeredAt.getTime())
+        .map((r) => ({
+          ...r,
+          authorName: this.authorNames.get(r.authorId) ?? null,
+          locationName: r.locationId
+            ? (this.locationNames.get(r.locationId) ?? null)
+            : null,
+        })),
+    );
+  }
+
   async record(
     patientId: string,
     entryId: string,
+    window: DoseWindow,
     build: (
-      prior: AnesthesiaAdministration[],
+      prior: AnesthesiaRecordPrior,
     ) => NewAnesthesiaAdministration | Promise<NewAnesthesiaAdministration>,
   ): Promise<AnesthesiaAdministration> {
-    const input = await build(await this.listByEntry(patientId, entryId));
+    const prior: AnesthesiaRecordPrior = {
+      entry: await this.listByEntry(patientId, entryId),
+      window: await this.listPatientWindow(patientId, window),
+    };
+    const input = await build(prior);
     const { anesthetic, ...rest } = input;
     const row: AnesthesiaAdministration = {
       id: randomUUID(),

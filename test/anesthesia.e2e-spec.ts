@@ -324,7 +324,7 @@ describe('Anestesia local en la evolución (DX-307, e2e)', () => {
       expect(
         (events[0].metadata as { anesthesiaSafety: unknown }).anesthesiaSafety,
       ).toEqual({
-        rulesVersion: 'ANESTHESIA_DOSE_V1',
+        rulesVersion: 'ANESTHESIA_DOSE_V2',
         blocking: ['DOSE_OVER_MAX'],
         info: [],
         overridden: true,
@@ -354,15 +354,17 @@ describe('Anestesia local en la evolución (DX-307, e2e)', () => {
   });
 
   it('dos anestésicos: el % es la suma de fracciones (lidocaína 51 % + articaína 49 % → 409)', async () => {
-    const entry = await createEntry(a, child, dentistA.token);
-    await call(a, 'post', anesthesia(child, entry), dentistA.token)
+    // Otra paciente: la niña ya recibió hoy 204 mg (DX-418, cuentan las 24 h).
+    const twin = await createPatient(a, 'Gemela', '2018-05-10', { peso: 20 });
+    const entry = await createEntry(a, twin, dentistA.token);
+    await call(a, 'post', anesthesia(twin, entry), dentistA.token)
       .send({
         anestheticId: byCode(catalogA, 'LIDOCAINE_2_EPI').id,
         carpules: 2,
         technique: 'INFILTRATION',
       })
       .expect(201);
-    const res = await call(a, 'post', anesthesia(child, entry), dentistA.token)
+    const res = await call(a, 'post', anesthesia(twin, entry), dentistA.token)
       .send({
         anestheticId: byCode(catalogA, 'ARTICAINE_4_EPI').id,
         carpules: 1,
@@ -538,6 +540,194 @@ describe('Anestesia local en la evolución (DX-307, e2e)', () => {
       } finally {
         await appRole.$disconnect();
       }
+    });
+  });
+
+  describe('DX-418 · acumulado del paciente en 24 h (todas las evoluciones y sedes)', () => {
+    interface Part {
+      clinicalEntryId: string;
+      current: boolean;
+      authorName: string | null;
+      locationName: string | null;
+      mg: number;
+      percent: number | null;
+    }
+    interface Window {
+      hours: number;
+      parts: Part[];
+      pendingMg: number | null;
+    }
+    const lido3 = () => ({
+      anestheticId: byCode(catalogA, 'LIDOCAINE_2_EPI').id,
+      carpules: 3,
+      technique: 'INFILTRATION',
+    });
+    let kid: string;
+    let centro: string;
+    let norte: string;
+
+    beforeAll(async () => {
+      kid = await createPatient(a, 'Mateo', '2018-05-10', { peso: 20 });
+      centro = await createEntry(a, kid, dentistA.token);
+      // El odontólogo restringido a la Sede Norte la abre allí.
+      norte = await createEntry(a, kid, restrictedDentistA);
+      const [c, n] = await Promise.all(
+        [centro, norte].map((id) =>
+          raw.clinicalEntry.findUniqueOrThrow({
+            where: { id },
+            select: { locationId: true },
+          }),
+        ),
+      );
+      expect(c.locationId).not.toBeNull();
+      expect(n.locationId).not.toBe(c.locationId);
+    });
+
+    it('criterio: 20 kg, 3 carpules de lidocaína en la evolución 1 (77 %) y 3 en la 2 (otra sede) → 409 con 216 mg (154 %)', async () => {
+      const first = await call(
+        a,
+        'post',
+        anesthesia(kid, centro),
+        dentistA.token,
+      )
+        .send(lido3())
+        .expect(201);
+      expect(
+        (first.body as { cumulativePercent: number }).cumulativePercent,
+      ).toBe(77);
+
+      const check = await call(
+        a,
+        'post',
+        `${anesthesia(kid, norte)}/check`,
+        restrictedDentistA,
+      )
+        .send({ anestheticId: lido3().anestheticId, carpules: 3 })
+        .expect(200);
+      const preview = check.body as { summary: Summary; window: Window };
+      expect(preview.summary).toEqual(
+        expect.objectContaining({
+          totalMg: 216,
+          percent: 154,
+          level: 'EXCEEDED',
+        }),
+      );
+      expect(preview.window.hours).toBe(24);
+      expect(preview.window.pendingMg).toBe(108);
+      expect(preview.window.parts).toEqual([
+        expect.objectContaining({
+          clinicalEntryId: centro,
+          current: false,
+          authorName: 'Miembro DENTIST',
+          mg: 108,
+          percent: 77,
+        }),
+      ]);
+      expect(preview.window.parts[0].locationName).not.toBe('Sede Norte');
+
+      const conflict = await call(
+        a,
+        'post',
+        anesthesia(kid, norte),
+        restrictedDentistA,
+      )
+        .send(lido3())
+        .expect(409);
+      expect((conflict.body as { message: string }).message).toContain(
+        '216 mg de 140 mg (154 %)',
+      );
+      expect(
+        await raw.anesthesiaAdministration.count({
+          where: { patientId: kid },
+        }),
+      ).toBe(1);
+    });
+
+    it('con motivo se guarda y la barra de cada evolución enseña el acumulado del paciente con el desglose', async () => {
+      const saved = await call(
+        a,
+        'post',
+        anesthesia(kid, norte),
+        restrictedDentistA,
+      )
+        .send({ ...lido3(), overrideReason: OVERRIDE })
+        .expect(201);
+      expect(saved.body).toEqual(
+        expect.objectContaining({
+          cumulativeMg: 216,
+          cumulativePercent: 154,
+          overrideReason: OVERRIDE,
+          safetyRulesVersion: 'ANESTHESIA_DOSE_V2',
+        }),
+      );
+      const listed = await call(
+        a,
+        'get',
+        anesthesia(kid, centro),
+        assistantA,
+      ).expect(200);
+      const entry = listed.body as {
+        records: unknown[];
+        summary: Summary;
+        window: Window;
+      };
+      expect(entry.records).toHaveLength(1);
+      expect(entry.summary.percent).toBe(154);
+      expect(
+        entry.window.parts.map((p) => [
+          p.clinicalEntryId,
+          p.current,
+          p.authorName,
+          p.locationName === 'Sede Norte',
+          p.mg,
+        ]),
+      ).toEqual([
+        [centro, true, 'Miembro DENTIST', false, 108],
+        [norte, false, 'Dentista Norte', true, 108],
+      ]);
+    });
+
+    it('las administraciones de otra clínica nunca cuentan', async () => {
+      // B registra para su paciente: no aparece en nada de A.
+      await call(b, 'post', anesthesia(patientB, entryB), b.adminToken)
+        .send({
+          anestheticId: byCode(catalogB, 'LIDOCAINE_2_EPI').id,
+          carpules: 3,
+          technique: 'INFILTRATION',
+        })
+        .expect(201);
+      const fresh = await createPatient(a, 'Nueva', '2018-05-10', {
+        peso: 20,
+      });
+      const entry = await createEntry(a, fresh, dentistA.token);
+      const res = await call(
+        a,
+        'get',
+        anesthesia(fresh, entry),
+        dentistA.token,
+      ).expect(200);
+      const body = res.body as { summary: Summary; window: Window };
+      expect(body.summary.totalMg).toBe(0);
+      expect(body.window.parts).toEqual([]);
+      const ofB = await call(
+        b,
+        'get',
+        anesthesia(patientB, entryB),
+        b.adminToken,
+      ).expect(200);
+      expect(
+        (ofB.body as { window: Window }).window.parts.map((p) => p.mg),
+      ).toEqual([108]);
+    });
+
+    it('una hora futura en la previsualización es 400', async () => {
+      await call(a, 'post', `${anesthesia(kid, centro)}/check`, dentistA.token)
+        .send({
+          anestheticId: lido3().anestheticId,
+          carpules: 1,
+          administeredAt: new Date(Date.now() + 3_600_000).toISOString(),
+        })
+        .expect(400);
     });
   });
 

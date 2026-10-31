@@ -48,7 +48,10 @@ export interface AnesthesiaAdministration {
   administeredAt: Date;
   weightKg: number | null;
   weightSource: WeightSource | null;
-  /** mg y % acumulados de la evolución CON este registro. */
+  /**
+   * mg y % acumulados CON este registro: de la evolución en V1 (DX-307); del
+   * paciente en la ventana de 24 h en V2 (DX-418). Ver `safetyRulesVersion`.
+   */
   cumulativeMg: number;
   cumulativePercent: number | null;
   safetyRulesVersion: string;

@@ -102,7 +102,10 @@ export class AnesthesiaController {
   @Roles(...CLINICAL_ROLES)
   @ApiParam({ name: 'entryId', format: 'uuid' })
   @ApiOperation({
-    summary: 'Anestesia de una evolución y su acumulado frente al máximo',
+    summary:
+      'Anestesia de una evolución y el acumulado del paciente en las últimas 24 h frente al máximo',
+    description:
+      'DX-418: el acumulado suma TODAS las administraciones del paciente en la clínica (cualquier evolución, sede y profesional) en una ventana móvil de 24 h, con el desglose por evolución y profesional. Las de otra clínica nunca cuentan.',
   })
   @ApiOkResponse({ type: EntryAnesthesiaDto })
   @ApiNotFoundResponse({ description: 'Paciente o evolución no encontrados' })
@@ -126,10 +129,10 @@ export class AnesthesiaController {
   @ApiOperation({
     summary: 'Previsualiza la dosis acumulada con un anestésico más',
     description:
-      'No guarda nada. Lee la anamnesis vigente (peso y alergias) y lo ya registrado en la evolución.',
+      'No guarda nada. Lee la anamnesis vigente (peso y alergias) y lo ya registrado al paciente a menos de 24 h de `administeredAt` (por defecto, ahora) en cualquier evolución y sede de la clínica (DX-418).',
   })
   @ApiOkResponse({ type: AnesthesiaCheckDto })
-  @ApiBadRequestResponse({ description: 'Carpules o peso inválidos' })
+  @ApiBadRequestResponse({ description: 'Carpules, peso u hora inválidos' })
   @ApiNotFoundResponse({
     description: 'Paciente, evolución o anestésico no encontrados',
   })
@@ -142,6 +145,9 @@ export class AnesthesiaController {
       anestheticId: dto.anestheticId,
       carpules: dto.carpules,
       weightKg: dto.weightKg,
+      administeredAt: dto.administeredAt
+        ? new Date(dto.administeredAt)
+        : undefined,
     });
   }
 
@@ -158,7 +164,7 @@ export class AnesthesiaController {
   @ApiOperation({
     summary: 'Registra anestesia local en la evolución (inalterable)',
     description:
-      'El servidor calcula los mg, el acumulado de la evolución y la fracción del máximo por peso. Al llegar al 100 % (o con alergia a anestésicos) responde 409 salvo `overrideReason`, que queda sellado y auditado.',
+      'El servidor calcula los mg, el acumulado del PACIENTE a menos de 24 h de la administración (todas sus evoluciones y sedes de la clínica, DX-418) y la fracción del máximo por peso. Al llegar al 100 % (o con alergia a anestésicos) responde 409 salvo `overrideReason`, que queda sellado y auditado. Dos registros simultáneos del mismo paciente se serializan (bloqueo por paciente): el segundo calcula con el primero.',
   })
   @ApiCreatedResponse({ type: RecordedAnesthesiaDto })
   @ApiBadRequestResponse({

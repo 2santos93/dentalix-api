@@ -6,6 +6,7 @@ import type {
 } from '../entities';
 import type { AnesthesiaAnamnesis, DoseAlert } from '../anesthesia-dose';
 import type { SampleAnesthetic } from '../sample-anesthetics';
+import type { DoseWindow, WindowAdministration } from '../anesthesia-window';
 
 export const ANESTHESIA_REPOSITORY = Symbol('ANESTHESIA_REPOSITORY');
 
@@ -66,6 +67,14 @@ export interface NewAnesthesiaAdministration {
   authorId: string;
 }
 
+/** Lo ya registrado que decide un registro nuevo (leído bajo el bloqueo). */
+export interface AnesthesiaRecordPrior {
+  /** De ESTA evolución, en orden de administración (para el peso). */
+  entry: AnesthesiaAdministration[];
+  /** Del paciente en la ventana (DX-418), de cualquier evolución y sede. */
+  window: AnesthesiaAdministration[];
+}
+
 export interface AnesthesiaRepository {
   listProducts(includeInactive: boolean): Promise<AnestheticProduct[]>;
   findProduct(id: string): Promise<AnestheticProduct | null>;
@@ -101,16 +110,28 @@ export interface AnesthesiaRepository {
   ): Promise<AnesthesiaAdministration[]>;
   listByPatient(patientId: string): Promise<AnesthesiaAdministration[]>;
   /**
-   * Append-only. Bloquea la evolución (FOR UPDATE) para que dos registros
-   * simultáneos no pasen los dos por debajo del máximo, lee lo ya registrado
-   * y llama a `build`, que decide (o lanza) con ese acumulado; inserta lo que
-   * devuelva, en la MISMA transacción.
+   * DX-418: administraciones del paciente con `administeredAt` dentro de la
+   * ventana, en TODAS sus evoluciones y sedes de esta clínica (nunca de
+   * otra: RLS), con el nombre del profesional y de la sede para el desglose.
+   * En orden de administración.
+   */
+  listPatientWindow(
+    patientId: string,
+    window: DoseWindow,
+  ): Promise<WindowAdministration[]>;
+  /**
+   * Append-only. Bloquea al PACIENTE (DX-418; en DX-307 era la evolución)
+   * para que dos registros simultáneos, en la misma o en otra evolución o
+   * sede, no pasen los dos por debajo del máximo; lee lo ya registrado (la
+   * evolución y la ventana) y llama a `build`, que decide (o lanza) con ese
+   * acumulado; inserta lo que devuelva, en la MISMA transacción.
    */
   record(
     patientId: string,
     entryId: string,
+    window: DoseWindow,
     build: (
-      prior: AnesthesiaAdministration[],
+      prior: AnesthesiaRecordPrior,
     ) => NewAnesthesiaAdministration | Promise<NewAnesthesiaAdministration>,
   ): Promise<AnesthesiaAdministration>;
 }

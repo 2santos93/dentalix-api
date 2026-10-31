@@ -5458,6 +5458,8 @@ model AnesthesiaAdministration {
   author     User              @relation(fields: [authorId], references: [id])
 
   @@index([tenantId, patientId, clinicalEntryId, administeredAt], map: "anesthesia_administrations_entry_idx")
+  // DX-418: acumulado del paciente en la ventana de 24 h (todas sus evoluciones).
+  @@index([tenantId, patientId, administeredAt], map: "anesthesia_administrations_patient_time_idx")
   @@index([tenantId, anestheticId], map: "anesthesia_administrations_anesthetic_idx")
   // PARCIAL (WHERE "locationId" IS NOT NULL), no declarable en Prisma:
   //   anesthesia_administrations_location_idx ("tenantId", "locationId")
