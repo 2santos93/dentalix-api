@@ -1,3 +1,4 @@
+import { round2 } from '../../../../shared/money/money';
 export type Periodicity = 'WEEKLY' | 'BIWEEKLY' | 'MONTHLY';
 
 export interface GenerateScheduleInput {
@@ -12,10 +13,6 @@ export interface GeneratedInstallment {
   sequence: number;
   dueDate: Date;
   amount: number;
-}
-
-function round2(value: number): number {
-  return Math.round(value * 100) / 100;
 }
 
 // Calendar-month add in UTC with end-of-month clamp (Jan 31 + 1m -> Feb 28/29),

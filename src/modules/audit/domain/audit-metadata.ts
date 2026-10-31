@@ -8,6 +8,7 @@ import { MAX_ALLOCATION_LINES } from '../../payments/domain/allocation-rules';
 import { MAX_HOLIDAYS_PER_FILE } from '../../location-calendar/domain/holiday-rules';
 import { parseCivilDate } from '../../../shared/time/civil-day';
 import { ClinicRole } from '@prisma/client';
+import { round2 } from '../../../shared/money/money';
 
 export interface AuditMetadata {
   /** Campos que traía la petición de escritura (nombres, nunca valores). */
@@ -549,7 +550,7 @@ function currencyTotals(value: unknown): AuditCurrencyTotal[] {
       typeof amount !== 'number' ||
       !Number.isFinite(amount) ||
       amount < 0 ||
-      Math.round(amount * 100) / 100 !== amount
+      round2(amount) !== amount
     ) {
       continue;
     }
@@ -955,7 +956,7 @@ function allocationLine(value: unknown): AuditAllocationLine | null {
     typeof amount !== 'number' ||
     !Number.isFinite(amount) ||
     amount < 0 ||
-    Math.round(amount * 100) / 100 !== amount
+    round2(amount) !== amount
   ) {
     return null;
   }

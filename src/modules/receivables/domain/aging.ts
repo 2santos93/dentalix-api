@@ -1,4 +1,5 @@
 import { parseCivilDate } from '../../../shared/time/civil-day';
+import { fromCents, toCents } from '../../../shared/money/money';
 
 /*
  * Tramos de la cartera por antigüedad (DX-145). Fijos, como en Open Dental:
@@ -73,13 +74,7 @@ export function emptyBuckets(): AgingBuckets {
 
 // Montos Decimal(14,2): se suman en centavos enteros (mismo criterio que el
 // estado de cuenta y la caja) para que 0.1 + 0.2 sea 0.3.
-export function toCents(amount: number): number {
-  return Math.round(amount * 100);
-}
-
-export function fromCents(cents: number): number {
-  return cents / 100;
-}
+export { fromCents, toCents };
 
 /** Suma `amount` al tramo, exacto en centavos. Muta `buckets`. */
 export function addToBuckets(

@@ -25,6 +25,7 @@ import {
   PLAN_CREDIT_READER,
   type PlanCreditReader,
 } from '../../domain/ports/plan-credit-reader.port';
+import { round2 } from '../../../../shared/money/money';
 
 export interface GetPlanBalanceResult {
   planCurrency: string;
@@ -97,12 +98,6 @@ export interface GetPlanBalanceWithItemsResult extends GetPlanBalanceResult {
   manualPaymentIds: string[];
   /** En el orden del plan. */
   items: PlanItemBalance[];
-}
-
-// Same rounding policy as CreateSaleUseCase/ConvertAmountUseCase: monetary
-// sums are rounded to 2 decimals to avoid floating point drift.
-function round2(value: number): number {
-  return Math.round(value * 100) / 100;
 }
 
 const BILLABLE_STATUSES: ReadonlySet<TreatmentPlanItemStatus> = new Set([

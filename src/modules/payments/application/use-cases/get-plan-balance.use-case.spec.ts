@@ -13,6 +13,7 @@ import { ConvertAmountUseCase } from '../../../exchange/application/use-cases/co
 import { TreatmentPlanDetail } from '../../../treatment-plans/domain/entities/treatment-plan.entity';
 import { TreatmentPlanItem } from '../../../treatment-plans/domain/entities/treatment-plan-item.entity';
 import { PLAN_WITHOUT_OPTIONS } from '../../../treatment-plans/application/use-cases/__fixtures__/in-memory-treatment-plan.repository';
+import { round2 } from '../../../../shared/money/money';
 
 class FakeGetTreatmentPlanUseCase {
   public plan: TreatmentPlanDetail | null = null;
@@ -30,10 +31,6 @@ interface FakeConvertInput {
   from: string;
   to: string;
   date: string;
-}
-
-function round2(value: number): number {
-  return Math.round(value * 100) / 100;
 }
 
 /**

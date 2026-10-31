@@ -22,6 +22,7 @@ import {
   type VoidActor,
 } from '../../payments/domain/void-window';
 import { isPlanBillable } from '../../treatment-plans/domain/plan-status-machine';
+import { fromCents, toCents } from '../../../shared/money/money';
 
 export interface ComputeAccountStatementOptions {
   /** "Hoy" para decidir qué cuota está vencida (inyectado, nunca el reloj). */
@@ -68,16 +69,6 @@ export interface ComputeAccountStatementOptions {
  * - Próxima cuota = la de vencimiento más cercano que todavía no venció ni está
  *   pagada (las vencidas ya se cuentan aparte).
  */
-
-// Montos Decimal(14,2): sumar en centavos enteros es exacto (mismo criterio que
-// ListCashPaymentsUseCase).
-function toCents(amount: number): number {
-  return Math.round(amount * 100);
-}
-
-function fromCents(cents: number): number {
-  return cents / 100;
-}
 
 function countsTowardsBalance(status: TreatmentPlanStatus): boolean {
   return isPlanBillable(status);

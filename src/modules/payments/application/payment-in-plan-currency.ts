@@ -1,6 +1,7 @@
 import { ExchangeRateUnavailableError } from '../../exchange/domain/ports/exchange-rate-provider.port';
 import { isMissingRateError } from '../../exchange/domain/missing-exchange-rate.error';
 import type { AmountConverter } from '../../exchange/application/use-cases/convert-amount.use-case';
+import { round2 } from '../../../shared/money/money';
 
 export interface PaymentToConvert {
   amount: number;
@@ -9,8 +10,6 @@ export interface PaymentToConvert {
   /** Día civil del abono en su sede: la fecha de la tasa (DX-097). */
   paidOn: string;
 }
-
-const round2 = (value: number): number => Math.round(value * 100) / 100;
 
 // Se tratan como «sin tasa» SOLO estos fallos: `ConvertAmountUseCase` lanza el
 // primero cuando la moneda del abono no tiene tasa ese día (en el snapshot del

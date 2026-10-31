@@ -28,6 +28,7 @@ import {
   type PaymentMethodRepository,
 } from '../../../payment-methods/domain/ports/payment-method-repository.port';
 import { PAYMENT_METHOD_NOT_FOUND_MESSAGE } from '../../../payment-methods/domain/payment-method-rules';
+import { toCents } from '../../../../shared/money/money';
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 20;
@@ -110,13 +111,6 @@ function normalizePageSize(pageSize?: number): number {
     return DEFAULT_PAGE_SIZE;
   }
   return Math.min(Math.floor(pageSize), MAX_PAGE_SIZE);
-}
-
-// Los montos son Decimal(14,2): sumar en centavos enteros es exacto (14 dígitos
-// caben de sobra en un entero seguro de JS) y evita que 0.1 + 0.2 salga
-// 0.30000000000000004 en un total de caja.
-function toCents(amount: number): number {
-  return Math.round(amount * 100);
 }
 
 function methodRank(method: PaymentMethod | null): number {

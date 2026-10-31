@@ -622,7 +622,9 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
         const written: unknown[] = [];
         await expect(
           useCase(doneItem(), written).execute('item1', { price: 250 }, actor),
-        ).rejects.toThrow(new ConflictException(DONE_ITEM_PRICE_LOCKED_MESSAGE));
+        ).rejects.toThrow(
+          new ConflictException(DONE_ITEM_PRICE_LOCKED_MESSAGE),
+        );
         expect(written).toHaveLength(0);
       }
     });

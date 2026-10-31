@@ -31,9 +31,7 @@ describe('abono con fecha futura (DX-054)', () => {
       false,
     );
     // 2026-11-03 empieza como pronto el 2026-11-02T10:00Z: más de 24 h.
-    expect(isPaidAtTooFarInFuture({ civilDate: '2026-11-03' }, NOW)).toBe(
-      true,
-    );
+    expect(isPaidAtTooFarInFuture({ civilDate: '2026-11-03' }, NOW)).toBe(true);
     expect(isPaidAtTooFarInFuture({ civilDate: '2026-10-31' }, NOW)).toBe(
       false,
     );

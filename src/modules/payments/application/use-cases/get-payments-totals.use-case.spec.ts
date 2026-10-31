@@ -4,16 +4,13 @@ import { GetPaymentsTotalsUseCase } from './get-payments-totals.use-case';
 import { VoidPaymentUseCase } from './void-payment.use-case';
 import { InMemoryPaymentRepository } from './__fixtures__/in-memory-payment.repository';
 import { ConvertAmountUseCase } from '../../../exchange/application/use-cases/convert-amount.use-case';
+import { round2 } from '../../../../shared/money/money';
 
 interface FakeConvertInput {
   amount: number;
   from: string;
   to: string;
   date: string;
-}
-
-function round2(value: number): number {
-  return Math.round(value * 100) / 100;
 }
 
 /**

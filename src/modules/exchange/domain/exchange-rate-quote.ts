@@ -1,4 +1,5 @@
 import { BASE_CURRENCY, type ExchangeRateSource } from './exchange-rate-source';
+import { round2 } from '../../../shared/money/money';
 
 /**
  * DX-375: la tasa con la que se convierte un importe de `from` a `to` un día,
@@ -36,5 +37,5 @@ export function convertWithQuote(
   const usd =
     quote.from === BASE_CURRENCY ? amount : amount / quote.fromPerBase;
   const raw = quote.to === BASE_CURRENCY ? usd : usd * quote.toPerBase;
-  return Math.round(raw * 100) / 100;
+  return round2(raw);
 }

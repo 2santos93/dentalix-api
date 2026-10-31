@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { ToothSurface } from '@prisma/client';
+import { fromCents, toCents } from '../../../shared/money/money';
 
 /** «Válido 30 días»: el presupuesto caduca 30 días naturales después de emitirse. */
 export const QUOTE_VALIDITY_DAYS = 30;
@@ -119,14 +120,6 @@ export interface QuoteContent {
   items: QuoteItem[];
   /** Una fila por moneda (hoy un plan tiene una sola). */
   totals: QuoteTotal[];
-}
-
-function toCents(value: number): number {
-  return Math.round(value * 100);
-}
-
-function fromCents(cents: number): number {
-  return cents / 100;
 }
 
 function addDays(date: string, days: number): string {
