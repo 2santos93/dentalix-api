@@ -208,7 +208,7 @@ export const EXPENSE_INTEGRITY_MESSAGES = {
 // (ERRCODE propio Q4270). Mismo texto que el RAISE de la migración
 // 20261107120000_dx427_anesthesia_sedation_checks.
 export const CLINICAL_TIME_BEFORE_ENTRY_MESSAGE =
-  'La hora no puede ser anterior a la fecha de la evolución.';
+  'La hora no puede ser anterior a la fecha de la evolución. Indica la fecha de atención correcta en la evolución.';
 const CLINICAL_TIME_BEFORE_ENTRY: ErrorBody = {
   statusCode: HttpStatus.BAD_REQUEST,
   error: 'Bad Request',

@@ -29,7 +29,7 @@
 --   «ahora» de la evolución sin cita: 36 h cubren el día entero en cualquier
 --   zona (UTC−12…UTC+14) y documentar al final de la jornada. Un CHECK no
 --   puede leer otra tabla; el trigger es SECURITY INVOKER (lee la evolución
---   bajo la RLS de la clínica de la fila) y no se aplica a lo ya registrado.
+--   bajo la RLS de la sesión: sin `app.current_tenant` no la ve y deja pasar) y no se aplica a lo ya registrado.
 --
 -- Compatible hacia atrás: solo restringe lo que la app ya no escribe (sus
 -- reglas son las mismas o más estrictas). Sin columnas, sin reescritura y sin
@@ -98,7 +98,7 @@ BEGIN
   WHERE e."tenantId" = NEW."tenantId" AND e."id" = NEW."clinicalEntryId";
   IF entry_date IS NOT NULL
      AND NEW."administeredAt" < entry_date - interval '36 hours' THEN
-    RAISE EXCEPTION 'La hora no puede ser anterior a la fecha de la evolución.'
+    RAISE EXCEPTION 'La hora no puede ser anterior a la fecha de la evolución. Indica la fecha de atención correcta en la evolución.'
       USING ERRCODE = 'Q4270';
   END IF;
   RETURN NEW;
@@ -121,7 +121,7 @@ BEGIN
     ON e."tenantId" = s."tenantId" AND e."id" = s."clinicalEntryId"
   WHERE s."tenantId" = NEW."tenantId" AND s."id" = NEW."sedationRecordId";
   IF entry_date IS NOT NULL AND clinical_at < entry_date - interval '36 hours' THEN
-    RAISE EXCEPTION 'La hora no puede ser anterior a la fecha de la evolución.'
+    RAISE EXCEPTION 'La hora no puede ser anterior a la fecha de la evolución. Indica la fecha de atención correcta en la evolución.'
       USING ERRCODE = 'Q4270';
   END IF;
   RETURN NEW;

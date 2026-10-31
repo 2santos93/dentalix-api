@@ -5037,11 +5037,15 @@ también por SQL directo o desde una réplica antigua.
     WHERE "checkedAt" > "createdAt" + interval '15 minutes';
   ```
 
-  Si el `VALIDATE` falla (por `lock_timeout` o por una fila así), `npx prisma
-  migrate resolve --rolled-back 20261107120100_dx427_anesthesia_sedation_validate`
-  y `deploy` de nuevo: la primera migración ya protege las escrituras nuevas.
-  Una fila incoherente no se corrige (es inalterable): se documenta con una
-  adenda y se decide con el responsable clínico.
+  La consulta es **obligatoria antes de desplegar**. Si el `VALIDATE` falla
+  por `lock_timeout`, `npx prisma migrate resolve --rolled-back
+  20261107120100_dx427_anesthesia_sedation_validate` y `deploy` de nuevo. Si
+  la consulta devuelve filas, el `VALIDATE` fallará en cada despliegue (las
+  filas son inalterables y no se corrigen): marca la migración como aplicada
+  con `npx prisma migrate resolve --applied
+  20261107120100_dx427_anesthesia_sedation_validate`, de modo que los CHECK
+  quedan `NOT VALID` pero siguen protegiendo cada escritura nueva, documenta
+  cada fila con una adenda y abre una incidencia con el responsable clínico.
 - **Pruebas**: `test/anesthesia-sedation-checks.int-spec.ts` (INSERT crudos
   con `dentalix_app`) y `test/migrations/dx427-additive.spec.ts`.
 

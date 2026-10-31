@@ -295,7 +295,8 @@ describe('PrismaExceptionFilter', () => {
     expect(bodyOf(json)).toEqual({
       statusCode: 400,
       error: 'Bad Request',
-      message: 'La hora no puede ser anterior a la fecha de la evolución.',
+      message:
+        'La hora no puede ser anterior a la fecha de la evolución. Indica la fecha de atención correcta en la evolución.',
     });
     expect(JSON.stringify(bodyOf(json))).not.toContain(SECRET_DETAIL);
     jest.restoreAllMocks();

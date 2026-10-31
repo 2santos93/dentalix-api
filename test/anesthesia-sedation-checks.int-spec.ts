@@ -37,7 +37,7 @@ const NEW_CHECKS = [
 /** Mensaje y SQLSTATE de la guarda «anterior a la evolución». */
 const BEFORE_ENTRY_STATE = 'Q4270';
 const BEFORE_ENTRY_MESSAGE =
-  'La hora no puede ser anterior a la fecha de la evolución.';
+  'La hora no puede ser anterior a la fecha de la evolución. Indica la fecha de atención correcta en la evolución.';
 
 const minutes = (n: number) => `interval '${n} minutes'`;
 

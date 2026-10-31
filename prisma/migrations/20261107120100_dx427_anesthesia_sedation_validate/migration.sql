@@ -5,7 +5,8 @@
 -- de desplegar, la consulta previa del README («DX-427»).
 --
 -- lock_timeout 5 s; para reintentar, `prisma migrate resolve --rolled-back
--- 20261107120100_dx427_anesthesia_sedation_validate` y `deploy`.
+-- 20261107120100_dx427_anesthesia_sedation_validate` y `deploy`. Si hay filas
+-- incumplidoras (inalterables), `resolve --applied` según el README («DX-427»).
 
 SET LOCAL lock_timeout = '5s';
 
