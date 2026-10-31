@@ -17,7 +17,7 @@
 --
 -- ADD VALUE va en su propio fichero: un valor nuevo no se puede usar en la
 -- misma transacción que lo crea (los índices de
--- 20261111100100_dx360_audit_events_idx lo usan).
+-- 20261111110100_dx360_audit_events_idx lo usan).
 --
 -- Fecha: posterior a las migraciones de main en el momento de la rama
 -- (20261110100100, DX-470).

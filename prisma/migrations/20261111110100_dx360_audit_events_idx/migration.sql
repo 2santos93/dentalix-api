@@ -7,7 +7,7 @@
 -- "audit_events_resource_<valor>_idx" por cada valor de "AuditResourceType":
 -- es el que sirve el filtro por tipo de recurso del registro de auditoría
 -- bajo RLS. Va en su PROPIA migración: los valores se añadieron en
--- 20261111100000_dx360_enums y Postgres no deja usar un valor de enum nuevo
+-- 20261111110000_dx360_enums y Postgres no deja usar un valor de enum nuevo
 -- en la misma transacción que lo crea.
 --
 -- No es concurrente (tabla particionada): bloquea las escrituras de auditoría
@@ -17,7 +17,7 @@
 -- lock_timeout 5 s: acota la ESPERA del bloqueo (no la construcción). Si
 -- falla, Prisma la deja marcada como fallida y otro `migrate deploy` se para
 -- con P3009: antes hay que ejecutar `npx prisma migrate resolve --rolled-back
--- 20261111100100_dx360_audit_events_idx` y luego repetir `migrate deploy`.
+-- 20261111110100_dx360_audit_events_idx` y luego repetir `migrate deploy`.
 --
 -- Aditiva; se propaga a cada partición. IF NOT EXISTS: idempotente.
 -- Rollback: DROP INDEX IF EXISTS de cada uno (el filtro sigue funcionando,
