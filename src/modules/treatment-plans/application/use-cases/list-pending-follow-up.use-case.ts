@@ -64,7 +64,9 @@ export class ListPendingFollowUpUseCase {
   /**
    * Presupuestos por seguir (DX-040): planes PRESENTED hace más de N días
    * (7 por defecto) cuyo paciente no tiene cita futura, paginados (tope 100
-   * por página) y con su monto en la moneda del plan.
+   * por página) y con su monto en la moneda del plan. D2: la página es de
+   * GRUPOS de opciones (A/B del mismo plan), así que puede traer más filas
+   * que `pageSize`; `total` cuenta grupos.
    */
   async execute(input: ListPendingFollowUpInput): Promise<PendingFollowUpPage> {
     const now = this.now();
