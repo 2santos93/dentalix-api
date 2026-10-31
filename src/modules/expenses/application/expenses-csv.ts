@@ -1,5 +1,5 @@
 import { csvAmount, csvDocument, csvText } from '../../../shared/csv/csv-cells';
-import { currencyDecimals } from '../../../shared/money/currency-decimals';
+import type { CurrencyDigitsTable } from '../../../shared/money/currency-digits';
 import type { ExpenseStatus } from '../domain/entities/expense.entity';
 import type { ExpenseView } from './expense-view';
 
@@ -35,11 +35,12 @@ export const EXPENSE_STATUS_LABELS: Record<ExpenseStatus, string> = {
 export function toExpensesCsv(
   rows: readonly ExpenseView[],
   locationNames: ReadonlyMap<string, string>,
+  digits: CurrencyDigitsTable,
 ): string {
   const lines: string[] = [EXPENSES_CSV_HEADER.join(',')];
   for (const row of rows) {
     const money = (value: number) =>
-      csvAmount(value, currencyDecimals(row.currency));
+      csvAmount(value, digits.roundingDigits(row.currency));
     lines.push(
       [
         row.invoiceDate,

@@ -2,6 +2,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { seedIcd10Codes } from '../src/modules/reference/infrastructure/seed-icd10-codes';
 import { loadCitySeedRows } from './reference/cities';
 import { ISO3166_COUNTRIES } from './reference/iso3166';
+import { CURRENCY_DIGITS } from './reference/currency-digits';
 import { ISO4217_CURRENCIES } from './reference/iso4217';
 
 // Corre con el rol owner (DIRECT_URL): estas tablas son globales, sin RLS.
@@ -19,12 +20,20 @@ const prisma = new PrismaClient<Prisma.PrismaClientOptions>({
 // 2026-07 (USD, COP, EUR…) conservan su nombre y símbolo de entonces, y el
 // seed los cambia por los de `Intl`. Solo es texto de presentación: el código
 // y los decimales no cambian.
+// DX-340: los decimales (minor units ISO y dígitos de redondeo) los rellena la
+// migración 20261111100100; el seed escribe los mismos de la referencia para
+// que una base sembrada sin esa migración no se quede con el 2 por defecto.
 async function seedCurrencies(): Promise<void> {
+  const digits = new Map(CURRENCY_DIGITS.map((c) => [c.code, c] as const));
   for (const { code, name, symbol } of ISO4217_CURRENCIES) {
+    const reference = digits.get(code);
+    if (!reference)
+      throw new Error(`Moneda ${code} sin decimales de referencia`);
+    const { minorUnits, roundingDigits } = reference;
     await prisma.currency.upsert({
       where: { code },
-      update: { name, symbol },
-      create: { code, name, symbol },
+      update: { name, symbol, minorUnits, roundingDigits },
+      create: { code, name, symbol, minorUnits, roundingDigits },
     });
   }
   console.log(`Seeded ${ISO4217_CURRENCIES.length} currencies`);

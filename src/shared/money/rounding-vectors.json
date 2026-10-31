@@ -1,0 +1,475 @@
+{
+  "about": "DX-340: vectores de redondeo compartidos por la API (src/shared/money/rounding-vectors.json) y la web (src/lib/money/rounding-vectors.json, copia byte a byte). Fijan la regla vigente: cada línea se redondea a roundingDigits de su moneda (la mitad hacia arriba) y el total es la suma de líneas. No dependen de Intl.",
+  "currencies": {
+    "COP": {
+      "minorUnits": 2,
+      "roundingDigits": 0
+    },
+    "EUR": {
+      "minorUnits": 2,
+      "roundingDigits": 2
+    },
+    "JPY": {
+      "minorUnits": 0,
+      "roundingDigits": 0
+    },
+    "RSD": {
+      "minorUnits": 2,
+      "roundingDigits": 0
+    }
+  },
+  "discountForPercent": [
+    {
+      "currency": "RSD",
+      "price": 123.45,
+      "percent": 7.5,
+      "capPercent": 100,
+      "discount": 9
+    },
+    {
+      "currency": "RSD",
+      "price": 1000,
+      "percent": 10,
+      "capPercent": 10,
+      "discount": 100
+    },
+    {
+      "currency": "RSD",
+      "price": 1005,
+      "percent": 10.01,
+      "capPercent": 10,
+      "discount": 100
+    },
+    {
+      "currency": "RSD",
+      "price": 99.99,
+      "percent": 10,
+      "capPercent": 10,
+      "discount": 9
+    },
+    {
+      "currency": "RSD",
+      "price": 19.99,
+      "percent": 50,
+      "capPercent": 100,
+      "discount": 10
+    },
+    {
+      "currency": "RSD",
+      "price": 0.4,
+      "percent": 100,
+      "capPercent": 100,
+      "discount": 0
+    },
+    {
+      "currency": "RSD",
+      "price": 150000.5,
+      "percent": 12.34,
+      "capPercent": 15,
+      "discount": 18510
+    },
+    {
+      "currency": "RSD",
+      "price": 10.05,
+      "percent": 5,
+      "capPercent": 5,
+      "discount": 0
+    },
+    {
+      "currency": "JPY",
+      "price": 123.45,
+      "percent": 7.5,
+      "capPercent": 100,
+      "discount": 9
+    },
+    {
+      "currency": "JPY",
+      "price": 1000,
+      "percent": 10,
+      "capPercent": 10,
+      "discount": 100
+    },
+    {
+      "currency": "JPY",
+      "price": 1005,
+      "percent": 10.01,
+      "capPercent": 10,
+      "discount": 100
+    },
+    {
+      "currency": "JPY",
+      "price": 99.99,
+      "percent": 10,
+      "capPercent": 10,
+      "discount": 9
+    },
+    {
+      "currency": "JPY",
+      "price": 19.99,
+      "percent": 50,
+      "capPercent": 100,
+      "discount": 10
+    },
+    {
+      "currency": "JPY",
+      "price": 0.4,
+      "percent": 100,
+      "capPercent": 100,
+      "discount": 0
+    },
+    {
+      "currency": "JPY",
+      "price": 150000.5,
+      "percent": 12.34,
+      "capPercent": 15,
+      "discount": 18510
+    },
+    {
+      "currency": "JPY",
+      "price": 10.05,
+      "percent": 5,
+      "capPercent": 5,
+      "discount": 0
+    },
+    {
+      "currency": "EUR",
+      "price": 123.45,
+      "percent": 7.5,
+      "capPercent": 100,
+      "discount": 9.26
+    },
+    {
+      "currency": "EUR",
+      "price": 1000,
+      "percent": 10,
+      "capPercent": 10,
+      "discount": 100
+    },
+    {
+      "currency": "EUR",
+      "price": 1005,
+      "percent": 10.01,
+      "capPercent": 10,
+      "discount": 100.5
+    },
+    {
+      "currency": "EUR",
+      "price": 99.99,
+      "percent": 10,
+      "capPercent": 10,
+      "discount": 9.99
+    },
+    {
+      "currency": "EUR",
+      "price": 19.99,
+      "percent": 50,
+      "capPercent": 100,
+      "discount": 10
+    },
+    {
+      "currency": "EUR",
+      "price": 0.4,
+      "percent": 100,
+      "capPercent": 100,
+      "discount": 0.4
+    },
+    {
+      "currency": "EUR",
+      "price": 150000.5,
+      "percent": 12.34,
+      "capPercent": 15,
+      "discount": 18510.06
+    },
+    {
+      "currency": "EUR",
+      "price": 10.05,
+      "percent": 5,
+      "capPercent": 5,
+      "discount": 0.5
+    },
+    {
+      "currency": "COP",
+      "price": 123.45,
+      "percent": 7.5,
+      "capPercent": 100,
+      "discount": 9
+    },
+    {
+      "currency": "COP",
+      "price": 1000,
+      "percent": 10,
+      "capPercent": 10,
+      "discount": 100
+    },
+    {
+      "currency": "COP",
+      "price": 1005,
+      "percent": 10.01,
+      "capPercent": 10,
+      "discount": 100
+    },
+    {
+      "currency": "COP",
+      "price": 99.99,
+      "percent": 10,
+      "capPercent": 10,
+      "discount": 9
+    },
+    {
+      "currency": "COP",
+      "price": 19.99,
+      "percent": 50,
+      "capPercent": 100,
+      "discount": 10
+    },
+    {
+      "currency": "COP",
+      "price": 0.4,
+      "percent": 100,
+      "capPercent": 100,
+      "discount": 0
+    },
+    {
+      "currency": "COP",
+      "price": 150000.5,
+      "percent": 12.34,
+      "capPercent": 15,
+      "discount": 18510
+    },
+    {
+      "currency": "COP",
+      "price": 10.05,
+      "percent": 5,
+      "capPercent": 5,
+      "discount": 0
+    }
+  ],
+  "percentPrice": [
+    {
+      "currency": "RSD",
+      "base": 123.45,
+      "percent": 7.5,
+      "price": 114
+    },
+    {
+      "currency": "RSD",
+      "base": 19.99,
+      "percent": 12.34,
+      "price": 18
+    },
+    {
+      "currency": "RSD",
+      "base": 100.5,
+      "percent": 0,
+      "price": 100
+    },
+    {
+      "currency": "RSD",
+      "base": 0.5,
+      "percent": 50,
+      "price": 0
+    },
+    {
+      "currency": "JPY",
+      "base": 123.45,
+      "percent": 7.5,
+      "price": 114
+    },
+    {
+      "currency": "JPY",
+      "base": 19.99,
+      "percent": 12.34,
+      "price": 18
+    },
+    {
+      "currency": "JPY",
+      "base": 100.5,
+      "percent": 0,
+      "price": 100
+    },
+    {
+      "currency": "JPY",
+      "base": 0.5,
+      "percent": 50,
+      "price": 0
+    },
+    {
+      "currency": "EUR",
+      "base": 123.45,
+      "percent": 7.5,
+      "price": 114.19
+    },
+    {
+      "currency": "EUR",
+      "base": 19.99,
+      "percent": 12.34,
+      "price": 17.52
+    },
+    {
+      "currency": "EUR",
+      "base": 100.5,
+      "percent": 0,
+      "price": 100.5
+    },
+    {
+      "currency": "EUR",
+      "base": 0.5,
+      "percent": 50,
+      "price": 0.25
+    },
+    {
+      "currency": "COP",
+      "base": 123.45,
+      "percent": 7.5,
+      "price": 114
+    },
+    {
+      "currency": "COP",
+      "base": 19.99,
+      "percent": 12.34,
+      "price": 18
+    },
+    {
+      "currency": "COP",
+      "base": 100.5,
+      "percent": 0,
+      "price": 100
+    },
+    {
+      "currency": "COP",
+      "base": 0.5,
+      "percent": 50,
+      "price": 0
+    }
+  ],
+  "alternativeRoundingDigits": [
+    {
+      "currency": "RSD",
+      "roundingDigits": 2,
+      "price": 123.45,
+      "percent": 7.5,
+      "capPercent": 100,
+      "discount": 9.26,
+      "note": "Si RSD redondeara a sus 2 minor units ISO: decisión pendiente del dueño, no vigente."
+    },
+    {
+      "currency": "COP",
+      "roundingDigits": 2,
+      "price": 123.45,
+      "percent": 7.5,
+      "capPercent": 100,
+      "discount": 9.26,
+      "note": "Ídem COP."
+    }
+  ],
+  "discountLimits": [
+    {
+      "price": 1000,
+      "discount": 100,
+      "percent": 10,
+      "exceeds": false
+    },
+    {
+      "price": 1000,
+      "discount": 100.01,
+      "percent": 10,
+      "exceeds": true
+    },
+    {
+      "price": 123.45,
+      "discount": 9,
+      "percent": 7.5,
+      "exceeds": false
+    },
+    {
+      "price": 123.45,
+      "discount": 9.26,
+      "percent": 7.5,
+      "exceeds": true
+    },
+    {
+      "price": 123.45,
+      "discount": 9.25,
+      "percent": 7.5,
+      "exceeds": false
+    },
+    {
+      "price": 99.99,
+      "discount": 10,
+      "percent": 10,
+      "exceeds": true
+    },
+    {
+      "price": 0.1,
+      "discount": 0.01,
+      "percent": 10,
+      "exceeds": false
+    }
+  ],
+  "linesTotal": [
+    {
+      "currency": "EUR",
+      "lines": [
+        {
+          "price": 123.45,
+          "discount": 9.26
+        },
+        {
+          "price": 0.1,
+          "discount": 0
+        },
+        {
+          "price": 0.2,
+          "discount": 0
+        }
+      ],
+      "total": 114.49
+    },
+    {
+      "currency": "JPY",
+      "lines": [
+        {
+          "price": 1000,
+          "discount": 100
+        },
+        {
+          "price": 2500,
+          "discount": 250
+        },
+        {
+          "price": 123,
+          "discount": 9
+        }
+      ],
+      "total": 3264
+    },
+    {
+      "currency": "RSD",
+      "lines": [
+        {
+          "price": 123.45,
+          "discount": 9
+        },
+        {
+          "price": 100,
+          "discount": 0
+        }
+      ],
+      "total": 214.45
+    },
+    {
+      "currency": "COP",
+      "lines": [
+        {
+          "price": 150000.5,
+          "discount": 18510
+        },
+        {
+          "price": 80000,
+          "discount": 0
+        }
+      ],
+      "total": 211490.5
+    }
+  ]
+}

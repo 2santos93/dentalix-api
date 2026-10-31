@@ -4,10 +4,13 @@ import {
   checkItemDiscount,
   discountForPercent,
   discountPercent,
-  currencyDecimals,
   roleDiscountCapMessage,
-  roundToCurrency,
 } from './discount-policy';
+import { REFERENCE_CURRENCY_DIGITS } from '../../../shared/money/__fixtures__/reference-currency-digits';
+
+// DX-340: los dígitos de redondeo salen de `currencies.rounding_digits` (aquí,
+// de la referencia versionada que rellena la migración).
+const digits = (code: string) => REFERENCE_CURRENCY_DIGITS.roundingDigits(code);
 
 describe('política de descuentos (DX-204)', () => {
   describe('valores por defecto', () => {
@@ -168,41 +171,34 @@ describe('política de descuentos (DX-204)', () => {
 
   describe('redondeo por moneda', () => {
     it('COP (y CLP) sin decimales; EUR, USD a céntimos', () => {
-      expect(currencyDecimals('COP')).toBe(0);
-      expect(currencyDecimals('CLP')).toBe(0);
-      expect(currencyDecimals('EUR')).toBe(2);
-      expect(currencyDecimals('USD')).toBe(2);
-    });
-
-    it('roundToCurrency redondea a la unidad de la moneda (mitad hacia arriba)', () => {
-      expect(roundToCurrency(12345.5, 'COP')).toBe(12346);
-      expect(roundToCurrency(12345.49, 'COP')).toBe(12345);
-      expect(roundToCurrency(10.005, 'EUR')).toBe(10.01);
-      expect(roundToCurrency(10.004, 'EUR')).toBe(10);
+      expect(digits('COP')).toBe(0);
+      expect(digits('CLP')).toBe(0);
+      expect(digits('EUR')).toBe(2);
+      expect(digits('USD')).toBe(2);
     });
 
     it('discountForPercent: 7,5 % de tres precios en COP sin decimales', () => {
-      expect(discountForPercent(85000, 7.5, 'COP', 10)).toBe(6375);
-      expect(discountForPercent(123457, 7.5, 'COP', 10)).toBe(9259);
-      expect(discountForPercent(99999, 7.5, 'COP', 10)).toBe(7500);
+      expect(discountForPercent(85000, 7.5, digits('COP'), 10)).toBe(6375);
+      expect(discountForPercent(123457, 7.5, digits('COP'), 10)).toBe(9259);
+      expect(discountForPercent(99999, 7.5, digits('COP'), 10)).toBe(7500);
     });
 
     it('discountForPercent: en EUR a céntimos', () => {
-      expect(discountForPercent(85.55, 7.5, 'EUR', 10)).toBe(6.42);
-      expect(discountForPercent(123.45, 7.5, 'EUR', 10)).toBe(9.26);
-      expect(discountForPercent(0.99, 7.5, 'EUR', 10)).toBe(0.07);
+      expect(discountForPercent(85.55, 7.5, digits('EUR'), 10)).toBe(6.42);
+      expect(discountForPercent(123.45, 7.5, digits('EUR'), 10)).toBe(9.26);
+      expect(discountForPercent(0.99, 7.5, digits('EUR'), 10)).toBe(0.07);
     });
 
     it('si el redondeo pasara del tope del rol, baja a la unidad que lo respeta', () => {
       // 10 % de 1005 = 100,5 → redondeado 101 (10,05 %) > 10 % → 100.
-      expect(discountForPercent(1005, 10, 'COP', 10)).toBe(100);
+      expect(discountForPercent(1005, 10, digits('COP'), 10)).toBe(100);
       // EUR: 10 % de 10,05 = 1,005 → 1,01 (10,05 %) > 10 % → 1,00.
-      expect(discountForPercent(10.05, 10, 'EUR', 10)).toBe(1);
+      expect(discountForPercent(10.05, 10, digits('EUR'), 10)).toBe(1);
     });
 
     it('nunca supera el precio', () => {
-      expect(discountForPercent(0.5, 100, 'COP', 100)).toBe(0);
-      expect(discountForPercent(1500, 100, 'COP', 100)).toBe(1500);
+      expect(discountForPercent(0.5, 100, digits('COP'), 100)).toBe(0);
+      expect(discountForPercent(1500, 100, digits('COP'), 100)).toBe(1500);
     });
   });
 });

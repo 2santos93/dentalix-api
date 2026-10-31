@@ -2,6 +2,7 @@ import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { TREATMENT_PLAN_REPOSITORY } from '../../domain/ports/treatment-plan-repository.port';
 import type { TreatmentPlanRepository } from '../../domain/ports/treatment-plan-repository.port';
 import { TreatmentPlanDetail } from '../../domain/entities/treatment-plan.entity';
+import { linesTotal } from '../../../../shared/money/line-rounding';
 
 @Injectable()
 export class GetTreatmentPlanUseCase {
@@ -23,13 +24,10 @@ export class GetTreatmentPlanUseCase {
     // discount; still no taxes). Computed here, on every read, NEVER persisted
     // on the plan row, so a soft-deleted item (already excluded by the
     // repository's `findPlanById`) can never linger in the total either.
-    // Summed in integer cents: no floating point drift.
-    const cents = plan.items.reduce(
-      (sum, item) =>
-        sum + Math.round(item.price * 100) - Math.round(item.discount * 100),
-      0,
-    );
-    const total = cents / 100;
+    // DX-340: total = suma exacta de las líneas (shared/money/line-rounding),
+    // la misma regla del presupuesto, el saldo, el recibo y el estado de
+    // cuenta. Summed in integer cents: no floating point drift.
+    const total = linesTotal(plan.items);
 
     return { ...plan, total };
   }

@@ -1,4 +1,4 @@
-import { ISO_ZERO_DECIMAL_CURRENCIES } from '../money/currency-decimals';
+import { CLDR_ZERO_FORMAT_DIGITS } from './cldr-format-digits';
 
 /**
  * Helper único de formato regional (DX-350). Mismo contrato que la web y los
@@ -310,7 +310,7 @@ function build(locale: string, hourCycle: HourCycle): RegionalFormat {
       ),
     money: (amount, currency) => {
       const digits =
-        ISO_ZERO_DECIMAL_CURRENCIES.has(currency.toUpperCase()) &&
+        CLDR_ZERO_FORMAT_DIGITS.has(currency.toUpperCase()) &&
         Number.isInteger(amount)
           ? 0
           : 2;

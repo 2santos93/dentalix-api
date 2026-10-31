@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Headers,
+  Inject,
   Param,
   ParseUUIDPipe,
   Post,
@@ -13,6 +14,10 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
+import {
+  CURRENCY_DIGITS_CATALOG,
+  type CurrencyDigitsCatalog,
+} from '../../../shared/money/currency-digits';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
@@ -113,6 +118,9 @@ export class PaymentsController {
     private readonly recordSplitPayment: RecordSplitPaymentUseCase,
     // DX-390: el VOID de las otras líneas de un cobro dividido.
     private readonly audit: RecordAuditEventUseCase,
+    // DX-340: decimales de cada moneda (currencies.rounding_digits).
+    @Inject(CURRENCY_DIGITS_CATALOG)
+    private readonly currencyDigits: CurrencyDigitsCatalog,
   ) {}
 
   /**
@@ -199,7 +207,7 @@ export class PaymentsController {
       { userId: req.user.sub, role: req.user.role },
     );
     sendCsv(res, `caja-${from}-${to}.csv`);
-    return toCashPaymentsCsv(items);
+    return toCashPaymentsCsv(items, await this.currencyDigits.table());
   }
 
   @Audit({
