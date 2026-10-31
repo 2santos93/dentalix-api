@@ -1,6 +1,8 @@
 import { PaymentMethodGate } from '../payment-method-gate';
+import { PAID_AT_IN_FUTURE_MESSAGE } from '../../domain/paid-at-window';
 import type { PaymentMethodRepository } from '../../../payment-methods/domain/ports/payment-method-repository.port';
 import {
+  BadRequestException,
   ConflictException,
   NotFoundException,
   UnprocessableEntityException,
@@ -31,11 +33,24 @@ function setup() {
       } as unknown as PaymentMethodRepository,
       repo,
     ),
+    () => new Date('2026-10-31T15:00:00.000Z'),
   );
   return { repo, uc };
 }
 
 describe('RecordOpeningBalancePaymentUseCase (DX-262, revisión C1)', () => {
+  it('DX-054: fecha a más de 24 h en el futuro → 400 en español y no se registra', async () => {
+    const { repo, uc } = setup();
+    await expect(
+      uc.execute('ob-1', {
+        amount: 1000,
+        currency: 'COP',
+        paidAt: '2026-11-05',
+      }),
+    ).rejects.toThrow(new BadRequestException(PAID_AT_IN_FUTURE_MESSAGE));
+    expect(repo.lastCreateInput).toBeNull();
+  });
+
   it('registra el abono contra el saldo migrado, sin plan y con el paciente del saldo', async () => {
     const { repo, uc } = setup();
     const payment = await uc.execute(

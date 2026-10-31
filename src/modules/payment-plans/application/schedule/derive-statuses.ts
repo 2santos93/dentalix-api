@@ -1,3 +1,4 @@
+import { round2 } from '../../../../shared/money/money';
 export type InstallmentStatus = 'PAID' | 'PARTIAL' | 'PENDING' | 'OVERDUE';
 
 export interface ScheduleTramo {
@@ -10,10 +11,6 @@ export interface ScheduleTramo {
 export interface DerivedTramo extends ScheduleTramo {
   covered: number;
   status: InstallmentStatus;
-}
-
-function round2(value: number): number {
-  return Math.round(value * 100) / 100;
 }
 
 /**

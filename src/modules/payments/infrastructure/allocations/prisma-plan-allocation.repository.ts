@@ -52,11 +52,13 @@ import type {
   PlanAllocationSnapshot,
   RebalanceOptions,
 } from '../../domain/ports/plan-allocation-repository.port';
+import { toCents } from '../../../../shared/money/money';
 
-const toCents = (value: Prisma.Decimal | number): number =>
-  Math.round(Number(value) * 100);
+/** Centavos de una columna Decimal (o de un número). */
+const decimalCents = (value: Prisma.Decimal | number): number =>
+  toCents(Number(value));
 
-const fromCents = (cents: number): Prisma.Decimal =>
+const decimalFromCents = (cents: number): Prisma.Decimal =>
   new Prisma.Decimal(cents).dividedBy(100);
 
 /** Rótulo en español del catálogo de cada ítem, por id del catálogo. */
@@ -256,8 +258,8 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
       paymentId: r.paymentId,
       paidAt: r.paidAt,
       createdAt: r.createdAt,
-      baseCents: toCents(r.amount),
-      allocatedCents: toCents(r.allocated),
+      baseCents: decimalCents(r.amount),
+      allocatedCents: decimalCents(r.allocated),
     }));
   }
 
@@ -305,7 +307,7 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
         createdAt: r.createdAt,
         completedAt: r.completedAt,
         billableCents,
-        allocatedCents: toCents(r.allocated),
+        allocatedCents: decimalCents(r.allocated),
       });
     }
     return items;
@@ -335,7 +337,7 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
       if (rowId) {
         await tx.paymentAllocation.update({
           where: { id: rowId },
-          data: { amount: { increment: fromCents(inc.cents) } },
+          data: { amount: { increment: decimalFromCents(inc.cents) } },
           select: { id: true },
         });
       } else {
@@ -345,7 +347,7 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
             paymentId: inc.paymentId,
             treatmentPlanId: planId,
             treatmentPlanItemId: inc.itemId,
-            amount: fromCents(inc.cents),
+            amount: decimalFromCents(inc.cents),
             source: PaymentAllocationSource.AUTO,
             createdById: actorId,
           },
@@ -692,7 +694,7 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
         });
         const lines = rows.map((r) => ({
           itemId: r.treatmentPlanItemId,
-          cents: toCents(r.amount),
+          cents: decimalCents(r.amount),
           source: r.source,
         }));
         const items =
@@ -809,7 +811,10 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
       _sum: { amount: true },
     });
     const othersOf = new Map(
-      others.map((o) => [o.treatmentPlanItemId, toCents(o._sum.amount ?? 0)]),
+      others.map((o) => [
+        o.treatmentPlanItemId,
+        decimalCents(o._sum.amount ?? 0),
+      ]),
     );
     return items.map((i) => ({
       id: i.id,
@@ -934,7 +939,7 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
          ORDER BY "treatmentPlanItemId"`;
       const previous = current.map((r) => ({
         itemId: r.itemId,
-        cents: toCents(r.amount),
+        cents: decimalCents(r.amount),
       }));
       if (
         allocationVersion({ manual: base.manual, lines: previous }) !==
@@ -943,7 +948,7 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
         throw new ConflictException(ALLOCATION_VERSION_CONFLICT);
       }
 
-      const baseCents = toCents(base.amount);
+      const baseCents = decimalCents(base.amount);
       if (input.mode === 'MANUAL') {
         const violation = validateManualAllocation({
           baseCents,
@@ -980,7 +985,7 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
       const kept = current.filter(
         (r) =>
           r.source === PaymentAllocationSource.MANUAL &&
-          wanted.get(r.itemId) === toCents(r.amount),
+          wanted.get(r.itemId) === decimalCents(r.amount),
       );
       await tx.$executeRaw`SELECT set_config('app.allocation_cause', 'MANUAL', true)`;
       await tx.$executeRaw`
@@ -996,7 +1001,7 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
             paymentId,
             treatmentPlanId: planId,
             treatmentPlanItemId: itemId,
-            amount: fromCents(cents),
+            amount: decimalFromCents(cents),
             source: PaymentAllocationSource.MANUAL,
             createdById: input.actorId,
           },
@@ -1066,7 +1071,7 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
       );
       out.set(r.id, {
         status: r.status,
-        freeCents: Math.max(0, billableCents - toCents(r.others)),
+        freeCents: Math.max(0, billableCents - decimalCents(r.others)),
       });
     }
     for (const id of itemIds) {

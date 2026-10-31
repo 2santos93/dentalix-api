@@ -69,6 +69,17 @@ export class PlanBalanceDto {
       'Vacío si no hay ninguno.',
   })
   paymentsWithoutRate!: PaymentWithoutRateDto[];
+
+  @ApiProperty({
+    example: false,
+    description:
+      'DX-054: el proveedor de tasas no respondió a tiempo (el saldo espera ' +
+      'como mucho 4 s a las conversiones en vivo). Los abonos que esperaban ' +
+      'su tasa salen en paymentsWithoutRate y no suman en paid: el saldo está ' +
+      'incompleto y volver a pedirlo lo completa cuando el proveedor responda. ' +
+      'Nunca es un 500.',
+  })
+  rateProviderTimedOut!: boolean;
 }
 
 // DX-051: cobrado y pendiente por ítem, en el orden del plan. Lleva diente y

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { ClinicRole, type PaymentMethod } from '@prisma/client';
 import { RECEIPT_PREFIX_PATTERN } from '../../payments/domain/receipt-number';
 import { currencyDecimals } from '../../../shared/money/currency-decimals';
+import { fromCents, toCents } from '../../../shared/money/money';
 
 /*
  * Saldo a favor del paciente (DX-253): reglas puras del traspaso a otro plan y
@@ -84,13 +85,7 @@ export function receptionCapMessage(
     : `Recepción puede mover hasta ${capText(capCents, currency)} por operación: pídeselo a administración.`;
 }
 
-export function toCents(amount: number): number {
-  return Math.round(amount * 100);
-}
-
-export function fromCents(cents: number): number {
-  return cents / 100;
-}
+export { fromCents, toCents };
 
 export interface PlanCreditInput {
   /** Facturable del plan (0 si no se cobra: cancelado o rechazado). */

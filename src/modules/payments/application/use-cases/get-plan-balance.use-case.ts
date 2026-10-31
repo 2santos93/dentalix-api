@@ -16,11 +16,19 @@ import {
   paymentAmountIn,
   type PaymentWithRate,
 } from '../payment-exchange-rate';
-import { ConvertAmountUseCase } from '../../../exchange/application/use-cases/convert-amount.use-case';
+import {
+  type AmountConverter,
+  ConvertAmountUseCase,
+} from '../../../exchange/application/use-cases/convert-amount.use-case';
+import {
+  CONVERSION_TIMED_OUT,
+  conversionDeadline,
+} from '../conversion-deadline';
 import {
   PLAN_CREDIT_READER,
   type PlanCreditReader,
 } from '../../domain/ports/plan-credit-reader.port';
+import { round2 } from '../../../../shared/money/money';
 
 export interface GetPlanBalanceResult {
   planCurrency: string;
@@ -48,6 +56,13 @@ export interface GetPlanBalanceResult {
    * que se registre la tasa y el barrido la congele.
    */
   paymentsWithoutRate: PaymentWithoutRate[];
+  /**
+   * DX-054: el proveedor de tasas no respondió dentro del plazo del saldo
+   * (`BALANCE_CONVERSION_BUDGET_MS`): los abonos que esperaban su tasa salen
+   * en `paymentsWithoutRate` y no suman. Volver a pedir el saldo lo completa
+   * cuando el proveedor responda. `false` en el caso normal.
+   */
+  rateProviderTimedOut: boolean;
 }
 
 /** Un abono «sin tasa» del saldo (DX-375): nunca datos del paciente. */
@@ -86,12 +101,6 @@ export interface GetPlanBalanceWithItemsResult extends GetPlanBalanceResult {
   manualPaymentIds: string[];
   /** En el orden del plan. */
   items: PlanItemBalance[];
-}
-
-// Same rounding policy as CreateSaleUseCase/ConvertAmountUseCase: monetary
-// sums are rounded to 2 decimals to avoid floating point drift.
-function round2(value: number): number {
-  return Math.round(value * 100) / 100;
 }
 
 const BILLABLE_STATUSES: ReadonlySet<TreatmentPlanItemStatus> = new Set([
@@ -234,26 +243,46 @@ export class GetPlanBalanceUseCase {
     // las tasas de cada día una sola vez (no una lectura por abono). Con la
     // tasa congelada (DX-375) ni siquiera se usa: solo los abonos anteriores
     // aún sin congelar se convierten con la tasa de su día.
-    const convert = this.convertAmount.memoized();
-
-    for (const payment of payments) {
-      // IMP-4a/4b: cada abono se convierte por su propio importe (nunca
-      // reutilizando un `rateUsed`, que depende del importe), y uno sin tasa
-      // no tumba el saldo: no cuenta en `paid` y se informa «sin tasa»
-      // (`paymentsCount` no cambia). Cualquier otro fallo se propaga.
-      const converted =
-        baseOf.get(payment.id) ??
-        (await paymentAmountIn(convert, payment, plan.currency));
-      if (converted === null) {
-        paymentsWithoutRate.push({
-          paymentId: payment.id,
-          amount: payment.amount,
-          currency: payment.currency,
-          paidOn: payment.paidOn,
-        });
-        continue;
+    const memoized = this.convertAmount.memoized();
+    // DX-054: un proveedor lento o colgado no retiene el saldo: todas las
+    // conversiones en vivo comparten un plazo y lo que no llegue sale «sin
+    // tasa», como un abono que el proveedor no puede convertir.
+    const deadline = conversionDeadline();
+    // Vencido el plazo no se lanza ni una petición más a un proveedor que ya
+    // no responde a tiempo: la conversión en vivo queda pendiente y `race`
+    // la da por vencida al instante. Lo que no pide tasa (misma moneda, tasa
+    // congelada) no pasa por aquí y sigue sumando.
+    const never = <T>(): Promise<T> => new Promise<T>(() => undefined);
+    const convert: AmountConverter = {
+      execute: (input) =>
+        deadline.timedOut ? never() : memoized.execute(input),
+      quote: (input) => (deadline.timedOut ? never() : memoized.quote(input)),
+    };
+    try {
+      for (const payment of payments) {
+        // IMP-4a/4b: cada abono se convierte por su propio importe (nunca
+        // reutilizando un `rateUsed`, que depende del importe), y uno sin tasa
+        // no tumba el saldo: no cuenta en `paid` y se informa «sin tasa»
+        // (`paymentsCount` no cambia). Cualquier otro fallo se propaga.
+        const base = baseOf.get(payment.id);
+        const converted =
+          base ??
+          (await deadline.race(
+            paymentAmountIn(convert, payment, plan.currency),
+          ));
+        if (converted === null || converted === CONVERSION_TIMED_OUT) {
+          paymentsWithoutRate.push({
+            paymentId: payment.id,
+            amount: payment.amount,
+            currency: payment.currency,
+            paidOn: payment.paidOn,
+          });
+          continue;
+        }
+        paid += converted;
       }
-      paid += converted;
+    } finally {
+      deadline.dispose();
     }
 
     const creditMovements = this.credit
@@ -267,6 +296,7 @@ export class GetPlanBalanceUseCase {
       balance: round2(billable - paid - creditMovements),
       paymentsCount: payments.length,
       paymentsWithoutRate,
+      rateProviderTimedOut: deadline.timedOut,
     };
   }
 }

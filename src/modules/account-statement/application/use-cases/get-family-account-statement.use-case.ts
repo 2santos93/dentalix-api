@@ -19,10 +19,11 @@ import {
   ACCOUNT_STATEMENT_CLOCK,
   type AccountStatementClock,
 } from './get-account-statement.use-case';
+import { toCents } from '../../../../shared/money/money';
 
 // Montos Decimal(14,2): se suman en céntimos enteros (como el cálculo
 // individual), así el total cuadra al céntimo con la suma de los subtotales.
-const cents = (amount: number): number => Math.round(amount * 100);
+const cents = toCents;
 
 const FIELDS = [
   'budgeted',

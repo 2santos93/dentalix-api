@@ -3,16 +3,7 @@ import {
   BillablePlanRow,
 } from '../domain/entities/billable-plan.entity';
 import { isPlanBillable } from '../../treatment-plans/domain/plan-status-machine';
-
-// Montos Decimal(14,2): sumar en centavos enteros es exacto (mismo criterio que
-// computeAccountStatement).
-function toCents(amount: number): number {
-  return Math.round(amount * 100);
-}
-
-function fromCents(cents: number): number {
-  return cents / 100;
-}
+import { fromCents, toCents } from '../../../shared/money/money';
 
 /**
  * Qué planes se le ofrecen a quien cobra y con qué cifras (DX-067). Mismos

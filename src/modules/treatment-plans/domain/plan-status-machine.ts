@@ -122,6 +122,28 @@ export function closedPlanItemsMessage(status: TreatmentPlanStatus): string {
 }
 
 /**
+ * DX-054: lo realizado ya se cobró o se está cobrando por ese precio (sus
+ * imputaciones, el recibo, la producción del profesional). Un ítem DONE no
+ * cambia de precio, en ningún estado del plan ni para ningún rol; para
+ * corregirlo se devuelve antes a ACCEPTED (que deja rastro en la atribución)
+ * y entonces se edita. Repetir el mismo precio no es un cambio.
+ */
+export const DONE_ITEM_PRICE_LOCKED_MESSAGE =
+  'El procedimiento ya está realizado: su precio no se cambia. Para corregirlo, devuélvelo antes a «Aceptado».';
+
+export function isDoneItemPriceChange(
+  itemStatus: TreatmentPlanItemStatus,
+  currentPrice: number,
+  newPrice: number | undefined,
+): boolean {
+  return (
+    itemStatus === TreatmentPlanItemStatus.DONE &&
+    newPrice !== undefined &&
+    newPrice !== currentPrice
+  );
+}
+
+/**
  * La única escritura de ítems que admite un plan cerrado (DX-109): en un plan
  * COMPLETED, marcar como REALIZADO un ítem que quedó ACEPTADO, sin tocar nada
  * más. COMPLETED es final y no exige que todo esté hecho, así que sin esto un

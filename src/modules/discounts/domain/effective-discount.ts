@@ -5,6 +5,7 @@ import {
   type DiscountPolicyRules,
   type ItemDiscountCheck,
 } from './discount-policy';
+import { fromCents, toCents } from '../../../shared/money/money';
 
 /**
  * Descuento EFECTIVO de un ítem del plan (SEC-041). El tope por rol de DX-204
@@ -37,11 +38,11 @@ export interface EffectiveDiscount {
 }
 
 function cents(amount: number): bigint {
-  return BigInt(Math.round(amount * 100));
+  return BigInt(toCents(amount));
 }
 
-function fromCents(value: bigint): number {
-  return Number(value) / 100;
+function amountOf(value: bigint): number {
+  return fromCents(Number(value));
 }
 
 function effectiveCents(item: PricedItem): {
@@ -62,10 +63,10 @@ function effectiveCents(item: PricedItem): {
 export function effectiveDiscount(item: PricedItem): EffectiveDiscount {
   const { list, reduction, total } = effectiveCents(item);
   return {
-    listPrice: fromCents(list),
-    priceReduction: fromCents(reduction),
+    listPrice: amountOf(list),
+    priceReduction: amountOf(reduction),
     itemDiscount: item.discount,
-    total: fromCents(total),
+    total: amountOf(total),
   };
 }
 

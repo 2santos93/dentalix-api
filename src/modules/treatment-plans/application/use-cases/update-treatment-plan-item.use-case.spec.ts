@@ -20,6 +20,7 @@ import {
   TreatmentPlanStatus,
 } from '@prisma/client';
 import { UpdateTreatmentPlanItemUseCase } from './update-treatment-plan-item.use-case';
+import { DONE_ITEM_PRICE_LOCKED_MESSAGE } from '../../domain/plan-status-machine';
 import {
   TreatmentPlan,
   TreatmentPlanWithItems,
@@ -596,6 +597,67 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
 
       expect(calls[0].change.attribution).toEqual({ kind: 'CLEAR' });
       expect(calls[0].change.mirror).toBeUndefined();
+    });
+  });
+
+  describe('precio de un ítem realizado (DX-054)', () => {
+    const doneItem = () =>
+      fakeItem({ status: TreatmentPlanItemStatus.DONE, price: 300 });
+    const useCase = (existing: TreatmentPlanItem, written: unknown[]) =>
+      new UpdateTreatmentPlanItemUseCase(
+        makeRepo({
+          findItemById: () => Promise.resolve(existing),
+          updateItem: applying(existing, (patch) => {
+            written.push(patch);
+            return Promise.resolve(existing);
+          }),
+        }),
+        makeCatalogRepo(),
+        testDiscountPolicy(),
+        FIXED_CLOCK,
+      );
+
+    it('cambiar el precio de un ítem DONE → 409 en español para todo rol, y no se escribe', async () => {
+      for (const actor of [ADMIN_ACTOR, DENTIST_ACTOR, ASSISTANT_ACTOR]) {
+        const written: unknown[] = [];
+        await expect(
+          useCase(doneItem(), written).execute('item1', { price: 250 }, actor),
+        ).rejects.toThrow(
+          new ConflictException(DONE_ITEM_PRICE_LOCKED_MESSAGE),
+        );
+        expect(written).toHaveLength(0);
+      }
+    });
+
+    it('tampoco a la vez que sale de DONE: primero se devuelve a «Aceptado»', async () => {
+      const written: unknown[] = [];
+      await expect(
+        useCase(doneItem(), written).execute(
+          'item1',
+          { price: 250, status: TreatmentPlanItemStatus.ACCEPTED },
+          ADMIN_ACTOR,
+        ),
+      ).rejects.toThrow(new ConflictException(DONE_ITEM_PRICE_LOCKED_MESSAGE));
+      expect(written).toHaveLength(0);
+    });
+
+    it('repetir el mismo precio o cambiar las notas de un ítem DONE sí', async () => {
+      const written: unknown[] = [];
+      await useCase(doneItem(), written).execute(
+        'item1',
+        { price: 300, notes: 'Control a los 15 días' },
+        ADMIN_ACTOR,
+      );
+      expect(written).toEqual([{ price: 300, notes: 'Control a los 15 días' }]);
+    });
+
+    it('el precio de un ítem ACCEPTED sigue cambiando', async () => {
+      const written: unknown[] = [];
+      await useCase(
+        fakeItem({ status: TreatmentPlanItemStatus.ACCEPTED, price: 300 }),
+        written,
+      ).execute('item1', { price: 250 }, ADMIN_ACTOR);
+      expect(written).toEqual([{ price: 250 }]);
     });
   });
 

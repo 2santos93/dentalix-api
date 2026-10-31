@@ -5,6 +5,7 @@ import type {
   PlanAllocationRepository,
 } from '../../domain/ports/plan-allocation-repository.port';
 import { GetPlanBalanceUseCase } from './get-plan-balance.use-case';
+import { BALANCE_CONVERSION_BUDGET_MS } from '../conversion-deadline';
 import { InMemoryPaymentRepository } from './__fixtures__/in-memory-payment.repository';
 import { GetTreatmentPlanUseCase } from '../../../treatment-plans/application/use-cases/get-treatment-plan.use-case';
 import { ExchangeRateUnavailableError } from '../../../exchange/domain/ports/exchange-rate-provider.port';
@@ -12,6 +13,7 @@ import { ConvertAmountUseCase } from '../../../exchange/application/use-cases/co
 import { TreatmentPlanDetail } from '../../../treatment-plans/domain/entities/treatment-plan.entity';
 import { TreatmentPlanItem } from '../../../treatment-plans/domain/entities/treatment-plan-item.entity';
 import { PLAN_WITHOUT_OPTIONS } from '../../../treatment-plans/application/use-cases/__fixtures__/in-memory-treatment-plan.repository';
+import { round2 } from '../../../../shared/money/money';
 
 class FakeGetTreatmentPlanUseCase {
   public plan: TreatmentPlanDetail | null = null;
@@ -29,10 +31,6 @@ interface FakeConvertInput {
   from: string;
   to: string;
   date: string;
-}
-
-function round2(value: number): number {
-  return Math.round(value * 100) / 100;
 }
 
 /**
@@ -67,6 +65,8 @@ class FakeConvertAmountUseCase {
   public readonly infraFailingFrom = new Set<string>();
   /** Currencies (as `from`) whose rates the provider cannot give (DX-051). */
   public readonly rateUnavailableFrom = new Set<string>();
+  /** Currencies (as `from`) whose conversion never answers: a slow provider (DX-054). */
+  public readonly hangingFrom = new Set<string>();
   /** units of `from` currency per 1 USD-equivalent `to`; mirrors
    * `rates[from]` in the real use case. */
   private readonly unitsPerTarget: Record<string, number> = { COP: 4000 };
@@ -86,6 +86,9 @@ class FakeConvertAmountUseCase {
     rateUsed: number;
   }> {
     this.calls.push(input);
+    if (this.hangingFrom.has(input.from)) {
+      return new Promise(() => undefined);
+    }
     if (this.infraFailingFrom.has(input.from)) {
       return Promise.reject(
         new Error(`simulated infra failure converting ${input.from}`),
@@ -358,6 +361,7 @@ describe('GetPlanBalanceUseCase', () => {
       creditMovements: 0,
       paymentsCount: 0,
       paymentsWithoutRate: [],
+      rateProviderTimedOut: false,
     });
   });
 
@@ -502,6 +506,109 @@ describe('GetPlanBalanceUseCase', () => {
 
     expect(result.paid).toBe(0);
     expect(result.paymentsCount).toBe(1);
+  });
+
+  describe('DX-054: proveedor de tasas lento', () => {
+    beforeEach(() => jest.useFakeTimers());
+    afterEach(() => jest.useRealTimers());
+
+    it(`a los ${BALANCE_CONVERSION_BUDGET_MS} ms responde sin esperar: los abonos sin convertir salen marcados y no suman`, async () => {
+      const { repo, fakeGetPlan, fakeConvert, uc } = makeUseCase();
+      fakeConvert.hangingFrom.add('COP');
+      fakeGetPlan.plan = makePlan({
+        currency: 'USD',
+        items: [makeItem({ price: 500, status: TreatmentPlanItemStatus.DONE })],
+      });
+      repo.seedPayment({
+        treatmentPlanId: 'plan-1',
+        amount: 100,
+        currency: 'USD',
+        paidAt: new Date('2026-03-05T12:00:00.000Z'),
+      });
+      const slow = repo.seedPayment({
+        treatmentPlanId: 'plan-1',
+        amount: 400000,
+        currency: 'COP',
+        paidAt: new Date('2026-03-06T12:00:00.000Z'),
+      });
+
+      const pending = uc.execute('plan-1');
+      await jest.advanceTimersByTimeAsync(BALANCE_CONVERSION_BUDGET_MS);
+      const result = await pending;
+
+      expect(result.paid).toBe(100);
+      expect(result.balance).toBe(400);
+      expect(result.paymentsCount).toBe(2);
+      expect(result.rateProviderTimedOut).toBe(true);
+      expect(result.paymentsWithoutRate).toEqual([
+        {
+          paymentId: slow.id,
+          amount: 400000,
+          currency: 'COP',
+          paidOn: '2026-03-06',
+        },
+      ]);
+    });
+
+    it('el plazo es de todo el saldo, no por abono: un segundo abono lento no lo alarga', async () => {
+      const { repo, fakeGetPlan, fakeConvert, uc } = makeUseCase();
+      fakeConvert.hangingFrom.add('COP');
+      fakeGetPlan.plan = makePlan({ currency: 'USD' });
+      for (const day of ['2026-03-05', '2026-03-06']) {
+        repo.seedPayment({
+          treatmentPlanId: 'plan-1',
+          amount: 400000,
+          currency: 'COP',
+          paidAt: new Date(`${day}T12:00:00.000Z`),
+        });
+      }
+
+      const pending = uc.execute('plan-1');
+      await jest.advanceTimersByTimeAsync(BALANCE_CONVERSION_BUDGET_MS);
+      const result = await pending;
+
+      expect(result.paid).toBe(0);
+      expect(result.paymentsWithoutRate).toHaveLength(2);
+      expect(result.rateProviderTimedOut).toBe(true);
+    });
+
+    it('vencido el plazo no se pide ninguna conversión más al proveedor', async () => {
+      const { repo, fakeGetPlan, fakeConvert, uc } = makeUseCase();
+      fakeConvert.hangingFrom.add('COP');
+      fakeGetPlan.plan = makePlan({ currency: 'USD' });
+      for (const day of ['2026-03-05', '2026-03-06', '2026-03-07']) {
+        repo.seedPayment({
+          treatmentPlanId: 'plan-1',
+          amount: 400000,
+          currency: 'COP',
+          paidAt: new Date(`${day}T12:00:00.000Z`),
+        });
+      }
+
+      const pending = uc.execute('plan-1');
+      await jest.advanceTimersByTimeAsync(BALANCE_CONVERSION_BUDGET_MS);
+      const result = await pending;
+
+      expect(fakeConvert.calls).toHaveLength(1);
+      expect(result.paymentsWithoutRate).toHaveLength(3);
+    });
+
+    it('sin conversiones lentas no marca nada ni deja temporizadores vivos', async () => {
+      const { repo, fakeGetPlan, uc } = makeUseCase();
+      fakeGetPlan.plan = makePlan({ currency: 'USD' });
+      repo.seedPayment({
+        treatmentPlanId: 'plan-1',
+        amount: 400000,
+        currency: 'COP',
+        paidAt: new Date('2026-03-05T12:00:00.000Z'),
+      });
+
+      const result = await uc.execute('plan-1');
+
+      expect(result.paid).toBe(100);
+      expect(result.rateProviderTimedOut).toBe(false);
+      expect(jest.getTimerCount()).toBe(0);
+    });
   });
 
   it('propagates a generic conversion error instead of silently skipping the payment', async () => {
@@ -870,6 +977,7 @@ describe('GetPlanBalanceUseCase', () => {
         'paymentsCount',
         'paymentsWithoutRate',
         'planCurrency',
+        'rateProviderTimedOut',
       ]);
       expect(allocations.readPlanBalanceSnapshot).not.toHaveBeenCalled();
     });

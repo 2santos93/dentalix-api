@@ -15,6 +15,7 @@ import {
 import { GetTreatmentPlanUseCase } from '../../../treatment-plans/application/use-cases/get-treatment-plan.use-case';
 import { GetPlanBalanceUseCase } from '../../../payments/application/use-cases/get-plan-balance.use-case';
 import { generateSchedule, Periodicity } from '../schedule/generate-schedule';
+import { round2 } from '../../../../shared/money/money';
 
 const PERIODICITIES: ReadonlySet<Periodicity> = new Set([
   'WEEKLY',
@@ -29,10 +30,6 @@ export interface CreatePaymentPlanInput {
   startDate: string | Date;
   totalToFinance?: number;
   notes?: string;
-}
-
-function round2(value: number): number {
-  return Math.round(value * 100) / 100;
 }
 
 function isFiniteNonNegative(value: unknown): value is number {

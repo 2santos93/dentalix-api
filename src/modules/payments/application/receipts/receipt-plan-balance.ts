@@ -2,8 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { GetPlanBalanceUseCase } from '../use-cases/get-plan-balance.use-case';
 import { errorName } from '../payment-in-plan-currency';
 import type { ReceiptPlanBalance } from '../../domain/receipt-snapshot';
-
-const round2 = (value: number): number => Math.round(value * 100) / 100;
+import { round2 } from '../../../../shared/money/money';
 
 /**
  * Saldo del plan TRAS un abono que aún no se ha guardado, para la foto del
@@ -31,6 +30,12 @@ export class ReceiptPlanBalanceCalculator {
         return null;
       }
       const before = await this.getPlanBalance.execute(treatmentPlanId);
+      // DX-054: con el proveedor de tasas fuera de plazo el `paid` previo
+      // está incompleto; el recibo (que se congela) sale sin saldo.
+      if (before.rateProviderTimedOut) {
+        this.warnUnavailable('RateProviderTimedOut');
+        return null;
+      }
       const paid = round2(before.paid + convertedAmount);
       return {
         currency: before.planCurrency,
