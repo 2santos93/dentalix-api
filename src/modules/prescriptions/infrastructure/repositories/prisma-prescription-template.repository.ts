@@ -1,6 +1,7 @@
 import { ConflictException, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
+import { lockRow } from '../../../../shared/prisma/lock-row';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import type {
   PrescriptionTemplate,
@@ -126,6 +127,8 @@ export class PrismaPrescriptionTemplateRepository implements PrescriptionTemplat
   ): Promise<PrescriptionTemplate> {
     return this.prisma
       .runWithTenant(async (tx) => {
+        // DX-360: el antes, con la fila bloqueada hasta el final.
+        await lockRow(tx, 'prescription_templates', id);
         const before = mapRow(
           await tx.prescriptionTemplate.findUniqueOrThrow({ where: { id } }),
         );
@@ -158,6 +161,7 @@ export class PrismaPrescriptionTemplateRepository implements PrescriptionTemplat
 
   async softDelete(id: string, audit: AuditRequestContext): Promise<void> {
     await this.prisma.runWithTenant(async (tx) => {
+      await lockRow(tx, 'prescription_templates', id);
       const live = await tx.prescriptionTemplate.findFirst({
         where: { id, deletedAt: null },
       });

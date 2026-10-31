@@ -1,6 +1,10 @@
 import type { AuditAction, AuditResourceType } from '@prisma/client';
 import type { AuditEventDraft } from './audit-event';
-import type { AuditConfigValue, AuditMetadata } from './audit-metadata';
+import {
+  MAX_AUDIT_CONFIG_TEXT,
+  type AuditConfigValue,
+  type AuditMetadata,
+} from './audit-metadata';
 import {
   auditDraftFromContext,
   type AuditRequestContext,
@@ -43,6 +47,26 @@ function sameValue(a: AuditConfigValue, b: AuditConfigValue): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+/**
+ * Un texto tal como entra en el evento: sin caracteres de formato (los ZWJ
+ * de un emoji compuesto, marcas de dirección), con los de control y los
+ * saltos de línea como espacio, y recortado con «…» si pasa del tope. Así
+ * un nombre largo o con emoji queda en el evento en vez de descartarse.
+ */
+function forEvent(value: AuditConfigValue): AuditConfigValue {
+  if (Array.isArray(value)) {
+    return value.map((v) => forEvent(v) as string | number);
+  }
+  if (typeof value !== 'string') return value;
+  const clean = value
+    .replace(/\p{Cf}/gu, '')
+    .replace(/[\p{Cc}\u2028\u2029]+/gu, ' ');
+  const chars = [...clean];
+  return chars.length > MAX_AUDIT_CONFIG_TEXT
+    ? `${chars.slice(0, MAX_AUDIT_CONFIG_TEXT - 1).join('')}…`
+    : clean;
+}
+
 function visible(
   snapshot: ConfigSnapshot,
   fields: readonly string[],
@@ -51,7 +75,7 @@ function visible(
   return Object.fromEntries(
     fields
       .filter((f) => !hidden.includes(f) && f in snapshot)
-      .map((f) => [f, snapshot[f]]),
+      .map((f) => [f, forEvent(snapshot[f])]),
   );
 }
 

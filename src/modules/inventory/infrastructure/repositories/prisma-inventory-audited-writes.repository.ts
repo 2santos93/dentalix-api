@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
+import { lockRow } from '../../../../shared/prisma/lock-row';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { configAuditEvent } from '../../../audit/domain/config-audit';
@@ -51,6 +52,8 @@ export class PrismaInventoryAuditedWritesRepository implements InventoryAuditedW
     tx: Prisma.TransactionClient,
     id: string,
   ): Promise<ItemRow> {
+    // DX-360: el antes, con la fila bloqueada hasta el final de la edición.
+    await lockRow(tx, 'inventory_items', id);
     const row = await tx.inventoryItem.findFirst({
       where: { id, deletedAt: null },
     });

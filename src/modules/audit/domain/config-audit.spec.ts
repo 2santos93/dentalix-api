@@ -121,4 +121,32 @@ describe('configAuditEvent (DX-360)', () => {
     });
     expect(event?.metadata.params).toEqual({ locationId: LOC_B });
   });
+
+  it('textos largos o con caracteres de formato: se normalizan, no se descartan', () => {
+    const title = 'T'.repeat(200);
+    const family = 'Sede 👨\u200D👩\u200D👧';
+    const long = 'n'.repeat(300);
+    const event = configAuditEvent(ctx, {
+      ...target,
+      reason: 'CONSENT_TEMPLATE_CREATED',
+      action: 'CREATE',
+      after: { title, name: family, sku: long, notes: 'línea 1\nlínea 2' },
+    });
+    const after = event.metadata.configChange?.after ?? {};
+    expect(after.title).toBe(title);
+    expect(after.name).toBe('Sede 👨👩👧');
+    expect(after.sku).toBe(`${'n'.repeat(254)}…`);
+    expect(after.notes).toBe('línea 1 línea 2');
+    expect(sanitizeAuditMetadata(event.metadata)).toEqual(event.metadata);
+  });
+
+  it('el cambio se detecta con el valor real aunque el normalizado coincida', () => {
+    const event = configAuditEvent(ctx, {
+      ...target,
+      action: 'UPDATE',
+      before: { name: `${'a'.repeat(300)}x` },
+      after: { name: `${'a'.repeat(300)}y` },
+    });
+    expect(event?.metadata.changedFields).toEqual(['name']);
+  });
 });

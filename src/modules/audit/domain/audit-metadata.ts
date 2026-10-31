@@ -1172,8 +1172,16 @@ function staffAccess(value: unknown): AuditStaffAccessChange | null {
   return { ...(before ? { before } : {}), ...(after ? { after } : {}) };
 }
 
-/** Texto corto de configuración: una línea, sin caracteres de control. */
-const CONFIG_TEXT = /^[^\p{Cc}\p{Cf}\u2028\u2029]{0,120}$/u;
+/**
+ * Texto de configuración: una línea de hasta `MAX_AUDIT_CONFIG_TEXT`
+ * caracteres, sin caracteres de control ni de formato. `configAuditEvent` ya
+ * lo deja así (recorta y limpia); aquí lo que no encaja se descarta.
+ */
+export const MAX_AUDIT_CONFIG_TEXT = 255;
+const CONFIG_TEXT = new RegExp(
+  `^[^\\p{Cc}\\p{Cf}\\u2028\\u2029]{0,${MAX_AUDIT_CONFIG_TEXT}}$`,
+  'u',
+);
 const MAX_CONFIG_LIST = 50;
 
 function configScalar(value: unknown): value is string | number {

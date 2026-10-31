@@ -1,6 +1,7 @@
 import { ConflictException, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
+import { lockRow } from '../../../../shared/prisma/lock-row';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { Payer } from '../../domain/entities/payer.entity';
 import {
@@ -159,9 +160,13 @@ export class PrismaPayerRepository implements PayerRepository {
   ): Promise<Payer | null> {
     try {
       return await this.prisma.runWithTenant(async (tx) => {
+        // DX-360: el antes, con la fila bloqueada; retirado o de otra
+        // clínica → null (404), sin escribir nada.
+        if (!(await lockRow(tx, 'payers', id))) return null;
         const current = await tx.payer.findFirst({
           where: { id, deletedAt: null },
         });
+        if (!current) return null;
         const row = await tx.payer.update({
           where: { id },
           data: {
@@ -177,16 +182,14 @@ export class PrismaPayerRepository implements PayerRepository {
           },
         });
         const updated = mapToEntity(row);
-        const event =
-          current &&
-          configAuditEvent(audit, {
-            action: 'UPDATE',
-            resourceType: 'PAYER',
-            resourceId: id,
-            reason: 'PAYER_UPDATED',
-            before: payerSnapshot(mapToEntity(current)),
-            after: payerSnapshot(updated),
-          });
+        const event = configAuditEvent(audit, {
+          action: 'UPDATE',
+          resourceType: 'PAYER',
+          resourceId: id,
+          reason: 'PAYER_UPDATED',
+          before: payerSnapshot(mapToEntity(current)),
+          after: payerSnapshot(updated),
+        });
         if (event) await writeAuditEvent(tx, event);
         return updated;
       });

@@ -4,6 +4,7 @@ import {
   AUDIT_CANCELLATION_KINDS,
   AUDIT_CANCELLATION_REASONS,
   AUDIT_ORIGINS,
+  MAX_AUDIT_CONFIG_TEXT,
   type AuditCancellation,
   type AuditOrigin,
 } from '../../domain/audit-metadata';
@@ -278,11 +279,11 @@ export class AuditExchangeRateBackupDto {
   currencies!: string[];
 }
 
-/** Valor de un campo de configuración (DX-360): texto corto, número, booleano, null o lista. */
+/** Valor de un campo de configuración (DX-360): texto de una línea, número, booleano, null o lista. */
 const AUDIT_CONFIG_VALUE = {
   nullable: true,
   oneOf: [
-    { type: 'string', maxLength: 120 },
+    { type: 'string', maxLength: MAX_AUDIT_CONFIG_TEXT },
     { type: 'number' },
     { type: 'boolean' },
     {

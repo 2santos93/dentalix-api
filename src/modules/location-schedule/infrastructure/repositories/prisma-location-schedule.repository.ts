@@ -113,16 +113,18 @@ export class PrismaLocationScheduleRepository implements LocationScheduleReposit
       // DX-089: la sede del request o la de escritura de la sesión (la
       // principal sin restricción): la misma en la que se agenda.
       const locationId = await this.tenantContext.writeLocationId(tx);
-      // FOR SHARE: choca con el FOR UPDATE de un cambio de zona en curso
+      // FOR NO KEY UPDATE: choca con el FOR UPDATE de un cambio de zona en curso
       // (PATCH /locations/:id), así que aquí se lee la zona ya confirmada y la
       // columna legada no vuelve a la anterior (R20).
+      // DX-360: y con otro reemplazo del horario de la misma sede, que espera:
+      // el antes de su evento es la semana que deja este.
       const [location] = await tx.$queryRaw<
         { id: string; timeZone: string | null }[]
       >`
         SELECT l."id", l."timeZone"
           FROM "locations" l
          WHERE l."id" = ${locationId}::uuid AND l."tenantId" = ${tenantId}::uuid
-           FOR SHARE`;
+           FOR NO KEY UPDATE`;
       // R15: una web antigua manda la zona; solo vale si es la de la sede.
       if (
         input.legacyTimeZone !== undefined &&

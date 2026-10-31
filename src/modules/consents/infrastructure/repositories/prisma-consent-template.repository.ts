@@ -1,6 +1,7 @@
 import { ConflictException, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
+import { lockRow } from '../../../../shared/prisma/lock-row';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { ConsentTemplate } from '../../domain/entities/consent-template.entity';
 import {
@@ -130,6 +131,8 @@ export class PrismaConsentTemplateRepository implements ConsentTemplateRepositor
   ): Promise<ConsentTemplate> {
     return this.prisma
       .runWithTenant(async (tx) => {
+        // DX-360: el antes, con la fila bloqueada hasta el final.
+        await lockRow(tx, 'consent_templates', id);
         const before = mapToEntity(
           await tx.consentTemplate.findUniqueOrThrow({ where: { id } }),
         );

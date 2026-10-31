@@ -1594,8 +1594,8 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   'POST /prescription-templates': 'config-audit.e2e-spec.ts',
   'PATCH /prescription-templates/:id': 'config-audit.e2e-spec.ts',
   'DELETE /prescription-templates/:id': 'config-audit.e2e-spec.ts',
-  // Inventario: INVENTORY_ITEM e INVENTORY_MOVEMENT en la sede del artículo,
-  // sin notas ni motivo.
+  // Inventario: INVENTORY_ITEM en la sede del artículo e INVENTORY_MOVEMENT
+  // en la sede del movimiento, sin notas ni motivo.
   'POST /inventory/items': 'config-audit.e2e-spec.ts',
   'PATCH /inventory/items/:id': 'config-audit.e2e-spec.ts',
   'DELETE /inventory/items/:id': 'config-audit.e2e-spec.ts',

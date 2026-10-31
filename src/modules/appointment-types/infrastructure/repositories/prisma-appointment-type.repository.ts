@@ -1,6 +1,7 @@
 import { ConflictException, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
+import { lockRow } from '../../../../shared/prisma/lock-row';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { AppointmentType } from '../../domain/entities/appointment-type.entity';
 import {
@@ -133,6 +134,8 @@ export class PrismaAppointmentTypeRepository implements AppointmentTypeRepositor
   ): Promise<AppointmentType> {
     return this.prisma
       .runWithTenant(async (tx) => {
+        // DX-360: el antes, con la fila bloqueada hasta el final.
+        await lockRow(tx, 'appointment_types', id);
         const before = mapToEntity(
           await tx.appointmentType.findUniqueOrThrow({ where: { id } }),
         );
@@ -165,6 +168,7 @@ export class PrismaAppointmentTypeRepository implements AppointmentTypeRepositor
 
   async softDelete(id: string, audit: AuditRequestContext): Promise<void> {
     await this.prisma.runWithTenant(async (tx) => {
+      await lockRow(tx, 'appointment_types', id);
       const before = mapToEntity(
         await tx.appointmentType.findUniqueOrThrow({ where: { id } }),
       );

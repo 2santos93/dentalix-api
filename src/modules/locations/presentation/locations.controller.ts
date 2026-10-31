@@ -86,7 +86,7 @@ export class LocationsController {
   @ApiOperation({
     summary: 'Crea una sede',
     description:
-      'Queda en la auditoría (LOCATION_CREATED) con su nombre, país, moneda, zona, formato, reloj y teléfono; nunca la dirección.',
+      'Queda en la auditoría (LOCATION_CREATED) con su nombre, país, moneda, zona, formato, reloj, teléfono y región telefónica por defecto (defaultPhoneRegion); nunca la dirección.',
   })
   @ApiCreatedResponse({ type: LocationDto })
   async create(

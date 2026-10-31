@@ -5,6 +5,7 @@ import {
   Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
+import { lockRow } from '../../../shared/prisma/lock-row';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { requireLocationTimeZone } from '../../../shared/locations/location-time-zone';
 import { requireLocationFormat } from '../../../shared/locations/location-regional';
@@ -160,6 +161,12 @@ export class PrismaReminderRepository implements ReminderRepository {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
       // Bajo RLS: una sede de otra clínica es invisible, igual que una que no existe.
+      // DX-360: la sede bloqueada (FOR NO KEY UPDATE) serializa dos guardados
+      // a la vez, también el primero, cuando aún no hay fila de ajustes: el
+      // antes de cada evento es el después del anterior.
+      if (!(await lockRow(tx, 'locations', locationId, 'NO KEY UPDATE'))) {
+        return null;
+      }
       const location = await tx.location.findFirst({
         where: { id: locationId, deletedAt: null },
         select: {

@@ -1165,6 +1165,13 @@ describe('sanitizeAuditMetadata — cambio de configuración de la clínica (DX-
     expect(sanitizeAuditMetadata({ configChange })).toEqual({ configChange });
   });
 
+  it('admite textos de hasta 255 caracteres (un título de 200)', () => {
+    const configChange = {
+      after: { title: 'T'.repeat(200), host: 'h'.repeat(255) },
+    };
+    expect(sanitizeAuditMetadata({ configChange })).toEqual({ configChange });
+  });
+
   it('admite un solo lado (un alta o un retiro)', () => {
     const configChange = {
       after: { host: 'citas.clinica.co', status: 'PENDING' },
@@ -1178,7 +1185,7 @@ describe('sanitizeAuditMetadata — cambio de configuración de la clínica (DX-
         configChange: {
           after: {
             name: 'Resina',
-            body: 'x'.repeat(121),
+            body: 'x'.repeat(256),
             notes: 'línea 1\nlínea 2',
             items: [{ activeIngredient: 'Amoxicilina' }],
             minStock: Number.NaN,
@@ -1194,7 +1201,7 @@ describe('sanitizeAuditMetadata — cambio de configuración de la clínica (DX-
     for (const configChange of [
       {},
       { before: 'x' },
-      { after: { body: 'x'.repeat(200) } },
+      { after: { body: 'x'.repeat(256) } },
       { before: {}, after: {} },
       'x',
     ]) {

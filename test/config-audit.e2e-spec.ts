@@ -448,6 +448,33 @@ describe('Auditoría de la configuración de la clínica (e2e, DX-360)', () => {
       expect(dump).not.toContain('Autorizo');
     });
 
+    it('un título de 200 caracteres y un nombre con emoji (ZWJ) quedan en el evento, sin descartarse', async () => {
+      const title = `Consentimiento ${'x'.repeat(185)}`;
+      const created = await as(clinicA)
+        .send('post', '/consent-templates')
+        .send({ title, body: 'Texto de la plantilla larga.' })
+        .expect(201);
+      const [event] = await eventsOf(clinicA, 'CONSENT_TEMPLATE', {
+        resourceId: (created.body as { id: string }).id,
+      });
+      expect(
+        (event.metadata as { configChange: { after: { title: string } } })
+          .configChange.after.title,
+      ).toBe(title);
+
+      const item = await as(clinicA)
+        .send('post', '/inventory/items')
+        .send({ name: 'Kit familia 👨\u200D👩\u200D👧', unit: 'caja' })
+        .expect(201);
+      const [itemEvent] = await eventsOf(clinicA, 'INVENTORY_ITEM', {
+        resourceId: (item.body as { id: string }).id,
+      });
+      expect(
+        (itemEvent.metadata as { configChange: { after: { name: string } } })
+          .configChange.after.name,
+      ).toBe('Kit familia 👨👩👧');
+    });
+
     it('POST/PATCH/DELETE /prescription-templates: nombre y nº de medicamentos, nunca los medicamentos ni las notas', async () => {
       const created = await as(clinicA)
         .send('post', '/prescription-templates')
@@ -509,7 +536,7 @@ describe('Auditoría de la configuración de la clínica (e2e, DX-360)', () => {
   });
 
   describe('inventario', () => {
-    it('POST/PATCH/DELETE /inventory/items y POST movements: eventos en la sede del artículo, sin notas ni motivo', async () => {
+    it('POST/PATCH/DELETE /inventory/items y POST movements: el artículo en su sede y el movimiento en la sede del movimiento, sin notas ni motivo', async () => {
       const created = await as(clinicA)
         .send('post', '/inventory/items')
         .set('X-Location-Id', locationA)
@@ -593,6 +620,56 @@ describe('Auditoría de la configuración de la clínica (e2e, DX-360)', () => {
       });
       const dump = JSON.stringify([...items, moved]);
       expect(dump).not.toContain('proveedor X');
+    });
+  });
+
+  describe('rollback: sin cambio no hay evento', () => {
+    const count = () =>
+      raw.auditEvent.count({ where: { tenantId: clinicA.tenantId } });
+
+    it('POST y PATCH /appointment-types con un nombre repetido: 409 y ningún evento nuevo', async () => {
+      await as(clinicA)
+        .send('post', '/appointment-types')
+        .send({ name: 'Ortodoncia', durationMinutes: 30, color: '#112233' })
+        .expect(201);
+      const other = await as(clinicA)
+        .send('post', '/appointment-types')
+        .send({ name: 'Periodoncia', durationMinutes: 30, color: '#112233' })
+        .expect(201);
+      const before = await count();
+      await as(clinicA)
+        .send('post', '/appointment-types')
+        .send({ name: 'Ortodoncia', durationMinutes: 45, color: '#445566' })
+        .expect(409);
+      await as(clinicA)
+        .send(
+          'patch',
+          `/appointment-types/${(other.body as { id: string }).id}`,
+        )
+        .send({ name: 'Ortodoncia' })
+        .expect(409);
+      expect(await count()).toBe(before);
+    });
+
+    it('POST y PATCH /payers con un nombre repetido: 409 y ningún evento nuevo', async () => {
+      await as(clinicA)
+        .send('post', '/payers')
+        .send({ name: 'Aseguradora Uno', type: 'INSURER' })
+        .expect(201);
+      const other = await as(clinicA)
+        .send('post', '/payers')
+        .send({ name: 'Aseguradora Dos', type: 'INSURER' })
+        .expect(201);
+      const before = await count();
+      await as(clinicA)
+        .send('post', '/payers')
+        .send({ name: 'Aseguradora Uno', type: 'OTHER' })
+        .expect(409);
+      await as(clinicA)
+        .send('patch', `/payers/${(other.body as { id: string }).id}`)
+        .send({ name: 'Aseguradora Uno' })
+        .expect(409);
+      expect(await count()).toBe(before);
     });
   });
 
