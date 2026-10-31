@@ -14,6 +14,8 @@ export interface SignedConsentPdfJobSource {
   /** El profesional que lo completó: autor del documento archivado. */
   professionalUserId: string;
   status: SignedConsentPdfStatus;
+  /** DX-443: al archivarlo, enviar la copia al paciente (no en el retroactivo). */
+  notifyPatient: boolean;
   /** null si aún no está completo (falta la firma del profesional). */
   source: SignedConsentPdfSource | null;
 }
@@ -45,10 +47,12 @@ export interface SignedConsentPdfRepository {
   /**
    * En UNA transacción: la fila del documento del paciente (SIGNED_CONSENT,
    * inalterable) y el estado a READY con su id. `ALREADY_READY` si otro
-   * intento lo archivó antes (y no se crea nada).
+   * intento lo archivó antes (y no se crea nada). DX-443: `onArchived` corre
+   * en esa misma transacción (encolar la copia al paciente: outbox).
    */
   archive(
     input: ArchiveSignedConsentPdfInput,
+    onArchived?: (tx: Prisma.TransactionClient) => Promise<void>,
   ): Promise<'ARCHIVED' | 'ALREADY_READY'>;
   /** Cuenta el intento y deja el código; `final` ⇒ FAILED. */
   recordFailure(

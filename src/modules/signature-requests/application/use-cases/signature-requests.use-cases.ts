@@ -162,6 +162,7 @@ export function toSignatureRequestSummary(
     countersignedAt: consent?.countersignedAt ?? null,
     signedPdfStatus: consent?.signedPdf?.status ?? null,
     signedPdfDocumentId: consent?.signedPdf?.documentId ?? null,
+    signedPdfCopySentAt: consent?.signedPdf?.copySentAt ?? null,
   };
 }
 

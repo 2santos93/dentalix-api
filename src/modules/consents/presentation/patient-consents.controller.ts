@@ -20,8 +20,10 @@ import {
   ApiForbiddenResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
+  ApiOperation,
   ApiParam,
   ApiTags,
+  ApiTooManyRequestsResponse,
 } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
@@ -32,6 +34,8 @@ import {
   SIGNATURE_REQUEST_ROLES,
 } from '../../auth/presentation/guards/clinic-role-sets';
 import { RetrySignedConsentPdfUseCase } from '../application/signed-consent-pdf.service';
+import { ResendSignedPdfCopyUseCase } from '../application/signed-pdf-copy.service';
+import type { TenantHostRequest } from '../../../shared/tenancy/tenant-host-request';
 import { JwtPayload } from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 import {
@@ -53,6 +57,7 @@ import {
   PatientConsentDto,
   PatientConsentSummaryDto,
   SignedConsentPdfRetryDto,
+  SignedPdfCopyResentDto,
 } from './dto/patient-consent.dto';
 import { PreviewPatientConsentQueryDto } from './dto/preview-patient-consent-query.dto';
 import {
@@ -104,6 +109,7 @@ export class PatientConsentsController {
     private readonly getConsent: GetPatientConsentUseCase,
     private readonly countersignConsent: CountersignPatientConsentUseCase,
     private readonly retrySignedPdf: RetrySignedConsentPdfUseCase,
+    private readonly resendCopy: ResendSignedPdfCopyUseCase,
   ) {}
 
   @Audit({
@@ -289,5 +295,49 @@ export class PatientConsentsController {
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<SignedConsentPdfRetryDto> {
     return this.retrySignedPdf.execute(patientId, id);
+  }
+
+  // DX-443: «Reenviar copia» del PDF firmado al paciente (o a su
+  // responsable): enlace nuevo de un solo uso y el anterior deja de servir.
+  // Los cuatro roles, como el bloque de firma a distancia de la ficha.
+  @Audit({
+    action: 'SEND',
+    resource: 'CONSENT',
+    resourceId: { param: 'id' },
+    patient: { param: 'patientId' },
+    reason: 'SIGNED_PDF_COPY_RESENT',
+  })
+  @Roles(...SIGNATURE_REQUEST_ROLES)
+  @Post(':id/signed-pdf/copy')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Reenviar la copia del PDF firmado al paciente',
+    description:
+      'Envía por email (outbox de DX-088, sin nada clínico) un enlace NUEVO de un solo uso para descargar el PDF firmado, al email de la firma a distancia; el anterior deja de servir en la misma transacción. Auditado como SEND de CONSENT, reason SIGNED_PDF_COPY_RESENT. Sin el token ni la URL en la respuesta.',
+  })
+  @ApiOkResponse({ type: SignedPdfCopyResentDto })
+  @ApiForbiddenResponse({
+    description:
+      'Sin un rol de esta clínica (los cuatro roles pueden reenviar)',
+  })
+  @ApiNotFoundResponse({ description: 'Consentimiento no encontrado' })
+  @ApiConflictResponse({
+    description:
+      'El PDF firmado todavía no está archivado, o no se pudo armar el enlace de la clínica',
+  })
+  @ApiTooManyRequestsResponse({
+    description: 'Tope de emails a esta persona o de la clínica',
+  })
+  resendSignedPdfCopy(
+    @Param('patientId', ParseUUIDPipe) patientId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: AuthenticatedRequest & TenantHostRequest,
+  ): Promise<SignedPdfCopyResentDto> {
+    return this.resendCopy.execute(
+      patientId,
+      id,
+      req.user.sub,
+      req.tenantHost?.host,
+    );
   }
 }
