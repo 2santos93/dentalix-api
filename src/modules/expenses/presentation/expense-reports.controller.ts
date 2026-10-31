@@ -1,11 +1,16 @@
 import {
   Controller,
   Get,
+  Inject,
   Query,
   Res,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
+import {
+  CURRENCY_DIGITS_CATALOG,
+  type CurrencyDigitsCatalog,
+} from '../../../shared/money/currency-digits';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
@@ -46,7 +51,12 @@ const LOCATION_HEADER = {
 @Roles(...EXPENSE_ROLES)
 @Controller()
 export class ExpenseReportsController {
-  constructor(private readonly listExpenses: ListExpensesUseCase) {}
+  constructor(
+    private readonly listExpenses: ListExpensesUseCase,
+    // DX-340: decimales de cada moneda (currencies.rounding_digits).
+    @Inject(CURRENCY_DIGITS_CATALOG)
+    private readonly currencyDigits: CurrencyDigitsCatalog,
+  ) {}
 
   @Audit({ action: 'EXPORT', resource: 'EXPENSE', reason: 'EXPENSE_LIST' })
   @Get('expenses.csv')
@@ -68,6 +78,10 @@ export class ExpenseReportsController {
   ): Promise<string> {
     const { items, locationNames } = await this.listExpenses.exportAll(query);
     sendCsv(res, `gastos-${query.from ?? 'inicio'}-${query.to ?? 'hoy'}.csv`);
-    return toExpensesCsv(items, locationNames);
+    return toExpensesCsv(
+      items,
+      locationNames,
+      await this.currencyDigits.table(items.map((i) => i.currency)),
+    );
   }
 }

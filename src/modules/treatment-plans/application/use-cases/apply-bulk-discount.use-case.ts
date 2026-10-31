@@ -16,6 +16,10 @@ import {
   DENTAL_CATALOG_REPOSITORY,
   type DentalCatalogRepository,
 } from '../../../dental-catalog/domain/ports/dental-catalog-repository.port';
+import {
+  CURRENCY_DIGITS_CATALOG,
+  type CurrencyDigitsCatalog,
+} from '../../../../shared/money/currency-digits';
 import { assertItemsEditable } from './signed-plan-lock';
 import {
   assertPlanDiscountable,
@@ -40,8 +44,9 @@ export interface ApplyBulkDiscountResult {
 
 /**
  * Acción «Descuento %» sobre varios ítems de un plan (DX-204). A cada ítem se
- * le pone el `percent` % de SU precio, redondeado a la unidad de la moneda del
- * plan (COP sin decimales, EUR a céntimos). El tope del rol se comprueba antes
+ * le pone el `percent` % de SU precio, redondeado a los dígitos de redondeo de
+ * la moneda del plan (`currencies.rounding_digits`, DX-340: COP sin decimales,
+ * EUR a céntimos). El tope del rol se comprueba antes
  * (un % por encima: 403 y nada cambia) y otra vez ítem a ítem: si el redondeo
  * lo llevara por encima, baja a la unidad que lo respeta. Por encima del
  * umbral, el motivo es obligatorio (422). Todo o nada, en una transacción.
@@ -58,6 +63,8 @@ export class ApplyBulkDiscountUseCase {
     private readonly now: PlanClock,
     @Inject(DENTAL_CATALOG_REPOSITORY)
     private readonly catalog: DentalCatalogRepository,
+    @Inject(CURRENCY_DIGITS_CATALOG)
+    private readonly currencyDigits: CurrencyDigitsCatalog,
   ) {}
 
   async execute(
@@ -76,6 +83,14 @@ export class ApplyBulkDiscountUseCase {
       input.discountReason !== undefined ||
       input.discountReasonNote !== undefined;
     const noDiscount = await this.noDiscountCatalogItems(planId, input.itemIds);
+    // La moneda del plan se lee con su fila bloqueada, dentro de la
+    // transacción; la tabla de decimales se carga antes (en caché) con la
+    // moneda que el plan tiene ahora, para que una moneda dada de alta
+    // después no falte dentro de la transacción.
+    const current = await this.repo.findPlanById(planId);
+    const digits = await this.currencyDigits.table(
+      current ? [current.currency] : [],
+    );
     let skippedNoDiscount = 0;
     // BE-036: el estado del plan se valida con su fila bloqueada, dentro de
     // la transacción, junto a los ítems.
@@ -96,7 +111,7 @@ export class ApplyBulkDiscountUseCase {
           const discount = discountForPercent(
             item.price,
             input.percent,
-            plan.currency,
+            digits.roundingDigits(plan.currency),
             cap,
           );
           const before = {

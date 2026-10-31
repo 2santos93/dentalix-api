@@ -29,6 +29,7 @@ import {
   type PlanCreditReader,
 } from '../../domain/ports/plan-credit-reader.port';
 import { round2 } from '../../../../shared/money/money';
+import { linesTotal } from '../../../../shared/money/line-rounding';
 
 export interface GetPlanBalanceResult {
   planCurrency: string;
@@ -231,10 +232,9 @@ export class GetPlanBalanceUseCase {
     // `paid`.
     const billable = !isPlanBillable(plan.status)
       ? 0
-      : round2(
-          planItems
-            .filter((item) => BILLABLE_STATUSES.has(item.status))
-            .reduce((sum, item) => sum + item.price - item.discount, 0),
+      : // DX-340: suma exacta de las líneas cobrables (regla única).
+        linesTotal(
+          planItems.filter((item) => BILLABLE_STATUSES.has(item.status)),
         );
 
     let paid = 0;

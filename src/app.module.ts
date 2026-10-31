@@ -5,6 +5,7 @@ import { HealthController } from './health/health.controller';
 import { ShutdownState } from './shared/lifecycle/shutdown-state';
 import { ConfigModule } from './config/config.module';
 import { PrismaModule } from './shared/prisma/prisma.module';
+import { MoneyModule } from './shared/money/money.module';
 import { TenantContextModule } from './shared/tenancy/tenant-context.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { MeModule } from './modules/me/me.module';
@@ -78,6 +79,8 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     ConfigModule,
     SecurityModule,
     PrismaModule,
+    // Global (DX-340): decimales por moneda de `currencies`.
+    MoneyModule,
     TenantContextModule,
     // Global: el AuditInterceptor de `@Audit(...)` se instancia en los
     // controladores de muchos módulos (DX-009).
