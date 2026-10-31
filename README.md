@@ -3669,11 +3669,12 @@ migraciones `20261020200000_dx151_enums`,
   objeto huérfano se borra en el acto (es lo único que se borra).
 - **CSP de la web**: la web ve los PDF en un `iframe` y las imágenes en
   `<img>` desde la URL firmada, así que su CSP añade a `frame-src` e
-  `img-src` el origen de los ficheros: `NEXT_PUBLIC_FILES_ORIGIN` (variable
-  de la **web**, no de la API; por defecto el origen de la API, que es el de
-  `/files/signed` con el disco). Con S3 en producción, pon ahí el origen del
-  bucket (`https://<bucket>.s3.<región>.amazonaws.com` o el de R2). La API no
-  tiene variables nuevas.
+  `img-src` el origen de los ficheros: `FILES_ORIGIN` (variable de servidor
+  de la **web**, leída en runtime desde DX-083, no de la API; por defecto
+  el origen de la API, que es el de `/files/signed` con el disco). Con S3
+  en producción, pon ahí el origen del bucket
+  (`https://<bucket>.s3.<región>.amazonaws.com` o el de R2). La API no tiene
+  variables nuevas.
 - **Pendiente tras DX-089**: la sede de escritura la resuelve solo
   `PrismaPatientDocumentRepository.resolveWriteLocationId` (hoy la activa o
   la principal); cuando DX-089 llegue a main pasa a
@@ -4620,8 +4621,8 @@ file://cors.json` con `{"CORSRules": [...]}`; GET no hace falta: el visor
   pasa a R2, hay que implementar antes un modo de PUT prefirmado (con
   `Content-Length` y `x-amz-checksum-sha256` firmados) en
   `createDirectUpload` (tarea aparte del tech lead; informe DX-259).
-- **Web**: `NEXT_PUBLIC_FILES_ORIGIN` = origen del bucket (CSP `connect-src`,
-  `frame-src`, `img-src`).
+- **Web**: `FILES_ORIGIN` (antes `NEXT_PUBLIC_FILES_ORIGIN`, DX-083) = origen
+  del bucket (CSP `connect-src`, `frame-src`, `img-src`).
 - La política IAM de DX-084 sirve (`CopyObject` usa `s3:GetObject` del origen
   y `s3:PutObject` del destino); añade `s3:ListBucket` sobre el bucket para el
   `HeadBucket` del arranque.
@@ -5325,18 +5326,27 @@ y `docker-compose.yml` (`minio/minio` ya no se puede descargar de Docker Hub);
 si la imagen no se descarga, el paso queda en rojo con un error que lo dice y
 el resto de la suite sigue corriendo.
 
-## Deployment
+## Imagen de producción y apagado ordenado (DX-083)
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+Runbook completo (orden backup → `migrate deploy` → API gradual → web →
+`/health/ready`, y valores de timeouts y pool): `dentalix-docs/docs/operacion/despliegue.md`.
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
-
-```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
-```
-
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+- `docker build -t dentalix-api .` — multi-etapa: build con devDependencies;
+  runtime con `npm ci --omit=dev`, sin `.env` (`.dockerignore`), usuario
+  `node` y `CMD node dist/main`. La CI la construye en cada PR (job
+  «Imagen Docker») y le pasa `.github/scripts/docker-smoke-api.sh`.
+- En la imagen: `npx prisma migrate deploy` (job con `DIRECT_URL`),
+  `npm run seed:prod` y `npm run audit:purge:prod`. Son el seed y la purga
+  compilados por `npm run build:scripts` a `dist/scripts` (las ciudades de
+  `country-state-city`, devDependency, van a `cities.json`). En desarrollo
+  siguen `npx prisma db seed` y `npm run audit:purge` con ts-node.
+- SIGTERM/SIGINT (`src/config/graceful-shutdown.ts`): `/health/ready` da 503
+  al momento, espera `SHUTDOWN_DRAIN_MS` atendiendo, cierra el servidor HTTP
+  (las peticiones y transacciones en vuelo terminan) y después `app.close()`
+  (email, worker, `$disconnect`), con el tope `SHUTDOWN_TIMEOUT_MS`. El
+  worker (`APP_ROLE=worker`) sigue con `enableShutdownHooks`.
+- Swagger (`/docs`) no se publica con `NODE_ENV=production` salvo
+  `SWAGGER_ENABLED="true"` (SEC-019).
 
 ## Resources
 

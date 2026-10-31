@@ -10,6 +10,7 @@
   },
   "scripts": {
     "build": "nest build",
+    "build:scripts": "tsc -p tsconfig.scripts.json && node dist/scripts/prisma/scripts/export-cities.js",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",
     "start:dev": "nest start --watch",
@@ -29,6 +30,8 @@
     "g1:backfill-locations": "ts-node --transpile-only prisma/scripts/g1-backfill-locations.ts",
     "phones:report": "ts-node --transpile-only prisma/scripts/phones-report.ts",
     "audit:purge": "ts-node --transpile-only prisma/audit-purge.ts",
+    "seed:prod": "node dist/scripts/prisma/seed.js",
+    "audit:purge:prod": "node dist/scripts/prisma/audit-purge.js",
     "db:test:setup": "dotenv -e .env.test -- npx prisma migrate deploy && dotenv -e .env.test -- npx prisma db seed",
     "test:int": "dotenv -e .env.test -- jest --config ./test/jest-int.json --runInBand",
     "test:owner-nosu": "jest --config ./test/jest-owner-nosu.json --runInBand",

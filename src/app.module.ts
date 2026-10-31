@@ -2,6 +2,7 @@ import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { HealthController } from './health/health.controller';
+import { ShutdownState } from './shared/lifecycle/shutdown-state';
 import { ConfigModule } from './config/config.module';
 import { PrismaModule } from './shared/prisma/prisma.module';
 import { TenantContextModule } from './shared/tenancy/tenant-context.module';
@@ -156,7 +157,7 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     RemindersModule,
   ],
   controllers: [AppController, HealthController],
-  providers: [AppService],
+  providers: [AppService, ShutdownState],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {

@@ -2,7 +2,9 @@ import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { configureApp } from './config/configure-app';
-import { setupSwagger } from './config/swagger';
+import { installGracefulShutdown } from './config/graceful-shutdown';
+import { loadShutdownConfig } from './config/shutdown-config';
+import { setupSwagger, swaggerEnabled } from './config/swagger';
 import { parseAppRole } from './modules/jobs/infrastructure/jobs-config';
 import { AppLogger } from './shared/observability/app-logger';
 import { loadLogConfig } from './shared/observability/log-config';
@@ -33,11 +35,17 @@ async function bootstrap(): Promise<void> {
   // Observabilidad, seguridad, límites de cuerpo, prefijo y validación: lo
   // mismo que montan los e2e (ver configure-app.ts).
   configureApp(app);
-  setupSwagger(app);
-  // SIGTERM/SIGINT cierran la app con orden: el despachador de email
-  // (DX-088) deja de barrer y espera la tanda en vuelo, y con APP_ROLE=all el
-  // worker de trabajos (DX-085) espera a los trabajos en curso.
-  app.enableShutdownHooks();
+  const config = app.get(ConfigService);
+  if (swaggerEnabled((key) => config.get<string>(key))) setupSwagger(app);
+  // SIGTERM/SIGINT (DX-083): readiness 503, drenado, cierre del servidor HTTP
+  // con las peticiones en vuelo terminadas y, después, app.close(): el
+  // despachador de email (DX-088) espera la tanda en vuelo, con APP_ROLE=all
+  // el worker (DX-085) espera a sus trabajos, y Prisma se desconecta. Sin
+  // enableShutdownHooks: cerraría la base antes que el HTTP.
+  installGracefulShutdown(
+    app,
+    loadShutdownConfig((key) => config.get<string>(key)),
+  );
 
   await app.listen(process.env.PORT ?? 3000);
 }

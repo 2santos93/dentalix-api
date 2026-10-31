@@ -1,5 +1,6 @@
 import { Logger, ServiceUnavailableException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import { ShutdownState } from '../shared/lifecycle/shutdown-state';
 import { HealthController, READINESS_DB_TIMEOUT_MS } from './health.controller';
 
 type QueryRaw = jest.Mock<Promise<unknown>, [TemplateStringsArray]>;
@@ -70,6 +71,22 @@ describe('HealthController', () => {
     const queryRaw = queryRawMock().mockResolvedValue([]);
     await controllerWith(queryRaw).ready();
     expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it('DX-083: durante el drenado la readiness da 503 sin tocar la base; la liveness sigue ok', async () => {
+    const queryRaw = queryRawMock().mockResolvedValue([]);
+    const shutdown = new ShutdownState();
+    const controller = new HealthController({ $queryRaw: queryRaw }, shutdown);
+    await expect(controller.ready()).resolves.toEqual({
+      status: 'ok',
+      database: 'up',
+    });
+    shutdown.startDraining();
+    await expect(controller.ready()).rejects.toMatchObject({
+      response: { statusCode: 503, status: 'draining' },
+    });
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+    expect(controller.check()).toEqual({ status: 'ok' });
   });
 
   it('ambas sondas quedan fuera del rate limit', () => {

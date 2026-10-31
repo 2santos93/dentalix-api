@@ -5,6 +5,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
+import { ShutdownState } from '../shared/lifecycle/shutdown-state';
 import { PrismaService } from '../shared/prisma/prisma.service';
 
 /** Lo único que la readiness necesita del cliente de Prisma. */
@@ -31,11 +32,16 @@ class DatabaseTimeoutError extends Error {
  *   fallo va como `cause` del 503: el filtro global deja UNA línea warn con
  *   su tipo (DatabaseTimeoutError, PrismaClientInitializationError...), sin
  *   el mensaje del driver, que puede llevar la URL de la base.
+ *   DX-083: también 503 (`status: 'draining'`, sin tocar la base) desde que
+ *   llega SIGTERM, mientras la API drena (ver graceful-shutdown.ts).
  */
 @SkipThrottle()
 @Controller('health')
 export class HealthController {
-  constructor(@Inject(PrismaService) private readonly db: DatabasePing) {}
+  constructor(
+    @Inject(PrismaService) private readonly db: DatabasePing,
+    private readonly shutdown: ShutdownState = new ShutdownState(),
+  ) {}
 
   @Get()
   check(): { status: 'ok' } {
@@ -44,6 +50,12 @@ export class HealthController {
 
   @Get('ready')
   async ready(): Promise<{ status: 'ok'; database: 'up' }> {
+    if (this.shutdown.draining) {
+      throw new ServiceUnavailableException({
+        statusCode: 503,
+        status: 'draining',
+      });
+    }
     let timer: NodeJS.Timeout | undefined;
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(
