@@ -134,7 +134,11 @@ describeWithBackupTools(
         // públicos de la copia (prefijo y base) y se busca en lo que queda.
         const pass = password(cfg.sourceUrl);
         const db = decodeURIComponent(new URL(cfg.sourceUrl).pathname.slice(1));
-        const visible = r.out.split(`dentalix-${db}`).join('').split(db).join('');
+        const visible = r.out
+          .split(`dentalix-${db}`)
+          .join('')
+          .split(db)
+          .join('');
         expect(r.out).not.toContain(cfg.sourceUrl);
         if (pass) {
           expect(r.out).not.toContain(`:${pass}@`);

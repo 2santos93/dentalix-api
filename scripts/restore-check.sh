@@ -131,7 +131,7 @@ SELECT format('DROP DATABASE IF EXISTS %I WITH (FORCE)', :'db') \gexec
 SQL
 }
 
-# shellcheck disable=SC2329 # la invoca el trap EXIT
+# shellcheck disable=SC2317,SC2329 # la invoca el trap EXIT (SC2317 en shellcheck < 0.10)
 finalize() {
   local rc=$? c sep='' checks_json='{' event
   set +e
