@@ -131,7 +131,7 @@ export class InClinicViewDto {
   @ApiProperty({ format: 'uuid' })
   locationId!: string;
 
-  @ApiProperty({ example: 'America/Bogota' })
+  @ApiProperty({ example: 'UTC' })
   timeZone!: string;
 
   @ApiProperty({

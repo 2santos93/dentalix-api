@@ -18,7 +18,7 @@ describe('DTOs de pagadores (DX-153)', () => {
   it.each(PAYER_TYPES)(
     'type accepts the five generic types (%s)',
     async (type) => {
-      expect(await messages(CreatePayerDto, { name: 'Sura', type })).toEqual(
+      expect(await messages(CreatePayerDto, { name: 'Surco', type })).toEqual(
         [],
       );
       expect(await messages(UpdatePayerDto, { type })).toEqual([]);
@@ -36,7 +36,7 @@ describe('DTOs de pagadores (DX-153)', () => {
     };
     for (const [code, generic] of Object.entries(legacy)) {
       const create = plainToInstance(CreatePayerDto, {
-        name: 'Sura',
+        name: 'Surco',
         type: code,
       });
       expect(await validate(create)).toEqual([]);
@@ -56,7 +56,7 @@ describe('DTOs de pagadores (DX-153)', () => {
 
   it('an unknown type is 400 with the generic list', async () => {
     for (const type of ['XX', 'constructor', '']) {
-      const out = await messages(CreatePayerDto, { name: 'Sura', type });
+      const out = await messages(CreatePayerDto, { name: 'Surco', type });
       expect(out).toEqual([
         'El tipo de pagador debe ser uno de: INSURER, PREPAID_PLAN, PUBLIC_SYSTEM, EMPLOYER, OTHER.',
       ]);

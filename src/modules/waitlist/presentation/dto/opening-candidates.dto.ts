@@ -231,7 +231,7 @@ export class OpeningCandidatesDto {
   @ApiProperty({ format: 'date-time' })
   end!: Date;
 
-  @ApiProperty({ example: 'America/Bogota' })
+  @ApiProperty({ example: 'UTC' })
   timeZone!: string;
 
   @ApiProperty({

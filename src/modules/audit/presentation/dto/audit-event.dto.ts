@@ -406,7 +406,7 @@ export class AuditEventDto {
   locationId!: string | null;
 
   @ApiProperty({
-    example: 'America/Bogota',
+    example: 'UTC',
     description:
       'Zona IANA de la sede del evento (o de la sede principal): la hora se ' +
       'muestra en ella.',
@@ -448,7 +448,7 @@ export class AuditEventsPageDto {
   nextCursor!: string | null;
 
   @ApiProperty({
-    example: 'America/Bogota',
+    example: 'UTC',
     description:
       'Zona de la sede activa (o de la principal), para interpretar los ' +
       'días de los filtros.',

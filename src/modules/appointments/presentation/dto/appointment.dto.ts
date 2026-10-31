@@ -297,7 +297,7 @@ export class PlanItemReservedElsewhereDto {
     nullable: true,
     description:
       'Zona IANA de esa sede: la fecha se muestra en ella. null si no está permitida.',
-    example: 'America/Bogota',
+    example: 'UTC',
   })
   timeZone!: string | null;
 

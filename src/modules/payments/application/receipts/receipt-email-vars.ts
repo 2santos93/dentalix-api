@@ -76,7 +76,7 @@ export function receiptEmailVars(
     locationAddress: snapshot.location.address,
     fiscalLine: snapshot.fiscalDataPending
       ? null
-      : `${clinic.legalName} · NIT/NIF ${clinic.taxId}`,
+      : `${clinic.legalName} · Id. fiscal ${clinic.taxId}`,
     // El nombre visible ya resuelto al leer el recibo (DX-327, R18).
     patientDocLabel: documentText(patient.docTypeName, patient.docNumberMasked),
     // DX-390: un cobro dividido dice su total y sus formas de pago.

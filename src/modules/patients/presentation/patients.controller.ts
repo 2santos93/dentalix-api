@@ -547,7 +547,7 @@ export class PatientsController {
       'administrativas y contacto de emergencia, y retira la autorización ' +
       'de marketing vigente. Conserva la HC y la identificación que exige ' +
       '(nombre, documento, nacimiento, sexo, residencia, estado civil, ' +
-      'ocupación, aseguradora, médico y acudiente). Motivo obligatorio. 409 ' +
+      'ocupación, aseguradora, médico y tutor). Motivo obligatorio. 409 ' +
       '`NOT_UNDER_RETENTION` si la HC no está en retención (se archiva).',
   })
   @ApiOkResponse({ type: PatientDto })

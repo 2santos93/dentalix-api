@@ -318,7 +318,7 @@ export class ProductionItemDto {
   locationName!: string;
 
   @ApiProperty({
-    example: 'America/Bogota',
+    example: 'UTC',
     description: 'Zona de la sede donde se realizó: la fecha se pinta con ella',
   })
   timeZone!: string;

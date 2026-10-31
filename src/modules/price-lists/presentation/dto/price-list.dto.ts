@@ -41,7 +41,7 @@ export class PriceListDto {
   @ApiProperty({ format: 'uuid' })
   id!: string;
 
-  @ApiProperty({ example: 'Convenio Sura EPS' })
+  @ApiProperty({ example: 'Convenio Empresa Alfa' })
   name!: string;
 
   @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })

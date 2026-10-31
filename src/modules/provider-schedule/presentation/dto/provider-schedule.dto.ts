@@ -332,7 +332,7 @@ export class RosterLocationDto {
   @ApiProperty({ example: 'Sede Norte' })
   name!: string;
 
-  @ApiProperty({ example: 'America/Bogota' })
+  @ApiProperty({ example: 'UTC' })
   timeZone!: string;
 }
 

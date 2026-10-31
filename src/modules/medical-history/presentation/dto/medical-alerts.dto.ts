@@ -101,7 +101,7 @@ export class PatientMedicalAlertsDto extends MedicalAlertFlagsDto {
   today!: string;
 
   @ApiProperty({
-    example: 'America/Bogota',
+    example: 'UTC',
     description: 'Zona IANA de esa sede.',
   })
   timeZone!: string;

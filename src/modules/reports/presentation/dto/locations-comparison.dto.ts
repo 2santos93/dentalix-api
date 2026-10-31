@@ -171,7 +171,7 @@ export class ComparisonRowDto {
   @ApiProperty({
     type: String,
     nullable: true,
-    example: 'America/Bogota',
+    example: 'UTC',
     description: 'Zona con la que la sede corta sus días (null en el total)',
   })
   timeZone!: string | null;

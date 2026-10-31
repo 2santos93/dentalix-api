@@ -254,7 +254,7 @@ export class ResponsiblePartyDto {
 
   @ApiProperty({
     description:
-      'Copiado del acudiente antiguo de la ficha (guardianName, DEPRECADO).',
+      'Copiado del tutor antiguo de la ficha (guardianName, DEPRECADO).',
   })
   migratedFromGuardian!: boolean;
 
