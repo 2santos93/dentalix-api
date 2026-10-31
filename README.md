@@ -4722,7 +4722,44 @@ MEDICAL_HISTORY` con `reason: ANESTHESIA_DOSE_CHECK`).
 - **Migraciones** `20261104130000_dx307_enums`, `…130100_dx307_audit_events_idx`
   y `…130200_dx307_anesthesia`: aditivas (dos tablas y un tipo nuevos).
 - **Demo**: `seed:demo` carga los sugeridos y una exodoncia de la paciente
-  infantil (Sofía, 32 kg) con 2 carpules de lidocaína (72 de 224 mg, 32 %).
+  infantil (Sofía, 11 años, 32 kg) con 2 carpules de lidocaína (DX-420: 72 de
+  140,8 mg con el máximo pediátrico, 51 %; con su hoja de sedación del mismo
+  día, 98,6 mg y 73 %).
+- **DX-418**: el acumulado y el tope son del PACIENTE en la ventana de 24 h
+  que contiene la administración (todas sus evoluciones y sedes; versión
+  `ANESTHESIA_DOSE_V2`; `domain/anesthesia-window.ts`).
+- **DX-420 · pediatría, edad mínima, sedación y epinefrina** (versión
+  `ANESTHESIA_DOSE_V3`; reglas y fuentes en `domain/anesthesia-limits.ts`):
+  - Catálogo con `pediatricMaxMgPerKg` (null = el de adulto), `minAgeYears`
+    (null = sin mínimo) y `epinephrineMgPerCarpule` (ml × 1000 / dilución:
+    1:100.000 × 1,8 ml = 0,018 mg; 0 sin epinefrina; null = no se sabe). Los
+    sugeridos traen la tabla de la AAPD (lidocaína y mepivacaína 4,4 mg/kg;
+    articaína desde 4 años; bupivacaína desde 12). Sin epinefrina en el alta o
+    al cambiar el vasoconstrictor o el volumen, se deduce del texto.
+  - «Pediátrico» = menor de 12 años cumplidos (`PEDIATRIC_AGE_LIMIT`, el
+    mismo corte que pide el peso). −30 % del máximo (también del tope
+    absoluto) en menores de 6 meses y si el paciente tiene hoja de sedación
+    (DX-407) en esa evolución o con hora en las 24 h de la anestesia; las dos
+    se multiplican. Avisos `PEDIATRIC_MAX`, `DOSE_REDUCED_INFANT`,
+    `DOSE_REDUCED_SEDATION` con su fuente.
+  - Edad mínima del anestésico NUEVO (`AGE_BELOW_MINIMUM`) y epinefrina
+    acumulada en la misma ventana ≥ 0,2 mg, o ≥ 0,04 mg con cardiopatía en la
+    anamnesis (`CARDIOPATIA`, `HIPERTENSION`, `VALVULOPATIA`,
+    `PROTESIS_VALVULAR` marcadas «Sí»; `EPINEPHRINE_OVER_MAX`) son
+    bloqueantes con el mismo 409 + `overrideReason`. Sin fecha de nacimiento
+    (`AGE_UNKNOWN`) o sin anamnesis (`EPINEPHRINE_CARDIAC_UNKNOWN`), aviso
+    informativo y valores de adulto sano.
+  - `summary.adjustment`, `summary.epinephrine` y `summary.remaining`
+    («quedan X mg ≈ Y carpules» del anestésico previsualizado, en cuartos
+    hacia abajo y sin llegar al 100 %, que ya exige motivo; manda lo que se
+    agote antes, dosis o epinefrina). Cada
+    registro copia los tres valores del catálogo, la epinefrina de la dosis y
+    la acumulada. Los registros anteriores no se tocan (append-only): su
+    epinefrina se deduce del vasoconstrictor y su máximo es el de adulto.
+  - Migraciones `20261106141959_dx420_unforce_anesthetic_products`,
+    `…142000_dx420_anesthesia_pediatric_epinephrine` (columnas nulas, CHECK
+    de rangos y relleno de los valores por defecto revisables en el catálogo
+    de todas las clínicas) y `…142001_dx420_reforce_anesthetic_products`.
 
 ## Hoja de sedación consciente en la evolución (DX-407)
 

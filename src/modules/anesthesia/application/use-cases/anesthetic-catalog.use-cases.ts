@@ -13,6 +13,7 @@ import {
 } from '../../domain/ports/anesthesia-repository.port';
 import type { AnestheticProduct } from '../../domain/entities';
 import { SAMPLE_ANESTHETICS } from '../../domain/sample-anesthetics';
+import { epinephrineFromLabel } from '../../domain/anesthesia-limits';
 import { ANESTHETIC_NOT_FOUND_MESSAGE } from './anesthesia.use-cases';
 
 export const ANESTHETIC_DUPLICATE_NAME_MESSAGE =
@@ -55,8 +56,20 @@ export class AnestheticCatalogUseCases {
     input: AnestheticProductInput,
     userId: string,
   ): Promise<AnestheticProduct> {
+    const values = clean(input) as AnestheticProductInput;
     const created = await this.repo.createProduct(
-      clean(input) as AnestheticProductInput,
+      {
+        ...values,
+        pediatricMaxMgPerKg: values.pediatricMaxMgPerKg ?? null,
+        minAgeYears: values.minAgeYears ?? null,
+        // DX-420: sin valor, de la dilución del vasoconstrictor.
+        epinephrineMgPerCarpule:
+          values.epinephrineMgPerCarpule ??
+          epinephrineFromLabel(
+            values.vasoconstrictor ?? null,
+            values.mlPerCarpule,
+          ),
+      },
       userId,
     );
     if (created === 'DUPLICATE_NAME') {
@@ -70,7 +83,26 @@ export class AnestheticCatalogUseCases {
     patch: AnestheticProductPatch,
     userId: string,
   ): Promise<AnestheticProduct> {
-    const updated = await this.repo.updateProduct(id, clean(patch), userId);
+    const values = clean(patch);
+    // DX-420: cambiar el vasoconstrictor o el volumen sin dar la epinefrina
+    // la recalcula, para que no quede la del carpule anterior.
+    if (
+      values.epinephrineMgPerCarpule === undefined &&
+      (values.vasoconstrictor !== undefined ||
+        values.mlPerCarpule !== undefined)
+    ) {
+      const current = await this.repo.findProduct(id);
+      if (current === null) {
+        throw new NotFoundException(ANESTHETIC_NOT_FOUND_MESSAGE);
+      }
+      values.epinephrineMgPerCarpule = epinephrineFromLabel(
+        values.vasoconstrictor === undefined
+          ? current.vasoconstrictor
+          : values.vasoconstrictor,
+        values.mlPerCarpule ?? current.mlPerCarpule,
+      );
+    }
+    const updated = await this.repo.updateProduct(id, values, userId);
     if (updated === null) {
       throw new NotFoundException(ANESTHETIC_NOT_FOUND_MESSAGE);
     }

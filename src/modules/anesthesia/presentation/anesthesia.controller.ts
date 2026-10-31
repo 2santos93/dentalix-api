@@ -129,7 +129,7 @@ export class AnesthesiaController {
   @ApiOperation({
     summary: 'Previsualiza la dosis acumulada con un anestésico más',
     description:
-      'No guarda nada. Lee la anamnesis vigente (peso y alergias) y lo ya registrado al paciente en la ventana de 24 h que contiene `administeredAt` (por defecto, ahora; la de más acumulado) en cualquier evolución y sede de la clínica (DX-418).',
+      'No guarda nada. Lee la anamnesis vigente (peso y alergias) y lo ya registrado al paciente en la ventana de 24 h que contiene `administeredAt` (por defecto, ahora; la de más acumulado) en cualquier evolución y sede de la clínica (DX-418). DX-420: aplica el máximo pediátrico (< 12 años), −30 % en menores de 6 meses o con hoja de sedación en las 24 h, la edad mínima del anestésico y el tope de epinefrina por cita (0,04 mg con cardiopatía en la anamnesis), y devuelve «quedan X mg ≈ Y carpules» en `summary.remaining`.',
   })
   @ApiOkResponse({ type: AnesthesiaCheckDto })
   @ApiBadRequestResponse({ description: 'Carpules, peso u hora inválidos' })
@@ -164,7 +164,7 @@ export class AnesthesiaController {
   @ApiOperation({
     summary: 'Registra anestesia local en la evolución (inalterable)',
     description:
-      'El servidor calcula los mg, el acumulado del PACIENTE en la ventana de 24 h que contiene la administración con más acumulado (todas sus evoluciones y sedes de la clínica, DX-418) y la fracción del máximo por peso. Al llegar al 100 % (o con alergia a anestésicos) responde 409 salvo `overrideReason`, que queda sellado y auditado. Dos registros simultáneos del mismo paciente se serializan (bloqueo por paciente): el segundo calcula con el primero.',
+      'El servidor calcula los mg, el acumulado del PACIENTE en la ventana de 24 h que contiene la administración con más acumulado (todas sus evoluciones y sedes de la clínica, DX-418) y la fracción del máximo por peso. Al llegar al 100 %, al tope de epinefrina, por debajo de la edad mínima del anestésico (DX-420) o con alergia a anestésicos responde 409 salvo `overrideReason`, que queda sellado y auditado. Dos registros simultáneos del mismo paciente se serializan (bloqueo por paciente): el segundo calcula con el primero.',
   })
   @ApiCreatedResponse({ type: RecordedAnesthesiaDto })
   @ApiBadRequestResponse({

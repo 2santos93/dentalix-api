@@ -22,11 +22,17 @@ import {
   type AnesthesiaDoseSummary,
   type AnestheticSnapshot,
   type DoseLine,
+  epinephrinePerCarpule,
   hasBlockingDoseAlerts,
   isValidCarpules,
   lineMg,
   summarizeAnesthesiaDose,
 } from '../../domain/anesthesia-dose';
+import {
+  ageInMonths,
+  doseAdjustment,
+  type DosePatient,
+} from '../../domain/anesthesia-limits';
 import {
   ANESTHESIA_DOSE_WINDOW_HOURS,
   type DoseWindow,
@@ -135,7 +141,25 @@ export function snapshotOf(
     mlPerCarpule: a.mlPerCarpule,
     maxMgPerKg: a.maxMgPerKg,
     maxAbsoluteMg: a.maxAbsoluteMg,
+    pediatricMaxMgPerKg: a.pediatricMaxMgPerKg,
+    minAgeYears: a.minAgeYears,
+    // Registros anteriores a DX-420 (null): se deduce del vasoconstrictor.
+    epinephrineMgPerCarpule:
+      'anestheticName' in a && a.epinephrineMgPerCarpule === null
+        ? undefined
+        : a.epinephrineMgPerCarpule,
   };
+}
+
+/** mg de epinefrina de `carpules` carpules; null si no se sabe. */
+function epinephrineOf(
+  anesthetic: AnestheticSnapshot,
+  carpules: number,
+): number | null {
+  const perCarpule = epinephrinePerCarpule(anesthetic);
+  return perCarpule === null
+    ? null
+    : Math.round(perCarpule * carpules * 10000) / 10000;
 }
 
 function linesOf(records: readonly AnesthesiaAdministration[]): DoseLine[] {
@@ -200,11 +224,13 @@ function ageOf(
   patient: AnesthesiaPatientContext,
   entry: AnesthesiaEntryRef,
   now: Date,
-): number | null {
-  return ageForSnapshot(
-    patient.birthDate,
-    civilDateIn(now, entry.timeZone ?? YOUNGEST_AGE_TIME_ZONE),
-  );
+): { years: number | null; months: number | null } {
+  const today = civilDateIn(now, entry.timeZone ?? YOUNGEST_AGE_TIME_ZONE);
+  const years = ageForSnapshot(patient.birthDate, today);
+  return {
+    years,
+    months: years === null ? null : ageInMonths(patient.birthDate, today),
+  };
 }
 
 function conflictMessage(summary: AnesthesiaDoseSummary): string {
@@ -282,6 +308,7 @@ export class AnesthesiaUseCases {
     at: Date,
     input: AnesthesiaDoseInput | null,
     product: AnestheticProduct | null,
+    sedation: boolean,
   ): Omit<AnesthesiaCheckResult, 'window'> & {
     window: DoseWindow;
     windowRecords: R[];
@@ -290,7 +317,20 @@ export class AnesthesiaUseCases {
       throw new BadRequestException(CARPULES_INVALID_MESSAGE);
     }
     const weight = resolveWeight(input?.weightKg, patient, prior, entry);
-    const window = worstDoseWindow(at, prior.window, weight.weightKg);
+    const age = ageOf(patient, entry, this.now());
+    const dosePatient: DosePatient = {
+      ageYears: age.years,
+      ageMonths: age.months,
+      sedation,
+      cardiac: patient.anamnesis?.cardiac ?? null,
+    };
+    const adjustment = doseAdjustment(dosePatient);
+    const window = worstDoseWindow(
+      at,
+      prior.window,
+      weight.weightKg,
+      adjustment,
+    );
     const windowRecords = prior.window.filter((r) =>
       isInDoseWindow(r.administeredAt, window),
     );
@@ -302,8 +342,10 @@ export class AnesthesiaUseCases {
       lines,
       weightKg: weight.weightKg,
       anamnesis: patient.anamnesis,
+      patient: dosePatient,
+      pending: product ? snapshotOf(product) : null,
     });
-    const ageYears = ageOf(patient, entry, this.now());
+    const ageYears = age.years;
     return {
       summary,
       window,
@@ -317,17 +359,21 @@ export class AnesthesiaUseCases {
     };
   }
 
-  /** Lo registrado en la evolución y en la ventana, con los nombres. */
+  /**
+   * Lo registrado en la evolución y en la ventana, con los nombres, y si hay
+   * sedación (DX-407) en esta evolución o en el mismo rango (DX-420).
+   */
   private async prior(patientId: string, entryId: string, window: DoseWindow) {
     const entry = await this.repo.listByEntry(patientId, entryId);
     const inWindow = await this.repo.listPatientWindow(patientId, window);
-    return { entry, window: inWindow };
+    const sedation = await this.repo.hasSedation(patientId, entryId, window);
+    return { entry, window: inWindow, sedation };
   }
 
   private windowView(
     window: DoseWindow,
     records: Parameters<typeof doseWindowBreakdown>[0],
-    weightKg: number | null,
+    summary: AnesthesiaDoseSummary,
     entryId: string,
     pendingMg: number | null,
   ): AnesthesiaDoseWindowView {
@@ -335,7 +381,12 @@ export class AnesthesiaUseCases {
       hours: ANESTHESIA_DOSE_WINDOW_HOURS,
       from: window.from,
       to: window.to,
-      parts: doseWindowBreakdown(records, weightKg, entryId),
+      parts: doseWindowBreakdown(
+        records,
+        summary.weightKg,
+        entryId,
+        summary.adjustment,
+      ),
       pendingMg,
     };
   }
@@ -357,13 +408,14 @@ export class AnesthesiaUseCases {
       at,
       input,
       product,
+      prior.sedation,
     );
     return {
       ...result,
       window: this.windowView(
         window,
         windowRecords,
-        result.summary.weightKg,
+        result.summary,
         entryId,
         lineMg(snapshotOf(product), input.carpules),
       ),
@@ -383,7 +435,15 @@ export class AnesthesiaUseCases {
     const { patient, entry } = await this.context(patientId, entryId);
     const now = this.now();
     const prior = await this.prior(patientId, entryId, doseWindowAround(now));
-    const result = this.compute(patient, entry, prior, now, null, null);
+    const result = this.compute(
+      patient,
+      entry,
+      prior,
+      now,
+      null,
+      null,
+      prior.sedation,
+    );
     return {
       records: prior.entry,
       summary: result.summary,
@@ -392,7 +452,7 @@ export class AnesthesiaUseCases {
       window: this.windowView(
         result.window,
         result.windowRecords,
-        result.summary.weightKg,
+        result.summary,
         entryId,
         null,
       ),
@@ -434,13 +494,17 @@ export class AnesthesiaUseCases {
     const administeredAt = this.administeredAt(input);
     const { patient, entry } = await this.context(patientId, entryId);
     const product = await this.anesthetic(input.anestheticId);
+    const range = doseWindowAround(administeredAt);
+    // DX-420: la hoja de sedación no se serializa con la anestesia (la
+    // escribe otro flujo); se lee antes del bloqueo.
+    const sedation = await this.repo.hasSedation(patientId, entryId, range);
 
     // El acumulado que decidió el guardado, para devolverlo con el registro.
     const decided: { summary?: AnesthesiaDoseSummary } = {};
     const created = await this.repo.record(
       patientId,
       entryId,
-      doseWindowAround(administeredAt),
+      range,
       (prior) => {
         const result = this.compute(
           patient,
@@ -449,6 +513,7 @@ export class AnesthesiaUseCases {
           administeredAt,
           input,
           product,
+          sedation,
         );
         if (result.weightRequired) {
           throw new BadRequestException(PEDIATRIC_WEIGHT_REQUIRED_MESSAGE);
@@ -479,6 +544,8 @@ export class AnesthesiaUseCases {
           weightSource: result.weightSource,
           cumulativeMg: result.summary.totalMg,
           cumulativePercent: result.summary.percent,
+          epinephrineMg: epinephrineOf(snapshotOf(product), input.carpules),
+          cumulativeEpinephrineMg: result.summary.epinephrine.totalMg,
           safetyRulesVersion: result.summary.rulesVersion,
           safetyAlerts: result.summary.alerts,
           // Solo se sella si hizo falta: un motivo sin aviso bloqueante sobra.

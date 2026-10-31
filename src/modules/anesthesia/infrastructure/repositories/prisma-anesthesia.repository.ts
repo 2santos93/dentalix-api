@@ -20,6 +20,7 @@ import type {
   DoseAlertSeverity,
 } from '../../domain/anesthesia-dose';
 import type { SampleAnesthetic } from '../../domain/sample-anesthetics';
+import { hasCardiacCondition } from '../../domain/anesthesia-limits';
 import type {
   DoseWindow,
   WindowAdministration,
@@ -30,6 +31,9 @@ type AdministrationRow = Prisma.AnesthesiaAdministrationGetPayload<
   Record<string, never>
 >;
 type JsonRecord = Record<string, Prisma.JsonValue>;
+
+const decimalOrNull = (value: Prisma.Decimal | null) =>
+  value === null ? null : Number(value);
 
 const ADMINISTRATION_ORDER: Prisma.AnesthesiaAdministrationOrderByWithRelationInput[] =
   [{ administeredAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }];
@@ -48,6 +52,9 @@ function mapProduct(row: ProductRow): AnestheticProduct {
     mlPerCarpule: Number(row.mlPerCarpule),
     maxMgPerKg: Number(row.maxMgPerKg),
     maxAbsoluteMg: Number(row.maxAbsoluteMg),
+    pediatricMaxMgPerKg: decimalOrNull(row.pediatricMaxMgPerKg),
+    minAgeYears: row.minAgeYears,
+    epinephrineMgPerCarpule: decimalOrNull(row.epinephrineMgPerCarpule),
     sampleCode: row.sampleCode,
     active: row.active,
     createdAt: row.createdAt,
@@ -91,6 +98,9 @@ function mapAdministration(row: AdministrationRow): AnesthesiaAdministration {
     mlPerCarpule: Number(row.mlPerCarpule),
     maxMgPerKg: Number(row.maxMgPerKg),
     maxAbsoluteMg: Number(row.maxAbsoluteMg),
+    pediatricMaxMgPerKg: decimalOrNull(row.pediatricMaxMgPerKg),
+    minAgeYears: row.minAgeYears,
+    epinephrineMgPerCarpule: decimalOrNull(row.epinephrineMgPerCarpule),
     carpules: Number(row.carpules),
     doseMg: Number(row.doseMg),
     technique: row.technique,
@@ -104,6 +114,8 @@ function mapAdministration(row: AdministrationRow): AnesthesiaAdministration {
         : null,
     cumulativeMg: Number(row.cumulativeMg),
     cumulativePercent: row.cumulativePercent,
+    epinephrineMg: decimalOrNull(row.epinephrineMg),
+    cumulativeEpinephrineMg: decimalOrNull(row.cumulativeEpinephrineMg),
     safetyRulesVersion: row.safetyRulesVersion,
     safetyAlerts: readAlerts(row.safetyAlerts),
     overrideReason: row.overrideReason,
@@ -118,6 +130,20 @@ function readAllergens(value: Prisma.JsonValue | null): string[] {
   return value.flatMap((entry) =>
     isRecord(entry) && typeof entry.alergeno === 'string'
       ? [entry.alergeno]
+      : [],
+  );
+}
+
+/** Condiciones de la anamnesis (`codigo` y `estado`), para la cardiopatía. */
+function readConditions(
+  value: Prisma.JsonValue | null,
+): { codigo: string; estado: string }[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) =>
+    isRecord(entry) &&
+    typeof entry.codigo === 'string' &&
+    typeof entry.estado === 'string'
+      ? [{ codigo: entry.codigo, estado: entry.estado }]
       : [],
   );
 }
@@ -310,7 +336,12 @@ export class PrismaAnesthesiaRepository implements AnesthesiaRepository {
       const history = await tx.medicalHistoryVersion.findFirst({
         where: { patientId, deletedAt: null },
         orderBy: { version: 'desc' },
-        select: { allergies: true, vitalSigns: true, safetyFlags: true },
+        select: {
+          allergies: true,
+          conditions: true,
+          vitalSigns: true,
+          safetyFlags: true,
+        },
       });
       const flags =
         history && isRecord(history.safetyFlags) ? history.safetyFlags : {};
@@ -321,6 +352,7 @@ export class PrismaAnesthesiaRepository implements AnesthesiaRepository {
               allergens: readAllergens(history.allergies),
               anestheticAllergyFlag: flags.alergiaAnestesico === true,
               weightKg: readWeight(history.vitalSigns),
+              cardiac: hasCardiacCondition(readConditions(history.conditions)),
             }
           : null,
       };
@@ -395,6 +427,33 @@ export class PrismaAnesthesiaRepository implements AnesthesiaRepository {
     );
   }
 
+  async hasSedation(
+    patientId: string,
+    entryId: string,
+    range: DoseWindow,
+  ): Promise<boolean> {
+    // Como el acumulado: en cualquier sede de la clínica (la RLS deja fuera
+    // las de otra). La hora clínica es la de la valoración; las hojas
+    // anteriores a esa columna usan la de alta.
+    const found = await this.prisma.runWithTenant((tx) =>
+      tx.sedationRecord.findFirst({
+        where: {
+          patientId,
+          OR: [
+            { clinicalEntryId: entryId },
+            { assessedAt: { gte: range.from, lte: range.to } },
+            {
+              assessedAt: null,
+              createdAt: { gte: range.from, lte: range.to },
+            },
+          ],
+        },
+        select: { id: true },
+      }),
+    );
+    return found !== null;
+  }
+
   async record(
     patientId: string,
     entryId: string,
@@ -444,6 +503,11 @@ export class PrismaAnesthesiaRepository implements AnesthesiaRepository {
           mlPerCarpule: anesthetic.mlPerCarpule,
           maxMgPerKg: anesthetic.maxMgPerKg,
           maxAbsoluteMg: anesthetic.maxAbsoluteMg,
+          pediatricMaxMgPerKg: anesthetic.pediatricMaxMgPerKg,
+          minAgeYears: anesthetic.minAgeYears,
+          epinephrineMgPerCarpule: anesthetic.epinephrineMgPerCarpule,
+          epinephrineMg: input.epinephrineMg,
+          cumulativeEpinephrineMg: input.cumulativeEpinephrineMg,
           carpules: input.carpules,
           doseMg: input.doseMg,
           technique: input.technique,
