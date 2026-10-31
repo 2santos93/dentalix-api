@@ -18,6 +18,10 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import { civilDateIn } from '../src/shared/time/civil-day';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationBody,
+} from './support/location-fixtures';
 
 // DX-253 en HTTP real: un plan CANCELADO con 300.000 abonados traspasa 200.000
 // a un plan vivo del mismo paciente (el origen queda con 100.000 a favor, el
@@ -341,6 +345,30 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
         /saldo a favor|moneda|motivo|abono/,
       );
     }
+    expect(await counts()).toEqual(before);
+  });
+
+  it('D1: con varias sedes, una devolución en efectivo sin sede explícita es 400 en español y no guarda nada', async () => {
+    // Una segunda sede: sin cabecera ya no hay una única sede posible.
+    await as(api().post('/api/v1/locations'), a)
+      .send(locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }))
+      .expect(201);
+    const before = await counts();
+    const res = await api()
+      .post(`/api/v1/treatment-plans/${origin}/credit-refunds`)
+      .set('X-Tenant-Host', a.host)
+      .set('Authorization', `Bearer ${a.adminToken}`)
+      .send({
+        amount: 1_000,
+        currency: 'COP',
+        method: 'CASH',
+        reason: 'El paciente se muda de ciudad',
+        paymentIds: [originPayment],
+      })
+      .expect(400);
+    expect((res.body as { message: string }).message).toBe(
+      'Elige la sede de la caja de la que sale el efectivo.',
+    );
     expect(await counts()).toEqual(before);
   });
 

@@ -51,16 +51,37 @@ export const CREDIT_ROLE_FORBIDDEN_MESSAGE =
 
 /** 409 al anular un abono que es referencia de una devolución (DX-253). */
 export function voidRefundReferenceMessage(refundNumber: string): string {
-  return `No se puede anular: el abono es referencia de la devolución ${refundNumber}, que no se deshace. Pide a administración que revise el caso.`;
+  return `No se puede anular: el abono es referencia de la devolución ${refundNumber}: una devolución no se deshace y el abono queda como su traza contable.`;
 }
 export const VOID_MOVED_CREDIT_MESSAGE =
-  'No se puede anular: parte del saldo a favor de este plan ya se traspasó o se devolvió y, sin este abono, el plan quedaría debiendo ese dinero. Pide a administración que revise el caso.';
+  'No se puede anular: parte del saldo a favor de este plan ya se traspasó o se devolvió y, sin este abono, el plan quedaría debiendo ese dinero.';
+
+/**
+ * D1 (QA): el efectivo sale del cajón de UNA sede; sin `X-Location-Id` (vista
+ * «Todas las sedes») no se elige por defecto otra sede ni se deja fuera del
+ * arqueo: 400.
+ */
+export const CREDIT_CASH_LOCATION_REQUIRED_MESSAGE =
+  'Elige la sede de la caja de la que sale el efectivo.';
+
+/** El tope con miles, 2 decimales y moneda («10.000,00 COP», D3 de la QA). */
+function capText(capCents: number, currency: string): string {
+  const amount = new Intl.NumberFormat('es-CO', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+    useGrouping: true,
+  }).format(capCents / 100);
+  return `${amount} ${currency}`;
+}
 
 /** 403 de RECEPTION por encima del tope de la clínica (mismo patrón que DX-204). */
-export function receptionCapMessage(capCents: number): string {
+export function receptionCapMessage(
+  capCents: number,
+  currency: string,
+): string {
   return capCents === 0
     ? 'Recepción no puede traspasar ni devolver saldo a favor en esta clínica: pídeselo a administración.'
-    : `Recepción puede mover hasta ${(capCents / 100).toFixed(2)} por operación: pídeselo a administración.`;
+    : `Recepción puede mover hasta ${capText(capCents, currency)} por operación: pídeselo a administración.`;
 }
 
 export function toCents(amount: number): number {

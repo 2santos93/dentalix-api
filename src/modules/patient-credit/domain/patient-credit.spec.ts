@@ -163,8 +163,9 @@ describe('saldo a favor (DX-253)', () => {
     });
 
     it('el 403 explica el tope en español', () => {
-      expect(receptionCapMessage(0)).toMatch(/administración/);
-      expect(receptionCapMessage(50_000)).toContain('500.00');
+      expect(receptionCapMessage(0, 'COP')).toMatch(/administración/);
+      // D3 (QA): el tope con formato y moneda, no «10000.00».
+      expect(receptionCapMessage(1_000_000, 'COP')).toContain('10.000,00 COP');
     });
   });
 

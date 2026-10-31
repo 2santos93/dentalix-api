@@ -15,6 +15,7 @@ import {
   legacyReceiptReference,
 } from '../../payments/domain/receipt-number';
 import {
+  CREDIT_CASH_LOCATION_REQUIRED_MESSAGE,
   CREDIT_CASH_SESSION_REQUIRED_MESSAGE,
   CREDIT_CHANGED_MESSAGE,
   CREDIT_IDEMPOTENCY_REUSED_MESSAGE,
@@ -368,6 +369,13 @@ export class PrismaPatientCreditRepository implements PatientCreditRepository {
           throw new BadRequestException(CREDIT_PAYMENT_NOT_OF_PLAN_MESSAGE);
         }
 
+        // D1: el efectivo sale de la caja de UNA sede. Sin `X-Location-Id`
+        // (vista «Todas las sedes») y con varias sedes posibles, no se elige
+        // la sede por defecto: 400. Con una sola sede posible no hay duda.
+        // Las demás formas de devolver no tocan caja.
+        if (input.method === 'CASH' && !this.tenantContext.getLocationId()) {
+          await this.assertSingleWriteLocation(tx);
+        }
         const locationId = await this.tenantContext.writeLocationId(tx);
         let cashSessionId: string | null = null;
         if (input.method === 'CASH') {
@@ -539,6 +547,22 @@ export class PrismaPatientCreditRepository implements PatientCreditRepository {
         if (existing) return sameRequestOrThrow(existing, input.fingerprint);
       }
       throw error;
+    }
+  }
+
+  /** 400 si, sin sede en la cabecera, el miembro podría escribir en varias. */
+  private async assertSingleWriteLocation(tx: Tx): Promise<void> {
+    const allowed = this.tenantContext.scopeLocationIds();
+    const usable = await tx.location.count({
+      where: {
+        tenantId: this.tenantId(),
+        isActive: true,
+        deletedAt: null,
+        ...(allowed ? { id: { in: allowed } } : {}),
+      },
+    });
+    if (usable > 1) {
+      throw new BadRequestException(CREDIT_CASH_LOCATION_REQUIRED_MESSAGE);
     }
   }
 

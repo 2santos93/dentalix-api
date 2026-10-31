@@ -94,7 +94,7 @@ async function checkAmount(
   const amountCents = toCents(amount);
   const cap = await repo.receptionCapCents();
   if (!canMoveCredit(actor.role, amountCents, cap)) {
-    throw new ForbiddenException(receptionCapMessage(cap));
+    throw new ForbiddenException(receptionCapMessage(cap, source.currency));
   }
   if (amountCents > source.creditCents) {
     throw new BadRequestException(CREDIT_AMOUNT_EXCEEDS_MESSAGE);
