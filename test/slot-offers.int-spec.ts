@@ -261,7 +261,7 @@ describe('oferta de hueco por enlace (int, DX-435)', () => {
 
   describe('rutas públicas: aislamiento y minimización', () => {
     it('un token de otra clínica, inventado o mal formado da el mismo 404', async () => {
-      const { token } = await offerToEntry(a, 0);
+      const { token, offerId } = await offerToEntry(a, 0);
       const notFound = new NotFoundException(SLOT_OFFER_NOT_FOUND_MESSAGE);
       await expect(inClinic(b, () => getOffer.execute(token))).rejects.toThrow(
         notFound,
@@ -270,15 +270,19 @@ describe('oferta de hueco por enlace (int, DX-435)', () => {
         inClinic(b, () => acceptOffer.execute(token, META)),
       ).rejects.toThrow(notFound);
       await expect(
+        inClinic(b, () => declineOffer.execute(token, META)),
+      ).rejects.toThrow(notFound);
+      await expect(
         inClinic(a, () => getOffer.execute(generateSlotOfferToken())),
       ).rejects.toThrow(notFound);
       await expect(
         inClinic(a, () => getOffer.execute('corto')),
       ).rejects.toThrow(notFound);
-      // Y en la clínica B el intento no tocó nada.
+      // Y el intento desde B no tocó nada de A.
       expect(
         await owner.appointment.count({ where: { tenantId: a.tenantId } }),
       ).toBe(0);
+      expect(await outcomeOf(offerId)).toBe('PENDING');
     });
 
     it('la página ve nombre de pila, cuándo y dónde; ni apellidos ni la nota', async () => {
