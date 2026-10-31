@@ -1,4 +1,16 @@
 import { findAllergyMatches } from '../../prescriptions/domain/allergy-match';
+import {
+  AAPD_SOURCE,
+  type DoseAdjustment,
+  type DosePatient,
+  doseAdjustment,
+  EPINEPHRINE_SOURCE,
+  epinephrineFromLabel,
+  epinephrineMaxMg,
+  NO_ADJUSTMENT,
+  PEDIATRIC_AGE_LIMIT,
+  UNKNOWN_PATIENT,
+} from './anesthesia-limits';
 
 /**
  * Dosis de anestesia local en la evolución (DX-307). Lo calcula el SERVIDOR
@@ -24,8 +36,12 @@ import { findAllergyMatches } from '../../prescriptions/domain/allergy-match';
  *  - V2 (DX-418): las líneas son todas las del paciente en la ventana de
  *    24 h que contiene la administración con más acumulado, en cualquier
  *    evolución y sede de la clínica (`anesthesia-window.ts`).
+ *  - V3 (DX-420): máximo pediátrico (< 12 años) del catálogo, −30 % en
+ *    menores de 6 meses y con sedación en las 24 h, edad mínima del fármaco
+ *    y tope de epinefrina por cita (0,04 mg en el cardiópata)
+ *    (`anesthesia-limits.ts`).
  */
-export const ANESTHESIA_DOSE_RULES_VERSION = 'ANESTHESIA_DOSE_V2';
+export const ANESTHESIA_DOSE_RULES_VERSION = 'ANESTHESIA_DOSE_V3';
 
 /** Fracción del máximo desde la que se avisa. */
 export const DOSE_WARNING_FRACTION = 0.8;
@@ -50,6 +66,15 @@ export interface AnestheticSnapshot {
   mlPerCarpule: number;
   maxMgPerKg: number;
   maxAbsoluteMg: number;
+  /**
+   * DX-420: mg/kg en menores de 12 años (null o ausente = el de adulto),
+   * edad mínima en años (null = sin mínimo) y mg de epinefrina por carpule
+   * (ausente en registros anteriores a DX-420: se deduce del texto del
+   * vasoconstrictor; null = no se sabe).
+   */
+  pediatricMaxMgPerKg?: number | null;
+  minAgeYears?: number | null;
+  epinephrineMgPerCarpule?: number | null;
 }
 
 export interface DoseLine {
@@ -83,6 +108,36 @@ export interface AnestheticDose {
   maxMg: number | null;
   /** % de su máximo, entero; null sin peso. */
   percent: number | null;
+  /** DX-420: mg/kg usado (pediátrico o de adulto). */
+  maxMgPerKg: number;
+  /** De dónde sale ese máximo, para enseñarlo. */
+  maxSource: string;
+}
+
+export type EpinephrineLevel = 'OK' | 'WARNING' | 'EXCEEDED';
+
+/** DX-420: epinefrina acumulada en la ventana contra el tope por cita. */
+export interface EpinephrineSummary {
+  totalMg: number;
+  maxMg: number;
+  /** % del tope, entero (mismo redondeo que la dosis). */
+  percent: number;
+  /** Cardiopatía en la anamnesis; null sin anamnesis. */
+  cardiac: boolean | null;
+  level: EpinephrineLevel;
+}
+
+/** DX-420: «quedan X mg ≈ Y carpules» del anestésico que se va a poner. */
+export interface DoseRemaining {
+  name: string;
+  mg: number;
+  /** En cuartos de carpule, hacia abajo. */
+  carpules: number;
+  mlPerCarpule: number;
+  /** Qué límite se agota antes (con la epinefrina, `mg` son los que caben con ella). */
+  limitedBy: 'DOSE' | 'EPINEPHRINE';
+  /** Epinefrina que queda hasta el tope, en mg. */
+  epinephrineMg: number;
 }
 
 export interface AnesthesiaDoseSummary {
@@ -94,6 +149,11 @@ export interface AnesthesiaDoseSummary {
   percent: number | null;
   level: DoseLevel;
   alerts: DoseAlert[];
+  /** DX-420: ajustes del máximo por edad y sedación. */
+  adjustment: DoseAdjustment & { ageYears: number | null };
+  epinephrine: EpinephrineSummary;
+  /** Solo con una dosis nueva y peso; null si no. */
+  remaining: DoseRemaining | null;
 }
 
 export interface DoseInput {
@@ -101,10 +161,20 @@ export interface DoseInput {
   weightKg: number | null;
   /** null = el paciente no tiene anamnesis. */
   anamnesis: AnesthesiaAnamnesis | null;
+  /**
+   * DX-420: edad, sedación y cardiopatía. Sin él se calcula como un adulto
+   * sano y no se avisa de lo que no se sabe (edad, cardiopatía): el caso de
+   * uso siempre lo pasa.
+   */
+  patient?: DosePatient;
+  /** DX-420: el anestésico de la dosis nueva (ya incluida en `lines`). */
+  pending?: AnestheticSnapshot | null;
 }
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
+const round4 = (n: number) => Math.round(n * 10000) / 10000;
 const fmt = (n: number) => String(round1(n)).replace('.', ',');
+const fmtEpi = (n: number) => String(round4(n)).replace('.', ',');
 
 /**
  * Fracción → % entero que se ENSEÑA, sin contradecir el nivel: redondear
@@ -138,15 +208,41 @@ export function lineMg(
   );
 }
 
-/** Máximo en mg para el peso: el menor entre el de mg/kg y el tope absoluto. */
+/** mg/kg que aplica: el pediátrico del catálogo en menores de 12, si lo hay. */
+export function maxMgPerKgFor(
+  anesthetic: AnestheticSnapshot,
+  adjustment: DoseAdjustment = NO_ADJUSTMENT,
+): number {
+  return adjustment.pediatric && anesthetic.pediatricMaxMgPerKg
+    ? anesthetic.pediatricMaxMgPerKg
+    : anesthetic.maxMgPerKg;
+}
+
+/**
+ * Máximo en mg para el peso: el menor entre el de mg/kg y el tope absoluto,
+ * por el factor de reducción (DX-420: lactante, sedación).
+ */
 export function maxDoseMg(
   anesthetic: AnestheticSnapshot,
   weightKg: number | null,
+  adjustment: DoseAdjustment = NO_ADJUSTMENT,
 ): number | null {
   if (weightKg === null) return null;
   return round1(
-    Math.min(anesthetic.maxMgPerKg * weightKg, anesthetic.maxAbsoluteMg),
+    Math.min(
+      maxMgPerKgFor(anesthetic, adjustment) * weightKg,
+      anesthetic.maxAbsoluteMg,
+    ) * adjustment.factor,
   );
+}
+
+/** mg de epinefrina por carpule: el del catálogo o, si falta, el del texto. */
+export function epinephrinePerCarpule(
+  anesthetic: AnestheticSnapshot,
+): number | null {
+  return anesthetic.epinephrineMgPerCarpule === undefined
+    ? epinephrineFromLabel(anesthetic.vasoconstrictor, anesthetic.mlPerCarpule)
+    : anesthetic.epinephrineMgPerCarpule;
 }
 
 /** Mismo anestésico = mismos valores del catálogo (una copia idéntica). */
@@ -158,6 +254,7 @@ function keyOf(a: AnestheticSnapshot): string {
     a.mlPerCarpule,
     a.maxMgPerKg,
     a.maxAbsoluteMg,
+    a.pediatricMaxMgPerKg ?? '',
   ].join('|');
 }
 
@@ -230,14 +327,199 @@ function allergyAlerts(
   return [];
 }
 
+/** Fuente del máximo de un anestésico, para enseñarla con él. */
+function maxSourceOf(
+  anesthetic: AnestheticSnapshot,
+  adjustment: DoseAdjustment,
+): string {
+  const base =
+    adjustment.pediatric && anesthetic.pediatricMaxMgPerKg
+      ? `${AAPD_SOURCE}: ${fmt(anesthetic.pediatricMaxMgPerKg)} mg/kg en menores de ${PEDIATRIC_AGE_LIMIT} años`
+      : MALAMED;
+  return adjustment.factor < 1
+    ? `${base}; reducido un ${Math.round((1 - adjustment.factor) * 100)} % (${AAPD_SOURCE})`
+    : base;
+}
+
+/** Avisos de por qué el máximo no es el del prospecto (DX-420). */
+function adjustmentAlerts(
+  groups: Group[],
+  adjustment: DoseAdjustment,
+  patient: DosePatient | null,
+  pending: AnestheticSnapshot | null,
+): DoseAlert[] {
+  const alerts: DoseAlert[] = [];
+  if (groups.length === 0) return alerts;
+  const pediatricGroups = groups.filter(
+    (g) => g.anesthetic.pediatricMaxMgPerKg,
+  );
+  if (adjustment.pediatric && pediatricGroups.length > 0) {
+    const list = pediatricGroups
+      .map(
+        (g) =>
+          `${g.anesthetic.activeIngredient} ${fmt(g.anesthetic.pediatricMaxMgPerKg as number)} mg/kg`,
+      )
+      .join(', ');
+    alerts.push({
+      code: 'PEDIATRIC_MAX',
+      severity: 'INFO',
+      message: `Menor de ${PEDIATRIC_AGE_LIMIT} años (${patient?.ageYears} años): máximo pediátrico de ${list}.`,
+      source: AAPD_SOURCE,
+    });
+  }
+  if (adjustment.infant) {
+    alerts.push({
+      code: 'DOSE_REDUCED_INFANT',
+      severity: 'INFO',
+      message: `Máximo reducido un 30 %: menor de 6 meses (${patient?.ageMonths} meses).`,
+      source: AAPD_SOURCE,
+    });
+  }
+  if (adjustment.sedation) {
+    alerts.push({
+      code: 'DOSE_REDUCED_SEDATION',
+      severity: 'INFO',
+      message:
+        'Máximo reducido un 30 %: hay sedación consciente registrada en las 24 h de la anestesia (depresor del sistema nervioso central).',
+      source: AAPD_SOURCE,
+    });
+  }
+  const ageDependent =
+    pediatricGroups.length > 0 || (pending?.minAgeYears ?? null) !== null;
+  if (patient === null) return alerts;
+  if (patient.ageYears === null && ageDependent) {
+    alerts.push({
+      code: 'AGE_UNKNOWN',
+      severity: 'INFO',
+      message:
+        'Sin fecha de nacimiento: se usan los máximos de adulto y no se comprueba la edad mínima del anestésico. Anótala en la ficha del paciente.',
+      source: AAPD_SOURCE,
+    });
+  }
+  const minAge = pending?.minAgeYears ?? null;
+  if (
+    pending &&
+    minAge !== null &&
+    patient.ageYears !== null &&
+    patient.ageYears < minAge
+  ) {
+    alerts.push({
+      code: 'AGE_BELOW_MINIMUM',
+      severity: 'BLOCKING',
+      message: `${pending.activeIngredient} no recomendada en menores de ${minAge} años (el paciente tiene ${patient.ageYears}).`,
+      source: AAPD_SOURCE,
+    });
+  }
+  return alerts;
+}
+
+function summarizeEpinephrine(
+  groups: Group[],
+  anamnesis: AnesthesiaAnamnesis | null,
+  patient: DosePatient | null,
+): { summary: EpinephrineSummary; alerts: DoseAlert[] } {
+  const alerts: DoseAlert[] = [];
+  let totalMg = 0;
+  for (const g of groups) {
+    const perCarpule = epinephrinePerCarpule(g.anesthetic);
+    if (perCarpule === null) {
+      alerts.push({
+        code: 'EPINEPHRINE_UNKNOWN',
+        severity: 'INFO',
+        message: `No se ha podido sumar la epinefrina de ${g.anesthetic.name}: falta su dilución o los mg por carpule en el catálogo.`,
+        source: EPINEPHRINE_SOURCE,
+      });
+    } else {
+      totalMg += perCarpule * g.carpules;
+    }
+  }
+  totalMg = round4(totalMg);
+  const cardiac = anamnesis === null ? null : (patient?.cardiac ?? false);
+  const maxMg = epinephrineMaxMg(cardiac);
+  const fraction = totalMg / maxMg;
+  const percent = percentOf(fraction);
+  const who = cardiac === true ? 'cardiopatía en la anamnesis' : 'adulto sano';
+  let level: EpinephrineLevel = 'OK';
+  if (totalMg > 0 && fraction + EPSILON >= DOSE_BLOCK_FRACTION) {
+    level = 'EXCEEDED';
+    alerts.push({
+      code: 'EPINEPHRINE_OVER_MAX',
+      severity: 'BLOCKING',
+      message: `Epinefrina por encima del tope: ${fmtEpi(totalMg)} mg de ${fmtEpi(maxMg)} mg por cita (${percent} %, ${who}).`,
+      source: EPINEPHRINE_SOURCE,
+    });
+  } else if (totalMg > 0 && fraction + EPSILON >= DOSE_WARNING_FRACTION) {
+    level = 'WARNING';
+    alerts.push({
+      code: 'EPINEPHRINE_NEAR_MAX',
+      severity: 'INFO',
+      message: `Epinefrina cerca del tope: ${fmtEpi(totalMg)} mg de ${fmtEpi(maxMg)} mg por cita (${percent} %, ${who}).`,
+      source: EPINEPHRINE_SOURCE,
+    });
+  }
+  if (patient !== null && anamnesis === null && totalMg > 0) {
+    alerts.push({
+      code: 'EPINEPHRINE_CARDIAC_UNKNOWN',
+      severity: 'INFO',
+      message:
+        'Sin anamnesis no se sabe si es cardiópata: se usa el tope del adulto sano (0,2 mg); en el cardiópata es 0,04 mg.',
+      source: EPINEPHRINE_SOURCE,
+    });
+  }
+  return {
+    summary: { totalMg, maxMg, percent, cardiac, level },
+    alerts,
+  };
+}
+
+/**
+ * Lo que queda del anestésico nuevo hasta el máximo (la suma de fracciones
+ * se reparte en sus mg) y hasta el tope de epinefrina; manda el menor.
+ */
+function remainingOf(
+  pending: AnestheticSnapshot,
+  fraction: number,
+  maxMg: number,
+  epinephrine: EpinephrineSummary,
+): DoseRemaining {
+  let mg = round1(Math.max(0, 1 - fraction) * maxMg);
+  const perCarpuleMg = lineMg(pending, 1);
+  let carpules = perCarpuleMg > 0 ? mg / perCarpuleMg : 0;
+  let limitedBy: DoseRemaining['limitedBy'] = 'DOSE';
+  const epinephrineMg = round4(
+    Math.max(0, epinephrine.maxMg - epinephrine.totalMg),
+  );
+  const epiPerCarpule = epinephrinePerCarpule(pending);
+  if (epiPerCarpule) {
+    const byEpinephrine = epinephrineMg / epiPerCarpule;
+    if (byEpinephrine < carpules) {
+      // Los mg que caben con la epinefrina que queda, no los del anestésico.
+      carpules = byEpinephrine;
+      mg = round1(byEpinephrine * perCarpuleMg);
+      limitedBy = 'EPINEPHRINE';
+    }
+  }
+  return {
+    name: pending.name,
+    mg,
+    carpules: Math.floor(carpules / CARPULE_STEP + EPSILON) * CARPULE_STEP,
+    mlPerCarpule: pending.mlPerCarpule,
+    limitedBy,
+    epinephrineMg,
+  };
+}
+
 export function summarizeAnesthesiaDose(
   input: DoseInput,
 ): AnesthesiaDoseSummary {
   const { weightKg } = input;
+  const patient = input.patient ?? null;
+  const pending = input.pending ?? null;
+  const adjustment = doseAdjustment(patient ?? UNKNOWN_PATIENT);
   const groups = groupLines(input.lines);
   const totalMg = round1(groups.reduce((sum, g) => sum + g.mg, 0));
   const byAnesthetic: AnestheticDose[] = groups.map((g) => {
-    const maxMg = maxDoseMg(g.anesthetic, weightKg);
+    const maxMg = maxDoseMg(g.anesthetic, weightKg, adjustment);
     return {
       name: g.anesthetic.name,
       activeIngredient: g.anesthetic.activeIngredient,
@@ -246,12 +528,15 @@ export function summarizeAnesthesiaDose(
       mg: g.mg,
       maxMg,
       percent: maxMg === null ? null : percentOf(g.mg / maxMg),
+      maxMgPerKg: maxMgPerKgFor(g.anesthetic, adjustment),
+      maxSource: maxSourceOf(g.anesthetic, adjustment),
     };
   });
 
   const alerts: DoseAlert[] = [];
   let level: DoseLevel;
   let percent: number | null;
+  let fraction: number | null = null;
 
   if (weightKg === null) {
     percent = null;
@@ -264,9 +549,10 @@ export function summarizeAnesthesiaDose(
         source: MALAMED,
       });
     }
-    // El tope absoluto no depende del peso: también suma fracciones.
+    // El tope absoluto no depende del peso: también suma fracciones, y
+    // también baja con las reducciones de DX-420.
     const absoluteFraction = groups.reduce(
-      (sum, g) => sum + g.mg / g.anesthetic.maxAbsoluteMg,
+      (sum, g) => sum + g.mg / (g.anesthetic.maxAbsoluteMg * adjustment.factor),
       0,
     );
     if (absoluteFraction + EPSILON >= DOSE_BLOCK_FRACTION) {
@@ -279,7 +565,7 @@ export function summarizeAnesthesiaDose(
       });
     }
   } else {
-    const fraction = byAnesthetic.reduce(
+    fraction = byAnesthetic.reduce(
       (sum, a) => sum + a.mg / (a.maxMg as number),
       0,
     );
@@ -288,13 +574,15 @@ export function summarizeAnesthesiaDose(
       byAnesthetic.length === 1
         ? `de ${fmt(byAnesthetic[0].maxMg as number)} mg (${percent} %)`
         : `(${percent} % de la suma de los máximos de cada anestésico)`;
+    const source =
+      byAnesthetic.length === 1 ? byAnesthetic[0].maxSource : MALAMED;
     if (fraction + EPSILON >= DOSE_BLOCK_FRACTION) {
       level = 'EXCEEDED';
       alerts.push({
         code: 'DOSE_OVER_MAX',
         severity: 'BLOCKING',
         message: `Dosis máxima superada: ${fmt(totalMg)} mg ${maxLabel} para ${fmt(weightKg)} kg.`,
-        source: MALAMED,
+        source,
       });
     } else if (fraction + EPSILON >= DOSE_WARNING_FRACTION) {
       level = 'WARNING';
@@ -302,14 +590,20 @@ export function summarizeAnesthesiaDose(
         code: 'DOSE_NEAR_MAX',
         severity: 'INFO',
         message: `Cerca de la dosis máxima: ${fmt(totalMg)} mg ${maxLabel} para ${fmt(weightKg)} kg.`,
-        source: MALAMED,
+        source,
       });
     } else {
       level = 'OK';
     }
   }
 
+  alerts.push(...adjustmentAlerts(groups, adjustment, patient, pending));
+  const epinephrine = summarizeEpinephrine(groups, input.anamnesis, patient);
+  alerts.push(...epinephrine.alerts);
   alerts.push(...allergyAlerts(groups, input.anamnesis));
+
+  const pendingMax =
+    pending === null ? null : maxDoseMg(pending, weightKg, adjustment);
   return {
     rulesVersion: ANESTHESIA_DOSE_RULES_VERSION,
     weightKg,
@@ -318,6 +612,12 @@ export function summarizeAnesthesiaDose(
     percent,
     level,
     alerts,
+    adjustment: { ...adjustment, ageYears: patient?.ageYears ?? null },
+    epinephrine: epinephrine.summary,
+    remaining:
+      pending === null || pendingMax === null || fraction === null
+        ? null
+        : remainingOf(pending, fraction, pendingMax, epinephrine.summary),
   };
 }
 

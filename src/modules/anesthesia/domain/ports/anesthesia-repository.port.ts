@@ -18,6 +18,13 @@ export interface AnestheticProductInput {
   mlPerCarpule: number;
   maxMgPerKg: number;
   maxAbsoluteMg: number;
+  /**
+   * DX-420: sin valor, null (el máximo de adulto; sin edad mínima). La
+   * epinefrina sin valor la deduce el caso de uso del vasoconstrictor.
+   */
+  pediatricMaxMgPerKg?: number | null;
+  minAgeYears?: number | null;
+  epinephrineMgPerCarpule?: number | null;
 }
 
 export type AnestheticProductPatch = Partial<AnestheticProductInput> & {
@@ -42,7 +49,13 @@ export interface AnesthesiaEntryRef {
 /** Lo que el cálculo lee del paciente: nacimiento y anamnesis VIGENTE. */
 export interface AnesthesiaPatientContext {
   birthDate: Date | null;
-  anamnesis: (AnesthesiaAnamnesis & { weightKg: number | null }) | null;
+  anamnesis:
+    | (AnesthesiaAnamnesis & {
+        weightKg: number | null;
+        /** DX-420: condición cardiovascular marcada «Sí» (tope de epinefrina). */
+        cardiac: boolean;
+      })
+    | null;
 }
 
 /** Fila nueva; tenant, id y `createdAt` los ponen el repositorio y la BD. */
@@ -61,6 +74,8 @@ export interface NewAnesthesiaAdministration {
   weightSource: WeightSource | null;
   cumulativeMg: number;
   cumulativePercent: number | null;
+  epinephrineMg: number | null;
+  cumulativeEpinephrineMg: number | null;
   safetyRulesVersion: string;
   safetyAlerts: DoseAlert[];
   overrideReason: string | null;
@@ -119,6 +134,16 @@ export interface AnesthesiaRepository {
     patientId: string,
     window: DoseWindow,
   ): Promise<WindowAdministration[]>;
+  /**
+   * DX-420: ¿tiene el paciente hoja de sedación (DX-407) en ESTA evolución o
+   * con hora clínica (valoración, o alta de la hoja si es anterior a la
+   * columna) dentro del rango cerrado `range`, en cualquier sede?
+   */
+  hasSedation(
+    patientId: string,
+    entryId: string,
+    range: DoseWindow,
+  ): Promise<boolean>;
   /**
    * Append-only. Bloquea al PACIENTE (DX-418; en DX-307 era la evolución)
    * para que dos registros simultáneos, en la misma o en otra evolución o

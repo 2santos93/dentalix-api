@@ -1,4 +1,5 @@
 import { maxDoseMg } from './anesthesia-dose';
+import { type DoseAdjustment, NO_ADJUSTMENT } from './anesthesia-limits';
 import type { AnesthesiaAdministration } from './entities';
 
 /**
@@ -63,17 +64,23 @@ export function isInDoseWindow(at: Date, window: DoseWindow): boolean {
  * posterior: basta mirar la que acaba en `at` y las que acaban en cada dosis
  * de `(at, at + 24 h]`. Carga = suma de mg / máximo de cada anestésico (la
  * misma regla aditiva que el total); sin peso, los mg. A igualdad, la que
- * acaba en `at` (las últimas 24 h).
+ * acaba en `at` (las últimas 24 h). Los máximos con los ajustes del paciente
+ * (DX-420), los mismos que el total.
  */
 export function worstDoseWindow(
   at: Date,
   records: readonly AnesthesiaAdministration[],
   weightKg: number | null,
+  adjustment: DoseAdjustment = NO_ADJUSTMENT,
 ): DoseWindow {
   const t = at.getTime();
   const load = (r: AnesthesiaAdministration) => {
     if (weightKg === null) return r.doseMg;
-    const maxMg = maxDoseMg({ ...r, name: r.anestheticName }, weightKg);
+    const maxMg = maxDoseMg(
+      { ...r, name: r.anestheticName },
+      weightKg,
+      adjustment,
+    );
     return maxMg === null || maxMg <= 0 ? r.doseMg : r.doseMg / maxMg;
   };
   const ends = [
@@ -131,12 +138,14 @@ const round1 = (n: number) => Math.round(n * 10) / 10;
 
 /**
  * Desglose por evolución y profesional, en orden de la primera
- * administración. Usa el MISMO peso que el acumulado total.
+ * administración. Usa el MISMO peso y los mismos ajustes (DX-420) que el
+ * acumulado total.
  */
 export function doseWindowBreakdown(
   records: readonly WindowAdministration[],
   weightKg: number | null,
   currentEntryId: string,
+  adjustment: DoseAdjustment = NO_ADJUSTMENT,
 ): DoseWindowPart[] {
   const parts = new Map<string, DoseWindowPart>();
   const fractions = new Map<string, number>();
@@ -159,7 +168,11 @@ export function doseWindowBreakdown(
       percent: null,
     };
     // Los mg sellados en el registro (copia del catálogo de ese momento).
-    const maxMg = maxDoseMg({ ...r, name: r.anestheticName }, weightKg);
+    const maxMg = maxDoseMg(
+      { ...r, name: r.anestheticName },
+      weightKg,
+      adjustment,
+    );
     const fraction =
       (fractions.get(key) ?? 0) + (maxMg === null ? 0 : r.doseMg / maxMg);
     fractions.set(key, fraction);

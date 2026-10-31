@@ -1,12 +1,14 @@
 import {
   ANESTHESIA_DOSE_RULES_VERSION,
   type AnestheticSnapshot,
+  hasBlockingDoseAlerts,
   isValidCarpules,
   lineMg,
   maxDoseMg,
   summarizeAnesthesiaDose,
 } from './anesthesia-dose';
 import { SAMPLE_ANESTHETICS } from './sample-anesthetics';
+import { NO_ADJUSTMENT as NO_ADJ } from './anesthesia-limits';
 
 // Valores de referencia de la literatura (los del catálogo de ejemplo):
 // Malamed, Handbook of Local Anesthesia (7.ª ed.), dosis máximas recomendadas.
@@ -252,6 +254,8 @@ describe('dosis de anestesia local (DX-307)', () => {
       expect(r.alerts.map((a) => [a.code, a.severity])).toEqual([
         ['WEIGHT_MISSING', 'INFO'],
         ['DOSE_OVER_ABSOLUTE', 'BLOCKING'],
+        // DX-420: 14 × 0,018 = 0,252 mg de epinefrina, sobre 0,2 mg.
+        ['EPINEPHRINE_OVER_MAX', 'BLOCKING'],
       ]);
       expect(r.level).toBe('EXCEEDED');
     });
@@ -298,5 +302,317 @@ describe('dosis de anestesia local (DX-307)', () => {
       anamnesis: CLEAN,
     });
     expect([r.totalMg, r.percent, r.level, r.alerts]).toEqual([0, 0, 'OK', []]);
+  });
+});
+
+describe('máximos pediátricos, edad mínima, sedación y epinefrina (DX-420)', () => {
+  const ADULT = {
+    ageYears: 40,
+    ageMonths: 480,
+    sedation: false,
+    cardiac: false,
+  };
+  const CHILD = {
+    ageYears: 8,
+    ageMonths: 100,
+    sedation: false,
+    cardiac: false,
+  };
+  const codes = (s: { alerts: { code: string }[] }) =>
+    s.alerts.map((a) => a.code);
+
+  it('el catálogo de ejemplo trae los valores pediátricos, la edad mínima y la epinefrina', () => {
+    expect(
+      [LIDO, ARTI, MEPI, PRILO, BUPI].map((a) => [
+        a.pediatricMaxMgPerKg,
+        a.minAgeYears,
+        a.epinephrineMgPerCarpule,
+      ]),
+    ).toEqual([
+      [4.4, null, 0.018],
+      [null, 4, 0.017],
+      [4.4, null, 0],
+      [null, null, 0],
+      [null, 12, 0.009],
+    ]);
+  });
+
+  it('niño de 20 kg con lidocaína: máximo 4,4 mg/kg = 88 mg, con la fuente AAPD', () => {
+    const s = summarizeAnesthesiaDose({
+      lines: [{ anesthetic: LIDO, carpules: 1 }],
+      weightKg: 20,
+      anamnesis: CLEAN,
+      patient: CHILD,
+      pending: LIDO,
+    });
+    expect(s.rulesVersion).toBe('ANESTHESIA_DOSE_V3');
+    expect(s.byAnesthetic[0]).toEqual(
+      expect.objectContaining({
+        maxMg: 88,
+        maxMgPerKg: 4.4,
+        percent: 41,
+      }),
+    );
+    expect(s.byAnesthetic[0].maxSource).toContain('AAPD');
+    expect(s.adjustment).toEqual(
+      expect.objectContaining({ pediatric: true, factor: 1 }),
+    );
+    const pediatric = s.alerts.find((a) => a.code === 'PEDIATRIC_MAX');
+    expect(pediatric?.severity).toBe('INFO');
+    expect(pediatric?.source).toContain('AAPD');
+    expect(pediatric?.message).toContain('4,4 mg/kg');
+  });
+
+  it('un adulto de 70 kg con lidocaína sigue con 7 mg/kg (490 mg)', () => {
+    const s = summarizeAnesthesiaDose({
+      lines: [{ anesthetic: LIDO, carpules: 1 }],
+      weightKg: 70,
+      anamnesis: CLEAN,
+      patient: ADULT,
+    });
+    expect(s.byAnesthetic[0].maxMg).toBe(490);
+    expect(codes(s)).not.toContain('PEDIATRIC_MAX');
+  });
+
+  it('sin valor pediátrico en el catálogo (articaína) se usa el de adulto', () => {
+    expect(maxDoseMg(ARTI, 20, { ...NO_ADJ, pediatric: true })).toBe(140);
+  });
+
+  it('articaína en menor de 4 años y bupivacaína en menor de 12: aviso bloqueante', () => {
+    const arti = summarizeAnesthesiaDose({
+      lines: [{ anesthetic: ARTI, carpules: 0.5 }],
+      weightKg: 14,
+      anamnesis: CLEAN,
+      patient: { ...CHILD, ageYears: 3, ageMonths: 40 },
+      pending: ARTI,
+    });
+    const alert = arti.alerts.find((a) => a.code === 'AGE_BELOW_MINIMUM');
+    expect(alert?.severity).toBe('BLOCKING');
+    expect(alert?.source).toContain('AAPD');
+    expect(alert?.message).toContain('menores de 4 años');
+    expect(hasBlockingDoseAlerts(arti.alerts)).toBe(true);
+
+    const bupi = summarizeAnesthesiaDose({
+      lines: [{ anesthetic: BUPI, carpules: 1 }],
+      weightKg: 40,
+      anamnesis: CLEAN,
+      patient: { ...CHILD, ageYears: 11 },
+      pending: BUPI,
+    });
+    expect(codes(bupi)).toContain('AGE_BELOW_MINIMUM');
+    // A los 12 cumplidos ya no.
+    const bupi12 = summarizeAnesthesiaDose({
+      lines: [{ anesthetic: BUPI, carpules: 1 }],
+      weightKg: 40,
+      anamnesis: CLEAN,
+      patient: { ...CHILD, ageYears: 12, ageMonths: 150 },
+      pending: BUPI,
+    });
+    expect(codes(bupi12)).not.toContain('AGE_BELOW_MINIMUM');
+  });
+
+  it('la edad mínima solo mira la dosis nueva, no lo ya registrado con su motivo', () => {
+    const s = summarizeAnesthesiaDose({
+      lines: [
+        { anesthetic: ARTI, carpules: 0.5 },
+        { anesthetic: LIDO, carpules: 0.5 },
+      ],
+      weightKg: 14,
+      anamnesis: CLEAN,
+      patient: { ...CHILD, ageYears: 3, ageMonths: 40 },
+      pending: LIDO,
+    });
+    expect(codes(s)).not.toContain('AGE_BELOW_MINIMUM');
+  });
+
+  it('sin fecha de nacimiento: máximos de adulto y aviso explícito, sin bloquear', () => {
+    const s = summarizeAnesthesiaDose({
+      lines: [{ anesthetic: ARTI, carpules: 1 }],
+      weightKg: 20,
+      anamnesis: CLEAN,
+      patient: { ...ADULT, ageYears: null, ageMonths: null },
+      pending: ARTI,
+    });
+    const alert = s.alerts.find((a) => a.code === 'AGE_UNKNOWN');
+    expect(alert?.severity).toBe('INFO');
+    expect(alert?.message).toContain('fecha de nacimiento');
+    expect(hasBlockingDoseAlerts(s.alerts)).toBe(false);
+  });
+
+  it('con sedación el máximo baja un 30 % y se dice por qué', () => {
+    const s = summarizeAnesthesiaDose({
+      lines: [{ anesthetic: LIDO, carpules: 1 }],
+      weightKg: 20,
+      anamnesis: CLEAN,
+      patient: { ...CHILD, sedation: true },
+      pending: LIDO,
+    });
+    // 4,4 × 20 = 88 → × 0,7 = 61,6 mg.
+    expect(s.byAnesthetic[0].maxMg).toBe(61.6);
+    expect(s.percent).toBe(58);
+    const alert = s.alerts.find((a) => a.code === 'DOSE_REDUCED_SEDATION');
+    expect(alert?.message).toContain('30 %');
+    expect(alert?.message).toContain('sedación');
+  });
+
+  it('menor de 6 meses: −30 %; también baja el tope absoluto sin peso', () => {
+    const s = summarizeAnesthesiaDose({
+      lines: [{ anesthetic: LIDO, carpules: 0.25 }],
+      weightKg: 6,
+      anamnesis: CLEAN,
+      patient: { ...CHILD, ageYears: 0, ageMonths: 4 },
+      pending: LIDO,
+    });
+    // 4,4 × 6 = 26,4 → × 0,7 = 18,5 mg.
+    expect(s.byAnesthetic[0].maxMg).toBe(18.5);
+    expect(codes(s)).toContain('DOSE_REDUCED_INFANT');
+    expect(maxDoseMg(LIDO, null, { ...NO_ADJ, factor: 0.7 })).toBeNull();
+  });
+
+  it('epinefrina acumulada en mg contra 0,2 mg en el adulto sano', () => {
+    const s = summarizeAnesthesiaDose({
+      lines: [{ anesthetic: LIDO, carpules: 3 }],
+      weightKg: 70,
+      anamnesis: CLEAN,
+      patient: ADULT,
+      pending: LIDO,
+    });
+    expect(s.epinephrine).toEqual({
+      totalMg: 0.054,
+      maxMg: 0.2,
+      percent: 27,
+      cardiac: false,
+      level: 'OK',
+    });
+  });
+
+  it('cardiópata: tope 0,04 mg; 3 carpules 1:100.000 (0,054 mg) exigen motivo', () => {
+    const s = summarizeAnesthesiaDose({
+      lines: [{ anesthetic: LIDO, carpules: 3 }],
+      weightKg: 70,
+      anamnesis: CLEAN,
+      patient: { ...ADULT, cardiac: true },
+      pending: LIDO,
+    });
+    expect(s.epinephrine).toEqual(
+      expect.objectContaining({
+        totalMg: 0.054,
+        maxMg: 0.04,
+        level: 'EXCEEDED',
+        cardiac: true,
+      }),
+    );
+    const alert = s.alerts.find((a) => a.code === 'EPINEPHRINE_OVER_MAX');
+    expect(alert?.severity).toBe('BLOCKING');
+    expect(alert?.message).toContain('0,054 mg');
+    expect(alert?.message).toContain('cardiopatía');
+    // El anestésico va bien (162 de 490 mg): bloquea solo la epinefrina.
+    expect(s.level).toBe('OK');
+    expect(hasBlockingDoseAlerts(s.alerts)).toBe(true);
+  });
+
+  it('cardiópata con 2 carpules (0,036 mg): aviso al 80 %, sin motivo', () => {
+    const s = summarizeAnesthesiaDose({
+      lines: [{ anesthetic: LIDO, carpules: 2 }],
+      weightKg: 70,
+      anamnesis: CLEAN,
+      patient: { ...ADULT, cardiac: true },
+    });
+    expect(s.epinephrine.level).toBe('WARNING');
+    expect(codes(s)).toContain('EPINEPHRINE_NEAR_MAX');
+    expect(hasBlockingDoseAlerts(s.alerts)).toBe(false);
+  });
+
+  it('sin anamnesis: tope de adulto sano y aviso de que no se ha comprobado la cardiopatía', () => {
+    const s = summarizeAnesthesiaDose({
+      lines: [{ anesthetic: LIDO, carpules: 1 }],
+      weightKg: 70,
+      anamnesis: NO_ANAMNESIS,
+      patient: { ...ADULT, cardiac: null },
+    });
+    expect(s.epinephrine.maxMg).toBe(0.2);
+    expect(codes(s)).toContain('EPINEPHRINE_CARDIAC_UNKNOWN');
+  });
+
+  it('epinefrina sin mg por carpule en el catálogo: se deduce del texto o se avisa', () => {
+    const legacy = { ...LIDO, epinephrineMgPerCarpule: undefined };
+    const s = summarizeAnesthesiaDose({
+      lines: [{ anesthetic: legacy, carpules: 1 }],
+      weightKg: 70,
+      anamnesis: CLEAN,
+      patient: ADULT,
+    });
+    expect(s.epinephrine.totalMg).toBe(0.018);
+    const unknown = {
+      ...LIDO,
+      vasoconstrictor: 'Con epinefrina',
+      epinephrineMgPerCarpule: null,
+    };
+    const u = summarizeAnesthesiaDose({
+      lines: [{ anesthetic: unknown, carpules: 1 }],
+      weightKg: 70,
+      anamnesis: CLEAN,
+      patient: ADULT,
+    });
+    expect(codes(u)).toContain('EPINEPHRINE_UNKNOWN');
+  });
+
+  it('quedan X mg ≈ Y carpules del anestésico nuevo, en cuartos hacia abajo', () => {
+    const s = summarizeAnesthesiaDose({
+      lines: [{ anesthetic: LIDO, carpules: 1 }],
+      weightKg: 20,
+      anamnesis: CLEAN,
+      patient: CHILD,
+      pending: LIDO,
+    });
+    // 88 − 36 = 52 mg; 52 / 36 = 1,44 → 1,25 carpules de 1,8 ml.
+    expect(s.remaining).toEqual({
+      name: LIDO.name,
+      mg: 52,
+      carpules: 1.25,
+      mlPerCarpule: 1.8,
+      limitedBy: 'DOSE',
+      epinephrineMg: 0.182,
+    });
+  });
+
+  it('en el cardiópata lo que queda lo limita la epinefrina', () => {
+    const s = summarizeAnesthesiaDose({
+      lines: [{ anesthetic: LIDO, carpules: 1 }],
+      weightKg: 70,
+      anamnesis: CLEAN,
+      patient: { ...ADULT, cardiac: true },
+      pending: LIDO,
+    });
+    // Epinefrina: 0,04 − 0,018 = 0,022 mg → 1,22 carpules → 1.
+    expect(s.remaining).toEqual(
+      expect.objectContaining({
+        mg: 44,
+        carpules: 1,
+        limitedBy: 'EPINEPHRINE',
+        epinephrineMg: 0.022,
+      }),
+    );
+  });
+
+  it('superado el máximo quedan 0; sin peso no hay «quedan»', () => {
+    const over = summarizeAnesthesiaDose({
+      lines: [{ anesthetic: LIDO, carpules: 3 }],
+      weightKg: 20,
+      anamnesis: CLEAN,
+      patient: CHILD,
+      pending: LIDO,
+    });
+    expect(over.remaining).toEqual(
+      expect.objectContaining({ mg: 0, carpules: 0 }),
+    );
+    const noWeight = summarizeAnesthesiaDose({
+      lines: [{ anesthetic: LIDO, carpules: 1 }],
+      weightKg: null,
+      anamnesis: CLEAN,
+      patient: CHILD,
+      pending: LIDO,
+    });
+    expect(noWeight.remaining).toBeNull();
   });
 });

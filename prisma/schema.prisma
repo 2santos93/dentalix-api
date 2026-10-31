@@ -5425,6 +5425,12 @@ model AnestheticProduct {
   mlPerCarpule     Decimal  @db.Decimal(3, 2)
   maxMgPerKg       Decimal  @db.Decimal(4, 2)
   maxAbsoluteMg    Decimal  @db.Decimal(6, 1)
+  /// DX-420: mg/kg en menores de 12 años (null = el de adulto), edad mínima
+  /// en años (null = sin mínimo) y mg de epinefrina por carpule (0 = sin
+  /// epinefrina; null = no se sabe). Valores por defecto revisables.
+  pediatricMaxMgPerKg     Decimal? @db.Decimal(4, 2)
+  minAgeYears             Int?     @db.SmallInt
+  epinephrineMgPerCarpule Decimal? @db.Decimal(5, 4)
   sampleCode       String?
   active           Boolean  @default(true)
   createdById      String?  @db.Uuid
@@ -5465,6 +5471,14 @@ model AnesthesiaAdministration {
   mlPerCarpule       Decimal             @db.Decimal(3, 2)
   maxMgPerKg         Decimal             @db.Decimal(4, 2)
   maxAbsoluteMg      Decimal             @db.Decimal(6, 1)
+  // DX-420: copia de los valores pediátricos y de epinefrina del catálogo
+  // (null en los registros anteriores), la epinefrina de esta dosis y la
+  // acumulada del paciente en la ventana, en mg.
+  pediatricMaxMgPerKg     Decimal?            @db.Decimal(4, 2)
+  minAgeYears             Int?                @db.SmallInt
+  epinephrineMgPerCarpule Decimal?            @db.Decimal(5, 4)
+  epinephrineMg           Decimal?            @db.Decimal(6, 4)
+  cumulativeEpinephrineMg Decimal?            @db.Decimal(6, 4)
   carpules           Decimal             @db.Decimal(4, 2)
   doseMg             Decimal             @db.Decimal(6, 1)
   technique          AnesthesiaTechnique

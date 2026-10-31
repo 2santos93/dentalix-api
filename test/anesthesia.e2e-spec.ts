@@ -184,6 +184,20 @@ describe('Anestesia local en la evolución (DX-307, e2e)', () => {
     catalogB = (
       await call(b, 'post', '/anesthetics/samples', b.adminToken).expect(201)
     ).body as Product[];
+    // Los criterios de DX-307 y DX-418 se escribieron con el máximo de adulto
+    // (lidocaína 7 mg/kg) para una niña: la clínica A quita los valores
+    // pediátricos del catálogo (editables, DX-420). Los de DX-420 se prueban
+    // en anesthesia-pediatric.e2e-spec.ts.
+    for (const code of ['LIDOCAINE_2_EPI', 'MEPIVACAINE_3']) {
+      await call(
+        a,
+        'patch',
+        `/anesthetics/${byCode(catalogA, code).id}`,
+        a.adminToken,
+      )
+        .send({ pediatricMaxMgPerKg: null })
+        .expect(200);
+    }
 
     child = await createPatient(a, 'Niña', '2018-05-10', { peso: 20 });
     adult = await createPatient(a, 'Adulto', '1980-01-01', {});
@@ -324,7 +338,7 @@ describe('Anestesia local en la evolución (DX-307, e2e)', () => {
       expect(
         (events[0].metadata as { anesthesiaSafety: unknown }).anesthesiaSafety,
       ).toEqual({
-        rulesVersion: 'ANESTHESIA_DOSE_V2',
+        rulesVersion: 'ANESTHESIA_DOSE_V3',
         blocking: ['DOSE_OVER_MAX'],
         info: [],
         overridden: true,
@@ -657,7 +671,7 @@ describe('Anestesia local en la evolución (DX-307, e2e)', () => {
           cumulativeMg: 216,
           cumulativePercent: 154,
           overrideReason: OVERRIDE,
-          safetyRulesVersion: 'ANESTHESIA_DOSE_V2',
+          safetyRulesVersion: 'ANESTHESIA_DOSE_V3',
         }),
       );
       const listed = await call(

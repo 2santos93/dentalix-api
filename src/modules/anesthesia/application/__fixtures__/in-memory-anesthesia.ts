@@ -28,6 +28,8 @@ export class InMemoryAnesthesiaRepository implements AnesthesiaRepository {
   /** Nombres de profesionales y sedes para el desglose (DX-418). */
   authorNames = new Map<string, string>();
   locationNames = new Map<string, string>();
+  /** Hojas de sedación (DX-407) por evolución y hora clínica (DX-420). */
+  sedations: { patientId: string; entryId: string; at: Date }[] = [];
 
   listProducts(includeInactive: boolean): Promise<AnestheticProduct[]> {
     return Promise.resolve(
@@ -51,6 +53,9 @@ export class InMemoryAnesthesiaRepository implements AnesthesiaRepository {
     const product: AnestheticProduct = {
       id: randomUUID(),
       ...input,
+      pediatricMaxMgPerKg: input.pediatricMaxMgPerKg ?? null,
+      minAgeYears: input.minAgeYears ?? null,
+      epinephrineMgPerCarpule: input.epinephrineMgPerCarpule ?? null,
       sampleCode: input.sampleCode ?? null,
       active: true,
       createdAt: now,
@@ -142,6 +147,16 @@ export class InMemoryAnesthesiaRepository implements AnesthesiaRepository {
     );
   }
 
+  hasSedation(patientId: string, entryId: string, range: DoseWindow) {
+    return Promise.resolve(
+      this.sedations.some(
+        (s) =>
+          s.patientId === patientId &&
+          (s.entryId === entryId || isInDoseWindow(s.at, range)),
+      ),
+    );
+  }
+
   async record(
     patientId: string,
     entryId: string,
@@ -167,6 +182,9 @@ export class InMemoryAnesthesiaRepository implements AnesthesiaRepository {
       mlPerCarpule: anesthetic.mlPerCarpule,
       maxMgPerKg: anesthetic.maxMgPerKg,
       maxAbsoluteMg: anesthetic.maxAbsoluteMg,
+      pediatricMaxMgPerKg: anesthetic.pediatricMaxMgPerKg,
+      minAgeYears: anesthetic.minAgeYears,
+      epinephrineMgPerCarpule: anesthetic.epinephrineMgPerCarpule,
       createdAt: new Date(),
     };
     this.records.push(row);

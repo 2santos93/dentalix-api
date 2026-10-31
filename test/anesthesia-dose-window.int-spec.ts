@@ -96,6 +96,20 @@ describe('anestesia: acumulado del paciente y bloqueo por paciente (DX-418, int)
         );
     lidoA = await lido(a);
     lidoB = await lido(b);
+    // Los criterios de DX-418 se escribieron con el máximo de adulto
+    // (lidocaína 7 mg/kg) para un niño: las clínicas quitan el pediátrico del
+    // catálogo (DX-420, editable por el ADMIN).
+    for (const [clinic, id] of [
+      [a, lidoA],
+      [b, lidoB],
+    ] as const) {
+      await http()
+        .patch(`/api/v1/anesthetics/${id}`)
+        .set('X-Tenant-Host', clinic.host)
+        .set('Authorization', `Bearer ${clinic.adminToken}`)
+        .send({ pediatricMaxMgPerKg: null })
+        .expect(200);
+    }
     uc = app.get(AnesthesiaUseCases);
     repo = app.get<AnesthesiaRepository>(ANESTHESIA_REPOSITORY);
     tenantContext = app.get(TenantContextService);

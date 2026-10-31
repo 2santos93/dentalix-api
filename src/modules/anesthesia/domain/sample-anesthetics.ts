@@ -19,6 +19,14 @@
  * mepivacaína (4,4 mg/kg, máx. 300 mg): una clínica que la siga cambia esos
  * valores en su catálogo.
  *
+ * DX-420: valores pediátricos (menores de 12 años) de esa misma guía de la
+ * AAPD: lidocaína y mepivacaína 4,4 mg/kg (`pediatricMaxMgPerKg`; null = el
+ * de adulto, como la articaína 7 y la bupivacaína 1,3); articaína no
+ * recomendada en menores de 4 años y bupivacaína en menores de 12
+ * (`minAgeYears`). Epinefrina por carpule (`epinephrineMgPerCarpule`) =
+ * ml × 1000 / dilución: 1:100.000 → 0,01 mg/ml (1,8 ml → 0,018 mg; 1,7 ml
+ * → 0,017 mg) y 1:200.000 → 0,005 mg/ml (0,009 mg).
+ *
  * Volumen del carpule: 1,8 ml (presentación habitual); la articaína se
  * comercializa en carpules de 1,7 ml (Septanest/Septocaine, Ubistesin), y así
  * queda en el ejemplo. Los valores son una ayuda y no sustituyen la ficha
@@ -34,6 +42,9 @@ export interface SampleAnesthetic {
   mlPerCarpule: number;
   maxMgPerKg: number;
   maxAbsoluteMg: number;
+  pediatricMaxMgPerKg: number | null;
+  minAgeYears: number | null;
+  epinephrineMgPerCarpule: number;
 }
 
 export const SAMPLE_ANESTHETICS: readonly SampleAnesthetic[] = [
@@ -46,6 +57,9 @@ export const SAMPLE_ANESTHETICS: readonly SampleAnesthetic[] = [
     mlPerCarpule: 1.8,
     maxMgPerKg: 7,
     maxAbsoluteMg: 500,
+    pediatricMaxMgPerKg: 4.4,
+    minAgeYears: null,
+    epinephrineMgPerCarpule: 0.018,
   },
   {
     sampleCode: 'ARTICAINE_4_EPI',
@@ -56,6 +70,9 @@ export const SAMPLE_ANESTHETICS: readonly SampleAnesthetic[] = [
     mlPerCarpule: 1.7,
     maxMgPerKg: 7,
     maxAbsoluteMg: 500,
+    pediatricMaxMgPerKg: null,
+    minAgeYears: 4,
+    epinephrineMgPerCarpule: 0.017,
   },
   {
     sampleCode: 'MEPIVACAINE_3',
@@ -66,6 +83,9 @@ export const SAMPLE_ANESTHETICS: readonly SampleAnesthetic[] = [
     mlPerCarpule: 1.8,
     maxMgPerKg: 6.6,
     maxAbsoluteMg: 400,
+    pediatricMaxMgPerKg: 4.4,
+    minAgeYears: null,
+    epinephrineMgPerCarpule: 0,
   },
   {
     sampleCode: 'PRILOCAINE_4',
@@ -76,6 +96,9 @@ export const SAMPLE_ANESTHETICS: readonly SampleAnesthetic[] = [
     mlPerCarpule: 1.8,
     maxMgPerKg: 8,
     maxAbsoluteMg: 600,
+    pediatricMaxMgPerKg: null,
+    minAgeYears: null,
+    epinephrineMgPerCarpule: 0,
   },
   {
     sampleCode: 'BUPIVACAINE_05_EPI',
@@ -86,5 +109,8 @@ export const SAMPLE_ANESTHETICS: readonly SampleAnesthetic[] = [
     mlPerCarpule: 1.8,
     maxMgPerKg: 1.3,
     maxAbsoluteMg: 90,
+    pediatricMaxMgPerKg: null,
+    minAgeYears: 12,
+    epinephrineMgPerCarpule: 0.009,
   },
 ];

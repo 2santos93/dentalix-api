@@ -36,7 +36,12 @@ function patient(
 ): AnesthesiaPatientContext {
   return {
     birthDate: new Date('2018-03-01T00:00:00.000Z'),
-    anamnesis: { allergens: [], anestheticAllergyFlag: false, weightKg: 20 },
+    anamnesis: {
+      allergens: [],
+      anestheticAllergyFlag: false,
+      weightKg: 20,
+      cardiac: false,
+    },
     ...overrides,
   };
 }
@@ -44,6 +49,7 @@ function patient(
 async function setup(
   ctx: AnesthesiaPatientContext = patient(),
   allowed: 'ALL' | string[] = 'ALL',
+  { pediatricValues = false }: { pediatricValues?: boolean } = {},
 ) {
   const repo = new InMemoryAnesthesiaRepository();
   repo.patients.set(PATIENT, ctx);
@@ -55,6 +61,12 @@ async function setup(
   });
   const catalog = new AnestheticCatalogUseCases(repo);
   const [lido, arti] = await catalog.loadSamples(AUTHOR);
+  // Los criterios de DX-307 y DX-418 se escribieron con el máximo de adulto
+  // (lidocaína 7 mg/kg) para un niño: aquí la clínica no tiene valores
+  // pediátricos salvo que el test de DX-420 los pida.
+  if (!pediatricValues) {
+    for (const p of repo.products) p.pediatricMaxMgPerKg = null;
+  }
   // El criterio de DX-307 usa articaína en carpules de 1,7 ml.
   const uc = new AnesthesiaUseCases(repo, tenantContext(allowed));
   uc.now = () => NOW;
@@ -173,6 +185,7 @@ describe('AnesthesiaUseCases (DX-307)', () => {
           allergens: [],
           anestheticAllergyFlag: false,
           weightKg: null,
+          cardiac: false,
         },
       }),
     );
@@ -306,6 +319,7 @@ describe('AnesthesiaUseCases (DX-307)', () => {
           allergens: ['Mepivacaína'],
           anestheticAllergyFlag: false,
           weightKg: 20,
+          cardiac: false,
         },
       }),
     );
@@ -489,7 +503,7 @@ describe('acumulado del paciente en 24 h (DX-418)', () => {
       expect.objectContaining({
         cumulativeMg: 216,
         cumulativePercent: 154,
-        safetyRulesVersion: 'ANESTHESIA_DOSE_V2',
+        safetyRulesVersion: 'ANESTHESIA_DOSE_V3',
         overrideReason: 'Segunda cirugía urgente, valorado con la madre',
       }),
     );
@@ -765,5 +779,203 @@ describe('AnestheticCatalogUseCases (DX-307)', () => {
     await expect(
       catalog.update(PATIENT, { active: false }, AUTHOR),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+});
+
+describe('máximos pediátricos, edad mínima, sedación y epinefrina (DX-420)', () => {
+  const HOUR = 3_600_000;
+  const codes = (alerts: { code: string }[]) => alerts.map((a) => a.code);
+  const pediatric = (ctx: AnesthesiaPatientContext = patient()) =>
+    setup(ctx, 'ALL', { pediatricValues: true });
+  const conflictOf = async (p: Promise<unknown>) => {
+    const err = await p.catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ConflictException);
+    return (err as ConflictException).getResponse() as {
+      message: string;
+      safetyAlerts: { code: string }[];
+    };
+  };
+
+  it('niño de 20 kg con lidocaína: máximo 88 mg (4,4 mg/kg, AAPD) y quedan X mg ≈ Y carpules', async () => {
+    const { uc, lido } = await pediatric();
+    const check = await uc.check(PATIENT, ENTRY, {
+      anestheticId: lido.id,
+      carpules: 1,
+    });
+    expect(check.ageYears).toBe(8);
+    expect(check.summary.byAnesthetic[0]).toEqual(
+      expect.objectContaining({ maxMg: 88, maxMgPerKg: 4.4, percent: 41 }),
+    );
+    expect(check.summary.byAnesthetic[0].maxSource).toContain('AAPD');
+    expect(check.summary.remaining).toEqual(
+      expect.objectContaining({ mg: 52, carpules: 1.25, mlPerCarpule: 1.8 }),
+    );
+  });
+
+  it('articaína a un niño de 3 años: 409 por edad mínima; con motivo se guarda y lo sella', async () => {
+    const { uc, arti, repo } = await pediatric(
+      patient({ birthDate: new Date('2023-06-01T00:00:00.000Z') }),
+    );
+    const body = await conflictOf(
+      uc.record(
+        PATIENT,
+        ENTRY,
+        { ...base, anestheticId: arti.id, carpules: 0.5 },
+        AUTHOR,
+      ),
+    );
+    expect(codes(body.safetyAlerts)).toContain('AGE_BELOW_MINIMUM');
+    expect(body.message).toContain('menores de 4 años');
+    expect(repo.records).toHaveLength(0);
+    const saved = await uc.record(
+      PATIENT,
+      ENTRY,
+      {
+        ...base,
+        anestheticId: arti.id,
+        carpules: 0.5,
+        overrideReason: 'Sin alternativa disponible, valorado con la madre',
+      },
+      AUTHOR,
+    );
+    expect(saved.overrideReason).toContain('Sin alternativa');
+    expect(saved.minAgeYears).toBe(4);
+    expect(codes(saved.safetyAlerts)).toContain('AGE_BELOW_MINIMUM');
+  });
+
+  it('con hoja de sedación ese día el máximo baja un 30 % y lo dice', async () => {
+    const { uc, lido, repo } = await pediatric();
+    repo.sedations.push({
+      patientId: PATIENT,
+      entryId: 'otra-evolucion',
+      at: new Date(NOW.getTime() - 3 * HOUR),
+    });
+    const check = await uc.check(PATIENT, ENTRY, {
+      anestheticId: lido.id,
+      carpules: 1,
+    });
+    // 4,4 × 20 = 88 → × 0,7 = 61,6 mg.
+    expect(check.summary.byAnesthetic[0].maxMg).toBe(61.6);
+    expect(check.summary.adjustment.sedation).toBe(true);
+    expect(codes(check.summary.alerts)).toContain('DOSE_REDUCED_SEDATION');
+  });
+
+  it('una sedación de hace 2 días no reduce', async () => {
+    const { uc, lido, repo } = await pediatric();
+    repo.sedations.push({
+      patientId: PATIENT,
+      entryId: 'otra-evolucion',
+      at: new Date(NOW.getTime() - 48 * HOUR),
+    });
+    const check = await uc.check(PATIENT, ENTRY, {
+      anestheticId: lido.id,
+      carpules: 1,
+    });
+    expect(check.summary.byAnesthetic[0].maxMg).toBe(88);
+  });
+
+  it('cardiópata en la anamnesis: tope de epinefrina 0,04 mg; 3 carpules → 409; con motivo sella la epinefrina', async () => {
+    const { uc, lido, repo } = await pediatric(
+      patient({
+        birthDate: new Date('1960-01-01T00:00:00.000Z'),
+        anamnesis: {
+          allergens: [],
+          anestheticAllergyFlag: false,
+          weightKg: 80,
+          cardiac: true,
+        },
+      }),
+    );
+    const body = await conflictOf(
+      uc.record(
+        PATIENT,
+        ENTRY,
+        { ...base, anestheticId: lido.id, carpules: 3 },
+        AUTHOR,
+      ),
+    );
+    expect(codes(body.safetyAlerts)).toEqual(['EPINEPHRINE_OVER_MAX']);
+    expect(body.message).toContain('0,054 mg de 0,04 mg');
+    expect(repo.records).toHaveLength(0);
+    const saved = await uc.record(
+      PATIENT,
+      ENTRY,
+      {
+        ...base,
+        anestheticId: lido.id,
+        carpules: 3,
+        overrideReason: 'Cardiólogo consultado, exodoncia múltiple',
+      },
+      AUTHOR,
+    );
+    expect(saved).toEqual(
+      expect.objectContaining({
+        epinephrineMg: 0.054,
+        cumulativeEpinephrineMg: 0.054,
+        epinephrineMgPerCarpule: 0.018,
+        safetyRulesVersion: 'ANESTHESIA_DOSE_V3',
+      }),
+    );
+    expect(saved.summary.epinephrine).toEqual(
+      expect.objectContaining({
+        maxMg: 0.04,
+        cardiac: true,
+        level: 'EXCEEDED',
+      }),
+    );
+  });
+
+  it('la epinefrina se acumula entre evoluciones (ventana de DX-418) y deduce la de registros antiguos', async () => {
+    const { uc, lido, repo } = await pediatric(
+      patient({
+        birthDate: new Date('1960-01-01T00:00:00.000Z'),
+        anamnesis: {
+          allergens: [],
+          anestheticAllergyFlag: false,
+          weightKg: 80,
+          cardiac: true,
+        },
+      }),
+    );
+    await uc.record(
+      PATIENT,
+      ENTRY,
+      { ...base, anestheticId: lido.id, carpules: 1 },
+      AUTHOR,
+    );
+    // Un registro anterior a DX-420: sin epinefrina por carpule copiada.
+    repo.records[0].epinephrineMgPerCarpule = null;
+    const check = await uc.check(PATIENT, ENTRY, {
+      anestheticId: lido.id,
+      carpules: 1,
+    });
+    expect(check.summary.epinephrine).toEqual(
+      expect.objectContaining({
+        totalMg: 0.036,
+        maxMg: 0.04,
+        level: 'WARNING',
+      }),
+    );
+    expect(check.summary.remaining).toEqual(
+      // 0,004 mg / 0,018 por carpule = 0,22 → ni un cuarto de carpule.
+      expect.objectContaining({
+        limitedBy: 'EPINEPHRINE',
+        carpules: 0,
+        mg: 8,
+        epinephrineMg: 0.004,
+      }),
+    );
+  });
+
+  it('sin fecha de nacimiento: aviso explícito, máximos de adulto, sin bloquear', async () => {
+    const { uc, arti } = await pediatric(patient({ birthDate: null }));
+    const saved = await uc.record(
+      PATIENT,
+      ENTRY,
+      { ...base, anestheticId: arti.id, carpules: 1 },
+      AUTHOR,
+    );
+    expect(codes(saved.safetyAlerts)).toContain('AGE_UNKNOWN');
+    expect(saved.overrideReason).toBeNull();
   });
 });
