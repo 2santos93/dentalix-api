@@ -1846,3 +1846,109 @@ describe('textos sin ejemplos de un país (DX-368)', () => {
     }
   });
 });
+
+/**
+ * DX-325: ningún texto de producción ni la demo cita una ley, una norma con
+ * número o una autoridad de datos o sanitaria. Los comentarios quedan fuera:
+ * son de DX-371. El nombre `AUTHORITY` ya lo usa DX-327 en este módulo.
+ */
+const NUM = String.raw`(?:n\.?[º°o]\.?\s*|no\.\s*)?`;
+/** Regímenes por su sigla y normas con número, en español, inglés y portugués. */
+const LAW_CITATION = new RegExp(
+  String.raw`\b(?:h[aá]beas\s+data|lgpd|gdpr|rgpd|hipaa|ccpa|lopdgdd|lopd|lfpdppp|pipeda)\b` +
+    String.raw`|\b(?:ley|decreto|reglamento|real\s+decreto|law|lei)\s+(?:org[aá]nica\s+|estatutaria\s+|\(ue\)\s+)?${NUM}\d` +
+    String.raw`|\bresoluci[oó]n\s+${NUM}\d+\s*(?:de\s+\d{4}|\/\d{4})` +
+    String.raw`|\bley\s+de\s+protecci[oó]n\s+de\s+datos|\bregulation\s+\(eu\)|\bart[ií]culo\s+\d` +
+    String.raw`|\b(?:Res|[Aa]rt)\.\s*\d|\bDec\.\s*\d{3,}`,
+  'i',
+);
+/** Autoridades de datos o sanitarias por su sigla o nombre; sensible a mayúsculas. */
+const LAW_AUTHORITY = new RegExp(
+  String.raw`\b(?:SIC|IN` +
+    String.raw`VIMA|AEPD|AEMPS|ANMAT|COFEPRIS|ANVISA|DIGEMID|INHRR|SACS|ANPD|CNIL)\b` +
+    String.raw`|\bRD\s*\d|Superintendencia`,
+);
+const citesLaw = (line: string): boolean =>
+  LAW_CITATION.test(line) || LAW_AUTHORITY.test(line);
+
+describe('textos sin leyes ni autoridades (DX-325)', () => {
+  const citesLawInCode = (line: string): boolean =>
+    !isComment(line) && citesLaw(line);
+
+  it('architecture: no production text or demo seed cites a law or an authority', () => {
+    const files = [
+      ...tsFiles(SRC).filter(isProduction),
+      ...allFiles(join(PRISMA_DIR, 'demo')).filter((file) =>
+        file.endsWith('.ts'),
+      ),
+      join(PRISMA_DIR, 'seed.ts'),
+      join(PRISMA_DIR, 'seed-demo.ts'),
+    ];
+    expect(files.length).toBeGreaterThan(500);
+    expect(files.map((file) => relative(ROOT, file))).toEqual(
+      expect.arrayContaining([
+        join(
+          'src',
+          'modules',
+          'data-consents',
+          'application',
+          'use-cases',
+          'publish-privacy-policy.use-case.ts',
+        ),
+        join('prisma', 'demo', 'data.ts'),
+        join('prisma', 'seed-demo.ts'),
+      ]),
+    );
+    expect(offending(files, citesLawInCode)).toEqual([]);
+  });
+
+  it('the law patterns catch each citation and skip neutral text', () => {
+    for (const line of [
+      `'${'De' + 'c. 1377'} de 2013, art. 6'`,
+      `'${'Le' + 'y 1581'} de 2012'`,
+      `'${'Le' + 'y No. 1581'}'`,
+      `'${'Re' + 's. 839'}/2017'`,
+      `'${'Re' + 's. 4816'}/2008'`,
+      `'${'R' + 'D 192'}/2023'`,
+      `'${'Reglamento' + ' (UE) 2017'}/745'`,
+      `'${'Regulation' + ' (EU)'} 2016/679'`,
+      `'${'Superinten' + 'dencia'} de Industria y Comercio'`,
+      `'ante la ${'S' + 'IC'}'`,
+      `'Registro ${'IN' + 'VIMA'}'`,
+      `'${'Real Decreto' + ' 1718'}/2010'`,
+      `'${'Resolución' + ' 1995'} de 1999'`,
+      `'${'Resolución' + ' No. 5'} de 2020'`,
+      `'${'artículo' + ' 6'}'`,
+      `'${'Ley de Protección' + ' de Datos'} Personales'`,
+      `'${'Law' + ' No. 25'}.326'`,
+      `'${'Lei' + ' 13'}.709'`,
+      `'registro ${'IN' + 'HRR'}'`,
+      `'permiso ${'SA' + 'CS'}'`,
+      `'${'AN' + 'PD'}'`,
+      `'${'CN' + 'IL'}'`,
+    ]) {
+      expect({ line, caught: citesLawInCode(line) }).toEqual({
+        line,
+        caught: true,
+      });
+    }
+    for (const line of [
+      `'la resolución de precios del plan'`,
+      `'Resolución del precio por convenio'`,
+      `'Resolución 1920×1080'`,
+      `'Resolución 300 ppp'`,
+      `'Dec. 31'`,
+      `'Leyenda del odontograma'`,
+      `'ley de oferta y demanda'`,
+      `'(sic)'`,
+      `'basic'`,
+      `'artículos de limpieza'`,
+      `// ${'Le' + 'y 1581'}`,
+    ]) {
+      expect({ line, caught: citesLawInCode(line) }).toEqual({
+        line,
+        caught: false,
+      });
+    }
+  });
+});

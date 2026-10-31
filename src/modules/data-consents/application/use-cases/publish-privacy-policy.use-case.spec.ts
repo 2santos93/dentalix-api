@@ -2,7 +2,10 @@ import { BadRequestException } from '@nestjs/common';
 import { PublishPrivacyPolicyUseCase } from './publish-privacy-policy.use-case';
 import { GetPrivacyPoliciesUseCase } from './get-privacy-policies.use-case';
 import { InMemoryPrivacyPolicyRepository } from './__fixtures__/in-memory-data-consents';
-import { policyContentHash } from '../../domain/privacy-policy-content';
+import {
+  normalizePolicyContent,
+  policyContentHash,
+} from '../../domain/privacy-policy-content';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 
 const AUDIT: AuditRequestContext = {
@@ -54,20 +57,17 @@ describe('PublishPrivacyPolicyUseCase', () => {
     expect(v1.contentHash).toBe(policyContentHash(CONTENT));
   });
 
-  it('rechaza un texto de datos sensibles sin las frases obligatorias y no publica nada', async () => {
-    await expect(
-      publish.execute(
-        { ...CONTENT, sensitiveHealthText: 'Autorizo el uso de mi salud.' },
-        AUDIT,
-      ),
-    ).rejects.toThrow(BadRequestException);
-    await expect(
-      publish.execute(
-        { ...CONTENT, sensitiveHealthText: 'Autorizo el uso de mi salud.' },
-        AUDIT,
-      ),
-    ).rejects.toThrow(/no está obligado.*datos sensibles.*finalidad/);
-    expect(repo.versions).toHaveLength(0);
+  it('publica un texto de datos sensibles sin frases obligatorias, en cualquier idioma', async () => {
+    const content = {
+      ...CONTENT,
+      sensitiveHealthText: 'I authorise the processing of my health data.',
+    };
+    const v1 = await publish.execute(content, AUDIT);
+    expect(v1.version).toBe(1);
+    expect(repo.versions).toHaveLength(1);
+    expect(v1.contentHash).toBe(
+      policyContentHash(normalizePolicyContent(content)),
+    );
   });
 
   it('rechaza textos vacíos tras recortar espacios', async () => {
