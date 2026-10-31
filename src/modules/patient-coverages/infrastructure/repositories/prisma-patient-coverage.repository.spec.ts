@@ -32,7 +32,7 @@ function row(type: PatientCoverageRow['payer']['type']): PatientCoverageRow {
     createdAt: AT,
     updatedAt: AT,
     deletedAt: null,
-    payer: { id: 'payer-1', name: 'Sura EPS', type, active: true },
+    payer: { id: 'payer-1', name: 'Surco Salud', type, active: true },
   };
 }
 
@@ -41,7 +41,7 @@ describe('mapper de coberturas (DX-326, fase 1)', () => {
     const coverage = toEntity(row('EPS_CO'), new Map());
     expect(coverage.payer).toEqual({
       id: 'payer-1',
-      name: 'Sura EPS',
+      name: 'Surco Salud',
       type: 'PUBLIC_SYSTEM',
       active: true,
     });

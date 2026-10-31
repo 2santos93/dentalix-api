@@ -52,8 +52,8 @@ describe('Resumen de cobertura y filtro por pagador (e2e, DX-153)', () => {
   let clinic: Clinic;
   let other: Clinic;
   let reception: string;
-  let sura: string;
-  let sanitas: string;
+  let surco: string;
+  let sanavida: string;
   let foreignPayer: string;
   const patients: Record<string, string> = {};
   const appointments: Record<string, string> = {};
@@ -97,12 +97,12 @@ describe('Resumen de cobertura y filtro por pagador (e2e, DX-153)', () => {
     const member = await seedMember(raw, clinic, ClinicRole.RECEPTION);
     reception = await loginAs(app, clinic.host, member.email);
 
-    sura = await post(clinic, '/api/v1/payers', {
-      name: 'Sura',
+    surco = await post(clinic, '/api/v1/payers', {
+      name: 'Surco',
       type: 'PUBLIC_SYSTEM',
     });
-    sanitas = await post(clinic, '/api/v1/payers', {
-      name: 'Sanitas',
+    sanavida = await post(clinic, '/api/v1/payers', {
+      name: 'Sanavida',
       type: 'PUBLIC_SYSTEM',
     });
     foreignPayer = await post(other, '/api/v1/payers', {
@@ -116,20 +116,20 @@ describe('Resumen de cobertura y filtro por pagador (e2e, DX-153)', () => {
     patients.sin = await createPatient(clinic, 'Sonia', 'Sinseguro');
 
     await cover('vencida', {
-      payerId: sura,
+      payerId: surco,
       planName: 'Plus',
       memberNumber: MEMBER_NUMBER,
       validFrom: dayFromNow(-400),
       validTo: dayFromNow(-5),
     });
     await cover('vigente', {
-      payerId: sanitas,
+      payerId: sanavida,
       planName: 'Oro',
       validTo: dayFromNow(60),
     });
-    // Secundaria de Sura: cuenta para el filtro, no para el resumen.
-    await cover('vigente', { payerId: sura, isPrimary: false });
-    await cover('futura', { payerId: sanitas, validFrom: dayFromNow(30) });
+    // Secundaria de Surco: cuenta para el filtro, no para el resumen.
+    await cover('vigente', { payerId: surco, isPrimary: false });
+    await cover('futura', { payerId: sanavida, validFrom: dayFromNow(30) });
 
     let hour = 14;
     for (const key of Object.keys(patients)) {
@@ -167,13 +167,13 @@ describe('Resumen de cobertura y filtro por pagador (e2e, DX-153)', () => {
     );
     expect(byPatient.get(patients.vencida)).toEqual({
       status: 'EXPIRED',
-      payerName: 'Sura',
+      payerName: 'Surco',
       planName: 'Plus',
       validTo: dayFromNow(-5),
     });
     expect(byPatient.get(patients.vigente)).toEqual({
       status: 'ACTIVE',
-      payerName: 'Sanitas',
+      payerName: 'Sanavida',
       planName: 'Oro',
       validTo: dayFromNow(60),
     });
@@ -204,7 +204,7 @@ describe('Resumen de cobertura y filtro por pagador (e2e, DX-153)', () => {
     ).expect(200);
     const body = res.body as { coverage: CoverageBody };
     expect(body.coverage.status).toBe('EXPIRED');
-    expect(body.coverage.payerName).toBe('Sura');
+    expect(body.coverage.payerName).toBe('Surco');
     expect(Object.keys(body.coverage).sort()).toEqual([
       'payerName',
       'planName',
@@ -238,7 +238,7 @@ describe('Resumen de cobertura y filtro por pagador (e2e, DX-153)', () => {
 
     it('devuelve a quien tiene alguna cobertura viva de ese pagador, con total', async () => {
       const res = await as(
-        api().get('/api/v1/patients').query({ payerId: sura }),
+        api().get('/api/v1/patients').query({ payerId: surco }),
         reception,
       ).expect(200);
       // vigente la tiene como secundaria: cuenta.
@@ -252,7 +252,7 @@ describe('Resumen de cobertura y filtro por pagador (e2e, DX-153)', () => {
       const res = await as(
         api()
           .get('/api/v1/patients')
-          .query({ payerId: sanitas, query: 'fut', pageSize: 1 }),
+          .query({ payerId: sanavida, query: 'fut', pageSize: 1 }),
         reception,
       ).expect(200);
       expect(ids(res.body)).toEqual([patients.futura]);

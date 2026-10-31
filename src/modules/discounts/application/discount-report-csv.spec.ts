@@ -203,7 +203,7 @@ describe('CSV del informe de descuentos (DX-204)', () => {
       reasonNote: null,
       itemDiscount: 0,
       discount: 0,
-      agreementName: 'Sura',
+      agreementName: 'Surco',
       basePrice: 100,
       agreementReduction: 10,
       agreementAssignedByName: null,

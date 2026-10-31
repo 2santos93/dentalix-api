@@ -15,7 +15,7 @@ function percentAgreement(
 ): PricingAgreement {
   return {
     id: 'agr-1',
-    name: 'Sura EPS',
+    name: 'Surco Salud',
     kind: AgreementKind.PERCENT_DISCOUNT,
     percent: 15,
     percentByCategory: null,
@@ -94,7 +94,7 @@ describe('resolveItemPrice (DX-105 §3)', () => {
       price: 85000,
       source: PriceSource.AGREEMENT_PERCENT,
       agreementId: 'agr-1',
-      agreementName: 'Sura EPS',
+      agreementName: 'Surco Salud',
       allowDiscount: true,
     });
   });

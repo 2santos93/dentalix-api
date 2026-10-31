@@ -48,7 +48,7 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
   const payer = await raw.payer.create({
     data: {
       tenantId: tenant.id,
-      name: 'Sanitas',
+      name: 'Sanavida',
       type: 'EPS_CO',
     },
   });
@@ -277,14 +277,17 @@ describe('pagadores y coberturas (int, DX-153)', () => {
         return id;
       };
       const ids = [
-        await mk(a, 'P1', 'Sura EPS', new Date('2026-01-02')),
-        await mk(a, 'P2', '  sura eps ', new Date('2026-01-01')),
+        await mk(a, 'P1', 'Surco Salud', new Date('2026-01-02')),
+        await mk(a, 'P2', '  surco salud ', new Date('2026-01-01')),
         await mk(a, 'P3', '   ', new Date('2026-01-03')),
         await mk(a, 'P4', null, new Date('2026-01-04')),
         await mk(a, 'P5', 'Colsanitas', new Date('2026-01-05'), true),
         await mk(a, 'P6', longText, new Date('2026-01-06')),
       ];
-      bf = { a: ids, b: await mk(b, 'PB', 'Sura EPS', new Date('2026-01-01')) };
+      bf = {
+        a: ids,
+        b: await mk(b, 'PB', 'Surco Salud', new Date('2026-01-01')),
+      };
       await runBackfill();
     });
 
@@ -303,9 +306,9 @@ describe('pagadores y coberturas (int, DX-153)', () => {
 
     it('un pagador por texto normalizado, con el texto del paciente más antiguo, tipo OTRO y sin país', async () => {
       const payers = await payersOf(a.tenantId);
-      // El más antiguo con esa clave es P2 («  sura eps »), sin espacios.
+      // El más antiguo con esa clave es P2 («  surco salud »), sin espacios.
       expect(payers.map((p) => p.name).sort()).toEqual(
-        ['Colsanitas', 'X'.repeat(120), 'sura eps'].sort(),
+        ['Colsanitas', 'X'.repeat(120), 'surco salud'].sort(),
       );
       for (const p of payers) {
         expect(p.type).toBe('OTRO');
@@ -333,10 +336,10 @@ describe('pagadores y coberturas (int, DX-153)', () => {
         expect(c.memberNumber).toBeNull();
         expect(c.validFrom).toBeNull();
       }
-      const sura = (await payersOf(a.tenantId)).find((p) =>
-        p.name.toLowerCase().startsWith('sura'),
+      const surco = (await payersOf(a.tenantId)).find((p) =>
+        p.name.toLowerCase().startsWith('surco'),
       );
-      const bySura = cov.filter((c) => c.payerId === sura?.id);
+      const bySura = cov.filter((c) => c.payerId === surco?.id);
       expect(bySura.map((c) => c.patientId).sort()).toEqual(
         [bf.a[0], bf.a[1]].sort(),
       );
@@ -346,7 +349,7 @@ describe('pagadores y coberturas (int, DX-153)', () => {
       const pa = await payersOf(a.tenantId);
       const pb = await payersOf(b.tenantId);
       expect(pb).toHaveLength(1);
-      expect(pb[0].name).toBe('Sura EPS');
+      expect(pb[0].name).toBe('Surco Salud');
       expect(pa.map((p) => p.id)).not.toContain(pb[0].id);
       const covB = await raw.patientCoverage.findMany({
         where: { tenantId: b.tenantId },
@@ -390,13 +393,13 @@ describe('pagadores y coberturas (int, DX-153)', () => {
         texts.map((t) => [t.firstName, t.insurerEps]),
       );
       expect(byName).toMatchObject({
-        P1: 'Sura EPS',
-        P2: '  sura eps ',
+        P1: 'Surco Salud',
+        P2: '  surco salud ',
         P3: '   ',
         P4: null,
         P5: 'Colsanitas',
         P6: longText,
-        PB: 'Sura EPS',
+        PB: 'Surco Salud',
       });
     });
   });
@@ -452,11 +455,11 @@ describe('pagadores y coberturas (int, DX-153)', () => {
       const existing = await raw.payer.create({
         data: {
           tenantId: a.tenantId,
-          name: 'SURA EPS',
+          name: 'SURCO SALUD',
           type: 'EPS_CO',
         },
       });
-      const patientId = await mkPatient(a, 'R1', 'Sura EPS');
+      const patientId = await mkPatient(a, 'R1', 'Surco Salud');
       await runBackfill();
       const payers = await raw.payer.findMany({
         where: { tenantId: a.tenantId },

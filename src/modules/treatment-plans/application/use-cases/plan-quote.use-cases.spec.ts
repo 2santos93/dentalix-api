@@ -242,8 +242,8 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
             discount: 0,
             basePrice: 1000,
             referencePrice: 850,
-            agreementName: 'Sura EPS −15 %',
-            agreementPayerName: 'Sura EPS',
+            agreementName: 'Surco Salud −15 %',
+            agreementPayerName: 'Surco Salud',
           },
         ],
       }),
@@ -251,8 +251,8 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
     const shown = await get.execute('patient-1', 'plan-1');
     expect(shown.version).toBe(2);
     expect(shown.agreement).toEqual({
-      name: 'Sura EPS −15 %',
-      payerName: 'Sura EPS',
+      name: 'Surco Salud −15 %',
+      payerName: 'Surco Salud',
     });
     expect(shown.items[0].listPrice).toBe(1000);
     expect(shown.totals[0].agreementSaving).toBe(150);
@@ -269,7 +269,7 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
     );
     expect(signed.version).toBe(2);
     expect(signed.acceptance?.integrityOk).toBe(true);
-    expect(signed.agreement?.name).toBe('Sura EPS −15 %');
+    expect(signed.agreement?.name).toBe('Surco Salud −15 %');
     expect(
       (repo.sources.get('plan-1')!.acceptance!.content as { version: number })
         .version,

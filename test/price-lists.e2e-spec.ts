@@ -167,11 +167,11 @@ describe('Listas de precios (e2e, DX-105)', () => {
   describe('alta, roles y validación', () => {
     it('ADMIN crea una lista con nombre normalizado y moneda en mayúsculas', async () => {
       const list = await createList({
-        name: '  Convenio   Sura ',
+        name: '  Convenio   Surco ',
         currency: 'cop',
       });
       expect(list).toMatchObject({
-        name: 'Convenio Sura',
+        name: 'Convenio Surco',
         currency: 'COP',
         locationId: null,
         active: true,
@@ -197,7 +197,7 @@ describe('Listas de precios (e2e, DX-105)', () => {
         ClinicRole.DENTIST,
         ClinicRole.ASSISTANT,
       ]) {
-        expect(await names('', tokens[role])).toContain('Convenio Sura');
+        expect(await names('', tokens[role])).toContain('Convenio Surco');
       }
       await as(api().get('/api/v1/price-lists'), tokens.RECEPTION).expect(403);
     });
@@ -292,7 +292,7 @@ describe('Listas de precios (e2e, DX-105)', () => {
         .send({ active: null })
         .expect(400);
       await admin(api().patch(`/api/v1/price-lists/${norte.id}`))
-        .send({ name: 'convenio SURA' })
+        .send({ name: 'convenio SURCO' })
         .expect(409);
       await as(api().patch(`/api/v1/price-lists/${norte.id}`), tokens.DENTIST)
         .send({ name: 'Nada' })
@@ -578,7 +578,7 @@ describe('Listas de precios (e2e, DX-105)', () => {
       const payer = await raw.payer.create({
         data: {
           tenantId: clinic.tenantId,
-          name: 'Sanitas',
+          name: 'Sanavida',
           type: 'EPS_CO',
         },
       });

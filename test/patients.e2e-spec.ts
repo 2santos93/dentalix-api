@@ -263,7 +263,7 @@ describe('Patients (e2e)', () => {
         .patch(`/api/v1/patients/${patientId}`)
         .set('X-Tenant-Host', hostFor(clinic.subdomain))
         .set('Authorization', `Bearer ${clinic.accessToken}`)
-        .send({ occupation: 'Docente', insurerEps: 'Sura' })
+        .send({ occupation: 'Docente', insurerEps: 'Surco' })
         .expect(200);
       const body = res.body as Record<string, unknown>;
       expect(body.occupation).toBe('Docente');

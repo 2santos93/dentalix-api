@@ -36,7 +36,7 @@ describe('casos de uso de pagadores (DX-153)', () => {
 
   describe('listar', () => {
     it('por defecto solo activos, por nombre; includeInactive suma los desactivados', async () => {
-      repo.seed({ name: 'Sura' });
+      repo.seed({ name: 'Surco' });
       repo.seed({ name: 'Adeslas', type: 'INSURER' });
       repo.seed({ name: 'Colsanitas', active: false });
       const retired = repo.seed({ name: 'Retirada' });
@@ -44,11 +44,11 @@ describe('casos de uso de pagadores (DX-153)', () => {
 
       expect((await list.execute({})).map((p) => p.name)).toEqual([
         'Adeslas',
-        'Sura',
+        'Surco',
       ]);
       expect(
         (await list.execute({ includeInactive: true })).map((p) => p.name),
-      ).toEqual(['Adeslas', 'Colsanitas', 'Sura']);
+      ).toEqual(['Adeslas', 'Colsanitas', 'Surco']);
     });
   });
 
@@ -106,24 +106,24 @@ describe('casos de uso de pagadores (DX-153)', () => {
     });
 
     it('409 propio si el que coincide está desactivado, al crear y al renombrar', async () => {
-      repo.seed({ name: 'Sura', active: false });
+      repo.seed({ name: 'Surco', active: false });
       await expect(
-        create.execute({ name: 'SURA', type: 'OTHER' }),
+        create.execute({ name: 'SURCO', type: 'OTHER' }),
       ).rejects.toThrow(
         new ConflictException(PAYER_DUPLICATE_INACTIVE_MESSAGE),
       );
       const other = repo.seed({ name: 'Allianz' });
-      await expect(update.execute(other.id, { name: 'sura' })).rejects.toThrow(
+      await expect(update.execute(other.id, { name: 'surco' })).rejects.toThrow(
         new ConflictException(PAYER_DUPLICATE_INACTIVE_MESSAGE),
       );
     });
 
     it('permite reutilizar el nombre de un pagador retirado', async () => {
-      const old = repo.seed({ name: 'Sura' });
+      const old = repo.seed({ name: 'Surco' });
       repo.deleted.add(old.id);
       await expect(
-        create.execute({ name: 'sura', type: 'PUBLIC_SYSTEM' }),
-      ).resolves.toMatchObject({ name: 'sura' });
+        create.execute({ name: 'surco', type: 'PUBLIC_SYSTEM' }),
+      ).resolves.toMatchObject({ name: 'surco' });
     });
   });
 
@@ -140,27 +140,27 @@ describe('casos de uso de pagadores (DX-153)', () => {
     });
 
     it('desactiva y renombra', async () => {
-      const p = repo.seed({ name: 'Sura' });
+      const p = repo.seed({ name: 'Surco' });
       const out = await update.execute(p.id, {
-        name: ' Sura  Salud ',
+        name: ' Surco  Salud ',
         active: false,
       });
-      expect(out).toMatchObject({ name: 'Sura Salud', active: false });
+      expect(out).toMatchObject({ name: 'Surco Salud', active: false });
     });
 
     it('no choca consigo mismo al cambiar solo mayúsculas', async () => {
-      const p = repo.seed({ name: 'sura' });
+      const p = repo.seed({ name: 'surco' });
       await expect(
-        update.execute(p.id, { name: 'SURA' }),
+        update.execute(p.id, { name: 'SURCO' }),
       ).resolves.toMatchObject({
-        name: 'SURA',
+        name: 'SURCO',
       });
     });
 
     it('409 al renombrar hacia el nombre de otro', async () => {
-      repo.seed({ name: 'Sura' });
+      repo.seed({ name: 'Surco' });
       const other = repo.seed({ name: 'Allianz' });
-      await expect(update.execute(other.id, { name: 'SURA' })).rejects.toThrow(
+      await expect(update.execute(other.id, { name: 'SURCO' })).rejects.toThrow(
         new ConflictException(PAYER_DUPLICATE_MESSAGE),
       );
       expect(other.name).toBe('Allianz');

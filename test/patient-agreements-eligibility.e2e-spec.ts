@@ -46,7 +46,7 @@ const COVERAGE_CASES: CoverageCase[] = [
 ];
 
 const COVERAGE_REQUIRED =
-  'Este convenio es de «Sura EPS»: elige una cobertura vigente del paciente con ese pagador. Si no la tiene, añádela antes en la ficha.';
+  'Este convenio es de «Surco Salud»: elige una cobertura vigente del paciente con ese pagador. Si no la tiene, añádela antes en la ficha.';
 const COVERAGE_NOT_LIVE =
   'La cobertura elegida no está vigente hoy: revisa sus fechas o elige otra.';
 const COVERAGE_NOT_FOUND = 'Cobertura no encontrada.';
@@ -173,7 +173,7 @@ describe('Elegibilidad para asignar un convenio (e2e, SEC-047)', () => {
       tokens[role] = await loginAs(app, clinic.host, member.email);
     }
     suraPayer = await post(clinic, '/api/v1/payers', {
-      name: 'Sura EPS',
+      name: 'Surco Salud',
       type: 'PUBLIC_SYSTEM',
     });
     cortesiaPayer = await post(clinic, '/api/v1/payers', {
@@ -183,7 +183,7 @@ describe('Elegibilidad para asignar un convenio (e2e, SEC-047)', () => {
     payerOf['pagador externo'] = suraPayer;
     payerOf.interno = cortesiaPayer;
     agreementOf['pagador externo'] = await post(clinic, '/api/v1/agreements', {
-      name: 'Sura EPS 100 %',
+      name: 'Surco Salud 100 %',
       payerId: suraPayer,
       kind: 'PERCENT_DISCOUNT',
       percent: 100,
@@ -198,7 +198,7 @@ describe('Elegibilidad para asignar un convenio (e2e, SEC-047)', () => {
     // La otra clínica tiene su propio pagador con el MISMO nombre y una
     // cobertura viva: su id no vale en esta clínica.
     const foreignPayer = await post(other, '/api/v1/payers', {
-      name: 'Sura EPS',
+      name: 'Surco Salud',
       type: 'PUBLIC_SYSTEM',
     });
     const foreignPatient = await createPatient(other, 'Ajena');
@@ -235,7 +235,7 @@ describe('Elegibilidad para asignar un convenio (e2e, SEC-047)', () => {
     );
     expect(types).toEqual({
       'Cortesía socios 100 %': 'OTHER',
-      'Sura EPS 100 %': 'PUBLIC_SYSTEM',
+      'Surco Salud 100 %': 'PUBLIC_SYSTEM',
     });
   });
 
@@ -365,7 +365,7 @@ describe('Elegibilidad para asignar un convenio (e2e, SEC-047)', () => {
         .send({ agreementId })
         .expect(400);
       expect((res.body as { message: string }).message).toBe(
-        COVERAGE_REQUIRED.replace('Sura EPS', 'Plan Sur antiguo'),
+        COVERAGE_REQUIRED.replace('Surco Salud', 'Plan Sur antiguo'),
       );
     }
   });
@@ -397,7 +397,7 @@ describe('Elegibilidad para asignar un convenio (e2e, SEC-047)', () => {
 
   it('una cobertura retirada ya no vale: 400', async () => {
     const patient = await createPatient(clinic, 'Retirada');
-    // La primera es la principal; la de Sura, la segunda, se puede retirar.
+    // La primera es la principal; la de Surco, la segunda, se puede retirar.
     await coverageFor(patient, cortesiaPayer, 'viva');
     const coverageId = (await coverageFor(patient, suraPayer, 'viva'))!;
     await as(

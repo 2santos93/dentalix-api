@@ -21,7 +21,7 @@ function row(type: PrismaPayer['type']): PrismaPayer {
   return {
     id: 'payer-1',
     tenantId: 'tenant-1',
-    name: 'Sura EPS',
+    name: 'Surco Salud',
     type,
     active: true,
     createdAt: AT,
@@ -68,9 +68,9 @@ describe('PrismaPayerRepository (DX-326, fase 1)', () => {
       expect(payer).not.toHaveProperty('country');
 
       const { repo, writes } = fakeRepository();
-      await repo.create({ name: 'Sura EPS', type, active: true });
+      await repo.create({ name: 'Surco Salud', type, active: true });
       await repo.update('payer-1', { type });
-      await repo.update('payer-1', { name: 'Sura' });
+      await repo.update('payer-1', { name: 'Surco' });
       expect(writes.map((w) => w.type)).toEqual([code, code, undefined]);
       for (const data of writes) expect(data).not.toHaveProperty('country');
     },
@@ -98,7 +98,7 @@ describe('PrismaPayerRepository (DX-326, fase 1)', () => {
     const type: PayerType = 'INSURER';
     const create = {
       tenantId: 'tenant-1',
-      name: 'Sura EPS',
+      name: 'Surco Salud',
       // @ts-expect-error: un tipo genérico sin traducir no se guarda en la fase 1 (R5).
       type,
     } satisfies Prisma.PayerUncheckedCreateInput & {

@@ -134,10 +134,10 @@ describe('Convenios (e2e, DX-105)', () => {
         .expect(201);
     }
 
-    payerId = await createPayer(clinic, 'Sanitas');
+    payerId = await createPayer(clinic, 'Sanavida');
     otherPayerId = await createPayer(other, 'Pagador de la otra');
     const list = await admin(api().post('/api/v1/price-lists'))
-      .send({ name: 'Lista Sanitas', currency: 'COP' })
+      .send({ name: 'Lista Sanavida', currency: 'COP' })
       .expect(201);
     listId = (list.body as IdBody).id;
     const sedes = await admin(api().get('/api/v1/locations')).expect(200);
@@ -152,15 +152,15 @@ describe('Convenios (e2e, DX-105)', () => {
   describe('alta por kind', () => {
     it('descuento porcentual: nombre normalizado, pagador anidado y nace activo', async () => {
       const a = await createAgreement({
-        name: '  Convenio   Sanitas ',
+        name: '  Convenio   Sanavida ',
         kind: 'PERCENT_DISCOUNT',
         percent: 12.5,
         validFrom: '2026-01-01',
         validTo: '2026-12-31',
       });
       expect(a).toMatchObject({
-        name: 'Convenio Sanitas',
-        payer: { id: payerId, name: 'Sanitas' },
+        name: 'Convenio Sanavida',
+        payer: { id: payerId, name: 'Sanavida' },
         kind: 'PERCENT_DISCOUNT',
         percent: 12.5,
         percentByCategory: null,
@@ -184,7 +184,7 @@ describe('Convenios (e2e, DX-105)', () => {
         kind: 'PRICE_LIST',
         percent: null,
         percentByCategory: null,
-        priceList: { id: listId, name: 'Lista Sanitas', currency: 'COP' },
+        priceList: { id: listId, name: 'Lista Sanavida', currency: 'COP' },
         locationId: sedeId,
       });
     });
