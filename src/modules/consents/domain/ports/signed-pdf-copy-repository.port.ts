@@ -78,11 +78,13 @@ export interface SignedPdfCopyRepository {
    * el nuevo. Devuelve su id y la hora del envío.
    */
   issueLink(input: IssueSignedPdfCopyLinkInput): Promise<{ id: string }>;
+  /** null también si el paciente está archivado (DX-461). */
   findLinkByTokenHash(tokenHash: string): Promise<SignedPdfCopyLinkRow | null>;
   /**
-   * Gasta el enlace (UPDATE condicional: sin usar, sin invalidar y sin
-   * caducar) y, en la misma transacción, deja el evento de auditoría EXPORT
-   * de CONSENT con origen PUBLIC_LINK. Dos descargas a la vez: una gana.
+   * Gasta el enlace (UPDATE condicional: sin usar, sin invalidar, sin
+   * caducar y con el paciente vivo) y, en la misma transacción, deja el
+   * evento de auditoría EXPORT de CONSENT con origen PUBLIC_LINK. Dos
+   * descargas a la vez: una gana.
    */
   consumeLink(
     linkId: string,

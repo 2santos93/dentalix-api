@@ -125,7 +125,7 @@ export class PrismaSlotOfferRepository implements SlotOfferRepository {
         const row = await tx.waitlistOffer.findUnique({
           where: { tokenHash },
           include: {
-            patient: { select: { firstName: true } },
+            patient: { select: { firstName: true, deletedAt: true } },
             location: {
               select: {
                 id: true,
@@ -169,6 +169,7 @@ export class PrismaSlotOfferRepository implements SlotOfferRepository {
           appointmentId: row.appointmentId,
           outcome: row.outcome,
           expiresAt: row.expiresAt,
+          patientArchived: row.patient.deletedAt !== null,
           createdAt: row.createdAt,
           slotStart: row.slotStart,
           appointmentEnd: new Date(row.slotStart.getTime() + durationMs),
@@ -238,6 +239,12 @@ export class PrismaSlotOfferRepository implements SlotOfferRepository {
     meta: AuditRequestMeta,
   ): Promise<SlotOfferResolution> {
     const tenantId = offer.tenantId;
+    // DX-461: primero el paciente (el orden de archivar: paciente, luego sus
+    // ofertas). Si archivar está en curso, se espera a su COMMIT y se ve
+    // archivado: nunca una cita SCHEDULED de un paciente archivado.
+    if (!(await this.lockLivePatient(tx, offer.patientId))) {
+      return { state: 'EXPIRED', appointmentId: null };
+    }
     // El candado de las asignaciones del profesional (el de «Agendar aquí»,
     // DX-122): dos aceptaciones del mismo hueco van una detrás de otra.
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(
@@ -331,6 +338,9 @@ export class PrismaSlotOfferRepository implements SlotOfferRepository {
     meta: AuditRequestMeta,
   ): Promise<SlotOfferResolution> {
     return this.prisma.runWithTenant(async (tx) => {
+      if (!(await this.lockLivePatient(tx, offer.patientId))) {
+        return { state: 'EXPIRED', appointmentId: null };
+      }
       const current = await this.lockOffer(tx, offer.id);
       if (!current) return { state: 'UNAVAILABLE', appointmentId: null };
       const state = publicSlotOfferState(current, now, false);
@@ -382,6 +392,18 @@ export class PrismaSlotOfferRepository implements SlotOfferRepository {
       }
       return due.length;
     });
+  }
+
+  /**
+   * DX-461: ¿sigue vivo el paciente? FOR SHARE choca con el FOR UPDATE de
+   * archivar: o se responde antes de que archive, o después viéndolo
+   * archivado. Varias respuestas del mismo paciente no se esperan entre sí.
+   */
+  private async lockLivePatient(tx: Tx, patientId: string): Promise<boolean> {
+    const rows = await tx.$queryRaw<{ deletedAt: Date | null }[]>`
+      SELECT "deletedAt" FROM "patients"
+       WHERE "id" = ${patientId}::uuid FOR SHARE`;
+    return rows.length > 0 && rows[0].deletedAt === null;
   }
 
   /** Relee la oferta con la fila bloqueada (la verdad de la transacción). */

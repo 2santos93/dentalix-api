@@ -2965,6 +2965,8 @@ enum SignedConsentPdfStatus {
 /// DX-443: enlace de un solo uso para que el paciente (o su responsable)
 /// descargue su copia del PDF firmado. Solo el sha256 del token; uno vivo por
 /// consentimiento (índice parcial `signed_consent_pdf_links_live_key`).
+/// DX-461: `signed_consent_pdf_links_patient_live_idx` (parcial, vivos por
+/// paciente) sirve la anulación al archivar al paciente.
 /// Trigger `signed_consent_pdf_links_guard`: solo se marca usado o invalidado,
 /// una vez; sin DELETE. RLS FORCE.
 model SignedConsentPdfLink {

@@ -179,6 +179,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // retención extendida, supresión parcial e historias que salen de
   // retención, solo gestión.
   'DELETE /patients/:id': ADMIN_ONLY,
+  // DX-461: cuántos enlaces públicos vivos anularía archivar.
+  'GET /patients/:id/live-public-links': ADMIN_ONLY,
   'PATCH /patients/:id/retention': ADMIN_ONLY,
   'POST /patients/:id/partial-suppression': ADMIN_ONLY,
   'GET /patients/retention/expiring': ADMIN_ONLY,
