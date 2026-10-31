@@ -78,6 +78,18 @@ export function daysUntilNextWeekday(now: Date): number {
   return offset;
 }
 
+/**
+ * DX-446: desfases (0 = hoy, en Bogotá) de los `count` próximos días
+ * laborables (lun–vie), empezando por hoy si lo es.
+ */
+export function upcomingWeekdayOffsets(now: Date, count: number): number[] {
+  const offsets: number[] = [];
+  for (let offset = 0; offsets.length < count; offset++) {
+    if (![0, 6].includes(bogotaDay(now, offset).weekday)) offsets.push(offset);
+  }
+  return offsets;
+}
+
 export type DemoLocationKey = 'principal' | 'norte';
 
 /** Huecos candidatos por sede: [inicio en minutos de pared, duración]. */

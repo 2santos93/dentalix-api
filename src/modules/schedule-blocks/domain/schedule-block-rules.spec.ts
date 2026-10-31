@@ -28,6 +28,8 @@ function block(overrides: Partial<ScheduleBlock> = {}): ScheduleBlock {
     kind: ScheduleBlockKind.VACATION,
     allowsBooking: false,
     note: null,
+    reservedForTypeIds: [],
+    releaseAtMinute: null,
     createdById: 'u1',
     createdAt: z('2026-10-01T00:00:00.000Z'),
     updatedAt: z('2026-10-01T00:00:00.000Z'),

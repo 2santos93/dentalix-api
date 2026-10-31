@@ -1,5 +1,6 @@
 import type {
   AffectedAppointment,
+  ReservedTypeRef,
   ScheduleBlock,
 } from '../../domain/entities/schedule-block.entity';
 import type {
@@ -8,6 +9,7 @@ import type {
   AffectedAppointmentsPage,
   CreateScheduleBlockRepoInput,
   ListScheduleBlocksParams,
+  ReservedContext,
   ScheduleBlockRepository,
   ScheduleBlockScope,
   UpdateScheduleBlockRepoInput,
@@ -28,6 +30,8 @@ export class InMemoryScheduleBlockRepository implements ScheduleBlockRepository 
   /** Formato y reloj de la sede (lo que mostraba: 24 h, día/mes). */
   locale: string | null = 'es-CO';
   hourCycle: string | null = 'h23';
+  /** DX-446: tipos de cita de ESTA clínica (los de otra no están). */
+  readonly types: ReservedTypeRef[] = [];
   private nextId = 1;
 
   seed(partial: Partial<ScheduleBlock> = {}): ScheduleBlock {
@@ -41,6 +45,8 @@ export class InMemoryScheduleBlockRepository implements ScheduleBlockRepository 
       kind: 'VACATION' as const,
       allowsBooking: false,
       note: null,
+      reservedForTypeIds: [],
+      releaseAtMinute: null,
       createdById: 'u1',
       createdAt: new Date('2026-10-01T00:00:00.000Z'),
       updatedAt: new Date('2026-10-01T00:00:00.000Z'),
@@ -64,6 +70,8 @@ export class InMemoryScheduleBlockRepository implements ScheduleBlockRepository 
       kind: row.kind,
       allowsBooking: row.allowsBooking,
       note: row.note,
+      reservedForTypeIds: [...row.reservedForTypeIds],
+      releaseAtMinute: row.releaseAtMinute,
       createdById: row.createdById,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
@@ -109,6 +117,8 @@ export class InMemoryScheduleBlockRepository implements ScheduleBlockRepository 
         kind: input.kind,
         allowsBooking: input.allowsBooking,
         note: input.note,
+        reservedForTypeIds: input.reservedForTypeIds ?? [],
+        releaseAtMinute: input.releaseAtMinute ?? null,
         createdById: input.createdById,
       }),
     );
@@ -126,6 +136,8 @@ export class InMemoryScheduleBlockRepository implements ScheduleBlockRepository 
       kind: patch.kind,
       allowsBooking: patch.allowsBooking,
       note: patch.note,
+      reservedForTypeIds: patch.reservedForTypeIds,
+      releaseAtMinute: patch.releaseAtMinute,
     };
     Object.assign(
       row,
@@ -144,15 +156,28 @@ export class InMemoryScheduleBlockRepository implements ScheduleBlockRepository 
 
   findAffecting(query: AffectingBlocksQuery): Promise<AffectingBlocks> {
     const locationId = query.locationId ?? this.currentLocationId;
+    const blocks = this.live()
+      .filter((r) => blockAffects(r, query.providerId, locationId))
+      .filter((r) => overlapsBlock(r, query.start, query.end))
+      .map((r) => this.toEntity(r));
+    const wanted = new Set(blocks.flatMap((b) => b.reservedForTypeIds));
     return Promise.resolve({
       locationId,
       timeZone: this.timeZone,
       locale: this.locale,
       hourCycle: this.hourCycle,
-      blocks: this.live()
-        .filter((r) => blockAffects(r, query.providerId, locationId))
-        .filter((r) => overlapsBlock(r, query.start, query.end))
-        .map((r) => this.toEntity(r)),
+      blocks,
+      reservedTypes: this.types.filter((t) => wanted.has(t.id)),
+    });
+  }
+
+  reservedContext(
+    typeIds: readonly string[],
+    locationIds: readonly string[],
+  ): Promise<ReservedContext> {
+    return Promise.resolve({
+      types: this.types.filter((t) => typeIds.includes(t.id)),
+      timeZones: new Map(locationIds.map((id) => [id, this.timeZone])),
     });
   }
 

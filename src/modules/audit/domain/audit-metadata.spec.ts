@@ -1082,3 +1082,31 @@ describe('sanitizeAuditMetadata — descarte de «Pendiente de cerrar» (DX-439)
     }
   });
 });
+
+describe('sanitizeAuditMetadata — hueco reservado saltado (DX-446)', () => {
+  const blockId = '0190f2a4-7b1c-7d2e-8f3a-123456789abc';
+  const overrideId = '0190f2a4-7b1c-7d2e-8f3a-cba987654321';
+
+  it('guarda la fila del override y los bloques', () => {
+    expect(
+      sanitizeAuditMetadata({
+        reservedSlotOverride: { overrideId, blockIds: [blockId] },
+      }),
+    ).toEqual({
+      reservedSlotOverride: { overrideId, blockIds: [blockId] },
+    });
+  });
+
+  it('el motivo (texto libre), sin uuids o con claves extra, no queda nada', () => {
+    for (const reservedSlotOverride of [
+      { overrideId, blockIds: [blockId], reason: 'Dolor agudo' },
+      { overrideId, blockIds: ['no-uuid'] },
+      { overrideId, blockIds: [] },
+      { overrideId: 'no-uuid', blockIds: [blockId] },
+      { blockIds: [blockId] },
+      { overrideId, blockIds: [blockId], patient: 'Ana' },
+    ]) {
+      expect(sanitizeAuditMetadata({ reservedSlotOverride })).toEqual({});
+    }
+  });
+});

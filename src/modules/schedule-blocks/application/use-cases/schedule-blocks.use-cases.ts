@@ -5,9 +5,13 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { ClinicRole, ScheduleBlockKind } from '@prisma/client';
-import type { ScheduleBlock } from '../../domain/entities/schedule-block.entity';
+import type {
+  ScheduleBlock,
+  ScheduleBlockView,
+} from '../../domain/entities/schedule-block.entity';
 import {
   SCHEDULE_BLOCK_REPOSITORY,
   type AffectedAppointmentsPage,
@@ -25,6 +29,18 @@ import {
   scheduleBlockRangeError,
   scheduleBlockScopeError,
 } from '../../domain/schedule-block-rules';
+import {
+  RESERVED_TYPE_INACTIVE_MESSAGE,
+  RESERVED_TYPE_NOT_FOUND_MESSAGE,
+  isReleased,
+  releaseInstant,
+  reservedBlockShapeError,
+} from '../../domain/reserved-slot';
+import {
+  SCHEDULE_BLOCK_CLOCK,
+  systemScheduleBlockClock,
+  type ScheduleBlockClock,
+} from '../schedule-block-clock';
 import {
   LOCATION_REPOSITORY,
   type LocationRepository,
@@ -50,6 +66,10 @@ export interface CreateScheduleBlockInput {
   kind: ScheduleBlockKind;
   allowsBooking?: boolean;
   note?: string;
+  /** DX-446: tipos permitidos en un `RESERVED` (de esta clínica y activos). */
+  reservedForTypeIds?: string[];
+  /** DX-446: «Liberar a partir de» (minutos de pared de la sede, 0..1439). */
+  releaseAtMinute?: number | null;
   /** Hay citas dentro y quien bloquea ya las vio: se crea igualmente. */
   confirmAffected?: boolean;
 }
@@ -61,6 +81,10 @@ export interface UpdateScheduleBlockInput {
   allowsBooking?: boolean;
   /** `null` borra la nota. */
   note?: string | null;
+  /** DX-446: solo en `RESERVED`; pasar a otro tipo los limpia. */
+  reservedForTypeIds?: string[];
+  /** DX-446: `null` quita la liberación. */
+  releaseAtMinute?: number | null;
   confirmAffected?: boolean;
 }
 
@@ -135,6 +159,88 @@ async function assertScopeBelongs(
   }
 }
 
+/** DX-446: lo que un bloque reservado lleva además del rango y el alcance. */
+interface ReservedFields {
+  kind: ScheduleBlockKind;
+  start: Date;
+  end: Date;
+  locationId: string | null;
+  allowsBooking: boolean;
+  reservedForTypeIds: string[];
+  releaseAtMinute: number | null;
+}
+
+/**
+ * DX-446: forma del bloque según su tipo (con la zona de su sede) y, si es
+ * `RESERVED` y sus tipos cambian, que sean de ESTA clínica (404: uno ajeno no
+ * se ve bajo RLS) y estén activos (400). El trigger de la tabla lo repite.
+ */
+async function assertReservedValid(
+  repo: ScheduleBlockRepository,
+  block: ReservedFields,
+  checkTypes: boolean,
+): Promise<void> {
+  if (block.kind !== ScheduleBlockKind.RESERVED) {
+    assertValid(reservedBlockShapeError(block, null));
+    return;
+  }
+  const ctx = await repo.reservedContext(
+    checkTypes ? block.reservedForTypeIds : [],
+    block.locationId !== null ? [block.locationId] : [],
+  );
+  const timeZone =
+    block.locationId !== null
+      ? (ctx.timeZones.get(block.locationId) ?? null)
+      : null;
+  assertValid(reservedBlockShapeError(block, timeZone));
+  if (!checkTypes) return;
+  for (const id of block.reservedForTypeIds) {
+    const type = ctx.types.find((t) => t.id === id);
+    if (!type) throw new NotFoundException(RESERVED_TYPE_NOT_FOUND_MESSAGE);
+    if (!type.active)
+      throw new BadRequestException(RESERVED_TYPE_INACTIVE_MESSAGE);
+  }
+}
+
+/**
+ * DX-446: cada bloque con los tipos reservados que nombra, su instante de
+ * liberación y si ya pasó (reloj del servidor, zona de su sede).
+ */
+async function toViews(
+  repo: ScheduleBlockRepository,
+  blocks: ScheduleBlock[],
+  now: Date,
+): Promise<ScheduleBlockView[]> {
+  const reserved = blocks.filter((b) => b.kind === ScheduleBlockKind.RESERVED);
+  const ctx =
+    reserved.length === 0
+      ? null
+      : await repo.reservedContext(
+          [...new Set(reserved.flatMap((b) => b.reservedForTypeIds))],
+          [
+            ...new Set(
+              reserved
+                .map((b) => b.locationId)
+                .filter((id): id is string => id !== null),
+            ),
+          ],
+        );
+  return blocks.map((block) => {
+    const zone =
+      ctx && block.locationId !== null
+        ? ctx.timeZones.get(block.locationId)
+        : undefined;
+    return {
+      ...block,
+      reservedForTypes: ctx
+        ? ctx.types.filter((t) => block.reservedForTypeIds.includes(t.id))
+        : [],
+      releaseAt: zone ? releaseInstant(block, zone) : null,
+      released: zone ? isReleased(block, zone, now) : false,
+    };
+  });
+}
+
 @Injectable()
 export class ListScheduleBlocksUseCase {
   constructor(
@@ -145,6 +251,9 @@ export class ListScheduleBlocksUseCase {
     @Inject(STAFF_REPOSITORY)
     private readonly staff: StaffRepository,
     private readonly tenantContext: TenantContextService,
+    @Optional()
+    @Inject(SCHEDULE_BLOCK_CLOCK)
+    private readonly clock: ScheduleBlockClock = systemScheduleBlockClock,
   ) {}
 
   async execute(params: {
@@ -152,7 +261,7 @@ export class ListScheduleBlocksUseCase {
     to: Date;
     locationId?: string;
     providerIds?: string[];
-  }): Promise<ScheduleBlock[]> {
+  }): Promise<ScheduleBlockView[]> {
     if (params.to.getTime() <= params.from.getTime()) {
       throw new BadRequestException(
         'El final del rango tiene que ser posterior al inicio',
@@ -189,7 +298,8 @@ export class ListScheduleBlocksUseCase {
         throw new NotFoundException('Profesional no encontrado');
       }
     }
-    return this.repo.list({ ...params, providerIds });
+    const blocks = await this.repo.list({ ...params, providerIds });
+    return toViews(this.repo, blocks, this.clock());
   }
 }
 
@@ -253,6 +363,16 @@ export class CreateScheduleBlockUseCase {
     assertCanWrite(actor, scope.providerId);
     assertLocationWritable(this.tenantContext, scope.locationId);
     await assertScopeBelongs(scope, this.locations, this.staff);
+    const reserved: ReservedFields = {
+      kind: input.kind,
+      start: input.start,
+      end: input.end,
+      locationId: scope.locationId,
+      allowsBooking: input.allowsBooking ?? false,
+      reservedForTypeIds: [...new Set(input.reservedForTypeIds ?? [])],
+      releaseAtMinute: input.releaseAtMinute ?? null,
+    };
+    await assertReservedValid(this.repo, reserved, true);
 
     // Crear un bloqueo NUNCA borra ni mueve citas: si hay alguna dentro, se
     // pide confirmación explícita (la web enseña la lista antes).
@@ -269,8 +389,10 @@ export class CreateScheduleBlockUseCase {
       start: input.start,
       end: input.end,
       kind: input.kind,
-      allowsBooking: input.allowsBooking ?? false,
+      allowsBooking: reserved.allowsBooking,
       note,
+      reservedForTypeIds: reserved.reservedForTypeIds,
+      releaseAtMinute: reserved.releaseAtMinute,
       createdById: actor.userId,
     });
   }
@@ -304,6 +426,34 @@ export class UpdateScheduleBlockUseCase {
     assertValid(scheduleBlockRangeError(start, end));
     const note = cleanNote(input.note);
 
+    // DX-446: pasar a otro tipo limpia los tipos reservados y la liberación.
+    const kind = input.kind ?? current.kind;
+    const isReserved = kind === ScheduleBlockKind.RESERVED;
+    const reservedForTypeIds = isReserved
+      ? [...new Set(input.reservedForTypeIds ?? current.reservedForTypeIds)]
+      : (input.reservedForTypeIds ?? []);
+    const releaseAtMinute = isReserved
+      ? input.releaseAtMinute !== undefined
+        ? input.releaseAtMinute
+        : current.releaseAtMinute
+      : (input.releaseAtMinute ?? null);
+    const typesChanged =
+      reservedForTypeIds.length !== current.reservedForTypeIds.length ||
+      reservedForTypeIds.some((id) => !current.reservedForTypeIds.includes(id));
+    await assertReservedValid(
+      this.repo,
+      {
+        kind,
+        start,
+        end,
+        locationId: current.locationId,
+        allowsBooking: input.allowsBooking ?? current.allowsBooking,
+        reservedForTypeIds,
+        releaseAtMinute,
+      },
+      typesChanged,
+    );
+
     const rangeChanged =
       start.getTime() !== current.start.getTime() ||
       end.getTime() !== current.end.getTime();
@@ -329,6 +479,8 @@ export class UpdateScheduleBlockUseCase {
       kind: input.kind,
       allowsBooking: input.allowsBooking,
       note,
+      reservedForTypeIds,
+      releaseAtMinute,
       updatedById: actor.userId,
     });
   }

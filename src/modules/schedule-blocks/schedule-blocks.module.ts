@@ -14,11 +14,15 @@ import {
 } from './application/use-cases/schedule-blocks.use-cases';
 import { SCHEDULE_BLOCK_REPOSITORY } from './domain/ports/schedule-block-repository.port';
 import { PrismaScheduleBlockRepository } from './infrastructure/repositories/prisma-schedule-block.repository';
+import {
+  SCHEDULE_BLOCK_CLOCK,
+  systemScheduleBlockClock,
+} from './application/schedule-block-clock';
 
 /**
  * Bloqueos de agenda (DX-122). Exporta el repositorio para que la agenda
  * (AppointmentsModule) rechace o avise al agendar o mover encima de un
- * bloqueo, y para buscar huecos.
+ * bloqueo, y para buscar huecos; y el reloj de los huecos reservados (DX-446).
  */
 @Module({
   imports: [JwtModule.register({}), LocationsModule, StaffModule],
@@ -35,7 +39,9 @@ import { PrismaScheduleBlockRepository } from './infrastructure/repositories/pri
       provide: SCHEDULE_BLOCK_REPOSITORY,
       useClass: PrismaScheduleBlockRepository,
     },
+    // DX-446: «¿ya se liberó el hueco reservado?»; los e2e lo fijan.
+    { provide: SCHEDULE_BLOCK_CLOCK, useValue: systemScheduleBlockClock },
   ],
-  exports: [SCHEDULE_BLOCK_REPOSITORY],
+  exports: [SCHEDULE_BLOCK_REPOSITORY, SCHEDULE_BLOCK_CLOCK],
 })
 export class ScheduleBlocksModule {}

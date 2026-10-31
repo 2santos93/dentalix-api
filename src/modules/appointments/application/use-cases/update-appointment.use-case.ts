@@ -5,6 +5,7 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { AppointmentStatus, CancellationReasonCode } from '@prisma/client';
@@ -19,7 +20,15 @@ import {
   AppointmentWriteResult,
   PlanItemReservedElsewhere,
 } from '../../domain/entities/appointment.entity';
-import { checkScheduleBlocks } from '../schedule-block-check';
+import {
+  checkScheduleBlocks,
+  type ReservedOverride,
+} from '../schedule-block-check';
+import {
+  SCHEDULE_BLOCK_CLOCK,
+  systemScheduleBlockClock,
+  type ScheduleBlockClock,
+} from '../../../schedule-blocks/application/schedule-block-clock';
 import { SCHEDULE_BLOCK_REPOSITORY } from '../../../schedule-blocks/domain/ports/schedule-block-repository.port';
 import type { ScheduleBlockRepository } from '../../../schedule-blocks/domain/ports/schedule-block-repository.port';
 import { LOCATION_SCHEDULE_REPOSITORY } from '../../../location-schedule/domain/ports/location-schedule-repository.port';
@@ -110,6 +119,11 @@ export type UpdateAppointmentInput = Omit<
    * la agenda (400 si faltan). En cualquier otro cambio se ignoran.
    */
   cancellation?: CancellationRequest;
+  /**
+   * DX-446: «Mover igualmente» a un hueco reservado (5–300 caracteres). Solo
+   * ADMIN y odontólogo (el rol sale del `auditContext`); si no, 403.
+   */
+  overrideReason?: string;
 };
 
 /**
@@ -200,6 +214,10 @@ export class UpdateAppointmentUseCase {
     // DX-233: mover fuera del horario del profesional destino → aviso, o 409
     // en modo estricto.
     private readonly availability: ProviderAvailabilityService,
+    // DX-446: «¿ya se liberó el hueco reservado?» (inyectable en los tests).
+    @Optional()
+    @Inject(SCHEDULE_BLOCK_CLOCK)
+    private readonly clock: ScheduleBlockClock = systemScheduleBlockClock,
   ) {}
 
   async execute(
@@ -279,7 +297,7 @@ export class UpdateAppointmentUseCase {
     auditContext: AppointmentAuditContext | undefined,
     fromOpening: boolean,
   ): Promise<AppointmentWriteResult> {
-    const { statusReason, cancellation, ...patch } = input;
+    const { statusReason, cancellation, overrideReason, ...patch } = input;
     const existing = await this.repo.findById(id);
     if (!existing) {
       // Same rationale as the Patient use cases: a missing row and a row
@@ -366,6 +384,7 @@ export class UpdateAppointmentUseCase {
     // Reagendar = cambiar la hora O el profesional (DX-121: «Mover a…» y el
     // arrastre entre columnas). Ambos pasan por las mismas reglas.
     let warnings: Warnings = NO_WARNINGS;
+    let reservedOverride: ReservedOverride | null = null;
     const isReschedule =
       patch.start !== undefined ||
       patch.end !== undefined ||
@@ -433,15 +452,24 @@ export class UpdateAppointmentUseCase {
       // DX-122: bloqueos del profesional DESTINO en la sede de la cita. Solo al
       // reagendar, como el horario: cancelar o completar una cita que quedó
       // dentro de un bloqueo creado después tiene que seguir siendo posible.
-      warnings = collectWarnings(
-        await checkScheduleBlocks(this.blocks, {
+      // DX-446: con el tipo de la cita, el reloj y el rol de quien mueve.
+      const blockCheck = await checkScheduleBlocks(
+        this.blocks,
+        {
           providerId: nextProviderId,
           start: nextStart,
           end: nextEnd,
           locationId: existing.locationId,
-        }),
-        offSchedule,
+        },
+        {
+          appointmentTypeId: existing.appointmentTypeId,
+          now: this.clock(),
+          actorRole: auditContext?.actor.role ?? null,
+          overrideReason,
+        },
       );
+      warnings = collectWarnings(blockCheck.warnings, offSchedule);
+      reservedOverride = blockCheck.override;
 
       // Re-check overlap EXCLUDING this appointment's own id — otherwise an
       // unchanged appointment would always "collide" with itself. Contra el
@@ -595,6 +623,7 @@ export class UpdateAppointmentUseCase {
       ...warnings,
       planItemsReservedElsewhere: await this.reservedElsewhere(updated),
       ...(exitResult ? { completedExit: exitResult } : {}),
+      ...(reservedOverride ? { reservedOverride } : {}),
     };
   }
 
