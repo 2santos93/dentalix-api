@@ -11,6 +11,10 @@ import {
   REGIONAL_BOGOTA_FIXTURE,
   registerBody,
 } from './support/location-fixtures';
+import {
+  normalizePolicyContent,
+  policyContentHash,
+} from '../src/modules/data-consents/domain/privacy-policy-content';
 
 // DIRECT_URL (superusuario, sin RLS) solo para sembrar miembros con rol, mirar
 // filas y limpiar — mismo criterio que account-statement.e2e-spec.ts.
@@ -23,7 +27,7 @@ const PASSWORD = 'S3cret!!';
 const USER_AGENT = 'Dentalix-e2e/1.0 (mostrador)';
 
 const POLICY = {
-  policyText: 'Política de tratamiento de datos de la clínica (Ley 1581).',
+  policyText: 'Política de tratamiento de datos de la clínica.',
   generalText: 'Autorizo el tratamiento de mis datos personales.',
   sensitiveHealthText:
     'Autorizo el tratamiento de mis datos sensibles de salud (historia clínica). No está obligado a autorizarlo. Finalidad: la atención odontológica.',
@@ -78,7 +82,7 @@ function stateOf(body: ConsentsBody): Record<string, boolean | null> {
   return Object.fromEntries(body.current.map((c) => [c.scope, c.granted]));
 }
 
-describe('Autorización de datos Ley 1581 — /privacy-policies y /patients/:id/data-consents (e2e)', () => {
+describe('Autorización de datos — /privacy-policies y /patients/:id/data-consents (e2e)', () => {
   let app: INestApplication<App>;
   let clinicA: Session;
   let clinicB: Session;
@@ -230,19 +234,6 @@ describe('Autorización de datos Ley 1581 — /privacy-policies y /patients/:id/
         .post('/privacy-policies', POLICY)
         .expect(403);
       await as(clinicA, dentistA).post('/privacy-policies', POLICY).expect(403);
-    });
-
-    it('rechaza un texto de datos sensibles sin las frases obligatorias (400)', async () => {
-      const res = await as(clinicA)
-        .post('/privacy-policies', {
-          ...POLICY,
-          sensitiveHealthText: 'Autorizo el uso de mis datos de salud.',
-        })
-        .expect(400);
-      expect((res.body as { message: string }).message).toMatch(
-        /no está obligado.*datos sensibles.*finalidad/,
-      );
-      expect(await currentPolicy(clinicA)).toBeNull();
     });
 
     it('ADMIN publica v1; todos los roles la leen', async () => {
@@ -499,14 +490,29 @@ describe('Autorización de datos Ley 1581 — /privacy-policies y /patients/:id/
         .expect(404);
     });
 
-    it('tras publicar v2, una decisión contra v1 da 409; v1 queda intacta', async () => {
+    it('tras publicar v2 sin frases, las autorizaciones previas siguen en v1 y v1 no cambia', async () => {
       const v1 = (await currentPolicy(clinicA)) as PolicyBody;
-      const v2 = (
-        await as(clinicA)
-          .post('/privacy-policies', { ...POLICY, policyText: 'Versión 2.' })
-          .expect(201)
-      ).body as PolicyBody;
+      const { policyText: v1PolicyText, contentHash: v1ContentHash } = v1;
+      const dto = {
+        ...POLICY,
+        policyText: 'Versión 2.',
+        sensitiveHealthText: 'I authorise the processing of my health data.',
+      };
+      const v2 = (await as(clinicA).post('/privacy-policies', dto).expect(201))
+        .body as PolicyBody;
       expect(v2.version).toBe(2);
+      expect(v2.contentHash).toBe(
+        policyContentHash(normalizePolicyContent(dto)),
+      );
+      const { history } = (
+        await as(clinicA)
+          .get(`/patients/${patientId}/data-consents`)
+          .expect(200)
+      ).body as ConsentsBody;
+      expect(history).toHaveLength(2);
+      for (const row of history) {
+        expect(row.policyVersion?.version).toBe(1);
+      }
       await as(clinicA)
         .post(`/patients/${patientId}/data-consents`, {
           policyVersionId: v1.id,
@@ -518,6 +524,8 @@ describe('Autorización de datos Ley 1581 — /privacy-policies y /patients/:id/
       expect(all.current.id).toBe(v2.id);
       expect(all.history.map((p) => p.version)).toEqual([2, 1]);
       expect(all.history[1]).toEqual(v1);
+      expect(all.history[1].policyText).toBe(v1PolicyText);
+      expect(all.history[1].contentHash).toBe(v1ContentHash);
     });
   });
 
