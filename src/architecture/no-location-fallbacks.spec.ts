@@ -673,21 +673,6 @@ const COUNTRY_DOC_ACRONYM = new RegExp(
     ')\\b',
   'i',
 );
-/**
- * Excepción hasta DX-019: la línea fiscal impresa del recibo («Razón social ·
- * NIT/NIF …»), la única línea que lo imprime. Sale de aquí con DX-019.
- */
-const RECEIPT_FISCAL_LINE = {
-  file: join(
-    SRC,
-    'modules',
-    'payments',
-    'application',
-    'receipts',
-    'receipt-email-vars.ts',
-  ),
-  line: (text: string): boolean => /· NIT\/NIF \$\{clinic\.taxId\}`/.test(text),
-};
 /** `DocType` en un import de `@prisma/client` (también de varias líneas). */
 const PRISMA_DOC_TYPE_IMPORT =
   /import\s+(?:type\s+)?\{[^}]*\bDocType\b[^}]*\}\s*from\s*'@prisma\/client'/g;
@@ -830,21 +815,13 @@ describe('tipos de documento genéricos (DX-327)', () => {
   });
 
   it("architecture: no other country's document acronym outside legacy-doc-type.ts", () => {
-    // Excepciones, una por una: `legacy-doc-type.ts` (sinónimos de los
-    // archivos de importación de siempre, R13) y la línea fiscal del recibo
-    // hasta DX-019. Los tests y las migraciones no se recorren (ver arriba).
+    // Única excepción: `legacy-doc-type.ts` (sinónimos de los archivos de
+    // importación de siempre, R13). La línea fiscal del recibo dice
+    // «Id. fiscal» (DX-323) y ya no es excepción. Los tests y las migraciones
+    // no se recorren (ver arriba).
     const files = scanned().filter((file) => file !== LEGACY_DOC_TYPE_FILE);
-    const fiscal = readFileSync(RECEIPT_FISCAL_LINE.file, 'utf8')
-      .split('\n')
-      .filter(RECEIPT_FISCAL_LINE.line);
-    expect(fiscal).toHaveLength(1);
     expect(
-      offending(
-        files,
-        (line) =>
-          COUNTRY_DOC_ACRONYM.test(fold(line)) &&
-          !RECEIPT_FISCAL_LINE.line(line),
-      ),
+      offending(files, (line) => COUNTRY_DOC_ACRONYM.test(fold(line))),
     ).toEqual([]);
   });
 
@@ -1021,13 +998,17 @@ describe('tipos de documento genéricos (DX-327)', () => {
       });
     }
     expect(
-      RECEIPT_FISCAL_LINE.line(
-        '      : `${clinic.legalName} · NIT/NIF ${clinic.taxId}`,',
+      COUNTRY_DOC_ACRONYM.test(
+        fold(
+          '      : `${clinic.legalName} · NI' + 'T/NI' + 'F ${clinic.taxId}`,',
+        ),
       ),
     ).toBe(true);
-    expect(RECEIPT_FISCAL_LINE.line('// NIT/NIF de la cl\u00ednica')).toBe(
-      false,
-    );
+    expect(
+      COUNTRY_DOC_ACRONYM.test(
+        fold('      : `${clinic.legalName} · Id. fiscal ${clinic.taxId}`,'),
+      ),
+    ).toBe(false);
     expect(LONG_DOCUMENT_NAME.test('Tarjeta' + ' de identidad')).toBe(true);
     expect(LONG_DOCUMENT_NAME.test('Extranjer\u00eda')).toBe(true);
     expect(isLegacyKeyLiteral('tarjetade' + 'identidad')).toBe(true);
@@ -1875,14 +1856,12 @@ describe('textos sin leyes ni autoridades (DX-325)', () => {
   const citesLawInCode = (line: string): boolean =>
     !isComment(line) && citesLaw(line);
 
-  it('architecture: no production text or demo seed cites a law or an authority', () => {
+  it('architecture: no production text or seed cites a law or an authority', () => {
     const files = [
       ...tsFiles(SRC).filter(isProduction),
-      ...allFiles(join(PRISMA_DIR, 'demo')).filter((file) =>
-        file.endsWith('.ts'),
-      ),
       join(PRISMA_DIR, 'seed.ts'),
-      join(PRISMA_DIR, 'seed-demo.ts'),
+      // La demo (`prisma/demo/**`, `seed-demo.ts`) la neutraliza otra rama
+      // (chore/demo-neutral); se suma a esta lista cuando llegue a main.
     ];
     expect(files.length).toBeGreaterThan(500);
     expect(files.map((file) => relative(ROOT, file))).toEqual(
@@ -1895,8 +1874,7 @@ describe('textos sin leyes ni autoridades (DX-325)', () => {
           'use-cases',
           'publish-privacy-policy.use-case.ts',
         ),
-        join('prisma', 'demo', 'data.ts'),
-        join('prisma', 'seed-demo.ts'),
+        join('prisma', 'seed.ts'),
       ]),
     );
     expect(offending(files, citesLawInCode)).toEqual([]);
@@ -1946,6 +1924,158 @@ describe('textos sin leyes ni autoridades (DX-325)', () => {
       `// ${'Le' + 'y 1581'}`,
     ]) {
       expect({ line, caught: citesLawInCode(line) }).toEqual({
+        line,
+        caught: false,
+      });
+    }
+  });
+});
+
+/**
+ * DX-323/DX-325: Dentalix es un producto mundial; ningún país es el de por
+ * defecto. Ni el código de producción ni sus comentarios, el esquema o el seed
+ * de referencia nombran Colombia, sus leyes y autoridades, su zona, locale o
+ * prefijo, sus aseguradoras y siglas sanitarias o fiscales, ni sus ciudades.
+ * A diferencia de la guarda de leyes (DX-325), aquí los comentarios también
+ * cuentan: un comentario que justifica el código con una ley de un país es lo
+ * que vuelve a colar la regla. Los literales se arman por partes para que este
+ * fichero no se cite a sí mismo.
+ */
+const COLOMBIA_TERMS: ReadonlyArray<[string, RegExp]> = [
+  ['país', new RegExp('colombi', 'i')],
+  [
+    'zona o ciudad',
+    new RegExp(
+      'bogot[aá]|medell[ií]n|barranquilla|antioquia|cundinamarca',
+      'i',
+    ),
+  ],
+  ['locale', new RegExp('\\bes-' + 'CO\\b')],
+  ['prefijo', new RegExp('(?<![\\w+])\\+' + '57\\b')],
+  [
+    'ley o autoridad',
+    new RegExp(
+      [
+        '\\b15' + '81\\b',
+        '\\b13' + '77\\b',
+        'superinten' + 'dencia',
+        '83' + '9/2017',
+        '19' + '95/1999',
+        '48' + '16/2008',
+        'decreto\\s+7' + '80',
+      ].join('|'),
+      'i',
+    ),
+  ],
+  [
+    'aseguradora',
+    new RegExp(
+      '\\b(?:' +
+        [
+          'fami' + 'sanar',
+          'sani' + 'tas',
+          'nueva ' + 'eps',
+          'su' + 'ra',
+          'compen' + 'sar',
+          'coo' + 'meva',
+          'salud ' + 'total',
+        ].join('|') +
+        ')\\b',
+      'i',
+    ),
+  ],
+  [
+    'sigla nacional',
+    new RegExp(
+      '\\b(?:' +
+        [
+          'EP' + 'S',
+          'RI' + 'PS',
+          'CU' + 'PS',
+          'RE' + 'PS',
+          'DI' + 'AN',
+          'NI' + 'T',
+        ].join('|') +
+        ')\\b',
+    ),
+  ],
+  ['figura legal de un país', new RegExp('acudi' + 'ente', 'i')],
+  [
+    'valor por defecto',
+    new RegExp('@default\\("(?:CO' + 'P|America/' + 'Bogota|es-' + 'CO)"\\)'),
+  ],
+];
+
+function colombiaHit(line: string): string | null {
+  const hit = COLOMBIA_TERMS.find(([, pattern]) => pattern.test(line));
+  return hit ? hit[0] : null;
+}
+
+describe('sin Colombia (DX-323, DX-325)', () => {
+  it('architecture: no production line, comment, schema or reference seed is Colombian', () => {
+    const files = [
+      ...tsFiles(SRC).filter(
+        (file) =>
+          isProduction(file) &&
+          // Lista generada de TODAS las zonas IANA: referencia mundial.
+          file !== IANA_ZONE_NAMES_FILE,
+      ),
+      join(PRISMA_DIR, 'schema.prisma'),
+      join(PRISMA_DIR, 'seed.ts'),
+    ];
+    expect(files.length).toBeGreaterThan(500);
+    const hits = files.flatMap((file) =>
+      readFileSync(file, 'utf8')
+        .split('\n')
+        .flatMap((line, i) => {
+          const kind = colombiaHit(line);
+          return kind ? [`${relative(ROOT, file)}:${i + 1} (${kind})`] : [];
+        }),
+    );
+    expect(hits).toEqual([]);
+  });
+
+  it('the Colombia patterns catch each retired form and skip neutral text', () => {
+    for (const line of [
+      `// ${'Colom' + 'bia'} (UTC-5)`,
+      `  @ApiProperty({ example: 'America/${'Bogo' + 'ta'}' })`,
+      ` * 20:00 en ${'Bogo' + 'tá'}`,
+      `    example: '${'es-' + 'CO'}',`,
+      `  phone: '+${'57'} 300 000 0000',`,
+      ` * (${'Ley ' + '1581'} / RGPD)`,
+      ` * (${'Dec. ' + '1377'}, art. 6)`,
+      ` * ${'Res. ' + '839'}/2017`,
+      ` * ${'Res. ' + '1995'}/1999 art. 18`,
+      `  @ApiProperty({ example: 'Convenio ${'Su' + 'ra'} ${'EP' + 'S'}' })`,
+      `'${'Fami' + 'sanar'}'`,
+      `'el código ${'RE' + 'PS'} de la sede'`,
+      `  : \`\${clinic.legalName} · ${'NI' + 'T'}/NIF \${clinic.taxId}\``,
+      `// el ${'acudi' + 'ente'} se gestiona como responsable`,
+      `  timezone String @default("America/${'Bogo' + 'ta'}")`,
+      `  currency String @default("${'CO' + 'P'}")`,
+      `'${'medel' + 'lín'}'`,
+    ]) {
+      expect({ line, caught: colombiaHit(line) !== null }).toEqual({
+        line,
+        caught: true,
+      });
+    }
+    for (const line of [
+      `  @ApiProperty({ example: 'UTC' })`,
+      `    example: 'es',`,
+      `const ZERO = ['COP', 'CLP', 'JPY'];`,
+      `  'nit',`,
+      `  EPS_CO`,
+      `  repsHabilitationCode?: never;`,
+      `  : \`\${clinic.legalName} · Id. fiscal \${clinic.taxId}\``,
+      ` * 20:00 en una sede a UTC−5`,
+      `'Tutor legal'`,
+      `  timezone String @default("UTC")`,
+      `'+00 000 000 0001'`,
+      `'surable'`,
+      `const steps = 3;`,
+    ]) {
+      expect({ line, caught: colombiaHit(line) !== null }).toEqual({
         line,
         caught: false,
       });
