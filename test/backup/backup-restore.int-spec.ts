@@ -129,8 +129,17 @@ describeWithBackupTools(
         const r = backup(cfg.sourceUrl, out);
         expect(r.out).toContain('Copia:');
         expect(r.status).toBe(0);
+        // La contraseña no sale nunca. En la CI es «dentalix», igual que el
+        // prefijo del fichero (dentalix-<bd>): se quitan antes los nombres
+        // públicos de la copia (prefijo y base) y se busca en lo que queda.
         const pass = password(cfg.sourceUrl);
-        if (pass) expect(r.out).not.toContain(pass);
+        const db = decodeURIComponent(new URL(cfg.sourceUrl).pathname.slice(1));
+        const visible = r.out.split(`dentalix-${db}`).join('').split(db).join('');
+        expect(r.out).not.toContain(cfg.sourceUrl);
+        if (pass) {
+          expect(r.out).not.toContain(`:${pass}@`);
+          expect(visible).not.toContain(pass);
+        }
 
         const files = readdirSync(out).sort();
         expect(files).toHaveLength(3);
