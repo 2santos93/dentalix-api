@@ -11,6 +11,7 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import { ReportSeeder } from './support/reports-fixtures';
+import { safeTodayZone } from './support/sede-clock';
 import { TokenService } from '../src/shared/crypto/token.service';
 import {
   addCivilDays,
@@ -28,9 +29,9 @@ import {
 } from '../src/modules/closing-queue/application/closing-queue.use-cases';
 
 /**
- * DX-439 · «Pendiente de cerrar» por HTTP real. Clínica A (Bogotá, UTC−5)
+ * DX-439 · «Pendiente de cerrar» por HTTP real. Clínica A (Bogotá, UTC−5, o la zona de `safeTodayZone` cerca de su medianoche)
  * con la sede principal y la Norte; la Dra. «DENTIST» (sembrada) y el Dr. Dos.
- * Las citas son de AYER en Bogotá (sembradas por `raw`: la API no agenda en
+ * Las citas son de AYER en esa zona (sembradas por `raw`: la API no agenda en
  * el pasado) y una de HOY, que no sale nunca:
  *
  *  - confirmada: CONFIRMED de la Dra. en la principal → sección 1;
@@ -45,7 +46,10 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
-const ZONE = 'America/Bogota';
+// DX-449: la zona de las dos sedes es Bogotá salvo cerca de su medianoche,
+// cuando pasa a la candidata más cerca del mediodía (el «hoy» y el «ayer» de
+// los fixtures no dependen de la hora de la CI).
+const ZONE = safeTodayZone();
 const ROUTE = '/closing-queue';
 
 interface AuditRow {
@@ -103,7 +107,7 @@ describe('«Pendiente de cerrar» (DX-439, e2e)', () => {
   const ids = (section: { items: { appointmentId: string }[] } | null) =>
     (section?.items ?? []).map((i) => i.appointmentId).sort();
 
-  /** Hoy en Bogotá, y un instante de ayer allí a las `hour` locales. */
+  /** Hoy en la zona de las sedes, y un instante de ayer allí a las `hour` locales. */
   const today = () => civilDateIn(new Date(), ZONE);
   const yesterdayAt = (hour: number) =>
     new Date(
@@ -145,6 +149,10 @@ describe('«Pendiente de cerrar» (DX-439, e2e)', () => {
     ).id;
     const seed = new ReportSeeder(raw, a.tenantId);
     norte = await seed.location('Sede Norte');
+    await raw.location.updateMany({
+      where: { tenantId: a.tenantId },
+      data: { timeZone: ZONE },
+    });
     patient = await seed.patient('Cierre');
     tokens.ADMIN = a.adminToken;
     for (const role of [
