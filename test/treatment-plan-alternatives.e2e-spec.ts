@@ -494,6 +494,36 @@ describe('Alternativas de plan y presupuestos por seguir (e2e, DX-040)', () => {
       expect(ids).not.toContain(foreign);
     });
 
+    it('I1: /pending-follow-up/count da el total de la lista, sin pacientes, sin auditar y con los mismos roles', async () => {
+      const list = (
+        await as(clinicA, tokens.RECEPTION)
+          .get('/treatment-plans/pending-follow-up')
+          .expect(200)
+      ).body as FollowUpPage & { total: number };
+      const before = await raw.auditEvent.count({
+        where: { tenantId: clinicA.tenantId },
+      });
+      const res = await as(clinicA, tokens.RECEPTION)
+        .get('/treatment-plans/pending-follow-up/count')
+        .expect(200);
+      expect(res.body).toEqual({ total: list.total });
+      expect(list.total).toBe(2);
+      const north = await as(clinicA, tokens.RECEPTION)
+        .get('/treatment-plans/pending-follow-up/count')
+        .set('X-Location-Id', northLocationA)
+        .expect(200);
+      expect(north.body).toEqual({ total: 1 });
+      expect(
+        await raw.auditEvent.count({ where: { tenantId: clinicA.tenantId } }),
+      ).toBe(before);
+      await as(clinicA, tokens.DENTIST)
+        .get('/treatment-plans/pending-follow-up/count')
+        .expect(403);
+      await as(clinicA, tokens.ASSISTANT)
+        .get('/treatment-plans/pending-follow-up/count')
+        .expect(403);
+    });
+
     it('filtra por la sede activa (X-Location-Id)', async () => {
       const res = await as(clinicA, tokens.RECEPTION)
         .get('/treatment-plans/pending-follow-up')

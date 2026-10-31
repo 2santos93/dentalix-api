@@ -439,6 +439,32 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
     ]);
   });
 
+  it('I1: /receivables/aging/summary da los mismos totales sin filas de pacientes y sin auditar', async () => {
+    const list = (
+      await get(clinicA, '/receivables/aging', receptionToken)
+        .set('X-Location-Id', sedePrincipal)
+        .expect(200)
+    ).body as AgingPage;
+    const before = await raw.auditEvent.count({
+      where: { tenantId: clinicA.tenantId },
+    });
+    const res = await get(clinicA, '/receivables/aging/summary', receptionToken)
+      .set('X-Location-Id', sedePrincipal)
+      .expect(200);
+    const body = res.body as Record<string, unknown>;
+    expect(Object.keys(body).sort()).toEqual(['asOf', 'scope', 'totals']);
+    expect(body.asOf).toBe(list.asOf);
+    expect(body.scope).toEqual(list.scope);
+    expect(body.totals).toEqual(list.totals);
+    expect(
+      await raw.auditEvent.count({ where: { tenantId: clinicA.tenantId } }),
+    ).toBe(before);
+    // Mismos roles que la lista: el clínico no ve la cartera.
+    for (const token of [dentistToken, assistantToken]) {
+      await get(clinicA, '/receivables/aging/summary', token).expect(403);
+    }
+  });
+
   it('el total de cada paciente coincide con su estado de cuenta', async () => {
     const res = await get(clinicA, '/receivables/aging').expect(200);
     const rows = (res.body as AgingPage).items;

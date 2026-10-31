@@ -2308,8 +2308,18 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       path: () => `/treatment-plans/unscheduled?${field}=${id()}`,
       queryIds: [field],
       status: 200,
-      responseBody: { items: [], nextCursor: null, limit: 25 },
+      responseBody: { items: [], nextCursor: null, limit: 25, total: 0 },
     })),
+    // I1: el contador de Inicio, con el mismo filtro de sede que la lista.
+    {
+      name: 'GET /treatment-plans/unscheduled/count ?locationId de A',
+      verb: 'get',
+      path: () =>
+        `/treatment-plans/unscheduled/count?locationId=${a.locationId}`,
+      queryIds: ['locationId'],
+      status: 200,
+      responseBody: { total: 0 },
+    },
     {
       name: 'GET /patients/:patientId/price-quote ?catalogItemId de A',
       verb: 'get',
@@ -2335,6 +2345,7 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
         ],
         ['/receivables/aging', '', 'providerId'],
         ['/receivables/aging.csv', '', 'providerId'],
+        ['/receivables/aging/summary', '', 'providerId'],
       ] as const
     ).flatMap(([route, range, providerField]): IsolationCase[] => [
       {
@@ -2356,7 +2367,11 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
             // Solo la cabecera del CSV.
             expect(text.trim().split('\r\n')).toHaveLength(1);
           } else {
-            expect(body).toMatchObject({ items: [], total: 0, totals: [] });
+            expect(body).toMatchObject(
+              route.endsWith('/summary')
+                ? { totals: [] }
+                : { items: [], total: 0, totals: [] },
+            );
           }
         },
       },
