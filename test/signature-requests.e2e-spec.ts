@@ -3,6 +3,7 @@ import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createE2eApp } from './support/create-e2e-app';
+import { JobWorker } from '../src/modules/jobs/application/job-worker.service';
 import { CapturingMailer } from './support/capture-mailer';
 import { signaturePng } from './support/png-fixtures';
 import {
@@ -63,6 +64,8 @@ interface SignatureRequestView {
   consentId: string | null;
   signedIpAddress: string | null;
   countersignedAt: string | null;
+  signedPdfStatus: 'PENDING' | 'READY' | 'FAILED' | null;
+  signedPdfDocumentId: string | null;
   emailQueued?: boolean;
 }
 
@@ -475,7 +478,71 @@ describe('Firma a distancia de consentimientos (e2e, DX-243)', () => {
     expect((await listA())[0]).toMatchObject({
       status: 'COMPLETE',
       countersignedAt: expect.any(String) as string,
+      // DX-422: el PDF firmado se genera en segundo plano.
+      signedPdfStatus: 'PENDING',
+      signedPdfDocumentId: null,
     });
+    // Aún no está en error: «Reintentar» no aplica (409).
+    await as(clinicA, reception)
+      .post(`/patients/${patientId}/consents/${consentId}/signed-pdf/retry`)
+      .expect(409);
+
+    // DX-422: la cola lo genera y lo archiva en los documentos del paciente.
+    await app.get(JobWorker).drain();
+    const [withPdf] = await listA();
+    expect(withPdf).toMatchObject({
+      signedPdfStatus: 'READY',
+      signedPdfDocumentId: expect.any(String) as string,
+    });
+    const pdfId = withPdf.signedPdfDocumentId!;
+    const docs = await as(clinicA, reception)
+      .get(`/patients/${patientId}/documents`)
+      .expect(200);
+    expect(docs.body).toContainEqual(
+      expect.objectContaining({
+        id: pdfId,
+        category: 'SIGNED_CONSENT',
+        mimeType: 'application/pdf',
+        uploadedById: dentistId,
+        voidedAt: null,
+      }),
+    );
+    // «Descargar PDF»: URL firmada de descarga, como cualquier documento.
+    const download = await as(clinicA, reception)
+      .get(`/patients/${patientId}/documents/${pdfId}/url/download`)
+      .expect(200);
+    expect(download.body).toMatchObject({ disposition: 'attachment' });
+    const signedUrl = new URL((download.body as { url: string }).url);
+    const file = await request(app.getHttpServer())
+      .get(`${signedUrl.pathname}${signedUrl.search}`)
+      .buffer(true)
+      .parse((res, cb) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (c: Buffer) => chunks.push(c));
+        res.on('end', () => cb(null, Buffer.concat(chunks)));
+      })
+      .expect(200);
+    expect((file.body as Buffer).subarray(0, 5).toString()).toBe('%PDF-');
+    // H2: el PDF firmado no se anula desde Documentos (ni el ADMIN): 409.
+    const voidAttempt = await as(clinicA)
+      .post(`/patients/${patientId}/documents/${pdfId}/void`, {
+        reason: 'Prueba de anulación',
+      })
+      .expect(409);
+    expect((voidAttempt.body as { message: string }).message).toBe(
+      'Este es el PDF firmado de un consentimiento: es la prueba de la firma y no se puede anular.',
+    );
+    expect((await listA())[0]).toMatchObject({ signedPdfStatus: 'READY' });
+    // Ya archivado: reintentar es 409; desde otra clínica, 404 (sin pistas).
+    await as(clinicA, reception)
+      .post(`/patients/${patientId}/consents/${consentId}/signed-pdf/retry`)
+      .expect(409);
+    await as(clinicB)
+      .post(`/patients/${patientId}/consents/${consentId}/signed-pdf/retry`)
+      .expect(404);
+    await as(clinicB)
+      .get(`/patients/${patientId}/documents/${pdfId}/url/download`)
+      .expect(404);
     // El modal ya avisa de que este paciente lo firmó (sin bloquear).
     const after = await as(clinicA, reception)
       .get(`/patients/${patientId}/signature-requests/options`)

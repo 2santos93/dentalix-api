@@ -462,11 +462,18 @@ describe('CountersignPatientConsentUseCase (DX-243)', () => {
       REMOTE,
       'Dra. Laura Gómez',
     );
+    const scheduled: string[] = [];
     const countersign = new CountersignPatientConsentUseCase(
       ctx.consents,
       () => NOW,
+      {
+        schedule: (_tx, consentId) => {
+          scheduled.push(consentId);
+          return Promise.resolve();
+        },
+      },
     );
-    return { ...ctx, consent, countersign };
+    return { ...ctx, consent, countersign, scheduled };
   }
 
   it('el profesional que lo envió firma en la app: queda completo, con su hash encadenado e íntegro', async () => {
@@ -497,6 +504,8 @@ describe('CountersignPatientConsentUseCase (DX-243)', () => {
     const doc = await ctx.get.execute('p1', 'pc-remote');
     expect(doc.integrityOk).toBe(true);
     expect(doc.professionalSignature).toBe(PNG_B);
+    // DX-422: completo ⇒ se encola (en la misma transacción) el PDF firmado.
+    expect(ctx.scheduled).toEqual(['pc-remote']);
   });
 
   it('el detalle detecta una firma del paciente alterada a distancia', async () => {
@@ -533,9 +542,12 @@ describe('CountersignPatientConsentUseCase (DX-243)', () => {
         META,
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
+    expect(ctx.scheduled).toEqual([]);
     await ctx.countersign.execute('p1', 'pc-remote', input, META);
     await expect(
       ctx.countersign.execute('p1', 'pc-remote', input, META),
     ).rejects.toBeInstanceOf(ConflictException);
+    // El segundo intento (409) no encola otro PDF.
+    expect(ctx.scheduled).toEqual(['pc-remote']);
   });
 });

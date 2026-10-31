@@ -121,6 +121,8 @@ model Tenant {
   // DX-243: solicitudes de firma a distancia y firmas del profesional.
   signatureRequests                       SignatureRequest[]
   consentCountersignatures                PatientConsentCountersignature[]
+  // DX-422: estado del PDF firmado de cada consentimiento a distancia.
+  signedConsentPdfs                       SignedConsentPdf[]
   // DX-151: documentos de los pacientes.
   patientDocuments                        PatientDocument[]
   // DX-233: horario de cada profesional por sede y sus excepciones por fecha.
@@ -664,6 +666,8 @@ model Patient {
   // DX-243: solicitudes de firma a distancia y firmas del profesional.
   signatureRequests           SignatureRequest[]
   consentCountersignatures    PatientConsentCountersignature[]
+  // DX-422: PDF firmado de sus consentimientos a distancia.
+  signedConsentPdfs           SignedConsentPdf[]
   country                     Country?                         @relation(fields: [countryCode], references: [code])
   city                        City?                            @relation(fields: [cityId], references: [id])
 
@@ -2742,6 +2746,8 @@ model PatientConsent {
   // DX-243: la solicitud, de la MISMA clínica y del MISMO paciente.
   signatureRequest SignatureRequest?               @relation(fields: [tenantId, signatureRequestId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, map: "patient_consents_signature_request_fkey")
   countersignature PatientConsentCountersignature?
+  // DX-422: el PDF firmado generado en el servidor (solo a distancia).
+  signedPdf        SignedConsentPdf?
 
   // DX-407: destino de la FK compuesta (tenantId, patientId, consentId) de
   // sedation_records: el consentimiento es del MISMO paciente y clínica.
@@ -2874,6 +2880,41 @@ model PatientConsentCountersignature {
   @@index([tenantId, patientId], map: "patient_consent_countersignatures_patient_idx")
   @@index([professionalUserId], map: "patient_consent_countersignatures_professional_idx")
   @@map("patient_consent_countersignatures")
+}
+
+/// DX-422: estado de la generación del PDF firmado de un consentimiento a
+/// distancia ya completo. PENDING (en la cola o reintentando), READY (archivado
+/// en `patient_documents`, inalterable) o FAILED (intentos agotados; la ficha
+/// ofrece reintentar). Trigger `signed_consent_pdfs_guard`: una fila READY no
+/// cambia y nunca cambia de consentimiento; sin DELETE. RLS FORCE.
+model SignedConsentPdf {
+  id            String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId      String                 @db.Uuid
+  patientId     String                 @db.Uuid
+  consentId     String                 @db.Uuid
+  status        SignedConsentPdfStatus @default(PENDING)
+  attempts      Int                    @default(0)
+  /// Código técnico del último error (CHECK), nunca un mensaje.
+  lastErrorCode String?
+  documentId    String?                @db.Uuid
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @default(now())
+
+  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patient  Patient          @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "signed_consent_pdfs_patient_fkey")
+  consent  PatientConsent   @relation(fields: [tenantId, consentId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, map: "signed_consent_pdfs_consent_fkey")
+  document PatientDocument? @relation(fields: [tenantId, documentId], references: [tenantId, id], onDelete: Restrict, map: "signed_consent_pdfs_document_fkey")
+
+  @@unique([tenantId, consentId, patientId], map: "signed_consent_pdfs_consent_key")
+  @@unique([tenantId, documentId], map: "signed_consent_pdfs_document_key")
+  @@index([tenantId, patientId], map: "signed_consent_pdfs_patient_idx")
+  @@map("signed_consent_pdfs")
+}
+
+enum SignedConsentPdfStatus {
+  PENDING
+  READY
+  FAILED
 }
 
 // ---------------------------------------------------------------------------
@@ -3915,6 +3956,8 @@ model PatientDocument {
   location   Location @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict)
   uploadedBy User     @relation("PatientDocumentUploadedBy", fields: [uploadedById], references: [id], onDelete: Restrict)
   voidedBy   User?    @relation("PatientDocumentVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
+  // DX-422: el PDF firmado que archiva (si lo generó el servidor).
+  signedConsentPdf SignedConsentPdf?
 
   @@unique([tenantId, id], map: "patient_documents_tenant_id_key")
   @@index([tenantId, patientId, uploadedAt(sort: Desc)], map: "patient_documents_patient_uploaded_idx")

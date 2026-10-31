@@ -1,4 +1,4 @@
-import type { ConsentSignerType, DocumentType } from '@prisma/client';
+import type { ConsentSignerType, DocumentType, Prisma } from '@prisma/client';
 import {
   PatientConsent,
   PatientConsentSummary,
@@ -117,9 +117,12 @@ export interface PatientConsentRepository {
    * DX-243: la firma del profesional de uno firmado a distancia. Append-only
    * (un INSERT; la base rechaza UPDATE y DELETE y una segunda firma). Lanza
    * `AlreadyCountersignedError` si otra petición la guardó antes.
+   * DX-422: `onCompleted` corre en ESA transacción (queda completo): encola
+   * el PDF firmado como outbox; si la firma hace rollback, no hay trabajo.
    */
   countersign(
     input: CreateCountersignatureRepoInput,
+    onCompleted?: (tx: Prisma.TransactionClient) => Promise<void>,
   ): Promise<PatientConsentSummary>;
 
   /** `null` si no existe, es de otro paciente o de otra clínica. */

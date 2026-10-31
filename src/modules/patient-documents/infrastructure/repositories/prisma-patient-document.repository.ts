@@ -182,8 +182,10 @@ export class PrismaPatientDocumentRepository implements PatientDocumentRepositor
     input: { voidedById: string; reason: string },
   ): Promise<VoidPatientDocumentOutcome> {
     return this.prisma.runWithTenant(async (tx) => {
+      // DX-422: el PDF firmado que archivó el servidor no se anula (en la
+      // misma sentencia: nadie lo enlaza entre medias, su fila es READY).
       const { count } = await tx.patientDocument.updateMany({
-        where: { id, voidedAt: null },
+        where: { id, voidedAt: null, signedConsentPdf: { is: null } },
         data: {
           voidedAt: new Date(),
           voidedById: input.voidedById,
@@ -193,9 +195,17 @@ export class PrismaPatientDocumentRepository implements PatientDocumentRepositor
       if (count === 1) return 'VOIDED';
       const exists = await tx.patientDocument.findFirst({
         where: { id },
-        select: { id: true },
+        select: {
+          id: true,
+          voidedAt: true,
+          signedConsentPdf: { select: { id: true } },
+        },
       });
-      return exists ? 'ALREADY_VOIDED' : 'NOT_FOUND';
+      if (!exists) return 'NOT_FOUND';
+      if (!exists.voidedAt && exists.signedConsentPdf) {
+        return 'SIGNED_CONSENT_PDF';
+      }
+      return 'ALREADY_VOIDED';
     });
   }
 

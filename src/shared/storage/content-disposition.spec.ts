@@ -15,6 +15,17 @@ describe('contentDispositionHeader (DX-151)', () => {
     );
   });
 
+  it('DX-422 (H1): rayas y comillas tipográficas se transliteran en el fallback (no «_»)', () => {
+    expect(
+      contentDispositionHeader({
+        disposition: 'attachment',
+        filename: 'Consentimiento — Exodoncia “38” ‘a’ – fin….pdf',
+      }),
+    ).toBe(
+      `attachment; filename="Consentimiento - Exodoncia '38' 'a' - fin....pdf"; filename*=UTF-8''Consentimiento%20%E2%80%94%20Exodoncia%20%E2%80%9C38%E2%80%9D%20%E2%80%98a%E2%80%99%20%E2%80%93%20fin%E2%80%A6.pdf`,
+    );
+  });
+
   it('sin nombre: solo la disposición', () => {
     expect(contentDispositionHeader({ disposition: 'attachment' })).toBe(
       'attachment',

@@ -34,10 +34,25 @@ export type JobHandler<P extends JobPayload = JobPayload> = (
   context: JobContext,
 ) => Promise<void>;
 
+/** Lo que recibe `onExhausted`: el trabajo ya quedó FAILED sin ejecutarse. */
+export interface ExhaustedContext {
+  jobId: string;
+  tenantId: string | null;
+  attempts: number;
+}
+
 export interface JobDefinition<P extends JobPayload = JobPayload> {
   /** `modulo.trabajo` en minúsculas (p. ej. `auth.purge-expired-tokens`). */
   name: string;
   handle: JobHandler<P>;
+  /**
+   * DX-422: aviso cuando el ÚLTIMO intento se quedó a medias (el worker murió
+   * o perdió el arriendo) y la cola lo cierra FAILED `LeaseExpired` SIN llamar
+   * al handler. Corre bajo el tenant del trabajo; si falla, solo se registra
+   * en el log (el trabajo ya está FAILED). Para que el estado de negocio no se
+   * quede «en curso» para siempre.
+   */
+  onExhausted?: (payload: P, context: ExhaustedContext) => Promise<void>;
   /** Intentos totales antes de quedar FAILED (1..25). Default: JOBS_MAX_ATTEMPTS. */
   maxAttempts?: number;
   /** Base del backoff exponencial. Default: JOBS_RETRY_BASE_MS. */
@@ -132,6 +147,8 @@ export interface ExhaustedJob {
   name: string;
   tenantId: string | null;
   attempts: number;
+  /** DX-422: para `onExhausted` (solo ids, como todo payload). */
+  payload: JobPayload;
 }
 
 /** Latido de un proceso worker (`job_workers`, DX-220). */

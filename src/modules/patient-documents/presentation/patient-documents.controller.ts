@@ -369,7 +369,10 @@ export class PatientDocumentsController {
   @ApiOkResponse({ type: PatientDocumentDto })
   @ApiBadRequestResponse({ description: 'Motivo vacío o demasiado corto' })
   @ApiNotFoundResponse({ description: NOT_FOUND })
-  @ApiConflictResponse({ description: 'El documento ya está anulado.' })
+  @ApiConflictResponse({
+    description:
+      'El documento ya está anulado, o es el PDF firmado de un consentimiento (DX-422), que no se anula.',
+  })
   @ApiForbiddenResponse({
     description:
       'Solo quien subió el documento o un administrador puede anularlo.',

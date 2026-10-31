@@ -57,6 +57,7 @@ const LIST_INCLUDE = {
       id: true,
       ipAddress: true,
       countersignature: { select: { signedAt: true } },
+      signedPdf: { select: { status: true, documentId: true } },
     },
   },
   budgetAcceptance: { select: { id: true, ipAddress: true } },
@@ -119,6 +120,7 @@ function toListRow(row: ListRow): SignatureRequestListRow {
           id: consent.id,
           ipAddress: consent.ipAddress,
           countersignedAt: consent.countersignature?.signedAt ?? null,
+          signedPdf: consent.signedPdf,
         }
       : null,
     budgetAcceptance,

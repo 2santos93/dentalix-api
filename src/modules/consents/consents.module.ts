@@ -1,7 +1,25 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { TokenService } from '../../shared/crypto/token.service';
+import { StorageModule } from '../../shared/storage/storage.module';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
+import { JobsModule } from '../jobs/jobs.module';
+import {
+  GenerateSignedConsentPdf,
+  RetrySignedConsentPdfUseCase,
+  SignedConsentPdfAudit,
+  SignedConsentPdfJobs,
+  SignedConsentPdfQueue,
+} from './application/signed-consent-pdf.service';
+import {
+  SIGNED_CONSENT_PDF_REPOSITORY,
+  SIGNED_CONSENT_PDF_SCHEDULER,
+} from './domain/ports/signed-consent-pdf-repository.port';
+import {
+  PdfkitSignedConsentPdfRenderer,
+  SIGNED_CONSENT_PDF_RENDERER,
+} from './infrastructure/pdf/signed-consent-pdf.renderer';
+import { PrismaSignedConsentPdfRepository } from './infrastructure/repositories/prisma-signed-consent-pdf.repository';
 import { PatientsModule } from '../patients/patients.module';
 import { DocumentTypeNamesModule } from '../document-type-names/document-type-names.module';
 import { ConsentTemplatesController } from './presentation/consent-templates.controller';
@@ -30,10 +48,17 @@ import { PrismaPatientConsentRepository } from './infrastructure/repositories/pr
  * firmados en pantalla, append-only. PatientsModule exporta PATIENT_REPOSITORY
  * para el 404 de "paciente de otra clínica" del listado. DX-243: la firma del
  * profesional de los firmados a distancia, y exporta el render del documento
- * para el módulo de firma a distancia.
+ * para el módulo de firma a distancia. DX-422: genera en la cola el PDF firmado
+ * de uno completo a distancia y lo archiva en los documentos del paciente.
  */
 @Module({
-  imports: [JwtModule.register({}), PatientsModule, DocumentTypeNamesModule],
+  imports: [
+    JwtModule.register({}),
+    PatientsModule,
+    DocumentTypeNamesModule,
+    JobsModule,
+    StorageModule,
+  ],
   controllers: [ConsentTemplatesController, PatientConsentsController],
   providers: [
     ListConsentTemplatesUseCase,
@@ -55,6 +80,24 @@ import { PrismaPatientConsentRepository } from './infrastructure/repositories/pr
     {
       provide: PATIENT_CONSENT_REPOSITORY,
       useClass: PrismaPatientConsentRepository,
+    },
+    // DX-422: PDF firmado generado en el servidor y archivado en la ficha.
+    GenerateSignedConsentPdf,
+    SignedConsentPdfAudit,
+    RetrySignedConsentPdfUseCase,
+    SignedConsentPdfJobs,
+    SignedConsentPdfQueue,
+    {
+      provide: SIGNED_CONSENT_PDF_SCHEDULER,
+      useExisting: SignedConsentPdfQueue,
+    },
+    {
+      provide: SIGNED_CONSENT_PDF_REPOSITORY,
+      useClass: PrismaSignedConsentPdfRepository,
+    },
+    {
+      provide: SIGNED_CONSENT_PDF_RENDERER,
+      useValue: new PdfkitSignedConsentPdfRenderer(),
     },
   ],
   // DX-243: la firma a distancia congela el texto con el mismo render.

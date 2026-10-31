@@ -160,6 +160,8 @@ export function toSignatureRequestSummary(
       consent?.ipAddress ?? row.budgetAcceptance?.ipAddress ?? null,
     budgetAcceptanceId: row.budgetAcceptance?.id ?? null,
     countersignedAt: consent?.countersignedAt ?? null,
+    signedPdfStatus: consent?.signedPdf?.status ?? null,
+    signedPdfDocumentId: consent?.signedPdf?.documentId ?? null,
   };
 }
 

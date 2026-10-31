@@ -324,6 +324,7 @@ export class PrismaPatientConsentRepository implements PatientConsentRepository 
 
   async countersign(
     input: CreateCountersignatureRepoInput,
+    onCompleted?: (tx: Prisma.TransactionClient) => Promise<void>,
   ): Promise<PatientConsentSummary> {
     const tenantId = this.requireTenantId();
     try {
@@ -333,6 +334,16 @@ export class PrismaPatientConsentRepository implements PatientConsentRepository 
         await tx.patientConsentCountersignature.create({
           data: { tenantId, ...input },
         });
+        // DX-422: el estado del PDF firmado nace PENDING con la firma que
+        // lo completa, y su trabajo se encola en la misma transacción.
+        await tx.signedConsentPdf.create({
+          data: {
+            tenantId,
+            patientId: input.patientId,
+            consentId: input.consentId,
+          },
+        });
+        await onCompleted?.(tx);
         return tx.patientConsent.findFirstOrThrow({
           where: { id: input.consentId, patientId: input.patientId },
           select: SUMMARY_SELECT,

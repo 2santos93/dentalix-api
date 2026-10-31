@@ -507,6 +507,9 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       'sedation_records.patientId',
       // DX-243: un consentimiento enviado a firmar a distancia bloquea el deshacer.
       'signature_requests.patientId',
+      // DX-422: el estado del PDF firmado; solo existe con un consentimiento
+      // firmado (que ya bloquea el deshacer): bloquea igual.
+      'signed_consent_pdfs.patientId',
       'tooth_records.patientId',
       'treatment_plans.patientId',
       'waitlist_offers.patientId',

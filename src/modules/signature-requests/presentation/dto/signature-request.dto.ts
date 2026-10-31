@@ -4,6 +4,7 @@ import {
   ConsentSignerType,
   SignatureRequestChannel,
   SignatureRequestType,
+  SignedConsentPdfStatus,
   TreatmentPlanStatus,
 } from '@prisma/client';
 import { IsEnum, IsOptional, IsUUID } from 'class-validator';
@@ -134,6 +135,22 @@ export class SignatureRequestDto {
     description: 'Firma del profesional en la app (Completo)',
   })
   countersignedAt!: Date | null;
+  @ApiProperty({
+    enum: SignedConsentPdfStatus,
+    enumName: 'SignedConsentPdfStatus',
+    nullable: true,
+    description:
+      'DX-422: PDF firmado del consentimiento completo (PENDING generándose o reintentando, READY archivado en los documentos del paciente, FAILED)',
+  })
+  signedPdfStatus!: SignedConsentPdfStatus | null;
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description:
+      'DX-422: documento del paciente con el PDF firmado (READY): se descarga con GET /patients/:patientId/documents/:id/url/download',
+  })
+  signedPdfDocumentId!: string | null;
 }
 
 export class SignatureRequestCreatedDto extends SignatureRequestDto {

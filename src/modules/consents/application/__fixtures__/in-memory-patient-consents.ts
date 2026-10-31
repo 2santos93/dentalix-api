@@ -1,3 +1,4 @@
+import type { Prisma } from '@prisma/client';
 import {
   PatientConsent,
   StoredCountersignature,
@@ -141,12 +142,15 @@ export class InMemoryPatientConsentRepository implements PatientConsentRepositor
     });
   }
 
-  countersign(
+  async countersign(
     input: CreateCountersignatureRepoInput,
+    onCompleted?: (tx: Prisma.TransactionClient) => Promise<void>,
   ): Promise<PatientConsentSummary> {
     if (this.countersignatures.has(input.consentId)) {
-      return Promise.reject(new AlreadyCountersignedError());
+      throw new AlreadyCountersignedError();
     }
+    // Sin BD: el «tx» es de mentira; el callback encola en la cola de prueba.
+    await onCompleted?.({} as Prisma.TransactionClient);
     this.countersignatures.set(input.consentId, {
       professionalUserId: input.professionalUserId,
       professionalName: input.professionalName,
@@ -162,7 +166,7 @@ export class InMemoryPatientConsentRepository implements PatientConsentRepositor
       complete: true,
     };
     this.rows[index] = updated;
-    return Promise.resolve(updated);
+    return updated;
   }
 
   listByPatient(patientId: string): Promise<PatientConsentSummary[]> {

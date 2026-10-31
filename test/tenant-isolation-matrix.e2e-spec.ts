@@ -3299,6 +3299,9 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       'signature-requests.e2e-spec.ts',
     'POST /patients/:patientId/consents/:id/countersign':
       'signature-requests.e2e-spec.ts',
+    // DX-422: reintentar el PDF firmado de A desde la clínica B → 404.
+    'POST /patients/:patientId/consents/:id/signed-pdf/retry':
+      'signature-requests.e2e-spec.ts',
     // DX-375: el ADMIN de otra clínica corrige la tasa manual de A → 404.
     'PUT /exchange/manual-rates/:id':
       'payment-frozen-exchange-rate.e2e-spec.ts',
