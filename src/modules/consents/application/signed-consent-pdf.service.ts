@@ -13,6 +13,7 @@ import {
   type FileStoragePort,
 } from '../../../shared/storage/file-storage.port';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
+import { RecordAuditEventUseCase } from '../../audit/application/record-audit-event.use-case';
 import { JobQueue } from '../../jobs/application/job-queue.service';
 import { JobRegistry } from '../../jobs/application/job-registry';
 import type { JobContext, JobPayload } from '../../jobs/domain/job';
@@ -60,6 +61,37 @@ function isConnectionLostError(error: unknown): boolean {
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
+ * M2: el evento de auditoría de sistema (origen JOB, sin usuario: la BD solo
+ * lo admite para este motivo, audit_events_actor_check). Solo ids. Como todo
+ * evento, `record` nunca lanza.
+ */
+@Injectable()
+export class SignedConsentPdfAudit {
+  constructor(
+    private readonly audit: RecordAuditEventUseCase,
+    private readonly tenantContext: TenantContextService,
+  ) {}
+
+  async integrityMismatch(consentId: string, patientId: string): Promise<void> {
+    const tenantId = this.tenantContext.getTenantId();
+    if (tenantId === undefined) return;
+    await this.audit.record({
+      tenantId,
+      locationId: null,
+      actor: { kind: 'system' },
+      action: 'VIEW',
+      resourceType: 'CONSENT',
+      resourceId: consentId,
+      patient: { kind: 'patient', id: patientId },
+      requestId: null,
+      ip: null,
+      userAgent: null,
+      metadata: { reason: 'SIGNED_PDF_INTEGRITY_MISMATCH', origin: 'JOB' },
+    });
+  }
+}
+
+/**
  * DX-422: genera en el servidor el PDF del consentimiento firmado a distancia
  * (texto congelado, firma de quien firmó y del profesional, página de
  * evidencias) y lo archiva en los documentos del paciente. Corre en la cola
@@ -83,7 +115,26 @@ export class GenerateSignedConsentPdf {
     @Inject(SIGNED_CONSENT_PDF_RENDERER)
     private readonly renderer: SignedConsentPdfRenderer,
     private readonly tenantContext: TenantContextService,
+    @Inject(SignedConsentPdfAudit)
+    private readonly audit: Pick<SignedConsentPdfAudit, 'integrityMismatch'>,
   ) {}
+
+  /**
+   * M1 (revisión): la cola cerró el ÚLTIMO intento sin ejecutarlo (el worker
+   * murió a mitad): sin esto la fila se quedaría PENDING para siempre.
+   */
+  async exhausted(payload: JobPayload): Promise<void> {
+    const { consentId } = payload;
+    if (typeof consentId !== 'string' || !UUID.test(consentId)) return;
+    await this.repo.recordFailure(consentId, {
+      code: 'LEASE_EXPIRED',
+      final: true,
+    });
+    this.logger.warn({
+      event: 'consents.signed_pdf.lease_expired',
+      consentId,
+    });
+  }
 
   async handle(payload: JobPayload, context: JobContext): Promise<void> {
     const { consentId } = payload;
@@ -139,6 +190,17 @@ export class GenerateSignedConsentPdf {
       this.logger.warn(
         `PDF firmado no generado (consentId=${consentId}, intento=${context.attempt}/${context.maxAttempts}, code=${code})`,
       );
+      if (code === 'INTEGRITY_MISMATCH') {
+        // M2 (revisión): un consentimiento alterado por fuera de la app es un
+        // incidente: queda en la auditoría (sistema, solo ids) y en el log de
+        // error con un `event` estable para alertar.
+        this.logger.error({
+          event: 'consents.signed_pdf.integrity_mismatch',
+          consentId,
+          patientId: job.patientId,
+        });
+        await this.audit.integrityMismatch(consentId, job.patientId);
+      }
       if (definitive) return;
       throw error;
     }
@@ -240,6 +302,7 @@ export class SignedConsentPdfJobs implements OnModuleInit {
       name: SIGNED_CONSENT_PDF_JOB,
       maxAttempts: SIGNED_CONSENT_PDF_MAX_ATTEMPTS,
       handle: (payload, context) => this.generate.handle(payload, context),
+      onExhausted: (payload) => this.generate.exhausted(payload),
     });
   }
 }

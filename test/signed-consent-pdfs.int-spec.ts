@@ -11,7 +11,12 @@ import {
 import { PrismaPatientConsentRepository } from '../src/modules/consents/infrastructure/repositories/prisma-patient-consent.repository';
 import { PrismaSignedConsentPdfRepository } from '../src/modules/consents/infrastructure/repositories/prisma-signed-consent-pdf.repository';
 import { PdfkitSignedConsentPdfRenderer } from '../src/modules/consents/infrastructure/pdf/signed-consent-pdf.renderer';
-import { GenerateSignedConsentPdf } from '../src/modules/consents/application/signed-consent-pdf.service';
+import {
+  GenerateSignedConsentPdf,
+  SignedConsentPdfAudit,
+} from '../src/modules/consents/application/signed-consent-pdf.service';
+import { RecordAuditEventUseCase } from '../src/modules/audit/application/record-audit-event.use-case';
+import { PrismaAuditEventRepository } from '../src/modules/audit/infrastructure/prisma-audit-event.repository';
 import {
   computeCountersignatureHash,
   computeRemoteConsentHash,
@@ -227,6 +232,10 @@ describe('PDF firmado en Postgres (DX-422)', () => {
     storage,
     new PdfkitSignedConsentPdfRenderer(),
     tenantContext,
+    new SignedConsentPdfAudit(
+      new RecordAuditEventUseCase(new PrismaAuditEventRepository(prisma)),
+      tenantContext,
+    ),
   );
   const generate = (s: Seeded, consentId: string) =>
     asClinic(s.tenantId, () =>
@@ -427,6 +436,48 @@ describe('PDF firmado en Postgres (DX-422)', () => {
         },
       }),
     ).rejects.toThrow(/signed_consent_pdfs_error_check/);
+  });
+
+  it('M2: un consentimiento alterado no se archiva y deja un evento de sistema (sin actor, solo ids) que la BD admite', async () => {
+    const consentId = await remoteSigned(a);
+    await countersign(a, consentId);
+    // Alterar el texto firmado por fuera de la app (superusuario sin triggers).
+    await owner.$transaction([
+      owner.$executeRaw`SET LOCAL session_replication_role = replica`,
+      owner.$executeRaw`UPDATE "patient_consents" SET "body" = 'Otro texto' WHERE "id" = ${consentId}::uuid`,
+    ]);
+    await generate(a, consentId);
+    expect(
+      await owner.signedConsentPdf.findFirstOrThrow({ where: { consentId } }),
+    ).toMatchObject({
+      status: 'FAILED',
+      lastErrorCode: 'INTEGRITY_MISMATCH',
+      documentId: null,
+    });
+    const events = await owner.auditEvent.findMany({
+      where: {
+        tenantId: a.tenantId,
+        resourceId: consentId,
+        resourceType: 'CONSENT',
+      },
+    });
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      action: 'VIEW',
+      actorUserId: null,
+      actorRole: null,
+      patientId: a.patientId,
+      metadata: { reason: 'SIGNED_PDF_INTEGRITY_MISMATCH', origin: 'JOB' },
+    });
+  });
+
+  it('M1: el aviso de intento agotado deja FAILED con LEASE_EXPIRED', async () => {
+    const consentId = await remoteSigned(a);
+    await countersign(a, consentId);
+    await asClinic(a.tenantId, () => generator.exhausted({ consentId }));
+    expect(
+      await owner.signedConsentPdf.findFirstOrThrow({ where: { consentId } }),
+    ).toMatchObject({ status: 'FAILED', lastErrorCode: 'LEASE_EXPIRED' });
   });
 
   it('RLS ENABLE + FORCE en la tabla nueva', async () => {

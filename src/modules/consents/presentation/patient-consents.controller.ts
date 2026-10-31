@@ -275,6 +275,11 @@ export class PatientConsentsController {
   @Post(':id/signed-pdf/retry')
   @HttpCode(202)
   @ApiAcceptedResponse({ type: SignedConsentPdfRetryDto })
+  // B4: la de la clase («recepción») no aplica aquí: recepción sí reintenta.
+  @ApiForbiddenResponse({
+    description:
+      'Sin un rol de esta clínica (los cuatro roles pueden reintentar)',
+  })
   @ApiNotFoundResponse({ description: 'Consentimiento no encontrado' })
   @ApiConflictResponse({
     description: 'El PDF firmado ya está archivado o se está generando',

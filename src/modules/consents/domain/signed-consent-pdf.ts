@@ -6,6 +6,7 @@ import {
   regionalFormat,
   type RegionalFormat,
 } from '../../../shared/format/regional-format';
+import { transliterateToAscii } from '../../../shared/storage/ascii-filename';
 import { civilDateIn } from '../../../shared/time/civil-day';
 import {
   computeCountersignatureHash,
@@ -97,7 +98,7 @@ const NOT_RECORDED = 'No registrado';
 /**
  * Lo que las fuentes estándar del PDF (WinAnsi) pintan tal cual: ASCII
  * imprimible, Latin-1 y los 27 signos de 0x80–0x9F (€, —, “”, …), más los
- * saltos de línea y el tabulador. El español, el portugués, el francés y el
+ * saltos de línea (\n o \r\n). El español, el portugués, el francés y el
  * resto de lenguas de Europa occidental caben enteros.
  */
 const WIN_ANSI_EXTRA = new Set('€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ'.split(''));
@@ -105,18 +106,19 @@ const WIN_ANSI_EXTRA = new Set('€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”�
 const THIN_SPACES = /[\u2007\u2009\u202f]/g;
 
 function isWinAnsiPrintable(text: string): boolean {
-  for (const ch of text) {
+  const chars = [...text];
+  return chars.every((ch, i) => {
     const code = ch.codePointAt(0) ?? 0;
-    const ok =
+    // B5: el tabulador no avanza igual que en pantalla y un \r suelto no es
+    // un salto de línea: no se pintarían tal cual. \r\n sí (un salto).
+    if (ch === '\r') return chars[i + 1] === '\n';
+    return (
       ch === '\n' ||
-      ch === '\r' ||
-      ch === '\t' ||
       (code >= 0x20 && code <= 0x7e) ||
       (code >= 0xa0 && code <= 0xff) ||
-      WIN_ANSI_EXTRA.has(ch);
-    if (!ok) return false;
-  }
-  return true;
+      WIN_ANSI_EXTRA.has(ch)
+    );
+  });
 }
 
 /**
@@ -284,15 +286,19 @@ function withoutControlChars(text: string): string {
 }
 
 /**
- * «Consentimiento firmado - <título> - <día civil de la sede>.pdf»: el nombre
- * con el que se archiva en los documentos del paciente.
+ * «Consentimiento firmado - <título> - <día civil de la sede>.pdf» en ASCII:
+ * el nombre con el que se archiva en los documentos del paciente.
  */
 export function signedConsentPdfFileName(
   title: string,
   completedAt: Date,
   timeZone: string,
 ): string {
-  const safeTitle = withoutControlChars(title)
+  // H1: en ASCII (Chromium descarta un `filename*` con UTF-8 y lo guarda
+  // como «download»); el título exacto va dentro del PDF.
+  const safeTitle = Array.from(transliterateToAscii(withoutControlChars(title)))
+    .map((ch) => (/^[\x20-\x7e]$/.test(ch) ? ch : '_'))
+    .join('')
     .replace(UNSAFE_NAME_CHARS, ' ')
     .replace(/\s+/g, ' ')
     .trim()

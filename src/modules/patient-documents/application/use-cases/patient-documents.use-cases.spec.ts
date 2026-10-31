@@ -46,6 +46,7 @@ import {
   DOCUMENT_NOT_FOUND_MESSAGE,
   DOWNLOAD_ONLY_MESSAGE,
   DUPLICATE_DOCUMENT_MESSAGE,
+  SIGNED_CONSENT_PDF_VOID_MESSAGE,
   GetPatientDocumentUrlUseCase,
   GetPatientDocumentUseCase,
   ListPatientDocumentsUseCase,
@@ -1043,6 +1044,18 @@ describe('Documentos del paciente (DX-151, casos de uso)', () => {
   });
 
   describe('anular', () => {
+    it('DX-422: el PDF firmado que archivó el servidor no se anula (409 en español) y sigue vigente', async () => {
+      const doc = await uploadPdf();
+      repo.signedConsentPdfIds.add(doc.id);
+      await expect(
+        voidDoc.execute(PATIENT, doc.id, 'No lo quiero', {
+          userId: ADMIN,
+          role: ClinicRole.ADMIN,
+        }),
+      ).rejects.toEqual(new ConflictException(SIGNED_CONSENT_PDF_VOID_MESSAGE));
+      expect((await repo.findById(PATIENT, doc.id))?.voidedAt).toBeNull();
+    });
+
     it('el autor anula con motivo; devuelve quién y por qué', async () => {
       const doc = await uploadPdf();
       const voided = await voidDoc.execute(

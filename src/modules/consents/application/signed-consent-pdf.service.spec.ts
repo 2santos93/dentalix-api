@@ -1,4 +1,4 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import { ConflictException, Logger, NotFoundException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { InMemoryFileStorage } from '../../../shared/storage/__fixtures__/in-memory-file-storage';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
@@ -126,12 +126,29 @@ function setup() {
   const storage = new InMemoryFileStorage();
   const renderer = new FakeRenderer();
   const tenant = new TenantContextService();
-  const service = new GenerateSignedConsentPdf(repo, storage, renderer, tenant);
+  const audit = new FakeAudit();
+  const service = new GenerateSignedConsentPdf(
+    repo,
+    storage,
+    renderer,
+    tenant,
+    audit,
+  );
   const run = (attempt = 1, max = 5) =>
     tenant.run(TENANT, () =>
       service.handle({ consentId: CONSENT }, ctx(attempt, max)),
     );
-  return { repo, storage, renderer, run };
+  const exhausted = () =>
+    tenant.run(TENANT, () => service.exhausted({ consentId: CONSENT }));
+  return { repo, storage, renderer, run, audit, exhausted };
+}
+
+class FakeAudit {
+  mismatches: { consentId: string; patientId: string }[] = [];
+  integrityMismatch(consentId: string, patientId: string): Promise<void> {
+    this.mismatches.push({ consentId, patientId });
+    return Promise.resolve();
+  }
 }
 
 describe('GenerateSignedConsentPdf (DX-422)', () => {
@@ -154,7 +171,7 @@ describe('GenerateSignedConsentPdf (DX-422)', () => {
       sizeBytes: bytes.length,
       sha256: createHash('sha256').update(bytes).digest('hex'),
       originalName:
-        'Consentimiento firmado - Consentimiento — Exodoncia - 2026-10-31.pdf',
+        'Consentimiento firmado - Consentimiento - Exodoncia - 2026-10-31.pdf',
     });
     expect(input.storageKey).toBe(
       `patient-documents/${TENANT}/${input.documentId}.pdf`,
@@ -208,6 +225,46 @@ describe('GenerateSignedConsentPdf (DX-422)', () => {
     ]);
   });
 
+  it('M2: un registro alterado deja un evento de auditoría de sistema (solo ids) y un log de error con event estable', async () => {
+    const { repo, run, audit } = setup();
+    const error = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+    repo.job = {
+      ...repo.job!,
+      source: { ...signedSource(), body: 'Texto cambiado por fuera' },
+    };
+    await run();
+    expect(audit.mismatches).toEqual([
+      { consentId: CONSENT, patientId: PATIENT },
+    ]);
+    expect(error).toHaveBeenCalledWith({
+      event: 'consents.signed_pdf.integrity_mismatch',
+      consentId: CONSENT,
+      patientId: PATIENT,
+    });
+    expect(JSON.stringify(error.mock.calls)).not.toContain('Texto cambiado');
+    error.mockRestore();
+  });
+
+  it('M1: si la cola agota el último intento sin ejecutarlo, queda FAILED con LEASE_EXPIRED', async () => {
+    const { repo, exhausted } = setup();
+    await exhausted();
+    expect(repo.failures).toEqual([{ code: 'LEASE_EXPIRED', final: true }]);
+  });
+
+  it('M1: con un payload inválido el aviso no toca nada', async () => {
+    const { repo } = setup();
+    const tenant = new TenantContextService();
+    const service = new GenerateSignedConsentPdf(
+      repo,
+      new InMemoryFileStorage(),
+      new FakeRenderer(),
+      tenant,
+      new FakeAudit(),
+    );
+    await tenant.run(TENANT, () => service.exhausted({ consentId: 'x' }));
+    expect(repo.failures).toEqual([]);
+  });
+
   it('sin la firma del profesional (no completo) no genera nada', async () => {
     const { repo, run } = setup();
     repo.job = { ...repo.job!, source: null };
@@ -232,6 +289,7 @@ describe('GenerateSignedConsentPdf (DX-422)', () => {
       new InMemoryFileStorage(),
       new FakeRenderer(),
       tenant,
+      new FakeAudit(),
     );
     await expect(
       tenant.run(TENANT, () => service.handle({ consentId: 'x' }, ctx())),

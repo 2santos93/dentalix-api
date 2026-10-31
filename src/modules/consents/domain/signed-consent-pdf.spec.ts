@@ -186,6 +186,17 @@ describe('buildSignedConsentPdfModel (DX-422)', () => {
     ).toThrow(SignedConsentPdfSourceError);
   });
 
+  it('B5: un tabulador o un \\r suelto no se pintan tal cual: UNSUPPORTED_CHARACTERS; \\r\\n sí vale', () => {
+    for (const body of ['Uno\tdos', 'Uno\rdos', 'Fin\r']) {
+      expect(() => buildSignedConsentPdfModel(source({ body }))).toThrow(
+        expect.objectContaining({ code: 'UNSUPPORTED_CHARACTERS' }) as Error,
+      );
+    }
+    expect(
+      buildSignedConsentPdfModel(source({ body: 'Uno\r\ndos' })).body,
+    ).toBe('Uno\r\ndos');
+  });
+
   it('una sede sin zona o sin formato no pinta con otro valor', () => {
     expect(() =>
       buildSignedConsentPdfModel(
@@ -215,6 +226,18 @@ describe('buildSignedConsentPdfModel (DX-422)', () => {
 });
 
 describe('signedConsentPdfFileName', () => {
+  it('H1: el nombre del archivo es ASCII (Chromium descarta un filename* con UTF-8 y lo llama «download»)', () => {
+    const name = signedConsentPdfFileName(
+      'Consentimiento informado — Exodoncia «Clínica» ñ',
+      new Date('2026-11-01T02:30:00.000Z'),
+      'America/Caracas',
+    );
+    expect(name).toBe(
+      "Consentimiento firmado - Consentimiento informado - Exodoncia 'Clinica' n - 2026-10-31.pdf",
+    );
+    expect(name).toMatch(/^[\x20-\x7e]+$/);
+  });
+
   it('nombre con el título saneado y el día civil de la sede', () => {
     expect(
       signedConsentPdfFileName(

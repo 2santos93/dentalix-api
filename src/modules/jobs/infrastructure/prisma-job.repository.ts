@@ -155,7 +155,7 @@ export class PrismaJobRepository implements JobRepository {
           LIMIT ${limit}
           FOR UPDATE SKIP LOCKED
        )
-      RETURNING j."id", j."name", j."tenantId", j."attempts"`;
+      RETURNING j."id", j."name", j."tenantId", j."attempts", j."payload"`;
   }
 
   async complete(id: string, attempts: number): Promise<boolean> {

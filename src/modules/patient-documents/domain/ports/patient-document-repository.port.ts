@@ -49,8 +49,12 @@ export class DuplicateActivePatientDocumentError extends Error {
   }
 }
 
+/**
+ * `SIGNED_CONSENT_PDF`: es el PDF firmado que archivó el servidor (DX-422):
+ * es la prueba de un consentimiento completo y no se anula.
+ */
 export type VoidPatientDocumentOutcome =
-  'VOIDED' | 'NOT_FOUND' | 'ALREADY_VOIDED';
+  'VOIDED' | 'NOT_FOUND' | 'ALREADY_VOIDED' | 'SIGNED_CONSENT_PDF';
 
 /**
  * Todo corre bajo la RLS del tenant del contexto: un paciente o un documento

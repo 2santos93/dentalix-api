@@ -523,6 +523,16 @@ describe('Firma a distancia de consentimientos (e2e, DX-243)', () => {
       })
       .expect(200);
     expect((file.body as Buffer).subarray(0, 5).toString()).toBe('%PDF-');
+    // H2: el PDF firmado no se anula desde Documentos (ni el ADMIN): 409.
+    const voidAttempt = await as(clinicA)
+      .post(`/patients/${patientId}/documents/${pdfId}/void`, {
+        reason: 'Prueba de anulación',
+      })
+      .expect(409);
+    expect((voidAttempt.body as { message: string }).message).toBe(
+      'Este es el PDF firmado de un consentimiento: es la prueba de la firma y no se puede anular.',
+    );
+    expect((await listA())[0]).toMatchObject({ signedPdfStatus: 'READY' });
     // Ya archivado: reintentar es 409; desde otra clínica, 404 (sin pistas).
     await as(clinicA, reception)
       .post(`/patients/${patientId}/consents/${consentId}/signed-pdf/retry`)

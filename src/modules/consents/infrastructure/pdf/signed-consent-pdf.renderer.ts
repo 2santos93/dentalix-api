@@ -79,7 +79,10 @@ export class PdfkitSignedConsentPdfRenderer implements SignedConsentPdfRenderer 
       .fillColor('black')
       .text(model.title);
     doc.moveDown();
-    doc.font('Helvetica').fontSize(11).text(model.body, { lineGap: 2 });
+    doc
+      .font('Helvetica')
+      .fontSize(11)
+      .text(model.body.replace(/\r\n/g, '\n'), { lineGap: 2 });
     doc.moveDown(2);
     this.signature(
       doc,

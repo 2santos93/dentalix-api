@@ -7,6 +7,7 @@ import { JobsModule } from '../jobs/jobs.module';
 import {
   GenerateSignedConsentPdf,
   RetrySignedConsentPdfUseCase,
+  SignedConsentPdfAudit,
   SignedConsentPdfJobs,
   SignedConsentPdfQueue,
 } from './application/signed-consent-pdf.service';
@@ -82,6 +83,7 @@ import { PrismaPatientConsentRepository } from './infrastructure/repositories/pr
     },
     // DX-422: PDF firmado generado en el servidor y archivado en la ficha.
     GenerateSignedConsentPdf,
+    SignedConsentPdfAudit,
     RetrySignedConsentPdfUseCase,
     SignedConsentPdfJobs,
     SignedConsentPdfQueue,
