@@ -2,7 +2,7 @@
  * Dinero en la API (DX-054): los importes son `Decimal(14,2)` y se suman en
  * CENTAVOS enteros para que 0.1 + 0.2 sea 0.3. Es la ÚNICA definición del
  * redondeo de dinero: ningún caso de uso define el suyo (lo vigila la guarda
- * de `money.spec.ts`). Las monedas sin decimales (JPY, COP…) llegan ya
+ * de `money.spec.ts`). Las monedas sin decimales (JPY, KRW…) llegan ya
  * enteras, así que estos redondeos no las alteran; cómo se PINTAN o
  * redondean los presupuestos es `currency-decimals.ts`.
  */

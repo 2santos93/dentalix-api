@@ -222,7 +222,7 @@ export function parseAmountCents(
     // Una celda calculada con fórmula llega con ruido de coma flotante
     // («178500.00000000003»): si la diferencia con 2 decimales es solo eso,
     // se redondea (revisión M6). La tolerancia es relativa (revisión N2):
-    // en COP, `=0,1*3*1000000000` llega como 300000000.00000006. Son 16 ULP
+    // en pesos, `=0,1*3*1000000000` llega como 300000000.00000006. Son 16 ULP
     // del valor (≈ 1e-6 en 3·10⁸), no |x|·1e-12, que en 2·10⁹ ya tragaría un
     // tercer decimal real; ese (≥ 0,001) sigue siendo error.
     if (frac.length > 2) {

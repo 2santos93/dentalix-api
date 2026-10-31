@@ -139,9 +139,9 @@ export interface ArchiveRevocation {
 
 /**
  * Campos NO clínicos que vacía la supresión parcial (DX-039): contacto y notas
- * administrativas. Se conserva la identificación que exige la HC (Res.
- * 1995/1999: nombre, documento, nacimiento, sexo, residencia, estado civil,
- * ocupación, aseguradora, médico tratante y responsable/acudiente). Ver
+ * administrativas. Se conserva la identificación que acompaña a la HC
+ * (nombre, documento, nacimiento, sexo, residencia, estado civil,
+ * ocupación, aseguradora, médico tratante y responsable o tutor). Ver
  * docs/adr/0002-retencion-historia-clinica.md.
  */
 export const PARTIAL_SUPPRESSION_FIELDS = [

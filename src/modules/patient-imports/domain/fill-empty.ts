@@ -17,7 +17,7 @@ export interface FillablePatient {
   emergencyContactName: string | null;
   emergencyContactPhone: string | null;
   notes: string | null;
-  /** Supresión parcial (Ley 1581, DX-039): sus campos no se vuelven a rellenar. */
+  /** Supresión parcial (DX-039): sus campos no se vuelven a rellenar. */
   partiallySuppressedAt?: Date | null;
 }
 
@@ -45,7 +45,7 @@ function current(
  * Qué campos VACÍOS del paciente existente rellena la fila. Nunca pisa un
  * dato: un campo con algo escrito (o un sexo distinto de «sin especificar»)
  * se queda como está aunque el fichero traiga otro valor. Si el paciente
- * pidió la supresión parcial de sus datos (Ley 1581), los campos suprimidos
+ * pidió la supresión parcial de sus datos (DX-039), los campos suprimidos
  * (teléfono, correo, dirección, notas, contacto de emergencia) NO se
  * rellenan aunque estén vacíos: es justo lo que la supresión impide.
  */

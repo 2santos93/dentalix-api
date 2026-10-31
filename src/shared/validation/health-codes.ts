@@ -1,7 +1,8 @@
 /**
  * Códigos de salud (DX-212): CIE-10 de los diagnósticos. Funciones puras,
- * compartidas por los casos de uso de las evoluciones. DX-319: el código REPS
- * de la sede se borró (DX-320 borró el CUPS).
+ * compartidas por los casos de uso de las evoluciones. DX-319: el código de
+ * habilitación nacional de la sede se borró (DX-320 borró el código de
+ * procedimiento nacional del catálogo).
  */
 
 /** CIE-10: letra, 2 dígitos y, opcional, punto y 1–2 caracteres (K02.1). */

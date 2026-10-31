@@ -107,7 +107,7 @@ export interface ReminderCancellationPolicyVars {
   noticeHours: number;
   /** Texto de la clínica para el paciente (puede ir vacío). */
   text: string;
-  /** Importe del cargo ya formateado («50.000 COP»), o null si no hay. */
+  /** Importe del cargo ya formateado («50,00 USD»), o null si no hay. */
   feeLabel: string | null;
 }
 

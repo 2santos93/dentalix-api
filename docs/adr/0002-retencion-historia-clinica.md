@@ -4,10 +4,11 @@ Estado: aceptado · 2026-10-16
 
 ## Contexto
 
-La Res. 839/2017 obliga a conservar la historia clínica (HC) al menos 15 años
-desde la última atención; en casos especiales el plazo se dobla o es
-permanente (víctimas de violaciones de DD. HH./DIH). Un archivado por error, o
-pedido en un reclamo de datos (Ley 1581), puede incumplirla. La HC ya es
+La historia clínica (HC) se conserva un plazo mínimo; por defecto, 15 años
+desde la última atención (un valor prudente que iguala o supera el de muchas
+normativas sanitarias); en casos especiales el plazo se dobla o es permanente
+(p. ej. víctimas de violaciones de DD. HH./DIH). Un archivado por error, o
+pedido en un reclamo de datos del paciente, puede incumplirlo. La HC ya es
 inalterable en la BD (DX-038).
 
 ## Decisión
@@ -49,9 +50,9 @@ inalterable en la BD (DX-038).
   `phone`, `email`, `address`, `notes` (administrativas) y el contacto de
   emergencia (`emergencyContact*`); retira la autorización de MARKETING vigente
   con una fila nueva `granted=false` (historia de consentimientos
-  append-only, DX-037). **Conserva** la identificación que la Res. 1995/1999
-  exige en la HC: nombres, documento, nacimiento, sexo, país/ciudad, estado
-  civil, ocupación, aseguradora, médico tratante y responsable/acudiente
+  append-only, DX-037). **Conserva** la identificación que acompaña a la
+  HC: nombres, documento, nacimiento, sexo, país/ciudad, estado
+  civil, ocupación, aseguradora, médico tratante y responsable o tutor
   (`guardian*`). Marca `partially_suppressed_at`, deja el motivo en
   `patient_retention_actions` y el evento `PARTIAL_SUPPRESSION` en auditoría.
 - **Historias que salen de retención**: `GET /patients/retention/expiring`
@@ -61,8 +62,8 @@ inalterable en la BD (DX-038).
 
 ## Consecuencias
 
-- El borrado de pacientes con HC queda bloqueado durante el plazo legal; el
+- El borrado de pacientes con HC queda bloqueado durante el plazo de conservación; el
   ADMIN tiene una salida documentada (supresión parcial) para los reclamos de
-  Ley 1581.
+  datos del paciente.
 - Un cambio de estado de una cita que vuelve de `COMPLETED` a otro estado no
   retrocede la fecha: la atención ocurrió.

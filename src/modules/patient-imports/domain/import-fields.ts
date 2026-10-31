@@ -11,7 +11,7 @@ import { LEGACY_DOC_NUMBER_HEADER_SYNONYMS } from '../../patients/domain/legacy-
  * reconoce en un Excel de otro software.
  *
  * Fuera a propósito: país y ciudad (catálogo con ids), aseguradora (DX-153),
- * acudiente (DX-203), historia clínica, saldo (DX-262) y citas (DX-263).
+ * tutor (DX-203), historia clínica, saldo (DX-262) y citas (DX-263).
  */
 export const IMPORT_FIELDS = [
   {

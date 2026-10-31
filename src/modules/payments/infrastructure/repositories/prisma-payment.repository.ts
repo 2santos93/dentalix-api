@@ -600,7 +600,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
     const locationId = await this.tenantContext.writeLocationId(tx);
     // DX-097: un pago con solo el día se guarda al mediodía de ESA sede, así
     // cae en su día de caja (medianoche UTC sería la tarde del día anterior
-    // en Bogotá).
+    // en una sede al oeste de UTC).
     const timeZone = (
       await resolveLocationTimeZones(tx, tenantId, [locationId])
     )(locationId);

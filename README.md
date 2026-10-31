@@ -683,7 +683,7 @@ UPDATE … WHERE` no en espera) y el login correcto lo borra después. Si se
   «sin alertas»), `alerts` (códigos de las banderas derivadas en el orden del
   banner de la ficha; `alergiaMarcada` = otra alergia marcada como alerta, sin
   el alérgeno) y `anamnesisReviewedAt`. Nunca alergias, condiciones,
-  medicamentos ni notas (Ley 1581 / RGPD); los leen los cuatro roles que ven
+  medicamentos ni notas (minimización de datos); los leen los cuatro roles que ven
   la agenda. Por lote: una lectura de la vigencia y UNA consulta (versión
   vigente + última confirmación por paciente, con `LATERAL ... LIMIT 1` sobre
   `mhv_tenant_patient_version_key` y `medical_history_reviews_tenant_patient_idx`).
@@ -1222,7 +1222,7 @@ UPDATE`, que no estorba a las FK), así que dos «Traer» del mismo
 La caja (`GET /payments`), el dashboard (`GET /dashboard`) y el estado de
 cuenta (`GET /patients/:id/account-statement`) reciben días civiles
 `YYYY-MM-DD` y los cortan a **medianoche de la zona IANA de cada sede**, no a
-medianoche UTC: un abono de las 20:00 en Bogotá (01:00 UTC del día siguiente)
+medianoche UTC: un abono de las 20:00 en una sede a UTC−5 (01:00 UTC del día siguiente)
 cuenta en su día.
 
 - **Zona de la sede**: la zona IANA de la propia sede (`locations."timeZone"`,
@@ -1880,11 +1880,10 @@ moneda y método, módulo `src/modules/cash-sessions`, tablas `cash_sessions`,
 
 ## Códigos clínicos: CIE-10 (DX-212)
 
-Diagnósticos CIE-10 (estándar internacional) en la evolución y código de
-habilitación REPS de la sede. DX-318 y DX-320 (epic DX-311, producto global)
+Diagnósticos CIE-10 (estándar internacional) en la evolución. DX-318 y DX-320 (epic DX-311, producto global)
 retiraron el indicador «listo para RDA» (`GET /clinical-entries/:id/rda-readiness`
 y su variante por lotes `GET /patients/:id/clinical-entries/rda-readiness`,
-ahora 404 y fuera del contrato OpenAPI) y el código CUPS del catálogo
+ahora 404 y fuera del contrato OpenAPI) y el código de procedimiento nacional del catálogo
 (columna `dental_catalog_items.cupsCode` borrada en
 `20261024173000_dx320_drop_catalog_cups_code`). El catálogo se identifica solo
 por su código interno: no hay «código externo del procedimiento» (decisión
@@ -1911,7 +1910,7 @@ D4). Un cliente antiguo que aún mande `cupsCode` en `POST`/`PATCH
   Sin diagnóstico la evolución se sigue guardando. Una corrección es una adenda
   en la evolución y una evolución nueva con el diagnóstico. RLS FORCE, FK
   compuesta a la evolución (misma clínica y paciente) y RESTRICT al código.
-- El código REPS de la sede se borró en DX-319 (ver «Nº de registro
+- El código de habilitación nacional de la sede se borró en DX-319 (ver «Nº de registro
   sanitario de la sede»).
 - **Sede de la evolución** (DX-232, `clinical_entries."locationId"`): la de la
   cita ligada o, sin cita, la sede activa de la petición (`X-Location-Id`; sin
@@ -1920,8 +1919,8 @@ D4). Un cliente antiguo que aún mande `cupsCode` en `POST`/`PATCH
 
 ## Nº de registro sanitario de la sede (DX-319)
 
-Sustituye al código REPS de la sede (DX-212), que solo servía en Colombia
-(DX-311: Dentalix es global, ninguna regla depende del país).
+Sustituye al código de habilitación nacional de la sede (DX-212), que solo
+servía en un país (DX-311: Dentalix es global, ninguna regla depende del país).
 
 - **`locations.healthRegistrationNumber`**: texto libre opcional, sin formato
   ni validación por país, hasta 64 caracteres (CHECK
@@ -1930,7 +1929,7 @@ Sustituye al código REPS de la sede (DX-212), que solo servía en Colombia
   lo recorta; vacío o `null` lo quita y sin el campo no cambia. Va en la
   respuesta de la sede (`GET /locations`).
 - **`locations.showHealthRegistrationNumber`** (por defecto `false`): si el nº
-  sale en los documentos de la sede. Hoy ningún documento imprimía el REPS, así
+  sale en los documentos de la sede. Hoy ningún documento imprimía el código antiguo, así
   que ninguno lo imprime aún; DX-306 (justificantes) lo usará como campo
   opcional, solo con el booleano activo.
 - **Auditoría**: el `UPDATE` de `LOCATION` lleva, además de los campos
@@ -1939,14 +1938,13 @@ Sustituye al código REPS de la sede (DX-212), que solo servía en Colombia
   metadata: un dato público de la sede, nunca de un paciente; el saneado admite
   1–64 caracteres sin caracteres de control. El handler lo deja en
   `req.auditMetadata`, que el interceptor sanea y no deja pisar sus campos.
-- **`repsHabilitationCode` en el cuerpo → 400** («El código REPS ya no
+- **`repsHabilitationCode` en el cuerpo → 400** («repsHabilitationCode ya no
   existe…»): la ValidationPipe global solo descartaría el campo y una web
   antigua mostraría «Guardado» sin guardar nada.
 - **Migraciones**: `20261024174000_dx319_location_health_registration` añade
   las dos columnas (compatible hacia atrás) y
-  `20261024174100_dx319_drop_location_reps` **copia el REPS existente** al nº
-  de registro sanitario (en Colombia es el registro de la sede; así el ADMIN
-  no lo pierde) solo donde no hay nº y sin activar la impresión, y luego hace
+  `20261024174100_dx319_drop_location_reps` **copia el código antiguo** al nº
+  de registro sanitario (así el ADMIN no lo pierde) solo donde no hay nº y sin activar la impresión, y luego hace
   `DROP COLUMN IF EXISTS` (solo lo referenciaba su CHECK; ni vistas, ni
   funciones, ni índices, ni RLS). Con FORCE quitado durante la copia (owner
   sin BYPASSRLS) e idempotente. El nº nuevo no admite saltos de línea ni
@@ -1965,8 +1963,8 @@ null` da 400.
 
 ## Registro de implantes (DX-191)
 
-Ficha de cada implante, pilar, injerto o membrana colocado (Res. 4816/2008
-art. 31 en CO; Reglamento (UE) 2017/745 art. 18 y RD 192/2023 art. 36 en ES),
+Ficha de cada implante, pilar, injerto o membrana colocado (trazabilidad de
+productos sanitarios implantados, sin citar la norma de ningún país),
 módulo `src/modules/implants`, tabla `patient_implants`.
 
 - **Alta** `POST /patients/:id/implants` (DENTIST y ADMIN; el resto 403 en
@@ -2566,7 +2564,7 @@ LINK`; `audit_events_actor_check` admite actor NULL solo para eso y el
 
 ## Responsable de pago y grupo familiar (DX-203)
 
-Quién paga y quién recibe los avisos de un paciente (el acudiente de un
+Quién paga y quién recibe los avisos de un paciente (el tutor de un
 menor, la madre que paga a sus hijos), como el garante de Open Dental o
 Dentrix. Módulo `patients`, tabla `patient_responsible_parties`; migraciones
 `20261018150000_dx203_patient_responsible_parties` y
@@ -2612,7 +2610,7 @@ Dentrix. Módulo `patients`, tabla `patient_responsible_parties`; migraciones
   individual, sobre la misma lectura) y el total en céntimos. Solo importes y
   nombres; solo lectura (no hay abono familiar). Auditoría VIEW de
   ACCOUNT_STATEMENT con `reason: FAMILY_ACCOUNT_STATEMENT`.
-- **Acudiente antiguo**: `patients.guardianName/guardianDocNumber` quedan
+- **Tutor antiguo**: `patients.guardianName/guardianDocNumber` quedan
   DEPRECADOS y de solo lectura (la API ya no los escribe; un cliente antiguo
   que los mande no da error). La migración copió cada valor a un contacto
   responsable `LEGAL_GUARDIAN` que recibe avisos y no paga, de forma
@@ -3779,7 +3777,7 @@ migraciones `20261020000000_dx222_enums`,
 ## Pagadores y coberturas del paciente (DX-153)
 
 Con qué pagador, plan y afiliado se atiende cada paciente: un catálogo de
-pagadores por clínica (EPS, prepagadas, mutuas, empresas) y hasta 5
+pagadores por clínica (aseguradoras, planes prepago, sistema público, empresas) y hasta 5
 coberturas por paciente, una principal. Sustituye al texto libre
 `patients."insurerEps"`. Módulos `payers` y `patient-coverages`; migraciones
 `20261020210000_dx153_enums`, `20261020210100_dx153_payers_and_coverages` y
@@ -4386,7 +4384,7 @@ WHERE "deletedAt" IS NULL AND "docNumber" IS NOT NULL`: bajo RLS FORCE es
   `patient-imports.expire-validated.daily`; desde entonces `errors.csv` da
   **410**. `filledValues` (lo rellenado) se conserva mientras se pueda
   deshacer.
-- **Ley 1581 / RGPD (DX-037)**: los importados nacen **sin** autorización de
+- **Autorización de datos (DX-037)**: los importados nacen **sin** autorización de
   datos registrada (`data_processing_consents` vacía, `dataConsentAccepted`
   false) y la ficha la marca «Pendiente». La importación no inventa
   consentimientos. `patients.import_batch_id` dice qué lote creó a cada uno.
@@ -4424,7 +4422,7 @@ WHERE "deletedAt" IS NULL AND "docNumber" IS NOT NULL`: bajo RLS FORCE es
   estilos, ≤ 1 M de cadenas compartidas y 4 M de pasos del escáner por
   fichero (400 en español), cediendo el hilo cada 8.192 pasos; CSV
   Windows-1252 decodificado en nativo.
-- **Supresión parcial (Ley 1581)**: «Actualizar solo campos vacíos» nunca
+- **Supresión parcial (DX-039)**: «Actualizar solo campos vacíos» nunca
   rellena los campos suprimidos de un paciente con `partially_suppressed_at`
   (el dry-run lo avisa en la fila).
 - **Probar a mano**: `prisma/demo/pacientes-importacion-ejemplo.csv` (25 filas
@@ -5562,7 +5560,7 @@ dentalix_email_dispatcher`) o repón la política como en
   función de `public` vuelve a usar `CURRENT_TIMESTAMP` o `now()` sin UTC. Aun así, `dentalix_app` (y el owner, y los roles
   NOLOGIN) tiene que arrancar con `TimeZone = UTC`: cualquier hora que la BD
   calcule con la zona de la sesión (`CURRENT_TIMESTAMP` en un `DEFAULT`, SQL
-  a mano, un trigger futuro) se desfasaría (con `America/Bogota`, 5 h). La
+  a mano, un trigger futuro) se desfasaría (con una sesión a UTC−5, 5 h). La
   migración `20261019090000_dx226_server_time_utc_receipt_series` hace
   `ALTER ROLE … SET timezone = 'UTC'` en `dentalix_app`, el dueño de la base,
   `dentalix_owner` y los roles NOLOGIN, y `ALTER DATABASE <base> SET timezone

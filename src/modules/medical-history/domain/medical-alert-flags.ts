@@ -23,7 +23,7 @@ export type MedicalAlertCode = (typeof MEDICAL_ALERT_CODES)[number];
 
 /**
  * Lo único de la anamnesis que llega a la agenda, al panel «En clínica» y a
- * la cabecera de la ficha: banderas mínimas (Ley 1581 / RGPD), no la historia.
+ * la cabecera de la ficha: banderas mínimas (minimización de datos), no la historia.
  */
 export interface MedicalAlertFlags {
   hasCriticalAlert: boolean;

@@ -3,7 +3,7 @@
  *
  * La caja y el dashboard se consultan por días del CALENDARIO de la sede, pero
  * los abonos se guardan como instantes (UTC). Cortar el día a medianoche UTC
- * deja un abono de las 20:00 en Bogotá (01:00 UTC del día siguiente) fuera de
+ * deja un abono de las 20:00 en una sede a UTC−5 (01:00 UTC del día siguiente) fuera de
  * «hoy». Esta es la única traducción día civil ↔ instante del dominio: sin
  * dependencias, con `Intl` (que trae la base de zonas de ICU, DST incluido).
  *

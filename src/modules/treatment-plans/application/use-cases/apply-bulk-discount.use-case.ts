@@ -41,7 +41,7 @@ export interface ApplyBulkDiscountResult {
 /**
  * Acción «Descuento %» sobre varios ítems de un plan (DX-204). A cada ítem se
  * le pone el `percent` % de SU precio, redondeado a la unidad de la moneda del
- * plan (COP sin decimales, EUR a céntimos). El tope del rol se comprueba antes
+ * plan (JPY sin decimales, EUR a céntimos). El tope del rol se comprueba antes
  * (un % por encima: 403 y nada cambia) y otra vez ítem a ítem: si el redondeo
  * lo llevara por encima, baja a la unidad que lo respeta. Por encima del
  * umbral, el motivo es obligatorio (422). Todo o nada, en una transacción.

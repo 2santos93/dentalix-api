@@ -153,7 +153,7 @@ export const DASHBOARD_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 // Gestión de personal (crear/editar rol/desactivar): solo gestión.
 export const STAFF_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 
-// Autorización de datos Ley 1581 (DX-037): la registran quienes reciben al
+// Autorización de tratamiento de datos (DX-037): la registran quienes reciben al
 // paciente — recepción en el mostrador y el personal clínico en el sillón —,
 // y todos necesitan leer el estado vigente y la política vigente.
 export const DATA_CONSENT_ROLES: ClinicRole[] = [
@@ -222,8 +222,8 @@ export const TREATMENT_PLAN_FOLLOW_UP_ROLES: ClinicRole[] = [
 
 // Retención legal de la HC (DX-039): archivar un paciente, cambiar su
 // retención extendida, la supresión parcial y la lista de historias que salen
-// de retención. Solo gestión: quien responde ante la Res. 839/2017 es el
-// titular de la clínica.
+// de retención. Solo gestión: quien responde de la conservación de la
+// historia clínica es el titular de la clínica.
 export const PATIENT_RETENTION_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 
 // Cartera por antigüedad (DX-145): la lista de cobro con importes y teléfonos
