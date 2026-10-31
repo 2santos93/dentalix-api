@@ -77,10 +77,7 @@ export class PrivacyPoliciesController {
       'Crea la versión siguiente y pasa a ser la vigente. No hay borradores ni edición.',
   })
   @ApiCreatedResponse({ type: PrivacyPolicyVersionDto })
-  @ApiBadRequestResponse({
-    description:
-      'Texto vacío o el de datos sensibles no incluye las frases obligatorias.',
-  })
+  @ApiBadRequestResponse({ description: 'Algún texto está vacío.' })
   @ApiForbiddenResponse({ description: 'Solo ADMIN publica la política.' })
   @ApiConflictResponse({
     description: 'Otra versión se publicó a la vez; recarga y reintenta.',
