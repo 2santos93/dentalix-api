@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -21,8 +22,21 @@ import {
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiTags,
+  ApiTooManyRequestsResponse,
 } from '@nestjs/swagger';
 import { ClinicRole } from '@prisma/client';
+import { ConfigService } from '@nestjs/config';
+import {
+  resolvePublicWebProtocol,
+  safeLinkHost,
+} from '../../../shared/tenancy/public-link';
+import type { TenantHostRequest } from '../../../shared/tenancy/tenant-host-request';
+import { CreateLinkOfferUseCase } from '../application/use-cases/link-offers.use-cases';
+import {
+  LINK_OFFER_HOST_MESSAGE,
+  LINK_OFFER_OUTCOME_MESSAGE,
+  isLinkChannel,
+} from '../domain/slot-offer-link';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import {
@@ -41,7 +55,6 @@ import {
   ListOpeningCandidatesUseCase,
   RecordWaitlistOfferOutcomeUseCase,
   type OpeningCandidatesView,
-  type WaitlistOfferView,
 } from '../application/use-cases/opening-candidates.use-cases';
 import type { WaitlistOffer } from '../domain/ports/opening-candidates-repository.port';
 import {
@@ -73,12 +86,18 @@ import {
 @RolesDeniedMessage(OPENING_ASSIGN_FORBIDDEN_MESSAGE)
 @Controller('appointments/openings')
 export class OpeningCandidatesController {
+  private readonly protocol: 'http' | 'https';
+
   constructor(
     private readonly listCandidates: ListOpeningCandidatesUseCase,
     private readonly createOffer: CreateWaitlistOfferUseCase,
+    private readonly createLinkOffer: CreateLinkOfferUseCase,
     private readonly recordOutcome: RecordWaitlistOfferOutcomeUseCase,
     private readonly tenantContext: TenantContextService,
-  ) {}
+    config: ConfigService,
+  ) {
+    this.protocol = resolvePublicWebProtocol((key) => config.get<string>(key));
+  }
 
   /** Detrás del RolesGuard siempre hay sesión de clínica y tenant. */
   private ctx(req: AuditableRequest): AuditRequestContext {
@@ -136,27 +155,47 @@ export class OpeningCandidatesController {
   })
   @ApiConflictResponse({
     description:
-      'Tope de ofertas del día («Ya se le ofrecieron 2 huecos hoy»), por WhatsApp a un paciente con baja, canal «Ninguno» o sin el permiso de WhatsApp (DX-128), o pendiente/cita que ya no está vigente',
+      'Tope de ofertas del día («Ya se le ofrecieron 2 huecos hoy»), por WhatsApp a un paciente con baja, canal «Ninguno» o sin el permiso de WhatsApp (DX-128), o pendiente/cita que ya no está vigente. DX-435: por enlace con menos de 20 minutos para el hueco, o por email sin email o con baja.',
   })
-  offer(
+  @ApiTooManyRequestsResponse({
+    description:
+      'DX-435 `LINK_EMAIL`: topes del outbox por destinatario o clínica (DX-088).',
+  })
+  async offer(
     @Param('locationId', ParseUUIDPipe) locationId: string,
     @Body() dto: CreateWaitlistOfferDto,
-    @Req() req: AuditableRequest,
-  ): Promise<WaitlistOfferView> {
-    return this.createOffer.execute(
-      {
-        locationId,
-        slotStart: new Date(dto.slotStart),
-        slotEnd: new Date(dto.slotEnd),
-        providerId: dto.providerId,
-        patientId: dto.patientId,
-        waitlistEntryId: dto.waitlistEntryId,
-        appointmentId: dto.appointmentId,
-        channel: dto.channel,
-        outcome: dto.outcome,
-      },
-      this.ctx(req),
+    @Req() req: AuditableRequest & TenantHostRequest,
+  ): Promise<CreatedWaitlistOfferDto> {
+    const base = {
+      locationId,
+      slotStart: new Date(dto.slotStart),
+      slotEnd: new Date(dto.slotEnd),
+      providerId: dto.providerId,
+      patientId: dto.patientId,
+      waitlistEntryId: dto.waitlistEntryId,
+      appointmentId: dto.appointmentId,
+    };
+    const ctx = this.ctx(req);
+    const channel = dto.channel;
+    if (isLinkChannel(channel)) {
+      // El enlace se arma con el host de la clínica, validado ENTERO antes
+      // de emitir (ver SAFE_HOST en public-link.ts).
+      const host = safeLinkHost(req.tenantHost?.host);
+      if (!host) throw new BadRequestException(LINK_OFFER_HOST_MESSAGE);
+      if (dto.outcome !== undefined && dto.outcome !== 'PENDING') {
+        throw new BadRequestException(LINK_OFFER_OUTCOME_MESSAGE);
+      }
+      return this.createLinkOffer.execute(
+        { ...base, channel },
+        { protocol: this.protocol, host },
+        ctx,
+      );
+    }
+    const created = await this.createOffer.execute(
+      { ...base, channel, outcome: dto.outcome },
+      ctx,
     );
+    return { ...created, url: null, whatsappPhone: null };
   }
 
   @Patch('offers/:id')

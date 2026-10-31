@@ -23,6 +23,8 @@ export interface CandidatePatient {
   reminderOptOutAt: Date | null;
   /** DX-128: permiso de WhatsApp; sin él no se le ofrece por WhatsApp. */
   whatsappOptInAt: Date | null;
+  /** DX-435: para la oferta con enlace por email. */
+  email: string | null;
 }
 
 export interface EntryCandidateRow extends EntryCandidateSource {
@@ -55,6 +57,8 @@ export interface WaitlistOffer {
   createdById: string;
   outcomeById: string | null;
   outcomeAt: Date | null;
+  /** DX-435: cuándo deja de valer el enlace (solo canales con enlace). */
+  expiresAt: Date | null;
   createdAt: Date;
 }
 
@@ -70,6 +74,9 @@ export interface CreateWaitlistOfferRepoInput {
   outcome: WaitlistOfferOutcome;
   offerDay: string;
   createdById: string;
+  /** DX-435: hash del token y caducidad, solo en los canales con enlace. */
+  tokenHash?: string;
+  expiresAt?: Date;
 }
 
 export interface OfferSummary {
@@ -79,6 +86,18 @@ export interface OfferSummary {
   forSlot: boolean;
   /** La última oferta de ESTE hueco aún sin respuesta (para anotarla). */
   pendingOfferId: string | null;
+  /** DX-435: la última oferta con enlace de ESTE hueco. */
+  linkOffer: { outcome: WaitlistOfferOutcome; expiresAt: Date } | null;
+}
+
+/** DX-435: una oferta con enlace de un hueco, para el estado del panel. */
+export interface SlotLinkOfferRow {
+  patientId: string;
+  patientFirstName: string;
+  patientLastName: string;
+  outcome: WaitlistOfferOutcome;
+  expiresAt: Date;
+  outcomeAt: Date | null;
 }
 
 /** Lo que se comprueba antes de ofrecer: de quién es y si sigue vigente. */
@@ -131,6 +150,13 @@ export interface OpeningCandidatesRepository {
     cap: number,
   ): Promise<{ offer: WaitlistOffer; offersToday: number } | null>;
   findOffer(id: string): Promise<WaitlistOffer | null>;
+  /** DX-435: ofertas con enlace del hueco (mismo profesional, solapadas). */
+  linkOffersForSlot(params: {
+    locationId: string;
+    providerId: string;
+    slotStart: Date;
+    slotEnd: Date;
+  }): Promise<SlotLinkOfferRow[]>;
   /** Anota el resultado SOLO si sigue PENDING; `null` si ya tenía. */
   recordOutcome(
     id: string,

@@ -1440,6 +1440,9 @@ model AppointmentWaitlistEntry {
 enum WaitlistOfferChannel {
   WA_ME
   PHONE
+  // DX-435: oferta con enlace público que el paciente acepta solo.
+  LINK_WA_ME
+  LINK_EMAIL
 }
 
 enum WaitlistOfferOutcome {
@@ -1447,6 +1450,9 @@ enum WaitlistOfferOutcome {
   ACCEPTED
   DECLINED
   NO_ANSWER
+  // DX-435: el enlace caducó sin respuesta, u otro paciente se quedó el hueco.
+  EXPIRED
+  TAKEN_BY_OTHER
 }
 
 model WaitlistOffer {
@@ -1468,6 +1474,11 @@ model WaitlistOffer {
   createdById     String               @db.Uuid
   outcomeById     String?              @db.Uuid
   outcomeAt       DateTime?
+  // DX-435: solo en los canales con enlace (CHECK). sha256 del token de un
+  // solo uso (el texto plano viaja únicamente en el enlace) y cuándo deja de
+  // valer: al empezar el hueco, o antes si se configura.
+  tokenHash       String?              @unique(map: "waitlist_offers_token_hash_key")
+  expiresAt       DateTime?
   createdAt       DateTime             @default(now())
   updatedAt       DateTime             @updatedAt
 
@@ -3323,6 +3334,8 @@ enum EmailTemplate {
   SIGNATURE_CODE            @map("signature-code")
   // DX-415: confirmación de la aceptación del presupuesto a distancia.
   SIGNATURE_BUDGET_ACCEPTED @map("signature-budget-accepted")
+  // DX-435: oferta de un hueco libre con enlace para aceptarlo.
+  SLOT_OFFER                @map("slot-offer")
 }
 
 /// Registro de envíos de email (patrón outbox). NUNCA guarda el destinatario

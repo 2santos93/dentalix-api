@@ -375,6 +375,8 @@ export const AUDIT_ORIGINS = [
   'MESSAGE',
   'STAFF',
   'JOB',
+  // DX-435: el paciente desde el enlace público de la oferta de hueco.
+  'PUBLIC_LINK',
 ] as const;
 export type AuditOrigin = (typeof AUDIT_ORIGINS)[number];
 

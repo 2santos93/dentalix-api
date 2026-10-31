@@ -1451,6 +1451,10 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   'POST /public/sign/:token/code': 'signature-requests.e2e-spec.ts',
   'POST /public/sign/:token/verify': 'signature-requests.e2e-spec.ts',
   'POST /public/sign/:token/sign': 'signature-requests.e2e-spec.ts',
+  // DX-435: aceptar y rechazar la oferta de hueco desde el enlace (UPDATE de
+  // WAITLIST_OFFER, origen PUBLIC_LINK, en la transacción del repositorio).
+  'POST /public/slot-offers/:token/accept': 'slot-offers.int-spec.ts',
+  'POST /public/slot-offers/:token/decline': 'slot-offers.int-spec.ts',
   // DX-361: confirmación de cita por enlace, en la transacción de la
   // escritura y sin token, hash ni URL. Recepción: UPDATE APPOINTMENT origen
   // STAFF, CONFIRMATION_LINK_CREATED o _RESENT; el paciente (sin usuario):

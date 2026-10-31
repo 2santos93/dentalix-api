@@ -606,5 +606,30 @@ describe('plantillas reservadas para otras tareas', () => {
       expect(email.html).not.toContain('href=');
       expect(email.text).not.toMatch(/\$|\bCOP\b|implante|tratamiento/i);
     });
+
+    it('la oferta de hueco por enlace (DX-435): cuándo, dónde y con quién; sin nada clínico', () => {
+      const email = renderEmail(
+        'slot-offer',
+        {
+          patientFirstName: 'Laura',
+          clinicName: 'Sonrisas del Norte',
+          slotLabel: 'lunes 2 de noviembre, 10:00 a. m.',
+          locationName: 'Sede Centro',
+          providerName: 'Dra. Gómez',
+          url: 'https://demo.dentalix.app/hueco/abc',
+          expiresAtLabel: '02/11/2026 10:00 a. m.',
+        },
+        brand,
+      );
+      expect(email.subject).toBe('Sonrisas del Norte tiene un hueco libre para ti');
+      expect(email.text).toContain('Hola, Laura');
+      expect(email.text).toContain('lunes 2 de noviembre, 10:00 a. m.');
+      expect(email.text).toContain('Sede Centro');
+      expect(email.text).toContain('Dra. Gómez');
+      expect(email.text).toContain('el primero que lo acepte');
+      expect(email.text).toContain('02/11/2026 10:00 a. m.');
+      expect(email.html).toContain('href="https://demo.dentalix.app/hueco/abc"');
+      expect(email.text).not.toMatch(/tratamiento|motivo/i);
+    });
   });
 });

@@ -7,6 +7,7 @@ import type {
   OfferSummary,
   OfferTarget,
   OpeningCandidatesRepository,
+  SlotLinkOfferRow,
   WaitlistOffer,
 } from '../../domain/ports/opening-candidates-repository.port';
 
@@ -20,6 +21,8 @@ export class InMemoryOpeningCandidatesRepository implements OpeningCandidatesRep
   readonly entries: EntryCandidateRow[] = [];
   readonly appointments: AppointmentCandidateRow[] = [];
   readonly offers: WaitlistOffer[] = [];
+  /** DX-435: hash del token de cada oferta con enlace (nunca el texto plano). */
+  readonly tokenHashes = new Map<string, string>();
   private seq = 1;
 
   addPatient(
@@ -32,6 +35,7 @@ export class InMemoryOpeningCandidatesRepository implements OpeningCandidatesRep
       contactChannel: 'WHATSAPP',
       reminderOptOutAt: null,
       whatsappOptInAt: new Date('2026-01-10T15:00:00Z'),
+      email: `${over.id}@example.com`,
       ...over,
     };
     this.patients.push(patient);
@@ -86,6 +90,7 @@ export class InMemoryOpeningCandidatesRepository implements OpeningCandidatesRep
         today: 0,
         forSlot: false,
         pendingOfferId: null,
+        linkOffer: null,
       };
       if (o.offerDay === params.offerDay) s.today += 1;
       if (
@@ -94,8 +99,12 @@ export class InMemoryOpeningCandidatesRepository implements OpeningCandidatesRep
         o.slotEnd > params.slotStart
       ) {
         s.forSlot = true;
-        if (s.pendingOfferId === null && o.outcome === 'PENDING') {
+        const linked = o.expiresAt !== null;
+        if (s.pendingOfferId === null && o.outcome === 'PENDING' && !linked) {
           s.pendingOfferId = o.id;
+        }
+        if (s.linkOffer === null && o.expiresAt !== null) {
+          s.linkOffer = { outcome: o.outcome, expiresAt: o.expiresAt };
         }
       }
       out.set(o.patientId, s);
@@ -146,9 +155,12 @@ export class InMemoryOpeningCandidatesRepository implements OpeningCandidatesRep
     ).length;
     if (today >= cap) return Promise.resolve(null);
     const resolved = input.outcome !== 'PENDING';
+    const { tokenHash, expiresAt, ...rest } = input;
+    if (tokenHash) this.tokenHashes.set(`offer-${this.seq}`, tokenHash);
     const offer: WaitlistOffer = {
       id: `offer-${this.seq++}`,
-      ...input,
+      ...rest,
+      expiresAt: expiresAt ?? null,
       outcomeById: resolved ? input.createdById : null,
       outcomeAt: resolved ? new Date() : null,
       createdAt: new Date(),
@@ -159,6 +171,36 @@ export class InMemoryOpeningCandidatesRepository implements OpeningCandidatesRep
 
   findOffer(id: string): Promise<WaitlistOffer | null> {
     return Promise.resolve(this.offers.find((o) => o.id === id) ?? null);
+  }
+
+  linkOffersForSlot(params: {
+    locationId: string;
+    providerId: string;
+    slotStart: Date;
+    slotEnd: Date;
+  }): Promise<SlotLinkOfferRow[]> {
+    return Promise.resolve(
+      this.offers.flatMap((o) => {
+        const patient = this.patients.find((p) => p.id === o.patientId);
+        return o.expiresAt &&
+          patient &&
+          o.locationId === params.locationId &&
+          o.providerId === params.providerId &&
+          o.slotStart < params.slotEnd &&
+          o.slotEnd > params.slotStart
+          ? [
+              {
+                patientId: o.patientId,
+                patientFirstName: patient.firstName,
+                patientLastName: patient.lastName,
+                outcome: o.outcome,
+                expiresAt: o.expiresAt,
+                outcomeAt: o.outcomeAt,
+              },
+            ]
+          : [];
+      }),
+    );
   }
 
   recordOutcome(

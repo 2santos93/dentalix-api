@@ -35,6 +35,8 @@ const LOW_LIMITS: RateLimitConfig = {
   'anamnesis-token': { limit: 2, ttlMs: 60_000 },
   signature: { limit: 4, ttlMs: 60_000 },
   'signature-token': { limit: 2, ttlMs: 60_000 },
+  'slot-offer': { limit: 4, ttlMs: 60_000 },
+  'slot-token': { limit: 2, ttlMs: 60_000 },
 };
 
 // JWT con `sub` pero sin firma válida: JwtAuthGuard lo rechaza (401), pero el

@@ -22,6 +22,7 @@ const TEMPLATE_TO_DB: Record<EmailTemplateName, EmailTemplate> = {
   'signature-request': EmailTemplate.SIGNATURE_REQUEST,
   'signature-code': EmailTemplate.SIGNATURE_CODE,
   'signature-budget-accepted': EmailTemplate.SIGNATURE_BUDGET_ACCEPTED,
+  'slot-offer': EmailTemplate.SLOT_OFFER,
 };
 
 /**

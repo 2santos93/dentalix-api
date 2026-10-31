@@ -48,6 +48,10 @@
  * - signature-token: las mismas rutas, por TOKEN (sin IP), como
  *                  anamnesis-token: un mismo enlace no admite ráfagas aunque
  *                  cambie la IP. Los 5 intentos del código son aparte (BD).
+ * - slot-offer:    las rutas públicas de la oferta de hueco (DX-435: ver,
+ *                  aceptar y rechazar), por IP (enumeración de tokens).
+ * - slot-token:    las mismas rutas, por TOKEN (sin IP), como
+ *                  signature-token.
  * - public-files:  servir los avatares (`GET /files/avatars/:name`), por IP
  *                  (DX-259). Ruta anónima que llega al bucket; con la caché
  *                  del navegador (clave versionada, `immutable`) el uso
@@ -79,7 +83,9 @@ export type RateLimitPolicy =
   | 'anamnesis'
   | 'anamnesis-token'
   | 'signature'
-  | 'signature-token';
+  | 'signature-token'
+  | 'slot-offer'
+  | 'slot-token';
 
 export interface RateLimitRule {
   limit: number;
@@ -110,6 +116,8 @@ export const DEFAULT_RATE_LIMITS: RateLimitConfig = {
   'anamnesis-token': { limit: 10, ttlMs: MINUTE },
   signature: { limit: 20, ttlMs: MINUTE },
   'signature-token': { limit: 10, ttlMs: MINUTE },
+  'slot-offer': { limit: 20, ttlMs: MINUTE },
+  'slot-token': { limit: 10, ttlMs: MINUTE },
 };
 
 type EnvReader = (key: string) => string | undefined;
@@ -152,5 +160,7 @@ export function loadRateLimitConfig(env: EnvReader): RateLimitConfig {
     'anamnesis-token': rule('anamnesis-token'),
     signature: rule('signature'),
     'signature-token': rule('signature-token'),
+    'slot-offer': rule('slot-offer'),
+    'slot-token': rule('slot-token'),
   };
 }

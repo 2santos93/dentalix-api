@@ -38,6 +38,7 @@ import {
   OPENING_CANDIDATES_REPOSITORY,
   type CandidatePatient,
   type OpeningCandidatesRepository,
+  type SlotLinkOfferRow,
   type WaitlistOffer,
 } from '../../domain/ports/opening-candidates-repository.port';
 import {
@@ -64,6 +65,18 @@ import {
   type PhoneRegion,
 } from '../../../../shared/phone/phone-number';
 import { WAITLIST_NOT_FOUND_MESSAGE } from '../../domain/waitlist-rules';
+import {
+  LINK_OFFER_OUTCOME_MESSAGE,
+  LINK_OFFER_TOO_LATE_MESSAGE,
+  OFFER_EMAIL_BLOCKED_MESSAGE,
+  OFFER_EMAIL_MISSING_MESSAGE,
+  OFFER_LINK_RESOLVED_MESSAGE,
+  emailOfferBlock,
+  isLinkChannel,
+  linkOfferWindowOpen,
+  type EmailOfferBlock,
+  type PublicSlotOfferState,
+} from '../../domain/slot-offer-link';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { assertAttendsAt } from '../../../staff/domain/provider-location';
 import { ProviderAvailabilityService } from '../../../provider-schedule/application/provider-availability.service';
@@ -88,6 +101,8 @@ export interface OpeningCandidate {
   /** Baja, canal «Ninguno» o sin permiso de WhatsApp (DX-128): no se le escribe. */
   whatsappBlocked: boolean;
   whatsappBlockedReason: WhatsappOfferBlock | null;
+  /** DX-435: ¿se le puede enviar el enlace por email? (DX-128) */
+  emailBlockedReason: EmailOfferBlock | null;
   waitlistEntryId: string | null;
   appointmentId: string | null;
   priority: WaitlistPriority;
@@ -112,6 +127,28 @@ export interface OpeningCandidate {
   offeredForSlot: boolean;
   /** La última oferta de este hueco aún sin respuesta («Anotar respuesta»). */
   pendingOfferId: string | null;
+  /**
+   * DX-435: cómo va su última oferta con enlace de este hueco (`OPEN` =
+   * enviada y vigente); `null` si no se le envió enlace.
+   */
+  linkOfferState: Exclude<PublicSlotOfferState, 'UNAVAILABLE'> | null;
+}
+
+/** DX-435: el estado de las ofertas con enlace del hueco («Oferta enviada (n)»). */
+export interface SlotLinkOffersSummary {
+  /** Enviadas, sin respuesta y aún vigentes. */
+  pending: number;
+  /** Enviadas en total para este hueco. */
+  total: number;
+  /** Quién se lo quedó (nombre para el personal) y cuándo. */
+  acceptedBy: {
+    patientId: string;
+    firstName: string;
+    lastName: string;
+    at: Date | null;
+  } | null;
+  /** Todas caducaron sin que nadie aceptara («Caducado»). */
+  expired: boolean;
 }
 
 export interface OpeningCandidatesView {
@@ -127,6 +164,10 @@ export interface OpeningCandidatesView {
   providerOffSchedule: boolean;
   /** Tope de ofertas por paciente y día (configurable). */
   offerCap: number;
+  /** DX-435: ofertas con enlace del hueco (sin profesional, no hay). */
+  linkOffers: SlotLinkOffersSummary;
+  /** DX-435: ¿quedan al menos 20 minutos para ofertar por enlace? */
+  linkOfferOpen: boolean;
   items: OpeningCandidate[];
   truncated: boolean;
 }
@@ -186,6 +227,43 @@ function contactOf(patient: CandidatePatient, region: PhoneRegion | null) {
     whatsappPhone: wa.phone,
     whatsappBlocked: wa.blocked,
     whatsappBlockedReason: wa.reason,
+    emailBlockedReason: emailOfferBlock(patient),
+  };
+}
+
+function linkOfferStateOf(
+  offer: { outcome: WaitlistOfferOutcome; expiresAt: Date } | null,
+  now: Date,
+): OpeningCandidate['linkOfferState'] {
+  if (!offer) return null;
+  if (offer.outcome === 'NO_ANSWER') return 'EXPIRED';
+  if (offer.outcome === 'ACCEPTED') return 'ACCEPTED';
+  if (offer.outcome === 'DECLINED') return 'DECLINED';
+  if (offer.outcome === 'TAKEN_BY_OTHER') return 'TAKEN';
+  if (offer.outcome === 'EXPIRED') return 'EXPIRED';
+  return offer.expiresAt.getTime() <= now.getTime() ? 'EXPIRED' : 'OPEN';
+}
+
+/** «Oferta enviada (n)», «Aceptado por …» o «Caducado». */
+export function summarizeLinkOffers(
+  rows: SlotLinkOfferRow[],
+  now: Date,
+): SlotLinkOffersSummary {
+  const states = rows.map((r) => linkOfferStateOf(r, now));
+  const accepted = rows.find((r) => r.outcome === 'ACCEPTED') ?? null;
+  return {
+    pending: states.filter((s) => s === 'OPEN').length,
+    total: rows.length,
+    acceptedBy: accepted
+      ? {
+          patientId: accepted.patientId,
+          firstName: accepted.patientFirstName,
+          lastName: accepted.patientLastName,
+          at: accepted.outcomeAt,
+        }
+      : null,
+    expired:
+      rows.length > 0 && states.every((s) => s === 'EXPIRED' || s === 'DECLINED'),
   };
 }
 
@@ -284,6 +362,15 @@ export class ListOpeningCandidatesUseCase {
       slotEnd: input.end,
     });
 
+    const linkRows = slot.providerId
+      ? await this.repo.linkOffersForSlot({
+          locationId: location.id,
+          providerId: slot.providerId,
+          slotStart: input.start,
+          slotEnd: input.end,
+        })
+      : [];
+
     const region = phoneRegionOrNull(location.defaultPhoneRegion);
     const items = ranked.items.map((item): OpeningCandidate => {
       const offers = summary.get(item.source.patient.id);
@@ -293,6 +380,7 @@ export class ListOpeningCandidatesUseCase {
         offersToday: offers?.today ?? 0,
         offeredForSlot: offers?.forSlot ?? false,
         pendingOfferId: offers?.pendingOfferId ?? null,
+        linkOfferState: linkOfferStateOf(offers?.linkOffer ?? null, now),
         waitingSince: item.source.createdAt,
       };
       if (item.kind === 'WAITLIST') {
@@ -341,6 +429,8 @@ export class ListOpeningCandidatesUseCase {
       timeZone,
       providerOffSchedule,
       offerCap: this.config.offersPerPatientPerDay,
+      linkOffers: summarizeLinkOffers(linkRows, now),
+      linkOfferOpen: linkOfferWindowOpen(input.start, now),
       items,
       truncated: ranked.truncated,
     };
@@ -358,6 +448,11 @@ export interface CreateWaitlistOfferInput {
   channel: WaitlistOfferChannel;
   /** Solo por teléfono: lo que respondió al llamarlo. */
   outcome?: WaitlistOfferOutcome;
+  /**
+   * DX-435: hash del token y caducidad de una oferta con enlace. Solo lo pone
+   * `CreateLinkOfferUseCase`; un canal con enlace sin él es un 400.
+   */
+  link?: { tokenHash: string; expiresAt: Date };
 }
 
 export interface WaitlistOfferView extends WaitlistOffer {
@@ -423,8 +518,16 @@ export class CreateWaitlistOfferUseCase {
     if (input.channel === 'WA_ME' && outcome !== 'PENDING') {
       throw new BadRequestException(OFFER_WHATSAPP_OUTCOME_MESSAGE);
     }
+    const linked = isLinkChannel(input.channel);
+    if (linked && (outcome !== 'PENDING' || !input.link)) {
+      throw new BadRequestException(LINK_OFFER_OUTCOME_MESSAGE);
+    }
     const now = this.clock();
     assertSlot(input.slotStart, input.slotEnd, now);
+    // DX-435: con menos de 20 minutos no da tiempo a ver el enlace y llegar.
+    if (linked && !linkOfferWindowOpen(input.slotStart, now)) {
+      throw new ConflictException(LINK_OFFER_TOO_LATE_MESSAGE);
+    }
     const location = await requireLocation(
       this.locations,
       this.tenantContext,
@@ -456,7 +559,14 @@ export class CreateWaitlistOfferUseCase {
         throw new ConflictException(OFFER_APPOINTMENT_MISMATCH_MESSAGE);
       }
     }
-    if (input.channel === 'WA_ME') {
+    if (input.channel === 'LINK_EMAIL') {
+      const block = emailOfferBlock(patient);
+      if (block === 'NO_EMAIL') {
+        throw new ConflictException(OFFER_EMAIL_MISSING_MESSAGE);
+      }
+      if (block) throw new ConflictException(OFFER_EMAIL_BLOCKED_MESSAGE);
+    }
+    if (input.channel === 'WA_ME' || input.channel === 'LINK_WA_ME') {
       const wa = whatsappOfferPhone(
         patient,
         phoneRegionOrNull(location.defaultPhoneRegion),
@@ -486,6 +596,8 @@ export class CreateWaitlistOfferUseCase {
         outcome,
         offerDay: offerDayFor(now, requireLocationTimeZone(location)),
         createdById: ctx.actor.userId,
+        tokenHash: input.link?.tokenHash,
+        expiresAt: input.link?.expiresAt,
       },
       cap,
     );
@@ -495,7 +607,9 @@ export class CreateWaitlistOfferUseCase {
       ctx,
       created.offer,
       'CREATE',
-      input.channel === 'WA_ME' ? 'OFFER_WA_ME' : `OFFER_PHONE_${outcome}`,
+      input.channel === 'PHONE'
+        ? `OFFER_PHONE_${outcome}`
+        : `OFFER_${input.channel}`,
     );
     return {
       ...created.offer,
@@ -524,6 +638,10 @@ export class RecordWaitlistOfferOutcomeUseCase {
     if (!current) throw new NotFoundException(OFFER_NOT_FOUND_MESSAGE);
     // DX-089: la oferta es de un hueco de una sede; ajena → 403.
     this.tenantContext.assertLocationAllowed(current.locationId);
+    // DX-435: la oferta con enlace la responde el paciente desde el enlace.
+    if (isLinkChannel(current.channel)) {
+      throw new ConflictException(OFFER_LINK_RESOLVED_MESSAGE);
+    }
     const updated = await this.repo.recordOutcome(
       id,
       outcome,

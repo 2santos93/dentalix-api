@@ -15,6 +15,7 @@ import type {
   OfferSummary,
   OfferTarget,
   OpeningCandidatesRepository,
+  SlotLinkOfferRow,
   WaitlistOffer,
 } from '../../domain/ports/opening-candidates-repository.port';
 
@@ -34,6 +35,7 @@ const PATIENT_SELECT = {
   contactChannel: true,
   reminderOptOutAt: true,
   whatsappOptInAt: true,
+  email: true,
 } as const satisfies Prisma.PatientSelect;
 
 const TYPE_SELECT = {
@@ -58,6 +60,7 @@ function mapOffer(row: OfferRow): WaitlistOffer {
     createdById: row.createdById,
     outcomeById: row.outcomeById,
     outcomeAt: row.outcomeAt,
+    expiresAt: row.expiresAt,
     createdAt: row.createdAt,
   };
 }
@@ -187,7 +190,13 @@ export class PrismaOpeningCandidatesRepository implements OpeningCandidatesRepos
             slotStart: { lt: params.slotEnd },
             slotEnd: { gt: params.slotStart },
           },
-          select: { id: true, patientId: true, outcome: true },
+          select: {
+            id: true,
+            patientId: true,
+            outcome: true,
+            channel: true,
+            expiresAt: true,
+          },
           orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         }),
       ]),
@@ -196,17 +205,26 @@ export class PrismaOpeningCandidatesRepository implements OpeningCandidatesRepos
       today: 0,
       forSlot: false,
       pendingOfferId: null,
+      linkOffer: null,
     };
     for (const row of today) {
       out.set(row.patientId, { ...empty, today: row._count._all });
     }
     for (const row of forSlot) {
       const current = out.get(row.patientId) ?? empty;
+      // DX-435: las ofertas con enlace las responde el paciente, no se anotan.
+      const linked = row.expiresAt !== null;
       out.set(row.patientId, {
         ...current,
         forSlot: true,
         pendingOfferId:
-          current.pendingOfferId ?? (row.outcome === 'PENDING' ? row.id : null),
+          current.pendingOfferId ??
+          (row.outcome === 'PENDING' && !linked ? row.id : null),
+        linkOffer:
+          current.linkOffer ??
+          (linked && row.expiresAt
+            ? { outcome: row.outcome, expiresAt: row.expiresAt }
+            : null),
       });
     }
     return out;
@@ -290,6 +308,8 @@ export class PrismaOpeningCandidatesRepository implements OpeningCandidatesRepos
           outcome: input.outcome,
           offerDay,
           createdById: input.createdById,
+          tokenHash: input.tokenHash,
+          expiresAt: input.expiresAt,
           outcomeById: resolved ? input.createdById : null,
           outcomeAt: resolved ? new Date() : null,
         },
@@ -302,6 +322,48 @@ export class PrismaOpeningCandidatesRepository implements OpeningCandidatesRepos
     return this.prisma.runWithTenant(async (tx) => {
       const row = await tx.waitlistOffer.findFirst({ where: { id } });
       return row ? mapOffer(row) : null;
+    });
+  }
+
+  linkOffersForSlot(params: {
+    locationId: string;
+    providerId: string;
+    slotStart: Date;
+    slotEnd: Date;
+  }): Promise<SlotLinkOfferRow[]> {
+    return this.prisma.runWithTenant(async (tx) => {
+      // waitlist_offers_tenant_location_slot_idx
+      const rows = await tx.waitlistOffer.findMany({
+        where: {
+          locationId: params.locationId,
+          providerId: params.providerId,
+          channel: { in: ['LINK_WA_ME', 'LINK_EMAIL'] },
+          slotStart: { lt: params.slotEnd },
+          slotEnd: { gt: params.slotStart },
+        },
+        select: {
+          patientId: true,
+          outcome: true,
+          expiresAt: true,
+          outcomeAt: true,
+          patient: { select: { firstName: true, lastName: true } },
+        },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      });
+      return rows.flatMap((r) =>
+        r.expiresAt
+          ? [
+              {
+                patientId: r.patientId,
+                patientFirstName: r.patient.firstName,
+                patientLastName: r.patient.lastName,
+                outcome: r.outcome,
+                expiresAt: r.expiresAt,
+                outcomeAt: r.outcomeAt,
+              },
+            ]
+          : [],
+      );
     });
   }
 

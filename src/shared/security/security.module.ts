@@ -105,6 +105,16 @@ function throttlers(
           request(context).params?.token,
         ),
     },
+    // DX-435: la oferta de hueco pública, por IP y por token.
+    strict('slot-offer'),
+    {
+      ...strict('slot-token'),
+      generateKey: (context, _ip, name) =>
+        publicTokenRateLimitKey(
+          routePrefix(context, name),
+          request(context).params?.token,
+        ),
+    },
     {
       ...strict('direct-upload'),
       generateKey: (context, _ip, name) =>

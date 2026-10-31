@@ -103,6 +103,15 @@ export class OpeningCandidateDto {
   })
   whatsappBlockedReason!: 'OPTED_OUT' | 'CHANNEL_NONE' | 'NO_OPT_IN' | null;
 
+  @ApiProperty({
+    enum: ['OPTED_OUT', 'CHANNEL_NONE', 'NO_EMAIL'],
+    enumName: 'EmailOfferBlock',
+    nullable: true,
+    description:
+      'DX-435: por qué no se le envía el enlace por email (baja o canal «Ninguno» de DX-128, o sin email). null si se puede.',
+  })
+  emailBlockedReason!: 'OPTED_OUT' | 'CHANNEL_NONE' | 'NO_EMAIL' | null;
+
   @ApiProperty({ type: String, format: 'uuid', nullable: true })
   waitlistEntryId!: string | null;
 
@@ -159,6 +168,49 @@ export class OpeningCandidateDto {
       'La última oferta de ESTE hueco aún sin respuesta (p. ej. el WhatsApp enviado): su id para anotar la respuesta con `PATCH /appointments/openings/offers/:id`.',
   })
   pendingOfferId!: string | null;
+
+  @ApiProperty({
+    enum: ['OPEN', 'ACCEPTED', 'DECLINED', 'EXPIRED', 'TAKEN'],
+    enumName: 'CandidateLinkOfferState',
+    nullable: true,
+    description:
+      'DX-435: su última oferta con enlace de este hueco: `OPEN` enviada y vigente, `ACCEPTED`, `DECLINED`, `EXPIRED` (caducó) o `TAKEN` (otro aceptó antes). null si no se le envió enlace.',
+  })
+  linkOfferState!: 'OPEN' | 'ACCEPTED' | 'DECLINED' | 'EXPIRED' | 'TAKEN' | null;
+}
+
+export class LinkOfferAcceptedByDto {
+  @ApiProperty({ format: 'uuid' })
+  patientId!: string;
+
+  @ApiProperty()
+  firstName!: string;
+
+  @ApiProperty()
+  lastName!: string;
+
+  @ApiProperty({ type: String, format: 'date-time', nullable: true })
+  at!: Date | null;
+}
+
+export class SlotLinkOffersDto {
+  @ApiProperty({ description: 'Enviadas, sin respuesta y aún vigentes («Oferta enviada (n)»).' })
+  pending!: number;
+
+  @ApiProperty({ description: 'Enviadas en total para este hueco.' })
+  total!: number;
+
+  @ApiProperty({
+    type: LinkOfferAcceptedByDto,
+    nullable: true,
+    description: '«Aceptado por …»: quién se quedó el hueco desde el enlace.',
+  })
+  acceptedBy!: LinkOfferAcceptedByDto | null;
+
+  @ApiProperty({
+    description: '«Caducado»: todas caducaron o se rechazaron sin que nadie aceptara.',
+  })
+  expired!: boolean;
 }
 
 export class OpeningCandidatesDto {
@@ -185,6 +237,15 @@ export class OpeningCandidatesDto {
 
   @ApiProperty({ description: 'Tope de ofertas por paciente y día.' })
   offerCap!: number;
+
+  @ApiProperty({ type: SlotLinkOffersDto })
+  linkOffers!: SlotLinkOffersDto;
+
+  @ApiProperty({
+    description:
+      'DX-435: quedan al menos 20 minutos para el hueco (se puede enviar oferta con enlace).',
+  })
+  linkOfferOpen!: boolean;
 
   @ApiProperty({ type: [OpeningCandidateDto] })
   items!: OpeningCandidateDto[];
@@ -229,7 +290,7 @@ export class CreateWaitlistOfferDto {
     enum: WaitlistOfferChannel,
     enumName: 'WaitlistOfferChannel',
     description:
-      '`WA_ME`: la web abre wa.me con el mensaje (sin datos clínicos). `PHONE`: «Llamé».',
+      '`WA_ME`: la web abre wa.me con el mensaje (sin datos clínicos). `PHONE`: «Llamé». DX-435 `LINK_EMAIL` / `LINK_WA_ME`: oferta con enlace público que el paciente acepta solo (el primero que acepta se queda el hueco); por email la envía el outbox y por WhatsApp el enlace vuelve en `url` para el texto de wa.me.',
   })
   @IsEnum(WaitlistOfferChannel)
   channel!: WaitlistOfferChannel;
@@ -297,6 +358,14 @@ export class WaitlistOfferDto {
   @ApiProperty({ type: String, format: 'date-time', nullable: true })
   outcomeAt!: Date | null;
 
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description: 'DX-435: cuándo deja de valer el enlace (solo canales con enlace).',
+  })
+  expiresAt!: Date | null;
+
   @ApiProperty({ format: 'date-time' })
   createdAt!: Date;
 }
@@ -307,4 +376,19 @@ export class CreatedWaitlistOfferDto extends WaitlistOfferDto {
 
   @ApiProperty()
   offerCap!: number;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'DX-435, solo `LINK_WA_ME`: el enlace público para el texto prellenado de wa.me. Por email no vuelve (sale por el outbox).',
+  })
+  url!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'DX-435, solo `LINK_WA_ME`: E.164 sin `+` para wa.me.',
+  })
+  whatsappPhone!: string | null;
 }
