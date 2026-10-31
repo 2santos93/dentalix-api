@@ -42,6 +42,8 @@ export const WALK_IN_MESSAGES = {
     '«Atender sin cita» lo usan recepción, la asistente o la administración.',
   patientChoice:
     'Elige un paciente existente o da de alta uno nuevo (no los dos).',
+  newPatientBlank:
+    'El paciente nuevo necesita nombre, apellido y un teléfono de contacto (al menos 5 caracteres).',
   noUrgentType:
     'No hay ningún tipo de cita de urgencia activo. Marca uno como «Urgencia» en Tipos de cita.',
   notUrgentType:

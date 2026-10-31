@@ -296,6 +296,23 @@ describe('CreateWalkInUseCase (DX-470)', () => {
     ).rejects.toThrow(BadRequestException);
   });
 
+  it('alta mínima con nombre, apellido o teléfono en blanco tras recortar: 400 sin escribir', async () => {
+    const { uc, writes } = setup();
+    for (const patch of [
+      { firstName: '   ' },
+      { lastName: '\t ' },
+      { phone: '  12   ' },
+    ]) {
+      await expect(
+        uc.execute(
+          { newPatient: { ...NEW_PATIENT, ...patch }, providerId: 'prov1' },
+          CTX,
+        ),
+      ).rejects.toThrow(WALK_IN_MESSAGES.newPatientBlank);
+    }
+    expect(writes).toHaveLength(0);
+  });
+
   it('paciente o profesional de otra clínica (o inexistentes): 404', async () => {
     await expect(
       setup({ patientExists: false }).uc.execute(

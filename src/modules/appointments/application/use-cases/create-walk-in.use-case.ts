@@ -268,12 +268,20 @@ export class CreateWalkInUseCase {
     }
     const data = input.newPatient!;
     const docNumber = data.docNumber?.trim() || undefined;
+    const firstName = data.firstName.trim();
+    const lastName = data.lastName.trim();
+    const phone = data.phone.trim();
+    // El DTO mide antes de recortar: «   » pasaría y dejaría un paciente sin
+    // nombre ni teléfono.
+    if (firstName === '' || lastName === '' || phone.length < 5) {
+      throw new BadRequestException(WALK_IN_MESSAGES.newPatientBlank);
+    }
     return {
       kind: 'new',
       data: {
-        firstName: data.firstName.trim(),
-        lastName: data.lastName.trim(),
-        phone: data.phone.trim(),
+        firstName,
+        lastName,
+        phone,
         docType: data.docType ?? DocumentType.OTHER,
         docTypeLabel: docTypeLabelInput(data.docTypeLabel) ?? null,
         docNumber,
