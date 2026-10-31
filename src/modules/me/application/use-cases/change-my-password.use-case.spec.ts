@@ -1,12 +1,12 @@
 import { UnauthorizedException } from '@nestjs/common';
 import { ClinicRole } from '@prisma/client';
 import { ChangeMyPasswordUseCase } from './change-my-password.use-case';
-import { PasswordService } from '../../../../shared/crypto/password.service';
+import { TestPasswordHasher } from '../../../../shared/testing/test-password-hasher';
 import { UserProfileRepository } from '../../domain/ports/user-profile-repository.port';
 import type { SessionClaimsService } from '../../../auth/application/session-claims.service';
 import type { TenantJwtPayload } from '../../../../shared/crypto/token.service';
 
-const password = new PasswordService();
+const password = new TestPasswordHasher();
 
 // DX-359: desde dónde llega el cambio.
 const REQ = { requestId: 'req-1', ip: '10.0.0.1', userAgent: 'jest' };
