@@ -216,14 +216,23 @@ export class PrismaSignedConsentPdfRepository
   requestRetry(
     patientId: string,
     consentId: string,
+    authorize: (locationId: string | null) => void,
     enqueue: (tx: Prisma.TransactionClient, attempt: number) => Promise<void>,
   ): Promise<RetrySignedConsentPdfOutcome> {
     return this.prisma.runWithTenant(async (tx) => {
       const row = await tx.signedConsentPdf.findFirst({
         where: { consentId, patientId },
-        select: { status: true, attempts: true },
+        select: {
+          status: true,
+          attempts: true,
+          consent: {
+            select: { signatureRequest: { select: { locationId: true } } },
+          },
+        },
       });
       if (!row) return 'NOT_FOUND';
+      // SEC-060: antes de cambiar el estado, como «Reenviar copia».
+      authorize(row.consent.signatureRequest?.locationId ?? null);
       // Condicional: dos «Reintentar» a la vez encolan uno solo.
       const updated = await tx.signedConsentPdf.updateMany({
         where: { consentId, patientId, status: 'FAILED' },

@@ -1,4 +1,9 @@
-import { ConflictException, Logger, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import { InMemoryFileStorage } from '../../../shared/storage/__fixtures__/in-memory-file-storage';
@@ -335,17 +340,34 @@ describe('GenerateSignedConsentPdf (DX-422)', () => {
 });
 
 describe('RetrySignedConsentPdfUseCase (DX-422)', () => {
-  function retrySetup(outcome: 'RETRYING' | 'NOT_FOUND' | 'NOT_FAILED') {
+  function retrySetup(
+    outcome: 'RETRYING' | 'NOT_FOUND' | 'NOT_FAILED',
+    opts: { locationId?: string | null; allowedLocations?: string[] } = {},
+  ) {
     const enqueued: { consentId: string; attempt: number }[] = [];
     const repo = {
-      requestRetry: (
+      // Como el repositorio real: autoriza la sede del envío antes de tocar
+      // el estado; si `authorize` lanza, la transacción no cambia nada.
+      requestRetry: async (
         _patientId: string,
         consentId: string,
+        authorize: (locationId: string | null) => void,
         enqueue: (tx: never, attempt: number) => Promise<void>,
-      ) =>
-        outcome === 'RETRYING'
-          ? enqueue({} as never, 6).then(() => outcome)
-          : Promise.resolve(outcome),
+      ) => {
+        if (outcome === 'NOT_FOUND') return outcome;
+        authorize(opts.locationId === undefined ? LOCATION : opts.locationId);
+        if (outcome === 'NOT_FAILED') return outcome;
+        await enqueue({} as never, 6);
+        return outcome;
+      },
+    };
+    const allowed = opts.allowedLocations;
+    const tenantContext = {
+      assertLocationAllowed: (locationId: string) => {
+        if (allowed && !allowed.includes(locationId)) {
+          throw new ForbiddenException('Sede no permitida');
+        }
+      },
     };
     const queue = {
       retry: (_tx: unknown, consentId: string, attempt: number) => {
@@ -355,7 +377,7 @@ describe('RetrySignedConsentPdfUseCase (DX-422)', () => {
     };
     return {
       enqueued,
-      useCase: new RetrySignedConsentPdfUseCase(repo, queue),
+      useCase: new RetrySignedConsentPdfUseCase(repo, queue, tenantContext),
     };
   }
 
@@ -374,6 +396,30 @@ describe('RetrySignedConsentPdfUseCase (DX-422)', () => {
     await expect(
       retrySetup('NOT_FAILED').useCase.execute(PATIENT, CONSENT),
     ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('SEC-060: envío desde una sede no permitida al usuario → 403 sin encolar', async () => {
+    const { useCase, enqueued } = retrySetup('RETRYING', {
+      allowedLocations: ['99999999-9999-4999-8999-999999999999'],
+    });
+    await expect(useCase.execute(PATIENT, CONSENT)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    expect(enqueued).toEqual([]);
+  });
+
+  it('SEC-060: sede permitida o consentimiento sin envío a distancia → se reintenta', async () => {
+    const allowed = retrySetup('RETRYING', { allowedLocations: [LOCATION] });
+    await expect(allowed.useCase.execute(PATIENT, CONSENT)).resolves.toEqual({
+      status: 'PENDING',
+    });
+    const sinEnvio = retrySetup('RETRYING', {
+      locationId: null,
+      allowedLocations: ['99999999-9999-4999-8999-999999999999'],
+    });
+    await expect(sinEnvio.useCase.execute(PATIENT, CONSENT)).resolves.toEqual({
+      status: 'PENDING',
+    });
   });
 
   it('claves de idempotencia: la primera y una por reintento', () => {
