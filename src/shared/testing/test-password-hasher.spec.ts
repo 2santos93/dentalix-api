@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync } from 'node:fs';
-import { join, relative, sep } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import * as argon2 from 'argon2';
 import {
   DUMMY_PASSWORD_HASH,
@@ -11,6 +11,8 @@ import {
 } from './test-password-hasher';
 
 const SRC = join(__dirname, '..', '..');
+const ROOT = join(SRC, '..');
+const TESTING = join(SRC, 'shared', 'testing');
 
 function tsFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -25,6 +27,27 @@ const matching = (files: string[], pattern: RegExp): string[] =>
   files
     .filter((file) => pattern.test(readFileSync(file, 'utf8')))
     .map((file) => relative(SRC, file));
+
+/**
+ * Módulos que `source` (el texto de `file`) carga: `import … from`,
+ * `export … from`, `import '…'`, `import(…)` y `require(…)`, resueltos a ruta
+ * absoluta. Cubre las relativas (`../testing/…`, sin «shared/» delante) y las
+ * de `baseUrl` (`src/shared/testing/…`); los paquetes se quedan como están.
+ */
+function importedPaths(file: string, source: string): string[] {
+  const specifier =
+    /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)['"`]([^'"`]+)['"`]/g;
+  return [...source.matchAll(specifier)].map(([, spec]) => {
+    if (spec.startsWith('.')) return resolve(dirname(file), spec);
+    if (spec.startsWith('src/')) return resolve(ROOT, spec);
+    return spec;
+  });
+}
+
+const importsTesting = (file: string, source: string): boolean =>
+  importedPaths(file, source).some(
+    (path) => path === TESTING || path.startsWith(TESTING + sep),
+  );
 
 describe('TestPasswordHasher (DX-209)', () => {
   const hasher = new TestPasswordHasher();
@@ -47,21 +70,67 @@ describe('TestPasswordHasher (DX-209)', () => {
 
   describe('frontera con producción', () => {
     const files = tsFiles(SRC);
-    const testing = join(SRC, 'shared', 'testing') + sep;
+
+    it('the guard detects every way of importing src/shared/testing', () => {
+      // Romper la guarda a propósito: si alguna de estas formas dejara de
+      // detectarse, el test de abajo daría verde con una fuga real.
+      const inCrypto = join(SRC, 'shared', 'crypto', 'password.module.ts');
+      const inModule = join(SRC, 'modules', 'auth', 'auth.module.ts');
+      const leaks: [string, string][] = [
+        [
+          inCrypto,
+          "import { TestPasswordHasher } from '../testing/test-password-hasher';",
+        ],
+        [
+          inCrypto,
+          'import { TestPasswordHasher } from "../testing/test-password-hasher";',
+        ],
+        [inCrypto, "export * from '../testing/test-password-hasher';"],
+        [inCrypto, "import '../testing';"],
+        [inCrypto, "const t = require('../testing/test-password-hasher');"],
+        [
+          inCrypto,
+          "const t = await import('../testing/test-password-hasher');",
+        ],
+        [
+          inModule,
+          "import {\n  TestPasswordHasher,\n} from '../../shared/testing/test-password-hasher';",
+        ],
+        [
+          inModule,
+          "import { TestPasswordHasher } from 'src/shared/testing/test-password-hasher';",
+        ],
+      ];
+      for (const [file, source] of leaks) {
+        expect([source, importsTesting(file, source)]).toEqual([source, true]);
+      }
+      // Y no confunde un vecino de nombre parecido ni un paquete.
+      expect(
+        importsTesting(inCrypto, "import { x } from '../testing-utils/x';"),
+      ).toBe(false);
+      expect(
+        importsTesting(inCrypto, "import * as argon2 from 'argon2';"),
+      ).toBe(false);
+    });
 
     it('no production module imports src/shared/testing', () => {
       const production = files.filter(
         (file) =>
           !file.endsWith('.spec.ts') &&
           !file.split(sep).includes('__fixtures__') &&
-          !file.startsWith(testing),
+          !file.startsWith(TESTING + sep),
       );
-      expect(matching(production, /from '[^']*shared\/testing\//)).toEqual([]);
+      expect(production.length).toBeGreaterThan(100);
+      expect(
+        production
+          .filter((file) => importsTesting(file, readFileSync(file, 'utf8')))
+          .map((file) => relative(SRC, file)),
+      ).toEqual([]);
     });
 
     it('only password.service.spec.ts runs argon2 at production cost (new PasswordService)', () => {
       const specs = files.filter(
-        (file) => file.endsWith('.spec.ts') && !file.startsWith(testing),
+        (file) => file.endsWith('.spec.ts') && !file.startsWith(TESTING + sep),
       );
       expect(matching(specs, /new PasswordService\(/)).toEqual([
         join('shared', 'crypto', 'password.service.spec.ts'),
