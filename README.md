@@ -1646,7 +1646,7 @@ recibo; y JPY, EUR y RSD con ítems no cobrables y descuentos con céntimos,
 estado de cuenta en SQL = `/balance` = main).
 
 **Fuente única de decimales: la tabla `currencies`** (migraciones
-`20261111100000_dx340_currency_digits` y `…100_backfill`), leída por
+`20261111115000_dx340_currency_digits` y `…100_backfill`), leída por
 `CURRENCY_DIGITS_CATALOG` (`src/shared/money/currency-digits.ts`; la tabla se
 guarda en memoria 5 minutos, `CURRENCY_DIGITS_TTL_MS`, y una moneda que falte
 se relee en el acto). Ningún módulo tiene ya una lista de monedas sin decimales para

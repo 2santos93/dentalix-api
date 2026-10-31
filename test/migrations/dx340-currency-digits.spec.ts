@@ -16,8 +16,8 @@ const code = (migration: string): string =>
     .replace(/--[^\n]*/g, '')
     .trim();
 
-const ADD = '20261111100000_dx340_currency_digits';
-const BACKFILL = '20261111100100_dx340_currency_digits_backfill';
+const ADD = '20261111115000_dx340_currency_digits';
+const BACKFILL = '20261111115100_dx340_currency_digits_backfill';
 
 function codesIn(sql: string, column: string): string[] {
   const match = new RegExp(
