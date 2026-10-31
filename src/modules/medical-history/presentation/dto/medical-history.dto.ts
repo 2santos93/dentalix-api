@@ -49,7 +49,7 @@ export class MedicalHistoryDto {
 
   @ApiProperty({
     enum: ANSWER_STATUSES,
-    enumName: 'AnamnesisAnswer',
+    enumName: 'AnamnesisAnswerStatus',
     nullable: true,
     description:
       'Embarazo: SI / NO / DESCONOCE; null = sin responder. En las versiones anteriores a este campo solo se guardaba el «Sí»: allí null puede ser «No» o no preguntado (nunca se inventa un «No»).',

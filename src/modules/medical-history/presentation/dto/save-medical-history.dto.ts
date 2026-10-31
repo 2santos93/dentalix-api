@@ -96,7 +96,7 @@ export class SaveMedicalHistoryDto {
 
   @ApiPropertyOptional({
     enum: ANSWER_STATUSES,
-    enumName: 'AnamnesisAnswer',
+    enumName: 'AnamnesisAnswerStatus',
     description:
       'Embarazo: SI / NO / DESCONOCE («No sabe»). Ausente = «Sin responder». Solo el «Sí» enciende la alerta.',
   })

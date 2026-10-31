@@ -717,7 +717,7 @@ model Patient {
 }
 
 /// Respuesta tri-estado de la anamnesis (como `Condition.estado`).
-enum AnamnesisAnswer {
+enum AnamnesisAnswerStatus {
   SI
   NO
   DESCONOCE
@@ -744,7 +744,7 @@ model MedicalHistoryVersion {
   /// Embarazo tri-estado; NULL = sin responder. NULL también en las versiones
   /// anteriores a la columna: ahí manda `safetyFlags.embarazo` (solo guardaba
   /// el «Sí»), ver `readStoredPregnancy`.
-  pregnancy        AnamnesisAnswer?
+  pregnancy        AnamnesisAnswerStatus?
   // Banderas denormalizadas — calculadas en el dominio (deriveSafetyFlags).
   safetyFlags      Json?
   hasCriticalAlert Boolean              @default(false)

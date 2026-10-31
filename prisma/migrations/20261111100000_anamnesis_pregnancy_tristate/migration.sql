@@ -14,9 +14,9 @@
 -- las anteriores conservan sus booleanos y se leen con `readStoredHabits`
 -- (true «Sí», false «No»). Sin SQL para eso: no se reescribe nada.
 
-CREATE TYPE "AnamnesisAnswer" AS ENUM ('SI', 'NO', 'DESCONOCE');
+CREATE TYPE "AnamnesisAnswerStatus" AS ENUM ('SI', 'NO', 'DESCONOCE');
 
-ALTER TABLE "medical_history_versions" ADD COLUMN "pregnancy" "AnamnesisAnswer";
+ALTER TABLE "medical_history_versions" ADD COLUMN "pregnancy" "AnamnesisAnswerStatus";
 
 -- La bandera derivada y la respuesta no pueden contradecirse en lo nuevo:
 -- embarazo = true  ⇔  pregnancy = 'SI'. NOT VALID: no se revisan (ni se
