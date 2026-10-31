@@ -26,6 +26,13 @@ import { stackWithoutMessage } from '../observability/safe-stack';
  * sin el `DETAIL` de Postgres: CHECK (23514) y desbordamiento numérico (22003)
  * → 400; FK (P2003 / 23503) y los triggers de inmutabilidad (23001) → 409. Las violaciones de EXCLUDE (23P01) las
  * mapean los casos de uso de citas antes de llegar aquí.
+ *
+ * DX-431: una transacción que pasa de su tope o no consigue conexión a
+ * tiempo (P2028 de tiempo) o cuya sesión cierra
+ * `idle_in_transaction_session_timeout` (25P03) → 503 `TRANSACTION_TIMEOUT`;
+ * una sentencia cancelada por `statement_timeout` (57014) → 503
+ * `STATEMENT_TIMEOUT`. Los dos con `Retry-After` y el request id, nunca el
+ * 500 genérico. Cualquier otro P2028 sigue siendo un 500.
  */
 
 // Maps a Prisma unique-index name (or column list) in `meta.target` to a
@@ -127,11 +134,14 @@ export function conflictMessageForTarget(target: unknown): string {
 
 interface HttpishResponse {
   status(code: number): { json(body: unknown): unknown };
+  setHeader(name: string, value: string): unknown;
 }
 
 interface ErrorBody {
   statusCode: number;
   error: string;
+  /** Código de dominio estable para el cliente (p. ej. `TRANSACTION_TIMEOUT`). */
+  code?: string;
   message: string;
   /** Solo en los 500 (DX-023): para encontrar la petición en el log. */
   requestId?: string;
@@ -201,6 +211,41 @@ const CONCURRENCY_CONFLICT: ErrorBody = {
   message:
     'Otra operación sobre los mismos datos se cruzó con esta. Vuelve a intentarlo.',
 };
+// DX-431 (OPS-012): cortes por tiempo. Son un estado previsto de carga, no un
+// fallo del código: 503 con `Retry-After`, como el almacén o el semáforo de
+// subidas (DX-259).
+export const TIMEOUT_RETRY_AFTER_SECONDS = 5;
+export const TRANSACTION_TIMEOUT_MESSAGE =
+  'La operación tardó demasiado y se canceló sin guardar cambios. Vuelve a intentarlo en unos segundos.';
+// La transacción interactiva pasó de TENANT_TX_TIMEOUT_MS, no consiguió
+// conexión del pool en TENANT_TX_MAX_WAIT_MS (P2028), o Postgres cerró la
+// sesión por idle_in_transaction_session_timeout (25P03): la transacción se
+// deshizo entera, así que «sin guardar cambios» es cierto.
+const TRANSACTION_TIMEOUT: ErrorBody = {
+  statusCode: HttpStatus.SERVICE_UNAVAILABLE,
+  error: 'Service Unavailable',
+  code: 'TRANSACTION_TIMEOUT',
+  message: TRANSACTION_TIMEOUT_MESSAGE,
+};
+export const STATEMENT_TIMEOUT_MESSAGE =
+  'La operación tardó demasiado y se canceló. Vuelve a intentarlo en unos segundos.';
+// Postgres canceló UNA sentencia por el statement_timeout de dentalix_app
+// (57014). Fuera de una transacción, lo hecho antes por otras sentencias ya
+// quedó guardado: el mensaje no promete lo contrario.
+const STATEMENT_TIMEOUT: ErrorBody = {
+  statusCode: HttpStatus.SERVICE_UNAVAILABLE,
+  error: 'Service Unavailable',
+  code: 'STATEMENT_TIMEOUT',
+  message: STATEMENT_TIMEOUT_MESSAGE,
+};
+/**
+ * Los P2028 de tiempo: transacción expirada (commit o consulta sobre ella) o
+ * sin conexión para empezarla en `maxWait`. Otros P2028 («Transaction already
+ * closed» por otro motivo) son fallos del código y siguen como 500.
+ */
+const P2028_TIMEOUT_PATTERN =
+  /expired transaction|Unable to start a transaction in the given time|timeout for this transaction/i;
+
 const INTERNAL_ERROR: ErrorBody = {
   statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
   error: 'Internal Server Error',
@@ -348,6 +393,28 @@ export class PrismaExceptionFilter implements ExceptionFilter {
     }
 
     const sqlState = sqlStateOf(exception);
+    const timeout =
+      prismaCode === 'P2028'
+        ? P2028_TIMEOUT_PATTERN.test(exception.message)
+          ? TRANSACTION_TIMEOUT
+          : undefined
+        : sqlState === '25P03'
+          ? TRANSACTION_TIMEOUT
+          : sqlState === '57014'
+            ? STATEMENT_TIMEOUT
+            : undefined;
+    if (timeout) {
+      // El mensaje dice qué tope fue (timeout, maxWait, idle o
+      // statement_timeout); sin el DETAIL de Postgres.
+      this.logger.warn(
+        `Transacción o sentencia cortada por tiempo (${prismaCode === 'P2028' ? prismaCode : sqlState}), 503 ${timeout.code}: ${redactedPrismaMessage(exception.message)}`,
+      );
+      response.setHeader('Retry-After', String(TIMEOUT_RETRY_AFTER_SECONDS));
+      const requestId = currentRequestId();
+      send(requestId ? { ...timeout, requestId } : timeout);
+      return;
+    }
+
     const generic =
       prismaCode === 'P2003'
         ? FK_VIOLATION

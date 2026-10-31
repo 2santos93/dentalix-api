@@ -766,6 +766,76 @@ describe('validateEnv', () => {
     });
   });
 
+  describe('límites de producción: servidor HTTP y transacciones (DX-431)', () => {
+    it('sin las variables arranca con los valores recomendados, también en producción', () => {
+      expect(() => validateEnv(baseEnv())).not.toThrow();
+      expect(() => validateEnv(prodEnv())).not.toThrow();
+    });
+
+    it('acepta plazos bajos coherentes (los del e2e)', () => {
+      expect(() =>
+        validateEnv(
+          baseEnv({
+            HTTP_KEEP_ALIVE_TIMEOUT_MS: '1000',
+            HTTP_HEADERS_TIMEOUT_MS: '1500',
+            HTTP_REQUEST_TIMEOUT_MS: '2000',
+            TENANT_TX_TIMEOUT_MS: '500',
+            TENANT_TX_MAX_WAIT_MS: '100',
+          }),
+        ),
+      ).not.toThrow();
+    });
+
+    it.each([
+      ['HTTP_KEEP_ALIVE_TIMEOUT_MS', 'sesenta'],
+      ['HTTP_HEADERS_TIMEOUT_MS', '0'],
+      ['HTTP_REQUEST_TIMEOUT_MS', '-5'],
+      ['HTTP_REQUEST_TIMEOUT_MS', '30s'],
+      ['TENANT_TX_TIMEOUT_MS', '100'],
+      ['TENANT_TX_MAX_WAIT_MS', '1e3'],
+    ])(
+      '%s=%s impide arrancar con un mensaje que nombra la variable y su rango',
+      (key, value) => {
+        const msg = errorOf(baseEnv({ [key]: value }));
+        expect(msg).toMatch(/^Configuración inválida; la API no arranca:/);
+        expect(msg).toMatch(
+          new RegExp(`- ${key} debe ser un entero entre \\d+ y \\d+`),
+        );
+      },
+    );
+
+    it('rechaza plazos incoherentes entre sí', () => {
+      expect(
+        errorOf(
+          baseEnv({
+            HTTP_KEEP_ALIVE_TIMEOUT_MS: '70000',
+            HTTP_HEADERS_TIMEOUT_MS: '60000',
+          }),
+        ),
+      ).toContain('debe ser mayor que HTTP_KEEP_ALIVE_TIMEOUT_MS');
+      expect(errorOf(baseEnv({ HTTP_REQUEST_TIMEOUT_MS: '30000' }))).toContain(
+        'debe ser mayor o igual que HTTP_HEADERS_TIMEOUT_MS',
+      );
+      expect(
+        errorOf(
+          baseEnv({
+            TENANT_TX_TIMEOUT_MS: '30000',
+            SHUTDOWN_TIMEOUT_MS: '20000',
+          }),
+        ),
+      ).toContain('debe ser menor que SHUTDOWN_TIMEOUT_MS');
+    });
+
+    it('en producción la petición entera tiene que durar al menos UPLOAD_MAX_DURATION_MS + 10 s', () => {
+      expect(() =>
+        validateEnv(baseEnv({ HTTP_REQUEST_TIMEOUT_MS: '100000' })),
+      ).not.toThrow();
+      expect(errorOf(prodEnv({ HTTP_REQUEST_TIMEOUT_MS: '125000' }))).toContain(
+        'debe ser al menos UPLOAD_MAX_DURATION_MS (120000) + 10000 ms',
+      );
+    });
+  });
+
   it('validateEnv accepts an env that still sets the retired CANCELLATION_FEE_BLOCK_EPS_CO', () => {
     // DX-321: la variable ya no existe; un despliegue que aún la defina arranca.
     expect(() =>

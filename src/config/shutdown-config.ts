@@ -24,7 +24,8 @@ export interface ShutdownConfig {
 export const DEFAULT_SHUTDOWN_DRAIN_MS_PRODUCTION = 15_000;
 /**
  * Tope del cierre HTTP + `app.close()`: más que el timeout de una transacción
- * (5 s) y que la espera del worker (`JOBS_SHUTDOWN_GRACE_MS`, 20 s).
+ * (`TENANT_TX_TIMEOUT_MS`, 5 s; validateEnv lo exige) y que la espera del
+ * worker (`JOBS_SHUTDOWN_GRACE_MS`, 20 s).
  */
 export const DEFAULT_SHUTDOWN_TIMEOUT_MS = 25_000;
 
