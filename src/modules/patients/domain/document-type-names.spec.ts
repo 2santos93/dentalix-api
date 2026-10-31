@@ -202,6 +202,9 @@ describe('document-type-names (DX-327, R16)', () => {
         checked += 1;
       }
     }
-    expect(checked).toBeGreaterThan(5);
+    expect(checked).toBe(
+      IMPORT_DOC_TYPE_ALIASES.flatMap(([, keys]) => keys).length,
+    );
+    expect(checked).toBeGreaterThan(0);
   });
 });

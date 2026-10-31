@@ -50,7 +50,7 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 const HEADER =
   'tipo_documento;numero_documento;nombres;apellidos;fecha_nacimiento;sexo;telefono;email;notas';
 const CSV = Buffer.from(
-  `${HEADER}\nCC;46000001;Ana;Tope;01/02/1990;F;3100000001;ana@example.com;\n`,
+  `${HEADER}\nNATIONAL_ID;46000001;Ana;Tope;01/02/1990;F;3100000001;ana@example.com;\n`,
   'utf8',
 );
 const BOUNDARY = '----sec046boundary';

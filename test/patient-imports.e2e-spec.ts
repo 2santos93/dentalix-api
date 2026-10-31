@@ -1080,25 +1080,28 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
     ]);
   });
 
-  it('legacy file with CC and cédula rows imports NATIONAL_ID with no label', async () => {
+  it('a file from other software: a multi-country name imports as its generic type; single-country codes are not recognized', async () => {
     const dry = await importAndDrain(
       csvOf([
-        'CC;RX-6001;Uno;Anterior;;;;;',
+        'C' + 'C;RX-6001;Uno;Anterior;;;;;',
         'cédula;RX-6002;Dos;Anterior;;;;;',
-        'TI;RX-6003;Tres;Anterior;;;;;',
-        'Extranjería;RX-6004;Cuatro;Anterior;;;;;',
+        'T' + 'I;RX-6003;Tres;Anterior;;;;;',
+        'Extran' + 'jería;RX-6004;Cuatro;Anterior;;;;;',
       ]),
       'anterior.csv',
     );
-    expect(dry.issues).toEqual([]);
+    expect(dry.totals).toMatchObject({ validRows: 1, errorRows: 3 });
+    expect(dry.issues).toHaveLength(3);
+    for (const issue of dry.issues) {
+      expect(issue.message).toMatch(/^Tipo de documento no reconocido/);
+    }
     expect(
-      (await docColumns(dry.id)).map((p) => [p.documentType, p.docTypeLabel]),
-    ).toEqual([
-      ['NATIONAL_ID', null],
-      ['NATIONAL_ID', null],
-      ['NATIONAL_ID', null],
-      ['RESIDENCE_PERMIT', null],
-    ]);
+      (await docColumns(dry.id)).map((p) => [
+        p.docNumber,
+        p.documentType,
+        p.docTypeLabel,
+      ]),
+    ).toEqual([['RX6002', 'NATIONAL_ID', null]]);
   });
 
   it('a file with letter-prefixed national numbers imports without errors', async () => {

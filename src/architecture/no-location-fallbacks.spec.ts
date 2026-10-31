@@ -1,6 +1,10 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { ISO3166_COUNTRIES } from '../../prisma/reference/iso3166';
+import {
+  IMPORT_DOC_NUMBER_HEADER_ALIASES,
+  IMPORT_DOC_TYPE_ALIASES,
+} from '../modules/patients/domain/legacy-document-codes';
 import { ISO4217_CURRENCIES } from '../../prisma/reference/iso4217';
 
 /**
@@ -689,6 +693,31 @@ function demoDocumentNameHit(): string {
   expect(at).toHaveLength(1);
   return `${relative(SRC, DEMO_DOCUMENT_NAME_FILE)}:${at[0] + 1}`;
 }
+/**
+ * `legacy-document-codes.ts` ya no se exime entero: solo estas líneas, los
+ * alias de importación de uso en muchos países (en América y Europa), una
+ * por una. Un código o un nombre de un solo país (las siglas y nombres
+ * colombianos que había antes) no cabe aquí: añadirlo a la lista hace saltar
+ * las guardas de nombres y siglas.
+ */
+const MULTI_COUNTRY_IMPORT_ALIAS_LINES = [
+  "['NATIONAL_ID', ['cedula']],",
+  "['OTHER', ['dni']],",
+  "'cedula',",
+  "'dni',",
+  "'rut',",
+];
+/** `fichero:línea` de cada una; falla si alguna no está una sola vez. */
+function multiCountryAliasHits(): string[] {
+  const lines = readFileSync(LEGACY_DOCUMENT_CODES_FILE, 'utf8').split('\n');
+  return MULTI_COUNTRY_IMPORT_ALIAS_LINES.map((pinned) => {
+    const at = lines
+      .map((line, i) => (line.trim() === pinned ? i : -1))
+      .filter((i) => i >= 0);
+    expect({ pinned, count: at.length }).toEqual({ pinned, count: 1 });
+    return `${relative(SRC, LEGACY_DOCUMENT_CODES_FILE)}:${at[0] + 1}`;
+  });
+}
 /** `DocType` en un import de `@prisma/client` (también de varias líneas). */
 const PRISMA_DOC_TYPE_IMPORT =
   /import\s+(?:type\s+)?\{[^}]*\bDocType\b[^}]*\}\s*from\s*'@prisma\/client'/g;
@@ -753,27 +782,61 @@ describe('tipos de documento genéricos (DX-327, DX-323)', () => {
     join(ROOT, 'README.md'),
   ];
 
-  it('architecture: no legacy document type or name outside legacy-document-codes.ts', () => {
-    const files = scanned().filter(
-      (file) => file !== LEGACY_DOCUMENT_CODES_FILE,
-    );
+  it('architecture: no legacy document type or country document name, outside the pinned multi-country import aliases', () => {
+    const files = scanned();
+    expect(files).toContain(LEGACY_DOCUMENT_CODES_FILE);
     expect(files.length).toBeGreaterThan(500);
     expect(productionDataFiles().length).toBeGreaterThan(0);
-    const allowed = demoDocumentNameHit();
+    const allowed = [demoDocumentNameHit(), ...multiCountryAliasHits()];
     expect(
-      offending(files, legacyDocTypeHit).filter((hit) => hit !== allowed),
+      offending(files, legacyDocTypeHit).filter(
+        (hit) => !allowed.includes(hit),
+      ),
     ).toEqual([]);
   });
 
-  it("architecture: no other country's document acronym outside legacy-document-codes.ts", () => {
-    // Única excepción: `legacy-document-codes.ts` (alias de los ficheros de
-    // importación, R13). Los tests y las migraciones no se recorren.
-    const files = scanned().filter(
-      (file) => file !== LEGACY_DOCUMENT_CODES_FILE,
-    );
+  it("architecture: no other country's document acronym, outside the pinned multi-country import aliases", () => {
+    // Sin fichero exento: solo las líneas fijadas de los alias de uso en
+    // muchos países. Los tests y las migraciones no se recorren.
+    const files = scanned();
+    expect(files).toContain(LEGACY_DOCUMENT_CODES_FILE);
+    const allowed = multiCountryAliasHits();
     expect(
-      offending(files, (line) => COUNTRY_DOC_ACRONYM.test(fold(line))),
+      offending(files, (line) => COUNTRY_DOC_ACRONYM.test(fold(line))).filter(
+        (hit) => !allowed.includes(hit),
+      ),
     ).toEqual([]);
+  });
+
+  it('import aliases are only the pinned multi-country names: no code or name of a single country', () => {
+    const keys = [
+      ...IMPORT_DOC_TYPE_ALIASES.flatMap(([, list]) => list),
+      ...IMPORT_DOC_NUMBER_HEADER_ALIASES,
+    ];
+    expect([...new Set(keys)].sort()).toEqual(['cedula', 'dni', 'rut']);
+    for (const retired of [
+      'c' + 'c',
+      't' + 'i',
+      'c' + 'e',
+      'ceduladeciu' + 'dadania',
+      'tarjetadeiden' + 'tidad',
+      'ceduladeextran' + 'jeria',
+      'extran' + 'jeria',
+      'r' + 'c',
+      'registro' + 'civil',
+      'nu' + 'ip',
+      'p' + 'ep',
+      'p' + 'pt',
+      'n' + 'it',
+      'c' + 'v',
+      'm' + 's',
+      'a' + 's',
+    ]) {
+      expect({ retired, alias: keys.includes(retired) }).toEqual({
+        retired,
+        alias: false,
+      });
+    }
   });
 
   it('architecture: no production, demo or seed file names the frozen document code, its enum or its column', () => {
@@ -830,7 +893,7 @@ describe('tipos de documento genéricos (DX-327, DX-323)', () => {
     const literals = legacyCode
       .filter((line) => !/^\s*import\b|\bfrom\s+'/.test(line))
       .flatMap((line) => [...line.matchAll(/'([^']*)'/g)].map((m) => m[1]));
-    expect(literals.length).toBeGreaterThan(20);
+    expect(literals.length).toBeGreaterThan(8);
     expect(literals.filter((literal) => !isLegacyKeyLiteral(literal))).toEqual(
       [],
     );

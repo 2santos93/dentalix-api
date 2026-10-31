@@ -10,9 +10,9 @@ import { isDocumentType } from './document-type';
  *    ya emitido (inmutable: no se reescribe) y las filas y el mapeo de una
  *    importación preparada entonces. Las fotos nuevas solo llevan el tipo
  *    genérico.
- * 2. Ficheros de importación de otro software (o de una versión anterior):
- *    la celda «Tipo de documento» puede traer uno de estos códigos o
- *    nombres; se reconocen y se guardan como el tipo genérico, sin etiqueta.
+ * 2. Ficheros de importación de otro software: la celda «Tipo de documento»
+ *    puede traer un nombre de uso en muchos países (`IMPORT_DOC_TYPE_ALIASES`);
+ *    se reconoce y se guarda como el tipo genérico, sin etiqueta.
  *
  * La BD ya no tiene ninguno: la columna antigua quedó congelada con nombres
  * genéricos (migración 20261110130000) y nadie la lee.
@@ -44,52 +44,28 @@ export function docTypeFromStored(code: string): DocumentType {
 }
 
 /**
- * Valores de la celda «Tipo de documento» de un fichero de importación que
- * vienen de otro software, ya como claves normalizadas (`documentTypeKey`).
- * Se comprueban después de los nombres de la clínica y de los genéricos
- * (`GENERIC_DOC_TYPE_NAMES`). Spec de DX-327, Q3.
+ * Nombres de uso en muchos países para la celda «Tipo de documento» de un
+ * fichero de importación de otro software, ya como claves normalizadas
+ * (`documentTypeKey`). Se comprueban después de los nombres de la clínica y
+ * de los genéricos (`GENERIC_DOC_TYPE_NAMES`). Spec de DX-327, Q3.
+ *
+ * Solo nombres de uso en muchos países (cada línea de la lista la fija la
+ * guarda `no-location-fallbacks.spec.ts`). Las siglas y los nombres de un solo
+ * país no se reconocen: un fichero con ellos da
+ * «Tipo de documento no reconocido» y la clínica lo resuelve con el nombre
+ * local de su documento (Ajustes › Tipos de documento).
  */
 export const IMPORT_DOC_TYPE_ALIASES: ReadonlyArray<
   [DocumentType, readonly string[]]
 > = [
-  [
-    'NATIONAL_ID',
-    [
-      'cc',
-      'cedula',
-      'ceduladeciudadania',
-      'cedulaciudadania',
-      'cedulaciudadana',
-      'ti',
-      'tarjetadeidentidad',
-      'tarjetaidentidad',
-    ],
-  ],
-  [
-    'RESIDENCE_PERMIT',
-    ['ce', 'cedulaextranjeria', 'ceduladeextranjeria', 'extranjeria'],
-  ],
-  [
-    'OTHER',
-    [
-      'rc',
-      'registrocivil',
-      'nuip',
-      'pep',
-      'ppt',
-      'dni',
-      'nit',
-      'cv',
-      'ms',
-      'as',
-    ],
-  ],
+  ['NATIONAL_ID', ['cedula']],
+  ['OTHER', ['dni']],
 ];
 
 /**
  * Cabeceras de la columna del NÚMERO de documento en ficheros de otro
  * software (pre-flight I5), ya como claves normalizadas. `import-fields.ts`
- * las añade a sus sinónimos; no son tipos (`rut` no es un valor de tipo).
+ * las añade a sus sinónimos; no son tipos (la tercera no es un valor de tipo).
  */
 export const IMPORT_DOC_NUMBER_HEADER_ALIASES: readonly string[] = [
   'cedula',

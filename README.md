@@ -3136,7 +3136,8 @@ para cualquier clínica y país: `NATIONAL_ID` («Documento nacional»),
 `TAX_ID` («Identificación fiscal») y `OTHER` («Otro documento»). Ningún código
 nombra el documento de un país. Los códigos anteriores a DX-327 solo se
 LEEN en `src/modules/patients/domain/legacy-document-codes.ts` (excepción
-G5.3: JSON ya guardado y alias de los ficheros de importación), y la guarda
+G5.3: JSON ya guardado; allí viven también los alias de los ficheros de
+importación, sin ningún código ni nombre de un solo país), y la guarda
 `src/architecture/no-location-fallbacks.spec.ts` lo comprueba, también sobre
 este README. Migraciones
 `20261030120000_dx327_document_type`,
@@ -3191,7 +3192,11 @@ este README. Migraciones
   cambiaron (nunca los textos). Guardar lo mismo responde 200 sin evento.
 - **Importación**: la columna de tipo reconoce, en este orden, los nombres
   locales de la clínica, los códigos y nombres genéricos, y los alias de
-  ficheros de otro software (`IMPORT_DOC_TYPE_ALIASES`). Dos filas con el mismo número y el mismo tipo
+  ficheros de otro software (`IMPORT_DOC_TYPE_ALIASES`: solo dos nombres de uso
+  en muchos países, fijados línea a línea por la guarda). Las siglas y
+  los nombres de un solo país no se reconocen: la fila da «Tipo de documento no
+  reconocido» y la clínica lo resuelve poniendo ese nombre como nombre local de
+  su documento. Dos filas con el mismo número y el mismo tipo
   genérico son el mismo paciente. Ver «Importación de pacientes» abajo.
 - **BD**: `patients."documentType"` (con `DEFAULT 'OTHER'`) y
   `"docTypeLabel"`, y lo mismo, nullable, en `patient_responsible_parties`.
@@ -4341,8 +4346,11 @@ Módulo `src/modules/patient-imports`; rutas bajo `/api/v1/patient-imports`,
   fichero): nombres y apellidos obligatorios; tipo de documento genérico
   (DX-327) por, en este orden, los nombres locales de la clínica, el código o
   el nombre genérico (`NATIONAL_ID`, «Documento nacional», `PASSPORT`,
-  «Pasaporte»…) y los códigos y sinónimos anteriores, que se aceptan como su
-  tipo genérico y sin etiqueta, o el de por defecto; nº de documento con una
+  «Pasaporte»…) y los alias de uso en muchos países de otro software
+  (`IMPORT_DOC_TYPE_ALIASES`), que se aceptan como su tipo genérico y sin
+  etiqueta, o el de por defecto; las siglas o nombres de un solo país dan
+  «Tipo de documento no reconocido» salvo que la clínica los tenga como nombre
+  local; nº de documento con una
   sola regla para cualquier tipo (sin espacios, puntos, comas, guiones ni
   barras, en mayúsculas, hasta 30 letras y dígitos: «V-12.345.678» →
   «V12345678»; notación científica de Excel detectada); fecha DD/MM/AAAA,

@@ -262,34 +262,46 @@ describe('tipos de documento de la importación (DX-327)', () => {
     },
   );
 
-  it.each([
-    ['C.C.', 'NATIONAL_ID'],
-    ['cc', 'NATIONAL_ID'],
-    ['Cédula', 'NATIONAL_ID'],
-    ['Cédula de ciudadanía', 'NATIONAL_ID'],
-    ['TI', 'NATIONAL_ID'],
-    ['Tarjeta de identidad', 'NATIONAL_ID'],
-    ['CE', 'RESIDENCE_PERMIT'],
-    ['Cédula de extranjería', 'RESIDENCE_PERMIT'],
-    ['Extranjería', 'RESIDENCE_PERMIT'],
-  ])(
-    'import aliases from other software map to their generic type with no label (%s → %s)',
-    (raw, type) => {
-      // parseDocType devuelve solo el tipo: no hay etiqueta que derivar (Q3).
-      expect(parseDocType(raw, NO_NAMES)).toBe(type);
-    },
-  );
-
-  it('alias dni and nit map to OTHER; rut is not a type', () => {
+  it('import aliases from other software map to their generic type with no label', () => {
+    // parseDocType devuelve solo el tipo: no hay etiqueta que derivar (Q3).
+    expect(parseDocType('Cédula', NO_NAMES)).toBe('NATIONAL_ID');
+    expect(parseDocType('cedula', NO_NAMES)).toBe('NATIONAL_ID');
     expect(parseDocType('DNI', NO_NAMES)).toBe('OTHER');
-    expect(parseDocType('NIT', NO_NAMES)).toBe('OTHER');
-    expect(parseDocType('RC', NO_NAMES)).toBe('OTHER');
     // Pre-flight I7: `rut` solo era cabecera del número; no se añade nada.
     expect(parseDocType('RUT', NO_NAMES)).toBeNull();
     expect(typeError('RUT', NO_NAMES)).toMatch(
       /^Tipo de documento no reconocido/,
     );
   });
+
+  it.each([
+    'C.C.',
+    'cc',
+    'Cédula de ciudadanía',
+    'TI',
+    'Tarjeta de identidad',
+    'CE',
+    'Cédula de extranjería',
+    'Extranjería',
+    'NIT',
+    'RC',
+    'Registro civil',
+    'NUIP',
+    'PEP',
+    'PPT',
+    'CV',
+    'MS',
+    'AS',
+  ])(
+    'codes and names of a single country are not import aliases (%s): the clinic names its own',
+    (raw) => {
+      expect(parseDocType(raw, NO_NAMES)).toBeNull();
+      expect(typeError(raw, NO_NAMES)).toMatch(
+        /^Tipo de documento no reconocido/,
+      );
+      expect(parseDocType(raw, { NATIONAL_ID: raw })).toBe('NATIONAL_ID');
+    },
+  );
 
   it('number header synonyms cedula, dni and rut recognize the number column', () => {
     for (const header of ['Cédula', 'DNI', 'RUT']) {
@@ -477,11 +489,11 @@ describe('tipos de documento de la importación (DX-327)', () => {
     expect(parseDocType('nombre local', NO_NAMES)).toBeNull();
   });
 
-  it("legacy: a clinic's local name equal to a legacy key of another type wins", () => {
-    // «CE» era un sinónimo anterior de RESIDENCE_PERMIT; la clínica lo usa
-    // para TAX_ID: gana la clínica (R19, prioridad 1).
-    expect(parseDocType('CE', { TAX_ID: 'CE' })).toBe('TAX_ID');
-    expect(parseDocType('CE', NO_NAMES)).toBe('RESIDENCE_PERMIT');
+  it("a clinic's local name equal to an import alias of another type wins", () => {
+    // «DNI» es un alias de OTHER; la clínica lo usa para su documento
+    // nacional: gana la clínica (R19, prioridad 1).
+    expect(parseDocType('DNI', { NATIONAL_ID: 'DNI' })).toBe('NATIONAL_ID');
+    expect(parseDocType('DNI', NO_NAMES)).toBe('OTHER');
     // La clínica que llama «Cédula de identidad» a su documento nacional lo
     // importa con ese nombre; sin configurarlo, no es ningún tipo.
     const names: ClinicDocumentTypeNames = {
@@ -705,12 +717,12 @@ describe('dedupeRows', () => {
     expect(r.conflicts).toBe(0);
   });
 
-  it('legacy CC and TI with the same key are the same type after the migration', () => {
-    // Una fila «CC» y otra «TI» del fichero dan las dos NATIONAL_ID (R3), y un
-    // paciente que la BD tenía como TI ya es NATIONAL_ID: repetido y
-    // existente, nunca «otro tipo» (R12).
-    const cc = parseDocType('CC', NO_NAMES);
-    const ti = parseDocType('TI', NO_NAMES);
+  it('two rows of the same generic type with the same key are the same document', () => {
+    // Una fila «Cédula» y otra «NATIONAL_ID» del fichero dan las dos
+    // NATIONAL_ID (R3), y un paciente que la BD ya tiene como NATIONAL_ID:
+    // repetido y existente, nunca «otro tipo» (R12).
+    const cc = parseDocType('Cédula', NO_NAMES);
+    const ti = parseDocType('NATIONAL_ID', NO_NAMES);
     expect([cc, ti]).toEqual(['NATIONAL_ID', 'NATIONAL_ID']);
     const r = dedupeRows(
       [
