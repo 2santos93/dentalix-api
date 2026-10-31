@@ -148,7 +148,7 @@ export class AnesthesiaDoseCheckDto {
   @ApiPropertyOptional({
     format: 'date-time',
     description:
-      'Hora de la administración; por defecto, ahora. No puede ser futura. Centra la ventana de 24 h del acumulado del paciente (DX-418): manda la misma al previsualizar y al guardar.',
+      'Hora de la administración; por defecto, ahora. No puede ser futura. Decide la ventana de 24 h del acumulado del paciente, que la contiene (DX-418): manda la misma al previsualizar y al guardar.',
   })
   @IsOptional()
   @IsDateString()
@@ -258,12 +258,12 @@ export class AnesthesiaDoseWindowDto {
   @ApiProperty({
     example: 24,
     description:
-      'DX-418: ventana MÓVIL de 24 h alrededor de la administración, no el día civil de la sede: las dosis máximas de anestésico local son por sesión / 24 h, y con el día civil 3 carpules a las 23:30 y 3 a las 00:30 empezarían de cero.',
+      'DX-418: ventana MÓVIL de 24 h, no el día civil de la sede: las dosis máximas de anestésico local son por sesión / 24 h, y con el día civil 3 carpules a las 23:30 y 3 a las 00:30 empezarían de cero. Es la ventana de 24 h que contiene la administración con más acumulado: «ahora», las últimas 24 h; anotada tarde, puede ser la que acaba en una dosis posterior ya registrada. Nunca suma dosis a más de 24 h entre sí.',
   })
   hours!: number;
   @ApiProperty({ format: 'date-time', description: 'Inicio (incluido)' })
   from!: Date;
-  @ApiProperty({ format: 'date-time', description: 'Fin (excluido)' })
+  @ApiProperty({ format: 'date-time', description: 'Fin (incluido)' })
   to!: Date;
   @ApiProperty({
     type: [AnesthesiaDoseWindowPartDto],

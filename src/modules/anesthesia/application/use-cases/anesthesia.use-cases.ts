@@ -33,6 +33,8 @@ import {
   type DoseWindowPart,
   doseWindowAround,
   doseWindowBreakdown,
+  isInDoseWindow,
+  worstDoseWindow,
 } from '../../domain/anesthesia-window';
 import {
   assertAuthor,
@@ -68,7 +70,7 @@ export interface AnesthesiaDoseInput {
   /** Peso anotado en el sillón; si no viene, el de la anamnesis vigente. */
   weightKg?: number;
   /**
-   * Hora de la administración; por defecto, ahora. Centra la ventana de 24 h
+   * Hora de la administración; por defecto, ahora. Decide la ventana de 24 h
    * del acumulado (DX-418): la previsualización y el guardado usan la misma.
    */
   administeredAt?: Date;
@@ -220,7 +222,7 @@ function conflictMessage(summary: AnesthesiaDoseSummary): string {
  * previsualización.
  *
  * DX-418: el acumulado y el tope son del PACIENTE en una ventana móvil de
- * 24 h alrededor de la administración (`anesthesia-window.ts`, por qué no el
+ * 24 h que contiene la administración (`anesthesia-window.ts`, por qué no el
  * día civil), sumando todas sus evoluciones, sedes y profesionales de esta
  * clínica; el bloqueo es por paciente.
  */
@@ -267,18 +269,32 @@ export class AnesthesiaUseCases {
     return at;
   }
 
-  private compute(
+  /**
+   * `prior.window` es lo leído en `doseWindowAround(at)` (±24 h); el
+   * acumulado es el de la peor ventana de 24 h que contiene `at`
+   * (`worstDoseWindow`), que también se devuelve con sus registros para el
+   * desglose.
+   */
+  private compute<R extends AnesthesiaAdministration>(
     patient: AnesthesiaPatientContext,
     entry: AnesthesiaEntryRef,
-    prior: AnesthesiaRecordPrior,
+    prior: { entry: AnesthesiaAdministration[]; window: R[] },
+    at: Date,
     input: AnesthesiaDoseInput | null,
     product: AnestheticProduct | null,
-  ): Omit<AnesthesiaCheckResult, 'window'> {
+  ): Omit<AnesthesiaCheckResult, 'window'> & {
+    window: DoseWindow;
+    windowRecords: R[];
+  } {
     if (input && !isValidCarpules(input.carpules)) {
       throw new BadRequestException(CARPULES_INVALID_MESSAGE);
     }
     const weight = resolveWeight(input?.weightKg, patient, prior, entry);
-    const lines = linesOf(prior.window);
+    const window = worstDoseWindow(at, prior.window, weight.weightKg);
+    const windowRecords = prior.window.filter((r) =>
+      isInDoseWindow(r.administeredAt, window),
+    );
+    const lines = linesOf(windowRecords);
     if (input && product) {
       lines.push({ anesthetic: snapshotOf(product), carpules: input.carpules });
     }
@@ -290,6 +306,8 @@ export class AnesthesiaUseCases {
     const ageYears = ageOf(patient, entry, this.now());
     return {
       summary,
+      window,
+      windowRecords,
       ageYears,
       weightSource: weight.source,
       weightRequired:
@@ -331,14 +349,20 @@ export class AnesthesiaUseCases {
     const at = this.administeredAt(input);
     const { patient, entry } = await this.context(patientId, entryId);
     const product = await this.anesthetic(input.anestheticId);
-    const window = doseWindowAround(at);
-    const prior = await this.prior(patientId, entryId, window);
-    const result = this.compute(patient, entry, prior, input, product);
+    const prior = await this.prior(patientId, entryId, doseWindowAround(at));
+    const { window, windowRecords, ...result } = this.compute(
+      patient,
+      entry,
+      prior,
+      at,
+      input,
+      product,
+    );
     return {
       ...result,
       window: this.windowView(
         window,
-        prior.window,
+        windowRecords,
         result.summary.weightKg,
         entryId,
         lineMg(snapshotOf(product), input.carpules),
@@ -357,17 +381,17 @@ export class AnesthesiaUseCases {
     }
   > {
     const { patient, entry } = await this.context(patientId, entryId);
-    const window = doseWindowAround(this.now());
-    const prior = await this.prior(patientId, entryId, window);
-    const result = this.compute(patient, entry, prior, null, null);
+    const now = this.now();
+    const prior = await this.prior(patientId, entryId, doseWindowAround(now));
+    const result = this.compute(patient, entry, prior, now, null, null);
     return {
       records: prior.entry,
       summary: result.summary,
       ageYears: result.ageYears,
       weightRequired: result.weightRequired,
       window: this.windowView(
-        window,
-        prior.window,
+        result.window,
+        result.windowRecords,
         result.summary.weightKg,
         entryId,
         null,
@@ -413,13 +437,19 @@ export class AnesthesiaUseCases {
 
     // El acumulado que decidió el guardado, para devolverlo con el registro.
     const decided: { summary?: AnesthesiaDoseSummary } = {};
-    const window = doseWindowAround(administeredAt);
     const created = await this.repo.record(
       patientId,
       entryId,
-      window,
+      doseWindowAround(administeredAt),
       (prior) => {
-        const result = this.compute(patient, entry, prior, input, product);
+        const result = this.compute(
+          patient,
+          entry,
+          prior,
+          administeredAt,
+          input,
+          product,
+        );
         if (result.weightRequired) {
           throw new BadRequestException(PEDIATRIC_WEIGHT_REQUIRED_MESSAGE);
         }

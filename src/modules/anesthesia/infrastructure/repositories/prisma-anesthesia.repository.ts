@@ -130,7 +130,8 @@ function readWeight(value: Prisma.JsonValue | null): number | null {
 }
 
 /**
- * Filtro de la ventana del paciente (DX-418): todas sus evoluciones y sedes;
+ * Filtro del rango del paciente (DX-418, cerrado: `doseWindowAround`): todas
+ * sus evoluciones y sedes;
  * la RLS de la transacción deja fuera las de otra clínica. Lo sirve el índice
  * `anesthesia_administrations_patient_time_idx` (tenant, paciente, hora).
  */
@@ -140,7 +141,7 @@ function windowWhere(
 ): Prisma.AnesthesiaAdministrationWhereInput {
   return {
     patientId,
-    administeredAt: { gte: window.from, lt: window.to },
+    administeredAt: { gte: window.from, lte: window.to },
   };
 }
 

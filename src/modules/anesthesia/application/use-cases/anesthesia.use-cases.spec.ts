@@ -594,7 +594,10 @@ describe('acumulado del paciente en 24 h (DX-418)', () => {
     };
     const check = await uc.check(PATIENT, ENTRY_2, lateEntry);
     expect(check.summary.percent).toBe(154);
-    expect(check.window.from).toEqual(new Date(NOW.getTime() - 27 * HOUR));
+    // La peor ventana de 24 h que contiene la hora anotada: la que acaba en
+    // la dosis de las 15:00, no un tramo de 48 h.
+    expect(check.window.from).toEqual(new Date(NOW.getTime() - 24 * HOUR));
+    expect(check.window.to).toEqual(NOW);
     await expect(
       uc.record(PATIENT, ENTRY_2, { ...base, ...lateEntry }, OTRO_AUTOR),
     ).rejects.toBeInstanceOf(ConflictException);
@@ -604,6 +607,86 @@ describe('acumulado del paciente en 24 h (DX-418)', () => {
         administeredAt: new Date(NOW.getTime() + HOUR),
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('anotada tarde: suma la peor ventana de 24 h que la contiene, nunca dos dosis a más de 24 h entre sí', async () => {
+    const { uc, lido } = await twoEntries();
+    // A (hace 28 h 30 min) y B (hace 15 min) distan más de 24 h: ninguna
+    // ventana de 24 h las tiene a las dos.
+    await uc.record(
+      PATIENT,
+      ENTRY,
+      {
+        ...base,
+        anestheticId: lido.id,
+        carpules: 2,
+        administeredAt: new Date(NOW.getTime() - 28.5 * HOUR),
+      },
+      AUTHOR,
+    );
+    await uc.record(
+      PATIENT,
+      ENTRY,
+      {
+        ...base,
+        anestheticId: lido.id,
+        carpules: 2,
+        administeredAt: new Date(NOW.getTime() - 0.25 * HOUR),
+      },
+      AUTHOR,
+    );
+    // Anotada tarde (hace 5 h) entre las dos: A + C = B + C = 77 %, no 128 %.
+    const late = {
+      anestheticId: lido.id,
+      carpules: 1,
+      administeredAt: new Date(NOW.getTime() - 5 * HOUR),
+    };
+    const check = await uc.check(PATIENT, ENTRY_2, late);
+    expect(check.summary.totalMg).toBe(108);
+    expect(check.summary.percent).toBe(77);
+    expect(check.window.parts).toHaveLength(1);
+    expect(check.window.to.getTime() - check.window.from.getTime()).toBe(
+      24 * HOUR,
+    );
+    const saved = await uc.record(
+      PATIENT,
+      ENTRY_2,
+      { ...base, ...late },
+      OTRO_AUTOR,
+    );
+    expect(saved.cumulativePercent).toBe(77);
+    expect(saved.overrideReason).toBeNull();
+
+    // Si la de después la empuja por encima, esa ventana es la que decide.
+    const worse = await uc.check(PATIENT, ENTRY_2, {
+      ...late,
+      carpules: 2,
+      administeredAt: new Date(NOW.getTime() - 4 * HOUR),
+    });
+    // Ventana que acaba en B: B (72) + C (36) + nueva (72) = 180 mg.
+    expect(worse.summary.totalMg).toBe(180);
+    expect(worse.summary.level).toBe('EXCEEDED');
+    expect(worse.window.to).toEqual(new Date(NOW.getTime() - 0.25 * HOUR));
+  });
+
+  it('la cota de hace justo 24 h cuenta en la previsualización y en el GET', async () => {
+    const { uc, lido, repo } = await twoEntries();
+    await uc.record(
+      PATIENT,
+      ENTRY,
+      {
+        ...base,
+        anestheticId: lido.id,
+        carpules: 1,
+        administeredAt: new Date(NOW.getTime() - 24 * HOUR),
+      },
+      AUTHOR,
+    );
+    expect(repo.records).toHaveLength(1);
+    const listed = await uc.listByEntry(PATIENT, ENTRY_2);
+    expect(listed.summary.totalMg).toBe(36);
+    expect(listed.window.from).toEqual(new Date(NOW.getTime() - 24 * HOUR));
+    expect(listed.window.to).toEqual(NOW);
   });
 
   it('un miembro de otra sede también ve lo puesto en esta (la seguridad del paciente manda)', async () => {

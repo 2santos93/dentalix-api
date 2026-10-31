@@ -110,8 +110,8 @@ export interface AnesthesiaRepository {
   ): Promise<AnesthesiaAdministration[]>;
   listByPatient(patientId: string): Promise<AnesthesiaAdministration[]>;
   /**
-   * DX-418: administraciones del paciente con `administeredAt` dentro de la
-   * ventana, en TODAS sus evoluciones y sedes de esta clínica (nunca de
+   * DX-418: administraciones del paciente con `administeredAt` dentro del
+   * rango cerrado `[from, to]`, en TODAS sus evoluciones y sedes de esta clínica (nunca de
    * otra: RLS), con el nombre del profesional y de la sede para el desglose.
    * En orden de administración.
    */

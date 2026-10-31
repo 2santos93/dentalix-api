@@ -202,6 +202,41 @@ describe('anestesia: acumulado del paciente y bloqueo por paciente (DX-418, int)
     }
   });
 
+  it('sin interbloqueo con la sedación (DX-407): evolución FOR UPDATE + FK al paciente mientras la anestesia tiene al paciente', async () => {
+    const { patientId, e1 } = await childWithTwoEntries();
+    let anesthesiaStatus = 0;
+    let anesthesiaDone: Promise<void> = Promise.resolve();
+    await raw.$transaction(
+      async (tx) => {
+        // Lo que hace `createRecord` de la sedación: bloquea la evolución...
+        await tx.$queryRaw`
+          SELECT "id" FROM "clinical_entries"
+          WHERE "id" = ${e1}::uuid AND "patientId" = ${patientId}::uuid
+          FOR UPDATE`;
+        // ...mientras la anestesia de la MISMA evolución toma al paciente y
+        // espera a la evolución (FK del INSERT)...
+        anesthesiaDone = post(a, anesthesia(patientId, e1), {
+          ...LIDO3,
+          anestheticId: lidoA,
+        }).then((res) => {
+          anesthesiaStatus = res.status;
+        });
+        // Más que deadlock_timeout (1 s): un ciclo ya habría saltado.
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        expect(anesthesiaStatus).toBe(0);
+        // ...y el INSERT de la hoja toma la FK del paciente (FOR KEY SHARE):
+        // compatible con el FOR NO KEY UPDATE de la anestesia, no espera.
+        await tx.$queryRaw`
+          SELECT "id" FROM "patients"
+          WHERE "id" = ${patientId}::uuid FOR KEY SHARE`;
+      },
+      { timeout: 20_000 },
+    );
+    // Confirmada la «sedación», la anestesia sigue y entra (sin 40P01).
+    await anesthesiaDone;
+    expect(anesthesiaStatus).toBe(201);
+  });
+
   it('con motivo el segundo pasa y sella el acumulado de las dos evoluciones', async () => {
     const { patientId, e1, e2 } = await childWithTwoEntries();
     await post(a, anesthesia(patientId, e1), {

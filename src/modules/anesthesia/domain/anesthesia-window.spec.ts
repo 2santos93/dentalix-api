@@ -4,6 +4,7 @@ import {
   doseWindowAround,
   doseWindowBreakdown,
   isInDoseWindow,
+  worstDoseWindow,
   type WindowAdministration,
 } from './anesthesia-window';
 import { SAMPLE_ANESTHETICS } from './sample-anesthetics';
@@ -53,14 +54,15 @@ function record(
 }
 
 describe('ventana del acumulado del paciente (DX-418)', () => {
-  it('es de 24 h a cada lado de la administración: [desde, hasta)', () => {
+  it('lee 24 h a cada lado de la administración, cerrado: [desde, hasta]', () => {
     expect(ANESTHESIA_DOSE_WINDOW_HOURS).toBe(24);
     const w = doseWindowAround(AT);
     expect(w.from.toISOString()).toBe('2026-10-29T15:00:00.000Z');
     expect(w.to.toISOString()).toBe('2026-10-31T15:00:00.000Z');
     expect(isInDoseWindow(new Date(AT.getTime() - 23.9 * HOUR), w)).toBe(true);
     expect(isInDoseWindow(w.from, w)).toBe(true);
-    expect(isInDoseWindow(w.to, w)).toBe(false);
+    expect(isInDoseWindow(w.to, w)).toBe(true);
+    expect(isInDoseWindow(new Date(w.to.getTime() + 1), w)).toBe(false);
     expect(isInDoseWindow(new Date(AT.getTime() - 25 * HOUR), w)).toBe(false);
     // No es el día civil: las 23:30 y las 00:30 cuentan juntas.
     const lateNight = new Date('2026-10-30T23:30:00-05:00');
@@ -70,6 +72,48 @@ describe('ventana del acumulado del paciente (DX-418)', () => {
         doseWindowAround(lateNight),
       ),
     ).toBe(true);
+  });
+
+  it('peor ventana de 24 h que contiene la hora: la que acaba en ella o en una dosis posterior, nunca 48 h', () => {
+    const at = AT;
+    const before = record({
+      carpules: 2,
+      administeredAt: new Date(at.getTime() - 20 * HOUR),
+    });
+    const after = record({
+      carpules: 2,
+      administeredAt: new Date(at.getTime() + 10 * HOUR),
+    });
+    // Sin nada después: las 24 h que acaban en la hora.
+    expect(worstDoseWindow(at, [before], 20)).toEqual({
+      from: new Date(at.getTime() - 24 * HOUR),
+      to: at,
+    });
+    // Con más carga en la que acaba en la dosis posterior, esa (tiene las dos).
+    const near = record({
+      carpules: 2,
+      administeredAt: new Date(at.getTime() - 10 * HOUR),
+    });
+    expect(worstDoseWindow(at, [near, after], 20)).toEqual({
+      from: new Date(at.getTime() - 14 * HOUR),
+      to: new Date(at.getTime() + 10 * HOUR),
+    });
+    // A más de 24 h entre sí: ninguna ventana tiene las dos; a igualdad, la
+    // que acaba en la hora.
+    const far = record({
+      carpules: 2,
+      administeredAt: new Date(at.getTime() + 23 * HOUR),
+    });
+    const w = worstDoseWindow(at, [before, far], 20);
+    expect(w.to).toEqual(at);
+    // Sin peso decide por mg.
+    const big = record({
+      carpules: 3,
+      administeredAt: new Date(at.getTime() + 23 * HOUR),
+    });
+    expect(worstDoseWindow(at, [before, big], null).to).toEqual(
+      big.administeredAt,
+    );
   });
 
   it('criterio: 20 kg, 3 carpules de lidocaína en E1 y 3 en E2 → 216 mg, 154 %, bloqueante', () => {

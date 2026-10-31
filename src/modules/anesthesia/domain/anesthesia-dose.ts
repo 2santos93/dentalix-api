@@ -21,9 +21,9 @@ import { findAllergyMatches } from '../../prescriptions/domain/allergy-match';
  * Versionado: `ANESTHESIA_DOSE_RULES_VERSION` va en cada registro. Cambiar un
  * umbral, una regla o un texto obliga a subir la versión.
  *  - V1 (DX-307): las líneas eran las de UNA evolución.
- *  - V2 (DX-418): las líneas son todas las del paciente a menos de 24 h de
- *    la administración, en cualquier evolución y sede de la clínica
- *    (`anesthesia-window.ts`).
+ *  - V2 (DX-418): las líneas son todas las del paciente en la ventana de
+ *    24 h que contiene la administración con más acumulado, en cualquier
+ *    evolución y sede de la clínica (`anesthesia-window.ts`).
  */
 export const ANESTHESIA_DOSE_RULES_VERSION = 'ANESTHESIA_DOSE_V2';
 
