@@ -1,7 +1,7 @@
 -- DX-438 (DB-066): consulta de diagnóstico (solo lectura) de los asientos de
 -- saldo a favor cuya moneda no es la de su plan. Esos asientos no cuentan en
 -- ningún saldo (las lecturas suman solo la moneda actual del plan): es saldo
--- del paciente que no se ve. Desde 20261107140000_dx438_credit_currency_lock
+-- del paciente que no se ve. Desde 20261107150000_dx438_credit_currency_lock
 -- ya no se pueden producir; con DX-253 recién desplegado debería dar 0 filas.
 -- No borra ni cambia nada: corregirlos es decisión de la clínica.
 --

@@ -1316,7 +1316,7 @@ saldo desaparecería de todos los saldos sin error.
   sesión: dentalix_app (siempre con su clínica) y el superusuario lo ven; un
   owner sin superusuario y sin `app.current_tenant` no ve los asientos, así
   que el mantenimiento a mano fija la clínica antes. Migración aditiva
-  `20261107140000_dx438_credit_currency_lock` (solo función + trigger).
+  `20261107150000_dx438_credit_currency_lock` (solo función + trigger).
 - **Diagnóstico** (solo lectura): `prisma/scripts/credit-currency-report.sql`
   lista los asientos en otra moneda que su plan (`ENTRY_CURRENCY_MISMATCH`, con
   clínica, paciente, plan, asiento, tipo, importe y las dos monedas). Debe dar
