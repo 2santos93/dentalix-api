@@ -51,6 +51,16 @@ describe('redactSensitive', () => {
     });
   });
 
+  it('oculta el triaje de una urgencia (DX-470): es un dato de salud', () => {
+    expect(
+      redactSensitive({
+        triageFlags: ['PAIN'],
+        triageNote: 'Muela 36',
+        walkIn: true,
+      }),
+    ).toEqual({ triageFlags: REDACTED, triageNote: REDACTED, walkIn: true });
+  });
+
   it('no modifica el objeto original', () => {
     const headers = { authorization: 'Bearer x' };
     redactSensitive(headers);

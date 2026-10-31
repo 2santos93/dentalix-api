@@ -108,6 +108,10 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
       lateCancellation: overrides.lateCancellation ?? null,
       noShowMarkedAt: overrides.noShowMarkedAt ?? null,
       policyVersionId: overrides.policyVersionId ?? null,
+      triageFlags: overrides.triageFlags ?? [],
+      triageNote: overrides.triageNote ?? null,
+      walkIn: overrides.walkIn ?? false,
+      overbooked: overrides.overbooked ?? false,
       preArrivalStatus: overrides.preArrivalStatus ?? null,
       createdAt: overrides.createdAt ?? now,
       updatedAt: overrides.updatedAt ?? now,
@@ -152,6 +156,10 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
       lateCancellation: row.lateCancellation,
       noShowMarkedAt: row.noShowMarkedAt,
       policyVersionId: row.policyVersionId,
+      triageFlags: row.triageFlags,
+      triageNote: row.triageNote,
+      walkIn: row.walkIn,
+      overbooked: row.overbooked,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };
@@ -205,6 +213,10 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
       lateCancellation: null,
       noShowMarkedAt: null,
       policyVersionId: null,
+      triageFlags: [],
+      triageNote: null,
+      walkIn: false,
+      overbooked: false,
       preArrivalStatus: null,
       createdAt: now,
       updatedAt: now,
@@ -249,6 +261,8 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
       .filter((r) => r.providerId === providerId)
       .filter((r) => r.deletedAt === null)
       .filter((r) => r.status !== AppointmentStatus.CANCELLED)
+      // DX-470: un sobrecupo no ocupa el hueco del profesional.
+      .filter((r) => !r.overbooked)
       // Half-open interval overlap — see PrismaAppointmentRepository for the
       // identical rationale: adjacent appointments (end === start) do NOT
       // satisfy both conditions, so they don't overlap.
@@ -406,6 +420,8 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
 
   /** Test helper: nombres de los profesionales que devuelve `listInClinic`. */
   readonly providerNames = new Map<string, string>();
+  /** Test helper (DX-470): tipos de cita de urgencia. */
+  readonly urgentTypeIds = new Set<string>();
 
   listInClinic(params: ListInClinicParams): Promise<InClinicAppointment[]> {
     const items = this.rows
@@ -417,6 +433,9 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
       .map((r) => ({
         ...this.toEntity(r),
         providerName: this.providerNames.get(r.providerId) ?? null,
+        urgent:
+          r.appointmentTypeId !== null &&
+          this.urgentTypeIds.has(r.appointmentTypeId),
       }));
     return Promise.resolve(items);
   }

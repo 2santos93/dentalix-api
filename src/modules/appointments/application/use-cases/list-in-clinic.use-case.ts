@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { AppointmentStatus, ClinicRole } from '@prisma/client';
+import { AppointmentStatus, ClinicRole, TriageFlag } from '@prisma/client';
 import { APPOINTMENT_REPOSITORY } from '../../domain/ports/appointment-repository.port';
 import type {
   AppointmentRepository,
@@ -41,7 +41,10 @@ export interface ListInClinicInput {
   userId: string;
 }
 
-/** Una persona del panel: nombre y horas, nada clínico (ni motivo ni notas). */
+/**
+ * Una persona del panel: nombre y horas, nada de la historia (ni motivo ni
+ * notas). DX-470: la urgencia y su triaje de recepción sí.
+ */
 export interface InClinicItem {
   appointmentId: string;
   patientId: string;
@@ -66,6 +69,14 @@ export interface InClinicItem {
    * permitidas al usuario): el aviso «reservado en la cita del…».
    */
   planItemsReservedElsewhere: PlanItemReservedElsewhere[];
+  /** DX-470: el tipo de la cita es de urgencia. */
+  urgent: boolean;
+  /** DX-470: llegó sin cita, y si se atiende en sobrecupo. */
+  walkIn: boolean;
+  overbooked: boolean;
+  /** DX-470: triaje de recepción (personal con acceso a la sede). */
+  triageFlags: TriageFlag[];
+  triageNote: string | null;
 }
 
 export interface InClinicView<Item extends InClinicItem = InClinicItem> {
@@ -116,6 +127,11 @@ function toItem(
     waitedMinutes: minutesSince(arrived, a.seatedAt ?? now),
     punctuality: arrivalPunctuality(a.start, arrived),
     planItemsReservedElsewhere: reserved.get(a.id) ?? [],
+    urgent: a.urgent,
+    walkIn: a.walkIn,
+    overbooked: a.overbooked,
+    triageFlags: a.triageFlags,
+    triageNote: a.triageNote,
   };
 }
 
