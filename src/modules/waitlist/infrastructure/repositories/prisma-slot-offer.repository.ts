@@ -83,7 +83,14 @@ export class PrismaSlotOfferRepository implements SlotOfferRepository {
           include: {
             patient: { select: { firstName: true } },
             location: {
-              select: { id: true, name: true, address: true, timeZone: true },
+              select: {
+                id: true,
+                name: true,
+                address: true,
+                timeZone: true,
+                locale: true,
+                hourCycle: true,
+              },
             },
             waitlistEntry: {
               select: {
@@ -125,6 +132,8 @@ export class PrismaSlotOfferRepository implements SlotOfferRepository {
           locationName: row.location.name,
           locationAddress: row.location.address,
           timeZone: requireLocationTimeZone(row.location),
+          locale: row.location.locale,
+          hourCycle: row.location.hourCycle,
           currentAppointmentStart: row.appointment?.start ?? null,
           appointmentTypeId: type?.active ? type.id : null,
         };

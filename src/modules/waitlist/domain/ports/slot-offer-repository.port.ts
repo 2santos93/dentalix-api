@@ -27,6 +27,9 @@ export interface PublicSlotOffer {
   locationName: string;
   locationAddress: string | null;
   timeZone: string;
+  /** Formato de la sede (locale BCP 47 y 12/24 h) para pintar la hora como ella. */
+  locale: string | null;
+  hourCycle: string | null;
   /** La cita que se adelantaría (solo citas «Adelantar si hay hueco»). */
   currentAppointmentStart: Date | null;
   /** Tipo de la entrada de pendientes, si sigue activo (la cita nace con él). */

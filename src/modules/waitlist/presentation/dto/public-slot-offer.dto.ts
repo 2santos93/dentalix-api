@@ -25,6 +25,17 @@ export class PublicSlotOfferDetailsDto {
   @ApiProperty({ example: 'America/Bogota' })
   timeZone!: string;
 
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'es-CO',
+    description: 'Locale de la sede: la página pinta el día y la hora como la sede.',
+  })
+  locale!: string | null;
+
+  @ApiProperty({ type: String, nullable: true, example: 'h12' })
+  hourCycle!: string | null;
+
   @ApiProperty({ type: String, nullable: true })
   providerName!: string | null;
 

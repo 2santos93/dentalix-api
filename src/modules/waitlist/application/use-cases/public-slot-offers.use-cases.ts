@@ -37,6 +37,8 @@ export interface PublicSlotOfferDetails {
   start: Date;
   end: Date;
   timeZone: string;
+  locale: string | null;
+  hourCycle: string | null;
   providerName: string | null;
   locationName: string;
   locationAddress: string | null;
@@ -63,6 +65,8 @@ function details(offer: PublicSlotOffer): PublicSlotOfferDetails {
     start: offer.slotStart,
     end: offer.appointmentEnd,
     timeZone: offer.timeZone,
+    locale: offer.locale,
+    hourCycle: offer.hourCycle,
     providerName: offer.providerName,
     locationName: offer.locationName,
     locationAddress: offer.locationAddress,
