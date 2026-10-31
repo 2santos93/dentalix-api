@@ -7,7 +7,8 @@
 -- ADD VALUE va en su propio fichero: un valor nuevo no se puede usar en la
 -- misma transacción que lo crea.
 --
--- Fecha: posterior a la última migración existente (20261107120100, DX-427).
+-- Fecha: posterior a las migraciones de main en el momento del rebase
+-- (20261107150000, DX-438).
 --
 -- Compatible hacia atrás: solo AÑADE un valor que el código anterior no usa.
 
