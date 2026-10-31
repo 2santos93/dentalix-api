@@ -425,7 +425,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // (CLINICAL); presentarlo, quien lo decide; rechazarlo, además recepción,
   // que llama al paciente desde la lista de seguimiento (ADMIN y recepción).
   'GET /treatment-plans/pending-follow-up': BILLING,
+  'GET /treatment-plans/pending-follow-up/count': BILLING,
   'GET /treatment-plans/unscheduled': EVERY_ROLE,
+  'GET /treatment-plans/unscheduled/count': EVERY_ROLE,
   'GET /treatment-plans/:id/visits': EVERY_ROLE,
   'PATCH /treatment-plans/:id/visits': PLAN_DECIDERS,
   'POST /treatment-plans/:id/present': PLAN_DECIDERS,
@@ -571,6 +573,7 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // Cartera por antigüedad: loop/informes/DX-145.md. El CSV es un dato
   // personal de muchos pacientes: solo ADMIN.
   'GET /receivables/aging': BILLING,
+  'GET /receivables/aging/summary': BILLING,
   'GET /receivables/aging.csv': ADMIN_ONLY,
   // Descuentos (loop/informes/DX-204.md): la política la leen quienes editan
   // ítems de plan y la cambia ADMIN; el informe y su CSV, solo ADMIN.

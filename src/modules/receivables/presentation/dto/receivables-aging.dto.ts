@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, PickType } from '@nestjs/swagger';
 import {
   CollectionChannel,
   CollectionOutcome,
@@ -279,3 +279,10 @@ export class ReceivablesAgingPageDto {
   })
   totals!: AgingTotalDto[];
 }
+
+// GET /receivables/aging/summary (Inicio, I1): la cabecera de la cartera sin
+// filas de pacientes.
+export class ReceivablesAgingSummaryDto extends PickType(
+  ReceivablesAgingPageDto,
+  ['asOf', 'scope', 'totals'] as const,
+) {}

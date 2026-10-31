@@ -19,6 +19,8 @@ import { DrainAllocationRebalancesInterceptor } from '../../payments/presentatio
 import { Audit } from '../../audit/presentation/audit.decorator';
 import { PlanVisitsService } from '../application/plan-visits.service';
 import {
+  UnscheduledPlansCountDto,
+  UnscheduledPlansCountQueryDto,
   UnscheduledPlansQueryDto,
   UpdatePlanVisitsDto,
   PlanVisitsDto,
@@ -43,6 +45,16 @@ export class PlanVisitsController {
   @Audit({ action: 'VIEW', resource: 'TREATMENT_PLAN' })
   list(@Query() input: UnscheduledPlansQueryDto) {
     return this.visits.unscheduled(input);
+  }
+  // Inicio (I1): solo el número, sin pacientes ni montos, así que sin @Audit
+  // (mismo criterio que GET /closing-queue/count). Mismos filtros y alcance.
+  @Get('unscheduled/count')
+  @ApiOkResponse({ type: UnscheduledPlansCountDto })
+  async count(
+    @Query() input: UnscheduledPlansCountQueryDto,
+  ): Promise<UnscheduledPlansCountDto> {
+    const page = await this.visits.unscheduled({ ...input, limit: 1 });
+    return { total: page.total };
   }
   @Get(':id/visits')
   @ApiOkResponse({ type: PlanVisitsDto })

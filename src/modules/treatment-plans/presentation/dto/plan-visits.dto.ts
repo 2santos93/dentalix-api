@@ -1,4 +1,4 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional, OmitType } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
@@ -116,4 +116,23 @@ export class UnscheduledPlansPageDto {
   @ApiProperty({ type: String, format: 'uuid', nullable: true }) nextCursor!:
     string | null;
   @ApiProperty() limit!: number;
+  @ApiProperty({
+    description:
+      'Planes aceptados con algo sin agendar que cumplen los filtros (sede, olderThanDays), en todas las páginas: no depende de cursor ni limit.',
+  })
+  total!: number;
+}
+
+// GET /treatment-plans/unscheduled/count (Inicio, I1): los mismos filtros que
+// la lista, sin cursor ni página.
+export class UnscheduledPlansCountQueryDto extends OmitType(
+  UnscheduledPlansQueryDto,
+  ['cursor', 'limit'] as const,
+) {}
+
+export class UnscheduledPlansCountDto {
+  @ApiProperty({
+    description: 'Planes aceptados con algo sin agendar, con esos filtros',
+  })
+  total!: number;
 }
