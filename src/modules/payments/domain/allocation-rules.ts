@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { TreatmentPlanItemStatus } from '@prisma/client';
+import { lineCents } from '../../../shared/money/line-rounding';
 
 // Reglas puras de la imputación de abonos a ítems (DX-051, spec R5, R7, R10,
 // R11). Todo en céntimos enteros; sin E/S.
@@ -179,5 +180,6 @@ export function itemBillableCents(
   ) {
     return 0;
   }
-  return Math.max(0, Math.round((item.price - item.discount) * 100));
+  // DX-340: la línea del ítem, la misma de todos los documentos.
+  return Math.max(0, lineCents(item));
 }

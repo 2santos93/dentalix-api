@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { CurrencyDigitsDto } from '../../../reference/presentation/dto/currency.dto';
 import {
   TreatmentPlanRejectionReason,
   TreatmentPlanStatus,
@@ -129,6 +130,13 @@ export class TreatmentPlanDto {
       'Sum of active items price minus discount — only present on GET by id',
   })
   total?: number;
+
+  @ApiPropertyOptional({
+    type: CurrencyDigitsDto,
+    description:
+      'DX-340: decimales de la moneda del plan (currencies). La web redondea con roundingDigits la vista previa del descuento en bloque. Solo en GET by id',
+  })
+  currencyDigits?: CurrencyDigitsDto;
 
   @ApiPropertyOptional({
     type: TreatmentPlanAcceptanceSummaryDto,

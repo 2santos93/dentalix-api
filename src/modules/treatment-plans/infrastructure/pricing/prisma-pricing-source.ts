@@ -27,6 +27,10 @@ import {
   TREATMENT_PLAN_CLOCK,
   type PlanClock,
 } from '../../application/plan-clock';
+import {
+  CURRENCY_DIGITS_CATALOG,
+  type CurrencyDigitsCatalog,
+} from '../../../../shared/money/currency-digits';
 
 /**
  * `PricingSource` sobre los repositorios de catálogo, listas, convenios y
@@ -50,6 +54,8 @@ export class PrismaPricingSource implements PricingSource {
     private readonly assignments: PatientAgreementRepository,
     @Inject(TREATMENT_PLAN_CLOCK)
     private readonly now: PlanClock,
+    @Inject(CURRENCY_DIGITS_CATALOG)
+    private readonly currencyDigits: CurrencyDigitsCatalog,
   ) {}
 
   async contextFor(
@@ -66,6 +72,7 @@ export class PrismaPricingSource implements PricingSource {
     const agreement = assignment
       ? await this.agreements.findLiveById(assignment.agreementId)
       : null;
+    const digits = await this.currencyDigits.table([planCurrency]);
 
     return {
       catalogItem: {
@@ -74,6 +81,7 @@ export class PrismaPricingSource implements PricingSource {
         allowDiscount: catalogItem.allowDiscount,
       },
       planCurrency,
+      planRoundingDigits: digits.roundingDigits(planCurrency),
       today,
       locationId,
       agreement:

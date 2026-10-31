@@ -1,3 +1,4 @@
+import { REFERENCE_CURRENCY_DIGITS } from '../../../shared/money/__fixtures__/reference-currency-digits';
 import { PaymentMethod, TreatmentPlanStatus } from '@prisma/client';
 import { CSV_BOM } from '../../../shared/csv/csv-cells';
 import type { CashPaymentView } from '../domain/entities/cash-payment.entity';
@@ -39,7 +40,10 @@ const linesOf = (csv: string) => csv.slice(1).split('\r\n');
 
 describe('CSV de la caja (DX-395)', () => {
   it('UTF-8 con BOM, CRLF, cabecera con medio y referencia y una línea por abono', () => {
-    const csv = toCashPaymentsCsv([row(), row({ id: 'p2' })]);
+    const csv = toCashPaymentsCsv(
+      [row(), row({ id: 'p2' })],
+      REFERENCE_CURRENCY_DIGITS,
+    );
     expect(csv.startsWith(CSV_BOM)).toBe(true);
     const lines = linesOf(csv);
     expect(lines[0]).toBe(CASH_PAYMENTS_CSV_HEADER.join(','));
@@ -58,7 +62,9 @@ describe('CSV de la caja (DX-395)', () => {
   });
 
   it('lleva el medio de la clínica y la referencia, con los decimales de la moneda', () => {
-    expect(linesOf(toCashPaymentsCsv([row()]))[1]).toBe(
+    expect(
+      linesOf(toCashPaymentsCsv([row()], REFERENCE_CURRENCY_DIGITS))[1],
+    ).toBe(
       [
         '2026-10-15',
         '"Sede Norte"',
@@ -72,40 +78,51 @@ describe('CSV de la caja (DX-395)', () => {
     );
     expect(
       linesOf(
-        toCashPaymentsCsv([row({ currency: 'USD', amount: 10.5 })]),
+        toCashPaymentsCsv(
+          [row({ currency: 'USD', amount: 10.5 })],
+          REFERENCE_CURRENCY_DIGITS,
+        ),
       )[1].endsWith(',USD,10.50'),
     ).toBe(true);
   });
 
   it('saldo migrado, sin medio ni referencia', () => {
     const line = linesOf(
-      toCashPaymentsCsv([
-        row({
-          treatmentPlan: null,
-          openingBalance: { id: 'ob1', concept: 'Deuda anterior' },
-          method: null,
-          paymentMethod: null,
-          reference: null,
-        }),
-      ]),
+      toCashPaymentsCsv(
+        [
+          row({
+            treatmentPlan: null,
+            openingBalance: { id: 'ob1', concept: 'Deuda anterior' },
+            method: null,
+            paymentMethod: null,
+            reference: null,
+          }),
+        ],
+        REFERENCE_CURRENCY_DIGITS,
+      ),
     )[1];
     expect(line).toContain('"Saldo migrado · Deuda anterior","Sin método",""');
   });
 
   it('protege las fórmulas en la referencia y el nombre (inyección CSV)', () => {
     const line = linesOf(
-      toCashPaymentsCsv([
-        row({
-          reference: '=HYPERLINK("x")',
-          patient: { id: 'p', fullName: '+Ana' },
-        }),
-      ]),
+      toCashPaymentsCsv(
+        [
+          row({
+            reference: '=HYPERLINK("x")',
+            patient: { id: 'p', fullName: '+Ana' },
+          }),
+        ],
+        REFERENCE_CURRENCY_DIGITS,
+      ),
     )[1];
     expect(line).toContain(`"'+Ana"`);
     expect(line).toContain(`"'=HYPERLINK(""x"")"`);
   });
 
   it('las notas internas no salen en el CSV', () => {
-    expect(toCashPaymentsCsv([row()])).not.toContain('nota interna');
+    expect(toCashPaymentsCsv([row()], REFERENCE_CURRENCY_DIGITS)).not.toContain(
+      'nota interna',
+    );
   });
 });

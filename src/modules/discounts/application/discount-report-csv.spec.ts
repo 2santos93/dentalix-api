@@ -1,3 +1,4 @@
+import { REFERENCE_CURRENCY_DIGITS } from '../../../shared/money/__fixtures__/reference-currency-digits';
 import { DiscountReason } from '@prisma/client';
 import {
   DISCOUNT_REPORT_CSV_HEADER,
@@ -44,7 +45,7 @@ const row: DiscountReportRowView = {
 
 describe('CSV del informe de descuentos (DX-204)', () => {
   it('UTF-8 con BOM, CRLF, cabecera y una línea por ítem', () => {
-    const csv = toDiscountReportCsv([row]);
+    const csv = toDiscountReportCsv([row], REFERENCE_CURRENCY_DIGITS);
     expect(csv.startsWith('﻿')).toBe(true);
     const lines = csv.slice(1).split('\r\n');
     expect(lines[0]).toBe(DISCOUNT_REPORT_CSV_HEADER.join(','));
@@ -53,7 +54,9 @@ describe('CSV del informe de descuentos (DX-204)', () => {
   });
 
   it('protege contra la inyección de fórmulas y escapa comillas', () => {
-    const line = toDiscountReportCsv([row]).slice(1).split('\r\n')[1];
+    const line = toDiscountReportCsv([row], REFERENCE_CURRENCY_DIGITS)
+      .slice(1)
+      .split('\r\n')[1];
     expect(line).toBe(
       [
         '2026-10-02',
@@ -91,7 +94,10 @@ describe('CSV del informe de descuentos (DX-204)', () => {
       discount: 9259,
       percent: 7.5,
     };
-    const [, eurLine, copLine] = toDiscountReportCsv([row, cop])
+    const [, eurLine, copLine] = toDiscountReportCsv(
+      [row, cop],
+      REFERENCE_CURRENCY_DIGITS,
+    )
       .slice(1)
       .split('\r\n');
     expect(eurLine.split(',').slice(7, 13)).toEqual([
@@ -123,7 +129,9 @@ describe('CSV del informe de descuentos (DX-204)', () => {
       discount: 500000,
       percent: 50,
     };
-    const line = toDiscountReportCsv([reduced]).slice(1).split('\r\n')[1];
+    const line = toDiscountReportCsv([reduced], REFERENCE_CURRENCY_DIGITS)
+      .slice(1)
+      .split('\r\n')[1];
     expect(line.split(',').slice(7, 13)).toEqual([
       '1000000',
       '500000',
@@ -143,7 +151,10 @@ describe('CSV del informe de descuentos (DX-204)', () => {
   });
 
   it('el diente también va entre comillas y protegido (dato heredado sin validar)', () => {
-    const line = toDiscountReportCsv([{ ...row, toothNumber: '=1+1' }])
+    const line = toDiscountReportCsv(
+      [{ ...row, toothNumber: '=1+1' }],
+      REFERENCE_CURRENCY_DIGITS,
+    )
       .slice(1)
       .split('\r\n')[1];
     expect(line).toContain(`,"'=1+1",`);
@@ -172,7 +183,7 @@ describe('CSV del informe de descuentos (DX-204)', () => {
       reason: null,
       reasonNote: null,
     };
-    const cells = toDiscountReportCsv([agreed])
+    const cells = toDiscountReportCsv([agreed], REFERENCE_CURRENCY_DIGITS)
       .slice(1)
       .split('\r\n')[1]
       .split(',');
@@ -210,7 +221,7 @@ describe('CSV del informe de descuentos (DX-204)', () => {
       createdByName: 'Dr. Pérez',
       discountByName: null,
     };
-    const cells = toDiscountReportCsv([agreed])
+    const cells = toDiscountReportCsv([agreed], REFERENCE_CURRENCY_DIGITS)
       .slice(1)
       .split('\r\n')[1]
       .split(',');

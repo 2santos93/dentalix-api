@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { ClinicRole, type PaymentMethod } from '@prisma/client';
 import { RECEIPT_PREFIX_PATTERN } from '../../payments/domain/receipt-number';
-import { currencyDecimals } from '../../../shared/money/currency-decimals';
+import type { RoundingDigits } from '../../../shared/money/line-rounding';
 import { fromCents, toCents } from '../../../shared/money/money';
 
 /*
@@ -67,22 +67,27 @@ export const CREDIT_CASH_LOCATION_REQUIRED_MESSAGE =
   'Elige la sede de la caja de la que sale el efectivo.';
 
 /**
- * El tope con los decimales de su moneda y su código («10000.50 USD»,
+ * El tope con los decimales de redondeo de su moneda y su código («10000.50 USD»,
  * «5000 JPY»). Sin separador de miles a propósito: el dominio no conoce el
  * formato regional de la sede (DX-311, sin locales fijos).
  */
-function capText(capCents: number, currency: string): string {
-  return `${(capCents / 100).toFixed(currencyDecimals(currency))} ${currency}`;
+function capText(
+  capCents: number,
+  currency: string,
+  digits: RoundingDigits,
+): string {
+  return `${(capCents / 100).toFixed(digits)} ${currency}`;
 }
 
 /** 403 de RECEPTION por encima del tope de la clínica (mismo patrón que DX-204). */
 export function receptionCapMessage(
   capCents: number,
   currency: string,
+  digits: RoundingDigits,
 ): string {
   return capCents === 0
     ? 'Recepción no puede traspasar ni devolver saldo a favor en esta clínica: pídeselo a administración.'
-    : `Recepción puede mover hasta ${capText(capCents, currency)} por operación: pídeselo a administración.`;
+    : `Recepción puede mover hasta ${capText(capCents, currency, digits)} por operación: pídeselo a administración.`;
 }
 
 export { fromCents, toCents };

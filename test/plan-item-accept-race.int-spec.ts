@@ -6,6 +6,7 @@ import {
   PrismaClient,
 } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
+import { PrismaCurrencyDigitsCatalog } from '../src/shared/money/prisma-currency-digits.catalog';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaTreatmentPlanRepository } from '../src/modules/treatment-plans/infrastructure/repositories/prisma-treatment-plan.repository';
 import { AddTreatmentPlanItemUseCase } from '../src/modules/treatment-plans/application/use-cases/add-treatment-plan-item.use-case';
@@ -56,7 +57,13 @@ const pricing: PricingSource = {
 
 const add = new AddTreatmentPlanItemUseCase(plans, pricing, policy, now);
 const update = new UpdateTreatmentPlanItemUseCase(plans, catalog, policy, now);
-const bulk = new ApplyBulkDiscountUseCase(plans, policy, now, catalog);
+const bulk = new ApplyBulkDiscountUseCase(
+  plans,
+  policy,
+  now,
+  catalog,
+  new PrismaCurrencyDigitsCatalog(prisma),
+);
 
 interface Seeded {
   tenantId: string;
