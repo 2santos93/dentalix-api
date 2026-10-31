@@ -133,6 +133,8 @@ model Tenant {
   // DX-151: documentos de los pacientes.
   patientDocuments                        PatientDocument[]
   // DX-233: horario de cada profesional por sede y sus excepciones por fecha.
+  // DX-211: sillones de las sedes.
+  chairs                                  Chair[]
   providerSchedules                       ProviderSchedule[]
   providerScheduleOverrides               ProviderScheduleOverride[]
   // DX-247: confirmaciones «Sin cambios hoy» de la anamnesis.
@@ -396,6 +398,8 @@ model Location {
   priceLists                 PriceList[]
   agreements                 Agreement[]
   // DX-233: horario de los profesionales en la sede y sus excepciones.
+  // DX-211: sillones de la sede.
+  chairs                     Chair[]
   providerSchedules          ProviderSchedule[]
   providerScheduleOverrides  ProviderScheduleOverride[]
   // DX-279: versiones de la política de cancelación de la sede.
@@ -445,6 +449,8 @@ model ClinicMembership {
   performedPlanItems    TreatmentPlanItem[]
   // DX-374: tasas de cambio manuales que registró.
   manualExchangeRates   ManualExchangeRate[]
+  // DX-211: sillones de los que es el profesional por defecto.
+  defaultChairs         Chair[]
 
   // PARTIAL unique (WHERE "deletedAt" IS NULL) — a soft-deleted membership must
   // NOT block re-adding the same user. The predicate lives in migration
@@ -1241,6 +1247,11 @@ model Appointment {
   // EXCLUDE de solape del profesional. Solo con `walkIn` (CHECK). El motivo,
   // en appointment_reserved_overrides (WALK_IN_OVERBOOK).
   overbooked          Boolean                 @default(false)
+  // DX-211: sillón de la cita (null = sin sillón, como todas las anteriores).
+  // FK compuesta con la SEDE de la cita; EXCLUDE
+  // appointments_no_overlap_per_chair (en la migración) sobre las vivas y no
+  // canceladas.
+  chairId             String?                 @db.Uuid
   createdAt           DateTime                @default(now())
   updatedAt           DateTime                @updatedAt
   deletedAt           DateTime?
@@ -1279,6 +1290,8 @@ model Appointment {
   appointmentType AppointmentType?           @relation(fields: [tenantId, appointmentTypeId], references: [tenantId, id], onDelete: Restrict)
   // FK COMPUESTA (DX-279): la versión comunicada es de la MISMA clínica.
   policyVersion   CancellationPolicyVersion? @relation(fields: [tenantId, policyVersionId], references: [tenantId, id], onDelete: Restrict, map: "appointments_policy_version_fkey")
+  // FK COMPUESTA (DX-211): el sillón es de la MISMA clínica y de la MISMA sede.
+  chair           Chair?                     @relation(fields: [tenantId, locationId, chairId], references: [tenantId, locationId, id], onDelete: Restrict, map: "appointments_chair_fkey")
 
   // Destino de la FK compuesta (tenantId, appointmentId) de
   // appointment_confirmations (DX-005): la cita tiene que ser del MISMO tenant.
@@ -1316,6 +1329,9 @@ model Appointment {
   //   appointments_tenant_policy_version_idx ("tenantId", "policyVersionId")
   //     WHERE "policyVersionId" IS NOT NULL
   //     -> DX-279: lado hijo de la FK compuesta a la versión de la política.
+  //   appointments_tenant_location_chair_start_idx ("tenantId", "locationId",
+  //     "chairId", start) WHERE "chairId" IS NOT NULL
+  //     -> DX-211: lado hijo de la FK compuesta al sillón y filtro `chairIds`.
   @@map("appointments")
 }
 
@@ -2622,6 +2638,42 @@ model LocationScheduleRange {
 // `schedule_blocks`: la membresía solo tiene un único PARCIAL); la API exige
 // un miembro activo con rol que atiende. La sede va por FK COMPUESTA
 // (SEC-004). Reglas en la BD: migración 20261020220100_dx233_provider_schedules.
+/// DX-211: sillón (gabinete) de una sede, recurso de la cita. Nombre único
+/// por sede entre todos sus sillones (activos o no: las citas de uno inactivo
+/// siguen mostrando su nombre). No se borra: se desactiva. RLS FORCE.
+model Chair {
+  id                          String   @id @default(uuid()) @db.Uuid
+  tenantId                    String   @db.Uuid
+  locationId                  String   @db.Uuid
+  /// 1–40, recortado y sin caracteres de control (CHECK chairs_name_check).
+  name                        String   @db.VarChar(40)
+  /// Orden de la columna en la agenda (0–999), luego por nombre.
+  sortOrder                   Int      @default(0)
+  /// Profesional que se propone al elegir el sillón (usuario y su membresía,
+  /// juntos o ninguno: CHECK chairs_default_provider_check).
+  defaultProviderId           String?  @db.Uuid
+  defaultProviderMembershipId String?  @db.Uuid
+  active                      Boolean  @default(true)
+  createdById                 String?  @db.Uuid
+  updatedById                 String?  @db.Uuid
+  createdAt                   DateTime @default(now())
+  updatedAt                   DateTime @updatedAt
+
+  tenant                    Tenant            @relation(fields: [tenantId], references: [id])
+  location                  Location          @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict)
+  // FK COMPUESTA (patrón DX-050): el profesional por defecto es miembro de la
+  // MISMA clínica, y la membresía es la de ese usuario.
+  defaultProviderMembership ClinicMembership? @relation(fields: [tenantId, defaultProviderMembershipId, defaultProviderId], references: [tenantId, id, userId], onDelete: Restrict, map: "chairs_default_provider_fkey")
+  appointments              Appointment[]
+
+  // Destino de la FK compuesta de appointments: el sillón de la MISMA sede.
+  @@unique([tenantId, locationId, id], map: "chairs_tenant_location_id_key")
+  // Un nombre por sede; también la lista por sede y el lado hijo de la FK a la sede.
+  @@unique([tenantId, locationId, name], map: "chairs_location_name_key")
+  @@index([tenantId, defaultProviderMembershipId, defaultProviderId], map: "chairs_default_provider_idx")
+  @@map("chairs")
+}
+
 model ProviderSchedule {
   id          String    @id @default(uuid()) @db.Uuid
   tenantId    String    @db.Uuid
@@ -3352,6 +3404,8 @@ enum AuditResourceType {
   // DX-253: saldo a favor del paciente (traspaso, devolución y su
   // comprobante, tope de recepción).
   PATIENT_CREDIT
+  // DX-211: sillones de cada sede (alta, edición, orden, desactivación).
+  CHAIR
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o

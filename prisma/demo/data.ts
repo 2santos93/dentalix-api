@@ -2279,6 +2279,22 @@ export interface DemoAppointmentType {
   isUrgent?: boolean;
 }
 
+/**
+ * DX-211: sillones de la Sede Norte (la principal sigue sin sillones, para
+ * enseñar que una sede sin ellos no cambia). `defaultDentistIndex` es el
+ * índice del dentista por defecto en la lista de dentistas de la demo.
+ */
+export interface DemoChair {
+  name: string;
+  defaultDentistIndex?: number;
+}
+
+export const DEMO_CHAIRS: readonly DemoChair[] = [
+  { name: 'Sillón 1', defaultDentistIndex: 0 },
+  { name: 'Sillón 2', defaultDentistIndex: 1 },
+  { name: 'Sillón 3' },
+];
+
 export const DEMO_APPOINTMENT_TYPES: readonly DemoAppointmentType[] = [
   {
     name: 'Valoración',

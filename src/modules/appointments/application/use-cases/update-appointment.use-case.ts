@@ -57,6 +57,7 @@ import { civilDateIn } from '../../../../shared/time/civil-day';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { assertAttendsAt } from '../../../staff/domain/provider-location';
 import { ProviderAvailabilityService } from '../../../provider-schedule/application/provider-availability.service';
+import { ChairAssignmentService } from '../chair-assignment';
 import {
   NO_WARNINGS,
   collectWarnings,
@@ -218,6 +219,11 @@ export class UpdateAppointmentUseCase {
     @Optional()
     @Inject(SCHEDULE_BLOCK_CLOCK)
     private readonly clock: ScheduleBlockClock = systemScheduleBlockClock,
+    // DX-211: sillón de la cita. Opcional para los dobles de los specs
+    // anteriores, que no mueven citas con sillón; la app siempre lo provee.
+    @Optional()
+    @Inject(ChairAssignmentService)
+    private readonly chairs: ChairAssignmentService | null = null,
   ) {}
 
   async execute(
@@ -385,6 +391,13 @@ export class UpdateAppointmentUseCase {
     // arrastre entre columnas). Ambos pasan por las mismas reglas.
     let warnings: Warnings = NO_WARNINGS;
     let reservedOverride: ReservedOverride | null = null;
+    // DX-211: cambiar (o quitar) el sillón. Cambiar SOLO de sillón no es
+    // reagendar (ni hora ni profesional): no revoca la confirmación ni mira
+    // el horario, pero sí el sillón destino, y queda como movimiento.
+    const chairChanged =
+      patch.chairId !== undefined && patch.chairId !== existing.chairId;
+    const nextChairId =
+      patch.chairId !== undefined ? patch.chairId : existing.chairId;
     const isReschedule =
       patch.start !== undefined ||
       patch.end !== undefined ||
@@ -497,6 +510,26 @@ export class UpdateAppointmentUseCase {
       }
     }
 
+    // DX-211: el sillón de la cita al cambiarlo o al reagendarla (el de antes
+    // o el nuevo): de su sede, activo y libre en la franja final. Una cita
+    // cancelada no ocupa el sillón (la EXCLUDE tampoco la cuenta).
+    if (
+      nextChairId !== null &&
+      (chairChanged || isReschedule) &&
+      (patch.status ?? existing.status) !== AppointmentStatus.CANCELLED
+    ) {
+      const chair = await this.requireChairs().load(nextChairId, {
+        locationId: existing.locationId,
+        requireActive: true,
+      });
+      await this.requireChairs().assertFree(chair, {
+        locationId: existing.locationId,
+        start: patch.start ?? existing.start,
+        end: patch.end ?? existing.end,
+        excludeId: existing.id,
+      });
+    }
+
     // Race-proof backstop for the DB's EXCLUDE constraint
     // (appointments_no_overlap_per_provider / ..._per_patient, 23P01) — mirrors
     // CreateAppointmentUseCase. NOT limited to the reschedule branch on
@@ -566,13 +599,21 @@ export class UpdateAppointmentUseCase {
       } = await this.repo.update(id, effectivePatch));
     } catch (error) {
       const scope = overlapExclusionScope(error);
-      if (scope !== null) {
+      // DX-211: también al reactivar una cancelada cuyo sillón se ocupó.
+      if (scope === 'chair' && nextChairId !== null) {
+        throw await this.requireChairs().raceConflict(nextChairId, {
+          start: patch.start ?? existing.start,
+          end: patch.end ?? existing.end,
+          excludeId: existing.id,
+        });
+      }
+      if (scope === 'provider' || scope === 'patient') {
         throw new ConflictException(OVERLAP_MESSAGES[scope]);
       }
       throw error;
     }
 
-    if (isReschedule && auditContext) {
+    if ((isReschedule || chairChanged) && auditContext) {
       await this.recordMove(existing, updated, auditContext);
     }
     // B2: un solo evento por cancelación. Desde la clínica la lleva el del
@@ -930,7 +971,10 @@ export class UpdateAppointmentUseCase {
     });
   }
 
-  /** `audit_event` del movimiento: hora y profesional antes y después. */
+  /**
+   * `audit_event` del movimiento: hora, profesional y (DX-211) sillón antes y
+   * después.
+   */
   private recordMove(
     before: Appointment,
     after: Appointment,
@@ -954,14 +998,23 @@ export class UpdateAppointmentUseCase {
             start: before.start.toISOString(),
             end: before.end.toISOString(),
             providerId: before.providerId,
+            chairId: before.chairId,
           },
           to: {
             start: after.start.toISOString(),
             end: after.end.toISOString(),
             providerId: after.providerId,
+            chairId: after.chairId,
           },
         },
       },
     });
+  }
+
+  private requireChairs(): ChairAssignmentService {
+    if (!this.chairs) {
+      throw new Error('ChairAssignmentService no está configurado');
+    }
+    return this.chairs;
   }
 }

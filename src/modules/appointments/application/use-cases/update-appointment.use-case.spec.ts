@@ -80,6 +80,8 @@ function fakeAppointment(overrides: Partial<Appointment> = {}): Appointment {
     triageNote: null,
     walkIn: false,
     overbooked: false,
+    chairId: null,
+    chair: null,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
     ...overrides,
@@ -112,6 +114,7 @@ function makeRepo(overrides: RepoOverrides = {}): AppointmentRepository {
     findOverlapping: (): Promise<Appointment[]> => Promise.resolve([]),
     findOverlappingForPatient: (): Promise<Appointment[]> =>
       Promise.resolve([]),
+    findOverlappingForChair: (): Promise<Appointment[]> => Promise.resolve([]),
     undoArrival: () => Promise.resolve(null),
     listInClinic: () => Promise.resolve([]),
     currentCancellationPolicy: () => Promise.resolve(null),
@@ -477,6 +480,8 @@ describe('UpdateAppointmentUseCase', () => {
         findById: (): Promise<Appointment | null> => Promise.resolve(existing),
         findOverlapping: (): Promise<Appointment[]> => Promise.resolve([]),
         findOverlappingForPatient: (): Promise<Appointment[]> =>
+          Promise.resolve([]),
+        findOverlappingForChair: (): Promise<Appointment[]> =>
           Promise.resolve([]), // pre-check passes
         update: (): Promise<Appointment> => Promise.reject(ormExclusionError()),
       });
@@ -537,6 +542,8 @@ describe('UpdateAppointmentUseCase', () => {
           Promise.resolve(fakeAppointment()),
         findOverlapping: (): Promise<Appointment[]> => Promise.resolve([]),
         findOverlappingForPatient: (): Promise<Appointment[]> =>
+          Promise.resolve([]),
+        findOverlappingForChair: (): Promise<Appointment[]> =>
           Promise.resolve([]),
         undoArrival: () => Promise.resolve(null),
         listInClinic: () => Promise.resolve([]),
