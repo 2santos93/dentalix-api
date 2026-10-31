@@ -849,8 +849,8 @@ migraciones `20261105150000_dx243_enums`,
 
 El presupuesto de un plan **«Presentado»** se envía por el mismo enlace con
 código; al firmar, el plan queda aceptado con las reglas de la aceptación en
-la clínica (DX-012/DX-040). Migraciones `20261106120000_dx415_enums` y
-`20261106120100_dx415_remote_budget`.
+la clínica (DX-012/DX-040). Migraciones `20261106160000_dx415_enums` y
+`20261106160100_dx415_remote_budget`.
 
 - `POST /patients/:patientId/signature-requests` con `type: BUDGET` y
   `treatmentPlanId` (obligatorio, 400 sin él; 404 si no es del paciente o de
