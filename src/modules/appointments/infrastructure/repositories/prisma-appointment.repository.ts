@@ -78,7 +78,7 @@ const CLEARED_CANCELLATION = {
  * Joins just the patient's name onto an appointment — enough for a client to
  * label it without fetching the patient list (see `Appointment.patientFirstName`).
  */
-const INCLUDE_PATIENT_NAME = {
+export const INCLUDE_PATIENT_NAME = {
   planItems: { where: { deletedAt: null }, select: { planItemId: true } },
   patient: { select: { firstName: true, lastName: true } },
   // DX-121: el tipo embebido, aunque esté desactivado o retirado (la cita no
@@ -104,7 +104,9 @@ type PrismaAppointmentWithPatient = PrismaAppointment & {
   } | null;
 };
 
-function mapToEntity(appointment: PrismaAppointmentWithPatient): Appointment {
+export function mapToEntity(
+  appointment: PrismaAppointmentWithPatient,
+): Appointment {
   return {
     planItemIds: appointment.planItems?.map((i) => i.planItemId) ?? [],
     id: appointment.id,
@@ -136,6 +138,10 @@ function mapToEntity(appointment: PrismaAppointmentWithPatient): Appointment {
     lateCancellation: appointment.lateCancellation,
     noShowMarkedAt: appointment.noShowMarkedAt,
     policyVersionId: appointment.policyVersionId,
+    triageFlags: appointment.triageFlags,
+    triageNote: appointment.triageNote,
+    walkIn: appointment.walkIn,
+    overbooked: appointment.overbooked,
     createdAt: appointment.createdAt,
     updatedAt: appointment.updatedAt,
   };
@@ -309,6 +315,9 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
       providerId,
       deletedAt: null,
       status: { not: 'CANCELLED' },
+      // DX-470: un sobrecupo no ocupa el hueco del profesional (tampoco en la
+      // EXCLUDE appointments_no_overlap_per_provider).
+      overbooked: false,
       // Half-open interval overlap: [start,end) overlaps [s2,e2) iff
       // start < e2 AND s2 < end — i.e. this appointment's start is before
       // the other's end, AND this appointment's end is after the other's
@@ -808,7 +817,15 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
           ...(params.providerId ? { providerId: params.providerId } : {}),
         },
         orderBy: [{ start: 'asc' }, { id: 'asc' }],
-        include: INCLUDE_PATIENT_NAME,
+        include: {
+          ...INCLUDE_PATIENT_NAME,
+          appointmentType: {
+            select: {
+              ...INCLUDE_PATIENT_NAME.appointmentType.select,
+              isUrgent: true,
+            },
+          },
+        },
       });
       const providerIds = [...new Set(appointments.map((a) => a.providerId))];
       // El nombre del profesional, a través de la membresía (con RLS): solo
@@ -826,9 +843,18 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
       for (const m of memberships) {
         if (!names.has(m.userId)) names.set(m.userId, m.user.fullName);
       }
-      return appointments.map((a) => ({
-        ...mapToEntity(a),
+      return appointments.map(({ appointmentType, ...a }) => ({
+        ...mapToEntity({
+          ...a,
+          appointmentType: appointmentType && {
+            id: appointmentType.id,
+            name: appointmentType.name,
+            durationMinutes: appointmentType.durationMinutes,
+            color: appointmentType.color,
+          },
+        }),
         providerName: names.get(a.providerId) ?? null,
+        urgent: appointmentType?.isUrgent ?? false,
       }));
     });
   }

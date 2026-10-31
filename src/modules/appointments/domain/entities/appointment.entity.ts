@@ -2,6 +2,7 @@ import {
   AppointmentStatus,
   CancellationByKind,
   CancellationReasonCode,
+  TriageFlag,
 } from '@prisma/client';
 import type { AppointmentTypeSummary } from '../../../appointment-types/domain/entities/appointment-type.entity';
 import type { HourCycle } from '../../../../shared/format/regional-format';
@@ -79,6 +80,17 @@ export interface Appointment {
   noShowMarkedAt: Date | null;
   /** DX-279: versión de la política comunicada al paciente (DX-291; hoy null). */
   policyVersionId: string | null;
+  /**
+   * DX-470: señales y nota de triaje de recepción (datos de salud). Solo las
+   * devuelven GET /appointments/:id y el panel «En clínica»; la agenda, las
+   * vistas públicas y los recordatorios no.
+   */
+  triageFlags: TriageFlag[];
+  triageNote: string | null;
+  /** DX-470: nació en «Atender sin cita». */
+  walkIn: boolean;
+  /** DX-470: sobrecupo anotado (no ocupa el hueco del profesional). */
+  overbooked: boolean;
   createdAt: Date;
   updatedAt: Date;
 }

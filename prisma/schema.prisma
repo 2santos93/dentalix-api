@@ -1229,6 +1229,18 @@ model Appointment {
   // al enviar el recordatorio y cuando el paciente responde por el enlace
   // (la que vio); null = no consta que se le comunicara.
   policyVersionId     String?                 @db.Uuid
+  // DX-470: triaje de recepción de una urgencia (datos de salud: solo GET
+  // /appointments/:id y el panel «En clínica»; nunca vistas públicas,
+  // recordatorios ni logs). CHECK appointments_triage_check: ≤ 6 señales y la
+  // nota recortada de 1–200.
+  triageFlags         TriageFlag[]            @default([])
+  triageNote          String?                 @db.VarChar(200)
+  // DX-470: nació en «Atender sin cita» (llegada en el mismo paso).
+  walkIn              Boolean                 @default(false)
+  // DX-470: sobrecupo anotado (sin hueco reservado libre): no cuenta en la
+  // EXCLUDE de solape del profesional. Solo con `walkIn` (CHECK). El motivo,
+  // en appointment_reserved_overrides (WALK_IN_OVERBOOK).
+  overbooked          Boolean                 @default(false)
   createdAt           DateTime                @default(now())
   updatedAt           DateTime                @updatedAt
   deletedAt           DateTime?
@@ -1348,6 +1360,16 @@ model AppointmentType {
 // sedes (vacaciones, congreso); con profesional y sede, solo en esa sede.
 // `allowsBooking = false` impide agendar encima (409); `true` deja agendar con
 // aviso (p. ej. el almuerzo). Nunca se borra físicamente: `deletedAt` lo retira.
+/// DX-470: señales de triaje de recepción (política tipo CareQuest).
+enum TriageFlag {
+  PAIN
+  SWELLING
+  INFECTION
+  FEVER
+  BLEEDING
+  TRAUMA
+}
+
 enum ScheduleBlockKind {
   VACATION
   MEETING
@@ -6117,15 +6139,23 @@ model ClosingQueueDismissal {
 /// DX-446: «Agendar igualmente» en un hueco reservado: los bloques saltados y
 /// el motivo (5–300, una línea). El texto vive aquí, nunca en `audit_event`
 /// (que solo lleva el id de esta fila). Append-only, RLS FORCE.
+/// DX-470: qué motivo guarda la fila: saltarse un hueco reservado (DX-446)
+/// o el sobrecupo de «Atender sin cita» (sin bloques).
+enum ReservedOverrideKind {
+  RESERVED_SLOT
+  WALK_IN_OVERBOOK
+}
+
 model AppointmentReservedOverride {
-  id            String   @id @default(uuid()) @db.Uuid
-  tenantId      String   @db.Uuid
-  patientId     String   @db.Uuid
-  appointmentId String   @db.Uuid
-  blockIds      String[] @db.Uuid
-  reason        String   @db.VarChar(300)
-  createdById   String   @db.Uuid
-  createdAt     DateTime @default(now())
+  id            String               @id @default(uuid()) @db.Uuid
+  tenantId      String               @db.Uuid
+  patientId     String               @db.Uuid
+  appointmentId String               @db.Uuid
+  kind          ReservedOverrideKind @default(RESERVED_SLOT)
+  blockIds      String[]             @db.Uuid
+  reason        String               @db.VarChar(300)
+  createdById   String               @db.Uuid
+  createdAt     DateTime             @default(now())
 
   tenant      Tenant      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   appointment Appointment @relation(fields: [tenantId, patientId, appointmentId], references: [tenantId, patientId, id], onDelete: Restrict, onUpdate: Restrict, map: "appointment_reserved_overrides_appointment_fkey")

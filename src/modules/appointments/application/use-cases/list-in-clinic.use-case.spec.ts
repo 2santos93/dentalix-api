@@ -3,7 +3,7 @@ import {
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
-import { AppointmentStatus, ClinicRole } from '@prisma/client';
+import { AppointmentStatus, ClinicRole, TriageFlag } from '@prisma/client';
 import { InMemoryAppointmentRepository } from './__fixtures__/in-memory-appointment.repository';
 import { ListInClinicUseCase } from './list-in-clinic.use-case';
 import type { LocationRepository } from '../../../locations/domain/ports/location-repository.port';
@@ -50,6 +50,36 @@ describe('ListInClinicUseCase (DX-200)', () => {
     );
     return { repo, uc };
   }
+
+  it('DX-470: la urgencia sin cita sale con su insignia y su triaje', async () => {
+    const { repo, uc } = setup();
+    repo.urgentTypeIds.add('type-urgent');
+    const walkIn = repo.seed({
+      locationId: 'bog',
+      status: AppointmentStatus.ARRIVED,
+      appointmentTypeId: 'type-urgent',
+      start: at('2026-10-19T14:20:00.000Z'),
+      end: at('2026-10-19T14:50:00.000Z'),
+      arrivedAt: at('2026-10-19T14:20:00.000Z'),
+      walkIn: true,
+      overbooked: true,
+      triageFlags: [TriageFlag.PAIN, TriageFlag.SWELLING],
+      triageNote: 'Muela 36',
+    });
+    const view = await uc.execute(
+      { locationId: 'bog', role: ClinicRole.RECEPTION, userId: 'rec-1' },
+      NOW,
+    );
+    expect(view.waiting).toHaveLength(1);
+    expect(view.waiting[0]).toMatchObject({
+      appointmentId: walkIn.id,
+      urgent: true,
+      walkIn: true,
+      overbooked: true,
+      triageFlags: ['PAIN', 'SWELLING'],
+      triageNote: 'Muela 36',
+    });
+  });
 
   it('agrupa en espera / en sillón / listo para cobrar con minutos y color', async () => {
     const { repo, uc } = setup();
@@ -146,6 +176,11 @@ describe('ListInClinicUseCase (DX-200)', () => {
       waitedMinutes: 30,
       punctuality: 'ON_TIME',
       planItemsReservedElsewhere: [],
+      urgent: false,
+      walkIn: false,
+      overbooked: false,
+      triageFlags: [],
+      triageNote: null,
     });
     // Solo nombre y hora: nada clínico (ni motivo ni notas).
     expect(view.waiting[0]).not.toHaveProperty('reason');

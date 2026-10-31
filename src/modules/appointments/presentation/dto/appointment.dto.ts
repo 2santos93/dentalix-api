@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional, OmitType } from '@nestjs/swagger';
+import { TriageFlag } from '@prisma/client';
 import {
   AppointmentStatus,
   CancellationByKind,
@@ -194,6 +195,33 @@ export class AppointmentDto {
       'DX-279: versión de la política comunicada al paciente (la rellena DX-291; hoy null).',
   })
   policyVersionId!: string | null;
+
+  @ApiProperty({
+    enum: TriageFlag,
+    enumName: 'TriageFlag',
+    isArray: true,
+    description:
+      'DX-470: señales de triaje de recepción (dolor, inflamación, infección, fiebre, sangrado, traumatismo). Datos de salud: no salen en la agenda (GET /appointments), ni en vistas públicas ni recordatorios.',
+  })
+  triageFlags!: TriageFlag[];
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    maxLength: 200,
+    description:
+      'DX-470: nota de triaje (≤ 200). Mismo alcance que `triageFlags`.',
+  })
+  triageNote!: string | null;
+
+  @ApiProperty({ description: 'DX-470: nació en «Atender sin cita».' })
+  walkIn!: boolean;
+
+  @ApiProperty({
+    description:
+      'DX-470: sobrecupo anotado (sin hueco reservado libre). No ocupa el hueco del profesional: otra cita puede solaparse con ella.',
+  })
+  overbooked!: boolean;
 
   @ApiProperty({ format: 'date-time' })
   createdAt!: Date;
@@ -410,6 +438,8 @@ export class PatientIncidentCountsDto {
 export class AppointmentListItemDto extends OmitType(AppointmentDto, [
   'notes',
   'cancelReasonText',
+  'triageFlags',
+  'triageNote',
 ] as const) {
   @ApiProperty({
     type: PatientIncidentCountsDto,

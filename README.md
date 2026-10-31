@@ -1009,6 +1009,63 @@ la clínica (DX-012/DX-040). Migraciones `20261106160000_dx415_enums` y
   su hora, otra 3 min tarde), una en el sillón y otra lista para cobrar
   (dentro del horario de hoy; con la sede cerrada, ninguna).
 
+## «Atender sin cita»: urgencia en un paso (DX-470)
+
+Porción 2 de DX-446: el paciente con dolor que llega sin cita queda en «En
+clínica» en un solo paso.
+
+- **`POST /appointments/walk-in`** (RECEPTION, ASSISTANT, ADMIN: marcar la
+  llegada es del mostrador, DX-200; el odontólogo, 403). Cuerpo: `patientId`
+  (paciente de la clínica) **o** `newPatient` (alta mínima: `firstName`,
+  `lastName`, `phone`; `docType`/`docNumber` opcionales), `providerId`,
+  `appointmentTypeId` opcional (urgente y activo; sin él, el primer tipo
+  urgente activo por nombre; sin ninguno, 409), `triageFlags` (solo `PAIN`,
+  `SWELLING`, `INFECTION`, `FEVER`, `BLEEDING`, `TRAUMA`, sin repetir; si no,
+  400), `triageNote` (≤ 200) y `overbookReason` (5–300, una línea).
+- **Sede, hora y autor** no vienen del cliente (la ValidationPipe descarta
+  `start`, `arrivedAt`, `locationId`, `createdById`): la sede es la de
+  `X-Location-Id` o la de escritura de la sesión, entre las permitidas
+  (`LOCATION_NOT_ALLOWED`, DX-089), y el profesional tiene que atender en ella
+  (400); la hora es el reloj del servidor (`SCHEDULE_BLOCK_CLOCK`, el mismo
+  que decide la liberación de DX-446; los e2e lo fijan) y el autor, el token.
+- **Dónde cae la cita**: sin `overbookReason`, en el primer hueco de un bloque
+  `RESERVED` de hoy (zona de la sede) del profesional o de la sede que admite
+  el tipo urgente, desde el minuto en curso, sin pisar citas vivas del
+  profesional (en cualquier sede, como la EXCLUDE) ni del paciente
+  (`domain/walk-in.ts`, `findReservedSlot`). Si no queda ninguno: 409
+  `{ code: "NO_RESERVED_SLOT", canOverbook: true }`. Con `overbookReason`:
+  **sobrecupo** ahora (`overbooked = true`), con el motivo en
+  `appointment_reserved_overrides` (`kind = WALK_IN_OVERBOOK`, sin bloques),
+  el mismo mecanismo que «Agendar igualmente». Los bloqueos que no dejan
+  agendar (vacaciones) siguen siendo 409; fuera del horario del profesional
+  es solo un aviso, también en modo estricto (el paciente ya está aquí). No se
+  mira el horario de la sede.
+- **Una transacción** (`PrismaWalkInRepository`): alta del paciente (la misma
+  fila y el mismo candado de documento que el alta normal,
+  `insertPatientRowInTx`; un documento de otro paciente vivo da 409
+  `PATIENT_DUPLICATE` con `existingPatientId`), la cita en `ARRIVED` con
+  `arrivedAt`, `preArrivalStatus = SCHEDULED` («Deshacer llegada» la deja
+  agendada) y `walkIn = true`, el motivo del sobrecupo y los `audit_event`
+  `WALK_IN_PATIENT`, `WALK_IN_ARRIVAL` y `WALK_IN_OVERBOOK` (solo nombres de
+  campo y el id del motivo). Si algo falla (FK compuesta, EXCLUDE por una
+  carrera: «Otra persona acaba de ocupar ese hueco…»), no queda nada.
+- **Columnas** (migraciones `20261110100000`/`100100`, aditivas; CHECK `NOT
+  VALID` y validadas después): `appointments."triageFlags"` (`"TriageFlag"[]`,
+  `'{}'`), `"triageNote"` (`varchar(200)`, recortada), `"walkIn"` y
+  `"overbooked"` (`NOT "overbooked" OR "walkIn"`), y
+  `appointment_reserved_overrides."kind"`. La EXCLUDE
+  `appointments_no_overlap_per_provider` deja de contar los sobrecupos (más
+  laxa, misma técnica que `20261015150000`); el pre-check `findOverlapping`
+  también. La del paciente no cambia. Sin índice nuevo.
+- **Datos de salud**: el triaje sale solo en `GET /appointments/:id` y en el
+  panel `GET /appointments/in-clinic` (ahora con `urgent`, `walkIn`,
+  `overbooked`, `triageFlags` y `triageNote`), que exige sede permitida. La
+  agenda (`GET /appointments`) lo quita; vistas públicas, recordatorios y
+  mensajes no lo leen (lo vigila `triage-privacy.spec.ts`: solo una lista de
+  ficheros puede nombrarlo) y el redactor de logs oculta toda clave `triage*`.
+- Matriz de aislamiento: `POST /appointments/walk-in` con `patientId`,
+  `providerId` y `appointmentTypeId` de otra clínica (404/404/400).
+
 ## Producción atribuible: quién realizó cada ítem, dónde y cuándo (DX-050)
 
 - **Columnas** de `treatment_plan_items` (migración

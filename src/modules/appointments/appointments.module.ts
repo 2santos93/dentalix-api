@@ -11,6 +11,9 @@ import { APPOINTMENT_REPOSITORY } from './domain/ports/appointment-repository.po
 import { PrismaAppointmentRepository } from './infrastructure/repositories/prisma-appointment.repository';
 import { RESERVED_OVERRIDE_REPOSITORY } from './domain/ports/reserved-override-repository.port';
 import { PrismaReservedOverrideRepository } from './infrastructure/repositories/prisma-reserved-override.repository';
+import { WALK_IN_REPOSITORY } from './domain/ports/walk-in-repository.port';
+import { PrismaWalkInRepository } from './infrastructure/repositories/prisma-walk-in.repository';
+import { CreateWalkInUseCase } from './application/use-cases/create-walk-in.use-case';
 import { TokenService } from '../../shared/crypto/token.service';
 import { PatientsModule } from '../patients/patients.module';
 import { StaffModule } from '../staff/staff.module';
@@ -79,6 +82,9 @@ import { MedicalHistoryModule } from '../medical-history/medical-history.module'
       provide: RESERVED_OVERRIDE_REPOSITORY,
       useClass: PrismaReservedOverrideRepository,
     },
+    // DX-470: «Atender sin cita» (paciente, cita ARRIVED y triaje en un paso).
+    CreateWalkInUseCase,
+    { provide: WALK_IN_REPOSITORY, useClass: PrismaWalkInRepository },
     // DX-279: asistencia del paciente (resumen de 12 meses e insignia).
     PatientAttendanceFlags,
     GetPatientAttendanceUseCase,

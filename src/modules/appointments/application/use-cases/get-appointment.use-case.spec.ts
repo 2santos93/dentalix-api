@@ -39,6 +39,10 @@ function fakeAppointment(id: string): Appointment {
     lateCancellation: null,
     noShowMarkedAt: null,
     policyVersionId: null,
+    triageFlags: [],
+    triageNote: null,
+    walkIn: false,
+    overbooked: false,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
   };

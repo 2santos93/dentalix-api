@@ -175,9 +175,11 @@ export interface ListInClinicParams {
   providerId?: string;
 }
 
-/** Una cita del panel con el nombre de su profesional (sin datos clínicos). */
+/** Una cita del panel con el nombre de su profesional y si es urgente. */
 export interface InClinicAppointment extends Appointment {
   providerName: string | null;
+  /** DX-470: el tipo de la cita es de urgencia (aunque se haya desactivado). */
+  urgent: boolean;
 }
 
 export const APPOINTMENT_REPOSITORY = Symbol('APPOINTMENT_REPOSITORY');
