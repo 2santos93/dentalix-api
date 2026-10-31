@@ -3,7 +3,10 @@ import type {
   SignatureRequestListRow,
   SignatureRequestRecord,
 } from '../../domain/entities/signature-request.entity';
-import { TreatmentPlanStatus } from '@prisma/client';
+import {
+  type SignedConsentPdfStatus,
+  TreatmentPlanStatus,
+} from '@prisma/client';
 import {
   RemoteBudgetChangedError,
   type BudgetSource,
@@ -39,6 +42,11 @@ export class InMemorySignatureRequestRepository implements SignatureRequestRepos
     evidence: PublicRequestEvidence;
   })[] = [];
   readonly countersigned = new Set<string>();
+  /** DX-422: estado del PDF firmado por consentimiento. */
+  readonly signedPdfs = new Map<
+    string,
+    { status: SignedConsentPdfStatus; documentId: string | null }
+  >();
   readonly budgets = new Map<string, BudgetSource>();
   readonly acceptances: (Omit<RemoteBudgetAcceptanceInsert, 'stillMatches'> & {
     id: string;
@@ -150,6 +158,7 @@ export class InMemorySignatureRequestRepository implements SignatureRequestRepos
             countersignedAt: this.countersigned.has(consent.id)
               ? consent.signedAt
               : null,
+            signedPdf: this.signedPdfs.get(consent.id) ?? null,
           }
         : null,
       budgetAcceptance: acceptance

@@ -193,3 +193,9 @@ export class PatientConsentDocumentDto extends PatientConsentDto {
   })
   remoteIpAddress!: string | null;
 }
+
+/** DX-422: el reintento quedó encolado. */
+export class SignedConsentPdfRetryDto {
+  @ApiProperty({ enum: ['PENDING'], enumName: 'SignedConsentPdfRetryStatus' })
+  status!: 'PENDING';
+}

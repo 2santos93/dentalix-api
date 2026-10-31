@@ -46,6 +46,10 @@ import {
   SignatureImageError,
 } from '../../domain/signature-image';
 import { CONSENT_TEMPLATE_NOT_FOUND_MESSAGE } from './consent-templates.use-cases';
+import {
+  SIGNED_CONSENT_PDF_SCHEDULER,
+  type SignedConsentPdfScheduler,
+} from '../../domain/ports/signed-consent-pdf-repository.port';
 import { PATIENT_REPOSITORY } from '../../../patients/domain/ports/patient-repository.port';
 import type { PatientRepository } from '../../../patients/domain/ports/patient-repository.port';
 import {
@@ -497,6 +501,8 @@ export class CountersignPatientConsentUseCase {
     private readonly consents: PatientConsentRepository,
     @Inject(CONSENT_CLOCK)
     private readonly now: ConsentClock,
+    @Inject(SIGNED_CONSENT_PDF_SCHEDULER)
+    private readonly pdfs: SignedConsentPdfScheduler,
   ) {}
 
   async execute(
@@ -525,22 +531,26 @@ export class CountersignPatientConsentUseCase {
     const signedAt = this.now();
     const professionalName = target.remote.professionalName;
     try {
-      return await this.consents.countersign({
-        patientId,
-        consentId: target.id,
-        professionalUserId: meta.recordedById,
-        professionalName,
-        professionalSignature,
-        contentHash: computeCountersignatureHash({
-          consentHash: target.contentHash,
+      return await this.consents.countersign(
+        {
+          patientId,
+          consentId: target.id,
+          professionalUserId: meta.recordedById,
           professionalName,
           professionalSignature,
+          contentHash: computeCountersignatureHash({
+            consentHash: target.contentHash,
+            professionalName,
+            professionalSignature,
+            signedAt,
+          }),
           signedAt,
-        }),
-        signedAt,
-        ipAddress: meta.ipAddress,
-        userAgent: meta.userAgent,
-      });
+          ipAddress: meta.ipAddress,
+          userAgent: meta.userAgent,
+        },
+        // DX-422: completo ⇒ PDF firmado en segundo plano (outbox).
+        (tx) => this.pdfs.schedule(tx, target.id),
+      );
     } catch (error) {
       if (error instanceof AlreadyCountersignedError) {
         throw new ConflictException(CONSENT_ALREADY_COUNTERSIGNED_MESSAGE);

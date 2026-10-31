@@ -568,6 +568,14 @@ const EXPECTED: Record<string, AuditOptions> = {
     patient: P,
     reason: 'CONSENT_COUNTERSIGNED',
   },
+  // DX-422: reintentar el PDF firmado que la cola no pudo generar.
+  'POST /patients/:patientId/consents/:id/signed-pdf/retry': {
+    action: 'UPDATE',
+    resource: 'CONSENT',
+    resourceId: { param: 'id' },
+    patient: P,
+    reason: 'SIGNED_PDF_RETRY',
+  },
   // DX-243: enviar a firmar a distancia y anular el enlace.
   'POST /patients/:patientId/signature-requests': {
     action: 'SEND',

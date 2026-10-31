@@ -898,6 +898,41 @@ la clínica (DX-012/DX-040). Migraciones `20261106160000_dx415_enums` y
 - **Pendiente** (DX-422): el PDF del presupuesto firmado generado en el
   servidor; hoy el paciente imprime o guarda la copia desde la página.
 
+### PDF firmado generado en el servidor (DX-422)
+
+- Cuando el profesional firma en la app un consentimiento firmado a distancia
+  (queda **Completo**), en la MISMA transacción nace su fila en
+  `signed_consent_pdfs` (`PENDING`) y se encola `consents.signed-pdf` (outbox,
+  DX-085; payload solo con el id).
+- El trabajo relee todo bajo el tenant, **comprueba los dos hashes guardados**
+  (firma del paciente con sus evidencias y firma del profesional encadenada) y
+  genera con **pdfkit** (JS puro, sin binarios nativos ni navegador, versión
+  fijada) el documento con el texto congelado tal cual, las dos firmas y una
+  **página de evidencias**: documento y versión de la plantilla, id, las dos
+  huellas SHA-256, canal y destino enmascarado, envío, apertura, código
+  verificado, firma del paciente/responsable y del profesional en la zona IANA y
+  el formato de la sede desde la que se envió (con el instante UTC exacto al
+  lado), IP y navegador de quien firmó. Además adjunta `texto-firmado.txt`
+  (título y texto exactos en UTF-8). Determinista: un reintento da los mismos
+  bytes.
+- Se archiva en `patient_documents` (categoría `SIGNED_CONSENT`, autor el
+  profesional, sede del envío; inalterable por el trigger de DX-151) y el
+  estado pasa a `READY` (fila congelada por `signed_consent_pdfs_guard`; la app
+  no tiene DELETE). Se descarga como cualquier documento
+  (`GET /patients/:id/documents/:docId/url/download`, URL firmada y auditada).
+- Reintentos: backoff exponencial de la cola, 6 intentos; el último deja
+  `FAILED` con un código técnico (`lastErrorCode`, nunca un mensaje). Un origen
+  inválido (hash que no casa, sede sin zona o formato, texto que las fuentes
+  estándar no pintan: `UNSUPPORTED_CHARACTERS`) es `FAILED` sin reintento: nunca
+  se archiva un documento alterado. `POST /patients/:id/consents/:consentId/signed-pdf/retry`
+  (los cuatro roles, 202; 409 si no está en error; 404 de otra clínica) lo
+  vuelve a encolar.
+- La lista de la ficha (`GET …/signature-requests`) trae `signedPdfStatus` y
+  `signedPdfDocumentId`.
+- Fuentes: Helvetica (WinAnsi), que cubre el español, el portugués y el resto
+  de lenguas de Europa occidental. Un texto con otros alfabetos queda `FAILED`
+  con `UNSUPPORTED_CHARACTERS` hasta que se embeba una fuente Unicode.
+
 ## Flujo del paciente en la clínica (DX-200)
 
 - **Estados nuevos** de la cita: `ARRIVED` (llegó, en espera), `IN_CHAIR`

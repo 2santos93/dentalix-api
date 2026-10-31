@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
   Param,
   ParseUUIDPipe,
   Post,
@@ -11,6 +12,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import {
+  ApiAcceptedResponse,
   ApiBadRequestResponse,
   ApiBearerAuth,
   ApiConflictResponse,
@@ -25,7 +27,11 @@ import type { Request } from 'express';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import { Roles } from '../../auth/presentation/guards/roles.decorator';
-import { CLINICAL_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
+import {
+  CLINICAL_ROLES,
+  SIGNATURE_REQUEST_ROLES,
+} from '../../auth/presentation/guards/clinic-role-sets';
+import { RetrySignedConsentPdfUseCase } from '../application/signed-consent-pdf.service';
 import { JwtPayload } from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 import {
@@ -46,6 +52,7 @@ import {
   PatientConsentDocumentDto,
   PatientConsentDto,
   PatientConsentSummaryDto,
+  SignedConsentPdfRetryDto,
 } from './dto/patient-consent.dto';
 import { PreviewPatientConsentQueryDto } from './dto/preview-patient-consent-query.dto';
 import {
@@ -96,6 +103,7 @@ export class PatientConsentsController {
     private readonly signConsent: SignPatientConsentUseCase,
     private readonly getConsent: GetPatientConsentUseCase,
     private readonly countersignConsent: CountersignPatientConsentUseCase,
+    private readonly retrySignedPdf: RetrySignedConsentPdfUseCase,
   ) {}
 
   @Audit({
@@ -251,5 +259,30 @@ export class PatientConsentsController {
       // ve en el documento; la de una firma en pantalla es la de la clínica.
       remoteIpAddress: doc.remote ? doc.ipAddress : null,
     };
+  }
+
+  // DX-422: «Reintentar» el PDF firmado cuando la cola agotó los intentos.
+  // Los cuatro roles, como el bloque de firma a distancia de la ficha (no
+  // devuelve nada clínico).
+  @Audit({
+    action: 'UPDATE',
+    resource: 'CONSENT',
+    resourceId: { param: 'id' },
+    patient: { param: 'patientId' },
+    reason: 'SIGNED_PDF_RETRY',
+  })
+  @Roles(...SIGNATURE_REQUEST_ROLES)
+  @Post(':id/signed-pdf/retry')
+  @HttpCode(202)
+  @ApiAcceptedResponse({ type: SignedConsentPdfRetryDto })
+  @ApiNotFoundResponse({ description: 'Consentimiento no encontrado' })
+  @ApiConflictResponse({
+    description: 'El PDF firmado ya está archivado o se está generando',
+  })
+  retrySignedPdfGeneration(
+    @Param('patientId', ParseUUIDPipe) patientId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<SignedConsentPdfRetryDto> {
+    return this.retrySignedPdf.execute(patientId, id);
   }
 }

@@ -293,6 +293,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // a firmar; el caso de uso lo comprueba). Enviar a firmar, verlo en la ficha
   // y anularlo: los cuatro roles (recepción lo envía), como la anamnesis.
   'POST /patients/:patientId/consents/:id/countersign': CLINICAL,
+  // DX-422: reintentar el PDF firmado que no se pudo generar: los cuatro
+  // roles, como el bloque de firma a distancia de la ficha (nada clínico).
+  'POST /patients/:patientId/consents/:id/signed-pdf/retry': EVERY_ROLE,
   'GET /patients/:patientId/signature-requests/options': EVERY_ROLE,
   'GET /patients/:patientId/signature-requests': EVERY_ROLE,
   'POST /patients/:patientId/signature-requests': EVERY_ROLE,
