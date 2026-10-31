@@ -3669,11 +3669,12 @@ migraciones `20261020200000_dx151_enums`,
   objeto huérfano se borra en el acto (es lo único que se borra).
 - **CSP de la web**: la web ve los PDF en un `iframe` y las imágenes en
   `<img>` desde la URL firmada, así que su CSP añade a `frame-src` e
-  `img-src` el origen de los ficheros: `NEXT_PUBLIC_FILES_ORIGIN` (variable
-  de la **web**, no de la API; por defecto el origen de la API, que es el de
-  `/files/signed` con el disco). Con S3 en producción, pon ahí el origen del
-  bucket (`https://<bucket>.s3.<región>.amazonaws.com` o el de R2). La API no
-  tiene variables nuevas.
+  `img-src` el origen de los ficheros: `FILES_ORIGIN` (variable de servidor
+  de la **web**, leída en runtime desde DX-083, no de la API; por defecto
+  el origen de la API, que es el de `/files/signed` con el disco). Con S3
+  en producción, pon ahí el origen del bucket
+  (`https://<bucket>.s3.<región>.amazonaws.com` o el de R2). La API no tiene
+  variables nuevas.
 - **Pendiente tras DX-089**: la sede de escritura la resuelve solo
   `PrismaPatientDocumentRepository.resolveWriteLocationId` (hoy la activa o
   la principal); cuando DX-089 llegue a main pasa a
@@ -4620,8 +4621,8 @@ file://cors.json` con `{"CORSRules": [...]}`; GET no hace falta: el visor
   pasa a R2, hay que implementar antes un modo de PUT prefirmado (con
   `Content-Length` y `x-amz-checksum-sha256` firmados) en
   `createDirectUpload` (tarea aparte del tech lead; informe DX-259).
-- **Web**: `NEXT_PUBLIC_FILES_ORIGIN` = origen del bucket (CSP `connect-src`,
-  `frame-src`, `img-src`).
+- **Web**: `FILES_ORIGIN` (antes `NEXT_PUBLIC_FILES_ORIGIN`, DX-083) = origen
+  del bucket (CSP `connect-src`, `frame-src`, `img-src`).
 - La política IAM de DX-084 sirve (`CopyObject` usa `s3:GetObject` del origen
   y `s3:PutObject` del destino); añade `s3:ListBucket` sobre el bucket para el
   `HeadBucket` del arranque.
