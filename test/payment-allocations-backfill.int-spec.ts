@@ -18,8 +18,9 @@ import {
 } from '../src/modules/payments/domain/ports/plan-allocation-repository.port';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { seedDemo } from '../prisma/seed-demo';
-import { civilDateIn } from '../src/shared/time/civil-day';
+import { DEMO_TIMEZONE } from '../prisma/demo/calendar';
 import { purgeDemoTenants } from './support/demo-tenant-purge';
+import { civilDaysSince } from './support/sede-clock';
 import {
   REGIONAL_BOGOTA_FIXTURE,
   locationData,
@@ -45,10 +46,12 @@ const PAID_AT = new Date('2026-10-20T12:00:00.000Z');
 const RATE_DATES = ['2026-10-19', '2026-10-20', '2026-10-21'];
 const EUR_PER_USD = 0.9;
 /**
- * DX-375: la demo trae un abono de hoy en USD sobre un plan en COP; con la
- * tasa COP de hoy en la caché lo congela al sembrarse, sin salir a la red.
+ * DX-375: la demo trae un abono en USD de hace 30 min sobre un plan en COP;
+ * con la tasa COP de su día en la caché lo congela al sembrarse, sin salir a
+ * la red. DX-449: pasada la medianoche de Bogotá ese abono es de AYER, así que
+ * se siembra la tasa de cada día que toca la última hora (uno o dos).
  */
-const DEMO_TODAY = civilDateIn(new Date(), 'America/Bogota');
+const DEMO_RATE_DAYS = civilDaysSince(60, DEMO_TIMEZONE);
 const COP_PER_USD = 4000;
 
 let app: INestApplication;
@@ -222,7 +225,11 @@ describe('backfill de imputaciones de abonos (DX-051, R17)', () => {
       skipDuplicates: true,
     });
     await raw.exchangeRateSnapshot.createMany({
-      data: [{ date: DEMO_TODAY, currency: 'COP', rate: COP_PER_USD }],
+      data: DEMO_RATE_DAYS.map((date) => ({
+        date,
+        currency: 'COP',
+        rate: COP_PER_USD,
+      })),
       skipDuplicates: true,
     });
 
@@ -262,7 +269,7 @@ describe('backfill de imputaciones de abonos (DX-051, R17)', () => {
     });
     await raw.exchangeRateSnapshot.deleteMany({
       where: {
-        date: DEMO_TODAY,
+        date: { in: DEMO_RATE_DAYS },
         currency: 'COP',
         fetchedAt: { gte: ratesCreatedAt },
       },

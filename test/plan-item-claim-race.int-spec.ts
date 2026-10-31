@@ -6,10 +6,8 @@ import { PrismaAppointmentRepository } from '../src/modules/appointments/infrast
 import { heldInClinicMessage } from '../src/modules/appointments/domain/plan-item-reservation';
 import { regionalFormat } from '../src/shared/format/regional-format';
 import { resetDatabase } from './support/e2e-fixtures';
-import {
-  REGIONAL_BOGOTA_FIXTURE,
-  locationData,
-} from './support/location-fixtures';
+import { locationData } from './support/location-fixtures';
+import { sedeTodayFixture } from './support/sede-clock';
 
 /**
  * DX-288: «Traer a esta cita» (DX-273) es atómico. Con varias peticiones de
@@ -27,7 +25,13 @@ const context = new TenantContextService();
 const prisma = new PrismaService(context);
 const repo = new PrismaAppointmentRepository(prisma, context);
 const MIN = 60000;
-const ZONE = 'America/Bogota';
+/**
+ * DX-449: Bogotá salvo cerca de su medianoche, cuando las sedes pasan a una
+ * zona donde ahora es mediodía: las citas «de hoy que ya empezaron» son de hoy
+ * a cualquier hora de la CI.
+ */
+const SEDE = sedeTodayFixture();
+const ZONE = SEDE.timeZone;
 const DAY = 86400000;
 
 describe('DX-288 «Traer a esta cita» con peticiones concurrentes (int)', () => {
@@ -227,7 +231,7 @@ describe('DX-288 «Traer a esta cita» con peticiones concurrentes (int)', () =>
     ).id;
     locationId = (
       await owner.location.create({
-        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        data: locationData(SEDE, {
           tenantId,
           name: 'Principal',
         }),
@@ -279,7 +283,7 @@ describe('DX-288 «Traer a esta cita» con peticiones concurrentes (int)', () =>
         start,
         timeZone: ZONE,
         locationName: 'Principal',
-        fmt: regionalFormat(REGIONAL_BOGOTA_FIXTURE),
+        fmt: regionalFormat(SEDE),
       }),
     );
     expect(await activeHolders(itemId)).toEqual([first]);
@@ -367,7 +371,7 @@ describe('DX-288 «Traer a esta cita» con peticiones concurrentes (int)', () =>
           start,
           timeZone: ZONE,
           locationName: 'Principal',
-          fmt: regionalFormat(REGIONAL_BOGOTA_FIXTURE),
+          fmt: regionalFormat(SEDE),
         }),
       );
     }
@@ -377,7 +381,7 @@ describe('DX-288 «Traer a esta cita» con peticiones concurrentes (int)', () =>
   it('la que gana es de una sede no permitida a quien llega después: 409 general, sin su hora ni su sede (DX-089, revisión B2)', async () => {
     const norte = (
       await owner.location.create({
-        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        data: locationData(SEDE, {
           tenantId,
           name: 'Sede Norte',
         }),

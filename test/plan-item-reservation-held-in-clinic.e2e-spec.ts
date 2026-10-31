@@ -17,10 +17,8 @@ import {
 } from './support/e2e-fixtures';
 import { heldInClinicMessage } from '../src/modules/appointments/domain/plan-item-reservation';
 import { regionalFormat } from '../src/shared/format/regional-format';
-import {
-  REGIONAL_BOGOTA_FIXTURE,
-  locationData,
-} from './support/location-fixtures';
+import { locationData } from './support/location-fixtures';
+import { sedeTodayFixture } from './support/sede-clock';
 
 /**
  * DX-293 (seguimiento de DX-288, revisión M2): el aviso de reserva en otra
@@ -35,7 +33,13 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 });
 const MIN = 60000;
 const DAY = 86400000;
-const ZONE = 'America/Bogota';
+/**
+ * DX-449: Bogotá salvo cerca de su medianoche, cuando la sede pasa a una zona
+ * donde ahora es mediodía: las citas «de hoy que ya empezaron» son de hoy a
+ * cualquier hora de la CI.
+ */
+const SEDE = sedeTodayFixture();
+const ZONE = SEDE.timeZone;
 
 interface ReservedElsewhere {
   planItemId: string;
@@ -205,12 +209,19 @@ describe('DX-293 aviso de reserva en otra cita con heldInClinic', () => {
     app = await createE2eApp();
     await resetDatabase(raw);
     a = await registerClinic(app, 'dx293-e2e');
-    const location = await raw.location.findFirstOrThrow({
-      where: { tenantId: a.tenantId },
+    const location = await raw.location.update({
+      where: {
+        id: (
+          await raw.location.findFirstOrThrow({
+            where: { tenantId: a.tenantId },
+          })
+        ).id,
+      },
+      data: { timeZone: ZONE },
     });
     locationId = location.id;
     locationName = location.name;
-    // Sin horario: la zona de la sede es la de su país (Bogotá).
+    // Sin horario: «hoy» es el de la zona de la sede.
     await raw.locationSchedule.updateMany({
       where: { tenantId: a.tenantId },
       data: { deletedAt: new Date() },
@@ -261,8 +272,8 @@ describe('DX-293 aviso de reserva en otra cita con heldInClinic', () => {
         locationId,
         locationName,
         timeZone: ZONE,
-        locale: REGIONAL_BOGOTA_FIXTURE.locale,
-        hourCycle: REGIONAL_BOGOTA_FIXTURE.hourCycle,
+        locale: SEDE.locale,
+        hourCycle: SEDE.hourCycle,
       };
       expect(await arrive(today.id)).toEqual([expected]);
       expect(await panelNotice(today.id)).toEqual([expected]);
@@ -273,7 +284,7 @@ describe('DX-293 aviso de reserva en otra cita con heldInClinic', () => {
           start: holder.start,
           timeZone: ZONE,
           locationName,
-          fmt: regionalFormat(REGIONAL_BOGOTA_FIXTURE),
+          fmt: regionalFormat(SEDE),
         }),
       );
       expect(await activeLinks(itemId)).toEqual([{ appointmentId: holder.id }]);
@@ -317,8 +328,8 @@ describe('DX-293 aviso de reserva en otra cita con heldInClinic', () => {
       locationId,
       locationName,
       timeZone: ZONE,
-      locale: REGIONAL_BOGOTA_FIXTURE.locale,
-      hourCycle: REGIONAL_BOGOTA_FIXTURE.hourCycle,
+      locale: SEDE.locale,
+      hourCycle: SEDE.hourCycle,
     };
     expect(await arrive(today.id)).toEqual([expected]);
     expect(await panelNotice(today.id)).toEqual([expected]);
@@ -329,7 +340,7 @@ describe('DX-293 aviso de reserva en otra cita con heldInClinic', () => {
   // Al final: restringe a recepción a la sede principal.
   it('titular de hoy en la clínica de una sede no permitida: heldInClinic sin cita, hora ni sede (DX-089); quien ve las dos sedes, sí', async () => {
     const north = await raw.location.create({
-      data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      data: locationData(SEDE, {
         tenantId: a.tenantId,
         name: 'Sede Norte DX293',
       }),
@@ -412,8 +423,8 @@ describe('DX-293 aviso de reserva en otra cita con heldInClinic', () => {
       locationId: north.id,
       locationName: 'Sede Norte DX293',
       timeZone: ZONE,
-      locale: REGIONAL_BOGOTA_FIXTURE.locale,
-      hourCycle: REGIONAL_BOGOTA_FIXTURE.hourCycle,
+      locale: SEDE.locale,
+      hourCycle: SEDE.hourCycle,
     });
   });
 });
