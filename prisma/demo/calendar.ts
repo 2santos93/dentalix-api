@@ -393,3 +393,51 @@ export function planComparisonHistory(
   }
   return visits;
 }
+
+/** Qué deja sin cerrar cada cita de ejemplo de «Pendiente de cerrar» (DX-439). */
+export type ClosingExampleKind = 'OUTCOME' | 'EVOLUTION' | 'TREATMENT';
+
+export interface PlannedClosingExample {
+  kind: ClosingExampleKind;
+  start: Date;
+  end: Date;
+}
+
+const CLOSING_EXAMPLE_MINUTES = 30;
+const CLOSING_EXAMPLE_KINDS: readonly ClosingExampleKind[] = [
+  'OUTCOME',
+  'EVOLUTION',
+  'TREATMENT',
+];
+
+/**
+ * DX-439: tres citas del último día ABIERTO antes de hoy (ayer si la sede
+ * abrió), al final de su horario y sin solaparse: una CONFIRMED que nadie
+ * cerró, una atendida sin evolución y una atendida con un tratamiento ligado
+ * sin marcar como hecho. Sin días abiertos en la última semana: ninguna.
+ */
+export function planClosingQueueExamples(
+  now: Date,
+  ranges: readonly WallRange[],
+): PlannedClosingExample[] {
+  for (let daysAgo = 1; daysAgo <= 7; daysAgo++) {
+    const day = bogotaDay(now, -daysAgo);
+    const open = ranges.filter((r) => r.weekday === day.weekday);
+    if (open.length === 0) continue;
+    const close = Math.max(...open.map((r) => r.endMinute));
+    const first =
+      close - CLOSING_EXAMPLE_KINDS.length * CLOSING_EXAMPLE_MINUTES;
+    if (!open.some((r) => r.startMinute <= first && r.endMinute >= close)) {
+      continue;
+    }
+    return CLOSING_EXAMPLE_KINDS.map((kind, i) => {
+      const startMinute = first + i * CLOSING_EXAMPLE_MINUTES;
+      return {
+        kind,
+        start: at(day, startMinute),
+        end: at(day, startMinute + CLOSING_EXAMPLE_MINUTES),
+      };
+    });
+  }
+  return [];
+}

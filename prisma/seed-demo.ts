@@ -135,6 +135,7 @@ import {
   planAppointments,
   planComparisonHistory,
   planInClinicToday,
+  planClosingQueueExamples,
 } from './demo/calendar';
 import { CreateScheduleBlockUseCase } from '../src/modules/schedule-blocks/application/use-cases/schedule-blocks.use-cases';
 import {
@@ -753,6 +754,16 @@ class DemoSeeder {
       locations,
       patientIds,
       dentists,
+      catalog,
+    );
+
+    await this.createClosingQueueExamples(
+      tenantId,
+      locations,
+      hours,
+      patientIds,
+      dentists,
+      receptionId,
       catalog,
     );
 
@@ -2083,6 +2094,85 @@ class DemoSeeder {
             dentist,
           );
         }
+      }
+    });
+  }
+
+  /**
+   * DX-439: «Pendiente de cerrar» con algo en cada sección para probarla en
+   * local: en la sede principal, el último día abierto antes de hoy, una cita
+   * CONFIRMED sin desenlace, una atendida sin evolución y una atendida con un
+   * tratamiento del plan ligado que sigue en ACCEPTED (el plan, aceptado).
+   */
+  private async createClosingQueueExamples(
+    tenantId: string,
+    locations: Record<DemoLocationKey, string>,
+    hours: Record<DemoLocationKey, BusinessHours | null>,
+    patientIds: string[],
+    dentists: string[],
+    receptionId: string,
+    catalog: Map<string, string>,
+  ): Promise<void> {
+    const examples = planClosingQueueExamples(
+      this.now,
+      hours.principal?.ranges ?? [],
+    );
+    const candidates = patientIds.filter(
+      (_, i) => i !== DEMO_PLAN_OPTIONS.patientIndex,
+    );
+    const used = new Set<string>();
+    await this.inTenant(tenantId, locations.principal, async () => {
+      const create = this.use(CreateAppointmentUseCase);
+      const update = this.use(UpdateAppointmentUseCase);
+      for (const example of examples) {
+        const booked = await this.bookFirstFree(
+          create,
+          example,
+          dentists,
+          candidates,
+          used,
+          receptionId,
+        );
+        if (!booked) continue;
+        used.add(booked.patientId);
+        await update.execute(booked.id, {
+          status:
+            example.kind === 'OUTCOME'
+              ? AppointmentStatus.CONFIRMED
+              : AppointmentStatus.COMPLETED,
+        });
+        if (example.kind !== 'TREATMENT') continue;
+        await this.prisma.runWithTenant(async (tx) => {
+          const plan = await tx.treatmentPlan.create({
+            data: {
+              tenantId,
+              patientId: booked.patientId,
+              currency: DEMO_CURRENCY,
+              status: TreatmentPlanStatus.ACCEPTED,
+              notes: 'Resina pendiente de marcar como realizada.',
+              createdById: booked.providerId,
+            },
+          });
+          const item = await tx.treatmentPlanItem.create({
+            data: {
+              tenantId,
+              planId: plan.id,
+              toothNumber: '26',
+              catalogItemId: catalogId(catalog, 'OP-RESINA-1'),
+              price: 150000,
+              status: TreatmentPlanItemStatus.ACCEPTED,
+              createdById: booked.providerId,
+            },
+          });
+          await tx.appointmentPlanItem.create({
+            data: {
+              tenantId,
+              patientId: booked.patientId,
+              appointmentId: booked.id,
+              planItemId: item.id,
+            },
+          });
+        });
       }
     });
   }

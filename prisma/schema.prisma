@@ -68,6 +68,8 @@ model Tenant {
   emailOutbox                             EmailOutbox[]
   clinicalEntryAddenda                    ClinicalEntryAddendum[]
   anestheticProducts                      AnestheticProduct[]
+  // DX-439: descartes de «Pendiente de cerrar».
+  closingQueueDismissals                  ClosingQueueDismissal[]
   anesthesiaAdministrations               AnesthesiaAdministration[]
   // DX-407: hoja de sedación consciente en la evolución.
   sedationRecords                         SedationRecord[]
@@ -216,6 +218,8 @@ model User {
   tokens                            UserToken[]
   clinicalEntryAddenda              ClinicalEntryAddendum[]
   anesthesiaAdministrations         AnesthesiaAdministration[]
+  // DX-439: pendientes de «Pendiente de cerrar» que descartó.
+  closingQueueDismissals            ClosingQueueDismissal[]
   // DX-407: hoja de sedación (autor de cada parte; operador y monitor del egreso).
   sedationRecordsAuthored           SedationRecord[]
   sedationChecklists                SedationChecklist[]
@@ -1243,6 +1247,8 @@ model Appointment {
   medicalHistorySubmissions MedicalHistorySubmission[]
   // DX-291: cargo por inasistencia o cancelación tardía (o su condonación).
   cancellationFee           CancellationFee?
+  // DX-439: pendientes de cierre descartados de esta cita.
+  closingQueueDismissals    ClosingQueueDismissal[]
 
   // FK COMPUESTA a propósito: exige que el paciente sea del MISMO tenant.
   // Antes era `[patientId] -> [id]`, que solo garantizaba "el paciente existe
@@ -1736,6 +1742,8 @@ model TreatmentPlanItem {
   appointmentLinks  AppointmentPlanItem[]
   // DX-291: el cargo por inasistencia que creó este ítem (si lo es).
   cancellationFees  CancellationFee[]
+  // DX-439: «sin marcar como hecho» descartado de «Pendiente de cerrar».
+  closingDismissals ClosingQueueDismissal[]
   id                String                  @id @default(uuid()) @db.Uuid
   tenantId          String                  @db.Uuid
   planId            String                  @db.Uuid
@@ -3295,6 +3303,8 @@ enum AuditResourceType {
   ANESTHESIA_ADMINISTRATION
   // DX-407: hoja de sedación de una evolución (cada parte que se añade).
   SEDATION_RECORD
+  // DX-439: descarte de un pendiente de «Pendiente de cerrar» (con motivo).
+  CLOSING_QUEUE_DISMISSAL
   // DX-243: firma a distancia (enviar, abrir, verificar, bloquear, firmar, anular).
   SIGNATURE_REQUEST
   // DX-253: saldo a favor del paciente (traspaso, devolución y su
@@ -6027,4 +6037,59 @@ model ExchangeProviderClinicBudget {
 
   @@id([tenantId, quota])
   @@map("exchange_provider_clinic_budgets")
+}
+
+// DX-439: sección de «Pendiente de cerrar». OUTCOME = cita pasada sin
+// desenlace (SCHEDULED/CONFIRMED); EVOLUTION = atendida sin evolución viva;
+// TREATMENT = atendida con un ítem ligado activo que sigue en ACCEPTED.
+enum ClosingQueueSection {
+  OUTCOME
+  EVOLUTION
+  TREATMENT
+}
+
+// DX-439: motivo (lista cerrada) de un descarte. OTHER exige texto (3–200).
+enum ClosingDismissalReason {
+  PATIENT_DECLINED_TODAY
+  PAPER_NOTE
+  DUPLICATE_APPOINTMENT
+  OTHER
+}
+
+/// DX-439: un pendiente de «Pendiente de cerrar» descartado a mano, con su
+/// motivo. Saca ese pendiente (sección + cita [+ ítem]) de la lista sin tocar
+/// la cita, la historia ni el plan; el descarte queda además en
+/// `audit_events` (CLOSING_QUEUE_DISMISSAL). Append-only (trigger + REVOKE),
+/// RLS FORCE por tenant y FK COMPUESTAS a la cita y al ítem del MISMO
+/// paciente y clínica. `createdAt` lo pone la BD.
+///
+/// Solo SQL (Prisma no los expresa):
+///   closing_queue_dismissals_pending_key UNIQUE ("tenantId", section,
+///     "appointmentId", "planItemId") NULLS NOT DISTINCT -> un descarte por
+///     pendiente, y el NOT EXISTS de la lista.
+///   CHECK closing_queue_dismissals_item_check: ítem solo y siempre en TREATMENT.
+///   CHECK closing_queue_dismissals_reason_text_check: texto 3–200 (sin
+///     espacios de los bordes) con OTHER; sin texto con los demás motivos.
+model ClosingQueueDismissal {
+  id            String                 @id @default(uuid()) @db.Uuid
+  tenantId      String                 @db.Uuid
+  section       ClosingQueueSection
+  patientId     String                 @db.Uuid
+  appointmentId String                 @db.Uuid
+  planItemId    String?                @db.Uuid
+  reasonCode    ClosingDismissalReason
+  reasonText    String?                @db.VarChar(200)
+  createdById   String                 @db.Uuid
+  createdAt     DateTime               @default(now())
+
+  tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  appointment Appointment        @relation(fields: [tenantId, patientId, appointmentId], references: [tenantId, patientId, id], onDelete: Restrict, onUpdate: Restrict, map: "closing_queue_dismissals_appointment_fkey")
+  planItem    TreatmentPlanItem? @relation(fields: [tenantId, patientId, planItemId], references: [tenantId, patientId, id], onDelete: Restrict, onUpdate: Restrict, map: "closing_queue_dismissals_plan_item_fkey")
+  createdBy   User               @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, id], map: "closing_queue_dismissals_tenant_id_key")
+  @@index([tenantId, patientId, appointmentId], map: "closing_queue_dismissals_tenant_appointment_idx")
+  @@index([tenantId, patientId, planItemId], map: "closing_queue_dismissals_tenant_plan_item_idx")
+  @@index([createdById], map: "closing_queue_dismissals_created_by_idx")
+  @@map("closing_queue_dismissals")
 }
