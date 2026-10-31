@@ -9,6 +9,8 @@ import { PlatformSedationTemplateSource } from '../../infrastructure/platform-se
 import { PLATFORM_SEDATION_TEMPLATE as T } from '../../domain/sedation-template';
 import { InMemorySedationRepository } from '../__fixtures__/in-memory-sedation';
 import {
+  SEDATION_CHECKLIST_BEFORE_ASSESSMENT_MESSAGE,
+  SEDATION_TIME_FUTURE_MESSAGE,
   SedationUseCases,
   type SedationAssessInput,
   type SedationDischargeRequest,
@@ -232,6 +234,58 @@ describe('SedationUseCases (DX-407)', () => {
     });
   });
 
+  describe('hora clínica de la valoración y del checklist (QA DX-407)', () => {
+    it('la valoración guarda la hora anotada; sin ella, ahora; futura, 400', async () => {
+      const { uc } = setup();
+      const sheet = await uc.assess(
+        PATIENT,
+        ENTRY,
+        { ...assessment(), assessedAt: at(-60) },
+        DENTIST,
+      );
+      expect(sheet.assessedAt).toEqual(at(-60));
+      // El registro sigue siendo la hora del servidor.
+      expect(sheet.createdAt).toEqual(NOW);
+
+      const other = setup();
+      expect(
+        (await other.uc.assess(PATIENT, ENTRY, assessment(), DENTIST))
+          .assessedAt,
+      ).toEqual(NOW);
+      const future = setup();
+      await expect(
+        future.uc.assess(
+          PATIENT,
+          ENTRY,
+          { ...assessment(), assessedAt: at(10) },
+          DENTIST,
+        ),
+      ).rejects.toThrow(SEDATION_TIME_FUTURE_MESSAGE);
+    });
+
+    it('el checklist guarda su hora anotada, que no puede ser anterior a la valoración', async () => {
+      const { uc, repo } = setup();
+      await uc.assess(
+        PATIENT,
+        ENTRY,
+        { ...assessment(), assessedAt: at(-60) },
+        DENTIST,
+      );
+      await expect(
+        uc.check(PATIENT, ENTRY, allMarks, DENTIST, at(-61)),
+      ).rejects.toThrow(SEDATION_CHECKLIST_BEFORE_ASSESSMENT_MESSAGE);
+      expect(repo.sheets[0].checklist).toBeNull();
+      await expect(
+        uc.check(PATIENT, ENTRY, allMarks, DENTIST, at(10)),
+      ).rejects.toThrow(SEDATION_TIME_FUTURE_MESSAGE);
+      const sheet = await uc.check(PATIENT, ENTRY, allMarks, DENTIST, at(-57));
+      expect(sheet.checklist).toMatchObject({
+        checkedAt: at(-57),
+        createdAt: NOW,
+      });
+    });
+  });
+
   describe('checklist', () => {
     it('sin hoja: 404', async () => {
       const { uc } = setup();
@@ -378,7 +432,8 @@ describe('SedationUseCases (DX-407)', () => {
       );
       expect(after.watch).toMatchObject({ overdue: false });
       expect(after.watch.nextDueAt).toEqual(at(5));
-      expect(after.watch.missedIntervals).toBe(1);
+      // De -16 a 0 vencieron sin toma las de -11, -6 y -1.
+      expect(after.watch.missedIntervals).toBe(3);
     });
 
     it('una toma anotada con hora futura (tolerancia de reloj) no aplaza el aviso', async () => {

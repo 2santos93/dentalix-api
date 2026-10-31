@@ -1102,6 +1102,10 @@ export const DEMO_SEDATION = {
     escortRelationship: 'Madre',
     consentConfirmed: true,
   },
+  // Horas en orden (QA DX-407): valoración < checklist < toma basal < N2O <
+  // tomas intraoperatorias < egreso, todas en el pasado de la siembra.
+  assessedMinutesAgo: 60,
+  checkedMinutesAgo: 57,
   baselineMinutesAgo: 55,
   n2o: { n2oPercent: 30, flowLpm: 6, minutesAgo: 50 },
   intraMinutesAgo: [45, 40, 35],

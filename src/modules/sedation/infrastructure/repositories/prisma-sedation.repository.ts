@@ -151,13 +151,16 @@ function mapSheet(row: SheetRow, names: Map<string, string>): SedationSheet {
     consentConfirmed: row.consentConfirmed,
     consentId: row.consentId,
     author: actor(row.authorId),
+    // Las hojas anteriores a la hora clínica (QA DX-407) usan la del servidor.
+    assessedAt: row.assessedAt ?? row.createdAt,
     createdAt: row.createdAt,
     checklist: row.checklist
       ? {
           id: row.checklist.id,
           items: readChecklist(row.checklist.items),
           author: actor(row.checklist.authorId),
-          checkedAt: row.checklist.createdAt,
+          checkedAt: row.checklist.checkedAt ?? row.checklist.createdAt,
+          createdAt: row.checklist.createdAt,
         }
       : null,
     agents: row.agents.map((a) => ({
@@ -360,6 +363,7 @@ export class PrismaSedationRepository implements SedationRepository {
               tenantId,
               sedationRecordId,
               items: write.items as unknown as Prisma.InputJsonValue,
+              checkedAt: write.checkedAt,
               authorId: write.authorId,
             },
           });

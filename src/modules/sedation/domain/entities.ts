@@ -23,8 +23,14 @@ export interface SedationChecklistRow {
   id: string;
   items: SedationChecklistItem[];
   author: SedationActor;
-  /** Hora del servidor en que se marcó. */
+  /**
+   * Hora clínica del checklist, la que anota quien lo marca (por defecto,
+   * ahora); nunca anterior a la valoración. Las hojas de antes de esta
+   * columna usan la del servidor.
+   */
   checkedAt: Date;
+  /** Hora del servidor en que se registró. */
+  createdAt: Date;
 }
 
 export interface SedationAgentRow {
@@ -102,6 +108,12 @@ export interface SedationSheet {
   consentConfirmed: boolean;
   consentId: string | null;
   author: SedationActor;
+  /**
+   * Hora clínica de la valoración, la que anota quien la hace (por defecto,
+   * ahora). Las hojas de antes de esta columna usan la del servidor.
+   */
+  assessedAt: Date;
+  /** Hora del servidor en que se registró. */
   createdAt: Date;
   checklist: SedationChecklistRow | null;
   /** En orden de administración. */

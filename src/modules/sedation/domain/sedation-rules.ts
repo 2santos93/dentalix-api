@@ -379,7 +379,14 @@ export interface VitalsWatch {
   nextDueAt: Date | null;
   overdue: boolean;
   overdueMinutes: number;
-  /** Huecos pasados entre tomas (desde el inicio) mayores que el intervalo. */
+  /**
+   * Intervalos vencidos sin toma entre el inicio y la última toma. En cada
+   * hueco entre dos marcas (inicio o toma) vence una toma a cada múltiplo
+   * del intervalo; las que vencen ANTES de la toma siguiente se pasaron sin
+   * ella: ⌈hueco / intervalo⌉ − 1 (20 min con intervalo de 5 → 3: vencían a
+   * los 5, 10, 15 y 20, y la del 20 llegó a su hora). El hueco abierto (desde
+   * la última toma hasta ahora) no cuenta: de él avisa `overdue`.
+   */
   missedIntervals: number;
 }
 
@@ -412,7 +419,8 @@ export function vitalsWatch(state: SedationTimeline, now: Date): VitalsWatch {
       ...allTaken.filter((t) => t >= startedMs).sort((a, b) => a - b),
     ];
     for (let i = 1; i < marks.length; i += 1) {
-      if (marks[i] - marks[i - 1] > intervalMs) missedIntervals += 1;
+      const gap = marks[i] - marks[i - 1];
+      if (gap > intervalMs) missedIntervals += Math.ceil(gap / intervalMs) - 1;
     }
   }
 

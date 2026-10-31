@@ -108,7 +108,8 @@ export class InMemorySedationRepository implements SedationRepository {
           id: randomUUID(),
           items: write.items,
           author: this.actor(write.authorId),
-          checkedAt: this.now(),
+          checkedAt: write.checkedAt,
+          createdAt: this.now(),
         };
         break;
       case 'AGENT': {

@@ -4668,9 +4668,10 @@ y plantilla en `domain/sedation-template.ts`. Contenido de la hoja de la AAPD
   `sedation_records` (una por evolución: grado, ASA I–V + E, interconsulta o
   justificación con ASA ≥ III, ayuno en h, Mallampati, peso, talla, IMC y
   reversores calculados —naloxona 0,1 mg/kg máx. 2 mg; flumazenil 0,01 mg/kg
-  máx. 0,2 mg—, acompañante, consentimiento y, si se cita, el `patient_consents`
-  firmado del MISMO paciente), `sedation_checklists` (uno por hoja; hora del
-  servidor y autor), `sedation_agent_administrations` (N₂O con % y flujo, oral
+  máx. 0,2 mg—, acompañante, consentimiento, hora clínica `assessedAt` y, si
+  se cita, el `patient_consents` firmado del MISMO paciente),
+  `sedation_checklists` (uno por hoja; hora clínica `checkedAt` y autor),
+  `sedation_agent_administrations` (N₂O con % y flujo, oral
   u otro con dosis, unidad, vía, hora y autor), `sedation_vitals` (basal,
   intraoperatoria o al alta) y `sedation_discharges` (uno por hoja; criterios
   o Aldrete, la toma al alta por FK de la MISMA hoja, hora, a quién se
@@ -4678,13 +4679,25 @@ y plantilla en `domain/sedation-template.ts`. Contenido de la hoja de la AAPD
 - **Reglas**: lo que falta responde 400 con `problems: [{code, message}]`.
   Orden: valoración → checklist (antes solo la toma basal) → fármacos y
   tomas → egreso, que cierra la hoja (luego todo es 409). En sedación moderada,
-  operador = monitor exige justificación. Un IMC fuera de 5–150 es un error de
+  operador = monitor exige justificación. Horas: las de valoración,
+  checklist, toma, fármaco y egreso las anota quien registra (por defecto,
+  ahora; nunca futuras, con 5 min de tolerancia de reloj) y `createdAt` es
+  siempre la del servidor; el checklist no puede ser anterior a la valoración
+  (400) y el egreso no puede ser anterior a la última toma o fármaco. Las
+  hojas anteriores a `assessedAt`/`checkedAt` (nulas) leen `createdAt`. Un
+  valor fuera de rango responde 400 con el rango («El N₂O tiene que estar
+  entre 10 y 70 %.»). Un IMC fuera de 5–150 es un error de
   peso o talla (`BMI_IMPLAUSIBLE`). Un Aldrete anotado < 9 no da el alta
   aunque se marquen los criterios (`ALDRETE_BELOW_MINIMUM`), ni un nivel de
   sedación moderado o profundo al alta (`DISCHARGE_SEDATION_LEVEL`). `watch`
   (en cada respuesta): con la sedación en curso, `nextDueAt` = última toma (o
   inicio) + intervalo y `overdue` si pasa sin toma; `missedIntervals` cuenta
-  los huecos pasados. Una toma o fármaco con hora posterior a su registro
+  los intervalos vencidos sin toma entre el inicio y la última toma: en cada
+  hueco entre dos marcas vence una toma a cada múltiplo del intervalo y las
+  que vencen antes de la toma siguiente se pasaron, ⌈hueco / intervalo⌉ − 1
+  (20 min con intervalo de 5 → 3: vencían a los 5, 10, 15 y 20, y la del 20
+  llegó a su hora). El hueco abierto hasta ahora no cuenta: lo dice
+  `overdue`. Una toma o fármaco con hora posterior a su registro
   cuenta desde que se registró (la tolerancia de reloj no aplaza el aviso).
   Cada escritura bloquea la hoja (`FOR UPDATE`).
 - **Roles**: valoración, checklist, fármacos y egreso, DENTIST y ADMIN; las
@@ -4698,12 +4711,15 @@ y plantilla en `domain/sedation-template.ts`. Contenido de la hoja de la AAPD
   `CREATE SEDATION_RECORD` con `metadata.reason` `SEDATION_ASSESSMENT|
 CHECKLIST|AGENT|VITALS|DISCHARGE`, sin constantes, dosis ni textos.
 - **Migraciones** `20261105140000_dx407_enums`,
-  `…130100_dx407_audit_events_idx` y `…130200_dx407_sedation`: aditivas
-  (tipos, cinco tablas y el único `patient_consents (tenantId, patientId, id)`
-  que sirve de destino a la FK del consentimiento).
+  `…140100_dx407_audit_events_idx`, `…140200_dx407_sedation` y
+  `…140300_dx407_sedation_clinical_times`: aditivas (tipos, cinco tablas, el
+  único `patient_consents (tenantId, patientId, id)` que sirve de destino a la
+  FK del consentimiento y las dos columnas nulas de hora clínica, sin
+  reescritura).
 - **Demo**: `seed:demo` añade a Sofía (32 kg) una evolución «Restauraciones
-  bajo sedación con óxido nitroso» con la hoja completa (N₂O 30 %, 1 toma
-  basal, 3 intraoperatorias cada 5 min y egreso con el asistente como
+  bajo sedación con óxido nitroso» con la hoja completa y sus horas en orden
+  (valoración hace 60 min, checklist 57, toma basal 55, N₂O 30 % 50, 3
+  intraoperatorias cada 5 min y egreso hace 20 con el asistente como
   monitor).
 
 ## Imputación de abonos a ítems (DX-051)

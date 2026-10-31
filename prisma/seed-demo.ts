@@ -1667,7 +1667,10 @@ class DemoSeeder {
     await sedation.assess(
       patientId,
       entry.id,
-      { ...DEMO_SEDATION.assessment },
+      {
+        ...DEMO_SEDATION.assessment,
+        assessedAt: minutesAgo(DEMO_SEDATION.assessedMinutesAgo),
+      },
       dentistId,
     );
     await sedation.addVitals(
@@ -1689,6 +1692,7 @@ class DemoSeeder {
         checked: true,
       })),
       dentistId,
+      minutesAgo(DEMO_SEDATION.checkedMinutesAgo),
     );
     await sedation.addAgent(
       patientId,

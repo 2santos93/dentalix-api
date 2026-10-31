@@ -5391,6 +5391,9 @@ model SedationRecord {
   consentConfirmed         Boolean
   consentId                String?       @db.Uuid
   authorId                 String        @db.Uuid
+  /// Hora clínica de la valoración (la anota quien la hace; por defecto, ahora).
+  /// Nula en las hojas anteriores a la columna: se lee `createdAt`.
+  assessedAt               DateTime?
   createdAt                DateTime      @default(now())
 
   tenant    Tenant                        @relation(fields: [tenantId], references: [id])
@@ -5414,15 +5417,17 @@ model SedationRecord {
 }
 
 /// Checklist previo de una hoja (DX-407): copia de los ítems de la plantilla
-/// con su marca; la hora es la del servidor (`createdAt`) y el autor quien lo
-/// marcó. Uno por hoja; inalterable.
+/// con su marca, su hora clínica (`checkedAt`, nunca anterior a la valoración;
+/// nula en los anteriores a la columna, que usan `createdAt`, la del servidor)
+/// y el autor quien lo marcó. Uno por hoja; inalterable.
 model SedationChecklist {
-  id               String   @id @default(uuid()) @db.Uuid
-  tenantId         String   @db.Uuid
-  sedationRecordId String   @db.Uuid
+  id               String    @id @default(uuid()) @db.Uuid
+  tenantId         String    @db.Uuid
+  sedationRecordId String    @db.Uuid
   items            Json
-  authorId         String   @db.Uuid
-  createdAt        DateTime @default(now())
+  checkedAt        DateTime?
+  authorId         String    @db.Uuid
+  createdAt        DateTime  @default(now())
 
   tenant Tenant         @relation(fields: [tenantId], references: [id])
   record SedationRecord @relation(fields: [tenantId, sedationRecordId], references: [tenantId, id])

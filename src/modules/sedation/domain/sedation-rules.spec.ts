@@ -310,7 +310,7 @@ describe('reglas de la hoja de sedación (DX-407)', () => {
       expect(watch.overdue).toBe(true);
     });
 
-    it('cuenta los huecos pasados de más de un intervalo entre tomas', () => {
+    it('cuenta los intervalos vencidos sin toma, no los huecos', () => {
       const watch = vitalsWatch(
         {
           ...base,
@@ -322,8 +322,33 @@ describe('reglas de la hoja de sedación (DX-407)', () => {
         },
         at(21),
       );
-      // 0→4 y 4→9 caben en 5 min; 9→20 no.
-      expect(watch.missedIntervals).toBe(1);
+      // 0→4 y 4→9 caben en 5 min; en 9→20 vencieron sin toma las de los
+      // minutos 14 y 19.
+      expect(watch.missedIntervals).toBe(2);
+    });
+
+    it('un hueco de 20 min con intervalo de 5 son 3 intervalos vencidos (la toma del minuto 20 llega a su hora)', () => {
+      const watch = vitalsWatch(
+        { ...base, vitals: [{ phase: 'INTRA', takenAt: at(20) }] },
+        at(21),
+      );
+      // Vencían a los 5, 10, 15 y 20: la del 20 se hizo justo a tiempo.
+      expect(watch.missedIntervals).toBe(3);
+    });
+
+    it('un hueco de 21 min ya son 4 intervalos vencidos; uno de 10 exactos, 1', () => {
+      expect(
+        vitalsWatch(
+          { ...base, vitals: [{ phase: 'INTRA', takenAt: at(21) }] },
+          at(22),
+        ).missedIntervals,
+      ).toBe(4);
+      expect(
+        vitalsWatch(
+          { ...base, vitals: [{ phase: 'INTRA', takenAt: at(10) }] },
+          at(11),
+        ).missedIntervals,
+      ).toBe(1);
     });
 
     it('una toma con hora posterior a cuando se registró cuenta desde que se registró (no aplaza el aviso)', () => {

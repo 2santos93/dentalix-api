@@ -29,6 +29,17 @@ import {
 
 const ONE_DECIMAL = { maxDecimalPlaces: 1 };
 
+/**
+ * Mensaje de un valor fuera de rango con el rango permitido (QA DX-407):
+ * «El N₂O tiene que estar entre 10 y 70 %.», no el genérico en inglés.
+ */
+function inRange(label: string, min: number, max: number, unit = '') {
+  const n = (v: number) => String(v).replace('.', ',');
+  return {
+    message: `${label} tiene que estar entre ${n(min)} y ${n(max)}${unit ? ` ${unit}` : ''}.`,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Entrada
 // ---------------------------------------------------------------------------
@@ -68,22 +79,22 @@ export class SedationAssessmentDto {
   @ApiPropertyOptional({ minimum: 0, maximum: 72, description: 'Horas' })
   @IsOptional()
   @IsNumber(ONE_DECIMAL)
-  @Min(0)
-  @Max(72)
+  @Min(0, inRange('El ayuno de líquidos claros', 0, 72, 'h'))
+  @Max(72, inRange('El ayuno de líquidos claros', 0, 72, 'h'))
   fastingClearLiquidsHours?: number;
 
   @ApiPropertyOptional({ minimum: 0, maximum: 72, description: 'Horas' })
   @IsOptional()
   @IsNumber(ONE_DECIMAL)
-  @Min(0)
-  @Max(72)
+  @Min(0, inRange('El ayuno de sólidos y leche', 0, 72, 'h'))
+  @Max(72, inRange('El ayuno de sólidos y leche', 0, 72, 'h'))
   fastingSolidsHours?: number;
 
   @ApiPropertyOptional({ minimum: 1, maximum: 4 })
   @IsOptional()
   @IsInt()
-  @Min(1)
-  @Max(4)
+  @Min(1, inRange('La clase de Mallampati', 1, 4))
+  @Max(4, inRange('La clase de Mallampati', 1, 4))
   mallampati?: number;
 
   @ApiPropertyOptional({
@@ -93,15 +104,15 @@ export class SedationAssessmentDto {
   })
   @IsOptional()
   @IsNumber(ONE_DECIMAL)
-  @Min(0.1)
-  @Max(399)
+  @Min(0.1, inRange('El peso', 0.1, 399, 'kg'))
+  @Max(399, inRange('El peso', 0.1, 399, 'kg'))
   weightKg?: number;
 
   @ApiPropertyOptional({ minimum: 30, maximum: 250, description: 'Talla (cm)' })
   @IsOptional()
   @IsNumber(ONE_DECIMAL)
-  @Min(30)
-  @Max(250)
+  @Min(30, inRange('La talla', 30, 250, 'cm'))
+  @Max(250, inRange('La talla', 30, 250, 'cm'))
   heightCm?: number;
 
   @ApiPropertyOptional({ maxLength: 120, description: 'Acompañante adulto' })
@@ -127,6 +138,14 @@ export class SedationAssessmentDto {
   @IsOptional()
   @IsUUID()
   consentId?: string;
+
+  @ApiPropertyOptional({
+    format: 'date-time',
+    description: 'Hora de la valoración; por defecto, ahora',
+  })
+  @IsOptional()
+  @IsDateString()
+  assessedAt?: string;
 }
 
 export class SedationMarkDto {
@@ -147,6 +166,15 @@ export class SedationChecklistDto {
   @ValidateNested({ each: true })
   @Type(() => SedationMarkDto)
   items!: SedationMarkDto[];
+
+  @ApiPropertyOptional({
+    format: 'date-time',
+    description:
+      'Hora del checklist; por defecto, ahora. No puede ser anterior a la valoración',
+  })
+  @IsOptional()
+  @IsDateString()
+  checkedAt?: string;
 }
 
 export class SedationAgentDto {
@@ -163,8 +191,8 @@ export class SedationAgentDto {
   @ApiPropertyOptional({ minimum: 0.01, maximum: 10000 })
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
-  @Min(0.01)
-  @Max(10000)
+  @Min(0.01, inRange('La dosis', 0.01, 10000))
+  @Max(10000, inRange('La dosis', 0.01, 10000))
   dose?: number;
 
   @ApiPropertyOptional({ enum: SedationDoseUnit, enumName: 'SedationDoseUnit' })
@@ -184,8 +212,8 @@ export class SedationAgentDto {
   @ApiPropertyOptional({ minimum: 10, maximum: 70, description: 'N2O: %' })
   @IsOptional()
   @IsInt()
-  @Min(10)
-  @Max(70)
+  @Min(10, inRange('El N₂O', 10, 70, '%'))
+  @Max(70, inRange('El N₂O', 10, 70, '%'))
   n2oPercent?: number;
 
   @ApiPropertyOptional({
@@ -195,8 +223,8 @@ export class SedationAgentDto {
   })
   @IsOptional()
   @IsNumber(ONE_DECIMAL)
-  @Min(0.5)
-  @Max(15)
+  @Min(0.5, inRange('El flujo total', 0.5, 15, 'l/min'))
+  @Max(15, inRange('El flujo total', 0.5, 15, 'l/min'))
   flowLpm?: number;
 
   @ApiPropertyOptional({
@@ -212,36 +240,36 @@ export class SedationVitalsValuesDto {
   @ApiPropertyOptional({ minimum: 50, maximum: 100, description: 'SpO2 (%)' })
   @IsOptional()
   @IsInt()
-  @Min(50)
-  @Max(100)
+  @Min(50, inRange('La SpO₂', 50, 100, '%'))
+  @Max(100, inRange('La SpO₂', 50, 100, '%'))
   spo2?: number;
 
   @ApiPropertyOptional({ minimum: 20, maximum: 250, description: 'lpm' })
   @IsOptional()
   @IsInt()
-  @Min(20)
-  @Max(250)
+  @Min(20, inRange('La FC', 20, 250, 'lpm'))
+  @Max(250, inRange('La FC', 20, 250, 'lpm'))
   heartRate?: number;
 
   @ApiPropertyOptional({ minimum: 40, maximum: 300, description: 'mmHg' })
   @IsOptional()
   @IsInt()
-  @Min(40)
-  @Max(300)
+  @Min(40, inRange('La TA sistólica', 40, 300, 'mmHg'))
+  @Max(300, inRange('La TA sistólica', 40, 300, 'mmHg'))
   systolic?: number;
 
   @ApiPropertyOptional({ minimum: 20, maximum: 200, description: 'mmHg' })
   @IsOptional()
   @IsInt()
-  @Min(20)
-  @Max(200)
+  @Min(20, inRange('La TA diastólica', 20, 200, 'mmHg'))
+  @Max(200, inRange('La TA diastólica', 20, 200, 'mmHg'))
   diastolic?: number;
 
   @ApiPropertyOptional({ minimum: 2, maximum: 80, description: 'rpm' })
   @IsOptional()
   @IsInt()
-  @Min(2)
-  @Max(80)
+  @Min(2, inRange('La FR', 2, 80, 'rpm'))
+  @Max(80, inRange('La FR', 2, 80, 'rpm'))
   respiratoryRate?: number;
 
   @ApiPropertyOptional({
@@ -251,8 +279,8 @@ export class SedationVitalsValuesDto {
   })
   @IsOptional()
   @IsInt()
-  @Min(0)
-  @Max(150)
+  @Min(0, inRange('El CO₂ espirado', 0, 150, 'mmHg'))
+  @Max(150, inRange('El CO₂ espirado', 0, 150, 'mmHg'))
   etco2?: number;
 
   @ApiPropertyOptional({ enum: SedationLevel, enumName: 'SedationLevel' })
@@ -304,8 +332,8 @@ export class SedationDischargeDto {
   })
   @IsOptional()
   @IsInt()
-  @Min(0)
-  @Max(10)
+  @Min(0, inRange('El Aldrete modificado', 0, 10))
+  @Max(10, inRange('El Aldrete modificado', 0, 10))
   aldreteScore?: number;
 
   @ApiProperty({
@@ -425,8 +453,14 @@ export class SedationChecklistRowDto {
   @ApiProperty({ type: [SedationChecklistItemDto] })
   items!: SedationChecklistItemDto[];
   @ApiProperty({ type: SedationActorDto }) author!: SedationActorDto;
-  @ApiProperty({ format: 'date-time', description: 'Hora del servidor' })
+  @ApiProperty({
+    format: 'date-time',
+    description:
+      'Hora del checklist (la anotada; por defecto, la del registro)',
+  })
   checkedAt!: Date;
+  @ApiProperty({ format: 'date-time', description: 'Hora del servidor' })
+  createdAt!: Date;
 }
 
 export class SedationAgentRowDto {
@@ -512,7 +546,10 @@ export class SedationVitalsWatchDto {
   @ApiProperty({ description: 'Se pasó el intervalo sin toma' })
   overdue!: boolean;
   @ApiProperty() overdueMinutes!: number;
-  @ApiProperty({ description: 'Huecos pasados mayores que el intervalo' })
+  @ApiProperty({
+    description:
+      'Intervalos vencidos sin toma entre el inicio y la última toma: en cada hueco, ⌈hueco / intervalo⌉ − 1 (20 min con intervalo de 5 → 3)',
+  })
   missedIntervals!: number;
 }
 
@@ -564,7 +601,14 @@ export class SedationSheetDto {
   @ApiProperty({ type: String, format: 'uuid', nullable: true })
   consentId!: string | null;
   @ApiProperty({ type: SedationActorDto }) author!: SedationActorDto;
-  @ApiProperty({ format: 'date-time' }) createdAt!: Date;
+  @ApiProperty({
+    format: 'date-time',
+    description:
+      'Hora de la valoración (la anotada; por defecto, la del registro)',
+  })
+  assessedAt!: Date;
+  @ApiProperty({ format: 'date-time', description: 'Hora del servidor' })
+  createdAt!: Date;
   @ApiProperty({ type: SedationChecklistRowDto, nullable: true })
   checklist!: SedationChecklistRowDto | null;
   @ApiProperty({ type: [SedationAgentRowDto] }) agents!: SedationAgentRowDto[];

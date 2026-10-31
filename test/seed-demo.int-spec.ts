@@ -582,6 +582,44 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(typed).toBeGreaterThanOrEqual(10);
   });
 
+  it('DX-407: la hoja de sedación de ejemplo va en orden (valoración < checklist < fármaco < tomas intraoperatorias < egreso)', async () => {
+    const tenantId = await liveDemoTenantId();
+    const sheet = await raw.sedationRecord.findFirstOrThrow({
+      where: { tenantId },
+      include: {
+        checklist: true,
+        agents: true,
+        vitals: true,
+        discharge: true,
+      },
+    });
+    const ms = (d: Date | null | undefined) => {
+      if (!d) throw new Error('falta una hora en la hoja de ejemplo');
+      return d.getTime();
+    };
+    const assessed = ms(sheet.assessedAt);
+    const checked = ms(sheet.checklist?.checkedAt);
+    const agents = sheet.agents.map((a) => ms(a.administeredAt));
+    const baseline = sheet.vitals
+      .filter((v) => v.phase === 'BASELINE')
+      .map((v) => ms(v.takenAt));
+    const intra = sheet.vitals
+      .filter((v) => v.phase === 'INTRA')
+      .map((v) => ms(v.takenAt));
+    const discharged = ms(sheet.discharge?.dischargedAt);
+    expect(assessed).toBeLessThan(checked);
+    // La basal, tras la valoración y antes del primer fármaco.
+    for (const t of baseline) {
+      expect(t).toBeGreaterThan(assessed);
+      expect(t).toBeLessThan(Math.min(...agents));
+    }
+    expect(Math.min(...agents)).toBeGreaterThan(checked);
+    expect(Math.min(...intra)).toBeGreaterThan(Math.max(...agents));
+    expect(discharged).toBeGreaterThan(Math.max(...intra));
+    // Y todo es pasado respecto del registro (nada «después del egreso»).
+    expect(discharged).toBeLessThanOrEqual(sheet.createdAt.getTime());
+  });
+
   it('deja evoluciones redactadas con plantilla y ligadas a su cita atendida (DX-170)', async () => {
     const tenantId = await liveDemoTenantId();
     const entries = await raw.clinicalEntry.findMany({

@@ -47,6 +47,8 @@ export interface NewSedationRecord {
   escortRelationship: string | null;
   consentConfirmed: boolean;
   consentId: string | null;
+  /** Hora clínica de la valoración (ya comprobado que no es futura). */
+  assessedAt: Date;
   authorId: string;
 }
 
@@ -89,7 +91,12 @@ export interface NewSedationDischarge {
 
 /** Una parte nueva de la hoja (append-only). */
 export type SedationAppend =
-  | { kind: 'CHECKLIST'; items: SedationChecklistItem[]; authorId: string }
+  | {
+      kind: 'CHECKLIST';
+      items: SedationChecklistItem[];
+      checkedAt: Date;
+      authorId: string;
+    }
   | { kind: 'AGENT'; agent: NewSedationAgent }
   | { kind: 'VITALS'; vitals: NewSedationVitals }
   /** Las constantes al alta y el egreso, en la misma transacción. */

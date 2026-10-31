@@ -40,6 +40,8 @@ interface Sheet {
   templateVersion: string;
   vitalsIntervalMinutes: number;
   author: { id: string; name: string | null };
+  assessedAt: string;
+  createdAt: string;
   checklist: {
     items: { code: string; checked: boolean }[];
     author: { id: string };
@@ -321,10 +323,17 @@ describe('Hoja de sedación en la evolución (DX-407, e2e)', () => {
     });
 
     it('completa: 201 con IMC y reversores por peso, y auditada sin datos clínicos', async () => {
+      const assessedAt = ago(40);
+      const before = Date.now();
       const res = await call(a, 'post', sheet(child, childEntry), dentist.token)
-        .send({ ...ASSESSMENT, consentId: consent })
+        .send({ ...ASSESSMENT, consentId: consent, assessedAt })
         .expect(201);
       const body = res.body as Sheet;
+      // La hora clínica es la anotada; el registro, la del servidor.
+      expect(body.assessedAt).toBe(assessedAt);
+      expect(new Date(body.createdAt).getTime()).toBeGreaterThanOrEqual(
+        before - 1000,
+      );
       expect(body).toMatchObject({
         status: 'ASSESSED',
         bmi: 15,
@@ -436,7 +445,24 @@ describe('Hoja de sedación en la evolución (DX-407, e2e)', () => {
         .expect(403);
     });
 
-    it('checklist completo: hora del servidor y quien lo marca; un segundo, 409', async () => {
+    it('checklist con hora anterior a la valoración: 400', async () => {
+      const res = await call(
+        a,
+        'post',
+        `${sheet(child, childEntry)}/checklist`,
+        dentist.token,
+      )
+        .send({
+          items: CHECKLIST_CODES.map((code) => ({ code, checked: true })),
+          checkedAt: ago(45),
+        })
+        .expect(400);
+      expect((res.body as { message: string }).message).toBe(
+        'La hora del checklist no puede ser anterior a la de la valoración previa.',
+      );
+    });
+
+    it('checklist completo: hora (por defecto, ahora) y quien lo marca; un segundo, 409', async () => {
       const before = Date.now();
       const res = await call(
         a,
@@ -495,6 +521,31 @@ describe('Hoja de sedación en la evolución (DX-407, e2e)', () => {
       )
         .send({ kind: 'NITROUS_OXIDE', n2oPercent: 30, flowLpm: 6 })
         .expect(403);
+    });
+
+    it('un valor fuera de rango dice el rango permitido (N₂O al 80 %, SpO₂ 140)', async () => {
+      const n2o = await call(
+        a,
+        'post',
+        `${sheet(child, childEntry)}/agents`,
+        dentist.token,
+      )
+        .send({ kind: 'NITROUS_OXIDE', n2oPercent: 80, flowLpm: 6 })
+        .expect(400);
+      expect(JSON.stringify(n2o.body)).toContain(
+        'El N₂O tiene que estar entre 10 y 70 %.',
+      );
+      const spo2 = await call(
+        a,
+        'post',
+        `${sheet(child, childEntry)}/vitals`,
+        assistant.token,
+      )
+        .send({ phase: 'INTRA', ...VITALS, spo2: 140 })
+        .expect(400);
+      expect(JSON.stringify(spo2.body)).toContain(
+        'La SpO₂ tiene que estar entre 50 y 100 %.',
+      );
     });
 
     it('la asistente registra la toma intraoperatoria; pasado el intervalo, la hoja avisa', async () => {

@@ -151,7 +151,12 @@ export class SedationController {
     @Body() dto: SedationAssessmentDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<SedationSheetView> {
-    return this.sedation.assess(patientId, entryId, dto, req.user.sub);
+    return this.sedation.assess(
+      patientId,
+      entryId,
+      { ...dto, assessedAt: date(dto.assessedAt) },
+      req.user.sub,
+    );
   }
 
   @AuditSedationPart('SEDATION_CHECKLIST')
@@ -159,7 +164,8 @@ export class SedationController {
   @Roles(...SEDATION_WRITE_ROLES)
   @ApiParam({ name: 'entryId', format: 'uuid' })
   @ApiOperation({
-    summary: 'Checklist previo (hora del servidor y quien lo marca)',
+    summary:
+      'Checklist previo (quien lo marca y su hora, nunca anterior a la valoración)',
   })
   @ApiCreatedResponse({ type: SedationSheetDto })
   @ApiBadRequestResponse({ type: SedationProblemsDto })
@@ -173,7 +179,13 @@ export class SedationController {
     @Body() dto: SedationChecklistDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<SedationSheetView> {
-    return this.sedation.check(patientId, entryId, dto.items, req.user.sub);
+    return this.sedation.check(
+      patientId,
+      entryId,
+      dto.items,
+      req.user.sub,
+      date(dto.checkedAt),
+    );
   }
 
   @AuditSedationPart('SEDATION_AGENT')

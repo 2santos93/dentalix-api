@@ -59,10 +59,15 @@ export const SEDATION_CONSENT_NOT_FOUND_MESSAGE =
 export const SEDATION_MONITOR_INVALID_MESSAGE =
   'Quien monitoriza tiene que ser un miembro clínico de esta clínica (odontólogo, asistente o administrador)';
 export const SEDATION_TIME_FUTURE_MESSAGE = 'La hora no puede ser futura';
+export const SEDATION_CHECKLIST_BEFORE_ASSESSMENT_MESSAGE =
+  'La hora del checklist no puede ser anterior a la de la valoración previa.';
 /** Tolerancia del reloj del dispositivo para «la hora no es futura». */
 const CLOCK_SKEW_MS = 5 * 60 * 1000;
 
-export type SedationAssessInput = SedationAssessmentInput;
+export interface SedationAssessInput extends SedationAssessmentInput {
+  /** Hora clínica de la valoración; por defecto, ahora. */
+  assessedAt?: Date;
+}
 
 export interface SedationAgentRequest extends SedationAgentInput {
   administeredAt?: Date;
@@ -263,6 +268,7 @@ export class SedationUseCases {
     authorId: string,
   ): Promise<SedationSheetView> {
     const author = assertAuthor(authorId);
+    const assessedAt = this.notFuture(input.assessedAt);
     const entry = await this.entry(patientId, entryId);
     const template = await this.templates.current();
     rejectProblems(assessmentProblems(input, template));
@@ -299,6 +305,7 @@ export class SedationUseCases {
       escortRelationship: trimmedOrNull(input.escortRelationship),
       consentConfirmed: input.consentConfirmed,
       consentId: input.consentId ?? null,
+      assessedAt,
       authorId: author,
     });
     if (created === 'DUPLICATE') {
@@ -307,24 +314,35 @@ export class SedationUseCases {
     return this.view(created);
   }
 
-  /** Checklist previo: hora del servidor y quien lo marca. */
+  /**
+   * Checklist previo: quien lo marca y su hora clínica (por defecto, ahora),
+   * que no puede ser anterior a la valoración.
+   */
   async check(
     patientId: string,
     entryId: string,
     marks: SedationMark[],
     authorId: string,
+    time?: Date,
   ): Promise<SedationSheetView> {
     const author = assertAuthor(authorId);
+    const checkedAt = this.notFuture(time);
     return this.appendTo(patientId, entryId, async (sheet) => {
       if (sheet.discharge) throw new ConflictException(SEDATION_CLOSED_MESSAGE);
       if (sheet.checklist) {
         throw new ConflictException(SEDATION_CHECKLIST_DONE_MESSAGE);
+      }
+      if (checkedAt.getTime() < sheet.assessedAt.getTime()) {
+        throw new BadRequestException(
+          SEDATION_CHECKLIST_BEFORE_ASSESSMENT_MESSAGE,
+        );
       }
       const template = await this.templateOf(sheet);
       rejectProblems(checklistProblems(marks, template));
       return {
         kind: 'CHECKLIST',
         items: buildChecklistItems(marks, template),
+        checkedAt,
         authorId: author,
       };
     });
