@@ -58,8 +58,8 @@ describe('Convenio del paciente (e2e, DX-105)', () => {
   const tokens = {} as Record<ClinicRole, string>;
   let sanavida: string;
   let surco: string;
-  let convenioSanitas: string;
-  let convenioSura: string;
+  let convenioSanavida: string;
+  let convenioSurco: string;
   let foreignAgreement: string;
   let patient: string;
   let foreignPatient: string;
@@ -162,12 +162,12 @@ describe('Convenio del paciente (e2e, DX-105)', () => {
       name: 'Ajena',
       type: 'OTHER',
     });
-    convenioSanitas = await createAgreement(
+    convenioSanavida = await createAgreement(
       clinic,
       'Convenio Sanavida',
       sanavida,
     );
-    convenioSura = await createAgreement(clinic, 'Convenio Surco', surco, {
+    convenioSurco = await createAgreement(clinic, 'Convenio Surco', surco, {
       percent: 20,
     });
     foreignAgreement = await createAgreement(
@@ -194,7 +194,7 @@ describe('Convenio del paciente (e2e, DX-105)', () => {
   it('PUT asigna el convenio con estado, pagador y sin retiro', async () => {
     const { id: p, sanavida: cov } = await coveredPatient('Asignada');
     const res = await put(p, {
-      agreementId: convenioSanitas,
+      agreementId: convenioSanavida,
       coverageId: cov,
       validFrom: dayFromNow(-30),
       validTo: dayFromNow(30),
@@ -221,12 +221,12 @@ describe('Convenio del paciente (e2e, DX-105)', () => {
     const p = c.id;
     const first = (
       await put(p, {
-        agreementId: convenioSanitas,
+        agreementId: convenioSanavida,
         coverageId: c.sanavida,
       }).expect(200)
     ).body as Assignment;
     const second = (
-      await put(p, { agreementId: convenioSura, coverageId: c.surco }).expect(
+      await put(p, { agreementId: convenioSurco, coverageId: c.surco }).expect(
         200,
       )
     ).body as Assignment;
@@ -259,7 +259,7 @@ describe('Convenio del paciente (e2e, DX-105)', () => {
       memberNumber: '1020304050',
     });
     const res = await put(p, {
-      agreementId: convenioSanitas,
+      agreementId: convenioSanavida,
       coverageId: mine,
     }).expect(200);
     expect((res.body as Assignment).coverageId).toBe(mine);
@@ -267,7 +267,7 @@ describe('Convenio del paciente (e2e, DX-105)', () => {
     expect(JSON.stringify(res.body)).not.toContain('5544332211');
 
     const wrongPayer = await put(p, {
-      agreementId: convenioSanitas,
+      agreementId: convenioSanavida,
       coverageId: otherPayer,
     }).expect(400);
     expect((wrongPayer.body as { message: string }).message).toBe(
@@ -278,11 +278,11 @@ describe('Convenio del paciente (e2e, DX-105)', () => {
 
     // Cobertura de otro paciente de la misma clínica.
     const p2 = await createPatient(clinic, 'Otra');
-    await put(p2, { agreementId: convenioSanitas, coverageId: mine }).expect(
+    await put(p2, { agreementId: convenioSanavida, coverageId: mine }).expect(
       400,
     );
     await put(p2, {
-      agreementId: convenioSanitas,
+      agreementId: convenioSanavida,
       coverageId: '00000000-0000-4000-8000-000000000000',
     }).expect(400);
   });
@@ -300,7 +300,7 @@ describe('Convenio del paciente (e2e, DX-105)', () => {
     }
     await put(p, { agreementId: 'abc' }).expect(400);
     const range = await put(p, {
-      agreementId: convenioSanitas,
+      agreementId: convenioSanavida,
       validFrom: '2026-12-31',
       validTo: '2026-01-01',
     }).expect(400);
@@ -324,13 +324,13 @@ describe('Convenio del paciente (e2e, DX-105)', () => {
   it('el estado mira la vigencia de la asignación Y la del convenio', async () => {
     const { id: p, sanavida: cov } = await coveredPatient('Vigencias');
     await put(p, {
-      agreementId: convenioSanitas,
+      agreementId: convenioSanavida,
       coverageId: cov,
       validTo: dayFromNow(-5),
     }).expect(200);
     expect((await read(p)).current?.status).toBe('EXPIRED');
     await put(p, {
-      agreementId: convenioSanitas,
+      agreementId: convenioSanavida,
       coverageId: cov,
       validFrom: dayFromNow(5),
     }).expect(200);
@@ -353,7 +353,7 @@ describe('Convenio del paciente (e2e, DX-105)', () => {
     const p = c.id;
     const a = (
       await put(p, {
-        agreementId: convenioSanitas,
+        agreementId: convenioSanavida,
         coverageId: c.sanavida,
       }).expect(200)
     ).body as Assignment;
@@ -366,7 +366,7 @@ describe('Convenio del paciente (e2e, DX-105)', () => {
       'El paciente no tiene convenio asignado.',
     );
     // Y se puede volver a asignar.
-    await put(p, { agreementId: convenioSura, coverageId: c.surco }).expect(
+    await put(p, { agreementId: convenioSurco, coverageId: c.surco }).expect(
       200,
     );
     expect((await read(p)).history).toHaveLength(1);
@@ -393,7 +393,7 @@ describe('Convenio del paciente (e2e, DX-105)', () => {
       agreementName: null,
       payerName: null,
     });
-    await put(p, { agreementId: convenioSura, coverageId: cov }).expect(200);
+    await put(p, { agreementId: convenioSurco, coverageId: cov }).expect(200);
     const detail = await as(
       api().get(`/api/v1/patients/${p}`),
       tokens.ASSISTANT,
@@ -415,7 +415,7 @@ describe('Convenio del paciente (e2e, DX-105)', () => {
     await as(api().get(url(foreignPatient)), tokens.ADMIN).expect(404);
     await put(
       foreignPatient,
-      { agreementId: convenioSanitas },
+      { agreementId: convenioSanavida },
       tokens.ADMIN,
     ).expect(404);
     await as(api().delete(url(foreignPatient)), tokens.ADMIN).expect(404);
@@ -440,7 +440,7 @@ describe('Convenio del paciente (e2e, DX-105)', () => {
       await as(api().get(url(p)), tokens[role]).expect(200);
       await put(
         p,
-        { agreementId: convenioSanitas, coverageId: cov },
+        { agreementId: convenioSanavida, coverageId: cov },
         tokens[role],
       ).expect(200);
       await as(api().delete(url(p)), tokens[role]).expect(204);
@@ -462,7 +462,7 @@ describe('Convenio del paciente (e2e, DX-105)', () => {
     const p = await createPatient(clinic, 'Auditada');
     const cov = await cover(p, sanavida);
     await put(p, {
-      agreementId: convenioSanitas,
+      agreementId: convenioSanavida,
       coverageId: cov,
       notes: 'nota secreta del convenio',
     }).expect(200);
@@ -500,9 +500,9 @@ describe('Convenio del paciente (e2e, DX-105)', () => {
     const p = c.id;
     const results = await Promise.all(
       [
-        { agreementId: convenioSanitas, coverageId: c.sanavida },
-        { agreementId: convenioSura, coverageId: c.surco },
-        { agreementId: convenioSanitas, coverageId: c.sanavida },
+        { agreementId: convenioSanavida, coverageId: c.sanavida },
+        { agreementId: convenioSurco, coverageId: c.surco },
+        { agreementId: convenioSanavida, coverageId: c.sanavida },
       ].map((body) => put(p, body)),
     );
     for (const r of results) expect([200, 422]).toContain(r.status);

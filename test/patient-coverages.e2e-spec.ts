@@ -291,11 +291,11 @@ describe('Coberturas del paciente (e2e, DX-153)', () => {
       'Ese pagador está desactivado.',
     );
     // Con el mismo pagador ya desactivado, editar otros campos vale.
-    const [, withSura] = (await list(patient)).filter(
+    const [, withSurco] = (await list(patient)).filter(
       (c) => c.payer.id === surco,
     );
     await as(
-      api().patch(`${coverages(patient)}/${withSura.id}`),
+      api().patch(`${coverages(patient)}/${withSurco.id}`),
       tokens.RECEPTION,
     )
       .send({ planName: 'Sigue' })

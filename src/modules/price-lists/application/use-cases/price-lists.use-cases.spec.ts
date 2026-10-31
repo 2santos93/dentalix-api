@@ -84,7 +84,7 @@ describe('casos de uso de listas de precios (DX-105)', () => {
     it('por defecto solo las activas, por nombre; includeInactive suma las desactivadas y nunca las retiradas', async () => {
       repo.seed({ name: 'Surco' });
       repo.seed({ name: 'Allianz' });
-      repo.seed({ name: 'Colsanitas', active: false });
+      repo.seed({ name: 'Colsanavida', active: false });
       const retired = repo.seed({ name: 'Retirada' });
       repo.deleted.add(retired.id);
 
@@ -94,7 +94,7 @@ describe('casos de uso de listas de precios (DX-105)', () => {
       ]);
       expect(
         (await list.execute({ includeInactive: true })).map((l) => l.name),
-      ).toEqual(['Allianz', 'Colsanitas', 'Surco']);
+      ).toEqual(['Allianz', 'Colsanavida', 'Surco']);
     });
   });
 

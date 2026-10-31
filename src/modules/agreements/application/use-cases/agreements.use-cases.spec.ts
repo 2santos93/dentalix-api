@@ -96,7 +96,7 @@ describe('casos de uso de convenios (DX-105)', () => {
     it('por defecto solo los activos, por nombre; includeInactive suma los desactivados y nunca los retirados', async () => {
       repo.seed({ name: 'Surco' });
       repo.seed({ name: 'Allianz' });
-      repo.seed({ name: 'Colsanitas', active: false });
+      repo.seed({ name: 'Colsanavida', active: false });
       const retired = repo.seed({ name: 'Retirado' });
       repo.deleted.add(retired.id);
 
@@ -106,7 +106,7 @@ describe('casos de uso de convenios (DX-105)', () => {
       ]);
       expect(
         (await list.execute({ includeInactive: true })).map((a) => a.name),
-      ).toEqual(['Allianz', 'Colsanitas', 'Surco']);
+      ).toEqual(['Allianz', 'Colsanavida', 'Surco']);
     });
   });
 

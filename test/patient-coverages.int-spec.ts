@@ -281,7 +281,7 @@ describe('pagadores y coberturas (int, DX-153)', () => {
         await mk(a, 'P2', '  surco salud ', new Date('2026-01-01')),
         await mk(a, 'P3', '   ', new Date('2026-01-03')),
         await mk(a, 'P4', null, new Date('2026-01-04')),
-        await mk(a, 'P5', 'Colsanitas', new Date('2026-01-05'), true),
+        await mk(a, 'P5', 'Colsanavida', new Date('2026-01-05'), true),
         await mk(a, 'P6', longText, new Date('2026-01-06')),
       ];
       bf = {
@@ -308,7 +308,7 @@ describe('pagadores y coberturas (int, DX-153)', () => {
       const payers = await payersOf(a.tenantId);
       // El más antiguo con esa clave es P2 («  surco salud »), sin espacios.
       expect(payers.map((p) => p.name).sort()).toEqual(
-        ['Colsanitas', 'X'.repeat(120), 'surco salud'].sort(),
+        ['Colsanavida', 'X'.repeat(120), 'surco salud'].sort(),
       );
       for (const p of payers) {
         expect(p.type).toBe('OTRO');
@@ -339,8 +339,8 @@ describe('pagadores y coberturas (int, DX-153)', () => {
       const surco = (await payersOf(a.tenantId)).find((p) =>
         p.name.toLowerCase().startsWith('surco'),
       );
-      const bySura = cov.filter((c) => c.payerId === surco?.id);
-      expect(bySura.map((c) => c.patientId).sort()).toEqual(
+      const bySurco = cov.filter((c) => c.payerId === surco?.id);
+      expect(bySurco.map((c) => c.patientId).sort()).toEqual(
         [bf.a[0], bf.a[1]].sort(),
       );
     });
@@ -397,7 +397,7 @@ describe('pagadores y coberturas (int, DX-153)', () => {
         P2: '  surco salud ',
         P3: '   ',
         P4: null,
-        P5: 'Colsanitas',
+        P5: 'Colsanavida',
         P6: longText,
         PB: 'Surco Salud',
       });

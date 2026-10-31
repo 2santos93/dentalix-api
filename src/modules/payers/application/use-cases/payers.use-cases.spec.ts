@@ -38,7 +38,7 @@ describe('casos de uso de pagadores (DX-153)', () => {
     it('por defecto solo activos, por nombre; includeInactive suma los desactivados', async () => {
       repo.seed({ name: 'Surco' });
       repo.seed({ name: 'Adeslas', type: 'INSURER' });
-      repo.seed({ name: 'Colsanitas', active: false });
+      repo.seed({ name: 'Colsanavida', active: false });
       const retired = repo.seed({ name: 'Retirada' });
       repo.deleted.add(retired.id);
 
@@ -48,7 +48,7 @@ describe('casos de uso de pagadores (DX-153)', () => {
       ]);
       expect(
         (await list.execute({ includeInactive: true })).map((p) => p.name),
-      ).toEqual(['Adeslas', 'Colsanitas', 'Surco']);
+      ).toEqual(['Adeslas', 'Colsanavida', 'Surco']);
     });
   });
 

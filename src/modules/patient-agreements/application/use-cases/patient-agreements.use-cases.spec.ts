@@ -52,11 +52,11 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
   let remove: RemovePatientAgreementUseCase;
   let sanavida: { id: string; name: string };
   let surco: { id: string; name: string };
-  let convenioSanitas: string;
-  let convenioSura: string;
+  let convenioSanavida: string;
+  let convenioSurco: string;
   /** Coberturas vivas del paciente con cada pagador. */
-  let covSanitas: string;
-  let covSura: string;
+  let covSanavida: string;
+  let covSurco: string;
   /** Convenio sin pagador externo: su pagador es de tipo OTHER (SEC-047). */
   let cortesia: string;
   let cortesiaPayer: { id: string; name: string };
@@ -83,11 +83,11 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
       name: 'Cortesía',
       type: 'OTHER',
     });
-    convenioSanitas = agreements.seed({
+    convenioSanavida = agreements.seed({
       name: 'Convenio Sanavida',
       payer: { id: sanavida.id, name: sanavida.name, type: 'PUBLIC_SYSTEM' },
     }).id;
-    convenioSura = agreements.seed({
+    convenioSurco = agreements.seed({
       name: 'Convenio Surco',
       payer: { id: surco.id, name: surco.name, type: 'PUBLIC_SYSTEM' },
     }).id;
@@ -96,11 +96,11 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
       percent: 100,
       payer: { ...cortesiaPayer, type: 'OTHER' },
     }).id;
-    covSanitas = coverages.seed({
+    covSanavida = coverages.seed({
       patientId: PATIENT,
       payerId: sanavida.id,
     }).id;
-    covSura = coverages.seed({ patientId: PATIENT, payerId: surco.id }).id;
+    covSurco = coverages.seed({ patientId: PATIENT, payerId: surco.id }).id;
   });
 
   describe('consultar', () => {
@@ -120,17 +120,17 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
     it('el historial solo viene con includeHistory y va de la más reciente a la más antigua', async () => {
       repo.seed({
         patientId: PATIENT,
-        agreementId: convenioSura,
+        agreementId: convenioSurco,
         retiredAt: new Date('2026-09-01T00:00:00Z'),
       });
       repo.seed({
         patientId: PATIENT,
-        agreementId: convenioSanitas,
+        agreementId: convenioSanavida,
         retiredAt: new Date('2026-09-15T00:00:00Z'),
       });
       const live = repo.seed({
         patientId: PATIENT,
-        agreementId: convenioSanitas,
+        agreementId: convenioSanavida,
       });
 
       const without = await get.execute(PATIENT, false);
@@ -163,7 +163,7 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
       await expect(
         assign.execute(
           'otra-clinica',
-          { agreementId: convenioSanitas, coverageId: covSanitas },
+          { agreementId: convenioSanavida, coverageId: covSanavida },
           RECEPTION,
         ),
       ).rejects.toThrow(new NotFoundException(PATIENT_NOT_FOUND_MESSAGE));
@@ -174,8 +174,8 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
       const out = await assign.execute(
         PATIENT,
         {
-          agreementId: convenioSanitas,
-          coverageId: covSanitas,
+          agreementId: convenioSanavida,
+          coverageId: covSanavida,
           notes: '  Plan oro  ',
         },
         RECEPTION,
@@ -191,12 +191,12 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
     it('sustituye la viva: la anterior queda retirada y aparece en el historial', async () => {
       const first = await assign.execute(
         PATIENT,
-        { agreementId: convenioSanitas, coverageId: covSanitas },
+        { agreementId: convenioSanavida, coverageId: covSanavida },
         RECEPTION,
       );
       const second = await assign.execute(
         PATIENT,
-        { agreementId: convenioSura, coverageId: covSura },
+        { agreementId: convenioSurco, coverageId: covSurco },
         RECEPTION,
       );
       expect(repo.live(PATIENT)).toHaveLength(1);
@@ -209,11 +209,11 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
       await expect(
         assign.execute(PATIENT, { agreementId: 'no-existe' }, RECEPTION),
       ).rejects.toThrow(new BadRequestException(AGREEMENT_NOT_FOUND_MESSAGE));
-      agreements.deleted.add(convenioSanitas);
+      agreements.deleted.add(convenioSanavida);
       await expect(
         assign.execute(
           PATIENT,
-          { agreementId: convenioSanitas, coverageId: covSanitas },
+          { agreementId: convenioSanavida, coverageId: covSanavida },
           RECEPTION,
         ),
       ).rejects.toThrow(new BadRequestException(AGREEMENT_NOT_FOUND_MESSAGE));
@@ -221,10 +221,10 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
     });
 
     it('un convenio desactivado se asigna y sale INACTIVE', async () => {
-      agreements.rows.find((a) => a.id === convenioSanitas)!.active = false;
+      agreements.rows.find((a) => a.id === convenioSanavida)!.active = false;
       const out = await assign.execute(
         PATIENT,
-        { agreementId: convenioSanitas, coverageId: covSanitas },
+        { agreementId: convenioSanavida, coverageId: covSanavida },
         RECEPTION,
       );
       expect(out.status).toBe('INACTIVE');
@@ -234,21 +234,21 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
     it('400 con una vigencia al revés y no retira la anterior', async () => {
       await assign.execute(
         PATIENT,
-        { agreementId: convenioSanitas, coverageId: covSanitas },
+        { agreementId: convenioSanavida, coverageId: covSanavida },
         RECEPTION,
       );
       await expect(
         assign.execute(
           PATIENT,
           {
-            agreementId: convenioSura,
+            agreementId: convenioSurco,
             validFrom: '2026-12-31',
             validTo: '2026-01-01',
           },
           RECEPTION,
         ),
       ).rejects.toThrow(new BadRequestException(AGREEMENT_DATE_RANGE_MESSAGE));
-      expect(repo.live(PATIENT)[0].agreementId).toBe(convenioSanitas);
+      expect(repo.live(PATIENT)[0].agreementId).toBe(convenioSanavida);
     });
 
     describe('cobertura', () => {
@@ -259,7 +259,7 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
         });
         const out = await assign.execute(
           PATIENT,
-          { agreementId: convenioSanitas, coverageId: cov.id },
+          { agreementId: convenioSanavida, coverageId: cov.id },
           RECEPTION,
         );
         expect(out.coverageId).toBe(cov.id);
@@ -270,7 +270,7 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
         await expect(
           assign.execute(
             PATIENT,
-            { agreementId: convenioSanitas, coverageId: cov.id },
+            { agreementId: convenioSanavida, coverageId: cov.id },
             RECEPTION,
           ),
         ).rejects.toThrow(
@@ -293,7 +293,7 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
           await expect(
             assign.execute(
               PATIENT,
-              { agreementId: convenioSanitas, coverageId },
+              { agreementId: convenioSanavida, coverageId },
               RECEPTION,
             ),
           ).rejects.toThrow(
@@ -312,7 +312,7 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
             await expect(
               assign.execute(
                 PATIENT,
-                { agreementId: convenioSanitas, coverageId },
+                { agreementId: convenioSanavida, coverageId },
                 actor(role),
               ),
             ).rejects.toThrow(
@@ -328,10 +328,10 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
         async (role) => {
           const out = await assign.execute(
             PATIENT,
-            { agreementId: convenioSanitas, coverageId: covSanitas },
+            { agreementId: convenioSanavida, coverageId: covSanavida },
             actor(role),
           );
-          expect(out.coverageId).toBe(covSanitas);
+          expect(out.coverageId).toBe(covSanavida);
         },
       );
 
@@ -350,7 +350,7 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
           await expect(
             assign.execute(
               PATIENT,
-              { agreementId: convenioSanitas, coverageId },
+              { agreementId: convenioSanavida, coverageId },
               ADMIN,
             ),
           ).rejects.toThrow(new BadRequestException(COVERAGE_NOT_LIVE_MESSAGE));
@@ -364,7 +364,7 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
         });
         const out = await assign.execute(
           PATIENT,
-          { agreementId: convenioSanitas, coverageId: edges.id },
+          { agreementId: convenioSanavida, coverageId: edges.id },
           RECEPTION,
         );
         expect(out.coverageId).toBe(edges.id);
@@ -465,7 +465,7 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
         await expect(
           assign.execute(
             PATIENT,
-            { agreementId: cortesia, coverageId: covSanitas },
+            { agreementId: cortesia, coverageId: covSanavida },
             ADMIN,
           ),
         ).rejects.toThrow(
@@ -503,7 +503,7 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
           await expect(
             assign.execute(
               PATIENT,
-              { agreementId: convenioSanitas, coverageId },
+              { agreementId: convenioSanavida, coverageId },
               actor(role),
             ),
           ).rejects.toThrow(
@@ -523,7 +523,7 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
           await expect(
             assign.execute(
               PATIENT,
-              { agreementId: convenioSanitas, coverageId: verified },
+              { agreementId: convenioSanavida, coverageId: verified },
               actor(role),
             ),
           ).resolves.toMatchObject({ coverageId: verified });
@@ -531,7 +531,7 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
           await expect(
             assign.execute(
               PATIENT,
-              { agreementId: convenioSanitas, coverageId: byOther },
+              { agreementId: convenioSanavida, coverageId: byOther },
               actor(role),
             ),
           ).resolves.toMatchObject({ coverageId: byOther });
@@ -543,7 +543,7 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
         await expect(
           assign.execute(
             PATIENT,
-            { agreementId: convenioSanitas, coverageId },
+            { agreementId: convenioSanavida, coverageId },
             ADMIN,
           ),
         ).resolves.toMatchObject({ coverageId });
@@ -558,7 +558,7 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
         await expect(
           assign.execute(
             PATIENT,
-            { agreementId: convenioSanitas, coverageId: foreign },
+            { agreementId: convenioSanavida, coverageId: foreign },
             RECEPTION,
           ),
         ).rejects.toThrow(new BadRequestException(COVERAGE_NOT_FOUND_MESSAGE));
@@ -567,7 +567,7 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
       it('el repositorio recibe quién asigna para repetir la comprobación en la transacción', async () => {
         await assign.execute(
           PATIENT,
-          { agreementId: convenioSanitas, coverageId: covSanitas },
+          { agreementId: convenioSanavida, coverageId: covSanavida },
           RECEPTION,
         );
         expect(repo.lastReplaceActor).toEqual({
@@ -580,14 +580,14 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
     it('la carrera del índice parcial llega como 422 y no cambia nada', async () => {
       const first = await assign.execute(
         PATIENT,
-        { agreementId: convenioSanitas, coverageId: covSanitas },
+        { agreementId: convenioSanavida, coverageId: covSanavida },
         RECEPTION,
       );
       repo.failNextReplace = true;
       await expect(
         assign.execute(
           PATIENT,
-          { agreementId: convenioSura, coverageId: covSura },
+          { agreementId: convenioSurco, coverageId: covSurco },
           RECEPTION,
         ),
       ).rejects.toThrow(
@@ -613,7 +613,7 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
     it('retira la viva, que pasa al historial', async () => {
       const a = await assign.execute(
         PATIENT,
-        { agreementId: convenioSanitas, coverageId: covSanitas },
+        { agreementId: convenioSanavida, coverageId: covSanavida },
         RECEPTION,
       );
       await remove.execute(PATIENT, 'u2');
