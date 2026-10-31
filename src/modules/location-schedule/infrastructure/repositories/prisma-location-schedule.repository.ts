@@ -9,6 +9,9 @@ import {
   SCHEDULE_TIME_ZONE_MOVED,
 } from '../../domain/ports/location-schedule-repository.port';
 import { BusinessHours } from '../../application/business-hours';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
+import { locationScheduleAuditEvent } from '../../domain/location-schedule-audit';
 
 /// Los tramos se retiran en blando (ver `LocationScheduleRange` en el esquema),
 /// así que la tabla acumula los horarios anteriores. Toda lectura pide SOLO los
@@ -103,6 +106,7 @@ export class PrismaLocationScheduleRepository implements LocationScheduleReposit
 
   async replaceForCurrentLocation(
     input: ReplaceScheduleInput,
+    audit: AuditRequestContext,
   ): Promise<BusinessHours> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
@@ -134,7 +138,7 @@ export class PrismaLocationScheduleRepository implements LocationScheduleReposit
       // locationId) y el tenantId lo pone el servidor, no el cliente.
       const existing = await tx.locationSchedule.findFirst({
         where: { locationId, deletedAt: null },
-        select: { id: true },
+        select: { id: true, ...LIVE_RANGES },
       });
       const scheduleId = existing
         ? existing.id
@@ -173,13 +177,21 @@ export class PrismaLocationScheduleRepository implements LocationScheduleReposit
         });
       }
 
-      return mapToBusinessHours(
+      const saved = mapToBusinessHours(
         await tx.locationSchedule.findFirstOrThrow({
           where: { id: scheduleId },
           include: LIVE_RANGES,
         }),
         timeZone,
       );
+      const event = locationScheduleAuditEvent(
+        audit,
+        locationId,
+        existing?.ranges ?? [],
+        saved.ranges,
+      );
+      if (event) await writeAuditEvent(tx, event);
+      return saved;
     });
   }
 }

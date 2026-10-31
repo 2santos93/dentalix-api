@@ -257,6 +257,22 @@ resourceId?, patient? })`: pacientes, historia clínica, evoluciones,
   dos, en la misma transacción que el cambio y sin el token, su hash ni la
   URL; un enlace desconocido, caducado o ya usado no deja evento. El enlace
   del recordatorio automático no se audita (no hay usuario).
+- **Configuración de la clínica (DX-360)**: alta de sede (`CREATE
+  LOCATION`, `LOCATION_CREATED`), horario de la sede (`UPDATE
+  LOCATION_SCHEDULE`, con `scheduleChange`), recordatorios de una sede
+  (`UPDATE REMINDER_SETTINGS`), alta de un dominio propio (`CREATE
+  TENANT_DOMAIN`, `DOMAIN_REGISTERED`: host y estado, nunca el token),
+  publicar la política de datos (`CREATE PRIVACY_POLICY`: versión y hash
+  antes y después y qué textos cambiaron, nunca los textos), tipos de cita
+  (`APPOINTMENT_TYPE`), pagadores (`PAYER`), plantillas de consentimiento
+  (`CONSENT_TEMPLATE`: el texto solo por nombre, con la versión) y de receta
+  (`PRESCRIPTION_TEMPLATE`: nombre y nº de medicamentos), y el inventario
+  (`INVENTORY_ITEM`, `INVENTORY_MOVEMENT`: en la sede del artículo, sin notas
+  ni motivo). Cada alta, cambio o retiro lleva en `configChange` el antes y
+  el después de los campos que cambiaron (un solo lado en un alta o un
+  retiro); el texto libre solo va en `changedFields`. Los escribe el
+  repositorio en la misma transacción que el cambio; una edición que no
+  cambia nada no deja evento.
 - **Un evento por petición** que termina bien (una sola escritura, nunca N):
   actor, rol, acción, recurso, paciente, sede activa, request id
   (`X-Request-Id`, DX-023), IP y user agent. Una petición que falla (404,

@@ -37,12 +37,12 @@ import {
   DATA_CONSENT_ROLES,
   PRIVACY_POLICY_WRITE_ROLES,
 } from '../../auth/presentation/guards/clinic-role-sets';
-import { JwtPayload } from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
-
-interface AuthenticatedRequest {
-  user: JwtPayload;
-}
+import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
+import {
+  requireAuditRequestContext,
+  type AuditableRequest,
+} from '../../audit/presentation/audit-request-context';
 
 // Sin PATCH/PUT/DELETE a propósito: una versión publicada es inmutable (y la
 // BD lo impone con un trigger). Cambiar la política = publicar otra versión.
@@ -56,6 +56,7 @@ export class PrivacyPoliciesController {
   constructor(
     private readonly getPolicies: GetPrivacyPoliciesUseCase,
     private readonly publishPolicy: PublishPrivacyPolicyUseCase,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   @Get()
@@ -74,7 +75,7 @@ export class PrivacyPoliciesController {
   @ApiOperation({
     summary: 'Publicar una nueva versión de la política (solo ADMIN)',
     description:
-      'Crea la versión siguiente y pasa a ser la vigente. No hay borradores ni edición.',
+      'Crea la versión siguiente y pasa a ser la vigente. No hay borradores ni edición. Queda en la auditoría (PRIVACY_POLICY_PUBLISHED) con versión y hash antes y después y qué textos cambiaron; nunca los textos.',
   })
   @ApiCreatedResponse({ type: PrivacyPolicyVersionDto })
   @ApiBadRequestResponse({
@@ -87,7 +88,7 @@ export class PrivacyPoliciesController {
   })
   publish(
     @Body() dto: PublishPrivacyPolicyDto,
-    @Req() req: AuthenticatedRequest,
+    @Req() req: AuditableRequest,
   ): Promise<PrivacyPolicyVersion> {
     return this.publishPolicy.execute(
       {
@@ -96,7 +97,7 @@ export class PrivacyPoliciesController {
         sensitiveHealthText: dto.sensitiveHealthText,
         marketingText: dto.marketingText,
       },
-      req.user.sub,
+      requireAuditRequestContext(req, this.tenantContext),
     );
   }
 }

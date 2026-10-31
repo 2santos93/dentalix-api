@@ -31,8 +31,13 @@ import {
   APPOINTMENT_ROLES,
   APPOINTMENT_TYPE_WRITE_ROLES,
 } from '../../auth/presentation/guards/clinic-role-sets';
-import { JwtPayload } from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
+import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
+import {
+  requireAuditRequestContext,
+  type AuditableRequest,
+} from '../../audit/presentation/audit-request-context';
+import type { AuditRequestContext } from '../../audit/domain/audit-request-context';
 import {
   CreateAppointmentTypeUseCase,
   DeleteAppointmentTypeUseCase,
@@ -46,10 +51,6 @@ import {
   ListAppointmentTypesQueryDto,
   UpdateAppointmentTypeDto,
 } from './dto/appointment-type.dto';
-
-interface AuthenticatedRequest {
-  user: JwtPayload;
-}
 
 // Tipos de cita (DX-121). Leerlos: quien agenda (los 4 roles, para el selector
 // del formulario). Crear, editar, desactivar y retirar: solo ADMIN.
@@ -65,6 +66,7 @@ export class AppointmentTypesController {
     private readonly createType: CreateAppointmentTypeUseCase,
     private readonly updateType: UpdateAppointmentTypeUseCase,
     private readonly deleteType: DeleteAppointmentTypeUseCase,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   @Get()
@@ -85,7 +87,7 @@ export class AppointmentTypesController {
   @ApiForbiddenResponse({ description: 'Solo ADMIN' })
   create(
     @Body() dto: CreateAppointmentTypeDto,
-    @Req() req: AuthenticatedRequest,
+    @Req() req: AuditableRequest,
   ): Promise<AppointmentType> {
     return this.createType.execute(
       {
@@ -95,7 +97,7 @@ export class AppointmentTypesController {
         active: dto.active,
         isUrgent: dto.isUrgent,
       },
-      req.user.sub,
+      this.audit(req),
     );
   }
 
@@ -109,7 +111,7 @@ export class AppointmentTypesController {
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateAppointmentTypeDto,
-    @Req() req: AuthenticatedRequest,
+    @Req() req: AuditableRequest,
   ): Promise<AppointmentType> {
     return this.updateType.execute(
       id,
@@ -120,7 +122,7 @@ export class AppointmentTypesController {
         active: dto.active,
         isUrgent: dto.isUrgent,
       },
-      req.user.sub,
+      this.audit(req),
     );
   }
 
@@ -135,8 +137,13 @@ export class AppointmentTypesController {
   @ApiForbiddenResponse({ description: 'Solo ADMIN' })
   async remove(
     @Param('id', ParseUUIDPipe) id: string,
-    @Req() req: AuthenticatedRequest,
+    @Req() req: AuditableRequest,
   ): Promise<void> {
-    await this.deleteType.execute(id, req.user.sub);
+    await this.deleteType.execute(id, this.audit(req));
+  }
+
+  /** Quién escribe, para el evento que el repositorio guarda (DX-360). */
+  private audit(req: AuditableRequest): AuditRequestContext {
+    return requireAuditRequestContext(req, this.tenantContext);
   }
 }

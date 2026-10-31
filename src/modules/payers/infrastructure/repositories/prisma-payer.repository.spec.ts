@@ -5,6 +5,7 @@
  * al leer y guarda el código anterior al escribir (spec R4, R5).
  */
 import { readFileSync } from 'node:fs';
+import { TEST_AUDIT } from '../../../audit/application/__fixtures__/test-audit-context';
 import { join } from 'node:path';
 import type { Prisma } from '@prisma/client';
 import type { PayerType } from '../../domain/payer-type';
@@ -47,7 +48,10 @@ function fakeRepository() {
     writes.push(data);
     return Promise.resolve(row(data.type ?? 'OTRO'));
   };
-  const tx = { payer: { create: echo, update: echo } };
+  const tx = {
+    payer: { create: echo, update: echo, findFirst: () => null },
+    auditEvent: { create: () => Promise.resolve({ id: 'event-1' }) },
+  };
   const prisma = {
     runWithTenant: <T>(work: (client: typeof tx) => Promise<T>) => work(tx),
   };
@@ -68,9 +72,9 @@ describe('PrismaPayerRepository (DX-326, fase 1)', () => {
       expect(payer).not.toHaveProperty('country');
 
       const { repo, writes } = fakeRepository();
-      await repo.create({ name: 'Sura EPS', type, active: true });
-      await repo.update('payer-1', { type });
-      await repo.update('payer-1', { name: 'Sura' });
+      await repo.create({ name: 'Sura EPS', type, active: true }, TEST_AUDIT);
+      await repo.update('payer-1', { type }, TEST_AUDIT);
+      await repo.update('payer-1', { name: 'Sura' }, TEST_AUDIT);
       expect(writes.map((w) => w.type)).toEqual([code, code, undefined]);
       for (const data of writes) expect(data).not.toHaveProperty('country');
     },

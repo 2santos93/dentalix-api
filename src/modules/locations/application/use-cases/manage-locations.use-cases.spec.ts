@@ -14,6 +14,16 @@ import type {
   Location,
   LocationRepository,
 } from '../../domain/ports/location-repository.port';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+
+const AUDIT: AuditRequestContext = {
+  tenantId: 't1',
+  locationId: null,
+  actor: { userId: 'admin-1', role: 'ADMIN' },
+  requestId: null,
+  ip: null,
+  userAgent: null,
+};
 
 function makeLocation(overrides: Partial<Location> = {}): Location {
   return {
@@ -133,7 +143,10 @@ describe('CreateLocationUseCase', () => {
       }),
     );
 
-    await uc.execute({ name: '  Sede Norte  ', address: '   ', ...TOKYO });
+    await uc.execute(
+      { name: '  Sede Norte  ', address: '   ', ...TOKYO },
+      AUDIT,
+    );
 
     expect(created).toEqual([
       {
@@ -151,13 +164,16 @@ describe('CreateLocationUseCase', () => {
     const create = jest.fn((input: Partial<Location>) =>
       Promise.resolve(makeLocation(input)),
     );
-    await createUseCase(makeRepo({ create })).execute({
-      name: 'Tokio',
-      country: 'CO',
-      currency: 'jpy',
-      timeZone: 'Asia/Tokyo',
-      locale: 'JA-jp',
-    });
+    await createUseCase(makeRepo({ create })).execute(
+      {
+        name: 'Tokio',
+        country: 'CO',
+        currency: 'jpy',
+        timeZone: 'Asia/Tokyo',
+        locale: 'JA-jp',
+      },
+      AUDIT,
+    );
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({
         country: 'CO',
@@ -165,6 +181,7 @@ describe('CreateLocationUseCase', () => {
         timeZone: 'Asia/Tokyo',
         locale: 'ja-JP',
       }),
+      AUDIT,
     );
   });
 
@@ -179,7 +196,7 @@ describe('CreateLocationUseCase', () => {
       const create = jest.fn();
       const input = { name: 'Sede', ...TOKYO, [field]: undefined };
       const error = await createUseCase(makeRepo({ create }))
-        .execute(input)
+        .execute(input, AUDIT)
         .catch((e: unknown) => e);
       expect(error).toBeInstanceOf(BadRequestException);
       expect((error as BadRequestException).getResponse()).toMatchObject({
@@ -200,9 +217,10 @@ describe('CreateLocationUseCase', () => {
         makeRepo({
           create,
         }),
-      ).execute({ name: 'Sede', ...regional, currency: 'EUR' });
+      ).execute({ name: 'Sede', ...regional, currency: 'EUR' }, AUDIT);
       expect(create).toHaveBeenCalledWith(
         expect.objectContaining({ hourCycle: regional.hourCycle }),
+        AUDIT,
       );
     }
   });
@@ -212,20 +230,24 @@ describe('CreateLocationUseCase', () => {
       Promise.resolve(makeLocation(input)),
     );
     const { hourCycle: _omitted, ...g1Body } = NEW_YORK;
-    await createUseCase(makeRepo({ create })).execute({
-      name: 'Web G1',
-      ...g1Body,
-      currency: 'EUR',
-    });
+    await createUseCase(makeRepo({ create })).execute(
+      {
+        name: 'Web G1',
+        ...g1Body,
+        currency: 'EUR',
+      },
+      AUDIT,
+    );
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({ locale: 'en-US', hourCycle: null }),
+      AUDIT,
     );
   });
 
   it('G1-B: un reloj inválido es 400 con su mensaje y su campo, y no crea nada', async () => {
     const create = jest.fn();
     const error = await createUseCase(makeRepo({ create }))
-      .execute({ name: 'Sede', ...TOKYO, hourCycle: 'h24' })
+      .execute({ name: 'Sede', ...TOKYO, hourCycle: 'h24' }, AUDIT)
       .catch((e: unknown) => e);
     expect((error as BadRequestException).getResponse()).toMatchObject({
       message: 'El reloj «h24» no es válido: elige 12 h o 24 h.',
@@ -236,7 +258,7 @@ describe('CreateLocationUseCase', () => {
 
   it('G1: una moneda que no está en la lista es 400', async () => {
     const error = await createUseCase(makeRepo())
-      .execute({ name: 'Sede', ...TOKYO, currency: 'XYZ' })
+      .execute({ name: 'Sede', ...TOKYO, currency: 'XYZ' }, AUDIT)
       .catch((e: unknown) => e);
     expect((error as BadRequestException).getResponse()).toMatchObject({
       message: 'La moneda XYZ no está en la lista de monedas admitidas.',
@@ -298,14 +320,17 @@ describe('país de la sede (DX-312)', () => {
     const create = jest.fn();
     const uc = createUseCase(makeRepo({ create }));
     const error = await uc
-      .execute({ name: 'X', ...TOKYO, country: 'XX', currency: 'ZZZ' })
+      .execute({ name: 'X', ...TOKYO, country: 'XX', currency: 'ZZZ' }, AUDIT)
       .catch((e: unknown) => e);
     expect((error as BadRequestException).getResponse()).toMatchObject({
       message: 'El país «XX» no está en la lista de países.',
       field: 'country',
     });
     const missing = await uc
-      .execute({ name: 'X', ...TOKYO, country: undefined, currency: 'ZZZ' })
+      .execute(
+        { name: 'X', ...TOKYO, country: undefined, currency: 'ZZZ' },
+        AUDIT,
+      )
       .catch((e: unknown) => e);
     expect((missing as BadRequestException).getResponse()).toMatchObject({
       message: 'Elige el país de la sede.',
@@ -318,13 +343,17 @@ describe('país de la sede (DX-312)', () => {
     const create = jest.fn((input: { country: string }) =>
       Promise.resolve(makeLocation({ country: input.country })),
     );
-    await createUseCase(makeRepo({ create })).execute({
-      name: 'Caracas',
-      ...TOKYO,
-      country: ' ve ',
-    });
+    await createUseCase(makeRepo({ create })).execute(
+      {
+        name: 'Caracas',
+        ...TOKYO,
+        country: ' ve ',
+      },
+      AUDIT,
+    );
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({ country: 'VE' }),
+      AUDIT,
     );
   });
 
@@ -363,15 +392,19 @@ describe('país de la sede (DX-013)', () => {
       Promise.resolve(makeLocation({ country: input.country })),
     );
     const uc = createUseCase(makeRepo({ create }));
-    await uc.execute({
-      name: 'Madrid',
-      country: 'ES',
-      currency: 'EUR',
-      timeZone: 'Europe/Madrid',
-      locale: 'es-ES',
-    });
+    await uc.execute(
+      {
+        name: 'Madrid',
+        country: 'ES',
+        currency: 'EUR',
+        timeZone: 'Europe/Madrid',
+        locale: 'es-ES',
+      },
+      AUDIT,
+    );
     expect(create).toHaveBeenLastCalledWith(
       expect.objectContaining({ country: 'ES' }),
+      AUDIT,
     );
   });
 
@@ -499,12 +532,16 @@ describe('teléfono de la sede (DX-222)', () => {
     );
     const uc = createUseCase(makeRepo({ create }));
 
-    await uc.execute({ name: 'Sede Sur', phone: ' 601 222 3333 ', ...TOKYO });
-    await uc.execute({ name: 'Sede Este', phone: '   ', ...TOKYO });
+    await uc.execute(
+      { name: 'Sede Sur', phone: ' 601 222 3333 ', ...TOKYO },
+      AUDIT,
+    );
+    await uc.execute({ name: 'Sede Este', phone: '   ', ...TOKYO }, AUDIT);
 
     expect(create).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({ phone: '601 222 3333' }),
+      AUDIT,
     );
     expect(create.mock.calls[1][0].phone).toBeUndefined();
   });
@@ -934,8 +971,8 @@ describe('prefijo telefónico de la sede (DX-329)', () => {
 
   it('create suggests the country when the field is absent, none when the library has no metadata', async () => {
     const { create, uc } = created();
-    await uc.execute({ name: 'Sede', ...TOKYO, country: 've' });
-    await uc.execute({ name: 'Antártida', ...TOKYO, country: 'AQ' });
+    await uc.execute({ name: 'Sede', ...TOKYO, country: 've' }, AUDIT);
+    await uc.execute({ name: 'Antártida', ...TOKYO, country: 'AQ' }, AUDIT);
     expect(create.mock.calls.map(([i]) => i.defaultPhoneRegion)).toEqual([
       'VE',
       null,
@@ -944,24 +981,30 @@ describe('prefijo telefónico de la sede (DX-329)', () => {
 
   it('create stores an explicit region (not the country) or null, validated', async () => {
     const { create, uc } = created();
-    await uc.execute({
-      name: 'Sede',
-      ...TOKYO,
-      country: 'VE',
-      defaultPhoneRegion: ' co ',
-    });
-    await uc.execute({
-      name: 'Sede',
-      ...TOKYO,
-      country: 'VE',
-      defaultPhoneRegion: null,
-    });
+    await uc.execute(
+      {
+        name: 'Sede',
+        ...TOKYO,
+        country: 'VE',
+        defaultPhoneRegion: ' co ',
+      },
+      AUDIT,
+    );
+    await uc.execute(
+      {
+        name: 'Sede',
+        ...TOKYO,
+        country: 'VE',
+        defaultPhoneRegion: null,
+      },
+      AUDIT,
+    );
     expect(create.mock.calls.map(([i]) => i.defaultPhoneRegion)).toEqual([
       'CO',
       null,
     ]);
     const bad = await uc
-      .execute({ name: 'Sede', ...TOKYO, defaultPhoneRegion: 'VEN' })
+      .execute({ name: 'Sede', ...TOKYO, defaultPhoneRegion: 'VEN' }, AUDIT)
       .catch((e: BadRequestException) => e);
     expect(bad).toBeInstanceOf(BadRequestException);
     expect((bad as BadRequestException).getResponse()).toMatchObject({

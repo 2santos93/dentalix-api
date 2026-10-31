@@ -20,7 +20,7 @@ type PrismaInventoryMovement = Prisma.InventoryMovementGetPayload<
   Record<string, never>
 >;
 
-function mapToEntity(item: PrismaInventoryItem): InventoryItem {
+export function mapToEntity(item: PrismaInventoryItem): InventoryItem {
   return {
     id: item.id,
     tenantId: item.tenantId,
@@ -38,7 +38,7 @@ function mapToEntity(item: PrismaInventoryItem): InventoryItem {
 // `quantity` is a Prisma `Decimal` at the DB layer; the API-facing entity
 // exposes it as a plain `number` — same convention as
 // `PrismaTreatmentPlanRepository.mapItemToEntity` for `price`.
-function mapMovementToEntity(
+export function mapMovementToEntity(
   movement: PrismaInventoryMovement,
 ): InventoryMovement {
   return {

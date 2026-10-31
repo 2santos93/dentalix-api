@@ -180,6 +180,26 @@ export interface AuditMetadata {
    * cuántos de cada tipo. Solo números: ni tokens, ni destinatarios, ni ids.
    */
   revokedLinks?: LivePublicLinkCounts;
+  /**
+   * DX-360: un cambio de la configuración de la clínica (sedes, horarios,
+   * recordatorios, dominios, política de datos, catálogos, plantillas e
+   * inventario): los campos que cambiaron con su antes y después, o un solo
+   * lado en un alta o un retiro. Solo valores cortos de CONFIGURACIÓN
+   * (nombres de catálogo, códigos, números, booleanos, hashes); el texto
+   * libre o largo (cuerpo de una plantilla, notas, motivo de un movimiento)
+   * solo va por su nombre en `changedFields`. Nunca secretos (el token de
+   * verificación de un dominio) ni datos de un paciente.
+   */
+  configChange?: AuditConfigChange;
+}
+
+/** Valor de configuración en la auditoría (DX-360). */
+export type AuditConfigValue =
+  string | number | boolean | null | (string | number)[];
+
+export interface AuditConfigChange {
+  before?: Record<string, AuditConfigValue>;
+  after?: Record<string, AuditConfigValue>;
 }
 
 export const AUDIT_CLOSING_QUEUE_SECTIONS = [
@@ -1152,6 +1172,50 @@ function staffAccess(value: unknown): AuditStaffAccessChange | null {
   return { ...(before ? { before } : {}), ...(after ? { after } : {}) };
 }
 
+/** Texto corto de configuración: una línea, sin caracteres de control. */
+const CONFIG_TEXT = /^[^\p{Cc}\p{Cf}\u2028\u2029]{0,120}$/u;
+const MAX_CONFIG_LIST = 50;
+
+function configScalar(value: unknown): value is string | number {
+  return (
+    (typeof value === 'string' && CONFIG_TEXT.test(value)) ||
+    (typeof value === 'number' && Number.isFinite(value))
+  );
+}
+
+function configValue(value: unknown): AuditConfigValue | undefined {
+  if (value === null || typeof value === 'boolean') return value;
+  if (configScalar(value)) return value;
+  if (
+    Array.isArray(value) &&
+    value.length <= MAX_CONFIG_LIST &&
+    value.every(configScalar)
+  ) {
+    return [...value];
+  }
+  return undefined;
+}
+
+/** Un lado: cada campo con su forma; el que no encaja se cae solo (DX-360). */
+function configSide(value: unknown): Record<string, AuditConfigValue> | null {
+  if (!isRecord(value)) return null;
+  const out: Record<string, AuditConfigValue> = {};
+  for (const [key, raw] of Object.entries(value).slice(0, MAX_FIELDS)) {
+    if (!IDENTIFIER.test(key)) continue;
+    const kept = configValue(raw);
+    if (kept !== undefined) out[key] = kept;
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+function configChange(value: unknown): AuditConfigChange | null {
+  if (!isRecord(value)) return null;
+  const before = configSide(value.before);
+  const after = configSide(value.after);
+  if (!before && !after) return null;
+  return { ...(before ? { before } : {}), ...(after ? { after } : {}) };
+}
+
 /** DX-402: los dos días reales, el de la tasa antes del de inicio. */
 function exchangeRateBackup(value: unknown): AuditExchangeRateBackup | null {
   if (!isRecord(value)) return null;
@@ -1258,5 +1322,7 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (overridden) out.reservedSlotOverride = overridden;
   const revoked = revokedLinks(input.revokedLinks);
   if (revoked) out.revokedLinks = revoked;
+  const config = configChange(input.configChange);
+  if (config) out.configChange = config;
   return out;
 }

@@ -3352,6 +3352,18 @@ enum AuditResourceType {
   // DX-253: saldo a favor del paciente (traspaso, devolución y su
   // comprobante, tope de recepción).
   PATIENT_CREDIT
+  // DX-360: configuración de la clínica — horario de atención de una sede,
+  // sus recordatorios, la política de datos, los catálogos (tipos de cita,
+  // pagadores), las plantillas (consentimiento, receta) y el inventario.
+  LOCATION_SCHEDULE
+  REMINDER_SETTINGS
+  PRIVACY_POLICY
+  APPOINTMENT_TYPE
+  PAYER
+  CONSENT_TEMPLATE
+  PRESCRIPTION_TEMPLATE
+  INVENTORY_ITEM
+  INVENTORY_MOVEMENT
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o
