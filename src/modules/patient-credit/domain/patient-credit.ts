@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { ClinicRole, type PaymentMethod } from '@prisma/client';
 import { RECEIPT_PREFIX_PATTERN } from '../../payments/domain/receipt-number';
+import { currencyDecimals } from '../../../shared/money/currency-decimals';
 
 /*
  * Saldo a favor del paciente (DX-253): reglas puras del traspaso a otro plan y
@@ -64,14 +65,13 @@ export const VOID_MOVED_CREDIT_MESSAGE =
 export const CREDIT_CASH_LOCATION_REQUIRED_MESSAGE =
   'Elige la sede de la caja de la que sale el efectivo.';
 
-/** El tope con miles, 2 decimales y moneda («10.000,00 COP», D3 de la QA). */
+/**
+ * El tope con los decimales de su moneda y su código («10000.50 USD»,
+ * «5000 JPY»). Sin separador de miles a propósito: el dominio no conoce el
+ * formato regional de la sede (DX-311, sin locales fijos).
+ */
 function capText(capCents: number, currency: string): string {
-  const amount = new Intl.NumberFormat('es-CO', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-    useGrouping: true,
-  }).format(capCents / 100);
-  return `${amount} ${currency}`;
+  return `${(capCents / 100).toFixed(currencyDecimals(currency))} ${currency}`;
 }
 
 /** 403 de RECEPTION por encima del tope de la clínica (mismo patrón que DX-204). */
