@@ -41,6 +41,7 @@ import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context
 import { TenantJwtPayload } from '../../../shared/crypto/token.service';
 import { Audit } from '../../audit/presentation/audit.decorator';
 import type { AuditOptions } from '../../audit/presentation/audit-options';
+import type { AuditedRequest } from '../../audit/presentation/audit-request';
 import {
   CreatePatientCoverageUseCase,
   DeletePatientCoverageUseCase,
@@ -67,7 +68,8 @@ const uuidPipe = (what: string) =>
 // titular. El GET no se audita (la ficha ya se audita en `GET /patients/:id`).
 // SEC-049: el alta, el cambio y la verificación llevan además el tipo de
 // pagador, los 4 últimos del nº y si quedó verificada; el rol de quien lo hizo
-// va en el evento (`actorRole`).
+// va en el evento (`actorRole`). SEC-053: si el cambio movió la vigencia, el
+// evento lleva también la vigencia antes y después y si borró la verificación.
 const audit = (reason: string, coverage = false): AuditOptions => ({
   action: 'UPDATE',
   resource: 'PATIENT',
@@ -139,7 +141,7 @@ export class PatientCoveragesController {
   @ApiOperation({
     summary: 'Editar una cobertura; null vacía los campos opcionales (DX-153)',
     description:
-      'SEC-049: cambiar el pagador o el nº de afiliado borra la verificación y deja la cobertura declarada por quien la edita.',
+      'SEC-049: cambiar el pagador o el nº de afiliado borra la verificación y deja la cobertura declarada por quien la edita. SEC-053: si quien edita no es ADMIN, cambiar la vigencia (`validFrom`/`validTo`) de una cobertura de pagador externo también la borra; un ADMIN la corrige sin perderla. Las notas, el plan, el titular o la principal no la tocan.',
   })
   @ApiOkResponse({ type: PatientCoverageDto })
   @ApiBadRequestResponse({
@@ -150,18 +152,22 @@ export class PatientCoveragesController {
   @ApiUnprocessableEntityResponse({
     description: 'Otra petición cambió la cobertura principal a la vez',
   })
-  update(
+  async update(
     @Param('patientId', uuidPipe('del paciente')) patientId: string,
     @Param('coverageId', uuidPipe('de la cobertura')) coverageId: string,
     @Body() dto: UpdatePatientCoverageDto,
-    @Req() req: { user: TenantJwtPayload },
+    @Req() req: AuditedRequest & { user: TenantJwtPayload },
   ): Promise<PatientCoverageView> {
-    return this.updateCoverage.execute(
+    const { coverage, validityChange } = await this.updateCoverage.execute(
       patientId,
       coverageId,
       dto,
-      req.user.sub,
+      { userId: req.user.sub, role: req.user.role },
     );
+    if (validityChange) {
+      req.auditMetadata = { coverageValidity: validityChange };
+    }
+    return coverage;
   }
 
   @Audit(audit('COVERAGE_VERIFIED', true))

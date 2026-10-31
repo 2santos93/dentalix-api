@@ -18,9 +18,12 @@ import {
   MAX_COVERAGES_PER_PATIENT,
 } from '../../domain/coverage-rules';
 import { memberNumberChanged } from '../../domain/member-number-rules';
+import { coverageRedeclared } from '../../domain/coverage-declaration-rules';
+import { isExternalPayer } from '../../../payers/domain/payer-type';
 import type { PatientCoverage } from '../../domain/entities/patient-coverage.entity';
 import { payerTypeFromStored } from '../../../payers/domain/legacy-payer-type';
 import type {
+  CoverageUpdateResult,
   CreateCoverageRepoInput,
   PatientCoverageRepository,
   PrimaryCoverageRow,
@@ -331,26 +334,49 @@ export class PrismaPatientCoverageRepository implements PatientCoverageRepositor
   async update(
     id: string,
     patch: UpdateCoverageRepoPatch,
-  ): Promise<PatientCoverage | null> {
+  ): Promise<CoverageUpdateResult | null> {
     const tenantId = this.requireTenantId();
     const patientId = await this.patientOf(id);
     if (!patientId) return null;
-    const row = await translatePrimaryRace(
+    const result = await translatePrimaryRace(
       this.prisma.runWithTenant(async (tx) => {
         await lockPatientCoverages(tx, tenantId, patientId);
         // Con el candado, otra petición pudo retirarla mientras esperábamos.
         const live = await tx.patientCoverage.findFirst({
           where: { id, patientId, deletedAt: null },
-          select: { id: true, payerId: true, memberNumber: true },
+          select: {
+            id: true,
+            payerId: true,
+            memberNumber: true,
+            validFrom: true,
+            validTo: true,
+            verifiedAt: true,
+            payer: { select: { type: true } },
+          },
         });
         if (!live) return null;
-        // SEC-049: lo verificado es ESE pagador con ESE número; si cambia
-        // cualquiera de los dos, la verificación se borra y el editor pasa a
-        // ser quien lo declaró.
-        const redeclared =
-          (patch.payerId !== undefined && patch.payerId !== live.payerId) ||
-          (patch.memberNumber !== undefined &&
-            memberNumberChanged(live.memberNumber, patch.memberNumber));
+        const previous = {
+          validFrom: live.validFrom ? toDateOnly(live.validFrom) : null,
+          validTo: live.validTo ? toDateOnly(live.validTo) : null,
+          verified: live.verifiedAt !== null,
+        };
+        // SEC-049/SEC-053: lo verificado es ESE pagador con ESE número y, para
+        // quien no es ADMIN, ESA vigencia. Se decide sobre lo leído con el
+        // candado (verificar toma el mismo), así que entre leer «verificada»
+        // y escribir no se cuela nada.
+        const redeclared = coverageRedeclared(
+          {
+            payerId: live.payerId,
+            memberNumber: live.memberNumber,
+            validFrom: previous.validFrom,
+            validTo: previous.validTo,
+            externalPayer: isExternalPayer(
+              payerTypeFromStored(live.payer.type),
+            ),
+          },
+          patch,
+          patch.editorRole,
+        );
         if (patch.payerId !== undefined) {
           await assertPayerUsable(
             tx,
@@ -361,7 +387,7 @@ export class PrismaPatientCoverageRepository implements PatientCoverageRepositor
         if (patch.isPrimary) {
           await unmarkOtherPrimaries(tx, patientId, id, patch.updatedById);
         }
-        return tx.patientCoverage.update({
+        const row = await tx.patientCoverage.update({
           where: { id, patientId, deletedAt: null },
           data: {
             payerId: patch.payerId,
@@ -383,9 +409,14 @@ export class PrismaPatientCoverageRepository implements PatientCoverageRepositor
           },
           include: COVERAGE_INCLUDE,
         });
+        return { row, previous };
       }),
     );
-    return row ? this.withNames(row) : null;
+    if (!result) return null;
+    return {
+      coverage: await this.withNames(result.row),
+      previous: result.previous,
+    };
   }
 
   async verify(

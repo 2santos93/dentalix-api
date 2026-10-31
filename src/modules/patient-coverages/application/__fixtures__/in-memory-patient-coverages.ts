@@ -9,8 +9,11 @@ import {
   MAX_COVERAGES_PER_PATIENT,
 } from '../../domain/coverage-rules';
 import { memberNumberChanged } from '../../domain/member-number-rules';
+import { coverageRedeclared } from '../../domain/coverage-declaration-rules';
+import { isExternalPayer } from '../../../payers/domain/payer-type';
 import type { PatientCoverage } from '../../domain/entities/patient-coverage.entity';
 import type {
+  CoverageUpdateResult,
   CreateCoverageRepoInput,
   PatientCoverageRepository,
   PrimaryCoverageRow,
@@ -165,7 +168,7 @@ export class InMemoryPatientCoverageRepository implements PatientCoverageReposit
   update(
     id: string,
     patch: UpdateCoverageRepoPatch,
-  ): Promise<PatientCoverage | null> {
+  ): Promise<CoverageUpdateResult | null> {
     this.calls.push('update');
     const row = this.rows.find((r) => r.id === id && !r.deleted);
     if (!row) return Promise.resolve(null);
@@ -177,12 +180,20 @@ export class InMemoryPatientCoverageRepository implements PatientCoverageReposit
     if (patch.isPrimary) {
       for (const r of this.live(row.patientId)) r.isPrimary = false;
     }
-    const { updatedById, ...fields } = patch;
-    // Como el repositorio Prisma: cambiar pagador o número borra la verificación.
+    const { updatedById, editorRole, ...fields } = patch;
+    const previous = {
+      validFrom: row.validFrom,
+      validTo: row.validTo,
+      verified: row.verifiedAt !== null,
+    };
+    const payerType = this.payers.rows.find((p) => p.id === row.payerId)!.type;
+    // Como el repositorio Prisma: la misma regla (SEC-049/SEC-053).
     if (
-      (patch.payerId !== undefined && patch.payerId !== row.payerId) ||
-      (patch.memberNumber !== undefined &&
-        memberNumberChanged(row.memberNumber, patch.memberNumber))
+      coverageRedeclared(
+        { ...row, externalPayer: isExternalPayer(payerType) },
+        patch,
+        editorRole,
+      )
     ) {
       Object.assign(row, {
         declaredById: updatedById,
@@ -195,7 +206,7 @@ export class InMemoryPatientCoverageRepository implements PatientCoverageReposit
       if (value !== undefined)
         (row as unknown as Record<string, unknown>)[key] = value;
     }
-    return Promise.resolve(this.view(row));
+    return Promise.resolve({ coverage: this.view(row), previous });
   }
 
   verify(

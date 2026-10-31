@@ -639,6 +639,45 @@ describe('sanitizeAuditMetadata — cancelación de una cita (DX-279)', () => {
   });
 });
 
+describe('sanitizeAuditMetadata — vigencia de una cobertura (SEC-053)', () => {
+  it('conserva las fechas (o null) antes y después y si borró la verificación', () => {
+    const coverageValidity = {
+      before: { validFrom: '2025-01-01', validTo: '2026-06-30' },
+      after: { validFrom: '2025-01-01', validTo: null },
+      verificationCleared: true,
+    };
+    expect(sanitizeAuditMetadata({ coverageValidity })).toEqual({
+      coverageValidity,
+    });
+  });
+
+  it('descarta el cambio entero si un lado o el booleano no tienen la forma admitida', () => {
+    const ok = { validFrom: null, validTo: '2026-06-30' };
+    for (const coverageValidity of [
+      { before: ok, verificationCleared: false },
+      { before: ok, after: ok },
+      { before: ok, after: ok, verificationCleared: 'sí' },
+      {
+        before: ok,
+        after: { validFrom: null, validTo: '2026-02-30' },
+        verificationCleared: false,
+      },
+      {
+        before: ok,
+        after: { validFrom: null, validTo: '30/06/2026' },
+        verificationCleared: false,
+      },
+      {
+        before: ok,
+        after: { ...ok, memberNumber: '1020304050' },
+        verificationCleared: false,
+      },
+    ]) {
+      expect(sanitizeAuditMetadata({ coverageValidity })).toEqual({});
+    }
+  });
+});
+
 describe('sanitizeAuditMetadata — nº de registro sanitario de la sede (DX-319)', () => {
   it('conserva el número (o null) y si se imprime, antes y después', () => {
     const healthRegistration = {

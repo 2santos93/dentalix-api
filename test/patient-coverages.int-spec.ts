@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { Prisma, PrismaClient } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaPayerRepository } from '../src/modules/payers/infrastructure/repositories/prisma-payer.repository';
@@ -588,10 +588,22 @@ describe('pagadores y coberturas (int, DX-153)', () => {
       ).rejects.toMatchObject({ message: 'Ese pagador está desactivado.' });
       const [cov] = await live(patientId);
       await expect(
-        inA(() => repo.update(cov.id, { payerId: gone, updatedById: by })),
+        inA(() =>
+          repo.update(cov.id, {
+            payerId: gone,
+            updatedById: by,
+            editorRole: ClinicRole.RECEPTION,
+          }),
+        ),
       ).rejects.toMatchObject({ message: 'Pagador no encontrado.' });
       await expect(
-        inA(() => repo.update(cov.id, { payerId: spare, updatedById: by })),
+        inA(() =>
+          repo.update(cov.id, {
+            payerId: spare,
+            updatedById: by,
+            editorRole: ClinicRole.RECEPTION,
+          }),
+        ),
       ).rejects.toMatchObject({ message: 'Ese pagador está desactivado.' });
     });
 
@@ -657,8 +669,20 @@ describe('pagadores y coberturas (int, DX-153)', () => {
       const { patientId, payerId, ids } = await seedPatient(3);
       for (let round = 0; round < 4; round++) {
         const results = await Promise.allSettled([
-          inA(() => repo.update(ids[1], { isPrimary: true, updatedById: by })),
-          inA(() => repo.update(ids[2], { isPrimary: true, updatedById: by })),
+          inA(() =>
+            repo.update(ids[1], {
+              isPrimary: true,
+              updatedById: by,
+              editorRole: ClinicRole.RECEPTION,
+            }),
+          ),
+          inA(() =>
+            repo.update(ids[2], {
+              isPrimary: true,
+              updatedById: by,
+              editorRole: ClinicRole.RECEPTION,
+            }),
+          ),
           inA(() => repo.create(input(patientId, payerId, true))),
         ]);
         expect(results.map((r) => r.status)).toEqual([
@@ -694,7 +718,13 @@ describe('pagadores y coberturas (int, DX-153)', () => {
       const { patientId, ids } = await seedPatient(3);
       const [removed, marked] = await Promise.all([
         inA(() => repo.softDelete(ids[1], by)),
-        inA(() => repo.update(ids[1], { isPrimary: true, updatedById: by })),
+        inA(() =>
+          repo.update(ids[1], {
+            isPrimary: true,
+            updatedById: by,
+            editorRole: ClinicRole.RECEPTION,
+          }),
+        ),
       ]);
       expect(removed).toBe(true);
       const rows = await live(patientId);
@@ -702,7 +732,7 @@ describe('pagadores y coberturas (int, DX-153)', () => {
       expect(rows.filter((r) => r.isPrimary)).toHaveLength(1);
       // Según quién entre primero, el PATCH ve la fila viva (la marca y luego
       // se retira, promoviendo otra) o ya retirada (null).
-      expect(marked === null || marked.id === ids[1]).toBe(true);
+      expect(marked === null || marked.coverage.id === ids[1]).toBe(true);
     });
 
     it('un POST con isPrimary:true que falla (FK) no deja la marca de la anterior desmarcada', async () => {
@@ -724,6 +754,7 @@ describe('pagadores y coberturas (int, DX-153)', () => {
             planName: 'Cambiado',
             isPrimary: true,
             updatedById: by,
+            editorRole: ClinicRole.RECEPTION,
           }),
         ),
       ).rejects.toBeDefined();
@@ -847,7 +878,11 @@ describe('pagadores y coberturas (int, DX-153)', () => {
             }),
           ),
           inA(() =>
-            repo.update(id, { memberNumber: 'B5678', updatedById: editor }),
+            repo.update(id, {
+              memberNumber: 'B5678',
+              updatedById: editor,
+              editorRole: ClinicRole.RECEPTION,
+            }),
           ),
         ]);
         expect(edited.status).toBe('fulfilled');
@@ -864,6 +899,125 @@ describe('pagadores y coberturas (int, DX-153)', () => {
           expect(verified.reason).toMatchObject({ status: 409 });
         }
       }
+    });
+
+    describe('vigencia (SEC-053)', () => {
+      const verifiedAt = new Date('2025-02-01T10:00:00.000Z');
+
+      async function seedVerifiedExpired() {
+        const seeded = await seedCoverage('A1234');
+        await raw.patientCoverage.update({
+          where: { id: seeded.id },
+          data: {
+            validFrom: new Date('2025-01-01T00:00:00.000Z'),
+            validTo: new Date('2026-06-30T00:00:00.000Z'),
+            declaredById: admin,
+            verifiedById: admin,
+            verifiedAt,
+          },
+        });
+        return seeded;
+      }
+
+      const stored = (id: string) =>
+        raw.patientCoverage.findUniqueOrThrow({
+          where: { id },
+          select: {
+            validTo: true,
+            verifiedAt: true,
+            verifiedById: true,
+            declaredById: true,
+          },
+        });
+
+      it.each([ClinicRole.RECEPTION, ClinicRole.ASSISTANT, ClinicRole.DENTIST])(
+        '%s quita el fin de una verificada: queda sin verificar y declarada por él, con lo de antes en el resultado',
+        async (role) => {
+          const { id } = await seedVerifiedExpired();
+          const out = await inA(() =>
+            repo.update(id, {
+              validTo: null,
+              updatedById: editor,
+              editorRole: role,
+            }),
+          );
+          expect(out?.previous).toEqual({
+            validFrom: '2025-01-01',
+            validTo: '2026-06-30',
+            verified: true,
+          });
+          expect(out?.coverage).toMatchObject({
+            validTo: null,
+            verifiedAt: null,
+            declaredById: editor,
+          });
+          expect(await stored(id)).toEqual({
+            validTo: null,
+            verifiedAt: null,
+            verifiedById: null,
+            declaredById: editor,
+          });
+        },
+      );
+
+      it('ADMIN la alarga y sigue verificada; las notas solas no la tocan', async () => {
+        const { id } = await seedVerifiedExpired();
+        await inA(() =>
+          repo.update(id, {
+            validTo: '2027-06-30',
+            updatedById: admin,
+            editorRole: ClinicRole.ADMIN,
+          }),
+        );
+        await inA(() =>
+          repo.update(id, {
+            notes: 'Carné renovado',
+            validTo: '2027-06-30',
+            updatedById: editor,
+            editorRole: ClinicRole.RECEPTION,
+          }),
+        );
+        expect(await stored(id)).toEqual({
+          validTo: new Date('2027-06-30T00:00:00.000Z'),
+          verifiedAt,
+          verifiedById: admin,
+          declaredById: admin,
+        });
+      });
+
+      it('se decide con el candado tomado: si la verifican mientras espera, el cambio de recepción igual la deja sin verificar', async () => {
+        const { id, patientId } = await seedCoverage('A1234');
+        let edit: Promise<unknown> = Promise.resolve();
+        // Otra transacción tiene el candado del paciente y verifica la
+        // cobertura; la edición de recepción ya leyó «sin verificar» fuera
+        // del candado (para saber el paciente) y espera.
+        await raw.$transaction(async (tx) => {
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${a.tenantId} || ':' || ${patientId}))`;
+          edit = inA(() =>
+            repo.update(id, {
+              validTo: '2027-06-30',
+              updatedById: editor,
+              editorRole: ClinicRole.RECEPTION,
+            }),
+          );
+          await new Promise((resolve) => setTimeout(resolve, 300));
+          await tx.patientCoverage.update({
+            where: { id },
+            data: { verifiedById: admin, verifiedAt: new Date() },
+          });
+        });
+        // Leyó con el candado: vio la verificación que se acababa de hacer
+        // (fuera del candado habría leído «sin verificar»).
+        expect(await edit).toMatchObject({
+          previous: { verified: true },
+        });
+        expect(await stored(id)).toMatchObject({
+          validTo: new Date('2027-06-30T00:00:00.000Z'),
+          verifiedAt: null,
+          verifiedById: null,
+          declaredById: editor,
+        });
+      });
     });
   });
 

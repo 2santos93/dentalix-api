@@ -4,6 +4,7 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import { ClinicRole } from '@prisma/client';
 import { InMemoryPayerRepository } from '../../../payers/application/__fixtures__/in-memory-payers';
 import {
   COVERAGE_DATE_RANGE_MESSAGE,
@@ -28,6 +29,7 @@ import {
   ListPatientCoveragesUseCase,
   UpdatePatientCoverageUseCase,
   VerifyPatientCoverageUseCase,
+  type UpdatePatientCoverageInput,
 } from './patient-coverages.use-cases';
 
 describe('casos de uso de coberturas (DX-153)', () => {
@@ -40,6 +42,16 @@ describe('casos de uso de coberturas (DX-153)', () => {
   let remove: DeletePatientCoverageUseCase;
   let sanitas: string;
   let sura: string;
+  /** Edita con ese usuario y rol (recepción por omisión) y da la cobertura. */
+  const edit = async (
+    patientId: string,
+    coverageId: string,
+    input: UpdatePatientCoverageInput,
+    userId: string,
+    role: ClinicRole = ClinicRole.RECEPTION,
+  ) =>
+    (await update.execute(patientId, coverageId, input, { userId, role }))
+      .coverage;
 
   beforeEach(() => {
     payers = new InMemoryPayerRepository();
@@ -199,21 +211,21 @@ describe('casos de uso de coberturas (DX-153)', () => {
 
     it('404 del paciente ajeno y de una cobertura que no es suya', async () => {
       await expect(
-        update.execute('otra-clinica', covId, { planName: 'X' }, 'u1'),
+        edit('otra-clinica', covId, { planName: 'X' }, 'u1'),
       ).rejects.toThrow(new NotFoundException(PATIENT_NOT_FOUND_MESSAGE));
       await expect(
-        update.execute(PATIENT, 'no-existe', { planName: 'X' }, 'u1'),
+        edit(PATIENT, 'no-existe', { planName: 'X' }, 'u1'),
       ).rejects.toThrow(new NotFoundException(COVERAGE_NOT_FOUND_MESSAGE));
     });
 
     it('null vacía los textos y las fechas; solo toca lo enviado', async () => {
-      await update.execute(
+      await edit(
         PATIENT,
         covId,
         { planName: 'Oro', memberNumber: '999', validFrom: '2026-01-01' },
         'u1',
       );
-      const out = await update.execute(
+      const out = await edit(
         PATIENT,
         covId,
         { planName: null, validFrom: null, notes: '  nota ' },
@@ -228,29 +240,29 @@ describe('casos de uso de coberturas (DX-153)', () => {
     });
 
     it('valida la vigencia sobre lo guardado: un fin anterior al inicio ya guardado es 400', async () => {
-      await update.execute(PATIENT, covId, { validFrom: '2026-05-10' }, 'u1');
+      await edit(PATIENT, covId, { validFrom: '2026-05-10' }, 'u1');
       await expect(
-        update.execute(PATIENT, covId, { validTo: '2026-05-09' }, 'u1'),
+        edit(PATIENT, covId, { validTo: '2026-05-09' }, 'u1'),
       ).rejects.toThrow(new BadRequestException(COVERAGE_DATE_RANGE_MESSAGE));
     });
 
     it('cambiar de pagador exige uno activo; 400 si no existe', async () => {
       const off = payers.seed({ name: 'Off', active: false });
       await expect(
-        update.execute(PATIENT, covId, { payerId: off.id }, 'u1'),
+        edit(PATIENT, covId, { payerId: off.id }, 'u1'),
       ).rejects.toThrow(new BadRequestException(PAYER_INACTIVE_MESSAGE));
       await expect(
-        update.execute(PATIENT, covId, { payerId: 'no-existe' }, 'u1'),
+        edit(PATIENT, covId, { payerId: 'no-existe' }, 'u1'),
       ).rejects.toThrow(
         new BadRequestException(COVERAGE_PAYER_NOT_FOUND_MESSAGE),
       );
-      const out = await update.execute(PATIENT, covId, { payerId: sura }, 'u1');
+      const out = await edit(PATIENT, covId, { payerId: sura }, 'u1');
       expect(out.payer.id).toBe(sura);
     });
 
     it('con el mismo pagador ya desactivado, editar otros campos vale', async () => {
       payers.rows.find((p) => p.id === sanitas)!.active = false;
-      const out = await update.execute(
+      const out = await edit(
         PATIENT,
         covId,
         { payerId: sanitas, planName: 'Plata' },
@@ -264,7 +276,7 @@ describe('casos de uso de coberturas (DX-153)', () => {
 
     it('isPrimary:false sobre la única principal es 400', async () => {
       await expect(
-        update.execute(PATIENT, covId, { isPrimary: false }, 'u1'),
+        edit(PATIENT, covId, { isPrimary: false }, 'u1'),
       ).rejects.toThrow(
         new BadRequestException(COVERAGE_PRIMARY_REQUIRED_MESSAGE),
       );
@@ -273,12 +285,7 @@ describe('casos de uso de coberturas (DX-153)', () => {
 
     it('isPrimary:false sobre una no principal no cambia nada', async () => {
       const second = await create.execute(PATIENT, { payerId: sura }, 'u1');
-      const out = await update.execute(
-        PATIENT,
-        second.id,
-        { isPrimary: false },
-        'u1',
-      );
+      const out = await edit(PATIENT, second.id, { isPrimary: false }, 'u1');
       expect(out.isPrimary).toBe(false);
       expect(repo.live(PATIENT).find((r) => r.id === covId)!.isPrimary).toBe(
         true,
@@ -287,12 +294,7 @@ describe('casos de uso de coberturas (DX-153)', () => {
 
     it('isPrimary:true en otra la hace principal y desmarca la anterior', async () => {
       const second = await create.execute(PATIENT, { payerId: sura }, 'u1');
-      const out = await update.execute(
-        PATIENT,
-        second.id,
-        { isPrimary: true },
-        'u1',
-      );
+      const out = await edit(PATIENT, second.id, { isPrimary: true }, 'u1');
       expect(out.isPrimary).toBe(true);
       expect(
         repo
@@ -306,7 +308,7 @@ describe('casos de uso de coberturas (DX-153)', () => {
       const second = await create.execute(PATIENT, { payerId: sura }, 'u1');
       repo.failNextPrimaryWrite = true;
       await expect(
-        update.execute(PATIENT, second.id, { isPrimary: true }, 'u1'),
+        edit(PATIENT, second.id, { isPrimary: true }, 'u1'),
       ).rejects.toBeInstanceOf(UnprocessableEntityException);
       expect(
         repo.live(PATIENT).find((r) => r.id === second.id)!.isPrimary,
@@ -411,14 +413,14 @@ describe('casos de uso de coberturas (DX-153)', () => {
     it('una cobertura anterior sin nº se edita (notas, fechas) sin pedirlo', async () => {
       const old = repo.seed({ patientId: PATIENT, payerId: external });
       await expect(
-        update.execute(PATIENT, old.id, { notes: 'Llamar antes' }, 'u2'),
+        edit(PATIENT, old.id, { notes: 'Llamar antes' }, 'u2'),
       ).resolves.toMatchObject({ notes: 'Llamar antes', memberNumber: null });
     });
 
     it('cambiar el pagador a uno externo o vaciar el nº lo exige', async () => {
       const c = await create.execute(PATIENT, { payerId: sanitas }, 'u1');
       await expect(
-        update.execute(PATIENT, c.id, { payerId: external }, 'u1'),
+        edit(PATIENT, c.id, { payerId: external }, 'u1'),
       ).rejects.toThrow(
         new BadRequestException(MEMBER_NUMBER_REQUIRED_MESSAGE),
       );
@@ -428,7 +430,7 @@ describe('casos de uso de coberturas (DX-153)', () => {
         'u1',
       );
       await expect(
-        update.execute(PATIENT, e.id, { memberNumber: null }, 'u1'),
+        edit(PATIENT, e.id, { memberNumber: null }, 'u1'),
       ).rejects.toThrow(
         new BadRequestException(MEMBER_NUMBER_REQUIRED_MESSAGE),
       );
@@ -517,7 +519,7 @@ describe('casos de uso de coberturas (DX-153)', () => {
       await verify.execute(PATIENT, c.id, '1020304050', 'admin-1');
 
       // El mismo número con otros espacios o tocar otros campos no la borra.
-      const same = await update.execute(
+      const same = await edit(
         PATIENT,
         c.id,
         { memberNumber: ' 1020304050 ', notes: 'ok' },
@@ -528,7 +530,7 @@ describe('casos de uso de coberturas (DX-153)', () => {
         declaredById: 'u1',
       });
 
-      const changed = await update.execute(
+      const changed = await edit(
         PATIENT,
         c.id,
         { memberNumber: '1020304059' },
@@ -542,13 +544,90 @@ describe('casos de uso de coberturas (DX-153)', () => {
       });
 
       await verify.execute(PATIENT, c.id, '1020304059', 'admin-1');
-      const moved = await update.execute(
-        PATIENT,
-        c.id,
-        { payerId: otherExternal },
-        'u3',
-      );
+      const moved = await edit(PATIENT, c.id, { payerId: otherExternal }, 'u3');
       expect(moved).toMatchObject({ verifiedAt: null, declaredById: 'u3' });
+    });
+
+    describe('vigencia de una cobertura verificada (SEC-053)', () => {
+      async function verifiedExpired() {
+        const c = await create.execute(
+          PATIENT,
+          {
+            payerId: external,
+            memberNumber: '1020304050',
+            validFrom: '2025-01-01',
+            validTo: '2026-06-30',
+          },
+          'admin-1',
+        );
+        await verify.execute(PATIENT, c.id, '1020304050', 'admin-1');
+        return c.id;
+      }
+
+      it.each([ClinicRole.RECEPTION, ClinicRole.ASSISTANT, ClinicRole.DENTIST])(
+        '%s alarga o quita el fin: queda sin verificar, declarada por él, y lo cuenta para la auditoría',
+        async (role) => {
+          const id = await verifiedExpired();
+          const out = await update.execute(
+            PATIENT,
+            id,
+            { validTo: null },
+            { userId: 'u2', role },
+          );
+          expect(out.coverage).toMatchObject({
+            validTo: null,
+            status: 'ACTIVE',
+            verifiedAt: null,
+            verifiedById: null,
+            verifiedByName: null,
+            declaredById: 'u2',
+          });
+          expect(out.validityChange).toEqual({
+            before: { validFrom: '2025-01-01', validTo: '2026-06-30' },
+            after: { validFrom: '2025-01-01', validTo: null },
+            verificationCleared: true,
+          });
+        },
+      );
+
+      it('ADMIN cambia la vigencia y sigue verificada', async () => {
+        const id = await verifiedExpired();
+        const out = await update.execute(
+          PATIENT,
+          id,
+          { validTo: '2027-06-30' },
+          { userId: 'admin-1', role: ClinicRole.ADMIN },
+        );
+        expect(out.coverage).toMatchObject({
+          validTo: '2027-06-30',
+          verifiedById: 'admin-1',
+          declaredById: 'admin-1',
+        });
+        expect(out.validityChange).toMatchObject({
+          after: { validTo: '2027-06-30' },
+          verificationCleared: false,
+        });
+      });
+
+      it('cambiar solo las notas, o enviar la misma vigencia, no la toca', async () => {
+        const id = await verifiedExpired();
+        const out = await update.execute(
+          PATIENT,
+          id,
+          {
+            notes: 'Pedir el carné nuevo',
+            validFrom: '2025-01-01',
+            validTo: '2026-06-30',
+          },
+          { userId: 'u2', role: ClinicRole.RECEPTION },
+        );
+        expect(out.coverage).toMatchObject({
+          notes: 'Pedir el carné nuevo',
+          verifiedById: 'admin-1',
+          declaredById: 'admin-1',
+        });
+        expect(out.validityChange).toBeNull();
+      });
     });
   });
 });

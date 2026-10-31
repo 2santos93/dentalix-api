@@ -3448,6 +3448,17 @@ de precios) que fijan el precio de cada ítem del plan al añadirlo. Módulos
     Cambiar el pagador o el nº de afiliado **borra la verificación** y deja
     la cobertura declarada por quien la edita (`declaredById`; en las
     anteriores, `createdById`).
+  - **Vigencia (SEC-053, BE-048)**: si quien edita no es ADMIN, cambiar
+    `validFrom` o `validTo` de una cobertura de pagador externo también la
+    redeclara (sin verificar y declarada por él), igual que el pagador o el
+    nº: ya no se alarga ni se quita el fin de una cobertura verificada y
+    vencida para asignarse el convenio. Un ADMIN corrige la vigencia sin
+    perder la verificación. Reenviar las mismas fechas, las notas, el plan, el
+    titular o la principal no la tocan. La regla es una
+    (`coverageRedeclared`) y la decide el repositorio con el candado del
+    paciente tomado, sobre lo guardado, en la misma escritura. El evento
+    `COVERAGE_CHANGED` lleva `coverageValidity` (fechas antes y después y si
+    borró la verificación) cuando la vigencia cambió.
   - Al asignar, un rol que no es ADMIN no puede usar una cobertura cuyo
     pagador o nº declaró él mismo si no está verificada (403 en español que
     dice qué falta). Sí puede si la verificó un ADMIN, si la registró otro
