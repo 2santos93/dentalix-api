@@ -486,6 +486,8 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       'medical_history_submissions.patientId',
       'medical_history_versions.patientId',
       'patient_agreements.patientId',
+      // DX-243: la firma del profesional de uno firmado a distancia.
+      'patient_consent_countersignatures.patientId',
       'patient_consents.patientId',
       'patient_coverages.patientId',
       'patient_dentition_events.patientId',
@@ -503,6 +505,8 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       'reminder_opt_out_match_warnings.patientId',
       // DX-407: la hoja de sedación cuelga de una evolución, como la anestesia.
       'sedation_records.patientId',
+      // DX-243: un consentimiento enviado a firmar a distancia bloquea el deshacer.
+      'signature_requests.patientId',
       'tooth_records.patientId',
       'treatment_plans.patientId',
       'waitlist_offers.patientId',

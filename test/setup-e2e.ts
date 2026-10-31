@@ -22,6 +22,8 @@ for (const policy of [
   'EXCHANGE_RATES',
   'ANAMNESIS',
   'ANAMNESIS_TOKEN',
+  'SIGNATURE',
+  'SIGNATURE_TOKEN',
 ]) {
   process.env[`RATE_LIMIT_${policy}_LIMIT`] ??= HIGH_LIMIT;
 }

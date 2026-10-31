@@ -3220,6 +3220,19 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       'medical-history-submissions.e2e-spec.ts',
     'POST /medical-history/submissions/:id/revoke':
       'medical-history-submissions.e2e-spec.ts',
+    // DX-243: B → 404 sobre el paciente, la solicitud y el consentimiento de
+    // A (opciones, lista, enviar, anular y firma del profesional), sin tocar
+    // nada de A.
+    'GET /patients/:patientId/signature-requests/options':
+      'signature-requests.e2e-spec.ts',
+    'GET /patients/:patientId/signature-requests':
+      'signature-requests.e2e-spec.ts',
+    'POST /patients/:patientId/signature-requests':
+      'signature-requests.e2e-spec.ts',
+    'POST /patients/:patientId/signature-requests/:id/revoke':
+      'signature-requests.e2e-spec.ts',
+    'POST /patients/:patientId/consents/:id/countersign':
+      'signature-requests.e2e-spec.ts',
     // DX-375: el ADMIN de otra clínica corrige la tasa manual de A → 404.
     'PUT /exchange/manual-rates/:id':
       'payment-frozen-exchange-rate.e2e-spec.ts',
@@ -3262,6 +3275,13 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       'public-post-op-instructions.e2e-spec.ts',
     'POST /public/post-op-instructions/:token/opened':
       'public-post-op-instructions.e2e-spec.ts',
+    // DX-243: «el token de A en el host de B → Enlace no válido» en las cinco
+    // rutas, sin abrir, enviar código, verificar ni firmar nada de A.
+    'GET /public/sign/:token': 'signature-requests.e2e-spec.ts',
+    'POST /public/sign/:token/code': 'signature-requests.e2e-spec.ts',
+    'POST /public/sign/:token/verify': 'signature-requests.e2e-spec.ts',
+    'GET /public/sign/:token/document': 'signature-requests.e2e-spec.ts',
+    'POST /public/sign/:token/sign': 'signature-requests.e2e-spec.ts',
     // «el token de A en el host de B → 404» (GET y POST del formulario).
     'GET /public/medical-history/:token':
       'medical-history-submissions.e2e-spec.ts',

@@ -13,6 +13,8 @@ import {
 } from './application/use-cases/consent-templates.use-cases';
 import {
   CONSENT_CLOCK,
+  ConsentDocumentRenderer,
+  CountersignPatientConsentUseCase,
   GetPatientConsentUseCase,
   ListPatientConsentsUseCase,
   PreviewPatientConsentUseCase,
@@ -26,7 +28,9 @@ import { PrismaPatientConsentRepository } from './infrastructure/repositories/pr
 /**
  * Consentimientos informados (DX-006): plantillas por clínica y consentimientos
  * firmados en pantalla, append-only. PatientsModule exporta PATIENT_REPOSITORY
- * para el 404 de "paciente de otra clínica" del listado.
+ * para el 404 de "paciente de otra clínica" del listado. DX-243: la firma del
+ * profesional de los firmados a distancia, y exporta el render del documento
+ * para el módulo de firma a distancia.
  */
 @Module({
   imports: [JwtModule.register({}), PatientsModule, DocumentTypeNamesModule],
@@ -39,6 +43,8 @@ import { PrismaPatientConsentRepository } from './infrastructure/repositories/pr
     PreviewPatientConsentUseCase,
     SignPatientConsentUseCase,
     GetPatientConsentUseCase,
+    CountersignPatientConsentUseCase,
+    ConsentDocumentRenderer,
     TokenService,
     TenantContextInterceptor,
     { provide: CONSENT_CLOCK, useValue: () => new Date() },
@@ -51,5 +57,7 @@ import { PrismaPatientConsentRepository } from './infrastructure/repositories/pr
       useClass: PrismaPatientConsentRepository,
     },
   ],
+  // DX-243: la firma a distancia congela el texto con el mismo render.
+  exports: [ConsentDocumentRenderer, CONSENT_TEMPLATE_REPOSITORY],
 })
 export class ConsentsModule {}

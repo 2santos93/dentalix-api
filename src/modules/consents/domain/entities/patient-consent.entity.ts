@@ -1,4 +1,22 @@
-import type { ConsentSignerType, DocumentType } from '@prisma/client';
+import type {
+  ConsentSignerType,
+  DocumentType,
+  SignatureRequestChannel,
+} from '@prisma/client';
+
+/**
+ * DX-243: evidencias congeladas de una firma del paciente a distancia (por
+ * enlace con código). `professionalUserId` es quien debe firmar después.
+ */
+export interface RemoteConsentEvidence {
+  signatureRequestId: string;
+  channel: SignatureRequestChannel;
+  destinationMasked: string;
+  sentAt: Date;
+  openedAt: Date;
+  verifiedAt: Date;
+  professionalUserId: string;
+}
 
 /**
  * Consentimiento FIRMADO (DX-006): foto congelada del documento. No hay forma
@@ -20,15 +38,33 @@ export interface PatientConsentSummary {
   contentHash: string;
   signedAt: Date;
   recordedById: string;
+  /** DX-243: null si se firmó en pantalla. */
+  remote: RemoteConsentEvidence | null;
+  /**
+   * Cuándo firmó el profesional: la misma hora en pantalla; a distancia, la
+   * de su firma posterior en la app, o null si aún falta.
+   */
+  professionalSignedAt: Date | null;
+  /** Solo cuenta como válido con las dos firmas (DX-243). */
+  complete: boolean;
 }
 
 export interface PatientConsent extends PatientConsentSummary {
   body: string;
   /** PNG en base64, sin prefijo `data:`. */
   patientSignature: string;
-  professionalSignature: string;
+  /** null en uno firmado a distancia hasta que firma el profesional. */
+  professionalSignature: string | null;
   ipAddress: string | null;
   userAgent: string | null;
+}
+
+/** DX-243: la firma del profesional que completó uno firmado a distancia. */
+export interface StoredCountersignature {
+  professionalName: string;
+  professionalSignature: string;
+  contentHash: string;
+  signedAt: Date;
 }
 
 /** El paciente VIVO de la cabecera imprimible (no está sellado). */
@@ -55,4 +91,8 @@ export interface PatientConsentDocument extends PatientConsent {
 export type StoredPatientConsentDocument = Omit<
   PatientConsentDocument,
   'integrityOk' | 'patient'
-> & { patient: ConsentDocumentPatient };
+> & {
+  patient: ConsentDocumentPatient;
+  /** La firma del profesional a distancia con su propio hash (DX-243). */
+  countersignature: StoredCountersignature | null;
+};

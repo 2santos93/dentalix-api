@@ -124,6 +124,14 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
 
 /** Ids cuyo caso «B manda el id de A» ya está en otro spec (se cita cuál). */
 export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
+  // DX-243: «B manda la plantilla, el plan o el profesional de A → 404/400 y
+  // no se crea nada».
+  'POST /patients/:patientId/signature-requests body.templateId':
+    'signature-requests.e2e-spec.ts',
+  'POST /patients/:patientId/signature-requests body.treatmentPlanId':
+    'signature-requests.e2e-spec.ts',
+  'POST /patients/:patientId/signature-requests body.professionalId':
+    'signature-requests.e2e-spec.ts',
   // DX-307: «un anestésico de otra clínica no se acepta (404)».
   'POST /patients/:patientId/clinical-entries/:entryId/anesthesia body.anestheticId':
     'anesthesia.e2e-spec.ts',

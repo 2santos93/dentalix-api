@@ -350,6 +350,16 @@ export const ANAMNESIS_REQUEST_ROLES: ClinicRole[] = [
   ClinicRole.RECEPTION,
   ClinicRole.ADMIN,
 ];
+// Firma a distancia (DX-243) — ENVIAR un consentimiento a firmar por enlace,
+// ver su estado en la ficha y ANULARLO: los cuatro roles, como la anamnesis
+// por enlace (recepción lo envía antes de la cita). La lista no lleva el
+// texto del documento. FIRMAR como profesional: CLINICAL_ROLES (consentimientos).
+export const SIGNATURE_REQUEST_ROLES: ClinicRole[] = [
+  ClinicRole.DENTIST,
+  ClinicRole.ASSISTANT,
+  ClinicRole.RECEPTION,
+  ClinicRole.ADMIN,
+];
 export const ANAMNESIS_REVIEW_DECISION_ROLES: ClinicRole[] = [
   ClinicRole.DENTIST,
   ClinicRole.ADMIN,

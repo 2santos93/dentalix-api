@@ -29,6 +29,7 @@ import { CLINICAL_ROLES } from '../../auth/presentation/guards/clinic-role-sets'
 import { JwtPayload } from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 import {
+  CountersignPatientConsentUseCase,
   GetPatientConsentUseCase,
   ListPatientConsentsUseCase,
   PreviewPatientConsentUseCase,
@@ -47,7 +48,10 @@ import {
   PatientConsentSummaryDto,
 } from './dto/patient-consent.dto';
 import { PreviewPatientConsentQueryDto } from './dto/preview-patient-consent-query.dto';
-import { SignPatientConsentDto } from './dto/sign-patient-consent.dto';
+import {
+  CountersignPatientConsentDto,
+  SignPatientConsentDto,
+} from './dto/sign-patient-consent.dto';
 import { Audit } from '../../audit/presentation/audit.decorator';
 
 type AuthenticatedRequest = Request & { user: JwtPayload };
@@ -67,7 +71,9 @@ function toConsentDto(consent: PatientConsent): PatientConsentDto {
   return {
     ...rest,
     patientSignature: toDataUrl(consent.patientSignature),
-    professionalSignature: toDataUrl(consent.professionalSignature),
+    professionalSignature: consent.professionalSignature
+      ? toDataUrl(consent.professionalSignature)
+      : null,
   };
 }
 
@@ -89,6 +95,7 @@ export class PatientConsentsController {
     private readonly previewConsent: PreviewPatientConsentUseCase,
     private readonly signConsent: SignPatientConsentUseCase,
     private readonly getConsent: GetPatientConsentUseCase,
+    private readonly countersignConsent: CountersignPatientConsentUseCase,
   ) {}
 
   @Audit({
@@ -176,6 +183,48 @@ export class PatientConsentsController {
     return toConsentDto(consent);
   }
 
+  // DX-243: el profesional firma en la app uno que el paciente firmó a
+  // distancia. Append-only: un INSERT en su propia tabla.
+  @Audit({
+    action: 'SIGN',
+    resource: 'CONSENT',
+    resourceId: { param: 'id' },
+    patient: { param: 'patientId' },
+    reason: 'CONSENT_COUNTERSIGNED',
+  })
+  @Post(':id/countersign')
+  @ApiCreatedResponse({ type: PatientConsentSummaryDto })
+  @ApiBadRequestResponse({
+    description: 'Falta la firma, no es PNG o supera 200 KB',
+  })
+  @ApiForbiddenResponse({
+    description:
+      'Solo el profesional que se eligió al enviarlo a firmar (y que nombra el texto)',
+  })
+  @ApiNotFoundResponse({ description: 'Consentimiento no encontrado' })
+  @ApiConflictResponse({
+    description:
+      'Se firmó en la clínica (ya lleva la firma del profesional) o el profesional ya firmó',
+  })
+  countersign(
+    @Param('patientId', ParseUUIDPipe) patientId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CountersignPatientConsentDto,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<PatientConsentSummary> {
+    const userAgent = req.get('user-agent');
+    return this.countersignConsent.execute(
+      patientId,
+      id,
+      { professionalSignature: dto.professionalSignature },
+      {
+        recordedById: req.user.sub,
+        ipAddress: req.ip ?? null,
+        userAgent: userAgent ? userAgent.slice(0, USER_AGENT_MAX) : null,
+      },
+    );
+  }
+
   @Audit({
     action: 'VIEW',
     resource: 'CONSENT',
@@ -198,6 +247,9 @@ export class PatientConsentsController {
       clinic: doc.clinic,
       patient: doc.patient,
       integrityOk: doc.integrityOk,
+      // DX-243: la IP del paciente a distancia es evidencia de la firma y se
+      // ve en el documento; la de una firma en pantalla es la de la clínica.
+      remoteIpAddress: doc.remote ? doc.ipAddress : null,
     };
   }
 }

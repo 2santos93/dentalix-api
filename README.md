@@ -780,6 +780,65 @@ Módulo `medical-history-submissions`; migraciones
   penicilina, asma, anticonceptivo, alcohol los fines de semana) y queda en
   «Anamnesis por revisar» de la sede principal.
 
+## Firma a distancia de consentimientos (DX-243)
+
+El consentimiento se envía por email y el paciente (o, si es menor, su
+responsable) lo firma desde el móvil tras verificar un código de 6 dígitos; el
+profesional firma después en la app y solo entonces cuenta como «Completo».
+Módulo `signature-requests` (y la firma del profesional en `consents`);
+migraciones `20261105130000_dx243_enums`,
+`20261105130100_dx243_audit_events_idx` y
+`20261105130200_dx243_signature_requests`.
+
+- **Tabla `signature_requests`**: tipo (`CONSENT`; `BUDGET` reservado para
+  DX-415, hoy 400), canal (`EMAIL`), sede, plantilla y versión, plan
+  opcional, el documento **congelado** al enviar (título y texto ya
+  resueltos), profesional que firmará, firmante (`PATIENT` o `GUARDIAN` con su
+  nombre), destino y destino enmascarado, `tokenHash` (SHA-256),
+  `codeHash` (HMAC-SHA256 con clave HKDF de `JWT_ACCESS_SECRET`; nunca en
+  claro), intentos (5 → `lockedAt`), envíos del código (5, cada 60 s),
+  `sessionHash` (la sesión de 30 min del navegador que verificó), caducidad
+  (72 h) y `openedAt`/`verifiedAt`/`signedAt`/`revokedAt`. RLS FORCE, FK
+  compuestas, CHECK de forma y de estado; el trigger
+  `signature_requests_guard` congela una solicitud firmada o anulada y su
+  documento, destino y token; sin borrado duro.
+- **`patient_consents`**: la firma del paciente a distancia es una fila más
+  (inmutable), con `signatureRequestId` y las evidencias congeladas
+  (`remoteChannel`, `remoteDestinationMasked`, `remoteSentAt`,
+  `remoteOpenedAt`, `remoteVerifiedAt`, IP y UA), `professionalSignature`
+  NULL y su `contentHash` (`computeRemoteConsentHash`: texto exacto, versión
+  de la plantilla, firmante, firma, `signedAt` del servidor y evidencias).
+  La firma del profesional va en **`patient_consent_countersignatures`**
+  (append-only, una por consentimiento, hash encadenado). El listado de
+  consentimientos trae `remote`, `professionalSignedAt` y `complete`; el
+  detalle comprueba los dos hashes (`integrityOk`) y da `remoteIpAddress`.
+- **Personal** (los 4 roles, como la anamnesis por enlace):
+  - `GET /patients/:patientId/signature-requests/options`: plantillas activas,
+    profesionales con rol clínico, profesional por defecto y a quién iría
+    (enmascarado) o por qué no (sin email, menor sin responsable, baja de
+    envíos).
+  - `POST /patients/:patientId/signature-requests` (`type`, `channel`,
+    `templateId`, `treatmentPlanId?`, `professionalId?`; recepción debe elegir
+    el profesional): congela el texto, anula la anterior del mismo paciente y
+    plantilla aún sin firmar y encola el email (topes del outbox de DX-088:
+    429). Un menor según la mayoría de la clínica (DX-328) va a su
+    responsable (DX-203).
+  - `GET …/signature-requests` y `POST …/:id/revoke` (409 si ya está firmada
+    o anulada).
+  - `POST /patients/:patientId/consents/:id/countersign` (CLINICAL_ROLES, y
+    solo el profesional elegido al enviarlo; 403 si no, 409 si no es a
+    distancia o ya está firmada).
+- **Públicas** (`/public/sign/:token`, tenant del host, `no-store`,
+  `no-referrer`, rate limit `signature` por IP y `signature-token` por token):
+  `GET` (estado mínimo, sin documento), `POST …/code` (apertura + código por
+  email), `POST …/verify` (`{ code }` → `sessionToken`), `GET …/document` y
+  `POST …/sign` (cabecera `X-Signature-Session`). Desconocido, de otra
+  clínica, caducado, usado, anulado o bloqueado responden igual: 404
+  «Enlace no válido». Los pasos del paciente se auditan sin actor y con
+  origen `LINK` en la misma transacción.
+- **Pendiente**: el PDF firmado al paciente (no hay generación de PDF en el
+  servidor; la página pública ofrece imprimir/guardar la copia al firmar).
+
 ## Flujo del paciente en la clínica (DX-200)
 
 - **Estados nuevos** de la cita: `ARRIVED` (llegó, en espera), `IN_CHAIR`
