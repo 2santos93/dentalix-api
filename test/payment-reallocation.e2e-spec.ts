@@ -297,9 +297,10 @@ describe('Reasignación de la imputación de un abono (DX-051, e2e)', () => {
 
     // Aparece más saldo por cubrir y el plan se reparte: el abono fijado no
     // vuelve a llenarse.
-    await addItem(planId, 50, 'DONE');
+    // (DX-054: un ítem DONE ya no cambia de precio; se encarece uno aceptado.)
+    const accepted = await addItem(planId, 50);
     await api()
-      .patch(`/treatment-plans/${planId}/items/${done}`, { price: 120 })
+      .patch(`/treatment-plans/${planId}/items/${accepted}`, { price: 120 })
       .expect(200);
     expect(await rowsOf(paymentId)).toEqual({});
     expect(

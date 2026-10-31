@@ -47,6 +47,7 @@ import {
   normalizePaidAt,
   type PreparedPaymentLine,
 } from './record-payment.use-case';
+import { round2 } from '../../../../shared/money/money';
 
 /** Una forma de pago del cobro: su medio, su moneda, su importe, su referencia. */
 export interface SplitPaymentLineInput {
@@ -79,8 +80,6 @@ export interface SplitPaymentResult {
   total: number | null;
   payments: Payment[];
 }
-
-const round2 = (value: number): number => Math.round(value * 100) / 100;
 
 /**
  * DX-390: un cobro dividido en varias formas de pago (2–5) con UN recibo. Cada
@@ -140,7 +139,7 @@ export class RecordSplitPaymentUseCase {
       }
       currencies.push(await this.recordPayment.validCurrency(line));
     }
-    const paidAt = normalizePaidAt(input.paidAt);
+    const paidAt = this.recordPayment.checkedPaidAt(input.paidAt);
 
     const plan = await this.getTreatmentPlan.execute(treatmentPlanId);
     if (!isPlanBillable(plan.status)) {
@@ -299,6 +298,15 @@ export class RecordSplitPaymentUseCase {
       this.logger.warn({
         event: 'payment_receipt.balance_unavailable',
         error: errorName(error),
+      });
+      return null;
+    }
+    // DX-054: proveedor de tasas fuera de plazo → `paid` previo incompleto:
+    // ni guarda de exceso ni saldo en el recibo (como un saldo ilegible).
+    if (before.rateProviderTimedOut) {
+      this.logger.warn({
+        event: 'payment_receipt.balance_unavailable',
+        error: 'RateProviderTimedOut',
       });
       return null;
     }

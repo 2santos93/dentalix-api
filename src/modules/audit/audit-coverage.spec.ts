@@ -48,6 +48,8 @@ import { CancellationPolicyController } from '../cancellation-policies/presentat
 import { CancellationFeeController } from '../cancellation-fees/presentation/cancellation-fee.controller';
 import { DiscountReportController } from '../discounts/presentation/discount-report.controller';
 import { ProductionByProcedureController } from '../reports/presentation/production-by-procedure.controller';
+import { ClosingQueueController } from '../closing-queue/presentation/closing-queue.controller';
+import { ContingencyAgendaController } from '../contingency-agenda/presentation/contingency-agenda.controller';
 import { CollectionsController } from '../collections/presentation/collections.controller';
 import { CashSessionsController } from '../cash-sessions/presentation/cash-sessions.controller';
 import { ScheduleBlocksController } from '../schedule-blocks/presentation/schedule-blocks.controller';
@@ -1135,6 +1137,26 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'TREATMENT_PLAN_ITEM',
     reason: 'PRODUCTION_REPORT',
   },
+  // DX-439: «Pendiente de cerrar» lleva los nombres de muchos pacientes.
+  'GET /closing-queue': {
+    action: 'VIEW',
+    resource: 'APPOINTMENT',
+    reason: 'CLOSING_QUEUE',
+  },
+  // DX-339: agenda de contingencia (PDF con nombres y teléfonos de los
+  // pacientes de hoy y mañana de la sede): cada descarga, con la sede.
+  'GET /locations/:locationId/contingency-agenda': {
+    action: 'EXPORT',
+    resource: 'LOCATION',
+    resourceId: { param: 'locationId' },
+    reason: 'CONTINGENCY_AGENDA_DOWNLOADED',
+  },
+  'GET /locations/:locationId/contingency-agenda/nightly/pdf': {
+    action: 'EXPORT',
+    resource: 'LOCATION',
+    resourceId: { param: 'locationId' },
+    reason: 'CONTINGENCY_AGENDA_NIGHTLY_DOWNLOADED',
+  },
   // DX-150: cobranza. La nota se audita sin su texto (solo los nombres de los
   // campos); el cambio de estado del compromiso lo audita SettlePaymentPromises.
   'POST /patients/:id/collection-notes': {
@@ -1435,6 +1457,9 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // DX-200: ARRIVAL_UNDONE con el estado al que vuelve.
   'POST /appointments/:id/undo-arrival':
     'patient-flow.use-case.spec.ts y patient-flow.e2e-spec.ts',
+  // DX-470: WALK_IN_PATIENT, WALK_IN_ARRIVAL y WALK_IN_OVERBOOK en la misma
+  // transacción que el alta y la cita (todo o nada).
+  'POST /appointments/walk-in': 'walk-in.int-spec.ts y walk-in.e2e-spec.ts',
   // Adelantar al hueco: APPOINTMENT_MOVED, como cualquier reagendado.
   'PATCH /appointments/:id/opening': 'update-appointment.use-case.spec.ts',
   // Lista de espera: WAITLIST_MANUAL, WAITLIST_DISMISSED y WAITLIST_SCHEDULED.
@@ -1536,6 +1561,11 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
     'platform-mfa.use-case.spec.ts y staff-access-audit.e2e-spec.ts',
   'POST /platform/mfa/enrollment/confirm':
     'platform-mfa.use-case.spec.ts y staff-access-audit.e2e-spec.ts',
+  // DX-439: CREATE CLOSING_QUEUE_DISMISSAL (CLOSING_QUEUE_DISMISSED) en la
+  // transacción del descarte, con la sección y el código del motivo y la cita
+  // (y el ítem) en `params`; nunca el texto de «Otro».
+  'POST /closing-queue/dismissals':
+    'closing-queue.use-cases.spec.ts y closing-queue.e2e-spec.ts',
 };
 
 /**
@@ -1664,6 +1694,8 @@ const CONTROLLERS: Type[] = [
   CancellationFeeController,
   DiscountReportController,
   ProductionByProcedureController,
+  ClosingQueueController,
+  ContingencyAgendaController,
   CollectionsController,
   CashSessionsController,
   ExpenseReportsController,

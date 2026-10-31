@@ -2,6 +2,7 @@ import {
   AppointmentStatus,
   CancellationByKind,
   CancellationReasonCode,
+  TriageFlag,
 } from '@prisma/client';
 import type { AppointmentTypeSummary } from '../../../appointment-types/domain/entities/appointment-type.entity';
 import type { HourCycle } from '../../../../shared/format/regional-format';
@@ -79,6 +80,17 @@ export interface Appointment {
   noShowMarkedAt: Date | null;
   /** DX-279: versión de la política comunicada al paciente (DX-291; hoy null). */
   policyVersionId: string | null;
+  /**
+   * DX-470: señales y nota de triaje de recepción (datos de salud). Solo las
+   * devuelven GET /appointments/:id y el panel «En clínica»; la agenda, las
+   * vistas públicas y los recordatorios no.
+   */
+  triageFlags: TriageFlag[];
+  triageNote: string | null;
+  /** DX-470: nació en «Atender sin cita». */
+  walkIn: boolean;
+  /** DX-470: sobrecupo anotado (no ocupa el hueco del profesional). */
+  overbooked: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -108,6 +120,12 @@ export interface AppointmentWriteResult extends Appointment {
    * intervalo mínimo de la visita siguiente de cada plan afectado.
    */
   completedExit?: CompletedExit;
+  /**
+   * DX-446: la cita se agendó o movió a un hueco reservado saltándose la
+   * reserva (con permiso y motivo): los bloques y el motivo (este en
+   * `appointment_reserved_overrides`, nunca en `audit_event`). Ausente en cualquier otro caso.
+   */
+  reservedOverride?: { blockIds: string[]; reason: string };
 }
 
 /** Un tratamiento de la cita reservado en otra cita (DX-273). */

@@ -100,12 +100,33 @@ describe('enlace de la oferta de hueco (DX-435)', () => {
       expect(s('NO_ANSWER')).toBe('EXPIRED');
     });
 
+    it('DX-461: paciente archivado → como caducada, sea cual sea el resultado', () => {
+      for (const outcome of [
+        'PENDING',
+        'ACCEPTED',
+        'DECLINED',
+        'TAKEN_BY_OTHER',
+      ] as const) {
+        expect(
+          publicSlotOfferState(
+            { outcome, expiresAt: slotStart, patientArchived: true },
+            now,
+            false,
+          ),
+        ).toBe('EXPIRED');
+      }
+    });
+
     it('cada estado tiene su mensaje en español', () => {
       expect(SLOT_OFFER_MESSAGES.TAKEN).toBe('Este hueco ya se ocupó');
       expect(SLOT_OFFER_MESSAGES.UNAVAILABLE).toBe(
         'Este hueco ya no está disponible',
       );
-      expect(SLOT_OFFER_MESSAGES.EXPIRED).toBe('Esta oferta caducó');
+      // DX-461: caducada, anulada (paciente archivado) o dada por perdida
+      // dicen lo mismo: sin pistas de cuál de ellas es.
+      expect(SLOT_OFFER_MESSAGES.EXPIRED).toBe(
+        'Este enlace ya no está disponible',
+      );
     });
   });
 

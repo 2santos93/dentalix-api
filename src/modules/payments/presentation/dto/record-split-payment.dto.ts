@@ -94,7 +94,8 @@ export class RecordSplitPaymentDto {
     example: '2026-10-30',
     description:
       'El día civil `YYYY-MM-DD` (o un instante con `Z` o desfase) de TODO ' +
-      'el cobro, como en un abono (DX-097).',
+      'el cobro, como en un abono (DX-097). DX-054: 400 si va a más de ' +
+      '24 h en el futuro.',
   })
   @IsDateString()
   paidAt!: string;

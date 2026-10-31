@@ -1,4 +1,5 @@
 import { generateSchedule } from './generate-schedule';
+import { round2 } from '../../../../shared/money/money';
 
 describe('generateSchedule', () => {
   const base = {
@@ -22,7 +23,7 @@ describe('generateSchedule', () => {
     const rows = generateSchedule({ ...base, downPayment: 200 });
     // (1200 - 200) / 12 -> last row absorbs the cent remainder
     const sum = rows.reduce((s, r) => s + r.amount, 0);
-    expect(Math.round(sum * 100) / 100).toBe(1000);
+    expect(round2(sum)).toBe(1000);
   });
 
   it('puts the rounding remainder on the LAST installment', () => {
@@ -34,7 +35,7 @@ describe('generateSchedule', () => {
     // 100 / 3 -> 33.33, 33.33, 33.34
     expect(rows.map((r) => r.amount)).toEqual([33.33, 33.33, 33.34]);
     const sum = rows.reduce((s, r) => s + r.amount, 0);
-    expect(Math.round(sum * 100) / 100).toBe(100);
+    expect(round2(sum)).toBe(100);
   });
 
   it('spaces MONTHLY installments one calendar month apart from startDate', () => {

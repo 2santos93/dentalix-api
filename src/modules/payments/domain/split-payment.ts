@@ -1,3 +1,4 @@
+import { toCents } from '../../../shared/money/money';
 /**
  * DX-390: cobro dividido en varias formas de pago con un solo recibo. Cada
  * línea es un abono con su medio, su moneda, su importe y su referencia; el
@@ -37,8 +38,6 @@ export const SPLIT_PAYMENT_BALANCE_CHANGED = 'SPLIT_PAYMENT_BALANCE_CHANGED';
 
 export const SPLIT_PAYMENT_BALANCE_CHANGED_MESSAGE =
   'Lo pendiente del plan cambió mientras se registraba el cobro (entró otro abono). No se registró nada: revisa el total y vuelve a intentarlo.';
-
-const toCents = (value: number): number => Math.round(value * 100);
 
 /**
  * El total del cobro en la moneda del plan: la suma de las líneas ya

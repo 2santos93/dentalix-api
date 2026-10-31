@@ -1059,3 +1059,87 @@ describe('sanitizeAuditMetadata — tasa de respaldo de un día sin tasa (DX-402
     }
   });
 });
+
+describe('sanitizeAuditMetadata — descarte de «Pendiente de cerrar» (DX-439)', () => {
+  it('conserva la sección y el código del motivo', () => {
+    const closingQueueDismissal = {
+      section: 'TREATMENT',
+      reasonCode: 'PATIENT_DECLINED_TODAY',
+    };
+    expect(sanitizeAuditMetadata({ closingQueueDismissal })).toEqual({
+      closingQueueDismissal,
+    });
+  });
+
+  it('descarta el descarte entero con el texto del motivo o códigos ajenos', () => {
+    for (const closingQueueDismissal of [
+      { section: 'OUTCOME', reasonCode: 'OTHER', reasonText: 'Se fue' },
+      { section: 'OTRA', reasonCode: 'OTHER' },
+      { section: 'OUTCOME', reasonCode: 'Se fue' },
+      'OUTCOME',
+    ]) {
+      expect(sanitizeAuditMetadata({ closingQueueDismissal })).toEqual({});
+    }
+  });
+});
+
+describe('sanitizeAuditMetadata — hueco reservado saltado (DX-446)', () => {
+  const blockId = '0190f2a4-7b1c-7d2e-8f3a-123456789abc';
+  const overrideId = '0190f2a4-7b1c-7d2e-8f3a-cba987654321';
+
+  it('guarda la fila del override y los bloques', () => {
+    expect(
+      sanitizeAuditMetadata({
+        reservedSlotOverride: { overrideId, blockIds: [blockId] },
+      }),
+    ).toEqual({
+      reservedSlotOverride: { overrideId, blockIds: [blockId] },
+    });
+  });
+
+  it('el motivo (texto libre), sin uuids o con claves extra, no queda nada', () => {
+    for (const reservedSlotOverride of [
+      { overrideId, blockIds: [blockId], reason: 'Dolor agudo' },
+      { overrideId, blockIds: ['no-uuid'] },
+      { overrideId, blockIds: [] },
+      { overrideId: 'no-uuid', blockIds: [blockId] },
+      { blockIds: [blockId] },
+      { overrideId, blockIds: [blockId], patient: 'Ana' },
+    ]) {
+      expect(sanitizeAuditMetadata({ reservedSlotOverride })).toEqual({});
+    }
+  });
+});
+
+describe('sanitizeAuditMetadata — enlaces anulados al archivar (DX-461)', () => {
+  const revokedLinks = {
+    slotOffers: 1,
+    consentSignatures: 2,
+    budgetSignatures: 0,
+    signedPdfCopies: 1,
+    anamnesis: 3,
+  };
+
+  it('conserva el número de enlaces anulados por tipo', () => {
+    expect(
+      sanitizeAuditMetadata({
+        reason: 'PATIENT_ARCHIVED_LINKS_REVOKED',
+        revokedLinks,
+      }),
+    ).toEqual({ reason: 'PATIENT_ARCHIVED_LINKS_REVOKED', revokedLinks });
+  });
+
+  it('descarta el bloque entero con tokens, claves ajenas o números raros', () => {
+    for (const bad of [
+      { ...revokedLinks, token: 'abc' },
+      { ...revokedLinks, slotOffers: -1 },
+      { ...revokedLinks, anamnesis: 1.5 },
+      { ...revokedLinks, consentSignatures: '2' },
+      { ...revokedLinks, signedPdfCopies: 1_000_001 },
+      { slotOffers: 1 },
+      'muchos',
+    ]) {
+      expect(sanitizeAuditMetadata({ revokedLinks: bad })).toEqual({});
+    }
+  });
+});

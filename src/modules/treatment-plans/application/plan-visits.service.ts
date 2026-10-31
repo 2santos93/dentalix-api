@@ -261,15 +261,24 @@ export class PlanVisitsService {
             ).start,
           },
         }));
+        // Mismo filtro para la página y para el total (Inicio, I1): el total
+        // no depende del cursor ni del tamaño de página.
+        const where: Prisma.TreatmentPlanWhereInput = {
+          status: 'ACCEPTED',
+          deletedAt: null,
+          patient: { deletedAt: null },
+          OR: ageScope,
+          ...(scopes ? { acceptedLocationId: { in: scopes } } : {}),
+          items: { some: pending },
+        };
+        // Sin ninguna sede con zona no hay plan que cumpla `OR: []`.
+        const total = ageScope.length
+          ? await tx.treatmentPlan.count({ where })
+          : 0;
         const rows = await tx.treatmentPlan.findMany({
           where: {
-            status: 'ACCEPTED',
-            deletedAt: null,
-            patient: { deletedAt: null },
-            OR: ageScope,
-            ...(scopes ? { acceptedLocationId: { in: scopes } } : {}),
+            ...where,
             ...(input.cursor ? { id: { gt: input.cursor } } : {}),
-            items: { some: pending },
           },
           orderBy: { id: 'asc' },
           take: limit + 1,
@@ -389,6 +398,7 @@ export class PlanVisitsService {
           items,
           nextCursor: rows.length > limit ? page[page.length - 1].id : null,
           limit,
+          total,
         };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },

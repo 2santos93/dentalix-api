@@ -323,6 +323,16 @@ export class PrismaMedicalHistorySubmissionRepository implements MedicalHistoryS
   submit(input: SubmitInput): Promise<SubmitOutcome> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
+      // DX-461: primero el paciente vivo (FOR KEY SHARE), en el orden de
+      // archivar (paciente → envíos). Si no, este UPDATE bloquea el envío,
+      // archivar bloquea al paciente y espera el envío, y el INSERT de la
+      // autorización (FK al paciente) espera a archivar: deadlock. Así se
+      // espera al COMMIT de archivar y, archivado, no se escribe nada.
+      const live = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "patients"
+         WHERE "id" = ${input.patientId}::uuid AND "deletedAt" IS NULL
+         FOR KEY SHARE`;
+      if (live.length === 0) return 'GONE';
       // Un solo uso: la transición es condicional. Un segundo POST (o uno
       // después de caducar o de anularse) no encuentra la fila en
       // PENDING_PATIENT y no escribe nada.

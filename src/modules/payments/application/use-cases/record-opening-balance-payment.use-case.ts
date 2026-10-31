@@ -6,6 +6,11 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { PAYMENT_REPOSITORY } from '../../domain/ports/payment-repository.port';
+import { PAYMENT_CLOCK, type PaymentClock } from './void-payment.use-case';
+import {
+  PAID_AT_IN_FUTURE_MESSAGE,
+  isPaidAtTooFarInFuture,
+} from '../../domain/paid-at-window';
 import type { PaymentRepository } from '../../domain/ports/payment-repository.port';
 import { Payment } from '../../domain/entities/payment.entity';
 import {
@@ -47,6 +52,9 @@ export class RecordOpeningBalancePaymentUseCase {
     private readonly whitelist: CurrencyWhitelist,
     // DX-377: medio del catálogo, referencia y aviso de referencia repetida.
     private readonly paymentMethodGate: PaymentMethodGate,
+    // DX-054: la fecha del abono no puede ir más de 24 h por delante.
+    @Inject(PAYMENT_CLOCK)
+    private readonly now: PaymentClock,
   ) {}
 
   async execute(
@@ -87,6 +95,9 @@ export class RecordOpeningBalancePaymentUseCase {
       throw new BadRequestException(`Unknown currency: ${currency}`);
     }
     const paidAt = normalizePaidAt(input.paidAt);
+    if (isPaidAtTooFarInFuture(paidAt, this.now())) {
+      throw new BadRequestException(PAID_AT_IN_FUTURE_MESSAGE);
+    }
 
     const balance = await this.repo.findOpeningBalance(openingBalanceId);
     if (!balance) {

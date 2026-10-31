@@ -210,6 +210,7 @@ describe('Adendas de la historia clínica (DX-038, e2e)', () => {
         .expect(400);
     });
 
+    // ISOLATION_COVERS: POST /patients/:patientId/clinical-entries/:entryId/addenda
     it('IDOR: evolución de otra clínica → 404, sin crear nada', async () => {
       await call(a, 'post', addendaPath(patientA, entryB.id), dentistA.token)
         .send({ reason: REASON, text: 'x' })
@@ -268,6 +269,7 @@ describe('Adendas de la historia clínica (DX-038, e2e)', () => {
       );
     });
 
+    // ISOLATION_COVERS: GET /patients/:patientId/clinical-entries/:entryId/addenda
     it('otra clínica no las ve (404)', async () => {
       await call(
         b,

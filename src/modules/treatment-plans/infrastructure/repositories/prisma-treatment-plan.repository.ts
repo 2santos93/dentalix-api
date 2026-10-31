@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -36,6 +37,7 @@ import {
   ItemAttributionChange,
   PERFORMER_NOT_AT_LOCATION_MESSAGE,
   PERFORMER_NOT_ATTENDING_MESSAGE,
+  DONE_APPOINTMENT_NOT_LINKED_MESSAGE,
   PERFORMED_LOCATION_NOT_FOUND_MESSAGE,
   PERFORMER_NOT_FOUND_MESSAGE,
   isAttendingRole,
@@ -522,6 +524,37 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
   }
 
   /**
+   * DX-439: la cita atendida desde la que se marca el ítem como realizado:
+   * viva, COMPLETED y con un vínculo vivo al ítem, FOR SHARE para que no
+   * cambie a mitad (bajo RLS la de otra clínica no existe). Su sede tiene que
+   * ser de las permitidas al usuario (DX-089, 403). Si no, 409.
+   */
+  private async doneAppointment(
+    tx: Prisma.TransactionClient,
+    appointmentId: string,
+    itemId: string,
+  ): Promise<{ locationId: string; start: Date }> {
+    const [appointment] = await tx.$queryRaw<
+      { locationId: string; start: Date }[]
+    >`
+      SELECT a."locationId", a."start"
+        FROM "appointments" a
+        JOIN "appointment_plan_items" ap
+          ON ap."tenantId" = a."tenantId" AND ap."appointmentId" = a."id"
+         AND ap."planItemId" = ${itemId}::uuid AND ap."deletedAt" IS NULL
+       WHERE a."tenantId" = ${this.requireTenantId()}::uuid
+         AND a."id" = ${appointmentId}::uuid
+         AND a."deletedAt" IS NULL
+         AND a."status" = 'COMPLETED'
+         FOR SHARE OF a`;
+    if (!appointment) {
+      throw new ConflictException(DONE_APPOINTMENT_NOT_LINKED_MESSAGE);
+    }
+    this.tenantContext.assertLocationAllowed(appointment.locationId);
+    return appointment;
+  }
+
+  /**
    * DX-050: columnas de la atribución. SET y CORRECT con profesional resuelven
    * su membresía viva en ESTA clínica (bajo RLS: la de otra clínica no
    * existe), FOR SHARE para que no se desactive a mitad; la FK compuesta
@@ -541,9 +574,16 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
       };
     }
     if (change.kind === 'SET') {
+      // DX-439: desde su cita atendida, la sede y la hora de la cita; si no,
       // DX-089: la sede del request (ya validada contra las permitidas) o la
-      // de escritura de la sesión.
-      const locationId = await this.tenantContext.writeLocationId(tx);
+      // de escritura de la sesión, y la hora del servidor.
+      const fromAppointment =
+        change.appointmentId !== undefined
+          ? await this.doneAppointment(tx, change.appointmentId, previous.id)
+          : null;
+      const locationId =
+        fromAppointment?.locationId ??
+        (await this.tenantContext.writeLocationId(tx));
       const membershipId = await resolvePerformer(
         tx,
         this.requireTenantId(),
@@ -554,7 +594,7 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
         performedById: change.performedById,
         performedByMembershipId: membershipId,
         performedLocationId: locationId,
-        completedAt: change.completedAt,
+        completedAt: fromAppointment?.start ?? change.completedAt,
       };
     }
     const data: Prisma.TreatmentPlanItemUncheckedUpdateInput = {};

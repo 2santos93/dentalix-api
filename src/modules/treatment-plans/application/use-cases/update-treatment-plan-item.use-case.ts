@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Inject,
   Injectable,
@@ -29,8 +30,13 @@ import {
   touchesDiscount,
   type DiscountActor,
 } from './item-discount';
-import { isClosedPlanItemChangeAllowed } from '../../domain/plan-status-machine';
 import {
+  DONE_ITEM_PRICE_LOCKED_MESSAGE,
+  isClosedPlanItemChangeAllowed,
+  isDoneItemPriceChange,
+} from '../../domain/plan-status-machine';
+import {
+  APPOINTMENT_ONLY_WHEN_MARKING_DONE_MESSAGE,
   decideAttribution,
   isAttributionCorrection,
 } from '../../domain/plan-item-attribution';
@@ -61,6 +67,11 @@ export interface UpdateTreatmentPlanItemInput {
    * atribuir uno «Sin atribuir» (con quién y cuándo).
    */
   performedLocationId?: string;
+  /**
+   * DX-439: al pasar a DONE desde «Pendiente de cerrar», la cita atendida que
+   * lleva el ítem: la sede y la fecha de realización son las suyas.
+   */
+  appointmentId?: string;
 }
 
 /** ¿La petición pone otro `discount` o cambia el motivo o su nota? (DX-204) */
@@ -169,9 +180,25 @@ export class UpdateTreatmentPlanItemUseCase {
         ) {
           assertPlanOpenForItems(plan);
         }
+        // DX-054: lo realizado no cambia de precio (ni al salir de DONE en la
+        // misma petición), con el ítem leído bloqueado.
+        if (isDoneItemPriceChange(item.status, item.price, patch.price)) {
+          throw new ConflictException(DONE_ITEM_PRICE_LOCKED_MESSAGE);
+        }
         // DX-050: con el ítem bloqueado, quién lo realizó, cuándo, y quién
         // puede cambiarlo (400/403 antes de escribir nada).
-        const attribution = decideAttribution(item, patch, actor, at);
+        const decided = decideAttribution(item, patch, actor, at);
+        // DX-439: la cita solo acompaña a un paso a DONE; el repositorio
+        // comprueba (con la cita bloqueada) que esté atendida y lleve el ítem.
+        if (patch.appointmentId !== undefined && decided?.kind !== 'SET') {
+          throw new BadRequestException(
+            APPOINTMENT_ONLY_WHEN_MARKING_DONE_MESSAGE,
+          );
+        }
+        const attribution =
+          decided?.kind === 'SET' && patch.appointmentId !== undefined
+            ? { ...decided, appointmentId: patch.appointmentId }
+            : decided;
         // Plan aceptado con firma (DX-012): lo firmado (precio, descuento,
         // caras, notas) no cambia y el ítem no vuelve a propuesto; avanzar el
         // tratamiento (aceptado <-> realizado) sí.
@@ -199,6 +226,7 @@ export class UpdateTreatmentPlanItemUseCase {
           performedById: _performedById,
           completedAt: _completedAt,
           performedLocationId: _performedLocationId,
+          appointmentId: _appointmentId,
           ...rest
         } = patch;
         const repoPatch: UpdateTreatmentPlanItemRepoInput = rest;

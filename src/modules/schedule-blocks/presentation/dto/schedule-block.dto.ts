@@ -8,15 +8,41 @@ import {
   IsBoolean,
   IsDateString,
   IsEnum,
+  IsInt,
   IsOptional,
   IsString,
   IsUUID,
+  Max,
   MaxLength,
+  Min,
+  ValidateIf,
 } from 'class-validator';
 import { BLOCK_NOTE_MAX_LENGTH } from '../../domain/schedule-block-rules';
+import { MAX_RESERVED_TYPES } from '../../domain/reserved-slot';
 
 const KIND_DESCRIPTION =
-  'VACATION (vacaciones), MEETING (reunión o congreso), LUNCH (almuerzo), OTHER.';
+  'VACATION (vacaciones), MEETING (reunión o congreso), LUNCH (almuerzo), OTHER, RESERVED (DX-446: hueco reservado para `reservedForTypeIds`; exige sede).';
+const RESERVED_TYPES_DESCRIPTION = `DX-446: tipos de cita que SÍ se pueden agendar en un bloque RESERVED (1–${MAX_RESERVED_TYPES}, de esta clínica y activos: 404 si alguno es ajeno, 400 si está desactivado). Vacío o ausente en los demás tipos.`;
+const RELEASE_DESCRIPTION =
+  'DX-446: «Liberar a partir de», minutos desde las 00:00 de la hora de la SEDE del día del bloque (0–1439; 660 = 11:00), antes de su inicio. Pasada esa hora (reloj del servidor) el hueco admite cualquier tipo. null = no se libera. Solo en RESERVED.';
+
+/** DX-446: un tipo de cita reservado, como lo pinta la agenda. */
+export class ReservedTypeRefDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty()
+  name!: string;
+
+  @ApiProperty({ pattern: '^#[0-9A-F]{6}$' })
+  color!: string;
+
+  @ApiProperty()
+  isUrgent!: boolean;
+
+  @ApiProperty()
+  active!: boolean;
+}
 
 /** Respuesta de los endpoints de bloqueos (DX-122). */
 export class ScheduleBlockDto {
@@ -69,6 +95,22 @@ export class ScheduleBlockDto {
   })
   note!: string | null;
 
+  @ApiProperty({
+    type: [String],
+    format: 'uuid',
+    description: RESERVED_TYPES_DESCRIPTION,
+  })
+  reservedForTypeIds!: string[];
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    minimum: 0,
+    maximum: 1439,
+    description: RELEASE_DESCRIPTION,
+  })
+  releaseAtMinute!: number | null;
+
   @ApiProperty({ type: String, format: 'uuid', nullable: true })
   createdById!: string | null;
 
@@ -77,6 +119,31 @@ export class ScheduleBlockDto {
 
   @ApiProperty({ format: 'date-time' })
   updatedAt!: Date;
+}
+
+/** DX-446: un bloque del listado de la agenda (con lo que pinta un reservado). */
+export class ScheduleBlockListItemDto extends ScheduleBlockDto {
+  @ApiProperty({
+    type: [ReservedTypeRefDto],
+    description:
+      'DX-446: nombre y color de los tipos de `reservedForTypeIds` (vivos de esta clínica).',
+  })
+  reservedForTypes!: ReservedTypeRefDto[];
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description:
+      'DX-446: instante de liberación del día del bloque (hora de la sede), o null.',
+  })
+  releaseAt!: Date | null;
+
+  @ApiProperty({
+    description:
+      'DX-446: true si ya pasó `releaseAt` según el reloj del servidor: la agenda muestra «Libre desde HH:MM».',
+  })
+  released!: boolean;
 }
 
 export class CreateScheduleBlockDto {
@@ -130,6 +197,32 @@ export class CreateScheduleBlockDto {
   note?: string;
 
   @ApiPropertyOptional({
+    type: [String],
+    format: 'uuid',
+    maxItems: MAX_RESERVED_TYPES,
+    description: RESERVED_TYPES_DESCRIPTION,
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_RESERVED_TYPES)
+  @IsUUID('all', { each: true })
+  reservedForTypeIds?: string[];
+
+  @ApiPropertyOptional({
+    type: Number,
+    nullable: true,
+    minimum: 0,
+    maximum: 1439,
+    description: RELEASE_DESCRIPTION,
+  })
+  @IsOptional()
+  @ValidateIf((_o, value) => value !== null)
+  @IsInt()
+  @Min(0)
+  @Max(1439)
+  releaseAtMinute?: number | null;
+
+  @ApiPropertyOptional({
     description:
       'Si hay citas dentro del rango la API responde 409 (no las toca). Con true, se crea igualmente.',
   })
@@ -171,6 +264,32 @@ export class UpdateScheduleBlockDto {
   @IsString()
   @MaxLength(BLOCK_NOTE_MAX_LENGTH)
   note?: string | null;
+
+  @ApiPropertyOptional({
+    type: [String],
+    format: 'uuid',
+    maxItems: MAX_RESERVED_TYPES,
+    description: RESERVED_TYPES_DESCRIPTION,
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_RESERVED_TYPES)
+  @IsUUID('all', { each: true })
+  reservedForTypeIds?: string[];
+
+  @ApiPropertyOptional({
+    type: Number,
+    nullable: true,
+    minimum: 0,
+    maximum: 1439,
+    description: RELEASE_DESCRIPTION,
+  })
+  @IsOptional()
+  @ValidateIf((_o, value) => value !== null)
+  @IsInt()
+  @Min(0)
+  @Max(1439)
+  releaseAtMinute?: number | null;
 
   @ApiPropertyOptional({
     description: 'Igual que al crear, si el rango cambia.',

@@ -197,6 +197,8 @@ describe('Indicaciones postoperatorias por enlace público (e2e, DX-222)', () =>
     expect((await deliveryRow()).firstOpenedAt).toBeNull();
   });
 
+  // ISOLATION_COVERS: GET /public/post-op-instructions/:token
+  // ISOLATION_COVERS: POST /public/post-op-instructions/:token/opened
   it('el token de A en el host de B → 404, igual que uno inventado', async () => {
     const res = await publicGet(clinicB.host, token).expect(404);
     expect((res.body as { message: string }).message).toBe(

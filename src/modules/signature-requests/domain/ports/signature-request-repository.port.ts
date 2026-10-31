@@ -268,7 +268,8 @@ export interface SignatureRequestRepository {
    * que hay AHORA y aplica en la misma transacción lo que devuelva (cambios,
    * eventos de auditoría y, al firmar, el consentimiento). Serializa los
    * intentos sobre un mismo enlace: nunca se evalúan más de 5 códigos.
-   * `null` si la fila no existe (o es de otra clínica).
+   * `null` si la fila no existe (o es de otra clínica) o, DX-461, si el
+   * paciente está archivado.
    */
   withLockedRequest<T>(
     id: string,

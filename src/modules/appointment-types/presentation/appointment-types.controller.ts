@@ -93,6 +93,7 @@ export class AppointmentTypesController {
         durationMinutes: dto.durationMinutes,
         color: dto.color,
         active: dto.active,
+        isUrgent: dto.isUrgent,
       },
       req.user.sub,
     );
@@ -117,6 +118,7 @@ export class AppointmentTypesController {
         durationMinutes: dto.durationMinutes,
         color: dto.color,
         active: dto.active,
+        isUrgent: dto.isUrgent,
       },
       req.user.sub,
     );

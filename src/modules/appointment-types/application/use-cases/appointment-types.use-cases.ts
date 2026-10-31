@@ -23,6 +23,8 @@ export interface AppointmentTypeInput {
   durationMinutes: number;
   color: string;
   active?: boolean;
+  /** DX-446: tipo de urgencia. */
+  isUrgent?: boolean;
 }
 
 function assertValid(error: string | null): void {
@@ -33,7 +35,10 @@ function assertValid(error: string | null): void {
 function normalize(
   input: Partial<AppointmentTypeInput>,
 ): Partial<AppointmentTypeInput> {
-  const out: Partial<AppointmentTypeInput> = { active: input.active };
+  const out: Partial<AppointmentTypeInput> = {
+    active: input.active,
+    isUrgent: input.isUrgent,
+  };
   if (input.name !== undefined) {
     assertValid(appointmentTypeNameError(input.name));
     out.name = input.name.trim();
@@ -79,6 +84,7 @@ export class CreateAppointmentTypeUseCase {
       durationMinutes: valid.durationMinutes,
       color: valid.color,
       active: input.active ?? true,
+      isUrgent: input.isUrgent ?? false,
       createdById,
     });
   }

@@ -215,6 +215,8 @@ describe('Baja de recordatorios (e2e, DX-128)', () => {
       expect(row.reminderOptOutAt).toBeNull();
     });
 
+    // ISOLATION_COVERS: GET /public/reminder-opt-outs/:token
+    // ISOLATION_COVERS: POST /public/reminder-opt-outs/:token
     it('en el host de otra clínica, o con un token inventado, 404', async () => {
       await pub(
         api().get(`/api/v1/public/reminder-opt-outs/${token}`),
@@ -481,6 +483,7 @@ describe('Baja de recordatorios (e2e, DX-128)', () => {
       expect(reminder.skipReason).toBe('OPTED_OUT');
     });
 
+    // ISOLATION_COVERS: GET /patients/:id/communication/opt-out-warnings
     it('DX214: móvil compartido por6 no desactiva ninguno; por2 desactiva ambos', async () => {
       const six: string[] = [];
       for (let i = 0; i < 6; i++)

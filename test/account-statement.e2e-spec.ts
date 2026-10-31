@@ -508,6 +508,7 @@ describe('Estado de cuenta — GET /patients/:patientId/account-statement (e2e)'
     }
   });
 
+  // ISOLATION_COVERS: GET /patients/:patientId/account-statement
   it('aísla por clínica: otra clínica recibe 404, igual que un UUID inexistente', async () => {
     await as(clinicB)
       .get(`/patients/${patientId}/account-statement`)

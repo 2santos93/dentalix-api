@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsOptional, Matches } from 'class-validator';
+import { TriageFlag } from '@prisma/client';
 import { IN_CLINIC_STATUSES } from '../../domain/patient-flow';
 import { MedicalAlertFlagsDto } from '../../../medical-history/presentation/dto/medical-alerts.dto';
 import { PlanItemReservedElsewhereDto } from './appointment.dto';
@@ -21,7 +22,10 @@ export class InClinicQueryDto {
   date?: string;
 }
 
-/** Una persona del panel: nombre y horas, sin datos clínicos. */
+/**
+ * Una persona del panel: nombre y horas, sin historia clínica. Desde DX-470,
+ * también la urgencia y su triaje de recepción.
+ */
 export class InClinicItemDto {
   @ApiProperty({ format: 'uuid' })
   appointmentId!: string;
@@ -91,6 +95,33 @@ export class InClinicItemDto {
       'DX-247: la misma alerta médica que la tarjeta de la agenda (solo banderas).',
   })
   medicalAlerts!: MedicalAlertFlagsDto;
+  @ApiProperty({
+    description:
+      'DX-470: la cita es de un tipo de urgencia (insignia «Urgencia» en el panel).',
+  })
+  urgent!: boolean;
+
+  @ApiProperty({ description: 'DX-470: llegó sin cita («Atender sin cita»).' })
+  walkIn!: boolean;
+
+  @ApiProperty({ description: 'DX-470: atendida en sobrecupo.' })
+  overbooked!: boolean;
+
+  @ApiProperty({
+    enum: TriageFlag,
+    enumName: 'TriageFlag',
+    isArray: true,
+    description:
+      'DX-470: señales de triaje de recepción. Solo para el personal con acceso a la sede del panel.',
+  })
+  triageFlags!: TriageFlag[];
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'DX-470: nota de triaje (≤ 200).',
+  })
+  triageNote!: string | null;
 }
 
 export class InClinicViewDto {

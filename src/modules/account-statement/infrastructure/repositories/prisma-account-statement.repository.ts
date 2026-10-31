@@ -13,6 +13,7 @@ import {
   catalogOf,
   methodRefOf,
 } from '../../../payment-methods/domain/method-catalog';
+import { round2 } from '../../../../shared/money/money';
 
 // Mismo "facturable" que GetPlanBalanceUseCase: un ítem PROPOSED aún no se debe.
 const BILLABLE_ITEM_STATUSES: TreatmentPlanItemStatus[] = [
@@ -410,8 +411,7 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
           const list = paidByPlan.get(row.treatmentPlanId) ?? [];
           const amount = row._sum.amount?.toNumber() ?? 0;
           const same = list.find((p) => p.currency === row.currency);
-          if (same)
-            same.amount = Math.round((same.amount + amount) * 100) / 100;
+          if (same) same.amount = round2(same.amount + amount);
           else list.push({ currency: row.currency, amount });
           paidByPlan.set(row.treatmentPlanId, list);
         }

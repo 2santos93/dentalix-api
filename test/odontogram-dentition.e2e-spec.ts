@@ -459,10 +459,12 @@ describe('Odontograma fase 2: dentición, anulación y asOf (DX-120, e2e)', () =
   });
 
   describe('aislamiento entre clínicas (B sobre el paciente y el registro de A)', () => {
+    // ISOLATION_COVERS: GET /patients/:patientId/dentition
     it('B no ve la dentición de A: 404', async () => {
       await call(b, 'get', `/patients/${child}/dentition`).expect(404);
     });
 
+    // ISOLATION_COVERS: POST /patients/:patientId/dentition-events
     it('B no cambia la dentición de A: 404, sin escribir', async () => {
       const before = await raw.patientDentitionEvent.count();
       await call(b, 'post', `/patients/${child}/dentition-events`)
@@ -471,6 +473,7 @@ describe('Odontograma fase 2: dentición, anulación y asOf (DX-120, e2e)', () =
       expect(await raw.patientDentitionEvent.count()).toBe(before);
     });
 
+    // ISOLATION_COVERS: POST /patients/:patientId/tooth-records/:recordId/void
     it('B no anula un registro de A: 404', async () => {
       const target = await raw.toothRecord.findFirstOrThrow({
         where: { tenantId: a.tenantId, toothNumber: '55' },

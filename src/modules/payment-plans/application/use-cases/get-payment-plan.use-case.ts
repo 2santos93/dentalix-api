@@ -13,6 +13,7 @@ import {
   ScheduleTramo,
 } from '../schedule/derive-statuses';
 import { Inject } from '@nestjs/common';
+import { round2 } from '../../../../shared/money/money';
 
 export interface DerivedInstallmentView {
   sequence: number;
@@ -48,10 +49,6 @@ export interface GetPaymentPlanResult {
   overdueCount: number;
   overdueAmount: number;
   isFullyPaid: boolean;
-}
-
-function round2(value: number): number {
-  return Math.round(value * 100) / 100;
 }
 
 // Injectable clock so specs pass a fixed "today"; production uses the real one.

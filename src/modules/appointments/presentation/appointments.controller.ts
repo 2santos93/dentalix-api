@@ -6,6 +6,7 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Inject,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -51,6 +52,12 @@ import {
 } from '../../medical-history/domain/medical-alert-flags';
 import { OpeningsDto, OpeningsQueryDto } from './dto/openings.dto';
 import { InClinicQueryDto, InClinicViewDto } from './dto/in-clinic.dto';
+import { CreateWalkInDto, WalkInResultDto } from './dto/walk-in.dto';
+import {
+  CreateWalkInUseCase,
+  type WalkInResult,
+} from '../application/use-cases/create-walk-in.use-case';
+import { WALK_IN_MESSAGES, WALK_IN_ROLES } from '../domain/walk-in';
 import {
   ListInClinicUseCase,
   type InClinicItem,
@@ -98,6 +105,10 @@ import { auditRequestContext } from '../../audit/presentation/audit-request-cont
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import type { AppointmentAuditContext } from '../application/use-cases/update-appointment.use-case';
+import {
+  RESERVED_OVERRIDE_REPOSITORY,
+  type ReservedOverrideRepository,
+} from '../domain/ports/reserved-override-repository.port';
 
 interface AuthenticatedRequest {
   user: JwtPayload;
@@ -132,6 +143,11 @@ export class AppointmentsController {
     private readonly listInClinic: ListInClinicUseCase,
     // DX-279: insignia «inasistencias · cancelaciones tardías» de las tarjetas.
     private readonly attendanceFlags: PatientAttendanceFlags,
+    // DX-446: motivo de «Agendar igualmente» fuera de la auditoría.
+    @Inject(RESERVED_OVERRIDE_REPOSITORY)
+    private readonly reservedOverrides: ReservedOverrideRepository,
+    // DX-470: «Atender sin cita».
+    private readonly createWalkIn: CreateWalkInUseCase,
   ) {}
 
   /** Quién escribe, para los `audit_event` de los casos de uso (DX-121/122). */
@@ -139,6 +155,31 @@ export class AppointmentsController {
     req: AuthenticatedRequest,
   ): AppointmentAuditContext | undefined {
     return auditRequestContext(req, this.tenantContext);
+  }
+
+  /**
+   * DX-446: cita agendada o movida saltándose un hueco reservado. El motivo
+   * va a `appointment_reserved_overrides` y el `audit_event` (aparte del
+   * evento HTTP genérico) solo lleva el id de esa fila y los bloques: nada de
+   * texto libre en la auditoría (DX-009). En la respuesta, `reservedOverride`.
+   */
+  private async auditReservedOverride(
+    appointment: AppointmentWriteResult,
+    action: 'CREATE' | 'UPDATE',
+    ctx: AppointmentAuditContext | undefined,
+  ): Promise<void> {
+    if (!appointment.reservedOverride || !ctx) return;
+    await this.reservedOverrides.record(
+      {
+        appointmentId: appointment.id,
+        patientId: appointment.patientId,
+        locationId: appointment.locationId,
+        blockIds: appointment.reservedOverride.blockIds,
+        reason: appointment.reservedOverride.reason,
+        action,
+      },
+      ctx,
+    );
   }
 
   /** La escritura explícita de vínculos es distinta de la traza HTTP genérica. */
@@ -185,14 +226,14 @@ export class AppointmentsController {
   })
   @ApiConflictResponse({
     description:
-      'Solape con otra cita, o el horario está bloqueado para ese profesional o la sede (DX-122)',
+      'Solape con otra cita, el horario está bloqueado para ese profesional o la sede (DX-122), o es un hueco reservado para otros tipos y aún sin liberar (DX-446: `code: RESERVED_SLOT`, `canOverride` dice si quien agenda puede reintentar con `overrideReason`)',
   })
   @ApiUnprocessableEntityResponse({
     description: 'Fuera del horario de atención de la sede',
   })
   @ApiForbiddenResponse({
     description:
-      'DX-210: `wantsEarlier` solo lo marcan RECEPTION, DENTIST y ADMIN',
+      'DX-210: `wantsEarlier` solo lo marcan RECEPTION, DENTIST y ADMIN. DX-446: `overrideReason` solo lo envían ADMIN y DENTIST',
   })
   async create(
     @Body() dto: CreateAppointmentDto,
@@ -216,7 +257,10 @@ export class AppointmentsController {
       appointmentTypeId: dto.appointmentTypeId,
       wantsEarlier: dto.wantsEarlier,
       planItemIds: dto.planItemIds,
+      actorRole: ctx?.actor.role ?? null,
+      overrideReason: dto.overrideReason,
     });
+    await this.auditReservedOverride(created, 'CREATE', ctx);
     // DX-210: nacer marcada «Adelantar si hay hueco» también queda auditado.
     if (created.wantsEarlier && ctx) {
       await this.audit.record({
@@ -254,7 +298,10 @@ export class AppointmentsController {
     @Query() query: ListAppointmentsQueryDto,
     @Req() req: { user: JwtPayload },
   ): Promise<
-    (Omit<Appointment, 'notes' | 'cancelReasonText'> & {
+    (Omit<
+      Appointment,
+      'notes' | 'cancelReasonText' | 'triageFlags' | 'triageNote'
+    > & {
       balance: OverdueBalance;
       coverage: CoverageSummary;
       medicalAlerts: MedicalAlertFlags;
@@ -277,8 +324,16 @@ export class AppointmentsController {
     // DX-247: el estado de la anamnesis el día civil de CADA cita en su sede.
     const medical = await this.medicalAlertFlags.forAppointments(appointments);
     const attendance = await this.attendanceFlags.forPatients(patientIds);
+    // DX-470: el triaje (datos de salud) no sale en la agenda: solo en GET
+    // /appointments/:id y en el panel «En clínica».
     return appointments.map(
-      ({ notes: _notes, cancelReasonText: _text, ...a }) => ({
+      ({
+        notes: _notes,
+        cancelReasonText: _text,
+        triageFlags: _flags,
+        triageNote: _note,
+        ...a
+      }) => ({
         ...a,
         balance: flags.get(a.patientId) ?? {
           hasOverdue: false,
@@ -288,6 +343,49 @@ export class AppointmentsController {
         medicalAlerts: medical.get(a.id) ?? NO_ANAMNESIS_FLAGS,
         attendance: attendance.get(a.patientId) ?? NO_INCIDENTS,
       }),
+    );
+  }
+
+  @Post('walk-in')
+  @Roles(...WALK_IN_ROLES)
+  @RolesDeniedMessage(WALK_IN_MESSAGES.forbidden)
+  @ApiCreatedResponse({
+    type: WalkInResultDto,
+    description:
+      'DX-470 «Atender sin cita», en una transacción: el paciente (existente por `patientId`, o alta mínima `newPatient` con nombre, apellido y teléfono) y una cita de tipo urgente DESDE AHORA ya en «En clínica» (ARRIVED, `arrivedAt` = reloj del servidor, `walkIn`), con las señales y la nota de triaje. Va al primer hueco RESERVED libre de hoy del profesional que admite el tipo urgente (DX-446); con `overbookReason`, en sobrecupo ahora (`overbooked`, motivo en `appointment_reserved_overrides`). Sede: la de X-Location-Id (o la de escritura de la sesión), entre las permitidas al usuario; autor, el del token. Queda en auditoría (`WALK_IN_PATIENT`, `WALK_IN_ARRIVAL`, `WALK_IN_OVERBOOK`) sin el triaje ni el motivo.',
+  })
+  @ApiBadRequestResponse({
+    description:
+      'Datos inválidos: ni `patientId` ni `newPatient` (o los dos), señales fuera de las 6, nota de más de 200, motivo del sobrecupo fuera de 5–300, tipo no urgente o desactivado, o el profesional no atiende en la sede',
+  })
+  @ApiForbiddenResponse({
+    description:
+      'Solo RECEPTION, ASSISTANT y ADMIN (marcan la llegada); sede no permitida (`LOCATION_NOT_ALLOWED`)',
+  })
+  @ApiNotFoundResponse({
+    description: 'Paciente o profesional que no son de esta clínica',
+  })
+  @ApiConflictResponse({
+    description:
+      '`NO_RESERVED_SLOT` (`canOverbook`): no queda hueco reservado libre hoy, se puede reintentar con `overbookReason`; `PATIENT_DUPLICATE` (`existingPatientId` y `existingPatient` con `id`, `firstName`, `lastName`): el documento del alta mínima ya es de otro paciente (se comprueba antes que el hueco); sin tipo urgente activo; un bloqueo que no deja agendar; el paciente ya está en otra cita a esa hora; u otra persona ocupó el hueco a la vez',
+  })
+  async walkIn(
+    @Body() dto: CreateWalkInDto,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<WalkInResult> {
+    const ctx = this.auditContext(req);
+    if (!ctx) throw new Error('Sin sesión de clínica detrás del RolesGuard');
+    return this.createWalkIn.execute(
+      {
+        patientId: dto.patientId,
+        newPatient: dto.newPatient,
+        providerId: dto.providerId,
+        appointmentTypeId: dto.appointmentTypeId,
+        triageFlags: dto.triageFlags,
+        triageNote: dto.triageNote,
+        overbookReason: dto.overbookReason,
+      },
+      ctx,
     );
   }
 
@@ -401,14 +499,14 @@ export class AppointmentsController {
   })
   @ApiForbiddenResponse({
     description:
-      'Rol sin permiso de agenda, sin permiso para ese paso del flujo en la clínica (DX-200), o RECEPTION/ASSISTANT sacando una cita de COMPLETED (DX-273)',
+      'Rol sin permiso de agenda, sin permiso para ese paso del flujo en la clínica (DX-200), o RECEPTION/ASSISTANT sacando una cita de COMPLETED (DX-273), o `overrideReason` sin ser ADMIN ni DENTIST (DX-446)',
   })
   @ApiNotFoundResponse({
     description: 'Cita o profesional no encontrados en esta clínica',
   })
   @ApiConflictResponse({
     description:
-      'Solape con otra cita del profesional o del paciente (también si otro movimiento ganó la carrera), el nuevo horario está bloqueado (DX-122), o un salto imposible del flujo en la clínica o la cita cambió mientras tanto (DX-200)',
+      'Solape con otra cita del profesional o del paciente (también si otro movimiento ganó la carrera), el nuevo horario está bloqueado (DX-122) o reservado sin liberar (DX-446, `RESERVED_SLOT`), o un salto imposible del flujo en la clínica o la cita cambió mientras tanto (DX-200)',
   })
   @ApiUnprocessableEntityResponse({
     description: 'Fuera del horario de atención de la sede de la cita',
@@ -436,9 +534,11 @@ export class AppointmentsController {
           reasonCode: dto.cancelReasonCode,
           reasonText: dto.cancelReasonText,
         },
+        overrideReason: dto.overrideReason,
       },
       ctx,
     );
+    await this.auditReservedOverride(updated, 'UPDATE', ctx);
     await this.auditPlanItems(updated, dto.planItemIds, 'UPDATE', ctx);
     return updated;
   }

@@ -3,6 +3,7 @@ import {
   decimalPlaces,
 } from '../../../shared/validation/bounded-decimal';
 import type { ExpenseStatus } from './entities/expense.entity';
+import { fromCents, toCents } from '../../../shared/money/money';
 
 /**
  * Reglas puras de un gasto (DX-274). Sin Nest ni Prisma: fallan con
@@ -103,13 +104,7 @@ function assertNoControlChars(value: string): void {
 }
 
 // --- Dinero -----------------------------------------------------------------
-export function toCents(amount: number): number {
-  return Math.round(amount * 100);
-}
-
-export function fromCents(cents: number): number {
-  return cents / 100;
-}
+export { fromCents, toCents };
 
 /** Importe > 0, hasta 2 decimales y dentro de `Decimal(14,2)`. */
 export function validateAmount(amount: unknown): number {

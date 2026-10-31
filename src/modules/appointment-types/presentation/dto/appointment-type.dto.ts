@@ -41,6 +41,12 @@ export class AppointmentTypeDto {
   @ApiProperty()
   active!: boolean;
 
+  @ApiProperty({
+    description:
+      'DX-446: tipo de urgencia (p. ej. «Consulta de urgencia»): se ofrece primero al reservar huecos.',
+  })
+  isUrgent!: boolean;
+
   @ApiProperty({ format: 'date-time' })
   createdAt!: Date;
 
@@ -89,6 +95,13 @@ export class CreateAppointmentTypeDto {
   @IsOptional()
   @IsBoolean()
   active?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'DX-446: tipo de urgencia. Por defecto, false',
+  })
+  @IsOptional()
+  @IsBoolean()
+  isUrgent?: boolean;
 }
 
 export class UpdateAppointmentTypeDto extends PartialType(

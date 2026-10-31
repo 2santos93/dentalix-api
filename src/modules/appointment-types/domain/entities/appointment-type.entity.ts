@@ -12,6 +12,8 @@ export interface AppointmentType {
   /** `#RRGGBB`, siempre en mayúsculas. */
   color: string;
   active: boolean;
+  /** DX-446: tipo de urgencia (los huecos reservados lo ofrecen primero). */
+  isUrgent: boolean;
   createdAt: Date;
   updatedAt: Date;
 }

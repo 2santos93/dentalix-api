@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional, OmitType } from '@nestjs/swagger';
+import { TriageFlag } from '@prisma/client';
 import {
   AppointmentStatus,
   CancellationByKind,
@@ -195,6 +196,33 @@ export class AppointmentDto {
   })
   policyVersionId!: string | null;
 
+  @ApiProperty({
+    enum: TriageFlag,
+    enumName: 'TriageFlag',
+    isArray: true,
+    description:
+      'DX-470: señales de triaje de recepción (dolor, inflamación, infección, fiebre, sangrado, traumatismo). Datos de salud: no salen en la agenda (GET /appointments), ni en vistas públicas ni recordatorios.',
+  })
+  triageFlags!: TriageFlag[];
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    maxLength: 200,
+    description:
+      'DX-470: nota de triaje (≤ 200). Mismo alcance que `triageFlags`.',
+  })
+  triageNote!: string | null;
+
+  @ApiProperty({ description: 'DX-470: nació en «Atender sin cita».' })
+  walkIn!: boolean;
+
+  @ApiProperty({
+    description:
+      'DX-470: sobrecupo anotado (sin hueco reservado libre). No ocupa el hueco del profesional: otra cita puede solaparse con ella.',
+  })
+  overbooked!: boolean;
+
   @ApiProperty({ format: 'date-time' })
   createdAt!: Date;
 
@@ -327,6 +355,15 @@ export class VisitMinimumChangeDto {
   anchorAppointmentIdAfter!: string | null;
 }
 
+/** DX-446: reserva saltada con permiso (bloques y motivo). */
+export class ReservedOverrideDto {
+  @ApiProperty({ type: [String], format: 'uuid' })
+  blockIds!: string[];
+
+  @ApiProperty()
+  reason!: string;
+}
+
 /** DX-273: resultado de sacar una cita de COMPLETED. */
 export class CompletedExitDto {
   @ApiProperty({
@@ -373,6 +410,13 @@ export class AppointmentWriteDto extends AppointmentDto {
       'DX-273: solo al sacar la cita de COMPLETED. El motivo y cómo queda el mínimo de la visita siguiente de cada plan afectado.',
   })
   completedExit?: CompletedExitDto;
+
+  @ApiPropertyOptional({
+    type: () => ReservedOverrideDto,
+    description:
+      'DX-446: solo si la cita se agendó o movió a un hueco reservado saltándose la reserva (con `overrideReason`). El motivo queda en `appointment_reserved_overrides`, no en `audit_event`.',
+  })
+  reservedOverride?: ReservedOverrideDto;
 }
 
 /**
@@ -394,6 +438,8 @@ export class PatientIncidentCountsDto {
 export class AppointmentListItemDto extends OmitType(AppointmentDto, [
   'notes',
   'cancelReasonText',
+  'triageFlags',
+  'triageNote',
 ] as const) {
   @ApiProperty({
     type: PatientIncidentCountsDto,

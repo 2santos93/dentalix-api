@@ -4,12 +4,19 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import type { ClinicRole } from '@prisma/client';
 import { APPOINTMENT_REPOSITORY } from '../../domain/ports/appointment-repository.port';
 import type { AppointmentRepository } from '../../domain/ports/appointment-repository.port';
 import { AppointmentWriteResult } from '../../domain/entities/appointment.entity';
 import { checkScheduleBlocks } from '../schedule-block-check';
+import {
+  SCHEDULE_BLOCK_CLOCK,
+  systemScheduleBlockClock,
+  type ScheduleBlockClock,
+} from '../../../schedule-blocks/application/schedule-block-clock';
 import {
   OVERLAP_MESSAGES,
   overlapExclusionScope,
@@ -59,6 +66,13 @@ export interface CreateAppointmentInput {
   waitlistEntryId?: string;
   /** DX-210: «Adelantar si hay hueco». */
   wantsEarlier?: boolean;
+  /**
+   * DX-446: rol de quien agenda (decide si puede saltarse un hueco
+   * reservado). Lo pone el controlador desde el token, nunca el cliente.
+   */
+  actorRole?: ClinicRole | null;
+  /** DX-446: «Agendar igualmente» en un hueco reservado (5–300 caracteres). */
+  overrideReason?: string;
 }
 
 /** La entrada con la hora de fin ya resuelta (explícita o por el tipo). */
@@ -90,6 +104,10 @@ export class CreateAppointmentUseCase {
     // DX-233: fuera del horario del profesional en la sede → aviso, o 409 si
     // la clínica activó el modo estricto.
     private readonly availability: ProviderAvailabilityService,
+    // DX-446: «¿ya se liberó el hueco reservado?» (inyectable en los tests).
+    @Optional()
+    @Inject(SCHEDULE_BLOCK_CLOCK)
+    private readonly clock: ScheduleBlockClock = systemScheduleBlockClock,
   ) {}
 
   async execute(
@@ -218,15 +236,24 @@ export class CreateAppointmentUseCase {
 
     // DX-122: bloqueos de la agenda del profesional o de la sede. Uno que no
     // deja agendar es un 409; uno que sí (almuerzo), un aviso en la respuesta.
-    const warnings = collectWarnings(
-      await checkScheduleBlocks(this.blocks, {
+    // DX-446: un hueco reservado deja pasar sus tipos, o todos desde la
+    // liberación, o a quien puede saltárselo con motivo.
+    const blockCheck = await checkScheduleBlocks(
+      this.blocks,
+      {
         providerId: input.providerId,
         start: input.start,
         end: input.end,
         locationId: input.locationId,
-      }),
-      offSchedule,
+      },
+      {
+        appointmentTypeId: input.appointmentTypeId ?? null,
+        now: this.clock(),
+        actorRole: input.actorRole ?? null,
+        overrideReason: input.overrideReason,
+      },
     );
+    const warnings = collectWarnings(blockCheck.warnings, offSchedule);
 
     // Overlap rule: two half-open intervals [s1,e1) and [s2,e2) overlap iff
     // s1 < e2 AND s2 < e1 — enforced by the repository's findOverlapping
@@ -273,7 +300,14 @@ export class CreateAppointmentUseCase {
         planItemIds: input.planItemIds,
       });
       // DX-273: un alta con ítems ya reservados en otra cita es 409; nunca avisa.
-      return { ...created, ...warnings, planItemsReservedElsewhere: [] };
+      return {
+        ...created,
+        ...warnings,
+        planItemsReservedElsewhere: [],
+        ...(blockCheck.override
+          ? { reservedOverride: blockCheck.override }
+          : {}),
+      };
     } catch (error) {
       const scope = overlapExclusionScope(error);
       if (scope !== null) {

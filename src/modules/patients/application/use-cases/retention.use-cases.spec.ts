@@ -1,12 +1,15 @@
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import type {
   PatientArchiveState,
   PatientRepository,
   PatientRetentionState,
   RetentionExpiringParams,
 } from '../../domain/ports/patient-repository.port';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+import type { PatientPublicLinksReader } from '../../domain/ports/patient-public-links.port';
 import {
   ArchivePatientUseCase,
+  CountPatientLivePublicLinksUseCase,
   ListRetentionExpiringUseCase,
   PartiallySuppressPatientUseCase,
   SetRetentionExtensionUseCase,
@@ -14,18 +17,29 @@ import {
 
 const NOW = new Date('2026-10-16T12:00:00.000Z');
 const clock = (): Date => NOW;
+const CTX: AuditRequestContext = {
+  tenantId: 't1',
+  locationId: null,
+  actor: { userId: 'u1', role: 'ADMIN' },
+  requestId: 'req-1',
+  ip: '203.0.113.1',
+  userAgent: 'jest',
+};
 
 function repoWith(retention: PatientRetentionState, pendingAppointments = 0) {
   const state: PatientArchiveState = { ...retention, pendingAppointments };
   const archived: string[] = [];
+  const revocations: { now: Date; ctx: AuditRequestContext }[] = [];
   const repo = {
     archive: async (
       id: string,
       assert: (s: PatientArchiveState) => void,
+      revocation: { now: Date; ctx: AuditRequestContext },
     ): Promise<void> => {
       await Promise.resolve();
       assert(state);
       archived.push(id);
+      revocations.push(revocation);
     },
     partiallySuppress: jest.fn(
       async (
@@ -42,7 +56,7 @@ function repoWith(retention: PatientRetentionState, pendingAppointments = 0) {
       Promise.resolve({ items: [], total: 0 }),
     ),
   };
-  return { repo, archived };
+  return { repo, archived, revocations };
 }
 
 describe('ArchivePatientUseCase (DX-039)', () => {
@@ -54,8 +68,20 @@ describe('ArchivePatientUseCase (DX-039)', () => {
     await new ArchivePatientUseCase(
       repo as unknown as PatientRepository,
       clock,
-    ).execute('p1');
+    ).execute('p1', CTX);
     expect(archived).toEqual(['p1']);
+  });
+
+  it('DX-461: anula los enlaces con la hora del reloj y quién archiva', async () => {
+    const { repo, revocations } = repoWith({
+      lastAttentionAt: null,
+      retentionExtended: 'NONE',
+    });
+    await new ArchivePatientUseCase(
+      repo as unknown as PatientRepository,
+      clock,
+    ).execute('p1', CTX);
+    expect(revocations).toEqual([{ now: NOW, ctx: CTX }]);
   });
 
   it('409 si la HC está en retención (no archiva)', async () => {
@@ -67,7 +93,7 @@ describe('ArchivePatientUseCase (DX-039)', () => {
       new ArchivePatientUseCase(
         repo as unknown as PatientRepository,
         clock,
-      ).execute('p1'),
+      ).execute('p1', CTX),
     ).rejects.toBeInstanceOf(ConflictException);
     expect(archived).toEqual([]);
   });
@@ -81,7 +107,7 @@ describe('ArchivePatientUseCase (DX-039)', () => {
       repo as unknown as PatientRepository,
       clock,
     )
-      .execute('p1')
+      .execute('p1', CTX)
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ConflictException);
     expect((err as ConflictException).getResponse()).toMatchObject({
@@ -162,5 +188,33 @@ describe('ListRetentionExpiringUseCase', () => {
       skip: 50,
       take: 50,
     });
+  });
+});
+
+describe('CountPatientLivePublicLinksUseCase (DX-461)', () => {
+  const counts = {
+    slotOffers: 1,
+    consentSignatures: 0,
+    budgetSignatures: 2,
+    signedPdfCopies: 0,
+    anamnesis: 1,
+  };
+
+  it('devuelve los enlaces vivos por tipo y el total, a la hora del reloj', async () => {
+    const countLive = jest.fn(() => Promise.resolve(counts));
+    const reader: PatientPublicLinksReader = { countLive };
+    await expect(
+      new CountPatientLivePublicLinksUseCase(reader, clock).execute('p1'),
+    ).resolves.toEqual({ ...counts, total: 4 });
+    expect(countLive).toHaveBeenCalledWith('p1', NOW);
+  });
+
+  it('404 si el paciente no existe (o ya está archivado) en la clínica', async () => {
+    const reader: PatientPublicLinksReader = {
+      countLive: () => Promise.resolve(null),
+    };
+    await expect(
+      new CountPatientLivePublicLinksUseCase(reader, clock).execute('p1'),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 });

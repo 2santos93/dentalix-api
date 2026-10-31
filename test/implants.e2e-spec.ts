@@ -517,6 +517,11 @@ describe('Implantes — /patients/:id/implants, /implant-card, /implants (DX-191
       ]);
     });
 
+    // ISOLATION_COVERS: GET /patients/:patientId/implants
+    // ISOLATION_COVERS: POST /patients/:patientId/implants
+    // ISOLATION_COVERS: GET /patients/:patientId/implant-card
+    // ISOLATION_COVERS: POST /patients/:patientId/implant-card/print
+    // ISOLATION_COVERS: POST /implants/:id/void
     it('B no ve ni toca los implantes de A (404)', async () => {
       await call(
         b,

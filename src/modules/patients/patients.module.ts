@@ -29,6 +29,7 @@ import { GetPatientUseCase } from './application/use-cases/get-patient.use-case'
 import { UpdatePatientUseCase } from './application/use-cases/update-patient.use-case';
 import {
   ArchivePatientUseCase,
+  CountPatientLivePublicLinksUseCase,
   ListRetentionExpiringUseCase,
   PartiallySuppressPatientUseCase,
   RETENTION_CLOCK,
@@ -46,6 +47,8 @@ import {
 } from './application/use-cases/document-type-names.use-cases';
 import { DocumentTypeNamesModule } from '../document-type-names/document-type-names.module';
 import { PATIENT_REPOSITORY } from './domain/ports/patient-repository.port';
+import { PATIENT_PUBLIC_LINKS_READER } from './domain/ports/patient-public-links.port';
+import { PrismaPatientPublicLinksRepository } from './infrastructure/repositories/prisma-patient-public-links.repository';
 import { PrismaPatientRepository } from './infrastructure/repositories/prisma-patient.repository';
 import { REFERENCE_LOOKUP } from './domain/ports/reference-lookup.port';
 import { PrismaReferenceLookup } from './infrastructure/adapters/prisma-reference-lookup.adapter';
@@ -82,6 +85,7 @@ import { PatientAgreementsModule } from '../patient-agreements/patient-agreement
     GetPatientUseCase,
     UpdatePatientUseCase,
     ArchivePatientUseCase,
+    CountPatientLivePublicLinksUseCase,
     SetRetentionExtensionUseCase,
     PartiallySuppressPatientUseCase,
     ListRetentionExpiringUseCase,
@@ -126,6 +130,11 @@ import { PatientAgreementsModule } from '../patient-agreements/patient-agreement
     // listing it here makes it resolvable for @UseInterceptors on PatientsController.
     TenantContextInterceptor,
     { provide: PATIENT_REPOSITORY, useClass: PrismaPatientRepository },
+    // DX-461: enlaces públicos vivos que anularía archivar.
+    {
+      provide: PATIENT_PUBLIC_LINKS_READER,
+      useClass: PrismaPatientPublicLinksRepository,
+    },
     { provide: REFERENCE_LOOKUP, useClass: PrismaReferenceLookup },
   ],
   // CountPatientsUseCase exportado para el `patientCount` del dashboard: un

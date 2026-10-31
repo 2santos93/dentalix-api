@@ -36,7 +36,10 @@ import {
   ReceivablesAgingFiltersDto,
   ReceivablesAgingQueryDto,
 } from './dto/receivables-aging-query.dto';
-import { ReceivablesAgingPageDto } from './dto/receivables-aging.dto';
+import {
+  ReceivablesAgingPageDto,
+  ReceivablesAgingSummaryDto,
+} from './dto/receivables-aging.dto';
 
 export const RECEIVABLES_FORBIDDEN_MESSAGE =
   'Tu rol no tiene acceso a la cartera: es para administración y recepción.';
@@ -77,6 +80,38 @@ export class ReceivablesController {
       this.tenantContext.assertLocationAllowed(query.locationId);
     }
     return query.locationId ?? this.tenantContext.getLocationId();
+  }
+
+  // Inicio (I1): solo los totales por moneda (pacientes, saldo, tramos), sin
+  // ninguna fila de paciente ni teléfono, así que no lleva @Audit (mismo
+  // criterio que GET /closing-queue/count). Mismos filtros, sede y roles que
+  // la lista: los totales son los mismos que pinta la cabecera de la cartera.
+  @Get('aging/summary')
+  @ApiOperation({
+    summary: 'Totales de la cartera por antigüedad, sin pacientes',
+    description:
+      'Los `totals` de GET /receivables/aging con los mismos filtros, sin filas. Por moneda, sin convertir.',
+  })
+  @ApiHeader(LOCATION_HEADER)
+  @ApiOkResponse({ type: ReceivablesAgingSummaryDto })
+  @ApiBadRequestResponse({
+    description: 'Filtro inválido o sede que no es de esta clínica',
+  })
+  @ApiForbiddenResponse({ description: RECEIVABLES_FORBIDDEN_MESSAGE })
+  async summary(
+    @Query() query: ReceivablesAgingFiltersDto,
+  ): Promise<ReceivablesAgingSummaryDto> {
+    const page = await this.getAging.execute({
+      locationId: this.locationOf(query),
+      currency: query.currency,
+      minBalance: query.minBalance,
+      minAgeDays: query.minAgeDays,
+      providerId: query.providerId,
+      hasPromise: query.hasPromise,
+      page: 1,
+      pageSize: 1,
+    });
+    return { asOf: page.asOf, scope: page.scope, totals: page.totals };
   }
 
   @Audit({

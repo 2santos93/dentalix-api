@@ -8,6 +8,11 @@ import { MAX_ALLOCATION_LINES } from '../../payments/domain/allocation-rules';
 import { MAX_HOLIDAYS_PER_FILE } from '../../location-calendar/domain/holiday-rules';
 import { parseCivilDate } from '../../../shared/time/civil-day';
 import { ClinicRole } from '@prisma/client';
+import { round2 } from '../../../shared/money/money';
+import {
+  LIVE_PUBLIC_LINK_KINDS,
+  type LivePublicLinkCounts,
+} from '../../patients/domain/live-public-links';
 
 export interface AuditMetadata {
   /** Campos que traía la petición de escritura (nombres, nunca valores). */
@@ -157,6 +162,48 @@ export interface AuditMetadata {
    * contraseña.
    */
   staffAccess?: AuditStaffAccessChange;
+  /**
+   * DX-439: un pendiente de «Pendiente de cerrar» descartado: la sección y el
+   * código del motivo. La cita (y el ítem) van en `params`; el texto de
+   * «Otro» nunca (queda en `closing_queue_dismissals`, `resourceId`).
+   */
+  closingQueueDismissal?: AuditClosingQueueDismissal;
+  /**
+   * DX-446: cita agendada o movida a un hueco reservado saltándose la reserva
+   * (ADMIN u odontólogo): la fila de `appointment_reserved_overrides` y los
+   * bloques saltados. El MOTIVO escrito nunca (texto libre: queda en esa
+   * tabla, como el «Otro» de DX-439).
+   */
+  reservedSlotOverride?: AuditReservedSlotOverride;
+  /**
+   * DX-461: enlaces públicos vivos que se anularon al archivar al paciente,
+   * cuántos de cada tipo. Solo números: ni tokens, ni destinatarios, ni ids.
+   */
+  revokedLinks?: LivePublicLinkCounts;
+}
+
+export const AUDIT_CLOSING_QUEUE_SECTIONS = [
+  'OUTCOME',
+  'EVOLUTION',
+  'TREATMENT',
+] as const;
+export const AUDIT_CLOSING_DISMISSAL_REASONS = [
+  'PATIENT_DECLINED_TODAY',
+  'PAPER_NOTE',
+  'DUPLICATE_APPOINTMENT',
+  'OTHER',
+] as const;
+
+/** Descarte de un pendiente de cierre en la auditoría (DX-439): solo códigos. */
+export interface AuditClosingQueueDismissal {
+  section: (typeof AUDIT_CLOSING_QUEUE_SECTIONS)[number];
+  reasonCode: (typeof AUDIT_CLOSING_DISMISSAL_REASONS)[number];
+}
+
+/** Hueco reservado saltado con permiso (DX-446). */
+export interface AuditReservedSlotOverride {
+  overrideId: string;
+  blockIds: string[];
 }
 
 /** Un lado del cambio de accesos de un miembro (DX-359). */
@@ -409,6 +456,7 @@ const PROFESSIONAL_LICENSE = /^[^\p{Cc}\p{Cf}\u2028\u2029]{1,60}$/u;
 const PROFESSIONAL_SPECIALTY = /^[^\p{Cc}\p{Cf}\u2028\u2029]{1,80}$/u;
 /** Tope de sedes por lado: las de una clínica, con holgura. */
 const MAX_STAFF_LOCATIONS = 200;
+const MAX_OVERRIDE_BLOCKS = 20;
 const MAX_FIELDS = 50;
 /** Tope de tramos por lado (7 días × 7 tramos × varias sedes). */
 const MAX_SCHEDULE_ENTRIES = 500;
@@ -511,7 +559,7 @@ function currencyTotals(value: unknown): AuditCurrencyTotal[] {
       typeof amount !== 'number' ||
       !Number.isFinite(amount) ||
       amount < 0 ||
-      Math.round(amount * 100) / 100 !== amount
+      round2(amount) !== amount
     ) {
       continue;
     }
@@ -796,6 +844,47 @@ function cancellation(value: unknown): AuditCancellation | null {
   return { byKind: kind, reasonCode: reason, noticeMinutes, lateCancellation };
 }
 
+/** El descarte entero con su forma, o nada (DX-439). */
+function closingQueueDismissal(
+  value: unknown,
+): AuditClosingQueueDismissal | null {
+  if (!isRecord(value)) return null;
+  const { section, reasonCode, ...rest } = value;
+  const s = AUDIT_CLOSING_QUEUE_SECTIONS.find((v) => v === section);
+  const r = AUDIT_CLOSING_DISMISSAL_REASONS.find((v) => v === reasonCode);
+  if (Object.keys(rest).length > 0 || !s || !r) return null;
+  return { section: s, reasonCode: r };
+}
+
+/** Tope de enlaces de un tipo en un evento: muy por encima de lo real. */
+const MAX_REVOKED_LINKS = 1_000_000;
+
+/** Exactamente los tipos de enlace, cada uno un natural acotado, o nada (DX-461). */
+function revokedLinks(value: unknown): LivePublicLinkCounts | null {
+  if (!isRecord(value)) return null;
+  const keys = Object.keys(value);
+  if (
+    keys.length !== LIVE_PUBLIC_LINK_KINDS.length ||
+    keys.some((k) => !(LIVE_PUBLIC_LINK_KINDS as readonly string[]).includes(k))
+  ) {
+    return null;
+  }
+  const out = {} as LivePublicLinkCounts;
+  for (const kind of LIVE_PUBLIC_LINK_KINDS) {
+    const n = value[kind];
+    if (
+      typeof n !== 'number' ||
+      !Number.isInteger(n) ||
+      n < 0 ||
+      n > MAX_REVOKED_LINKS
+    ) {
+      return null;
+    }
+    out[kind] = n;
+  }
+  return out;
+}
+
 const MAX_SAFETY_CODES = 50;
 
 function safetyCodes(value: unknown): string[] | null {
@@ -905,7 +994,7 @@ function allocationLine(value: unknown): AuditAllocationLine | null {
     typeof amount !== 'number' ||
     !Number.isFinite(amount) ||
     amount < 0 ||
-    Math.round(amount * 100) / 100 !== amount
+    round2(amount) !== amount
   ) {
     return null;
   }
@@ -1088,6 +1177,29 @@ function exchangeRateBackup(value: unknown): AuditExchangeRateBackup | null {
  * no encaja se DESCARTA (no se trunca ni se escapa): así un valor clínico que
  * llegara por error a cualquier clave nunca acaba en la tabla.
  */
+/** Fila del override y bloques (uuids), o nada (DX-446). */
+function reservedSlotOverride(
+  value: unknown,
+): AuditReservedSlotOverride | null {
+  if (!isRecord(value)) return null;
+  const { overrideId, blockIds, ...rest } = value;
+  if (
+    Object.keys(rest).length > 0 ||
+    typeof overrideId !== 'string' ||
+    !UUID.test(overrideId) ||
+    !Array.isArray(blockIds) ||
+    blockIds.length === 0 ||
+    blockIds.length > MAX_OVERRIDE_BLOCKS ||
+    !blockIds.every((id) => typeof id === 'string' && UUID.test(id))
+  ) {
+    return null;
+  }
+  return {
+    overrideId: overrideId.toLowerCase(),
+    blockIds: (blockIds as string[]).map((id) => id.toLowerCase()),
+  };
+}
+
 export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (!isRecord(input)) return {};
   const out: AuditMetadata = {};
@@ -1140,5 +1252,11 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (calendar) out.locationCalendar = calendar;
   const access = staffAccess(input.staffAccess);
   if (access) out.staffAccess = access;
+  const dismissed = closingQueueDismissal(input.closingQueueDismissal);
+  if (dismissed) out.closingQueueDismissal = dismissed;
+  const overridden = reservedSlotOverride(input.reservedSlotOverride);
+  if (overridden) out.reservedSlotOverride = overridden;
+  const revoked = revokedLinks(input.revokedLinks);
+  if (revoked) out.revokedLinks = revoked;
   return out;
 }

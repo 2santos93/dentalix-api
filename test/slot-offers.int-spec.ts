@@ -302,6 +302,9 @@ describe('oferta de hueco por enlace (int, DX-435)', () => {
   });
 
   describe('rutas públicas: aislamiento y minimización', () => {
+    // ISOLATION_COVERS: GET /public/slot-offers/:token
+    // ISOLATION_COVERS: POST /public/slot-offers/:token/accept
+    // ISOLATION_COVERS: POST /public/slot-offers/:token/decline
     it('un token de otra clínica, inventado o mal formado da el mismo 404', async () => {
       const { token, offerId } = await offerToEntry(a, 0);
       const notFound = new NotFoundException(SLOT_OFFER_NOT_FOUND_MESSAGE);
@@ -678,7 +681,7 @@ describe('oferta de hueco por enlace (int, DX-435)', () => {
       const seen = await inClinic(a, () => getOffer.execute(token));
       expect(seen).toMatchObject({
         state: 'EXPIRED',
-        message: 'Esta oferta caducó',
+        message: 'Este enlace ya no está disponible',
       });
       expect(await outcomeOf(offerId)).toBe('PENDING');
       const tried = await inClinic(a, () => acceptOffer.execute(token, META));

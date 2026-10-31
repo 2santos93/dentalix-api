@@ -89,3 +89,32 @@ describe('DeleteAppointmentTypeUseCase', () => {
     await expect(uc.execute(type.id)).rejects.toThrow(NotFoundException);
   });
 });
+
+describe('tipo de urgencia (DX-446)', () => {
+  it('nace sin urgencia salvo que se pida, y se puede marcar y desmarcar', async () => {
+    const repo = new InMemoryAppointmentTypeRepository();
+    const plain = await new CreateAppointmentTypeUseCase(repo).execute({
+      name: 'Limpieza',
+      durationMinutes: 30,
+      color: '#0EA5E9',
+    });
+    expect(plain.isUrgent).toBe(false);
+    const urgent = await new CreateAppointmentTypeUseCase(repo).execute({
+      name: 'Consulta de urgencia',
+      durationMinutes: 30,
+      color: '#DC2626',
+      isUrgent: true,
+    });
+    expect(urgent.isUrgent).toBe(true);
+    const update = new UpdateAppointmentTypeUseCase(repo);
+    expect((await update.execute(plain.id, { isUrgent: true })).isUrgent).toBe(
+      true,
+    );
+    expect(
+      (await update.execute(plain.id, { name: 'Limpieza dental' })).isUrgent,
+    ).toBe(true);
+    expect((await update.execute(plain.id, { isUrgent: false })).isUrgent).toBe(
+      false,
+    );
+  });
+});

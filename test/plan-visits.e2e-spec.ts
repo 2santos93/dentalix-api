@@ -110,6 +110,8 @@ describe('DX-256 visitas y agenda', () => {
     await app?.close();
     await raw.$disconnect();
   });
+  // ISOLATION_COVERS: GET /treatment-plans/:id/visits
+  // ISOLATION_COVERS: PATCH /treatment-plans/:id/visits
   it('guarda dos visitas; recepción no organiza y clínica ajena no encuentra el plan', async () => {
     const body = {
       items: itemIds.map((itemId, n) => ({
@@ -199,6 +201,27 @@ describe('DX-256 visitas y agenda', () => {
       `/treatment-plans/unscheduled?locationId=${otherLocation}`,
     ).expect(200);
     expect((north.body as { items: unknown[] }).items).toHaveLength(0);
+    // I1: el total no depende del cursor ni de la página; el contador da lo
+    // mismo sin pacientes y sin dejar evento de auditoría.
+    const pageTotal = (page.body as { total: number; items: unknown[] }).total;
+    expect(pageTotal).toBe((page.body as { items: unknown[] }).items.length);
+    expect((north.body as { total: number }).total).toBe(0);
+    const auditBefore = await raw.auditEvent.count();
+    const counted = await call(
+      'get',
+      `/treatment-plans/unscheduled/count?locationId=${locationId}`,
+      undefined,
+      reception,
+    ).expect(200);
+    expect(counted.body).toEqual({ total: pageTotal });
+    const narrow = await call(
+      'get',
+      `/treatment-plans/unscheduled?locationId=${locationId}&limit=1`,
+      undefined,
+      reception,
+    ).expect(200);
+    expect((narrow.body as { total: number }).total).toBe(pageTotal);
+    expect(await raw.auditEvent.count()).toBe(auditBefore + 1);
     const create = (offset: number) => ({
       patientId,
       providerId: a.adminUserId,

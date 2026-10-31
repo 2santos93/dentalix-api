@@ -134,8 +134,10 @@ export class PrismaSignedPdfCopyRepository
 
   findLinkByTokenHash(tokenHash: string): Promise<SignedPdfCopyLinkRow | null> {
     return this.prisma.runWithTenant((tx) =>
-      tx.signedConsentPdfLink.findUnique({
-        where: { tokenHash },
+      tx.signedConsentPdfLink.findFirst({
+        // DX-461: el enlace de un paciente archivado no existe para la ruta
+        // pública (mismo 404 que caducado o invalidado).
+        where: { tokenHash, signedPdf: { patient: { deletedAt: null } } },
         select: {
           id: true,
           consentId: true,
@@ -162,6 +164,7 @@ export class PrismaSignedPdfCopyRepository
           usedAt: null,
           revokedAt: null,
           expiresAt: { gt: now },
+          signedPdf: { patient: { deletedAt: null } },
         },
         data: { usedAt: now },
       });

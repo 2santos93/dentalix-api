@@ -179,6 +179,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // retención extendida, supresión parcial e historias que salen de
   // retención, solo gestión.
   'DELETE /patients/:id': ADMIN_ONLY,
+  // DX-461: cuántos enlaces públicos vivos anularía archivar.
+  'GET /patients/:id/live-public-links': ADMIN_ONLY,
   'PATCH /patients/:id/retention': ADMIN_ONLY,
   'POST /patients/:id/partial-suppression': ADMIN_ONLY,
   'GET /patients/retention/expiring': ADMIN_ONLY,
@@ -425,7 +427,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // (CLINICAL); presentarlo, quien lo decide; rechazarlo, además recepción,
   // que llama al paciente desde la lista de seguimiento (ADMIN y recepción).
   'GET /treatment-plans/pending-follow-up': BILLING,
+  'GET /treatment-plans/pending-follow-up/count': BILLING,
   'GET /treatment-plans/unscheduled': EVERY_ROLE,
+  'GET /treatment-plans/unscheduled/count': EVERY_ROLE,
   'GET /treatment-plans/:id/visits': EVERY_ROLE,
   'PATCH /treatment-plans/:id/visits': PLAN_DECIDERS,
   'POST /treatment-plans/:id/present': PLAN_DECIDERS,
@@ -519,6 +523,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
     'ASSISTANT',
     'RECEPTION',
   ),
+  // DX-470 «Atender sin cita» (loop/informes/DX-470.md): marca la llegada en
+  // el mismo paso, así que es del mostrador (como «Llegó»); el alta mínima
+  // que lo acompaña es de PATIENT_ROLES, que incluye a los tres.
+  'POST /appointments/walk-in': roles('ADMIN', 'ASSISTANT', 'RECEPTION'),
   // DX-273 «Traer a esta cita» (loop/informes/DX-273.md): quien ve la agenda;
   // que la cita esté en la clínica y la sede de la otra cita los mira el caso
   // de uso (409 / 403).
@@ -571,6 +579,7 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // Cartera por antigüedad: loop/informes/DX-145.md. El CSV es un dato
   // personal de muchos pacientes: solo ADMIN.
   'GET /receivables/aging': BILLING,
+  'GET /receivables/aging/summary': BILLING,
   'GET /receivables/aging.csv': ADMIN_ONLY,
   // Descuentos (loop/informes/DX-204.md): la política la leen quienes editan
   // ítems de plan y la cambia ADMIN; el informe y su CSV, solo ADMIN.
@@ -595,6 +604,23 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /reports/production-by-procedure': roles('ADMIN', 'DENTIST'),
   'GET /reports/production-by-procedure.csv': roles('ADMIN', 'DENTIST'),
   'GET /reports/production-by-procedure/items': roles('ADMIN', 'DENTIST'),
+  // DX-439: «Pendiente de cerrar». ADMIN todo; DENTIST evolución y
+  // tratamiento de sus citas; RECEPTION el desenlace (lo acota el caso de uso).
+  'GET /closing-queue': roles('ADMIN', 'DENTIST', 'RECEPTION'),
+  'GET /closing-queue/count': roles('ADMIN', 'DENTIST', 'RECEPTION'),
+  'POST /closing-queue/dismissals': roles('ADMIN', 'DENTIST', 'RECEPTION'),
+  // DX-339: agenda de contingencia por sede (PDF de hoy y mañana con los
+  // teléfonos de los pacientes): recepción y gestión; la sede la acota el
+  // caso de uso (DX-089).
+  'GET /locations/:locationId/contingency-agenda': roles('ADMIN', 'RECEPTION'),
+  'GET /locations/:locationId/contingency-agenda/nightly': roles(
+    'ADMIN',
+    'RECEPTION',
+  ),
+  'GET /locations/:locationId/contingency-agenda/nightly/pdf': roles(
+    'ADMIN',
+    'RECEPTION',
+  ),
   // DX-150: cobranza (gestiones y compromisos de pago), mismo dato financiero.
   'POST /patients/:id/collection-notes': BILLING,
   'POST /patients/:id/payment-promises': BILLING,

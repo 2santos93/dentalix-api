@@ -66,6 +66,10 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
   'PATCH /appointments/:id body.planItemIds[]',
   'PATCH /appointments/:id body.providerId',
   'PATCH /appointments/:id/opening body.providerId',
+  // DX-470: «Atender sin cita».
+  'POST /appointments/walk-in body.appointmentTypeId',
+  'POST /appointments/walk-in body.patientId',
+  'POST /appointments/walk-in body.providerId',
   'PUT /staff/:userId/locations body.locationIds[]',
   'GET /schedule-blocks ?locationId',
   'GET /schedule-blocks ?providerIds[]',
@@ -73,6 +77,9 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
   'GET /schedule-blocks/affected-appointments ?providerId',
   'POST /schedule-blocks body.locationId',
   'POST /schedule-blocks body.providerId',
+  // DX-446: tipos de cita de un hueco reservado.
+  'POST /schedule-blocks body.reservedForTypeIds[]',
+  'PATCH /schedule-blocks/:id body.reservedForTypeIds[]',
   'PUT /providers/:providerId/schedule body.locations[].locationId',
   'POST /providers/:providerId/schedule-overrides body.locationId',
   'GET /schedule/roster ?locationId',
@@ -91,6 +98,7 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
   // --- planes de tratamiento ---
   'GET /treatment-plans/unscheduled ?cursor',
   'GET /treatment-plans/unscheduled ?locationId',
+  'GET /treatment-plans/unscheduled/count ?locationId',
   'PATCH /treatment-plans/:id/visits body.items[].itemId',
   // DX-051: los ítems de una reasignación manual.
   'PUT /payments/:id/allocations body.allocations[].treatmentPlanItemId',
@@ -112,6 +120,8 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
   'GET /reports/production-by-procedure/items ?professionalId',
   'GET /receivables/aging ?locationId',
   'GET /receivables/aging ?providerId',
+  'GET /receivables/aging/summary ?locationId',
+  'GET /receivables/aging/summary ?providerId',
   'GET /receivables/aging.csv ?locationId',
   'GET /receivables/aging.csv ?providerId',
   'GET /cash-sessions/current ?locationId',
@@ -131,6 +141,18 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
 
 /** Ids cuyo caso «B manda el id de A» ya está en otro spec (se cita cuál). */
 export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
+  // DX-439: «B manda la sede, el profesional, la cita o el ítem de A → 403 o
+  // lista sin filas de A, y 404 sin descarte».
+  'GET /closing-queue ?locationId': 'closing-queue.e2e-spec.ts',
+  // DX-439: marcar DONE «desde» la cita atendida de A con el ítem de B → 409.
+  'PATCH /treatment-plans/:id/items/:itemId body.appointmentId':
+    'closing-queue.e2e-spec.ts',
+  'GET /closing-queue ?professionalId': 'closing-queue.e2e-spec.ts',
+  'GET /closing-queue/count ?locationId': 'closing-queue.e2e-spec.ts',
+  'GET /closing-queue/count ?professionalId': 'closing-queue.e2e-spec.ts',
+  'POST /closing-queue/dismissals body.appointmentId':
+    'closing-queue.e2e-spec.ts',
+  'POST /closing-queue/dismissals body.planItemId': 'closing-queue.e2e-spec.ts',
   // DX-243: «B manda la plantilla, el plan o el profesional de A → 404/400 y
   // no se crea nada».
   'POST /patients/:patientId/signature-requests body.templateId':

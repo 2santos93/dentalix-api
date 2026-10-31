@@ -1009,6 +1009,63 @@ la clínica (DX-012/DX-040). Migraciones `20261106160000_dx415_enums` y
   su hora, otra 3 min tarde), una en el sillón y otra lista para cobrar
   (dentro del horario de hoy; con la sede cerrada, ninguna).
 
+## «Atender sin cita»: urgencia en un paso (DX-470)
+
+Porción 2 de DX-446: el paciente con dolor que llega sin cita queda en «En
+clínica» en un solo paso.
+
+- **`POST /appointments/walk-in`** (RECEPTION, ASSISTANT, ADMIN: marcar la
+  llegada es del mostrador, DX-200; el odontólogo, 403). Cuerpo: `patientId`
+  (paciente de la clínica) **o** `newPatient` (alta mínima: `firstName`,
+  `lastName`, `phone`; `docType`/`docNumber` opcionales), `providerId`,
+  `appointmentTypeId` opcional (urgente y activo; sin él, el primer tipo
+  urgente activo por nombre; sin ninguno, 409), `triageFlags` (solo `PAIN`,
+  `SWELLING`, `INFECTION`, `FEVER`, `BLEEDING`, `TRAUMA`, sin repetir; si no,
+  400), `triageNote` (≤ 200) y `overbookReason` (5–300, una línea).
+- **Sede, hora y autor** no vienen del cliente (la ValidationPipe descarta
+  `start`, `arrivedAt`, `locationId`, `createdById`): la sede es la de
+  `X-Location-Id` o la de escritura de la sesión, entre las permitidas
+  (`LOCATION_NOT_ALLOWED`, DX-089), y el profesional tiene que atender en ella
+  (400); la hora es el reloj del servidor (`SCHEDULE_BLOCK_CLOCK`, el mismo
+  que decide la liberación de DX-446; los e2e lo fijan) y el autor, el token.
+- **Dónde cae la cita**: sin `overbookReason`, en el primer hueco de un bloque
+  `RESERVED` de hoy (zona de la sede) del profesional o de la sede que admite
+  el tipo urgente, desde el minuto en curso, sin pisar citas vivas del
+  profesional (en cualquier sede, como la EXCLUDE) ni del paciente
+  (`domain/walk-in.ts`, `findReservedSlot`). Si no queda ninguno: 409
+  `{ code: "NO_RESERVED_SLOT", canOverbook: true }`. Con `overbookReason`:
+  **sobrecupo** ahora (`overbooked = true`), con el motivo en
+  `appointment_reserved_overrides` (`kind = WALK_IN_OVERBOOK`, sin bloques),
+  el mismo mecanismo que «Agendar igualmente». Los bloqueos que no dejan
+  agendar (vacaciones) siguen siendo 409; fuera del horario del profesional
+  es solo un aviso, también en modo estricto (el paciente ya está aquí). No se
+  mira el horario de la sede.
+- **Una transacción** (`PrismaWalkInRepository`): alta del paciente (la misma
+  fila y el mismo candado de documento que el alta normal,
+  `insertPatientRowInTx`; un documento de otro paciente vivo da 409
+  `PATIENT_DUPLICATE` con `existingPatientId`), la cita en `ARRIVED` con
+  `arrivedAt`, `preArrivalStatus = SCHEDULED` («Deshacer llegada» la deja
+  agendada) y `walkIn = true`, el motivo del sobrecupo y los `audit_event`
+  `WALK_IN_PATIENT`, `WALK_IN_ARRIVAL` y `WALK_IN_OVERBOOK` (solo nombres de
+  campo y el id del motivo). Si algo falla (FK compuesta, EXCLUDE por una
+  carrera: «Otra persona acaba de ocupar ese hueco…»), no queda nada.
+- **Columnas** (migraciones `20261110100000`/`100100`, aditivas; CHECK `NOT
+  VALID` y validadas después): `appointments."triageFlags"` (`"TriageFlag"[]`,
+  `'{}'`), `"triageNote"` (`varchar(200)`, recortada), `"walkIn"` y
+  `"overbooked"` (`NOT "overbooked" OR "walkIn"`), y
+  `appointment_reserved_overrides."kind"`. La EXCLUDE
+  `appointments_no_overlap_per_provider` deja de contar los sobrecupos (más
+  laxa, misma técnica que `20261015150000`); el pre-check `findOverlapping`
+  también. La del paciente no cambia. Sin índice nuevo.
+- **Datos de salud**: el triaje sale solo en `GET /appointments/:id` y en el
+  panel `GET /appointments/in-clinic` (ahora con `urgent`, `walkIn`,
+  `overbooked`, `triageFlags` y `triageNote`), que exige sede permitida. La
+  agenda (`GET /appointments`) lo quita; vistas públicas, recordatorios y
+  mensajes no lo leen (lo vigila `triage-privacy.spec.ts`: solo una lista de
+  ficheros puede nombrarlo) y el redactor de logs oculta toda clave `triage*`.
+- Matriz de aislamiento: `POST /appointments/walk-in` con `patientId`,
+  `providerId` y `appointmentTypeId` de otra clínica (404/404/400).
+
 ## Producción atribuible: quién realizó cada ítem, dónde y cuándo (DX-050)
 
 - **Columnas** de `treatment_plan_items` (migración
@@ -2024,6 +2081,52 @@ la Sede Norte, por ejemplo). Por defecto nadie está restringido.
   solo atiende en la Sede Norte; la recepción de siempre
   (`recepcion@demo.dentalix.app`) sigue con todas.
 
+## Agenda de contingencia por sede (DX-339)
+
+Si cae la nube o internet, recepción necesita saber a quién espera hoy y
+mañana y cómo llamarle. Módulo `src/modules/contingency-agenda`.
+
+- **Qué lleva** (PDF A4 apaisado, pdfkit con las fuentes estándar como el PDF
+  firmado de DX-422): las citas de HOY y MAÑANA de una sede (días civiles en
+  su zona IANA), sin canceladas ni inasistencias, ordenadas por hora y
+  profesional: hora de inicio y fin (zona, locale y reloj de la sede),
+  paciente, teléfono (formato internacional con la región de la sede, o el
+  texto guardado), profesional, tipo de cita y alertas NO clínicas: confirmada
+  / sin confirmar / en la clínica / atendida, «Primera visita» (sin ninguna
+  cita atendida antes), «Pidió que le llamen» (DX-005) y «Alerta médica: ver
+  ficha» como sí/no (alerta crítica o premedicación de DX-247, sin detalle).
+  Nunca notas ni motivo de la cita ni nada de la historia clínica. Cabecera con
+  clínica, sede, teléfono de la sede y «Generada el … (zona)»; pie con la sede
+  y «Página X de Y» en cada hoja. Un carácter que la fuente no pinta se
+  translitera o sale como «?» (`shared/pdf/win-ansi.ts`).
+- **Endpoints** (ADMIN y RECEPTION; la sede tiene que ser de la clínica —si
+  no, 404— y permitida al usuario —DX-089, si no 403 `LOCATION_NOT_ALLOWED`—;
+  sede sin zona o sin formato: 409 con su código):
+  - `GET /locations/:locationId/contingency-agenda`: el PDF generado en ese
+    momento (`attachment`, `agenda-contingencia-<sede>-<día>.pdf`,
+    `Cache-Control: private, no-store`).
+  - `GET /locations/:locationId/contingency-agenda/nightly`: estado de la copia
+    nocturna (`available`, `current` = es la de hoy en la sede, `forDate`,
+    `generatedAt`, `appointmentCount`). Sin pacientes; no se audita.
+  - `GET /locations/:locationId/contingency-agenda/nightly/pdf`: la última copia
+    tal cual se generó; 404 si aún no hay.
+- **Auditoría**: cada descarga correcta deja `audit_events` EXPORT de
+  `LOCATION` con la sede como recurso y `reason`
+  `CONTINGENCY_AGENDA_DOWNLOADED` o `CONTINGENCY_AGENDA_NIGHTLY_DOWNLOADED`.
+- **Copia nocturna**: la tarea `contingency.nightly-sweep.hourly` (ver «Trabajos
+  en segundo plano») encola, desde las 02:00 de cada sede, un
+  `contingency.nightly-agenda` por sede (payload solo con el id). El trabajo
+  guarda el PDF en el almacén PRIVADO (`contingency-agendas/<clínica>/<sede>.pdf`,
+  se sobrescribe: solo la última) y la fila de la sede en
+  `contingency_agenda_snapshots` (RLS FORCE, FK compuesta a la sede, sin
+  DELETE para la app). Una noche perdida se recupera en el tick siguiente del
+  mismo día; una sede sin zona, formato o reloj se salta hasta configurarla.
+- **Email a la sede: no**. Las sedes no tienen dirección de email propia y el
+  outbox de DX-088 no admite adjuntos; además, mandar por correo una lista con
+  nombres y teléfonos de pacientes multiplica las copias fuera del sistema. La
+  copia nocturna queda en la app (descarga auditada).
+- **Web**: botón «Agenda de contingencia» en la agenda (ADMIN y RECEPTION).
+
 ## Trabajos en segundo plano (DX-085)
 
 Cola y tareas programadas sobre la Postgres que ya existe (módulo
@@ -2190,6 +2293,7 @@ idempotencyKey, tenantId })`. Con `tx` (la de `runWithTenant`) el trabajo
   | `jobs.purge-finished.daily`          | `41 3 * * *` | Borra los trabajos terminados de más de `JOBS_RETENTION_DAYS`                                                                                                                                                                                                                                                                                                                                                                                                              |
   | `collections.settle-promises.hourly` | `7 * * * *`  | Cierra los compromisos de pago (DX-150): `KEPT` si los abonos registrados desde el compromiso y fechados hasta su día (zona de su sede) cubren el importe; `BROKEN` desde el día siguiente. Regla diaria, barrida cada hora para respetar la medianoche de cada sede; idempotente y auditada sin usuario (`origin: JOB`). El abono que cubre un compromiso lo cierra además en el acto; anular ese abono lo reabre (DX-215). Cada cierre relee con el candado del paciente |
   | `domains.recheck-sweep.hourly`       | `29 * * * *` | Re-verifica el TXT de cada dominio personalizado VERIFIED (consulta el DNS de toda la ronda y encola un `domains.recheck` por dominio, en su clínica); desactiva los que fallan `DOMAIN_RECHECK_MAX_FAILURES` veces seguidas (SEC-009). Si falla más de la mitad (y son ≥ 4), la ronda no cuenta (`domains.recheck_suspect`, DX-220)                                                                                                                                       |
+  | `contingency.nightly-sweep.hourly`   | `47 * * * *` | Agenda de contingencia (DX-339): por clínica, cada sede con zona, formato y reloj cuya copia no es la de HOY en su zona y en la que ya son las 02:00 recibe su `contingency.nightly-agenda` (clave `contingency.nightly:<sede>:<día>`); el trabajo genera el PDF de hoy y mañana y sobrescribe la copia de la sede |
 
 - **Tablas**: `jobs` y `job_schedules` son de PLATAFORMA, sin RLS (exención
   documentada en `test/rls-catalog.int-spec.ts`): un worker reclama trabajos de
@@ -4656,10 +4760,12 @@ el que se sirve sale de la extensión de la clave, con `nosniff`.
 3. **Versionado** activado: un reemplazo o un borrado (el avatar anterior se
    borra al subir uno nuevo) deja una versión anterior recuperable. Es la base
    de la copia de ficheros de DX-082 (replicación a otra cuenta o región).
-4. **Ciclo de vida**: expirar las versiones no actuales a los 30 días y
-   abortar las subidas multiparte incompletas a los 7 días. Los ficheros
-   clínicos de DX-008 seguirán la retención de la historia clínica (DX-039),
-   así que **no** se expiran versiones actuales.
+4. **Ciclo de vida** (DX-082: reglas por prefijo en
+   [Copias de la BD y de los ficheros](#copias-de-la-bd-y-de-los-ficheros-dx-082)):
+   las versiones no actuales solo expiran bajo `avatars/` (30 días), nunca
+   bajo `patient-documents/` (retención de la historia clínica, DX-039);
+   abortar las subidas multiparte incompletas a los 7 días. **No** se
+   expiran versiones actuales de ficheros clínicos.
 5. **Credenciales mínimas**: un usuario o rol solo para la API con
    `s3:GetObject`, `s3:PutObject` y `s3:DeleteObject` sobre
    `arn:aws:s3:::<bucket>/*` y nada más (sin `s3:ListAllMyBuckets`, sin
@@ -5625,6 +5731,86 @@ FALSE`.
   `DIRECT_URL=<owner> DATABASE_URL=<app> OWNER_NOSU_ADMIN_URL=<admin>/postgres
 npm run test:owner-nosu`. Los specs crean y borran sus propias bases y, el
   de clúster compartido, un segundo owner y un intruso con nombre único.
+
+## Copias de la BD y de los ficheros (DX-082)
+
+Runbook (restauración completa y de una clínica, RPO/RTO, claves, prueba
+mensual, requisitos del bucket): `dentalix-docs/docs/operacion/backups.md`.
+Tres scripts bash en `scripts/` (sin Node salvo los dos pasos de
+`restore-check.sh` que lo dicen; `--help` en cada uno):
+
+| Script                       | Qué hace                                                                                                                                                                                                                   |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `scripts/backup-db.sh`       | `pg_dump -Fc --create` cifrado al vuelo con **age** (clave pública) + `.sha256` + manifiesto de filas por tabla contado en la **misma instantánea** que el volcado. Nombre `<prefijo>_AAAAMMDDTHHMMSSZ.dump.age` (UTC). |
+| `scripts/restore-check.sh`   | SHA-256, `age -d \| pg_restore` en una BD temporal nueva, `prisma migrate status`, FORCE RLS (SQL propio y `prisma/check-force.ts`), filas por tabla == manifiesto, informe JSON y borrado de la BD. `--tenant <uuid>`: una clínica. |
+| `scripts/backup-retention.sh`| Política 35 diarias + 12 mensuales sobre una lista de nombres (directorio o `aws s3 ls`): `keep`, `delete` o `review` (mensuales de más de 12 meses: **nunca** se borran solas, DX-039).                                  |
+
+**Por qué age** (y no gpg ni openssl): una clave pública X25519 en un fichero,
+sin anillo de claves ni estado en `~/.gnupg`, cifrado en streaming
+autenticado (una copia alterada no se descifra) y binario estático en
+Debian/Ubuntu (`apt-get install age`). `openssl` no cifra en streaming con
+clave pública (habría que montar un esquema híbrido a mano). La clave
+privada **no** está en el repo, ni en la app, ni en el job de copias: la
+guardan quienes restauran (runbook).
+
+**Rol de copias.** Con FORCE RLS (DX-113) el owner sin `BYPASSRLS` queda
+sujeto a la RLS y `pg_dump` aborta («query would be affected by row-level
+security policy»); `dentalix_app` ni siquiera puede bloquear las tablas. El
+volcado necesita un rol propio, creado por el admin del proveedor (dar
+`BYPASSRLS` exige superusuario o el equivalente del proveedor; comprobarlo al
+elegirlo):
+
+```sql
+CREATE ROLE dentalix_backup LOGIN PASSWORD '…' BYPASSRLS
+  NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
+GRANT pg_read_all_data TO dentalix_backup;
+ALTER ROLE dentalix_backup SET default_transaction_read_only = on;
+```
+
+Su contraseña solo la tiene el job de copias (nunca la API). `backup-db.sh`
+lee `BACKUP_DATABASE_URL` (o `DIRECT_URL`, o `PG*`), la reparte en variables
+de libpq (nunca en argv ni en la salida) y abre la sesión con
+`row_security = off`: un rol sin `BYPASSRLS` falla en vez de copiar tablas
+vacías.
+
+```bash
+# Copia (job diario; --prune aplica la retención al directorio local)
+BACKUP_DATABASE_URL=… BACKUP_AGE_RECIPIENTS_FILE=/run/secrets/backup-recipients.txt \
+  scripts/backup-db.sh --out-dir /var/backups/dentalix --prefix dentalix-prod [--prune]
+# Prueba de restauración, en un Postgres 16 DESECHABLE (superusuario) con el repo
+RESTORE_ADMIN_URL=postgresql://postgres:…@localhost:55432/postgres \
+BACKUP_AGE_IDENTITY_FILE=/ruta/segura/backup-key.txt \
+  scripts/restore-check.sh --file dentalix-prod_20261031T030000Z.dump.age --report informe.json
+# Una clínica (CSV cifrados con la clave pública + verificación por recarga)
+BACKUP_AGE_RECIPIENTS_FILE=… scripts/restore-check.sh --file … --tenant <uuid> --tenant-out DIR
+```
+
+`restore-check.sh` restaura como superusuario (las tablas tienen FORCE RLS y
+se conservan dueños y privilegios) y solo crea y borra bases con
+`RESTORE_DB_PREFIX` (`dx_restore_`). Los roles del manifiesto (owner,
+`dentalix_app`, los NOLOGIN) tienen que existir en ese clúster
+(`--create-missing-roles` los crea NOLOGIN). Los errores de Postgres se
+filtran (sin `DETAIL`/`CONTEXT`, que en un `COPY` llevan valores de filas): el
+informe solo tiene nombres de tabla, números y tiempos.
+
+**Tests.** `test/invariants/backup-*.spec.ts` (unit, `npm test`): política de
+retención y los scripts con stubs de `pg_dump`/`psql`/`age` (fallo sin dejar
+ficheros, contraseña nunca en argv ni en la salida). `test/backup/backup-restore.int-spec.ts`
+(`npm run test:int`): volcado y restauración reales de `dentalix_test`, otra
+clave, copia alterada y `--tenant` con dos clínicas. Necesita `pg_dump`,
+`pg_restore`, `age` y un rol que vuelque (superusuario o `BYPASSRLS`): si
+falta algo se **salta** con un aviso `[DX-082] SALTADO …`; en la CI
+(`REQUIRE_BACKUP_TESTS=1`, el job instala `age`) falta algo = fallo. En
+local, con el owner sin superusuario, como el usuario `postgres` del sistema:
+
+```bash
+su postgres -c "BACKUP_TEST_SOURCE_URL='postgresql:///dentalix_test?host=/var/run/postgresql' \
+  npx jest --config ./test/jest-int.json --runInBand test/backup"
+```
+
+**Bucket de ficheros**: versionado, ciclo de vida por prefijo, `Deny
+s3:DeleteObject` en `patient-documents/*` para la credencial de la API y
+replicación a otra cuenta: requisitos para infra en el runbook.
 
 ## Lint en local sin agotar memoria (DX-338)
 

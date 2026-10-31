@@ -128,3 +128,44 @@ export class ClinicalRecordRetentionErrorDto {
   @ApiProperty({ type: String, format: 'date', nullable: true })
   retentionUntil!: string | null;
 }
+
+/**
+ * DX-461: enlaces públicos vivos del paciente (los que anularía archivarlo),
+ * por tipo y en total. Solo números: ni tokens ni destinatarios.
+ */
+export class LivePublicLinksDto {
+  @ApiProperty({
+    minimum: 0,
+    description: 'Ofertas de hueco con enlace pendientes (DX-435)',
+  })
+  slotOffers!: number;
+
+  @ApiProperty({
+    minimum: 0,
+    description:
+      'Consentimientos enviados a firmar a distancia sin firmar (DX-243)',
+  })
+  consentSignatures!: number;
+
+  @ApiProperty({
+    minimum: 0,
+    description:
+      'Presupuestos enviados a aceptar a distancia sin firmar (DX-415)',
+  })
+  budgetSignatures!: number;
+
+  @ApiProperty({
+    minimum: 0,
+    description: 'Enlaces de la copia del PDF firmado sin descargar (DX-443)',
+  })
+  signedPdfCopies!: number;
+
+  @ApiProperty({
+    minimum: 0,
+    description: 'Cuestionarios de salud (anamnesis) sin responder (DX-099)',
+  })
+  anamnesis!: number;
+
+  @ApiProperty({ minimum: 0, description: 'Suma de todos los tipos' })
+  total!: number;
+}

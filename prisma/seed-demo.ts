@@ -131,10 +131,12 @@ import {
   daysAgoAt,
   daysUntilMondayAfterNext,
   daysUntilNextWeekday,
+  upcomingWeekdayOffsets,
   daysUntilRotationCover,
   planAppointments,
   planComparisonHistory,
   planInClinicToday,
+  planClosingQueueExamples,
 } from './demo/calendar';
 import { CreateScheduleBlockUseCase } from '../src/modules/schedule-blocks/application/use-cases/schedule-blocks.use-cases';
 import {
@@ -180,6 +182,7 @@ import {
   DEMO_CONSENT_TEMPLATES,
   DEMO_APPOINTMENT_TYPES,
   DEMO_LUNCH,
+  DEMO_RESERVED_URGENCY,
   DEMO_ROTATION,
   DEMO_VACATION,
   DEMO_WAITLIST,
@@ -756,6 +759,16 @@ class DemoSeeder {
       catalog,
     );
 
+    await this.createClosingQueueExamples(
+      tenantId,
+      locations,
+      hours,
+      patientIds,
+      dentists,
+      receptionId,
+      catalog,
+    );
+
     await this.createCollections(tenantId, locations, patientIds, receptionId);
 
     await this.createCashSessions(tenantId, locations, receptionId);
@@ -796,6 +809,16 @@ class DemoSeeder {
     // DX-051 al final: cualquier paso anterior que cobre o cambie ítems deja
     // su plan en la cola, y la demo termina con la cola vacía.
     await this.allocatePayments(tenantId, ownerId);
+
+    // DX-446 al final: el hueco reservado no puede cambiar las citas que la
+    // demo ya agendó (las que caen dentro se quedan, como al crearlo a mano).
+    await this.createReservedUrgencySlots(
+      tenantId,
+      locations,
+      dentists,
+      receptionId,
+      typeByReason,
+    );
 
     return this.requestConfirmations(tenantId, receptionId);
   }
@@ -1329,6 +1352,7 @@ class DemoSeeder {
           name: spec.name,
           durationMinutes: spec.durationMinutes,
           color: spec.color,
+          isUrgent: spec.isUrgent ?? false,
         },
         ownerId,
       );
@@ -1954,6 +1978,45 @@ class DemoSeeder {
   }
 
   /**
+   * DX-446: «Urgencias» 15:00–15:30 reservado para «Consulta de urgencia» los
+   * próximos días laborables, liberado a las 11:00. Recepción lo crea por el
+   * mismo caso de uso que la agenda (validaciones, auditoría), confirmando
+   * las citas que ya caigan dentro.
+   */
+  private async createReservedUrgencySlots(
+    tenantId: string,
+    locations: Record<DemoLocationKey, string>,
+    dentists: string[],
+    receptionId: string,
+    typeByReason: Map<string, string>,
+  ): Promise<void> {
+    const spec = DEMO_RESERVED_URGENCY;
+    const urgent = DEMO_APPOINTMENT_TYPES.find((t) => t.name === spec.typeName);
+    const typeId = urgent && typeByReason.get(urgent.reasons[0]);
+    if (!typeId) throw new Error(`Falta el tipo «${spec.typeName}»`);
+    const actor = { userId: receptionId, role: ClinicRole.RECEPTION };
+    await this.inTenant(tenantId, undefined, async () => {
+      const blocks = this.use(CreateScheduleBlockUseCase);
+      for (const offset of upcomingWeekdayOffsets(this.now, spec.days)) {
+        await blocks.execute(
+          {
+            providerId: dentists[spec.dentistIndex],
+            locationId: locations.principal,
+            start: daysAgoAt(this.now, -offset, spec.startMinute),
+            end: daysAgoAt(this.now, -offset, spec.endMinute),
+            kind: ScheduleBlockKind.RESERVED,
+            reservedForTypeIds: [typeId],
+            releaseAtMinute: spec.releaseAtMinute,
+            note: spec.note,
+            confirmAffected: true,
+          },
+          actor,
+        );
+      }
+    });
+  }
+
+  /**
    * DX-247: anamnesis de hace más de un año, para ver «Anamnesis caducada» en
    * la agenda y en la ficha. La historia es inalterable (no se puede antedatar
    * una versión ya guardada), así que la versión 1 se inserta ya con su fecha,
@@ -2083,6 +2146,85 @@ class DemoSeeder {
             dentist,
           );
         }
+      }
+    });
+  }
+
+  /**
+   * DX-439: «Pendiente de cerrar» con algo en cada sección para probarla en
+   * local: en la sede principal, el último día abierto antes de hoy, una cita
+   * CONFIRMED sin desenlace, una atendida sin evolución y una atendida con un
+   * tratamiento del plan ligado que sigue en ACCEPTED (el plan, aceptado).
+   */
+  private async createClosingQueueExamples(
+    tenantId: string,
+    locations: Record<DemoLocationKey, string>,
+    hours: Record<DemoLocationKey, BusinessHours | null>,
+    patientIds: string[],
+    dentists: string[],
+    receptionId: string,
+    catalog: Map<string, string>,
+  ): Promise<void> {
+    const examples = planClosingQueueExamples(
+      this.now,
+      hours.principal?.ranges ?? [],
+    );
+    const candidates = patientIds.filter(
+      (_, i) => i !== DEMO_PLAN_OPTIONS.patientIndex,
+    );
+    const used = new Set<string>();
+    await this.inTenant(tenantId, locations.principal, async () => {
+      const create = this.use(CreateAppointmentUseCase);
+      const update = this.use(UpdateAppointmentUseCase);
+      for (const example of examples) {
+        const booked = await this.bookFirstFree(
+          create,
+          example,
+          dentists,
+          candidates,
+          used,
+          receptionId,
+        );
+        if (!booked) continue;
+        used.add(booked.patientId);
+        await update.execute(booked.id, {
+          status:
+            example.kind === 'OUTCOME'
+              ? AppointmentStatus.CONFIRMED
+              : AppointmentStatus.COMPLETED,
+        });
+        if (example.kind !== 'TREATMENT') continue;
+        await this.prisma.runWithTenant(async (tx) => {
+          const plan = await tx.treatmentPlan.create({
+            data: {
+              tenantId,
+              patientId: booked.patientId,
+              currency: DEMO_CURRENCY,
+              status: TreatmentPlanStatus.ACCEPTED,
+              notes: 'Resina pendiente de marcar como realizada.',
+              createdById: booked.providerId,
+            },
+          });
+          const item = await tx.treatmentPlanItem.create({
+            data: {
+              tenantId,
+              planId: plan.id,
+              toothNumber: '26',
+              catalogItemId: catalogId(catalog, 'OP-RESINA-1'),
+              price: 150000,
+              status: TreatmentPlanItemStatus.ACCEPTED,
+              createdById: booked.providerId,
+            },
+          });
+          await tx.appointmentPlanItem.create({
+            data: {
+              tenantId,
+              patientId: booked.patientId,
+              appointmentId: booked.id,
+              planItemId: item.id,
+            },
+          });
+        });
       }
     });
   }

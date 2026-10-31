@@ -675,6 +675,7 @@ describe('Responsables de pago y avisos (e2e, DX-203)', () => {
       });
     });
 
+    // ISOLATION_COVERS: GET /patients/:patientId/family-account-statement
     it('roles y aislamiento: DENTIST 403; otra clínica 404', async () => {
       await as(
         api().get(`/api/v1/patients/${payer}/family-account-statement`),
