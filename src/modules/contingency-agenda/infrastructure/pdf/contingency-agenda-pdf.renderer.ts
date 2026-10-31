@@ -73,11 +73,19 @@ export class PdfkitContingencyAgendaRenderer implements ContingencyAgendaRendere
     this.header(doc, model);
     for (const day of model.days) this.day(doc, day);
     doc.moveDown();
+    doc.font('Helvetica').fontSize(8);
+    const noticeWidth = this.contentWidth(doc);
+    // El aviso entero por encima del pie: si no cabe, a la página siguiente
+    // (pdfkit lo dejaría pisar el pie, que va dentro del margen inferior).
+    if (
+      doc.y + doc.heightOfString(model.notice, { width: noticeWidth }) >
+      this.bottom(doc)
+    ) {
+      doc.addPage();
+    }
     doc
-      .font('Helvetica')
-      .fontSize(8)
       .fillColor(MUTED)
-      .text(model.notice, MARGIN, doc.y, { width: this.contentWidth(doc) });
+      .text(model.notice, MARGIN, doc.y, { width: noticeWidth });
     this.footers(doc, model);
     doc.end();
     return done;

@@ -21,6 +21,25 @@ function paintedLines(pdf: Buffer): string[] {
   );
 }
 
+/** Altura (origen abajo, en pt) de la línea base de cada texto pintado. */
+function paintedAt(pdf: Buffer): { y: number; text: string }[] {
+  const raw = pdf.toString('latin1');
+  return [
+    ...raw.matchAll(
+      /1 0 0 1 [\d.-]+ ([\d.-]+) Tm\n(?:[^\n]*\n)*?\[([^\]]*)\] TJ/g,
+    ),
+  ].map((op) => ({
+    y: Number(op[1]),
+    text: [...op[2].matchAll(/<([0-9a-f]*)>/g)]
+      .map((hex) =>
+        [...Buffer.from(hex[1], 'hex')]
+          .map((b) => WIN_ANSI_HIGH[b] ?? String.fromCharCode(b))
+          .join(''),
+      )
+      .join(''),
+  }));
+}
+
 function row(
   patient: string,
   over: Partial<ContingencyRow> = {},
@@ -129,6 +148,28 @@ describe('PdfkitContingencyAgendaRenderer (DX-339)', () => {
     expect(lines).toContain(`Página ${pages} de ${pages}`);
     // Sin páginas en blanco: cada página tiene su pie y algo más.
     expect(lines.filter((l) => l.startsWith('Página ')).length).toBe(pages);
+  });
+
+  it('el aviso final nunca pisa el pie, tenga el día las citas que tenga', async () => {
+    const notice = model().notice;
+    for (let n = 1; n <= 45; n++) {
+      const rows = Array.from({ length: n }, (_, i) =>
+        row(`Paciente ${i + 1}`),
+      );
+      const painted = paintedAt(
+        await renderer.render(
+          model({ days: [{ ...model().days[0], rows }], total: n }),
+        ),
+      );
+      const footerY = Math.max(
+        ...painted.filter((p) => p.text.startsWith('Página ')).map((p) => p.y),
+      );
+      const noticeY = painted.find((p) => p.text === notice)?.y;
+      expect({
+        n,
+        above: noticeY !== undefined && noticeY > footerY + 8,
+      }).toEqual({ n, above: true });
+    }
   });
 
   it('es determinista: la misma entrada da los mismos bytes', async () => {
