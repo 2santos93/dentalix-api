@@ -42,6 +42,12 @@
  * - anamnesis-token: las mismas rutas, por TOKEN (sin IP): un mismo enlace no
  *                  admite ráfagas de reintentos aunque cambie la IP. La clave
  *                  es el hash del token, nunca el token.
+ * - signature:     las rutas públicas de la firma a distancia (DX-243: ver el
+ *                  enlace, pedir y verificar el código, ver y firmar el
+ *                  documento), por IP (enumeración de tokens).
+ * - signature-token: las mismas rutas, por TOKEN (sin IP), como
+ *                  anamnesis-token: un mismo enlace no admite ráfagas aunque
+ *                  cambie la IP. Los 5 intentos del código son aparte (BD).
  * - public-files:  servir los avatares (`GET /files/avatars/:name`), por IP
  *                  (DX-259). Ruta anónima que llega al bucket; con la caché
  *                  del navegador (clave versionada, `immutable`) el uso
@@ -71,7 +77,9 @@ export type RateLimitPolicy =
   | 'patient-import'
   | 'exchange-rates'
   | 'anamnesis'
-  | 'anamnesis-token';
+  | 'anamnesis-token'
+  | 'signature'
+  | 'signature-token';
 
 export interface RateLimitRule {
   limit: number;
@@ -100,6 +108,8 @@ export const DEFAULT_RATE_LIMITS: RateLimitConfig = {
   'exchange-rates': { limit: 120, ttlMs: MINUTE },
   anamnesis: { limit: 20, ttlMs: MINUTE },
   'anamnesis-token': { limit: 10, ttlMs: MINUTE },
+  signature: { limit: 20, ttlMs: MINUTE },
+  'signature-token': { limit: 10, ttlMs: MINUTE },
 };
 
 type EnvReader = (key: string) => string | undefined;
@@ -140,5 +150,7 @@ export function loadRateLimitConfig(env: EnvReader): RateLimitConfig {
     'exchange-rates': rule('exchange-rates'),
     anamnesis: rule('anamnesis'),
     'anamnesis-token': rule('anamnesis-token'),
+    signature: rule('signature'),
+    'signature-token': rule('signature-token'),
   };
 }

@@ -16,6 +16,7 @@ import { PatientCoveragesController } from '../patient-coverages/presentation/pa
 import { PatientResponsiblePartiesController } from '../patients/presentation/patient-responsible-parties.controller';
 import { MedicalHistoryController } from '../medical-history/presentation/medical-history.controller';
 import { PatientAnamnesisRequestsController } from '../medical-history-submissions/presentation/patient-anamnesis-requests.controller';
+import { PatientSignatureRequestsController } from '../signature-requests/presentation/patient-signature-requests.controller';
 import { MedicalHistorySubmissionsController } from '../medical-history-submissions/presentation/medical-history-submissions.controller';
 import { ClinicalEntriesController } from '../clinical-entries/presentation/clinical-entries.controller';
 import { DentalCatalogController } from '../dental-catalog/presentation/dental-catalog.controller';
@@ -556,6 +557,29 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'CONSENT',
     resourceId: RES,
     patient: P,
+  },
+  // DX-243: el profesional firma en la app uno firmado a distancia.
+  'POST /patients/:patientId/consents/:id/countersign': {
+    action: 'SIGN',
+    resource: 'CONSENT',
+    resourceId: { param: 'id' },
+    patient: P,
+    reason: 'CONSENT_COUNTERSIGNED',
+  },
+  // DX-243: enviar a firmar a distancia y anular el enlace.
+  'POST /patients/:patientId/signature-requests': {
+    action: 'SEND',
+    resource: 'SIGNATURE_REQUEST',
+    resourceId: RES,
+    patient: P,
+    reason: 'SIGNATURE_REQUEST_SENT',
+  },
+  'POST /patients/:patientId/signature-requests/:id/revoke': {
+    action: 'UPDATE',
+    resource: 'SIGNATURE_REQUEST',
+    resourceId: { param: 'id' },
+    patient: P,
+    reason: 'SIGNATURE_REQUEST_REVOKED',
   },
   'GET /patients/:patientId/consents/:id': {
     action: 'VIEW',
@@ -1370,6 +1394,13 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // REMINDER_OPT_OUT del paciente por el enlace (solo si de verdad se da de baja).
   'POST /public/reminder-opt-outs/:token':
     'reminder-opt-out.use-cases.spec.ts y reminder-opt-out.e2e-spec.ts',
+  // DX-243: el paciente por el enlace, en la transacción de cada paso:
+  // SIGNATURE_LINK_OPENED y SIGNATURE_CODE_SENT al pedir el código,
+  // SIGNATURE_CODE_VERIFIED o SIGNATURE_LINK_LOCKED al verificarlo y
+  // SIGNATURE_PATIENT_SIGNED al firmar (con el consentimiento).
+  'POST /public/sign/:token/code': 'signature-requests.e2e-spec.ts',
+  'POST /public/sign/:token/verify': 'signature-requests.e2e-spec.ts',
+  'POST /public/sign/:token/sign': 'signature-requests.e2e-spec.ts',
   // ANAMNESIS_SUBMITTED (y el consentimiento) en la transacción del envío.
   'POST /public/medical-history/:token':
     'medical-history-submissions.e2e-spec.ts',
@@ -1519,6 +1550,7 @@ const CONTROLLERS: Type[] = [
   AuthController,
   PatientsController,
   PatientAnamnesisRequestsController,
+  PatientSignatureRequestsController,
   MedicalHistorySubmissionsController,
   PatientResponsiblePartiesController,
   PatientCoveragesController,

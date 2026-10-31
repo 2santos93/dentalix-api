@@ -1,5 +1,9 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { ConsentSignerType, type DocumentType } from '@prisma/client';
+import {
+  ConsentSignerType,
+  SignatureRequestChannel,
+  type DocumentType,
+} from '@prisma/client';
 import { DOCUMENT_TYPES } from '../../../patients/domain/document-type';
 import {
   DOC_TYPE_LABEL_PROPERTY,
@@ -21,6 +25,37 @@ export class ConsentPreviewDto {
 
   @ApiProperty()
   professionalName!: string;
+}
+
+/** DX-243: evidencias congeladas de la firma del paciente a distancia. */
+export class RemoteConsentEvidenceDto {
+  @ApiProperty({ format: 'uuid' })
+  signatureRequestId!: string;
+
+  @ApiProperty({
+    enum: SignatureRequestChannel,
+    enumName: 'SignatureRequestChannel',
+  })
+  channel!: SignatureRequestChannel;
+
+  @ApiProperty({ description: 'Destino enmascarado (an***@dominio)' })
+  destinationMasked!: string;
+
+  @ApiProperty({ format: 'date-time' })
+  sentAt!: Date;
+
+  @ApiProperty({ format: 'date-time' })
+  openedAt!: Date;
+
+  @ApiProperty({ format: 'date-time', description: 'Código verificado' })
+  verifiedAt!: Date;
+
+  @ApiProperty({
+    format: 'uuid',
+    description:
+      'El profesional que debe firmar en la app (y que nombra el texto)',
+  })
+  professionalUserId!: string;
 }
 
 export class PatientConsentSummaryDto {
@@ -67,6 +102,28 @@ export class PatientConsentSummaryDto {
 
   @ApiProperty({ format: 'uuid' })
   recordedById!: string;
+
+  @ApiProperty({
+    type: RemoteConsentEvidenceDto,
+    nullable: true,
+    description: 'DX-243: firmado a distancia por enlace; null si en pantalla',
+  })
+  remote!: RemoteConsentEvidenceDto | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description:
+      'Firma del profesional: la misma hora en pantalla; a distancia, la de su firma en la app (null si falta)',
+  })
+  professionalSignedAt!: Date | null;
+
+  @ApiProperty({
+    description:
+      'Completo: con la firma del paciente Y la del profesional. Solo así cuenta como válido.',
+  })
+  complete!: boolean;
 }
 
 export class PatientConsentDto extends PatientConsentSummaryDto {
@@ -76,8 +133,13 @@ export class PatientConsentDto extends PatientConsentSummaryDto {
   @ApiProperty({ description: 'data:image/png;base64,…' })
   patientSignature!: string;
 
-  @ApiProperty({ description: 'data:image/png;base64,…' })
-  professionalSignature!: string;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'data:image/png;base64,…; null en uno firmado a distancia hasta que firma el profesional',
+  })
+  professionalSignature!: string | null;
 }
 
 class ConsentClinicDto {
@@ -122,4 +184,12 @@ export class PatientConsentDocumentDto extends PatientConsentDto {
     description: 'true si el hash guardado coincide con el recalculado al leer',
   })
   integrityOk!: boolean;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'DX-243: IP desde la que firmó el paciente a distancia (evidencia); null si se firmó en pantalla',
+  })
+  remoteIpAddress!: string | null;
 }

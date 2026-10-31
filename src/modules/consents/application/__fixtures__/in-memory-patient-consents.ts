@@ -1,10 +1,15 @@
 import {
   PatientConsent,
+  StoredCountersignature,
   StoredPatientConsentDocument,
   PatientConsentSummary,
+  RemoteConsentEvidence,
 } from '../../domain/entities/patient-consent.entity';
 import {
+  AlreadyCountersignedError,
   ConsentSigningContext,
+  CountersignTarget,
+  CreateCountersignatureRepoInput,
   CreatePatientConsentRepoInput,
   PatientConsentRepository,
 } from '../../domain/ports/patient-consent-repository.port';
@@ -16,6 +21,13 @@ import {
  */
 export class InMemoryPatientConsentRepository implements PatientConsentRepository {
   readonly rows: PatientConsent[] = [];
+  /** DX-243: firmas del profesional a distancia, por id de consentimiento. */
+  readonly countersignatures = new Map<
+    string,
+    StoredCountersignature & { professionalUserId: string }
+  >();
+  /** DX-243: nombre del profesional que debe firmar, por id de usuario. */
+  readonly remoteProfessionalNames = new Map<string, string>();
   /** Zona de la sede de la firma (la activa o la principal). */
   timeZone = 'Europe/Madrid';
   /** Esa sede con su formato y su reloj (G1-B), explícitos. */
@@ -75,9 +87,82 @@ export class InMemoryPatientConsentRepository implements PatientConsentRepositor
       id: `pc-${this.nextId++}`,
       tenantId: 't1',
       ...input,
+      remote: null,
+      professionalSignedAt: input.signedAt,
+      complete: true,
     };
     this.rows.push(row);
     return Promise.resolve(row);
+  }
+
+  /** DX-243: siembra uno firmado a distancia (lo escribe el módulo de firma). */
+  seedRemote(
+    row: Omit<
+      PatientConsent,
+      'remote' | 'professionalSignedAt' | 'complete' | 'professionalSignature'
+    >,
+    remote: RemoteConsentEvidence,
+    professionalName: string,
+  ): PatientConsent {
+    const consent: PatientConsent = {
+      ...row,
+      professionalSignature: null,
+      remote,
+      professionalSignedAt: null,
+      complete: false,
+    };
+    this.rows.push(consent);
+    this.remoteProfessionalNames.set(
+      remote.professionalUserId,
+      professionalName,
+    );
+    return consent;
+  }
+
+  findCountersignTarget(
+    patientId: string,
+    id: string,
+  ): Promise<CountersignTarget | null> {
+    const row = this.rows.find((r) => r.id === id && r.patientId === patientId);
+    if (!row) return Promise.resolve(null);
+    return Promise.resolve({
+      id: row.id,
+      patientId: row.patientId,
+      contentHash: row.contentHash,
+      remote: row.remote
+        ? {
+            professionalUserId: row.remote.professionalUserId,
+            professionalName:
+              this.remoteProfessionalNames.get(row.remote.professionalUserId) ??
+              row.professionalName,
+          }
+        : null,
+      countersigned: this.countersignatures.has(row.id),
+    });
+  }
+
+  countersign(
+    input: CreateCountersignatureRepoInput,
+  ): Promise<PatientConsentSummary> {
+    if (this.countersignatures.has(input.consentId)) {
+      return Promise.reject(new AlreadyCountersignedError());
+    }
+    this.countersignatures.set(input.consentId, {
+      professionalUserId: input.professionalUserId,
+      professionalName: input.professionalName,
+      professionalSignature: input.professionalSignature,
+      contentHash: input.contentHash,
+      signedAt: input.signedAt,
+    });
+    const index = this.rows.findIndex((r) => r.id === input.consentId);
+    const updated: PatientConsent = {
+      ...this.rows[index],
+      professionalSignature: input.professionalSignature,
+      professionalSignedAt: input.signedAt,
+      complete: true,
+    };
+    this.rows[index] = updated;
+    return Promise.resolve(updated);
   }
 
   listByPatient(patientId: string): Promise<PatientConsentSummary[]> {
@@ -99,6 +184,7 @@ export class InMemoryPatientConsentRepository implements PatientConsentRepositor
       ...row,
       clinic: { name: 'Clínica Demo', logoUrl: null },
       patient: { id: patientId, ...patient },
+      countersignature: this.countersignatures.get(row.id) ?? null,
     });
   }
 }

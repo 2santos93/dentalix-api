@@ -117,6 +117,21 @@ describe('Cabeceras de seguridad (e2e)', () => {
     );
   });
 
+  it('deja pasar X-Signature-Session en el preflight (firma a distancia desde el navegador, DX-243)', async () => {
+    const res = await request(app.getHttpServer())
+      .options(`/api/v1/public/sign/${'A'.repeat(43)}/sign`)
+      .set('Origin', 'http://localhost:3001')
+      .set('Access-Control-Request-Method', 'POST')
+      .set(
+        'Access-Control-Request-Headers',
+        'content-type,x-signature-session,x-tenant-host',
+      );
+    expect(res.status).toBe(204);
+    expect(res.headers['access-control-allow-headers']).toMatch(
+      /X-Signature-Session/,
+    );
+  });
+
   it('acepta subdominios del dominio raíz (marca blanca)', async () => {
     const res = await request(app.getHttpServer())
       .get('/api/v1/health')

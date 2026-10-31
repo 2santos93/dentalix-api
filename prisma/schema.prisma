@@ -118,6 +118,9 @@ model Tenant {
   postOpDeliveries                        PostOpInstructionDelivery[]
   // DX-099: anamnesis enviadas por enlace al paciente.
   medicalHistorySubmissions               MedicalHistorySubmission[]
+  // DX-243: solicitudes de firma a distancia y firmas del profesional.
+  signatureRequests                       SignatureRequest[]
+  consentCountersignatures                PatientConsentCountersignature[]
   // DX-151: documentos de los pacientes.
   patientDocuments                        PatientDocument[]
   // DX-233: horario de cada profesional por sede y sus excepciones por fecha.
@@ -185,15 +188,15 @@ model User {
   privacyPoliciesPublished          PrivacyPolicyVersion[]
   dataConsentsRecorded              DataProcessingConsent[]
   perioExamsPerformed               PerioExam[]
-  prescriptionsIssued               Prescription[]                @relation("PrescriptionProfessional")
-  prescriptionsVoided               Prescription[]                @relation("PrescriptionVoidedBy")
+  prescriptionsIssued               Prescription[]                   @relation("PrescriptionProfessional")
+  prescriptionsVoided               Prescription[]                   @relation("PrescriptionVoidedBy")
   // DX-191: implantes colocados, anulados y tarjetas entregadas.
-  implantsPlaced                    PatientImplant[]              @relation("PatientImplantProfessional")
-  implantsVoided                    PatientImplant[]              @relation("PatientImplantVoidedBy")
-  implantCardsDelivered             PatientImplant[]              @relation("PatientImplantCardDeliveredBy")
+  implantsPlaced                    PatientImplant[]                 @relation("PatientImplantProfessional")
+  implantsVoided                    PatientImplant[]                 @relation("PatientImplantVoidedBy")
+  implantCardsDelivered             PatientImplant[]                 @relation("PatientImplantCardDeliveredBy")
   // DX-151: documentos del paciente subidos y anulados.
-  uploadedPatientDocuments          PatientDocument[]             @relation("PatientDocumentUploadedBy")
-  voidedPatientDocuments            PatientDocument[]             @relation("PatientDocumentVoidedBy")
+  uploadedPatientDocuments          PatientDocument[]                @relation("PatientDocumentUploadedBy")
+  voidedPatientDocuments            PatientDocument[]                @relation("PatientDocumentVoidedBy")
   planAcceptancesRecorded           TreatmentPlanAcceptance[]
   tokens                            UserToken[]
   clinicalEntryAddenda              ClinicalEntryAddendum[]
@@ -203,28 +206,34 @@ model User {
   sedationChecklists                SedationChecklist[]
   sedationAgentsAdministered        SedationAgentAdministration[]
   sedationVitalsTaken               SedationVitals[]
-  sedationDischargesOperated        SedationDischarge[]           @relation("SedationDischargeOperator")
-  sedationDischargesMonitored       SedationDischarge[]           @relation("SedationDischargeMonitor")
+  sedationDischargesOperated        SedationDischarge[]              @relation("SedationDischargeOperator")
+  sedationDischargesMonitored       SedationDischarge[]              @relation("SedationDischargeMonitor")
   dentitionEventsRecorded           PatientDentitionEvent[]
   retentionActions                  PatientRetentionAction[]
   platformAccesses                  PlatformAccessAudit[]
   // DX-204: descuentos dados en ítems de plan y cambios de la política.
-  planItemDiscounts                 TreatmentPlanItem[]           @relation("TreatmentPlanItemDiscountBy")
+  planItemDiscounts                 TreatmentPlanItem[]              @relation("TreatmentPlanItemDiscountBy")
   discountPoliciesUpdated           DiscountPolicy[]
   // DX-220: acciones de plataforma del superadmin (reencolar un trabajo).
   platformAuditEvents               PlatformAuditEvent[]
   // DX-222: indicaciones postoperatorias entregadas.
   postOpDeliveries                  PostOpInstructionDelivery[]
   // DX-099: enlaces de anamnesis creados y envíos revisados.
-  medicalHistorySubmissionsCreated  MedicalHistorySubmission[]    @relation("MedicalHistorySubmissionCreatedBy")
-  medicalHistorySubmissionsReviewed MedicalHistorySubmission[]    @relation("MedicalHistorySubmissionReviewedBy")
+  medicalHistorySubmissionsCreated  MedicalHistorySubmission[]       @relation("MedicalHistorySubmissionCreatedBy")
+  medicalHistorySubmissionsReviewed MedicalHistorySubmission[]       @relation("MedicalHistorySubmissionReviewedBy")
   // DX-273: salidas de citas de COMPLETED (con motivo).
-  appointmentStatusReversals        AppointmentStatusReversal[]   @relation("AppointmentStatusReversalActor")
+  appointmentStatusReversals        AppointmentStatusReversal[]      @relation("AppointmentStatusReversalActor")
   // DX-279: versiones de la política de cancelación que creó.
   cancellationPolicyVersions        CancellationPolicyVersion[]
-  cancellationFees                  CancellationFee[]             @relation("CancellationFeeCreatedBy")
+  cancellationFees                  CancellationFee[]                @relation("CancellationFeeCreatedBy")
   // SEC-050: cargos por inasistencia que anuló (con motivo).
-  cancellationFeesVoided            CancellationFee[]             @relation("CancellationFeeVoidedBy")
+  cancellationFeesVoided            CancellationFee[]                @relation("CancellationFeeVoidedBy")
+  // DX-243: firma a distancia (quién la envía, el profesional que firmará, quién
+  // la anula) y las firmas del profesional que añadió después.
+  signatureRequestsCreated          SignatureRequest[]               @relation("SignatureRequestCreatedBy")
+  signatureRequestsProfessional     SignatureRequest[]               @relation("SignatureRequestProfessional")
+  signatureRequestsRevoked          SignatureRequest[]               @relation("SignatureRequestRevokedBy")
+  consentCountersignatures          PatientConsentCountersignature[]
 
   @@map("users")
 }
@@ -356,6 +365,8 @@ model Location {
   postOpDeliveries           PostOpInstructionDelivery[]
   // DX-099: anamnesis por revisar de la sede.
   medicalHistorySubmissions  MedicalHistorySubmission[]
+  // DX-243: solicitudes de firma a distancia enviadas desde la sede.
+  signatureRequests          SignatureRequest[]
   // DX-105: listas y convenios de la sede.
   priceLists                 PriceList[]
   agreements                 Agreement[]
@@ -586,7 +597,7 @@ model Patient {
   // por tenant (patients_import_batch_fkey).
   importBatchId                String?               @map("import_batch_id") @db.Uuid
 
-  importBatch                 PatientImportBatch?          @relation(fields: [tenantId, importBatchId], references: [tenantId, id], onDelete: Restrict, map: "patients_import_batch_fkey")
+  importBatch                 PatientImportBatch?              @relation(fields: [tenantId, importBatchId], references: [tenantId, id], onDelete: Restrict, map: "patients_import_batch_fkey")
   // DX-107: filas de importación que lo crearon o le rellenaron campos vacíos.
   importRows                  PatientImportRow[]
   // DX-262: saldos migrados y su hoja de saldos.
@@ -625,8 +636,8 @@ model Patient {
   reminderOptOutMatchWarnings ReminderOptOutMatchWarning[]
   reminderOptOutLinks         ReminderOptOutLink[]
   // DX-203: sus responsables (de pago y avisos) y de quién es responsable.
-  responsibleParties          PatientResponsibleParty[]    @relation("PatientResponsibleParties")
-  responsibleFor              PatientResponsibleParty[]    @relation("ResponsiblePatient")
+  responsibleParties          PatientResponsibleParty[]        @relation("PatientResponsibleParties")
+  responsibleFor              PatientResponsibleParty[]        @relation("ResponsiblePatient")
   // DX-153: sus coberturas (pagador, plan, afiliado, vigencia).
   coverages                   PatientCoverage[]
   // DX-105: asignaciones de convenio (una viva; las retiradas son el historial).
@@ -635,8 +646,11 @@ model Patient {
   postOpDeliveries            PostOpInstructionDelivery[]
   // DX-099: anamnesis enviadas por enlace.
   medicalHistorySubmissions   MedicalHistorySubmission[]
-  country                     Country?                     @relation(fields: [countryCode], references: [code])
-  city                        City?                        @relation(fields: [cityId], references: [id])
+  // DX-243: solicitudes de firma a distancia y firmas del profesional.
+  signatureRequests           SignatureRequest[]
+  consentCountersignatures    PatientConsentCountersignature[]
+  country                     Country?                         @relation(fields: [countryCode], references: [code])
+  city                        City?                            @relation(fields: [cityId], references: [id])
 
   @@unique([tenantId, docNumber], map: "patients_tenant_doc_key")
   // Requisito de las FK COMPUESTAS de Appointment, TreatmentPlan,
@@ -1652,6 +1666,8 @@ model TreatmentPlan {
   payments                    Payment[]
   paymentPlans                PaymentPlan[]
   consents                    PatientConsent[]
+  // DX-243: consentimientos enviados a firmar a distancia con este plan.
+  signatureRequests           SignatureRequest[]
   // Aceptación firmada del presupuesto (DX-012): como mucho una por plan.
   acceptance                  TreatmentPlanAcceptance?
   // DX-051: imputaciones a sus ítems y cola de repartos pendientes.
@@ -2619,8 +2635,10 @@ model ConsentTemplate {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  tenant   Tenant           @relation(fields: [tenantId], references: [id])
-  consents PatientConsent[]
+  tenant            Tenant             @relation(fields: [tenantId], references: [id])
+  consents          PatientConsent[]
+  // DX-243: enviados a firmar a distancia con esta plantilla.
+  signatureRequests SignatureRequest[]
 
   // Destino de la FK compuesta de PatientConsent (SEC-004).
   @@unique([tenantId, id], map: "consent_templates_tenant_id_key")
@@ -2638,48 +2656,181 @@ enum ConsentSignerType {
 // de la migración rechaza cualquier UPDATE, y el DELETE dentro de un contexto
 // de tenant (la app); el puerto del repositorio no tiene ni update ni delete.
 model PatientConsent {
-  id                    String            @id @default(uuid()) @db.Uuid
-  tenantId              String            @db.Uuid
-  patientId             String            @db.Uuid
-  templateId            String            @db.Uuid
-  templateVersion       Int
-  treatmentPlanId       String?           @db.Uuid
+  id                      String                   @id @default(uuid()) @db.Uuid
+  tenantId                String                   @db.Uuid
+  patientId               String                   @db.Uuid
+  templateId              String                   @db.Uuid
+  templateVersion         Int
+  treatmentPlanId         String?                  @db.Uuid
   // Foto del documento tal como se firmó.
-  title                 String
-  body                  String
-  signerType            ConsentSignerType
+  title                   String
+  body                    String
+  signerType              ConsentSignerType
   // Quien firma: el paciente o su tutor (nombre y documento en el momento de
   // la firma).
-  signerName            String
-  signerDocument        String?
-  professionalName      String
+  signerName              String
+  signerDocument          String?
+  professionalName        String
   // PNG en base64 (sin prefijo data:). Tope: 200 KB decodificados (CHECK).
-  patientSignature      String
-  professionalSignature String
+  patientSignature        String
+  // DX-243: NULL solo en una firma a distancia (`signatureRequestId`): el
+  // profesional firma después, en `patient_consent_countersignatures`.
+  professionalSignature   String?
   // SHA-256 (hex) de texto + firmante + firmas + signedAt (consent-hash.ts).
-  contentHash           String
+  contentHash             String
   // Hora del servidor, nunca del cliente.
-  signedAt              DateTime
-  recordedById          String            @db.Uuid
-  ipAddress             String?
-  userAgent             String?
-  createdAt             DateTime          @default(now())
+  signedAt                DateTime
+  recordedById            String                   @db.Uuid
+  ipAddress               String?
+  userAgent               String?
+  createdAt               DateTime                 @default(now())
+  // DX-243: firma a distancia. Evidencias congeladas del enlace (canal,
+  // destino enmascarado, envío, apertura y verificación del código); todas
+  // NULL en una firma en pantalla y todas presentes en una a distancia (CHECK).
+  signatureRequestId      String?                  @db.Uuid
+  remoteChannel           SignatureRequestChannel?
+  remoteDestinationMasked String?
+  remoteSentAt            DateTime?
+  remoteOpenedAt          DateTime?
+  remoteVerifiedAt        DateTime?
 
   // FK COMPUESTAS (SEC-004): paciente, plantilla y plan del MISMO tenant; el
   // plan, además, del MISMO paciente (mismo criterio que Payment).
-  patient         Patient          @relation(fields: [tenantId, patientId], references: [tenantId, id])
-  template        ConsentTemplate  @relation(fields: [tenantId, templateId], references: [tenantId, id])
-  treatmentPlan   TreatmentPlan?   @relation(fields: [tenantId, treatmentPlanId, patientId], references: [tenantId, id, patientId])
+  patient          Patient                         @relation(fields: [tenantId, patientId], references: [tenantId, id])
+  template         ConsentTemplate                 @relation(fields: [tenantId, templateId], references: [tenantId, id])
+  treatmentPlan    TreatmentPlan?                  @relation(fields: [tenantId, treatmentPlanId, patientId], references: [tenantId, id, patientId])
   // DX-407: consentimiento de sedación citado en la valoración previa.
-  sedationRecords SedationRecord[]
+  sedationRecords  SedationRecord[]
+  // DX-243: la solicitud, de la MISMA clínica y del MISMO paciente.
+  signatureRequest SignatureRequest?               @relation(fields: [tenantId, signatureRequestId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, map: "patient_consents_signature_request_fkey")
+  countersignature PatientConsentCountersignature?
 
   // DX-407: destino de la FK compuesta (tenantId, patientId, consentId) de
   // sedation_records: el consentimiento es del MISMO paciente y clínica.
   @@unique([tenantId, patientId, id], map: "patient_consents_tenant_patient_id_key")
+  // DX-243: destino de la FK compuesta de la firma del profesional.
+  @@unique([tenantId, id, patientId], map: "patient_consents_tenant_id_patient_key")
+  // Una solicitud produce como mucho un consentimiento (el id ya fija clínica y paciente).
+  @@unique([tenantId, signatureRequestId, patientId], map: "patient_consents_signature_request_key")
   @@index([tenantId, patientId, signedAt])
   @@index([tenantId, templateId])
   @@index([tenantId, treatmentPlanId, patientId])
   @@map("patient_consents")
+}
+
+// ---------------------------------------------------------------------------
+// Firma a distancia (DX-243). Una solicitud lleva al paciente (o a su
+// responsable, si es menor) un enlace de un solo uso por email; el documento
+// solo se ve tras verificar un código de 6 dígitos (5 intentos → bloqueado).
+// Del token y del código solo se guarda el hash (SHA-256 / HMAC). El texto que
+// verá y firmará se congela al enviarla. Tipos CONSENT y BUDGET (el segundo
+// llega con DX-415; hoy la API lo rechaza).
+// ---------------------------------------------------------------------------
+enum SignatureRequestType {
+  CONSENT
+  BUDGET
+}
+
+enum SignatureRequestChannel {
+  EMAIL
+}
+
+model SignatureRequest {
+  id                 String                  @id @default(uuid()) @db.Uuid
+  tenantId           String                  @db.Uuid
+  /// Sede desde la que se envía: da la zona y el formato de las fechas.
+  locationId         String                  @db.Uuid
+  patientId          String                  @db.Uuid
+  type               SignatureRequestType
+  channel            SignatureRequestChannel
+  /// CONSENT: plantilla y versión del texto congelado (CHECK).
+  templateId         String?                 @db.Uuid
+  templateVersion    Int?
+  treatmentPlanId    String?                 @db.Uuid
+  /// El documento exacto que verá y firmará (variables ya resueltas).
+  title              String
+  body               String
+  /// El profesional que firmará después en la app (y que nombra el texto).
+  professionalUserId String                  @db.Uuid
+  professionalName   String
+  /// Quién firma: el paciente o, si es menor, su responsable (DX-203/DX-328).
+  signerType         ConsentSignerType
+  signerName         String
+  signerDocument     String?
+  /// Adónde va (para reenviar el código) y cómo se muestra (`an***@dominio`).
+  destination        String
+  destinationMasked  String
+  tokenHash          String                  @unique
+  /// HMAC-SHA256 del código vigente; NULL hasta pedirlo.
+  codeHash           String?
+  codeExpiresAt      DateTime?
+  codeSentAt         DateTime?
+  codeSendCount      Int                     @default(0)
+  failedAttempts     Int                     @default(0)
+  lockedAt           DateTime?
+  /// Sesión del navegador que verificó el código (hash), con su caducidad.
+  sessionHash        String?
+  sessionExpiresAt   DateTime?
+  expiresAt          DateTime
+  openedAt           DateTime?
+  verifiedAt         DateTime?
+  signedAt           DateTime?
+  revokedAt          DateTime?
+  revokedById        String?                 @db.Uuid
+  createdById        String                  @db.Uuid
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+
+  tenant        Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patient       Patient          @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "signature_requests_patient_fkey")
+  location      Location         @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "signature_requests_location_fkey")
+  template      ConsentTemplate? @relation(fields: [tenantId, templateId], references: [tenantId, id], onDelete: Restrict, map: "signature_requests_template_fkey")
+  treatmentPlan TreatmentPlan?   @relation(fields: [tenantId, treatmentPlanId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, map: "signature_requests_plan_fkey")
+  professional  User             @relation("SignatureRequestProfessional", fields: [professionalUserId], references: [id], onDelete: Restrict, map: "signature_requests_professional_fkey")
+  createdBy     User             @relation("SignatureRequestCreatedBy", fields: [createdById], references: [id], onDelete: Restrict, map: "signature_requests_created_by_fkey")
+  revokedBy     User?            @relation("SignatureRequestRevokedBy", fields: [revokedById], references: [id], onDelete: Restrict, map: "signature_requests_revoked_by_fkey")
+  consent       PatientConsent?
+
+  @@unique([tenantId, id, patientId], map: "signature_requests_tenant_id_patient_key")
+  @@index([tenantId, patientId, createdAt(sort: Desc)], map: "signature_requests_patient_idx")
+  @@index([tenantId, locationId], map: "signature_requests_location_idx")
+  @@index([tenantId, templateId], map: "signature_requests_template_idx")
+  @@index([tenantId, treatmentPlanId], map: "signature_requests_plan_idx")
+  @@index([professionalUserId], map: "signature_requests_professional_idx")
+  @@index([createdById], map: "signature_requests_created_by_idx")
+  @@index([revokedById], map: "signature_requests_revoked_by_idx")
+  @@map("signature_requests")
+}
+
+/// Firma del profesional que completa un consentimiento firmado a distancia
+/// (DX-243). Append-only e inmutable, como el consentimiento: una por
+/// consentimiento, solo si este no la tiene ya (trigger).
+model PatientConsentCountersignature {
+  id                    String   @id @default(uuid()) @db.Uuid
+  tenantId              String   @db.Uuid
+  patientId             String   @db.Uuid
+  consentId             String   @db.Uuid
+  professionalUserId    String   @db.Uuid
+  professionalName      String
+  /// PNG en base64 (sin prefijo data:). Tope: 200 KB decodificados (CHECK).
+  professionalSignature String
+  /// SHA-256 del hash del consentimiento + profesional + firma + signedAt.
+  contentHash           String
+  signedAt              DateTime
+  ipAddress             String?
+  userAgent             String?
+  createdAt             DateTime @default(now())
+
+  tenant       Tenant         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patient      Patient        @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "patient_consent_countersignatures_patient_fkey")
+  consent      PatientConsent @relation(fields: [tenantId, consentId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, map: "patient_consent_countersignatures_consent_fkey")
+  professional User           @relation(fields: [professionalUserId], references: [id], onDelete: Restrict, map: "patient_consent_countersignatures_professional_fkey")
+
+  // Una firma del profesional por consentimiento (y lado hijo de su FK).
+  @@unique([tenantId, consentId, patientId], map: "patient_consent_countersignatures_consent_key")
+  @@index([tenantId, patientId], map: "patient_consent_countersignatures_patient_idx")
+  @@index([professionalUserId], map: "patient_consent_countersignatures_professional_idx")
+  @@map("patient_consent_countersignatures")
 }
 
 // ---------------------------------------------------------------------------
@@ -3014,6 +3165,8 @@ enum AuditResourceType {
   ANESTHESIA_ADMINISTRATION
   // DX-407: hoja de sedación de una evolución (cada parte que se añade).
   SEDATION_RECORD
+  // DX-243: firma a distancia (enviar, abrir, verificar, bloquear, firmar, anular).
+  SIGNATURE_REQUEST
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o
@@ -3078,6 +3231,9 @@ enum EmailTemplate {
   PAYMENT_RECEIPT      @map("payment-receipt")
   // DX-222: enlace a las indicaciones postoperatorias.
   POST_OP_INSTRUCTIONS @map("post-op-instructions")
+  // DX-243: firma a distancia (el enlace y el código de verificación).
+  SIGNATURE_REQUEST    @map("signature-request")
+  SIGNATURE_CODE       @map("signature-code")
 }
 
 /// Registro de envíos de email (patrón outbox). NUNCA guarda el destinatario

@@ -114,6 +114,12 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // DX-099: cuestionario de anamnesis por enlace (el paciente, sin sesión).
   'GET /public/medical-history/:token': PUBLIC_TENANT,
   'POST /public/medical-history/:token': PUBLIC_TENANT,
+  // DX-243: firma a distancia por enlace con código (el paciente, sin sesión).
+  'GET /public/sign/:token': PUBLIC_TENANT,
+  'POST /public/sign/:token/code': PUBLIC_TENANT,
+  'POST /public/sign/:token/verify': PUBLIC_TENANT,
+  'GET /public/sign/:token/document': PUBLIC_TENANT,
+  'POST /public/sign/:token/sign': PUBLIC_TENANT,
 
   // --- Cualquier sesión (sin rol de clínica) -------------------------------
   // dentalix-docs/docs/plans/2026-07-28-user-profile.md (/me) y
@@ -283,6 +289,14 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /patients/:patientId/consents/preview': CLINICAL,
   'POST /patients/:patientId/consents': CLINICAL,
   'GET /patients/:patientId/consents/:id': CLINICAL,
+  // DX-243: firma del profesional de uno firmado a distancia (el que lo envió
+  // a firmar; el caso de uso lo comprueba). Enviar a firmar, verlo en la ficha
+  // y anularlo: los cuatro roles (recepción lo envía), como la anamnesis.
+  'POST /patients/:patientId/consents/:id/countersign': CLINICAL,
+  'GET /patients/:patientId/signature-requests/options': EVERY_ROLE,
+  'GET /patients/:patientId/signature-requests': EVERY_ROLE,
+  'POST /patients/:patientId/signature-requests': EVERY_ROLE,
+  'POST /patients/:patientId/signature-requests/:id/revoke': EVERY_ROLE,
 
   // --- Autorización de datos, Ley 1581 (DX-037) ----------------------------
   // loop/informes/DX-037.md.

@@ -19,6 +19,8 @@ const TEMPLATE_TO_DB: Record<EmailTemplateName, EmailTemplate> = {
   'registration-notice': EmailTemplate.REGISTRATION_NOTICE,
   'payment-receipt': EmailTemplate.PAYMENT_RECEIPT,
   'post-op-instructions': EmailTemplate.POST_OP_INSTRUCTIONS,
+  'signature-request': EmailTemplate.SIGNATURE_REQUEST,
+  'signature-code': EmailTemplate.SIGNATURE_CODE,
 };
 
 /**

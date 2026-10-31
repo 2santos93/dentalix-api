@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Inject,
   Injectable,
   NotFoundException,
@@ -10,6 +11,7 @@ import {
   PatientConsent,
   PatientConsentDocument,
   PatientConsentSummary,
+  StoredPatientConsentDocument,
 } from '../../domain/entities/patient-consent.entity';
 import { ConsentTemplate } from '../../domain/entities/consent-template.entity';
 import {
@@ -23,6 +25,7 @@ import {
   type ConsentTemplateRepository,
 } from '../../domain/ports/consent-template-repository.port';
 import {
+  AlreadyCountersignedError,
   PATIENT_CONSENT_REPOSITORY,
   type ConsentSigningContext,
   type PatientConsentRepository,
@@ -32,7 +35,11 @@ import {
   renderConsent,
   usesVariable,
 } from '../../domain/render-consent';
-import { computeConsentHash } from '../../domain/consent-hash';
+import {
+  computeConsentHash,
+  computeCountersignatureHash,
+  computeRemoteConsentHash,
+} from '../../domain/consent-hash';
 import { requireLocationFormat } from '../../../../shared/locations/location-regional';
 import {
   parseSignaturePng,
@@ -51,6 +58,12 @@ export const CONSENT_CLOCK = Symbol('CONSENT_CLOCK');
 
 export const PLAN_NOT_FOUND_MESSAGE = 'Plan de tratamiento no encontrado';
 export const CONSENT_NOT_FOUND_MESSAGE = 'Consentimiento no encontrado';
+export const CONSENT_NOT_REMOTE_MESSAGE =
+  'Este consentimiento se firmó en la clínica: ya lleva la firma del profesional.';
+export const CONSENT_ALREADY_COUNTERSIGNED_MESSAGE =
+  'El profesional ya firmó este consentimiento.';
+export const CONSENT_WRONG_PROFESSIONAL_MESSAGE = (name: string) =>
+  `Solo ${name} puede firmar este consentimiento como profesional: es quien lo envió a firmar y quien nombra el texto.`;
 const NO_TREATMENT = 'No especificado';
 const NO_DOCUMENT = 'Sin documento';
 
@@ -163,6 +176,42 @@ async function prepare(
     tratamiento: treatmentOf(context.plan),
   });
   return { template, context, title: template.title, body, document };
+}
+
+/** El documento resuelto, listo para mostrar y sellar. */
+export type PreparedConsent = Awaited<ReturnType<typeof prepare>>;
+
+/**
+ * DX-243: la misma resolución de plantilla + contexto que la vista previa y la
+ * firma en pantalla, para congelar el texto que se envía a firmar a distancia.
+ * Lanza los mismos 404/400/409 (paciente, plan, plantilla, sede sin formato).
+ */
+@Injectable()
+export class ConsentDocumentRenderer {
+  constructor(
+    @Inject(CONSENT_TEMPLATE_REPOSITORY)
+    private readonly templates: ConsentTemplateRepository,
+    @Inject(PATIENT_CONSENT_REPOSITORY)
+    private readonly consents: PatientConsentRepository,
+    private readonly documentTypeNames: DocumentTypeNamesReader,
+  ) {}
+
+  render(
+    patientId: string,
+    input: PreviewPatientConsentInput,
+    professionalUserId: string,
+    now: Date,
+  ): Promise<PreparedConsent> {
+    return prepare(
+      this.templates,
+      this.consents,
+      this.documentTypeNames,
+      now,
+      patientId,
+      input,
+      professionalUserId,
+    );
+  }
 }
 
 @Injectable()
@@ -359,22 +408,12 @@ export class GetPatientConsentUseCase {
     if (!doc) {
       throw new NotFoundException(CONSENT_NOT_FOUND_MESSAGE);
     }
-    const expected = computeConsentHash({
-      title: doc.title,
-      body: doc.body,
-      signerType: doc.signerType,
-      signerName: doc.signerName,
-      signerDocument: doc.signerDocument,
-      professionalName: doc.professionalName,
-      patientSignature: doc.patientSignature,
-      professionalSignature: doc.professionalSignature,
-      signedAt: doc.signedAt,
-    });
     // La cabecera es en vivo (R18): el nombre visible de hoy; lo firmado
-    // (cuerpo y `signerDocument`) es texto sellado y no se recalcula.
-    const { patient } = doc;
+    // (cuerpo y `signerDocument`) es texto sellado y no se recalcula. La firma
+    // del profesional a distancia ya va en `professionalSignature`.
+    const { patient, countersignature: _countersignature, ...consent } = doc;
     return {
-      ...doc,
+      ...consent,
       patient: {
         ...patient,
         docTypeName: documentTypeName(
@@ -383,7 +422,130 @@ export class GetPatientConsentUseCase {
           await this.documentTypeNames.get(),
         ),
       },
-      integrityOk: expected === doc.contentHash,
+      integrityOk: integrityOk(doc),
     };
+  }
+}
+
+/**
+ * ¿Casa lo guardado con sus hashes? En pantalla, el de las dos firmas; a
+ * distancia (DX-243), el de la firma del paciente con sus evidencias y, si ya
+ * firmó el profesional, el de su firma encadenado al anterior.
+ */
+function integrityOk(doc: StoredPatientConsentDocument): boolean {
+  if (!doc.remote) {
+    return (
+      doc.professionalSignature !== null &&
+      computeConsentHash({
+        title: doc.title,
+        body: doc.body,
+        signerType: doc.signerType,
+        signerName: doc.signerName,
+        signerDocument: doc.signerDocument,
+        professionalName: doc.professionalName,
+        patientSignature: doc.patientSignature,
+        professionalSignature: doc.professionalSignature,
+        signedAt: doc.signedAt,
+      }) === doc.contentHash
+    );
+  }
+  const patientSide = computeRemoteConsentHash({
+    title: doc.title,
+    body: doc.body,
+    templateVersion: doc.templateVersion,
+    signerType: doc.signerType,
+    signerName: doc.signerName,
+    signerDocument: doc.signerDocument,
+    professionalName: doc.professionalName,
+    patientSignature: doc.patientSignature,
+    signedAt: doc.signedAt,
+    channel: doc.remote.channel,
+    destinationMasked: doc.remote.destinationMasked,
+    sentAt: doc.remote.sentAt,
+    openedAt: doc.remote.openedAt,
+    verifiedAt: doc.remote.verifiedAt,
+    ipAddress: doc.ipAddress,
+    userAgent: doc.userAgent,
+  });
+  if (patientSide !== doc.contentHash) return false;
+  const counter = doc.countersignature;
+  return (
+    counter === null ||
+    computeCountersignatureHash({
+      consentHash: doc.contentHash,
+      professionalName: counter.professionalName,
+      professionalSignature: counter.professionalSignature,
+      signedAt: counter.signedAt,
+    }) === counter.contentHash
+  );
+}
+
+export interface CountersignPatientConsentInput {
+  professionalSignature: string;
+}
+
+/**
+ * DX-243: el profesional firma en la app un consentimiento que el paciente
+ * firmó a distancia; solo entonces cuenta como completo. Solo el profesional
+ * que nombra el texto (quien se eligió al enviarlo). Append-only: un INSERT
+ * en su propia tabla, con su hash encadenado al del consentimiento.
+ */
+@Injectable()
+export class CountersignPatientConsentUseCase {
+  constructor(
+    @Inject(PATIENT_CONSENT_REPOSITORY)
+    private readonly consents: PatientConsentRepository,
+    @Inject(CONSENT_CLOCK)
+    private readonly now: ConsentClock,
+  ) {}
+
+  async execute(
+    patientId: string,
+    id: string,
+    input: CountersignPatientConsentInput,
+    meta: SignPatientConsentMeta,
+  ): Promise<PatientConsentSummary> {
+    const target = await this.consents.findCountersignTarget(patientId, id);
+    if (!target) throw new NotFoundException(CONSENT_NOT_FOUND_MESSAGE);
+    if (!target.remote) {
+      throw new ConflictException(CONSENT_NOT_REMOTE_MESSAGE);
+    }
+    if (target.countersigned) {
+      throw new ConflictException(CONSENT_ALREADY_COUNTERSIGNED_MESSAGE);
+    }
+    if (target.remote.professionalUserId !== meta.recordedById) {
+      throw new ForbiddenException(
+        CONSENT_WRONG_PROFESSIONAL_MESSAGE(target.remote.professionalName),
+      );
+    }
+    const professionalSignature = parseSignature(
+      input.professionalSignature,
+      'la firma del profesional',
+    );
+    const signedAt = this.now();
+    const professionalName = target.remote.professionalName;
+    try {
+      return await this.consents.countersign({
+        patientId,
+        consentId: target.id,
+        professionalUserId: meta.recordedById,
+        professionalName,
+        professionalSignature,
+        contentHash: computeCountersignatureHash({
+          consentHash: target.contentHash,
+          professionalName,
+          professionalSignature,
+          signedAt,
+        }),
+        signedAt,
+        ipAddress: meta.ipAddress,
+        userAgent: meta.userAgent,
+      });
+    } catch (error) {
+      if (error instanceof AlreadyCountersignedError) {
+        throw new ConflictException(CONSENT_ALREADY_COUNTERSIGNED_MESSAGE);
+      }
+      throw error;
+    }
   }
 }

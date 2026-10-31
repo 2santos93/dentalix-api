@@ -95,6 +95,16 @@ function throttlers(
           request(context).params?.token,
         ),
     },
+    // DX-243: la firma a distancia pública, por IP y por token.
+    strict('signature'),
+    {
+      ...strict('signature-token'),
+      generateKey: (context, _ip, name) =>
+        publicTokenRateLimitKey(
+          routePrefix(context, name),
+          request(context).params?.token,
+        ),
+    },
     {
       ...strict('direct-upload'),
       generateKey: (context, _ip, name) =>

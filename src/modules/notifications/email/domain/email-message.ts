@@ -18,6 +18,8 @@ export const EMAIL_TEMPLATES = [
   'registration-notice',
   'payment-receipt',
   'post-op-instructions',
+  'signature-request',
+  'signature-code',
 ] as const;
 export type EmailTemplateName = (typeof EMAIL_TEMPLATES)[number];
 
@@ -161,6 +163,31 @@ export interface PostOpInstructionsEmailVars {
   responsibleName: string | null;
 }
 
+/**
+ * DX-243: enlace para firmar un documento a distancia. Nada clínico: ni el
+ * título del documento ni el procedimiento; solo quién lo envía, a quién y el
+ * enlace (el documento se ve tras verificar el código).
+ */
+export interface SignatureRequestEmailVars {
+  /** Nombre de pila de quien firma (el paciente o su responsable). */
+  recipientFirstName: string;
+  /** Va al responsable de un menor: el nombre de pila del paciente. */
+  patientFirstName: string | null;
+  clinicName: string;
+  /** Enlace público (`/firmar/<token>`). */
+  url: string;
+  /** Caducidad del enlace, ya formateada en la zona y el formato de la sede. */
+  expiresAtLabel: string;
+}
+
+/** DX-243: el código de 6 dígitos que abre el documento. Solo el código. */
+export interface SignatureCodeEmailVars {
+  recipientFirstName: string;
+  clinicName: string;
+  code: string;
+  expiresInMinutes: number;
+}
+
 export interface EmailVarsByTemplate {
   invitation: InvitationEmailVars;
   'password-reset': PasswordResetEmailVars;
@@ -169,6 +196,8 @@ export interface EmailVarsByTemplate {
   'registration-notice': RegistrationNoticeEmailVars;
   'payment-receipt': PaymentReceiptEmailVars;
   'post-op-instructions': PostOpInstructionsEmailVars;
+  'signature-request': SignatureRequestEmailVars;
+  'signature-code': SignatureCodeEmailVars;
 }
 
 /** Lo que el remitente produce para una plantilla: asunto, HTML y texto. */
