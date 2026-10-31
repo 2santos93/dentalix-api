@@ -148,6 +148,8 @@ model Tenant {
   locationHolidays                        LocationHoliday[]
   // DX-374: tasas de cambio manuales de la clínica.
   manualExchangeRates                     ManualExchangeRate[]
+  // SEC-058: contadores de la clínica en el presupuesto del proveedor de tasas.
+  exchangeProviderClinicBudgets           ExchangeProviderClinicBudget[]
 
   // DX-253: tope de RECEPTION para traspasar o devolver saldo a favor (0 =
   // no puede; ADMIN no tiene tope).
@@ -5885,4 +5887,34 @@ model PatientCreditRefundCounter {
 
   @@id([tenantId, seriesPrefix])
   @@map("patient_credit_refund_counters")
+}
+
+/// SEC-058: contador GLOBAL del presupuesto de llamadas al proveedor de tasas,
+/// compartido por todas las réplicas (una fila, `scope = 'GLOBAL'`, en ventana
+/// fija). Tabla de PLATAFORMA sin RLS ni columna de clínica: dentalix_app no
+/// tiene ningún privilegio sobre ella y solo la toca con la función SECURITY
+/// DEFINER `dx_exchange_provider_spend_global` (incrementa con tope).
+model ExchangeProviderBudget {
+  scope       String   @id
+  windowStart DateTime
+  calls       Int
+  updatedAt   DateTime @default(dbgenerated("timezone('UTC'::text, now())"))
+
+  @@map("exchange_provider_budget")
+}
+
+/// SEC-058: contadores de una clínica en el presupuesto del proveedor de
+/// tasas (`HOUR`, `DAY` y `SWEEP`, en ventana fija). RLS FORCE por tenant: la
+/// app solo ve y gasta los de la clínica del contexto. Cae con la clínica.
+model ExchangeProviderClinicBudget {
+  tenantId    String   @db.Uuid
+  quota       String
+  windowStart DateTime
+  calls       Int
+  updatedAt   DateTime @default(dbgenerated("timezone('UTC'::text, now())"))
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@id([tenantId, quota])
+  @@map("exchange_provider_clinic_budgets")
 }
