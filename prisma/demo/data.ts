@@ -1961,21 +1961,18 @@ export const DEMO_INVENTORY: readonly DemoInventoryItem[] = [
   },
 ];
 
-/**
- * DX-037: política de tratamiento de datos v1 de la clínica demo. El texto de
- * datos sensibles trae las tres frases que exige el Dec. 1377 (art. 6).
- */
+/** DX-037/DX-325: política v1 de la demo, la plantilla neutra rellenada. */
 export const DEMO_PRIVACY_POLICY = {
   policyText: [
-    `${DEMO_CLINIC_NAME}, como responsable del tratamiento, recoge y trata los datos personales de sus pacientes conforme a la Ley 1581 de 2012 y el Decreto 1377 de 2013.`,
-    'Finalidades: prestar la atención odontológica, llevar la historia clínica, agendar y recordar citas, facturar y cumplir obligaciones legales.',
-    'Derechos del titular: conocer, actualizar, rectificar y suprimir sus datos, revocar la autorización y presentar quejas ante la Superintendencia de Industria y Comercio.',
-    'Canal de atención: recepción de la clínica o el correo de contacto publicado en la sede.',
+    `Responsable del tratamiento: ${DEMO_CLINIC_NAME}, con domicilio en la dirección de la sede principal, recoge y trata los datos personales de sus pacientes.`,
+    'Finalidades: prestar la atención odontológica, llevar la historia clínica, agendar y recordar citas, cobrar y facturar los servicios, y cumplir las obligaciones legales de la clínica.',
+    'Derechos del paciente: conocer, actualizar, rectificar y suprimir sus datos, y revocar esta autorización en cualquier momento, salvo lo que la clínica deba conservar por obligación legal.',
+    'Contacto: para ejercer sus derechos o hacer consultas, diríjase a la recepción de la clínica o escriba al correo de contacto publicado en la sede.',
   ].join('\n\n'),
   generalText:
     'Autorizo el tratamiento de mis datos personales de identificación y contacto para las finalidades descritas en la política.',
   sensitiveHealthText:
-    'Autorizo de forma expresa el tratamiento de mis datos sensibles de salud (historia clínica, odontograma, radiografías y antecedentes médicos). Se me informó que no estoy obligado a autorizar el tratamiento de datos sensibles. Finalidad: prestar la atención odontológica y conservar la historia clínica según la ley.',
+    'Autorizo de forma expresa el tratamiento de mis datos sensibles de salud (historia clínica, odontograma, radiografías y antecedentes médicos) con la finalidad de prestarme la atención odontológica y conservar mi historia clínica. Se me informó que dar esta autorización es voluntario: no estoy obligado/a a darla.',
   marketingText:
     'Autorizo recibir comunicaciones comerciales (promociones, campañas y recordatorios no clínicos) por teléfono, WhatsApp o correo. Puedo revocarlo en cualquier momento.',
 };
