@@ -1,5 +1,5 @@
 import { csvAmount, csvDocument, csvText } from '../../../shared/csv/csv-cells';
-import { currencyDecimals } from '../../../shared/money/currency-decimals';
+import type { CurrencyDigitsTable } from '../../../shared/money/currency-digits';
 import type { ExpenseSummaryRowView } from './use-cases/get-expense-summary.use-case';
 
 /*
@@ -18,6 +18,7 @@ export const EXPENSES_SUMMARY_CSV_HEADER = [
 
 export function toExpensesSummaryCsv(
   rows: readonly ExpenseSummaryRowView[],
+  digits: CurrencyDigitsTable,
 ): string {
   const lines: string[] = [EXPENSES_SUMMARY_CSV_HEADER.join(',')];
   for (const row of rows) {
@@ -28,7 +29,7 @@ export function toExpensesSummaryCsv(
         row.currency,
         concept,
         csvText(category),
-        csvAmount(amount, currencyDecimals(row.currency)),
+        csvAmount(amount, digits.roundingDigits(row.currency)),
       ].join(',');
     lines.push(line('Ingresos', '', row.income));
     for (const c of row.categories) {

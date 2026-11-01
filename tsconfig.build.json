@@ -1,5 +1,14 @@
 {
   "extends": "./tsconfig.json",
-  "include": ["src"],
-  "exclude": ["node_modules", "test", "dist", "prisma", "**/*spec.ts"]
+  "include": [
+    "src"
+  ],
+  "exclude": [
+    "node_modules",
+    "test",
+    "dist",
+    "prisma",
+    "**/*spec.ts",
+    "**/__fixtures__/**"
+  ]
 }

@@ -2,6 +2,8 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { seedIcd10Codes } from '../src/modules/reference/infrastructure/seed-icd10-codes';
 import { loadCitySeedRows } from './reference/cities';
 import { ISO3166_COUNTRIES } from './reference/iso3166';
+import { currencySeedUpserts } from '../src/shared/money/currency-seed';
+import { CURRENCY_DIGITS } from './reference/currency-digits';
 import { ISO4217_CURRENCIES } from './reference/iso4217';
 
 // Corre con el rol owner (DIRECT_URL): estas tablas son globales, sin RLS.
@@ -19,13 +21,12 @@ const prisma = new PrismaClient<Prisma.PrismaClientOptions>({
 // 2026-07 (USD, EUR, MXN…) conservan su nombre y símbolo de entonces, y el
 // seed los cambia por los de `Intl`. Solo es texto de presentación: el código
 // y los decimales no cambian.
+// DX-340: los decimales (minor units ISO y dígitos de redondeo) los rellena la
+// migración 20261111100100; el seed solo los escribe al crear una moneda y
+// nunca los pisa al volver a sembrar (`currencySeedUpserts`).
 async function seedCurrencies(): Promise<void> {
-  for (const { code, name, symbol } of ISO4217_CURRENCIES) {
-    await prisma.currency.upsert({
-      where: { code },
-      update: { name, symbol },
-      create: { code, name, symbol },
-    });
+  for (const args of currencySeedUpserts(ISO4217_CURRENCIES, CURRENCY_DIGITS)) {
+    await prisma.currency.upsert(args);
   }
   console.log(`Seeded ${ISO4217_CURRENCIES.length} currencies`);
 }

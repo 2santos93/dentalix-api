@@ -354,13 +354,20 @@ describe('DX-102 · audit_events particionada (int)', () => {
       const boundary = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
       // 75 eventos: grupos de 5 en el MISMO milisegundo, a ambos lados del
       // inicio de mes (dos particiones).
-      const ids: string[] = [];
+      const from = new Date(boundary - 3_600_000);
+      const to = new Date(boundary + 3_600_000);
+      // Entre las 23:00 y las 01:00 UTC del cambio de mes, los eventos que
+      // otros tests de este fichero escriben «ahora» caen también en la
+      // ventana: cuentan como esperados para que el test no dependa del reloj.
+      const preexisting = await owner.auditEvent.findMany({
+        where: { tenantId: tenantB, occurredAt: { gte: from, lt: to } },
+        select: { id: true },
+      });
+      const ids: string[] = preexisting.map((e) => e.id);
       for (let g = 0; g < 15; g++) {
         const at = new Date(boundary + (g - 7) * 60_000);
         for (let k = 0; k < 5; k++) ids.push(await insertAs(tenantB, at));
       }
-      const from = new Date(boundary - 3_600_000);
-      const to = new Date(boundary + 3_600_000);
       const seen: string[] = [];
       let cursor: { occurredAt: Date; id: string } | null = null;
       for (let page = 0; page < 20; page++) {

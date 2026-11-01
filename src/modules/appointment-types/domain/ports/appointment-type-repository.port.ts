@@ -1,3 +1,4 @@
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { AppointmentType } from '../entities/appointment-type.entity';
 
 // Sin `tenantId`: sale del contexto del request, nunca del cliente.
@@ -32,11 +33,19 @@ export interface AppointmentTypeRepository {
    * da `null`, igual que uno inexistente.
    */
   findById(id: string): Promise<AppointmentType | null>;
-  create(input: CreateAppointmentTypeRepoInput): Promise<AppointmentType>;
+  /**
+   * DX-360: alta, cambio y retiro dejan su evento (APPOINTMENT_TYPE) en la
+   * misma transacción; un cambio que no cambia nada, ninguno.
+   */
+  create(
+    input: CreateAppointmentTypeRepoInput,
+    audit: AuditRequestContext,
+  ): Promise<AppointmentType>;
   update(
     id: string,
     input: UpdateAppointmentTypeRepoInput,
+    audit: AuditRequestContext,
   ): Promise<AppointmentType>;
   /** Borrado lógico: `deletedAt` y `active = false`. Las citas no cambian. */
-  softDelete(id: string, deletedById?: string): Promise<void>;
+  softDelete(id: string, audit: AuditRequestContext): Promise<void>;
 }

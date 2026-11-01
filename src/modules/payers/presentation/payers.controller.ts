@@ -33,8 +33,13 @@ import {
   PAYER_MANAGE_ROLES,
   PAYER_ROLES,
 } from '../../auth/presentation/guards/clinic-role-sets';
-import { JwtPayload } from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
+import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
+import {
+  requireAuditRequestContext,
+  type AuditableRequest,
+} from '../../audit/presentation/audit-request-context';
+import type { AuditRequestContext } from '../../audit/domain/audit-request-context';
 import {
   CreatePayerUseCase,
   DeletePayerUseCase,
@@ -48,10 +53,6 @@ import {
   PayerDto,
   UpdatePayerDto,
 } from './dto/payer.dto';
-
-interface AuthenticatedRequest {
-  user: JwtPayload;
-}
 
 // Pagadores (DX-153). Leerlos: los 4 roles (selectores de cobertura). Darlos
 // de alta: ADMIN y recepción (mostrador). Editar, desactivar y retirar: ADMIN.
@@ -67,6 +68,7 @@ export class PayersController {
     private readonly createPayer: CreatePayerUseCase,
     private readonly updatePayer: UpdatePayerUseCase,
     private readonly deletePayer: DeletePayerUseCase,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   @Get()
@@ -90,11 +92,11 @@ export class PayersController {
   @ApiForbiddenResponse({ description: 'Solo ADMIN y recepción' })
   create(
     @Body() dto: CreatePayerDto,
-    @Req() req: AuthenticatedRequest,
+    @Req() req: AuditableRequest,
   ): Promise<Payer> {
     return this.createPayer.execute(
       { name: dto.name, type: dto.type },
-      req.user.sub,
+      this.audit(req),
     );
   }
 
@@ -109,7 +111,7 @@ export class PayersController {
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdatePayerDto,
-    @Req() req: AuthenticatedRequest,
+    @Req() req: AuditableRequest,
   ): Promise<Payer> {
     return this.updatePayer.execute(
       id,
@@ -118,7 +120,7 @@ export class PayersController {
         type: dto.type,
         active: dto.active,
       },
-      req.user.sub,
+      this.audit(req),
     );
   }
 
@@ -137,8 +139,13 @@ export class PayersController {
   @ApiForbiddenResponse({ description: 'Solo ADMIN' })
   async remove(
     @Param('id', ParseUUIDPipe) id: string,
-    @Req() req: AuthenticatedRequest,
+    @Req() req: AuditableRequest,
   ): Promise<void> {
-    await this.deletePayer.execute(id, req.user.sub);
+    await this.deletePayer.execute(id, this.audit(req));
+  }
+
+  /** Quién escribe, para el evento que el repositorio guarda (DX-360). */
+  private audit(req: AuditableRequest): AuditRequestContext {
+    return requireAuditRequestContext(req, this.tenantContext);
   }
 }

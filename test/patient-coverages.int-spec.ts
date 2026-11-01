@@ -520,6 +520,15 @@ describe('pagadores y coberturas (int, DX-153)', () => {
     }
 
     const inA = <T>(fn: () => Promise<T>) => tenantContext.run(a.tenantId, fn);
+    // DX-360: retirar el pagador deja su evento de auditoría.
+    const auditBy = () => ({
+      tenantId: a.tenantId,
+      locationId: null,
+      actor: { userId: by, role: ClinicRole.ADMIN },
+      requestId: null,
+      ip: null,
+      userAgent: null,
+    });
     const input = (patientId: string, payerId: string, isPrimary: boolean) => ({
       patientId,
       payerId,
@@ -540,7 +549,7 @@ describe('pagadores y coberturas (int, DX-153)', () => {
       for (let round = 0; round < 8; round++) {
         const { patientId, payerId } = await seedPatient(0);
         const [retired, created] = await Promise.allSettled([
-          inA(() => payers.retire(payerId, by)),
+          inA(() => payers.retire(payerId, auditBy())),
           inA(() => repo.create(input(patientId, payerId, false))),
         ]);
         const payer = await raw.payer.findUniqueOrThrow({
@@ -585,8 +594,10 @@ describe('pagadores y coberturas (int, DX-153)', () => {
           },
         })
       ).id;
-      await expect(inA(() => payers.retire(gone, by))).resolves.toBe('RETIRED');
-      await expect(inA(() => payers.retire(gone, by))).resolves.toBe(
+      await expect(inA(() => payers.retire(gone, auditBy()))).resolves.toBe(
+        'RETIRED',
+      );
+      await expect(inA(() => payers.retire(gone, auditBy()))).resolves.toBe(
         'NOT_FOUND',
       );
       await expect(

@@ -256,6 +256,22 @@ resourceId?, patient? })`: pacientes, historia clínica, evoluciones,
   dos, en la misma transacción que el cambio y sin el token, su hash ni la
   URL; un enlace desconocido, caducado o ya usado no deja evento. El enlace
   del recordatorio automático no se audita (no hay usuario).
+- **Configuración de la clínica (DX-360)**: alta de sede (`CREATE
+  LOCATION`, `LOCATION_CREATED`), horario de la sede (`UPDATE
+  LOCATION_SCHEDULE`, con `scheduleChange`), recordatorios de una sede
+  (`UPDATE REMINDER_SETTINGS`), alta de un dominio propio (`CREATE
+  TENANT_DOMAIN`, `DOMAIN_REGISTERED`: host y estado, nunca el token),
+  publicar la política de datos (`CREATE PRIVACY_POLICY`: versión y hash
+  antes y después y qué textos cambiaron, nunca los textos), tipos de cita
+  (`APPOINTMENT_TYPE`), pagadores (`PAYER`), plantillas de consentimiento
+  (`CONSENT_TEMPLATE`: el texto solo por nombre, con la versión) y de receta
+  (`PRESCRIPTION_TEMPLATE`: nombre y nº de medicamentos), y el inventario
+  (`INVENTORY_ITEM`, `INVENTORY_MOVEMENT`: en la sede del artículo, sin notas
+  ni motivo). Cada alta, cambio o retiro lleva en `configChange` el antes y
+  el después de los campos que cambiaron (un solo lado en un alta o un
+  retiro); el texto libre solo va en `changedFields`. Los escribe el
+  repositorio en la misma transacción que el cambio; una edición que no
+  cambia nada no deja evento.
 - **Un evento por petición** que termina bien (una sola escritura, nunca N):
   actor, rol, acción, recurso, paciente, sede activa, request id
   (`X-Request-Id`, DX-023), IP y user agent. Una petición que falla (404,
@@ -1565,8 +1581,9 @@ regla de SEC-013) un abono que contaba para él, ya no es verdad que se pagó:
   puede cualquier rol que edite el plan. Cada descuento guarda
   `discountById`, `discountAt` (hora del servidor) y `discountLocationId` (la
   sede del request o la principal).
-- **«Descuento %» en bloque**: el % de cada precio, redondeado a la unidad de la
-  moneda del plan (COP, CLP, JPY, KRW y PYG sin decimales; el resto a
+- **«Descuento %» en bloque**: el % de cada precio, redondeado a los
+  `roundingDigits` de la moneda del plan (`currencies.rounding_digits`, ver
+  «Redondeo de importes», DX-340: COP, JPY, RSD… sin decimales; EUR, USD a
   céntimos) y nunca por encima del tope del rol ítem a ítem (si el redondeo lo
   pasara, baja a la unidad que lo respeta). Todo o nada, en una transacción;
   un evento de auditoría (`reason` BULK_DISCOUNT) sin importes ni la nota.
@@ -1626,6 +1643,94 @@ discount`, en % del precio de referencia (el de catálogo si el precio está
   entonces validan si está aceptado, firmado o cerrado. Una aceptación sin
   firma que confirma mientras una edición espera ya no deja cambiar el plan
   aceptado (`test/plan-item-accept-race.int-spec.ts`).
+
+## Redondeo de importes: una sola regla por línea (DX-340)
+
+**Regla.** Cada **línea** (un ítem del plan: precio − descuento) se redondea
+**una vez**, cuando se calcula (descuento en bloque, precio por % de convenio),
+a los `roundingDigits` de su moneda, la mitad hacia arriba. El **total** de
+cualquier documento —presupuesto, detalle del plan, `/balance`, recibo, estado
+de cuenta, caja— es la **suma exacta de sus líneas** en céntimos enteros y no
+se vuelve a redondear. Código: `src/shared/money/line-rounding.ts`
+(`lineCents`, `linesTotal`, `percentOfCentsInUnits`, `roundToDigits`); lo usan
+`discountForPercent` (descuentos), `percentPrice` (convenios),
+`GetTreatmentPlanUseCase` (total del plan), `buildQuoteContent`
+(presupuesto), `GetPlanBalanceUseCase` (saldo y, con él, recibo y plan de
+pagos) e `itemBillableCents` (imputaciones). **No usan el helper, pero son
+equivalentes:** el estado de cuenta suma en la BD (`Σ price − Σ discount` en
+`numeric`, exacto) y la caja suma los abonos guardados en céntimos (no hay
+líneas que redondear). Lo comprueban `src/shared/money/documents-agree.property.spec.ts`
+(fast-check contra un **oráculo congelado** con el código de origin/main,
+`__fixtures__/pre-dx340-oracle.ts`: 2 000 planes por moneda en JPY, EUR y RSD
+y 40 en cada moneda del catálogo, con ítems PROPOSED no cobrables y descuentos
+manuales con céntimos; descuento en bloque y precio por convenio = main en
+todas las monedas) y `test/currency-rounding.e2e-spec.ts` (Postgres: plan JPY
+y EUR con descuento en bloque, detalle = `/balance` = estado de cuenta =
+recibo; y JPY, EUR y RSD con ítems no cobrables y descuentos con céntimos,
+estado de cuenta en SQL = `/balance` = main).
+
+**Fuente única de decimales: la tabla `currencies`** (migraciones
+`20261111115000_dx340_currency_digits` y `…100_backfill`), leída por
+`CURRENCY_DIGITS_CATALOG` (`src/shared/money/currency-digits.ts`; la tabla se
+guarda en memoria 5 minutos, `CURRENCY_DIGITS_TTL_MS`, y una moneda que falte
+se relee en el acto). Ningún módulo tiene ya una lista de monedas sin decimales para
+redondear (se borró `currency-decimals.ts` y su `ZERO_DECIMAL_CURRENCIES`).
+Contrato: `GET /currencies` y `GET /public/currencies` devuelven `minorUnits`
+y `roundingDigits`; `GET /treatment-plans/:id` devuelve `currencyDigits` (la
+web redondea con él la vista previa del descuento en bloque).
+
+Cuatro números distintos, que no se mezclan:
+
+| Concepto | Dónde | Fuente versionada | Para qué |
+|---|---|---|---|
+| Minor units ISO 4217 | `currencies.minor_units` | SIX ISO 4217 List One publicada 2026-09-17 (sha256 en `prisma/reference/currency-digits.ts`) | Dato normativo; tope de `rounding_digits`. No redondea nada. |
+| Dígitos de redondeo por línea | `currencies.rounding_digits` | `prisma/reference/currency-digits.ts` (generada por `prisma/scripts/generate-currency-digits.ts`) | La regla de esta sección. |
+| Dígitos de formato CLDR | `prisma/reference/iso4217.ts` (`cldrDigits`) → `cldr-format-digits-zero.json` (copia en la web) | CLDR 47.0 (Node 22.16.0, ICU 77.1), fijado | Solo pintar: sin decimales si el importe es entero. Ninguna prueba lee el `Intl` del host. |
+| Redondeo de efectivo | — | CLDR `cashDigits`/`cashRounding` | **Fuera de alcance** (DX-340): la caja cuenta lo cobrado tal cual. |
+
+Antes, `prisma/reference/iso4217.ts` llamaba `minorUnits` a los dígitos de
+CLDR (DX-313); el campo se renombró a `cldrDigits` porque no son los de ISO.
+
+**Decisión de producto (vigente).** Los importes ya guardados no cambian: no se
+reescribe ni recalcula ningún documento histórico (la migración solo toca la
+tabla de referencia), y `rounding_digits` **congela** la regla anterior: 0 para
+las monedas sin decimales en CLDR 47 y para el conjunto anterior a G1 (COP,
+CLP, JPY, KRW, PYG); el resto, sus minor units. Así ningún descuento ni precio
+nuevo cambia. Donde ISO y la regla difieren (minor units 2, redondeo 0): AFN,
+ALL, COP, IRR, KPW, LAK, LBP, MGA, MMK, RSD, SOS, SYP, YER. Caso de referencia:
+**123,45 RSD × 7,5 % = 9,25875 → 9 RSD** (vigente, redondeo 0) frente a
+**9,26 RSD** si se redondeara a sus 2 minor units ISO (CLDR 48.1 separa
+`digits` 2 y `cashDigits` 0). Se mantiene 0 porque cambiarlo alteraría
+resultados actuales; pasar RSD/COP (u otra) a 2 es una **decisión pendiente
+del dueño**, compatible con los contratos (el campo ya existe) y sin tocar
+documentos guardados. Cómo se aplica, en este orden: (1) cambiar la regla en
+`prisma/scripts/generate-currency-digits.ts` y regenerar
+`prisma/reference/currency-digits.ts`; (2) una migración de datos
+`UPDATE "currencies" SET "rounding_digits" = … WHERE "code" IN (…)`; (3)
+desplegar. Las réplicas leen el valor nuevo en ≤ 5 minutos (caché con TTL)
+o al reiniciar. El seed **no** pisa los decimales de una moneda que ya existe
+(solo los escribe al crearla), así que volver a sembrar no deshace el cambio;
+el oráculo congelado de los tests fallará a propósito para esa moneda y hay
+que actualizar el test con la decisión.
+
+**Límite de precisión.** Los importes son `Decimal(14,2)` (`Decimal(12,2)` en
+algunas tablas): ninguna moneda puede tener más de 2 decimales. Las de 3 de
+ISO (BHD, IQD, JOD, KWD, LYD, OMR, TND) no están en el catálogo (la FK las
+rechaza), la CHECK `currencies_minor_units_check` rechaza `minor_units > 2` y
+`roundingDigits()` lanza un error explícito: nunca se truncan en silencio.
+Las cuotas de un plan de pagos se siguen repartiendo al céntimo (también en
+JPY): repartirlas en unidades de la moneda es otra decisión pendiente.
+
+**Paridad API/web.** `src/shared/money/rounding-vectors.json` (copia byte a
+byte en la web, `src/lib/money/rounding-vectors.json`, vigilada por
+`scripts/check-api-reference-sync.mjs` de la web) fija RSD, JPY, EUR y COP con
+123,45 × 7,5 %, límites del descuento y total de líneas; lo comprueban
+`rounding-vectors.spec.ts` (API) y `line-rounding.test.ts` (web).
+
+Para cambiar la referencia: descargar la List One de SIX, ejecutar
+`npx ts-node --transpile-only prisma/scripts/generate-currency-digits.ts
+<list-one.xml>`, revisar el diff y crear una migración con los `UPDATE` que
+imprime.
 
 ## Reportes: «Comparar sedes» (DX-014)
 

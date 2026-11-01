@@ -2082,9 +2082,15 @@ model ManualExchangeRate {
 // ExchangeRateSnapshot: sin tenantId, sin RLS, sin deletedAt. Currency es
 // además la whitelist de códigos ISO 4217 aceptados en planes/abonos.
 model Currency {
-  code   String @id // ISO 4217, p.ej. "USD"
-  name   String // "Dólar estadounidense"
-  symbol String // "$"
+  code           String @id // ISO 4217, p.ej. "USD"
+  name           String // "Dólar estadounidense"
+  symbol         String // "$"
+  // DX-340: minor units de ISO 4217 (SIX List One); dato normativo.
+  minorUnits     Int    @default(2) @map("minor_units") @db.SmallInt
+  // DX-340: decimales a los que se redondea cada línea (total = suma de
+  // líneas). Puede ser menor que minorUnits (RSD, COP…: README «Redondeo de
+  // importes»). Referencia: prisma/reference/currency-digits.ts.
+  roundingDigits Int    @default(2) @map("rounding_digits") @db.SmallInt
 
   // FK de `currency` (DX-042, 20261016131000_currency_fks).
   treatmentPlans             TreatmentPlan[]
@@ -3389,6 +3395,18 @@ enum AuditResourceType {
   // DX-253: saldo a favor del paciente (traspaso, devolución y su
   // comprobante, tope de recepción).
   PATIENT_CREDIT
+  // DX-360: configuración de la clínica — horario de atención de una sede,
+  // sus recordatorios, la política de datos, los catálogos (tipos de cita,
+  // pagadores), las plantillas (consentimiento, receta) y el inventario.
+  LOCATION_SCHEDULE
+  REMINDER_SETTINGS
+  PRIVACY_POLICY
+  APPOINTMENT_TYPE
+  PAYER
+  CONSENT_TEMPLATE
+  PRESCRIPTION_TEMPLATE
+  INVENTORY_ITEM
+  INVENTORY_MOVEMENT
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o

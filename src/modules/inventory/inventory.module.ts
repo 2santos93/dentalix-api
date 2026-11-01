@@ -9,6 +9,8 @@ import { DeleteInventoryItemUseCase } from './application/use-cases/delete-inven
 import { RecordInventoryMovementUseCase } from './application/use-cases/record-inventory-movement.use-case';
 import { INVENTORY_REPOSITORY } from './domain/ports/inventory-repository.port';
 import { PrismaInventoryRepository } from './infrastructure/repositories/prisma-inventory.repository';
+import { INVENTORY_AUDITED_WRITES } from './domain/ports/inventory-audited-writes.port';
+import { PrismaInventoryAuditedWritesRepository } from './infrastructure/repositories/prisma-inventory-audited-writes.repository';
 import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 
@@ -35,6 +37,11 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
     {
       provide: INVENTORY_REPOSITORY,
       useClass: PrismaInventoryRepository,
+    },
+    // DX-360: las escrituras, con su auditoría en la misma transacción.
+    {
+      provide: INVENTORY_AUDITED_WRITES,
+      useClass: PrismaInventoryAuditedWritesRepository,
     },
   ],
   // Exported (additive) so DashboardModule can inject

@@ -1,5 +1,5 @@
 import { csvAmount, csvDocument, csvText } from '../../../shared/csv/csv-cells';
-import { currencyDecimals } from '../../../shared/money/currency-decimals';
+import type { CurrencyDigitsTable } from '../../../shared/money/currency-digits';
 import type { CashPaymentView } from '../domain/entities/cash-payment.entity';
 
 /*
@@ -33,7 +33,10 @@ function destinationOf(row: CashPaymentView): string {
     : 'Saldo migrado';
 }
 
-export function toCashPaymentsCsv(rows: readonly CashPaymentView[]): string {
+export function toCashPaymentsCsv(
+  rows: readonly CashPaymentView[],
+  digits: CurrencyDigitsTable,
+): string {
   const lines: string[] = [CASH_PAYMENTS_CSV_HEADER.join(',')];
   for (const row of rows) {
     lines.push(
@@ -45,7 +48,7 @@ export function toCashPaymentsCsv(rows: readonly CashPaymentView[]): string {
         csvText(row.paymentMethod?.name ?? NO_METHOD),
         csvText(row.reference),
         row.currency,
-        csvAmount(row.amount, currencyDecimals(row.currency)),
+        csvAmount(row.amount, digits.roundingDigits(row.currency)),
       ].join(','),
     );
   }

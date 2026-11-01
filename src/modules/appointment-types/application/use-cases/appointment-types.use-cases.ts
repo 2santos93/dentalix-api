@@ -16,6 +16,8 @@ import {
   normalizeAppointmentTypeColor,
 } from '../../domain/appointment-type-rules';
 
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+
 export const APPOINTMENT_TYPE_NOT_FOUND_MESSAGE = 'Tipo de cita no encontrado';
 
 export interface AppointmentTypeInput {
@@ -76,17 +78,20 @@ export class CreateAppointmentTypeUseCase {
 
   async execute(
     input: AppointmentTypeInput,
-    createdById?: string,
+    audit: AuditRequestContext,
   ): Promise<AppointmentType> {
     const valid = normalize(input) as AppointmentTypeInput;
-    return this.repo.create({
-      name: valid.name,
-      durationMinutes: valid.durationMinutes,
-      color: valid.color,
-      active: input.active ?? true,
-      isUrgent: input.isUrgent ?? false,
-      createdById,
-    });
+    return this.repo.create(
+      {
+        name: valid.name,
+        durationMinutes: valid.durationMinutes,
+        color: valid.color,
+        active: input.active ?? true,
+        isUrgent: input.isUrgent ?? false,
+        createdById: audit.actor.userId,
+      },
+      audit,
+    );
   }
 }
 
@@ -105,13 +110,17 @@ export class UpdateAppointmentTypeUseCase {
   async execute(
     id: string,
     input: Partial<AppointmentTypeInput>,
-    updatedById?: string,
+    audit: AuditRequestContext,
   ): Promise<AppointmentType> {
     const current = await this.repo.findById(id);
     if (!current) {
       throw new NotFoundException(APPOINTMENT_TYPE_NOT_FOUND_MESSAGE);
     }
-    return this.repo.update(id, { ...normalize(input), updatedById });
+    return this.repo.update(
+      id,
+      { ...normalize(input), updatedById: audit.actor.userId },
+      audit,
+    );
   }
 }
 
@@ -123,11 +132,11 @@ export class DeleteAppointmentTypeUseCase {
   ) {}
 
   /** Borrado lógico: el tipo sale de la gestión; sus citas lo conservan. */
-  async execute(id: string, deletedById?: string): Promise<void> {
+  async execute(id: string, audit: AuditRequestContext): Promise<void> {
     const current = await this.repo.findById(id);
     if (!current) {
       throw new NotFoundException(APPOINTMENT_TYPE_NOT_FOUND_MESSAGE);
     }
-    await this.repo.softDelete(id, deletedById);
+    await this.repo.softDelete(id, audit);
   }
 }

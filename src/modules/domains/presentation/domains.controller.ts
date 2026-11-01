@@ -7,6 +7,7 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Req,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
@@ -28,6 +29,11 @@ import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import { Roles } from '../../auth/presentation/guards/roles.decorator';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 import { Audit } from '../../audit/presentation/audit.decorator';
+import {
+  requireAuditRequestContext,
+  type AuditableRequest,
+} from '../../audit/presentation/audit-request-context';
+import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { CreateDomainDto } from './dto/create-domain.dto';
 import {
   RegisterDomainResponseDto,
@@ -59,12 +65,17 @@ export class DomainsController {
     private readonly listDomains: ListDomainsUseCase,
     private readonly verifyDomain: VerifyDomainUseCase,
     private readonly deleteDomain: DeleteDomainUseCase,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
+  // DX-360: auditado en la transacción del alta (CREATE TENANT_DOMAIN,
+  // DOMAIN_REGISTERED) con el host y el estado; nunca el token.
   @Post()
   @ApiOperation({
     summary:
       'Registra un dominio propio en PENDING y devuelve el TXT a publicar (72 h para verificarlo)',
+    description:
+      'Queda en la auditoría (DOMAIN_REGISTERED) con el host y el estado PENDING; el token de verificación nunca.',
   })
   @ApiCreatedResponse({ type: RegisterDomainResponseDto })
   @ApiBadRequestResponse({
@@ -74,8 +85,14 @@ export class DomainsController {
     description:
       'Ya está registrado (vivo) en esta clínica, o verificado por otra cuenta',
   })
-  create(@Body() dto: CreateDomainDto): Promise<RegisterDomainResult> {
-    return this.registerDomain.execute({ host: dto.host });
+  create(
+    @Body() dto: CreateDomainDto,
+    @Req() req: AuditableRequest,
+  ): Promise<RegisterDomainResult> {
+    return this.registerDomain.execute(
+      { host: dto.host },
+      requireAuditRequestContext(req, this.tenantContext),
+    );
   }
 
   @Get()

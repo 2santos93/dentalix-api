@@ -1,3 +1,4 @@
+import { referenceCurrencyDigitsCatalog } from '../../../../shared/money/__fixtures__/reference-currency-digits';
 import {
   BadRequestException,
   ConflictException,
@@ -108,7 +109,13 @@ function setup(
       policy,
       FIXED_CLOCK,
     ),
-    bulk: new ApplyBulkDiscountUseCase(repo, policy, FIXED_CLOCK, catalog),
+    bulk: new ApplyBulkDiscountUseCase(
+      repo,
+      policy,
+      FIXED_CLOCK,
+      catalog,
+      referenceCurrencyDigitsCatalog(),
+    ),
   };
 }
 

@@ -5,6 +5,7 @@ import type {
   Prisma,
 } from '@prisma/client';
 import type { RegionalFormat } from '../../../../shared/format/regional-format';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import type { ReminderSettingsInput } from '../reminder-lead-hours';
 import type { ReminderRecord } from '../reminder-timeline';
 import type { ReminderContact } from '../reminder-eligibility';
@@ -79,11 +80,15 @@ export const REMINDER_REPOSITORY = Symbol('REMINDER_REPOSITORY');
 export interface ReminderRepository {
   /** Sedes vivas de la clínica en contexto con sus ajustes (o los por defecto). */
   listSettings(): Promise<LocationReminderSettingsView[]>;
-  /** null si la sede no existe en esta clínica (o está retirada). */
+  /**
+   * null si la sede no existe en esta clínica (o está retirada). DX-360: si
+   * algo cambia, deja su evento (REMINDER_SETTINGS) en la misma transacción;
+   * quien guarda es el actor de `audit`.
+   */
   saveSettings(
     locationId: string,
     input: ReminderSettingsInput,
-    updatedById?: string,
+    audit: AuditRequestContext,
   ): Promise<LocationReminderSettingsView | null>;
 
   /** Clínicas vivas (para el barrido; `tenants` no tiene RLS). */

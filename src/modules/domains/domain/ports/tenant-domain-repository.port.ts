@@ -1,3 +1,4 @@
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import type { TenantDomainRow } from '../entities/tenant-domain.entity';
 
 export const TENANT_DOMAIN_REPOSITORY = Symbol('TENANT_DOMAIN_REPOSITORY');
@@ -26,13 +27,18 @@ export interface TenantDomainRepository {
   /**
    * Alta en PENDING. Con `replacing`, en la MISMA transacción retira (soft
    * delete) ese dominio de la clínica: su PENDING caducado del mismo host.
+   * DX-360: el alta deja su evento (CREATE TENANT_DOMAIN) en la misma
+   * transacción, sin el token.
    */
-  create(input: {
-    host: string;
-    verifyToken: string;
-    expiresAt: Date;
-    replacing?: { id: string; deletedAt: Date };
-  }): Promise<TenantDomainRow>;
+  create(
+    input: {
+      host: string;
+      verifyToken: string;
+      expiresAt: Date;
+      replacing?: { id: string; deletedAt: Date };
+    },
+    audit: AuditRequestContext,
+  ): Promise<TenantDomainRow>;
   listByTenant(): Promise<TenantDomainRow[]>;
   findByHostForTenant(host: string): Promise<TenantDomainRow | null>;
   findById(id: string): Promise<TenantDomainRow | null>;

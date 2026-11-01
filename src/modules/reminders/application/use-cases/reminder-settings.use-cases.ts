@@ -15,6 +15,8 @@ import {
   type ReminderSettingsInput,
 } from '../../domain/reminder-lead-hours';
 
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+
 export const LOCATION_NOT_FOUND_MESSAGE = 'Sede no encontrada';
 
 /** Ajustes de recordatorio de cada sede viva de la clínica (DX-026). */
@@ -43,7 +45,7 @@ export class UpdateReminderSettingsUseCase {
   async execute(
     locationId: string,
     input: ReminderSettingsInput,
-    updatedById?: string,
+    audit: AuditRequestContext,
   ): Promise<LocationReminderSettingsView> {
     const error = settingsError(input);
     if (error) throw new BadRequestException(error);
@@ -53,7 +55,7 @@ export class UpdateReminderSettingsUseCase {
         enabled: input.enabled,
         leadHours: normalizeLeadHours(input.leadHours),
       },
-      updatedById,
+      audit,
     );
     if (!saved) throw new NotFoundException(LOCATION_NOT_FOUND_MESSAGE);
     return saved;

@@ -1,3 +1,4 @@
+import { TEST_AUDIT } from '../../../audit/application/__fixtures__/test-audit-context';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { InMemoryConsentTemplateRepository } from '../__fixtures__/in-memory-consent-templates';
 import {
@@ -13,7 +14,7 @@ describe('CreateConsentTemplateUseCase', () => {
 
     const created = await uc.execute(
       { title: '  Endodoncia ', body: ' Yo, {{paciente}}, autorizo. ' },
-      'admin-1',
+      TEST_AUDIT,
     );
 
     expect(created).toMatchObject({
@@ -29,12 +30,12 @@ describe('CreateConsentTemplateUseCase', () => {
     const uc = new CreateConsentTemplateUseCase(
       new InMemoryConsentTemplateRepository(),
     );
-    await expect(uc.execute({ title: '  ', body: 'x' })).rejects.toThrow(
-      BadRequestException,
-    );
-    await expect(uc.execute({ title: 'x', body: '   ' })).rejects.toThrow(
-      BadRequestException,
-    );
+    await expect(
+      uc.execute({ title: '  ', body: 'x' }, TEST_AUDIT),
+    ).rejects.toThrow(BadRequestException);
+    await expect(
+      uc.execute({ title: 'x', body: '   ' }, TEST_AUDIT),
+    ).rejects.toThrow(BadRequestException);
   });
 
   it('rechaza variables que no existen y dice cuáles', async () => {
@@ -42,7 +43,7 @@ describe('CreateConsentTemplateUseCase', () => {
       new InMemoryConsentTemplateRepository(),
     );
     await expect(
-      uc.execute({ title: 'X', body: '{{paciente}} {{edad}}' }),
+      uc.execute({ title: 'X', body: '{{paciente}} {{edad}}' }, TEST_AUDIT),
     ).rejects.toThrow(/\{\{edad\}\}/);
   });
 });
@@ -53,7 +54,11 @@ describe('UpdateConsentTemplateUseCase', () => {
     const tpl = repo.seed();
     const uc = new UpdateConsentTemplateUseCase(repo);
 
-    const updated = await uc.execute(tpl.id, { body: 'Nuevo {{fecha}}' });
+    const updated = await uc.execute(
+      tpl.id,
+      { body: 'Nuevo {{fecha}}' },
+      TEST_AUDIT,
+    );
 
     expect(updated.body).toBe('Nuevo {{fecha}}');
     expect(updated.version).toBe(2);
@@ -64,7 +69,7 @@ describe('UpdateConsentTemplateUseCase', () => {
     const tpl = repo.seed();
     const uc = new UpdateConsentTemplateUseCase(repo);
 
-    const updated = await uc.execute(tpl.id, { active: false });
+    const updated = await uc.execute(tpl.id, { active: false }, TEST_AUDIT);
 
     expect(updated.active).toBe(false);
     expect(updated.version).toBe(1);
@@ -75,10 +80,14 @@ describe('UpdateConsentTemplateUseCase', () => {
     const tpl = repo.seed();
     const uc = new UpdateConsentTemplateUseCase(repo);
 
-    const updated = await uc.execute(tpl.id, {
-      title: tpl.title,
-      body: tpl.body,
-    });
+    const updated = await uc.execute(
+      tpl.id,
+      {
+        title: tpl.title,
+        body: tpl.body,
+      },
+      TEST_AUDIT,
+    );
 
     expect(updated.version).toBe(1);
   });
@@ -87,18 +96,18 @@ describe('UpdateConsentTemplateUseCase', () => {
     const uc = new UpdateConsentTemplateUseCase(
       new InMemoryConsentTemplateRepository(),
     );
-    await expect(uc.execute('otra', { active: false })).rejects.toThrow(
-      NotFoundException,
-    );
+    await expect(
+      uc.execute('otra', { active: false }, TEST_AUDIT),
+    ).rejects.toThrow(NotFoundException);
   });
 
   it('valida las variables del texto nuevo', async () => {
     const repo = new InMemoryConsentTemplateRepository();
     const tpl = repo.seed();
     const uc = new UpdateConsentTemplateUseCase(repo);
-    await expect(uc.execute(tpl.id, { body: '{{nope}}' })).rejects.toThrow(
-      BadRequestException,
-    );
+    await expect(
+      uc.execute(tpl.id, { body: '{{nope}}' }, TEST_AUDIT),
+    ).rejects.toThrow(BadRequestException);
   });
 });
 

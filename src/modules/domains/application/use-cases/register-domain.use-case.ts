@@ -18,6 +18,7 @@ import {
 } from '../../domain/rules/tenant-domain-rules';
 import { parseHost } from '../../../../shared/tenancy/host-parser';
 import { DomainClock } from '../domain-clock';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 
 export interface RegisterDomainResult {
   domain: TenantDomainRecord;
@@ -54,7 +55,10 @@ export class RegisterDomainUseCase {
       .filter(Boolean);
   }
 
-  async execute(input: { host: string }): Promise<RegisterDomainResult> {
+  async execute(
+    input: { host: string },
+    audit: AuditRequestContext,
+  ): Promise<RegisterDomainResult> {
     const host = input.host.trim().toLowerCase().split(':')[0];
     if (!host || !host.includes('.')) {
       throw new BadRequestException('Dominio no válido.');
@@ -80,12 +84,15 @@ export class RegisterDomainUseCase {
     try {
       // Su propio PENDING caducado no le bloquea: se retira y se da de alta
       // uno nuevo (token y plazo nuevos), en una sola transacción.
-      const row = await this.repo.create({
-        host,
-        verifyToken,
-        expiresAt: pendingExpiresAt(now),
-        replacing: existing ? { id: existing.id, deletedAt: now } : undefined,
-      });
+      const row = await this.repo.create(
+        {
+          host,
+          verifyToken,
+          expiresAt: pendingExpiresAt(now),
+          replacing: existing ? { id: existing.id, deletedAt: now } : undefined,
+        },
+        audit,
+      );
       return {
         domain: toDomainRecord(row, now),
         dns: {

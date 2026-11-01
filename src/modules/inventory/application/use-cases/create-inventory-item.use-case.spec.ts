@@ -1,3 +1,4 @@
+import { TEST_AUDIT } from '../../../audit/application/__fixtures__/test-audit-context';
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { CreateInventoryItemUseCase } from './create-inventory-item.use-case';
@@ -12,7 +13,7 @@ describe('CreateInventoryItemUseCase', () => {
   it('creates an item with the given fields and default minStock 0', async () => {
     const { uc } = makeUseCase();
 
-    const item = await uc.execute({ name: 'Gasas', unit: 'caja' });
+    const item = await uc.execute({ name: 'Gasas', unit: 'caja' }, TEST_AUDIT);
 
     expect(item.name).toBe('Gasas');
     expect(item.unit).toBe('caja');
@@ -24,13 +25,16 @@ describe('CreateInventoryItemUseCase', () => {
   it('trims name/unit/sku and persists an explicit minStock', async () => {
     const { uc } = makeUseCase();
 
-    const item = await uc.execute({
-      name: '  Guantes  ',
-      unit: ' caja ',
-      sku: ' GT-100 ',
-      minStock: 5,
-      notes: 'stock crítico',
-    });
+    const item = await uc.execute(
+      {
+        name: '  Guantes  ',
+        unit: ' caja ',
+        sku: ' GT-100 ',
+        minStock: 5,
+        notes: 'stock crítico',
+      },
+      TEST_AUDIT,
+    );
 
     expect(item.name).toBe('Guantes');
     expect(item.unit).toBe('caja');
@@ -39,21 +43,24 @@ describe('CreateInventoryItemUseCase', () => {
     expect(item.notes).toBe('stock crítico');
   });
 
-  it('accepts createdById as a separate argument, never from input', async () => {
+  it('takes createdById from the audit actor, never from input', async () => {
     const { uc, repo } = makeUseCase();
 
-    const item = await uc.execute({ name: 'Anestesia', unit: 'ml' }, 'user-1');
+    const item = await uc.execute(
+      { name: 'Anestesia', unit: 'ml' },
+      TEST_AUDIT,
+    );
 
-    expect(item.createdById).toBe('user-1');
+    expect(item.createdById).toBe(TEST_AUDIT.actor.userId);
     const stored = await repo.findItemById(item.id);
-    expect(stored?.createdById).toBe('user-1');
+    expect(stored?.createdById).toBe(TEST_AUDIT.actor.userId);
   });
 
   it('rejects a blank name with 400', async () => {
     const { uc } = makeUseCase();
 
     await expect(
-      uc.execute({ name: '   ', unit: 'unidad' }),
+      uc.execute({ name: '   ', unit: 'unidad' }, TEST_AUDIT),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
@@ -61,7 +68,7 @@ describe('CreateInventoryItemUseCase', () => {
     const { uc } = makeUseCase();
 
     await expect(
-      uc.execute({ name: 'Gasas', unit: '   ' }),
+      uc.execute({ name: 'Gasas', unit: '   ' }, TEST_AUDIT),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
@@ -69,7 +76,7 @@ describe('CreateInventoryItemUseCase', () => {
     const { uc } = makeUseCase();
 
     await expect(
-      uc.execute({ name: 'Gasas', unit: 'caja', minStock: -1 }),
+      uc.execute({ name: 'Gasas', unit: 'caja', minStock: -1 }, TEST_AUDIT),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
@@ -77,7 +84,10 @@ describe('CreateInventoryItemUseCase', () => {
     const { uc } = makeUseCase();
 
     await expect(
-      uc.execute({ name: 'Gasas', unit: 'caja', minStock: Infinity }),
+      uc.execute(
+        { name: 'Gasas', unit: 'caja', minStock: Infinity },
+        TEST_AUDIT,
+      ),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
@@ -94,7 +104,9 @@ describe('CreateInventoryItemUseCase', () => {
       }),
     );
 
-    await expect(uc.execute({ name: 'guantes', unit: 'caja' })).rejects.toThrow(
+    await expect(
+      uc.execute({ name: 'guantes', unit: 'caja' }, TEST_AUDIT),
+    ).rejects.toThrow(
       new ConflictException('Ya existe un insumo con ese nombre en esta sede.'),
     );
   });
@@ -103,8 +115,8 @@ describe('CreateInventoryItemUseCase', () => {
     const { repo, uc } = makeUseCase();
     jest.spyOn(repo, 'createItem').mockRejectedValue(new Error('boom'));
 
-    await expect(uc.execute({ name: 'Gasas', unit: 'caja' })).rejects.toThrow(
-      'boom',
-    );
+    await expect(
+      uc.execute({ name: 'Gasas', unit: 'caja' }, TEST_AUDIT),
+    ).rejects.toThrow('boom');
   });
 });
