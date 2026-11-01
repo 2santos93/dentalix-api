@@ -47,6 +47,12 @@ export interface RegionalFormat {
   date(instant: Date, timeZone: string): string;
   /** 'YYYY-MM-DD' sin zona, mismo formato que `date()`. */
   civilDate(day: string): string;
+  /**
+   * Día y mes en el patrón corto del locale de la sede (Intl/CLDR con
+   * `day`/`month: '2-digit'`), sin forzar ceros ni orden (DX-520): es-* da
+   * «1/11» (CLDR fija `d/M` para día-mes), en-GB/pt-BR «01/11», en-US
+   * «11/01», de-DE «01.11.». `date()` sí lleva siempre 2 cifras.
+   */
   dayMonth(instant: Date, timeZone: string): string;
   time(instant: Date, timeZone: string): string;
   dateTime(instant: Date, timeZone: string): string;
