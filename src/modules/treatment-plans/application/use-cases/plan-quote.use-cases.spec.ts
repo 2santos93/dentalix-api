@@ -25,7 +25,7 @@ import { FixedDocumentTypeNamesReader } from '../../../document-type-names/__fix
 // PNG real de 1x1 (firma + IHDR).
 const PNG =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
-// 16 oct 2026, 10:00 en Bogotá (UTC-5).
+// 16 oct 2026, 10:00 en la zona de la sede (UTC-5).
 const NOW = new Date('2026-10-16T15:00:00.000Z');
 const META = {
   acceptedById: 'user-1',
@@ -77,7 +77,7 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
 
   it('compone el presupuesto con la fecha de hoy en la zona de la sede y su hash', async () => {
     const { get } = setup();
-    // 23:30 del 15 en Bogotá = 04:30 UTC del 16: el presupuesto es del 15.
+    // 23:30 del 15 en la zona de la sede = 04:30 UTC del 16: el presupuesto es del 15.
     const lateRepo = new InMemoryPlanQuoteRepository();
     lateRepo.add(quoteSource());
     const late = new GetPlanQuoteUseCase(
