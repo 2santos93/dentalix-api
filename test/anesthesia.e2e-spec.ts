@@ -2,6 +2,7 @@ import { INestApplication } from '@nestjs/common';
 import { Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
+import { leavesWith } from './support/content-leaves';
 import { createE2eApp } from './support/create-e2e-app';
 import {
   Clinic,
@@ -336,16 +337,22 @@ describe('Anestesia local en la evolución (DX-307, e2e)', () => {
         actorUserId: dentistA.userId,
         patientId: child,
       });
-      expect(
-        (events[0].metadata as { anesthesiaSafety: unknown }).anesthesiaSafety,
-      ).toEqual({
-        rulesVersion: 'ANESTHESIA_DOSE_V3',
-        blocking: ['DOSE_OVER_MAX'],
-        info: [],
-        overridden: true,
+      // El metadato entero: solo los ids de la ruta y las reglas, sin dosis.
+      expect(events[0].metadata).toEqual({
+        params: { entryId: childEntry, patientId: child },
+        anesthesiaSafety: {
+          rulesVersion: 'ANESTHESIA_DOSE_V3',
+          blocking: ['DOSE_OVER_MAX'],
+          info: [],
+          overridden: true,
+        },
       });
-      expect(JSON.stringify(events[0])).not.toContain(OVERRIDE);
-      expect(JSON.stringify(events[0])).not.toContain('204');
+      // Ni la dosis (204 mg), ni el % del máximo (146), ni el motivo en ningún
+      // número, texto o clave del evento. Los ids y la hora no cuentan: un
+      // `e204` de un UUID o un `.204Z` no son la dosis (DX-496, TST-059).
+      for (const clinical of [204, 146, OVERRIDE]) {
+        expect(leavesWith(events[0], clinical)).toEqual([]);
+      }
     });
 
     it('la evolución lista el registro y el acumulado; la ficha lo ve', async () => {

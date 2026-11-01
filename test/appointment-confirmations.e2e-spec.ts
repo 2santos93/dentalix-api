@@ -388,7 +388,10 @@ describe('Confirmación de cita por enlace (e2e)', () => {
         'Endodoncia',
         'penicilina',
         'Secreta',
-        '310',
+        // El móvil del paciente, con o sin espacios: '310' a secas aparecía
+        // al azar en UUID y horas (DX-496, TST-059).
+        '310 555 0101',
+        '3105550101',
         patientA,
         appt.id,
         clinicA.tenantId,
