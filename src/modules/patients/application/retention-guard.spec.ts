@@ -61,11 +61,9 @@ describe('assertNotUnderRetention (DX-039, DX-330)', () => {
       ),
     );
     expect(body.retentionUntil).toBe('2040-03-10');
-    expect(body.message).toContain(
-      'en retención hasta el 10/03/2040 (20 años desde la última atención)',
+    expect(body.message).toBe(
+      'La historia clínica de este paciente está en retención hasta el 10/03/2040 (20 años desde la última atención): no se puede archivar ni borrar. Si necesitas retirar sus datos de contacto, usa la supresión parcial.',
     );
-    expect(body.message).not.toMatch(/legal/);
-    expect(body.message).not.toContain('15');
   });
 
   it('una atención vencida con 15 sigue en retención con 20', () => {

@@ -21,6 +21,7 @@ import {
   transactionId,
   waitForTransactionWaiters,
 } from './support/postgres-concurrency';
+import { fixedSedeDay } from './support/sede-clock';
 import { purgeTenants } from './support/tenant-purge';
 
 // DX-330: el plazo de conservación de la HC es una columna de la clínica
@@ -129,9 +130,10 @@ describe('plazo de conservación de la HC por clínica (DX-330, int)', () => {
 });
 
 describe('el plazo de la clínica manda en la fecha de fin (DX-330, int)', () => {
-  // `findById` y `list` miran el reloj real: las fechas salen de hoy, para que
-  // 15 años estén siempre vencidos y 20 y 25, siempre en retención.
-  const NOW = new Date();
+  // `findById` y `list` miran el reloj real: las fechas salen del día de la
+  // sede, para que 15 años estén siempre vencidos y 20 y 25, siempre en
+  // retención.
+  const NOW = fixedSedeDay().at;
   const LAST_YEAR = NOW.getUTCFullYear() - 16;
   const LAST = new Date(Date.UTC(LAST_YEAR, 5, 15, 10));
   const endWith = (years: number): string => `${LAST_YEAR + years}-06-15`;

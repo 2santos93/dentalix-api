@@ -94,10 +94,9 @@ describe('Plazo de conservación de la HC (DX-330)', () => {
       const error = await update(20)
         .execute({ clinicalRecordRetentionYears: 19 }, ctx)
         .catch((e: unknown) => e);
-      expect((error as BadRequestException).message).toContain(
-        'entre 20 y 100',
+      expect((error as BadRequestException).message).toBe(
+        'El plazo de conservación de la historia clínica tiene que ser un número entero de años entre 20 y 100.',
       );
-      expect((error as BadRequestException).message).not.toContain('15');
     });
 
     it.each([15, 100])('%p is accepted', async (value) => {
