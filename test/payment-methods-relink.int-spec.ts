@@ -12,7 +12,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { normalizeReference } from '../src/modules/payment-methods/domain/payment-method-rules';
 import {
   REGIONAL_BOGOTA_FIXTURE,
-  locationData,
+  regionalLocationInsert,
 } from './support/location-fixtures';
 
 // DX-395, capa DB: la migración 20261103130000 repite el enlace de los abonos
@@ -40,12 +40,16 @@ async function seedClinic(
     INSERT INTO "tenants" ("id", "name", "subdomain", "updatedAt")
     VALUES (gen_random_uuid(), ${subdomain}, ${subdomain}, now())
     RETURNING "id"`;
-  const location = await db.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
-      tenantId: tenant.id,
-      name: 'Sede',
-    }),
-  });
+  // Sede también por SQL: el cliente insertaría columnas de sede posteriores
+  // (p. ej. DX-515) aunque no se pidan.
+  const location = {
+    id: await regionalLocationInsert(
+      db,
+      tenant.id,
+      'Sede',
+      REGIONAL_BOGOTA_FIXTURE,
+    ),
+  };
   const patient = await db.patient.create({
     data: { tenantId: tenant.id, firstName: 'Ana', lastName: subdomain },
   });

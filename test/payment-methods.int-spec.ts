@@ -9,7 +9,7 @@ import { PrismaPaymentMethodRepository } from '../src/modules/payment-methods/in
 import { PrismaPaymentRepository } from '../src/modules/payments/infrastructure/repositories/prisma-payment.repository';
 import {
   REGIONAL_BOGOTA_FIXTURE,
-  locationData,
+  regionalLocationInsert,
 } from './support/location-fixtures';
 
 // DX-377, capa DB: el catálogo de medios de pago (RLS FORCE, sin DELETE para
@@ -47,16 +47,17 @@ async function seedClinic(
     INSERT INTO "tenants" ("id", "name", "subdomain", "updatedAt")
     VALUES (gen_random_uuid(), ${subdomain}, ${subdomain}, now())
     RETURNING "id"`;
-  const { defaultPhoneRegion: _region, ...regional } = REGIONAL_BOGOTA_FIXTURE;
-  const location = await db.location.create({
-    data: beforeDx377
-      ? { ...regional, tenantId: tenant.id, name: 'Sede' }
-      : locationData(REGIONAL_BOGOTA_FIXTURE, {
-          tenantId: tenant.id,
-          name: 'Sede',
-        }),
-    select: { id: true },
-  });
+  // Sede también por SQL: el cliente insertaría columnas de sede posteriores
+  // (p. ej. DX-515) aunque no se pidan.
+  const location = {
+    id: await regionalLocationInsert(
+      db,
+      tenant.id,
+      'Sede',
+      REGIONAL_BOGOTA_FIXTURE,
+      { phoneRegion: !beforeDx377 },
+    ),
+  };
   const patient = await db.patient.create({
     data: { tenantId: tenant.id, firstName: 'Ana', lastName: subdomain },
   });
