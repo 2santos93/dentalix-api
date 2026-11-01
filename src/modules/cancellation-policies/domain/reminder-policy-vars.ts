@@ -1,4 +1,5 @@
 import type { RegionalFormat } from '../../../shared/format/regional-format';
+import type { CurrencyTexts } from '../../../shared/format/currency-text';
 import type { ReminderCancellationPolicyVars } from '../../notifications/email/domain/email-message';
 
 /**
@@ -16,6 +17,8 @@ export function reminderPolicyVars(
     currency: string | null;
   } | null,
   fmt: RegionalFormat,
+  /** DX-517: el texto propio de cada moneda de la clínica (vacío = el código). */
+  currencyTexts?: CurrencyTexts | null,
 ): ReminderCancellationPolicyVars | null {
   if (!policy) return null;
   return {
@@ -23,7 +26,7 @@ export function reminderPolicyVars(
     text: policy.patientText,
     feeLabel:
       policy.suggestedFee !== null && policy.suggestedFee > 0 && policy.currency
-        ? fmt.money(policy.suggestedFee, policy.currency)
+        ? fmt.money(policy.suggestedFee, policy.currency, currencyTexts)
         : null,
   };
 }

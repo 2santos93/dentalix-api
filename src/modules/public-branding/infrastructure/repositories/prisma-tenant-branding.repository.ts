@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantBrandingRepository } from '../../domain/ports/tenant-branding-repository.port';
 import { TenantBranding } from '../../domain/entities/tenant-branding.entity';
+import { readCurrencyTexts } from '../../../../shared/format/currency-text';
 
 @Injectable()
 export class PrismaTenantBrandingRepository implements TenantBrandingRepository {
@@ -15,7 +16,12 @@ export class PrismaTenantBrandingRepository implements TenantBrandingRepository 
     // TenantResolverService.resolve(). No runWithTenant, no DIRECT_URL.
     const tenant = await this.prisma.tenant.findFirst({
       where: { id: tenantId, deletedAt: null },
-      select: { name: true, primaryColor: true, logoUrl: true },
+      select: {
+        name: true,
+        primaryColor: true,
+        logoUrl: true,
+        currencyTexts: true,
+      },
     });
 
     if (!tenant) return null;
@@ -27,11 +33,13 @@ export class PrismaTenantBrandingRepository implements TenantBrandingRepository 
     name: string;
     primaryColor: string;
     logoUrl: string | null;
+    currencyTexts: unknown;
   }): TenantBranding {
     return {
       name: tenant.name,
       primaryColor: tenant.primaryColor,
       logoUrl: tenant.logoUrl,
+      currencyTexts: readCurrencyTexts(tenant.currencyTexts),
     };
   }
 }

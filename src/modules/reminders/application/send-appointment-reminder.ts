@@ -1,4 +1,5 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { ClinicCurrencyTextsReader } from '../../../shared/money/clinic-currency-texts.reader';
 import { CreateConfirmationLinkUseCase } from '../../appointment-confirmations/application/use-cases/create-confirmation-link.use-case';
 import { OutboundMessages } from '../../notifications/outbound/application/outbound-messages.service';
 import { EmailOutbox } from '../../notifications/email/application/email-outbox.service';
@@ -71,6 +72,8 @@ export class SendAppointmentReminder {
     private readonly clock: ReminderClock,
     private readonly tenantContext: TenantContextService,
     private readonly optOutLinks: ReminderOptOutLinks,
+    // DX-517: opcional para los tests que construyen el caso a mano.
+    @Optional() private readonly currencyTexts?: ClinicCurrencyTextsReader,
   ) {}
 
   async handle(payload: JobPayload, context?: JobContext): Promise<void> {
@@ -233,6 +236,9 @@ export class SendAppointmentReminder {
         cancellationPolicy: reminderPolicyVars(
           ctx.cancellationPolicy,
           ctx.locationFormat,
+          ctx.cancellationPolicy?.suggestedFee
+            ? await this.currencyTexts?.forTenant(tenantId)
+            : null,
         ),
       },
     });

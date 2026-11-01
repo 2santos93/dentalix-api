@@ -1,3 +1,4 @@
+import { readCurrencyTexts } from '../../../../shared/format/currency-text';
 import { Prisma } from '@prisma/client';
 import {
   buildReceiptSnapshot,
@@ -68,7 +69,13 @@ export async function issuePaymentReceipt(
       tx.tenant.findUniqueOrThrow({
         where: { id: payment.tenantId },
         // DX-515: título y leyenda del recibo de la clínica.
-        select: { name: true, receiptTitle: true, receiptLegend: true },
+        // DX-517: y el texto propio de cada moneda.
+        select: {
+          name: true,
+          receiptTitle: true,
+          receiptLegend: true,
+          currencyTexts: true,
+        },
       }),
       readDocumentTypeNames(tx, payment.tenantId),
       tx.patient.findFirstOrThrow({
@@ -170,6 +177,8 @@ export async function issuePaymentReceipt(
           },
         ),
       },
+      // DX-517: se congela en la foto; sin textos propios, la foto es la de antes.
+      currencyTexts: readCurrencyTexts(tenant.currencyTexts),
     },
     // El nombre visible queda congelado en la foto (DX-327, R18).
     names,

@@ -7,6 +7,7 @@ import {
 } from '../../patients/domain/document-type';
 import { docTypeFromStored } from '../../patients/domain/legacy-document-codes';
 import type { ReceiptTexts } from './receipt-settings';
+import type { CurrencyTexts } from '../../../shared/format/currency-text';
 
 /** Pie legal por defecto del recibo de caja (DX-136). */
 export const RECEIPT_LEGAL_NOTICE = 'Este documento no es factura';
@@ -105,6 +106,8 @@ export interface ReceiptSnapshotInput {
    * entre la de la clínica y la de la sede). Ausente o `null` = sin ellos.
    */
   texts?: ReceiptTexts | null;
+  /** DX-517: texto propio de cada moneda de la clínica al emitir. Vacío o ausente = ninguno. */
+  currencyTexts?: CurrencyTexts | null;
 }
 
 /**
@@ -171,6 +174,14 @@ export interface ReceiptSnapshot {
    * anterior no la añade aunque la clínica la configure después.
    */
   legend?: string;
+  /**
+   * DX-517: el texto propio de cada moneda que tenía la clínica al emitir
+   * ({«VES»: «Bs.»}), con el que se pintan los importes del recibo y de su
+   * email. AUSENTE si no tenía ninguno: la foto es la de antes y reimprimir
+   * un recibo anterior no cambia sus importes aunque la clínica lo configure
+   * después.
+   */
+  currencyTexts?: CurrencyTexts;
 }
 
 const blankToNull = (value: string | null): string | null =>
@@ -233,6 +244,10 @@ export function buildReceiptSnapshot(
     // DX-515: solo si están configurados, para no cambiar la foto de antes.
     ...(input.texts?.title ? { title: input.texts.title } : {}),
     ...(input.texts?.legend ? { legend: input.texts.legend } : {}),
+    // DX-517: igual, solo si la clínica tiene alguno.
+    ...(input.currencyTexts && Object.keys(input.currencyTexts).length > 0
+      ? { currencyTexts: { ...input.currencyTexts } }
+      : {}),
   };
 }
 

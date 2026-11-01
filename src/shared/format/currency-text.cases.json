@@ -1,0 +1,22 @@
+[
+  { "locale": "es-VE", "amount": 1234.5, "currency": "VES", "texts": { "VES": "Bs." }, "expected": "Bs.\u00a01.234,50" },
+  { "locale": "es-VE", "amount": -1234.5, "currency": "VES", "texts": { "VES": "Bs." }, "expected": "Bs.-1.234,50" },
+  { "locale": "es-VE", "amount": 1234, "currency": "VES", "texts": { "VES": "Bs." }, "expected": "Bs.\u00a01.234,00" },
+  { "locale": "es-VE", "amount": 0.5, "currency": "VES", "texts": { "VES": "Bs." }, "expected": "Bs.\u00a00,50" },
+  { "locale": "es-VE", "amount": 1234.5, "currency": "USD", "texts": { "USD": "US$" }, "expected": "US$\u00a01.234,50" },
+  { "locale": "es", "amount": 1234.5, "currency": "VES", "texts": { "VES": "Bs." }, "expected": "1234,50\u00a0Bs." },
+  { "locale": "es", "amount": 150000.5, "currency": "VES", "texts": { "VES": "Bs." }, "expected": "150.000,50\u00a0Bs." },
+  { "locale": "en-US", "amount": 1234.5, "currency": "USD", "texts": { "USD": "US$" }, "expected": "US$\u00a01,234.50" },
+  { "locale": "en-US", "amount": -1234.5, "currency": "USD", "texts": { "USD": "US$" }, "expected": "-US$\u00a01,234.50" },
+  { "locale": "pt-BR", "amount": 1234.5, "currency": "BRL", "texts": { "BRL": "R$" }, "expected": "R$\u00a01.234,50" },
+  { "locale": "de-DE", "amount": 1234.5, "currency": "EUR", "texts": { "EUR": "€" }, "expected": "1.234,50\u00a0€" },
+  { "locale": "fr-FR", "amount": 1234.5, "currency": "EUR", "texts": { "EUR": "€" }, "expected": "1\u202f234,50\u00a0€" },
+  { "locale": "ar-EG", "amount": 1234.5, "currency": "EGP", "texts": { "EGP": "ج.م." }, "expected": "1,234.50\u00a0ج.م." },
+  { "locale": "ja-JP", "amount": 1234, "currency": "JPY", "texts": { "JPY": "円" }, "expected": "円\u00a01,234" },
+  { "locale": "ja-JP", "amount": 1234.5, "currency": "JPY", "texts": { "JPY": "円" }, "expected": "円\u00a01,234.50" },
+  { "locale": "es-MX", "amount": 2195000, "currency": "MXN", "texts": { "MXN": "MX$" }, "expected": "MX$\u00a02,195,000.00" },
+  { "locale": "de-CH", "amount": 1234.5, "currency": "CHF", "texts": { "CHF": "Fr." }, "expected": "Fr.\u00a01\u2019234.50" },
+  { "locale": "en-GB", "amount": 1234.5, "currency": "GBP", "texts": { "GBP": "£" }, "expected": "£\u00a01,234.50" },
+  { "locale": "es-VE", "amount": 1234.5, "currency": "VES", "texts": { "VES": "Bs.Digit" }, "expected": "Bs.Digit\u00a01.234,50" },
+  { "locale": "es-VE", "amount": 1234.5, "currency": "ves", "texts": { "VES": "Bs." }, "expected": "Bs.\u00a01.234,50" }
+]

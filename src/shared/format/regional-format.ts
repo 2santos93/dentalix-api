@@ -1,4 +1,9 @@
 import { CLDR_ZERO_FORMAT_DIGITS } from './cldr-format-digits';
+import {
+  currencyTextFor,
+  moneyWithCurrencyText,
+  type CurrencyTexts,
+} from './currency-text';
 
 /**
  * Helper único de formato regional (DX-350). Mismo contrato que la web y los
@@ -41,8 +46,13 @@ export interface RegionalFormat {
   number(value: number, digits?: { min?: number; max?: number }): string;
   /** 12.5 → «12.5%» / «12,5 %». Por defecto max 2 decimales. */
   percent(value: number, maxDigits?: number): string;
-  /** 0 decimales si la moneda no tiene unidad menor y el importe es entero; si no, 2. */
-  money(amount: number, currency: string): string;
+  /**
+   * 0 decimales si la moneda no tiene unidad menor y el importe es entero; si
+   * no, 2. DX-517: con un texto propio de la clínica para esa moneda
+   * (`texts`), ese texto en el lugar del código (`moneyWithCurrencyText`);
+   * sin él, como siempre.
+   */
+  money(amount: number, currency: string, texts?: CurrencyTexts | null): string;
   /** Día, mes (2 cifras) y año (4) en el orden del locale. */
   date(instant: Date, timeZone: string): string;
   /** 'YYYY-MM-DD' sin zona, mismo formato que `date()`. */
@@ -308,7 +318,11 @@ function build(locale: string, hourCycle: HourCycle): RegionalFormat {
           maximumFractionDigits: maxDigits,
         }).format(value / 100),
       ),
-    money: (amount, currency) => {
+    money: (amount, currency, texts) => {
+      const text = currencyTextFor(texts, currency);
+      if (text !== undefined) {
+        return moneyWithCurrencyText(amount, currency, locale, text);
+      }
       const digits =
         CLDR_ZERO_FORMAT_DIGITS.has(currency.toUpperCase()) &&
         Number.isInteger(amount)

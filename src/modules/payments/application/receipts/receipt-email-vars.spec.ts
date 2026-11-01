@@ -306,4 +306,51 @@ describe('receiptEmailVars (DX-136)', () => {
     expect(vars.planLabel).toBe('Plan del 09/01/2026 · Opción A: implante');
     expect(vars.voided?.dateLabel).toBe('10/28/2026');
   });
+
+  it('DX-517: los importes usan el texto de moneda congelado en la foto; sin él, los de antes', () => {
+    const plain = receiptEmailVars(view(), SEDE_ZONE, SEDE_FMT);
+    const frozen = forView(
+      buildReceiptSnapshot(
+        { ...SNAPSHOT_INPUT, currencyTexts: { COP: 'Col$' } },
+        NO_LOCAL_NAMES,
+      ),
+    );
+    const vars = receiptEmailVars(
+      view({ snapshot: frozen }),
+      SEDE_ZONE,
+      SEDE_FMT,
+    );
+    expect(vars.amountLabel).toBe(
+      SEDE_FMT.money(150000, 'COP', { COP: 'Col$' }),
+    );
+    expect(vars.amountLabel).toMatch(/^Col\$\s150\.000,00$/);
+    expect(vars.balanceLabel).toMatch(/^Col\$\s450\.000,00$/);
+    expect({ ...vars, amountLabel: '', balanceLabel: '' }).toEqual({
+      ...plain,
+      amountLabel: '',
+      balanceLabel: '',
+    });
+  });
+
+  it('DX-515-bis: título y leyenda de la foto van al email; sin ellos, las variables de antes', () => {
+    const plain = receiptEmailVars(view(), SEDE_ZONE, SEDE_FMT);
+    expect(plain).not.toHaveProperty('title');
+    expect(plain).not.toHaveProperty('legend');
+    const vars = receiptEmailVars(
+      view({
+        snapshot: {
+          ...snapshot,
+          title: 'Recibo de pago',
+          legend: 'Este recibo no es una factura',
+        },
+      }),
+      SEDE_ZONE,
+      SEDE_FMT,
+    );
+    expect(vars).toEqual({
+      ...plain,
+      title: 'Recibo de pago',
+      legend: 'Este recibo no es una factura',
+    });
+  });
 });
