@@ -2298,6 +2298,13 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
             `providerId=${clinicB.adminUserId}&locationId=${b.locationId}&patientId=${a.patientId}`,
           'Paciente no encontrado',
         ],
+        [
+          // DX-509-bis: la cita que se mueve (no ocupa su propia hora).
+          'excludeAppointmentId',
+          () =>
+            `providerId=${clinicB.adminUserId}&locationId=${b.locationId}&excludeAppointmentId=${a.appointmentId}`,
+          'Cita no encontrada',
+        ],
       ] as const
     ).map(([field, query, message]): IsolationCase => ({
       name: `GET /appointments/openings ?${field} de A`,
