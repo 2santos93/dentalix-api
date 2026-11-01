@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional, OmitType } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   IsEnum,
+  IsIn,
   IsInt,
   IsOptional,
   IsUUID,
@@ -10,6 +11,10 @@ import {
   Min,
 } from 'class-validator';
 import { PaymentMethod } from '@prisma/client';
+import {
+  EXTERNAL_INVOICE_FILTERS,
+  type ExternalInvoiceFilter,
+} from '../../domain/ports/payment-repository.port';
 import { MAX_RANGE_DAYS } from '../../application/use-cases/list-cash-payments.use-case';
 import {
   PERIOD_DAY_MAX,
@@ -70,6 +75,18 @@ export class ListCashPaymentsQueryDto {
   @IsOptional()
   @IsUUID('all', { message: 'paymentMethodId debe ser un UUID.' })
   paymentMethodId?: string;
+
+  @ApiPropertyOptional({
+    enum: EXTERNAL_INVOICE_FILTERS,
+    description:
+      'DX-515: WITH = solo abonos con nº de factura externa; WITHOUT = solo ' +
+      'los que aún no lo tienen. Sin él, todos.',
+  })
+  @IsOptional()
+  @IsIn(EXTERNAL_INVOICE_FILTERS, {
+    message: 'externalInvoice debe ser WITH o WITHOUT.',
+  })
+  externalInvoice?: ExternalInvoiceFilter;
 
   @ApiPropertyOptional({ minimum: 1, default: 1 })
   @IsOptional()

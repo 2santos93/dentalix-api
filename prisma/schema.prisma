@@ -54,6 +54,14 @@ model Tenant {
   /// DX-374: día civil (sede principal) desde el que rige la fuente MANUAL;
   /// los anteriores siguen con la automática. NULL con AUTOMATIC (CHECK).
   manualExchangeRatesSince                DateTime?                        @db.Date
+  /// DX-515: título del recibo de caja; NULL = «Recibo de caja» (lo pone la
+  /// web). CHECK 1..60, una línea sin espacios en los extremos. Solo ADMIN
+  /// (PUT /payment-receipts/settings, auditado). Se congela en la foto.
+  receiptTitle                            String?
+  /// DX-515: leyenda del recibo de la clínica (p. ej. «Este recibo no es una
+  /// factura»); NULL = no se imprime nada. CHECK 1..250, una línea. Una sede
+  /// puede sustituirla (`Location.receiptLegendOverride`). Se congela en la foto.
+  receiptLegend                           String?
   createdAt                               DateTime                         @default(now())
   updatedAt                               DateTime                         @updatedAt
   deletedAt                               DateTime?
@@ -332,6 +340,11 @@ model Location {
   healthRegistrationNumber     String?
   // DX-319: si el nº sale en los documentos de la sede. Por defecto no.
   showHealthRegistrationNumber Boolean        @default(false)
+  /// DX-515: la sede imprime SU leyenda del recibo (`receiptLegend`, NULL =
+  /// ninguna) en vez de la de la clínica. false = hereda la de la clínica, y
+  /// entonces `receiptLegend` es NULL (CHECK locations_receipt_legend_check).
+  receiptLegendOverride        Boolean        @default(false)
+  receiptLegend                String?
   // DX-222: teléfono de la sede para las indicaciones postoperatorias
   // («llama a la clínica al …»). Hasta 40 caracteres (CHECK
   // locations_phone_length_check).
@@ -2330,6 +2343,12 @@ model Payment {
   // `splitId`).
   splitId                  String?             @db.Uuid
   splitLine                Int?                @db.SmallInt
+  // DX-515: nº de la factura fiscal emitida FUERA de Dentalix para este
+  // abono: texto libre sin formato (1..64, una línea, CHECK
+  // payments_external_invoice_number_check). Lo ponen ADMIN y RECEPTION,
+  // también después de emitir el recibo (auditado con antes y después); el
+  // recibo emitido no cambia. En un cobro dividido va en todas sus líneas.
+  externalInvoiceNumber    String?
 
   // FK COMPUESTAS (SEC-004): el plan y la sede tienen que ser del MISMO tenant,
   // y `patientId` (denormalizado) tiene que ser el paciente del plan. Por

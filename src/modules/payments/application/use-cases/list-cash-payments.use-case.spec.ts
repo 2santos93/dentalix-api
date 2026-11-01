@@ -47,6 +47,7 @@ function fakeRow(
     method: PaymentMethod.CASH,
     paymentMethod: null,
     reference: null,
+    externalInvoiceNumber: null,
     notes: null,
     location: { id: 'loc-1', name: 'Sede principal' },
     patient: { id: 'pat-1', fullName: 'Ana Gómez' },

@@ -5,6 +5,7 @@ import {
   type ReceiptSplitLine,
 } from '../../domain/receipt-snapshot';
 import { formatReceiptNumber } from '../../domain/receipt-number';
+import { effectiveReceiptLegend } from '../../domain/receipt-settings';
 import { readDocumentTypeNames } from '../../../patients/infrastructure/repositories/prisma-document-type-names.repository';
 
 /** El abono recién insertado, en la misma transacción. */
@@ -54,11 +55,20 @@ export async function issuePaymentReceipt(
     await Promise.all([
       tx.location.findFirstOrThrow({
         where: { id: payment.locationId },
-        select: { id: true, name: true, address: true, receiptPrefix: true },
+        select: {
+          id: true,
+          name: true,
+          address: true,
+          receiptPrefix: true,
+          // DX-515: la leyenda propia de la sede, si la tiene.
+          receiptLegendOverride: true,
+          receiptLegend: true,
+        },
       }),
       tx.tenant.findUniqueOrThrow({
         where: { id: payment.tenantId },
-        select: { name: true },
+        // DX-515: título y leyenda del recibo de la clínica.
+        select: { name: true, receiptTitle: true, receiptLegend: true },
       }),
       readDocumentTypeNames(tx, payment.tenantId),
       tx.patient.findFirstOrThrow({
@@ -149,6 +159,17 @@ export async function issuePaymentReceipt(
       planBalance,
       cashier,
       split: payment.split ?? null,
+      // DX-515: se congelan en la foto; sin configurar, la foto es la de antes.
+      texts: {
+        title: tenant.receiptTitle,
+        legend: effectiveReceiptLegend(
+          { title: tenant.receiptTitle, legend: tenant.receiptLegend },
+          {
+            override: location.receiptLegendOverride,
+            legend: location.receiptLegend,
+          },
+        ),
+      },
     },
     // El nombre visible queda congelado en la foto (DX-327, R18).
     names,

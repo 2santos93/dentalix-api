@@ -275,3 +275,50 @@ describe('receiptPatientView (DX-327)', () => {
     expect(() => receiptPatientView(toString, NO_LOCAL_NAMES)).toThrow();
   });
 });
+
+describe('buildReceiptSnapshot: título y leyenda del recibo (DX-515)', () => {
+  it('sin título ni leyenda configurados, la foto es byte a byte la de antes', () => {
+    const before = JSON.stringify(
+      buildReceiptSnapshot(input(), NO_LOCAL_NAMES),
+    );
+    for (const texts of [undefined, null, { title: null, legend: null }]) {
+      const snapshot = buildReceiptSnapshot(input({ texts }), NO_LOCAL_NAMES);
+      expect(JSON.stringify(snapshot)).toBe(before);
+      expect(snapshot).not.toHaveProperty('title');
+      expect(snapshot).not.toHaveProperty('legend');
+    }
+  });
+
+  it('congela el título y la leyenda configurados al emitir, y nada más cambia', () => {
+    const plain = buildReceiptSnapshot(input(), NO_LOCAL_NAMES);
+    const snapshot = buildReceiptSnapshot(
+      input({
+        texts: {
+          title: 'Recibo de pago',
+          legend: 'Este recibo no es una factura',
+        },
+      }),
+      NO_LOCAL_NAMES,
+    );
+    expect(snapshot).toEqual({
+      ...plain,
+      title: 'Recibo de pago',
+      legend: 'Este recibo no es una factura',
+    });
+  });
+
+  it('solo la leyenda, o solo el título: la otra clave no aparece', () => {
+    const onlyLegend = buildReceiptSnapshot(
+      input({ texts: { title: null, legend: 'Sin valor fiscal' } }),
+      NO_LOCAL_NAMES,
+    );
+    expect(onlyLegend.legend).toBe('Sin valor fiscal');
+    expect(onlyLegend).not.toHaveProperty('title');
+    const onlyTitle = buildReceiptSnapshot(
+      input({ texts: { title: 'Recibo de pago', legend: null } }),
+      NO_LOCAL_NAMES,
+    );
+    expect(onlyTitle.title).toBe('Recibo de pago');
+    expect(onlyTitle).not.toHaveProperty('legend');
+  });
+});

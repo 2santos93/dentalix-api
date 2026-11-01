@@ -38,6 +38,7 @@ import { PriceQuoteController } from '../treatment-plans/presentation/price-quot
 import { PlanFollowUpController } from '../treatment-plans/presentation/plan-follow-up.controller';
 import { PaymentsController } from '../payments/presentation/payments.controller';
 import { PaymentReceiptsController } from '../payments/presentation/payment-receipts.controller';
+import { ReceiptSettingsController } from '../payments/presentation/receipt-settings.controller';
 import { PaymentAllocationsController } from '../payments/presentation/payment-allocations.controller';
 import { PaymentPlansController } from '../payment-plans/presentation/payment-plans.controller';
 import { AccountStatementController } from '../account-statement/presentation/account-statement.controller';
@@ -1536,6 +1537,14 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
     'medical-history-submissions.e2e-spec.ts',
   // Plataforma: JOB_RETRIED en `platform_audit_events`, no en `audit_events`.
   'POST /platform/jobs/:id/retry': 'jobs-platform.e2e-spec.ts',
+  // DX-515: el repositorio escribe el evento en la transacción del cambio,
+  // con el antes y el después (configAuditEvent); sin evento si no cambia.
+  // CLINIC_SETTINGS RECEIPT_SETTINGS, LOCATION RECEIPT_LEGEND y PAYMENT
+  // EXTERNAL_INVOICE_NUMBER (este, con el paciente del abono).
+  'PUT /payment-receipts/settings': 'receipt-settings.e2e-spec.ts',
+  'PUT /payment-receipts/settings/locations/:locationId':
+    'receipt-settings.e2e-spec.ts',
+  'PUT /payments/:id/external-invoice-number': 'receipt-settings.e2e-spec.ts',
   // DX-324: CLINIC_SETTINGS con PRESCRIPTION_SETTINGS, los campos cambiados
   // y el antes y el después en códigos RX; sin evento si nada cambió.
   'PUT /prescriptions/settings':
@@ -1720,6 +1729,7 @@ const CONTROLLERS: Type[] = [
   PriceQuoteController,
   PaymentsController,
   PaymentReceiptsController,
+  ReceiptSettingsController,
   PaymentAllocationsController,
   PaymentPlansController,
   AccountStatementController,
