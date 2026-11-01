@@ -43,6 +43,12 @@ describe('DX-502: migraciones de treatment_plan_items."catalogCurrency"', () => 
 
   it('las funciones de los triggers fijan el search_path', () => {
     const sql = read(SCHEMA);
+    // B2: rellenar desde NULL exige la marca del relleno en los dos triggers.
+    expect(
+      sql.match(
+        /coalesce\(current_setting\('app\.dx502_backfill', true\), ''\) = 'on'/g,
+      ),
+    ).toHaveLength(2);
     const functions = sql.match(/FUNCTION public\."\w+"\(\) RETURNS trigger/g);
     expect(functions).toHaveLength(2);
     expect(sql.match(/SET search_path = pg_catalog, pg_temp/g)).toHaveLength(2);
@@ -58,6 +64,8 @@ describe('DX-502: migraciones de treatment_plan_items."catalogCurrency"', () => 
     expect(stmts[0]).toMatch(/^DO \$\$body\$\$$/);
     expect(sql).toMatch(/COMMIT;/);
     expect(sql).toMatch(/set_config\('app\.current_tenant', t::text, true\)/);
+    // B2: la marca que deja pasar el relleno único por los triggers.
+    expect(sql).toMatch(/set_config\('app\.dx502_backfill', 'on', true\)/);
     expect(sql).toMatch(/set_config\('lock_timeout', '\d+s', true\)/);
     expect(sql).toMatch(/i\."catalogCurrency" IS NULL/);
     expect(sql).toMatch(/LIMIT \d+/);

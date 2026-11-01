@@ -934,6 +934,32 @@ no hay una común. No cambia después (trigger
   `PublicBudgetItemDto.listPriceCurrency`.
 - Relleno: `20261111180100_dx502_plan_item_catalog_currency_backfill`
   (moneda común de las sedes activas de cada clínica; sin común, `NULL`).
+  Solo el relleno puede poner la moneda a un ítem que no la tenía: fija
+  `app.dx502_backfill = 'on'` en cada lote y los triggers lo exigen.
+- **Despliegue (sin réplicas mixtas).** Una réplica sin DX-502 no sabe leer
+  las fotos v3: `parseQuoteContent` lanza un `Error` genérico y la ruta
+  responde 500 (presupuesto imprimible, aceptación en la clínica, enlace
+  público y su firma). Hay que desplegar sin dejar a la vez réplicas viejas y
+  nuevas sirviendo tráfico (parar las viejas antes de abrir las nuevas, o
+  cambiar todas de golpe), y no volver atrás la API una vez emitido algún
+  presupuesto v3. Orden: `prisma migrate deploy` (aditiva: las réplicas
+  viejas siguen funcionando con la columna nueva) → cambiar todas las réplicas
+  a DX-502.
+- **Ítems creados por réplicas viejas tras el relleno.** Los ítems que dé de
+  alta una réplica sin DX-502 entre el relleno y el cambio de réplicas quedan
+  con `catalogCurrency` NULL (la web oculta su precio de lista con la nota).
+  El relleno es idempotente (solo toca ítems sin moneda) y, cuando ya no
+  queda ninguna réplica vieja, se repite ejecutando su `migration.sql` con el
+  owner de las migraciones (fuera de una transacción: hace COMMIT por lote):
+  ```bash
+  psql "$DIRECT_URL_SIN_SCHEMA" -X -v ON_ERROR_STOP=1 \
+    -f prisma/migrations/20261111180100_dx502_plan_item_catalog_currency_backfill/migration.sql
+  ```
+  `$DIRECT_URL_SIN_SCHEMA` es `DIRECT_URL` sin `?schema=public` (psql no lo
+  acepta). Si el relleno de la migración se cortó a medias (migración
+  fallida), basta `npx prisma migrate resolve --rolled-back
+  20261111180100_dx502_plan_item_catalog_currency_backfill` y
+  `npx prisma migrate deploy`.
 - Pendiente: el control de descuentos (tope, motivo e informe, SEC-041) sigue
   contando como rebaja un precio por debajo de un catálogo en otra moneda.
 

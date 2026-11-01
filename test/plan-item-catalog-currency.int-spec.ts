@@ -356,6 +356,41 @@ describe('moneda del catálogo en el ítem del plan (DX-502, Postgres)', () => {
     expect(await catalogCurrencyOf(itemId)).toBe('COP');
   });
 
+  it('fuera del relleno, un ítem sin moneda no la recibe (abierto, cerrado o firmado): solo el relleno la pone', async () => {
+    const c = await seedClinic('dx502-sin-relleno', [{ currency: 'COP' }]);
+    const open = (await planWithItem(c)).itemId;
+    const closed = (
+      await planWithItem(c, { status: 'COMPLETED' }, { status: 'DONE' })
+    ).itemId;
+    const signedPlan = await planWithItem(c);
+    await sendAndSign(c, signedPlan.planId);
+    for (const itemId of [open, closed, signedPlan.itemId]) {
+      // Con la clínica en contexto (la app) y como owner sin la marca.
+      await expect(
+        asClinic(c.tenantId, () =>
+          prisma.runWithTenant((tx) =>
+            tx.treatmentPlanItem.update({
+              where: { id: itemId },
+              data: { catalogCurrency: 'USD' },
+            }),
+          ),
+        ),
+      ).rejects.toThrow(/moneda del catálogo del ítem queda fijada/);
+      await expect(
+        owner.treatmentPlanItem.update({
+          where: { id: itemId },
+          data: { catalogCurrency: 'USD' },
+        }),
+      ).rejects.toThrow(/moneda del catálogo del ítem queda fijada/);
+      expect(await catalogCurrencyOf(itemId)).toBeNull();
+    }
+    // El relleno (con su marca) sí la pone, también en el cerrado y el firmado.
+    runBackfill();
+    for (const itemId of [open, closed, signedPlan.itemId]) {
+      expect(await catalogCurrencyOf(itemId)).toBe('COP');
+    }
+  });
+
   it('plan en EUR con el catálogo en COP: se firma con el precio de lista en COP, sin ahorro, y sigue en COP aunque cambien las sedes', async () => {
     const c = await seedClinic('dx502-eur-cop', [{ currency: 'COP' }]);
     // Precio de convenio en EUR (la foto del nombre basta: el «ahorro» es

@@ -17,7 +17,9 @@
 --
 -- Sin NO FORCE: con un owner sin superusuario ni BYPASSRLS (DX-113) la RLS
 -- le aplica, así que recorre las clínicas y fija `app.current_tenant` en cada
--- lote. Los triggers de bloqueo dejan pasar este relleno único (ver
+-- lote. Los triggers de bloqueo dejan pasar este relleno único solo con la
+-- marca `app.dx502_backfill` = 'on', que se fija (como la clínica) en cada
+-- lote y dura lo que su transacción (ver
 -- 20261111180000_dx502_plan_item_catalog_currency).
 --
 -- Idempotente: solo toca los ítems aún sin moneda. Si se corta a mitad (los
@@ -50,6 +52,7 @@ BEGIN
     last_id := NULL;
     LOOP
       PERFORM pg_catalog.set_config('app.current_tenant', t::text, true);
+      PERFORM pg_catalog.set_config('app.dx502_backfill', 'on', true);
       PERFORM pg_catalog.set_config('lock_timeout', '5s', true);
       SELECT pg_catalog.array_agg(s."id") INTO batch
         FROM (SELECT i."id" FROM public."treatment_plan_items" i

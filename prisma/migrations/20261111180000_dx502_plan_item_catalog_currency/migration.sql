@@ -14,12 +14,13 @@
 --                         currencies NOT VALID (la valida
 --                         20261111180200_dx502_plan_item_catalog_currency_fk_validate).
 --   trigger nuevo         treatment_plan_items_catalog_currency_frozen: una
---                         vez escrita, la moneda no cambia ni se borra (sí se
---                         rellena una vez, desde NULL).
+--                         vez escrita, la moneda no cambia ni se borra; desde
+--                         NULL solo la pone el relleno (que fija
+--                         `app.dx502_backfill` = 'on' en su transacción).
 --   trigger existente     treatment_plan_items_locked_when_closed (versión de
 --                         20261024150400_sec050_void_fee_in_closed_plan, sin
 --                         más cambios) admite en un plan cerrado ese relleno
---                         único y nada más de la fila. Sin él, el relleno de
+--                         único (con la misma marca) y nada más de la fila. Sin él, el relleno de
 --                         20261111180100 fallaría en los ítems de planes
 --                         completados, rechazados o cancelados.
 --                         treatment_plans_locked_when_accepted y
@@ -49,8 +50,11 @@ LANGUAGE plpgsql
 SET search_path = pg_catalog, pg_temp
 AS $$
 BEGIN
-  IF OLD."catalogCurrency" IS NOT NULL
-     AND NEW."catalogCurrency" IS DISTINCT FROM OLD."catalogCurrency" THEN
+  -- Solo el relleno de la migración (que fija `app.dx502_backfill` en su
+  -- transacción) pone la moneda a un ítem que no la tenía.
+  IF NEW."catalogCurrency" IS DISTINCT FROM OLD."catalogCurrency"
+     AND NOT (OLD."catalogCurrency" IS NULL
+              AND coalesce(current_setting('app.dx502_backfill', true), '') = 'on') THEN
     RAISE EXCEPTION 'la moneda del catálogo del ítem queda fijada al darlo de alta: no cambia'
       USING ERRCODE = 'restrict_violation';
   END IF;
@@ -122,8 +126,10 @@ BEGIN
       RETURN NEW;
     END IF;
     -- DX-502: rellenar UNA vez la moneda del catálogo de un ítem que no la
-    -- tenía (el relleno de la migración), sin tocar nada más de la fila.
+    -- tenía, solo desde el relleno de la migración (`app.dx502_backfill`), sin
+    -- tocar nada más de la fila.
     IF TG_OP = 'UPDATE'
+       AND coalesce(current_setting('app.dx502_backfill', true), '') = 'on'
        AND OLD."catalogCurrency" IS NULL
        AND (to_jsonb(NEW) - ARRAY['catalogCurrency', 'updatedAt'])
            = (to_jsonb(OLD) - ARRAY['catalogCurrency', 'updatedAt']) THEN
