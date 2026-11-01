@@ -17,6 +17,7 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import { civilDateIn } from '../src/shared/time/civil-day';
+import { sedeTodayFixture } from './support/sede-clock';
 
 // DX-516 en HTTP real: ajustes por medio de pago (impuesto, recargo o
 // descuento). Sin ajustes nada cambia; solo el ADMIN los configura, con su
@@ -31,8 +32,9 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
-const BOGOTA = 'America/Bogota';
-const today = (): string => civilDateIn(new Date(), BOGOTA);
+// La sede en una zona lejos de su medianoche (DX-449): los abonos «de hoy»
+// caen en la caja abierta, nunca como tardíos.
+const SEDE = sedeTodayFixture();
 
 interface Adjustment {
   type: string;
@@ -80,6 +82,7 @@ describe('Ajustes por medio de pago (e2e, DX-516)', () => {
   let cashB: string;
   let taxId: string;
   let sessionId: string;
+  let today: string;
 
   const api = () => request(app.getHttpServer());
   const as = (req: request.Test, clinic: Clinic, token = clinic.adminToken) =>
@@ -92,7 +95,7 @@ describe('Ajustes por medio de pago (e2e, DX-516)', () => {
   const pay = (body: Record<string, unknown>) =>
     asReception(api().post(`/api/v1/treatment-plans/${planA}/payments`)).send({
       currency: 'USD',
-      paidAt: today(),
+      paidAt: today,
       ...body,
     });
 
@@ -179,8 +182,9 @@ describe('Ajustes por medio de pago (e2e, DX-516)', () => {
   beforeAll(async () => {
     app = await createE2eApp();
     await resetDatabase(raw);
-    a = await registerClinic(app, 'dx516-a');
-    b = await registerClinic(app, 'dx516-b');
+    a = await registerClinic(app, 'dx516-a', SEDE);
+    b = await registerClinic(app, 'dx516-b', SEDE);
+    today = civilDateIn(new Date(), SEDE.timeZone);
     const member = await seedMember(raw, a, ClinicRole.RECEPTION);
     receptionA = await loginAs(app, a.host, member.email);
     sedeA = (
@@ -385,7 +389,7 @@ describe('Ajustes por medio de pago (e2e, DX-516)', () => {
     // Caja: fila y resumen con lo cobrado.
     const cash = (
       await asReception(
-        api().get(`/api/v1/payments?from=${today()}&to=${today()}`),
+        api().get(`/api/v1/payments?from=${today}&to=${today}`),
       ).expect(200)
     ).body as {
       items: PaymentBody[];
@@ -408,7 +412,7 @@ describe('Ajustes por medio de pago (e2e, DX-516)', () => {
 
     // CSV: columnas al final.
     const csv = await asReception(
-      api().get(`/api/v1/payments.csv?from=${today()}&to=${today()}`),
+      api().get(`/api/v1/payments.csv?from=${today}&to=${today}`),
     ).expect(200);
     const lines = csv.text.split('\r\n');
     expect(lines[0]).toContain(
@@ -495,7 +499,7 @@ describe('Ajustes por medio de pago (e2e, DX-516)', () => {
       api().post(`/api/v1/treatment-plans/${planA}/split-payments`),
     )
       .send({
-        paidAt: today(),
+        paidAt: today,
         lines: [
           { amount: 50, currency: 'USD', paymentMethodId: cashA },
           { amount: 50, currency: 'USD', paymentMethodId: cardA },
@@ -565,7 +569,7 @@ describe('Ajustes por medio de pago (e2e, DX-516)', () => {
     expect(card?.expected ?? 0).toBe(0);
     const cash = (
       await asReception(
-        api().get(`/api/v1/payments?from=${today()}&to=${today()}`),
+        api().get(`/api/v1/payments?from=${today}&to=${today}`),
       ).expect(200)
     ).body as {
       summary: { adjustments: unknown[]; collected: unknown[] };
