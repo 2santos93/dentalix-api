@@ -472,6 +472,13 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /payment-methods': ADMIN_ONLY,
   'PATCH /payment-methods/:id': ADMIN_ONLY,
   'DELETE /appointment-types/:id': ADMIN_ONLY,
+  // DX-211: sillones de cada sede; leerlos quien agenda, escribirlos ADMIN.
+  'GET /chairs': EVERY_ROLE,
+  'POST /chairs': ADMIN_ONLY,
+  'PUT /chairs/order': ADMIN_ONLY,
+  'PATCH /chairs/:id': ADMIN_ONLY,
+  'POST /chairs/:id/deactivate': ADMIN_ONLY,
+  'POST /chairs/:id/reactivate': ADMIN_ONLY,
   'GET /payers': EVERY_ROLE,
   'POST /payers': roles('ADMIN', 'RECEPTION'),
   'PATCH /payers/:id': ADMIN_ONLY,

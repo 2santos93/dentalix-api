@@ -15,6 +15,7 @@ import {
 } from '../../domain/entities/appointment.entity';
 import { HOUR_CYCLES } from '../../../../shared/locations/location-regional';
 import type { HourCycle } from '../../../../shared/format/regional-format';
+import { ChairSummaryDto } from '../../../chairs/presentation/dto/chair.dto';
 
 // Response shape for Appointment endpoints — documents the Appointment
 // entity contract for Swagger (same convention as BrandingDto /
@@ -222,6 +223,22 @@ export class AppointmentDto {
       'DX-470: sobrecupo anotado (sin hueco reservado libre). No ocupa el hueco del profesional: otra cita puede solaparse con ella.',
   })
   overbooked!: boolean;
+
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description: 'DX-211: sillón de la cita; null = sin sillón.',
+  })
+  chairId!: string | null;
+
+  @ApiProperty({
+    type: () => ChairSummaryDto,
+    nullable: true,
+    description:
+      'DX-211: el sillón embebido (nombre y si sigue activo), aunque se haya desactivado después.',
+  })
+  chair!: ChairSummaryDto | null;
 
   @ApiProperty({ format: 'date-time' })
   createdAt!: Date;

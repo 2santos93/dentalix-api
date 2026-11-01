@@ -9,6 +9,7 @@ import {
   IsUUID,
 } from 'class-validator';
 import { MAX_PROVIDER_COLUMNS } from '../../application/use-cases/list-appointments.use-case';
+import { MAX_CHAIR_COLUMNS } from '../../../chairs/domain/chair-rules';
 
 /** `?providerIds=a&providerIds=b` llega como array; `?providerIds=a`, como string. */
 function toArray({ value }: { value: unknown }): unknown {
@@ -45,6 +46,22 @@ export class ListAppointmentsQueryDto {
   })
   @IsUUID('all', { each: true })
   providerIds?: string[];
+
+  @ApiPropertyOptional({
+    type: [String],
+    format: 'uuid',
+    maxItems: MAX_CHAIR_COLUMNS,
+    description: `DX-211: solo las citas de estos sillones (activos o no) de la sede de la agenda (\`locationId\` o X-Location-Id; sin sede, 400). Un sillón de otra sede o clínica da 400. Hasta ${MAX_CHAIR_COLUMNS}; se repite el parámetro: ?chairIds=a&chairIds=b.`,
+  })
+  @IsOptional()
+  @Transform(toArray)
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(MAX_CHAIR_COLUMNS, {
+    message: `Puedes ver como mucho ${MAX_CHAIR_COLUMNS} sillones a la vez`,
+  })
+  @IsUUID('all', { each: true })
+  chairIds?: string[];
 
   @ApiPropertyOptional({
     format: 'uuid',

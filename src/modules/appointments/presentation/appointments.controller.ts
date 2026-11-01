@@ -222,11 +222,11 @@ export class AppointmentsController {
   })
   @ApiBadRequestResponse({
     description:
-      'Datos inválidos, cita en el pasado, sin hora de fin ni tipo, o tipo desactivado/ajeno',
+      'Datos inválidos, cita en el pasado, sin hora de fin ni tipo, o tipo desactivado/ajeno; DX-211: sin profesional (ni el del sillón), o sillón de otra sede o desactivado',
   })
   @ApiConflictResponse({
     description:
-      'Solape con otra cita, el horario está bloqueado para ese profesional o la sede (DX-122), o es un hueco reservado para otros tipos y aún sin liberar (DX-446: `code: RESERVED_SLOT`, `canOverride` dice si quien agenda puede reintentar con `overrideReason`)',
+      'Solape con otra cita (del profesional, del paciente o, DX-211, del sillón: «El sillón X ya está ocupado de HH:MM a HH:MM»), el horario está bloqueado para ese profesional o la sede (DX-122), o es un hueco reservado para otros tipos y aún sin liberar (DX-446: `code: RESERVED_SLOT`, `canOverride` dice si quien agenda puede reintentar con `overrideReason`)',
   })
   @ApiUnprocessableEntityResponse({
     description: 'Fuera del horario de atención de la sede',
@@ -259,6 +259,7 @@ export class AppointmentsController {
       planItemIds: dto.planItemIds,
       actorRole: ctx?.actor.role ?? null,
       overrideReason: dto.overrideReason,
+      chairId: dto.chairId,
     });
     await this.auditReservedOverride(created, 'CREATE', ctx);
     // DX-210: nacer marcada «Adelantar si hay hueco» también queda auditado.
@@ -292,7 +293,8 @@ export class AppointmentsController {
       'Cada cita con `balance` (DX-150): marca «Saldo vencido» de su paciente, calculada para todo el lote en un número fijo de consultas (sin N+1). El importe, solo ADMIN y RECEPTION. Con `coverage` (DX-153): resumen de la cobertura principal del paciente, también por lote. Y con `medicalAlerts` (DX-247): SOLO banderas de la anamnesis (alerta, premedicación, al día / caducada / ausente el día civil de la cita en la zona de su sede, y los códigos de alerta), nunca la historia médica ni las notas de la cita (disponibles en GET /appointments/:id). Con `attendance` (DX-279): inasistencias y cancelaciones tardías del paciente en 12 meses, por lote; sin el detalle libre del motivo de cancelación (`cancelReasonText`, en GET /appointments/:id).',
   })
   @ApiBadRequestResponse({
-    description: 'Más de 12 profesionales o alguno ajeno a la clínica',
+    description:
+      'Más de 12 profesionales o alguno ajeno a la clínica; DX-211: más de 12 sillones, alguno de otra sede o clínica, o `chairIds` sin sede',
   })
   async list(
     @Query() query: ListAppointmentsQueryDto,
@@ -314,6 +316,7 @@ export class AppointmentsController {
       providerId: query.providerId,
       providerIds: query.providerIds,
       locationId: query.locationId,
+      chairIds: query.chairIds,
     });
     const flags = await this.balanceFlags.forPatients(
       appointments.map((a) => a.patientId),
@@ -502,11 +505,11 @@ export class AppointmentsController {
       'Rol sin permiso de agenda, sin permiso para ese paso del flujo en la clínica (DX-200), o RECEPTION/ASSISTANT sacando una cita de COMPLETED (DX-273), o `overrideReason` sin ser ADMIN ni DENTIST (DX-446)',
   })
   @ApiNotFoundResponse({
-    description: 'Cita o profesional no encontrados en esta clínica',
+    description: 'Cita, profesional o sillón no encontrados en esta clínica',
   })
   @ApiConflictResponse({
     description:
-      'Solape con otra cita del profesional o del paciente (también si otro movimiento ganó la carrera), el nuevo horario está bloqueado (DX-122) o reservado sin liberar (DX-446, `RESERVED_SLOT`), o un salto imposible del flujo en la clínica o la cita cambió mientras tanto (DX-200)',
+      'Solape con otra cita del profesional, del paciente o del sillón (DX-211, con su nombre y horas; también si otro movimiento ganó la carrera), el nuevo horario está bloqueado (DX-122) o reservado sin liberar (DX-446, `RESERVED_SLOT`), o un salto imposible del flujo en la clínica o la cita cambió mientras tanto (DX-200)',
   })
   @ApiUnprocessableEntityResponse({
     description: 'Fuera del horario de atención de la sede de la cita',
@@ -523,6 +526,7 @@ export class AppointmentsController {
         start: dto.start !== undefined ? new Date(dto.start) : undefined,
         end: dto.end !== undefined ? new Date(dto.end) : undefined,
         providerId: dto.providerId,
+        chairId: dto.chairId,
         status: dto.status,
         reason: dto.reason,
         notes: dto.notes,

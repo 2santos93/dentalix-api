@@ -35,6 +35,8 @@ import { PrismaPatientAttendanceRepository } from './infrastructure/repositories
 
 import { PatientCoveragesModule } from '../patient-coverages/patient-coverages.module';
 import { MedicalHistoryModule } from '../medical-history/medical-history.module';
+import { ChairsModule } from '../chairs/chairs.module';
+import { ChairAssignmentService } from './application/chair-assignment';
 
 @Module({
   // JwtModule.register({}) mirrors PatientsModule/OdontogramModule:
@@ -61,6 +63,8 @@ import { MedicalHistoryModule } from '../medical-history/medical-history.module'
     ProviderScheduleModule,
     // DX-247: banderas médicas mínimas de las tarjetas y de «En clínica».
     MedicalHistoryModule,
+    // DX-211: sillón de la cita (de la sede, activo y libre).
+    ChairsModule,
   ],
   controllers: [AppointmentsController, PatientAttendanceController],
   providers: [
@@ -72,6 +76,8 @@ import { MedicalHistoryModule } from '../medical-history/medical-history.module'
     FindOpeningsUseCase,
     // DX-200: panel «En clínica».
     ListInClinicUseCase,
+    // DX-211: sillón de la cita al agendar o mover.
+    ChairAssignmentService,
     TokenService,
     // TenantContextInterceptor only depends on the @Global TenantContextService;
     // listing it here makes it resolvable for @UseInterceptors on AppointmentsController.

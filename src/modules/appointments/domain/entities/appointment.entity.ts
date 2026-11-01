@@ -5,6 +5,7 @@ import {
   TriageFlag,
 } from '@prisma/client';
 import type { AppointmentTypeSummary } from '../../../appointment-types/domain/entities/appointment-type.entity';
+import type { ChairSummary } from '../../../chairs/domain/entities/chair.entity';
 import type { HourCycle } from '../../../../shared/format/regional-format';
 
 /**
@@ -91,6 +92,14 @@ export interface Appointment {
   walkIn: boolean;
   /** DX-470: sobrecupo anotado (no ocupa el hueco del profesional). */
   overbooked: boolean;
+  /** DX-211: sillón de la cita; null = sin sillón. */
+  chairId: string | null;
+  /**
+   * DX-211: el sillón embebido (nombre y si sigue activo) para pintar la
+   * tarjeta y el detalle sin otra petición. Se embebe aunque el sillón se
+   * haya desactivado después: la cita lo conserva («(inactivo)»).
+   */
+  chair: ChairSummary | null;
   createdAt: Date;
   updatedAt: Date;
 }

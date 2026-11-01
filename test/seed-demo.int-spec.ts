@@ -595,6 +595,30 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(typed).toBeGreaterThanOrEqual(10);
   });
 
+  it('deja 3 sillones en la Sede Norte (2 con profesional por defecto) y citas de esa sede con sillón (DX-211)', async () => {
+    const tenantId = await liveDemoTenantId();
+    const chairs = await raw.chair.findMany({
+      where: { tenantId },
+      include: { location: { select: { name: true } } },
+      orderBy: { sortOrder: 'asc' },
+    });
+    expect(chairs.map((c) => c.name)).toEqual([
+      'Sillón 1',
+      'Sillón 2',
+      'Sillón 3',
+    ]);
+    expect(new Set(chairs.map((c) => c.locationId)).size).toBe(1);
+    expect(chairs.filter((c) => c.defaultProviderId !== null)).toHaveLength(2);
+    const withChair = await raw.appointment.findMany({
+      where: { tenantId, chairId: { not: null } },
+      select: { locationId: true },
+    });
+    expect(withChair.length).toBeGreaterThanOrEqual(3);
+    expect(withChair.every((a) => a.locationId === chairs[0].locationId)).toBe(
+      true,
+    );
+  });
+
   it('DX-407: la hoja de sedación de ejemplo va en orden (valoración < checklist < fármaco < tomas intraoperatorias < egreso)', async () => {
     const tenantId = await liveDemoTenantId();
     const sheet = await raw.sedationRecord.findFirstOrThrow({

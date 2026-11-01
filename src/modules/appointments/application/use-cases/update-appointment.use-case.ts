@@ -57,6 +57,7 @@ import { civilDateIn } from '../../../../shared/time/civil-day';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { assertAttendsAt } from '../../../staff/domain/provider-location';
 import { ProviderAvailabilityService } from '../../../provider-schedule/application/provider-availability.service';
+import { ChairAssignmentService } from '../chair-assignment';
 import {
   NO_WARNINGS,
   collectWarnings,
@@ -218,6 +219,11 @@ export class UpdateAppointmentUseCase {
     @Optional()
     @Inject(SCHEDULE_BLOCK_CLOCK)
     private readonly clock: ScheduleBlockClock = systemScheduleBlockClock,
+    // DX-211: sillón de la cita. Opcional para los dobles de los specs
+    // anteriores, que no mueven citas con sillón; la app siempre lo provee.
+    @Optional()
+    @Inject(ChairAssignmentService)
+    private readonly chairs: ChairAssignmentService | null = null,
   ) {}
 
   async execute(
@@ -343,6 +349,17 @@ export class UpdateAppointmentUseCase {
     // decide (sin saltos imposibles, permisos por rol) y aquí se fijan las
     // horas con el reloj del servidor; el cambio va condicionado al estado
     // leído, así que dos personas a la vez no se pisan (la segunda, 409).
+    // Reagendar = cambiar DE VERDAD la hora o el profesional respecto a lo
+    // guardado (DX-121: «Mover a…» y el arrastre). DX-211: «Mover a…» manda
+    // siempre fecha, hora y profesional; si solo cambia el sillón no es un
+    // reagendado (ni revoca la confirmación ni mira pasado u horario).
+    const moves =
+      (patch.start !== undefined &&
+        patch.start.getTime() !== existing.start.getTime()) ||
+      (patch.end !== undefined &&
+        patch.end.getTime() !== existing.end.getTime()) ||
+      (patch.providerId !== undefined &&
+        patch.providerId !== existing.providerId);
     const nextStatus =
       patch.status !== undefined && patch.status !== existing.status
         ? patch.status
@@ -358,13 +375,7 @@ export class UpdateAppointmentUseCase {
     // borra sus datos (coherente con la CHECK de la tabla).
     // B1: el aviso se cuenta contra el inicio de la cita; cancelar y mover en
     // el mismo cambio no tiene sentido y daría un aviso incoherente.
-    if (
-      nextStatus === AppointmentStatus.CANCELLED &&
-      (patch.start !== undefined ||
-        patch.end !== undefined ||
-        (patch.providerId !== undefined &&
-          patch.providerId !== existing.providerId))
-    ) {
+    if (nextStatus === AppointmentStatus.CANCELLED && moves) {
       throw new BadRequestException(CANCELLATION_MESSAGES.cancelAndMove);
     }
     const cancellationPatch =
@@ -385,11 +396,14 @@ export class UpdateAppointmentUseCase {
     // arrastre entre columnas). Ambos pasan por las mismas reglas.
     let warnings: Warnings = NO_WARNINGS;
     let reservedOverride: ReservedOverride | null = null;
-    const isReschedule =
-      patch.start !== undefined ||
-      patch.end !== undefined ||
-      (patch.providerId !== undefined &&
-        patch.providerId !== existing.providerId);
+    // DX-211: cambiar (o quitar) el sillón. Cambiar SOLO de sillón no es
+    // reagendar (ni hora ni profesional): no revoca la confirmación ni mira
+    // el horario, pero sí el sillón destino, y queda como movimiento.
+    const chairChanged =
+      patch.chairId !== undefined && patch.chairId !== existing.chairId;
+    const nextChairId =
+      patch.chairId !== undefined ? patch.chairId : existing.chairId;
+    const isReschedule = moves;
     if (isReschedule) {
       const nextStart = patch.start ?? existing.start;
       const nextEnd = patch.end ?? existing.end;
@@ -497,6 +511,32 @@ export class UpdateAppointmentUseCase {
       }
     }
 
+    // DX-211: el sillón de la cita al cambiarlo, al reagendarla o al
+    // reactivar una cancelada: de su sede y activo, aunque la cita esté o pase
+    // a cancelada. Que esté libre solo se mira si la cita lo ocupará (una
+    // cancelada no cuenta, como en la EXCLUDE).
+    const finalStatus = patch.status ?? existing.status;
+    const reactivatesCancelled =
+      existing.status === AppointmentStatus.CANCELLED &&
+      finalStatus !== AppointmentStatus.CANCELLED;
+    if (
+      nextChairId !== null &&
+      (chairChanged || isReschedule || reactivatesCancelled)
+    ) {
+      const chair = await this.requireChairs().load(nextChairId, {
+        locationId: existing.locationId,
+        requireActive: true,
+      });
+      if (finalStatus !== AppointmentStatus.CANCELLED) {
+        await this.requireChairs().assertFree(chair, {
+          locationId: existing.locationId,
+          start: patch.start ?? existing.start,
+          end: patch.end ?? existing.end,
+          excludeId: existing.id,
+        });
+      }
+    }
+
     // Race-proof backstop for the DB's EXCLUDE constraint
     // (appointments_no_overlap_per_provider / ..._per_patient, 23P01) — mirrors
     // CreateAppointmentUseCase. NOT limited to the reschedule branch on
@@ -566,13 +606,21 @@ export class UpdateAppointmentUseCase {
       } = await this.repo.update(id, effectivePatch));
     } catch (error) {
       const scope = overlapExclusionScope(error);
-      if (scope !== null) {
+      // DX-211: también al reactivar una cancelada cuyo sillón se ocupó.
+      if (scope === 'chair' && nextChairId !== null) {
+        throw await this.requireChairs().raceConflict(nextChairId, {
+          start: patch.start ?? existing.start,
+          end: patch.end ?? existing.end,
+          excludeId: existing.id,
+        });
+      }
+      if (scope === 'provider' || scope === 'patient') {
         throw new ConflictException(OVERLAP_MESSAGES[scope]);
       }
       throw error;
     }
 
-    if (isReschedule && auditContext) {
+    if ((isReschedule || chairChanged) && auditContext) {
       await this.recordMove(existing, updated, auditContext);
     }
     // B2: un solo evento por cancelación. Desde la clínica la lleva el del
@@ -930,7 +978,10 @@ export class UpdateAppointmentUseCase {
     });
   }
 
-  /** `audit_event` del movimiento: hora y profesional antes y después. */
+  /**
+   * `audit_event` del movimiento: hora, profesional y (DX-211) sillón antes y
+   * después.
+   */
   private recordMove(
     before: Appointment,
     after: Appointment,
@@ -954,14 +1005,23 @@ export class UpdateAppointmentUseCase {
             start: before.start.toISOString(),
             end: before.end.toISOString(),
             providerId: before.providerId,
+            chairId: before.chairId,
           },
           to: {
             start: after.start.toISOString(),
             end: after.end.toISOString(),
             providerId: after.providerId,
+            chairId: after.chairId,
           },
         },
       },
     });
+  }
+
+  private requireChairs(): ChairAssignmentService {
+    if (!this.chairs) {
+      throw new Error('ChairAssignmentService no está configurado');
+    }
+    return this.chairs;
   }
 }

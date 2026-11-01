@@ -76,6 +76,8 @@ function fakeAppointment(overrides: Partial<Appointment> = {}): Appointment {
     triageNote: null,
     walkIn: false,
     overbooked: false,
+    chairId: null,
+    chair: null,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
     ...overrides,
@@ -108,6 +110,7 @@ function makeRepo(
     findOverlapping: (): Promise<Appointment[]> => Promise.resolve([]),
     findOverlappingForPatient: (): Promise<Appointment[]> =>
       Promise.resolve([]),
+    findOverlappingForChair: (): Promise<Appointment[]> => Promise.resolve([]),
     undoArrival: () => Promise.resolve(null),
     listInClinic: () => Promise.resolve([]),
     currentCancellationPolicy: () => Promise.resolve(null),
@@ -969,6 +972,8 @@ describe('CreateAppointmentUseCase', () => {
         findOverlapping: (): Promise<Appointment[]> => Promise.resolve([]),
         findOverlappingForPatient: (): Promise<Appointment[]> =>
           Promise.resolve([]),
+        findOverlappingForChair: (): Promise<Appointment[]> =>
+          Promise.resolve([]),
         undoArrival: () => Promise.resolve(null),
         listInClinic: () => Promise.resolve([]),
         currentCancellationPolicy: () => Promise.resolve(null),
@@ -1004,6 +1009,8 @@ describe('CreateAppointmentUseCase', () => {
         findOverlapping: (): Promise<Appointment[]> => Promise.resolve([]),
         findOverlappingForPatient: (): Promise<Appointment[]> =>
           Promise.resolve([]),
+        findOverlappingForChair: (): Promise<Appointment[]> =>
+          Promise.resolve([]),
         undoArrival: () => Promise.resolve(null),
         listInClinic: () => Promise.resolve([]),
         currentCancellationPolicy: () => Promise.resolve(null),
@@ -1029,6 +1036,8 @@ describe('CreateAppointmentUseCase', () => {
       const repo = makeRepo({
         findOverlapping: (): Promise<Appointment[]> => Promise.resolve([]),
         findOverlappingForPatient: (): Promise<Appointment[]> =>
+          Promise.resolve([]),
+        findOverlappingForChair: (): Promise<Appointment[]> =>
           Promise.resolve([]),
         undoArrival: () => Promise.resolve(null),
         listInClinic: () => Promise.resolve([]),
@@ -1061,6 +1070,8 @@ describe('CreateAppointmentUseCase', () => {
       const repo = makeRepo({
         findOverlapping: (): Promise<Appointment[]> => Promise.resolve([]),
         findOverlappingForPatient: (): Promise<Appointment[]> =>
+          Promise.resolve([]),
+        findOverlappingForChair: (): Promise<Appointment[]> =>
           Promise.resolve([]),
         undoArrival: () => Promise.resolve(null),
         listInClinic: () => Promise.resolve([]),

@@ -54,6 +54,11 @@ export const APPOINTMENT_ROLES: ClinicRole[] = [
 // Leerlos (selector del formulario de cita): APPOINTMENT_ROLES.
 export const APPOINTMENT_TYPE_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 
+// Sillones de cada sede (DX-211) — leerlos (selector del formulario de cita y
+// columnas de la agenda): APPOINTMENT_ROLES. Crear, editar, ordenar y
+// desactivar: solo ADMIN.
+export const CHAIR_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+
 // Pagadores (DX-153) — leer (selectores de cobertura): los 4 roles. Crear:
 // ADMIN y recepción, que da de alta al paciente en mostrador y no puede
 // esperar al administrador. Editar, desactivar y retirar: solo gestión.

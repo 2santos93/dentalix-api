@@ -69,6 +69,7 @@ import { CreateCancellationPolicyVersionUseCase } from '../src/modules/cancellat
 import { OVERLAP_MESSAGES } from '../src/modules/appointments/application/appointment-overlap-error';
 import { ListAppointmentsUseCase } from '../src/modules/appointments/application/use-cases/list-appointments.use-case';
 import { CreateAppointmentTypeUseCase } from '../src/modules/appointment-types/application/use-cases/appointment-types.use-cases';
+import { CreateChairUseCase } from '../src/modules/chairs/application/use-cases/chairs.use-cases';
 import { LoadSampleNoteTemplatesUseCase } from '../src/modules/clinical-note-templates/application/use-cases/clinical-note-templates.use-cases';
 import { AnestheticCatalogUseCases } from '../src/modules/anesthesia/application/use-cases/anesthetic-catalog.use-cases';
 import { AnesthesiaUseCases } from '../src/modules/anesthesia/application/use-cases/anesthesia.use-cases';
@@ -183,6 +184,7 @@ import {
   DEMO_SEDATION,
   DEMO_CONSENT_TEMPLATES,
   DEMO_APPOINTMENT_TYPES,
+  DEMO_CHAIRS,
   DEMO_LUNCH,
   DEMO_RESERVED_URGENCY,
   DEMO_ROTATION,
@@ -294,6 +296,13 @@ export {
  */
 
 export type DemoSeedStatus = 'created' | 'skipped' | 'rebuilt';
+
+/** DX-211: un sillón sembrado y las franjas que ya ocupan sus citas. */
+interface DemoSeededChair {
+  id: string;
+  defaultProviderId: string | null;
+  busy: { start: Date; end: Date }[];
+}
 
 /** DX-170: cita atendida de la demo, para ligarle una evolución. */
 interface AttendedAppointment {
@@ -754,6 +763,11 @@ class DemoSeeder {
       this.createProviderRotation(tenantId, locations, dentists, ownerId),
     );
 
+    // DX-211: sillones de la Sede Norte (como en Ajustes → Sillones).
+    const norteChairs = await this.inTenant(tenantId, locations.norte, () =>
+      this.createChairs(locations.norte, dentists, ownerId),
+    );
+
     const attended = await this.createAppointments(
       tenantId,
       locations,
@@ -762,6 +776,7 @@ class DemoSeeder {
       dentists,
       receptionId,
       typeByReason,
+      norteChairs,
     );
 
     await this.createCancellationPolicy(
@@ -1507,6 +1522,51 @@ class DemoSeeder {
     );
   }
 
+  /**
+   * DX-211: los sillones de la Sede Norte, con su profesional por defecto, por
+   * el mismo caso de uso que /settings/sillones (el ADMIN). Devuelve cada
+   * sillón con el dentista por defecto, para repartir las citas de la sede.
+   */
+  private async createChairs(
+    locationId: string,
+    dentists: string[],
+    ownerId: string,
+  ): Promise<DemoSeededChair[]> {
+    const chairs: DemoSeededChair[] = [];
+    for (const spec of DEMO_CHAIRS) {
+      const defaultProviderId =
+        spec.defaultDentistIndex !== undefined
+          ? dentists[spec.defaultDentistIndex]
+          : null;
+      const chair = await this.use(CreateChairUseCase).execute(
+        { locationId, name: spec.name, defaultProviderId },
+        ownerId,
+      );
+      chairs.push({ id: chair.id, defaultProviderId, busy: [] });
+    }
+    return chairs;
+  }
+
+  /**
+   * DX-211: el sillón de una cita de la Sede Norte: el del dentista si está
+   * libre, si no el primero libre; sin ninguno libre, la cita va sin sillón
+   * (como cualquier cita de una clínica sin sillones).
+   */
+  private pickChair(
+    chairs: DemoSeededChair[],
+    providerId: string,
+    start: Date,
+    end: Date,
+  ): string | undefined {
+    const free = (c: DemoSeededChair) =>
+      c.busy.every((b) => b.end <= start || b.start >= end);
+    const chair =
+      chairs.find((c) => c.defaultProviderId === providerId && free(c)) ??
+      chairs.find(free);
+    chair?.busy.push({ start, end });
+    return chair?.id;
+  }
+
   private async createAppointments(
     tenantId: string,
     locations: Record<DemoLocationKey, string>,
@@ -1515,6 +1575,7 @@ class DemoSeeder {
     dentists: string[],
     createdById: string,
     typeByReason: Map<string, string>,
+    norteChairs: DemoSeededChair[],
   ): Promise<AttendedAppointment[]> {
     // DX-040: el paciente de las opciones A/B no tiene cita futura (por eso
     // sale en «Presupuestos por seguir»); sus citas pasadas se quedan.
@@ -1543,6 +1604,16 @@ class DemoSeeder {
           // DX-121: el hueco del calendario manda (end explícito); el tipo
           // solo colorea la tarjeta.
           appointmentTypeId: typeByReason.get(a.reason),
+          // DX-211: las de la Sede Norte, en un sillón libre.
+          chairId:
+            a.location === 'norte'
+              ? this.pickChair(
+                  norteChairs,
+                  dentists[a.dentistIndex],
+                  a.start,
+                  a.end,
+                )
+              : undefined,
         };
         // Pasado/futuro se decide con el reloj VIVO (el mismo que usa el caso
         // de uso), no con `this.now`. Las pasadas van por la ruta histórica,
