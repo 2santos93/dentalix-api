@@ -16,7 +16,7 @@ import {
   type RegisterImplantInput,
 } from './implants.use-cases';
 
-// 2026-10-17 15:00 UTC = 10:00 en Bogotá.
+// 2026-10-17 15:00 UTC = 10:00 en la zona de la sede.
 const NOW = new Date('2026-10-17T15:00:00.000Z');
 const clock = () => NOW;
 
