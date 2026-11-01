@@ -210,12 +210,24 @@ describe('Inventory (e2e)', () => {
 
       // --- 3. POST .../movements { type: IN, quantity: 10 } -> 201 ->
       // GET items -> stock=10, lowStock=false (10 > 5).
-      await request(app.getHttpServer())
+      const movementRes = await request(app.getHttpServer())
         .post(`/api/v1/inventory/items/${item.id}/movements`)
         .set('X-Tenant-Host', hostFor(subdomainA))
         .set('Authorization', `Bearer ${clinicA.accessToken}`)
         .send({ type: 'IN', quantity: 10 })
         .expect(201);
+
+      const storedItem = await raw.inventoryItem.findUniqueOrThrow({
+        where: { id: item.id },
+      });
+      const storedMovement = await raw.inventoryMovement.findUniqueOrThrow({
+        where: { id: (movementRes.body as InventoryMovementResponseBody).id },
+      });
+      expect(storedMovement.tenantId).toBe(clinicA.tenantId);
+      expect(storedMovement.itemId).toBe(item.id);
+      expect(storedMovement.locationId).toBe(storedItem.locationId);
+      expect(storedMovement.type).toBe('IN');
+      expect(storedMovement.quantity.toNumber()).toBe(10);
 
       const list2 = await request(app.getHttpServer())
         .get('/api/v1/inventory/items')

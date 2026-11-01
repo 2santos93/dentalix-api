@@ -30,6 +30,7 @@ type StoredPayment = Omit<
   Payment,
   'paidOn' | 'receiptNumber' | 'exchangeRateStatus' | 'duplicateReferenceOf'
 > & {
+  locationId: string;
   referenceNormalized: string | null;
   deletedAt: Date | null;
   idempotencyKey: string | null;
@@ -66,6 +67,7 @@ export class InMemoryPaymentRepository implements PaymentRepository {
   /** Test helper: seed a payment row directly, bypassing use-case validation. */
   seedPayment(overrides: Partial<StoredPayment> = {}): Payment {
     const row: StoredPayment = {
+      locationId: overrides.locationId ?? 'loc-1',
       id: overrides.id ?? `payment-seed-${++seq}`,
       tenantId: overrides.tenantId ?? 't1',
       treatmentPlanId:
@@ -202,6 +204,7 @@ export class InMemoryPaymentRepository implements PaymentRepository {
     split: { id?: string; splitId: string; line: number } | null,
   ): StoredPayment {
     const row: StoredPayment = {
+      locationId: 'loc-1',
       id: split?.id ?? `payment-${++seq}`,
       tenantId: 't1',
       treatmentPlanId: input.treatmentPlanId,
@@ -385,6 +388,7 @@ export class InMemoryPaymentRepository implements PaymentRepository {
       row
         ? {
             id: row.id,
+            locationId: row.locationId,
             createdById: row.createdById,
             createdAt: row.createdAt,
             timeZone: this.timeZone,

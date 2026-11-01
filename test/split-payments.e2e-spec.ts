@@ -18,6 +18,11 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import { civilDateIn } from '../src/shared/time/civil-day';
+import {
+  REGIONAL_BOGOTA_FIXTURE,
+  locationBody,
+} from './support/location-fixtures';
+import { LOCATION_NOT_ALLOWED_CODE } from '../src/shared/tenancy/location-access';
 
 // DX-390 en HTTP real: un cobro de 2–5 formas de pago crea un abono por línea
 // y UN recibo en una sola transacción (si una línea falla, no queda ninguna
@@ -570,6 +575,116 @@ describe('Cobro dividido con un solo recibo (e2e, DX-390)', () => {
     expect(lines).toHaveLength(3);
     for (const movement of lines) {
       expect(movement).toMatchObject({ splitId: first.id, splitLines: 3 });
+    }
+  });
+
+  it('DX-089-bis: autor restringido no anula ninguna línea ni altera recibo, imputaciones, compromiso o saldo a favor', async () => {
+    const payment = await raw.payment.findUniqueOrThrow({
+      where: { id: first.id },
+    });
+    const author = await raw.user.findUniqueOrThrow({
+      where: { id: payment.createdById! },
+    });
+    const allowed: string[] = [];
+    for (const name of ['Norte DX089', 'Sur DX089']) {
+      const location = (
+        await as(api().post('/api/v1/locations'), a)
+          .send(locationBody(REGIONAL_BOGOTA_FIXTURE, { name }))
+          .expect(201)
+      ).body as { id: string };
+      allowed.push(location.id);
+    }
+    // El saldo traspasable usa abonos en la moneda del plan (DX-253).
+    // Otros cobros COP dejan margen incluso tras anular el primer cobro.
+    await split({
+      lines: [
+        { amount: 250_000, currency: 'COP', paymentMethodId: cashA },
+        { amount: 250_000, currency: 'COP', paymentMethodId: cashA },
+      ],
+      confirmCreditBalance: true,
+    }).expect(201);
+    // Un traspaso real deja asientos que también deben permanecer inalterados.
+    const target = await raw.treatmentPlan.create({
+      data: {
+        tenantId: a.tenantId,
+        patientId: payment.patientId,
+        currency: 'COP',
+      },
+    });
+    await as(api().post(`/api/v1/treatment-plans/${planA}/credit-transfers`), a)
+      .send({ targetPlanId: target.id, amount: 10_000, currency: 'COP' })
+      .expect(201);
+    const promise = await raw.paymentPromise.create({
+      data: {
+        tenantId: a.tenantId,
+        patientId: payment.patientId,
+        locationId: payment.locationId,
+        amount: 1,
+        currency: 'COP',
+        dueDate: new Date(`${TODAY}T00:00:00.000Z`),
+        createdById: author.id,
+      },
+    });
+    await raw.paymentPromise.update({
+      where: { id: promise.id },
+      data: { status: 'KEPT', settledAt: new Date() },
+    });
+    await as(api().put(`/api/v1/staff/${author.id}/locations`), a)
+      .send({ locationIds: allowed })
+      .expect(200);
+    const restricted = await loginAs(app, a.host, author.email);
+    const state = async () => {
+      const query = {
+        where: { tenantId: a.tenantId },
+        orderBy: { id: 'asc' as const },
+      };
+      return {
+        payments: await raw.payment.findMany(query),
+        receipts: await raw.paymentReceipt.findMany(query),
+        allocations: await raw.paymentAllocation.findMany(query),
+        allocationMovements:
+          await raw.paymentAllocationMovement.findMany(query),
+        promises: await raw.paymentPromise.findMany(query),
+        creditEntries: await raw.patientCreditEntry.findMany(query),
+        creditTransfers: await raw.patientCreditTransfer.findMany(query),
+        creditRefunds: await raw.patientCreditRefund.findMany(query),
+        events: await raw.auditEvent.findMany(query),
+      };
+    };
+    const balanceBefore = await balance();
+    const before = await state();
+    expect(before.payments.filter((p) => p.splitId === first.id)).toHaveLength(
+      3,
+    );
+    expect(before.receipts.some((r) => r.paymentId === first.id)).toBe(true);
+    expect(before.allocations.some((p) => p.paymentId === first.id)).toBe(true);
+    expect(before.promises.some((p) => p.status === 'KEPT')).toBe(true);
+    expect(before.creditEntries).toHaveLength(2);
+    try {
+      // Ambas cabeceras son válidas; el rechazo debe venir de la sede
+      // persistida, no del rol, autor, día o validación de la cabecera.
+      for (const active of [undefined, allowed[0]]) {
+        for (const line of first.payments) {
+          const req = as(
+            api().delete(`/api/v1/payments/${line.id}`),
+            a,
+            restricted,
+          );
+          const res = await (active ? req.set('X-Location-Id', active) : req)
+            .send({ reason: 'Cobro registrado dos veces' })
+            .expect(403);
+          expect(res.body).toMatchObject({ code: LOCATION_NOT_ALLOWED_CODE });
+          expect(await state()).toEqual(before);
+        }
+      }
+      // Esta lectura se audita como VIEW: va después de comprobar que los
+      // rechazos no escribieron ningún evento.
+      expect(await balance()).toEqual(balanceBefore);
+    } finally {
+      await as(api().put(`/api/v1/staff/${author.id}/locations`), a)
+        .send({ locationIds: [] })
+        .expect(200);
+      receptionA = await loginAs(app, a.host, author.email);
     }
   });
 

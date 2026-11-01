@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { configAuditEvent } from '../../../audit/domain/config-audit';
 import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
@@ -24,7 +25,10 @@ interface PaymentRow {
  */
 @Injectable()
 export class PrismaExternalInvoiceRepository implements ExternalInvoiceRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly tenantContext: TenantContextService,
+  ) {}
 
   set(
     paymentId: string,
@@ -36,6 +40,9 @@ export class PrismaExternalInvoiceRepository implements ExternalInvoiceRepositor
         SELECT "id", "locationId", "splitId", "deletedAt", "externalInvoiceNumber"
           FROM "payments" WHERE "id" = ${paymentId}::uuid`;
       if (!target) return { kind: 'not-found' };
+      // DX-089-bis: se escribe en la sede persistida del abono; un usuario
+      // restringido a otras sedes no la toca (403, nada cambia).
+      this.tenantContext.assertLocationAllowed(target.locationId);
       if (target.deletedAt !== null) return { kind: 'voided' };
 
       // DX-390: un cobro dividido tiene un solo recibo, y por tanto una sola
