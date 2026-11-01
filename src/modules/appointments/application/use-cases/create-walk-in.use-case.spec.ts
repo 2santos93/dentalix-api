@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import {
   AppointmentStatus,
@@ -19,12 +20,14 @@ import type { PatientRepository } from '../../../patients/domain/ports/patient-r
 import type { StaffRepository } from '../../../staff/domain/ports/staff-repository.port';
 import type { LocationRepository } from '../../../locations/domain/ports/location-repository.port';
 import type {
+  WalkInReplay,
   WalkInRepository,
   WalkInWrite,
 } from '../../domain/ports/walk-in-repository.port';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { PROVIDER_NOT_AT_LOCATION_MESSAGE } from '../../../staff/domain/provider-location';
 import {
+  IDEMPOTENCY_KEY_REUSED_CODE,
   NO_RESERVED_SLOT_CODE,
   PATIENT_DUPLICATE_CODE,
   WALK_IN_MESSAGES,
@@ -67,14 +70,19 @@ function setup(
   const writes: WalkInWrite[] = [];
   let failWith: Error | null = null;
   const docLookups: string[] = [];
+  // DX-510: lo que el doble guarda por Idempotency-Key (como la columna).
+  const byKey = new Map<string, WalkInReplay>();
   const walkIns: WalkInRepository = {
     findLivePatientIdByDoc: (docNumber) => {
       docLookups.push(docNumber);
       return Promise.resolve(options.docOwner?.id ?? null);
     },
+    findByIdempotencyKey: (key) => Promise.resolve(byKey.get(key) ?? null),
     create: (input) => {
       writes.push(input);
       if (failWith) return Promise.reject(failWith);
+      const stored = input.idempotency && byKey.get(input.idempotency.key);
+      if (stored) return Promise.resolve({ replayed: true, ...stored });
       const patientId =
         input.patient.kind === 'existing' ? input.patient.id : 'new-patient';
       const appointment = appointments.seed({
@@ -91,10 +99,19 @@ function setup(
         triageFlags: input.triageFlags,
         triageNote: input.triageNote,
       });
+      const overbookId = input.overbookReason !== null ? 'override-1' : null;
+      if (input.idempotency) {
+        byKey.set(input.idempotency.key, {
+          appointment,
+          overbookId,
+          fingerprint: input.idempotency.fingerprint,
+        });
+      }
       return Promise.resolve({
+        replayed: false,
         appointment,
         patientCreated: input.patient.kind === 'new',
-        overbookId: input.overbookReason !== null ? 'override-1' : null,
+        overbookId,
       });
     },
   };
@@ -149,6 +166,7 @@ function setup(
     writes,
     docLookups,
     reserved,
+    byKey,
     fail: (error: Error) => {
       failWith = error;
     },
@@ -542,5 +560,113 @@ describe('CreateWalkInUseCase (DX-470)', () => {
     await expect(
       uc.execute({ patientId: 'p1', providerId: 'prov1' }, CTX),
     ).rejects.toThrow(WALK_IN_MESSAGES.slotTaken);
+  });
+
+  describe('Idempotency-Key (DX-510)', () => {
+    const KEY = '0F8FAD5B-D9CB-469F-A165-70867728950E';
+
+    it('dos envíos con la misma clave: la misma cita, sin segundo paciente ni segunda cita', async () => {
+      const { uc, writes, reserved, appointments } = setup();
+      reserved('17:00', '18:00');
+      const input = { newPatient: NEW_PATIENT, providerId: 'prov1' };
+
+      const first = await uc.execute(input, CTX, KEY);
+      const second = await uc.execute(
+        { ...input, newPatient: { ...NEW_PATIENT, firstName: 'Lucía' } },
+        CTX,
+        ` ${KEY.toLowerCase()} `,
+      );
+
+      expect(first.patientCreated).toBe(true);
+      expect(second.id).toBe(first.id);
+      expect(second.patientCreated).toBe(false);
+      expect(second.overbookId).toBe(first.overbookId);
+      // El atajo encontró la cita antes de escribir: una sola escritura.
+      expect(writes).toHaveLength(1);
+      expect(writes[0].idempotency).toEqual({
+        key: KEY.toLowerCase(),
+        fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
+      });
+      expect(await appointments.findOverlapping('prov1', utc('00:00'), utc('23:59'))).toHaveLength(1);
+    });
+
+    it('misma clave con otros datos: 422 IDEMPOTENCY_KEY_REUSED y nada nuevo', async () => {
+      const { uc, writes, reserved } = setup();
+      reserved('17:00', '19:00');
+      await uc.execute({ patientId: 'p1', providerId: 'prov1' }, CTX, KEY);
+
+      const variants = [
+        { patientId: 'p1', providerId: 'prov1', triageFlags: [TriageFlag.PAIN] },
+        { patientId: 'p1', providerId: 'prov1', triageNote: 'otra' },
+        { patientId: 'p2', providerId: 'prov1' },
+        {
+          patientId: 'p1',
+          providerId: 'prov1',
+          overbookReason: 'Dolor agudo, no espera',
+        },
+      ];
+      for (const variant of variants) {
+        const error = await uc.execute(variant, CTX, KEY).catch((e: unknown) => e);
+        expect(error).toBeInstanceOf(UnprocessableEntityException);
+        expect((error as UnprocessableEntityException).getResponse()).toMatchObject({
+          code: IDEMPOTENCY_KEY_REUSED_CODE,
+          message: WALK_IN_MESSAGES.idempotencyKeyReused,
+        });
+      }
+      expect(writes).toHaveLength(1);
+    });
+
+    it('la transacción encuentra la cita de la otra petición con la misma clave: la devuelve', async () => {
+      const { uc, writes, reserved, byKey } = setup();
+      reserved('17:00', '18:00');
+      const input = { patientId: 'p1', providerId: 'prov1' };
+      const first = await uc.execute(input, CTX, KEY);
+      // Simula la carrera: el atajo no la vio (la primera aún no había
+      // confirmado) pero la transacción, tras el candado, sí.
+      const stored = byKey.get(KEY.toLowerCase())!;
+      byKey.delete(KEY.toLowerCase());
+      let lookups = 0;
+      const original = byKey.get.bind(byKey);
+      byKey.get = (k: string) => (lookups++ === 0 ? undefined : (original(k) ?? stored));
+
+      const second = await uc.execute(input, CTX, KEY);
+      expect(second.id).toBe(first.id);
+      expect(second.patientCreated).toBe(false);
+      expect(writes).toHaveLength(2);
+    });
+
+    it('carrera: lo que ve la segunda petición (p. ej. el hueco ocupado) es la cita de la primera', async () => {
+      const { uc, reserved, byKey, fail } = setup();
+      reserved('17:00', '18:00');
+      const input = { patientId: 'p1', providerId: 'prov1' };
+      const first = await uc.execute(input, CTX, KEY);
+      const stored = byKey.get(KEY.toLowerCase())!;
+      byKey.delete(KEY.toLowerCase());
+      fail(
+        new Prisma.PrismaClientUnknownRequestError(
+          'conflicting key value violates exclusion constraint "appointments_no_overlap_per_provider" 23P01',
+          { clientVersion: 'x' },
+        ),
+      );
+      let lookups = 0;
+      const original = byKey.get.bind(byKey);
+      byKey.get = (k: string) => (lookups++ === 0 ? undefined : (original(k) ?? stored));
+
+      const second = await uc.execute(input, CTX, KEY);
+      expect(second.id).toBe(first.id);
+    });
+
+    it('sin clave: como siempre (dos envíos, dos citas); clave que no es UUID: 400', async () => {
+      const { uc, writes, reserved } = setup();
+      reserved('17:00', '18:00');
+      await uc.execute({ patientId: 'p1', providerId: 'prov1' }, CTX);
+      await uc.execute({ patientId: 'p2', providerId: 'prov1' }, CTX, '  ');
+      expect(writes).toHaveLength(2);
+      expect(writes.every((w) => w.idempotency === undefined)).toBe(true);
+      await expect(
+        uc.execute({ patientId: 'p1', providerId: 'prov1' }, CTX, 'doble-clic'),
+      ).rejects.toThrow(new BadRequestException(WALK_IN_MESSAGES.idempotencyKeyInvalid));
+      expect(writes).toHaveLength(2);
+    });
   });
 });

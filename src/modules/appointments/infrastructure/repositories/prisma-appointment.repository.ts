@@ -815,7 +815,15 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
       );
   }
 
-  async undoArrival(id: string): Promise<Appointment | null> {
+  async undoArrival(
+    id: string,
+    options: { clearOverbooked?: boolean } = {},
+  ): Promise<Appointment | null> {
+    // DX-509: deja de ser sobrecupo en la misma sentencia; si su hueco ya lo
+    // ocupa otra cita, la EXCLUDE del profesional lo rechaza (23P01).
+    const overbooked = options.clearOverbooked
+      ? Prisma.sql`false`
+      : Prisma.sql`"overbooked"`;
     return this.prisma.runWithTenant(async (tx) => {
       // Una sola sentencia condicional: vuelve al estado previo SOLO si sigue
       // en ARRIVED (la CHECK de la tabla garantiza que entonces lo tiene).
@@ -824,6 +832,7 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
            SET "status" = "preArrivalStatus",
                "preArrivalStatus" = NULL,
                "arrivedAt" = NULL,
+               "overbooked" = ${overbooked},
                "updatedAt" = timezone('UTC', now())
          WHERE "id" = ${id}::uuid
            AND "deletedAt" IS NULL

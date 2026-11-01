@@ -88,6 +88,11 @@ import {
   planItemsEditable,
 } from '../../domain/plan-item-reservation';
 import { requireLocationTimeZone } from '../../../../shared/locations/location-time-zone';
+import {
+  OVERBOOK_AUDIT_REASONS,
+  OVERBOOK_SLOT_TAKEN_CODE,
+  WALK_IN_MESSAGES,
+} from '../../domain/walk-in';
 
 /**
  * Lo que el cliente puede cambiar. `revokeConfirmations` y los indicadores de
@@ -109,6 +114,7 @@ export type UpdateAppointmentInput = Omit<
   | 'cancel'
   | 'clearCancellation'
   | 'noShowMarkedAt'
+  | 'overbooked'
 > & {
   /**
    * DX-273: motivo para sacar la cita de COMPLETED (obligatorio entonces,
@@ -125,7 +131,16 @@ export type UpdateAppointmentInput = Omit<
    * ADMIN y odontólogo (el rol sale del `auditContext`); si no, 403.
    */
   overrideReason?: string;
+  /**
+   * DX-509: al reactivar una urgencia en sobrecupo cuyo hueco ya ocupa otra
+   * cita del profesional, mantenerla en sobrecupo a sabiendas (auditado). Sin
+   * esto, ese caso es 409 `OVERBOOK_SLOT_TAKEN`. En cualquier otro, se ignora.
+   */
+  keepOverbooked?: boolean;
 };
+
+/** DX-509: qué pasa con el sobrecupo de la cita en este cambio. */
+type OverbookTransition = 'clear' | 'keep' | null;
 
 /**
  * DX-279 (M1): estados en los que el paciente ya vino (en la clínica) o la
@@ -303,7 +318,13 @@ export class UpdateAppointmentUseCase {
     auditContext: AppointmentAuditContext | undefined,
     fromOpening: boolean,
   ): Promise<AppointmentWriteResult> {
-    const { statusReason, cancellation, overrideReason, ...patch } = input;
+    const {
+      statusReason,
+      cancellation,
+      overrideReason,
+      keepOverbooked,
+      ...patch
+    } = input;
     const existing = await this.repo.findById(id);
     if (!existing) {
       // Same rationale as the Patient use cases: a missing row and a row
@@ -564,6 +585,16 @@ export class UpdateAppointmentUseCase {
       patch.status !== undefined &&
       WAITLIST_STATUSES.has(existing.status) &&
       !WAITLIST_STATUSES.has(patch.status);
+    // DX-509: movida (otra hora u otro profesional) deja de ser sobrecupo y
+    // ya pasó el anti-solape de arriba; reactivada en su hora, solo si su
+    // hueco sigue libre o quien reactiva la mantiene en sobrecupo.
+    const overbook: OverbookTransition = !existing.overbooked
+      ? null
+      : isReschedule
+        ? 'clear'
+        : reactivates
+          ? await this.overbookAtItsSlot(existing, keepOverbooked === true)
+          : null;
     const effectivePatch: UpdateAppointmentRepoInput = {
       ...patch,
       ...flowPatch,
@@ -572,6 +603,7 @@ export class UpdateAppointmentUseCase {
         ? { confirmationSentAt: null, callbackRequestedAt: null }
         : {}),
       ...(isReschedule ? { revokeConfirmations: true } : {}),
+      ...(overbook === 'clear' ? { overbooked: false as const } : {}),
       ...(fromOpening ? { requireWantsEarlier: true } : {}),
       ...(completedExit ? { completedExit } : {}),
       ...(auditContext ? { audit: auditContext } : {}),
@@ -614,6 +646,11 @@ export class UpdateAppointmentUseCase {
           excludeId: existing.id,
         });
       }
+      // DX-509: el hueco del sobrecupo reactivado se ocupó a la vez: se
+      // puede reintentar manteniéndolo en sobrecupo.
+      if (scope === 'provider' && overbook === 'clear' && !isReschedule) {
+        throw overbookSlotTaken();
+      }
       if (scope === 'provider' || scope === 'patient') {
         throw new ConflictException(OVERLAP_MESSAGES[scope]);
       }
@@ -622,6 +659,9 @@ export class UpdateAppointmentUseCase {
 
     if ((isReschedule || chairChanged) && auditContext) {
       await this.recordMove(existing, updated, auditContext);
+    }
+    if (overbook !== null && auditContext) {
+      await this.recordOverbook(updated, overbook, auditContext);
     }
     // B2: un solo evento por cancelación. Desde la clínica la lleva el del
     // flujo y desde «Completada» el de la salida (DX-273, en el repositorio).
@@ -723,6 +763,7 @@ export class UpdateAppointmentUseCase {
   async undoArrival(
     id: string,
     auditContext: AppointmentAuditContext,
+    options: { keepOverbooked?: boolean } = {},
   ): Promise<AppointmentWriteResult> {
     const existing = await this.repo.findById(id);
     if (!existing) throw new NotFoundException('Cita no encontrada');
@@ -734,7 +775,23 @@ export class UpdateAppointmentUseCase {
     if (existing.status !== AppointmentStatus.ARRIVED) {
       throw new ConflictException(PATIENT_FLOW_MESSAGES.undoNotArrived);
     }
-    const updated = await this.repo.undoArrival(id);
+    // DX-509: una urgencia en sobrecupo vuelve a ser una cita agendada en su
+    // hora: deja de ser sobrecupo si su hueco está libre; si no, solo
+    // manteniéndolo a sabiendas (o 409 `OVERBOOK_SLOT_TAKEN`).
+    const overbook: OverbookTransition = existing.overbooked
+      ? await this.overbookAtItsSlot(existing, options.keepOverbooked === true)
+      : null;
+    let updated: Appointment | null;
+    try {
+      updated = await this.repo.undoArrival(id, {
+        clearOverbooked: overbook === 'clear',
+      });
+    } catch (error) {
+      if (overbook === 'clear' && overlapExclusionScope(error) === 'provider') {
+        throw overbookSlotTaken();
+      }
+      throw error;
+    }
     if (!updated) throw new ConflictException(PATIENT_FLOW_MESSAGES.stale);
     await this.recordStatus(
       updated,
@@ -742,6 +799,9 @@ export class UpdateAppointmentUseCase {
       'ARRIVAL_UNDONE',
       auditContext,
     );
+    if (overbook !== null) {
+      await this.recordOverbook(updated, overbook, auditContext);
+    }
     return {
       ...updated,
       ...NO_WARNINGS,
@@ -979,6 +1039,57 @@ export class UpdateAppointmentUseCase {
   }
 
   /**
+   * DX-509: un sobrecupo que vuelve a contar EN SU HORA (deshacer la llegada,
+   * reactivar). Con el hueco del profesional libre deja de ser sobrecupo; si
+   * otra cita lo ocupa, solo sigue en sobrecupo si se pide (`keep`), o 409.
+   * La EXCLUDE del profesional cierra la carrera al escribir.
+   */
+  private async overbookAtItsSlot(
+    existing: Appointment,
+    keep: boolean,
+  ): Promise<'clear' | 'keep'> {
+    const clash = await this.repo.findOverlapping(
+      existing.providerId,
+      existing.start,
+      existing.end,
+      existing.id,
+    );
+    if (clash.length === 0) return 'clear';
+    if (keep) return 'keep';
+    throw overbookSlotTaken();
+  }
+
+  /**
+   * DX-509: `audit_event` del fin (`WALK_IN_OVERBOOK_CLEARED`) o de mantener
+   * a sabiendas (`WALK_IN_OVERBOOK_KEPT`) un sobrecupo. Sin el motivo.
+   */
+  private recordOverbook(
+    appointment: Appointment,
+    transition: 'clear' | 'keep',
+    ctx: AppointmentAuditContext,
+  ): Promise<void> {
+    return this.audit.record({
+      tenantId: ctx.tenantId,
+      locationId: ctx.locationId,
+      actor: { kind: 'user', userId: ctx.actor.userId, role: ctx.actor.role },
+      action: 'UPDATE',
+      resourceType: 'APPOINTMENT',
+      resourceId: appointment.id,
+      patient: { kind: 'patient', id: appointment.patientId },
+      requestId: ctx.requestId,
+      ip: ctx.ip,
+      userAgent: ctx.userAgent,
+      metadata: {
+        reason:
+          transition === 'clear'
+            ? OVERBOOK_AUDIT_REASONS.cleared
+            : OVERBOOK_AUDIT_REASONS.kept,
+        ...(transition === 'clear' ? { changedFields: ['overbooked'] } : {}),
+      },
+    });
+  }
+
+  /**
    * `audit_event` del movimiento: hora, profesional y (DX-211) sillón antes y
    * después.
    */
@@ -1024,4 +1135,15 @@ export class UpdateAppointmentUseCase {
     }
     return this.chairs;
   }
+}
+
+/** DX-509: 409 del sobrecupo que no cabe en su hora; se puede mantener. */
+function overbookSlotTaken(): ConflictException {
+  return new ConflictException({
+    statusCode: 409,
+    error: 'Conflict',
+    code: OVERBOOK_SLOT_TAKEN_CODE,
+    message: WALK_IN_MESSAGES.overbookSlotTaken,
+    canKeepOverbooked: true,
+  });
 }

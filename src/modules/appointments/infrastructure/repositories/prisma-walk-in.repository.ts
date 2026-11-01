@@ -1,5 +1,10 @@
 import { ConflictException, Injectable } from '@nestjs/common';
-import { AppointmentStatus, ReservedOverrideKind, Sex } from '@prisma/client';
+import {
+  AppointmentStatus,
+  Prisma,
+  ReservedOverrideKind,
+  Sex,
+} from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
@@ -11,9 +16,10 @@ import {
 import { livePatientWithDoc } from '../../../patients/infrastructure/patient-doc-lock';
 import { PATIENT_DUPLICATE_CODE } from '../../domain/walk-in';
 import type {
+  WalkInCreateOutcome,
+  WalkInReplay,
   WalkInRepository,
   WalkInWrite,
-  WalkInWriteResult,
 } from '../../domain/ports/walk-in-repository.port';
 import {
   INCLUDE_PATIENT_NAME,
@@ -48,10 +54,35 @@ export class PrismaWalkInRepository implements WalkInRepository {
     );
   }
 
+  findByIdempotencyKey(key: string): Promise<WalkInReplay | null> {
+    const tenantId = this.tenantContext.getTenantId();
+    if (!tenantId) throw new Error('No tenant in context');
+    return this.prisma.runWithTenant((tx) => replayIn(tx, tenantId, key));
+  }
+
   async create(
     input: WalkInWrite,
     ctx: AuditRequestContext,
-  ): Promise<WalkInWriteResult> {
+  ): Promise<WalkInCreateOutcome> {
+    try {
+      return await this.write(input, ctx);
+    } catch (error) {
+      // DX-510: red por si dos transacciones con la misma clave llegaran a
+      // insertar (el candado de abajo lo evita): el único parcial rechaza la
+      // segunda y se devuelve la original.
+      const key = input.idempotency?.key;
+      if (key && isUniqueViolation(error)) {
+        const original = await this.findByIdempotencyKey(key);
+        if (original) return { replayed: true, ...original };
+      }
+      throw error;
+    }
+  }
+
+  private async write(
+    input: WalkInWrite,
+    ctx: AuditRequestContext,
+  ): Promise<WalkInCreateOutcome> {
     const tenantId = this.tenantContext.getTenantId();
     if (!tenantId) throw new Error('No tenant in context');
     const actor = {
@@ -69,6 +100,18 @@ export class PrismaWalkInRepository implements WalkInRepository {
     };
 
     return this.prisma.runWithTenant(async (tx) => {
+      const idempotency = input.idempotency;
+      if (idempotency) {
+        // DX-510: el doble clic o el reintento con la misma clave espera aquí
+        // a la primera petición; si esa ya creó la cita, se devuelve (sin un
+        // segundo paciente ni una segunda cita, y sin volver a auditar).
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(
+          hashtext('dx_walk_in_idempotency:' || ${tenantId}),
+          hashtext(${idempotency.key})
+        )`;
+        const original = await replayIn(tx, tenantId, idempotency.key);
+        if (original) return { replayed: true as const, ...original };
+      }
       let patientId: string;
       let patientCreated = false;
       if (input.patient.kind === 'new') {
@@ -137,6 +180,8 @@ export class PrismaWalkInRepository implements WalkInRepository {
           overbooked: input.overbookReason !== null,
           triageFlags: input.triageFlags,
           triageNote: input.triageNote,
+          idempotencyKey: idempotency?.key ?? null,
+          idempotencyFingerprint: idempotency?.fingerprint ?? null,
         },
         include: INCLUDE_PATIENT_NAME,
       });
@@ -194,10 +239,50 @@ export class PrismaWalkInRepository implements WalkInRepository {
       }
 
       return {
+        replayed: false as const,
         appointment: mapToEntity(appointment),
         patientCreated,
         overbookId,
       };
     });
   }
+}
+
+/** ¿Es un P2002 (violación de único)? Como en los gastos (DX-274). */
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === 'P2002'
+  );
+}
+
+/**
+ * DX-510: la cita de esta clave en la clínica (el único es por clínica; la
+ * RLS ya la acota), con la huella de su petición y la fila del motivo del
+ * sobrecupo, o null.
+ */
+async function replayIn(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  key: string,
+): Promise<WalkInReplay | null> {
+  const appointment = await tx.appointment.findFirst({
+    where: { tenantId, idempotencyKey: key },
+    include: INCLUDE_PATIENT_NAME,
+  });
+  if (!appointment) return null;
+  const override = await tx.appointmentReservedOverride.findFirst({
+    where: {
+      tenantId,
+      appointmentId: appointment.id,
+      kind: ReservedOverrideKind.WALK_IN_OVERBOOK,
+    },
+    orderBy: { createdAt: 'asc' },
+    select: { id: true },
+  });
+  return {
+    appointment: mapToEntity(appointment),
+    overbookId: override?.id ?? null,
+    fingerprint: appointment.idempotencyFingerprint,
+  };
 }
