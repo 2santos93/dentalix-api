@@ -38,6 +38,11 @@ export interface Payment {
   /** DX-377: motivo con que se confirmó una referencia repetida. */
   duplicateReferenceReason: string | null;
   /**
+   * DX-515: nº de la factura fiscal emitida fuera de Dentalix para el abono,
+   * texto libre; `null` si no se anotó.
+   */
+  externalInvoiceNumber: string | null;
+  /**
    * DX-377: solo en la respuesta del alta: los abonos con la misma referencia
    * y medio que se confirmaron con motivo (para la auditoría).
    */

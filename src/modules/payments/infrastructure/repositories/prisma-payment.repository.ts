@@ -164,6 +164,7 @@ function mapToEntity(payment: PrismaPayment, timeZone: string): Payment {
     paymentMethodName: payment.paymentMethod?.name ?? null,
     reference: payment.reference,
     duplicateReferenceReason: payment.duplicateReferenceReason,
+    externalInvoiceNumber: payment.externalInvoiceNumber,
     notes: payment.notes,
     createdById: payment.createdById,
     createdAt: payment.createdAt,
@@ -198,6 +199,8 @@ const CASH_PAYMENT_SELECT = {
   method: true,
   paymentMethodId: true,
   reference: true,
+  // DX-515: nº de la factura fiscal externa.
+  externalInvoiceNumber: true,
   notes: true,
   location: { select: { id: true, name: true } },
   plan: {
@@ -257,6 +260,7 @@ function mapToCashPayment(
     method: row.method,
     paymentMethod: methodRefOf(catalog, row.paymentMethodId, row.method),
     reference: row.reference,
+    externalInvoiceNumber: row.externalInvoiceNumber,
     notes: row.notes,
     location: { id: row.location.id, name: row.location.name },
     // `Payment.patientId` es la copia desnormalizada del paciente del plan (o
@@ -1242,6 +1246,12 @@ export class PrismaPaymentRepository implements PaymentRepository {
           deletedAt: null,
           ...scope.where,
           ...(params.method ? { method: params.method } : {}),
+          // DX-515: con o sin nº de factura externa (para cuadrar lo facturado).
+          ...(params.externalInvoice === 'WITH'
+            ? { externalInvoiceNumber: { not: null } }
+            : params.externalInvoice === 'WITHOUT'
+              ? { externalInvoiceNumber: null }
+              : {}),
           // DX-395: el medio, y si es inicial también los abonos sin medio
           // de su método (réplicas anteriores), como los nombra el resumen.
           // En AND: `scope.where` ya trae su propio OR (una rama por sede).

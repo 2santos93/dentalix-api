@@ -422,6 +422,8 @@ describe('Caja — GET /payments (e2e)', () => {
       // DX-377: el medio inicial de su método y sin referencia.
       paymentMethod: { id: expect.any(String) as string, name: 'Efectivo' },
       reference: null,
+      // DX-515: sin nº de factura externa.
+      externalInvoiceNumber: null,
       notes: null,
       location: { id: sedePrincipal, name: 'Sede principal' },
       patient: { id: patientAna, fullName: 'Ana Gómez' },

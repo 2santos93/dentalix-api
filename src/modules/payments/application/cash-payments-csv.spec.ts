@@ -18,6 +18,7 @@ function row(overrides: Partial<CashPaymentView> = {}): CashPaymentView {
     method: PaymentMethod.TRANSFER,
     paymentMethod: { id: 'pm-mobile', name: 'Pago móvil' },
     reference: 'ABC 123',
+    externalInvoiceNumber: null,
     notes: 'nota interna',
     location: { id: 'l1', name: 'Sede Norte' },
     patient: { id: 'pat-1', fullName: 'Ana Gómez' },
@@ -54,6 +55,7 @@ describe('CSV de la caja (DX-395)', () => {
       'Destino',
       'Medio',
       'Referencia',
+      'Factura externa',
       'Moneda',
       'Importe',
     ]);
@@ -72,6 +74,7 @@ describe('CSV de la caja (DX-395)', () => {
         '"Plan del 2026-09-01"',
         '"Pago móvil"',
         '"ABC 123"',
+        '""',
         'COP',
         '150000',
       ].join(','),
@@ -118,6 +121,44 @@ describe('CSV de la caja (DX-395)', () => {
     )[1];
     expect(line).toContain(`"'+Ana"`);
     expect(line).toContain(`"'=HYPERLINK(""x"")"`);
+  });
+
+  it('DX-515: lleva el nº de la factura externa tal cual, sin formato', () => {
+    const line = linesOf(
+      toCashPaymentsCsv(
+        [row({ externalInvoiceNumber: 'A/2026 00-77' })],
+        REFERENCE_CURRENCY_DIGITS,
+      ),
+    )[1];
+    expect(line).toBe(
+      [
+        '2026-10-15',
+        '"Sede Norte"',
+        '"Ana Gómez"',
+        '"Plan del 2026-09-01"',
+        '"Pago móvil"',
+        '"ABC 123"',
+        '"A/2026 00-77"',
+        'COP',
+        '150000',
+      ].join(','),
+    );
+  });
+
+  it('DX-515: protege las fórmulas en el nº de la factura externa', () => {
+    for (const [value, cell] of [
+      ['=1+1', `"'=1+1"`],
+      ['-5', `"'-5"`],
+      ['@SUM(A1)', `"'@SUM(A1)"`],
+    ]) {
+      const line = linesOf(
+        toCashPaymentsCsv(
+          [row({ externalInvoiceNumber: value })],
+          REFERENCE_CURRENCY_DIGITS,
+        ),
+      )[1];
+      expect(line).toContain(`,"ABC 123",${cell},COP,`);
+    }
   });
 
   it('las notas internas no salen en el CSV', () => {

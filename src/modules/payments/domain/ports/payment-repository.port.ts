@@ -155,6 +155,10 @@ export type ListPaymentsReceivedInRangeParams = CivilPeriod;
 /** Abono del período (ya trae `paidOn`, su día civil en la zona de su sede). */
 export type ReceivedPayment = Payment;
 
+/** DX-515: filtro de la caja por nº de factura externa. */
+export const EXTERNAL_INVOICE_FILTERS = ['WITH', 'WITHOUT'] as const;
+export type ExternalInvoiceFilter = (typeof EXTERNAL_INVOICE_FILTERS)[number];
+
 export interface ListCashRegisterParams extends CivilPeriod {
   method?: PaymentMethod;
   /**
@@ -163,6 +167,8 @@ export interface ListCashRegisterParams extends CivilPeriod {
    * medio de ese método (réplicas anteriores), como el resumen.
    */
   paymentMethod?: { id: string; legacyMethod: PaymentMethod | null };
+  /** DX-515: solo los abonos con (o sin) nº de factura externa. */
+  externalInvoice?: ExternalInvoiceFilter;
   /** Ya normalizado por el caso de uso. */
   skip: number;
   /** Ya acotado por el caso de uso. */

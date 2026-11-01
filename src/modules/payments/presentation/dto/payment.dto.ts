@@ -88,6 +88,14 @@ export class PaymentDto {
     type: String,
     nullable: true,
     description:
+      'DX-515: nº de la factura fiscal emitida fuera de Dentalix (texto libre); null si no se anotó.',
+  })
+  externalInvoiceNumber!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
       'Motivo con que se confirmó una referencia repetida (DX-377); null si no se repetía.',
   })
   duplicateReferenceReason!: string | null;

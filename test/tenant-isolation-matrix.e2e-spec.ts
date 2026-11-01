@@ -3502,6 +3502,15 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       routes: ['POST /treatment-plans/:id/split-payments'],
     },
     {
+      spec: 'receipt-settings.e2e-spec.ts',
+      checks:
+        'B → 404 al anotar la factura externa de un abono de A y A → 404 al cambiar la leyenda de una sede de B, sin cambios (DX-515)',
+      routes: [
+        'PUT /payments/:id/external-invoice-number',
+        'PUT /payment-receipts/settings/locations/:locationId',
+      ],
+    },
+    {
       spec: 'patient-credit.e2e-spec.ts',
       checks:
         'B → 404 sobre el plan, el comprobante y el paciente de A: traslado, devolución, comprobante y movimientos (DX-253)',

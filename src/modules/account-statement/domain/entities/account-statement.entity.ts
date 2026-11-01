@@ -46,6 +46,8 @@ export interface StatementPaymentRow {
   paymentMethod: StatementPaymentMethodRef | null;
   /** DX-395: referencia del pago tal como se tecleó, o `null`. */
   reference: string | null;
+  /** DX-515: nº de la factura fiscal externa del abono, o `null`. */
+  externalInvoiceNumber?: string | null;
   /** DX-390: el cobro dividido del abono (id de su línea 1), o `null`. */
   splitId?: string | null;
   location: { id: string; name: string };
@@ -229,6 +231,8 @@ export interface StatementMovement {
   paymentMethod: StatementPaymentMethodRef | null;
   /** DX-395: referencia del pago, o `null`. */
   reference: string | null;
+  /** DX-515: nº de la factura fiscal emitida fuera de Dentalix, o `null`. */
+  externalInvoiceNumber: string | null;
   /**
    * DX-390: el cobro dividido del abono (id de su línea 1) y cuántas formas de
    * pago tiene; `null` en un abono suelto. Anular una anula el cobro entero.
