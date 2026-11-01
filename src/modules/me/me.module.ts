@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { MeController } from './presentation/me.controller';
+import { MyMfaController } from './presentation/my-mfa.controller';
 import { GetMyProfileUseCase } from './application/use-cases/get-my-profile.use-case';
 import { UpdateMyNameUseCase } from './application/use-cases/update-my-name.use-case';
 import { ChangeMyPasswordUseCase } from './application/use-cases/change-my-password.use-case';
@@ -18,7 +19,7 @@ import { AuthModule } from '../auth/auth.module';
 // aporta SessionClaimsService (el cambio de contraseña re-emite la sesión).
 @Module({
   imports: [JwtModule.register({}), StorageModule, AuthModule],
-  controllers: [MeController],
+  controllers: [MeController, MyMfaController],
   providers: [
     GetMyProfileUseCase,
     UpdateMyNameUseCase,

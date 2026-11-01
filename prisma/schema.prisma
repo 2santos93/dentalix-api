@@ -24,6 +24,11 @@ model Tenant {
   // DX-233: cita fuera del horario del profesional. false (defecto) = se
   // agenda con el aviso PROVIDER_OFF_SCHEDULE; true = 409.
   providerScheduleStrict                  Boolean                          @default(false)
+  // DX-021: exige verificación en dos pasos (TOTP) a los ADMIN de esta
+  // clínica. Un ADMIN sin ella pasa por el alta forzada al iniciar sesión,
+  // antes de recibir ningún token con acceso a datos. Lo cambia el ADMIN
+  // (PUT /security-policy, auditado).
+  requireAdminMfa                         Boolean                          @default(false)
   // DX-247: meses que vale una anamnesis (o su última confirmación «Sin
   // cambios hoy») antes de salir «Anamnesis caducada». CHECK 1..60 en la BD.
   anamnesisValidityMonths                 Int                              @default(12)
@@ -210,6 +215,11 @@ model User {
   mfaTotpPendingSecretEnc String?
   mfaEnabledAt            DateTime?
   mfaLastUsedStep         Int?
+  // DX-021: el MFA es del USUARIO (global): las mismas columnas sirven al
+  // superadmin y a cualquier miembro que lo active desde «Mi perfil», y se
+  // pide en el login de TODAS sus clínicas. Códigos de recuperación aparte
+  // (`user_mfa_recovery_codes`, solo su HMAC).
+  mfaRecoveryCodes        UserMfaRecoveryCode[]
   createdAt               DateTime           @default(now())
   updatedAt               DateTime           @updatedAt
   deletedAt               DateTime?
@@ -2603,6 +2613,25 @@ model InventoryMovement {
 // Denylist de refresh tokens revocados por logout. Cada fila vive a lo sumo el
 // TTL del refresh (JWT_REFRESH_TTL, ~30d); se limpian de forma lazy al revocar.
 // Tabla global (sin RLS ni tenantId): el jti ya es único por token.
+/// DX-021: códigos de recuperación de la verificación en dos pasos de un
+/// usuario (10 por alta o regeneración). Solo se guarda su HMAC-SHA-256 con
+/// una clave derivada de MFA_ENCRYPTION_KEY (ligado al usuario): ni la BD
+/// sola permite probarlos sin conexión. Un solo uso (`usedAt`); regenerar o
+/// desactivar el MFA borra los anteriores. Tabla global, sin RLS (como
+/// `users`).
+model UserMfaRecoveryCode {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String    @db.Uuid
+  codeHash  String
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, codeHash])
+  @@map("user_mfa_recovery_codes")
+}
+
 model RevokedToken {
   jti       String   @id
   expiresAt DateTime

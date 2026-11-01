@@ -58,6 +58,13 @@ const HARD_DELETE_ALLOWLIST: ReadonlySet<string> = new Set<string>([
   // dentro de la misma transacción que el resto del lote y el cambio queda en
   // audit_events (PRICES_REPLACED). La lista entera sí se retira en blando.
   'priceListItem',
+  // DX-021: huellas (HMAC) de los códigos de recuperación de la verificación
+  // en dos pasos. Son material de credencial, sin datos de pacientes y sin
+  // nada que las referencie: regenerarlos o desactivar el MFA DEBE
+  // destruirlos (conservarlos «en blando» solo dejaría credenciales viejas en
+  // la BD). Cada cambio queda en audit_events (MFA_RECOVERY_CODES_REGENERATED
+  // / MFA_DISABLED).
+  'userMfaRecoveryCode',
 ]);
 
 const FORBIDDEN_OPERATIONS: ReadonlySet<string> = new Set([

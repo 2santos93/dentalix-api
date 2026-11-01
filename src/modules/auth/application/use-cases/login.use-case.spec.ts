@@ -10,6 +10,15 @@ const unusedBreakGlass = {
   open: () => Promise.reject(new Error('break-glass no esperado')),
 } as never;
 
+/** DX-021: miembro sin MFA y sin obligación (el login de siempre). */
+const noMfa = {
+  state: () => Promise.resolve({ enabledAt: null, isPlatformAdmin: false }),
+  isRequired: () => Promise.resolve(false),
+} as never;
+const unusedChallenges = {
+  issue: () => Promise.reject(new Error('paso MFA no esperado')),
+} as never;
+
 const password = new TestPasswordHasher();
 
 function makeRepo(
@@ -44,7 +53,14 @@ describe('LoginUseCase', () => {
       tokenVersion: 0,
       allowedLocationIds: null,
     });
-    const uc = new LoginUseCase(repo, password, tokens, unusedBreakGlass);
+    const uc = new LoginUseCase(
+      repo,
+      password,
+      tokens,
+      unusedBreakGlass,
+      noMfa,
+      unusedChallenges,
+    );
     const result = await uc.execute({
       tenantId: 't1',
       email: 'A@B.com',
@@ -70,6 +86,8 @@ describe('LoginUseCase', () => {
       password,
       { issue } as never,
       unusedBreakGlass,
+      noMfa,
+      unusedChallenges,
     );
     await uc.execute({ tenantId: 't1', email: 'a@b.com', password: 'S3cret!' });
     expect(issue).toHaveBeenCalledWith({
@@ -101,6 +119,8 @@ describe('LoginUseCase', () => {
         password,
         { issue } as never,
         unusedBreakGlass,
+        noMfa,
+        unusedChallenges,
       );
       await uc.execute({
         tenantId: 't1',
@@ -139,12 +159,114 @@ describe('LoginUseCase', () => {
     });
   });
 
+  describe('DX-021: segundo factor', () => {
+    async function memberRepo(role: ClinicRole = ClinicRole.ADMIN) {
+      return makeRepo({
+        userId: 'u1',
+        role,
+        passwordHash: await password.hash('S3cret!'),
+        tokenVersion: 7,
+        allowedLocationIds: null,
+      });
+    }
+    const challenges = {
+      issue: jest.fn().mockResolvedValue({
+        token: 'mfa-token',
+        expiresAt: new Date('2026-11-01T10:05:00Z'),
+      }),
+    };
+    const issue = jest.fn();
+
+    beforeEach(() => {
+      challenges.issue.mockClear();
+      issue.mockReset();
+    });
+
+    it('con el MFA activo: solo el token intermedio (ni access ni refresh)', async () => {
+      const mfa = {
+        state: () =>
+          Promise.resolve({ enabledAt: new Date(), isPlatformAdmin: false }),
+        isRequired: () => Promise.resolve(false),
+      };
+      const uc = new LoginUseCase(
+        await memberRepo(ClinicRole.DENTIST),
+        password,
+        { issue } as never,
+        unusedBreakGlass,
+        mfa as never,
+        challenges as never,
+      );
+      const result = await uc.execute({
+        tenantId: 't1',
+        email: 'a@b.com',
+        password: 'S3cret!',
+      });
+      expect(result).toEqual({
+        mfa: 'MFA_REQUIRED',
+        mfaToken: 'mfa-token',
+        expiresAt: new Date('2026-11-01T10:05:00Z'),
+      });
+      expect(issue).not.toHaveBeenCalled();
+      expect(challenges.issue).toHaveBeenCalledWith({
+        userId: 'u1',
+        tenantId: 't1',
+        tokenVersion: 7,
+        purpose: 'MFA_VERIFY',
+      });
+    });
+
+    it('obligatorio y sin activar: alta forzada, sin tokens de sesión', async () => {
+      const mfa = {
+        state: () =>
+          Promise.resolve({ enabledAt: null, isPlatformAdmin: false }),
+        isRequired: () => Promise.resolve(true),
+      };
+      const uc = new LoginUseCase(
+        await memberRepo(),
+        password,
+        { issue } as never,
+        unusedBreakGlass,
+        mfa as never,
+        challenges as never,
+      );
+      const result = await uc.execute({
+        tenantId: 't1',
+        email: 'a@b.com',
+        password: 'S3cret!',
+      });
+      expect(result).toMatchObject({ mfa: 'MFA_ENROLLMENT_REQUIRED' });
+      expect(issue).not.toHaveBeenCalled();
+      expect(challenges.issue).toHaveBeenCalledWith(
+        expect.objectContaining({ purpose: 'MFA_ENROLL' }),
+      );
+    });
+
+    it('con la contraseña mala ni siquiera se mira el MFA', async () => {
+      const state = jest.fn();
+      const uc = new LoginUseCase(
+        await memberRepo(),
+        password,
+        { issue } as never,
+        unusedBreakGlass,
+        { state, isRequired: jest.fn() } as never,
+        challenges as never,
+      );
+      await expect(
+        uc.execute({ tenantId: 't1', email: 'a@b.com', password: 'mala' }),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+      expect(state).not.toHaveBeenCalled();
+      expect(challenges.issue).not.toHaveBeenCalled();
+    });
+  });
+
   it('rejects when there is no membership', async () => {
     const uc = new LoginUseCase(
       makeRepo(null),
       password,
       tokens,
       unusedBreakGlass,
+      noMfa,
+      unusedChallenges,
     );
     await expect(
       uc.execute({ tenantId: 't1', email: 'a@b.com', password: 'x' }),
@@ -160,7 +282,14 @@ describe('LoginUseCase', () => {
       tokenVersion: 0,
       allowedLocationIds: null,
     });
-    const uc = new LoginUseCase(repo, password, tokens, unusedBreakGlass);
+    const uc = new LoginUseCase(
+      repo,
+      password,
+      tokens,
+      unusedBreakGlass,
+      noMfa,
+      unusedChallenges,
+    );
     await expect(
       uc.execute({ tenantId: 't1', email: 'a@b.com', password: 'wrong' }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
@@ -177,6 +306,8 @@ describe('LoginUseCase', () => {
         password,
         tokens,
         unusedBreakGlass,
+        noMfa,
+        unusedChallenges,
       );
       await expect(
         uc.execute({ tenantId: 't1', email: 'nadie@x.com', password: 'pw' }),
@@ -196,7 +327,14 @@ describe('LoginUseCase', () => {
           tokenVersion: 0,
         });
       const spy = jest.spyOn(password, 'verify');
-      const uc = new LoginUseCase(repo, password, tokens, unusedBreakGlass);
+      const uc = new LoginUseCase(
+        repo,
+        password,
+        tokens,
+        unusedBreakGlass,
+        noMfa,
+        unusedChallenges,
+      );
       await expect(
         uc.execute({ tenantId: 't1', email: 'otra@x.com', password: 'pw' }),
       ).rejects.toThrow(new UnauthorizedException('Invalid credentials'));
@@ -212,6 +350,8 @@ describe('LoginUseCase', () => {
         password,
         tokens,
         unusedBreakGlass,
+        noMfa,
+        unusedChallenges,
       );
       await expect(
         uc.executePlatform({ email: 'nadie@x.com', password: 'pw' }),

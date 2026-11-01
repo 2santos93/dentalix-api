@@ -16,6 +16,9 @@ import {
   type BreakGlassSession,
 } from '../break-glass.service';
 import { locationClaim } from '../../../../shared/tenancy/location-access';
+import type { MfaChallenge } from '../../domain/user-mfa';
+import { MfaChallengeService } from '../mfa-challenge.service';
+import { UserMfaService } from '../user-mfa.service';
 
 export interface PlatformLoginInput {
   email: string;
@@ -38,8 +41,15 @@ export interface LoginInput {
 
 export type SessionPair = { accessToken: string; refreshToken: string };
 
-/** Login de clínica: el par de siempre, o la sesión break-glass (sin refresh). */
-export type LoginResult = SessionPair | BreakGlassSession;
+/**
+ * Login de clínica: el par de siempre, la sesión break-glass (sin refresh) o,
+ * DX-021, el paso del segundo factor (sin ningún token con acceso a datos).
+ */
+export type LoginResult = SessionPair | BreakGlassSession | MfaChallenge;
+
+export function isMfaChallenge(result: LoginResult): result is MfaChallenge {
+  return 'mfa' in result && typeof result.mfa === 'string';
+}
 
 export function isBreakGlassSession(
   result: LoginResult,
@@ -56,6 +66,8 @@ export class LoginUseCase {
     private readonly password: PasswordService,
     private readonly tokens: TokenService,
     private readonly breakGlass: BreakGlassService,
+    private readonly mfa: UserMfaService,
+    private readonly challenges: MfaChallengeService,
   ) {}
 
   async execute(input: LoginInput): Promise<LoginResult> {
@@ -75,6 +87,29 @@ export class LoginUseCase {
     );
     if (!ok) {
       throw new UnauthorizedException('Invalid credentials');
+    }
+    // DX-021: con la contraseña correcta, el segundo factor. Activo → se pide
+    // el código; obligatorio y sin activar → alta forzada. En ambos casos
+    // solo un token intermedio, que no abre ninguna ruta de datos.
+    const mfa = await this.mfa.state(membership.userId);
+    const purpose = mfa.enabledAt
+      ? ('MFA_VERIFY' as const)
+      : (await this.mfa.isRequired(mfa, input.tenantId, membership.role))
+        ? ('MFA_ENROLL' as const)
+        : null;
+    if (purpose) {
+      const { token, expiresAt } = await this.challenges.issue({
+        userId: membership.userId,
+        tenantId: input.tenantId,
+        tokenVersion: membership.tokenVersion,
+        purpose,
+      });
+      return {
+        mfa:
+          purpose === 'MFA_VERIFY' ? 'MFA_REQUIRED' : 'MFA_ENROLLMENT_REQUIRED',
+        mfaToken: token,
+        expiresAt,
+      };
     }
     return this.tokens.issue({
       sub: membership.userId,

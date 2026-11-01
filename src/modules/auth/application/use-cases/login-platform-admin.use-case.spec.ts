@@ -84,6 +84,8 @@ describe('LoginUseCase — superadmin de plataforma', () => {
         password,
         tokens.service,
         breakGlass.service,
+        {} as never,
+        {} as never,
       );
 
       const result = await uc.execute({
@@ -129,6 +131,8 @@ describe('LoginUseCase — superadmin de plataforma', () => {
         password,
         tokens.service,
         makeBreakGlass().service,
+        {} as never,
+        {} as never,
       );
 
       await expect(
@@ -148,6 +152,8 @@ describe('LoginUseCase — superadmin de plataforma', () => {
         password,
         tokens.service,
         makeBreakGlass().service,
+        {} as never,
+        {} as never,
       );
 
       await expect(
@@ -169,6 +175,8 @@ describe('LoginUseCase — superadmin de plataforma', () => {
         password,
         tokens.service,
         makeBreakGlass().service,
+        {} as never,
+        {} as never,
       );
 
       await uc.executePlatform({
@@ -192,6 +200,8 @@ describe('LoginUseCase — superadmin de plataforma', () => {
         password,
         makeTokens().service,
         makeBreakGlass().service,
+        {} as never,
+        {} as never,
       );
 
       await expect(
@@ -208,6 +218,8 @@ describe('LoginUseCase — superadmin de plataforma', () => {
         password,
         makeTokens().service,
         makeBreakGlass().service,
+        {} as never,
+        {} as never,
       );
 
       await expect(

@@ -40,6 +40,13 @@ import { BreakGlassService } from './application/break-glass.service';
 import { BREAK_GLASS_REPOSITORY } from './domain/ports/break-glass-repository.port';
 import { PrismaBreakGlassRepository } from './infrastructure/repositories/prisma-break-glass.repository';
 import { mfaSecretCipherProvider } from '../../shared/crypto/mfa-secret-cipher';
+import { UserMfaService } from './application/user-mfa.service';
+import { MfaChallengeService } from './application/mfa-challenge.service';
+import { CompleteMfaLoginUseCase } from './application/use-cases/complete-mfa-login.use-case';
+import { USER_MFA_REPOSITORY } from './domain/ports/user-mfa-repository.port';
+import { PrismaUserMfaRepository } from './infrastructure/repositories/prisma-user-mfa.repository';
+import { LoginMfaController } from './presentation/login-mfa.controller';
+import { SecurityPolicyController } from './presentation/security-policy.controller';
 import { COUNTRY_WHITELIST } from '../locations/domain/ports/country-whitelist.port';
 import { PrismaCountryWhitelist } from '../locations/infrastructure/adapters/prisma-country-whitelist.adapter';
 import { CURRENCY_WHITELIST } from '../treatment-plans/domain/ports/currency-whitelist.port';
@@ -57,6 +64,9 @@ import { PrismaCurrencyWhitelist } from '../treatment-plans/infrastructure/adapt
     AuthController,
     PasswordResetController,
     PublicSubdomainsController,
+    // DX-021: segundo paso del login y política de MFA de la clínica.
+    LoginMfaController,
+    SecurityPolicyController,
   ],
   providers: [
     RegisterClinicUseCase,
@@ -82,6 +92,11 @@ import { PrismaCurrencyWhitelist } from '../treatment-plans/infrastructure/adapt
     BreakGlassService,
     { provide: BREAK_GLASS_REPOSITORY, useClass: PrismaBreakGlassRepository },
     mfaSecretCipherProvider,
+    // DX-021: verificación en dos pasos de los miembros (reutiliza SEC-008).
+    UserMfaService,
+    MfaChallengeService,
+    CompleteMfaLoginUseCase,
+    { provide: USER_MFA_REPOSITORY, useClass: PrismaUserMfaRepository },
     // Registro con verificación del email (DX-029).
     {
       provide: REGISTRATION_REPOSITORY,
@@ -109,6 +124,7 @@ import { PrismaCurrencyWhitelist } from '../treatment-plans/infrastructure/adapt
   // El cambio de contraseña (MeModule) vuelve a emitir el par de la sesión
   // con los claims ACTUALES, igual que /auth/refresh. Él y aceptar invitación
   // (InvitationsModule) entregan el par con la cookie de sesión (DX-062).
-  exports: [SessionClaimsService, SessionCookieService],
+  // DX-021: «Mi perfil» (MeModule) activa y desactiva el MFA del usuario.
+  exports: [SessionClaimsService, SessionCookieService, UserMfaService],
 })
 export class AuthModule {}

@@ -1596,6 +1596,24 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
     'change-my-password.use-case.spec.ts, me-profile-repo.int-spec.ts y staff-access-audit.e2e-spec.ts',
   // DX-359: plataforma. MFA_ENROLLMENT_STARTED y MFA_ENABLED en
   // `platform_audit_events`, sin secreto, código ni URI.
+  // DX-021: verificación en dos pasos de los miembros, en la auditoría de la
+  // clínica, sin secreto, URI ni códigos (TOTP o de recuperación).
+  'POST /auth/login/mfa':
+    'complete-mfa-login.use-case (LOGIN MFA_TOTP / MFA_RECOVERY_CODE, LOGIN_FAILED INVALID_MFA_CODE) y user-mfa.e2e-spec.ts',
+  'POST /auth/login/mfa/enrollment':
+    'user-mfa.service (UPDATE STAFF_MEMBER MFA_ENROLLMENT_STARTED) y user-mfa.e2e-spec.ts',
+  'POST /auth/login/mfa/enrollment/confirm':
+    'user-mfa.service (MFA_ENABLED, misma transacción) + LOGIN MFA_ENROLLED; user-mfa.e2e-spec.ts',
+  'POST /me/mfa/enrollment':
+    'user-mfa.service (MFA_ENROLLMENT_STARTED) y user-mfa.e2e-spec.ts',
+  'POST /me/mfa/enrollment/confirm':
+    'user-mfa.service.spec.ts (MFA_ENABLED, misma transacción) y user-mfa.e2e-spec.ts',
+  'POST /me/mfa/disable':
+    'user-mfa.service.spec.ts (MFA_DISABLED, misma transacción) y user-mfa.e2e-spec.ts',
+  'POST /me/mfa/recovery-codes':
+    'user-mfa.service.spec.ts (MFA_RECOVERY_CODES_REGENERATED) y user-mfa.e2e-spec.ts',
+  'PUT /security-policy':
+    'user-mfa.service.spec.ts (CLINIC_SETTINGS MFA_POLICY con antes/después) y user-mfa.e2e-spec.ts',
   'POST /platform/mfa/enrollment':
     'platform-mfa.use-case.spec.ts y staff-access-audit.e2e-spec.ts',
   'POST /platform/mfa/enrollment/confirm':

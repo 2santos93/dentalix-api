@@ -89,6 +89,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // sesión ni clínica; límite propio `subdomain-check` por IP.
   'GET /public/subdomains/:slug/availability': PUBLIC,
   'POST /auth/login': PUBLIC,
+  // DX-021: segundo paso del login (se autentica con el token intermedio).
+  'POST /auth/login/mfa': PUBLIC,
+  'POST /auth/login/mfa/enrollment': PUBLIC,
+  'POST /auth/login/mfa/enrollment/confirm': PUBLIC,
   'POST /auth/refresh': PUBLIC,
   'POST /auth/logout': PUBLIC,
   // DX-010: recuperar la contraseña, en el host de la clínica.
@@ -137,6 +141,14 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /me': AUTHENTICATED,
   'PATCH /me': AUTHENTICATED,
   'POST /me/password': AUTHENTICATED,
+  // DX-021: verificación en dos pasos de la cuenta propia (sesión de clínica).
+  'GET /me/mfa': EVERY_ROLE,
+  'POST /me/mfa/enrollment': EVERY_ROLE,
+  'POST /me/mfa/enrollment/confirm': EVERY_ROLE,
+  'POST /me/mfa/disable': EVERY_ROLE,
+  'POST /me/mfa/recovery-codes': EVERY_ROLE,
+  'GET /security-policy': ADMIN_ONLY,
+  'PUT /security-policy': ADMIN_ONLY,
   'POST /me/avatar': AUTHENTICATED,
   'DELETE /me/avatar': AUTHENTICATED,
   'GET /currencies': AUTHENTICATED,

@@ -623,7 +623,10 @@ describe('Break-glass del superadmin (e2e, SEC-008)', () => {
         .expect(201);
     });
 
-    it('un superadmin que SÍ es miembro entra con su rol sin MFA ni motivo', async () => {
+    // DX-021: el MFA es obligatorio para el superadmin también como MIEMBRO.
+    // Sigue sin motivo ni break-glass, pero la contraseña sola ya no basta:
+    // el login pide el código y luego entra con su rol (y refresh).
+    it('un superadmin que SÍ es miembro entra con su rol sin motivo, pero con su código (DX-021)', async () => {
       await raw.clinicMembership.create({
         data: {
           tenantId: other.tenantId,
@@ -635,10 +638,24 @@ describe('Break-glass del superadmin (e2e, SEC-008)', () => {
         email: SUPER_EMAIL,
         password: SEEDED_PASSWORD,
       }).expect(201);
-      const body = res.body as Body;
+      const challenge = res.body as Body & { mfa?: string; mfaToken?: string };
+      expect(challenge.mfa).toBe('MFA_REQUIRED');
+      expect(challenge.accessToken).toBeUndefined();
+      // El paso usado vuelve atrás: el código vigente ya se gastó en otro caso.
+      await raw.user.update({
+        where: { id: superId },
+        data: { mfaLastUsedStep: Math.floor(Date.now() / 30_000) - 5 },
+      });
+      const done = await http()
+        .post('/api/v1/auth/login/mfa')
+        .set('X-Tenant-Host', other.host)
+        .send({ mfaToken: challenge.mfaToken, code: codeAt(secret) })
+        .expect(200);
+      const body = done.body as Body;
       expect(claimsOf(body.accessToken!)).toMatchObject({
         role: ClinicRole.RECEPTION,
       });
+      expect(claimsOf(body.accessToken!).breakGlass).toBeUndefined();
       expect(body.refreshToken).toEqual(expect.any(String));
     });
   });
