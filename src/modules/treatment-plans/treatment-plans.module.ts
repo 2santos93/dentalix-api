@@ -131,6 +131,12 @@ import { PriceQuoteController } from './presentation/price-quote.controller';
   // plan (+ its active items + currency) before recording/valuing a payment,
   // same cross-module DI pattern as ExchangeModule exporting
   // ConvertAmountUseCase for SalesModule/PaymentsModule.
-  exports: [GetTreatmentPlanUseCase],
+  // DX-503: «Mi día» cuenta presupuestos por seguir y aceptados sin agendar
+  // con los mismos casos de uso que sus `/count`.
+  exports: [
+    GetTreatmentPlanUseCase,
+    ListPendingFollowUpUseCase,
+    PlanVisitsService,
+  ],
 })
 export class TreatmentPlansModule {}
