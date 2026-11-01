@@ -122,7 +122,8 @@ de despliegue hacen falta las devDependencies para sembrar. El puerto se lee de
 
    Cada sede nueva tiene su propio dentista, tarifa en su moneda, planes y
    abonos en esa moneda, citas y realizados en su zona (con el cambio de hora
-   de Londres), cuatro festivos de ejemplo y un cierre puntual a 28 días: la
+   de Londres), tres festivos de ejemplo que se repiten cada año y un
+   cierre puntual a 28 días (o el siguiente día que no sea festivo): la
    demo no pone ninguna cita en un festivo de su sede. Las tasas MANUAL de
    los últimos 61 días cubren VES, BRL y GBP (ficticias; hoy y ayer valen
    igual). «Comparar sedes» (DX-014) cuenta los meses en la zona de cada sede.

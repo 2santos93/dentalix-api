@@ -6,6 +6,7 @@ import {
 } from 'libphonenumber-js/max';
 import {
   daysAgoAt,
+  demoHolidayRows,
   isDemoHoliday,
   planAppointments,
   planClosingQueueExamples,
@@ -18,7 +19,6 @@ import {
   DEMO_COMMUNICATION,
   DEMO_COMPARISON_HISTORY,
   DEMO_COVERAGES,
-  DEMO_HOLIDAYS,
   DEMO_LOCATIONS,
   DEMO_MANUAL_RATES,
   DEMO_PATIENTS,
@@ -34,6 +34,7 @@ import {
   localPatientIndexes,
   sitePatientIndexes,
 } from '../../prisma/demo/data';
+import { conflictOf } from '../../src/modules/location-calendar/domain/holiday-rules';
 import { MANUAL_RATE_MAX_DECIMALS } from '../../src/modules/exchange/domain/exchange-rate-source';
 import { DEFAULT_BUSINESS_HOURS } from '../../src/shared/locations/default-business-hours';
 import { decimalPlaces } from '../../src/shared/validation/bounded-decimal';
@@ -469,9 +470,9 @@ describe('demo global (DX-335)', () => {
   it('the comparison history of a location uses the calendar months of its zone', () => {
     // 21:30 del 31 de octubre en Caracas y ya 01:30 del 1 de noviembre en Londres.
     const now = new Date('2026-11-01T01:30:00Z');
-    const visitMonths = (zone: string) => {
+    const visitMonths = (zone: string, at = now) => {
       const visits = planComparisonHistory(
-        now,
+        at,
         zone,
         'londres',
         DEMO_COMPARISON_HISTORY,
@@ -479,7 +480,7 @@ describe('demo global (DX-335)', () => {
       );
       // Cada visita, en el calendario de la zona con la que se planificó.
       const monthOf = (v: (typeof visits)[number]) =>
-        civilDateIn(daysAgoAt(now, v.daysAgo, v.startMinute, zone), zone).slice(
+        civilDateIn(daysAgoAt(at, v.daysAgo, v.startMinute, zone), zone).slice(
           0,
           7,
         );
@@ -496,6 +497,15 @@ describe('demo global (DX-335)', () => {
     const main = visitMonths(DEMO_LOCATIONS.principal.timeZone);
     expect(main.previous.length).toBeGreaterThan(0);
     expect(main.previous.every((m) => m === '2026-09')).toBe(true);
+    // El 1 de noviembre es domingo y Londres no tiene aún visitas del mes:
+    // el martes 3 (01:30 en Londres, todavía lunes en Caracas) sí las tiene.
+    const tuesday = visitMonths(
+      DEMO_LOCATIONS.londres.timeZone,
+      new Date('2026-11-03T01:30:00Z'),
+    );
+    expect(tuesday.current.length).toBeGreaterThan(0);
+    expect(tuesday.current.every((m) => m === '2026-11')).toBe(true);
+    expect(tuesday.previous.every((m) => m === '2026-10')).toBe(true);
   });
 
   it('comparison history never anchors on a day its location is closed', () => {
@@ -660,7 +670,7 @@ describe('demo global (DX-335)', () => {
     expect(planned).toBeGreaterThan(366 * 4);
   });
 
-  it('a done item is dated on a day its location is open, never a closed weekday or a holiday', () => {
+  it('a done item or a site payment is dated on a day its location is open, never a closed weekday or a holiday', () => {
     let saturdaysSkipped = 0;
     for (
       let day = '2028-01-01';
@@ -670,7 +680,8 @@ describe('demo global (DX-335)', () => {
       const now = new Date(`${day}T12:00:00Z`);
       for (const key of SITE_KEYS) {
         const zone = DEMO_LOCATIONS[key].timeZone;
-        for (const daysAgo of [0, 1, 6, 13]) {
+        // 5 y 12: los abonos de los planes de las sedes nuevas.
+        for (const daysAgo of [0, 1, 5, 6, 12, 13]) {
           const offset = workdayDaysAgo(now, key, daysAgo, rangesOf(key));
           const visitDay = addCivilDays(civilDateIn(now, zone), -offset);
           const weekday = civilWeekday(visitDay);
@@ -690,16 +701,35 @@ describe('demo global (DX-335)', () => {
     expect(saturdaysSkipped).toBeGreaterThan(0);
   });
 
-  it('every location has four example holidays and a closure 28 days from its today', () => {
-    for (const key of SITE_KEYS) {
-      expect(DEMO_HOLIDAYS[key]).toHaveLength(4);
-      const now = new Date('2028-03-10T12:00:00Z');
-      const closure = addCivilDays(
-        civilDateIn(now, DEMO_LOCATIONS[key].timeZone),
-        28,
-      );
-      expect(isDemoHoliday(now, key, closure)).toBe(true);
+  it('the holidays the seed creates never conflict with each other, any run date of a year (DX-316 R5)', () => {
+    let checked = 0;
+    for (
+      let day = '2028-01-01';
+      day <= '2028-12-31';
+      day = addCivilDays(day, 1)
+    ) {
+      for (const hour of ['01:30', '12:00', '23:30']) {
+        const now = new Date(`${day}T${hour}:00Z`);
+        for (const key of SITE_KEYS) {
+          const rows = demoHolidayRows(now, key);
+          // Tres recurrentes y un cierre puntual, que los planificadores ven.
+          expect(rows.filter((r) => r.recurring)).toHaveLength(3);
+          const [closure] = rows.filter((r) => !r.recurring);
+          expect(isDemoHoliday(now, key, closure.date)).toBe(true);
+          const today = civilDateIn(now, DEMO_LOCATIONS[key].timeZone);
+          expect(closure.date >= addCivilDays(today, 28)).toBe(true);
+          const conflicts = rows.flatMap((a, i) =>
+            rows.slice(i + 1).flatMap((b) => {
+              const conflict = conflictOf(a, b);
+              return conflict ? [{ key, a, b, conflict }] : [];
+            }),
+          );
+          expect({ now, conflicts }).toEqual({ now, conflicts: [] });
+          checked++;
+        }
+      }
     }
+    expect(checked).toBe(366 * 3 * SITE_KEYS.length);
   });
 
   it('demo coverages carry no literal date, only days from the patient location today', () => {

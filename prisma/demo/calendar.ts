@@ -43,26 +43,74 @@ function sedeDay(now: Date, offset: number, timeZone: string): LocalDay {
   return { offset, day, weekday: civilWeekday(day) };
 }
 
+/** Mes y día (MM-DD) de un festivo recurrente de la demo. */
+function recurringMonthDay(holiday: { month: number; day: number }): string {
+  return `${String(holiday.month).padStart(2, '0')}-${String(holiday.day).padStart(2, '0')}`;
+}
+
+/**
+ * Día civil del cierre puntual de la sede: `daysFromToday` días desde su
+ * «hoy», o el siguiente cuyo mes y día no sea un festivo recurrente suyo. Un
+ * puntual en el mismo MM-DD que un recurrente choca (DX-316 R5,
+ * `ONE_OFF_ON_RECURRING`) y el seed fallaría ese día del año.
+ */
+function closureDay(now: Date, key: DemoLocationKey, daysFromToday: number) {
+  const recurring = new Set(
+    DEMO_HOLIDAYS[key].flatMap((h) =>
+      'month' in h ? [recurringMonthDay(h)] : [],
+    ),
+  );
+  let day = addCivilDays(
+    civilDateIn(now, DEMO_LOCATIONS[key].timeZone),
+    daysFromToday,
+  );
+  while (recurring.has(day.slice(5))) day = addCivilDays(day, 1);
+  return day;
+}
+
+/**
+ * Los festivos de ejemplo de la sede tal como el seed los crea con
+ * `CreateHolidayUseCase` (R12): un recurrente lleva la fecha de su año en
+ * curso en la zona de la sede (el caso de uso exige una fecha completa); el
+ * cierre puntual, la de `closureDay`.
+ */
+export function demoHolidayRows(
+  now: Date,
+  key: DemoLocationKey,
+): { date: string; name: string; recurring: boolean }[] {
+  const year = civilDateIn(now, DEMO_LOCATIONS[key].timeZone).slice(0, 4);
+  return DEMO_HOLIDAYS[key].map((holiday) =>
+    'month' in holiday
+      ? {
+          date: `${year}-${recurringMonthDay(holiday)}`,
+          name: holiday.name,
+          recurring: true,
+        }
+      : {
+          date: closureDay(now, key, holiday.daysFromToday),
+          name: holiday.name,
+          recurring: false,
+        },
+  );
+}
+
 /**
  * ¿Es `day` (YYYY-MM-DD) un festivo de ejemplo de la sede? Lo usan TODOS los
  * planificadores: un festivo cuenta como día cerrado, así la demo no tiene
  * citas en un festivo de su sede (PF6). Los recurrentes se comparan por
- * mes y día con cualquier año; el cierre puntual, contra el «hoy» de la sede.
+ * mes y día con cualquier año; el cierre puntual, con el día que guarda el
+ * seed (`closureDay`).
  */
 export function isDemoHoliday(
   now: Date,
   key: DemoLocationKey,
   day: string,
 ): boolean {
-  return DEMO_HOLIDAYS[key].some((holiday) => {
-    if ('daysFromToday' in holiday) {
-      const today = civilDateIn(now, DEMO_LOCATIONS[key].timeZone);
-      return day === addCivilDays(today, holiday.daysFromToday);
-    }
-    const month = String(holiday.month).padStart(2, '0');
-    const dayOfMonth = String(holiday.day).padStart(2, '0');
-    return day.slice(5) === `${month}-${dayOfMonth}`;
-  });
+  return DEMO_HOLIDAYS[key].some((holiday) =>
+    'daysFromToday' in holiday
+      ? day === closureDay(now, key, holiday.daysFromToday)
+      : day.slice(5) === recurringMonthDay(holiday),
+  );
 }
 
 /**

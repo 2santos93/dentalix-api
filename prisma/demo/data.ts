@@ -257,7 +257,8 @@ export function regionOf(key: DemoLocationKey): DemoRegion {
 /**
  * Un festivo de ejemplo de una sede (R12): recurrente (mes y día, sirve para
  * cualquier año) o un cierre puntual a `daysFromToday` días del «hoy» de la
- * sede. Son datos de la demo, no una regla del producto.
+ * sede (o el siguiente día que no sea un recurrente suyo). Son datos de la
+ * demo, no una regla del producto.
  */
 export type DemoHoliday = { name: string } & (
   { month: number; day: number } | { daysFromToday: number }
@@ -268,7 +269,10 @@ const MAINTENANCE_CLOSURE: DemoHoliday = {
   daysFromToday: 28,
 };
 
-/** Festivos de ejemplo por sede: cuatro cada una (R12). */
+/**
+ * Festivos de ejemplo por sede (R12): tres recurrentes y el cierre puntual,
+ * que `demoHolidayRows` corre si cae en el MM-DD de un recurrente.
+ */
 export const DEMO_HOLIDAYS: Record<DemoLocationKey, readonly DemoHoliday[]> = {
   principal: [
     { name: 'Año Nuevo', month: 1, day: 1 },
@@ -2149,7 +2153,7 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
     ],
     payments: [
       { daysAgo: 7, amount: 230, method: CARD, location: 'principal' },
-      // DX-051: el paciente pagó 60000 de más sobre lo facturable (500000):
+      // DX-051: el paciente pagó 60 de más sobre lo facturable (500):
       // ese importe queda «sin imputar» en la demo.
       { daysAgo: 2, amount: 330, method: CASH, location: 'principal' },
     ],

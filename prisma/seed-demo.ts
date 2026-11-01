@@ -139,6 +139,7 @@ import {
   daysUntilNextWeekday,
   upcomingWeekdayOffsets,
   daysUntilRotationCover,
+  demoHolidayRows,
   isDemoHoliday,
   workdayDaysAgo,
   planAppointments,
@@ -217,7 +218,6 @@ import {
   DEMO_PATIENTS,
   DEMO_PAYERS,
   DEMO_COVERAGES,
-  DEMO_HOLIDAYS,
   DEMO_RETENTION,
   DEMO_RESPONSIBLES,
   DEMO_PLANS,
@@ -1086,26 +1086,12 @@ class DemoSeeder {
       ids[key] = created.id;
     }
     // R12: los festivos de ejemplo de cada sede, como los cargaría el ADMIN
-    // desde Ajustes. Un recurrente lleva la fecha de su año en curso en la
-    // zona de la sede (`CreateHolidayUseCase` exige una fecha completa).
+    // desde Ajustes (`demoHolidayRows`: fechas completas y un cierre puntual
+    // que nunca cae en el MM-DD de un recurrente).
     for (const key of Object.keys(ids) as DemoLocationKey[]) {
-      const year = civilDateIn(this.now, DEMO_LOCATIONS[key].timeZone).slice(
-        0,
-        4,
-      );
       await this.inTenant(tenantId, ids[key], async () => {
-        for (const holiday of DEMO_HOLIDAYS[key]) {
-          const recurring = 'month' in holiday;
-          await this.use(CreateHolidayUseCase).execute(ids[key], {
-            date: recurring
-              ? `${year}-${String(holiday.month).padStart(2, '0')}-${String(holiday.day).padStart(2, '0')}`
-              : addCivilDays(
-                  civilDateIn(this.now, DEMO_LOCATIONS[key].timeZone),
-                  holiday.daysFromToday,
-                ),
-            name: holiday.name,
-            recurring,
-          });
+        for (const holiday of demoHolidayRows(this.now, key)) {
+          await this.use(CreateHolidayUseCase).execute(ids[key], holiday);
         }
       });
     }
@@ -2209,10 +2195,11 @@ class DemoSeeder {
       for (const entry of open.items.filter((e) => !keep.includes(e))) {
         await dismiss.execute(entry.id, DEMO_WAITLIST.dismissReason, ctx);
       }
-      // El alta manual: el primer paciente de la lista candidata que no esté ya.
+      // El alta manual: el primer paciente de la lista candidata que no esté
+      // ya, entre los de las sedes de la rotación (la lista es de la principal).
       const manual = DEMO_WAITLIST.manual;
       const pending = new Set(keep.map((k) => k.patientId));
-      const manualPatientId = [manual.patientIndex, ...patientIds.keys()]
+      const manualPatientId = [manual.patientIndex, ...localPatientIndexes()]
         .map((i) => patientIds[i])
         .find((id) => !pending.has(id))!;
       await this.use(CreateWaitlistEntryUseCase).execute(
@@ -2497,7 +2484,7 @@ class DemoSeeder {
               planId: plan.id,
               toothNumber: '26',
               catalogItemId: catalogId(catalog, 'OP-RESINA-1'),
-              price: 150000,
+              price: DEMO_PRICES['OP-RESINA-1'],
               status: TreatmentPlanItemStatus.ACCEPTED,
               createdById: booked.providerId,
             },
@@ -2703,7 +2690,18 @@ class DemoSeeder {
                   0,
                 ),
                 currency: plan.currency,
-                paidAt: daysAgoAt(this.now, payment.daysAgo, 11 * 60, zone),
+                // Como el realizado: en un día abierto y no festivo de la sede.
+                paidAt: daysAgoAt(
+                  this.now,
+                  workdayDaysAgo(
+                    this.now,
+                    key,
+                    payment.daysAgo,
+                    hours[key]?.ranges ?? [],
+                  ),
+                  11 * 60,
+                  zone,
+                ),
                 method: payment.method,
               },
               receptionId,

@@ -34,15 +34,21 @@ import {
   DEMO_PRESCRIPTION,
   DEMO_PAYERS,
   DEMO_PRESCRIPTION_SETTINGS,
+  DEMO_PRICE_LISTS,
+  DEMO_PRICES,
   DEMO_PROFESSIONAL_LICENSES,
   DEMO_PROFESSIONAL_SPECIALTIES,
   DEMO_SITE_PRICE_LISTS,
   type DemoLocationKey,
 } from '../prisma/demo/data';
 import { coverageStatus } from '../src/modules/patient-coverages/domain/coverage-rules';
-import { isDemoHoliday } from '../prisma/demo/calendar';
+import { demoHolidayRows, isDemoHoliday } from '../prisma/demo/calendar';
 import { purgeDemoTenants } from './support/demo-tenant-purge';
-import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
+import {
+  addCivilDays,
+  civilDateIn,
+  civilWeekday,
+} from '../src/shared/time/civil-day';
 import { tenantTablesInDeleteOrder } from './support/tenant-purge';
 import { hostFor } from './support/tenant-host';
 import { PAYER_TYPES } from '../src/modules/payers/domain/payer-type';
@@ -1581,6 +1587,76 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     }
   });
 
+  it('every demo plan item is priced from a list of its plan currency', async () => {
+    const tenantId = await liveDemoTenantId();
+    const items = await raw.treatmentPlanItem.findMany({
+      where: { tenantId, deletedAt: null },
+      select: {
+        id: true,
+        price: true,
+        catalogItemId: true,
+        plan: { select: { currency: true } },
+      },
+    });
+    const codes = new Map(
+      (
+        await raw.dentalCatalogItem.findMany({
+          where: { tenantId },
+          select: { id: true, code: true },
+        })
+      ).map((c) => [c.id, c.code]),
+    );
+    // Los precios válidos de cada código en cada moneda: el catálogo (USD) y
+    // las listas de la demo. Un ítem fuera de ellos es un resto de otra moneda.
+    const lists: { currency: string; prices: Record<string, number> }[] = [
+      { currency: DEMO_LOCATIONS.principal.currency, prices: DEMO_PRICES },
+      ...DEMO_PRICE_LISTS,
+      ...DEMO_SITE_PRICE_LISTS,
+    ];
+    expect(items.length).toBeGreaterThan(0);
+    const offenders = items.filter((item) => {
+      const code = codes.get(item.catalogItemId)!;
+      return !lists.some(
+        (l) =>
+          l.currency === item.plan.currency &&
+          (l.prices as Record<string, number | undefined>)[code] ===
+            Number(item.price),
+      );
+    });
+    expect(
+      offenders.map((o) => ({
+        code: codes.get(o.catalogItemId),
+        currency: o.plan.currency,
+        price: Number(o.price),
+      })),
+    ).toEqual([]);
+  });
+
+  it('every payment of a solo site is dated on a day its location is open, never a holiday', async () => {
+    const tenantId = await liveDemoTenantId();
+    const siteKeys = await demoSiteKeysById(tenantId);
+    const payments = await raw.payment.findMany({
+      where: { tenantId, deletedAt: null },
+      select: { locationId: true, paidAt: true },
+    });
+    const solo = payments.filter((p) =>
+      ['saoPaulo', 'londres'].includes(siteKeys.get(p.locationId)!),
+    );
+    expect(solo.length).toBeGreaterThan(0);
+    const offenders = solo.flatMap((p) => {
+      const key = siteKeys.get(p.locationId)!;
+      const day = civilDateIn(p.paidAt, DEMO_LOCATIONS[key].timeZone);
+      const open = DEMO_LOCATIONS[key].schedule!.some(
+        (r) => r.weekday === civilWeekday(day),
+      );
+      const holiday = [seededBetween.start, seededBetween.end].some((t) =>
+        isDemoHoliday(new Date(t), key, day),
+      );
+      return open && !holiday ? [] : [{ key, day, open, holiday }];
+    });
+    expect(offenders).toEqual([]);
+  });
+
   it('the doctor dashboard converts every currency without a missing rate', async () => {
     const tenantId = await liveDemoTenantId();
     const today = civilDateIn(new Date(), DEMO_LOCATIONS.principal.timeZone);
@@ -1796,6 +1872,14 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       expect(mine.filter((h) => !h.recurring).map((h) => h.name)).toEqual([
         'Cierre por mantenimiento',
       ]);
+      // El cierre guardado es el que ven los planificadores (`demoHolidayRows`).
+      const closure = mine.find((h) => !h.recurring)!;
+      expect(
+        [seededBetween.start, seededBetween.end].map(
+          (t) =>
+            demoHolidayRows(new Date(t), key).find((h) => !h.recurring)!.date,
+        ),
+      ).toContain(closure.date.toISOString().slice(0, 10));
     }
     // Ninguna cita, de ningún estado, cae en un festivo de su sede. Los
     // festivos se miran con el «hoy» de los dos extremos de la corrida.
