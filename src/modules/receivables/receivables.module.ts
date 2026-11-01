@@ -29,5 +29,7 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
     },
     { provide: RECEIVABLES_CLOCK, useValue: () => new Date() },
   ],
+  // DX-503: «Mi día» cuenta la cartera con el mismo caso de uso.
+  exports: [GetReceivablesAgingUseCase],
 })
 export class ReceivablesModule {}

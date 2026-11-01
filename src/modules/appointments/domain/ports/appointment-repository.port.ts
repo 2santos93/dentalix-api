@@ -117,6 +117,12 @@ export interface UpdateAppointmentRepoInput {
   clearCancellation?: true;
   /** DX-279: hora en que se marca NO_SHOW; null al salir de NO_SHOW. */
   noShowMarkedAt?: Date | null;
+  /**
+   * DX-509: la cita deja de ser sobrecupo (se movió, o se deshizo la llegada
+   * o se reactivó con su hueco libre) y pasa a contar en la EXCLUDE del
+   * profesional. Solo se apaga: un sobrecupo nace en «Atender sin cita».
+   */
+  overbooked?: false;
 }
 
 /** DX-279: lo que el caso de uso decide de una cancelación. */
@@ -265,8 +271,13 @@ export interface AppointmentRepository {
    * DX-200 «Deshacer llegada»: si la cita SIGUE en ARRIVED, vuelve al estado
    * previo y borra la hora de llegada, en una sola sentencia condicional.
    * `null` si ya no estaba en ARRIVED (otra persona la movió) o no existe.
+   * DX-509: con `clearOverbooked`, en la MISMA sentencia deja de ser
+   * sobrecupo (la EXCLUDE del profesional decide si su hueco sigue libre).
    */
-  undoArrival(id: string): Promise<Appointment | null>;
+  undoArrival(
+    id: string,
+    options?: { clearOverbooked?: boolean },
+  ): Promise<Appointment | null>;
 
   /**
    * DX-200: citas vivas de la sede en ARRIVED, IN_CHAIR o READY_FOR_CHECKOUT

@@ -428,7 +428,10 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
     });
   }
 
-  undoArrival(id: string): Promise<Appointment | null> {
+  undoArrival(
+    id: string,
+    options: { clearOverbooked?: boolean } = {},
+  ): Promise<Appointment | null> {
     const row = this.rows.find((r) => r.id === id && r.deletedAt === null);
     if (
       !row ||
@@ -441,6 +444,7 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
       status: row.preArrivalStatus,
       preArrivalStatus: null,
       arrivedAt: null,
+      ...(options.clearOverbooked ? { overbooked: false } : {}),
     });
     return Promise.resolve(this.toEntity(row));
   }

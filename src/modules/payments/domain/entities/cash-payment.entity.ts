@@ -29,6 +29,8 @@ export interface CashPayment {
   paymentMethod: { id: string; name: string } | null;
   /** DX-377: referencia del pago, tal como la dio el pagador. */
   reference: string | null;
+  /** DX-515: nº de la factura fiscal emitida fuera de Dentalix, o `null`. */
+  externalInvoiceNumber: string | null;
   notes: string | null;
   location: { id: string; name: string };
   patient: { id: string; fullName: string };

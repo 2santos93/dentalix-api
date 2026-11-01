@@ -269,6 +269,23 @@ export class ReceiptSnapshotDto {
 
   @ApiProperty({ example: 'Este documento no es factura' })
   legalNotice!: string;
+
+  @ApiPropertyOptional({
+    example: 'Recibo de pago',
+    description:
+      'DX-515: el título del recibo que configuró la clínica, congelado al ' +
+      'emitir. Ausente si no tenía (se imprime «Recibo de caja»).',
+  })
+  title?: string;
+
+  @ApiPropertyOptional({
+    example: 'Este recibo no es una factura',
+    description:
+      'DX-515: la leyenda de la clínica o de la sede, congelada al emitir. ' +
+      'Ausente si no había: no se imprime nada, también al reimprimir un ' +
+      'recibo anterior a que se configurara.',
+  })
+  legend?: string;
 }
 
 /**

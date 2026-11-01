@@ -131,5 +131,7 @@ import { PrismaWaitlistRepository } from './infrastructure/repositories/prisma-w
         loadLinkOfferConfig((key) => config.get<string>(key)),
     },
   ],
+  // DX-503: «Mi día» cuenta la lista de espera con el mismo caso de uso.
+  exports: [ListWaitlistUseCase],
 })
 export class WaitlistModule {}

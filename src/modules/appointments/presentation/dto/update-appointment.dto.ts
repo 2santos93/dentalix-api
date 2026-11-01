@@ -171,4 +171,23 @@ export class UpdateAppointmentDto {
       'El motivo para agendar en un hueco reservado debe tener entre 5 y 300 caracteres.',
   })
   overrideReason?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'DX-509: al reactivar (desde CANCELLED o NO_SHOW) una urgencia en sobrecupo cuya hora ya ocupa otra cita del profesional, `true` la mantiene en sobrecupo a sabiendas (`audit_event` `WALK_IN_OVERBOOK_KEPT`). Sin él ese caso es 409 `OVERBOOK_SLOT_TAKEN`. Con el hueco libre deja de ser sobrecupo sola (`WALK_IN_OVERBOOK_CLEARED`); moverla a otra hora u otro profesional también. En cualquier otro cambio se ignora.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  keepOverbooked?: boolean;
+}
+
+/** DX-509: cuerpo opcional de «Deshacer llegada». */
+export class UndoArrivalDto {
+  @ApiPropertyOptional({
+    description:
+      'DX-509: para una urgencia en sobrecupo cuya hora ya ocupa otra cita del profesional, `true` la deja agendada y en sobrecupo a sabiendas (`audit_event` `WALK_IN_OVERBOOK_KEPT`). Sin él ese caso es 409 `OVERBOOK_SLOT_TAKEN`. Con el hueco libre deja de ser sobrecupo sola (`WALK_IN_OVERBOOK_CLEARED`). Se ignora en una cita que no es sobrecupo.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  keepOverbooked?: boolean;
 }

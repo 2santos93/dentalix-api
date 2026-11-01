@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { ScheduleBlockKind, TriageFlag } from '@prisma/client';
 import {
   OVERRIDE_REASON_MAX,
@@ -36,6 +37,25 @@ export const WALK_IN_ROLES = FRONT_DESK_ROLES;
 export const NO_RESERVED_SLOT_CODE = 'NO_RESERVED_SLOT';
 /** Código del 409 de un documento que ya tiene otro paciente vivo. */
 export const PATIENT_DUPLICATE_CODE = 'PATIENT_DUPLICATE';
+/**
+ * DX-509: código del 409 al deshacer la llegada o reactivar un sobrecupo cuyo
+ * hueco ya ocupa otra cita del profesional. Con `canKeepOverbooked`: se puede
+ * reintentar con `keepOverbooked: true` (sigue en sobrecupo, auditado).
+ */
+export const OVERBOOK_SLOT_TAKEN_CODE = 'OVERBOOK_SLOT_TAKEN';
+/** DX-510: código del 422 de una Idempotency-Key repetida con otros datos. */
+export const IDEMPOTENCY_KEY_REUSED_CODE = 'IDEMPOTENCY_KEY_REUSED';
+
+/**
+ * DX-509: códigos de auditoría del fin de un sobrecupo. `CLEARED`: deja de
+ * serlo (se movió, o al deshacer la llegada o reactivarla su hueco estaba
+ * libre) y pasa a contar en el anti-solape del profesional. `KEPT`: quien
+ * deshace la llegada o reactiva la mantiene en sobrecupo a sabiendas.
+ */
+export const OVERBOOK_AUDIT_REASONS = {
+  cleared: 'WALK_IN_OVERBOOK_CLEARED',
+  kept: 'WALK_IN_OVERBOOK_KEPT',
+} as const;
 
 export const WALK_IN_MESSAGES = {
   forbidden:
@@ -52,6 +72,11 @@ export const WALK_IN_MESSAGES = {
     'No queda ningún hueco reservado libre hoy para este profesional. Puedes atenderlo en sobrecupo indicando el motivo.',
   slotTaken:
     'Otra persona acaba de ocupar ese hueco. Vuelve a intentarlo para buscar el siguiente.',
+  overbookSlotTaken:
+    'Esta urgencia se atendió en sobrecupo y su hora ya la ocupa otra cita del profesional. Muévela a otra hora o mantenla como sobrecupo.',
+  idempotencyKeyInvalid: 'La clave de idempotencia debe ser un UUID.',
+  idempotencyKeyReused:
+    'Esta atención sin cita ya se registró con otros datos. Revisa «En clínica» antes de volver a intentarlo.',
 } as const;
 
 /** Las señales sin repetir y en el orden canónico. */
@@ -168,4 +193,62 @@ export function findReservedSlot(
     }
   }
   return best;
+}
+
+/** DX-510: lo que identifica una petición de «Atender sin cita». */
+export interface WalkInRequestShape {
+  /** Sede ya resuelta (cabecera o sede de escritura de la sesión). */
+  locationId: string;
+  patientId?: string;
+  newPatient?: {
+    firstName: string;
+    lastName: string;
+    phone: string;
+    docType?: string;
+    docTypeLabel?: string | null;
+    docNumber?: string;
+  };
+  providerId: string;
+  appointmentTypeId?: string;
+  triageFlags?: readonly TriageFlag[];
+  triageNote?: string | null;
+  overbookReason?: string;
+}
+
+const lowerId = (id: string | undefined): string | null =>
+  id === undefined ? null : id.toLowerCase();
+const trimmedOrNull = (value: string | null | undefined): string | null => {
+  const trimmed = value?.trim() ?? '';
+  return trimmed === '' ? null : trimmed;
+};
+
+/**
+ * DX-510: huella (SHA-256 hex) de la petición, con la normalización que
+ * aplica el caso de uso (recortes, señales sin repetir y en su orden, ids en
+ * minúsculas) y la sede: el mismo cuerpo escrito de dos formas es la misma
+ * petición; otro paciente, profesional, tipo, triaje, motivo o sede, no.
+ */
+export function walkInRequestFingerprint(input: WalkInRequestShape): string {
+  const p = input.newPatient;
+  const parts = [
+    'WALK_IN',
+    input.locationId.toLowerCase(),
+    lowerId(input.patientId),
+    p
+      ? [
+          p.firstName.trim(),
+          p.lastName.trim(),
+          p.phone.trim(),
+          p.docType ?? null,
+          trimmedOrNull(p.docTypeLabel),
+          trimmedOrNull(p.docNumber),
+        ]
+      : null,
+    input.providerId.toLowerCase(),
+    lowerId(input.appointmentTypeId),
+    normalizeTriageFlags(input.triageFlags),
+    normalizeTriageNote(input.triageNote),
+    trimmedOrNull(input.overbookReason),
+  ];
+  return createHash('sha256').update(JSON.stringify(parts)).digest('hex');
 }

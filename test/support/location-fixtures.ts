@@ -186,6 +186,40 @@ export async function g1LocationInsert(
 }
 
 /**
+ * INSERT crudo de una sede con TODOS los datos regionales (país, moneda, zona,
+ * formato, reloj y, salvo `phoneRegion: false`, prefijo telefónico de
+ * DX-329). Para los int de migración sobre una BD desechable migrada solo
+ * hasta cierta fecha: `db.location.create` insertaría columnas de sede
+ * posteriores (p. ej. `receiptLegendOverride` de DX-515) aunque no se pidan.
+ * Devuelve el id.
+ */
+export async function regionalLocationInsert(
+  prisma: Pick<PrismaClient, '$queryRaw'>,
+  tenantId: string,
+  name: string,
+  regional: RegionalFixture,
+  { phoneRegion = true }: { phoneRegion?: boolean } = {},
+): Promise<string> {
+  const rows = phoneRegion
+    ? await prisma.$queryRaw<{ id: string }[]>`
+        INSERT INTO "locations" ("id", "tenantId", "name", "countryCode", "currency",
+                                 "timeZone", "locale", "hourCycle",
+                                 "defaultPhoneRegion", "updatedAt")
+        VALUES (gen_random_uuid(), ${tenantId}::uuid, ${name}, ${regional.country},
+                ${regional.currency}, ${regional.timeZone}, ${regional.locale},
+                ${regional.hourCycle}, ${regional.defaultPhoneRegion}, now())
+        RETURNING "id"`
+    : await prisma.$queryRaw<{ id: string }[]>`
+        INSERT INTO "locations" ("id", "tenantId", "name", "countryCode", "currency",
+                                 "timeZone", "locale", "hourCycle", "updatedAt")
+        VALUES (gen_random_uuid(), ${tenantId}::uuid, ${name}, ${regional.country},
+                ${regional.currency}, ${regional.timeZone}, ${regional.locale},
+                ${regional.hourCycle}, now())
+        RETURNING "id"`;
+  return rows[0].id;
+}
+
+/**
  * Como `g1LocationInsert`, para una etapa anterior a DX-312: el país va en la
  * columna enum de entonces (`LEGACY_ENUM_COUNTRY`).
  */

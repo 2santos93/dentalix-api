@@ -379,6 +379,7 @@ export function computeAccountStatement(
       method: p.method,
       paymentMethod: p.paymentMethod,
       reference: p.reference,
+      externalInvoiceNumber: p.externalInvoiceNumber ?? null,
       splitId: p.splitId ?? null,
       splitLines: p.splitId ? (splitLines.get(p.splitId) ?? null) : null,
       location: p.location,

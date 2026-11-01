@@ -566,6 +566,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /treatment-plans/:id/payments': BILLING,
   'GET /treatment-plans/:id/balance': BILLING,
   'DELETE /payments/:id': BILLING,
+  // DX-515: el nº de la factura fiscal externa lo ponen los roles de cobro.
+  'PUT /payments/:id/external-invoice-number': BILLING,
   // Recibo de caja (DX-136): loop/informes/DX-136.md.
   'GET /payments/:id/receipt': BILLING,
   'POST /payments/:id/receipt/print': BILLING,
@@ -619,6 +621,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /closing-queue': roles('ADMIN', 'DENTIST', 'RECEPTION'),
   'GET /closing-queue/count': roles('ADMIN', 'DENTIST', 'RECEPTION'),
   'POST /closing-queue/dismissals': roles('ADMIN', 'DENTIST', 'RECEPTION'),
+  // DX-503: «Mi día». Los cuatro roles; qué listas cuenta cada uno lo decide
+  // WORK_QUEUE_ROLES, que nunca amplía el @Roles de ninguna lista.
+  'GET /work-queues/summary': EVERY_ROLE,
   // DX-339: agenda de contingencia por sede (PDF de hoy y mañana con los
   // teléfonos de los pacientes): recepción y gestión; la sede la acota el
   // caso de uso (DX-089).
@@ -640,6 +645,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // ajustes de caja de la clínica, solo ADMIN.
   'GET /cash-sessions/settings': BILLING,
   'PUT /cash-sessions/settings': ADMIN_ONLY,
+  // DX-515: título y leyenda del recibo (clínica y sede), solo ADMIN.
+  'GET /payment-receipts/settings': ADMIN_ONLY,
+  'PUT /payment-receipts/settings': ADMIN_ONLY,
+  'PUT /payment-receipts/settings/locations/:locationId': ADMIN_ONLY,
   'GET /cash-sessions/current': BILLING,
   'POST /cash-sessions/open': BILLING,
   'GET /cash-sessions': BILLING,

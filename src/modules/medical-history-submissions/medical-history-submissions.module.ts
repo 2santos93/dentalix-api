@@ -66,5 +66,7 @@ import { PublicMedicalHistoryController } from './presentation/public-medical-hi
     TenantContextInterceptor,
     PublicTenantContextInterceptor,
   ],
+  // DX-503: «Mi día» cuenta la bandeja con el mismo caso de uso.
+  exports: [CountAnamnesisInboxUseCase],
 })
 export class MedicalHistorySubmissionsModule {}

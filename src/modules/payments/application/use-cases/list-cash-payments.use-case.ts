@@ -4,6 +4,7 @@ import { PAYMENT_REPOSITORY } from '../../domain/ports/payment-repository.port';
 import type {
   CashRegisterGroup,
   CashRegisterPage,
+  ExternalInvoiceFilter,
   ListCashRegisterParams,
   PaymentRepository,
 } from '../../domain/ports/payment-repository.port';
@@ -68,6 +69,8 @@ export interface ListCashPaymentsInput {
    * comprueba que sea de la clínica del contexto (RLS) antes de consultar.
    */
   paymentMethodId?: string;
+  /** DX-515: solo los abonos con (o sin) nº de factura externa. */
+  externalInvoice?: ExternalInvoiceFilter;
   page?: number;
   pageSize?: number;
 }
@@ -259,6 +262,7 @@ export class ListCashPaymentsUseCase {
       to,
       method: input.method,
       paymentMethod,
+      externalInvoice: input.externalInvoice,
       skip: (page - 1) * pageSize,
       take: pageSize,
     });
@@ -290,6 +294,7 @@ export class ListCashPaymentsUseCase {
       to,
       method: input.method,
       paymentMethod,
+      externalInvoice: input.externalInvoice,
       skip: 0,
       take: CASH_EXPORT_MAX_ROWS + 1,
     });

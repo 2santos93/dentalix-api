@@ -507,6 +507,9 @@ export class PrismaSlotOfferRepository implements SlotOfferRepository {
         end: offer.appointmentEnd,
         providerId: offer.providerId,
         wantsEarlier: false,
+        // DX-509: en su hueco nuevo deja de ser sobrecupo (si lo era) y
+        // cuenta en la EXCLUDE del profesional.
+        overbooked: false,
         confirmationSentAt: null,
         callbackRequestedAt: null,
       },

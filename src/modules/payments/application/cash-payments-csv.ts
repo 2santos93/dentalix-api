@@ -4,8 +4,9 @@ import type { CashPaymentView } from '../domain/entities/cash-payment.entity';
 
 /*
  * CSV de la caja (DX-395): una línea por abono con los mismos filtros que la
- * pantalla (período, sede, método y medio). Lleva el medio de pago de la
- * clínica y la referencia del pago, que solo descargan los roles de cobro.
+ * pantalla (período, sede, método, medio y, DX-515, con o sin factura
+ * externa). Lleva el medio de pago de la clínica, la referencia del pago y el
+ * nº de la factura fiscal externa, que solo descargan los roles de cobro.
  * Texto libre entre comillas, sin saltos de línea y protegido contra
  * fórmulas; importes con los decimales de su moneda. Las notas del abono no
  * viajan: son internas y la caja no las muestra.
@@ -17,6 +18,8 @@ export const CASH_PAYMENTS_CSV_HEADER = [
   'Destino',
   'Medio',
   'Referencia',
+  // DX-515: nº de la factura fiscal emitida fuera (vacío si no se anotó).
+  'Factura externa',
   'Moneda',
   'Importe',
 ] as const;
@@ -47,6 +50,7 @@ export function toCashPaymentsCsv(
         csvText(destinationOf(row)),
         csvText(row.paymentMethod?.name ?? NO_METHOD),
         csvText(row.reference),
+        csvText(row.externalInvoiceNumber),
         row.currency,
         csvAmount(row.amount, digits.roundingDigits(row.currency)),
       ].join(','),

@@ -4,6 +4,7 @@ import {
   Controller,
   ForbiddenException,
   Get,
+  Headers,
   HttpCode,
   HttpStatus,
   Inject,
@@ -22,13 +23,17 @@ import {
   ApiConflictResponse,
   ApiCreatedResponse,
   ApiForbiddenResponse,
+  ApiHeader,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiTags,
   ApiUnprocessableEntityResponse,
 } from '@nestjs/swagger';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
-import { UpdateAppointmentDto } from './dto/update-appointment.dto';
+import {
+  UndoArrivalDto,
+  UpdateAppointmentDto,
+} from './dto/update-appointment.dto';
 import { ListAppointmentsQueryDto } from './dto/list-appointments-query.dto';
 import {
   AppointmentDto,
@@ -372,9 +377,20 @@ export class AppointmentsController {
     description:
       '`NO_RESERVED_SLOT` (`canOverbook`): no queda hueco reservado libre hoy, se puede reintentar con `overbookReason`; `PATIENT_DUPLICATE` (`existingPatientId` y `existingPatient` con `id`, `firstName`, `lastName`): el documento del alta mínima ya es de otro paciente (se comprueba antes que el hueco); sin tipo urgente activo; un bloqueo que no deja agendar; el paciente ya está en otra cita a esa hora; u otra persona ocupó el hueco a la vez',
   })
+  @ApiHeader({
+    name: 'Idempotency-Key',
+    required: false,
+    description:
+      'DX-510: UUID estable por intento de «Atender sin cita» (doble clic, reintento de red). Repetir la MISMA petición con la misma clave devuelve la cita original (sin un segundo paciente ni una segunda cita, `patientCreated: false`); otros datos con la misma clave son 422 `IDEMPOTENCY_KEY_REUSED`. Por clínica; vive con la cita (sin caducidad, como en abonos y gastos).',
+  })
+  @ApiUnprocessableEntityResponse({
+    description:
+      '`IDEMPOTENCY_KEY_REUSED`: la Idempotency-Key ya creó una atención sin cita con otros datos (otro paciente, profesional, triaje, motivo o sede)',
+  })
   async walkIn(
     @Body() dto: CreateWalkInDto,
     @Req() req: AuthenticatedRequest,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
   ): Promise<WalkInResult> {
     const ctx = this.auditContext(req);
     if (!ctx) throw new Error('Sin sesión de clínica detrás del RolesGuard');
@@ -389,6 +405,7 @@ export class AppointmentsController {
         overbookReason: dto.overbookReason,
       },
       ctx,
+      idempotencyKey,
     );
   }
 
@@ -509,7 +526,7 @@ export class AppointmentsController {
   })
   @ApiConflictResponse({
     description:
-      'Solape con otra cita del profesional, del paciente o del sillón (DX-211, con su nombre y horas; también si otro movimiento ganó la carrera), el nuevo horario está bloqueado (DX-122) o reservado sin liberar (DX-446, `RESERVED_SLOT`), o un salto imposible del flujo en la clínica o la cita cambió mientras tanto (DX-200)',
+      'Solape con otra cita del profesional, del paciente o del sillón (DX-211, con su nombre y horas; también si otro movimiento ganó la carrera), el nuevo horario está bloqueado (DX-122) o reservado sin liberar (DX-446, `RESERVED_SLOT`), o un salto imposible del flujo en la clínica o la cita cambió mientras tanto (DX-200). DX-509: `OVERBOOK_SLOT_TAKEN` (`canKeepOverbooked`) al reactivar una urgencia en sobrecupo cuya hora ya ocupa otra cita del profesional; se puede reintentar con `keepOverbooked: true`',
   })
   @ApiUnprocessableEntityResponse({
     description: 'Fuera del horario de atención de la sede de la cita',
@@ -539,6 +556,7 @@ export class AppointmentsController {
           reasonText: dto.cancelReasonText,
         },
         overrideReason: dto.overrideReason,
+        keepOverbooked: dto.keepOverbooked,
       },
       ctx,
     );
@@ -592,15 +610,18 @@ export class AppointmentsController {
   @ApiNotFoundResponse({ description: 'Cita no encontrada en esta clínica' })
   @ApiConflictResponse({
     description:
-      'La cita no está en espera (ya pasó al sillón, o nunca llegó), o cambió mientras tanto',
+      'La cita no está en espera (ya pasó al sillón, o nunca llegó), o cambió mientras tanto. DX-509: `OVERBOOK_SLOT_TAKEN` (`canKeepOverbooked`): la urgencia es un sobrecupo y su hora ya la ocupa otra cita del profesional; se puede reintentar con `keepOverbooked: true`',
   })
   undoArrival(
     @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UndoArrivalDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<AppointmentWriteResult> {
     const ctx = this.auditContext(req);
     if (!ctx) throw new Error('Sin sesión de clínica detrás del RolesGuard');
-    return this.updateAppointment.undoArrival(id, ctx);
+    return this.updateAppointment.undoArrival(id, ctx, {
+      keepOverbooked: dto.keepOverbooked,
+    });
   }
 
   @Patch(':id/opening')

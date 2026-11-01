@@ -6,6 +6,7 @@ import {
   type ClinicDocumentTypeNames,
 } from '../../patients/domain/document-type';
 import { docTypeFromStored } from '../../patients/domain/legacy-document-codes';
+import type { ReceiptTexts } from './receipt-settings';
 
 /** Pie legal por defecto del recibo de caja (DX-136). */
 export const RECEIPT_LEGAL_NOTICE = 'Este documento no es factura';
@@ -99,6 +100,11 @@ export interface ReceiptSnapshotInput {
   cashier: { id: string; fullName: string } | null;
   /** DX-390: las líneas de un cobro dividido (ausente en un abono suelto). */
   split?: { lines: ReceiptSplitLine[]; planCurrency: string } | null;
+  /**
+   * DX-515: título y leyenda configurados al emitir (la leyenda, ya resuelta
+   * entre la de la clínica y la de la sede). Ausente o `null` = sin ellos.
+   */
+  texts?: ReceiptTexts | null;
 }
 
 /**
@@ -153,6 +159,18 @@ export interface ReceiptSnapshot {
    */
   split?: ReceiptSplit | null;
   legalNotice: string;
+  /**
+   * DX-515: el título del recibo que configuró la clínica, congelado al
+   * emitir. AUSENTE si no tenía (la web pone «Recibo de caja»): la foto de
+   * una clínica sin título es la misma de antes de DX-515.
+   */
+  title?: string;
+  /**
+   * DX-515: la leyenda de la clínica o de la sede, congelada al emitir.
+   * AUSENTE si no había: el recibo no imprime nada y reimprimir un recibo
+   * anterior no la añade aunque la clínica la configure después.
+   */
+  legend?: string;
 }
 
 const blankToNull = (value: string | null): string | null =>
@@ -212,6 +230,9 @@ export function buildReceiptSnapshot(
     cashier: input.cashier,
     ...(input.split ? { split: receiptSplit(input.split) } : {}),
     legalNotice: RECEIPT_LEGAL_NOTICE,
+    // DX-515: solo si están configurados, para no cambiar la foto de antes.
+    ...(input.texts?.title ? { title: input.texts.title } : {}),
+    ...(input.texts?.legend ? { legend: input.texts.legend } : {}),
   };
 }
 
