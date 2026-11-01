@@ -1,6 +1,7 @@
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
-import { INVENTORY_REPOSITORY } from '../../domain/ports/inventory-repository.port';
-import type { InventoryRepository } from '../../domain/ports/inventory-repository.port';
+import { INVENTORY_AUDITED_WRITES } from '../../domain/ports/inventory-audited-writes.port';
+import type { InventoryAuditedWrites } from '../../domain/ports/inventory-audited-writes.port';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { InventoryItem } from '../../domain/entities/inventory-item.entity';
 import { toInventoryNameConflict } from '../inventory-name-conflict';
 
@@ -18,13 +19,13 @@ export interface CreateInventoryItemInput {
 @Injectable()
 export class CreateInventoryItemUseCase {
   constructor(
-    @Inject(INVENTORY_REPOSITORY)
-    private readonly repo: InventoryRepository,
+    @Inject(INVENTORY_AUDITED_WRITES)
+    private readonly writes: InventoryAuditedWrites,
   ) {}
 
   async execute(
     input: CreateInventoryItemInput,
-    createdById?: string,
+    audit: AuditRequestContext,
   ): Promise<InventoryItem> {
     const name = input.name.trim();
     if (!name) {
@@ -46,14 +47,16 @@ export class CreateInventoryItemUseCase {
     const sku = input.sku?.trim();
 
     try {
-      return await this.repo.createItem({
-        name,
-        sku: sku ? sku : undefined,
-        unit,
-        minStock,
-        notes: input.notes,
-        createdById,
-      });
+      return await this.writes.createItem(
+        {
+          name,
+          sku: sku ? sku : undefined,
+          unit,
+          minStock,
+          notes: input.notes,
+        },
+        audit,
+      );
     } catch (error) {
       throw toInventoryNameConflict(error);
     }

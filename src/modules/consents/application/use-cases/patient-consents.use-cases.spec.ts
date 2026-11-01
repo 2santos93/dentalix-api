@@ -1,3 +1,4 @@
+import { TEST_AUDIT } from '../../../audit/application/__fixtures__/test-audit-context';
 import {
   BadRequestException,
   ConflictException,
@@ -353,9 +354,13 @@ describe('SignPatientConsentUseCase', () => {
 
   it('409 si la plantilla cambió desde la vista previa', async () => {
     const { sign, templates, template } = setup();
-    await new UpdateConsentTemplateUseCase(templates).execute(template.id, {
-      body: 'Texto nuevo {{paciente}}',
-    });
+    await new UpdateConsentTemplateUseCase(templates).execute(
+      template.id,
+      {
+        body: 'Texto nuevo {{paciente}}',
+      },
+      TEST_AUDIT,
+    );
     await expect(
       sign.execute('p1', signInput(template.id), META),
     ).rejects.toThrow(ConflictException);
@@ -365,10 +370,14 @@ describe('SignPatientConsentUseCase', () => {
     const { sign, get, templates, template } = setup();
     const signed = await sign.execute('p1', signInput(template.id), META);
 
-    await new UpdateConsentTemplateUseCase(templates).execute(template.id, {
-      title: 'Otro título',
-      body: 'Texto totalmente distinto',
-    });
+    await new UpdateConsentTemplateUseCase(templates).execute(
+      template.id,
+      {
+        title: 'Otro título',
+        body: 'Texto totalmente distinto',
+      },
+      TEST_AUDIT,
+    );
 
     const reread = await get.execute('p1', signed.id);
     expect(reread.title).toBe('Consentimiento de exodoncia');

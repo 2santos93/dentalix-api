@@ -11,6 +11,8 @@ import {
 } from '../../domain/ports/consent-template-repository.port';
 import { findUnknownVariables } from '../../domain/render-consent';
 
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+
 export const CONSENT_TEMPLATE_NOT_FOUND_MESSAGE = 'Plantilla no encontrada';
 
 export interface ConsentTemplateInput {
@@ -57,17 +59,20 @@ export class CreateConsentTemplateUseCase {
 
   async execute(
     input: ConsentTemplateInput,
-    createdById?: string,
+    audit: AuditRequestContext,
   ): Promise<ConsentTemplate> {
     const title = requireText(input.title, 'El título');
     const body = requireText(input.body, 'El texto');
     assertKnownVariables(body);
-    return this.repo.create({
-      title,
-      body,
-      active: input.active ?? true,
-      createdById,
-    });
+    return this.repo.create(
+      {
+        title,
+        body,
+        active: input.active ?? true,
+        createdById: audit.actor.userId,
+      },
+      audit,
+    );
   }
 }
 
@@ -87,7 +92,7 @@ export class UpdateConsentTemplateUseCase {
   async execute(
     id: string,
     input: Partial<ConsentTemplateInput>,
-    updatedById?: string,
+    audit: AuditRequestContext,
   ): Promise<ConsentTemplate> {
     const current = await this.repo.findById(id);
     if (!current) {
@@ -107,12 +112,16 @@ export class UpdateConsentTemplateUseCase {
       (title !== undefined && title !== current.title) ||
       (body !== undefined && body !== current.body);
 
-    return this.repo.update(id, {
-      title,
-      body,
-      active: input.active,
-      bumpVersion: textChanged,
-      updatedById,
-    });
+    return this.repo.update(
+      id,
+      {
+        title,
+        body,
+        active: input.active,
+        bumpVersion: textChanged,
+        updatedById: audit.actor.userId,
+      },
+      audit,
+    );
   }
 }

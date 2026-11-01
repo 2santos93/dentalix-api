@@ -4,6 +4,7 @@ import {
   AUDIT_CANCELLATION_KINDS,
   AUDIT_CANCELLATION_REASONS,
   AUDIT_ORIGINS,
+  MAX_AUDIT_CONFIG_TEXT,
   type AuditCancellation,
   type AuditOrigin,
 } from '../../domain/audit-metadata';
@@ -278,6 +279,40 @@ export class AuditExchangeRateBackupDto {
   currencies!: string[];
 }
 
+/** Valor de un campo de configuración (DX-360): texto de una línea, número, booleano, null o lista. */
+const AUDIT_CONFIG_VALUE = {
+  nullable: true,
+  oneOf: [
+    { type: 'string', maxLength: MAX_AUDIT_CONFIG_TEXT },
+    { type: 'number' },
+    { type: 'boolean' },
+    {
+      type: 'array',
+      maxItems: 50,
+      items: { oneOf: [{ type: 'string' }, { type: 'number' }] },
+    },
+  ],
+};
+
+/** Cambio de configuración de la clínica (DX-360). */
+export class AuditConfigChangeDto {
+  @ApiPropertyOptional({
+    type: 'object',
+    additionalProperties: AUDIT_CONFIG_VALUE,
+    description: 'Valores antes del cambio (o del retiro).',
+    example: { durationMinutes: 30 },
+  })
+  before?: Record<string, unknown>;
+
+  @ApiPropertyOptional({
+    type: 'object',
+    additionalProperties: AUDIT_CONFIG_VALUE,
+    description: 'Valores después del cambio (o del alta).',
+    example: { durationMinutes: 45 },
+  })
+  after?: Record<string, unknown>;
+}
+
 export class AuditMetadataDto {
   @ApiPropertyOptional({
     type: [String],
@@ -379,6 +414,13 @@ export class AuditMetadataDto {
       'DX-402: el barrido congeló en un abono (`reason` EXCHANGE_RATE_BACKUP, `origin` JOB, sin usuario) la tasa manual de un día anterior a «manual desde», como tasa de respaldo de un día sin tasa del proveedor. Solo días y monedas; ni importes ni la tasa.',
   })
   exchangeRateBackup?: AuditExchangeRateBackupDto;
+
+  @ApiPropertyOptional({
+    type: AuditConfigChangeDto,
+    description:
+      'DX-360: configuración de la clínica (sedes, horario, recordatorios, dominios, política de datos, tipos de cita, pagadores, plantillas, inventario): los campos que cambiaron con su antes y después, o un lado en un alta o un retiro. El texto libre o largo (cuerpo de una plantilla, notas, motivo) solo figura en `changedFields`; nunca secretos (token de un dominio) ni datos de pacientes.',
+  })
+  configChange?: AuditConfigChangeDto;
 }
 
 export class AuditEventDto {

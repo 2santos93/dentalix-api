@@ -1,3 +1,4 @@
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { BusinessHours, ScheduleRange } from '../../application/business-hours';
 
 export const LOCATION_SCHEDULE_REPOSITORY = Symbol(
@@ -46,8 +47,11 @@ export interface LocationScheduleRepository {
    * Crea la fila de configuración si no existía, con la columna legada
    * `timezone` igual a la zona de la sede (R20). Con `legacyTimeZone` distinto
    * de esa zona (o sede sin zona), 400 `SCHEDULE_TIME_ZONE_MOVED` (R15).
+   * DX-360: si la semana cambia, deja su evento (LOCATION_SCHEDULE) en la
+   * misma transacción.
    */
   replaceForCurrentLocation(
     input: ReplaceScheduleInput,
+    audit: AuditRequestContext,
   ): Promise<BusinessHours>;
 }

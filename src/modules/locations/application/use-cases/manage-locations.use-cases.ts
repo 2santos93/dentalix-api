@@ -8,6 +8,7 @@ import { TenantContextService } from '../../../../shared/tenancy/tenant-context.
 import { suggestedPhoneRegion } from '../../../../shared/phone/phone-number';
 import { canonicalTimeZoneName } from '../../../../shared/time/canonical-time-zone';
 import { LOCATION_REPOSITORY } from '../../domain/ports/location-repository.port';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import type {
   Location,
   LocationRepository,
@@ -90,18 +91,21 @@ export class CreateLocationUseCase {
     @Inject(CURRENCY_WHITELIST) private readonly currencies: CurrencyWhitelist,
     @Inject(COUNTRY_WHITELIST) private readonly countries: CountryWhitelist,
   ) {}
-  async execute(input: {
-    name: string;
-    address?: string;
-    country?: string;
-    currency?: string;
-    timeZone?: string;
-    locale?: string;
-    hourCycle?: string;
-    phone?: string;
-    // Sin tipar: lo valida `validateDefaultPhoneRegion` (400 con `field`).
-    defaultPhoneRegion?: unknown;
-  }): Promise<Location> {
+  async execute(
+    input: {
+      name: string;
+      address?: string;
+      country?: string;
+      currency?: string;
+      timeZone?: string;
+      locale?: string;
+      hourCycle?: string;
+      phone?: string;
+      // Sin tipar: lo valida `validateDefaultPhoneRegion` (400 con `field`).
+      defaultPhoneRegion?: unknown;
+    },
+    audit: AuditRequestContext,
+  ): Promise<Location> {
     const country = await validateCountry(input.country, this.countries);
     if (typeof country !== 'string') {
       throw regionalBadRequest(country.field, country.message);
@@ -122,14 +126,17 @@ export class CreateLocationUseCase {
       }
       defaultPhoneRegion = checked;
     }
-    return this.repo.create({
-      name: input.name.trim(),
-      address: input.address?.trim() || undefined,
-      country,
-      ...regional,
-      phone: input.phone?.trim() || undefined,
-      defaultPhoneRegion,
-    });
+    return this.repo.create(
+      {
+        name: input.name.trim(),
+        address: input.address?.trim() || undefined,
+        country,
+        ...regional,
+        phone: input.phone?.trim() || undefined,
+        defaultPhoneRegion,
+      },
+      audit,
+    );
   }
 }
 

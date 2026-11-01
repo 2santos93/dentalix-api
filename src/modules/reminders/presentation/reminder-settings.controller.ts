@@ -16,6 +16,7 @@ import {
   ApiForbiddenResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
+  ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
 import { ClinicRole } from '@prisma/client';
@@ -34,7 +35,11 @@ import {
   RolesDeniedMessage,
 } from '../../auth/presentation/guards/roles.decorator';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
-import type { JwtPayload } from '../../../shared/crypto/token.service';
+import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
+import {
+  requireAuditRequestContext,
+  type AuditableRequest,
+} from '../../audit/presentation/audit-request-context';
 
 export const REMINDER_SETTINGS_FORBIDDEN_MESSAGE =
   'Solo un administrador puede ver y cambiar los recordatorios.';
@@ -54,6 +59,7 @@ export class ReminderSettingsController {
   constructor(
     private readonly list: ListReminderSettingsUseCase,
     private readonly update: UpdateReminderSettingsUseCase,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   @Get()
@@ -63,7 +69,14 @@ export class ReminderSettingsController {
     return this.list.execute();
   }
 
+  // DX-360: auditado en la transacción (UPDATE REMINDER_SETTINGS) con el
+  // antes y el después; sin evento si nada cambia.
   @Put(':locationId')
+  @ApiOperation({
+    summary: 'Reemplaza los ajustes de recordatorio de una sede',
+    description:
+      'Queda en la auditoría (REMINDER_SETTINGS_UPDATED) con activado y antelaciones antes y después, en esa sede. Guardar lo mismo no deja evento.',
+  })
   @ApiOkResponse({ type: LocationReminderSettingsDto })
   @ApiBadRequestResponse({
     description: 'Antelaciones inválidas (mensaje en español)',
@@ -80,12 +93,12 @@ export class ReminderSettingsController {
     )
     locationId: string,
     @Body() dto: UpdateReminderSettingsDto,
-    @Req() req: { user: JwtPayload },
+    @Req() req: AuditableRequest,
   ): Promise<LocationReminderSettingsDto> {
     return this.update.execute(
       locationId,
       { enabled: dto.enabled, leadHours: dto.leadHours },
-      req.user.sub,
+      requireAuditRequestContext(req, this.tenantContext),
     );
   }
 }

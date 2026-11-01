@@ -1566,6 +1566,40 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // (y el ítem) en `params`; nunca el texto de «Otro».
   'POST /closing-queue/dismissals':
     'closing-queue.use-cases.spec.ts y closing-queue.e2e-spec.ts',
+  // DX-360: configuración de la clínica, en la transacción del cambio
+  // (`configChange` con el antes/después de los campos cambiados; sin evento
+  // si una edición no cambia nada). Texto libre y secretos nunca.
+  // Sedes: CREATE LOCATION; horario: UPDATE LOCATION_SCHEDULE con
+  // `scheduleChange`; recordatorios: UPDATE REMINDER_SETTINGS, en su sede.
+  'POST /locations': 'config-audit.e2e-spec.ts',
+  'PUT /locations/schedule':
+    'location-schedule-audit.spec.ts y config-audit.e2e-spec.ts',
+  'PUT /reminder-settings/:locationId': 'config-audit.e2e-spec.ts',
+  // Dominio: CREATE TENANT_DOMAIN sin el token; política: CREATE
+  // PRIVACY_POLICY con versión y hash, sin los textos.
+  'POST /domains': 'config-audit.e2e-spec.ts',
+  'POST /privacy-policies':
+    'privacy-policy-audit.spec.ts y config-audit.e2e-spec.ts',
+  // Catálogos: APPOINTMENT_TYPE y PAYER (CREATE/UPDATE/DELETE).
+  'POST /appointment-types': 'config-audit.e2e-spec.ts',
+  'PATCH /appointment-types/:id': 'config-audit.e2e-spec.ts',
+  'DELETE /appointment-types/:id': 'config-audit.e2e-spec.ts',
+  'POST /payers': 'config-audit.e2e-spec.ts',
+  'PATCH /payers/:id': 'config-audit.e2e-spec.ts',
+  'DELETE /payers/:id': 'config-audit.e2e-spec.ts',
+  // Plantillas: CONSENT_TEMPLATE (el texto solo por nombre, con la versión)
+  // y PRESCRIPTION_TEMPLATE (nombre y nº de medicamentos).
+  'POST /consent-templates': 'config-audit.e2e-spec.ts',
+  'PATCH /consent-templates/:id': 'config-audit.e2e-spec.ts',
+  'POST /prescription-templates': 'config-audit.e2e-spec.ts',
+  'PATCH /prescription-templates/:id': 'config-audit.e2e-spec.ts',
+  'DELETE /prescription-templates/:id': 'config-audit.e2e-spec.ts',
+  // Inventario: INVENTORY_ITEM en la sede del artículo e INVENTORY_MOVEMENT
+  // en la sede del movimiento, sin notas ni motivo.
+  'POST /inventory/items': 'config-audit.e2e-spec.ts',
+  'PATCH /inventory/items/:id': 'config-audit.e2e-spec.ts',
+  'DELETE /inventory/items/:id': 'config-audit.e2e-spec.ts',
+  'POST /inventory/items/:id/movements': 'config-audit.e2e-spec.ts',
 };
 
 /**
@@ -1613,34 +1647,6 @@ const KNOWN_UNAUDITED: Record<string, string> = {
   'POST /auth/forgot-password': 'envía el email; no enumera cuentas',
   'POST /me/avatar': 'foto de perfil propia',
   'DELETE /me/avatar': 'foto de perfil propia',
-
-  // --- Configuración de la clínica ----------------------------------------
-  'POST /locations': 'hueco: alta de sede sin evento',
-  'PUT /locations/schedule': 'hueco: horario de la sede sin evento',
-  'PUT /reminder-settings/:locationId':
-    'hueco: ajustes de recordatorios de la sede sin evento',
-  'POST /domains': 'hueco: alta de dominio propio sin evento',
-  'POST /privacy-policies':
-    'hueco: publicar una versión de la política sin evento',
-  'POST /appointment-types': 'hueco: catálogo de tipos de cita sin evento',
-  'PATCH /appointment-types/:id': 'hueco: catálogo de tipos de cita sin evento',
-  'DELETE /appointment-types/:id':
-    'hueco: catálogo de tipos de cita sin evento',
-  'POST /payers': 'hueco: pagadores sin evento',
-  'PATCH /payers/:id': 'hueco: pagadores sin evento',
-  'DELETE /payers/:id': 'hueco: pagadores sin evento',
-  'POST /consent-templates': 'hueco: plantillas de consentimiento sin evento',
-  'PATCH /consent-templates/:id':
-    'hueco: plantillas de consentimiento sin evento',
-  'POST /prescription-templates': 'hueco: plantillas de receta sin evento',
-  'PATCH /prescription-templates/:id': 'hueco: plantillas de receta sin evento',
-  'DELETE /prescription-templates/:id':
-    'hueco: plantillas de receta sin evento',
-  'POST /inventory/items': 'hueco: inventario sin evento',
-  'PATCH /inventory/items/:id': 'hueco: inventario sin evento',
-  'DELETE /inventory/items/:id': 'hueco: inventario sin evento',
-  'POST /inventory/items/:id/movements':
-    'hueco: movimientos de inventario sin evento',
 
   // --- Citas y enlaces al paciente -----------------------------------------
   'POST /public/post-op-instructions/:token/opened':

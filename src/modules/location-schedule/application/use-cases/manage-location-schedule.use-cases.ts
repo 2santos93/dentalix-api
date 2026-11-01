@@ -4,6 +4,7 @@ import type {
   LocationScheduleRepository,
   ReplaceScheduleInput,
 } from '../../domain/ports/location-schedule-repository.port';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { BusinessHours, ScheduleRange } from '../business-hours';
 
 /** Devuelve el horario de la sede en contexto (null = sin configurar). */
@@ -30,7 +31,10 @@ export class ReplaceLocationScheduleUseCase {
    * La zona ya no se edita aquí: es un dato de la sede (G1, R4). Una web
    * antigua que aún la envía la pasa como `legacyTimeZone` (R15).
    */
-  async execute(input: ReplaceScheduleInput): Promise<BusinessHours> {
+  async execute(
+    input: ReplaceScheduleInput,
+    audit: AuditRequestContext,
+  ): Promise<BusinessHours> {
     for (const range of input.ranges) {
       if (
         !Number.isInteger(range.weekday) ||
@@ -67,10 +71,10 @@ export class ReplaceLocationScheduleUseCase {
       );
     }
 
-    return this.repo.replaceForCurrentLocation({
-      ranges: input.ranges,
-      legacyTimeZone: input.legacyTimeZone,
-    });
+    return this.repo.replaceForCurrentLocation(
+      { ranges: input.ranges, legacyTimeZone: input.legacyTimeZone },
+      audit,
+    );
   }
 }
 

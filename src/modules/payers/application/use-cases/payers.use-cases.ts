@@ -17,6 +17,8 @@ import {
 } from '../../domain/payer-rules';
 import type { PayerType } from '../../domain/payer-type';
 
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+
 export const PAYER_NOT_FOUND_MESSAGE = 'Pagador no encontrado.';
 export const PAYER_DUPLICATE_MESSAGE = 'Ya existe un pagador con ese nombre.';
 export const PAYER_DUPLICATE_INACTIVE_MESSAGE =
@@ -66,17 +68,23 @@ export class CreatePayerUseCase {
     @Inject(PAYER_REPOSITORY) private readonly repo: PayerRepository,
   ) {}
 
-  async execute(input: CreatePayerInput, createdById?: string): Promise<Payer> {
+  async execute(
+    input: CreatePayerInput,
+    audit: AuditRequestContext,
+  ): Promise<Payer> {
     assertValid(validatePayerName(input.name));
     const name = normalizePayerName(input.name);
     const existing = await this.repo.findByNormalizedName(payerNameKey(name));
     if (existing) throw duplicateConflict(existing);
-    return this.repo.create({
-      name,
-      type: input.type,
-      active: input.active ?? true,
-      createdById,
-    });
+    return this.repo.create(
+      {
+        name,
+        type: input.type,
+        active: input.active ?? true,
+        createdById: audit.actor.userId,
+      },
+      audit,
+    );
   }
 }
 
@@ -89,7 +97,7 @@ export class UpdatePayerUseCase {
   async execute(
     id: string,
     input: UpdatePayerInput,
-    updatedById?: string,
+    audit: AuditRequestContext,
   ): Promise<Payer> {
     const current = await this.repo.findById(id);
     if (!current) throw new NotFoundException(PAYER_NOT_FOUND_MESSAGE);
@@ -106,7 +114,11 @@ export class UpdatePayerUseCase {
     }
     // Cualquier tipo vale con cualquier sede (DX-326): el DTO ya lo validó.
     if (input.type !== undefined) patch.type = input.type;
-    const updated = await this.repo.update(id, { ...patch, updatedById });
+    const updated = await this.repo.update(
+      id,
+      { ...patch, updatedById: audit.actor.userId },
+      audit,
+    );
     if (!updated) throw new NotFoundException(PAYER_NOT_FOUND_MESSAGE);
     return updated;
   }
@@ -119,8 +131,8 @@ export class DeletePayerUseCase {
   ) {}
 
   /** Con coberturas vivas no se retira: se desactiva (las coberturas siguen). */
-  async execute(id: string, deletedById?: string): Promise<void> {
-    const result = await this.repo.retire(id, deletedById);
+  async execute(id: string, audit: AuditRequestContext): Promise<void> {
+    const result = await this.repo.retire(id, audit);
     if (result === 'NOT_FOUND') {
       throw new NotFoundException(PAYER_NOT_FOUND_MESSAGE);
     }

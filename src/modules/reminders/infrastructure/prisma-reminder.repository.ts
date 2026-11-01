@@ -5,6 +5,7 @@ import {
   Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
+import { lockRow } from '../../../shared/prisma/lock-row';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { requireLocationTimeZone } from '../../../shared/locations/location-time-zone';
 import { requireLocationFormat } from '../../../shared/locations/location-regional';
@@ -17,6 +18,9 @@ import {
   REMINDER_LOOKAHEAD_MS,
 } from '../domain/reminder-window';
 import type { ReminderSettingsInput } from '../domain/reminder-lead-hours';
+import type { AuditRequestContext } from '../../audit/domain/audit-request-context';
+import { writeAuditEvent } from '../../audit/infrastructure/prisma-audit-event.repository';
+import { reminderSettingsAuditEvent } from '../domain/reminder-settings-audit';
 import type { ReminderEmailDelivery } from '../domain/reminder-timeline';
 import type { ReminderContact } from '../domain/reminder-eligibility';
 import type {
@@ -152,20 +156,30 @@ export class PrismaReminderRepository implements ReminderRepository {
   saveSettings(
     locationId: string,
     input: ReminderSettingsInput,
-    updatedById?: string,
+    audit: AuditRequestContext,
   ): Promise<LocationReminderSettingsView | null> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
       // Bajo RLS: una sede de otra clínica es invisible, igual que una que no existe.
+      // DX-360: la sede bloqueada (FOR NO KEY UPDATE) serializa dos guardados
+      // a la vez, también el primero, cuando aún no hay fila de ajustes: el
+      // antes de cada evento es el después del anterior.
+      if (!(await lockRow(tx, 'locations', locationId, 'NO KEY UPDATE'))) {
+        return null;
+      }
       const location = await tx.location.findFirst({
         where: { id: locationId, deletedAt: null },
-        select: { id: true, name: true },
+        select: {
+          id: true,
+          name: true,
+          reminderSettings: { select: { enabled: true, leadHours: true } },
+        },
       });
       if (!location) return null;
       const data = {
         enabled: input.enabled,
         leadHours: input.leadHours,
-        updatedById: updatedById ?? null,
+        updatedById: audit.actor.userId,
       };
       const saved = await tx.locationReminderSettings.upsert({
         where: { tenantId_locationId: { tenantId, locationId } },
@@ -173,6 +187,13 @@ export class PrismaReminderRepository implements ReminderRepository {
         update: data,
         select: SETTINGS_SELECT,
       });
+      const event = reminderSettingsAuditEvent(
+        audit,
+        locationId,
+        location.reminderSettings[0] ?? { enabled: false, leadHours: [] },
+        saved,
+      );
+      if (event) await writeAuditEvent(tx, event);
       return {
         locationId: location.id,
         locationName: location.name,

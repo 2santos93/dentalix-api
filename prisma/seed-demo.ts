@@ -603,6 +603,21 @@ class DemoSeeder {
     return created.id;
   }
 
+  /**
+   * DX-360: quién escribe, para los casos de uso que auditan en su
+   * transacción. Se llama dentro de `inTenant` (tenant y sede del contexto).
+   */
+  private auditAs(userId: string, role: ClinicRole): AuditRequestContext {
+    return {
+      tenantId: this.tenantContext.getTenantId() as string,
+      locationId: this.tenantContext.getLocationId() ?? null,
+      actor: { userId, role },
+      requestId: null,
+      ip: null,
+      userAgent: null,
+    };
+  }
+
   private inTenant<T>(
     tenantId: string,
     locationId: string | undefined,
@@ -629,7 +644,7 @@ class DemoSeeder {
     const receptionId = userIds[3];
 
     const locations = await this.inTenant(tenantId, undefined, () =>
-      this.setUpLocations(tenantId),
+      this.setUpLocations(tenantId, ownerId),
     );
     await this.inTenant(tenantId, undefined, () =>
       this.restrictStaffLocations(ownerId, userIds, locations),
@@ -645,7 +660,7 @@ class DemoSeeder {
     const policy = await this.inTenant(tenantId, undefined, () =>
       this.use(PublishPrivacyPolicyUseCase).execute(
         DEMO_PRIVACY_POLICY,
-        ownerId,
+        this.auditAs(ownerId, ClinicRole.ADMIN),
       ),
     );
 
@@ -925,7 +940,11 @@ class DemoSeeder {
 
   private async setUpLocations(
     tenantId: string,
+    ownerId: string,
   ): Promise<Record<DemoLocationKey, string>> {
+    // DX-360: el alta de sede, el horario y los recordatorios quedan en la
+    // auditoría como si los guardara el ADMIN desde Ajustes.
+    const admin = this.auditAs(ownerId, ClinicRole.ADMIN);
     const principal = await this.prisma.runWithTenant(tenantId, (tx) =>
       tx.location.findFirstOrThrow({
         where: { deletedAt: null },
@@ -940,25 +959,30 @@ class DemoSeeder {
     });
     // Nace con el horario por defecto (como cualquier sede nueva) y luego se
     // le pone el suyo con el caso de uso de /settings/horarios.
-    const norte = await this.use(CreateLocationUseCase).execute({
-      ...DEMO_LOCATIONS.norte,
-      country: 'CO',
-      currency: DEMO_CURRENCY,
-      timeZone: DEMO_TIMEZONE,
-      locale: 'es-CO',
-      hourCycle: DEMO_HOUR_CYCLE,
-    });
+    const norte = await this.use(CreateLocationUseCase).execute(
+      {
+        ...DEMO_LOCATIONS.norte,
+        country: 'CO',
+        currency: DEMO_CURRENCY,
+        timeZone: DEMO_TIMEZONE,
+        locale: 'es-CO',
+        hourCycle: DEMO_HOUR_CYCLE,
+      },
+      admin,
+    );
     await this.inTenant(tenantId, norte.id, () =>
-      this.use(ReplaceLocationScheduleUseCase).execute({
-        ranges: NORTE_SCHEDULE,
-      }),
+      this.use(ReplaceLocationScheduleUseCase).execute(
+        { ranges: NORTE_SCHEDULE },
+        { ...admin, locationId: norte.id },
+      ),
     );
     // DX-026: la principal manda recordatorios por email 48 h y 2 h antes; la
     // Norte se queda como cualquier sede nueva (desactivados).
-    await this.use(UpdateReminderSettingsUseCase).execute(principal.id, {
-      enabled: true,
-      leadHours: [48, 2],
-    });
+    await this.use(UpdateReminderSettingsUseCase).execute(
+      principal.id,
+      { enabled: true, leadHours: [48, 2] },
+      admin,
+    );
     return { principal: principal.id, norte: norte.id };
   }
 
@@ -993,7 +1017,7 @@ class DemoSeeder {
       payers.find((p) => p.name === DEMO_ALFA_PAYER.name) ??
       (await this.use(CreatePayerUseCase).execute(
         { name: DEMO_ALFA_PAYER.name, type: DEMO_ALFA_PAYER.type },
-        receptionId,
+        this.auditAs(receptionId, ClinicRole.RECEPTION),
       ));
     const payerIds = new Map(payers.map((p) => [p.name, p.id]));
     payerIds.set(alfaPayer.name, alfaPayer.id);
@@ -1220,7 +1244,7 @@ class DemoSeeder {
         (
           await this.use(CreatePayerUseCase).execute(
             { name: payer.name, type: payer.type },
-            receptionId,
+            this.auditAs(receptionId, ClinicRole.RECEPTION),
           )
         ).id;
       payerIds.set(payer.key, id);
@@ -1354,7 +1378,7 @@ class DemoSeeder {
           color: spec.color,
           isUrgent: spec.isUrgent ?? false,
         },
-        ownerId,
+        this.auditAs(ownerId, ClinicRole.ADMIN),
       );
       for (const reason of spec.reasons) typeByReason.set(reason, type.id);
     }
@@ -2889,7 +2913,10 @@ class DemoSeeder {
     const templates: { id: string; version: number }[] = [];
     for (const spec of DEMO_CONSENT_TEMPLATES) {
       templates.push(
-        await this.use(CreateConsentTemplateUseCase).execute(spec, ownerId),
+        await this.use(CreateConsentTemplateUseCase).execute(
+          spec,
+          this.auditAs(ownerId, ClinicRole.ADMIN),
+        ),
       );
     }
     const { patientIndex, dentistIndex, templateIndex } = DEMO_SIGNED_CONSENT;
@@ -2995,7 +3022,7 @@ class DemoSeeder {
     for (const template of DEMO_PRESCRIPTION_TEMPLATES) {
       await this.use(CreatePrescriptionTemplateUseCase).execute(
         { name: template.name, notes: template.notes, items: template.items },
-        ownerId,
+        ownerCtx,
       );
     }
     await this.use(IssuePrescriptionUseCase).execute(
@@ -3056,7 +3083,7 @@ class DemoSeeder {
             unit: spec.unit,
             minStock: spec.minStock,
           },
-          createdById,
+          this.auditAs(createdById, ClinicRole.ASSISTANT),
         );
         for (const m of spec.movements) {
           await this.use(RecordInventoryMovementUseCase).execute(
@@ -3066,7 +3093,7 @@ class DemoSeeder {
               quantity: m.quantity,
               reason: m.reason,
             },
-            createdById,
+            this.auditAs(createdById, ClinicRole.ASSISTANT),
           );
         }
       });

@@ -10,6 +10,8 @@ import {
   policyContentHash,
 } from '../../domain/privacy-policy-content';
 
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+
 export const EMPTY_POLICY_TEXT_MESSAGE =
   'Todos los textos de la política son obligatorios.';
 
@@ -26,16 +28,19 @@ export class PublishPrivacyPolicyUseCase {
    */
   async execute(
     content: PrivacyPolicyContent,
-    publishedById: string,
+    audit: AuditRequestContext,
   ): Promise<PrivacyPolicyVersion> {
     const normalized = normalizePolicyContent(content);
     if (Object.values(normalized).some((text) => text === '')) {
       throw new BadRequestException(EMPTY_POLICY_TEXT_MESSAGE);
     }
-    return this.repo.publish({
-      ...normalized,
-      contentHash: policyContentHash(normalized),
-      publishedById,
-    });
+    return this.repo.publish(
+      {
+        ...normalized,
+        contentHash: policyContentHash(normalized),
+        publishedById: audit.actor.userId,
+      },
+      audit,
+    );
   }
 }

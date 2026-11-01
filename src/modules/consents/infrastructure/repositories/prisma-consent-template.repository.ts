@@ -1,6 +1,7 @@
 import { ConflictException, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
+import { lockRow } from '../../../../shared/prisma/lock-row';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { ConsentTemplate } from '../../domain/entities/consent-template.entity';
 import {
@@ -8,6 +9,13 @@ import {
   CreateConsentTemplateRepoInput,
   UpdateConsentTemplateRepoInput,
 } from '../../domain/ports/consent-template-repository.port';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+import { configAuditEvent } from '../../../audit/domain/config-audit';
+import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
+import {
+  CONSENT_TEMPLATE_HIDDEN_FIELDS,
+  consentTemplateSnapshot,
+} from '../../domain/consent-template-audit';
 
 type PrismaConsentTemplate = Prisma.ConsentTemplateGetPayload<
   Record<string, never>
@@ -79,23 +87,37 @@ export class PrismaConsentTemplateRepository implements ConsentTemplateRepositor
 
   async create(
     input: CreateConsentTemplateRepoInput,
+    audit: AuditRequestContext,
   ): Promise<ConsentTemplate> {
     const tenantId = this.requireTenantId();
-    const row = await this.prisma
-      .runWithTenant((tx) =>
-        tx.consentTemplate.create({
-          data: {
-            tenantId,
-            title: input.title,
-            body: input.body,
-            active: input.active,
-            createdById: input.createdById,
-            updatedById: input.createdById,
-          },
-        }),
-      )
+    return this.prisma
+      .runWithTenant(async (tx) => {
+        const created = mapToEntity(
+          await tx.consentTemplate.create({
+            data: {
+              tenantId,
+              title: input.title,
+              body: input.body,
+              active: input.active,
+              createdById: input.createdById,
+              updatedById: input.createdById,
+            },
+          }),
+        );
+        await writeAuditEvent(
+          tx,
+          configAuditEvent(audit, {
+            action: 'CREATE',
+            resourceType: 'CONSENT_TEMPLATE',
+            resourceId: created.id,
+            reason: 'CONSENT_TEMPLATE_CREATED',
+            after: consentTemplateSnapshot(created),
+            hiddenFields: CONSENT_TEMPLATE_HIDDEN_FIELDS,
+          }),
+        );
+        return created;
+      })
       .catch(rethrowDuplicateTitle);
-    return mapToEntity(row);
   }
 
   /**
@@ -105,21 +127,39 @@ export class PrismaConsentTemplateRepository implements ConsentTemplateRepositor
   async update(
     id: string,
     input: UpdateConsentTemplateRepoInput,
+    audit: AuditRequestContext,
   ): Promise<ConsentTemplate> {
-    const row = await this.prisma
-      .runWithTenant((tx) =>
-        tx.consentTemplate.update({
-          where: { id },
-          data: {
-            title: input.title,
-            body: input.body,
-            active: input.active,
-            updatedById: input.updatedById,
-            ...(input.bumpVersion ? { version: { increment: 1 } } : {}),
-          },
-        }),
-      )
+    return this.prisma
+      .runWithTenant(async (tx) => {
+        // DX-360: el antes, con la fila bloqueada hasta el final.
+        await lockRow(tx, 'consent_templates', id);
+        const before = mapToEntity(
+          await tx.consentTemplate.findUniqueOrThrow({ where: { id } }),
+        );
+        const after = mapToEntity(
+          await tx.consentTemplate.update({
+            where: { id },
+            data: {
+              title: input.title,
+              body: input.body,
+              active: input.active,
+              updatedById: input.updatedById,
+              ...(input.bumpVersion ? { version: { increment: 1 } } : {}),
+            },
+          }),
+        );
+        const event = configAuditEvent(audit, {
+          action: 'UPDATE',
+          resourceType: 'CONSENT_TEMPLATE',
+          resourceId: id,
+          reason: 'CONSENT_TEMPLATE_UPDATED',
+          before: consentTemplateSnapshot(before),
+          after: consentTemplateSnapshot(after),
+          hiddenFields: CONSENT_TEMPLATE_HIDDEN_FIELDS,
+        });
+        if (event) await writeAuditEvent(tx, event);
+        return after;
+      })
       .catch(rethrowDuplicateTitle);
-    return mapToEntity(row);
   }
 }

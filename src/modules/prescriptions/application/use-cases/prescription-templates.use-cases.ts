@@ -13,6 +13,7 @@ import {
   type PrescriptionTemplateRepository,
 } from '../../domain/ports/prescription-template-repository.port';
 import { MAX_PRESCRIPTION_ITEMS } from '../../domain/prescription-rules';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 
 export const PRESCRIPTION_TEMPLATE_NOT_FOUND_MESSAGE =
   'Plantilla de receta no encontrada';
@@ -130,7 +131,7 @@ export class CreatePrescriptionTemplateUseCase {
 
   async execute(
     input: PrescriptionTemplateInput,
-    createdById: string,
+    audit: AuditRequestContext,
   ): Promise<PrescriptionTemplate> {
     return this.repo.create(
       {
@@ -138,7 +139,7 @@ export class CreatePrescriptionTemplateUseCase {
         notes: trimmedOrNull(input.notes),
         items: normalizeItems(input.items),
       },
-      createdById,
+      audit,
     );
   }
 }
@@ -154,7 +155,7 @@ export class UpdatePrescriptionTemplateUseCase {
   async execute(
     id: string,
     input: Partial<PrescriptionTemplateInput>,
-    updatedById: string,
+    audit: AuditRequestContext,
   ): Promise<PrescriptionTemplate> {
     if (!(await this.repo.findById(id))) {
       throw new NotFoundException(PRESCRIPTION_TEMPLATE_NOT_FOUND_MESSAGE);
@@ -172,7 +173,7 @@ export class UpdatePrescriptionTemplateUseCase {
           ? { items: normalizeItems(input.items) }
           : {}),
       },
-      updatedById,
+      audit,
     );
   }
 }
@@ -185,10 +186,10 @@ export class DeletePrescriptionTemplateUseCase {
   ) {}
 
   /** Borrado BLANDO: en Dentalix nada se borra en duro. */
-  async execute(id: string, deletedById: string): Promise<void> {
+  async execute(id: string, audit: AuditRequestContext): Promise<void> {
     if (!(await this.repo.findById(id))) {
       throw new NotFoundException(PRESCRIPTION_TEMPLATE_NOT_FOUND_MESSAGE);
     }
-    await this.repo.softDelete(id, deletedById);
+    await this.repo.softDelete(id, audit);
   }
 }

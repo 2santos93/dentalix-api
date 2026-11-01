@@ -28,8 +28,13 @@ import {
   CLINICAL_ROLES,
   CONSENT_TEMPLATE_WRITE_ROLES,
 } from '../../auth/presentation/guards/clinic-role-sets';
-import { JwtPayload } from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
+import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
+import {
+  requireAuditRequestContext,
+  type AuditableRequest,
+} from '../../audit/presentation/audit-request-context';
+import type { AuditRequestContext } from '../../audit/domain/audit-request-context';
 import {
   CreateConsentTemplateUseCase,
   ListConsentTemplatesUseCase,
@@ -40,10 +45,6 @@ import { ConsentTemplateDto } from './dto/consent-template.dto';
 import { CreateConsentTemplateDto } from './dto/create-consent-template.dto';
 import { UpdateConsentTemplateDto } from './dto/update-consent-template.dto';
 import { ListConsentTemplatesQueryDto } from './dto/list-consent-templates-query.dto';
-
-interface AuthenticatedRequest {
-  user: JwtPayload;
-}
 
 // Sin @Delete a propósito: una plantilla se DESACTIVA (PATCH active=false),
 // nunca se borra; los consentimientos firmados la referencian.
@@ -58,6 +59,7 @@ export class ConsentTemplatesController {
     private readonly listTemplates: ListConsentTemplatesUseCase,
     private readonly createTemplate: CreateConsentTemplateUseCase,
     private readonly updateTemplate: UpdateConsentTemplateUseCase,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   @Get()
@@ -80,11 +82,11 @@ export class ConsentTemplatesController {
   @ApiForbiddenResponse({ description: 'Solo ADMIN' })
   create(
     @Body() dto: CreateConsentTemplateDto,
-    @Req() req: AuthenticatedRequest,
+    @Req() req: AuditableRequest,
   ): Promise<ConsentTemplate> {
     return this.createTemplate.execute(
       { title: dto.title, body: dto.body, active: dto.active },
-      req.user.sub,
+      this.audit(req),
     );
   }
 
@@ -98,12 +100,17 @@ export class ConsentTemplatesController {
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateConsentTemplateDto,
-    @Req() req: AuthenticatedRequest,
+    @Req() req: AuditableRequest,
   ): Promise<ConsentTemplate> {
     return this.updateTemplate.execute(
       id,
       { title: dto.title, body: dto.body, active: dto.active },
-      req.user.sub,
+      this.audit(req),
     );
+  }
+
+  /** Quién escribe, para el evento que el repositorio guarda (DX-360). */
+  private audit(req: AuditableRequest): AuditRequestContext {
+    return requireAuditRequestContext(req, this.tenantContext);
   }
 }

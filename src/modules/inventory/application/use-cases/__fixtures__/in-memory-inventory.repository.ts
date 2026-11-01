@@ -8,6 +8,8 @@ import {
   ListInventoryItemsRepoParams,
   UpdateInventoryItemRepoInput,
 } from '../../../domain/ports/inventory-repository.port';
+import type { InventoryAuditedWrites } from '../../../domain/ports/inventory-audited-writes.port';
+import type { AuditRequestContext } from '../../../../audit/domain/audit-request-context';
 import { signedQuantity } from '../../../domain/stock-signing';
 
 // `InventoryItem` (the API-facing entity) deliberately has no `deletedAt`
@@ -29,7 +31,9 @@ const NOW = new Date('2026-01-01T00:00:00.000Z');
  * uses), proving the two aggregation paths can't drift apart. Mirrors
  * `PrismaInventoryRepository`'s semantics.
  */
-export class InMemoryInventoryRepository implements InventoryRepository {
+export class InMemoryInventoryRepository
+  implements InventoryRepository, InventoryAuditedWrites
+{
   private readonly items: StoredItem[] = [];
   private readonly movements: InventoryMovement[] = [];
 
@@ -94,7 +98,11 @@ export class InMemoryInventoryRepository implements InventoryRepository {
     };
   }
 
-  createItem(input: CreateInventoryItemRepoInput): Promise<InventoryItem> {
+  /** Con `audit` (camino del caso de uso, DX-360) el autor es su actor. */
+  createItem(
+    input: CreateInventoryItemRepoInput,
+    audit?: AuditRequestContext,
+  ): Promise<InventoryItem> {
     const row: StoredItem = {
       id: `item-${++seq}`,
       tenantId: 't1',
@@ -103,7 +111,7 @@ export class InMemoryInventoryRepository implements InventoryRepository {
       unit: input.unit,
       minStock: input.minStock,
       notes: input.notes ?? null,
-      createdById: input.createdById ?? null,
+      createdById: audit?.actor.userId ?? input.createdById ?? null,
       createdAt: NOW,
       updatedAt: NOW,
       deletedAt: null,
@@ -165,6 +173,7 @@ export class InMemoryInventoryRepository implements InventoryRepository {
 
   createMovement(
     input: CreateInventoryMovementRepoInput,
+    audit?: AuditRequestContext,
   ): Promise<InventoryMovement> {
     const row: InventoryMovement = {
       id: `movement-${++seq}`,
@@ -174,7 +183,7 @@ export class InMemoryInventoryRepository implements InventoryRepository {
       quantity: input.quantity,
       reason: input.reason ?? null,
       occurredAt: NOW,
-      createdById: input.createdById ?? null,
+      createdById: audit?.actor.userId ?? input.createdById ?? null,
       createdAt: NOW,
     };
     this.movements.push(row);
