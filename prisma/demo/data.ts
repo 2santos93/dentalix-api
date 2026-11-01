@@ -17,6 +17,7 @@ import {
 } from '@prisma/client';
 import type { MedicalHistoryVersionData } from '../../src/modules/medical-history/domain/ports/medical-history-repository.port';
 import type { ScheduleRange } from '../../src/modules/location-schedule/application/business-hours';
+import { addCivilDays, civilDateIn } from '../../src/shared/time/civil-day';
 import {
   ANAMNESIS_CONDITIONS,
   type AnamnesisAnswers,
@@ -39,30 +40,42 @@ export const DEMO_PRIMARY_COLOR = '#0E7C86';
 export const DEMO_EMAIL_DOMAIN = 'demo.dentalix.app';
 /** Contraseña común de todos los usuarios demo (se imprime al terminar). */
 export const DEMO_PASSWORD = 'DemoDentalix2026!';
-/**
- * La otra moneda de la demo: los bolívares de los abonos por «Pago móvil» o
- * en efectivo en Bs. Su tasa es MANUAL (la que la clínica registra cada día,
- * DX-374), desde `DEMO_MANUAL_RATE_DAYS` días atrás.
- */
-export const DEMO_RATE_CURRENCY = 'VES';
 /** Días de tasas manuales sembradas (hoy incluido): cubren toda la historia de abonos. */
 export const DEMO_MANUAL_RATE_DAYS = 61;
 /**
- * Tasa FICTICIA de la demo (VES por 1 USD) del día `daysAgo`: 250,00 hoy y
- * ayer, y 0,50 menos por cada día anterior (220,50 hace 60 días, la más antigua). Hoy y ayer
- * valen lo mismo para que el abono en bolívares «de hace 30 min» dé la misma
- * cifra en USD aunque la siembra cruce la medianoche de la sede (DX-449).
+ * Redondeo a 4 decimales: sin él la coma flotante deja restos
+ * (`5.398000000000001`) y el caso de uso rechaza la tasa por tener más de
+ * `MANUAL_RATE_MAX_DECIMALS` decimales.
  */
-export function demoVesPerUsd(daysAgo: number): number {
-  return 250 - 0.5 * Math.max(0, daysAgo - 1);
-}
-/** El importe en VES que vale `usd` con la tasa demo del día `daysAgo`. */
-export function demoVes(usd: number, daysAgo: number): number {
-  return Math.round(usd * demoVesPerUsd(daysAgo) * 100) / 100;
+const r4 = (x: number) => Math.round(x * 1e4) / 1e4;
+/**
+ * Tasas FICTICIAS de la demo (unidades por 1 USD) del día `daysAgo`, una por
+ * cada moneda distinta de USD que usa una sede o un abono. Su fuente es
+ * MANUAL (la que la clínica registra cada día, DX-374), desde
+ * `DEMO_MANUAL_RATE_DAYS` días atrás. Hoy y ayer valen lo mismo para que el
+ * abono «de hace 30 min» dé la misma cifra en USD aunque la siembra cruce la
+ * medianoche de la sede (DX-449).
+ */
+export const DEMO_MANUAL_RATES: Readonly<
+  Record<'VES' | 'BRL' | 'GBP', (daysAgo: number) => number>
+> = {
+  VES: (d) => r4(250 - 0.5 * Math.max(0, d - 1)),
+  BRL: (d) => r4(5.4 - 0.002 * Math.max(0, d - 1)),
+  GBP: (d) => r4(0.78 + 0.0005 * Math.max(0, d - 1)),
+};
+/** El importe en `currency` que vale `usd` con la tasa demo del día `daysAgo`. */
+export function demoAmountIn(
+  currency: keyof typeof DEMO_MANUAL_RATES,
+  usd: number,
+  daysAgo: number,
+): number {
+  return Math.round(usd * DEMO_MANUAL_RATES[currency](daysAgo) * 100) / 100;
 }
 /** Sedes de la rotación de los dos dentistas compartidos (DX-233). */
 export type RotationSiteKey = 'principal' | 'norte';
-export type DemoLocationKey = RotationSiteKey;
+/** Sedes con un dentista propio, restringido a ella (D7). */
+export type SoloSiteKey = 'saoPaulo' | 'londres';
+export type DemoLocationKey = RotationSiteKey | SoloSiteKey;
 
 /**
  * Configuración regional de una sede (DATOS: la API exige país, moneda, zona,
@@ -101,6 +114,12 @@ interface DemoUser {
   locations?: readonly DemoLocationKey[];
 }
 
+/** Correo del dentista propio de cada sede sin rotación (D7). */
+export const DEMO_SITE_DENTISTS: Readonly<Record<SoloSiteKey, string>> = {
+  saoPaulo: `dentista.saopaulo@${DEMO_EMAIL_DOMAIN}`,
+  londres: `dentista.londres@${DEMO_EMAIL_DOMAIN}`,
+};
+
 /** El primero es el dueño (lo crea el registro); el resto entra por invitación. */
 export const DEMO_USERS: readonly DemoUser[] = [
   {
@@ -136,6 +155,20 @@ export const DEMO_USERS: readonly DemoUser[] = [
     role: ClinicRole.RECEPTION,
     locations: ['norte'],
   },
+  // D7: el dentista propio de cada sede sin rotación, restringido a ella. Van
+  // al final por la misma razón.
+  {
+    email: DEMO_SITE_DENTISTS.saoPaulo,
+    fullName: 'Beatriz Nogueira Prado',
+    role: ClinicRole.DENTIST,
+    locations: ['saoPaulo'],
+  },
+  {
+    email: DEMO_SITE_DENTISTS.londres,
+    fullName: 'Oliver Bennett',
+    role: ClinicRole.DENTIST,
+    locations: ['londres'],
+  },
 ];
 
 /** Horario propio de la Sede Norte (la principal conserva el del registro). */
@@ -147,11 +180,25 @@ const NORTE_SCHEDULE: ScheduleRange[] = [
   { weekday: 6, startMinute: 8 * 60, endMinute: 12 * 60 },
 ];
 
+/** Horario de la Sede São Paulo: lun–vie 8–12 y 13–18. */
+const SAO_PAULO_SCHEDULE: ScheduleRange[] = [1, 2, 3, 4, 5].flatMap(
+  (weekday) => [
+    { weekday, startMinute: 8 * 60, endMinute: 12 * 60 },
+    { weekday, startMinute: 13 * 60, endMinute: 18 * 60 },
+  ],
+);
+
+/** Horario de la Sede Londres: lun–vie 9–13 y 14–18. */
+const LONDRES_SCHEDULE: ScheduleRange[] = [1, 2, 3, 4, 5].flatMap((weekday) => [
+  { weekday, startMinute: 9 * 60, endMinute: 13 * 60 },
+  { weekday, startMinute: 14 * 60, endMinute: 18 * 60 },
+]);
+
 /**
  * Las sedes de la demo, cada una con su región. La multimoneda de la
- * principal se ve en los abonos en `DEMO_RATE_CURRENCY` con la tasa manual
- * del día que registra la clínica (`demoVesPerUsd`), y en el fondo de la caja
- * abierta en las dos monedas.
+ * principal se ve en los abonos en VES con la tasa manual del día que
+ * registra la clínica (`DEMO_MANUAL_RATES`), y en el fondo de la caja abierta
+ * en las dos monedas.
  */
 export const DEMO_LOCATIONS: Record<DemoLocationKey, DemoLocation> = {
   // La crea el registro con el nombre "Sede principal" y el horario por
@@ -176,6 +223,28 @@ export const DEMO_LOCATIONS: Record<DemoLocationKey, DemoLocation> = {
     hourCycle: 'h23',
     schedule: NORTE_SCHEDULE,
   },
+  saoPaulo: {
+    name: 'Sede São Paulo',
+    address: 'Rua Demo, 100, conj. 12',
+    phone: '+55 11 3555 0100',
+    country: 'BR',
+    currency: 'BRL',
+    timeZone: 'America/Sao_Paulo',
+    locale: 'pt-BR',
+    hourCycle: 'h23',
+    schedule: SAO_PAULO_SCHEDULE,
+  },
+  londres: {
+    name: 'Sede Londres',
+    address: '10 Demo Street, Suite 4',
+    phone: '+44 20 7946 0100',
+    country: 'GB',
+    currency: 'GBP',
+    timeZone: 'Europe/London',
+    locale: 'en-GB',
+    hourCycle: 'h23',
+    schedule: LONDRES_SCHEDULE,
+  },
 };
 
 /** La región de una sede: solo los cinco campos regionales de su fila. */
@@ -183,6 +252,36 @@ export function regionOf(key: DemoLocationKey): DemoRegion {
   const { country, currency, timeZone, locale, hourCycle } =
     DEMO_LOCATIONS[key];
   return { country, currency, timeZone, locale, hourCycle };
+}
+
+/**
+ * Días de tasa manual que siembra la demo y la sede en cuyo contexto se
+ * registra cada uno. Van desde hace `DEMO_MANUAL_RATE_DAYS - 1` días (en la
+ * principal) hasta el «hoy» más adelantado de las sedes, porque el caso de uso
+ * rechaza una fecha posterior al «hoy» de la sede del contexto: cada día va
+ * con la primera sede, en el orden de `DEMO_LOCATIONS`, cuyo «hoy» lo admite.
+ */
+export function demoRateDates(
+  now: Date,
+): { date: string; key: DemoLocationKey }[] {
+  const todays = (Object.keys(DEMO_LOCATIONS) as DemoLocationKey[]).map(
+    (key) => ({ key, today: civilDateIn(now, DEMO_LOCATIONS[key].timeZone) }),
+  );
+  const latest = todays
+    .map((t) => t.today)
+    .reduce((max, today) => (today > max ? today : max));
+  const dates: { date: string; key: DemoLocationKey }[] = [];
+  for (
+    let date = addCivilDays(
+      civilDateIn(now, DEMO_LOCATIONS.principal.timeZone),
+      -(DEMO_MANUAL_RATE_DAYS - 1),
+    );
+    date <= latest;
+    date = addCivilDays(date, 1)
+  ) {
+    dates.push({ date, key: todays.find((t) => t.today >= date)!.key });
+  }
+  return dates;
 }
 
 /** Tarifas (USD) que la clínica demo pone a los ítems del catálogo por defecto. */
@@ -217,6 +316,11 @@ export const DEMO_PRICES: Record<string, number> = {
 };
 
 interface DemoPatient {
+  /**
+   * R3: sede donde se atiende; da también la región con la que se lee su
+   * teléfono.
+   */
+  location: DemoLocationKey;
   firstName: string;
   lastName: string;
   docType: DocumentType;
@@ -252,6 +356,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0001',
     birthDate: '1992-03-14',
     sex: Sex.F,
+    location: 'principal',
     phone: '+58 414 555 0101',
     email: 'laura.castro@example.com',
     address: 'Calle Los Almendros 127, Apto 501',
@@ -280,6 +385,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0002',
     birthDate: '1968-11-02',
     sex: Sex.M,
+    location: 'principal',
     phone: '+58 424 555 0102',
     email: 'jorge.ramirez@example.com',
     address: 'Av. Las Palmas 853',
@@ -330,6 +436,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0003',
     birthDate: '1998-07-21',
     sex: Sex.F,
+    location: 'norte',
     phone: '+58 416 555 0103',
     email: 'natalia.vargas@example.com',
     address: 'Calle Los Robles 53',
@@ -343,6 +450,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0004',
     birthDate: '1975-01-30',
     sex: Sex.M,
+    location: 'principal',
     phone: '+58 426 555 0104',
     email: 'hector.molina@example.com',
     address: 'Av. del Parque 642',
@@ -380,6 +488,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0005',
     birthDate: '1995-09-09',
     sex: Sex.F,
+    location: 'principal',
     phone: '+58 412 555 0105',
     email: 'daniela.morales@example.com',
     address: 'Calle Los Cedros 10',
@@ -392,6 +501,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0006',
     birthDate: '2001-04-18',
     sex: Sex.M,
+    location: 'principal',
     phone: '+58 414 555 0106',
     email: 'santiago.pardo@example.com',
     address: 'Av. Libertad 1180',
@@ -404,6 +514,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0007',
     birthDate: '1960-12-05',
     sex: Sex.F,
+    location: 'norte',
     phone: '+58 424 555 0107',
     email: 'marta.becerra@example.com',
     address: 'Calle Las Acacias 145',
@@ -453,6 +564,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0008',
     birthDate: '1955-06-27',
     sex: Sex.M,
+    location: 'principal',
     phone: '+58 416 555 0108',
     email: 'ricardo.salcedo@example.com',
     address: 'Pasaje Los Olivos 23',
@@ -487,6 +599,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0009',
     birthDate: '2015-02-11',
     sex: Sex.F,
+    location: 'norte',
     phone: '+58 426 555 0109',
     email: 'familia.ortiz@example.com',
     address: 'Calle Los Pinos 160',
@@ -507,6 +620,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0010',
     birthDate: '1993-10-03',
     sex: Sex.F,
+    location: 'principal',
     phone: '+58 412 555 0110',
     email: 'carolina.duran@example.com',
     address: 'Av. del Río 1020',
@@ -525,6 +639,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0011',
     birthDate: '1988-08-16',
     sex: Sex.M,
+    location: 'principal',
     phone: '+58 414 555 0111',
     email: 'felipe.arias@example.com',
     address: 'Calle Las Flores 5',
@@ -537,6 +652,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0012',
     birthDate: '1990-05-25',
     sex: Sex.F,
+    location: 'principal',
     phone: '+58 424 555 0112',
     email: 'juliana.guerrero@example.com',
     address: 'Calle Los Sauces 72',
@@ -576,6 +692,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0013',
     birthDate: '2012-09-30',
     sex: Sex.M,
+    location: 'principal',
     phone: '+58 416 555 0113',
     email: 'familia.contreras@example.com',
     address: 'Av. Principal 2415',
@@ -587,6 +704,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0014',
     birthDate: '1979-03-08',
     sex: Sex.F,
+    location: 'principal',
     phone: '+58 426 555 0114',
     email: 'anamaria.zambrano@example.com',
     address: 'Calle Los Laureles 33',
@@ -600,6 +718,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0015',
     birthDate: '1970-07-12',
     sex: Sex.M,
+    location: 'principal',
     phone: '+58 412 555 0115',
     email: 'luis.pena@example.com',
     address: 'Av. del Mar 728',
@@ -612,6 +731,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0016',
     birthDate: '2004-12-19',
     sex: Sex.F,
+    location: 'principal',
     phone: '+58 414 555 0116',
     email: 'valeria.suarez@example.com',
     address: 'Calle Las Camelias 116',
@@ -624,6 +744,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0017',
     birthDate: '1966-02-22',
     sex: Sex.M,
+    location: 'principal',
     phone: '+58 424 555 0117',
     email: 'gustavo.rios@example.com',
     address: 'Av. Los Jardines 361',
@@ -650,6 +771,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0018',
     birthDate: '1997-06-06',
     sex: Sex.F,
+    location: 'principal',
     phone: '+58 416 555 0118',
     email: 'isabella.moreno@example.com',
     address: 'Calle Los Nogales 63',
@@ -662,6 +784,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0019',
     birthDate: '1986-01-17',
     sex: Sex.M,
+    location: 'principal',
     phone: '+58 426 555 0119',
     email: 'alejandro.fuentes@example.com',
     address: 'Av. Las Américas 1346',
@@ -674,6 +797,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0020',
     birthDate: '1999-11-28',
     sex: Sex.F,
+    location: 'principal',
     phone: '+58 412 555 0120',
     email: 'camila.rincon@example.com',
     address: 'Calle Los Álamos 26',
@@ -686,6 +810,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0021',
     birthDate: '1991-04-04',
     sex: Sex.M,
+    location: 'principal',
     phone: '+58 414 555 0121',
     email: 'diego.lozano@example.com',
     address: 'Av. Universidad 1345',
@@ -698,6 +823,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0022',
     birthDate: '1982-08-31',
     sex: Sex.F,
+    location: 'principal',
     phone: '+58 424 555 0122',
     email: 'paula.cortes@example.com',
     address: 'Calle Las Magnolias 100',
@@ -710,6 +836,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-P01',
     birthDate: '1984-10-10',
     sex: Sex.M,
+    location: 'principal',
     phone: '+52 55 5555 0123',
     email: 'tomas.aguilar@example.com',
     address: 'Calle Los Tulipanes 85, Hotel',
@@ -722,6 +849,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0023',
     birthDate: '1996-01-23',
     sex: Sex.F,
+    location: 'principal',
     phone: '+58 426 555 0124',
     email: 'mariajose.escobar@example.com',
     address: 'Av. del Sol 150',
@@ -734,12 +862,124 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0024',
     birthDate: '2000-03-15',
     sex: Sex.M,
+    location: 'principal',
     phone: '+58 412 555 0125',
     email: 'sebastian.nino@example.com',
     address: 'Calle Los Jazmines 45',
     occupation: 'Músico',
   },
+  // R5: pacientes de las sedes con dentista propio, al final para no mover los
+  // índices. São Paulo (25-28) con documento nacional y Londres (29-32) con
+  // pasaporte, porque en el Reino Unido no hay documento nacional.
+  {
+    firstName: 'Lucas',
+    lastName: 'Oliveira Santos',
+    docType: 'NATIONAL_ID',
+    docNumber: 'DEMO-B001',
+    birthDate: '1988-04-12',
+    sex: Sex.M,
+    location: 'saoPaulo',
+    phone: '+55 11 95555 0101',
+    email: 'lucas.oliveira@example.com',
+    address: 'Rua das Acácias, 45, apto 12',
+  },
+  {
+    firstName: 'Mariana',
+    lastName: 'Costa Ribeiro',
+    docType: 'NATIONAL_ID',
+    docNumber: 'DEMO-B002',
+    birthDate: '1993-09-03',
+    sex: Sex.F,
+    location: 'saoPaulo',
+    phone: '+55 11 95555 0102',
+    email: 'mariana.costa@example.com',
+    address: 'Av. das Palmeiras, 300',
+  },
+  {
+    firstName: 'Gabriel',
+    lastName: 'Almeida Rocha',
+    docType: 'NATIONAL_ID',
+    docNumber: 'DEMO-B003',
+    birthDate: '1979-12-21',
+    sex: Sex.M,
+    location: 'saoPaulo',
+    phone: '+55 11 95555 0103',
+    email: 'gabriel.almeida@example.com',
+    address: 'Rua dos Ipês, 78',
+  },
+  {
+    firstName: 'Júlia',
+    lastName: 'Carvalho Martins',
+    docType: 'NATIONAL_ID',
+    docNumber: 'DEMO-B004',
+    birthDate: '2001-06-17',
+    sex: Sex.F,
+    location: 'saoPaulo',
+    phone: '+55 11 3555 0104',
+    email: 'julia.carvalho@example.com',
+    address: 'Rua das Orquídeas, 150, casa 2',
+  },
+  {
+    firstName: 'Emily',
+    lastName: 'Clarke',
+    docType: 'PASSPORT',
+    docNumber: 'DEMO-G001',
+    birthDate: '1990-02-08',
+    sex: Sex.F,
+    location: 'londres',
+    phone: '+44 20 7946 0101',
+    email: 'emily.clarke@example.com',
+    address: '12 Oak Lane, Flat 3',
+  },
+  {
+    firstName: 'James',
+    lastName: 'Turner',
+    docType: 'PASSPORT',
+    docNumber: 'DEMO-G002',
+    birthDate: '1985-07-30',
+    sex: Sex.M,
+    location: 'londres',
+    phone: '+44 20 7946 0102',
+    email: 'james.turner@example.com',
+    address: '45 Elm Road',
+  },
+  {
+    firstName: 'Sophie',
+    lastName: 'Wright',
+    docType: 'PASSPORT',
+    docNumber: 'DEMO-G003',
+    birthDate: '1997-11-14',
+    sex: Sex.F,
+    location: 'londres',
+    phone: '+44 20 7946 0103',
+    email: 'sophie.wright@example.com',
+    address: '7 Willow Close',
+  },
+  {
+    firstName: 'Harry',
+    lastName: 'Walsh',
+    docType: 'PASSPORT',
+    docNumber: 'DEMO-G004',
+    birthDate: '1972-05-25',
+    sex: Sex.M,
+    location: 'londres',
+    phone: '+44 20 7946 0104',
+    email: 'harry.walsh@example.com',
+    address: '88 Birch Avenue',
+  },
 ];
+
+/** Índices de los pacientes de las sedes de la rotación (R3). */
+export function localPatientIndexes(): number[] {
+  return DEMO_PATIENTS.flatMap((p, i) =>
+    p.location === 'principal' || p.location === 'norte' ? [i] : [],
+  );
+}
+
+/** Índices de los pacientes de una sede con dentista propio (R3). */
+export function sitePatientIndexes(key: SoloSiteKey): number[] {
+  return DEMO_PATIENTS.flatMap((p, i) => (p.location === key ? [i] : []));
+}
 
 /**
  * DX-153: pagadores del catálogo de la clínica demo (reemplazan al texto libre de aseguradora anterior a DX-153).
@@ -1659,8 +1899,8 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
       // DX-377: «Pago móvil» en bolívares (300 USD a la tasa de su día).
       {
         daysAgo: 12,
-        amount: demoVes(300, 12),
-        currency: DEMO_RATE_CURRENCY,
+        amount: demoAmountIn('VES', 300, 12),
+        currency: 'VES',
         method: TRANSFER,
         mobileReference: '7788 3104 21',
         location: 'principal',
@@ -1670,8 +1910,8 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
       {
         daysAgo: 0,
         minutesAgo: 30,
-        amount: demoVes(45, 0),
-        currency: DEMO_RATE_CURRENCY,
+        amount: demoAmountIn('VES', 45, 0),
+        currency: 'VES',
         method: CASH,
         location: 'principal',
         notes: 'Abono en bolívares.',
@@ -1785,8 +2025,8 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
     payments: [
       {
         daysAgo: 14,
-        amount: demoVes(130, 14),
-        currency: DEMO_RATE_CURRENCY,
+        amount: demoAmountIn('VES', 130, 14),
+        currency: 'VES',
         method: TRANSFER,
         mobileReference: '1234 5598 00',
         location: 'norte',
@@ -2276,15 +2516,22 @@ export const DEMO_PRESCRIPTION_TEMPLATES: readonly DemoPrescriptionTemplate[] =
     },
   ];
 
-/** Nº de registro profesional de los odontólogos demo. */
+/**
+ * Nº de registro profesional de los odontólogos demo: los dos de la rotación
+ * y, después, los de `DEMO_SITE_DENTISTS`, en su orden.
+ */
 export const DEMO_PROFESSIONAL_LICENSES: readonly string[] = [
   'LIC-DEMO-5219',
   'LIC-DEMO-2521',
+  'LIC-DEMO-7310',
+  'LIC-DEMO-8842',
 ];
 
 /** Especialidad de los odontólogos demo, en el mismo orden (DX-324). */
 export const DEMO_PROFESSIONAL_SPECIALTIES: readonly string[] = [
   'Cirugía oral',
+  'Odontología general',
+  'Odontología general',
   'Odontología general',
 ];
 

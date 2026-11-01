@@ -4,6 +4,10 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
+import {
+  type CountryCode,
+  parsePhoneNumberFromString,
+} from 'libphonenumber-js/max';
 import { ClinicRole, DocumentType, Prisma, PrismaClient } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { fitsBusinessHours } from '../src/modules/location-schedule/application/business-hours';
@@ -21,9 +25,12 @@ import {
   DEMO_COMPARISON_HISTORY,
   DEMO_COVERAGES,
   DEMO_LOCATIONS,
+  DEMO_MANUAL_RATES,
+  DEMO_PATIENTS,
   DEMO_PRESCRIPTION,
   DEMO_PAYERS,
   DEMO_PRESCRIPTION_SETTINGS,
+  DEMO_PROFESSIONAL_LICENSES,
   DEMO_PROFESSIONAL_SPECIALTIES,
 } from '../prisma/demo/data';
 import { purgeDemoTenants } from './support/demo-tenant-purge';
@@ -276,16 +283,19 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(tenant.primaryColor).not.toBe('#0F5E9C');
 
     firstCounts = await countsFor(tenantId);
-    expect(firstCounts.locations).toBe(2);
-    expect(firstCounts.location_schedules).toBe(2);
+    // DX-335: las dos sedes de la rotación y las dos con dentista propio.
+    expect(firstCounts.locations).toBe(4);
+    expect(firstCounts.location_schedules).toBe(4);
     // DX-316: cada sede con su calendario de lunes a viernes (trigger), sin
     // festivos (los de ejemplo son de G6.1).
-    expect(firstCounts.location_working_calendars).toBe(2);
+    expect(firstCounts.location_working_calendars).toBe(4);
     expect(firstCounts.location_holidays).toBe(0);
-    expect(firstCounts.clinic_memberships).toBe(6);
-    // DX-089: solo «Recepción Norte» tiene sedes; el resto atiende en todas.
-    expect(firstCounts.membership_locations).toBe(1);
-    expect(firstCounts.patients).toBe(25);
+    expect(firstCounts.clinic_memberships).toBe(8);
+    // DX-089: «Recepción Norte» y el dentista de cada sede propia tienen
+    // sedes; el resto atiende en todas.
+    expect(firstCounts.membership_locations).toBe(3);
+    // R3: 25 de las sedes de la rotación y 4 por cada sede propia.
+    expect(firstCounts.patients).toBe(33);
     // DX-203: la abuela paga a Sofía y a Mateo; la madre y el padre, contactos.
     expect(firstCounts.patient_responsible_parties).toBe(4);
     // DX-153: 7 pagadores y una cobertura por paciente con aseguradora;
@@ -448,8 +458,21 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     ]);
     const memberships = await raw.clinicMembership.findMany({
       where: { tenantId, professionalSpecialty: { not: null } },
-      select: { professionalSpecialty: true },
+      select: {
+        professionalSpecialty: true,
+        professionalLicense: true,
+        user: { select: { email: true } },
+      },
     });
+    // A69: los cuatro dentistas, también los de las sedes propias, cada uno
+    // con su registro (en el orden de los dentistas de `DEMO_USERS`).
+    expect(
+      memberships.map((m) => [m.user.email, m.professionalLicense]).sort(),
+    ).toEqual(
+      DEMO_USERS.filter((u) => u.role === ClinicRole.DENTIST)
+        .map((u, i) => [u.email, DEMO_PROFESSIONAL_LICENSES[i]])
+        .sort(),
+    );
     expect(memberships.map((m) => m.professionalSpecialty).sort()).toEqual(
       [...DEMO_PROFESSIONAL_SPECIALTIES].sort(),
     );
@@ -1047,13 +1070,18 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     const rows = await raw.membershipLocation.findMany({
       where: { tenantId },
       select: {
-        locationId: true,
+        location: { select: { name: true } },
         membership: { select: { user: { select: { email: true } } } },
       },
     });
-    expect(rows.map((r) => [r.membership.user.email, r.locationId])).toEqual([
-      [`recepcion.norte@${DEMO_EMAIL_DOMAIN}`, norte.id],
-    ]);
+    // D7: también el dentista de cada sede propia, restringido a la suya.
+    expect(
+      rows.map((r) => [r.membership.user.email, r.location.name]).sort(),
+    ).toEqual(
+      DEMO_USERS.flatMap((u) =>
+        (u.locations ?? []).map((key) => [u.email, DEMO_LOCATIONS[key].name]),
+      ).sort(),
+    );
 
     const login = await request(app.getHttpServer())
       .post('/api/v1/auth/login')
@@ -1169,8 +1197,9 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     ]) {
       expect(statuses).toContain(s);
     }
-    expect(new Set(appointments.map((a) => a.locationId)).size).toBe(2);
-    expect(new Set(appointments.map((a) => a.providerId)).size).toBe(2);
+    // R3: las cuatro sedes, cada una con sus dentistas.
+    expect(new Set(appointments.map((a) => a.locationId)).size).toBe(4);
+    expect(new Set(appointments.map((a) => a.providerId)).size).toBe(4);
 
     const now = Date.now();
     const day = 24 * 60 * 60 * 1000;
@@ -1337,14 +1366,20 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(settings.manualExchangeRatesSince!.toISOString().slice(0, 10)).toBe(
       addCivilDays(today, -60),
     );
+    // Por moneda: la tasa VES del «hoy» de la principal es 250 (el resto de
+    // la cobertura, en «manual rates cover every non-USD currency…»).
     const rates = await raw.manualExchangeRate.findMany({
       where: { tenantId },
       orderBy: { date: 'asc' },
     });
-    expect(rates).toHaveLength(61);
-    expect(new Set(rates.map((r) => r.currency))).toEqual(new Set(['VES']));
-    expect(rates.at(-1)!.date.toISOString().slice(0, 10)).toBe(today);
-    expect(Number(rates.at(-1)!.rate)).toBe(250);
+    expect(new Set(rates.map((r) => r.currency))).toEqual(
+      new Set(Object.keys(DEMO_MANUAL_RATES)),
+    );
+    const vesToday = rates.find(
+      (r) =>
+        r.currency === 'VES' && r.date.toISOString().slice(0, 10) === today,
+    );
+    expect(Number(vesToday!.rate)).toBe(250);
     expect(
       payments.every(
         (p) =>
@@ -1401,6 +1436,84 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(lowStock[0].n).toBeGreaterThanOrEqual(2);
     const items = await raw.inventoryItem.findMany({ where: { tenantId } });
     expect(new Set(items.map((i) => i.locationId)).size).toBe(2);
+  });
+
+  it('manual rates cover every non-USD currency up to the most advanced location today', async () => {
+    const tenantId = await liveDemoTenantId();
+    const rates = await raw.manualExchangeRate.findMany({
+      where: { tenantId },
+      orderBy: { date: 'asc' },
+    });
+    // La siembra puede cruzar la medianoche de una sede: vale el «hoy» más
+    // adelantado del inicio o del final de la siembra.
+    const latestToday = (t: number) =>
+      Object.values(DEMO_LOCATIONS)
+        .map((l) => civilDateIn(new Date(t), l.timeZone))
+        .sort()
+        .at(-1)!;
+    const accepted = [
+      latestToday(seededBetween.start),
+      latestToday(seededBetween.end),
+    ];
+    for (const currency of ['VES', 'BRL', 'GBP']) {
+      const days = rates
+        .filter((r) => r.currency === currency)
+        .map((r) => r.date.toISOString().slice(0, 10));
+      expect({ currency, count: [61, 62].includes(days.length) }).toEqual({
+        currency,
+        count: true,
+      });
+      expect({ currency, last: accepted.includes(days.at(-1)!) }).toEqual({
+        currency,
+        last: true,
+      });
+    }
+  });
+
+  it("every stored demo phone is valid for its patient's location region", async () => {
+    const tenantId = await liveDemoTenantId();
+    const patients = await raw.patient.findMany({
+      where: { tenantId },
+      select: { docNumber: true, phone: true },
+    });
+    expect(patients).toHaveLength(DEMO_PATIENTS.length);
+    for (const row of patients) {
+      const demo = DEMO_PATIENTS.find((p) => p.docNumber === row.docNumber)!;
+      const region = DEMO_LOCATIONS[demo.location].country;
+      const parsed = parsePhoneNumberFromString(
+        row.phone ?? '',
+        region as CountryCode,
+      );
+      expect({ doc: row.docNumber, valid: parsed?.isValid() ?? false }).toEqual(
+        { doc: row.docNumber, valid: true },
+      );
+      // El extranjero de la demo conserva su prefijo.
+      if (row.docNumber !== 'DEMO-P01') {
+        expect({ doc: row.docNumber, country: parsed?.country }).toEqual({
+          doc: row.docNumber,
+          country: region,
+        });
+      }
+    }
+    const locations = await raw.location.findMany({
+      where: { tenantId, deletedAt: null, phone: { not: null } },
+      select: { name: true, phone: true },
+    });
+    expect(locations.length).toBeGreaterThan(0);
+    for (const row of locations) {
+      const site = Object.values(DEMO_LOCATIONS).find(
+        (l) => l.name === row.name,
+      )!;
+      const parsed = parsePhoneNumberFromString(
+        row.phone!,
+        site.country as CountryCode,
+      );
+      expect({
+        name: row.name,
+        valid: parsed?.isValid() ?? false,
+        country: parsed?.country,
+      }).toEqual({ name: row.name, valid: true, country: site.country });
+    }
   });
 
   it('DX-051: los abonos de la demo quedan imputados, uno fijado a mano, un plan con importe sin imputar y la cola vacía', async () => {
@@ -1464,10 +1577,18 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       return openDayBefore ? [previous, current] : [previous];
     };
 
+    // Las dos sedes de la rotación: las sedes con dentista propio aún no
+    // tienen historia de cobros ni realizados.
     const locations = await raw.location.findMany({
-      where: { tenantId },
+      where: {
+        tenantId,
+        name: {
+          in: [DEMO_LOCATIONS.principal.name, DEMO_LOCATIONS.norte.name],
+        },
+      },
       select: { id: true },
     });
+    expect(locations).toHaveLength(2);
     const [appointments, payments, items] = await Promise.all([
       raw.appointment.findMany({
         where: { tenantId, status: 'COMPLETED', deletedAt: null },

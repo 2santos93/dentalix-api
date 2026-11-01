@@ -1,29 +1,42 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { parsePhoneNumberFromString } from 'libphonenumber-js/max';
+import {
+  type CountryCode,
+  parsePhoneNumberFromString,
+} from 'libphonenumber-js/max';
 import {
   daysAgoAt,
   planAppointments,
   planInClinicToday,
+  planSiteAppointments,
 } from '../../prisma/demo/calendar';
 import {
   DEMO_COMMUNICATION,
   DEMO_LOCATIONS,
+  DEMO_MANUAL_RATES,
   DEMO_PATIENTS,
+  DEMO_PLANS,
   DEMO_PRIVACY_POLICY,
   DEMO_RESPONSIBLES,
   DEMO_USERS,
+  demoRateDates,
+  localPatientIndexes,
+  sitePatientIndexes,
 } from '../../prisma/demo/data';
+import { MANUAL_RATE_MAX_DECIMALS } from '../../src/modules/exchange/domain/exchange-rate-source';
 import { DEFAULT_BUSINESS_HOURS } from '../../src/shared/locations/default-business-hours';
+import { decimalPlaces } from '../../src/shared/validation/bounded-decimal';
+import { addCivilDays } from '../../src/shared/time/civil-day';
 
 // DX-335 (G6.1): la demo es una clínica de varios países y nada de ella
 // presupone uno. Este fichero reúne los invariantes de esos datos; cada tarea
 // de DX-335 añade aquí los suyos. Corre en `npm test` (`test/invariants` está
 // en `roots` de jest) y no necesita base de datos.
 
-// Región de la sede principal. Literal aquí: los teléfonos de la hoja y el
-// fijo de DX-128 se validan con la región con la que los lee la demo.
-const MAIN_REGION = 'VE';
+// Región de la sede principal: los teléfonos de la hoja y el fijo de DX-128
+// se validan con la región con la que los lee la demo.
+const MAIN_REGION = DEMO_LOCATIONS.principal.country as CountryCode;
+const SITES = Object.values(DEMO_LOCATIONS);
 
 // Apellidos retirados (A6, A7, A11-A22). Los literales se arman por partes
 // para que este fichero no se delate solo.
@@ -204,8 +217,166 @@ describe('demo global (DX-335)', () => {
       principal: DEMO_LOCATIONS.principal.timeZone,
       norte: DEMO_LOCATIONS.norte.timeZone,
     };
-    const indexes = DEMO_PATIENTS.map((_, i) => i);
+    const indexes = localPatientIndexes();
     const plan = () => planAppointments(now, zones, indexes, () => true);
     expect(plan()).toEqual(plan());
+  });
+  it('the demo locations span at least three countries, currencies, zones and locales', () => {
+    for (const field of [
+      'country',
+      'currency',
+      'timeZone',
+      'locale',
+    ] as const) {
+      expect({
+        field,
+        distinct: new Set(SITES.map((site) => site[field])).size >= 3,
+      }).toEqual({ field, distinct: true });
+    }
+  });
+
+  it('no demo location is in a retired country', () => {
+    const retired = ['C' + 'O', 'E' + 'S'];
+    expect(SITES.filter((site) => retired.includes(site.country))).toEqual([]);
+  });
+
+  it('some demo location uses a locale that is not Spanish', () => {
+    expect(SITES.some((site) => site.locale.split('-')[0] !== 'es')).toBe(true);
+  });
+
+  it('every currency of a location or a payment is USD or has a manual rate', () => {
+    const currencies = [
+      ...SITES.map((site) => site.currency),
+      ...DEMO_PLANS.flatMap((plan) =>
+        plan.payments.flatMap((payment) =>
+          payment.currency ? [payment.currency] : [],
+        ),
+      ),
+    ];
+    for (const currency of currencies) {
+      expect({
+        currency,
+        rated: currency === 'USD' || currency in DEMO_MANUAL_RATES,
+      }).toEqual({ currency, rated: true });
+    }
+  });
+
+  it("every demo phone is valid and belongs to its patient's location region", () => {
+    const checks: { phone: string; region: string; foreign: boolean }[] = [];
+    for (const patient of DEMO_PATIENTS) {
+      const region = DEMO_LOCATIONS[patient.location].country;
+      const foreign = patient.docNumber === 'DEMO-P01';
+      for (const phone of [patient.phone, patient.emergencyContactPhone]) {
+        if (phone) checks.push({ phone, region, foreign });
+      }
+    }
+    for (const responsible of DEMO_RESPONSIBLES) {
+      if (!responsible.contact) continue;
+      const patient = DEMO_PATIENTS[responsible.patientIndex];
+      checks.push({
+        phone: responsible.contact.phone,
+        region: DEMO_LOCATIONS[patient.location].country,
+        foreign: false,
+      });
+    }
+    for (const site of SITES) {
+      if (site.phone) {
+        checks.push({
+          phone: site.phone,
+          region: site.country,
+          foreign: false,
+        });
+      }
+    }
+    for (const { input } of DEMO_COMMUNICATION) {
+      if ('phone' in input) {
+        checks.push({
+          phone: input.phone,
+          region: MAIN_REGION,
+          foreign: false,
+        });
+      }
+    }
+    expect(checks.length).toBeGreaterThan(DEMO_PATIENTS.length);
+    for (const { phone, region, foreign } of checks) {
+      const parsed = parsePhoneNumberFromString(phone, region as CountryCode);
+      expect({ phone, valid: parsed?.isValid() ?? false }).toEqual({
+        phone,
+        valid: true,
+      });
+      if (!foreign) {
+        expect({ phone, country: parsed?.country }).toEqual({
+          phone,
+          country: region,
+        });
+      }
+    }
+  });
+
+  it('every manual rate is positive and has at most the decimals the use case accepts', () => {
+    for (const [currency, rateOf] of Object.entries(DEMO_MANUAL_RATES)) {
+      for (let daysAgo = 0; daysAgo <= 61; daysAgo++) {
+        const rate = rateOf(daysAgo);
+        expect({
+          currency,
+          daysAgo,
+          positive: rate > 0,
+          decimals: decimalPlaces(rate) <= MANUAL_RATE_MAX_DECIMALS,
+        }).toEqual({ currency, daysAgo, positive: true, decimals: true });
+      }
+    }
+  });
+
+  it('no planned appointment joins a patient or a dentist with a location that is not theirs', () => {
+    const now = new Date('2026-11-02T15:00:00Z');
+    const zones = {
+      principal: DEMO_LOCATIONS.principal.timeZone,
+      norte: DEMO_LOCATIONS.norte.timeZone,
+    };
+    const rotation = planAppointments(
+      now,
+      zones,
+      localPatientIndexes(),
+      () => true,
+    );
+    expect(rotation.length).toBeGreaterThan(0);
+    for (const a of rotation) {
+      expect({
+        location: a.location,
+        patientLocation: DEMO_PATIENTS[a.patientIndex].location,
+      }).toEqual({
+        location: expect.stringMatching(/^(principal|norte)$/) as string,
+        patientLocation: expect.stringMatching(/^(principal|norte)$/) as string,
+      });
+    }
+    for (const key of ['saoPaulo', 'londres'] as const) {
+      const site = planSiteAppointments(
+        now,
+        key,
+        DEMO_LOCATIONS[key].timeZone,
+        sitePatientIndexes(key),
+        () => true,
+      );
+      expect(site.length).toBeGreaterThan(0);
+      for (const a of site) {
+        expect({
+          location: a.location,
+          dentistIndex: a.dentistIndex,
+          patientLocation: DEMO_PATIENTS[a.patientIndex].location,
+        }).toEqual({ location: key, dentistIndex: 0, patientLocation: key });
+      }
+    }
+  });
+
+  it('rates are registered up to the most advanced location today from a location whose today admits them', () => {
+    // 21:30 del 31 de octubre en Caracas y ya 01:30 del 1 de noviembre en Londres.
+    const dates = demoRateDates(new Date('2026-11-01T01:30:00Z'));
+    expect(dates).toHaveLength(62);
+    expect(dates[0].date).toBe('2026-09-01');
+    expect(dates.at(-1)).toEqual({ date: '2026-11-01', key: 'londres' });
+    dates.forEach(({ date, key }, i) => {
+      expect(date).toBe(addCivilDays('2026-09-01', i));
+      if (i < 61) expect({ date, key }).toEqual({ date, key: 'principal' });
+    });
   });
 });

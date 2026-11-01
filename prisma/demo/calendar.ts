@@ -6,7 +6,12 @@ import {
   zonedStartOfDay,
   zonedWallTime,
 } from '../../src/shared/time/civil-day';
-import { DEMO_ROTATION, type RotationSiteKey } from './data';
+import {
+  DEMO_ROTATION,
+  type DemoLocationKey,
+  type RotationSiteKey,
+  type SoloSiteKey,
+} from './data';
 
 /**
  * Calendario de la clínica demo. Todo es función pura de "hoy" (sin azar), así
@@ -106,7 +111,7 @@ export function upcomingWeekdayOffsets(
 }
 
 /** Huecos candidatos por sede: [inicio en minutos de pared, duración]. */
-const SLOT_TEMPLATES: Record<RotationSiteKey, readonly [number, number][]> = {
+const SLOT_TEMPLATES: Record<DemoLocationKey, readonly [number, number][]> = {
   // Horario por defecto del registro: lun-vie 9-13 y 15-19, sáb 9-13.
   principal: [
     [9 * 60, 60],
@@ -127,6 +132,25 @@ const SLOT_TEMPLATES: Record<RotationSiteKey, readonly [number, number][]> = {
     [14 * 60 + 30, 45],
     [16 * 60, 60],
   ],
+  // Sedes con dentista propio, fuera de su pausa de mediodía.
+  // lun-vie 8-12 y 13-18.
+  saoPaulo: [
+    [8 * 60, 60],
+    [9 * 60 + 30, 45],
+    [10 * 60 + 30, 60],
+    [13 * 60, 60],
+    [14 * 60 + 30, 45],
+    [16 * 60, 60],
+  ],
+  // lun-vie 9-13 y 14-18.
+  londres: [
+    [9 * 60, 60],
+    [10 * 60 + 30, 30],
+    [11 * 60 + 30, 60],
+    [14 * 60, 45],
+    [15 * 60, 60],
+    [16 * 60 + 30, 60],
+  ],
 };
 
 const REASONS = [
@@ -144,9 +168,12 @@ const REASONS = [
 ] as const;
 
 interface PlannedAppointment {
-  /** 0 = dentista, 1 = dentista2. */
+  /**
+   * En las sedes de la rotación, 0 = dentista y 1 = dentista2; en una sede
+   * con dentista propio, siempre 0 (el suyo).
+   */
   dentistIndex: number;
-  location: RotationSiteKey;
+  location: DemoLocationKey;
   start: Date;
   end: Date;
   /** Índice del paciente en `DEMO_PATIENTS`. */
@@ -177,10 +204,7 @@ export function planAppointments(
   patientIndexes: readonly number[],
   fits: (location: RotationSiteKey, start: Date, end: Date) => boolean,
 ): PlannedAppointment[] {
-  const today = sedeDay(now, 0, zones.principal);
-  const daysSinceMonday = (today.weekday + 6) % 7;
-  const firstOffset = -daysSinceMonday - 7;
-  const lastOffset = firstOffset + 19; // sábado de la semana próxima
+  const { firstOffset, lastOffset } = calendarRange(now, zones.principal);
 
   const half = Math.ceil(patientIndexes.length / 2);
   const groups = [patientIndexes.slice(0, half), patientIndexes.slice(half)];
@@ -233,6 +257,58 @@ export function planAppointments(
     }
   }
   return planned;
+}
+
+/**
+ * Las citas de una sede con dentista propio: mismo rango de días y misma regla
+ * de huecos que `planAppointments`, con su único dentista (`dentistIndex` 0),
+ * los pacientes de la sede (`patientIndexes`) y el «hoy» de su zona. El
+ * horario lo filtra quien llama (`fits`).
+ */
+export function planSiteAppointments(
+  now: Date,
+  key: SoloSiteKey,
+  timeZone: string,
+  patientIndexes: readonly number[],
+  fits: (start: Date, end: Date) => boolean,
+): PlannedAppointment[] {
+  const { firstOffset, lastOffset } = calendarRange(now, timeZone);
+  const planned: PlannedAppointment[] = [];
+  for (let offset = firstOffset; offset <= lastOffset; offset++) {
+    const day = sedeDay(now, offset, timeZone);
+    if (day.weekday === 0) continue; // domingo cerrado
+    const dayIndex = offset - firstOffset;
+    SLOT_TEMPLATES[key].forEach(([startMinute, duration], slot) => {
+      if ((dayIndex * 3 + slot * 5) % 7 >= 3) return;
+      const start = at(day, startMinute, timeZone);
+      const end = at(day, startMinute + duration, timeZone);
+      if (!fits(start, end)) return;
+      const seq = planned.length;
+      planned.push({
+        dentistIndex: 0,
+        location: key,
+        start,
+        end,
+        patientIndex: patientIndexes[seq % patientIndexes.length],
+        reason: REASONS[seq % REASONS.length],
+        status: statusFor(now, start, end, dayIndex + slot),
+      });
+    });
+  }
+  return planned;
+}
+
+/**
+ * Desfases (en la zona dada) del calendario de citas: del lunes de la semana
+ * pasada al sábado de la próxima.
+ */
+function calendarRange(
+  now: Date,
+  timeZone: string,
+): { firstOffset: number; lastOffset: number } {
+  const daysSinceMonday = (sedeDay(now, 0, timeZone).weekday + 6) % 7;
+  const firstOffset = -daysSinceMonday - 7;
+  return { firstOffset, lastOffset: firstOffset + 19 };
 }
 
 function statusFor(
