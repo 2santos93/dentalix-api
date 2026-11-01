@@ -3230,9 +3230,11 @@ export const DEMO_CANCELLATION = {
 export const DEMO_COMPARISON_HISTORY = {
   dentistIndex: 0,
   reason: 'Profilaxis y control',
+  // Las dos sedes de la rotación, en otro orden: con dos huecos por sede,
+  // un paciente nunca tiene visita en las dos el mismo día.
   patientIndexes: {
     principal: [14, 15, 17, 18],
-    norte: [14, 15, 17, 18],
+    norte: [17, 18, 14, 15],
     saoPaulo: [27, 28],
     londres: [31, 32],
   },

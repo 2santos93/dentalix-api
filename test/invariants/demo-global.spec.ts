@@ -535,6 +535,43 @@ describe('demo global (DX-335)', () => {
     expect(checked).toBeGreaterThan(366 * 4);
   });
 
+  it('comparison history never gives a patient visits at two rotation locations on the same day', () => {
+    // Las dos sedes de la rotación comparten pacientes: si uno tuviera visita
+    // en las dos el mismo día, el mismo procedimiento quedaría dos veces.
+    const rotation = ['principal', 'norte'] as const;
+    let checked = 0;
+    for (
+      let day = '2028-01-01';
+      day <= '2028-12-31';
+      day = addCivilDays(day, 1)
+    ) {
+      const now = new Date(`${day}T12:00:00Z`);
+      const seen = new Map<string, DemoLocationKey>();
+      for (const key of rotation) {
+        const zone = DEMO_LOCATIONS[key].timeZone;
+        for (const visit of planComparisonHistory(
+          now,
+          zone,
+          key,
+          DEMO_COMPARISON_HISTORY,
+          rangesOf(key),
+        )) {
+          const visitDay = addCivilDays(civilDateIn(now, zone), -visit.daysAgo);
+          const slot = `${visit.patientIndex}@${visitDay}`;
+          const other = seen.get(slot);
+          if (other !== undefined && other !== key) {
+            expect({ day, slot, locations: [other, key] }).toEqual(
+              'one rotation location per patient and day',
+            );
+          }
+          seen.set(slot, key);
+          checked++;
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(366 * 2);
+  });
+
   it('no planner puts an appointment on a holiday of its location', () => {
     expect(
       isDemoHoliday(
