@@ -33,6 +33,8 @@ export function catalogPricing(
         planCurrency,
         planRoundingDigits:
           REFERENCE_CURRENCY_DIGITS.roundingDigits(planCurrency),
+        // DX-502: el catálogo en la moneda del plan, salvo que `extra` diga otra.
+        catalogCurrency: planCurrency,
         today: PRICING_TODAY,
         locationId: PRICING_LOCATION_ID,
         agreement: null,

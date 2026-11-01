@@ -107,6 +107,14 @@ export class PlanQuoteItemDto {
       'Convenio con que se fijó el precio del ítem (v2). Null si no hubo convenio.',
   })
   agreementName!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'DX-502: moneda ISO 4217 de `listPrice`, la del catálogo al dar de alta el ítem (congelada; en v1/v2, la guardada en el ítem). Puede no ser la del plan: no se convierte. Null si no se sabe: la web oculta la cifra o la muestra sin moneda, con la nota de referencia.',
+  })
+  listPriceCurrency!: string | null;
 }
 
 export class PlanQuoteTotalDto {
@@ -124,7 +132,7 @@ export class PlanQuoteTotalDto {
 
   @ApiProperty({
     description:
-      'Ahorro por convenio (v2): Σ max(0, precio de lista − precio de referencia) de los ítems con convenio, en la moneda del plan. 0 en v1.',
+      'Ahorro por convenio (v2): Σ max(0, precio de lista − precio de referencia) de los ítems con convenio, en la moneda del plan. v3 (DX-502): solo los ítems cuyo precio de lista está en la moneda del plan (nunca resta monedas distintas). 0 en v1.',
   })
   agreementSaving!: number;
 }
@@ -218,11 +226,11 @@ export class PlanQuoteDocumentDto {
   visitOrganization?: PlanQuoteVisitDto[];
 
   @ApiProperty({
-    enum: [1, 2],
+    enum: [1, 2, 3],
     description:
-      '2 = con convenio y ahorro (DX-105); 1 = foto firmada antes de DX-105 (sin convenio).',
+      '3 = con la moneda de cada precio de lista (DX-502); 2 = con convenio y ahorro (DX-105); 1 = foto firmada antes de DX-105 (sin convenio).',
   })
-  version!: 1 | 2;
+  version!: 1 | 2 | 3;
 
   @ApiProperty({ format: 'uuid' })
   planId!: string;

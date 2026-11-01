@@ -136,6 +136,9 @@ export class AddTreatmentPlanItemUseCase {
         catalogPrice: resolved.price,
         pricing: {
           basePrice: resolved.basePrice,
+          // DX-502: sin precio de catálogo no hay moneda que guardar.
+          catalogCurrency:
+            resolved.basePrice === null ? null : resolved.catalogCurrency,
           priceSource: resolved.source,
           agreementId: resolved.agreementId,
           agreementName: resolved.agreementName,

@@ -446,6 +446,8 @@ describe('GetPriceQuoteUseCase (DX-105)', () => {
     );
     await expect(quote.execute('p1', 'endo', 'COP')).resolves.toEqual({
       basePrice: 100_000,
+      // DX-502: la moneda del catálogo viaja con su precio.
+      catalogCurrency: 'COP',
       price: 85_000,
       source: PriceSource.AGREEMENT_PERCENT,
       agreementId: 'agr-surco',

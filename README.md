@@ -913,6 +913,30 @@ la clínica (DX-012/DX-040). Migraciones `20261106160000_dx415_enums` y
 - **Pendiente** (DX-422): el PDF del presupuesto firmado generado en el
   servidor; hoy el paciente imprime o guarda la copia desde la página.
 
+### Moneda del precio de lista (DX-502)
+
+El precio de lista del presupuesto es el `defaultPrice` del catálogo, que no
+lleva moneda. Al dar de alta un ítem, la API congela en
+`treatment_plan_items."catalogCurrency"` la moneda del catálogo: la común de
+TODAS las sedes activas de la clínica (no solo las del usuario), o `NULL` si
+no hay una común. No cambia después (trigger
+`treatment_plan_items_catalog_currency_frozen`) y las alternativas la copian.
+
+- El presupuesto se compone como **v3**: cada ítem lleva `listPriceCurrency`
+  (sellado en el hash) y el «Ahorro por convenio» solo suma los ítems cuyo
+  precio de lista está en la moneda del plan (nunca resta monedas distintas).
+- Las fotos v1/v2 ya firmadas conservan su hash; al leerlas, la API completa
+  `listPriceCurrency` con la del ítem. Un enlace a distancia v2 enviado antes
+  del despliegue se recompone como v2 y sigue valiendo; la página pública lo
+  muestra sin cifra de precio de lista (`listPriceCurrency: null`).
+- Se expone en `TreatmentPlanItemDto.catalogCurrency`,
+  `PriceQuoteDto.catalogCurrency`, `PlanQuoteItemDto.listPriceCurrency` y
+  `PublicBudgetItemDto.listPriceCurrency`.
+- Relleno: `20261111180100_dx502_plan_item_catalog_currency_backfill`
+  (moneda común de las sedes activas de cada clínica; sin común, `NULL`).
+- Pendiente: el control de descuentos (tope, motivo e informe, SEC-041) sigue
+  contando como rebaja un precio por debajo de un catálogo en otra moneda.
+
 ### PDF firmado generado en el servidor (DX-422)
 
 - Cuando el profesional firma en la app un consentimiento firmado a distancia

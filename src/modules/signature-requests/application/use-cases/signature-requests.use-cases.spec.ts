@@ -18,6 +18,7 @@ import type {
 } from '../../../notifications/email/domain/email-message';
 import { quoteSource } from '../../../treatment-plans/application/use-cases/__fixtures__/in-memory-plan-quote.repository';
 import { computeQuoteHash } from '../../../treatment-plans/domain/plan-quote';
+import { composeQuoteContent } from '../../../treatment-plans/application/use-cases/plan-quote.use-cases';
 import { RemoteBudgetCheck } from '../remote-budget';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import type { SignatureRecipientContext } from '../../domain/ports/signature-request-repository.port';
@@ -921,6 +922,70 @@ describe('presupuesto a distancia (DX-415)', () => {
         ctx.inTenant(() => ctx.document.execute(token, session)),
       ).rejects.toThrow(SIGNATURE_LINK_INVALID_MESSAGE);
     }
+  });
+
+  describe('DX-502: plan en EUR con el catálogo en COP', () => {
+    function eurBudget(ctx: Ctx) {
+      const budget = presentedBudget(ctx);
+      budget.quote = {
+        ...budget.quote,
+        plan: { ...budget.quote.plan, currency: 'EUR' },
+        items: [
+          {
+            ...budget.quote.items[0],
+            price: 100.55,
+            discount: 0,
+            basePrice: 80000,
+            referencePrice: 100.55,
+            agreementName: 'Lista Euro',
+            agreementPayerName: 'Aseguradora',
+            listPriceCurrency: 'COP',
+          },
+        ],
+      };
+      return budget;
+    }
+
+    it('la foto enviada lleva el precio de lista en COP y el paciente lo ve así, sin ahorro', async () => {
+      const ctx = setup();
+      eurBudget(ctx);
+      const { token, session } = await verifiedBudget(ctx);
+      const doc = await ctx.inTenant(() =>
+        ctx.document.execute(token, session),
+      );
+      expect(doc.budget?.currency).toBe('EUR');
+      expect(doc.budget?.items[0]).toMatchObject({
+        unitPrice: 100.55,
+        listPrice: 80000,
+        listPriceCurrency: 'COP',
+      });
+      expect(doc.budget?.totals[0]).toMatchObject({
+        currency: 'EUR',
+        agreementSaving: 0,
+      });
+    });
+
+    it('un enlace v2 enviado antes de DX-502 sigue valiendo (se recompone como v2)', async () => {
+      const ctx = setup();
+      const budget = eurBudget(ctx);
+      await sendBudget(ctx);
+      const [row] = ctx.repo.rows;
+      const sent = row.budgetContent as { issuedOn: string };
+      const v2 = composeQuoteContent(budget.quote, sent.issuedOn, {}, 2);
+      row.budgetContent = JSON.parse(JSON.stringify(v2)) as never;
+      row.budgetContentHash = computeQuoteHash(v2);
+      const token = tokenOf(ctx);
+      await ctx.inTenant(() => ctx.code.execute(token, EVIDENCE));
+      const code = ctx.codes.at(-1)!.vars.code;
+      const { sessionToken } = await ctx.inTenant(() =>
+        ctx.verify.execute(token, code, EVIDENCE),
+      );
+      const doc = await ctx.inTenant(() =>
+        ctx.document.execute(token, sessionToken),
+      );
+      // La foto v2 no guardó la moneda: la web oculta la cifra con la nota.
+      expect(doc.budget?.items[0].listPriceCurrency).toBeNull();
+    });
   });
 
   it('el día siguiente el mismo presupuesto sigue valiendo (la emisión es la de la foto)', async () => {

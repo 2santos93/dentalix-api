@@ -12,6 +12,11 @@ export const QUOTE_VALIDITY_DAYS = 30;
 const QUOTE_HASH_VERSION = 'dentalix-plan-quote-v1';
 /** DX-105: el hash v2 sella además el convenio, el precio de lista y el ahorro. */
 export const QUOTE_HASH_VERSION_V2 = 'dentalix-plan-quote-v2';
+/** DX-502: el hash v3 sella además la moneda de cada precio de lista. */
+export const QUOTE_HASH_VERSION_V3 = 'dentalix-plan-quote-v3';
+/** Las versiones que se componen: la vigente (3) y la v2 de los enlaces ya enviados. */
+export type ComposedQuoteVersion = 2 | 3;
+export const CURRENT_QUOTE_VERSION: ComposedQuoteVersion = 3;
 /** Separador de los nombres cuando un plan mezcla varios convenios. */
 const AGREEMENT_NAMES_SEPARATOR = ' · ';
 const ACCEPTANCE_HASH_VERSION = 'dentalix-plan-acceptance-v1';
@@ -44,6 +49,11 @@ export interface QuoteSourceItem {
   agreementName: string | null;
   /** Pagador de ese convenio; `null` si no hubo convenio. */
   agreementPayerName: string | null;
+  /**
+   * DX-502: moneda del catálogo congelada en el ítem al darlo de alta (la de
+   * `basePrice`); `null` si no se supo (sedes sin una moneda común).
+   */
+  listPriceCurrency: string | null;
 }
 
 export interface QuoteLocation {
@@ -79,6 +89,12 @@ export interface QuoteItem {
   listPrice: number | null;
   /** Convenio con que se fijó el precio (v2). */
   agreementName: string | null;
+  /**
+   * Moneda del precio de lista: la del catálogo al dar de alta el ítem (v3,
+   * DX-502). Puede no ser la del plan: no se convierte. `null` si no se sabe
+   * (v1/v2 sin completar, o sedes sin moneda común).
+   */
+  listPriceCurrency: string | null;
 }
 
 export interface QuoteTotal {
@@ -86,7 +102,11 @@ export interface QuoteTotal {
   gross: number;
   discount: number;
   net: number;
-  /** Σ max(0, precio de lista − precio de referencia) de los ítems con convenio (v2). */
+  /**
+   * Σ max(0, precio de lista − precio de referencia) de los ítems con convenio
+   * (v2). v3 (DX-502): solo de los ítems cuyo precio de lista está en la
+   * moneda del plan; nunca resta monedas distintas.
+   */
   agreementSaving: number;
 }
 
@@ -103,11 +123,14 @@ export interface QuoteAgreement {
  */
 export interface QuoteContent {
   /**
-   * 2 = presupuesto con convenio y ahorro (DX-105), el único que se compone
-   * hoy. 1 = fotos firmadas antes de DX-105: se leen con `agreement: null`,
-   * `listPrice`/`agreementName` nulos y ahorro 0, y su hash sigue siendo el v1.
+   * 3 = con la moneda de cada precio de lista (DX-502), el que se compone hoy.
+   * 2 = convenio y ahorro (DX-105): fotos firmadas o enviadas antes de DX-502;
+   * se leen con `listPriceCurrency` null y su hash sigue siendo el v2 (un
+   * enlace v2 aún pendiente se recompone como v2 para compararlo). 1 = fotos
+   * firmadas antes de DX-105: además `agreement: null`, `listPrice` y
+   * `agreementName` nulos y ahorro 0, con su hash v1.
    */
-  version: 1 | 2;
+  version: 1 | 2 | 3;
   planId: string;
   patientId: string;
   currency: string;
@@ -151,13 +174,33 @@ function agreementOf(items: QuoteSourceItem[]): QuoteAgreement | null {
 }
 
 /**
+ * ¿Entra el ítem en el «Ahorro por convenio»? Con convenio, precio de lista y
+ * referencia; en v3, además, con el precio de lista en la moneda del plan: la
+ * resta entre monedas distintas (o desconocidas) no es un ahorro (DX-502).
+ */
+function savesByAgreement(
+  item: QuoteSourceItem,
+  planCurrency: string,
+  version: ComposedQuoteVersion,
+): item is QuoteSourceItem & { basePrice: number; referencePrice: number } {
+  return (
+    item.agreementName !== null &&
+    item.basePrice !== null &&
+    item.referencePrice !== null &&
+    (version === 2 || item.listPriceCurrency === planCurrency)
+  );
+}
+
+/**
  * Compone el presupuesto. El dinero se suma en céntimos enteros, así que el
  * total nunca arrastra deriva de coma flotante; un plan sin ítems da totales
- * en cero.
+ * en cero. `version` es la vigente salvo para recomponer un enlace v2 ya
+ * enviado (DX-415) y compararlo con su hash.
  */
 export function buildQuoteContent(
   source: QuoteContentSource,
   issuedOn: string,
+  version: ComposedQuoteVersion = CURRENT_QUOTE_VERSION,
 ): QuoteContent {
   const items: QuoteItem[] = source.items.map((item) => ({
     id: item.id,
@@ -171,14 +214,13 @@ export function buildQuoteContent(
     subtotal: fromCents(lineCents(item)),
     listPrice: item.basePrice,
     agreementName: item.agreementName,
+    listPriceCurrency: version === 3 ? item.listPriceCurrency : null,
   }));
   const gross = items.reduce((sum, i) => sum + toCents(i.unitPrice), 0);
   const discount = items.reduce((sum, i) => sum + toCents(i.discount), 0);
   const saving = source.items.reduce(
     (sum, i) =>
-      i.agreementName !== null &&
-      i.basePrice !== null &&
-      i.referencePrice !== null
+      savesByAgreement(i, source.currency, version)
         ? sum +
           Math.max(
             0,
@@ -189,7 +231,7 @@ export function buildQuoteContent(
     0,
   );
   return {
-    version: 2,
+    version,
     planId: source.planId,
     patientId: source.patientId,
     currency: source.currency,
@@ -227,7 +269,9 @@ export function computeQuoteHash(content: QuoteContent): string {
   const canonical =
     content.version === 1
       ? canonicalQuoteV1(content)
-      : canonicalQuoteV2(content);
+      : content.version === 2
+        ? canonicalQuoteV2(content)
+        : canonicalQuoteV3(content);
   return createHash('sha256').update(canonical, 'utf8').digest('hex');
 }
 
@@ -301,6 +345,67 @@ function canonicalQuoteV2(content: QuoteContent): string {
       money(t.agreementSaving),
     ]),
   ]);
+}
+
+/** v3: v2 más la moneda de cada precio de lista (DX-502). */
+function canonicalQuoteV3(content: QuoteContent): string {
+  return JSON.stringify([
+    QUOTE_HASH_VERSION_V3,
+    content.planId,
+    content.patientId,
+    content.currency,
+    content.clinicName,
+    [content.location.id, content.location.name, content.location.address],
+    [content.patient.name, content.patient.document],
+    content.professionalName,
+    content.agreement
+      ? [content.agreement.name, content.agreement.payerName]
+      : null,
+    content.issuedOn,
+    content.validUntil,
+    content.validityDays,
+    content.items.map((i) => [
+      i.id,
+      i.toothNumber,
+      i.surfaces,
+      i.procedure,
+      i.quantity,
+      money(i.unitPrice),
+      money(i.discount),
+      money(i.subtotal),
+      i.listPrice === null ? null : money(i.listPrice),
+      i.agreementName,
+      i.listPriceCurrency,
+    ]),
+    content.totals.map((t) => [
+      t.currency,
+      money(t.gross),
+      money(t.discount),
+      money(t.net),
+      money(t.agreementSaving),
+    ]),
+  ]);
+}
+
+/**
+ * DX-502: una foto v1/v2 no guardó la moneda de sus precios de lista. Para
+ * mostrarla se completa con la congelada en cada ítem del plan (por id; los
+ * ítems de un plan firmado no cambian). No toca nada de lo que sella el hash
+ * v1/v2. Una foto v3 ya la lleva y se devuelve tal cual.
+ */
+export function withListPriceCurrencies(
+  content: QuoteContent,
+  items: readonly Pick<QuoteSourceItem, 'id' | 'listPriceCurrency'>[],
+): QuoteContent {
+  if (content.version === 3) return content;
+  const currencyOf = new Map(items.map((i) => [i.id, i.listPriceCurrency]));
+  return {
+    ...content,
+    items: content.items.map((item) => ({
+      ...item,
+      listPriceCurrency: currencyOf.get(item.id) ?? null,
+    })),
+  };
 }
 
 export interface AcceptanceHashInput {
@@ -396,11 +501,15 @@ function surfacesOf(item: JsonRecord): ToothSurface[] {
  */
 export function parseQuoteContent(value: unknown): QuoteContent {
   try {
-    if (!isRecord(value) || (value.version !== 1 && value.version !== 2)) {
+    if (
+      !isRecord(value) ||
+      (value.version !== 1 && value.version !== 2 && value.version !== 3)
+    ) {
       throw new Error('version');
     }
     const version = value.version;
-    const v2 = version === 2;
+    const v2 = version >= 2;
+    const v3 = version === 3;
     const location = rec(value, 'location');
     const patient = rec(value, 'patient');
     return {
@@ -434,6 +543,7 @@ export function parseQuoteContent(value: unknown): QuoteContent {
         subtotal: num(item, 'subtotal'),
         listPrice: v2 ? numOrNull(item, 'listPrice') : null,
         agreementName: v2 ? strOrNull(item, 'agreementName') : null,
+        listPriceCurrency: v3 ? strOrNull(item, 'listPriceCurrency') : null,
       })),
       totals: list(value, 'totals').map((total) => ({
         currency: str(total, 'currency'),

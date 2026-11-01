@@ -1831,6 +1831,11 @@ model TreatmentPlanItem {
   // (ítems anteriores, sin backfill). CHECK treatment_plan_items_base_price_nonneg.
   basePrice         Decimal?                @db.Decimal(12, 2)
   priceSource       PriceSource?
+  // DX-502: moneda del catálogo (la común de las sedes activas) al dar de alta
+  // el ítem: la de `basePrice`, el precio de lista del presupuesto. NULL si no
+  // había una común o no hay precio de catálogo; no se convierte a la del
+  // plan. Escrita una vez (trigger treatment_plan_items_catalog_currency_frozen).
+  catalogCurrency   String?                 @db.Char(3)
   agreementId       String?                 @db.Uuid
   agreementName     String?
   // Sede con la que se resolvió el precio.
@@ -1885,6 +1890,8 @@ model TreatmentPlanItem {
   agreement             Agreement?                  @relation(fields: [tenantId, agreementId], references: [tenantId, id], onDelete: Restrict, map: "treatment_plan_items_agreement_fkey")
   // FK COMPUESTA (SEC-004, DX-105): la sede con la que se resolvió el precio.
   pricingLocation       Location?                   @relation("TreatmentPlanItemPricingLocation", fields: [tenantId, pricingLocationId], references: [tenantId, id], onDelete: Restrict, map: "treatment_plan_items_pricing_location_fkey")
+  // DX-502: la moneda del catálogo existe en `currencies`.
+  catalogCurrencyRef    Currency?                   @relation("TreatmentPlanItemCatalogCurrency", fields: [catalogCurrency], references: [code], onDelete: Restrict, map: "treatment_plan_items_catalog_currency_fkey")
   // DX-051: imputaciones de abonos a este ítem y su historial.
   allocations           PaymentAllocation[]
   allocationMovements   PaymentAllocationMovement[]
@@ -2124,6 +2131,8 @@ model Currency {
   expenses                   Expense[]
   // DX-105: listas de precios en esa moneda.
   priceLists                 PriceList[]
+  // DX-502: ítems de plan cuyo precio de catálogo está en esa moneda.
+  treatmentPlanItemCatalogs  TreatmentPlanItem[]         @relation("TreatmentPlanItemCatalogCurrency")
   // DX-262: saldos migrados en esa moneda.
   openingBalances            OpeningBalance[]
   // DX-279: importe sugerido de la política de cancelación en esa moneda.

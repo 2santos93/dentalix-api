@@ -137,6 +137,7 @@ function makeItem(
     catalogItemId: 'cat-1',
     catalogPrice: null,
     basePrice: null,
+    catalogCurrency: null,
     priceSource: null,
     agreementId: null,
     agreementName: null,

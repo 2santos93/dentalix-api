@@ -50,6 +50,12 @@ export interface PricingContext {
   planCurrency: string;
   /** Dígitos de redondeo por línea de esa moneda (`currencies.rounding_digits`). */
   planRoundingDigits: RoundingDigits;
+  /**
+   * DX-502: moneda del catálogo (`catalogCurrencyOf`, la común de las sedes
+   * activas); `null` si no se sabe. No interviene en la resolución: viaja con
+   * `basePrice` para congelarla en el ítem.
+   */
+  catalogCurrency: string | null;
   /** Día civil de hoy en la zona de la sede que sella el ítem (R8). */
   today: string;
   /** Sede de escritura del request (`writeLocationId`). */
@@ -71,6 +77,8 @@ export interface PricingContext {
 export interface ResolvedItemPrice {
   /** `defaultPrice` del catálogo en el momento (puede ser null). */
   basePrice: number | null;
+  /** DX-502: moneda de `basePrice` (la del catálogo); `null` si no se sabe. */
+  catalogCurrency: string | null;
   /** Precio de referencia resuelto (= `catalogPrice` del ítem, ruling R1). */
   price: number | null;
   source: PriceSource;
@@ -157,7 +165,11 @@ export function percentPrice(
 export function resolveItemPrice(ctx: PricingContext): ResolvedItemPrice {
   const { catalogItem } = ctx;
   const base = catalogItem.defaultPrice;
-  const common = { basePrice: base, allowDiscount: catalogItem.allowDiscount };
+  const common = {
+    basePrice: base,
+    catalogCurrency: ctx.catalogCurrency,
+    allowDiscount: catalogItem.allowDiscount,
+  };
 
   if (agreementApplies(ctx)) {
     const { agreement } = ctx;

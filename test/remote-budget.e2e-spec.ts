@@ -75,6 +75,8 @@ describe('Presupuesto a distancia (e2e, DX-415)', () => {
         set(server().post(`/api/v1${path}`)).send(body),
       patch: (path: string, body: object) =>
         set(server().patch(`/api/v1${path}`)).send(body),
+      put: (path: string, body: object) =>
+        set(server().put(`/api/v1${path}`)).send(body),
     };
   };
   const pub = (host: string) => ({
@@ -378,6 +380,95 @@ describe('Presupuesto a distancia (e2e, DX-415)', () => {
       select: { status: true },
     });
     expect(plan.status).toBe('PRESENTED');
+  });
+
+  it('DX-502: plan en EUR con el catálogo en COP: el ítem, el presupuesto y el enlace llevan el precio de lista en COP, sin ahorro entre monedas', async () => {
+    const sedes = await as(clinicA).get('/locations').expect(200);
+    const sede = (sedes.body as { id: string; currency: string }[])[0];
+    expect(sede.currency).toBe('COP');
+    const catalog = await as(clinicA)
+      .post('/catalog/items', {
+        code: 'DX502-COR',
+        kind: CatalogKind.PROCEDURE,
+        labelEs: 'Corona cerámica',
+        color: '#2A2B3C',
+        defaultPrice: 80000,
+      })
+      .expect(201);
+    const corona = (catalog.body as { id: string }).id;
+    const list = await as(clinicA)
+      .post('/price-lists', {
+        name: 'Lista Euro DX-502',
+        currency: 'EUR',
+        locationId: sede.id,
+      })
+      .expect(201);
+    const listId = (list.body as { id: string }).id;
+    await as(clinicA)
+      .put(`/price-lists/${listId}/items`, {
+        items: [{ catalogItemId: corona, price: 100.55 }],
+      })
+      .expect(200);
+
+    const quoted = await as(clinicA)
+      .get(
+        `/patients/${patientId}/price-quote?catalogItemId=${corona}&currency=EUR`,
+      )
+      .expect(200);
+    expect(quoted.body).toMatchObject({
+      basePrice: 80000,
+      catalogCurrency: 'COP',
+      price: 100.55,
+      source: 'PRICE_LIST',
+      currency: 'EUR',
+    });
+
+    const plan = await as(clinicA)
+      .post(`/patients/${patientId}/treatment-plans`, { currency: 'EUR' })
+      .expect(201);
+    const planId = (plan.body as { id: string }).id;
+    const item = await as(clinicA)
+      .post(`/treatment-plans/${planId}/items`, {
+        toothNumber: '11',
+        catalogItemId: corona,
+      })
+      .expect(201);
+    expect(item.body).toMatchObject({
+      price: 100.55,
+      basePrice: 80000,
+      catalogCurrency: 'COP',
+    });
+    await as(clinicA).post(`/treatment-plans/${planId}/present`).expect(200);
+
+    const quote = await as(clinicA)
+      .get(`/patients/${patientId}/treatment-plans/${planId}/quote`)
+      .expect(200);
+    expect(quote.body).toMatchObject({
+      version: 3,
+      currency: 'EUR',
+      items: [
+        { unitPrice: 100.55, listPrice: 80000, listPriceCurrency: 'COP' },
+      ],
+      totals: [{ currency: 'EUR', net: 100.55, agreementSaving: 0 }],
+    });
+
+    const { token } = await send(planId);
+    const session = await verified(token);
+    const doc = (
+      await pub(clinicA.host).get(`${token}/document`, session).expect(200)
+    ).body as {
+      budget: {
+        currency: string;
+        items: { listPrice: number | null; listPriceCurrency: string | null }[];
+        totals: { agreementSaving: number }[];
+      };
+    };
+    expect(doc.budget.currency).toBe('EUR');
+    expect(doc.budget.items[0]).toMatchObject({
+      listPrice: 80000,
+      listPriceCurrency: 'COP',
+    });
+    expect(doc.budget.totals[0].agreementSaving).toBe(0);
   });
 
   it('la clínica B no envía el plan de A ni abre su enlace en su host', async () => {

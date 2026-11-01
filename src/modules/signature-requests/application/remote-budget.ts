@@ -56,7 +56,9 @@ export function budgetStillMatches(
   ) {
     return false;
   }
-  const live = composeQuoteContent(quote, sent.issuedOn, names);
+  // DX-502: con la versión de la foto (un enlace v2 se recompone como v2).
+  if (sent.version === 1) return false;
+  const live = composeQuoteContent(quote, sent.issuedOn, names, sent.version);
   return computeQuoteHash(live) === request.budgetContentHash;
 }
 

@@ -38,6 +38,7 @@ interface Item {
   discount: number;
   discountById: string | null;
   basePrice: number | null;
+  catalogCurrency: string | null;
   priceSource: string | null;
   agreementId: string | null;
   agreementName: string | null;
@@ -351,6 +352,7 @@ describe('Precio resuelto y foto en el ítem del plan (e2e, DX-105)', () => {
       const q = await quote(patient, endo, 'COP', mainLocation);
       expect(q).toEqual({
         basePrice: item.basePrice,
+        catalogCurrency: item.catalogCurrency,
         price: item.catalogPrice,
         source: item.priceSource,
         agreementId: item.agreementId,

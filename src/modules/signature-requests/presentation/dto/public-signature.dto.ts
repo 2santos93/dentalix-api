@@ -93,6 +93,13 @@ class PublicBudgetItemDto {
   @ApiProperty({ type: Number, nullable: true }) listPrice!: number | null;
   @ApiProperty({ type: String, nullable: true })
   agreementName!: string | null;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'DX-502: moneda ISO 4217 de `listPrice` (la del catálogo, congelada en la foto enviada). Puede no ser la del plan: no se convierte. Null si no se sabe (foto anterior a DX-502 o sedes sin moneda común): no se muestra la cifra.',
+  })
+  listPriceCurrency!: string | null;
 }
 
 class PublicBudgetTotalDto {
@@ -100,7 +107,11 @@ class PublicBudgetTotalDto {
   @ApiProperty() gross!: number;
   @ApiProperty() discount!: number;
   @ApiProperty() net!: number;
-  @ApiProperty() agreementSaving!: number;
+  @ApiProperty({
+    description:
+      'Ahorro por convenio en `currency`. Desde DX-502 no suma los ítems cuyo precio de lista está en otra moneda (o en una desconocida).',
+  })
+  agreementSaving!: number;
 }
 
 /**

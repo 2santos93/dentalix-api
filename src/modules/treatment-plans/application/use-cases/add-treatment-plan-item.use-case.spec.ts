@@ -81,6 +81,7 @@ function fakeItem(
     catalogItemId: 'cat1',
     catalogPrice: null,
     basePrice: null,
+    catalogCurrency: null,
     priceSource: null,
     agreementId: null,
     agreementName: null,
@@ -368,5 +369,64 @@ describe('AddTreatmentPlanItemUseCase', () => {
       ToothSurface.MESIAL,
     ]);
     expect(captured?.notes).toBe('Caries profunda');
+  });
+
+  describe('DX-502: moneda del catálogo congelada en el ítem', () => {
+    async function addWith(
+      extra: Parameters<typeof catalogPricing>[1],
+      defaultPrice: number | null = 80000,
+    ) {
+      let captured: Omit<AddTreatmentPlanItemRepoInput, 'planId'> | undefined;
+      const repo = makeRepo({}, (input) => {
+        captured = input;
+      });
+      const catalogRepo = makeCatalogRepo({
+        findById: (): Promise<DentalCatalogItem | null> =>
+          Promise.resolve(fakeCatalogItem({ defaultPrice })),
+      });
+      const uc = new AddTreatmentPlanItemUseCase(
+        repo,
+        catalogPricing(catalogRepo, extra),
+        testDiscountPolicy(),
+        FIXED_CLOCK,
+      );
+      await uc.execute(
+        'plan1',
+        { toothNumber: '11', catalogItemId: 'cat1' },
+        ADMIN_ACTOR,
+      );
+      return captured;
+    }
+
+    it('plan en USD con el catálogo en COP: guarda COP con el precio de catálogo', async () => {
+      const captured = await addWith({
+        catalogCurrency: 'COP',
+        locationList: { price: 100.55, currency: 'USD' },
+      });
+      expect(captured?.price).toBe(100.55);
+      expect(captured?.pricing).toMatchObject({
+        basePrice: 80000,
+        catalogCurrency: 'COP',
+      });
+    });
+
+    it('sin moneda común de las sedes, la guarda vacía', async () => {
+      const captured = await addWith({ catalogCurrency: null });
+      expect(captured?.pricing.catalogCurrency).toBeNull();
+    });
+
+    it('sin precio de catálogo no guarda moneda', async () => {
+      const captured = await addWith(
+        {
+          catalogCurrency: 'COP',
+          locationList: { price: 100.55, currency: 'USD' },
+        },
+        null,
+      );
+      expect(captured?.pricing).toMatchObject({
+        basePrice: null,
+        catalogCurrency: null,
+      });
+    });
   });
 });

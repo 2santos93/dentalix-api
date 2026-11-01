@@ -1,5 +1,7 @@
 import {
   buildQuoteContent,
+  QUOTE_HASH_VERSION_V3,
+  withListPriceCurrencies,
   computeAcceptanceHash,
   computeQuoteHash,
   parseQuoteContent,
@@ -32,6 +34,7 @@ function source(
         referencePrice: null,
         agreementName: null,
         agreementPayerName: null,
+        listPriceCurrency: 'COP',
       },
       {
         id: 'i2',
@@ -44,6 +47,7 @@ function source(
         referencePrice: null,
         agreementName: null,
         agreementPayerName: null,
+        listPriceCurrency: 'COP',
       },
     ],
     ...overrides,
@@ -107,6 +111,7 @@ describe('buildQuoteContent (DX-012)', () => {
       referencePrice: null,
       agreementName: null,
       agreementPayerName: null,
+      listPriceCurrency: null,
     }));
     const content = buildQuoteContent(source({ items }), '2026-10-16');
     expect(content.totals[0].net).toBe(1);
@@ -256,7 +261,7 @@ describe('presupuesto v1 firmado (DX-105, R3)', () => {
   });
 
   it('rechaza una versión desconocida', () => {
-    expect(() => parseQuoteContent({ ...V1_STORED, version: 3 })).toThrow(
+    expect(() => parseQuoteContent({ ...V1_STORED, version: 9 })).toThrow(
       /campo version/,
     );
   });
@@ -296,7 +301,7 @@ describe('presupuesto v2 con convenio (DX-105)', () => {
     });
 
   it('compone el convenio, el precio de lista y el ahorro (solo suma si baja)', () => {
-    const content = buildQuoteContent(withAgreement(), '2026-10-16');
+    const content = buildQuoteContent(withAgreement(), '2026-10-16', 2);
     expect(content.version).toBe(2);
     expect(content.agreement).toEqual({
       name: 'Surco Salud −15 %',
@@ -314,6 +319,7 @@ describe('presupuesto v2 con convenio (DX-105)', () => {
       buildQuoteContent(
         source({ items: [{ ...items[0], price }] }),
         '2026-10-16',
+        2,
       ).totals[0].agreementSaving;
     // lista 1000, convenio 850: cobrar 1000 no ahorra nada; 900 ahorra 100.
     expect(typed(1000)).toBe(0);
@@ -330,6 +336,7 @@ describe('presupuesto v2 con convenio (DX-105)', () => {
         ],
       }),
       '2026-10-16',
+      2,
     );
     expect(content.agreement).toBeNull();
     expect(content.items[0].listPrice).toBe(3500000);
@@ -344,7 +351,7 @@ describe('presupuesto v2 con convenio (DX-105)', () => {
       agreementPayerName: 'Empresa Alfa',
     };
     items[2] = { ...items[2], agreementName: 'Surco Salud −15 %' };
-    const content = buildQuoteContent(source({ items }), '2026-10-16');
+    const content = buildQuoteContent(source({ items }), '2026-10-16', 2);
     expect(content.agreement).toEqual({
       name: 'Surco Salud −15 % · Empresa Alfa lista',
       payerName: 'Surco Salud',
@@ -352,7 +359,7 @@ describe('presupuesto v2 con convenio (DX-105)', () => {
   });
 
   it('el hash v2 incluye convenio, precio de lista y ahorro', () => {
-    const base = buildQuoteContent(withAgreement(), '2026-10-16');
+    const base = buildQuoteContent(withAgreement(), '2026-10-16', 2);
     const hash = computeQuoteHash(base);
     expect(hash).toMatch(/^[0-9a-f]{64}$/);
     const variants: QuoteContent[] = [
@@ -381,7 +388,7 @@ describe('presupuesto v2 con convenio (DX-105)', () => {
   });
 
   it('v1 y v2 de los mismos datos no colisionan (versión sellada)', () => {
-    const v2 = buildQuoteContent(source(), '2026-10-16');
+    const v2 = buildQuoteContent(source(), '2026-10-16', 2);
     expect(computeQuoteHash({ ...v2, version: 1 })).not.toBe(
       computeQuoteHash(v2),
     );
@@ -389,7 +396,7 @@ describe('presupuesto v2 con convenio (DX-105)', () => {
   });
 
   it('sobrevive a un viaje por JSON y se lee como v2', () => {
-    const base = buildQuoteContent(withAgreement(), '2026-10-16');
+    const base = buildQuoteContent(withAgreement(), '2026-10-16', 2);
     const back = parseQuoteContent(JSON.parse(JSON.stringify(base)));
     expect(back).toEqual(base);
     expect(computeQuoteHash(back)).toBe(computeQuoteHash(base));
@@ -399,5 +406,136 @@ describe('presupuesto v2 con convenio (DX-105)', () => {
     expect(() => parseQuoteContent({ ...V1_STORED, version: 2 })).toThrow(
       /presupuesto guardado/,
     );
+  });
+});
+
+describe('presupuesto v3 con la moneda del catálogo (DX-502)', () => {
+  /** Plan en EUR: un ítem de convenio con el catálogo en COP y otro en EUR. */
+  const eurPlan = (): QuoteContentSource =>
+    source({
+      currency: 'EUR',
+      items: [
+        {
+          ...source().items[0],
+          price: 100.55,
+          discount: 0,
+          basePrice: 80000,
+          referencePrice: 100.55,
+          agreementName: 'Lista Euro',
+          agreementPayerName: 'Aseguradora',
+          listPriceCurrency: 'COP',
+        },
+        {
+          ...source().items[1],
+          id: 'i3',
+          price: 85,
+          discount: 0,
+          basePrice: 100,
+          referencePrice: 85,
+          agreementName: 'Lista Euro',
+          agreementPayerName: 'Aseguradora',
+          listPriceCurrency: 'EUR',
+        },
+      ],
+    });
+
+  it('se compone como v3 y cada precio de lista lleva la moneda del catálogo', () => {
+    const content = buildQuoteContent(eurPlan(), '2026-11-01');
+    expect(content.version).toBe(3);
+    expect(
+      content.items.map((i) => [i.listPrice, i.listPriceCurrency]),
+    ).toEqual([
+      [80000, 'COP'],
+      [100, 'EUR'],
+    ]);
+  });
+
+  it('el ahorro por convenio no resta un precio de lista en otra moneda', () => {
+    const content = buildQuoteContent(eurPlan(), '2026-11-01');
+    // Solo el ítem con el catálogo en EUR: 100 − 85. Nunca 80.000 COP − 100,55 EUR.
+    expect(content.totals[0].agreementSaving).toBe(15);
+  });
+
+  it('sin moneda del catálogo conocida, tampoco hay ahorro', () => {
+    const [cop] = eurPlan().items;
+    const content = buildQuoteContent(
+      source({ currency: 'EUR', items: [{ ...cop, listPriceCurrency: null }] }),
+      '2026-11-01',
+    );
+    expect(content.items[0].listPriceCurrency).toBeNull();
+    expect(content.totals[0].agreementSaving).toBe(0);
+  });
+
+  it('el hash v3 sella la moneda del precio de lista', () => {
+    const base = buildQuoteContent(eurPlan(), '2026-11-01');
+    const changed: QuoteContent = {
+      ...base,
+      items: [
+        { ...base.items[0], listPriceCurrency: 'USD' },
+        ...base.items.slice(1),
+      ],
+    };
+    expect(computeQuoteHash(changed)).not.toBe(computeQuoteHash(base));
+    expect(QUOTE_HASH_VERSION_V3).toBe('dentalix-plan-quote-v3');
+  });
+
+  it('sobrevive a un viaje por JSON y se lee como v3', () => {
+    const base = buildQuoteContent(eurPlan(), '2026-11-01');
+    const back = parseQuoteContent(JSON.parse(JSON.stringify(base)));
+    expect(back).toEqual(base);
+    expect(computeQuoteHash(back)).toBe(computeQuoteHash(base));
+  });
+
+  it('un v3 sin la moneda del precio de lista se rechaza', () => {
+    const base = JSON.parse(
+      JSON.stringify(buildQuoteContent(eurPlan(), '2026-11-01')),
+    ) as { items: Record<string, unknown>[] };
+    delete base.items[0].listPriceCurrency;
+    expect(() => parseQuoteContent(base)).toThrow(/campo listPriceCurrency/);
+  });
+
+  it('un v2 se sigue componiendo igual: su hash no cambia (enlaces ya enviados)', () => {
+    const content = buildQuoteContent(
+      source({
+        items: [
+          {
+            ...source().items[0],
+            price: 850,
+            discount: 0,
+            basePrice: 1000,
+            referencePrice: 850,
+            agreementName: 'Surco Salud −15 %',
+            agreementPayerName: 'Surco Salud',
+          },
+        ],
+      }),
+      '2026-10-16',
+      2,
+    );
+    expect(content.items[0].listPriceCurrency).toBeNull();
+    // Calculado con el código anterior a DX-502 sobre los mismos datos.
+    expect(computeQuoteHash(content)).toBe(
+      '94ac6c549ccc57b4e5f3e6bd1e890eb3216b7d9964fe48e26f6d21be0df84d39',
+    );
+  });
+
+  it('un v2 o v1 se lee sin moneda y se completa con la de los ítems del plan', () => {
+    const v2 = buildQuoteContent(eurPlan(), '2026-11-01', 2);
+    const stored = parseQuoteContent(JSON.parse(JSON.stringify(v2)));
+    expect(stored.items.map((i) => i.listPriceCurrency)).toEqual([null, null]);
+    const filled = withListPriceCurrencies(stored, [
+      { id: 'i1', listPriceCurrency: 'COP' },
+    ]);
+    expect(filled.items.map((i) => i.listPriceCurrency)).toEqual(['COP', null]);
+    // Completar no toca lo sellado.
+    expect(computeQuoteHash(filled)).toBe(computeQuoteHash(stored));
+  });
+
+  it('un v3 no se completa: conserva la moneda con la que se emitió', () => {
+    const v3 = buildQuoteContent(eurPlan(), '2026-11-01');
+    const filled = withListPriceCurrencies(v3, [
+      { id: 'i1', listPriceCurrency: 'USD' },
+    ]);
+    expect(filled.items[0].listPriceCurrency).toBe('COP');
   });
 });

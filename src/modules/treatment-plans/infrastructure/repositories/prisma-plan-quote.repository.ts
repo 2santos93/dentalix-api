@@ -190,6 +190,7 @@ export async function readPlanQuoteSource(
           price: true,
           discount: true,
           basePrice: true,
+          catalogCurrency: true,
           catalogPrice: true,
           agreementId: true,
           agreementName: true,
@@ -285,6 +286,7 @@ export async function readPlanQuoteSource(
       agreementPayerName: item.agreementId
         ? requirePayerName(payerNames, item.agreementId, plan.id)
         : null,
+      listPriceCurrency: item.catalogCurrency,
     })),
     patient: {
       firstName: patient.firstName,
