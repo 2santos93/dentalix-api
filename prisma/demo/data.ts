@@ -27,11 +27,12 @@ import {
 // USD (el país, la zona, el formato y los nombres locales de los documentos
 // son DATOS de la clínica; el código no sabe de Venezuela). Nombres,
 // direcciones y documentos inventados, sin leyes ni aseguradoras reales. Los
-// correos usan example.com (RFC 2606). Los teléfonos son venezolanos con el
-// abonado 555-01XX/02XX/03XX: Venezuela no reserva un tramo para ficción, así
-// que se usa el bloque «555» que se reconoce como ficticio; son válidos para
-// libphonenumber (los 04XX, tipo MOBILE) y la app nunca escribe a un teléfono
-// sola (WhatsApp es un enlace `wa.me` que abre una persona).
+// correos usan example.com (RFC 2606). Los teléfonos usan el bloque «555»,
+// que se reconoce como ficticio: en Brasil y en Venezuela no hay tramo
+// reservado, así que es un bloque válido para libphonenumber sin garantía de
+// que no esté asignado. La demo no envía nada a esos números: WhatsApp es un
+// enlace `wa.me` que abre una persona, y los recordatorios van por correo a
+// example.com.
 
 export const DEMO_SUBDOMAIN = 'demo';
 export const DEMO_CLINIC_NAME = 'Clínica Demo';
@@ -111,7 +112,7 @@ export const DEMO_USERS: readonly DemoUser[] = [
   },
   {
     email: `dentista2@${DEMO_EMAIL_DOMAIN}`,
-    fullName: 'Valentina Restrepo Mejía',
+    fullName: 'Valentina Rivas Mendoza',
     role: ClinicRole.DENTIST,
   },
   {
@@ -128,7 +129,7 @@ export const DEMO_USERS: readonly DemoUser[] = [
   // no mover los índices del resto (dentistas, recepción y asistente).
   {
     email: `recepcion.norte@${DEMO_EMAIL_DOMAIN}`,
-    fullName: 'Lorena Ospina Vargas',
+    fullName: 'Lorena Pacheco Vargas',
     role: ClinicRole.RECEPTION,
     locations: ['norte'],
   },
@@ -254,7 +255,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
   },
   {
     firstName: 'Jorge Eduardo',
-    lastName: 'Ramírez Ospina',
+    lastName: 'Ramírez Ortega',
     docType: 'NATIONAL_ID',
     docNumber: 'DEMO-0002',
     birthDate: '1968-11-02',
@@ -264,7 +265,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     address: 'Av. Las Palmas 853',
     occupation: 'Contador',
     maritalStatus: 'Casado',
-    emergencyContactName: 'Gloria Ospina',
+    emergencyContactName: 'Gloria Ortega',
     emergencyContactRelationship: 'Esposa',
     emergencyContactPhone: '+58 424 555 0202',
     medicalHistory: {
@@ -354,13 +355,13 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
   },
   {
     firstName: 'Daniela',
-    lastName: 'Montoya Arango',
+    lastName: 'Morales Rangel',
     docType: 'NATIONAL_ID',
     docNumber: 'DEMO-0005',
     birthDate: '1995-09-09',
     sex: Sex.F,
     phone: '+58 412 555 0105',
-    email: 'daniela.montoya@example.com',
+    email: 'daniela.morales@example.com',
     address: 'Calle Los Cedros 10',
     occupation: 'Abogada',
   },
@@ -377,14 +378,14 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     occupation: 'Ingeniero de software',
   },
   {
-    firstName: 'Martha Lucía',
+    firstName: 'Marta Elena',
     lastName: 'Becerra Rincón',
     docType: 'NATIONAL_ID',
     docNumber: 'DEMO-0007',
     birthDate: '1960-12-05',
     sex: Sex.F,
     phone: '+58 424 555 0107',
-    email: 'martha.becerra@example.com',
+    email: 'marta.becerra@example.com',
     address: 'Calle Las Acacias 145',
     occupation: 'Pensionada',
     maritalStatus: 'Viuda',
@@ -481,13 +482,13 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
   },
   {
     firstName: 'Carolina',
-    lastName: 'Duque Henao',
+    lastName: 'Durán Bello',
     docType: 'NATIONAL_ID',
     docNumber: 'DEMO-0010',
     birthDate: '1993-10-03',
     sex: Sex.F,
     phone: '+58 412 555 0110',
-    email: 'carolina.duque@example.com',
+    email: 'carolina.duran@example.com',
     address: 'Av. del Río 1020',
     occupation: 'Docente',
     medicalHistory: {
@@ -499,7 +500,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
   },
   {
     firstName: 'Felipe',
-    lastName: 'Arias Londoño',
+    lastName: 'Arias León',
     docType: 'NATIONAL_ID',
     docNumber: 'DEMO-0011',
     birthDate: '1988-08-16',
@@ -511,7 +512,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
   },
   {
     firstName: 'Juliana',
-    lastName: 'Guerrero Pinzón',
+    lastName: 'Guerrero Paredes',
     docType: 'NATIONAL_ID',
     docNumber: 'DEMO-0012',
     birthDate: '1990-05-25',
@@ -550,30 +551,30 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
   },
   {
     firstName: 'Mateo',
-    lastName: 'Cifuentes Rojas',
+    lastName: 'Contreras Rojas',
     docType: 'NATIONAL_ID',
     docNumber: 'DEMO-0013',
     birthDate: '2012-09-30',
     sex: Sex.M,
     phone: '+58 416 555 0113',
-    email: 'familia.cifuentes@example.com',
+    email: 'familia.contreras@example.com',
     address: 'Av. Principal 2415',
   },
   {
     firstName: 'Ana María',
-    lastName: 'Zapata Gil',
+    lastName: 'Zambrano Gil',
     docType: 'NATIONAL_ID',
     docNumber: 'DEMO-0014',
     birthDate: '1979-03-08',
     sex: Sex.F,
     phone: '+58 426 555 0114',
-    email: 'anamaria.zapata@example.com',
+    email: 'anamaria.zambrano@example.com',
     address: 'Calle Los Laureles 33',
     occupation: 'Administradora de empresas',
     medicalHistory: healthy,
   },
   {
-    firstName: 'Luis Fernando',
+    firstName: 'Luis Alberto',
     lastName: 'Peña Acosta',
     docType: 'NATIONAL_ID',
     docNumber: 'DEMO-0015',
@@ -598,7 +599,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
   },
   {
     firstName: 'Gustavo',
-    lastName: 'Ríos Villamizar',
+    lastName: 'Ríos Villarroel',
     docType: 'NATIONAL_ID',
     docNumber: 'DEMO-0017',
     birthDate: '1966-02-22',
@@ -624,7 +625,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
   },
   {
     firstName: 'Isabella',
-    lastName: 'Moreno Castaño',
+    lastName: 'Moreno Castillo',
     docType: 'NATIONAL_ID',
     docNumber: 'DEMO-0018',
     birthDate: '1997-06-06',
@@ -671,7 +672,7 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     occupation: 'Mecánico',
   },
   {
-    firstName: 'Paula Andrea',
+    firstName: 'Paula Daniela',
     lastName: 'Cortés Silva',
     docType: 'NATIONAL_ID',
     docNumber: 'DEMO-0022',
@@ -2412,10 +2413,10 @@ export const DEMO_LUNCH = {
 /**
  * DX-247: alertas médicas en la agenda. Jorge Eduardo Ramírez (prótesis
  * valvular) sale con «Requiere premedicación» y es el primero en entrar hoy al
- * panel «En clínica»; Ana María Zapata tiene la anamnesis de hace 14 meses
+ * panel «En clínica»; Ana María Zambrano tiene la anamnesis de hace 14 meses
  * («Anamnesis caducada», vigencia de 12); la de Gustavo Ríos es de hace 13
  * meses pero la dentista confirmó «Sin cambios hoy» (al día). Los pacientes
- * sin `medicalHistory` (p. ej. Daniela Montoya) salen «Sin anamnesis».
+ * sin `medicalHistory` (p. ej. Daniela Morales) salen «Sin anamnesis».
  */
 export const DEMO_MEDICAL_ALERTS = {
   premedicationPatientIndex: 1,
@@ -2439,7 +2440,7 @@ export const DEMO_WAITLIST = {
 // DX-128: bloque «Comunicaciones» de la ficha. Todos nacen con el canal de la
 // clínica (EMAIL); recepción deja a unos pocos en los otros estados para
 // verlos en la ficha y en los recordatorios: WhatsApp con opt-in en persona,
-// ninguno, baja anotada por recepción y un teléfono fijo (móvil no válido).
+// ninguno, baja anotada por recepción y un teléfono fijo (no sirve para WhatsApp).
 export const DEMO_COMMUNICATION = [
   {
     patientIndex: 0,
@@ -2457,11 +2458,11 @@ export const DEMO_COMMUNICATION = [
   },
   { patientIndex: 2, input: { contactChannel: 'NONE' } },
   { patientIndex: 3, input: { reminderOptOut: true } },
-  { patientIndex: 4, input: { phone: '0414 555 0405' } },
+  { patientIndex: 4, input: { phone: '+58 212 555 0405' } },
 ] as const;
 
 // ---------------------------------------------------------------------------
-// DX-203: responsables de pago y avisos. La abuela Martha Lucía Becerra
+// DX-203: responsables de pago y avisos. La abuela Marta Elena Becerra
 // (paciente) es la pagadora principal de Sofía y de Mateo: su ficha muestra
 // «Responsable de» y el estado de cuenta familiar. Los avisos de Sofía van a
 // su madre Claudia (contacto sin ficha; la abuela solo paga); los de Mateo, a
@@ -2515,7 +2516,7 @@ export const DEMO_RESPONSIBLES: readonly DemoResponsible[] = [
   {
     patientIndex: 12,
     contact: {
-      fullName: 'Óscar Cifuentes',
+      fullName: 'Óscar Contreras',
       docType: 'NATIONAL_ID',
       docNumber: 'DEMO-C02',
       phone: '+58 424 555 0213',
@@ -2757,7 +2758,7 @@ export const DEMO_ANAMNESIS_SUBMISSION: {
  * DX-279: política de cancelación de la sede principal (24 h de aviso, cargo
  * sugerido de 50 USD) y una paciente con incidencias para ver la insignia
  * «2 inasistencias · 1 cancelación tardía (12 meses)» en su ficha y en sus
- * citas: Daniela Montoya Arango, con dos inasistencias y una cancelación con
+ * citas: Daniela Morales Rangel, con dos inasistencias y una cancelación con
  * 5 h de aviso en citas de la semana pasada en la sede principal (en huecos
  * libres del calendario). Las cancelaciones del calendario se
  * registran como avisadas por el paciente 2 días antes (no tardías).
