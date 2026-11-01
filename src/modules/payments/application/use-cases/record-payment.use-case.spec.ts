@@ -446,7 +446,7 @@ describe('RecordPaymentUseCase', () => {
       paidAt: '2026-10-16',
     });
 
-    // Sede del fake en Bogotá (UTC-5): 12:00 locales = 17:00 UTC.
+    // Sede del fake en la zona de la sede (UTC-5): 12:00 locales = 17:00 UTC.
     expect(payment.paidAt.toISOString()).toBe('2026-10-16T17:00:00.000Z');
   });
 

@@ -33,7 +33,7 @@ class FakeGetTreatmentPlanUseCase {
   }
 }
 
-// 2026-10-16 10:00 en Bogotá (UTC-5).
+// 2026-10-16 10:00 en la zona de la sede (UTC-5).
 const NOW = new Date('2026-10-16T15:00:00.000Z');
 const clock = (): Date => NOW;
 
@@ -207,7 +207,7 @@ describe('VoidPaymentUseCase', () => {
       const repo = new InMemoryPaymentRepository();
       const payment = repo.seedPayment({
         createdById: 'u-recep',
-        // 08:00 en Bogotá del mismo día.
+        // 08:00 en la zona de la sede del mismo día.
         createdAt: new Date('2026-10-16T13:00:00.000Z'),
       });
       const uc = new VoidPaymentUseCase(repo, clock, context);
@@ -262,7 +262,7 @@ describe('VoidPaymentUseCase', () => {
     });
 
     it('el "día" es el de la zona de la sede, no el UTC', async () => {
-      // 2026-10-16 02:00 UTC = 2026-10-15 21:00 en Bogotá: mismo día UTC que
+      // 2026-10-16 02:00 UTC = 2026-10-15 21:00 en la zona de la sede: mismo día UTC que
       // NOW, pero OTRO día en la sede -> 403.
       const repo = new InMemoryPaymentRepository();
       const ayerEnSede = repo.seedPayment({
