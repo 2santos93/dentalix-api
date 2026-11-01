@@ -64,6 +64,17 @@ export class UpdateAppointmentDto {
   providerId?: string;
 
   @ApiPropertyOptional({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description:
+      'DX-211: cambiar el sillón (de la sede de la cita y activo; si no, 400/404) o quitarlo con null. Al cambiarlo o reagendar una cita con sillón se mira que esté libre en la franja (409 con su nombre y horas). Cambiar solo el sillón no anula el enlace de confirmación; queda auditado como movimiento.',
+  })
+  @IsOptional()
+  @IsUUID()
+  chairId?: string | null;
+
+  @ApiPropertyOptional({
     enum: AppointmentStatus,
     description:
       'DX-200: flujo en la clínica sin saltos (409 si no): ARRIVED desde SCHEDULED/CONFIRMED y solo el día de la cita (RECEPTION, ASSISTANT, ADMIN; fija `arrivedAt`); IN_CHAIR desde ARRIVED y READY_FOR_CHECKOUT desde IN_CHAIR (DENTIST, ASSISTANT, ADMIN; fijan `seatedAt` / `readyForCheckoutAt`); la salida a COMPLETED (o CANCELLED si se fue sin pasar al sillón) desde el flujo, RECEPTION, ASSISTANT, ADMIN. Nunca NO_SHOW desde el flujo; para volver a agendada, `POST /appointments/:id/undo-arrival`. Las horas las pone el servidor. Rol sin permiso: 403. DX-273: salir de COMPLETED (a cualquier otro estado) solo ADMIN y DENTIST, con `statusReason` (403 / 400).',

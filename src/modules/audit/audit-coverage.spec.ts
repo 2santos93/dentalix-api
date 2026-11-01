@@ -53,6 +53,7 @@ import { ContingencyAgendaController } from '../contingency-agenda/presentation/
 import { CollectionsController } from '../collections/presentation/collections.controller';
 import { CashSessionsController } from '../cash-sessions/presentation/cash-sessions.controller';
 import { ScheduleBlocksController } from '../schedule-blocks/presentation/schedule-blocks.controller';
+import { ChairsController } from '../chairs/presentation/chairs.controller';
 import { StaffController } from '../staff/presentation/staff.controller';
 import { ClinicalNoteTemplatesController } from '../clinical-note-templates/presentation/clinical-note-templates.controller';
 import { AnesthesiaController } from '../anesthesia/presentation/anesthesia.controller';
@@ -1313,6 +1314,35 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: { param: 'id' },
   },
 
+  // DX-211: sillones de cada sede (sin paciente). No se borran: se desactivan.
+  'POST /chairs': {
+    action: 'CREATE',
+    resource: 'CHAIR',
+    resourceId: RES,
+  },
+  'PATCH /chairs/:id': {
+    action: 'UPDATE',
+    resource: 'CHAIR',
+    resourceId: { param: 'id' },
+  },
+  'PUT /chairs/order': {
+    action: 'UPDATE',
+    resource: 'CHAIR',
+    reason: 'CHAIR_ORDER',
+  },
+  'POST /chairs/:id/deactivate': {
+    action: 'UPDATE',
+    resource: 'CHAIR',
+    resourceId: { param: 'id' },
+    reason: 'CHAIR_DEACTIVATED',
+  },
+  'POST /chairs/:id/reactivate': {
+    action: 'UPDATE',
+    resource: 'CHAIR',
+    resourceId: { param: 'id' },
+    reason: 'CHAIR_REACTIVATED',
+  },
+
   // DX-048: un ADMIN desbloquea el inicio de sesión de un miembro.
   'POST /staff/:userId/login-unlock': {
     action: 'UPDATE',
@@ -1709,6 +1739,7 @@ const CONTROLLERS: Type[] = [
   ExpenseCategoriesController,
   CashOutflowsController,
   ScheduleBlocksController,
+  ChairsController,
   StaffController,
   ClinicalNoteTemplatesController,
   DomainsController,

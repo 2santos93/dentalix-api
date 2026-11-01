@@ -452,6 +452,8 @@ export interface AuditAppointmentSlot {
   start: string;
   end: string;
   providerId: string;
+  /** DX-211: sillón de la cita (null = sin sillón); ausente en los eventos anteriores. */
+  chairId?: string | null;
 }
 
 const IDENTIFIER = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
@@ -518,7 +520,18 @@ function appointmentSlot(value: unknown): AuditAppointmentSlot | null {
   ) {
     return null;
   }
-  return { start, end, providerId: providerId.toLowerCase() };
+  const slot: AuditAppointmentSlot = {
+    start,
+    end,
+    providerId: providerId.toLowerCase(),
+  };
+  // DX-211: el sillón solo si es un uuid o null; cualquier otra cosa, fuera.
+  const { chairId } = value;
+  if (chairId === null) slot.chairId = null;
+  else if (typeof chairId === 'string' && UUID.test(chairId)) {
+    slot.chairId = chairId.toLowerCase();
+  }
+  return slot;
 }
 
 /** El movimiento entero, o nada: medio movimiento no le sirve a nadie. */

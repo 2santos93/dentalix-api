@@ -19,6 +19,7 @@ import { ClinicalNoteTemplatesModule } from './modules/clinical-note-templates/c
 import { OdontogramModule } from './modules/odontogram/odontogram.module';
 import { AppointmentsModule } from './modules/appointments/appointments.module';
 import { AppointmentTypesModule } from './modules/appointment-types/appointment-types.module';
+import { ChairsModule } from './modules/chairs/chairs.module';
 import { PaymentMethodsModule } from './modules/payment-methods/payment-methods.module';
 import { PayersModule } from './modules/payers/payers.module';
 import { PriceListsModule } from './modules/price-lists/price-lists.module';
@@ -102,6 +103,8 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     OdontogramModule,
     AppointmentsModule,
     AppointmentTypesModule,
+    // DX-211: sillones de cada sede.
+    ChairsModule,
     PaymentMethodsModule,
     PayersModule,
     PriceListsModule,

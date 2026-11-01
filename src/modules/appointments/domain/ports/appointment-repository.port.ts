@@ -40,6 +40,8 @@ export interface CreateAppointmentRepoInput {
   waitlistEntryId?: string;
   /** DX-210: «Adelantar si hay hueco» (por defecto false). */
   wantsEarlier?: boolean;
+  /** DX-211: sillón ya validado (de esta clínica, de la sede y activo). */
+  chairId?: string;
 }
 
 export interface UpdateAppointmentRepoInput {
@@ -48,6 +50,8 @@ export interface UpdateAppointmentRepoInput {
   end?: Date;
   /** DX-121: mover la cita a otro profesional (ya validado por el use-case). */
   providerId?: string;
+  /** DX-211: cambiar o quitar (`null`) el sillón, ya validado por el use-case. */
+  chairId?: string | null;
   status?: AppointmentStatus;
   reason?: string | null;
   notes?: string | null;
@@ -157,6 +161,8 @@ export interface ListAppointmentsByRangeParams {
   providerIds?: string[];
   /** DX-121: sede explícita; si falta, la sede del request (X-Location-Id). */
   locationId?: string;
+  /** DX-211: solo las citas de estos sillones (ids ya validados contra la sede). */
+  chairIds?: string[];
 }
 
 export interface ListUpcomingAppointmentsParams {
@@ -232,6 +238,19 @@ export interface AppointmentRepository {
    */
   findOverlappingForPatient(
     patientId: string,
+    start: Date,
+    end: Date,
+    excludeId?: string,
+  ): Promise<Appointment[]>;
+
+  /**
+   * DX-211: igual que `findOverlapping` pero por SILLÓN: citas vivas y no
+   * canceladas de ese sillón que se solapan con `[start, end)` (un sobrecupo
+   * también ocupa el sillón). Es el pre-check de la EXCLUDE
+   * appointments_no_overlap_per_chair.
+   */
+  findOverlappingForChair(
+    chairId: string,
     start: Date,
     end: Date,
     excludeId?: string,

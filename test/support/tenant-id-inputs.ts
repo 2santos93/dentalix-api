@@ -141,6 +141,17 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
 
 /** Ids cuyo caso «B manda el id de A» ya está en otro spec (se cita cuál). */
 export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
+  // DX-211: «B manda el sillón, la sede o el profesional de A → 404/400 en
+  // español (o 403 por la sede) y no se crea ni cambia nada».
+  'GET /chairs ?locationId': 'chairs.e2e-spec.ts',
+  'POST /chairs body.locationId': 'chairs.e2e-spec.ts',
+  'POST /chairs body.defaultProviderId': 'chairs.e2e-spec.ts',
+  'PATCH /chairs/:id body.defaultProviderId': 'chairs.e2e-spec.ts',
+  'PUT /chairs/order body.locationId': 'chairs.e2e-spec.ts',
+  'PUT /chairs/order body.chairIds[]': 'chairs.e2e-spec.ts',
+  'POST /appointments body.chairId': 'chairs.e2e-spec.ts',
+  'PATCH /appointments/:id body.chairId': 'chairs.e2e-spec.ts',
+  'GET /appointments ?chairIds[]': 'chairs.e2e-spec.ts',
   // DX-439: «B manda la sede, el profesional, la cita o el ítem de A → 403 o
   // lista sin filas de A, y 404 sin descarte».
   'GET /closing-queue ?locationId': 'closing-queue.e2e-spec.ts',

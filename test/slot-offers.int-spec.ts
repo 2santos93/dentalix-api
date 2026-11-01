@@ -112,6 +112,7 @@ async function cleanup(): Promise<void> {
   await owner.waitlistOffer.deleteMany({ where });
   await owner.appointmentWaitlistEntry.deleteMany({ where });
   await owner.appointment.deleteMany({ where });
+  await owner.chair.deleteMany({ where });
   await owner.patient.deleteMany({ where });
   await owner.location.deleteMany({ where });
   await owner.tenant.deleteMany({ where: { id: where.tenantId } });
@@ -144,6 +145,7 @@ describe('oferta de hueco por enlace (int, DX-435)', () => {
     await owner.waitlistOffer.deleteMany({ where });
     await owner.appointmentWaitlistEntry.deleteMany({ where });
     await owner.appointment.deleteMany({ where });
+    await owner.chair.deleteMany({ where });
   });
 
   /** Una oferta con enlace a un pendiente de la lista; devuelve el token. */
@@ -569,6 +571,55 @@ describe('oferta de hueco por enlace (int, DX-435)', () => {
             },
           },
         },
+      });
+    });
+
+    it('DX-211: con el sillón de la cita desactivado, aceptar da «no disponible» y la cita no se mueve', async () => {
+      const chair = await owner.chair.create({
+        data: {
+          tenantId: a.tenantId,
+          locationId: a.locationId,
+          name: 'Sillón inactivo DX-211',
+          active: false,
+        },
+      });
+      const later = await owner.appointment.create({
+        data: {
+          tenantId: a.tenantId,
+          locationId: a.locationId,
+          patientId: a.patientIds[1],
+          providerId: DOCTOR,
+          chairId: chair.id,
+          start: at('09:00', FAR),
+          end: at('09:30', FAR),
+          wantsEarlier: true,
+        },
+      });
+      const token = generateSlotOfferToken();
+      await owner.waitlistOffer.create({
+        data: {
+          tenantId: a.tenantId,
+          locationId: a.locationId,
+          slotStart: at('17:00'),
+          slotEnd: at('18:00'),
+          providerId: DOCTOR,
+          patientId: a.patientIds[1],
+          appointmentId: later.id,
+          channel: 'LINK_WA_ME',
+          offerDay: new Date(`${DAY}T00:00:00.000Z`),
+          createdById: STAFF,
+          tokenHash: hashSlotOfferToken(token),
+          expiresAt: at('17:00'),
+        },
+      });
+      const result = await inClinic(a, () => acceptOffer.execute(token, META));
+      expect(result.state).not.toBe('ACCEPTED');
+      const kept = await owner.appointment.findUniqueOrThrow({
+        where: { id: later.id },
+      });
+      expect(kept).toMatchObject({
+        start: at('09:00', FAR),
+        wantsEarlier: true,
       });
     });
 

@@ -121,6 +121,28 @@ describe('sanitizeAuditMetadata (DX-009)', () => {
         }),
       ).toEqual({ move: { from, to } });
     });
+
+    it('DX-211: guarda el sillón antes y después (uuid o null) y descarta otro valor', () => {
+      const chair = '33333333-3333-4333-8333-333333333333';
+      expect(
+        sanitizeAuditMetadata({
+          move: {
+            from: { ...from, chairId: null },
+            to: { ...to, chairId: chair },
+          },
+        }),
+      ).toEqual({
+        move: {
+          from: { ...from, chairId: null },
+          to: { ...to, chairId: chair },
+        },
+      });
+      expect(
+        sanitizeAuditMetadata({
+          move: { from: { ...from, chairId: 'Sillón 1' }, to },
+        }),
+      ).toEqual({ move: { from, to } });
+    });
   });
 
   describe('status (DX-200: flujo del paciente en la clínica)', () => {

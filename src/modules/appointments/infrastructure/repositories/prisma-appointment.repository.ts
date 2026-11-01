@@ -86,6 +86,9 @@ export const INCLUDE_PATIENT_NAME = {
   appointmentType: {
     select: { id: true, name: true, durationMinutes: true, color: true },
   },
+  // DX-211: el sillón embebido, aunque esté desactivado (la cita lo conserva).
+  // La FK compuesta garantiza que es de la misma clínica y sede.
+  chair: { select: { id: true, name: true, active: true } },
 } as const;
 
 /**
@@ -102,6 +105,7 @@ type PrismaAppointmentWithPatient = PrismaAppointment & {
     durationMinutes: number;
     color: string;
   } | null;
+  chair?: { id: string; name: string; active: boolean } | null;
 };
 
 export function mapToEntity(
@@ -142,6 +146,8 @@ export function mapToEntity(
     triageNote: appointment.triageNote,
     walkIn: appointment.walkIn,
     overbooked: appointment.overbooked,
+    chairId: appointment.chairId,
+    chair: appointment.chair ?? null,
     createdAt: appointment.createdAt,
     updatedAt: appointment.updatedAt,
   };
@@ -210,6 +216,7 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
             createdById: input.createdById,
             appointmentTypeId: input.appointmentTypeId,
             wantsEarlier: input.wantsEarlier,
+            chairId: input.chairId,
           },
           include: INCLUDE_PATIENT_NAME,
         });
@@ -265,6 +272,8 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
       // DX-121: columnas de la vista Día. `providerId IN (...)` lo sirve
       // `appointments_tenantId_providerId_start_idx` (DX-043).
       ...(params.providerIds ? { providerId: { in: params.providerIds } } : {}),
+      // DX-211: columnas por sillón (appointments_tenant_location_chair_start_idx).
+      ...(params.chairIds ? { chairId: { in: params.chairIds } } : {}),
       // La agenda SÍ es por sede: una cita ocurre en un sitio físico. Una sede
       // explícita (DX-121, ya permitida por el caso de uso) manda sobre la del
       // request; una de otra clínica no devuelve nada (RLS). Sin ninguna, las
@@ -338,6 +347,32 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
     });
   }
 
+  async findOverlappingForChair(
+    chairId: string,
+    start: Date,
+    end: Date,
+    excludeId?: string,
+  ): Promise<Appointment[]> {
+    // Mismo solape medio-abierto que `findOverlapping`, espejo de la EXCLUDE
+    // appointments_no_overlap_per_chair: un sobrecupo SÍ ocupa el sillón.
+    const where: Prisma.AppointmentWhereInput = {
+      chairId,
+      deletedAt: null,
+      status: { not: 'CANCELLED' },
+      start: { lt: end },
+      end: { gt: start },
+      ...(excludeId ? { id: { not: excludeId } } : {}),
+    };
+
+    return this.prisma.runWithTenant(async (tx) => {
+      const appointments = await tx.appointment.findMany({
+        where,
+        orderBy: { start: 'asc' },
+      });
+      return appointments.map(mapToEntity);
+    });
+  }
+
   async findOverlappingForPatient(
     patientId: string,
     start: Date,
@@ -396,7 +431,7 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
         } = patch;
         // DX-279: los datos de la cancelación van en la MISMA sentencia que el
         // estado (la CHECK appointments_cancellation_check se mira por fila).
-        const data: Prisma.AppointmentUpdateManyMutationInput = {
+        const data: Prisma.AppointmentUncheckedUpdateManyInput = {
           ...rest,
           ...(cancel ? await this.cancellationData(tx, id, cancel) : {}),
           ...(clearCancellation ? CLEARED_CANCELLATION : {}),

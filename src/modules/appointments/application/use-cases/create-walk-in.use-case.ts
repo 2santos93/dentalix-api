@@ -264,7 +264,10 @@ export class CreateWalkInUseCase {
       if (scope === 'provider') {
         throw new ConflictException(WALK_IN_MESSAGES.slotTaken);
       }
-      if (scope !== null) throw new ConflictException(OVERLAP_MESSAGES[scope]);
+      // Una cita sin cita previa no lleva sillón (DX-211): solo queda el paciente.
+      if (scope === 'patient') {
+        throw new ConflictException(OVERLAP_MESSAGES.patient);
+      }
       throw error;
     }
   }
