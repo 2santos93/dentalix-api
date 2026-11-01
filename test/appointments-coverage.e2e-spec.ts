@@ -58,7 +58,7 @@ describe('Resumen de cobertura y filtro por pagador (e2e, DX-153)', () => {
   const patients: Record<string, string> = {};
   const appointments: Record<string, string> = {};
   // Un martes futuro, a las 14:00-17:30 UTC: el horario por defecto de la sede
-  // (09:00-13:00 y 15:00-19:00 locales, Colombia) las acepta, y las citas
+  // (09:00-13:00 y 15:00-19:00 locales) las acepta, y las citas
   // pasadas se rechazan.
   const futureDay = nextTuesday();
 
