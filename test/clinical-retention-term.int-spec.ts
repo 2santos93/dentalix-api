@@ -12,6 +12,12 @@ import { assertNotUnderRetention } from '../src/modules/patients/application/ret
 import { floorCandidate } from '../src/modules/patients/domain/retention/clinical-record-retention';
 import { ListRetentionExpiringUseCase } from '../src/modules/patients/application/use-cases/retention.use-cases';
 import { REGIONAL_BOGOTA_FIXTURE } from './support/location-fixtures';
+import {
+  gate,
+  settle,
+  transactionId,
+  waitForTransactionWaiters,
+} from './support/postgres-concurrency';
 import { purgeTenants } from './support/tenant-purge';
 
 // DX-330: el plazo de conservación de la HC es una columna de la clínica
@@ -1031,5 +1037,276 @@ describe('cambiar el plazo: suelos, ventana y evento (DX-330, int)', () => {
     });
     const other = known('P2010', '23514');
     await expect(failingWith(other)).rejects.toBe(other);
+  });
+
+  // R8 y PF1: el `set` real se detiene con el `FOR UPDATE` de una fila que su
+  // `UPDATE` quiere escribir (PATTERNS X8), nunca con un bloqueo de `tenants`
+  // de la prueba: así se ejercita el bloqueo que toma `set`.
+  describe('concurrencia del cambio de plazo', () => {
+    async function holdTransaction(
+      work: (tx: Prisma.TransactionClient) => Promise<unknown>,
+    ): Promise<{ xid: string; release(): Promise<void> }> {
+      const ready = gate<string>();
+      const done = gate();
+      const finished = settle(
+        raw.$transaction(
+          async (tx) => {
+            await work(tx);
+            ready.open(await transactionId(tx));
+            await done.wait;
+          },
+          { timeout: 30_000 },
+        ),
+      );
+      const failed = finished.then((outcome) => {
+        if (outcome.status === 'rejected') {
+          throw new Error(String(outcome.reason));
+        }
+        return '';
+      });
+      const xid = await Promise.race([ready.wait, failed]);
+      return {
+        xid,
+        release: async () => {
+          done.open();
+          expect((await finished).status).toBe('fulfilled');
+        },
+      };
+    }
+
+    function holdPatientRow(patientId: string) {
+      return holdTransaction(
+        (tx) =>
+          tx.$queryRaw`SELECT 1 FROM "patients" WHERE "id" = ${patientId}::uuid FOR UPDATE`,
+      );
+    }
+
+    /** La transacción de quien espera a `xid`, para esperar a su vez detrás de ella. */
+    async function waiterOf(xid: string): Promise<string> {
+      const [row] = await raw.$queryRaw<{ xid: string }[]>`
+        SELECT a."backend_xid"::text AS xid
+          FROM pg_catalog.pg_locks l
+          JOIN pg_catalog.pg_stat_activity a ON a."pid" = l."pid"
+         WHERE l."locktype" = 'transactionid'
+           AND l."transactionid"::text = ${xid}
+           AND NOT l."granted"`;
+      return row.xid;
+    }
+
+    async function msOf(work: Promise<unknown>): Promise<number> {
+      const started = Date.now();
+      await work;
+      return Date.now() - started;
+    }
+
+    it('archive waits for a raise and sees it', async () => {
+      const started = Date.now();
+      const a = await clinicAt(15);
+      const id = await patientIn(a, '2010-06-15');
+      const raise = await holdTransaction(async (tx) => {
+        await tx.$queryRaw`SELECT 1 FROM "tenants" WHERE "id" = ${a}::uuid FOR NO KEY UPDATE`;
+        await tx.$executeRaw`UPDATE "tenants" SET "clinicalRecordRetentionYears" = 20 WHERE "id" = ${a}::uuid`;
+      });
+      try {
+        const archiving = settle(archive(a, id));
+        await waitForTransactionWaiters(raw, raise.xid);
+        await raise.release();
+        expect(await archiving).toMatchObject({
+          status: 'rejected',
+          reason: {
+            response: {
+              code: 'CLINICAL_RECORD_RETENTION',
+              retentionUntil: '2030-06-15',
+            },
+          },
+        });
+      } finally {
+        await raise.release();
+      }
+      const { deletedAt } = await raw.patient.findUniqueOrThrow({
+        where: { id },
+      });
+      expect(deletedAt).toBeNull();
+      expect(Date.now() - started).toBeLessThan(10_000);
+    });
+
+    it('a reduction and an archive do not deadlock', async () => {
+      const started = Date.now();
+      const b = await clinicAt(25);
+      const id = await patientIn(b, '2010-06-15');
+      const other = await patientIn(b, '2011-06-15');
+      const held = await holdPatientRow(other);
+      try {
+        const reducing = settle(put(b, 15, T));
+        await waitForTransactionWaiters(raw, held.xid);
+        const archiving = settle(archive(b, id));
+        await waitForTransactionWaiters(raw, await waiterOf(held.xid));
+        await held.release();
+        expect(await reducing).toMatchObject({
+          status: 'fulfilled',
+          value: { outcome: 'APPLIED', protectedPatients: 2 },
+        });
+        // Espera tras `tenants`, así que ve la reducción y el suelo que deja.
+        expect(await archiving).toMatchObject({
+          status: 'rejected',
+          reason: {
+            response: {
+              code: 'CLINICAL_RECORD_RETENTION',
+              retentionUntil: '2035-06-15',
+            },
+          },
+        });
+      } finally {
+        await held.release();
+      }
+      expect(Date.now() - started).toBeLessThan(10_000);
+    });
+
+    it('the PUT does not block new records of the clinic', async () => {
+      const b = await clinicAt(25);
+      const pending = await patientIn(b, '2010-06-15');
+      const unattended = await patientIn(b, null);
+      const held = await holdPatientRow(pending);
+      try {
+        const reducing = settle(put(b, 15, T));
+        await waitForTransactionWaiters(raw, held.xid);
+
+        // `clinical_entries` no tiene FK a `tenants`, así que no ve este
+        // bloqueo; `payers`, sí, como otras 81 tablas: su alta toma KEY SHARE
+        // sobre la clínica y es la que esperaría a un FOR UPDATE (M16).
+        const entryMs = await msOf(
+          prisma.runWithTenant(b, (tx) =>
+            tx.clinicalEntry.create({
+              data: {
+                tenantId: b,
+                patientId: unattended,
+                entryDate: T,
+                notes: 'Control',
+                performedById: actorId,
+              },
+            }),
+          ),
+        );
+        const payerMs = await msOf(
+          prisma.runWithTenant(b, (tx) =>
+            tx.payer.create({
+              data: { tenantId: b, name: 'Alta', type: 'INSURER' },
+            }),
+          ),
+        );
+        expect(entryMs).toBeLessThan(1000);
+        expect(payerMs).toBeLessThan(1000);
+
+        await held.release();
+        expect(await reducing).toMatchObject({
+          status: 'fulfilled',
+          value: { outcome: 'APPLIED' },
+        });
+      } finally {
+        await held.release();
+      }
+      expect(await floorOf(pending)).toBe('2035-06-15');
+      // Su primera atención llegó con la reducción en curso: plazo nuevo.
+      expect(await floorOf(unattended)).toBeNull();
+    });
+
+    it('a busy reduction writes nothing', async () => {
+      const b = await clinicAt(25);
+      // Ids en orden y fila detenida la última, en orden físico y de `id`: el
+      // `UPDATE` llega a ella con las demás ya escritas.
+      const ids = Array.from({ length: 12 }, () => randomUUID()).sort();
+      await raw.patient.createMany({
+        data: ids.map((id) => ({
+          id,
+          tenantId: b,
+          firstName: 'Corte',
+          lastName: 'DX330',
+          lastAttentionAt: new Date('2010-06-15T10:00:00Z'),
+        })),
+      });
+      const before = await storedIn(b);
+      const held = await holdPatientRow(ids[ids.length - 1]);
+      try {
+        const reducing = settle(put(b, 15, T));
+        await waitForTransactionWaiters(raw, held.xid);
+        const free = await raw.$queryRaw<{ id: string }[]>`
+          SELECT "id" FROM "patients" WHERE "tenantId" = ${b}::uuid
+             FOR NO KEY UPDATE SKIP LOCKED`;
+        expect(free.length).toBeLessThan(ids.length - 1);
+
+        // La fila sigue detenida hasta que `lock_timeout` (5 s) corta el `set`.
+        expect(await reducing).toEqual({
+          status: 'fulfilled',
+          value: { outcome: 'BUSY', reason: 'CONTENTION' },
+        });
+        expect(await storedIn(b)).toEqual(before);
+        expect(await floorsIn(b)).toBe(0);
+        expect(await eventsIn(b)).toHaveLength(0);
+      } finally {
+        await held.release();
+      }
+      await expect(put(b, 15, T)).resolves.toMatchObject({
+        outcome: 'APPLIED',
+        protectedPatients: ids.length,
+      });
+    }, 20_000);
+
+    it('a failure after the floors rolls everything back', async () => {
+      const b = await clinicAt(25);
+      await patientIn(b, '2010-06-15');
+      const before = await storedIn(b);
+      // El evento es el último paso: `locationId` no es un uuid y el `INSERT`
+      // falla con los suelos y el plazo ya escritos en la transacción.
+      await expect(
+        tenantContext.run(b, () =>
+          settings.set(
+            { clinicalRecordRetentionYears: 15, confirmReduction: true },
+            { ...ctxOf(b), locationId: 'no-es-un-uuid' },
+            T,
+          ),
+        ),
+      ).rejects.toThrow();
+      expect(await storedIn(b)).toEqual(before);
+      expect(await floorsIn(b)).toBe(0);
+      expect(await eventsIn(b)).toHaveLength(0);
+    });
+
+    it('a raise and a correction at once leave a valid state', async () => {
+      for (let round = 0; round < 4; round++) {
+        const b = await clinicAt(20);
+        await patientIn(b, '2010-06-15');
+        await put(b, 30, T);
+        const at = after(23 * HOUR);
+
+        const results = await Promise.all([put(b, 40, at), put(b, 20, at)]);
+        expect(results.map((r) => r.outcome)).toEqual(['APPLIED', 'APPLIED']);
+
+        // Corrección y después subida (abre otra ventana), o subida y después
+        // corrección (la cierra). Ninguna de las dos deja suelos.
+        const stored = await storedIn(b);
+        expect([
+          { years: 20, raisedAt: null, yearsBeforeRaise: null },
+          { years: 40, raisedAt: at, yearsBeforeRaise: 20 },
+        ]).toContainEqual(stored);
+        expect(await floorsIn(b)).toBe(0);
+
+        const changes = (await eventsIn(b))
+          .map((event) => {
+            const { configChange } = event.metadata as unknown as {
+              configChange: Record<
+                'before' | 'after',
+                { clinicalRecordRetentionYears: number }
+              >;
+            };
+            return `${configChange.before.clinicalRecordRetentionYears}>${configChange.after.clinicalRecordRetentionYears}`;
+          })
+          .sort();
+        expect(changes).toEqual(
+          stored.years === 20
+            ? ['20>30', '30>40', '40>20']
+            : ['20>30', '20>40', '30>20'],
+        );
+      }
+    });
   });
 });
