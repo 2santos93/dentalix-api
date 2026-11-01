@@ -18,10 +18,8 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import { civilDateIn } from '../src/shared/time/civil-day';
-import {
-  REGIONAL_BOGOTA_FIXTURE,
-  locationBody,
-} from './support/location-fixtures';
+import { locationBody } from './support/location-fixtures';
+import { sedeTodayFixture } from './support/sede-clock';
 
 // DX-253 en HTTP real: un plan CANCELADO con 300.000 abonados traspasa 200.000
 // a un plan vivo del mismo paciente (el origen queda con 100.000 a favor, el
@@ -35,8 +33,12 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
-const ZONE = 'America/Bogota';
-const TODAY = civilDateIn(new Date(), ZONE);
+// DX-495 (TST-062): la sede usa la zona segura de DX-449 (Bogotá lejos de su
+// medianoche; si no, una zona en la que ahora es cerca del mediodía): el «hoy»
+// de los abonos y el de la API no se separan si la corrida cruza la
+// medianoche de Bogotá.
+const SEDE = sedeTodayFixture();
+const TODAY = civilDateIn(new Date(), SEDE.timeZone);
 
 interface TransferBody {
   id: string;
@@ -192,8 +194,8 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
   beforeAll(async () => {
     app = await createE2eApp();
     await resetDatabase(raw);
-    a = await registerClinic(app, 'dx253-a');
-    b = await registerClinic(app, 'dx253-b');
+    a = await registerClinic(app, 'dx253-a', SEDE);
+    b = await registerClinic(app, 'dx253-b', SEDE);
     sede = (
       await raw.location.findFirstOrThrow({
         where: { tenantId: a.tenantId },
@@ -380,7 +382,7 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
   it('D1: con varias sedes, una devolución en efectivo sin sede explícita es 400 en español y no guarda nada', async () => {
     // Una segunda sede: sin cabecera ya no hay una única sede posible.
     await as(api().post('/api/v1/locations'), a)
-      .send(locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }))
+      .send(locationBody(SEDE, { name: 'Sede Norte' }))
       .expect(201);
     const before = await counts();
     const res = await api()

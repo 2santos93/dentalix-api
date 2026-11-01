@@ -10,6 +10,8 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
+import { sedeTodayFixture } from './support/sede-clock';
+import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
 
 // DX-120 · odontograma fase 2 de punta a punta: dentición por edad,
 // exfoliar 55 → erupcionar 15 → registrar → anular → carta a una fecha
@@ -56,16 +58,20 @@ interface GroupBody {
   records: RecordBody[];
 }
 
-/** Día civil en Bogotá (zona por defecto de la clínica) `daysAgo` días atrás. */
-function bogotaDay(daysAgo = 0): string {
-  return new Date(Date.now() - 5 * 60 * 60 * 1000 - daysAgo * DAY_MS)
-    .toISOString()
-    .slice(0, 10);
+// DX-495 (TST-062): la clínica usa la zona segura de DX-449 (Bogotá lejos de
+// su medianoche; si no, una zona en la que ahora es cerca del mediodía), así
+// el «hoy» del test y el de la API no se separan si la corrida cruza la
+// medianoche de Bogotá.
+const SEDE = sedeTodayFixture();
+
+/** Día civil de la sede de la clínica `daysAgo` días atrás. */
+function sedeDay(daysAgo = 0): string {
+  return addCivilDays(civilDateIn(new Date(), SEDE.timeZone), -daysAgo);
 }
 
 /** Fecha de nacimiento de alguien que tiene `years` años (y un mes) hoy. */
 function birthDateFor(years: number): string {
-  const [y, m, d] = bogotaDay(31).split('-').map(Number);
+  const [y, m, d] = sedeDay(31).split('-').map(Number);
   return `${y - years}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 }
 
@@ -111,8 +117,8 @@ describe('Odontograma fase 2: dentición, anulación y asOf (DX-120, e2e)', () =
   beforeAll(async () => {
     app = await createE2eApp();
     await resetDatabase(raw);
-    a = await registerClinic(app, 'dx120-a');
-    b = await registerClinic(app, 'dx120-b');
+    a = await registerClinic(app, 'dx120-a', SEDE);
+    b = await registerClinic(app, 'dx120-b', SEDE);
     const dentist = await seedMember(raw, a, ClinicRole.DENTIST);
     dentistA = {
       userId: dentist.userId,
@@ -412,7 +418,7 @@ describe('Odontograma fase 2: dentición, anulación y asOf (DX-120, e2e)', () =
       const res = await call(
         a,
         'get',
-        `/patients/${adult}/odontogram?asOf=${bogotaDay(5)}`,
+        `/patients/${adult}/odontogram?asOf=${sedeDay(5)}`,
       ).expect(200);
       const groups = res.body as GroupBody[];
       expect(groups.map((g) => g.toothNumber)).toEqual(['36']);
@@ -423,7 +429,7 @@ describe('Odontograma fase 2: dentición, anulación y asOf (DX-120, e2e)', () =
       const res = await call(
         a,
         'get',
-        `/patients/${adult}/odontogram?asOf=${bogotaDay()}`,
+        `/patients/${adult}/odontogram?asOf=${sedeDay()}`,
       ).expect(200);
       expect((res.body as GroupBody[]).map((g) => g.toothNumber)).toEqual([
         '46',
@@ -434,10 +440,10 @@ describe('Odontograma fase 2: dentición, anulación y asOf (DX-120, e2e)', () =
       const res = await call(
         a,
         'get',
-        `/patients/${child}/dentition?asOf=${bogotaDay(1)}`,
+        `/patients/${child}/dentition?asOf=${sedeDay(1)}`,
       ).expect(200);
       const body = res.body as DentitionBody;
-      expect(body.asOf).toBe(bogotaDay(1));
+      expect(body.asOf).toBe(sedeDay(1));
       expect(body.positions.find((p) => p.position === '15')?.source).toBe(
         'AGE',
       );
@@ -453,7 +459,7 @@ describe('Odontograma fase 2: dentición, anulación y asOf (DX-120, e2e)', () =
       await call(
         a,
         'get',
-        `/patients/${adult}/dentition?asOf=${bogotaDay(-3)}`,
+        `/patients/${adult}/dentition?asOf=${sedeDay(-3)}`,
       ).expect(400);
     });
   });

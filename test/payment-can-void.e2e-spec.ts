@@ -8,11 +8,8 @@ import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
-import {
-  REGIONAL_BOGOTA_FIXTURE,
-  registerBody,
-  setLocationZone,
-} from './support/location-fixtures';
+import { registerBody, setLocationZone } from './support/location-fixtures';
+import { sedeTodayFixture } from './support/sede-clock';
 
 // DX-057 — la caja (GET /payments) y el estado de cuenta exponen, por abono,
 // `createdById` y `canVoid` para QUIEN CONSULTA, con la misma regla que aplica
@@ -86,7 +83,9 @@ describe('canVoid en caja y estado de cuenta (e2e, DX-057)', () => {
     const email = `owner@${subdomain}.com`;
     const reg = await registerVerified(
       app,
-      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+      // DX-495 (TST-062): con la zona segura de DX-449, un abono «de hoy» no
+      // cae en ayer si la corrida cruza la medianoche de Bogotá.
+      registerBody(sedeTodayFixture(), {
         clinicName: `Clinica ${subdomain}`,
         subdomain,
         email,

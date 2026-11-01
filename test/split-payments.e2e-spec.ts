@@ -18,6 +18,7 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import { civilDateIn } from '../src/shared/time/civil-day';
+import { sedeTodayFixture } from './support/sede-clock';
 
 // DX-390 en HTTP real: un cobro de 2–5 formas de pago crea un abono por línea
 // y UN recibo en una sola transacción (si una línea falla, no queda ninguna
@@ -30,8 +31,12 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
-const ZONE = 'America/Bogota';
-const TODAY = civilDateIn(new Date(), ZONE);
+// DX-495 (TST-062): la sede usa la zona segura de DX-449 (Bogotá lejos de su
+// medianoche; si no, una zona en la que ahora es cerca del mediodía): el «hoy»
+// de los abonos y el de la API no se separan si la corrida cruza la
+// medianoche de Bogotá.
+const SEDE = sedeTodayFixture();
+const TODAY = civilDateIn(new Date(), SEDE.timeZone);
 const PROVIDER = { COP: 4000 };
 
 interface PaymentBody {
@@ -197,8 +202,8 @@ describe('Cobro dividido con un solo recibo (e2e, DX-390)', () => {
         rate,
       })),
     });
-    a = await registerClinic(app, 'dx390-a');
-    b = await registerClinic(app, 'dx390-b');
+    a = await registerClinic(app, 'dx390-a', SEDE);
+    b = await registerClinic(app, 'dx390-b', SEDE);
     const member = await seedMember(raw, a, ClinicRole.RECEPTION);
     receptionA = await loginAs(app, a.host, member.email);
     planA = await seedPlan(a, 'A');

@@ -5,6 +5,7 @@ import { App } from 'supertest/types';
 import { createE2eApp } from './support/create-e2e-app';
 import { Clinic, registerClinic, resetDatabase } from './support/e2e-fixtures';
 import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
+import { sedeTodayFixture } from './support/sede-clock';
 
 // DX-376 en HTTP real: el recibo de un abono en otra moneda trae la tasa que
 // congeló el abono (DX-375), su fuente, su día y el equivalente en la moneda
@@ -16,8 +17,12 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
-const ZONE = 'America/Bogota';
-const TODAY = civilDateIn(new Date(), ZONE);
+// DX-495 (TST-062): la clínica usa la zona segura de DX-449 (Bogotá lejos de
+// su medianoche; si no, una zona en la que ahora es cerca del mediodía): el
+// «hoy» de los abonos y el de la API no se separan si la corrida cruza la
+// medianoche de Bogotá.
+const SEDE = sedeTodayFixture();
+const TODAY = civilDateIn(new Date(), SEDE.timeZone);
 const YESTERDAY = addCivilDays(TODAY, -1);
 
 interface ReceiptBody {
@@ -146,8 +151,8 @@ describe('Recibo con la tasa congelada del abono (e2e, DX-376)', () => {
         { date: TODAY, currency: 'VES', rate: 40 },
       ],
     });
-    auto = await registerClinic(app, 'dx376-auto');
-    manual = await registerClinic(app, 'dx376-manual');
+    auto = await registerClinic(app, 'dx376-auto', SEDE);
+    manual = await registerClinic(app, 'dx376-manual', SEDE);
     await seedPlan(auto, 'A');
     await seedPlan(manual, 'M');
   });

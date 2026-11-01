@@ -16,7 +16,8 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
-import { civilDateIn } from '../src/shared/time/civil-day';
+import { civilDateIn, zonedStartOfDay } from '../src/shared/time/civil-day';
+import { sedeTodayFixture } from './support/sede-clock';
 
 // DX-395 en HTTP real: el estado de cuenta nombra el medio de la clínica y la
 // referencia de cada abono (también el de una réplica anterior sin medio); la
@@ -27,8 +28,12 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
-const ZONE = 'America/Bogota';
-const TODAY = civilDateIn(new Date(), ZONE);
+// DX-495 (TST-062): la clínica usa la zona segura de DX-449 (Bogotá lejos de
+// su medianoche; si no, una zona en la que ahora es cerca del mediodía): el
+// «hoy» de los abonos y el de la API no se separan si la corrida cruza la
+// medianoche de Bogotá.
+const SEDE = sedeTodayFixture();
+const TODAY = civilDateIn(new Date(), SEDE.timeZone);
 
 interface MethodBody {
   id: string;
@@ -149,8 +154,8 @@ describe('Medio y referencia en estado de cuenta y caja (e2e, DX-395)', () => {
   beforeAll(async () => {
     app = await createE2eApp();
     await resetDatabase(raw);
-    a = await registerClinic(app, 'dx395-a');
-    b = await registerClinic(app, 'dx395-b');
+    a = await registerClinic(app, 'dx395-a', SEDE);
+    b = await registerClinic(app, 'dx395-b', SEDE);
     receptionA = await loginAs(
       app,
       a.host,
@@ -219,7 +224,10 @@ describe('Medio y referencia en estado de cuenta y caja (e2e, DX-395)', () => {
         patientId: plan.patientId,
         amount: 5,
         currency: 'USD',
-        paidAt: new Date(`${TODAY}T17:00:00.000Z`),
+        // Mediodía de hoy en la sede.
+        paidAt: new Date(
+          zonedStartOfDay(TODAY, SEDE.timeZone).getTime() + 12 * 60 * 60_000,
+        ),
         method: 'CASH',
       },
     });

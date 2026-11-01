@@ -17,7 +17,12 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
-import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
+import {
+  addCivilDays,
+  civilDateIn,
+  zonedStartOfDay,
+} from '../src/shared/time/civil-day';
+import { sedeTodayFixture } from './support/sede-clock';
 import { PAYMENT_CLOCK } from '../src/modules/payments/application/use-cases/void-payment.use-case';
 
 // DX-215 (BE-032) · abono → compromiso CUMPLIDO → anulación del abono →
@@ -30,8 +35,12 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
-const BOGOTA = 'America/Bogota';
-const today = (): string => civilDateIn(new Date(), BOGOTA);
+// DX-495 (TST-062): la clínica usa la zona segura de DX-449 (Bogotá lejos de
+// su medianoche; si no, una zona en la que ahora es cerca del mediodía): el
+// «hoy» de los abonos y el de la API no se separan si la corrida cruza la
+// medianoche de Bogotá.
+const SEDE = sedeTodayFixture();
+const today = (): string => civilDateIn(new Date(), SEDE.timeZone);
 
 interface PromiseBody {
   id: string;
@@ -163,8 +172,8 @@ describe('Cobranza — un compromiso cumplido se reabre al anular su abono (e2e,
           .useValue(() => voidClock ?? new Date()),
     });
     await resetDatabase(raw);
-    clinicA = await registerClinic(app, 'reabre-a');
-    clinicB = await registerClinic(app, 'reabre-b');
+    clinicA = await registerClinic(app, 'reabre-a', SEDE);
+    clinicB = await registerClinic(app, 'reabre-b', SEDE);
     const catalog = await api(clinicA, 'post', '/catalog/items')
       .send({
         code: 'REABRE',
@@ -261,9 +270,12 @@ describe('Cobranza — un compromiso cumplido se reabre al anular su abono (e2e,
     const paymentId = await pay(d.planId);
     expect((await promiseOf(d.patientId)).status).toBe('KEPT');
 
-    // 00:30 del día siguiente a la fecha en Bogotá; solo ADMIN anula abonos
+    // 00:30 del día siguiente a la fecha en la sede; solo ADMIN anula abonos
     // de otro día.
-    voidClock = new Date(`${addCivilDays(dueDate, 1)}T05:30:00.000Z`);
+    voidClock = new Date(
+      zonedStartOfDay(addCivilDays(dueDate, 1), SEDE.timeZone).getTime() +
+        30 * 60_000,
+    );
     await voidPayment(paymentId).expect(403);
     await voidPayment(paymentId, clinicA.adminToken).expect(200);
 

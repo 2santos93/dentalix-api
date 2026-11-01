@@ -626,7 +626,7 @@ describe('Horario de los profesionales por sede (e2e, DX-233)', () => {
       expect((off.body as Body).id).toBeDefined();
     });
 
-    it('un profesional sin horario se comporta como hoy (horario de la sede)', async () => {
+    it('un profesional sin horario se comporta como hasta ahora (horario de la sede)', async () => {
       expect(await openings(clinic.adminUserId, sedeA, MON, MON)).toEqual([
         { start: local(MON, '07:00'), end: local(MON, '20:00') },
       ]);

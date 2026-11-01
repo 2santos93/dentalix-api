@@ -232,7 +232,7 @@ describe('caja por turno: tablas, RLS e inmutabilidad (int, DX-027)', () => {
     });
   });
 
-  it('los ajustes de caja de la clínica nacen con el comportamiento de hoy', async () => {
+  it('los ajustes de caja de la clínica nacen con el comportamiento de siempre', async () => {
     const tenant = await raw.tenant.findUniqueOrThrow({
       where: { id: a.tenantId },
       select: { cashRequireOpenSession: true, cashBlindClose: true },

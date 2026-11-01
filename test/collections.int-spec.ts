@@ -6,10 +6,8 @@ import { SettlePaymentPromises } from '../src/modules/collections/application/se
 import { RecordAuditEventUseCase } from '../src/modules/audit/application/record-audit-event.use-case';
 import { PrismaAuditEventRepository } from '../src/modules/audit/infrastructure/prisma-audit-event.repository';
 import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
-import {
-  REGIONAL_BOGOTA_FIXTURE,
-  locationData,
-} from './support/location-fixtures';
+import { locationData } from './support/location-fixtures';
+import { sedeTodayFixture } from './support/sede-clock';
 
 // DX-150, capa DB: notas de cobranza y compromisos de pago (RLS FORCE, FK
 // compuestas, append-only por trigger, un compromiso abierto por paciente) y
@@ -25,7 +23,11 @@ const prisma = new PrismaService(tenantContext);
 const SUBDOMAINS = ['dx150-int-a', 'dx150-int-b'];
 const FK_VIOLATION = { code: 'P2003' };
 const IMMUTABLE = /inalterable|no admite/;
-const BOGOTA = 'America/Bogota';
+// DX-495 (TST-062): la sede usa la zona segura de DX-449 (Bogotá lejos de su
+// medianoche; si no, una zona en la que ahora es cerca del mediodía): el «hoy»
+// de los compromisos y el del barrido no se separan si la corrida cruza la
+// medianoche de Bogotá.
+const SEDE = sedeTodayFixture();
 
 interface Clinic {
   tenantId: string;
@@ -42,7 +44,7 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
   });
   const tenantId = tenant.id;
   const location = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(SEDE, {
       tenantId,
       name: 'Sede',
       country: 'CO',
@@ -151,7 +153,7 @@ describe('cobranza: notas y compromisos de pago (int, DX-150)', () => {
     ...extra,
   });
 
-  const today = () => civilDateIn(new Date(), BOGOTA);
+  const today = () => civilDateIn(new Date(), SEDE.timeZone);
 
   describe.each(['collection_notes', 'payment_promises'])('%s', (table) => {
     it('tiene RLS ENABLE + FORCE y la política del tenant', async () => {

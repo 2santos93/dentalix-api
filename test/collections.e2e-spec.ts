@@ -18,7 +18,12 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
-import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
+import {
+  addCivilDays,
+  civilDateIn,
+  zonedStartOfDay,
+} from '../src/shared/time/civil-day';
+import { sedeTodayFixture } from './support/sede-clock';
 import { COLLECTIONS_REPOSITORY } from '../src/modules/collections/domain/ports/collections-repository.port';
 import type { CollectionsRepository } from '../src/modules/collections/domain/ports/collections-repository.port';
 import { SettlePaymentPromises } from '../src/modules/collections/application/settle-payment-promises';
@@ -32,10 +37,17 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
-const BOGOTA = 'America/Bogota';
-const today = (): string => civilDateIn(new Date(), BOGOTA);
-const noonDaysAgo = (n: number): Date =>
-  new Date(`${addCivilDays(today(), -n)}T17:00:00.000Z`);
+// DX-495 (TST-062): la clínica usa la zona segura de DX-449 (Bogotá lejos de
+// su medianoche; si no, una zona en la que ahora es cerca del mediodía), y las
+// horas se dan en la hora local de la sede: el «hoy» de las citas y el de la
+// API no se separan si la corrida cruza la medianoche de Bogotá.
+const SEDE = sedeTodayFixture();
+const HOUR = 60 * 60 * 1000;
+const today = (): string => civilDateIn(new Date(), SEDE.timeZone);
+/** `hour` en punto, hora local de la sede, del día civil `day`. */
+const sedeAt = (day: string, hour: number): Date =>
+  new Date(zonedStartOfDay(day, SEDE.timeZone).getTime() + hour * HOUR);
+const noonDaysAgo = (n: number): Date => sedeAt(addCivilDays(today(), -n), 12);
 
 interface Body {
   items: Record<string, unknown>[];
@@ -119,9 +131,7 @@ describe('Cobranza — notas, compromisos y saldo vencido (e2e, DX-150)', () => 
     locationId: string,
     hour: number,
   ) {
-    const start = new Date(
-      `${today()}T${String(hour).padStart(2, '0')}:00:00.000Z`,
-    );
+    const start = sedeAt(today(), hour);
     await raw.appointment.create({
       data: {
         tenantId: clinic.tenantId,
@@ -138,8 +148,8 @@ describe('Cobranza — notas, compromisos y saldo vencido (e2e, DX-150)', () => 
   beforeAll(async () => {
     app = await createE2eApp();
     await resetDatabase(raw);
-    clinicA = await registerClinic(app, 'cobranza-a');
-    clinicB = await registerClinic(app, 'cobranza-b');
+    clinicA = await registerClinic(app, 'cobranza-a', SEDE);
+    clinicB = await registerClinic(app, 'cobranza-b', SEDE);
     const sedes = await api(clinicA, 'get', '/locations').expect(200);
     const sede = (sedes.body as { id: string }[])[0].id;
 
@@ -170,8 +180,8 @@ describe('Cobranza — notas, compromisos y saldo vencido (e2e, DX-150)', () => 
     deudor = await patient(clinicA, 'Debe', 'COB-1');
     deudorPlan = await plan(clinicA, deudor, 500_000);
     alDia = await patient(clinicA, 'Aldia', 'COB-2');
-    await appointmentToday(clinicA, deudor, sede, 14);
-    await appointmentToday(clinicA, alDia, sede, 15);
+    await appointmentToday(clinicA, deudor, sede, 9);
+    await appointmentToday(clinicA, alDia, sede, 10);
   });
 
   afterAll(async () => {
@@ -535,7 +545,7 @@ describe('Cobranza — notas, compromisos y saldo vencido (e2e, DX-150)', () => 
       for (let i = 0; i < 6; i += 1) {
         const p = await patient(clinicA, `Lote${i}`, `COB-L${i}`);
         await plan(clinicA, p, 10_000 + i);
-        await appointmentToday(clinicA, p, sede, 16 + i);
+        await appointmentToday(clinicA, p, sede, 11 + i);
       }
       const repo = app.get<CollectionsRepository>(COLLECTIONS_REPOSITORY);
       const ledgers = jest.spyOn(repo, 'ledgersOf');

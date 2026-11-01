@@ -8,11 +8,8 @@ import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
-import {
-  REGIONAL_BOGOTA_FIXTURE,
-  registerBody,
-  setLocationZone,
-} from './support/location-fixtures';
+import { sedeTodayFixture } from './support/sede-clock';
+import { registerBody, setLocationZone } from './support/location-fixtures';
 
 // SEC-013 — DELETE /payments/:id exige motivo, guarda quién/cuándo/por qué y
 // limita a recepción a sus propios abonos del día. DIRECT_URL (superusuario,
@@ -83,7 +80,10 @@ describe('Anulación de abonos con motivo y autor — DELETE /payments/:id (e2e)
     const email = `owner@${subdomain}.com`;
     const reg = await registerVerified(
       app,
-      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+      // DX-495 (TST-062): «hoy» de recepción es el de la sede; con la zona
+      // segura de DX-449 un abono «de hoy» no cae en ayer si la corrida cruza
+      // la medianoche de Bogotá.
+      registerBody(sedeTodayFixture(), {
         clinicName: `Clinica ${subdomain}`,
         subdomain,
         email,
@@ -269,8 +269,11 @@ describe('Anulación de abonos con motivo y autor — DELETE /payments/:id (e2e)
     const otherDayZone = zones.find(
       (z) => day(createdAt, z) !== day(new Date(), z),
     )!;
+    // Mismo día ahora y dentro de 10 min: la medianoche no cae en medio del test.
     const sameDayZone = zones.find(
-      (z) => day(createdAt, z) === day(new Date(), z),
+      (z) =>
+        day(createdAt, z) === day(new Date(), z) &&
+        day(createdAt, z) === day(new Date(Date.now() + 10 * 60_000), z),
     )!;
     expect(otherDayZone).toBeDefined();
     expect(sameDayZone).toBeDefined();

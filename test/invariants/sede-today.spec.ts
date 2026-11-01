@@ -9,7 +9,8 @@ import {
   safeTodayZone,
   sedeTodayFixture,
 } from '../support/sede-clock';
-import { isCheckedSpec, readSpecs, type SpecSource } from './bare-delete-many';
+import { readSpecs } from './bare-delete-many';
+import { findRealClockToday } from './real-clock-today';
 
 // DX-449 (TST-053): los specs de agenda y reservas calculaban «hoy» con el
 // reloj real y la zona fija de Bogotá; entre las 04:40 y las 06:00 UTC (la
@@ -29,16 +30,18 @@ const REPO_ROOT = join(__dirname, '..', '..');
  * empezadas en la sede; quedan para migrar (ver informe de DX-449). Solo puede
  * bajar: cada entrada tiene que seguir cumpliendo el patrón (un spec migrado
  * sale de aquí) y un spec nuevo no entra.
+ *
+ * DX-495 (TST-062): de 29 a 19. Salen los de dinero (split-payments,
+ * patient-credit, collections*, cash-sessions*, payment-can-void,
+ * payment-method-statement, payment-receipt-exchange-rate), que registran la
+ * clínica con `sedeTodayFixture`. `cash-register` se queda: sus casos fijan
+ * abonos a horas de Bogotá y la zona publicada de la sede.
  */
 const LEGACY_REAL_CLOCK_TODAY: ReadonlySet<string> = new Set([
   'test/appointments-medical-alerts.e2e-spec.ts',
   'test/cancellation-fee-protected.e2e-spec.ts',
   'test/cash-register.e2e-spec.ts',
-  'test/cash-sessions-concurrency.e2e-spec.ts',
-  'test/cash-sessions.e2e-spec.ts',
   'test/clinical-codes.e2e-spec.ts',
-  'test/collections-reopen.e2e-spec.ts',
-  'test/collections.e2e-spec.ts',
   'test/exchange-provider-budget.e2e-spec.ts',
   'test/exchange-provider-quota.e2e-spec.ts',
   'test/exchange-rate-dates.e2e-spec.ts',
@@ -46,48 +49,15 @@ const LEGACY_REAL_CLOCK_TODAY: ReadonlySet<string> = new Set([
   'test/implants.e2e-spec.ts',
   'test/jobs-maintenance.e2e-spec.ts',
   'test/opening-candidates.e2e-spec.ts',
-  'test/patient-credit.e2e-spec.ts',
   'test/patient-flow.e2e-spec.ts',
-  'test/payment-can-void.e2e-spec.ts',
-  'test/payment-method-statement.e2e-spec.ts',
   'test/payment-rate-backup.e2e-spec.ts',
-  'test/payment-receipt-exchange-rate.e2e-spec.ts',
   'test/plan-items-arrival.e2e-spec.ts',
   'test/receivables.e2e-spec.ts',
-  'test/split-payments.e2e-spec.ts',
-  'test/collections.int-spec.ts',
   'test/opening-balances.int-spec.ts',
   'test/payment-promise-reopen.int-spec.ts',
   'test/seed-demo.int-spec.ts',
   'test/waitlist-offers.int-spec.ts',
 ]);
-
-const TODAY_IDENTIFIER = /\b\w*(?:today|Today|TODAY)\w*\b/;
-const REAL_CLOCK = /\bDate\.now\(\)|\bnew Date\(\)/;
-const SEDE_CLOCK_IMPORT = /from '\.\/support\/sede-clock'/;
-
-/** El código sin comentarios: un «today» en prosa no cuenta. */
-function code(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/(^|[^:])\/\/.*$/gm, '$1');
-}
-
-/** Specs con BD que nombran «hoy», leen el reloj real y no usan sede-clock. */
-export function findRealClockToday(specs: SpecSource[]): string[] {
-  return specs
-    .filter((s) => isCheckedSpec(s.path))
-    .filter((s) => {
-      const body = code(s.source);
-      return (
-        TODAY_IDENTIFIER.test(body) &&
-        REAL_CLOCK.test(body) &&
-        !SEDE_CLOCK_IMPORT.test(s.source)
-      );
-    })
-    .map((s) => s.path)
-    .sort();
-}
 
 describe('DX-449: «hoy» de la sede en los specs de agenda y reservas', () => {
   describe('safeTodayZone', () => {
@@ -183,6 +153,102 @@ describe('DX-449: «hoy» de la sede en los specs de agenda y reservas', () => {
       },
     ]);
     expect(found).toEqual(['test/nuevo.e2e-spec.ts', 'test/nuevo.int-spec.ts']);
+  });
+
+  it('DX-495: detecta el «hoy» en español de un título o un identificador', () => {
+    const found = findRealClockToday([
+      {
+        // El caso de chairs.e2e-spec.ts:572 antes de DX-495: el «hoy» solo
+        // está en el título y la cita «de hace 5 min» se lleva a ARRIVED.
+        path: 'test/sillones.e2e-spec.ts',
+        source: [
+          "it('se cambia el sillón de una cita de hoy con el paciente ya en la clínica', async () => {",
+          '  const start = new Date(Date.now() - 5 * 60_000);',
+          "  await patch(id).send({ status: 'ARRIVED' }).expect(200);",
+          '});',
+        ].join('\n'),
+      },
+      {
+        path: 'test/titulo.int-spec.ts',
+        source: [
+          "describe('Hoy en la agenda', () => {",
+          "  it('cuenta la cita', () => book(new Date()));",
+          '});',
+        ].join('\n'),
+      },
+      {
+        path: 'test/identificador.e2e-spec.ts',
+        source: 'const citaDeHoy = () => book(new Date());',
+      },
+      {
+        path: 'test/mensaje.e2e-spec.ts',
+        source: [
+          "it('rechaza el abono', () => {",
+          '  const at = new Date();',
+          "  expect(message).toBe('Solo puedes anular abonos registrados hoy.');",
+          '});',
+        ].join('\n'),
+      },
+      {
+        path: 'test/prosa.int-spec.ts',
+        source: '// la cita de hoy\nconst start = new Date();',
+      },
+      {
+        path: 'test/etiqueta.int-spec.ts',
+        source: [
+          "it('«Sin cambios hoy» guarda autor y hora', () => {",
+          '  const before = Date.now();',
+          '});',
+        ].join('\n'),
+      },
+    ]);
+    expect(found).toEqual([
+      'test/identificador.e2e-spec.ts',
+      'test/sillones.e2e-spec.ts',
+      'test/titulo.int-spec.ts',
+    ]);
+  });
+
+  it('DX-495: detecta una cita de `Date.now() - n` que pasa a ARRIVED o IN_CHAIR', () => {
+    const found = findRealClockToday([
+      {
+        path: 'test/llegada.e2e-spec.ts',
+        source: [
+          "it('el paciente llega', async () => {",
+          '  const late = await appointment(new Date(Date.now() - 20 * MIN));',
+          "  await setStatus(late, 'ARRIVED');",
+          '});',
+        ].join('\n'),
+      },
+      {
+        path: 'test/sillon.int-spec.ts',
+        source:
+          "const start = Date.now() - HOUR; await move(start, 'IN_CHAIR');",
+      },
+      {
+        path: 'test/futura.e2e-spec.ts',
+        source:
+          "const start = new Date(Date.now() + 7 * DAY); await setStatus(a, 'ARRIVED');",
+      },
+      {
+        path: 'test/otro-test.e2e-spec.ts',
+        source: [
+          "it('una cita vieja', () => book(new Date(Date.now() - 400 * DAY)));",
+          "it('llega', () => setStatus(future, 'ARRIVED'));",
+        ].join('\n'),
+      },
+      {
+        path: 'test/migrada.e2e-spec.ts',
+        source: [
+          "import { sedeTodayFixture } from './support/sede-clock';",
+          "const start = new Date(Date.now() - 5 * MIN); setStatus(a, 'ARRIVED');",
+        ].join('\n'),
+      },
+    ]);
+    expect(found).toEqual([
+      'test/llegada.e2e-spec.ts',
+      'test/sillon.int-spec.ts',
+    ]);
   });
 
   it('ningún spec fuera de la lista heredada calcula «hoy» con el reloj real', () => {

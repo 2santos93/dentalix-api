@@ -11,10 +11,8 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import { civilDateIn } from '../src/shared/time/civil-day';
-import {
-  REGIONAL_BOGOTA_FIXTURE,
-  locationBody,
-} from './support/location-fixtures';
+import { locationBody } from './support/location-fixtures';
+import { sedeTodayFixture } from './support/sede-clock';
 
 // DX-027 · Caja por turno bajo concurrencia y con varias monedas y sedes:
 // dos aperturas o dos cierres a la vez (uno gana, el otro 409), abonos y
@@ -25,8 +23,12 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
-const BOGOTA = 'America/Bogota';
-const today = (): string => civilDateIn(new Date(), BOGOTA);
+// DX-495 (TST-062): la clínica usa la zona segura de DX-449 (Bogotá lejos de
+// su medianoche; si no, una zona en la que ahora es cerca del mediodía): el
+// «hoy» de la caja y el de la API no se separan si la corrida cruza la
+// medianoche de Bogotá.
+const SEDE = sedeTodayFixture();
+const today = (): string => civilDateIn(new Date(), SEDE.timeZone);
 const ROUNDS = 6;
 
 interface ClosingLine {
@@ -111,7 +113,7 @@ describe('Caja por turno: concurrencia, monedas y sedes (e2e, DX-027)', () => {
   beforeAll(async () => {
     app = await createE2eApp();
     await resetDatabase(raw);
-    clinic = await registerClinic(app, 'caja-concurrencia');
+    clinic = await registerClinic(app, 'caja-concurrencia', SEDE);
     const reception = await seedMember(raw, clinic, ClinicRole.RECEPTION);
     receptionToken = await loginAs(app, clinic.host, reception.email);
     sedePrincipal = (
@@ -123,7 +125,7 @@ describe('Caja por turno: concurrencia, monedas y sedes (e2e, DX-027)', () => {
     sedeNorte = (
       (
         await api('post', '/locations')
-          .send(locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Norte' }))
+          .send(locationBody(SEDE, { name: 'Norte' }))
           .expect(201)
       ).body as { id: string }
     ).id;
