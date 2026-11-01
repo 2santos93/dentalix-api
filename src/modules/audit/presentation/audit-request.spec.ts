@@ -376,7 +376,7 @@ describe('buildAuditDraft (DX-009)', () => {
       },
       req({
         params: { id: PATIENT },
-        body: { reason: 'Reclamo del titular de los datos' },
+        body: { reason: 'Solicitud del paciente sobre sus datos' },
       }),
       { id: PATIENT },
       scope,
