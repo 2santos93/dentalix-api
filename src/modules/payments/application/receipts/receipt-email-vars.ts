@@ -35,13 +35,13 @@ function targetLabel(
 /** DX-390: el total en la moneda del plan o, sin él, la suma de las líneas. */
 function splitAmountLabel(
   split: NonNullable<PaymentReceiptView['split']>,
-  fmt: RegionalFormat,
+  money: (amount: number, currency: string) => string,
 ): string {
   if (split.total.amount !== null) {
-    return fmt.money(split.total.amount, split.total.currency);
+    return money(split.total.amount, split.total.currency);
   }
   return split.lines
-    .map((line) => fmt.money(line.amount, line.currency))
+    .map((line) => money(line.amount, line.currency))
     .join(' + ');
 }
 
@@ -59,7 +59,9 @@ function lineMethodLabel(
  * tratamientos, solo el nombre del plan. `timeZone` es la de la sede del
  * recibo: el día del plan y el de la anulación son días civiles de esa sede
  * (no puede decir «anulado el 18» si allí aún es el 17). `fmt` es su formato
- * (G1-B): fechas e importes como los escribe esa sede.
+ * (G1-B): fechas e importes como los escribe esa sede; los importes, con el
+ * texto propio de cada moneda congelado en la foto (DX-517). El título y la
+ * leyenda congelados (DX-515) van también al email: sin ellos, como antes.
  */
 export function receiptEmailVars(
   receipt: PaymentReceiptView,
@@ -68,6 +70,8 @@ export function receiptEmailVars(
 ): PaymentReceiptEmailVars {
   const { snapshot } = receipt;
   const { clinic, patient, payment, plan, planBalance } = snapshot;
+  const money = (amount: number, currency: string): string =>
+    fmt.money(amount, currency, snapshot.currencyTexts);
   return {
     patientName: patient.fullName,
     reference: receipt.reference,
@@ -81,8 +85,8 @@ export function receiptEmailVars(
     patientDocLabel: documentText(patient.docTypeName, patient.docNumberMasked),
     // DX-390: un cobro dividido dice su total y sus formas de pago.
     amountLabel: receipt.split
-      ? splitAmountLabel(receipt.split, fmt)
-      : fmt.money(payment.amount, payment.currency),
+      ? splitAmountLabel(receipt.split, money)
+      : money(payment.amount, payment.currency),
     paidOnLabel: fmt.civilDate(payment.paidOn),
     methodLabel: receipt.split
       ? receipt.split.lines.map(lineMethodLabel).join(' + ')
@@ -97,7 +101,7 @@ export function receiptEmailVars(
     ),
     toOpeningBalance: Boolean(snapshot.openingBalance),
     balanceLabel: planBalance
-      ? fmt.money(planBalance.balance, planBalance.currency)
+      ? money(planBalance.balance, planBalance.currency)
       : null,
     cashierName: snapshot.cashier?.fullName ?? null,
     voided:
@@ -108,5 +112,8 @@ export function receiptEmailVars(
           }
         : null,
     legalNotice: snapshot.legalNotice,
+    // DX-515-bis: solo si la foto los tiene; las variables de antes no cambian.
+    ...(snapshot.title ? { title: snapshot.title } : {}),
+    ...(snapshot.legend ? { legend: snapshot.legend } : {}),
   };
 }

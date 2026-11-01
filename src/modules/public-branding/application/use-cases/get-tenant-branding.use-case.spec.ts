@@ -14,6 +14,7 @@ describe('GetTenantBrandingUseCase', () => {
       name: 'Sonrisa',
       primaryColor: '#123456',
       logoUrl: 'https://cdn.example.com/logo.png',
+      currencyTexts: { EUR: '€' },
     };
     const repo: TenantBrandingRepository = {
       findById: (tenantId: string) => {

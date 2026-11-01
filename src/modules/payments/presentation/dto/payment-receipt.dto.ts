@@ -286,6 +286,16 @@ export class ReceiptSnapshotDto {
       'recibo anterior a que se configurara.',
   })
   legend?: string;
+
+  @ApiPropertyOptional({
+    type: 'object',
+    additionalProperties: { type: 'string' },
+    description:
+      'DX-517: el texto propio de cada moneda que tenía la clínica al ' +
+      'emitir (código ISO → texto), congelado. Ausente si no tenía ninguno: ' +
+      'los importes llevan el código ISO, también al reimprimir.',
+  })
+  currencyTexts?: Record<string, string>;
 }
 
 /**

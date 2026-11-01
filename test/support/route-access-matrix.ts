@@ -340,6 +340,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /exchange/convert': EVERY_ROLE,
   'GET /exchange/settings': ADMIN_ONLY,
   'PUT /exchange/settings': ADMIN_ONLY,
+  // DX-517: texto propio de cada moneda de la clínica, solo ADMIN.
+  'GET /exchange/currency-texts': ADMIN_ONLY,
+  'PUT /exchange/currency-texts': ADMIN_ONLY,
   'GET /exchange/manual-rates': ADMIN_ONLY,
   'POST /exchange/manual-rates': ADMIN_ONLY,
   'PUT /exchange/manual-rates/:id': ADMIN_ONLY,
