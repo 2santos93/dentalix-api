@@ -70,7 +70,10 @@ describe('PrismaPayerRepository (DX-326)', () => {
       expect(payer).not.toHaveProperty('country');
 
       const { repo, writes } = fakeRepository();
-      await repo.create({ name: 'Surco Salud', type, active: true }, TEST_AUDIT);
+      await repo.create(
+        { name: 'Surco Salud', type, active: true },
+        TEST_AUDIT,
+      );
       await repo.update('payer-1', { type }, TEST_AUDIT);
       await repo.update('payer-1', { name: 'Surco' }, TEST_AUDIT);
       expect(writes.map((w) => w.type)).toEqual([type, type, undefined]);
