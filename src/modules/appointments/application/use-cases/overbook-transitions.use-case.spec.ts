@@ -128,14 +128,13 @@ describe('UpdateAppointmentUseCase · sobrecupo (DX-509)', () => {
     it('a otra hora libre: deja de ser sobrecupo, auditado', async () => {
       const { uc, t, overbooked, reasons, repo } = setup();
       const a = overbooked();
-      const moved = await uc.execute(
-        a.id,
-        { start: t(60), end: t(90) },
-        ctx(),
-      );
+      const moved = await uc.execute(a.id, { start: t(60), end: t(90) }, ctx());
       expect(moved.overbooked).toBe(false);
       expect((await repo.findById(a.id))!.overbooked).toBe(false);
-      expect(reasons()).toEqual(['APPOINTMENT_MOVED', 'WALK_IN_OVERBOOK_CLEARED']);
+      expect(reasons()).toEqual([
+        'APPOINTMENT_MOVED',
+        'WALK_IN_OVERBOOK_CLEARED',
+      ]);
     });
 
     it('a otro profesional libre a la misma hora: deja de ser sobrecupo', async () => {

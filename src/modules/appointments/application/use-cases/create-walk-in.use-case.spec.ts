@@ -585,9 +585,11 @@ describe('CreateWalkInUseCase (DX-470)', () => {
       expect(writes).toHaveLength(1);
       expect(writes[0].idempotency).toEqual({
         key: KEY.toLowerCase(),
-        fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
+        fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/) as string,
       });
-      expect(await appointments.findOverlapping('prov1', utc('00:00'), utc('23:59'))).toHaveLength(1);
+      expect(
+        await appointments.findOverlapping('prov1', utc('00:00'), utc('23:59')),
+      ).toHaveLength(1);
     });
 
     it('misma clave con otros datos: 422 IDEMPOTENCY_KEY_REUSED y nada nuevo', async () => {
@@ -596,7 +598,11 @@ describe('CreateWalkInUseCase (DX-470)', () => {
       await uc.execute({ patientId: 'p1', providerId: 'prov1' }, CTX, KEY);
 
       const variants = [
-        { patientId: 'p1', providerId: 'prov1', triageFlags: [TriageFlag.PAIN] },
+        {
+          patientId: 'p1',
+          providerId: 'prov1',
+          triageFlags: [TriageFlag.PAIN],
+        },
         { patientId: 'p1', providerId: 'prov1', triageNote: 'otra' },
         { patientId: 'p2', providerId: 'prov1' },
         {
@@ -606,9 +612,13 @@ describe('CreateWalkInUseCase (DX-470)', () => {
         },
       ];
       for (const variant of variants) {
-        const error = await uc.execute(variant, CTX, KEY).catch((e: unknown) => e);
+        const error = await uc
+          .execute(variant, CTX, KEY)
+          .catch((e: unknown) => e);
         expect(error).toBeInstanceOf(UnprocessableEntityException);
-        expect((error as UnprocessableEntityException).getResponse()).toMatchObject({
+        expect(
+          (error as UnprocessableEntityException).getResponse(),
+        ).toMatchObject({
           code: IDEMPOTENCY_KEY_REUSED_CODE,
           message: WALK_IN_MESSAGES.idempotencyKeyReused,
         });
@@ -627,7 +637,8 @@ describe('CreateWalkInUseCase (DX-470)', () => {
       byKey.delete(KEY.toLowerCase());
       let lookups = 0;
       const original = byKey.get.bind(byKey);
-      byKey.get = (k: string) => (lookups++ === 0 ? undefined : (original(k) ?? stored));
+      byKey.get = (k: string) =>
+        lookups++ === 0 ? undefined : (original(k) ?? stored);
 
       const second = await uc.execute(input, CTX, KEY);
       expect(second.id).toBe(first.id);
@@ -650,7 +661,8 @@ describe('CreateWalkInUseCase (DX-470)', () => {
       );
       let lookups = 0;
       const original = byKey.get.bind(byKey);
-      byKey.get = (k: string) => (lookups++ === 0 ? undefined : (original(k) ?? stored));
+      byKey.get = (k: string) =>
+        lookups++ === 0 ? undefined : (original(k) ?? stored);
 
       const second = await uc.execute(input, CTX, KEY);
       expect(second.id).toBe(first.id);
@@ -665,7 +677,9 @@ describe('CreateWalkInUseCase (DX-470)', () => {
       expect(writes.every((w) => w.idempotency === undefined)).toBe(true);
       await expect(
         uc.execute({ patientId: 'p1', providerId: 'prov1' }, CTX, 'doble-clic'),
-      ).rejects.toThrow(new BadRequestException(WALK_IN_MESSAGES.idempotencyKeyInvalid));
+      ).rejects.toThrow(
+        new BadRequestException(WALK_IN_MESSAGES.idempotencyKeyInvalid),
+      );
       expect(writes).toHaveLength(2);
     });
   });

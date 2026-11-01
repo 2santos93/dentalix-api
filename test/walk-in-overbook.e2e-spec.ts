@@ -132,7 +132,10 @@ describe('Sobrecupo de urgencia y «Atender sin cita» idempotente (e2e, DX-509/
   /** Urgencia en sobrecupo AHORA (`clockNow`), de 30 min, con el dentista. */
   async function overbookedAt(hhmm: string): Promise<Body> {
     clockNow = local(hhmm);
-    const res = await as(api().post('/api/v1/appointments/walk-in'), reception.token)
+    const res = await as(
+      api().post('/api/v1/appointments/walk-in'),
+      reception.token,
+    )
       .send({
         patientId: urgentPatientId,
         providerId: dentist.userId,
@@ -253,11 +256,15 @@ describe('Sobrecupo de urgencia y «Atender sin cita» idempotente (e2e, DX-509/
     const [trigger] = await raw.$queryRaw<{ def: string }[]>`
       SELECT pg_get_triggerdef(oid) AS def FROM pg_trigger
        WHERE tgname = 'dx509_walk_in_guard'`;
-    expect(trigger.def).toMatch(/BEFORE UPDATE OF overbooked, start, "end", "providerId"/);
+    expect(trigger.def).toMatch(
+      /BEFORE UPDATE OF overbooked, start, "end", "providerId"/,
+    );
     const [index] = await raw.$queryRaw<{ def: string }[]>`
       SELECT indexdef AS def FROM pg_indexes
        WHERE indexname = 'appointments_tenant_idempotency_key'`;
-    expect(index.def).toMatch(/UNIQUE INDEX .*\("tenantId", "idempotencyKey"\) WHERE \("idempotencyKey" IS NOT NULL\)/);
+    expect(index.def).toMatch(
+      /UNIQUE INDEX .*\("tenantId", "idempotencyKey"\) WHERE \("idempotencyKey" IS NOT NULL\)/,
+    );
     const [chair] = await raw.$queryRaw<{ def: string }[]>`
       SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint
        WHERE conname = 'appointments_no_overlap_per_chair'`;
@@ -285,7 +292,10 @@ describe('Sobrecupo de urgencia y «Atender sin cita» idempotente (e2e, DX-509/
       expect(moved.body).toMatchObject({ overbooked: false });
       expect(await overbookedInDb(a.id)).toBe(false);
       expect(await reasonsOf(a.id)).toEqual(
-        expect.arrayContaining(['APPOINTMENT_MOVED', 'WALK_IN_OVERBOOK_CLEARED']),
+        expect.arrayContaining([
+          'APPOINTMENT_MOVED',
+          'WALK_IN_OVERBOOK_CLEARED',
+        ]),
       );
       // Ya no es sobrecupo: otra cita encima del profesional choca.
       await book('11:10', '11:40').expect(409);
@@ -294,7 +304,9 @@ describe('Sobrecupo de urgencia y «Atender sin cita» idempotente (e2e, DX-509/
 
     it('a otro profesional: normal y ocupa SU hueco', async () => {
       const a = await overbookedAt('12:00');
-      const moved = await patch(a.id, { providerId: dentist2.userId }).expect(200);
+      const moved = await patch(a.id, { providerId: dentist2.userId }).expect(
+        200,
+      );
       expect(moved.body).toMatchObject({
         providerId: dentist2.userId,
         overbooked: false,
@@ -356,14 +368,18 @@ describe('Sobrecupo de urgencia y «Atender sin cita» idempotente (e2e, DX-509/
       const taken = await patch(a.id, { status: 'SCHEDULED' }).expect(409);
       expectSlotTaken(taken.body);
       expect(
-        (await raw.appointment.findUniqueOrThrow({ where: { id: a.id } })).status,
+        (await raw.appointment.findUniqueOrThrow({ where: { id: a.id } }))
+          .status,
       ).toBe('CANCELLED');
 
       const kept = await patch(a.id, {
         status: 'SCHEDULED',
         keepOverbooked: true,
       }).expect(200);
-      expect(kept.body).toMatchObject({ status: 'SCHEDULED', overbooked: true });
+      expect(kept.body).toMatchObject({
+        status: 'SCHEDULED',
+        overbooked: true,
+      });
       expect(await reasonsOf(a.id)).toContain('WALK_IN_OVERBOOK_KEPT');
     });
 
@@ -371,7 +387,10 @@ describe('Sobrecupo de urgencia y «Atender sin cita» idempotente (e2e, DX-509/
       const a = await overbookedAt('16:00');
       await cancel(a.id);
       const back = await patch(a.id, { status: 'SCHEDULED' }).expect(200);
-      expect(back.body).toMatchObject({ status: 'SCHEDULED', overbooked: false });
+      expect(back.body).toMatchObject({
+        status: 'SCHEDULED',
+        overbooked: false,
+      });
       expect(await reasonsOf(a.id)).toContain('WALK_IN_OVERBOOK_CLEARED');
       await book('16:00', '16:30').expect(409);
     });
@@ -398,7 +417,11 @@ describe('Sobrecupo de urgencia y «Atender sin cita» idempotente (e2e, DX-509/
     const a = await overbookedAt('10:30');
     await expect(
       raw.appointment.update({
-        where: { id: (await book('18:30', '19:00').expect(201)).body.id },
+        where: {
+          id: (
+            (await book('18:30', '19:00').expect(201)).body as { id: string }
+          ).id,
+        },
         data: { overbooked: true, walkIn: true },
       }),
     ).rejects.toThrow(/Un sobrecupo solo nace/);
@@ -446,7 +469,9 @@ describe('Sobrecupo de urgencia y «Atender sin cita» idempotente (e2e, DX-509/
         where: { tenantId: clinic.tenantId },
       });
       const responses = await Promise.all(
-        Array.from({ length: 5 }, () => walkIn(key, newPatient(dentist.userId))),
+        Array.from({ length: 5 }, () =>
+          walkIn(key, newPatient(dentist.userId)),
+        ),
       );
       expect(responses.map((r) => r.status)).toEqual([201, 201, 201, 201, 201]);
       const ids = new Set(responses.map((r) => (r.body as Body).id));
@@ -472,7 +497,7 @@ describe('Sobrecupo de urgencia y «Atender sin cita» idempotente (e2e, DX-509/
         id,
         patientCreated: false,
         overbooked: true,
-        overbookId: responses[0].body.overbookId,
+        overbookId: (responses[0].body as { overbookId: string }).overbookId,
       });
     });
 
@@ -507,10 +532,14 @@ describe('Sobrecupo de urgencia y «Atender sin cita» idempotente (e2e, DX-509/
         otherMainId,
         otherReception.token,
       ).expect(201);
-      expect(theirs.body.id).not.toBe(mine.body.id);
+      expect((theirs.body as { id: string }).id).not.toBe(
+        (mine.body as { id: string }).id,
+      );
       expect(theirs.body).toMatchObject({ patientCreated: true });
 
-      const bad = await walkIn('doble-clic', newPatient(dentist.userId)).expect(400);
+      const bad = await walkIn('doble-clic', newPatient(dentist.userId)).expect(
+        400,
+      );
       expect(bad.body).toMatchObject({
         message: 'La clave de idempotencia debe ser un UUID.',
       });
