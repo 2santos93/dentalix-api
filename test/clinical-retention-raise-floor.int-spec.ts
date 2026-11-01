@@ -1,3 +1,5 @@
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { raiseClinicalRetentionFloor } from '../src/modules/patients/infrastructure/clinical-retention-raise-floor';
 import { purgeTenants } from './support/tenant-purge';
@@ -6,6 +8,7 @@ import { purgeTenants } from './support/tenant-purge';
 // plataforma, con un evento de plataforma por clínica. Corre con el owner, como
 // el script. Los eventos de plataforma son append-only: no se limpian, y el
 // usuario administrador que los firma se queda con ellos.
+const run = promisify(execFile);
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
@@ -173,5 +176,55 @@ describe('retention:raise-floor (DX-330, int)', () => {
       before: 16,
       after: 20,
     });
+  });
+
+  describe('the script validates the platform minimum like the boot', () => {
+    // Proceso real del script (ts-node), con el entorno de esta BD.
+    function script(minYears: string | undefined) {
+      const env: NodeJS.ProcessEnv = { ...process.env };
+      if (minYears === undefined)
+        delete env.PLATFORM_MIN_CLINICAL_RETENTION_YEARS;
+      else env.PLATFORM_MIN_CLINICAL_RETENTION_YEARS = minYears;
+      return run(
+        'npx',
+        [
+          'ts-node',
+          '--transpile-only',
+          'prisma/retention-raise-floor.ts',
+          `--actor-email=${ADMIN_EMAIL}`,
+        ],
+        { env, cwd: process.cwd() },
+      ).then(
+        () => ({ code: 0, stderr: '' }),
+        (e: { code: number; stderr: string }) => ({
+          code: e.code,
+          stderr: e.stderr,
+        }),
+      );
+    }
+
+    it.each(['200', 'abc', '101', '20.5'])(
+      'fails with a non-zero exit and writes nothing for %s',
+      async (value) => {
+        const before = await raw.platformAuditEvent.count();
+        const yearsBefore = await years(tenantB);
+
+        const result = await script(value);
+
+        expect(result.code).not.toBe(0);
+        expect(result.stderr).toContain(
+          'PLATFORM_MIN_CLINICAL_RETENTION_YEARS debe ser un entero entre 15 y 100.',
+        );
+        expect(await raw.platformAuditEvent.count()).toBe(before);
+        expect(await years(tenantB)).toBe(yearsBefore);
+      },
+      60_000,
+    );
+
+    it('an empty value means 15, as at boot, and succeeds', async () => {
+      const result = await script('');
+
+      expect(result.code).toBe(0);
+    }, 60_000);
   });
 });

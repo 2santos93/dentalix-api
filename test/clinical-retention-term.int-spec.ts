@@ -8,7 +8,10 @@ import {
   PrismaClinicRetentionSettingsRepository,
   retentionCandidates,
 } from '../src/modules/patients/infrastructure/repositories/prisma-clinic-retention-settings.repository';
-import { assertNotUnderRetention } from '../src/modules/patients/application/retention-guard';
+import {
+  assertNotUnderRetention,
+  assertUnderRetention,
+} from '../src/modules/patients/application/retention-guard';
 import { floorCandidate } from '../src/modules/patients/domain/retention/clinical-record-retention';
 import { ListRetentionExpiringUseCase } from '../src/modules/patients/application/use-cases/retention.use-cases';
 import { REGIONAL_BOGOTA_FIXTURE } from './support/location-fixtures';
@@ -738,6 +741,35 @@ describe('cambiar el plazo: suelos, ventana y evento (DX-330, int)', () => {
     expect(await floorOf(live)).toBe('2035-06-15');
   });
 
+  it('partial suppression still applies to a patient held only by a floor', async () => {
+    const b = await clinicAt(25);
+    const held = await patientIn(b, '2010-06-15');
+    const suppress = (tenantId: string, id: string) =>
+      tenantContext.run(tenantId, () =>
+        patients.partiallySuppress(id, {
+          reason: 'Reclamo del titular de los datos',
+          actorId,
+          assertAllowed: (state) => assertUnderRetention(state, T),
+        }),
+      );
+    await put(b, 15, T);
+    // Con 15 años, 2010-06-15 vencería en 2025: solo el suelo lo mantiene.
+    expect(await floorOf(held)).toBe('2035-06-15');
+
+    const result = await suppress(b, held);
+    expect(result.underRetention).toBe(true);
+    expect(result.partiallySuppressedAt).toBeInstanceOf(Date);
+
+    // Control: sin suelo (clínica que ya estaba en 15), la misma fecha ya no
+    // está en retención y la supresión parcial se rechaza.
+    const c = await clinicAt(15);
+    const free = await patientIn(c, '2010-06-15');
+    expect(await floorOf(free)).toBeNull();
+    await expect(suppress(c, free)).rejects.toMatchObject({
+      response: { code: 'NOT_UNDER_RETENTION' },
+    });
+  });
+
   it('a reduction does not bring the expiring list forward', async () => {
     const a = await clinicAt(15);
     const b = await clinicAt(25);
@@ -1220,8 +1252,16 @@ describe('cambiar el plazo: suelos, ventana y evento (DX-330, int)', () => {
         await held.release();
       }
       expect(await floorOf(pending)).toBe('2035-06-15');
-      // Su primera atención llegó con la reducción en curso: plazo nuevo.
-      expect(await floorOf(unattended)).toBeNull();
+      // Su primera atención llegó con la reducción en curso: el trigger le fijó
+      // la fecha de atención y la reducción no le escribió un suelo.
+      const late = await raw.patient.findUniqueOrThrow({
+        where: { id: unattended },
+        select: { lastAttentionAt: true, retentionFloorUntil: true },
+      });
+      expect(late.lastAttentionAt).not.toBeNull();
+      expect(late.retentionFloorUntil).toBeNull();
+      // La reducción sí protegió al paciente que ya tenía atención.
+      expect(await floorOf(pending)).toBe('2035-06-15');
     });
 
     it('a busy reduction writes nothing', async () => {

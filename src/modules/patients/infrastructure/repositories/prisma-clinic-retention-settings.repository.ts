@@ -4,7 +4,10 @@ import { configAuditEvent } from '../../../audit/domain/config-audit';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
-import { sqlStateOf } from '../../../../shared/prisma/prisma-exception.filter';
+import {
+  P2028_TIMEOUT_PATTERN,
+  sqlStateOf,
+} from '../../../../shared/prisma/prisma-exception.filter';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import type {
   ClinicRetentionSettingsRepository,
@@ -64,7 +67,7 @@ async function countProtectedPatients(
 }
 
 /** Los bloqueos y el tope de sentencia se avisan; lo demás no es de aquí (R9). */
-function busyReason(error: unknown): 'CONTENTION' | 'TIMEOUT' | null {
+export function busyReason(error: unknown): 'CONTENTION' | 'TIMEOUT' | null {
   if (
     !(error instanceof Prisma.PrismaClientKnownRequestError) &&
     !(error instanceof Prisma.PrismaClientUnknownRequestError)
@@ -73,6 +76,15 @@ function busyReason(error: unknown): 'CONTENTION' | 'TIMEOUT' | null {
   }
   // Prisma da un 40P01 de una escritura del ORM como P2034, sin SQLSTATE.
   if ('code' in error && error.code === 'P2034') return 'CONTENTION';
+  // Se acabó el tiempo de la transacción o no hubo conexión (maxWait): se
+  // deshizo entera, igual que un tope de sentencia.
+  if (
+    'code' in error &&
+    error.code === 'P2028' &&
+    P2028_TIMEOUT_PATTERN.test(error.message)
+  ) {
+    return 'TIMEOUT';
+  }
   const sqlState = sqlStateOf(error);
   if (sqlState === '55P03' || sqlState === '40P01') return 'CONTENTION';
   return sqlState === '57014' ? 'TIMEOUT' : null;

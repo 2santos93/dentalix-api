@@ -254,7 +254,7 @@ const STATEMENT_TIMEOUT: ErrorBody = {
  * sin conexión para empezarla en `maxWait`. Otros P2028 («Transaction already
  * closed» por otro motivo) son fallos del código y siguen como 500.
  */
-const P2028_TIMEOUT_PATTERN =
+export const P2028_TIMEOUT_PATTERN =
   /expired transaction|Unable to start a transaction in the given time|timeout for this transaction/i;
 
 const INTERNAL_ERROR: ErrorBody = {

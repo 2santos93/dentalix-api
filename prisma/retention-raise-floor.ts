@@ -11,7 +11,7 @@
  * números: ningún dato de pacientes.
  */
 import { Prisma, PrismaClient } from '@prisma/client';
-import { loadClinicalRetentionConfig } from '../src/modules/patients/domain/retention/clinical-retention-config';
+import { resolvePlatformMinYears } from '../src/modules/patients/domain/retention/clinical-retention-config';
 import { raiseClinicalRetentionFloor } from '../src/modules/patients/infrastructure/clinical-retention-raise-floor';
 
 async function main(): Promise<void> {
@@ -21,9 +21,8 @@ async function main(): Promise<void> {
       .find((arg) => arg.startsWith('--actor-email='))
       ?.slice('--actor-email='.length)
       .trim() || null;
-  const { platformMinYears } = loadClinicalRetentionConfig(
-    (key) => process.env[key],
-  );
+  // Sin validateEnv: un valor inválido corta aquí, antes de conectar.
+  const platformMinYears = resolvePlatformMinYears((key) => process.env[key]);
   const url = process.env.DIRECT_URL;
   if (!url) throw new Error('Falta DIRECT_URL (conexión del owner).');
   const prisma = new PrismaClient<Prisma.PrismaClientOptions>({

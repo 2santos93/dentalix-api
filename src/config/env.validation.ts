@@ -46,6 +46,7 @@ import {
   boundedInt,
   storageDriverOf,
 } from '../shared/storage/storage-config';
+import { platformMinYearsProblem } from '../modules/patients/domain/retention/clinical-retention-config';
 import { parseMailEncryptionKey } from '../modules/notifications/email/infrastructure/email-payload-cipher';
 import { AUDIT_MIN_RETENTION_MONTHS } from '../modules/audit/infrastructure/audit-retention-config';
 import {
@@ -414,14 +415,10 @@ function auditProblems(env: Env): string[] {
  * clínica. Vacío = 15; por debajo del suelo, la API no arranca.
  */
 function retentionProblems(env: Env): string[] {
-  const key = 'PLATFORM_MIN_CLINICAL_RETENTION_YEARS';
-  const raw = str(env, key);
-  if (raw == null) return [];
-  const value = Number(raw.trim());
-  if (!/^\d{1,3}$/.test(raw.trim()) || value < 15 || value > 100) {
-    return [`${key} debe ser un entero entre 15 y 100.`];
-  }
-  return [];
+  const problem = platformMinYearsProblem(
+    str(env, 'PLATFORM_MIN_CLINICAL_RETENTION_YEARS'),
+  );
+  return problem ? [problem] : [];
 }
 
 /** DX-085: papel del proceso y ajustes de la cola de trabajos. */
