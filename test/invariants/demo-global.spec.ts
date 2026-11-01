@@ -2,12 +2,19 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parsePhoneNumberFromString } from 'libphonenumber-js/max';
 import {
+  daysAgoAt,
+  planAppointments,
+  planInClinicToday,
+} from '../../prisma/demo/calendar';
+import {
   DEMO_COMMUNICATION,
+  DEMO_LOCATIONS,
   DEMO_PATIENTS,
   DEMO_PRIVACY_POLICY,
   DEMO_RESPONSIBLES,
   DEMO_USERS,
 } from '../../prisma/demo/data';
+import { DEFAULT_BUSINESS_HOURS } from '../../src/shared/locations/default-business-hours';
 
 // DX-335 (G6.1): la demo es una clínica de varios países y nada de ella
 // presupone uno. Este fichero reúne los invariantes de esos datos; cada tarea
@@ -153,5 +160,52 @@ describe('demo global (DX-335)', () => {
     expect(parsePhoneNumberFromString(phone, MAIN_REGION)?.getType()).toBe(
       'FIXED_LINE',
     );
+  });
+
+  it('daysAgoAt follows daylight saving time in the location zone', () => {
+    const march = new Date('2027-03-24T12:00:00Z');
+    const october = new Date('2027-10-27T12:00:00Z');
+    expect(daysAgoAt(march, -5, 9 * 60, 'Europe/London').toISOString()).toBe(
+      '2027-03-29T08:00:00.000Z',
+    );
+    expect(daysAgoAt(march, 2, 9 * 60, 'Europe/London').toISOString()).toBe(
+      '2027-03-22T09:00:00.000Z',
+    );
+    expect(daysAgoAt(october, -5, 9 * 60, 'Europe/London').toISOString()).toBe(
+      '2027-11-01T09:00:00.000Z',
+    );
+    expect(daysAgoAt(october, 2, 9 * 60, 'Europe/London').toISOString()).toBe(
+      '2027-10-25T08:00:00.000Z',
+    );
+    expect(
+      daysAgoAt(
+        new Date('2026-11-01T12:00:00Z'),
+        0,
+        9 * 60,
+        'America/Caracas',
+      ).toISOString(),
+    ).toBe('2026-11-01T13:00:00.000Z');
+  });
+
+  it('the in-clinic planner reads the minute of the day in the location zone', () => {
+    // Lunes 2026-11-02 a las 10:00 en Caracas: la que «llegó antes» va a +10 min.
+    const now = new Date('2026-11-02T14:00:00Z');
+    const [early] = planInClinicToday(
+      now,
+      DEFAULT_BUSINESS_HOURS,
+      'America/Caracas',
+    );
+    expect(early.start.toISOString()).toBe('2026-11-02T14:10:00.000Z');
+  });
+
+  it('the demo calendar is a pure function of now', () => {
+    const now = new Date('2026-11-04T15:00:00Z');
+    const zones = {
+      principal: DEMO_LOCATIONS.principal.timeZone,
+      norte: DEMO_LOCATIONS.norte.timeZone,
+    };
+    const indexes = DEMO_PATIENTS.map((_, i) => i);
+    const plan = () => planAppointments(now, zones, indexes, () => true);
+    expect(plan()).toEqual(plan());
   });
 });

@@ -1,48 +1,53 @@
 import { AppointmentStatus } from '@prisma/client';
-import { DEMO_ROTATION } from './data';
+import {
+  addCivilDays,
+  civilDateIn,
+  civilWeekday,
+  zonedStartOfDay,
+  zonedWallTime,
+} from '../../src/shared/time/civil-day';
+import { DEMO_ROTATION, type RotationSiteKey } from './data';
 
 /**
  * Calendario de la clínica demo. Todo es función pura de "hoy" (sin azar), así
  * que dos corridas el mismo día producen exactamente las mismas citas.
  *
- * Las sedes demo están en America/Caracas: UTC−4 todo el año (Venezuela no
- * tiene horario de verano desde 2016). Por eso aquí se puede pasar de hora de
- * pared a instante con un desfase constante, sin librería de zonas. Si se
- * cambia la zona, tiene que ser otra de desfase FIJO y
- * `DEMO_UTC_OFFSET_MINUTES` su desfase (minutos que hay que sumar a la hora
- * de pared para llegar a UTC: 240 en UTC−4).
+ * Cada sede tiene su zona (`DEMO_LOCATIONS[key].timeZone`), y cada función
+ * recibe la de la sede del dato, sin valor por defecto. La hora de pared pasa
+ * a instante con los helpers de `civil-day`, que resuelven el desfase que la
+ * zona tiene ESE día (horario de verano incluido).
  */
-export const DEMO_TIMEZONE = 'America/Caracas';
-const DEMO_UTC_OFFSET_MINUTES = 240;
 const MINUTE_MS = 60 * 1000;
 const DAY_MS = 24 * 60 * MINUTE_MS;
 
 interface LocalDay {
   /** Días respecto de hoy (0 = hoy, -1 = ayer...). */
   offset: number;
-  /** Medianoche UTC de la fecha de pared (solo para aritmética). */
-  utcMidnight: number;
+  /** Día civil (YYYY-MM-DD) de la sede. */
+  day: string;
   /** 0=domingo .. 6=sábado, la convención de `ScheduleRange.weekday`. */
   weekday: number;
 }
 
 /** El día de pared de la sede desplazado `offset` días desde `now`. */
-function sedeDay(now: Date, offset: number): LocalDay {
-  const wall = new Date(now.getTime() - DEMO_UTC_OFFSET_MINUTES * MINUTE_MS);
-  const todayMidnight = Date.UTC(
-    wall.getUTCFullYear(),
-    wall.getUTCMonth(),
-    wall.getUTCDate(),
-  );
-  const utcMidnight = todayMidnight + offset * DAY_MS;
-  return { offset, utcMidnight, weekday: new Date(utcMidnight).getUTCDay() };
+function sedeDay(now: Date, offset: number, timeZone: string): LocalDay {
+  const day = addCivilDays(civilDateIn(now, timeZone), offset);
+  return { offset, day, weekday: civilWeekday(day) };
 }
 
 /** Instante de las `minuteOfDay` (hora de pared de la sede) de ese día. */
-function at(day: LocalDay, minuteOfDay: number): Date {
-  return new Date(
-    day.utcMidnight + (minuteOfDay + DEMO_UTC_OFFSET_MINUTES) * MINUTE_MS,
-  );
+function at(day: LocalDay, minuteOfDay: number, timeZone: string): Date {
+  return zonedWallTime(day.day, minuteOfDay, timeZone);
+}
+
+/**
+ * Minutos de pared transcurridos hoy en la sede. Se cuentan desde el inicio
+ * del día, así que el domingo de un cambio de hora se desvían 60 min; en las
+ * zonas de la demo ese día es domingo y las sedes cierran.
+ */
+function minuteNow(now: Date, timeZone: string): number {
+  const start = zonedStartOfDay(civilDateIn(now, timeZone), timeZone);
+  return (now.getTime() - start.getTime()) / MINUTE_MS;
 }
 
 /** Instante "hace `daysAgo` días a las `minuteOfDay`" (hora de la sede). */
@@ -50,8 +55,9 @@ export function daysAgoAt(
   now: Date,
   daysAgo: number,
   minuteOfDay: number,
+  timeZone: string,
 ): Date {
-  return at(sedeDay(now, -daysAgo), minuteOfDay);
+  return at(sedeDay(now, -daysAgo, timeZone), minuteOfDay, timeZone);
 }
 
 /**
@@ -60,8 +66,8 @@ export function daysAgoAt(
  * hasta el sábado de la semana próxima): ahí caen las vacaciones de ejemplo
  * sin pisar ninguna cita.
  */
-export function daysUntilMondayAfterNext(now: Date): number {
-  const daysSinceMonday = (sedeDay(now, 0).weekday + 6) % 7;
+export function daysUntilMondayAfterNext(now: Date, timeZone: string): number {
+  const daysSinceMonday = (sedeDay(now, 0, timeZone).weekday + 6) % 7;
   return 14 - daysSinceMonday;
 }
 
@@ -70,14 +76,14 @@ export function daysUntilMondayAfterNext(now: Date): number {
  * vacaciones (el de después de `daysUntilMondayAfterNext`): ahí va la
  * excepción de ejemplo de su horario.
  */
-export function daysUntilRotationCover(now: Date): number {
-  return daysUntilMondayAfterNext(now) + 7;
+export function daysUntilRotationCover(now: Date, timeZone: string): number {
+  return daysUntilMondayAfterNext(now, timeZone) + 7;
 }
 
 /** DX-122: días desde hoy hasta el próximo día laborable (lunes a viernes). */
-export function daysUntilNextWeekday(now: Date): number {
+export function daysUntilNextWeekday(now: Date, timeZone: string): number {
   let offset = 1;
-  while ([0, 6].includes(sedeDay(now, offset).weekday)) offset++;
+  while ([0, 6].includes(sedeDay(now, offset, timeZone).weekday)) offset++;
   return offset;
 }
 
@@ -85,18 +91,22 @@ export function daysUntilNextWeekday(now: Date): number {
  * DX-446: desfases (0 = hoy, en la sede) de los `count` próximos días
  * laborables (lun–vie), empezando por hoy si lo es.
  */
-export function upcomingWeekdayOffsets(now: Date, count: number): number[] {
+export function upcomingWeekdayOffsets(
+  now: Date,
+  count: number,
+  timeZone: string,
+): number[] {
   const offsets: number[] = [];
   for (let offset = 0; offsets.length < count; offset++) {
-    if (![0, 6].includes(sedeDay(now, offset).weekday)) offsets.push(offset);
+    if (![0, 6].includes(sedeDay(now, offset, timeZone).weekday)) {
+      offsets.push(offset);
+    }
   }
   return offsets;
 }
 
-export type DemoLocationKey = 'principal' | 'norte';
-
 /** Huecos candidatos por sede: [inicio en minutos de pared, duración]. */
-const SLOT_TEMPLATES: Record<DemoLocationKey, readonly [number, number][]> = {
+const SLOT_TEMPLATES: Record<RotationSiteKey, readonly [number, number][]> = {
   // Horario por defecto del registro: lun-vie 9-13 y 15-19, sáb 9-13.
   principal: [
     [9 * 60, 60],
@@ -136,7 +146,7 @@ const REASONS = [
 interface PlannedAppointment {
   /** 0 = dentista, 1 = dentista2. */
   dentistIndex: number;
-  location: DemoLocationKey;
+  location: RotationSiteKey;
   start: Date;
   end: Date;
   /** Índice del paciente en `DEMO_PATIENTS`. */
@@ -156,33 +166,35 @@ interface PlannedAppointment {
  *   paciente nunca tiene dos citas a la vez;
  * - el filtrado por horario lo hace quien llama (`fits`), con el validador
  *   real del producto, para no copiar aquí la lógica de horarios.
+ *
+ * El «hoy» es el de la zona de la principal, y cada cita se pasa a instante
+ * con la zona de su sede (`zones`). `patientIndexes` son los índices de
+ * `DEMO_PATIENTS` que se reparten, en dos mitades de la lista.
  */
 export function planAppointments(
   now: Date,
-  patientCount: number,
-  fits: (location: DemoLocationKey, start: Date, end: Date) => boolean,
+  zones: Readonly<Record<RotationSiteKey, string>>,
+  patientIndexes: readonly number[],
+  fits: (location: RotationSiteKey, start: Date, end: Date) => boolean,
 ): PlannedAppointment[] {
-  const today = sedeDay(now, 0);
+  const today = sedeDay(now, 0, zones.principal);
   const daysSinceMonday = (today.weekday + 6) % 7;
   const firstOffset = -daysSinceMonday - 7;
   const lastOffset = firstOffset + 19; // sábado de la semana próxima
 
-  const half = Math.ceil(patientCount / 2);
-  const groups = [
-    Array.from({ length: half }, (_, i) => i),
-    Array.from({ length: patientCount - half }, (_, i) => half + i),
-  ];
+  const half = Math.ceil(patientIndexes.length / 2);
+  const groups = [patientIndexes.slice(0, half), patientIndexes.slice(half)];
   const cursor = [0, 0];
   const planned: PlannedAppointment[] = [];
 
   for (let offset = firstOffset; offset <= lastOffset; offset++) {
-    const day = sedeDay(now, offset);
+    const day = sedeDay(now, offset, zones.principal);
     if (day.weekday === 0) continue; // domingo cerrado
     const dayIndex = offset - firstOffset;
 
     for (let dentistIndex = 0; dentistIndex < 2; dentistIndex++) {
       if (day.weekday === 6 && dentistIndex === 1) continue; // libra sábados
-      const location: DemoLocationKey =
+      const location: RotationSiteKey =
         dentistIndex === DEMO_ROTATION.dentistIndex
           ? (DEMO_ROTATION.weekdays.norte as readonly number[]).includes(
               day.weekday,
@@ -195,8 +207,8 @@ export function planAppointments(
 
       SLOT_TEMPLATES[location].forEach(([startMinute, duration], slot) => {
         if ((dayIndex * 3 + slot * 5 + dentistIndex * 2) % 7 >= 3) return;
-        const start = at(day, startMinute);
-        const end = at(day, startMinute + duration);
+        const start = at(day, startMinute, zones[location]);
+        const end = at(day, startMinute + duration, zones[location]);
         if (!fits(location, start, end)) return;
 
         const group = groups[dentistIndex];
@@ -281,17 +293,16 @@ const IN_CLINIC_PLAN: readonly { offset: number; stage: InClinicStage }[] = [
 export function planInClinicToday(
   now: Date,
   ranges: readonly WallRange[],
+  timeZone: string,
 ): PlannedInClinic[] {
-  const today = sedeDay(now, 0);
+  const today = sedeDay(now, 0, timeZone);
   const open = ranges
     .filter((r) => r.weekday === today.weekday)
     .sort((a, b) => a.startMinute - b.startMinute);
   if (open.length === 0) return [];
   const first = open[0].startMinute;
   const last = Math.max(...open.map((r) => r.endMinute)) - IN_CLINIC_MINUTES;
-  const nowMinute = Math.floor(
-    (now.getTime() - today.utcMidnight) / MINUTE_MS - DEMO_UTC_OFFSET_MINUTES,
-  );
+  const nowMinute = Math.floor(minuteNow(now, timeZone));
   const fits = (m: number) =>
     open.some(
       (r) => m >= r.startMinute && m + IN_CLINIC_MINUTES <= r.endMinute,
@@ -311,8 +322,8 @@ export function planInClinicToday(
     if (minute < first) continue;
     taken.push(minute);
     planned.push({
-      start: at(today, minute),
-      end: at(today, minute + IN_CLINIC_MINUTES),
+      start: at(today, minute, timeZone),
+      end: at(today, minute + IN_CLINIC_MINUTES, timeZone),
       stage,
     });
   }
@@ -324,7 +335,7 @@ export interface PlannedHistoryVisit {
   month: 'previous' | 'current';
   /** Días respecto de hoy (en la sede): siempre en el pasado (≥ 1). */
   daysAgo: number;
-  location: DemoLocationKey;
+  location: RotationSiteKey;
   /** Minutos de pared desde las 00:00 en la sede. */
   startMinute: number;
   durationMinutes: number;
@@ -338,7 +349,7 @@ export interface PlannedHistoryVisit {
 export interface HistoryTemplate {
   patientIndexes: readonly number[];
   /** [inicio en minutos de pared, duración] por sede: fuera de SLOT_TEMPLATES. */
-  slots: Record<DemoLocationKey, readonly (readonly [number, number])[]>;
+  slots: Record<RotationSiteKey, readonly (readonly [number, number])[]>;
   procedures: Record<'previous' | 'current', readonly string[]>;
 }
 
@@ -358,15 +369,19 @@ export interface HistoryTemplate {
  */
 export function planComparisonHistory(
   now: Date,
+  timeZone: string,
   template: HistoryTemplate,
 ): PlannedHistoryVisit[] {
-  const today = sedeDay(now, 0);
-  const date = new Date(today.utcMidnight);
+  // Aritmética de fechas civiles: el `Date.UTC` de la fecha de pared de la
+  // sede, nunca un instante.
+  const [y, m, d] = sedeDay(now, 0, timeZone).day.split('-').map(Number);
+  const todayMidnight = Date.UTC(y, m - 1, d);
+  const date = new Date(todayMidnight);
   const year = date.getUTCFullYear();
   const month = date.getUTCMonth();
   const dayOfMonth = date.getUTCDate();
   const daysAgoOf = (utcMidnight: number) =>
-    Math.round((today.utcMidnight - utcMidnight) / DAY_MS);
+    Math.round((todayMidnight - utcMidnight) / DAY_MS);
   const weekdayOf = (utcMidnight: number) => new Date(utcMidnight).getUTCDay();
 
   const anchors: { month: 'previous' | 'current'; daysAgo: number }[] = [];
@@ -434,9 +449,10 @@ const CLOSING_EXAMPLE_KINDS: readonly ClosingExampleKind[] = [
 export function planClosingQueueExamples(
   now: Date,
   ranges: readonly WallRange[],
+  timeZone: string,
 ): PlannedClosingExample[] {
   for (let daysAgo = 1; daysAgo <= 7; daysAgo++) {
-    const day = sedeDay(now, -daysAgo);
+    const day = sedeDay(now, -daysAgo, timeZone);
     const open = ranges.filter((r) => r.weekday === day.weekday);
     if (open.length === 0) continue;
     const close = Math.max(...open.map((r) => r.endMinute));
@@ -449,8 +465,8 @@ export function planClosingQueueExamples(
       const startMinute = first + i * CLOSING_EXAMPLE_MINUTES;
       return {
         kind,
-        start: at(day, startMinute),
-        end: at(day, startMinute + CLOSING_EXAMPLE_MINUTES),
+        start: at(day, startMinute, timeZone),
+        end: at(day, startMinute + CLOSING_EXAMPLE_MINUTES, timeZone),
       };
     });
   }

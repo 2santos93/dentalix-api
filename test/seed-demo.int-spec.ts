@@ -20,6 +20,7 @@ import {
   DEMO_ALFA_PAYER,
   DEMO_COMPARISON_HISTORY,
   DEMO_COVERAGES,
+  DEMO_LOCATIONS,
   DEMO_PRESCRIPTION,
   DEMO_PAYERS,
   DEMO_PRESCRIPTION_SETTINGS,
@@ -133,6 +134,24 @@ async function liveDemoTenantId(): Promise<string> {
     select: { id: true },
   });
   return tenant.id;
+}
+
+/** DX-335: zona de cada sede de la demo por id: la de su fila de `DEMO_LOCATIONS`. */
+async function demoZonesById(tenantId: string): Promise<Map<string, string>> {
+  const rows = await raw.location.findMany({
+    where: { tenantId },
+    select: { id: true, name: true },
+  });
+  return new Map(
+    rows.map((row) => {
+      const site = Object.values(DEMO_LOCATIONS).find(
+        (l) => l.name === row.name,
+      );
+      if (!site)
+        throw new Error(`Sede sin fila en DEMO_LOCATIONS: ${row.name}`);
+      return [row.id, site.timeZone];
+    }),
+  );
 }
 
 describe('seed demo (prisma/seed-demo.ts)', () => {
@@ -515,17 +534,34 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     const locations = await raw.location.findMany({
       where: { tenantId, deletedAt: null },
     });
-    expect(locations).toHaveLength(2);
+    // DX-335: cada sede de la BD es una fila de `DEMO_LOCATIONS`, con su
+    // región entera (G1-B: reloj explícito).
+    expect(locations.map((l) => l.name).sort()).toEqual(
+      Object.values(DEMO_LOCATIONS)
+        .map((l) => l.name)
+        .sort(),
+    );
     for (const location of locations) {
-      // V1: clínica venezolana que trabaja en USD en sus dos sedes, en hora
-      // de Caracas y con el formato es-VE.
-      expect(location.currency).toBe('USD');
-      expect(location.timeZone).toBe('America/Caracas');
-      expect(location.locale).toBe('es-VE');
-      // G1-B: reloj explícito, el que la demo ya pintaba.
-      expect(location.hourCycle).toBe('h23');
-      expect(location.country).toBe('VE');
-      expect(location.defaultPhoneRegion).toBe('VE');
+      const site = Object.values(DEMO_LOCATIONS).find(
+        (l) => l.name === location.name,
+      )!;
+      expect({
+        name: location.name,
+        country: location.country,
+        currency: location.currency,
+        timeZone: location.timeZone,
+        locale: location.locale,
+        hourCycle: location.hourCycle,
+        phoneRegion: location.defaultPhoneRegion,
+      }).toEqual({
+        name: site.name,
+        country: site.country,
+        currency: site.currency,
+        timeZone: site.timeZone,
+        locale: site.locale,
+        hourCycle: site.hourCycle,
+        phoneRegion: site.country,
+      });
       // El backfill D5 deja esto en NULL: la demo lo fija ella misma.
       expect(location.regionalSettingsReviewedAt).toBeInstanceOf(Date);
     }
@@ -540,8 +576,9 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     const schedules = await raw.locationSchedule.findMany({
       where: { tenantId },
     });
+    const zones = await demoZonesById(tenantId);
     for (const schedule of schedules) {
-      expect(schedule.timezone).toBe('America/Caracas');
+      expect(schedule.timezone).toBe(zones.get(schedule.locationId));
     }
   });
 
@@ -890,26 +927,24 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       ),
       overrides: [],
     };
-    // «Hoy» es el día civil de la clínica (su zona, Caracas), no el del
+    // «Hoy» es el día civil de la sede de la cita (su zona), no el del
     // proceso (DX-251).
-    const civilDay = (d: Date): string =>
-      new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Caracas' }).format(
-        d,
-      );
-    const today = civilDay(new Date());
+    const zones = await demoZonesById(tenantId);
+    const zoneOf = (locationId: string) => zones.get(locationId)!;
     const theirs = await raw.appointment.findMany({
       where: { tenantId, providerId, deletedAt: null },
     });
     expect(theirs.length).toBeGreaterThan(0);
     const outside = theirs.filter(
       (a) =>
-        civilDay(a.start) !== today &&
+        civilDateIn(a.start, zoneOf(a.locationId)) !==
+          civilDateIn(new Date(), zoneOf(a.locationId)) &&
         !providerWorksAt(
           snapshot,
           a.locationId,
           a.start,
           a.end,
-          'America/Caracas',
+          zoneOf(a.locationId),
         ),
     );
     expect(outside).toEqual([]);
@@ -1266,7 +1301,10 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       (p) => p.currency !== p.exchangeRateCurrency,
     );
     expect(foreign).toHaveLength(4);
-    const today = civilDateIn(new Date(), 'America/Caracas');
+    // Las tasas son de la clínica: se cuentan desde el «hoy» de la principal,
+    // y el día de cada abono es el de su sede.
+    const zones = await demoZonesById(tenantId);
+    const today = civilDateIn(new Date(), DEMO_LOCATIONS.principal.timeZone);
     for (const p of foreign) {
       expect(p).toMatchObject({
         currency: 'VES',
@@ -1274,7 +1312,7 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
         exchangeRateSource: 'MANUAL',
       });
       const day = p.exchangeRateDate!.toISOString().slice(0, 10);
-      expect(day).toBe(civilDateIn(p.paidAt, 'America/Caracas'));
+      expect(day).toBe(civilDateIn(p.paidAt, zones.get(p.locationId)!));
       const daysAgo = Math.round(
         (Date.parse(today) - Date.parse(day)) / 86_400_000,
       );
@@ -1408,22 +1446,23 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
 
   it('DX-014: las dos sedes tienen actividad en el mes anterior y en el actual', async () => {
     const tenantId = await liveDemoTenantId();
-    const month = (d: Date): string =>
-      new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Caracas' })
-        .format(d)
-        .slice(0, 7);
-    const today = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'America/Caracas',
-    }).format(new Date());
-    const [y, m, d] = today.split('-').map(Number);
-    const current = today.slice(0, 7);
-    const previous = month(new Date(Date.UTC(y, m - 2, 15, 12)));
-    // El mes actual solo se siembra si hay un día abierto (lunes a sábado)
-    // antes de hoy en el mes.
-    const openDayBefore = Array.from({ length: d - 1 }, (_, i) =>
-      new Date(Date.UTC(y, m - 1, i + 1)).getUTCDay(),
-    ).some((weekday) => weekday !== 0);
-    const months = openDayBefore ? [previous, current] : [previous];
+    const zones = await demoZonesById(tenantId);
+    // Meses civiles de la sede: su zona.
+    const monthsAt = (zone: string): string[] => {
+      const today = civilDateIn(new Date(), zone);
+      const [y, m, d] = today.split('-').map(Number);
+      const current = today.slice(0, 7);
+      const previous = civilDateIn(
+        new Date(Date.UTC(y, m - 2, 15, 12)),
+        zone,
+      ).slice(0, 7);
+      // El mes actual solo se siembra si hay un día abierto (lunes a sábado)
+      // antes de hoy en el mes.
+      const openDayBefore = Array.from({ length: d - 1 }, (_, i) =>
+        new Date(Date.UTC(y, m - 1, i + 1)).getUTCDay(),
+      ).some((weekday) => weekday !== 0);
+      return openDayBefore ? [previous, current] : [previous];
+    };
 
     const locations = await raw.location.findMany({
       where: { tenantId },
@@ -1443,8 +1482,10 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
         select: { performedLocationId: true, completedAt: true },
       }),
     ]);
-    for (const wanted of months) {
-      for (const { id } of locations) {
+    for (const { id } of locations) {
+      const zone = zones.get(id)!;
+      const month = (at: Date): string => civilDateIn(at, zone).slice(0, 7);
+      for (const wanted of monthsAt(zone)) {
         const where = `${wanted} en ${id}`;
         expect({
           where,

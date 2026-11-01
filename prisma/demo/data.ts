@@ -17,15 +17,14 @@ import {
 } from '@prisma/client';
 import type { MedicalHistoryVersionData } from '../../src/modules/medical-history/domain/ports/medical-history-repository.port';
 import type { ScheduleRange } from '../../src/modules/location-schedule/application/business-hours';
-import type { DemoLocationKey } from './calendar';
 import {
   ANAMNESIS_CONDITIONS,
   type AnamnesisAnswers,
 } from '../../src/modules/medical-history-submissions/domain/anamnesis-questionnaire';
 
-// Datos FICTICIOS de la clínica demo: una clínica venezolana que trabaja en
-// USD (el país, la zona, el formato y los nombres locales de los documentos
-// son DATOS de la clínica; el código no sabe de Venezuela). Nombres,
+// Datos FICTICIOS de la clínica demo: una clínica con sedes en varios países;
+// cada dato regional (país, moneda, zona, formato y reloj) es una fila de
+// `DEMO_LOCATIONS`, y el código no sabe de ningún país. Nombres,
 // direcciones y documentos inventados, sin leyes ni aseguradoras reales. Los
 // correos usan example.com (RFC 2606). Los teléfonos usan el bloque «555»,
 // que se reconoce como ficticio: en Brasil y en Venezuela no hay tramo
@@ -40,25 +39,6 @@ export const DEMO_PRIMARY_COLOR = '#0E7C86';
 export const DEMO_EMAIL_DOMAIN = 'demo.dentalix.app';
 /** Contraseña común de todos los usuarios demo (se imprime al terminar). */
 export const DEMO_PASSWORD = 'DemoDentalix2026!';
-/**
- * Configuración regional de las sedes demo (DATOS: la API exige país, moneda,
- * zona y formato explícitos, sin valores por defecto). La demo es una clínica
- * venezolana que trabaja en USD, como la mayoría de las de su primer mercado:
- *  - país VE en las dos sedes;
- *  - moneda USD en las dos (planes, listas de precios, caja, gastos). La
- *    multimoneda se ve como en Venezuela: parte de los abonos se cobra en
- *    bolívares (VES) con la tasa manual del día que registra la clínica
- *    (`DEMO_RATE_CURRENCY`, `demoVesPerUsd`), y la caja abierta tiene fondo
- *    en las dos monedas;
- *  - zona America/Caracas: UTC−4 fijo, sin horario de verano desde 2016, así
- *    que el calendario demo pasa de hora de pared a instante con un desfase
- *    constante (ver `calendar.ts`);
- *  - formato `es-VE` (12.345,67 · 31/10/2026).
- */
-export const DEMO_COUNTRY = 'VE';
-/** Moneda de la clínica y de sus dos sedes: planes y abonos van en USD. */
-export const DEMO_CURRENCY = 'USD';
-export const DEMO_LOCALE = 'es-VE';
 /**
  * La otra moneda de la demo: los bolívares de los abonos por «Pago móvil» o
  * en efectivo en Bs. Su tasa es MANUAL (la que la clínica registra cada día,
@@ -80,11 +60,34 @@ export function demoVesPerUsd(daysAgo: number): number {
 export function demoVes(usd: number, daysAgo: number): number {
   return Math.round(usd * demoVesPerUsd(daysAgo) * 100) / 100;
 }
+/** Sedes de la rotación de los dos dentistas compartidos (DX-233). */
+export type RotationSiteKey = 'principal' | 'norte';
+export type DemoLocationKey = RotationSiteKey;
+
 /**
- * G1-B (DX-350): reloj de las sedes demo, explícito (nunca un default): 24 h,
- * el que la demo pinta hoy en pantalla (spec G1-B §4.5).
+ * Configuración regional de una sede (DATOS: la API exige país, moneda, zona,
+ * formato y reloj explícitos, sin valores por defecto). El reloj va explícito,
+ * nunca un default (G1-B, DX-350).
  */
-export const DEMO_HOUR_CYCLE = 'h23';
+export interface DemoRegion {
+  country: string;
+  currency: string;
+  timeZone: string;
+  locale: string;
+  hourCycle: 'h23';
+}
+
+export interface DemoLocation extends DemoRegion {
+  name: string;
+  address: string;
+  /**
+   * DX-222: teléfono de la sede, el que las indicaciones postoperatorias
+   * muestran para urgencias (`{{telefono_sede}}`). Ficticio.
+   */
+  phone?: string;
+  /** Horario propio; sin él la sede conserva el que le dio su alta. */
+  schedule?: ScheduleRange[];
+}
 
 interface DemoUser {
   email: string;
@@ -135,23 +138,8 @@ export const DEMO_USERS: readonly DemoUser[] = [
   },
 ];
 
-export const DEMO_LOCATIONS: Record<
-  DemoLocationKey,
-  { name: string; address: string }
-> = {
-  // La crea el registro con el nombre "Sede principal"; el seed le pone dirección.
-  principal: {
-    name: 'Sede principal',
-    address: 'Av. Principal, Edif. Torre Demo, piso 3, consultorio 302',
-  },
-  norte: {
-    name: 'Sede Norte',
-    address: 'Calle Los Mangos, C.C. Demo Norte, local 4',
-  },
-};
-
 /** Horario propio de la Sede Norte (la principal conserva el del registro). */
-export const NORTE_SCHEDULE: ScheduleRange[] = [
+const NORTE_SCHEDULE: ScheduleRange[] = [
   ...[1, 2, 3, 4, 5].flatMap((weekday) => [
     { weekday, startMinute: 7 * 60, endMinute: 12 * 60 },
     { weekday, startMinute: 13 * 60, endMinute: 17 * 60 },
@@ -160,10 +148,42 @@ export const NORTE_SCHEDULE: ScheduleRange[] = [
 ];
 
 /**
- * DX-222: teléfono de la sede principal, el que las indicaciones
- * postoperatorias muestran para urgencias (`{{telefono_sede}}`). Ficticio.
+ * Las sedes de la demo, cada una con su región. La multimoneda de la
+ * principal se ve en los abonos en `DEMO_RATE_CURRENCY` con la tasa manual
+ * del día que registra la clínica (`demoVesPerUsd`), y en el fondo de la caja
+ * abierta en las dos monedas.
  */
-export const DEMO_PRINCIPAL_PHONE = '+58 212 555 0100';
+export const DEMO_LOCATIONS: Record<DemoLocationKey, DemoLocation> = {
+  // La crea el registro con el nombre "Sede principal" y el horario por
+  // defecto; el seed le pone dirección y teléfono.
+  principal: {
+    name: 'Sede principal',
+    address: 'Av. Principal, Edif. Torre Demo, piso 3, consultorio 302',
+    phone: '+58 212 555 0100',
+    country: 'VE',
+    currency: 'USD',
+    timeZone: 'America/Caracas',
+    locale: 'es-VE',
+    hourCycle: 'h23',
+  },
+  norte: {
+    name: 'Sede Norte',
+    address: 'Calle Los Mangos, C.C. Demo Norte, local 4',
+    country: 'VE',
+    currency: 'USD',
+    timeZone: 'America/Caracas',
+    locale: 'es-VE',
+    hourCycle: 'h23',
+    schedule: NORTE_SCHEDULE,
+  },
+};
+
+/** La región de una sede: solo los cinco campos regionales de su fila. */
+export function regionOf(key: DemoLocationKey): DemoRegion {
+  const { country, currency, timeZone, locale, hourCycle } =
+    DEMO_LOCATIONS[key];
+  return { country, currency, timeZone, locale, hourCycle };
+}
 
 /** Tarifas (USD) que la clínica demo pone a los ítems del catálogo por defecto. */
 export const DEMO_PRICES: Record<string, number> = {
@@ -761,7 +781,7 @@ export const DEMO_PRICE_LISTS = [
     key: 'norte',
     name: 'Tarifa Sede Norte',
     locationKey: 'norte',
-    currency: DEMO_CURRENCY,
+    currency: DEMO_LOCATIONS.norte.currency,
     prices: {
       'IMG-CONSULTA': 75,
       'PREV-PROFILAXIS': 110,
@@ -774,7 +794,7 @@ export const DEMO_PRICE_LISTS = [
     key: 'alfa',
     name: 'Convenio Alfa',
     locationKey: null,
-    currency: DEMO_CURRENCY,
+    currency: DEMO_LOCATIONS.principal.currency,
     prices: {
       'PREV-PROFILAXIS': 90,
       'OP-RESINA-1': 120,
@@ -1511,7 +1531,7 @@ interface DemoPayment {
   minutesAgo?: number;
   amount: number;
   /**
-   * DX-375: moneda del abono si no es la del plan (`DEMO_CURRENCY`): VES, que
+   * DX-375: moneda del abono si no es la del plan (la de su sede): VES, que
    * congela la tasa manual de su día (la demo las siembra todas, así que
    * ninguno queda «sin tasa» y la demo no depende del proveedor).
    */
@@ -2768,7 +2788,7 @@ export const DEMO_CANCELLATION = {
   policy: {
     noticeHours: 24,
     suggestedFee: 50,
-    currency: DEMO_CURRENCY,
+    currency: DEMO_LOCATIONS.principal.currency,
     patientText:
       'Si no puedes asistir, avísanos con al menos 24 horas de antelación para ofrecer tu hora a otro paciente. Las cancelaciones con menos aviso y las inasistencias pueden tener un cargo.',
   },

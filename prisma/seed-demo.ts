@@ -132,8 +132,6 @@ import {
   SavePerioMeasuresUseCase,
 } from '../src/modules/periodontal/application/use-cases/perio-exams.use-cases';
 import {
-  DemoLocationKey,
-  DEMO_TIMEZONE,
   daysAgoAt,
   daysUntilMondayAfterNext,
   daysUntilNextWeekday,
@@ -201,10 +199,6 @@ import {
   DEMO_PROFESSIONAL_SPECIALTIES,
   DEMO_PRESCRIPTION_SETTINGS,
   demoPerioMeasures,
-  DEMO_COUNTRY,
-  DEMO_CURRENCY,
-  DEMO_HOUR_CYCLE,
-  DEMO_LOCALE,
   DEMO_COMPARISON_HISTORY,
   DEMO_EXPENSE_OWN_CATEGORIES,
   DEMO_MANUAL_RATE_DAYS,
@@ -234,7 +228,6 @@ import {
   DEMO_PRICE_LISTS,
   DEMO_AGREEMENTS,
   DEMO_PATIENT_AGREEMENTS,
-  DEMO_PRINCIPAL_PHONE,
   DEMO_POSTOP,
   DEMO_PRIMARY_COLOR,
   DEMO_PRIVACY_POLICY,
@@ -244,7 +237,8 @@ import {
   DEMO_TOOTH_RECORD_VOIDS,
   DEMO_PEDIATRIC,
   DEMO_USERS,
-  NORTE_SCHEDULE,
+  type DemoLocationKey,
+  regionOf,
 } from './demo/data';
 import {
   DEMO_PATIENT_SIGNATURE_PNG,
@@ -577,13 +571,7 @@ class DemoSeeder {
       // G1: la demo es dato de prueba con país, moneda, zona y formato
       // EXPLÍCITOS (nada se deduce); nace revisada, sin aviso D5. G1-B: y
       // su reloj, sin pasar por la función de backfill (spec G1-B §4.5).
-      location: {
-        country: DEMO_COUNTRY,
-        currency: DEMO_CURRENCY,
-        timeZone: DEMO_TIMEZONE,
-        locale: DEMO_LOCALE,
-        hourCycle: DEMO_HOUR_CYCLE,
-      },
+      location: regionOf('principal'),
       // DX-359: el alta queda auditada, sin petición detrás.
       request: null,
     });
@@ -618,7 +606,8 @@ class DemoSeeder {
     tenantId: string,
     ownerId: string,
   ): Promise<void> {
-    const today = civilDateIn(this.now, DEMO_TIMEZONE);
+    // Las tasas son de la clínica, sin sede: el «hoy» es el de la principal.
+    const today = civilDateIn(this.now, DEMO_LOCATIONS.principal.timeZone);
     const oldest = DEMO_MANUAL_RATE_DAYS - 1;
     await this.prisma.tenant.update({
       where: { id: tenantId },
@@ -1022,25 +1011,21 @@ class DemoSeeder {
     await this.use(UpdateLocationUseCase).execute(principal.id, {
       address: DEMO_LOCATIONS.principal.address,
       // DX-222: el de urgencias en las indicaciones postoperatorias.
-      phone: DEMO_PRINCIPAL_PHONE,
+      phone: DEMO_LOCATIONS.principal.phone,
     });
     // Nace con el horario por defecto (como cualquier sede nueva) y luego se
     // le pone el suyo con el caso de uso de /settings/horarios.
     const norte = await this.use(CreateLocationUseCase).execute(
       {
-        ...DEMO_LOCATIONS.norte,
-        country: DEMO_COUNTRY,
-        // Como la principal: la clínica trabaja en USD en sus dos sedes.
-        currency: DEMO_CURRENCY,
-        timeZone: DEMO_TIMEZONE,
-        locale: DEMO_LOCALE,
-        hourCycle: DEMO_HOUR_CYCLE,
+        name: DEMO_LOCATIONS.norte.name,
+        address: DEMO_LOCATIONS.norte.address,
+        ...regionOf('norte'),
       },
       admin,
     );
     await this.inTenant(tenantId, norte.id, () =>
       this.use(ReplaceLocationScheduleUseCase).execute(
-        { ranges: NORTE_SCHEDULE },
+        { ranges: DEMO_LOCATIONS.norte.schedule! },
         { ...admin, locationId: norte.id },
       ),
     );
@@ -1339,12 +1324,14 @@ class DemoSeeder {
     dentists: string[],
     catalog: Map<string, string>,
   ): Promise<void> {
+    // Los registros clínicos no llevan sede: van con la zona de la principal.
+    const clinicalZone = DEMO_LOCATIONS.principal.timeZone;
     const entries: { id: string; patientId: string }[] = [];
     for (const e of DEMO_CLINICAL_ENTRIES) {
       const entry = await this.use(CreateClinicalEntryUseCase).execute(
         patientIds[e.patientIndex],
         {
-          entryDate: daysAgoAt(this.now, e.daysAgo, 10 * 60),
+          entryDate: daysAgoAt(this.now, e.daysAgo, 10 * 60, clinicalZone),
           reason: e.reason,
           notes: e.notes,
           diagnoses: e.diagnoses?.map((d) => ({ ...d })),
@@ -1375,7 +1362,12 @@ class DemoSeeder {
           catalogItemId,
           status: r.status,
           notes: r.notes,
-          recordedAt: daysAgoAt(this.now, r.daysAgo, 10 * 60 + 30),
+          recordedAt: daysAgoAt(
+            this.now,
+            r.daysAgo,
+            10 * 60 + 30,
+            clinicalZone,
+          ),
         },
         dentists[r.dentistIndex],
       );
@@ -1417,7 +1409,7 @@ class DemoSeeder {
           status: r.status,
           origin: r.origin,
           notes: 'notes' in r ? r.notes : undefined,
-          recordedAt: daysAgoAt(this.now, r.daysAgo, 11 * 60),
+          recordedAt: daysAgoAt(this.now, r.daysAgo, 11 * 60, clinicalZone),
         },
         kidDentist,
       );
@@ -1481,9 +1473,16 @@ class DemoSeeder {
       },
       ctx,
     );
+    // La cobertura es de la Sede Norte: su zona.
+    const coverZone = DEMO_LOCATIONS.norte.timeZone;
     const cover = civilDateIn(
-      daysAgoAt(this.now, -daysUntilRotationCover(this.now), 12 * 60),
-      DEMO_TIMEZONE,
+      daysAgoAt(
+        this.now,
+        -daysUntilRotationCover(this.now, coverZone),
+        12 * 60,
+        coverZone,
+      ),
+      coverZone,
     );
     const overrides = this.use(SetProviderOverrideUseCase);
     // Primero «no trabaja» en la principal: si no, la mañana de la Norte se
@@ -1564,7 +1563,11 @@ class DemoSeeder {
     // sale en «Presupuestos por seguir»); sus citas pasadas se quedan.
     const planned = planAppointments(
       this.now,
-      patientIds.length,
+      {
+        principal: DEMO_LOCATIONS.principal.timeZone,
+        norte: DEMO_LOCATIONS.norte.timeZone,
+      },
+      DEMO_PATIENTS.map((_, i) => i),
       (key, start, end) => fitsBusinessHours(start, end, hours[key]),
     ).filter(
       (a) =>
@@ -1678,7 +1681,12 @@ class DemoSeeder {
     ) => {
       for (let d = daysAgo; d <= incidents.lastDaysAgo; d++) {
         for (let m = incidents.firstMinute; m < incidents.lastMinute; m += 30) {
-          const start = daysAgoAt(this.now, d, m);
+          const start = daysAgoAt(
+            this.now,
+            d,
+            m,
+            DEMO_LOCATIONS[location].timeZone,
+          );
           const end = new Date(start.getTime() + 30 * 60_000);
           if (!fitsBusinessHours(start, end, hours[location])) continue;
           try {
@@ -1948,7 +1956,13 @@ class DemoSeeder {
       );
     }
 
-    const todayStart = daysAgoAt(this.now, 0, 0).getTime();
+    // Las indicaciones no llevan sede: el «hoy» es el de la principal.
+    const todayStart = daysAgoAt(
+      this.now,
+      0,
+      0,
+      DEMO_LOCATIONS.principal.timeZone,
+    ).getTime();
     const appointment = [...attended]
       .filter((a) => a.start.getTime() < todayStart)
       .sort((x, y) => y.start.getTime() - x.start.getTime())[0];
@@ -2035,25 +2049,28 @@ class DemoSeeder {
       ip: null,
       userAgent: null,
     };
+    // Las vacaciones son del profesional, sin sede, y el resto va en la
+    // principal: todo con la zona de la principal.
+    const zone = DEMO_LOCATIONS.principal.timeZone;
     await this.inTenant(tenantId, undefined, async () => {
       const blocks = this.use(CreateScheduleBlockUseCase);
-      const monday = daysUntilMondayAfterNext(this.now);
+      const monday = daysUntilMondayAfterNext(this.now, zone);
       await blocks.execute(
         {
           providerId: dentists[DEMO_VACATION.dentistIndex],
-          start: daysAgoAt(this.now, -monday, 0),
-          end: daysAgoAt(this.now, -(monday + 5), 0),
+          start: daysAgoAt(this.now, -monday, 0, zone),
+          end: daysAgoAt(this.now, -(monday + 5), 0, zone),
           kind: ScheduleBlockKind.VACATION,
           note: DEMO_VACATION.note,
         },
         actor,
       );
-      const day = daysUntilNextWeekday(this.now);
+      const day = daysUntilNextWeekday(this.now, zone);
       await blocks.execute(
         {
           locationId: locations.principal,
-          start: daysAgoAt(this.now, -day, DEMO_LUNCH.startMinute),
-          end: daysAgoAt(this.now, -day, DEMO_LUNCH.endMinute),
+          start: daysAgoAt(this.now, -day, DEMO_LUNCH.startMinute, zone),
+          end: daysAgoAt(this.now, -day, DEMO_LUNCH.endMinute, zone),
           kind: ScheduleBlockKind.LUNCH,
           allowsBooking: true,
           note: DEMO_LUNCH.note,
@@ -2101,8 +2118,8 @@ class DemoSeeder {
       // principal queda marcada «Adelantar si hay hueco»: sale como candidata
       // al cancelar una cita de un día anterior («Ocupar este hueco»).
       const upcoming = await this.use(ListAppointmentsUseCase).execute({
-        from: daysAgoAt(this.now, -2, 0),
-        to: daysAgoAt(this.now, -21, 0),
+        from: daysAgoAt(this.now, -2, 0, zone),
+        to: daysAgoAt(this.now, -21, 0, zone),
         providerId: dentists[0],
         locationId: locations.principal,
       });
@@ -2137,15 +2154,17 @@ class DemoSeeder {
     const typeId = urgent && typeByReason.get(urgent.reasons[0]);
     if (!typeId) throw new Error(`Falta el tipo «${spec.typeName}»`);
     const actor = { userId: receptionId, role: ClinicRole.RECEPTION };
+    // Los bloques van en la principal: su zona.
+    const zone = DEMO_LOCATIONS.principal.timeZone;
     await this.inTenant(tenantId, undefined, async () => {
       const blocks = this.use(CreateScheduleBlockUseCase);
-      for (const offset of upcomingWeekdayOffsets(this.now, spec.days)) {
+      for (const offset of upcomingWeekdayOffsets(this.now, spec.days, zone)) {
         await blocks.execute(
           {
             providerId: dentists[spec.dentistIndex],
             locationId: locations.principal,
-            start: daysAgoAt(this.now, -offset, spec.startMinute),
-            end: daysAgoAt(this.now, -offset, spec.endMinute),
+            start: daysAgoAt(this.now, -offset, spec.startMinute, zone),
+            end: daysAgoAt(this.now, -offset, spec.endMinute, zone),
             kind: ScheduleBlockKind.RESERVED,
             reservedForTypeIds: [typeId],
             releaseAtMinute: spec.releaseAtMinute,
@@ -2233,7 +2252,11 @@ class DemoSeeder {
     dentists: string[],
     receptionId: string,
   ): Promise<void> {
-    const slots = planInClinicToday(this.now, hours.principal?.ranges ?? []);
+    const slots = planInClinicToday(
+      this.now,
+      hours.principal?.ranges ?? [],
+      DEMO_LOCATIONS.principal.timeZone,
+    );
     const ctx = (userId: string, role: ClinicRole): AuditRequestContext => ({
       tenantId,
       locationId: locations.principal,
@@ -2310,6 +2333,7 @@ class DemoSeeder {
     const examples = planClosingQueueExamples(
       this.now,
       hours.principal?.ranges ?? [],
+      DEMO_LOCATIONS.principal.timeZone,
     );
     const candidates = patientIds.filter(
       (_, i) => i !== DEMO_PLAN_OPTIONS.patientIndex,
@@ -2341,7 +2365,7 @@ class DemoSeeder {
             data: {
               tenantId,
               patientId: booked.patientId,
-              currency: DEMO_CURRENCY,
+              currency: DEMO_LOCATIONS.principal.currency,
               status: TreatmentPlanStatus.ACCEPTED,
               notes: 'Resina pendiente de marcar como realizada.',
               createdById: booked.providerId,
@@ -2430,7 +2454,14 @@ class DemoSeeder {
           performedLocationId: null,
           completedAt: null,
         }
-      : { completedAt: daysAgoAt(this.now, firstPaymentDaysAgo, 10 * 60) };
+      : {
+          completedAt: daysAgoAt(
+            this.now,
+            firstPaymentDaysAgo,
+            10 * 60,
+            DEMO_LOCATIONS[spec.doneAt ?? 'principal'].timeZone,
+          ),
+        };
     await this.prisma.runWithTenant((tx) =>
       tx.treatmentPlanItem.update({ where: { id: itemId }, data }),
     );
@@ -2457,17 +2488,20 @@ class DemoSeeder {
     const dentist = { userId: dentistId, role: ClinicRole.DENTIST };
     for (const visit of planComparisonHistory(
       this.now,
+      DEMO_LOCATIONS.principal.timeZone,
       DEMO_COMPARISON_HISTORY,
     )) {
-      const start = daysAgoAt(this.now, visit.daysAgo, visit.startMinute);
+      const zone = DEMO_LOCATIONS[visit.location].timeZone;
+      const start = daysAgoAt(this.now, visit.daysAgo, visit.startMinute, zone);
       const end = daysAgoAt(
         this.now,
         visit.daysAgo,
         visit.startMinute + visit.durationMinutes,
+        zone,
       );
       const patientId = patientIds[visit.patientIndex];
-      // Las dos sedes cobran en USD (la Norte, con su lista de precios).
-      const sedeCurrency = DEMO_CURRENCY;
+      // Cada visita cobra en la moneda de su sede (la Norte, con su lista).
+      const sedeCurrency = DEMO_LOCATIONS[visit.location].currency;
       await this.inTenant(tenantId, locations[visit.location], async () => {
         const appointment = await this.use(
           CreateAppointmentUseCase,
@@ -2587,7 +2621,8 @@ class DemoSeeder {
       const planId = await this.inTenant(tenantId, undefined, async () => {
         const plan = await this.use(CreateTreatmentPlanUseCase).execute({
           patientId: patientIds[spec.patientIndex],
-          currency: DEMO_CURRENCY,
+          // El plan se crea sin sede: moneda y zona de la principal.
+          currency: DEMO_LOCATIONS.principal.currency,
           notes: spec.notes,
           createdById: dentistId,
         });
@@ -2644,7 +2679,12 @@ class DemoSeeder {
         if (spec.openedDaysAgo !== undefined) {
           // DX-145: el plan se abrió hace N días (ningún caso de uso fecha un
           // plan en el pasado). Bajo `app.current_tenant`, como el resto.
-          const openedAt = daysAgoAt(this.now, spec.openedDaysAgo, 9 * 60);
+          const openedAt = daysAgoAt(
+            this.now,
+            spec.openedDaysAgo,
+            9 * 60,
+            DEMO_LOCATIONS.principal.timeZone,
+          );
           await this.prisma.runWithTenant((tx) =>
             tx.treatmentPlan.update({
               where: { id: plan.id },
@@ -2663,6 +2703,7 @@ class DemoSeeder {
                 this.now,
                 spec.paymentPlan.startDaysAgo,
                 12 * 60,
+                DEMO_LOCATIONS.principal.timeZone,
               ),
               notes: 'Financiación acordada con el paciente.',
             },
@@ -2699,10 +2740,15 @@ class DemoSeeder {
             {
               ...mobile,
               amount: payment.amount,
-              currency: payment.currency ?? DEMO_CURRENCY,
+              currency: payment.currency ?? DEMO_LOCATIONS.principal.currency,
               paidAt:
                 payment.minutesAgo === undefined
-                  ? daysAgoAt(this.now, payment.daysAgo, 11 * 60 + i * 20)
+                  ? daysAgoAt(
+                      this.now,
+                      payment.daysAgo,
+                      11 * 60 + i * 20,
+                      DEMO_LOCATIONS[payment.location].timeZone,
+                    )
                   : new Date(this.now.getTime() - payment.minutesAgo * 60_000),
               method: payment.method,
               notes: payment.notes,
@@ -2732,8 +2778,13 @@ class DemoSeeder {
             planId,
             {
               amount: first.amount,
-              currency: DEMO_CURRENCY,
-              paidAt: daysAgoAt(this.now, first.daysAgo, 11 * 60 + 5),
+              currency: DEMO_LOCATIONS.principal.currency,
+              paidAt: daysAgoAt(
+                this.now,
+                first.daysAgo,
+                11 * 60 + 5,
+                DEMO_LOCATIONS[first.location].timeZone,
+              ),
               method: first.method,
             },
             receptionId,
@@ -2763,6 +2814,8 @@ class DemoSeeder {
     receptionId: string,
   ): Promise<void> {
     const actor = { userId: receptionId, isAdmin: false };
+    // Las cajas son las de la principal: su moneda.
+    const cashCurrency = DEMO_LOCATIONS.principal.currency;
     await this.inTenant(tenantId, locations.principal, async () => {
       // El plan aceptado con más saldo pendiente: los cobros del turno nunca
       // dejan un plan pagado de más.
@@ -2786,7 +2839,7 @@ class DemoSeeder {
       );
       // Lo cobrado en USD: los abonos en VES, con su tasa congelada.
       const inUsd = (pay: (typeof plans)[number]['payments'][number]) =>
-        pay.currency === DEMO_CURRENCY ||
+        pay.currency === cashCurrency ||
         !pay.exchangeRateFrom ||
         !pay.exchangeRateTo
           ? pay.amount.toNumber()
@@ -2808,7 +2861,7 @@ class DemoSeeder {
       const charge = (
         amount: number,
         method: 'CASH' | 'CARD',
-        currency: string = DEMO_CURRENCY,
+        currency: string = cashCurrency,
       ) =>
         this.use(RecordPaymentUseCase).execute(
           plan.id,
@@ -2824,7 +2877,7 @@ class DemoSeeder {
 
       const morning = await this.use(OpenCashSessionUseCase).execute(
         {
-          floats: [{ currency: DEMO_CURRENCY, amount: 200 }],
+          floats: [{ currency: cashCurrency, amount: 200 }],
           notes: 'Turno de mañana',
         },
         actor,
@@ -2835,8 +2888,8 @@ class DemoSeeder {
         morning.id,
         {
           counts: [
-            { currency: DEMO_CURRENCY, method: 'CASH', counted: 238 },
-            { currency: DEMO_CURRENCY, method: 'CARD', counted: 25 },
+            { currency: cashCurrency, method: 'CASH', counted: 238 },
+            { currency: cashCurrency, method: 'CARD', counted: 25 },
           ],
           differenceReason: 'Se entregó cambio de más a un paciente.',
         },
@@ -2849,7 +2902,7 @@ class DemoSeeder {
       await this.use(OpenCashSessionUseCase).execute(
         {
           floats: [
-            { currency: DEMO_CURRENCY, amount: 150 },
+            { currency: cashCurrency, amount: 150 },
             { currency: DEMO_RATE_CURRENCY, amount: demoVes(20, 0) },
           ],
           notes: 'Turno de tarde',
@@ -2874,7 +2927,9 @@ class DemoSeeder {
     ownerId: string,
     receptionId: string,
   ): Promise<void> {
-    const today = civilDateIn(this.now, DEMO_TIMEZONE);
+    // Los gastos y la salida de caja son de la principal: su zona y su moneda.
+    const { timeZone, currency } = DEMO_LOCATIONS.principal;
+    const today = civilDateIn(this.now, timeZone);
     const day = (offset: number) => addCivilDays(today, offset);
     await this.inTenant(tenantId, locations.principal, async () => {
       const existing = new Set(
@@ -2894,7 +2949,7 @@ class DemoSeeder {
             supplier: expense.supplier,
             description: expense.description,
             amount: expense.amount,
-            currency: DEMO_CURRENCY,
+            currency,
             invoiceDate: day(expense.invoice),
             dueDate: expense.due === null ? null : day(expense.due),
             payment: expense.payment
@@ -2909,7 +2964,7 @@ class DemoSeeder {
         );
       }
       await this.use(CreateCashOutflowUseCase).execute(
-        { ...DEMO_CASH_OUTFLOW, currency: DEMO_CURRENCY },
+        { ...DEMO_CASH_OUTFLOW, currency },
         receptionId,
       );
     });
@@ -2941,9 +2996,9 @@ class DemoSeeder {
         patientIds[promise.patientIndex],
         {
           amount: promise.amount,
-          currency: DEMO_CURRENCY,
+          currency: DEMO_LOCATIONS[promise.location].currency,
           dueDate: addCivilDays(
-            civilDateIn(this.now, DEMO_TIMEZONE),
+            civilDateIn(this.now, DEMO_LOCATIONS[promise.location].timeZone),
             promise.dueInDays,
           ),
         },
@@ -2984,7 +3039,12 @@ class DemoSeeder {
         );
       }
     };
-    const presentedAt = daysAgoAt(this.now, spec.presentedDaysAgo, 10 * 60);
+    const presentedAt = daysAgoAt(
+      this.now,
+      spec.presentedDaysAgo,
+      10 * 60,
+      DEMO_LOCATIONS[spec.location].timeZone,
+    );
     const present = new PresentTreatmentPlanUseCase(
       this.app.get<TreatmentPlanRepository>(TREATMENT_PLAN_REPOSITORY, {
         strict: false,
@@ -2995,7 +3055,7 @@ class DemoSeeder {
     await this.inTenant(tenantId, locations[spec.location], async () => {
       const a = await this.use(CreateTreatmentPlanUseCase).execute({
         patientId: patientIds[spec.patientIndex],
-        currency: DEMO_CURRENCY,
+        currency: DEMO_LOCATIONS[spec.location].currency,
         notes: spec.notes,
         createdById: dentistId,
       });
@@ -3111,18 +3171,15 @@ class DemoSeeder {
   ): Promise<void> {
     const patientId = patientIds[DEMO_PERIO.patientIndex];
     const providerId = dentists[DEMO_PERIO.dentistIndex];
-    const dayFormat = new Intl.DateTimeFormat('en-CA', {
-      timeZone: DEMO_TIMEZONE,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    });
+    // Los exámenes no llevan sede: el día es el de la principal.
+    const zone = DEMO_LOCATIONS.principal.timeZone;
     for (const spec of DEMO_PERIO.exams) {
       const exam = await this.use(CreatePerioExamUseCase).execute(
         patientId,
         {
-          examDate: dayFormat.format(
-            daysAgoAt(this.now, spec.daysAgo, 12 * 60),
+          examDate: civilDateIn(
+            daysAgoAt(this.now, spec.daysAgo, 12 * 60, zone),
+            zone,
           ),
           notes: spec.notes,
         },
@@ -3194,12 +3251,8 @@ class DemoSeeder {
     patientIds: string[],
     dentists: string[],
   ): Promise<void> {
-    const dayFormat = new Intl.DateTimeFormat('en-CA', {
-      timeZone: DEMO_TIMEZONE,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    });
+    // Sin X-Location-Id: el día es el de la principal.
+    const zone = DEMO_LOCATIONS.principal.timeZone;
     for (const spec of DEMO_IMPLANTS) {
       await this.use(RegisterImplantUseCase).execute(
         patientIds[spec.patientIndex],
@@ -3213,8 +3266,9 @@ class DemoSeeder {
           diameterMm: spec.diameterMm,
           lengthMm: spec.lengthMm,
           sanitaryRegistration: spec.sanitaryRegistration,
-          placedOn: dayFormat.format(
-            daysAgoAt(this.now, spec.daysAgo, 10 * 60),
+          placedOn: civilDateIn(
+            daysAgoAt(this.now, spec.daysAgo, 10 * 60, zone),
+            zone,
           ),
         },
         dentists[spec.dentistIndex],
