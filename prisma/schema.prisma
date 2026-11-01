@@ -3640,10 +3640,10 @@ model UserToken {
   @@map("user_tokens")
 }
 
-// DX-039: retención legal extendida de la historia clínica.
-//   NONE      -> 15 años desde la última atención (plazo por defecto).
-//   DOUBLE    -> 30 años (casos especiales que doblan el plazo).
-//   PERMANENT -> nunca se libera (p. ej. víctimas de violaciones de DD. HH./DIH).
+// DX-039: retención extendida de la historia clínica.
+//   NONE      -> el plazo de la clínica desde la última atención (DX-330).
+//   DOUBLE    -> el doble de ese plazo.
+//   PERMANENT -> nunca se libera.
 enum RetentionExtension {
   NONE
   DOUBLE

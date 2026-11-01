@@ -19,12 +19,14 @@ import {
   ApiBearerAuth,
   ApiConflictResponse,
   ApiCreatedResponse,
+  ApiExtraModels,
   ApiNoContentResponse,
   ApiForbiddenResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
+  getSchemaPath,
 } from '@nestjs/swagger';
 import { CreatePatientDto } from './dto/create-patient.dto';
 import { UpdatePatientDto } from './dto/update-patient.dto';
@@ -104,6 +106,7 @@ import {
 } from '../application/use-cases/retention-settings.use-cases';
 import {
   RetentionReductionUnconfirmedErrorDto,
+  RetentionSettingsBusyErrorDto,
   RetentionSettingsDto,
   RetentionSettingsUpdateResultDto,
   UpdateRetentionSettingsDto,
@@ -285,12 +288,16 @@ export class PatientsController {
   @Get('retention/expiring')
   @Roles(...PATIENT_RETENTION_ROLES)
   @ApiOperation({
-    summary: 'Historias que salen de retención legal (solo ADMIN)',
+    summary: 'Historias que salen de retención (solo ADMIN)',
     description:
       'DX-039. Pacientes vivos cuya HC ya no está en retención o deja de ' +
-      'estarlo dentro de `withinDays` (NONE: 15 años, DOUBLE: 30 años desde ' +
-      'la última atención; PERMANENT nunca sale). Orden: la que antes vence. ' +
-      'Paginada, con tope. Solo informa: no purga nada.',
+      'estarlo dentro de `withinDays` (NONE: el plazo de la clínica, DOUBLE: ' +
+      'el doble, desde la última atención; PERMANENT nunca sale). Una ' +
+      'reducción del plazo no adelanta la lista: la fecha de fin que una ' +
+      'historia ya tenía se respeta. Orden: `lastAttentionAt` ascendente; con ' +
+      'esa fecha fijada, una fila puede aparecer más tarde que su última ' +
+      'atención, y `retentionUntil` es la fecha efectiva. Paginada, con ' +
+      'tope. Solo informa: no purga nada.',
   })
   @ApiOkResponse({ type: ListRetentionExpiringResponseDto })
   @ApiForbiddenResponse({ description: 'Rol distinto de ADMIN' })
@@ -346,8 +353,17 @@ export class PatientsController {
       'No entero o fuera del rango del mínimo de plataforma al máximo',
   })
   @ApiForbiddenResponse({ description: RETENTION_SETTINGS_FORBIDDEN_MESSAGE })
+  @ApiExtraModels(
+    RetentionReductionUnconfirmedErrorDto,
+    RetentionSettingsBusyErrorDto,
+  )
   @ApiConflictResponse({
-    type: RetentionReductionUnconfirmedErrorDto,
+    schema: {
+      oneOf: [
+        { $ref: getSchemaPath(RetentionReductionUnconfirmedErrorDto) },
+        { $ref: getSchemaPath(RetentionSettingsBusyErrorDto) },
+      ],
+    },
     description:
       '`RETENTION_REDUCTION_UNCONFIRMED`: reducir sin confirmar, sin guardar nada. ' +
       '`RETENTION_SETTINGS_BUSY`: otra operación con los pacientes de la clínica en curso, o la reducción tarda demasiado; no se guardó nada.',
@@ -511,8 +527,9 @@ export class PatientsController {
     summary: 'Archivar paciente (borrado blando, solo ADMIN)',
     description:
       'DX-039. Retira al paciente de los listados (`deletedAt`); su HC se ' +
-      'conserva siempre. Si la HC está en retención legal (15 años desde la ' +
-      'última atención, 30 con DOUBLE, siempre con PERMANENT) responde 409 ' +
+      'conserva siempre. Si la HC está en retención (el plazo de la ' +
+      'clínica desde la última atención, el doble con DOUBLE, siempre con ' +
+      'PERMANENT) responde 409 ' +
       '`CLINICAL_RECORD_RETENTION` con la fecha hasta la que se conserva. Un ' +
       'paciente sin atenciones clínicas se archiva, salvo que tenga citas ' +
       'programadas o confirmadas (409 `PATIENT_HAS_PENDING_APPOINTMENTS`: ' +
@@ -527,7 +544,7 @@ export class PatientsController {
   @ApiConflictResponse({
     type: ClinicalRecordRetentionErrorDto,
     description:
-      'HC en retención legal (`CLINICAL_RECORD_RETENTION`) o citas abiertas ' +
+      'HC en retención (`CLINICAL_RECORD_RETENTION`) o citas abiertas ' +
       '(`PATIENT_HAS_PENDING_APPOINTMENTS`, sin `retentionUntil`)',
   })
   @ApiForbiddenResponse({ description: 'Rol distinto de ADMIN' })
@@ -573,7 +590,7 @@ export class PatientsController {
   @ApiOperation({
     summary: 'Cambiar la retención extendida de la HC (solo ADMIN)',
     description:
-      'DX-039. NONE (15 años), DOUBLE (30) o PERMANENT. Motivo obligatorio: ' +
+      'DX-039. NONE (el plazo de la clínica), DOUBLE (el doble) o PERMANENT. Motivo obligatorio: ' +
       'queda con el autor y la fecha en el rastro de retención del paciente; ' +
       'el registro de auditoría guarda quién y cuándo (sin el motivo).',
   })

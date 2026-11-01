@@ -171,12 +171,12 @@ describe('SetRetentionExtensionUseCase', () => {
       repo as unknown as PatientRepository,
     ).execute('p1', {
       value: 'PERMANENT',
-      reason: ' Víctima de DIH (Ley 1448) ',
+      reason: ' Caso especial de la clínica ',
       actorId: 'u1',
     });
     expect(repo.setRetentionExtension).toHaveBeenCalledWith('p1', {
       value: 'PERMANENT',
-      reason: 'Víctima de DIH (Ley 1448)',
+      reason: 'Caso especial de la clínica',
       actorId: 'u1',
     });
   });

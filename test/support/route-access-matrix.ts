@@ -178,7 +178,7 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /patients/:patientId/responsible-parties': EVERY_ROLE,
   'PATCH /patients/:patientId/responsible-parties/:partyId': EVERY_ROLE,
   'DELETE /patients/:patientId/responsible-parties/:partyId': EVERY_ROLE,
-  // Retención legal de la HC (loop/informes/DX-039.md): archivar, cambiar la
+  // Retención de la HC (loop/informes/DX-039.md): archivar, cambiar la
   // retención extendida, supresión parcial e historias que salen de
   // retención, solo gestión.
   'DELETE /patients/:id': ADMIN_ONLY,

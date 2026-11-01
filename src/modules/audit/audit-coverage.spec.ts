@@ -230,7 +230,7 @@ const EXPECTED: Record<string, AuditOptions> = {
     patient: P,
     reason: 'AGREEMENT_REMOVED',
   },
-  // DX-039: archivar y retención legal de la HC.
+  // DX-039: archivar y retención de la HC.
   'DELETE /patients/:id': {
     action: 'DELETE',
     resource: 'PATIENT',

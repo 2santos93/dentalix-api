@@ -80,7 +80,13 @@ export class RetentionReductionUnconfirmedErrorDto {
   @ApiProperty({ example: 409 })
   statusCode!: number;
 
-  @ApiProperty({ example: 'RETENTION_REDUCTION_UNCONFIRMED' })
+  @ApiProperty({ example: 'Conflict' })
+  error!: string;
+
+  @ApiProperty({
+    enum: ['RETENTION_REDUCTION_UNCONFIRMED'],
+    example: 'RETENTION_REDUCTION_UNCONFIRMED',
+  })
   code!: string;
 
   @ApiProperty()
@@ -102,4 +108,22 @@ export class RetentionReductionUnconfirmedErrorDto {
     description: 'La reducción corrige una subida de hace menos de 24 horas.',
   })
   withinCorrectionWindow!: boolean;
+}
+
+/** Cuerpo del 409 `RETENTION_SETTINGS_BUSY` (Swagger): sin datos de la reducción. */
+export class RetentionSettingsBusyErrorDto {
+  @ApiProperty({ example: 409 })
+  statusCode!: number;
+
+  @ApiProperty({ example: 'Conflict' })
+  error!: string;
+
+  @ApiProperty({
+    enum: ['RETENTION_SETTINGS_BUSY'],
+    example: 'RETENTION_SETTINGS_BUSY',
+  })
+  code!: string;
+
+  @ApiProperty()
+  message!: string;
 }

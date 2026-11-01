@@ -47,8 +47,8 @@ export class SetRetentionExtensionDto extends RetentionReasonDto {
     enum: RetentionExtension,
     enumName: 'RetentionExtension',
     description:
-      'NONE = 15 años, DOUBLE = 30 años, PERMANENT = nunca se libera ' +
-      '(p. ej. víctimas de violaciones de DD. HH./DIH).',
+      'NONE = el plazo de la clínica, DOUBLE = el doble de ese plazo, ' +
+      'PERMANENT = nunca se libera.',
   })
   @IsEnum(RetentionExtension, {
     message: 'La retención debe ser NONE, DOUBLE o PERMANENT',
@@ -121,7 +121,7 @@ export class ClinicalRecordRetentionErrorDto {
 
   @ApiProperty({
     example:
-      'La historia clínica de este paciente está en retención legal hasta el 28/02/2039 (…)',
+      'La historia clínica de este paciente está en retención hasta el 28/02/2039 (…)',
   })
   message!: string;
 

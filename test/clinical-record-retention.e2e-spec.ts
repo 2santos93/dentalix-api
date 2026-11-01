@@ -444,6 +444,24 @@ describe('ajustes de conservación (DX-330)', () => {
     );
   });
 
+  // Cada `it` parte del mismo estado (plazo de plataforma, sin ventana ni
+  // suelos, reloj real) y no depende de otro: el orden no importa.
+  beforeEach(async () => {
+    clock = null;
+    await raw.tenant.updateMany({
+      where: { id: { in: [a.tenantId, b.tenantId] } },
+      data: {
+        clinicalRecordRetentionYears: 15,
+        clinicalRecordRetentionRaisedAt: null,
+        clinicalRecordRetentionYearsBeforeRaise: null,
+      },
+    });
+    await raw.patient.update({
+      where: { id: patientId },
+      data: { retentionFloorUntil: null },
+    });
+  });
+
   afterAll(async () => {
     await resetDatabase(raw);
     await app.close();
@@ -503,6 +521,7 @@ describe('ajustes de conservación (DX-330)', () => {
   it.each([14, 101, 15.5, 'veinte'])(
     'PUT with %p is a 400 and writes nothing',
     async (value) => {
+      const eventsBefore = (await termEvents(a)).length;
       const res = await put(a, { clinicalRecordRetentionYears: value }).expect(
         400,
       );
@@ -512,7 +531,7 @@ describe('ajustes de conservación (DX-330)', () => {
         );
       }
       expect((await read(a)).clinicalRecordRetentionYears).toBe(15);
-      expect(await termEvents(a)).toHaveLength(0);
+      expect(await termEvents(a)).toHaveLength(eventsBefore);
     },
   );
 
@@ -535,7 +554,9 @@ describe('ajustes de conservación (DX-330)', () => {
   });
 
   it('correcting the raise inside the window fixes no date and closes it', async () => {
-    clock = new Date(clock!.getTime() + 2 * HOUR);
+    clock = new Date();
+    await put(a, { clinicalRecordRetentionYears: 20 }).expect(200);
+    clock = new Date(clock.getTime() + 2 * HOUR);
     const unconfirmed = await put(a, {
       clinicalRecordRetentionYears: 15,
     }).expect(409);
@@ -567,8 +588,9 @@ describe('ajustes de conservación (DX-330)', () => {
   });
 
   it('a reduction outside the window marks retentionFromPreviousTerm', async () => {
+    clock = new Date();
     await put(a, { clinicalRecordRetentionYears: 20 }).expect(200);
-    clock = new Date(clock!.getTime() + 25 * HOUR);
+    clock = new Date(clock.getTime() + 25 * HOUR);
     expect((await read(a)).correctionWindow).toBeNull();
 
     const unconfirmed = await put(a, {
@@ -605,6 +627,13 @@ describe('ajustes de conservación (DX-330)', () => {
   });
 
   it('a repeated confirmed reduction is a no-op', async () => {
+    clock = new Date();
+    await put(a, { clinicalRecordRetentionYears: 20 }).expect(200);
+    clock = new Date(clock.getTime() + 25 * HOUR);
+    await put(a, {
+      clinicalRecordRetentionYears: 15,
+      confirmReduction: true,
+    }).expect(200);
     const eventsBefore = (await termEvents(a)).length;
     const res = await put(a, {
       clinicalRecordRetentionYears: 15,
@@ -618,10 +647,47 @@ describe('ajustes de conservación (DX-330)', () => {
     expect((await detail(patientId)).retentionUntil).toBe('2040-01-15');
   });
 
+  it('a raise ignores confirmReduction: true', async () => {
+    clock = new Date();
+    const res = await put(a, {
+      clinicalRecordRetentionYears: 20,
+      confirmReduction: true,
+    }).expect(200);
+    expect(res.body).toMatchObject({
+      clinicalRecordRetentionYears: 20,
+      protectedPatients: 0,
+    });
+    expect(
+      (await raw.patient.findUniqueOrThrow({ where: { id: patientId } }))
+        .retentionFloorUntil,
+    ).toBeNull();
+    expect((await read(a)).correctionWindow).not.toBeNull();
+  });
+
   it('the audit log shows one event per real change', async () => {
+    const eventsBefore = (await termEvents(a)).length;
+    clock = new Date();
+    await put(a, { clinicalRecordRetentionYears: 20 }).expect(200);
+    clock = new Date(clock.getTime() + 2 * HOUR);
+    await put(a, {
+      clinicalRecordRetentionYears: 15,
+      confirmReduction: true,
+    }).expect(200);
+    await put(a, { clinicalRecordRetentionYears: 20 }).expect(200);
+    clock = new Date(clock.getTime() + 25 * HOUR);
+    await put(a, {
+      clinicalRecordRetentionYears: 15,
+      confirmReduction: true,
+    }).expect(200);
+    // Sin cambio: ni evento.
+    await put(a, {
+      clinicalRecordRetentionYears: 15,
+      confirmReduction: true,
+    }).expect(200);
+
     const events = await termEvents(a);
     // 15→20, 20→15 (ventana), 15→20, 20→15 (fuera de la ventana).
-    expect(events).toHaveLength(4);
+    expect(events).toHaveLength(eventsBefore + 4);
     expect(events.map((e) => e.metadata.retentionTermChange)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -644,11 +710,12 @@ describe('ajustes de conservación (DX-330)', () => {
   });
 
   it('clinic B neither sees nor changes the term of clinic A', async () => {
+    const eventsBefore = (await termEvents(b)).length;
     await put(b, { clinicalRecordRetentionYears: 30 }).expect(200);
     expect((await read(b)).clinicalRecordRetentionYears).toBe(30);
     expect((await read(a)).clinicalRecordRetentionYears).toBe(15);
     await put(a, { clinicalRecordRetentionYears: 25 }).expect(200);
     expect((await read(b)).clinicalRecordRetentionYears).toBe(30);
-    expect(await termEvents(b)).toHaveLength(1);
+    expect(await termEvents(b)).toHaveLength(eventsBefore + 1);
   });
 });
