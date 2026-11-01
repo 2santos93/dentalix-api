@@ -6,6 +6,7 @@ import {
   type AuditedRequest,
 } from './audit-request';
 import type { AuditOptions } from './audit-options';
+import { leavesWith } from '../../../../test/support/content-leaves';
 
 const TENANT = '11111111-1111-4111-8111-111111111111';
 const USER = '22222222-2222-4222-8222-222222222222';
@@ -70,7 +71,9 @@ describe('buildAuditDraft (DX-009)', () => {
         verified: false,
       },
     });
-    expect(JSON.stringify(draft?.metadata)).not.toMatch(/1020|304/);
+    for (const part of ['1020', '304']) {
+      expect(leavesWith(draft?.metadata, part)).toEqual([]);
+    }
   });
 
   it('reasignación de un abono (DX-051): moneda del plan, modo e importes por ítem antes y después, de la respuesta', () => {
@@ -217,7 +220,9 @@ describe('buildAuditDraft (DX-009)', () => {
         overridden: true,
       },
     });
-    expect(JSON.stringify(draft?.metadata)).not.toMatch(/204|Exodoncia/);
+    for (const clinical of [204, 'Exodoncia']) {
+      expect(leavesWith(draft?.metadata, clinical)).toEqual([]);
+    }
   });
 
   it('búsqueda por lote (DX-191): lote/REF de la query y filas de la respuesta', () => {

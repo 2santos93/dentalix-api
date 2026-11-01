@@ -8,6 +8,7 @@ import {
 } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
+import { leavesWith } from './support/content-leaves';
 import { createE2eApp } from './support/create-e2e-app';
 import {
   Clinic,
@@ -273,9 +274,11 @@ describe('Medios de pago y referencia repetida (e2e, DX-377)', () => {
     expect(audit?.metadata).toMatchObject({
       paymentReference: { duplicateConfirmed: true, duplicateOf: [first.id] },
     });
-    // Ni la referencia ni el motivo en la auditoría.
-    expect(JSON.stringify(audit?.metadata)).not.toContain('0412');
-    expect(JSON.stringify(audit?.metadata)).not.toContain('cuotas');
+    // Ni la referencia (entera o su prefijo de operadora) ni el motivo en la
+    // auditoría; `duplicateOf` lleva ids, que no cuentan (DX-496, TST-059).
+    for (const leaked of ['04125551234', '0412', 'cuotas']) {
+      expect(leavesWith(audit?.metadata, leaked)).toEqual([]);
+    }
   });
 
   it('un abono anulado ya no cuenta como repetido', async () => {
