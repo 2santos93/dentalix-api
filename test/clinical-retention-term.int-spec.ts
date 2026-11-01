@@ -3,6 +3,7 @@ import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaAuthRepository } from '../src/modules/auth/infrastructure/repositories/prisma-auth.repository';
 import { REGIONAL_BOGOTA_FIXTURE } from './support/location-fixtures';
+import { purgeTenants } from './support/tenant-purge';
 
 // DX-330: el plazo de conservación de la HC es una columna de la clínica
 // (`clinicalRecordRetentionYears`, CHECK 15..100) con su ventana de corrección
@@ -45,7 +46,16 @@ describe('plazo de conservación de la HC por clínica (DX-330, int)', () => {
   });
 
   afterAll(async () => {
-    await raw.tenant.deleteMany({ where: { id: { in: [tenantA, tenantB] } } });
+    // La clínica del alta lleva sede, membresía, catálogo y auditoría: se
+    // borra con el catálogo de tablas de clínica (DX-396), y luego su usuario.
+    await purgeTenants(raw, [
+      tenantA,
+      tenantB,
+      ...created.map((c) => c.tenantId),
+    ]);
+    await raw.user.deleteMany({
+      where: { id: { in: created.map((c) => c.userId) } },
+    });
     await raw.$disconnect();
     await prisma.$disconnect();
   });
