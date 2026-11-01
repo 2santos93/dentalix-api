@@ -207,6 +207,134 @@ jobs:
         if: ${{ !cancelled() && steps.db.outcome == 'success' }}
         run: npm run test:int
 
+  # DX-495 (TST-062): fronteras de calendario. El cambio de mes del 31-10 al
+  # 01-11 dejó en rojo `test:int` (DX-491) y la medianoche de la sede de los
+  # fixtures (00:00 de Bogotá, 05:00 UTC) ya lo había hecho con la e2e
+  # (DX-449): ningún job corría los tests con la hora en una frontera. Este
+  # corre la unit y la integración con la hora fijada a:
+  #   - fin-de-mes:      el último día 31 ya empezado, 23:59:30 UTC (sin diciembre);
+  #   - medianoche-sede: el día 1 del mes en curso, 05:01 UTC (00:01 en Bogotá);
+  #   - fin-de-anio:     el 31 de diciembre más cercano, 23:59:30 UTC.
+  # Las fechas salen de `calendarBoundary` (test/support/calendar-clock.ts).
+  # La unit fija SOLO el `Date` de jest (FAKE_NOW, en proceso). La integración
+  # no puede: Postgres (`now()`, los DEFAULT) y el motor de Prisma leen el reloj
+  # del sistema, y con el `Date` de jest adelantado y el de la BD no, salen
+  # rojos que no existen (colas, recordatorios, CHECK de «no en el futuro»).
+  # Por eso, para `test:int`, se fija el reloj del runner, que comparten Node,
+  # Prisma y el contenedor de Postgres, y se devuelve a su hora al final.
+  calendar-boundaries:
+    name: Fronteras de calendario (${{ matrix.boundary }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        boundary: [fin-de-mes, medianoche-sede, fin-de-anio]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: dentalix
+          POSTGRES_PASSWORD: dentalix
+          POSTGRES_DB: dentalix_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U dentalix -d dentalix_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TZ: UTC
+      # Valores SOLO de test, ficticios (como en el job de integración). Sin
+      # S3 ni herramientas de copias: esos tests se saltan aquí (no dependen
+      # de la fecha) y corren en «Integración».
+      DATABASE_URL: postgresql://dentalix_app:dentalix_app@localhost:5432/dentalix_test?schema=public
+      DIRECT_URL: postgresql://dentalix:dentalix@localhost:5432/dentalix_test?schema=public
+      JWT_ACCESS_SECRET: solo-test-ci-access-4f1d9b2e7a6c3058e1b4d7a0c9f2e6b3
+      JWT_REFRESH_SECRET: solo-test-ci-refresh-8c2a5e9f1b7d4063a2e5c8f1b4d7a0e9
+      JWT_ACCESS_TTL: 900s
+      JWT_REFRESH_TTL: 30d
+      EXCHANGE_APP_ID: ''
+      EXCHANGE_BASE_URL: https://openexchangerates.org/api
+      TENANT_BASE_DOMAINS: dentalix.app,localhost
+      TRUST_PROXY: 'false'
+      STORAGE_DIR: ./storage-test
+      FILES_PUBLIC_BASE_URL: http://localhost:3000/api/v1/files
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+      - name: Generar el cliente de Prisma
+        id: prisma
+        run: npx prisma generate
+
+      - name: Hora de la frontera
+        id: boundary
+        run: |
+          at="$(npx ts-node -T -e "import { calendarBoundary } from './test/support/calendar-clock'; console.log(calendarBoundary('${{ matrix.boundary }}'))")"
+          echo "at=$at" >> "$GITHUB_OUTPUT"
+          echo "Frontera ${{ matrix.boundary }}: $at"
+
+      - name: Unit (npm test) con FAKE_NOW en la frontera
+        if: ${{ !cancelled() && steps.prisma.outcome == 'success' }}
+        env:
+          FAKE_NOW: ${{ steps.boundary.outputs.at }}
+        run: npm test
+
+      - name: Crear el rol de la app (docker/db-init)
+        id: role
+        if: ${{ !cancelled() && steps.prisma.outcome == 'success' }}
+        env:
+          PGPASSWORD: dentalix
+        run: psql -v ON_ERROR_STOP=1 -h localhost -U dentalix -d dentalix_test -f docker/db-init/01-app-role.sql
+
+      - name: Generar .env.test
+        if: ${{ !cancelled() && steps.role.outcome == 'success' }}
+        run: |
+          for k in DATABASE_URL DIRECT_URL JWT_ACCESS_SECRET JWT_REFRESH_SECRET \
+                   JWT_ACCESS_TTL JWT_REFRESH_TTL EXCHANGE_APP_ID EXCHANGE_BASE_URL \
+                   TENANT_BASE_DOMAINS TRUST_PROXY STORAGE_DIR FILES_PUBLIC_BASE_URL; do
+            printf '%s="%s"\n' "$k" "${!k}"
+          done > .env.test
+
+      - name: Migrar y sembrar la base de test (db:test:setup)
+        id: db
+        if: ${{ !cancelled() && steps.role.outcome == 'success' }}
+        run: npm run db:test:setup
+
+      # Sin sincronización (chrony/timesyncd la devolverían a la hora real) y
+      # con la hora real y el uptime anotados para devolverla al final.
+      - name: Fijar el reloj del runner en la frontera
+        id: clock
+        if: ${{ !cancelled() && steps.db.outcome == 'success' }}
+        run: |
+          echo "REAL_EPOCH=$(date -u +%s)" >> "$GITHUB_ENV"
+          echo "REAL_UPTIME=$(cut -d. -f1 /proc/uptime)" >> "$GITHUB_ENV"
+          sudo systemctl stop chrony.service systemd-timesyncd.service 2>/dev/null || true
+          sudo timedatectl set-ntp false 2>/dev/null || true
+          sudo date -u -s "${{ steps.boundary.outputs.at }}"
+          date -u
+          test "$(date -u +%Y-%m-%d)" = "$(echo '${{ steps.boundary.outputs.at }}' | cut -c1-10)"
+
+      - name: test:int con el reloj en la frontera
+        if: ${{ !cancelled() && steps.clock.outcome == 'success' }}
+        run: npm run test:int
+
+      - name: Devolver el reloj del runner a la hora real
+        if: ${{ always() && steps.clock.outcome != 'skipped' }}
+        run: |
+          now=$(( REAL_EPOCH + $(cut -d. -f1 /proc/uptime) - REAL_UPTIME ))
+          sudo date -u -s "@$now"
+          sudo timedatectl set-ntp true 2>/dev/null || true
+          sudo systemctl start chrony.service 2>/dev/null || true
+          date -u
+
   # DX-396 (TST-044): la e2e en serie pasaba de 18 min y GitHub la cancelaba a
   # los 20, y «cancelled» escondía rojos. Ahora va repartida con `jest --shard`
   # en una matriz: mismos servicios, env y pasos en cada shard. `total` y
