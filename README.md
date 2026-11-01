@@ -105,16 +105,41 @@ de despliegue hacen falta las devDependencies para sembrar. El puerto se lee de
    | RECEPTION | `recepcion@demo.dentalix.app`                                  |
    | ASSISTANT | `asistente@demo.dentalix.app`                                  |
    | RECEPTION | `recepcion.norte@demo.dentalix.app` (solo Sede Norte — DX-089) |
+   | DENTIST   | `dentista.saopaulo@demo.dentalix.app` (Beatriz Nogueira Prado, solo Sede São Paulo) |
+   | DENTIST   | `dentista.londres@demo.dentalix.app` (Oliver Bennett, solo Sede Londres) |
 
-   Contenido: 2 sedes con horario (la principal con el horario por defecto del
-   registro; "Sede Norte" con el suyo), catálogo por defecto con tarifas en la moneda de la sede demo (la demo es una clínica venezolana que trabaja en USD: las dos sedes en `VE`, `USD`, `America/Caracas` y `es-VE`; parte de los abonos y de la caja abierta en bolívares con la tasa MANUAL del día que la demo registra para los últimos 61 días; el documento nacional con su nombre local venezolano (`DEMO_DOCUMENT_TYPE_NAMES`, editable en Ajustes); teléfonos +58 con el abonado ficticio 555-01XX/02XX/03XX; ver `prisma/demo/data.ts`. Solo los DATOS dicen Venezuela),
+   Las sedes de la demo (DX-335) cubren varios países a propósito: la demo no
+   es de un país, enseña que una clínica puede tener sedes con moneda, zona,
+   idioma y reloj propios. Solo esta tabla afirma un país; ninguna regla del
+   producto ramifica por ellas (`DEMO_LOCATIONS` en `prisma/demo/data.ts`):
+
+   | Sede           | País | Moneda            | Zona                | Locale | Reloj | Teléfono           | Horario                       |
+   | -------------- | ---- | ----------------- | ------------------- | ------ | ----- | ------------------ | ----------------------------- |
+   | Sede principal | VE   | USD (+ abonos VES) | `America/Caracas`   | es-VE  | h23   | `+58 212 555 0100` | el del registro               |
+   | Sede Norte     | VE   | USD               | `America/Caracas`   | es-VE  | h23   | —                  | propio (lun–vie y sáb)        |
+   | Sede São Paulo | BR   | BRL               | `America/Sao_Paulo` | pt-BR  | h23   | `+55 11 3555 0100` | lun–vie 8–12 y 13–18          |
+   | Sede Londres   | GB   | GBP               | `Europe/London`     | en-GB  | h23   | `+44 20 7946 0100` | lun–vie 9–13 y 14–18          |
+
+   Cada sede nueva tiene su propio dentista, tarifa en su moneda, planes y
+   abonos en esa moneda, citas y realizados en su zona (con el cambio de hora
+   de Londres), tres festivos de ejemplo que se repiten cada año y un
+   cierre puntual a 28 días (o el siguiente día que no sea festivo): la
+   demo no pone ninguna cita en un festivo de su sede. Las tasas MANUAL de
+   los últimos 61 días cubren VES, BRL y GBP (ficticias; hoy y ayer valen
+   igual). «Comparar sedes» (DX-014) cuenta los meses en la zona de cada sede.
+   La política de privacidad es la plantilla neutra de DX-325 rellenada con
+   los datos de la principal (sin ley ni autoridad de ningún país), y dos
+   pacientes tienen la retención de la historia clínica ampliada.
+
+   Contenido: 4 sedes con horario (la principal con el horario por defecto del
+   registro; las demás con el suyo, ver la tabla de arriba), catálogo por defecto con tarifas en la moneda de cada sede (las dos sedes venezolanas trabajan en USD, con parte de los abonos y de la caja abierta en bolívares con la tasa MANUAL del día que la demo registra para los últimos 61 días; São Paulo y Londres con su tarifa propia en BRL y GBP; el documento nacional con el nombre genérico de documento; teléfonos de cada sede de su región con abonado ficticio; ver `prisma/demo/data.ts`),
    25 pacientes ficticios (correos `@example.com`) con historias clínicas,
    evoluciones (una corregida con una adenda — DX-038; tres con diagnóstico CIE-10 — DX-212) y odontograma (un hallazgo anulado con motivo y una paciente infantil con dentición mixta, registros temporales y de otro origen — DX-120), 5 tipos de cita con duración y color (DX-121), las 6 plantillas de evolución de ejemplo con dos evoluciones redactadas con ellas («Resina» y «Profilaxis») y ligadas a las últimas citas atendidas (DX-170), las 5 indicaciones postoperatorias de ejemplo con `POI-EXO` vinculada a «Exodoncia simple», la sede principal con teléfono y una entrega impresa de ayer (o del último día con consulta) — DX-222, ~90 citas desde el lunes de la semana pasada hasta
    el sábado de la próxima en distintos estados (las de valoración, limpieza, endodoncia, urgencia y ortodoncia con su tipo), bloqueos de agenda (vacaciones de la segunda dentista de lunes a viernes de la semana siguiente a la próxima, en todas las sedes, y el almuerzo del equipo en la sede principal el próximo día laborable, que deja agendar con aviso) y 3 «Pendientes por agendar» abiertos (las dos cancelaciones o no-shows más recientes y un alta manual urgente; las más antiguas quedan descartadas con motivo) — DX-122, y la cita agendada más lejana de la primera dentista en la sede principal marcada «Adelantar si hay hueco», que sale como candidata en «Ocupar este hueco» al cancelar una cita anterior (DX-210), la rotación de la segunda dentista entre las dos sedes (lunes, miércoles y viernes en la principal; martes y jueves en la Norte, con sus citas dentro) y una excepción el lunes que vuelve de vacaciones: no va a la principal y cubre la Norte de 7:00 a 12:00 — DX-233, planes de tratamiento en todos
    sus estados (con un presupuesto en borrador con descuentos —uno del 10 % del
    odontólogo y otro del 15 % de la administración con su motivo, que salen en
-   el informe de descuentos (DX-204)—, listo para presentar, y otro aceptado con la firma del paciente — DX-012; y dos opciones A/B de Carolina Duque —implante o puente— presentadas hace 9 días y sin cita futura, que salen en «Presupuestos por seguir» — DX-040), abonos en la moneda de la sede de los últimos 60 días en ambas sedes, cada uno con su recibo de caja numerado por sede (`PRI-000001`…, `NOR-000001`…; el abono duplicado anulado conserva su número y sale «ANULADO» — DX-136), un plan de
-   pagos con cuotas e inventario por sede con ítems bajo el stock mínimo. Varios planes se abrieron hace 20, 40, 75 y 100 días (`openedDaysAgo`), así que la cartera (DX-145) tiene deudores en todos los tramos en las dos sedes. Dos de ellos tienen gestiones de cobro y uno un compromiso de pago abierto a 5 días (DX-150): se ven en la cartera, en el bloque «Cobranza» de su ficha y con el chip «Saldo vencido» en sus citas. Recepción tiene en la sede principal la caja por turno de hoy (DX-027): la de la mañana cerrada con un arqueo que no cuadra por 2 USD (con su motivo) y la de la tarde abierta con su fondo en USD y en VES y un cobro en cada moneda; los abonos históricos quedan sin caja. «Recepción Norte» está restringida a la Sede Norte (DX-089): al entrar con ella la agenda, la caja, el inventario y la cartera muestran solo esa sede, y la principal da 403 (ver «Personal restringido a sedes»).
+   el informe de descuentos (DX-204)—, listo para presentar, y otro aceptado con la firma del paciente — DX-012; y dos opciones A/B de Carolina Durán —implante o puente— presentadas hace 9 días y sin cita futura, que salen en «Presupuestos por seguir» — DX-040), abonos en la moneda de la sede de los últimos 60 días en las cuatro sedes, cada uno con su recibo de caja numerado por sede (`PRI-000001`…, `NOR-000001`…; el abono duplicado anulado conserva su número y sale «ANULADO» — DX-136), un plan de
+   pagos con cuotas e inventario por sede con ítems bajo el stock mínimo. Varios planes se abrieron hace 20, 40, 75 y 100 días (`openedDaysAgo`), así que la cartera (DX-145) tiene deudores en todos los tramos en las dos sedes venezolanas. Dos de ellos tienen gestiones de cobro y uno un compromiso de pago abierto a 5 días (DX-150): se ven en la cartera, en el bloque «Cobranza» de su ficha y con el chip «Saldo vencido» en sus citas. Recepción tiene en la sede principal la caja por turno de hoy (DX-027): la de la mañana cerrada con un arqueo que no cuadra por 2 USD (con su motivo) y la de la tarde abierta con su fondo en USD y en VES y un cobro en cada moneda; los abonos históricos quedan sin caja. «Recepción Norte» está restringida a la Sede Norte (DX-089): al entrar con ella la agenda, la caja, el inventario y la cartera muestran solo esa sede, y la principal da 403 (ver «Personal restringido a sedes»).
 
    - **Idempotencia**: si el tenant `demo` ya existe, no hace nada (solo vuelve a
      imprimir las credenciales). `--reset` retira la demo anterior **en blando**
@@ -125,8 +150,10 @@ de despliegue hacen falta las devDependencies para sembrar. El puerto se lee de
      `admin@demo.dentalix.app` como ADMIN vivo) aborta la corrida, con o sin
      `--reset`; y si algún usuario `@demo.dentalix.app` es miembro vivo de otra
      clínica, tampoco se retira nada.
-   - **Determinista**: sin azar; todo depende solo de la fecha de hoy (en la zona
-     de la sede demo, `America/Caracas`, UTC−4 fijo). Moneda, zona horaria y país dependen siempre de la sede.
+   - **Determinista**: sin azar; todo depende solo de la fecha de hoy, contada en
+     la zona de la sede de cada dato (la hora de pared pasa a instante con el
+     desfase que esa zona tiene ese día, horario de verano incluido). Moneda,
+     zona horaria y país dependen siempre de la sede.
    - **Conexión**: no usa `DIRECT_URL`. Levanta la app (`AppModule`) y escribe con
      los mismos casos de uso que la API (registro, invitación + aceptación, sedes,
      horarios, pacientes, planes, abonos, plan de pagos, inventario), por
@@ -723,10 +750,10 @@ UPDATE … WHERE` no en espera) y el login correcto lo borra después. Si se
   `mhv_tenant_patient_id_key`, creado CONCURRENTLY) e inalterable como la
   historia (DX-038).
 - **Seed demo**: Jorge Eduardo Ramírez (prótesis valvular) requiere
-  premedicación y entra primero en «En clínica» hoy; Ana María Zapata tiene la
+  premedicación y entra primero en «En clínica» hoy; Ana María Zambrano tiene la
   anamnesis de hace 14 meses (caducada); la de Gustavo Ríos es de hace 13
   meses con «Sin cambios hoy» de la segunda dentista; quince pacientes no
-  tienen anamnesis (p. ej. Daniela Montoya).
+  tienen anamnesis (p. ej. Daniela Morales).
 
 ## Anamnesis previa a la cita por enlace (DX-099)
 
@@ -1327,8 +1354,9 @@ siguen admitiendo NULL hasta la fase 2.
 La lista ISO de monedas amplía las aceptadas en listas, gastos, caja y planes;
 el proveedor de tasas puede no tener alguna y esos abonos cuentan en
 `unconvertedPaymentsCount`. La demo (`npm run seed:demo`) crea sus sedes con
-valores explícitos y ya revisadas: `USD`, `America/Caracas`, `es-VE` y `VE`
-(una clínica venezolana que trabaja en USD; son datos, no reglas).
+valores explícitos y ya revisadas, cada una con su país, moneda, zona, locale
+y reloj (ver la tabla de sedes de la demo en el paso del `seed:demo`; son
+datos, no reglas).
 
 ### Fase 2 (ticket aparte)
 
@@ -2469,7 +2497,7 @@ suggestedFee?, currency?, patientText?, receptionCanCharge? }`, que crea la
   consulta para todo el lote (índice parcial
   `appointments_tenant_patient_incidents_idx`), y omite `cancelReasonText`.
 - **Demo**: la sede principal tiene una política de 24 h con cargo sugerido de
-  50 USD, y Daniela Montoya Arango tiene dos inasistencias y una
+  50 USD, y Daniela Morales Rangel tiene dos inasistencias y una
   cancelación con 5 h de aviso la semana pasada (insignia en su ficha y en sus
   citas). Las cancelaciones del calendario se registran avisadas por el
   paciente con 2 días.
@@ -2578,9 +2606,9 @@ false`, y un plan aceptado no se vuelve a descontar, DX-204); un cargo
 /locations/:id/cancellation-policy/email-preview` → `{ subject, html, text }`
   del recordatorio con la marca de la clínica y la política vigente (paciente
   y profesional de ejemplo). No envía nada.
-- **Demo**: las dos inasistencias y la cancelación tardía de Daniela Montoya
-  Arango tienen la política comunicada y se pueden cobrar. La inasistencia de
-  Jorge Eduardo Ramírez Ospina (hace 8 días) también tiene la política
+- **Demo**: las dos inasistencias y la cancelación tardía de Daniela Morales
+  Rangel tienen la política comunicada y se pueden cobrar. La inasistencia de
+  Jorge Eduardo Ramírez Ortega (hace 8 días) también tiene la política
   comunicada: ahí «Generar cargo» funciona igual como ADMIN.
 
 ## Recordatorios de cita por email (DX-026)
@@ -2672,7 +2700,7 @@ LINK`; `audit_events_actor_check` admite actor NULL solo para eso y el
 /patients/:id/communication`).
 - **Demo**: `seed:demo` deja a Laura con WhatsApp y opt-in en persona, al
   tercer paciente con canal ninguno, al cuarto dado de baja y al quinto con un
-  fijo (móvil no válido). Sofía Ortiz (menor) muestra los avisos dirigidos a
+  fijo (no sirve para WhatsApp). Sofía Ortiz (menor) muestra los avisos dirigidos a
   su madre Claudia.
 
 ## Responsable de pago y grupo familiar (DX-203)
@@ -2729,8 +2757,8 @@ Dentrix. Módulo `patients`, tabla `patient_responsible_parties`; migraciones
   responsable `LEGAL_GUARDIAN` que recibe avisos y no paga, de forma
   idempotente (índice único parcial `migratedFromGuardian`) y sin tocar las
   columnas viejas.
-- **Demo**: la abuela Martha Lucía Becerra paga a Sofía Ortiz y a Mateo
-  Cifuentes (su ficha muestra «Responsable de» y el estado de cuenta
+- **Demo**: la abuela Marta Elena Becerra paga a Sofía Ortiz y a Mateo
+  Contreras (su ficha muestra «Responsable de» y el estado de cuenta
   familiar); los avisos de Sofía van a su madre Claudia (contacto) y los de
   Mateo a la abuela.
 
@@ -3102,7 +3130,8 @@ después no altera nada ya calculado.
   abonos anteriores solo (50 por clínica y minuto).
 - **Demo**: la clínica demo está en `MANUAL` desde hace 60 días, con la tasa
   VES de cada día (ficticia: 250,00 hoy y ayer, 0,50 menos por cada día
-  anterior). Deja un abono de hoy de 11.250,00 VES (45 USD) en efectivo en el
+  anterior) y, desde DX-335, también la de BRL y la de GBP para los planes y
+  abonos de las sedes São Paulo y Londres. Deja un abono de hoy de 11.250,00 VES (45 USD) en efectivo en el
   plan «Endodoncia y rehabilitación de 46» (en USD), dos «Pago móvil» en
   bolívares y un cobro en Bs. en la caja abierta: todos congelan la tasa de su
   día, sin proveedor. Para ver el aviso «sin tasa», crea un abono en otra
@@ -4089,7 +4118,8 @@ de precios) que fijan el precio de cada ítem del plan al añadirlo. Módulos
 - **Demo**: `npm run seed:demo` crea las listas «Tarifa Sede Norte» (5
   precios en USD, sede Norte) y «Convenio Alfa» (3, en USD), el pagador
   «Empresa Alfa», los convenios «Aseguradora Demo −15 %» y «Empresa Alfa lista» y los asigna a tres
-  pacientes. Se crean al final para no cambiar los precios de los planes de la
+  pacientes. Las sedes São Paulo y Londres llevan además su propia tarifa, en
+  BRL y GBP, con los mismos códigos (DX-335). Se crean al final para no cambiar los precios de los planes de la
   demo.
 - **Tests**: `plan-quote.spec.ts`, `price-lists.e2e-spec.ts`,
   `agreements.e2e-spec.ts`, `patient-agreements.e2e-spec.ts`,
