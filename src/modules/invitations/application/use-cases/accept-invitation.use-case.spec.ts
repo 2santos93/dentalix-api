@@ -140,7 +140,7 @@ describe('AcceptInvitationUseCase', () => {
       uc.execute({ token: 'tok-mfa', password: 'longenough1' }),
     );
     expect(result).toEqual({ loginRequired: true });
-    expect(tokens.issue).not.toHaveBeenCalled();
+    expect(jest.mocked(tokens).issue.mock.calls).toHaveLength(0);
     expect(await repo.listPending()).toHaveLength(0);
   });
 
