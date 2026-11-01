@@ -76,6 +76,51 @@ describe('DX-496: asserts negativos sin literales numéricos cortos', () => {
       ]);
     });
 
+    it('resuelve la variable de un for…of sobre una lista literal', () => {
+      const found = findShortNegativeLiterals([
+        spec(
+          [
+            "const REF = '0412';",
+            'for (const leaked of [',
+            "  'Juan',",
+            "  '9b1e',",
+            '  REF,',
+            '  NUMBER.slice(0, -4),',
+            "  '9b1e77aa',",
+            ']) {',
+            '  expect(text).not.toContain(leaked);',
+            '}',
+            "for (const leaked of ['Juan', '9b1e77aa']) {",
+            '  expect(text).not.toContain(leaked);',
+            '}',
+          ].join('\n'),
+        ),
+      ]);
+      expect(found.map((f) => [f.line, f.literal])).toEqual([
+        [9, '9b1e'],
+        [9, '0412'],
+      ]);
+    });
+
+    it('ve las ramas de una regex con grupos, anclas y \\b', () => {
+      const found = findShortNegativeLiterals([
+        spec(
+          [
+            'expect(text).not.toMatch(/(204|146)/);',
+            'expect(text).not.toMatch(/^204$/);',
+            'expect(text).not.toMatch(/\\b0412\\b|(?:6c1d)/);',
+          ].join('\n'),
+        ),
+      ]);
+      expect(found.map((f) => [f.line, f.literal])).toEqual([
+        [1, '204'],
+        [1, '146'],
+        [2, '204'],
+        [3, '0412'],
+        [3, '6c1d'],
+      ]);
+    });
+
     it('permite centinelas largos, texto, regex con clases y listas', () => {
       const found = findShortNegativeLiterals([
         spec(
@@ -146,12 +191,26 @@ describe('DX-496: asserts negativos sin literales numéricos cortos', () => {
       expect(leavesWith({ total: { toJSON: () => '204.00' } }, 204)).toEqual([
         'total',
       ]);
+      expect(
+        leavesWith({ total: { toJSON: () => ({ amount: 204 }) } }, 204),
+      ).toEqual(['total.amount']);
+      expect(leavesWith({ file: Buffer.from([2, 0, 4]) }, 204)).toEqual([]);
+      expect(leavesWith({ file: Buffer.from('dosis 204') }, 204)).toEqual([]);
     });
 
     it('un texto que no es solo un UUID o una fecha sí se revisa', () => {
       expect(
         leavesWith({ ref: '58a0931b-e204-4179-8a1c-0204aa55e204 dosis' }, 204),
       ).toEqual(['ref']);
+    });
+
+    it('no se cuelga con ciclos: cada objeto se visita una vez', () => {
+      const node: Record<string, unknown> = { note: 'Dosis 204 mg' };
+      node.self = node;
+      expect(leavesWith({ a: node, b: node }, 204)).toEqual(['a.note']);
+      const list: unknown[] = ['204 mg'];
+      list.push(list);
+      expect(leavesWith(list, 204)).toEqual(['[0]']);
     });
 
     it('acepta el JSON ya leído y valores nulos', () => {

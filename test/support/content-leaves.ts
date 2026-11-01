@@ -23,11 +23,14 @@ function hasToJson(value: object): value is { toJSON: () => unknown } {
 /**
  * Rutas (`metadata.notes[0]`) de las hojas y claves de `value` que contienen
  * `needle`, sin mirar ids (UUID) ni fechas (`Date` o ISO). Vacío si el dato no
- * aparece. Los `toJSON` (Decimal de Prisma) se revisan por su texto.
+ * aparece. Revisa lo que saldría en `JSON.stringify`: un `toJSON` (Decimal
+ * de Prisma → texto, Buffer → `{ type, data }`) se revisa por lo que devuelve.
+ * Cada objeto se visita una vez, así que un ciclo no lo cuelga.
  */
 export function leavesWith(value: unknown, needle: string | number): string[] {
   const target = String(needle);
   const found: string[] = [];
+  const seen = new WeakSet<object>();
   const visit = (node: unknown, path: string): void => {
     if (node === null || node === undefined) return;
     if (node instanceof Date) return;
@@ -40,12 +43,14 @@ export function leavesWith(value: unknown, needle: string | number): string[] {
       return;
     }
     if (typeof node !== 'object') return;
+    if (seen.has(node)) return;
+    seen.add(node);
     if (Array.isArray(node)) {
       node.forEach((item, i) => visit(item, `${path}[${i}]`));
       return;
     }
     if (hasToJson(node)) {
-      visit(String(node.toJSON()), path);
+      visit(node.toJSON(), path);
       return;
     }
     for (const [key, child] of Object.entries(node)) {

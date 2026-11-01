@@ -40,23 +40,127 @@ const NEGATIVE =
 const ARGUMENT =
   /^(?:'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)"|`([^`$\\]*)`|\/((?:[^/\\\n[]|\\.|\[(?:[^\]\\\n]|\\.)*\])+)\/[a-z]*|(\d+(?:\.\d+)?)|String\(\s*([A-Za-z_$][\w$]*)\s*\)|`\$\{\s*([A-Za-z_$][\w$]*)\s*\}`|([A-Za-z_$][\w$]*)(?:\.toString\(\))?)\s*,?\s*\)/;
 
-/** `const NOMBRE = <literal>` del mismo fichero (cadena o número). */
-function constants(source: string): Map<string, string> {
-  const out = new Map<string, string>();
-  const decl =
-    /\bconst\s+([A-Za-z_$][\w$]*)\s*(?::\s*[\w.]+\s*)?=\s*(?:'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)"|`([^`$\\]*)`|(\d+(?:\.\d+)?))\s*(?:as\s+const\s*)?;/g;
-  for (const m of source.matchAll(decl)) {
-    out.set(m[1], m[2] ?? m[3] ?? m[4] ?? m[5]);
-  }
-  return out;
+const IDENT = /^[A-Za-z_$][\w$]*$/;
+const LITERAL =
+  /^(?:'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)"|`([^`$\\]*)`|(\d+(?:\.\d+)?))$/;
+
+/** Una variable del fichero: su posición y los valores que puede tomar. */
+interface Binding {
+  name: string;
+  index: number;
+  /** Literales que puede tomar. */
+  values: string[];
+  /** Nombres de otras variables de la lista (se resuelven al usarlas). */
+  refs: string[];
 }
 
-/** Ramas literales de una regex (`/6c1d|ana/` → `6c1d`, `ana`). */
+/** El texto de un literal de cadena o número, o null si no lo es. */
+function literalText(expr: string): string | null {
+  const m = LITERAL.exec(expr.trim());
+  return m ? (m[1] ?? m[2] ?? m[3] ?? m[4]) : null;
+}
+
+/** Los elementos de una lista literal, separados por las comas de primer nivel. */
+function arrayElements(body: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let quote: string | null = null;
+  let current = '';
+  for (let i = 0; i < body.length; i++) {
+    const c = body[i];
+    if (quote) {
+      current += c;
+      if (c === '\\') current += body[++i] ?? '';
+      else if (c === quote) quote = null;
+      continue;
+    }
+    if (c === "'" || c === '"' || c === '`') quote = c;
+    else if ('([{'.includes(c)) depth++;
+    else if (')]}'.includes(c)) depth--;
+    else if (c === ',' && depth === 0) {
+      out.push(current);
+      current = '';
+      continue;
+    }
+    current += c;
+  }
+  if (current.trim()) out.push(current);
+  return out.map((e) => e.trim()).filter((e) => e.length > 0);
+}
+
+/**
+ * `const NOMBRE = <literal>` y `for (const NOMBRE of [<lista literal>])` del
+ * fichero. De la lista solo cuentan los elementos que son un literal o el
+ * nombre de otra variable; una expresión (`NUMBER.slice(0, -4)`) no se evalúa.
+ */
+function bindings(source: string): Binding[] {
+  const out: Binding[] = [];
+  const decl =
+    /\bconst\s+([A-Za-z_$][\w$]*)\s*(?::\s*[\w.]+\s*)?=\s*('(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"|`[^`$\\]*`|\d+(?:\.\d+)?)\s*(?:as\s+const\s*)?;/g;
+  for (const m of source.matchAll(decl)) {
+    out.push({
+      name: m[1],
+      index: m.index,
+      values: [literalText(m[2]) ?? ''],
+      refs: [],
+    });
+  }
+  const loop = /\bfor\s*\(\s*const\s+([A-Za-z_$][\w$]*)\s+of\s+\[/g;
+  for (const m of source.matchAll(loop)) {
+    const open = m.index + m[0].length - 1;
+    let depth = 0;
+    let close = -1;
+    for (let i = open; i < source.length; i++) {
+      if (source[i] === '[') depth++;
+      else if (source[i] === ']' && --depth === 0) {
+        close = i;
+        break;
+      }
+    }
+    if (close < 0) continue;
+    const values: string[] = [];
+    const refs: string[] = [];
+    for (const element of arrayElements(source.slice(open + 1, close))) {
+      const text = literalText(element);
+      if (text !== null) values.push(text);
+      else if (IDENT.test(element)) refs.push(element);
+    }
+    out.push({ name: m[1], index: m.index, values, refs });
+  }
+  return out.sort((a, b) => a.index - b.index);
+}
+
+/**
+ * Valores posibles de `name` en `index`: la última declaración anterior con
+ * ese nombre (un `leaked` de otro bucle más arriba no cuenta).
+ */
+function resolve(
+  all: Binding[],
+  name: string,
+  index: number,
+  seen = new Set<string>(),
+): string[] {
+  if (seen.has(name)) return [];
+  seen.add(name);
+  const binding = all.filter((b) => b.name === name && b.index < index).pop();
+  if (!binding) return [];
+  return [
+    ...binding.values,
+    ...binding.refs.flatMap((ref) => resolve(all, ref, binding.index, seen)),
+  ];
+}
+
+/**
+ * Ramas literales de una regex: `/6c1d|ana/` → `6c1d`, `ana`. Sin anclas,
+ * grupos ni `\b`, así `/(204|146)/` o `/^204$/` no se escapan.
+ */
 function regexLiterals(pattern: string): string[] {
   return pattern
     .split(/(?<!\\)\|/)
-    .filter((branch) => /^[\w.:,-]*$/.test(branch.replace(/\\\./g, '.')))
-    .map((branch) => branch.replace(/\\\./g, '.'));
+    .map((branch) =>
+      branch.replace(/\\b|\(\?:|(?<!\\)[\^$()]/g, '').replace(/\\\./g, '.'),
+    )
+    .filter((branch) => /^[\w.:,-]*$/.test(branch));
 }
 
 /**
@@ -111,7 +215,7 @@ export function findShortNegativeLiterals(
   const found: ShortNegativeLiteral[] = [];
   for (const spec of specs) {
     if (SELF.has(spec.path)) continue;
-    const consts = constants(spec.source);
+    const scope = bindings(spec.source);
     for (const m of spec.source.matchAll(NEGATIVE)) {
       const matcher = m[1] ?? m[2];
       const start = m.index + m[0].length;
@@ -125,8 +229,7 @@ export function findShortNegativeLiterals(
       else if (text !== undefined) literals = [text];
       else {
         const name = str ?? tpl ?? ident;
-        const value = name === undefined ? undefined : consts.get(name);
-        literals = value === undefined ? [] : [value];
+        literals = name === undefined ? [] : resolve(scope, name, m.index);
       }
       const risky = literals.filter(isShortNumeric);
       if (risky.length === 0) continue;
