@@ -155,6 +155,22 @@ export class UserMfaService {
     });
   }
 
+  /**
+   * ¿Este miembro necesita segundo factor para abrir sesión en la clínica?
+   * Activo, u obligatorio y sin activar. Lo pregunta quien emite una sesión
+   * fuera del login (aceptar una invitación): ningún camino la salta.
+   */
+  async needsSecondFactor(
+    userId: string,
+    tenantId: string,
+    role: ClinicRole,
+  ): Promise<boolean> {
+    const state = await this.state(userId);
+    return (
+      state.enabledAt !== null || (await this.isRequired(state, tenantId, role))
+    );
+  }
+
   async status(
     userId: string,
     tenantId: string,

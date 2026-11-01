@@ -55,6 +55,11 @@ function withTenant<T>(
   return ctx.run(tenantId, fn);
 }
 
+/** DX-021: cuenta sin segundo factor (la aceptación de siempre). */
+const noSecondFactor = {
+  needsSecondFactor: () => Promise.resolve(false),
+} as never;
+
 describe('AcceptInvitationUseCase', () => {
   it('sin tenant en contexto (host apex/desconocido) -> NotFoundException sin llamar al repo', async () => {
     const repo = new InMemoryInvitationRepository();
@@ -65,6 +70,7 @@ describe('AcceptInvitationUseCase', () => {
       makeTokens(),
       new TenantContextService(),
       makeAudit(),
+      noSecondFactor,
     );
 
     // Deliberately NOT wrapped in ctx.run(...): mirrors a request that hit an
@@ -94,6 +100,7 @@ describe('AcceptInvitationUseCase', () => {
       tokens,
       ctx,
       makeAudit(),
+      noSecondFactor,
     );
 
     const result = await ctx.run('t1', () =>
@@ -111,6 +118,32 @@ describe('AcceptInvitationUseCase', () => {
     expect(invitation.email).toBe('nuevo@clinic.com'); // sanity: seedInvitation devolvió lo esperado
   });
 
+  it('DX-021: si la cuenta necesita segundo factor, queda aceptada pero sin emitir sesión', async () => {
+    const repo = new InMemoryInvitationRepository();
+    repo.seedInvitation({
+      token: 'tok-mfa',
+      email: 'nuevo-mfa@clinic.com',
+      fullName: 'Nuevo Admin',
+      role: ClinicRole.ADMIN,
+    });
+    const tokens = makeTokens();
+    const ctx = new TenantContextService();
+    const uc = new AcceptInvitationUseCase(
+      repo,
+      makePassword(),
+      tokens,
+      ctx,
+      makeAudit(),
+      { needsSecondFactor: () => Promise.resolve(true) } as never,
+    );
+    const result = await ctx.run('t1', () =>
+      uc.execute({ token: 'tok-mfa', password: 'longenough1' }),
+    );
+    expect(result).toEqual({ loginRequired: true });
+    expect(tokens.issue).not.toHaveBeenCalled();
+    expect(await repo.listPending()).toHaveLength(0);
+  });
+
   it('DX-359: aceptar con una cuenta NUEVA deja el alta del miembro (actor = él mismo), sin contraseña, hash ni token', async () => {
     const repo = new InMemoryInvitationRepository();
     const invitation = repo.seedInvitation({
@@ -126,6 +159,7 @@ describe('AcceptInvitationUseCase', () => {
       makeTokens(),
       ctx,
       audit,
+      noSecondFactor,
     );
 
     await ctx.run('t1', () =>
@@ -199,6 +233,7 @@ describe('AcceptInvitationUseCase', () => {
       tokens,
       ctx,
       makeAudit(),
+      noSecondFactor,
     );
 
     const result = await ctx.run('t1', () =>
@@ -235,6 +270,7 @@ describe('AcceptInvitationUseCase', () => {
       makeTokens(),
       ctx,
       makeAudit(),
+      noSecondFactor,
     );
 
     await expect(
@@ -274,6 +310,7 @@ describe('AcceptInvitationUseCase', () => {
         makeTokens(),
         ctx,
         makeAudit(),
+        noSecondFactor,
       );
 
       await expect(
@@ -292,6 +329,7 @@ describe('AcceptInvitationUseCase', () => {
       makeTokens(),
       ctx,
       makeAudit(),
+      noSecondFactor,
     );
 
     await expect(
@@ -311,6 +349,7 @@ describe('AcceptInvitationUseCase', () => {
       makeTokens(),
       ctx,
       makeAudit(),
+      noSecondFactor,
     );
 
     await expect(
@@ -342,6 +381,7 @@ describe('AcceptInvitationUseCase', () => {
       makeTokens(),
       ctx,
       makeAudit(),
+      noSecondFactor,
     );
 
     await expect(
@@ -372,6 +412,7 @@ describe('AcceptInvitationUseCase', () => {
       tokens,
       ctx,
       makeAudit(),
+      noSecondFactor,
     );
 
     await ctx.run('tenant-from-context', () =>
@@ -399,6 +440,7 @@ describe('AcceptInvitationUseCase', () => {
         makeTokens(),
         ctx,
         makeAudit(),
+        noSecondFactor,
       );
 
       await ctx.run('t1', () =>
@@ -433,6 +475,7 @@ describe('AcceptInvitationUseCase', () => {
         makeTokens({ issue }),
         ctx,
         audit,
+        noSecondFactor,
       );
 
       await ctx.run('t1', () =>
@@ -479,6 +522,7 @@ describe('AcceptInvitationUseCase', () => {
         makeTokens(),
         ctx,
         audit,
+        noSecondFactor,
       );
 
       await ctx.run('t1', () =>
@@ -503,6 +547,7 @@ describe('AcceptInvitationUseCase', () => {
         makeTokens(),
         ctx,
         makeAudit(),
+        noSecondFactor,
       );
 
       await expect(
@@ -523,6 +568,7 @@ describe('AcceptInvitationUseCase', () => {
         makeTokens(),
         ctx,
         makeAudit(),
+        noSecondFactor,
       );
 
       await expect(
@@ -565,6 +611,7 @@ describe('AcceptInvitationUseCase', () => {
           makeTokens(),
           ctx,
           audit,
+          noSecondFactor,
         ),
         audit,
         password,
@@ -719,6 +766,7 @@ describe('AcceptInvitationUseCase', () => {
         makeTokens({ issue }),
         ctx,
         makeAudit(),
+        noSecondFactor,
       );
       await ctx.run('t1', () =>
         uc.execute({ token: 'tok-loc', password: 'longenough1' }),

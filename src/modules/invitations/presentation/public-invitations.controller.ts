@@ -11,6 +11,7 @@ import {
 import type { Response } from 'express';
 import {
   ApiCreatedResponse,
+  ApiExtraModels,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
@@ -66,15 +67,29 @@ export class PublicInvitationsController {
     summary:
       'Acepta la invitación: crea la cuenta (email verificado), entra con la contraseña de una cuenta verificada o reclama una cuenta no verificada',
   })
-  @ApiCreatedResponse({ type: AuthTokensDto })
+  @ApiCreatedResponse({
+    description:
+      'Sesión (`AuthTokensDto`) o, DX-021, `{ loginRequired: true }`: aceptada, pero la cuenta necesita segundo factor y debe entrar por /login.',
+    schema: {
+      oneOf: [
+        { $ref: '#/components/schemas/AuthTokensDto' },
+        {
+          type: 'object',
+          properties: { loginRequired: { type: 'boolean', enum: [true] } },
+          required: ['loginRequired'],
+        },
+      ],
+    },
+  })
+  @ApiExtraModels(AuthTokensDto)
   async accept(
     @Req() req: TenantHostRequest & { ip?: string },
     @Res({ passthrough: true }) res: Response,
     @Param('token') token: string,
     @Body() dto: AcceptInvitationDto,
-  ): Promise<DeliveredSession> {
+  ): Promise<DeliveredSession | { loginRequired: true }> {
     const userAgent = req.headers['user-agent'];
-    const pair = await this.acceptInvitation.execute({
+    const result = await this.acceptInvitation.execute({
       token,
       password: dto.password,
       meta: {
@@ -84,6 +99,7 @@ export class PublicInvitationsController {
         requestId: currentRequestId() ?? null,
       },
     });
-    return this.cookie.deliver(res, pair, this.cookie.wantsCookie(req));
+    if ('loginRequired' in result) return result;
+    return this.cookie.deliver(res, result, this.cookie.wantsCookie(req));
   }
 }
