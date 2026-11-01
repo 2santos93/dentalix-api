@@ -20,10 +20,10 @@ import {
   UpdatePatientRepoInput,
 } from '../../domain/ports/patient-repository.port';
 import {
-  effectiveRetentionYears,
   isUnderRetention,
   retentionUntil,
 } from '../../domain/retention/clinical-record-retention';
+import { effectiveRetentionYears } from '../../domain/retention/retention-term-change';
 import {
   CLINICAL_RETENTION_CONFIG,
   type ClinicalRetentionConfig,

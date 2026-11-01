@@ -24,14 +24,6 @@ function addCivilYears(from: Date, years: number): Date {
   return new Date(Date.UTC(year, month, day));
 }
 
-/** El plazo que manda: el de la clínica, nunca menos que el de la plataforma. */
-export function effectiveRetentionYears(
-  clinicYears: number,
-  platformMinYears: number,
-): number {
-  return Math.max(clinicYears, platformMinYears);
-}
-
 /**
  * Hasta qué día (incluido, medianoche UTC) hay que conservar la historia
  * clínica. Puro: no lee el reloj.

@@ -120,8 +120,12 @@ describe('plazo de conservación de la HC por clínica (DX-330, int)', () => {
 });
 
 describe('el plazo de la clínica manda en la fecha de fin (DX-330, int)', () => {
-  const NOW = new Date('2026-11-01T12:00:00Z');
-  const LAST = new Date('2010-06-15T10:00:00Z');
+  // `findById` y `list` miran el reloj real: las fechas salen de hoy, para que
+  // 15 años estén siempre vencidos y 20 y 25, siempre en retención.
+  const NOW = new Date();
+  const LAST_YEAR = NOW.getUTCFullYear() - 16;
+  const LAST = new Date(Date.UTC(LAST_YEAR, 5, 15, 10));
+  const endWith = (years: number): string => `${LAST_YEAR + years}-06-15`;
   const repo = new PrismaPatientRepository(prisma, tenantContext, {
     platformMinYears: 15,
   });
@@ -211,14 +215,14 @@ describe('el plazo de la clínica manda en la fecha de fin (DX-330, int)', () =>
 
     const seenInA = await tenantContext.run(clinicA, () => repo.findById(inA));
     expect(seenInA).toMatchObject({
-      retentionUntil: '2025-06-15',
+      retentionUntil: endWith(15),
       underRetention: false,
       clinicRetentionYears: 15,
       retentionFromPreviousTerm: false,
     });
     const seenInB = await tenantContext.run(clinicB, () => repo.findById(inB));
     expect(seenInB).toMatchObject({
-      retentionUntil: '2035-06-15',
+      retentionUntil: endWith(25),
       underRetention: true,
       clinicRetentionYears: 25,
     });
@@ -227,19 +231,19 @@ describe('el plazo de la clínica manda en la fecha de fin (DX-330, int)', () =>
       repo.list({ query: 'Bea' }),
     );
     expect(listedInB.items.find((p) => p.id === inB)).toMatchObject({
-      retentionUntil: '2035-06-15',
+      retentionUntil: endWith(25),
       clinicRetentionYears: 25,
     });
     const listedInA = await tenantContext.run(clinicA, () => repo.list({}));
     expect(listedInA.items.find((p) => p.id === inA)).toMatchObject({
-      retentionUntil: '2025-06-15',
+      retentionUntil: endWith(15),
       clinicRetentionYears: 15,
     });
 
     await expect(archive(clinicB, inB)).rejects.toMatchObject({
       response: {
         code: 'CLINICAL_RECORD_RETENTION',
-        retentionUntil: '2035-06-15',
+        retentionUntil: endWith(25),
         message: expect.stringContaining('25 años') as string,
       },
     });
@@ -253,14 +257,14 @@ describe('el plazo de la clínica manda en la fecha de fin (DX-330, int)', () =>
     expect(
       await tenantContext.run(clinicA, () => repo.findById(id)),
     ).toMatchObject({
-      retentionUntil: '2030-06-15',
+      retentionUntil: endWith(20),
       underRetention: true,
       clinicRetentionYears: 20,
     });
     await expect(archive(clinicA, id)).rejects.toMatchObject({
       response: {
         code: 'CLINICAL_RECORD_RETENTION',
-        retentionUntil: '2030-06-15',
+        retentionUntil: endWith(20),
       },
     });
   });
@@ -274,24 +278,25 @@ describe('el plazo de la clínica manda en la fecha de fin (DX-330, int)', () =>
     expect(
       await tenantContext.run(clinicA, () => raised.findById(id)),
     ).toMatchObject({
-      retentionUntil: '2030-06-15',
+      retentionUntil: endWith(20),
       underRetention: true,
       clinicRetentionYears: 20,
     });
     await expect(archive(clinicA, id, raised)).rejects.toMatchObject({
-      response: { retentionUntil: '2030-06-15' },
+      response: { retentionUntil: endWith(20) },
     });
   });
 
   it('a floor keeps a patient out of the expiring list', async () => {
     // B ya redujo a 15: con su plazo de 25 el paciente de 2005 ni estaría.
+    const CLOCK = new Date('2026-11-01T12:00:00Z');
     await raw.$executeRaw`UPDATE "tenants" SET "clinicalRecordRetentionYears" = 15 WHERE "id" = ${clinicB}::uuid`;
     const id = await attended(
       clinicB,
       'Suelo',
       new Date('2005-03-10T10:00:00Z'),
     );
-    const useCase = new ListRetentionExpiringUseCase(repo, () => NOW);
+    const useCase = new ListRetentionExpiringUseCase(repo, () => CLOCK);
     const expiring = () =>
       tenantContext.run(clinicB, () =>
         useCase.execute({ withinDays: 365, page: 1, pageSize: 50 }),
