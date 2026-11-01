@@ -66,22 +66,28 @@ export function isDemoHoliday(
 }
 
 /**
- * Desfase (días atrás, en la sede) del día laborable no festivo más reciente
- * desde `daysAgo` hacia atrás: una visita nunca cae en un festivo ni en fin de
- * semana de la sede.
+ * Desfase (días atrás, en la sede) del día abierto no festivo más reciente
+ * desde `daysAgo` hacia atrás: una visita nunca cae en un día que el horario
+ * de la sede (`ranges`) tiene cerrado ni en un festivo suyo. Sin ningún día
+ * abierto en un año, el horario está vacío: se avisa en vez de girar sin fin.
  */
 export function workdayDaysAgo(
   now: Date,
   key: DemoLocationKey,
   daysAgo: number,
+  ranges: readonly { weekday: number }[],
 ): number {
   const timeZone = DEMO_LOCATIONS[key].timeZone;
-  let offset = daysAgo;
-  for (;;) {
+  for (let offset = daysAgo; offset < daysAgo + 366; offset++) {
     const day = sedeDay(now, -offset, timeZone);
-    if (day.weekday !== 0 && !isDemoHoliday(now, key, day.day)) return offset;
-    offset++;
+    if (
+      ranges.some((r) => r.weekday === day.weekday) &&
+      !isDemoHoliday(now, key, day.day)
+    ) {
+      return offset;
+    }
   }
+  throw new Error(`The ${key} demo location has no open day in a year`);
 }
 
 /** Instante de las `minuteOfDay` (hora de pared de la sede) de ese día. */

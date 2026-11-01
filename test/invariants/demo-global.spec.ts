@@ -12,6 +12,7 @@ import {
   planComparisonHistory,
   planInClinicToday,
   planSiteAppointments,
+  workdayDaysAgo,
 } from '../../prisma/demo/calendar';
 import {
   DEMO_COMMUNICATION,
@@ -657,6 +658,36 @@ describe('demo global (DX-335)', () => {
       expect({ day, offenders }).toEqual({ day, offenders: [] });
     }
     expect(planned).toBeGreaterThan(366 * 4);
+  });
+
+  it('a done item is dated on a day its location is open, never a closed weekday or a holiday', () => {
+    let saturdaysSkipped = 0;
+    for (
+      let day = '2028-01-01';
+      day <= '2028-12-31';
+      day = addCivilDays(day, 1)
+    ) {
+      const now = new Date(`${day}T12:00:00Z`);
+      for (const key of SITE_KEYS) {
+        const zone = DEMO_LOCATIONS[key].timeZone;
+        for (const daysAgo of [0, 1, 6, 13]) {
+          const offset = workdayDaysAgo(now, key, daysAgo, rangesOf(key));
+          const visitDay = addCivilDays(civilDateIn(now, zone), -offset);
+          const weekday = civilWeekday(visitDay);
+          expect(offset).toBeGreaterThanOrEqual(daysAgo);
+          expect(rangesOf(key).some((r) => r.weekday === weekday)).toBe(true);
+          expect(isDemoHoliday(now, key, visitDay)).toBe(false);
+          if (
+            key === 'saoPaulo' &&
+            civilWeekday(addCivilDays(civilDateIn(now, zone), -daysAgo)) === 6
+          ) {
+            saturdaysSkipped++;
+          }
+        }
+      }
+    }
+    // São Paulo cierra los sábados: el caso se recorrió de verdad.
+    expect(saturdaysSkipped).toBeGreaterThan(0);
   });
 
   it('every location has four example holidays and a closure 28 days from its today', () => {

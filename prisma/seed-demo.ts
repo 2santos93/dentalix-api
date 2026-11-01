@@ -841,6 +841,7 @@ class DemoSeeder {
     await this.createPlansAndPayments(
       tenantId,
       locations,
+      hours,
       patientIds,
       dentists,
       receptionId,
@@ -851,6 +852,7 @@ class DemoSeeder {
     await this.createSiteActivity(
       tenantId,
       locations,
+      hours,
       siteDentists,
       patientIds,
       receptionId,
@@ -2562,13 +2564,14 @@ class DemoSeeder {
       payments: readonly { daysAgo: number }[];
     },
     item: Pick<DemoPlanItem, 'unattributed'>,
+    hours: Record<DemoLocationKey, BusinessHours | null>,
   ): Promise<void> {
     const firstPaymentDaysAgo = Math.max(
       0,
       ...spec.payments.map((p) => p.daysAgo),
     );
-    // Un realizado es una visita: nunca en domingo ni en un festivo de la sede
-    // del plan (PF6). El abono no se mueve: fija la antigüedad de la cartera.
+    // Un realizado es una visita: nunca en un día cerrado ni en un festivo de
+    // la sede del plan (PF6). El abono no se mueve: fija la antigüedad de la cartera.
     const doneAt = spec.doneAt ?? 'principal';
     const data = item.unattributed
       ? {
@@ -2580,7 +2583,12 @@ class DemoSeeder {
       : {
           completedAt: daysAgoAt(
             this.now,
-            workdayDaysAgo(this.now, doneAt, firstPaymentDaysAgo),
+            workdayDaysAgo(
+              this.now,
+              doneAt,
+              firstPaymentDaysAgo,
+              hours[doneAt]?.ranges ?? [],
+            ),
             10 * 60,
             DEMO_LOCATIONS[doneAt].timeZone,
           ),
@@ -2601,6 +2609,7 @@ class DemoSeeder {
   private async createSiteActivity(
     tenantId: string,
     locations: Record<DemoLocationKey, string>,
+    hours: Record<DemoLocationKey, BusinessHours | null>,
     siteDentists: Record<SoloSiteKey, string>,
     patientIds: string[],
     receptionId: string,
@@ -2670,6 +2679,7 @@ class DemoSeeder {
                 added.id,
                 { payments: spec.payments, doneAt: key },
                 {},
+                hours,
               );
             }
           }
@@ -2868,6 +2878,7 @@ class DemoSeeder {
   private async createPlansAndPayments(
     tenantId: string,
     locations: Record<DemoLocationKey, string>,
+    hours: Record<DemoLocationKey, BusinessHours | null>,
     patientIds: string[],
     dentists: string[],
     receptionId: string,
@@ -2915,7 +2926,7 @@ class DemoSeeder {
                 ),
             );
             if (item.status === TreatmentPlanItemStatus.DONE) {
-              await this.datePlanItemDone(added.id, spec, item);
+              await this.datePlanItemDone(added.id, spec, item, hours);
             }
           }
         }
