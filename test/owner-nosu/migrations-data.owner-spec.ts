@@ -417,6 +417,13 @@ const FIXTURE_DX329 = [
  */
 const SIN_COLOMBIA = '20261110130000_sin_colombia_identificadores';
 
+/**
+ * DX-330: el plazo de conservación de la HC por clínica y el suelo de cada
+ * paciente. Solo columnas nuevas (con default o NULL) y sus CHECK; ningún
+ * relleno. Sin fixture propio: usa las clínicas y los pacientes P_A y P_B.
+ */
+const DX330 = '20261113100000_dx330_tenant_clinical_record_retention';
+
 const STEPS: Step[] = [
   { until: '20260731115959', fixture: [] },
   // 20260731120000_structured_clinical_history y _remove_owner_role.
@@ -510,7 +517,9 @@ const STEPS: Step[] = [
   // hasta la que retira los códigos anteriores.
   { until: SIN_COLOMBIA, fixture: FIXTURE_DX329 },
   // sin_colombia_identificadores: tipos de pagador y código de documento
-  // anteriores traducidos o renombrados; y las siguientes.
+  // anteriores traducidos o renombrados; y las siguientes hasta DX-330.
+  { until: DX330 },
+  // dx330: plazo de la HC en la clínica y suelo por paciente; y las siguientes.
   { until: '99999999999999' },
 ];
 
@@ -1608,6 +1617,54 @@ describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-no
     ).toBe(
       'patient_coverages=true,patient_responsible_parties=true,patients=true,payers=true',
     );
+  }, 180_000);
+
+  it('owner-nosu clinical record retention columns', async () => {
+    await run(STEPS[29]);
+    // Todas las clínicas de la BD empiezan en el suelo, sin relleno.
+    expect(
+      await scalar<number>(
+        `SELECT count(*)::int AS v FROM "tenants"
+          WHERE "clinicalRecordRetentionYears" <> 15
+             OR "clinicalRecordRetentionRaisedAt" IS NOT NULL
+             OR "clinicalRecordRetentionYearsBeforeRaise" IS NOT NULL`,
+      ),
+    ).toBe(0);
+    expect(
+      await scalar<number>(`SELECT count(*)::int AS v FROM "tenants"`),
+    ).toBeGreaterThanOrEqual(6);
+    // El CHECK de plazo: 14 falla; y media ventana también.
+    await expect(
+      target.$executeRawUnsafe(
+        `UPDATE "tenants" SET "clinicalRecordRetentionYears" = 14 WHERE "id" = '${T_A}'`,
+      ),
+    ).rejects.toThrow(/tenants_clinical_record_retention_years_check/);
+    await expect(
+      target.$executeRawUnsafe(
+        `UPDATE "tenants" SET "clinicalRecordRetentionRaisedAt" = now() WHERE "id" = '${T_A}'`,
+      ),
+    ).rejects.toThrow(/tenants_clinical_record_retention_raise_check/);
+    // El suelo por paciente nace NULL aunque el paciente tenga atención.
+    expect(
+      await scalar<number>(
+        `SELECT count(*)::int AS v FROM "patients"
+          WHERE "id" IN ('${P_A}', '${P_B}')
+            AND "last_attention_at" IS NOT NULL
+            AND "retention_floor_until" IS NULL`,
+      ),
+    ).toBeGreaterThanOrEqual(1);
+    expect(
+      await scalar<number>(
+        `SELECT count(*)::int AS v FROM "patients"
+          WHERE "retention_floor_until" IS NOT NULL`,
+      ),
+    ).toBe(0);
+    expect(
+      await scalar<boolean>(
+        `SELECT relforcerowsecurity AS v FROM pg_class
+          WHERE oid = 'public.patients'::regclass`,
+      ),
+    ).toBe(true);
   }, 180_000);
 
   it('al terminar: FORCE en toda tabla con RLS y todo es del owner', async () => {

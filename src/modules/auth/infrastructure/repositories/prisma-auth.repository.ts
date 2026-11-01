@@ -1,5 +1,5 @@
 import { seedInitialPaymentMethods } from '../../../payment-methods/infrastructure/prisma-payment-method.repository';
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
 import { clinicRegisteredAuditEvent } from '../../domain/registration-audit';
 import { ClinicRole, Prisma } from '@prisma/client';
@@ -12,6 +12,10 @@ import {
 import { seedDefaultBusinessHours } from '../../../../shared/locations/default-business-hours';
 import { DEFAULT_DENTAL_CATALOG } from '../../../../shared/catalog/default-dental-catalog';
 import { suggestedPhoneRegion } from '../../../../shared/phone/phone-number';
+import {
+  CLINICAL_RETENTION_CONFIG,
+  type ClinicalRetentionConfig,
+} from '../../../patients/domain/retention/clinical-retention-config';
 import { PLATFORM_DEFAULT_MAJORITY_AGE } from '../../../patients/domain/responsible-parties/majority-age';
 import { PLATFORM_DEFAULT_PRESCRIPTION_SETTINGS } from '../../../prescriptions/domain/prescription-settings';
 import {
@@ -29,7 +33,11 @@ import {
 export class PrismaAuthRepository implements AuthRepository {
   private readonly logger = new Logger('Auth');
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(CLINICAL_RETENTION_CONFIG)
+    private readonly retention: ClinicalRetentionConfig,
+  ) {}
 
   async findUserByEmail(
     email: string,
@@ -82,6 +90,9 @@ export class PrismaAuthRepository implements AuthRepository {
           subdomain: input.subdomain,
           // DX-328: explícito; el default de la BD es el mismo valor.
           majorityAge: PLATFORM_DEFAULT_MAJORITY_AGE,
+          // DX-330: igual con el plazo de la historia clínica (el mínimo de
+          // plataforma del entorno; el default de la BD es el suelo, 15).
+          clinicalRecordRetentionYears: this.retention.platformMinYears,
           // DX-324: igual con los ajustes de la receta.
           prescriptionPrintQuantityInWords:
             PLATFORM_DEFAULT_PRESCRIPTION_SETTINGS.printQuantityInWords,

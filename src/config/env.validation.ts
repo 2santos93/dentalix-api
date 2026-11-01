@@ -409,6 +409,21 @@ function auditProblems(env: Env): string[] {
   return problems;
 }
 
+/**
+ * DX-330: mínimo de plataforma del plazo de conservación de la historia
+ * clínica. Vacío = 15; por debajo del suelo, la API no arranca.
+ */
+function retentionProblems(env: Env): string[] {
+  const key = 'PLATFORM_MIN_CLINICAL_RETENTION_YEARS';
+  const raw = str(env, key);
+  if (raw == null) return [];
+  const value = Number(raw.trim());
+  if (!/^\d{1,3}$/.test(raw.trim()) || value < 15 || value > 100) {
+    return [`${key} debe ser un entero entre 15 y 100.`];
+  }
+  return [];
+}
+
 /** DX-085: papel del proceso y ajustes de la cola de trabajos. */
 function jobsProblems(env: Env): string[] {
   const problems: string[] = [];
@@ -713,6 +728,7 @@ export function validateEnv(env: Env): Env {
   if (isProd) problems.push(...productionProblems(env));
   problems.push(...mailProblems(env, isProd));
   problems.push(...auditProblems(env));
+  problems.push(...retentionProblems(env));
   problems.push(...jobsProblems(env));
   problems.push(...domainProblems(env));
   problems.push(...breakGlassProblems(env, isProd));
