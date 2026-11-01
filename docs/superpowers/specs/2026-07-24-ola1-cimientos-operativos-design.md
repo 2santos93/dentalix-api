@@ -31,7 +31,7 @@ al máximo lo que ya existe.
 - Invitación de personal por correo y cambio de contraseña obligado en el primer ingreso
   (dependen de la ola de notificaciones). V1 usa **alta directa con contraseña inicial**.
 - Cualquier cambio al contrato del endpoint `GET /dashboard` (se consume tal cual está).
-- Notificaciones, portal del paciente, cumplimiento DIAN/RIPS, IA (olas posteriores).
+- Notificaciones, portal del paciente, cumplimiento fiscal y de reporte sanitario, IA (olas posteriores).
 
 ## Decisiones tomadas (con el owner, 2026-07-24)
 
