@@ -1,3 +1,4 @@
+import { EMPTY_CLINIC_FISCAL } from '../../../../shared/clinic/clinic-fiscal';
 import { PrescriptionStatus } from '@prisma/client';
 import type {
   Prescription,
@@ -153,6 +154,7 @@ export class InMemoryPrescriptionRepository implements PrescriptionRepository {
         ? {
             ...structuredClone(row),
             clinicLogoUrl: null,
+            clinicFiscal: EMPTY_CLINIC_FISCAL,
             locationFormat: this.locationFormats.get(row.locationId) ?? {
               timeZone: null,
               locale: null,

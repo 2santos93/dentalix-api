@@ -1,3 +1,4 @@
+import type { ClinicFiscalData } from '../../../../shared/clinic/clinic-fiscal';
 import type {
   DocumentType,
   SignatureRequestChannel,
@@ -60,7 +61,8 @@ export interface PlanQuoteSource {
     docTypeLabel: string | null;
     docNumber: string | null;
   };
-  clinic: { name: string; logoUrl: string | null };
+  /** DX-019: `fiscal`, los datos fiscales de HOY (fuera del contenido firmado). */
+  clinic: { name: string; logoUrl: string | null; fiscal: ClinicFiscalData };
   location: QuoteLocation & { timeZone: string };
   /** Quien creó el plan; `null` si no consta. */
   professionalName: string | null;

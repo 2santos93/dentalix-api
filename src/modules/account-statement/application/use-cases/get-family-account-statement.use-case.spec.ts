@@ -1,3 +1,4 @@
+import { EMPTY_CLINIC_FISCAL } from '../../../../shared/clinic/clinic-fiscal';
 import { FixedDocumentTypeNamesReader } from '../../../document-type-names/__fixtures__/fixed-document-type-names.reader';
 import { NotFoundException } from '@nestjs/common';
 import { ClinicRole } from '@prisma/client';
@@ -44,7 +45,7 @@ function statement(
   payments: StatementPaymentRow[],
 ): AccountStatementData {
   return {
-    clinic: { name: 'Clínica Uno', logoUrl: null },
+    clinic: { name: 'Clínica Uno', logoUrl: null, fiscal: EMPTY_CLINIC_FISCAL },
     patient: {
       id,
       firstName,

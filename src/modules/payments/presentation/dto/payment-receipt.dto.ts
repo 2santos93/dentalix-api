@@ -29,6 +29,12 @@ export class ReceiptClinicDto {
   })
   taxId!: string | null;
 
+  @ApiPropertyOptional({
+    description:
+      'Nombre que la clínica da a su identificador fiscal, congelado al emitir (DX-019). Ausente = el genérico.',
+  })
+  taxIdLabel?: string;
+
   @ApiProperty({ type: String, nullable: true })
   address!: string | null;
 }

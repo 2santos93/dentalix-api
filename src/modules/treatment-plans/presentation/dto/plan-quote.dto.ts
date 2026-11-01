@@ -1,3 +1,4 @@
+import { ClinicFiscalDto } from '../../../../shared/clinic/clinic-fiscal.dto';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   SignatureRequestChannel,
@@ -241,6 +242,13 @@ export class PlanQuoteDocumentDto {
 
   @ApiProperty({ type: String, nullable: true })
   clinicLogoUrl!: string | null;
+
+  @ApiProperty({
+    type: ClinicFiscalDto,
+    description:
+      'DX-019: datos fiscales de HOY (no forman parte del contenido firmado).',
+  })
+  clinicFiscal!: ClinicFiscalDto;
 
   @ApiProperty({ type: PlanQuoteLocationDto })
   location!: PlanQuoteLocationDto;

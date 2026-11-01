@@ -1,3 +1,7 @@
+import {
+  CLINIC_FISCAL_SELECT,
+  clinicFiscalOf,
+} from '../../../../shared/clinic/clinic-fiscal';
 import { Injectable } from '@nestjs/common';
 import { Prisma, type SignatureRequestChannel } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
@@ -225,7 +229,7 @@ export async function readPlanQuoteSource(
     }),
     tx.tenant.findFirst({
       where: { id: tenantId },
-      select: { name: true, logoUrl: true },
+      select: { name: true, logoUrl: true, ...CLINIC_FISCAL_SELECT },
     }),
     plan.createdById
       ? tx.user.findFirst({
@@ -293,7 +297,11 @@ export async function readPlanQuoteSource(
       docTypeLabel: patient.docTypeLabel,
       docNumber: patient.docNumber,
     },
-    clinic: { name: tenant?.name ?? '', logoUrl: tenant?.logoUrl ?? null },
+    clinic: {
+      name: tenant?.name ?? '',
+      logoUrl: tenant?.logoUrl ?? null,
+      fiscal: clinicFiscalOf(tenant),
+    },
     location: { ...location, timeZone: zoneOf(location.id) },
     professionalName: plan.createdById
       ? (professional?.fullName ?? UNKNOWN_PROFESSIONAL)

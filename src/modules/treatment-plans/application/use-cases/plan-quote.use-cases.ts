@@ -1,3 +1,4 @@
+import type { ClinicFiscalData } from '../../../../shared/clinic/clinic-fiscal';
 import {
   BadRequestException,
   ConflictException,
@@ -63,6 +64,11 @@ export interface PlanQuoteDocument extends QuoteContent {
   visitOrganization?: PlanQuoteSource['visitOrganization'];
   planStatus: TreatmentPlanStatus;
   clinicLogoUrl: string | null;
+  /**
+   * DX-019: datos fiscales de la clínica, en vivo como el logo: no entran en
+   * el contenido firmado (su hash no cambia al editar los ajustes).
+   */
+  clinicFiscal: ClinicFiscalData;
   contentHash: string;
   acceptance: PlanQuoteAcceptanceView | null;
 }
@@ -166,6 +172,7 @@ function toDocument(
       })),
     planStatus: source.plan.status,
     clinicLogoUrl: source.clinic.logoUrl,
+    clinicFiscal: source.clinic.fiscal,
   };
   const stored = source.acceptance;
   if (!stored) {

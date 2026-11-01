@@ -36,6 +36,13 @@ import { FILE_STORAGE, contentDispositionHeader } from './file-storage.port';
 import type { FileStoragePort, SignedUrlOptions } from './file-storage.port';
 
 const SAFE_NAME = /^[A-Za-z0-9._-]+$/;
+/** DX-019: `logos/<uuid de la clínica>-<16 hex>.<ext>` (lo arma SetClinicLogoUseCase). */
+const LOGO_NAME = /^[0-9a-f-]{36}-[0-9a-f]{16}\.(png|jpg|svg)$/;
+const LOGO_CONTENT_TYPE: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  svg: 'image/svg+xml',
+};
 
 export const DIRECT_UPLOAD_MISSING_FILE_MESSAGE = 'Falta el archivo.';
 export const DIRECT_UPLOAD_PROBLEMS: Record<
@@ -90,7 +97,7 @@ export class FilesController {
   // navegador una clínica casi no la pide, así que su límite por IP es más
   // estricto que el global (RATE_LIMIT_PUBLIC_FILES_*).
   @RateLimit('public-files')
-  async getAvatar(
+  getAvatar(
     @Param('name') name: string,
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
@@ -101,8 +108,49 @@ export class FilesController {
     if (!SAFE_NAME.test(name) || !isFileKey(key)) {
       throw new BadRequestException('Invalid file name');
     }
+    // El tipo sale de la extensión (la fija el caso de uso), no de lo
+    // guardado: nunca se sirve como HTML algo subido como avatar.
+    return this.servePublic(key, name, contentTypeOf(key), req, res);
+  }
+
+  /**
+   * DX-019: el logo de la clínica (público por diseño: login, documentos,
+   * páginas del paciente). Solo nombres que arma el caso de uso
+   * (`<clínica>-<16 hex>.<png|jpg|svg>`); el contenido ya llegó re-escrito. El
+   * SVG se sirve además con una CSP que no deja ejecutar nada ni cargar nada
+   * aunque se abra suelto en una pestaña (en un `<img>` el navegador ya no
+   * ejecuta scripts).
+   */
+  @Get('logos/:name')
+  @Header('Cross-Origin-Resource-Policy', 'cross-origin')
+  @RateLimit('public-files')
+  getLogo(
+    @Param('name') name: string,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile | undefined> {
+    const match = LOGO_NAME.exec(name);
+    if (!match) throw new BadRequestException('Invalid file name');
+    const key = `logos/${name}`;
+    const type = LOGO_CONTENT_TYPE[match[1]];
+    if (match[1] === 'svg') {
+      res.set(
+        'Content-Security-Policy',
+        "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+      );
+    }
+    return this.servePublic(key, name, type, req, res);
+  }
+
+  private async servePublic(
+    key: string,
+    name: string,
+    contentType: string,
+    req: Request,
+    res: Response,
+  ): Promise<StreamableFile | undefined> {
     // Revisión I-2: mientras no haya fichero, no-store. Un 404 o un 503 con
-    // la caché de un año (immutable) dejaría el avatar roto para siempre en
+    // la caché de un año (immutable) dejaría el fichero roto para siempre en
     // el navegador o en una CDN, sin forma de invalidarlo (la URL no cambia).
     res.set('Cache-Control', 'no-store');
     // Revalidación (If-None-Match): basta un HeadObject; el objeto solo se
@@ -123,9 +171,7 @@ export class FilesController {
     }
     res.set('Cache-Control', avatarCacheControl(name));
     if (file.etag) res.set('ETag', file.etag);
-    // El tipo sale de la extensión (la fija el caso de uso), no de lo
-    // guardado: nunca se sirve como HTML algo subido como avatar.
-    res.set('Content-Type', contentTypeOf(key));
+    res.set('Content-Type', contentType);
     if (file.size !== null) res.set('Content-Length', String(file.size));
     return new StreamableFile(file.stream);
   }

@@ -75,6 +75,11 @@ export async function issuePaymentReceipt(
           receiptTitle: true,
           receiptLegend: true,
           currencyTexts: true,
+          // DX-019: datos fiscales de la clínica, que la foto congela.
+          legalName: true,
+          taxId: true,
+          taxIdLabel: true,
+          fiscalAddress: true,
         },
       }),
       readDocumentTypeNames(tx, payment.tenantId),
@@ -124,13 +129,15 @@ export async function issuePaymentReceipt(
 
   const snapshot = buildReceiptSnapshot(
     {
-      // DX-019 añadirá razón social, identificador fiscal y dirección fiscal de la clínica;
-      // hoy no existen y el recibo dice «Datos fiscales pendientes».
+      // DX-019: razón social, identificador (con el nombre que le da la
+      // clínica) y dirección fiscal. Sin razón social o sin identificador, el
+      // recibo dice «Datos fiscales pendientes».
       clinic: {
         name: tenant.name,
-        legalName: null,
-        taxId: null,
-        address: null,
+        legalName: tenant.legalName,
+        taxId: tenant.taxId,
+        taxIdLabel: tenant.taxIdLabel,
+        address: tenant.fiscalAddress,
       },
       location: {
         id: location.id,

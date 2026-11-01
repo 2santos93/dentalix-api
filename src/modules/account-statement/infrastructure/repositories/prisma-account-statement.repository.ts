@@ -1,3 +1,7 @@
+import {
+  CLINIC_FISCAL_SELECT,
+  clinicFiscalOf,
+} from '../../../../shared/clinic/clinic-fiscal';
 import { Injectable } from '@nestjs/common';
 import { Prisma, TreatmentPlanItemStatus } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
@@ -96,7 +100,7 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
           // contexto, igual que PrismaTenantBrandingRepository.
           tx.tenant.findFirst({
             where: { id: tenantId, deletedAt: null },
-            select: { name: true, logoUrl: true },
+            select: { name: true, logoUrl: true, ...CLINIC_FISCAL_SELECT },
           }),
           tx.treatmentPlan.findMany({
             where: livePlan,
@@ -238,6 +242,7 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
           clinic: {
             name: tenant?.name ?? '',
             logoUrl: tenant?.logoUrl ?? null,
+            fiscal: clinicFiscalOf(tenant),
           },
           patient: {
             id: patient.id,

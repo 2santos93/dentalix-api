@@ -1,3 +1,4 @@
+import type { ClinicFiscalData } from '../../../../shared/clinic/clinic-fiscal';
 import {
   DocumentType,
   PaymentMethod,
@@ -309,6 +310,8 @@ export interface StatementPatient {
 export interface StatementClinic {
   name: string;
   logoUrl: string | null;
+  /** DX-019: datos fiscales y de contacto de la clínica. */
+  fiscal: ClinicFiscalData;
 }
 
 /**

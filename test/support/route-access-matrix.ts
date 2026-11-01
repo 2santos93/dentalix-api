@@ -73,6 +73,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // Readiness con BD, sin tenant ni rate limit: loop/informes/DX-023.md.
   'GET /health/ready': PUBLIC,
   'GET /files/avatars/:name': PUBLIC,
+  // DX-019: logo de la clínica (público por diseño, re-escrito al subirlo).
+  'GET /files/logos/:name': PUBLIC,
   // URL firmada del adaptador de disco (solo desarrollo; la firma HMAC es la
   // autorización, y con S3 responde 404): loop/informes/DX-084.md.
   'GET /files/signed': PUBLIC,
@@ -343,6 +345,11 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // DX-517: texto propio de cada moneda de la clínica, solo ADMIN.
   'GET /exchange/currency-texts': ADMIN_ONLY,
   'PUT /exchange/currency-texts': ADMIN_ONLY,
+  // DX-019: Ajustes › Datos de la clínica.
+  'GET /clinic/settings': ADMIN_ONLY,
+  'PATCH /clinic/settings': ADMIN_ONLY,
+  'POST /clinic/settings/logo': ADMIN_ONLY,
+  'DELETE /clinic/settings/logo': ADMIN_ONLY,
   'GET /exchange/manual-rates': ADMIN_ONLY,
   'POST /exchange/manual-rates': ADMIN_ONLY,
   'PUT /exchange/manual-rates/:id': ADMIN_ONLY,

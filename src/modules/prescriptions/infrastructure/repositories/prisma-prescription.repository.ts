@@ -1,3 +1,7 @@
+import {
+  CLINIC_FISCAL_SELECT,
+  clinicFiscalOf,
+} from '../../../../shared/clinic/clinic-fiscal';
 /**
  * Excepción G5.3 (DX-334): recetas emitidas antes de DX-324. El repositorio
  * lee el `country` legado de cada fila y, en fase 1, copia en la receta única
@@ -402,7 +406,7 @@ export class PrismaPrescriptionRepository implements PrescriptionRepository {
       const [tenant, location] = await Promise.all([
         tx.tenant.findFirst({
           where: { id: tenantId },
-          select: { logoUrl: true },
+          select: { logoUrl: true, ...CLINIC_FISCAL_SELECT },
         }),
         tx.location.findFirst({
           where: { id: row.locationId },
@@ -412,6 +416,7 @@ export class PrismaPrescriptionRepository implements PrescriptionRepository {
       return {
         ...mapRow(row),
         clinicLogoUrl: tenant?.logoUrl ?? null,
+        clinicFiscal: clinicFiscalOf(tenant),
         locationFormat: {
           timeZone: location?.timeZone ?? null,
           locale: location?.locale ?? null,

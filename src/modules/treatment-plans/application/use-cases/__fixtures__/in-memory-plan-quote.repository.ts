@@ -1,3 +1,4 @@
+import { EMPTY_CLINIC_FISCAL } from '../../../../../shared/clinic/clinic-fiscal';
 import { TreatmentPlanStatus } from '@prisma/client';
 import type {
   AcceptPlanOutcome,
@@ -50,7 +51,11 @@ export function quoteSource(
       docTypeLabel: null,
       docNumber: '123',
     },
-    clinic: { name: 'Clínica Sonrisa', logoUrl: null },
+    clinic: {
+      name: 'Clínica Sonrisa',
+      logoUrl: null,
+      fiscal: EMPTY_CLINIC_FISCAL,
+    },
     location: {
       id: 'loc-1',
       name: 'Sede principal',

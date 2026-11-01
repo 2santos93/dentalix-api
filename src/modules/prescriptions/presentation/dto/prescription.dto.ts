@@ -1,3 +1,4 @@
+import { ClinicFiscalDto } from '../../../../shared/clinic/clinic-fiscal.dto';
 /**
  * Excepción G5.3 (DX-334): recetas emitidas antes de DX-324. `country` es el
  * campo histórico de la plantilla legada; en la receta única viaja `null`.
@@ -243,6 +244,12 @@ export class PrescriptionLocationFormatDto {
 
 export class PrescriptionDocumentDto extends PrescriptionDto {
   @ApiProperty({ type: String, nullable: true }) clinicLogoUrl!: string | null;
+  @ApiProperty({
+    type: ClinicFiscalDto,
+    description:
+      'DX-019: datos fiscales de HOY (no forman parte del hash de la receta).',
+  })
+  clinicFiscal!: ClinicFiscalDto;
   @ApiProperty({
     type: PrescriptionLocationFormatDto,
     description:

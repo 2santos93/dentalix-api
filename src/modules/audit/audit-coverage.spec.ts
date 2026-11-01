@@ -1548,6 +1548,12 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // DX-517: CLINIC_SETTINGS CURRENCY_TEXTS con el antes y el después
   // («VES=Bs.»), en la transacción del cambio; sin evento si no cambia.
   'PUT /exchange/currency-texts': 'currency-texts.e2e-spec.ts',
+  // DX-019: CLINIC_SETTINGS CLINIC_PROFILE (datos de la clínica) y
+  // CLINIC_LOGO (clave del logo) con el antes y el después, en la
+  // transacción del cambio; sin evento si nada cambia.
+  'PATCH /clinic/settings': 'clinic-settings.e2e-spec.ts',
+  'POST /clinic/settings/logo': 'clinic-settings.e2e-spec.ts',
+  'DELETE /clinic/settings/logo': 'clinic-settings.e2e-spec.ts',
   // DX-324: CLINIC_SETTINGS con PRESCRIPTION_SETTINGS, los campos cambiados
   // y el antes y el después en códigos RX; sin evento si nada cambió.
   'PUT /prescriptions/settings':

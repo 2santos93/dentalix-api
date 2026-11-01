@@ -1,3 +1,4 @@
+import type { ClinicFiscalData } from '../../../../shared/clinic/clinic-fiscal';
 /**
  * Excepción G5.3 (DX-334): recetas emitidas antes de DX-324. La entidad lleva
  * el campo histórico `country`; ninguna regla decide con él (spec R1, R12).
@@ -91,6 +92,8 @@ export interface PrescriptionLocationFormat {
 /** La receta con lo que necesita la vista imprimible. */
 export interface PrescriptionDocument extends Prescription {
   clinicLogoUrl: string | null;
+  /** DX-019: datos fiscales de HOY, en vivo como el logo (fuera del hash). */
+  clinicFiscal: ClinicFiscalData;
   locationFormat: PrescriptionLocationFormat;
   /** `true` si el hash guardado coincide con el recalculado al leer. */
   integrityOk: boolean;
