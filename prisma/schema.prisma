@@ -3802,9 +3802,11 @@ model PlatformAuditEvent {
   id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   actorUserId  String   @db.Uuid
   /// `JOB_RETRIED`; DX-359: `MFA_ENROLLMENT_STARTED`, `MFA_ENABLED`,
-  /// `PASSWORD_CHANGE` (CHECK en la migración).
+  /// `PASSWORD_CHANGE`; DX-330: `CLINICAL_RETENTION_MINIMUM_APPLIED` (CHECK en
+  /// la migración).
   action       String
-  /// `JOB`; DX-359: `USER` (el propio superadmin) (CHECK en la migración).
+  /// `JOB`; DX-359: `USER` (el propio superadmin); DX-330: `TENANT` (la
+  /// clínica afectada) (CHECK en la migración).
   resourceType String
   resourceId   String?  @db.Uuid
   requestId    String?

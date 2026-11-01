@@ -10,6 +10,7 @@
   "include": [
     "prisma/seed.ts",
     "prisma/audit-purge.ts",
+    "prisma/retention-raise-floor.ts",
     "prisma/scripts/export-cities.ts"
   ],
   "exclude": ["node_modules", "dist", "**/*spec.ts"]
