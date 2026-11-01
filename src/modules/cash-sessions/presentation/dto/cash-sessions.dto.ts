@@ -336,6 +336,12 @@ export class CashExpectedLineDto {
   @ApiProperty()
   paymentsCount!: number;
 
+  @ApiProperty({
+    description:
+      'DX-516: ajustes por medio de pago de esos abonos, con signo (impuestos y recargos +, descuentos −); 0 sin ajustes.',
+  })
+  paymentAdjustments!: number;
+
   @ApiProperty({ description: 'Ajustes que entraron en esta caja (con signo)' })
   adjustments!: number;
 
@@ -350,7 +356,7 @@ export class CashExpectedLineDto {
 
   @ApiProperty({
     description:
-      'opening + payments + adjustments − outflows (puede ser negativo)',
+      'opening + payments + paymentAdjustments + adjustments − outflows (puede ser negativo)',
   })
   expected!: number;
 }
@@ -465,6 +471,12 @@ export class CashSessionPaymentDto {
 
   @ApiProperty({ type: CashStaffRefDto, nullable: true })
   createdBy!: CashStaffRefDto | null;
+
+  @ApiProperty({
+    description:
+      'DX-516: lo cobrado = importe + impuestos + recargos − descuentos (sin ajustes, el importe).',
+  })
+  collectedAmount!: number;
 }
 
 export class CashVoidedPaymentDto extends CashSessionPaymentDto {

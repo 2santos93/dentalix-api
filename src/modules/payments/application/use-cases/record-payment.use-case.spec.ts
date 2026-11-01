@@ -1,3 +1,4 @@
+import { referenceCurrencyDigitsCatalog } from '../../../../shared/money/__fixtures__/reference-currency-digits';
 import { PaymentMethodGate } from '../payment-method-gate';
 import type { PaymentMethodRepository } from '../../../payment-methods/domain/ports/payment-method-repository.port';
 import { MissingExchangeRateError } from '../../../exchange/domain/missing-exchange-rate.error';
@@ -147,6 +148,7 @@ describe('RecordPaymentUseCase', () => {
           findByLegacyMethod: () => Promise.resolve(null),
         } as unknown as PaymentMethodRepository,
         repo,
+        referenceCurrencyDigitsCatalog(),
       ),
       () => RECORD_NOW,
     );

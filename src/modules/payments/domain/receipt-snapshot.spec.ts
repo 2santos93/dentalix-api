@@ -322,3 +322,83 @@ describe('buildReceiptSnapshot: título y leyenda del recibo (DX-515)', () => {
     expect(onlyTitle).not.toHaveProperty('legend');
   });
 });
+
+describe('buildReceiptSnapshot: ajustes por medio de pago (DX-516)', () => {
+  const TAX = {
+    type: 'TAX' as const,
+    label: 'Impuesto 3 %',
+    calculation: 'PERCENT' as const,
+    percent: 3,
+    fixedAmount: null,
+    base: 150000,
+    amount: 4500,
+    currency: 'COP',
+  };
+
+  it('sin ajustes la foto es byte a byte la de antes (sin clave nueva)', () => {
+    const before = JSON.stringify(
+      buildReceiptSnapshot(input(), NO_LOCAL_NAMES),
+    );
+    for (const adjustments of [undefined, []]) {
+      const base = input();
+      const snapshot = buildReceiptSnapshot(
+        input({ payment: { ...base.payment, adjustments } }),
+        NO_LOCAL_NAMES,
+      );
+      expect(JSON.stringify(snapshot)).toBe(before);
+      expect(snapshot.payment).not.toHaveProperty('adjustments');
+    }
+  });
+
+  it('congela los ajustes del abono con su base e importe, y nada más cambia', () => {
+    const plain = buildReceiptSnapshot(input(), NO_LOCAL_NAMES);
+    const base = input();
+    const snapshot = buildReceiptSnapshot(
+      input({ payment: { ...base.payment, adjustments: [TAX] } }),
+      NO_LOCAL_NAMES,
+    );
+    expect(snapshot).toEqual({
+      ...plain,
+      payment: { ...plain.payment, adjustments: [TAX] },
+    });
+  });
+
+  it('en un cobro dividido los ajustes van en su línea, no en `payment`', () => {
+    const base = input();
+    const snapshot = buildReceiptSnapshot(
+      input({
+        payment: { ...base.payment, adjustments: [TAX] },
+        split: {
+          planCurrency: 'COP',
+          lines: [
+            {
+              paymentId: 'pay-1',
+              line: 1,
+              amount: 150000,
+              currency: 'COP',
+              method: 'CASH',
+              paymentMethodName: 'Efectivo',
+              reference: null,
+              equivalentAmount: 150000,
+              adjustments: [TAX],
+            },
+            {
+              paymentId: 'pay-2',
+              line: 2,
+              amount: 50000,
+              currency: 'COP',
+              method: 'CARD',
+              paymentMethodName: 'Tarjeta',
+              reference: null,
+              equivalentAmount: 50000,
+            },
+          ],
+        },
+      }),
+      NO_LOCAL_NAMES,
+    );
+    expect(snapshot.payment).not.toHaveProperty('adjustments');
+    expect(snapshot.split?.lines[0].adjustments).toEqual([TAX]);
+    expect(snapshot.split?.lines[1]).not.toHaveProperty('adjustments');
+  });
+});

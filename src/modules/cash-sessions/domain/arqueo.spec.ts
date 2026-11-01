@@ -7,6 +7,44 @@ import {
 } from './arqueo';
 
 describe('arqueo de caja (DX-027)', () => {
+  it('DX-516: los ajustes por medio de pago entran con su abono (impuestos y recargos suman, descuentos restan)', () => {
+    const [cash] = expectedLines({
+      floats: [{ currency: 'USD', cents: 1_000 }],
+      payments: [
+        // 100 con un impuesto de 3: entran 103.
+        {
+          currency: 'USD',
+          method: 'CASH',
+          cents: 10_000,
+          adjustmentCents: 300,
+        },
+        // 50 con un descuento de 2,50: entran 47,50.
+        {
+          currency: 'USD',
+          method: 'CASH',
+          cents: 5_000,
+          adjustmentCents: -250,
+        },
+        // Sin ajustes (o una réplica anterior): como siempre.
+        { currency: 'USD', method: 'CASH', cents: 2_000 },
+      ],
+      adjustments: [],
+      outflows: [],
+    });
+    expect(cash).toEqual({
+      currency: 'USD',
+      method: 'CASH',
+      openingCents: 1_000,
+      paymentsCents: 17_000,
+      paymentsCount: 3,
+      paymentAdjustmentsCents: 50,
+      adjustmentsCents: 0,
+      outflowsCents: 0,
+      outflowsCount: 0,
+      expectedCents: 18_050,
+    });
+  });
+
   it('pasa importes a céntimos exactos y de vuelta', () => {
     expect(centsOf(0.1 + 0.2)).toBe(30);
     expect(centsOf(150_000.55)).toBe(15_000_055);
@@ -41,6 +79,7 @@ describe('arqueo de caja (DX-027)', () => {
         openingCents: 5_000_000,
         paymentsCents: 3_000_000,
         paymentsCount: 2,
+        paymentAdjustmentsCents: 0,
         adjustmentsCents: -500_000,
         outflowsCents: 0,
         outflowsCount: 0,
@@ -52,6 +91,7 @@ describe('arqueo de caja (DX-027)', () => {
         openingCents: 0,
         paymentsCents: 8_000_000,
         paymentsCount: 1,
+        paymentAdjustmentsCents: 0,
         adjustmentsCents: 0,
         outflowsCents: 0,
         outflowsCount: 0,
@@ -63,6 +103,7 @@ describe('arqueo de caja (DX-027)', () => {
         openingCents: 0,
         paymentsCents: 100,
         paymentsCount: 1,
+        paymentAdjustmentsCents: 0,
         adjustmentsCents: 0,
         outflowsCents: 0,
         outflowsCount: 0,
@@ -74,6 +115,7 @@ describe('arqueo de caja (DX-027)', () => {
         openingCents: 0,
         paymentsCents: 0,
         paymentsCount: 0,
+        paymentAdjustmentsCents: 0,
         adjustmentsCents: 0,
         outflowsCents: 0,
         outflowsCount: 0,
@@ -85,6 +127,7 @@ describe('arqueo de caja (DX-027)', () => {
         openingCents: 0,
         paymentsCents: 5_000,
         paymentsCount: 1,
+        paymentAdjustmentsCents: 0,
         adjustmentsCents: 0,
         outflowsCents: 0,
         outflowsCount: 0,
@@ -166,6 +209,7 @@ describe('arqueo de caja (DX-027)', () => {
         openingCents: 1_000_000,
         paymentsCents: 200_000,
         paymentsCount: 1,
+        paymentAdjustmentsCents: 0,
         adjustmentsCents: 50_000,
         outflowsCents: 175_000,
         outflowsCount: 2,
@@ -184,6 +228,7 @@ describe('arqueo de caja (DX-027)', () => {
         openingCents: 0,
         paymentsCents: 0,
         paymentsCount: 0,
+        paymentAdjustmentsCents: 0,
         adjustmentsCents: 0,
         outflowsCents: 1_000,
         outflowsCount: 1,

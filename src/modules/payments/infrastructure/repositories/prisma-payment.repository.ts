@@ -88,6 +88,12 @@ import {
   methodRefOf,
   type MethodCatalog,
 } from '../../../payment-methods/domain/method-catalog';
+import {
+  adjustmentLinesOf,
+  ADJUSTMENT_LINE_SELECT,
+  insertPaymentAdjustments,
+} from './payment-adjustments.persistence';
+import { collectedAmount } from '../../../payment-methods/domain/payment-adjustments';
 
 // DX-136: cada abono se lee con la serie y el número de su recibo (o sin
 // recibo, si es anterior a la numeración).
@@ -101,6 +107,8 @@ const PAYMENT_INCLUDE = {
   splitHead: { select: { receipt: RECEIPT_NUMBER_SELECT } },
   // DX-377: el nombre del medio de pago del catálogo.
   paymentMethod: { select: { name: true } },
+  // DX-516: sus ajustes por medio de pago, en orden.
+  methodAdjustments: ADJUSTMENT_LINE_SELECT,
 } satisfies Prisma.PaymentInclude;
 
 type PrismaPayment = Prisma.PaymentGetPayload<{
@@ -149,6 +157,7 @@ function receiptNumberOf(
 }
 
 function mapToEntity(payment: PrismaPayment, timeZone: string): Payment {
+  const adjustments = adjustmentLinesOf(payment.methodAdjustments);
   return {
     id: payment.id,
     tenantId: payment.tenantId,
@@ -181,6 +190,8 @@ function mapToEntity(payment: PrismaPayment, timeZone: string): Payment {
       exchangeRateCurrency: payment.exchangeRateCurrency,
       frozenRate: frozenRateOf(payment),
     }),
+    adjustments,
+    collectedAmount: collectedAmount(payment.amount.toNumber(), adjustments),
   };
 }
 
@@ -223,6 +234,8 @@ const CASH_PAYMENT_SELECT = {
   // apunta a sí misma), aunque el filtro de la caja deje ver solo una.
   splitId: true,
   splitHead: { select: { _count: { select: { splitLines: true } } } },
+  // DX-516: sus ajustes por medio de pago, en orden.
+  methodAdjustments: ADJUSTMENT_LINE_SELECT,
 } satisfies Prisma.PaymentSelect;
 
 type PrismaCashPayment = Prisma.PaymentGetPayload<{
@@ -250,6 +263,7 @@ function mapToCashPayment(
   timeZone: string,
   catalog: MethodCatalog,
 ): CashPayment {
+  const adjustments = adjustmentLinesOf(row.methodAdjustments);
   return {
     id: row.id,
     createdById: row.createdById,
@@ -278,6 +292,8 @@ function mapToCashPayment(
       : null,
     splitId: row.splitId,
     splitLines: row.splitHead?._count.splitLines ?? null,
+    adjustments,
+    collectedAmount: collectedAmount(row.amount.toNumber(), adjustments),
   };
 }
 
@@ -556,6 +572,10 @@ export class PrismaPaymentRepository implements PaymentRepository {
               paymentMethodName: l.entity.paymentMethodName,
               reference: l.entity.reference,
               equivalentAmount: l.equivalentAmount,
+              // DX-516: los ajustes de cada línea, solo si los tiene.
+              ...(l.entity.adjustments.length > 0
+                ? { adjustments: l.entity.adjustments }
+                : {}),
             })),
             planCurrency: head.planCurrency,
           },
@@ -663,19 +683,31 @@ export class PrismaPaymentRepository implements PaymentRepository {
       },
       include: { paymentMethod: { select: { name: true } } },
     });
+    // DX-516: los ajustes del medio, congelados con el abono (misma
+    // transacción, antes del recibo y del ajuste de caja tardío).
+    const methodAdjustments = await insertPaymentAdjustments(
+      tx,
+      { tenantId, paymentId: created.id },
+      input.adjustments ?? [],
+    );
+    const entity = mapToEntity(
+      { ...created, receipt: null, splitHead: null, methodAdjustments },
+      timeZone,
+    );
     // DX-027: con fecha de un día cuya caja ya cerró, es un ajuste de la
-    // caja abierta (o pendiente), con enlace a la cerrada.
+    // caja abierta (o pendiente), con enlace a la cerrada. DX-516: por lo
+    // cobrado (importe ± ajustes), que es lo que entra en el cajón.
     if (cash.late && created.createdById) {
       await recordLatePaymentAdjustment(
         tx,
-        { ...created, createdById: created.createdById },
+        {
+          ...created,
+          amount: new Prisma.Decimal(entity.collectedAmount),
+          createdById: created.createdById,
+        },
         cash.late,
       );
     }
-    const entity = mapToEntity(
-      { ...created, receipt: null, splitHead: null },
-      timeZone,
-    );
     // DX-051 (R4): la base del abono nace con él si se convirtió a la moneda
     // que el plan tiene con su fila bloqueada y con el día civil con que se
     // guardó; el plan queda encolado y el reparto corre tras el COMMIT. Si
@@ -730,6 +762,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
         paidAt: created.paidAt,
         paidOn: entity.paidOn,
         createdById: created.createdById,
+        adjustments: entity.adjustments,
       },
     };
   }
@@ -1281,8 +1314,8 @@ export class PrismaPaymentRepository implements PaymentRepository {
         // registrado o anulado a mitad de camino no puede dejar un total que
         // describa otras filas que las devueltas (en READ COMMITTED, el nivel
         // por defecto, cada sentencia vería su propia foto).
-        const [rows, total, groups, scopeLocation, methods] = await Promise.all(
-          [
+        const [rows, total, groups, scopeLocation, methods, adjustmentGroups] =
+          await Promise.all([
             tx.payment.findMany({
               where,
               select: CASH_PAYMENT_SELECT,
@@ -1324,8 +1357,15 @@ export class PrismaPaymentRepository implements PaymentRepository {
             tx.clinicPaymentMethod.findMany({
               select: { id: true, name: true, legacyMethod: true },
             }),
-          ],
-        );
+            // DX-516: los ajustes de esos mismos abonos, por moneda y tipo.
+            tx.paymentAdjustment.groupBy({
+              by: ['currency', 'type'],
+              where: { payment: where },
+              _sum: { amount: true },
+              _count: { _all: true },
+              orderBy: [{ currency: 'asc' }, { type: 'asc' }],
+            }),
+          ]);
         const catalog = catalogOf(methods);
 
         // La zona de cada sede ya se leyó para el período, en la misma foto:
@@ -1343,6 +1383,12 @@ export class PrismaPaymentRepository implements PaymentRepository {
               group.paymentMethodId,
               group.method,
             ),
+            total: group._sum.amount?.toNumber() ?? 0,
+            count: group._count._all,
+          })),
+          adjustmentGroups: adjustmentGroups.map((group) => ({
+            currency: group.currency,
+            type: group.type,
             total: group._sum.amount?.toNumber() ?? 0,
             count: group._count._all,
           })),

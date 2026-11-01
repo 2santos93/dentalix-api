@@ -27,6 +27,14 @@ import {
   type PaymentRepository,
   type ReferenceMatch,
 } from '../domain/ports/payment-repository.port';
+import {
+  computePaymentAdjustments,
+  type ComputedAdjustment,
+} from '../../payment-methods/domain/payment-adjustments';
+import {
+  CURRENCY_DIGITS_CATALOG,
+  type CurrencyDigitsCatalog,
+} from '../../../shared/money/currency-digits';
 
 export interface PaymentMethodRequest {
   paymentMethodId?: string;
@@ -42,6 +50,17 @@ export interface ResolvedPaymentMethod {
   referenceNormalized: string | null;
   duplicateReferenceReason: string | null;
   duplicateReferenceOf: string[];
+  /**
+   * DX-516: los ajustes del medio calculados sobre el importe del abono (lo
+   * que se congela en él). Vacío sin ajustes, sin medio o sin `charge`.
+   */
+  adjustments: ComputedAdjustment[];
+}
+
+/** DX-516: el importe y la moneda del abono, para calcular sus ajustes. */
+export interface PaymentCharge {
+  amount: number;
+  currency: string;
 }
 
 function duplicateMessage(count: number): string {
@@ -74,11 +93,20 @@ export class PaymentMethodGate {
     private readonly methods: PaymentMethodRepository,
     @Inject(PAYMENT_REPOSITORY)
     private readonly payments: PaymentRepository,
+    @Inject(CURRENCY_DIGITS_CATALOG)
+    private readonly digits: CurrencyDigitsCatalog,
   ) {}
 
+  /**
+   * DX-516: con `charge`, además calcula los ajustes del medio (leídos con
+   * el medio, en la misma lectura bajo RLS) sobre ese importe, con los
+   * decimales de redondeo de su moneda (DX-340). Es la foto que el abono
+   * congela: cambiar la configuración después no la recalcula.
+   */
   async resolve(
     input: PaymentMethodRequest,
     paidAt: Date | CivilPaidDay,
+    charge?: PaymentCharge,
   ): Promise<ResolvedPaymentMethod> {
     const medium = await this.medium(input);
     const requiresReference = medium?.requiresReference ?? false;
@@ -126,7 +154,23 @@ export class PaymentMethodGate {
       referenceNormalized,
       duplicateReferenceReason: matches.length > 0 ? reason : null,
       duplicateReferenceOf: matches.map((m) => m.id),
+      adjustments: await this.adjustmentsOf(medium, charge),
     };
+  }
+
+  private async adjustmentsOf(
+    medium: ClinicPaymentMethodEntity | null,
+    charge: PaymentCharge | undefined,
+  ): Promise<ComputedAdjustment[]> {
+    const rules = medium?.adjustments.filter((a) => a.active) ?? [];
+    if (!charge || rules.length === 0) return [];
+    const table = await this.digits.table([charge.currency]);
+    return computePaymentAdjustments(
+      rules,
+      charge.amount,
+      charge.currency,
+      table.roundingDigits(charge.currency),
+    );
   }
 
   /**

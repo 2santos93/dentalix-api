@@ -59,6 +59,8 @@ function fakeRow(
     openingBalance: null,
     splitId: null,
     splitLines: null,
+    adjustments: [],
+    collectedAmount: overrides.amount ?? 100,
     ...overrides,
   };
   return { payment, voidSubject };
@@ -403,6 +405,35 @@ describe('ListCashPaymentsUseCase', () => {
     ]);
   });
 
+  it('DX-516: lo cobrado por moneda suma impuestos y recargos y resta descuentos; sin ajustes, igual a los abonos', async () => {
+    const repo = new SpyPaymentRepository({
+      items: [],
+      total: 3,
+      scopeLocation: null,
+      groups: [
+        { currency: 'USD', method: PaymentMethod.CASH, total: 150, count: 2 },
+        { currency: 'EUR', method: PaymentMethod.CARD, total: 40, count: 1 },
+      ],
+      adjustmentGroups: [
+        { currency: 'USD', type: 'TAX', total: 3, count: 1 },
+        { currency: 'USD', type: 'SURCHARGE', total: 0.1, count: 1 },
+        { currency: 'USD', type: 'DISCOUNT', total: 2.5, count: 1 },
+      ],
+    });
+
+    const { summary } = await useCaseFor(repo).execute(RANGE);
+
+    expect(summary.adjustments).toEqual([
+      { currency: 'USD', type: 'TAX', total: 3, count: 1 },
+      { currency: 'USD', type: 'SURCHARGE', total: 0.1, count: 1 },
+      { currency: 'USD', type: 'DISCOUNT', total: 2.5, count: 1 },
+    ]);
+    expect(summary.collected).toEqual([
+      { currency: 'EUR', total: 40 },
+      { currency: 'USD', total: 150.6 },
+    ]);
+  });
+
   it('DX-377: totaliza por medio y moneda; dos medios del mismo método suman en el método', async () => {
     const efectivo = { id: 'pm-cash', name: 'Efectivo' };
     const movil = { id: 'pm-mobile', name: 'Pago móvil' };
@@ -493,6 +524,9 @@ describe('ListCashPaymentsUseCase', () => {
 
     expect(out.summary).toEqual({
       count: 0,
+      // DX-516: sin ajustes, vacíos.
+      adjustments: [],
+      collected: [],
       byCurrency: [],
       byMethod: [],
       byPaymentMethod: [],

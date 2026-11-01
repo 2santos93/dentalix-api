@@ -3372,6 +3372,15 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       routes: ['PATCH /payment-methods/:id'],
     },
     {
+      spec: 'payment-method-adjustments.e2e-spec.ts',
+      checks:
+        'B → 404 al añadir un ajuste al medio de A y al editar el ajuste de A, sin cambiar nada en A (DX-516)',
+      routes: [
+        'POST /payment-methods/:id/adjustments',
+        'PATCH /payment-methods/:id/adjustments/:adjustmentId',
+      ],
+    },
+    {
       spec: 'reminder-opt-out.e2e-spec.ts',
       checks:
         'B → 404 al consultar los avisos del paciente de A y no se añade ningún evento VIEW a la auditoría de A (DX-214)',

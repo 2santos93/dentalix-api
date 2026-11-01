@@ -1,3 +1,4 @@
+import { referenceCurrencyDigitsCatalog } from '../../../../shared/money/__fixtures__/reference-currency-digits';
 import { PaymentMethodGate } from '../payment-method-gate';
 import { PAID_AT_IN_FUTURE_MESSAGE } from '../../domain/paid-at-window';
 import type { PaymentMethodRepository } from '../../../payment-methods/domain/ports/payment-method-repository.port';
@@ -32,6 +33,7 @@ function setup() {
         findByLegacyMethod: () => Promise.resolve(null),
       } as unknown as PaymentMethodRepository,
       repo,
+      referenceCurrencyDigitsCatalog(),
     ),
     () => new Date('2026-10-31T15:00:00.000Z'),
   );

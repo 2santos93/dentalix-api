@@ -2,6 +2,7 @@ import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { PaymentMethod } from '@prisma/client';
 import { PAYMENT_REPOSITORY } from '../../domain/ports/payment-repository.port';
 import type {
+  CashAdjustmentGroup,
   CashRegisterGroup,
   CashRegisterPage,
   ExternalInvoiceFilter,
@@ -30,6 +31,7 @@ import {
 } from '../../../payment-methods/domain/ports/payment-method-repository.port';
 import { PAYMENT_METHOD_NOT_FOUND_MESSAGE } from '../../../payment-methods/domain/payment-method-rules';
 import { toCents } from '../../../../shared/money/money';
+import { adjustmentSign } from '../../../payment-methods/domain/payment-adjustments';
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 20;
@@ -88,6 +90,10 @@ export interface CashPaymentsSummary {
   byMethod: CashMethodTotal[];
   /** DX-377: total por medio de pago de la clínica y moneda. */
   byPaymentMethod: CashPaymentMethodTotal[];
+  /** DX-516: ajustes por medio de pago, por moneda y tipo (vacío: ninguno). */
+  adjustments: CashAdjustmentGroup[];
+  /** DX-516: lo cobrado por moneda (abonos ± ajustes). */
+  collected: { currency: string; total: number }[];
 }
 
 export interface ListCashPaymentsOutput {
@@ -120,7 +126,10 @@ function methodRank(method: PaymentMethod | null): number {
   return METHOD_ORDER.indexOf(method);
 }
 
-function summarize(groups: CashRegisterGroup[]): CashPaymentsSummary {
+function summarize(
+  groups: CashRegisterGroup[],
+  adjustmentGroups: readonly CashAdjustmentGroup[] = [],
+): CashPaymentsSummary {
   const currencyCents = new Map<string, { cents: number; count: number }>();
   let count = 0;
 
@@ -216,7 +225,30 @@ function summarize(groups: CashRegisterGroup[]): CashPaymentsSummary {
         a.currency.localeCompare(b.currency),
     );
 
-  return { count, byCurrency, byMethod, byPaymentMethod };
+  // DX-516: lo cobrado = abonos + impuestos + recargos − descuentos, por
+  // moneda; sin ajustes es exactamente `byCurrency`.
+  const collectedCents = new Map(
+    byCurrency.map((c) => [c.currency, toCents(c.total)]),
+  );
+  for (const group of adjustmentGroups) {
+    collectedCents.set(
+      group.currency,
+      (collectedCents.get(group.currency) ?? 0) +
+        adjustmentSign(group.type) * toCents(group.total),
+    );
+  }
+  const collected = [...collectedCents.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([currency, cents]) => ({ currency, total: cents / 100 }));
+
+  return {
+    count,
+    byCurrency,
+    byMethod,
+    byPaymentMethod,
+    adjustments: [...adjustmentGroups],
+    collected,
+  };
 }
 
 /**
@@ -275,7 +307,7 @@ export class ListCashPaymentsUseCase {
       from: input.from,
       to: input.to,
       scope: { location: result.scopeLocation },
-      summary: summarize(result.groups),
+      summary: summarize(result.groups, result.adjustmentGroups),
     };
   }
 

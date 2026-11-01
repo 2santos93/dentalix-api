@@ -1,3 +1,4 @@
+import { referenceCurrencyDigitsCatalog } from '../../../shared/money/__fixtures__/reference-currency-digits';
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import type { PaymentMethod } from '@prisma/client';
 import { InMemoryPaymentRepository } from './use-cases/__fixtures__/in-memory-payment.repository';
@@ -60,6 +61,7 @@ describe('PaymentMethodGate (DX-377)', () => {
     gate = new PaymentMethodGate(
       methodsRepo([MOBILE, CASH, OFF]) as PaymentMethodRepository,
       payments,
+      referenceCurrencyDigitsCatalog(),
     );
   });
 
@@ -167,5 +169,79 @@ describe('PaymentMethodGate (DX-377)', () => {
     expect(out.duplicateReferenceOf).toEqual([]);
     // Sin repetida, el motivo no se guarda.
     expect(out.duplicateReferenceReason).toBeNull();
+  });
+});
+
+describe('PaymentMethodGate: ajustes del medio (DX-516)', () => {
+  const adjustment = (
+    overrides: Partial<ClinicPaymentMethodEntity['adjustments'][number]>,
+  ): ClinicPaymentMethodEntity['adjustments'][number] => ({
+    id: 'adj-1',
+    paymentMethodId: 'pm-card',
+    type: 'TAX',
+    label: 'Impuesto',
+    calculation: 'PERCENT',
+    percent: 3,
+    fixedAmount: null,
+    fixedCurrency: null,
+    active: true,
+    createdAt: NOW,
+    updatedAt: NOW,
+    ...overrides,
+  });
+  const CARD = method({
+    id: 'pm-card',
+    kind: 'CARD',
+    legacyMethod: 'CARD',
+    adjustments: [
+      adjustment({}),
+      adjustment({ id: 'adj-off', label: 'Apagado', active: false }),
+      adjustment({
+        id: 'adj-fixed',
+        type: 'DISCOUNT',
+        label: 'Fijo',
+        calculation: 'FIXED',
+        percent: null,
+        fixedAmount: 1,
+        fixedCurrency: 'USD',
+      }),
+    ],
+  });
+  const gate = new PaymentMethodGate(
+    methodsRepo([CARD]) as PaymentMethodRepository,
+    new InMemoryPaymentRepository(),
+    referenceCurrencyDigitsCatalog(),
+  );
+  const paidAt = new Date('2026-06-01T15:00:00.000Z');
+
+  it('calcula los activos del medio sobre el importe y la moneda del abono', async () => {
+    const out = await gate.resolve({ paymentMethodId: 'pm-card' }, paidAt, {
+      amount: 100,
+      currency: 'USD',
+    });
+    expect(
+      out.adjustments.map((a) => [a.sourceAdjustmentId, a.type, a.amount]),
+    ).toEqual([
+      ['adj-1', 'TAX', 3],
+      ['adj-fixed', 'DISCOUNT', 1],
+    ]);
+  });
+
+  it('el fijo en otra moneda no se aplica; sin importe, ningún ajuste', async () => {
+    const eur = await gate.resolve({ paymentMethodId: 'pm-card' }, paidAt, {
+      amount: 100,
+      currency: 'EUR',
+    });
+    expect(eur.adjustments.map((a) => a.sourceAdjustmentId)).toEqual(['adj-1']);
+    const none = await gate.resolve({ paymentMethodId: 'pm-card' }, paidAt);
+    expect(none.adjustments).toEqual([]);
+  });
+
+  it('un cliente anterior que solo manda `method` usa los ajustes de su medio inicial', async () => {
+    const out = await gate.resolve({ method: 'CARD' }, paidAt, {
+      amount: 10,
+      currency: 'USD',
+    });
+    expect(out.adjustments.map((a) => a.amount)).toEqual([0.3, 1]);
   });
 });

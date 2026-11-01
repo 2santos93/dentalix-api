@@ -1,3 +1,4 @@
+import { collectedAmount } from '../../../../payment-methods/domain/payment-adjustments';
 import { Payment } from '../../../domain/entities/payment.entity';
 import { exchangeRateStatus } from '../../../domain/payment-exchange-rate';
 import type { IdempotentPayment } from '../../../domain/idempotency';
@@ -96,6 +97,8 @@ export class InMemoryPaymentRepository implements PaymentRepository {
       // Sin indicarlo, un abono anterior a DX-375 (se lee con la tasa de su día).
       exchangeRateCurrency: overrides.exchangeRateCurrency ?? null,
       frozenRate: overrides.frozenRate ?? null,
+      adjustments: overrides.adjustments ?? [],
+      collectedAmount: overrides.collectedAmount ?? overrides.amount ?? 0,
     };
     this.payments.push(row);
     return this.toEntity(row);
@@ -131,6 +134,8 @@ export class InMemoryPaymentRepository implements PaymentRepository {
       exchangeRateCurrency: row.exchangeRateCurrency,
       frozenRate: row.frozenRate,
       exchangeRateStatus: exchangeRateStatus(row),
+      adjustments: row.adjustments,
+      collectedAmount: row.collectedAmount,
     };
   }
 
@@ -230,6 +235,18 @@ export class InMemoryPaymentRepository implements PaymentRepository {
       exchangeRateCurrency:
         input.frozenRate?.currency ?? input.planAmount?.planCurrency ?? null,
       frozenRate: input.frozenRate,
+      // DX-516: lo que el real inserta en payment_adjustments.
+      adjustments: (input.adjustments ?? []).map((a) => ({
+        type: a.type,
+        label: a.label,
+        calculation: a.calculation,
+        percent: a.percent,
+        fixedAmount: a.fixedAmount,
+        base: a.base,
+        amount: a.amount,
+        currency: a.currency,
+      })),
+      collectedAmount: collectedAmount(input.amount, input.adjustments ?? []),
     };
     this.payments.push(row);
     return row;

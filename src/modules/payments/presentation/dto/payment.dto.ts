@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { PaymentAdjustmentLineDto } from './payment-adjustment-line.dto';
 import { PaymentMethod } from '@prisma/client';
 import {
   PAYMENT_EXCHANGE_RATE_STATUSES,
@@ -175,4 +176,18 @@ export class PaymentDto {
     description: EXCHANGE_RATE_STATUS_DESCRIPTION,
   })
   exchangeRateStatus!: PaymentExchangeRateStatus;
+
+  @ApiProperty({
+    type: [PaymentAdjustmentLineDto],
+    description:
+      'DX-516: ajustes por medio de pago congelados en el abono (vacío sin ajustes).',
+  })
+  adjustments!: PaymentAdjustmentLineDto[];
+
+  @ApiProperty({
+    example: 103,
+    description:
+      'DX-516: lo cobrado = importe + impuestos + recargos − descuentos (sin ajustes, el importe). El saldo del plan se mueve por `amount`.',
+  })
+  collectedAmount!: number;
 }

@@ -1,3 +1,4 @@
+import { referenceCurrencyDigitsCatalog } from '../../../../shared/money/__fixtures__/reference-currency-digits';
 import {
   BadRequestException,
   ConflictException,
@@ -140,7 +141,11 @@ function makeUseCase() {
       Promise.resolve(MEDIUMS.find((m) => m.id === id) ?? null),
     findByLegacyMethod: () => Promise.resolve(null),
   } as unknown as PaymentMethodRepository;
-  const gate = new PaymentMethodGate(methods, repo);
+  const gate = new PaymentMethodGate(
+    methods,
+    repo,
+    referenceCurrencyDigitsCatalog(),
+  );
   const recordPayment = new RecordPaymentUseCase(
     repo,
     getPlan as unknown as GetTreatmentPlanUseCase,

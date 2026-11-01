@@ -1,11 +1,16 @@
 import type { IdempotentPayment } from '../idempotency';
 import type { FrozenExchangeRate } from '../payment-exchange-rate';
-import { ClinicRole, PaymentMethod } from '@prisma/client';
+import {
+  ClinicRole,
+  PaymentAdjustmentType,
+  PaymentMethod,
+} from '@prisma/client';
 import { Payment } from '../entities/payment.entity';
 import { CashPayment } from '../entities/cash-payment.entity';
 import type { VoidSubject } from '../void-window';
 import type { ReceiptPlanBalance } from '../receipt-snapshot';
 import type { RegionalFormat } from '../../../../shared/format/regional-format';
+import type { ComputedAdjustment } from '../../../payment-methods/domain/payment-adjustments';
 
 // NOTE: deliberately NO `tenantId`/`id` field — the tenant comes from the
 // guarded request context (never the client), same convention as
@@ -40,6 +45,12 @@ export interface CreatePaymentRepoInput {
   referenceNormalized?: string | null;
   /** DX-377: motivo de la confirmación de una referencia repetida. */
   duplicateReferenceReason?: string | null;
+  /**
+   * DX-516: los ajustes del medio ya calculados sobre `amount` (en su
+   * moneda): se insertan en la MISMA transacción, antes del recibo.
+   * Ausente o vacío: sin ajustes.
+   */
+  adjustments?: ComputedAdjustment[];
   notes?: string;
   createdById?: string;
   /**
@@ -191,6 +202,14 @@ export interface CashRegisterGroup {
   count: number;
 }
 
+/** DX-516: suma de los ajustes de un (moneda, tipo) del período. */
+export interface CashAdjustmentGroup {
+  currency: string;
+  type: PaymentAdjustmentType;
+  total: number;
+  count: number;
+}
+
 /** Una fila de la caja con lo que decide si el actor puede anularla. */
 export interface CashRegisterRow {
   payment: CashPayment;
@@ -203,6 +222,11 @@ export interface CashRegisterPage {
   total: number;
   /** Agregado por (moneda, método) del período entero, sin paginar. */
   groups: CashRegisterGroup[];
+  /**
+   * DX-516: ajustes por medio de pago de los mismos abonos, por (moneda,
+   * tipo), en positivo. Ausente o vacío: ninguno.
+   */
+  adjustmentGroups?: CashAdjustmentGroup[];
   /** La sede activa del request, o `null` en la vista consolidada. */
   scopeLocation: { id: string; name: string } | null;
 }

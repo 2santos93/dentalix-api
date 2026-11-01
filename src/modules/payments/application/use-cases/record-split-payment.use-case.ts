@@ -184,6 +184,8 @@ export class RecordSplitPaymentUseCase {
         reference: method.reference,
         referenceNormalized: method.referenceNormalized,
         duplicateReferenceReason: method.duplicateReferenceReason,
+        // DX-516: cada parte, con los ajustes de su propio medio.
+        adjustments: method.adjustments,
         notes: input.notes,
         createdById,
         receiptPlanBalance: null,

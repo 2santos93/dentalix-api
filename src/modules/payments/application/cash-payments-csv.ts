@@ -1,5 +1,8 @@
 import { csvAmount, csvDocument, csvText } from '../../../shared/csv/csv-cells';
 import type { CurrencyDigitsTable } from '../../../shared/money/currency-digits';
+import type { RoundingDigits } from '../../../shared/money/line-rounding';
+import { fromCents, toCents } from '../../../shared/money/money';
+import type { PaymentAdjustmentType } from '@prisma/client';
 import type { CashPaymentView } from '../domain/entities/cash-payment.entity';
 
 /*
@@ -22,9 +25,41 @@ export const CASH_PAYMENTS_CSV_HEADER = [
   'Factura externa',
   'Moneda',
   'Importe',
+  // DX-516: ajustes por medio de pago (al final: la cabecera anterior no se
+  // mueve). Vacíos sin ajustes; «Total cobrado» es entonces el importe.
+  'Impuestos',
+  'Recargos',
+  'Descuentos',
+  'Total cobrado',
+  'Detalle de ajustes',
 ] as const;
 
 const NO_METHOD = 'Sin método';
+
+/** DX-516: la suma de un tipo de ajuste del abono, o vacío si no tiene. */
+function adjustmentCell(
+  row: CashPaymentView,
+  type: PaymentAdjustmentType,
+  digits: RoundingDigits,
+): string {
+  const lines = row.adjustments.filter((a) => a.type === type);
+  if (lines.length === 0) return '';
+  const cents = lines.reduce((sum, a) => sum + toCents(a.amount), 0);
+  return csvAmount(fromCents(cents), digits);
+}
+
+/** DX-516: «Etiqueta +3.00; Otra −2.50», con los decimales de su moneda. */
+function adjustmentDetail(
+  row: CashPaymentView,
+  digits: RoundingDigits,
+): string {
+  return row.adjustments
+    .map(
+      (a) =>
+        `${a.label} ${a.type === 'DISCOUNT' ? '-' : '+'}${csvAmount(a.amount, digits)}`,
+    )
+    .join('; ');
+}
 
 /** Mismo nombre que la pantalla: «Plan del <día>» o «Saldo migrado · …». */
 function destinationOf(row: CashPaymentView): string {
@@ -53,6 +88,11 @@ export function toCashPaymentsCsv(
         csvText(row.externalInvoiceNumber),
         row.currency,
         csvAmount(row.amount, digits.roundingDigits(row.currency)),
+        adjustmentCell(row, 'TAX', digits.roundingDigits(row.currency)),
+        adjustmentCell(row, 'SURCHARGE', digits.roundingDigits(row.currency)),
+        adjustmentCell(row, 'DISCOUNT', digits.roundingDigits(row.currency)),
+        csvAmount(row.collectedAmount, digits.roundingDigits(row.currency)),
+        csvText(adjustmentDetail(row, digits.roundingDigits(row.currency))),
       ].join(','),
     );
   }

@@ -2,6 +2,7 @@ import { ConflictException } from '@nestjs/common';
 import { Prisma, type PaymentMethod } from '@prisma/client';
 import { civilDateIn, civilDayRange } from '../../../shared/time/civil-day';
 import { methodBucket } from '../domain/arqueo';
+import { collectedAmount } from '../../payment-methods/domain/payment-adjustments';
 
 /*
  * Lo que la caja por turno (DX-027) hace DENTRO de las transacciones de los
@@ -137,7 +138,10 @@ export async function assignPaymentToCashSession(
   return { cashSessionId: sessionId, late: null };
 }
 
-/** El ajuste del abono tardío, tras insertar el abono (misma transacción). */
+/**
+ * El ajuste del abono tardío, tras insertar el abono (misma transacción).
+ * DX-516: `amount` es lo cobrado (importe ± ajustes por medio de pago).
+ */
 export async function recordLatePaymentAdjustment(
   tx: Prisma.TransactionClient,
   payment: {
@@ -188,6 +192,8 @@ export async function recordVoidAdjustment(
       currency: true,
       method: true,
       amount: true,
+      // DX-516: la anulación compensa lo cobrado (importe ± ajustes).
+      methodAdjustments: { select: { type: true, amount: true } },
     },
   });
   if (!payment) return;
@@ -232,7 +238,15 @@ export async function recordVoidAdjustment(
       originalSessionId,
       currency: payment.currency,
       method: methodBucket(payment.method),
-      amount: payment.amount.negated(),
+      amount: new Prisma.Decimal(
+        collectedAmount(
+          payment.amount.toNumber(),
+          payment.methodAdjustments.map((a) => ({
+            type: a.type,
+            amount: a.amount.toNumber(),
+          })),
+        ),
+      ).negated(),
       createdById: input.voidedById,
     },
   });

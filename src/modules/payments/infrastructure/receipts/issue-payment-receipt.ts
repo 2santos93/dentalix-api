@@ -6,6 +6,7 @@ import {
 } from '../../domain/receipt-snapshot';
 import { formatReceiptNumber } from '../../domain/receipt-number';
 import { effectiveReceiptLegend } from '../../domain/receipt-settings';
+import type { PaymentAdjustmentLine } from '../../domain/payment-adjustment-line';
 import { readDocumentTypeNames } from '../../../patients/infrastructure/repositories/prisma-document-type-names.repository';
 
 /** El abono recién insertado, en la misma transacción. */
@@ -26,6 +27,8 @@ export interface ReceiptPaymentRow {
   paidAt: Date;
   paidOn: string;
   createdById: string | null;
+  /** DX-516: los ajustes por medio de pago congelados en el abono. */
+  adjustments?: PaymentAdjustmentLine[];
   /**
    * DX-390: el cobro dividido cuyo recibo único emite su línea 1: todas sus
    * líneas y la moneda del plan del total.
@@ -147,6 +150,7 @@ export async function issuePaymentReceipt(
         reference: payment.reference ?? null,
         paidAt: payment.paidAt,
         paidOn: payment.paidOn,
+        adjustments: payment.adjustments,
       },
       plan,
       openingBalance: opening

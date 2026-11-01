@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { PaymentAdjustmentLineDto } from './payment-adjustment-line.dto';
 import { PaymentMethod, type DocumentType } from '@prisma/client';
 import { DOCUMENT_TYPES } from '../../../patients/domain/document-type';
 import {
@@ -107,6 +108,13 @@ export class ReceiptPaymentDto {
 
   @ApiProperty({ example: '2026-10-17', description: 'Día civil en la sede.' })
   paidOn!: string;
+
+  @ApiPropertyOptional({
+    type: [PaymentAdjustmentLineDto],
+    description:
+      'DX-516: ajustes por medio de pago congelados al emitir; ausente sin ajustes, en los recibos anteriores y en un cobro dividido (van en cada línea).',
+  })
+  adjustments?: PaymentAdjustmentLineDto[];
 }
 
 export class ReceiptPlanDto {
@@ -183,6 +191,13 @@ export class ReceiptSplitLineDto {
       'La línea en la moneda del plan con su tasa congelada; null «sin tasa».',
   })
   equivalentAmount!: number | null;
+
+  @ApiPropertyOptional({
+    type: [PaymentAdjustmentLineDto],
+    description:
+      'DX-516: ajustes del medio de esta línea; ausente si no tiene ninguno.',
+  })
+  adjustments?: PaymentAdjustmentLineDto[];
 }
 
 /** DX-390: total del cobro dividido en la moneda del plan. */

@@ -1623,6 +1623,13 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   'POST /appointment-types': 'config-audit.e2e-spec.ts',
   'PATCH /appointment-types/:id': 'config-audit.e2e-spec.ts',
   'DELETE /appointment-types/:id': 'config-audit.e2e-spec.ts',
+  // DX-516: ajustes por medio de pago (solo ADMIN): UPDATE/CREATE
+  // PAYMENT_METHOD con PAYMENT_METHOD_ADJUSTMENT_CREATED/UPDATED y el antes y
+  // el después, en la transacción del cambio.
+  'POST /payment-methods/:id/adjustments':
+    'payment-method-adjustments.e2e-spec.ts',
+  'PATCH /payment-methods/:id/adjustments/:adjustmentId':
+    'payment-method-adjustments.e2e-spec.ts',
   'POST /payers': 'config-audit.e2e-spec.ts',
   'PATCH /payers/:id': 'config-audit.e2e-spec.ts',
   'DELETE /payers/:id': 'config-audit.e2e-spec.ts',

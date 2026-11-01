@@ -30,6 +30,8 @@ function row(overrides: Partial<CashPaymentView> = {}): CashPaymentView {
     openingBalance: null,
     splitId: null,
     splitLines: null,
+    adjustments: [],
+    collectedAmount: overrides.amount ?? 150000,
     canVoid: false,
     registeredOn: '2026-10-15',
     registeredToday: false,
@@ -58,6 +60,12 @@ describe('CSV de la caja (DX-395)', () => {
       'Factura externa',
       'Moneda',
       'Importe',
+      // DX-516: al final, sin mover las anteriores.
+      'Impuestos',
+      'Recargos',
+      'Descuentos',
+      'Total cobrado',
+      'Detalle de ajustes',
     ]);
     expect(lines).toHaveLength(4);
     expect(lines[3]).toBe('');
@@ -77,6 +85,12 @@ describe('CSV de la caja (DX-395)', () => {
         '""',
         'COP',
         '150000',
+        // DX-516: sin ajustes, vacíos y lo cobrado = el importe.
+        '',
+        '',
+        '',
+        '150000',
+        '""',
       ].join(','),
     );
     expect(
@@ -85,7 +99,7 @@ describe('CSV de la caja (DX-395)', () => {
           [row({ currency: 'USD', amount: 10.5 })],
           REFERENCE_CURRENCY_DIGITS,
         ),
-      )[1].endsWith(',USD,10.50'),
+      )[1].endsWith(',USD,10.50,,,,10.50,""'),
     ).toBe(true);
   });
 
@@ -141,6 +155,11 @@ describe('CSV de la caja (DX-395)', () => {
         '"A/2026 00-77"',
         'COP',
         '150000',
+        '',
+        '',
+        '',
+        '150000',
+        '""',
       ].join(','),
     );
   });
@@ -165,5 +184,80 @@ describe('CSV de la caja (DX-395)', () => {
     expect(toCashPaymentsCsv([row()], REFERENCE_CURRENCY_DIGITS)).not.toContain(
       'nota interna',
     );
+  });
+
+  it('DX-516: impuestos, recargos y descuentos por separado, lo cobrado y el detalle saneado', () => {
+    const line = linesOf(
+      toCashPaymentsCsv(
+        [
+          row({
+            currency: 'USD',
+            amount: 100,
+            adjustments: [
+              {
+                type: 'TAX',
+                label: 'Impuesto 3 %',
+                calculation: 'PERCENT',
+                percent: 3,
+                fixedAmount: null,
+                base: 100,
+                amount: 3,
+                currency: 'USD',
+              },
+              {
+                type: 'SURCHARGE',
+                label: 'Comisión',
+                calculation: 'FIXED',
+                percent: null,
+                fixedAmount: 1.5,
+                base: 100,
+                amount: 1.5,
+                currency: 'USD',
+              },
+              {
+                type: 'DISCOUNT',
+                label: '-Pronto pago',
+                calculation: 'PERCENT',
+                percent: 5,
+                fixedAmount: null,
+                base: 100,
+                amount: 5,
+                currency: 'USD',
+              },
+            ],
+            collectedAmount: 99.5,
+          }),
+        ],
+        REFERENCE_CURRENCY_DIGITS,
+      ),
+    )[1];
+    expect(
+      line.endsWith(
+        `,USD,100.00,3.00,1.50,5.00,99.50,"Impuesto 3 % +3.00; Comisión +1.50; -Pronto pago -5.00"`,
+      ),
+    ).toBe(true);
+    // Una etiqueta que empieza como una fórmula se neutraliza.
+    const formula = linesOf(
+      toCashPaymentsCsv(
+        [
+          row({
+            adjustments: [
+              {
+                type: 'DISCOUNT',
+                label: '=HYPERLINK("x")',
+                calculation: 'FIXED',
+                percent: null,
+                fixedAmount: 10,
+                base: 150000,
+                amount: 10,
+                currency: 'COP',
+              },
+            ],
+          }),
+        ],
+        REFERENCE_CURRENCY_DIGITS,
+      ),
+    )[1];
+    expect(formula).toContain(`"'=HYPERLINK(""x"") -10"`);
   });
 });

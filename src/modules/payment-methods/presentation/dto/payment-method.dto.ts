@@ -208,7 +208,6 @@ export class CreatePaymentAdjustmentDto {
   @ApiPropertyOptional({
     type: String,
     nullable: true,
-    example: 'USD',
     description: 'Con FIXED: moneda del catálogo.',
   })
   @IsOptional()

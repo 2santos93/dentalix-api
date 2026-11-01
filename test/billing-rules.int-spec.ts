@@ -1,3 +1,4 @@
+import { referenceCurrencyDigitsCatalog } from '../src/shared/money/__fixtures__/reference-currency-digits';
 import { PaymentMethodGate } from '../src/modules/payments/application/payment-method-gate';
 import { PrismaPaymentMethodRepository } from '../src/modules/payment-methods/infrastructure/prisma-payment-method.repository';
 import {
@@ -123,6 +124,7 @@ const recordPayment = new RecordPaymentUseCase(
   new PaymentMethodGate(
     new PrismaPaymentMethodRepository(prisma, tenantContext),
     paymentRepo,
+    referenceCurrencyDigitsCatalog(),
   ),
   () => NOW,
 );
