@@ -115,6 +115,9 @@
     ],
     "coverageDirectory": "../coverage",
     "testEnvironment": "node",
+    "setupFiles": [
+      "<rootDir>/../test/setup-calendar-clock.ts"
+    ],
     "testTimeout": 20000
   },
   "prisma": {

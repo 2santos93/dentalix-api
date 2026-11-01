@@ -28,6 +28,16 @@ const prisma = new PrismaService(context);
 const MIN = 60000;
 const DAY = 86400000;
 
+/**
+ * «Hace `minutes` minutos» con el reloj de Postgres: la reserva vencida de una
+ * cita en curso la decide la BD con `now()`, no el reloj del proceso de test
+ * (DX-495: el job de fronteras de calendario adelanta solo el de jest).
+ */
+async function dbMinutesAgo(minutes: number): Promise<Date> {
+  const [{ now }] = await owner.$queryRaw<{ now: Date }[]>`SELECT now() AS now`;
+  return new Date(now.getTime() - minutes * MIN);
+}
+
 describe('DX-271 triggers de reserva de ítems', () => {
   let tenantId: string,
     patientId: string,
@@ -186,7 +196,7 @@ describe('DX-271 triggers de reserva de ítems', () => {
 
   it('el cambio de estado no reactiva un vínculo que choca: la reserva se queda en la cita futura', async () => {
     // A: hoy, empezó hace 20 min y el paciente no ha llegado (reserva vencida).
-    const late = await appointment(new Date(Date.now() - 20 * MIN));
+    const late = await appointment(await dbMinutesAgo(20));
     await link(late);
     expect(await active(late)).toBe(false);
     // B: la semana que viene, reserva el ítem.
@@ -209,7 +219,7 @@ describe('DX-271 triggers de reserva de ítems', () => {
 
   it('sin conflicto, «Llegó» sí activa la reserva de la cita en curso', async () => {
     const other = await newItem();
-    const late = await appointment(new Date(Date.now() - 15 * MIN));
+    const late = await appointment(await dbMinutesAgo(15));
     await link(late, other);
     expect(await active(late, other)).toBe(false);
     await setStatus(late, 'ARRIVED');

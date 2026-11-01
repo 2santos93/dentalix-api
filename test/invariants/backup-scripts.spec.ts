@@ -239,8 +239,12 @@ describe('backup-db.sh (DX-082) con stubs', () => {
     // `dentalix-prod_staging_*` casa con el glob `dentalix-prod_*`. Ayer:
     // prod a las 03:00 y staging a las 04:00. Si se mezclaran, la de prod
     // saldría como superseded-same-day y se borraría.
-    const y = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
-    const day = y.replace(/-/g, '');
+    // «Ayer» con el reloj del script (`date` del sistema), no con el `Date`
+    // del test: el job de fronteras de calendario (DX-495) adelanta el `Date`
+    // de jest y no el de los procesos hijos.
+    const day = spawnSync('date', ['-u', '-d', 'yesterday', '+%Y%m%d'], {
+      encoding: 'utf8',
+    }).stdout.trim();
     // La de las 00:00 es la primera del mes (o la sustituye la de las 03:00),
     // así la de las 03:00 solo se conserva como la última de su día.
     const first = `dentalix-prod_${day}T000000Z`;
