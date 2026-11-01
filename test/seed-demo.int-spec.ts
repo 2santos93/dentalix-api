@@ -1,6 +1,6 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { INestApplication, Logger, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
@@ -10,6 +10,8 @@ import {
 } from 'libphonenumber-js/max';
 import { ClinicRole, DocumentType, Prisma, PrismaClient } from '@prisma/client';
 import { AppModule } from '../src/app.module';
+import { GetDoctorDashboardUseCase } from '../src/modules/dashboard/application/use-cases/get-doctor-dashboard.use-case';
+import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { fitsBusinessHours } from '../src/modules/location-schedule/application/business-hours';
 import { providerWorksAt } from '../src/modules/provider-schedule/domain/provider-availability';
 import {
@@ -32,6 +34,8 @@ import {
   DEMO_PRESCRIPTION_SETTINGS,
   DEMO_PROFESSIONAL_LICENSES,
   DEMO_PROFESSIONAL_SPECIALTIES,
+  DEMO_SITE_PRICE_LISTS,
+  type DemoLocationKey,
 } from '../prisma/demo/data';
 import { purgeDemoTenants } from './support/demo-tenant-purge';
 import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
@@ -157,6 +161,23 @@ async function demoZonesById(tenantId: string): Promise<Map<string, string>> {
       if (!site)
         throw new Error(`Sede sin fila en DEMO_LOCATIONS: ${row.name}`);
       return [row.id, site.timeZone];
+    }),
+  );
+}
+
+/** DX-335: sede de cada paciente demo por id: la de su fila de `DEMO_PATIENTS`. */
+async function demoPatientSitesById(
+  tenantId: string,
+): Promise<Map<string, DemoLocationKey>> {
+  const rows = await raw.patient.findMany({
+    where: { tenantId },
+    select: { id: true, docNumber: true },
+  });
+  return new Map(
+    rows.map((row) => {
+      const demo = DEMO_PATIENTS.find((p) => p.docNumber === row.docNumber);
+      if (!demo) throw new Error(`Paciente sin fila demo: ${row.docNumber}`);
+      return [row.id, demo.location];
     }),
   );
 }
@@ -306,8 +327,9 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(firstCounts.patient_coverages).toBe(DEMO_COVERAGES.length + 1);
     // DX-105: dos listas (Sede Norte y Convenio Alfa), sus 5 + 3 precios, dos
     // convenios (Aseguradora Demo −15 % y Empresa Alfa lista) y tres pacientes asignados.
-    expect(firstCounts.price_lists).toBe(2);
-    expect(firstCounts.price_list_items).toBe(8);
+    // R8: más la tarifa de cada sede con dentista propio, con los 26 códigos.
+    expect(firstCounts.price_lists).toBe(4);
+    expect(firstCounts.price_list_items).toBe(8 + 2 * 26);
     expect(firstCounts.agreements).toBe(2);
     expect(firstCounts.patient_agreements).toBe(3);
     expect(firstCounts.medical_history_versions).toBeGreaterThanOrEqual(8);
@@ -326,7 +348,7 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     // DX-120: dentición mixta de la paciente infantil (3 posiciones).
     expect(firstCounts.patient_dentition_events).toBe(3);
     expect(firstCounts.appointments).toBeGreaterThanOrEqual(40);
-    expect(firstCounts.treatment_plans).toBeGreaterThanOrEqual(6);
+    expect(firstCounts.treatment_plans).toBeGreaterThanOrEqual(10);
     expect(firstCounts.payments).toBeGreaterThanOrEqual(10);
     expect(firstCounts.payment_plans).toBe(1);
     expect(firstCounts.installments).toBeGreaterThanOrEqual(3);
@@ -1314,9 +1336,19 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(new Set(plans.flatMap((p) => p.items.map((i) => i.status)))).toEqual(
       new Set(['PROPOSED', 'ACCEPTED', 'DONE']),
     );
-    // V1: todos los planes en USD, también los de la Sede Norte.
+    // Cada plan, en la moneda de la sede de su paciente (los de «Comparar
+    // sedes» son de pacientes de la sede de su visita): USD en las sedes de
+    // la rotación, también en la Norte; BRL y GBP en las sedes propias.
     expect(plans.length).toBeGreaterThan(0);
-    expect(plans.every((p) => p.currency === 'USD')).toBe(true);
+    const patientSites = await demoPatientSitesById(tenantId);
+    for (const plan of plans) {
+      const site = patientSites.get(plan.patientId)!;
+      expect({ plan: plan.notes, site, currency: plan.currency }).toEqual({
+        plan: plan.notes,
+        site,
+        currency: DEMO_LOCATIONS[site].currency,
+      });
+    }
 
     const payments = await raw.payment.findMany({
       where: { tenantId, deletedAt: null },
@@ -1387,7 +1419,7 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
           p.paidAt.getTime() <= Date.now(),
       ),
     ).toBe(true);
-    expect(new Set(payments.map((p) => p.locationId)).size).toBe(2);
+    expect(new Set(payments.map((p) => p.locationId)).size).toBe(4);
     expect(new Set(payments.map((p) => p.method)).size).toBeGreaterThanOrEqual(
       3,
     );
@@ -1397,18 +1429,23 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       const billable = plan.items
         .filter((i) => i.status !== 'PROPOSED')
         .reduce((s, i) => s + Number(i.price) - Number(i.discount), 0);
-      // En USD: los abonos en VES, con su tasa congelada.
+      // En la moneda del plan: un abono en ella suma tal cual, y uno en otra
+      // (VES sobre un plan en USD) se convierte con su tasa congelada.
       const paid = payments
         .filter((p) => p.treatmentPlanId === plan.id)
         .reduce(
           (s, p) =>
             s +
-            (p.currency === 'USD'
+            (p.currency === plan.currency
               ? Number(p.amount)
               : (Number(p.amount) * Number(p.exchangeRateTo)) /
                 Number(p.exchangeRateFrom)),
           0,
         );
+      expect({ plan: plan.notes, paid: Number.isFinite(paid) }).toEqual({
+        plan: plan.notes,
+        paid: true,
+      });
       return paid > billable;
     });
     expect(overpaid.map((plan) => plan.notes)).toEqual(['Resinas en molares.']);
@@ -1467,6 +1504,86 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
         currency,
         last: true,
       });
+    }
+  });
+
+  it('new-site plans use their location currency and their own price list', async () => {
+    const tenantId = await liveDemoTenantId();
+    const patientSites = await demoPatientSitesById(tenantId);
+    const plans = await raw.treatmentPlan.findMany({
+      where: { tenantId },
+      include: { items: { where: { deletedAt: null } } },
+    });
+    const lists = await raw.priceList.findMany({
+      where: { tenantId, deletedAt: null },
+      select: { name: true, currency: true, active: true },
+    });
+    for (const spec of DEMO_SITE_PRICE_LISTS) {
+      expect(lists.find((l) => l.name === spec.name)).toMatchObject({
+        currency: spec.currency,
+        active: true,
+      });
+    }
+    for (const key of ['saoPaulo', 'londres'] as const) {
+      const sitePlans = plans.filter(
+        (p) => patientSites.get(p.patientId) === key,
+      );
+      expect({ key, plans: sitePlans.length > 0 }).toEqual({
+        key,
+        plans: true,
+      });
+      for (const plan of sitePlans) {
+        expect({ key, currency: plan.currency }).toEqual({
+          key,
+          currency: DEMO_LOCATIONS[key].currency,
+        });
+        for (const item of plan.items) {
+          expect({ key, item: item.id, source: item.priceSource }).toEqual({
+            key,
+            item: item.id,
+            source: 'PRICE_LIST',
+          });
+        }
+      }
+    }
+    // PF8: ningún ítem de un plan en otra moneda sale del catálogo, que no
+    // tiene moneda.
+    for (const plan of plans.filter((p) => p.currency !== 'USD')) {
+      for (const item of plan.items) {
+        expect({ item: item.id, source: item.priceSource }).not.toEqual({
+          item: item.id,
+          source: 'CATALOG',
+        });
+      }
+    }
+  });
+
+  it('the doctor dashboard converts every currency without a missing rate', async () => {
+    const tenantId = await liveDemoTenantId();
+    const today = civilDateIn(new Date(), DEMO_LOCATIONS.principal.timeZone);
+    // Un abono sin tasa no lanza: se salta con este aviso y no suma.
+    const warn = jest.spyOn(Logger.prototype, 'warn');
+    try {
+      const dashboard = await app
+        .get(TenantContextService)
+        .run(tenantId, undefined, () =>
+          app.get(GetDoctorDashboardUseCase).execute({
+            from: addCivilDays(today, -30),
+            to: addCivilDays(today, 1),
+            currency: 'USD',
+          }),
+        );
+      expect(Object.keys(dashboard.incomes.byCurrency)).toEqual(
+        expect.arrayContaining(['USD', 'BRL', 'GBP']),
+      );
+      expect(dashboard.incomes.totalConverted).toBeGreaterThan(0);
+      expect(
+        warn.mock.calls.filter(([message]) =>
+          String(message).includes('no rate'),
+        ),
+      ).toEqual([]);
+    } finally {
+      warn.mockRestore();
     }
   });
 
@@ -1557,11 +1674,24 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     ).toBe(0);
   });
 
-  it('DX-014: las dos sedes tienen actividad en el mes anterior y en el actual', async () => {
+  it('DX-014: las cuatro sedes tienen actividad en el mes anterior y en el actual', async () => {
     const tenantId = await liveDemoTenantId();
     const zones = await demoZonesById(tenantId);
-    // Meses civiles de la sede: su zona.
-    const monthsAt = (zone: string): string[] => {
+    const schedules = await raw.locationSchedule.findMany({
+      where: { tenantId, deletedAt: null },
+      include: { ranges: { where: { deletedAt: null } } },
+    });
+    // Días de la semana con tramo en el horario de cada sede.
+    const openWeekdays = new Map(
+      schedules.map((s) => [
+        s.locationId,
+        new Set(s.ranges.map((r) => r.weekday)),
+      ]),
+    );
+    // Meses civiles de la sede: su zona y su horario (PF5).
+    const monthsAt = (id: string): string[] => {
+      const zone = zones.get(id)!;
+      const open = openWeekdays.get(id)!;
       const today = civilDateIn(new Date(), zone);
       const [y, m, d] = today.split('-').map(Number);
       const current = today.slice(0, 7);
@@ -1569,26 +1699,19 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
         new Date(Date.UTC(y, m - 2, 15, 12)),
         zone,
       ).slice(0, 7);
-      // El mes actual solo se siembra si hay un día abierto (lunes a sábado)
-      // antes de hoy en el mes.
+      // El mes actual solo se siembra si hay un día abierto de la sede antes
+      // de hoy en el mes.
       const openDayBefore = Array.from({ length: d - 1 }, (_, i) =>
         new Date(Date.UTC(y, m - 1, i + 1)).getUTCDay(),
-      ).some((weekday) => weekday !== 0);
+      ).some((weekday) => open.has(weekday));
       return openDayBefore ? [previous, current] : [previous];
     };
 
-    // Las dos sedes de la rotación: las sedes con dentista propio aún no
-    // tienen historia de cobros ni realizados.
     const locations = await raw.location.findMany({
-      where: {
-        tenantId,
-        name: {
-          in: [DEMO_LOCATIONS.principal.name, DEMO_LOCATIONS.norte.name],
-        },
-      },
+      where: { tenantId, deletedAt: null },
       select: { id: true },
     });
-    expect(locations).toHaveLength(2);
+    expect(locations).toHaveLength(Object.keys(DEMO_LOCATIONS).length);
     const [appointments, payments, items] = await Promise.all([
       raw.appointment.findMany({
         where: { tenantId, status: 'COMPLETED', deletedAt: null },
@@ -1606,7 +1729,7 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     for (const { id } of locations) {
       const zone = zones.get(id)!;
       const month = (at: Date): string => civilDateIn(at, zone).slice(0, 7);
-      for (const wanted of monthsAt(zone)) {
+      for (const wanted of monthsAt(id)) {
         const where = `${wanted} en ${id}`;
         expect({
           where,
@@ -1651,7 +1774,7 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(presentable.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('DX-050: los realizados quedan atribuidos (quién, sede, fecha) en las dos sedes, y uno «Sin atribuir»', async () => {
+  it('DX-050: los realizados quedan atribuidos (quién, sede, fecha) en las cuatro sedes, y uno «Sin atribuir»', async () => {
     const tenantId = await liveDemoTenantId();
     const done = await raw.treatmentPlanItem.findMany({
       where: { tenantId, status: 'DONE', deletedAt: null },
@@ -1674,9 +1797,9 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       expect(item.completedAt!.getTime()).toBeLessThanOrEqual(Date.now());
     }
     expect(new Set(attributed.map((i) => i.performedLocation?.name)).size).toBe(
-      2,
+      4,
     );
-    expect(new Set(attributed.map((i) => i.performedById)).size).toBe(2);
+    expect(new Set(attributed.map((i) => i.performedById)).size).toBe(4);
   });
 
   it('DX-040: un grupo A/B presentado hace más de 7 días, sin cita futura, sale en «Presupuestos por seguir»', async () => {

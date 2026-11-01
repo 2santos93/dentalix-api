@@ -7,18 +7,23 @@ import {
 import {
   daysAgoAt,
   planAppointments,
+  planComparisonHistory,
   planInClinicToday,
   planSiteAppointments,
 } from '../../prisma/demo/calendar';
 import {
   DEMO_COMMUNICATION,
+  DEMO_COMPARISON_HISTORY,
   DEMO_LOCATIONS,
   DEMO_MANUAL_RATES,
   DEMO_PATIENTS,
   DEMO_PLANS,
+  DEMO_PRICES,
   DEMO_PRIVACY_POLICY,
   DEMO_RESPONSIBLES,
+  DEMO_SITE_PRICE_LISTS,
   DEMO_USERS,
+  type DemoLocationKey,
   demoRateDates,
   localPatientIndexes,
   sitePatientIndexes,
@@ -26,7 +31,11 @@ import {
 import { MANUAL_RATE_MAX_DECIMALS } from '../../src/modules/exchange/domain/exchange-rate-source';
 import { DEFAULT_BUSINESS_HOURS } from '../../src/shared/locations/default-business-hours';
 import { decimalPlaces } from '../../src/shared/validation/bounded-decimal';
-import { addCivilDays } from '../../src/shared/time/civil-day';
+import {
+  addCivilDays,
+  civilDateIn,
+  civilWeekday,
+} from '../../src/shared/time/civil-day';
 
 // DX-335 (G6.1): la demo es una clínica de varios países y nada de ella
 // presupone uno. Este fichero reúne los invariantes de esos datos; cada tarea
@@ -37,6 +46,10 @@ import { addCivilDays } from '../../src/shared/time/civil-day';
 // se validan con la región con la que los lee la demo.
 const MAIN_REGION = DEMO_LOCATIONS.principal.country as CountryCode;
 const SITES = Object.values(DEMO_LOCATIONS);
+const SITE_KEYS = Object.keys(DEMO_LOCATIONS) as DemoLocationKey[];
+// Horario de cada sede: el suyo o, sin él, el del registro (la principal).
+const rangesOf = (key: DemoLocationKey) =>
+  DEMO_LOCATIONS[key].schedule ?? DEFAULT_BUSINESS_HOURS;
 
 // Apellidos retirados (A6, A7, A11-A22). Los literales se arman por partes
 // para que este fichero no se delate solo.
@@ -374,6 +387,33 @@ describe('demo global (DX-335)', () => {
         }).toEqual({ location: key, dentistIndex: 0, patientLocation: key });
       }
     }
+    // La historia de «Comparar sedes», con los pacientes de cada sede.
+    for (const key of SITE_KEYS) {
+      const history = planComparisonHistory(
+        now,
+        DEMO_LOCATIONS[key].timeZone,
+        key,
+        DEMO_COMPARISON_HISTORY,
+        rangesOf(key),
+      );
+      expect({ key, visits: history.length > 0 }).toEqual({
+        key,
+        visits: true,
+      });
+      for (const visit of history) {
+        const patientLocation = DEMO_PATIENTS[visit.patientIndex].location;
+        expect({
+          location: visit.location,
+          patientLocation:
+            key === 'principal' || key === 'norte'
+              ? ['principal', 'norte'].includes(patientLocation)
+              : patientLocation,
+        }).toEqual({
+          location: key,
+          patientLocation: key === 'principal' || key === 'norte' ? true : key,
+        });
+      }
+    }
   });
 
   it('rates are registered up to the most advanced location today from a location whose today admits them', () => {
@@ -386,5 +426,105 @@ describe('demo global (DX-335)', () => {
       expect(date).toBe(addCivilDays('2026-09-01', i));
       if (i < 61) expect({ date, key }).toEqual({ date, key: 'principal' });
     });
+  });
+
+  it('every location tariff has every demo price code, derived from USD', () => {
+    expect(DEMO_SITE_PRICE_LISTS.map((list) => list.currency).sort()).toEqual([
+      'BRL',
+      'GBP',
+    ]);
+    const codes = Object.keys(DEMO_PRICES).sort();
+    expect(codes).toHaveLength(26);
+    const rule: Record<string, (usd: number) => number> = {
+      BRL: (usd) => Math.round((usd * 3) / 10) * 10,
+      GBP: (usd) => Math.round((usd * 0.8) / 5) * 5,
+    };
+    for (const list of DEMO_SITE_PRICE_LISTS) {
+      expect({
+        list: list.name,
+        codes: Object.keys(list.prices).sort(),
+      }).toEqual({ list: list.name, codes });
+      expect(list.currency).toBe(DEMO_LOCATIONS[list.locationKey].currency);
+      for (const code of codes) {
+        expect({ code, price: list.prices[code] }).toEqual({
+          code,
+          price: rule[list.currency](DEMO_PRICES[code]),
+        });
+      }
+    }
+    const byCurrency = (currency: string) =>
+      DEMO_SITE_PRICE_LISTS.find((list) => list.currency === currency)!;
+    expect(byCurrency('BRL').prices['IMG-CONSULTA']).toBe(240);
+    expect(byCurrency('GBP').prices['IMG-CONSULTA']).toBe(65);
+  });
+
+  it('the comparison history of a location uses the calendar months of its zone', () => {
+    // 21:30 del 31 de octubre en Caracas y ya 01:30 del 1 de noviembre en Londres.
+    const now = new Date('2026-11-01T01:30:00Z');
+    const visitMonths = (zone: string) => {
+      const visits = planComparisonHistory(
+        now,
+        zone,
+        'londres',
+        DEMO_COMPARISON_HISTORY,
+        rangesOf('londres'),
+      );
+      // Cada visita, en el calendario de la zona con la que se planificó.
+      const monthOf = (v: (typeof visits)[number]) =>
+        civilDateIn(daysAgoAt(now, v.daysAgo, v.startMinute, zone), zone).slice(
+          0,
+          7,
+        );
+      return {
+        previous: visits.filter((v) => v.month === 'previous').map(monthOf),
+        current: visits.filter((v) => v.month === 'current').map(monthOf),
+      };
+    };
+    const london = visitMonths(DEMO_LOCATIONS.londres.timeZone);
+    expect(london.previous.length).toBeGreaterThan(0);
+    expect(london.previous.every((m) => m === '2026-10')).toBe(true);
+    expect(london.current.every((m) => m === '2026-11')).toBe(true);
+    // Control: con la zona de la principal, el «mes anterior» es septiembre.
+    const main = visitMonths(DEMO_LOCATIONS.principal.timeZone);
+    expect(main.previous.length).toBeGreaterThan(0);
+    expect(main.previous.every((m) => m === '2026-09')).toBe(true);
+  });
+
+  it('comparison history never anchors on a day its location is closed', () => {
+    let checked = 0;
+    for (
+      let day = '2028-01-01';
+      day <= '2028-12-31';
+      day = addCivilDays(day, 1)
+    ) {
+      const now = new Date(`${day}T12:00:00Z`);
+      for (const key of SITE_KEYS) {
+        const zone = DEMO_LOCATIONS[key].timeZone;
+        const ranges = rangesOf(key);
+        for (const visit of planComparisonHistory(
+          now,
+          zone,
+          key,
+          DEMO_COMPARISON_HISTORY,
+          ranges,
+        )) {
+          const visitDay = addCivilDays(civilDateIn(now, zone), -visit.daysAgo);
+          const weekday = civilWeekday(visitDay);
+          const fits = ranges.some(
+            (r) =>
+              r.weekday === weekday &&
+              r.startMinute <= visit.startMinute &&
+              visit.startMinute + visit.durationMinutes <= r.endMinute,
+          );
+          if (!fits) {
+            expect({ key, day, visitDay, visit }).toEqual(
+              'a slot inside its schedule',
+            );
+          }
+          checked++;
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(366 * 4);
   });
 });

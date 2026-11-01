@@ -227,6 +227,8 @@ import {
   DEMO_PRICES,
   DEMO_ALFA_PAYER,
   DEMO_PRICE_LISTS,
+  DEMO_SITE_PRICE_LISTS,
+  DEMO_NEW_SITE_PLANS,
   DEMO_AGREEMENTS,
   DEMO_PATIENT_AGREEMENTS,
   DEMO_POSTOP,
@@ -840,11 +842,22 @@ class DemoSeeder {
       ownerId,
     );
 
+    await this.createSiteActivity(
+      tenantId,
+      locations,
+      siteDentists,
+      patientIds,
+      receptionId,
+      catalog,
+    );
+
     await this.createComparisonHistory(
       tenantId,
       locations,
+      hours,
       patientIds,
       dentists,
+      siteDentists,
       receptionId,
       catalog,
     );
@@ -2489,8 +2502,10 @@ class DemoSeeder {
    */
   private async datePlanItemDone(
     itemId: string,
-    spec: DemoPlan,
-    item: DemoPlanItem,
+    spec: Pick<DemoPlan, 'doneAt'> & {
+      payments: readonly { daysAgo: number }[];
+    },
+    item: Pick<DemoPlanItem, 'unattributed'>,
   ): Promise<void> {
     const firstPaymentDaysAgo = Math.max(
       0,
@@ -2517,29 +2532,162 @@ class DemoSeeder {
   }
 
   /**
+   * D5 y R8: la actividad propia de cada sede con dentista propio, antes de
+   * «Comparar sedes». Primero su tarifa (en su moneda, con todos los códigos)
+   * y después sus planes, sin `currency`, con sus ítems, realizados y abonos.
+   * Todo corre en el contexto de la sede: el caso de uso toma la moneda del
+   * plan y el precio del ítem de la sede del request (PF8); fuera de ella el
+   * ítem saldría del catálogo, que no tiene moneda.
+   */
+  private async createSiteActivity(
+    tenantId: string,
+    locations: Record<DemoLocationKey, string>,
+    siteDentists: Record<SoloSiteKey, string>,
+    patientIds: string[],
+    receptionId: string,
+    catalog: Map<string, string>,
+  ): Promise<void> {
+    for (const key of ['saoPaulo', 'londres'] as const) {
+      const dentistId = siteDentists[key];
+      const dentist = { userId: dentistId, role: ClinicRole.DENTIST };
+      const zone = DEMO_LOCATIONS[key].timeZone;
+      await this.inTenant(tenantId, locations[key], async () => {
+        // Idempotente como DX-105: la tarifa se busca por nombre.
+        const existingLists = await this.use(ListPriceListsUseCase).execute({
+          includeInactive: true,
+        });
+        for (const spec of DEMO_SITE_PRICE_LISTS.filter(
+          (list) => list.locationKey === key,
+        )) {
+          if (existingLists.some((l) => l.name === spec.name)) continue;
+          const created = await this.use(CreatePriceListUseCase).execute(
+            {
+              name: spec.name,
+              currency: spec.currency,
+              locationId: locations[spec.locationKey],
+            },
+            receptionId,
+          );
+          await this.use(ReplacePriceListItemsUseCase).execute(
+            created.id,
+            Object.entries(spec.prices).map(([code, price]) => ({
+              catalogItemId: catalogId(catalog, code),
+              price,
+            })),
+          );
+        }
+
+        for (const spec of DEMO_NEW_SITE_PLANS.filter(
+          (plan) => plan.location === key,
+        )) {
+          // Sin `currency`: la de la sede activa (R14).
+          const plan = await this.use(CreateTreatmentPlanUseCase).execute({
+            patientId: patientIds[spec.patientIndex],
+            notes: spec.notes,
+            createdById: dentistId,
+          });
+          const amounts = new Map<string, number>();
+          for (const item of spec.items) {
+            const added = await this.use(AddTreatmentPlanItemUseCase).execute(
+              plan.id,
+              {
+                toothNumber: item.tooth,
+                catalogItemId: catalogId(catalog, item.code),
+              },
+              dentist,
+            );
+            amounts.set(
+              item.code,
+              Number(added.price) - Number(added.discount),
+            );
+            if (item.status === TreatmentPlanItemStatus.PROPOSED) continue;
+            await this.use(UpdateTreatmentPlanItemUseCase).execute(
+              added.id,
+              { status: item.status },
+              dentist,
+            );
+            if (item.status === TreatmentPlanItemStatus.DONE) {
+              await this.datePlanItemDone(
+                added.id,
+                { payments: spec.payments, doneAt: key },
+                {},
+              );
+            }
+          }
+          const path =
+            spec.status === 'COMPLETED'
+              ? [TreatmentPlanStatus.ACCEPTED, TreatmentPlanStatus.COMPLETED]
+              : [TreatmentPlanStatus.ACCEPTED];
+          for (const status of path) {
+            await this.use(UpdateTreatmentPlanUseCase).execute(
+              plan.id,
+              { status },
+              { role: ClinicRole.DENTIST },
+            );
+          }
+          for (const payment of spec.payments) {
+            await this.use(RecordPaymentUseCase).execute(
+              plan.id,
+              {
+                amount: payment.covers.reduce(
+                  (sum, code) => sum + (amounts.get(code) ?? 0),
+                  0,
+                ),
+                currency: plan.currency,
+                paidAt: daysAgoAt(this.now, payment.daysAgo, 11 * 60, zone),
+                method: payment.method,
+              },
+              receptionId,
+            );
+          }
+        }
+      });
+    }
+  }
+
+  /**
    * DX-014: un día con actividad en cada sede en el mes anterior y en el
-   * actual (`planComparisonHistory`), para que «Comparar sedes» compare algo
-   * cualquier día del mes. Cada visita es una cita atendida (ruta histórica,
-   * con las validaciones de horario y solapes), un plan con su procedimiento
-   * realizado allí por la dentista (DX-050, fechado a la hora de la cita) y el
-   * abono del total en la sede al terminar. Sin caja: va antes de los turnos
-   * de hoy, como el resto de abonos históricos.
+   * actual (`planComparisonHistory`, una llamada por sede con su zona y su
+   * horario), para que «Comparar sedes» compare algo cualquier día del mes.
+   * Cada visita es una cita atendida (ruta histórica, con las validaciones de
+   * horario y solapes), un plan con su procedimiento realizado allí (DX-050,
+   * fechado a la hora de la cita) y el abono del total en la sede al
+   * terminar. Las sedes de la rotación las atiende la primera dentista, con
+   * la moneda de su sede; una sede con dentista propio, él, con el plan sin
+   * `currency` (la de la sede) y el precio de su tarifa (PF8). Todo en el
+   * contexto de la sede de la visita. Sin caja: va antes de los turnos de
+   * hoy, como el resto de abonos históricos.
    */
   private async createComparisonHistory(
     tenantId: string,
     locations: Record<DemoLocationKey, string>,
+    hours: Record<DemoLocationKey, BusinessHours | null>,
     patientIds: string[],
     dentists: string[],
+    siteDentists: Record<SoloSiteKey, string>,
     receptionId: string,
     catalog: Map<string, string>,
   ): Promise<void> {
-    const dentistId = dentists[DEMO_COMPARISON_HISTORY.dentistIndex];
-    const dentist = { userId: dentistId, role: ClinicRole.DENTIST };
-    for (const visit of planComparisonHistory(
-      this.now,
-      DEMO_LOCATIONS.principal.timeZone,
-      DEMO_COMPARISON_HISTORY,
-    )) {
+    const keys = Object.keys(DEMO_LOCATIONS) as DemoLocationKey[];
+    const visits = keys.flatMap((key) =>
+      planComparisonHistory(
+        this.now,
+        DEMO_LOCATIONS[key].timeZone,
+        key,
+        DEMO_COMPARISON_HISTORY,
+        hours[key]?.ranges ?? [],
+      ),
+    );
+    for (const visit of visits) {
+      const { location } = visit;
+      // Una sede con dentista propio: él; las de la rotación, la primera dentista.
+      const siteDentistId =
+        location === 'saoPaulo' || location === 'londres'
+          ? siteDentists[location]
+          : undefined;
+      const dentistId =
+        siteDentistId ?? dentists[DEMO_COMPARISON_HISTORY.dentistIndex];
+      const dentist = { userId: dentistId, role: ClinicRole.DENTIST };
       const zone = DEMO_LOCATIONS[visit.location].timeZone;
       const start = daysAgoAt(this.now, visit.daysAgo, visit.startMinute, zone);
       const end = daysAgoAt(
@@ -2549,8 +2697,6 @@ class DemoSeeder {
         zone,
       );
       const patientId = patientIds[visit.patientIndex];
-      // Cada visita cobra en la moneda de su sede (la Norte, con su lista).
-      const sedeCurrency = DEMO_LOCATIONS[visit.location].currency;
       await this.inTenant(tenantId, locations[visit.location], async () => {
         const appointment = await this.use(
           CreateAppointmentUseCase,
@@ -2565,9 +2711,13 @@ class DemoSeeder {
         await this.use(UpdateAppointmentUseCase).execute(appointment.id, {
           status: AppointmentStatus.COMPLETED,
         });
+        // Las sedes de la rotación cobran en la moneda de su sede (la Norte,
+        // con su lista); una sede propia, sin `currency`: la de la sede.
         const plan = await this.use(CreateTreatmentPlanUseCase).execute({
           patientId,
-          currency: sedeCurrency,
+          ...(siteDentistId
+            ? {}
+            : { currency: DEMO_LOCATIONS[visit.location].currency }),
           notes: 'Control y procedimiento del día.',
           createdById: dentistId,
         });
@@ -2604,7 +2754,7 @@ class DemoSeeder {
           plan.id,
           {
             amount: Number(item.price) - Number(item.discount),
-            currency: sedeCurrency,
+            currency: plan.currency,
             paidAt: new Date(end.getTime() + 10 * 60 * 1000),
             method: PaymentMethod.CARD,
           },

@@ -1043,6 +1043,45 @@ export const DEMO_PRICE_LISTS = [
   },
 ] as const;
 
+/**
+ * R8: la tarifa activa de cada sede con dentista propio, en su moneda y con
+ * TODOS los códigos de `DEMO_PRICES`, para que el precio de un ítem salga de
+ * la lista (`PRICE_LIST`) y nunca del catálogo, que no tiene moneda (PF8).
+ * Los precios se derivan de los de USD con una regla fija y verosímil.
+ */
+export const DEMO_SITE_PRICE_LISTS: readonly {
+  key: SoloSiteKey;
+  name: string;
+  locationKey: SoloSiteKey;
+  currency: string;
+  prices: Record<string, number>;
+}[] = [
+  {
+    key: 'saoPaulo',
+    name: 'Tarifa Sede São Paulo',
+    locationKey: 'saoPaulo',
+    currency: DEMO_LOCATIONS.saoPaulo.currency,
+    prices: Object.fromEntries(
+      Object.entries(DEMO_PRICES).map(([code, usd]) => [
+        code,
+        Math.round((usd * 3) / 10) * 10,
+      ]),
+    ),
+  },
+  {
+    key: 'londres',
+    name: 'Tarifa Sede Londres',
+    locationKey: 'londres',
+    currency: DEMO_LOCATIONS.londres.currency,
+    prices: Object.fromEntries(
+      Object.entries(DEMO_PRICES).map(([code, usd]) => [
+        code,
+        Math.round((usd * 0.8) / 5) * 5,
+      ]),
+    ),
+  },
+];
+
 /** DX-105: los dos convenios de la demo. */
 export const DEMO_AGREEMENTS = [
   {
@@ -2080,6 +2119,61 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
 ];
 
 /**
+ * D5: un plan de una sede con dentista propio. Sin `currency`: la moneda sale
+ * de la sede activa (R14), y el precio de cada ítem, de su tarifa
+ * (`DEMO_SITE_PRICE_LISTS`). Lo atiende el dentista de la sede.
+ */
+export interface DemoNewSitePlan {
+  location: SoloSiteKey;
+  patientIndex: number;
+  status: 'ACCEPTED' | 'COMPLETED';
+  notes: string;
+  items: { code: string; tooth: string; status: TreatmentPlanItemStatus }[];
+  /**
+   * Abonos en la sede y en la moneda del plan. El importe es el de los ítems
+   * de `covers` (precio menos descuento), el que el caso de uso les puso.
+   */
+  payments: {
+    daysAgo: number;
+    method: PaymentMethod;
+    covers: readonly string[];
+  }[];
+}
+
+/**
+ * D5: dos planes por sede con dentista propio, de sus dos primeros pacientes:
+ * uno aceptado con un realizado y un abono parcial, y otro completado y
+ * pagado entero. Así la cartera, la producción y «Comparar sedes» tienen
+ * datos en la moneda de cada sede.
+ */
+export const DEMO_NEW_SITE_PLANS: readonly DemoNewSitePlan[] = (
+  ['saoPaulo', 'londres'] as const
+).flatMap((location) => {
+  const [first, second] = sitePatientIndexes(location);
+  return [
+    {
+      location,
+      patientIndex: first,
+      status: 'ACCEPTED' as const,
+      notes: 'Valoración y resina en 16.',
+      items: [
+        { code: 'IMG-CONSULTA', tooth: '16', status: DONE },
+        { code: 'OP-RESINA-1', tooth: '16', status: ACCEPTED },
+      ],
+      payments: [{ daysAgo: 5, method: CASH, covers: ['IMG-CONSULTA'] }],
+    },
+    {
+      location,
+      patientIndex: second,
+      status: 'COMPLETED' as const,
+      notes: 'Profilaxis de control.',
+      items: [{ code: 'PREV-PROFILAXIS', tooth: '11', status: DONE }],
+      payments: [{ daysAgo: 12, method: CARD, covers: ['PREV-PROFILAXIS'] }],
+    },
+  ];
+});
+
+/**
  * DX-040: un paciente con DOS OPCIONES del mismo tratamiento (reponer el 46
  * ausente), presentadas hace 9 días en la sede principal y sin cita futura:
  * aparece en «Presupuestos por seguir» y en la ficha se comparan lado a lado.
@@ -3066,16 +3160,23 @@ export const DEMO_CANCELLATION = {
 
 /**
  * DX-014: historia de «Comparar sedes» (ver `planComparisonHistory`). Un día
- * en cada mes con dos visitas atendidas por sede de la primera dentista (sin
- * horario propio), cada una con su procedimiento realizado allí y cobrado
- * entero en la sede (sin saldo: no entra en la cartera). Pacientes sin planes
- * ni convenios de la demo. Huecos fuera de las plantillas del calendario,
- * dentro del horario de cada sede (también el sábado).
+ * en cada mes con dos visitas atendidas por sede, cada una con su
+ * procedimiento realizado allí y cobrado entero en la sede (sin saldo: no
+ * entra en la cartera). En las sedes de la rotación las atiende la primera
+ * dentista (sin horario propio), con pacientes sin planes ni convenios de la
+ * demo; en una sede con dentista propio, él, con pacientes de la sede (R3).
+ * Huecos fuera de las plantillas del calendario, dentro del horario de cada
+ * sede (también el sábado, donde abre).
  */
 export const DEMO_COMPARISON_HISTORY = {
   dentistIndex: 0,
   reason: 'Profilaxis y control',
-  patientIndexes: [14, 15, 17, 18],
+  patientIndexes: {
+    principal: [14, 15, 17, 18],
+    norte: [14, 15, 17, 18],
+    saoPaulo: [27, 28],
+    londres: [31, 32],
+  },
   slots: {
     principal: [
       [10 * 60, 30],
@@ -3084,6 +3185,14 @@ export const DEMO_COMPARISON_HISTORY = {
     norte: [
       [8 * 60, 30],
       [9 * 60 + 15, 45],
+    ],
+    saoPaulo: [
+      [11 * 60 + 30, 30],
+      [17 * 60 + 15, 30],
+    ],
+    londres: [
+      [12 * 60 + 30, 30],
+      [17 * 60 + 30, 30],
     ],
   },
   procedures: {
