@@ -19,7 +19,7 @@ import {
 /**
  * GLOBAL-G1 (DX-314): la zona de una sede sale SOLO de `locations."timeZone"`,
  * contra Postgres real con el rol de la app (RLS FORCE). Ni el horario ni el
- * país: una zona NULL o corrupta es 409, nunca Bogotá.
+ * país: una zona NULL o corrupta es 409, nunca una zona por defecto.
  */
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
@@ -95,7 +95,7 @@ describe('zona de la sede: solo Location.timeZone (int, G1)', () => {
         }),
       })
     ).id;
-    // Su horario LEGADO dice Bogotá: el código nuevo no lo lee (R20).
+    // Su horario LEGADO dice una zona UTC−5: el código nuevo no lo lee (R20).
     await raw.locationSchedule.create({
       data: { tenantId, locationId: ids.tokyo, timezone: 'America/Bogota' },
     });

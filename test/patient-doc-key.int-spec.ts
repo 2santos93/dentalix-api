@@ -36,7 +36,7 @@ const prisma = new PrismaService(tenantContext);
 
 const INDEX = 'patients_tenant_doc_key_live_idx';
 /**
- * Pacientes con documento en la clínica A (con puntos, como en Colombia):
+ * Pacientes con documento en la clínica A (con puntos):
  * el volumen del criterio de DX-287. Con muchos menos, el planificador puede
  * preferir, con razón, recorrer una tabla pequeña con 250 claves.
  */

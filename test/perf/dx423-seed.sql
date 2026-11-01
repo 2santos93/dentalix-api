@@ -1,7 +1,7 @@
 -- DX-423 · siembra del benchmark de «Producción por procedimiento» (NO es parte
 -- de la suite; ver docs/perf/DX-423.md). Corre como owner en una base
 -- DESECHABLE ya migrada (con la siembra de referencia: monedas). Determinista.
---   Tenant "bench-produccion": 5 sedes (Bogotá), 20 profesionales, 20.000
+--   Tenant "bench-produccion": 5 sedes, 20 profesionales, 20.000
 --   pacientes, 60 procedimientos en 8 categorías y 24 MESES (2024-11-01 →
 --   2026-10-31) con 200.000 ítems REALIZADOS (1 de cada 10 en USD, 1 de cada 5
 --   con descuento, catálogo congelado), más 20.000 propuestos/aceptados, 2.000

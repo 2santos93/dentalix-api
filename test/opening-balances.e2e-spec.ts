@@ -76,7 +76,7 @@ const BALANCES_HEADER =
 const csv = (header: string, lines: string[]) =>
   Buffer.from(`${header}\n${lines.join('\n')}\n`, 'utf8');
 
-/** Día civil en Bogotá (la sede de la demo): el «hoy» de la clínica. */
+/** Día civil en la zona de la sede de la demo: el «hoy» de la clínica. */
 function bogotaDay(offsetDays = 0): string {
   const d = new Date(Date.now() + offsetDays * 86_400_000);
   return new Intl.DateTimeFormat('en-CA', {

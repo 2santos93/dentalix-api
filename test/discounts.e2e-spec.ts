@@ -36,7 +36,7 @@ const DAY = 24 * 60 * 60 * 1000;
 let requestSeq = 0;
 /** X-Request-Id propio para encontrar el evento de auditoría de la petición. */
 const nextRequestId = () => `dx204-e2e-${++requestSeq}-${Date.now()}`;
-/** Día civil de Bogotá (UTC−5 fijo) `offset` días desde hoy. */
+/** Día civil de la sede (UTC−5 fijo) `offset` días desde hoy. */
 const bogotaDay = (offset = 0) =>
   new Date(Date.now() - 5 * 60 * 60 * 1000 + offset * DAY)
     .toISOString()
