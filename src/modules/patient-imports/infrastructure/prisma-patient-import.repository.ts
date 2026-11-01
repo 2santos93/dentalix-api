@@ -1647,20 +1647,25 @@ export class PrismaPatientImportRepository {
          FOR UPDATE`;
       const ids = created.map((p) => p.id);
       if (ids.length > 0) {
+        // DX-294: los ids van UNA vez (CTE), no un array por tabla: con
+        // 10.000 pacientes y ~32 tablas eran 320.000 uuids en el bind y
+        // ~160 ms de planificación (la selectividad de cada elemento por
+        // tabla), segundos con la máquina cargada; así, ~15 ms.
         const checks = references.map(
           (ref) =>
             Prisma.sql`SELECT ${Prisma.raw(quoteIdent(ref.column))}::uuid AS id
                          FROM ${Prisma.raw(quoteIdent(ref.table))}
-                        WHERE ${Prisma.raw(quoteIdent(ref.column))} = ANY(${ids}::uuid[])`,
+                        WHERE ${Prisma.raw(quoteIdent(ref.column))} IN (SELECT id FROM batch_patients)`,
         );
         // DX-262: un saldo migrado de OTRO lote también es actividad (los
         // del propio lote se retiran con él).
         checks.push(Prisma.sql`SELECT "patientId" AS id FROM "opening_balances"
                                 WHERE "tenantId" = ${tenantId}::uuid
-                                  AND "patientId" = ANY(${ids}::uuid[])
+                                  AND "patientId" IN (SELECT id FROM batch_patients)
                                   AND "importBatchId" <> ${id}::uuid
                                   AND "voidedAt" IS NULL`);
         const [{ n }] = await tx.$queryRaw<{ n: number }[]>`
+          WITH batch_patients AS MATERIALIZED (SELECT unnest(${ids}::uuid[]) AS id)
           SELECT count(DISTINCT id)::int AS n FROM (${Prisma.join(checks, ' UNION ALL ')}) a`;
         if (n > 0) throw new UndoBlockedError(n);
       }
