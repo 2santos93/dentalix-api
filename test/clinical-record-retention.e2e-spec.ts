@@ -11,7 +11,7 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 
-// DX-039 · retención legal de la HC de punta a punta: 409
+// DX-039 · retención de la HC de punta a punta: 409
 // CLINICAL_RECORD_RETENTION al archivar, solo ADMIN para retención y
 // supresión parcial (403 al resto), aislamiento entre clínicas y rastro de
 // auditoría (quién y cuándo, sin el motivo libre).
@@ -184,7 +184,7 @@ describe('Retención legal de la historia clínica (DX-039, e2e)', () => {
       retentionUntil: detail.retentionUntil,
     });
     expect((res.body as { message: string }).message).toMatch(
-      /retención legal hasta el \d{2}\/\d{2}\/\d{4}/,
+      /retención hasta el \d{2}\/\d{2}\/\d{4}/,
     );
     await call(a, 'get', `/patients/${p}`, a.adminToken).expect(200);
   });

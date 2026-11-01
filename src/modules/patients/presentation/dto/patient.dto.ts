@@ -184,6 +184,21 @@ export class PatientDto {
   underRetention!: boolean;
 
   @ApiProperty({
+    example: 15,
+    description:
+      'Plazo vigente de la clínica en años (NONE); DOUBLE es el doble. ' +
+      'PERMANENT no caduca.',
+  })
+  clinicRetentionYears!: number;
+
+  @ApiProperty({
+    description:
+      'La fecha de fin sale del plazo anterior de la clínica: se redujo y ' +
+      'esta historia ya estaba en retención (DX-330).',
+  })
+  retentionFromPreviousTerm!: boolean;
+
+  @ApiProperty({
     format: 'date-time',
     nullable: true,
     type: String,

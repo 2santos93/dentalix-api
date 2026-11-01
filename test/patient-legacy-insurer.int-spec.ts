@@ -13,7 +13,9 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 });
 const tenantContext = new TenantContextService();
 const prisma = new PrismaService(tenantContext);
-const repo = new PrismaPatientRepository(prisma, tenantContext);
+const repo = new PrismaPatientRepository(prisma, tenantContext, {
+  platformMinYears: 15,
+});
 
 const SUBDOMAIN = 'dx322-insurer-eps';
 

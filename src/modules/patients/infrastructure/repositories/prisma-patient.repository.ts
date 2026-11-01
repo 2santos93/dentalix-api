@@ -1,5 +1,6 @@
 import {
   ConflictException,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -19,9 +20,14 @@ import {
   UpdatePatientRepoInput,
 } from '../../domain/ports/patient-repository.port';
 import {
+  effectiveRetentionYears,
   isUnderRetention,
   retentionUntil,
 } from '../../domain/retention/clinical-record-retention';
+import {
+  CLINICAL_RETENTION_CONFIG,
+  type ClinicalRetentionConfig,
+} from '../../domain/retention/clinical-retention-config';
 import { Patient } from '../../domain/entities/patient.entity';
 import { livePatientWithDoc, lockPatientDocs } from '../patient-doc-lock';
 import { revokeLivePublicLinks } from '../patient-public-links';
@@ -84,24 +90,73 @@ type TxClient = Prisma.TransactionClient;
 
 const PATIENT_NOT_FOUND = 'Patient not found';
 
+/** El plazo vigente de la clínica, en años: lo que `mapToEntity` necesita. */
+export interface RetentionTerm {
+  years: number;
+}
+
 /**
- * Bloquea la fila del paciente vivo (FOR UPDATE) y devuelve lo que la regla de
- * retención necesita. Bajo RLS: un id de otro tenant no aparece (404).
+ * DX-330: el plazo vigente de la clínica. Una vez por llamada, no por paciente.
+ * `tenants` no tiene RLS: se lee por el id del contexto.
  */
-async function lockRetentionState(
+export async function retentionTermInTx(
   tx: TxClient,
+  tenantId: string,
+  platformMinYears: number,
+): Promise<RetentionTerm> {
+  const clinic = await tx.tenant.findUniqueOrThrow({
+    where: { id: tenantId },
+    select: { clinicalRecordRetentionYears: true },
+  });
+  return {
+    years: effectiveRetentionYears(
+      clinic.clinicalRecordRetentionYears,
+      platformMinYears,
+    ),
+  };
+}
+
+/**
+ * Lo que la regla de retención necesita, en el orden de bloqueo del cambio de
+ * plazo (DX-330, R8): primero `tenants` FOR SHARE, para esperar a un cambio en
+ * curso y verlo, y después la fila del paciente vivo FOR UPDATE. Bajo RLS: un
+ * id de otro tenant no aparece (404).
+ */
+async function lockRetentionContext(
+  tx: TxClient,
+  tenantId: string,
   id: string,
+  platformMinYears: number,
 ): Promise<PatientRetentionState> {
-  const rows = await tx.$queryRaw<
-    { lastAttentionAt: Date | null; retentionExtended: RetentionExtension }[]
+  const [clinic] = await tx.$queryRaw<
+    { clinicalRecordRetentionYears: number }[]
   >`
+    SELECT "clinicalRecordRetentionYears"
+    FROM "tenants"
+    WHERE "id" = ${tenantId}::uuid
+    FOR SHARE`;
+  const rows = await tx.$queryRaw<Omit<PatientRetentionState, 'years'>[]>`
     SELECT "last_attention_at" AS "lastAttentionAt",
-           "retention_extended" AS "retentionExtended"
+           "retention_extended" AS "retentionExtended",
+           "retention_floor_until" AS "retentionFloorUntil"
     FROM "patients"
     WHERE "id" = ${id}::uuid AND "deletedAt" IS NULL
     FOR UPDATE`;
   if (rows.length === 0) throw new NotFoundException(PATIENT_NOT_FOUND);
-  return rows[0];
+  return {
+    ...rows[0],
+    years: effectiveRetentionYears(
+      clinic.clinicalRecordRetentionYears,
+      platformMinYears,
+    ),
+  };
+}
+
+/** Misma aritmética de siempre para los cortes de la lista de vencimientos. */
+function yearsBefore(date: Date, years: number): Date {
+  const d = new Date(date);
+  d.setUTCFullYear(d.getUTCFullYear() - years);
+  return d;
 }
 
 export const DOC_TAKEN_MESSAGE =
@@ -186,10 +241,16 @@ export async function insertPatientRowInTx(
   });
 }
 
-export function mapToEntity(patient: PrismaPatient, now = new Date()): Patient {
-  const until = retentionUntil(
+export function mapToEntity(
+  patient: PrismaPatient,
+  term: RetentionTerm,
+  now = new Date(),
+): Patient {
+  const { until, basis } = retentionUntil(
     patient.lastAttentionAt,
     patient.retentionExtended,
+    term.years,
+    patient.retentionFloorUntil,
   );
   return {
     id: patient.id,
@@ -226,6 +287,8 @@ export function mapToEntity(patient: PrismaPatient, now = new Date()): Patient {
     retentionUntil:
       until instanceof Date ? until.toISOString().slice(0, 10) : null,
     underRetention: isUnderRetention(until, now),
+    clinicRetentionYears: term.years,
+    retentionFromPreviousTerm: basis === 'PREVIOUS_TERM',
     partiallySuppressedAt: patient.partiallySuppressedAt,
     importBatchId: patient.importBatchId,
     contactChannel: patient.contactChannel,
@@ -244,6 +307,8 @@ export class PrismaPatientRepository implements PatientRepository {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantContext: TenantContextService,
+    @Inject(CLINICAL_RETENTION_CONFIG)
+    private readonly retention: ClinicalRetentionConfig,
   ) {}
 
   /**
@@ -263,11 +328,32 @@ export class PrismaPatientRepository implements PatientRepository {
     return tenantId;
   }
 
+  private termInTx(tx: TxClient): Promise<RetentionTerm> {
+    return retentionTermInTx(
+      tx,
+      this.requireTenantId(),
+      this.retention.platformMinYears,
+    );
+  }
+
+  private lockRetention(
+    tx: TxClient,
+    id: string,
+  ): Promise<PatientRetentionState> {
+    return lockRetentionContext(
+      tx,
+      this.requireTenantId(),
+      id,
+      this.retention.platformMinYears,
+    );
+  }
+
   async create(input: CreatePatientRepoInput): Promise<Patient> {
     const tenantId = this.requireTenantId();
-    const patient = await this.prisma.runWithTenant(async (tx) => {
+    const { patient, term } = await this.prisma.runWithTenant(async (tx) => {
       // DX-128: el paciente nace con el canal por defecto de su clínica.
       const created = await insertPatientRowInTx(tx, tenantId, input);
+      const term = await this.termInTx(tx);
 
       if (input.medicalHistory) {
         const { data, safetyFlags, hasCriticalAlert } = input.medicalHistory;
@@ -311,7 +397,10 @@ export class PrismaPatientRepository implements PatientRepository {
           recordedById: consent.recordedById,
           evidence: consent.evidence,
         });
-        return derived ? { ...created, ...derived } : created;
+        return {
+          patient: derived ? { ...created, ...derived } : created,
+          term,
+        };
       }
       if (consent?.kind === 'legacy') {
         const derived = await recordLegacyConsentInTx(tx, {
@@ -322,21 +411,21 @@ export class PrismaPatientRepository implements PatientRepository {
           recordedById: consent.recordedById,
           evidence: consent.evidence,
         });
-        return { ...created, ...derived };
+        return { patient: { ...created, ...derived }, term };
       }
 
-      return created;
+      return { patient: created, term };
     });
-    return mapToEntity(patient);
+    return mapToEntity(patient, term);
   }
 
   async findById(id: string): Promise<Patient | null> {
-    const patient = await this.prisma.runWithTenant(async (tx) => {
-      return tx.patient.findFirst({
+    return this.prisma.runWithTenant(async (tx) => {
+      const patient = await tx.patient.findFirst({
         where: { id, deletedAt: null },
       });
+      return patient ? mapToEntity(patient, await this.termInTx(tx)) : null;
     });
-    return patient ? mapToEntity(patient) : null;
   }
 
   async list(params: ListPatientsParams): Promise<ListPatientsResult> {
@@ -372,6 +461,7 @@ export class PrismaPatientRepository implements PatientRepository {
         : {}),
     };
     return this.prisma.runWithTenant(async (tx) => {
+      const term = await this.termInTx(tx);
       const [items, total] = await Promise.all([
         tx.patient.findMany({
           where,
@@ -383,7 +473,7 @@ export class PrismaPatientRepository implements PatientRepository {
         }),
         tx.patient.count({ where }),
       ]);
-      return { items: items.map((p) => mapToEntity(p)), total };
+      return { items: items.map((p) => mapToEntity(p, term)), total };
     });
   }
 
@@ -413,10 +503,11 @@ export class PrismaPatientRepository implements PatientRepository {
       const rows = await tx.patient.findMany({
         where: { id: { in: ids }, deletedAt: null },
       });
+      const term = await this.termInTx(tx);
       const byId = new Map(rows.map((row) => [row.id, row]));
       const items = ids.flatMap((id) => {
         const row = byId.get(id);
-        return row ? [mapToEntity(row)] : [];
+        return row ? [mapToEntity(row, term)] : [];
       });
       return { items, total: Number(total) };
     });
@@ -447,7 +538,7 @@ export class PrismaPatientRepository implements PatientRepository {
         where: { id },
         data: patientUpdateData(patch, existing.documentType),
       });
-      return mapToEntity(patient);
+      return mapToEntity(patient, await this.termInTx(tx));
     });
   }
 
@@ -458,7 +549,7 @@ export class PrismaPatientRepository implements PatientRepository {
   ): Promise<void> {
     const tenantId = this.requireTenantId();
     await this.prisma.runWithTenant(async (tx) => {
-      const retention = await lockRetentionState(tx, id);
+      const retention = await this.lockRetention(tx, id);
       // Todas las sedes: el paciente es de la clínica, no de una sede.
       const pendingAppointments = await tx.appointment.count({
         where: {
@@ -515,7 +606,7 @@ export class PrismaPatientRepository implements PatientRepository {
   ): Promise<Patient> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
-      const state = await lockRetentionState(tx, id);
+      const state = await this.lockRetention(tx, id);
       await tx.patientRetentionAction.create({
         data: {
           tenantId,
@@ -531,7 +622,7 @@ export class PrismaPatientRepository implements PatientRepository {
         where: { id },
         data: { retentionExtended: input.value },
       });
-      return mapToEntity(patient);
+      return mapToEntity(patient, state);
     });
   }
 
@@ -545,7 +636,8 @@ export class PrismaPatientRepository implements PatientRepository {
   ): Promise<Patient> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
-      input.assertAllowed(await lockRetentionState(tx, id));
+      const state = await this.lockRetention(tx, id);
+      input.assertAllowed(state);
       // Autorización de MARKETING: la historia es append-only (DX-037), así
       // que se retira con una fila nueva contra la misma versión de política.
       const marketing = await tx.dataProcessingConsent.findFirst({
@@ -582,29 +674,44 @@ export class PrismaPatientRepository implements PatientRepository {
         where: { id },
         data: { ...cleared, partiallySuppressedAt: new Date() },
       });
-      return mapToEntity(patient);
+      return mapToEntity(patient, state);
     });
   }
 
   async listRetentionExpiring(
     params: RetentionExpiringParams,
   ): Promise<ListPatientsResult> {
-    // Lo sirve patients_tenant_last_attention_live_idx (parcial: vivos y con
-    // atención). Orden: la que antes vence primero.
-    const where: Prisma.PatientWhereInput = {
-      deletedAt: null,
-      OR: [
-        {
-          retentionExtended: 'NONE',
-          lastAttentionAt: { lt: params.noneBefore },
-        },
-        {
-          retentionExtended: 'DOUBLE',
-          lastAttentionAt: { lt: params.doubleBefore },
-        },
-      ],
-    };
     return this.prisma.runWithTenant(async (tx) => {
+      const term = await this.termInTx(tx);
+      // Lo sirve patients_tenant_last_attention_live_idx (parcial: vivos y con
+      // atención). Orden: la que antes vence primero; con un suelo, una fila
+      // puede aparecer más tarde que su `lastAttentionAt`.
+      const where: Prisma.PatientWhereInput = {
+        deletedAt: null,
+        OR: [
+          {
+            retentionExtended: 'NONE',
+            lastAttentionAt: {
+              lt: yearsBefore(params.horizonNext, term.years),
+            },
+          },
+          {
+            retentionExtended: 'DOUBLE',
+            lastAttentionAt: {
+              lt: yearsBefore(params.horizonNext, 2 * term.years),
+            },
+          },
+        ],
+        // DX-330 (R7): una historia con suelo sale cuando vence el suelo.
+        AND: [
+          {
+            OR: [
+              { retentionFloorUntil: null },
+              { retentionFloorUntil: { lt: params.horizonNext } },
+            ],
+          },
+        ],
+      };
       const [items, total] = await Promise.all([
         tx.patient.findMany({
           where,
@@ -614,7 +721,7 @@ export class PrismaPatientRepository implements PatientRepository {
         }),
         tx.patient.count({ where }),
       ]);
-      return { items: items.map((p) => mapToEntity(p)), total };
+      return { items: items.map((p) => mapToEntity(p, term)), total };
     });
   }
 }

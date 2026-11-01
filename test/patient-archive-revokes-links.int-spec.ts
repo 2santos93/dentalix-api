@@ -29,7 +29,9 @@ const owner = new PrismaClient<Prisma.PrismaClientOptions>({
 });
 const tenantContext = new TenantContextService();
 const prisma = new PrismaService(tenantContext);
-const patients = new PrismaPatientRepository(prisma, tenantContext);
+const patients = new PrismaPatientRepository(prisma, tenantContext, {
+  platformMinYears: 15,
+});
 const links = new PrismaPatientPublicLinksRepository(prisma, tenantContext);
 const requests = new PrismaSignatureRequestRepository(prisma, tenantContext);
 const consents = new PrismaPatientConsentRepository(prisma, tenantContext);

@@ -52,8 +52,12 @@ export interface Patient {
    * `underRetention`).
    */
   retentionUntil: string | null;
-  /** Si hoy la HC está en retención legal (no se puede archivar). */
+  /** Si hoy la HC está en retención (no se puede archivar). */
   underRetention: boolean;
+  /** DX-330: plazo vigente de la clínica en años (NONE); DOUBLE es el doble. */
+  clinicRetentionYears: number;
+  /** DX-330: la fecha de fin sale del plazo anterior de la clínica. */
+  retentionFromPreviousTerm: boolean;
   /** DX-039: cuándo se vaciaron los datos no clínicos (supresión parcial). */
   partiallySuppressedAt: Date | null;
   /** DX-107: lote de importación que creó al paciente (null = alta a mano). */
