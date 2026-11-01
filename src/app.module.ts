@@ -73,6 +73,7 @@ import { OutboundMessagesModule } from './modules/notifications/outbound/outboun
 import { RemindersModule } from './modules/reminders/reminders.module';
 import { SecurityModule } from './shared/security/security.module';
 import { SupportAccessesModule } from './modules/support-accesses/support-accesses.module';
+import { WorkQueuesModule } from './modules/work-queues/work-queues.module';
 import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
 
 @Module({
@@ -149,6 +150,8 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     PlatformModule,
     // Accesos de soporte (break-glass) visibles para el ADMIN (SEC-008).
     SupportAccessesModule,
+    // DX-503: «Mi día», los recuentos de las listas de trabajo por rol y sede.
+    WorkQueuesModule,
     DashboardModule,
     ConsentsModule,
     PostOpInstructionsModule,

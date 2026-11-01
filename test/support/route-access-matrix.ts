@@ -619,6 +619,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /closing-queue': roles('ADMIN', 'DENTIST', 'RECEPTION'),
   'GET /closing-queue/count': roles('ADMIN', 'DENTIST', 'RECEPTION'),
   'POST /closing-queue/dismissals': roles('ADMIN', 'DENTIST', 'RECEPTION'),
+  // DX-503: «Mi día». Los cuatro roles; qué listas cuenta cada uno lo decide
+  // WORK_QUEUE_ROLES, que nunca amplía el @Roles de ninguna lista.
+  'GET /work-queues/summary': EVERY_ROLE,
   // DX-339: agenda de contingencia por sede (PDF de hoy y mañana con los
   // teléfonos de los pacientes): recepción y gestión; la sede la acota el
   // caso de uso (DX-089).
