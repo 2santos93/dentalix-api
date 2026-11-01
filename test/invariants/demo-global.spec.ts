@@ -209,6 +209,14 @@ describe('demo global (DX-335)', () => {
       'America/Caracas',
     );
     expect(early.start.toISOString()).toBe('2026-11-02T14:10:00.000Z');
+    // Fuera de UTC−4, donde un desfase fijo se delata: lunes 2027-06-07 a
+    // las 10:00 en Londres (BST, UTC+1).
+    const [earlyLondon] = planInClinicToday(
+      new Date('2027-06-07T09:00:00Z'),
+      DEFAULT_BUSINESS_HOURS,
+      'Europe/London',
+    );
+    expect(earlyLondon.start.toISOString()).toBe('2027-06-07T09:10:00.000Z');
   });
 
   it('the demo calendar is a pure function of now', () => {
