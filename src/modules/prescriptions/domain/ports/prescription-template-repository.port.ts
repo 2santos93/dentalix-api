@@ -1,3 +1,4 @@
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import type {
   PrescriptionTemplate,
   PrescriptionTemplateItem,
@@ -18,15 +19,20 @@ export interface PrescriptionTemplateRepository {
   list(): Promise<PrescriptionTemplate[]>;
   /** Bajo RLS: una de otra clínica, o retirada, da `null`. */
   findById(id: string): Promise<PrescriptionTemplate | null>;
+  /**
+   * DX-360: alta, cambio y retiro dejan su evento (PRESCRIPTION_TEMPLATE) en
+   * la misma transacción; un cambio que no cambia nada, ninguno. Quien
+   * escribe es el actor de `audit`.
+   */
   create(
     input: PrescriptionTemplateRepoInput,
-    createdById: string,
+    audit: AuditRequestContext,
   ): Promise<PrescriptionTemplate>;
   update(
     id: string,
     input: Partial<PrescriptionTemplateRepoInput>,
-    updatedById: string,
+    audit: AuditRequestContext,
   ): Promise<PrescriptionTemplate>;
   /** Borrado BLANDO (`deletedAt`). */
-  softDelete(id: string, deletedById: string): Promise<void>;
+  softDelete(id: string, audit: AuditRequestContext): Promise<void>;
 }

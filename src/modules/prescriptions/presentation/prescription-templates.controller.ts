@@ -30,8 +30,13 @@ import {
   CLINICAL_ROLES,
   PRESCRIPTION_TEMPLATE_WRITE_ROLES,
 } from '../../auth/presentation/guards/clinic-role-sets';
-import type { TenantJwtPayload } from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
+import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
+import {
+  requireAuditRequestContext,
+  type AuditableRequest,
+} from '../../audit/presentation/audit-request-context';
+import type { AuditRequestContext } from '../../audit/domain/audit-request-context';
 import {
   CreatePrescriptionTemplateUseCase,
   DeletePrescriptionTemplateUseCase,
@@ -44,10 +49,6 @@ import {
   PrescriptionTemplateDto,
   UpdatePrescriptionTemplateDto,
 } from './dto/prescription-template.dto';
-
-interface AuthenticatedRequest {
-  user: TenantJwtPayload;
-}
 
 @ApiTags('prescription-templates')
 @ApiBearerAuth()
@@ -62,6 +63,7 @@ export class PrescriptionTemplatesController {
     private readonly createTemplate: CreatePrescriptionTemplateUseCase,
     private readonly updateTemplate: UpdatePrescriptionTemplateUseCase,
     private readonly deleteTemplate: DeletePrescriptionTemplateUseCase,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   @Get()
@@ -81,11 +83,11 @@ export class PrescriptionTemplatesController {
   })
   create(
     @Body() dto: CreatePrescriptionTemplateDto,
-    @Req() req: AuthenticatedRequest,
+    @Req() req: AuditableRequest,
   ): Promise<PrescriptionTemplate> {
     return this.createTemplate.execute(
       { name: dto.name, notes: dto.notes, items: dto.items },
-      req.user.sub,
+      this.audit(req),
     );
   }
 
@@ -101,12 +103,12 @@ export class PrescriptionTemplatesController {
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdatePrescriptionTemplateDto,
-    @Req() req: AuthenticatedRequest,
+    @Req() req: AuditableRequest,
   ): Promise<PrescriptionTemplate> {
     return this.updateTemplate.execute(
       id,
       { name: dto.name, notes: dto.notes, items: dto.items },
-      req.user.sub,
+      this.audit(req),
     );
   }
 
@@ -121,8 +123,13 @@ export class PrescriptionTemplatesController {
   })
   async remove(
     @Param('id', ParseUUIDPipe) id: string,
-    @Req() req: AuthenticatedRequest,
+    @Req() req: AuditableRequest,
   ): Promise<void> {
-    await this.deleteTemplate.execute(id, req.user.sub);
+    await this.deleteTemplate.execute(id, this.audit(req));
+  }
+
+  /** Quién escribe, para el evento que el repositorio guarda (DX-360). */
+  private audit(req: AuditableRequest): AuditRequestContext {
+    return requireAuditRequestContext(req, this.tenantContext);
   }
 }

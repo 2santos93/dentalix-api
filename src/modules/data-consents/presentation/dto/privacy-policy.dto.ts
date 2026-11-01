@@ -37,7 +37,7 @@ export class PublishPrivacyPolicyDto {
 
   @ApiProperty({
     description:
-      'Texto de la casilla SENSITIVE_HEALTH. Debe decir que el titular «no está obligado» a autorizar, qué «datos sensibles» se tratan y su «finalidad» (Dec. 1377, art. 6); si falta alguna, 400.',
+      'Texto de la casilla SENSITIVE_HEALTH (datos sensibles de salud): lo que el paciente autoriza de forma expresa y separada.',
     minLength: 1,
     maxLength: SCOPE_TEXT_MAX,
   })

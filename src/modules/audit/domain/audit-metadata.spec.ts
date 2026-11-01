@@ -1165,3 +1165,69 @@ describe('sanitizeAuditMetadata — enlaces anulados al archivar (DX-461)', () =
     }
   });
 });
+
+describe('sanitizeAuditMetadata — cambio de configuración de la clínica (DX-360)', () => {
+  it('conserva los campos con su antes y después: textos cortos, números, booleanos, null y listas', () => {
+    const configChange = {
+      before: {
+        name: 'Limpieza',
+        durationMinutes: 30,
+        active: true,
+        sku: null,
+        leadHours: [24],
+      },
+      after: {
+        name: 'Limpieza profunda',
+        durationMinutes: 45,
+        active: false,
+        sku: 'GUA-01',
+        leadHours: [24, 2],
+      },
+    };
+    expect(sanitizeAuditMetadata({ configChange })).toEqual({ configChange });
+  });
+
+  it('admite textos de hasta 255 caracteres (un título de 200)', () => {
+    const configChange = {
+      after: { title: 'T'.repeat(200), host: 'h'.repeat(255) },
+    };
+    expect(sanitizeAuditMetadata({ configChange })).toEqual({ configChange });
+  });
+
+  it('admite un solo lado (un alta o un retiro)', () => {
+    const configChange = {
+      after: { host: 'citas.clinica.co', status: 'PENDING' },
+    };
+    expect(sanitizeAuditMetadata({ configChange })).toEqual({ configChange });
+  });
+
+  it('descarta el valor que no tiene la forma admitida (texto largo, saltos de línea, objetos, NaN)', () => {
+    expect(
+      sanitizeAuditMetadata({
+        configChange: {
+          after: {
+            name: 'Resina',
+            body: 'x'.repeat(256),
+            notes: 'línea 1\nlínea 2',
+            items: [{ activeIngredient: 'Amoxicilina' }],
+            minStock: Number.NaN,
+            'mal nombre': 1,
+            list: Array.from({ length: 51 }, (_, i) => i),
+          },
+        },
+      }),
+    ).toEqual({ configChange: { after: { name: 'Resina' } } });
+  });
+
+  it('sin ningún lado válido no queda nada', () => {
+    for (const configChange of [
+      {},
+      { before: 'x' },
+      { after: { body: 'x'.repeat(256) } },
+      { before: {}, after: {} },
+      'x',
+    ]) {
+      expect(sanitizeAuditMetadata({ configChange })).toEqual({});
+    }
+  });
+});

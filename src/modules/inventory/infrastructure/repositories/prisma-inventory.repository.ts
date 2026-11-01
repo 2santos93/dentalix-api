@@ -1,13 +1,10 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
-  CreateInventoryItemRepoInput,
-  CreateInventoryMovementRepoInput,
   InventoryRepository,
   ListInventoryItemsRepoParams,
-  UpdateInventoryItemRepoInput,
 } from '../../domain/ports/inventory-repository.port';
 import { InventoryItem } from '../../domain/entities/inventory-item.entity';
 import { InventoryMovement } from '../../domain/entities/inventory-movement.entity';
@@ -20,7 +17,7 @@ type PrismaInventoryMovement = Prisma.InventoryMovementGetPayload<
   Record<string, never>
 >;
 
-function mapToEntity(item: PrismaInventoryItem): InventoryItem {
+export function mapToEntity(item: PrismaInventoryItem): InventoryItem {
   return {
     id: item.id,
     tenantId: item.tenantId,
@@ -38,7 +35,7 @@ function mapToEntity(item: PrismaInventoryItem): InventoryItem {
 // `quantity` is a Prisma `Decimal` at the DB layer; the API-facing entity
 // exposes it as a plain `number` — same convention as
 // `PrismaTreatmentPlanRepository.mapItemToEntity` for `price`.
-function mapMovementToEntity(
+export function mapMovementToEntity(
   movement: PrismaInventoryMovement,
 ): InventoryMovement {
   return {
@@ -54,55 +51,16 @@ function mapMovementToEntity(
   };
 }
 
+/**
+ * Lecturas del inventario. Las escrituras, con su auditoría en la misma
+ * transacción, están en `PrismaInventoryAuditedWritesRepository` (DX-360).
+ */
 @Injectable()
 export class PrismaInventoryRepository implements InventoryRepository {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantContext: TenantContextService,
   ) {}
-
-  /**
-   * `tenantId` is NOT NULL at the DB level with no column default that
-   * autofills from the RLS GUC, so — unlike a plain SELECT/UPDATE, which RLS
-   * filters transparently — an INSERT still needs the app to supply it
-   * explicitly. We never take it from the input (never from the client); we
-   * read it from the same request-scoped context that `runWithTenant(fn)`
-   * uses to set `app.current_tenant`, so the value written always matches
-   * the GUC the WITH CHECK policy validates against (same convention as
-   * PrismaTreatmentPlanRepository / PrismaSaleRepository).
-   */
-  private requireTenantId(): string {
-    const tenantId = this.tenantContext.getTenantId();
-    if (!tenantId) {
-      throw new Error('No tenant in context');
-    }
-    return tenantId;
-  }
-
-  async createItem(
-    input: CreateInventoryItemRepoInput,
-  ): Promise<InventoryItem> {
-    const tenantId = this.requireTenantId();
-    const item = await this.prisma.runWithTenant(async (tx) => {
-      return tx.inventoryItem.create({
-        data: {
-          // Sede del request si el cliente la fijó (X-Location-Id, ya validada
-          // contra esta clínica); si no, la de escritura de la sesión: la
-          // principal sin restricción (lo de siempre) o la primera permitida
-          // (DX-089).
-          locationId: await this.tenantContext.writeLocationId(tx),
-          tenantId,
-          name: input.name,
-          sku: input.sku,
-          unit: input.unit,
-          minStock: input.minStock,
-          notes: input.notes,
-          createdById: input.createdById,
-        },
-      });
-    });
-    return mapToEntity(item);
-  }
 
   async findItemById(id: string): Promise<InventoryItem | null> {
     const item = await this.prisma.runWithTenant(async (tx) => {
@@ -150,68 +108,6 @@ export class PrismaInventoryRepository implements InventoryRepository {
       });
       return items.map(mapToEntity);
     });
-  }
-
-  async updateItem(
-    id: string,
-    patch: UpdateInventoryItemRepoInput,
-  ): Promise<InventoryItem> {
-    return this.prisma.runWithTenant(async (tx) => {
-      const existing = await tx.inventoryItem.findFirst({
-        where: { id, deletedAt: null },
-        select: { id: true },
-      });
-      if (!existing) {
-        throw new NotFoundException('Inventory item not found');
-      }
-
-      const item = await tx.inventoryItem.update({
-        where: { id },
-        data: patch,
-      });
-      return mapToEntity(item);
-    });
-  }
-
-  async softDeleteItem(id: string): Promise<void> {
-    await this.prisma.runWithTenant(async (tx) => {
-      const existing = await tx.inventoryItem.findFirst({
-        where: { id, deletedAt: null },
-        select: { id: true },
-      });
-      if (!existing) {
-        throw new NotFoundException('Inventory item not found');
-      }
-
-      await tx.inventoryItem.update({
-        where: { id },
-        data: { deletedAt: new Date() },
-      });
-    });
-  }
-
-  async createMovement(
-    input: CreateInventoryMovementRepoInput,
-  ): Promise<InventoryMovement> {
-    const tenantId = this.requireTenantId();
-    const movement = await this.prisma.runWithTenant(async (tx) => {
-      return tx.inventoryMovement.create({
-        data: {
-          // Sede del request si el cliente la fijó (X-Location-Id, ya validada
-          // contra esta clínica); si no, la de escritura de la sesión: la
-          // principal sin restricción (lo de siempre) o la primera permitida
-          // (DX-089).
-          locationId: await this.tenantContext.writeLocationId(tx),
-          tenantId,
-          itemId: input.itemId,
-          type: input.type,
-          quantity: input.quantity,
-          reason: input.reason,
-          createdById: input.createdById,
-        },
-      });
-    });
-    return mapMovementToEntity(movement);
   }
 
   // listMovements NO filtra por sede: los movimientos ya cuelgan de un ítem,

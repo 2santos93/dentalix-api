@@ -691,7 +691,7 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     { notes: 'Evolución de A' },
   );
   await create(app, a, '/privacy-policies', {
-    policyText: 'Política de tratamiento de datos de A (Ley 1581).',
+    policyText: 'Política de tratamiento de datos de A.',
     generalText: 'Autorizo el tratamiento de mis datos personales.',
     sensitiveHealthText:
       'Autorizo el tratamiento de mis datos sensibles de salud (historia clínica). No está obligado a autorizarlo. Finalidad: la atención odontológica.',
@@ -822,7 +822,7 @@ async function seedBExtras(
   });
   // Con su propia política publicada, la de A no es «la vigente» de B.
   await create(app, b, '/privacy-policies', {
-    policyText: 'Política de tratamiento de datos de B (Ley 1581).',
+    policyText: 'Política de tratamiento de datos de B.',
     generalText: 'Autorizo el tratamiento de mis datos personales.',
     sensitiveHealthText:
       'Autorizo el tratamiento de mis datos sensibles de salud (historia clínica). No está obligado a autorizarlo. Finalidad: la atención odontológica.',

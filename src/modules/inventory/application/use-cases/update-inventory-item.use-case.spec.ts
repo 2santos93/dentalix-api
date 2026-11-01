@@ -1,3 +1,4 @@
+import { TEST_AUDIT } from '../../../audit/application/__fixtures__/test-audit-context';
 import {
   BadRequestException,
   ConflictException,
@@ -10,14 +11,14 @@ import { InMemoryInventoryRepository } from './__fixtures__/in-memory-inventory.
 describe('UpdateInventoryItemUseCase', () => {
   function makeUseCase() {
     const repo = new InMemoryInventoryRepository();
-    return { repo, uc: new UpdateInventoryItemUseCase(repo) };
+    return { repo, uc: new UpdateInventoryItemUseCase(repo, repo) };
   }
 
   it('throws NotFoundException when the item is absent (or another tenant)', async () => {
     const { uc } = makeUseCase();
 
     await expect(
-      uc.execute('missing-id', { name: 'New name' }),
+      uc.execute('missing-id', { name: 'New name' }, TEST_AUDIT),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
@@ -25,7 +26,11 @@ describe('UpdateInventoryItemUseCase', () => {
     const { repo, uc } = makeUseCase();
     const item = repo.seedItem({ name: 'Old', unit: 'unidad', minStock: 1 });
 
-    const updated = await uc.execute(item.id, { name: '  New name  ' });
+    const updated = await uc.execute(
+      item.id,
+      { name: '  New name  ' },
+      TEST_AUDIT,
+    );
 
     expect(updated.name).toBe('New name');
     expect(updated.unit).toBe('unidad');
@@ -36,34 +41,38 @@ describe('UpdateInventoryItemUseCase', () => {
     const { repo, uc } = makeUseCase();
     const item = repo.seedItem();
 
-    await expect(uc.execute(item.id, { name: '   ' })).rejects.toBeInstanceOf(
-      BadRequestException,
-    );
+    await expect(
+      uc.execute(item.id, { name: '   ' }, TEST_AUDIT),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('rejects a blank unit with 400', async () => {
     const { repo, uc } = makeUseCase();
     const item = repo.seedItem();
 
-    await expect(uc.execute(item.id, { unit: '   ' })).rejects.toBeInstanceOf(
-      BadRequestException,
-    );
+    await expect(
+      uc.execute(item.id, { unit: '   ' }, TEST_AUDIT),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('rejects a negative minStock with 400', async () => {
     const { repo, uc } = makeUseCase();
     const item = repo.seedItem();
 
-    await expect(uc.execute(item.id, { minStock: -1 })).rejects.toBeInstanceOf(
-      BadRequestException,
-    );
+    await expect(
+      uc.execute(item.id, { minStock: -1 }, TEST_AUDIT),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('allows clearing sku/notes to null', async () => {
     const { repo, uc } = makeUseCase();
     const item = repo.seedItem({ sku: 'SKU-1', notes: 'old note' });
 
-    const updated = await uc.execute(item.id, { sku: null, notes: null });
+    const updated = await uc.execute(
+      item.id,
+      { sku: null, notes: null },
+      TEST_AUDIT,
+    );
 
     expect(updated.sku).toBeNull();
     expect(updated.notes).toBeNull();
@@ -75,9 +84,9 @@ describe('UpdateInventoryItemUseCase', () => {
       deletedAt: new Date('2026-01-02T00:00:00.000Z'),
     });
 
-    await expect(uc.execute(item.id, { name: 'X' })).rejects.toBeInstanceOf(
-      NotFoundException,
-    );
+    await expect(
+      uc.execute(item.id, { name: 'X' }, TEST_AUDIT),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 
   // DX-042 (DB-011): renombrar a un nombre que ya usa otro insumo de la MISMA
@@ -92,7 +101,9 @@ describe('UpdateInventoryItemUseCase', () => {
       }),
     );
 
-    await expect(uc.execute(item.id, { name: 'GUANTES' })).rejects.toThrow(
+    await expect(
+      uc.execute(item.id, { name: 'GUANTES' }, TEST_AUDIT),
+    ).rejects.toThrow(
       new ConflictException('Ya existe un insumo con ese nombre en esta sede.'),
     );
   });

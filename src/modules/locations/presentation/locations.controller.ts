@@ -13,6 +13,7 @@ import {
   ApiBearerAuth,
   ApiCreatedResponse,
   ApiOkResponse,
+  ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
 import { ClinicRole } from '@prisma/client';
@@ -34,6 +35,11 @@ import { PATIENT_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 import { Audit } from '../../audit/presentation/audit.decorator';
 import type { AuditedRequest } from '../../audit/presentation/audit-request';
+import {
+  requireAuditRequestContext,
+  type AuditableRequest,
+} from '../../audit/presentation/audit-request-context';
+import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import {
   withPhoneInternational,
   type WithPhoneInternational,
@@ -64,6 +70,7 @@ export class LocationsController {
     private readonly listLocations: ListLocationsUseCase,
     private readonly createLocation: CreateLocationUseCase,
     private readonly updateLocation: UpdateLocationUseCase,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   @Get()
@@ -72,11 +79,26 @@ export class LocationsController {
     return (await this.listLocations.execute()).map(present);
   }
 
+  // DX-360: auditado en la transacción del alta (CREATE LOCATION,
+  // LOCATION_CREATED) con nombre, país, valores regionales y teléfono.
   @Post()
   @Roles(ClinicRole.ADMIN)
+  @ApiOperation({
+    summary: 'Crea una sede',
+    description:
+      'Queda en la auditoría (LOCATION_CREATED) con su nombre, país, moneda, zona, formato, reloj, teléfono y región telefónica por defecto (defaultPhoneRegion); nunca la dirección.',
+  })
   @ApiCreatedResponse({ type: LocationDto })
-  async create(@Body() dto: CreateLocationDto): Promise<LocationOutput> {
-    return present(await this.createLocation.execute(dto));
+  async create(
+    @Body() dto: CreateLocationDto,
+    @Req() req: AuditableRequest,
+  ): Promise<LocationOutput> {
+    return present(
+      await this.createLocation.execute(
+        dto,
+        requireAuditRequestContext(req, this.tenantContext),
+      ),
+    );
   }
 
   // Los cambios de la sede quedan auditados (campos cambiados, nunca sus

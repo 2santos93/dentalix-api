@@ -7,6 +7,9 @@ import {
 import { InventoryMovementType } from '@prisma/client';
 import { INVENTORY_REPOSITORY } from '../../domain/ports/inventory-repository.port';
 import type { InventoryRepository } from '../../domain/ports/inventory-repository.port';
+import { INVENTORY_AUDITED_WRITES } from '../../domain/ports/inventory-audited-writes.port';
+import type { InventoryAuditedWrites } from '../../domain/ports/inventory-audited-writes.port';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { InventoryMovement } from '../../domain/entities/inventory-movement.entity';
 
 // NOTE: deliberately NO `tenantId`/`id`/`occurredAt` field — tenant from
@@ -23,6 +26,8 @@ export class RecordInventoryMovementUseCase {
   constructor(
     @Inject(INVENTORY_REPOSITORY)
     private readonly repo: InventoryRepository,
+    @Inject(INVENTORY_AUDITED_WRITES)
+    private readonly writes: InventoryAuditedWrites,
   ) {}
 
   /**
@@ -35,7 +40,7 @@ export class RecordInventoryMovementUseCase {
    */
   async execute(
     input: RecordInventoryMovementInput,
-    createdById?: string,
+    audit: AuditRequestContext,
   ): Promise<InventoryMovement> {
     const item = await this.repo.findItemById(input.itemId);
     if (!item) {
@@ -61,12 +66,14 @@ export class RecordInventoryMovementUseCase {
       );
     }
 
-    return this.repo.createMovement({
-      itemId: input.itemId,
-      type: input.type,
-      quantity: input.quantity,
-      reason: input.reason,
-      createdById,
-    });
+    return this.writes.createMovement(
+      {
+        itemId: input.itemId,
+        type: input.type,
+        quantity: input.quantity,
+        reason: input.reason,
+      },
+      audit,
+    );
   }
 }
