@@ -236,7 +236,7 @@ describe('perio_*: FK compuestas, RLS, inmutabilidad y CHECKs (DX-007, int)', ()
   it('el repositorio toma la zona horaria de la sede activa', async () => {
     // G1: la zona es de la sede (`Location.timeZone`), no de su horario.
     const repo = new PrismaPerioExamRepository(prisma, tenantContext);
-    // Sin sedes activas no hay zona de referencia: 409, nunca Bogotá.
+    // Sin sedes activas no hay zona de referencia: 409, nunca una zona por defecto.
     await expect(
       tenantContext.run(b.tenantId, undefined, () => repo.clinicTimeZone()),
     ).rejects.toMatchObject({ response: { code: 'LOCATION_REQUIRED' } });

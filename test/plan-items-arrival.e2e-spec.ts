@@ -42,7 +42,7 @@ const DAY = 86400000;
 const ZONE = 'America/Bogota';
 const CLOSED = 'Esta cita ya pasó: sus tratamientos no se cambian.';
 
-/** «30/10/2026 a las 09:00» en la zona de la sede (Colombia sin horario). */
+/** «30/10/2026 a las 09:00» en la zona de la sede (UTC−5, sin horario de verano). */
 function wall(instant: Date): string {
   const p = Object.fromEntries(
     new Intl.DateTimeFormat('es-CO', {
@@ -60,7 +60,7 @@ function wall(instant: Date): string {
   return `${p.day}/${p.month}/${p.year} a las ${p.hour}:${p.minute}`;
 }
 
-/** Minutos que lleva el día en Bogotá (UTC-5 fijo). */
+/** Minutos que lleva el día en la zona de la sede (UTC-5 fijo). */
 function minutesIntoBogotaDay(now: Date): number {
   const local = new Date(now.getTime() - 5 * 60 * MIN);
   return local.getUTCHours() * 60 + local.getUTCMinutes();
@@ -198,7 +198,7 @@ describe('DX-271 llegada tarde y vínculos de citas cerradas', () => {
       ids: [itemId],
     } = await acceptedItems(1);
     await accept(planId);
-    // Cita A de hoy (en Bogotá) que empezó hace un rato; el paciente no llega.
+    // Cita A de hoy (en la zona de la sede) que empezó hace un rato; el paciente no llega.
     const lateBy = Math.max(
       1,
       Math.min(20, minutesIntoBogotaDay(new Date()) - 1),

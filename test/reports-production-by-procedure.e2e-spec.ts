@@ -28,8 +28,8 @@ import {
 import type { LocationsComparison } from '../src/modules/reports/application/use-cases/get-locations-comparison.use-case';
 
 /**
- * DX-423 · «Producción por procedimiento» por HTTP real. Clínica A (Bogotá,
- * UTC−5) con tres sedes y octubre de 2026:
+ * DX-423 · «Producción por procedimiento» por HTTP real. Clínica A (UTC−5)
+ * con tres sedes y octubre de 2026:
  *
  *  - Resina (Operatoria) COP en la principal: 100 y 100 de la Dra. Uno y 80
  *    con 20 de descuento del Dr. Dos, catálogo 100 en los tres → 3 · bruto
@@ -38,7 +38,7 @@ import type { LocationsComparison } from '../src/modules/reports/application/use
  *  - Profilaxis (Prevención) COP 40 en la Norte, de la Dra. Uno, para un
  *    paciente cuyo plan se presentó en la principal («de» la principal);
  *  - Blanqueamiento (sin categoría) COP 30 en la Sur a las 22:00 del 31/10 en
- *    Bogotá (ya 1/11 en UTC): cuenta; otro a las 22:00 del 30/09: no;
+ *    la zona de la sede (ya 1/11 en UTC): cuenta; otro a las 22:00 del 30/09: no;
  *  - no cuentan: un DONE borrado, uno de un plan borrado, un propuesto, un
  *    aceptado y uno aceptado en un plan cancelado;
  *  - «Sin atribuir»: un DONE sin quién, cuándo ni sede (COP 70) y uno de la
@@ -264,7 +264,7 @@ describe('GET /reports/production-by-procedure (DX-423)', () => {
       completedAt: at('09'),
       presentedLocationId: principal,
     });
-    // Bordes del período en la zona de la sede (Bogotá).
+    // Bordes del período en la zona de la sede.
     await item({
       patientId: p3,
       catalogItemId: blanqueamiento,
