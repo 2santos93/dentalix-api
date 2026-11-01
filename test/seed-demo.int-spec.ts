@@ -26,6 +26,8 @@ import {
   DEMO_ALFA_PAYER,
   DEMO_COMPARISON_HISTORY,
   DEMO_COVERAGES,
+  DEMO_HOLIDAYS,
+  DEMO_RETENTION,
   DEMO_LOCATIONS,
   DEMO_MANUAL_RATES,
   DEMO_PATIENTS,
@@ -37,6 +39,8 @@ import {
   DEMO_SITE_PRICE_LISTS,
   type DemoLocationKey,
 } from '../prisma/demo/data';
+import { coverageStatus } from '../src/modules/patient-coverages/domain/coverage-rules';
+import { isDemoHoliday } from '../prisma/demo/calendar';
 import { purgeDemoTenants } from './support/demo-tenant-purge';
 import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
 import { tenantTablesInDeleteOrder } from './support/tenant-purge';
@@ -161,6 +165,25 @@ async function demoZonesById(tenantId: string): Promise<Map<string, string>> {
       if (!site)
         throw new Error(`Sede sin fila en DEMO_LOCATIONS: ${row.name}`);
       return [row.id, site.timeZone];
+    }),
+  );
+}
+
+/** DX-335: clave de cada sede demo por id, por su nombre. */
+async function demoSiteKeysById(
+  tenantId: string,
+): Promise<Map<string, DemoLocationKey>> {
+  const rows = await raw.location.findMany({
+    where: { tenantId },
+    select: { id: true, name: true },
+  });
+  return new Map(
+    rows.map((row) => {
+      const key = (Object.keys(DEMO_LOCATIONS) as DemoLocationKey[]).find(
+        (k) => DEMO_LOCATIONS[k].name === row.name,
+      );
+      if (!key) throw new Error(`Sede sin fila en DEMO_LOCATIONS: ${row.name}`);
+      return [row.id, key];
     }),
   );
 }
@@ -307,10 +330,10 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     // DX-335: las dos sedes de la rotación y las dos con dentista propio.
     expect(firstCounts.locations).toBe(4);
     expect(firstCounts.location_schedules).toBe(4);
-    // DX-316: cada sede con su calendario de lunes a viernes (trigger), sin
-    // festivos (los de ejemplo son de G6.1).
+    // DX-316: cada sede con su calendario de lunes a viernes (trigger) y sus
+    // cuatro festivos de ejemplo (R12).
     expect(firstCounts.location_working_calendars).toBe(4);
-    expect(firstCounts.location_holidays).toBe(0);
+    expect(firstCounts.location_holidays).toBe(16);
     expect(firstCounts.clinic_memberships).toBe(8);
     // DX-089: «Recepción Norte» y el dentista de cada sede propia tienen
     // sedes; el resto atiende en todas.
@@ -1688,9 +1711,11 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
         new Set(s.ranges.map((r) => r.weekday)),
       ]),
     );
+    const siteKeys = await demoSiteKeysById(tenantId);
     // Meses civiles de la sede: su zona y su horario (PF5).
     const monthsAt = (id: string): string[] => {
       const zone = zones.get(id)!;
+      const key = siteKeys.get(id)!;
       const open = openWeekdays.get(id)!;
       const today = civilDateIn(new Date(), zone);
       const [y, m, d] = today.split('-').map(Number);
@@ -1701,9 +1726,15 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       ).slice(0, 7);
       // El mes actual solo se siembra si hay un día abierto de la sede antes
       // de hoy en el mes.
-      const openDayBefore = Array.from({ length: d - 1 }, (_, i) =>
-        new Date(Date.UTC(y, m - 1, i + 1)).getUTCDay(),
-      ).some((weekday) => open.has(weekday));
+      // Un festivo de la sede cuenta como cerrado (R12).
+      const openDayBefore = Array.from(
+        { length: d - 1 },
+        (_, i) => new Date(Date.UTC(y, m - 1, i + 1)),
+      ).some(
+        (date) =>
+          open.has(date.getUTCDay()) &&
+          !isDemoHoliday(new Date(), key, date.toISOString().slice(0, 10)),
+      );
       return openDayBefore ? [previous, current] : [previous];
     };
 
@@ -1748,6 +1779,109 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
         }).toEqual({ where, completed: true, paid: true, done: true });
       }
     }
+  });
+
+  it('holidays per location and no appointment on a holiday', async () => {
+    const tenantId = await liveDemoTenantId();
+    const siteKeys = await demoSiteKeysById(tenantId);
+    const holidays = await raw.locationHoliday.findMany({
+      where: { tenantId, deletedAt: null },
+    });
+    for (const [id, key] of siteKeys) {
+      const mine = holidays.filter((h) => h.locationId === id);
+      expect({ key, names: mine.map((h) => h.name).sort() }).toEqual({
+        key,
+        names: DEMO_HOLIDAYS[key].map((h) => h.name).sort(),
+      });
+      expect(mine.filter((h) => !h.recurring).map((h) => h.name)).toEqual([
+        'Cierre por mantenimiento',
+      ]);
+    }
+    // Ninguna cita, de ningún estado, cae en un festivo de su sede. Los
+    // festivos se miran con el «hoy» de los dos extremos de la corrida.
+    const appointments = await raw.appointment.findMany({
+      where: { tenantId, deletedAt: null },
+      select: { locationId: true, start: true },
+    });
+    expect(appointments.length).toBeGreaterThan(0);
+    const zones = await demoZonesById(tenantId);
+    const onHoliday = appointments.filter((a) => {
+      const day = civilDateIn(a.start, zones.get(a.locationId)!);
+      const key = siteKeys.get(a.locationId)!;
+      return [seededBetween.start, seededBetween.end].some((t) =>
+        isDemoHoliday(new Date(t), key, day),
+      );
+    });
+    expect(onHoliday).toEqual([]);
+  });
+
+  it("coverage pending and expired are relative to the patient's location today", async () => {
+    const tenantId = await liveDemoTenantId();
+    const stored = async (index: number) => {
+      const patient = await raw.patient.findFirstOrThrow({
+        where: { tenantId, docNumber: DEMO_PATIENTS[index].docNumber },
+      });
+      const coverage = await raw.patientCoverage.findFirstOrThrow({
+        where: {
+          tenantId,
+          patientId: patient.id,
+          memberNumber: DEMO_COVERAGES.find((c) => c.patientIndex === index)!
+            .memberNumber,
+        },
+      });
+      return {
+        validFrom: coverage.validFrom?.toISOString().slice(0, 10) ?? null,
+        validTo: coverage.validTo?.toISOString().slice(0, 10) ?? null,
+        zone: DEMO_LOCATIONS[DEMO_PATIENTS[index].location].timeZone,
+      };
+    };
+    // «hoy» de la sede en cualquiera de los dos extremos de la corrida.
+    const todays = (zone: string) =>
+      [seededBetween.start, seededBetween.end].map((t) =>
+        civilDateIn(new Date(t), zone),
+      );
+    const expired = await stored(3);
+    expect(expired.validFrom).toBeNull();
+    expect(todays(expired.zone).map((d) => addCivilDays(d, -30))).toContain(
+      expired.validTo,
+    );
+    const pending = await stored(7);
+    expect(pending.validTo).toBeNull();
+    expect(todays(pending.zone).map((d) => addCivilDays(d, 45))).toContain(
+      pending.validFrom,
+    );
+    // La ficha los lee como «vencida» y «pendiente» en la sede del paciente.
+    expect(coverageStatus(expired, todays(expired.zone)[1])).toBe('EXPIRED');
+    expect(coverageStatus(pending, todays(pending.zone)[1])).toBe(
+      'NOT_STARTED',
+    );
+  });
+
+  it('retention extension on two patients', async () => {
+    const tenantId = await liveDemoTenantId();
+    for (const spec of DEMO_RETENTION) {
+      const patient = await raw.patient.findFirstOrThrow({
+        where: {
+          tenantId,
+          docNumber: DEMO_PATIENTS[spec.patientIndex].docNumber,
+        },
+      });
+      expect(patient.retentionExtended).toBe(spec.value);
+      const actions = await raw.patientRetentionAction.findMany({
+        where: { tenantId, patientId: patient.id },
+      });
+      expect(actions).toHaveLength(1);
+      expect(actions[0]).toMatchObject({
+        kind: 'EXTENSION_CHANGED',
+        newExtension: spec.value,
+        reason: spec.reason,
+      });
+    }
+    expect(
+      await raw.patient.count({
+        where: { tenantId, retentionExtended: { not: 'NONE' } },
+      }),
+    ).toBe(DEMO_RETENTION.length);
   });
 
   it('DX-012: un presupuesto presentable (borrador con descuento) y otro aceptado con firma', async () => {

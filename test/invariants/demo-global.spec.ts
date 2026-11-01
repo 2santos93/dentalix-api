@@ -6,7 +6,9 @@ import {
 } from 'libphonenumber-js/max';
 import {
   daysAgoAt,
+  isDemoHoliday,
   planAppointments,
+  planClosingQueueExamples,
   planComparisonHistory,
   planInClinicToday,
   planSiteAppointments,
@@ -14,6 +16,8 @@ import {
 import {
   DEMO_COMMUNICATION,
   DEMO_COMPARISON_HISTORY,
+  DEMO_COVERAGES,
+  DEMO_HOLIDAYS,
   DEMO_LOCATIONS,
   DEMO_MANUAL_RATES,
   DEMO_PATIENTS,
@@ -21,6 +25,7 @@ import {
   DEMO_PRICES,
   DEMO_PRIVACY_POLICY,
   DEMO_RESPONSIBLES,
+  DEMO_RETENTION,
   DEMO_SITE_PRICE_LISTS,
   DEMO_USERS,
   type DemoLocationKey,
@@ -220,6 +225,7 @@ describe('demo global (DX-335)', () => {
       now,
       DEFAULT_BUSINESS_HOURS,
       'America/Caracas',
+      'principal',
     );
     expect(early.start.toISOString()).toBe('2026-11-02T14:10:00.000Z');
     // Fuera de UTC−4, donde un desfase fijo se delata: lunes 2027-06-07 a
@@ -228,6 +234,7 @@ describe('demo global (DX-335)', () => {
       new Date('2027-06-07T09:00:00Z'),
       DEFAULT_BUSINESS_HOURS,
       'Europe/London',
+      'londres',
     );
     expect(earlyLondon.start.toISOString()).toBe('2027-06-07T09:10:00.000Z');
   });
@@ -526,5 +533,128 @@ describe('demo global (DX-335)', () => {
       }
     }
     expect(checked).toBeGreaterThan(366 * 4);
+  });
+
+  it('no planner puts an appointment on a holiday of its location', () => {
+    expect(
+      isDemoHoliday(
+        new Date('2028-07-05T12:00:00Z'),
+        'principal',
+        '2028-07-05',
+      ),
+    ).toBe(true);
+    expect(
+      isDemoHoliday(new Date('2028-12-26T12:00:00Z'), 'londres', '2028-12-26'),
+    ).toBe(true);
+    const zones = {
+      principal: DEMO_LOCATIONS.principal.timeZone,
+      norte: DEMO_LOCATIONS.norte.timeZone,
+    };
+    const mainRanges = rangesOf('principal');
+    let planned = 0;
+    for (
+      let day = '2028-01-01';
+      day <= '2028-12-31';
+      day = addCivilDays(day, 1)
+    ) {
+      const now = new Date(`${day}T12:00:00Z`);
+      const offenders: unknown[] = [];
+      const check = (planner: string, key: DemoLocationKey, start: Date) => {
+        planned++;
+        const visitDay = civilDateIn(start, DEMO_LOCATIONS[key].timeZone);
+        if (isDemoHoliday(now, key, visitDay)) {
+          offenders.push({ planner, key, visitDay });
+        }
+      };
+      for (const a of planAppointments(
+        now,
+        zones,
+        localPatientIndexes(),
+        () => true,
+      )) {
+        check('planAppointments', a.location, a.start);
+      }
+      for (const key of ['saoPaulo', 'londres'] as const) {
+        for (const a of planSiteAppointments(
+          now,
+          key,
+          DEMO_LOCATIONS[key].timeZone,
+          sitePatientIndexes(key),
+          () => true,
+        )) {
+          check('planSiteAppointments', key, a.start);
+        }
+      }
+      for (const a of planInClinicToday(
+        now,
+        mainRanges,
+        zones.principal,
+        'principal',
+      )) {
+        check('planInClinicToday', 'principal', a.start);
+      }
+      for (const a of planClosingQueueExamples(
+        now,
+        mainRanges,
+        zones.principal,
+        'principal',
+      )) {
+        check('planClosingQueueExamples', 'principal', a.start);
+      }
+      for (const key of SITE_KEYS) {
+        const zone = DEMO_LOCATIONS[key].timeZone;
+        for (const v of planComparisonHistory(
+          now,
+          zone,
+          key,
+          DEMO_COMPARISON_HISTORY,
+          rangesOf(key),
+        )) {
+          check(
+            'planComparisonHistory',
+            key,
+            daysAgoAt(now, v.daysAgo, v.startMinute, zone),
+          );
+        }
+      }
+      expect({ day, offenders }).toEqual({ day, offenders: [] });
+    }
+    expect(planned).toBeGreaterThan(366 * 4);
+  });
+
+  it('every location has four example holidays and a closure 28 days from its today', () => {
+    for (const key of SITE_KEYS) {
+      expect(DEMO_HOLIDAYS[key]).toHaveLength(4);
+      const now = new Date('2028-03-10T12:00:00Z');
+      const closure = addCivilDays(
+        civilDateIn(now, DEMO_LOCATIONS[key].timeZone),
+        28,
+      );
+      expect(isDemoHoliday(now, key, closure)).toBe(true);
+    }
+  });
+
+  it('demo coverages carry no literal date, only days from the patient location today', () => {
+    for (const c of DEMO_COVERAGES) {
+      expect(Object.keys(c)).not.toContain('validFrom');
+      expect(Object.keys(c)).not.toContain('validTo');
+    }
+    expect(DEMO_COVERAGES.some((c) => (c.validFromDays ?? 0) > 0)).toBe(true);
+    expect(DEMO_COVERAGES.some((c) => (c.validToDays ?? 0) < 0)).toBe(true);
+  });
+
+  it('the demo extends retention on two patients with fixed reasons', () => {
+    expect(DEMO_RETENTION).toEqual([
+      {
+        patientIndex: 1,
+        value: 'PERMANENT',
+        reason: 'Tratamiento de implantes de larga duración',
+      },
+      {
+        patientIndex: 6,
+        value: 'DOUBLE',
+        reason: 'Solicitud de la paciente',
+      },
+    ]);
   });
 });

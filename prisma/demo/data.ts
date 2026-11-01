@@ -255,6 +255,62 @@ export function regionOf(key: DemoLocationKey): DemoRegion {
 }
 
 /**
+ * Un festivo de ejemplo de una sede (R12): recurrente (mes y día, sirve para
+ * cualquier año) o un cierre puntual a `daysFromToday` días del «hoy» de la
+ * sede. Son datos de la demo, no una regla del producto.
+ */
+export type DemoHoliday = { name: string } & (
+  { month: number; day: number } | { daysFromToday: number }
+);
+
+const MAINTENANCE_CLOSURE: DemoHoliday = {
+  name: 'Cierre por mantenimiento',
+  daysFromToday: 28,
+};
+
+/** Festivos de ejemplo por sede: cuatro cada una (R12). */
+export const DEMO_HOLIDAYS: Record<DemoLocationKey, readonly DemoHoliday[]> = {
+  principal: [
+    { name: 'Año Nuevo', month: 1, day: 1 },
+    { name: 'Día de la Independencia', month: 7, day: 5 },
+    { name: 'Navidad', month: 12, day: 25 },
+    MAINTENANCE_CLOSURE,
+  ],
+  norte: [
+    { name: 'Año Nuevo', month: 1, day: 1 },
+    { name: 'Día de la Independencia', month: 7, day: 5 },
+    { name: 'Navidad', month: 12, day: 25 },
+    MAINTENANCE_CLOSURE,
+  ],
+  saoPaulo: [
+    { name: 'Año Nuevo', month: 1, day: 1 },
+    { name: 'Independencia', month: 9, day: 7 },
+    { name: 'Navidad', month: 12, day: 25 },
+    MAINTENANCE_CLOSURE,
+  ],
+  londres: [
+    { name: 'Año Nuevo', month: 1, day: 1 },
+    { name: 'Navidad', month: 12, day: 25 },
+    { name: 'San Esteban (Boxing Day)', month: 12, day: 26 },
+    MAINTENANCE_CLOSURE,
+  ],
+};
+
+/** Pacientes con la retención de la historia clínica ampliada (R13). */
+export const DEMO_RETENTION: readonly {
+  patientIndex: number;
+  value: 'DOUBLE' | 'PERMANENT';
+  reason: string;
+}[] = [
+  {
+    patientIndex: 1,
+    value: 'PERMANENT',
+    reason: 'Tratamiento de implantes de larga duración',
+  },
+  { patientIndex: 6, value: 'DOUBLE', reason: 'Solicitud de la paciente' },
+];
+
+/**
  * Días de tasa manual que siembra la demo y la sede en cuyo contexto se
  * registra cada uno. Van desde hace `DEMO_MANUAL_RATE_DAYS - 1` días (en la
  * principal) hasta el «hoy» más adelantado de las sedes, porque el caso de uso
@@ -1141,9 +1197,12 @@ export interface DemoCoverage {
   payerKey: (typeof DEMO_PAYERS)[number]['key'];
   planName: string;
   memberNumber: string;
-  /** YYYY-MM-DD; fechas fijas para que la demo sea estable. */
-  validFrom: string | null;
-  validTo: string | null;
+  /**
+   * Días desde el «hoy» de la sede del paciente (R10): la demo no envejece.
+   * `null` = sin límite.
+   */
+  validFromDays: number | null;
+  validToDays: number | null;
   isPrimary: boolean;
 }
 
@@ -1154,8 +1213,8 @@ export const DEMO_COVERAGES: readonly DemoCoverage[] = [
     payerKey: 'aseguradora',
     planName: 'Plan Esencial',
     memberNumber: 'DEMO-ASEG-1000',
-    validFrom: null,
-    validTo: null,
+    validFromDays: null,
+    validToDays: null,
     isPrimary: true,
   },
   {
@@ -1163,8 +1222,8 @@ export const DEMO_COVERAGES: readonly DemoCoverage[] = [
     payerKey: 'prepagada',
     planName: 'Plan Prepagado Familiar',
     memberNumber: 'DEMO-PREP-1001',
-    validFrom: null,
-    validTo: null,
+    validFromDays: null,
+    validToDays: null,
     isPrimary: true,
   },
   {
@@ -1172,8 +1231,8 @@ export const DEMO_COVERAGES: readonly DemoCoverage[] = [
     payerKey: 'publico',
     planName: 'Cobertura Pública Básica',
     memberNumber: 'DEMO-PUB-1002',
-    validFrom: null,
-    validTo: null,
+    validFromDays: null,
+    validToDays: null,
     isPrimary: true,
   },
   {
@@ -1181,8 +1240,8 @@ export const DEMO_COVERAGES: readonly DemoCoverage[] = [
     payerKey: 'horizonte',
     planName: 'Plan Horizonte Clásico',
     memberNumber: 'DEMO-HORIZ-1003',
-    validFrom: null,
-    validTo: '2025-12-31',
+    validFromDays: null,
+    validToDays: -30,
     isPrimary: true,
   },
   {
@@ -1190,8 +1249,8 @@ export const DEMO_COVERAGES: readonly DemoCoverage[] = [
     payerKey: 'aseguradora',
     planName: 'Plan Esencial',
     memberNumber: 'DEMO-ASEG-1004',
-    validFrom: null,
-    validTo: null,
+    validFromDays: null,
+    validToDays: null,
     isPrimary: true,
   },
   {
@@ -1199,8 +1258,8 @@ export const DEMO_COVERAGES: readonly DemoCoverage[] = [
     payerKey: 'mutual',
     planName: 'Plan Mutual Dental',
     memberNumber: 'DEMO-MUTUAL-1005',
-    validFrom: null,
-    validTo: null,
+    validFromDays: null,
+    validToDays: null,
     isPrimary: true,
   },
   {
@@ -1208,8 +1267,8 @@ export const DEMO_COVERAGES: readonly DemoCoverage[] = [
     payerKey: 'prepagada',
     planName: 'Plan Prepagado Familiar',
     memberNumber: 'DEMO-PREP-1006',
-    validFrom: null,
-    validTo: null,
+    validFromDays: null,
+    validToDays: null,
     isPrimary: true,
   },
   {
@@ -1217,8 +1276,8 @@ export const DEMO_COVERAGES: readonly DemoCoverage[] = [
     payerKey: 'vital',
     planName: 'Plan Vital Integral',
     memberNumber: 'DEMO-VITAL-1007',
-    validFrom: '2027-06-01',
-    validTo: null,
+    validFromDays: 45,
+    validToDays: null,
     isPrimary: true,
   },
   {
@@ -1226,8 +1285,8 @@ export const DEMO_COVERAGES: readonly DemoCoverage[] = [
     payerKey: 'publico',
     planName: 'Cobertura Pública Básica',
     memberNumber: 'DEMO-PUB-1008',
-    validFrom: null,
-    validTo: null,
+    validFromDays: null,
+    validToDays: null,
     isPrimary: true,
   },
   {
@@ -1235,8 +1294,8 @@ export const DEMO_COVERAGES: readonly DemoCoverage[] = [
     payerKey: 'aseguradora',
     planName: 'Plan Esencial',
     memberNumber: 'DEMO-ASEG-1009',
-    validFrom: null,
-    validTo: null,
+    validFromDays: null,
+    validToDays: null,
     isPrimary: true,
   },
   {
@@ -1244,8 +1303,8 @@ export const DEMO_COVERAGES: readonly DemoCoverage[] = [
     payerKey: 'premium',
     planName: 'Plan Premium Oro',
     memberNumber: 'DEMO-PREM-1010',
-    validFrom: null,
-    validTo: null,
+    validFromDays: null,
+    validToDays: null,
     isPrimary: true,
   },
   {
@@ -1253,8 +1312,8 @@ export const DEMO_COVERAGES: readonly DemoCoverage[] = [
     payerKey: 'prepagada',
     planName: 'Plan Prepagado Familiar',
     memberNumber: 'DEMO-PREP-1011',
-    validFrom: null,
-    validTo: null,
+    validFromDays: null,
+    validToDays: null,
     isPrimary: true,
   },
   {
@@ -1262,8 +1321,8 @@ export const DEMO_COVERAGES: readonly DemoCoverage[] = [
     payerKey: 'horizonte',
     planName: 'Plan Horizonte Clásico',
     memberNumber: 'DEMO-HORIZ-1012',
-    validFrom: null,
-    validTo: null,
+    validFromDays: null,
+    validToDays: null,
     isPrimary: true,
   },
   {
@@ -1271,8 +1330,8 @@ export const DEMO_COVERAGES: readonly DemoCoverage[] = [
     payerKey: 'aseguradora',
     planName: 'Plan Esencial',
     memberNumber: 'DEMO-ASEG-1013',
-    validFrom: null,
-    validTo: null,
+    validFromDays: null,
+    validToDays: null,
     isPrimary: true,
   },
   {
@@ -1280,8 +1339,8 @@ export const DEMO_COVERAGES: readonly DemoCoverage[] = [
     payerKey: 'vital',
     planName: 'Plan Vital Integral',
     memberNumber: 'DEMO-VITAL-1014',
-    validFrom: null,
-    validTo: null,
+    validFromDays: null,
+    validToDays: null,
     isPrimary: true,
   },
   {
@@ -1289,8 +1348,8 @@ export const DEMO_COVERAGES: readonly DemoCoverage[] = [
     payerKey: 'publico',
     planName: 'Cobertura Pública Básica',
     memberNumber: 'DEMO-PUB-1015',
-    validFrom: null,
-    validTo: null,
+    validFromDays: null,
+    validToDays: null,
     isPrimary: true,
   },
   {
@@ -1298,8 +1357,8 @@ export const DEMO_COVERAGES: readonly DemoCoverage[] = [
     payerKey: 'horizonte',
     planName: 'Plan Horizonte Clásico',
     memberNumber: 'DEMO-HORIZ-1016',
-    validFrom: null,
-    validTo: null,
+    validFromDays: null,
+    validToDays: null,
     isPrimary: true,
   },
   {
@@ -1307,8 +1366,8 @@ export const DEMO_COVERAGES: readonly DemoCoverage[] = [
     payerKey: 'mutual',
     planName: 'Plan Mutual Dental',
     memberNumber: 'DEMO-MUTUAL-1017',
-    validFrom: null,
-    validTo: null,
+    validFromDays: null,
+    validToDays: null,
     isPrimary: true,
   },
   {
@@ -1316,8 +1375,8 @@ export const DEMO_COVERAGES: readonly DemoCoverage[] = [
     payerKey: 'prepagada',
     planName: 'Plan Prepagado Familiar',
     memberNumber: 'DEMO-PREP-1018',
-    validFrom: null,
-    validTo: null,
+    validFromDays: null,
+    validToDays: null,
     isPrimary: true,
   },
   {
@@ -1325,8 +1384,8 @@ export const DEMO_COVERAGES: readonly DemoCoverage[] = [
     payerKey: 'vital',
     planName: 'Plan Vital Integral',
     memberNumber: 'DEMO-VITAL-1019',
-    validFrom: null,
-    validTo: null,
+    validFromDays: null,
+    validToDays: null,
     isPrimary: true,
   },
   {
@@ -1334,8 +1393,8 @@ export const DEMO_COVERAGES: readonly DemoCoverage[] = [
     payerKey: 'publico',
     planName: 'Cobertura Pública Básica',
     memberNumber: 'DEMO-PUB-1020',
-    validFrom: null,
-    validTo: null,
+    validFromDays: null,
+    validToDays: null,
     isPrimary: true,
   },
   {
@@ -1343,8 +1402,8 @@ export const DEMO_COVERAGES: readonly DemoCoverage[] = [
     payerKey: 'aseguradora',
     planName: 'Plan Esencial',
     memberNumber: 'DEMO-ASEG-1021',
-    validFrom: null,
-    validTo: null,
+    validFromDays: null,
+    validToDays: null,
     isPrimary: true,
   },
   {
@@ -1352,8 +1411,8 @@ export const DEMO_COVERAGES: readonly DemoCoverage[] = [
     payerKey: 'mutual',
     planName: 'Plan Mutual Dental',
     memberNumber: 'DEMO-MUTUAL-1022',
-    validFrom: null,
-    validTo: null,
+    validFromDays: null,
+    validToDays: null,
     isPrimary: true,
   },
 ];

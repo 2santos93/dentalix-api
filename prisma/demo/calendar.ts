@@ -8,6 +8,8 @@ import {
 } from '../../src/shared/time/civil-day';
 import type { ScheduleRange } from '../../src/modules/location-schedule/application/business-hours';
 import {
+  DEMO_HOLIDAYS,
+  DEMO_LOCATIONS,
   DEMO_ROTATION,
   type DemoLocationKey,
   type RotationSiteKey,
@@ -39,6 +41,47 @@ interface LocalDay {
 function sedeDay(now: Date, offset: number, timeZone: string): LocalDay {
   const day = addCivilDays(civilDateIn(now, timeZone), offset);
   return { offset, day, weekday: civilWeekday(day) };
+}
+
+/**
+ * ¿Es `day` (YYYY-MM-DD) un festivo de ejemplo de la sede? Lo usan TODOS los
+ * planificadores: un festivo cuenta como día cerrado, así la demo no tiene
+ * citas en un festivo de su sede (PF6). Los recurrentes se comparan por
+ * mes y día con cualquier año; el cierre puntual, contra el «hoy» de la sede.
+ */
+export function isDemoHoliday(
+  now: Date,
+  key: DemoLocationKey,
+  day: string,
+): boolean {
+  return DEMO_HOLIDAYS[key].some((holiday) => {
+    if ('daysFromToday' in holiday) {
+      const today = civilDateIn(now, DEMO_LOCATIONS[key].timeZone);
+      return day === addCivilDays(today, holiday.daysFromToday);
+    }
+    const month = String(holiday.month).padStart(2, '0');
+    const dayOfMonth = String(holiday.day).padStart(2, '0');
+    return day.slice(5) === `${month}-${dayOfMonth}`;
+  });
+}
+
+/**
+ * Desfase (días atrás, en la sede) del día laborable no festivo más reciente
+ * desde `daysAgo` hacia atrás: una visita nunca cae en un festivo ni en fin de
+ * semana de la sede.
+ */
+export function workdayDaysAgo(
+  now: Date,
+  key: DemoLocationKey,
+  daysAgo: number,
+): number {
+  const timeZone = DEMO_LOCATIONS[key].timeZone;
+  let offset = daysAgo;
+  for (;;) {
+    const day = sedeDay(now, -offset, timeZone);
+    if (day.weekday !== 0 && !isDemoHoliday(now, key, day.day)) return offset;
+    offset++;
+  }
 }
 
 /** Instante de las `minuteOfDay` (hora de pared de la sede) de ese día. */
@@ -229,6 +272,7 @@ export function planAppointments(
           : (dayIndex + dentistIndex) % 2 === 0
             ? 'principal'
             : 'norte';
+      if (isDemoHoliday(now, location, day.day)) continue;
 
       SLOT_TEMPLATES[location].forEach(([startMinute, duration], slot) => {
         if ((dayIndex * 3 + slot * 5 + dentistIndex * 2) % 7 >= 3) return;
@@ -277,7 +321,7 @@ export function planSiteAppointments(
   const planned: PlannedAppointment[] = [];
   for (let offset = firstOffset; offset <= lastOffset; offset++) {
     const day = sedeDay(now, offset, timeZone);
-    if (day.weekday === 0) continue; // domingo cerrado
+    if (day.weekday === 0 || isDemoHoliday(now, key, day.day)) continue;
     const dayIndex = offset - firstOffset;
     SLOT_TEMPLATES[key].forEach(([startMinute, duration], slot) => {
       if ((dayIndex * 3 + slot * 5) % 7 >= 3) return;
@@ -371,8 +415,10 @@ export function planInClinicToday(
   now: Date,
   ranges: readonly WallRange[],
   timeZone: string,
+  key: DemoLocationKey,
 ): PlannedInClinic[] {
   const today = sedeDay(now, 0, timeZone);
+  if (isDemoHoliday(now, key, today.day)) return [];
   const open = ranges
     .filter((r) => r.weekday === today.weekday)
     .sort((a, b) => a.startMinute - b.startMinute);
@@ -437,7 +483,8 @@ export interface HistoryTemplate {
  * día del mes. El calendario normal (lunes de la semana pasada → sábado de la
  * próxima) puede no tocar el mes anterior.
  *  - Un día es abierto si su día de la semana tiene tramo en `ranges`, el
- *    horario de la sede (una sede cerrada el sábado no recibe la visita).
+ *    horario de la sede (una sede cerrada el sábado no recibe la visita), y
+ *    no es un festivo de la sede (`isDemoHoliday`).
  *  - Mes anterior: el mismo día del mes que hoy (o su último día), y si está
  *    cerrado, el abierto anterior de ese mes (o el siguiente, si no lo hay).
  *    Queda entre ~28 y ~31 días atrás: dentro de los 60 días de los abonos.
@@ -467,8 +514,11 @@ export function planComparisonHistory(
   const daysAgoOf = (utcMidnight: number) =>
     Math.round((todayMidnight - utcMidnight) / DAY_MS);
   const isOpen = (utcMidnight: number) => {
-    const weekday = new Date(utcMidnight).getUTCDay();
-    return ranges.some((r) => r.weekday === weekday);
+    const date = new Date(utcMidnight);
+    return (
+      ranges.some((r) => r.weekday === date.getUTCDay()) &&
+      !isDemoHoliday(now, key, date.toISOString().slice(0, 10))
+    );
   };
 
   const anchors: { month: 'previous' | 'current'; daysAgo: number }[] = [];
@@ -537,9 +587,11 @@ export function planClosingQueueExamples(
   now: Date,
   ranges: readonly WallRange[],
   timeZone: string,
+  key: DemoLocationKey,
 ): PlannedClosingExample[] {
   for (let daysAgo = 1; daysAgo <= 7; daysAgo++) {
     const day = sedeDay(now, -daysAgo, timeZone);
+    if (isDemoHoliday(now, key, day.day)) continue;
     const open = ranges.filter((r) => r.weekday === day.weekday);
     if (open.length === 0) continue;
     const close = Math.max(...open.map((r) => r.endMinute));

@@ -28,6 +28,7 @@ import {
   CreateLocationUseCase,
   UpdateLocationUseCase,
 } from '../src/modules/locations/application/use-cases/manage-locations.use-cases';
+import { CreateHolidayUseCase } from '../src/modules/location-calendar/application/location-calendar.use-cases';
 import {
   GetLocationScheduleUseCase,
   ReplaceLocationScheduleUseCase,
@@ -123,6 +124,7 @@ import { SignPatientConsentUseCase } from '../src/modules/consents/application/u
 import { CreatePrescriptionTemplateUseCase } from '../src/modules/prescriptions/application/use-cases/prescription-templates.use-cases';
 import { IssuePrescriptionUseCase } from '../src/modules/prescriptions/application/use-cases/prescriptions.use-cases';
 import { UpdatePrescriptionSettingsUseCase } from '../src/modules/prescriptions/application/use-cases/prescription-settings.use-cases';
+import { SetRetentionExtensionUseCase } from '../src/modules/patients/application/use-cases/retention.use-cases';
 import { RegisterImplantUseCase } from '../src/modules/implants/application/use-cases/implants.use-cases';
 import { UpdateStaffUseCase } from '../src/modules/staff/application/use-cases/update-staff.use-case';
 import { ReplaceStaffLocationsUseCase } from '../src/modules/staff/application/use-cases/staff-locations.use-cases';
@@ -137,6 +139,8 @@ import {
   daysUntilNextWeekday,
   upcomingWeekdayOffsets,
   daysUntilRotationCover,
+  isDemoHoliday,
+  workdayDaysAgo,
   planAppointments,
   planSiteAppointments,
   planComparisonHistory,
@@ -213,6 +217,8 @@ import {
   DEMO_PATIENTS,
   DEMO_PAYERS,
   DEMO_COVERAGES,
+  DEMO_HOLIDAYS,
+  DEMO_RETENTION,
   DEMO_RESPONSIBLES,
   DEMO_PLANS,
   DEMO_CASH_OUTFLOW,
@@ -905,6 +911,12 @@ class DemoSeeder {
       this.createImplants(patientIds, dentists),
     );
 
+    // R13: dos pacientes con la retención de su historia ampliada, como la
+    // fijaría el ADMIN desde la ficha.
+    await this.inTenant(tenantId, undefined, () =>
+      this.extendRetention(patientIds, ownerId),
+    );
+
     // DX-105 al final: una lista activa en la Sede Norte o un convenio asignado
     // re-precian los ítems que se añadan después, y los planes de la demo ya
     // están fijados con sus precios de catálogo.
@@ -1070,6 +1082,30 @@ class DemoSeeder {
         ),
       );
       ids[key] = created.id;
+    }
+    // R12: los festivos de ejemplo de cada sede, como los cargaría el ADMIN
+    // desde Ajustes. Un recurrente lleva la fecha de su año en curso en la
+    // zona de la sede (`CreateHolidayUseCase` exige una fecha completa).
+    for (const key of Object.keys(ids) as DemoLocationKey[]) {
+      const year = civilDateIn(this.now, DEMO_LOCATIONS[key].timeZone).slice(
+        0,
+        4,
+      );
+      await this.inTenant(tenantId, ids[key], async () => {
+        for (const holiday of DEMO_HOLIDAYS[key]) {
+          const recurring = 'month' in holiday;
+          await this.use(CreateHolidayUseCase).execute(ids[key], {
+            date: recurring
+              ? `${year}-${String(holiday.month).padStart(2, '0')}-${String(holiday.day).padStart(2, '0')}`
+              : addCivilDays(
+                  civilDateIn(this.now, DEMO_LOCATIONS[key].timeZone),
+                  holiday.daysFromToday,
+                ),
+            name: holiday.name,
+            recurring,
+          });
+        }
+      });
     }
     // DX-026: la principal manda recordatorios por email 48 h y 2 h antes; las
     // demás se quedan como cualquier sede nueva (desactivados).
@@ -1344,7 +1380,15 @@ class DemoSeeder {
         ).id;
       payerIds.set(payer.key, id);
     }
+    // R10: las fechas de la cobertura cuentan desde el «hoy» de la sede del
+    // paciente.
     for (const c of DEMO_COVERAGES) {
+      const today = civilDateIn(
+        this.now,
+        DEMO_LOCATIONS[DEMO_PATIENTS[c.patientIndex].location].timeZone,
+      );
+      const relativeDay = (days: number | null) =>
+        days === null ? null : addCivilDays(today, days);
       const patientId = ids[c.patientIndex];
       const payerId = payerIds.get(c.payerKey) as string;
       const has = await this.use(ListPatientCoveragesUseCase).execute(
@@ -1357,8 +1401,8 @@ class DemoSeeder {
           payerId,
           planName: c.planName,
           memberNumber: c.memberNumber,
-          validFrom: c.validFrom,
-          validTo: c.validTo,
+          validFrom: relativeDay(c.validFromDays),
+          validTo: relativeDay(c.validToDays),
           isPrimary: c.isPrimary,
         },
         receptionId,
@@ -1737,6 +1781,16 @@ class DemoSeeder {
       patientIndex: number = incidents.patientIndex,
     ) => {
       for (let d = daysAgo; d <= incidents.lastDaysAgo; d++) {
+        const zone = DEMO_LOCATIONS[location].timeZone;
+        if (
+          isDemoHoliday(
+            this.now,
+            location,
+            civilDateIn(daysAgoAt(this.now, d, 12 * 60, zone), zone),
+          )
+        ) {
+          continue;
+        }
         for (let m = incidents.firstMinute; m < incidents.lastMinute; m += 30) {
           const start = daysAgoAt(
             this.now,
@@ -2314,6 +2368,7 @@ class DemoSeeder {
       this.now,
       hours.principal?.ranges ?? [],
       DEMO_LOCATIONS.principal.timeZone,
+      'principal',
     );
     const ctx = (userId: string, role: ClinicRole): AuditRequestContext => ({
       tenantId,
@@ -2395,6 +2450,7 @@ class DemoSeeder {
       this.now,
       hours.principal?.ranges ?? [],
       DEMO_LOCATIONS.principal.timeZone,
+      'principal',
     );
     // R3: solo pacientes de las sedes de la rotación.
     const candidates = localPatientIds.filter(
@@ -2511,6 +2567,9 @@ class DemoSeeder {
       0,
       ...spec.payments.map((p) => p.daysAgo),
     );
+    // Un realizado es una visita: nunca en domingo ni en un festivo de la sede
+    // del plan (PF6). El abono no se mueve: fija la antigüedad de la cartera.
+    const doneAt = spec.doneAt ?? 'principal';
     const data = item.unattributed
       ? {
           performedById: null,
@@ -2521,9 +2580,9 @@ class DemoSeeder {
       : {
           completedAt: daysAgoAt(
             this.now,
-            firstPaymentDaysAgo,
+            workdayDaysAgo(this.now, doneAt, firstPaymentDaysAgo),
             10 * 60,
-            DEMO_LOCATIONS[spec.doneAt ?? 'principal'].timeZone,
+            DEMO_LOCATIONS[doneAt].timeZone,
           ),
         };
     await this.prisma.runWithTenant((tx) =>
@@ -3475,6 +3534,28 @@ class DemoSeeder {
         },
         dentists[spec.dentistIndex],
       );
+    }
+  }
+
+  /** R13: idempotente, se salta al paciente que ya tiene esa ampliación. */
+  private async extendRetention(
+    patientIds: string[],
+    actorId: string,
+  ): Promise<void> {
+    for (const spec of DEMO_RETENTION) {
+      const id = patientIds[spec.patientIndex];
+      const current = await this.prisma.runWithTenant((tx) =>
+        tx.patient.findUniqueOrThrow({
+          where: { id },
+          select: { retentionExtended: true },
+        }),
+      );
+      if (current.retentionExtended === spec.value) continue;
+      await this.use(SetRetentionExtensionUseCase).execute(id, {
+        value: spec.value,
+        reason: spec.reason,
+        actorId,
+      });
     }
   }
 
