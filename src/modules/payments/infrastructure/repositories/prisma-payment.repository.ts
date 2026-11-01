@@ -1095,6 +1095,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
       );
       return {
         id: payment.id,
+        locationId: payment.locationId,
         createdById: payment.createdById,
         createdAt: payment.createdAt,
         timeZone: timeZoneOf(payment.locationId),
