@@ -422,7 +422,7 @@ const SIN_COLOMBIA = '20261110130000_sin_colombia_identificadores';
  * paciente. Solo columnas nuevas (con default o NULL) y sus CHECK; ningún
  * relleno. Sin fixture propio: usa las clínicas y los pacientes P_A y P_B.
  */
-const DX330 = '20261113100000_dx330_tenant_clinical_record_retention';
+const DX330 = '20261113110000_dx330_tenant_clinical_record_retention';
 
 const STEPS: Step[] = [
   { until: '20260731115959', fixture: [] },
