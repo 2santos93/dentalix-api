@@ -56,6 +56,8 @@ run npx prisma migrate deploy
 echo "==> Seed de referencia y purga de auditoría (dry-run), sin devDependencies"
 run npm run --silent seed:prod
 run npm run --silent audit:purge:prod -- --dry-run
+# Sin --actor-email: en el humo no hay administrador de plataforma (el dry-run no lo exige).
+run npm run --silent retention:raise-floor:prod -- --dry-run
 
 echo "==> API con NODE_ENV=production"
 # Valores de humo, NO secretos: con ellos la API pasa la validación de

@@ -10,7 +10,7 @@ import {
   locationData,
 } from './support/location-fixtures';
 
-// DX-039, capa DB de la retención legal de la HC: backfill de la migración,
+// DX-039, capa DB de la retención de la HC: backfill de la migración,
 // triggers que mantienen `last_attention_at` (nunca retrocede), RLS FORZADA y
 // append-only de `patient_retention_actions`, y la supresión parcial por la
 // misma ruta que la app (runWithTenant, rol dentalix_app).
@@ -95,7 +95,7 @@ function appointment(
   );
 }
 
-describe('retención legal de la HC (DX-039, int)', () => {
+describe('retención de la HC (DX-039, int)', () => {
   beforeAll(async () => {
     await prisma.onModuleInit();
     userId = (
@@ -234,7 +234,9 @@ describe('retención legal de la HC (DX-039, int)', () => {
   });
 
   it('archivar bajo retención falla dentro de la transacción y no marca deletedAt', async () => {
-    const repo = new PrismaPatientRepository(prisma, tenantContext);
+    const repo = new PrismaPatientRepository(prisma, tenantContext, {
+      platformMinYears: 15,
+    });
     const p = await newPatient(tenantA, 'Archivo');
     await entry(tenantA, p, '2026-02-01T10:00:00Z');
     const now = new Date('2026-10-16T12:00:00Z');
@@ -273,7 +275,9 @@ describe('retención legal de la HC (DX-039, int)', () => {
   });
 
   it('supresión parcial: vacía lo no clínico, retira marketing, conserva la HC y deja rastro', async () => {
-    const repo = new PrismaPatientRepository(prisma, tenantContext);
+    const repo = new PrismaPatientRepository(prisma, tenantContext, {
+      platformMinYears: 15,
+    });
     const p = await newPatient(tenantA, 'Supresion');
     const e = await entry(tenantA, p, '2026-02-01T10:00:00Z');
     const policy = await raw.privacyPolicyVersion.create({
@@ -343,7 +347,9 @@ describe('retención legal de la HC (DX-039, int)', () => {
   });
 
   it('patient_retention_actions: RLS forzada entre tenants y append-only para la app', async () => {
-    const repo = new PrismaPatientRepository(prisma, tenantContext);
+    const repo = new PrismaPatientRepository(prisma, tenantContext, {
+      platformMinYears: 15,
+    });
     const p = await newPatient(tenantA, 'Extension');
     const updated = await tenantContext.run(tenantA, () =>
       repo.setRetentionExtension(p, {

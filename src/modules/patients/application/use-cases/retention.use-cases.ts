@@ -15,7 +15,6 @@ import {
   type PatientRepository,
 } from '../../domain/ports/patient-repository.port';
 import type { Patient } from '../../domain/entities/patient.entity';
-import { CLINICAL_RECORD_RETENTION_YEARS } from '../../domain/retention/clinical-record-retention';
 import {
   assertNoPendingAppointments,
   assertNotUnderRetention,
@@ -28,7 +27,7 @@ export const RETENTION_CLOCK = Symbol('RETENTION_CLOCK');
 
 /**
  * Archivar (borrado blando, `deletedAt`) un paciente — DX-039. Rechaza con 409
- * `CLINICAL_RECORD_RETENTION` si la HC sigue en retención legal; un paciente
+ * `CLINICAL_RECORD_RETENTION` si la HC sigue en retención; un paciente
  * sin atenciones clínicas (p. ej. un duplicado recién creado) se archiva,
  * salvo que tenga citas abiertas (409 `PATIENT_HAS_PENDING_APPOINTMENTS`).
  * DX-461: al archivar se anulan sus enlaces públicos vivos (ver el repo).
@@ -121,12 +120,6 @@ export class PartiallySuppressPatientUseCase {
 export const RETENTION_EXPIRING_MAX_DAYS = 365;
 export const RETENTION_EXPIRING_MAX_PAGE_SIZE = 50;
 
-function yearsBefore(date: Date, years: number): Date {
-  const d = new Date(date);
-  d.setUTCFullYear(d.getUTCFullYear() - years);
-  return d;
-}
-
 /**
  * Historias que salen de retención (ya vencidas o que vencen dentro de
  * `withinDays`), para que el ADMIN decida. No purga nada (fuera de alcance).
@@ -148,8 +141,9 @@ export class ListRetentionExpiringUseCase {
     const take = Math.min(input.pageSize, RETENTION_EXPIRING_MAX_PAGE_SIZE);
     // Día siguiente al horizonte a medianoche UTC: la retención termina el
     // día (incluido) en que se cumplen los años, así que «vence antes del
-    // horizonte» = última atención < horizonte + 1 día − N años.
-    const horizon = new Date(
+    // horizonte» = fecha de fin < horizonte + 1 día. Los años son de la
+    // clínica: los lee el repositorio.
+    const horizonNext = new Date(
       Date.UTC(
         now.getUTCFullYear(),
         now.getUTCMonth(),
@@ -157,8 +151,7 @@ export class ListRetentionExpiringUseCase {
       ),
     );
     return this.repo.listRetentionExpiring({
-      noneBefore: yearsBefore(horizon, CLINICAL_RECORD_RETENTION_YEARS),
-      doubleBefore: yearsBefore(horizon, CLINICAL_RECORD_RETENTION_YEARS * 2),
+      horizonNext,
       skip: (input.page - 1) * take,
       take,
     });

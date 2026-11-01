@@ -42,6 +42,8 @@ function fakePatient(id: string): Patient {
     retentionExtended: 'NONE',
     retentionUntil: null,
     underRetention: false,
+    clinicRetentionYears: 15,
+    retentionFromPreviousTerm: false,
     partiallySuppressedAt: null,
     importBatchId: null,
     contactChannel: 'EMAIL',

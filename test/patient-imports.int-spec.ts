@@ -718,7 +718,9 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
   it('alta manual con el mismo documento escrito distinto: 409, también si la importación ya lo creó', async () => {
     const batch = await prepared(a, [person('9.191.919')]);
     await runAll(a, batch!.id);
-    const manual = new PrismaPatientRepository(prisma, tenantContext);
+    const manual = new PrismaPatientRepository(prisma, tenantContext, {
+      platformMinYears: 15,
+    });
     await expect(
       inTenant(a, () =>
         manual.create({

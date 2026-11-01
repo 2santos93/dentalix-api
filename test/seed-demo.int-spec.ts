@@ -11,6 +11,7 @@ import {
 import { ClinicRole, DocumentType, Prisma, PrismaClient } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { GetDoctorDashboardUseCase } from '../src/modules/dashboard/application/use-cases/get-doctor-dashboard.use-case';
+import { GetPatientUseCase } from '../src/modules/patients/application/use-cases/get-patient.use-case';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { fitsBusinessHours } from '../src/modules/location-schedule/application/business-hours';
 import { providerWorksAt } from '../src/modules/provider-schedule/domain/provider-availability';
@@ -1966,6 +1967,37 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
         where: { tenantId, retentionExtended: { not: 'NONE' } },
       }),
     ).toBe(DEMO_RETENTION.length);
+  });
+
+  it('DX-330: the demo stays on the platform minimum, with no floors', async () => {
+    const tenantId = await liveDemoTenantId();
+    const clinic = await raw.tenant.findUniqueOrThrow({
+      where: { id: tenantId },
+      select: { clinicalRecordRetentionYears: true },
+    });
+    expect(clinic.clinicalRecordRetentionYears).toBe(15);
+    expect(
+      await raw.patient.count({
+        where: { tenantId, retentionFloorUntil: { not: null } },
+      }),
+    ).toBe(0);
+
+    const spec = DEMO_RETENTION.find((r) => r.value === 'DOUBLE');
+    const stored = await raw.patient.findFirstOrThrow({
+      where: {
+        tenantId,
+        docNumber: DEMO_PATIENTS[spec!.patientIndex].docNumber,
+      },
+    });
+    const patient = await app
+      .get(TenantContextService)
+      .run(tenantId, () => app.get(GetPatientUseCase).execute(stored.id));
+    expect(patient.clinicRetentionYears).toBe(15);
+    expect(patient.retentionFromPreviousTerm).toBe(false);
+    const last = stored.lastAttentionAt!;
+    expect(patient.retentionUntil?.slice(0, 4)).toBe(
+      String(last.getUTCFullYear() + 30),
+    );
   });
 
   it('DX-012: un presupuesto presentable (borrador con descuento) y otro aceptado con firma', async () => {

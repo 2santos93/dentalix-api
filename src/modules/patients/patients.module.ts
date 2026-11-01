@@ -42,11 +42,18 @@ import {
 import { PATIENT_SETTINGS_REPOSITORY } from './domain/ports/patient-settings-repository.port';
 import { PrismaPatientSettingsRepository } from './infrastructure/repositories/prisma-patient-settings.repository';
 import {
+  GetRetentionSettingsUseCase,
+  UpdateRetentionSettingsUseCase,
+} from './application/use-cases/retention-settings.use-cases';
+import { CLINIC_RETENTION_SETTINGS_REPOSITORY } from './domain/ports/clinic-retention-settings-repository.port';
+import { PrismaClinicRetentionSettingsRepository } from './infrastructure/repositories/prisma-clinic-retention-settings.repository';
+import {
   GetDocumentTypeNamesUseCase,
   UpdateDocumentTypeNamesUseCase,
 } from './application/use-cases/document-type-names.use-cases';
 import { DocumentTypeNamesModule } from '../document-type-names/document-type-names.module';
 import { PATIENT_REPOSITORY } from './domain/ports/patient-repository.port';
+import { clinicalRetentionConfigProvider } from './domain/retention/clinical-retention-config';
 import { PATIENT_PUBLIC_LINKS_READER } from './domain/ports/patient-public-links.port';
 import { PrismaPatientPublicLinksRepository } from './infrastructure/repositories/prisma-patient-public-links.repository';
 import { PrismaPatientRepository } from './infrastructure/repositories/prisma-patient.repository';
@@ -90,6 +97,8 @@ import { PatientAgreementsModule } from '../patient-agreements/patient-agreement
     PartiallySuppressPatientUseCase,
     ListRetentionExpiringUseCase,
     { provide: RETENTION_CLOCK, useValue: () => new Date() },
+    // DX-330: mínimo de plataforma del plazo de conservación de la HC.
+    clinicalRetentionConfigProvider,
     // DX-128: bloque «Comunicaciones» de la ficha.
     GetPatientCommunicationUseCase,
     GetPatientOptOutWarningsUseCase,
@@ -107,6 +116,13 @@ import { PatientAgreementsModule } from '../patient-agreements/patient-agreement
     {
       provide: PATIENT_SETTINGS_REPOSITORY,
       useClass: PrismaPatientSettingsRepository,
+    },
+    // DX-330: plazo de conservación de la HC de la clínica (Ajustes).
+    GetRetentionSettingsUseCase,
+    UpdateRetentionSettingsUseCase,
+    {
+      provide: CLINIC_RETENTION_SETTINGS_REPOSITORY,
+      useClass: PrismaClinicRetentionSettingsRepository,
     },
     // DX-327: nombre local de cada tipo de documento (Ajustes).
     GetDocumentTypeNamesUseCase,

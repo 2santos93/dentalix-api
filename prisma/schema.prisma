@@ -33,6 +33,12 @@ model Tenant {
   /// el default de la BD es el mismo valor, para réplicas anteriores).
   /// CHECK 14..21. Lo cambia el ADMIN (PUT /patients/settings, auditado).
   majorityAge                             Int                              @default(18)
+  /// DX-330: años que la clínica conserva la historia clínica desde la última atención (15..100, CHECK en la BD). 15 de plataforma al crear la clínica (lo escribe la API; el default de la BD es el mismo valor, para réplicas anteriores). Lo cambia el ADMIN (PUT /patients/retention/settings, auditado) y nunca baja la fecha de una historia ya en retención (DX-330).
+  clinicalRecordRetentionYears            Int                              @default(15)
+  /// DX-330 (R13): cuándo se subió el plazo por última vez. Abre la ventana de corrección de 24 h; NULL = sin ventana. Va con clinicalRecordRetentionYearsBeforeRaise (CHECK: las dos o ninguna).
+  clinicalRecordRetentionRaisedAt         DateTime?
+  /// DX-330 (R13): el plazo que había antes de esa subida; dentro de la ventana, volver a él no deja fechas fijadas por la subida.
+  clinicalRecordRetentionYearsBeforeRaise Int?
   /// DX-327: nombre local del tipo; NULL = el genérico. Lo cambia el ADMIN
   /// (PUT /patients/document-type-names, auditado). CHECK 1..60 sin espacios
   /// en los extremos. Todas las clínicas empiezan con los cinco a NULL.
@@ -618,12 +624,14 @@ model Patient {
   // (dx_search_normalize). La calcula Postgres; la app nunca la escribe ni la
   // lee (@ignore): se consulta solo desde dx_patient_search_ids/_count. Ver
   // docs/adr/0001-busqueda-pacientes-rls.md.
-  // DX-039: retención de la HC (15 años por defecto, ampliable). `lastAttentionAt` lo
+  // DX-039: retención de la HC (plazo de la clínica, DX-330; ampliable). `lastAttentionAt` lo
   // mantienen triggers de BD (evolución insertada / cita COMPLETED) y nunca
   // retrocede; la app solo lo lee. `retentionExtended` lo cambia solo ADMIN
   // (rastro en patient_retention_actions + audit_events).
   lastAttentionAt              DateTime?             @map("last_attention_at")
   retentionExtended            RetentionExtension    @default(NONE) @map("retention_extended")
+  /// DX-330 (R6): fecha de fin de conservación que la historia ya tenía cuando la clínica redujo su plazo. La escribe solo el cambio de plazo; nunca baja.
+  retentionFloorUntil          DateTime?             @db.Date @map("retention_floor_until")
   partiallySuppressedAt        DateTime?             @map("partially_suppressed_at")
   // DX-128: canal OPERATIVO de los avisos automáticos (recordatorios), no el
   // consentimiento de marketing (DX-037). Nace con el de la clínica
@@ -3637,10 +3645,10 @@ model UserToken {
   @@map("user_tokens")
 }
 
-// DX-039: retención legal extendida de la historia clínica.
-//   NONE      -> 15 años desde la última atención (plazo por defecto).
-//   DOUBLE    -> 30 años (casos especiales que doblan el plazo).
-//   PERMANENT -> nunca se libera (p. ej. víctimas de violaciones de DD. HH./DIH).
+// DX-039: retención extendida de la historia clínica.
+//   NONE      -> el plazo de la clínica desde la última atención (DX-330).
+//   DOUBLE    -> el doble de ese plazo.
+//   PERMANENT -> nunca se libera.
 enum RetentionExtension {
   NONE
   DOUBLE
@@ -3799,9 +3807,11 @@ model PlatformAuditEvent {
   id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   actorUserId  String   @db.Uuid
   /// `JOB_RETRIED`; DX-359: `MFA_ENROLLMENT_STARTED`, `MFA_ENABLED`,
-  /// `PASSWORD_CHANGE` (CHECK en la migración).
+  /// `PASSWORD_CHANGE`; DX-330: `CLINICAL_RETENTION_MINIMUM_APPLIED` (CHECK en
+  /// la migración).
   action       String
-  /// `JOB`; DX-359: `USER` (el propio superadmin) (CHECK en la migración).
+  /// `JOB`; DX-359: `USER` (el propio superadmin); DX-330: `TENANT` (la
+  /// clínica afectada) (CHECK en la migración).
   resourceType String
   resourceId   String?  @db.Uuid
   requestId    String?

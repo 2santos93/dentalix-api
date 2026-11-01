@@ -159,8 +159,8 @@ export class PatientDto {
     enum: RetentionExtension,
     enumName: 'RetentionExtension',
     description:
-      'Retención extendida de la HC: NONE = 15 años desde la última ' +
-      'atención, DOUBLE = 30 años, PERMANENT = nunca se ' +
+      'Retención extendida de la HC: NONE = el plazo de la clínica desde la ' +
+      'última atención, DOUBLE = el doble de ese plazo, PERMANENT = nunca se ' +
       'libera. Solo ADMIN la cambia.',
   })
   retentionExtended!: RetentionExtension;
@@ -178,10 +178,25 @@ export class PatientDto {
 
   @ApiProperty({
     description:
-      'Si hoy la HC está en retención legal: archivar o borrar al paciente ' +
+      'Si hoy la HC está en retención: archivar o borrar al paciente ' +
       'responde 409 CLINICAL_RECORD_RETENTION.',
   })
   underRetention!: boolean;
+
+  @ApiProperty({
+    example: 15,
+    description:
+      'Plazo vigente de la clínica en años (NONE); DOUBLE es el doble. ' +
+      'PERMANENT no caduca.',
+  })
+  clinicRetentionYears!: number;
+
+  @ApiProperty({
+    description:
+      'La fecha de fin sale del plazo anterior de la clínica: se redujo y ' +
+      'esta historia ya estaba en retención (DX-330).',
+  })
+  retentionFromPreviousTerm!: boolean;
 
   @ApiProperty({
     format: 'date-time',

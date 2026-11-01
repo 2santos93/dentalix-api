@@ -191,6 +191,22 @@ export interface AuditMetadata {
    * verificación de un dominio) ni datos de un paciente.
    */
   configChange?: AuditConfigChange;
+  /**
+   * DX-330: cambio del plazo de conservación de la historia clínica de la
+   * clínica: dirección según el plazo vigente, pacientes que quedan
+   * protegidos por la reducción (0 en una subida), plazos vigentes antes y
+   * después, y si una bajada corrigió una subida de menos de 24 h. Solo
+   * códigos y enteros.
+   */
+  retentionTermChange?: AuditRetentionTermChange;
+}
+
+export interface AuditRetentionTermChange {
+  direction: 'UP' | 'DOWN';
+  protectedPatients: number;
+  effectiveBefore: number;
+  effectiveAfter: number;
+  withinCorrectionWindow: boolean;
 }
 
 /** Valor de configuración en la auditoría (DX-360). */
@@ -1237,6 +1253,40 @@ function configChange(value: unknown): AuditConfigChange | null {
   return { ...(before ? { before } : {}), ...(after ? { after } : {}) };
 }
 
+/** DX-330: la forma exacta o nada; una clave de más lo tira entero. */
+function retentionTermChange(value: unknown): AuditRetentionTermChange | null {
+  if (!isRecord(value)) return null;
+  const {
+    direction,
+    protectedPatients,
+    effectiveBefore,
+    effectiveAfter,
+    withinCorrectionWindow,
+    ...rest
+  } = value;
+  if (
+    Object.keys(rest).length > 0 ||
+    (direction !== 'UP' && direction !== 'DOWN') ||
+    !isCount(protectedPatients) ||
+    !isCount(effectiveBefore) ||
+    !isCount(effectiveAfter) ||
+    typeof withinCorrectionWindow !== 'boolean'
+  ) {
+    return null;
+  }
+  return {
+    direction,
+    protectedPatients,
+    effectiveBefore,
+    effectiveAfter,
+    withinCorrectionWindow,
+  };
+}
+
+function isCount(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 0;
+}
+
 /** DX-402: los dos días reales, el de la tasa antes del de inicio. */
 function exchangeRateBackup(value: unknown): AuditExchangeRateBackup | null {
   if (!isRecord(value)) return null;
@@ -1345,5 +1395,7 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (revoked) out.revokedLinks = revoked;
   const config = configChange(input.configChange);
   if (config) out.configChange = config;
+  const term = retentionTermChange(input.retentionTermChange);
+  if (term) out.retentionTermChange = term;
   return out;
 }

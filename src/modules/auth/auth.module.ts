@@ -16,6 +16,7 @@ import {
   REFRESH_REUSE_GRACE_MS,
   loadRefreshReuseGraceMs,
 } from './domain/refresh-rotation';
+import { clinicalRetentionConfigProvider } from '../patients/domain/retention/clinical-retention-config';
 import { PrismaAuthRepository } from './infrastructure/repositories/prisma-auth.repository';
 import { PasswordService } from '../../shared/crypto/password.service';
 import { TokenService } from '../../shared/crypto/token.service';
@@ -77,6 +78,8 @@ import { PrismaCurrencyWhitelist } from '../treatment-plans/infrastructure/adapt
     SessionCookieService,
     PasswordService,
     TokenService,
+    // DX-330: el mínimo de plataforma del plazo de la HC, que el alta escribe.
+    clinicalRetentionConfigProvider,
     { provide: AUTH_REPOSITORY, useClass: PrismaAuthRepository },
     // Acceso break-glass del superadmin a una clínica (SEC-008).
     BreakGlassService,

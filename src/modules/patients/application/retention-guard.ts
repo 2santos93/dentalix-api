@@ -1,10 +1,11 @@
 import { ConflictException } from '@nestjs/common';
-import type { RetentionExtension } from '@prisma/client';
 import type { PatientRetentionState } from '../domain/ports/patient-repository.port';
 import {
   formatRetentionDate,
   isUnderRetention,
   retentionUntil,
+  type RetentionBasis,
+  type RetentionEnd,
 } from '../domain/retention/clinical-record-retention';
 
 export const CLINICAL_RECORD_RETENTION = 'CLINICAL_RECORD_RETENTION';
@@ -32,26 +33,39 @@ export function assertNoPendingAppointments(pendingAppointments: number): void {
 }
 
 /**
- * Mensaje en español con la fecha hasta la que se conserva la HC. La base
- * legal entre paréntesis sigue al plazo: con DOUBLE la fecha es a 30 años y
- * decir «15 años» contradiría la fecha.
+ * Mensaje en español con la fecha hasta la que se conserva la HC. El motivo
+ * entre paréntesis sigue a lo que dio la fecha: con DOUBLE el doble del plazo
+ * de la clínica (`years`), y con el suelo el plazo anterior, porque decir el
+ * plazo de hoy contradiría la fecha.
  */
 export function retentionMessage(
   until: Date | 'PERMANENT',
-  extension: RetentionExtension = 'NONE',
+  basis: RetentionBasis,
+  years: number,
 ): string {
   if (until === 'PERMANENT') {
-    return 'La historia clínica de este paciente tiene retención legal permanente: no se puede archivar ni borrar. Si necesitas retirar sus datos de contacto, usa la supresión parcial.';
+    return 'La historia clínica de este paciente tiene retención permanente: no se puede archivar ni borrar. Si necesitas retirar sus datos de contacto, usa la supresión parcial.';
   }
-  const basis =
-    extension === 'DOUBLE'
-      ? 'plazo doble: 30 años desde la última atención'
-      : '15 años desde la última atención';
-  return `La historia clínica de este paciente está en retención legal hasta el ${formatRetentionDate(until)} (${basis}): no se puede archivar ni borrar. Si necesitas retirar sus datos de contacto, usa la supresión parcial.`;
+  const reason =
+    basis === 'PREVIOUS_TERM'
+      ? 'plazo anterior de la clínica'
+      : basis === 'DOUBLE'
+        ? `plazo doble: ${2 * years} años desde la última atención`
+        : `${years} años desde la última atención`;
+  return `La historia clínica de este paciente está en retención hasta el ${formatRetentionDate(until)} (${reason}): no se puede archivar ni borrar. Si necesitas retirar sus datos de contacto, usa la supresión parcial.`;
+}
+
+function retentionEnd(state: PatientRetentionState): RetentionEnd {
+  return retentionUntil(
+    state.lastAttentionAt,
+    state.retentionExtended,
+    state.years,
+    state.retentionFloorUntil,
+  );
 }
 
 /**
- * Regla de dominio de DX-039: mientras la HC esté en retención legal, ni el
+ * Regla de dominio de DX-039: mientras la HC esté en retención, ni el
  * paciente ni sus entradas clínicas se archivan o borran. 409 con un código
  * estable para que el cliente lo distinga de otros conflictos.
  */
@@ -59,13 +73,13 @@ export function assertNotUnderRetention(
   state: PatientRetentionState,
   now: Date,
 ): void {
-  const until = retentionUntil(state.lastAttentionAt, state.retentionExtended);
-  if (until === null || !isUnderRetention(until, now)) return;
+  const { until, basis } = retentionEnd(state);
+  if (until === null || basis === null || !isUnderRetention(until, now)) return;
   throw new ConflictException({
     statusCode: 409,
     error: 'Conflict',
     code: CLINICAL_RECORD_RETENTION,
-    message: retentionMessage(until, state.retentionExtended),
+    message: retentionMessage(until, basis, state.years),
     retentionUntil:
       until === 'PERMANENT' ? null : until.toISOString().slice(0, 10),
   });
@@ -76,13 +90,13 @@ export function assertUnderRetention(
   state: PatientRetentionState,
   now: Date,
 ): void {
-  const until = retentionUntil(state.lastAttentionAt, state.retentionExtended);
+  const { until } = retentionEnd(state);
   if (until !== null && isUnderRetention(until, now)) return;
   throw new ConflictException({
     statusCode: 409,
     error: 'Conflict',
     code: NOT_UNDER_RETENTION,
     message:
-      'La historia clínica de este paciente no está en retención legal: no hace falta la supresión parcial, puedes archivar al paciente.',
+      'La historia clínica de este paciente no está en retención: no hace falta la supresión parcial, puedes archivar al paciente.',
   });
 }
