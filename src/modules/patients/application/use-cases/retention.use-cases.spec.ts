@@ -138,12 +138,14 @@ describe('PartiallySuppressPatientUseCase', () => {
       repo as unknown as PatientRepository,
       clock,
     ).execute('p1', {
-      reason: '  Reclamo del titular de los datos  ',
+      reason: '  Solicitud del paciente sobre sus datos  ',
       actorId: 'u1',
     });
     expect(repo.partiallySuppress).toHaveBeenCalledWith(
       'p1',
-      expect.objectContaining({ reason: 'Reclamo del titular de los datos' }),
+      expect.objectContaining({
+        reason: 'Solicitud del paciente sobre sus datos',
+      }),
     );
   });
 
@@ -156,7 +158,7 @@ describe('PartiallySuppressPatientUseCase', () => {
       new PartiallySuppressPatientUseCase(
         repo as unknown as PatientRepository,
         clock,
-      ).execute('p1', { reason: 'Reclamo del titular', actorId: 'u1' }),
+      ).execute('p1', { reason: 'Solicitud del paciente', actorId: 'u1' }),
     ).rejects.toBeInstanceOf(ConflictException);
   });
 });
