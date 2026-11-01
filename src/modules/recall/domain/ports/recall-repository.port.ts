@@ -4,10 +4,10 @@ import type {
   RecallContactView,
   RecallDueQuery,
   RecallDueRow,
+  RecallRef,
   SetPatientRecallData,
   StaffRef,
 } from '../recall.entity';
-import type { RecallKind } from '@prisma/client';
 
 export const RECALL_REPOSITORY = Symbol('RECALL_REPOSITORY');
 
@@ -26,9 +26,8 @@ export interface RecallRepository {
   /** Hoy en la zona de la sede donde se escribe (la activa o la de trabajo). */
   writeToday(now: Date): Promise<string>;
   upsertRecall(data: SetPatientRecallData): Promise<{ id: string }>;
-  findRecall(
-    recallId: string,
-  ): Promise<{ id: string; patientId: string; kind: RecallKind } | null>;
+  /** El recall con su sede: la misma que usa la lista para filtrar. */
+  findRecall(recallId: string): Promise<RecallRef | null>;
   appointmentOfPatient(
     appointmentId: string,
     patientId: string,

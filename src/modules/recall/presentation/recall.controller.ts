@@ -151,14 +151,17 @@ export class RecallController {
   @ApiHeader({
     name: 'X-Location-Id',
     required: false,
-    description: 'Sede activa: queda en el contacto.',
+    description:
+      'No decide nada: se autoriza y se sella con la sede del paciente (la de la lista), no con la activa.',
   })
   @ApiCreatedResponse({ type: RecallContactDto })
   @ApiBadRequestResponse({
     description:
       'Canal o desenlace inválidos, nota de más de 280, BOOKED sin cita o cita de otro paciente',
   })
-  @ApiForbiddenResponse({ description: RECALL_LIST_FORBIDDEN_MESSAGE })
+  @ApiForbiddenResponse({
+    description: `${RECALL_LIST_FORBIDDEN_MESSAGE} O 403 LOCATION_NOT_ALLOWED: el paciente es de una sede no permitida.`,
+  })
   @ApiNotFoundResponse({ description: 'Recall de otra clínica o inexistente' })
   contact(
     @Param('recallId', ParseUUIDPipe) recallId: string,

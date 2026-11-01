@@ -16,6 +16,7 @@ import type {
   RecallContactView,
   RecallDueQuery,
   RecallDueRow,
+  RecallRef,
   SetPatientRecallData,
   StaffRef,
 } from '../domain/recall.entity';
@@ -335,15 +336,31 @@ export class PrismaRecallRepository implements RecallRepository {
     });
   }
 
-  findRecall(
-    recallId: string,
-  ): Promise<{ id: string; patientId: string; kind: RecallKind } | null> {
-    return this.prisma.runWithTenant((tx) =>
-      tx.patientRecall.findFirst({
-        where: { id: recallId, patient: { deletedAt: null } },
-        select: { id: true, patientId: true, kind: true },
-      }),
-    );
+  async findRecall(recallId: string): Promise<RecallRef | null> {
+    return this.prisma.runWithTenant(async (tx) => {
+      // La sede sale de la MISMA consulta que la lista: quien no puede ver a
+      // este paciente en la lista tampoco puede registrarle un contacto.
+      const rows = await tx.$queryRaw<
+        {
+          id: string;
+          patientId: string;
+          kind: RecallKind;
+          homeLocationId: string;
+        }[]
+      >`${this.recallFacts(
+        new Date(),
+        Prisma.sql`AND pr."id" = ${recallId}::uuid AND pa."deletedAt" IS NULL`,
+      )}`;
+      const row = rows[0];
+      return row
+        ? {
+            id: row.id,
+            patientId: row.patientId,
+            kind: row.kind,
+            locationId: row.homeLocationId,
+          }
+        : null;
+    });
   }
 
   appointmentOfPatient(

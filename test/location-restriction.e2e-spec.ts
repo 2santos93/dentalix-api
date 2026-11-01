@@ -615,6 +615,98 @@ describe('Personal restringido a sedes (DX-089)', () => {
     });
   });
 
+  describe('recall (DX-015)', () => {
+    const seedRecall = async (doc: string, locationId: string) => {
+      const patientId = await createPatient(doc);
+      const recall = await raw.patientRecall.create({
+        data: {
+          tenantId: a.tenantId,
+          patientId,
+          kind: 'CHECKUP',
+          intervalMonths: 6,
+          lastDoneAt: new Date('2020-01-15T00:00:00.000Z'),
+          locationId,
+          createdById: a.adminUserId,
+          updatedById: a.adminUserId,
+        },
+        select: { id: true },
+      });
+      return { patientId, recallId: recall.id };
+    };
+    const contact = { channel: 'CALL', outcome: 'NO_ANSWER' };
+    const contactsOf = (recallId: string) =>
+      raw.recallContact.findMany({ where: { recallId } });
+    const auditsOf = (patientId: string) =>
+      raw.auditEvent.count({
+        where: { patientId, resourceType: 'RECALL_CONTACT' },
+      });
+
+    it('la lista: sin cabecera solo sus sedes; otra sede explícita 403', async () => {
+      const own = await seedRecall('RC-LIST-1', a1);
+      const other = await seedRecall('RC-LIST-2', a2);
+      const ids = async (m: Member) =>
+        (
+          (await as(m).get('/recall/due', { pageSize: 100 }).expect(200))
+            .body as { items: { recallId: string }[] }
+        ).items.map((i) => i.recallId);
+      const mine = await ids(r);
+      expect(mine).toContain(own.recallId);
+      expect(mine).not.toContain(other.recallId);
+      expect(await ids(r2)).toContain(other.recallId);
+      expectNotAllowed(await as(r, a2).get('/recall/due'));
+    });
+
+    it('contacto en otra sede: 403 sin crear nada ni auditar, con y sin cabecera', async () => {
+      const { patientId, recallId } = await seedRecall('RC-DENY', a2);
+      expectNotAllowed(
+        await as(r).post(`/recall/${recallId}/contacts`, contact),
+      );
+      expectNotAllowed(
+        await as(r, a1).post(`/recall/${recallId}/contacts`, contact),
+      );
+      expect(await contactsOf(recallId)).toEqual([]);
+      expect(await auditsOf(patientId)).toBe(0);
+    });
+
+    it('contacto en su sede: 201, sellado con la sede del recall aunque otra permitida esté activa', async () => {
+      const own = await seedRecall('RC-OWN', a1);
+      await as(r).post(`/recall/${own.recallId}/contacts`, contact).expect(201);
+      const other = await seedRecall('RC-OWN-2', a2);
+      await as(r2, a3)
+        .post(`/recall/${other.recallId}/contacts`, contact)
+        .expect(201);
+      expect((await contactsOf(other.recallId))[0].locationId).toBe(a2);
+    });
+
+    it('manda la sede de la lista: fijado en A1 pero atendido en A2 es de A2', async () => {
+      const { patientId, recallId } = await seedRecall('RC-MOVED', a1);
+      const start = new Date('2021-03-10T15:00:00.000Z');
+      await raw.appointment.create({
+        data: {
+          tenantId: a.tenantId,
+          patientId,
+          locationId: a2,
+          providerId: e.userId,
+          start,
+          end: new Date(start.getTime() + 30 * 60_000),
+          status: 'COMPLETED',
+        },
+      });
+      expectNotAllowed(
+        await as(r).post(`/recall/${recallId}/contacts`, contact),
+      );
+      await as(r2).post(`/recall/${recallId}/contacts`, contact).expect(201);
+    });
+
+    it('sin restricción, cualquier sede; un recall inexistente sigue siendo 404', async () => {
+      const { recallId } = await seedRecall('RC-ALL', a2);
+      await as(u).post(`/recall/${recallId}/contacts`, contact).expect(201);
+      await as(r)
+        .post('/recall/00000000-0000-4000-8000-000000000000/contacts', contact)
+        .expect(404);
+    });
+  });
+
   describe('lo que NO se filtra', () => {
     it('pacientes y ficha: toda la clínica', async () => {
       await as(r).get('/patients').expect(200);

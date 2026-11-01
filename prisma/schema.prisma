@@ -6401,7 +6401,7 @@ model RecallContact {
   tenantId      String               @db.Uuid
   recallId      String               @db.Uuid
   patientId     String               @db.Uuid
-  /// Sede activa al registrarlo; NULL = vista consolidada.
+  /// Sede del paciente al registrarlo (la misma que usa la lista).
   locationId    String?              @db.Uuid
   channel       RecallContactChannel
   outcome       RecallContactOutcome

@@ -311,6 +311,10 @@ export class CreateRecallContactUseCase {
     }
     const recall = await this.repo.findRecall(recallId);
     if (!recall) throw new NotFoundException(RECALL_NOT_FOUND_MESSAGE);
+    // DX-089: se autoriza por la sede del recall, nunca por la cabecera (otra
+    // sede permitida no abre esta). Un recall siempre tiene sede, así que aquí
+    // no aplica el «toda la clínica» de la ficha del paciente.
+    this.tenantContext.assertLocationAllowed(recall.locationId);
     if (
       appointmentId !== null &&
       !(await this.repo.appointmentOfPatient(appointmentId, recall.patientId))
@@ -320,7 +324,7 @@ export class CreateRecallContactUseCase {
     return this.repo.createContact({
       recallId: recall.id,
       patientId: recall.patientId,
-      locationId: this.tenantContext.getLocationId() ?? null,
+      locationId: recall.locationId,
       channel: input.channel,
       outcome: input.outcome,
       note,

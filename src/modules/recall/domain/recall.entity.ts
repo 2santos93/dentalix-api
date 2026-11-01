@@ -113,6 +113,14 @@ export interface PatientRecallView {
   updatedBy: StaffRef;
 }
 
+/** Un recall con su sede (la de la última cita atendida o, sin ella, la del recall). */
+export interface RecallRef {
+  id: string;
+  patientId: string;
+  kind: RecallKind;
+  locationId: string;
+}
+
 export interface StaffRef {
   id: string;
   /** `null` si ya no es resoluble (usuario fuera de la clínica). */
