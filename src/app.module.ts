@@ -150,8 +150,6 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     PlatformModule,
     // Accesos de soporte (break-glass) visibles para el ADMIN (SEC-008).
     SupportAccessesModule,
-    // DX-503: «Mi día», los recuentos de las listas de trabajo por rol y sede.
-    WorkQueuesModule,
     DashboardModule,
     ConsentsModule,
     PostOpInstructionsModule,
@@ -171,6 +169,10 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     OutboundMessagesModule,
     // Recordatorio automático de cita por email, por sede (DX-026).
     RemindersModule,
+    // DX-503: «Mi día», los recuentos de las listas de trabajo por rol y sede.
+    // El ÚLTIMO: importa seis módulos y, si fuera antes, adelantaría el registro
+    // de sus rutas (y cambiaría el orden del OpenAPI sin cambiar nada más).
+    WorkQueuesModule,
   ],
   controllers: [AppController, HealthController],
   providers: [AppService, ShutdownState],
