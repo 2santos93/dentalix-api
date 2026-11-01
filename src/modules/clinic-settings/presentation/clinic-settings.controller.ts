@@ -122,10 +122,9 @@ export class ClinicSettingsController {
   @ApiOperation({
     summary: 'Sube el logo de la clínica',
     description:
-      'DX-019. PNG, JPG o SVG de hasta 1 MB. El tipo se comprueba por los ' +
-      'bytes y el fichero se re-escribe antes de guardarlo (sin metadatos; ' +
-      'el SVG, sin scripts, enlaces ni estilos externos). Es público por ' +
-      'diseño (marca).',
+      'DX-019. PNG, JPG o WebP de hasta 1 MB. El tipo se comprueba por los ' +
+      'bytes y el fichero se re-escribe antes de guardarlo (sin metadatos). ' +
+      'SVG no se admite. Es público por diseño (marca).',
   })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
@@ -136,7 +135,7 @@ export class ClinicSettingsController {
         file: {
           type: 'string',
           format: 'binary',
-          description: 'PNG, JPG o SVG de hasta 1 MB',
+          description: 'PNG, JPG o WebP de hasta 1 MB',
         },
       },
     },

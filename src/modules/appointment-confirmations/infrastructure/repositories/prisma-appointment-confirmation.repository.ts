@@ -1,3 +1,4 @@
+import { withClinicLogoUrl } from '../../../../shared/storage/clinic-logo-url';
 import { Injectable } from '@nestjs/common';
 import {
   AppointmentConfirmationResponse,
@@ -268,8 +269,8 @@ export class PrismaAppointmentConfirmationRepository implements AppointmentConfi
     const tenantId = this.requireTenantId();
     return this.prisma.tenant.findFirst({
       where: { id: tenantId, deletedAt: null },
-      select: { name: true, primaryColor: true, logoUrl: true },
-    });
+      select: { name: true, primaryColor: true, logoKey: true },
+    }).then((row) => withClinicLogoUrl(row));
   }
 
   /**

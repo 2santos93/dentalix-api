@@ -6,9 +6,7 @@ export const CLINIC_SETTINGS_REPOSITORY = Symbol('CLINIC_SETTINGS_REPOSITORY');
 /** La fila de la clínica tal como la usa Ajustes › Datos de la clínica. */
 export interface StoredClinicSettings {
   profile: ClinicProfile;
-  /** URL pública del logo (la que leen los documentos), o `null`. */
-  logoUrl: string | null;
-  /** Clave del logo subido desde Ajustes (DX-084), o `null`. */
+  /** Clave del logo en el almacén (DX-084), o una URL anterior a DX-019, o `null`. */
   logoKey: string | null;
 }
 
@@ -22,9 +20,9 @@ export interface ClinicSettingsRepository {
     patch: ClinicProfilePatch,
     ctx: AuditRequestContext,
   ): Promise<StoredClinicSettings>;
-  /** `logo` null = quitarlo. */
+  /** `key` null = quitarlo. */
   setLogo(
-    logo: { key: string; url: string } | null,
+    key: string | null,
     ctx: AuditRequestContext,
   ): Promise<StoredClinicSettings>;
 }

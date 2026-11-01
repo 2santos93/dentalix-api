@@ -1,3 +1,4 @@
+import { withClinicLogoUrl } from '../../../shared/storage/clinic-logo-url';
 import { Injectable } from '@nestjs/common';
 import {
   DataConsentChannel,
@@ -295,7 +296,7 @@ export class PrismaMedicalHistorySubmissionRepository implements MedicalHistoryS
       const [tenant, granted, policy] = await Promise.all([
         tx.tenant.findUniqueOrThrow({
           where: { id: tenantId },
-          select: { name: true, logoUrl: true, primaryColor: true },
+          select: { name: true, logoKey: true, primaryColor: true },
         }),
         sensitiveHealthGranted(tx, row.patientId),
         tx.privacyPolicyVersion.findFirst({
@@ -313,7 +314,7 @@ export class PrismaMedicalHistorySubmissionRepository implements MedicalHistoryS
         submission: toEntity(row),
         patientFirstName: row.patient.firstName,
         patientDeleted: row.patient.deletedAt !== null,
-        clinic: tenant,
+        clinic: withClinicLogoUrl(tenant),
         sensitiveHealthGranted: granted,
         policy,
       };

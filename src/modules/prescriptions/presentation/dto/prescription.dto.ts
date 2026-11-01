@@ -187,6 +187,13 @@ export class PrescriptionDto {
   @ApiProperty({ type: String, nullable: true }) professionalEmail!:
     string | null;
   @ApiProperty() clinicName!: string;
+  @ApiProperty({
+    type: ClinicFiscalDto,
+    nullable: true,
+    description:
+      'DX-019: datos fiscales congelados al emitir; null = la receta se imprime sin ellos (nunca con los de hoy).',
+  })
+  clinicFiscal!: ClinicFiscalDto | null;
   @ApiProperty() locationName!: string;
   @ApiProperty({ type: String, nullable: true }) locationAddress!:
     string | null;
@@ -244,12 +251,6 @@ export class PrescriptionLocationFormatDto {
 
 export class PrescriptionDocumentDto extends PrescriptionDto {
   @ApiProperty({ type: String, nullable: true }) clinicLogoUrl!: string | null;
-  @ApiProperty({
-    type: ClinicFiscalDto,
-    description:
-      'DX-019: datos fiscales de HOY (no forman parte del hash de la receta).',
-  })
-  clinicFiscal!: ClinicFiscalDto;
   @ApiProperty({
     type: PrescriptionLocationFormatDto,
     description:

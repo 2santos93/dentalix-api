@@ -1,3 +1,4 @@
+import { clinicLogoPublicUrl } from '../../../../shared/storage/clinic-logo-url';
 import {
   CLINIC_FISCAL_SELECT,
   clinicFiscalOf,
@@ -100,7 +101,7 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
           // contexto, igual que PrismaTenantBrandingRepository.
           tx.tenant.findFirst({
             where: { id: tenantId, deletedAt: null },
-            select: { name: true, logoUrl: true, ...CLINIC_FISCAL_SELECT },
+            select: { name: true, logoKey: true, ...CLINIC_FISCAL_SELECT },
           }),
           tx.treatmentPlan.findMany({
             where: livePlan,
@@ -241,7 +242,7 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
         return {
           clinic: {
             name: tenant?.name ?? '',
-            logoUrl: tenant?.logoUrl ?? null,
+            logoUrl: clinicLogoPublicUrl(tenant?.logoKey ?? null),
             fiscal: clinicFiscalOf(tenant),
           },
           patient: {

@@ -42,9 +42,29 @@ export const JPEG_WITH_EXIF = Buffer.from(
   'base64',
 );
 
-export const SIMPLE_SVG = Buffer.from(
-  '<?xml version="1.0" encoding="UTF-8"?>\n' +
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" width="10" height="10">' +
-    '<rect width="10" height="10" fill="#0E7490"/></svg>',
+function riffChunk(type: string, data: Buffer): Buffer {
+  const head = Buffer.alloc(8);
+  head.write(type, 0, 'latin1');
+  head.writeUInt32LE(data.length, 4);
+  return Buffer.concat([head, data, Buffer.alloc(data.length % 2)]);
+}
+
+/** Contenedor WebP válido (el cuerpo VP8L es de relleno: la API no decodifica). */
+export function makeWebp(extra: Buffer[] = []): Buffer {
+  const body = Buffer.concat([
+    riffChunk('VP8L', Buffer.from([0x2f, 0, 0, 0, 0x10])),
+    ...extra,
+  ]);
+  const riff = Buffer.alloc(12);
+  riff.write('RIFF', 0, 'latin1');
+  riff.writeUInt32LE(body.length + 4, 4);
+  riff.write('WEBP', 8, 'latin1');
+  return Buffer.concat([riff, body]);
+}
+
+export const webpChunk = riffChunk;
+
+export const SVG_WITH_SCRIPT = Buffer.from(
+  '<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"><script>alert(1)</script><rect width="1" height="1"/></svg>',
   'utf8',
 );

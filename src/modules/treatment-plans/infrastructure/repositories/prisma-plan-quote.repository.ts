@@ -1,3 +1,4 @@
+import { clinicLogoPublicUrl } from '../../../../shared/storage/clinic-logo-url';
 import {
   CLINIC_FISCAL_SELECT,
   clinicFiscalOf,
@@ -229,7 +230,7 @@ export async function readPlanQuoteSource(
     }),
     tx.tenant.findFirst({
       where: { id: tenantId },
-      select: { name: true, logoUrl: true, ...CLINIC_FISCAL_SELECT },
+      select: { name: true, logoKey: true, ...CLINIC_FISCAL_SELECT },
     }),
     plan.createdById
       ? tx.user.findFirst({
@@ -299,7 +300,7 @@ export async function readPlanQuoteSource(
     },
     clinic: {
       name: tenant?.name ?? '',
-      logoUrl: tenant?.logoUrl ?? null,
+      logoUrl: clinicLogoPublicUrl(tenant?.logoKey ?? null),
       fiscal: clinicFiscalOf(tenant),
     },
     location: { ...location, timeZone: zoneOf(location.id) },

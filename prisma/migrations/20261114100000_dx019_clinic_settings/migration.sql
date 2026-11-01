@@ -11,11 +11,9 @@
 --   tenants."fiscalAddress"  dirección fiscal. 1..250, una línea.
 --   tenants."contactEmail"   email de contacto de la clínica. 3..254.
 --   tenants."contactPhone"   teléfono de contacto, texto libre. 1..40.
---   tenants."logoKey"        CLAVE del logo en el almacén (DX-084:
---                            `logos/<tenantId>-<16 hex>.<png|jpg|svg>`), nunca
---                            una URL. `logoUrl` sigue siendo lo que leen los
---                            documentos: al subir se escribe la URL pública de
---                            esta clave; al quitar el logo, las dos a NULL.
+--
+-- El logo usa la columna existente "logoUrl", que pasa a guardar la CLAVE del
+-- almacén (DX-084, como `users."avatarUrl"`); ver `clinicLogoPublicUrl`.
 --
 -- Sin razón social o sin identificador, el recibo dice «Datos fiscales
 -- pendientes» (DX-136). Los recibos emitidos CONGELAN estos datos en su foto:
@@ -39,7 +37,6 @@ ALTER TABLE "tenants"
   ADD COLUMN "fiscalAddress" TEXT,
   ADD COLUMN "contactEmail" TEXT,
   ADD COLUMN "contactPhone" TEXT,
-  ADD COLUMN "logoKey" TEXT,
   ADD CONSTRAINT "tenants_legal_name_check" CHECK (
     "legalName" IS NULL OR (
       char_length("legalName") BETWEEN 1 AND 160
@@ -80,8 +77,14 @@ ALTER TABLE "tenants"
       AND "contactPhone" = btrim("contactPhone")
       AND "contactPhone" !~ '[[:cntrl:]]'
     )
-  ),
-  ADD CONSTRAINT "tenants_logo_key_check" CHECK (
-    "logoKey" IS NULL
-    OR "logoKey" ~ '^logos/[0-9a-f-]{36}-[0-9a-f]{16}\.(png|jpg|svg)$'
   );
+
+-- DX-019 (médico-legal): la receta congela los datos fiscales de la clínica al
+-- emitirse, como el recibo. Objeto jsonb; NULL = emitida antes o sin datos: se
+-- reimprime SIN datos fiscales, nunca con los de hoy. La protege el trigger
+-- `prescriptions_immutable` (compara la fila entera) y entra en el hash (v4).
+ALTER TABLE "prescriptions"
+  ADD COLUMN "clinicFiscal" JSONB,
+  ADD CONSTRAINT "prescriptions_clinic_fiscal_check" CHECK (
+    "clinicFiscal" IS NULL OR jsonb_typeof("clinicFiscal") = 'object'
+  ) NOT VALID;

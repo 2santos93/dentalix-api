@@ -13,7 +13,10 @@ model Tenant {
   name                                    String
   subdomain                               String                           @unique
   primaryColor                            String                           @default("#0F5E9C")
-  logoUrl                                 String?
+  /// DX-019 (DX-084): CLAVE del logo (`logos/<tenantId>-<16 hex>.<ext>`), nunca una
+  /// URL; la columna conserva su nombre anterior para que sea aditivo. La URL se
+  /// calcula al responder (`clinicLogoPublicUrl`). Una URL http(s) anterior sale tal cual.
+  logoKey                                 String?                          @map("logoUrl")
   // DX-128: canal de los avisos automáticos con el que nace cada paciente.
   defaultContactChannel                   ContactChannel                   @default(EMAIL)
   // DX-027: ajustes de caja de la clínica. Por defecto, el comportamiento de
@@ -80,10 +83,6 @@ model Tenant {
   fiscalAddress                           String?
   contactEmail                            String?
   contactPhone                            String?
-  /// DX-019: CLAVE del logo subido (`logos/<tenantId>-<16 hex>.<ext>`, DX-084),
-  /// nunca una URL. Al subirlo, `logoUrl` recibe su URL pública (lo que leen
-  /// los documentos); al quitarlo, las dos a NULL.
-  logoKey                                 String?
   createdAt                               DateTime                         @default(now())
   updatedAt                               DateTime                         @updatedAt
   deletedAt                               DateTime?
@@ -3315,6 +3314,8 @@ model Prescription {
   professionalSpecialty String?
   professionalEmail     String?
   clinicName            String
+  /// DX-019: datos fiscales congelados al emitir; NULL = se reimprime sin ellos.
+  clinicFiscal          Json?
   locationName          String
   locationAddress       String?
   notes                 String?

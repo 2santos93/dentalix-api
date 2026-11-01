@@ -1,3 +1,4 @@
+import { withClinicLogoUrl } from '../../../shared/storage/clinic-logo-url';
 import { Injectable } from '@nestjs/common';
 import {
   ClinicRole,
@@ -426,10 +427,12 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
         },
       });
       if (!row) return null;
-      const tenant = await tx.tenant.findUniqueOrThrow({
+      const tenant = withClinicLogoUrl(
+        await tx.tenant.findUniqueOrThrow({
         where: { id: tenantId },
-        select: { name: true, logoUrl: true, primaryColor: true },
-      });
+        select: { name: true, logoKey: true, primaryColor: true },
+      }),
+      );
       const { location, ...request } = row;
       return {
         request: toRecord(request),

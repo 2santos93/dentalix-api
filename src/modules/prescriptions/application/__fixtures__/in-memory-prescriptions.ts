@@ -51,6 +51,7 @@ export function makeIssuer(
       ...overrides,
     },
     clinicName: 'Clínica Demo',
+    clinicFiscal: EMPTY_CLINIC_FISCAL,
     settings: { ...TEST_PRESCRIPTION_SETTINGS, ...extra.settings },
     phase1: { country: 'CO' },
     professional: {
@@ -154,7 +155,6 @@ export class InMemoryPrescriptionRepository implements PrescriptionRepository {
         ? {
             ...structuredClone(row),
             clinicLogoUrl: null,
-            clinicFiscal: EMPTY_CLINIC_FISCAL,
             locationFormat: this.locationFormats.get(row.locationId) ?? {
               timeZone: null,
               locale: null,

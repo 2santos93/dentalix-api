@@ -1,8 +1,10 @@
 import {
   JPEG_WITH_EXIF,
-  SIMPLE_SVG,
+  SVG_WITH_SCRIPT,
   makePng,
+  makeWebp,
   pngChunk,
+  webpChunk,
 } from '../__fixtures__/logo-fixtures';
 import {
   LOGO_MAX_BYTES,
@@ -17,26 +19,18 @@ function ok(bytes: Buffer) {
   return result;
 }
 
-function svgOut(svg: string): string {
-  return ok(Buffer.from(svg, 'utf8')).bytes.toString('utf8');
-}
-
 describe('logo de la clínica (DX-019)', () => {
   describe('tipo por los bytes, no por la etiqueta', () => {
-    it('reconoce PNG, JPEG y SVG', () => {
+    it('reconoce PNG, JPEG y WebP', () => {
       expect(sniffLogo(makePng())).toBe('image/png');
       expect(sniffLogo(JPEG_WITH_EXIF)).toBe('image/jpeg');
-      expect(sniffLogo(SIMPLE_SVG)).toBe('image/svg+xml');
-      expect(sniffLogo(Buffer.from('\uFEFF  <svg viewBox="0 0 1 1"/>'))).toBe(
-        'image/svg+xml',
-      );
+      expect(sniffLogo(makeWebp())).toBe('image/webp');
     });
 
-    it('rechaza HTML, GIF, WebP, PDF y texto con un mensaje claro', () => {
+    it('rechaza HTML, GIF, PDF y texto con un mensaje claro', () => {
       for (const bytes of [
         Buffer.from('<html><script>alert(1)</script></html>'),
         Buffer.from('GIF89a\x01\x00\x01\x00'),
-        Buffer.from('RIFF\x00\x00\x00\x00WEBPVP8 '),
         Buffer.from('%PDF-1.7'),
         Buffer.from('hola'),
       ]) {
@@ -165,106 +159,58 @@ describe('logo de la clínica (DX-019)', () => {
     });
   });
 
-  describe('SVG saneado', () => {
-    it('un dibujo sencillo se conserva', () => {
-      const out = ok(SIMPLE_SVG);
-      expect(out.contentType).toBe('image/svg+xml');
-      expect(out.bytes.toString()).toBe(
-        '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 10 10" width="10" height="10"><rect width="10" height="10" fill="#0E7490"/></svg>',
-      );
+  describe('WebP re-escrito', () => {
+    it('una imagen limpia sale idéntica', () => {
+      const webp = makeWebp();
+      const out = ok(webp);
+      expect(out.contentType).toBe('image/webp');
+      expect(out.bytes.equals(webp)).toBe(true);
     });
 
-    it('se caen scripts, eventos, foreignObject, imágenes, enlaces y animaciones con su contenido', () => {
-      const out = svgOut(
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" onload="alert(1)">' +
-          '<script>alert(1)</script>' +
-          '<foreignObject><div xmlns="http://www.w3.org/1999/xhtml">x</div></foreignObject>' +
-          '<image href="https://tracker.example/x.png"/>' +
-          '<a href="javascript:alert(1)"><rect width="1" height="1"/></a>' +
-          '<rect width="2" height="2" onclick="alert(1)"><set attributeName="fill" to="red"/></rect>' +
-          '</svg>',
-      );
-      expect(out).not.toMatch(
-        /script|alert|foreignObject|image|tracker|javascript|onload|onclick|<a|<set|xhtml/,
-      );
-      expect(out).toContain('<rect width="2" height="2"></rect>');
+    it('se caen EXIF, XMP y lo pegado detrás del RIFF', () => {
+      const dirty = Buffer.concat([
+        makeWebp([
+          webpChunk('EXIF', Buffer.from('MM<script>')),
+          webpChunk('XMP ', Buffer.from('<x:script/>')),
+        ]),
+        Buffer.from('<html><script>alert(1)</script>'),
+      ]);
+      const out = ok(dirty).bytes;
+      expect(out.includes(Buffer.from('script'))).toBe(false);
+      expect(out.equals(makeWebp())).toBe(true);
     });
 
-    it('href solo hacia #id del propio dibujo; url() externo fuera', () => {
-      const out = svgOut(
-        '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">' +
-          '<defs><linearGradient id="g"><stop offset="0" stop-color="#fff"/></linearGradient></defs>' +
-          '<use xlink:href="#g"/><use href="https://evil.example/a.svg#x"/>' +
-          '<rect fill="url(#g)" width="1" height="1"/>' +
-          '<rect fill="url(https://evil.example/p)" style="fill:url(https://evil.example/p)" width="1" height="1"/>' +
-          '</svg>',
-      );
-      expect(out).toContain('<use xlink:href="#g"/>');
-      expect(out).toContain('fill="url(#g)"');
-      expect(out).not.toContain('evil.example');
+    it('un RIFF truncado o sin imagen: dañado', () => {
+      const webp = makeWebp();
+      expect(sanitizeLogo(webp.subarray(0, webp.length - 2))).toEqual({
+        ok: false,
+        message: LOGO_MESSAGES.damaged,
+      });
+      const empty = Buffer.from(webp);
+      empty.writeUInt32LE(4, 4);
+      expect(sanitizeLogo(empty)).toEqual({
+        ok: false,
+        message: LOGO_MESSAGES.damaged,
+      });
     });
+  });
 
-    it('CSS: un <style> sencillo se queda; con @import, escapes o url externa, rechazado', () => {
-      expect(
-        svgOut(
-          '<svg xmlns="http://www.w3.org/2000/svg"><style>.a{fill:#123456}</style><rect class="a"/></svg>',
-        ),
-      ).toContain('<style>.a{fill:#123456}</style><rect class="a"/>');
-      expect(
-        svgOut(
-          '<svg xmlns="http://www.w3.org/2000/svg"><defs><style><![CDATA[.a>b{fill:red}]]></style></defs></svg>',
-        ),
-      ).toContain('<style>.a&gt;b{fill:red}</style>');
-      for (const css of [
-        '@import url(https://x.example/a.css);',
-        '.a{background:\\75rl(x)}',
-        '.a{fill:url(https://x.example/)}',
+  describe('SVG: nunca', () => {
+    it('un SVG con script se rechaza, con cualquier cabecera delante', () => {
+      for (const bytes of [
+        SVG_WITH_SCRIPT,
+        Buffer.concat([
+          Buffer.from('<?xml version="1.0"?>\n'),
+          SVG_WITH_SCRIPT,
+        ]),
+        Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), SVG_WITH_SCRIPT]),
       ]) {
-        expect(
-          sanitizeLogo(
-            Buffer.from(
-              `<svg xmlns="http://www.w3.org/2000/svg"><style>${css}</style></svg>`,
-            ),
-          ),
-        ).toEqual({
+        expect(sniffLogo(bytes)).toBeNull();
+        expect(sanitizeLogo(bytes)).toEqual({
           ok: false,
-          message: LOGO_MESSAGES.svg,
+          message: LOGO_MESSAGES.type,
         });
       }
-    });
-
-    it('DOCTYPE, entidades propias, CDATA suelto, instrucciones y XML mal formado: rechazados', () => {
-      for (const svg of [
-        '<!DOCTYPE svg [<!ENTITY x "y">]><svg xmlns="http://www.w3.org/2000/svg">&x;</svg>',
-        '<svg xmlns="http://www.w3.org/2000/svg"><text>&nbsp;</text></svg>',
-        '<svg xmlns="http://www.w3.org/2000/svg"><text><![CDATA[x]]></text></svg>',
-        '<svg xmlns="http://www.w3.org/2000/svg"><?php echo 1; ?></svg>',
-        '<svg xmlns="http://www.w3.org/2000/svg"><g></svg>',
-        '<svg xmlns="http://www.w3.org/2000/svg"></svg><svg/>',
-        '<html><svg/></html>',
-        '<svg xmlns="http://www.w3.org/2000/svg"><text>a & b</text></svg>',
-      ]) {
-        const result = sanitizeLogo(Buffer.from(svg));
-        expect(result.ok).toBe(false);
-      }
-    });
-
-    it('el texto se re-escapa (no se puede abrir una etiqueta desde un texto)', () => {
-      expect(
-        svgOut(
-          '<svg xmlns="http://www.w3.org/2000/svg"><text>&lt;script&gt; &#65;&#x42;</text></svg>',
-        ),
-      ).toContain('<text>&lt;script&gt; AB</text>');
-    });
-
-    it('elementos de editores (sodipodi, inkscape, metadata) se caen con su contenido', () => {
-      const out = svgOut(
-        '<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="x" inkscape:version="1"><metadata><rdf:RDF/></metadata>' +
-          '<sodipodi:namedview pagecolor="#fff"/><path d="M0 0h1" inkscape:label="a"/></svg>',
-      );
-      expect(out).toBe(
-        '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><path d="M0 0h1"/></svg>',
-      );
     });
   });
 });

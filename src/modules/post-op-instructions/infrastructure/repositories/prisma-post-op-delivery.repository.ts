@@ -1,3 +1,4 @@
+import { withClinicLogoUrl } from '../../../../shared/storage/clinic-logo-url';
 import { Injectable } from '@nestjs/common';
 import type { PostOpInstructionDelivery, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
@@ -243,10 +244,12 @@ export class PrismaPostOpDeliveryRepository implements PostOpDeliveryRepository 
         },
       });
       if (!row) return null;
-      const clinic = await tx.tenant.findUniqueOrThrow({
+      const clinic = withClinicLogoUrl(
+        await tx.tenant.findUniqueOrThrow({
         where: { id: tenantId },
-        select: { name: true, logoUrl: true, primaryColor: true },
-      });
+        select: { name: true, logoKey: true, primaryColor: true },
+      }),
+      );
       const { location, patient, ...delivery } = row;
       return {
         ...toEntity(delivery),
@@ -266,10 +269,12 @@ export class PrismaPostOpDeliveryRepository implements PostOpDeliveryRepository 
         include: { location: { select: { phone: true } } },
       });
       if (!row) return null;
-      const clinic = await tx.tenant.findUniqueOrThrow({
+      const clinic = withClinicLogoUrl(
+        await tx.tenant.findUniqueOrThrow({
         where: { id: tenantId },
-        select: { name: true, logoUrl: true, primaryColor: true },
-      });
+        select: { name: true, logoKey: true, primaryColor: true },
+      }),
+      );
       const { location, ...delivery } = row;
       return { ...toEntity(delivery), clinic, locationPhone: location.phone };
     });

@@ -61,7 +61,7 @@ export interface PlanQuoteSource {
     docTypeLabel: string | null;
     docNumber: string | null;
   };
-  /** DX-019: `fiscal`, los datos fiscales de HOY (fuera del contenido firmado). */
+  /** DX-019: `fiscal`, los de hoy: entran en el contenido que se presenta y se firma. */
   clinic: { name: string; logoUrl: string | null; fiscal: ClinicFiscalData };
   location: QuoteLocation & { timeZone: string };
   /** Quien creó el plan; `null` si no consta. */

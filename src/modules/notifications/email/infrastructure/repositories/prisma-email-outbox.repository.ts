@@ -1,3 +1,4 @@
+import { withClinicLogoUrl } from '../../../../../shared/storage/clinic-logo-url';
 import { Injectable } from '@nestjs/common';
 import { EmailOutboxStatus, EmailTemplate, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../../shared/prisma/prisma.service';
@@ -240,7 +241,7 @@ export class PrismaEmailOutboxRepository implements EmailOutboxRepository {
     // `tenants` es global (sin RLS), igual que PrismaTenantBrandingRepository.
     return this.prisma.tenant.findFirst({
       where: { id: tenantId, deletedAt: null },
-      select: { name: true, logoUrl: true, primaryColor: true },
-    });
+      select: { name: true, logoKey: true, primaryColor: true },
+    }).then((row) => withClinicLogoUrl(row));
   }
 }

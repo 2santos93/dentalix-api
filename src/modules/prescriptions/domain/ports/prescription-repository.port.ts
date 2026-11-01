@@ -34,6 +34,8 @@ export interface CreatePrescriptionRepoInput {
   professionalSpecialty: string | null;
   professionalEmail: string | null;
   clinicName: string;
+  /** DX-019: la foto fiscal (o null). */
+  clinicFiscal: ClinicFiscalData | null;
   locationName: string;
   locationAddress: string | null;
   notes: string | null;
@@ -60,8 +62,6 @@ export type VoidPrescriptionOutcome =
 /** La receta guardada con lo que la vista imprimible lee de la clínica y la sede. */
 export type StoredPrescription = Prescription & {
   clinicLogoUrl: string | null;
-  /** DX-019: datos fiscales de HOY (fuera del contenido con hash). */
-  clinicFiscal: ClinicFiscalData;
   locationFormat: PrescriptionLocationFormat;
 };
 

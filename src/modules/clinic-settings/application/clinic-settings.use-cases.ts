@@ -7,6 +7,7 @@ import {
   FILE_STORAGE,
   type FileStoragePort,
 } from '../../../shared/storage/file-storage.port';
+import { clinicLogoPublicUrl } from '../../../shared/storage/clinic-logo-url';
 import { IMMUTABLE_CACHE_CONTROL } from '../../../shared/storage/public-file-cache';
 import {
   UPLOAD_TEMP_DIR,
@@ -40,7 +41,7 @@ export function clinicSettingsView(
 ): ClinicSettingsView {
   return {
     ...stored.profile,
-    logoUrl: stored.logoUrl,
+    logoUrl: clinicLogoPublicUrl(stored.logoKey),
     fiscalDataPending: isFiscalDataPending(stored.profile),
   };
 }
@@ -134,10 +135,7 @@ export class SetClinicLogoUseCase {
     } finally {
       await removeLocalFile(clean);
     }
-    const stored = await this.repo.setLogo(
-      { key, url: this.storage.publicUrl(key) },
-      ctx,
-    );
+    const stored = await this.repo.setLogo(key, ctx);
     return clinicSettingsView(stored);
   }
 }

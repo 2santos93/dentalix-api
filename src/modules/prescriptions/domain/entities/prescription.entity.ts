@@ -60,6 +60,8 @@ export interface Prescription {
   professionalSpecialty: string | null;
   professionalEmail: string | null;
   clinicName: string;
+  /** DX-019: congelados al emitir; `null` = se imprime sin datos fiscales. */
+  clinicFiscal: ClinicFiscalData | null;
   locationName: string;
   locationAddress: string | null;
   notes: string | null;
@@ -92,8 +94,6 @@ export interface PrescriptionLocationFormat {
 /** La receta con lo que necesita la vista imprimible. */
 export interface PrescriptionDocument extends Prescription {
   clinicLogoUrl: string | null;
-  /** DX-019: datos fiscales de HOY, en vivo como el logo (fuera del hash). */
-  clinicFiscal: ClinicFiscalData;
   locationFormat: PrescriptionLocationFormat;
   /** `true` si el hash guardado coincide con el recalculado al leer. */
   integrityOk: boolean;
@@ -129,6 +129,8 @@ export interface PrescriptionIssuer {
     timeZone: string;
   };
   clinicName: string;
+  /** DX-019: los de hoy; la receta los congela al emitirse. */
+  clinicFiscal: ClinicFiscalData;
   settings: PrescriptionSettings;
   /** Solo para la web anterior a DX-324; ninguna regla lo lee (R1). */
   phase1: Phase1IssuerCompat;

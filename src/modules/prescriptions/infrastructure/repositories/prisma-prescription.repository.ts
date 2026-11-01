@@ -1,6 +1,8 @@
+import { clinicLogoPublicUrl } from '../../../../shared/storage/clinic-logo-url';
 import {
   CLINIC_FISCAL_SELECT,
   clinicFiscalOf,
+  readClinicFiscal,
 } from '../../../../shared/clinic/clinic-fiscal';
 /**
  * Excepción G5.3 (DX-334): recetas emitidas antes de DX-324. El repositorio
@@ -177,6 +179,7 @@ function mapRow(row: Row): Prescription {
     professionalSpecialty: row.professionalSpecialty,
     professionalEmail: row.professionalEmail,
     clinicName: row.clinicName,
+    clinicFiscal: readClinicFiscal(row.clinicFiscal),
     locationName: row.locationName,
     locationAddress: row.locationAddress,
     notes: row.notes,
@@ -251,6 +254,7 @@ export class PrismaPrescriptionRepository implements PrescriptionRepository {
           where: { id: tenantId },
           select: {
             name: true,
+            ...CLINIC_FISCAL_SELECT,
             prescriptionPrintQuantityInWords: true,
             prescriptionRequireClinicalRecordNumber: true,
             prescriptionValidityDays: true,
@@ -270,6 +274,7 @@ export class PrismaPrescriptionRepository implements PrescriptionRepository {
       return {
         location: { ...site, timeZone: zoneOf(location.id) },
         clinicName: tenant.name,
+        clinicFiscal: clinicFiscalOf(tenant),
         // Fase 1 (spec §4.4, §7): el país legado de la sede, solo para la web
         // anterior a DX-324; la fase 2 lo retira. DX-312: la proyección del
         // país ISO de la sede (null fuera de los dos países legados).
@@ -365,6 +370,9 @@ export class PrismaPrescriptionRepository implements PrescriptionRepository {
       return tx.prescription.create({
         data: {
           ...rest,
+          clinicFiscal:
+            (rest.clinicFiscal as unknown as Prisma.InputJsonValue | null) ??
+            Prisma.DbNull,
           country: legacyClinicCountry(country),
           tenantId,
           dispensationDate: fromDateOnly(dispensationDate),
@@ -406,7 +414,7 @@ export class PrismaPrescriptionRepository implements PrescriptionRepository {
       const [tenant, location] = await Promise.all([
         tx.tenant.findFirst({
           where: { id: tenantId },
-          select: { logoUrl: true, ...CLINIC_FISCAL_SELECT },
+          select: { logoKey: true },
         }),
         tx.location.findFirst({
           where: { id: row.locationId },
@@ -415,8 +423,7 @@ export class PrismaPrescriptionRepository implements PrescriptionRepository {
       ]);
       return {
         ...mapRow(row),
-        clinicLogoUrl: tenant?.logoUrl ?? null,
-        clinicFiscal: clinicFiscalOf(tenant),
+        clinicLogoUrl: clinicLogoPublicUrl(tenant?.logoKey ?? null),
         locationFormat: {
           timeZone: location?.timeZone ?? null,
           locale: location?.locale ?? null,

@@ -15,8 +15,11 @@ import { CLINIC_SETTINGS_MESSAGES } from '../src/modules/clinic-settings/domain/
 import { LOGO_MESSAGES } from '../src/modules/clinic-settings/domain/logo-image';
 import {
   JPEG_WITH_EXIF,
+  SVG_WITH_SCRIPT,
   makePng,
+  makeWebp,
   pngChunk,
+  webpChunk,
 } from '../src/modules/clinic-settings/__fixtures__/logo-fixtures';
 
 // DX-019 en HTTP real: Ajustes › Datos de la clínica. Solo ADMIN edita; cada
@@ -63,6 +66,7 @@ describe('Ajustes › Datos de la clínica (e2e, DX-019)', () => {
   let assistantA: string;
   let patientA = '';
   let planA = '';
+  let catalogItemId = '';
 
   const server = () => app.getHttpServer();
   const as = (clinic: Clinic, token = clinic.adminToken) => ({
@@ -177,6 +181,7 @@ describe('Ajustes › Datos de la clínica (e2e, DX-019)', () => {
         })
         .expect(201)
     ).body as { id: string };
+    catalogItemId = item.id;
     planA = (
       (
         await as(a)
@@ -418,10 +423,11 @@ describe('Ajustes › Datos de la clínica (e2e, DX-019)', () => {
     });
   });
 
-  it('logo JPEG (sin EXIF) y SVG saneado, servido con una CSP que no ejecuta nada', async () => {
+  it('logo JPEG (sin EXIF) y WebP: re-escritos y servidos con su tipo real; la etiqueta del navegador no manda', async () => {
     const jpg = (
-      await as(a).upload(JPEG_WITH_EXIF, 'logo.jpg', 'image/jpeg').expect(200)
+      await as(a).upload(JPEG_WITH_EXIF, 'logo.png', 'image/png').expect(200)
     ).body as SettingsBody;
+    expect(jpg.logoUrl).toMatch(/\.jpg$/);
     const jpgFile = await request(server())
       .get(logoPath(jpg.logoUrl!))
       .buffer(true)
@@ -431,23 +437,46 @@ describe('Ajustes › Datos de la clínica (e2e, DX-019)', () => {
       Buffer.from(jpgFile.body as Buffer).includes(Buffer.from('Exif')),
     ).toBe(false);
 
-    const svg = Buffer.from(
-      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" onload="alert(1)"><script>alert(1)</script>' +
-        '<rect width="10" height="10" fill="#0E7490"/></svg>',
-    );
-    // La etiqueta del navegador no manda: se manda como PNG y es un SVG.
-    const saved = (await as(a).upload(svg, 'logo.png', 'image/png').expect(200))
-      .body as SettingsBody;
-    expect(saved.logoUrl).toMatch(/\.svg$/);
-    const svgFile = await request(server())
-      .get(logoPath(saved.logoUrl!))
+    const webp = (
+      await as(a)
+        .upload(
+          makeWebp([webpChunk('EXIF', Buffer.from('GPS'))]),
+          'logo.webp',
+          'image/webp',
+        )
+        .expect(200)
+    ).body as SettingsBody;
+    expect(webp.logoUrl).toMatch(/\.webp$/);
+    const webpFile = await request(server())
+      .get(logoPath(webp.logoUrl!))
       .buffer(true)
       .expect(200);
-    expect(svgFile.headers['content-type']).toContain('image/svg+xml');
-    expect(svgFile.headers['content-security-policy']).toContain('sandbox');
-    const text = Buffer.from(svgFile.body as Buffer).toString('utf8');
-    expect(text).not.toMatch(/script|onload|alert/);
-    expect(text).toContain('<rect width="10" height="10" fill="#0E7490"/>');
+    expect(webpFile.headers['content-type']).toBe('image/webp');
+    expect(Buffer.from(webpFile.body as Buffer).equals(makeWebp())).toBe(true);
+  });
+
+  it('SVG: rechazado con script, disfrazado de .png y con Content-Type de imagen; no se guarda nada', async () => {
+    const before = (await as(a).get('/clinic/settings').expect(200))
+      .body as SettingsBody;
+    const events = (await auditOf('CLINIC_LOGO')).length;
+    for (const [name, type] of [
+      ['logo.svg', 'image/svg+xml'],
+      ['logo.png', 'image/png'],
+      ['logo.jpg', 'image/jpeg'],
+    ] as const) {
+      const res = await as(a).upload(SVG_WITH_SCRIPT, name, type).expect(400);
+      expect((res.body as { message: string }).message).toBe(
+        LOGO_MESSAGES.type,
+      );
+    }
+    expect(
+      ((await as(a).get('/clinic/settings').expect(200)).body as SettingsBody)
+        .logoUrl,
+    ).toBe(before.logoUrl);
+    expect(await auditOf('CLINIC_LOGO')).toHaveLength(events);
+    await request(server())
+      .get(`/api/v1/files/logos/${a.tenantId}-0000000000000000.svg`)
+      .expect(400);
   });
 
   it('un logo inválido (tipo, contenido o tamaño) se rechaza con un mensaje claro y no cambia el que había', async () => {
@@ -548,17 +577,22 @@ describe('Ajustes › Datos de la clínica (e2e, DX-019)', () => {
       .expect(200);
   });
 
-  it('presupuesto y estado de cuenta imprimen los datos fiscales de hoy', async () => {
+  it('el estado de cuenta y el presupuesto sin aceptar llevan los datos de hoy', async () => {
     const quote = await as(a)
       .get(`/patients/${patientA}/treatment-plans/${planA}/quote`)
       .expect(200);
-    expect((quote.body as { clinicFiscal: unknown }).clinicFiscal).toEqual({
-      legalName: FISCAL.legalName,
-      taxIdLabel: FISCAL.taxIdLabel,
-      taxId: FISCAL.taxId,
-      address: FISCAL.fiscalAddress,
-      email: FISCAL.contactEmail,
-      phone: FISCAL.contactPhone,
+    expect(
+      quote.body as { clinicFiscal: unknown; version: number },
+    ).toMatchObject({
+      version: 3,
+      clinicFiscal: {
+        legalName: FISCAL.legalName,
+        taxIdLabel: FISCAL.taxIdLabel,
+        taxId: FISCAL.taxId,
+        address: FISCAL.fiscalAddress,
+        email: FISCAL.contactEmail,
+        phone: FISCAL.contactPhone,
+      },
     });
     const statement = await as(a)
       .get(`/patients/${patientA}/account-statement`)
@@ -568,6 +602,158 @@ describe('Ajustes › Datos de la clínica (e2e, DX-019)', () => {
     ).toMatchObject({
       legalName: FISCAL.legalName,
       taxId: FISCAL.taxId,
+    });
+  });
+
+  describe('reimpresión médico-legal: se imprime como se emitió', () => {
+    const SIGNATURE =
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+    const DRUG = {
+      activeIngredient: 'Amoxicilina',
+      concentration: '500 mg',
+      pharmaceuticalForm: 'Cápsula',
+      route: 'Oral',
+      dose: '1 cápsula',
+      frequency: 'Cada 8 horas',
+      durationDays: 7,
+      totalQuantity: 21,
+      quantityUnit: 'cápsulas',
+    };
+    const rxPath = () => `/patients/${patientA}/prescriptions`;
+    const issueRx = async (): Promise<string> => {
+      const res = await as(a, dentistA)
+        .post(rxPath(), { items: [DRUG], professionalLicense: 'RM-1' })
+        .expect(201);
+      return (res.body as { id: string }).id;
+    };
+    const getRx = async (id: string) =>
+      (await as(a, dentistA).get(`/prescriptions/${id}`).expect(200)).body as {
+        clinicFiscal: Record<string, unknown> | null;
+        integrityOk: boolean;
+      };
+    const signedPlan = async (): Promise<string> => {
+      const plan = (
+        (
+          await as(a)
+            .post(`/patients/${patientA}/treatment-plans`, { currency: 'COP' })
+            .expect(201)
+        ).body as { id: string }
+      ).id;
+      await as(a)
+        .post(`/treatment-plans/${plan}/items`, {
+          toothNumber: '12',
+          catalogItemId,
+        })
+        .expect(201);
+      const quote = (
+        await as(a)
+          .get(`/patients/${patientA}/treatment-plans/${plan}/quote`)
+          .expect(200)
+      ).body as {
+        contentHash: string;
+      };
+      await as(a)
+        .post(`/patients/${patientA}/treatment-plans/${plan}/acceptance`, {
+          signerName: 'Ana Fiscal',
+          signature: SIGNATURE,
+          contentHash: quote.contentHash,
+        })
+        .expect(201);
+      return plan;
+    };
+    const getQuote = async (plan: string) =>
+      (
+        await as(a)
+          .get(`/patients/${patientA}/treatment-plans/${plan}/quote`)
+          .expect(200)
+      ).body as {
+        version: number;
+        clinicFiscal: Record<string, unknown> | null;
+        acceptance: { integrityOk: boolean };
+      };
+
+    afterEach(async () => {
+      await as(a)
+        .patch('/clinic/settings', {
+          taxId: FISCAL.taxId,
+          legalName: FISCAL.legalName,
+        })
+        .expect(200);
+    });
+
+    it('receta: congela los datos, en el hash, y no cambia al editarlos', async () => {
+      const id = await issueRx();
+      await as(a)
+        .patch('/clinic/settings', {
+          legalName: 'Otra Razón S.A.',
+          taxId: 'OTRO-9',
+        })
+        .expect(200);
+      const rx = await getRx(id);
+      expect(rx.clinicFiscal).toMatchObject({
+        legalName: FISCAL.legalName,
+        taxId: FISCAL.taxId,
+      });
+      expect(rx.integrityOk).toBe(true);
+    });
+
+    it('receta antigua sin foto: se reimprime sin datos fiscales, nunca con los de hoy', async () => {
+      // Como las emitidas antes de DX-019 (el trigger se salta por ser esta la conexión del dueño sin sede).
+      const id = await issueRx();
+      await raw.$executeRaw`ALTER TABLE "prescriptions" DISABLE TRIGGER "prescriptions_immutable"`;
+      await raw.prescription.update({
+        where: { id },
+        data: { clinicFiscal: Prisma.DbNull },
+      });
+      await raw.$executeRaw`ALTER TABLE "prescriptions" ENABLE TRIGGER "prescriptions_immutable"`;
+      expect((await getRx(id)).clinicFiscal).toBeNull();
+    });
+
+    it('la foto de una receta no se puede cambiar (trigger)', async () => {
+      const id = await issueRx();
+      await expect(
+        raw.prescription.update({
+          where: { id },
+          data: { clinicFiscal: { legalName: 'Falsa' } },
+        }),
+      ).rejects.toThrow(/inmutable/);
+    });
+
+    it('presupuesto firmado: congela los datos, en el hash, y no cambia al editarlos', async () => {
+      const plan = await signedPlan();
+      await as(a)
+        .patch('/clinic/settings', {
+          legalName: 'Otra Razón S.A.',
+          taxId: 'OTRO-9',
+        })
+        .expect(200);
+      const quote = await getQuote(plan);
+      expect(quote.version).toBe(3);
+      expect(quote.clinicFiscal).toMatchObject({
+        legalName: FISCAL.legalName,
+        taxId: FISCAL.taxId,
+      });
+      expect(quote.acceptance.integrityOk).toBe(true);
+    });
+
+    it('presupuesto firmado antiguo (v2, sin foto): sin datos fiscales, nunca con los de hoy', async () => {
+      const plan = await signedPlan();
+      const row = await raw.treatmentPlanAcceptance.findFirstOrThrow({
+        where: { planId: plan },
+      });
+      const { clinicFiscal: _frozen, ...old } = row.content as Record<
+        string,
+        unknown
+      >;
+      await raw.$executeRaw`ALTER TABLE "treatment_plan_acceptances" DISABLE TRIGGER USER`;
+      await raw.treatmentPlanAcceptance.update({
+        where: { id: row.id },
+        data: { content: { ...old, version: 2 } as Prisma.InputJsonValue },
+      });
+      await raw.$executeRaw`ALTER TABLE "treatment_plan_acceptances" ENABLE TRIGGER USER`;
+      const quote = await getQuote(plan);
+      expect(quote.version).toBe(2);
+      expect(quote.clinicFiscal).toBeNull();
     });
   });
 

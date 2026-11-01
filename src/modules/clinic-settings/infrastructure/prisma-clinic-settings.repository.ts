@@ -24,7 +24,6 @@ const SELECT = {
   contactEmail: true,
   contactPhone: true,
   primaryColor: true,
-  logoUrl: true,
   logoKey: true,
 } satisfies Prisma.TenantSelect;
 
@@ -41,7 +40,7 @@ function toStored(row: Row): StoredClinicSettings {
     contactPhone: row.contactPhone,
     primaryColor: row.primaryColor,
   };
-  return { profile, logoUrl: row.logoUrl, logoKey: row.logoKey };
+  return { profile, logoKey: row.logoKey };
 }
 
 /**
@@ -97,7 +96,7 @@ export class PrismaClinicSettingsRepository implements ClinicSettingsRepository 
   }
 
   setLogo(
-    logo: { key: string; url: string } | null,
+    logoKey: string | null,
     ctx: AuditRequestContext,
   ): Promise<StoredClinicSettings> {
     const id = this.tenantId();
@@ -109,18 +108,18 @@ export class PrismaClinicSettingsRepository implements ClinicSettingsRepository 
       const after = toStored(
         await tx.tenant.update({
           where: { id },
-          data: { logoKey: logo?.key ?? null, logoUrl: logo?.url ?? null },
+          data: { logoKey },
           select: SELECT,
         }),
       );
-      // En la auditoría va la clave (o la URL anterior a DX-019), nunca bytes.
+      // En la auditoría va la clave, nunca bytes.
       const event = configAuditEvent(ctx, {
         action: 'UPDATE',
         resourceType: 'CLINIC_SETTINGS',
         resourceId: id,
         reason: 'CLINIC_LOGO',
-        before: { logo: before.logoKey ?? before.logoUrl },
-        after: { logo: after.logoKey ?? after.logoUrl },
+        before: { logo: before.logoKey },
+        after: { logo: after.logoKey },
       });
       if (event) await writeAuditEvent(tx, event);
       return after;

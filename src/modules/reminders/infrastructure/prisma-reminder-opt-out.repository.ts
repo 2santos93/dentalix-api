@@ -1,3 +1,4 @@
+import { withClinicLogoUrl } from '../../../shared/storage/clinic-logo-url';
 import { ConfigService } from '@nestjs/config';
 import { ReminderClock } from '../application/reminder-clock';
 import { optOutPositiveInteger } from '../application/opt-out-config';
@@ -211,7 +212,7 @@ export class PrismaReminderOptOutRepository implements ReminderOptOutRepository 
     const tenantId = this.requireTenantId();
     return this.prisma.tenant.findFirst({
       where: { id: tenantId, deletedAt: null },
-      select: { name: true, primaryColor: true, logoUrl: true },
-    });
+      select: { name: true, primaryColor: true, logoKey: true },
+    }).then((row) => withClinicLogoUrl(row));
   }
 }

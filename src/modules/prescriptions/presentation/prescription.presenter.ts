@@ -44,7 +44,6 @@ export function presentPrescriptionDocument(
   return {
     ...presentPrescription(doc),
     clinicLogoUrl: doc.clinicLogoUrl,
-    clinicFiscal: doc.clinicFiscal,
     locationFormat: doc.locationFormat,
     integrityOk: doc.integrityOk,
   };
