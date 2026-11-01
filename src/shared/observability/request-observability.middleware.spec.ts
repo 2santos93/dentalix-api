@@ -88,7 +88,7 @@ describe('requestObservabilityMiddleware', () => {
     const req = request({
       method: 'PATCH',
       // La URL real (con id y query) nunca se registra; solo la plantilla.
-      url: '/api/v1/patients/9b1e?query=Juan',
+      url: '/api/v1/patients/9b1e77aa?query=Juan',
       headers: {
         authorization: 'Bearer eyJ.secreto.firma',
         cookie: 'dx_refresh=abc',
@@ -126,7 +126,7 @@ describe('requestObservabilityMiddleware', () => {
       'eyJ',
       'dx_refresh',
       'query=',
-      '9b1e',
+      '9b1e77aa',
     ]) {
       expect(text).not.toContain(leaked);
     }

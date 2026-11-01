@@ -6,11 +6,11 @@ import type {
   PrivacyPolicyVersion,
 } from '../../domain/entities/privacy-policy.entity';
 import {
-  SENSITIVE_HEALTH_ELEMENT_LABELS,
-  missingSensitiveHealthElements,
   normalizePolicyContent,
   policyContentHash,
 } from '../../domain/privacy-policy-content';
+
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 
 export const EMPTY_POLICY_TEXT_MESSAGE =
   'Todos los textos de la política son obligatorios.';
@@ -28,27 +28,19 @@ export class PublishPrivacyPolicyUseCase {
    */
   async execute(
     content: PrivacyPolicyContent,
-    publishedById: string,
+    audit: AuditRequestContext,
   ): Promise<PrivacyPolicyVersion> {
     const normalized = normalizePolicyContent(content);
     if (Object.values(normalized).some((text) => text === '')) {
       throw new BadRequestException(EMPTY_POLICY_TEXT_MESSAGE);
     }
-    const missing = missingSensitiveHealthElements(
-      normalized.sensitiveHealthText,
+    return this.repo.publish(
+      {
+        ...normalized,
+        contentHash: policyContentHash(normalized),
+        publishedById: audit.actor.userId,
+      },
+      audit,
     );
-    if (missing.length > 0) {
-      const list = missing
-        .map((m) => SENSITIVE_HEALTH_ELEMENT_LABELS[m])
-        .join(', ');
-      throw new BadRequestException(
-        `El texto de datos sensibles de salud debe informar: ${list} (Dec. 1377 de 2013, art. 6).`,
-      );
-    }
-    return this.repo.publish({
-      ...normalized,
-      contentHash: policyContentHash(normalized),
-      publishedById,
-    });
   }
 }

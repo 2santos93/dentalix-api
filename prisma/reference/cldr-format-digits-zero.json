@@ -1,0 +1,8 @@
+{
+  "cldr": "47.0",
+  "cldrDigitsZero": [
+    "AFN", "ALL", "BIF", "CLP", "DJF", "GNF", "IRR", "ISK", "JPY", "KMF",
+    "KPW", "KRW", "LAK", "LBP", "MGA", "MMK", "PYG", "RSD", "RWF", "SOS",
+    "SYP", "UGX", "VND", "VUV", "XAF", "XOF", "XPF", "YER"
+  ]
+}

@@ -3,6 +3,7 @@ import { ClinicRole, Prisma, PrismaClient, Sex } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { PAYER_TYPES } from '../src/modules/payers/domain/payer-type';
+import { leavesWith } from './support/content-leaves';
 import { createE2eApp } from './support/create-e2e-app';
 import {
   Clinic,
@@ -262,12 +263,11 @@ describe('Cobertura verificable para asignar un convenio (e2e, SEC-049)', () => 
       }
     });
 
-    it('legacy EMPRESA payer audits as EMPLOYER', async () => {
-      // Excepción G5.3 (DX-334): tipos de pagador anteriores a DX-326.
+    it('an EMPLOYER payer inserted by SQL audits as EMPLOYER', async () => {
       const rows = await raw.$queryRaw<{ id: string }[]>`
         INSERT INTO "payers" ("id", "tenantId", "name", "type", "updatedAt")
         VALUES (gen_random_uuid(), ${clinic.tenantId}::uuid, 'Empresa Alfa',
-                'EMPRESA'::"PayerType", now())
+                'EMPLOYER'::"PayerType", now())
         RETURNING "id"`;
       const patient = await createPatient('Auditada legado');
       await as(api().post(coverages(patient)), tokens.RECEPTION)
@@ -292,7 +292,7 @@ describe('Cobertura verificable para asignar un convenio (e2e, SEC-049)', () => 
           patientId: patient,
           payerId: payer,
           isPrimary: true,
-          migratedFromInsurerEps: true,
+          migratedFromLegacyInsurer: true,
         },
         select: { id: true },
       });
@@ -303,7 +303,7 @@ describe('Cobertura verificable para asignar un convenio (e2e, SEC-049)', () => 
         expect.objectContaining({
           id: migrated.id,
           memberNumber: null,
-          migratedFromInsurerEps: true,
+          migratedFromLegacyInsurer: true,
           declaredById: null,
           verifiedAt: null,
           verifiedById: null,
@@ -461,8 +461,11 @@ describe('Cobertura verificable para asignar un convenio (e2e, SEC-049)', () => 
           }) as unknown,
         }),
       ]);
-      // El número entero no está en ningún evento.
-      expect(JSON.stringify(events)).not.toContain('102030');
+      // Ni el número entero ni lo que no son sus 4 últimos en ningún evento
+      // (los ids y las horas no cuentan: DX-496, TST-059).
+      for (const part of [NUMBER, NUMBER.slice(0, -4)]) {
+        expect(leavesWith(events, part)).toEqual([]);
+      }
     });
 
     it('editar el nº borra la verificación; quien lo editó vuelve a necesitarla para asignar', async () => {
@@ -744,7 +747,9 @@ describe('Cobertura verificable para asignar un convenio (e2e, SEC-049)', () => 
       const foreign = await verify(foreignPatient, foreignCoverage).expect(404);
       expect(message(foreign)).toBe('Paciente no encontrado.');
       for (const res of [own, foreign]) {
-        expect(JSON.stringify(res.body)).not.toMatch(/9988|6655|Aseguradora/);
+        for (const leaked of ['9988776655', '9988', '6655', 'Aseguradora']) {
+          expect(leavesWith(res.body, leaked)).toEqual([]);
+        }
       }
       const row = await raw.patientCoverage.findUniqueOrThrow({
         where: { id: foreignCoverage },

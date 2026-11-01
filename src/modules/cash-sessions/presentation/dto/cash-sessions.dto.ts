@@ -715,7 +715,7 @@ export class CashSessionDetailDto extends CashSessionSummaryDto {
   @ApiProperty({ type: String, nullable: true })
   notes!: string | null;
 
-  @ApiProperty({ example: 'America/Bogota' })
+  @ApiProperty({ example: 'UTC' })
   timeZone!: string;
 
   @ApiProperty({

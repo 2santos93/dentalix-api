@@ -30,11 +30,11 @@ describe('DTOs de listas de precios (DX-105)', () => {
   describe('alta', () => {
     it('acepta un alta válida con y sin sede', async () => {
       expect(
-        await messages(CreatePriceListDto, { name: 'Sura', currency: 'COP' }),
+        await messages(CreatePriceListDto, { name: 'Surco', currency: 'COP' }),
       ).toEqual([]);
       expect(
         await messages(CreatePriceListDto, {
-          name: 'Sura',
+          name: 'Surco',
           currency: 'COP',
           locationId: ID,
         }),
@@ -51,19 +51,19 @@ describe('DTOs de listas de precios (DX-105)', () => {
 
     it('rechaza moneda ausente o que no es de 3 letras y sede que no es uuid', async () => {
       expect(
-        (await messages(CreatePriceListDto, { name: 'Sura' })).length,
+        (await messages(CreatePriceListDto, { name: 'Surco' })).length,
       ).toBeGreaterThan(0);
       expect(
         (
           await messages(CreatePriceListDto, {
-            name: 'Sura',
+            name: 'Surco',
             currency: 'PESOS',
           })
         ).length,
       ).toBeGreaterThan(0);
       expect(
         await messages(CreatePriceListDto, {
-          name: 'Sura',
+          name: 'Surco',
           currency: 'COP',
           locationId: 'norte',
         }),

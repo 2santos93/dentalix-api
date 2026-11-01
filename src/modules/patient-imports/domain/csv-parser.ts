@@ -77,7 +77,7 @@ const DELIMITER_SAMPLE_LINES = 20;
 
 /**
  * Separador: el que más aparece FUERA de comillas en las primeras líneas
- * (la cabecera y unas filas). Excel en español (es-CO, es-ES) guarda con «;» porque la
+ * (la cabecera y unas filas). Excel en español (es-*) guarda con «;» porque la
  * coma es el decimal; en inglés, con «,». Empate o ninguno: «,».
  */
 export function detectDelimiter(text: string): CsvDelimiter {

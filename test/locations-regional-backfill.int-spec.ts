@@ -113,10 +113,10 @@ describe('barrido de sedes sin configurar (int, G1 fase 1)', () => {
       'Antigua B',
       REGIONAL_BOGOTA_FIXTURE.country,
     );
-    // Una réplica antigua de España: el país sí lo envió.
+    // Otro país (Z1): la misma tabla de todos los países, ningún caso propio.
     await raw.location.update({
       where: { id: legacyB },
-      data: { country: 'ES' },
+      data: { country: 'VE' },
     });
     // Valores elegidos por alguien: el barrido nunca los pisa.
     tokyo = (
@@ -151,9 +151,9 @@ describe('barrido de sedes sin configurar (int, G1 fase 1)', () => {
     expect(
       await raw.location.findUniqueOrThrow({ where: { id: legacyB } }),
     ).toMatchObject({
-      currency: 'EUR',
-      timeZone: 'Europe/Madrid',
-      locale: 'es-ES',
+      currency: 'USD',
+      timeZone: 'America/Caracas',
+      locale: 'es-VE',
       regionalSettingsReviewedAt: null,
     });
     expect(
@@ -166,6 +166,46 @@ describe('barrido de sedes sin configurar (int, G1 fase 1)', () => {
     expect(
       await raw.location.findUniqueOrThrow({ where: { id: tokyo } }),
     ).toEqual(tokyoBefore);
+  });
+
+  it('a country with several zones fills currency and format and leaves the zone to choose, unless the live schedule has one (Z1)', async () => {
+    const noSchedule = await legacyLocationInsert(
+      raw,
+      tenantA,
+      'Varias zonas',
+      'ES',
+    );
+    const withSchedule = await legacyLocationInsert(
+      raw,
+      tenantA,
+      'Varias zonas con horario',
+      'ES',
+    );
+    await raw.$executeRaw`
+      INSERT INTO "location_schedules" ("id", "tenantId", "locationId", "timezone", "updatedAt")
+      VALUES (gen_random_uuid(), ${tenantA}::uuid, ${withSchedule}::uuid, 'Atlantic/Canary', now())`;
+    try {
+      const first = await job.sweep();
+      expect(first.find((r) => r.tenantId === tenantA)?.filled).toBe(2);
+      expect(
+        await raw.location.findUniqueOrThrow({ where: { id: noSchedule } }),
+      ).toMatchObject({ currency: 'EUR', timeZone: null, locale: 'es-ES' });
+      expect(
+        await raw.location.findUniqueOrThrow({ where: { id: withSchedule } }),
+      ).toMatchObject({
+        currency: 'EUR',
+        timeZone: 'Atlantic/Canary',
+        locale: 'es-ES',
+      });
+      // Lo que no tiene dato se queda NULL y la segunda pasada no lo cuenta.
+      const second = await job.sweep();
+      expect(second.find((r) => r.tenantId === tenantA)?.filled).toBe(0);
+    } finally {
+      await raw.$executeRaw`
+        DELETE FROM "location_schedules" WHERE "locationId" = ${withSchedule}::uuid`;
+      await raw.$executeRaw`
+        DELETE FROM "locations" WHERE "id" IN (${noSchedule}::uuid, ${withSchedule}::uuid)`;
+    }
   });
 
   it('g1:backfill-locations reports the rows it filled', async () => {

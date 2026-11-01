@@ -3,7 +3,7 @@ import {
   type AmountTotals,
 } from '../domain/production-by-procedure';
 import type { ProductionByProcedure } from './use-cases/get-production-by-procedure.use-case';
-import { ISO_ZERO_DECIMAL_CURRENCIES } from '../../../shared/money/currency-decimals';
+import { CLDR_ZERO_FORMAT_DIGITS } from '../../../shared/format/cldr-format-digits';
 
 /*
  * CSV de «Producción por procedimiento» (DX-423): las MISMAS filas y en el
@@ -52,7 +52,7 @@ function num(value: number | null, decimals: number): string {
 function money(value: number | null, currency: string): string {
   if (value === null) return '';
   const zero =
-    ISO_ZERO_DECIMAL_CURRENCIES.has(currency.toUpperCase()) &&
+    CLDR_ZERO_FORMAT_DIGITS.has(currency.toUpperCase()) &&
     Number.isInteger(value);
   return value.toFixed(zero ? 0 : 2);
 }

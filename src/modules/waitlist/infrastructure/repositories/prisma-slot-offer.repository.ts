@@ -481,7 +481,8 @@ export class PrismaSlotOfferRepository implements SlotOfferRepository {
   /**
    * Cita «Adelantar si hay hueco» → al hueco, sin la marca, como el
    * «Asignar» de DX-210: su hora original queda libre. Condicionado a que
-   * siga marcada y agendada/confirmada; los enlaces de confirmación sin
+   * siga marcada y agendada/confirmada (y, DX-211, sin sillón o con uno
+   * activo); los enlaces de confirmación sin
    * responder dejan de valer (hablaban de la hora vieja).
    */
   private async moveAppointment(
@@ -496,12 +497,19 @@ export class PrismaSlotOfferRepository implements SlotOfferRepository {
         wantsEarlier: true,
         status: { in: [...MOVABLE_STATUSES] },
         start: { gt: offer.slotStart },
+        // DX-211: con un sillón desactivado la cita no se puede reagendar
+        // (como en el PATCH): el hueco deja de estar disponible. Uno ocupado
+        // lo rechaza la EXCLUDE por sillón.
+        OR: [{ chairId: null }, { chair: { active: true } }],
       },
       data: {
         start: offer.slotStart,
         end: offer.appointmentEnd,
         providerId: offer.providerId,
         wantsEarlier: false,
+        // DX-509: en su hueco nuevo deja de ser sobrecupo (si lo era) y
+        // cuenta en la EXCLUDE del profesional.
+        overbooked: false,
         confirmationSentAt: null,
         callbackRequestedAt: null,
       },

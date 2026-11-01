@@ -1,5 +1,6 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { JwtService } from '@nestjs/jwt';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
@@ -218,17 +219,51 @@ describe('Session revalidation on refresh (e2e)', () => {
       .expect(200);
   });
 
-  it('a refresh token is single-use: the second refresh with it is 401', async () => {
+  /** Lleva la última rotación de la familia del token fuera de la gracia. */
+  async function ageLastRotation(refreshToken: string): Promise<void> {
+    const sid = claimsOf(refreshToken).sid as string;
+    await raw.refreshSession.update({
+      where: { id: sid },
+      data: { rotatedAt: new Date(Date.now() - 5 * 60_000) },
+    });
+  }
+
+  it('a refresh token is single-use: reusing it after the grace is 401 and revokes the WHOLE family (theft detection)', async () => {
     const { refreshToken } = await login(OWNER);
 
     const first = await refresh(refreshToken).expect(201);
-    await refresh(refreshToken).expect(401);
+    const next = (first.body as Tokens).refreshToken;
+    await ageLastRotation(next);
 
-    // La cadena sigue viva: el token NUEVO sí renueva.
-    await refresh((first.body as Tokens).refreshToken).expect(201);
+    // Alguien presenta el token ya rotado fuera de la gracia: 401…
+    await refresh(refreshToken).expect(401);
+    // …y la cadena del que rotó primero también muere: ladrón y víctima
+    // vuelven a /login en vez de quedar viva la cadena robada.
+    await refresh(next).expect(401);
   });
 
-  it('two concurrent refreshes with the same token yield exactly ONE valid pair', async () => {
+  it('lost response: the PREVIOUS token within the grace gets the CURRENT one again (same jti), not a second chain', async () => {
+    const { refreshToken } = await login(OWNER);
+
+    // La API rota pero el cliente no recibe la respuesta (recarga, red).
+    const lost = ((await refresh(refreshToken).expect(201)).body as Tokens)
+      .refreshToken;
+    // Reintenta con el token que aún tiene: 201 con una copia del vigente.
+    const again = ((await refresh(refreshToken).expect(201)).body as Tokens)
+      .refreshToken;
+    expect(claimsOf(again).jti).toBe(claimsOf(lost).jti);
+    expect(claimsOf(again).exp).toBe(claimsOf(lost).exp);
+    expect(claimsOf(again).sid).toBe(claimsOf(refreshToken).sid);
+
+    // Una sola cadena: la copia rota y, desde ahí, el token del login es
+    // más viejo que el anterior → reuso.
+    const third = ((await refresh(again).expect(201)).body as Tokens)
+      .refreshToken;
+    await refresh(refreshToken).expect(401);
+    await refresh(third).expect(401);
+  });
+
+  it('two concurrent refreshes with the same token yield ONE live chain (every copy carries the same jti)', async () => {
     const { refreshToken } = await login(OWNER);
 
     const results = await Promise.all([
@@ -236,8 +271,29 @@ describe('Session revalidation on refresh (e2e)', () => {
       refresh(refreshToken),
       refresh(refreshToken),
     ]);
-    const statuses = results.map((r) => r.status).sort();
-    expect(statuses).toEqual([201, 401, 401]);
+    expect(results.map((r) => r.status)).toEqual([201, 201, 201]);
+    const jtis = new Set(
+      results.map((r) => claimsOf((r.body as Tokens).refreshToken).jti),
+    );
+    expect(jtis.size).toBe(1);
+    // Sin gracia (fuera de ella), el token original ya no sirve.
+    await ageLastRotation((results[0].body as Tokens).refreshToken);
+    await refresh(refreshToken).expect(401);
+  });
+
+  it('a pre-family refresh (no sid claim) is still single-use by the denylist and its new pair joins a family', async () => {
+    const { refreshToken } = await login(OWNER);
+    // Un refresh emitido antes de las familias: mismos claims, sin `sid`.
+    const { sid: _sid, iat: _iat, ...legacyClaims } = claimsOf(refreshToken);
+    const legacy = await new JwtService({}).signAsync(legacyClaims, {
+      secret: process.env.JWT_REFRESH_SECRET,
+    });
+
+    const renewed = ((await refresh(legacy).expect(201)).body as Tokens)
+      .refreshToken;
+    await refresh(legacy).expect(401);
+    expect(typeof claimsOf(renewed).sid).toBe('string');
+    await refresh(renewed).expect(201);
   });
 
   it('changing the password revokes previous sessions and hands back a fresh pair', async () => {

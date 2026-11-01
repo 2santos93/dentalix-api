@@ -8,6 +8,9 @@ import type {
   TenantDomainRepository,
 } from '../../domain/ports/tenant-domain-repository.port';
 import type { TenantDomainRow } from '../../domain/entities/tenant-domain.entity';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
+import { domainRegisteredAuditEvent } from '../../domain/domain-audit';
 
 const SELECT = {
   id: true,
@@ -44,22 +47,27 @@ export class PrismaTenantDomainRepository implements TenantDomainRepository {
     return tenantId;
   }
 
-  create(input: {
-    host: string;
-    verifyToken: string;
-    expiresAt: Date;
-    replacing?: { id: string; deletedAt: Date };
-  }): Promise<TenantDomainRow> {
+  create(
+    input: {
+      host: string;
+      verifyToken: string;
+      expiresAt: Date;
+      replacing?: { id: string; deletedAt: Date };
+    },
+    audit: AuditRequestContext,
+  ): Promise<TenantDomainRow> {
     const tenantId = this.tenantId();
     const { replacing } = input;
-    return this.prisma.$transaction(async (tx) => {
+    // Con el tenant fijado (audit_events tiene RLS forzada): el evento va en
+    // la misma transacción que el alta (DX-360).
+    return this.prisma.runWithTenant(tenantId, async (tx) => {
       if (replacing) {
         await tx.tenantDomain.updateMany({
           where: { id: replacing.id, tenantId, deletedAt: null },
           data: { deletedAt: replacing.deletedAt },
         });
       }
-      return tx.tenantDomain.create({
+      const row = await tx.tenantDomain.create({
         data: {
           tenantId,
           host: input.host,
@@ -68,6 +76,11 @@ export class PrismaTenantDomainRepository implements TenantDomainRepository {
         },
         select: SELECT,
       });
+      await writeAuditEvent(
+        tx,
+        domainRegisteredAuditEvent(audit, row, replacing?.id ?? null),
+      );
+      return row;
     });
   }
 

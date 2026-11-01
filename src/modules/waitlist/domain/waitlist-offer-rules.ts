@@ -79,8 +79,8 @@ export interface PatientContactFields {
 export type WhatsappOfferBlock = 'OPTED_OUT' | 'CHANNEL_NONE' | 'NO_OPT_IN';
 
 /**
- * ¿Se le puede ofrecer el hueco por WhatsApp? (DX-128, Ley 1581 / RGPD:
- * minimización y finalidad) Con la baja de los avisos o el canal «Ninguno»,
+ * ¿Se le puede ofrecer el hueco por WhatsApp? (DX-128, protección de
+ * datos: minimización y finalidad) Con la baja de los avisos o el canal «Ninguno»,
  * no: el paciente pidió que no le escriban. Tampoco sin el permiso de WhatsApp
  * registrado (fecha y origen): escribirle por un canal que no autorizó no es
  * un aviso operativo de su cita, es ofrecerle algo nuevo. En los tres casos se

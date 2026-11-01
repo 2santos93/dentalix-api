@@ -182,13 +182,13 @@ export class UpdateLocationDto {
   })
   showHealthRegistrationNumber?: boolean;
 
-  // DX-319: el código REPS se borró de la sede. La ValidationPipe global solo
+  // DX-319: el código de habilitación nacional se borró de la sede. La ValidationPipe global solo
   // DESCARTARÍA el campo y respondería 200, y una web antigua mostraría
   // «Guardado» sin guardar nada: con él en el cuerpo (aunque sea null) es 400.
   @ApiHideProperty()
   @Equals(undefined, {
     message:
-      'El código REPS ya no existe: usa healthRegistrationNumber (nº de registro sanitario).',
+      'repsHabilitationCode ya no existe: usa healthRegistrationNumber (nº de registro sanitario).',
   })
   repsHabilitationCode?: never;
 

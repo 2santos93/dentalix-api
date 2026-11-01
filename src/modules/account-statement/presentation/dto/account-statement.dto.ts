@@ -312,6 +312,16 @@ export class AccountStatementMovementDto {
 
   @ApiProperty({
     type: String,
+    nullable: true,
+    example: '00-000123',
+    description:
+      'DX-515: nº de la factura fiscal emitida fuera de Dentalix para el ' +
+      'abono (texto libre), o `null` si no se anotó.',
+  })
+  externalInvoiceNumber!: string | null;
+
+  @ApiProperty({
+    type: String,
     format: 'uuid',
     nullable: true,
     description:

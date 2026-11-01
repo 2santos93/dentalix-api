@@ -5,11 +5,8 @@ import {
   documentTypeName,
   type ClinicDocumentTypeNames,
 } from '../../patients/domain/document-type';
-import {
-  docTypeFromStored,
-  legacyStoredDocType,
-  type LegacyDocType,
-} from '../../patients/domain/legacy-doc-type';
+import { docTypeFromStored } from '../../patients/domain/legacy-document-codes';
+import type { ReceiptTexts } from './receipt-settings';
 
 /** Pie legal por defecto del recibo de caja (DX-136). */
 export const RECEIPT_LEGAL_NOTICE = 'Este documento no es factura';
@@ -103,6 +100,11 @@ export interface ReceiptSnapshotInput {
   cashier: { id: string; fullName: string } | null;
   /** DX-390: las líneas de un cobro dividido (ausente en un abono suelto). */
   split?: { lines: ReceiptSplitLine[]; planCurrency: string } | null;
+  /**
+   * DX-515: título y leyenda configurados al emitir (la leyenda, ya resuelta
+   * entre la de la clínica y la de la sede). Ausente o `null` = sin ellos.
+   */
+  texts?: ReceiptTexts | null;
 }
 
 /**
@@ -118,15 +120,16 @@ export interface ReceiptSnapshot {
   /** Falta la razón social o el identificador fiscal: el recibo dice «Datos fiscales pendientes». */
   fiscalDataPending: boolean;
   /**
-   * DX-327 (fase 1, R5, R6 y R18): `docType` sigue siendo el código anterior
-   * para las réplicas anteriores; las fotos nuevas añaden el tipo genérico, la
-   * etiqueta y el nombre visible congelado. Las anteriores solo tienen el
-   * código. Se lee SIEMPRE con `receiptPatientView`.
+   * DX-327 (R6 y R18): las fotos llevan el tipo genérico, la etiqueta y el
+   * nombre visible congelado. Las emitidas antes de la migración
+   * 20261110130000 llevan además (o solo, las anteriores a DX-327) el código
+   * anterior en `docType`; la foto es inmutable y no se reescribe. Se lee
+   * SIEMPRE con `receiptPatientView`.
    */
   patient: {
     id: string;
     fullName: string;
-    docType: LegacyDocType;
+    docType?: string;
     documentType?: DocumentType;
     docTypeLabel?: string | null;
     docTypeName?: string;
@@ -156,6 +159,18 @@ export interface ReceiptSnapshot {
    */
   split?: ReceiptSplit | null;
   legalNotice: string;
+  /**
+   * DX-515: el título del recibo que configuró la clínica, congelado al
+   * emitir. AUSENTE si no tenía (la web pone «Recibo de caja»): la foto de
+   * una clínica sin título es la misma de antes de DX-515.
+   */
+  title?: string;
+  /**
+   * DX-515: la leyenda de la clínica o de la sede, congelada al emitir.
+   * AUSENTE si no había: el recibo no imprime nada y reimprimir un recibo
+   * anterior no la añade aunque la clínica la configure después.
+   */
+  legend?: string;
 }
 
 const blankToNull = (value: string | null): string | null =>
@@ -188,7 +203,6 @@ export function buildReceiptSnapshot(
     patient: {
       id: input.patient.id,
       fullName: `${input.patient.firstName.trim()} ${input.patient.lastName.trim()}`,
-      docType: legacyStoredDocType(docType),
       documentType: docType,
       docTypeLabel,
       docTypeName: documentTypeName(docType, docTypeLabel, clinicNames),
@@ -216,6 +230,9 @@ export function buildReceiptSnapshot(
     cashier: input.cashier,
     ...(input.split ? { split: receiptSplit(input.split) } : {}),
     legalNotice: RECEIPT_LEGAL_NOTICE,
+    // DX-515: solo si están configurados, para no cambiar la foto de antes.
+    ...(input.texts?.title ? { title: input.texts.title } : {}),
+    ...(input.texts?.legend ? { legend: input.texts.legend } : {}),
   };
 }
 
@@ -274,7 +291,9 @@ export function receiptPatientView(
   clinicNames: ClinicDocumentTypeNames,
 ): ReceiptPatientView {
   const { patient } = snapshot;
-  const docType = docTypeFromStored(patient.documentType ?? patient.docType);
+  const docType = docTypeFromStored(
+    String(patient.documentType ?? patient.docType),
+  );
   const docTypeLabel = patient.docTypeLabel ?? null;
   return {
     id: patient.id,

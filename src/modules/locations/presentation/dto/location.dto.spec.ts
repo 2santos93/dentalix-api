@@ -70,7 +70,7 @@ describe('UpdateLocationDto · nº de registro sanitario (DX-319)', () => {
   it('el código REPS ya no existe: enviarlo es un 400, no un 200 mudo', async () => {
     for (const value of ['110010123401', null, '']) {
       expect((await check({ repsHabilitationCode: value })).messages).toEqual([
-        'El código REPS ya no existe: usa healthRegistrationNumber (nº de registro sanitario).',
+        'repsHabilitationCode ya no existe: usa healthRegistrationNumber (nº de registro sanitario).',
       ]);
     }
     expect((await check({ name: 'Sede' })).messages).toEqual([]);

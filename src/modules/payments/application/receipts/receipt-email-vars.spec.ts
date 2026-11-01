@@ -229,7 +229,9 @@ describe('receiptEmailVars (DX-136)', () => {
       SEDE_ZONE,
       SEDE_FMT,
     );
-    expect(vars.fiscalLine).toBe('Clínica Demo S.A.S. · NIT/NIF 900123456-7');
+    expect(vars.fiscalLine).toBe(
+      'Clínica Demo S.A.S. · Id. fiscal 900123456-7',
+    );
     expect(vars.methodLabel).toBe('Sin especificar');
     expect(vars.planLabel).toBe('Plan del 01/09/2026');
     expect(vars.toOpeningBalance).toBe(false);

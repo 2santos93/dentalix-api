@@ -12,8 +12,8 @@ export function csvText(value: string | null): string {
   return `"${safe.replace(/"/g, '""')}"`;
 }
 
-/** Importe con los decimales de su moneda (COP sin decimales, EUR a céntimos). */
-export function csvAmount(value: number, decimals: 0 | 2): string {
+/** Importe con los decimales de su moneda (JPY sin decimales, EUR a céntimos). */
+export function csvAmount(value: number, decimals: 0 | 1 | 2): string {
   return value.toFixed(decimals);
 }
 

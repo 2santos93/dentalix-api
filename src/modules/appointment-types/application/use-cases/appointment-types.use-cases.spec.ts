@@ -1,3 +1,4 @@
+import { TEST_AUDIT } from '../../../audit/application/__fixtures__/test-audit-context';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { InMemoryAppointmentTypeRepository } from '../__fixtures__/in-memory-appointment-types';
 import {
@@ -12,7 +13,7 @@ describe('CreateAppointmentTypeUseCase', () => {
     const repo = new InMemoryAppointmentTypeRepository();
     const created = await new CreateAppointmentTypeUseCase(repo).execute(
       { name: '  Endodoncia ', durationMinutes: 90, color: '#7c3aed' },
-      'admin-1',
+      TEST_AUDIT,
     );
     expect(created).toMatchObject({
       name: 'Endodoncia',
@@ -31,7 +32,7 @@ describe('CreateAppointmentTypeUseCase', () => {
     const uc = new CreateAppointmentTypeUseCase(
       new InMemoryAppointmentTypeRepository(),
     );
-    const call = uc.execute(input);
+    const call = uc.execute(input, TEST_AUDIT);
     await expect(call).rejects.toThrow(BadRequestException);
     await expect(call).rejects.toThrow(message);
   });
@@ -59,12 +60,12 @@ describe('UpdateAppointmentTypeUseCase', () => {
     const type = repo.seed();
     const uc = new UpdateAppointmentTypeUseCase(repo);
 
-    await expect(uc.execute(type.id, { active: false })).resolves.toMatchObject(
-      { active: false, durationMinutes: 90 },
-    );
-    await expect(uc.execute(type.id, { color: '#12' })).rejects.toThrow(
-      BadRequestException,
-    );
+    await expect(
+      uc.execute(type.id, { active: false }, TEST_AUDIT),
+    ).resolves.toMatchObject({ active: false, durationMinutes: 90 });
+    await expect(
+      uc.execute(type.id, { color: '#12' }, TEST_AUDIT),
+    ).rejects.toThrow(BadRequestException);
   });
 
   it('404 si el tipo no existe en la clínica (o está retirado)', async () => {
@@ -72,7 +73,11 @@ describe('UpdateAppointmentTypeUseCase', () => {
     const type = repo.seed();
     repo.deleted.add(type.id);
     await expect(
-      new UpdateAppointmentTypeUseCase(repo).execute(type.id, { name: 'X' }),
+      new UpdateAppointmentTypeUseCase(repo).execute(
+        type.id,
+        { name: 'X' },
+        TEST_AUDIT,
+      ),
     ).rejects.toThrow(NotFoundException);
   });
 });
@@ -83,38 +88,48 @@ describe('DeleteAppointmentTypeUseCase', () => {
     const type = repo.seed();
     const uc = new DeleteAppointmentTypeUseCase(repo);
 
-    await uc.execute(type.id);
+    await uc.execute(type.id, TEST_AUDIT);
     expect(repo.rows).toHaveLength(1);
     expect(repo.deleted.has(type.id)).toBe(true);
-    await expect(uc.execute(type.id)).rejects.toThrow(NotFoundException);
+    await expect(uc.execute(type.id, TEST_AUDIT)).rejects.toThrow(
+      NotFoundException,
+    );
   });
 });
 
 describe('tipo de urgencia (DX-446)', () => {
   it('nace sin urgencia salvo que se pida, y se puede marcar y desmarcar', async () => {
     const repo = new InMemoryAppointmentTypeRepository();
-    const plain = await new CreateAppointmentTypeUseCase(repo).execute({
-      name: 'Limpieza',
-      durationMinutes: 30,
-      color: '#0EA5E9',
-    });
+    const plain = await new CreateAppointmentTypeUseCase(repo).execute(
+      {
+        name: 'Limpieza',
+        durationMinutes: 30,
+        color: '#0EA5E9',
+      },
+      TEST_AUDIT,
+    );
     expect(plain.isUrgent).toBe(false);
-    const urgent = await new CreateAppointmentTypeUseCase(repo).execute({
-      name: 'Consulta de urgencia',
-      durationMinutes: 30,
-      color: '#DC2626',
-      isUrgent: true,
-    });
+    const urgent = await new CreateAppointmentTypeUseCase(repo).execute(
+      {
+        name: 'Consulta de urgencia',
+        durationMinutes: 30,
+        color: '#DC2626',
+        isUrgent: true,
+      },
+      TEST_AUDIT,
+    );
     expect(urgent.isUrgent).toBe(true);
     const update = new UpdateAppointmentTypeUseCase(repo);
-    expect((await update.execute(plain.id, { isUrgent: true })).isUrgent).toBe(
-      true,
-    );
     expect(
-      (await update.execute(plain.id, { name: 'Limpieza dental' })).isUrgent,
+      (await update.execute(plain.id, { isUrgent: true }, TEST_AUDIT)).isUrgent,
     ).toBe(true);
-    expect((await update.execute(plain.id, { isUrgent: false })).isUrgent).toBe(
-      false,
-    );
+    expect(
+      (await update.execute(plain.id, { name: 'Limpieza dental' }, TEST_AUDIT))
+        .isUrgent,
+    ).toBe(true);
+    expect(
+      (await update.execute(plain.id, { isUrgent: false }, TEST_AUDIT))
+        .isUrgent,
+    ).toBe(false);
   });
 });

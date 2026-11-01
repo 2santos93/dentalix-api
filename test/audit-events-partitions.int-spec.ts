@@ -354,13 +354,20 @@ describe('DX-102 · audit_events particionada (int)', () => {
       const boundary = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
       // 75 eventos: grupos de 5 en el MISMO milisegundo, a ambos lados del
       // inicio de mes (dos particiones).
-      const ids: string[] = [];
+      const from = new Date(boundary - 3_600_000);
+      const to = new Date(boundary + 3_600_000);
+      // Entre las 23:00 y las 01:00 UTC del cambio de mes, los eventos que
+      // otros tests de este fichero escriben «ahora» caen también en la
+      // ventana: cuentan como esperados para que el test no dependa del reloj.
+      const preexisting = await owner.auditEvent.findMany({
+        where: { tenantId: tenantB, occurredAt: { gte: from, lt: to } },
+        select: { id: true },
+      });
+      const ids: string[] = preexisting.map((e) => e.id);
       for (let g = 0; g < 15; g++) {
         const at = new Date(boundary + (g - 7) * 60_000);
         for (let k = 0; k < 5; k++) ids.push(await insertAs(tenantB, at));
       }
-      const from = new Date(boundary - 3_600_000);
-      const to = new Date(boundary + 3_600_000);
       const seen: string[] = [];
       let cursor: { occurredAt: Date; id: string } | null = null;
       for (let page = 0; page < 20; page++) {
@@ -371,9 +378,15 @@ describe('DX-102 · audit_events particionada (int)', () => {
         const last = pageRows[pageRows.length - 1];
         cursor = { occurredAt: last.occurredAt, id: last.id };
       }
-      expect(seen).toHaveLength(ids.length);
-      expect(new Set(seen).size).toBe(ids.length);
-      expect([...seen].sort()).toEqual([...ids].sort());
+      // Sin duplicados en todo lo paginado, y están todos los esperados. Cerca
+      // del cambio de mes (entre las 23:00 y las 01:00 UTC) un evento que se
+      // escribe «ahora» después de leer `preexisting` puede caer en la ventana:
+      // no es de este test y no cuenta.
+      expect(new Set(seen).size).toBe(seen.length);
+      const expected = new Set(ids);
+      expect(seen.filter((id) => expected.has(id)).sort()).toEqual(
+        [...ids].sort(),
+      );
 
       await repo.insert({
         tenantId: tenantB,

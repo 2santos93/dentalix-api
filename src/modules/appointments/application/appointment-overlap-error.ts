@@ -1,11 +1,15 @@
 import { Prisma } from '@prisma/client';
 
-/** Qué recurso quedó doble-agendado: el profesional o el paciente. */
-export type OverlapScope = 'provider' | 'patient';
+/**
+ * Qué recurso quedó doble-agendado: el profesional, el paciente o (DX-211) el
+ * sillón.
+ */
+export type OverlapScope = 'provider' | 'patient' | 'chair';
 
 const CONSTRAINT_NAMES: Record<OverlapScope, string> = {
   provider: 'appointments_no_overlap_per_provider',
   patient: 'appointments_no_overlap_per_patient',
+  chair: 'appointments_no_overlap_per_chair',
 };
 
 /**
@@ -13,7 +17,10 @@ const CONSTRAINT_NAMES: Record<OverlapScope, string> = {
  * pre-check y el backstop de la constraint respondan EXACTAMENTE lo mismo: al
  * usuario le da igual si el conflicto lo detectó la app o la DB.
  */
-export const OVERLAP_MESSAGES: Record<OverlapScope, string> = {
+export const OVERLAP_MESSAGES: Record<
+  Exclude<OverlapScope, 'chair'>,
+  string
+> = {
   provider: 'El profesional ya tiene una cita en ese horario',
   patient: 'El paciente ya tiene otra cita en ese horario',
 };
@@ -46,6 +53,10 @@ export function overlapExclusionScope(error: unknown): OverlapScope | null {
   }
   if (message.includes(CONSTRAINT_NAMES.patient)) {
     return 'patient';
+  }
+  // DX-211: el 409 del sillón lleva su nombre y horas (ChairAssignmentService).
+  if (message.includes(CONSTRAINT_NAMES.chair)) {
+    return 'chair';
   }
   return 'provider';
 }

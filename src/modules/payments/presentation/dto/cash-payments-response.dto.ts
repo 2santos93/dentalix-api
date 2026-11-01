@@ -126,6 +126,14 @@ export class CashPaymentDto {
   @ApiProperty({ type: String, nullable: true })
   reference!: string | null;
 
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'DX-515: nº de la factura fiscal emitida fuera de Dentalix; null si no se anotó.',
+  })
+  externalInvoiceNumber!: string | null;
+
   @ApiProperty({ type: String, nullable: true })
   notes!: string | null;
 

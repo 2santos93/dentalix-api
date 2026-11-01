@@ -39,7 +39,8 @@ export class CreateClinicalEntryAddendumUseCase {
   ) {}
 
   /**
-   * Corrige una evolución con una nota aclaratoria (Res. 1995/1999 art. 18):
+   * Corrige una evolución con una nota aclaratoria (la historia no se borra ni
+   * se reescribe):
    * siempre INSERTA; el original no se toca. Paciente de otra clínica o
    * evolución de otro paciente → el mismo 404, sin revelar si existe.
    */

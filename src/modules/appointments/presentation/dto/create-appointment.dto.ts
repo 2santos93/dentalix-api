@@ -34,9 +34,23 @@ export class CreateAppointmentDto {
   @IsUUID()
   patientId!: string;
 
-  @ApiProperty({ format: 'uuid' })
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'Profesional de la cita. DX-211: opcional si viene `chairId` con profesional por defecto (se toma el del sillón); el elegido manda siempre. Sin ninguno, 400.',
+  })
+  @IsOptional()
   @IsUUID()
-  providerId!: string;
+  providerId?: string;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'DX-211: sillón de la cita. De esta clínica (si no, 404), de la sede de la cita y activo (si no, 400). Otra cita viva en ese sillón y franja: 409 «El sillón X ya está ocupado de HH:MM a HH:MM» (horas de la sede). Sin él, nada cambia.',
+  })
+  @IsOptional()
+  @IsUUID()
+  chairId?: string;
 
   @ApiProperty({ type: String, format: 'date-time' })
   @IsDateString()

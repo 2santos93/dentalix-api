@@ -80,12 +80,12 @@ describe('coverageTrustedFor (SEC-049)', () => {
     extra: Partial<{
       verifiedAt: Date | null;
       declaredById: string | null;
-      migratedFromInsurerEps: boolean;
+      migratedFromLegacyInsurer: boolean;
     }> = {},
   ) => ({
     verifiedAt: null,
     declaredById: ME,
-    migratedFromInsurerEps: false,
+    migratedFromLegacyInsurer: false,
     ...extra,
   });
   const NON_ADMIN = [
@@ -128,7 +128,7 @@ describe('coverageTrustedFor (SEC-049)', () => {
   it('cobertura MIGRADA del texto libre de aseguradora anterior a DX-153 o sin autor conocido, vale', () => {
     const actor = { userId: ME, role: ClinicRole.RECEPTION };
     expect(
-      coverageTrustedFor(coverage({ migratedFromInsurerEps: true }), actor),
+      coverageTrustedFor(coverage({ migratedFromLegacyInsurer: true }), actor),
     ).toBe(true);
     expect(coverageTrustedFor(coverage({ declaredById: null }), actor)).toBe(
       true,

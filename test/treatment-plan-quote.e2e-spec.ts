@@ -748,11 +748,11 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
 
     beforeAll(async () => {
       const payer = await as(clinicA)
-        .post('/payers', { name: 'Sura EPS', type: 'PUBLIC_SYSTEM' })
+        .post('/payers', { name: 'Surco Salud', type: 'PUBLIC_SYSTEM' })
         .expect(201);
       const agreement = await as(clinicA)
         .post('/agreements', {
-          name: 'Sura EPS −15 %',
+          name: 'Surco Salud −15 %',
           payerId: (payer.body as { id: string }).id,
           kind: 'PERCENT_DISCOUNT',
           percent: 15,
@@ -786,8 +786,8 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
       const quote = res.body as QuoteBody;
       expect(quote.version).toBe(2);
       expect(quote.agreement).toEqual({
-        name: 'Sura EPS −15 %',
-        payerName: 'Sura EPS',
+        name: 'Surco Salud −15 %',
+        payerName: 'Surco Salud',
       });
       expect(quote.items).toEqual([
         expect.objectContaining({
@@ -795,7 +795,7 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
           discount: 0,
           subtotal: 850,
           listPrice: 1000,
-          agreementName: 'Sura EPS −15 %',
+          agreementName: 'Surco Salud −15 %',
         }),
       ]);
       expect(quote.totals).toEqual([
@@ -829,7 +829,7 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
         .expect(201);
       const quote = res.body as QuoteBody;
       expect(quote.contentHash).toBe(agreementShownHash);
-      expect(quote.agreement?.name).toBe('Sura EPS −15 %');
+      expect(quote.agreement?.name).toBe('Surco Salud −15 %');
       expect(quote.acceptance?.integrityOk).toBe(true);
 
       const row = await raw.treatmentPlanAcceptance.findFirstOrThrow({
@@ -837,7 +837,7 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
       });
       expect(row.content).toMatchObject({
         version: 2,
-        agreement: { name: 'Sura EPS −15 %', payerName: 'Sura EPS' },
+        agreement: { name: 'Surco Salud −15 %', payerName: 'Surco Salud' },
         totals: [expect.objectContaining({ agreementSaving: 150 })],
       });
 

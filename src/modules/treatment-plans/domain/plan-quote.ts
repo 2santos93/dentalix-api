@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto';
 import { ToothSurface } from '@prisma/client';
 import { fromCents, toCents } from '../../../shared/money/money';
+import {
+  lineCents,
+  linesTotalCents,
+} from '../../../shared/money/line-rounding';
 
 /** «Válido 30 días»: el presupuesto caduca 30 días naturales después de emitirse. */
 export const QUOTE_VALIDITY_DAYS = 30;
@@ -163,7 +167,8 @@ export function buildQuoteContent(
     quantity: 1,
     unitPrice: item.price,
     discount: item.discount,
-    subtotal: fromCents(toCents(item.price) - toCents(item.discount)),
+    // DX-340: la línea, con la regla única (shared/money/line-rounding).
+    subtotal: fromCents(lineCents(item)),
     listPrice: item.basePrice,
     agreementName: item.agreementName,
   }));
@@ -202,7 +207,7 @@ export function buildQuoteContent(
         currency: source.currency,
         gross: fromCents(gross),
         discount: fromCents(discount),
-        net: fromCents(gross - discount),
+        net: fromCents(linesTotalCents(source.items)),
         agreementSaving: fromCents(saving),
       },
     ],

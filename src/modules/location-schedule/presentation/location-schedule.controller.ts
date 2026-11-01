@@ -3,10 +3,16 @@ import {
   Controller,
   Get,
   Put,
+  Req,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOkResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 import { ClinicRole } from '@prisma/client';
 import {
   GetLocationScheduleUseCase,
@@ -19,6 +25,11 @@ import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import { Roles } from '../../auth/presentation/guards/roles.decorator';
 import { PATIENT_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
+import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
+import {
+  requireAuditRequestContext,
+  type AuditableRequest,
+} from '../../audit/presentation/audit-request-context';
 
 /**
  * Horario de atención de la sede EN CONTEXTO (cabecera `X-Location-Id` si vino,
@@ -37,6 +48,7 @@ export class LocationScheduleController {
   constructor(
     private readonly getSchedule: GetLocationScheduleUseCase,
     private readonly replaceSchedule: ReplaceLocationScheduleUseCase,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   /** `null` = sede sin horario configurado ⇒ no se restringe nada. */
@@ -48,16 +60,26 @@ export class LocationScheduleController {
     return this.getSchedule.execute();
   }
 
+  // DX-360: auditado en la transacción (UPDATE LOCATION_SCHEDULE) con los
+  // tramos antes y después; sin evento si la semana no cambia.
   @Put()
   @Roles(ClinicRole.ADMIN)
+  @ApiOperation({
+    summary: 'Reemplaza el horario semanal de la sede en contexto',
+    description:
+      'Queda en la auditoría (LOCATION_SCHEDULE_REPLACED) con los tramos antes y después, en la sede del horario. Guardar la misma semana no deja evento.',
+  })
   @ApiOkResponse({
     description:
       'Horario reemplazado; `timezone` en la respuesta es la zona de la sede',
   })
-  replace(@Body() dto: ReplaceLocationScheduleDto): Promise<BusinessHours> {
-    return this.replaceSchedule.execute({
-      ranges: dto.ranges,
-      legacyTimeZone: dto.timezone,
-    });
+  replace(
+    @Body() dto: ReplaceLocationScheduleDto,
+    @Req() req: AuditableRequest,
+  ): Promise<BusinessHours> {
+    return this.replaceSchedule.execute(
+      { ranges: dto.ranges, legacyTimeZone: dto.timezone },
+      requireAuditRequestContext(req, this.tenantContext),
+    );
   }
 }

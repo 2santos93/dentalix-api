@@ -46,7 +46,7 @@ const COVERAGE_CASES: CoverageCase[] = [
 ];
 
 const COVERAGE_REQUIRED =
-  'Este convenio es de «Sura EPS»: elige una cobertura vigente del paciente con ese pagador. Si no la tiene, añádela antes en la ficha.';
+  'Este convenio es de «Surco Salud»: elige una cobertura vigente del paciente con ese pagador. Si no la tiene, añádela antes en la ficha.';
 const COVERAGE_NOT_LIVE =
   'La cobertura elegida no está vigente hoy: revisa sus fechas o elige otra.';
 const COVERAGE_NOT_FOUND = 'Cobertura no encontrada.';
@@ -173,7 +173,7 @@ describe('Elegibilidad para asignar un convenio (e2e, SEC-047)', () => {
       tokens[role] = await loginAs(app, clinic.host, member.email);
     }
     suraPayer = await post(clinic, '/api/v1/payers', {
-      name: 'Sura EPS',
+      name: 'Surco Salud',
       type: 'PUBLIC_SYSTEM',
     });
     cortesiaPayer = await post(clinic, '/api/v1/payers', {
@@ -183,7 +183,7 @@ describe('Elegibilidad para asignar un convenio (e2e, SEC-047)', () => {
     payerOf['pagador externo'] = suraPayer;
     payerOf.interno = cortesiaPayer;
     agreementOf['pagador externo'] = await post(clinic, '/api/v1/agreements', {
-      name: 'Sura EPS 100 %',
+      name: 'Surco Salud 100 %',
       payerId: suraPayer,
       kind: 'PERCENT_DISCOUNT',
       percent: 100,
@@ -198,7 +198,7 @@ describe('Elegibilidad para asignar un convenio (e2e, SEC-047)', () => {
     // La otra clínica tiene su propio pagador con el MISMO nombre y una
     // cobertura viva: su id no vale en esta clínica.
     const foreignPayer = await post(other, '/api/v1/payers', {
-      name: 'Sura EPS',
+      name: 'Surco Salud',
       type: 'PUBLIC_SYSTEM',
     });
     const foreignPatient = await createPatient(other, 'Ajena');
@@ -235,7 +235,7 @@ describe('Elegibilidad para asignar un convenio (e2e, SEC-047)', () => {
     );
     expect(types).toEqual({
       'Cortesía socios 100 %': 'OTHER',
-      'Sura EPS 100 %': 'PUBLIC_SYSTEM',
+      'Surco Salud 100 %': 'PUBLIC_SYSTEM',
     });
   });
 
@@ -289,7 +289,7 @@ describe('Elegibilidad para asignar un convenio (e2e, SEC-047)', () => {
       // La API no crea coberturas migradas: solo el relleno de DX-153.
       await raw.patientCoverage.update({
         where: { id: coverageId },
-        data: { migratedFromInsurerEps: true },
+        data: { migratedFromLegacyInsurer: true },
       });
       await as(api().put(url(patient)), tokens[role])
         .send({ agreementId: agreementOf.interno, coverageId })
@@ -304,13 +304,12 @@ describe('Elegibilidad para asignar un convenio (e2e, SEC-047)', () => {
     },
   );
 
-  it('legacy OTRO payer stays internal: a RECEPTION assignment is 403', async () => {
-    // Excepción G5.3 (DX-334): tipos de pagador anteriores a DX-326. Un
-    // pagador guardado con el código anterior OTRO se lee OTHER (interno):
-    // SEC-047 sigue pidiendo ADMIN para su convenio.
+  it('an OTHER payer inserted by SQL stays internal: a RECEPTION assignment is 403', async () => {
+    // Un pagador OTHER (interno, también los que eran OTRO antes de la
+    // migración 20261110130000): SEC-047 sigue pidiendo ADMIN para su convenio.
     const [{ id: payerId }] = await raw.$queryRaw<{ id: string }[]>`
       INSERT INTO "payers" ("id", "tenantId", "name", "type", "updatedAt")
-      VALUES (gen_random_uuid(), ${clinic.tenantId}::uuid, 'Cortesía empleados', 'OTRO', now())
+      VALUES (gen_random_uuid(), ${clinic.tenantId}::uuid, 'Cortesía empleados', 'OTHER', now())
       RETURNING id::text AS id`;
     const agreementId = await post(clinic, '/api/v1/agreements', {
       name: 'Cortesía empleados 100 %',
@@ -344,14 +343,13 @@ describe('Elegibilidad para asignar un convenio (e2e, SEC-047)', () => {
     ).toBe('OTHER');
   });
 
-  it('legacy EPS_CO payer stays external: an assignment without coverage is 400', async () => {
-    // Excepción G5.3 (DX-334): tipos de pagador anteriores a DX-326. Un
-    // pagador guardado con el código anterior EPS_CO se lee PUBLIC_SYSTEM
-    // (externo): SEC-047 pide cobertura viva, también a ADMIN.
+  it('a PUBLIC_SYSTEM payer inserted by SQL with a country stays external: an assignment without coverage is 400', async () => {
+    // Un pagador PUBLIC_SYSTEM guardado antes de DX-326, con país (externo):
+    // SEC-047 pide cobertura viva, también a ADMIN.
     const [{ id: payerId }] = await raw.$queryRaw<{ id: string }[]>`
       INSERT INTO "payers" ("id", "tenantId", "name", "type", "country", "updatedAt")
       VALUES (gen_random_uuid(), ${clinic.tenantId}::uuid, 'Plan Sur antiguo',
-              'EPS_CO', 'CO', now())
+              'PUBLIC_SYSTEM', 'ES', now())
       RETURNING id::text AS id`;
     const agreementId = await post(clinic, '/api/v1/agreements', {
       name: 'Plan Sur antiguo 100 %',
@@ -365,7 +363,7 @@ describe('Elegibilidad para asignar un convenio (e2e, SEC-047)', () => {
         .send({ agreementId })
         .expect(400);
       expect((res.body as { message: string }).message).toBe(
-        COVERAGE_REQUIRED.replace('Sura EPS', 'Plan Sur antiguo'),
+        COVERAGE_REQUIRED.replace('Surco Salud', 'Plan Sur antiguo'),
       );
     }
   });
@@ -376,12 +374,12 @@ describe('Elegibilidad para asignar un convenio (e2e, SEC-047)', () => {
     await as(
       api().patch(`/api/v1/patients/${patient}/coverages/${coverageId}`),
       tokens.ADMIN,
-    ).send({ migratedFromInsurerEps: true });
+    ).send({ migratedFromLegacyInsurer: true });
     const row = await raw.patientCoverage.findUniqueOrThrow({
       where: { id: coverageId },
-      select: { migratedFromInsurerEps: true },
+      select: { migratedFromLegacyInsurer: true },
     });
-    expect(row.migratedFromInsurerEps).toBe(false);
+    expect(row.migratedFromLegacyInsurer).toBe(false);
   });
 
   it('una cobertura viva de OTRO pagador no habilita el convenio: 400', async () => {
@@ -397,7 +395,7 @@ describe('Elegibilidad para asignar un convenio (e2e, SEC-047)', () => {
 
   it('una cobertura retirada ya no vale: 400', async () => {
     const patient = await createPatient(clinic, 'Retirada');
-    // La primera es la principal; la de Sura, la segunda, se puede retirar.
+    // La primera es la principal; la de Surco, la segunda, se puede retirar.
     await coverageFor(patient, cortesiaPayer, 'viva');
     const coverageId = (await coverageFor(patient, suraPayer, 'viva'))!;
     await as(

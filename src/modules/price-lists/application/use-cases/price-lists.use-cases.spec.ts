@@ -82,30 +82,30 @@ describe('casos de uso de listas de precios (DX-105)', () => {
 
   describe('listar', () => {
     it('por defecto solo las activas, por nombre; includeInactive suma las desactivadas y nunca las retiradas', async () => {
-      repo.seed({ name: 'Sura' });
+      repo.seed({ name: 'Surco' });
       repo.seed({ name: 'Allianz' });
-      repo.seed({ name: 'Colsanitas', active: false });
+      repo.seed({ name: 'Colsanavida', active: false });
       const retired = repo.seed({ name: 'Retirada' });
       repo.deleted.add(retired.id);
 
       expect((await list.execute({})).map((l) => l.name)).toEqual([
         'Allianz',
-        'Sura',
+        'Surco',
       ]);
       expect(
         (await list.execute({ includeInactive: true })).map((l) => l.name),
-      ).toEqual(['Allianz', 'Colsanitas', 'Sura']);
+      ).toEqual(['Allianz', 'Colsanavida', 'Surco']);
     });
   });
 
   describe('crear', () => {
     it('normaliza el nombre y la moneda y nace activa', async () => {
       const created = await create.execute(
-        { name: '  Lista   Sura ', currency: 'cop' },
+        { name: '  Lista   Surco ', currency: 'cop' },
         'u1',
       );
       expect(created).toMatchObject({
-        name: 'Lista Sura',
+        name: 'Lista Surco',
         currency: 'COP',
         locationId: null,
         active: true,
@@ -198,16 +198,16 @@ describe('casos de uso de listas de precios (DX-105)', () => {
     });
 
     it('renombra; el propio nombre con otras mayúsculas no es duplicado', async () => {
-      const row = repo.seed({ name: 'Sura' });
+      const row = repo.seed({ name: 'Surco' });
       await expect(
-        update.execute(row.id, { name: 'SURA' }),
-      ).resolves.toMatchObject({ name: 'SURA' });
+        update.execute(row.id, { name: 'SURCO' }),
+      ).resolves.toMatchObject({ name: 'SURCO' });
     });
 
     it('409 al renombrar a un nombre de otra lista viva', async () => {
-      repo.seed({ name: 'Sura' });
+      repo.seed({ name: 'Surco' });
       const other = repo.seed({ name: 'Allianz' });
-      await expect(update.execute(other.id, { name: 'sura' })).rejects.toThrow(
+      await expect(update.execute(other.id, { name: 'surco' })).rejects.toThrow(
         new ConflictException(PRICE_LIST_DUPLICATE_MESSAGE),
       );
       expect(other.name).toBe('Allianz');
@@ -293,7 +293,7 @@ describe('casos de uso de listas de precios (DX-105)', () => {
 
   describe('retirar', () => {
     it('retira una lista sin convenios y la saca del listado', async () => {
-      const row = repo.seed({ name: 'Sura' });
+      const row = repo.seed({ name: 'Surco' });
       await remove.execute(row.id, 'u1');
       expect(await list.execute({ includeInactive: true })).toEqual([]);
     });

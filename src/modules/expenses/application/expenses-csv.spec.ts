@@ -1,3 +1,4 @@
+import { REFERENCE_CURRENCY_DIGITS } from '../../../shared/money/__fixtures__/reference-currency-digits';
 import { CSV_BOM } from '../../../shared/csv/csv-cells';
 import type { ExpenseView } from './expense-view';
 import { EXPENSES_CSV_HEADER, toExpensesCsv } from './expenses-csv';
@@ -30,7 +31,7 @@ const names = new Map([['l1', '@Sede Norte']]);
 
 describe('CSV de gastos (DX-274)', () => {
   it('UTF-8 con BOM, CRLF, cabecera y una línea por gasto', () => {
-    const csv = toExpensesCsv([row], names);
+    const csv = toExpensesCsv([row], names, REFERENCE_CURRENCY_DIGITS);
     expect(csv.startsWith('﻿')).toBe(true);
     const lines = csv.slice(1).split('\r\n');
     expect(lines[0]).toBe(EXPENSES_CSV_HEADER.join(','));
@@ -39,7 +40,9 @@ describe('CSV de gastos (DX-274)', () => {
   });
 
   it('protege las fórmulas, escapa comillas y aplana saltos de línea', () => {
-    const line = toExpensesCsv([row], names).slice(1).split('\r\n')[1];
+    const line = toExpensesCsv([row], names, REFERENCE_CURRENCY_DIGITS)
+      .slice(1)
+      .split('\r\n')[1];
     expect(line).toBe(
       [
         '2026-10-01',
@@ -69,7 +72,9 @@ describe('CSV de gastos (DX-274)', () => {
       overdue: false,
       dueDate: null,
     };
-    const line = toExpensesCsv([eur], names).slice(1).split('\r\n')[1];
+    const line = toExpensesCsv([eur], names, REFERENCE_CURRENCY_DIGITS)
+      .slice(1)
+      .split('\r\n')[1];
     expect(line.split(',').slice(-6)).toEqual([
       'EUR',
       '12.50',
@@ -82,7 +87,7 @@ describe('CSV de gastos (DX-274)', () => {
   });
 
   it('sin gastos, solo la cabecera', () => {
-    expect(toExpensesCsv([], names)).toBe(
+    expect(toExpensesCsv([], names, REFERENCE_CURRENCY_DIGITS)).toBe(
       CSV_BOM + EXPENSES_CSV_HEADER.join(',') + '\r\n',
     );
   });

@@ -1,3 +1,4 @@
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import type { HourCycle } from '../regional-settings';
 
 export interface Location {
@@ -104,7 +105,14 @@ export interface RegionalWrite {
 export const LOCATION_REPOSITORY = Symbol('LOCATION_REPOSITORY');
 
 export interface LocationRepository {
-  create(input: CreateLocationRepoInput): Promise<Location>;
+  /**
+   * DX-360: el alta deja su evento (CREATE LOCATION, LOCATION_CREATED) en la
+   * misma transacción.
+   */
+  create(
+    input: CreateLocationRepoInput,
+    audit: AuditRequestContext,
+  ): Promise<Location>;
   /** Sedes no borradas del tenant, ordenadas por fecha de creación. */
   list(): Promise<Location[]>;
   findById(id: string): Promise<Location | null>;

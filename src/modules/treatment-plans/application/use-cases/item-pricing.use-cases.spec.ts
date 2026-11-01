@@ -1,3 +1,4 @@
+import { referenceCurrencyDigitsCatalog } from '../../../../shared/money/__fixtures__/reference-currency-digits';
 import {
   BadRequestException,
   ConflictException,
@@ -71,9 +72,9 @@ const catalog = {
     Promise.resolve(ITEMS.filter((c) => ids.includes(c.id))),
 } as unknown as DentalCatalogRepository;
 
-const SURA: PricingAgreement = {
-  id: 'agr-sura',
-  name: 'Sura EPS',
+const SURCO: PricingAgreement = {
+  id: 'agr-surco',
+  name: 'Surco Salud',
   kind: AgreementKind.PERCENT_DISCOUNT,
   percent: 15,
   percentByCategory: null,
@@ -108,13 +109,19 @@ function setup(
       policy,
       FIXED_CLOCK,
     ),
-    bulk: new ApplyBulkDiscountUseCase(repo, policy, FIXED_CLOCK, catalog),
+    bulk: new ApplyBulkDiscountUseCase(
+      repo,
+      policy,
+      FIXED_CLOCK,
+      catalog,
+      referenceCurrencyDigitsCatalog(),
+    ),
   };
 }
 
 describe('Precio resuelto y foto en el alta del ítem (DX-105)', () => {
   it('resuelve con el paciente y la moneda del plan, y sella la foto', async () => {
-    const { add, pricing } = setup({ agreement: SURA });
+    const { add, pricing } = setup({ agreement: SURCO });
     const item = await add.execute(
       'plan1',
       { toothNumber: '11', catalogItemId: 'endo' },
@@ -127,8 +134,8 @@ describe('Precio resuelto y foto en el alta del ítem (DX-105)', () => {
       discount: 0,
       basePrice: 100_000,
       priceSource: PriceSource.AGREEMENT_PERCENT,
-      agreementId: 'agr-sura',
-      agreementName: 'Sura EPS',
+      agreementId: 'agr-surco',
+      agreementName: 'Surco Salud',
       pricingLocationId: PRICING_LOCATION_ID,
       // El precio de convenio no es un descuento discrecional (R1).
       discountById: null,
@@ -154,7 +161,7 @@ describe('Precio resuelto y foto en el alta del ítem (DX-105)', () => {
   });
 
   it('precio explícito por debajo de la referencia: la política lo juzga contra el precio pactado', async () => {
-    const { add } = setup({ agreement: SURA });
+    const { add } = setup({ agreement: SURCO });
     // 85 000 → 80 000 es un 5,9 %: dentro del 10 % del DENTIST.
     const item = await add.execute(
       'plan1',
@@ -252,7 +259,7 @@ describe('Precio resuelto y foto en el alta del ítem (DX-105)', () => {
     });
 
     it('con convenio %: el convenio no aplica, sale el precio de catálogo', async () => {
-      const { add } = setup({ agreement: SURA });
+      const { add } = setup({ agreement: SURCO });
       const item = await add.execute(
         'plan1',
         { toothNumber: '11', catalogItemId: 'xray' },
@@ -269,7 +276,7 @@ describe('Precio resuelto y foto en el alta del ítem (DX-105)', () => {
     it('con convenio de lista: el precio pactado sí aplica (no es un descuento)', async () => {
       const { add } = setup({
         agreement: {
-          ...SURA,
+          ...SURCO,
           kind: AgreementKind.PRICE_LIST,
           percent: null,
           priceListId: 'list-1',
@@ -434,15 +441,15 @@ describe('GetPriceQuoteUseCase (DX-105)', () => {
 
   it('devuelve la misma resolución que el alta, con la moneda pedida', async () => {
     const quote = new GetPriceQuoteUseCase(
-      catalogPricing(catalog, { agreement: SURA }),
+      catalogPricing(catalog, { agreement: SURCO }),
       patients(true),
     );
     await expect(quote.execute('p1', 'endo', 'COP')).resolves.toEqual({
       basePrice: 100_000,
       price: 85_000,
       source: PriceSource.AGREEMENT_PERCENT,
-      agreementId: 'agr-sura',
-      agreementName: 'Sura EPS',
+      agreementId: 'agr-surco',
+      agreementName: 'Surco Salud',
       allowDiscount: true,
       currency: 'COP',
     });

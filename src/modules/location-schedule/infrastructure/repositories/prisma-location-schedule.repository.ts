@@ -9,6 +9,9 @@ import {
   SCHEDULE_TIME_ZONE_MOVED,
 } from '../../domain/ports/location-schedule-repository.port';
 import { BusinessHours } from '../../application/business-hours';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
+import { locationScheduleAuditEvent } from '../../domain/location-schedule-audit';
 
 /// Los tramos se retiran en blando (ver `LocationScheduleRange` en el esquema),
 /// así que la tabla acumula los horarios anteriores. Toda lectura pide SOLO los
@@ -103,22 +106,25 @@ export class PrismaLocationScheduleRepository implements LocationScheduleReposit
 
   async replaceForCurrentLocation(
     input: ReplaceScheduleInput,
+    audit: AuditRequestContext,
   ): Promise<BusinessHours> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
       // DX-089: la sede del request o la de escritura de la sesión (la
       // principal sin restricción): la misma en la que se agenda.
       const locationId = await this.tenantContext.writeLocationId(tx);
-      // FOR SHARE: choca con el FOR UPDATE de un cambio de zona en curso
+      // FOR NO KEY UPDATE: choca con el FOR UPDATE de un cambio de zona en curso
       // (PATCH /locations/:id), así que aquí se lee la zona ya confirmada y la
       // columna legada no vuelve a la anterior (R20).
+      // DX-360: y con otro reemplazo del horario de la misma sede, que espera:
+      // el antes de su evento es la semana que deja este.
       const [location] = await tx.$queryRaw<
         { id: string; timeZone: string | null }[]
       >`
         SELECT l."id", l."timeZone"
           FROM "locations" l
          WHERE l."id" = ${locationId}::uuid AND l."tenantId" = ${tenantId}::uuid
-           FOR SHARE`;
+           FOR NO KEY UPDATE`;
       // R15: una web antigua manda la zona; solo vale si es la de la sede.
       if (
         input.legacyTimeZone !== undefined &&
@@ -134,7 +140,7 @@ export class PrismaLocationScheduleRepository implements LocationScheduleReposit
       // locationId) y el tenantId lo pone el servidor, no el cliente.
       const existing = await tx.locationSchedule.findFirst({
         where: { locationId, deletedAt: null },
-        select: { id: true },
+        select: { id: true, ...LIVE_RANGES },
       });
       const scheduleId = existing
         ? existing.id
@@ -173,13 +179,21 @@ export class PrismaLocationScheduleRepository implements LocationScheduleReposit
         });
       }
 
-      return mapToBusinessHours(
+      const saved = mapToBusinessHours(
         await tx.locationSchedule.findFirstOrThrow({
           where: { id: scheduleId },
           include: LIVE_RANGES,
         }),
         timeZone,
       );
+      const event = locationScheduleAuditEvent(
+        audit,
+        locationId,
+        existing?.ranges ?? [],
+        saved.ranges,
+      );
+      if (event) await writeAuditEvent(tx, event);
+      return saved;
     });
   }
 }

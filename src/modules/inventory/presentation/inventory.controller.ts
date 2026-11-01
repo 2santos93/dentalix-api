@@ -42,12 +42,13 @@ import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import { Roles } from '../../auth/presentation/guards/roles.decorator';
 import { INVENTORY_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
-import { JwtPayload } from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
-
-interface AuthenticatedRequest {
-  user: JwtPayload;
-}
+import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
+import {
+  requireAuditRequestContext,
+  type AuditableRequest,
+} from '../../audit/presentation/audit-request-context';
+import type { AuditRequestContext } from '../../audit/domain/audit-request-context';
 
 // Inventario es gestión de insumos + admin -> @Roles(...INVENTORY_ROLES)
 // (ADMIN/ASSISTANT; RECEPTION/DENTIST NO -- ver
@@ -70,16 +71,17 @@ export class InventoryController {
     private readonly updateInventoryItem: UpdateInventoryItemUseCase,
     private readonly deleteInventoryItem: DeleteInventoryItemUseCase,
     private readonly recordInventoryMovement: RecordInventoryMovementUseCase,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   @Post()
   @ApiCreatedResponse({ type: InventoryItemDto })
   create(
     @Body() dto: CreateInventoryItemDto,
-    @Req() req: AuthenticatedRequest,
+    @Req() req: AuditableRequest,
   ): Promise<InventoryItem> {
-    // `createdById` comes from the authenticated user (req.user.sub), never
-    // from the client body -- same convention as
+    // `createdById` comes from the authenticated user (the audit context),
+    // never from the client body -- same convention as
     // SalesController.create / TreatmentPlansController.create.
     return this.createInventoryItem.execute(
       {
@@ -89,7 +91,7 @@ export class InventoryController {
         minStock: dto.minStock,
         notes: dto.notes,
       },
-      req.user.sub,
+      this.audit(req),
     );
   }
 
@@ -117,20 +119,25 @@ export class InventoryController {
   update(
     @Param('id') id: string,
     @Body() dto: UpdateInventoryItemDto,
+    @Req() req: AuditableRequest,
   ): Promise<InventoryItem> {
-    return this.updateInventoryItem.execute(id, {
-      name: dto.name,
-      sku: dto.sku,
-      unit: dto.unit,
-      minStock: dto.minStock,
-      notes: dto.notes,
-    });
+    return this.updateInventoryItem.execute(
+      id,
+      {
+        name: dto.name,
+        sku: dto.sku,
+        unit: dto.unit,
+        minStock: dto.minStock,
+        notes: dto.notes,
+      },
+      this.audit(req),
+    );
   }
 
   @Delete(':id')
   @ApiOkResponse({ description: 'Item soft-deleted (deletedAt set)' })
-  remove(@Param('id') id: string): Promise<void> {
-    return this.deleteInventoryItem.execute(id);
+  remove(@Param('id') id: string, @Req() req: AuditableRequest): Promise<void> {
+    return this.deleteInventoryItem.execute(id, this.audit(req));
   }
 
   @Post(':id/movements')
@@ -138,7 +145,7 @@ export class InventoryController {
   createMovement(
     @Param('id') id: string,
     @Body() dto: RecordInventoryMovementDto,
-    @Req() req: AuthenticatedRequest,
+    @Req() req: AuditableRequest,
   ): Promise<InventoryMovement> {
     // `itemId` comes from the route param (never duplicated in the body);
     // `createdById` from the authenticated user -- same convention as
@@ -150,7 +157,7 @@ export class InventoryController {
         quantity: dto.quantity,
         reason: dto.reason,
       },
-      req.user.sub,
+      this.audit(req),
     );
   }
 
@@ -165,5 +172,10 @@ export class InventoryController {
     // as GetSaleUseCase/GetTreatmentPlanUseCase.
     const detail = await this.getInventoryItem.execute(id);
     return detail.movements;
+  }
+
+  /** Quién escribe, para el evento que el repositorio guarda (DX-360). */
+  private audit(req: AuditableRequest): AuditRequestContext {
+    return requireAuditRequestContext(req, this.tenantContext);
   }
 }

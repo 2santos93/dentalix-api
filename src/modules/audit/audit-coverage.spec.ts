@@ -38,6 +38,7 @@ import { PriceQuoteController } from '../treatment-plans/presentation/price-quot
 import { PlanFollowUpController } from '../treatment-plans/presentation/plan-follow-up.controller';
 import { PaymentsController } from '../payments/presentation/payments.controller';
 import { PaymentReceiptsController } from '../payments/presentation/payment-receipts.controller';
+import { ReceiptSettingsController } from '../payments/presentation/receipt-settings.controller';
 import { PaymentAllocationsController } from '../payments/presentation/payment-allocations.controller';
 import { PaymentPlansController } from '../payment-plans/presentation/payment-plans.controller';
 import { AccountStatementController } from '../account-statement/presentation/account-statement.controller';
@@ -53,6 +54,7 @@ import { ContingencyAgendaController } from '../contingency-agenda/presentation/
 import { CollectionsController } from '../collections/presentation/collections.controller';
 import { CashSessionsController } from '../cash-sessions/presentation/cash-sessions.controller';
 import { ScheduleBlocksController } from '../schedule-blocks/presentation/schedule-blocks.controller';
+import { ChairsController } from '../chairs/presentation/chairs.controller';
 import { StaffController } from '../staff/presentation/staff.controller';
 import { ClinicalNoteTemplatesController } from '../clinical-note-templates/presentation/clinical-note-templates.controller';
 import { AnesthesiaController } from '../anesthesia/presentation/anesthesia.controller';
@@ -1313,6 +1315,35 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: { param: 'id' },
   },
 
+  // DX-211: sillones de cada sede (sin paciente). No se borran: se desactivan.
+  'POST /chairs': {
+    action: 'CREATE',
+    resource: 'CHAIR',
+    resourceId: RES,
+  },
+  'PATCH /chairs/:id': {
+    action: 'UPDATE',
+    resource: 'CHAIR',
+    resourceId: { param: 'id' },
+  },
+  'PUT /chairs/order': {
+    action: 'UPDATE',
+    resource: 'CHAIR',
+    reason: 'CHAIR_ORDER',
+  },
+  'POST /chairs/:id/deactivate': {
+    action: 'UPDATE',
+    resource: 'CHAIR',
+    resourceId: { param: 'id' },
+    reason: 'CHAIR_DEACTIVATED',
+  },
+  'POST /chairs/:id/reactivate': {
+    action: 'UPDATE',
+    resource: 'CHAIR',
+    resourceId: { param: 'id' },
+    reason: 'CHAIR_REACTIVATED',
+  },
+
   // DX-048: un ADMIN desbloquea el inicio de sesión de un miembro.
   'POST /staff/:userId/login-unlock': {
     action: 'UPDATE',
@@ -1506,6 +1537,14 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
     'medical-history-submissions.e2e-spec.ts',
   // Plataforma: JOB_RETRIED en `platform_audit_events`, no en `audit_events`.
   'POST /platform/jobs/:id/retry': 'jobs-platform.e2e-spec.ts',
+  // DX-515: el repositorio escribe el evento en la transacción del cambio,
+  // con el antes y el después (configAuditEvent); sin evento si no cambia.
+  // CLINIC_SETTINGS RECEIPT_SETTINGS, LOCATION RECEIPT_LEGEND y PAYMENT
+  // EXTERNAL_INVOICE_NUMBER (este, con el paciente del abono).
+  'PUT /payment-receipts/settings': 'receipt-settings.e2e-spec.ts',
+  'PUT /payment-receipts/settings/locations/:locationId':
+    'receipt-settings.e2e-spec.ts',
+  'PUT /payments/:id/external-invoice-number': 'receipt-settings.e2e-spec.ts',
   // DX-324: CLINIC_SETTINGS con PRESCRIPTION_SETTINGS, los campos cambiados
   // y el antes y el después en códigos RX; sin evento si nada cambió.
   'PUT /prescriptions/settings':
@@ -1566,6 +1605,40 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // (y el ítem) en `params`; nunca el texto de «Otro».
   'POST /closing-queue/dismissals':
     'closing-queue.use-cases.spec.ts y closing-queue.e2e-spec.ts',
+  // DX-360: configuración de la clínica, en la transacción del cambio
+  // (`configChange` con el antes/después de los campos cambiados; sin evento
+  // si una edición no cambia nada). Texto libre y secretos nunca.
+  // Sedes: CREATE LOCATION; horario: UPDATE LOCATION_SCHEDULE con
+  // `scheduleChange`; recordatorios: UPDATE REMINDER_SETTINGS, en su sede.
+  'POST /locations': 'config-audit.e2e-spec.ts',
+  'PUT /locations/schedule':
+    'location-schedule-audit.spec.ts y config-audit.e2e-spec.ts',
+  'PUT /reminder-settings/:locationId': 'config-audit.e2e-spec.ts',
+  // Dominio: CREATE TENANT_DOMAIN sin el token; política: CREATE
+  // PRIVACY_POLICY con versión y hash, sin los textos.
+  'POST /domains': 'config-audit.e2e-spec.ts',
+  'POST /privacy-policies':
+    'privacy-policy-audit.spec.ts y config-audit.e2e-spec.ts',
+  // Catálogos: APPOINTMENT_TYPE y PAYER (CREATE/UPDATE/DELETE).
+  'POST /appointment-types': 'config-audit.e2e-spec.ts',
+  'PATCH /appointment-types/:id': 'config-audit.e2e-spec.ts',
+  'DELETE /appointment-types/:id': 'config-audit.e2e-spec.ts',
+  'POST /payers': 'config-audit.e2e-spec.ts',
+  'PATCH /payers/:id': 'config-audit.e2e-spec.ts',
+  'DELETE /payers/:id': 'config-audit.e2e-spec.ts',
+  // Plantillas: CONSENT_TEMPLATE (el texto solo por nombre, con la versión)
+  // y PRESCRIPTION_TEMPLATE (nombre y nº de medicamentos).
+  'POST /consent-templates': 'config-audit.e2e-spec.ts',
+  'PATCH /consent-templates/:id': 'config-audit.e2e-spec.ts',
+  'POST /prescription-templates': 'config-audit.e2e-spec.ts',
+  'PATCH /prescription-templates/:id': 'config-audit.e2e-spec.ts',
+  'DELETE /prescription-templates/:id': 'config-audit.e2e-spec.ts',
+  // Inventario: INVENTORY_ITEM en la sede del artículo e INVENTORY_MOVEMENT
+  // en la sede del movimiento, sin notas ni motivo.
+  'POST /inventory/items': 'config-audit.e2e-spec.ts',
+  'PATCH /inventory/items/:id': 'config-audit.e2e-spec.ts',
+  'DELETE /inventory/items/:id': 'config-audit.e2e-spec.ts',
+  'POST /inventory/items/:id/movements': 'config-audit.e2e-spec.ts',
 };
 
 /**
@@ -1614,34 +1687,6 @@ const KNOWN_UNAUDITED: Record<string, string> = {
   'POST /me/avatar': 'foto de perfil propia',
   'DELETE /me/avatar': 'foto de perfil propia',
 
-  // --- Configuración de la clínica ----------------------------------------
-  'POST /locations': 'hueco: alta de sede sin evento',
-  'PUT /locations/schedule': 'hueco: horario de la sede sin evento',
-  'PUT /reminder-settings/:locationId':
-    'hueco: ajustes de recordatorios de la sede sin evento',
-  'POST /domains': 'hueco: alta de dominio propio sin evento',
-  'POST /privacy-policies':
-    'hueco: publicar una versión de la política sin evento',
-  'POST /appointment-types': 'hueco: catálogo de tipos de cita sin evento',
-  'PATCH /appointment-types/:id': 'hueco: catálogo de tipos de cita sin evento',
-  'DELETE /appointment-types/:id':
-    'hueco: catálogo de tipos de cita sin evento',
-  'POST /payers': 'hueco: pagadores sin evento',
-  'PATCH /payers/:id': 'hueco: pagadores sin evento',
-  'DELETE /payers/:id': 'hueco: pagadores sin evento',
-  'POST /consent-templates': 'hueco: plantillas de consentimiento sin evento',
-  'PATCH /consent-templates/:id':
-    'hueco: plantillas de consentimiento sin evento',
-  'POST /prescription-templates': 'hueco: plantillas de receta sin evento',
-  'PATCH /prescription-templates/:id': 'hueco: plantillas de receta sin evento',
-  'DELETE /prescription-templates/:id':
-    'hueco: plantillas de receta sin evento',
-  'POST /inventory/items': 'hueco: inventario sin evento',
-  'PATCH /inventory/items/:id': 'hueco: inventario sin evento',
-  'DELETE /inventory/items/:id': 'hueco: inventario sin evento',
-  'POST /inventory/items/:id/movements':
-    'hueco: movimientos de inventario sin evento',
-
   // --- Citas y enlaces al paciente -----------------------------------------
   'POST /public/post-op-instructions/:token/opened':
     'marca la apertura de la indicación; sin evento',
@@ -1684,6 +1729,7 @@ const CONTROLLERS: Type[] = [
   PriceQuoteController,
   PaymentsController,
   PaymentReceiptsController,
+  ReceiptSettingsController,
   PaymentAllocationsController,
   PaymentPlansController,
   AccountStatementController,
@@ -1703,6 +1749,7 @@ const CONTROLLERS: Type[] = [
   ExpenseCategoriesController,
   CashOutflowsController,
   ScheduleBlocksController,
+  ChairsController,
   StaffController,
   ClinicalNoteTemplatesController,
   DomainsController,

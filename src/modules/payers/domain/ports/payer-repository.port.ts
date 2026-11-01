@@ -1,3 +1,4 @@
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { Payer } from '../entities/payer.entity';
 import type { PayerType } from '../payer-type';
 
@@ -37,14 +38,25 @@ export interface PayerRepository {
     nameKey: string,
     excludeId?: string,
   ): Promise<Payer | null>;
-  create(input: CreatePayerRepoInput): Promise<Payer>;
+  /**
+   * DX-360: alta, cambio y retiro dejan su evento (PAYER) en la misma
+   * transacción; un cambio que no cambia nada, ninguno.
+   */
+  create(
+    input: CreatePayerRepoInput,
+    audit: AuditRequestContext,
+  ): Promise<Payer>;
   /** `null` si el pagador ya no existe (retirado entre la lectura y la escritura). */
-  update(id: string, patch: UpdatePayerRepoInput): Promise<Payer | null>;
+  update(
+    id: string,
+    patch: UpdatePayerRepoInput,
+    audit: AuditRequestContext,
+  ): Promise<Payer | null>;
   /**
    * Retira el pagador (`deletedAt` y `active = false`) si ninguna cobertura
    * ni convenio vivo lo usa. Recuento y retiro van en UNA transacción con el pagador
    * bloqueado, así una cobertura que se crea a la vez o espera (y falla con
    * «Pagador no encontrado») o se cuenta aquí (`IN_USE`).
    */
-  retire(id: string, updatedById?: string): Promise<RetirePayerResult>;
+  retire(id: string, audit: AuditRequestContext): Promise<RetirePayerResult>;
 }

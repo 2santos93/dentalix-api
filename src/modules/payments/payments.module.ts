@@ -40,6 +40,17 @@ import { PaymentAllocationsController } from './presentation/payment-allocations
 import { PaymentRateBacklogController } from './presentation/payment-rate-backlog.controller';
 import { GetPaymentAllocationsUseCase } from './application/use-cases/get-payment-allocations.use-case';
 import { ReplacePaymentAllocationsUseCase } from './application/use-cases/replace-payment-allocations.use-case';
+import { ReceiptSettingsController } from './presentation/receipt-settings.controller';
+import {
+  GetReceiptSettingsUseCase,
+  UpdateLocationReceiptLegendUseCase,
+  UpdateReceiptSettingsUseCase,
+} from './application/receipts/receipt-settings.use-cases';
+import { RECEIPT_SETTINGS_REPOSITORY } from './domain/ports/receipt-settings-repository.port';
+import { PrismaReceiptSettingsRepository } from './infrastructure/repositories/prisma-receipt-settings.repository';
+import { SetExternalInvoiceNumberUseCase } from './application/use-cases/set-external-invoice-number.use-case';
+import { EXTERNAL_INVOICE_REPOSITORY } from './domain/ports/external-invoice-repository.port';
+import { PrismaExternalInvoiceRepository } from './infrastructure/repositories/prisma-external-invoice.repository';
 
 // REST lands here in PAY-T3 (`PAYMENT_ROLES`, controller, DTOs) on top of the
 // use-cases + repo PAY-T2 already built. ExchangeModule is imported (not
@@ -71,6 +82,8 @@ import { ReplacePaymentAllocationsUseCase } from './application/use-cases/replac
     // DX-051: ver y reasignar la imputación de un abono.
     PaymentAllocationsController,
     PaymentRateBacklogController,
+    // DX-515: título y leyenda del recibo (clínica y sede).
+    ReceiptSettingsController,
   ],
   providers: [
     RecordPaymentUseCase,
@@ -98,6 +111,19 @@ import { ReplacePaymentAllocationsUseCase } from './application/use-cases/replac
       useClass: PrismaPaymentReceiptRepository,
     },
     { provide: RECEIPT_EMAIL_SENDER, useClass: OutboxReceiptEmailSender },
+    // DX-515: recibo no fiscal (título, leyenda y nº de factura externa).
+    GetReceiptSettingsUseCase,
+    UpdateReceiptSettingsUseCase,
+    UpdateLocationReceiptLegendUseCase,
+    {
+      provide: RECEIPT_SETTINGS_REPOSITORY,
+      useClass: PrismaReceiptSettingsRepository,
+    },
+    SetExternalInvoiceNumberUseCase,
+    {
+      provide: EXTERNAL_INVOICE_REPOSITORY,
+      useClass: PrismaExternalInvoiceRepository,
+    },
     TokenService,
     // TenantContextInterceptor only depends on the @Global TenantContextService;
     // listing it here makes it resolvable for @UseInterceptors on PaymentsController.

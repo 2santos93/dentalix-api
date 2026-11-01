@@ -5,6 +5,7 @@ import { HealthController } from './health/health.controller';
 import { ShutdownState } from './shared/lifecycle/shutdown-state';
 import { ConfigModule } from './config/config.module';
 import { PrismaModule } from './shared/prisma/prisma.module';
+import { MoneyModule } from './shared/money/money.module';
 import { TenantContextModule } from './shared/tenancy/tenant-context.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { MeModule } from './modules/me/me.module';
@@ -18,6 +19,7 @@ import { ClinicalNoteTemplatesModule } from './modules/clinical-note-templates/c
 import { OdontogramModule } from './modules/odontogram/odontogram.module';
 import { AppointmentsModule } from './modules/appointments/appointments.module';
 import { AppointmentTypesModule } from './modules/appointment-types/appointment-types.module';
+import { ChairsModule } from './modules/chairs/chairs.module';
 import { PaymentMethodsModule } from './modules/payment-methods/payment-methods.module';
 import { PayersModule } from './modules/payers/payers.module';
 import { PriceListsModule } from './modules/price-lists/price-lists.module';
@@ -71,6 +73,7 @@ import { OutboundMessagesModule } from './modules/notifications/outbound/outboun
 import { RemindersModule } from './modules/reminders/reminders.module';
 import { SecurityModule } from './shared/security/security.module';
 import { SupportAccessesModule } from './modules/support-accesses/support-accesses.module';
+import { WorkQueuesModule } from './modules/work-queues/work-queues.module';
 import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
 
 @Module({
@@ -78,6 +81,8 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     ConfigModule,
     SecurityModule,
     PrismaModule,
+    // Global (DX-340): decimales por moneda de `currencies`.
+    MoneyModule,
     TenantContextModule,
     // Global: el AuditInterceptor de `@Audit(...)` se instancia en los
     // controladores de muchos módulos (DX-009).
@@ -99,6 +104,8 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     OdontogramModule,
     AppointmentsModule,
     AppointmentTypesModule,
+    // DX-211: sillones de cada sede.
+    ChairsModule,
     PaymentMethodsModule,
     PayersModule,
     PriceListsModule,
@@ -162,6 +169,10 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     OutboundMessagesModule,
     // Recordatorio automático de cita por email, por sede (DX-026).
     RemindersModule,
+    // DX-503: «Mi día», los recuentos de las listas de trabajo por rol y sede.
+    // El ÚLTIMO: importa seis módulos y, si fuera antes, adelantaría el registro
+    // de sus rutas (y cambiaría el orden del OpenAPI sin cambiar nada más).
+    WorkQueuesModule,
   ],
   controllers: [AppController, HealthController],
   providers: [AppService, ShutdownState],

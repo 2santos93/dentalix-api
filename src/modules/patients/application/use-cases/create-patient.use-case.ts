@@ -15,7 +15,10 @@ import type { ReferenceLookup } from '../../domain/ports/reference-lookup.port';
 import { Patient } from '../../domain/entities/patient.entity';
 import { CLINICAL_ROLES } from '../../../auth/presentation/guards/clinic-role-sets';
 import { deriveSafetyFlags } from '../../../medical-history/domain/safety-flags';
-import type { MedicalHistoryVersionData } from '../../../medical-history/domain/ports/medical-history-repository.port';
+import {
+  toVersionData,
+  type MedicalHistoryInput,
+} from '../../../medical-history/domain/anamnesis-answers';
 import type {
   ConsentDecision,
   ConsentEvidence,
@@ -60,7 +63,7 @@ export interface CreatePatientInput {
    * puede adjuntar la anamnesis v1 (ver SEC-005 en `execute`).
    */
   actorRole: ClinicRole;
-  medicalHistory?: MedicalHistoryVersionData;
+  medicalHistory?: MedicalHistoryInput;
 }
 
 @Injectable()
@@ -103,11 +106,11 @@ export class CreatePatientUseCase {
       }
     }
 
-    const medicalHistory = input.medicalHistory
-      ? {
-          data: input.medicalHistory,
-          ...deriveSafetyFlags(input.medicalHistory),
-        }
+    const versionData = input.medicalHistory
+      ? toVersionData(input.medicalHistory)
+      : undefined;
+    const medicalHistory = versionData
+      ? { data: versionData, ...deriveSafetyFlags(versionData) }
       : undefined;
 
     return this.repo.create({

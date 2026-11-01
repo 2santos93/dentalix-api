@@ -1,20 +1,10 @@
 import type { DocumentType } from '@prisma/client';
 import { DOC_TYPE_LABEL_MAX, DOCUMENT_TYPES } from '../../domain/document-type';
-import { LEGACY_CODES, type LegacyDocType } from '../../domain/legacy-doc-type';
 
-/**
- * DX-327 (R9, fase 1): el tipo que llega en un cuerpo. Además de los cinco
- * genéricos, los códigos anteriores (web anterior) pasan la validación; el
- * controlador los traduce con `resolveDocTypeInput` antes del caso de uso, que
- * solo acepta `DocumentType`. OpenAPI publica solo los genéricos. La fase 2
- * retira los anteriores.
- */
-export type DocTypeInput = DocumentType | LegacyDocType;
+/** DX-327: el tipo que llega en un cuerpo, uno de los cinco genéricos. */
+export type DocTypeInput = DocumentType;
 
-export const DOC_TYPE_INPUTS: readonly DocTypeInput[] = [
-  ...DOCUMENT_TYPES,
-  ...LEGACY_CODES,
-];
+export const DOC_TYPE_INPUTS: readonly DocTypeInput[] = DOCUMENT_TYPES;
 
 export const DOC_TYPE_MESSAGE = `El tipo de documento debe ser uno de: ${DOCUMENT_TYPES.join(', ')}.`;
 

@@ -19,6 +19,7 @@ function current(overrides: Partial<MedicalHistory> = {}): MedicalHistory {
     conditions: [],
     medications: [],
     habits: null,
+    pregnancy: null,
     dentalHistory: null,
     surgeries: [],
     vitalSigns: null,
@@ -236,11 +237,11 @@ describe('respuestas del paciente → versión de la HC (DX-099)', () => {
       };
       const proposed = proposeVersionFromAnswers(a, null);
       expect(proposed.habits).toEqual({
-        tabaquismo: { activo: true, porDia: 10 },
-        alcohol: { activo: true, frecuencia: 'Fines de semana' },
-        bruxismo: true,
+        tabaquismo: { estado: 'SI', porDia: 10 },
+        alcohol: { estado: 'SI', frecuencia: 'Fines de semana' },
+        bruxismo: 'SI',
       });
-      expect(proposed.embarazo).toBe(true);
+      expect(proposed.pregnancy).toBe('SI');
       expect(proposed.semanasEmbarazo).toBe(12);
       expect(proposed.surgeries).toEqual([
         { descripcion: 'Apendicectomía', fecha: '2015' },
@@ -249,7 +250,7 @@ describe('respuestas del paciente → versión de la HC (DX-099)', () => {
   });
 
   describe('mapeo sobre la versión vigente', () => {
-    it('«No sé» conserva lo que ya había; «No» lo vacía; lo que el formulario no pregunta se conserva', () => {
+    it('«No sé» conserva lo que ya había en las LISTAS; en hábitos y embarazo se guarda «No sabe»; «No» vacía; lo que el formulario no pregunta se conserva', () => {
       const prev = current({
         allergies: [
           {
@@ -274,6 +275,7 @@ describe('respuestas del paciente → versión de la HC (DX-099)', () => {
         vitalSigns: { sistolica: 120 },
         familyHistory: 'Diabetes (madre)',
         notes: 'Nota del doctor',
+        pregnancy: 'SI',
         safetyFlags: { ...current().safetyFlags, embarazo: true },
       });
       const a = allNo();
@@ -286,14 +288,18 @@ describe('respuestas del paciente → versión de la HC (DX-099)', () => {
       expect(proposed.allergies).toEqual(prev.allergies);
       expect(proposed.medications).toEqual([]);
       expect(proposed.surgeries).toEqual(prev.surgeries);
-      expect(proposed.embarazo).toBe(true);
+      // «No sé» al embarazo es lo que el paciente contestó hoy: «No sabe», y
+      // la alerta (solo con «Sí») se apaga; el profesional lo ve en el diff.
+      expect(proposed.pregnancy).toBe('DESCONOCE');
+      expect(deriveSafetyFlags(proposed).safetyFlags.embarazo).toBe(false);
       // La condición propia de la clínica sigue, delante de las del cuestionario.
       expect(proposed.conditions![0].codigo).toBe('OTRA_CLINICA');
       expect(proposed.habits).toEqual({
         higieneOral: { cepilladoPorDia: 3 },
         dieta: 'Normal',
-        tabaquismo: { activo: false },
-        alcohol: { activo: false },
+        tabaquismo: { estado: 'NO' },
+        alcohol: { estado: 'NO' },
+        bruxismo: 'DESCONOCE',
       });
       expect(proposed.dentalHistory).toEqual(prev.dentalHistory);
       expect(proposed.vitalSigns).toEqual(prev.vitalSigns);

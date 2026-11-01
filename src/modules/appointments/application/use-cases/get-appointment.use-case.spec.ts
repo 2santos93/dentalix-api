@@ -43,6 +43,8 @@ function fakeAppointment(id: string): Appointment {
     triageNote: null,
     walkIn: false,
     overbooked: false,
+    chairId: null,
+    chair: null,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
   };
@@ -68,6 +70,7 @@ function makeRepo(
     findOverlapping: (): Promise<Appointment[]> => Promise.resolve([]),
     findOverlappingForPatient: (): Promise<Appointment[]> =>
       Promise.resolve([]),
+    findOverlappingForChair: (): Promise<Appointment[]> => Promise.resolve([]),
     undoArrival: () => Promise.resolve(null),
     listInClinic: () => Promise.resolve([]),
     currentCancellationPolicy: () => Promise.resolve(null),

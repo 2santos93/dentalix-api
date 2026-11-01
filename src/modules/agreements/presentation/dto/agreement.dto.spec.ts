@@ -26,7 +26,7 @@ async function messages(cls: new () => object, plain: object) {
 }
 
 const ID = '11111111-1111-4111-8111-111111111111';
-const base = { name: 'Sanitas', payerId: ID, kind: 'PERCENT_DISCOUNT' };
+const base = { name: 'Sanavida', payerId: ID, kind: 'PERCENT_DISCOUNT' };
 
 describe('DTOs de convenios (DX-105)', () => {
   describe('alta', () => {

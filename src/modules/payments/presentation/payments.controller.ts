@@ -4,15 +4,21 @@ import {
   Delete,
   Get,
   Headers,
+  Inject,
   Param,
   ParseUUIDPipe,
   Post,
+  Put,
   Query,
   Req,
   Res,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
+import {
+  CURRENCY_DIGITS_CATALOG,
+  type CurrencyDigitsCatalog,
+} from '../../../shared/money/currency-digits';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
@@ -76,6 +82,13 @@ import {
 } from '../../audit/presentation/audit-request-context';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { SettlePaymentPromises } from '../../collections/application/settle-payment-promises';
+import { SetExternalInvoiceNumberUseCase } from '../application/use-cases/set-external-invoice-number.use-case';
+import type { ExternalInvoiceNumberResult } from '../domain/ports/external-invoice-repository.port';
+import {
+  ExternalInvoiceNumberDto,
+  ExternalInvoiceNumberResultDto,
+} from './dto/receipt-settings.dto';
+import { requireAuditRequestContext } from '../../audit/presentation/audit-request-context';
 
 // RolesGuard (a nivel de clase) ya rechazó cualquier token sin rol de clínica
 // (los de plataforma), así que aquí `user` es siempre un token de clínica.
@@ -113,6 +126,11 @@ export class PaymentsController {
     private readonly recordSplitPayment: RecordSplitPaymentUseCase,
     // DX-390: el VOID de las otras líneas de un cobro dividido.
     private readonly audit: RecordAuditEventUseCase,
+    // DX-340: decimales de cada moneda (currencies.rounding_digits).
+    @Inject(CURRENCY_DIGITS_CATALOG)
+    private readonly currencyDigits: CurrencyDigitsCatalog,
+    // DX-515: nº de la factura fiscal emitida fuera de Dentalix.
+    private readonly setExternalInvoice: SetExternalInvoiceNumberUseCase,
   ) {}
 
   /**
@@ -149,6 +167,7 @@ export class PaymentsController {
         to: query.to,
         method: query.method,
         paymentMethodId: query.paymentMethodId,
+        externalInvoice: query.externalInvoice,
         page: query.page,
         pageSize: query.pageSize,
       },
@@ -166,11 +185,12 @@ export class PaymentsController {
   @ApiOperation({
     summary: 'Caja en CSV: abonos del período con medio y referencia',
     description:
-      'Mismos filtros que `GET /payments` (período, método y medio) y la ' +
+      'Mismos filtros que `GET /payments` (período, método, medio y nº de ' +
+      'factura externa) y la ' +
       'misma sede (`X-Location-Id`), sin paginar: hasta 10 000 abonos. UTF-8 ' +
       'con BOM y CRLF; celdas protegidas contra fórmulas; importes con los ' +
       'decimales de su moneda. Columnas: Fecha, Sede, Paciente, Destino, ' +
-      'Medio, Referencia, Moneda, Importe.',
+      'Medio, Referencia, Factura externa, Moneda, Importe.',
   })
   @ApiHeader({
     name: 'X-Location-Id',
@@ -195,11 +215,15 @@ export class PaymentsController {
         to: query.to,
         method: query.method,
         paymentMethodId: query.paymentMethodId,
+        externalInvoice: query.externalInvoice,
       },
       { userId: req.user.sub, role: req.user.role },
     );
     sendCsv(res, `caja-${from}-${to}.csv`);
-    return toCashPaymentsCsv(items);
+    return toCashPaymentsCsv(
+      items,
+      await this.currencyDigits.table(items.map((i) => i.currency)),
+    );
   }
 
   @Audit({
@@ -435,6 +459,44 @@ export class PaymentsController {
   })
   balance(@Param('id') id: string): Promise<GetPlanBalanceWithItemsResult> {
     return this.getPlanBalance.executeWithItems(id);
+  }
+
+  /**
+   * DX-515: el nº de la factura fiscal que la clínica emitió FUERA de
+   * Dentalix para este abono. Mismos roles que los pagos (ADMIN y RECEPTION).
+   * Texto libre sin formato; se puede poner o cambiar después de emitir el
+   * recibo, que no cambia. El caso de uso escribe el evento con el antes y el
+   * después en su transacción (sin evento si no cambia).
+   */
+  @Put('payments/:id/external-invoice-number')
+  @ApiOperation({
+    summary: 'Anotar el nº de la factura fiscal externa de un abono',
+    description:
+      'Texto libre (hasta 64 caracteres en una línea); null o vacío lo ' +
+      'quita. En un cobro dividido se guarda en todas sus líneas (un recibo, ' +
+      'una factura). El recibo emitido no cambia. Auditado con el antes y el después.',
+  })
+  @ApiOkResponse({ type: ExternalInvoiceNumberResultDto })
+  @ApiBadRequestResponse({
+    description: 'No es texto, tiene saltos de línea o pasa de 64 caracteres',
+  })
+  @ApiForbiddenResponse({
+    description: 'Rol sin acceso a pagos o abono de una sede no permitida',
+  })
+  @ApiNotFoundResponse({
+    description: 'El abono no existe o es de otra clínica',
+  })
+  @ApiConflictResponse({ description: 'El abono está anulado' })
+  updateExternalInvoiceNumber(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ExternalInvoiceNumberDto,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<ExternalInvoiceNumberResult> {
+    return this.setExternalInvoice.execute(
+      id,
+      dto.externalInvoiceNumber,
+      requireAuditRequestContext(req, this.tenantContext),
+    );
   }
 
   @Audit({

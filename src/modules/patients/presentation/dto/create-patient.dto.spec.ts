@@ -7,7 +7,6 @@ import {
   UpdateResponsiblePartyDto,
 } from './responsible-party.dto';
 import { DOCUMENT_TYPES } from '../../domain/document-type';
-import { LEGACY_CODES } from '../../domain/legacy-doc-type';
 
 const DOC_TYPE_MESSAGE =
   'El tipo de documento debe ser uno de: NATIONAL_ID, PASSPORT, RESIDENCE_PERMIT, TAX_ID, OTHER.';
@@ -37,10 +36,12 @@ describe('docType and docTypeLabel in the patient and responsible DTOs (DX-327)'
   });
 
   it.each(DTOS)(
-    'legacy codes pass validation for the controller to translate (%p)',
+    'retired document codes are 400 like any unknown type (%p)',
     async (dto) => {
-      for (const docType of LEGACY_CODES) {
-        expect(await docTypeErrors(dto, { docType })).toEqual([]);
+      for (const docType of ['CC', 'TI', 'CE']) {
+        expect(await docTypeErrors(dto, { docType })).toEqual([
+          DOC_TYPE_MESSAGE,
+        ]);
       }
     },
   );

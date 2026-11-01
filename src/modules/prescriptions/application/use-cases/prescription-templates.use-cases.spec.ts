@@ -1,3 +1,4 @@
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { InMemoryPrescriptionTemplateRepository } from '../__fixtures__/in-memory-prescriptions';
 import {
@@ -7,7 +8,14 @@ import {
   UpdatePrescriptionTemplateUseCase,
 } from './prescription-templates.use-cases';
 
-const USER = '00000000-0000-4000-8000-0000000000ad';
+const USER: AuditRequestContext = {
+  tenantId: '00000000-0000-4000-8000-000000000001',
+  locationId: null,
+  actor: { userId: '00000000-0000-4000-8000-0000000000ad', role: 'ADMIN' },
+  requestId: null,
+  ip: null,
+  userAgent: null,
+};
 
 describe('Plantillas de receta', () => {
   let repo: InMemoryPrescriptionTemplateRepository;

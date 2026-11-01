@@ -5,7 +5,7 @@ import {
   csvDocument,
   csvText as text,
 } from '../../../shared/csv/csv-cells';
-import { currencyDecimals } from '../domain/discount-policy';
+import type { CurrencyDigitsTable } from '../../../shared/money/currency-digits';
 
 /*
  * CSV del informe de descuentos (DX-204): una línea por ítem, mismos filtros
@@ -63,8 +63,12 @@ const PLAN_STATUS_LABELS: Record<TreatmentPlanStatus, string> = {
   CANCELLED: 'Cancelado',
 };
 
-function money(value: number, currency: string): string {
-  return csvAmount(value, currencyDecimals(currency));
+function money(
+  value: number,
+  currency: string,
+  digits: CurrencyDigitsTable,
+): string {
+  return csvAmount(value, digits.roundingDigits(currency));
 }
 
 function planLabel(row: DiscountReportRowView): string {
@@ -95,6 +99,7 @@ function authorText(row: DiscountReportRowView): string {
 
 export function toDiscountReportCsv(
   rows: readonly DiscountReportRowView[],
+  digits: CurrencyDigitsTable,
 ): string {
   const lines: string[] = [DISCOUNT_REPORT_CSV_HEADER.join(',')];
   for (const row of rows) {
@@ -107,11 +112,13 @@ export function toDiscountReportCsv(
         text(row.toothNumber),
         text(row.procedure),
         row.currency,
-        row.catalogPrice === null ? '' : money(row.catalogPrice, row.currency),
-        money(row.price, row.currency),
-        money(row.priceReduction, row.currency),
-        money(row.itemDiscount, row.currency),
-        money(row.discount, row.currency),
+        row.catalogPrice === null
+          ? ''
+          : money(row.catalogPrice, row.currency, digits),
+        money(row.price, row.currency, digits),
+        money(row.priceReduction, row.currency, digits),
+        money(row.itemDiscount, row.currency, digits),
+        money(row.discount, row.currency, digits),
         row.percent.toFixed(2),
         reasonText(row),
         text(row.reasonNote),
@@ -120,8 +127,8 @@ export function toDiscountReportCsv(
         text(row.agreementName),
         row.agreementName === null || row.basePrice === null
           ? ''
-          : money(row.basePrice, row.currency),
-        money(row.agreementReduction, row.currency),
+          : money(row.basePrice, row.currency, digits),
+        money(row.agreementReduction, row.currency, digits),
         text(row.agreementAssignedByName),
         text(row.createdByName),
       ].join(','),

@@ -8,8 +8,9 @@ export interface LogoutInput {
 }
 
 /**
- * Revoca el refresh token entregado insertando su `jti` en la denylist. A
- * partir de aquí /auth/refresh lo rechaza. El access token NO se revoca: muere
+ * Revoca la familia del refresh token entregado (claim `sid`: todo ese inicio
+ * de sesión) o, en los refresh anteriores a las familias, su `jti` en la
+ * denylist. A partir de aquí /auth/refresh lo rechaza. El access token NO se revoca: muere
  * solo al expirar (JWT_ACCESS_TTL, ~15m). Es idempotente y silencioso: un
  * refresh inválido/expirado no produce error (cerrar sesión no debe fallar).
  */
@@ -27,6 +28,19 @@ export class LogoutUseCase {
     } catch {
       return; // token inválido/expirado → nada que revocar
     }
-    await this.repo.revokeToken(payload.jti, new Date(payload.exp * 1000));
+    const expiresAt = new Date(payload.exp * 1000);
+    // Con familia (`sid`): se cierra la sesión entera, también la copia que
+    // otra pestaña pudiera estar rotando en ese momento. Sin `sid` (refresh
+    // anterior a las familias): su jti a la denylist.
+    if (payload.sid) {
+      await this.repo.revokeRefreshSession(
+        payload.sid,
+        payload.sub,
+        payload.jti,
+        expiresAt,
+      );
+      return;
+    }
+    await this.repo.revokeToken(payload.jti, expiresAt);
   }
 }

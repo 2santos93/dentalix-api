@@ -478,12 +478,12 @@ describe('Filtro de pacientes por pagador (DX-153, int)', () => {
     otherTenantId = other.id;
     payer1 = (
       await raw.payer.create({
-        data: { tenantId, name: 'Sura', type: 'EPS_CO' },
+        data: { tenantId, name: 'Surco', type: 'PUBLIC_SYSTEM' },
       })
     ).id;
     payer2 = (
       await raw.payer.create({
-        data: { tenantId, name: 'Sanitas', type: 'EPS_CO' },
+        data: { tenantId, name: 'Sanavida', type: 'PUBLIC_SYSTEM' },
       })
     ).id;
     foreignPayer = (
@@ -491,7 +491,7 @@ describe('Filtro de pacientes por pagador (DX-153, int)', () => {
         data: {
           tenantId: otherTenantId,
           name: 'Ajena',
-          type: 'EPS_CO',
+          type: 'PUBLIC_SYSTEM',
         },
       })
     ).id;

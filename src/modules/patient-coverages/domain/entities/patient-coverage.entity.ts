@@ -30,7 +30,7 @@ export interface PatientCoverage {
    * de DX-153; la API nunca la crea. SEC-047: habilita a cualquier rol a asignar un convenio de pagador
    * OTHER (los pagadores del relleno son OTHER hasta que se reclasifican).
    */
-  migratedFromInsurerEps: boolean;
+  migratedFromLegacyInsurer: boolean;
   /**
    * SEC-049: quién puso por última vez el pagador o el nº de afiliado (en las
    * anteriores a SEC-049, quien la creó). Un rol no ADMIN no puede asignar un

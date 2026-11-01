@@ -7,6 +7,9 @@ import {
 import { INVENTORY_REPOSITORY } from '../../domain/ports/inventory-repository.port';
 import type { InventoryRepository } from '../../domain/ports/inventory-repository.port';
 import { InventoryItem } from '../../domain/entities/inventory-item.entity';
+import { INVENTORY_AUDITED_WRITES } from '../../domain/ports/inventory-audited-writes.port';
+import type { InventoryAuditedWrites } from '../../domain/ports/inventory-audited-writes.port';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { toInventoryNameConflict } from '../inventory-name-conflict';
 
 export interface UpdateInventoryItemInput {
@@ -22,11 +25,14 @@ export class UpdateInventoryItemUseCase {
   constructor(
     @Inject(INVENTORY_REPOSITORY)
     private readonly repo: InventoryRepository,
+    @Inject(INVENTORY_AUDITED_WRITES)
+    private readonly writes: InventoryAuditedWrites,
   ) {}
 
   async execute(
     id: string,
     input: UpdateInventoryItemInput,
+    audit: AuditRequestContext,
   ): Promise<InventoryItem> {
     const existing = await this.repo.findItemById(id);
     if (!existing) {
@@ -60,13 +66,17 @@ export class UpdateInventoryItemUseCase {
     }
 
     try {
-      return await this.repo.updateItem(id, {
-        name,
-        sku: input.sku,
-        unit,
-        minStock: input.minStock,
-        notes: input.notes,
-      });
+      return await this.writes.updateItem(
+        id,
+        {
+          name,
+          sku: input.sku,
+          unit,
+          minStock: input.minStock,
+          notes: input.notes,
+        },
+        audit,
+      );
     } catch (error) {
       throw toInventoryNameConflict(error);
     }

@@ -1,6 +1,7 @@
 import { ConflictException, GoneException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Prisma, PrismaClient } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
+import type { AuditRequestContext } from '../src/modules/audit/domain/audit-request-context';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { TenantResolverService } from '../src/shared/tenancy/tenant-resolver.service';
@@ -50,6 +51,18 @@ const register = new RegisterDomainUseCase(repo, config, clock);
 const verify = new VerifyDomainUseCase(repo, dns, clock);
 const list = new ListDomainsUseCase(repo, clock);
 
+// DX-360: el alta deja su evento; quién da igual aquí, la clínica no.
+const audit = (): AuditRequestContext => ({
+  tenantId: tenantContext.getTenantId() as string,
+  locationId: null,
+  actor: {
+    userId: '0192f0a0-0000-7000-8000-00000000a360',
+    role: ClinicRole.ADMIN,
+  },
+  requestId: null,
+  ip: null,
+  userAgent: null,
+});
 const as = <T>(tenantId: string, fn: () => Promise<T>): Promise<T> =>
   tenantContext.run(tenantId, fn);
 
@@ -103,8 +116,10 @@ describe('SEC-009 · dominios personalizados (int)', () => {
   describe('índices únicos parciales', () => {
     it('dos clínicas pueden tener el mismo host en PENDING (antes: 409 por el índice global)', async () => {
       const host = 'citas.squat-int.com';
-      await as(A, () => register.execute({ host }));
-      await expect(as(B, () => register.execute({ host }))).resolves.toEqual(
+      await as(A, () => register.execute({ host }, audit()));
+      await expect(
+        as(B, () => register.execute({ host }, audit())),
+      ).resolves.toEqual(
         expect.objectContaining({
           domain: expect.objectContaining({ status: 'PENDING' }) as unknown,
         }),
@@ -186,7 +201,7 @@ describe('SEC-009 · dominios personalizados (int)', () => {
 
     it('un PENDING de más de 72 h es EXPIRED: no se verifica (410) y su clínica lo puede volver a registrar', async () => {
       const host = 'citas.expired-int.com';
-      const { domain } = await as(A, () => register.execute({ host }));
+      const { domain } = await as(A, () => register.execute({ host }, audit()));
       clock.advance(72 * HOUR + 1);
       dns.records.set(txt(host), [domain.verifyToken]);
 
@@ -197,7 +212,7 @@ describe('SEC-009 · dominios personalizados (int)', () => {
         'EXPIRED',
       ]);
 
-      const again = await as(A, () => register.execute({ host }));
+      const again = await as(A, () => register.execute({ host }, audit()));
       expect(again.domain.id).not.toBe(domain.id);
       const rows = await owner.tenantDomain.findMany({
         where: { tenantId: A, host },
@@ -228,8 +243,8 @@ describe('SEC-009 · dominios personalizados (int)', () => {
   describe('verificación: el primero que demuestra el TXT se lo queda', () => {
     it('B verifica: enruta a B y el PENDING de A queda invalidado (EXPIRED)', async () => {
       const host = 'citas.winner-int.com';
-      const squat = await as(A, () => register.execute({ host }));
-      const real = await as(B, () => register.execute({ host }));
+      const squat = await as(A, () => register.execute({ host }, audit()));
+      const real = await as(B, () => register.execute({ host }, audit()));
       expect(await resolver.resolve(host)).toBeNull();
 
       dns.records.set(txt(host), [real.domain.verifyToken]);
@@ -251,7 +266,9 @@ describe('SEC-009 · dominios personalizados (int)', () => {
         as(A, () => verify.execute({ id: squat.domain.id })),
       ).rejects.toBeInstanceOf(GoneException);
       await expect(
-        as(A, () => register.execute({ host: 'citas.winner-int.com' })),
+        as(A, () =>
+          register.execute({ host: 'citas.winner-int.com' }, audit()),
+        ),
       ).rejects.toBeInstanceOf(ConflictException);
     });
 
@@ -327,7 +344,7 @@ describe('SEC-009 · dominios personalizados (int)', () => {
 
     it('cuando el TXT desaparece, a la 3ª comprobación seguida pasa a DISABLED y el resolver deja de enrutarlo', async () => {
       const host = 'citas.recheck-int.com';
-      const { domain } = await as(A, () => register.execute({ host }));
+      const { domain } = await as(A, () => register.execute({ host }, audit()));
       dns.records.set(txt(host), [domain.verifyToken]);
       await as(A, () => verify.execute({ id: domain.id }));
       expect(await resolver.resolve(host)).toBe(A);
@@ -355,7 +372,7 @@ describe('SEC-009 · dominios personalizados (int)', () => {
       expect((await as(A, () => list.execute()))[0].status).toBe('DISABLED');
 
       // El host queda libre para quien demuestre el control ahora.
-      const real = await as(B, () => register.execute({ host }));
+      const real = await as(B, () => register.execute({ host }, audit()));
       dns.records.set(txt(host), [real.domain.verifyToken]);
       await expect(
         as(B, () => verify.execute({ id: real.domain.id })),

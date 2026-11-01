@@ -17,7 +17,6 @@ import {
   REGIONAL_BOGOTA_FIXTURE,
   locationData,
 } from './support/location-fixtures';
-import { legacyStoredDocType } from '../src/modules/patients/domain/legacy-doc-type';
 
 const NOW = new Date('2026-10-23T12:00:00Z');
 const DAY = 86400000;
@@ -93,7 +92,6 @@ beforeAll(async () => {
     firstName: 'Fixture',
     lastName: 'Test',
     documentType: 'NATIONAL_ID',
-    docType: legacyStoredDocType('NATIONAL_ID'),
     docNumber: randomUUID(),
     sex: 'F',
   } as const;

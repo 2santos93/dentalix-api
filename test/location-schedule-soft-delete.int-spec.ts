@@ -1,4 +1,4 @@
-import { Prisma, PrismaClient } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaLocationScheduleRepository } from '../src/modules/location-schedule/infrastructure/repositories/prisma-location-schedule.repository';
@@ -22,6 +22,7 @@ const repo = new PrismaLocationScheduleRepository(prisma, tenantContext);
 const MORNING = { weekday: 1, startMinute: 9 * 60, endMinute: 13 * 60 };
 const AFTERNOON = { weekday: 1, startMinute: 15 * 60, endMinute: 19 * 60 };
 const SATURDAY = { weekday: 6, startMinute: 8 * 60, endMinute: 12 * 60 };
+const ADMIN_ID = '0192f0a0-0000-7000-8000-00000000a360';
 
 describe('Horario de sede: los tramos se retiran en blando (int)', () => {
   let tenantId: string;
@@ -53,13 +54,23 @@ describe('Horario de sede: los tramos se retiran en blando (int)', () => {
     await prisma.onModuleDestroy();
   });
 
+  // DX-360: el reemplazo deja su evento de auditoría; aquí da igual quién.
+  const audit = () => ({
+    tenantId,
+    locationId,
+    actor: { userId: ADMIN_ID, role: ClinicRole.ADMIN },
+    requestId: null,
+    ip: null,
+    userAgent: null,
+  });
+
   function asClinic<T>(fn: () => Promise<T>): Promise<T> {
     return tenantContext.run(tenantId, locationId, fn);
   }
 
   it('guarda el horario, lo reemplaza, y el reemplazo NO borra los tramos viejos', async () => {
     await asClinic(() =>
-      repo.replaceForCurrentLocation({ ranges: [MORNING, AFTERNOON] }),
+      repo.replaceForCurrentLocation({ ranges: [MORNING, AFTERNOON] }, audit()),
     );
 
     const primeros = await raw.locationScheduleRange.findMany({
@@ -70,7 +81,7 @@ describe('Horario de sede: los tramos se retiran en blando (int)', () => {
 
     // Segundo guardado: la clínica cambia a "sólo sábados por la mañana".
     const despues = await asClinic(() =>
-      repo.replaceForCurrentLocation({ ranges: [SATURDAY] }),
+      repo.replaceForCurrentLocation({ ranges: [SATURDAY] }, audit()),
     );
 
     // Lo que ve la aplicación: sólo el horario NUEVO.

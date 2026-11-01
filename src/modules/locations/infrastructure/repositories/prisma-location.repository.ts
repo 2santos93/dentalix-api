@@ -1,6 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { seedDefaultBusinessHours } from '../../../../shared/locations/default-business-hours';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
+import { locationCreatedAuditEvent } from '../../domain/location-audit';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
   CreateLocationRepoInput,
@@ -37,7 +40,10 @@ export class PrismaLocationRepository implements LocationRepository {
     return tenantId;
   }
 
-  async create(input: CreateLocationRepoInput): Promise<Location> {
+  async create(
+    input: CreateLocationRepoInput,
+    audit: AuditRequestContext,
+  ): Promise<Location> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
       const location = await tx.location.create({
@@ -63,7 +69,10 @@ export class PrismaLocationRepository implements LocationRepository {
       // según por dónde se crearon. Su columna legada de zona es la de la sede
       // (R20).
       await seedDefaultBusinessHours(tx, tenantId, location.id, input.timeZone);
-      if (input.hourCycle !== null) return location;
+      if (input.hourCycle !== null) {
+        await writeAuditEvent(tx, locationCreatedAuditEvent(audit, location));
+        return location;
+      }
       // G1-B fase 1 (spec §4.1): alta de la web de G1, sin reloj. La función
       // es lo único que rellena un NULL (R5), en esta misma transacción; no
       // toca la revisión. Desaparece en fase 2.
@@ -73,7 +82,11 @@ export class PrismaLocationRepository implements LocationRepository {
         tenantId,
         locationId: location.id,
       });
-      return tx.location.findUniqueOrThrow({ where: { id: location.id } });
+      const filled = await tx.location.findUniqueOrThrow({
+        where: { id: location.id },
+      });
+      await writeAuditEvent(tx, locationCreatedAuditEvent(audit, filled));
+      return filled;
     });
   }
 

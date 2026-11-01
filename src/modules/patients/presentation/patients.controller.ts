@@ -104,7 +104,6 @@ import {
 import { DocumentTypeNamesDto } from './dto/document-type-names.dto';
 import { DOCUMENT_TYPE_NAMES_FORBIDDEN_MESSAGE } from '../domain/document-type-names';
 import { DocumentTypeNamesReader } from '../domain/ports/document-type-names-repository.port';
-import { resolveDocTypeInput } from '../domain/legacy-doc-type';
 import {
   withDocTypeName,
   type WithDocTypeName,
@@ -199,7 +198,7 @@ export class PatientsController {
     const patient = await this.createPatient.execute({
       ...dto,
       // DX-327 (R9): un código anterior llega como su genérico, sin etiqueta.
-      docType: resolveDocTypeInput(dto.docType),
+      docType: dto.docType,
       birthDate: dto.birthDate ? new Date(dto.birthDate) : undefined,
       consentEvidence: consentEvidenceFrom(req),
       createdById: req.user.sub,
@@ -415,13 +414,6 @@ export class PatientsController {
   ): Promise<PatientOutput> {
     const patient = await this.updatePatient.execute(id, {
       ...dto,
-      // DX-327 (R9): traducido ANTES del caso de uso, que compara genéricos
-      // (R7): un código anterior reenviado con el mismo genérico conserva la
-      // etiqueta.
-      docType:
-        dto.docType === undefined
-          ? undefined
-          : resolveDocTypeInput(dto.docType),
       // Tres casos, no dos: ausente = no tocar, `null` = vaciar la columna
       // (es nullable), y una fecha = parsearla. El guard anterior sólo miraba
       // `undefined`, así que un `null` caía en `new Date(null)` y escribía
@@ -547,7 +539,7 @@ export class PatientsController {
       'administrativas y contacto de emergencia, y retira la autorización ' +
       'de marketing vigente. Conserva la HC y la identificación que exige ' +
       '(nombre, documento, nacimiento, sexo, residencia, estado civil, ' +
-      'ocupación, aseguradora, médico y acudiente). Motivo obligatorio. 409 ' +
+      'ocupación, aseguradora, médico y tutor). Motivo obligatorio. 409 ' +
       '`NOT_UNDER_RETENTION` si la HC no está en retención (se archiva).',
   })
   @ApiOkResponse({ type: PatientDto })

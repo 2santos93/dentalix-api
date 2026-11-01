@@ -1,5 +1,12 @@
 import { ClinicRole, DiscountReason } from '@prisma/client';
-import { currencyDecimals } from '../../../shared/money/currency-decimals';
+import {
+  RoundingDigits,
+  basisPoints,
+  bigCents,
+  percentOfCentsInUnits,
+  unitCents,
+  unitsToAmount,
+} from '../../../shared/money/line-rounding';
 
 /**
  * Política de descuentos de la clínica (DX-204): el % máximo de descuento que
@@ -52,18 +59,9 @@ export type ItemDiscountCheck =
   | { kind: 'reason-required'; thresholdPercent: number }
   | { kind: 'note-required' };
 
-function cents(amount: number): bigint {
-  return BigInt(Math.round(amount * 100));
-}
-
-/** Un % (hasta 2 decimales) en puntos básicos: 7,5 % → 750. */
-function basisPoints(percent: number): bigint {
-  return BigInt(Math.round(percent * 100));
-}
-
 /** ¿`discount` supera el `percent` % de `price`? */
 function exceeds(price: number, discount: number, percent: number): boolean {
-  return cents(discount) * 10000n > cents(price) * basisPoints(percent);
+  return bigCents(discount) * 10000n > bigCents(price) * basisPoints(percent);
 }
 
 /**
@@ -97,37 +95,35 @@ export function discountPercent(price: number, discount: number): number {
   return Math.round((discount / price) * 10000) / 100;
 }
 
-// Vive en `shared/money` (también lo usan los CSV de gastos); se reexporta aquí
-// para no tocar a quienes ya la importan de la política de descuentos.
-export { currencyDecimals };
-
-/** Redondea a la unidad de la moneda, la mitad hacia arriba. */
-export function roundToCurrency(amount: number, currency: string): number {
-  const d = currencyDecimals(currency);
-  // Notación exponencial: 10.005 → 1000.5 exacto (×100 daría 1000.4999…).
-  return Number(`${Math.round(Number(`${amount}e${d}`))}e-${d}`);
-}
-
 /**
- * Descuento de un ítem al aplicarle `percent` % (acción en bloque): redondeado
- * a la unidad de la moneda (mitad hacia arriba). Si el redondeo lo llevara por
- * encima del tope del rol (`capPercent`), baja a la mayor unidad que lo
- * respeta; nunca supera el precio.
+ * Descuento de un ítem al aplicarle `percent` % (acción en bloque): una línea,
+ * redondeada a los `digits` de redondeo de la moneda del plan
+ * (`currencies.rounding_digits`, DX-340), la mitad hacia arriba. Si el
+ * redondeo lo llevara por encima del tope del rol (`capPercent`), baja a la
+ * mayor unidad que lo respeta; nunca supera el precio.
  */
 export function discountForPercent(
   price: number,
   percent: number,
-  currency: string,
+  digits: RoundingDigits,
   capPercent: number,
 ): number {
-  const unit = 10n ** BigInt(2 - currencyDecimals(currency)); // en céntimos
-  const priceCents = cents(price);
-  const scale = unit * 10000n;
-  const rounded = (priceCents * basisPoints(percent) + scale / 2n) / scale;
-  const capped = (priceCents * basisPoints(capPercent)) / scale;
-  const whole = priceCents / unit;
+  const priceCents = bigCents(price);
+  const rounded = percentOfCentsInUnits(
+    priceCents,
+    basisPoints(percent),
+    digits,
+    'half-up',
+  );
+  const capped = percentOfCentsInUnits(
+    priceCents,
+    basisPoints(capPercent),
+    digits,
+    'floor',
+  );
+  const whole = priceCents / unitCents(digits);
   let units = rounded;
   if (capped < units) units = capped;
   if (whole < units) units = whole;
-  return Number(units * unit) / 100;
+  return unitsToAmount(units, digits);
 }

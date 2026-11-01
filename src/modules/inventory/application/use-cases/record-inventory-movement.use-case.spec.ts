@@ -1,3 +1,4 @@
+import { TEST_AUDIT } from '../../../audit/application/__fixtures__/test-audit-context';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { InventoryMovementType } from '@prisma/client';
 import { RecordInventoryMovementUseCase } from './record-inventory-movement.use-case';
@@ -6,18 +7,21 @@ import { InMemoryInventoryRepository } from './__fixtures__/in-memory-inventory.
 describe('RecordInventoryMovementUseCase', () => {
   function makeUseCase() {
     const repo = new InMemoryInventoryRepository();
-    return { repo, uc: new RecordInventoryMovementUseCase(repo) };
+    return { repo, uc: new RecordInventoryMovementUseCase(repo, repo) };
   }
 
   it('throws NotFoundException when the item is absent (or another tenant)', async () => {
     const { uc } = makeUseCase();
 
     await expect(
-      uc.execute({
-        itemId: 'missing-id',
-        type: InventoryMovementType.IN,
-        quantity: 10,
-      }),
+      uc.execute(
+        {
+          itemId: 'missing-id',
+          type: InventoryMovementType.IN,
+          quantity: 10,
+        },
+        TEST_AUDIT,
+      ),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
@@ -28,11 +32,14 @@ describe('RecordInventoryMovementUseCase', () => {
     });
 
     await expect(
-      uc.execute({
-        itemId: item.id,
-        type: InventoryMovementType.IN,
-        quantity: 10,
-      }),
+      uc.execute(
+        {
+          itemId: item.id,
+          type: InventoryMovementType.IN,
+          quantity: 10,
+        },
+        TEST_AUDIT,
+      ),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
@@ -47,13 +54,13 @@ describe('RecordInventoryMovementUseCase', () => {
         quantity: 10,
         reason: 'restock',
       },
-      'user-1',
+      TEST_AUDIT,
     );
 
     expect(movement.type).toBe(InventoryMovementType.IN);
     expect(movement.quantity).toBe(10);
     expect(movement.reason).toBe('restock');
-    expect(movement.createdById).toBe('user-1');
+    expect(movement.createdById).toBe(TEST_AUDIT.actor.userId);
     const stock = await repo.sumSignedQuantity(item.id);
     expect(stock).toBe(10);
   });
@@ -63,18 +70,24 @@ describe('RecordInventoryMovementUseCase', () => {
     const item = repo.seedItem();
 
     await expect(
-      uc.execute({
-        itemId: item.id,
-        type: InventoryMovementType.IN,
-        quantity: 0,
-      }),
+      uc.execute(
+        {
+          itemId: item.id,
+          type: InventoryMovementType.IN,
+          quantity: 0,
+        },
+        TEST_AUDIT,
+      ),
     ).rejects.toBeInstanceOf(BadRequestException);
     await expect(
-      uc.execute({
-        itemId: item.id,
-        type: InventoryMovementType.IN,
-        quantity: -5,
-      }),
+      uc.execute(
+        {
+          itemId: item.id,
+          type: InventoryMovementType.IN,
+          quantity: -5,
+        },
+        TEST_AUDIT,
+      ),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
@@ -83,18 +96,24 @@ describe('RecordInventoryMovementUseCase', () => {
     const item = repo.seedItem();
 
     await expect(
-      uc.execute({
-        itemId: item.id,
-        type: InventoryMovementType.OUT,
-        quantity: 0,
-      }),
+      uc.execute(
+        {
+          itemId: item.id,
+          type: InventoryMovementType.OUT,
+          quantity: 0,
+        },
+        TEST_AUDIT,
+      ),
     ).rejects.toBeInstanceOf(BadRequestException);
     await expect(
-      uc.execute({
-        itemId: item.id,
-        type: InventoryMovementType.OUT,
-        quantity: -1,
-      }),
+      uc.execute(
+        {
+          itemId: item.id,
+          type: InventoryMovementType.OUT,
+          quantity: -1,
+        },
+        TEST_AUDIT,
+      ),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
@@ -103,11 +122,14 @@ describe('RecordInventoryMovementUseCase', () => {
     const item = repo.seedItem();
 
     await expect(
-      uc.execute({
-        itemId: item.id,
-        type: InventoryMovementType.ADJUSTMENT,
-        quantity: 0,
-      }),
+      uc.execute(
+        {
+          itemId: item.id,
+          type: InventoryMovementType.ADJUSTMENT,
+          quantity: 0,
+        },
+        TEST_AUDIT,
+      ),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
@@ -120,11 +142,14 @@ describe('RecordInventoryMovementUseCase', () => {
       quantity: 10,
     });
 
-    const movement = await uc.execute({
-      itemId: item.id,
-      type: InventoryMovementType.ADJUSTMENT,
-      quantity: -3,
-    });
+    const movement = await uc.execute(
+      {
+        itemId: item.id,
+        type: InventoryMovementType.ADJUSTMENT,
+        quantity: -3,
+      },
+      TEST_AUDIT,
+    );
 
     expect(movement.quantity).toBe(-3);
     const stock = await repo.sumSignedQuantity(item.id);
@@ -140,11 +165,14 @@ describe('RecordInventoryMovementUseCase', () => {
       quantity: 2,
     });
 
-    await uc.execute({
-      itemId: item.id,
-      type: InventoryMovementType.OUT,
-      quantity: 5,
-    });
+    await uc.execute(
+      {
+        itemId: item.id,
+        type: InventoryMovementType.OUT,
+        quantity: 5,
+      },
+      TEST_AUDIT,
+    );
 
     const stock = await repo.sumSignedQuantity(item.id);
     expect(stock).toBe(-3);

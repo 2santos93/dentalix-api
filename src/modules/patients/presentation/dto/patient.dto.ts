@@ -130,7 +130,7 @@ export class PatientDto {
     nullable: true,
     deprecated: true,
     description:
-      'DEPRECADO (DX-203), solo lectura: el acudiente es ahora un responsable (`GET /patients/:id/responsible-parties`). La migración lo copió allí.',
+      'DEPRECADO (DX-203), solo lectura: el tutor es ahora un responsable (`GET /patients/:id/responsible-parties`). La migración lo copió allí.',
   })
   guardianName!: string | null;
 

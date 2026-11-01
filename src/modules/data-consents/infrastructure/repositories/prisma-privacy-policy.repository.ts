@@ -7,6 +7,9 @@ import type {
   PublishPolicyInput,
 } from '../../domain/ports/privacy-policy-repository.port';
 import type { PrivacyPolicyVersion } from '../../domain/entities/privacy-policy.entity';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
+import { privacyPolicyPublishedAuditEvent } from '../../domain/privacy-policy-audit';
 
 const WITH_PUBLISHER = {
   publishedBy: { select: { id: true, fullName: true } },
@@ -60,7 +63,10 @@ export class PrismaPrivacyPolicyRepository implements PrivacyPolicyRepository {
     return rows.map(mapToEntity);
   }
 
-  async publish(input: PublishPolicyInput): Promise<PrivacyPolicyVersion> {
+  async publish(
+    input: PublishPolicyInput,
+    audit: AuditRequestContext,
+  ): Promise<PrivacyPolicyVersion> {
     const tenantId = this.requireTenantId();
     const row = await this.prisma.runWithTenant(async (tx) => {
       // Dos publicaciones a la vez calculan el mismo número: el UNIQUE
@@ -68,9 +74,16 @@ export class PrismaPrivacyPolicyRepository implements PrivacyPolicyRepository {
       const latest = await tx.privacyPolicyVersion.findFirst({
         where: { tenantId },
         orderBy: { version: 'desc' },
-        select: { version: true },
+        select: {
+          version: true,
+          contentHash: true,
+          policyText: true,
+          generalText: true,
+          sensitiveHealthText: true,
+          marketingText: true,
+        },
       });
-      return tx.privacyPolicyVersion.create({
+      const created = await tx.privacyPolicyVersion.create({
         data: {
           tenantId,
           version: (latest?.version ?? 0) + 1,
@@ -83,6 +96,11 @@ export class PrismaPrivacyPolicyRepository implements PrivacyPolicyRepository {
         },
         include: WITH_PUBLISHER,
       });
+      await writeAuditEvent(
+        tx,
+        privacyPolicyPublishedAuditEvent(audit, created.id, latest, created),
+      );
+      return created;
     });
     return mapToEntity(row);
   }

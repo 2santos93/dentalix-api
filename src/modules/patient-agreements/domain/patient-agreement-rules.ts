@@ -48,7 +48,7 @@ export interface CoverageTrustFacts {
   verifiedAt: Date | null;
   /** Quién puso por última vez su pagador o su nº de afiliado. */
   declaredById: string | null;
-  migratedFromInsurerEps: boolean;
+  migratedFromLegacyInsurer: boolean;
 }
 
 /**
@@ -68,7 +68,7 @@ export function coverageTrustedFor(
   actor: { userId: string; role: ClinicRole },
 ): boolean {
   if (actor.role === ClinicRole.ADMIN) return true;
-  if (coverage.verifiedAt !== null || coverage.migratedFromInsurerEps) {
+  if (coverage.verifiedAt !== null || coverage.migratedFromLegacyInsurer) {
     return true;
   }
   return coverage.declaredById !== actor.userId;

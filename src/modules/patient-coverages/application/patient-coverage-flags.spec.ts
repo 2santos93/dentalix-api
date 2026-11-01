@@ -16,7 +16,7 @@ describe('PatientCoverageFlags', () => {
       repo,
       () => new Date('2026-10-20T15:00:00Z'),
     );
-    payerId = payers.seed({ name: 'Sura' }).id;
+    payerId = payers.seed({ name: 'Surco' }).id;
   });
 
   const callsOf = (name: string) => repo.calls.filter((c) => c === name).length;
@@ -60,7 +60,7 @@ describe('PatientCoverageFlags', () => {
     });
     const summary = await flags.forPatient('p-1');
     expect(summary.status).toBe(status);
-    expect(summary.payerName).toBe('Sura');
+    expect(summary.payerName).toBe('Surco');
     expect(summary.validTo).toBe(validTo);
   });
 
@@ -94,7 +94,7 @@ describe('PatientCoverageFlags', () => {
     const map = await flags.forPatients(['p-1', 'p-2']);
     expect(map.get('p-1')).toEqual({
       status: 'ACTIVE',
-      payerName: 'Sura',
+      payerName: 'Surco',
       planName: 'Plus',
       validTo: '2027-01-01',
     });

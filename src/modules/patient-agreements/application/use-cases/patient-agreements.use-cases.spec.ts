@@ -50,13 +50,13 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
   let get: GetPatientAgreementUseCase;
   let assign: AssignPatientAgreementUseCase;
   let remove: RemovePatientAgreementUseCase;
-  let sanitas: { id: string; name: string };
-  let sura: { id: string; name: string };
-  let convenioSanitas: string;
-  let convenioSura: string;
+  let sanavida: { id: string; name: string };
+  let surco: { id: string; name: string };
+  let convenioSanavida: string;
+  let convenioSurco: string;
   /** Coberturas vivas del paciente con cada pagador. */
-  let covSanitas: string;
-  let covSura: string;
+  let covSanavida: string;
+  let covSurco: string;
   /** Convenio sin pagador externo: su pagador es de tipo OTHER (SEC-047). */
   let cortesia: string;
   let cortesiaPayer: { id: string; name: string };
@@ -77,27 +77,30 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
       clock,
     );
     remove = new RemovePatientAgreementUseCase(repo);
-    sanitas = payers.seed({ name: 'Sanitas' });
-    sura = payers.seed({ name: 'Sura' });
+    sanavida = payers.seed({ name: 'Sanavida' });
+    surco = payers.seed({ name: 'Surco' });
     cortesiaPayer = payers.seed({
       name: 'Cortesía',
       type: 'OTHER',
     });
-    convenioSanitas = agreements.seed({
-      name: 'Convenio Sanitas',
-      payer: { id: sanitas.id, name: sanitas.name, type: 'PUBLIC_SYSTEM' },
+    convenioSanavida = agreements.seed({
+      name: 'Convenio Sanavida',
+      payer: { id: sanavida.id, name: sanavida.name, type: 'PUBLIC_SYSTEM' },
     }).id;
-    convenioSura = agreements.seed({
-      name: 'Convenio Sura',
-      payer: { id: sura.id, name: sura.name, type: 'PUBLIC_SYSTEM' },
+    convenioSurco = agreements.seed({
+      name: 'Convenio Surco',
+      payer: { id: surco.id, name: surco.name, type: 'PUBLIC_SYSTEM' },
     }).id;
     cortesia = agreements.seed({
       name: 'Cortesía socios 100 %',
       percent: 100,
       payer: { ...cortesiaPayer, type: 'OTHER' },
     }).id;
-    covSanitas = coverages.seed({ patientId: PATIENT, payerId: sanitas.id }).id;
-    covSura = coverages.seed({ patientId: PATIENT, payerId: sura.id }).id;
+    covSanavida = coverages.seed({
+      patientId: PATIENT,
+      payerId: sanavida.id,
+    }).id;
+    covSurco = coverages.seed({ patientId: PATIENT, payerId: surco.id }).id;
   });
 
   describe('consultar', () => {
@@ -117,17 +120,17 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
     it('el historial solo viene con includeHistory y va de la más reciente a la más antigua', async () => {
       repo.seed({
         patientId: PATIENT,
-        agreementId: convenioSura,
+        agreementId: convenioSurco,
         retiredAt: new Date('2026-09-01T00:00:00Z'),
       });
       repo.seed({
         patientId: PATIENT,
-        agreementId: convenioSanitas,
+        agreementId: convenioSanavida,
         retiredAt: new Date('2026-09-15T00:00:00Z'),
       });
       const live = repo.seed({
         patientId: PATIENT,
-        agreementId: convenioSanitas,
+        agreementId: convenioSanavida,
       });
 
       const without = await get.execute(PATIENT, false);
@@ -136,8 +139,8 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
 
       const withHistory = await get.execute(PATIENT, true);
       expect(withHistory.history.map((h) => h.agreement.name)).toEqual([
-        'Convenio Sanitas',
-        'Convenio Sura',
+        'Convenio Sanavida',
+        'Convenio Surco',
       ]);
       expect(withHistory.history.every((h) => h.retiredAt !== null)).toBe(true);
     });
@@ -145,7 +148,7 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
     it('calcula el estado a hoy con las dos vigencias', async () => {
       const past = agreements.seed({
         name: 'Vencido',
-        payer: { id: sanitas.id, name: sanitas.name, type: 'PUBLIC_SYSTEM' },
+        payer: { id: sanavida.id, name: sanavida.name, type: 'PUBLIC_SYSTEM' },
         validTo: '2026-10-19',
       });
       repo.seed({ patientId: PATIENT, agreementId: past.id });
@@ -160,7 +163,7 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
       await expect(
         assign.execute(
           'otra-clinica',
-          { agreementId: convenioSanitas, coverageId: covSanitas },
+          { agreementId: convenioSanavida, coverageId: covSanavida },
           RECEPTION,
         ),
       ).rejects.toThrow(new NotFoundException(PATIENT_NOT_FOUND_MESSAGE));
@@ -171,14 +174,14 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
       const out = await assign.execute(
         PATIENT,
         {
-          agreementId: convenioSanitas,
-          coverageId: covSanitas,
+          agreementId: convenioSanavida,
+          coverageId: covSanavida,
           notes: '  Plan oro  ',
         },
         RECEPTION,
       );
       expect(out.status).toBe('ACTIVE');
-      expect(out.agreement.payer.name).toBe('Sanitas');
+      expect(out.agreement.payer.name).toBe('Sanavida');
       expect(out.notes).toBe('Plan oro');
       expect(out.retiredAt).toBeNull();
       expect(repo.live(PATIENT)).toHaveLength(1);
@@ -188,12 +191,12 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
     it('sustituye la viva: la anterior queda retirada y aparece en el historial', async () => {
       const first = await assign.execute(
         PATIENT,
-        { agreementId: convenioSanitas, coverageId: covSanitas },
+        { agreementId: convenioSanavida, coverageId: covSanavida },
         RECEPTION,
       );
       const second = await assign.execute(
         PATIENT,
-        { agreementId: convenioSura, coverageId: covSura },
+        { agreementId: convenioSurco, coverageId: covSurco },
         RECEPTION,
       );
       expect(repo.live(PATIENT)).toHaveLength(1);
@@ -206,11 +209,11 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
       await expect(
         assign.execute(PATIENT, { agreementId: 'no-existe' }, RECEPTION),
       ).rejects.toThrow(new BadRequestException(AGREEMENT_NOT_FOUND_MESSAGE));
-      agreements.deleted.add(convenioSanitas);
+      agreements.deleted.add(convenioSanavida);
       await expect(
         assign.execute(
           PATIENT,
-          { agreementId: convenioSanitas, coverageId: covSanitas },
+          { agreementId: convenioSanavida, coverageId: covSanavida },
           RECEPTION,
         ),
       ).rejects.toThrow(new BadRequestException(AGREEMENT_NOT_FOUND_MESSAGE));
@@ -218,10 +221,10 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
     });
 
     it('un convenio desactivado se asigna y sale INACTIVE', async () => {
-      agreements.rows.find((a) => a.id === convenioSanitas)!.active = false;
+      agreements.rows.find((a) => a.id === convenioSanavida)!.active = false;
       const out = await assign.execute(
         PATIENT,
-        { agreementId: convenioSanitas, coverageId: covSanitas },
+        { agreementId: convenioSanavida, coverageId: covSanavida },
         RECEPTION,
       );
       expect(out.status).toBe('INACTIVE');
@@ -231,40 +234,43 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
     it('400 con una vigencia al revés y no retira la anterior', async () => {
       await assign.execute(
         PATIENT,
-        { agreementId: convenioSanitas, coverageId: covSanitas },
+        { agreementId: convenioSanavida, coverageId: covSanavida },
         RECEPTION,
       );
       await expect(
         assign.execute(
           PATIENT,
           {
-            agreementId: convenioSura,
+            agreementId: convenioSurco,
             validFrom: '2026-12-31',
             validTo: '2026-01-01',
           },
           RECEPTION,
         ),
       ).rejects.toThrow(new BadRequestException(AGREEMENT_DATE_RANGE_MESSAGE));
-      expect(repo.live(PATIENT)[0].agreementId).toBe(convenioSanitas);
+      expect(repo.live(PATIENT)[0].agreementId).toBe(convenioSanavida);
     });
 
     describe('cobertura', () => {
       it('la acepta si es del paciente y del mismo pagador', async () => {
-        const cov = coverages.seed({ patientId: PATIENT, payerId: sanitas.id });
+        const cov = coverages.seed({
+          patientId: PATIENT,
+          payerId: sanavida.id,
+        });
         const out = await assign.execute(
           PATIENT,
-          { agreementId: convenioSanitas, coverageId: cov.id },
+          { agreementId: convenioSanavida, coverageId: cov.id },
           RECEPTION,
         );
         expect(out.coverageId).toBe(cov.id);
       });
 
       it('400 si es de otro pagador y no escribe', async () => {
-        const cov = coverages.seed({ patientId: PATIENT, payerId: sura.id });
+        const cov = coverages.seed({ patientId: PATIENT, payerId: surco.id });
         await expect(
           assign.execute(
             PATIENT,
-            { agreementId: convenioSanitas, coverageId: cov.id },
+            { agreementId: convenioSanavida, coverageId: cov.id },
             RECEPTION,
           ),
         ).rejects.toThrow(
@@ -276,18 +282,18 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
       it('400 si no es del paciente o está retirada', async () => {
         const other = coverages.seed({
           patientId: 'otro-paciente',
-          payerId: sanitas.id,
+          payerId: sanavida.id,
         });
         const gone = coverages.seed({
           patientId: PATIENT,
-          payerId: sanitas.id,
+          payerId: sanavida.id,
         });
         gone.deleted = true;
         for (const coverageId of [other.id, gone.id, 'no-existe']) {
           await expect(
             assign.execute(
               PATIENT,
-              { agreementId: convenioSanitas, coverageId },
+              { agreementId: convenioSanavida, coverageId },
               RECEPTION,
             ),
           ).rejects.toThrow(
@@ -306,11 +312,11 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
             await expect(
               assign.execute(
                 PATIENT,
-                { agreementId: convenioSanitas, coverageId },
+                { agreementId: convenioSanavida, coverageId },
                 actor(role),
               ),
             ).rejects.toThrow(
-              new BadRequestException(coverageRequiredMessage('Sanitas')),
+              new BadRequestException(coverageRequiredMessage('Sanavida')),
             );
           }
           expect(repo.rows).toHaveLength(0);
@@ -322,29 +328,29 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
         async (role) => {
           const out = await assign.execute(
             PATIENT,
-            { agreementId: convenioSanitas, coverageId: covSanitas },
+            { agreementId: convenioSanavida, coverageId: covSanavida },
             actor(role),
           );
-          expect(out.coverageId).toBe(covSanitas);
+          expect(out.coverageId).toBe(covSanavida);
         },
       );
 
       it('400 con una cobertura vencida o que aún no empieza (extremos vigentes)', async () => {
         const expired = coverages.seed({
           patientId: PATIENT,
-          payerId: sanitas.id,
+          payerId: sanavida.id,
           validTo: '2026-10-19',
         });
         const future = coverages.seed({
           patientId: PATIENT,
-          payerId: sanitas.id,
+          payerId: sanavida.id,
           validFrom: '2026-10-21',
         });
         for (const coverageId of [expired.id, future.id]) {
           await expect(
             assign.execute(
               PATIENT,
-              { agreementId: convenioSanitas, coverageId },
+              { agreementId: convenioSanavida, coverageId },
               ADMIN,
             ),
           ).rejects.toThrow(new BadRequestException(COVERAGE_NOT_LIVE_MESSAGE));
@@ -352,13 +358,13 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
         expect(repo.rows).toHaveLength(0);
         const edges = coverages.seed({
           patientId: PATIENT,
-          payerId: sanitas.id,
+          payerId: sanavida.id,
           validFrom: '2026-10-20',
           validTo: '2026-10-20',
         });
         const out = await assign.execute(
           PATIENT,
-          { agreementId: convenioSanitas, coverageId: edges.id },
+          { agreementId: convenioSanavida, coverageId: edges.id },
           RECEPTION,
         );
         expect(out.coverageId).toBe(edges.id);
@@ -392,7 +398,7 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
           const migrated = coverages.seed({
             patientId: PATIENT,
             payerId: cortesiaPayer.id,
-            migratedFromInsurerEps: true,
+            migratedFromLegacyInsurer: true,
           });
           const out = await assign.execute(
             PATIENT,
@@ -406,13 +412,13 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
       it('la cobertura migrada tiene que ser del mismo pagador, del paciente y estar vigente', async () => {
         const otherPayer = coverages.seed({
           patientId: PATIENT,
-          payerId: sanitas.id,
-          migratedFromInsurerEps: true,
+          payerId: sanavida.id,
+          migratedFromLegacyInsurer: true,
         });
         const otherPatient = coverages.seed({
           patientId: 'otro-paciente',
           payerId: cortesiaPayer.id,
-          migratedFromInsurerEps: true,
+          migratedFromLegacyInsurer: true,
         });
         for (const coverageId of [
           otherPayer.id,
@@ -432,7 +438,7 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
         const expired = coverages.seed({
           patientId: PATIENT,
           payerId: cortesiaPayer.id,
-          migratedFromInsurerEps: true,
+          migratedFromLegacyInsurer: true,
           validTo: '2026-10-19',
         });
         await expect(
@@ -459,7 +465,7 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
         await expect(
           assign.execute(
             PATIENT,
-            { agreementId: cortesia, coverageId: covSanitas },
+            { agreementId: cortesia, coverageId: covSanavida },
             ADMIN,
           ),
         ).rejects.toThrow(
@@ -480,11 +486,11 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
     });
 
     describe('cobertura verificable (SEC-049)', () => {
-      /** Cobertura de Sanitas que registró `declaredById` (SEC-049). */
+      /** Cobertura de Sanavida que registró `declaredById` (SEC-049). */
       const declared = (declaredById: string, extra: object = {}) =>
         coverages.seed({
           patientId: PATIENT,
-          payerId: sanitas.id,
+          payerId: sanavida.id,
           memberNumber: '1020304050',
           declaredById,
           ...extra,
@@ -497,7 +503,7 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
           await expect(
             assign.execute(
               PATIENT,
-              { agreementId: convenioSanitas, coverageId },
+              { agreementId: convenioSanavida, coverageId },
               actor(role),
             ),
           ).rejects.toThrow(
@@ -517,7 +523,7 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
           await expect(
             assign.execute(
               PATIENT,
-              { agreementId: convenioSanitas, coverageId: verified },
+              { agreementId: convenioSanavida, coverageId: verified },
               actor(role),
             ),
           ).resolves.toMatchObject({ coverageId: verified });
@@ -525,7 +531,7 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
           await expect(
             assign.execute(
               PATIENT,
-              { agreementId: convenioSanitas, coverageId: byOther },
+              { agreementId: convenioSanavida, coverageId: byOther },
               actor(role),
             ),
           ).resolves.toMatchObject({ coverageId: byOther });
@@ -537,7 +543,7 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
         await expect(
           assign.execute(
             PATIENT,
-            { agreementId: convenioSanitas, coverageId },
+            { agreementId: convenioSanavida, coverageId },
             ADMIN,
           ),
         ).resolves.toMatchObject({ coverageId });
@@ -546,13 +552,13 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
       it('la cobertura de otro paciente o de otra clínica sigue siendo 400 «no encontrada», antes del 403', async () => {
         const foreign = coverages.seed({
           patientId: 'otro-paciente',
-          payerId: sanitas.id,
+          payerId: sanavida.id,
           declaredById: 'u1',
         }).id;
         await expect(
           assign.execute(
             PATIENT,
-            { agreementId: convenioSanitas, coverageId: foreign },
+            { agreementId: convenioSanavida, coverageId: foreign },
             RECEPTION,
           ),
         ).rejects.toThrow(new BadRequestException(COVERAGE_NOT_FOUND_MESSAGE));
@@ -561,7 +567,7 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
       it('el repositorio recibe quién asigna para repetir la comprobación en la transacción', async () => {
         await assign.execute(
           PATIENT,
-          { agreementId: convenioSanitas, coverageId: covSanitas },
+          { agreementId: convenioSanavida, coverageId: covSanavida },
           RECEPTION,
         );
         expect(repo.lastReplaceActor).toEqual({
@@ -574,14 +580,14 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
     it('la carrera del índice parcial llega como 422 y no cambia nada', async () => {
       const first = await assign.execute(
         PATIENT,
-        { agreementId: convenioSanitas, coverageId: covSanitas },
+        { agreementId: convenioSanavida, coverageId: covSanavida },
         RECEPTION,
       );
       repo.failNextReplace = true;
       await expect(
         assign.execute(
           PATIENT,
-          { agreementId: convenioSura, coverageId: covSura },
+          { agreementId: convenioSurco, coverageId: covSurco },
           RECEPTION,
         ),
       ).rejects.toThrow(
@@ -607,7 +613,7 @@ describe('casos de uso del convenio del paciente (DX-105)', () => {
     it('retira la viva, que pasa al historial', async () => {
       const a = await assign.execute(
         PATIENT,
-        { agreementId: convenioSanitas, coverageId: covSanitas },
+        { agreementId: convenioSanavida, coverageId: covSanavida },
         RECEPTION,
       );
       await remove.execute(PATIENT, 'u2');

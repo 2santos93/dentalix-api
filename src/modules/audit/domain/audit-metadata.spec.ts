@@ -121,6 +121,28 @@ describe('sanitizeAuditMetadata (DX-009)', () => {
         }),
       ).toEqual({ move: { from, to } });
     });
+
+    it('DX-211: guarda el sillón antes y después (uuid o null) y descarta otro valor', () => {
+      const chair = '33333333-3333-4333-8333-333333333333';
+      expect(
+        sanitizeAuditMetadata({
+          move: {
+            from: { ...from, chairId: null },
+            to: { ...to, chairId: chair },
+          },
+        }),
+      ).toEqual({
+        move: {
+          from: { ...from, chairId: null },
+          to: { ...to, chairId: chair },
+        },
+      });
+      expect(
+        sanitizeAuditMetadata({
+          move: { from: { ...from, chairId: 'Sillón 1' }, to },
+        }),
+      ).toEqual({ move: { from, to } });
+    });
   });
 
   describe('status (DX-200: flujo del paciente en la clínica)', () => {
@@ -604,16 +626,16 @@ describe('sanitizeAuditMetadata — cancelación de una cita (DX-279)', () => {
     ).toEqual({});
   });
 
-  it('legacy payer type codes still pass the CODE format', () => {
-    // Excepción G5.3 (DX-334): tipos de pagador anteriores a DX-326. Los
-    // eventos anteriores guardan el código antiguo y no se reescriben (R12).
+  it('payer type codes pass the CODE format', () => {
+    // Los eventos anteriores guardan el código de entonces y no se reescriben
+    // (R12): cualquier código en mayúsculas con guiones bajos pasa.
     expect(
       sanitizeAuditMetadata({
-        coverage: { payerType: 'EPS_CO', verified: true },
+        coverage: { payerType: 'PUBLIC_SYSTEM', verified: true },
       }),
     ).toEqual({
       coverage: {
-        payerType: 'EPS_CO',
+        payerType: 'PUBLIC_SYSTEM',
         memberNumberLast4: null,
         verified: true,
       },
@@ -1140,6 +1162,72 @@ describe('sanitizeAuditMetadata — enlaces anulados al archivar (DX-461)', () =
       'muchos',
     ]) {
       expect(sanitizeAuditMetadata({ revokedLinks: bad })).toEqual({});
+    }
+  });
+});
+
+describe('sanitizeAuditMetadata — cambio de configuración de la clínica (DX-360)', () => {
+  it('conserva los campos con su antes y después: textos cortos, números, booleanos, null y listas', () => {
+    const configChange = {
+      before: {
+        name: 'Limpieza',
+        durationMinutes: 30,
+        active: true,
+        sku: null,
+        leadHours: [24],
+      },
+      after: {
+        name: 'Limpieza profunda',
+        durationMinutes: 45,
+        active: false,
+        sku: 'GUA-01',
+        leadHours: [24, 2],
+      },
+    };
+    expect(sanitizeAuditMetadata({ configChange })).toEqual({ configChange });
+  });
+
+  it('admite textos de hasta 255 caracteres (un título de 200)', () => {
+    const configChange = {
+      after: { title: 'T'.repeat(200), host: 'h'.repeat(255) },
+    };
+    expect(sanitizeAuditMetadata({ configChange })).toEqual({ configChange });
+  });
+
+  it('admite un solo lado (un alta o un retiro)', () => {
+    const configChange = {
+      after: { host: 'citas.clinica.co', status: 'PENDING' },
+    };
+    expect(sanitizeAuditMetadata({ configChange })).toEqual({ configChange });
+  });
+
+  it('descarta el valor que no tiene la forma admitida (texto largo, saltos de línea, objetos, NaN)', () => {
+    expect(
+      sanitizeAuditMetadata({
+        configChange: {
+          after: {
+            name: 'Resina',
+            body: 'x'.repeat(256),
+            notes: 'línea 1\nlínea 2',
+            items: [{ activeIngredient: 'Amoxicilina' }],
+            minStock: Number.NaN,
+            'mal nombre': 1,
+            list: Array.from({ length: 51 }, (_, i) => i),
+          },
+        },
+      }),
+    ).toEqual({ configChange: { after: { name: 'Resina' } } });
+  });
+
+  it('sin ningún lado válido no queda nada', () => {
+    for (const configChange of [
+      {},
+      { before: 'x' },
+      { after: { body: 'x'.repeat(256) } },
+      { before: {}, after: {} },
+      'x',
+    ]) {
+      expect(sanitizeAuditMetadata({ configChange })).toEqual({});
     }
   });
 });

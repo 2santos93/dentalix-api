@@ -1,17 +1,15 @@
 /**
- * DX-327 (fase 1, spec R4–R5): el repositorio lee el tipo genérico y la
- * etiqueta libre; al crear escribe la pareja con el código anterior; al
- * cambiar, solo las columnas nuevas (el trigger ajusta la anterior).
+ * DX-327 (spec R4): el repositorio lee y escribe el tipo genérico y la
+ * etiqueta libre; la columna anterior está congelada y nadie la toca.
  */
 import { DOCUMENT_TYPES } from '../../domain/document-type';
-import { legacyStoredDocType } from '../../domain/legacy-doc-type';
 import type { DocumentType } from '@prisma/client';
 import {
   mapToEntity,
   patientDocFields,
   patientUpdateData,
   PrismaPatientRepository,
-  type LegacyDocPair,
+  type DocTypeColumn,
   type PrismaPatient,
 } from './prisma-patient.repository';
 
@@ -23,9 +21,6 @@ function row(over: Partial<PrismaPatient> = {}): PrismaPatient {
     tenantId: 't1',
     firstName: 'Ana',
     lastName: 'Gomez',
-    // El código anterior de la fila no coincide a propósito con el genérico:
-    // la entidad no debe leerlo.
-    docType: 'OTHER',
     documentType: 'NATIONAL_ID',
     docTypeLabel: 'ID local',
     docNumber: 'RX-1001',
@@ -67,36 +62,35 @@ function row(over: Partial<PrismaPatient> = {}): PrismaPatient {
   };
 }
 
-describe('PrismaPatientRepository (DX-327, fase 1)', () => {
-  it('a patient row maps documentType and docTypeLabel, never the legacy code', () => {
+describe('PrismaPatientRepository (DX-327)', () => {
+  it('a patient row maps documentType and docTypeLabel', () => {
     const patient = mapToEntity(row());
     expect(patient.docType).toBe('NATIONAL_ID');
     expect(patient.docTypeLabel).toBe('ID local');
     expect(patient).not.toHaveProperty('documentType');
 
     const unlabelled = mapToEntity(
-      row({ docType: 'OTHER', documentType: 'TAX_ID', docTypeLabel: null }),
+      row({ documentType: 'TAX_ID', docTypeLabel: null }),
     );
     expect(unlabelled).toMatchObject({ docType: 'TAX_ID', docTypeLabel: null });
   });
 
   it.each(DOCUMENT_TYPES)(
-    'create data satisfies the legacy pair (%s)',
+    'create data writes the generic type and the label (%s)',
     (type) => {
       expect(patientDocFields(type, 'ID local')).toEqual({
         documentType: type,
-        docType: legacyStoredDocType(type),
         docTypeLabel: 'ID local',
       });
       expect(patientDocFields(type, null).docTypeLabel).toBeNull();
     },
   );
 
-  it('the legacy pair type requires the legacy code', () => {
-    // @ts-expect-error R5: un alta sin el código anterior no compila (el
-    // trigger tomaría el DEFAULT y un OTHER quedaría NATIONAL_ID).
-    const data: LegacyDocPair = { documentType: 'OTHER' };
-    expect(data.documentType).toBe('OTHER');
+  it('the create column type requires the generic type', () => {
+    // @ts-expect-error: un alta sin tipo no compila (la columna tomaría su
+    // DEFAULT 'OTHER').
+    const data: DocTypeColumn = {};
+    expect(data).toEqual({});
   });
 
   describe('update', () => {

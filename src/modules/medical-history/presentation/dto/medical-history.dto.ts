@@ -9,6 +9,8 @@ import {
   VitalSignsDto,
   SafetyFlagsDto,
 } from './anamnesis-parts.dto';
+import { ANSWER_STATUSES } from '../../domain/anamnesis-answers';
+import type { AnswerStatus } from '../../domain/entities/medical-history.entity';
 
 // Response shape for MedicalHistory endpoints — documents the
 // MedicalHistoryVersion entity contract for Swagger (same convention as
@@ -44,6 +46,15 @@ export class MedicalHistoryDto {
 
   @ApiProperty({ type: HabitsDto, nullable: true })
   habits!: HabitsDto | null;
+
+  @ApiProperty({
+    enum: ANSWER_STATUSES,
+    enumName: 'AnamnesisAnswerStatus',
+    nullable: true,
+    description:
+      'Embarazo: SI / NO / DESCONOCE; null = sin responder. En las versiones anteriores a este campo solo se guardaba el «Sí»: allí null puede ser «No» o no preguntado (nunca se inventa un «No»).',
+  })
+  pregnancy!: AnswerStatus | null;
 
   @ApiProperty({ type: DentalHistoryDto, nullable: true })
   dentalHistory!: DentalHistoryDto | null;

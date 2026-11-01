@@ -17,15 +17,22 @@ import {
 } from '@prisma/client';
 import type { MedicalHistoryVersionData } from '../../src/modules/medical-history/domain/ports/medical-history-repository.port';
 import type { ScheduleRange } from '../../src/modules/location-schedule/application/business-hours';
-import type { DemoLocationKey } from './calendar';
+import { addCivilDays, civilDateIn } from '../../src/shared/time/civil-day';
 import {
   ANAMNESIS_CONDITIONS,
   type AnamnesisAnswers,
 } from '../../src/modules/medical-history-submissions/domain/anamnesis-questionnaire';
 
-// Datos FICTICIOS de la clínica demo. Nombres y documentos inventados; los
-// correos usan example.com (RFC 2606) y los teléfonos son de formato
-// colombiano pero no asignados a nadie a propósito.
+// Datos FICTICIOS de la clínica demo: una clínica con sedes en varios países;
+// cada dato regional (país, moneda, zona, formato y reloj) es una fila de
+// `DEMO_LOCATIONS`, y el código no sabe de ningún país. Nombres,
+// direcciones y documentos inventados, sin leyes ni aseguradoras reales. Los
+// correos usan example.com (RFC 2606). Los teléfonos usan el bloque «555»,
+// que se reconoce como ficticio: en Brasil y en Venezuela no hay tramo
+// reservado, así que es un bloque válido para libphonenumber sin garantía de
+// que no esté asignado. La demo no envía nada a esos números: WhatsApp es un
+// enlace `wa.me` que abre una persona, y los recordatorios van por correo a
+// example.com.
 
 export const DEMO_SUBDOMAIN = 'demo';
 export const DEMO_CLINIC_NAME = 'Clínica Demo';
@@ -33,13 +40,67 @@ export const DEMO_PRIMARY_COLOR = '#0E7C86';
 export const DEMO_EMAIL_DOMAIN = 'demo.dentalix.app';
 /** Contraseña común de todos los usuarios demo (se imprime al terminar). */
 export const DEMO_PASSWORD = 'DemoDentalix2026!';
-/** Moneda de la clínica: planes y abonos van en COP. */
-export const DEMO_CURRENCY = 'COP';
+/** Días de tasas manuales sembradas (hoy incluido): cubren toda la historia de abonos. */
+export const DEMO_MANUAL_RATE_DAYS = 61;
 /**
- * G1-B (DX-350): reloj de las sedes demo, explícito (nunca un default): 24 h,
- * el que la demo pinta hoy en pantalla (spec G1-B §4.5).
+ * Redondeo a 4 decimales: sin él la coma flotante deja restos
+ * (`5.398000000000001`) y el caso de uso rechaza la tasa por tener más de
+ * `MANUAL_RATE_MAX_DECIMALS` decimales.
  */
-export const DEMO_HOUR_CYCLE = 'h23';
+const r4 = (x: number) => Math.round(x * 1e4) / 1e4;
+/**
+ * Tasas FICTICIAS de la demo (unidades por 1 USD) del día `daysAgo`, una por
+ * cada moneda distinta de USD que usa una sede o un abono. Su fuente es
+ * MANUAL (la que la clínica registra cada día, DX-374), desde
+ * `DEMO_MANUAL_RATE_DAYS` días atrás. Hoy y ayer valen lo mismo para que el
+ * abono «de hace 30 min» dé la misma cifra en USD aunque la siembra cruce la
+ * medianoche de la sede (DX-449).
+ */
+export const DEMO_MANUAL_RATES: Readonly<
+  Record<'VES' | 'BRL' | 'GBP', (daysAgo: number) => number>
+> = {
+  VES: (d) => r4(250 - 0.5 * Math.max(0, d - 1)),
+  BRL: (d) => r4(5.4 - 0.002 * Math.max(0, d - 1)),
+  GBP: (d) => r4(0.78 + 0.0005 * Math.max(0, d - 1)),
+};
+/** El importe en `currency` que vale `usd` con la tasa demo del día `daysAgo`. */
+export function demoAmountIn(
+  currency: keyof typeof DEMO_MANUAL_RATES,
+  usd: number,
+  daysAgo: number,
+): number {
+  return Math.round(usd * DEMO_MANUAL_RATES[currency](daysAgo) * 100) / 100;
+}
+/** Sedes de la rotación de los dos dentistas compartidos (DX-233). */
+export type RotationSiteKey = 'principal' | 'norte';
+/** Sedes con un dentista propio, restringido a ella (D7). */
+export type SoloSiteKey = 'saoPaulo' | 'londres';
+export type DemoLocationKey = RotationSiteKey | SoloSiteKey;
+
+/**
+ * Configuración regional de una sede (DATOS: la API exige país, moneda, zona,
+ * formato y reloj explícitos, sin valores por defecto). El reloj va explícito,
+ * nunca un default (G1-B, DX-350).
+ */
+export interface DemoRegion {
+  country: string;
+  currency: string;
+  timeZone: string;
+  locale: string;
+  hourCycle: 'h23';
+}
+
+export interface DemoLocation extends DemoRegion {
+  name: string;
+  address: string;
+  /**
+   * DX-222: teléfono de la sede, el que las indicaciones postoperatorias
+   * muestran para urgencias (`{{telefono_sede}}`). Ficticio.
+   */
+  phone?: string;
+  /** Horario propio; sin él la sede conserva el que le dio su alta. */
+  schedule?: ScheduleRange[];
+}
 
 interface DemoUser {
   email: string;
@@ -52,6 +113,12 @@ interface DemoUser {
    */
   locations?: readonly DemoLocationKey[];
 }
+
+/** Correo del dentista propio de cada sede sin rotación (D7). */
+export const DEMO_SITE_DENTISTS: Readonly<Record<SoloSiteKey, string>> = {
+  saoPaulo: `dentista.saopaulo@${DEMO_EMAIL_DOMAIN}`,
+  londres: `dentista.londres@${DEMO_EMAIL_DOMAIN}`,
+};
 
 /** El primero es el dueño (lo crea el registro); el resto entra por invitación. */
 export const DEMO_USERS: readonly DemoUser[] = [
@@ -67,7 +134,7 @@ export const DEMO_USERS: readonly DemoUser[] = [
   },
   {
     email: `dentista2@${DEMO_EMAIL_DOMAIN}`,
-    fullName: 'Valentina Restrepo Mejía',
+    fullName: 'Valentina Rivas Mendoza',
     role: ClinicRole.DENTIST,
   },
   {
@@ -84,29 +151,28 @@ export const DEMO_USERS: readonly DemoUser[] = [
   // no mover los índices del resto (dentistas, recepción y asistente).
   {
     email: `recepcion.norte@${DEMO_EMAIL_DOMAIN}`,
-    fullName: 'Lorena Ospina Vargas',
+    fullName: 'Lorena Pacheco Vargas',
     role: ClinicRole.RECEPTION,
     locations: ['norte'],
   },
+  // D7: el dentista propio de cada sede sin rotación, restringido a ella. Van
+  // al final por la misma razón.
+  {
+    email: DEMO_SITE_DENTISTS.saoPaulo,
+    fullName: 'Beatriz Nogueira Prado',
+    role: ClinicRole.DENTIST,
+    locations: ['saoPaulo'],
+  },
+  {
+    email: DEMO_SITE_DENTISTS.londres,
+    fullName: 'Oliver Bennett',
+    role: ClinicRole.DENTIST,
+    locations: ['londres'],
+  },
 ];
 
-export const DEMO_LOCATIONS: Record<
-  DemoLocationKey,
-  { name: string; address: string }
-> = {
-  // La crea el registro con el nombre "Sede principal"; el seed le pone dirección.
-  principal: {
-    name: 'Sede principal',
-    address: 'Calle 93 # 14-20, Consultorio 302, Bogotá',
-  },
-  norte: {
-    name: 'Sede Norte',
-    address: 'Carrera 7 # 140-15, Local 4, Bogotá',
-  },
-};
-
 /** Horario propio de la Sede Norte (la principal conserva el del registro). */
-export const NORTE_SCHEDULE: ScheduleRange[] = [
+const NORTE_SCHEDULE: ScheduleRange[] = [
   ...[1, 2, 3, 4, 5].flatMap((weekday) => [
     { weekday, startMinute: 7 * 60, endMinute: 12 * 60 },
     { weekday, startMinute: 13 * 60, endMinute: 17 * 60 },
@@ -114,44 +180,207 @@ export const NORTE_SCHEDULE: ScheduleRange[] = [
   { weekday: 6, startMinute: 8 * 60, endMinute: 12 * 60 },
 ];
 
-/**
- * DX-222: teléfono de la sede principal, el que las indicaciones
- * postoperatorias muestran para urgencias (`{{telefono_sede}}`). Ficticio.
- */
-export const DEMO_PRINCIPAL_PHONE = '+57 601 555 0101';
+/** Horario de la Sede São Paulo: lun–vie 8–12 y 13–18. */
+const SAO_PAULO_SCHEDULE: ScheduleRange[] = [1, 2, 3, 4, 5].flatMap(
+  (weekday) => [
+    { weekday, startMinute: 8 * 60, endMinute: 12 * 60 },
+    { weekday, startMinute: 13 * 60, endMinute: 18 * 60 },
+  ],
+);
 
-/** Tarifas (COP) que la clínica demo pone a los ítems del catálogo por defecto. */
+/** Horario de la Sede Londres: lun–vie 9–13 y 14–18. */
+const LONDRES_SCHEDULE: ScheduleRange[] = [1, 2, 3, 4, 5].flatMap((weekday) => [
+  { weekday, startMinute: 9 * 60, endMinute: 13 * 60 },
+  { weekday, startMinute: 14 * 60, endMinute: 18 * 60 },
+]);
+
+/**
+ * Las sedes de la demo, cada una con su región. La multimoneda de la
+ * principal se ve en los abonos en VES con la tasa manual del día que
+ * registra la clínica (`DEMO_MANUAL_RATES`), y en el fondo de la caja abierta
+ * en las dos monedas.
+ */
+export const DEMO_LOCATIONS: Record<DemoLocationKey, DemoLocation> = {
+  // La crea el registro con el nombre "Sede principal" y el horario por
+  // defecto; el seed le pone dirección y teléfono.
+  principal: {
+    name: 'Sede principal',
+    address: 'Av. Principal, Edif. Torre Demo, piso 3, consultorio 302',
+    phone: '+58 212 555 0100',
+    country: 'VE',
+    currency: 'USD',
+    timeZone: 'America/Caracas',
+    locale: 'es-VE',
+    hourCycle: 'h23',
+  },
+  norte: {
+    name: 'Sede Norte',
+    address: 'Calle Los Mangos, C.C. Demo Norte, local 4',
+    country: 'VE',
+    currency: 'USD',
+    timeZone: 'America/Caracas',
+    locale: 'es-VE',
+    hourCycle: 'h23',
+    schedule: NORTE_SCHEDULE,
+  },
+  saoPaulo: {
+    name: 'Sede São Paulo',
+    address: 'Rua Demo, 100, conj. 12',
+    phone: '+55 11 3555 0100',
+    country: 'BR',
+    currency: 'BRL',
+    timeZone: 'America/Sao_Paulo',
+    locale: 'pt-BR',
+    hourCycle: 'h23',
+    schedule: SAO_PAULO_SCHEDULE,
+  },
+  londres: {
+    name: 'Sede Londres',
+    address: '10 Demo Street, Suite 4',
+    phone: '+44 20 7946 0100',
+    country: 'GB',
+    currency: 'GBP',
+    timeZone: 'Europe/London',
+    locale: 'en-GB',
+    hourCycle: 'h23',
+    schedule: LONDRES_SCHEDULE,
+  },
+};
+
+/** La región de una sede: solo los cinco campos regionales de su fila. */
+export function regionOf(key: DemoLocationKey): DemoRegion {
+  const { country, currency, timeZone, locale, hourCycle } =
+    DEMO_LOCATIONS[key];
+  return { country, currency, timeZone, locale, hourCycle };
+}
+
+/**
+ * Un festivo de ejemplo de una sede (R12): recurrente (mes y día, sirve para
+ * cualquier año) o un cierre puntual a `daysFromToday` días del «hoy» de la
+ * sede (o el siguiente día que no sea un recurrente suyo). Son datos de la
+ * demo, no una regla del producto.
+ */
+export type DemoHoliday = { name: string } & (
+  { month: number; day: number } | { daysFromToday: number }
+);
+
+const MAINTENANCE_CLOSURE: DemoHoliday = {
+  name: 'Cierre por mantenimiento',
+  daysFromToday: 28,
+};
+
+/**
+ * Festivos de ejemplo por sede (R12): tres recurrentes y el cierre puntual,
+ * que `demoHolidayRows` corre si cae en el MM-DD de un recurrente.
+ */
+export const DEMO_HOLIDAYS: Record<DemoLocationKey, readonly DemoHoliday[]> = {
+  principal: [
+    { name: 'Año Nuevo', month: 1, day: 1 },
+    { name: 'Día de la Independencia', month: 7, day: 5 },
+    { name: 'Navidad', month: 12, day: 25 },
+    MAINTENANCE_CLOSURE,
+  ],
+  norte: [
+    { name: 'Año Nuevo', month: 1, day: 1 },
+    { name: 'Día de la Independencia', month: 7, day: 5 },
+    { name: 'Navidad', month: 12, day: 25 },
+    MAINTENANCE_CLOSURE,
+  ],
+  saoPaulo: [
+    { name: 'Año Nuevo', month: 1, day: 1 },
+    { name: 'Independencia', month: 9, day: 7 },
+    { name: 'Navidad', month: 12, day: 25 },
+    MAINTENANCE_CLOSURE,
+  ],
+  londres: [
+    { name: 'Año Nuevo', month: 1, day: 1 },
+    { name: 'Navidad', month: 12, day: 25 },
+    { name: 'San Esteban (Boxing Day)', month: 12, day: 26 },
+    MAINTENANCE_CLOSURE,
+  ],
+};
+
+/** Pacientes con la retención de la historia clínica ampliada (R13). */
+export const DEMO_RETENTION: readonly {
+  patientIndex: number;
+  value: 'DOUBLE' | 'PERMANENT';
+  reason: string;
+}[] = [
+  {
+    patientIndex: 1,
+    value: 'PERMANENT',
+    reason: 'Tratamiento de implantes de larga duración',
+  },
+  { patientIndex: 6, value: 'DOUBLE', reason: 'Solicitud de la paciente' },
+];
+
+/**
+ * Días de tasa manual que siembra la demo y la sede en cuyo contexto se
+ * registra cada uno. Van desde hace `DEMO_MANUAL_RATE_DAYS - 1` días (en la
+ * principal) hasta el «hoy» más adelantado de las sedes, porque el caso de uso
+ * rechaza una fecha posterior al «hoy» de la sede del contexto: cada día va
+ * con la primera sede, en el orden de `DEMO_LOCATIONS`, cuyo «hoy» lo admite.
+ */
+export function demoRateDates(
+  now: Date,
+): { date: string; key: DemoLocationKey }[] {
+  const todays = (Object.keys(DEMO_LOCATIONS) as DemoLocationKey[]).map(
+    (key) => ({ key, today: civilDateIn(now, DEMO_LOCATIONS[key].timeZone) }),
+  );
+  const latest = todays
+    .map((t) => t.today)
+    .reduce((max, today) => (today > max ? today : max));
+  const dates: { date: string; key: DemoLocationKey }[] = [];
+  for (
+    let date = addCivilDays(
+      civilDateIn(now, DEMO_LOCATIONS.principal.timeZone),
+      -(DEMO_MANUAL_RATE_DAYS - 1),
+    );
+    date <= latest;
+    date = addCivilDays(date, 1)
+  ) {
+    dates.push({ date, key: todays.find((t) => t.today >= date)!.key });
+  }
+  return dates;
+}
+
+/** Tarifas (USD) que la clínica demo pone a los ítems del catálogo por defecto. */
 export const DEMO_PRICES: Record<string, number> = {
-  'IMG-CONSULTA': 80000,
-  'IMG-RX-PERIAPICAL': 35000,
-  'IMG-RX-PANORAMICA': 90000,
-  'PREV-PROFILAXIS': 120000,
-  'PREV-FLUOR': 50000,
-  'PREV-SELLANTE': 70000,
-  'OP-RESINA-1': 150000,
-  'OP-RESINA-2': 190000,
-  'OP-RESINA-3': 230000,
-  'ENDO-UNI': 450000,
-  'ENDO-MULTI': 750000,
-  'PERIO-RASPADO': 180000,
-  'CX-EXO-SIMPLE': 150000,
-  'CX-CORDAL-INCL': 450000,
-  'PROT-CORONA-PROV': 250000,
-  'PROT-CORONA-LM': 1200000,
+  'IMG-CONSULTA': 80,
+  'IMG-RX-PERIAPICAL': 35,
+  'IMG-RX-PANORAMICA': 90,
+  'PREV-PROFILAXIS': 120,
+  'PREV-FLUOR': 50,
+  'PREV-SELLANTE': 70,
+  'OP-RESINA-1': 150,
+  'OP-RESINA-2': 190,
+  'OP-RESINA-3': 230,
+  'ENDO-UNI': 450,
+  'ENDO-MULTI': 750,
+  'PERIO-RASPADO': 180,
+  'CX-EXO-SIMPLE': 150,
+  'CX-CORDAL-INCL': 450,
+  'PROT-CORONA-PROV': 250,
+  'PROT-CORONA-LM': 1200,
   // DX-040: la opción B (puente fijo de 3 unidades) del grupo A/B de la demo.
-  'PROT-PUENTE': 1150000,
-  'IMPL-IMPLANTE': 3500000,
-  'IMPL-CORONA': 1800000,
-  'ORTO-VALORACION': 100000,
-  'ORTO-CONTROL': 120000,
-  'PED-SELLANTE': 65000,
-  'PED-FLUOR': 45000,
-  'EST-BLANQ-CONSULTORIO': 650000,
-  'EST-CARILLA-RESINA': 380000,
-  'URG-CONSULTA': 90000,
+  'PROT-PUENTE': 1150,
+  'IMPL-IMPLANTE': 3500,
+  'IMPL-CORONA': 1800,
+  'ORTO-VALORACION': 100,
+  'ORTO-CONTROL': 120,
+  'PED-SELLANTE': 65,
+  'PED-FLUOR': 45,
+  'EST-BLANQ-CONSULTORIO': 650,
+  'EST-CARILLA-RESINA': 380,
+  'URG-CONSULTA': 90,
 };
 
 interface DemoPatient {
+  /**
+   * R3: sede donde se atiende; da también la región con la que se lee su
+   * teléfono.
+   */
+  location: DemoLocationKey;
   firstName: string;
   lastName: string;
   docType: DocumentType;
@@ -161,8 +390,6 @@ interface DemoPatient {
   phone: string;
   email: string;
   address: string;
-  /** Nombre exacto en la tabla `cities` (país CO); se omite si no existe. */
-  city: string;
   occupation?: string;
   maritalStatus?: string;
   emergencyContactName?: string;
@@ -176,8 +403,8 @@ const healthy: MedicalHistoryVersionData = {
   conditions: [],
   medications: [],
   habits: {
-    tabaquismo: { activo: false },
-    higieneOral: { cepilladoPorDia: 3, hilo: true, cremaConFluor: true },
+    tabaquismo: { estado: 'NO' },
+    higieneOral: { cepilladoPorDia: 3, hilo: 'SI', cremaConFluor: 'SI' },
   },
 };
 
@@ -189,20 +416,20 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0001',
     birthDate: '1992-03-14',
     sex: Sex.F,
-    phone: '+57 310 555 0101',
+    location: 'principal',
+    phone: '+58 414 555 0101',
     email: 'laura.castro@example.com',
-    address: 'Calle 127 # 19-40, Apto 501',
-    city: 'Bogotá D.C.',
+    address: 'Calle Los Almendros 127, Apto 501',
     occupation: 'Diseñadora gráfica',
     maritalStatus: 'Soltera',
     emergencyContactName: 'Rosa Jiménez',
     emergencyContactRelationship: 'Madre',
-    emergencyContactPhone: '+57 310 555 0201',
+    emergencyContactPhone: '+58 424 555 0201',
     medicalHistory: {
       ...healthy,
       habits: {
-        tabaquismo: { activo: true, porDia: 5, anios: 8 },
-        higieneOral: { cepilladoPorDia: 2, hilo: false },
+        tabaquismo: { estado: 'SI', porDia: 5, anios: 8 },
+        higieneOral: { cepilladoPorDia: 2, hilo: 'NO' },
       },
       dentalHistory: {
         motivoConsulta: 'Sensibilidad al frío en molares inferiores',
@@ -213,20 +440,20 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
   },
   {
     firstName: 'Jorge Eduardo',
-    lastName: 'Ramírez Ospina',
+    lastName: 'Ramírez Ortega',
     docType: 'NATIONAL_ID',
     docNumber: 'DEMO-0002',
     birthDate: '1968-11-02',
     sex: Sex.M,
-    phone: '+57 311 555 0102',
+    location: 'principal',
+    phone: '+58 424 555 0102',
     email: 'jorge.ramirez@example.com',
-    address: 'Carrera 15 # 85-30',
-    city: 'Bogotá D.C.',
+    address: 'Av. Las Palmas 853',
     occupation: 'Contador',
     maritalStatus: 'Casado',
-    emergencyContactName: 'Gloria Ospina',
+    emergencyContactName: 'Gloria Ortega',
     emergencyContactRelationship: 'Esposa',
-    emergencyContactPhone: '+57 311 555 0202',
+    emergencyContactPhone: '+58 424 555 0202',
     medicalHistory: {
       allergies: [],
       conditions: [
@@ -269,10 +496,10 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0003',
     birthDate: '1998-07-21',
     sex: Sex.F,
-    phone: '+57 312 555 0103',
+    location: 'norte',
+    phone: '+58 416 555 0103',
     email: 'natalia.vargas@example.com',
-    address: 'Calle 53 # 24-12',
-    city: 'Bogotá D.C.',
+    address: 'Calle Los Robles 53',
     occupation: 'Estudiante de medicina',
     medicalHistory: healthy,
   },
@@ -283,10 +510,10 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0004',
     birthDate: '1975-01-30',
     sex: Sex.M,
-    phone: '+57 313 555 0104',
+    location: 'principal',
+    phone: '+58 426 555 0104',
     email: 'hector.molina@example.com',
-    address: 'Avenida Boyacá # 64-20',
-    city: 'Bogotá D.C.',
+    address: 'Av. del Parque 642',
     occupation: 'Conductor',
     medicalHistory: {
       allergies: [],
@@ -316,15 +543,15 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
   },
   {
     firstName: 'Daniela',
-    lastName: 'Montoya Arango',
+    lastName: 'Morales Rangel',
     docType: 'NATIONAL_ID',
     docNumber: 'DEMO-0005',
     birthDate: '1995-09-09',
     sex: Sex.F,
-    phone: '+57 314 555 0105',
-    email: 'daniela.montoya@example.com',
-    address: 'Calle 10 # 43-50',
-    city: 'Medellín',
+    location: 'principal',
+    phone: '+58 412 555 0105',
+    email: 'daniela.morales@example.com',
+    address: 'Calle Los Cedros 10',
     occupation: 'Abogada',
   },
   {
@@ -334,28 +561,28 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0006',
     birthDate: '2001-04-18',
     sex: Sex.M,
-    phone: '+57 315 555 0106',
+    location: 'principal',
+    phone: '+58 414 555 0106',
     email: 'santiago.pardo@example.com',
-    address: 'Carrera 11 # 118-05',
-    city: 'Bogotá D.C.',
+    address: 'Av. Libertad 1180',
     occupation: 'Ingeniero de software',
   },
   {
-    firstName: 'Martha Lucía',
+    firstName: 'Marta Elena',
     lastName: 'Becerra Rincón',
     docType: 'NATIONAL_ID',
     docNumber: 'DEMO-0007',
     birthDate: '1960-12-05',
     sex: Sex.F,
-    phone: '+57 316 555 0107',
-    email: 'martha.becerra@example.com',
-    address: 'Calle 145 # 12-80',
-    city: 'Bogotá D.C.',
+    location: 'norte',
+    phone: '+58 424 555 0107',
+    email: 'marta.becerra@example.com',
+    address: 'Calle Las Acacias 145',
     occupation: 'Pensionada',
     maritalStatus: 'Viuda',
     emergencyContactName: 'Felipe Becerra',
     emergencyContactRelationship: 'Hijo',
-    emergencyContactPhone: '+57 316 555 0207',
+    emergencyContactPhone: '+58 424 555 0207',
     medicalHistory: {
       allergies: [
         {
@@ -397,10 +624,10 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0008',
     birthDate: '1955-06-27',
     sex: Sex.M,
-    phone: '+57 317 555 0108',
+    location: 'principal',
+    phone: '+58 416 555 0108',
     email: 'ricardo.salcedo@example.com',
-    address: 'Transversal 23 # 97-45',
-    city: 'Bogotá D.C.',
+    address: 'Pasaje Los Olivos 23',
     occupation: 'Comerciante',
     medicalHistory: {
       allergies: [],
@@ -432,63 +659,63 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0009',
     birthDate: '2015-02-11',
     sex: Sex.F,
-    phone: '+57 318 555 0109',
+    location: 'norte',
+    phone: '+58 426 555 0109',
     email: 'familia.ortiz@example.com',
-    address: 'Calle 160 # 58-10',
-    city: 'Bogotá D.C.',
+    address: 'Calle Los Pinos 160',
     emergencyContactName: 'Claudia Navarro',
     emergencyContactRelationship: 'Madre',
-    emergencyContactPhone: '+57 318 555 0209',
+    emergencyContactPhone: '+58 424 555 0209',
     medicalHistory: {
       ...healthy,
-      habits: { higieneOral: { cepilladoPorDia: 2, cremaConFluor: true } },
+      habits: { higieneOral: { cepilladoPorDia: 2, cremaConFluor: 'SI' } },
       // DX-307: el peso con el que se calcula la dosis máxima de anestésico.
       vitalSigns: { peso: 32 },
     },
   },
   {
     firstName: 'Carolina',
-    lastName: 'Duque Henao',
+    lastName: 'Durán Bello',
     docType: 'NATIONAL_ID',
     docNumber: 'DEMO-0010',
     birthDate: '1993-10-03',
     sex: Sex.F,
-    phone: '+57 319 555 0110',
-    email: 'carolina.duque@example.com',
-    address: 'Carrera 50 # 102-33',
-    city: 'Bogotá D.C.',
+    location: 'principal',
+    phone: '+58 412 555 0110',
+    email: 'carolina.duran@example.com',
+    address: 'Av. del Río 1020',
     occupation: 'Docente',
     medicalHistory: {
       ...healthy,
-      embarazo: true,
+      pregnancy: 'SI',
       semanasEmbarazo: 20,
       notes: 'Embarazo de 20 semanas: evitar radiografías no urgentes.',
     },
   },
   {
     firstName: 'Felipe',
-    lastName: 'Arias Londoño',
+    lastName: 'Arias León',
     docType: 'NATIONAL_ID',
     docNumber: 'DEMO-0011',
     birthDate: '1988-08-16',
     sex: Sex.M,
-    phone: '+57 320 555 0111',
+    location: 'principal',
+    phone: '+58 414 555 0111',
     email: 'felipe.arias@example.com',
-    address: 'Calle 5 # 38-25',
-    city: 'Cali',
+    address: 'Calle Las Flores 5',
     occupation: 'Chef',
   },
   {
     firstName: 'Juliana',
-    lastName: 'Guerrero Pinzón',
+    lastName: 'Guerrero Paredes',
     docType: 'NATIONAL_ID',
     docNumber: 'DEMO-0012',
     birthDate: '1990-05-25',
     sex: Sex.F,
-    phone: '+57 321 555 0112',
+    location: 'principal',
+    phone: '+58 424 555 0112',
     email: 'juliana.guerrero@example.com',
-    address: 'Calle 72 # 10-07',
-    city: 'Bogotá D.C.',
+    address: 'Calle Los Sauces 72',
     occupation: 'Periodista',
     medicalHistory: {
       allergies: [
@@ -520,41 +747,41 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
   },
   {
     firstName: 'Mateo',
-    lastName: 'Cifuentes Rojas',
+    lastName: 'Contreras Rojas',
     docType: 'NATIONAL_ID',
     docNumber: 'DEMO-0013',
     birthDate: '2012-09-30',
     sex: Sex.M,
-    phone: '+57 322 555 0113',
-    email: 'familia.cifuentes@example.com',
-    address: 'Carrera 68 # 24-15',
-    city: 'Bogotá D.C.',
+    location: 'principal',
+    phone: '+58 416 555 0113',
+    email: 'familia.contreras@example.com',
+    address: 'Av. Principal 2415',
   },
   {
     firstName: 'Ana María',
-    lastName: 'Zapata Gil',
+    lastName: 'Zambrano Gil',
     docType: 'NATIONAL_ID',
     docNumber: 'DEMO-0014',
     birthDate: '1979-03-08',
     sex: Sex.F,
-    phone: '+57 323 555 0114',
-    email: 'anamaria.zapata@example.com',
-    address: 'Calle 33 # 80-12',
-    city: 'Medellín',
+    location: 'principal',
+    phone: '+58 426 555 0114',
+    email: 'anamaria.zambrano@example.com',
+    address: 'Calle Los Laureles 33',
     occupation: 'Administradora de empresas',
     medicalHistory: healthy,
   },
   {
-    firstName: 'Luis Fernando',
+    firstName: 'Luis Alberto',
     lastName: 'Peña Acosta',
     docType: 'NATIONAL_ID',
     docNumber: 'DEMO-0015',
     birthDate: '1970-07-12',
     sex: Sex.M,
-    phone: '+57 324 555 0115',
+    location: 'principal',
+    phone: '+58 412 555 0115',
     email: 'luis.pena@example.com',
-    address: 'Carrera 54 # 72-80',
-    city: 'Barranquilla',
+    address: 'Av. del Mar 728',
     occupation: 'Ingeniero civil',
   },
   {
@@ -564,23 +791,23 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0016',
     birthDate: '2004-12-19',
     sex: Sex.F,
-    phone: '+57 325 555 0116',
+    location: 'principal',
+    phone: '+58 414 555 0116',
     email: 'valeria.suarez@example.com',
-    address: 'Calle 116 # 7-15',
-    city: 'Bogotá D.C.',
+    address: 'Calle Las Camelias 116',
     occupation: 'Estudiante',
   },
   {
     firstName: 'Gustavo',
-    lastName: 'Ríos Villamizar',
+    lastName: 'Ríos Villarroel',
     docType: 'NATIONAL_ID',
     docNumber: 'DEMO-0017',
     birthDate: '1966-02-22',
     sex: Sex.M,
-    phone: '+57 326 555 0117',
+    location: 'principal',
+    phone: '+58 424 555 0117',
     email: 'gustavo.rios@example.com',
-    address: 'Carrera 27 # 36-14',
-    city: 'Bucaramanga',
+    address: 'Av. Los Jardines 361',
     occupation: 'Agricultor',
     medicalHistory: {
       allergies: [
@@ -594,20 +821,20 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
       ],
       conditions: [],
       medications: [],
-      habits: { tabaquismo: { activo: true, porDia: 10, anios: 30 } },
+      habits: { tabaquismo: { estado: 'SI', porDia: 10, anios: 30 } },
     },
   },
   {
     firstName: 'Isabella',
-    lastName: 'Moreno Castaño',
+    lastName: 'Moreno Castillo',
     docType: 'NATIONAL_ID',
     docNumber: 'DEMO-0018',
     birthDate: '1997-06-06',
     sex: Sex.F,
-    phone: '+57 327 555 0118',
+    location: 'principal',
+    phone: '+58 416 555 0118',
     email: 'isabella.moreno@example.com',
-    address: 'Calle 63 # 9-48',
-    city: 'Bogotá D.C.',
+    address: 'Calle Los Nogales 63',
     occupation: 'Fotógrafa',
   },
   {
@@ -617,10 +844,10 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0019',
     birthDate: '1986-01-17',
     sex: Sex.M,
-    phone: '+57 328 555 0119',
+    location: 'principal',
+    phone: '+58 426 555 0119',
     email: 'alejandro.fuentes@example.com',
-    address: 'Carrera 19 # 134-60',
-    city: 'Bogotá D.C.',
+    address: 'Av. Las Américas 1346',
     occupation: 'Médico veterinario',
   },
   {
@@ -630,10 +857,10 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0020',
     birthDate: '1999-11-28',
     sex: Sex.F,
-    phone: '+57 329 555 0120',
+    location: 'principal',
+    phone: '+58 412 555 0120',
     email: 'camila.rincon@example.com',
-    address: 'Calle 26 # 69-76',
-    city: 'Bogotá D.C.',
+    address: 'Calle Los Álamos 26',
     occupation: 'Asesora comercial',
   },
   {
@@ -643,23 +870,23 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0021',
     birthDate: '1991-04-04',
     sex: Sex.M,
-    phone: '+57 330 555 0121',
+    location: 'principal',
+    phone: '+58 414 555 0121',
     email: 'diego.lozano@example.com',
-    address: 'Avenida 68 # 13-45',
-    city: 'Bogotá D.C.',
+    address: 'Av. Universidad 1345',
     occupation: 'Mecánico',
   },
   {
-    firstName: 'Paula Andrea',
+    firstName: 'Paula Daniela',
     lastName: 'Cortés Silva',
     docType: 'NATIONAL_ID',
     docNumber: 'DEMO-0022',
     birthDate: '1982-08-31',
     sex: Sex.F,
-    phone: '+57 331 555 0122',
+    location: 'principal',
+    phone: '+58 424 555 0122',
     email: 'paula.cortes@example.com',
-    address: 'Calle 100 # 45-21',
-    city: 'Bogotá D.C.',
+    address: 'Calle Las Magnolias 100',
     occupation: 'Enfermera',
   },
   {
@@ -669,10 +896,10 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-P01',
     birthDate: '1984-10-10',
     sex: Sex.M,
+    location: 'principal',
     phone: '+52 55 5555 0123',
     email: 'tomas.aguilar@example.com',
-    address: 'Calle 85 # 11-53, Hotel',
-    city: 'Bogotá D.C.',
+    address: 'Calle Los Tulipanes 85, Hotel',
     occupation: 'Consultor',
   },
   {
@@ -682,10 +909,10 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0023',
     birthDate: '1996-01-23',
     sex: Sex.F,
-    phone: '+57 332 555 0124',
+    location: 'principal',
+    phone: '+58 426 555 0124',
     email: 'mariajose.escobar@example.com',
-    address: 'Carrera 43A # 1-50',
-    city: 'Medellín',
+    address: 'Av. del Sol 150',
     occupation: 'Arquitecta',
   },
   {
@@ -695,37 +922,145 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     docNumber: 'DEMO-0024',
     birthDate: '2000-03-15',
     sex: Sex.M,
-    phone: '+57 333 555 0125',
+    location: 'principal',
+    phone: '+58 412 555 0125',
     email: 'sebastian.nino@example.com',
-    address: 'Calle 45 # 13-31',
-    city: 'Bogotá D.C.',
+    address: 'Calle Los Jazmines 45',
     occupation: 'Músico',
   },
+  // R5: pacientes de las sedes con dentista propio, al final para no mover los
+  // índices. São Paulo (25-28) con documento nacional y Londres (29-32) con
+  // pasaporte, porque en el Reino Unido no hay documento nacional.
+  {
+    firstName: 'Lucas',
+    lastName: 'Oliveira Santos',
+    docType: 'NATIONAL_ID',
+    docNumber: 'DEMO-B001',
+    birthDate: '1988-04-12',
+    sex: Sex.M,
+    location: 'saoPaulo',
+    phone: '+55 11 95555 0101',
+    email: 'lucas.oliveira@example.com',
+    address: 'Rua das Acácias, 45, apto 12',
+  },
+  {
+    firstName: 'Mariana',
+    lastName: 'Costa Ribeiro',
+    docType: 'NATIONAL_ID',
+    docNumber: 'DEMO-B002',
+    birthDate: '1993-09-03',
+    sex: Sex.F,
+    location: 'saoPaulo',
+    phone: '+55 11 95555 0102',
+    email: 'mariana.costa@example.com',
+    address: 'Av. das Palmeiras, 300',
+  },
+  {
+    firstName: 'Gabriel',
+    lastName: 'Almeida Rocha',
+    docType: 'NATIONAL_ID',
+    docNumber: 'DEMO-B003',
+    birthDate: '1979-12-21',
+    sex: Sex.M,
+    location: 'saoPaulo',
+    phone: '+55 11 95555 0103',
+    email: 'gabriel.almeida@example.com',
+    address: 'Rua dos Ipês, 78',
+  },
+  {
+    firstName: 'Júlia',
+    lastName: 'Carvalho Martins',
+    docType: 'NATIONAL_ID',
+    docNumber: 'DEMO-B004',
+    birthDate: '2001-06-17',
+    sex: Sex.F,
+    location: 'saoPaulo',
+    phone: '+55 11 3555 0104',
+    email: 'julia.carvalho@example.com',
+    address: 'Rua das Orquídeas, 150, casa 2',
+  },
+  {
+    firstName: 'Emily',
+    lastName: 'Clarke',
+    docType: 'PASSPORT',
+    docNumber: 'DEMO-G001',
+    birthDate: '1990-02-08',
+    sex: Sex.F,
+    location: 'londres',
+    phone: '+44 20 7946 0101',
+    email: 'emily.clarke@example.com',
+    address: '12 Oak Lane, Flat 3',
+  },
+  {
+    firstName: 'James',
+    lastName: 'Turner',
+    docType: 'PASSPORT',
+    docNumber: 'DEMO-G002',
+    birthDate: '1985-07-30',
+    sex: Sex.M,
+    location: 'londres',
+    phone: '+44 20 7946 0102',
+    email: 'james.turner@example.com',
+    address: '45 Elm Road',
+  },
+  {
+    firstName: 'Sophie',
+    lastName: 'Wright',
+    docType: 'PASSPORT',
+    docNumber: 'DEMO-G003',
+    birthDate: '1997-11-14',
+    sex: Sex.F,
+    location: 'londres',
+    phone: '+44 20 7946 0103',
+    email: 'sophie.wright@example.com',
+    address: '7 Willow Close',
+  },
+  {
+    firstName: 'Harry',
+    lastName: 'Walsh',
+    docType: 'PASSPORT',
+    docNumber: 'DEMO-G004',
+    birthDate: '1972-05-25',
+    sex: Sex.M,
+    location: 'londres',
+    phone: '+44 20 7946 0104',
+    email: 'harry.walsh@example.com',
+    address: '88 Birch Avenue',
+  },
 ];
+
+/** Índices de los pacientes de las sedes de la rotación (R3). */
+export function localPatientIndexes(): number[] {
+  return DEMO_PATIENTS.flatMap((p, i) =>
+    p.location === 'principal' || p.location === 'norte' ? [i] : [],
+  );
+}
+
+/** Índices de los pacientes de una sede con dentista propio (R3). */
+export function sitePatientIndexes(key: SoloSiteKey): number[] {
+  return DEMO_PATIENTS.flatMap((p, i) => (p.location === key ? [i] : []));
+}
 
 /**
  * DX-153: pagadores del catálogo de la clínica demo (reemplazan al texto libre de aseguradora anterior a DX-153).
  *
- * DX-326, fase 1: los tipos son genéricos, pero la tabla `payers` aún guarda
- * los códigos anteriores. `seed-demo.ts` debe crearlos con `CreatePayerUseCase`
- * (que traduce en el repositorio), nunca con `payer.create` directo: el
- * cliente Prisma acepta el genérico y lo guardaría tal cual. Ninguna guarda
- * de arquitectura escanea `prisma/`; lo comprueba
- * `test/seed-demo.int-spec.ts` («demo payers use generic types and no
- * country»), que exige `storedPayerType(type)` en la base.
+ * Los tipos son los cinco genéricos (DX-326) y la base guarda el tipo
+ * genérico tal cual. `seed-demo.ts` los crea con `CreatePayerUseCase`, como
+ * la pantalla de Ajustes, y `test/seed-demo.int-spec.ts` («demo payers use
+ * generic types and no country») comprueba lo guardado.
  */
 export const DEMO_PAYERS = [
-  { key: 'sura', name: 'Sura EPS', type: 'PUBLIC_SYSTEM' },
-  { key: 'sanitas', name: 'Sanitas', type: 'PREPAID_PLAN' },
-  { key: 'compensar', name: 'Compensar', type: 'PUBLIC_SYSTEM' },
-  { key: 'nuevaEps', name: 'Nueva EPS', type: 'PUBLIC_SYSTEM' },
-  { key: 'famisanar', name: 'Famisanar', type: 'PUBLIC_SYSTEM' },
-  { key: 'saludTotal', name: 'Salud Total', type: 'PUBLIC_SYSTEM' },
-  { key: 'coomeva', name: 'Coomeva', type: 'PREPAID_PLAN' },
+  { key: 'aseguradora', name: 'Aseguradora Demo', type: 'INSURER' },
+  { key: 'prepagada', name: 'Plan Prepagado Demo', type: 'PREPAID_PLAN' },
+  { key: 'publico', name: 'Seguro Público Demo', type: 'PUBLIC_SYSTEM' },
+  { key: 'horizonte', name: 'Seguros Horizonte Demo', type: 'INSURER' },
+  { key: 'mutual', name: 'Mutual Bienestar Demo', type: 'INSURER' },
+  { key: 'vital', name: 'Salud Vital Demo', type: 'INSURER' },
+  { key: 'premium', name: 'Previsión Premium Demo', type: 'PREPAID_PLAN' },
 ] as const satisfies readonly {
   key: string;
   name: string;
-  type: 'PUBLIC_SYSTEM' | 'PREPAID_PLAN';
+  type: 'INSURER' | 'PUBLIC_SYSTEM' | 'PREPAID_PLAN';
 }[];
 
 /** DX-105: pagador extra de la demo, para el convenio de lista de precios. */
@@ -735,8 +1070,9 @@ export const DEMO_ALFA_PAYER = {
 } as const;
 
 /**
- * DX-105: listas de precios (COP). «Tarifa Sede Norte» es la lista activa de la
- * Sede Norte (5 precios); «Convenio Alfa» es de toda la clínica y solo la usa
+ * DX-105: listas de precios. «Tarifa Sede Norte» es la lista activa de la
+ * Sede Norte (USD, 5 precios); «Convenio Alfa» es de toda la
+ * clínica, en USD, y solo la usa
  * el convenio «Empresa Alfa lista» (3 precios). Los códigos son los de
  * `DEMO_PRICES`, y todos los precios quedan por debajo del de catálogo.
  */
@@ -745,32 +1081,73 @@ export const DEMO_PRICE_LISTS = [
     key: 'norte',
     name: 'Tarifa Sede Norte',
     locationKey: 'norte',
+    currency: DEMO_LOCATIONS.norte.currency,
     prices: {
-      'IMG-CONSULTA': 75000,
-      'PREV-PROFILAXIS': 110000,
-      'OP-RESINA-1': 140000,
-      'ENDO-UNI': 420000,
-      'URG-CONSULTA': 85000,
+      'IMG-CONSULTA': 75,
+      'PREV-PROFILAXIS': 110,
+      'OP-RESINA-1': 140,
+      'ENDO-UNI': 420,
+      'URG-CONSULTA': 85,
     },
   },
   {
     key: 'alfa',
     name: 'Convenio Alfa',
     locationKey: null,
+    currency: DEMO_LOCATIONS.principal.currency,
     prices: {
-      'PREV-PROFILAXIS': 90000,
-      'OP-RESINA-1': 120000,
-      'IMG-RX-PERIAPICAL': 28000,
+      'PREV-PROFILAXIS': 90,
+      'OP-RESINA-1': 120,
+      'IMG-RX-PERIAPICAL': 28,
     },
   },
 ] as const;
 
+/**
+ * R8: la tarifa activa de cada sede con dentista propio, en su moneda y con
+ * TODOS los códigos de `DEMO_PRICES`, para que el precio de un ítem salga de
+ * la lista (`PRICE_LIST`) y nunca del catálogo, que no tiene moneda (PF8).
+ * Los precios se derivan de los de USD con una regla fija y verosímil.
+ */
+export const DEMO_SITE_PRICE_LISTS: readonly {
+  key: SoloSiteKey;
+  name: string;
+  locationKey: SoloSiteKey;
+  currency: string;
+  prices: Record<string, number>;
+}[] = [
+  {
+    key: 'saoPaulo',
+    name: 'Tarifa Sede São Paulo',
+    locationKey: 'saoPaulo',
+    currency: DEMO_LOCATIONS.saoPaulo.currency,
+    prices: Object.fromEntries(
+      Object.entries(DEMO_PRICES).map(([code, usd]) => [
+        code,
+        Math.round((usd * 3) / 10) * 10,
+      ]),
+    ),
+  },
+  {
+    key: 'londres',
+    name: 'Tarifa Sede Londres',
+    locationKey: 'londres',
+    currency: DEMO_LOCATIONS.londres.currency,
+    prices: Object.fromEntries(
+      Object.entries(DEMO_PRICES).map(([code, usd]) => [
+        code,
+        Math.round((usd * 0.8) / 5) * 5,
+      ]),
+    ),
+  },
+];
+
 /** DX-105: los dos convenios de la demo. */
 export const DEMO_AGREEMENTS = [
   {
-    key: 'sura',
-    name: 'Sura EPS −15 %',
-    payerName: 'Sura EPS',
+    key: 'aseguradora',
+    name: 'Aseguradora Demo −15 %',
+    payerName: 'Aseguradora Demo',
     kind: 'PERCENT_DISCOUNT',
     percent: 15,
     priceListKey: null,
@@ -786,7 +1163,7 @@ export const DEMO_AGREEMENTS = [
 ] as const;
 
 /**
- * DX-105: tres pacientes con convenio (dos con Sura —que ya tienen su
+ * DX-105: tres pacientes con convenio (dos con Aseguradora Demo —que ya tienen su
  * cobertura— y uno con Alfa). SEC-047: el convenio exige una cobertura viva
  * del pagador; `coverage` es la que se le añade si aún no la tiene (la de
  * Alfa, como segunda cobertura, no principal). SEC-049: la registra
@@ -795,25 +1172,25 @@ export const DEMO_AGREEMENTS = [
 export const DEMO_PATIENT_AGREEMENTS = [
   {
     patientIndex: 0,
-    agreementKey: 'sura',
+    agreementKey: 'aseguradora',
     coverage: {
-      planName: 'Plan de Salud Sura',
-      memberNumber: 'DEMO-SURA-1000',
+      planName: 'Plan Esencial',
+      memberNumber: 'DEMO-ASEG-1000',
     },
   },
   {
     patientIndex: 4,
-    agreementKey: 'sura',
+    agreementKey: 'aseguradora',
     coverage: {
-      planName: 'Plan de Salud Sura',
-      memberNumber: 'DEMO-SURA-1004',
+      planName: 'Plan Esencial',
+      memberNumber: 'DEMO-ASEG-1004',
     },
   },
   {
     patientIndex: 2,
     agreementKey: 'alfa',
     coverage: {
-      planName: 'Convenio empresarial',
+      planName: 'Plan corporativo Alfa',
       memberNumber: 'DEMO-ALFA-1002',
     },
   },
@@ -824,9 +1201,12 @@ export interface DemoCoverage {
   payerKey: (typeof DEMO_PAYERS)[number]['key'];
   planName: string;
   memberNumber: string;
-  /** YYYY-MM-DD; fechas fijas para que la demo sea estable. */
-  validFrom: string | null;
-  validTo: string | null;
+  /**
+   * Días desde el «hoy» de la sede del paciente (R10): la demo no envejece.
+   * `null` = sin límite.
+   */
+  validFromDays: number | null;
+  validToDays: number | null;
   isPrimary: boolean;
 }
 
@@ -834,209 +1214,209 @@ export interface DemoCoverage {
 export const DEMO_COVERAGES: readonly DemoCoverage[] = [
   {
     patientIndex: 0,
-    payerKey: 'sura',
-    planName: 'Plan de Salud Sura',
-    memberNumber: 'DEMO-SURA-1000',
-    validFrom: null,
-    validTo: null,
+    payerKey: 'aseguradora',
+    planName: 'Plan Esencial',
+    memberNumber: 'DEMO-ASEG-1000',
+    validFromDays: null,
+    validToDays: null,
     isPrimary: true,
   },
   {
     patientIndex: 1,
-    payerKey: 'sanitas',
-    planName: 'Medicina Prepagada Sanitas',
-    memberNumber: 'DEMO-SANITAS-1001',
-    validFrom: null,
-    validTo: null,
+    payerKey: 'prepagada',
+    planName: 'Plan Prepagado Familiar',
+    memberNumber: 'DEMO-PREP-1001',
+    validFromDays: null,
+    validToDays: null,
     isPrimary: true,
   },
   {
     patientIndex: 2,
-    payerKey: 'compensar',
-    planName: 'Compensar Contributivo',
-    memberNumber: 'DEMO-COMPENSAR-1002',
-    validFrom: null,
-    validTo: null,
+    payerKey: 'publico',
+    planName: 'Cobertura Pública Básica',
+    memberNumber: 'DEMO-PUB-1002',
+    validFromDays: null,
+    validToDays: null,
     isPrimary: true,
   },
   {
     patientIndex: 3,
-    payerKey: 'nuevaEps',
-    planName: 'Nueva EPS Contributivo',
-    memberNumber: 'DEMO-NUEVAEPS-1003',
-    validFrom: null,
-    validTo: '2025-12-31',
+    payerKey: 'horizonte',
+    planName: 'Plan Horizonte Clásico',
+    memberNumber: 'DEMO-HORIZ-1003',
+    validFromDays: null,
+    validToDays: -30,
     isPrimary: true,
   },
   {
     patientIndex: 4,
-    payerKey: 'sura',
-    planName: 'Plan de Salud Sura',
-    memberNumber: 'DEMO-SURA-1004',
-    validFrom: null,
-    validTo: null,
+    payerKey: 'aseguradora',
+    planName: 'Plan Esencial',
+    memberNumber: 'DEMO-ASEG-1004',
+    validFromDays: null,
+    validToDays: null,
     isPrimary: true,
   },
   {
     patientIndex: 5,
-    payerKey: 'famisanar',
-    planName: 'Famisanar Contributivo',
-    memberNumber: 'DEMO-FAMISANAR-1005',
-    validFrom: null,
-    validTo: null,
+    payerKey: 'mutual',
+    planName: 'Plan Mutual Dental',
+    memberNumber: 'DEMO-MUTUAL-1005',
+    validFromDays: null,
+    validToDays: null,
     isPrimary: true,
   },
   {
     patientIndex: 6,
-    payerKey: 'sanitas',
-    planName: 'Medicina Prepagada Sanitas',
-    memberNumber: 'DEMO-SANITAS-1006',
-    validFrom: null,
-    validTo: null,
+    payerKey: 'prepagada',
+    planName: 'Plan Prepagado Familiar',
+    memberNumber: 'DEMO-PREP-1006',
+    validFromDays: null,
+    validToDays: null,
     isPrimary: true,
   },
   {
     patientIndex: 7,
-    payerKey: 'saludTotal',
-    planName: 'Salud Total Contributivo',
-    memberNumber: 'DEMO-SALUDTOTAL-1007',
-    validFrom: '2027-06-01',
-    validTo: null,
+    payerKey: 'vital',
+    planName: 'Plan Vital Integral',
+    memberNumber: 'DEMO-VITAL-1007',
+    validFromDays: 45,
+    validToDays: null,
     isPrimary: true,
   },
   {
     patientIndex: 8,
-    payerKey: 'compensar',
-    planName: 'Compensar Contributivo',
-    memberNumber: 'DEMO-COMPENSAR-1008',
-    validFrom: null,
-    validTo: null,
+    payerKey: 'publico',
+    planName: 'Cobertura Pública Básica',
+    memberNumber: 'DEMO-PUB-1008',
+    validFromDays: null,
+    validToDays: null,
     isPrimary: true,
   },
   {
     patientIndex: 9,
-    payerKey: 'sura',
-    planName: 'Plan de Salud Sura',
-    memberNumber: 'DEMO-SURA-1009',
-    validFrom: null,
-    validTo: null,
+    payerKey: 'aseguradora',
+    planName: 'Plan Esencial',
+    memberNumber: 'DEMO-ASEG-1009',
+    validFromDays: null,
+    validToDays: null,
     isPrimary: true,
   },
   {
     patientIndex: 10,
-    payerKey: 'coomeva',
-    planName: 'Coomeva Plan Premium',
-    memberNumber: 'DEMO-COOMEVA-1010',
-    validFrom: null,
-    validTo: null,
+    payerKey: 'premium',
+    planName: 'Plan Premium Oro',
+    memberNumber: 'DEMO-PREM-1010',
+    validFromDays: null,
+    validToDays: null,
     isPrimary: true,
   },
   {
     patientIndex: 11,
-    payerKey: 'sanitas',
-    planName: 'Medicina Prepagada Sanitas',
-    memberNumber: 'DEMO-SANITAS-1011',
-    validFrom: null,
-    validTo: null,
+    payerKey: 'prepagada',
+    planName: 'Plan Prepagado Familiar',
+    memberNumber: 'DEMO-PREP-1011',
+    validFromDays: null,
+    validToDays: null,
     isPrimary: true,
   },
   {
     patientIndex: 12,
-    payerKey: 'nuevaEps',
-    planName: 'Nueva EPS Contributivo',
-    memberNumber: 'DEMO-NUEVAEPS-1012',
-    validFrom: null,
-    validTo: null,
+    payerKey: 'horizonte',
+    planName: 'Plan Horizonte Clásico',
+    memberNumber: 'DEMO-HORIZ-1012',
+    validFromDays: null,
+    validToDays: null,
     isPrimary: true,
   },
   {
     patientIndex: 13,
-    payerKey: 'sura',
-    planName: 'Plan de Salud Sura',
-    memberNumber: 'DEMO-SURA-1013',
-    validFrom: null,
-    validTo: null,
+    payerKey: 'aseguradora',
+    planName: 'Plan Esencial',
+    memberNumber: 'DEMO-ASEG-1013',
+    validFromDays: null,
+    validToDays: null,
     isPrimary: true,
   },
   {
     patientIndex: 14,
-    payerKey: 'saludTotal',
-    planName: 'Salud Total Contributivo',
-    memberNumber: 'DEMO-SALUDTOTAL-1014',
-    validFrom: null,
-    validTo: null,
+    payerKey: 'vital',
+    planName: 'Plan Vital Integral',
+    memberNumber: 'DEMO-VITAL-1014',
+    validFromDays: null,
+    validToDays: null,
     isPrimary: true,
   },
   {
     patientIndex: 15,
-    payerKey: 'compensar',
-    planName: 'Compensar Contributivo',
-    memberNumber: 'DEMO-COMPENSAR-1015',
-    validFrom: null,
-    validTo: null,
+    payerKey: 'publico',
+    planName: 'Cobertura Pública Básica',
+    memberNumber: 'DEMO-PUB-1015',
+    validFromDays: null,
+    validToDays: null,
     isPrimary: true,
   },
   {
     patientIndex: 16,
-    payerKey: 'nuevaEps',
-    planName: 'Nueva EPS Contributivo',
-    memberNumber: 'DEMO-NUEVAEPS-1016',
-    validFrom: null,
-    validTo: null,
+    payerKey: 'horizonte',
+    planName: 'Plan Horizonte Clásico',
+    memberNumber: 'DEMO-HORIZ-1016',
+    validFromDays: null,
+    validToDays: null,
     isPrimary: true,
   },
   {
     patientIndex: 17,
-    payerKey: 'famisanar',
-    planName: 'Famisanar Contributivo',
-    memberNumber: 'DEMO-FAMISANAR-1017',
-    validFrom: null,
-    validTo: null,
+    payerKey: 'mutual',
+    planName: 'Plan Mutual Dental',
+    memberNumber: 'DEMO-MUTUAL-1017',
+    validFromDays: null,
+    validToDays: null,
     isPrimary: true,
   },
   {
     patientIndex: 19,
-    payerKey: 'sanitas',
-    planName: 'Medicina Prepagada Sanitas',
-    memberNumber: 'DEMO-SANITAS-1018',
-    validFrom: null,
-    validTo: null,
+    payerKey: 'prepagada',
+    planName: 'Plan Prepagado Familiar',
+    memberNumber: 'DEMO-PREP-1018',
+    validFromDays: null,
+    validToDays: null,
     isPrimary: true,
   },
   {
     patientIndex: 20,
-    payerKey: 'saludTotal',
-    planName: 'Salud Total Contributivo',
-    memberNumber: 'DEMO-SALUDTOTAL-1019',
-    validFrom: null,
-    validTo: null,
+    payerKey: 'vital',
+    planName: 'Plan Vital Integral',
+    memberNumber: 'DEMO-VITAL-1019',
+    validFromDays: null,
+    validToDays: null,
     isPrimary: true,
   },
   {
     patientIndex: 21,
-    payerKey: 'compensar',
-    planName: 'Compensar Contributivo',
-    memberNumber: 'DEMO-COMPENSAR-1020',
-    validFrom: null,
-    validTo: null,
+    payerKey: 'publico',
+    planName: 'Cobertura Pública Básica',
+    memberNumber: 'DEMO-PUB-1020',
+    validFromDays: null,
+    validToDays: null,
     isPrimary: true,
   },
   {
     patientIndex: 23,
-    payerKey: 'sura',
-    planName: 'Plan de Salud Sura',
-    memberNumber: 'DEMO-SURA-1021',
-    validFrom: null,
-    validTo: null,
+    payerKey: 'aseguradora',
+    planName: 'Plan Esencial',
+    memberNumber: 'DEMO-ASEG-1021',
+    validFromDays: null,
+    validToDays: null,
     isPrimary: true,
   },
   {
     patientIndex: 24,
-    payerKey: 'famisanar',
-    planName: 'Famisanar Contributivo',
-    memberNumber: 'DEMO-FAMISANAR-1022',
-    validFrom: null,
-    validTo: null,
+    payerKey: 'mutual',
+    planName: 'Plan Mutual Dental',
+    memberNumber: 'DEMO-MUTUAL-1022',
+    validFromDays: null,
+    validToDays: null,
     isPrimary: true,
   },
 ];
@@ -1471,7 +1851,7 @@ export interface DemoPlanItem {
   tooth: string;
   surfaces?: ToothSurface[];
   status: TreatmentPlanItemStatus;
-  /** Descuento en COP sobre la tarifa del catálogo (DX-012). */
+  /** Descuento en la moneda del plan sobre la tarifa del catálogo (DX-012). */
   discount?: number;
   /**
    * DX-204: motivo del descuento y quién lo da. Sin `discountBy`, el
@@ -1493,9 +1873,9 @@ interface DemoPayment {
   minutesAgo?: number;
   amount: number;
   /**
-   * DX-375: moneda del abono si no es la del plan (`DEMO_CURRENCY`). Congela
-   * la tasa de su día con la fuente de la clínica; sin tasa (en local, sin
-   * clave del proveedor) queda «sin tasa» y la demo enseña el aviso.
+   * DX-375: moneda del abono si no es la del plan (la de su sede): VES, que
+   * congela la tasa manual de su día (la demo las siembra todas, así que
+   * ninguno queda «sin tasa» y la demo no depende del proveedor).
    */
   currency?: string;
   method: PaymentMethod;
@@ -1567,18 +1947,18 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
     payments: [
       {
         daysAgo: 52,
-        amount: 1040000,
+        amount: 1040,
         method: TRANSFER,
         location: 'principal',
         notes: 'Cuota inicial del plan de pagos',
       },
-      { daysAgo: 21, amount: 750000, method: CARD, location: 'principal' },
+      { daysAgo: 21, amount: 750, method: CARD, location: 'principal' },
     ],
     // Arranca hace 45 días (mensual): la cuota inicial y la 1 quedan cubiertas
     // por los dos abonos, y la 2 (vencida hace ~2 semanas) sin pagar, para que
     // el estado de cuenta de la demo enseñe saldo Y una cuota vencida (DX-011).
     paymentPlan: {
-      downPayment: 1040000,
+      downPayment: 1040,
       installmentsCount: 6,
       startDaysAgo: 45,
     },
@@ -1600,8 +1980,8 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
       },
     ],
     payments: [
-      { daysAgo: 42, amount: 200000, method: CASH, location: 'norte' },
-      { daysAgo: 35, amount: 260000, method: CARD, location: 'norte' },
+      { daysAgo: 42, amount: 200, method: CASH, location: 'norte' },
+      { daysAgo: 35, amount: 260, method: CARD, location: 'norte' },
     ],
   },
   {
@@ -1617,23 +1997,26 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
       { code: 'PROT-CORONA-LM', tooth: '46', status: PROPOSED },
     ],
     payments: [
-      { daysAgo: 26, amount: 400000, method: CARD, location: 'principal' },
+      { daysAgo: 26, amount: 400, method: CARD, location: 'principal' },
+      // DX-377: «Pago móvil» en bolívares (300 USD a la tasa de su día).
       {
         daysAgo: 12,
-        amount: 300000,
+        amount: demoAmountIn('VES', 300, 12),
+        currency: 'VES',
         method: TRANSFER,
-        mobileReference: '0412 7788 31',
+        mobileReference: '7788 3104 21',
         location: 'principal',
       },
-      // DX-375: un abono de hoy en otra moneda que la del plan.
+      // DX-375: un abono de hoy en otra moneda que la del plan: efectivo en
+      // bolívares (45 USD a la tasa de hoy).
       {
         daysAgo: 0,
         minutesAgo: 30,
-        amount: 50,
-        currency: 'USD',
+        amount: demoAmountIn('VES', 45, 0),
+        currency: 'VES',
         method: CASH,
         location: 'principal',
-        notes: 'Abono en dólares.',
+        notes: 'Abono en bolívares.',
       },
     ],
   },
@@ -1651,7 +2034,7 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
         tooth: '21',
         surfaces: [VESTIBULAR],
         status: PROPOSED,
-        discount: 38000,
+        discount: 38,
       },
       {
         code: 'EST-CARILLA-RESINA',
@@ -1659,7 +2042,7 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
         surfaces: [VESTIBULAR],
         status: PROPOSED,
         // DX-204: 15 % de la administradora, con motivo (sale en el informe).
-        discount: 57000,
+        discount: 57,
         discountReason: 'PROMOTION',
         discountBy: 'owner',
       },
@@ -1687,9 +2070,7 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
     doneAt: 'norte',
     openedDaysAgo: 40,
     items: [{ code: 'IMPL-CORONA', tooth: '11', status: ACCEPTED }],
-    payments: [
-      { daysAgo: 30, amount: 300000, method: CASH, location: 'norte' },
-    ],
+    payments: [{ daysAgo: 30, amount: 300, method: CASH, location: 'norte' }],
     cancelledAfterPayments: true,
   },
   {
@@ -1706,13 +2087,13 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
       { code: 'PERIO-RASPADO', tooth: '46', status: ACCEPTED },
     ],
     payments: [
-      { daysAgo: 18, amount: 180000, method: CASH, location: 'norte' },
+      { daysAgo: 18, amount: 180, method: CASH, location: 'norte' },
       {
         daysAgo: 4,
-        amount: 180000,
+        amount: 180,
         method: OTHER,
         location: 'norte',
-        notes: 'Pago por Nequi',
+        notes: 'Pago con billetera digital',
       },
     ],
   },
@@ -1727,8 +2108,8 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
       { code: 'ENDO-UNI', tooth: '21', status: DONE },
     ],
     payments: [
-      { daysAgo: 58, amount: 90000, method: CASH, location: 'principal' },
-      { daysAgo: 50, amount: 450000, method: CARD, location: 'principal' },
+      { daysAgo: 58, amount: 90, method: CASH, location: 'principal' },
+      { daysAgo: 50, amount: 450, method: CARD, location: 'principal' },
     ],
   },
   {
@@ -1746,9 +2127,10 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
     payments: [
       {
         daysAgo: 14,
-        amount: 130000,
+        amount: demoAmountIn('VES', 130, 14),
+        currency: 'VES',
         method: TRANSFER,
-        mobileReference: '0098 1234 55',
+        mobileReference: '1234 5598 00',
         location: 'norte',
       },
     ],
@@ -1770,10 +2152,10 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
       { code: 'PREV-PROFILAXIS', tooth: '11', status: PROPOSED },
     ],
     payments: [
-      { daysAgo: 7, amount: 230000, method: CARD, location: 'principal' },
-      // DX-051: el paciente pagó 60000 de más sobre lo facturable (500000):
+      { daysAgo: 7, amount: 230, method: CARD, location: 'principal' },
+      // DX-051: el paciente pagó 60 de más sobre lo facturable (500):
       // ese importe queda «sin imputar» en la demo.
-      { daysAgo: 2, amount: 330000, method: CASH, location: 'principal' },
+      { daysAgo: 2, amount: 330, method: CASH, location: 'principal' },
     ],
   },
   {
@@ -1790,7 +2172,7 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
         code: 'PROT-CORONA-LM',
         tooth: '21',
         status: PROPOSED,
-        discount: 120000,
+        discount: 120,
         discountReason: 'LOYALTY',
       },
     ],
@@ -1798,6 +2180,61 @@ export const DEMO_PLANS: readonly DemoPlan[] = [
     payments: [],
   },
 ];
+
+/**
+ * D5: un plan de una sede con dentista propio. Sin `currency`: la moneda sale
+ * de la sede activa (R14), y el precio de cada ítem, de su tarifa
+ * (`DEMO_SITE_PRICE_LISTS`). Lo atiende el dentista de la sede.
+ */
+export interface DemoNewSitePlan {
+  location: SoloSiteKey;
+  patientIndex: number;
+  status: 'ACCEPTED' | 'COMPLETED';
+  notes: string;
+  items: { code: string; tooth: string; status: TreatmentPlanItemStatus }[];
+  /**
+   * Abonos en la sede y en la moneda del plan. El importe es el de los ítems
+   * de `covers` (precio menos descuento), el que el caso de uso les puso.
+   */
+  payments: {
+    daysAgo: number;
+    method: PaymentMethod;
+    covers: readonly string[];
+  }[];
+}
+
+/**
+ * D5: dos planes por sede con dentista propio, de sus dos primeros pacientes:
+ * uno aceptado con un realizado y un abono parcial, y otro completado y
+ * pagado entero. Así la cartera, la producción y «Comparar sedes» tienen
+ * datos en la moneda de cada sede.
+ */
+export const DEMO_NEW_SITE_PLANS: readonly DemoNewSitePlan[] = (
+  ['saoPaulo', 'londres'] as const
+).flatMap((location) => {
+  const [first, second] = sitePatientIndexes(location);
+  return [
+    {
+      location,
+      patientIndex: first,
+      status: 'ACCEPTED' as const,
+      notes: 'Valoración y resina en 16.',
+      items: [
+        { code: 'IMG-CONSULTA', tooth: '16', status: DONE },
+        { code: 'OP-RESINA-1', tooth: '16', status: ACCEPTED },
+      ],
+      payments: [{ daysAgo: 5, method: CASH, covers: ['IMG-CONSULTA'] }],
+    },
+    {
+      location,
+      patientIndex: second,
+      status: 'COMPLETED' as const,
+      notes: 'Profilaxis de control.',
+      items: [{ code: 'PREV-PROFILAXIS', tooth: '11', status: DONE }],
+      payments: [{ daysAgo: 12, method: CARD, covers: ['PREV-PROFILAXIS'] }],
+    },
+  ];
+});
 
 /**
  * DX-040: un paciente con DOS OPCIONES del mismo tratamiento (reponer el 46
@@ -1962,20 +2399,20 @@ export const DEMO_INVENTORY: readonly DemoInventoryItem[] = [
 ];
 
 /**
- * DX-037: política de tratamiento de datos v1 de la clínica demo. El texto de
- * datos sensibles trae las tres frases que exige el Dec. 1377 (art. 6).
+ * DX-037/DX-325: política v1 de la demo, la plantilla neutra rellenada. Sin
+ * ley, autoridad ni país: cada clínica pone el marco legal que le toca.
  */
 export const DEMO_PRIVACY_POLICY = {
   policyText: [
-    `${DEMO_CLINIC_NAME}, como responsable del tratamiento, recoge y trata los datos personales de sus pacientes conforme a la Ley 1581 de 2012 y el Decreto 1377 de 2013.`,
-    'Finalidades: prestar la atención odontológica, llevar la historia clínica, agendar y recordar citas, facturar y cumplir obligaciones legales.',
-    'Derechos del titular: conocer, actualizar, rectificar y suprimir sus datos, revocar la autorización y presentar quejas ante la Superintendencia de Industria y Comercio.',
-    'Canal de atención: recepción de la clínica o el correo de contacto publicado en la sede.',
+    `Responsable del tratamiento: ${DEMO_CLINIC_NAME}, con domicilio en ${DEMO_LOCATIONS.principal.address}, recoge y trata los datos personales de sus pacientes.`,
+    'Finalidades: prestar la atención odontológica, llevar la historia clínica, agendar y recordar citas, cobrar y facturar los servicios, y cumplir las obligaciones legales de la clínica.',
+    'Derechos del paciente: conocer, actualizar, rectificar y suprimir sus datos, y revocar esta autorización en cualquier momento, salvo lo que la clínica deba conservar por obligación legal.',
+    'Contacto: para ejercer sus derechos o hacer consultas, diríjase a la recepción de la clínica o escriba al correo de contacto publicado en la sede.',
   ].join('\n\n'),
   generalText:
     'Autorizo el tratamiento de mis datos personales de identificación y contacto para las finalidades descritas en la política.',
   sensitiveHealthText:
-    'Autorizo de forma expresa el tratamiento de mis datos sensibles de salud (historia clínica, odontograma, radiografías y antecedentes médicos). Se me informó que no estoy obligado a autorizar el tratamiento de datos sensibles. Finalidad: prestar la atención odontológica y conservar la historia clínica según la ley.',
+    'Autorizo de forma expresa el tratamiento de mis datos sensibles de salud (historia clínica, odontograma, radiografías y antecedentes médicos) con la finalidad de prestarme la atención odontológica y conservar mi historia clínica. Se me informó que dar esta autorización es voluntario: no estoy obligado/a a darla.',
   marketingText:
     'Autorizo recibir comunicaciones comerciales (promociones, campañas y recordatorios no clínicos) por teléfono, WhatsApp o correo. Puedo revocarlo en cualquier momento.',
 };
@@ -2236,15 +2673,22 @@ export const DEMO_PRESCRIPTION_TEMPLATES: readonly DemoPrescriptionTemplate[] =
     },
   ];
 
-/** Nº de registro profesional de los odontólogos demo. */
+/**
+ * Nº de registro profesional de los odontólogos demo: los dos de la rotación
+ * y, después, los de `DEMO_SITE_DENTISTS`, en su orden.
+ */
 export const DEMO_PROFESSIONAL_LICENSES: readonly string[] = [
-  'RM 52-1234-19',
-  'RM 25-7788-21',
+  'LIC-DEMO-5219',
+  'LIC-DEMO-2521',
+  'LIC-DEMO-7310',
+  'LIC-DEMO-8842',
 ];
 
 /** Especialidad de los odontólogos demo, en el mismo orden (DX-324). */
 export const DEMO_PROFESSIONAL_SPECIALTIES: readonly string[] = [
   'Cirugía oral',
+  'Odontología general',
+  'Odontología general',
   'Odontología general',
 ];
 
@@ -2278,6 +2722,22 @@ export interface DemoAppointmentType {
   /** DX-446: tipo de urgencia (los huecos reservados son para él). */
   isUrgent?: boolean;
 }
+
+/**
+ * DX-211: sillones de la Sede Norte (la principal sigue sin sillones, para
+ * enseñar que una sede sin ellos no cambia). `defaultDentistIndex` es el
+ * índice del dentista por defecto en la lista de dentistas de la demo.
+ */
+export interface DemoChair {
+  name: string;
+  defaultDentistIndex?: number;
+}
+
+export const DEMO_CHAIRS: readonly DemoChair[] = [
+  { name: 'Sillón 1', defaultDentistIndex: 0 },
+  { name: 'Sillón 2', defaultDentistIndex: 1 },
+  { name: 'Sillón 3' },
+];
 
 export const DEMO_APPOINTMENT_TYPES: readonly DemoAppointmentType[] = [
   {
@@ -2377,10 +2837,10 @@ export const DEMO_LUNCH = {
 /**
  * DX-247: alertas médicas en la agenda. Jorge Eduardo Ramírez (prótesis
  * valvular) sale con «Requiere premedicación» y es el primero en entrar hoy al
- * panel «En clínica»; Ana María Zapata tiene la anamnesis de hace 14 meses
+ * panel «En clínica»; Ana María Zambrano tiene la anamnesis de hace 14 meses
  * («Anamnesis caducada», vigencia de 12); la de Gustavo Ríos es de hace 13
  * meses pero la dentista confirmó «Sin cambios hoy» (al día). Los pacientes
- * sin `medicalHistory` (p. ej. Daniela Montoya) salen «Sin anamnesis».
+ * sin `medicalHistory` (p. ej. Daniela Morales) salen «Sin anamnesis».
  */
 export const DEMO_MEDICAL_ALERTS = {
   premedicationPatientIndex: 1,
@@ -2404,7 +2864,7 @@ export const DEMO_WAITLIST = {
 // DX-128: bloque «Comunicaciones» de la ficha. Todos nacen con el canal de la
 // clínica (EMAIL); recepción deja a unos pocos en los otros estados para
 // verlos en la ficha y en los recordatorios: WhatsApp con opt-in en persona,
-// ninguno, baja anotada por recepción y un teléfono fijo (móvil no válido).
+// ninguno, baja anotada por recepción y un teléfono fijo (no sirve para WhatsApp).
 export const DEMO_COMMUNICATION = [
   {
     patientIndex: 0,
@@ -2422,11 +2882,11 @@ export const DEMO_COMMUNICATION = [
   },
   { patientIndex: 2, input: { contactChannel: 'NONE' } },
   { patientIndex: 3, input: { reminderOptOut: true } },
-  { patientIndex: 4, input: { phone: '601 555 0105' } },
+  { patientIndex: 4, input: { phone: '+58 212 555 0405' } },
 ] as const;
 
 // ---------------------------------------------------------------------------
-// DX-203: responsables de pago y avisos. La abuela Martha Lucía Becerra
+// DX-203: responsables de pago y avisos. La abuela Marta Elena Becerra
 // (paciente) es la pagadora principal de Sofía y de Mateo: su ficha muestra
 // «Responsable de» y el estado de cuenta familiar. Los avisos de Sofía van a
 // su madre Claudia (contacto sin ficha; la abuela solo paga); los de Mateo, a
@@ -2464,7 +2924,7 @@ export const DEMO_RESPONSIBLES: readonly DemoResponsible[] = [
       docType: 'NATIONAL_ID',
       docNumber: 'DEMO-C01',
       email: 'claudia.navarro@example.com',
-      phone: '+57 318 555 0209',
+      phone: '+58 424 555 0209',
     },
     relationship: 'MOTHER',
     isPayer: false,
@@ -2480,10 +2940,10 @@ export const DEMO_RESPONSIBLES: readonly DemoResponsible[] = [
   {
     patientIndex: 12,
     contact: {
-      fullName: 'Óscar Cifuentes',
+      fullName: 'Óscar Contreras',
       docType: 'NATIONAL_ID',
       docNumber: 'DEMO-C02',
-      phone: '+57 322 555 0213',
+      phone: '+58 424 555 0213',
     },
     relationship: 'FATHER',
     isPayer: false,
@@ -2591,44 +3051,50 @@ export const DEMO_COLLECTION_NOTES: readonly DemoCollectionNote[] = [
   },
 ];
 
-/** Compromiso abierto: importe en COP y días desde hoy (día de la sede). */
+/** Compromiso abierto: importe en USD y días desde hoy (día de la sede). */
 export const DEMO_PAYMENT_PROMISE = {
   patientIndex: 8,
-  amount: 100000,
+  amount: 100,
   dueInDays: 5,
   location: 'principal' as DemoLocationKey,
 };
 
 /**
- * DX-274: gastos de la sede principal, en COP. Días relativos a hoy (el día de
+ * DX-335: las categorías de gasto que la demo crea como propias de la clínica
+ * (las demás son predefinidas); «Alquiler» no está entre las predefinidas.
+ */
+export const DEMO_EXPENSE_OWN_CATEGORIES = ['Alquiler'] as const;
+
+/**
+ * DX-274: gastos de la sede principal, en USD. Días relativos a hoy (el día de
  * la sede): `invoice`/`due`/`paid` negativos son pasado. Uno pagado del todo,
  * uno pagado a medias con el vencimiento ya pasado (sale «Vencido») y uno
  * pendiente con plazo.
  */
 export const DEMO_EXPENSES = [
   {
-    category: 'Arriendo',
-    supplier: 'Inmobiliaria Centro S.A.S.',
-    description: 'Arriendo del local del mes',
-    amount: 1_800_000,
+    category: 'Alquiler',
+    supplier: 'Inmobiliaria Demo',
+    description: 'Alquiler del local del mes',
+    amount: 1800,
     invoice: -14,
     due: null,
-    payment: { amount: 1_800_000, method: 'TRANSFER' as const, paid: -12 },
+    payment: { amount: 1800, method: 'TRANSFER' as const, paid: -12 },
   },
   {
-    category: 'Servicios públicos',
-    supplier: 'Empresas Públicas',
-    description: 'Energía y agua del mes',
-    amount: 420_000,
+    category: 'Mantenimiento',
+    supplier: 'Servicios Técnicos Demo',
+    description: 'Mantenimiento de equipos del mes',
+    amount: 420,
     invoice: -20,
     due: -5,
-    payment: { amount: 150_000, method: 'TRANSFER' as const, paid: -10 },
+    payment: { amount: 150, method: 'TRANSFER' as const, paid: -10 },
   },
   {
     category: 'Laboratorio',
     supplier: 'Laboratorio Dental Sonrisa',
     description: 'Coronas del mes',
-    amount: 680_000,
+    amount: 680,
     invoice: -3,
     due: 12,
     payment: null,
@@ -2637,13 +3103,13 @@ export const DEMO_EXPENSES = [
 
 /**
  * DX-274: salida de caja menor del turno de la tarde (el abierto, nunca el
- * cerrado: su arqueo ya cuadraba). Baja 18.000 el efectivo esperado.
+ * cerrado: su arqueo ya cuadraba). Baja 18 USD el efectivo esperado.
  */
 export const DEMO_CASH_OUTFLOW = {
   category: 'Mensajería',
-  supplier: 'Domicilios Rápido',
+  supplier: 'Mensajería Rápida',
   description: 'Envío de impresiones al laboratorio',
-  amount: 18_000,
+  amount: 18,
 };
 
 /**
@@ -2714,9 +3180,9 @@ export const DEMO_ANAMNESIS_SUBMISSION: {
 
 /**
  * DX-279: política de cancelación de la sede principal (24 h de aviso, cargo
- * sugerido de 50.000 COP) y una paciente con incidencias para ver la insignia
+ * sugerido de 50 USD) y una paciente con incidencias para ver la insignia
  * «2 inasistencias · 1 cancelación tardía (12 meses)» en su ficha y en sus
- * citas: Daniela Montoya Arango, con dos inasistencias y una cancelación con
+ * citas: Daniela Morales Rangel, con dos inasistencias y una cancelación con
  * 5 h de aviso en citas de la semana pasada en la sede principal (en huecos
  * libres del calendario). Las cancelaciones del calendario se
  * registran como avisadas por el paciente 2 días antes (no tardías).
@@ -2725,8 +3191,8 @@ export const DEMO_CANCELLATION = {
   location: 'principal' as DemoLocationKey,
   policy: {
     noticeHours: 24,
-    suggestedFee: 50000,
-    currency: 'COP',
+    suggestedFee: 50,
+    currency: DEMO_LOCATIONS.principal.currency,
     patientText:
       'Si no puedes asistir, avísanos con al menos 24 horas de antelación para ofrecer tu hora a otro paciente. Las cancelaciones con menos aviso y las inasistencias pueden tener un cargo.',
   },
@@ -2735,7 +3201,7 @@ export const DEMO_CANCELLATION = {
   incidents: {
     patientIndex: 4,
     dentistIndex: 0,
-    /** Huecos que se prueban (hora de pared de Bogotá, en minutos). */
+    /** Huecos que se prueban (hora de pared de la sede, en minutos). */
     firstMinute: 7 * 60,
     lastMinute: 18 * 60,
     /** Dentro de la semana pasada del calendario (nada de hace más de 15 días). */
@@ -2757,16 +3223,25 @@ export const DEMO_CANCELLATION = {
 
 /**
  * DX-014: historia de «Comparar sedes» (ver `planComparisonHistory`). Un día
- * en cada mes con dos visitas atendidas por sede de la primera dentista (sin
- * horario propio), cada una con su procedimiento realizado allí y cobrado
- * entero en la sede (sin saldo: no entra en la cartera). Pacientes sin planes
- * ni convenios de la demo. Huecos fuera de las plantillas del calendario,
- * dentro del horario de cada sede (también el sábado).
+ * en cada mes con dos visitas atendidas por sede, cada una con su
+ * procedimiento realizado allí y cobrado entero en la sede (sin saldo: no
+ * entra en la cartera). En las sedes de la rotación las atiende la primera
+ * dentista (sin horario propio), con pacientes sin planes ni convenios de la
+ * demo; en una sede con dentista propio, él, con pacientes de la sede (R3).
+ * Huecos fuera de las plantillas del calendario, dentro del horario de cada
+ * sede (también el sábado, donde abre).
  */
 export const DEMO_COMPARISON_HISTORY = {
   dentistIndex: 0,
   reason: 'Profilaxis y control',
-  patientIndexes: [14, 15, 17, 18],
+  // Las dos sedes de la rotación, en otro orden: con dos huecos por sede,
+  // un paciente nunca tiene visita en las dos el mismo día.
+  patientIndexes: {
+    principal: [14, 15, 17, 18],
+    norte: [17, 18, 14, 15],
+    saoPaulo: [27, 28],
+    londres: [31, 32],
+  },
   slots: {
     principal: [
       [10 * 60, 30],
@@ -2775,6 +3250,14 @@ export const DEMO_COMPARISON_HISTORY = {
     norte: [
       [8 * 60, 30],
       [9 * 60 + 15, 45],
+    ],
+    saoPaulo: [
+      [11 * 60 + 30, 30],
+      [17 * 60 + 15, 30],
+    ],
+    londres: [
+      [12 * 60 + 30, 30],
+      [17 * 60 + 30, 30],
     ],
   },
   procedures: {

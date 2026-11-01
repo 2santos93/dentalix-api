@@ -163,11 +163,13 @@ describe('saldo a favor (DX-253)', () => {
     });
 
     it('el 403 explica el tope en español', () => {
-      expect(receptionCapMessage(0, 'COP')).toMatch(/administración/);
+      expect(receptionCapMessage(0, 'COP', 0)).toMatch(/administración/);
       // D3 (QA): el tope con los decimales de su moneda y su código, sin locale fijo.
-      expect(receptionCapMessage(1_000_000, 'COP')).toContain('10000 COP');
-      expect(receptionCapMessage(1_000_050, 'USD')).toContain('10000.50 USD');
-      expect(receptionCapMessage(500_000, 'JPY')).toContain('5000 JPY');
+      expect(receptionCapMessage(1_000_000, 'COP', 0)).toContain('10000 COP');
+      expect(receptionCapMessage(1_000_050, 'USD', 2)).toContain(
+        '10000.50 USD',
+      );
+      expect(receptionCapMessage(500_000, 'JPY', 0)).toContain('5000 JPY');
     });
   });
 

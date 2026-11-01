@@ -43,9 +43,11 @@ export interface ListInventoryItemsRepoParams {
   query?: string;
 }
 
+/**
+ * Lecturas del inventario. Las escrituras, con su auditoría, van por
+ * `InventoryAuditedWrites` (DX-360).
+ */
 export interface InventoryRepository {
-  createItem(input: CreateInventoryItemRepoInput): Promise<InventoryItem>;
-
   /** A single active (non-deleted) item, or `null` if absent/soft-deleted/
    * another tenant (RLS makes those indistinguishable from "absent"). */
   findItemById(id: string): Promise<InventoryItem | null>;
@@ -58,20 +60,6 @@ export interface InventoryRepository {
    * no cross-item aggregation, so there is no reason to pull every row and
    * filter in memory). Omitting `params` preserves today's behaviour. */
   listItems(params?: ListInventoryItemsRepoParams): Promise<InventoryItem[]>;
-
-  updateItem(
-    id: string,
-    patch: UpdateInventoryItemRepoInput,
-  ): Promise<InventoryItem>;
-
-  /** Soft-delete: sets `deletedAt`. Never a hard delete. */
-  softDeleteItem(id: string): Promise<void>;
-
-  /** Persists an immutable movement row. There is no update/delete for
-   * movements — correcting one means recording a new ADJUSTMENT. */
-  createMovement(
-    input: CreateInventoryMovementRepoInput,
-  ): Promise<InventoryMovement>;
 
   /**
    * All movements for one item, ordered by `occurredAt` DESC (ties by id).

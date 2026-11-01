@@ -156,7 +156,7 @@ class RefundReceiptLocationDto {
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty() name!: string;
   @ApiProperty({ type: String, nullable: true }) address!: string | null;
-  @ApiProperty({ example: 'America/Bogota', description: 'IANA de la sede.' })
+  @ApiProperty({ example: 'UTC', description: 'IANA de la sede.' })
   timeZone!: string;
 }
 

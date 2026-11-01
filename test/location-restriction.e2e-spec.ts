@@ -753,7 +753,7 @@ describe('Personal restringido a sedes (DX-089)', () => {
           tenantId: b.tenantId,
           firstName: 'Otro',
           lastName: 'Tenant',
-          docType: 'CC',
+          documentType: 'NATIONAL_ID',
           docNumber: 'BIS-OTHER',
           sex: Sex.F,
         },
@@ -784,6 +784,33 @@ describe('Personal restringido a sedes (DX-089)', () => {
         (await raw.payment.findUniqueOrThrow({ where: { id: payment.id } }))
           .deletedAt,
       ).toBeNull();
+    });
+
+    it('nº de factura externa en otra sede: 403 sin mutación (DX-515)', async () => {
+      const payment = await seedPayment(a1);
+      const before = await financialState();
+      for (const active of [undefined, a2]) {
+        expectNotAllowed(
+          await as(r2, active).put(
+            `/payments/${payment.id}/external-invoice-number`,
+            { externalInvoiceNumber: 'F-001' },
+          ),
+        );
+        expect(await financialState()).toEqual(before);
+      }
+    });
+
+    it('nº de factura externa en su sede aunque la cabecera señale otra permitida', async () => {
+      const payment = await seedPayment(a3);
+      await as(r2, a2)
+        .put(`/payments/${payment.id}/external-invoice-number`, {
+          externalInvoiceNumber: 'F-002',
+        })
+        .expect(200);
+      expect(
+        (await raw.payment.findUniqueOrThrow({ where: { id: payment.id } }))
+          .externalInvoiceNumber,
+      ).toBe('F-002');
     });
 
     it('movimientos en otra sede: 403 sin cambio en stock ni movimientos', async () => {

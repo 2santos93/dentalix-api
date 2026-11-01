@@ -1,5 +1,12 @@
 import { AgreementKind, PriceSource } from '@prisma/client';
-import { currencyDecimals } from '../../../discounts/domain/discount-policy';
+import {
+  RoundingDigits,
+  basisPoints,
+  bigCents,
+  percentOfCentsInUnits,
+  unitCents,
+  unitsToAmount,
+} from '../../../../shared/money/line-rounding';
 import { normalizeCategory } from '../../../agreements/domain/agreement-rules';
 
 /** 400 cuando ni el convenio, ni la lista de la sede, ni el catálogo dan precio. */
@@ -41,6 +48,8 @@ export interface PricingContext {
   };
   /** Moneda del plan (ISO 4217). */
   planCurrency: string;
+  /** Dígitos de redondeo por línea de esa moneda (`currencies.rounding_digits`). */
+  planRoundingDigits: RoundingDigits;
   /** Día civil de hoy en la zona de la sede que sella el ítem (R8). */
   today: string;
   /** Sede de escritura del request (`writeLocationId`). */
@@ -108,26 +117,28 @@ function percentFor(
 }
 
 /**
- * `base × (1 − p/100)` redondeado a la unidad de la moneda del plan, la mitad
- * hacia arriba: la regla de `roundToCurrency` (R6), en enteros para que
- * 0,5 unidades nunca se pierdan por coma flotante. Nunca negativo ni por
- * encima de `base` (si la base trae decimales que la moneda no tiene, baja a
- * la unidad entera que no la supera).
+ * `base × (1 − p/100)` redondeado a los dígitos de redondeo de la moneda del
+ * plan (`currencies.rounding_digits`, DX-340), la mitad hacia arriba: una
+ * línea, con la regla única de `shared/money/line-rounding`. Nunca negativo
+ * ni por encima de `base` (si la base trae decimales que la moneda no
+ * redondea, baja a la unidad entera que no la supera).
  */
 export function percentPrice(
   base: number,
   percent: number,
-  currency: string,
+  digits: RoundingDigits,
 ): number {
   const p = Math.min(100, Math.max(0, percent));
-  const baseCents = BigInt(Math.round(base * 100));
-  const unit = 10n ** BigInt(2 - currencyDecimals(currency)); // en céntimos
-  const scale = unit * 10000n;
-  const numerator = baseCents * (10000n - BigInt(Math.round(p * 100)));
-  let units = (numerator + scale / 2n) / scale;
-  const whole = baseCents / unit;
+  const baseCents = bigCents(base);
+  let units = percentOfCentsInUnits(
+    baseCents,
+    10000n - basisPoints(p),
+    digits,
+    'half-up',
+  );
+  const whole = baseCents / unitCents(digits);
   if (units > whole) units = whole;
-  return Number(units * unit) / 100;
+  return unitsToAmount(units, digits);
 }
 
 /**
@@ -160,7 +171,7 @@ export function resolveItemPrice(ctx: PricingContext): ResolvedItemPrice {
         return {
           ...common,
           ...fromAgreement,
-          price: percentPrice(base, percent, ctx.planCurrency),
+          price: percentPrice(base, percent, ctx.planRoundingDigits),
           source: PriceSource.AGREEMENT_PERCENT,
         };
       }

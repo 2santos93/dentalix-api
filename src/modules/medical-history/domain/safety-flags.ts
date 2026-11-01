@@ -71,8 +71,9 @@ export function isFlaggedAllergen(alergeno: string): boolean {
 /**
  * Deriva las banderas de seguridad y `hasCriticalAlert` a partir de la entrada
  * estructurada. NUNCA confía en flags provistas por el cliente: siempre
- * recalcula. `embarazo`/`semanasEmbarazo` son la única entrada directa (no se
- * pueden inferir de las listas).
+ * recalcula. `pregnancy`/`semanasEmbarazo` son la única entrada directa (no se
+ * pueden inferir de las listas): la bandera `embarazo` solo con un «Sí»
+ * explícito (ni «No», ni «No sabe», ni sin responder).
  */
 export function deriveSafetyFlags(data: MedicalHistoryVersionData): {
   safetyFlags: SafetyFlags;
@@ -85,8 +86,8 @@ export function deriveSafetyFlags(data: MedicalHistoryVersionData): {
     conditions.some((c) => c.codigo === codigo && c.estado === 'SI');
 
   const safetyFlags: SafetyFlags = {
-    embarazo: data.embarazo === true,
-    ...(data.embarazo === true && data.semanasEmbarazo !== undefined
+    embarazo: data.pregnancy === 'SI',
+    ...(data.pregnancy === 'SI' && data.semanasEmbarazo !== undefined
       ? { semanasEmbarazo: data.semanasEmbarazo }
       : {}),
     anticoagulantes: anyMatch(meds, ANTICOAGULANT_KW),

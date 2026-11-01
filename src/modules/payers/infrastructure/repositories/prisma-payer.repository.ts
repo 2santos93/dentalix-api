@@ -1,31 +1,27 @@
 import { ConflictException, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
+import { lockRow } from '../../../../shared/prisma/lock-row';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { Payer } from '../../domain/entities/payer.entity';
-import {
-  type LegacyStoredPayerType,
-  payerTypeFromStored,
-  storedPayerType,
-} from '../../domain/legacy-payer-type';
 import {
   CreatePayerRepoInput,
   PayerRepository,
   RetirePayerResult,
   UpdatePayerRepoInput,
 } from '../../domain/ports/payer-repository.port';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+import { configAuditEvent } from '../../../audit/domain/config-audit';
+import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
+import { payerSnapshot } from '../../domain/payer-audit';
 
 export type PrismaPayer = Prisma.PayerGetPayload<Record<string, never>>;
 
-/**
- * DX-326 fase 1: la fila guarda el código anterior (o el genérico) y el
- * dominio solo ve el tipo genérico.
- */
 export function mapToEntity(row: PrismaPayer): Payer {
   return {
     id: row.id,
     name: row.name,
-    type: payerTypeFromStored(row.type),
+    type: row.type,
     active: row.active,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -108,51 +104,78 @@ export class PrismaPayerRepository implements PayerRepository {
     });
   }
 
-  async create(input: CreatePayerRepoInput): Promise<Payer> {
+  async create(
+    input: CreatePayerRepoInput,
+    audit: AuditRequestContext,
+  ): Promise<Payer> {
     const tenantId = this.requireTenantId();
-    const row = await this.prisma
-      .runWithTenant((tx) =>
-        tx.payer.create({
-          // Fase 1 (R5): se guarda el código anterior del tipo genérico.
+    return this.prisma
+      .runWithTenant(async (tx) => {
+        const row = await tx.payer.create({
           data: {
             tenantId,
             name: input.name,
-            type: storedPayerType(input.type),
+            type: input.type,
             active: input.active,
             createdById: input.createdById,
             updatedById: input.createdById,
-          } satisfies Prisma.PayerUncheckedCreateInput & {
-            type?: LegacyStoredPayerType;
-          },
-        }),
-      )
+          } satisfies Prisma.PayerUncheckedCreateInput,
+        });
+        const created = mapToEntity(row);
+        await writeAuditEvent(
+          tx,
+          configAuditEvent(audit, {
+            action: 'CREATE',
+            resourceType: 'PAYER',
+            resourceId: created.id,
+            reason: 'PAYER_CREATED',
+            after: payerSnapshot(created),
+          }),
+        );
+        return created;
+      })
       .catch(rethrowDuplicateName);
-    return mapToEntity(row);
   }
 
   /**
    * Por `id` bajo RLS. `null` si el pagador desapareció entre la lectura del
    * caso de uso y esta escritura (P2025).
    */
-  async update(id: string, patch: UpdatePayerRepoInput): Promise<Payer | null> {
+  async update(
+    id: string,
+    patch: UpdatePayerRepoInput,
+    audit: AuditRequestContext,
+  ): Promise<Payer | null> {
     try {
-      const row = await this.prisma.runWithTenant((tx) =>
-        tx.payer.update({
+      return await this.prisma.runWithTenant(async (tx) => {
+        // DX-360: el antes, con la fila bloqueada; retirado o de otra
+        // clínica → null (404), sin escribir nada.
+        if (!(await lockRow(tx, 'payers', id))) return null;
+        const current = await tx.payer.findFirst({
+          where: { id, deletedAt: null },
+        });
+        if (!current) return null;
+        const row = await tx.payer.update({
           where: { id },
           data: {
             name: patch.name,
-            type:
-              patch.type === undefined
-                ? undefined
-                : storedPayerType(patch.type),
+            type: patch.type,
             active: patch.active,
             updatedById: patch.updatedById,
-          } satisfies Prisma.PayerUpdateInput & {
-            type?: LegacyStoredPayerType;
-          },
-        }),
-      );
-      return mapToEntity(row);
+          } satisfies Prisma.PayerUpdateInput,
+        });
+        const updated = mapToEntity(row);
+        const event = configAuditEvent(audit, {
+          action: 'UPDATE',
+          resourceType: 'PAYER',
+          resourceId: id,
+          reason: 'PAYER_UPDATED',
+          before: payerSnapshot(mapToEntity(current)),
+          after: payerSnapshot(updated),
+        });
+        if (event) await writeAuditEvent(tx, event);
+        return updated;
+      });
     } catch (error) {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -169,7 +192,7 @@ export class PrismaPayerRepository implements PayerRepository {
    * cambio de cobertura (o el de un convenio) lo relee con `FOR SHARE` dentro de su transacción, así
    * que uno de los dos espera al otro y ve su resultado.
    */
-  retire(id: string, updatedById?: string): Promise<RetirePayerResult> {
+  retire(id: string, audit: AuditRequestContext): Promise<RetirePayerResult> {
     return this.prisma.runWithTenant(async (tx) => {
       const locked = await tx.$queryRaw<{ id: string }[]>`
         SELECT id FROM "payers"
@@ -183,10 +206,25 @@ export class PrismaPayerRepository implements PayerRepository {
         tx.agreement.count({ where: { payerId: id, deletedAt: null } }),
       ]);
       if (coverages > 0 || agreements > 0) return 'IN_USE';
+      const before = await tx.payer.findUniqueOrThrow({ where: { id } });
       await tx.payer.update({
         where: { id },
-        data: { active: false, deletedAt: new Date(), updatedById },
+        data: {
+          active: false,
+          deletedAt: new Date(),
+          updatedById: audit.actor.userId,
+        },
       });
+      await writeAuditEvent(
+        tx,
+        configAuditEvent(audit, {
+          action: 'DELETE',
+          resourceType: 'PAYER',
+          resourceId: id,
+          reason: 'PAYER_DELETED',
+          before: payerSnapshot(mapToEntity(before)),
+        }),
+      );
       return 'RETIRED';
     });
   }

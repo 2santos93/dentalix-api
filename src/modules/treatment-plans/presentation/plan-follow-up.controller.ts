@@ -77,7 +77,7 @@ export class PlanFollowUpController {
   @ApiOkResponse({
     type: PendingFollowUpCountDto,
     description:
-      'Cuántos planes saldrían en «Presupuestos por seguir» con los mismos filtros',
+      'Cuántos presupuestos (grupos de opciones) saldrían en «Presupuestos por seguir» con los mismos filtros',
   })
   async count(
     @Query() query: PendingFollowUpCountQueryDto,

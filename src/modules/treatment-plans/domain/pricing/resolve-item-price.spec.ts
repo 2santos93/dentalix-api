@@ -1,5 +1,8 @@
 import { AgreementKind, PriceSource } from '@prisma/client';
-import { roundToCurrency } from '../../../discounts/domain/discount-policy';
+import { roundToDigits } from '../../../../shared/money/line-rounding';
+import { REFERENCE_CURRENCY_DIGITS } from '../../../../shared/money/__fixtures__/reference-currency-digits';
+
+const digits = (code: string) => REFERENCE_CURRENCY_DIGITS.roundingDigits(code);
 import {
   percentPrice,
   resolveItemPrice,
@@ -15,7 +18,7 @@ function percentAgreement(
 ): PricingAgreement {
   return {
     id: 'agr-1',
-    name: 'Sura EPS',
+    name: 'Surco Salud',
     kind: AgreementKind.PERCENT_DISCOUNT,
     percent: 15,
     percentByCategory: null,
@@ -51,6 +54,7 @@ function ctx(overrides: Partial<PricingContext> = {}): PricingContext {
       allowDiscount: true,
     },
     planCurrency: 'COP',
+    planRoundingDigits: 0,
     today: TODAY,
     locationId: SEDE,
     agreement: null,
@@ -94,7 +98,7 @@ describe('resolveItemPrice (DX-105 §3)', () => {
       price: 85000,
       source: PriceSource.AGREEMENT_PERCENT,
       agreementId: 'agr-1',
-      agreementName: 'Sura EPS',
+      agreementName: 'Surco Salud',
       allowDiscount: true,
     });
   });
@@ -317,27 +321,27 @@ describe('resolveItemPrice (DX-105 §3)', () => {
   describe('redondeo a la moneda del plan (R6)', () => {
     it('COP sin decimales, la mitad hacia arriba', () => {
       // 33 333 × 0,85 = 28 333,05 → 28 333; 10 001 × 0,85 = 8 500,85 → 8 501.
-      expect(percentPrice(33333, 15, 'COP')).toBe(28333);
-      expect(percentPrice(10001, 15, 'COP')).toBe(8501);
+      expect(percentPrice(33333, 15, digits('COP'))).toBe(28333);
+      expect(percentPrice(10001, 15, digits('COP'))).toBe(8501);
       // 7,5 %: 99 999 × 0,925 = 92 499,075 → 92 499; 1 × 0,5 = 0,5 → 1.
-      expect(percentPrice(99999, 7.5, 'COP')).toBe(92499);
-      expect(percentPrice(1, 50, 'COP')).toBe(1);
+      expect(percentPrice(99999, 7.5, digits('COP'))).toBe(92499);
+      expect(percentPrice(1, 50, digits('COP'))).toBe(1);
     });
 
     it('USD a céntimos, la mitad hacia arriba sin perderla por coma flotante', () => {
       // 10,01 × 0,5 = 5,005 → 5,01 (en coma flotante 5,005 sería 5,00499…).
-      expect(percentPrice(10.01, 50, 'USD')).toBe(5.01);
-      expect(percentPrice(123.45, 7.5, 'USD')).toBe(114.19);
-      expect(percentPrice(19.99, 12.34, 'USD')).toBe(
-        roundToCurrency(19.99 * (1 - 0.1234), 'USD'),
+      expect(percentPrice(10.01, 50, digits('USD'))).toBe(5.01);
+      expect(percentPrice(123.45, 7.5, digits('USD'))).toBe(114.19);
+      expect(percentPrice(19.99, 12.34, digits('USD'))).toBe(
+        roundToDigits(19.99 * (1 - 0.1234), 2),
       );
     });
 
     it('nunca negativo ni por encima de la base', () => {
-      expect(percentPrice(100, 100, 'USD')).toBe(0);
-      expect(percentPrice(100, 0, 'USD')).toBe(100);
+      expect(percentPrice(100, 100, digits('USD'))).toBe(0);
+      expect(percentPrice(100, 0, digits('USD'))).toBe(100);
       // Base con decimales en una moneda sin ellos: no sube por encima.
-      expect(percentPrice(100.6, 0, 'COP')).toBe(100);
+      expect(percentPrice(100.6, 0, digits('COP'))).toBe(100);
     });
 
     it('el precio por % del convenio sale redondeado en la moneda del plan', () => {

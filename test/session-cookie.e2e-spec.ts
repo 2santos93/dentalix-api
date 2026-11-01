@@ -74,6 +74,20 @@ function refreshFrom(res: request.Response): string {
 
 const cookieHeader = (refresh: string) => `${REFRESH_COOKIE}=${refresh}`;
 
+function claimsOf(jwt: string): Record<string, unknown> {
+  return JSON.parse(
+    Buffer.from(jwt.split('.')[1] ?? '', 'base64url').toString('utf8'),
+  ) as Record<string, unknown>;
+}
+
+/** Lleva la última rotación de la familia del token fuera de la gracia. */
+async function ageLastRotation(refresh: string): Promise<void> {
+  await raw.refreshSession.update({
+    where: { id: claimsOf(refresh).sid as string },
+    data: { rotatedAt: new Date(Date.now() - 5 * 60_000) },
+  });
+}
+
 /** Claves del body con valor string no vacío (para comparar la forma). */
 function bodyKeys(res: request.Response): string[] {
   const body = res.body as Record<string, unknown>;
@@ -192,7 +206,7 @@ describe('Refresh en cookie HttpOnly (e2e, DX-062)', () => {
   });
 
   describe('refresh por cookie', () => {
-    it('rota la cookie: el par nuevo llega en la cookie y la anterior da 401 (y se borra)', async () => {
+    it('rota la cookie: el par nuevo llega en la cookie; la anterior, pasada la gracia, da 401 (se borra) y revoca la sesión', async () => {
       const first = refreshFrom(await cookieLogin(SUB_A, `owner-a${DOMAIN}`));
 
       const res = await http()
@@ -203,6 +217,7 @@ describe('Refresh en cookie HttpOnly (e2e, DX-062)', () => {
       expect(bodyKeys(res)).toEqual(['accessToken']);
       const second = refreshFrom(res);
       expect(second).not.toBe(first);
+      await ageLastRotation(second);
 
       const reused = await http()
         .post('/api/v1/auth/refresh')
@@ -212,11 +227,44 @@ describe('Refresh en cookie HttpOnly (e2e, DX-062)', () => {
       // La cookie muerta se borra para no reintentar con ella en cada carga.
       expect(sessionCookie(reused)).toMatch(/Expires=Thu, 01 Jan 1970/);
 
-      // La cadena nueva sigue viva.
+      // Reuso fuera de la gracia = robo: la cadena nueva también muere.
       await http()
         .post('/api/v1/auth/refresh')
         .set(fromWeb(SUB_A))
         .set('Cookie', cookieHeader(second))
+        .expect(401);
+    });
+
+    it('recargar con el refresh en vuelo NO cierra la sesión: la respuesta perdida se recupera con la cookie anterior', async () => {
+      const before = refreshFrom(await cookieLogin(SUB_A, `owner-a${DOMAIN}`));
+
+      // Carga 1: la API rota, pero el navegador aborta la petición al recargar
+      // y nunca guarda la cookie nueva.
+      const lost = refreshFrom(
+        await http()
+          .post('/api/v1/auth/refresh')
+          .set(fromWeb(SUB_A))
+          .set('Cookie', cookieHeader(before))
+          .expect(201),
+      );
+
+      // Carga 2: arranca con la cookie que quedó (la anterior) → 201 con una
+      // copia del token vigente (mismo jti y exp que el perdido).
+      const recovered = await http()
+        .post('/api/v1/auth/refresh')
+        .set(fromWeb(SUB_A))
+        .set('Cookie', cookieHeader(before))
+        .expect(201);
+      expect(bodyKeys(recovered)).toEqual(['accessToken']);
+      const again = refreshFrom(recovered);
+      expect(claimsOf(again).jti).toBe(claimsOf(lost).jti);
+      expect(claimsOf(again).exp).toBe(claimsOf(lost).exp);
+
+      // La sesión sigue con normalidad.
+      await http()
+        .post('/api/v1/auth/refresh')
+        .set(fromWeb(SUB_A))
+        .set('Cookie', cookieHeader(again))
         .expect(201);
     });
 
@@ -375,6 +423,31 @@ describe('Refresh en cookie HttpOnly (e2e, DX-062)', () => {
         .post('/api/v1/auth/refresh')
         .send({ refreshToken: refresh })
         .expect(401);
+    });
+
+    it('cierra la sesión entera: tras el logout, ni la cookie anterior (en la gracia) recupera el refresh', async () => {
+      const before = refreshFrom(await cookieLogin(SUB_A, `owner-a${DOMAIN}`));
+      const current = refreshFrom(
+        await http()
+          .post('/api/v1/auth/refresh')
+          .set(fromWeb(SUB_A))
+          .set('Cookie', cookieHeader(before))
+          .expect(201),
+      );
+
+      await http()
+        .post('/api/v1/auth/logout')
+        .set(fromWeb(SUB_A))
+        .set('Cookie', cookieHeader(current))
+        .expect(204);
+
+      for (const token of [before, current]) {
+        await http()
+          .post('/api/v1/auth/refresh')
+          .set(fromWeb(SUB_A))
+          .set('Cookie', cookieHeader(token))
+          .expect(401);
+      }
     });
 
     it('CSRF: logout por cookie desde un origen ajeno → 403 y la sesión sigue viva', async () => {

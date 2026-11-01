@@ -38,6 +38,8 @@ function makeRepo(overrides: Partial<AuthRepository> = {}): AuthRepository {
     revokeToken: jest.fn(),
     findSessionState: jest.fn(),
     consumeRefreshToken: jest.fn(),
+    rotateRefreshSession: jest.fn(),
+    revokeRefreshSession: jest.fn(),
     ...overrides,
   };
 }

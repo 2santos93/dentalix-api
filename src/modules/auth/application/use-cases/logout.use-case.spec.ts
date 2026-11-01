@@ -26,6 +26,28 @@ describe('LogoutUseCase', () => {
     ).toHaveBeenCalledWith('jti-1', new Date(decoded.exp * 1000));
   });
 
+  it('revokes the whole family when the refresh token has a sid', async () => {
+    const tokens = {
+      verifyRefresh: jest.fn().mockResolvedValue({ ...decoded, sid: 'fam-1' }),
+    } as never;
+    const repo = {
+      revokeToken: jest.fn(),
+      revokeRefreshSession: jest.fn().mockResolvedValue(undefined),
+    };
+
+    await new LogoutUseCase(tokens, repo as never).execute({
+      refreshToken: 'good-ref',
+    });
+
+    expect(repo.revokeRefreshSession).toHaveBeenCalledWith(
+      'fam-1',
+      'u1',
+      'jti-1',
+      new Date(decoded.exp * 1000),
+    );
+    expect(repo.revokeToken).not.toHaveBeenCalled();
+  });
+
   it('is a silent no-op when the refresh token is invalid/expired', async () => {
     const tokens = {
       verifyRefresh: jest.fn().mockRejectedValue(new Error('bad token')),

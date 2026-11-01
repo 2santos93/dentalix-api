@@ -40,6 +40,9 @@ import { assertAttendsAt } from '../../../staff/domain/provider-location';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { ProviderAvailabilityService } from '../../../provider-schedule/application/provider-availability.service';
 import { collectWarnings } from '../appointment-warnings';
+import { ChairAssignmentService } from '../chair-assignment';
+import type { Chair } from '../../../chairs/domain/entities/chair.entity';
+import { resolveAppointmentProviderId } from '../../../chairs/domain/chair-rules';
 
 // NOTE: deliberately NO `tenantId`/`status` field — tenant comes from the
 // guarded request context (the repository reads it, never this input), and
@@ -47,7 +50,11 @@ import { collectWarnings } from '../appointment-warnings';
 export interface CreateAppointmentInput {
   planItemIds?: string[];
   patientId: string;
-  providerId: string;
+  /**
+   * DX-211: opcional si viene `chairId` con profesional por defecto (el
+   * elegido manda siempre; sin ninguno, 400).
+   */
+  providerId?: string;
   start: Date;
   /** DX-121: opcional si viene `appointmentTypeId` (sale de su duración). */
   end?: Date;
@@ -73,6 +80,8 @@ export interface CreateAppointmentInput {
   actorRole?: ClinicRole | null;
   /** DX-446: «Agendar igualmente» en un hueco reservado (5–300 caracteres). */
   overrideReason?: string;
+  /** DX-211: sillón de la cita (de esta clínica, de su sede y activo). */
+  chairId?: string;
 }
 
 /** La entrada con la hora de fin ya resuelta (explícita o por el tipo). */
@@ -80,6 +89,10 @@ type ResolvedAppointmentInput = CreateAppointmentInput & { end: Date };
 
 export const APPOINTMENT_TYPE_UNAVAILABLE_MESSAGE =
   'El tipo de cita no existe o está desactivado';
+
+export const PROVIDER_REQUIRED_MESSAGE = 'Elige un profesional';
+export const CHAIR_WITHOUT_PROVIDER_MESSAGE =
+  'Elige un profesional: el sillón no tiene profesional por defecto';
 
 @Injectable()
 export class CreateAppointmentUseCase {
@@ -108,6 +121,11 @@ export class CreateAppointmentUseCase {
     @Optional()
     @Inject(SCHEDULE_BLOCK_CLOCK)
     private readonly clock: ScheduleBlockClock = systemScheduleBlockClock,
+    // DX-211: sillón de la cita. Opcional para los dobles de los specs
+    // anteriores, que no agendan con sillón; la app siempre lo provee.
+    @Optional()
+    @Inject(ChairAssignmentService)
+    private readonly chairs: ChairAssignmentService | null = null,
   ) {}
 
   async execute(
@@ -191,10 +209,6 @@ export class CreateAppointmentUseCase {
     if (!patient) {
       throw new NotFoundException('Paciente no encontrado');
     }
-    const provider = await this.staff.findById(input.providerId);
-    if (!provider) {
-      throw new NotFoundException('Profesional no encontrado');
-    }
 
     // DX-089: la sede de la cita (la de pendientes, ya permitida, o la misma en
     // la que el repositorio la escribirá: la del request o, sin cabecera, la
@@ -205,8 +219,36 @@ export class CreateAppointmentUseCase {
     }
     const target =
       input.locationId ?? (await this.repo.resolveWriteLocationId());
-    assertAttendsAt(provider, target);
 
+    // DX-211: el sillón es de esta clínica, de la sede de la cita y activo
+    // (404/400). Sin profesional elegido, se toma el suyo por defecto.
+    const chair =
+      input.chairId !== undefined
+        ? await this.requireChairs().load(input.chairId, {
+            locationId: target,
+            requireActive: true,
+          })
+        : null;
+    const providerId = resolveAppointmentProviderId(input.providerId, chair);
+    if (providerId === null) {
+      throw new BadRequestException(
+        chair ? CHAIR_WITHOUT_PROVIDER_MESSAGE : PROVIDER_REQUIRED_MESSAGE,
+      );
+    }
+    const provider = await this.staff.findById(providerId);
+    if (!provider) {
+      throw new NotFoundException('Profesional no encontrado');
+    }
+    assertAttendsAt(provider, target);
+    return this.createFor({ ...input, providerId }, target, chair);
+  }
+
+  /** El resto de reglas, con el profesional y el sillón ya resueltos. */
+  private async createFor(
+    input: ResolvedAppointmentInput & { providerId: string },
+    target: string,
+    chair: Chair | null,
+  ): Promise<AppointmentWriteResult> {
     // Horario de atención de la SEDE: la cita tiene que caber completa en un
     // tramo del día. Sede sin horario configurado => sin restricción (ver
     // fitsBusinessHours), así que esto no cambia nada hasta que la clínica lo
@@ -279,6 +321,16 @@ export class CreateAppointmentUseCase {
       throw new ConflictException(OVERLAP_MESSAGES.patient);
     }
 
+    // DX-211: tercer eje, el SILLÓN: dos citas no lo ocupan a la vez (aunque
+    // sean de profesionales y pacientes distintos).
+    if (chair) {
+      await this.requireChairs().assertFree(chair, {
+        locationId: target,
+        start: input.start,
+        end: input.end,
+      });
+    }
+
     // The pre-checks above handle the common case with a friendly 409 WITHOUT
     // hitting the DB. This try/catch is the race-proof backstop: if a
     // concurrent create slips past them, the DB's EXCLUDE constraints
@@ -298,6 +350,7 @@ export class CreateAppointmentUseCase {
         waitlistEntryId: input.waitlistEntryId,
         wantsEarlier: input.wantsEarlier,
         planItemIds: input.planItemIds,
+        chairId: chair?.id,
       });
       // DX-273: un alta con ítems ya reservados en otra cita es 409; nunca avisa.
       return {
@@ -310,10 +363,20 @@ export class CreateAppointmentUseCase {
       };
     } catch (error) {
       const scope = overlapExclusionScope(error);
-      if (scope !== null) {
+      if (scope === 'chair' && chair) {
+        throw await this.requireChairs().raceConflict(chair.id, input);
+      }
+      if (scope === 'provider' || scope === 'patient') {
         throw new ConflictException(OVERLAP_MESSAGES[scope]);
       }
       throw error;
     }
+  }
+
+  private requireChairs(): ChairAssignmentService {
+    if (!this.chairs) {
+      throw new Error('ChairAssignmentService no está configurado');
+    }
+    return this.chairs;
   }
 }

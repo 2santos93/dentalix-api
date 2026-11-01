@@ -7,7 +7,7 @@ import {
 
 describe('redeclarar una cobertura (SEC-049/SEC-053)', () => {
   const verified: CoverageDeclarationFacts = {
-    payerId: 'sura',
+    payerId: 'surco',
     memberNumber: '1020304050',
     validFrom: '2025-01-01',
     validTo: '2026-06-30',
@@ -93,7 +93,7 @@ describe('redeclarar una cobertura (SEC-049/SEC-053)', () => {
           coverageRedeclared(
             verified,
             {
-              payerId: 'sura',
+              payerId: 'surco',
               memberNumber: ' 1020304050 ',
               validFrom: '2025-01-01',
               validTo: '2026-06-30',
@@ -107,9 +107,9 @@ describe('redeclarar una cobertura (SEC-049/SEC-053)', () => {
     it.each([...NOT_ADMIN, ClinicRole.ADMIN])(
       '%s: cambiar el pagador o el nº la redeclara siempre (SEC-049)',
       (role) => {
-        expect(coverageRedeclared(verified, { payerId: 'sanitas' }, role)).toBe(
-          true,
-        );
+        expect(
+          coverageRedeclared(verified, { payerId: 'sanavida' }, role),
+        ).toBe(true);
         expect(
           coverageRedeclared(verified, { memberNumber: '1020304059' }, role),
         ).toBe(true);

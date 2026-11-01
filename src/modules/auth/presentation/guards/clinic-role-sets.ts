@@ -54,6 +54,11 @@ export const APPOINTMENT_ROLES: ClinicRole[] = [
 // Leerlos (selector del formulario de cita): APPOINTMENT_ROLES.
 export const APPOINTMENT_TYPE_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 
+// Sillones de cada sede (DX-211) — leerlos (selector del formulario de cita y
+// columnas de la agenda): APPOINTMENT_ROLES. Crear, editar, ordenar y
+// desactivar: solo ADMIN.
+export const CHAIR_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+
 // Pagadores (DX-153) — leer (selectores de cobertura): los 4 roles. Crear:
 // ADMIN y recepción, que da de alta al paciente en mostrador y no puede
 // esperar al administrador. Editar, desactivar y retirar: solo gestión.
@@ -153,7 +158,7 @@ export const DASHBOARD_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 // Gestión de personal (crear/editar rol/desactivar): solo gestión.
 export const STAFF_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 
-// Autorización de datos Ley 1581 (DX-037): la registran quienes reciben al
+// Autorización de tratamiento de datos (DX-037): la registran quienes reciben al
 // paciente — recepción en el mostrador y el personal clínico en el sillón —,
 // y todos necesitan leer el estado vigente y la política vigente.
 export const DATA_CONSENT_ROLES: ClinicRole[] = [
@@ -222,8 +227,8 @@ export const TREATMENT_PLAN_FOLLOW_UP_ROLES: ClinicRole[] = [
 
 // Retención legal de la HC (DX-039): archivar un paciente, cambiar su
 // retención extendida, la supresión parcial y la lista de historias que salen
-// de retención. Solo gestión: quien responde ante la Res. 839/2017 es el
-// titular de la clínica.
+// de retención. Solo gestión: quien responde de la conservación de la
+// historia clínica es el titular de la clínica.
 export const PATIENT_RETENTION_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 
 // Cartera por antigüedad (DX-145): la lista de cobro con importes y teléfonos

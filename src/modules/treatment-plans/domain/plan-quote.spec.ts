@@ -272,16 +272,16 @@ describe('presupuesto v2 con convenio (DX-105)', () => {
           discount: 0,
           basePrice: 1000,
           referencePrice: 850,
-          agreementName: 'Sura EPS −15 %',
-          agreementPayerName: 'Sura EPS',
+          agreementName: 'Surco Salud −15 %',
+          agreementPayerName: 'Surco Salud',
         },
         {
           ...source().items[1],
           price: 200,
           basePrice: 200,
           referencePrice: 200,
-          agreementName: 'Sura EPS −15 %',
-          agreementPayerName: 'Sura EPS',
+          agreementName: 'Surco Salud −15 %',
+          agreementPayerName: 'Surco Salud',
         },
         {
           ...source().items[1],
@@ -289,8 +289,8 @@ describe('presupuesto v2 con convenio (DX-105)', () => {
           price: 120.5,
           basePrice: 100,
           referencePrice: 120.5,
-          agreementName: 'Sura EPS −15 %',
-          agreementPayerName: 'Sura EPS',
+          agreementName: 'Surco Salud −15 %',
+          agreementPayerName: 'Surco Salud',
         },
       ],
     });
@@ -299,11 +299,11 @@ describe('presupuesto v2 con convenio (DX-105)', () => {
     const content = buildQuoteContent(withAgreement(), '2026-10-16');
     expect(content.version).toBe(2);
     expect(content.agreement).toEqual({
-      name: 'Sura EPS −15 %',
-      payerName: 'Sura EPS',
+      name: 'Surco Salud −15 %',
+      payerName: 'Surco Salud',
     });
     expect(content.items.map((i) => i.listPrice)).toEqual([1000, 200, 100]);
-    expect(content.items[0].agreementName).toBe('Sura EPS −15 %');
+    expect(content.items[0].agreementName).toBe('Surco Salud −15 %');
     // 150 de la primera; 0 en la segunda; la tercera sube y no resta.
     expect(content.totals[0].agreementSaving).toBe(150);
   });
@@ -343,11 +343,11 @@ describe('presupuesto v2 con convenio (DX-105)', () => {
       agreementName: 'Empresa Alfa lista',
       agreementPayerName: 'Empresa Alfa',
     };
-    items[2] = { ...items[2], agreementName: 'Sura EPS −15 %' };
+    items[2] = { ...items[2], agreementName: 'Surco Salud −15 %' };
     const content = buildQuoteContent(source({ items }), '2026-10-16');
     expect(content.agreement).toEqual({
-      name: 'Sura EPS −15 % · Empresa Alfa lista',
-      payerName: 'Sura EPS',
+      name: 'Surco Salud −15 % · Empresa Alfa lista',
+      payerName: 'Surco Salud',
     });
   });
 
@@ -356,8 +356,8 @@ describe('presupuesto v2 con convenio (DX-105)', () => {
     const hash = computeQuoteHash(base);
     expect(hash).toMatch(/^[0-9a-f]{64}$/);
     const variants: QuoteContent[] = [
-      { ...base, agreement: { name: 'Otro', payerName: 'Sura EPS' } },
-      { ...base, agreement: { name: 'Sura EPS −15 %', payerName: 'Otro' } },
+      { ...base, agreement: { name: 'Otro', payerName: 'Surco Salud' } },
+      { ...base, agreement: { name: 'Surco Salud −15 %', payerName: 'Otro' } },
       { ...base, agreement: null },
       {
         ...base,

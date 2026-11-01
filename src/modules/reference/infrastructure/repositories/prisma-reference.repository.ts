@@ -35,8 +35,8 @@ export class PrismaReferenceRepository implements ReferenceRepository {
         select: { id: true, name: true, region: true },
       });
     }
-    // Accent-insensitive (and case-insensitive) match so "medellin" finds
-    // "Medellín". Prisma's `mode: 'insensitive'` only folds case, not accents,
+    // Accent-insensitive (and case-insensitive) match so "sao paulo" finds
+    // "São Paulo". Prisma's `mode: 'insensitive'` only folds case, not accents,
     // so we drop to a raw query using the `unaccent` extension (enabled by the
     // 20260729000000_enable_unaccent migration). ILIKE wildcards in the user
     // input are escaped so the term matches literally, matching the previous

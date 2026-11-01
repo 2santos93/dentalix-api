@@ -12,6 +12,12 @@ import {
   HOUR_CYCLES,
   REGIONAL_MESSAGES,
 } from '../../../locations/domain/regional-settings';
+import {
+  SUBDOMAIN_FORMAT_MESSAGE,
+  SUBDOMAIN_MAX_LENGTH,
+  SUBDOMAIN_PATTERN,
+  SUBDOMAIN_PATTERN_SOURCE,
+} from '../../../../shared/tenancy/subdomain-rules';
 
 /**
  * DX-144 (SEC-034): tope de lo que escribe quien pide el alta, como en las
@@ -31,10 +37,15 @@ export class RegisterDto {
   })
   clinicName!: string;
 
-  @ApiProperty({ pattern: '^[a-z0-9-]+$', example: 'sonrisa' })
-  @Matches(/^[a-z0-9-]+$/, {
-    message: 'subdomain must be lowercase alphanumeric or hyphen',
+  // Misma regla que la comprobación pública de disponibilidad
+  // (shared/tenancy/subdomain-rules.ts). Las reservadas de la plataforma las
+  // rechaza el caso de uso (409 SUBDOMAIN_RESERVED).
+  @ApiProperty({
+    pattern: SUBDOMAIN_PATTERN_SOURCE,
+    maxLength: SUBDOMAIN_MAX_LENGTH,
+    example: 'sonrisa',
   })
+  @Matches(SUBDOMAIN_PATTERN, { message: SUBDOMAIN_FORMAT_MESSAGE })
   subdomain!: string;
 
   @ApiProperty({ format: 'email' })

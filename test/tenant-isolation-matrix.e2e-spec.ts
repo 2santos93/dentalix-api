@@ -213,6 +213,8 @@ interface SeedA {
   domainId: string;
   prescriptionTemplateId: string;
   appointmentTypeId: string;
+  /** DX-211: un sillón de la sede de A. */
+  chairId: string;
   payerId: string;
   /** DX-274: un gasto de A con un pago, y una categoría propia de A. */
   expenseId: string;
@@ -509,6 +511,12 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     color: '#7C3AED',
   });
 
+  // DX-211: un sillón de la sede de A.
+  const chair = await create(app, a, '/chairs', {
+    locationId: location.id,
+    name: 'Sillón de A',
+  });
+
   // DX-153: un pagador de A.
   const payer = await create(app, a, '/payers', {
     name: 'Pagador de A',
@@ -683,7 +691,7 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     { notes: 'Evolución de A' },
   );
   await create(app, a, '/privacy-policies', {
-    policyText: 'Política de tratamiento de datos de A (Ley 1581).',
+    policyText: 'Política de tratamiento de datos de A.',
     generalText: 'Autorizo el tratamiento de mis datos personales.',
     sensitiveHealthText:
       'Autorizo el tratamiento de mis datos sensibles de salud (historia clínica). No está obligado a autorizarlo. Finalidad: la atención odontológica.',
@@ -719,6 +727,7 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     domainId: (domainRes.body as { domain: IdBody }).domain.id,
     prescriptionTemplateId: prescriptionTemplate.id,
     appointmentTypeId: appointmentType.id,
+    chairId: chair.id,
     payerId: payer.id,
     expenseId: expense.id,
     expensePaymentId: expensePaid.payments[0].id,
@@ -813,7 +822,7 @@ async function seedBExtras(
   });
   // Con su propia política publicada, la de A no es «la vigente» de B.
   await create(app, b, '/privacy-policies', {
-    policyText: 'Política de tratamiento de datos de B (Ley 1581).',
+    policyText: 'Política de tratamiento de datos de B.',
     generalText: 'Autorizo el tratamiento de mis datos personales.',
     sensitiveHealthText:
       'Autorizo el tratamiento de mis datos sensibles de salud (historia clínica). No está obligado a autorizarlo. Finalidad: la atención odontológica.',
@@ -1017,6 +1026,8 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       'location_reminder_settings',
       // DX-279: versiones de la política de cancelación.
       'cancellation_policy_versions',
+      // DX-211: sillones de la sede de A.
+      'chairs',
       // DX-316: calendario de la sede nueva de A y su festivo.
       'location_working_calendars',
       'location_holidays',
@@ -1583,6 +1594,26 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       name: 'DELETE /appointment-types/:id',
       verb: 'delete',
       path: () => `/appointment-types/${a.appointmentTypeId}`,
+      status: 404,
+    },
+    // --- chairs (DX-211) ---
+    {
+      name: 'PATCH /chairs/:id',
+      verb: 'patch',
+      path: () => `/chairs/${a.chairId}`,
+      body: () => ({ name: 'Hackeado' }),
+      status: 404,
+    },
+    {
+      name: 'POST /chairs/:id/deactivate',
+      verb: 'post',
+      path: () => `/chairs/${a.chairId}/deactivate`,
+      status: 404,
+    },
+    {
+      name: 'POST /chairs/:id/reactivate',
+      verb: 'post',
+      path: () => `/chairs/${a.chairId}/reactivate`,
       status: 404,
     },
     // --- payers (DX-153) ---
@@ -3469,6 +3500,15 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       checks:
         'B → 404 al cobrar dividido en el plan de A, y no ve su recibo (DX-390)',
       routes: ['POST /treatment-plans/:id/split-payments'],
+    },
+    {
+      spec: 'receipt-settings.e2e-spec.ts',
+      checks:
+        'B → 404 al anotar la factura externa de un abono de A y A → 404 al cambiar la leyenda de una sede de B, sin cambios (DX-515)',
+      routes: [
+        'PUT /payments/:id/external-invoice-number',
+        'PUT /payment-receipts/settings/locations/:locationId',
+      ],
     },
     {
       spec: 'patient-credit.e2e-spec.ts',

@@ -21,7 +21,8 @@ export interface LocationRegionalBackfillReport {
  * una sede (o verifica un registro) la deja con moneda, zona y locale NULL.
  * Clínica por clínica, con su tenant fijado (`runWithTenant`, RLS FORCE y rol
  * de la app), llama a `dx_g1_backfill_location_regional(tenantId)`: la única
- * correspondencia país → valor (D5, R2/R19). Rellena solo columnas NULL, no
+ * correspondencia país → valor (D5, R2/R19), una tabla de todos los países
+ * (Z1, `prisma/reference/country-regional-defaults.json`). Rellena solo columnas NULL, no
  * marca la sede como revisada (el ADMIN ve el aviso D5) e, idempotente, sin
  * filas NULL no escribe nada. Lo comparten el job y `npm run
  * g1:backfill-locations`. Desaparece en fase 2.

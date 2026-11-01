@@ -1,3 +1,4 @@
+import { referenceCurrencyDigitsCatalog } from '../../../../shared/money/__fixtures__/reference-currency-digits';
 import {
   ConflictException,
   ForbiddenException,
@@ -75,7 +76,13 @@ function setup(plan: { status?: TreatmentPlanStatus } = {}) {
       policy,
       FIXED_CLOCK,
     ),
-    bulk: new ApplyBulkDiscountUseCase(repo, policy, FIXED_CLOCK, catalog),
+    bulk: new ApplyBulkDiscountUseCase(
+      repo,
+      policy,
+      FIXED_CLOCK,
+      catalog,
+      referenceCurrencyDigitsCatalog(),
+    ),
   };
 }
 

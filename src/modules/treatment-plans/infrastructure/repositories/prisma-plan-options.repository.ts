@@ -176,15 +176,32 @@ export class PrismaPlanOptionsRepository implements PlanOptionsRepository {
            )
       )`;
     const offset = (query.page - 1) * query.pageSize;
+    // D2: se pagina por GRUPO de opciones (las alternativas A/B de un plan;
+    // un plan suelto es su propio grupo), no por opción: una conversación
+    // con el paciente nunca se parte entre dos páginas, y `total` cuenta
+    // conversaciones por seguir (lo que Inicio llama «Presupuestos por
+    // seguir»). Orden: el grupo por su presentación MÁS antigua (la que
+    // decide a quién llamar primero); dentro, cada opción por la suya.
+    const groupKey = Prisma.sql`coalesce(p."optionGroupId", p."id")`;
 
     return this.prisma.runWithTenant(
       async (tx) => {
         const [{ total }] = await tx.$queryRaw<{ total: number }[]>`
-          SELECT count(*)::int AS "total"
+          SELECT count(DISTINCT ${groupKey})::int AS "total"
             FROM "treatment_plans" p
             JOIN "patients" pa ON pa."id" = p."patientId"
            WHERE ${where}`;
         const rows = await tx.$queryRaw<FollowUpSqlRow[]>`
+          WITH "groups" AS (
+            SELECT ${groupKey} AS "groupKey",
+                   min(p."presentedAt") AS "firstPresentedAt"
+              FROM "treatment_plans" p
+              JOIN "patients" pa ON pa."id" = p."patientId"
+             WHERE ${where}
+             GROUP BY 1
+             ORDER BY 2 ASC, 1 ASC
+             LIMIT ${query.pageSize} OFFSET ${offset}
+          )
           SELECT p."id" AS "planId",
                  p."patientId",
                  pa."firstName" AS "patientFirstName",
@@ -199,15 +216,16 @@ export class PrismaPlanOptionsRepository implements PlanOptionsRepository {
                  coalesce(sum(i."price" - i."discount"), 0) AS "total",
                  count(i."id")::int AS "itemCount"
             FROM "treatment_plans" p
+            JOIN "groups" g ON g."groupKey" = ${groupKey}
             JOIN "patients" pa ON pa."id" = p."patientId"
             -- La sede de la presentación, también si se retiró (DX-329, m17).
             LEFT JOIN "locations" lo ON lo."id" = p."presentedLocationId"
             LEFT JOIN "treatment_plan_items" i
               ON i."planId" = p."id" AND i."deletedAt" IS NULL
            WHERE ${where}
-           GROUP BY p."id", pa."id", lo."id"
-           ORDER BY p."presentedAt" ASC, p."id" ASC
-           LIMIT ${query.pageSize} OFFSET ${offset}`;
+           GROUP BY p."id", pa."id", lo."id", g."groupKey", g."firstPresentedAt"
+           ORDER BY g."firstPresentedAt" ASC, g."groupKey" ASC,
+                    p."presentedAt" ASC, p."id" ASC`;
         return {
           total,
           rows: rows.map((row) => ({

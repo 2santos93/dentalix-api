@@ -40,6 +40,8 @@ export interface CreateAppointmentRepoInput {
   waitlistEntryId?: string;
   /** DX-210: «Adelantar si hay hueco» (por defecto false). */
   wantsEarlier?: boolean;
+  /** DX-211: sillón ya validado (de esta clínica, de la sede y activo). */
+  chairId?: string;
 }
 
 export interface UpdateAppointmentRepoInput {
@@ -48,6 +50,8 @@ export interface UpdateAppointmentRepoInput {
   end?: Date;
   /** DX-121: mover la cita a otro profesional (ya validado por el use-case). */
   providerId?: string;
+  /** DX-211: cambiar o quitar (`null`) el sillón, ya validado por el use-case. */
+  chairId?: string | null;
   status?: AppointmentStatus;
   reason?: string | null;
   notes?: string | null;
@@ -113,6 +117,12 @@ export interface UpdateAppointmentRepoInput {
   clearCancellation?: true;
   /** DX-279: hora en que se marca NO_SHOW; null al salir de NO_SHOW. */
   noShowMarkedAt?: Date | null;
+  /**
+   * DX-509: la cita deja de ser sobrecupo (se movió, o se deshizo la llegada
+   * o se reactivó con su hueco libre) y pasa a contar en la EXCLUDE del
+   * profesional. Solo se apaga: un sobrecupo nace en «Atender sin cita».
+   */
+  overbooked?: false;
 }
 
 /** DX-279: lo que el caso de uso decide de una cancelación. */
@@ -157,6 +167,8 @@ export interface ListAppointmentsByRangeParams {
   providerIds?: string[];
   /** DX-121: sede explícita; si falta, la sede del request (X-Location-Id). */
   locationId?: string;
+  /** DX-211: solo las citas de estos sillones (ids ya validados contra la sede). */
+  chairIds?: string[];
 }
 
 export interface ListUpcomingAppointmentsParams {
@@ -237,6 +249,19 @@ export interface AppointmentRepository {
     excludeId?: string,
   ): Promise<Appointment[]>;
 
+  /**
+   * DX-211: igual que `findOverlapping` pero por SILLÓN: citas vivas y no
+   * canceladas de ese sillón que se solapan con `[start, end)` (un sobrecupo
+   * también ocupa el sillón). Es el pre-check de la EXCLUDE
+   * appointments_no_overlap_per_chair.
+   */
+  findOverlappingForChair(
+    chairId: string,
+    start: Date,
+    end: Date,
+    excludeId?: string,
+  ): Promise<Appointment[]>;
+
   update(
     id: string,
     patch: UpdateAppointmentRepoInput,
@@ -246,8 +271,13 @@ export interface AppointmentRepository {
    * DX-200 «Deshacer llegada»: si la cita SIGUE en ARRIVED, vuelve al estado
    * previo y borra la hora de llegada, en una sola sentencia condicional.
    * `null` si ya no estaba en ARRIVED (otra persona la movió) o no existe.
+   * DX-509: con `clearOverbooked`, en la MISMA sentencia deja de ser
+   * sobrecupo (la EXCLUDE del profesional decide si su hueco sigue libre).
    */
-  undoArrival(id: string): Promise<Appointment | null>;
+  undoArrival(
+    id: string,
+    options?: { clearOverbooked?: boolean },
+  ): Promise<Appointment | null>;
 
   /**
    * DX-200: citas vivas de la sede en ARRIVED, IN_CHAIR o READY_FOR_CHECKOUT

@@ -18,9 +18,7 @@ import {
 } from '../src/modules/payments/domain/ports/plan-allocation-repository.port';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { seedDemo } from '../prisma/seed-demo';
-import { DEMO_TIMEZONE } from '../prisma/demo/calendar';
 import { purgeDemoTenants } from './support/demo-tenant-purge';
-import { civilDaysSince } from './support/sede-clock';
 import {
   REGIONAL_BOGOTA_FIXTURE,
   locationData,
@@ -45,14 +43,9 @@ const PAID_AT = new Date('2026-10-20T12:00:00.000Z');
 // Fechas de la tasa por si la sede no está en UTC.
 const RATE_DATES = ['2026-10-19', '2026-10-20', '2026-10-21'];
 const EUR_PER_USD = 0.9;
-/**
- * DX-375: la demo trae un abono en USD de hace 30 min sobre un plan en COP;
- * con la tasa COP de su día en la caché lo congela al sembrarse, sin salir a
- * la red. DX-449: pasada la medianoche de Bogotá ese abono es de AYER, así que
- * se siembra la tasa de cada día que toca la última hora (uno o dos).
- */
-const DEMO_RATE_DAYS = civilDaysSince(60, DEMO_TIMEZONE);
-const COP_PER_USD = 4000;
+// DX-375 / V1: los abonos en bolívares de la demo congelan (y al quitarles la
+// imputación, vuelven a calcular) la tasa MANUAL de su día que la propia demo
+// siembra: no hace falta ninguna tasa en la caché ni salir a la red.
 
 let app: INestApplication;
 let deps: BackfillDeps;
@@ -224,14 +217,6 @@ describe('backfill de imputaciones de abonos (DX-051, R17)', () => {
       })),
       skipDuplicates: true,
     });
-    await raw.exchangeRateSnapshot.createMany({
-      data: DEMO_RATE_DAYS.map((date) => ({
-        date,
-        currency: 'COP',
-        rate: COP_PER_USD,
-      })),
-      skipDuplicates: true,
-    });
 
     ({ tenantId: demoId } = await seedDemo({ quiet: true }));
     other = await seedOtherClinic();
@@ -264,13 +249,6 @@ describe('backfill de imputaciones de abonos (DX-051, R17)', () => {
       where: {
         date: { in: RATE_DATES },
         currency: 'EUR',
-        fetchedAt: { gte: ratesCreatedAt },
-      },
-    });
-    await raw.exchangeRateSnapshot.deleteMany({
-      where: {
-        date: { in: DEMO_RATE_DAYS },
-        currency: 'COP',
         fetchedAt: { gte: ratesCreatedAt },
       },
     });

@@ -20,6 +20,7 @@ import {
 const LOW_LIMITS: RateLimitConfig = {
   global: { limit: 1000, ttlMs: 60_000 },
   auth: { limit: 8, ttlMs: 60_000 },
+  'subdomain-check': { limit: 3, ttlMs: 60_000 },
   'login-burst': { limit: 3, ttlMs: 60_000 },
   invitation: { limit: 2, ttlMs: 60_000 },
   password: { limit: 2, ttlMs: 60_000 },
@@ -131,6 +132,20 @@ describe('Rate limiting (e2e)', () => {
         await request(app.getHttpServer())
           .post('/api/v1/auth/register')
           .send({}),
+      );
+    });
+
+    it('GET public/subdomains/:slug/availability: política propia `subdomain-check`, 429 por IP', async () => {
+      for (const slug of ['libre-uno', 'libre-dos', 'libre-tres']) {
+        await request(app.getHttpServer())
+          .get(`/api/v1/public/subdomains/${slug}/availability`)
+          .expect(200);
+      }
+      // Cambiar de dirección no abre otro balde: barrer direcciones choca.
+      expectTooMany(
+        await request(app.getHttpServer()).get(
+          '/api/v1/public/subdomains/libre-cuatro/availability',
+        ),
       );
     });
 

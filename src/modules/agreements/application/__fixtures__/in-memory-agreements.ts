@@ -30,7 +30,7 @@ export class InMemoryAgreementRepository implements AgreementRepository {
     const row: Agreement = {
       id: `agreement-${this.nextId++}`,
       name: 'Convenio base',
-      payer: { id: 'payer-1', name: 'Sanitas', type: 'PUBLIC_SYSTEM' },
+      payer: { id: 'payer-1', name: 'Sanavida', type: 'PUBLIC_SYSTEM' },
       kind: 'PERCENT_DISCOUNT',
       percent: 10,
       percentByCategory: null,

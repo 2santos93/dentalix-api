@@ -10,7 +10,7 @@ import { PrismaPatientCoverageRepository } from '../src/modules/patient-coverage
 // DX-153, capa DB: pagadores (payers) y coberturas del paciente
 // (patient_coverages). RLS FORCE, FK COMPUESTAS (cruzar clínicas falla), las
 // CHECK (vigencia), los índices únicos parciales y el relleno de
-// patients."insurerEps" (idempotente, sin tocar el texto). Lo que se prueba va
+// patients."legacyInsurerName" (idempotente, sin tocar el texto). Lo que se prueba va
 // por la MISMA ruta que la app (runWithTenant, rol dentalix_app, sujeto a
 // RLS); `raw` (DIRECT_URL, superusuario) siembra y limpia.
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
@@ -26,7 +26,12 @@ const BACKFILL = readFileSync(
     '../prisma/migrations/20261020210200_dx153_insurer_eps_backfill/migration.sql',
   ),
   'utf8',
-);
+)
+  // SQL histórico con los nombres de hoy (migración 20261110130000): la
+  // columna y la marca renombradas y el tipo genérico del código anterior.
+  .replaceAll('"insurerEps"', '"legacyInsurerName"')
+  .replaceAll('"migratedFromInsurerEps"', '"migratedFromLegacyInsurer"')
+  .replaceAll("'OTRO'", "'OTHER'");
 
 interface Clinic {
   tenantId: string;
@@ -48,8 +53,8 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
   const payer = await raw.payer.create({
     data: {
       tenantId: tenant.id,
-      name: 'Sanitas',
-      type: 'EPS_CO',
+      name: 'Sanavida',
+      type: 'PUBLIC_SYSTEM',
     },
   });
   return { tenantId: tenant.id, patients, payerId: payer.id };
@@ -154,10 +159,8 @@ describe('pagadores y coberturas (int, DX-153)', () => {
     ).rejects.toThrow(/23503|foreign key/i);
   });
 
-  it('legacy MUTUA_ES with CO inserts because payers_type_country_check no longer exists', async () => {
-    // Excepción G5.3 (DX-334): tipos de pagador anteriores a DX-326. DX-326:
-    // cualquier tipo con cualquier país o ninguno; el INSERT es el de la API
-    // anterior, con el código antiguo.
+  it('an INSURER with a country inserts because payers_type_country_check no longer exists', async () => {
+    // DX-326: cualquier tipo con cualquier país o ninguno.
     const [check] = await raw.$queryRaw<{ n: number }[]>`
       SELECT count(*)::int AS n FROM pg_constraint
        WHERE conrelid = 'public.payers'::regclass
@@ -168,7 +171,7 @@ describe('pagadores y coberturas (int, DX-153)', () => {
         raw.$executeRaw`INSERT INTO payers
           ("id", "tenantId", "name", "type", "country", "updatedAt")
           VALUES (gen_random_uuid(), ${a.tenantId}::uuid, 'Mutua con CO',
-                  'MUTUA_ES', 'CO', now())`,
+                  'INSURER', 'ES', now())`,
       ).resolves.toBe(1);
     } finally {
       await raw.$executeRaw`DELETE FROM payers
@@ -235,14 +238,14 @@ describe('pagadores y coberturas (int, DX-153)', () => {
     );
   });
 
-  // DX-322: el cliente Prisma ya no ve `insurerEps` (@ignore); la columna
+  // DX-322: el cliente Prisma ya no ve `legacyInsurerName` (@ignore); la columna
   // legada sigue en la BD hasta la fase 2 y se siembra y lee en crudo.
-  async function setInsurerEps(id: string, text: string): Promise<void> {
+  async function setLegacyInsurerName(id: string, text: string): Promise<void> {
     await raw.$executeRaw`
-      UPDATE patients SET "insurerEps" = ${text} WHERE id = ${id}::uuid`;
+      UPDATE patients SET "legacyInsurerName" = ${text} WHERE id = ${id}::uuid`;
   }
 
-  describe('relleno de insurerEps', () => {
+  describe('relleno de la aseguradora antigua', () => {
     let bf: { a: string[]; b: string };
     const longText = 'X'.repeat(300);
 
@@ -260,7 +263,7 @@ describe('pagadores y coberturas (int, DX-153)', () => {
       const mk = async (
         clinic: Clinic,
         firstName: string,
-        insurerEps: string | null,
+        insurerText: string | null,
         createdAt: Date,
         archived = false,
       ) => {
@@ -273,18 +276,21 @@ describe('pagadores y coberturas (int, DX-153)', () => {
             ...(archived ? { deletedAt: new Date() } : {}),
           },
         });
-        if (insurerEps !== null) await setInsurerEps(id, insurerEps);
+        if (insurerText !== null) await setLegacyInsurerName(id, insurerText);
         return id;
       };
       const ids = [
-        await mk(a, 'P1', 'Sura EPS', new Date('2026-01-02')),
-        await mk(a, 'P2', '  sura eps ', new Date('2026-01-01')),
+        await mk(a, 'P1', 'Surco Salud', new Date('2026-01-02')),
+        await mk(a, 'P2', '  surco salud ', new Date('2026-01-01')),
         await mk(a, 'P3', '   ', new Date('2026-01-03')),
         await mk(a, 'P4', null, new Date('2026-01-04')),
-        await mk(a, 'P5', 'Colsanitas', new Date('2026-01-05'), true),
+        await mk(a, 'P5', 'Colsanavida', new Date('2026-01-05'), true),
         await mk(a, 'P6', longText, new Date('2026-01-06')),
       ];
-      bf = { a: ids, b: await mk(b, 'PB', 'Sura EPS', new Date('2026-01-01')) };
+      bf = {
+        a: ids,
+        b: await mk(b, 'PB', 'Surco Salud', new Date('2026-01-01')),
+      };
       await runBackfill();
     });
 
@@ -301,14 +307,14 @@ describe('pagadores y coberturas (int, DX-153)', () => {
     const payersOf = (tenantId: string) =>
       raw.payer.findMany({ where: { tenantId }, orderBy: { name: 'asc' } });
 
-    it('un pagador por texto normalizado, con el texto del paciente más antiguo, tipo OTRO y sin país', async () => {
+    it('un pagador por texto normalizado, con el texto del paciente más antiguo, tipo OTHER y sin país', async () => {
       const payers = await payersOf(a.tenantId);
-      // El más antiguo con esa clave es P2 («  sura eps »), sin espacios.
+      // El más antiguo con esa clave es P2 («  surco salud »), sin espacios.
       expect(payers.map((p) => p.name).sort()).toEqual(
-        ['Colsanitas', 'X'.repeat(120), 'sura eps'].sort(),
+        ['Colsanavida', 'X'.repeat(120), 'surco salud'].sort(),
       );
       for (const p of payers) {
-        expect(p.type).toBe('OTRO');
+        expect(p.type).toBe('OTHER');
         expect(p.active).toBe(true);
       }
       // `country` lleva @ignore en el cliente (DX-326): se lee por SQL.
@@ -328,16 +334,16 @@ describe('pagadores y coberturas (int, DX-153)', () => {
       );
       for (const c of cov) {
         expect(c.isPrimary).toBe(true);
-        expect(c.migratedFromInsurerEps).toBe(true);
+        expect(c.migratedFromLegacyInsurer).toBe(true);
         expect(c.planName).toBeNull();
         expect(c.memberNumber).toBeNull();
         expect(c.validFrom).toBeNull();
       }
-      const sura = (await payersOf(a.tenantId)).find((p) =>
-        p.name.toLowerCase().startsWith('sura'),
+      const surco = (await payersOf(a.tenantId)).find((p) =>
+        p.name.toLowerCase().startsWith('surco'),
       );
-      const bySura = cov.filter((c) => c.payerId === sura?.id);
-      expect(bySura.map((c) => c.patientId).sort()).toEqual(
+      const bySurco = cov.filter((c) => c.payerId === surco?.id);
+      expect(bySurco.map((c) => c.patientId).sort()).toEqual(
         [bf.a[0], bf.a[1]].sort(),
       );
     });
@@ -346,7 +352,7 @@ describe('pagadores y coberturas (int, DX-153)', () => {
       const pa = await payersOf(a.tenantId);
       const pb = await payersOf(b.tenantId);
       expect(pb).toHaveLength(1);
-      expect(pb[0].name).toBe('Sura EPS');
+      expect(pb[0].name).toBe('Surco Salud');
       expect(pa.map((p) => p.id)).not.toContain(pb[0].id);
       const covB = await raw.patientCoverage.findMany({
         where: { tenantId: b.tenantId },
@@ -361,7 +367,7 @@ describe('pagadores y coberturas (int, DX-153)', () => {
       expect(names).toContain('X'.repeat(120));
     });
 
-    it('una segunda ejecución no duplica nada y insurerEps queda intacto', async () => {
+    it('una segunda ejecución no duplica nada y el texto antiguo queda intacto', async () => {
       const before = [
         await raw.payer.count({
           where: { tenantId: { in: [a.tenantId, b.tenantId] } },
@@ -382,26 +388,26 @@ describe('pagadores y coberturas (int, DX-153)', () => {
       expect(after).toEqual(before);
       expect(before).toEqual([4, 5]);
       const texts = await raw.$queryRaw<
-        { firstName: string; insurerEps: string | null }[]
+        { firstName: string; insurerText: string | null }[]
       >`
-        SELECT "firstName", "insurerEps" FROM patients
+        SELECT "firstName", "legacyInsurerName" AS "insurerText" FROM patients
          WHERE id = ANY(${[...bf.a, bf.b]}::uuid[])`;
       const byName = Object.fromEntries(
-        texts.map((t) => [t.firstName, t.insurerEps]),
+        texts.map((t) => [t.firstName, t.insurerText]),
       );
       expect(byName).toMatchObject({
-        P1: 'Sura EPS',
-        P2: '  sura eps ',
+        P1: 'Surco Salud',
+        P2: '  surco salud ',
         P3: '   ',
         P4: null,
-        P5: 'Colsanitas',
+        P5: 'Colsanavida',
         P6: longText,
-        PB: 'Sura EPS',
+        PB: 'Surco Salud',
       });
     });
   });
 
-  describe('relleno de insurerEps: clave única y reutilización', () => {
+  describe('relleno de la aseguradora antigua: clave única y reutilización', () => {
     const tenants = () => ({ in: [a.tenantId, b.tenantId] });
 
     async function wipe(): Promise<void> {
@@ -423,12 +429,12 @@ describe('pagadores y coberturas (int, DX-153)', () => {
     const mkPatient = async (
       clinic: Clinic,
       firstName: string,
-      insurerEps: string,
+      insurerText: string,
     ) => {
       const { id } = await raw.patient.create({
         data: { tenantId: clinic.tenantId, firstName, lastName: 'Clave' },
       });
-      await setInsurerEps(id, insurerEps);
+      await setLegacyInsurerName(id, insurerText);
       return id;
     };
 
@@ -452,17 +458,17 @@ describe('pagadores y coberturas (int, DX-153)', () => {
       const existing = await raw.payer.create({
         data: {
           tenantId: a.tenantId,
-          name: 'SURA EPS',
-          type: 'EPS_CO',
+          name: 'SURCO SALUD',
+          type: 'PUBLIC_SYSTEM',
         },
       });
-      const patientId = await mkPatient(a, 'R1', 'Sura EPS');
+      const patientId = await mkPatient(a, 'R1', 'Surco Salud');
       await runBackfill();
       const payers = await raw.payer.findMany({
         where: { tenantId: a.tenantId },
       });
       expect(payers.map((p) => p.id)).toEqual([existing.id]);
-      expect(payers[0].type).toBe('EPS_CO');
+      expect(payers[0].type).toBe('PUBLIC_SYSTEM');
       const cov = await raw.patientCoverage.findMany({
         where: { tenantId: a.tenantId },
       });
@@ -493,7 +499,7 @@ describe('pagadores y coberturas (int, DX-153)', () => {
           data: {
             tenantId: a.tenantId,
             name: `Pagador carrera ${patientId}`,
-            type: 'OTRO',
+            type: 'OTHER',
           },
         })
       ).id;
@@ -514,6 +520,15 @@ describe('pagadores y coberturas (int, DX-153)', () => {
     }
 
     const inA = <T>(fn: () => Promise<T>) => tenantContext.run(a.tenantId, fn);
+    // DX-360: retirar el pagador deja su evento de auditoría.
+    const auditBy = () => ({
+      tenantId: a.tenantId,
+      locationId: null,
+      actor: { userId: by, role: ClinicRole.ADMIN },
+      requestId: null,
+      ip: null,
+      userAgent: null,
+    });
     const input = (patientId: string, payerId: string, isPrimary: boolean) => ({
       patientId,
       payerId,
@@ -534,7 +549,7 @@ describe('pagadores y coberturas (int, DX-153)', () => {
       for (let round = 0; round < 8; round++) {
         const { patientId, payerId } = await seedPatient(0);
         const [retired, created] = await Promise.allSettled([
-          inA(() => payers.retire(payerId, by)),
+          inA(() => payers.retire(payerId, auditBy())),
           inA(() => repo.create(input(patientId, payerId, false))),
         ]);
         const payer = await raw.payer.findUniqueOrThrow({
@@ -566,17 +581,23 @@ describe('pagadores y coberturas (int, DX-153)', () => {
           data: {
             tenantId: a.tenantId,
             name: `Spare ${payerId}`,
-            type: 'OTRO',
+            type: 'OTHER',
           },
         })
       ).id;
       const gone = (
         await raw.payer.create({
-          data: { tenantId: a.tenantId, name: `Gone ${payerId}`, type: 'OTRO' },
+          data: {
+            tenantId: a.tenantId,
+            name: `Gone ${payerId}`,
+            type: 'OTHER',
+          },
         })
       ).id;
-      await expect(inA(() => payers.retire(gone, by))).resolves.toBe('RETIRED');
-      await expect(inA(() => payers.retire(gone, by))).resolves.toBe(
+      await expect(inA(() => payers.retire(gone, auditBy()))).resolves.toBe(
+        'RETIRED',
+      );
+      await expect(inA(() => payers.retire(gone, auditBy()))).resolves.toBe(
         'NOT_FOUND',
       );
       await expect(
@@ -789,7 +810,7 @@ describe('pagadores y coberturas (int, DX-153)', () => {
           data: {
             tenantId: a.tenantId,
             name: `Verifica ${patientId}`,
-            type: 'EMPRESA',
+            type: 'EMPLOYER',
           },
         })
       ).id;
@@ -844,7 +865,7 @@ describe('pagadores y coberturas (int, DX-153)', () => {
       const { id, payerId } = await seedCoverage('A1234');
       const other = (
         await raw.payer.create({
-          data: { tenantId: a.tenantId, name: `Otro ${id}`, type: 'OTRO' },
+          data: { tenantId: a.tenantId, name: `Otro ${id}`, type: 'OTHER' },
         })
       ).id;
       await raw.patientCoverage.update({

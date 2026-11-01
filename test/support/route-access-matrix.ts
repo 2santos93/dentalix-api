@@ -85,6 +85,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // 2026-07-28-logout.md; cookie de refresh: loop/informes/DX-062.md.
   'POST /auth/register': PUBLIC,
   'POST /auth/register/verify': PUBLIC,
+  // ¿Está libre esta dirección web? (registro, mientras se escribe): sin
+  // sesión ni clínica; límite propio `subdomain-check` por IP.
+  'GET /public/subdomains/:slug/availability': PUBLIC,
   'POST /auth/login': PUBLIC,
   'POST /auth/refresh': PUBLIC,
   'POST /auth/logout': PUBLIC,
@@ -312,7 +315,7 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /patients/:patientId/signature-requests': EVERY_ROLE,
   'POST /patients/:patientId/signature-requests/:id/revoke': EVERY_ROLE,
 
-  // --- Autorización de datos, Ley 1581 (DX-037) ----------------------------
+  // --- Autorización de datos (DX-037) ----------------------------
   // loop/informes/DX-037.md.
   'GET /patients/:patientId/data-consents': EVERY_ROLE,
   'POST /patients/:patientId/data-consents': EVERY_ROLE,
@@ -469,6 +472,13 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /payment-methods': ADMIN_ONLY,
   'PATCH /payment-methods/:id': ADMIN_ONLY,
   'DELETE /appointment-types/:id': ADMIN_ONLY,
+  // DX-211: sillones de cada sede; leerlos quien agenda, escribirlos ADMIN.
+  'GET /chairs': EVERY_ROLE,
+  'POST /chairs': ADMIN_ONLY,
+  'PUT /chairs/order': ADMIN_ONLY,
+  'PATCH /chairs/:id': ADMIN_ONLY,
+  'POST /chairs/:id/deactivate': ADMIN_ONLY,
+  'POST /chairs/:id/reactivate': ADMIN_ONLY,
   'GET /payers': EVERY_ROLE,
   'POST /payers': roles('ADMIN', 'RECEPTION'),
   'PATCH /payers/:id': ADMIN_ONLY,
@@ -556,6 +566,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /treatment-plans/:id/payments': BILLING,
   'GET /treatment-plans/:id/balance': BILLING,
   'DELETE /payments/:id': BILLING,
+  // DX-515: el nº de la factura fiscal externa lo ponen los roles de cobro.
+  'PUT /payments/:id/external-invoice-number': BILLING,
   // Recibo de caja (DX-136): loop/informes/DX-136.md.
   'GET /payments/:id/receipt': BILLING,
   'POST /payments/:id/receipt/print': BILLING,
@@ -609,6 +621,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /closing-queue': roles('ADMIN', 'DENTIST', 'RECEPTION'),
   'GET /closing-queue/count': roles('ADMIN', 'DENTIST', 'RECEPTION'),
   'POST /closing-queue/dismissals': roles('ADMIN', 'DENTIST', 'RECEPTION'),
+  // DX-503: «Mi día». Los cuatro roles; qué listas cuenta cada uno lo decide
+  // WORK_QUEUE_ROLES, que nunca amplía el @Roles de ninguna lista.
+  'GET /work-queues/summary': EVERY_ROLE,
   // DX-339: agenda de contingencia por sede (PDF de hoy y mañana con los
   // teléfonos de los pacientes): recepción y gestión; la sede la acota el
   // caso de uso (DX-089).
@@ -630,6 +645,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // ajustes de caja de la clínica, solo ADMIN.
   'GET /cash-sessions/settings': BILLING,
   'PUT /cash-sessions/settings': ADMIN_ONLY,
+  // DX-515: título y leyenda del recibo (clínica y sede), solo ADMIN.
+  'GET /payment-receipts/settings': ADMIN_ONLY,
+  'PUT /payment-receipts/settings': ADMIN_ONLY,
+  'PUT /payment-receipts/settings/locations/:locationId': ADMIN_ONLY,
   'GET /cash-sessions/current': BILLING,
   'POST /cash-sessions/open': BILLING,
   'GET /cash-sessions': BILLING,

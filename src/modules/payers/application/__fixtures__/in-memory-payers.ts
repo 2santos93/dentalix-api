@@ -21,7 +21,7 @@ export class InMemoryPayerRepository implements PayerRepository {
   seed(partial: Partial<Payer> = {}): Payer {
     const row: Payer = {
       id: `payer-${this.nextId++}`,
-      name: 'Sanitas',
+      name: 'Sanavida',
       type: 'PUBLIC_SYSTEM',
       active: true,
       createdAt: new Date('2026-10-01T00:00:00.000Z'),

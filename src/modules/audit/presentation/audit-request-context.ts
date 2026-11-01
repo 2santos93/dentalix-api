@@ -33,3 +33,16 @@ export function auditRequestContext(
     userAgent: (Array.isArray(userAgent) ? userAgent[0] : userAgent) ?? null,
   };
 }
+
+/**
+ * Igual, para una ruta que solo corre detrás del RolesGuard con sesión de
+ * clínica: sin ella es un error de programación, no un 4xx (DX-360).
+ */
+export function requireAuditRequestContext(
+  req: AuditableRequest,
+  tenantContext: TenantContextService,
+): AuditRequestContext {
+  const ctx = auditRequestContext(req, tenantContext);
+  if (!ctx) throw new Error('Sin sesión de clínica detrás del RolesGuard');
+  return ctx;
+}

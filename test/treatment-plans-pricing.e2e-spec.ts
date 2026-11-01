@@ -225,7 +225,7 @@ describe('Precio resuelto y foto en el ítem del plan (e2e, DX-105)', () => {
     });
 
     payer = await create('/payers', {
-      name: 'Sura',
+      name: 'Surco',
       type: 'PUBLIC_SYSTEM',
     });
 
@@ -320,14 +320,14 @@ describe('Precio resuelto y foto en el ítem del plan (e2e, DX-105)', () => {
 
   describe('convenio por porcentaje', () => {
     let patient: string;
-    let sura: string;
+    let surco: string;
     beforeAll(async () => {
       patient = await createPatient('Porcentaje');
-      sura = await createAgreement('Sura EPS', {
+      surco = await createAgreement('Surco Salud', {
         kind: 'PERCENT_DISCOUNT',
         percent: 15,
       });
-      await assign(patient, { agreementId: sura });
+      await assign(patient, { agreementId: surco });
     });
 
     it('% general: 100 000 − 15 % = 85 000, con convenio en la foto; gana a la lista de la sede', async () => {
@@ -338,8 +338,8 @@ describe('Precio resuelto y foto en el ítem del plan (e2e, DX-105)', () => {
         catalogPrice: 85000,
         basePrice: 100000,
         priceSource: 'AGREEMENT_PERCENT',
-        agreementId: sura,
-        agreementName: 'Sura EPS',
+        agreementId: surco,
+        agreementName: 'Surco Salud',
         pricingLocationId: northLocation,
         discountById: null,
       });
@@ -431,18 +431,18 @@ describe('Precio resuelto y foto en el ítem del plan (e2e, DX-105)', () => {
       const plan = await newPlan(patient);
       const before = await added(plan, endo);
       expect(before.price).toBe(85000);
-      await as().patch(`/agreements/${sura}`, { percent: 40 }).expect(200);
+      await as().patch(`/agreements/${surco}`, { percent: 40 }).expect(200);
       try {
         const [kept] = await planItems(plan);
         expect(kept).toMatchObject({
           price: 85000,
           catalogPrice: 85000,
-          agreementName: 'Sura EPS',
+          agreementName: 'Surco Salud',
         });
         const fresh = await added(plan, endo);
         expect(fresh).toMatchObject({ price: 60000, catalogPrice: 60000 });
       } finally {
-        await as().patch(`/agreements/${sura}`, { percent: 15 }).expect(200);
+        await as().patch(`/agreements/${surco}`, { percent: 15 }).expect(200);
       }
     });
 
@@ -459,12 +459,12 @@ describe('Precio resuelto y foto en el ítem del plan (e2e, DX-105)', () => {
           catalogPrice: source.catalogPrice,
           basePrice: source.basePrice,
           priceSource: 'AGREEMENT_PERCENT',
-          agreementId: sura,
-          agreementName: 'Sura EPS',
+          agreementId: surco,
+          agreementName: 'Surco Salud',
           pricingLocationId: northLocation,
         });
       } finally {
-        await assign(patient, { agreementId: sura });
+        await assign(patient, { agreementId: surco });
       }
     });
   });

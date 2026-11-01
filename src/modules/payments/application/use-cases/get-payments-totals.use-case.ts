@@ -27,7 +27,7 @@ export interface GetPaymentsTotalsResult {
   /** Number of active payments in the range (regardless of currency). */
   count: number;
   /** Breakdown of the ORIGINAL (unconverted) amounts grouped by each
-   * payment's own currency, e.g. `{ COP: 500000, USD: 30 }`. */
+   * payment's own currency, e.g. `{ USD: 500, EUR: 30 }`. */
   byCurrency: Record<string, number>;
 }
 

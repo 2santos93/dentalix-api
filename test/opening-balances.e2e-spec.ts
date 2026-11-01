@@ -210,9 +210,9 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
     const res = await attach(
       '',
       csv(PATIENTS_HEADER, [
-        'CC;111111;Ana;Migrada',
-        'CC;222222;Luis;Migrado',
-        'CC;900900;Ya;Existía',
+        'NATIONAL_ID;111111;Ana;Migrada',
+        'NATIONAL_ID;222222;Luis;Migrado',
+        'NATIONAL_ID;900900;Ya;Existía',
       ]),
       'pacientes.csv',
     )
@@ -685,7 +685,7 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
   it('retirar SOLO los saldos del lote aunque sus pacientes ya tengan citas', async () => {
     const res = await attach(
       '',
-      csv(PATIENTS_HEADER, ['CC;444444;Iris;Citada']),
+      csv(PATIENTS_HEADER, ['NATIONAL_ID;444444;Iris;Citada']),
       'p3.csv',
     ).expect(201);
     const third = res.body as Batch;
@@ -748,7 +748,7 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
     const upload = async (file: string, addToExisting?: string) => {
       const res = await attach(
         '',
-        csv(PATIENTS_HEADER, ['CC;555555;Dora;Repetida']),
+        csv(PATIENTS_HEADER, ['NATIONAL_ID;555555;Dora;Repetida']),
         file,
       ).expect(201);
       const batch = res.body as Batch;
@@ -840,7 +840,7 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
   it('quitar la hoja de saldos de un dry-run; en un lote ya importado, 409', async () => {
     const res = await attach(
       '',
-      csv(PATIENTS_HEADER, ['CC;333333;Eva;Nueva']),
+      csv(PATIENTS_HEADER, ['NATIONAL_ID;333333;Eva;Nueva']),
       'p2.csv',
     ).expect(201);
     const second = res.body as Batch;

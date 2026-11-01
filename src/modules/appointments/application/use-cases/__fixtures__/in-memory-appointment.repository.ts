@@ -5,6 +5,7 @@ import {
   Appointment,
   PlanItemReservedElsewhere,
 } from '../../../domain/entities/appointment.entity';
+import type { ChairSummary } from '../../../../chairs/domain/entities/chair.entity';
 import type { AuditRequestContext } from '../../../../audit/domain/audit-request-context';
 import { WANTS_EARLIER_GONE_MESSAGE } from '../../../domain/wants-earlier';
 import {
@@ -40,7 +41,7 @@ const FAKE_LOCATION_TIME_ZONE = 'America/Bogota';
 // fake still has to honour "non-deleted only" like the real Prisma repo, so
 // it tracks `deletedAt` on the stored row and strips it via `toEntity`
 // (mirrors `mapToEntity` in prisma-appointment.repository.ts).
-type StoredAppointment = Appointment & {
+type StoredAppointment = Omit<Appointment, 'chair'> & {
   deletedAt: Date | null;
   /** DX-200: a qué vuelve «Deshacer llegada» (no sale en la entidad). */
   preArrivalStatus: AppointmentStatus | null;
@@ -67,6 +68,12 @@ let seq = 0;
  */
 export class InMemoryAppointmentRepository implements AppointmentRepository {
   private readonly rows: StoredAppointment[] = [];
+
+  /**
+   * DX-211: sillones que el doble embebe en la cita (lo que en Prisma es el
+   * `include` del sillón). Un `chairId` sin entrada sale con `chair: null`.
+   */
+  readonly chairDirectory = new Map<string, ChairSummary>();
 
   /**
    * DX-122: con unos pendientes en memoria, `update` con `enqueueWaitlist` y
@@ -112,6 +119,7 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
       triageNote: overrides.triageNote ?? null,
       walkIn: overrides.walkIn ?? false,
       overbooked: overrides.overbooked ?? false,
+      chairId: overrides.chairId ?? null,
       preArrivalStatus: overrides.preArrivalStatus ?? null,
       createdAt: overrides.createdAt ?? now,
       updatedAt: overrides.updatedAt ?? now,
@@ -160,6 +168,11 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
       triageNote: row.triageNote,
       walkIn: row.walkIn,
       overbooked: row.overbooked,
+      chairId: row.chairId,
+      chair:
+        row.chairId !== null
+          ? (this.chairDirectory.get(row.chairId) ?? null)
+          : null,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };
@@ -217,6 +230,7 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
       triageNote: null,
       walkIn: false,
       overbooked: false,
+      chairId: input.chairId ?? null,
       preArrivalStatus: null,
       createdAt: now,
       updatedAt: now,
@@ -240,6 +254,11 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
         (r) => !params.providerIds || params.providerIds.includes(r.providerId),
       )
       .filter((r) => !params.locationId || r.locationId === params.locationId)
+      .filter(
+        (r) =>
+          !params.chairIds ||
+          (r.chairId !== null && params.chairIds.includes(r.chairId)),
+      )
       .sort((a, b) => a.start.getTime() - b.start.getTime())
       .map((r) => this.toEntity(r));
     return Promise.resolve(items);
@@ -266,6 +285,23 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
       // Half-open interval overlap — see PrismaAppointmentRepository for the
       // identical rationale: adjacent appointments (end === start) do NOT
       // satisfy both conditions, so they don't overlap.
+      .filter((r) => r.start < end && r.end > start)
+      .filter((r) => (excludeId ? r.id !== excludeId : true))
+      .map((r) => this.toEntity(r));
+    return Promise.resolve(items);
+  }
+
+  findOverlappingForChair(
+    chairId: string,
+    start: Date,
+    end: Date,
+    excludeId?: string,
+  ): Promise<Appointment[]> {
+    // DX-211: por sillón (mismo solape medio-abierto); un sobrecupo también lo ocupa.
+    const items = this.rows
+      .filter((r) => r.chairId === chairId)
+      .filter((r) => r.deletedAt === null)
+      .filter((r) => r.status !== AppointmentStatus.CANCELLED)
       .filter((r) => r.start < end && r.end > start)
       .filter((r) => (excludeId ? r.id !== excludeId : true))
       .map((r) => this.toEntity(r));
@@ -392,7 +428,10 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
     });
   }
 
-  undoArrival(id: string): Promise<Appointment | null> {
+  undoArrival(
+    id: string,
+    options: { clearOverbooked?: boolean } = {},
+  ): Promise<Appointment | null> {
     const row = this.rows.find((r) => r.id === id && r.deletedAt === null);
     if (
       !row ||
@@ -405,6 +444,7 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
       status: row.preArrivalStatus,
       preArrivalStatus: null,
       arrivedAt: null,
+      ...(options.clearOverbooked ? { overbooked: false } : {}),
     });
     return Promise.resolve(this.toEntity(row));
   }

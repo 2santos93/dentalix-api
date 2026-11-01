@@ -349,11 +349,11 @@ describe('Medio y referencia en estado de cuenta y caja (e2e, DX-395)', () => {
       .trim()
       .split('\r\n');
     expect(lines[0]).toBe(
-      'Fecha,Sede,Paciente,Destino,Medio,Referencia,Moneda,Importe',
+      'Fecha,Sede,Paciente,Destino,Medio,Referencia,Factura externa,Moneda,Importe',
     );
     expect(lines).toHaveLength(3);
-    expect(res.text).toContain('"Pago móvil","ABC 123",USD,10.00');
-    expect(res.text).toContain('"Pago móvil","123-456",USD,10.00');
+    expect(res.text).toContain('"Pago móvil","ABC 123","",USD,10.00');
+    expect(res.text).toContain('"Pago móvil","123-456","",USD,10.00');
 
     const audit = await raw.auditEvent.findFirst({
       where: {
