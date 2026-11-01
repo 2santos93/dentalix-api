@@ -2771,6 +2771,35 @@ Dentrix. Módulo `patients`, tabla `patient_responsible_parties`; migraciones
   familiar); los avisos de Sofía van a su madre Claudia (contacto) y los de
   Mateo a la abuela.
 
+## Plazo de conservación de la historia clínica (DX-330)
+
+Cada clínica guarda en `tenants."clinicalRecordRetentionYears"` cuántos años
+conserva la historia clínica desde la última atención. El plazo que rige es el
+guardado, nunca por debajo del mínimo de plataforma
+(`PLATFORM_MIN_CLINICAL_RETENTION_YEARS`).
+
+- **Endpoints**: `GET /patients/retention/settings` (los 4 roles) devuelve el
+  plazo guardado, el vigente, el mínimo de plataforma, el máximo y la ventana
+  de corrección (`correctionWindow`, `null` si no hay ninguna abierta).
+  `PUT /patients/retention/settings` solo lo usa el ADMIN
+  (`CLINIC_SETTINGS_WRITE_ROLES`). Las dos rutas están declaradas antes de
+  `GET /patients/:id`.
+- **Reducir pide confirmación**: sin `confirmReduction: true` responde 409
+  `RETENTION_REDUCTION_UNCONFIRMED` con `previousYears`, `newYears`,
+  `protectedPatients` y `withinCorrectionWindow`, sin guardar nada. Con él, las
+  historias que ya estaban en retención mantienen su fecha de fin y el plazo
+  nuevo se aplica al resto y a las atenciones nuevas. En una subida, o sin
+  cambio, `confirmReduction` se ignora.
+- **Ventana de corrección**: durante las 24 horas siguientes a una subida,
+  volver al plazo anterior no deja ninguna fecha fijada por esa subida.
+- **Concurrencia**: el cambio bloquea la fila de la clínica con
+  `FOR NO KEY UPDATE`; si otra operación con los pacientes lo impide, o la
+  reducción tarda demasiado, responde 409 `RETENTION_SETTINGS_BUSY` sin
+  guardar nada.
+- **Auditoría**: un cambio real deja un UPDATE de `CLINIC_SETTINGS` con
+  `reason: CLINICAL_RECORD_RETENTION_SETTINGS`, `configChange` y
+  `retentionTermChange`, en la misma transacción. Sin cambio, 200 sin evento.
+
 ## Mayoría de edad de la clínica (DX-328)
 
 La edad desde la que un paciente es adulto la fija cada clínica en

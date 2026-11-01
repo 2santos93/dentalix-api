@@ -187,6 +187,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'PATCH /patients/:id/retention': ADMIN_ONLY,
   'POST /patients/:id/partial-suppression': ADMIN_ONLY,
   'GET /patients/retention/expiring': ADMIN_ONLY,
+  // DX-330: el plazo de conservación lo leen todos; lo cambia gestión.
+  'GET /patients/retention/settings': EVERY_ROLE,
+  'PUT /patients/retention/settings': ADMIN_ONLY,
   // DX-328: la mayoría de edad de la clínica la leen todos; la cambia gestión.
   'GET /patients/settings': EVERY_ROLE,
   'PUT /patients/settings': ADMIN_ONLY,

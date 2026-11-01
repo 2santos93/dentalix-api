@@ -97,6 +97,18 @@ import {
 } from '../application/use-cases/patient-settings.use-cases';
 import { PatientSettingsDto } from './dto/patient-settings.dto';
 import {
+  GetRetentionSettingsUseCase,
+  UpdateRetentionSettingsUseCase,
+  type RetentionSettings,
+  type RetentionSettingsUpdateResult,
+} from '../application/use-cases/retention-settings.use-cases';
+import {
+  RetentionReductionUnconfirmedErrorDto,
+  RetentionSettingsDto,
+  RetentionSettingsUpdateResultDto,
+  UpdateRetentionSettingsDto,
+} from './dto/retention-settings.dto';
+import {
   GetDocumentTypeNamesUseCase,
   UpdateDocumentTypeNamesUseCase,
   type DocumentTypeNamesSettings,
@@ -153,6 +165,9 @@ export class PatientsController {
     private readonly setRetention: SetRetentionExtensionUseCase,
     private readonly partiallySuppress: PartiallySuppressPatientUseCase,
     private readonly listRetentionExpiring: ListRetentionExpiringUseCase,
+    // DX-330: plazo de conservación de la HC de la clínica.
+    private readonly getRetentionSettings: GetRetentionSettingsUseCase,
+    private readonly updateRetentionSettings: UpdateRetentionSettingsUseCase,
     // DX-150: marca «Saldo vencido» de la cabecera de la ficha.
     private readonly balanceFlags: PatientBalanceFlags,
     // DX-153: resumen de cobertura de la ficha y del listado.
@@ -293,6 +308,60 @@ export class PatientsController {
         RETENTION_EXPIRING_MAX_PAGE_SIZE,
       ),
     });
+  }
+
+  // DX-330: antes de `@Get(':id')`, como `retention/expiring`.
+  @Get('retention/settings')
+  @ApiOperation({
+    summary: 'Plazo de conservación de la historia clínica de la clínica',
+    description:
+      'DX-330. `effectiveYears` es el plazo que rige (el guardado, nunca por ' +
+      'debajo del mínimo de plataforma). `correctionWindow` aparece durante ' +
+      'las 24 horas siguientes a una subida.',
+  })
+  @ApiOkResponse({ type: RetentionSettingsDto })
+  retentionSettings(): Promise<RetentionSettings> {
+    return this.getRetentionSettings.execute();
+  }
+
+  @Put('retention/settings')
+  @Roles(...CLINIC_SETTINGS_WRITE_ROLES)
+  @RolesDeniedMessage(CLINIC_SETTINGS_FORBIDDEN_MESSAGE)
+  @ApiOperation({
+    summary:
+      'Cambia el plazo de conservación de la historia clínica; queda en la auditoría',
+    description:
+      'DX-330. Subir aplica desde la siguiente petición. Reducir pide ' +
+      '`confirmReduction: true`: las historias que ya estaban en retención ' +
+      'mantienen su fecha de fin y el plazo nuevo se aplica al resto y a las ' +
+      'atenciones nuevas. Si el valor no cambia, responde 200 sin evento de ' +
+      'auditoría.',
+  })
+  @ApiOkResponse({ type: RetentionSettingsUpdateResultDto })
+  @ApiBadRequestResponse({
+    description:
+      'No entero o fuera del rango del mínimo de plataforma al máximo',
+  })
+  @ApiForbiddenResponse({ description: CLINIC_SETTINGS_FORBIDDEN_MESSAGE })
+  @ApiConflictResponse({
+    type: RetentionReductionUnconfirmedErrorDto,
+    description:
+      '`RETENTION_REDUCTION_UNCONFIRMED`: reducir sin confirmar, sin guardar nada. ' +
+      '`RETENTION_SETTINGS_BUSY`: otra operación con los pacientes de la clínica en curso, o la reducción tarda demasiado; no se guardó nada.',
+  })
+  updateRetention(
+    @Body() dto: UpdateRetentionSettingsDto,
+    @Req() req: AuditableRequest,
+  ): Promise<RetentionSettingsUpdateResult> {
+    const ctx = auditRequestContext(req, this.tenantContext);
+    if (!ctx) throw new Error('Sin sesión de clínica detrás del RolesGuard');
+    return this.updateRetentionSettings.execute(
+      {
+        clinicalRecordRetentionYears: dto.clinicalRecordRetentionYears,
+        confirmReduction: dto.confirmReduction,
+      },
+      ctx,
+    );
   }
 
   // Antes de `@Get(':id')`, como `retention/expiring`: si no, `settings` se

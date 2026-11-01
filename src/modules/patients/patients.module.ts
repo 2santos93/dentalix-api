@@ -42,6 +42,12 @@ import {
 import { PATIENT_SETTINGS_REPOSITORY } from './domain/ports/patient-settings-repository.port';
 import { PrismaPatientSettingsRepository } from './infrastructure/repositories/prisma-patient-settings.repository';
 import {
+  GetRetentionSettingsUseCase,
+  UpdateRetentionSettingsUseCase,
+} from './application/use-cases/retention-settings.use-cases';
+import { CLINIC_RETENTION_SETTINGS_REPOSITORY } from './domain/ports/clinic-retention-settings-repository.port';
+import { PrismaClinicRetentionSettingsRepository } from './infrastructure/repositories/prisma-clinic-retention-settings.repository';
+import {
   GetDocumentTypeNamesUseCase,
   UpdateDocumentTypeNamesUseCase,
 } from './application/use-cases/document-type-names.use-cases';
@@ -110,6 +116,13 @@ import { PatientAgreementsModule } from '../patient-agreements/patient-agreement
     {
       provide: PATIENT_SETTINGS_REPOSITORY,
       useClass: PrismaPatientSettingsRepository,
+    },
+    // DX-330: plazo de conservación de la HC de la clínica (Ajustes).
+    GetRetentionSettingsUseCase,
+    UpdateRetentionSettingsUseCase,
+    {
+      provide: CLINIC_RETENTION_SETTINGS_REPOSITORY,
+      useClass: PrismaClinicRetentionSettingsRepository,
     },
     // DX-327: nombre local de cada tipo de documento (Ajustes).
     GetDocumentTypeNamesUseCase,

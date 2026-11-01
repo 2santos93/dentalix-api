@@ -1473,6 +1473,9 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // DX-328: CLINIC_SETTINGS con MAJORITY_AGE_SETTINGS; sin evento si no cambia.
   'PUT /patients/settings':
     'patient-settings.use-cases.spec.ts y patient-settings.e2e-spec.ts',
+  // DX-330: CLINIC_SETTINGS con CLINICAL_RECORD_RETENTION_SETTINGS y `retentionTermChange`, en la transacción del cambio; sin evento si no cambia.
+  'PUT /patients/retention/settings':
+    'retention-settings.use-cases.spec.ts y clinical-record-retention.e2e-spec.ts',
   // DX-327: CLINIC_SETTINGS con DOCUMENT_TYPE_NAMES_SETTINGS y los tipos cambiados; sin evento si no cambia.
   'PUT /patients/document-type-names':
     'document-type-names.use-cases.spec.ts y document-type-names.e2e-spec.ts',
