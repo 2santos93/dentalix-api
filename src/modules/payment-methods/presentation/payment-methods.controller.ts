@@ -34,17 +34,30 @@ import {
 import { TenantJwtPayload } from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 import { Audit } from '../../audit/presentation/audit.decorator';
+import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import {
+  requireAuditRequestContext,
+  type AuditableRequest,
+} from '../../audit/presentation/audit-request-context';
+import {
+  CreatePaymentAdjustmentUseCase,
   CreatePaymentMethodUseCase,
   ListPaymentMethodsUseCase,
+  UpdatePaymentAdjustmentUseCase,
   UpdatePaymentMethodUseCase,
 } from '../application/payment-methods.use-cases';
-import type { ClinicPaymentMethodEntity } from '../domain/payment-method.entity';
+import type {
+  ClinicPaymentMethodEntity,
+  PaymentMethodAdjustmentEntity,
+} from '../domain/payment-method.entity';
 import { PAYMENT_METHODS_ADMIN_MESSAGE } from '../domain/payment-method-rules';
 import {
+  CreatePaymentAdjustmentDto,
   CreatePaymentMethodDto,
   ListPaymentMethodsQueryDto,
+  PaymentMethodAdjustmentDto,
   PaymentMethodDto,
+  UpdatePaymentAdjustmentDto,
   UpdatePaymentMethodDto,
 } from './dto/payment-method.dto';
 
@@ -66,6 +79,9 @@ export class PaymentMethodsController {
     private readonly listMethods: ListPaymentMethodsUseCase,
     private readonly createMethod: CreatePaymentMethodUseCase,
     private readonly updateMethod: UpdatePaymentMethodUseCase,
+    private readonly createAdjustment: CreatePaymentAdjustmentUseCase,
+    private readonly updateAdjustment: UpdatePaymentAdjustmentUseCase,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   @Get()
@@ -134,6 +150,74 @@ export class PaymentMethodsController {
         requiresReference: dto.requiresReference,
       },
       req.user.sub,
+    );
+  }
+
+  // DX-516: ajustes por medio de pago (impuesto, recargo o descuento). Solo
+  // ADMIN; auditados en la transacción del cambio (DX-360: PAYMENT_METHOD
+  // PAYMENT_METHOD_ADJUSTMENT_CREATED/UPDATED con el antes y el después).
+  @Post(':id/adjustments')
+  @Roles(...PAYMENT_METHOD_WRITE_ROLES)
+  @RolesDeniedMessage(PAYMENT_METHODS_ADMIN_MESSAGE)
+  @ApiCreatedResponse({ type: PaymentMethodAdjustmentDto })
+  @ApiBadRequestResponse({
+    description:
+      'Etiqueta vacía o larga, porcentaje fuera de (0, 100], importe fijo sin moneda o con más decimales que su moneda.',
+  })
+  @ApiNotFoundResponse({ description: 'Medio no encontrado en esta clínica' })
+  @ApiConflictResponse({
+    description: 'Etiqueta repetida en el medio o tope de ajustes activos',
+  })
+  @ApiForbiddenResponse({ description: 'Solo ADMIN' })
+  addAdjustment(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreatePaymentAdjustmentDto,
+    @Req() req: AuditableRequest,
+  ): Promise<PaymentMethodAdjustmentEntity> {
+    return this.createAdjustment.execute(
+      id,
+      {
+        type: dto.type,
+        label: dto.label,
+        calculation: dto.calculation,
+        percent: dto.percent,
+        fixedAmount: dto.fixedAmount,
+        fixedCurrency: dto.fixedCurrency,
+        active: dto.active,
+      },
+      requireAuditRequestContext(req, this.tenantContext),
+    );
+  }
+
+  @Patch(':id/adjustments/:adjustmentId')
+  @Roles(...PAYMENT_METHOD_WRITE_ROLES)
+  @RolesDeniedMessage(PAYMENT_METHODS_ADMIN_MESSAGE)
+  @ApiOkResponse({ type: PaymentMethodAdjustmentDto })
+  @ApiBadRequestResponse({ description: 'Campo inválido (como en el alta).' })
+  @ApiNotFoundResponse({ description: 'Medio o ajuste no encontrado' })
+  @ApiConflictResponse({
+    description: 'Etiqueta repetida en el medio o tope de ajustes activos',
+  })
+  @ApiForbiddenResponse({ description: 'Solo ADMIN' })
+  changeAdjustment(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('adjustmentId', ParseUUIDPipe) adjustmentId: string,
+    @Body() dto: UpdatePaymentAdjustmentDto,
+    @Req() req: AuditableRequest,
+  ): Promise<PaymentMethodAdjustmentEntity> {
+    return this.updateAdjustment.execute(
+      id,
+      adjustmentId,
+      {
+        type: dto.type,
+        label: dto.label,
+        calculation: dto.calculation,
+        percent: dto.percent,
+        fixedAmount: dto.fixedAmount,
+        fixedCurrency: dto.fixedCurrency,
+        active: dto.active,
+      },
+      requireAuditRequestContext(req, this.tenantContext),
     );
   }
 }

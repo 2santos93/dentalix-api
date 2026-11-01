@@ -1,0 +1,301 @@
+{
+  "about": "DX-516: vectores de los ajustes por medio de pago compartidos por la API (src/modules/payment-methods/domain/payment-adjustment-vectors.json) y la web (src/lib/payments/payment-adjustment-vectors.json, copia byte a byte). Cada ajuste se calcula sobre el importe del abono (sin encadenarse), redondeado a roundingDigits de su moneda (la mitad hacia arriba, DX-340); un fijo solo se aplica en su moneda; los descuentos se topan para que lo cobrado no sea negativo; cobrado = importe + impuestos + recargos − descuentos.",
+  "currencies": {
+    "EUR": {
+      "roundingDigits": 2
+    },
+    "JPY": {
+      "roundingDigits": 0
+    },
+    "RSD": {
+      "roundingDigits": 0
+    },
+    "USD": {
+      "roundingDigits": 2
+    }
+  },
+  "cases": [
+    {
+      "name": "sin ajustes: nada cambia",
+      "amount": 100,
+      "currency": "USD",
+      "rules": [],
+      "lines": [],
+      "collected": 100
+    },
+    {
+      "name": "impuesto 3 % sobre 100,00",
+      "amount": 100,
+      "currency": "USD",
+      "rules": [
+        {
+          "type": "TAX",
+          "label": "Impuesto 3 %",
+          "calculation": "PERCENT",
+          "percent": 3,
+          "fixedAmount": null,
+          "fixedCurrency": null,
+          "active": true
+        }
+      ],
+      "lines": [
+        {
+          "type": "TAX",
+          "label": "Impuesto 3 %",
+          "amount": 3
+        }
+      ],
+      "collected": 103
+    },
+    {
+      "name": "7,5 % de 123,45 con 2 decimales (9,25875 → 9,26)",
+      "amount": 123.45,
+      "currency": "USD",
+      "rules": [
+        {
+          "type": "TAX",
+          "label": "Impuesto",
+          "calculation": "PERCENT",
+          "percent": 7.5,
+          "fixedAmount": null,
+          "fixedCurrency": null,
+          "active": true
+        }
+      ],
+      "lines": [
+        {
+          "type": "TAX",
+          "label": "Impuesto",
+          "amount": 9.26
+        }
+      ],
+      "collected": 132.71
+    },
+    {
+      "name": "7,5 % de 123,45 en una moneda que redondea a 0 decimales (→ 9)",
+      "amount": 123.45,
+      "currency": "RSD",
+      "rules": [
+        {
+          "type": "TAX",
+          "label": "Impuesto",
+          "calculation": "PERCENT",
+          "percent": 7.5,
+          "fixedAmount": null,
+          "fixedCurrency": null,
+          "active": true
+        }
+      ],
+      "lines": [
+        {
+          "type": "TAX",
+          "label": "Impuesto",
+          "amount": 9
+        }
+      ],
+      "collected": 132.45
+    },
+    {
+      "name": "descuento 10 % de 1005 sin decimales (100,5 → 101, la mitad hacia arriba)",
+      "amount": 1005,
+      "currency": "JPY",
+      "rules": [
+        {
+          "type": "DISCOUNT",
+          "label": "Descuento contado",
+          "calculation": "PERCENT",
+          "percent": 10,
+          "fixedAmount": null,
+          "fixedCurrency": null,
+          "active": true
+        }
+      ],
+      "lines": [
+        {
+          "type": "DISCOUNT",
+          "label": "Descuento contado",
+          "amount": 101
+        }
+      ],
+      "collected": 904
+    },
+    {
+      "name": "recargo fijo y descuento sobre la misma base",
+      "amount": 50,
+      "currency": "USD",
+      "rules": [
+        {
+          "type": "SURCHARGE",
+          "label": "Recargo",
+          "calculation": "FIXED",
+          "percent": null,
+          "fixedAmount": 2,
+          "fixedCurrency": "USD",
+          "active": true
+        },
+        {
+          "type": "DISCOUNT",
+          "label": "Descuento",
+          "calculation": "PERCENT",
+          "percent": 5,
+          "fixedAmount": null,
+          "fixedCurrency": null,
+          "active": true
+        }
+      ],
+      "lines": [
+        {
+          "type": "SURCHARGE",
+          "label": "Recargo",
+          "amount": 2
+        },
+        {
+          "type": "DISCOUNT",
+          "label": "Descuento",
+          "amount": 2.5
+        }
+      ],
+      "collected": 49.5
+    },
+    {
+      "name": "dos cargos no se encadenan (3 % y 2 % de 100)",
+      "amount": 100,
+      "currency": "USD",
+      "rules": [
+        {
+          "type": "TAX",
+          "label": "A",
+          "calculation": "PERCENT",
+          "percent": 3,
+          "fixedAmount": null,
+          "fixedCurrency": null,
+          "active": true
+        },
+        {
+          "type": "SURCHARGE",
+          "label": "B",
+          "calculation": "PERCENT",
+          "percent": 2,
+          "fixedAmount": null,
+          "fixedCurrency": null,
+          "active": true
+        }
+      ],
+      "lines": [
+        {
+          "type": "TAX",
+          "label": "A",
+          "amount": 3
+        },
+        {
+          "type": "SURCHARGE",
+          "label": "B",
+          "amount": 2
+        }
+      ],
+      "collected": 105
+    },
+    {
+      "name": "importe fijo en otra moneda: no se aplica",
+      "amount": 50,
+      "currency": "USD",
+      "rules": [
+        {
+          "type": "SURCHARGE",
+          "label": "Recargo",
+          "calculation": "FIXED",
+          "percent": null,
+          "fixedAmount": 2,
+          "fixedCurrency": "EUR",
+          "active": true
+        }
+      ],
+      "lines": [],
+      "collected": 50
+    },
+    {
+      "name": "ajuste inactivo: no se aplica",
+      "amount": 50,
+      "currency": "USD",
+      "rules": [
+        {
+          "type": "TAX",
+          "label": "Impuesto",
+          "calculation": "PERCENT",
+          "percent": 3,
+          "fixedAmount": null,
+          "fixedCurrency": null,
+          "active": false
+        }
+      ],
+      "lines": [],
+      "collected": 50
+    },
+    {
+      "name": "un descuento mayor que lo cobrado se topa (nunca negativo)",
+      "amount": 10,
+      "currency": "USD",
+      "rules": [
+        {
+          "type": "DISCOUNT",
+          "label": "Descuento",
+          "calculation": "FIXED",
+          "percent": null,
+          "fixedAmount": 15,
+          "fixedCurrency": "USD",
+          "active": true
+        }
+      ],
+      "lines": [
+        {
+          "type": "DISCOUNT",
+          "label": "Descuento",
+          "amount": 10
+        }
+      ],
+      "collected": 0
+    },
+    {
+      "name": "un cálculo que redondea a 0 no crea línea",
+      "amount": 10,
+      "currency": "JPY",
+      "rules": [
+        {
+          "type": "TAX",
+          "label": "Impuesto",
+          "calculation": "PERCENT",
+          "percent": 1,
+          "fixedAmount": null,
+          "fixedCurrency": null,
+          "active": true
+        }
+      ],
+      "lines": [],
+      "collected": 10
+    },
+    {
+      "name": "0,5 céntimos hacia arriba (2,5 % de 0,10 = 0,0025 → 0,00: sin línea; 2,5 % de 0,20 = 0,005 → 0,01)",
+      "amount": 0.2,
+      "currency": "USD",
+      "rules": [
+        {
+          "type": "TAX",
+          "label": "Impuesto",
+          "calculation": "PERCENT",
+          "percent": 2.5,
+          "fixedAmount": null,
+          "fixedCurrency": null,
+          "active": true
+        }
+      ],
+      "lines": [
+        {
+          "type": "TAX",
+          "label": "Impuesto",
+          "amount": 0.01
+        }
+      ],
+      "collected": 0.21
+    }
+  ]
+}

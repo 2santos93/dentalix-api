@@ -75,6 +75,7 @@ function medium(
     kind: 'OTHER',
     active: true,
     requiresReference: false,
+    adjustments: [],
     legacyMethod: null,
     createdAt: METHOD_AT,
     updatedAt: METHOD_AT,

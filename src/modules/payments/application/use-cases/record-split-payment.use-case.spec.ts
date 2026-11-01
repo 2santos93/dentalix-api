@@ -42,6 +42,7 @@ function medium(
     kind: 'CASH',
     active: true,
     requiresReference: false,
+    adjustments: [],
     legacyMethod: 'CASH',
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),

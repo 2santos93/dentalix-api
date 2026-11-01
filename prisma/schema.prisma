@@ -94,6 +94,9 @@ model Tenant {
   appointmentTypes                        AppointmentType[]
   // DX-377: medios de pago de la clínica (catálogo de caja).
   paymentMethods                          ClinicPaymentMethod[]
+  // DX-516: ajustes por medio de pago (configurados y congelados en abonos).
+  paymentMethodAdjustments                PaymentMethodAdjustment[]
+  paymentAdjustments                      PaymentAdjustment[]
   jobs                                    Job[]
   outboundMessages                        OutboundMessage[]
   scheduleBlocks                          ScheduleBlock[]
@@ -742,9 +745,9 @@ enum AnamnesisAnswerStatus {
 }
 
 model MedicalHistoryVersion {
-  id               String               @id @default(uuid()) @db.Uuid
-  tenantId         String               @db.Uuid
-  patientId        String               @db.Uuid
+  id               String                 @id @default(uuid()) @db.Uuid
+  tenantId         String                 @db.Uuid
+  patientId        String                 @db.Uuid
   version          Int
   // Listas/objetos estructurados (snapshot inmutable por versión).
   allergies        Json?
@@ -765,12 +768,12 @@ model MedicalHistoryVersion {
   pregnancy        AnamnesisAnswerStatus?
   // Banderas denormalizadas — calculadas en el dominio (deriveSafetyFlags).
   safetyFlags      Json?
-  hasCriticalAlert Boolean              @default(false)
+  hasCriticalAlert Boolean                @default(false)
   // DX-099: tecleada por el personal o aceptada desde el formulario del
   // paciente (autor = quien la revisó).
-  source           MedicalHistorySource @default(STAFF)
-  createdById      String?              @db.Uuid
-  createdAt        DateTime             @default(now())
+  source           MedicalHistorySource   @default(STAFF)
+  createdById      String?                @db.Uuid
+  createdAt        DateTime               @default(now())
   deletedAt        DateTime?
 
   // FK COMPUESTA (tenantId, patientId) -> patients(tenantId, id): exige que el
@@ -1212,81 +1215,81 @@ enum AppointmentStatus {
 }
 
 model Appointment {
-  id                  String                  @id @default(uuid()) @db.Uuid
-  tenantId            String                  @db.Uuid
-  locationId          String                  @db.Uuid
-  patientId           String                  @db.Uuid
-  providerId          String                  @db.Uuid
-  start               DateTime
-  end                 DateTime
-  status              AppointmentStatus       @default(SCHEDULED)
-  reason              String?
-  notes               String?
-  createdById         String?                 @db.Uuid
+  id                     String                  @id @default(uuid()) @db.Uuid
+  tenantId               String                  @db.Uuid
+  locationId             String                  @db.Uuid
+  patientId              String                  @db.Uuid
+  providerId             String                  @db.Uuid
+  start                  DateTime
+  end                    DateTime
+  status                 AppointmentStatus       @default(SCHEDULED)
+  reason                 String?
+  notes                  String?
+  createdById            String?                 @db.Uuid
   // DX-121: tipo de cita (duración y color). Opcional: las citas anteriores no
   // tienen tipo y siguen siendo válidas.
-  appointmentTypeId   String?                 @db.Uuid
+  appointmentTypeId      String?                 @db.Uuid
   // DX-005: cuándo recepción generó el último enlace de confirmación vigente
   // (null = nunca, o se invalidó al reagendar/cambiar el estado a mano).
-  confirmationSentAt  DateTime?
+  confirmationSentAt     DateTime?
   // DX-005: el paciente pulsó "Quiero que me llamen" en el enlace. Se limpia
   // cuando recepción reagenda o cambia el estado de la cita.
-  callbackRequestedAt DateTime?
+  callbackRequestedAt    DateTime?
   // DX-210: «Adelantar si hay hueco». La cita es candidata para ocupar un
   // hueco libre anterior; al moverla a uno se apaga.
-  wantsEarlier        Boolean                 @default(false)
+  wantsEarlier           Boolean                 @default(false)
   // DX-200: horas del flujo en la clínica (UTC, reloj del servidor). null en
   // las citas anteriores y mientras no se marca el paso. CHECK en la
   // migración: cada estado del flujo lleva su hora y en orden.
-  arrivedAt           DateTime?
-  seatedAt            DateTime?
-  readyForCheckoutAt  DateTime?
+  arrivedAt              DateTime?
+  seatedAt               DateTime?
+  readyForCheckoutAt     DateTime?
   // DX-200: el estado (SCHEDULED o CONFIRMED) al que vuelve «Deshacer
   // llegada». Solo con la cita en ARRIVED.
-  preArrivalStatus    AppointmentStatus?
+  preArrivalStatus       AppointmentStatus?
   // DX-279: cancelación (solo en CANCELLED, CHECK appointments_cancellation_check):
   // hora del servidor (UTC), quién, motivo del catálogo cerrado y texto
   // opcional (≤ 500), minutos de aviso (≥ 0) y si fue tardía según la política
   // vigente de la sede. Hora, quién, aviso y tardía van juntos (todos o
   // ninguno: las canceladas antiguas no tienen ninguno).
-  cancelledAt         DateTime?
-  cancelledByKind     CancellationByKind?
-  cancelReasonCode    CancellationReasonCode?
-  cancelReasonText    String?                 @db.VarChar(500)
-  noticeMinutes       Int?
-  lateCancellation    Boolean?
+  cancelledAt            DateTime?
+  cancelledByKind        CancellationByKind?
+  cancelReasonCode       CancellationReasonCode?
+  cancelReasonText       String?                 @db.VarChar(500)
+  noticeMinutes          Int?
+  lateCancellation       Boolean?
   // DX-279: cuándo se marcó la inasistencia (solo en NO_SHOW; null en las antiguas).
-  noShowMarkedAt      DateTime?
+  noShowMarkedAt         DateTime?
   // DX-279: versión de la política COMUNICADA al paciente. DX-291 la rellena
   // al enviar el recordatorio y cuando el paciente responde por el enlace
   // (la que vio); null = no consta que se le comunicara.
-  policyVersionId     String?                 @db.Uuid
+  policyVersionId        String?                 @db.Uuid
   // DX-470: triaje de recepción de una urgencia (datos de salud: solo GET
   // /appointments/:id y el panel «En clínica»; nunca vistas públicas,
   // recordatorios ni logs). CHECK appointments_triage_check: ≤ 6 señales y la
   // nota recortada de 1–200.
-  triageFlags         TriageFlag[]            @default([])
-  triageNote          String?                 @db.VarChar(200)
+  triageFlags            TriageFlag[]            @default([])
+  triageNote             String?                 @db.VarChar(200)
   // DX-470: nació en «Atender sin cita» (llegada en el mismo paso).
-  walkIn              Boolean                 @default(false)
+  walkIn                 Boolean                 @default(false)
   // DX-470: sobrecupo anotado (sin hueco reservado libre): no cuenta en la
   // EXCLUDE de solape del profesional. Solo con `walkIn` (CHECK). El motivo,
   // en appointment_reserved_overrides (WALK_IN_OVERBOOK).
-  overbooked          Boolean                 @default(false)
+  overbooked             Boolean                 @default(false)
   // DX-211: sillón de la cita (null = sin sillón, como todas las anteriores).
   // FK compuesta con la SEDE de la cita; EXCLUDE
   // appointments_no_overlap_per_chair (en la migración) sobre las vivas y no
   // canceladas.
-  chairId             String?                 @db.Uuid
+  chairId                String?                 @db.Uuid
   // DX-510: Idempotency-Key (UUID) de «Atender sin cita» y huella de la
   // petición. Único parcial por clínica (ver abajo); inalterables (trigger
   // dx509_walk_in_guard). DX-509: el mismo trigger apaga `overbooked` si la
   // cita cambia de hora o de profesional.
-  idempotencyKey      String?
+  idempotencyKey         String?
   idempotencyFingerprint String?
-  createdAt           DateTime                @default(now())
-  updatedAt           DateTime                @updatedAt
-  deletedAt           DateTime?
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  deletedAt              DateTime?
 
   planItems                    AppointmentPlanItem[]
   // DX-273: salidas de COMPLETED, con su motivo.
@@ -2134,6 +2137,9 @@ model Currency {
   payments                   Payment[]
   // DX-375: abonos cuya tasa congelada convierte a esta moneda.
   paymentsExchangeRate       Payment[]                   @relation("PaymentExchangeRateCurrency")
+  // DX-516: ajustes por medio de pago fijos en esa moneda, y los congelados.
+  paymentMethodAdjustments   PaymentMethodAdjustment[]   @relation("PaymentMethodAdjustmentCurrency")
+  paymentAdjustments         PaymentAdjustment[]         @relation("PaymentAdjustmentCurrency")
   paymentPlans               PaymentPlan[]
   // DX-150: compromisos de pago en esa moneda.
   paymentPromises            PaymentPromise[]
@@ -2268,8 +2274,10 @@ model ClinicPaymentMethod {
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
 
-  tenant   Tenant    @relation(fields: [tenantId], references: [id])
-  payments Payment[]
+  tenant      Tenant                    @relation(fields: [tenantId], references: [id])
+  payments    Payment[]
+  // DX-516: sus ajustes (impuesto, recargo o descuento); ninguno por defecto.
+  adjustments PaymentMethodAdjustment[]
 
   // Destino de la FK compuesta de payments.paymentMethodId (SEC-004).
   @@unique([tenantId, id], map: "payment_methods_tenant_id_key")
@@ -2278,6 +2286,77 @@ model ClinicPaymentMethod {
   // Único PARCIAL (WHERE "legacyMethod" IS NOT NULL) en la migración.
   @@unique([tenantId, legacyMethod], map: "payment_methods_tenant_legacy_key")
   @@map("payment_methods")
+}
+
+// DX-516: tipo genérico de un ajuste por medio de pago. Ninguno nombra un
+// tributo de un país: la etiqueta la escribe la clínica.
+enum PaymentAdjustmentType {
+  TAX
+  SURCHARGE
+  DISCOUNT
+}
+
+enum PaymentAdjustmentCalculation {
+  PERCENT
+  FIXED
+}
+
+// DX-516: ajuste configurado en un medio de pago de la clínica. PERCENT lleva
+// `percent` (0 < p <= 100, 2 decimales); FIXED, `fixedAmount` (> 0) y su
+// moneda, y solo se aplica a abonos en esa moneda (CHECK
+// payment_method_adjustments_calculation_check). No se borra: se desactiva.
+model PaymentMethodAdjustment {
+  id              String                       @id @default(uuid()) @db.Uuid
+  tenantId        String                       @db.Uuid
+  paymentMethodId String                       @db.Uuid
+  type            PaymentAdjustmentType
+  label           String
+  calculation     PaymentAdjustmentCalculation
+  percent         Decimal?                     @db.Decimal(5, 2)
+  fixedAmount     Decimal?                     @db.Decimal(14, 2)
+  fixedCurrency   String?
+  active          Boolean                      @default(true)
+  createdById     String?                      @db.Uuid
+  updatedById     String?                      @db.Uuid
+  createdAt       DateTime                     @default(now())
+  updatedAt       DateTime                     @updatedAt
+
+  tenant           Tenant              @relation(fields: [tenantId], references: [id])
+  paymentMethod    ClinicPaymentMethod @relation(fields: [tenantId, paymentMethodId], references: [tenantId, id], onDelete: Restrict, map: "payment_method_adjustments_method_fkey")
+  fixedCurrencyRef Currency?           @relation("PaymentMethodAdjustmentCurrency", fields: [fixedCurrency], references: [code], onDelete: Restrict, map: "payment_method_adjustments_currency_fkey")
+
+  @@unique([tenantId, id], map: "payment_method_adjustments_tenant_id_key")
+  @@index([tenantId, paymentMethodId], map: "payment_method_adjustments_tenant_method_idx")
+  @@map("payment_method_adjustments")
+}
+
+// DX-516: un ajuste congelado en un abono (append-only: un trigger impide
+// UPDATE y DELETE). `base` es el importe del abono y `currency` su moneda (el
+// trigger lo comprueba al insertar). `sourceAdjustmentId` es un puntero suave
+// al ajuste de origen: la configuración cambia y la línea no. Cuenta solo
+// mientras su abono está vivo: anular el abono anula sus ajustes.
+model PaymentAdjustment {
+  id                 String                       @id @default(uuid()) @db.Uuid
+  tenantId           String                       @db.Uuid
+  paymentId          String                       @db.Uuid
+  position           Int                          @db.SmallInt
+  sourceAdjustmentId String?                      @db.Uuid
+  type               PaymentAdjustmentType
+  label              String
+  calculation        PaymentAdjustmentCalculation
+  percent            Decimal?                     @db.Decimal(5, 2)
+  fixedAmount        Decimal?                     @db.Decimal(14, 2)
+  base               Decimal                      @db.Decimal(14, 2)
+  amount             Decimal                      @db.Decimal(14, 2)
+  currency           String
+  createdAt          DateTime                     @default(now())
+
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  payment     Payment  @relation(fields: [tenantId, paymentId], references: [tenantId, id], onDelete: Cascade, map: "payment_adjustments_payment_fkey")
+  currencyRef Currency @relation("PaymentAdjustmentCurrency", fields: [currency], references: [code], map: "payment_adjustments_currency_fkey")
+
+  @@unique([tenantId, paymentId, position], map: "payment_adjustments_tenant_payment_position_key")
+  @@map("payment_adjustments")
 }
 
 // Abono contra un Plan de Tratamiento (reemplaza Sale/SaleLineItem — ver
@@ -2376,9 +2455,11 @@ model Payment {
   // numeración: conservan su referencia antigua REC-xxxxxxxx.
   receipt PaymentReceipt?
 
-  cashSession     CashSession?            @relation(fields: [tenantId, cashSessionId], references: [tenantId, id], onDelete: Restrict, map: "payments_cash_session_fkey")
-  paymentMethod   ClinicPaymentMethod?    @relation(fields: [tenantId, paymentMethodId], references: [tenantId, id], onDelete: Restrict, map: "payments_payment_method_fkey")
-  cashAdjustments CashSessionAdjustment[]
+  cashSession       CashSession?            @relation(fields: [tenantId, cashSessionId], references: [tenantId, id], onDelete: Restrict, map: "payments_cash_session_fkey")
+  paymentMethod     ClinicPaymentMethod?    @relation(fields: [tenantId, paymentMethodId], references: [tenantId, id], onDelete: Restrict, map: "payments_payment_method_fkey")
+  cashAdjustments   CashSessionAdjustment[]
+  // DX-516: sus ajustes por medio de pago, congelados al registrarlo.
+  methodAdjustments PaymentAdjustment[]
 
   // DX-051: base en la moneda del plan (como mucho una, PK "paymentId";
   // Prisma la ve como lista porque la FK compuesta no apunta a un único de la
