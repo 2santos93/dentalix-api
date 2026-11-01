@@ -62,6 +62,7 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
   'GET /appointments ?providerIds[]',
   'GET /appointments/openings ?locationId',
   'GET /appointments/openings ?patientId',
+  'GET /appointments/openings ?excludeAppointmentId',
   'GET /appointments/openings ?providerId',
   'PATCH /appointments/:id body.planItemIds[]',
   'PATCH /appointments/:id body.providerId',

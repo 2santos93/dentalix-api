@@ -14,6 +14,7 @@ import {
   DismissalExistsError,
   type ClosingAppointmentRef,
   type ClosingAppointmentRow,
+  type ClosingKeptOverbookRow,
   type ClosingLocation,
   type ClosingQueueRepository,
   type ClosingScope,
@@ -36,6 +37,11 @@ interface AppointmentSqlRow {
   professionalId: string;
   professionalName: string | null;
   total: bigint;
+}
+
+interface KeptOverbookSqlRow extends AppointmentSqlRow {
+  keptAt: Date;
+  keptByName: string | null;
 }
 
 interface TreatmentSqlRow extends AppointmentSqlRow {
@@ -245,6 +251,47 @@ export class PrismaClosingQueueRepository implements ClosingQueueRepository {
       procedureLabel: row.procedureLabel,
       toothNumber: row.toothNumber,
       surfaces: row.surfaces,
+    }));
+  }
+
+  async keptOverbooks(
+    scope: ClosingScope,
+    limit: number,
+  ): Promise<SectionPage<ClosingKeptOverbookRow>> {
+    const tenantId = this.requireTenantId();
+    // DX-509-bis: siguen en sobrecupo (`overbooked`) y la última decisión
+    // sobre ellas fue mantenerlas (`WALK_IN_OVERBOOK_KEPT`). Un sobrecupo no
+    // vuelve a encenderse tras apagarse (trigger dx509_walk_in_guard), así
+    // que «sigue en sobrecupo + hubo KEPT» basta. El evento se busca por el
+    // índice (clínica, paciente, fecha) de audit_events: pocas filas por
+    // paciente y solo para las pocas citas en sobrecupo de la ventana.
+    const rows = await this.prisma.runWithTenant(
+      (tx) => tx.$queryRaw<KeptOverbookSqlRow[]>`
+      SELECT ${APPOINTMENT_COLUMNS},
+             k."occurredAt" AS "keptAt", ku."fullName" AS "keptByName"
+        FROM "appointments" a
+        ${APPOINTMENT_JOINS}
+        JOIN LATERAL (
+          SELECT e."occurredAt", e."actorUserId"
+            FROM "audit_events" e
+           WHERE e."tenantId" = a."tenantId"
+             AND e."patientId" = a."patientId"
+             AND e."resourceType" = 'APPOINTMENT'
+             AND e."resourceId" = a."id"
+             AND e."metadata"->>'reason' = 'WALK_IN_OVERBOOK_KEPT'
+           ORDER BY e."occurredAt" DESC, e."id" DESC
+           LIMIT 1) k ON true
+        LEFT JOIN "users" ku ON ku."id" = k."actorUserId"
+       WHERE ${this.window(tenantId, scope)}
+         AND a."overbooked"
+         AND a."status" <> 'CANCELLED'
+       ORDER BY a."start", a."id"
+       LIMIT ${limit}`,
+    );
+    return page(rows, (row) => ({
+      ...toAppointment(row),
+      keptAt: row.keptAt,
+      keptByName: row.keptByName,
     }));
   }
 

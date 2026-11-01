@@ -68,6 +68,11 @@ model Tenant {
   /// factura»); NULL = no se imprime nada. CHECK 1..250, una línea. Una sede
   /// puede sustituirla (`Location.receiptLegendOverride`). Se congela en la foto.
   receiptLegend                           String?
+  /// DX-517: texto propio de cada moneda {código ISO 4217 → texto de 1..8}
+  /// (p. ej. {"VES": "Bs."}). '{}' = nada: los importes llevan el código ISO.
+  /// Sustituye al código en la posición que da el formato de la sede. Se
+  /// congela en la foto del recibo. CHECK: objeto jsonb (la API valida el resto).
+  currencyTexts                           Json                             @default("{}")
   createdAt                               DateTime                         @default(now())
   updatedAt                               DateTime                         @updatedAt
   deletedAt                               DateTime?

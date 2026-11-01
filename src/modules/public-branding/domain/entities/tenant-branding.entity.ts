@@ -1,3 +1,5 @@
+import type { CurrencyTexts } from '../../../../shared/format/currency-text';
+
 /**
  * Public white-label branding of a tenant, as consumed by the unauthenticated
  * marketing/login shell (web app's `fetchBranding`). Deliberately NOT the raw
@@ -9,4 +11,10 @@ export interface TenantBranding {
   name: string;
   primaryColor: string;
   logoUrl: string | null;
+  /**
+   * DX-517: texto propio de cada moneda (código ISO → texto). No es un dato
+   * sensible: es cómo se escriben los importes, también en las páginas
+   * públicas (firmar un presupuesto). Vacío = nada configurado.
+   */
+  currencyTexts: CurrencyTexts;
 }

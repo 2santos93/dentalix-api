@@ -26,6 +26,13 @@ import {
   RegisterManualExchangeRateUseCase,
 } from './application/use-cases/manual-exchange-rates.use-cases';
 import { ExchangeSettingsController } from './presentation/exchange-settings.controller';
+import { ClinicCurrencyTextsController } from './presentation/clinic-currency-texts.controller';
+import {
+  GetClinicCurrencyTextsUseCase,
+  UpdateClinicCurrencyTextsUseCase,
+} from './application/use-cases/clinic-currency-texts.use-cases';
+import { CLINIC_CURRENCY_TEXTS_REPOSITORY } from './domain/ports/clinic-currency-texts-repository.port';
+import { PrismaClinicCurrencyTextsRepository } from './infrastructure/repositories/prisma-clinic-currency-texts.repository';
 import { ExchangeSourceChangeHooks } from './application/exchange-source-change-hooks';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -48,7 +55,12 @@ import { PrismaProviderRatesBudget } from './infrastructure/repositories/prisma-
   // JobsModule: precarga diaria de los tipos de cambio (DX-085).
   imports: [JwtModule.register({}), JobsModule],
   // DX-374: fuente de la tasa de la clínica y tasas manuales (solo ADMIN).
-  controllers: [ExchangeController, ExchangeSettingsController],
+  // DX-517: texto propio de cada moneda (solo ADMIN).
+  controllers: [
+    ExchangeController,
+    ExchangeSettingsController,
+    ClinicCurrencyTextsController,
+  ],
   providers: [
     // GetRatesForDateUseCase must be registered explicitly as a provider (not
     // only implicitly constructed): ConvertAmountUseCase injects it directly
@@ -64,6 +76,12 @@ import { PrismaProviderRatesBudget } from './infrastructure/repositories/prisma-
     RegisterManualExchangeRateUseCase,
     CorrectManualExchangeRateUseCase,
     ExchangeSourceChangeHooks,
+    GetClinicCurrencyTextsUseCase,
+    UpdateClinicCurrencyTextsUseCase,
+    {
+      provide: CLINIC_CURRENCY_TEXTS_REPOSITORY,
+      useClass: PrismaClinicCurrencyTextsRepository,
+    },
     { provide: EXCHANGE_RATE_CLOCK, useValue: () => new Date() },
     // SEC-054: caché negativa, single-flight y presupuestos de las llamadas
     // al proveedor (una instancia por proceso: compartida por todas las

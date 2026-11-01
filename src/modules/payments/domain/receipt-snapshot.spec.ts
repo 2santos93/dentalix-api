@@ -322,3 +322,30 @@ describe('buildReceiptSnapshot: título y leyenda del recibo (DX-515)', () => {
     expect(onlyTitle).not.toHaveProperty('legend');
   });
 });
+
+describe('buildReceiptSnapshot: texto propio de cada moneda (DX-517)', () => {
+  it('sin textos, la foto es byte a byte la de antes', () => {
+    const before = JSON.stringify(
+      buildReceiptSnapshot(input(), NO_LOCAL_NAMES),
+    );
+    for (const currencyTexts of [undefined, null, {}]) {
+      const snapshot = buildReceiptSnapshot(
+        input({ currencyTexts }),
+        NO_LOCAL_NAMES,
+      );
+      expect(JSON.stringify(snapshot)).toBe(before);
+      expect(snapshot).not.toHaveProperty('currencyTexts');
+    }
+  });
+
+  it('congela el mapa de la clínica al emitir (una copia), y nada más cambia', () => {
+    const texts = { EUR: '€', VES: 'Bs.' };
+    const plain = buildReceiptSnapshot(input(), NO_LOCAL_NAMES);
+    const snapshot = buildReceiptSnapshot(
+      input({ currencyTexts: texts }),
+      NO_LOCAL_NAMES,
+    );
+    expect(snapshot).toEqual({ ...plain, currencyTexts: texts });
+    expect(snapshot.currencyTexts).not.toBe(texts);
+  });
+});

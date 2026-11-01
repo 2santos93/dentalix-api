@@ -56,6 +56,18 @@ export interface ClosingTreatmentRow extends ClosingAppointmentRow {
   surfaces: ToothSurface[];
 }
 
+/**
+ * DX-509-bis: una urgencia que sigue en sobrecupo porque alguien lo decidió
+ * (`WALK_IN_OVERBOOK_KEPT` al deshacer la llegada o reactivarla): compartió
+ * la hora del profesional con otra cita a sabiendas. Solo se informa.
+ */
+export interface ClosingKeptOverbookRow extends ClosingAppointmentRow {
+  /** Cuándo se decidió mantenerla (la última vez). */
+  keptAt: Date;
+  /** Quién lo decidió (null si el usuario ya no existe). */
+  keptByName: string | null;
+}
+
 export interface SectionPage<T> {
   rows: T[];
   total: number;
@@ -88,6 +100,11 @@ export interface ClosingQueueRepository {
     scope: ClosingScope,
     limit: number,
   ): Promise<SectionPage<ClosingTreatmentRow>>;
+  /** DX-509-bis: sobrecupos mantenidos a sabiendas (informativo, sin descarte). */
+  keptOverbooks(
+    scope: ClosingScope,
+    limit: number,
+  ): Promise<SectionPage<ClosingKeptOverbookRow>>;
   /** Citas de días anteriores que siguen «en la clínica» (las cierra DX-237). */
   staleInClinic(scope: ClosingScope): Promise<number>;
   findAppointment(id: string): Promise<ClosingAppointmentRef | null>;

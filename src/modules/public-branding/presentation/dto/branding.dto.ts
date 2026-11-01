@@ -14,4 +14,12 @@ export class BrandingDto {
 
   @ApiProperty({ type: String, nullable: true })
   logoUrl!: string | null;
+
+  @ApiProperty({
+    type: 'object',
+    additionalProperties: { type: 'string' },
+    description:
+      'DX-517: texto propio de cada moneda {código ISO → texto}; vacío = los importes llevan el código ISO. Lo usa la web para pintar todos los importes.',
+  })
+  currencyTexts!: Record<string, string>;
 }
