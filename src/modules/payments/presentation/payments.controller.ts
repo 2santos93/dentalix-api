@@ -480,7 +480,9 @@ export class PaymentsController {
   @ApiBadRequestResponse({
     description: 'No es texto, tiene saltos de línea o pasa de 64 caracteres',
   })
-  @ApiForbiddenResponse({ description: 'Rol sin acceso a pagos' })
+  @ApiForbiddenResponse({
+    description: 'Rol sin acceso a pagos o abono de una sede no permitida',
+  })
   @ApiNotFoundResponse({
     description: 'El abono no existe o es de otra clínica',
   })
@@ -508,7 +510,8 @@ export class PaymentsController {
     summary: 'Anular un abono (con motivo; queda quién y cuándo)',
     description:
       'Borrado lógico: el abono deja de sumar pero se conserva con ' +
-      '`voidedById`, `voidedAt` y `voidReason`. ADMIN anula cualquier abono; ' +
+      '`voidedById`, `voidedAt` y `voidReason`. Exige acceso a la sede persistida ' +
+      'del abono, también sin cabecera o en vista consolidada. ADMIN anula cualquier abono; ' +
       'RECEPTION solo los que registró ella misma el mismo día (calendario ' +
       'de la sede del abono). Si el abono contaba para un compromiso de ' +
       'pago cumplido del paciente en su moneda y ya no queda cubierto, el compromiso ' +
@@ -521,7 +524,8 @@ export class PaymentsController {
   })
   @ApiForbiddenResponse({
     description:
-      'Rol sin acceso a pagos, o RECEPTION anulando un abono de otro usuario ' +
+      'Sede del abono no permitida (LOCATION_NOT_ALLOWED), rol sin acceso a pagos, ' +
+      'o RECEPTION anulando un abono de otro usuario ' +
       'o de otro día',
   })
   @ApiNotFoundResponse({
