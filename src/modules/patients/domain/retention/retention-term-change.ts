@@ -46,7 +46,8 @@ export function openCorrectionWindow(
 ): { previousYears: number; until: Date } | null {
   if (stored.raisedAt === null || stored.yearsBeforeRaise === null) return null;
   const until = new Date(stored.raisedAt.getTime() + CORRECTION_WINDOW_MS);
-  if (now.getTime() >= until.getTime()) return null;
+  // `!(<)` y no `>=`: con una fecha inválida (NaN) la ventana queda cerrada.
+  if (!(now.getTime() < until.getTime())) return null;
   return { previousYears: stored.yearsBeforeRaise, until };
 }
 

@@ -46,6 +46,16 @@ describe('openCorrectionWindow', () => {
     expect(openCorrectionWindow(stored, at(86_400_000))).toBeNull();
   });
 
+  it('fails closed on an invalid date', () => {
+    expect(openCorrectionWindow(raised(30, 20), new Date('nope'))).toBeNull();
+    expect(
+      openCorrectionWindow(
+        { years: 30, raisedAt: new Date('nope'), yearsBeforeRaise: 20 },
+        T,
+      ),
+    ).toBeNull();
+  });
+
   it('is closed without a raise', () => {
     expect(openCorrectionWindow(plain(30), T)).toBeNull();
   });
@@ -65,9 +75,9 @@ describe('planRetentionTermChange', () => {
     expect(plan.effectiveAfter).toBe(20);
     expect(plan.nextWindow).toEqual({ raisedAt: null, yearsBeforeRaise: null });
     const open = change(
-      planRetentionTermChange(raised(15, 12), 20, 20, at(HOUR)),
+      planRetentionTermChange(raised(15, 15), 20, 20, at(HOUR)),
     );
-    expect(open.nextWindow).toEqual({ raisedAt: T, yearsBeforeRaise: 12 });
+    expect(open.nextWindow).toEqual({ raisedAt: T, yearsBeforeRaise: 15 });
   });
 
   it('a raise opens a window from the previous effective term', () => {
@@ -151,6 +161,12 @@ describe('retentionTermAuditSpec', () => {
         },
       },
     });
+  });
+
+  it('a raise always records zero protected patients', () => {
+    const plan = change(planRetentionTermChange(plain(20), 30, 15, T));
+    const spec = retentionTermAuditSpec(TENANT, 20, 30, plan, 9);
+    expect(spec.extra?.retentionTermChange?.protectedPatients).toBe(0);
   });
 
   it('keeps protectedPatients on a reduction', () => {
