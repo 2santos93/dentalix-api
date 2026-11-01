@@ -13,6 +13,7 @@ describe('workQueueSources (DX-503)', () => {
     followUp: { execute: jest.fn().mockResolvedValue({ total: 3 }) },
     visits: { unscheduled: jest.fn().mockResolvedValue({ total: 5 }) },
     waitlist: { execute: jest.fn().mockResolvedValue({ total: 6 }) },
+    recall: { execute: jest.fn().mockResolvedValue({ total: 8 }) },
     receivables: {
       execute: jest.fn().mockResolvedValue({
         totals: [
@@ -71,6 +72,8 @@ describe('workQueueSources (DX-503)', () => {
       page: 1,
       pageSize: 1,
     });
+    await expect(sources.RECALL(actor)).resolves.toEqual({ count: 8 });
+    expect(deps.recall.execute).toHaveBeenCalledWith({ page: 1, pageSize: 1 });
     await expect(sources.LOW_STOCK(actor)).resolves.toEqual({ count: 7 });
     expect(deps.inventory.execute).toHaveBeenCalledWith({
       page: 1,

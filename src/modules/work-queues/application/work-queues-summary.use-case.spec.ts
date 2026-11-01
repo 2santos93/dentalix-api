@@ -4,6 +4,7 @@ import {
   CLINICAL_ROLES,
   CLOSING_QUEUE_ROLES,
   INVENTORY_ROLES,
+  RECALL_LIST_ROLES,
   RECEIVABLES_ROLES,
   TREATMENT_PLAN_FOLLOW_UP_ROLES,
 } from '../../auth/presentation/guards/clinic-role-sets';
@@ -45,6 +46,7 @@ describe('WORK_QUEUE_ROLES (DX-503)', () => {
     QUOTE_FOLLOW_UP: TREATMENT_PLAN_FOLLOW_UP_ROLES,
     ACCEPTED_UNSCHEDULED: APPOINTMENT_ROLES,
     WAITLIST: APPOINTMENT_ROLES,
+    RECALL: RECALL_LIST_ROLES,
     RECEIVABLES: RECEIVABLES_ROLES,
     LOW_STOCK: INVENTORY_ROLES,
   };
@@ -66,6 +68,7 @@ describe('WORK_QUEUE_ROLES (DX-503)', () => {
       'QUOTE_FOLLOW_UP',
       'ACCEPTED_UNSCHEDULED',
       'WAITLIST',
+      'RECALL',
       'RECEIVABLES',
     ]);
     expect(workQueuesFor(ClinicRole.ASSISTANT)).toEqual([
@@ -128,7 +131,8 @@ describe('GetWorkQueuesSummaryUseCase (DX-503)', () => {
       { key: 'QUOTE_FOLLOW_UP', status: 'ERROR', count: null },
       { key: 'ACCEPTED_UNSCHEDULED', status: 'OK', count: 4 },
       { key: 'WAITLIST', status: 'OK', count: 5 },
-      { key: 'RECEIVABLES', status: 'OK', count: 6 },
+      { key: 'RECALL', status: 'OK', count: 6 },
+      { key: 'RECEIVABLES', status: 'OK', count: 7 },
     ]);
   });
 

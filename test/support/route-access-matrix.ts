@@ -636,6 +636,14 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
     'ADMIN',
     'RECEPTION',
   ),
+  // DX-015: recall. La lista de llamada y sus contactos, el mostrador; fijar o
+  // pausar el recall de un paciente, el personal clínico; leer el bloque de la
+  // ficha (sin datos clínicos), los cuatro roles.
+  'GET /recall/due': BILLING,
+  'GET /recall/due/count': BILLING,
+  'POST /recall/:recallId/contacts': BILLING,
+  'GET /patients/:id/recalls': EVERY_ROLE,
+  'PUT /patients/:id/recalls/:kind': CLINICAL,
   // DX-150: cobranza (gestiones y compromisos de pago), mismo dato financiero.
   'POST /patients/:id/collection-notes': BILLING,
   'POST /patients/:id/payment-promises': BILLING,

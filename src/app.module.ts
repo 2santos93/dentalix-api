@@ -74,6 +74,7 @@ import { RemindersModule } from './modules/reminders/reminders.module';
 import { SecurityModule } from './shared/security/security.module';
 import { SupportAccessesModule } from './modules/support-accesses/support-accesses.module';
 import { WorkQueuesModule } from './modules/work-queues/work-queues.module';
+import { RecallModule } from './modules/recall/recall.module';
 import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
 
 @Module({
@@ -172,6 +173,7 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     // DX-503: «Mi día», los recuentos de las listas de trabajo por rol y sede.
     // El ÚLTIMO: importa seis módulos y, si fuera antes, adelantaría el registro
     // de sus rutas (y cambiaría el orden del OpenAPI sin cambiar nada más).
+    RecallModule,
     WorkQueuesModule,
   ],
   controllers: [AppController, HealthController],

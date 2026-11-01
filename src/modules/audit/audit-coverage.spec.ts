@@ -52,6 +52,10 @@ import { ProductionByProcedureController } from '../reports/presentation/product
 import { ClosingQueueController } from '../closing-queue/presentation/closing-queue.controller';
 import { ContingencyAgendaController } from '../contingency-agenda/presentation/contingency-agenda.controller';
 import { CollectionsController } from '../collections/presentation/collections.controller';
+import {
+  PatientRecallsController,
+  RecallController,
+} from '../recall/presentation/recall.controller';
 import { CashSessionsController } from '../cash-sessions/presentation/cash-sessions.controller';
 import { ScheduleBlocksController } from '../schedule-blocks/presentation/schedule-blocks.controller';
 import { ChairsController } from '../chairs/presentation/chairs.controller';
@@ -1159,6 +1163,25 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: { param: 'locationId' },
     reason: 'CONTINGENCY_AGENDA_NIGHTLY_DOWNLOADED',
   },
+  // DX-015: recall. La lista (con teléfonos) se audita sin paciente; el
+  // contacto, sin la nota; fijar o pausar el recall, con el paciente.
+  'GET /recall/due': { action: 'VIEW', resource: 'PATIENT_RECALL' },
+  'POST /recall/:recallId/contacts': {
+    action: 'CREATE',
+    resource: 'RECALL_CONTACT',
+    resourceId: RES,
+    patient: { response: 'patientId' },
+  },
+  'GET /patients/:id/recalls': {
+    action: 'VIEW',
+    resource: 'PATIENT_RECALL',
+    patient: { param: 'id' },
+  },
+  'PUT /patients/:id/recalls/:kind': {
+    action: 'UPDATE',
+    resource: 'PATIENT_RECALL',
+    patient: { param: 'id' },
+  },
   // DX-150: cobranza. La nota se audita sin su texto (solo los nombres de los
   // campos); el cambio de estado del compromiso lo audita SettlePaymentPromises.
   'POST /patients/:id/collection-notes': {
@@ -1743,6 +1766,8 @@ const CONTROLLERS: Type[] = [
   ClosingQueueController,
   ContingencyAgendaController,
   CollectionsController,
+  RecallController,
+  PatientRecallsController,
   CashSessionsController,
   ExpenseReportsController,
   ExpensesController,

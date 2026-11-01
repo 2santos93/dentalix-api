@@ -52,8 +52,8 @@ export class WorkQueuesController {
   @ApiOperation({
     summary: 'Recuentos de las listas de trabajo del rol («Mi día»)',
     description:
-      'Cada número es el de su lista (closing-queue/count, submissions/summary, pending-follow-up/count, unscheduled/count, waitlist, receivables/aging/summary, inventory lowStockOnly) con sus filtros por defecto, en la sede activa. ' +
-      'ADMIN: todas. DENTIST: pendiente de cerrar (lo suyo) y anamnesis. RECEPTION: pendiente de cerrar (desenlace), presupuestos por seguir, aceptados sin agendar, lista de espera y cartera. ASSISTANT: anamnesis y bajo stock. ' +
+      'Cada número es el de su lista (closing-queue/count, submissions/summary, pending-follow-up/count, unscheduled/count, waitlist, recall/due/count, receivables/aging/summary, inventory lowStockOnly) con sus filtros por defecto, en la sede activa. ' +
+      'ADMIN: todas. DENTIST: pendiente de cerrar (lo suyo) y anamnesis. RECEPTION: pendiente de cerrar (desenlace), presupuestos por seguir, aceptados sin agendar, lista de espera, recall y cartera. ASSISTANT: anamnesis y bajo stock. ' +
       'Una lista que falla sale con `status: ERROR` y `count: null`; las demás llegan igual.',
   })
   @ApiHeader({

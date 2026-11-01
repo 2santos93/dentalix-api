@@ -10,6 +10,8 @@ import { InventoryModule } from '../inventory/inventory.module';
 import { CountAnamnesisInboxUseCase } from '../medical-history-submissions/application/use-cases/anamnesis-review.use-cases';
 import { MedicalHistorySubmissionsModule } from '../medical-history-submissions/medical-history-submissions.module';
 import { GetReceivablesAgingUseCase } from '../receivables/application/use-cases/get-receivables-aging.use-case';
+import { ListDueRecallsUseCase } from '../recall/application/use-cases/recall.use-cases';
+import { RecallModule } from '../recall/recall.module';
 import { ReceivablesModule } from '../receivables/receivables.module';
 import { PlanVisitsService } from '../treatment-plans/application/plan-visits.service';
 import { ListPendingFollowUpUseCase } from '../treatment-plans/application/use-cases/list-pending-follow-up.use-case';
@@ -36,6 +38,7 @@ import { WorkQueuesController } from './presentation/work-queues.controller';
     MedicalHistorySubmissionsModule,
     TreatmentPlansModule,
     WaitlistModule,
+    RecallModule,
     ReceivablesModule,
     InventoryModule,
   ],
@@ -53,6 +56,7 @@ import { WorkQueuesController } from './presentation/work-queues.controller';
         ListPendingFollowUpUseCase,
         PlanVisitsService,
         ListWaitlistUseCase,
+        ListDueRecallsUseCase,
         GetReceivablesAgingUseCase,
         ListInventoryItemsUseCase,
         TenantContextService,
@@ -63,6 +67,7 @@ import { WorkQueuesController } from './presentation/work-queues.controller';
         followUp: ListPendingFollowUpUseCase,
         visits: PlanVisitsService,
         waitlist: ListWaitlistUseCase,
+        recall: ListDueRecallsUseCase,
         receivables: GetReceivablesAgingUseCase,
         inventory: ListInventoryItemsUseCase,
         tenantContext: TenantContextService,
@@ -73,6 +78,7 @@ import { WorkQueuesController } from './presentation/work-queues.controller';
           followUp,
           visits,
           waitlist,
+          recall,
           receivables,
           inventory,
           tenantContext,

@@ -164,6 +164,9 @@ export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
   'POST /closing-queue/dismissals body.appointmentId':
     'closing-queue.e2e-spec.ts',
   'POST /closing-queue/dismissals body.planItemId': 'closing-queue.e2e-spec.ts',
+  // DX-015: «B registra un contacto de recall con la cita de A → 400 en
+  // español y no se crea nada».
+  'POST /recall/:recallId/contacts body.appointmentId': 'recall.e2e-spec.ts',
   // DX-243: «B manda la plantilla, el plan o el profesional de A → 404/400 y
   // no se crea nada».
   'POST /patients/:patientId/signature-requests body.templateId':
