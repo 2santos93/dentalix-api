@@ -1265,6 +1265,12 @@ model Appointment {
   // appointments_no_overlap_per_chair (en la migración) sobre las vivas y no
   // canceladas.
   chairId             String?                 @db.Uuid
+  // DX-510: Idempotency-Key (UUID) de «Atender sin cita» y huella de la
+  // petición. Único parcial por clínica (ver abajo); inalterables (trigger
+  // dx509_walk_in_guard). DX-509: el mismo trigger apaga `overbooked` si la
+  // cita cambia de hora o de profesional.
+  idempotencyKey      String?
+  idempotencyFingerprint String?
   createdAt           DateTime                @default(now())
   updatedAt           DateTime                @updatedAt
   deletedAt           DateTime?
@@ -1312,6 +1318,8 @@ model Appointment {
   // DX-170: destino de la FK compuesta de clinical_entries: la cita de una
   // evolución es de la misma clínica y del mismo paciente.
   @@unique([tenantId, patientId, id], map: "appointments_tenant_patient_id_key")
+  // DX-510: único parcial por clínica (WHERE "idempotencyKey" IS NOT NULL, solo SQL).
+  @@unique([tenantId, idempotencyKey], map: "appointments_tenant_idempotency_key")
   @@index([tenantId, providerId, start])
   @@index([tenantId, patientId])
   // DX-121: lado hijo de la FK compuesta al tipo de cita.

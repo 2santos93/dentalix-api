@@ -5,6 +5,7 @@ import {
   Injectable,
   NotFoundException,
   Optional,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { DocumentType, TriageFlag } from '@prisma/client';
 import { APPOINTMENT_REPOSITORY } from '../../domain/ports/appointment-repository.port';
@@ -12,10 +13,12 @@ import type { AppointmentRepository } from '../../domain/ports/appointment-repos
 import { WALK_IN_REPOSITORY } from '../../domain/ports/walk-in-repository.port';
 import type {
   WalkInPatient,
+  WalkInReplay,
   WalkInRepository,
 } from '../../domain/ports/walk-in-repository.port';
 import type { AppointmentWriteResult } from '../../domain/entities/appointment.entity';
 import {
+  IDEMPOTENCY_KEY_REUSED_CODE,
   NO_RESERVED_SLOT_CODE,
   PATIENT_DUPLICATE_CODE,
   WALK_IN_MESSAGES,
@@ -25,10 +28,12 @@ import {
   normalizeTriageNote,
   overbookReasonError,
   triageNoteError,
+  walkInRequestFingerprint,
   type Interval,
 } from '../../domain/walk-in';
+import { parseIdempotencyKey } from '../../../expenses/domain/expense-idempotency';
 import { checkScheduleBlocks } from '../schedule-block-check';
-import { collectWarnings } from '../appointment-warnings';
+import { NO_WARNINGS, collectWarnings } from '../appointment-warnings';
 import {
   OVERLAP_MESSAGES,
   overlapExclusionScope,
@@ -124,9 +129,43 @@ export class CreateWalkInUseCase {
     private readonly clock: ScheduleBlockClock = systemScheduleBlockClock,
   ) {}
 
+  /**
+   * DX-510: con `Idempotency-Key` (UUID), repetir la MISMA petición (doble
+   * clic, reintento de red) devuelve la cita que creó la primera, sin un
+   * segundo paciente ni una segunda cita; con otros datos es un 422
+   * `IDEMPOTENCY_KEY_REUSED`. La clave es por clínica y vive con la cita
+   * (sin caducidad, como en abonos y gastos). Sin clave, como siempre.
+   */
   async execute(
     input: CreateWalkInInput,
     ctx: AuditRequestContext,
+    idempotencyHeader?: string,
+  ): Promise<WalkInResult> {
+    const key = parseIdempotencyKey(idempotencyHeader);
+    if (key === null) {
+      throw new BadRequestException(WALK_IN_MESSAGES.idempotencyKeyInvalid);
+    }
+    if (key === undefined) return this.attend(input, ctx, undefined);
+    const locationId = await this.appointments.resolveWriteLocationId();
+    const fingerprint = walkInRequestFingerprint({ ...input, locationId });
+    const stored = await this.walkIns.findByIdempotencyKey(key);
+    if (stored) return replayResult(stored, fingerprint);
+    try {
+      return await this.attend(input, ctx, { key, fingerprint });
+    } catch (error) {
+      // La otra petición con la misma clave ganó la carrera y su cita ya está
+      // escrita: lo que esta vio después (el documento ya dado de alta, el
+      // hueco ocupado, el paciente ya en una cita) es esa misma cita.
+      const raced = await this.walkIns.findByIdempotencyKey(key);
+      if (raced) return replayResult(raced, fingerprint);
+      throw error;
+    }
+  }
+
+  private async attend(
+    input: CreateWalkInInput,
+    ctx: AuditRequestContext,
+    idempotency: { key: string; fingerprint: string } | undefined,
   ): Promise<WalkInResult> {
     const patient = this.patientChoice(input);
     const noteError = triageNoteError(input.triageNote);
@@ -245,9 +284,13 @@ export class CreateWalkInUseCase {
           triageNote: normalizeTriageNote(input.triageNote),
           overbookReason,
           createdById: ctx.actor.userId,
+          ...(idempotency ? { idempotency } : {}),
         },
         ctx,
       );
+      if (written.replayed) {
+        return replayResult(written, idempotency?.fingerprint ?? null);
+      }
       return {
         ...written.appointment,
         ...warnings,
@@ -393,6 +436,31 @@ export class CreateWalkInUseCase {
       busy,
     });
   }
+}
+
+/**
+ * DX-510: la cita que creó la clave, si la petición es la misma; si no, 422.
+ * Esta petición no escribió nada: sin avisos ni paciente nuevo.
+ */
+function replayResult(
+  stored: WalkInReplay,
+  fingerprint: string | null,
+): WalkInResult {
+  if (stored.fingerprint !== fingerprint) {
+    throw new UnprocessableEntityException({
+      statusCode: 422,
+      error: 'Unprocessable Entity',
+      code: IDEMPOTENCY_KEY_REUSED_CODE,
+      message: WALK_IN_MESSAGES.idempotencyKeyReused,
+    });
+  }
+  return {
+    ...stored.appointment,
+    ...NO_WARNINGS,
+    planItemsReservedElsewhere: [],
+    patientCreated: false,
+    overbookId: stored.overbookId,
+  };
 }
 
 /** El id del 409 `PATIENT_DUPLICATE` de la transacción (que no trae nombre). */
