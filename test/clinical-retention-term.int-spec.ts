@@ -1093,10 +1093,29 @@ describe('cambiar el plazo: suelos, ventana y evento (DX-330, int)', () => {
       return row.xid;
     }
 
-    async function msOf(work: Promise<unknown>): Promise<number> {
-      const started = Date.now();
-      await work;
-      return Date.now() - started;
+    /** Si la fila de la clínica estuviera tomada, esto da `55P03`, no una espera. */
+    function withoutWaiting<T>(
+      tenantId: string,
+      insert: (tx: Prisma.TransactionClient) => Promise<T>,
+    ): Promise<T> {
+      return prisma.runWithTenant(tenantId, async (tx) => {
+        await tx.$executeRaw`SET LOCAL lock_timeout = '200ms'`;
+        return insert(tx);
+      });
+    }
+
+    /** El segundo en la cola espera en el bloqueo de la fila, no en el xid. */
+    async function waitForTupleWaiter(): Promise<void> {
+      const deadline = Date.now() + 3000;
+      while (Date.now() < deadline) {
+        const [row] = await raw.$queryRaw<{ waiting: number }[]>`
+          SELECT count(*)::int AS waiting FROM pg_catalog.pg_locks
+           WHERE locktype = 'tuple' AND relation = '"tenants"'::regclass
+             AND NOT granted`;
+        if (row.waiting >= 1) return;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      throw new Error('el segundo cambio no llegó a la cola de la clínica');
     }
 
     it('archive waits for a raise and sees it', async () => {
@@ -1172,30 +1191,25 @@ describe('cambiar el plazo: suelos, ventana y evento (DX-330, int)', () => {
         await waitForTransactionWaiters(raw, held.xid);
 
         // `clinical_entries` no tiene FK a `tenants`, así que no ve este
-        // bloqueo; `payers`, sí, como otras 81 tablas: su alta toma KEY SHARE
-        // sobre la clínica y es la que esperaría a un FOR UPDATE (M16).
-        const entryMs = await msOf(
-          prisma.runWithTenant(b, (tx) =>
-            tx.clinicalEntry.create({
-              data: {
-                tenantId: b,
-                patientId: unattended,
-                entryDate: T,
-                notes: 'Control',
-                performedById: actorId,
-              },
-            }),
-          ),
+        // bloqueo; `payers` y las demás tablas con esa FK, sí: su alta toma
+        // KEY SHARE sobre la clínica y chocaría con un FOR UPDATE (M16).
+        await withoutWaiting(b, (tx) =>
+          tx.clinicalEntry.create({
+            data: {
+              tenantId: b,
+              patientId: unattended,
+              entryDate: T,
+              notes: 'Control',
+              performedById: actorId,
+            },
+          }),
         );
-        const payerMs = await msOf(
-          prisma.runWithTenant(b, (tx) =>
-            tx.payer.create({
-              data: { tenantId: b, name: 'Alta', type: 'INSURER' },
-            }),
-          ),
+        await withoutWaiting(b, (tx) =>
+          tx.payer.create({
+            data: { tenantId: b, name: 'Alta', type: 'INSURER' },
+          }),
         );
-        expect(entryMs).toBeLessThan(1000);
-        expect(payerMs).toBeLessThan(1000);
+        await waitForTransactionWaiters(raw, held.xid);
 
         await held.release();
         expect(await reducing).toMatchObject({
@@ -1271,26 +1285,55 @@ describe('cambiar el plazo: suelos, ventana y evento (DX-330, int)', () => {
       expect(await eventsIn(b)).toHaveLength(0);
     });
 
-    it('a raise and a correction at once leave a valid state', async () => {
-      for (let round = 0; round < 4; round++) {
+    it.each([
+      {
+        order: 'the raise and then the correction',
+        first: 40,
+        second: 20,
+        end: { years: 20, raisedAt: null, yearsBeforeRaise: null },
+        changes: ['20>30', '30>40', '40>20'],
+      },
+      {
+        order: 'the correction and then the raise',
+        first: 20,
+        second: 40,
+        end: { years: 40, raisedAt: after(23 * HOUR), yearsBeforeRaise: 20 },
+        changes: ['20>30', '20>40', '30>20'],
+      },
+    ])(
+      'a raise and a correction at once: $order',
+      async ({ first, second, end, changes }) => {
         const b = await clinicAt(20);
         await patientIn(b, '2010-06-15');
         await put(b, 30, T);
         const at = after(23 * HOUR);
 
-        const results = await Promise.all([put(b, 40, at), put(b, 20, at)]);
-        expect(results.map((r) => r.outcome)).toEqual(['APPLIED', 'APPLIED']);
+        // La cola de la fila de la clínica fija el orden: el primero espera
+        // al xid del holder y el segundo, en el bloqueo de la fila.
+        const clinic = await holdTransaction(
+          (tx) =>
+            tx.$queryRaw`SELECT 1 FROM "tenants" WHERE "id" = ${b}::uuid FOR NO KEY UPDATE`,
+        );
+        try {
+          const firstPut = settle(put(b, first, at));
+          await waitForTransactionWaiters(raw, clinic.xid);
+          const secondPut = settle(put(b, second, at));
+          await waitForTupleWaiter();
+          await clinic.release();
 
-        // Corrección y después subida (abre otra ventana), o subida y después
-        // corrección (la cierra). Ninguna de las dos deja suelos.
-        const stored = await storedIn(b);
-        expect([
-          { years: 20, raisedAt: null, yearsBeforeRaise: null },
-          { years: 40, raisedAt: at, yearsBeforeRaise: 20 },
-        ]).toContainEqual(stored);
+          for (const result of [await firstPut, await secondPut]) {
+            expect(result).toMatchObject({
+              status: 'fulfilled',
+              value: { outcome: 'APPLIED' },
+            });
+          }
+        } finally {
+          await clinic.release();
+        }
+
+        expect(await storedIn(b)).toEqual(end);
         expect(await floorsIn(b)).toBe(0);
-
-        const changes = (await eventsIn(b))
+        const seen = (await eventsIn(b))
           .map((event) => {
             const { configChange } = event.metadata as unknown as {
               configChange: Record<
@@ -1301,12 +1344,8 @@ describe('cambiar el plazo: suelos, ventana y evento (DX-330, int)', () => {
             return `${configChange.before.clinicalRecordRetentionYears}>${configChange.after.clinicalRecordRetentionYears}`;
           })
           .sort();
-        expect(changes).toEqual(
-          stored.years === 20
-            ? ['20>30', '30>40', '40>20']
-            : ['20>30', '20>40', '30>20'],
-        );
-      }
-    });
+        expect(seen).toEqual(changes);
+      },
+    );
   });
 });
