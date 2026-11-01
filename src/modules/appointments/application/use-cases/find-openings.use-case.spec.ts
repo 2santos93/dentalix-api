@@ -156,6 +156,9 @@ describe('FindOpeningsUseCase (DX-122)', () => {
     expect(freed.openings.map((o) => [o.start, o.end])).toEqual([
       [z('14:00'), z('18:00')],
     ]);
+    await expect(
+      build(appointments).execute({ ...query, excludeAppointmentId: 'otra' }),
+    ).rejects.toThrow(new NotFoundException('Cita no encontrada'));
   });
 
   it('sede sin horario: propone el horario por defecto en la zona de la sede', async () => {

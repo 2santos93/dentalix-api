@@ -320,7 +320,7 @@ describe('Sobrecupo de urgencia y «Atender sin cita» idempotente (e2e, DX-509/
         );
       expect(covers(await openings(false))).toBe(false);
       expect(covers(await openings(true))).toBe(true);
-      // Una cita que no existe no cambia nada; un id que no es UUID, 400.
+      // Una cita que no es de la clínica: 404; un id que no es UUID, 400.
       await as(api().get('/api/v1/appointments/openings'), reception.token)
         .query({
           providerId: dentist.userId,
@@ -331,6 +331,16 @@ describe('Sobrecupo de urgencia y «Atender sin cita» idempotente (e2e, DX-509/
           excludeAppointmentId: 'no-uuid',
         })
         .expect(400);
+      await as(api().get('/api/v1/appointments/openings'), reception.token)
+        .query({
+          providerId: dentist.userId,
+          locationId: mainId,
+          from: DAY,
+          to: DAY,
+          durationMinutes: 30,
+          excludeAppointmentId: randomUUID(),
+        })
+        .expect(404);
 
       const moved = await patch(a.id, {
         start: local('11:00').toISOString(),

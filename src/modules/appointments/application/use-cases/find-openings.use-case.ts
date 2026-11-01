@@ -119,6 +119,14 @@ export class FindOpeningsUseCase {
     if (input.patientId && !(await this.patients.findById(input.patientId))) {
       throw new NotFoundException('Paciente no encontrado');
     }
+    // DX-509-bis: la cita que se mueve tiene que ser de esta clínica (como
+    // el resto de ids de la consulta).
+    if (
+      input.excludeAppointmentId &&
+      !(await this.appointments.findById(input.excludeAppointmentId))
+    ) {
+      throw new NotFoundException('Cita no encontrada');
+    }
 
     // Sin horario configurado la agenda no se restringe, pero proponer huecos
     // a las 3 de la mañana no ayuda: se usa el horario por defecto del alta.
