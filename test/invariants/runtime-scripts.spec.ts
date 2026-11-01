@@ -41,11 +41,18 @@ describe('scripts de la imagen de runtime (DX-083)', () => {
 
   it('el seed y la purga compilados se ejecutan con node, no con ts-node', () => {
     expect(tsconfig.include).toEqual(
-      expect.arrayContaining(['prisma/seed.ts', 'prisma/audit-purge.ts']),
+      expect.arrayContaining([
+        'prisma/seed.ts',
+        'prisma/audit-purge.ts',
+        'prisma/retention-raise-floor.ts',
+      ]),
     );
     expect(pkg.scripts['seed:prod']).toBe('node dist/scripts/prisma/seed.js');
     expect(pkg.scripts['audit:purge:prod']).toBe(
       'node dist/scripts/prisma/audit-purge.js',
+    );
+    expect(pkg.scripts['retention:raise-floor:prod']).toBe(
+      'node dist/scripts/prisma/retention-raise-floor.js',
     );
   });
 
@@ -54,6 +61,7 @@ describe('scripts de la imagen de runtime (DX-083)', () => {
     for (const file of [
       'prisma/seed.ts',
       'prisma/audit-purge.ts',
+      'prisma/retention-raise-floor.ts',
       'prisma/reference/cities.ts',
     ]) {
       const bad = staticImports(file).filter((m) =>

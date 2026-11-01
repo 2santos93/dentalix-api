@@ -41,7 +41,7 @@ import { STAFF_REPOSITORY } from '../../../staff/domain/ports/staff-repository.p
 import type { StaffRepository } from '../../../staff/domain/ports/staff-repository.port';
 import { RecordAuditEventUseCase } from '../../../audit/application/record-audit-event.use-case';
 import {
-  OVERLAP_MESSAGES,
+  overlapConflict,
   overlapExclusionScope,
 } from '../appointment-overlap-error';
 import {
@@ -516,7 +516,7 @@ export class UpdateAppointmentUseCase {
         existing.id,
       );
       if (overlapping.length > 0) {
-        throw new ConflictException(OVERLAP_MESSAGES.provider);
+        throw overlapConflict('provider');
       }
 
       // Mismo criterio, otro eje: el paciente tampoco puede quedar con dos
@@ -528,7 +528,7 @@ export class UpdateAppointmentUseCase {
         existing.id,
       );
       if (patientOverlapping.length > 0) {
-        throw new ConflictException(OVERLAP_MESSAGES.patient);
+        throw overlapConflict('patient');
       }
     }
 
@@ -652,7 +652,7 @@ export class UpdateAppointmentUseCase {
         throw overbookSlotTaken();
       }
       if (scope === 'provider' || scope === 'patient') {
-        throw new ConflictException(OVERLAP_MESSAGES[scope]);
+        throw overlapConflict(scope);
       }
       throw error;
     }

@@ -75,6 +75,12 @@ function fakeRepo() {
       scopes.treatment.push(scope);
       return Promise.resolve({ rows: [], total: 0 });
     }),
+    keptOverbooks: fn<'keptOverbooks'>(() =>
+      Promise.resolve({
+        rows: [{ ...row(), keptAt: NOW, keptByName: 'Recepción Uno' }],
+        total: 1,
+      }),
+    ),
     staleInClinic: fn<'staleInClinic'>(() => Promise.resolve(2)),
     findAppointment: fn<'findAppointment'>(() =>
       Promise.resolve({
@@ -217,6 +223,38 @@ describe('ClosingQueueUseCases (DX-439)', () => {
     expect(scopes.outcome[0].branches.flatMap((b) => b.locationIds)).toEqual([
       MAIN,
     ]);
+  });
+
+  it('DX-509-bis: los sobrecupos mantenidos salen aparte, sin sumar en el total ni en el contador', async () => {
+    const admin = fakeRepo();
+    const q = await new ClosingQueueUseCases(admin.repo, () => NOW).list(
+      query(ClinicRole.ADMIN),
+    );
+    expect(q.keptOverbooks).toEqual({
+      total: 1,
+      items: [
+        expect.objectContaining({
+          appointmentId: APPT,
+          keptAt: NOW,
+          keptByName: 'Recepción Uno',
+        }),
+      ],
+    });
+    expect(q.total).toBe(1);
+    const c = await new ClosingQueueUseCases(admin.repo, () => NOW).count(
+      query(ClinicRole.ADMIN),
+    );
+    expect(c.total).toBe(1);
+    expect(admin.repo.keptOverbooks).toHaveBeenCalledTimes(1);
+
+    // Un DENTIST, solo los suyos (mismo alcance que sus secciones).
+    const dentist = fakeRepo();
+    await new ClosingQueueUseCases(dentist.repo, () => NOW).list(
+      query(ClinicRole.DENTIST),
+    );
+    expect(dentist.repo.keptOverbooks.mock.calls[0][0].professionalId).toBe(
+      'd-1',
+    );
   });
 
   it('el contador no calcula «en clínica»', async () => {

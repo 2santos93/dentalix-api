@@ -115,6 +115,10 @@ export interface ListPatientsResult {
 export interface PatientRetentionState {
   lastAttentionAt: Date | null;
   retentionExtended: RetentionExtension;
+  /** DX-330: fecha que dejó una reducción del plazo; nunca baja. */
+  retentionFloorUntil: Date | null;
+  /** DX-330: plazo vigente de la clínica en años, leído con `tenants` bloqueada. */
+  years: number;
 }
 
 /**
@@ -155,10 +159,12 @@ export const PARTIAL_SUPPRESSION_FIELDS = [
 ] as const;
 
 export interface RetentionExpiringParams {
-  /** Última atención anterior a esta fecha con plazo NONE (hoy + horizonte − 15 años). */
-  noneBefore: Date;
-  /** Ídem con plazo DOUBLE (hoy + horizonte − 30 años). */
-  doubleBefore: Date;
+  /**
+   * Día siguiente al horizonte, a medianoche UTC. Sale de la lista lo que termina
+   * antes: el repositorio resta el plazo vigente de la clínica (el doble con
+   * DOUBLE) y exige que el suelo también termine antes.
+   */
+  horizonNext: Date;
   skip: number;
   take: number;
 }

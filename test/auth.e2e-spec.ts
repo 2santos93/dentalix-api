@@ -5,7 +5,10 @@ import { App } from 'supertest/types';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
-import { registerVerified } from './support/register-verified';
+import {
+  registerVerified,
+  waitForPendingRegistration,
+} from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
 import {
   REGIONAL_BERLIN_FIXTURE,
@@ -218,13 +221,9 @@ describe('Auth (e2e)', () => {
         .send({ token, password: PASSWORD });
     }
 
-    async function waitForPending(email: string) {
-      for (let i = 0; i < 200; i++) {
-        if (await raw.pendingRegistration.count({ where: { email } })) return;
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      }
-      throw new Error('no apareció el registro pendiente');
-    }
+    // DX-520: sondeo con tope (no 2 s fijos), el mismo que `registerVerified`.
+    const waitForPending = (email: string) =>
+      waitForPendingRegistration(raw, email);
 
     it('registration creates the location with the four values, reviewed', async () => {
       const before = Date.now();

@@ -19,12 +19,14 @@ import {
   ApiBearerAuth,
   ApiConflictResponse,
   ApiCreatedResponse,
+  ApiExtraModels,
   ApiNoContentResponse,
   ApiForbiddenResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
+  getSchemaPath,
 } from '@nestjs/swagger';
 import { CreatePatientDto } from './dto/create-patient.dto';
 import { UpdatePatientDto } from './dto/update-patient.dto';
@@ -97,6 +99,19 @@ import {
 } from '../application/use-cases/patient-settings.use-cases';
 import { PatientSettingsDto } from './dto/patient-settings.dto';
 import {
+  GetRetentionSettingsUseCase,
+  UpdateRetentionSettingsUseCase,
+  type RetentionSettings,
+  type RetentionSettingsUpdateResult,
+} from '../application/use-cases/retention-settings.use-cases';
+import {
+  RetentionReductionUnconfirmedErrorDto,
+  RetentionSettingsBusyErrorDto,
+  RetentionSettingsDto,
+  RetentionSettingsUpdateResultDto,
+  UpdateRetentionSettingsDto,
+} from './dto/retention-settings.dto';
+import {
   GetDocumentTypeNamesUseCase,
   UpdateDocumentTypeNamesUseCase,
   type DocumentTypeNamesSettings,
@@ -116,6 +131,9 @@ import {
 
 export const CLINIC_SETTINGS_FORBIDDEN_MESSAGE =
   'Solo un administrador puede cambiar la mayoría de edad.';
+
+export const RETENTION_SETTINGS_FORBIDDEN_MESSAGE =
+  'Solo un administrador puede cambiar el plazo de conservación.';
 
 type ListPatientsWithCoverageOutput = Omit<ListPatientsOutput, 'items'> & {
   items: WithPhoneInternational<
@@ -153,6 +171,9 @@ export class PatientsController {
     private readonly setRetention: SetRetentionExtensionUseCase,
     private readonly partiallySuppress: PartiallySuppressPatientUseCase,
     private readonly listRetentionExpiring: ListRetentionExpiringUseCase,
+    // DX-330: plazo de conservación de la HC de la clínica.
+    private readonly getRetentionSettings: GetRetentionSettingsUseCase,
+    private readonly updateRetentionSettings: UpdateRetentionSettingsUseCase,
     // DX-150: marca «Saldo vencido» de la cabecera de la ficha.
     private readonly balanceFlags: PatientBalanceFlags,
     // DX-153: resumen de cobertura de la ficha y del listado.
@@ -267,12 +288,16 @@ export class PatientsController {
   @Get('retention/expiring')
   @Roles(...PATIENT_RETENTION_ROLES)
   @ApiOperation({
-    summary: 'Historias que salen de retención legal (solo ADMIN)',
+    summary: 'Historias que salen de retención (solo ADMIN)',
     description:
       'DX-039. Pacientes vivos cuya HC ya no está en retención o deja de ' +
-      'estarlo dentro de `withinDays` (NONE: 15 años, DOUBLE: 30 años desde ' +
-      'la última atención; PERMANENT nunca sale). Orden: la que antes vence. ' +
-      'Paginada, con tope. Solo informa: no purga nada.',
+      'estarlo dentro de `withinDays` (NONE: el plazo de la clínica, DOUBLE: ' +
+      'el doble, desde la última atención; PERMANENT nunca sale). Una ' +
+      'reducción del plazo no adelanta la lista: la fecha de fin que una ' +
+      'historia ya tenía se respeta. Orden: `lastAttentionAt` ascendente; con ' +
+      'esa fecha fijada, una fila puede aparecer más tarde que su última ' +
+      'atención, y `retentionUntil` es la fecha efectiva. Paginada, con ' +
+      'tope. Solo informa: no purga nada.',
   })
   @ApiOkResponse({ type: ListRetentionExpiringResponseDto })
   @ApiForbiddenResponse({ description: 'Rol distinto de ADMIN' })
@@ -293,6 +318,69 @@ export class PatientsController {
         RETENTION_EXPIRING_MAX_PAGE_SIZE,
       ),
     });
+  }
+
+  // DX-330: antes de `@Get(':id')`, como `retention/expiring`.
+  @Get('retention/settings')
+  @ApiOperation({
+    summary: 'Plazo de conservación de la historia clínica de la clínica',
+    description:
+      'DX-330. `effectiveYears` es el plazo que rige (el guardado, nunca por ' +
+      'debajo del mínimo de plataforma). `correctionWindow` aparece durante ' +
+      'las 24 horas siguientes a una subida.',
+  })
+  @ApiOkResponse({ type: RetentionSettingsDto })
+  retentionSettings(): Promise<RetentionSettings> {
+    return this.getRetentionSettings.execute();
+  }
+
+  @Put('retention/settings')
+  @Roles(...CLINIC_SETTINGS_WRITE_ROLES)
+  @RolesDeniedMessage(RETENTION_SETTINGS_FORBIDDEN_MESSAGE)
+  @ApiOperation({
+    summary:
+      'Cambia el plazo de conservación de la historia clínica; queda en la auditoría',
+    description:
+      'DX-330. Subir aplica desde la siguiente petición. Reducir pide ' +
+      '`confirmReduction: true`: las historias que ya estaban en retención ' +
+      'mantienen su fecha de fin y el plazo nuevo se aplica al resto y a las ' +
+      'atenciones nuevas. Si el valor no cambia, responde 200 sin evento de ' +
+      'auditoría.',
+  })
+  @ApiOkResponse({ type: RetentionSettingsUpdateResultDto })
+  @ApiBadRequestResponse({
+    description:
+      'No entero o fuera del rango del mínimo de plataforma al máximo',
+  })
+  @ApiForbiddenResponse({ description: RETENTION_SETTINGS_FORBIDDEN_MESSAGE })
+  @ApiExtraModels(
+    RetentionReductionUnconfirmedErrorDto,
+    RetentionSettingsBusyErrorDto,
+  )
+  @ApiConflictResponse({
+    schema: {
+      oneOf: [
+        { $ref: getSchemaPath(RetentionReductionUnconfirmedErrorDto) },
+        { $ref: getSchemaPath(RetentionSettingsBusyErrorDto) },
+      ],
+    },
+    description:
+      '`RETENTION_REDUCTION_UNCONFIRMED`: reducir sin confirmar, sin guardar nada. ' +
+      '`RETENTION_SETTINGS_BUSY`: otra operación con los pacientes de la clínica en curso, o la reducción tarda demasiado; no se guardó nada.',
+  })
+  updateRetention(
+    @Body() dto: UpdateRetentionSettingsDto,
+    @Req() req: AuditableRequest,
+  ): Promise<RetentionSettingsUpdateResult> {
+    const ctx = auditRequestContext(req, this.tenantContext);
+    if (!ctx) throw new Error('Sin sesión de clínica detrás del RolesGuard');
+    return this.updateRetentionSettings.execute(
+      {
+        clinicalRecordRetentionYears: dto.clinicalRecordRetentionYears,
+        confirmReduction: dto.confirmReduction,
+      },
+      ctx,
+    );
   }
 
   // Antes de `@Get(':id')`, como `retention/expiring`: si no, `settings` se
@@ -439,8 +527,9 @@ export class PatientsController {
     summary: 'Archivar paciente (borrado blando, solo ADMIN)',
     description:
       'DX-039. Retira al paciente de los listados (`deletedAt`); su HC se ' +
-      'conserva siempre. Si la HC está en retención legal (15 años desde la ' +
-      'última atención, 30 con DOUBLE, siempre con PERMANENT) responde 409 ' +
+      'conserva siempre. Si la HC está en retención (el plazo de la ' +
+      'clínica desde la última atención, el doble con DOUBLE, siempre con ' +
+      'PERMANENT) responde 409 ' +
       '`CLINICAL_RECORD_RETENTION` con la fecha hasta la que se conserva. Un ' +
       'paciente sin atenciones clínicas se archiva, salvo que tenga citas ' +
       'programadas o confirmadas (409 `PATIENT_HAS_PENDING_APPOINTMENTS`: ' +
@@ -455,7 +544,7 @@ export class PatientsController {
   @ApiConflictResponse({
     type: ClinicalRecordRetentionErrorDto,
     description:
-      'HC en retención legal (`CLINICAL_RECORD_RETENTION`) o citas abiertas ' +
+      'HC en retención (`CLINICAL_RECORD_RETENTION`) o citas abiertas ' +
       '(`PATIENT_HAS_PENDING_APPOINTMENTS`, sin `retentionUntil`)',
   })
   @ApiForbiddenResponse({ description: 'Rol distinto de ADMIN' })
@@ -501,7 +590,7 @@ export class PatientsController {
   @ApiOperation({
     summary: 'Cambiar la retención extendida de la HC (solo ADMIN)',
     description:
-      'DX-039. NONE (15 años), DOUBLE (30) o PERMANENT. Motivo obligatorio: ' +
+      'DX-039. NONE (el plazo de la clínica), DOUBLE (el doble) o PERMANENT. Motivo obligatorio: ' +
       'queda con el autor y la fecha en el rastro de retención del paciente; ' +
       'el registro de auditoría guarda quién y cuándo (sin el motivo).',
   })

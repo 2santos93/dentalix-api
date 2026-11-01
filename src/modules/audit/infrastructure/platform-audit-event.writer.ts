@@ -9,7 +9,8 @@ const MAX_IP = 64;
 /**
  * DX-359: escribe un evento de plataforma DENTRO de la transacción `tx` del
  * cambio (MFA o contraseña del superadmin): o los dos o ninguno. Metadata
- * vacía a propósito (ver PlatformAuditEventDraft).
+ * vacía a propósito, salvo el mínimo de conservación de DX-330, que lleva
+ * `{ before, after }` (ver PlatformAuditEventDraft).
  */
 export async function writePlatformAuditEvent(
   tx: Prisma.TransactionClient,
@@ -24,7 +25,7 @@ export async function writePlatformAuditEvent(
       requestId: draft.actor.requestId?.slice(0, MAX_REQUEST_ID) ?? null,
       ip: draft.actor.ip?.slice(0, MAX_IP) ?? null,
       userAgent: draft.actor.userAgent?.slice(0, MAX_AUDIT_USER_AGENT) ?? null,
-      metadata: {},
+      metadata: 'metadata' in draft ? draft.metadata : {},
     },
     select: { id: true },
   });

@@ -421,7 +421,7 @@ export class AppointmentsController {
       'Fechas inválidas, al revés o más de 31 días; duración fuera de 5–480',
   })
   @ApiNotFoundResponse({
-    description: 'Sede, profesional o paciente de otra clínica',
+    description: 'Sede, profesional, paciente o cita a excluir de otra clínica',
   })
   openings(@Query() query: OpeningsQueryDto): Promise<OpeningsView> {
     return this.findOpenings.execute({
@@ -431,6 +431,7 @@ export class AppointmentsController {
       to: query.to,
       durationMinutes: query.durationMinutes,
       patientId: query.patientId,
+      excludeAppointmentId: query.excludeAppointmentId,
     });
   }
 

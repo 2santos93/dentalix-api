@@ -313,6 +313,42 @@ export class AuditConfigChangeDto {
   after?: Record<string, unknown>;
 }
 
+/** Cambio del plazo de conservación de la historia clínica (DX-330). */
+export class AuditRetentionTermChangeDto {
+  @ApiProperty({
+    enum: ['UP', 'DOWN'],
+    description: 'Dirección según el plazo vigente.',
+  })
+  direction!: 'UP' | 'DOWN';
+
+  @ApiProperty({
+    type: 'integer',
+    minimum: 0,
+    description:
+      'Pacientes que conservan una fecha posterior a la del plazo nuevo; 0 en una subida.',
+  })
+  protectedPatients!: number;
+
+  @ApiProperty({
+    type: 'integer',
+    minimum: 0,
+    description: 'Plazo vigente antes del cambio, en años.',
+  })
+  effectiveBefore!: number;
+
+  @ApiProperty({
+    type: 'integer',
+    minimum: 0,
+    description: 'Plazo vigente después del cambio, en años.',
+  })
+  effectiveAfter!: number;
+
+  @ApiProperty({
+    description: 'Una bajada que corrige una subida de hace menos de 24 horas.',
+  })
+  withinCorrectionWindow!: boolean;
+}
+
 export class AuditMetadataDto {
   @ApiPropertyOptional({
     type: [String],
@@ -421,6 +457,13 @@ export class AuditMetadataDto {
       'DX-360: configuración de la clínica (sedes, horario, recordatorios, dominios, política de datos, tipos de cita, pagadores, plantillas, inventario): los campos que cambiaron con su antes y después, o un lado en un alta o un retiro. El texto libre o largo (cuerpo de una plantilla, notas, motivo) solo figura en `changedFields`; nunca secretos (token de un dominio) ni datos de pacientes.',
   })
   configChange?: AuditConfigChangeDto;
+
+  @ApiPropertyOptional({
+    type: AuditRetentionTermChangeDto,
+    description:
+      'DX-330: cambio del plazo de conservación de la historia clínica (`reason` CLINICAL_RECORD_RETENTION_SETTINGS): dirección, pacientes protegidos, plazos vigentes y si corrigió una subida reciente. Solo códigos y enteros.',
+  })
+  retentionTermChange?: AuditRetentionTermChangeDto;
 }
 
 export class AuditEventDto {

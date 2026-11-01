@@ -46,6 +46,7 @@ import {
   boundedInt,
   storageDriverOf,
 } from '../shared/storage/storage-config';
+import { platformMinYearsProblem } from '../modules/patients/domain/retention/clinical-retention-config';
 import { parseMailEncryptionKey } from '../modules/notifications/email/infrastructure/email-payload-cipher';
 import { AUDIT_MIN_RETENTION_MONTHS } from '../modules/audit/infrastructure/audit-retention-config';
 import {
@@ -409,6 +410,17 @@ function auditProblems(env: Env): string[] {
   return problems;
 }
 
+/**
+ * DX-330: mínimo de plataforma del plazo de conservación de la historia
+ * clínica. Vacío = 15; por debajo del suelo, la API no arranca.
+ */
+function retentionProblems(env: Env): string[] {
+  const problem = platformMinYearsProblem(
+    str(env, 'PLATFORM_MIN_CLINICAL_RETENTION_YEARS'),
+  );
+  return problem ? [problem] : [];
+}
+
 /** DX-085: papel del proceso y ajustes de la cola de trabajos. */
 function jobsProblems(env: Env): string[] {
   const problems: string[] = [];
@@ -713,6 +725,7 @@ export function validateEnv(env: Env): Env {
   if (isProd) problems.push(...productionProblems(env));
   problems.push(...mailProblems(env, isProd));
   problems.push(...auditProblems(env));
+  problems.push(...retentionProblems(env));
   problems.push(...jobsProblems(env));
   problems.push(...domainProblems(env));
   problems.push(...breakGlassProblems(env, isProd));

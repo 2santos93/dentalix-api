@@ -346,7 +346,12 @@ describe('Tipos de cita y agenda en columnas (e2e, DX-121)', () => {
       const token = (link.body as { url: string }).url.split('/confirmar/')[1];
 
       // Desde aquí, en TODA la clínica, solo puede auditarse el movimiento.
-      const t0 = new Date();
+      // Por id y no por hora: el evento del enlace se escribe 1-2 ms antes y un
+      // corte con `new Date()` puede dejarlo dentro (`occurredAt` redondea a ms).
+      const before = await raw.auditEvent.findMany({
+        where: { tenantId: clinic.tenantId, resourceType: 'APPOINTMENT' },
+        select: { id: true },
+      });
       const moved = await as(
         api().patch(`/api/v1/appointments/${appt.id}`),
         reception.token,
@@ -372,13 +377,13 @@ describe('Tipos de cita y agenda en columnas (e2e, DX-121)', () => {
 
       // Desde DX-256 cada POST/PATCH deja además su traza HTTP genérica
       // (UPDATE con changedFields) junto al APPOINTMENT_MOVED con el antes y el
-      // después. Tras t0, en toda la clínica, solo esos dos y de esta cita:
+      // después. Desde entonces, en toda la clínica, solo esos dos y de esta cita:
       // nada atribuido a otra cita ni duplicado.
       const events = await raw.auditEvent.findMany({
         where: {
           tenantId: clinic.tenantId,
           resourceType: 'APPOINTMENT',
-          occurredAt: { gte: t0 },
+          id: { notIn: before.map((e) => e.id) },
         },
         orderBy: { occurredAt: 'asc' },
       });

@@ -13,6 +13,7 @@ import {
 } from './support/e2e-fixtures';
 import type { RegionalFixture } from './support/location-fixtures';
 import { SCHEDULE_BLOCK_CLOCK } from '../src/modules/schedule-blocks/application/schedule-block-clock';
+import { CLOSING_QUEUE_NOW } from '../src/modules/closing-queue/domain/ports/closing-queue-repository.port';
 import {
   addCivilDays,
   civilDateIn,
@@ -53,6 +54,8 @@ const local = (hhmm: string): Date => {
 };
 
 let clockNow = new Date(0);
+// «Pendiente de cerrar» mira días anteriores a hoy: su reloj va aparte.
+let closingNow = new Date(0);
 
 interface Body {
   id: string;
@@ -204,6 +207,7 @@ describe('Sobrecupo de urgencia y «Atender sin cita» idempotente (e2e, DX-509/
   beforeAll(async () => {
     app = await createE2eApp((builder) => {
       builder.overrideProvider(SCHEDULE_BLOCK_CLOCK).useValue(() => clockNow);
+      builder.overrideProvider(CLOSING_QUEUE_NOW).useValue(() => closingNow);
     });
     await resetDatabase(raw);
     clinic = await registerClinic(app, 'dx509-caracas', CARACAS);
@@ -282,8 +286,61 @@ describe('Sobrecupo de urgencia y «Atender sin cita» idempotente (e2e, DX-509/
       }).expect(409);
       expect(clash.body).toMatchObject({
         message: 'El profesional ya tiene una cita en ese horario',
+        // DX-509-bis: con código y ámbito, la web ofrece el siguiente hueco.
+        code: 'APPOINTMENT_OVERLAP',
+        scope: 'provider',
       });
       expect(await overbookedInDb(a.id)).toBe(true);
+
+      // DX-509-bis: «Buscar hueco» para moverla: sin excluirla, su propia
+      // hora (del paciente) tapa 09:00–09:30; excluyéndola, ese hueco sale.
+      const openings = async (exclude: boolean) => {
+        const res = await as(
+          api().get('/api/v1/appointments/openings'),
+          reception.token,
+        )
+          .query({
+            providerId: dentist.userId,
+            locationId: mainId,
+            from: DAY,
+            to: DAY,
+            durationMinutes: 30,
+            patientId: urgentPatientId,
+            ...(exclude ? { excludeAppointmentId: a.id } : {}),
+          })
+          .expect(200);
+        return (res.body as { openings: { start: string; end: string }[] })
+          .openings;
+      };
+      const covers = (list: { start: string; end: string }[]) =>
+        list.some(
+          (o) =>
+            new Date(o.start) <= local('09:00') &&
+            new Date(o.end) >= local('09:30'),
+        );
+      expect(covers(await openings(false))).toBe(false);
+      expect(covers(await openings(true))).toBe(true);
+      // Una cita que no es de la clínica: 404; un id que no es UUID, 400.
+      await as(api().get('/api/v1/appointments/openings'), reception.token)
+        .query({
+          providerId: dentist.userId,
+          locationId: mainId,
+          from: DAY,
+          to: DAY,
+          durationMinutes: 30,
+          excludeAppointmentId: 'no-uuid',
+        })
+        .expect(400);
+      await as(api().get('/api/v1/appointments/openings'), reception.token)
+        .query({
+          providerId: dentist.userId,
+          locationId: mainId,
+          from: DAY,
+          to: DAY,
+          durationMinutes: 30,
+          excludeAppointmentId: randomUUID(),
+        })
+        .expect(404);
 
       const moved = await patch(a.id, {
         start: local('11:00').toISOString(),
@@ -394,6 +451,92 @@ describe('Sobrecupo de urgencia y «Atender sin cita» idempotente (e2e, DX-509/
       expect(await reasonsOf(a.id)).toContain('WALK_IN_OVERBOOK_CLEARED');
       await book('16:00', '16:30').expect(409);
     });
+  });
+
+  it('DX-509-bis · «Pendiente de cerrar» lista los sobrecupos mantenidos (no los demás), sin sumarlos al contador', async () => {
+    // Mantenido a sabiendas: reactivada con su hora ocupada.
+    const kept = await overbookedAt('09:30');
+    await patch(kept.id, {
+      status: 'CANCELLED',
+      cancelledByKind: 'STAFF_FOR_PATIENT',
+      cancelReasonCode: 'ILLNESS',
+    }).expect(200);
+    await book('09:30', '10:00').expect(201);
+    await patch(kept.id, { status: 'SCHEDULED', keepOverbooked: true }).expect(
+      200,
+    );
+    // Sobrecupo de siempre (nadie decidió mantenerlo): no sale.
+    const plain = await overbookedAt('10:00');
+
+    closingNow = new Date(local('12:00').getTime() + 86_400_000);
+    const list = async (token: string) =>
+      (
+        await as(api().get('/api/v1/closing-queue'), token)
+          .query({ from: DAY, to: DAY })
+          .expect(200)
+      ).body as {
+        total: number;
+        keptOverbooks: {
+          total: number;
+          items: {
+            appointmentId: string;
+            keptByName: string | null;
+            keptAt: string;
+          }[];
+        };
+      };
+    const count = async (token: string) =>
+      (
+        (
+          await as(api().get('/api/v1/closing-queue/count'), token)
+            .query({ from: DAY, to: DAY })
+            .expect(200)
+        ).body as { total: number }
+      ).total;
+
+    const asReception = await list(reception.token);
+    const ids = asReception.keptOverbooks.items.map((i) => i.appointmentId);
+    expect(ids).toContain(kept.id);
+    expect(ids).not.toContain(plain.id);
+    const row = asReception.keptOverbooks.items.find(
+      (i) => i.appointmentId === kept.id,
+    )!;
+    const receptionUser = await raw.user.findUniqueOrThrow({
+      where: { id: reception.userId },
+    });
+    expect(row.keptByName).toBe(receptionUser.fullName);
+    expect(Number.isNaN(Date.parse(row.keptAt))).toBe(false);
+    // Informativo: el total y el contador son los de las secciones.
+    expect(await count(reception.token)).toBe(asReception.total);
+
+    // El odontólogo de la cita la ve; la otra clínica, nunca.
+    expect(
+      (await list(dentist.token)).keptOverbooks.items.map(
+        (i) => i.appointmentId,
+      ),
+    ).toContain(kept.id);
+    const foreign = (
+      await as(
+        api().get('/api/v1/closing-queue'),
+        other.adminToken,
+        null,
+        other.host,
+      )
+        .query({ from: DAY, to: DAY })
+        .expect(200)
+    ).body as { keptOverbooks: { total: number } };
+    expect(foreign.keptOverbooks.total).toBe(0);
+
+    // Cancelada deja de salir; movida deja de ser sobrecupo y tampoco sale.
+    await patch(kept.id, {
+      start: local('17:30').toISOString(),
+      end: local('18:00').toISOString(),
+    }).expect(200);
+    expect(
+      (await list(reception.token)).keptOverbooks.items.map(
+        (i) => i.appointmentId,
+      ),
+    ).not.toContain(kept.id);
   });
 
   it('DX-509 · en su hora no cambia: notas y salida sin atención (cancelar)', async () => {

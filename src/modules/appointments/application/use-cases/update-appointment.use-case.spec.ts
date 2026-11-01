@@ -502,6 +502,16 @@ describe('UpdateAppointmentUseCase', () => {
           end: at('11:30'),
         }),
       ).rejects.toThrow('El profesional ya tiene una cita en ese horario');
+      // DX-509-bis: el 409 de solape lleva su código (la web ofrece hueco).
+      const error = await uc
+        .execute('a1', { start: at('11:00'), end: at('11:30') })
+        .catch((e: ConflictException) => e);
+      expect((error as ConflictException).getResponse()).toEqual(
+        expect.objectContaining({
+          code: 'APPOINTMENT_OVERLAP',
+          scope: 'provider',
+        }),
+      );
     });
 
     it('maps an UN-CANCEL into a taken slot to 409 (no pre-check runs on a status-only patch)', async () => {

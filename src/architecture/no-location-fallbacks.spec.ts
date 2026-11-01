@@ -2081,3 +2081,111 @@ describe('sin Colombia (DX-323, DX-325)', () => {
     }
   });
 });
+
+/**
+ * G1 (DX-330, spec §8): el plazo de la HC es de la clínica. Ni una constante
+ * de 15 años, ni un texto que lo fije, ni «legal», ni las causales de un país.
+ * Los literales se arman por partes para que este fichero no se delate solo.
+ */
+describe('el plazo de la HC es de la clínica (DX-330)', () => {
+  const PRODUCTION = tsFiles(SRC).filter(isProduction);
+  const PATIENTS = join(SRC, 'modules', 'patients') + sep;
+  const DEMO = join(SRC, '..', 'prisma', 'demo');
+  const SCHEMA = join(SRC, '..', 'prisma', 'schema.prisma');
+  const FIXED_CONSTANT = 'CLINICAL_RECORD_' + 'RETENTION_YEARS';
+  const FIXED_TERM = /\b\d+\s+años\b/;
+  const RETENTION_WORD = /atenci[oó]n|retenci[oó]n/;
+  const LEGAL_RETENTION = new RegExp('retenci[oó]n ' + 'legal');
+  const COUNTRY_GROUNDS = new RegExp('DD\\.\\s?' + 'HH\\.|\\b' + 'DI' + 'H\\b');
+
+  /**
+   * Literales de texto de un fichero, sin comentarios y con los trozos unidos
+   * por `+` (Prettier parte los textos largos) fundidos en uno.
+   */
+  const literals = (text: string): { text: string; line: number }[] => {
+    const code = text
+      .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
+      .replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
+    const joined = code.replace(/(['"`])\s*\+\s*\1/g, '');
+    return [
+      ...joined.matchAll(
+        /'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"|`(?:[^`\\]|\\.)*`/g,
+      ),
+    ].map((m) => ({
+      text: m[0],
+      line: joined.slice(0, m.index).split('\n').length,
+    }));
+  };
+  const fixedTermLiteral = (literal: string): boolean =>
+    (FIXED_TERM.test(literal) && RETENTION_WORD.test(literal)) ||
+    LEGAL_RETENTION.test(literal);
+  /** `fichero:línea` de cada literal de `files` que cumple `matches`. */
+  const offendingLiterals = (
+    files: string[],
+    matches: (literal: string) => boolean,
+  ): string[] =>
+    files.flatMap((file) =>
+      literals(readFileSync(file, 'utf8')).flatMap((l) =>
+        matches(l.text) ? [`${relative(SRC, file)}:${l.line}`] : [],
+      ),
+    );
+  /** Un texto suelto, como si fuera el único literal de un fichero. */
+  const fixedTermText = (line: string): boolean =>
+    literals(line).some((l) => fixedTermLiteral(l.text));
+
+  it('G1.1: no production file names the fixed 15-year constant', () => {
+    expect(
+      offending(PRODUCTION, (line) => line.includes(FIXED_CONSTANT)),
+    ).toEqual([]);
+  });
+
+  it('G1.2: no patients literal fixes a number of years or says legal retention', () => {
+    const patients = PRODUCTION.filter((file) => file.startsWith(PATIENTS));
+    expect(offendingLiterals(patients, fixedTermLiteral)).toEqual([]);
+  });
+
+  it('G1.3: no production text, demo seed or schema comment names the grounds of a country', () => {
+    const demo = existsSync(DEMO) ? tsFiles(DEMO) : [];
+    const texts = offendingLiterals([...PRODUCTION, ...demo], (literal) =>
+      COUNTRY_GROUNDS.test(literal),
+    );
+    const schema = readFileSync(SCHEMA, 'utf8')
+      .split('\n')
+      .flatMap((line, i) =>
+        COUNTRY_GROUNDS.test(line) ? [`prisma/schema.prisma:${i + 1}`] : [],
+      );
+    expect([...texts, ...schema]).toEqual([]);
+  });
+
+  it('G1.4: the patterns catch each retired form and skip the clinic term', () => {
+    for (const line of [
+      `  message: '${'15 ' + 'años'} desde la última atención',`,
+      `  summary: 'Historias en ${'retención ' + 'legal'}',`,
+    ]) {
+      expect({ line, caught: fixedTermText(line) }).toEqual({
+        line,
+        caught: true,
+      });
+    }
+    for (const line of [
+      '  message: `${years} años desde la última atención`,',
+      "  reason: 'Vigencia: 12 meses',",
+      `  // ${'15 ' + 'años'} de retención: comentario`,
+    ]) {
+      expect({ line, caught: fixedTermText(line) }).toEqual({
+        line,
+        caught: false,
+      });
+    }
+    for (const line of [
+      `víctimas de violaciones de ${'DD. ' + 'HH./' + 'DI' + 'H'}`,
+      `razón ${'DI' + 'H'}`,
+    ]) {
+      expect({ line, caught: COUNTRY_GROUNDS.test(line) }).toEqual({
+        line,
+        caught: true,
+      });
+    }
+    expect(COUNTRY_GROUNDS.test('Permanente (nunca se libera)')).toBe(false);
+  });
+});
