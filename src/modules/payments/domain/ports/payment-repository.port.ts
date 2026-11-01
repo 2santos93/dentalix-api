@@ -214,6 +214,8 @@ export interface CashRegisterPage {
  */
 export interface PaymentVoidTarget extends VoidSubject {
   id: string;
+  /** Sede persistida del abono, para autorizar antes de escribir. */
+  locationId: string;
   /**
    * DX-390: si es una línea de un cobro dividido, los ids de sus líneas vivas
    * en orden (ella incluida): se anulan juntas, con su recibo. `[]` en un
