@@ -676,24 +676,6 @@ const COUNTRY_DOC_ACRONYM = new RegExp(
 const FROZEN_DOC_CODE =
   /\bLegacyDocumentCode\b|\blegacyDocumentCode\b|"docType"|\$Enums\s*(?:\.\s*DocType\b|\[\s*['"]DocType['"]\s*\])|\{[^}]*\bDocType\b[^}]*\}\s*=\s*\$Enums\b/;
 /**
- * V1 (decisión del dueño, 2026-10-31): la demo es una clínica venezolana y su
- * documento nacional lleva el nombre local con el que la llaman allí. Es DATO
- * de la clínica (DX-327: el ADMIN lo pone en Ajustes y el seed lo pone por ese
- * mismo caso de uso), no una regla: la única línea de la demo que nombra un
- * documento de un país. Ningún otro fichero ni línea se exime.
- */
-const DEMO_DOCUMENT_NAME_FILE = join(PRISMA_DIR, 'demo', 'data.ts');
-const DEMO_DOCUMENT_NAME_LINE = "NATIONAL_ID: 'Cédula de identidad',";
-/** `fichero:línea` de esa única línea; falla si no está una sola vez. */
-function demoDocumentNameHit(): string {
-  const lines = readFileSync(DEMO_DOCUMENT_NAME_FILE, 'utf8').split('\n');
-  const at = lines
-    .map((line, i) => (line.trim() === DEMO_DOCUMENT_NAME_LINE ? i : -1))
-    .filter((i) => i >= 0);
-  expect(at).toHaveLength(1);
-  return `${relative(SRC, DEMO_DOCUMENT_NAME_FILE)}:${at[0] + 1}`;
-}
-/**
  * `legacy-document-codes.ts` ya no se exime entero: solo estas líneas, los
  * alias de importación de uso en muchos países (en América y Europa), una
  * por una. Un código o un nombre de un solo país (las siglas y nombres
@@ -787,7 +769,7 @@ describe('tipos de documento genéricos (DX-327, DX-323)', () => {
     expect(files).toContain(LEGACY_DOCUMENT_CODES_FILE);
     expect(files.length).toBeGreaterThan(500);
     expect(productionDataFiles().length).toBeGreaterThan(0);
-    const allowed = [demoDocumentNameHit(), ...multiCountryAliasHits()];
+    const allowed = multiCountryAliasHits();
     expect(
       offending(files, legacyDocTypeHit).filter(
         (hit) => !allowed.includes(hit),
@@ -872,11 +854,7 @@ describe('tipos de documento genéricos (DX-327, DX-323)', () => {
   it('architecture: the demo names no country document or authority', () => {
     const files = demoFiles();
     expect(files.some((file) => file.endsWith('.csv'))).toBe(true);
-    // Excepción nombrada: el nombre local del documento nacional (V1).
-    const allowed = demoDocumentNameHit();
-    expect(
-      offending(files, demoCountryDocumentHit).filter((hit) => hit !== allowed),
-    ).toEqual([]);
+    expect(offending(files, demoCountryDocumentHit)).toEqual([]);
   });
 
   it('architecture: no code derives a document label from a legacy code', () => {
@@ -1965,6 +1943,22 @@ const COLOMBIA_TERMS: ReadonlyArray<[string, RegExp]> = [
     'valor por defecto',
     new RegExp('@default\\("(?:CO' + 'P|America/' + 'Bogota|es-' + 'CO)"\\)'),
   ],
+  [
+    'medio de pago o banco de un país',
+    new RegExp(
+      '\\b(?:' +
+        [
+          'ne' + 'qui',
+          'davi' + 'plata',
+          'banco' + 'lombia',
+          'davi' + 'vienda',
+          'efec' + 'ty',
+          'balo' + 'to',
+        ].join('|') +
+        ')\\b',
+      'i',
+    ),
+  ],
 ];
 
 function colombiaHit(line: string): string | null {
@@ -2053,6 +2047,8 @@ describe('sin Colombia (DX-323, DX-325)', () => {
       `${'MUTUA' + '_ES'},`,
       `  migratedFrom${'Insurer' + 'Eps'}: true,`,
       `UPDATE patients SET "${'insurer' + 'Eps'}" = 'x'`,
+      `notes: '${'Pago por ' + 'Ne' + 'qui'}'`,
+      `'${'Davi' + 'plata'}'`,
     ]) {
       expect({ line, caught: colombiaHit(line) !== null }).toEqual({
         line,
@@ -2075,6 +2071,8 @@ describe('sin Colombia (DX-323, DX-325)', () => {
       `'+00 000 000 0001'`,
       `'surable'`,
       `const steps = 3;`,
+      `notes: 'Pago con billetera digital'`,
+      `'efectivo'`,
     ]) {
       expect({ line, caught: colombiaHit(line) !== null }).toEqual({
         line,

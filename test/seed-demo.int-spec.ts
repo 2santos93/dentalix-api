@@ -394,13 +394,12 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
         tenant.prescriptionRequireClinicalRecordNumber,
       validityDays: tenant.prescriptionValidityDays,
     }).toEqual(DEMO_PRESCRIPTION_SETTINGS);
-    // DX-324: los ajustes los fija el ADMIN por su caso de uso, auditado
-    // (V1: además del de los nombres de los documentos).
+    // DX-324: los ajustes los fija el ADMIN por su caso de uso, auditado.
     const settingsEvents = await raw.auditEvent.findMany({
       where: { tenantId, resourceType: 'CLINIC_SETTINGS' },
       select: { action: true, actorRole: true, metadata: true },
     });
-    expect(settingsEvents).toHaveLength(2);
+    expect(settingsEvents).toHaveLength(1);
     expect(settingsEvents).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -408,13 +407,6 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
           actorRole: ClinicRole.ADMIN,
           metadata: expect.objectContaining({
             reason: 'PRESCRIPTION_SETTINGS',
-          }) as unknown,
-        }),
-        expect.objectContaining({
-          action: 'UPDATE',
-          actorRole: ClinicRole.ADMIN,
-          metadata: expect.objectContaining({
-            reason: 'DOCUMENT_TYPE_NAMES_SETTINGS',
           }) as unknown,
         }),
       ]),
@@ -444,11 +436,10 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     );
   });
 
-  it('the demo clinic names its documents as a Venezuelan clinic does, through the audited settings use case', async () => {
-    // R16 (pre-flight M18): toda clínica empieza sin nombres locales y ningún
-    // valor por defecto los rellena. La demo (V1, clínica venezolana) los pone
-    // como lo haría su ADMIN en Ajustes: solo el documento nacional, con su
-    // evento DOCUMENT_TYPE_NAMES_SETTINGS; los demás siguen sin nombre.
+  it('the demo clinic keeps the generic document names', async () => {
+    // R16 (pre-flight M18) y DX-335: toda clínica empieza sin nombres locales
+    // y la demo, que reúne sedes de varios países, no pone ninguno: ni
+    // columnas rellenas ni evento de Ajustes que las haya escrito.
     const tenantId = await liveDemoTenantId();
     const tenant = await raw.tenant.findUniqueOrThrow({
       where: { id: tenantId },
@@ -461,7 +452,7 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       },
     });
     expect(tenant).toEqual({
-      docTypeNameNationalId: 'Cédula de identidad',
+      docTypeNameNationalId: null,
       docTypeNamePassport: null,
       docTypeNameResidencePermit: null,
       docTypeNameTaxId: null,
@@ -471,14 +462,10 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       where: { tenantId, resourceType: 'CLINIC_SETTINGS' },
       select: { metadata: true },
     });
-    const meta = events.map(
-      (e) => e.metadata as { reason?: string; changedFields?: string[] } | null,
-    );
+    const meta = events.map((e) => e.metadata as { reason?: string } | null);
     expect(
-      meta
-        .filter((m) => m?.reason === 'DOCUMENT_TYPE_NAMES_SETTINGS')
-        .map((m) => m?.changedFields),
-    ).toEqual([['NATIONAL_ID']]);
+      meta.filter((m) => m?.reason === 'DOCUMENT_TYPE_NAMES_SETTINGS'),
+    ).toEqual([]);
   });
 
   it('demo patients and contacts use generic types, neutral numbers and no label', async () => {
@@ -1216,18 +1203,18 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       orderBy: { invoiceDate: 'asc' },
     });
     expect(expenses.map((e) => e.category)).toEqual([
-      'Servicios públicos',
-      'Arriendo',
+      'Mantenimiento',
+      'Alquiler',
       'Laboratorio',
       'Mensajería',
     ]);
     const paid = (e: (typeof expenses)[number]) =>
       e.payments.reduce((sum, p) => sum + Number(p.amount), 0);
-    const [utilities, rent, lab, courier] = expenses;
+    const [maintenance, rent, lab, courier] = expenses;
     expect(paid(rent)).toBe(Number(rent.amount));
-    expect(paid(utilities)).toBeGreaterThan(0);
-    expect(paid(utilities)).toBeLessThan(Number(utilities.amount));
-    expect(utilities.dueDate!.getTime()).toBeLessThan(Date.now());
+    expect(paid(maintenance)).toBeGreaterThan(0);
+    expect(paid(maintenance)).toBeLessThan(Number(maintenance.amount));
+    expect(maintenance.dueDate!.getTime()).toBeLessThan(Date.now());
     expect(paid(lab)).toBe(0);
     expect(lab.dueDate!.getTime()).toBeGreaterThan(Date.now());
 
@@ -1241,7 +1228,7 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       method: 'CASH',
     });
     expect(
-      [utilities, rent, lab]
+      [maintenance, rent, lab]
         .flatMap((e) => e.payments)
         .map((p) => p.cashSessionId),
     ).toEqual([null, null]);

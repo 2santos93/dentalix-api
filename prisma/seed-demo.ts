@@ -99,7 +99,6 @@ import { RecordPaymentUseCase } from '../src/modules/payments/application/use-ca
 import { CreatePaymentMethodUseCase } from '../src/modules/payment-methods/application/payment-methods.use-cases';
 import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
 import { RegisterManualExchangeRateUseCase } from '../src/modules/exchange/application/use-cases/manual-exchange-rates.use-cases';
-import { UpdateDocumentTypeNamesUseCase } from '../src/modules/patients/application/use-cases/document-type-names.use-cases';
 import {
   CreateCollectionNoteUseCase,
   CreatePaymentPromiseUseCase,
@@ -112,6 +111,10 @@ import {
 } from '../src/modules/cash-sessions/application/use-cases/cash-sessions.use-cases';
 import { CreateCashOutflowUseCase } from '../src/modules/expenses/application/use-cases/create-cash-outflow.use-case';
 import { CreateExpenseUseCase } from '../src/modules/expenses/application/use-cases/create-expense.use-case';
+import {
+  CreateExpenseCategoryUseCase,
+  ListExpenseCategoriesUseCase,
+} from '../src/modules/expenses/application/use-cases/expense-categories.use-cases';
 import { CreatePaymentPlanUseCase } from '../src/modules/payment-plans/application/use-cases/create-payment-plan.use-case';
 import { CreateInventoryItemUseCase } from '../src/modules/inventory/application/use-cases/create-inventory-item.use-case';
 import { RecordInventoryMovementUseCase } from '../src/modules/inventory/application/use-cases/record-inventory-movement.use-case';
@@ -203,7 +206,7 @@ import {
   DEMO_HOUR_CYCLE,
   DEMO_LOCALE,
   DEMO_COMPARISON_HISTORY,
-  DEMO_DOCUMENT_TYPE_NAMES,
+  DEMO_EXPENSE_OWN_CATEGORIES,
   DEMO_MANUAL_RATE_DAYS,
   DEMO_RATE_CURRENCY,
   demoVes,
@@ -640,27 +643,10 @@ class DemoSeeder {
     });
   }
 
-  /** DX-327: los nombres locales de los documentos (dato de la clínica). */
-  private async setUpDocumentTypeNames(
-    tenantId: string,
-    ownerId: string,
-  ): Promise<void> {
-    await this.use(UpdateDocumentTypeNamesUseCase).execute(
-      DEMO_DOCUMENT_TYPE_NAMES,
-      {
-        tenantId,
-        locationId: null,
-        actor: { userId: ownerId, role: ClinicRole.ADMIN },
-        requestId: null,
-        ip: null,
-        userAgent: null,
-      },
-    );
-  }
-
   /**
-   * DX-377: el medio demo «Pago móvil» (tipo digital, pide referencia), además
-   * de los 4 iniciales que el alta ya creó. Nombre genérico: ni país ni banco.
+   * DX-377: el medio "Pago móvil" (tipo digital, pide referencia), el nombre
+   * del medio de pago venezolano: dato de las sedes del piloto. Los medios son
+   * de la clínica, así que se ve en todas las sedes.
    */
   private async mobilePaymentMethod(
     tenantId: string,
@@ -724,9 +710,6 @@ class DemoSeeder {
       this.restrictStaffLocations(ownerId, userIds, locations),
     );
     await this.setUpExchangeRates(tenantId, ownerId);
-    await this.inTenant(tenantId, undefined, () =>
-      this.setUpDocumentTypeNames(tenantId, ownerId),
-    );
     const hours = await this.readBusinessHours(tenantId, locations);
 
     const catalog = await this.inTenant(tenantId, undefined, () =>
@@ -2894,6 +2877,15 @@ class DemoSeeder {
     const today = civilDateIn(this.now, DEMO_TIMEZONE);
     const day = (offset: number) => addCivilDays(today, offset);
     await this.inTenant(tenantId, locations.principal, async () => {
+      const existing = new Set(
+        (await this.use(ListExpenseCategoriesUseCase).execute()).map(
+          (category) => category.name,
+        ),
+      );
+      for (const name of DEMO_EXPENSE_OWN_CATEGORIES) {
+        if (existing.has(name)) continue;
+        await this.use(CreateExpenseCategoryUseCase).execute(name, ownerId);
+      }
       for (const expense of DEMO_EXPENSES) {
         await this.use(CreateExpenseUseCase).execute(
           {

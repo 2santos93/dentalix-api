@@ -136,8 +136,8 @@ describe('Nombre local de cada tipo de documento (e2e, DX-327)', () => {
   });
 
   it('every clinic starts with no local names', async () => {
-    // Clínicas nuevas por el alta de la API. La demo (V1) pone los suyos
-    // después, por el mismo caso de uso de Ajustes: seed-demo.int-spec.
+    // Clínicas nuevas por el alta de la API. La demo deja los nombres
+    // genéricos: seed-demo.int-spec.
     expect(await names()).toStrictEqual(NONE);
     expect(await names(other.adminToken, other.host)).toStrictEqual(NONE);
     const rows = await raw.tenant.findMany({
