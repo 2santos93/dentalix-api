@@ -129,6 +129,9 @@ import {
 export const CLINIC_SETTINGS_FORBIDDEN_MESSAGE =
   'Solo un administrador puede cambiar la mayoría de edad.';
 
+export const RETENTION_SETTINGS_FORBIDDEN_MESSAGE =
+  'Solo un administrador puede cambiar el plazo de conservación.';
+
 type ListPatientsWithCoverageOutput = Omit<ListPatientsOutput, 'items'> & {
   items: WithPhoneInternational<
     WithDocTypeName<Patient & { coverage: CoverageSummary }>
@@ -326,7 +329,7 @@ export class PatientsController {
 
   @Put('retention/settings')
   @Roles(...CLINIC_SETTINGS_WRITE_ROLES)
-  @RolesDeniedMessage(CLINIC_SETTINGS_FORBIDDEN_MESSAGE)
+  @RolesDeniedMessage(RETENTION_SETTINGS_FORBIDDEN_MESSAGE)
   @ApiOperation({
     summary:
       'Cambia el plazo de conservación de la historia clínica; queda en la auditoría',
@@ -342,7 +345,7 @@ export class PatientsController {
     description:
       'No entero o fuera del rango del mínimo de plataforma al máximo',
   })
-  @ApiForbiddenResponse({ description: CLINIC_SETTINGS_FORBIDDEN_MESSAGE })
+  @ApiForbiddenResponse({ description: RETENTION_SETTINGS_FORBIDDEN_MESSAGE })
   @ApiConflictResponse({
     type: RetentionReductionUnconfirmedErrorDto,
     description:

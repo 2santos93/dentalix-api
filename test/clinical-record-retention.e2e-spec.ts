@@ -488,8 +488,13 @@ describe('ajustes de conservación (DX-330)', () => {
   it.each(['DENTIST', 'ASSISTANT', 'RECEPTION'] as const)(
     '%s gets 403 on PUT and the term stays',
     async (role) => {
-      await put(a, { clinicalRecordRetentionYears: 20 }, tokens[role]).expect(
-        403,
+      const res = await put(
+        a,
+        { clinicalRecordRetentionYears: 20 },
+        tokens[role],
+      ).expect(403);
+      expect((res.body as { message: string }).message).toBe(
+        'Solo un administrador puede cambiar el plazo de conservación.',
       );
       expect((await read(a)).clinicalRecordRetentionYears).toBe(15);
     },
