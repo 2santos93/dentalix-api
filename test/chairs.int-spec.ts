@@ -377,8 +377,10 @@ describe('sillones en la BD (int, DX-211)', () => {
       const rejected = outcomes.filter((o) => o.status === 'rejected');
       expect(fulfilled).toHaveLength(1);
       expect(rejected).toHaveLength(1);
+      // La exclusión también puede resolverse como interbloqueo (40P01): Postgres
+      // aborta a uno de los dos y la garantía es la misma, entra una sola cita.
       expect(String((rejected[0] as { reason: unknown }).reason)).toMatch(
-        /appointments_no_overlap_per_chair/,
+        /appointments_no_overlap_per_chair|40P01/,
       );
       await expect(
         raw.appointment.count({ where: { chairId: chair.id } }),

@@ -205,6 +205,8 @@ function paymentReceipt(
     ? `${vars.locationName} (${vars.locationAddress})`
     : vars.locationName;
   const responsible = vars.responsibleName?.trim() || null;
+  // DX-515-bis: el título congelado en el recibo, o el de siempre.
+  const title = vars.title ?? 'Recibo de caja';
   const blocks: EmailBlock[] = [
     {
       kind: 'paragraph',
@@ -215,10 +217,12 @@ function paymentReceipt(
     {
       kind: 'paragraph',
       text: vars.legacy
-        ? `Recibo de caja N.º ${vars.reference} (abono anterior a la numeración consecutiva: sin serie).`
-        : `Recibo de caja N.º ${vars.reference}`,
+        ? `${title} N.º ${vars.reference} (abono anterior a la numeración consecutiva: sin serie).`
+        : `${title} N.º ${vars.reference}`,
     },
   ];
+  // DX-515-bis: la leyenda congelada, justo bajo el título (como en el papel).
+  if (vars.legend) blocks.push({ kind: 'paragraph', text: vars.legend });
   if (vars.voided) {
     blocks.push({
       kind: 'paragraph',
@@ -257,7 +261,7 @@ function paymentReceipt(
   );
   return renderLayout({
     brand,
-    subject: `Recibo de caja ${vars.reference}${vars.voided ? ' (ANULADO)' : ''} · ${clinic}`,
+    subject: `${title} ${vars.reference}${vars.voided ? ' (ANULADO)' : ''} · ${clinic}`,
     heading: `Hola, ${responsible ?? vars.patientName}`,
     blocks,
     action: null,

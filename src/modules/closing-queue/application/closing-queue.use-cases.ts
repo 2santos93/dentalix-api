@@ -42,6 +42,7 @@ import {
   CLOSING_QUEUE_REPOSITORY,
   DismissalExistsError,
   type ClosingAppointmentRow,
+  type ClosingKeptOverbookRow,
   type ClosingLocation,
   type ClosingQueueRepository,
   type ClosingScope,
@@ -105,6 +106,11 @@ export interface ClosingQueue {
   treatment: ClosingSection<ClosingTreatmentRow> | null;
   /** Citas de días anteriores aún «en la clínica» (DX-237): solo se enlazan. */
   staleInClinic: number | null;
+  /**
+   * DX-509-bis: urgencias que siguen en sobrecupo porque alguien lo decidió.
+   * Informativo: no suma en `total` ni en el contador (no hay nada que cerrar).
+   */
+  keptOverbooks: ClosingSection<ClosingKeptOverbookRow>;
   total: number;
   locations: { id: string; name: string }[];
   /**
@@ -269,7 +275,15 @@ export class ClosingQueueUseCases {
 
   async list(query: ClosingQueueQuery): Promise<ClosingQueue> {
     const resolved = await this.resolve(query);
-    const r = await this.read(resolved, CLOSING_QUEUE_SECTION_LIMIT, true);
+    const [r, kept] = await Promise.all([
+      this.read(resolved, CLOSING_QUEUE_SECTION_LIMIT, true),
+      this.section(
+        true,
+        resolved.scope,
+        (s, l) => this.repo.keptOverbooks(s, l),
+        CLOSING_QUEUE_SECTION_LIMIT,
+      ),
+    ]);
     const view = <T>(page: SectionPage<T> | null): ClosingSection<T> | null =>
       page === null ? null : { total: page.total, items: page.rows };
     return {
@@ -281,6 +295,7 @@ export class ClosingQueueUseCases {
       evolution: view(r.evolution),
       treatment: view(r.treatment),
       staleInClinic: r.stale,
+      keptOverbooks: { total: kept!.total, items: kept!.rows },
       total: r.total,
       locations: resolved.locations,
       locationsWithoutZone: resolved.locationsWithoutZone,

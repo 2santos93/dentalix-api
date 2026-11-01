@@ -591,6 +591,29 @@ describe('validateEnv', () => {
     });
   });
 
+  describe('mínimo de conservación de la historia clínica (DX-330)', () => {
+    it('acepta vacío y un entero entre 15 y 100', () => {
+      expect(() => validateEnv(baseEnv())).not.toThrow();
+      expect(() =>
+        validateEnv(baseEnv({ PLATFORM_MIN_CLINICAL_RETENTION_YEARS: '' })),
+      ).not.toThrow();
+      expect(() =>
+        validateEnv(baseEnv({ PLATFORM_MIN_CLINICAL_RETENTION_YEARS: '20' })),
+      ).not.toThrow();
+    });
+
+    it.each(['14', '101', 'abc', '15.5'])(
+      'rechaza %s con el mensaje exacto',
+      (value) => {
+        expect(
+          errorOf(baseEnv({ PLATFORM_MIN_CLINICAL_RETENTION_YEARS: value })),
+        ).toContain(
+          'PLATFORM_MIN_CLINICAL_RETENTION_YEARS debe ser un entero entre 15 y 100.',
+        );
+      },
+    );
+  });
+
   describe('auditoría (DX-102)', () => {
     it('acepta la retención por defecto y una mayor', () => {
       expect(() => validateEnv(baseEnv())).not.toThrow();

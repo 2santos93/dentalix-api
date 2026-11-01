@@ -230,7 +230,7 @@ const EXPECTED: Record<string, AuditOptions> = {
     patient: P,
     reason: 'AGREEMENT_REMOVED',
   },
-  // DX-039: archivar y retención legal de la HC.
+  // DX-039: archivar y retención de la HC.
   'DELETE /patients/:id': {
     action: 'DELETE',
     resource: 'PATIENT',
@@ -1473,6 +1473,9 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // DX-328: CLINIC_SETTINGS con MAJORITY_AGE_SETTINGS; sin evento si no cambia.
   'PUT /patients/settings':
     'patient-settings.use-cases.spec.ts y patient-settings.e2e-spec.ts',
+  // DX-330: CLINIC_SETTINGS con CLINICAL_RECORD_RETENTION_SETTINGS y `retentionTermChange`, en la transacción del cambio; sin evento si no cambia.
+  'PUT /patients/retention/settings':
+    'retention-settings.use-cases.spec.ts y clinical-record-retention.e2e-spec.ts',
   // DX-327: CLINIC_SETTINGS con DOCUMENT_TYPE_NAMES_SETTINGS y los tipos cambiados; sin evento si no cambia.
   'PUT /patients/document-type-names':
     'document-type-names.use-cases.spec.ts y document-type-names.e2e-spec.ts',
@@ -1545,6 +1548,9 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   'PUT /payment-receipts/settings/locations/:locationId':
     'receipt-settings.e2e-spec.ts',
   'PUT /payments/:id/external-invoice-number': 'receipt-settings.e2e-spec.ts',
+  // DX-517: CLINIC_SETTINGS CURRENCY_TEXTS con el antes y el después
+  // («VES=Bs.»), en la transacción del cambio; sin evento si no cambia.
+  'PUT /exchange/currency-texts': 'currency-texts.e2e-spec.ts',
   // DX-324: CLINIC_SETTINGS con PRESCRIPTION_SETTINGS, los campos cambiados
   // y el antes y el después en códigos RX; sin evento si nada cambió.
   'PUT /prescriptions/settings':

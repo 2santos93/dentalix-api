@@ -50,8 +50,10 @@ async function seedClinic(
       REGIONAL_BOGOTA_FIXTURE,
     ),
   };
+  // Solo el id: el cliente leería columnas de paciente posteriores (DX-330).
   const patient = await db.patient.create({
     data: { tenantId: tenant.id, firstName: 'Ana', lastName: subdomain },
+    select: { id: true },
   });
   const plan = await db.treatmentPlan.create({
     data: {

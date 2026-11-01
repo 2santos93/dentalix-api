@@ -332,7 +332,7 @@ describe('buildReceiptSnapshot: ajustes por medio de pago (DX-516)', () => {
     fixedAmount: null,
     base: 150000,
     amount: 4500,
-    currency: 'COP',
+    currency: 'USD',
   };
 
   it('sin ajustes la foto es byte a byte la de antes (sin clave nueva)', () => {
@@ -369,13 +369,13 @@ describe('buildReceiptSnapshot: ajustes por medio de pago (DX-516)', () => {
       input({
         payment: { ...base.payment, adjustments: [TAX] },
         split: {
-          planCurrency: 'COP',
+          planCurrency: 'USD',
           lines: [
             {
               paymentId: 'pay-1',
               line: 1,
               amount: 150000,
-              currency: 'COP',
+              currency: 'USD',
               method: 'CASH',
               paymentMethodName: 'Efectivo',
               reference: null,
@@ -386,7 +386,7 @@ describe('buildReceiptSnapshot: ajustes por medio de pago (DX-516)', () => {
               paymentId: 'pay-2',
               line: 2,
               amount: 50000,
-              currency: 'COP',
+              currency: 'USD',
               method: 'CARD',
               paymentMethodName: 'Tarjeta',
               reference: null,
@@ -400,5 +400,32 @@ describe('buildReceiptSnapshot: ajustes por medio de pago (DX-516)', () => {
     expect(snapshot.payment).not.toHaveProperty('adjustments');
     expect(snapshot.split?.lines[0].adjustments).toEqual([TAX]);
     expect(snapshot.split?.lines[1]).not.toHaveProperty('adjustments');
+  });
+});
+
+describe('buildReceiptSnapshot: texto propio de cada moneda (DX-517)', () => {
+  it('sin textos, la foto es byte a byte la de antes', () => {
+    const before = JSON.stringify(
+      buildReceiptSnapshot(input(), NO_LOCAL_NAMES),
+    );
+    for (const currencyTexts of [undefined, null, {}]) {
+      const snapshot = buildReceiptSnapshot(
+        input({ currencyTexts }),
+        NO_LOCAL_NAMES,
+      );
+      expect(JSON.stringify(snapshot)).toBe(before);
+      expect(snapshot).not.toHaveProperty('currencyTexts');
+    }
+  });
+
+  it('congela el mapa de la clínica al emitir (una copia), y nada más cambia', () => {
+    const texts = { EUR: '€', VES: 'Bs.' };
+    const plain = buildReceiptSnapshot(input(), NO_LOCAL_NAMES);
+    const snapshot = buildReceiptSnapshot(
+      input({ currencyTexts: texts }),
+      NO_LOCAL_NAMES,
+    );
+    expect(snapshot).toEqual({ ...plain, currencyTexts: texts });
+    expect(snapshot.currencyTexts).not.toBe(texts);
   });
 });

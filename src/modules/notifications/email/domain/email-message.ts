@@ -147,6 +147,13 @@ export interface PaymentReceiptEmailVars {
   cashierName: string | null;
   voided: { dateLabel: string; reason: string } | null;
   legalNotice: string;
+  /**
+   * DX-515-bis: el título del recibo congelado en su foto; ausente = «Recibo
+   * de caja», como siempre.
+   */
+  title?: string;
+  /** DX-515-bis: la leyenda congelada en la foto; ausente = ninguna. */
+  legend?: string;
 }
 
 /**

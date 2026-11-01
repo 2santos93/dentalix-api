@@ -35,4 +35,14 @@ describe('reminderPolicyVars (DX-291, DX-350)', () => {
     expect(reminderPolicyVars(policy(10, null), fmt)?.feeLabel).toBeNull();
     expect(reminderPolicyVars(null, fmt)).toBeNull();
   });
+
+  it('DX-517: con texto propio para la moneda, ese texto en el lugar del código; sin él, igual', () => {
+    const fmt = regionalFormat({ locale: 'es-VE', hourCycle: 'h12' });
+    expect(
+      reminderPolicyVars(policy(1234.5, 'VES'), fmt, { VES: 'Bs.' })?.feeLabel,
+    ).toBe('Bs.\u00a01.234,50');
+    expect(
+      reminderPolicyVars(policy(1234.5, 'VES'), fmt, { EUR: '€' })?.feeLabel,
+    ).toBe(reminderPolicyVars(policy(1234.5, 'VES'), fmt)?.feeLabel);
+  });
 });

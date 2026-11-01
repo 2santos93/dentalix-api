@@ -85,6 +85,8 @@ describe('Public tenant branding (e2e)', () => {
       name: 'Sonrisa Branding',
       primaryColor: '#AA1155',
       logoUrl: 'https://cdn.example.com/logo.png',
+      // DX-517: sin textos propios de moneda, el mapa vacío.
+      currencyTexts: {},
     });
   });
 

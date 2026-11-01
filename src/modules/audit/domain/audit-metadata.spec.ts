@@ -1231,3 +1231,47 @@ describe('sanitizeAuditMetadata — cambio de configuración de la clínica (DX-
     }
   });
 });
+
+describe('sanitizeAuditMetadata — cambio del plazo de la HC (DX-330)', () => {
+  const retentionTermChange = {
+    direction: 'DOWN',
+    protectedPatients: 6,
+    effectiveBefore: 25,
+    effectiveAfter: 15,
+    withinCorrectionWindow: false,
+  };
+
+  it('conserva los cinco campos', () => {
+    expect(sanitizeAuditMetadata({ retentionTermChange })).toEqual({
+      retentionTermChange,
+    });
+    const raised = {
+      ...retentionTermChange,
+      direction: 'UP',
+      protectedPatients: 0,
+      withinCorrectionWindow: true,
+    };
+    expect(sanitizeAuditMetadata({ retentionTermChange: raised })).toEqual({
+      retentionTermChange: raised,
+    });
+  });
+
+  it('un campo que no encaja o una clave de más lo tira entero', () => {
+    const { withinCorrectionWindow: _, ...incomplete } = retentionTermChange;
+    for (const value of [
+      { ...retentionTermChange, protectedPatients: -1 },
+      { ...retentionTermChange, protectedPatients: 1.5 },
+      { ...retentionTermChange, protectedPatients: '6' },
+      { ...retentionTermChange, protectedPatients: Number.NaN },
+      { ...retentionTermChange, effectiveBefore: -15 },
+      { ...retentionTermChange, effectiveAfter: 'x' },
+      { ...retentionTermChange, direction: 'SIDEWAYS' },
+      { ...retentionTermChange, withinCorrectionWindow: 'false' },
+      { ...retentionTermChange, patientName: 'Ana' },
+      incomplete,
+      'x',
+    ]) {
+      expect(sanitizeAuditMetadata({ retentionTermChange: value })).toEqual({});
+    }
+  });
+});

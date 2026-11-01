@@ -132,6 +132,35 @@ describe('FindOpeningsUseCase (DX-122)', () => {
     ]);
   });
 
+  it('DX-509-bis: la cita que se mueve no tapa su propia hora (ni por profesional ni por paciente)', async () => {
+    const appointments = new InMemoryAppointmentRepository();
+    const moving = appointments.seed({
+      providerId: 'prov1',
+      patientId: 'p1',
+      start: z('15:00'),
+      end: z('15:30'),
+    });
+    const blocked = await build(appointments).execute({
+      ...query,
+      patientId: 'p1',
+    });
+    expect(blocked.openings.map((o) => [o.start, o.end])).toEqual([
+      [z('14:00'), z('15:00')],
+      [z('15:30'), z('18:00')],
+    ]);
+    const freed = await build(appointments).execute({
+      ...query,
+      patientId: 'p1',
+      excludeAppointmentId: moving.id,
+    });
+    expect(freed.openings.map((o) => [o.start, o.end])).toEqual([
+      [z('14:00'), z('18:00')],
+    ]);
+    await expect(
+      build(appointments).execute({ ...query, excludeAppointmentId: 'otra' }),
+    ).rejects.toThrow(new NotFoundException('Cita no encontrada'));
+  });
+
   it('sede sin horario: propone el horario por defecto en la zona de la sede', async () => {
     const result = await build(undefined, undefined, null).execute(query);
     expect(result.openings.map((o) => [o.start, o.end])).toEqual([

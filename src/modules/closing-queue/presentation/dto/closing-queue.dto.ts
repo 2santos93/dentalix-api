@@ -119,6 +119,33 @@ export class ClosingTreatmentDto extends ClosingAppointmentDto {
   surfaces!: ToothSurface[];
 }
 
+export class ClosingKeptOverbookDto extends ClosingAppointmentDto {
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    description: 'Cuándo se decidió mantenerla en sobrecupo (la última vez)',
+  })
+  keptAt!: Date;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'Quién lo decidió',
+  })
+  keptByName!: string | null;
+}
+
+export class ClosingKeptOverbookSectionDto {
+  @ApiProperty({ description: 'Cuántos hay (exacto)' })
+  total!: number;
+
+  @ApiProperty({
+    type: [ClosingKeptOverbookDto],
+    description: `Del más antiguo al más reciente; como mucho ${CLOSING_QUEUE_SECTION_LIMIT}`,
+  })
+  items!: ClosingKeptOverbookDto[];
+}
+
 export class ClosingAppointmentSectionDto {
   @ApiProperty({ description: 'Cuántos hay (exacto)' })
   total!: number;
@@ -207,6 +234,13 @@ export class ClosingQueueDto {
       'Citas de días anteriores aún «en la clínica» (llegó, en sillón, listo para cobrar): las cierra DX-237, aquí solo se cuentan. null sin la sección 1.',
   })
   staleInClinic!: number | null;
+
+  @ApiProperty({
+    type: ClosingKeptOverbookSectionDto,
+    description:
+      'DX-509-bis: urgencias del período que siguen en sobrecupo porque alguien decidió mantenerlas (`WALK_IN_OVERBOOK_KEPT` al deshacer la llegada o reactivarlas) y no están canceladas: compartieron la hora del profesional con otra cita. Informativo: no suma en `total` ni en el contador y no se descarta. Mismas sedes, período y profesional que las secciones (un DENTIST, las suyas).',
+  })
+  keptOverbooks!: ClosingKeptOverbookSectionDto;
 
   @ApiProperty({ description: 'Suma de las secciones visibles' })
   total!: number;

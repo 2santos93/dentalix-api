@@ -412,6 +412,38 @@ describe('plantillas reservadas para otras tareas', () => {
       expect(email.text).not.toContain('Saldo del plan');
       expect(email.html).not.toContain('<b>Ana</b>');
     });
+
+    it('DX-515-bis: con título y leyenda congelados, el asunto y el cuerpo los llevan', () => {
+      const email = renderEmail(
+        'payment-receipt',
+        {
+          ...base,
+          title: 'Recibo de pago',
+          legend: 'Este recibo no es una factura',
+        },
+        brand,
+      );
+      expect(email.subject).toBe(
+        'Recibo de pago NOR-000123 · Sonrisas del Norte',
+      );
+      expect(email.text).toContain('Recibo de pago N.º NOR-000123');
+      expect(email.text).not.toContain('Recibo de caja');
+      const lines = email.text.split('\n');
+      const titleAt = lines.findIndex((l) => l.includes('Recibo de pago N.º'));
+      expect(lines[titleAt + 1]).toContain('Este recibo no es una factura');
+      // El pie fijo de DX-136 sigue.
+      expect(email.text).toContain('Este documento no es factura');
+    });
+
+    it('DX-515-bis: sin título ni leyenda, el email es el de antes, byte a byte', () => {
+      const before = renderEmail('payment-receipt', base, brand);
+      const same = renderEmail(
+        'payment-receipt',
+        { ...base, title: undefined, legend: undefined },
+        brand,
+      );
+      expect(same).toEqual(before);
+    });
   });
 
   describe('post-op-instructions (DX-222)', () => {

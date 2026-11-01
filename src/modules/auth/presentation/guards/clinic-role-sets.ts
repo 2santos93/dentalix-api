@@ -225,7 +225,7 @@ export const TREATMENT_PLAN_FOLLOW_UP_ROLES: ClinicRole[] = [
   ClinicRole.RECEPTION,
 ];
 
-// Retención legal de la HC (DX-039): archivar un paciente, cambiar su
+// Retención de la HC (DX-039): archivar un paciente, cambiar su
 // retención extendida, la supresión parcial y la lista de historias que salen
 // de retención. Solo gestión: quien responde de la conservación de la
 // historia clínica es el titular de la clínica.

@@ -241,6 +241,7 @@ describe('CSV de la caja (DX-395)', () => {
       toCashPaymentsCsv(
         [
           row({
+            currency: 'USD',
             adjustments: [
               {
                 type: 'DISCOUNT',
@@ -250,7 +251,7 @@ describe('CSV de la caja (DX-395)', () => {
                 fixedAmount: 10,
                 base: 150000,
                 amount: 10,
-                currency: 'COP',
+                currency: 'USD',
               },
             ],
           }),
@@ -258,6 +259,6 @@ describe('CSV de la caja (DX-395)', () => {
         REFERENCE_CURRENCY_DIGITS,
       ),
     )[1];
-    expect(formula).toContain(`"'=HYPERLINK(""x"") -10"`);
+    expect(formula).toContain(`"'=HYPERLINK(""x"") -10.00"`);
   });
 });
