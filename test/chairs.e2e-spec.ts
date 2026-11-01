@@ -14,6 +14,7 @@ import {
   REGIONAL_BOGOTA_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
+import { sedeTodayFixture } from './support/sede-clock';
 
 // DX-211 en HTTP real: sillones por sede (CRUD solo ADMIN, desactivar en vez
 // de borrar, auditado), el sillón como recurso de la cita (409 por sillón con
@@ -560,16 +561,46 @@ describe('Sillones por sede y anti-solape por sillón (e2e, DX-211)', () => {
     });
 
     it('se cambia el sillón de una cita de hoy con el paciente ya en la clínica', async () => {
+      // DX-495 (TST-062): «hoy» es el de la sede, y la API lo decide con su
+      // reloj real. Entre las 05:00 y las 05:05 UTC la cita «de hace 5 min»
+      // caía en el día anterior de Bogotá y ARRIVED daba 409. La sede de este
+      // caso usa la zona segura de DX-449 (Bogotá lejos de su medianoche; si
+      // no, una zona en la que ahora es cerca del mediodía) y sus propios
+      // sillones; el resto del spec sigue en Bogotá (sus mensajes llevan las
+      // horas de la sede).
+      const now = new Date();
+      const hoy = (
+        (
+          await as(api().post('/api/v1/locations'), clinic.adminToken)
+            .send(locationBody(sedeTodayFixture(now), { name: 'Sede Hoy' }))
+            .expect(201)
+        ).body as { id: string }
+      ).id;
+      await as(api().put('/api/v1/locations/schedule'), clinic.adminToken)
+        .set('X-Location-Id', hoy)
+        .send({ ranges: [] })
+        .expect(200);
+      const first = await createChair({
+        locationId: hoy,
+        name: 'Sillón Hoy 1',
+      });
+      const second = await createChair({
+        locationId: hoy,
+        name: 'Sillón Hoy 2',
+      });
       const appt = (
-        await book({
-          chairId: one.id,
-          patientId: patients[3],
-          start: at('13:00'),
-          end: at('13:30'),
-        }).expect(201)
+        await book(
+          {
+            chairId: first.id,
+            patientId: patients[3],
+            start: at('13:00'),
+            end: at('13:30'),
+          },
+          hoy,
+        ).expect(201)
       ).body as AppointmentBody & { start: string; end: string };
       // Se trae a HOY (empezó hace 5 min) por `raw`: agendar en el pasado no se puede.
-      const start = new Date(Date.now() - 5 * 60_000);
+      const start = new Date(now.getTime() - 5 * 60_000);
       const end = new Date(start.getTime() + 30 * 60_000);
       await raw.appointment.update({
         where: { id: appt.id },
@@ -584,10 +615,10 @@ describe('Sillones por sede y anti-solape por sillón (e2e, DX-211)', () => {
           start: start.toISOString(),
           end: end.toISOString(),
         },
-        two.id,
+        second.id,
       ).expect(200);
       expect(moved.body as AppointmentBody & { status: string }).toMatchObject({
-        chairId: two.id,
+        chairId: second.id,
         status: 'ARRIVED',
       });
     });
