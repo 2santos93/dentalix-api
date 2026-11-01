@@ -191,6 +191,22 @@ export interface AuditMetadata {
    * verificación de un dominio) ni datos de un paciente.
    */
   configChange?: AuditConfigChange;
+  /**
+   * DX-330: cambio del plazo de conservación de la historia clínica de la
+   * clínica: dirección según el plazo vigente, pacientes que quedan
+   * protegidos por la reducción (0 en una subida), plazos vigentes antes y
+   * después, y si una bajada corrigió una subida de menos de 24 h. Solo
+   * códigos y enteros.
+   */
+  retentionTermChange?: AuditRetentionTermChange;
+}
+
+export interface AuditRetentionTermChange {
+  direction: 'UP' | 'DOWN';
+  protectedPatients: number;
+  effectiveBefore: number;
+  effectiveAfter: number;
+  withinCorrectionWindow: boolean;
 }
 
 /** Valor de configuración en la auditoría (DX-360). */
