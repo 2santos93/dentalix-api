@@ -431,6 +431,7 @@ export class AppointmentsController {
       to: query.to,
       durationMinutes: query.durationMinutes,
       patientId: query.patientId,
+      excludeAppointmentId: query.excludeAppointmentId,
     });
   }
 

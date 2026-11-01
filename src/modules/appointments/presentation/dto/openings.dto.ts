@@ -46,6 +46,15 @@ export class OpeningsQueryDto {
   @IsOptional()
   @IsUUID()
   patientId?: string;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'DX-509-bis: la cita que se va a mover no ocupa (si no, su propia hora taparía los huecos de al lado). Una cita que no existe no cambia nada.',
+  })
+  @IsOptional()
+  @IsUUID()
+  excludeAppointmentId?: string;
 }
 
 export class OpeningDto {

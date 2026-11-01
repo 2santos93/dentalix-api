@@ -47,6 +47,8 @@ export interface FindOpeningsInput {
   durationMinutes: number;
   /** Opcional: las otras citas del paciente también ocupan. */
   patientId?: string;
+  /** DX-509-bis: la cita que se mueve no ocupa su propia hora. */
+  excludeAppointmentId?: string;
 }
 
 export interface OpeningsView {
@@ -132,12 +134,14 @@ export class FindOpeningsUseCase {
         input.providerId,
         range.start,
         range.end,
+        input.excludeAppointmentId,
       )),
       ...(input.patientId
         ? await this.appointments.findOverlappingForPatient(
             input.patientId,
             range.start,
             range.end,
+            input.excludeAppointmentId,
           )
         : []),
       ...(
