@@ -41,7 +41,7 @@ describe('openMinutes (DX-014)', () => {
   });
 
   it('descuenta los cierres de toda la sede que caen en horario', () => {
-    // Lunes 2026-10-19, cierre de 12:00 a 16:00 (Bogotá = UTC-5): quita
+    // Lunes 2026-10-19, cierre de 12:00 a 16:00 (zona de la sede UTC-5): quita
     // 12-13 y 15-16 → 480 − 120.
     expect(
       openMinutes({
