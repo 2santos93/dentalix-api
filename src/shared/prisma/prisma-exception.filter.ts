@@ -290,7 +290,7 @@ export const BY_SQLSTATE: Record<string, ErrorBody> = {
  *    `meta`; el SQLSTATE solo aparece en `message` (`PostgresError { code: "23514", ...`).
  *  - raw (`$executeRaw`): `PrismaClientKnownRequestError` P2010 con `meta.code`.
  */
-function sqlStateOf(
+export function sqlStateOf(
   exception:
     | Prisma.PrismaClientKnownRequestError
     | Prisma.PrismaClientUnknownRequestError,
