@@ -324,6 +324,21 @@ describe('Nombre del documento por sede (e2e, DX-524)', () => {
         .expect(200);
     });
 
+    it('GET /patients/document-type-names keeps the clinic names in `names` and adds what the active location uses in `effective`', async () => {
+      const read = (location?: string) =>
+        get<{
+          names: Record<string, string | null>;
+          effective: Record<string, string | null>;
+        }>('/patients/document-type-names', adminA, location);
+      const inB = await read(locB);
+      expect(inB.names.NATIONAL_ID).toBe('Documento clínica');
+      expect(inB.effective.NATIONAL_ID).toBe('Documento B');
+      expect((await read(locA)).effective.NATIONAL_ID).toBe(
+        'Documento clínica',
+      );
+      expect((await read()).effective.NATIONAL_ID).toBe('Documento clínica');
+    });
+
     it('a prescription freezes the name of the location that issues it, and a later rename changes nothing', async () => {
       const rx = (location: string) =>
         post<{ id: string; patientDocument: string | null }>(
