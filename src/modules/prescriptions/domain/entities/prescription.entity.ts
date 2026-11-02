@@ -1,3 +1,4 @@
+import type { ClinicFiscalData } from '../../../../shared/clinic/clinic-fiscal';
 /**
  * Excepción G5.3 (DX-334): recetas emitidas antes de DX-324. La entidad lleva
  * el campo histórico `country`; ninguna regla decide con él (spec R1, R12).
@@ -59,6 +60,8 @@ export interface Prescription {
   professionalSpecialty: string | null;
   professionalEmail: string | null;
   clinicName: string;
+  /** DX-019: congelados al emitir; `null` = se imprime sin datos fiscales. */
+  clinicFiscal: ClinicFiscalData | null;
   locationName: string;
   locationAddress: string | null;
   notes: string | null;
@@ -126,6 +129,8 @@ export interface PrescriptionIssuer {
     timeZone: string;
   };
   clinicName: string;
+  /** DX-019: los de hoy; la receta los congela al emitirse. */
+  clinicFiscal: ClinicFiscalData;
   settings: PrescriptionSettings;
   /** Solo para la web anterior a DX-324; ninguna regla lo lee (R1). */
   phase1: Phase1IssuerCompat;

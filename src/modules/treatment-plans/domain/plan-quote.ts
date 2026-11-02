@@ -1,4 +1,10 @@
 import { createHash } from 'node:crypto';
+import {
+  clinicFiscalHashFields,
+  clinicFiscalToFreeze,
+  readClinicFiscal,
+  type ClinicFiscalData,
+} from '../../../shared/clinic/clinic-fiscal';
 import { ToothSurface } from '@prisma/client';
 import { fromCents, toCents } from '../../../shared/money/money';
 import {
@@ -18,6 +24,8 @@ const ACCEPTANCE_HASH_VERSION = 'dentalix-plan-acceptance-v1';
 
 /** Lo que hace falta para componer el presupuesto de un plan. */
 export interface QuoteContentSource {
+  /** DX-019: los datos fiscales de la clínica al componerlo. */
+  clinicFiscal?: ClinicFiscalData | null;
   planId: string;
   patientId: string;
   currency: string;
@@ -106,8 +114,10 @@ export interface QuoteContent {
    * 2 = presupuesto con convenio y ahorro (DX-105), el único que se compone
    * hoy. 1 = fotos firmadas antes de DX-105: se leen con `agreement: null`,
    * `listPrice`/`agreementName` nulos y ahorro 0, y su hash sigue siendo el v1.
+   * 3 (DX-019) = v2 con los datos fiscales que la clínica tenía: sin ninguno se
+   * compone v2, así una clínica sin configurar no cambia ni un byte del hash.
    */
-  version: 1 | 2;
+  version: 1 | 2 | 3;
   planId: string;
   patientId: string;
   currency: string;
@@ -115,6 +125,8 @@ export interface QuoteContent {
   location: QuoteLocation;
   patient: QuotePatient;
   professionalName: string | null;
+  /** DX-019: datos fiscales congelados; `null` en v1, v2 (sin ellos al firmar). */
+  clinicFiscal: ClinicFiscalData | null;
   /** Convenio aplicado a los ítems; `null` si ninguno lo tiene. */
   agreement: QuoteAgreement | null;
   /** `YYYY-MM-DD` en la zona de la sede. */
@@ -188,8 +200,12 @@ export function buildQuoteContent(
         : sum,
     0,
   );
+  const clinicFiscal = source.clinicFiscal
+    ? clinicFiscalToFreeze(source.clinicFiscal)
+    : null;
   return {
-    version: 2,
+    version: clinicFiscal ? 3 : 2,
+    clinicFiscal,
     planId: source.planId,
     patientId: source.patientId,
     currency: source.currency,
@@ -227,8 +243,19 @@ export function computeQuoteHash(content: QuoteContent): string {
   const canonical =
     content.version === 1
       ? canonicalQuoteV1(content)
-      : canonicalQuoteV2(content);
+      : content.version === 2
+        ? canonicalQuoteV2(content)
+        : canonicalQuoteV3(content);
   return createHash('sha256').update(canonical, 'utf8').digest('hex');
+}
+
+/** v3 (DX-019): v2 más los datos fiscales, con su propia marca delante. */
+function canonicalQuoteV3(content: QuoteContent): string {
+  return JSON.stringify([
+    'dentalix-quote-v3',
+    content.clinicFiscal ? clinicFiscalHashFields(content.clinicFiscal) : null,
+    canonicalQuoteV2(content),
+  ]);
 }
 
 /** Serialización v1, intacta: los presupuestos firmados antes de DX-105 la usan. */
@@ -396,15 +423,19 @@ function surfacesOf(item: JsonRecord): ToothSurface[] {
  */
 export function parseQuoteContent(value: unknown): QuoteContent {
   try {
-    if (!isRecord(value) || (value.version !== 1 && value.version !== 2)) {
+    if (
+      !isRecord(value) ||
+      (value.version !== 1 && value.version !== 2 && value.version !== 3)
+    ) {
       throw new Error('version');
     }
     const version = value.version;
-    const v2 = version === 2;
+    const v2 = version !== 1;
     const location = rec(value, 'location');
     const patient = rec(value, 'patient');
     return {
       version,
+      clinicFiscal: version === 3 ? readClinicFiscal(value.clinicFiscal) : null,
       planId: str(value, 'planId'),
       patientId: str(value, 'patientId'),
       currency: str(value, 'currency'),

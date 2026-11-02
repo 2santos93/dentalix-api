@@ -1,3 +1,4 @@
+import { readClinicFiscal } from '../src/shared/clinic/clinic-fiscal';
 import { randomUUID } from 'node:crypto';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
@@ -117,6 +118,7 @@ async function hashOfStoredRow(
   });
   const input: StoredPrescriptionHashInput = {
     ...row,
+    clinicFiscal: readClinicFiscal(row.clinicFiscal),
     dispensationDate: dayOnly(row.dispensationDate),
     validUntil: dayOnly(row.validUntil),
     allergyMatches:

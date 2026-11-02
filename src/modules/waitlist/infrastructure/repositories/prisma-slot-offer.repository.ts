@@ -1,3 +1,4 @@
+import { withClinicLogoUrl } from '../../../../shared/storage/clinic-logo-url';
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
@@ -190,10 +191,12 @@ export class PrismaSlotOfferRepository implements SlotOfferRepository {
 
   findClinicBranding(): Promise<ClinicBrandingRow | null> {
     // `tenants` no tiene RLS: se lee por el id ya resuelto desde el host.
-    return this.prisma.tenant.findFirst({
-      where: { id: this.requireTenantId(), deletedAt: null },
-      select: { name: true, primaryColor: true, logoUrl: true },
-    });
+    return this.prisma.tenant
+      .findFirst({
+        where: { id: this.requireTenantId(), deletedAt: null },
+        select: { name: true, primaryColor: true, logoKey: true },
+      })
+      .then((row) => withClinicLogoUrl(row));
   }
 
   slotTaken(offer: PublicSlotOffer): Promise<boolean> {

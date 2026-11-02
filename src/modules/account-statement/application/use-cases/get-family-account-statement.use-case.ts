@@ -1,3 +1,4 @@
+import { EMPTY_CLINIC_FISCAL } from '../../../../shared/clinic/clinic-fiscal';
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import {
   ACCOUNT_STATEMENT_REPOSITORY,
@@ -75,7 +76,11 @@ export class GetFamilyAccountStatementUseCase {
     const issuedAt = this.now();
     const refs = [family.payer, ...family.dependents];
 
-    let clinic: StatementClinic = { name: '', logoUrl: null };
+    let clinic: StatementClinic = {
+      name: '',
+      logoUrl: null,
+      fiscal: EMPTY_CLINIC_FISCAL,
+    };
     const members: FamilyStatementMember[] = [];
     const totals = new Map<string, Record<(typeof FIELDS)[number], number>>();
     for (const ref of refs) {

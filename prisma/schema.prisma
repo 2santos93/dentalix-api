@@ -13,7 +13,10 @@ model Tenant {
   name                                    String
   subdomain                               String                           @unique
   primaryColor                            String                           @default("#0F5E9C")
-  logoUrl                                 String?
+  /// DX-019 (DX-084): CLAVE del logo (`logos/<tenantId>-<16 hex>.<ext>`), nunca una
+  /// URL; la columna conserva su nombre anterior para que sea aditivo. La URL se
+  /// calcula al responder (`clinicLogoPublicUrl`). Una URL http(s) anterior sale tal cual.
+  logoKey                                 String?                          @map("logoUrl")
   // DX-128: canal de los avisos automáticos con el que nace cada paciente.
   defaultContactChannel                   ContactChannel                   @default(EMAIL)
   // DX-027: ajustes de caja de la clínica. Por defecto, el comportamiento de
@@ -73,6 +76,19 @@ model Tenant {
   /// Sustituye al código en la posición que da el formato de la sede. Se
   /// congela en la foto del recibo. CHECK: objeto jsonb (la API valida el resto).
   currencyTexts                           Json                             @default("{}")
+  /// DX-019: datos fiscales y de contacto de la clínica (Ajustes › Datos de
+  /// la clínica, solo ADMIN, PATCH /clinic/settings, auditado). Texto libre,
+  /// sin formato por país; NULL = sin dato. CHECK de longitud y una línea.
+  /// Sin razón social o sin identificador, el recibo dice «Datos fiscales
+  /// pendientes». Los recibos los congelan en su foto al emitir.
+  legalName                               String?
+  taxId                                   String?
+  /// DX-019: nombre que la clínica da a su identificador fiscal; NULL = el
+  /// genérico («Id. fiscal», lo pone la web).
+  taxIdLabel                              String?
+  fiscalAddress                           String?
+  contactEmail                            String?
+  contactPhone                            String?
   createdAt                               DateTime                         @default(now())
   updatedAt                               DateTime                         @updatedAt
   deletedAt                               DateTime?
@@ -3387,6 +3403,8 @@ model Prescription {
   professionalSpecialty String?
   professionalEmail     String?
   clinicName            String
+  /// DX-019: datos fiscales congelados al emitir; NULL = se reimprime sin ellos.
+  clinicFiscal          Json?
   locationName          String
   locationAddress       String?
   notes                 String?

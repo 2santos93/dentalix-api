@@ -35,6 +35,7 @@ import { InvitationsModule } from './modules/invitations/invitations.module';
 import { DomainsModule } from './modules/domains/domains.module';
 import { PublicBrandingModule } from './modules/public-branding/public-branding.module';
 import { ExchangeModule } from './modules/exchange/exchange.module';
+import { ClinicSettingsModule } from './modules/clinic-settings/clinic-settings.module';
 import { ReferenceModule } from './modules/reference/reference.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { PaymentPlansModule } from './modules/payment-plans/payment-plans.module';
@@ -119,6 +120,8 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     StaffModule,
     DomainsModule,
     PublicBrandingModule,
+    // DX-019: Ajustes › Datos de la clínica (marca, datos fiscales y logo).
+    ClinicSettingsModule,
     ExchangeModule,
     ReferenceModule,
     PaymentsModule,

@@ -256,7 +256,7 @@ describe('presupuesto v1 firmado (DX-105, R3)', () => {
   });
 
   it('rechaza una versión desconocida', () => {
-    expect(() => parseQuoteContent({ ...V1_STORED, version: 3 })).toThrow(
+    expect(() => parseQuoteContent({ ...V1_STORED, version: 99 })).toThrow(
       /campo version/,
     );
   });
@@ -399,5 +399,53 @@ describe('presupuesto v2 con convenio (DX-105)', () => {
     expect(() => parseQuoteContent({ ...V1_STORED, version: 2 })).toThrow(
       /presupuesto guardado/,
     );
+  });
+});
+
+describe('datos fiscales congelados (DX-019)', () => {
+  const FISCAL = {
+    legalName: 'Sonrisas S.A.',
+    taxIdLabel: 'ID fiscal',
+    taxId: 'J-1',
+    address: null,
+    email: null,
+    phone: null,
+  };
+  const EMPTY = { ...FISCAL, legalName: null, taxIdLabel: null, taxId: null };
+
+  it('sin datos se compone v2 y el hash no cambia; con datos, v3 y los sella', () => {
+    const plain = buildQuoteContent(source(), '2026-10-16');
+    const empty = buildQuoteContent(
+      { ...source(), clinicFiscal: EMPTY },
+      '2026-10-16',
+    );
+    expect(empty.version).toBe(2);
+    expect(empty.clinicFiscal).toBeNull();
+    expect(computeQuoteHash(empty)).toBe(computeQuoteHash(plain));
+
+    const frozen = buildQuoteContent(
+      { ...source(), clinicFiscal: FISCAL },
+      '2026-10-16',
+    );
+    expect(frozen.version).toBe(3);
+    expect(computeQuoteHash(frozen)).not.toBe(computeQuoteHash(plain));
+    const other = { ...frozen, clinicFiscal: { ...FISCAL, taxId: 'J-2' } };
+    expect(computeQuoteHash(other)).not.toBe(computeQuoteHash(frozen));
+  });
+
+  it('una foto v3 guardada se lee igual y sigue validando; una v2 da null', () => {
+    const frozen = buildQuoteContent(
+      { ...source(), clinicFiscal: FISCAL },
+      '2026-10-16',
+    );
+    const stored: unknown = JSON.parse(JSON.stringify(frozen));
+    const parsed = parseQuoteContent(stored);
+    expect(parsed.clinicFiscal).toEqual(FISCAL);
+    expect(computeQuoteHash(parsed)).toBe(computeQuoteHash(frozen));
+    expect(
+      parseQuoteContent(
+        JSON.parse(JSON.stringify(buildQuoteContent(source(), '2026-10-16'))),
+      ).clinicFiscal,
+    ).toBeNull();
   });
 });

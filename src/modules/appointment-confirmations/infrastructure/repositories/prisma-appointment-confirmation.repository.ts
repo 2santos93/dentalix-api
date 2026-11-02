@@ -1,3 +1,4 @@
+import { withClinicLogoUrl } from '../../../../shared/storage/clinic-logo-url';
 import { Injectable } from '@nestjs/common';
 import {
   AppointmentConfirmationResponse,
@@ -266,10 +267,12 @@ export class PrismaAppointmentConfirmationRepository implements AppointmentConfi
     // `tenants` no tiene RLS (igual que PrismaTenantBrandingRepository): se lee
     // por el id ya resuelto desde el host.
     const tenantId = this.requireTenantId();
-    return this.prisma.tenant.findFirst({
-      where: { id: tenantId, deletedAt: null },
-      select: { name: true, primaryColor: true, logoUrl: true },
-    });
+    return this.prisma.tenant
+      .findFirst({
+        where: { id: tenantId, deletedAt: null },
+        select: { name: true, primaryColor: true, logoKey: true },
+      })
+      .then((row) => withClinicLogoUrl(row));
   }
 
   /**

@@ -1,3 +1,4 @@
+import { clinicLogoPublicUrl } from '../../../../shared/storage/clinic-logo-url';
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
@@ -386,7 +387,7 @@ export class PrismaPatientConsentRepository implements PatientConsentRepository 
       if (!row) return null;
       const tenant = await tx.tenant.findFirst({
         where: { id: tenantId },
-        select: { name: true, logoUrl: true },
+        select: { name: true, logoKey: true },
       });
       const {
         patient: { documentType, ...patient },
@@ -394,7 +395,10 @@ export class PrismaPatientConsentRepository implements PatientConsentRepository 
       } = row;
       return {
         ...mapToEntity(consent),
-        clinic: { name: tenant?.name ?? '', logoUrl: tenant?.logoUrl ?? null },
+        clinic: {
+          name: tenant?.name ?? '',
+          logoUrl: clinicLogoPublicUrl(tenant?.logoKey ?? null),
+        },
         patient: { ...patient, docType: documentType },
         countersignature: consent.countersignature,
       };
