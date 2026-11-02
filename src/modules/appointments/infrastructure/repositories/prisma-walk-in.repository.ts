@@ -170,6 +170,7 @@ export class PrismaWalkInRepository implements WalkInRepository {
           patientId,
           providerId: input.providerId,
           appointmentTypeId: input.appointmentTypeId,
+          chairId: input.chairId,
           start: input.start,
           end: input.end,
           status: AppointmentStatus.ARRIVED,

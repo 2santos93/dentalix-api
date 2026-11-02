@@ -10,6 +10,7 @@ import {
   IsUUID,
   MaxLength,
   MinLength,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { DocumentType, TriageFlag } from '@prisma/client';
@@ -107,6 +108,16 @@ export class CreateWalkInDto {
   @IsOptional()
   @IsUUID()
   appointmentTypeId?: string;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'DX-492: sillón activo de la sede. Ocupado a la hora de la cita: 409 con su nombre y horas; de otra sede o desactivado: 400; de otra clínica: 404.',
+  })
+  // `null` no es «sin sillón»: se rechaza aquí, no con un 500 al buscarlo.
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsUUID()
+  chairId?: string;
 
   @ApiPropertyOptional({
     enum: TriageFlag,

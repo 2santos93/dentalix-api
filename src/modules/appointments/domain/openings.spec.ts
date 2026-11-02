@@ -1,4 +1,8 @@
-import { findOpenings, type OpeningsQuery } from './openings';
+import {
+  findOpenings,
+  mergeChairOpenings,
+  type OpeningsQuery,
+} from './openings';
 import type { ScheduleRange } from '../../location-schedule/application/business-hours';
 
 // Martes 20-10-2026 en la zona de la sede (UTC−4 fijo): 09:00 local = 13:00Z.
@@ -181,5 +185,46 @@ describe('findOpenings con el horario del profesional (DX-233)', () => {
     expect(
       asIso(findOpenings(query({ providerRangesOn: () => null }))),
     ).toEqual(asIso(findOpenings(query())));
+  });
+});
+
+describe('mergeChairOpenings (DX-492)', () => {
+  const at = (hh: string) => new Date(`2026-10-20T${hh}:00:00.000Z`);
+  const result = (...slots: [string, string][]) => ({
+    openings: slots.map(([s, e]) => ({ start: at(s), end: at(e) })),
+    truncated: false,
+  });
+
+  it('ordena por hora y no repite un hueco que otro sillón cubre', () => {
+    const merged = mergeChairOpenings([
+      { chair: 'A', result: result(['14', '15'], ['16', '18']) },
+      { chair: 'B', result: result(['14', '18']) },
+      { chair: 'C', result: result(['14', '18']) },
+    ]);
+    expect(merged.openings).toEqual([
+      { start: at('14'), end: at('18'), chair: 'B' },
+    ]);
+  });
+
+  it('huecos que se solapan sin cubrirse salen los dos', () => {
+    const merged = mergeChairOpenings([
+      { chair: 'A', result: result(['14', '16']) },
+      { chair: 'B', result: result(['15', '17']) },
+    ]);
+    expect(merged.openings.map((o) => o.chair)).toEqual(['A', 'B']);
+  });
+
+  it('recorta al tope y avisa; también si un sillón venía recortado', () => {
+    const many = mergeChairOpenings(
+      [{ chair: 'A', result: result(['14', '15'], ['16', '17']) }],
+      1,
+    );
+    expect(many.openings).toHaveLength(1);
+    expect(many.truncated).toBe(true);
+    expect(
+      mergeChairOpenings([
+        { chair: 'A', result: { ...result(['14', '15']), truncated: true } },
+      ]).truncated,
+    ).toBe(true);
   });
 });

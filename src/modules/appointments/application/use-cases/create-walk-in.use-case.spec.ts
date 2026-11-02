@@ -12,6 +12,8 @@ import {
   TriageFlag,
 } from '@prisma/client';
 import { CreateWalkInUseCase } from './create-walk-in.use-case';
+import { ChairAssignmentService } from '../chair-assignment';
+import { InMemoryChairRepository } from '../../../chairs/application/__fixtures__/in-memory-chairs';
 import { InMemoryAppointmentRepository } from './__fixtures__/in-memory-appointment.repository';
 import { InMemoryScheduleBlockRepository } from '../../../schedule-blocks/application/__fixtures__/in-memory-schedule-blocks';
 import { InMemoryAppointmentTypeRepository } from '../../../appointment-types/application/__fixtures__/in-memory-appointment-types';
@@ -32,6 +34,7 @@ import {
   PATIENT_DUPLICATE_CODE,
   WALK_IN_MESSAGES,
   WALK_IN_ROLES,
+  walkInRequestFingerprint,
 } from '../../domain/walk-in';
 import { PATIENT_ROLES } from '../../../auth/presentation/guards/clinic-role-sets';
 import { DOC_TAKEN_MESSAGE } from '../../../patients/infrastructure/repositories/prisma-patient.repository';
@@ -136,6 +139,7 @@ function setup(
     findById: (id: string) =>
       Promise.resolve({ id, name: 'Sede', timeZone: 'America/Caracas' }),
   } as unknown as LocationRepository;
+  const chairs = new InMemoryChairRepository();
   const uc = new CreateWalkInUseCase(
     appointments,
     walkIns,
@@ -145,6 +149,7 @@ function setup(
     blocks,
     locations,
     inMemoryAvailability(),
+    new ChairAssignmentService(chairs, appointments, locations),
     () => NOW,
   );
   const reserved = (start: string, end: string, typeIds = [urgent.id]) =>
@@ -160,6 +165,7 @@ function setup(
     uc,
     appointments,
     blocks,
+    chairs,
     types,
     urgent,
     cleaning,
@@ -180,6 +186,78 @@ const NEW_PATIENT = {
 };
 
 describe('CreateWalkInUseCase (DX-470)', () => {
+  describe('con sillón (DX-492)', () => {
+    const overbook = { overbookReason: 'Dolor agudo sin hueco' };
+    const input = { newPatient: NEW_PATIENT, providerId: 'prov1', ...overbook };
+
+    it('guarda el sillón libre de la sede', async () => {
+      const { uc, chairs, writes } = setup();
+      const chair = chairs.seed({ name: 'Sillón 1' });
+      await uc.execute({ ...input, chairId: chair.id }, CTX);
+      expect(writes[0].chairId).toBe(chair.id);
+    });
+
+    it('sin sillón, la cita va sin sillón', async () => {
+      const { uc, writes } = setup();
+      await uc.execute(input, CTX);
+      expect(writes[0].chairId).toBeNull();
+    });
+
+    it('ocupado: 409 con el nombre del sillón y nada escrito', async () => {
+      const { uc, chairs, appointments, writes } = setup();
+      const chair = chairs.seed({ name: 'Sillón 1' });
+      appointments.seed({
+        providerId: 'otro',
+        chairId: chair.id,
+        start: new Date(NOW.getTime() - 10 * 60_000),
+        end: new Date(NOW.getTime() + 10 * 60_000),
+      });
+      await expect(
+        uc.execute({ ...input, chairId: chair.id }, CTX),
+      ).rejects.toThrow(/Sillón 1/);
+      expect(writes).toHaveLength(0);
+    });
+
+    it('otra sede o desactivado: 400; de otra clínica: 404', async () => {
+      const { uc, chairs } = setup();
+      const elsewhere = chairs.seed({ locationId: 'loc2' });
+      const off = chairs.seed({ active: false });
+      await expect(
+        uc.execute({ ...input, chairId: elsewhere.id }, CTX),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(
+        uc.execute({ ...input, chairId: off.id }, CTX),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(
+        uc.execute({ ...input, chairId: 'ajena' }, CTX),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('la carrera (EXCLUDE del sillón) también dice su nombre', async () => {
+      const { uc, chairs, fail } = setup();
+      const chair = chairs.seed({ name: 'Sillón 1' });
+      fail(
+        new Prisma.PrismaClientUnknownRequestError(
+          'exclusion 23P01 appointments_no_overlap_per_chair',
+          { clientVersion: 'test' },
+        ),
+      );
+      await expect(
+        uc.execute({ ...input, chairId: chair.id }, CTX),
+      ).rejects.toThrow(/Sillón 1/);
+    });
+
+    it('la huella cambia con el sillón y es la de siempre sin él', () => {
+      const shape = { locationId: 'loc1', providerId: 'prov1' };
+      expect(walkInRequestFingerprint({ ...shape, chairId: 'a' })).not.toBe(
+        walkInRequestFingerprint(shape),
+      );
+      expect(walkInRequestFingerprint({ ...shape, chairId: undefined })).toBe(
+        walkInRequestFingerprint(shape),
+      );
+    });
+  });
+
   it('paciente nuevo en el primer hueco reservado libre: ARRIVED, urgente, llegada ahora', async () => {
     const { uc, writes, reserved, urgent } = setup();
     reserved('20:00', '20:30');
@@ -211,6 +289,7 @@ describe('CreateWalkInUseCase (DX-470)', () => {
       providerId: 'prov1',
       locationId: 'loc1',
       appointmentTypeId: urgent.id,
+      chairId: null,
       start: utc('17:00'),
       end: utc('17:30'),
       arrivedAt: NOW,

@@ -10,6 +10,8 @@ import type { PatientRepository } from '../../../patients/domain/ports/patient-r
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { inMemoryAvailability } from '../../../provider-schedule/application/__fixtures__/availability';
 import { InMemoryProviderScheduleRepository } from '../../../provider-schedule/application/__fixtures__/in-memory-provider-schedule.repository';
+import { ChairAssignmentService } from '../chair-assignment';
+import { InMemoryChairRepository } from '../../../chairs/application/__fixtures__/in-memory-chairs';
 
 // Un martes futuro (para que "ahora" no recorte nada), en la zona de la sede (UTC−4).
 function nextTuesday(): string {
@@ -54,6 +56,7 @@ describe('FindOpeningsUseCase (DX-122)', () => {
     blocks = new InMemoryScheduleBlockRepository(),
     hours: BusinessHours | null = HOURS,
     providerSchedules = new InMemoryProviderScheduleRepository(),
+    chairs = new InMemoryChairRepository(),
   ) {
     return new FindOpeningsUseCase(
       appointments,
@@ -64,6 +67,7 @@ describe('FindOpeningsUseCase (DX-122)', () => {
       patients,
       new TenantContextService(),
       inMemoryAvailability(providerSchedules),
+      new ChairAssignmentService(chairs, appointments, locations),
     );
   }
 
@@ -74,6 +78,112 @@ describe('FindOpeningsUseCase (DX-122)', () => {
     to: DAY,
     durationMinutes: 30,
   };
+
+  describe('con sillón (DX-492, DX-509-ter)', () => {
+    function withChairs() {
+      const appointments = new InMemoryAppointmentRepository();
+      const chairs = new InMemoryChairRepository();
+      const one = chairs.seed({ name: 'Sillón 1' });
+      const two = chairs.seed({ name: 'Sillón 2' });
+      const uc = build(appointments, undefined, undefined, undefined, chairs);
+      return { appointments, chairs, one, two, uc };
+    }
+    const iso = (d: Date) => d.toISOString();
+
+    it('profesional libre y sillón ocupado por otro: el hueco no pisa esa cita', async () => {
+      const { appointments, one, uc } = withChairs();
+      appointments.seed({
+        providerId: 'otro',
+        chairId: one.id,
+        start: z('14:00'),
+        end: z('14:30'),
+      });
+      const view = await uc.execute({ ...query, chairIds: [one.id] });
+      expect(view.openings).toEqual([
+        {
+          start: z('13:00'),
+          end: z('14:00'),
+          chair: { id: one.id, name: 'Sillón 1', active: true },
+        },
+        {
+          start: z('14:30'),
+          end: z('17:00'),
+          chair: { id: one.id, name: 'Sillón 1', active: true },
+        },
+      ]);
+    });
+
+    it('un sobrecupo también ocupa el sillón; la cita que se mueve, no', async () => {
+      const { appointments, one, uc } = withChairs();
+      appointments.seed({
+        providerId: 'otro',
+        chairId: one.id,
+        overbooked: true,
+        start: z('14:00'),
+        end: z('14:30'),
+      });
+      const moving = appointments.seed({
+        providerId: 'prov1',
+        chairId: one.id,
+        start: z('15:00'),
+        end: z('15:30'),
+      });
+      const view = await uc.execute({
+        ...query,
+        chairIds: [one.id],
+        excludeAppointmentId: moving.id,
+      });
+      expect(view.openings.map((o) => iso(o.start))).toEqual([
+        iso(z('13:00')),
+        iso(z('14:30')),
+      ]);
+    });
+
+    it('con varios, cada hueco lleva un sillón libre en todo él', async () => {
+      const { appointments, one, two, uc } = withChairs();
+      appointments.seed({
+        providerId: 'otro',
+        chairId: one.id,
+        start: z('14:00'),
+        end: z('14:30'),
+      });
+      const view = await uc.execute({ ...query, chairIds: [one.id, two.id] });
+      expect(view.openings).toEqual([
+        {
+          start: z('13:00'),
+          end: z('17:00'),
+          chair: { id: two.id, name: 'Sillón 2', active: true },
+        },
+      ]);
+    });
+
+    it('sillón de otra sede o desactivado: 400; de otra clínica: 404', async () => {
+      const { chairs, uc } = withChairs();
+      const elsewhere = chairs.seed({ locationId: 'loc2' });
+      const off = chairs.seed({ active: false });
+      await expect(
+        uc.execute({ ...query, chairIds: [elsewhere.id] }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(
+        uc.execute({ ...query, chairIds: [off.id] }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(
+        uc.execute({ ...query, chairIds: ['ajeno'] }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('sin chairIds, los huecos no llevan sillón', async () => {
+      const { one, appointments, uc } = withChairs();
+      appointments.seed({
+        providerId: 'otro',
+        chairId: one.id,
+        start: z('14:00'),
+        end: z('14:30'),
+      });
+      const view = await uc.execute(query);
+      expect(view.openings).toEqual([{ start: z('13:00'), end: z('17:00') }]);
+    });
+  });
 
   it('horario de la sede − citas del profesional − bloqueos, en la zona de la sede', async () => {
     const appointments = new InMemoryAppointmentRepository();

@@ -360,22 +360,22 @@ export class AppointmentsController {
   @ApiCreatedResponse({
     type: WalkInResultDto,
     description:
-      'DX-470 «Atender sin cita», en una transacción: el paciente (existente por `patientId`, o alta mínima `newPatient` con nombre, apellido y teléfono) y una cita de tipo urgente DESDE AHORA ya en «En clínica» (ARRIVED, `arrivedAt` = reloj del servidor, `walkIn`), con las señales y la nota de triaje. Va al primer hueco RESERVED libre de hoy del profesional que admite el tipo urgente (DX-446); con `overbookReason`, en sobrecupo ahora (`overbooked`, motivo en `appointment_reserved_overrides`). Sede: la de X-Location-Id (o la de escritura de la sesión), entre las permitidas al usuario; autor, el del token. Queda en auditoría (`WALK_IN_PATIENT`, `WALK_IN_ARRIVAL`, `WALK_IN_OVERBOOK`) sin el triaje ni el motivo.',
+      'DX-470 «Atender sin cita», en una transacción: el paciente (existente por `patientId`, o alta mínima `newPatient` con nombre, apellido y teléfono) y una cita de tipo urgente DESDE AHORA ya en «En clínica» (ARRIVED, `arrivedAt` = reloj del servidor, `walkIn`), con las señales y la nota de triaje. Va al primer hueco RESERVED libre de hoy del profesional que admite el tipo urgente (DX-446); con `overbookReason`, en sobrecupo ahora (`overbooked`, motivo en `appointment_reserved_overrides`). DX-492: `chairId` opcional, un sillón activo de la sede. Sede: la de X-Location-Id (o la de escritura de la sesión), entre las permitidas al usuario; autor, el del token. Queda en auditoría (`WALK_IN_PATIENT`, `WALK_IN_ARRIVAL`, `WALK_IN_OVERBOOK`) sin el triaje ni el motivo.',
   })
   @ApiBadRequestResponse({
     description:
-      'Datos inválidos: ni `patientId` ni `newPatient` (o los dos), señales fuera de las 6, nota de más de 200, motivo del sobrecupo fuera de 5–300, tipo no urgente o desactivado, o el profesional no atiende en la sede',
+      'Datos inválidos: ni `patientId` ni `newPatient` (o los dos), señales fuera de las 6, nota de más de 200, motivo del sobrecupo fuera de 5–300, tipo no urgente o desactivado, el profesional no atiende en la sede, o el sillón es de otra sede o está desactivado',
   })
   @ApiForbiddenResponse({
     description:
       'Solo RECEPTION, ASSISTANT y ADMIN (marcan la llegada); sede no permitida (`LOCATION_NOT_ALLOWED`)',
   })
   @ApiNotFoundResponse({
-    description: 'Paciente o profesional que no son de esta clínica',
+    description: 'Paciente, profesional o sillón que no son de esta clínica',
   })
   @ApiConflictResponse({
     description:
-      '`NO_RESERVED_SLOT` (`canOverbook`): no queda hueco reservado libre hoy, se puede reintentar con `overbookReason`; `PATIENT_DUPLICATE` (`existingPatientId` y `existingPatient` con `id`, `firstName`, `lastName`): el documento del alta mínima ya es de otro paciente (se comprueba antes que el hueco); sin tipo urgente activo; un bloqueo que no deja agendar; el paciente ya está en otra cita a esa hora; u otra persona ocupó el hueco a la vez',
+      '`NO_RESERVED_SLOT` (`canOverbook`): no queda hueco reservado libre hoy, se puede reintentar con `overbookReason`; `PATIENT_DUPLICATE` (`existingPatientId` y `existingPatient` con `id`, `firstName`, `lastName`): el documento del alta mínima ya es de otro paciente (se comprueba antes que el hueco); sin tipo urgente activo; un bloqueo que no deja agendar; el paciente ya está en otra cita a esa hora; el sillón está ocupado (mensaje con su nombre y horas); u otra persona ocupó el hueco a la vez',
   })
   @ApiHeader({
     name: 'Idempotency-Key',
@@ -400,6 +400,7 @@ export class AppointmentsController {
         newPatient: dto.newPatient,
         providerId: dto.providerId,
         appointmentTypeId: dto.appointmentTypeId,
+        chairId: dto.chairId,
         triageFlags: dto.triageFlags,
         triageNote: dto.triageNote,
         overbookReason: dto.overbookReason,
@@ -414,14 +415,15 @@ export class AppointmentsController {
   @ApiOkResponse({
     type: OpeningsDto,
     description:
-      'DX-122 «Buscar hueco»: huecos del profesional dentro del horario de la sede (su zona horaria), fuera de bloqueos y sin solape con sus citas (ni con las del paciente, si se indica). Nunca en el pasado.',
+      'DX-122 «Buscar hueco»: huecos del profesional dentro del horario de la sede (su zona horaria), fuera de bloqueos y sin solape con sus citas (ni con las del paciente, si se indica). Nunca en el pasado. DX-492: con `chairIds`, solo los huecos con alguno de esos sillones libre, y cada hueco lleva el suyo en `chair`.',
   })
   @ApiBadRequestResponse({
     description:
-      'Fechas inválidas, al revés o más de 31 días; duración fuera de 5–480',
+      'Fechas inválidas, al revés o más de 31 días; duración fuera de 5–480; DX-492: sillón de otra sede o desactivado, o más de 12',
   })
   @ApiNotFoundResponse({
-    description: 'Sede, profesional, paciente o cita a excluir de otra clínica',
+    description:
+      'Sede, profesional, paciente, cita a excluir o sillón de otra clínica',
   })
   openings(@Query() query: OpeningsQueryDto): Promise<OpeningsView> {
     return this.findOpenings.execute({
@@ -432,6 +434,7 @@ export class AppointmentsController {
       durationMinutes: query.durationMinutes,
       patientId: query.patientId,
       excludeAppointmentId: query.excludeAppointmentId,
+      chairIds: query.chairIds,
     });
   }
 
