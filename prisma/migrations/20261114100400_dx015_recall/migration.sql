@@ -144,8 +144,8 @@ CREATE FUNCTION public.dx_recall_contact_guard() RETURNS trigger
 AS $$
 BEGIN
   IF TG_OP = 'INSERT' THEN
-    -- La fecha del contacto la pone el servidor de BD.
-    NEW."createdAt" := CURRENT_TIMESTAMP;
+    -- La fecha del contacto la pone el servidor de BD, en UTC (DX-226).
+    NEW."createdAt" := pg_catalog.timezone('UTC', pg_catalog.now());
     RETURN NEW;
   END IF;
   IF TG_OP IN ('DELETE', 'TRUNCATE') AND EXISTS (

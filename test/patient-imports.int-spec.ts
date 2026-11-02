@@ -495,6 +495,8 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       'patient_dentition_events.patientId',
       'patient_documents.patientId',
       'patient_implants.patientId',
+      // DX-015: un recall fijado o un contacto de recall es actividad durable.
+      'patient_recalls.patientId',
       'patient_responsible_parties.patientId',
       'patient_responsible_parties.responsiblePatientId',
       'patient_retention_actions.patientId',
@@ -502,6 +504,7 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       'perio_exams.patientId',
       'post_op_instruction_deliveries.patientId',
       'prescriptions.patientId',
+      'recall_contacts.patientId',
       'reminder_opt_out_links.patientId',
       // DX-214: el aviso auditable es actividad durable y debe bloquear undo.
       'reminder_opt_out_match_warnings.patientId',
