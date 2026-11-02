@@ -22,7 +22,15 @@ import {
   type VoidActor,
 } from '../../payments/domain/void-window';
 import { isPlanBillable } from '../../treatment-plans/domain/plan-status-machine';
+import type { GetPlanBalanceResult } from '../../payments/application/use-cases/get-plan-balance.use-case';
 import { fromCents, toCents } from '../../../shared/money/money';
+
+/**
+ * DX-472: el saldo de cada plan según `GetPlanBalanceUseCase`, por id de plan.
+ * Sin él (la cartera, que lee sumas sin convertir) cuentan los abonos en la
+ * moneda del plan.
+ */
+export type PlanBalances = ReadonlyMap<string, GetPlanBalanceResult>;
 
 export interface ComputeAccountStatementOptions {
   /** "Hoy" para decidir qué cuota está vencida (inyectado, nunca el reloj). */
@@ -36,6 +44,8 @@ export interface ComputeAccountStatementOptions {
   movementsFrom?: string;
   /** Filtro de `movements`: último día civil (YYYY-MM-DD), inclusive. */
   movementsTo?: string;
+  /** El saldo de cada plan (DX-472): lo que se muestra de él y de sus cuotas. */
+  planBalances?: PlanBalances;
 }
 
 /*
@@ -48,11 +58,14 @@ export interface ComputeAccountStatementOptions {
  *   saldo. COMPLETED sí cuenta (lo hecho se debe hasta que se pague).
  * - Abonado = Σ abonos NO anulados, de cualquier plan (también de uno
  *   cancelado: ese dinero se recibió y queda a favor del paciente).
- * - Por moneda y SIN convertir. Cada cifra va en la moneda en que se presupuestó
- *   o se pagó. Convertir exigiría una tasa por abono (una consulta por fila) y
- *   mezclaría cifras de mercado con lo que el paciente de verdad entregó; un
- *   abono en otra moneda que la del plan se informa aparte en ese plan
- *   (`paidOtherCurrencies`) y no cubre sus cuotas.
+ * - Plan = las cifras de GetPlanBalanceUseCase (DX-472): `billable`, `paid` y
+ *   `balance` son las de `/balance` y las de `/payment-plan`; un abono en otra
+ *   moneda cuenta convertido a la del plan, con su tasa, y cubre cuotas. Lo que
+ *   difiere a propósito va en otro campo: `budgeted` (lo presupuestado aunque
+ *   el plan esté cancelado) y `paidOtherCurrencies` (lo entregado sin convertir).
+ * - Resumen por moneda = la suma de los planes en su moneda más lo abonado a
+ *   saldos migrados, que no se convierte. Los abonos «sin tasa» no suman y se
+ *   informan en su plan (`paymentsWithoutRate`).
  * - Cuotas: las de los planes de pago vivos de planes no cancelados, con el
  *   mismo reparto voraz y los mismos estados que GetPaymentPlanUseCase
  *   (deriveStatuses): lo abonado al plan en la moneda del plan de pagos cubre
@@ -165,6 +178,7 @@ function inRange(
 export function computeBalances(
   snapshot: BalanceSnapshot,
   today: Date,
+  planBalances?: PlanBalances,
 ): ComputedBalances {
   const currencies = new Map<string, CurrencyAccumulator>();
   const acc = (currency: string): CurrencyAccumulator => {
@@ -197,17 +211,23 @@ export function computeBalances(
     const counts = countsTowardsBalance(plan.status);
     const budgetedCents = toCents(plan.billable);
     const paidMap = paidByPlan.get(plan.id) ?? new Map<string, number>();
-    const paidCents = paidMap.get(plan.currency) ?? 0;
+    const known = planBalances?.get(plan.id);
+    const paidCents = known
+      ? toCents(known.paid)
+      : (paidMap.get(plan.currency) ?? 0);
     const creditCents = creditOf(plan.id, plan.currency);
+    const billableCents = counts ? budgetedCents : 0;
     if (counts) {
       acc(plan.currency).budgetedCents += budgetedCents;
     }
+    if (known) acc(plan.currency).paidCents += paidCents;
     return {
       id: plan.id,
       status: plan.status,
       currency: plan.currency,
       createdAt: plan.createdAt,
       budgeted: fromCents(budgetedCents),
+      billable: known?.billable ?? fromCents(billableCents),
       countsTowardsBalance: counts,
       paid: fromCents(paidCents),
       paidOtherCurrencies: [...paidMap.entries()]
@@ -215,9 +235,10 @@ export function computeBalances(
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([currency, cents]) => ({ currency, amount: fromCents(cents) })),
       creditMovements: fromCents(creditCents),
-      balance: fromCents(
-        (counts ? budgetedCents : 0) - paidCents - creditCents,
-      ),
+      balance:
+        known?.balance ?? fromCents(billableCents - paidCents - creditCents),
+      paymentsWithoutRate: known?.paymentsWithoutRate ?? [],
+      rateProviderTimedOut: known?.rateProviderTimedOut ?? false,
     };
   });
 
@@ -250,8 +271,9 @@ export function computeBalances(
   });
 
   // --- Abonado por moneda ---------------------------------------------------
+  // Lo de un plan con su saldo ya está sumado arriba, convertido a su moneda.
   for (const p of snapshot.payments) {
-    if (isActive(p)) {
+    if (isActive(p) && !planBalances?.has(p.treatmentPlanId ?? '')) {
       acc(p.currency).paidCents += toCents(p.amount);
     }
   }
@@ -265,13 +287,19 @@ export function computeBalances(
     }
     // DX-253: un traspaso recibido cubre cuotas como un abono; una
     // devolución deja de cubrirlas.
+    const known = planBalances?.get(paymentPlan.treatmentPlanId);
     const paidCents =
-      (paidByPlan.get(paymentPlan.treatmentPlanId)?.get(paymentPlan.currency) ??
-        0) + creditOf(paymentPlan.treatmentPlanId, paymentPlan.currency);
+      (known
+        ? toCents(known.paid)
+        : (paidByPlan
+            .get(paymentPlan.treatmentPlanId)
+            ?.get(paymentPlan.currency) ?? 0)) +
+      creditOf(paymentPlan.treatmentPlanId, paymentPlan.currency);
     const derived = deriveStatuses(
       buildTramos(paymentPlan),
       fromCents(paidCents),
       today,
+      { paidIncomplete: known?.rateProviderTimedOut },
     );
     const currencyAcc = acc(paymentPlan.currency);
     currencyAcc.hasInstallments ||= derived.length > 0;
@@ -354,6 +382,7 @@ export function computeAccountStatement(
   const { summary, plans, installments, openingBalances } = computeBalances(
     snapshot,
     options.today,
+    options.planBalances,
   );
 
   // --- Movimientos ----------------------------------------------------------

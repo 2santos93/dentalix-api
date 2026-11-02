@@ -7,6 +7,7 @@ import {
   TreatmentPlanStatus,
 } from '@prisma/client';
 import { DOCUMENT_TYPES } from '../../../patients/domain/document-type';
+import { PaymentWithoutRateDto } from '../../../payments/presentation/dto/plan-balance.dto';
 import {
   DOC_TYPE_LABEL_PROPERTY,
   DOC_TYPE_NAME_DESCRIPTION,
@@ -89,7 +90,7 @@ export class AccountStatementCurrencySummaryDto {
   @ApiProperty({
     example: 3000000,
     description:
-      'Σ ítems ACCEPTED|DONE de los planes no cancelados en esta moneda',
+      'Σ ítems ACCEPTED|DONE de los planes no cancelados en esta moneda (Σ billable de esos planes)',
   })
   budgeted!: number;
 
@@ -109,7 +110,8 @@ export class AccountStatementCurrencySummaryDto {
 
   @ApiProperty({
     example: 1200000,
-    description: 'Σ abonos no anulados en esta moneda (sin convertir)',
+    description:
+      'DX-472: Σ paid de los planes en esta moneda (abonos vivos convertidos a ella, como en /balance) más los abonos a saldos migrados de esta moneda. Lo entregado en otra moneda se detalla en plans[].paidOtherCurrencies y en movements.',
   })
   paid!: number;
 
@@ -199,8 +201,19 @@ export class AccountStatementPlanDto {
   })
   createdAt!: Date;
 
-  @ApiProperty({ example: 3000000, description: 'Ítems ACCEPTED|DONE' })
+  @ApiProperty({
+    example: 3000000,
+    description:
+      'Ítems ACCEPTED|DONE, aunque el plan esté cancelado o rechazado. Difiere de billable a propósito: es lo que se presupuestó, no lo que se cobra.',
+  })
   budgeted!: number;
+
+  @ApiProperty({
+    example: 3000000,
+    description:
+      'DX-472: el billable de GET /treatment-plans/:id/balance: ítems ACCEPTED|DONE; 0 si el plan está cancelado o rechazado.',
+  })
+  billable!: number;
 
   @ApiProperty({
     description:
@@ -210,7 +223,8 @@ export class AccountStatementPlanDto {
 
   @ApiProperty({
     example: 1200000,
-    description: 'Abonos vivos en la moneda del plan',
+    description:
+      'DX-472: el paid de /balance: abonos vivos convertidos a la moneda del plan con la tasa de cada uno. Los «sin tasa» (paymentsWithoutRate) no suman.',
   })
   paid!: number;
 
@@ -223,12 +237,31 @@ export class AccountStatementPlanDto {
 
   @ApiProperty({
     type: [AccountStatementOtherCurrencyDto],
-    description: 'Abonos vivos del plan hechos en otra moneda (sin convertir)',
+    description:
+      'Abonos vivos del plan hechos en otra moneda, en esa moneda y sin convertir: lo que el paciente entregó. Solo informa: si tenían tasa, ya cuentan en paid.',
   })
   paidOtherCurrencies!: AccountStatementOtherCurrencyDto[];
 
-  @ApiProperty({ example: 1800000 })
+  @ApiProperty({
+    example: 1800000,
+    description:
+      'DX-472: el balance de /balance: billable - paid - creditMovements.',
+  })
   balance!: number;
+
+  @ApiProperty({
+    type: [PaymentWithoutRateDto],
+    description:
+      'DX-472: abonos del plan que no suman en paid por no tener tasa, como en /balance.',
+  })
+  paymentsWithoutRate!: PaymentWithoutRateDto[];
+
+  @ApiProperty({
+    example: false,
+    description:
+      'DX-472: el proveedor de tasas no respondió a tiempo: paid está incompleto y las cuotas de este plan no salen OVERDUE mientras tanto.',
+  })
+  rateProviderTimedOut!: boolean;
 }
 
 export class AccountStatementLocationRefDto {
@@ -490,6 +523,13 @@ export class AccountStatementDto {
       'DX-262: saldos migrados vivos, de la fecha de corte más antigua a la más reciente',
   })
   openingBalances!: AccountStatementOpeningBalanceDto[];
+
+  @ApiProperty({
+    example: false,
+    description:
+      'DX-472: en algún plan, el proveedor de tasas no respondió a tiempo (el saldo espera como mucho 4 s): esas cifras están incompletas y volver a pedirlas las completa. Nunca es un 500.',
+  })
+  rateProviderTimedOut!: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -573,4 +613,11 @@ export class FamilyAccountStatementDto {
     description: 'Suma de los subtotales por moneda, al céntimo.',
   })
   totals!: FamilyCurrencyAmountsDto[];
+
+  @ApiProperty({
+    example: false,
+    description:
+      'DX-472: en algún plan de la familia, el proveedor de tasas no respondió a tiempo: las cifras están incompletas.',
+  })
+  rateProviderTimedOut!: boolean;
 }

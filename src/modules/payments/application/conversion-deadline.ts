@@ -17,6 +17,11 @@ export interface ConversionDeadline {
   race<T>(work: Promise<T>): Promise<T | typeof CONVERSION_TIMED_OUT>;
   /** ¿Alguna conversión se quedó sin respuesta a tiempo? */
   readonly timedOut: boolean;
+  /**
+   * DX-472: da el plazo por vencido ya: el proveedor dijo que no contesta y
+   * esperar el resto no cambia nada.
+   */
+  expire(): void;
   /** Libera el temporizador (siempre, al terminar el cálculo). */
   dispose(): void;
 }
@@ -33,11 +38,13 @@ export function conversionDeadline(
 ): ConversionDeadline {
   let timer: ReturnType<typeof setTimeout> | null = null;
   let expired: Promise<typeof CONVERSION_TIMED_OUT> | null = null;
+  let fire: () => void = () => undefined;
   let timedOut = false;
 
   const deadline = (): Promise<typeof CONVERSION_TIMED_OUT> => {
     expired ??= new Promise((resolve) => {
-      timer = setTimeout(() => resolve(CONVERSION_TIMED_OUT), budgetMs);
+      fire = () => resolve(CONVERSION_TIMED_OUT);
+      timer = setTimeout(fire, budgetMs);
       timer.unref?.();
     });
     return expired;
@@ -51,6 +58,10 @@ export function conversionDeadline(
     },
     get timedOut() {
       return timedOut;
+    },
+    expire() {
+      void deadline();
+      fire();
     },
     dispose() {
       if (timer) clearTimeout(timer);

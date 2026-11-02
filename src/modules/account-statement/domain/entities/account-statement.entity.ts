@@ -7,6 +7,7 @@ import {
   TreatmentPlanStatus,
 } from '@prisma/client';
 import { InstallmentStatus } from '../../../payment-plans/application/schedule/derive-statuses';
+import type { PaymentWithoutRate } from '../../../payments/application/use-cases/get-plan-balance.use-case';
 
 /*
  * Estado de cuenta del paciente (DX-011): la foto financiera consolidada de UN
@@ -202,13 +203,15 @@ export interface StatementPlanLine {
   status: TreatmentPlanStatus;
   currency: string;
   createdAt: Date;
-  /** Facturable del plan (ítems ACCEPTED|DONE), aunque esté cancelado. */
+  /** Presupuestado (ítems ACCEPTED|DONE), aunque el plan esté cancelado. */
   budgeted: number;
+  /** DX-472: el `billable` de `/balance`: 0 si el plan no se cobra. */
+  billable: number;
   /** `false` para un plan CANCELLED o REJECTED: su facturable no suma al saldo. */
   countsTowardsBalance: boolean;
-  /** Abonos vivos del plan en SU moneda. */
+  /** DX-472: el `paid` de `/balance`: abonos vivos convertidos a su moneda. */
   paid: number;
-  /** Abonos vivos del plan hechos en otra moneda (no se convierten). */
+  /** Lo entregado en otra moneda, sin convertir (ya cuenta en `paid`). */
   paidOtherCurrencies: { currency: string; amount: number }[];
   /**
    * DX-253: Σ de los asientos del saldo a favor del plan en su moneda, con
@@ -216,8 +219,12 @@ export interface StatementPlanLine {
    * originales no cambian: esta cifra se suma a ellos.
    */
   creditMovements: number;
-  /** `(countsTowardsBalance ? budgeted : 0) - paid - creditMovements`. */
+  /** DX-472: el `balance` de `/balance`: `billable - paid - creditMovements`. */
   balance: number;
+  /** DX-472: abonos del plan que no suman en `paid` por no tener tasa. */
+  paymentsWithoutRate: PaymentWithoutRate[];
+  /** DX-472: el proveedor no respondió y `paid` está incompleto. */
+  rateProviderTimedOut: boolean;
 }
 
 export interface StatementMovement {
@@ -336,6 +343,8 @@ export interface AccountStatement extends ComputedAccountStatement {
   addressee: StatementAddressee;
   /** Filtro aplicado a `movements` (días civiles inclusive), o `null`. */
   range: { from: string | null; to: string | null };
+  /** DX-472: en algún plan, el proveedor de tasas no respondió a tiempo. */
+  rateProviderTimedOut: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -371,4 +380,6 @@ export interface FamilyAccountStatement {
   members: FamilyStatementMember[];
   /** Suma de los subtotales, por moneda y al céntimo. */
   totals: FamilyCurrencyAmounts[];
+  /** DX-472: en algún plan, el proveedor de tasas no respondió a tiempo. */
+  rateProviderTimedOut: boolean;
 }

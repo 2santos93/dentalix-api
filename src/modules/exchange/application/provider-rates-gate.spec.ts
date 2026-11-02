@@ -1,11 +1,13 @@
 import { Logger } from '@nestjs/common';
 import {
   ExchangeRateBudgetExceededError,
+  ExchangeRateProviderNotRespondingError,
   ExchangeRateUnavailableError,
 } from '../domain/ports/exchange-rate-provider.port';
 import {
   DEFAULT_PROVIDER_RATES_LIMITS,
   loadProviderRatesLimits,
+  NOT_RESPONDING_NEGATIVE_TTL_MS,
   providerRatesLimitsProblems,
   ProviderRatesGate,
   type ProviderRatesLimits,
@@ -92,6 +94,28 @@ describe('ProviderRatesGate (SEC-054)', () => {
       clock.advance(1);
       await expect(gate.fetch('2026-10-01', A, load)).rejects.toBeInstanceOf(
         ExchangeRateUnavailableError,
+      );
+      expect(load).toHaveBeenCalledTimes(2);
+    });
+
+    it('DX-472: un proveedor que no contestó se reprueba al minuto y repite su error', async () => {
+      const { gate, clock } = setup({ negativeTtlMs: HOUR });
+      const load = jest.fn(() =>
+        Promise.reject(new ExchangeRateProviderNotRespondingError('colgado')),
+      );
+
+      await expect(gate.fetch('2026-10-01', A, load)).rejects.toBeInstanceOf(
+        ExchangeRateProviderNotRespondingError,
+      );
+      clock.advance(NOT_RESPONDING_NEGATIVE_TTL_MS - 1);
+      await expect(gate.fetch('2026-10-01', A, load)).rejects.toBeInstanceOf(
+        ExchangeRateProviderNotRespondingError,
+      );
+      expect(load).toHaveBeenCalledTimes(1);
+
+      clock.advance(1);
+      await expect(gate.fetch('2026-10-01', A, load)).rejects.toBeInstanceOf(
+        ExchangeRateProviderNotRespondingError,
       );
       expect(load).toHaveBeenCalledTimes(2);
     });

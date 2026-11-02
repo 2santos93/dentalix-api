@@ -14,16 +14,18 @@ import { PrismaAccountStatementRepository } from './infrastructure/repositories/
 import { AccountStatementController } from './presentation/account-statement.controller';
 import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
+import { PaymentsModule } from '../payments/payments.module';
 
 // Estado de cuenta del paciente (DX-011). Módulo de solo lectura con su propio
 // repositorio: lee planes, abonos y cuotas en pocas consultas agregadas en vez
-// de componer los casos de uso por plan (que harían una ronda por plan y una
-// conversión por abono). Reutiliza la lógica pura de estados de cuota
-// (deriveStatuses) del módulo payment-plans, sin depender de su DI.
+// de componer los casos de uso por plan (que harían una ronda por plan). El
+// saldo de cada plan lo calcula GetPlanBalanceUseCase sobre esa lectura
+// (DX-472). Reutiliza la lógica pura de estados de cuota (deriveStatuses) del
+// módulo payment-plans, sin depender de su DI.
 @Module({
   // JwtModule.register({}): JwtAuthGuard -> TokenService -> JwtService, igual
   // que PaymentsModule.
-  imports: [JwtModule.register({}), DocumentTypeNamesModule],
+  imports: [JwtModule.register({}), DocumentTypeNamesModule, PaymentsModule],
   controllers: [AccountStatementController],
   providers: [
     GetAccountStatementUseCase,

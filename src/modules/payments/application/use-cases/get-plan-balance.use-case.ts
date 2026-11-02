@@ -20,15 +20,17 @@ import {
   type AmountConverter,
   ConvertAmountUseCase,
 } from '../../../exchange/application/use-cases/convert-amount.use-case';
+import { ExchangeRateProviderNotRespondingError } from '../../../exchange/domain/ports/exchange-rate-provider.port';
 import {
   CONVERSION_TIMED_OUT,
   conversionDeadline,
+  type ConversionDeadline,
 } from '../conversion-deadline';
 import {
   PLAN_CREDIT_READER,
   type PlanCreditReader,
 } from '../../domain/ports/plan-credit-reader.port';
-import { round2 } from '../../../../shared/money/money';
+import { round2, toCents } from '../../../../shared/money/money';
 import { linesTotal } from '../../../../shared/money/line-rounding';
 
 export interface GetPlanBalanceResult {
@@ -59,9 +61,10 @@ export interface GetPlanBalanceResult {
   paymentsWithoutRate: PaymentWithoutRate[];
   /**
    * DX-054: el proveedor de tasas no respondió dentro del plazo del saldo
-   * (`BALANCE_CONVERSION_BUDGET_MS`): los abonos que esperaban su tasa salen
-   * en `paymentsWithoutRate` y no suman. Volver a pedir el saldo lo completa
-   * cuando el proveedor responda. `false` en el caso normal.
+   * (`BALANCE_CONVERSION_BUDGET_MS`) o ya se sabe que no contesta (DX-472):
+   * los abonos que esperaban su tasa salen en `paymentsWithoutRate` y no
+   * suman. Volver a pedir el saldo lo completa cuando el proveedor responda.
+   * `false` en el caso normal.
    */
   rateProviderTimedOut: boolean;
 }
@@ -76,8 +79,34 @@ export interface PaymentWithoutRate {
 }
 
 /** Lo que la conversión necesita de un abono (el día civil ya resuelto). */
-interface PlanPayment extends PaymentWithRate {
+export interface PlanPayment extends PaymentWithRate {
   id: string;
+}
+
+/**
+ * DX-472: lo que el saldo de un plan necesita, ya leído por quien llama en su
+ * propia foto (el estado de cuenta lee todos los planes del paciente de una).
+ */
+export interface PlanBalanceInput {
+  plan: { id: string; status: TreatmentPlanStatus; currency: string };
+  /** Ítems vivos; `compute` se queda con los cobrables. */
+  items: {
+    status: TreatmentPlanItemStatus;
+    price: number;
+    discount: number;
+  }[];
+  /** Abonos VIVOS del plan. */
+  payments: PlanPayment[];
+  /** Base de imputación por abono: si la tiene, `paid` cuenta por ella. */
+  baseOf: ReadonlyMap<string, number>;
+  /** Σ de los asientos del saldo a favor del plan, en su moneda. */
+  creditMovements: number;
+}
+
+/** Las conversiones de UN cálculo: un convertidor y un plazo compartidos. */
+interface ConversionRun {
+  convert: AmountConverter;
+  deadline: ConversionDeadline;
 }
 
 /** Cobrado y pendiente de un ítem del plan (DX-051). */
@@ -148,7 +177,7 @@ export class GetPlanBalanceUseCase {
     const baseOf = new Map(
       snapshot.bases.map((b) => [b.paymentId, b.amount] as const),
     );
-    const result = await this.compute(
+    const result = await this.computeOne(
       { ...plan, id: treatmentPlanId },
       snapshot.items,
       payments,
@@ -160,7 +189,7 @@ export class GetPlanBalanceUseCase {
     const allocatedByPayment = new Map<string, number>();
     let allocatedCents = 0;
     for (const a of snapshot.allocations) {
-      const cents = Math.round(a.amount * 100);
+      const cents = toCents(a.amount);
       paidByItem.set(a.itemId, (paidByItem.get(a.itemId) ?? 0) + cents);
       allocatedByPayment.set(
         a.paymentId,
@@ -189,8 +218,7 @@ export class GetPlanBalanceUseCase {
     let unallocatedCents = 0;
     for (const base of snapshot.bases) {
       unallocatedCents +=
-        Math.round(base.amount * 100) -
-        (allocatedByPayment.get(base.paymentId) ?? 0);
+        toCents(base.amount) - (allocatedByPayment.get(base.paymentId) ?? 0);
     }
     const withBase = new Set(snapshot.bases.map((b) => b.paymentId));
     const unconvertedPaymentsCount = payments.filter(
@@ -214,31 +242,54 @@ export class GetPlanBalanceUseCase {
     // belongs to another tenant.
     const plan = await this.getTreatmentPlan.execute(treatmentPlanId);
     const payments = await this.repo.listByPlan(treatmentPlanId);
-    return this.compute(plan, plan.items, payments);
+    return this.computeOne(plan, plan.items, payments);
   }
 
-  private async compute(
-    plan: { id: string; status: TreatmentPlanStatus; currency: string },
-    planItems: {
-      status: TreatmentPlanItemStatus;
-      price: number;
-      discount: number;
-    }[],
+  /**
+   * DX-472: el saldo de varios planes con la MISMA cuenta que `execute`, sobre
+   * datos ya leídos, y UN solo plazo para todos: un estado de cuenta con varios
+   * planes tampoco espera más de `BALANCE_CONVERSION_BUDGET_MS` al proveedor.
+   */
+  async computeMany(
+    inputs: readonly PlanBalanceInput[],
+  ): Promise<Map<string, GetPlanBalanceResult>> {
+    const run = this.conversionRun();
+    const balances = new Map<string, GetPlanBalanceResult>();
+    try {
+      for (const input of inputs) {
+        balances.set(
+          input.plan.id,
+          await this.compute(
+            input.plan,
+            input.items,
+            input.payments,
+            input.baseOf,
+            run,
+            input.creditMovements,
+          ),
+        );
+      }
+    } finally {
+      run.deadline.dispose();
+    }
+    return balances;
+  }
+
+  private async computeOne(
+    plan: PlanBalanceInput['plan'],
+    planItems: PlanBalanceInput['items'],
     payments: PlanPayment[],
     baseOf: ReadonlyMap<string, number> = new Map(),
   ): Promise<GetPlanBalanceResult> {
-    // DX-109 (BE-001): un plan no cobrable (rechazado o cancelado) no debe
-    // nada, la misma regla que el estado de cuenta; sus abonos siguen en
-    // `paid`.
-    const billable = !isPlanBillable(plan.status)
-      ? 0
-      : // DX-340: suma exacta de las líneas cobrables (regla única).
-        linesTotal(
-          planItems.filter((item) => BILLABLE_STATUSES.has(item.status)),
-        );
+    const run = this.conversionRun();
+    try {
+      return await this.compute(plan, planItems, payments, baseOf, run);
+    } finally {
+      run.deadline.dispose();
+    }
+  }
 
-    let paid = 0;
-    const paymentsWithoutRate: PaymentWithoutRate[] = [];
+  private conversionRun(): ConversionRun {
     // DX-374: un convertidor por cálculo, que lee la fuente de la clínica y
     // las tasas de cada día una sola vez (no una lectura por abono). Con la
     // tasa congelada (DX-375) ni siquiera se usa: solo los abonos anteriores
@@ -253,41 +304,77 @@ export class GetPlanBalanceUseCase {
     // la da por vencida al instante. Lo que no pide tasa (misma moneda, tasa
     // congelada) no pasa por aquí y sigue sumando.
     const never = <T>(): Promise<T> => new Promise<T>(() => undefined);
-    const convert: AmountConverter = {
-      execute: (input) =>
-        deadline.timedOut ? never() : memoized.execute(input),
-      quote: (input) => (deadline.timedOut ? never() : memoized.quote(input)),
-    };
-    try {
-      for (const payment of payments) {
-        // IMP-4a/4b: cada abono se convierte por su propio importe (nunca
-        // reutilizando un `rateUsed`, que depende del importe), y uno sin tasa
-        // no tumba el saldo: no cuenta en `paid` y se informa «sin tasa»
-        // (`paymentsCount` no cambia). Cualquier otro fallo se propaga.
-        const base = baseOf.get(payment.id);
-        const converted =
-          base ??
-          (await deadline.race(
-            paymentAmountIn(convert, payment, plan.currency),
-          ));
-        if (converted === null || converted === CONVERSION_TIMED_OUT) {
-          paymentsWithoutRate.push({
-            paymentId: payment.id,
-            amount: payment.amount,
-            currency: payment.currency,
-            paidOn: payment.paidOn,
-          });
-          continue;
+    // DX-472: un proveedor que ya dijo que no contesta (el plazo de la llamada
+    // pasó, o sigue en su caché negativa) es lo mismo: el saldo avisa de que
+    // se reintente; no es un abono «sin tasa».
+    const guarded = async <T>(work: () => Promise<T>): Promise<T> => {
+      if (deadline.timedOut) return never();
+      try {
+        return await work();
+      } catch (error) {
+        if (!(error instanceof ExchangeRateProviderNotRespondingError)) {
+          throw error;
         }
-        paid += converted;
+        deadline.expire();
+        return never();
       }
-    } finally {
-      deadline.dispose();
+    };
+    return {
+      deadline,
+      convert: {
+        execute: (input) => guarded(() => memoized.execute(input)),
+        quote: (input) => guarded(() => memoized.quote(input)),
+      },
+    };
+  }
+
+  private async compute(
+    plan: PlanBalanceInput['plan'],
+    planItems: PlanBalanceInput['items'],
+    payments: PlanPayment[],
+    baseOf: ReadonlyMap<string, number>,
+    { convert, deadline }: ConversionRun,
+    knownCreditMovements?: number,
+  ): Promise<GetPlanBalanceResult> {
+    // DX-109 (BE-001): un plan no cobrable (rechazado o cancelado) no debe
+    // nada, la misma regla que el estado de cuenta; sus abonos siguen en
+    // `paid`.
+    const billable = !isPlanBillable(plan.status)
+      ? 0
+      : // DX-340: suma exacta de las líneas cobrables (regla única).
+        linesTotal(
+          planItems.filter((item) => BILLABLE_STATUSES.has(item.status)),
+        );
+
+    let paid = 0;
+    const paymentsWithoutRate: PaymentWithoutRate[] = [];
+    let rateProviderTimedOut = false;
+    for (const payment of payments) {
+      // IMP-4a/4b: cada abono se convierte por su propio importe (nunca
+      // reutilizando un `rateUsed`, que depende del importe), y uno sin tasa
+      // no tumba el saldo: no cuenta en `paid` y se informa «sin tasa»
+      // (`paymentsCount` no cambia). Cualquier otro fallo se propaga.
+      const base = baseOf.get(payment.id);
+      const converted =
+        base ??
+        (await deadline.race(paymentAmountIn(convert, payment, plan.currency)));
+      if (converted === CONVERSION_TIMED_OUT) rateProviderTimedOut = true;
+      if (converted === null || converted === CONVERSION_TIMED_OUT) {
+        paymentsWithoutRate.push({
+          paymentId: payment.id,
+          amount: payment.amount,
+          currency: payment.currency,
+          paidOn: payment.paidOn,
+        });
+        continue;
+      }
+      paid += converted;
     }
 
-    const creditMovements = this.credit
-      ? round2(await this.credit.netCredit(plan.id, plan.currency))
-      : 0;
+    const creditMovements = round2(
+      knownCreditMovements ??
+        (this.credit ? await this.credit.netCredit(plan.id, plan.currency) : 0),
+    );
     return {
       planCurrency: plan.currency,
       billable,
@@ -296,7 +383,7 @@ export class GetPlanBalanceUseCase {
       balance: round2(billable - paid - creditMovements),
       paymentsCount: payments.length,
       paymentsWithoutRate,
-      rateProviderTimedOut: deadline.timedOut,
+      rateProviderTimedOut,
     };
   }
 }

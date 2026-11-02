@@ -1,5 +1,8 @@
 import { ConfigService } from '@nestjs/config';
-import { ExchangeRateUnavailableError } from '../../domain/ports/exchange-rate-provider.port';
+import {
+  ExchangeRateProviderNotRespondingError,
+  ExchangeRateUnavailableError,
+} from '../../domain/ports/exchange-rate-provider.port';
 import {
   OpenExchangeRatesProvider,
   PROVIDER_TIMEOUT_MS,
@@ -60,8 +63,16 @@ describe('OpenExchangeRatesProvider (SEC-054)', () => {
       .fetchRates('2099-01-01')
       .catch((e: unknown) => e)) as Error;
     expect(error).toBeInstanceOf(ExchangeRateUnavailableError);
+    expect(error).not.toBeInstanceOf(ExchangeRateProviderNotRespondingError);
     expect(error.message).toContain('400');
     expect(error.message).not.toContain('secreto');
+  });
+
+  it('DX-472: un 5xx es que el proveedor no contesta, no que falte la tasa', async () => {
+    fetchMock.mockResolvedValue(new Response('caído', { status: 503 }));
+    await expect(
+      makeProvider().fetchRates('2026-10-01'),
+    ).rejects.toBeInstanceOf(ExchangeRateProviderNotRespondingError);
   });
 
   it('el tiempo agotado (o la red) es «sin tasa», sin el mensaje del error', async () => {
@@ -74,7 +85,7 @@ describe('OpenExchangeRatesProvider (SEC-054)', () => {
     const error = (await makeProvider()
       .fetchRates('2026-10-01')
       .catch((e: unknown) => e)) as Error;
-    expect(error).toBeInstanceOf(ExchangeRateUnavailableError);
+    expect(error).toBeInstanceOf(ExchangeRateProviderNotRespondingError);
     expect(error.message).toContain('TimeoutError');
     expect(error.message).not.toContain('aborted');
   });

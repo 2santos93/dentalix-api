@@ -15,6 +15,8 @@ import type {
   StatementClinic,
 } from '../../domain/entities/account-statement.entity';
 import { computeAccountStatement } from '../compute-account-statement';
+import { GetPlanBalanceUseCase } from '../../../payments/application/use-cases/get-plan-balance.use-case';
+import type { AccountStatementData } from '../../domain/ports/account-statement-repository.port';
 import { PATIENT_NOT_FOUND_MESSAGE } from '../../../patients/application/assert-patient-in-clinic';
 import {
   ACCOUNT_STATEMENT_CLOCK,
@@ -68,6 +70,7 @@ export class GetFamilyAccountStatementUseCase {
     private readonly family: StatementFamilyRepository,
     @Inject(ACCOUNT_STATEMENT_CLOCK)
     private readonly now: AccountStatementClock,
+    private readonly getPlanBalance: GetPlanBalanceUseCase,
   ) {}
 
   async execute(payerPatientId: string): Promise<FamilyAccountStatement> {
@@ -83,13 +86,22 @@ export class GetFamilyAccountStatementUseCase {
     };
     const members: FamilyStatementMember[] = [];
     const totals = new Map<string, Record<(typeof FIELDS)[number], number>>();
+    const loaded: { ref: (typeof refs)[number]; data: AccountStatementData }[] =
+      [];
     for (const ref of refs) {
       const data = await this.repo.load(ref.id);
       // Retirado entre las dos lecturas: no cuenta.
-      if (!data) continue;
+      if (data) loaded.push({ ref, data });
+    }
+    // DX-472: los saldos de toda la familia comparten el plazo del proveedor.
+    const planBalances = await this.getPlanBalance.computeMany(
+      loaded.flatMap(({ data }) => data.planBalances),
+    );
+    for (const { ref, data } of loaded) {
       clinic = data.clinic;
       const { summary } = computeAccountStatement(data.snapshot, {
         today: issuedAt,
+        planBalances,
       });
       const rows = summary.map((s) => ({
         currency: s.currency,
@@ -133,6 +145,9 @@ export class GetFamilyAccountStatementUseCase {
           balance: sum.balance / 100,
           overdueAmount: sum.overdueAmount / 100,
         })),
+      rateProviderTimedOut: [...planBalances.values()].some(
+        (b) => b.rateProviderTimedOut,
+      ),
     };
   }
 }

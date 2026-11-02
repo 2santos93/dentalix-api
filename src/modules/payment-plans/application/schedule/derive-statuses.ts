@@ -22,11 +22,17 @@ export interface DerivedTramo extends ScheduleTramo {
  *   PENDING  -> future and covered == 0
  * `today` is passed in (never read from the clock) so callers/tests are
  * deterministic; compare on UTC calendar date to match GetPlanBalanceUseCase.
+ *
+ * DX-472: `paidIncomplete` = el proveedor de tasas no respondió y `paidTotal`
+ * se queda corto por lo que no se pudo convertir. No se sabe qué tramos cubre
+ * eso, así que ninguno sale OVERDUE (quedan PARTIAL o PENDING) hasta que el
+ * saldo vuelva a estar completo.
  */
 export function deriveStatuses(
   tramos: ScheduleTramo[],
   paidTotal: number,
   today: Date,
+  { paidIncomplete = false }: { paidIncomplete?: boolean } = {},
 ): DerivedTramo[] {
   const todayDay = today.toISOString().slice(0, 10);
   let remaining = round2(paidTotal);
@@ -35,7 +41,8 @@ export function deriveStatuses(
     const covered = round2(Math.min(Math.max(remaining, 0), tramo.amount));
     remaining = round2(remaining - covered);
 
-    const isPastDue = tramo.dueDate.toISOString().slice(0, 10) < todayDay;
+    const isPastDue =
+      !paidIncomplete && tramo.dueDate.toISOString().slice(0, 10) < todayDay;
     let status: InstallmentStatus;
     if (covered >= tramo.amount) {
       status = 'PAID';

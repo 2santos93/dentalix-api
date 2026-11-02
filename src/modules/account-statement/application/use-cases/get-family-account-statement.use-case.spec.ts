@@ -10,6 +10,8 @@ import type {
 } from '../../domain/ports/account-statement-repository.port';
 import type { StatementFamilyRepository } from '../../domain/ports/statement-family-repository.port';
 import type { StatementPaymentRow } from '../../domain/entities/account-statement.entity';
+import { toCents } from '../../../../shared/money/money';
+import type { GetPlanBalanceUseCase } from '../../../payments/application/use-cases/get-plan-balance.use-case';
 
 const NOW = new Date('2026-03-01T15:00:00.000Z');
 
@@ -38,6 +40,11 @@ function payment(
   };
 }
 
+// Sin saldos conocidos el cálculo usa sus propias cifras (camino de la cartera).
+const noPlanBalances = {
+  computeMany: () => Promise.resolve(new Map()),
+} as unknown as GetPlanBalanceUseCase;
+
 function statement(
   id: string,
   firstName: string,
@@ -54,6 +61,7 @@ function statement(
       docTypeLabel: null,
       docNumber: `doc-${id}`,
     },
+    planBalances: [],
     snapshot: {
       plans: plans.map((p) => ({
         id: p.id,
@@ -147,7 +155,12 @@ function makeRepos() {
 describe('GetFamilyAccountStatementUseCase (DX-203)', () => {
   it('suma los saldos de sus pacientes con subtotal por paciente y cuadra al céntimo con los individuales', async () => {
     const { repo, family } = makeRepos();
-    const uc = new GetFamilyAccountStatementUseCase(repo, family, () => NOW);
+    const uc = new GetFamilyAccountStatementUseCase(
+      repo,
+      family,
+      () => NOW,
+      noPlanBalances,
+    );
     const out = await uc.execute('mother');
 
     expect(out.payer).toEqual({
@@ -178,6 +191,7 @@ describe('GetFamilyAccountStatementUseCase (DX-203)', () => {
       () => NOW,
       family,
       new FixedDocumentTypeNamesReader(),
+      noPlanBalances,
     );
     const actor = { userId: 'u-1', role: ClinicRole.ADMIN };
     const byCurrency = new Map<string, number>();
@@ -185,13 +199,13 @@ describe('GetFamilyAccountStatementUseCase (DX-203)', () => {
       for (const s of (await individual.execute(id, {}, actor)).summary) {
         byCurrency.set(
           s.currency,
-          (byCurrency.get(s.currency) ?? 0) + Math.round(s.balance * 100),
+          (byCurrency.get(s.currency) ?? 0) + toCents(s.balance),
         );
       }
     }
-    expect(
-      out.totals.map((t) => [t.currency, Math.round(t.balance * 100)]),
-    ).toEqual([...byCurrency.entries()].sort());
+    expect(out.totals.map((t) => [t.currency, toCents(t.balance)])).toEqual(
+      [...byCurrency.entries()].sort(),
+    );
     expect(out.totals).toEqual([
       {
         currency: 'COP',
@@ -220,6 +234,7 @@ describe('GetFamilyAccountStatementUseCase (DX-203)', () => {
       repo,
       family,
       () => NOW,
+      noPlanBalances,
     ).execute('mother');
     const json = JSON.stringify(out);
     expect(json).not.toContain('doc-');
@@ -230,9 +245,12 @@ describe('GetFamilyAccountStatementUseCase (DX-203)', () => {
   it('un pagador que no es de esta clínica: 404', async () => {
     const { repo, family } = makeRepos();
     await expect(
-      new GetFamilyAccountStatementUseCase(repo, family, () => NOW).execute(
-        'otra',
-      ),
+      new GetFamilyAccountStatementUseCase(
+        repo,
+        family,
+        () => NOW,
+        noPlanBalances,
+      ).execute('otra'),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 });

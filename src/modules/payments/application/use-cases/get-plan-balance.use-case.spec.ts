@@ -8,12 +8,15 @@ import { GetPlanBalanceUseCase } from './get-plan-balance.use-case';
 import { BALANCE_CONVERSION_BUDGET_MS } from '../conversion-deadline';
 import { InMemoryPaymentRepository } from './__fixtures__/in-memory-payment.repository';
 import { GetTreatmentPlanUseCase } from '../../../treatment-plans/application/use-cases/get-treatment-plan.use-case';
-import { ExchangeRateUnavailableError } from '../../../exchange/domain/ports/exchange-rate-provider.port';
+import {
+  ExchangeRateProviderNotRespondingError,
+  ExchangeRateUnavailableError,
+} from '../../../exchange/domain/ports/exchange-rate-provider.port';
 import { ConvertAmountUseCase } from '../../../exchange/application/use-cases/convert-amount.use-case';
 import { TreatmentPlanDetail } from '../../../treatment-plans/domain/entities/treatment-plan.entity';
 import { TreatmentPlanItem } from '../../../treatment-plans/domain/entities/treatment-plan-item.entity';
 import { PLAN_WITHOUT_OPTIONS } from '../../../treatment-plans/application/use-cases/__fixtures__/in-memory-treatment-plan.repository';
-import { round2 } from '../../../../shared/money/money';
+import { round2, toCents } from '../../../../shared/money/money';
 
 class FakeGetTreatmentPlanUseCase {
   public plan: TreatmentPlanDetail | null = null;
@@ -67,6 +70,8 @@ class FakeConvertAmountUseCase {
   public readonly rateUnavailableFrom = new Set<string>();
   /** Currencies (as `from`) whose conversion never answers: a slow provider (DX-054). */
   public readonly hangingFrom = new Set<string>();
+  /** Currencies (as `from`) whose provider is known not to answer (DX-472). */
+  public readonly notRespondingFrom = new Set<string>();
   /** units of `from` currency per 1 USD-equivalent `to`; mirrors
    * `rates[from]` in the real use case. */
   private readonly unitsPerTarget: Record<string, number> = { COP: 4000 };
@@ -88,6 +93,11 @@ class FakeConvertAmountUseCase {
     this.calls.push(input);
     if (this.hangingFrom.has(input.from)) {
       return new Promise(() => undefined);
+    }
+    if (this.notRespondingFrom.has(input.from)) {
+      return Promise.reject(
+        new ExchangeRateProviderNotRespondingError('sin respuesta'),
+      );
     }
     if (this.infraFailingFrom.has(input.from)) {
       return Promise.reject(
@@ -550,6 +560,78 @@ describe('GetPlanBalanceUseCase', () => {
       ]);
     });
 
+    it('computeMany: varios planes comparten UN plazo y solo avisa el que se quedó sin convertir (DX-472)', async () => {
+      const { fakeConvert, uc } = makeUseCase();
+      fakeConvert.hangingFrom.add('VES');
+      const payment = (id: string, currency: string, amount: number) => ({
+        id,
+        amount,
+        currency,
+        paidOn: '2026-03-05',
+        exchangeRateCurrency: null,
+        frozenRate: null,
+      });
+      const input = (
+        id: string,
+        payments: ReturnType<typeof payment>[],
+        creditMovements = 0,
+      ) => ({
+        plan: { id, status: TreatmentPlanStatus.DRAFT, currency: 'USD' },
+        items: [
+          {
+            status: TreatmentPlanItemStatus.ACCEPTED,
+            price: 500,
+            discount: 0,
+          },
+        ],
+        payments,
+        baseOf: new Map<string, number>(),
+        creditMovements,
+      });
+
+      const pending = uc.computeMany([
+        input('uno', [payment('a', 'VES', 3600)]),
+        input('dos', [payment('b', 'VES', 7200)]),
+        input('tres', [payment('c', 'USD', 100)], 50),
+      ]);
+      await jest.advanceTimersByTimeAsync(BALANCE_CONVERSION_BUDGET_MS);
+      const balances = await pending;
+
+      expect(balances.get('uno')).toMatchObject({
+        paid: 0,
+        balance: 500,
+        rateProviderTimedOut: true,
+      });
+      expect(balances.get('dos')).toMatchObject({
+        paid: 0,
+        rateProviderTimedOut: true,
+      });
+      expect(balances.get('tres')).toMatchObject({
+        paid: 100,
+        creditMovements: 50,
+        balance: 350,
+        rateProviderTimedOut: false,
+      });
+    });
+
+    it('un proveedor que ya se sabe que no contesta avisa al instante, como un plazo vencido (DX-472)', async () => {
+      const { repo, fakeGetPlan, fakeConvert, uc } = makeUseCase();
+      fakeConvert.notRespondingFrom.add('VES');
+      fakeGetPlan.plan = makePlan({ currency: 'USD' });
+      repo.seedPayment({
+        treatmentPlanId: 'plan-1',
+        amount: 3600,
+        currency: 'VES',
+        paidAt: new Date('2026-03-05T12:00:00.000Z'),
+      });
+
+      const result = await uc.execute('plan-1');
+
+      expect(result.paid).toBe(0);
+      expect(result.rateProviderTimedOut).toBe(true);
+      expect(result.paymentsWithoutRate).toHaveLength(1);
+    });
+
     it('el plazo es de todo el saldo, no por abono: un segundo abono lento no lo alarga', async () => {
       const { repo, fakeGetPlan, fakeConvert, uc } = makeUseCase();
       fakeConvert.hangingFrom.add('COP');
@@ -835,10 +917,8 @@ describe('GetPlanBalanceUseCase', () => {
 
       const result = await uc.executeWithItems('plan-1');
 
-      const sum = result.items.reduce((s, i) => s + i.paid * 100, 0);
-      expect(Math.round(sum + result.unallocated * 100)).toBe(
-        Math.round(result.paid * 100),
-      );
+      const sum = result.items.reduce((s, i) => s + toCents(i.paid), 0);
+      expect(sum + toCents(result.unallocated)).toBe(toCents(result.paid));
       expect(result.paid).toBe(159.9);
     });
 

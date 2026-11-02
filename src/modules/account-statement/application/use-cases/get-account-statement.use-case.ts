@@ -8,6 +8,7 @@ import { ACCOUNT_STATEMENT_REPOSITORY } from '../../domain/ports/account-stateme
 import type { AccountStatementRepository } from '../../domain/ports/account-statement-repository.port';
 import { AccountStatement } from '../../domain/entities/account-statement.entity';
 import { computeAccountStatement } from '../compute-account-statement';
+import { GetPlanBalanceUseCase } from '../../../payments/application/use-cases/get-plan-balance.use-case';
 import type { VoidActor } from '../../../payments/domain/void-window';
 import { parseCivilDate } from '../../../../shared/time/civil-day';
 import { PATIENT_NOT_FOUND_MESSAGE } from '../../../patients/application/assert-patient-in-clinic';
@@ -56,6 +57,7 @@ export class GetAccountStatementUseCase {
     @Inject(STATEMENT_FAMILY_REPOSITORY)
     private readonly family: StatementFamilyRepository,
     private readonly documentTypeNames: DocumentTypeNamesReader,
+    private readonly getPlanBalance: GetPlanBalanceUseCase,
   ) {}
 
   /** `actor` (del token) solo decide el `canVoid` de cada movimiento. */
@@ -84,11 +86,15 @@ export class GetAccountStatementUseCase {
     }
 
     const issuedAt = this.now();
+    const planBalances = await this.getPlanBalance.computeMany(
+      data.planBalances,
+    );
     const computed = computeAccountStatement(data.snapshot, {
       today: issuedAt,
       voidActor: actor,
       movementsFrom: from,
       movementsTo: to,
+      planBalances,
     });
 
     return {
@@ -106,6 +112,7 @@ export class GetAccountStatementUseCase {
       // DX-203: un menor o un paciente sin email, a nombre de su responsable.
       addressee: statementAddressee(data.patient, notice, issuedAt),
       range: { from: input.from ?? null, to: input.to ?? null },
+      rateProviderTimedOut: computed.plans.some((p) => p.rateProviderTimedOut),
       ...computed,
     };
   }

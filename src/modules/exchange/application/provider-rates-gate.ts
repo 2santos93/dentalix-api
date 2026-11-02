@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import {
   ExchangeRateBudgetExceededError,
+  ExchangeRateProviderNotRespondingError,
   ExchangeRateUnavailableError,
 } from '../domain/ports/exchange-rate-provider.port';
 import { EXCHANGE_RATE_CLOCK } from './use-cases/manual-exchange-rates.use-cases';
@@ -40,6 +41,13 @@ function forget<K>(map: Map<K, unknown>, key: K): void {
 /** Las tasas del día si ya están guardadas; `null` si no. */
 export type StoredRates = () => Promise<Record<string, number> | null>;
 
+/**
+ * DX-472: un proveedor que no contestó se vuelve a probar antes que un día que
+ * no tiene: el «Reintentar» del saldo tiene que poder completarlo. Nunca más
+ * que `negativeTtlMs`.
+ */
+export const NOT_RESPONDING_NEGATIVE_TTL_MS = 60_000;
+
 /** Por encima de esto se purgan las entradas caducadas al escribir. */
 const SWEEP_THRESHOLD = 1000;
 
@@ -59,7 +67,8 @@ const sameCaller = (a: ProviderRatesCaller, b: ProviderRatesCaller) =>
  *    OTRA clínica, quien esperaba lo intenta con el suyo;
  * 2. caché negativa compartida: un día que el proveedor no tuvo o en que
  *    falló (`ExchangeRateUnavailableError`) no se pide otra vez durante
- *    `negativeTtlMs`, para ninguna clínica. La precarga no la lee (reintenta
+ *    `negativeTtlMs` (`NOT_RESPONDING_NEGATIVE_TTL_MS` si no contestó, y se
+ *    repite ese error), para ninguna clínica. La precarga no la lee (reintenta
  *    con su propio backoff) y un acierto la limpia;
  * 3. presupuesto (SEC-058, `ProviderRatesBudget`): los cupos de la clínica
  *    (por hora, por día o el de clínica nueva, y el de su barrido) y el
@@ -78,7 +87,10 @@ export class ProviderRatesGate {
     string,
     { caller: ProviderRatesCaller; call: Promise<Record<string, number>> }
   >();
-  private readonly unavailableUntil = new Map<string, number>();
+  private readonly unavailableUntil = new Map<
+    string,
+    { until: number; notResponding: boolean }
+  >();
 
   constructor(
     @Inject(PROVIDER_RATES_LIMITS)
@@ -148,7 +160,10 @@ export class ProviderRatesGate {
         error instanceof ExchangeRateUnavailableError &&
         !(error instanceof ExchangeRateBudgetExceededError)
       ) {
-        this.rememberUnavailable(date);
+        this.rememberUnavailable(
+          date,
+          error instanceof ExchangeRateProviderNotRespondingError,
+        );
       }
       throw error;
     } finally {
@@ -157,24 +172,31 @@ export class ProviderRatesGate {
   }
 
   private assertNotKnownUnavailable(date: string, now: number): void {
-    const until = this.unavailableUntil.get(date);
-    if (until === undefined) return;
-    if (until > now) {
-      throw new ExchangeRateUnavailableError(
-        `El proveedor no dio las tasas del ${date} hace poco; no se vuelve a pedir hasta ${new Date(until).toISOString()}`,
-      );
+    const known = this.unavailableUntil.get(date);
+    if (known === undefined) return;
+    if (known.until > now) {
+      const message = `El proveedor no dio las tasas del ${date} hace poco; no se vuelve a pedir hasta ${new Date(known.until).toISOString()}`;
+      throw known.notResponding
+        ? new ExchangeRateProviderNotRespondingError(message)
+        : new ExchangeRateUnavailableError(message);
     }
     forget(this.unavailableUntil, date);
   }
 
-  private rememberUnavailable(date: string): void {
+  private rememberUnavailable(date: string, notResponding: boolean): void {
     const now = this.now().getTime();
     if (this.unavailableUntil.size >= SWEEP_THRESHOLD) {
-      for (const [day, until] of this.unavailableUntil) {
+      for (const [day, { until }] of this.unavailableUntil) {
         if (until <= now) forget(this.unavailableUntil, day);
       }
     }
-    this.unavailableUntil.set(date, now + this.limits.negativeTtlMs);
+    const ttl = notResponding
+      ? Math.min(NOT_RESPONDING_NEGATIVE_TTL_MS, this.limits.negativeTtlMs)
+      : this.limits.negativeTtlMs;
+    this.unavailableUntil.set(date, {
+      until: now + ttl,
+      notResponding,
+    });
   }
 
   /** Gasta una llamada de todos los cupos que tocan, o lanza el 429 interno. */
