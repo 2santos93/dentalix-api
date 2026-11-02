@@ -1,5 +1,6 @@
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { ClosingQueueUseCases } from '../../closing-queue/application/closing-queue.use-cases';
+import { ListDueRecallsUseCase } from '../../recall/application/use-cases/recall.use-cases';
 import { ListInventoryItemsUseCase } from '../../inventory/application/use-cases/list-inventory-items.use-case';
 import { CountAnamnesisInboxUseCase } from '../../medical-history-submissions/application/use-cases/anamnesis-review.use-cases';
 import { GetReceivablesAgingUseCase } from '../../receivables/application/use-cases/get-receivables-aging.use-case';
@@ -40,6 +41,7 @@ export function workQueueSources(deps: {
   followUp: ListPendingFollowUpUseCase;
   visits: PlanVisitsService;
   waitlist: ListWaitlistUseCase;
+  recall: ListDueRecallsUseCase;
   receivables: GetReceivablesAgingUseCase;
   inventory: ListInventoryItemsUseCase;
   tenantContext: TenantContextService;
@@ -71,6 +73,10 @@ export function workQueueSources(deps: {
     // GET /waitlist (OPEN por defecto) → total.
     WAITLIST: async () => ({
       count: (await deps.waitlist.execute({ page: 1, pageSize: 1 })).total,
+    }),
+    // GET /recall/due/count (DX-015): vencidos sin cita, sin filtros.
+    RECALL: async () => ({
+      count: (await deps.recall.execute({ page: 1, pageSize: 1 })).total,
     }),
     // GET /receivables/aging/summary → totals. Las monedas no se suman: un
     // paciente puede deber en dos, así que el recuento es el mayor de cada

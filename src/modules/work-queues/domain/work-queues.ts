@@ -14,6 +14,7 @@ export const WORK_QUEUE_KEYS = [
   'QUOTE_FOLLOW_UP',
   'ACCEPTED_UNSCHEDULED',
   'WAITLIST',
+  'RECALL',
   'RECEIVABLES',
   'LOW_STOCK',
 ] as const;
@@ -43,6 +44,8 @@ export const WORK_QUEUE_ROLES: Record<WorkQueueKey, readonly ClinicRole[]> = {
   ACCEPTED_UNSCHEDULED: [ClinicRole.ADMIN, ClinicRole.RECEPTION],
   // GET /waitlist (total) — APPOINTMENT_ROLES; lo agenda el mostrador.
   WAITLIST: [ClinicRole.ADMIN, ClinicRole.RECEPTION],
+  // GET /recall/due/count — RECALL_LIST_ROLES (DX-015).
+  RECALL: [ClinicRole.ADMIN, ClinicRole.RECEPTION],
   // GET /receivables/aging/summary — RECEIVABLES_ROLES.
   RECEIVABLES: [ClinicRole.ADMIN, ClinicRole.RECEPTION],
   // GET /inventory/items?lowStockOnly (total) — INVENTORY_ROLES.

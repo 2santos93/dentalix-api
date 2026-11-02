@@ -52,6 +52,7 @@ const EXPECTED_KEYS: Record<ClinicRole, WorkQueueKey[]> = {
     'QUOTE_FOLLOW_UP',
     'ACCEPTED_UNSCHEDULED',
     'WAITLIST',
+    'RECALL',
     'RECEIVABLES',
   ],
   ASSISTANT: ['ANAMNESIS_REVIEW', 'LOW_STOCK'],
@@ -116,6 +117,8 @@ describe('«Mi día»: GET /work-queues/summary (DX-503, e2e)', () => {
           .total as number;
       case 'WAITLIST':
         return (await body('/waitlist?pageSize=1')).total as number;
+      case 'RECALL':
+        return (await body('/recall/due/count')).total as number;
       case 'RECEIVABLES': {
         const totals = (await body('/receivables/aging/summary')).totals as {
           patients: number;
@@ -218,6 +221,23 @@ describe('«Mi día»: GET /work-queues/summary (DX-503, e2e)', () => {
       // Lista de espera abierta.
       await raw.appointmentWaitlistEntry.create({
         data: { tenantId, locationId, patientId },
+      });
+      // Recall (DX-015): otro paciente, sin citas, con el control de hace un
+      // año (cada 6 meses): vencido y sin cita, de esta sede.
+      const recallPatient = await seed.patient(
+        `Recall ${locationId.slice(0, 4)}-${i}`,
+      );
+      await raw.patientRecall.create({
+        data: {
+          tenantId,
+          patientId: recallPatient,
+          kind: 'CHECKUP',
+          intervalMonths: 6,
+          lastDoneAt: new Date(`${addCivilDays(today(), -365)}T00:00:00Z`),
+          locationId,
+          createdById: dentistId,
+          updatedById: dentistId,
+        },
       });
       // Bajo stock: mínimo 5, sin existencias.
       await raw.inventoryItem.create({
@@ -409,7 +429,7 @@ describe('«Mi día»: GET /work-queues/summary (DX-503, e2e)', () => {
       ).expect(200)
     ).body as WorkQueuesSummary;
     expect(body.items.map((i) => i.key)).toEqual(['ANAMNESIS_REVIEW']);
-    await get(a, ClinicRole.ADMIN, `${ROUTE}?keys=RECALL`).expect(400);
+    await get(a, ClinicRole.ADMIN, `${ROUTE}?keys=NO_EXISTE`).expect(400);
   });
 
   it('si una lista falla, sale ERROR y las demás llegan con su número', async () => {
@@ -429,6 +449,7 @@ describe('«Mi día»: GET /work-queues/summary (DX-503, e2e)', () => {
         'CLOSING_QUEUE',
         'ACCEPTED_UNSCHEDULED',
         'WAITLIST',
+        'RECALL',
         'RECEIVABLES',
       ]);
       for (const item of rest) {

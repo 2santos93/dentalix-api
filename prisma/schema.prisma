@@ -139,6 +139,8 @@ model Tenant {
   clinicalNoteTemplates                   ClinicalNoteTemplate[]
   // DX-150: cobranza (notas y compromisos de pago).
   collectionNotes                         CollectionNote[]
+  patientRecalls                          PatientRecall[]
+  recallContacts                          RecallContact[]
   // DX-203: responsables de pago y avisos de los pacientes.
   patientResponsibleParties               PatientResponsibleParty[]
   // DX-153: pagadores de la clínica y coberturas de sus pacientes.
@@ -421,6 +423,9 @@ model Location {
   paymentReceipts            PaymentReceipt[]
   collectionNotes            CollectionNote[]
   paymentPromises            PaymentPromise[]
+  // DX-015: recalls fijados en la sede y contactos registrados en ella.
+  patientRecalls             PatientRecall[]
+  recallContacts             RecallContact[]
   // DX-204: sede donde se dio el descuento de un ítem de plan.
   planItemDiscounts          TreatmentPlanItem[]         @relation("TreatmentPlanItemDiscountLocation")
   // DX-105: ítems de plan cuyo precio se resolvió con esta sede.
@@ -713,6 +718,9 @@ model Patient {
   ledger                      PatientLedger?
   collectionNotes             CollectionNote[]
   paymentPromises             PaymentPromise[]
+  // DX-015: sus recalls (uno por tipo) y los contactos de recall.
+  recalls                     PatientRecall[]
+  recallContacts              RecallContact[]
   // DX-128: enlaces de baja de los recordatorios enviados al paciente.
   reminderOptOutMatchWarnings ReminderOptOutMatchWarning[]
   reminderOptOutLinks         ReminderOptOutLink[]
@@ -1343,6 +1351,8 @@ model Appointment {
   // DX-439: pendientes de cierre descartados de esta cita.
   closingQueueDismissals       ClosingQueueDismissal[]
   appointmentReservedOverrides AppointmentReservedOverride[]
+  // DX-015: contactos de recall que acabaron en esta cita.
+  recallContacts               RecallContact[]
 
   // FK COMPUESTA a propósito: exige que el paciente sea del MISMO tenant.
   // Antes era `[patientId] -> [id]`, que solo garantizaba "el paciente existe
@@ -3602,6 +3612,9 @@ enum AuditResourceType {
   INVENTORY_MOVEMENT
   // DX-211: sillones de cada sede (alta, edición, orden, desactivación).
   CHAIR
+  // DX-015: recall del paciente (intervalo, desactivación) y sus contactos.
+  PATIENT_RECALL
+  RECALL_CONTACT
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o
@@ -6432,4 +6445,95 @@ model ContingencyAgendaSnapshot {
 
   @@id([tenantId, locationId])
   @@map("contingency_agenda_snapshots")
+}
+
+/// DX-015: tipo de recall. Lista cerrada en esta porción (higiene y control);
+/// los tipos configurables por clínica con disparadores son una porción aparte.
+enum RecallKind {
+  HYGIENE
+  CHECKUP
+}
+
+/// DX-015: por dónde se contactó al paciente de la lista de recall.
+enum RecallContactChannel {
+  CALL
+  WHATSAPP_LINK
+  EMAIL
+  IN_PERSON
+}
+
+/// DX-015: desenlace del contacto. Vocabulario completo de DX-465 desde ya;
+/// `BOOKED` exige la cita (CHECK en la BD).
+enum RecallContactOutcome {
+  NO_ANSWER
+  LEFT_MESSAGE
+  CALL_BACK
+  WILL_BOOK
+  DECLINED
+  WRONG_NUMBER
+  BOOKED
+}
+
+/// DX-015: recall del paciente, uno por tipo. El vencimiento NO se guarda: es
+/// MAX(lastDoneAt, día de la última cita atendida) + intervalMonths, calculado
+/// al leer (`recall-rules.ts` y la consulta de la lista).
+model PatientRecall {
+  id             String     @id @default(uuid()) @db.Uuid
+  tenantId       String     @db.Uuid
+  patientId      String     @db.Uuid
+  kind           RecallKind
+  /// 1–36 (CHECK en la BD).
+  intervalMonths Int
+  /// Día civil de la última limpieza/control que fijó el clínico.
+  lastDoneAt     DateTime   @db.Date
+  /// Sede donde se fijó: la del recall si el paciente aún no tiene citas atendidas.
+  locationId     String     @db.Uuid
+  active         Boolean    @default(true)
+  /// No sale en la lista hasta ese día (p. ej. «tratamiento en curso»).
+  disabledUntil  DateTime?  @db.Date
+  disabledReason String?
+  createdById    String     @db.Uuid
+  updatedById    String     @db.Uuid
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patient  Patient         @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "patient_recalls_patient_fkey")
+  location Location        @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "patient_recalls_location_fkey")
+  contacts RecallContact[]
+
+  @@unique([tenantId, patientId, kind], map: "patient_recalls_tenant_patient_kind_key")
+  /// Destino de la FK compuesta de recall_contacts.
+  @@unique([tenantId, id], map: "patient_recalls_tenant_id_key")
+  @@index([tenantId, locationId], map: "patient_recalls_tenant_location_idx")
+  @@map("patient_recalls")
+}
+
+/// DX-015: contacto de recall (append-only, como `collection_notes`).
+model RecallContact {
+  id            String               @id @default(uuid()) @db.Uuid
+  tenantId      String               @db.Uuid
+  recallId      String               @db.Uuid
+  patientId     String               @db.Uuid
+  /// Sede del paciente al registrarlo (la misma que usa la lista).
+  locationId    String?              @db.Uuid
+  channel       RecallContactChannel
+  outcome       RecallContactOutcome
+  /// ≤ 280, sin datos clínicos; nunca va a logs ni a la auditoría.
+  note          String?
+  /// Obligatoria con BOOKED (CHECK en la BD).
+  appointmentId String?              @db.Uuid
+  authorId      String               @db.Uuid
+  /// La pone el servidor de BD (trigger).
+  createdAt     DateTime             @default(now())
+
+  tenant      Tenant        @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  recall      PatientRecall @relation(fields: [tenantId, recallId], references: [tenantId, id], onDelete: Restrict, map: "recall_contacts_recall_fkey")
+  patient     Patient       @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "recall_contacts_patient_fkey")
+  location    Location?     @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "recall_contacts_location_fkey")
+  appointment Appointment?  @relation(fields: [tenantId, patientId, appointmentId], references: [tenantId, patientId, id], onDelete: Restrict, map: "recall_contacts_appointment_fkey")
+
+  @@index([tenantId, recallId, createdAt(sort: Desc), id(sort: Desc)], map: "recall_contacts_tenant_recall_created_idx")
+  @@index([tenantId, patientId, createdAt(sort: Desc), id(sort: Desc)], map: "recall_contacts_tenant_patient_created_idx")
+  @@map("recall_contacts")
 }
