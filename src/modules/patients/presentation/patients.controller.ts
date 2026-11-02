@@ -115,8 +115,12 @@ import {
   GetDocumentTypeNamesUseCase,
   UpdateDocumentTypeNamesUseCase,
   type DocumentTypeNamesSettings,
+  type DocumentTypeNamesView,
 } from '../application/use-cases/document-type-names.use-cases';
-import { DocumentTypeNamesDto } from './dto/document-type-names.dto';
+import {
+  DocumentTypeNamesDto,
+  DocumentTypeNamesViewDto,
+} from './dto/document-type-names.dto';
 import { DOCUMENT_TYPE_NAMES_FORBIDDEN_MESSAGE } from '../domain/document-type-names';
 import { DocumentTypeNamesReader } from '../domain/ports/document-type-names-repository.port';
 import {
@@ -422,10 +426,12 @@ export class PatientsController {
       'Null = sin nombre local: se usa el genérico. El nombre visible de un ' +
       'documento es la etiqueta del paciente, si no el nombre local de la ' +
       'clínica para su tipo, si no el genérico (R17). La importación de ' +
-      'pacientes reconoce también estos nombres, antes que los genéricos (R19).',
+      'pacientes reconoce también estos nombres, antes que los genéricos (R19). ' +
+      'DX-524: `names` son los de la clínica; `effective`, los que rigen en la ' +
+      'sede activa (los de la sede sobre los de la clínica, por tipo).',
   })
-  @ApiOkResponse({ type: DocumentTypeNamesDto })
-  documentTypeNames(): Promise<DocumentTypeNamesSettings> {
+  @ApiOkResponse({ type: DocumentTypeNamesViewDto })
+  documentTypeNames(): Promise<DocumentTypeNamesView> {
     return this.getDocumentTypeNames.execute();
   }
 

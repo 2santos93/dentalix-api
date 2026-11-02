@@ -343,6 +343,22 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
     expect(doc.acceptance?.integrityOk).toBe(true);
   });
 
+  it('DX-524: el presupuesto usa el nombre de la sede del plan al verlo y al aceptarlo, y los dos hashes coinciden', async () => {
+    names.names.NATIONAL_ID = 'Documento clínica';
+    names.byLocation.set('loc-1', { NATIONAL_ID: 'Documento sede' });
+    names.activeLocationId = 'otra-sede';
+    const { get, accept } = setup();
+    const shown = await get.execute('patient-1', 'plan-1');
+    expect(shown.patient.document).toBe('Documento sede 123');
+    const accepted = await accept.execute(
+      'patient-1',
+      'plan-1',
+      { signerName: 'Ana', signature: PNG, contentHash: shown.contentHash },
+      META,
+    );
+    expect(accepted.patient.document).toBe('Documento sede 123');
+  });
+
   it('an accepted quote prints its stored document without reading the clinic names', async () => {
     const { get, accept } = setup();
     await accept.execute(

@@ -3,6 +3,7 @@ import {
   DOC_TYPE_NAME_FIELD,
   DOC_TYPE_NAME_MAX,
   DocumentTypeNameError,
+  mergeDocumentTypeNames,
   normalizeDocumentTypeName,
   validateDocumentTypeNames,
 } from './document-type-names';
@@ -206,5 +207,38 @@ describe('document-type-names (DX-327, R16)', () => {
       IMPORT_DOC_TYPE_ALIASES.flatMap(([, keys]) => keys).length,
     );
     expect(checked).toBeGreaterThan(0);
+  });
+});
+
+describe('mergeDocumentTypeNames (DX-524)', () => {
+  const clinic = {
+    ...NONE,
+    NATIONAL_ID: 'Documento clínica',
+    PASSPORT: 'Pasaporte clínica',
+  };
+
+  it('sin nombres de sede devuelve los de la clínica', () => {
+    expect(mergeDocumentTypeNames(clinic, null)).toEqual(clinic);
+    expect(mergeDocumentTypeNames(clinic, NONE)).toEqual(clinic);
+  });
+
+  it('la sede gana por tipo y hereda el resto', () => {
+    const location = {
+      ...NONE,
+      NATIONAL_ID: 'Documento sede',
+      TAX_ID: 'Fiscal',
+    };
+    expect(mergeDocumentTypeNames(clinic, location)).toEqual({
+      ...NONE,
+      NATIONAL_ID: 'Documento sede',
+      PASSPORT: 'Pasaporte clínica',
+      TAX_ID: 'Fiscal',
+    });
+  });
+
+  it('un nombre vacío de la sede no tapa el de la clínica', () => {
+    expect(
+      mergeDocumentTypeNames(clinic, { ...NONE, NATIONAL_ID: '' }).NATIONAL_ID,
+    ).toBe('Documento clínica');
   });
 });

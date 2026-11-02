@@ -12,7 +12,27 @@ export const DOCUMENT_TYPE_NAMES_REPOSITORY = Symbol(
  * que sirva de token de Nest.
  */
 export abstract class DocumentTypeNamesReader {
-  abstract get(): Promise<DocumentTypeNames>;
+  /**
+   * DX-524: los nombres que rigen en una sede (los de la sede sobre los de la
+   * clínica, por tipo). `undefined` = la sede activa de la petición (sin ella,
+   * la clínica); `null` = solo los de la clínica; un id = esa sede. Los
+   * documentos pasan SU sede; las pantallas, nada.
+   */
+  abstract get(locationId?: string | null): Promise<DocumentTypeNames>;
+
+  /**
+   * DX-524: los de la clínica y los de todas sus sedes en una lectura, para
+   * resolver después y de forma síncrona los de la sede de un documento
+   * (p. ej. dentro de la transacción de aceptar un presupuesto).
+   */
+  abstract book(): Promise<DocumentTypeNamesBook>;
+}
+
+export interface DocumentTypeNamesBook {
+  /** Solo los de la clínica. */
+  readonly clinic: DocumentTypeNames;
+  /** Los de esa sede sobre los de la clínica; sede sin nombres o `null`: la clínica. */
+  forLocation(locationId: string | null | undefined): DocumentTypeNames;
 }
 
 /** Lectura y escritura de los cinco nombres (el caso de uso de Ajustes). */
