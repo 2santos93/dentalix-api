@@ -1,14 +1,14 @@
+/**
+ * Excepción G5.3 (DX-334): recetas emitidas antes de DX-324. El repositorio
+ * lee el `country` legado de cada fila y, en fase 1, copia en la receta única
+ * el de su sede como dato (spec D1, R12). Ninguna regla lo usa.
+ */
 import { clinicLogoPublicUrl } from '../../../../shared/storage/clinic-logo-url';
 import {
   CLINIC_FISCAL_SELECT,
   clinicFiscalOf,
   readClinicFiscal,
 } from '../../../../shared/clinic/clinic-fiscal';
-/**
- * Excepción G5.3 (DX-334): recetas emitidas antes de DX-324. El repositorio
- * lee el `country` legado de cada fila y, en fase 1, copia en la receta única
- * el de su sede como dato (spec D1, R12). Ninguna regla lo usa.
- */
 import { Injectable } from '@nestjs/common';
 import { Prisma, PrescriptionStatus } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';

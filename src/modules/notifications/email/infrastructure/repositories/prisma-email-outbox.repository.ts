@@ -239,9 +239,11 @@ export class PrismaEmailOutboxRepository implements EmailOutboxRepository {
     primaryColor: string | null;
   } | null> {
     // `tenants` es global (sin RLS), igual que PrismaTenantBrandingRepository.
-    return this.prisma.tenant.findFirst({
-      where: { id: tenantId, deletedAt: null },
-      select: { name: true, logoKey: true, primaryColor: true },
-    }).then((row) => withClinicLogoUrl(row));
+    return this.prisma.tenant
+      .findFirst({
+        where: { id: tenantId, deletedAt: null },
+        select: { name: true, logoKey: true, primaryColor: true },
+      })
+      .then((row) => withClinicLogoUrl(row));
   }
 }

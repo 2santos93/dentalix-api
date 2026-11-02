@@ -221,10 +221,12 @@ export class PrismaSignedPdfCopyRepository
 
   findClinicBranding(): Promise<ClinicBranding | null> {
     // `tenants` no tiene RLS: se lee por el id ya resuelto desde el host.
-    return this.prisma.tenant.findFirst({
-      where: { id: this.tenantId(), deletedAt: null },
-      select: { name: true, primaryColor: true, logoKey: true },
-    }).then((row) => withClinicLogoUrl(row));
+    return this.prisma.tenant
+      .findFirst({
+        where: { id: this.tenantId(), deletedAt: null },
+        select: { name: true, primaryColor: true, logoKey: true },
+      })
+      .then((row) => withClinicLogoUrl(row));
   }
 
   async tenantIds(): Promise<string[]> {

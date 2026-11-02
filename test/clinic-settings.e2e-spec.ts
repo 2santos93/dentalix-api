@@ -748,7 +748,7 @@ describe('Ajustes › Datos de la clínica (e2e, DX-019)', () => {
       await raw.$executeRaw`ALTER TABLE "treatment_plan_acceptances" DISABLE TRIGGER USER`;
       await raw.treatmentPlanAcceptance.update({
         where: { id: row.id },
-        data: { content: { ...old, version: 2 } as Prisma.InputJsonValue },
+        data: { content: { ...old, version: 2 } },
       });
       await raw.$executeRaw`ALTER TABLE "treatment_plan_acceptances" ENABLE TRIGGER USER`;
       const quote = await getQuote(plan);

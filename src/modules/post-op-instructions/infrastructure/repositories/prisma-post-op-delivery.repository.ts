@@ -246,9 +246,9 @@ export class PrismaPostOpDeliveryRepository implements PostOpDeliveryRepository 
       if (!row) return null;
       const clinic = withClinicLogoUrl(
         await tx.tenant.findUniqueOrThrow({
-        where: { id: tenantId },
-        select: { name: true, logoKey: true, primaryColor: true },
-      }),
+          where: { id: tenantId },
+          select: { name: true, logoKey: true, primaryColor: true },
+        }),
       );
       const { location, patient, ...delivery } = row;
       return {
@@ -271,9 +271,9 @@ export class PrismaPostOpDeliveryRepository implements PostOpDeliveryRepository 
       if (!row) return null;
       const clinic = withClinicLogoUrl(
         await tx.tenant.findUniqueOrThrow({
-        where: { id: tenantId },
-        select: { name: true, logoKey: true, primaryColor: true },
-      }),
+          where: { id: tenantId },
+          select: { name: true, logoKey: true, primaryColor: true },
+        }),
       );
       const { location, ...delivery } = row;
       return { ...toEntity(delivery), clinic, locationPhone: location.phone };

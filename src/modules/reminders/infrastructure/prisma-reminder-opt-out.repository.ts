@@ -210,9 +210,11 @@ export class PrismaReminderOptOutRepository implements ReminderOptOutRepository 
   clinicBranding(): Promise<OptOutClinicBranding | null> {
     // `tenants` no tiene RLS: se lee por el id ya resuelto desde el host.
     const tenantId = this.requireTenantId();
-    return this.prisma.tenant.findFirst({
-      where: { id: tenantId, deletedAt: null },
-      select: { name: true, primaryColor: true, logoKey: true },
-    }).then((row) => withClinicLogoUrl(row));
+    return this.prisma.tenant
+      .findFirst({
+        where: { id: tenantId, deletedAt: null },
+        select: { name: true, primaryColor: true, logoKey: true },
+      })
+      .then((row) => withClinicLogoUrl(row));
   }
 }

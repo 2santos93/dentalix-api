@@ -395,7 +395,10 @@ export class PrismaPatientConsentRepository implements PatientConsentRepository 
       } = row;
       return {
         ...mapToEntity(consent),
-        clinic: { name: tenant?.name ?? '', logoUrl: clinicLogoPublicUrl(tenant?.logoKey ?? null) },
+        clinic: {
+          name: tenant?.name ?? '',
+          logoUrl: clinicLogoPublicUrl(tenant?.logoKey ?? null),
+        },
         patient: { ...patient, docType: documentType },
         countersignature: consent.countersignature,
       };

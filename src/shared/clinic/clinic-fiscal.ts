@@ -81,8 +81,7 @@ export function clinicFiscalHashFields(
 export function readClinicFiscal(value: unknown): ClinicFiscalData | null {
   if (typeof value !== 'object' || value === null) return null;
   const r = value as Record<string, unknown>;
-  const text = (key: string) =>
-    typeof r[key] === 'string' ? (r[key] as string) : null;
+  const text = (key: string) => (typeof r[key] === 'string' ? r[key] : null);
   return {
     legalName: text('legalName'),
     taxIdLabel: text('taxIdLabel'),
