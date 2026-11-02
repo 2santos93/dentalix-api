@@ -1,4 +1,5 @@
 import { readCurrencyTexts } from '../../../../shared/format/currency-text';
+import { locationRegionalOrNull } from '../../../../shared/locations/location-regional';
 import { Prisma } from '@prisma/client';
 import {
   buildReceiptSnapshot,
@@ -64,6 +65,10 @@ export async function issuePaymentReceipt(
           // DX-515: la leyenda propia de la sede, si la tiene.
           receiptLegendOverride: true,
           receiptLegend: true,
+          // DX-521: la región de la sede, para congelarla en la foto.
+          timeZone: true,
+          locale: true,
+          hourCycle: true,
         },
       }),
       tx.tenant.findUniqueOrThrow({
@@ -179,6 +184,9 @@ export async function issuePaymentReceipt(
       },
       // DX-517: se congela en la foto; sin textos propios, la foto es la de antes.
       currencyTexts: readCurrencyTexts(tenant.currencyTexts),
+      // DX-521: zona, locale y reloj de la sede al emitir; `null` si no los
+      // tiene válidos (la foto sale sin ellos y la lectura usa los de hoy).
+      regional: locationRegionalOrNull(location),
     },
     // El nombre visible queda congelado en la foto (DX-327, R18).
     names,
