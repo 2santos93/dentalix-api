@@ -763,6 +763,7 @@ describe('Verificación en dos pasos, ampliación (e2e, DX-021-bis)', () => {
       });
     });
 
+    // ISOLATION_COVERS: DELETE /me/mfa/trusted-devices/:id
     it('se lista y se revoca; el de otro usuario es 404', async () => {
       const trusted = await login(other.host, email)
         .set('Cookie', cookie)
@@ -1070,6 +1071,8 @@ describe('Verificación en dos pasos, ampliación (e2e, DX-021-bis)', () => {
       await reset(adminId, totpAt(adminSecret)).expect(409);
     });
 
+    // ISOLATION_COVERS: GET /staff/:userId/mfa
+    // ISOLATION_COVERS: POST /staff/:userId/mfa/reset
     it('otra clínica: 404, sin tocar nada', async () => {
       const foreign = { userId: clinic.adminUserId };
       await reset(foreign.userId, totpAt(adminSecret)).expect(404);

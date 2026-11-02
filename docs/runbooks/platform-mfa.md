@@ -15,7 +15,8 @@ La migración `20261115090100_dx021bis_platform_mfa`, al desplegar:
 
 No toca a nadie el MFA ya activo: esas cuentas entran con su código.
 
-El orden del despliegue no importa, y no hay ningún paso manual por ello:
+Para la seguridad, el orden del despliegue no importa, y no hay ningún paso manual
+por ello:
 
 - las sesiones de plataforma llevan el claim `mfa`. La API nueva rechaza cualquier
   token sin él, también los que abra una réplica antigua después de migrar;
@@ -23,8 +24,13 @@ El orden del despliegue no importa, y no hay ningún paso manual por ello:
   fuera de la puerta nueva: las rutas de alta de las réplicas antiguas fallan.
 
 Mientras queden réplicas antiguas, su apex sigue pidiendo solo contraseña, pero
-esa sesión muere con ellas. Lo que no funciona es la web vieja contra la API
-nueva: despliega las dos a la vez.
+esa sesión muere con ellas.
+
+Para el acceso sí importa: el apex no admite versiones cruzadas en ningún sentido.
+La web vieja contra la API nueva no conoce el paso del código, y la web nueva
+contra la API vieja recibe la sesión directa y se queda en ese paso. Despliega la
+API (migración incluida) y, justo después, la web: hasta que termine, ningún
+superadmin entra al apex.
 
 Quien no lo tenga activo:
 

@@ -55,6 +55,7 @@ UPDATE "users"
 -- del despliegue: desde que esto aplica, las rutas antiguas fallan.
 CREATE FUNCTION "users_platform_mfa_enrollment_door"() RETURNS trigger
 LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
 AS $$
 BEGIN
   IF current_setting('dentalix.platform_mfa_enrollment', true) IS DISTINCT FROM 'email-verified' THEN

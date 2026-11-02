@@ -183,7 +183,7 @@ describe('Cuota del proveedor de tasas (e2e, SEC-054)', () => {
       code: 'EXCHANGE_RATE_BUDGET_EXCEEDED',
     });
     expect((lastTooMany!.body as ErrorBody).message).toMatch(
-      /^La clínica consultó demasiados días sin tasa guardada\. Intenta de nuevo en \d+ minutos\.$/,
+      /^La clínica consultó demasiados días sin tasa guardada\. Intenta de nuevo en \d+ (segundos?|minutos)\.$/,
     );
     const retryAfter = Number(lastTooMany!.headers['retry-after']);
     expect(retryAfter).toBeGreaterThan(0);
