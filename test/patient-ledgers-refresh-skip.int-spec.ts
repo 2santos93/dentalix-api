@@ -50,14 +50,21 @@ async function purge(): Promise<void> {
   await raw.tenant.deleteMany({ where: { id: { in: ids } } });
 }
 
-/** Recorridos (secuenciales + por índice) de cada tabla en la transacción en curso. */
+/**
+ * Recorridos de cada tabla en la transacción en curso: los secuenciales se
+ * apuntan en la tabla y los de índice en cada índice, así que hay que sumarlos
+ * o un plan por índice da 0 aunque haya recorrido la tabla.
+ */
 async function scans(
   tx: Prisma.TransactionClient,
 ): Promise<Record<string, number>> {
   const out: Record<string, number> = {};
   for (const table of COMPUTE_ONLY_TABLES) {
     const [{ n }] = await tx.$queryRawUnsafe<{ n: number }[]>(
-      `SELECT pg_stat_get_xact_numscans('public.${table}'::regclass)::int AS n`,
+      `SELECT (pg_stat_get_xact_numscans('public.${table}'::regclass)
+               + COALESCE((SELECT sum(pg_stat_get_xact_numscans(i.indexrelid))
+                             FROM pg_index i
+                            WHERE i.indrelid = 'public.${table}'::regclass), 0))::int AS n`,
     );
     out[table] = n;
   }
