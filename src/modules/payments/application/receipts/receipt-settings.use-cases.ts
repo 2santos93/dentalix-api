@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import {
   RECEIPT_SETTINGS_REPOSITORY,
@@ -89,6 +90,7 @@ export class UpdateLocationReceiptLegendUseCase {
   constructor(
     @Inject(RECEIPT_SETTINGS_REPOSITORY)
     private readonly repo: ReceiptSettingsRepository,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   async execute(
@@ -96,6 +98,8 @@ export class UpdateLocationReceiptLegendUseCase {
     input: { override: boolean; legend?: string | null },
     ctx: AuditRequestContext,
   ): Promise<LocationReceiptLegendView> {
+    // DX-525: solo en las sedes permitidas del miembro (403 sin cambiar nada).
+    this.tenantContext.assertLocationAllowed(locationId);
     const legend = input.override
       ? text(input.legend, RECEIPT_LEGEND_MAX, RECEIPT_LEGEND_MESSAGE)
       : null;
