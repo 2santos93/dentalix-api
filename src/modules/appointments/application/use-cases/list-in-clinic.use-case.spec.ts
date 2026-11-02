@@ -89,14 +89,14 @@ describe('ListInClinicUseCase (DX-200)', () => {
       active: true,
     });
     repo.seed({
-      locationId: 'bog',
+      locationId: 'ccs',
       status: AppointmentStatus.ARRIVED,
       chairId: 'chair-1',
-      start: at('2026-10-19T14:00:00.000Z'),
-      end: at('2026-10-19T14:30:00.000Z'),
+      start: at('2026-10-19T13:00:00.000Z'),
+      end: at('2026-10-19T13:30:00.000Z'),
     });
     const view = await uc.execute(
-      { locationId: 'bog', role: ClinicRole.RECEPTION, userId: 'rec-1' },
+      { locationId: 'ccs', role: ClinicRole.RECEPTION, userId: 'rec-1' },
       NOW,
     );
     expect(view.waiting[0]).toMatchObject({

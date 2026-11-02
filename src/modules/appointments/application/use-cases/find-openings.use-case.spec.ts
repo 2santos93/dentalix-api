@@ -95,19 +95,19 @@ describe('FindOpeningsUseCase (DX-122)', () => {
       appointments.seed({
         providerId: 'otro',
         chairId: one.id,
-        start: z('15:00'),
-        end: z('15:30'),
+        start: z('14:00'),
+        end: z('14:30'),
       });
       const view = await uc.execute({ ...query, chairIds: [one.id] });
       expect(view.openings).toEqual([
         {
-          start: z('14:00'),
-          end: z('15:00'),
+          start: z('13:00'),
+          end: z('14:00'),
           chair: { id: one.id, name: 'Sillón 1', active: true },
         },
         {
-          start: z('15:30'),
-          end: z('18:00'),
+          start: z('14:30'),
+          end: z('17:00'),
           chair: { id: one.id, name: 'Sillón 1', active: true },
         },
       ]);
@@ -119,14 +119,14 @@ describe('FindOpeningsUseCase (DX-122)', () => {
         providerId: 'otro',
         chairId: one.id,
         overbooked: true,
-        start: z('15:00'),
-        end: z('15:30'),
+        start: z('14:00'),
+        end: z('14:30'),
       });
       const moving = appointments.seed({
         providerId: 'prov1',
         chairId: one.id,
-        start: z('16:00'),
-        end: z('16:30'),
+        start: z('15:00'),
+        end: z('15:30'),
       });
       const view = await uc.execute({
         ...query,
@@ -134,8 +134,8 @@ describe('FindOpeningsUseCase (DX-122)', () => {
         excludeAppointmentId: moving.id,
       });
       expect(view.openings.map((o) => iso(o.start))).toEqual([
-        iso(z('14:00')),
-        iso(z('15:30')),
+        iso(z('13:00')),
+        iso(z('14:30')),
       ]);
     });
 
@@ -144,14 +144,14 @@ describe('FindOpeningsUseCase (DX-122)', () => {
       appointments.seed({
         providerId: 'otro',
         chairId: one.id,
-        start: z('15:00'),
-        end: z('15:30'),
+        start: z('14:00'),
+        end: z('14:30'),
       });
       const view = await uc.execute({ ...query, chairIds: [one.id, two.id] });
       expect(view.openings).toEqual([
         {
-          start: z('14:00'),
-          end: z('18:00'),
+          start: z('13:00'),
+          end: z('17:00'),
           chair: { id: two.id, name: 'Sillón 2', active: true },
         },
       ]);
@@ -177,11 +177,11 @@ describe('FindOpeningsUseCase (DX-122)', () => {
       appointments.seed({
         providerId: 'otro',
         chairId: one.id,
-        start: z('15:00'),
-        end: z('15:30'),
+        start: z('14:00'),
+        end: z('14:30'),
       });
       const view = await uc.execute(query);
-      expect(view.openings).toEqual([{ start: z('14:00'), end: z('18:00') }]);
+      expect(view.openings).toEqual([{ start: z('13:00'), end: z('17:00') }]);
     });
   });
 
