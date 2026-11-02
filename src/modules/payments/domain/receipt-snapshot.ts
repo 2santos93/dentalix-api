@@ -9,6 +9,7 @@ import { docTypeFromStored } from '../../patients/domain/legacy-document-codes';
 import type { ReceiptTexts } from './receipt-settings';
 import type { PaymentAdjustmentLine } from './payment-adjustment-line';
 import type { CurrencyTexts } from '../../../shared/format/currency-text';
+import type { LocationRegionalSettings } from '../../../shared/locations/location-regional';
 
 /** Pie legal por defecto del recibo de caja (DX-136). */
 export const RECEIPT_LEGAL_NOTICE = 'Este documento no es factura';
@@ -131,6 +132,11 @@ export interface ReceiptSnapshotInput {
   texts?: ReceiptTexts | null;
   /** DX-517: texto propio de cada moneda de la clínica al emitir. Vacío o ausente = ninguno. */
   currencyTexts?: CurrencyTexts | null;
+  /**
+   * DX-521: zona, locale y reloj de la sede al emitir (`locationRegionalOrNull`);
+   * `null` o ausente si la sede no tenía los tres ajustes válidos.
+   */
+  regional?: LocationRegionalSettings | null;
 }
 
 /**
@@ -212,6 +218,15 @@ export interface ReceiptSnapshot {
    * después.
    */
   currencyTexts?: CurrencyTexts;
+  /**
+   * DX-521: zona, locale (canónico) y reloj de la sede al emitir, con los que
+   * se pintan las fechas y los importes del recibo y de su email. AUSENTE si
+   * la sede no tenía los tres ajustes válidos, y en las fotos anteriores: la
+   * foto es inmutable y no se reescribe; la lectura usa entonces los ajustes
+   * de hoy de la sede (`PaymentReceiptView.regional`). Cambiar la zona de la
+   * sede después NO cambia un recibo que ya la congeló.
+   */
+  regional?: LocationRegionalSettings;
 }
 
 const blankToNull = (value: string | null): string | null =>
@@ -286,6 +301,8 @@ export function buildReceiptSnapshot(
     ...(input.currencyTexts && Object.keys(input.currencyTexts).length > 0
       ? { currencyTexts: { ...input.currencyTexts } }
       : {}),
+    // DX-521: igual, solo si la sede tenía su región completa y válida.
+    ...(input.regional ? { regional: { ...input.regional } } : {}),
   };
 }
 
@@ -328,8 +345,14 @@ export interface ReceiptPatientView {
   docNumberMasked: string | null;
 }
 
-/** La foto del recibo con su paciente ya leído (`receiptPatientView`). */
-export type ReceiptViewSnapshot = Omit<ReceiptSnapshot, 'patient'> & {
+/**
+ * La foto del recibo con su paciente ya leído (`receiptPatientView`). Sin
+ * `regional` (DX-521, PF3): se sirve solo el de nivel superior de la vista.
+ */
+export type ReceiptViewSnapshot = Omit<
+  ReceiptSnapshot,
+  'patient' | 'regional'
+> & {
   patient: ReceiptPatientView;
 };
 

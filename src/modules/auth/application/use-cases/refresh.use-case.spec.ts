@@ -21,6 +21,7 @@ const tenantPayload = {
 const platformPayload = {
   sub: 'u1',
   platform: true as const,
+  mfa: true as const,
   tv: 0,
   jti: 'jti-p',
   exp: EXP,
@@ -244,6 +245,7 @@ describe('RefreshUseCase', () => {
     expect(tokens.issue).toHaveBeenCalledWith({
       sub: 'u1',
       platform: true,
+      mfa: true,
       tv: 0,
     });
   });

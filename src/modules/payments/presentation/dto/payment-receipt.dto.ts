@@ -369,6 +369,27 @@ export class ReceiptSplitDto {
   total!: ReceiptSplitTotalDto;
 }
 
+export class ReceiptRegionalDto {
+  @ApiProperty({
+    example: 'America/Caracas',
+    description: 'Zona IANA de la sede.',
+  })
+  timeZone!: string;
+
+  @ApiProperty({
+    example: 'es-VE',
+    description: 'Locale canónico: separadores y orden de las fechas.',
+  })
+  locale!: string;
+
+  @ApiProperty({
+    enum: ['h12', 'h23'],
+    enumName: 'HourCycle',
+    description: 'Reloj de la sede: 12 h o 24 h.',
+  })
+  hourCycle!: 'h12' | 'h23';
+}
+
 export class PaymentReceiptDto {
   @ApiProperty({ format: 'uuid' })
   paymentId!: string;
@@ -418,6 +439,14 @@ export class PaymentReceiptDto {
       'DX-390: el cobro dividido del recibo (todas sus formas de pago, cada una con su tasa congelada, y el total en la moneda del plan); null en un abono suelto. El recibo de cualquier línea es el del cobro.',
   })
   split!: ReceiptSplitDto | null;
+
+  @ApiProperty({
+    type: ReceiptRegionalDto,
+    nullable: true,
+    description:
+      'DX-521: zona, locale y reloj con los que pintar las fechas y los importes del recibo. La región congelada en la foto al emitir; en un recibo anterior (o «sin serie»), la de hoy de su sede; null si la sede no tiene los tres ajustes válidos. La foto no la repite en `snapshot`.',
+  })
+  regional!: ReceiptRegionalDto | null;
 
   @ApiProperty({
     type: ReceiptSnapshotDto,

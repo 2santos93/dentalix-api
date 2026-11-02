@@ -25,6 +25,8 @@ const TEMPLATE_TO_DB: Record<EmailTemplateName, EmailTemplate> = {
   'signature-budget-accepted': EmailTemplate.SIGNATURE_BUDGET_ACCEPTED,
   'slot-offer': EmailTemplate.SLOT_OFFER,
   'signed-consent-copy': EmailTemplate.SIGNED_CONSENT_COPY,
+  'mfa-notice': EmailTemplate.MFA_NOTICE,
+  'mfa-enrollment-code': EmailTemplate.MFA_ENROLLMENT_CODE,
 };
 
 /**
@@ -58,6 +60,19 @@ export class PrismaEmailOutboxRepository implements EmailOutboxRepository {
         ${row.template}::"EmailTemplate", ${row.toHash},
         ${row.toMasked}, ${row.payload}, ${row.referenceId}::uuid,
         ${quota.recipientCooldownSeconds}::int, ${quota.recipientDaily}::int
+      ) AS id`;
+    return created.id ? { id: created.id } : null;
+  }
+
+  async insertPlatformSecurity(
+    row: NewPlatformOutboxEmail,
+    minIntervalSeconds: number,
+  ): Promise<{ id: string } | null> {
+    const [created] = await this.prisma.$queryRaw<{ id: string | null }[]>`
+      SELECT email_outbox_enqueue_platform_security(
+        ${row.template}::"EmailTemplate", ${row.toHash},
+        ${row.toMasked}, ${row.payload}, ${row.referenceId}::uuid,
+        ${minIntervalSeconds}::int
       ) AS id`;
     return created.id ? { id: created.id } : null;
   }

@@ -2,9 +2,11 @@ import {
   DEFAULT_LOGIN_LOCKOUT,
   accountBackoffMs,
   accountKeyHash,
+  ipBucket,
   ipKeyHash,
   loadLoginLockoutConfig,
   loginLockedMessage,
+  mfaEnrollKeyHash,
 } from './login-lockout';
 
 const MIN = 60_000;
@@ -149,5 +151,29 @@ describe('loadLoginLockoutConfig', () => {
         }),
       ),
     ).toThrow(/LOGIN_LOCKOUT_RESET_MS/);
+  });
+});
+
+describe('ipBucket (DX-021-bis)', () => {
+  it.each([
+    ['2001:db8:1:2:aaaa:bbbb:cccc:dddd', '2001:0db8:0001:0002::/64'],
+    ['2001:db8:1:2::9', '2001:0db8:0001:0002::/64'],
+    ['2001:DB8:1:2::9', '2001:0db8:0001:0002::/64'],
+    ['2001:db8::1', '2001:0db8:0000:0000::/64'],
+    ['::1', '0000:0000:0000:0000::/64'],
+    ['::ffff:190.2.3.4', '190.2.3.4'],
+    ['190.2.3.4', '190.2.3.4'],
+    ['unknown', 'unknown'],
+  ])('%s → %s', (ip, bucket) => {
+    expect(ipBucket(ip)).toBe(bucket);
+  });
+
+  it('otro /64 es otro cliente', () => {
+    expect(mfaEnrollKeyHash('u', '2001:db8:1:2::1')).toBe(
+      mfaEnrollKeyHash('u', '2001:db8:1:2:ffff::1'),
+    );
+    expect(mfaEnrollKeyHash('u', '2001:db8:1:3::1')).not.toBe(
+      mfaEnrollKeyHash('u', '2001:db8:1:2::1'),
+    );
   });
 });

@@ -83,7 +83,11 @@ describe('plazo de conservación de la HC por clínica (DX-330, int)', () => {
   });
 
   it('a new clinic starts at the platform minimum', async () => {
-    const repo = new PrismaAuthRepository(prisma, { platformMinYears: 20 });
+    const repo = new PrismaAuthRepository(
+      prisma,
+      { platformMinYears: 20 },
+      false,
+    );
     const clinic = await repo.createClinicWithOwner({
       clinicName: 'dx330 alta',
       subdomain: `dx330-t1-alta-${SUFFIX}`,

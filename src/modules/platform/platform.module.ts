@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AuthModule } from '../auth/auth.module';
 import { JwtModule } from '@nestjs/jwt';
 import { PlatformController } from './presentation/platform.controller';
 import { PlatformAdminGuard } from './presentation/guards/platform-admin.guard';
@@ -12,13 +13,12 @@ import { PlatformMfaController } from './presentation/platform-mfa.controller';
 import { PlatformMfaUseCase } from './application/use-cases/platform-mfa.use-case';
 import { PLATFORM_MFA_REPOSITORY } from './domain/ports/platform-mfa-repository.port';
 import { PrismaPlatformMfaRepository } from './infrastructure/repositories/prisma-platform-mfa.repository';
-import { mfaSecretCipherProvider } from '../../shared/crypto/mfa-secret-cipher';
 
 // JwtModule.register({}) igual que los demás módulos: JwtAuthGuard depende de
 // TokenService, que depende de JwtService.
 @Module({
   // JobsModule: cola de fallidos (DX-085).
-  imports: [JwtModule.register({}), JobsModule],
+  imports: [JwtModule.register({}), JobsModule, AuthModule],
   controllers: [
     PlatformController,
     PlatformJobsController,
@@ -32,7 +32,6 @@ import { mfaSecretCipherProvider } from '../../shared/crypto/mfa-secret-cipher';
     // MFA del superadmin, obligatorio para el break-glass (SEC-008).
     PlatformMfaUseCase,
     { provide: PLATFORM_MFA_REPOSITORY, useClass: PrismaPlatformMfaRepository },
-    mfaSecretCipherProvider,
   ],
 })
 export class PlatformModule {}

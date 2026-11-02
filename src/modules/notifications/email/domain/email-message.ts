@@ -23,6 +23,8 @@ export const EMAIL_TEMPLATES = [
   'signature-budget-accepted',
   'slot-offer',
   'signed-consent-copy',
+  'mfa-notice',
+  'mfa-enrollment-code',
 ] as const;
 export type EmailTemplateName = (typeof EMAIL_TEMPLATES)[number];
 
@@ -191,6 +193,24 @@ export interface SignatureRequestEmailVars {
 }
 
 /** DX-243: el código de 6 dígitos que abre el documento. Solo el código. */
+/** DX-021-bis: qué pasó con la verificación en dos pasos de la cuenta. */
+export type MfaNoticeKind =
+  'ENABLED' | 'RECOVERY_CODE_USED' | 'RESET_BY_ADMIN' | 'ATTEMPTS_LOCKED';
+
+export interface MfaNoticeEmailVars {
+  kind: MfaNoticeKind;
+  /** Códigos de recuperación que quedan (`RECOVERY_CODE_USED`). */
+  recoveryCodesRemaining?: number;
+}
+
+/** DX-021-bis: código del correo para el alta del superadmin. */
+export interface MfaEnrollmentCodeEmailVars {
+  code: string;
+  /** Dice cuál de varios correos es el del intento que está en pantalla. */
+  ref: string;
+  expiresInMinutes: number;
+}
+
 export interface SignatureCodeEmailVars {
   recipientFirstName: string;
   clinicName: string;
@@ -252,6 +272,8 @@ export interface EmailVarsByTemplate {
   'post-op-instructions': PostOpInstructionsEmailVars;
   'signature-request': SignatureRequestEmailVars;
   'signature-code': SignatureCodeEmailVars;
+  'mfa-notice': MfaNoticeEmailVars;
+  'mfa-enrollment-code': MfaEnrollmentCodeEmailVars;
   'signature-budget-accepted': SignatureBudgetAcceptedEmailVars;
   'slot-offer': SlotOfferEmailVars;
   'signed-consent-copy': SignedConsentCopyEmailVars;

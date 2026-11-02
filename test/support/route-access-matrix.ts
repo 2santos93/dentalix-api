@@ -149,6 +149,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /me/mfa/enrollment/confirm': EVERY_ROLE,
   'POST /me/mfa/disable': EVERY_ROLE,
   'POST /me/mfa/recovery-codes': EVERY_ROLE,
+  'GET /me/mfa/trusted-devices': EVERY_ROLE,
+  'DELETE /me/mfa/trusted-devices': EVERY_ROLE,
+  'DELETE /me/mfa/trusted-devices/:id': EVERY_ROLE,
   'GET /security-policy': ADMIN_ONLY,
   'PUT /security-policy': ADMIN_ONLY,
   'POST /me/avatar': AUTHENTICATED,
@@ -169,8 +172,7 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /platform/jobs/:id/retry': PLATFORM,
   // MFA del superadmin, exigido para el break-glass: loop/informes/SEC-008.md.
   'GET /platform/mfa': PLATFORM,
-  'POST /platform/mfa/enrollment': PLATFORM,
-  'POST /platform/mfa/enrollment/confirm': PLATFORM,
+  'POST /platform/mfa/recovery-codes': PLATFORM,
 
   // --- Pacientes (demográficos) --------------------------------------------
   // dentalix-docs/docs/plans/2026-07-23-fase2c-role-matrix.md (PATIENT_ROLES).
@@ -783,6 +785,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /staff/:userId/reactivate': ADMIN_ONLY,
   // DX-048: desbloquear el inicio de sesión de un miembro.
   'POST /staff/:userId/login-unlock': ADMIN_ONLY,
+  // DX-021-bis: la verificación en dos pasos de otro miembro.
+  'GET /staff/:userId/mfa': ADMIN_ONLY,
+  'POST /staff/:userId/mfa/reset': ADMIN_ONLY,
   // DX-089: sedes permitidas de un miembro.
   'GET /staff/:userId/locations': ADMIN_ONLY,
   'PUT /staff/:userId/locations': ADMIN_ONLY,

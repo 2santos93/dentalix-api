@@ -1,3 +1,4 @@
+import { UserMfaService } from '../../../auth/application/user-mfa.service';
 import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import type { UserProfileRepository } from '../../domain/ports/user-profile-repository.port';
 import { USER_PROFILE_REPOSITORY } from '../../domain/ports/user-profile-repository.port';
@@ -39,6 +40,7 @@ export class ChangeMyPasswordUseCase {
     private readonly password: PasswordService,
     private readonly sessions: SessionClaimsService,
     private readonly tokens: TokenService,
+    private readonly mfa: UserMfaService,
   ) {}
 
   /**
@@ -70,6 +72,9 @@ export class ChangeMyPasswordUseCase {
       newHash,
       passwordChangeAuditEvent(claims, request, input.locationId),
     );
+    // DX-021-bis: quien fallaba códigos con la contraseña vieja ya no puede
+    // seguir: el dueño no tiene por qué esperar la espera que él provocó.
+    await this.mfa.clearAttempts(userId);
     return this.tokens.issue({ ...claims, tv });
   }
 }

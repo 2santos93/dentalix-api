@@ -1,6 +1,10 @@
 import { config } from 'dotenv';
 config({ path: '.env.test' });
 
+// DX-021-bis: las clínicas nuevas nacen exigiendo el MFA a sus ADMIN. Las suites
+// registran clínicas y entran con contraseña; test/mfa-policy lo enciende.
+process.env.NEW_CLINIC_REQUIRE_ADMIN_MFA ??= 'false';
+
 // Las suites e2e hacen decenas de logins/peticiones desde 127.0.0.1: con los
 // límites de producción se cortarían con 429. Si `.env.test` no los define, se
 // suben aquí (las variables ya presentes ganan). El 429 real se prueba en

@@ -908,6 +908,149 @@ describe('Personal restringido a sedes (DX-089)', () => {
       ).toBe('F-002');
     });
 
+    // DX-525: leer, reimprimir y enviar el recibo, y cambiar la leyenda de una
+    // sede, respetan las sedes permitidas como las escrituras de arriba.
+    describe('recibo de caja y leyenda por sede (DX-525)', () => {
+      const issueReceipt = async (locationId: string) =>
+        (
+          (
+            await api(a.adminToken, locationId)
+              .post(`/treatment-plans/${plan}/payments`, {
+                amount: 10,
+                currency: 'VES',
+                paidAt: '2026-10-01',
+              })
+              .expect(201)
+          ).body as { id: string }
+        ).id;
+      const receiptState = async () => ({
+        outbox: await raw.emailOutbox.count({
+          where: { tenantId: a.tenantId },
+        }),
+        events: await raw.auditEvent.count({
+          where: { tenantId: a.tenantId, resourceType: 'PAYMENT_RECEIPT' },
+        }),
+      });
+      const receiptRoutes = (id: string) =>
+        [
+          ['get', `/payments/${id}/receipt`],
+          ['post', `/payments/${id}/receipt/print`],
+          ['post', `/payments/${id}/receipt/email`],
+        ] as const;
+      const call = (
+        m: Member,
+        active: string | undefined,
+        [verb, path]: readonly ['get' | 'post', string],
+      ) =>
+        verb === 'get' ? as(m, active).get(path) : as(m, active).post(path, {});
+
+      beforeAll(async () => {
+        await raw.patient.update({
+          where: { id: patient },
+          data: { email: 'dx525@example.com' },
+        });
+      });
+
+      it('recibo emitido o «sin serie» de otra sede: 403 al ver, reimprimir y enviar, sin cambios', async () => {
+        const issuedId = await issueReceipt(a1);
+        const legacyId = (await seedPayment(a1)).id;
+        const before = await receiptState();
+        for (const id of [issuedId, legacyId]) {
+          for (const route of receiptRoutes(id)) {
+            // Vista consolidada y con una cabecera permitida: manda la sede
+            // del abono, no la de la cabecera.
+            for (const active of [undefined, a2]) {
+              expectNotAllowed(await call(r2, active, route));
+            }
+          }
+        }
+        expect(await receiptState()).toEqual(before);
+      });
+
+      it('recibo de una sede ya retirada: el mismo 403 para quien no la tiene', async () => {
+        const id = (await seedPayment(a3)).id;
+        await raw.location.update({
+          where: { id: a3 },
+          data: { isActive: false },
+        });
+        try {
+          for (const route of receiptRoutes(id)) {
+            expectNotAllowed(await call(r, undefined, route));
+          }
+        } finally {
+          await raw.location.update({
+            where: { id: a3 },
+            data: { isActive: true },
+          });
+        }
+      });
+
+      it('recibo de su sede: lo ve, lo reimprime y lo envía (y ADMIN, siempre)', async () => {
+        const issuedId = await issueReceipt(a2);
+        const legacyId = (await seedPayment(a2)).id;
+        for (const id of [issuedId, legacyId]) {
+          // R2 trabaja en A2 y A3: con o sin cabecera de su sede.
+          for (const route of receiptRoutes(id)) {
+            const ok = route[1].endsWith('/email') ? 202 : 200;
+            await call(r2, undefined, route).expect(ok);
+            await call(r2, a2, route).expect(ok);
+            await (
+              route[0] === 'get'
+                ? admin().get(route[1])
+                : admin().post(route[1], {})
+            ).expect(ok);
+          }
+        }
+      });
+
+      it('leyenda de otra sede: 403 sin cambio, aun con un token ADMIN acotado', async () => {
+        const token = (
+          await app.get(TokenService).issue({
+            sub: (
+              await raw.clinicMembership.findFirstOrThrow({
+                where: { tenantId: a.tenantId, role: ClinicRole.ADMIN },
+              })
+            ).userId,
+            tenantId: a.tenantId,
+            role: ClinicRole.ADMIN,
+            loc: [a1],
+            tv: 0,
+          })
+        ).accessToken;
+        const legendOf = async (id: string) =>
+          raw.location.findUniqueOrThrow({
+            where: { id },
+            select: { receiptLegendOverride: true, receiptLegend: true },
+          });
+        const before = await legendOf(a2);
+        const events = await raw.auditEvent.count({
+          where: { tenantId: a.tenantId },
+        });
+        expectNotAllowed(
+          await api(token).put(`/payment-receipts/settings/locations/${a2}`, {
+            override: true,
+            legend: 'Otra sede',
+          }),
+        );
+        expect(await legendOf(a2)).toEqual(before);
+        expect(
+          await raw.auditEvent.count({ where: { tenantId: a.tenantId } }),
+        ).toBe(events);
+        // Su propia sede sí; y el ADMIN sin restricción, cualquiera.
+        await api(token)
+          .put(`/payment-receipts/settings/locations/${a1}`, {
+            override: true,
+            legend: 'Mi sede',
+          })
+          .expect(200);
+        await admin()
+          .put(`/payment-receipts/settings/locations/${a2}`, {
+            override: false,
+          })
+          .expect(200);
+      });
+    });
+
     it('movimientos en otra sede: 403 sin cambio en stock ni movimientos', async () => {
       const before = await raw.inventoryMovement.findMany({
         where: { itemId: item.a2 },

@@ -2,6 +2,7 @@ import type {
   ReceiptSplitLine,
   ReceiptViewSnapshot,
 } from '../receipt-snapshot';
+import type { LocationRegionalSettings } from '../../../../shared/locations/location-regional';
 import type {
   FrozenExchangeRate,
   PaymentExchangeRateStatus,
@@ -59,6 +60,13 @@ export interface PaymentReceiptView {
   exchangeRate: ReceiptExchangeRate | null;
   /** DX-390: el cobro dividido del recibo; `null` en un abono suelto. */
   split: ReceiptSplitView | null;
+  /**
+   * DX-521: zona, locale y reloj con los que se pintan las fechas y los
+   * importes del recibo. La foto si la tiene (y es válida en este runtime);
+   * si no, los ajustes de hoy de la sede del recibo; `null` si la sede no los
+   * tiene válidos (o está retirada sin ellos). Nunca da un 409 por esto.
+   */
+  regional: LocationRegionalSettings | null;
   /** La foto con el paciente ya leído (DX-327: nombre visible resuelto). */
   snapshot: ReceiptViewSnapshot;
 }

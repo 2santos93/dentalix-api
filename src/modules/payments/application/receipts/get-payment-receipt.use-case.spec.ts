@@ -1,4 +1,6 @@
 import { NotFoundException } from '@nestjs/common';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import { LOCATION_NOT_ALLOWED_MESSAGE } from '../../../../shared/tenancy/location-access';
 import { GetPaymentReceiptUseCase } from './get-payment-receipt.use-case';
 import type {
   PaymentReceiptRepository,
@@ -75,6 +77,7 @@ const issuedSnapshot = buildReceiptSnapshot(
   NO_LOCAL_NAMES,
 );
 
+const tenantContext = new TenantContextService();
 let names: FixedDocumentTypeNamesReader;
 beforeEach(() => {
   names = new FixedDocumentTypeNamesReader();
@@ -101,7 +104,12 @@ function makeUseCase(
             paymentsCount: 2,
           }),
   } as unknown as GetPlanBalanceUseCase;
-  return new GetPaymentReceiptUseCase(repo, getPlanBalance, names);
+  return new GetPaymentReceiptUseCase(
+    repo,
+    getPlanBalance,
+    names,
+    tenantContext,
+  );
 }
 
 const issued = (
@@ -111,11 +119,13 @@ const issued = (
 ): PaymentReceiptSource => ({
   kind: 'issued',
   paymentId: PAYMENT_ID,
+  locationId: 'loc-1',
   treatmentPlanId: 'plan-1',
   patientEmail: 'ana@example.com',
   notice: NOTICE,
   rate: SAME_CURRENCY_RATE,
   splitRates: [],
+  locationRegional: null,
   receipt: {
     seriesPrefix: 'NOR',
     number: 123,
@@ -141,6 +151,7 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
       voidReason: null,
       exchangeRate: null,
       split: null,
+      regional: null,
       snapshot: {
         ...issuedSnapshot,
         patient: {
@@ -210,11 +221,13 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
     const view = await makeUseCase({
       kind: 'legacy',
       paymentId: PAYMENT_ID,
+      locationId: 'loc-1',
       treatmentPlanId: 'plan-1',
       patientEmail: null,
       notice: NOTICE,
       rate: SAME_CURRENCY_RATE,
       splitRates: [],
+      locationRegional: null,
       legacy: {
         issuedAt: new Date('2025-01-10T17:05:00.000Z'),
         voidedAt: null,
@@ -243,11 +256,13 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
       {
         kind: 'legacy',
         paymentId: PAYMENT_ID,
+        locationId: 'loc-1',
         treatmentPlanId: 'plan-1',
         patientEmail: null,
         notice: NOTICE,
         rate: SAME_CURRENCY_RATE,
         splitRates: [],
+        locationRegional: null,
         legacy: {
           issuedAt: new Date(),
           voidedAt: new Date('2025-02-01T12:00:00.000Z'),
@@ -396,5 +411,178 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
     await expect(makeUseCase(null).execute(PAYMENT_ID)).rejects.toThrow(
       new NotFoundException('No encontramos ese abono.'),
     );
+  });
+});
+
+describe('GetPaymentReceiptUseCase · región de la sede (DX-521, R3 y PF3/PF4/PF8)', () => {
+  const PHOTO = {
+    timeZone: 'Europe/London',
+    locale: 'en-GB',
+    hourCycle: 'h23',
+  } as const;
+  const CURRENT = {
+    timeZone: 'America/Caracas',
+    locale: 'es-VE',
+    hourCycle: 'h23',
+  } as const;
+  const withRegional = (regional: unknown): PaymentReceiptSource => {
+    const base = issued();
+    if (base.kind !== 'issued') throw new Error('fixture');
+    return {
+      ...base,
+      receipt: {
+        ...base.receipt,
+        snapshot: { ...base.receipt.snapshot, regional } as ReceiptSnapshot,
+      },
+    };
+  };
+  const legacy = (
+    locationRegional: PaymentReceiptSource['locationRegional'],
+  ): PaymentReceiptSource => ({
+    kind: 'legacy',
+    paymentId: PAYMENT_ID,
+    locationId: 'loc-1',
+    treatmentPlanId: 'plan-1',
+    patientEmail: null,
+    notice: NOTICE,
+    rate: SAME_CURRENCY_RATE,
+    splitRates: [],
+    locationRegional,
+    legacy: {
+      issuedAt: new Date('2025-01-10T17:05:00.000Z'),
+      voidedAt: null,
+      voidReason: null,
+      snapshotInput,
+    },
+  });
+
+  it('la foto manda: sirve la región congelada aunque la sede tenga otra hoy', async () => {
+    const view = await makeUseCase({
+      ...withRegional(PHOTO),
+      locationRegional: CURRENT,
+    }).execute(PAYMENT_ID);
+    expect(view.regional).toEqual(PHOTO);
+  });
+
+  it('PF3: la foto servida no lleva `regional`; solo el de nivel superior', async () => {
+    const view = await makeUseCase(withRegional(PHOTO)).execute(PAYMENT_ID);
+    expect('regional' in view.snapshot).toBe(false);
+  });
+
+  it('una foto sin región usa los ajustes de hoy de la sede', async () => {
+    const view = await makeUseCase({
+      ...issued(),
+      locationRegional: CURRENT,
+    }).execute(PAYMENT_ID);
+    expect(view.regional).toEqual(CURRENT);
+  });
+
+  it('una foto sin región y una sede sin ajustes válidos (o retirada sin ellos): null, sin lanzar', async () => {
+    const view = await makeUseCase({
+      ...issued(),
+      locationRegional: null,
+    }).execute(PAYMENT_ID);
+    expect(view.regional).toBeNull();
+  });
+
+  it.each([
+    ['zona que este runtime no conoce', { ...PHOTO, timeZone: 'Mars/Olympus' }],
+    ['locale no soportado', { ...PHOTO, locale: 'zz-ZZ-not-a-tag-!!' }],
+    ['reloj inválido', { ...PHOTO, hourCycle: 'h11' }],
+  ])(
+    'PF4: una región de la foto con %s vale como ausente y se prueba con la sede actual',
+    async (_label, photo) => {
+      const withCurrent = await makeUseCase({
+        ...withRegional(photo),
+        locationRegional: CURRENT,
+      }).execute(PAYMENT_ID);
+      expect(withCurrent.regional).toEqual(CURRENT);
+      const withoutCurrent = await makeUseCase({
+        ...withRegional(photo),
+        locationRegional: null,
+      }).execute(PAYMENT_ID);
+      expect(withoutCurrent.regional).toBeNull();
+    },
+  );
+
+  it('un «sin serie» usa los ajustes actuales de la sede', async () => {
+    const view = await makeUseCase(legacy(CURRENT)).execute(PAYMENT_ID);
+    expect(view.regional).toEqual(CURRENT);
+    expect('regional' in view.snapshot).toBe(false);
+    const none = await makeUseCase(legacy(null)).execute(PAYMENT_ID);
+    expect(none.regional).toBeNull();
+  });
+
+  // DX-525: leer el recibo respeta las sedes permitidas, igual que anular el
+  // abono (VoidPaymentUseCase): la sede es la del abono.
+  describe('sedes permitidas (DX-525)', () => {
+    const legacy = (): PaymentReceiptSource => ({
+      kind: 'legacy',
+      paymentId: PAYMENT_ID,
+      locationId: 'loc-1',
+      treatmentPlanId: null,
+      patientEmail: null,
+      notice: NOTICE,
+      rate: SAME_CURRENCY_RATE,
+      splitRates: [],
+      locationRegional: null,
+      legacy: {
+        issuedAt: new Date('2025-01-10T17:00:00.000Z'),
+        voidedAt: null,
+        voidReason: null,
+        snapshotInput,
+      },
+    });
+
+    it.each([
+      ['emitido, vista consolidada', issued(), undefined, ['loc-2']],
+      ['«sin serie», vista consolidada', legacy(), undefined, ['loc-2']],
+      ['emitido, cabecera permitida', issued(), 'loc-2', ['loc-2']],
+      ['ninguna sede permitida', issued(), undefined, []],
+    ] as const)('403 en otra sede: %s', async (_, source, active, allowed) => {
+      const uc = makeUseCase(source);
+      await tenantContext.run(
+        't1',
+        active,
+        async () => {
+          await expect(uc.execute(PAYMENT_ID)).rejects.toThrow(
+            LOCATION_NOT_ALLOWED_MESSAGE,
+          );
+          await expect(uc.load(PAYMENT_ID)).rejects.toThrow(
+            LOCATION_NOT_ALLOWED_MESSAGE,
+          );
+        },
+        allowed,
+      );
+    });
+
+    it('su sede (emitido o «sin serie») y sin restricción: lo ve', async () => {
+      for (const source of [issued(), legacy()]) {
+        const uc = makeUseCase(source);
+        await tenantContext.run(
+          't1',
+          undefined,
+          async () => {
+            await expect(uc.execute(PAYMENT_ID)).resolves.toBeDefined();
+          },
+          ['loc-1', 'loc-9'],
+        );
+        await expect(uc.execute(PAYMENT_ID)).resolves.toBeDefined();
+      }
+    });
+
+    it('un abono que no existe sigue siendo 404 aunque esté restringido', async () => {
+      const uc = makeUseCase(null);
+      await tenantContext.run(
+        't1',
+        undefined,
+        async () => {
+          await expect(uc.execute(PAYMENT_ID)).rejects.toBeInstanceOf(
+            NotFoundException,
+          );
+        },
+        ['loc-2'],
+      );
+    });
   });
 });

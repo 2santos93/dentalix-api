@@ -4841,32 +4841,28 @@ de 30 días; ahora ese acceso es **break-glass**:
   producción; fuera, derivada de `JWT_ACCESS_SECRET`) y el id del usuario como
   dato autenticado. Cambiar la clave obliga a re-enrolar.
 
-**Enrolar el MFA** (en la web: área de plataforma del apex, `/admin`, tarjeta
-«Verificación en dos pasos»; o por API con el token de plataforma):
+**Enrolar el MFA**: en el login del apex (`/admin`). `POST /auth/login` nunca da
+sesión: responde `mfa: "MFA_ENROLLMENT_REQUIRED"` y envía un código al correo.
 
 ```bash
-# 1. Login en el APEX (sin subdominio de clínica) → token de plataforma
+# 1. Login en el APEX → mfaToken (MFA_REQUIRED, o el alta si no tiene MFA)
 curl -s -X POST http://localhost:3000/api/v1/auth/login \
   -H 'X-Tenant-Host: localhost' -H 'Content-Type: application/json' \
-  -d '{"email":"soporte@dentalix.app","password":"…"}'          # → accessToken
-# 2. Alta: devuelve el secreto (base32) y el otpauth:// para la app
-curl -s -X POST http://localhost:3000/api/v1/platform/mfa/enrollment \
-  -H 'X-Tenant-Host: localhost' -H "Authorization: Bearer $TOKEN"
-# 3. Confirmar con el código que muestra la app
-curl -s -X POST http://localhost:3000/api/v1/platform/mfa/enrollment/confirm \
-  -H 'X-Tenant-Host: localhost' -H "Authorization: Bearer $TOKEN" \
-  -H 'Content-Type: application/json' -d '{"code":"123456"}'
+  -d '{"email":"soporte@dentalix.app","password":"…"}'
+# 2. Alta: con el código del correo, devuelve el secreto y el otpauth://
+curl -s -X POST http://localhost:3000/api/v1/auth/login/mfa/enrollment \
+  -H 'X-Tenant-Host: localhost' -H 'Content-Type: application/json' \
+  -d '{"mfaToken":"…","emailCode":"12345678"}'
+# 3. Confirmar: código del correo + código de la app → sesión y 10 códigos
+curl -s -X POST http://localhost:3000/api/v1/auth/login/mfa/enrollment/confirm \
+  -H 'X-Tenant-Host: localhost' -H 'Content-Type: application/json' \
+  -d '{"mfaToken":"…","emailCode":"12345678","code":"123456"}'
 ```
 
-Con el MFA activo no se puede volver a enrolar (`409`): perder el móvil exige
-borrar a mano `mfaTotpSecretEnc`, `mfaEnabledAt` y `mfaLastUsedStep` del
-usuario en la BD (y re-enrolar). **Riesgo de la transición**: mientras un
-superadmin no haya enrolado, quien robe su contraseña podría enrolar su propio
-MFA desde el apex (que solo pide contraseña). Mitigación: la espera de
-seguridad de arriba (24 h sin break-glass tras el alta), el evento de log
-`platform_mfa.enabled` (conviene alertar sobre él) y el `409` que recibe el
-dueño real al intentar su alta, que le pide avisar. Enrolad a todos los
-superadmins en cuanto se despliegue.
+Con el MFA activo se entra con `POST /auth/login/mfa`. Perder el móvil y los
+códigos: `docs/runbooks/platform-mfa.md`; un miembro de clínica,
+`docs/runbooks/mfa-recovery.md`. La espera de seguridad del acceso de soporte se
+conserva (`BREAK_GLASS_MFA_COOLDOWN_MINUTES`).
 
 **Probar en local** (con `BREAK_GLASS_MFA_COOLDOWN_MINUTES=0` en `.env`): convierte en superadmin a un usuario que NO sea miembro
 de la demo (`UPDATE users SET "isPlatformAdmin" = true WHERE email = '…'`),

@@ -2,6 +2,7 @@ import { INestApplication } from '@nestjs/common';
 import { CatalogKind, ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
+import { moneyWithCode } from '../src/shared/format/money-with-code';
 import { createE2eApp } from './support/create-e2e-app';
 import { CapturingMailer } from './support/capture-mailer';
 import {
@@ -217,9 +218,10 @@ describe('Texto propio de cada moneda (e2e, DX-517) y email del recibo no fiscal
     beforeSnapshot = await storedSnapshot(before);
     expect(Object.keys(beforeSnapshot)).not.toContain('currencyTexts');
     const email = await emailOf(before);
-    // El importe con el formato de la sede, exactamente el de antes de DX-517.
+    // El importe con el formato de la sede y el código ISO (DX-378, DX-521),
+    // sin el texto propio que aún no hay.
     expect(email.text).toContain(
-      plain(`Valor: ${FMT.money(BEFORE_AMOUNT, 'VES')} ·`),
+      plain(`Valor: ${moneyWithCode(BEFORE_AMOUNT, 'VES', FMT, undefined)} ·`),
     );
     // DX-515-bis: sin título ni leyenda, el email de siempre.
     expect(email.subject).toMatch(/^Recibo de caja /);
@@ -322,11 +324,11 @@ describe('Texto propio de cada moneda (e2e, DX-517) y email del recibo no fiscal
     expect(FMT.money(1234.5, 'VES', { VES: 'Bs.' })).toBe('Bs.\u00a01.234,50');
     expect(email.text).toContain('Valor: Bs. 1.234,50 ·');
 
-    // El recibo anterior: foto intacta y su email con el importe de antes.
+    // El recibo anterior: foto intacta y su email con su importe sin texto propio.
     expect(await storedSnapshot(before)).toEqual(beforeSnapshot);
     const old = await emailOf(before);
     expect(old.text).toContain(
-      plain(`Valor: ${FMT.money(BEFORE_AMOUNT, 'VES')} ·`),
+      plain(`Valor: ${moneyWithCode(BEFORE_AMOUNT, 'VES', FMT, undefined)} ·`),
     );
     expect(old.text).not.toContain('Bs. 1.234,50');
   });

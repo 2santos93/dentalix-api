@@ -569,6 +569,15 @@ function breakGlassProblems(env: Env, isProd: boolean): string[] {
       );
     }
   }
+  const newClinicMfa = str(env, 'NEW_CLINIC_REQUIRE_ADMIN_MFA');
+  if (
+    newClinicMfa != null &&
+    !['true', 'false'].includes(newClinicMfa.trim())
+  ) {
+    problems.push(
+      'NEW_CLINIC_REQUIRE_ADMIN_MFA debe ser true o false (si las clínicas nuevas exigen la verificación en dos pasos a sus administradores).',
+    );
+  }
   return problems;
 }
 
