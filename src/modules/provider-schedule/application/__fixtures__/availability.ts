@@ -10,7 +10,7 @@ import { InMemoryProviderScheduleRepository } from './in-memory-provider-schedul
  */
 export function inMemoryAvailability(
   repo = new InMemoryProviderScheduleRepository(),
-  timeZone = 'America/Bogota',
+  timeZone = 'America/Caracas',
 ): ProviderAvailabilityService {
   const locations = {
     findById: (id: string) =>

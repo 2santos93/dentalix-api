@@ -27,7 +27,7 @@ import { InMemoryProviderScheduleRepository } from '../../../provider-schedule/a
 // Hoy es el lunes 19/10/2026 a las 08:00 en la zona de la sede; el hueco, el martes 20 de
 // 10:00 a 10:30 con la Dra. X en la sede 1.
 const local = (day: string, hhmm: string) =>
-  new Date(`${day}T${hhmm}:00-05:00`);
+  new Date(`${day}T${hhmm}:00-04:00`);
 const NOW = local('2026-10-19', '08:00');
 const clock = () => NOW;
 const SLOT = {
@@ -37,6 +37,7 @@ const SLOT = {
   end: local('2026-10-20', '10:30'),
 };
 
+let defaultPhoneRegion = 'VE';
 const locations = {
   findById: (id: string) =>
     Promise.resolve(
@@ -44,9 +45,9 @@ const locations = {
         ? {
             id,
             name: 'Sede',
-            country: 'CO',
-            defaultPhoneRegion: 'CO',
-            timeZone: 'America/Bogota',
+            country: 'VE',
+            defaultPhoneRegion,
+            timeZone: 'America/Caracas',
           }
         : null,
     ),
@@ -143,6 +144,7 @@ describe('«Ocupar este hueco» (DX-210)', () => {
   }
 
   beforeEach(() => {
+    defaultPhoneRegion = 'VE';
     repo = new InMemoryOpeningCandidatesRepository();
     drafts = [];
     providerSchedules = new InMemoryProviderScheduleRepository();
@@ -190,7 +192,7 @@ describe('«Ocupar este hueco» (DX-210)', () => {
         'p-cita',
       ]);
       expect(view).toMatchObject({
-        timeZone: 'America/Bogota',
+        timeZone: 'America/Caracas',
         offerCap: 2,
         truncated: false,
       });
@@ -199,7 +201,7 @@ describe('«Ocupar este hueco» (DX-210)', () => {
         appointmentId: 'cita',
         durationMinutes: 30,
         currentAppointment: { id: 'cita', start: local('2026-11-10', '09:00') },
-        whatsappPhone: '573101234567',
+        whatsappPhone: '584141234567',
         whatsappBlocked: false,
       });
     });
@@ -431,6 +433,7 @@ describe('«Ocupar este hueco» (DX-210)', () => {
     });
 
     it('an ambiguous number is never VALID, never a wa.me and never stored as E.164', async () => {
+      defaultPhoneRegion = 'TH';
       repo.addPatient({ id: 'p1', phone: '0058 412 1234567' });
       await expect(
         offer.execute({ ...base, channel: 'WA_ME' }, CTX),

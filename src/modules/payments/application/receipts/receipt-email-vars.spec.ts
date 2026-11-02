@@ -11,7 +11,11 @@ import { regionalFormat } from '../../../../shared/format/regional-format';
 
 const SNAPSHOT_INPUT = {
   clinic: { name: 'Clínica Demo', legalName: null, taxId: null, address: null },
-  location: { id: 'loc-1', name: 'Sede Norte', address: 'Cra 15 # 93-60' },
+  location: {
+    id: 'loc-1',
+    name: 'Sede Norte',
+    address: 'Av. Francisco de Miranda 93',
+  },
   patient: {
     id: 'pat-1',
     firstName: 'Carolina',
@@ -23,18 +27,18 @@ const SNAPSHOT_INPUT = {
   payment: {
     id: 'pay-1',
     amount: 150000,
-    currency: 'COP',
+    currency: 'VES',
     method: 'CASH',
-    paidAt: new Date('2026-10-17T17:00:00.000Z'),
+    paidAt: new Date('2026-10-17T16:00:00.000Z'),
     paidOn: '2026-10-17',
   },
   plan: {
     id: 'plan-1',
     optionLabel: 'Opción A: implante',
-    createdAt: new Date('2026-09-01T15:00:00.000Z'),
+    createdAt: new Date('2026-09-01T14:00:00.000Z'),
   },
   planBalance: {
-    currency: 'COP',
+    currency: 'VES',
     billable: 900000,
     paid: 450000,
     balance: 450000,
@@ -57,7 +61,7 @@ const view = (
   seriesPrefix: 'NOR',
   number: 123,
   legacy: false,
-  issuedAt: new Date('2026-10-17T17:00:05.000Z'),
+  issuedAt: new Date('2026-10-17T16:00:05.000Z'),
   voided: false,
   voidedAt: null,
   voidReason: null,
@@ -68,8 +72,8 @@ const view = (
 });
 
 /** Zona y formato de la sede del recibo en estos casos (ajustes explícitos). */
-const SEDE_ZONE = 'America/Bogota';
-const SEDE_FMT = regionalFormat({ locale: 'es-CO', hourCycle: 'h23' });
+const SEDE_ZONE = 'America/Caracas';
+const SEDE_FMT = regionalFormat({ locale: 'es-VE', hourCycle: 'h23' });
 
 describe('receiptEmailVars (DX-136)', () => {
   it('arma el email desde la foto del recibo, con el documento enmascarado', () => {
@@ -78,15 +82,15 @@ describe('receiptEmailVars (DX-136)', () => {
       SEDE_ZONE,
       SEDE_FMT,
     );
-    expect(amountLabel).toBe(SEDE_FMT.money(150000, 'COP'));
-    expect(amountLabel).toMatch(/^\$\s150\.000,00$/);
-    expect(balanceLabel).toMatch(/^\$\s450\.000,00$/);
+    expect(amountLabel).toBe(SEDE_FMT.money(150000, 'VES'));
+    expect(amountLabel).toMatch(/^Bs\.S\s150\.000,00$/);
+    expect(balanceLabel).toMatch(/^Bs\.S\s450\.000,00$/);
     expect(vars).toEqual({
       patientName: 'Carolina Duque',
       reference: 'NOR-000123',
       legacy: false,
       locationName: 'Sede Norte',
-      locationAddress: 'Cra 15 # 93-60',
+      locationAddress: 'Av. Francisco de Miranda 93',
       fiscalLine: null,
       patientDocLabel: 'Documento nacional ******5678',
       paidOnLabel: '17/10/2026',
@@ -125,23 +129,23 @@ describe('receiptEmailVars (DX-136)', () => {
           paymentMethodName: null,
           reference: null,
           amount: 100000,
-          currency: 'COP',
+          currency: 'VES',
           equivalentAmount: 100000,
         },
       ],
-      total: { currency: 'COP', amount: 300000 },
+      total: { currency: 'VES', amount: 300000 },
     };
     const vars = receiptEmailVars(view({ split }), SEDE_ZONE, SEDE_FMT);
-    expect(vars.amountLabel).toBe(SEDE_FMT.money(300000, 'COP'));
+    expect(vars.amountLabel).toBe(SEDE_FMT.money(300000, 'VES'));
     expect(vars.methodLabel).toBe('Pago móvil + Efectivo');
 
     const withoutRate = receiptEmailVars(
-      view({ split: { ...split, total: { currency: 'COP', amount: null } } }),
+      view({ split: { ...split, total: { currency: 'VES', amount: null } } }),
       SEDE_ZONE,
       SEDE_FMT,
     );
     expect(withoutRate.amountLabel).toBe(
-      `${SEDE_FMT.money(50, 'USD')} + ${SEDE_FMT.money(100000, 'COP')}`,
+      `${SEDE_FMT.money(50, 'USD')} + ${SEDE_FMT.money(100000, 'VES')}`,
     );
   });
 
@@ -184,7 +188,7 @@ describe('receiptEmailVars (DX-136)', () => {
     const vars = receiptEmailVars(
       view({
         voided: true,
-        voidedAt: new Date('2026-10-18T02:00:00.000Z'),
+        voidedAt: new Date('2026-10-18T01:00:00.000Z'),
         voidReason: 'Cobro duplicado',
       }),
       SEDE_ZONE,
@@ -200,17 +204,17 @@ describe('receiptEmailVars (DX-136)', () => {
     const vars = receiptEmailVars(
       view({
         voided: true,
-        voidedAt: new Date('2026-10-18T02:00:00.000Z'),
+        voidedAt: new Date('2026-10-18T01:00:00.000Z'),
         voidReason: 'Cobro duplicado',
       }),
       'Europe/Berlin',
       SEDE_FMT,
     );
-    // 02:00 UTC del 18 es el 17 en UTC-5, pero ya el 18 en Berlín.
+    // 01:00 UTC del 18 es el 17 en UTC-4, pero ya el 18 en Berlín.
     expect(vars.voided?.dateLabel).toBe('18/10/2026');
   });
 
-  it('con razón social y NIT, la línea fiscal; sin método, «Sin especificar»', () => {
+  it('con razón social e identificación fiscal, la línea fiscal; sin método, «Sin especificar»', () => {
     const vars = receiptEmailVars(
       view({
         snapshot: {
@@ -218,8 +222,8 @@ describe('receiptEmailVars (DX-136)', () => {
           fiscalDataPending: false,
           clinic: {
             name: 'Clínica Demo',
-            legalName: 'Clínica Demo S.A.S.',
-            taxId: '900123456-7',
+            legalName: 'Clínica Demo C.A.',
+            taxId: 'J-12345678-9',
             address: null,
           },
           payment: { ...snapshot.payment, method: null },
@@ -229,9 +233,7 @@ describe('receiptEmailVars (DX-136)', () => {
       SEDE_ZONE,
       SEDE_FMT,
     );
-    expect(vars.fiscalLine).toBe(
-      'Clínica Demo S.A.S. · Id. fiscal 900123456-7',
-    );
+    expect(vars.fiscalLine).toBe('Clínica Demo C.A. · Id. fiscal J-12345678-9');
     expect(vars.methodLabel).toBe('Sin especificar');
     expect(vars.planLabel).toBe('Plan del 01/09/2026');
     expect(vars.toOpeningBalance).toBe(false);
@@ -296,7 +298,7 @@ describe('receiptEmailVars (DX-136)', () => {
           payment: { ...snapshot.payment, paidOn: '2026-10-27' },
         },
         voided: true,
-        voidedAt: new Date('2026-10-28T15:00:00.000Z'),
+        voidedAt: new Date('2026-10-28T14:00:00.000Z'),
         voidReason: 'Cobro duplicado',
       }),
       'America/New_York',
@@ -311,7 +313,7 @@ describe('receiptEmailVars (DX-136)', () => {
     const plain = receiptEmailVars(view(), SEDE_ZONE, SEDE_FMT);
     const frozen = forView(
       buildReceiptSnapshot(
-        { ...SNAPSHOT_INPUT, currencyTexts: { COP: 'Col$' } },
+        { ...SNAPSHOT_INPUT, currencyTexts: { VES: 'Bs.' } },
         NO_LOCAL_NAMES,
       ),
     );
@@ -321,10 +323,10 @@ describe('receiptEmailVars (DX-136)', () => {
       SEDE_FMT,
     );
     expect(vars.amountLabel).toBe(
-      SEDE_FMT.money(150000, 'COP', { COP: 'Col$' }),
+      SEDE_FMT.money(150000, 'VES', { VES: 'Bs.' }),
     );
-    expect(vars.amountLabel).toMatch(/^Col\$\s150\.000,00$/);
-    expect(vars.balanceLabel).toMatch(/^Col\$\s450\.000,00$/);
+    expect(vars.amountLabel).toMatch(/^Bs\.\s150\.000,00$/);
+    expect(vars.balanceLabel).toMatch(/^Bs\.\s450\.000,00$/);
     expect({ ...vars, amountLabel: '', balanceLabel: '' }).toEqual({
       ...plain,
       amountLabel: '',

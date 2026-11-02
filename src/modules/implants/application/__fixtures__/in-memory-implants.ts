@@ -18,7 +18,7 @@ export class InMemoryImplantRepository implements PatientImplantRepository {
   patients = new Map<string, ImplantCardPatient>();
   planItems = new Map<string, string>(); // itemId -> patientId
   implants: PatientImplant[] = [];
-  location = { id: 'loc-1', timeZone: 'America/Bogota' };
+  location = { id: 'loc-1', timeZone: 'America/Caracas' };
   private seq = 0;
 
   loadPatient(patientId: string): Promise<ImplantCardPatient | null> {

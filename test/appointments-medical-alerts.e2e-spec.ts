@@ -11,7 +11,7 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
 
@@ -178,7 +178,7 @@ describe('Alertas médicas en la agenda (e2e, DX-247)', () => {
     ).expect(200);
     mainId = (locations.body as { id: string }[])[0].id;
     const north = await as(api().post('/api/v1/locations'), clinic.adminToken)
-      .send(locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }))
+      .send(locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede Norte' }))
       .expect(201);
     northId = (north.body as { id: string }).id;
     for (const locationId of [mainId, northId]) {
@@ -353,7 +353,7 @@ describe('Alertas médicas en la agenda (e2e, DX-247)', () => {
     ).expect(200);
     expect(today.body).toMatchObject({
       anamnesisStatus: 'CURRENT',
-      timeZone: 'America/Bogota',
+      timeZone: 'America/Caracas',
     });
     const body = today.body as { today: string; anamnesisExpiresOn: string };
     expect(body.anamnesisExpiresOn > body.today).toBe(true);

@@ -12,7 +12,7 @@ import {
   REGIONAL_TOKYO_FIXTURE,
   legacyLocationInsert,
   locationBody,
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
 } from './support/location-fixtures';
 
 // GLOBAL-G1 fase 1 (spec §3.4, R15, R20): la zona es un dato de la sede. El
@@ -73,12 +73,12 @@ describe('Horario de la sede sin zona propia (e2e, G1)', () => {
     const res = await as(api().put('/api/v1/locations/schedule'), mainId)
       .send({ ranges: WEEK })
       .expect(200);
-    expect(res.body).toEqual({ timezone: 'America/Bogota', ranges: WEEK });
+    expect(res.body).toEqual({ timezone: 'America/Caracas', ranges: WEEK });
   });
 
   it("PUT schedule with the location's zone is 200 (old web)", async () => {
     await as(api().put('/api/v1/locations/schedule'), mainId)
-      .send({ timezone: 'America/Bogota', ranges: [] })
+      .send({ timezone: 'America/Caracas', ranges: [] })
       .expect(200);
   });
 
@@ -94,7 +94,7 @@ describe('Horario de la sede sin zona propia (e2e, G1)', () => {
       api().get('/api/v1/locations/schedule'),
       mainId,
     ).expect(200);
-    expect(after.body).toEqual({ timezone: 'America/Bogota', ranges: WEEK });
+    expect(after.body).toEqual({ timezone: 'America/Caracas', ranges: WEEK });
     expect(
       (
         await raw.location.findUniqueOrThrow({
@@ -102,7 +102,7 @@ describe('Horario de la sede sin zona propia (e2e, G1)', () => {
           select: { timeZone: true },
         })
       ).timeZone,
-    ).toBe('America/Bogota');
+    ).toBe('America/Caracas');
   });
 
   it('creating a location writes location_schedules.timezone equal to its zone', async () => {
@@ -123,7 +123,7 @@ describe('Horario de la sede sin zona propia (e2e, G1)', () => {
     // Una réplica antigua (o un dato viejo) dejó otra zona en el horario.
     await raw.locationSchedule.updateMany({
       where: { locationId: tokyoId },
-      data: { timezone: 'America/Bogota' },
+      data: { timezone: 'America/Caracas' },
     });
     const res = await as(
       api().get('/api/v1/locations/schedule'),
@@ -143,7 +143,7 @@ describe('Horario de la sede sin zona propia (e2e, G1)', () => {
       raw,
       clinic.tenantId,
       'Antigua',
-      REGIONAL_BOGOTA_FIXTURE.country,
+      REGIONAL_CARACAS_FIXTURE.country,
     );
     const res = await as(api().put('/api/v1/locations/schedule'), legacyId)
       .send({ ranges: WEEK })
@@ -153,7 +153,7 @@ describe('Horario de la sede sin zona propia (e2e, G1)', () => {
       locationId: legacyId,
     });
     await as(api().put('/api/v1/locations/schedule'), legacyId)
-      .send({ timezone: 'America/Bogota', ranges: WEEK })
+      .send({ timezone: 'America/Caracas', ranges: WEEK })
       .expect(400);
     expect(
       await raw.locationSchedule.count({ where: { locationId: legacyId } }),

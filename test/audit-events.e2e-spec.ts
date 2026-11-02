@@ -468,7 +468,7 @@ describe('Registro de auditoría (e2e, DX-009)', () => {
         clinicA.adminToken,
       ).expect(200);
       const page = res.body as AuditPage;
-      expect(page.timeZone).toBe('America/Bogota');
+      expect(page.timeZone).toBe('America/Caracas');
       expect(page.items).toHaveLength(1);
       expect(page.items[0]).toMatchObject({
         action: 'SIGN',
@@ -480,7 +480,7 @@ describe('Registro de auditoría (e2e, DX-009)', () => {
         },
         patient: { id: patientId, fullName: 'Paula Auditada' },
         userAgent: 'dx009-e2e-agent',
-        timeZone: 'America/Bogota',
+        timeZone: 'America/Caracas',
       });
       expect(page.items[0].ip).toBeTruthy();
       expect(page.items[0].requestId).toMatch(/^dx009-e2e-/);
@@ -676,7 +676,7 @@ describe('Registro de auditoría (e2e, DX-009)', () => {
             insert: () =>
               Promise.reject(new Error('audit_events no disponible')),
             list: () => Promise.resolve([]),
-            clinicTimeZone: () => Promise.resolve('America/Bogota'),
+            clinicTimeZone: () => Promise.resolve('America/Caracas'),
           }),
       });
     });

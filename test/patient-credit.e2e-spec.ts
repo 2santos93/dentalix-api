@@ -19,7 +19,7 @@ import {
 } from './support/e2e-fixtures';
 import { civilDateIn } from '../src/shared/time/civil-day';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
 
@@ -35,7 +35,7 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
-const ZONE = 'America/Bogota';
+const ZONE = 'America/Caracas';
 const TODAY = civilDateIn(new Date(), ZONE);
 
 interface TransferBody {
@@ -118,7 +118,7 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
       token,
     );
     return (key ? req.set('Idempotency-Key', key) : req).send({
-      currency: 'COP',
+      currency: 'VES',
       method: 'CASH',
       reason: 'El paciente se muda de ciudad',
       paymentIds: [originPayment],
@@ -161,7 +161,7 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
     const planId = (
       (
         await as(api().post(`/api/v1/patients/${patientId}/treatment-plans`), a)
-          .send({ notes: `Plan ${tag}`, currency: 'COP' })
+          .send({ notes: `Plan ${tag}`, currency: 'VES' })
           .expect(201)
       ).body as { id: string }
     ).id;
@@ -183,7 +183,7 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
     return (
       (
         await as(api().post(`/api/v1/treatment-plans/${planId}/payments`), a)
-          .send({ amount, currency: 'COP', paidAt: TODAY, method: 'TRANSFER' })
+          .send({ amount, currency: 'VES', paidAt: TODAY, method: 'TRANSFER' })
           .expect(201)
       ).body as { id: string }
     ).id;
@@ -247,7 +247,7 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
   it('DENTIST y ASSISTANT: 403 en español (API)', async () => {
     for (const token of [dentistA, assistantA]) {
       const res = await transfer(
-        { targetPlanId: target, amount: 1, currency: 'COP' },
+        { targetPlanId: target, amount: 1, currency: 'VES' },
         { token },
       ).expect(403);
       expect((res.body as { message: string }).message).toMatch(
@@ -259,7 +259,7 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
 
   it('RECEPTION con el tope por defecto (0): 403 en español y nada guardado', async () => {
     const res = await transfer(
-      { targetPlanId: target, amount: 1_000, currency: 'COP' },
+      { targetPlanId: target, amount: 1_000, currency: 'VES' },
       { token: receptionA },
     ).expect(403);
     expect((res.body as { message: string }).message).toMatch(
@@ -270,7 +270,7 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
 
   it('traspasa 200.000 del plan cancelado a un plan vivo: origen 100.000 a favor, destino −200.000, abonos intactos; Idempotency-Key', async () => {
     const key = randomUUID();
-    const body = { targetPlanId: target, amount: 200_000, currency: 'COP' };
+    const body = { targetPlanId: target, amount: 200_000, currency: 'VES' };
     const first = (await transfer(body, { key }).expect(201))
       .body as TransferBody;
     expect(first).toMatchObject({
@@ -339,7 +339,7 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
       ).expect(200)
     ).body as { planCurrency: string; creditMovements: number };
     expect(balance).toMatchObject({
-      planCurrency: 'COP',
+      planCurrency: 'VES',
       creditMovements: 200_000,
     });
   });
@@ -348,13 +348,13 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
     await transfer({
       targetPlanId: target,
       amount: 100_000.01,
-      currency: 'COP',
+      currency: 'VES',
     }).expect(400);
     await as(
       api().post(`/api/v1/treatment-plans/${target}/credit-transfers`),
       a,
     )
-      .send({ targetPlanId: origin, amount: 1, currency: 'COP' })
+      .send({ targetPlanId: origin, amount: 1, currency: 'VES' })
       .expect(409);
   });
 
@@ -380,7 +380,7 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
   it('D1: con varias sedes, una devolución en efectivo sin sede explícita es 400 en español y no guarda nada', async () => {
     // Una segunda sede: sin cabecera ya no hay una única sede posible.
     await as(api().post('/api/v1/locations'), a)
-      .send(locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }))
+      .send(locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede Norte' }))
       .expect(201);
     const before = await counts();
     const res = await api()
@@ -389,7 +389,7 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
       .set('Authorization', `Bearer ${a.adminToken}`)
       .send({
         amount: 1_000,
-        currency: 'COP',
+        currency: 'VES',
         method: 'CASH',
         reason: 'El paciente se muda de ciudad',
         paymentIds: [originPayment],
@@ -412,7 +412,7 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
   it('en efectivo con caja abierta es un egreso del arqueo y sale en el detalle; comprobante numerado', async () => {
     const session = (
       await as(api().post('/api/v1/cash-sessions/open'), a)
-        .send({ floats: [{ currency: 'COP', amount: 50_000 }] })
+        .send({ floats: [{ currency: 'VES', amount: 50_000 }] })
         .expect(201)
     ).body as { id: string };
     const key = randomUUID();
@@ -446,7 +446,7 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
       creditRefunds: { number: string; amount: number }[];
     };
     expect(
-      detail.expected.find((l) => l.currency === 'COP' && l.method === 'CASH')
+      detail.expected.find((l) => l.currency === 'VES' && l.method === 'CASH')
         ?.expected,
     ).toBe(10_000);
     expect(detail.creditRefunds).toEqual([
@@ -517,12 +517,12 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
       api().post(`/api/v1/treatment-plans/${origin}/credit-transfers`),
       b,
     )
-      .send({ targetPlanId: target, amount: 1, currency: 'COP' })
+      .send({ targetPlanId: target, amount: 1, currency: 'VES' })
       .expect(404);
     await as(api().post(`/api/v1/treatment-plans/${origin}/credit-refunds`), b)
       .send({
         amount: 1,
-        currency: 'COP',
+        currency: 'VES',
         method: 'CASH',
         reason: 'Intento ajeno',
         paymentIds: [originPayment],
@@ -554,7 +554,7 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
       data: {
         tenantId: tenantB,
         patientId: patientB.id,
-        currency: 'COP',
+        currency: 'VES',
         status: 'ACCEPTED',
       },
     });
@@ -565,7 +565,7 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
         treatmentPlanId: planB.id,
         patientId: patientB.id,
         amount: 1_000,
-        currency: 'COP',
+        currency: 'VES',
         paidAt: new Date(),
         method: 'CASH',
       },
@@ -574,7 +574,7 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
     await transfer({
       targetPlanId: planB.id,
       amount: 1,
-      currency: 'COP',
+      currency: 'VES',
     }).expect(404);
     await refund({
       amount: 1,
@@ -620,7 +620,7 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
         .expect(200);
     const transferFrom = (planId: string, amount: number) =>
       as(api().post(`/api/v1/treatment-plans/${planId}/credit-transfers`), a)
-        .send({ targetPlanId: target, amount, currency: 'COP' })
+        .send({ targetPlanId: target, amount, currency: 'VES' })
         .expect(201);
 
     it('el abono de referencia de una devolución no se anula', async () => {
@@ -669,14 +669,14 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
             lines: [
               {
                 amount: 30_000,
-                currency: 'COP',
+                currency: 'VES',
                 paymentMethodId: methods.find((m) => m.legacyMethod === 'CARD')!
                   .id,
                 reference: 'DX253-T1',
               },
               {
                 amount: 20_000,
-                currency: 'COP',
+                currency: 'VES',
                 paymentMethodId: methods.find(
                   (m) => m.legacyMethod === 'TRANSFER',
                 )!.id,
@@ -713,7 +713,7 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
           a,
         ).send({
           amount: 30_000,
-          currency: 'COP',
+          currency: 'VES',
           method: 'TRANSFER',
           reason: 'Devolución en carrera',
           paymentIds: [payment],

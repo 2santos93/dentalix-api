@@ -11,7 +11,7 @@ import {
 
 const A = 'sede-a';
 const B = 'sede-b';
-const BOGOTA = 'America/Bogota';
+const CARACAS = 'America/Caracas';
 const MADRID = 'Europe/Madrid';
 const H = (h: number, m = 0) => h * 60 + m;
 
@@ -41,15 +41,15 @@ const UNCONFIGURED: ProviderScheduleSnapshot = {
 const names = (id: string) => (id === A ? 'Sede A' : 'Sede B');
 
 describe('providerWorksAt (DX-233)', () => {
-  // 2026-10-19 es lunes; 2026-10-22, jueves. La zona del fixture es UTC−5 fijo.
+  // 2026-10-19 es lunes; 2026-10-22, jueves. La zona del fixture es UTC−4 fijo.
   it('sin horario configurado no restringe (compatibilidad)', () => {
     expect(
       providerWorksAt(
         UNCONFIGURED,
         A,
-        new Date('2026-10-19T08:00:00Z'), // 03:00 en la zona de la sede
-        new Date('2026-10-19T08:30:00Z'),
-        BOGOTA,
+        new Date('2026-10-19T07:00:00Z'), // 03:00 en la zona de la sede
+        new Date('2026-10-19T07:30:00Z'),
+        CARACAS,
       ),
     ).toBe(true);
   });
@@ -61,9 +61,9 @@ describe('providerWorksAt (DX-233)', () => {
       providerWorksAt(
         s,
         A,
-        new Date('2026-10-19T13:00:00Z'),
-        new Date('2026-10-19T13:30:00Z'),
-        BOGOTA,
+        new Date('2026-10-19T12:00:00Z'),
+        new Date('2026-10-19T12:30:00Z'),
+        CARACAS,
       ),
     ).toBe(true);
     // Lunes 12:45–13:15 en A: se sale del tramo.
@@ -71,9 +71,9 @@ describe('providerWorksAt (DX-233)', () => {
       providerWorksAt(
         s,
         A,
-        new Date('2026-10-19T17:45:00Z'),
-        new Date('2026-10-19T18:15:00Z'),
-        BOGOTA,
+        new Date('2026-10-19T16:45:00Z'),
+        new Date('2026-10-19T17:15:00Z'),
+        CARACAS,
       ),
     ).toBe(false);
     // Termina justo a las 13:00: medio abierto, vale.
@@ -81,9 +81,9 @@ describe('providerWorksAt (DX-233)', () => {
       providerWorksAt(
         s,
         A,
-        new Date('2026-10-19T17:30:00Z'),
-        new Date('2026-10-19T18:00:00Z'),
-        BOGOTA,
+        new Date('2026-10-19T16:30:00Z'),
+        new Date('2026-10-19T17:00:00Z'),
+        CARACAS,
       ),
     ).toBe(true);
     // Lunes en B: ese día no trabaja allí.
@@ -91,9 +91,9 @@ describe('providerWorksAt (DX-233)', () => {
       providerWorksAt(
         s,
         B,
-        new Date('2026-10-19T13:00:00Z'),
-        new Date('2026-10-19T13:30:00Z'),
-        BOGOTA,
+        new Date('2026-10-19T12:00:00Z'),
+        new Date('2026-10-19T12:30:00Z'),
+        CARACAS,
       ),
     ).toBe(false);
     // Jueves 14:00 en B: sí.
@@ -101,9 +101,9 @@ describe('providerWorksAt (DX-233)', () => {
       providerWorksAt(
         s,
         B,
+        new Date('2026-10-22T18:00:00Z'),
         new Date('2026-10-22T19:00:00Z'),
-        new Date('2026-10-22T20:00:00Z'),
-        BOGOTA,
+        CARACAS,
       ),
     ).toBe(true);
     // Una sede donde no tiene horario: no trabaja allí.
@@ -111,9 +111,9 @@ describe('providerWorksAt (DX-233)', () => {
       providerWorksAt(
         s,
         'sede-c',
+        new Date('2026-10-22T18:00:00Z'),
         new Date('2026-10-22T19:00:00Z'),
-        new Date('2026-10-22T20:00:00Z'),
-        BOGOTA,
+        CARACAS,
       ),
     ).toBe(false);
   });
@@ -126,9 +126,9 @@ describe('providerWorksAt (DX-233)', () => {
       providerWorksAt(
         s,
         B,
+        new Date('2026-10-22T18:00:00Z'),
         new Date('2026-10-22T19:00:00Z'),
-        new Date('2026-10-22T20:00:00Z'),
-        BOGOTA,
+        CARACAS,
       ),
     ).toBe(false);
     // La semana siguiente vuelve el semanal.
@@ -136,9 +136,9 @@ describe('providerWorksAt (DX-233)', () => {
       providerWorksAt(
         s,
         B,
+        new Date('2026-10-29T18:00:00Z'),
         new Date('2026-10-29T19:00:00Z'),
-        new Date('2026-10-29T20:00:00Z'),
-        BOGOTA,
+        CARACAS,
       ),
     ).toBe(true);
   });
@@ -158,18 +158,18 @@ describe('providerWorksAt (DX-233)', () => {
       providerWorksAt(
         s,
         B,
+        new Date('2026-10-22T13:00:00Z'),
         new Date('2026-10-22T14:00:00Z'),
-        new Date('2026-10-22T15:00:00Z'),
-        BOGOTA,
+        CARACAS,
       ),
     ).toBe(true);
     expect(
       providerWorksAt(
         s,
         B,
+        new Date('2026-10-22T18:00:00Z'),
         new Date('2026-10-22T19:00:00Z'),
-        new Date('2026-10-22T20:00:00Z'),
-        BOGOTA,
+        CARACAS,
       ),
     ).toBe(false);
   });
@@ -185,9 +185,9 @@ describe('providerWorksAt (DX-233)', () => {
       providerWorksAt(
         s,
         A,
-        new Date('2026-10-19T13:00:00Z'),
-        new Date('2026-10-19T13:30:00Z'),
-        BOGOTA,
+        new Date('2026-10-19T12:00:00Z'),
+        new Date('2026-10-19T12:30:00Z'),
+        CARACAS,
       ),
     ).toBe(false);
     // Otra sede, o el día siguiente: sin restricción.
@@ -195,18 +195,18 @@ describe('providerWorksAt (DX-233)', () => {
       providerWorksAt(
         s,
         B,
-        new Date('2026-10-19T13:00:00Z'),
-        new Date('2026-10-19T13:30:00Z'),
-        BOGOTA,
+        new Date('2026-10-19T12:00:00Z'),
+        new Date('2026-10-19T12:30:00Z'),
+        CARACAS,
       ),
     ).toBe(true);
     expect(
       providerWorksAt(
         s,
         A,
-        new Date('2026-10-20T13:00:00Z'),
-        new Date('2026-10-20T13:30:00Z'),
-        BOGOTA,
+        new Date('2026-10-20T12:00:00Z'),
+        new Date('2026-10-20T12:30:00Z'),
+        CARACAS,
       ),
     ).toBe(true);
   });
@@ -226,9 +226,9 @@ describe('providerWorksAt (DX-233)', () => {
       providerWorksAt(
         s,
         A,
+        new Date('2026-10-20T03:30:00Z'),
         new Date('2026-10-20T04:30:00Z'),
-        new Date('2026-10-20T05:30:00Z'),
-        BOGOTA,
+        CARACAS,
       ),
     ).toBe(false);
     // Hasta las 24:00 justas, sí.
@@ -236,9 +236,9 @@ describe('providerWorksAt (DX-233)', () => {
       providerWorksAt(
         s,
         A,
-        new Date('2026-10-20T04:30:00Z'),
-        new Date('2026-10-20T05:00:00Z'),
-        BOGOTA,
+        new Date('2026-10-20T03:30:00Z'),
+        new Date('2026-10-20T04:00:00Z'),
+        CARACAS,
       ),
     ).toBe(true);
   });
@@ -306,7 +306,7 @@ describe('providerWorksAt (DX-233)', () => {
   });
 
   it('zona sin cambio de hora: el día lo marca la zona de la sede', () => {
-    // Lunes 19 a las 20:00 en la zona de la sede ya es martes 01:00Z.
+    // Lunes 19 a las 20:00 en la zona de la sede ya es martes 00:00Z.
     const s: ProviderScheduleSnapshot = {
       providerId: 'p',
       configured: true,
@@ -319,9 +319,9 @@ describe('providerWorksAt (DX-233)', () => {
       providerWorksAt(
         s,
         A,
-        new Date('2026-10-20T01:00:00Z'),
-        new Date('2026-10-20T01:30:00Z'),
-        BOGOTA,
+        new Date('2026-10-20T00:00:00Z'),
+        new Date('2026-10-20T00:30:00Z'),
+        CARACAS,
       ),
     ).toBe(true);
   });

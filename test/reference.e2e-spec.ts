@@ -8,7 +8,7 @@ import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   registerBody,
 } from './support/location-fixtures';
 
@@ -21,7 +21,7 @@ async function registerAndLogin(app: INestApplication<App>) {
   const sub = 'refclinic';
   await registerVerified(
     app,
-    registerBody(REGIONAL_BOGOTA_FIXTURE, {
+    registerBody(REGIONAL_CARACAS_FIXTURE, {
       clinicName: 'Ref Clinic',
       subdomain: sub,
       email: 'owner@ref.com',
@@ -80,14 +80,14 @@ describe('reference endpoints (e2e)', () => {
     expect(body.some((c) => c.code === 'USD' && c.symbol === '$')).toBe(true);
   });
 
-  it('GET /countries returns the seeded list incl. Colombia', async () => {
+  it('GET /countries returns the seeded list incl. Venezuela', async () => {
     const res = await request(app.getHttpServer())
       .get('/api/v1/countries')
       .set('X-Tenant-Host', hostFor(sub))
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
     const body = res.body as { code: string; name: string }[];
-    expect(body.some((c) => c.code === 'CO' && c.name === 'Colombia')).toBe(
+    expect(body.some((c) => c.code === 'VE' && c.name === 'Venezuela')).toBe(
       true,
     );
   });
@@ -102,12 +102,12 @@ describe('reference endpoints (e2e)', () => {
 
   it('GET /cities filters by countryCode + q and caps at 50', async () => {
     const res = await request(app.getHttpServer())
-      .get('/api/v1/cities?countryCode=CO&q=bog&limit=100')
+      .get('/api/v1/cities?countryCode=VE&q=car&limit=100')
       .set('X-Tenant-Host', hostFor(sub))
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
     const body = res.body as { id: number; name: string }[];
     expect(body.length).toBeLessThanOrEqual(50);
-    expect(body.some((c) => /bog/i.test(c.name))).toBe(true);
+    expect(body.some((c) => /car/i.test(c.name))).toBe(true);
   });
 });

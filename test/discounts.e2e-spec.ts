@@ -17,7 +17,7 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   legacyLocationInsert,
   locationBody,
 } from './support/location-fixtures';
@@ -36,8 +36,8 @@ const DAY = 24 * 60 * 60 * 1000;
 let requestSeq = 0;
 /** X-Request-Id propio para encontrar el evento de auditoría de la petición. */
 const nextRequestId = () => `dx204-e2e-${++requestSeq}-${Date.now()}`;
-/** Día civil de la sede (UTC−5 fijo) `offset` días desde hoy. */
-const bogotaDay = (offset = 0) =>
+/** Día civil de la sede (UTC−4 fijo) `offset` días desde hoy. */
+const caracasDay = (offset = 0) =>
   new Date(Date.now() - 5 * 60 * 60 * 1000 + offset * DAY)
     .toISOString()
     .slice(0, 10);
@@ -113,7 +113,7 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
     };
   };
 
-  async function newPlan(currency = 'COP'): Promise<string> {
+  async function newPlan(currency = 'USD'): Promise<string> {
     const res = await as(clinicA)
       .post(`/patients/${patientA}/treatment-plans`, { currency })
       .expect(201);
@@ -190,7 +190,7 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
     const north = await as(clinicA)
       .post(
         '/locations',
-        locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }),
+        locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede Norte' }),
       )
       .expect(201);
     northLocationA = (north.body as { id: string }).id;
@@ -335,8 +335,8 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
   });
 
   describe('«Descuento %» sobre varios ítems', () => {
-    it('COP sin decimales, tope ítem a ítem, un solo evento de auditoría', async () => {
-      const planId = await newPlan('COP');
+    it('USD sin decimales, tope ítem a ítem, un solo evento de auditoría', async () => {
+      const planId = await newPlan('USD');
       const items = [
         await addItem(planId, 85000),
         await addItem(planId, 123457),
@@ -558,7 +558,7 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
       });
     });
 
-    const period = () => `from=${bogotaDay(-7)}&to=${bogotaDay(0)}`;
+    const period = () => `from=${caracasDay(-7)}&to=${caracasDay(0)}`;
 
     it('cuadra con la suma del descuento efectivo de los ítems vivos del periodo', async () => {
       const res = await as(clinicA)
@@ -572,7 +572,7 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
           deletedAt: null,
           discountAt: { gte: from },
           plan: {
-            currency: 'COP',
+            currency: 'USD',
             deletedAt: null,
             status: { notIn: ['REJECTED', 'CANCELLED'] },
           },
@@ -592,11 +592,11 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
         (s, i) => s + Number(i.price) + reduction(i),
         0,
       );
-      const cop = report.totals.find((t) => t.currency === 'COP')!;
-      expect(cop.discount).toBe(expected);
-      expect(cop.gross).toBe(gross);
-      expect(cop.items).toBe(live.length);
-      expect(cop.percentOfGross).toBe(
+      const usd = report.totals.find((t) => t.currency === 'USD')!;
+      expect(usd.discount).toBe(expected);
+      expect(usd.gross).toBe(gross);
+      expect(usd.items).toBe(live.length);
+      expect(usd.percentOfGross).toBe(
         Math.round((expected / gross) * 10000) / 100,
       );
       const ids = report.items.map((i) => i.itemId);
@@ -628,7 +628,7 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
           raw,
           clinicA.tenantId,
           'Réplica antigua',
-          REGIONAL_BOGOTA_FIXTURE.country,
+          REGIONAL_CARACAS_FIXTURE.country,
         );
       });
 
@@ -767,10 +767,10 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
         'Solo la administración ve el informe de descuentos.',
       );
       await as(clinicA)
-        .get(`/reports/discounts?from=${bogotaDay(0)}&to=${bogotaDay(-1)}`)
+        .get(`/reports/discounts?from=${caracasDay(0)}&to=${caracasDay(-1)}`)
         .expect(400);
       await as(clinicA)
-        .get(`/reports/discounts?from=${bogotaDay(-400)}&to=${bogotaDay(0)}`)
+        .get(`/reports/discounts?from=${caracasDay(-400)}&to=${caracasDay(0)}`)
         .expect(400);
     });
 
@@ -798,7 +798,7 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
       'Precio por debajo del de catálogo: cuenta como descuento. Tu rol permite hasta un 10 % de descuento por ítem.';
     const REASON =
       'Precio por debajo del de catálogo: cuenta como descuento y supera el 10 %. Indica el motivo del descuento.';
-    const period = () => `from=${bogotaDay(-1)}&to=${bogotaDay(1)}`;
+    const period = () => `from=${caracasDay(-1)}&to=${caracasDay(1)}`;
 
     async function report(): Promise<Report> {
       const res = await as(clinicA)
@@ -929,7 +929,7 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
         .get(`/reports/discounts.csv?${period()}`)
         .expect(200);
       expect(csv.text).toContain(
-        'COP,1000000,800000,200000,0,200000,20.00,"Promoción o campaña"',
+        'USD,1000000,800000,200000,0,200000,20.00,"Promoción o campaña"',
       );
     });
 

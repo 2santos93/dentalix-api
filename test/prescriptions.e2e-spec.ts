@@ -17,7 +17,7 @@ import {
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   REGIONAL_NEW_YORK_FIXTURE,
   REGIONAL_TOKYO_FIXTURE,
   locationBody,
@@ -367,18 +367,18 @@ describe('Recetas — /patients/:id/prescriptions, /prescriptions, /prescription
         .get('/prescriptions/issuer')
         .expect(200);
       expect((main.body as { country: unknown }).country).toBeNull();
-      const bogota = (
+      const caracas = (
         await as(clinicA)
           .post(
             '/locations',
-            locationBody(REGIONAL_BOGOTA_FIXTURE, {
+            locationBody(REGIONAL_CARACAS_FIXTURE, {
               name: 'Sede emisor',
               address: 'Sede emisor',
             }),
           )
           .expect(201)
       ).body as { id: string };
-      const res = await as(clinicA, dentistA.token, bogota.id)
+      const res = await as(clinicA, dentistA.token, caracas.id)
         .get('/prescriptions/issuer')
         .expect(200);
       const issuerBody = res.body as { locationId: string; country: unknown };
@@ -873,13 +873,13 @@ describe('Recetas — /patients/:id/prescriptions, /prescriptions, /prescription
       });
       // Fase 1 (spec D1, R6): la fila sigue llevando las letras y la
       // proyección del país de la sede para las réplicas anteriores: CO para
-      // una sede de Bogotá y NULL para Nueva York y Tokio, fuera de los dos
+      // una sede de Caracas y NULL para Nueva York y Tokio, fuera de los dos
       // valores de la columna antigua.
-      const siteC = await createSite(REGIONAL_BOGOTA_FIXTURE, 'Sede C');
+      const siteC = await createSite(REGIONAL_CARACAS_FIXTURE, 'Sede C');
       for (const [site, siteCode, projected] of [
         [siteA, REGIONAL_NEW_YORK_FIXTURE.country, null],
         [siteB, REGIONAL_TOKYO_FIXTURE.country, null],
-        [siteC, REGIONAL_BOGOTA_FIXTURE.country, 'CO'],
+        [siteC, REGIONAL_CARACAS_FIXTURE.country, 'CO'],
       ] as const) {
         const res = await issueAt(site, noDocA).expect(201);
         const rx = res.body as RxBody;

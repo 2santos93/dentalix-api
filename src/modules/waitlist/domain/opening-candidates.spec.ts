@@ -6,10 +6,10 @@ import {
   type EntryCandidateSource,
 } from './opening-candidates';
 
-// En la zona de la sede (UTC−5 fijo): el hueco es el martes 20/10/2026 de 10:00 a 10:30.
-const TZ = 'America/Bogota';
+// En la zona de la sede (UTC−4 fijo): el hueco es el martes 20/10/2026 de 10:00 a 10:30.
+const TZ = 'America/Caracas';
 const local = (day: string, hhmm: string) =>
-  new Date(`${day}T${hhmm}:00-05:00`);
+  new Date(`${day}T${hhmm}:00-04:00`);
 const SLOT: CandidateSlot = {
   locationId: 'loc1',
   providerId: 'drx',

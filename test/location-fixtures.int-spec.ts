@@ -6,7 +6,7 @@ import {
 } from '../src/shared/phone/phone-number';
 import {
   REGIONAL_BERLIN_FIXTURE,
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   REGIONAL_NEW_YORK_FIXTURE,
   REGIONAL_TOKYO_FIXTURE,
   g1LocationInsert,
@@ -97,7 +97,7 @@ describe('fixtures de sede (G1)', () => {
       [REGIONAL_NEW_YORK_FIXTURE, '1'],
       [REGIONAL_TOKYO_FIXTURE, '81'],
       [REGIONAL_BERLIN_FIXTURE, '49'],
-      [REGIONAL_BOGOTA_FIXTURE, '57'],
+      [REGIONAL_CARACAS_FIXTURE, '58'],
     ] as const;
     for (const [fixture, callingCode] of cases) {
       expect(suggestedPhoneRegion(fixture.country)).toBe(
@@ -110,7 +110,7 @@ describe('fixtures de sede (G1)', () => {
   });
 
   it('regionalSql sirve para un INSERT crudo', async () => {
-    const { columns, values } = regionalSql(REGIONAL_BOGOTA_FIXTURE);
+    const { columns, values } = regionalSql(REGIONAL_CARACAS_FIXTURE);
     await raw.$executeRawUnsafe(
       `INSERT INTO "locations" ("id", "tenantId", "name", ${columns}, "updatedAt")
        VALUES (gen_random_uuid(), '${tenantId}', 'Cruda', ${values}, now())`,
@@ -119,8 +119,8 @@ describe('fixtures de sede (G1)', () => {
       where: { tenantId, name: 'Cruda' },
     });
     expect(row).toMatchObject({
-      currency: 'COP',
-      timeZone: 'America/Bogota',
+      currency: 'VES',
+      timeZone: 'America/Caracas',
       hourCycle: 'h23',
     });
   });
@@ -184,12 +184,7 @@ describe('fixtures de sede (G1)', () => {
   });
 
   it('legacyLocationInsert deja los campos regionales en NULL y el país que recibe', async () => {
-    const id = await legacyLocationInsert(
-      raw,
-      tenantId,
-      'Antigua',
-      REGIONAL_BOGOTA_FIXTURE.country,
-    );
+    const id = await legacyLocationInsert(raw, tenantId, 'Antigua', 'ES');
     const row = await raw.location.findUniqueOrThrow({ where: { id } });
     expect(row).toMatchObject({
       currency: null,
@@ -201,17 +196,17 @@ describe('fixtures de sede (G1)', () => {
     // El país que recibe va en "countryCode"; el trigger de DX-312 da la
     // columna antigua.
     expect(await countryColumns(id)).toEqual({
-      countryCode: REGIONAL_BOGOTA_FIXTURE.country,
-      country: REGIONAL_BOGOTA_FIXTURE.country,
+      countryCode: 'ES',
+      country: 'ES',
     });
   });
 
   it('setLocationZone cambia la sede y su horario a la vez', async () => {
     const location = await raw.location.create({
-      data: locationData(REGIONAL_BOGOTA_FIXTURE, { tenantId, name: 'Zona' }),
+      data: locationData(REGIONAL_CARACAS_FIXTURE, { tenantId, name: 'Zona' }),
     });
     await raw.locationSchedule.create({
-      data: { tenantId, locationId: location.id, timezone: 'America/Bogota' },
+      data: { tenantId, locationId: location.id, timezone: 'America/Caracas' },
     });
     await setLocationZone(raw, tenantId, location.id, 'Pacific/Auckland');
     expect(

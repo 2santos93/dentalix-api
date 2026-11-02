@@ -31,15 +31,15 @@ function makeLocation(overrides: Partial<Location> = {}): Location {
     tenantId: 't1',
     name: 'Sede principal',
     address: null,
-    country: 'CO',
+    country: 'VE',
     healthRegistrationNumber: null,
     showHealthRegistrationNumber: false,
     phone: null,
     defaultPhoneRegion: null,
     isActive: true,
-    currency: 'COP',
-    timeZone: 'America/Bogota',
-    locale: 'es-CO',
+    currency: 'VES',
+    timeZone: 'America/Caracas',
+    locale: 'es-VE',
     hourCycle: 'h23',
     regionalSettingsReviewedAt: new Date('2026-01-01'),
     createdAt: new Date('2026-01-01'),
@@ -72,19 +72,19 @@ const COUNTRIES = {
 
 /** Monedas admitidas en estos tests (el puerto real consulta `currencies`). */
 const CURRENCIES = {
-  has: (code: string) => Promise.resolve(['COP', 'EUR', 'JPY'].includes(code)),
+  has: (code: string) => Promise.resolve(['VES', 'EUR', 'JPY'].includes(code)),
 };
 
 /** Los valores regionales del alta: datos de test, no defaults. */
 const TOKYO = {
-  country: 'CO',
+  country: 'VE',
   currency: 'JPY',
   timeZone: 'Asia/Tokyo',
   locale: 'ja-JP',
   hourCycle: 'h23',
 };
 const NEW_YORK = {
-  country: 'CO',
+  country: 'VE',
   currency: 'USD',
   timeZone: 'America/New_York',
   locale: 'en-US',
@@ -153,8 +153,8 @@ describe('CreateLocationUseCase', () => {
         name: 'Sede Norte',
         address: undefined,
         phone: undefined,
-        // DX-329: sin el campo, el alta sugiere el país (CO).
-        defaultPhoneRegion: 'CO',
+        // DX-329: sin el campo, el alta sugiere el país (VE).
+        defaultPhoneRegion: 'VE',
         ...TOKYO,
       },
     ]);
@@ -167,7 +167,7 @@ describe('CreateLocationUseCase', () => {
     await createUseCase(makeRepo({ create })).execute(
       {
         name: 'Tokio',
-        country: 'CO',
+        country: 'VE',
         currency: 'jpy',
         timeZone: 'Asia/Tokyo',
         locale: 'JA-jp',
@@ -176,7 +176,7 @@ describe('CreateLocationUseCase', () => {
     );
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({
-        country: 'CO',
+        country: 'VE',
         currency: 'JPY',
         timeZone: 'Asia/Tokyo',
         locale: 'ja-JP',
@@ -553,15 +553,15 @@ describe('teléfono de la sede (DX-222)', () => {
     const uc = updateUseCase(makeRepo({ update }));
 
     const { location: saved } = await uc.execute('loc-1', {
-      phone: ' +57 601 555 0101 ',
+      phone: ' +58 212 555 0101 ',
     });
     await uc.execute('loc-1', { phone: '' });
     await uc.execute('loc-1', { phone: null });
     await uc.execute('loc-1', { name: 'Otra' });
 
-    expect(saved.phone).toBe('+57 601 555 0101');
+    expect(saved.phone).toBe('+58 212 555 0101');
     expect(update.mock.calls.map(([, patch]) => patch)).toEqual([
-      expect.objectContaining({ phone: '+57 601 555 0101' }),
+      expect.objectContaining({ phone: '+58 212 555 0101' }),
       expect.objectContaining({ phone: null }),
       expect.objectContaining({ phone: null }),
       expect.objectContaining({ phone: undefined }),
@@ -605,7 +605,7 @@ describe('teléfono de la sede (DX-222)', () => {
       ).rejects.toMatchObject({
         response: {
           code: 'LOCATION_REGIONAL_CHANGE_UNCONFIRMED',
-          message: expect.stringContaining('movimientos en COP') as string,
+          message: expect.stringContaining('movimientos en VES') as string,
         },
       });
       await expect(
@@ -627,7 +627,7 @@ describe('teléfono de la sede (DX-222)', () => {
       ).rejects.toMatchObject({
         response: {
           message: expect.stringMatching(
-            /movimientos en COP.*Las citas conservan su hora/,
+            /movimientos en VES.*Las citas conservan su hora/,
           ) as string,
         },
       });
@@ -645,15 +645,15 @@ describe('teléfono de la sede (DX-222)', () => {
       ]);
       expect(out.regionalSettings).toEqual({
         before: {
-          currency: 'COP',
-          timeZone: 'America/Bogota',
-          locale: 'es-CO',
+          currency: 'VES',
+          timeZone: 'America/Caracas',
+          locale: 'es-VE',
           hourCycle: 'h23',
         },
         after: {
           currency: 'JPY',
-          timeZone: 'America/Bogota',
-          locale: 'es-CO',
+          timeZone: 'America/Caracas',
+          locale: 'es-VE',
           hourCycle: 'h23',
         },
         reviewed: true,
@@ -688,15 +688,15 @@ describe('teléfono de la sede (DX-222)', () => {
         }),
       );
       await uc.execute('loc-1', {
-        currency: 'COP',
-        timeZone: 'America/Bogota',
-        locale: 'es-CO',
+        currency: 'VES',
+        timeZone: 'America/Caracas',
+        locale: 'es-VE',
       });
       expect(written).toEqual([
         {
-          currency: 'COP',
-          timeZone: 'America/Bogota',
-          locale: 'es-CO',
+          currency: 'VES',
+          timeZone: 'America/Caracas',
+          locale: 'es-VE',
           reviewed: true,
         },
       ]);
@@ -721,7 +721,7 @@ describe('teléfono de la sede (DX-222)', () => {
       const uc = updateUseCase(
         regionalRepo({
           written,
-          current: { currency: 'COP', timeZone: null, locale: null },
+          current: { currency: 'VES', timeZone: null, locale: null },
         }),
       );
       await expect(
@@ -774,15 +774,15 @@ describe('teléfono de la sede (DX-222)', () => {
       ]);
       expect(out.regionalSettings).toEqual({
         before: {
-          currency: 'COP',
-          timeZone: 'America/Bogota',
-          locale: 'es-CO',
+          currency: 'VES',
+          timeZone: 'America/Caracas',
+          locale: 'es-VE',
           hourCycle: 'h23',
         },
         after: {
-          currency: 'COP',
-          timeZone: 'America/Bogota',
-          locale: 'es-CO',
+          currency: 'VES',
+          timeZone: 'America/Caracas',
+          locale: 'es-VE',
           hourCycle: 'h12',
         },
         reviewed: true,
@@ -826,7 +826,7 @@ describe('teléfono de la sede (DX-222)', () => {
         locale: 'en-IN',
       });
       expect(out.regionalSettings).toMatchObject({
-        before: { timeZone: 'Asia/Kolkata', locale: 'es-CO' },
+        before: { timeZone: 'Asia/Kolkata', locale: 'es-VE' },
         after: { timeZone: 'Asia/Kolkata', locale: 'en-IN' },
         reviewed: true,
       });
@@ -986,7 +986,7 @@ describe('prefijo telefónico de la sede (DX-329)', () => {
         name: 'Sede',
         ...TOKYO,
         country: 'VE',
-        defaultPhoneRegion: ' co ',
+        defaultPhoneRegion: ' es ',
       },
       AUDIT,
     );
@@ -1000,7 +1000,7 @@ describe('prefijo telefónico de la sede (DX-329)', () => {
       AUDIT,
     );
     expect(create.mock.calls.map(([i]) => i.defaultPhoneRegion)).toEqual([
-      'CO',
+      'ES',
       null,
     ]);
     const bad = await uc
@@ -1021,11 +1021,11 @@ describe('prefijo telefónico de la sede (DX-329)', () => {
     const uc = updateUseCase(
       makeRepo({
         findById: () =>
-          Promise.resolve(makeLocation({ defaultPhoneRegion: 'CO' })),
+          Promise.resolve(makeLocation({ defaultPhoneRegion: 'VE' })),
         update,
       }),
     );
-    await uc.execute('loc-1', { country: 'VE' });
+    await uc.execute('loc-1', { country: 'ES' });
     expect(
       (update.mock.calls[0][1] as { defaultPhoneRegion?: unknown })
         .defaultPhoneRegion,

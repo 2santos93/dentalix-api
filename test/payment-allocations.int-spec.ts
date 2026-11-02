@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { Prisma, PrismaClient } from '@prisma/client';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -65,7 +65,7 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
   });
   const tenantId = tenant.id;
   const location = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, { tenantId, name: 'Sede' }),
+    data: locationData(REGIONAL_CARACAS_FIXTURE, { tenantId, name: 'Sede' }),
   });
   const patient = await raw.patient.create({
     data: { tenantId, firstName: 'Ana', lastName: 'Imputada' },
@@ -479,7 +479,7 @@ describe('imputación de abonos: tablas, RLS, guardas, liberación y cola (int, 
     const f = await fixture();
     const row = await allocate(f.planId, f.paymentId, f.done, 50);
     const drift = await asApp(a.tenantId, async (tx) => {
-      await tx.$executeRawUnsafe(`SET LOCAL TIME ZONE 'America/Bogota'`);
+      await tx.$executeRawUnsafe(`SET LOCAL TIME ZONE 'America/Caracas'`);
       await tx.paymentAllocation.update({
         where: { id: row.id },
         // Lo que mande la API en updatedAt no cuenta.

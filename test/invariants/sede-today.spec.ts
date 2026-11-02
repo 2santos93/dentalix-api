@@ -12,7 +12,7 @@ import {
 import { isCheckedSpec, readSpecs, type SpecSource } from './bare-delete-many';
 
 // DX-449 (TST-053): los specs de agenda y reservas calculaban «hoy» con el
-// reloj real y una zona fija (UTC−5); entre las 04:40 y las 06:00 UTC (la
+// reloj real y una zona fija (UTC−4); entre las 03:40 y las 05:00 UTC (la
 // medianoche de la sede, cuando el loop fusiona) sus citas «de hoy que ya
 // empezaron» caían en ayer o se solapaban. Un spec nuevo que hable de «hoy»
 // (un identificador con today/TODAY) y lea el reloj real (`Date.now()` o
@@ -25,7 +25,7 @@ const REPO_ROOT = join(__dirname, '..', '..');
 /**
  * Lista blanca: specs anteriores a DX-449 que nombran «hoy» y leen el reloj
  * real sin sede-clock. Justificación: ninguno aparece en las runs rojas de la
- * franja 04:40–06:00 UTC que cita TST-053 y su «hoy» no exige citas ya
+ * franja 03:40–05:00 UTC que cita TST-053 y su «hoy» no exige citas ya
  * empezadas en la sede; quedan para migrar (ver informe de DX-449). Solo puede
  * bajar: cada entrada tiene que seguir cumpliendo el patrón (un spec migrado
  * sale de aquí) y un spec nuevo no entra.
@@ -91,21 +91,21 @@ export function findRealClockToday(specs: SpecSource[]): string[] {
 
 describe('DX-449: «hoy» de la sede en los specs de agenda y reservas', () => {
   describe('safeTodayZone', () => {
-    it('es Bogotá cuando su medianoche queda lejos', () => {
+    it('es Caracas cuando su medianoche queda lejos', () => {
       // 12:00 en la zona de la sede.
-      expect(safeTodayZone(new Date('2026-10-31T17:00:00Z'))).toBe(
+      expect(safeTodayZone(new Date('2026-10-31T16:00:00Z'))).toBe(
         SEDE_FIXTURE_ZONE,
       );
     });
 
     it.each([
-      '2026-10-31T04:40:00Z',
-      '2026-10-31T05:01:00Z',
-      '2026-10-31T05:30:00Z',
-      '2026-10-31T05:56:00Z',
-      '2026-10-31T07:30:00Z',
+      '2026-10-31T03:40:00Z',
+      '2026-10-31T04:01:00Z',
+      '2026-10-31T04:30:00Z',
+      '2026-10-31T04:56:00Z',
+      '2026-10-31T06:30:00Z',
     ])(
-      'cerca de la medianoche de Bogotá (%s) elige una zona lejos de la suya',
+      'cerca de la medianoche de Caracas (%s) elige una zona lejos de la suya',
       (iso) => {
         const now = new Date(iso);
         const zone = safeTodayZone(now);
@@ -138,7 +138,7 @@ describe('DX-449: «hoy» de la sede en los specs de agenda y reservas', () => {
     });
 
     it('«hace 3 h» y «ahora» son el mismo día de la sede en la franja de los merges', () => {
-      for (const iso of ['2026-10-31T05:01:00Z', '2026-10-31T05:56:00Z']) {
+      for (const iso of ['2026-10-31T04:01:00Z', '2026-10-31T04:56:00Z']) {
         const now = new Date(iso);
         const { timeZone } = sedeTodayFixture(now);
         const before = new Date(now.getTime() - 179 * 60_000);
@@ -149,10 +149,10 @@ describe('DX-449: «hoy» de la sede en los specs de agenda y reservas', () => {
 
   it('civilDaysSince da uno o dos días civiles, del más antiguo al último', () => {
     expect(
-      civilDaysSince(60, SEDE_FIXTURE_ZONE, new Date('2026-10-31T17:00:00Z')),
+      civilDaysSince(60, SEDE_FIXTURE_ZONE, new Date('2026-10-31T16:00:00Z')),
     ).toEqual(['2026-10-31']);
     expect(
-      civilDaysSince(60, SEDE_FIXTURE_ZONE, new Date('2026-10-31T05:20:00Z')),
+      civilDaysSince(60, SEDE_FIXTURE_ZONE, new Date('2026-10-31T04:20:00Z')),
     ).toEqual(['2026-10-30', '2026-10-31']);
   });
 
@@ -164,7 +164,7 @@ describe('DX-449: «hoy» de la sede en los specs de agenda y reservas', () => {
       },
       {
         path: 'test/nuevo.int-spec.ts',
-        source: "const TODAY = civilDateIn(new Date(), 'America/Bogota');",
+        source: "const TODAY = civilDateIn(new Date(), 'America/Caracas');",
       },
       {
         path: 'test/migrado.e2e-spec.ts',

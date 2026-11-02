@@ -32,8 +32,8 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
-const BOGOTA = 'America/Bogota';
-const today = (): string => civilDateIn(new Date(), BOGOTA);
+const CARACAS = 'America/Caracas';
+const today = (): string => civilDateIn(new Date(), CARACAS);
 const noonDaysAgo = (n: number): Date =>
   new Date(`${addCivilDays(today(), -n)}T17:00:00.000Z`);
 
@@ -83,8 +83,8 @@ describe('Cobranza — notas, compromisos y saldo vencido (e2e, DX-150)', () => 
         firstName,
         lastName: 'Cobranza',
         docNumber: doc,
-        phone: '300 555 0101',
-        countryCode: 'CO',
+        phone: '412 555 0101',
+        countryCode: 'VE',
       },
       select: { id: true },
     });
@@ -96,7 +96,7 @@ describe('Cobranza — notas, compromisos y saldo vencido (e2e, DX-150)', () => 
       data: {
         tenantId: clinic.tenantId,
         patientId,
-        currency: 'COP',
+        currency: 'USD',
         status: TreatmentPlanStatus.ACCEPTED,
         createdAt: noonDaysAgo(40),
         items: {
@@ -166,7 +166,7 @@ describe('Cobranza — notas, compromisos y saldo vencido (e2e, DX-150)', () => 
       if (role === ClinicRole.ASSISTANT) assistantToken = token;
     }
 
-    // Deudor: 500.000 COP de un plan aceptado hace 40 días, sin abonos.
+    // Deudor: 500.000 USD de un plan aceptado hace 40 días, sin abonos.
     deudor = await patient(clinicA, 'Debe', 'COB-1');
     deudorPlan = await plan(clinicA, deudor, 500_000);
     alDia = await patient(clinicA, 'Aldia', 'COB-2');
@@ -207,11 +207,11 @@ describe('Cobranza — notas, compromisos y saldo vencido (e2e, DX-150)', () => 
       `/patients/${deudor}/payment-promises`,
       receptionToken,
     )
-      .send({ amount: 200000, currency: 'COP', dueDate })
+      .send({ amount: 200000, currency: 'USD', dueDate })
       .expect(201);
     expect(promise.body).toMatchObject({
       amount: 200000,
-      currency: 'COP',
+      currency: 'USD',
       dueDate,
       status: 'OPEN',
       covered: 0,
@@ -225,7 +225,7 @@ describe('Cobranza — notas, compromisos y saldo vencido (e2e, DX-150)', () => 
       `/patients/${deudor}/payment-promises`,
       receptionToken,
     )
-      .send({ amount: 1000, currency: 'COP', dueDate })
+      .send({ amount: 1000, currency: 'USD', dueDate })
       .expect(409);
 
     let aging = await api(
@@ -251,7 +251,7 @@ describe('Cobranza — notas, compromisos y saldo vencido (e2e, DX-150)', () => 
       )
         .send({
           amount,
-          currency: 'COP',
+          currency: 'USD',
           paidAt: new Date().toISOString(),
           method: 'CASH',
         })
@@ -337,7 +337,7 @@ describe('Cobranza — notas, compromisos y saldo vencido (e2e, DX-150)', () => 
       .find((l) => l.includes(`${dueDate}`) && l.includes('Cumplido'));
     expect(line).toMatch(
       new RegExp(
-        `,"Llamada · Promete pago",\\d{4}-\\d{2}-\\d{2},"Cumplido",200000\\.00,COP,${dueDate}$`,
+        `,"Llamada · Promete pago",\\d{4}-\\d{2}-\\d{2},"Cumplido",200000\\.00,USD,${dueDate}$`,
       ),
     );
     expect(csv.text).not.toContain('Paga el viernes');
@@ -358,7 +358,7 @@ describe('Cobranza — notas, compromisos y saldo vencido (e2e, DX-150)', () => 
         patientId: otro,
         locationId: sede,
         amount: 50_000,
-        currency: 'COP',
+        currency: 'USD',
         dueDate: new Date(`${addCivilDays(today(), -1)}T00:00:00.000Z`),
         createdById: clinicA.adminUserId,
       },
@@ -400,7 +400,7 @@ describe('Cobranza — notas, compromisos y saldo vencido (e2e, DX-150)', () => 
     )
       .send({
         amount: 1000,
-        currency: 'COP',
+        currency: 'USD',
         dueDate: addCivilDays(today(), -1),
       })
       .expect(400);
@@ -441,7 +441,7 @@ describe('Cobranza — notas, compromisos y saldo vencido (e2e, DX-150)', () => 
       .send({ channel: 'CALL', outcome: 'NO_ANSWER' })
       .expect(403);
     await api(clinicA, 'post', `/patients/${deudor}/payment-promises`, token())
-      .send({ amount: 1, currency: 'COP', dueDate: today() })
+      .send({ amount: 1, currency: 'USD', dueDate: today() })
       .expect(403);
   });
 
@@ -451,7 +451,7 @@ describe('Cobranza — notas, compromisos y saldo vencido (e2e, DX-150)', () => 
       .send({ channel: 'CALL', outcome: 'NO_ANSWER' })
       .expect(404);
     await api(clinicB, 'post', `/patients/${deudor}/payment-promises`)
-      .send({ amount: 1000, currency: 'COP', dueDate: today() })
+      .send({ amount: 1000, currency: 'USD', dueDate: today() })
       .expect(404);
     const aging = await api(clinicB, 'get', '/receivables/aging').expect(200);
     expect(bodyOf(aging).items).toEqual([]);
@@ -473,7 +473,7 @@ describe('Cobranza — notas, compromisos y saldo vencido (e2e, DX-150)', () => 
         expect(balanceOf(res.body, deudor)).toEqual({
           hasOverdue: true,
           overdueDays: 40,
-          amounts: [{ currency: 'COP', amount: 300000 }],
+          amounts: [{ currency: 'USD', amount: 300000 }],
         });
         expect(balanceOf(res.body, alDia)).toEqual({
           hasOverdue: false,
@@ -501,7 +501,7 @@ describe('Cobranza — notas, compromisos y saldo vencido (e2e, DX-150)', () => 
       expect(bodyOf(asReception).balance).toMatchObject({
         hasOverdue: true,
         overdueDays: 40,
-        amounts: [{ currency: 'COP', amount: 300000 }],
+        amounts: [{ currency: 'USD', amount: 300000 }],
       });
       const asDentist = await api(
         clinicA,

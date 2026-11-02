@@ -17,7 +17,7 @@ const input = (
   location: {
     id: 'loc-1',
     name: 'Sede Norte',
-    address: 'Calle 100 # 15-20, Bogotá',
+    address: 'Av. Libertador 100, Caracas',
   },
   patient: {
     id: 'pat-1',
@@ -30,7 +30,7 @@ const input = (
   payment: {
     id: 'pay-1',
     amount: 150000,
-    currency: 'COP',
+    currency: 'GBP',
     method: 'CASH',
     paidAt: new Date('2026-10-17T17:00:00.000Z'),
     paidOn: '2026-10-17',
@@ -41,7 +41,7 @@ const input = (
     createdAt: new Date('2026-09-01T15:00:00.000Z'),
   },
   planBalance: {
-    currency: 'COP',
+    currency: 'GBP',
     billable: 900000,
     paid: 450000,
     balance: 450000,
@@ -63,7 +63,7 @@ describe('buildReceiptSnapshot (DX-136)', () => {
       location: {
         id: 'loc-1',
         name: 'Sede Norte',
-        address: 'Calle 100 # 15-20, Bogotá',
+        address: 'Av. Libertador 100, Caracas',
       },
       fiscalDataPending: true,
       patient: {
@@ -77,7 +77,7 @@ describe('buildReceiptSnapshot (DX-136)', () => {
       payment: {
         id: 'pay-1',
         amount: 150000,
-        currency: 'COP',
+        currency: 'GBP',
         method: 'CASH',
         // DX-377: sin medio ni referencia en la entrada, nulos.
         paymentMethodName: null,
@@ -93,7 +93,7 @@ describe('buildReceiptSnapshot (DX-136)', () => {
       // DX-262: un abono a un plan no tiene saldo migrado.
       openingBalance: null,
       planBalance: {
-        currency: 'COP',
+        currency: 'GBP',
         billable: 900000,
         paid: 450000,
         balance: 450000,
@@ -108,28 +108,28 @@ describe('buildReceiptSnapshot (DX-136)', () => {
     expect(json).not.toContain('1012345678');
   });
 
-  it('con razón social y NIT de la clínica los datos fiscales no quedan pendientes', () => {
+  it('con razón social e identificación fiscal de la clínica los datos fiscales no quedan pendientes', () => {
     const snapshot = buildReceiptSnapshot(
       input({
         clinic: {
           name: 'Clínica Demo',
-          legalName: 'Clínica Demo S.A.S.',
-          taxId: '900123456-7',
-          address: 'Cra 7 # 72-10, Bogotá',
+          legalName: 'Clínica Demo C.A.',
+          taxId: 'J-12345678-9',
+          address: 'Av. Urdaneta 72, Caracas',
         },
       }),
       NO_LOCAL_NAMES,
     );
     expect(snapshot.fiscalDataPending).toBe(false);
-    expect(snapshot.clinic.taxId).toBe('900123456-7');
+    expect(snapshot.clinic.taxId).toBe('J-12345678-9');
   });
 
-  it('sin NIT (aunque haya razón social) siguen pendientes', () => {
+  it('sin identificación fiscal (aunque haya razón social) siguen pendientes', () => {
     const snapshot = buildReceiptSnapshot(
       input({
         clinic: {
           name: 'Clínica Demo',
-          legalName: 'Clínica Demo S.A.S.',
+          legalName: 'Clínica Demo C.A.',
           taxId: '  ',
           address: null,
         },

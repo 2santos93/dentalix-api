@@ -25,7 +25,7 @@ async function report(
       }),
     listLocations: () =>
       Promise.resolve([
-        { id: 'l1', name, isActive: true, timeZone: 'America/Bogota' },
+        { id: 'l1', name, isActive: true, timeZone: 'America/Caracas' },
       ]),
     aggregate: (period) =>
       Promise.resolve({
@@ -35,7 +35,7 @@ async function report(
             period.from === '2026-10-01'
               ? {
                   ...EMPTY_AGGREGATES,
-                  production: new Map([['COP', 12]]),
+                  production: new Map([['USD', 12]]),
                   collected: new Map([['EUR', 7.5]]),
                   completed: 9,
                   noShow: 1,
@@ -43,7 +43,7 @@ async function report(
                 }
               : {
                   ...EMPTY_AGGREGATES,
-                  production: new Map([['COP', 10]]),
+                  production: new Map([['USD', 10]]),
                   completed: 8,
                   noShow: 2,
                   attendedPatients: 2,
@@ -82,10 +82,10 @@ describe('CSV de «Comparar sedes» (DX-014)', () => {
     );
     const production = rows.filter((l) => l.includes('"Producción"'));
     expect(production).toEqual([
-      '2026-10-01 a 2026-10-31,2026-08-31 a 2026-09-30,"Sede principal","Producción",COP,12.00,10.00,20.0,%,Mejora,',
       '2026-10-01 a 2026-10-31,2026-08-31 a 2026-09-30,"Sede principal","Producción",EUR,0.00,0.00,,,Igual,',
-      '2026-10-01 a 2026-10-31,2026-08-31 a 2026-09-30,"Total clínica","Producción",COP,12.00,10.00,20.0,%,Mejora,',
+      '2026-10-01 a 2026-10-31,2026-08-31 a 2026-09-30,"Sede principal","Producción",USD,12.00,10.00,20.0,%,Mejora,',
       '2026-10-01 a 2026-10-31,2026-08-31 a 2026-09-30,"Total clínica","Producción",EUR,0.00,0.00,,,Igual,',
+      '2026-10-01 a 2026-10-31,2026-08-31 a 2026-09-30,"Total clínica","Producción",USD,12.00,10.00,20.0,%,Mejora,',
     ]);
     const noShow = rows.find((l) =>
       l.startsWith(
@@ -127,9 +127,9 @@ describe('CSV de «Comparar sedes» (DX-014)', () => {
     );
     expect(LOCATIONS_COMPARISON_CSV_HEADER.at(-1)).toBe('Aviso');
     expect(
-      rows.find((l) => l.includes('"Sede principal","Producción",COP')),
+      rows.find((l) => l.includes('"Sede principal","Producción",USD')),
     ).toBe(
-      `2026-10-01 a 2026-10-31,2026-08-31 a 2026-09-30,"Sede principal","Producción",COP,12.00,10.00,,,,"${UNATTRIBUTED_PREVIOUS_CSV_NOTE}"`,
+      `2026-10-01 a 2026-10-31,2026-08-31 a 2026-09-30,"Sede principal","Producción",USD,12.00,10.00,,,,"${UNATTRIBUTED_PREVIOUS_CSV_NOTE}"`,
     );
     // Los indicadores que no dependen de la atribución, sin aviso.
     expect(

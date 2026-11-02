@@ -1,6 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -62,7 +62,7 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
     data: { name: subdomain, subdomain },
   });
   const main = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId: tenant.id,
       name: 'Sede principal',
     }),
@@ -74,7 +74,7 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
     data: {
       tenantId: tenant.id,
       patientId: patient.id,
-      currency: 'COP',
+      currency: 'USD',
       status: 'ACCEPTED',
     },
   });
@@ -108,7 +108,7 @@ async function emit(
     INSERT INTO "payments" ("id", "tenantId", "locationId", "treatmentPlanId", "patientId",
       "amount", "currency", "paidAt", "updatedAt")
     VALUES (gen_random_uuid(), ${clinic.tenantId}::uuid, ${locationId}::uuid, ${clinic.planId}::uuid,
-      ${clinic.patientId}::uuid, 1000, 'COP', now() AT TIME ZONE 'UTC', now() AT TIME ZONE 'UTC')
+      ${clinic.patientId}::uuid, 1000, 'USD', now() AT TIME ZONE 'UTC', now() AT TIME ZONE 'UTC')
     RETURNING "id"`;
   const [{ prefix }] = await tx.$queryRaw<{ prefix: string }[]>`
     SELECT "receiptPrefix" AS prefix FROM "locations" WHERE "id" = ${locationId}::uuid`;
@@ -136,7 +136,7 @@ function setPrefix(clinic: Clinic, locationId: string, prefix: string | null) {
 function newLocation(clinic: Clinic, name: string, prefix?: string) {
   return asApp(clinic.tenantId, (tx) =>
     tx.location.create({
-      data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      data: locationData(REGIONAL_CARACAS_FIXTURE, {
         tenantId: clinic.tenantId,
         name,
         receiptPrefix: prefix,
@@ -310,7 +310,7 @@ describe('serie de recibos de la sede inmutable (DX-226, int)', () => {
           INSERT INTO "payments" ("id", "tenantId", "locationId", "treatmentPlanId", "patientId",
             "amount", "currency", "paidAt", "updatedAt")
           VALUES (gen_random_uuid(), ${a.tenantId}::uuid, ${a.mainId}::uuid, ${a.planId}::uuid,
-            ${a.patientId}::uuid, 1000, 'COP', now() AT TIME ZONE 'UTC', now() AT TIME ZONE 'UTC')
+            ${a.patientId}::uuid, 1000, 'USD', now() AT TIME ZONE 'UTC', now() AT TIME ZONE 'UTC')
           RETURNING "id"`;
         await tx.$executeRaw`
           UPDATE "payment_receipt_counters" SET "lastNumber" = "lastNumber" + 1

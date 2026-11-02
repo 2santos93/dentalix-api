@@ -34,7 +34,7 @@ import {
 } from '../../../domain/ports/appointment-repository.port';
 
 /** Zona de la sede del fake: dato de test, no un valor por defecto del producto. */
-const FAKE_LOCATION_TIME_ZONE = 'America/Bogota';
+const FAKE_LOCATION_TIME_ZONE = 'America/Caracas';
 
 // `Appointment` (the API-facing entity) deliberately has no `deletedAt` field
 // — same convention as Patient/ToothRecord, see appointment.entity.ts. The

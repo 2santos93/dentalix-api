@@ -29,7 +29,7 @@ const FOR_PATIENT = {
 // (llegó → en sillón → listo para cobrar → completada, y «Deshacer llegada»),
 // con la máquina de transiciones, las horas, los permisos y la auditoría.
 
-const TZ = 'America/Bogota';
+const TZ = 'America/Caracas';
 const HOUR = 60 * 60 * 1000;
 
 const schedule = {

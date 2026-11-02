@@ -19,14 +19,14 @@ export interface RegionalFixture {
   defaultPhoneRegion: string;
 }
 
-/** Conserva las expectativas de los tests anteriores a G1 (COP, zona UTC−5). */
-export const REGIONAL_BOGOTA_FIXTURE: RegionalFixture = {
-  country: 'CO',
-  currency: 'COP',
-  timeZone: 'America/Bogota',
-  locale: 'es-CO',
+/** Conserva las expectativas de los tests anteriores a G1 (VES, zona UTC−4). */
+export const REGIONAL_CARACAS_FIXTURE: RegionalFixture = {
+  country: 'VE',
+  currency: 'VES',
+  timeZone: 'America/Caracas',
+  locale: 'es-VE',
   hourCycle: 'h23',
-  defaultPhoneRegion: 'CO',
+  defaultPhoneRegion: 'VE',
 };
 
 /** Sede de Tokio: un número sin «+» se lee con su región (DX-329). */
@@ -97,7 +97,7 @@ export function registerBody<T extends object>(
 }
 
 /**
- * Excepción G5.3 (DX-334): columna anterior a DX-312: solo admite CO/ES. País
+ * Excepción G5.3 (DX-334): columna anterior a DX-312: solo admite VE/ES. País
  * de las sedes que los int de migraciones insertan en una etapa ANTERIOR a
  * DX-312 (sin la columna "countryCode"); no decide nada.
  */

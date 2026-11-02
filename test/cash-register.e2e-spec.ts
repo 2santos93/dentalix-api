@@ -15,7 +15,7 @@ import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationBody,
   registerBody,
 } from './support/location-fixtures';
@@ -70,7 +70,7 @@ async function registerAndLogin(
 ): Promise<{ tenantId: string; accessToken: string; subdomain: string }> {
   const register = await registerVerified(
     app,
-    registerBody(REGIONAL_BOGOTA_FIXTURE, {
+    registerBody(REGIONAL_CARACAS_FIXTURE, {
       ...opts,
       password: PASSWORD,
       fullName: 'Dr. Owner',
@@ -186,7 +186,7 @@ describe('Caja — GET /payments (e2e)', () => {
     const norte = await authA(
       request(app.getHttpServer())
         .post('/api/v1/locations')
-        .send(locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' })),
+        .send(locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede Norte' })),
     ).expect(201);
     sedeNorte = (norte.body as { id: string }).id;
 
@@ -261,7 +261,7 @@ describe('Caja — GET /payments (e2e)', () => {
       ...ana,
       locationId: sedePrincipal,
       amount: 100000,
-      currency: 'COP',
+      currency: 'VES',
       paidAt: '2026-10-01',
       method: PaymentMethod.CASH,
     });
@@ -279,7 +279,7 @@ describe('Caja — GET /payments (e2e)', () => {
       ...beto,
       locationId: sedePrincipal,
       amount: 20000.5,
-      currency: 'COP',
+      currency: 'VES',
       paidAt: '2026-10-15',
       method: PaymentMethod.CASH,
     });
@@ -288,7 +288,7 @@ describe('Caja — GET /payments (e2e)', () => {
       ...ana,
       locationId: sedeNorte,
       amount: 30000,
-      currency: 'COP',
+      currency: 'VES',
       paidAt: '2026-10-15',
     });
     await seedPayment('oct31Transfer', {
@@ -306,7 +306,7 @@ describe('Caja — GET /payments (e2e)', () => {
       ...ana,
       locationId: sedePrincipal,
       amount: 1,
-      currency: 'COP',
+      currency: 'VES',
       paidAt: '2026-09-30',
       method: PaymentMethod.CASH,
     });
@@ -315,7 +315,7 @@ describe('Caja — GET /payments (e2e)', () => {
       ...ana,
       locationId: sedePrincipal,
       amount: 1,
-      currency: 'COP',
+      currency: 'VES',
       paidAt: '2026-11-01',
       method: PaymentMethod.CASH,
     });
@@ -324,7 +324,7 @@ describe('Caja — GET /payments (e2e)', () => {
       ...ana,
       locationId: sedePrincipal,
       amount: 999999,
-      currency: 'COP',
+      currency: 'VES',
       paidAt: '2026-10-20',
       method: PaymentMethod.CASH,
       deletedAt: new Date(),
@@ -357,7 +357,7 @@ describe('Caja — GET /payments (e2e)', () => {
       treatmentPlanId: planB.id,
       patientId: patientB.id,
       amount: 777,
-      currency: 'COP',
+      currency: 'VES',
       paidAt: '2026-10-15',
       method: PaymentMethod.CASH,
     });
@@ -417,7 +417,7 @@ describe('Caja — GET /payments (e2e)', () => {
       paidAt: '2026-10-01T17:00:00.000Z',
       paidOn: '2026-10-01',
       amount: 100000,
-      currency: 'COP',
+      currency: 'VES',
       method: 'CASH',
       // DX-377: el medio inicial de su método y sin referencia.
       paymentMethod: { id: expect.any(String) as string, name: 'Efectivo' },
@@ -451,14 +451,14 @@ describe('Caja — GET /payments (e2e)', () => {
     expect(items).toHaveLength(1);
     expect(summary.count).toBe(5);
     expect(summary.byCurrency).toEqual([
-      { currency: 'COP', total: 150000.5, count: 3 },
+      { currency: 'VES', total: 150000.5, count: 3 },
       { currency: 'USD', total: 60.25, count: 2 },
     ]);
     expect(summary.byMethod).toEqual([
-      { method: 'CASH', currency: 'COP', total: 120000.5, count: 2 },
+      { method: 'CASH', currency: 'VES', total: 120000.5, count: 2 },
       { method: 'CARD', currency: 'USD', total: 50.25, count: 1 },
       { method: 'TRANSFER', currency: 'USD', total: 10, count: 1 },
-      { method: null, currency: 'COP', total: 30000, count: 1 },
+      { method: null, currency: 'VES', total: 30000, count: 1 },
     ]);
   });
 
@@ -476,7 +476,7 @@ describe('Caja — GET /payments (e2e)', () => {
     const bodyB = resB.body as CashBody;
     expect(bodyB.items.map((r) => r.id)).toEqual([ids.clinicB]);
     expect(bodyB.summary.byCurrency).toEqual([
-      { currency: 'COP', total: 777, count: 1 },
+      { currency: 'VES', total: 777, count: 1 },
     ]);
   });
 
@@ -497,7 +497,7 @@ describe('Caja — GET /payments (e2e)', () => {
     );
     expect(body.scope.location).toEqual({ id: sedeNorte, name: 'Sede Norte' });
     expect(body.summary.byCurrency).toEqual([
-      { currency: 'COP', total: 30000, count: 1 },
+      { currency: 'VES', total: 30000, count: 1 },
       { currency: 'USD', total: 50.25, count: 1 },
     ]);
   });
@@ -520,22 +520,22 @@ describe('Caja — GET /payments (e2e)', () => {
     );
     expect(body.summary).toEqual({
       count: 2,
-      byCurrency: [{ currency: 'COP', total: 120000.5, count: 2 }],
+      byCurrency: [{ currency: 'VES', total: 120000.5, count: 2 }],
       byMethod: [
-        { method: 'CASH', currency: 'COP', total: 120000.5, count: 2 },
+        { method: 'CASH', currency: 'VES', total: 120000.5, count: 2 },
       ],
       byPaymentMethod: [
         {
           paymentMethodId: expect.any(String) as string,
           name: 'Efectivo',
-          currency: 'COP',
+          currency: 'VES',
           total: 120000.5,
           count: 2,
         },
       ],
       // DX-516: sin ajustes, lo cobrado es lo abonado.
       adjustments: [],
-      collected: [{ currency: 'COP', total: 120000.5 }],
+      collected: [{ currency: 'VES', total: 120000.5 }],
     });
   });
 
@@ -616,7 +616,7 @@ describe('Caja — GET /payments (e2e)', () => {
         request(app.getHttpServer())
           .post('/api/v1/locations')
           .send(
-            locationBody(REGIONAL_BOGOTA_FIXTURE, {
+            locationBody(REGIONAL_CARACAS_FIXTURE, {
               name: 'Sede Madrid',
               country: 'ES',
               currency: 'EUR',
@@ -639,7 +639,7 @@ describe('Caja — GET /payments (e2e)', () => {
             locationId,
             ...ana,
             amount: 1000,
-            currency: 'COP',
+            currency: 'VES',
             paidAt: new Date(paidAt),
             method: PaymentMethod.CASH,
           },
@@ -647,8 +647,12 @@ describe('Caja — GET /payments (e2e)', () => {
         ids[key] = row.id;
       };
       // 20/12 a las 20:00 en la zona de la sede = 21/12 01:00 UTC.
-      await seedAt('decNightBogota', sedePrincipal, '2025-12-21T01:00:00.000Z');
-      // 21/12 a las 00:30 en Madrid = 20/12 23:30 UTC = 20/12 18:30 en Bogotá.
+      await seedAt(
+        'decNightCaracas',
+        sedePrincipal,
+        '2025-12-21T01:00:00.000Z',
+      );
+      // 21/12 a las 00:30 en Madrid = 20/12 23:30 UTC = 20/12 18:30 en Caracas.
       await seedAt(
         'decMadridAfterMidnight',
         sedeMadrid,
@@ -666,11 +670,11 @@ describe('Caja — GET /payments (e2e)', () => {
           l.timeZone,
         ]),
       );
-      expect(zones[sedePrincipal]).toBe('America/Bogota');
+      expect(zones[sedePrincipal]).toBe('America/Caracas');
       expect(zones[sedeMadrid]).toBe('Europe/Madrid');
     });
 
-    it('un abono a las 20:00 de Bogotá sale en la caja de ese día (con su paidOn) y no en la del siguiente', async () => {
+    it('un abono a las 20:00 de Caracas sale en la caja de ese día (con su paidOn) y no en la del siguiente', async () => {
       const day = await getA(
         { from: '2025-12-20', to: '2025-12-20' },
         sedePrincipal,
@@ -678,7 +682,7 @@ describe('Caja — GET /payments (e2e)', () => {
       const body = day.body as CashBody & {
         items: (CashRow & { paidOn: string })[];
       };
-      expect(body.items.map((r) => r.id)).toEqual([ids.decNightBogota]);
+      expect(body.items.map((r) => r.id)).toEqual([ids.decNightCaracas]);
       expect(body.items[0].paidOn).toBe('2025-12-20');
 
       const next = await getA(
@@ -693,7 +697,7 @@ describe('Caja — GET /payments (e2e)', () => {
         request(app.getHttpServer())
           .post(`/api/v1/treatment-plans/${planAna}/payments`)
           .set('X-Location-Id', sedeMadrid)
-          .send({ amount: 5, currency: 'COP', paidAt: '2025-12-22' }),
+          .send({ amount: 5, currency: 'VES', paidAt: '2025-12-22' }),
       ).expect(201);
       const payment = created.body as { id: string; paidAt: string };
       // 12:00 en Madrid (CET, UTC+1) = 11:00 UTC.
@@ -716,7 +720,7 @@ describe('Caja — GET /payments (e2e)', () => {
           .post(`/api/v1/treatment-plans/${planAna}/payments`)
           .send({
             amount: 6,
-            currency: 'COP',
+            currency: 'VES',
             paidAt: '2025-12-23T00:00:00.000Z',
           }),
       ).expect(201);
@@ -742,7 +746,7 @@ describe('Caja — GET /payments (e2e)', () => {
       await authA(
         request(app.getHttpServer())
           .post(`/api/v1/treatment-plans/${planAna}/payments`)
-          .send({ amount: 6, currency: 'COP', paidAt: '2025-12-23T20:00:00' }),
+          .send({ amount: 6, currency: 'VES', paidAt: '2025-12-23T20:00:00' }),
       ).expect(400);
     });
 
@@ -751,7 +755,7 @@ describe('Caja — GET /payments (e2e)', () => {
         200,
       );
       expect((dec20.body as CashBody).items.map((r) => r.id)).toEqual([
-        ids.decNightBogota,
+        ids.decNightCaracas,
       ]);
       const dec21 = await getA({ from: '2025-12-21', to: '2025-12-21' }).expect(
         200,

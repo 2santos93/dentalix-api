@@ -17,7 +17,7 @@ import { civilDateIn } from '../src/shared/time/civil-day';
 import { noticeRecipient } from '../src/modules/patients/domain/communication/notice-recipient';
 import { startsAtLabel } from '../src/modules/reminders/domain/starts-at-label';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   REGIONAL_TOKYO_FIXTURE,
   legacyLocationInsert,
   locationData,
@@ -26,7 +26,7 @@ import {
 /**
  * GLOBAL-G1 (DX-314): cada módulo corta «hoy» en la zona de SU sede, contra
  * Postgres real con el rol de la app. 15:30 UTC del 20/10 ya es el 21/10 en
- * Tokio (UTC+9) y aún el 20/10 en Bogotá: si un módulo usara otra zona, el
+ * Tokio (UTC+9) y aún el 20/10 en Caracas: si un módulo usara otra zona, el
  * día saldría mal. Nunca hay zona por defecto.
  */
 const owner = new PrismaClient<Prisma.PrismaClientOptions>({
@@ -35,7 +35,7 @@ const owner = new PrismaClient<Prisma.PrismaClientOptions>({
 const tenantContext = new TenantContextService();
 const prisma = new PrismaService(tenantContext);
 const SUBDOMAINS = ['g1-zone-consumers', 'g1-zone-consumers-empty'];
-/** 21/10/2026 00:30 en Tokio; 20/10/2026 10:30 en Bogotá. */
+/** 21/10/2026 00:30 en Tokio; 20/10/2026 10:30 en Caracas. */
 const NOW = new Date('2026-10-20T15:30:00.000Z');
 
 async function cleanup(): Promise<void> {
@@ -67,7 +67,7 @@ describe('consumidores de la zona de la sede: día civil en Tokio (int, G1)', ()
   let tenantId: string;
   let emptyTenantId: string;
   let tokyo: string;
-  let bogota: string;
+  let caracas: string;
   let legacy: string;
   let patientId: string;
   let providerId: string;
@@ -89,7 +89,7 @@ describe('consumidores de la zona de la sede: día civil en Tokio (int, G1)', ()
         data: { name: 'Sin sedes activas', subdomain: SUBDOMAINS[1] },
       })
     ).id;
-    // Tokio es la principal (la activa más antigua); Bogotá, la otra.
+    // Tokio es la principal (la activa más antigua); Caracas, la otra.
     tokyo = (
       await owner.location.create({
         data: locationData(REGIONAL_TOKYO_FIXTURE, {
@@ -99,11 +99,11 @@ describe('consumidores de la zona de la sede: día civil en Tokio (int, G1)', ()
         }),
       })
     ).id;
-    bogota = (
+    caracas = (
       await owner.location.create({
-        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        data: locationData(REGIONAL_CARACAS_FIXTURE, {
           tenantId,
-          name: 'Bogotá',
+          name: 'Caracas',
           createdAt: new Date('2026-01-02T00:00:00.000Z'),
         }),
       })
@@ -113,10 +113,10 @@ describe('consumidores de la zona de la sede: día civil en Tokio (int, G1)', ()
       owner,
       tenantId,
       'Réplica antigua',
-      REGIONAL_BOGOTA_FIXTURE.country,
+      REGIONAL_CARACAS_FIXTURE.country,
     );
     await owner.location.create({
-      data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      data: locationData(REGIONAL_CARACAS_FIXTURE, {
         tenantId: emptyTenantId,
         name: 'Inactiva',
         isActive: false,
@@ -189,9 +189,9 @@ describe('consumidores de la zona de la sede: día civil en Tokio (int, G1)', ()
       kind: 'PATIENT',
       minor: false,
     });
-    // Con la zona UTC−5 aún sería menor: el día de la sede decide.
-    expect(recipientOn('America/Bogota').minor).toBe(true);
-    // 01:00 UTC del 21/10 = 10:00 del 21 en Tokio (20:00 del 20 en Bogotá).
+    // Con la zona UTC−4 aún sería menor: el día de la sede decide.
+    expect(recipientOn('America/Caracas').minor).toBe(true);
+    // 01:00 UTC del 21/10 = 10:00 del 21 en Tokio (20:00 del 20 en Caracas).
     expect(
       startsAtLabel(
         ctx!.appointment.start,
@@ -235,11 +235,13 @@ describe('consumidores de la zona de la sede: día civil en Tokio (int, G1)', ()
       date: '2026-10-21',
       timeZone: 'Asia/Tokyo',
     });
-    await expect(inTenant(bogota, () => flags.todayInSede())).resolves.toEqual({
-      date: '2026-10-20',
-      timeZone: 'America/Bogota',
-    });
-    // Vista consolidada: la sede principal (Tokio), nunca Bogotá por defecto.
+    await expect(inTenant(caracas, () => flags.todayInSede())).resolves.toEqual(
+      {
+        date: '2026-10-20',
+        timeZone: 'America/Caracas',
+      },
+    );
+    // Vista consolidada: la sede principal (Tokio), nunca Caracas por defecto.
     await expect(
       inTenant(undefined, () => flags.todayInSede()),
     ).resolves.toEqual({ date: '2026-10-21', timeZone: 'Asia/Tokyo' });
@@ -300,8 +302,8 @@ describe('consumidores de la zona de la sede: día civil en Tokio (int, G1)', ()
       });
       return debtor.id;
     };
-    // 20/09 23:30 en Tokio (09:30 en Bogotá): hoy (21/10 en Tokio) son 31
-    // días; con la zona UTC−5 serían 30.
+    // 20/09 23:30 en Tokio (09:30 en Caracas): hoy (21/10 en Tokio) son 31
+    // días; con la zona UTC−4 serían 30.
     const boundary = await debt('Tokio', '2026-09-20T14:30:00.000Z', tokyo);
     // Sin sede: envejece en la zona de la principal (Tokio), igual que arriba.
     const noLocation = await debt('Sin sede', '2026-09-20T14:30:00.000Z', null);
@@ -344,7 +346,7 @@ describe('consumidores de la zona de la sede: día civil en Tokio (int, G1)', ()
         return out.body;
       });
     await expect(body(tokyo)).resolves.toBe('Fecha: 21 de octubre de 2026.');
-    await expect(body(bogota)).resolves.toBe('Fecha: 20 de octubre de 2026.');
+    await expect(body(caracas)).resolves.toBe('Fecha: 20 de octubre de 2026.');
     // Sin sede activa: la principal (Tokio).
     await expect(body(undefined)).resolves.toBe(
       'Fecha: 21 de octubre de 2026.',
@@ -362,8 +364,8 @@ describe('consumidores de la zona de la sede: día civil en Tokio (int, G1)', ()
       hourCycle: 'h23',
     });
     await expect(
-      inTenant(undefined, () => repo.locationTimeZone(bogota)),
-    ).resolves.toBe('America/Bogota');
+      inTenant(undefined, () => repo.locationTimeZone(caracas)),
+    ).resolves.toBe('America/Caracas');
     // La sede del lote sin zona: 409, nunca la zona de su país.
     expect(
       await conflictOf(

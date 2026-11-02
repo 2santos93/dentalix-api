@@ -180,7 +180,7 @@ describe('sanitizeAuditMetadata (DX-009)', () => {
 
     it('descarta cualquier otro valor', () => {
       expect(sanitizeAuditMetadata({ origin: 'WEBHOOK' })).toEqual({});
-      expect(sanitizeAuditMetadata({ origin: '+573101234567' })).toEqual({});
+      expect(sanitizeAuditMetadata({ origin: '+584141234567' })).toEqual({});
       expect(sanitizeAuditMetadata({ origin: 1 })).toEqual({});
     });
   });
@@ -389,12 +389,12 @@ describe('sanitizeAuditMetadata — saldos migrados del lote (DX-262)', () => {
           balancesCreated: 9,
           balancesUndone: -1,
           balanceTotals: [
-            { currency: 'COP', rows: 9, amount: 1500000.5, docNumber: '123' },
+            { currency: 'GBP', rows: 9, amount: 1500000.5, docNumber: '123' },
             { currency: 'usd', rows: 1, amount: 10 },
             { currency: 'EUR', rows: 1, amount: 10.555 },
             { currency: 'USD', rows: 1, amount: 40 },
           ],
-          balanceUndoneTotals: [{ currency: 'COP', rows: 2, amount: 10.5 }],
+          balanceUndoneTotals: [{ currency: 'GBP', rows: 2, amount: 10.5 }],
         },
       }),
     ).toEqual({
@@ -405,10 +405,10 @@ describe('sanitizeAuditMetadata — saldos migrados del lote (DX-262)', () => {
         balanceErrors: 2,
         balancesCreated: 9,
         balanceTotals: [
-          { currency: 'COP', rows: 9, amount: 1500000.5 },
+          { currency: 'GBP', rows: 9, amount: 1500000.5 },
           { currency: 'USD', rows: 1, amount: 40 },
         ],
-        balanceUndoneTotals: [{ currency: 'COP', rows: 2, amount: 10.5 }],
+        balanceUndoneTotals: [{ currency: 'GBP', rows: 2, amount: 10.5 }],
       },
     });
   });
@@ -781,14 +781,14 @@ describe('sanitizeAuditMetadata — reasignación de un abono (DX-051)', () => {
 describe('sanitizeAuditMetadata — moneda, zona y formato de la sede (G1)', () => {
   const side = (currency: string | null) => ({
     currency,
-    timeZone: currency ? 'America/Bogota' : null,
-    locale: currency ? 'es-CO' : null,
+    timeZone: currency ? 'America/Caracas' : null,
+    locale: currency ? 'es-VE' : null,
   });
 
   it('conserva antes y después (con null en una sede sin configurar) y la revisión', () => {
     const regionalSettings = {
       before: side(null),
-      after: side('COP'),
+      after: side('GBP'),
       reviewed: true,
     };
     expect(sanitizeAuditMetadata({ regionalSettings })).toEqual({
@@ -798,31 +798,31 @@ describe('sanitizeAuditMetadata — moneda, zona y formato de la sede (G1)', () 
 
   it('descarta el cambio entero si un valor o un lado no tiene la forma admitida', () => {
     for (const regionalSettings of [
-      { before: side('COP'), after: side('COP') },
+      { before: side('GBP'), after: side('GBP') },
       {
-        before: side('COP'),
-        after: { ...side('COP'), currency: 'cop' },
+        before: side('GBP'),
+        after: { ...side('GBP'), currency: 'gbp' },
         reviewed: true,
       },
       {
-        before: side('COP'),
-        after: { ...side('COP'), timeZone: 'a b' },
+        before: side('GBP'),
+        after: { ...side('GBP'), timeZone: 'a b' },
         reviewed: true,
       },
       {
-        before: side('COP'),
-        after: { ...side('COP'), extra: 1 },
+        before: side('GBP'),
+        after: { ...side('GBP'), extra: 1 },
         reviewed: true,
       },
-      { before: side('COP'), reviewed: false },
+      { before: side('GBP'), reviewed: false },
       {
-        before: { ...side('COP'), hourCycle: 'h23' },
-        after: { ...side('COP'), hourCycle: 'h24' },
+        before: { ...side('GBP'), hourCycle: 'h23' },
+        after: { ...side('GBP'), hourCycle: 'h24' },
         reviewed: true,
       },
       {
-        before: { ...side('COP'), hourCycle: 'h23' },
-        after: { ...side('COP'), hourCycle: 12 },
+        before: { ...side('GBP'), hourCycle: 'h23' },
+        after: { ...side('GBP'), hourCycle: 12 },
         reviewed: true,
       },
     ]) {
@@ -832,8 +832,8 @@ describe('sanitizeAuditMetadata — moneda, zona y formato de la sede (G1)', () 
 
   it('G1-B: conserva el reloj de cada lado (null en una sede sin reloj)', () => {
     const regionalSettings = {
-      before: { ...side('COP'), hourCycle: null },
-      after: { ...side('COP'), hourCycle: 'h12' },
+      before: { ...side('GBP'), hourCycle: null },
+      after: { ...side('GBP'), hourCycle: 'h12' },
       reviewed: true,
     };
     expect(sanitizeAuditMetadata({ regionalSettings })).toEqual({
@@ -843,7 +843,7 @@ describe('sanitizeAuditMetadata — moneda, zona y formato de la sede (G1)', () 
 
   it('G1-B: un evento de G1 sin reloj se sigue leyendo igual', () => {
     const regionalSettings = {
-      before: side('COP'),
+      before: side('GBP'),
       after: side('EUR'),
       reviewed: true,
     };
@@ -1036,7 +1036,7 @@ describe('sanitizeAuditMetadata — tasa de respaldo de un día sin tasa (DX-402
         exchangeRateBackup: {
           rateDate: '2026-10-28',
           manualSince: '2026-10-30',
-          currencies: ['COP', 'USD'],
+          currencies: ['GBP', 'USD'],
           amount: 50,
           patientName: 'Ana',
         },
@@ -1047,7 +1047,7 @@ describe('sanitizeAuditMetadata — tasa de respaldo de un día sin tasa (DX-402
       exchangeRateBackup: {
         rateDate: '2026-10-28',
         manualSince: '2026-10-30',
-        currencies: ['COP', 'USD'],
+        currencies: ['GBP', 'USD'],
       },
     });
   });
@@ -1057,23 +1057,23 @@ describe('sanitizeAuditMetadata — tasa de respaldo de un día sin tasa (DX-402
       {
         rateDate: '2026-02-30',
         manualSince: '2026-10-30',
-        currencies: ['COP'],
+        currencies: ['GBP'],
       },
       {
         rateDate: '2026-10-30',
         manualSince: '2026-10-30',
-        currencies: ['COP'],
+        currencies: ['GBP'],
       },
       {
         rateDate: '2026-10-28',
         manualSince: '2026-10-30',
-        currencies: ['cop'],
+        currencies: ['gbp'],
       },
       { rateDate: '2026-10-28', manualSince: '2026-10-30', currencies: [] },
       {
         rateDate: '2026-10-28',
         manualSince: '2026-10-30',
-        currencies: ['COP', 'EUR', 'VES'],
+        currencies: ['GBP', 'EUR', 'VES'],
       },
       '2026-10-28',
     ]) {

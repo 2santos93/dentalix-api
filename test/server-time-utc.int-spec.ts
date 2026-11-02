@@ -1,12 +1,12 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
 // DX-226 (DB-037): la hora que pone el servidor de BD en columnas `timestamp`
 // sin zona es UTC, sea cual sea el TimeZone de la sesión. Con CURRENT_TIMESTAMP
-// el valor se convertía a la zona de la sesión: con America/Bogota quedaba 5 h
+// el valor se convertía a la zona de la sesión: con America/Caracas quedaba 5 h
 // antes de lo que graba Prisma (UTC desde el cliente). Cada INSERT corre como
 // dentalix_app con la clínica fijada (como la API) y `SET LOCAL TIME ZONE`
 // fuera de UTC; la hora grabada tiene que coincidir (< 1 s) con
@@ -21,7 +21,7 @@ const appRole = new PrismaClient<Prisma.PrismaClientOptions>({
 
 const SUBDOMAIN = 'dx226-utc-int';
 const EMAIL = 'dr@dx226-utc-int.test';
-const ZONE = 'America/Bogota';
+const ZONE = 'America/Caracas';
 
 interface Seeded {
   tenantId: string;
@@ -82,7 +82,7 @@ async function cleanup(): Promise<void> {
  * Corre `sql` como dentalix_app, con la clínica fijada y la sesión en la zona de la sede,
  * y devuelve la primera fila. `$1` es siempre el tenant.
  */
-function inBogota<T>(
+function inCaracas<T>(
   sql: string,
   ...params: unknown[]
 ): Promise<T & { drift: number }> {
@@ -105,7 +105,7 @@ function inBogota<T>(
  * Corre `fn` como dentalix_app (Prisma, como la API), con la clínica fijada y
  * la sesión en la zona de la sede.
  */
-function txInBogota<T>(
+function txInCaracas<T>(
   fn: (tx: Prisma.TransactionClient) => Promise<T>,
 ): Promise<T> {
   return appRole.$transaction(async (tx) => {
@@ -140,10 +140,10 @@ describe('hora del servidor en UTC con una sesión fuera de UTC (DX-226, int)', 
       data: { name: SUBDOMAIN, subdomain: SUBDOMAIN },
     });
     const location = await raw.location.create({
-      data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      data: locationData(REGIONAL_CARACAS_FIXTURE, {
         tenantId: tenant.id,
         name: 'Sede Centro',
-        country: 'CO',
+        country: 'VE',
       }),
     });
     const patient = await raw.patient.create({
@@ -153,7 +153,7 @@ describe('hora del servidor en UTC con una sesión fuera de UTC (DX-226, int)', 
       data: {
         tenantId: tenant.id,
         patientId: patient.id,
-        currency: 'COP',
+        currency: 'USD',
         status: 'ACCEPTED',
       },
     });
@@ -214,7 +214,7 @@ describe('hora del servidor en UTC con una sesión fuera de UTC (DX-226, int)', 
   });
 
   it('clinical_entries y clinical_entry_addenda: createdAt en UTC', async () => {
-    const entry = await inBogota<{ id: string }>(
+    const entry = await inCaracas<{ id: string }>(
       `INSERT INTO "clinical_entries" ("id", "tenantId", "patientId", "entryDate", "notes", "performedById")
        VALUES (gen_random_uuid(), $1::uuid, $2::uuid, now() AT TIME ZONE 'UTC', 'Control', $3::uuid)
        RETURNING "id", ${drift('"createdAt"')}`,
@@ -222,7 +222,7 @@ describe('hora del servidor en UTC con una sesión fuera de UTC (DX-226, int)', 
       s.userId,
     );
     expect(entry.drift).toBeLessThan(1);
-    const addendum = await inBogota<{ id: string }>(
+    const addendum = await inCaracas<{ id: string }>(
       `INSERT INTO "clinical_entry_addenda" ("id", "tenantId", "patientId", "clinicalEntryId", "reason", "text", "authorId")
        VALUES (gen_random_uuid(), $1::uuid, $2::uuid, $3::uuid, 'Corrección de dato', 'Aclaración', $4::uuid)
        RETURNING "id", ${drift('"createdAt"')}`,
@@ -234,7 +234,7 @@ describe('hora del servidor en UTC con una sesión fuera de UTC (DX-226, int)', 
   });
 
   it('patient_implants: createdAt en UTC', async () => {
-    const implant = await inBogota<{ id: string }>(
+    const implant = await inCaracas<{ id: string }>(
       `INSERT INTO "patient_implants" ("id", "tenantId", "locationId", "patientId", "professionalId",
          "placedOn", "toothNumber", "kind", "manufacturer", "reference", "lot")
        VALUES (gen_random_uuid(), $1::uuid, $2::uuid, $3::uuid, $4::uuid,
@@ -248,7 +248,7 @@ describe('hora del servidor en UTC con una sesión fuera de UTC (DX-226, int)', 
   });
 
   it('patient_documents: uploadedAt y createdAt en UTC', async () => {
-    const doc = await inBogota<{ id: string; createdDrift: number }>(
+    const doc = await inCaracas<{ id: string; createdDrift: number }>(
       `INSERT INTO "patient_documents" ("id", "tenantId", "patientId", "locationId", "category",
          "originalName", "mimeType", "sizeBytes", "sha256", "storageKey", "uploadedById")
        VALUES (gen_random_uuid(), $1::uuid, $2::uuid, $3::uuid, 'XRAY',
@@ -264,7 +264,7 @@ describe('hora del servidor en UTC con una sesión fuera de UTC (DX-226, int)', 
   });
 
   it('collection_notes y payment_promises: createdAt en UTC', async () => {
-    const note = await inBogota<{ id: string }>(
+    const note = await inCaracas<{ id: string }>(
       `INSERT INTO "collection_notes" ("id", "tenantId", "patientId", "locationId", "channel", "outcome", "authorId")
        VALUES (gen_random_uuid(), $1::uuid, $2::uuid, $3::uuid, 'CALL', 'NO_ANSWER', $4::uuid)
        RETURNING "id", ${drift('"createdAt"')}`,
@@ -273,9 +273,9 @@ describe('hora del servidor en UTC con una sesión fuera de UTC (DX-226, int)', 
       s.userId,
     );
     expect(note.drift).toBeLessThan(1);
-    const promise = await inBogota<{ id: string }>(
+    const promise = await inCaracas<{ id: string }>(
       `INSERT INTO "payment_promises" ("id", "tenantId", "patientId", "locationId", "amount", "currency", "dueDate", "createdById")
-       VALUES (gen_random_uuid(), $1::uuid, $2::uuid, $3::uuid, 1000, 'COP', (now() AT TIME ZONE 'UTC')::date + 10, $4::uuid)
+       VALUES (gen_random_uuid(), $1::uuid, $2::uuid, $3::uuid, 1000, 'USD', (now() AT TIME ZONE 'UTC')::date + 10, $4::uuid)
        RETURNING "id", ${drift('"createdAt"')}`,
       s.patientId,
       s.locationId,
@@ -293,7 +293,7 @@ describe('hora del servidor en UTC con una sesión fuera de UTC (DX-226, int)', 
         INSERT INTO "payments" ("id", "tenantId", "locationId", "treatmentPlanId", "patientId",
           "amount", "currency", "paidAt", "createdAt", "updatedAt")
         VALUES (gen_random_uuid(), ${s.tenantId}::uuid, ${s.locationId}::uuid, ${s.planId}::uuid,
-          ${s.patientId}::uuid, 5000, 'COP', now() AT TIME ZONE 'UTC',
+          ${s.patientId}::uuid, 5000, 'USD', now() AT TIME ZONE 'UTC',
           (now() AT TIME ZONE 'UTC') + interval '1 hour', now() AT TIME ZONE 'UTC')
         RETURNING "id", ${Prisma.raw(drift('"createdAt"'))}`;
       const [{ prefix }] = await tx.$queryRaw<{ prefix: string }[]>`
@@ -323,7 +323,7 @@ describe('hora del servidor en UTC con una sesión fuera de UTC (DX-226, int)', 
   it('caja por turno (DX-027): apertura, cierre, reapertura y ajuste con la hora del servidor en UTC', async () => {
     // Apertura con su fondo (el trigger del fondo compara con la hora de la
     // apertura: si la fuente de hora no fuera la misma, fallaría).
-    const session = await txInBogota(async (tx) => {
+    const session = await txInCaracas(async (tx) => {
       const created = await tx.cashSession.create({
         data: {
           tenantId: s.tenantId,
@@ -335,7 +335,7 @@ describe('hora del servidor en UTC con una sesión fuera de UTC (DX-226, int)', 
         data: {
           tenantId: s.tenantId,
           sessionId: created.id,
-          currency: 'COP',
+          currency: 'USD',
           amount: 50_000,
         },
       });
@@ -345,7 +345,7 @@ describe('hora del servidor en UTC con una sesión fuera de UTC (DX-226, int)', 
       return created;
     });
     // Cierre con su arqueo y el cambio de estado.
-    const closing = await txInBogota(async (tx) => {
+    const closing = await txInCaracas(async (tx) => {
       const created = await tx.cashSessionClosing.create({
         data: {
           tenantId: s.tenantId,
@@ -361,7 +361,7 @@ describe('hora del servidor en UTC con una sesión fuera de UTC (DX-226, int)', 
         data: {
           tenantId: s.tenantId,
           closingId: created.id,
-          currency: 'COP',
+          currency: 'USD',
           method: 'CASH',
           opening: 50_000,
           expected: 50_000,
@@ -382,7 +382,7 @@ describe('hora del servidor en UTC con una sesión fuera de UTC (DX-226, int)', 
       return created;
     });
     // Reapertura y un ajuste pendiente.
-    await txInBogota(async (tx) => {
+    await txInCaracas(async (tx) => {
       const reopening = await tx.cashSessionReopening.create({
         data: {
           tenantId: s.tenantId,
@@ -416,7 +416,7 @@ describe('hora del servidor en UTC con una sesión fuera de UTC (DX-226, int)', 
           locationId: s.locationId,
           kind: 'CORRECTION',
           originalSessionId: session.id,
-          currency: 'COP',
+          currency: 'USD',
           method: 'CASH',
           amount: 100,
           reason: 'Corrección de prueba',
@@ -435,7 +435,7 @@ describe('hora del servidor en UTC con una sesión fuera de UTC (DX-226, int)', 
   });
 
   it('gastos, pagos de gasto y categorías: createdAt y voidedAt en UTC (DX-274)', async () => {
-    await txInBogota(async (tx) => {
+    await txInCaracas(async (tx) => {
       const category = await tx.expenseCategory.create({
         data: { tenantId: s.tenantId, name: 'Hora UTC', createdById: s.userId },
       });
@@ -448,7 +448,7 @@ describe('hora del servidor en UTC con una sesión fuera de UTC (DX-226, int)', 
           locationId: s.locationId,
           category: 'Otros',
           amount: 10_000,
-          currency: 'COP',
+          currency: 'USD',
           invoiceDate: new Date('2026-10-17T00:00:00.000Z'),
           createdById: s.userId,
         },
@@ -462,7 +462,7 @@ describe('hora del servidor en UTC con una sesión fuera de UTC (DX-226, int)', 
           expenseId: expense.id,
           locationId: s.locationId,
           amount: 10_000,
-          currency: 'COP',
+          currency: 'USD',
           method: 'TRANSFER',
           paidOn: new Date('2026-10-17T00:00:00.000Z'),
           createdById: s.userId,
@@ -499,9 +499,9 @@ describe('hora del servidor en UTC con una sesión fuera de UTC (DX-226, int)', 
 
   it('location_working_calendars y location_holidays: createdAt en UTC (DX-316)', async () => {
     // El calendario lo crea el trigger de alta de sede, con la sesión en la zona de la sede.
-    await txInBogota(async (tx) => {
+    await txInCaracas(async (tx) => {
       const location = await tx.location.create({
-        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        data: locationData(REGIONAL_CARACAS_FIXTURE, {
           tenantId: s.tenantId,
           name: 'Sede del calendario',
         }),
@@ -525,7 +525,7 @@ describe('hora del servidor en UTC con una sesión fuera de UTC (DX-226, int)', 
       ).toBeLessThan(1);
     });
     // Lo que mande la API en createdAt no cuenta.
-    const holiday = await inBogota<{ id: string }>(
+    const holiday = await inCaracas<{ id: string }>(
       `INSERT INTO "location_holidays"
          ("id", "tenantId", "locationId", "date", "name", "createdAt", "updatedAt")
        VALUES (gen_random_uuid(), $1::uuid, $2::uuid, '2027-01-04'::date,
@@ -540,11 +540,11 @@ describe('hora del servidor en UTC con una sesión fuera de UTC (DX-226, int)', 
     const membership = await raw.clinicMembership.create({
       data: { tenantId: s.tenantId, userId: s.userId, role: 'ADMIN' },
     });
-    const rate = await inBogota<{ id: string }>(
+    const rate = await inCaracas<{ id: string }>(
       `INSERT INTO "manual_exchange_rates"
          ("id", "tenantId", "date", "currency", "rate", "createdById",
           "createdByMembershipId", "createdAt")
-       VALUES (gen_random_uuid(), $1::uuid, '2026-10-29'::date, 'COP', 4000,
+       VALUES (gen_random_uuid(), $1::uuid, '2026-10-29'::date, 'VES', 4000,
                $2::uuid, $3::uuid, '2001-01-01 00:00:00')
        RETURNING "id", ${drift('"createdAt"')}`,
       s.userId,
@@ -563,7 +563,7 @@ describe('hora del servidor en UTC con una sesión fuera de UTC (DX-226, int)', 
         color: '#123456',
       },
     });
-    await txInBogota(async (tx) => {
+    await txInCaracas(async (tx) => {
       // El alta del ítem encola el plan (requestedAt).
       const item = await tx.treatmentPlanItem.create({
         data: {
@@ -588,7 +588,7 @@ describe('hora del servidor en UTC con una sesión fuera de UTC (DX-226, int)', 
           treatmentPlanId: s.planId,
           patientId: s.patientId,
           amount: 5_000,
-          currency: 'COP',
+          currency: 'USD',
           paidAt: new Date(),
         },
       });
@@ -600,7 +600,7 @@ describe('hora del servidor en UTC con una sesión fuera de UTC (DX-226, int)', 
           tenantId: s.tenantId,
           treatmentPlanId: s.planId,
           amount: 5_000,
-          currency: 'COP',
+          currency: 'USD',
           rateDate: new Date('2026-10-17T00:00:00.000Z'),
           createdAt: old,
         },

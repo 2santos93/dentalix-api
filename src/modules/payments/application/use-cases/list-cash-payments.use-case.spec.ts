@@ -19,8 +19,8 @@ import type {
 import type { VoidActor, VoidSubject } from '../../domain/void-window';
 import { CashPayment } from '../../domain/entities/cash-payment.entity';
 
-// 2026-10-16 10:00 en la zona de la sede (UTC-5): el "hoy" de la sede de las filas.
-const NOW = new Date('2026-10-16T15:00:00.000Z');
+// 2026-10-16 10:00 en la zona de la sede (UTC-4): el "hoy" de la sede de las filas.
+const NOW = new Date('2026-10-16T14:00:00.000Z');
 const clock = (): Date => NOW;
 const ADMIN: VoidActor = { userId: 'u-admin', role: ClinicRole.ADMIN };
 const RECEPTION: VoidActor = { userId: 'u-recep', role: ClinicRole.RECEPTION };
@@ -28,8 +28,8 @@ const RECEPTION: VoidActor = { userId: 'u-recep', role: ClinicRole.RECEPTION };
 /** Registrado por recepción hoy (en la zona de la sede). */
 const OWN_TODAY: VoidSubject = {
   createdById: 'u-recep',
-  createdAt: new Date('2026-10-16T13:00:00.000Z'),
-  timeZone: 'America/Bogota',
+  createdAt: new Date('2026-10-16T12:00:00.000Z'),
+  timeZone: 'America/Caracas',
 };
 
 function fakeRow(
@@ -40,10 +40,10 @@ function fakeRow(
   const payment: CashPayment = {
     id,
     createdById: voidSubject.createdById,
-    paidAt: new Date('2026-10-15T17:00:00.000Z'),
+    paidAt: new Date('2026-10-15T16:00:00.000Z'),
     paidOn: '2026-10-15',
     amount: 100,
-    currency: 'COP',
+    currency: 'VES',
     method: PaymentMethod.CASH,
     paymentMethod: null,
     reference: null,
@@ -372,9 +372,9 @@ describe('ListCashPaymentsUseCase', () => {
       groups: [
         { currency: 'USD', method: PaymentMethod.CARD, total: 0.1, count: 1 },
         { currency: 'USD', method: PaymentMethod.CASH, total: 0.2, count: 2 },
-        { currency: 'COP', method: null, total: 50000, count: 1 },
+        { currency: 'VES', method: null, total: 50000, count: 1 },
         {
-          currency: 'COP',
+          currency: 'VES',
           method: PaymentMethod.CASH,
           total: 150000.55,
           count: 2,
@@ -387,21 +387,21 @@ describe('ListCashPaymentsUseCase', () => {
     expect(summary.count).toBe(6);
     // 0.1 + 0.2 en coma flotante es 0.30000000000000004.
     expect(summary.byCurrency).toEqual([
-      { currency: 'COP', total: 200000.55, count: 3 },
       { currency: 'USD', total: 0.3, count: 3 },
+      { currency: 'VES', total: 200000.55, count: 3 },
     ]);
     // Orden estable: por método (orden del enum, "sin método" al final) y
     // dentro del método por moneda.
     expect(summary.byMethod).toEqual([
+      { method: PaymentMethod.CASH, currency: 'USD', total: 0.2, count: 2 },
       {
         method: PaymentMethod.CASH,
-        currency: 'COP',
+        currency: 'VES',
         total: 150000.55,
         count: 2,
       },
-      { method: PaymentMethod.CASH, currency: 'USD', total: 0.2, count: 2 },
       { method: PaymentMethod.CARD, currency: 'USD', total: 0.1, count: 1 },
-      { method: null, currency: 'COP', total: 50000, count: 1 },
+      { method: null, currency: 'VES', total: 50000, count: 1 },
     ]);
   });
 
@@ -444,14 +444,14 @@ describe('ListCashPaymentsUseCase', () => {
       scopeLocation: null,
       groups: [
         {
-          currency: 'COP',
+          currency: 'VES',
           method: PaymentMethod.TRANSFER,
           paymentMethod: movil,
           total: 100.1,
           count: 2,
         },
         {
-          currency: 'COP',
+          currency: 'VES',
           method: PaymentMethod.TRANSFER,
           paymentMethod: transferencia,
           total: 0.2,
@@ -465,7 +465,7 @@ describe('ListCashPaymentsUseCase', () => {
           count: 1,
         },
         {
-          currency: 'COP',
+          currency: 'VES',
           method: null,
           paymentMethod: null,
           total: 5,
@@ -480,11 +480,11 @@ describe('ListCashPaymentsUseCase', () => {
       { method: PaymentMethod.CASH, currency: 'USD', total: 10, count: 1 },
       {
         method: PaymentMethod.TRANSFER,
-        currency: 'COP',
+        currency: 'VES',
         total: 100.3,
         count: 3,
       },
-      { method: null, currency: 'COP', total: 5, count: 1 },
+      { method: null, currency: 'VES', total: 5, count: 1 },
     ]);
     expect(summary.byPaymentMethod).toEqual([
       {
@@ -497,21 +497,21 @@ describe('ListCashPaymentsUseCase', () => {
       {
         paymentMethodId: 'pm-mobile',
         name: 'Pago móvil',
-        currency: 'COP',
+        currency: 'VES',
         total: 100.1,
         count: 2,
       },
       {
         paymentMethodId: 'pm-transfer',
         name: 'Transferencia',
-        currency: 'COP',
+        currency: 'VES',
         total: 0.2,
         count: 1,
       },
       {
         paymentMethodId: null,
         name: null,
-        currency: 'COP',
+        currency: 'VES',
         total: 5,
         count: 1,
       },
@@ -542,7 +542,7 @@ describe('ListCashPaymentsUseCase', () => {
     const OWN_YESTERDAY: VoidSubject = {
       ...OWN_TODAY,
       // 23:30 del 15 en la zona de la sede: es 16 en UTC, pero no "hoy" en la sede.
-      createdAt: new Date('2026-10-16T04:30:00.000Z'),
+      createdAt: new Date('2026-10-16T03:30:00.000Z'),
     };
 
     it('recepción: true solo en sus abonos de hoy (día de la sede)', async () => {
@@ -602,7 +602,7 @@ describe('ListCashPaymentsUseCase', () => {
           fakeRow(
             'late-yesterday',
             {},
-            { ...OWN_TODAY, createdAt: new Date('2026-10-16T04:30:00.000Z') },
+            { ...OWN_TODAY, createdAt: new Date('2026-10-16T03:30:00.000Z') },
           ),
           // 20:00 del 16 en Madrid: allí ya es 16, en UTC también.
           fakeRow(

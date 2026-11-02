@@ -10,7 +10,7 @@ import type {
 export class InMemoryPerioExamRepository implements PerioExamRepository {
   readonly exams: PerioExamRecord[] = [];
   /** Zona de la sede activa (por defecto, la de una sede sin horario). */
-  timeZone = 'America/Bogota';
+  timeZone = 'America/Caracas';
   private seq = 0;
 
   clinicTimeZone(): Promise<string> {

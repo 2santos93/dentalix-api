@@ -54,19 +54,19 @@ describe('organización clínica por visitas DX-256', () => {
       minimumVisitDate(
         new Date('2026-01-01T00:00:00Z'),
         90,
-        new Date('2026-01-10T15:00:00Z'),
+        new Date('2026-01-10T14:00:00Z'),
       ).toISOString(),
     ).toBe('2026-04-01T00:00:00.000Z');
   });
-  it('respeta el día civil de Bogotá y el cambio DST de Madrid', () => {
+  it('respeta el día civil de Caracas y el cambio DST de Madrid', () => {
     expect(
       minimumVisitDate(
-        new Date('2026-01-02T00:30:00Z'),
+        new Date('2026-01-01T23:30:00Z'),
         90,
         new Date('2026-01-01T00:00:00Z'),
-        'America/Bogota',
+        'America/Caracas',
       ).toISOString(),
-    ).toBe('2026-04-01T05:00:00.000Z');
+    ).toBe('2026-04-01T04:00:00.000Z');
     expect(
       minimumVisitDate(
         new Date('2026-03-28T10:00:00Z'),
@@ -77,13 +77,13 @@ describe('organización clínica por visitas DX-256', () => {
     ).toBe('2026-03-29T22:00:00.000Z');
   });
   it('sin antecedente o intervalo sugiere hoy y nunca una fecha pasada', () => {
-    const now = new Date('2026-10-21T12:00:00Z');
+    const now = new Date('2026-10-21T11:00:00Z');
     expect(minimumVisitDate(null, 90, now)).toEqual(now);
     expect(minimumVisitDate(new Date('2020-01-01'), 0, now)).toEqual(now);
     expect(minimumVisitDate(new Date('2020-01-01'), 90, now)).toEqual(now);
   });
   it('selecciona solo ítems aceptados de plan aceptado sin cita futura viva', () => {
-    const now = new Date('2026-10-21T12:00:00Z');
+    const now = new Date('2026-10-21T11:00:00Z');
     expect(isUnscheduled('ACCEPTED', 'ACCEPTED', [], now)).toBe(true);
     expect(isUnscheduled('PRESENTED', 'ACCEPTED', [], now)).toBe(false);
     expect(isUnscheduled('ACCEPTED', 'DONE', [], now)).toBe(false);

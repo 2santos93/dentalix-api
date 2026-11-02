@@ -46,7 +46,7 @@ function loaded(
       },
       responsibles: over.responsibles ?? [],
       settings: {
-        timeZone: 'America/Bogota',
+        timeZone: 'America/Caracas',
         majorityAge: over.majorityAge ?? 18,
       },
     },

@@ -54,10 +54,10 @@ class FakeFeeRepo implements CancellationFeeRepository {
       version: 1,
       noticeHours: 24,
       suggestedFee: 50000,
-      currency: 'COP',
+      currency: 'USD',
     },
     receptionCanCharge: false,
-    locationLocale: 'es-CO',
+    locationLocale: 'es-VE',
     locationHourCycle: 'h23',
     fee: null,
   };
@@ -149,7 +149,7 @@ describe('casos de uso del cargo por inasistencia (DX-291)', () => {
       {
         appointmentId: APPT,
         amount: 50000,
-        currency: 'COP',
+        currency: 'USD',
         expectedStatus: 'NO_SHOW',
         expectedPolicyVersionId: 'v1',
         createdById: 'u-admin',
@@ -238,7 +238,7 @@ describe('casos de uso del cargo por inasistencia (DX-291)', () => {
       id: 'fee-x',
       status: 'CHARGED',
       amount: 50000,
-      currency: 'COP',
+      currency: 'USD',
       planId: 'p',
       planItemId: 'i',
       planItemRemoved: false,
@@ -289,7 +289,7 @@ describe('casos de uso del cargo por inasistencia (DX-291)', () => {
       status: 'NONE',
       chargeBlock: null,
       canManage: false,
-      communicated: { suggestedFee: 50000, currency: 'COP', version: 1 },
+      communicated: { suggestedFee: 50000, currency: 'USD', version: 1 },
     });
   });
 

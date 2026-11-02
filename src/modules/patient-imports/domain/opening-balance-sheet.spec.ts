@@ -13,11 +13,11 @@ import { ImportFileError } from './tabular-file';
 import { regionalFormat } from '../../../shared/format/regional-format';
 
 /** La sede del lote de las pruebas de siempre (lo que mostraba). */
-const FMT = () => regionalFormat({ locale: 'es-CO', hourCycle: 'h23' });
+const FMT = () => regionalFormat({ locale: 'es-VE', hourCycle: 'h23' });
 
 const CTX: BalanceRowContext = {
   today: '2026-10-23',
-  currencies: new Set(['COP', 'USD', 'EUR']),
+  currencies: new Set(['VES', 'USD', 'EUR']),
   format: 'CSV',
 };
 
@@ -35,7 +35,7 @@ describe('importe del saldo migrado (DX-262)', () => {
     ['1.234.567,50', 123_456_750],
     ['1,234,567.50', 123_456_750],
     ['$ 1.500.000', 150_000_000],
-    ['COP 2.000', 200_000],
+    ['VES 2.000', 200_000],
     ['1500,5', 150_050],
     ['1500.75', 150_075],
     ['  99  ', 9_900],
@@ -60,7 +60,7 @@ describe('importe del saldo migrado (DX-262)', () => {
     expect(parseAmountCents('0.30000000000000004', 'XLSX')).toEqual({
       cents: 30,
     });
-    // Importes grandes en COP: el ruido crece con el valor (QA N2,
+    // Importes grandes en VES: el ruido crece con el valor (QA N2,
     // `=0,1*3*1000000000`), y la tolerancia es relativa.
     expect(parseAmountCents('300000000.00000006', 'XLSX')).toEqual({
       cents: 30_000_000_000,
@@ -143,7 +143,7 @@ describe('columnas de la hoja de saldos (DX-262)', () => {
   });
 
   it('la plantilla trae BOM, las cabeceras y una fila de ejemplo ficticia', () => {
-    const csv = balanceTemplateCsv('COP');
+    const csv = balanceTemplateCsv('VES');
     expect(csv.startsWith('﻿"numero_documento","importe","moneda"')).toBe(true);
     expect(csv).toContain('Fila de ejemplo: bórrala antes de importar');
   });
@@ -151,14 +151,14 @@ describe('columnas de la hoja de saldos (DX-262)', () => {
   it('balance template uses the location currency', () => {
     const csv = balanceTemplateCsv('JPY');
     expect(csv).toContain('"JPY"');
-    expect(csv).not.toContain('COP');
+    expect(csv).not.toContain('VES');
   });
 });
 
 describe('validación de una fila de saldo (DX-262)', () => {
   const t = table([
     ['numero_documento', 'importe', 'moneda', 'fecha_antiguedad', 'concepto'],
-    ['1.020.304', '150.000', 'cop', '15/03/2026', 'Ortodoncia 2025'],
+    ['1.020.304', '150.000', 'ves', '15/03/2026', 'Ortodoncia 2025'],
     ['', '-3', 'XYZ', '2026-12-01', 'x'.repeat(201)],
     ['55', '100', 'USD', '', ''],
   ]);
@@ -167,13 +167,13 @@ describe('validación de una fila de saldo (DX-262)', () => {
   it('una fila buena: clave del documento, céntimos, moneda en mayúsculas, fecha ISO', () => {
     const r = validateBalanceRow(t.rows[0], cols, CTX, t.headers);
     expect(r.issues).toEqual([]);
-    expect(r.counted).toEqual({ currency: 'COP', cents: 15_000_000 });
+    expect(r.counted).toEqual({ currency: 'VES', cents: 15_000_000 });
     expect(r.candidate).toEqual({
       rowNumber: 2,
       docKey: '1020304',
       docNumber: '1.020.304',
       cents: 15_000_000,
-      currency: 'COP',
+      currency: 'VES',
       asOfDate: '2026-03-15',
       concept: 'Ortodoncia 2025',
     });
@@ -188,7 +188,7 @@ describe('validación de una fila de saldo (DX-262)', () => {
       ['importe', 'El importe debe ser mayor que 0.'],
       [
         'moneda',
-        'La moneda «XYZ» no está admitida en la clínica. Admitidas: COP, EUR, USD.',
+        'La moneda «XYZ» no está admitida en la clínica. Admitidas: EUR, USD, VES.',
       ],
       ['fecha_antiguedad', 'La fecha de antigüedad es futura.'],
       ['concepto', 'El concepto tiene más de 200 caracteres.'],
@@ -223,10 +223,10 @@ describe('agregado por paciente y moneda (DX-262)', () => {
   it('suma las filas del mismo paciente y moneda, con la fecha más antigua, y lo indica', () => {
     const result = aggregateBalances(
       [
-        c(2, '111', 10_000, 'COP', '2026-05-01', 'Ortodoncia'),
-        c(3, '111', 5_050, 'COP', '2026-02-10'),
+        c(2, '111', 10_000, 'VES', '2026-05-01', 'Ortodoncia'),
+        c(3, '111', 5_050, 'VES', '2026-02-10'),
         c(4, '111', 700, 'USD'),
-        c(5, '222', 20_000, 'COP'),
+        c(5, '222', 20_000, 'VES'),
       ],
       new Map([
         ['111', 'FOUND'],
@@ -239,7 +239,7 @@ describe('agregado por paciente y moneda (DX-262)', () => {
       {
         rowNumber: 2,
         docKey: '111',
-        currency: 'COP',
+        currency: 'VES',
         cents: 15_050,
         asOfDate: '2026-02-10',
         concept: 'Ortodoncia',
@@ -257,7 +257,7 @@ describe('agregado por paciente y moneda (DX-262)', () => {
       {
         rowNumber: 5,
         docKey: '222',
-        currency: 'COP',
+        currency: 'VES',
         cents: 20_000,
         asOfDate: null,
         concept: null,
@@ -277,8 +277,8 @@ describe('agregado por paciente y moneda (DX-262)', () => {
     ]);
     // Totales a importar por moneda, sin mezclar monedas.
     expect(result.validTotals).toEqual([
-      { currency: 'COP', rows: 3, cents: 35_050 },
       { currency: 'USD', rows: 1, cents: 700 },
+      { currency: 'VES', rows: 3, cents: 35_050 },
     ]);
   });
 
@@ -286,8 +286,8 @@ describe('agregado por paciente y moneda (DX-262)', () => {
     const big = 99_999_999_999_999; // 999.999.999.999,99
     const result = aggregateBalances(
       [
-        c(2, '111', big - 100, 'COP'),
-        c(3, '111', 200, 'COP'),
+        c(2, '111', big - 100, 'VES'),
+        c(3, '111', 200, 'VES'),
         c(4, '111', 50, 'USD'),
       ],
       new Map([['111', 'FOUND']]),
@@ -295,7 +295,7 @@ describe('agregado por paciente y moneda (DX-262)', () => {
       FMT,
     );
     expect(result.prepared.map((p) => [p.currency, p.cents])).toEqual([
-      ['COP', big - 100],
+      ['VES', big - 100],
       ['USD', 50],
     ]);
     expect(result.errorRows).toBe(1);
@@ -305,7 +305,7 @@ describe('agregado por paciente y moneda (DX-262)', () => {
         column: 'numero_documento',
         kind: 'ERROR',
         message:
-          'Con esta fila, el saldo de este paciente en COP pasaría de 999.999.999.999,99: revisa los importes.',
+          'Con esta fila, el saldo de este paciente en VES pasaría de 999.999.999.999,99: revisa los importes.',
         value: '111',
       },
     ]);
@@ -314,7 +314,7 @@ describe('agregado por paciente y moneda (DX-262)', () => {
   describe('paciente con un saldo migrado vivo de otro lote (QA D1)', () => {
     const existing = new Map([
       [
-        '111\u0000COP',
+        '111\u0000VES',
         {
           count: 1,
           cents: 150_000_000,
@@ -327,7 +327,7 @@ describe('agregado por paciente y moneda (DX-262)', () => {
         },
       ],
       [
-        '222\u0000COP',
+        '222\u0000VES',
         {
           count: 2,
           cents: 300_000,
@@ -346,11 +346,11 @@ describe('agregado por paciente y moneda (DX-262)', () => {
       ['333', 'FOUND' as const],
     ]);
     const rows = [
-      c(2, '111', 150_000_000, 'COP'),
-      c(3, '111', 1_000, 'COP'),
+      c(2, '111', 150_000_000, 'VES'),
+      c(3, '111', 1_000, 'VES'),
       c(4, '111', 4_000, 'USD'),
-      c(5, '222', 7_000, 'COP'),
-      c(6, '333', 9_000, 'COP'),
+      c(5, '222', 7_000, 'VES'),
+      c(6, '333', 9_000, 'VES'),
     ];
 
     it('por defecto NO lo crea: error en cada fila, con importe, lote y corte del existente', () => {
@@ -364,7 +364,7 @@ describe('agregado por paciente y moneda (DX-262)', () => {
       // Otra moneda del mismo paciente y otro paciente: sí.
       expect(result.prepared.map((p) => [p.docKey, p.currency])).toEqual([
         ['111', 'USD'],
-        ['333', 'COP'],
+        ['333', 'VES'],
       ]);
       expect(result.errorRows).toBe(3);
       expect(result.mergedRows).toBe(0);
@@ -374,7 +374,7 @@ describe('agregado por paciente y moneda (DX-262)', () => {
           column: 'numero_documento',
           kind: 'ERROR',
           message: expect.stringMatching(
-            /^Este paciente ya tiene un saldo migrado vivo de \$\s1\.500\.000,00 \(lote «existentes\.csv» del 22\/10\/2026, corte 09\/08\/2026\): no se crea otro\. Si es otra deuda, marca «Añadir aunque ya tenga saldo migrado» y vuelve a subir la hoja\.$/,
+            /^Este paciente ya tiene un saldo migrado vivo de Bs\.S\s1\.500\.000,00 \(lote «existentes\.csv» del 22\/10\/2026, corte 09\/08\/2026\): no se crea otro\. Si es otra deuda, marca «Añadir aunque ya tenga saldo migrado» y vuelve a subir la hoja\.$/,
           ) as string,
           value: '111',
         },
@@ -384,14 +384,14 @@ describe('agregado por paciente y moneda (DX-262)', () => {
           column: 'numero_documento',
           kind: 'ERROR',
           message: expect.stringMatching(
-            /^Este paciente ya tiene 2 saldos migrados vivos en COP por \$\s3\.000,00 \(el último, \$\s1\.000,00 del lote «otra\.csv» del 21\/10\/2026, corte 01\/09\/2026\): no se crea otro\./,
+            /^Este paciente ya tiene 2 saldos migrados vivos en VES por Bs\.S\s3\.000,00 \(el último, Bs\.S\s1\.000,00 del lote «otra\.csv» del 21\/10\/2026, corte 01\/09\/2026\): no se crea otro\./,
           ) as string,
           value: '222',
         },
       ]);
       expect(result.validTotals).toEqual([
-        { currency: 'COP', rows: 1, cents: 9_000 },
         { currency: 'USD', rows: 1, cents: 4_000 },
+        { currency: 'VES', rows: 1, cents: 9_000 },
       ]);
     });
 
@@ -404,10 +404,10 @@ describe('agregado por paciente y moneda (DX-262)', () => {
         existing,
       );
       expect(result.issues[0].message).toMatch(
-        /^Este paciente ya tiene un saldo migrado vivo de COP\s1,500,000\.00 \(lote/,
+        /^Este paciente ya tiene un saldo migrado vivo de VES\s1,500,000\.00 \(lote/,
       );
       expect(result.issues[2].message).toMatch(
-        /por COP\s3,000\.00 \(el último, COP\s1,000\.00 del lote/,
+        /por VES\s3,000\.00 \(el último, VES\s1,000\.00 del lote/,
       );
       // Sin saldos vivos que describir no se pide el formato (G1-B, I4).
       expect(() =>
@@ -429,10 +429,10 @@ describe('agregado por paciente y moneda (DX-262)', () => {
       expect(
         result.prepared.map((p) => [p.docKey, p.currency, p.cents]),
       ).toEqual([
-        ['111', 'COP', 150_001_000],
+        ['111', 'VES', 150_001_000],
         ['111', 'USD', 4_000],
-        ['222', 'COP', 7_000],
-        ['333', 'COP', 9_000],
+        ['222', 'VES', 7_000],
+        ['333', 'VES', 9_000],
       ]);
       expect(result.errorRows).toBe(0);
       expect(result.issues.map((i) => [i.row, i.kind])).toEqual([
@@ -449,9 +449,9 @@ describe('agregado por paciente y moneda (DX-262)', () => {
   it('documento inexistente o ambiguo: error de la fila; no entra en lo que se importa', () => {
     const result = aggregateBalances(
       [
-        c(2, '999', 1_000, 'COP'),
-        c(3, '777', 2_000, 'COP'),
-        c(4, '111', 3_000, 'COP'),
+        c(2, '999', 1_000, 'VES'),
+        c(3, '777', 2_000, 'VES'),
+        c(4, '111', 3_000, 'VES'),
       ],
       new Map([
         ['111', 'FOUND'],
@@ -473,7 +473,7 @@ describe('agregado por paciente y moneda (DX-262)', () => {
       ],
     ]);
     expect(result.validTotals).toEqual([
-      { currency: 'COP', rows: 1, cents: 3_000 },
+      { currency: 'VES', rows: 1, cents: 3_000 },
     ]);
   });
 });
