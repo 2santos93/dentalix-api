@@ -271,6 +271,18 @@ describe('SignPatientConsentUseCase', () => {
     });
   });
 
+  it('DX-524: sella el nombre del documento de la sede donde se firma', async () => {
+    const { sign, consents, names, template } = setup();
+    names.names.NATIONAL_ID = 'Documento clínica';
+    names.byLocation.set(consents.location.id, {
+      NATIONAL_ID: 'Documento sede',
+    });
+    names.byLocation.set('otra-sede', { NATIONAL_ID: 'Documento otra' });
+    names.activeLocationId = 'otra-sede';
+    const signed = await sign.execute('p1', signInput(template.id), META);
+    expect(signed.signerDocument).toBe('Documento sede 1020304050');
+  });
+
   it('firma un tutor con su nombre y documento', async () => {
     const { sign, template } = setup();
     const signed = await sign.execute(

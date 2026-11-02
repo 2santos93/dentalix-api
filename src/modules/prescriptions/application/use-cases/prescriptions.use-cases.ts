@@ -336,7 +336,8 @@ export class IssuePrescriptionUseCase {
       patientName: `${patient.firstName} ${patient.lastName}`,
       patientDocument: patientDocument(
         patient,
-        await this.documentTypeNames.get(),
+        // DX-524: el nombre de la sede que emite, congelado en la receta.
+        await this.documentTypeNames.get(issuer.location.id),
       ),
       patientBirthYear: patient.birthDate
         ? patient.birthDate.getUTCFullYear()

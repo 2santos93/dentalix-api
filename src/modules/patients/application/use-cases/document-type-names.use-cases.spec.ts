@@ -2,7 +2,10 @@ import { BadRequestException } from '@nestjs/common';
 import type { RecordAuditEventUseCase } from '../../../audit/application/record-audit-event.use-case';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import type { DocumentTypeNames } from '../../domain/document-type-names';
-import type { DocumentTypeNamesRepository } from '../../domain/ports/document-type-names-repository.port';
+import type {
+  DocumentTypeNamesBook,
+  DocumentTypeNamesRepository,
+} from '../../domain/ports/document-type-names-repository.port';
 import {
   GetDocumentTypeNamesUseCase,
   UpdateDocumentTypeNamesUseCase,
@@ -22,6 +25,13 @@ class InMemoryDocumentTypeNamesRepository implements DocumentTypeNamesRepository
 
   get(): Promise<DocumentTypeNames> {
     return Promise.resolve({ ...this.names });
+  }
+
+  book(): Promise<DocumentTypeNamesBook> {
+    return Promise.resolve({
+      clinic: { ...this.names },
+      forLocation: () => ({ ...this.names }),
+    });
   }
 
   set(

@@ -1,4 +1,4 @@
-import type { ClinicDocumentTypeNames } from '../../../patients/domain/document-type';
+import type { DocumentTypeNamesBook } from '../../../patients/domain/ports/document-type-names-repository.port';
 import type {
   ImplantCardPatient,
   ImplantCatalogEntry,
@@ -123,11 +123,11 @@ export class InMemoryImplantRepository implements PatientImplantRepository {
   }
 
   lastQuery: ImplantLotQuery | null = null;
-  lastNames: ClinicDocumentTypeNames | null = null;
+  lastNames: DocumentTypeNamesBook | null = null;
 
   searchByLot(
     query: ImplantLotQuery,
-    names: ClinicDocumentTypeNames,
+    names: DocumentTypeNamesBook,
   ): Promise<ImplantLotMatch[]> {
     this.lastQuery = query;
     this.lastNames = names;

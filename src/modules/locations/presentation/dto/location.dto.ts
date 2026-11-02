@@ -3,7 +3,7 @@ import {
   ApiProperty,
   ApiPropertyOptional,
 } from '@nestjs/swagger';
-import { Transform } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   Equals,
   IsBoolean,
@@ -13,7 +13,9 @@ import {
   MaxLength,
   MinLength,
   ValidateIf,
+  ValidateNested,
 } from 'class-validator';
+import { DocumentTypeNamesValuesDto } from '../../../patients/presentation/dto/document-type-names.dto';
 import {
   HEALTH_REGISTRATION_NUMBER_CHARS,
   HEALTH_REGISTRATION_NUMBER_MAX,
@@ -30,6 +32,9 @@ export const LOCATION_PHONE_MAX = 40;
 const PHONE_MESSAGE = `El teléfono admite hasta ${LOCATION_PHONE_MAX} caracteres.`;
 const PHONE_DOC =
   'DX-222: teléfono de la sede que ven los pacientes en las indicaciones postoperatorias ({{telefono_sede}}). Hasta 40 caracteres.';
+
+const DOC_TYPE_NAMES_DOC =
+  'DX-524: nombre propio de la sede para cada tipo de documento (texto libre de hasta 60 caracteres, distinto por tipo). Solo ADMIN; queda auditado. Una clave ausente no cambia; null o vacío vuelve a heredar el nombre de la clínica (DX-327) y, sin este, el genérico.';
 
 const HEALTH_REGISTRATION_DOC =
   'DX-319: nº de registro sanitario de la sede, texto libre sin formato ni validación por país (hasta 64 caracteres, se recorta). Solo ADMIN; queda auditado con su antes y después.';
@@ -274,6 +279,15 @@ export class UpdateLocationDto {
   confirmRegionalChange?: true;
 
   @ApiPropertyOptional({
+    type: DocumentTypeNamesValuesDto,
+    description: DOC_TYPE_NAMES_DOC,
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => DocumentTypeNamesValuesDto)
+  docTypeNames?: DocumentTypeNamesValuesDto;
+
+  @ApiPropertyOptional({
     description:
       'Desactivar una sede la oculta para operar; no se puede desactivar la última activa.',
   })
@@ -315,6 +329,11 @@ export class LocationDto {
     description: DEFAULT_PHONE_REGION_DOC,
   })
   defaultPhoneRegion!: string | null;
+  @ApiProperty({
+    type: DocumentTypeNamesValuesDto,
+    description: `${DOC_TYPE_NAMES_DOC} Siempre trae los cinco; null = hereda.`,
+  })
+  docTypeNames!: DocumentTypeNamesValuesDto;
   @ApiProperty() isActive!: boolean;
   @ApiProperty({
     type: String,

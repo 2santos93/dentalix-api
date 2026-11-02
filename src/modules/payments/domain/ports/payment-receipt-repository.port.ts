@@ -48,6 +48,8 @@ export interface ReceiptNoticeData {
 
 interface ReceiptSourceBase {
   paymentId: string;
+  /** DX-524: la sede del abono; sus nombres de documento rigen en una foto sin nombre congelado. */
+  locationId: string;
   /** `null` en un abono contra un saldo migrado (DX-262). */
   treatmentPlanId: string | null;
   /** Email ACTUAL del paciente (para enviarle el recibo), o null si no tiene. */

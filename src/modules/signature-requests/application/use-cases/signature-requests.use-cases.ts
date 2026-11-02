@@ -381,7 +381,8 @@ export class CreateSignatureRequestUseCase {
     if (!ctx) throw new NotFoundException(PATIENT_NOT_FOUND_MESSAGE);
     const recipient = decideRecipient(
       ctx,
-      await this.documentTypeNames.get(),
+      // DX-524: el nombre de la sede del texto.
+      await this.documentTypeNames.get(prepared.context.location.id),
       prepared.document,
       now,
     );
@@ -475,7 +476,8 @@ export class CreateSignatureRequestUseCase {
     }
 
     const now = this.clock();
-    const names = await this.documentTypeNames.get();
+    // DX-524: el nombre de la sede del plan, como en el presupuesto.
+    const names = await this.documentTypeNames.get(quote.location.id);
     const content = composeQuoteContent(
       quote,
       quoteIssuedOn(quote, now),

@@ -111,6 +111,7 @@ const issued = (
 ): PaymentReceiptSource => ({
   kind: 'issued',
   paymentId: PAYMENT_ID,
+  locationId: 'loc-1',
   treatmentPlanId: 'plan-1',
   patientEmail: 'ana@example.com',
   notice: NOTICE,
@@ -182,6 +183,26 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
     });
   });
 
+  it('DX-524: una foto sin nombre congelado se pinta con el nombre de la sede del abono, no el de la activa', async () => {
+    names.names.NATIONAL_ID = 'Documento clínica';
+    names.byLocation.set('loc-1', { NATIONAL_ID: 'Documento sede' });
+    names.byLocation.set('loc-activa', { NATIONAL_ID: 'Documento activa' });
+    names.activeLocationId = 'loc-activa';
+    const old = {
+      ...issuedSnapshot,
+      patient: {
+        id: 'pat-1',
+        fullName: 'Ana Ruiz',
+        docType: 'CC',
+        docNumberMasked: '****3456',
+      },
+    } satisfies ReceiptSnapshot;
+    const view = await makeUseCase(issued({ snapshot: old })).execute(
+      PAYMENT_ID,
+    );
+    expect(view.snapshot.patient.docTypeName).toBe('Documento sede');
+  });
+
   it('un recibo anulado conserva el número y trae fecha y motivo', async () => {
     const voidedAt = new Date('2026-10-18T10:00:00.000Z');
     const view = await makeUseCase(
@@ -212,6 +233,7 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
     const view = await makeUseCase({
       kind: 'legacy',
       paymentId: PAYMENT_ID,
+      locationId: 'loc-1',
       treatmentPlanId: 'plan-1',
       patientEmail: null,
       notice: NOTICE,
@@ -246,6 +268,7 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
       {
         kind: 'legacy',
         paymentId: PAYMENT_ID,
+        locationId: 'loc-1',
         treatmentPlanId: 'plan-1',
         patientEmail: null,
         notice: NOTICE,
@@ -430,6 +453,7 @@ describe('GetPaymentReceiptUseCase · región de la sede (DX-521, R3 y PF3/PF4/P
   ): PaymentReceiptSource => ({
     kind: 'legacy',
     paymentId: PAYMENT_ID,
+    locationId: 'loc-1',
     treatmentPlanId: 'plan-1',
     patientEmail: null,
     notice: NOTICE,

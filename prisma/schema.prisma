@@ -387,6 +387,14 @@ model Location {
   /// entonces `receiptLegend` es NULL (CHECK locations_receipt_legend_check).
   receiptLegendOverride        Boolean        @default(false)
   receiptLegend                String?
+  /// DX-524: nombre propio de la sede para cada tipo de documento; NULL = el de
+  /// la clínica (DX-327) y, sin este, el genérico. Lo cambia el ADMIN
+  /// (PATCH /locations/:id, auditado). CHECK 1..60 sin espacios en los extremos.
+  docTypeNameNationalId        String?
+  docTypeNamePassport          String?
+  docTypeNameResidencePermit   String?
+  docTypeNameTaxId             String?
+  docTypeNameOther             String?
   // DX-222: teléfono de la sede para las indicaciones postoperatorias
   // («llama a la clínica al …»). Hasta 40 caracteres (CHECK
   // locations_phone_length_check).

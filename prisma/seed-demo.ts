@@ -255,6 +255,7 @@ import {
   sitePatientIndexes,
   regionOf,
 } from './demo/data';
+import { DEMO_LOCATION_DOC_TYPE_NAMES } from './demo/document-type-names';
 import {
   DEMO_PATIENT_SIGNATURE_PNG,
   DEMO_PROFESSIONAL_SIGNATURE_PNG,
@@ -1064,6 +1065,7 @@ class DemoSeeder {
       }),
     );
     await this.use(UpdateLocationUseCase).execute(principal.id, {
+      docTypeNames: DEMO_LOCATION_DOC_TYPE_NAMES.principal,
       address: DEMO_LOCATIONS.principal.address,
       // DX-222: el de urgencias en las indicaciones postoperatorias.
       phone: DEMO_LOCATIONS.principal.phone,
@@ -1084,6 +1086,13 @@ class DemoSeeder {
         ),
       );
       ids[key] = created.id;
+      // DX-524: el nombre del documento de la sede, si lo tiene (Londres no).
+      const docTypeNames = DEMO_LOCATION_DOC_TYPE_NAMES[key];
+      if (docTypeNames) {
+        await this.inTenant(tenantId, undefined, () =>
+          this.use(UpdateLocationUseCase).execute(created.id, { docTypeNames }),
+        );
+      }
     }
     // R12: los festivos de ejemplo de cada sede, como los cargaría el ADMIN
     // desde Ajustes (`demoHolidayRows`: fechas completas y un cierre puntual
