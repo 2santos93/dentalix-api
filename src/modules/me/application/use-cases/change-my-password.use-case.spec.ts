@@ -44,6 +44,7 @@ function setup(hash: string | null) {
     password,
     claims as unknown as SessionClaimsService,
     tokens as never,
+    { clearAttempts: jest.fn().mockResolvedValue(undefined) } as never,
   );
   return { uc, repo, claims, tokens, sink };
 }

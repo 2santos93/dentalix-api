@@ -1,4 +1,4 @@
-import { hkdfSync, randomUUID } from 'node:crypto';
+import { createHmac, hkdfSync, randomUUID, timingSafeEqual } from 'node:crypto';
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
@@ -8,10 +8,13 @@ import {
   type MfaChallengePurpose,
 } from '../domain/user-mfa';
 
+const EMAIL_CODE_WINDOW_MS = 10 * 60_000;
+
 /** Lo que firma el token intermedio del login (DX-021). */
 export interface MfaChallengeClaims {
   sub: string;
-  tenantId: string;
+  /** `null`: login de plataforma (apex); solo vale en un host sin clínica. */
+  tenantId: string | null;
   /** `tokenVersion` al pedirlo: si cambia (contraseña, MFA), el token muere. */
   tv: number;
   purpose: MfaChallengePurpose;
@@ -50,7 +53,7 @@ export class MfaChallengeService {
 
   async issue(input: {
     userId: string;
-    tenantId: string;
+    tenantId: string | null;
     tokenVersion: number;
     purpose: MfaChallengePurpose;
   }): Promise<{ token: string; expiresAt: Date }> {
@@ -72,6 +75,41 @@ export class MfaChallengeService {
   }
 
   /**
+   * DX-021-bis: código de 8 dígitos que se envía al correo de un superadmin
+   * para empezar su alta. Sale de la cuenta, su `tokenVersion` y la ventana de
+   * 10 min con la clave derivada: no se guarda en ningún sitio, y volver a
+   * escribir la contraseña da el mismo código (el tope de correos de plataforma
+   * puede no dejar salir otro).
+   */
+  emailCode(
+    userId: string,
+    tokenVersion: number,
+    now: number = Date.now(),
+  ): string {
+    const window = Math.floor(now / EMAIL_CODE_WINDOW_MS);
+    const mac = createHmac('sha256', this.secret)
+      .update(`enrollment-email:${userId}:${tokenVersion}:${window}`)
+      .digest();
+    return String(mac.readUInt32BE(0) % 100_000_000).padStart(8, '0');
+  }
+
+  /** Vale el de esta ventana y el de la anterior: entre 10 y 20 min de vida. */
+  matchesEmailCode(
+    userId: string,
+    tokenVersion: number,
+    code: string,
+  ): boolean {
+    const given = Buffer.from(code);
+    const now = Date.now();
+    return [now, now - EMAIL_CODE_WINDOW_MS].some((t) => {
+      const expected = Buffer.from(this.emailCode(userId, tokenVersion, t));
+      return (
+        given.length === expected.length && timingSafeEqual(given, expected)
+      );
+    });
+  }
+
+  /**
    * Verifica firma, caducidad, propósito y clínica del host. Cualquier fallo
    * es el mismo 401 («vuelve a iniciar sesión»).
    */
@@ -90,8 +128,7 @@ export class MfaChallengeService {
     }
     if (
       claims.purpose !== purpose ||
-      !hostTenantId ||
-      claims.tenantId !== hostTenantId ||
+      claims.tenantId !== (hostTenantId ?? null) ||
       typeof claims.jti !== 'string'
     ) {
       throw expired();

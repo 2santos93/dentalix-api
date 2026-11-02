@@ -1,10 +1,14 @@
+import { ClinicRole } from '@prisma/client';
+import type { ClinicMfaPolicy } from '../domain/user-mfa';
+import type { SecondFactor } from './user-mfa.service';
+import type { TrustedDevice } from '../domain/ports/user-mfa-repository.port';
 import { randomBytes } from 'node:crypto';
 import {
   BadRequestException,
   ConflictException,
+  NotFoundException,
   ForbiddenException,
 } from '@nestjs/common';
-import { ClinicRole } from '@prisma/client';
 import { MfaSecretCipher } from '../../../shared/crypto/mfa-secret-cipher';
 import { TestPasswordHasher } from '../../../shared/testing/test-password-hasher';
 import { decodeBase32, totpCode, totpStep } from '../../../shared/crypto/totp';
@@ -46,6 +50,20 @@ class InMemoryUserMfaRepo
   codes: { hash: string; usedAt: Date | null }[] = [];
   audits: AuditEventDraft[] = [];
   requireAdminMfa = false;
+  requireAllMfa = false;
+  /** `roles` de la última política guardada y dispositivos en memoria. */
+  policyRoles: ClinicRole[] = [];
+  devices: {
+    id: string;
+    tokenHash: string;
+    tokenVersion: number;
+    label: string;
+    expiresAt: Date;
+    revoked: boolean;
+  }[] = [];
+  memberRole: ClinicRole | null = ClinicRole.ASSISTANT;
+  otherClinic = false;
+  platformEvents: unknown[] = [];
 
   find(): Promise<UserMfaState | null> {
     return Promise.resolve({
@@ -116,12 +134,66 @@ class InMemoryUserMfaRepo
     this.state.lastUsedStep = step;
     return Promise.resolve(true);
   }
-  findClinicPolicy(): Promise<boolean | null> {
-    return Promise.resolve(this.requireAdminMfa);
+  findClinicPolicy(): Promise<ClinicMfaPolicy | null> {
+    return Promise.resolve({
+      requireAdminMfa: this.requireAdminMfa,
+      requireAllMfa: this.requireAllMfa,
+    });
   }
-  setClinicPolicy(_t: string, v: boolean): Promise<void> {
-    this.requireAdminMfa = v;
+  setClinicPolicy(
+    _t: string,
+    policy: ClinicMfaPolicy,
+    roles: ClinicRole[],
+    audit: AuditEventDraft,
+  ): Promise<number> {
+    this.requireAdminMfa = policy.requireAdminMfa;
+    this.requireAllMfa = policy.requireAllMfa;
+    this.policyRoles = roles;
+    this.audits.push(audit);
+    return Promise.resolve(0);
+  }
+  recordPlatformEvent(draft: unknown): Promise<void> {
+    this.platformEvents.push(draft);
     return Promise.resolve();
+  }
+  findActiveMemberRole(): Promise<ClinicRole | null> {
+    return Promise.resolve(this.memberRole);
+  }
+  hasOtherActiveMemberships(): Promise<boolean> {
+    return Promise.resolve(this.otherClinic);
+  }
+  addTrustedDevice(
+    input: Omit<(typeof this.devices)[number], 'id' | 'revoked'>,
+  ) {
+    this.devices.push({
+      ...input,
+      id: `d${this.devices.length}`,
+      revoked: false,
+    });
+    return Promise.resolve();
+  }
+  touchTrustedDevice(
+    _u: string,
+    hash: string,
+    tokenVersion: number,
+  ): Promise<boolean> {
+    return Promise.resolve(
+      this.devices.some(
+        (d) =>
+          d.tokenHash === hash &&
+          d.tokenVersion === tokenVersion &&
+          !d.revoked &&
+          d.expiresAt > new Date(),
+      ),
+    );
+  }
+  listTrustedDevices(): Promise<TrustedDevice[]> {
+    return Promise.resolve([]);
+  }
+  revokeTrustedDevices(_u: string, id: string | null): Promise<number> {
+    const hit = this.devices.filter((d) => !d.revoked && (!id || d.id === id));
+    hit.forEach((d) => (d.revoked = true));
+    return Promise.resolve(hit.length);
   }
 }
 
@@ -149,6 +221,13 @@ async function setup(opts: { isPlatformAdmin?: boolean } = {}) {
       return Promise.resolve();
     },
   } as unknown as RecordAuditEventUseCase;
+  const notices: unknown[] = [];
+  const notifier = {
+    notice: (input: unknown) => {
+      notices.push(input);
+      return Promise.resolve();
+    },
+  } as never;
   const service = new UserMfaService(
     repo,
     repo as unknown as BreakGlassRepository,
@@ -156,6 +235,7 @@ async function setup(opts: { isPlatformAdmin?: boolean } = {}) {
     password,
     lockout,
     audit,
+    notifier,
   );
   let secret = '';
   const code = (offset = 0) =>
@@ -178,6 +258,7 @@ async function setup(opts: { isPlatformAdmin?: boolean } = {}) {
     throttle,
     recorded,
     cipher,
+    notices,
   };
 }
 
@@ -253,17 +334,27 @@ describe('UserMfaService (DX-021)', () => {
       for (const offset of [-1, 0, 1]) {
         forgetLastStep();
         await expect(
-          service.verifySecondFactor(USER, (await repo.find())!, {
-            code: code(offset),
-          }),
+          service.verifySecondFactor(
+            USER,
+            (await repo.find())!,
+            {
+              code: code(offset),
+            },
+            TENANT,
+          ),
         ).resolves.toBe('TOTP');
       }
       for (const offset of [-2, 2]) {
         forgetLastStep();
         await expect(
-          service.verifySecondFactor(USER, (await repo.find())!, {
-            code: code(offset),
-          }),
+          service.verifySecondFactor(
+            USER,
+            (await repo.find())!,
+            {
+              code: code(offset),
+            },
+            TENANT,
+          ),
         ).resolves.toBeNull();
       }
     });
@@ -274,16 +365,31 @@ describe('UserMfaService (DX-021)', () => {
       forgetLastStep();
       const c = code();
       await expect(
-        service.verifySecondFactor(USER, (await repo.find())!, { code: c }),
+        service.verifySecondFactor(
+          USER,
+          (await repo.find())!,
+          { code: c },
+          TENANT,
+        ),
       ).resolves.toBe('TOTP');
       await expect(
-        service.verifySecondFactor(USER, (await repo.find())!, { code: c }),
+        service.verifySecondFactor(
+          USER,
+          (await repo.find())!,
+          { code: c },
+          TENANT,
+        ),
       ).resolves.toBeNull();
       // Ni un código ANTERIOR al usado (también dentro de la ventana).
       await expect(
-        service.verifySecondFactor(USER, (await repo.find())!, {
-          code: code(-1),
-        }),
+        service.verifySecondFactor(
+          USER,
+          (await repo.find())!,
+          {
+            code: code(-1),
+          },
+          TENANT,
+        ),
       ).resolves.toBeNull();
     });
 
@@ -293,15 +399,25 @@ describe('UserMfaService (DX-021)', () => {
       forgetLastStep();
       for (let i = 0; i < DEFAULT_LOGIN_LOCKOUT.freeFailures; i++) {
         await expect(
-          service.verifySecondFactor(USER, (await repo.find())!, {
-            code: '000000',
-          }),
+          service.verifySecondFactor(
+            USER,
+            (await repo.find())!,
+            {
+              code: '000000',
+            },
+            TENANT,
+          ),
         ).resolves.toBeNull();
       }
       await expect(
-        service.verifySecondFactor(USER, (await repo.find())!, {
-          code: code(),
-        }),
+        service.verifySecondFactor(
+          USER,
+          (await repo.find())!,
+          {
+            code: code(),
+          },
+          TENANT,
+        ),
       ).rejects.toBeInstanceOf(LoginLockedError);
     });
 
@@ -323,12 +439,22 @@ describe('UserMfaService (DX-021)', () => {
         await setup();
       await enroll();
       forgetLastStep();
-      await service.verifySecondFactor(USER, (await repo.find())!, {
-        code: '000000',
-      });
-      await service.verifySecondFactor(USER, (await repo.find())!, {
-        code: code(),
-      });
+      await service.verifySecondFactor(
+        USER,
+        (await repo.find())!,
+        {
+          code: '000000',
+        },
+        TENANT,
+      );
+      await service.verifySecondFactor(
+        USER,
+        (await repo.find())!,
+        {
+          code: code(),
+        },
+        TENANT,
+      );
       expect(throttle.size()).toBe(0);
     });
   });
@@ -339,14 +465,24 @@ describe('UserMfaService (DX-021)', () => {
       const { recoveryCodes } = await enroll();
       const typed = recoveryCodes[3].toLowerCase().replace(/-/g, ' ');
       await expect(
-        service.verifySecondFactor(USER, (await repo.find())!, {
-          recoveryCode: typed,
-        }),
+        service.verifySecondFactor(
+          USER,
+          (await repo.find())!,
+          {
+            recoveryCode: typed,
+          },
+          TENANT,
+        ),
       ).resolves.toBe('RECOVERY_CODE');
       await expect(
-        service.verifySecondFactor(USER, (await repo.find())!, {
-          recoveryCode: recoveryCodes[3],
-        }),
+        service.verifySecondFactor(
+          USER,
+          (await repo.find())!,
+          {
+            recoveryCode: recoveryCodes[3],
+          },
+          TENANT,
+        ),
       ).resolves.toBeNull();
       expect((await repo.find())!.recoveryCodesRemaining).toBe(9);
     });
@@ -367,14 +503,24 @@ describe('UserMfaService (DX-021)', () => {
       expect(fresh).toHaveLength(10);
       expect(fresh).not.toContain(old[0]);
       await expect(
-        service.verifySecondFactor(USER, (await repo.find())!, {
-          recoveryCode: old[0],
-        }),
+        service.verifySecondFactor(
+          USER,
+          (await repo.find())!,
+          {
+            recoveryCode: old[0],
+          },
+          TENANT,
+        ),
       ).resolves.toBeNull();
       await expect(
-        service.verifySecondFactor(USER, (await repo.find())!, {
-          recoveryCode: fresh[0],
-        }),
+        service.verifySecondFactor(
+          USER,
+          (await repo.find())!,
+          {
+            recoveryCode: fresh[0],
+          },
+          TENANT,
+        ),
       ).resolves.toBe('RECOVERY_CODE');
       expect(repo.audits.map((a) => a.metadata.reason)).toContain(
         'MFA_RECOVERY_CODES_REGENERATED',
@@ -500,22 +646,178 @@ describe('UserMfaService (DX-021)', () => {
     });
 
     it('encenderla exige tener el MFA propio activo; el cambio se audita con antes y después', async () => {
-      const { service, enroll, recorded } = await setup();
-      await expect(service.setClinicPolicy(true, CTX)).rejects.toBeInstanceOf(
+      const { service, repo, enroll } = await setup();
+      const on = { requireAdminMfa: true };
+      await expect(service.setClinicPolicy(on, CTX)).rejects.toBeInstanceOf(
         ConflictException,
       );
       await enroll();
-      await expect(service.setClinicPolicy(true, CTX)).resolves.toEqual({
+      await expect(service.setClinicPolicy(on, CTX)).resolves.toEqual({
         requireAdminMfa: true,
+        requireAllMfa: false,
       });
+      expect(repo.policyRoles).toEqual([ClinicRole.ADMIN]);
       // Sin cambio, sin evento.
-      await service.setClinicPolicy(true, CTX);
-      const policy = recorded.filter((e) => e.metadata.reason === 'MFA_POLICY');
+      await service.setClinicPolicy(on, CTX);
+      const policy = repo.audits.filter(
+        (e) => e.metadata.reason === 'MFA_POLICY',
+      );
       expect(policy).toHaveLength(1);
       expect(policy[0].metadata).toEqual({
         reason: 'MFA_POLICY',
         statusChange: { from: 'ADMIN_MFA_OPTIONAL', to: 'ADMIN_MFA_REQUIRED' },
       });
+    });
+
+    it('DX-021-bis: «para todos» implica ADMIN y solo cierra a quienes quedan obligados de nuevo', async () => {
+      const { service, repo, enroll } = await setup();
+      await enroll();
+      repo.requireAdminMfa = true;
+      await expect(
+        service.setClinicPolicy(
+          { requireAdminMfa: false, requireAllMfa: true },
+          CTX,
+        ),
+      ).resolves.toEqual({ requireAdminMfa: true, requireAllMfa: true });
+      expect(repo.policyRoles).not.toContain(ClinicRole.ADMIN);
+      expect(repo.policyRoles).toContain(ClinicRole.RECEPTION);
+      // Relajarla no cierra nada ni exige MFA propio.
+      await service.setClinicPolicy(
+        { requireAdminMfa: false, requireAllMfa: false },
+        CTX,
+      );
+      expect(repo.policyRoles).toEqual([]);
+    });
+
+    it('DX-021-bis: `requireAllMfa` obliga a un rol no ADMIN', async () => {
+      const { service, repo } = await setup();
+      repo.requireAllMfa = true;
+      await expect(
+        service.isRequired(
+          { isPlatformAdmin: false },
+          TENANT,
+          ClinicRole.RECEPTION,
+        ),
+      ).resolves.toBe(true);
+    });
+  });
+
+  describe('avisos por correo (DX-021-bis)', () => {
+    it('usar un código de recuperación avisa, con los que quedan y sin el código', async () => {
+      const { service, repo, enroll, notices } = await setup();
+      const { recoveryCodes } = await enroll();
+      await service.verifySecondFactor(
+        USER,
+        (await repo.find())!,
+        { recoveryCode: recoveryCodes[0] },
+        TENANT,
+      );
+      expect(notices).toEqual([
+        {
+          tenantId: TENANT,
+          to: 'ana@clinica.test',
+          kind: 'RECOVERY_CODE_USED',
+          recoveryCodesRemaining: 9,
+        },
+      ]);
+    });
+
+    it('el fallo que deja la cuenta en espera avisa una sola vez', async () => {
+      const { service, repo, enroll, notices } = await setup();
+      await enroll();
+      for (let i = 0; i < 5; i += 1) {
+        await service.verifySecondFactor(
+          USER,
+          (await repo.find())!,
+          { code: '000000' },
+          TENANT,
+        );
+      }
+      await expect(
+        service.verifySecondFactor(
+          USER,
+          (await repo.find())!,
+          { code: '000000' },
+          TENANT,
+        ),
+      ).rejects.toThrow();
+      expect(notices).toEqual([
+        { tenantId: TENANT, to: 'ana@clinica.test', kind: 'ATTEMPTS_LOCKED' },
+      ]);
+    });
+  });
+
+  describe('dispositivo de confianza (DX-021-bis)', () => {
+    it('vale con la cookie y deja de valer si cambia tokenVersion o se revoca', async () => {
+      const { service, repo, enroll } = await setup();
+      await enroll();
+      const state = (await repo.find())!;
+      const token = await service.trustDevice(USER, state.tokenVersion, CTX);
+      expect(repo.devices[0].tokenHash).not.toContain(token);
+      await expect(
+        service.isTrustedDevice(USER, state, token, CTX),
+      ).resolves.toBe(true);
+      await expect(
+        service.isTrustedDevice(USER, state, 'otra', CTX),
+      ).resolves.toBe(false);
+      await expect(
+        service.isTrustedDevice(
+          USER,
+          { ...state, tokenVersion: state.tokenVersion + 1 },
+          token,
+          CTX,
+        ),
+      ).resolves.toBe(false);
+      await service.revokeTrustedDevices(USER, null, CTX);
+      await expect(
+        service.isTrustedDevice(USER, state, token, CTX),
+      ).resolves.toBe(false);
+    });
+
+    it('un superadmin nunca se salta el código', async () => {
+      const { service, repo, enroll } = await setup({ isPlatformAdmin: true });
+      await enroll();
+      const state = (await repo.find())!;
+      const token = await service.trustDevice(USER, state.tokenVersion, CTX);
+      await expect(
+        service.isTrustedDevice(USER, state, token, CTX),
+      ).resolves.toBe(false);
+    });
+  });
+
+  describe('reseteo por otro ADMIN (DX-021-bis)', () => {
+    const TARGET = '11111111-1111-4111-8111-111111111111';
+    const input = (factor: SecondFactor) => ({
+      currentPassword: PASSWORD,
+      factor,
+      reason: 'LOST_DEVICE' as const,
+    });
+
+    it('no vale para la propia cuenta ni para quien no es de la clínica', async () => {
+      const { service, repo, enroll } = await setup();
+      await enroll();
+      await expect(
+        service.resetForMember(USER, input({ code: '000000' }), CTX),
+      ).rejects.toBeInstanceOf(ConflictException);
+      repo.memberRole = null;
+      await expect(
+        service.resetForMember(TARGET, input({ code: '000000' }), CTX),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('una cuenta con acceso a otra clínica se rechaza y queda auditado, sin tocarla', async () => {
+      const { service, repo, enroll, forgetLastStep, code, recorded } =
+        await setup();
+      await enroll();
+      forgetLastStep();
+      repo.otherClinic = true;
+      await expect(
+        service.resetForMember(TARGET, input({ code: code() }), CTX),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(recorded.at(-1)?.metadata).toEqual({
+        reason: 'MFA_RESET_REFUSED',
+      });
+      expect(repo.state.enabledAt).not.toBeNull();
     });
   });
 });

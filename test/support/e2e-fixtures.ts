@@ -7,6 +7,7 @@ import { AppModule } from '../../src/app.module';
 import { PasswordService } from '../../src/shared/crypto/password.service';
 import { PrismaExceptionFilter } from '../../src/shared/prisma/prisma-exception.filter';
 import { hostFor } from './tenant-host';
+import { enrollPlatformAdmin } from './platform-mfa';
 import { registerVerified } from '../support/register-verified';
 import {
   REGIONAL_BOGOTA_FIXTURE,
@@ -166,13 +167,15 @@ export async function platformAdminToken(
   raw: PrismaClient,
 ): Promise<string> {
   const email = 'root@platform.test';
-  await raw.user.create({
+  const user = await raw.user.create({
     data: {
       email,
       passwordHash: await passwordService.hash(SEEDED_PASSWORD),
       fullName: 'Superadmin',
       isPlatformAdmin: true,
     },
+    select: { id: true },
   });
-  return loginAs(app, 'localhost', email);
+  // DX-021-bis: sin segundo factor no hay sesión de plataforma.
+  return (await enrollPlatformAdmin(app, { id: user.id, email })).accessToken;
 }

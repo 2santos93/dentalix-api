@@ -86,6 +86,7 @@ describe('LoginUseCase — superadmin de plataforma', () => {
         breakGlass.service,
         {} as never,
         {} as never,
+        {} as never,
       );
 
       const result = await uc.execute({
@@ -133,6 +134,7 @@ describe('LoginUseCase — superadmin de plataforma', () => {
         makeBreakGlass().service,
         {} as never,
         {} as never,
+        {} as never,
       );
 
       await expect(
@@ -154,6 +156,7 @@ describe('LoginUseCase — superadmin de plataforma', () => {
         makeBreakGlass().service,
         {} as never,
         {} as never,
+        {} as never,
       );
 
       await expect(
@@ -168,24 +171,93 @@ describe('LoginUseCase — superadmin de plataforma', () => {
   });
 
   describe('en el apex (sin tenant)', () => {
-    it('le emite un token de PLATAFORMA, sin tenant ni rol', async () => {
-      const tokens = makeTokens();
+    function apexUseCase(
+      user: AuthUserRecord,
+      enabledAt: Date | null,
+      tokens: ReturnType<typeof makeTokens>,
+    ) {
+      const issued: unknown[] = [];
+      const sent: unknown[] = [];
       const uc = new LoginUseCase(
-        makeRepo(await platformUser('S3cret!')),
+        makeRepo(user),
         password,
         tokens.service,
         makeBreakGlass().service,
-        {} as never,
-        {} as never,
+        {
+          state: () =>
+            Promise.resolve({
+              email: 'super@dentalix.com',
+              tokenVersion: 2,
+              enabledAt,
+            }),
+        } as never,
+        {
+          issue: (input: unknown) => {
+            issued.push(input);
+            return Promise.resolve({
+              token: 'mfa-token',
+              expiresAt: new Date('2030-01-01T00:00:00Z'),
+            });
+          },
+          emailCode: () => '12345678',
+        } as never,
+        {
+          sendEnrollmentCode: (input: unknown) => {
+            sent.push(input);
+            return Promise.resolve();
+          },
+        } as never,
+      );
+      return { uc, issued, sent };
+    }
+
+    it('DX-021-bis: con MFA, la contraseña no abre sesión: pide el código (token sin clínica)', async () => {
+      const tokens = makeTokens();
+      const { uc, issued, sent } = apexUseCase(
+        await platformUser('S3cret!'),
+        new Date(),
+        tokens,
       );
 
-      await uc.executePlatform({
+      const result = await uc.executePlatform({
         email: 'super@dentalix.com',
         password: 'S3cret!',
       });
 
-      expect(tokens.issued).toEqual([
-        { sub: 'super-1', platform: true, tv: 2 },
+      expect(tokens.issued).toEqual([]);
+      expect(result).toMatchObject({ mfa: 'MFA_REQUIRED' });
+      expect(result).not.toHaveProperty('emailCodeRequired');
+      expect(issued).toEqual([
+        {
+          userId: 'super-1',
+          tenantId: null,
+          tokenVersion: 2,
+          purpose: 'MFA_VERIFY',
+        },
+      ]);
+      expect(sent).toEqual([]);
+    });
+
+    it('DX-021-bis: sin MFA, alta forzada con código enviado a su correo', async () => {
+      const tokens = makeTokens();
+      const { uc, sent } = apexUseCase(
+        await platformUser('S3cret!'),
+        null,
+        tokens,
+      );
+
+      const result = await uc.executePlatform({
+        email: 'super@dentalix.com',
+        password: 'S3cret!',
+      });
+
+      expect(tokens.issued).toEqual([]);
+      expect(result).toMatchObject({
+        mfa: 'MFA_ENROLLMENT_REQUIRED',
+        emailCodeRequired: true,
+      });
+      expect(sent).toEqual([
+        { to: 'super@dentalix.com', code: '12345678', expiresInMinutes: 10 },
       ]);
     });
 
@@ -200,6 +272,7 @@ describe('LoginUseCase — superadmin de plataforma', () => {
         password,
         makeTokens().service,
         makeBreakGlass().service,
+        {} as never,
         {} as never,
         {} as never,
       );
@@ -218,6 +291,7 @@ describe('LoginUseCase — superadmin de plataforma', () => {
         password,
         makeTokens().service,
         makeBreakGlass().service,
+        {} as never,
         {} as never,
         {} as never,
       );

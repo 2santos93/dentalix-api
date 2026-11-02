@@ -1,9 +1,4 @@
-import {
-  Inject,
-  Injectable,
-  Logger,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import { AUTH_REPOSITORY } from '../../domain/ports/auth-repository.port';
 import type { AuthRepository } from '../../domain/ports/auth-repository.port';
 import {
@@ -16,7 +11,16 @@ import {
   type BreakGlassSession,
 } from '../break-glass.service';
 import { locationClaim } from '../../../../shared/tenancy/location-access';
-import type { MfaChallenge } from '../../domain/user-mfa';
+import {
+  MFA_CHALLENGE_TTL_SECONDS,
+  type MfaChallenge,
+  type MfaChallengePurpose,
+} from '../../domain/user-mfa';
+import {
+  MFA_NOTIFIER,
+  type MfaNotifier,
+} from '../../domain/ports/mfa-notifier.port';
+import { currentRequestId } from '../../../../shared/observability/request-context';
 import { MfaChallengeService } from '../mfa-challenge.service';
 import { UserMfaService } from '../user-mfa.service';
 
@@ -35,6 +39,8 @@ export interface LoginInput {
    */
   mfaCode?: string;
   breakGlassReason?: string;
+  /** DX-021-bis: token de la cookie de dispositivo de confianza, si la trae. */
+  trustedDeviceToken?: string;
   ip?: string | null;
   userAgent?: string | null;
 }
@@ -59,8 +65,6 @@ export function isBreakGlassSession(
 
 @Injectable()
 export class LoginUseCase {
-  private readonly logger = new Logger(LoginUseCase.name);
-
   constructor(
     @Inject(AUTH_REPOSITORY) private readonly repo: AuthRepository,
     private readonly password: PasswordService,
@@ -68,6 +72,7 @@ export class LoginUseCase {
     private readonly breakGlass: BreakGlassService,
     private readonly mfa: UserMfaService,
     private readonly challenges: MfaChallengeService,
+    @Inject(MFA_NOTIFIER) private readonly notifier: MfaNotifier,
   ) {}
 
   async execute(input: LoginInput): Promise<LoginResult> {
@@ -92,24 +97,38 @@ export class LoginUseCase {
     // el código; obligatorio y sin activar → alta forzada. En ambos casos
     // solo un token intermedio, que no abre ninguna ruta de datos.
     const mfa = await this.mfa.state(membership.userId);
-    const purpose = mfa.enabledAt
-      ? ('MFA_VERIFY' as const)
-      : (await this.mfa.isRequired(mfa, input.tenantId, membership.role))
-        ? ('MFA_ENROLL' as const)
-        : null;
-    if (purpose) {
-      const { token, expiresAt } = await this.challenges.issue({
-        userId: membership.userId,
+    // DX-021-bis: este navegador superó el código hace menos de 30 días.
+    const trusted = await this.mfa.isTrustedDevice(
+      membership.userId,
+      mfa,
+      input.trustedDeviceToken,
+      {
         tenantId: input.tenantId,
-        tokenVersion: membership.tokenVersion,
+        locationId: null,
+        actor: { userId: membership.userId, role: membership.role },
+        requestId: currentRequestId() ?? null,
+        ip: input.ip ?? null,
+        userAgent: input.userAgent ?? null,
+      },
+    );
+    const purpose = trusted
+      ? null
+      : mfa.enabledAt
+        ? ('MFA_VERIFY' as const)
+        : (await this.mfa.isRequired(mfa, input.tenantId, membership.role))
+          ? ('MFA_ENROLL' as const)
+          : null;
+    if (purpose) {
+      return this.challenge(
+        {
+          userId: membership.userId,
+          email: mfa.email,
+          isPlatformAdmin: mfa.isPlatformAdmin,
+          tokenVersion: membership.tokenVersion,
+        },
+        input.tenantId,
         purpose,
-      });
-      return {
-        mfa:
-          purpose === 'MFA_VERIFY' ? 'MFA_REQUIRED' : 'MFA_ENROLLMENT_REQUIRED',
-        mfaToken: token,
-        expiresAt,
-      };
+      );
     }
     return this.tokens.issue({
       sub: membership.userId,
@@ -118,6 +137,44 @@ export class LoginUseCase {
       tv: membership.tokenVersion,
       ...locationClaim(membership.role, membership.allowedLocationIds),
     });
+  }
+
+  /**
+   * El paso del segundo factor. El alta de un superadmin exige además un
+   * código enviado a su correo (DX-021-bis): quien solo tiene la contraseña no
+   * puede enrolar su móvil, y el dueño se entera del intento.
+   */
+  private async challenge(
+    user: {
+      userId: string;
+      email: string;
+      isPlatformAdmin: boolean;
+      tokenVersion: number;
+    },
+    tenantId: string | null,
+    purpose: MfaChallengePurpose,
+  ): Promise<MfaChallenge> {
+    const { token, expiresAt } = await this.challenges.issue({
+      userId: user.userId,
+      tenantId,
+      tokenVersion: user.tokenVersion,
+      purpose,
+    });
+    const emailCode = purpose === 'MFA_ENROLL' && user.isPlatformAdmin;
+    if (emailCode) {
+      await this.notifier.sendEnrollmentCode({
+        to: user.email,
+        code: this.challenges.emailCode(user.userId, user.tokenVersion),
+        expiresInMinutes: MFA_CHALLENGE_TTL_SECONDS.MFA_ENROLL / 60,
+      });
+    }
+    return {
+      mfa:
+        purpose === 'MFA_VERIFY' ? 'MFA_REQUIRED' : 'MFA_ENROLLMENT_REQUIRED',
+      mfaToken: token,
+      expiresAt,
+      ...(emailCode ? { emailCodeRequired: true as const } : {}),
+    };
   }
 
   private async loginAsPlatformAdminInTenant(
@@ -152,10 +209,11 @@ export class LoginUseCase {
    * Login en el APEX (host sin tenant). Solo lo resuelve un superadmin de
    * plataforma, y devuelve un token de PLATAFORMA (sin tenant ni rol) que
    * únicamente sirve para las rutas `/platform/*`.
+   *
+   * DX-021-bis: la contraseña no basta. Sale el paso del segundo factor (o,
+   * sin MFA, su alta) y la sesión la emite `CompleteMfaLoginUseCase`.
    */
-  async executePlatform(
-    input: PlatformLoginInput,
-  ): Promise<{ accessToken: string; refreshToken: string }> {
+  async executePlatform(input: PlatformLoginInput): Promise<MfaChallenge> {
     const email = input.email.trim().toLowerCase();
     const user = await this.repo.findUserForAuth(email);
     if (!user || !user.isPlatformAdmin) {
@@ -165,12 +223,17 @@ export class LoginUseCase {
     if (!ok) {
       throw new UnauthorizedException('Invalid credentials');
     }
-    this.logger.warn(`Platform admin session opened: user=${user.id}`);
-    return this.tokens.issue({
-      sub: user.id,
-      platform: true,
-      tv: user.tokenVersion,
-    });
+    const mfa = await this.mfa.state(user.id);
+    return this.challenge(
+      {
+        userId: user.id,
+        email: mfa.email,
+        isPlatformAdmin: true,
+        tokenVersion: mfa.tokenVersion,
+      },
+      null,
+      mfa.enabledAt ? 'MFA_VERIFY' : 'MFA_ENROLL',
+    );
   }
 
   /**

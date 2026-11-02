@@ -11,7 +11,8 @@ import { ClinicRole } from '@prisma/client';
  * Es obligatorio:
  *  - para el superadmin de plataforma (SEC-008) también cuando entra como
  *    MIEMBRO de una clínica (el acceso sin membresía ya es break-glass);
- *  - para los ADMIN de una clínica con `requireAdminMfa`.
+ *  - para los ADMIN de una clínica con `requireAdminMfa`;
+ *  - para todos los miembros de una clínica con `requireAllMfa` (DX-021-bis).
  * Quien lo tiene obligatorio y aún no lo activó pasa por el alta forzada
  * antes de recibir ningún token con acceso a datos.
  */
@@ -19,8 +20,9 @@ export function isMfaRequired(input: {
   role: ClinicRole;
   isPlatformAdmin: boolean;
   requireAdminMfa: boolean;
+  requireAllMfa: boolean;
 }): boolean {
-  if (input.isPlatformAdmin) return true;
+  if (input.isPlatformAdmin || input.requireAllMfa) return true;
   return input.role === ClinicRole.ADMIN && input.requireAdminMfa;
 }
 
@@ -43,6 +45,60 @@ export interface MfaChallenge {
   mfa: 'MFA_REQUIRED' | 'MFA_ENROLLMENT_REQUIRED';
   mfaToken: string;
   expiresAt: Date;
+  /**
+   * DX-021-bis: alta de un superadmin. Empezarla exige además el código que
+   * se le acaba de enviar al correo: la contraseña sola no enrola un móvil.
+   */
+  emailCodeRequired?: true;
+}
+
+/** DX-021-bis: las clínicas nuevas nacen exigiendo el MFA a sus ADMIN. */
+export const NEW_CLINIC_REQUIRES_ADMIN_MFA = Symbol(
+  'NEW_CLINIC_REQUIRES_ADMIN_MFA',
+);
+
+/** Política de una clínica. `requireAllMfa` implica `requireAdminMfa`. */
+export interface ClinicMfaPolicy {
+  requireAdminMfa: boolean;
+  requireAllMfa: boolean;
+}
+
+/** Vida de un dispositivo de confianza (DX-021-bis). */
+export const MFA_TRUSTED_DEVICE_DAYS = 30;
+
+/** Por qué un ADMIN restablece la verificación de otro (código, no texto libre). */
+export const MFA_RESET_REASONS = [
+  'LOST_DEVICE',
+  'DEVICE_REPLACED',
+  'SECURITY_INCIDENT',
+] as const;
+export type MfaResetReason = (typeof MFA_RESET_REASONS)[number];
+
+/** «Chrome en macOS» a partir del User-Agent: solo para reconocer el dispositivo. */
+export function trustedDeviceLabel(userAgent: string | null): string {
+  const ua = userAgent ?? '';
+  const browser = /Edg\//.test(ua)
+    ? 'Edge'
+    : /Firefox\//.test(ua)
+      ? 'Firefox'
+      : /Chrome\/|CriOS\//.test(ua)
+        ? 'Chrome'
+        : /Safari\//.test(ua)
+          ? 'Safari'
+          : null;
+  const system = /iPhone|iPad/.test(ua)
+    ? 'iOS'
+    : /Android/.test(ua)
+      ? 'Android'
+      : /Mac OS X/.test(ua)
+        ? 'macOS'
+        : /Windows/.test(ua)
+          ? 'Windows'
+          : /Linux/.test(ua)
+            ? 'Linux'
+            : null;
+  if (browser && system) return `${browser} en ${system}`;
+  return browser ?? system ?? 'Dispositivo desconocido';
 }
 
 export const MFA_MESSAGES = {
@@ -59,6 +115,16 @@ export const MFA_MESSAGES = {
     'Las cuentas de soporte de Dentalix deben mantener la verificación en dos pasos.',
   requiredByClinic:
     'Esta clínica exige la verificación en dos pasos a sus administradores: no puedes desactivarla.',
+  emailCodeInvalid:
+    'El código del correo no es correcto. Revisa el último que te enviamos.',
+  resetSelf:
+    'No puedes restablecer tu propia verificación: usa tus códigos de recuperación.',
+  resetNeedsOwnMfa:
+    'Para restablecer la de otra persona, activa primero tu propia verificación en dos pasos.',
+  resetPlatformAdmin:
+    'Las cuentas de soporte de Dentalix no se restablecen desde una clínica.',
+  resetOtherClinic:
+    'Esta cuenta da acceso a otra clínica: la persona debe usar sus códigos de recuperación.',
   policyNeedsOwnMfa:
     'Activa primero tu propia verificación en dos pasos (Mi perfil → Seguridad) antes de exigirla a los administradores.',
 } as const;

@@ -32,6 +32,8 @@ model Tenant {
   // antes de recibir ningún token con acceso a datos. Lo cambia el ADMIN
   // (PUT /security-policy, auditado).
   requireAdminMfa                         Boolean                          @default(false)
+  // DX-021-bis: la exige a TODOS los miembros (implica `requireAdminMfa`).
+  requireAllMfa                           Boolean                          @default(false)
   // DX-247: meses que vale una anamnesis (o su última confirmación «Sin
   // cambios hoy») antes de salir «Anamnesis caducada». CHECK 1..60 en la BD.
   anamnesisValidityMonths                 Int                              @default(12)
@@ -220,24 +222,24 @@ model Tenant {
 }
 
 model User {
-  id                      String             @id @default(uuid()) @db.Uuid
-  email                   String             @unique
+  id                      String                @id @default(uuid()) @db.Uuid
+  email                   String                @unique
   passwordHash            String
   fullName                String
   // DX-084: CLAVE del fichero en el almacén (`avatars/<id>.<ext>`), nunca
   // una URL; la URL pública se calcula al responder. La columna conserva su
   // nombre de antes (`avatarUrl`) para que la migración sea aditiva.
-  avatarKey               String?            @map("avatarUrl")
+  avatarKey               String?               @map("avatarUrl")
   emailVerifiedAt         DateTime?
   // Superadmin de PLATAFORMA: transversal a todos los tenants (por eso no es
   // un ClinicRole, que siempre es por-clínica vía ClinicMembership). Se otorga
   // SOLO por migración; ningún endpoint lo concede.
-  isPlatformAdmin         Boolean            @default(false)
+  isPlatformAdmin         Boolean               @default(false)
   // Versión de sesión: viaja en el claim `tv` de cada token y /auth/refresh
   // exige que coincida. Incrementarla invalida TODOS los refresh tokens del
   // usuario a la vez (lo hace el cambio de contraseña). Los tokens anteriores
   // a esta columna no traen `tv` y cuentan como 0.
-  tokenVersion            Int                @default(0)
+  tokenVersion            Int                   @default(0)
   // SEC-008: MFA (TOTP) del superadmin, exigido para el acceso break-glass a
   // una clínica sin membresía. Los secretos van cifrados (AES-256-GCM con
   // MFA_ENCRYPTION_KEY y el id del usuario como AAD); nunca en claro.
@@ -252,8 +254,10 @@ model User {
   // pide en el login de TODAS sus clínicas. Códigos de recuperación aparte
   // (`user_mfa_recovery_codes`, solo su HMAC).
   mfaRecoveryCodes        UserMfaRecoveryCode[]
-  createdAt               DateTime           @default(now())
-  updatedAt               DateTime           @updatedAt
+  // DX-021-bis: dispositivos que no piden el código durante 30 días.
+  trustedDevices          UserTrustedDevice[]
+  createdAt               DateTime              @default(now())
+  updatedAt               DateTime              @updatedAt
   deletedAt               DateTime?
   memberships             ClinicMembership[]
 
@@ -665,7 +669,7 @@ model Patient {
   lastAttentionAt              DateTime?             @map("last_attention_at")
   retentionExtended            RetentionExtension    @default(NONE) @map("retention_extended")
   /// DX-330 (R6): fecha de fin de conservación que la historia ya tenía cuando la clínica redujo su plazo. La escribe solo el cambio de plazo; nunca baja.
-  retentionFloorUntil          DateTime?             @db.Date @map("retention_floor_until")
+  retentionFloorUntil          DateTime?             @map("retention_floor_until") @db.Date
   partiallySuppressedAt        DateTime?             @map("partially_suppressed_at")
   // DX-128: canal OPERATIVO de los avisos automáticos (recordatorios), no el
   // consentimiento de marketing (DX-037). Nace con el de la clínica
@@ -2752,6 +2756,28 @@ model UserMfaRecoveryCode {
   @@map("user_mfa_recovery_codes")
 }
 
+/// DX-021-bis: dispositivo de confianza (30 días). `tokenHash` es el SHA-256
+/// del token aleatorio de la cookie HttpOnly. Solo vale con la `tokenVersion`
+/// actual del usuario: cambiar la contraseña o activar, desactivar o resetear
+/// el MFA lo invalida sin tocar la fila. Tabla global, sin RLS (como `users`).
+model UserTrustedDevice {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId       String    @db.Uuid
+  tokenHash    String    @unique
+  tokenVersion Int
+  /// Navegador y sistema, para reconocerlo en «Mi perfil».
+  label        String
+  createdAt    DateTime  @default(now())
+  lastUsedAt   DateTime  @default(now())
+  expiresAt    DateTime
+  revokedAt    DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@map("user_trusted_devices")
+}
+
 model RevokedToken {
   jti       String   @id
   expiresAt DateTime
@@ -3715,6 +3741,9 @@ enum EmailTemplate {
   SIGNATURE_BUDGET_ACCEPTED @map("signature-budget-accepted")
   // DX-435: oferta de un hueco libre con enlace para aceptarlo.
   SLOT_OFFER                @map("slot-offer")
+  // DX-021-bis: avisos de seguridad de la verificación en dos pasos.
+  MFA_NOTICE                @map("mfa-notice")
+  MFA_ENROLLMENT_CODE       @map("mfa-enrollment-code")
   // DX-443: copia del PDF firmado con un enlace de un solo uso.
   SIGNED_CONSENT_COPY       @map("signed-consent-copy")
 }
@@ -3948,8 +3977,9 @@ model PlatformAuditEvent {
   id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   actorUserId  String   @db.Uuid
   /// `JOB_RETRIED`; DX-359: `MFA_ENROLLMENT_STARTED`, `MFA_ENABLED`,
-  /// `PASSWORD_CHANGE`; DX-330: `CLINICAL_RETENTION_MINIMUM_APPLIED` (CHECK en
-  /// la migración).
+  /// `PASSWORD_CHANGE`; DX-330: `CLINICAL_RETENTION_MINIMUM_APPLIED`;
+  /// DX-021-bis: `LOGIN`, `LOGIN_FAILED`, `MFA_RECOVERY_CODES_REGENERATED`
+  /// (CHECK en la migración).
   action       String
   /// `JOB`; DX-359: `USER` (el propio superadmin); DX-330: `TENANT` (la
   /// clínica afectada) (CHECK en la migración).

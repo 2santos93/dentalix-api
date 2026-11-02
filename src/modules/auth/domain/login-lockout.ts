@@ -76,10 +76,9 @@ export const accountKeyHash = (email: string): string =>
   sha256(`dentalix:login-account:${normalizeLoginEmail(email)}`);
 
 /**
- * SEC-008: clave del contador de fallos del CÓDIGO MFA de un superadmin. Va
- * aparte del de la cuenta porque un login correcto (p. ej. en el apex, que
- * solo pide contraseña) borra el de la cuenta: con él, quien tenga la
- * contraseña podría probar códigos sin fin.
+ * SEC-008: clave del contador de fallos del CÓDIGO MFA. Va aparte del de la
+ * cuenta porque una contraseña correcta borra el de la cuenta: con él, quien
+ * tenga la contraseña podría probar códigos sin fin.
  */
 export const mfaKeyHash = (userId: string): string =>
   sha256(`dentalix:login-mfa:${userId}`);

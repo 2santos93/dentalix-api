@@ -54,9 +54,9 @@ const TOO_MANY = {
 };
 
 /**
- * DX-021: segundo paso del login de clínica. Público (sin JwtAuthGuard): se
- * autentica con el `mfaToken` del primer paso, que solo vale en la clínica
- * del host. Rate limit `auth` por IP además del contador por usuario.
+ * DX-021: segundo paso del login. Público (sin JwtAuthGuard): se autentica con
+ * el `mfaToken` del primer paso, que solo vale en la clínica del host o, el de
+ * un superadmin (DX-021-bis), en el apex. Rate limit `auth` por IP además del contador por usuario.
  */
 @ApiTags('auth')
 @Controller('auth/login/mfa')
@@ -93,13 +93,19 @@ export class LoginMfaController {
       );
     }
     try {
-      const pair = await this.login.verify({
+      const wantsCookie = this.cookie.wantsCookie(req);
+      const { trustedDeviceToken, ...pair } = await this.login.verify({
         mfaToken: dto.mfaToken,
         hostTenantId: req.tenantHost?.tenantId ?? undefined,
         factor: { code: dto.code, recoveryCode: dto.recoveryCode },
         request: requestMeta(req),
+        // Sin cookie no habría dónde guardarlo.
+        rememberDevice: wantsCookie && dto.rememberDevice === true,
       });
-      return this.cookie.deliver(res, pair, this.cookie.wantsCookie(req));
+      if (trustedDeviceToken) {
+        this.cookie.writeTrustedDevice(res, trustedDeviceToken);
+      }
+      return this.cookie.deliver(res, pair, wantsCookie);
     } catch (err) {
       throw lockedOr(err, res);
     }
@@ -113,16 +119,27 @@ export class LoginMfaController {
   })
   @ApiOkResponse({ type: MfaEnrollmentDto })
   @ApiUnauthorizedResponse({ description: '`code: "MFA_CHALLENGE_EXPIRED"`' })
+  @ApiBadRequestResponse({
+    description:
+      'Alta de un superadmin: falta el código enviado a su correo o no es correcto',
+  })
   @ApiConflictResponse({ description: 'La verificación ya está activa' })
-  startEnrollment(
+  @ApiTooManyRequestsResponse(TOO_MANY)
+  async startEnrollment(
     @Req() req: HostRequest,
+    @Res({ passthrough: true }) res: Response,
     @Body() dto: StartLoginMfaEnrollmentDto,
   ): Promise<UserMfaEnrollment> {
-    return this.login.startEnrollment({
-      mfaToken: dto.mfaToken,
-      hostTenantId: req.tenantHost?.tenantId ?? undefined,
-      request: requestMeta(req),
-    });
+    try {
+      return await this.login.startEnrollment({
+        mfaToken: dto.mfaToken,
+        hostTenantId: req.tenantHost?.tenantId ?? undefined,
+        emailCode: dto.emailCode,
+        request: requestMeta(req),
+      });
+    } catch (err) {
+      throw lockedOr(err, res);
+    }
   }
 
   @Post('enrollment/confirm')

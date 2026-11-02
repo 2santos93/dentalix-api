@@ -25,6 +25,8 @@ const TEMPLATE_TO_DB: Record<EmailTemplateName, EmailTemplate> = {
   'signature-budget-accepted': EmailTemplate.SIGNATURE_BUDGET_ACCEPTED,
   'slot-offer': EmailTemplate.SLOT_OFFER,
   'signed-consent-copy': EmailTemplate.SIGNED_CONSENT_COPY,
+  'mfa-notice': EmailTemplate.MFA_NOTICE,
+  'mfa-enrollment-code': EmailTemplate.MFA_ENROLLMENT_CODE,
 };
 
 /**

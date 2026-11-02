@@ -32,8 +32,8 @@ export const SECURITY_POLICY_FORBIDDEN_MESSAGE =
   'Solo la administración ve y cambia la seguridad de la clínica.';
 
 /**
- * DX-021: política de seguridad de la clínica (hoy: exigir el MFA a los
- * ADMIN). Solo ADMIN; el cambio queda auditado (CLINIC_SETTINGS, `MFA_POLICY`).
+ * DX-021: política de seguridad de la clínica (exigir el MFA a los ADMIN o,
+ * DX-021-bis, a todos). Solo ADMIN; el cambio queda auditado (CLINIC_SETTINGS, `MFA_POLICY`).
  */
 @ApiTags('auth')
 @ApiBearerAuth()
@@ -61,7 +61,7 @@ export class SecurityPolicyController {
   @ApiOperation({
     summary: 'Cambia la política de seguridad de la clínica (solo ADMIN)',
     description:
-      'Para exigir el MFA a los ADMIN, quien lo cambia debe tener ya el suyo activo (409 si no). Queda en la auditoría con el antes y el después.',
+      'Para endurecerla, quien la cambia debe tener ya su MFA activo (409 si no). Cierra las sesiones de quienes quedan obligados sin tenerlo. Queda en la auditoría con el antes, el después y cuántas sesiones se cerraron.',
   })
   @ApiOkResponse({ type: SecurityPolicyDto })
   @ApiForbiddenResponse({ description: SECURITY_POLICY_FORBIDDEN_MESSAGE })
@@ -71,7 +71,7 @@ export class SecurityPolicyController {
     @Body() dto: SecurityPolicyDto,
   ): Promise<SecurityPolicyDto> {
     return this.mfa.setClinicPolicy(
-      dto.requireAdminMfa,
+      dto,
       requireAuditRequestContext(req, this.tenantContext),
     );
   }

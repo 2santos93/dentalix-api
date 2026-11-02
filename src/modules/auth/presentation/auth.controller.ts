@@ -71,6 +71,7 @@ interface MfaChallengeResponse {
   mfa: 'MFA_REQUIRED' | 'MFA_ENROLLMENT_REQUIRED';
   mfaToken: string;
   expiresAt: string;
+  emailCodeRequired?: true;
 }
 
 function userAgentOf(req: TenantHostRequest): string | null {
@@ -212,6 +213,7 @@ export class AuthController {
     summary:
       'Inicia sesión en la clínica del host (o en plataforma desde el apex)',
     description:
+      'DX-021-bis: en el apex la contraseña no basta: responde siempre `MfaChallengeDto`; sin MFA, el alta exige además el código enviado al correo (`emailCodeRequired`). ' +
       'SEC-008: un superadmin SIN membresía en la clínica solo entra como acceso de soporte (break-glass): ' +
       'necesita el MFA enrolado (`/platform/mfa`), `mfaCode` y `breakGlassReason`. Recibe solo un access token ' +
       'ADMIN de vida corta (`breakGlass: true`, `expiresAt`), sin refresh, y el acceso queda en ' +
@@ -251,8 +253,8 @@ export class AuthController {
       throw lockedOr(err, res);
     }
     // Host SIN clínica (el apex): es la puerta del área de plataforma. Solo la
-    // resuelve un superadmin, y recibe un token de plataforma (sin tenant ni
-    // rol). Para cualquier otro usuario `executePlatform` lanza el mismo
+    // resuelve un superadmin, y recibe el paso del segundo factor (DX-021-bis);
+    // el token de plataforma (sin tenant ni rol) sale tras él. Para cualquier otro usuario `executePlatform` lanza el mismo
     // 'Invalid credentials', así que no se filtra si el email existe ni si es
     // superadmin.
     let result: LoginResult;
@@ -264,6 +266,7 @@ export class AuthController {
             password: dto.password,
             mfaCode: dto.mfaCode,
             breakGlassReason: dto.breakGlassReason,
+            trustedDeviceToken: this.cookie.readTrustedDevice(req),
             ip: req.ip ?? null,
             userAgent: userAgentOf(req),
           })
@@ -286,6 +289,7 @@ export class AuthController {
         mfa: result.mfa,
         mfaToken: result.mfaToken,
         expiresAt: result.expiresAt.toISOString(),
+        ...(result.emailCodeRequired ? { emailCodeRequired: true } : {}),
       };
     }
     if (isBreakGlassSession(result)) {

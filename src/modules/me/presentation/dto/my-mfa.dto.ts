@@ -62,3 +62,12 @@ export class MyMfaEnabledDto extends MyMfaStatusDto {
 
   @ApiPropertyOptional() refreshToken?: string;
 }
+
+/** DX-021-bis: un dispositivo de confianza vigente. */
+export class TrustedDeviceDto {
+  @ApiProperty({ format: 'uuid' }) id!: string;
+  @ApiProperty({ example: 'Chrome en macOS' }) label!: string;
+  @ApiProperty({ format: 'date-time' }) createdAt!: Date;
+  @ApiProperty({ format: 'date-time' }) lastUsedAt!: Date;
+  @ApiProperty({ format: 'date-time' }) expiresAt!: Date;
+}

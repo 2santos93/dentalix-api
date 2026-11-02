@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import {
+  IsBoolean,
   IsOptional,
   IsString,
   Length,
@@ -29,6 +30,13 @@ export class MfaChallengeDto {
 
   @ApiProperty({ format: 'date-time' })
   expiresAt!: string;
+
+  @ApiPropertyOptional({
+    enum: [true],
+    description:
+      'DX-021-bis: alta de un superadmin: se le envió un código al correo que exige POST /auth/login/mfa/enrollment.',
+  })
+  emailCodeRequired?: true;
 }
 
 /** Un segundo factor: `code` (6 dígitos de la app) o `recoveryCode`, uno de los dos. */
@@ -58,6 +66,14 @@ export class VerifyLoginMfaDto extends SecondFactorDto {
   @IsString()
   @Length(1, 2048)
   mfaToken!: string;
+
+  @ApiPropertyOptional({
+    description:
+      'DX-021-bis: no volver a pedir el código en este navegador durante 30 días (solo en modo cookie; nunca para un superadmin).',
+  })
+  @IsOptional()
+  @IsBoolean()
+  rememberDevice?: boolean;
 }
 
 export class StartLoginMfaEnrollmentDto {
@@ -67,6 +83,16 @@ export class StartLoginMfaEnrollmentDto {
   @IsString()
   @Length(1, 2048)
   mfaToken!: string;
+
+  @ApiPropertyOptional({
+    example: '12345678',
+    description:
+      'DX-021-bis: alta de un superadmin (`emailCodeRequired`): el código de 8 dígitos enviado a su correo.',
+  })
+  @IsOptional()
+  @Transform(stripSpaces)
+  @Matches(/^\d{8}$/, { message: 'El código del correo tiene 8 dígitos.' })
+  emailCode?: string;
 }
 
 export class ConfirmLoginMfaEnrollmentDto extends StartLoginMfaEnrollmentDto {

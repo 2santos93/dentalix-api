@@ -6,6 +6,8 @@ import {
   EmailVarsByTemplate,
   EmailVerifyEmailVars,
   InvitationEmailVars,
+  MfaEnrollmentCodeEmailVars,
+  MfaNoticeEmailVars,
   PasswordResetEmailVars,
   PaymentReceiptEmailVars,
   PostOpInstructionsEmailVars,
@@ -349,6 +351,70 @@ function signatureCode(
   });
 }
 
+/** DX-021-bis: solo el hecho; nunca códigos, secretos ni quién lo hizo. */
+function mfaNoticeText(vars: MfaNoticeEmailVars): {
+  subject: string;
+  body: string;
+  note: string;
+} {
+  switch (vars.kind) {
+    case 'RECOVERY_CODE_USED':
+      return {
+        subject: 'Se usó un código de recuperación en tu cuenta',
+        body: `Acabas de entrar a ${PRODUCT_NAME} con un código de recuperación. Te ${vars.recoveryCodesRemaining === 1 ? 'queda' : 'quedan'} ${plural(vars.recoveryCodesRemaining ?? 0, 'código', 'códigos')}.`,
+        note: 'Si no fuiste tú, cambia tu contraseña ahora y genera códigos nuevos desde tu perfil.',
+      };
+    case 'RESET_BY_ADMIN':
+      return {
+        subject: 'Se restableció tu verificación en dos pasos',
+        body: `Un administrador de tu clínica restableció la verificación en dos pasos de tu cuenta de ${PRODUCT_NAME}. Tus códigos de recuperación y tus dispositivos de confianza ya no sirven, y tus sesiones se cerraron.`,
+        note: 'Vuelve a activarla desde tu perfil. Si no lo pediste, avisa a la administración de tu clínica.',
+      };
+    case 'ATTEMPTS_LOCKED':
+      return {
+        subject: 'Intentos fallidos en la verificación de tu cuenta',
+        body: `Alguien escribió tu contraseña de ${PRODUCT_NAME} correctamente y falló varias veces el código de verificación. Por seguridad, los códigos quedan en espera unos minutos.`,
+        note: 'Si no fuiste tú, cambia tu contraseña ahora: eso corta el intento y te deja entrar enseguida.',
+      };
+  }
+}
+
+function mfaNotice(
+  vars: MfaNoticeEmailVars,
+  brand: EmailBrand | null,
+): RenderedEmail {
+  const { subject, body, note } = mfaNoticeText(vars);
+  return renderLayout({
+    brand,
+    subject,
+    heading: 'Aviso de seguridad',
+    blocks: [
+      { kind: 'paragraph', text: body },
+      { kind: 'note', text: note },
+    ],
+    action: null,
+  });
+}
+
+function mfaEnrollmentCode(
+  vars: MfaEnrollmentCodeEmailVars,
+  brand: EmailBrand | null,
+): RenderedEmail {
+  return renderLayout({
+    brand,
+    subject: 'Tu código para activar la verificación en dos pasos',
+    heading: 'Activa la verificación en dos pasos',
+    blocks: [
+      { kind: 'paragraph', text: `Tu código es: ${vars.code}` },
+      {
+        kind: 'note',
+        text: `Caduca en ${plural(vars.expiresInMinutes, 'minuto', 'minutos')}. Se pidió con tu contraseña correcta: si no fuiste tú, tu contraseña está comprometida. No compartas el código y avisa al equipo de seguridad de ${PRODUCT_NAME}.`,
+      },
+    ],
+    action: null,
+  });
+}
+
 function signatureBudgetAccepted(
   vars: SignatureBudgetAcceptedEmailVars,
   brand: EmailBrand | null,
@@ -445,6 +511,8 @@ const RENDERERS: { [T in EmailTemplateName]: Renderer<T> } = {
   'signature-budget-accepted': signatureBudgetAccepted,
   'slot-offer': slotOffer,
   'signed-consent-copy': signedConsentCopy,
+  'mfa-notice': mfaNotice,
+  'mfa-enrollment-code': mfaEnrollmentCode,
 };
 
 /**

@@ -86,6 +86,11 @@ export class LoginLockoutService {
     return this.repo.clearAccount(mfaKeyHash(userId));
   }
 
+  /** ¿Sus códigos MFA están en espera? (DX-021-bis: aviso a su dueño). */
+  async mfaBlocked(userId: string): Promise<boolean> {
+    return (await this.repo.accountBlockedUntil(mfaKeyHash(userId))) !== null;
+  }
+
   /** Desbloqueo por un ADMIN: borra espera y fallos de la cuenta. */
   unlock(email: string): Promise<void> {
     return this.repo.clearAccount(accountKeyHash(email));

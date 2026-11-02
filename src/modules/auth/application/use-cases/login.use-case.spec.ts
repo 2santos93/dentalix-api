@@ -14,6 +14,7 @@ const unusedBreakGlass = {
 const noMfa = {
   state: () => Promise.resolve({ enabledAt: null, isPlatformAdmin: false }),
   isRequired: () => Promise.resolve(false),
+  isTrustedDevice: () => Promise.resolve(false),
 } as never;
 const unusedChallenges = {
   issue: () => Promise.reject(new Error('paso MFA no esperado')),
@@ -60,6 +61,7 @@ describe('LoginUseCase', () => {
       unusedBreakGlass,
       noMfa,
       unusedChallenges,
+      {} as never,
     );
     const result = await uc.execute({
       tenantId: 't1',
@@ -88,6 +90,7 @@ describe('LoginUseCase', () => {
       unusedBreakGlass,
       noMfa,
       unusedChallenges,
+      {} as never,
     );
     await uc.execute({ tenantId: 't1', email: 'a@b.com', password: 'S3cret!' });
     expect(issue).toHaveBeenCalledWith({
@@ -121,6 +124,7 @@ describe('LoginUseCase', () => {
         unusedBreakGlass,
         noMfa,
         unusedChallenges,
+        {} as never,
       );
       await uc.execute({
         tenantId: 't1',
@@ -187,6 +191,7 @@ describe('LoginUseCase', () => {
         state: () =>
           Promise.resolve({ enabledAt: new Date(), isPlatformAdmin: false }),
         isRequired: () => Promise.resolve(false),
+        isTrustedDevice: () => Promise.resolve(false),
       };
       const uc = new LoginUseCase(
         await memberRepo(ClinicRole.DENTIST),
@@ -195,6 +200,7 @@ describe('LoginUseCase', () => {
         unusedBreakGlass,
         mfa as never,
         challenges as never,
+        {} as never,
       );
       const result = await uc.execute({
         tenantId: 't1',
@@ -220,6 +226,7 @@ describe('LoginUseCase', () => {
         state: () =>
           Promise.resolve({ enabledAt: null, isPlatformAdmin: false }),
         isRequired: () => Promise.resolve(true),
+        isTrustedDevice: () => Promise.resolve(false),
       };
       const uc = new LoginUseCase(
         await memberRepo(),
@@ -228,6 +235,7 @@ describe('LoginUseCase', () => {
         unusedBreakGlass,
         mfa as never,
         challenges as never,
+        {} as never,
       );
       const result = await uc.execute({
         tenantId: 't1',
@@ -250,6 +258,7 @@ describe('LoginUseCase', () => {
         unusedBreakGlass,
         { state, isRequired: jest.fn() } as never,
         challenges as never,
+        {} as never,
       );
       await expect(
         uc.execute({ tenantId: 't1', email: 'a@b.com', password: 'mala' }),
@@ -267,6 +276,7 @@ describe('LoginUseCase', () => {
       unusedBreakGlass,
       noMfa,
       unusedChallenges,
+      {} as never,
     );
     await expect(
       uc.execute({ tenantId: 't1', email: 'a@b.com', password: 'x' }),
@@ -289,6 +299,7 @@ describe('LoginUseCase', () => {
       unusedBreakGlass,
       noMfa,
       unusedChallenges,
+      {} as never,
     );
     await expect(
       uc.execute({ tenantId: 't1', email: 'a@b.com', password: 'wrong' }),
@@ -308,6 +319,7 @@ describe('LoginUseCase', () => {
         unusedBreakGlass,
         noMfa,
         unusedChallenges,
+        {} as never,
       );
       await expect(
         uc.execute({ tenantId: 't1', email: 'nadie@x.com', password: 'pw' }),
@@ -334,6 +346,7 @@ describe('LoginUseCase', () => {
         unusedBreakGlass,
         noMfa,
         unusedChallenges,
+        {} as never,
       );
       await expect(
         uc.execute({ tenantId: 't1', email: 'otra@x.com', password: 'pw' }),
@@ -352,6 +365,7 @@ describe('LoginUseCase', () => {
         unusedBreakGlass,
         noMfa,
         unusedChallenges,
+        {} as never,
       );
       await expect(
         uc.executePlatform({ email: 'nadie@x.com', password: 'pw' }),

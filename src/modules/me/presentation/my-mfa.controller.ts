@@ -2,9 +2,13 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   ForbiddenException,
   Get,
   HttpCode,
+  NotFoundException,
+  Param,
+  ParseUUIDPipe,
   Post,
   Req,
   Res,
@@ -17,6 +21,8 @@ import {
   ApiBearerAuth,
   ApiConflictResponse,
   ApiForbiddenResponse,
+  ApiNoContentResponse,
+  ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
@@ -60,6 +66,7 @@ import {
   ReauthMfaDto,
   RecoveryCodesDto,
   StartMyMfaDto,
+  TrustedDeviceDto,
 } from './dto/my-mfa.dto';
 
 const TOO_MANY = {
@@ -125,6 +132,47 @@ export class MyMfaController {
   status(@Req() req: AuditableRequest): Promise<UserMfaStatus> {
     const { user } = this.context(req);
     return this.mfa.status(user.sub, user.tenantId, user.role);
+  }
+
+  @Get('trusted-devices')
+  @ApiOperation({
+    summary:
+      'Tus dispositivos de confianza: los que no piden el código durante 30 días',
+  })
+  @ApiOkResponse({ type: [TrustedDeviceDto] })
+  trustedDevices(@Req() req: AuditableRequest): Promise<TrustedDeviceDto[]> {
+    return this.mfa.trustedDevices(this.context(req).user.sub);
+  }
+
+  // Antes que `:id`: Nest resuelve por orden de declaración.
+  @Delete('trusted-devices')
+  @HttpCode(204)
+  @ApiOperation({
+    summary: 'Revoca todos tus dispositivos de confianza',
+    description: 'Queda en la auditoría (`MFA_TRUSTED_DEVICES_REVOKED`).',
+  })
+  @ApiNoContentResponse({ description: 'Revocados' })
+  async revokeAllTrustedDevices(@Req() req: AuditableRequest): Promise<void> {
+    const { user, ctx } = this.context(req);
+    await this.mfa.revokeTrustedDevices(user.sub, null, ctx);
+  }
+
+  @Delete('trusted-devices/:id')
+  @HttpCode(204)
+  @ApiOperation({
+    summary: 'Revoca uno de tus dispositivos de confianza',
+    description: 'Queda en la auditoría (`MFA_TRUSTED_DEVICES_REVOKED`).',
+  })
+  @ApiNoContentResponse({ description: 'Revocado' })
+  @ApiNotFoundResponse({ description: 'No es un dispositivo tuyo' })
+  async revokeTrustedDevice(
+    @Req() req: AuditableRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<void> {
+    const { user, ctx } = this.context(req);
+    if (!(await this.mfa.revokeTrustedDevices(user.sub, id, ctx))) {
+      throw new NotFoundException('Dispositivo no encontrado');
+    }
   }
 
   @Post('enrollment')
