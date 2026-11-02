@@ -223,7 +223,10 @@ export class GetPlanQuoteUseCase {
     }
     // Un plan aceptado se imprime con su foto: los nombres de la clínica solo
     // hacen falta para componer el presupuesto vivo.
-    const names = source.acceptance ? {} : await this.documentTypeNames.get();
+    // DX-524: con el nombre de la sede del plan.
+    const names = source.acceptance
+      ? {}
+      : await this.documentTypeNames.get(source.location.id);
     return toDocument(source, this.now(), names);
   }
 }
@@ -283,7 +286,8 @@ export class AcceptTreatmentPlanUseCase {
     const acceptedAt = this.now();
     // Fuera de la transacción del plan (spec §4.6): si el ADMIN cambia un
     // nombre entre el GET y la firma, el hash vivo cambia → 409 (R18).
-    const names = await this.documentTypeNames.get();
+    // DX-524: con los de cada sede; se elige la del plan al leerlo.
+    const book = await this.documentTypeNames.book();
 
     const outcome = await this.repo.accept(
       patientId,
@@ -304,7 +308,11 @@ export class AcceptTreatmentPlanUseCase {
             'El plan no tiene ítems: agrega al menos un procedimiento antes de aceptarlo.',
           );
         }
-        const content = liveContent(source, acceptedAt, names);
+        const content = liveContent(
+          source,
+          acceptedAt,
+          book.forLocation(source.location.id),
+        );
         const contentHash = computeQuoteHash(content);
         if (contentHash !== input.contentHash) {
           throw new ConflictException(QUOTE_CHANGED_MESSAGE);
@@ -334,6 +342,10 @@ export class AcceptTreatmentPlanUseCase {
     if (outcome.kind === 'ALREADY_ACCEPTED') {
       throw new ConflictException(PLAN_ACCEPTED_CONFLICT_MESSAGE);
     }
-    return toDocument(outcome.source, acceptedAt, names);
+    return toDocument(
+      outcome.source,
+      acceptedAt,
+      book.forLocation(outcome.source.location.id),
+    );
   }
 }

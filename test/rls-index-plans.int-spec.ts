@@ -162,6 +162,11 @@ async function patient(
   return row.id;
 }
 
+const NO_BOOK = {
+  clinic: NO_LOCAL_NAMES,
+  forLocation: () => NO_LOCAL_NAMES,
+};
+
 describe('DX-225 · índices que sirven bajo RLS (int)', () => {
   let a: Clinic;
   let b: Clinic;
@@ -307,16 +312,13 @@ describe('DX-225 · índices que sirven bajo RLS (int)', () => {
     it('ignora mayúsculas y blancos alrededor, también en el parámetro, y solo en la clínica', async () => {
       const repo = new PrismaPatientImplantRepository(prisma, tenantContext);
       const byLot = await tenantContext.run(a.tenantId, () =>
-        repo.searchByLot({ lot: ' lot-77 ' }, NO_LOCAL_NAMES),
+        repo.searchByLot({ lot: ' lot-77 ' }, NO_BOOK),
       );
       expect(byLot.map((m) => m.lot).sort()).toEqual(
         [' lot-77 ', 'LOT-77', 'Lot-77'].sort(),
       );
       const byRef = await tenantContext.run(a.tenantId, () =>
-        repo.searchByLot(
-          { reference: 'Ref-9', lot: 'LOT-77  ' },
-          NO_LOCAL_NAMES,
-        ),
+        repo.searchByLot({ reference: 'Ref-9', lot: 'LOT-77  ' }, NO_BOOK),
       );
       expect(byRef.map((m) => [m.lot, m.reference]).sort()).toEqual(
         [

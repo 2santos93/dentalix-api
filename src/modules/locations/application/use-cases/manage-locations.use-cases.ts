@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Inject,
   Injectable,
@@ -38,6 +39,13 @@ import {
   validateRegionalSettings,
   validateTimeZone,
 } from '../../domain/regional-settings';
+import type { DocumentType } from '@prisma/client';
+import type { DocumentTypeNames } from '../../../patients/domain/document-type-names';
+import {
+  locationDocTypeNamesChange,
+  resolveLocationDocTypeNames,
+  type LocationDocTypeNamesChange,
+} from '../../domain/location-doc-type-names';
 import { COUNTRY_WHITELIST } from '../../domain/ports/country-whitelist.port';
 import type { CountryWhitelist } from '../../domain/ports/country-whitelist.port';
 import { CURRENCY_WHITELIST } from '../../../treatment-plans/domain/ports/currency-whitelist.port';
@@ -164,6 +172,8 @@ export interface LocationUpdate {
   location: Location;
   healthRegistration: HealthRegistrationChange | null;
   regionalSettings: RegionalSettingsChange | null;
+  /** DX-524: antes y después de los nombres de documento que cambiaron. */
+  docTypeNamesChange: LocationDocTypeNamesChange | null;
 }
 
 function regionalConflict(code: string, message: string): ConflictException {
@@ -254,6 +264,8 @@ export class UpdateLocationUseCase {
       defaultPhoneRegion?: unknown;
       confirmRegionalSettings?: true;
       confirmRegionalChange?: true;
+      // DX-524: solo los tipos que cambian; null o vacío = hereda.
+      docTypeNames?: Partial<Record<DocumentType, string | null>>;
     },
   ): Promise<LocationUpdate> {
     const current = await this.repo.findById(id);
@@ -294,6 +306,17 @@ export class UpdateLocationUseCase {
       }
       defaultPhoneRegion = checked;
     }
+    // DX-524: ausente no cambia; los enviados se validan junto a los que ya
+    // tenía la sede (400 sin guardar nada).
+    let docTypeNames: Partial<DocumentTypeNames> | undefined;
+    if (patch.docTypeNames !== undefined) {
+      const checked = resolveLocationDocTypeNames(
+        patch.docTypeNames,
+        current.docTypeNames,
+      );
+      if (!checked.ok) throw new BadRequestException(checked.message);
+      docTypeNames = checked.patch;
+    }
     const touchesRegional =
       Object.keys(regional).length > 0 ||
       patch.currency !== undefined ||
@@ -314,6 +337,7 @@ export class UpdateLocationUseCase {
       phone: normalizePhone(patch.phone),
       defaultPhoneRegion,
       isActive: patch.isActive,
+      docTypeNames,
     };
 
     if (!touchesRegional) {
@@ -323,6 +347,10 @@ export class UpdateLocationUseCase {
         location: updated,
         healthRegistration: healthRegistrationChange(current, updated),
         regionalSettings: null,
+        docTypeNamesChange: locationDocTypeNamesChange(
+          current.docTypeNames,
+          updated.docTypeNames,
+        ),
       };
     }
 
@@ -426,6 +454,10 @@ export class UpdateLocationUseCase {
     return {
       location: updated,
       healthRegistration: healthRegistrationChange(current, updated),
+      docTypeNamesChange: locationDocTypeNamesChange(
+        current.docTypeNames,
+        updated.docTypeNames,
+      ),
       // Sin cambio regional (ni confirmación) no hay antes/después que
       // auditar: p. ej. una zona reescrita solo en mayúsculas (M5).
       regionalSettings: reviewed

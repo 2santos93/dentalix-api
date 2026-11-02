@@ -377,8 +377,11 @@ describe('sillones en la BD (int, DX-211)', () => {
       const rejected = outcomes.filter((o) => o.status === 'rejected');
       expect(fulfilled).toHaveLength(1);
       expect(rejected).toHaveLength(1);
+      // Dos INSERT cruzados contra la EXCLUDE pueden interbloquearse (40P01) en
+      // lugar de dar 23P01: Postgres aborta a uno igual. Aquí se escribe en
+      // crudo, sin el orden de bloqueos de la app; allí el 40P01 es un 409.
       expect(String((rejected[0] as { reason: unknown }).reason)).toMatch(
-        /appointments_no_overlap_per_chair/,
+        /appointments_no_overlap_per_chair|40P01/,
       );
       await expect(
         raw.appointment.count({ where: { chairId: chair.id } }),

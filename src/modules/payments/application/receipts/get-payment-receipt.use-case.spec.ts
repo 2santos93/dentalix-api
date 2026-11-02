@@ -191,6 +191,26 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
     });
   });
 
+  it('DX-524: una foto sin nombre congelado se pinta con el nombre de la sede del abono, no el de la activa', async () => {
+    names.names.NATIONAL_ID = 'Documento clínica';
+    names.byLocation.set('loc-1', { NATIONAL_ID: 'Documento sede' });
+    names.byLocation.set('loc-activa', { NATIONAL_ID: 'Documento activa' });
+    names.activeLocationId = 'loc-activa';
+    const old = {
+      ...issuedSnapshot,
+      patient: {
+        id: 'pat-1',
+        fullName: 'Ana Ruiz',
+        docType: 'CC',
+        docNumberMasked: '****3456',
+      },
+    } satisfies ReceiptSnapshot;
+    const view = await makeUseCase(issued({ snapshot: old })).execute(
+      PAYMENT_ID,
+    );
+    expect(view.snapshot.patient.docTypeName).toBe('Documento sede');
+  });
+
   it('un recibo anulado conserva el número y trae fecha y motivo', async () => {
     const voidedAt = new Date('2026-10-18T10:00:00.000Z');
     const view = await makeUseCase(

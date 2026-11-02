@@ -155,7 +155,8 @@ export class GetPaymentReceiptUseCase {
     this.tenantContext.assertLocationAllowed(source.locationId);
     // DX-327 (spec §4.6): el nombre visible del documento se resuelve AQUÍ,
     // una vez, y de la vista salen la pantalla, el papel y el email.
-    const names = await this.documentTypeNames.get();
+    // DX-524: y con el nombre de la sede del abono, no el de la activa.
+    const names = await this.documentTypeNames.get(source.locationId);
     return {
       view:
         source.kind === 'issued'

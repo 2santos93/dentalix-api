@@ -614,8 +614,19 @@ function allFiles(dir: string): string[] {
   });
 }
 
-/** `prisma/demo/**` y `prisma/seed*.ts`. */
-const demoFiles = (): string[] => [
+/**
+ * DX-524: el ÚNICO fichero de la demo con nombres de documento de un país
+ * («Cédula de identidad» en las sedes venezolanas, «CPF» en São Paulo). Son
+ * datos de las sedes de la demo; el código no los conoce, y ningún otro
+ * fichero de la demo, de producción ni de migraciones puede nombrarlos.
+ */
+const DEMO_DOC_NAMES_FILE = join(PRISMA_DIR, 'demo', 'document-type-names.ts');
+
+/** `prisma/demo/**` y `prisma/seed*.ts`, sin el fichero de nombres de sede. */
+const demoFiles = (): string[] =>
+  demoFilesWithDocNames().filter((file) => file !== DEMO_DOC_NAMES_FILE);
+
+const demoFilesWithDocNames = (): string[] => [
   ...allFiles(join(PRISMA_DIR, 'demo')),
   ...readdirSync(PRISMA_DIR)
     .filter((name) => /^seed.*\.ts$/.test(name))
@@ -849,6 +860,20 @@ describe('tipos de documento genéricos (DX-327, DX-323)', () => {
         .slice(0, 200)
         .includes(R13_HEADER),
     ).toBe(true);
+  });
+
+  it('architecture: the country document names of the demo live only in its location-names data file (DX-524)', () => {
+    expect(demoFilesWithDocNames()).toContain(DEMO_DOC_NAMES_FILE);
+    // Es datos: sin importar nada de producción ni de la demo.
+    const lines = readFileSync(DEMO_DOC_NAMES_FILE, 'utf8').split('\n');
+    expect(lines.filter((line) => /^\s*import\b/.test(line))).toEqual([]);
+    // Y lo lee solo la semilla de la demo.
+    const readers = [...production, ...demoFiles()].filter((file) =>
+      /demo\/document-type-names['"]/.test(readFileSync(file, 'utf8')),
+    );
+    expect(readers.map((file) => relative(ROOT, file)).sort()).toEqual([
+      'prisma/seed-demo.ts',
+    ]);
   });
 
   it('architecture: the demo names no country document or authority', () => {
