@@ -48,6 +48,12 @@ export interface ReceiptNoticeData {
 
 interface ReceiptSourceBase {
   paymentId: string;
+  /**
+   * DX-525: la sede del abono (la persistida, aunque la sede ya esté
+   * retirada): con ella se comprueban las sedes permitidas del miembro, igual
+   * que al anular el abono. Vale también para un recibo «sin serie».
+   */
+  locationId: string;
   /** `null` en un abono contra un saldo migrado (DX-262). */
   treatmentPlanId: string | null;
   /** Email ACTUAL del paciente (para enviarle el recibo), o null si no tiene. */

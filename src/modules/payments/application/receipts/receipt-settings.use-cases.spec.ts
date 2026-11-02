@@ -8,6 +8,8 @@ import type {
   ClinicReceiptSettings,
   LocationReceiptLegend,
 } from '../../domain/receipt-settings';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import { LOCATION_NOT_ALLOWED_MESSAGE } from '../../../../shared/tenancy/location-access';
 import {
   GetReceiptSettingsUseCase,
   RECEIPT_SETTINGS_LOCATION_NOT_FOUND_MESSAGE,
@@ -23,6 +25,8 @@ const CTX: AuditRequestContext = {
   ip: null,
   userAgent: null,
 };
+
+const tenantContext = new TenantContextService();
 
 class FakeRepo implements ReceiptSettingsRepository {
   clinic: ClinicReceiptSettings = { title: null, legend: null };
@@ -99,7 +103,7 @@ describe('ajustes del recibo (DX-515)', () => {
 
   it('la leyenda de la sede: sin override la descarta; con override vacía = ninguna', async () => {
     const repo = new FakeRepo();
-    const uc = new UpdateLocationReceiptLegendUseCase(repo);
+    const uc = new UpdateLocationReceiptLegendUseCase(repo, tenantContext);
     await uc.execute('loc-1', { override: false, legend: 'ignorada' }, CTX);
     await uc.execute('loc-1', { override: true, legend: '' }, CTX);
     await uc.execute('loc-1', { override: true, legend: ' Propia ' }, CTX);
@@ -111,11 +115,53 @@ describe('ajustes del recibo (DX-515)', () => {
   });
 
   it('una sede que no es de la clínica: 404 en español', async () => {
-    const uc = new UpdateLocationReceiptLegendUseCase(new FakeRepo());
+    const uc = new UpdateLocationReceiptLegendUseCase(
+      new FakeRepo(),
+      tenantContext,
+    );
     await expect(
       uc.execute('otra', { override: true, legend: 'x' }, CTX),
     ).rejects.toThrow(
       new NotFoundException(RECEIPT_SETTINGS_LOCATION_NOT_FOUND_MESSAGE),
     );
+  });
+
+  // DX-525: la leyenda de una sede fuera de las permitidas no se toca.
+  it.each([
+    ['vista consolidada', undefined, ['loc-2']],
+    ['cabecera permitida', 'loc-2', ['loc-2']],
+    ['ninguna sede permitida', undefined, []],
+  ] as const)(
+    'otra sede (%s): 403 en español y no cambia nada',
+    async (_, active, allowed) => {
+      const repo = new FakeRepo();
+      const uc = new UpdateLocationReceiptLegendUseCase(repo, tenantContext);
+      await tenantContext.run(
+        't1',
+        active,
+        async () => {
+          await expect(
+            uc.execute('loc-1', { override: true, legend: 'x' }, CTX),
+          ).rejects.toThrow(LOCATION_NOT_ALLOWED_MESSAGE);
+        },
+        allowed,
+      );
+      expect(repo.setLocationCalls).toEqual([]);
+    },
+  );
+
+  it('su sede o sin restricción: la cambia', async () => {
+    const repo = new FakeRepo();
+    const uc = new UpdateLocationReceiptLegendUseCase(repo, tenantContext);
+    await tenantContext.run(
+      't1',
+      undefined,
+      async () => {
+        await uc.execute('loc-1', { override: true, legend: 'a' }, CTX);
+      },
+      ['loc-1'],
+    );
+    await uc.execute('loc-1', { override: true, legend: 'b' }, CTX);
+    expect(repo.setLocationCalls).toHaveLength(2);
   });
 });
