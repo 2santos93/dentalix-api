@@ -176,7 +176,7 @@ describe('SendAppointmentReminder (DX-026)', () => {
     expect(call[0].vars.cancellationPolicy).toEqual({
       noticeHours: 24,
       text: 'Avísanos con tiempo.',
-      feeLabel: expect.stringMatching(/50\.000.*COP|COP.*50\.000/) as unknown,
+      feeLabel: expect.stringMatching(/50\.000.*USD|USD.*50\.000/) as unknown,
     });
     expect(repo.reminders[0]).toMatchObject({
       status: 'SENT',
