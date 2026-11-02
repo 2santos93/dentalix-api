@@ -2,7 +2,10 @@ import { BadRequestException } from '@nestjs/common';
 import type { RecordAuditEventUseCase } from '../../../audit/application/record-audit-event.use-case';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import type { DocumentTypeNames } from '../../domain/document-type-names';
-import type { DocumentTypeNamesRepository } from '../../domain/ports/document-type-names-repository.port';
+import type {
+  DocumentTypeNamesBook,
+  DocumentTypeNamesRepository,
+} from '../../domain/ports/document-type-names-repository.port';
 import {
   GetDocumentTypeNamesUseCase,
   UpdateDocumentTypeNamesUseCase,
@@ -20,8 +23,24 @@ class InMemoryDocumentTypeNamesRepository implements DocumentTypeNamesRepository
   names: DocumentTypeNames = { ...NONE };
   writes = 0;
 
-  get(): Promise<DocumentTypeNames> {
-    return Promise.resolve({ ...this.names });
+  /** DX-524: lo que ve la sede activa (`undefined`) sobre los de la clínica. */
+  active: Partial<DocumentTypeNames> = {};
+
+  get(locationId?: string | null): Promise<DocumentTypeNames> {
+    const merged = { ...this.names };
+    if (locationId === undefined) {
+      for (const [type, name] of Object.entries(this.active)) {
+        if (name) merged[type as keyof DocumentTypeNames] = name;
+      }
+    }
+    return Promise.resolve(merged);
+  }
+
+  book(): Promise<DocumentTypeNamesBook> {
+    return Promise.resolve({
+      clinic: { ...this.names },
+      forLocation: () => ({ ...this.names }),
+    });
   }
 
   set(
@@ -60,7 +79,21 @@ describe('Nombres locales de los tipos de documento (DX-327, R16)', () => {
     repo.names = { ...NONE, TAX_ID: 'ID local' };
     await expect(
       new GetDocumentTypeNamesUseCase(repo).execute(),
-    ).resolves.toEqual({ names: { ...NONE, TAX_ID: 'ID local' } });
+    ).resolves.toEqual({
+      names: { ...NONE, TAX_ID: 'ID local' },
+      effective: { ...NONE, TAX_ID: 'ID local' },
+    });
+  });
+
+  it('DX-524: names are the clinic ones and effective adds the active location over them', async () => {
+    repo.names = { ...NONE, TAX_ID: 'ID local', OTHER: 'Otro local' };
+    repo.active = { TAX_ID: 'ID de la sede' };
+    await expect(
+      new GetDocumentTypeNamesUseCase(repo).execute(),
+    ).resolves.toEqual({
+      names: { ...NONE, TAX_ID: 'ID local', OTHER: 'Otro local' },
+      effective: { ...NONE, TAX_ID: 'ID de la sede', OTHER: 'Otro local' },
+    });
   });
 
   it('update audits CLINIC_SETTINGS with DOCUMENT_TYPE_NAMES_SETTINGS and the changed types, never the values', async () => {

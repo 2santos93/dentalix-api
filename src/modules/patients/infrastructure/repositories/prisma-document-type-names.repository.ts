@@ -5,10 +5,14 @@ import { TenantContextService } from '../../../../shared/tenancy/tenant-context.
 import { DOCUMENT_TYPES } from '../../domain/document-type';
 import {
   DOC_TYPE_NAME_FIELD,
+  mergeDocumentTypeNames,
   type DocTypeNameField,
   type DocumentTypeNames,
 } from '../../domain/document-type-names';
-import type { DocumentTypeNamesRepository } from '../../domain/ports/document-type-names-repository.port';
+import type {
+  DocumentTypeNamesBook,
+  DocumentTypeNamesRepository,
+} from '../../domain/ports/document-type-names-repository.port';
 
 type NameColumns = Record<DocTypeNameField, string | null>;
 
@@ -34,17 +38,55 @@ function fromColumns(row: NameColumns): DocumentTypeNames {
  * Los nombres de una clínica leídos con el cliente o la transacción de quien
  * llama: el recibo los congela dentro de la transacción del abono (spec
  * §4.6), sin otro constructor para el repositorio de pagos.
+ *
+ * DX-524: con `locationId`, los de esa sede sobre los de la clínica (por
+ * tipo); sin él (o `null`), solo los de la clínica. `db` ha de estar acotado a
+ * la clínica (`runWithTenant`); aun así la sede se busca por su `tenantId`.
  */
 export async function readDocumentTypeNames(
   db: Prisma.TransactionClient,
   tenantId: string,
+  locationId?: string | null,
 ): Promise<DocumentTypeNames> {
-  return fromColumns(
+  const clinic = fromColumns(
     await db.tenant.findUniqueOrThrow({
       where: { id: tenantId },
       select: SELECT,
     }),
   );
+  if (!locationId) return clinic;
+  const location = await db.location.findFirst({
+    // Sin `deletedAt`: un documento de una sede retirada conserva SU nombre.
+    where: { id: locationId, tenantId },
+    select: SELECT,
+  });
+  return mergeDocumentTypeNames(clinic, location && fromColumns(location));
+}
+
+/** DX-524: los de la clínica y los de cada una de sus sedes, en dos lecturas. */
+export async function readDocumentTypeNamesBook(
+  db: Prisma.TransactionClient,
+  tenantId: string,
+): Promise<DocumentTypeNamesBook> {
+  const [tenant, locations] = await Promise.all([
+    db.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: SELECT }),
+    db.location.findMany({
+      // Con las retiradas: sus documentos antiguos siguen con su nombre.
+      where: { tenantId },
+      select: { id: true, ...SELECT },
+    }),
+  ]);
+  const clinic = fromColumns(tenant);
+  const byLocation = new Map(
+    locations.map((l) => [
+      l.id,
+      mergeDocumentTypeNames(clinic, fromColumns(l)),
+    ]),
+  );
+  return {
+    clinic,
+    forLocation: (id) => (id && byLocation.get(id)) || { ...clinic },
+  };
 }
 
 function toColumns(names: DocumentTypeNames): NameColumns {
@@ -70,10 +112,29 @@ export class PrismaDocumentTypeNamesRepository implements DocumentTypeNamesRepos
     return tenantId;
   }
 
-  async get(): Promise<DocumentTypeNames> {
-    // `tenants` es global (sin RLS): siempre por el id del contexto, sin
-    // runWithTenant, como `getMajorityAge`.
-    return readDocumentTypeNames(this.prisma, this.tenantId());
+  async get(locationId?: string | null): Promise<DocumentTypeNames> {
+    const tenantId = this.tenantId();
+    // DX-524: sin argumento, la sede activa; sin ella (todas las sedes), la
+    // clínica. `null` pide expresamente la clínica.
+    const location =
+      locationId === undefined
+        ? this.tenantContext.getLocationId()
+        : locationId;
+    if (!location) {
+      // `tenants` es global (sin RLS): por el id del contexto, sin
+      // runWithTenant, como `getMajorityAge`.
+      return readDocumentTypeNames(this.prisma, tenantId);
+    }
+    return this.prisma.runWithTenant((tx) =>
+      readDocumentTypeNames(tx, tenantId, location),
+    );
+  }
+
+  book(): Promise<DocumentTypeNamesBook> {
+    const tenantId = this.tenantId();
+    return this.prisma.runWithTenant((tx) =>
+      readDocumentTypeNamesBook(tx, tenantId),
+    );
   }
 
   async set(

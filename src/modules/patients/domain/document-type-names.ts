@@ -128,3 +128,44 @@ export function validateDocumentTypeNames(
   }
   return { ok: true, names };
 }
+
+/**
+ * DX-524: los nombres que rigen en una sede. Por tipo: el de la sede si lo
+ * tiene; si no, el de la clínica (que puede ser null = genérico). Sin sede,
+ * los de la clínica.
+ */
+export function mergeDocumentTypeNames(
+  clinic: DocumentTypeNames,
+  location: Readonly<Partial<Record<DocumentType, string | null>>> | null,
+): DocumentTypeNames {
+  const names = {} as DocumentTypeNames;
+  for (const type of DOCUMENT_TYPES) {
+    const own =
+      location && Object.hasOwn(location, type) ? location[type] : null;
+    names[type] = own || clinic[type];
+  }
+  return names;
+}
+
+/** Las cinco columnas de una fila (`tenants` o `locations`), como nombres. */
+export function docTypeNamesFromColumns(
+  row: Readonly<Record<DocTypeNameField, string | null>>,
+): DocumentTypeNames {
+  const names = {} as DocumentTypeNames;
+  for (const type of DOCUMENT_TYPES)
+    names[type] = row[DOC_TYPE_NAME_FIELD[type]];
+  return names;
+}
+
+/** Solo las columnas de los tipos presentes (los demás no se tocan). */
+export function docTypeNamesToColumns(
+  names: Readonly<Partial<Record<DocumentType, string | null>>>,
+): Partial<Record<DocTypeNameField, string | null>> {
+  const columns: Partial<Record<DocTypeNameField, string | null>> = {};
+  for (const type of DOCUMENT_TYPES) {
+    if (Object.hasOwn(names, type)) {
+      columns[DOC_TYPE_NAME_FIELD[type]] = names[type] ?? null;
+    }
+  }
+  return columns;
+}

@@ -65,3 +65,13 @@ export class DocumentTypeNamesDto {
   @Type(() => DocumentTypeNamesValuesDto)
   names!: DocumentTypeNamesValuesDto;
 }
+
+/** Respuesta de GET (DX-524): los de la clínica y los que rigen en la sede activa. */
+export class DocumentTypeNamesViewDto extends DocumentTypeNamesDto {
+  @ApiProperty({
+    type: DocumentTypeNamesValuesDto,
+    description:
+      'Los nombres que rigen en la sede activa (X-Location-Id): los de la sede sobre los de la clínica, por tipo. Sin sede activa, los de la clínica. `names` sigue siendo solo los de la clínica.',
+  })
+  effective!: DocumentTypeNamesValuesDto;
+}
