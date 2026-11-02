@@ -175,6 +175,7 @@ describe('LoginUseCase — superadmin de plataforma', () => {
       user: AuthUserRecord,
       enabledAt: Date | null,
       tokens: ReturnType<typeof makeTokens>,
+      accepted = true,
     ) {
       const issued: unknown[] = [];
       const sent: unknown[] = [];
@@ -197,14 +198,16 @@ describe('LoginUseCase — superadmin de plataforma', () => {
             return Promise.resolve({
               token: 'mfa-token',
               expiresAt: new Date('2030-01-01T00:00:00Z'),
+              jti: 'jti-1',
             });
           },
           emailCode: () => '12345678',
+          emailCodeRef: () => 'A1F3',
         } as never,
         {
           sendEnrollmentCode: (input: unknown) => {
             sent.push(input);
-            return Promise.resolve();
+            return Promise.resolve(accepted);
           },
         } as never,
       );
@@ -249,16 +252,41 @@ describe('LoginUseCase — superadmin de plataforma', () => {
       const result = await uc.executePlatform({
         email: 'super@dentalix.com',
         password: 'S3cret!',
+        ip: '10.0.0.1',
       });
 
       expect(tokens.issued).toEqual([]);
       expect(result).toMatchObject({
         mfa: 'MFA_ENROLLMENT_REQUIRED',
         emailCodeRequired: true,
+        emailCodeRef: 'A1F3',
       });
       expect(sent).toEqual([
-        { to: 'super@dentalix.com', code: '12345678', expiresInMinutes: 10 },
+        {
+          userId: 'super-1',
+          ip: '10.0.0.1',
+          to: 'super@dentalix.com',
+          code: '12345678',
+          ref: 'A1F3',
+          expiresInMinutes: 10,
+        },
       ]);
+    });
+
+    it('DX-021-bis: si el correo no sale, no dice que salió: 429 con la espera', async () => {
+      const { uc } = apexUseCase(
+        await platformUser('S3cret!'),
+        null,
+        makeTokens(),
+        false,
+      );
+      await expect(
+        uc.executePlatform({
+          email: 'super@dentalix.com',
+          password: 'S3cret!',
+          ip: '10.0.0.1',
+        }),
+      ).rejects.toMatchObject({ retryAfterSeconds: 60 });
     });
 
     it('rechaza a un usuario normal', async () => {

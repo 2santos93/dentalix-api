@@ -63,7 +63,8 @@ export interface EmailOutboxRepository {
   /**
    * DX-021-bis: correo de seguridad de plataforma (`mfa-notice`,
    * `mfa-enrollment-code`): fuera del tope por destinatario, como mucho uno de
-   * esa plantilla por `minIntervalSeconds`. `null` si ya salió uno en ese plazo.
+   * esa plantilla y `referenceId` por `minIntervalSeconds`. `null` si ya salió
+   * uno en ese plazo.
    */
   insertPlatformSecurity(
     row: NewPlatformOutboxEmail,

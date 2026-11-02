@@ -51,6 +51,7 @@ export class InMemoryEmailOutboxRepository implements EmailOutboxRepository {
         r.tenantId === null &&
         r.toHash === row.toHash &&
         r.template === row.template &&
+        r.referenceId === row.referenceId &&
         Date.now() - r.createdAt.getTime() < minIntervalSeconds * 1000,
     );
     return Promise.resolve(

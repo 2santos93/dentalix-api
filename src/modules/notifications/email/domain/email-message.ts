@@ -206,6 +206,8 @@ export interface MfaNoticeEmailVars {
 /** DX-021-bis: código del correo para el alta del superadmin. */
 export interface MfaEnrollmentCodeEmailVars {
   code: string;
+  /** Dice cuál de varios correos es el del intento que está en pantalla. */
+  ref: string;
   expiresInMinutes: number;
 }
 

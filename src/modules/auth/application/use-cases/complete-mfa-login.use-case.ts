@@ -212,14 +212,14 @@ export class CompleteMfaLoginUseCase {
   ): Promise<void> {
     const userId = session.claims.sub;
     if (!(await this.mfa.state(userId)).isPlatformAdmin) return;
+    const { jti } = session.claims;
     await this.lockout.claimMfaEnrollAttempt(userId, request.ip);
-    if (
-      !emailCode ||
-      !this.challenges.matchesEmailCode(userId, session.claims.tv, emailCode)
-    ) {
+    if (!(await this.lockout.claimEnrollCodeAttempt(jti))) throw expired();
+    if (!emailCode || !this.challenges.matchesEmailCode(jti, emailCode)) {
       await this.record(session, 'LOGIN_FAILED', 'INVALID_EMAIL_CODE', request);
       throw new BadRequestException(MFA_MESSAGES.emailCodeInvalid);
     }
+    await this.lockout.clearEnrollCode(jti);
     await this.lockout.clearMfaEnroll(userId, request.ip);
   }
 

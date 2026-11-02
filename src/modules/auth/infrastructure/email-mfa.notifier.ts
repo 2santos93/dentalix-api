@@ -1,12 +1,11 @@
+import { createHash } from 'node:crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import { EmailOutbox } from '../../notifications/email/application/email-outbox.service';
-import type { MfaNotifier } from '../domain/ports/mfa-notifier.port';
-
-/**
- * Un código vale al menos estos segundos (`MfaChallengeService`): con uno cada
- * tanto, siempre hay uno vigente en el buzón.
- */
-const ENROLLMENT_CODE_INTERVAL_SECONDS = 600;
+import { ipBucket } from '../domain/login-lockout';
+import {
+  MFA_ENROLLMENT_CODE_INTERVAL_SECONDS,
+  type MfaNotifier,
+} from '../domain/ports/mfa-notifier.port';
 
 /**
  * Adaptador de los correos de la verificación en dos pasos (DX-021-bis). Un
@@ -47,16 +46,35 @@ export class EmailMfaNotifier implements MfaNotifier {
 
   async sendEnrollmentCode(
     input: Parameters<MfaNotifier['sendEnrollmentCode']>[0],
-  ): Promise<void> {
-    // `null` = ya salió uno hace menos de 10 min, y su código sigue vigente.
-    await this.outbox.enqueuePlatformSecurity(
+  ): Promise<boolean> {
+    const queued = await this.outbox.enqueuePlatformSecurity(
       {
         to: input.to,
         template: 'mfa-enrollment-code',
         locale: 'es',
-        vars: { code: input.code, expiresInMinutes: input.expiresInMinutes },
+        referenceId: clientReference(input.userId, input.ip),
+        vars: {
+          code: input.code,
+          ref: input.ref,
+          expiresInMinutes: input.expiresInMinutes,
+        },
       },
-      ENROLLMENT_CODE_INTERVAL_SECONDS,
+      MFA_ENROLLMENT_CODE_INTERVAL_SECONDS,
     );
+    return queued !== null;
   }
+}
+
+/** UUID estable de cuenta + cliente: el plazo entre correos va por pareja. */
+function clientReference(userId: string, ip: string | null): string {
+  const hex = createHash('sha256')
+    .update(`${userId}:${ipBucket(ip ?? 'unknown')}`)
+    .digest('hex');
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    hex.slice(12, 16),
+    hex.slice(16, 20),
+    hex.slice(20, 32),
+  ].join('-');
 }

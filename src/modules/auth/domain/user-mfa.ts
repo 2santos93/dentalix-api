@@ -46,10 +46,13 @@ export interface MfaChallenge {
   mfaToken: string;
   expiresAt: Date;
   /**
-   * DX-021-bis: alta de un superadmin. Empezarla exige además el código que
-   * se le acaba de enviar al correo: la contraseña sola no enrola un móvil.
+   * DX-021-bis: alta de un superadmin. Empezarla exige además el código de este
+   * token, que se le acaba de enviar al correo: la contraseña sola no enrola un
+   * móvil.
    */
   emailCodeRequired?: true;
+  /** Referencia que lleva el correo de ESTE intento (puede haber otros). */
+  emailCodeRef?: string;
 }
 
 /** DX-021-bis: las clínicas nuevas nacen exigiendo el MFA a sus ADMIN. */

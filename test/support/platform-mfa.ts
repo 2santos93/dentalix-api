@@ -14,31 +14,35 @@ export interface PlatformChallenge {
   mfa: 'MFA_REQUIRED' | 'MFA_ENROLLMENT_REQUIRED';
   mfaToken: string;
   emailCodeRequired?: true;
+  emailCodeRef?: string;
 }
 
-/** El primer paso en el apex (DX-021-bis): contraseña → paso del segundo factor. */
+/**
+ * El primer paso en el apex (DX-021-bis): contraseña → paso del segundo factor.
+ * `ip`: solo en apps con `trustProxyHops`.
+ */
 export async function apexPassword(
   app: INestApplication<App>,
   email: string,
-  password: string = SEEDED_PASSWORD,
+  ip?: string,
 ): Promise<PlatformChallenge> {
-  const res = await request(app.getHttpServer())
+  const req = request(app.getHttpServer())
     .post('/api/v1/auth/login')
-    .set('X-Tenant-Host', 'localhost')
-    .send({ email, password })
-    .expect(201);
+    .set('X-Tenant-Host', 'localhost');
+  if (ip) void req.set('X-Forwarded-For', ip);
+  const res = await req.send({ email, password: SEEDED_PASSWORD }).expect(201);
   return res.body as PlatformChallenge;
 }
 
-/** El código del correo: el test lo deriva, como el servidor al enviarlo. */
+/** El código del correo de ese token: el test lo deriva, como el servidor. */
 export function enrollmentEmailCode(
   app: INestApplication<App>,
-  userId: string,
-  tokenVersion: number,
+  mfaToken: string,
 ): string {
-  return app
-    .get(MfaChallengeService, { strict: false })
-    .emailCode(userId, tokenVersion);
+  const { jti } = JSON.parse(
+    Buffer.from(mfaToken.split('.')[1], 'base64url').toString(),
+  ) as { jti: string };
+  return app.get(MfaChallengeService, { strict: false }).emailCode(jti);
 }
 
 export interface EnrolledPlatformAdmin {
@@ -51,12 +55,13 @@ export interface EnrolledPlatformAdmin {
 /** Alta completa en el login del apex; el código de la app es el de hace 30 s. */
 export async function enrollPlatformAdmin(
   app: INestApplication<App>,
-  user: { id: string; email: string; tokenVersion?: number },
+  user: { id: string; email: string },
   userAgent = 'e2e',
+  challenge?: PlatformChallenge,
 ): Promise<EnrolledPlatformAdmin> {
   const http = () => request(app.getHttpServer());
-  const { mfaToken } = await apexPassword(app, user.email);
-  const emailCode = enrollmentEmailCode(app, user.id, user.tokenVersion ?? 0);
+  const { mfaToken } = challenge ?? (await apexPassword(app, user.email));
+  const emailCode = enrollmentEmailCode(app, mfaToken);
   const start = await http()
     .post('/api/v1/auth/login/mfa/enrollment')
     .set('X-Tenant-Host', 'localhost')

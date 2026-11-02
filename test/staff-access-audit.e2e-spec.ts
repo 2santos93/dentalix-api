@@ -547,7 +547,8 @@ describe('Auditoría de personal y cuenta (e2e, DX-359)', () => {
     }
 
     it('el alta y su login van a platform_audit_events, sin secreto ni códigos; un código erróneo queda como LOGIN_FAILED y no activa nada', async () => {
-      const { mfaToken } = await apexPassword(app, SUPER_EMAIL);
+      const challenge = await apexPassword(app, SUPER_EMAIL);
+      const { mfaToken } = challenge;
       await http()
         .post('/api/v1/auth/login/mfa/enrollment')
         .set('X-Tenant-Host', 'localhost')
@@ -560,6 +561,7 @@ describe('Auditoría de personal y cuenta (e2e, DX-359)', () => {
         app,
         { id: superId, email: SUPER_EMAIL },
         UA,
+        challenge,
       );
       platformToken = enrolled.accessToken;
 

@@ -8,10 +8,11 @@
 --                                         cupo del registro público, y al revés.
 --   email_outbox_enqueue_platform_security encola uno de esos correos con un
 --                                         único tope: como mucho uno de esa
---                                         plantilla por p_min_interval_seconds.
---                                         El código del alta usa 600 s, así que
---                                         siempre hay uno vigente en el buzón y
---                                         ningún tercero puede agotarlo.
+--                                         plantilla y p_reference_id por
+--                                         p_min_interval_seconds. El código del
+--                                         alta usa la pareja cuenta + cliente:
+--                                         otro cliente no le quita el turno al
+--                                         titular.
 --
 -- Mismas reglas que DX-144: SECURITY DEFINER del rol dentalix_email_dispatcher,
 -- search_path fijo, EXECUTE solo para dentalix_app y traspaso con SET ROLE.
@@ -91,6 +92,7 @@ BEGIN
      WHERE o."tenantId" IS NULL
        AND o."toHash" = p_to_hash
        AND o."template" = p_template
+       AND o."referenceId" IS NOT DISTINCT FROM p_reference_id
        AND o."createdAt" > v_now - pg_catalog.make_interval(secs => v_interval)
   ) THEN
     RETURN NULL;

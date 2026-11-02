@@ -16,7 +16,9 @@ import {
   type MfaChallenge,
   type MfaChallengePurpose,
 } from '../../domain/user-mfa';
+import { LoginLockedError } from '../../domain/login-lockout';
 import {
+  MFA_ENROLLMENT_CODE_INTERVAL_SECONDS,
   MFA_NOTIFIER,
   type MfaNotifier,
 } from '../../domain/ports/mfa-notifier.port';
@@ -27,6 +29,7 @@ import { UserMfaService } from '../user-mfa.service';
 export interface PlatformLoginInput {
   email: string;
   password: string;
+  ip?: string | null;
 }
 
 export interface LoginInput {
@@ -128,6 +131,7 @@ export class LoginUseCase {
         },
         input.tenantId,
         purpose,
+        input.ip ?? null,
       );
     }
     return this.tokens.issue({
@@ -153,27 +157,39 @@ export class LoginUseCase {
     },
     tenantId: string | null,
     purpose: MfaChallengePurpose,
+    ip: string | null,
   ): Promise<MfaChallenge> {
-    const { token, expiresAt } = await this.challenges.issue({
+    const { token, expiresAt, jti } = await this.challenges.issue({
       userId: user.userId,
       tenantId,
       tokenVersion: user.tokenVersion,
       purpose,
     });
-    const emailCode = purpose === 'MFA_ENROLL' && user.isPlatformAdmin;
-    if (emailCode) {
-      await this.notifier.sendEnrollmentCode({
+    const emailCodeRef =
+      purpose === 'MFA_ENROLL' && user.isPlatformAdmin
+        ? this.challenges.emailCodeRef(jti)
+        : null;
+    if (emailCodeRef) {
+      const sent = await this.notifier.sendEnrollmentCode({
+        userId: user.userId,
+        ip,
         to: user.email,
-        code: this.challenges.emailCode(user.userId, user.tokenVersion),
+        code: this.challenges.emailCode(jti),
+        ref: emailCodeRef,
         expiresInMinutes: MFA_CHALLENGE_TTL_SECONDS.MFA_ENROLL / 60,
       });
+      // Nunca «te enviamos un código» si no salió: este token no tendría código.
+      if (!sent)
+        throw new LoginLockedError(MFA_ENROLLMENT_CODE_INTERVAL_SECONDS);
     }
     return {
       mfa:
         purpose === 'MFA_VERIFY' ? 'MFA_REQUIRED' : 'MFA_ENROLLMENT_REQUIRED',
       mfaToken: token,
       expiresAt,
-      ...(emailCode ? { emailCodeRequired: true as const } : {}),
+      ...(emailCodeRef
+        ? { emailCodeRequired: true as const, emailCodeRef }
+        : {}),
     };
   }
 
@@ -233,6 +249,7 @@ export class LoginUseCase {
       },
       null,
       mfa.enabledAt ? 'MFA_VERIFY' : 'MFA_ENROLL',
+      input.ip ?? null,
     );
   }
 

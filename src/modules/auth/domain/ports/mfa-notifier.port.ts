@@ -2,6 +2,8 @@ import type { MfaNoticeKind } from '../../../notifications/email/domain/email-me
 
 export const MFA_NOTIFIER = Symbol('MFA_NOTIFIER');
 
+export const MFA_ENROLLMENT_CODE_INTERVAL_SECONDS = 60;
+
 /** DX-021-bis: los correos de la verificación en dos pasos. */
 export interface MfaNotifier {
   /**
@@ -15,12 +17,17 @@ export interface MfaNotifier {
     recoveryCodesRemaining?: number;
   }): Promise<void>;
   /**
-   * Código del alta de un superadmin: como mucho uno cada 10 min, sin más tope.
-   * Si no se puede encolar, lanza: el login no dice que se envió.
+   * Código del alta de un superadmin: cada intento de entrar tiene el suyo. Como
+   * mucho uno por cuenta y cliente (IP, /64 en IPv6) cada
+   * `MFA_ENROLLMENT_CODE_INTERVAL_SECONDS`, y ningún tope que un tercero pueda
+   * agotar. `false`: no salió por ese plazo. Si no se puede encolar, lanza.
    */
   sendEnrollmentCode(input: {
+    userId: string;
+    ip: string | null;
     to: string;
     code: string;
+    ref: string;
     expiresInMinutes: number;
-  }): Promise<void>;
+  }): Promise<boolean>;
 }

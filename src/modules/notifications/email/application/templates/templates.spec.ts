@@ -745,10 +745,11 @@ describe('avisos de la verificación en dos pasos (DX-021-bis)', () => {
   it('el código del alta avisa de que la contraseña está comprometida si no se pidió', () => {
     const { text } = renderEmail(
       'mfa-enrollment-code',
-      { code: '12345678', expiresInMinutes: 10 },
+      { code: '12345678', ref: 'A1F3', expiresInMinutes: 10 },
       null,
     );
     expect(text).toContain('Tu código es: 12345678');
+    expect(text).toContain('Referencia: A1F3');
     expect(text).toMatch(/contraseña está comprometida/);
   });
 });

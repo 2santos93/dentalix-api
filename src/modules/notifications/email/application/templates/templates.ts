@@ -412,9 +412,10 @@ function mfaEnrollmentCode(
     heading: 'Activa la verificación en dos pasos',
     blocks: [
       { kind: 'paragraph', text: `Tu código es: ${vars.code}` },
+      { kind: 'paragraph', text: `Referencia: ${vars.ref}` },
       {
         kind: 'note',
-        text: `Caduca en ${plural(vars.expiresInMinutes, 'minuto', 'minutos')}. Se pidió con tu contraseña correcta: si no fuiste tú, tu contraseña está comprometida. No compartas el código y avisa al equipo de seguridad de ${PRODUCT_NAME}.`,
+        text: `Vale solo para el intento que muestra esta referencia y admite 5 intentos. Caduca en ${plural(vars.expiresInMinutes, 'minuto', 'minutos')}. Se pidió con tu contraseña correcta: si no fuiste tú, tu contraseña está comprometida. No compartas el código y avisa al equipo de seguridad de ${PRODUCT_NAME}.`,
       },
     ],
     action: null,

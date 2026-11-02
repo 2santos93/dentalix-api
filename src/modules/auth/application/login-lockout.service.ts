@@ -2,8 +2,10 @@ import { Inject, Injectable } from '@nestjs/common';
 import {
   LOGIN_LOCKOUT_CONFIG,
   LoginLockedError,
+  MFA_ENROLL_CODE_ATTEMPTS,
   accountKeyHash,
   ipKeyHash,
+  mfaEnrollCodeKeyHash,
   mfaEnrollKeyHash,
   mfaKeyHash,
   type LoginLockoutConfig,
@@ -110,6 +112,23 @@ export class LoginLockoutService {
 
   clearMfaEnroll(userId: string, ip: string | null): Promise<void> {
     return this.repo.clearAccount(mfaEnrollKeyHash(userId, ip || UNKNOWN_IP));
+  }
+
+  /**
+   * Cobra un intento al código de ESE `mfaToken`, sin mirar de dónde viene.
+   * `false`: agotado, el código ya no vale aunque sea el correcto. Solo acertar
+   * lo borra (el alta lo pide dos veces y confirmar se puede reintentar).
+   */
+  async claimEnrollCodeAttempt(jti: string): Promise<boolean> {
+    const seconds = await this.repo.claimAccountAttempt(
+      mfaEnrollCodeKeyHash(jti),
+      MFA_ENROLL_CODE_ATTEMPTS,
+    );
+    return seconds === 0;
+  }
+
+  clearEnrollCode(jti: string): Promise<void> {
+    return this.repo.clearAccount(mfaEnrollCodeKeyHash(jti));
   }
 
   /** Desbloqueo por un ADMIN: borra espera y fallos de la cuenta. */

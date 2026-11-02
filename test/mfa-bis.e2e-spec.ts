@@ -218,53 +218,137 @@ describe('Verificación en dos pasos, ampliación (e2e, DX-021-bis)', () => {
         .expect(400);
     });
 
-    it('volver a escribir la contraseña da el mismo código; fallarlo espera solo por cuenta e IP y deja rastro', async () => {
-      const user = await seedSuper('reintento@platform.test');
-      const first = await apexPassword(app, user.email);
-      const second = await apexPassword(app, user.email);
-      expect(second.mfaToken).not.toBe(first.mfaToken);
-      const emailCode = enrollmentEmailCode(app, user.id, 0);
-      const wrong = emailCode === '00000000' ? '11111111' : '00000000';
-      const start = (code: string, ip: string) =>
-        http()
-          .post('/api/v1/auth/login/mfa/enrollment')
-          .set('X-Tenant-Host', 'localhost')
-          .set('X-Forwarded-For', ip)
-          .send({ mfaToken: second.mfaToken, emailCode: code });
-      // Un atacante con la contraseña falla a propósito desde su IP…
-      for (let i = 0; i < 5; i += 1) {
-        await start(wrong, '198.51.100.7').expect(400);
-      }
-      const locked = await start(emailCode, '198.51.100.7').expect(429);
-      expect(Number(locked.headers['retry-after'])).toBeGreaterThan(0);
-      // …y el titular, desde la suya, sigue adelante.
-      await start(emailCode, '203.0.113.20').expect(200);
+    const enrollStart = (mfaToken: string, emailCode: string, ip: string) =>
+      http()
+        .post('/api/v1/auth/login/mfa/enrollment')
+        .set('X-Tenant-Host', 'localhost')
+        .set('X-Forwarded-For', ip)
+        .send({ mfaToken, emailCode });
+    const wrongFor = (code: string) =>
+      code === '00000000' ? '11111111' : '00000000';
 
-      const events = await raw.platformAuditEvent.count({
-        where: {
-          actorUserId: user.id,
-          action: 'LOGIN_FAILED',
-          metadata: { path: ['reason'], equals: 'INVALID_EMAIL_CODE' },
-        },
-      });
-      expect(events).toBe(5);
+    it('rotar de IP no da más intentos: al quinto el código queda invalidado, aunque luego llegue el bueno', async () => {
+      const user = await seedSuper('rotacion@platform.test');
+      const { mfaToken } = await apexPassword(app, user.email, '198.51.100.1');
+      const emailCode = enrollmentEmailCode(app, mfaToken);
+      for (let i = 2; i <= 6; i += 1) {
+        await enrollStart(
+          mfaToken,
+          wrongFor(emailCode),
+          `198.51.100.${i}`,
+        ).expect(400);
+      }
+      const dead = await enrollStart(
+        mfaToken,
+        emailCode,
+        '198.51.100.7',
+      ).expect(401);
+      expect((dead.body as Body).code).toBe('MFA_CHALLENGE_EXPIRED');
+      expect(
+        await raw.platformAuditEvent.count({
+          where: {
+            actorUserId: user.id,
+            action: 'LOGIN_FAILED',
+            metadata: { path: ['reason'], equals: 'INVALID_EMAIL_CODE' },
+          },
+        }),
+      ).toBe(5);
+      // Volver a entrar da otro código, con sus intentos.
+      const fresh = await apexPassword(app, user.email, '198.51.100.8');
+      await enrollStart(
+        fresh.mfaToken,
+        enrollmentEmailCode(app, fresh.mfaToken),
+        '198.51.100.8',
+      ).expect(200);
+    });
+
+    it('un atacante con otra IP no bloquea al titular: gasta su código y su cuenta+IP, no los de él', async () => {
+      const user = await seedSuper('titular@platform.test');
+      const holder = await apexPassword(app, user.email, '203.0.113.20');
+      const attacker = await apexPassword(app, user.email, '198.51.100.9');
+      expect(attacker.emailCodeRef).not.toBe(holder.emailCodeRef);
+      const attackerCode = enrollmentEmailCode(app, attacker.mfaToken);
+      for (let i = 0; i < 5; i += 1) {
+        await enrollStart(
+          attacker.mfaToken,
+          wrongFor(attackerCode),
+          '198.51.100.9',
+        ).expect(400);
+      }
+      // El código del titular no vale con el token del atacante.
+      await enrollStart(
+        attacker.mfaToken,
+        enrollmentEmailCode(app, holder.mfaToken),
+        '198.51.100.10',
+      ).expect(401);
+      // Y el atacante sigue en espera desde su IP.
+      const locked = await enrollStart(
+        attacker.mfaToken,
+        attackerCode,
+        '198.51.100.9',
+      ).expect(429);
+      expect(Number(locked.headers['retry-after'])).toBeGreaterThan(0);
+
+      await enrollStart(
+        holder.mfaToken,
+        enrollmentEmailCode(app, holder.mfaToken),
+        '203.0.113.20',
+      ).expect(200);
+    });
+
+    it('IPv6: el mismo /64 cuenta junto y otro /64 no', async () => {
+      const user = await seedSuper('ipv6@platform.test');
+      const first = await apexPassword(app, user.email, '203.0.113.30');
+      const second = await apexPassword(app, user.email, '203.0.113.31');
+      const third = await apexPassword(app, user.email, '203.0.113.32');
+      for (let i = 1; i <= 5; i += 1) {
+        await enrollStart(
+          first.mfaToken,
+          wrongFor(enrollmentEmailCode(app, first.mfaToken)),
+          `2001:db8:1:2::${i}`,
+        ).expect(400);
+      }
+      await enrollStart(
+        second.mfaToken,
+        enrollmentEmailCode(app, second.mfaToken),
+        '2001:db8:1:2:ffff::9',
+      ).expect(429);
+      await enrollStart(
+        third.mfaToken,
+        enrollmentEmailCode(app, third.mfaToken),
+        '2001:db8:1:3::1',
+      ).expect(200);
+    });
+
+    it('el mismo cliente no pide otro correo enseguida, y se le dice: nunca un «enviado» falso', async () => {
+      const user = await seedSuper('seguido@platform.test');
+      await apexPassword(app, user.email, '2001:db8:9:9::1');
+      const again = await http()
+        .post('/api/v1/auth/login')
+        .set('X-Tenant-Host', 'localhost')
+        .set('X-Forwarded-For', '2001:db8:9:9::2')
+        .send({ email: user.email, password: SEEDED_PASSWORD })
+        .expect(429);
+      expect(Number(again.headers['retry-after'])).toBe(60);
+      await raw.loginThrottle.deleteMany({});
+      // Otro cliente no espera a ese turno.
+      await apexPassword(app, user.email, '203.0.113.40');
     });
 
     it('confirmar sin el código del correo no gasta el contador del titular', async () => {
       const user = await seedSuper('escaneando@platform.test');
       const { mfaToken } = await apexPassword(app, user.email);
-      const emailCode = enrollmentEmailCode(app, user.id, 0);
-      await http()
-        .post('/api/v1/auth/login/mfa/enrollment')
-        .set('X-Tenant-Host', 'localhost')
-        .send({ mfaToken, emailCode })
-        .expect(200);
-      const attacker = await apexPassword(app, user.email);
+      await enrollStart(
+        mfaToken,
+        enrollmentEmailCode(app, mfaToken),
+        '203.0.113.41',
+      ).expect(200);
+      const attacker = await apexPassword(app, user.email, '198.51.100.11');
       for (let i = 0; i < 6; i += 1) {
         await http()
           .post('/api/v1/auth/login/mfa/enrollment/confirm')
           .set('X-Tenant-Host', 'localhost')
-          .set('X-Forwarded-For', '198.51.100.8')
+          .set('X-Forwarded-For', '198.51.100.11')
           .send({ mfaToken: attacker.mfaToken, code: '000000' });
       }
       expect(
@@ -274,7 +358,7 @@ describe('Verificación en dos pasos, ampliación (e2e, DX-021-bis)', () => {
       ).toBe(0);
     });
 
-    it('el código del alta no se pierde: el tope de plataforma no lo frena y no se puede agotar', async () => {
+    it('el código del alta no se pierde: el tope de plataforma no lo frena', async () => {
       const user = await seedSuper('sincupo@platform.test');
       const toHash = app
         .get(EmailPayloadCipher, { strict: false })
@@ -287,20 +371,13 @@ describe('Verificación en dos pasos, ampliación (e2e, DX-021-bis)', () => {
         SELECT gen_random_uuid(), NULL, 'registration-notice', ${toHash}, 's***@platform.test',
                'SENT', 1, now(), timezone('utc', now()), timezone('utc', now())
           FROM generate_series(1, 4)`;
-      const codes = () =>
-        raw.emailOutbox.count({
-          where: { toHash, template: 'MFA_ENROLLMENT_CODE' },
-        });
-      // Diez rondas de contraseña, cada una pasados más de 10 min.
       for (let round = 1; round <= 10; round += 1) {
-        await apexPassword(app, user.email);
-        expect(await codes()).toBe(round);
-        // En el mismo plazo no sale otro: vale el que ya está en el buzón.
-        await apexPassword(app, user.email);
-        expect(await codes()).toBe(round);
-        await raw.$executeRaw`
-          UPDATE email_outbox SET "createdAt" = "createdAt" - interval '11 minutes'
-           WHERE "toHash" = ${toHash}`;
+        await apexPassword(app, user.email, `192.0.2.${round}`);
+        expect(
+          await raw.emailOutbox.count({
+            where: { toHash, template: 'MFA_ENROLLMENT_CODE' },
+          }),
+        ).toBe(round);
       }
     });
 

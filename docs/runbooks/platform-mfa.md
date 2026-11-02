@@ -29,13 +29,16 @@ nueva: despliega las dos a la vez.
 Quien no lo tenga activo:
 
 1. Escribe su contraseña en el apex. Si es correcta, la API envía a su correo un
-   código de 8 dígitos (vive entre 10 y 20 min, se deriva de la cuenta y no se
-   guarda). Volver a escribir la contraseña en ese rato da el mismo código.
+   código de 8 dígitos **de ese intento**, con una referencia que la pantalla
+   muestra. Vive lo que su token (10 min), se deriva de él y no se guarda.
 2. Escribe el código. Solo entonces ve el secreto. Quien tiene la contraseña
    pero no el correo no enrola su móvil; el dueño recibe el correo y sabe que su
-   contraseña está comprometida. Los fallos quedan en `platform_audit_events`
-   (`LOGIN_FAILED`, `INVALID_EMAIL_CODE`) y cuentan por cuenta **e IP**: quien
-   prueba códigos desde otro sitio no bloquea al titular.
+   contraseña está comprometida. Cada código admite **5 intentos en total**,
+   vengan de la IP que vengan; agotados, queda invalidado y hay que volver a
+   entrar. Además hay un contador por cuenta y cliente (IP, /64 en IPv6). Los
+   fallos quedan en `platform_audit_events` (`LOGIN_FAILED`,
+   `INVALID_EMAIL_CODE`). Un atacante gasta su código, nunca el del titular: cada
+   entrada tiene el suyo.
 3. Confirma con un código de la app, guarda sus 10 códigos de recuperación y entra.
 4. El acceso de soporte a clínicas sigue cerrado durante
    `BREAK_GLASS_MFA_COOLDOWN_MINUTES` (24 h por defecto).
@@ -49,9 +52,11 @@ correo caído, quien ya tiene MFA entra con normalidad y el alta espera a que se
 arregle.
 
 Este correo no pasa por el tope por destinatario de plataforma: si no, quien
-conoce la contraseña lo agotaría. Su único tope es uno cada 10 min, así que
-siempre hay un código vigente en el buzón (entre 10 y 20 min de vida). Si no
-llega, se vuelve a entrar pasados 10 min y sale otro.
+conoce la contraseña lo agotaría. Su único tope es uno por minuto por cuenta y
+cliente (IP, /64 en IPv6); dentro de ese minuto el login responde 429 con la
+espera, no «enviado». No hay tope global a propósito: sería una forma de bloquear
+al titular. El coste es que un atacante con la contraseña y muchas IP puede llenar
+ese buzón: cada correo le dice al dueño que la contraseña está comprometida.
 
 Quien activó el MFA antes de esta versión no tiene códigos de recuperación:
 `/admin` se lo avisa y los genera ahí (contraseña + código).

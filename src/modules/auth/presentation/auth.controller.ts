@@ -72,6 +72,7 @@ interface MfaChallengeResponse {
   mfaToken: string;
   expiresAt: string;
   emailCodeRequired?: true;
+  emailCodeRef?: string;
 }
 
 function userAgentOf(req: TenantHostRequest): string | null {
@@ -273,6 +274,7 @@ export class AuthController {
         : await this.login.executePlatform({
             email: dto.email,
             password: dto.password,
+            ip: req.ip ?? null,
           });
     } catch (err) {
       if (err instanceof UnauthorizedException) {
@@ -289,7 +291,9 @@ export class AuthController {
         mfa: result.mfa,
         mfaToken: result.mfaToken,
         expiresAt: result.expiresAt.toISOString(),
-        ...(result.emailCodeRequired ? { emailCodeRequired: true } : {}),
+        ...(result.emailCodeRequired
+          ? { emailCodeRequired: true, emailCodeRef: result.emailCodeRef }
+          : {}),
       };
     }
     if (isBreakGlassSession(result)) {
