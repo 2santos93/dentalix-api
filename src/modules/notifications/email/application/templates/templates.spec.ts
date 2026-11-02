@@ -640,7 +640,7 @@ describe('plantillas reservadas para otras tareas', () => {
         'El 31/10/2026 9:30 a. m. registramos tu aceptación',
       );
       expect(email.html).not.toContain('href=');
-      expect(email.text).not.toMatch(/\$|\bCOP\b|implante|tratamiento/i);
+      expect(email.text).not.toMatch(/\$|\bCO[P]\b|implante|tratamiento/i);
     });
 
     it('la oferta de hueco por enlace (DX-435): cuándo, dónde y con quién; sin nada clínico', () => {

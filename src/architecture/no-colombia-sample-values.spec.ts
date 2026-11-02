@@ -52,7 +52,7 @@ const CITY = 'Bogot';
 
 const FORBIDDEN = new RegExp(
   [
-    String.raw`(?<![\p{L}\p{N}_])${CURRENCY_CODE}(?![\p{L}\p{N}_])`,
+    String.raw`(?:(?<![\p{L}\p{N}_])|(?<=\\[sb]))${CURRENCY_CODE}(?![\p{L}\p{N}_])`,
     ZONE,
     `(?<![\\p{L}\\p{N}_-])${LOCALE}(?![\\p{L}\\p{N}_])`,
     `${CITY}[aá]`,
@@ -110,6 +110,8 @@ describe('los valores de ejemplo son de Venezuela y en USD, nunca de Colombia', 
     for (const line of [
       `currency: '${CURRENCY_CODE}',`,
       `150.000 ${CURRENCY_CODE}`,
+      String.raw`/150\.000,00\s${CURRENCY_CODE}/`,
+      String.raw`/\b${CURRENCY_CODE}\b/`,
       `timeZone: '${ZONE}',`,
       `locale: '${LOCALE}',`,
       'Sede en ' + 'Colombia',
