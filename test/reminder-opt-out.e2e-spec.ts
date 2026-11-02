@@ -22,7 +22,6 @@ import {
 } from './support/e2e-fixtures';
 import { CapturingMailer } from './support/capture-mailer';
 import {
-  REGIONAL_CARACAS_FIXTURE,
   REGIONAL_MADRID_FIXTURE,
   locationData,
 } from './support/location-fixtures';
