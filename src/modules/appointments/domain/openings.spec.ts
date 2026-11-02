@@ -1,7 +1,7 @@
 import { findOpenings, type OpeningsQuery } from './openings';
 import type { ScheduleRange } from '../../location-schedule/application/business-hours';
 
-// Martes 20-10-2026 en Bogotá (UTC−5 fijo): 09:00 local = 14:00Z.
+// Martes 20-10-2026 en la zona de la sede (UTC−5 fijo): 09:00 local = 14:00Z.
 const TUESDAY = '2026-10-20';
 const WEEKDAY_RANGES: ScheduleRange[] = [1, 2, 3, 4, 5].flatMap((weekday) => [
   { weekday, startMinute: 9 * 60, endMinute: 13 * 60 },
@@ -130,7 +130,7 @@ describe('findOpenings (DX-122): horario ∩ ¬bloqueos ∩ ¬citas', () => {
           { weekday: 2, startMinute: 20 * 60, endMinute: 24 * 60 },
           { weekday: 3, startMinute: 0, endMinute: 2 * 60 },
         ],
-        // 23:30 del martes – 00:30 del miércoles (hora de Bogotá).
+        // 23:30 del martes – 00:30 del miércoles (hora de la sede).
         busy: [
           {
             start: z('2026-10-21T04:30:00.000Z'),

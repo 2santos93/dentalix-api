@@ -44,7 +44,7 @@ async function seedClinic(
   const seed = new ReportSeeder(raw, tenant.id);
   const locationId = await seed.location('Sede principal');
   // La profesional atiende allí de lunes a viernes de 9 a 13 (240 min),
-  // Bogotá: es la capacidad de la sede (BE-042).
+  // En la zona de la sede: es la capacidad de la sede (BE-042).
   const { userId: providerId } = await seed.dentist();
   await seed.providerSchedule({
     providerId,

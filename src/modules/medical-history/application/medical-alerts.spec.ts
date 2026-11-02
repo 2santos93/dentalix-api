@@ -80,7 +80,7 @@ describe('PatientMedicalAlertFlags (DX-247, por lote)', () => {
   });
 
   it('cada cita se evalúa el día civil de su inicio en la zona de su sede, sin N+1', async () => {
-    // Revisada el 25/10/2025: caduca el 25/10/2026 en Bogotá.
+    // Revisada el 25/10/2025: caduca el 25/10/2026 en la zona de la sede.
     repo.seedSnapshot('p-1', {
       createdAt: new Date('2025-10-25T15:00:00.000Z'),
     });
@@ -97,7 +97,7 @@ describe('PatientMedicalAlertFlags (DX-247, por lote)', () => {
         start: new Date('2026-10-29T14:00:00.000Z'),
         locationId: 'bog',
       },
-      // 24/10 a las 23:30 en Bogotá es el 25/10 en UTC: sigue al día.
+      // 24/10 a las 23:30 en la zona de la sede es el 25/10 en UTC: sigue al día.
       {
         id: 'noche',
         patientId: 'p-1',

@@ -40,7 +40,7 @@ function addDays(day: string, n: number): string {
     .toISOString()
     .slice(0, 10);
 }
-/** Hora de pared de Bogotá (UTC−5 fijo) como instante ISO. */
+/** Hora de pared de la sede (UTC−5 fijo) como instante ISO. */
 function local(day: string, hhmm: string): string {
   return new Date(`${day}T${hhmm}:00-05:00`).toISOString();
 }

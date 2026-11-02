@@ -7,7 +7,7 @@ import {
 } from './business-hours';
 
 // Horario típico con cierre de mediodía: lun-vie 9-13 y 15-19, sáb 9-13,
-// domingo cerrado. Bogotá es UTC-5 fijo (sin DST), así que las cuentas de abajo
+// domingo cerrado. La zona del fixture es UTC-5 fijo (sin DST), así que las cuentas de abajo
 // son verificables a mano.
 function bogotaHours(): BusinessHours {
   const weekdays = [1, 2, 3, 4, 5];
@@ -23,7 +23,7 @@ function bogotaHours(): BusinessHours {
   };
 }
 
-// 2026-08-03 es LUNES. En Bogotá (UTC-5), 14:00Z = 09:00 local.
+// 2026-08-03 es LUNES. En la zona de la sede (UTC-5), 14:00Z = 09:00 local.
 const MONDAY_09_LOCAL = new Date('2026-08-03T14:00:00.000Z');
 const MONDAY_10_LOCAL = new Date('2026-08-03T15:00:00.000Z');
 

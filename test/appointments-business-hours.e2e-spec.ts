@@ -70,7 +70,7 @@ describe('Horario de atención en la zona de la sede (e2e, G1)', () => {
   });
 
   // 2026-11-02 es lunes. 10:00 en Tokio (UTC+9) = 01:00Z, que en Bogotá
-  // sería domingo 20:00: fuera de horario si se leyera en Bogotá.
+  // sería domingo 20:00: fuera de horario si se leyera en la zona de la sede.
   it('una cita a las 10:00 de Tokio cabe en el horario de la sede de Tokio', async () => {
     await book('2026-11-02T01:00:00.000Z', '2026-11-02T01:30:00.000Z').expect(
       201,

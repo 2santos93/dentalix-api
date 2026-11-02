@@ -56,7 +56,7 @@ interface GroupBody {
   records: RecordBody[];
 }
 
-/** Día civil en Bogotá (zona por defecto de la clínica) `daysAgo` días atrás. */
+/** Día civil en la zona de la sede (zona por defecto de la clínica) `daysAgo` días atrás. */
 function bogotaDay(daysAgo = 0): string {
   return new Date(Date.now() - 5 * 60 * 60 * 1000 - daysAgo * DAY_MS)
     .toISOString()

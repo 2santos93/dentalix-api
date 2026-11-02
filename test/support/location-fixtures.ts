@@ -19,7 +19,7 @@ export interface RegionalFixture {
   defaultPhoneRegion: string;
 }
 
-/** Conserva las expectativas de los tests anteriores a G1 (COP, Bogotá). */
+/** Conserva las expectativas de los tests anteriores a G1 (COP, zona UTC−5). */
 export const REGIONAL_BOGOTA_FIXTURE: RegionalFixture = {
   country: 'CO',
   currency: 'COP',

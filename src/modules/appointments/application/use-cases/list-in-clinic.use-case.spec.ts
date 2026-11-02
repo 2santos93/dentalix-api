@@ -37,7 +37,7 @@ const LOCATIONS: Record<string, RegionalRow> = {
 const at = (iso: string) => new Date(iso);
 
 describe('ListInClinicUseCase (DX-200)', () => {
-  // 19 oct 2026, 09:20 en Bogotá (UTC−5).
+  // 19 oct 2026, 09:20 en la zona de la sede (UTC−5).
   const NOW = at('2026-10-19T14:20:00.000Z');
 
   function setup() {

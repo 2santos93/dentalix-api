@@ -28,7 +28,7 @@ const PNG_A =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 const PNG_B =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==';
-// 17:30 UTC del 16 de octubre = 12:30 en Bogotá.
+// 17:30 UTC del 16 de octubre = 12:30 en la zona de la sede.
 const NOW = new Date('2026-10-16T17:30:00.000Z');
 const META = {
   recordedById: 'dentist-1',

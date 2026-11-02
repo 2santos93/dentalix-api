@@ -75,12 +75,12 @@ function setup() {
   return { repo, uc, drafts };
 }
 
-/** Una cita de hoy que no cruza la medianoche de Bogotá. */
+/** Una cita de hoy que no cruza la medianoche de la sede. */
 function todayAppointment(
   repo: InMemoryAppointmentRepository,
   status: AppointmentStatus = AppointmentStatus.CONFIRMED,
 ) {
-  // Dentro de 30 min, o antes si eso ya cae mañana en Bogotá: la llegada solo
+  // Dentro de 30 min, o antes si eso ya cae mañana en la zona de la sede: la llegada solo
   // depende del DÍA civil de la cita.
   const today = civilDayRange(civilDateIn(new Date(), TZ), TZ);
   const start = new Date(

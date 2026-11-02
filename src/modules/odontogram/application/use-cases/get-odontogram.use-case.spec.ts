@@ -3,7 +3,7 @@ import { CatalogKind } from '@prisma/client';
 import { GetOdontogramUseCase } from './get-odontogram.use-case';
 import { InMemoryToothRecordRepository } from '../__fixtures__/in-memory-odontogram';
 
-// Bogotá (UTC-5): "hoy" es 2026-10-16 hasta las 05:00 UTC del 17.
+// En la zona de la sede (UTC-5): "hoy" es 2026-10-16 hasta las 05:00 UTC del 17.
 const NOW = new Date('2026-10-16T20:00:00.000Z');
 
 function seeded() {
@@ -80,9 +80,9 @@ describe('GetOdontogramUseCase', () => {
     it('asOf incluye lo anulado después y excluye lo posterior, cortando el día en la zona de la clínica', async () => {
       const { repo, add } = seeded();
       const target = await add('64', '2026-10-01T10:00:00Z');
-      // 2026-10-05 a las 23:30 en Bogotá = 04:30 UTC del 6: sigue siendo el 5.
+      // 2026-10-05 a las 23:30 en la zona de la sede = 04:30 UTC del 6: sigue siendo el 5.
       await add('65', '2026-10-06T04:30:00Z');
-      // 2026-10-06 en Bogotá: posterior.
+      // 2026-10-06 en la zona de la sede: posterior.
       await add('84', '2026-10-06T15:00:00Z');
       // La anulación de 64 lleva la fecha del reloj del doble: el 16.
       await repo.createVoid({

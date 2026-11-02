@@ -275,7 +275,7 @@ describe('GetReceivablesAgingUseCase', () => {
 
   it('el último abono lleva su día civil en la zona de su sede', async () => {
     repo.debtors[1].lastPayment = {
-      // 02:00 UTC del 1-oct = 21:00 del 30-sep en Bogotá.
+      // 02:00 UTC del 1-oct = 21:00 del 30-sep en la zona de la sede.
       paidAt: new Date('2026-10-01T02:00:00.000Z'),
       timeZone: 'America/Bogota',
       amount: 50000,
@@ -300,7 +300,7 @@ describe('GetReceivablesAgingUseCase', () => {
 
   describe('cobranza (DX-150)', () => {
     it('el CSV lleva el día de la última gestión en la zona de la sede de la deuda', async () => {
-      // 21:00 del 15/10 en Bogotá = 02:00 UTC del 16/10.
+      // 21:00 del 15/10 en la zona de la sede = 02:00 UTC del 16/10.
       repo.collections.set('p-antiguo', {
         lastNote: {
           channel: 'CALL',

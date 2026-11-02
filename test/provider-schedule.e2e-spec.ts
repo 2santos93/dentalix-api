@@ -30,7 +30,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const BOGOTA_MS = 5 * 60 * 60 * 1000;
 const H = (h: number) => h * 60;
 
-/** YYYY-MM-DD (Bogotá) del primer lunes a 7 días o más: siempre futuro. */
+/** YYYY-MM-DD (zona de la sede) del primer lunes a 7 días o más: siempre futuro. */
 function nextMonday(): string {
   let t = Date.now() - BOGOTA_MS + 7 * DAY_MS;
   while (new Date(t).getUTCDay() !== 1) t += DAY_MS;
@@ -41,7 +41,7 @@ function addDays(day: string, n: number): string {
     .toISOString()
     .slice(0, 10);
 }
-/** Hora de pared de Bogotá (UTC−5 fijo) como instante ISO. */
+/** Hora de pared de la sede (UTC−5 fijo) como instante ISO. */
 function local(day: string, hhmm: string): string {
   return new Date(`${day}T${hhmm}:00-05:00`).toISOString();
 }
@@ -169,7 +169,7 @@ describe('Horario de los profesionales por sede (e2e, DX-233)', () => {
         .expect(201);
       patients.push((p.body as Body).id);
     }
-    // Las dos sedes abiertas de lunes a viernes de 7:00 a 20:00 (Bogotá).
+    // Las dos sedes abiertas de lunes a viernes de 7:00 a 20:00 (zona de la sede).
     for (const loc of [sedeA, sedeB]) {
       await as(api().put('/api/v1/locations/schedule'), clinic.adminToken)
         .set('X-Location-Id', loc)

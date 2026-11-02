@@ -9,7 +9,7 @@ import {
 describe('ofertas de huecos (DX-210)', () => {
   describe('día de la oferta en la zona de la sede', () => {
     it('las 23:30 de Bogotá siguen siendo hoy aunque en UTC ya sea mañana', () => {
-      const now = new Date('2026-10-21T04:30:00Z'); // 20/10 23:30 en Bogotá
+      const now = new Date('2026-10-21T04:30:00Z'); // 20/10 23:30 en la zona de la sede
       expect(offerDayFor(now, 'America/Bogota')).toBe('2026-10-20');
       expect(offerDayFor(now, 'Europe/Madrid')).toBe('2026-10-21');
     });

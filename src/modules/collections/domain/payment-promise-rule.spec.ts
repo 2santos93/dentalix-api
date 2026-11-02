@@ -63,14 +63,14 @@ describe('evaluatePromise (DX-150)', () => {
   });
 
   it('INCUMPLIDO desde las 00:00 del 16/11 en la zona de la sede, no antes', () => {
-    // 04:59 UTC del 16 = 23:59 del 15 en Bogotá: aún abierto.
+    // 04:59 UTC del 16 = 23:59 del 15 en la zona de la sede: aún abierto.
     expect(
       evaluatePromise(promise, [], {
         now: new Date('2026-11-16T04:59:59.000Z'),
         timeZone: BOGOTA,
       }).status,
     ).toBe('OPEN');
-    // 05:00 UTC del 16 = 00:00 del 16 en Bogotá: incumplido.
+    // 05:00 UTC del 16 = 00:00 del 16 en la zona de la sede: incumplido.
     expect(
       evaluatePromise(promise, [], {
         now: new Date('2026-11-16T05:00:00.000Z'),
@@ -229,7 +229,7 @@ describe('countsTowardPromise (DX-215)', () => {
 
 describe('statusAfterVoid (DX-215)', () => {
   const beforeDue = new Date('2026-11-10T16:00:00.000Z');
-  const afterDue = new Date('2026-11-16T05:30:00.000Z'); // 00:30 del 16 en Bogotá
+  const afterDue = new Date('2026-11-16T05:30:00.000Z'); // 00:30 del 16 en la zona de la sede
 
   it('anular el abono que lo cumplió ANTES de la fecha: vuelve a ABIERTO', () => {
     expect(

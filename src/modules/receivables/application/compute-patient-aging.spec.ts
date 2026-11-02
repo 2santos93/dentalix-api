@@ -6,7 +6,7 @@ import type {
 } from '../domain/entities/receivables.entity';
 import { computePatientAging } from './compute-patient-aging';
 
-// 15:00 UTC = 10:00 en Bogotá: el mismo día civil en las dos zonas.
+// 15:00 UTC = 10:00 en la zona de la sede: el mismo día civil en las dos zonas.
 const NOW = new Date('2026-10-17T15:00:00.000Z');
 const BOGOTA = 'America/Bogota';
 
@@ -152,7 +152,7 @@ describe('computePatientAging', () => {
         plans: [
           plan('p', {
             billable: 100,
-            // 02:00 UTC del 18-sep = 21:00 del 17-sep en Bogotá.
+            // 02:00 UTC del 18-sep = 21:00 del 17-sep en la zona de la sede.
             agingFrom: new Date('2026-09-18T02:00:00.000Z'),
           }),
         ],

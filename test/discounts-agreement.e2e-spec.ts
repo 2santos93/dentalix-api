@@ -31,7 +31,7 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 });
 
 const DAY = 24 * 60 * 60 * 1000;
-/** Día civil de Bogotá (UTC−5 fijo) `offset` días desde hoy. */
+/** Día civil de la sede (UTC−5 fijo) `offset` días desde hoy. */
 const bogotaDay = (offset = 0) =>
   new Date(Date.now() - 5 * 60 * 60 * 1000 + offset * DAY)
     .toISOString()

@@ -41,13 +41,13 @@ const UNCONFIGURED: ProviderScheduleSnapshot = {
 const names = (id: string) => (id === A ? 'Sede A' : 'Sede B');
 
 describe('providerWorksAt (DX-233)', () => {
-  // 2026-10-19 es lunes; 2026-10-22, jueves. Bogotá = UTC−5 fijo.
+  // 2026-10-19 es lunes; 2026-10-22, jueves. La zona del fixture es UTC−5 fijo.
   it('sin horario configurado no restringe (compatibilidad)', () => {
     expect(
       providerWorksAt(
         UNCONFIGURED,
         A,
-        new Date('2026-10-19T08:00:00Z'), // 03:00 en Bogotá
+        new Date('2026-10-19T08:00:00Z'), // 03:00 en la zona de la sede
         new Date('2026-10-19T08:30:00Z'),
         BOGOTA,
       ),
@@ -221,7 +221,7 @@ describe('providerWorksAt (DX-233)', () => {
       ],
       overrides: [],
     };
-    // Lunes 23:30 → martes 00:30 en Bogotá.
+    // Lunes 23:30 → martes 00:30 en la zona de la sede.
     expect(
       providerWorksAt(
         s,
@@ -305,8 +305,8 @@ describe('providerWorksAt (DX-233)', () => {
     ).toBe(true);
   });
 
-  it('Colombia: sin cambio de hora, el día lo marca la zona de la sede', () => {
-    // Lunes 19 a las 20:00 en Bogotá ya es martes 01:00Z.
+  it('zona sin cambio de hora: el día lo marca la zona de la sede', () => {
+    // Lunes 19 a las 20:00 en la zona de la sede ya es martes 01:00Z.
     const s: ProviderScheduleSnapshot = {
       providerId: 'p',
       configured: true,

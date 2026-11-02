@@ -36,7 +36,7 @@ import {
 import { PATIENT_ROLES } from '../../../auth/presentation/guards/clinic-role-sets';
 import { DOC_TAKEN_MESSAGE } from '../../../patients/infrastructure/repositories/prisma-patient.repository';
 
-// DX-470: «Atender sin cita». Martes 10 nov 2026 en Bogotá (UTC−5): las
+// DX-470: «Atender sin cita». Martes 10 nov 2026 en la zona de la sede (UTC−5): las
 // 10:07:42 del reloj del servidor son las 15:07:42 UTC.
 const NOW = new Date('2026-11-10T15:07:42.000Z');
 const utc = (hhmm: string) => new Date(`2026-11-10T${hhmm}:00.000Z`);

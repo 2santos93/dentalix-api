@@ -19,13 +19,13 @@ import type {
 import type { VoidActor, VoidSubject } from '../../domain/void-window';
 import { CashPayment } from '../../domain/entities/cash-payment.entity';
 
-// 2026-10-16 10:00 en Bogotá (UTC-5): el "hoy" de la sede de las filas.
+// 2026-10-16 10:00 en la zona de la sede (UTC-5): el "hoy" de la sede de las filas.
 const NOW = new Date('2026-10-16T15:00:00.000Z');
 const clock = (): Date => NOW;
 const ADMIN: VoidActor = { userId: 'u-admin', role: ClinicRole.ADMIN };
 const RECEPTION: VoidActor = { userId: 'u-recep', role: ClinicRole.RECEPTION };
 
-/** Registrado por recepción hoy (en la sede, Bogotá). */
+/** Registrado por recepción hoy (en la zona de la sede). */
 const OWN_TODAY: VoidSubject = {
   createdById: 'u-recep',
   createdAt: new Date('2026-10-16T13:00:00.000Z'),
@@ -506,7 +506,7 @@ describe('ListCashPaymentsUseCase', () => {
     const OTHER_USER: VoidSubject = { ...OTHER_AUTHOR };
     const OWN_YESTERDAY: VoidSubject = {
       ...OWN_TODAY,
-      // 23:30 del 15 en Bogotá: es 16 en UTC, pero no "hoy" en la sede.
+      // 23:30 del 15 en la zona de la sede: es 16 en UTC, pero no "hoy" en la sede.
       createdAt: new Date('2026-10-16T04:30:00.000Z'),
     };
 
@@ -561,9 +561,9 @@ describe('ListCashPaymentsUseCase', () => {
     it('registeredOn es el día civil del alta EN LA SEDE y registeredToday lo compara con hoy allí', async () => {
       const repo = new SpyPaymentRepository(
         pageWith(
-          // Alta hoy 08:00 en Bogotá, con fecha de pago de ayer.
+          // Alta hoy 08:00 en la zona de la sede, con fecha de pago de ayer.
           fakeRow('today'),
-          // 23:30 del 15 en Bogotá: en UTC ya es 16, pero en la sede no es hoy.
+          // 23:30 del 15 en la zona de la sede: en UTC ya es 16, pero en la sede no es hoy.
           fakeRow(
             'late-yesterday',
             {},

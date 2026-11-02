@@ -6,7 +6,7 @@ export interface UserRef {
 
 /**
  * Lo que la clínica redacta al publicar una versión. Cada `*Text` de scope es
- * el texto de su casilla: lo que el titular autoriza exactamente.
+ * el texto de su casilla: lo que el paciente autoriza exactamente.
  */
 export interface PrivacyPolicyContent {
   policyText: string;

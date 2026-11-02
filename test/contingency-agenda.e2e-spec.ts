@@ -27,10 +27,10 @@ import {
 } from '../src/modules/contingency-agenda/infrastructure/pdf/contingency-agenda-pdf.renderer';
 
 /**
- * DX-339 · Agenda de contingencia por HTTP real. Clínica A (sedes en Bogotá,
+ * DX-339 · Agenda de contingencia por HTTP real. Clínica A (sedes en
  * UTC−5, reloj de 24 h) con la sede principal y la Norte, y la clínica B. El
  * reloj del módulo es fijo: «hoy» es el lunes 4 de marzo de 2030 (mediodía en
- * Bogotá) y «mañana» el martes 5. El PDF se genera sin comprimir para leer lo
+ * la zona de la sede) y «mañana» el martes 5. El PDF se genera sin comprimir para leer lo
  * que pinta.
  *
  *  - hoyConfirmada: hoy 09:00, confirmada, primera visita → sale;
@@ -44,7 +44,7 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
-const NOW = new Date('2030-03-04T17:00:00Z'); // 12:00 en Bogotá
+const NOW = new Date('2030-03-04T17:00:00Z'); // 12:00 en la zona de la sede
 const at = (day: string, time: string) => new Date(`${day}T${time}:00-05:00`);
 const route = (locationId: string, suffix = '') =>
   `/locations/${locationId}/contingency-agenda${suffix}`;

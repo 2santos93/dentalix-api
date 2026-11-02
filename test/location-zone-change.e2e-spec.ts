@@ -56,7 +56,7 @@ describe('Locations / cambio regional (e2e)', () => {
       .set('X-Tenant-Host', clinic.host)
       .set('Authorization', `Bearer ${token}`);
 
-  /** Sede nueva en COP / Bogotá (revisada al crearla). */
+  /** Sede nueva en COP / UTC−5 (revisada al crearla). */
   const newLocation = async (): Promise<string> =>
     (
       (

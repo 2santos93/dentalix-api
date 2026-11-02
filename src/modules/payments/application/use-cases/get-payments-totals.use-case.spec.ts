@@ -194,21 +194,21 @@ describe('GetPaymentsTotalsUseCase', () => {
 
   it('DX-097: el período y la fecha de la tasa son los días civiles de la sede, no los UTC', async () => {
     const { repo, fakeConvert, uc } = makeUseCase('America/Bogota');
-    // 31/03 a las 22:00 en Bogotá = 01/04 03:00 UTC: es de marzo.
+    // 31/03 a las 22:00 en la zona de la sede = 01/04 03:00 UTC: es de marzo.
     repo.seedPayment({
       id: 'late-march',
       currency: 'COP',
       amount: 4000,
       paidAt: new Date('2026-04-01T03:00:00.000Z'),
     });
-    // 01/03 a las 00:30 en Bogotá = 01/03 05:30 UTC: es de marzo.
+    // 01/03 a las 00:30 en la zona de la sede = 01/03 05:30 UTC: es de marzo.
     repo.seedPayment({
       id: 'early-march',
       currency: 'USD',
       amount: 1,
       paidAt: new Date('2026-03-01T05:30:00.000Z'),
     });
-    // 28/02 a las 23:00 en Bogotá = 01/03 04:00 UTC: es de febrero.
+    // 28/02 a las 23:00 en la zona de la sede = 01/03 04:00 UTC: es de febrero.
     repo.seedPayment({
       id: 'late-feb',
       currency: 'USD',

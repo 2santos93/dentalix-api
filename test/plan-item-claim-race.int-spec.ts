@@ -26,7 +26,7 @@ const prisma = new PrismaService(context);
 const repo = new PrismaAppointmentRepository(prisma, context);
 const MIN = 60000;
 /**
- * DX-449: Bogotá salvo cerca de su medianoche, cuando las sedes pasan a una
+ * DX-449: la zona de la sede salvo cerca de su medianoche, cuando las sedes pasan a una
  * zona donde ahora es mediodía: las citas «de hoy que ya empezaron» son de hoy
  * a cualquier hora de la CI.
  */

@@ -24,7 +24,8 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 const UA = 'dx360-e2e-agent';
 
 const POLICY = {
-  policyText: 'Política de tratamiento de datos de la clínica (Ley 1581).',
+  policyText:
+    'Política de tratamiento de datos de la clínica (versión de prueba).',
   generalText: 'Autorizo el tratamiento de mis datos personales.',
   sensitiveHealthText:
     'Autorizo el tratamiento de mis datos sensibles de salud (historia clínica). No está obligado a autorizarlo. Finalidad: la atención odontológica.',
@@ -280,7 +281,7 @@ describe('Auditoría de la configuración de la clínica (e2e, DX-360)', () => {
         },
       });
       const dump = JSON.stringify(events);
-      expect(dump).not.toContain('Ley 1581');
+      expect(dump).not.toContain('versión de prueba');
       expect(dump).not.toContain('Versión 2 de la política');
     });
   });

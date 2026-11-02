@@ -21,7 +21,7 @@ import type {
  *
  *  - BE-042: la ocupación divide los minutos atendidos entre la CAPACIDAD de
  *    la sede (Σ horario de cada profesional en ella, menos sus bloqueos y los
- *    cierres), con tope de 100 %. Sedes en Bogotá (UTC−5): las 9:00 son las
+ *    cierres), con tope de 100 %. Sedes en la zona de la sede (UTC−5): las 9:00 son las
  *    14:00 UTC.
  *      Sede Tres: tres profesionales con horario los lunes 9–10.
  *      Sede Dos: dos profesionales los martes 9–13 y la sede abierta 9–13

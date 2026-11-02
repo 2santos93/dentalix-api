@@ -72,7 +72,7 @@ describe('Códigos clínicos: CIE-10 (DX-212, e2e)', () => {
       .set('Authorization', `Bearer ${token}`);
   }
 
-  /** Hoy en Bogotá como fecha civil (lo que manda la web al elegir fecha). */
+  /** Hoy en la zona de la sede como fecha civil (lo que manda la web al elegir fecha). */
   const today = () =>
     `${civilDateIn(new Date(), 'America/Bogota')}T00:00:00.000Z`;
 

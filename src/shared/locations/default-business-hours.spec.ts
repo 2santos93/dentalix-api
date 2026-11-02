@@ -3,13 +3,13 @@ import { fitsBusinessHours } from '../../modules/location-schedule/application/b
 
 // El horario por defecto se valida CONTRA el validador real, no contra una copia
 // de la expectativa: así estos tests fallan si alguno de los dos se desalinea.
-// La zona es dato de test (una sede de Bogotá): el horario no trae zona propia.
+// La zona es dato de test (una sede en UTC−5): el horario no trae zona propia.
 const hours = {
   timezone: 'America/Bogota',
   ranges: DEFAULT_BUSINESS_HOURS,
 };
 
-/** Instante UTC para una hora local de Bogotá (UTC-5 fijo) en una fecha dada. */
+/** Instante UTC para una hora local de la sede (UTC-5 fijo) en una fecha dada. */
 function bogota(dateIso: string, hour: number, minute = 0): Date {
   return new Date(
     `${dateIso}T${String(hour + 5).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00.000Z`,

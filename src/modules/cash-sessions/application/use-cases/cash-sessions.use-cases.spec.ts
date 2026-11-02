@@ -28,7 +28,7 @@ import {
 
 const ADMIN: CashActor = { userId: 'u-admin', isAdmin: true };
 const RECEPTION: CashActor = { userId: 'u-recep', isAdmin: false };
-// 2026-10-17 21:00 en Bogotá = 2026-10-18 02:00 UTC.
+// 2026-10-17 21:00 en la zona de la sede = 2026-10-18 02:00 UTC.
 const NOW = new Date('2026-10-18T02:00:00.000Z');
 
 function record(extra: Partial<CashSessionRecord> = {}): CashSessionRecord {

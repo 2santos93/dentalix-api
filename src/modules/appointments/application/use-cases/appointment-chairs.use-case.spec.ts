@@ -24,7 +24,7 @@ import type { Appointment } from '../../domain/entities/appointment.entity';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 
 // DX-211: el sillón como recurso de la cita. Día siempre futuro (crear y
-// reagendar rechazan el pasado). La sede del doble es 'loc1' en Bogotá: las
+// reagendar rechazan el pasado). La sede del doble es 'loc1' en la zona de la sede: las
 // 15:00 UTC son las 10:00 de pared.
 const DAY = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000)
   .toISOString()

@@ -749,7 +749,7 @@ describe('cambiar el plazo: suelos, ventana y evento (DX-330, int)', () => {
     const suppress = (tenantId: string, id: string) =>
       tenantContext.run(tenantId, () =>
         patients.partiallySuppress(id, {
-          reason: 'Reclamo del titular de los datos',
+          reason: 'Solicitud del paciente sobre sus datos',
           actorId,
           assertAllowed: (state) => assertUnderRetention(state, T),
         }),

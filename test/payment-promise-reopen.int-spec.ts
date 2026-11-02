@@ -453,7 +453,7 @@ describe('compromiso cumplido que se reabre al anular su abono (int, DX-215)', (
         where: { id },
         data: { status: 'KEPT', settledAt: new Date() },
       });
-      // 00:30 del día siguiente a la fecha en Bogotá.
+      // 00:30 del día siguiente a la fecha en la zona de la sede.
       const afterDue = new Date(`${addCivilDays(due, 1)}T05:30:00.000Z`);
 
       await voidPayment(paymentId, afterDue);

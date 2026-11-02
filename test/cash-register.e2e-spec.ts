@@ -243,7 +243,7 @@ describe('Caja — GET /payments (e2e)', () => {
       },
     ) => {
       const row = await raw.payment.create({
-        // Mediodía de Bogotá (17:00 UTC): como guarda la API un abono
+        // Mediodía de la sede (17:00 UTC): como guarda la API un abono
         // registrado solo con fecha (DX-097). El día de caja se corta en la
         // zona de la sede; los cortes de medianoche se prueban en
         // civil-day-cash.int-spec.ts y en el caso nocturno de abajo.
@@ -640,7 +640,7 @@ describe('Caja — GET /payments (e2e)', () => {
         });
         ids[key] = row.id;
       };
-      // 20/12 a las 20:00 en Bogotá = 21/12 01:00 UTC.
+      // 20/12 a las 20:00 en la zona de la sede = 21/12 01:00 UTC.
       await seedAt('decNightBogota', sedePrincipal, '2025-12-21T01:00:00.000Z');
       // 21/12 a las 00:30 en Madrid = 20/12 23:30 UTC = 20/12 18:30 en Bogotá.
       await seedAt(
