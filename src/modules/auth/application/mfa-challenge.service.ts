@@ -1,4 +1,4 @@
-import { hkdfSync, randomUUID } from 'node:crypto';
+import { createHmac, hkdfSync, randomUUID, timingSafeEqual } from 'node:crypto';
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
@@ -11,7 +11,8 @@ import {
 /** Lo que firma el token intermedio del login (DX-021). */
 export interface MfaChallengeClaims {
   sub: string;
-  tenantId: string;
+  /** `null`: login de plataforma (apex); solo vale en un host sin clínica. */
+  tenantId: string | null;
   /** `tokenVersion` al pedirlo: si cambia (contraseña, MFA), el token muere. */
   tv: number;
   purpose: MfaChallengePurpose;
@@ -50,10 +51,11 @@ export class MfaChallengeService {
 
   async issue(input: {
     userId: string;
-    tenantId: string;
+    tenantId: string | null;
     tokenVersion: number;
     purpose: MfaChallengePurpose;
-  }): Promise<{ token: string; expiresAt: Date }> {
+  }): Promise<{ token: string; expiresAt: Date; jti: string }> {
+    const jti = randomUUID();
     const token = await this.jwt.signAsync(
       {
         sub: input.userId,
@@ -64,11 +66,40 @@ export class MfaChallengeService {
       {
         secret: this.secret,
         expiresIn: MFA_CHALLENGE_TTL_SECONDS[input.purpose],
-        jwtid: randomUUID(),
+        jwtid: jti,
       },
     );
     const { exp } = this.jwt.decode<{ exp: number }>(token);
-    return { token, expiresAt: new Date(exp * 1000) };
+    return { token, expiresAt: new Date(exp * 1000), jti };
+  }
+
+  /**
+   * DX-021-bis: código de 8 dígitos que se envía al correo de un superadmin para
+   * empezar su alta. Sale del `jti` con la clave derivada: es de ESE token, no se
+   * guarda en ningún sitio y muere con él. Así quien conoce la contraseña solo
+   * puede gastar sus propios intentos, nunca los del titular.
+   */
+  emailCode(jti: string): string {
+    const mac = this.mac(`enrollment-email:${jti}`);
+    return String(mac.readUInt32BE(0) % 100_000_000).padStart(8, '0');
+  }
+
+  /** Referencia del correo: dice cuál de varios es el de este intento. */
+  emailCodeRef(jti: string): string {
+    return this.mac(`enrollment-email-ref:${jti}`)
+      .subarray(0, 2)
+      .toString('hex')
+      .toUpperCase();
+  }
+
+  matchesEmailCode(jti: string, code: string): boolean {
+    const given = Buffer.from(code);
+    const expected = Buffer.from(this.emailCode(jti));
+    return given.length === expected.length && timingSafeEqual(given, expected);
+  }
+
+  private mac(data: string): Buffer {
+    return createHmac('sha256', this.secret).update(data).digest();
   }
 
   /**
@@ -90,8 +121,7 @@ export class MfaChallengeService {
     }
     if (
       claims.purpose !== purpose ||
-      !hostTenantId ||
-      claims.tenantId !== hostTenantId ||
+      claims.tenantId !== (hostTenantId ?? null) ||
       typeof claims.jti !== 'string'
     ) {
       throw expired();

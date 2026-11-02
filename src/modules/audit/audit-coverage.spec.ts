@@ -1649,10 +1649,15 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
     'user-mfa.service.spec.ts (MFA_RECOVERY_CODES_REGENERATED) y user-mfa.e2e-spec.ts',
   'PUT /security-policy':
     'user-mfa.service.spec.ts (CLINIC_SETTINGS MFA_POLICY con antes/después) y user-mfa.e2e-spec.ts',
-  'POST /platform/mfa/enrollment':
-    'platform-mfa.use-case.spec.ts y staff-access-audit.e2e-spec.ts',
-  'POST /platform/mfa/enrollment/confirm':
-    'platform-mfa.use-case.spec.ts y staff-access-audit.e2e-spec.ts',
+  // DX-021-bis: los códigos del superadmin van a `platform_audit_events`.
+  'POST /platform/mfa/recovery-codes':
+    'user-mfa.service (MFA_RECOVERY_CODES_REGENERATED) y mfa-bis.e2e-spec.ts',
+  'DELETE /me/mfa/trusted-devices':
+    'user-mfa.service (MFA_TRUSTED_DEVICES_REVOKED) y mfa-bis.e2e-spec.ts',
+  'DELETE /me/mfa/trusted-devices/:id':
+    'user-mfa.service (MFA_TRUSTED_DEVICES_REVOKED) y mfa-bis.e2e-spec.ts',
+  'POST /staff/:userId/mfa/reset':
+    'user-mfa.service (MFA_RESET_<motivo> / MFA_RESET_REFUSED, en la transacción del reseteo) y mfa-bis.e2e-spec.ts',
   // DX-439: CREATE CLOSING_QUEUE_DISMISSAL (CLOSING_QUEUE_DISMISSED) en la
   // transacción del descarte, con la sección y el código del motivo y la cita
   // (y el ítem) en `params`; nunca el texto de «Otro».

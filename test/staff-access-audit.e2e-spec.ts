@@ -1,6 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
+import { apexPassword, enrollPlatformAdmin } from './support/platform-mfa';
 import { App } from 'supertest/types';
 import {
   Clinic,
@@ -522,7 +523,6 @@ describe('Auditoría de personal y cuenta (e2e, DX-359)', () => {
           select: { id: true },
         })
       ).id;
-      platformToken = await loginAs(app, 'localhost', SUPER_EMAIL);
     });
 
     const platform = (path: string) =>
@@ -546,42 +546,39 @@ describe('Auditoría de personal y cuenta (e2e, DX-359)', () => {
       });
     }
 
-    it('iniciar y confirmar el alta van a platform_audit_events, sin secreto, código ni URI; un código erróneo no deja evento', async () => {
-      const start = await platform('/platform/mfa/enrollment').expect(200);
-      const { secret, otpauthUri } = start.body as {
-        secret: string;
-        otpauthUri: string;
-      };
-      await platform('/platform/mfa/enrollment/confirm')
-        .send({ code: totpCode(decodeBase32(secret), 1) })
+    it('el alta y su login van a platform_audit_events, sin secreto ni códigos; un código erróneo queda como LOGIN_FAILED y no activa nada', async () => {
+      const challenge = await apexPassword(app, SUPER_EMAIL);
+      const { mfaToken } = challenge;
+      await http()
+        .post('/api/v1/auth/login/mfa/enrollment')
+        .set('X-Tenant-Host', 'localhost')
+        .send({ mfaToken, emailCode: '00000000' })
         .expect(400);
-      const code = totpCode(
-        decodeBase32(secret),
-        Math.floor(Date.now() / 30_000),
+      expect((await platformEvents()).map((e) => e.action)).toEqual([
+        'LOGIN_FAILED',
+      ]);
+      const enrolled = await enrollPlatformAdmin(
+        app,
+        { id: superId, email: SUPER_EMAIL },
+        UA,
+        challenge,
       );
-      await platform('/platform/mfa/enrollment/confirm')
-        .send({ code })
-        .expect(200);
+      platformToken = enrolled.accessToken;
 
       const events = await platformEvents();
-      expect(events).toEqual([
-        {
-          action: 'MFA_ENROLLMENT_STARTED',
-          resourceType: 'USER',
-          resourceId: superId,
-          userAgent: UA,
-          metadata: {},
-        },
-        {
-          action: 'MFA_ENABLED',
-          resourceType: 'USER',
-          resourceId: superId,
-          userAgent: UA,
-          metadata: {},
-        },
+      expect(events.map((e) => [e.action, e.metadata])).toEqual([
+        ['LOGIN_FAILED', { reason: 'INVALID_EMAIL_CODE' }],
+        ['MFA_ENROLLMENT_STARTED', {}],
+        ['MFA_ENABLED', {}],
+        ['LOGIN', { reason: 'MFA_ENROLLED' }],
       ]);
+      expect(events[1]).toMatchObject({
+        resourceType: 'USER',
+        resourceId: superId,
+        userAgent: UA,
+      });
       const dump = JSON.stringify(events);
-      for (const leaked of [secret, otpauthUri, code]) {
+      for (const leaked of [enrolled.secret, ...enrolled.recoveryCodes]) {
         expect(dump).not.toContain(leaked);
       }
       // Nada de esto entra en la auditoría de ninguna clínica.

@@ -1,5 +1,5 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsBoolean } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsBoolean, IsOptional } from 'class-validator';
 
 export class SecurityPolicyDto {
   @ApiProperty({
@@ -8,4 +8,12 @@ export class SecurityPolicyDto {
   })
   @IsBoolean()
   requireAdminMfa!: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'DX-021-bis: la exige a todos los miembros (implica `requireAdminMfa`). Sin indicarlo, se conserva.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  requireAllMfa?: boolean;
 }

@@ -160,6 +160,24 @@ export class EmailOutbox {
     return created;
   }
 
+  /**
+   * Correo de seguridad de plataforma (DX-021-bis): fuera del tope por
+   * destinatario, que quien conoce una contraseña podría agotar para dejar al
+   * titular sin código. `null`: ya salió uno en `minIntervalSeconds`.
+   */
+  async enqueuePlatformSecurity<T extends 'mfa-notice' | 'mfa-enrollment-code'>(
+    input: EnqueuePlatformEmailInput<T>,
+    minIntervalSeconds: number,
+  ): Promise<{ id: string } | null> {
+    const row = this.prepare(input, null);
+    const created = await this.repo.insertPlatformSecurity(
+      row,
+      minIntervalSeconds,
+    );
+    if (created) this.enqueued(created.id, null, input.template, row.toMasked);
+    return created;
+  }
+
   private prepare<T extends EmailTemplateName>(
     input: EnqueuePlatformEmailInput<T>,
     brand: EmailBrand | null,

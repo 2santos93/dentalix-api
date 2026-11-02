@@ -9,7 +9,10 @@ export type PlatformAuditAction =
   | 'MFA_ENROLLMENT_STARTED'
   | 'MFA_ENABLED'
   | 'PASSWORD_CHANGE'
-  | 'CLINICAL_RETENTION_MINIMUM_APPLIED';
+  | 'CLINICAL_RETENTION_MINIMUM_APPLIED'
+  | 'LOGIN'
+  | 'LOGIN_FAILED'
+  | 'MFA_RECOVERY_CODES_REGENERATED';
 
 export type PlatformAuditResourceType = 'JOB' | 'USER' | 'TENANT';
 
@@ -28,9 +31,17 @@ export interface PlatformAuditActor {
  */
 export interface OwnAccountAuditEventDraft {
   actor: PlatformAuditActor;
-  action: 'MFA_ENROLLMENT_STARTED' | 'MFA_ENABLED' | 'PASSWORD_CHANGE';
+  action:
+    | 'MFA_ENROLLMENT_STARTED'
+    | 'MFA_ENABLED'
+    | 'PASSWORD_CHANGE'
+    | 'LOGIN'
+    | 'LOGIN_FAILED'
+    | 'MFA_RECOVERY_CODES_REGENERATED';
   resourceType: 'USER';
   resourceId: string;
+  /** DX-021-bis: solo el LOGIN lleva un código de motivo (`MFA_TOTP`…). */
+  metadata?: { reason: string };
 }
 
 /**
@@ -52,6 +63,13 @@ export type PlatformAuditEventDraft =
 export function ownPlatformAccountEvent(
   actor: PlatformAuditActor,
   action: OwnAccountAuditEventDraft['action'],
+  reason?: string,
 ): OwnAccountAuditEventDraft {
-  return { actor, action, resourceType: 'USER', resourceId: actor.userId };
+  return {
+    actor,
+    action,
+    resourceType: 'USER',
+    resourceId: actor.userId,
+    ...(reason ? { metadata: { reason } } : {}),
+  };
 }

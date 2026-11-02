@@ -27,6 +27,10 @@ import { ResetPasswordUseCase } from './application/use-cases/reset-password.use
 import { PASSWORD_RESET_REPOSITORY } from './domain/ports/password-reset-repository.port';
 import { PASSWORD_RESET_NOTIFIER } from './domain/ports/password-reset-notifier.port';
 import { PrismaPasswordResetRepository } from './infrastructure/repositories/prisma-password-reset.repository';
+import { EmailMfaNotifier } from './infrastructure/email-mfa.notifier';
+import { MFA_NOTIFIER } from './domain/ports/mfa-notifier.port';
+import { NEW_CLINIC_REQUIRES_ADMIN_MFA } from './domain/user-mfa';
+import { StaffMfaController } from './presentation/staff-mfa.controller';
 import { EmailPasswordResetNotifier } from './infrastructure/email-password-reset.notifier';
 import { REGISTRATION_REPOSITORY } from './domain/ports/registration-repository.port';
 import { REGISTRATION_NOTIFIER } from './domain/ports/registration-notifier.port';
@@ -68,6 +72,8 @@ import { PrismaCurrencyWhitelist } from '../treatment-plans/infrastructure/adapt
     // DX-021: segundo paso del login y política de MFA de la clínica.
     LoginMfaController,
     SecurityPolicyController,
+    // DX-021-bis: reseteo por otro ADMIN.
+    StaffMfaController,
   ],
   providers: [
     RegisterClinicUseCase,
@@ -100,6 +106,13 @@ import { PrismaCurrencyWhitelist } from '../treatment-plans/infrastructure/adapt
     MfaChallengeService,
     CompleteMfaLoginUseCase,
     { provide: USER_MFA_REPOSITORY, useClass: PrismaUserMfaRepository },
+    { provide: MFA_NOTIFIER, useClass: EmailMfaNotifier },
+    {
+      provide: NEW_CLINIC_REQUIRES_ADMIN_MFA,
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) =>
+        config.get<string>('NEW_CLINIC_REQUIRE_ADMIN_MFA') !== 'false',
+    },
     // Registro con verificación del email (DX-029).
     {
       provide: REGISTRATION_REPOSITORY,
