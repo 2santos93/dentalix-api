@@ -13,8 +13,8 @@ import {
 import { NOT_RESPONDING_NEGATIVE_TTL_MS } from '../src/modules/exchange/application/provider-rates-gate';
 import { BALANCE_CONVERSION_BUDGET_MS } from '../src/modules/payments/application/conversion-deadline';
 import { EXCHANGE_RATE_CLOCK } from '../src/modules/exchange/application/use-cases/manual-exchange-rates.use-cases';
-import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
 import { createE2eApp } from './support/create-e2e-app';
+import { fixedSedeDay } from './support/sede-clock';
 import {
   registerClinic,
   resetDatabase,
@@ -55,7 +55,13 @@ interface PaymentPlanBody extends Figures {
 interface StatementBody {
   rateProviderTimedOut: boolean;
   plans: (Figures & { id: string; budgeted: number })[];
-  summary: { currency: string; paid: number; overdueCount: number }[];
+  summary: {
+    currency: string;
+    paid: number;
+    convertedPaid: number;
+    convertedBalance: number;
+    overdueCount: number;
+  }[];
   installments: (Installment & { treatmentPlanId: string })[];
 }
 
@@ -74,11 +80,9 @@ describe('DX-472: mismas cifras en /balance, estado de cuenta y plan de pagos (e
   const jpy = { id: '', paymentPlan: true };
   const cancelled = { id: '', paymentPlan: true };
 
-  const zone = REGIONAL_NEW_YORK_FIXTURE.timeZone;
-  const today = civilDateIn(new Date(), zone);
-  const paidOn = addCivilDays(today, -3);
-  const legacyOn = addCivilDays(today, -4);
-  const start = addCivilDays(today, -70);
+  const paidOn = fixedSedeDay(3).day;
+  const legacyOn = fixedSedeDay(4).day;
+  const start = fixedSedeDay(70).day;
 
   const api = () => request(app.getHttpServer());
   const as = (req: request.Test) =>
@@ -294,13 +298,31 @@ describe('DX-472: mismas cifras en /balance, estado de cuenta y plan de pagos (e
     });
   });
 
-  it('el resumen por moneda suma los planes y no abre una fila por cada moneda entregada', async () => {
+  it('el resumen da lo entregado sin convertir y, aparte, lo que cuadra con los planes', async () => {
     const { statement } = await views(usd.id);
     expect(
-      statement.summary.map(({ currency, paid }) => ({ currency, paid })),
+      statement.summary.map(
+        ({ currency, paid, convertedPaid, convertedBalance }) => ({
+          currency,
+          paid,
+          convertedPaid,
+          convertedBalance,
+        }),
+      ),
     ).toEqual([
-      { currency: 'JPY', paid: 6500 },
-      { currency: 'USD', paid: 280.25 },
+      // Lo entregado: 5000 + 15000 + 1500 JPY y 50,25 + 10 + 120 USD.
+      {
+        currency: 'JPY',
+        paid: 21500,
+        convertedPaid: 6500,
+        convertedBalance: 13500,
+      },
+      {
+        currency: 'USD',
+        paid: 180.25,
+        convertedPaid: 280.25,
+        convertedBalance: 19.75,
+      },
     ]);
   });
 

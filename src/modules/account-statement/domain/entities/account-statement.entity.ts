@@ -193,6 +193,12 @@ export interface StatementCurrencySummary {
    */
   creditMovements: number;
   balance: number;
+  /**
+   * DX-472: lo mismo que `paid` y `balance`, con lo de los planes convertido a
+   * su moneda: lo que cuadra con `plans[]`. `paid` y `balance` son sin convertir.
+   */
+  convertedPaid: number;
+  convertedBalance: number;
   overdueCount: number;
   overdueAmount: number;
   nextInstallment: StatementNextInstallment | null;
@@ -361,6 +367,8 @@ export interface FamilyCurrencyAmounts {
   openingPending: number;
   paid: number;
   balance: number;
+  convertedPaid: number;
+  convertedBalance: number;
   overdueAmount: number;
 }
 

@@ -63,9 +63,11 @@ export interface ComputeAccountStatementOptions {
  *   moneda cuenta convertido a la del plan, con su tasa, y cubre cuotas. Lo que
  *   difiere a propósito va en otro campo: `budgeted` (lo presupuestado aunque
  *   el plan esté cancelado) y `paidOtherCurrencies` (lo entregado sin convertir).
- * - Resumen por moneda = la suma de los planes en su moneda más lo abonado a
- *   saldos migrados, que no se convierte. Los abonos «sin tasa» no suman y se
- *   informan en su plan (`paymentsWithoutRate`).
+ * - Resumen por moneda: `paid` y `balance` son por moneda y SIN convertir (lo
+ *   que el paciente entregó en cada una): la cartera (DX-145) reparte esa cifra.
+ *   `convertedPaid` y `convertedBalance` son las de los planes (DX-472): la
+ *   suma de sus `paid` en su moneda más lo abonado a saldos migrados, que no se
+ *   convierte. Los abonos «sin tasa» no suman ahí y se informan en su plan.
  * - Cuotas: las de los planes de pago vivos de planes no cancelados, con el
  *   mismo reparto voraz y los mismos estados que GetPaymentPlanUseCase
  *   (deriveStatuses): lo abonado al plan en la moneda del plan de pagos cubre
@@ -96,6 +98,7 @@ interface CurrencyAccumulator {
   openingCents: number;
   openingPendingCents: number;
   paidCents: number;
+  convertedPaidCents: number;
   creditCents: number;
   overdueCount: number;
   overdueCents: number;
@@ -109,6 +112,7 @@ function emptyAccumulator(): CurrencyAccumulator {
     openingCents: 0,
     openingPendingCents: 0,
     paidCents: 0,
+    convertedPaidCents: 0,
     creditCents: 0,
     overdueCount: 0,
     overdueCents: 0,
@@ -220,7 +224,7 @@ export function computeBalances(
     if (counts) {
       acc(plan.currency).budgetedCents += budgetedCents;
     }
-    if (known) acc(plan.currency).paidCents += paidCents;
+    if (known) acc(plan.currency).convertedPaidCents += paidCents;
     return {
       id: plan.id,
       status: plan.status,
@@ -271,10 +275,13 @@ export function computeBalances(
   });
 
   // --- Abonado por moneda ---------------------------------------------------
-  // Lo de un plan con su saldo ya está sumado arriba, convertido a su moneda.
   for (const p of snapshot.payments) {
-    if (isActive(p) && !planBalances?.has(p.treatmentPlanId ?? '')) {
+    if (isActive(p)) {
       acc(p.currency).paidCents += toCents(p.amount);
+      // Lo de un plan con su saldo ya está sumado arriba, convertido.
+      if (!planBalances?.has(p.treatmentPlanId ?? '')) {
+        acc(p.currency).convertedPaidCents += toCents(p.amount);
+      }
     }
   }
 
@@ -366,6 +373,10 @@ export function computeBalances(
       creditMovements: fromCents(a.creditCents),
       balance: fromCents(
         a.budgetedCents + a.openingCents - a.paidCents - a.creditCents,
+      ),
+      convertedPaid: fromCents(a.convertedPaidCents),
+      convertedBalance: fromCents(
+        a.budgetedCents + a.openingCents - a.convertedPaidCents - a.creditCents,
       ),
       overdueCount: a.overdueCount,
       overdueAmount: fromCents(a.overdueCents),

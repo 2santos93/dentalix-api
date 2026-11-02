@@ -34,6 +34,8 @@ const FIELDS = [
   'openingPending',
   'paid',
   'balance',
+  'convertedPaid',
+  'convertedBalance',
   'overdueAmount',
 ] as const;
 
@@ -47,6 +49,8 @@ function addInto(
     openingPending: 0,
     paid: 0,
     balance: 0,
+    convertedPaid: 0,
+    convertedBalance: 0,
     overdueAmount: 0,
   };
   for (const f of FIELDS) current[f] += cents(row[f]);
@@ -110,6 +114,8 @@ export class GetFamilyAccountStatementUseCase {
         openingPending: s.openingPending,
         paid: s.paid,
         balance: s.balance,
+        convertedPaid: s.convertedPaid,
+        convertedBalance: s.convertedBalance,
         overdueAmount: s.overdueAmount,
       }));
       for (const row of rows) addInto(totals, row);
@@ -143,6 +149,8 @@ export class GetFamilyAccountStatementUseCase {
           openingPending: sum.openingPending / 100,
           paid: sum.paid / 100,
           balance: sum.balance / 100,
+          convertedPaid: sum.convertedPaid / 100,
+          convertedBalance: sum.convertedBalance / 100,
           overdueAmount: sum.overdueAmount / 100,
         })),
       rateProviderTimedOut: [...planBalances.values()].some(

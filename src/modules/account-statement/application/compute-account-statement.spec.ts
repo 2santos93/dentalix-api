@@ -781,8 +781,17 @@ describe('computeAccountStatement con el saldo de cada plan (DX-472)', () => {
       expect.objectContaining({
         currency: 'USD',
         budgeted: 100,
-        paid: 60,
-        balance: 40,
+        paid: 0,
+        balance: 100,
+        convertedPaid: 60,
+        convertedBalance: 40,
+      }),
+      expect.objectContaining({
+        currency: 'VES',
+        paid: 3600,
+        balance: -3600,
+        convertedPaid: 0,
+        convertedBalance: 0,
       }),
     ]);
     expect(out.installments.map((i) => i.covered)).toEqual([50, 10]);
@@ -815,8 +824,8 @@ describe('computeAccountStatement con el saldo de cada plan (DX-472)', () => {
     });
     expect(out.summary[0]).toMatchObject({
       budgeted: 0,
-      paid: 60,
-      balance: -60,
+      convertedPaid: 60,
+      convertedBalance: -60,
     });
   });
 
@@ -871,7 +880,8 @@ describe('computeAccountStatement con el saldo de cada plan (DX-472)', () => {
       },
     );
     expect(out.summary.find((s) => s.currency === 'VES')).toMatchObject({
-      paid: 20,
+      paid: 3620,
+      convertedPaid: 20,
     });
   });
 });

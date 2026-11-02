@@ -111,7 +111,7 @@ export class AccountStatementCurrencySummaryDto {
   @ApiProperty({
     example: 1200000,
     description:
-      'DX-472: Σ paid de los planes en esta moneda (abonos vivos convertidos a ella, como en /balance) más los abonos a saldos migrados de esta moneda. Lo entregado en otra moneda se detalla en plans[].paidOtherCurrencies y en movements.',
+      'Σ abonos no anulados en esta moneda, sin convertir: lo entregado en ella, la cifra de la cartera. Lo que cuadra con plans[] es convertedPaid.',
   })
   paid!: number;
 
@@ -124,9 +124,24 @@ export class AccountStatementCurrencySummaryDto {
 
   @ApiProperty({
     example: 1950000,
-    description: 'budgeted + openingBalance - paid (negativo = saldo a favor)',
+    description:
+      'budgeted + openingBalance - paid - creditMovements (negativo = saldo a favor), sin convertir: la cifra de la cartera. Lo que cuadra con plans[] es convertedBalance.',
   })
   balance!: number;
+
+  @ApiProperty({
+    example: 1200000,
+    description:
+      'DX-472: Σ plans[].paid en esta moneda (abonos convertidos a ella, como en /balance) más los abonos a saldos migrados de esta moneda. Difiere de paid a propósito: si todos los abonos son en la moneda del plan, coincide.',
+  })
+  convertedPaid!: number;
+
+  @ApiProperty({
+    example: 1950000,
+    description:
+      'DX-472: budgeted + openingBalance - convertedPaid - creditMovements: el saldo que cuadra con plans[].',
+  })
+  convertedBalance!: number;
 
   @ApiProperty({ example: 1 })
   overdueCount!: number;
@@ -551,11 +566,19 @@ export class FamilyCurrencyAmountsDto {
   })
   openingPending!: number;
 
-  @ApiProperty()
+  @ApiProperty({ description: 'Igual que `summary[].paid`: sin convertir' })
   paid!: number;
 
-  @ApiProperty()
+  @ApiProperty({ description: 'Igual que `summary[].balance`: sin convertir' })
   balance!: number;
+
+  @ApiProperty({ description: 'DX-472: igual que `summary[].convertedPaid`' })
+  convertedPaid!: number;
+
+  @ApiProperty({
+    description: 'DX-472: igual que `summary[].convertedBalance`',
+  })
+  convertedBalance!: number;
 
   @ApiProperty()
   overdueAmount!: number;
