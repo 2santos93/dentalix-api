@@ -94,6 +94,7 @@ import {
   insertPaymentAdjustments,
 } from './payment-adjustments.persistence';
 import { collectedAmount } from '../../../payment-methods/domain/payment-adjustments';
+import { toCents } from '../../../../shared/money/money';
 
 // DX-136: cada abono se lee con la serie y el número de su recibo (o sin
 // recibo, si es anterior a la numeración).
@@ -830,10 +831,10 @@ export class PrismaPaymentRepository implements PaymentRepository {
          AND "openingBalanceId" = ${input.openingBalanceId}::uuid
          AND "currency" = ${balance.currency}
          AND "deletedAt" IS NULL`;
-    const amountCents = Math.round(balance.amount.toNumber() * 100);
-    const paidCents = Math.round((paid?.toNumber() ?? 0) * 100);
+    const amountCents = toCents(balance.amount.toNumber());
+    const paidCents = toCents(paid?.toNumber() ?? 0);
     const pendingCents = amountCents - paidCents;
-    const thisCents = Math.round(input.amount * 100);
+    const thisCents = toCents(input.amount);
     if (thisCents > pendingCents) {
       throw new BadRequestException(
         pendingCents <= 0

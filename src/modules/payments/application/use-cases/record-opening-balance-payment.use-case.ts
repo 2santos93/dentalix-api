@@ -34,6 +34,7 @@ import {
   type RecordPaymentInput,
 } from './record-payment.use-case';
 import { PaymentMethodGate } from '../payment-method-gate';
+import { toCents } from '../../../../shared/money/money';
 
 /**
  * Abono contra el saldo migrado de un paciente (DX-262, revisión C1): el
@@ -110,9 +111,8 @@ export class RecordOpeningBalancePaymentUseCase {
     }
     // Atajo con un 400 limpio; la comprobación que cuenta la repite el
     // repositorio con el saldo bloqueado (dos cobros a la vez).
-    const pendingCents =
-      Math.round(balance.amount * 100) - Math.round(balance.paid * 100);
-    if (Math.round(input.amount * 100) > pendingCents) {
+    const pendingCents = toCents(balance.amount) - toCents(balance.paid);
+    if (toCents(input.amount) > pendingCents) {
       throw new BadRequestException(
         pendingCents <= 0
           ? OPENING_BALANCE_PAID_MESSAGE

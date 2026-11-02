@@ -1,3 +1,4 @@
+import { round2 } from '../../../../shared/money/money';
 import {
   BadRequestException,
   ForbiddenException,
@@ -131,8 +132,7 @@ function totalsOf(sums: readonly UnattributedSums[]): UnattributedTotals[] {
     .sort((a, b) => a.currency.localeCompare(b.currency));
 }
 
-const money = (value: number) =>
-  Math.round((value + Number.EPSILON) * 100) / 100;
+const money = round2;
 
 interface ResolvedScope {
   period: CivilPeriod;

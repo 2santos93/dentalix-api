@@ -1,4 +1,4 @@
-import { round2 } from '../../../../shared/money/money';
+import { round2, toCents } from '../../../../shared/money/money';
 export type Periodicity = 'WEEKLY' | 'BIWEEKLY' | 'MONTHLY';
 
 export interface GenerateScheduleInput {
@@ -64,7 +64,7 @@ export function generateSchedule(
   // by construction (float division/rounding would otherwise drift, e.g.
   // 0.1 + 0.2 !== 0.3). Only the first N-1 installments use the floored
   // base; the last absorbs whatever remains, which is always >= 0.
-  const financedCents = Math.round(financed * 100);
+  const financedCents = toCents(financed);
   const baseCents = Math.floor(financedCents / installmentsCount);
 
   const rows: GeneratedInstallment[] = [];

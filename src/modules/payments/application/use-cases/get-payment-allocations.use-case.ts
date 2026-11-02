@@ -15,7 +15,7 @@ import {
   type PaymentAllocationsSnapshot,
   type PlanAllocationRepository,
 } from '../../domain/ports/plan-allocation-repository.port';
-import { fromCents } from '../../../../shared/money/money';
+import { fromCents, toCents } from '../../../../shared/money/money';
 
 /** La imputación de un abono (spec §5.2 `PaymentAllocationsDto`). */
 export interface PaymentAllocationsView {
@@ -77,8 +77,7 @@ function toView(snapshot: PaymentAllocationsSnapshot): PaymentAllocationsView {
     throw new ConflictException(ALLOCATION_MIGRATED_BALANCE);
   }
   const manual = target.base?.manual ?? false;
-  const baseCents =
-    target.base === null ? null : Math.round(target.base.amount * 100);
+  const baseCents = target.base === null ? null : toCents(target.base.amount);
   const allocatedCents = lines.reduce((sum, l) => sum + l.cents, 0);
   // Las líneas en el orden de los ítems del plan; una línea en un ítem que
   // ya no es imputable (liberación en curso) va al final.

@@ -1,3 +1,4 @@
+import { toCents } from '../../../shared/money/money';
 import {
   civilDateIn,
   civilDaysInclusive,
@@ -365,10 +366,7 @@ export class PlanVisitsService {
             total:
               plan.items.reduce(
                 (sum, i) =>
-                  sum +
-                  Math.round(
-                    (i.price.toNumber() - i.discount.toNumber()) * 100,
-                  ),
+                  sum + toCents(i.price.toNumber() - i.discount.toNumber()),
                 0,
               ) / 100,
             itemCount: plan.items.length,
