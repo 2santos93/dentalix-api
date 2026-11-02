@@ -27,7 +27,8 @@ const prisma = new PrismaService(new TenantContextService());
 
 const CLINICS = {
   ve: 'dx329-phones-ve',
-  co: 'dx329-phones-co',
+  es: 'dx329-phones-es',
+  th: 'dx329-phones-th',
   none: 'dx329-phones-none',
   ar: 'dx329-phones-ar',
   multi: 'dx329-phones-multi',
@@ -153,7 +154,8 @@ async function fingerprint(): Promise<unknown> {
 describe('phones:report (int, DX-329 §4.6)', () => {
   const tenants: Record<keyof typeof CLINICS, string> = {
     ve: '',
-    co: '',
+    es: '',
+    th: '',
     none: '',
     ar: '',
     multi: '',
@@ -179,7 +181,7 @@ describe('phones:report (int, DX-329 §4.6)', () => {
     // VE: una región.
     ids.veLocation = await location(tenants.ve, 'VE', '0212-5551234', 1);
     ids.e164Valid = await patient(tenants.ve, { phone: '+58 412 1234567' });
-    ids.wrongCode = await patient(tenants.ve, { phone: '+574121234567' });
+    ids.wrongCode = await patient(tenants.ve, { phone: '+344121234567' });
     ids.mx = await patient(tenants.ve, { phone: '+52 1 55 1234 5678' });
     ids.nationalValid = await patient(tenants.ve, {
       phone: '0412-1234567',
@@ -207,20 +209,23 @@ describe('phones:report (int, DX-329 §4.6)', () => {
     await location(tenants.none, 'VE', null, 2, true);
     ids.noRegion = await patient(tenants.none, { phone: '0412-1234567' });
 
-    // CO.
-    await location(tenants.co, 'CO', null, 1);
-    ids.ambiguous = await patient(tenants.co, {
+    // TH: sus prefijos internacionales 005/007/009 dan dos lecturas.
+    await location(tenants.th, 'TH', null, 1);
+    ids.ambiguous = await patient(tenants.th, {
       emergencyContactPhone: '0058 412 1234567',
     });
-    ids.nationalInvalid = await patient(tenants.co, {
+
+    // ES.
+    await location(tenants.es, 'ES', null, 1);
+    ids.nationalInvalid = await patient(tenants.es, {
       physicianPhone: '0412-1234567',
     });
-    ids.optInStrayZero = await patient(tenants.co, {
-      phone: '03211234567',
+    ids.optInStrayZero = await patient(tenants.es, {
+      phone: '0612345678',
       whatsappOptIn: true,
     });
-    ids.coMobile = await patient(tenants.co, { phone: '310 555 0101' });
-    ids.optInBlankPhone = await patient(tenants.co, {
+    ids.esMobile = await patient(tenants.es, { phone: '612 55 01 01' });
+    ids.optInBlankPhone = await patient(tenants.es, {
       phone: '  ',
       whatsappOptIn: true,
     });
@@ -231,9 +236,9 @@ describe('phones:report (int, DX-329 §4.6)', () => {
 
     // Dos regiones: la principal es VE.
     ids.multiVe = await location(tenants.multi, 'VE', '0412-1234567', 1);
-    ids.multiCo = await location(tenants.multi, 'CO', '0212-5551234', 2);
-    ids.multiCoPatient = await patient(tenants.multi, {
-      phone: '310 555 0101',
+    ids.multiEs = await location(tenants.multi, 'ES', '0212-5551234', 2);
+    ids.multiEsPatient = await patient(tenants.multi, {
+      phone: '612 55 01 01',
     });
     ids.multiVePatient = await patient(tenants.multi, {
       phone: '0412-1234567',
@@ -264,8 +269,8 @@ describe('phones:report (int, DX-329 §4.6)', () => {
       'NATIONAL_VALID',
       'NATIONAL_INVALID',
     ]);
-    // `+57 412…` en una clínica VE: la propuesta es el mismo número con +58.
-    expect(classifyPhone('+574121234567', ['VE'])).toEqual({
+    // `+34 412…` en una clínica VE: la propuesta es el mismo número con +58.
+    expect(classifyPhone('+344121234567', ['VE'])).toEqual({
       category: 'E164_PROBABLE_WRONG_CODE',
       proposal: '+584121234567',
       extension: false,
@@ -287,7 +292,7 @@ describe('phones:report (int, DX-329 §4.6)', () => {
       proposal: null,
     });
     expect(detail(ids.noRegion)?.category).toBe('NATIONAL_NO_REGION');
-    expect(classifyPhone('0058 412 1234567', ['CO']).category).toBe(
+    expect(classifyPhone('0058 412 1234567', ['TH']).category).toBe(
       'NATIONAL_AMBIGUOUS',
     );
     expect(detail(ids.ambiguous, 'emergencyContactPhone')).toMatchObject({
@@ -314,8 +319,10 @@ describe('phones:report (int, DX-329 §4.6)', () => {
     expect(clinic('none').counts['patients.phone']).toEqual({
       NATIONAL_NO_REGION: 1,
     });
-    expect(clinic('co').counts).toMatchObject({
+    expect(clinic('th').counts).toMatchObject({
       'patients.emergencyContactPhone': { NATIONAL_AMBIGUOUS: 1 },
+    });
+    expect(clinic('es').counts).toMatchObject({
       'patients.physicianPhone': { NATIONAL_INVALID: 1 },
     });
     // Una extensión se cuenta aparte; la regla anterior no la leía.
@@ -339,7 +346,7 @@ describe('phones:report (int, DX-329 §4.6)', () => {
       ]) as string[],
     });
     expect(clinic('ve').flags.WHATSAPP_NOT_MOBILE).toBe(1);
-    expect(clinic('co').flags.WHATSAPP_NOT_MOBILE).toBe(1);
+    expect(clinic('es').flags.WHATSAPP_NOT_MOBILE).toBe(1);
 
     const { stdout } = await runScript('--detail');
     const line = (id: string) =>
@@ -360,7 +367,7 @@ describe('phones:report (int, DX-329 §4.6)', () => {
 
   it('the report counts WhatsApp patients without a phone apart', async () => {
     expect(clinic('ve').whatsappWithoutPhone).toBe(1);
-    expect(clinic('co').whatsappWithoutPhone).toBe(1);
+    expect(clinic('es').whatsappWithoutPhone).toBe(1);
     expect(clinic('ar').whatsappWithoutPhone).toBe(0);
     // No es una bandera: no tienen número que listar.
     expect(detail(ids.whatsappNoPhone)).toBeUndefined();
@@ -395,15 +402,15 @@ describe('phones:report (int, DX-329 §4.6)', () => {
     expect(detail(ids.whatsappLandline)?.flags).toContain(
       'CHANGED_SINCE_DX329',
     );
-    // `310 555 0101` en CO: igual con las dos reglas.
-    expect(detail(ids.coMobile)).toBeUndefined();
-    expect(clinic('co').flags.CHANGED_SINCE_DX329).toBe(1);
+    // `612 55 01 01` en ES: igual con las dos reglas.
+    expect(detail(ids.esMobile)).toBeUndefined();
+    expect(clinic('es').flags.CHANGED_SINCE_DX329).toBe(1);
     expect(clinic('ar').flags.CHANGED_SINCE_DX329).toBe(1);
   });
 
   it("a location phone is read with that location's own region", () => {
-    // `0212-5551234` vale en VE, la otra sede, pero no en CO, la suya.
-    expect(detail(ids.multiCo)).toMatchObject({
+    // `0212-5551234` vale en VE, la otra sede, pero no en ES, la suya.
+    expect(detail(ids.multiEs)).toMatchObject({
       resource: 'locations',
       field: 'phone',
       category: 'NATIONAL_INVALID',
@@ -424,7 +431,7 @@ describe('phones:report (int, DX-329 §4.6)', () => {
     });
     // Con la región de la principal (VE) ya no es un móvil: se marca, pero
     // la categoría sale de cualquier región viva.
-    expect(detail(ids.multiCoPatient)).toMatchObject({
+    expect(detail(ids.multiEsPatient)).toMatchObject({
       category: 'NATIONAL_VALID',
       flags: ['CHANGED_SINCE_DX329'],
     });

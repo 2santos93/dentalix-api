@@ -49,6 +49,7 @@ const ZONE = 'America/' + 'Bogota';
 const LOCALE = 'es-' + 'CO';
 const COUNTRY = 'colombi';
 const CITY = 'Bogot';
+const CALLING_CODE = String.raw`\+` + '57';
 
 const FORBIDDEN = new RegExp(
   [
@@ -56,6 +57,8 @@ const FORBIDDEN = new RegExp(
     ZONE,
     `(?<![\\p{L}\\p{N}_-])${LOCALE}(?![\\p{L}\\p{N}_])`,
     `${CITY}[aá]`,
+    `${CALLING_CODE}(?![0-9])`,
+    `${CALLING_CODE}3[0-9]{9}(?![0-9])`,
   ].join('|'),
   'u',
 );
@@ -119,6 +122,8 @@ describe('los valores de ejemplo son de Venezuela y en USD, nunca de Colombia', 
       'COLOMBIA',
       `${CITY}á`,
       `${CITY}a`,
+      `phone: '+${'57'} 300 123 4567',`,
+      `phone: '+${'57'}3001234567',`,
     ]) {
       expect({ line, caught: namesColombianSample(line) }).toEqual({
         line,

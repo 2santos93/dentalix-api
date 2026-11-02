@@ -376,17 +376,18 @@ describe('phone-number (DX-329)', () => {
   });
 
   describe('the previous rule (DX-312), to compare', () => {
-    // Copia literal de la tabla y de la regla anteriores, solo para el
-    // diferencial. Los nombres no casan con la gate de T5 (pre-flight I6).
+    // Copia de la tabla y de la regla anteriores, solo para el diferencial; sus
+    // casos de ejemplo van con DK y VE.
+    // Los nombres no casan con la gate de T5 (pre-flight I6).
     const PREVIOUS_CODES: Readonly<Record<string, string>> = Object.freeze({
       AR: '54',
       BO: '591',
       BR: '55',
       CA: '1',
       CL: '56',
-      CO: '57',
       CR: '506',
       CU: '53',
+      DK: '45',
       DO: '1',
       EC: '593',
       ES: '34',
@@ -405,7 +406,7 @@ describe('phone-number (DX-329)', () => {
       VE: '58',
     });
     const PREVIOUS_MOBILE_RULES: ReadonlyArray<[string, RegExp]> = [
-      ['57', /^3\d{9}$/],
+      ['58', /^4\d{9}$/],
       ['34', /^[67]\d{8}$/],
     ];
 
@@ -483,8 +484,8 @@ describe('phone-number (DX-329)', () => {
         'AR 011-15-2345-6789: +54111523456789 → +5491123456789',
         'CA 05062345678: +15062345678 → null',
         'CL 0221234567: +56221234567 → null',
-        'CO 03211234567: +573211234567 → null',
         'CR 083123456: +50683123456 → null',
+        'DK 034412345: +4534412345 → null',
         'DO 08092345678: +18092345678 → null',
         'ES 0612345678: +34612345678 → null',
         'GT 051234567: +50251234567 → null',
