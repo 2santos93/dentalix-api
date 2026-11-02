@@ -6,7 +6,7 @@ import { TenantContextService } from '../src/shared/tenancy/tenant-context.servi
 import { PrismaClinicalEntryRepository } from '../src/modules/clinical-entries/infrastructure/repositories/prisma-clinical-entry.repository';
 import { resetDatabase } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -61,7 +61,7 @@ describe('DX-232: sede de la evolución (Postgres)', () => {
     ).id;
     locationA = (
       await raw.location.create({
-        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        data: locationData(REGIONAL_CARACAS_FIXTURE, {
           tenantId,
           name: 'Principal',
           createdAt: new Date('2020-01-01'),
@@ -70,12 +70,12 @@ describe('DX-232: sede de la evolución (Postgres)', () => {
     ).id;
     locationB = (
       await raw.location.create({
-        data: locationData(REGIONAL_BOGOTA_FIXTURE, { tenantId, name: 'B' }),
+        data: locationData(REGIONAL_CARACAS_FIXTURE, { tenantId, name: 'B' }),
       })
     ).id;
     foreignLocation = (
       await raw.location.create({
-        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        data: locationData(REGIONAL_CARACAS_FIXTURE, {
           tenantId: foreignTenantId,
           name: 'Ajena',
         }),

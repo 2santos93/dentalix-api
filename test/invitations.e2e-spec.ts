@@ -11,7 +11,7 @@ import { CapturingMailer } from './support/capture-mailer';
 import { MAILER } from '../src/modules/notifications/email/domain/ports/mailer.port';
 import { resetDatabase } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   registerBody as clinicRegisterBody,
 } from './support/location-fixtures';
 
@@ -72,7 +72,7 @@ async function registerAndLogin(
 }> {
   const register = await registerVerified(
     app,
-    clinicRegisterBody(REGIONAL_BOGOTA_FIXTURE, {
+    clinicRegisterBody(REGIONAL_CARACAS_FIXTURE, {
       clinicName: opts.clinicName,
       subdomain: opts.subdomain,
       email: opts.email,

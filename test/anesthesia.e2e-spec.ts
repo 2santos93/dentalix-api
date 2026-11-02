@@ -13,7 +13,7 @@ import {
 } from './support/e2e-fixtures';
 import {
   locationBody,
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
 } from './support/location-fixtures';
 
 // DX-307 · anestesia local en la evolución, de punta a punta con Postgres:
@@ -150,7 +150,7 @@ describe('Anestesia local en la evolución (DX-307, e2e)', () => {
     // Un segundo odontólogo restringido a otra sede (DX-089).
     const north = (
       await call(a, 'post', '/locations', a.adminToken)
-        .send(locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }))
+        .send(locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede Norte' }))
         .expect(201)
     ).body as { id: string };
     const restrictedUser = await raw.user.create({

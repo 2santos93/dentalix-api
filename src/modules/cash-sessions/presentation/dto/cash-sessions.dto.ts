@@ -527,7 +527,7 @@ export class CashCreditRefundDto {
   @ApiProperty({ format: 'uuid' })
   id!: string;
 
-  @ApiProperty({ example: 'DEV-BOG-000001' })
+  @ApiProperty({ example: 'DEV-CCS-000001' })
   number!: string;
 
   @ApiProperty()

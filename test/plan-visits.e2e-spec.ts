@@ -12,7 +12,7 @@ import {
   STAFF_CANCELLATION,
 } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   legacyLocationInsert,
   locationData,
 } from './support/location-fixtures';
@@ -59,7 +59,7 @@ describe('DX-256 visitas y agenda', () => {
     });
     otherLocation = (
       await raw.location.create({
-        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        data: locationData(REGIONAL_CARACAS_FIXTURE, {
           tenantId: a.tenantId,
           name: 'Norte',
         }),
@@ -73,7 +73,7 @@ describe('DX-256 visitas y agenda', () => {
           tenantId: a.tenantId,
           firstName: 'Ana',
           lastName: 'Visitas',
-          phone: '+573001234567',
+          phone: '+584121234567',
         },
       })
     ).id;
@@ -88,7 +88,7 @@ describe('DX-256 visitas y agenda', () => {
     });
     planId = (
       await raw.treatmentPlan.create({
-        data: { tenantId: a.tenantId, patientId, currency: 'COP' },
+        data: { tenantId: a.tenantId, patientId, currency: 'VES' },
       })
     ).id;
     itemIds = [];
@@ -193,7 +193,7 @@ describe('DX-256 visitas y agenda', () => {
       ).items,
     ).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ planId, currency: 'COP', total: 270 }),
+        expect.objectContaining({ planId, currency: 'VES', total: 270 }),
       ]),
     );
     const north = await call(
@@ -488,7 +488,7 @@ describe('DX-256 visitas y agenda', () => {
         firstName: 'Vera',
         lastName: 'Visitas',
         phone: '0412-1234567',
-        countryCode: 'CO',
+        countryCode: 'VE',
       },
     });
     const catalog = await raw.dentalCatalogItem.findFirstOrThrow({
@@ -498,7 +498,7 @@ describe('DX-256 visitas y agenda', () => {
       data: {
         tenantId: a.tenantId,
         patientId: veneciana.id,
-        currency: 'COP',
+        currency: 'VES',
         status: 'ACCEPTED',
         acceptedAt: new Date(Date.now() - 2 * DAY),
         acceptedLocationId: otherLocation,
@@ -524,7 +524,7 @@ describe('DX-256 visitas y agenda', () => {
         }
       ).items.find((i) => i.planId === plan.id)?.patientWhatsApp;
     try {
-      // La sede del plan lee con su región (CO): ese número no es válido.
+      // La sede del plan lee con su región (VE): ese número no es válido.
       expect(await whatsAppOf()).toBeNull();
       await raw.location.update({
         where: { id: otherLocation },
@@ -558,7 +558,7 @@ describe('DX-256 visitas y agenda', () => {
         raw,
         a.tenantId,
         'Réplica antigua',
-        REGIONAL_BOGOTA_FIXTURE.country,
+        REGIONAL_CARACAS_FIXTURE.country,
       );
     });
 

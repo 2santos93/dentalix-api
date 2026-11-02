@@ -22,7 +22,7 @@ import {
 } from './support/e2e-fixtures';
 import { CapturingMailer } from './support/capture-mailer';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 import { MAILER } from '../src/modules/notifications/email/domain/ports/mailer.port';
@@ -427,7 +427,7 @@ describe('Baja de recordatorios (e2e, DX-128)', () => {
       const email = 'luisa@example.com';
       const patientId = await createPatient('128102', {
         email,
-        phone: '315 222 3344',
+        phone: '414 222 3344',
       });
       const appointmentId = await book(
         patientId,
@@ -450,7 +450,7 @@ describe('Baja de recordatorios (e2e, DX-128)', () => {
         .post('/api/v1/test/fake-whatsapp-webhook')
         .send({
           tenantId: clinic.tenantId,
-          from: '573152223344',
+          from: '584142223344',
           text: 'No más',
         })
         .expect(200);
@@ -487,10 +487,10 @@ describe('Baja de recordatorios (e2e, DX-128)', () => {
     it('DX214: móvil compartido por6 no desactiva ninguno; por2 desactiva ambos', async () => {
       const six: string[] = [];
       for (let i = 0; i < 6; i++)
-        six.push(await createPatient(`21420${i}`, { phone: '+573152229999' }));
+        six.push(await createPatient(`21420${i}`, { phone: '+584142229999' }));
       await api()
         .post('/api/v1/test/fake-whatsapp-webhook')
-        .send({ tenantId: clinic.tenantId, from: '573152229999', text: 'BAJA' })
+        .send({ tenantId: clinic.tenantId, from: '584142229999', text: 'BAJA' })
         .expect(200, { isOptOut: true, optedOut: [] });
       expect(
         await raw.patient.count({
@@ -563,12 +563,12 @@ describe('Baja de recordatorios (e2e, DX-128)', () => {
         'maxMatches',
       ]);
       const two = await Promise.all([
-        createPatient('214210', { phone: '+573152228888' }),
-        createPatient('214211', { phone: '+573152228888' }),
+        createPatient('214210', { phone: '+584142228888' }),
+        createPatient('214211', { phone: '+584142228888' }),
       ]);
       const response = await api()
         .post('/api/v1/test/fake-whatsapp-webhook')
-        .send({ tenantId: clinic.tenantId, from: '573152228888', text: 'BAJA' })
+        .send({ tenantId: clinic.tenantId, from: '584142228888', text: 'BAJA' })
         .expect(200);
       expect((response.body as InboundReplyResult).optedOut.sort()).toEqual(
         two.sort(),
@@ -577,19 +577,19 @@ describe('Baja de recordatorios (e2e, DX-128)', () => {
 
     it('otro texto, u otra clínica, no da de baja a nadie', async () => {
       const patientId = await createPatient('128103', {
-        phone: '316 000 1122',
+        phone: '414 000 1122',
       });
       await api()
         .post('/api/v1/test/fake-whatsapp-webhook')
         .send({
           tenantId: clinic.tenantId,
-          from: '573160001122',
+          from: '584140001122',
           text: 'Sí voy',
         })
         .expect(200, { isOptOut: false, optedOut: [] });
       await api()
         .post('/api/v1/test/fake-whatsapp-webhook')
-        .send({ tenantId: other.tenantId, from: '573160001122', text: 'BAJA' })
+        .send({ tenantId: other.tenantId, from: '584140001122', text: 'BAJA' })
         .expect(200, { isOptOut: true, optedOut: [] });
       const row = await raw.patient.findUniqueOrThrow({
         where: { id: patientId },
@@ -613,7 +613,7 @@ describe('Baja de recordatorios (e2e, DX-128)', () => {
         .send(reply)
         .expect(200, { isOptOut: true, optedOut: [] });
       const second = await raw.location.create({
-        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        data: locationData(REGIONAL_CARACAS_FIXTURE, {
           tenantId: clinic.tenantId,
           name: 'Sede 329 VE',
           defaultPhoneRegion: 'VE',
@@ -644,7 +644,7 @@ describe('Baja de recordatorios (e2e, DX-128)', () => {
       // Sede VE sin región (vaciada por un ADMIN o creada por una réplica
       // anterior): la baja casa con la sugerencia de su país.
       const withoutRegion = await raw.location.create({
-        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        data: locationData(REGIONAL_CARACAS_FIXTURE, {
           tenantId: clinic.tenantId,
           name: 'Sede 329 VE sin prefijo',
           country: 'VE',

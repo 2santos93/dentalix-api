@@ -8,7 +8,7 @@ import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   registerBody,
 } from './support/location-fixtures';
 
@@ -39,7 +39,7 @@ describe('patient location (e2e)', () => {
 
     await registerVerified(
       app,
-      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+      registerBody(REGIONAL_CARACAS_FIXTURE, {
         clinicName: 'Loc',
         subdomain: sub,
         email: 'o@loc.com',
@@ -55,7 +55,7 @@ describe('patient location (e2e)', () => {
     token = (login.body as { accessToken: string }).accessToken;
 
     const co = await raw.city.findFirst({
-      where: { countryCode: 'CO' },
+      where: { countryCode: 'VE' },
       select: { id: true },
     });
     coCityId = co!.id;
@@ -77,12 +77,12 @@ describe('patient location (e2e)', () => {
         lastName: 'G',
         docType: 'NATIONAL_ID',
         sex: 'F',
-        countryCode: 'CO',
+        countryCode: 'VE',
         cityId: coCityId,
       })
       .expect(201);
     const body = res.body as { countryCode: string; cityId: number };
-    expect(body.countryCode).toBe('CO');
+    expect(body.countryCode).toBe('VE');
     expect(body.cityId).toBe(coCityId);
   });
 

@@ -9,7 +9,7 @@ import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   registerBody,
   setLocationZone,
 } from './support/location-fixtures';
@@ -86,7 +86,7 @@ describe('canVoid en caja y estado de cuenta (e2e, DX-057)', () => {
     const email = `owner@${subdomain}.com`;
     const reg = await registerVerified(
       app,
-      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+      registerBody(REGIONAL_CARACAS_FIXTURE, {
         clinicName: `Clinica ${subdomain}`,
         subdomain,
         email,

@@ -13,7 +13,7 @@ import {
 import { EmailPayloadCipher } from '../src/modules/notifications/email/infrastructure/email-payload-cipher';
 import { EmailDispatcher } from '../src/modules/notifications/email/application/email-dispatcher.service';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   registerBody,
 } from './support/location-fixtures';
 import { purgeTenants } from './support/tenant-purge';
@@ -57,7 +57,7 @@ describe('Registro sin relé de emails (e2e, DX-144)', () => {
       .set('X-Tenant-Host', 'localhost')
       .set('X-Forwarded-For', `198.51.100.${i + 1}`)
       .send(
-        registerBody(REGIONAL_BOGOTA_FIXTURE, {
+        registerBody(REGIONAL_CARACAS_FIXTURE, {
           clinicName: 'Clínica Sonda',
           subdomain: overrides.subdomain ?? `${SUB_PREFIX}-${i}`,
           email,
@@ -239,7 +239,7 @@ describe('Registro sin relé de emails (e2e, DX-144)', () => {
       .post('/api/v1/auth/register')
       .set('X-Tenant-Host', 'localhost')
       .send(
-        registerBody(REGIONAL_BOGOTA_FIXTURE, {
+        registerBody(REGIONAL_CARACAS_FIXTURE, {
           clinicName: 'Clínica Sonda',
           subdomain: `${SUB_PREFIX}-saludo`,
           email,
@@ -260,7 +260,7 @@ describe('Registro sin relé de emails (e2e, DX-144)', () => {
       .post('/api/v1/auth/register')
       .set('X-Tenant-Host', 'localhost')
       .send(
-        registerBody(REGIONAL_BOGOTA_FIXTURE, {
+        registerBody(REGIONAL_CARACAS_FIXTURE, {
           clinicName: 'C'.repeat(121),
           subdomain: `${SUB_PREFIX}-largo`,
           email: `largo-${RUN}${DOMAIN}`,

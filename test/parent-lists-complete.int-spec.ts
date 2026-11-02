@@ -6,7 +6,7 @@ import { PrismaClinicalEntryRepository } from '../src/modules/clinical-entries/i
 import { PrismaToothRecordRepository } from '../src/modules/odontogram/infrastructure/repositories/prisma-tooth-record.repository';
 import { PrismaTreatmentPlanRepository } from '../src/modules/treatment-plans/infrastructure/repositories/prisma-treatment-plan.repository';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -42,7 +42,10 @@ describe('Listados por padre completos, sin topes silenciosos (DX-043, int)', ()
     tenantId = tenant.id;
     locationId = (
       await raw.location.create({
-        data: locationData(REGIONAL_BOGOTA_FIXTURE, { tenantId, name: 'Sede' }),
+        data: locationData(REGIONAL_CARACAS_FIXTURE, {
+          tenantId,
+          name: 'Sede',
+        }),
       })
     ).id;
     patientId = (

@@ -10,7 +10,7 @@ import { MAILER } from '../src/modules/notifications/email/domain/ports/mailer.p
 import { INVITATION_LIMITS } from '../src/modules/invitations/application/use-cases/create-invitation.use-case';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   registerBody,
 } from './support/location-fixtures';
 import { purgeTenantsBySubdomain } from './support/tenant-purge';
@@ -78,7 +78,7 @@ describe('Cuentas sin enumeración (e2e, DX-029)', () => {
     });
     await registerVerified(
       app,
-      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+      registerBody(REGIONAL_CARACAS_FIXTURE, {
         clinicName: 'Clínica DX-029',
         subdomain: SUB_A,
         email: `owner-a${DOMAIN}`,
@@ -99,7 +99,7 @@ describe('Cuentas sin enumeración (e2e, DX-029)', () => {
 
   describe('POST /auth/register', () => {
     const payload = (email: string, subdomain: string) =>
-      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+      registerBody(REGIONAL_CARACAS_FIXTURE, {
         clinicName: 'Clínica Sonda',
         subdomain,
         email,
@@ -271,7 +271,7 @@ describe('Cuentas sin enumeración (e2e, DX-029)', () => {
       const email = `multi${DOMAIN}`;
       await registerVerified(
         app,
-        registerBody(REGIONAL_BOGOTA_FIXTURE, {
+        registerBody(REGIONAL_CARACAS_FIXTURE, {
           clinicName: 'Clínica Otra',
           subdomain: 'dx143-otra',
           email,
@@ -295,7 +295,7 @@ describe('Cuentas sin enumeración (e2e, DX-029)', () => {
       // de invitaciones en este spec).
       await registerVerified(
         app,
-        registerBody(REGIONAL_BOGOTA_FIXTURE, {
+        registerBody(REGIONAL_CARACAS_FIXTURE, {
           clinicName: 'Clínica Que Invita',
           subdomain: 'dx143-invita',
           email: `owner-invita${DOMAIN}`,
@@ -369,7 +369,7 @@ describe('Cuentas sin enumeración (e2e, DX-029)', () => {
       const victim = `dra.victima${DOMAIN}`;
       await registerVerified(
         app,
-        registerBody(REGIONAL_BOGOTA_FIXTURE, {
+        registerBody(REGIONAL_CARACAS_FIXTURE, {
           clinicName: 'Clínica Atacante',
           subdomain: 'dx029-squat',
           email: victim,
@@ -437,7 +437,7 @@ describe('Cuentas sin enumeración (e2e, DX-029)', () => {
     it(`límite diario por clínica: la invitación ${DAILY_LIMIT + 1} -> 429 en español`, async () => {
       await registerVerified(
         app,
-        registerBody(REGIONAL_BOGOTA_FIXTURE, {
+        registerBody(REGIONAL_CARACAS_FIXTURE, {
           clinicName: 'Clínica Límite',
           subdomain: SUB_LIMIT,
           email: `owner-limite${DOMAIN}`,

@@ -10,7 +10,7 @@ import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
 import {
   REGIONAL_BERLIN_FIXTURE,
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   REGIONAL_NEW_YORK_FIXTURE,
   REGIONAL_TOKYO_FIXTURE,
   g1LocationInsert,
@@ -46,7 +46,7 @@ async function registerAndLogin(
 ) {
   const register = await registerVerified(
     app,
-    registerBody(REGIONAL_BOGOTA_FIXTURE, {
+    registerBody(REGIONAL_CARACAS_FIXTURE, {
       ...opts,
       password: PASSWORD,
       fullName: 'Dr. Owner',
@@ -195,9 +195,9 @@ describe('Locations / multi-sede (e2e)', () => {
         request(app.getHttpServer())
           .post('/api/v1/locations')
           .send(
-            locationBody(REGIONAL_BOGOTA_FIXTURE, {
+            locationBody(REGIONAL_CARACAS_FIXTURE, {
               name: 'Sede Norte',
-              address: 'Cra 15',
+              address: 'Av. Bolívar 15',
             }),
           ),
       ).expect(201);
@@ -511,7 +511,7 @@ describe('Locations / multi-sede (e2e)', () => {
         raw,
         tenantId,
         'Antigua',
-        REGIONAL_BOGOTA_FIXTURE.country,
+        REGIONAL_CARACAS_FIXTURE.country,
       );
       const res = await auth(
         request(app.getHttpServer()).get('/api/v1/locations'),

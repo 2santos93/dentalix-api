@@ -14,7 +14,7 @@ import {
 } from '../src/modules/patients/application/retention-guard';
 import { floorCandidate } from '../src/modules/patients/domain/retention/clinical-record-retention';
 import { ListRetentionExpiringUseCase } from '../src/modules/patients/application/use-cases/retention.use-cases';
-import { REGIONAL_BOGOTA_FIXTURE } from './support/location-fixtures';
+import { REGIONAL_CARACAS_FIXTURE } from './support/location-fixtures';
 import {
   gate,
   settle,
@@ -92,11 +92,11 @@ describe('plazo de conservación de la HC por clínica (DX-330, int)', () => {
       fullName: 'Dra. Plazo',
       emailVerifiedAt: new Date('2026-11-01T12:00:00Z'),
       location: {
-        country: REGIONAL_BOGOTA_FIXTURE.country,
-        currency: REGIONAL_BOGOTA_FIXTURE.currency,
-        timeZone: REGIONAL_BOGOTA_FIXTURE.timeZone,
-        locale: REGIONAL_BOGOTA_FIXTURE.locale,
-        hourCycle: REGIONAL_BOGOTA_FIXTURE.hourCycle,
+        country: REGIONAL_CARACAS_FIXTURE.country,
+        currency: REGIONAL_CARACAS_FIXTURE.currency,
+        timeZone: REGIONAL_CARACAS_FIXTURE.timeZone,
+        locale: REGIONAL_CARACAS_FIXTURE.locale,
+        hourCycle: REGIONAL_CARACAS_FIXTURE.hourCycle,
       },
       request: null,
     });

@@ -11,7 +11,7 @@ import { createE2eApp } from './support/create-e2e-app';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   registerBody,
 } from './support/location-fixtures';
 import { purgeTenantsBySubdomain } from './support/tenant-purge';
@@ -88,7 +88,7 @@ describe('Enlaces con token hacia el host de plataforma (e2e, SEC-033)', () => {
     dispatcher = app.get(EmailDispatcher);
     const register = await registerVerified(
       app,
-      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+      registerBody(REGIONAL_CARACAS_FIXTURE, {
         clinicName: 'Clínica Dominio Propio',
         subdomain: SUB,
         email: ADMIN_EMAIL,

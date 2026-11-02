@@ -15,7 +15,7 @@ const TENANT = '00000000-0000-4000-8000-000000000001';
 
 interface Row {
   id: string;
-  country?: 'CO' | 'ES';
+  country?: 'VE' | 'ES';
   timeZone: string | null;
   currency?: string | null;
   locale?: string | null;
@@ -209,7 +209,7 @@ describe('resolveReferenceLocation (R6)', () => {
   const rows: Row[] = [
     {
       id: 'principal',
-      country: 'CO',
+      country: 'VE',
       timeZone: 'Pacific/Auckland',
       currency: 'NZD',
       locale: 'en-NZ',

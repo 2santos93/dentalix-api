@@ -11,7 +11,7 @@ import {
 import type { ImportPatientData } from '../src/modules/patient-imports/domain/import-fields';
 import { ANESTHESIA_DOSE_RULES_VERSION } from '../src/modules/anesthesia/domain/anesthesia-dose';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -73,7 +73,7 @@ async function seed(subdomain: string): Promise<Seeded> {
     data: { name: subdomain, subdomain },
   });
   const location = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId: tenant.id,
       name: 'Sede',
     }),
@@ -356,7 +356,7 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
         // Sin el trigger de DX-327, la columna toma su DEFAULT 'OTHER'.
         documentType: 'NATIONAL_ID',
         docNumber: '4444',
-        phone: '3001112222',
+        phone: '4121112222',
       },
     });
     const outsider = await raw.patient.create({
@@ -371,7 +371,7 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       a,
       [
         person('4444', {
-          phone: '3109999999',
+          phone: '4149999999',
           email: 'nuevo@x.com',
           birthDate: '1990-01-01',
         }),
@@ -384,7 +384,7 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       where: { id: before.id },
     });
     expect(filled).toMatchObject({
-      phone: '3001112222',
+      phone: '4121112222',
       email: 'nuevo@x.com',
       firstName: 'Lleno',
     });
@@ -399,7 +399,7 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       where: { id: before.id },
     });
     expect(reverted).toMatchObject({
-      phone: '3001112222',
+      phone: '4121112222',
       email: null,
       birthDate: null,
       deletedAt: null,
@@ -636,7 +636,7 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
   });
 
   it('DX-214: un aviso durable bloquea deshacer el lote y conserva paciente, filas y avisos bajo RLS', async () => {
-    const batch = await prepared(a, [person('8883', { phone: '3101234567' })]);
+    const batch = await prepared(a, [person('8883', { phone: '4141234567' })]);
     await runAll(a, batch!.id);
     const created = await raw.patient.findFirstOrThrow({
       where: { importBatchId: batch!.id },
@@ -905,12 +905,12 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       a,
       [
         person('8181', {
-          phone: '+573109999999',
+          phone: '+584149999999',
           email: 'viejo@x.com',
           address: 'Calle vieja',
           notes: 'nota vieja',
           emergencyContactName: 'Luis',
-          emergencyContactPhone: '+573108888888',
+          emergencyContactPhone: '+584148888888',
           birthDate: '1980-05-05',
         }),
       ],
@@ -933,7 +933,7 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       where: { batchId: batch!.id },
     });
     expect(JSON.stringify(row.filledValues)).not.toMatch(
-      /viejo@x\.com|3109999999|Calle vieja|nota vieja|Luis|3108888888/,
+      /viejo@x\.com|4149999999|Calle vieja|nota vieja|Luis|4148888888/,
     );
   });
 

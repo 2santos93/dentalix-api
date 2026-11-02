@@ -5,7 +5,7 @@ const NUMBER_DIGITS = 6;
 
 /**
  * Número visible del recibo: la serie de la sede, un guion y el consecutivo
- * con al menos 6 cifras (`BOG-000123`). Pasado el millón crece, nunca se
+ * con al menos 6 cifras (`CCS-000123`). Pasado el millón crece, nunca se
  * recorta ni vuelve a empezar.
  */
 export function formatReceiptNumber(prefix: string, number: number): string {

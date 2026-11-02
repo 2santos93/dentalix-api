@@ -212,7 +212,7 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
       firstName: 'Carolina',
       lastName: 'Duque',
       email: ADULT_EMAIL,
-      phone: '+57 310 123 4567',
+      phone: '+58 414 123 4567',
       birthDate: '1990-05-01',
     });
     appointmentId = await appointment(patientId, typeId);
@@ -248,7 +248,7 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
         toMasked: 'ca***@example.com',
         toResponsible: false,
       },
-      whatsapp: { phone: '573101234567', reason: null },
+      whatsapp: { phone: '584141234567', reason: null },
       locationPhone: '601 555 0101',
       deliveries: [],
     });
@@ -356,7 +356,7 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
       201,
     );
     const created = res.body as Created;
-    expect(created.whatsapp?.phone).toBe('573101234567');
+    expect(created.whatsapp?.phone).toBe('584141234567');
     expect(created.whatsapp?.text).toContain(created.publicUrl);
     expect(created.whatsapp?.text).toContain('Hola Carolina');
     expect(created.whatsapp?.text).not.toContain('Exodoncia');
@@ -453,7 +453,7 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
       firstName: 'Dado',
       lastName: 'Debaja',
       email: 'baja@example.com',
-      phone: '+57 310 999 0000',
+      phone: '+58 414 999 0000',
     });
     await raw.patient.update({
       where: { id },

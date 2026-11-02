@@ -28,7 +28,7 @@ import {
 import { allNoAnswers } from '../src/modules/medical-history-submissions/domain/__fixtures__/anamnesis-answers';
 import type { AnamnesisAnswers } from '../src/modules/medical-history-submissions/domain/anamnesis-questionnaire';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -215,7 +215,7 @@ describe('Anamnesis previa a la cita por enlace (e2e, DX-099)', () => {
         sex: 'F',
         firstName: 'Mariana Isabel',
         lastName: LAST_NAME,
-        phone: '+57 300 123 4567',
+        phone: '+58 412 123 4567',
         birthDate: '1988-03-14',
       })
       .expect(201);
@@ -270,7 +270,7 @@ describe('Anamnesis previa a la cita por enlace (e2e, DX-099)', () => {
         appointmentStart.getTime(),
       );
       expect(created.consentRequired).toBe(true);
-      expect(created.whatsapp?.phone).toBe('573001234567');
+      expect(created.whatsapp?.phone).toBe('584121234567');
       expect(created.whatsapp?.text).toContain(created.url);
       expect(created.whatsapp?.text).toContain('Hola Mariana,');
       expect(created.whatsapp?.text).not.toContain(LAST_NAME);
@@ -763,7 +763,7 @@ describe('Anamnesis previa a la cita por enlace (e2e, DX-099)', () => {
         declarationAccepted: true,
       }).expect(200);
       const north = await raw.location.create({
-        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        data: locationData(REGIONAL_CARACAS_FIXTURE, {
           tenantId: clinicA.tenantId,
           name: 'Sede Norte DX-099',
         }),

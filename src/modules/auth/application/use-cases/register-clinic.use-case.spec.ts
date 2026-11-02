@@ -124,7 +124,7 @@ const COUNTRIES = {
 
 /** Monedas admitidas en estos tests (el puerto real consulta `currencies`). */
 const CURRENCIES = {
-  has: (code: string) => Promise.resolve(['COP', 'JPY'].includes(code)),
+  has: (code: string) => Promise.resolve(['USD', 'JPY'].includes(code)),
 };
 
 function newUseCase(
@@ -145,7 +145,7 @@ function newUseCase(
 
 // G1: la primera sede con sus cuatro valores (datos de test, no defaults).
 const TOKYO_LOCATION = {
-  locationCountry: 'CO',
+  locationCountry: 'VE',
   locationCurrency: 'JPY',
   locationTimeZone: 'Asia/Tokyo',
   locationLocale: 'ja-JP',
@@ -262,7 +262,7 @@ describe('RegisterClinicUseCase (DX-029)', () => {
       );
       await uc.execute({
         ...INPUT,
-        fullName: 'Tu banco bloqueó tu cuenta: llama al +57 300',
+        fullName: 'Tu banco bloqueó tu cuenta: llama al +58 412',
         clinicName: 'Entra en bit.ly/xxxx',
       });
       const [args] = notifier.sendVerification.mock.calls[0];
@@ -532,7 +532,7 @@ describe('RegisterClinicUseCase (DX-029)', () => {
         locationLocale: 'JA-jp',
       });
       expect(pending.rows[0].location).toEqual({
-        country: 'CO',
+        country: 'VE',
         currency: 'JPY',
         timeZone: 'Asia/Tokyo',
         locale: 'ja-JP',
@@ -544,7 +544,7 @@ describe('RegisterClinicUseCase (DX-029)', () => {
       expect(createClinic).toHaveBeenCalledWith(
         expect.objectContaining({
           location: {
-            country: 'CO',
+            country: 'VE',
             currency: 'JPY',
             timeZone: 'Asia/Tokyo',
             locale: 'ja-JP',
@@ -565,7 +565,7 @@ describe('RegisterClinicUseCase (DX-029)', () => {
         locationHourCycle: 'h12',
       });
       expect(pending.rows[0].location).toEqual({
-        country: 'CO',
+        country: 'VE',
         currency: 'JPY',
         timeZone: 'America/New_York',
         locale: 'en-US',
@@ -578,7 +578,7 @@ describe('RegisterClinicUseCase (DX-029)', () => {
       const uc = newUseCase(makeRepo(), pending, makeNotifier(), realPassword);
       await uc.execute({ ...INPUT, locationHourCycle: undefined });
       expect(pending.rows[0].location).toEqual({
-        country: 'CO',
+        country: 'VE',
         currency: 'JPY',
         timeZone: 'Asia/Tokyo',
         locale: 'ja-JP',

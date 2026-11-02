@@ -17,14 +17,14 @@ describe('locationOf (G1-B, pre-flight I3)', () => {
     expect(
       locationOf({
         ...ROW,
-        locationCountry: 'CO',
+        locationCountry: 'VE',
         locationCurrency: 'EUR',
         locationTimeZone: 'Europe/Berlin',
         locationLocale: 'de-DE',
         locationHourCycle: null,
       }),
     ).toEqual({
-      country: 'CO',
+      country: 'VE',
       currency: 'EUR',
       timeZone: 'Europe/Berlin',
       locale: 'de-DE',
@@ -36,7 +36,7 @@ describe('locationOf (G1-B, pre-flight I3)', () => {
     expect(
       locationOf({
         ...ROW,
-        locationCountry: 'CO',
+        locationCountry: 'VE',
         locationCurrency: 'USD',
         locationTimeZone: 'America/New_York',
         locationLocale: 'en-US',

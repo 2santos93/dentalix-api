@@ -5,7 +5,7 @@ import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { OutboundMessages } from '../src/modules/notifications/outbound/application/outbound-messages.service';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -32,7 +32,7 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
     data: { name: subdomain, subdomain },
   });
   const location = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId: tenant.id,
       name: 'Sede',
     }),
@@ -147,7 +147,7 @@ describe('DX-085 · outbound_messages (int)', () => {
       messages.record({
         channel: 'WHATSAPP_LINK',
         template: 'appointment-reminder',
-        recipient: '+57 300 123 4567',
+        recipient: '+58 412 123 4567',
       }),
     );
     await tenantContext.run(a.tenantId, () =>
@@ -155,7 +155,7 @@ describe('DX-085 · outbound_messages (int)', () => {
     );
     const row = await raw.outboundMessage.findUniqueOrThrow({ where: { id } });
     expect(row).toMatchObject({
-      recipientMasked: '+57***4567',
+      recipientMasked: '+58***4567',
       status: 'SENT',
       attempts: 1,
     });
@@ -167,7 +167,7 @@ describe('DX-085 · outbound_messages (int)', () => {
       messages.record({
         channel: 'SMS',
         template: 'x',
-        recipient: '3001234567',
+        recipient: '4121234567',
       }),
     );
     await tenantContext.run(a.tenantId, async () => {
@@ -187,7 +187,7 @@ describe('DX-085 · outbound_messages (int)', () => {
       messages.record({
         channel: 'SMS',
         template: 'x',
-        recipient: '3001234567',
+        recipient: '4121234567',
       }),
     );
     const seenByB = await prisma.runWithTenant(b.tenantId, (tx) =>

@@ -53,7 +53,7 @@ describe('composeImplantCard (DX-191)', () => {
     documentTypeNames: NO_LOCAL_NAMES,
     placedOn: '2026-10-10',
     locations: [
-      { id: 'l1', name: 'Sede principal', address: 'Cra 1 # 2-3' },
+      { id: 'l1', name: 'Sede principal', address: 'Av. Bolívar 1' },
       { id: 'l2', name: 'Sede Norte', address: null },
     ],
     implants: [
@@ -80,7 +80,9 @@ describe('composeImplantCard (DX-191)', () => {
       patientDocument: 'Documento nacional 52123456',
       patientBirthDate: '1980-05-02',
       clinicName: 'Clínica Demo',
-      locations: [{ id: 'l1', name: 'Sede principal', address: 'Cra 1 # 2-3' }],
+      locations: [
+        { id: 'l1', name: 'Sede principal', address: 'Av. Bolívar 1' },
+      ],
       placedOn: '2026-10-10',
       professionals: ['Dra. Ruiz'],
     });

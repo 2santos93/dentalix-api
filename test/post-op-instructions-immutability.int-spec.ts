@@ -1,6 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -113,7 +113,7 @@ async function seedClinic(subdomain: string): Promise<Seeded> {
   });
   const tenantId = tenant.id;
   const location = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId,
       name: `Sede ${subdomain}`,
     }),
@@ -556,7 +556,7 @@ describe('indicaciones postoperatorias: plantillas, vínculos y entregas (DX-222
         phone,
         a.locationId,
       );
-    await expect(setPhone('+57 601 555 0101')).resolves.toBe(1);
+    await expect(setPhone('+58 212 555 0101')).resolves.toBe(1);
     await expect(setPhone('1'.repeat(41))).rejects.toThrow(
       /locations_phone_length_check/,
     );

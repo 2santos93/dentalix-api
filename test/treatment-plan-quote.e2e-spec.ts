@@ -23,7 +23,7 @@ import {
   parseQuoteContent,
 } from '../src/modules/treatment-plans/domain/plan-quote';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationBody,
   registerBody,
 } from './support/location-fixtures';
@@ -152,7 +152,7 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
     const email = `owner@${subdomain}.com`;
     const reg = await registerVerified(
       app,
-      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+      registerBody(REGIONAL_CARACAS_FIXTURE, {
         clinicName: `Clinica ${subdomain}`,
         subdomain,
         email,
@@ -294,9 +294,9 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
     const north = await as(clinicA)
       .post(
         '/locations',
-        locationBody(REGIONAL_BOGOTA_FIXTURE, {
+        locationBody(REGIONAL_CARACAS_FIXTURE, {
           name: 'Sede Norte',
-          address: 'Cra 7 # 100-20',
+          address: 'Av. Urdaneta 100',
         }),
       )
       .expect(201);
@@ -409,7 +409,7 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
       expect((res.body as QuoteBody).location).toEqual({
         id: northLocationA,
         name: 'Sede Norte',
-        address: 'Cra 7 # 100-20',
+        address: 'Av. Urdaneta 100',
       });
     });
 

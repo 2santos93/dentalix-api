@@ -10,7 +10,7 @@ import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase, STAFF_CANCELLATION } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   registerBody,
 } from './support/location-fixtures';
 
@@ -66,7 +66,7 @@ describe('Confirmación de cita por enlace (e2e)', () => {
   async function registerClinic(subdomain: string): Promise<Clinic> {
     const reg = await registerVerified(
       app,
-      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+      registerBody(REGIONAL_CARACAS_FIXTURE, {
         clinicName: `Clínica ${subdomain}`,
         subdomain,
         email: `owner@${subdomain}.com`,
@@ -126,7 +126,7 @@ describe('Confirmación de cita por enlace (e2e)', () => {
         docType: 'NATIONAL_ID',
         docNumber,
         sex: Sex.F,
-        phone: '+57 310 555 0101',
+        phone: '+58 414 555 0101',
       })
       .expect(201);
     return (res.body as { id: string }).id;
@@ -237,7 +237,7 @@ describe('Confirmación de cita por enlace (e2e)', () => {
       expect(body.url).toBe(`http://${clinicA.host}/confirmar/${token}`);
       expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
       expect(body.expiresAt).toBe(appt.start);
-      expect(body.whatsappPhone).toBe('573105550101');
+      expect(body.whatsappPhone).toBe('584145550101');
       expect(body.appointment).toEqual({
         patientFirstName: 'Ana',
         start: appt.start,
@@ -255,11 +255,11 @@ describe('Confirmación de cita por enlace (e2e)', () => {
       const patient = await createPatient(clinicA, '329001');
       await raw.patient.update({
         where: { id: patient },
-        data: { phone: '310 555 0101', countryCode: null },
+        data: { phone: '414 555 0101', countryCode: null },
       });
       const appt = await createAppointment(clinicA, patient);
       const { body } = await newLink(clinicA, appt.id);
-      expect(body.whatsappPhone).toBe('573105550101');
+      expect(body.whatsappPhone).toBe('584145550101');
     });
 
     it("a patient whose country differs from the location's is read with the location's region", async () => {
@@ -269,7 +269,7 @@ describe('Confirmación de cita por enlace (e2e)', () => {
         data: { phone: '0412-1234567', countryCode: 'VE' },
       });
       const appt = await createAppointment(clinicA, patient);
-      // Con la región de la sede (CO), ese número no es válido: sin enlace.
+      // Con la región de la sede (VE), ese número no es válido: sin enlace.
       expect((await newLink(clinicA, appt.id)).body.whatsappPhone).toBeNull();
       const location = await raw.appointment.findUniqueOrThrow({
         where: { id: appt.id },
@@ -390,8 +390,8 @@ describe('Confirmación de cita por enlace (e2e)', () => {
         'Secreta',
         // El móvil del paciente, con o sin espacios: '310' a secas aparecía
         // al azar en UUID y horas (DX-496, TST-059).
-        '310 555 0101',
-        '3105550101',
+        '414 555 0101',
+        '4145550101',
         patientA,
         appt.id,
         clinicA.tenantId,

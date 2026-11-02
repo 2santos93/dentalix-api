@@ -11,7 +11,7 @@ import {
   readOnlyBatch,
   type PhonesReport,
 } from '../prisma/scripts/phones-report';
-import { REGIONAL_BOGOTA_FIXTURE } from './support/location-fixtures';
+import { REGIONAL_CARACAS_FIXTURE } from './support/location-fixtures';
 
 /**
  * DX-329 (spec §4.6, P2): el informe de los teléfonos guardados que no
@@ -67,7 +67,7 @@ async function location(
   minutes: number,
   deleted = false,
 ): Promise<string> {
-  const f = REGIONAL_BOGOTA_FIXTURE;
+  const f = REGIONAL_CARACAS_FIXTURE;
   const [row] = await raw.$queryRaw<{ id: string }[]>`
     INSERT INTO "locations" ("id", "tenantId", "name", "countryCode", "currency",
       "timeZone", "locale", "hourCycle", "defaultPhoneRegion", "phone",

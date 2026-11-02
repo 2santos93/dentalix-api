@@ -18,9 +18,9 @@ const e164 = (text: string, region: string | null): string | null =>
 
 /** Los casos de dos lecturas fijados (pre-flight C1). */
 const AMBIGUOUS_CASES: [string, string, [string, string]][] = [
-  ['CO', '0058 412 1234567', ['+584121234567', '+84121234567']],
+  ['TH', '0058 412 1234567', ['+584121234567', '+84121234567']],
   // Primero la lectura como `+`; después, con la región.
-  ['CO', '009 1 787 234 5678', ['+917872345678', '+17872345678']],
+  ['TH', '009 1 787 234 5678', ['+917872345678', '+17872345678']],
   ['DE', '49 151 23456789', ['+4915123456789', '+494915123456789']],
 ];
 
@@ -44,8 +44,8 @@ describe('phone-number (DX-329)', () => {
     const cases: [string, string, string, boolean][] = [
       ['VE', '0412-1234567', '+584121234567', true],
       ['VE', '0212-5551234', '+582125551234', false],
-      ['CO', '310 555 0101', '+573105550101', true],
-      ['CO', '601 555 0101', '+576015550101', false],
+      ['TH', '081 234 5678', '+66812345678', true],
+      ['TH', '02 123 4567', '+6621234567', false],
       ['ES', '612 34 56 78', '+34612345678', true],
       ['ES', '912 34 56 78', '+34912345678', false],
       ['IT', '06 1234 5678', '+390612345678', false],
@@ -100,8 +100,8 @@ describe('phone-number (DX-329)', () => {
       });
       expect(phoneReadings(text, 'VE')).toEqual(['+584121234567']);
     }
-    expect(e164('007 58 414 1234567', 'CO')).toBe('+584141234567');
-    expect(e164('0057 310 555 0101', 'US')).toBe('+573105550101');
+    expect(e164('007 58 414 1234567', 'TH')).toBe('+584141234567');
+    expect(e164('0058 412 123 4567', 'US')).toBe('+584121234567');
   });
 
   it('without a default region a number without + is not parsed', () => {
@@ -113,7 +113,7 @@ describe('phone-number (DX-329)', () => {
   });
 
   it('a trunk zero the number does not have is invalid', () => {
-    expect(parsePhone('03105550101', 'CO')).toBeNull();
+    expect(parsePhone('0912345678', 'PT')).toBeNull();
     expect(parsePhone('0612345678', 'ES')).toBeNull();
   });
 
@@ -137,8 +137,8 @@ describe('phone-number (DX-329)', () => {
   });
 
   it('a possible but invalid number gives null', () => {
-    expect(readPhone('+57 412 1234567', null)).toEqual({ kind: 'NONE' });
-    expect(parsePhone('+570000000000', null)).toBeNull();
+    expect(readPhone('+58 999 1234567', null)).toEqual({ kind: 'NONE' });
+    expect(parsePhone('+580000000000', null)).toBeNull();
   });
 
   it('MX numbers stored as +52 1 are invalid', () => {
@@ -186,8 +186,8 @@ describe('phone-number (DX-329)', () => {
     expect(parsePhone('+58 412 1234567', null)?.international).toBe(
       '+58 412 1234567',
     );
-    expect(parsePhone('+57 310 5550101', null)?.international).toBe(
-      '+57 310 5550101',
+    expect(parsePhone('+58 412 5550101', null)?.international).toBe(
+      '+58 412 5550101',
     );
     expect(parsePhone('+34 612 34 56 78', null)?.international).toBe(
       '+34 612 34 56 78',
@@ -197,8 +197,8 @@ describe('phone-number (DX-329)', () => {
   it('phoneInternational formats a valid number with the default region (DX-387)', () => {
     expect(phoneInternational('0412-1234567', 'VE')).toBe('+58 412 1234567');
     expect(phoneInternational('+584121234567', null)).toBe('+58 412 1234567');
-    expect(phoneInternational('601 555 0101 ext. 12', 'CO')).toBe(
-      '+57 601 5550101 ext. 12',
+    expect(phoneInternational('0212-5551234 ext. 12', 'VE')).toBe(
+      '+58 212 5551234 ext. 12',
     );
   });
 
@@ -208,14 +208,14 @@ describe('phone-number (DX-329)', () => {
     expect(phoneInternational('llamar por la tarde', 'VE')).toBeNull();
     expect(phoneInternational('0412-1234567', null)).toBeNull();
     // Ambiguo: dos lecturas válidas distintas, no se elige ninguna.
-    expect(phoneInternational('0058 412 1234567', 'CO')).toBeNull();
+    expect(phoneInternational('0058 412 1234567', 'TH')).toBeNull();
     expect(phoneInternational('9'.repeat(80), 'VE')).toBeNull();
   });
 
   it('whatsAppDigits accepts a valid fixed line and refuses an invalid one', () => {
-    expect(whatsAppDigits('601 555 0101', 'CO')).toBe('576015550101');
-    expect(whatsAppDigits('+57 412 1234567', 'CO')).toBeNull();
-    expect(whatsAppDigits(null, 'CO')).toBeNull();
+    expect(whatsAppDigits('0212-5551234', 'VE')).toBe('582125551234');
+    expect(whatsAppDigits('+58 999 1234567', 'VE')).toBeNull();
+    expect(whatsAppDigits(null, 'VE')).toBeNull();
   });
 
   it('suggestedPhoneRegion is the country when the library supports it', () => {
@@ -227,7 +227,7 @@ describe('phone-number (DX-329)', () => {
   });
 
   it('phoneRegionOrNull drops a region the library does not support', () => {
-    expect(phoneRegionOrNull(' co ')).toBe('CO');
+    expect(phoneRegionOrNull(' ve ')).toBe('VE');
     expect(phoneRegionOrNull('AC')).toBe('AC');
     expect(phoneRegionOrNull('AQ')).toBeNull();
     expect(phoneRegionOrNull('ZZ')).toBeNull();
@@ -244,18 +244,18 @@ describe('phone-number (DX-329)', () => {
   it('digits of any script read as the same digits', () => {
     for (const [region, text, readings] of [
       [
-        'CO',
+        'TH',
         '００５８ ４１２ １２３４５６７',
         ['+584121234567', '+84121234567'],
       ],
-      ['CO', '٠٠٥٨ ٤١٢ ١٢٣٤٥٦٧', ['+584121234567', '+84121234567']],
-      ['CO', '۰۰۵۸۴۱۲۱۲۳۴۵۶۷', ['+584121234567', '+84121234567']],
+      ['TH', '٠٠٥٨ ٤١٢ ١٢٣٤٥٦٧', ['+584121234567', '+84121234567']],
+      ['TH', '۰۰۵۸۴۱۲۱۲۳۴۵۶۷', ['+584121234567', '+84121234567']],
       [
-        'CO',
+        'TH',
         '００９ １ ７８７ ２３４ ５６７８',
         ['+917872345678', '+17872345678'],
       ],
-      ['CO', '٠٠٩ ١ ٧٨٧ ٢٣٤ ٥٦٧٨', ['+917872345678', '+17872345678']],
+      ['TH', '٠٠٩ ١ ٧٨٧ ٢٣٤ ٥٦٧٨', ['+917872345678', '+17872345678']],
       [
         'DE',
         '４９ １５１ ２３４５６７８９',
@@ -323,7 +323,7 @@ describe('phone-number (DX-329)', () => {
       });
     }
     // La letra rompía la lectura con la región y dejaba elegir la otra.
-    expect(readPhone('0058ñ412 1234567', 'CO')).toEqual({ kind: 'NONE' });
+    expect(readPhone('0058ñ412 1234567', 'TH')).toEqual({ kind: 'NONE' });
     for (const text of [
       '0212-5551234 ext 3',
       '0212-5551234 ext. 3',

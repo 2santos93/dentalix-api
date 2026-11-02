@@ -47,7 +47,7 @@ describe('CreateConfirmationLinkUseCase', () => {
 
     const result = await uc.execute({ appointmentId: appointment.id });
 
-    expect(result.whatsappPhone).toBe('573105550101');
+    expect(result.whatsappPhone).toBe('584145550101');
     expect(result.appointment).toEqual({
       patientFirstName: 'Ana',
       start: appointment.start,
@@ -93,7 +93,7 @@ describe('CreateConfirmationLinkUseCase', () => {
     ).toBeNull();
     const ambiguous = repo.addAppointment({
       patientPhone: '0058 412 1234567',
-      locationPhoneRegion: 'CO',
+      locationPhoneRegion: 'TH',
     });
     expect(
       (await uc.execute({ appointmentId: ambiguous.id })).whatsappPhone,

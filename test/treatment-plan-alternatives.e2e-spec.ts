@@ -17,7 +17,7 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
 
@@ -95,7 +95,7 @@ describe('Alternativas de plan y presupuestos por seguir (e2e, DX-040)', () => {
     price = 1000000,
   ): Promise<string> {
     const plan = await as(clinic)
-      .post(`/patients/${patientId}/treatment-plans`, { currency: 'COP' })
+      .post(`/patients/${patientId}/treatment-plans`, { currency: 'USD' })
       .expect(201);
     const id = (plan.body as Plan).id;
     await as(clinic)
@@ -166,13 +166,13 @@ describe('Alternativas de plan y presupuestos por seguir (e2e, DX-040)', () => {
     // (mismo criterio que tenant-isolation-matrix.e2e-spec.ts).
     await as(clinicA).put('/locations/schedule', { ranges: [] }).expect(200);
     catalogA = await catalogItem(clinicA, 'IMPL-A');
-    patientA = await patient(clinicA, 'Ana', '+57 300 111 2222');
+    patientA = await patient(clinicA, 'Ana', '+58 412 111 2222');
     const locations = await as(clinicA).get('/locations').expect(200);
     mainLocationA = (locations.body as { id: string }[])[0].id;
     const north = await as(clinicA)
       .post(
         '/locations',
-        locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }),
+        locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede Norte' }),
       )
       .expect(201);
     northLocationA = (north.body as { id: string }).id;
@@ -360,7 +360,7 @@ describe('Alternativas de plan y presupuestos por seguir (e2e, DX-040)', () => {
       await as(clinicA)
         .post(`/treatment-plans/${paid}/payments`, {
           amount: 10000,
-          currency: 'COP',
+          currency: 'USD',
           paidAt: new Date().toISOString(),
           method: 'CASH',
         })
@@ -395,7 +395,7 @@ describe('Alternativas de plan y presupuestos por seguir (e2e, DX-040)', () => {
 
     it('un plan sin ítems no se presenta (400)', async () => {
       const empty = await as(clinicA)
-        .post(`/patients/${patientA}/treatment-plans`, { currency: 'COP' })
+        .post(`/patients/${patientA}/treatment-plans`, { currency: 'USD' })
         .expect(201);
       await as(clinicA)
         .post(`/treatment-plans/${(empty.body as Plan).id}/present`)
@@ -415,7 +415,7 @@ describe('Alternativas de plan y presupuestos por seguir (e2e, DX-040)', () => {
         where: { tenantId: clinicA.tenantId, status: 'PRESENTED' },
         data: { status: 'CANCELLED' },
       });
-      const duePatient = await patient(clinicA, 'Laura', '+57 300 555 6666');
+      const duePatient = await patient(clinicA, 'Laura', '+58 412 555 6666');
       due = await planWithItem(clinicA, duePatient, catalogA, 2000000);
       await presentDaysAgo(due, 10, mainLocationA);
 
@@ -482,10 +482,10 @@ describe('Alternativas de plan y presupuestos por seguir (e2e, DX-040)', () => {
       expect(page.items.map((i) => i.planId)).toEqual([dueNorth, due]);
       expect(page.items[1]).toMatchObject({
         patientName: 'Laura Seguimiento',
-        patientPhone: '+57 300 555 6666',
-        patientWhatsApp: '573005556666',
+        patientPhone: '+58 412 555 6666',
+        patientWhatsApp: '584125556666',
         total: 1950000,
-        currency: 'COP',
+        currency: 'USD',
         daysSincePresented: 10,
       });
       const ids = page.items.map((i) => i.planId);
@@ -545,7 +545,7 @@ describe('Alternativas de plan y presupuestos por seguir (e2e, DX-040)', () => {
       });
       await raw.patient.update({
         where: { id: plan.patientId },
-        data: { phone: '0412-1234567', countryCode: 'CO' },
+        data: { phone: '0412-1234567', countryCode: 'VE' },
       });
       const read = async () =>
         (

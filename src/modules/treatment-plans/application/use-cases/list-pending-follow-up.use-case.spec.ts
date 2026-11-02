@@ -11,14 +11,14 @@ function row(overrides: Partial<PendingFollowUpRow> = {}): PendingFollowUpRow {
     patientId: 'p1',
     patientFirstName: 'Ana',
     patientLastName: 'Pérez',
-    patientPhone: '300 123 4567',
+    patientPhone: '412 123 4567',
     // Sin región por defecto: cada test fija la suya (DX-329).
     presentedLocationPhoneRegion: null,
     optionGroupId: 'plan-a',
     optionLabel: 'Opción A',
     presentedAt: new Date(NOW.getTime() - 9 * DAY),
     presentedLocationId: 'loc-1',
-    currency: 'COP',
+    currency: 'USD',
     total: 3400000,
     itemCount: 2,
     ...overrides,
@@ -60,7 +60,7 @@ describe('ListPendingFollowUpUseCase (DX-040)', () => {
   });
 
   it('devuelve cada fila con paciente, opción, monto en su moneda y días desde la presentación', async () => {
-    const { uc } = setup([row({ presentedLocationPhoneRegion: 'CO' })]);
+    const { uc } = setup([row({ presentedLocationPhoneRegion: 'VE' })]);
     const page = await uc.execute({});
     expect(page).toEqual({
       items: [
@@ -68,14 +68,14 @@ describe('ListPendingFollowUpUseCase (DX-040)', () => {
           planId: 'plan-a',
           patientId: 'p1',
           patientName: 'Ana Pérez',
-          patientPhone: '300 123 4567',
-          patientWhatsApp: '573001234567',
+          patientPhone: '412 123 4567',
+          patientWhatsApp: '584121234567',
           optionGroupId: 'plan-a',
           optionLabel: 'Opción A',
           presentedAt: new Date(NOW.getTime() - 9 * DAY),
           presentedLocationId: 'loc-1',
           daysSincePresented: 9,
-          currency: 'COP',
+          currency: 'USD',
           total: 3400000,
           itemCount: 2,
         },

@@ -9,7 +9,7 @@ import { PrismaExceptionFilter } from '../../src/shared/prisma/prisma-exception.
 import { hostFor } from './tenant-host';
 import { registerVerified } from '../support/register-verified';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   registerBody,
   type RegionalFixture,
 } from './location-fixtures';
@@ -99,7 +99,7 @@ interface Tokens {
 export async function registerClinic(
   app: INestApplication<App>,
   subdomain: string,
-  fixture: RegionalFixture = REGIONAL_BOGOTA_FIXTURE,
+  fixture: RegionalFixture = REGIONAL_CARACAS_FIXTURE,
 ): Promise<Clinic> {
   const email = `owner@${subdomain}.test`;
   const register = await registerVerified(

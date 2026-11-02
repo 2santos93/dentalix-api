@@ -175,10 +175,10 @@ describe('Baja de recordatorios por mensaje entrante (DX-128, para DX-126)', () 
   beforeEach(() => {
     repo = new FakeReminderOptOutRepository();
     // La región de la sede de estos casos; los de dos sedes fijan las suyas.
-    repo.regions = ['CO'];
-    repo.addPatient(ANA, { phone: '310 123 4567' });
+    repo.regions = ['VE'];
+    repo.addPatient(ANA, { phone: '0414-1234567' });
     // Mismo móvil escrito de otra forma: la madre con dos hijos, p. ej.
-    repo.addPatient(LUIS, { phone: '+57 (310) 123-4567' });
+    repo.addPatient(LUIS, { phone: '+58 (414) 123-4567' });
     // Mismos 8 últimos dígitos, otro país: no es el mismo móvil.
     repo.addPatient('5a1c7d2e-0000-4000-8000-000000000103', {
       phone: '+34 601 23 45 67'.replace(/\s/g, ''),
@@ -195,7 +195,7 @@ describe('Baja de recordatorios por mensaje entrante (DX-128, para DX-126)', () 
   it('«BAJA» del móvil registra la baja de cada paciente de ese móvil, con origen MESSAGE', async () => {
     const result = await useCase.execute({
       tenantId: TENANT,
-      fromPhone: '573101234567',
+      fromPhone: '584141234567',
       text: ' Baja ',
     });
     expect(result).toEqual({ isOptOut: true, optedOut: [ANA, LUIS] });
@@ -220,7 +220,7 @@ describe('Baja de recordatorios por mensaje entrante (DX-128, para DX-126)', () 
 
   it('seis coincidencias no dan de baja a ninguno y dejan aviso sin PII', async () => {
     for (let i = 0; i < 4; i++)
-      repo.addPatient(`shared-${i}`, { phone: '+573101234567' });
+      repo.addPatient(`shared-${i}`, { phone: '+584141234567' });
     const warning = jest
       .spyOn(Logger.prototype, 'warn')
       .mockImplementation(() => undefined);
@@ -228,7 +228,7 @@ describe('Baja de recordatorios por mensaje entrante (DX-128, para DX-126)', () 
       expect(
         await useCase.execute({
           tenantId: TENANT,
-          fromPhone: '573101234567',
+          fromPhone: '584141234567',
           text: 'BAJA',
         }),
       ).toEqual({ isOptOut: true, optedOut: [] });
@@ -249,7 +249,7 @@ describe('Baja de recordatorios por mensaje entrante (DX-128, para DX-126)', () 
 
   it('persiste todos los avisos del tope antes de responder; si falla no oculta el error', async () => {
     for (let i = 0; i < 4; i++)
-      repo.addPatient(`shared-${i}`, { phone: '+573101234567' });
+      repo.addPatient(`shared-${i}`, { phone: '+584141234567' });
     const recordMatchWarnings = jest
       .fn()
       .mockRejectedValue(new Error('warning storage unavailable'));
@@ -261,7 +261,7 @@ describe('Baja de recordatorios por mensaje entrante (DX-128, para DX-126)', () 
       await expect(
         useCase.execute({
           tenantId: TENANT,
-          fromPhone: '573101234567',
+          fromPhone: '584141234567',
           text: 'BAJA',
         }),
       ).rejects.toThrow('warning storage unavailable');
@@ -293,7 +293,7 @@ describe('Baja de recordatorios por mensaje entrante (DX-128, para DX-126)', () 
       expect(
         await limited.execute({
           tenantId: TENANT,
-          fromPhone: '573101234567',
+          fromPhone: '584141234567',
           text: 'BAJA',
         }),
       ).toEqual({ isOptOut: true, optedOut: [] });
@@ -307,7 +307,7 @@ describe('Baja de recordatorios por mensaje entrante (DX-128, para DX-126)', () 
   it('acepta el número con + y separadores', async () => {
     const result = await useCase.execute({
       tenantId: TENANT,
-      fromPhone: '+57 310 123 4567',
+      fromPhone: '+58 414 123 4567',
       text: 'STOP',
     });
     expect(result.optedOut).toEqual([ANA, LUIS]);
@@ -316,7 +316,7 @@ describe('Baja de recordatorios por mensaje entrante (DX-128, para DX-126)', () 
   it('un mensaje que no es de baja no toca nada', async () => {
     const result = await useCase.execute({
       tenantId: TENANT,
-      fromPhone: '573101234567',
+      fromPhone: '584141234567',
       text: 'No puedo ir mañana',
     });
     expect(result).toEqual({ isOptOut: false, optedOut: [] });
@@ -327,12 +327,12 @@ describe('Baja de recordatorios por mensaje entrante (DX-128, para DX-126)', () 
   it('repetir «BAJA» no vuelve a registrar ni a auditar', async () => {
     await useCase.execute({
       tenantId: TENANT,
-      fromPhone: '573101234567',
+      fromPhone: '584141234567',
       text: 'BAJA',
     });
     const again = await useCase.execute({
       tenantId: TENANT,
-      fromPhone: '573101234567',
+      fromPhone: '584141234567',
       text: 'no más',
     });
     expect(again).toEqual({ isOptOut: true, optedOut: [] });
@@ -341,13 +341,14 @@ describe('Baja de recordatorios por mensaje entrante (DX-128, para DX-126)', () 
 
   it("an opt-out reply matches a patient stored without + in any live location's region", async () => {
     // Sin «+», ese número solo es válido con la región de la segunda sede.
+    repo.regions = ['ES'];
     repo.addPatient(PEDRO, { phone: '0412-1234567' });
     const reply = { tenantId: TENANT, fromPhone: '584121234567', text: 'BAJA' };
     await expect(useCase.execute(reply)).resolves.toEqual({
       isOptOut: true,
       optedOut: [],
     });
-    repo.regions = ['CO', 'VE'];
+    repo.regions = ['ES', 'VE'];
     await expect(useCase.execute(reply)).resolves.toEqual({
       isOptOut: true,
       optedOut: [PEDRO],
@@ -357,7 +358,7 @@ describe('Baja de recordatorios por mensaje entrante (DX-128, para DX-126)', () 
   // La librería no da por válidos estos números guardados (un 0 que el
   // número no lleva); la lectura de antes sí los casaba (R8).
   it.each([
-    ['CO', '03211234567', '573211234567'],
+    ['PT', '0912345678', '351912345678'],
     ['ES', '0612345678', '34612345678'],
     ['US', '02015550123', '12015550123'],
     ['MX', '02221234567', '522221234567'],
@@ -405,13 +406,13 @@ describe('Baja de recordatorios por mensaje entrante (DX-128, para DX-126)', () 
     const regions = jest.spyOn(repo, 'liveLocationPhoneRegions');
     await useCase.execute({
       tenantId: TENANT,
-      fromPhone: '573009999999',
+      fromPhone: '584129999999',
       text: 'BAJA',
     });
     expect(regions).not.toHaveBeenCalled();
     await useCase.execute({
       tenantId: TENANT,
-      fromPhone: '573101234567',
+      fromPhone: '584141234567',
       text: 'BAJA',
     });
     expect(regions).toHaveBeenCalledTimes(1);
@@ -430,11 +431,11 @@ describe('Baja de recordatorios por mensaje entrante (DX-128, para DX-126)', () 
   });
 
   it('an opt-out reply from a range the library does not know still matches an identical stored +number', async () => {
-    repo.addPatient(PEDRO, { phone: '+57 000 000 0000' });
+    repo.addPatient(PEDRO, { phone: '+58 000 000 0000' });
     await expect(
       useCase.execute({
         tenantId: TENANT,
-        fromPhone: '570000000000',
+        fromPhone: '580000000000',
         text: 'BAJA',
       }),
     ).resolves.toEqual({ isOptOut: true, optedOut: [PEDRO] });
@@ -442,6 +443,7 @@ describe('Baja de recordatorios por mensaje entrante (DX-128, para DX-126)', () 
 
   it('an opt-out reply matches either reading of an ambiguous stored number', async () => {
     // Con la región de la sede, se lee como +58 412… y como +84 12…
+    repo.regions = ['TH'];
     repo.addPatient(PEDRO, { phone: '0058 412 1234567' });
     await expect(
       useCase.execute({
@@ -461,7 +463,7 @@ describe('Baja de recordatorios por mensaje entrante (DX-128, para DX-126)', () 
   });
 
   it('un móvil desconocido o sin dígitos suficientes no hace nada', async () => {
-    for (const fromPhone of ['573009999999', '123', '']) {
+    for (const fromPhone of ['584129999999', '123', '']) {
       await expect(
         useCase.execute({ tenantId: TENANT, fromPhone, text: 'BAJA' }),
       ).resolves.toEqual({ isOptOut: true, optedOut: [] });

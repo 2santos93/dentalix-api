@@ -18,7 +18,7 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
 
@@ -431,14 +431,14 @@ describe('Plantillas de indicaciones postoperatorias (e2e, DX-222)', () => {
         api().patch(`/api/v1/locations/${location.id}`),
         clinic.adminToken,
       )
-        .send({ phone: ' +57 601 555 0101 ' })
+        .send({ phone: ' +58 212 555 0101 ' })
         .expect(200);
-      expect((res.body as { phone: string }).phone).toBe('+57 601 555 0101');
+      expect((res.body as { phone: string }).phone).toBe('+58 212 555 0101');
       const again = await as(api().get('/api/v1/locations'), reception).expect(
         200,
       );
       expect((again.body as Array<{ phone: string }>)[0].phone).toBe(
-        '+57 601 555 0101',
+        '+58 212 555 0101',
       );
 
       const tooLong = await as(
@@ -463,7 +463,7 @@ describe('Plantillas de indicaciones postoperatorias (e2e, DX-222)', () => {
     it('POST /locations acepta el teléfono al crear la sede', async () => {
       const res = await as(api().post('/api/v1/locations'), clinic.adminToken)
         .send(
-          locationBody(REGIONAL_BOGOTA_FIXTURE, {
+          locationBody(REGIONAL_CARACAS_FIXTURE, {
             name: 'Sede Sur',
             phone: '601 222 3333',
           }),

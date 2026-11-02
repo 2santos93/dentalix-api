@@ -176,7 +176,7 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
         firstName: 'Ya',
         lastName: 'Existía',
         sex: 'UNSPECIFIED',
-        phone: '3009999999',
+        phone: '4129999999',
       })
       .expect(201);
     existingId = (existing.body as { id: string }).id;
@@ -253,10 +253,10 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
   it('dry-run: totales, duplicados y errores por fila en español SIN escribir pacientes', async () => {
     const before = await livePatients();
     const bytes = csvOf([
-      'NATIONAL_ID;1.000.001;Ana;Nueva;03/05/1990;F;310 123 4567;ana@example.com;', // 2 válida
+      'NATIONAL_ID;1.000.001;Ana;Nueva;03/05/1990;F;414 123 4567;ana@example.com;', // 2 válida
       'NATIONAL_ID;1000002;Luis;Nuevo;;M;;;', // 3 válida
       'NATIONAL_ID;1000001;Ana;Repetida;;;;;', // 4 repetida en el archivo
-      'NATIONAL_ID;900900;Nombre;Distinto;1980-01-01;F;3001111111;ya@example.com;nota', // 5 ya existe
+      'NATIONAL_ID;900900;Nombre;Distinto;1980-01-01;F;4121111111;ya@example.com;nota', // 5 ya existe
       'NATIONAL_ID;700700;Choque;Tipo;;;;;', // 6 mismo nº con otro tipo
       ';;;SinNombre;31/02/1990;Q;abc;=HYPERLINK("http://x");', // 7 errores
       'NATIONAL_ID;1000003;Eva;Nueva;;;;;', // 8 válida
@@ -304,7 +304,7 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
     ]);
     expect(firstBatch.preview[0].data).toMatchObject({
       docNumber: '1000001',
-      phone: '+573101234567',
+      phone: '+584141234567',
     });
     expect(await livePatients()).toBe(before);
     const [event] = await auditOf(firstBatch.id);
@@ -418,7 +418,7 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
     expect(existing).toMatchObject({
       firstName: 'Ya',
       lastName: 'Existía',
-      phone: '3009999999',
+      phone: '4129999999',
       email: 'ya@example.com',
       sex: 'F',
       notes: 'nota',
@@ -534,7 +534,7 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
       csvOf([
         'NATIONAL_ID;2000001;Nuevo;Uno;;;;;',
         'NATIONAL_ID;2000002;Nuevo;Dos;;;;;',
-        'NATIONAL_ID;800800;X;Y;1970-07-07;;3105550000;relleno@example.com;',
+        'NATIONAL_ID;800800;X;Y;1970-07-07;;4145550000;relleno@example.com;',
       ]),
       'segundo.csv',
     ).expect(201);
@@ -626,7 +626,7 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
         'Hoja',
         'Excel',
         { date: 32874 },
-        3101234567,
+        4141234567,
       ],
     ]);
     const res = await as(api().post('/api/v1/patient-imports'), a.adminToken)
@@ -640,7 +640,7 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
     expect((res.body as Batch).preview[0].data).toMatchObject({
       docNumber: '3000001',
       birthDate: '1990-01-01',
-      phone: '+573101234567',
+      phone: '+584141234567',
     });
   });
 

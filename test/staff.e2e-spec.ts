@@ -9,7 +9,7 @@ import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   registerBody as clinicRegisterBody,
 } from './support/location-fixtures';
 
@@ -53,7 +53,7 @@ async function registerAndLogin(
 }> {
   const register = await registerVerified(
     app,
-    clinicRegisterBody(REGIONAL_BOGOTA_FIXTURE, {
+    clinicRegisterBody(REGIONAL_CARACAS_FIXTURE, {
       clinicName: opts.clinicName,
       subdomain: opts.subdomain,
       email: opts.email,

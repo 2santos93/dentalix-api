@@ -11,7 +11,7 @@ import {
 } from '../src/modules/prescriptions/application/use-cases/prescriptions.use-cases';
 import { computePrescriptionHash } from '../src/modules/prescriptions/domain/prescription-hash';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -38,7 +38,7 @@ async function seedClinic(subdomain: string): Promise<Seeded> {
     data: { name: subdomain, subdomain },
   });
   const location = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId: tenant.id,
       name: 'Sede',
     }),
