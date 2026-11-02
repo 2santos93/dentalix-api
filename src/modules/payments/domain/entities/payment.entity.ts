@@ -1,3 +1,4 @@
+import type { PaymentAdjustmentLine } from '../payment-adjustment-line';
 import { PaymentMethod } from '@prisma/client';
 import type {
   FrozenExchangeRate,
@@ -72,4 +73,11 @@ export interface Payment {
   frozenRate: FrozenExchangeRate | null;
   /** DX-375: `exchangeRateStatus` de las dos de arriba. */
   exchangeRateStatus: PaymentExchangeRateStatus;
+  /**
+   * DX-516: los ajustes por medio de pago congelados en el abono (vacío sin
+   * ajustes) y lo cobrado: importe + impuestos + recargos − descuentos. Sin
+   * ajustes, lo cobrado es el importe.
+   */
+  adjustments: PaymentAdjustmentLine[];
+  collectedAmount: number;
 }

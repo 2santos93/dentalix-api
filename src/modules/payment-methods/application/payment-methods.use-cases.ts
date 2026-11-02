@@ -5,13 +5,39 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import type { PaymentMethodKind } from '@prisma/client';
-import type { ClinicPaymentMethodEntity } from '../domain/payment-method.entity';
+import type {
+  PaymentAdjustmentCalculation,
+  PaymentAdjustmentType,
+  PaymentMethodKind,
+} from '@prisma/client';
+import type {
+  ClinicPaymentMethodEntity,
+  PaymentMethodAdjustmentEntity,
+} from '../domain/payment-method.entity';
 import {
   PAYMENT_METHOD_REPOSITORY,
+  type PaymentAdjustmentWriteInput,
+  type PaymentAdjustmentWriteResult,
   type PaymentMethodRepository,
   type PaymentMethodWriteInput,
 } from '../domain/ports/payment-method-repository.port';
+import type { AuditRequestContext } from '../../audit/domain/audit-request-context';
+import {
+  CURRENCY_DIGITS_CATALOG,
+  type CurrencyDigitsCatalog,
+} from '../../../shared/money/currency-digits';
+import {
+  ADJUSTMENT_FIXED_MESSAGE,
+  ADJUSTMENT_LABEL_TAKEN_MESSAGE,
+  ADJUSTMENT_NOT_FOUND_MESSAGE,
+  ADJUSTMENT_PERCENT_MESSAGE,
+  ADJUSTMENT_SHAPE_MESSAGE,
+  ADJUSTMENTS_LIMIT_MESSAGE,
+  adjustmentFixedDigitsMessage,
+  adjustmentLabelError,
+  fitsCurrencyDigits,
+  isValidAdjustmentPercent,
+} from '../domain/payment-adjustments';
 import {
   DUPLICATE_PAYMENT_METHOD_NAME_MESSAGE,
   INITIAL_KIND_LOCKED_MESSAGE,
@@ -110,5 +136,180 @@ export class UpdatePaymentMethodUseCase {
     const updated = await this.repo.update(id, data, userId);
     if (!updated) throw new NotFoundException(PAYMENT_METHOD_NOT_FOUND_MESSAGE);
     return updated;
+  }
+}
+
+/** DX-516: lo que llega del cliente para un ajuste (alta: todo; cambio: parte). */
+export interface PaymentAdjustmentInput {
+  type: PaymentAdjustmentType;
+  label: string;
+  calculation: PaymentAdjustmentCalculation;
+  percent?: number | null;
+  fixedAmount?: number | null;
+  fixedCurrency?: string | null;
+  active?: boolean;
+}
+
+/**
+ * DX-516: valida la forma completa de un ajuste (etiqueta, porcentaje o
+ * importe fijo con su moneda del catálogo y sus decimales de redondeo).
+ */
+async function validAdjustment(
+  input: PaymentAdjustmentInput,
+  digits: CurrencyDigitsCatalog,
+): Promise<PaymentAdjustmentWriteInput> {
+  const labelError = adjustmentLabelError(input.label);
+  if (labelError !== null) throw new BadRequestException(labelError);
+  const label = input.label.trim();
+  const active = input.active ?? true;
+  if (input.calculation === 'PERCENT') {
+    if (
+      (input.fixedAmount ?? null) !== null ||
+      (input.fixedCurrency ?? null) !== null
+    ) {
+      throw new BadRequestException(ADJUSTMENT_SHAPE_MESSAGE);
+    }
+    if (!isValidAdjustmentPercent(input.percent)) {
+      throw new BadRequestException(ADJUSTMENT_PERCENT_MESSAGE);
+    }
+    return {
+      type: input.type,
+      label,
+      calculation: 'PERCENT',
+      percent: input.percent,
+      fixedAmount: null,
+      fixedCurrency: null,
+      active,
+    };
+  }
+  if ((input.percent ?? null) !== null) {
+    throw new BadRequestException(ADJUSTMENT_SHAPE_MESSAGE);
+  }
+  const amount = input.fixedAmount;
+  const currency = input.fixedCurrency?.trim().toUpperCase() ?? '';
+  if (
+    typeof amount !== 'number' ||
+    !Number.isFinite(amount) ||
+    amount <= 0 ||
+    currency === ''
+  ) {
+    throw new BadRequestException(ADJUSTMENT_FIXED_MESSAGE);
+  }
+  const table = await digits.table([currency]);
+  if (!table.has(currency)) {
+    throw new BadRequestException(`Moneda desconocida: ${currency}`);
+  }
+  const rounding = table.roundingDigits(currency);
+  if (!fitsCurrencyDigits(amount, rounding)) {
+    throw new BadRequestException(
+      adjustmentFixedDigitsMessage(currency, rounding),
+    );
+  }
+  return {
+    type: input.type,
+    label,
+    calculation: 'FIXED',
+    percent: null,
+    fixedAmount: amount,
+    fixedCurrency: currency,
+    active,
+  };
+}
+
+function adjustmentResult(result: PaymentAdjustmentWriteResult) {
+  if (result.ok) return result.adjustment;
+  switch (result.reason) {
+    case 'METHOD_NOT_FOUND':
+      throw new NotFoundException(PAYMENT_METHOD_NOT_FOUND_MESSAGE);
+    case 'NOT_FOUND':
+      throw new NotFoundException(ADJUSTMENT_NOT_FOUND_MESSAGE);
+    case 'LABEL_TAKEN':
+      throw new ConflictException(ADJUSTMENT_LABEL_TAKEN_MESSAGE);
+    case 'LIMIT':
+      throw new ConflictException(ADJUSTMENTS_LIMIT_MESSAGE);
+  }
+}
+
+/** DX-516: alta de un ajuste en un medio (solo ADMIN; auditado en el repositorio). */
+@Injectable()
+export class CreatePaymentAdjustmentUseCase {
+  constructor(
+    @Inject(PAYMENT_METHOD_REPOSITORY)
+    private readonly repo: PaymentMethodRepository,
+    @Inject(CURRENCY_DIGITS_CATALOG)
+    private readonly digits: CurrencyDigitsCatalog,
+  ) {}
+
+  async execute(
+    paymentMethodId: string,
+    input: PaymentAdjustmentInput,
+    audit: AuditRequestContext,
+  ): Promise<PaymentMethodAdjustmentEntity> {
+    const data = await validAdjustment(input, this.digits);
+    return adjustmentResult(
+      await this.repo.createAdjustment(paymentMethodId, data, audit),
+    );
+  }
+}
+
+/**
+ * DX-516: cambio de un ajuste (también desactivarlo). Lo que no llega se
+ * conserva; la forma resultante se valida entera. Cambiar el cálculo de
+ * porcentaje a fijo (o al revés) limpia el otro campo.
+ */
+@Injectable()
+export class UpdatePaymentAdjustmentUseCase {
+  constructor(
+    @Inject(PAYMENT_METHOD_REPOSITORY)
+    private readonly repo: PaymentMethodRepository,
+    @Inject(CURRENCY_DIGITS_CATALOG)
+    private readonly digits: CurrencyDigitsCatalog,
+  ) {}
+
+  async execute(
+    paymentMethodId: string,
+    adjustmentId: string,
+    input: Partial<PaymentAdjustmentInput>,
+    audit: AuditRequestContext,
+  ): Promise<PaymentMethodAdjustmentEntity> {
+    const method = await this.repo.findById(paymentMethodId);
+    if (!method) throw new NotFoundException(PAYMENT_METHOD_NOT_FOUND_MESSAGE);
+    const current = method.adjustments.find((a) => a.id === adjustmentId);
+    if (!current) throw new NotFoundException(ADJUSTMENT_NOT_FOUND_MESSAGE);
+    const calculation = input.calculation ?? current.calculation;
+    const switched = calculation !== current.calculation;
+    const merged: PaymentAdjustmentInput = {
+      type: input.type ?? current.type,
+      label: input.label ?? current.label,
+      calculation,
+      percent:
+        input.percent !== undefined
+          ? input.percent
+          : switched
+            ? null
+            : current.percent,
+      fixedAmount:
+        input.fixedAmount !== undefined
+          ? input.fixedAmount
+          : switched
+            ? null
+            : current.fixedAmount,
+      fixedCurrency:
+        input.fixedCurrency !== undefined
+          ? input.fixedCurrency
+          : switched
+            ? null
+            : current.fixedCurrency,
+      active: input.active ?? current.active,
+    };
+    const data = await validAdjustment(merged, this.digits);
+    return adjustmentResult(
+      await this.repo.updateAdjustment(
+        paymentMethodId,
+        adjustmentId,
+        data,
+        audit,
+      ),
+    );
   }
 }

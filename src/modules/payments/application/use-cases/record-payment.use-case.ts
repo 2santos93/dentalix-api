@@ -246,6 +246,7 @@ export class RecordPaymentUseCase {
       reference: payMethod.reference,
       referenceNormalized: payMethod.referenceNormalized,
       duplicateReferenceReason: payMethod.duplicateReferenceReason,
+      adjustments: payMethod.adjustments,
       notes: input.notes,
       createdById,
       idempotencyKey: key,
@@ -293,7 +294,11 @@ export class RecordPaymentUseCase {
     currency: string,
     paidAt: Date | CivilPaidDay,
   ): Promise<PreparedPaymentLine> {
-    const method = await this.paymentMethodGate.resolve(input, paidAt);
+    // DX-516: con los ajustes del medio sobre el importe de ESTA línea.
+    const method = await this.paymentMethodGate.resolve(input, paidAt, {
+      amount: input.amount,
+      currency,
+    });
 
     // DX-375, DX-136 y DX-051 (R4): fuera de la transacción del abono (la
     // tasa puede pedir un proveedor externo), UNA cotización con la fuente de

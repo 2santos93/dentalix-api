@@ -35,6 +35,7 @@ import { InvitationsModule } from './modules/invitations/invitations.module';
 import { DomainsModule } from './modules/domains/domains.module';
 import { PublicBrandingModule } from './modules/public-branding/public-branding.module';
 import { ExchangeModule } from './modules/exchange/exchange.module';
+import { ClinicSettingsModule } from './modules/clinic-settings/clinic-settings.module';
 import { ReferenceModule } from './modules/reference/reference.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { PaymentPlansModule } from './modules/payment-plans/payment-plans.module';
@@ -74,6 +75,7 @@ import { RemindersModule } from './modules/reminders/reminders.module';
 import { SecurityModule } from './shared/security/security.module';
 import { SupportAccessesModule } from './modules/support-accesses/support-accesses.module';
 import { WorkQueuesModule } from './modules/work-queues/work-queues.module';
+import { RecallModule } from './modules/recall/recall.module';
 import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
 
 @Module({
@@ -119,6 +121,8 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     StaffModule,
     DomainsModule,
     PublicBrandingModule,
+    // DX-019: Ajustes › Datos de la clínica (marca, datos fiscales y logo).
+    ClinicSettingsModule,
     ExchangeModule,
     ReferenceModule,
     PaymentsModule,
@@ -172,6 +176,7 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     // DX-503: «Mi día», los recuentos de las listas de trabajo por rol y sede.
     // El ÚLTIMO: importa seis módulos y, si fuera antes, adelantaría el registro
     // de sus rutas (y cambiaría el orden del OpenAPI sin cambiar nada más).
+    RecallModule,
     WorkQueuesModule,
   ],
   controllers: [AppController, HealthController],

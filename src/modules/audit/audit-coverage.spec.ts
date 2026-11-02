@@ -52,6 +52,10 @@ import { ProductionByProcedureController } from '../reports/presentation/product
 import { ClosingQueueController } from '../closing-queue/presentation/closing-queue.controller';
 import { ContingencyAgendaController } from '../contingency-agenda/presentation/contingency-agenda.controller';
 import { CollectionsController } from '../collections/presentation/collections.controller';
+import {
+  PatientRecallsController,
+  RecallController,
+} from '../recall/presentation/recall.controller';
 import { CashSessionsController } from '../cash-sessions/presentation/cash-sessions.controller';
 import { ScheduleBlocksController } from '../schedule-blocks/presentation/schedule-blocks.controller';
 import { ChairsController } from '../chairs/presentation/chairs.controller';
@@ -1159,6 +1163,25 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: { param: 'locationId' },
     reason: 'CONTINGENCY_AGENDA_NIGHTLY_DOWNLOADED',
   },
+  // DX-015: recall. La lista (con teléfonos) se audita sin paciente; el
+  // contacto, sin la nota; fijar o pausar el recall, con el paciente.
+  'GET /recall/due': { action: 'VIEW', resource: 'PATIENT_RECALL' },
+  'POST /recall/:recallId/contacts': {
+    action: 'CREATE',
+    resource: 'RECALL_CONTACT',
+    resourceId: RES,
+    patient: { response: 'patientId' },
+  },
+  'GET /patients/:id/recalls': {
+    action: 'VIEW',
+    resource: 'PATIENT_RECALL',
+    patient: { param: 'id' },
+  },
+  'PUT /patients/:id/recalls/:kind': {
+    action: 'UPDATE',
+    resource: 'PATIENT_RECALL',
+    patient: { param: 'id' },
+  },
   // DX-150: cobranza. La nota se audita sin su texto (solo los nombres de los
   // campos); el cambio de estado del compromiso lo audita SettlePaymentPromises.
   'POST /patients/:id/collection-notes': {
@@ -1551,6 +1574,12 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // DX-517: CLINIC_SETTINGS CURRENCY_TEXTS con el antes y el después
   // («VES=Bs.»), en la transacción del cambio; sin evento si no cambia.
   'PUT /exchange/currency-texts': 'currency-texts.e2e-spec.ts',
+  // DX-019: CLINIC_SETTINGS CLINIC_PROFILE (datos de la clínica) y
+  // CLINIC_LOGO (clave del logo) con el antes y el después, en la
+  // transacción del cambio; sin evento si nada cambia.
+  'PATCH /clinic/settings': 'clinic-settings.e2e-spec.ts',
+  'POST /clinic/settings/logo': 'clinic-settings.e2e-spec.ts',
+  'DELETE /clinic/settings/logo': 'clinic-settings.e2e-spec.ts',
   // DX-324: CLINIC_SETTINGS con PRESCRIPTION_SETTINGS, los campos cambiados
   // y el antes y el después en códigos RX; sin evento si nada cambió.
   'PUT /prescriptions/settings':
@@ -1602,6 +1631,24 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
     'change-my-password.use-case.spec.ts, me-profile-repo.int-spec.ts y staff-access-audit.e2e-spec.ts',
   // DX-359: plataforma. MFA_ENROLLMENT_STARTED y MFA_ENABLED en
   // `platform_audit_events`, sin secreto, código ni URI.
+  // DX-021: verificación en dos pasos de los miembros, en la auditoría de la
+  // clínica, sin secreto, URI ni códigos (TOTP o de recuperación).
+  'POST /auth/login/mfa':
+    'complete-mfa-login.use-case (LOGIN MFA_TOTP / MFA_RECOVERY_CODE, LOGIN_FAILED INVALID_MFA_CODE) y user-mfa.e2e-spec.ts',
+  'POST /auth/login/mfa/enrollment':
+    'user-mfa.service (UPDATE STAFF_MEMBER MFA_ENROLLMENT_STARTED) y user-mfa.e2e-spec.ts',
+  'POST /auth/login/mfa/enrollment/confirm':
+    'user-mfa.service (MFA_ENABLED, misma transacción) + LOGIN MFA_ENROLLED; user-mfa.e2e-spec.ts',
+  'POST /me/mfa/enrollment':
+    'user-mfa.service (MFA_ENROLLMENT_STARTED) y user-mfa.e2e-spec.ts',
+  'POST /me/mfa/enrollment/confirm':
+    'user-mfa.service.spec.ts (MFA_ENABLED, misma transacción) y user-mfa.e2e-spec.ts',
+  'POST /me/mfa/disable':
+    'user-mfa.service.spec.ts (MFA_DISABLED, misma transacción) y user-mfa.e2e-spec.ts',
+  'POST /me/mfa/recovery-codes':
+    'user-mfa.service.spec.ts (MFA_RECOVERY_CODES_REGENERATED) y user-mfa.e2e-spec.ts',
+  'PUT /security-policy':
+    'user-mfa.service.spec.ts (CLINIC_SETTINGS MFA_POLICY con antes/después) y user-mfa.e2e-spec.ts',
   'POST /platform/mfa/enrollment':
     'platform-mfa.use-case.spec.ts y staff-access-audit.e2e-spec.ts',
   'POST /platform/mfa/enrollment/confirm':
@@ -1629,6 +1676,13 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   'POST /appointment-types': 'config-audit.e2e-spec.ts',
   'PATCH /appointment-types/:id': 'config-audit.e2e-spec.ts',
   'DELETE /appointment-types/:id': 'config-audit.e2e-spec.ts',
+  // DX-516: ajustes por medio de pago (solo ADMIN): UPDATE/CREATE
+  // PAYMENT_METHOD con PAYMENT_METHOD_ADJUSTMENT_CREATED/UPDATED y el antes y
+  // el después, en la transacción del cambio.
+  'POST /payment-methods/:id/adjustments':
+    'payment-method-adjustments.e2e-spec.ts',
+  'PATCH /payment-methods/:id/adjustments/:adjustmentId':
+    'payment-method-adjustments.e2e-spec.ts',
   'POST /payers': 'config-audit.e2e-spec.ts',
   'PATCH /payers/:id': 'config-audit.e2e-spec.ts',
   'DELETE /payers/:id': 'config-audit.e2e-spec.ts',
@@ -1749,6 +1803,8 @@ const CONTROLLERS: Type[] = [
   ClosingQueueController,
   ContingencyAgendaController,
   CollectionsController,
+  RecallController,
+  PatientRecallsController,
   CashSessionsController,
   ExpenseReportsController,
   ExpensesController,

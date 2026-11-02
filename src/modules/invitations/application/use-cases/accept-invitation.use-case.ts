@@ -17,6 +17,7 @@ import type {
   AcceptUserResolution,
   InvitationRepository,
 } from '../../domain/ports/invitation-repository.port';
+import { UserMfaService } from '../../../auth/application/user-mfa.service';
 import { RecordAuditEventUseCase } from '../../../audit/application/record-audit-event.use-case';
 import { PasswordService } from '../../../../shared/crypto/password.service';
 import { TokenService } from '../../../../shared/crypto/token.service';
@@ -65,10 +66,12 @@ function assertNewPassword(password: string): void {
   }
 }
 
-export interface AcceptInvitationResult {
-  accessToken: string;
-  refreshToken: string;
-}
+/**
+ * El par de sesión o, DX-021, `loginRequired`: la invitación quedó aceptada,
+ * pero la cuenta necesita segundo factor y la sesión se abre en /login.
+ */
+export type AcceptInvitationResult =
+  { accessToken: string; refreshToken: string } | { loginRequired: true };
 
 /**
  * Caso de uso PÚBLICO (sin auth): quien acepta todavía no tiene sesión. El
@@ -89,6 +92,7 @@ export class AcceptInvitationUseCase {
     private readonly tokens: TokenService,
     private readonly tenantContext: TenantContextService,
     private readonly audit: RecordAuditEventUseCase,
+    private readonly mfa: UserMfaService,
   ) {}
 
   async execute(input: AcceptInvitationInput): Promise<AcceptInvitationResult> {
@@ -215,6 +219,13 @@ export class AcceptInvitationUseCase {
         userAgent: input.meta?.userAgent ?? null,
         metadata: { reason: ACCOUNT_CLAIM_AUDIT_REASON },
       });
+    }
+
+    // DX-021: aceptar una invitación no salta el segundo factor. Con el MFA
+    // activo u obligatorio (ADMIN de una clínica que lo exige, superadmin) la
+    // membresía queda creada, pero la sesión se abre por /login.
+    if (await this.mfa.needsSecondFactor(userId, tenantId, invitation.role)) {
+      return { loginRequired: true };
     }
 
     // El rol viene de la invitación (`invitation.role`), NUNCA de `input` —

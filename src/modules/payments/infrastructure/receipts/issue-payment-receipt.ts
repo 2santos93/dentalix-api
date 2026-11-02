@@ -8,6 +8,7 @@ import {
 } from '../../domain/receipt-snapshot';
 import { formatReceiptNumber } from '../../domain/receipt-number';
 import { effectiveReceiptLegend } from '../../domain/receipt-settings';
+import type { PaymentAdjustmentLine } from '../../domain/payment-adjustment-line';
 import { readDocumentTypeNames } from '../../../patients/infrastructure/repositories/prisma-document-type-names.repository';
 
 /** El abono recién insertado, en la misma transacción. */
@@ -28,6 +29,8 @@ export interface ReceiptPaymentRow {
   paidAt: Date;
   paidOn: string;
   createdById: string | null;
+  /** DX-516: los ajustes por medio de pago congelados en el abono. */
+  adjustments?: PaymentAdjustmentLine[];
   /**
    * DX-390: el cobro dividido cuyo recibo único emite su línea 1: todas sus
    * líneas y la moneda del plan del total.
@@ -80,6 +83,11 @@ export async function issuePaymentReceipt(
           receiptTitle: true,
           receiptLegend: true,
           currencyTexts: true,
+          // DX-019: datos fiscales de la clínica, que la foto congela.
+          legalName: true,
+          taxId: true,
+          taxIdLabel: true,
+          fiscalAddress: true,
         },
       }),
       readDocumentTypeNames(tx, payment.tenantId),
@@ -129,13 +137,15 @@ export async function issuePaymentReceipt(
 
   const snapshot = buildReceiptSnapshot(
     {
-      // DX-019 añadirá razón social, identificador fiscal y dirección fiscal de la clínica;
-      // hoy no existen y el recibo dice «Datos fiscales pendientes».
+      // DX-019: razón social, identificador (con el nombre que le da la
+      // clínica) y dirección fiscal. Sin razón social o sin identificador, el
+      // recibo dice «Datos fiscales pendientes».
       clinic: {
         name: tenant.name,
-        legalName: null,
-        taxId: null,
-        address: null,
+        legalName: tenant.legalName,
+        taxId: tenant.taxId,
+        taxIdLabel: tenant.taxIdLabel,
+        address: tenant.fiscalAddress,
       },
       location: {
         id: location.id,
@@ -159,6 +169,7 @@ export async function issuePaymentReceipt(
         reference: payment.reference ?? null,
         paidAt: payment.paidAt,
         paidOn: payment.paidOn,
+        adjustments: payment.adjustments,
       },
       plan,
       openingBalance: opening

@@ -299,6 +299,7 @@ describe('receta segura: emisión con anamnesis real (DX-300, int)', () => {
       over: Partial<Prisma.PrescriptionUncheckedCreateInput>,
     ): Prisma.PrescriptionUncheckedCreateInput => ({
       ...copy,
+      clinicFiscal: undefined,
       allergyMatches: [],
       ...over,
     });

@@ -1,3 +1,4 @@
+import { EMPTY_CLINIC_FISCAL } from '../../../../shared/clinic/clinic-fiscal';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ClinicRole } from '@prisma/client';
 import {
@@ -21,7 +22,7 @@ const CREATED_TODAY = new Date('2026-03-01T13:00:00.000Z');
 
 function data(): AccountStatementData {
   return {
-    clinic: { name: 'Clínica Uno', logoUrl: null },
+    clinic: { name: 'Clínica Uno', logoUrl: null, fiscal: EMPTY_CLINIC_FISCAL },
     patient: {
       id: 'p-1',
       firstName: 'Ana',

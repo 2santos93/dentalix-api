@@ -3,6 +3,10 @@
  * v2 sellan el país de la plantilla legada; la v3 (receta única) no lo lleva.
  */
 import { createHash } from 'node:crypto';
+import {
+  clinicFiscalHashFields,
+  type ClinicFiscalData,
+} from '../../../shared/clinic/clinic-fiscal';
 import type { AllergyMatch } from './allergy-match';
 import type { LegacyPrescriptionCountry } from './legacy-prescription';
 import type { SafetyAlert } from './prescription-safety';
@@ -64,6 +68,11 @@ interface PrescriptionHashContent {
   professionalSpecialty?: string | null;
   patientAgeYears?: number | null;
   patientWeightKg?: number | null;
+  /**
+   * DX-019: datos fiscales congelados al emitir. `null` o ausente = sin ellos,
+   * y la receta se sella en v3, así los hashes guardados siguen validando.
+   */
+  clinicFiscal?: ClinicFiscalData | null;
 }
 
 /**
@@ -234,8 +243,9 @@ function singleFormatFields(
       'Una receta única se sella siempre con printQuantityInWords (true o false)',
     );
   }
-  return [
-    'dentalix-prescription-v3',
+  const fiscal = input.clinicFiscal ?? null;
+  const fields = [
+    fiscal ? 'dentalix-prescription-v4' : 'dentalix-prescription-v3',
     input.issuedAt.toISOString(),
     input.dispensationDate,
     input.validUntil,
@@ -278,4 +288,5 @@ function singleFormatFields(
     safetyAlertFields(input.safetyAlerts),
     input.safetyOverrideReason,
   ];
+  return fiscal ? [...fields, clinicFiscalHashFields(fiscal)] : fields;
 }

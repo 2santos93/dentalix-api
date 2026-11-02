@@ -3334,6 +3334,16 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
    */
   const COVERED_ELSEWHERE: readonly IsolationExemption[] = [
     {
+      spec: 'recall.e2e-spec.ts',
+      checks:
+        'B → 404 al leer y al fijar el recall del paciente de A y al registrar un contacto en el recall de A; ni el recall de A ni los contactos cambian (DX-015)',
+      routes: [
+        'GET /patients/:id/recalls',
+        'PUT /patients/:id/recalls/:kind',
+        'POST /recall/:recallId/contacts',
+      ],
+    },
+    {
       spec: 'anesthesia.e2e-spec.ts',
       checks:
         'B → 404 en la ficha del paciente de A; y en sentido inverso, A → 404 al leer la anestesia de la evolución de B, al registrar con la evolución de B y al editar el anestésico de B',
@@ -3377,6 +3387,15 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       spec: 'payment-methods.e2e-spec.ts',
       checks: 'B → 404 al editar (desactivar) el medio de pago de A (DX-377)',
       routes: ['PATCH /payment-methods/:id'],
+    },
+    {
+      spec: 'payment-method-adjustments.e2e-spec.ts',
+      checks:
+        'B → 404 al añadir un ajuste al medio de A y al editar el ajuste de A, sin cambiar nada en A (DX-516)',
+      routes: [
+        'POST /payment-methods/:id/adjustments',
+        'PATCH /payment-methods/:id/adjustments/:adjustmentId',
+      ],
     },
     {
       spec: 'reminder-opt-out.e2e-spec.ts',

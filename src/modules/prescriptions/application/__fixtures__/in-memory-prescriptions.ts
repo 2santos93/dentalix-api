@@ -1,3 +1,4 @@
+import { EMPTY_CLINIC_FISCAL } from '../../../../shared/clinic/clinic-fiscal';
 import { PrescriptionStatus } from '@prisma/client';
 import type {
   Prescription,
@@ -50,6 +51,7 @@ export function makeIssuer(
       ...overrides,
     },
     clinicName: 'Clínica Demo',
+    clinicFiscal: EMPTY_CLINIC_FISCAL,
     settings: { ...TEST_PRESCRIPTION_SETTINGS, ...extra.settings },
     phase1: { country: 'CO' },
     professional: {

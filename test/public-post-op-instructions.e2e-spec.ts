@@ -179,7 +179,7 @@ describe('Indicaciones postoperatorias por enlace público (e2e, DX-222)', () =>
     expect(view).toEqual({
       clinic: {
         name: 'Clinica dx222-publica-a',
-        logoUrl: tenant.logoUrl,
+        logoUrl: tenant.logoKey,
         primaryColor: tenant.primaryColor,
       },
       locationPhone: '601 555 0101',

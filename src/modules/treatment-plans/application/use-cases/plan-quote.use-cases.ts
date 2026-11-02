@@ -127,6 +127,7 @@ export function composeQuoteContent(
       patientId: source.plan.patientId,
       currency: source.plan.currency,
       clinicName: source.clinic.name,
+      clinicFiscal: source.clinic.fiscal,
       location: {
         id: source.location.id,
         name: source.location.name,

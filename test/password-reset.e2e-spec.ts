@@ -186,7 +186,10 @@ describe('Recuperar la contraseña (e2e, DX-010)', () => {
     expect(unknown.status).toBe(202);
     expect(unknown.body).toEqual({ message: FORGOT_PASSWORD_MESSAGE });
 
-    await waitUntil(() => mailer.sent.length >= 1);
+    // El 202 no espera al trabajo: se aguarda a los dos correos que deben
+    // salir (uno solo aquí, bajo carga, es la carrera que daba el intermitente)
+    // y un margen por si saliera alguno de más.
+    await waitUntil(() => mailer.sent.length >= 2);
     await new Promise((resolve) => setTimeout(resolve, 200));
     await dispatcher.whenIdle();
     // Solo la miembro activa recibe el correo (dos veces, la segunda en

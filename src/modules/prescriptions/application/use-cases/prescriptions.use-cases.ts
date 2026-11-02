@@ -1,3 +1,4 @@
+import { clinicFiscalToFreeze } from '../../../../shared/clinic/clinic-fiscal';
 import {
   BadRequestException,
   ConflictException,
@@ -350,6 +351,7 @@ export class IssuePrescriptionUseCase {
       professionalSpecialty: trimmedOrNull(issuer.professional.specialty),
       professionalEmail: issuer.professional.email,
       clinicName: issuer.clinicName,
+      clinicFiscal: clinicFiscalToFreeze(issuer.clinicFiscal),
       locationName: issuer.location.name,
       locationAddress: issuer.location.address,
       notes: trimmedOrNull(input.notes),

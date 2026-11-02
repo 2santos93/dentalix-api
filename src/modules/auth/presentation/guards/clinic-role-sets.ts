@@ -441,3 +441,13 @@ export const CONTINGENCY_AGENDA_ROLES: ClinicRole[] = [
   ClinicRole.ADMIN,
   ClinicRole.RECEPTION,
 ];
+
+// Recall (DX-015): la lista de llamada y sus contactos son trabajo del
+// mostrador: ADMIN y RECEPTION. Fijar el intervalo o pausar el recall de un
+// paciente es una decisión clínica: CLINICAL_ROLES. El bloque de la ficha lo
+// leen los cuatro roles (sin datos clínicos).
+export const RECALL_LIST_ROLES: ClinicRole[] = [
+  ClinicRole.ADMIN,
+  ClinicRole.RECEPTION,
+];
+export const RECALL_INTERVAL_ROLES: ClinicRole[] = [...CLINICAL_ROLES];

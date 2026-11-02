@@ -1,3 +1,4 @@
+import { clinicLogoPublicUrl } from '../../../../shared/storage/clinic-logo-url';
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantBrandingRepository } from '../../domain/ports/tenant-branding-repository.port';
@@ -19,7 +20,7 @@ export class PrismaTenantBrandingRepository implements TenantBrandingRepository 
       select: {
         name: true,
         primaryColor: true,
-        logoUrl: true,
+        logoKey: true,
         currencyTexts: true,
       },
     });
@@ -32,13 +33,13 @@ export class PrismaTenantBrandingRepository implements TenantBrandingRepository 
   private mapToEntity(tenant: {
     name: string;
     primaryColor: string;
-    logoUrl: string | null;
+    logoKey: string | null;
     currencyTexts: unknown;
   }): TenantBranding {
     return {
       name: tenant.name,
       primaryColor: tenant.primaryColor,
-      logoUrl: tenant.logoUrl,
+      logoUrl: clinicLogoPublicUrl(tenant.logoKey),
       currencyTexts: readCurrencyTexts(tenant.currencyTexts),
     };
   }

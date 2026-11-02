@@ -7,17 +7,33 @@ import {
 } from '../../patients/domain/document-type';
 import { docTypeFromStored } from '../../patients/domain/legacy-document-codes';
 import type { ReceiptTexts } from './receipt-settings';
+import type { PaymentAdjustmentLine } from './payment-adjustment-line';
 import type { CurrencyTexts } from '../../../shared/format/currency-text';
 import type { LocationRegionalSettings } from '../../../shared/locations/location-regional';
 
 /** Pie legal por defecto del recibo de caja (DX-136). */
 export const RECEIPT_LEGAL_NOTICE = 'Este documento no es factura';
 
-/** Datos fiscales de la clínica. Hoy solo existe el nombre (DX-019 añadirá el resto). */
+/**
+ * Datos fiscales de la clínica (DX-019), congelados al emitir. `taxIdLabel`:
+ * el nombre que la clínica da a su identificador; solo está en la foto si
+ * había identificador y nombre propio (sin él, la web pone el genérico), así
+ * que la foto de una clínica sin configurar es la de siempre.
+ */
 export interface ReceiptClinicData {
   name: string;
   legalName: string | null;
   taxId: string | null;
+  taxIdLabel?: string;
+  address: string | null;
+}
+
+/** Lo que lee el emisor de la clínica (`taxIdLabel` null = el genérico). */
+export interface ReceiptClinicInput {
+  name: string;
+  legalName: string | null;
+  taxId: string | null;
+  taxIdLabel?: string | null;
   address: string | null;
 }
 
@@ -55,6 +71,11 @@ export interface ReceiptSplitLine {
   paymentMethodName: string | null;
   reference: string | null;
   equivalentAmount: number | null;
+  /**
+   * DX-516: los ajustes por medio de pago de esta línea (su propio medio),
+   * solo si los tiene: sin ajustes, la línea es la de antes.
+   */
+  adjustments?: PaymentAdjustmentLine[];
 }
 
 /**
@@ -68,7 +89,7 @@ export interface ReceiptSplit {
 
 /** Lo que se lee, en la transacción del abono, para congelar el recibo. */
 export interface ReceiptSnapshotInput {
-  clinic: ReceiptClinicData;
+  clinic: ReceiptClinicInput;
   location: ReceiptLocationData;
   patient: {
     id: string;
@@ -89,6 +110,8 @@ export interface ReceiptSnapshotInput {
     reference?: string | null;
     paidAt: Date;
     paidOn: string;
+    /** DX-516: los ajustes congelados en el abono (vacío o ausente: ninguno). */
+    adjustments?: PaymentAdjustmentLine[];
   };
   /** Plan del abono; `null` si es contra un saldo migrado (DX-262). */
   plan: { id: string; optionLabel: string | null; createdAt: Date } | null;
@@ -154,6 +177,13 @@ export interface ReceiptSnapshot {
     reference?: string | null;
     paidAt: string;
     paidOn: string;
+    /**
+     * DX-516: los ajustes por medio de pago del abono (impuesto, recargo o
+     * descuento), con su base y su importe. AUSENTE si no tiene ninguno (la
+     * foto es la de antes) y en un cobro dividido (van en cada línea).
+     * Lo cobrado = importe + impuestos + recargos − descuentos.
+     */
+    adjustments?: PaymentAdjustmentLine[];
   };
   /** `null` en un abono contra un saldo migrado (DX-262). */
   plan: { id: string; optionLabel: string | null; createdAt: string } | null;
@@ -211,10 +241,14 @@ export function buildReceiptSnapshot(
   clinicNames: ClinicDocumentTypeNames,
 ): ReceiptSnapshot {
   const { docType, docTypeLabel } = input.patient;
+  const taxId = blankToNull(input.clinic.taxId);
+  const taxIdLabel = blankToNull(input.clinic.taxIdLabel ?? null);
   const clinic: ReceiptClinicData = {
     name: input.clinic.name,
     legalName: blankToNull(input.clinic.legalName),
-    taxId: blankToNull(input.clinic.taxId),
+    taxId,
+    // Clave opcional: sin identificador o sin nombre propio no va en la foto.
+    ...(taxId !== null && taxIdLabel !== null ? { taxIdLabel } : {}),
     address: blankToNull(input.clinic.address),
   };
   return {
@@ -243,6 +277,10 @@ export function buildReceiptSnapshot(
       reference: input.payment.reference ?? null,
       paidAt: input.payment.paidAt.toISOString(),
       paidOn: input.payment.paidOn,
+      // DX-516: solo si los tiene y no es un cobro dividido (van por línea).
+      ...(!input.split && (input.payment.adjustments?.length ?? 0) > 0
+        ? { adjustments: input.payment.adjustments }
+        : {}),
     },
     plan: input.plan
       ? {

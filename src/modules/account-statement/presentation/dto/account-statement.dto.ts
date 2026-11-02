@@ -1,3 +1,4 @@
+import { ClinicFiscalDto } from '../../../../shared/clinic/clinic-fiscal.dto';
 import { ApiProperty } from '@nestjs/swagger';
 import {
   type DocumentType,
@@ -24,6 +25,12 @@ export class AccountStatementClinicDto {
 
   @ApiProperty({ type: String, nullable: true })
   logoUrl!: string | null;
+
+  @ApiProperty({
+    type: ClinicFiscalDto,
+    description: 'DX-019: datos fiscales y de contacto.',
+  })
+  fiscal!: ClinicFiscalDto;
 }
 
 export class AccountStatementPatientDto {

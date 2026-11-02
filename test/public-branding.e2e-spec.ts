@@ -63,7 +63,7 @@ describe('Public tenant branding (e2e)', () => {
       where: { id: tenantId },
       data: {
         primaryColor: '#AA1155',
-        logoUrl: 'https://cdn.example.com/logo.png',
+        logoKey: 'https://cdn.example.com/logo.png',
       },
     });
   });

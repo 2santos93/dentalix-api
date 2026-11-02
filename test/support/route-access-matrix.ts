@@ -73,6 +73,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // Readiness con BD, sin tenant ni rate limit: loop/informes/DX-023.md.
   'GET /health/ready': PUBLIC,
   'GET /files/avatars/:name': PUBLIC,
+  // DX-019: logo de la clínica (público por diseño, re-escrito al subirlo).
+  'GET /files/logos/:name': PUBLIC,
   // URL firmada del adaptador de disco (solo desarrollo; la firma HMAC es la
   // autorización, y con S3 responde 404): loop/informes/DX-084.md.
   'GET /files/signed': PUBLIC,
@@ -89,6 +91,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // sesión ni clínica; límite propio `subdomain-check` por IP.
   'GET /public/subdomains/:slug/availability': PUBLIC,
   'POST /auth/login': PUBLIC,
+  // DX-021: segundo paso del login (se autentica con el token intermedio).
+  'POST /auth/login/mfa': PUBLIC,
+  'POST /auth/login/mfa/enrollment': PUBLIC,
+  'POST /auth/login/mfa/enrollment/confirm': PUBLIC,
   'POST /auth/refresh': PUBLIC,
   'POST /auth/logout': PUBLIC,
   // DX-010: recuperar la contraseña, en el host de la clínica.
@@ -137,6 +143,14 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /me': AUTHENTICATED,
   'PATCH /me': AUTHENTICATED,
   'POST /me/password': AUTHENTICATED,
+  // DX-021: verificación en dos pasos de la cuenta propia (sesión de clínica).
+  'GET /me/mfa': EVERY_ROLE,
+  'POST /me/mfa/enrollment': EVERY_ROLE,
+  'POST /me/mfa/enrollment/confirm': EVERY_ROLE,
+  'POST /me/mfa/disable': EVERY_ROLE,
+  'POST /me/mfa/recovery-codes': EVERY_ROLE,
+  'GET /security-policy': ADMIN_ONLY,
+  'PUT /security-policy': ADMIN_ONLY,
   'POST /me/avatar': AUTHENTICATED,
   'DELETE /me/avatar': AUTHENTICATED,
   'GET /currencies': AUTHENTICATED,
@@ -346,6 +360,11 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // DX-517: texto propio de cada moneda de la clínica, solo ADMIN.
   'GET /exchange/currency-texts': ADMIN_ONLY,
   'PUT /exchange/currency-texts': ADMIN_ONLY,
+  // DX-019: Ajustes › Datos de la clínica.
+  'GET /clinic/settings': ADMIN_ONLY,
+  'PATCH /clinic/settings': ADMIN_ONLY,
+  'POST /clinic/settings/logo': ADMIN_ONLY,
+  'DELETE /clinic/settings/logo': ADMIN_ONLY,
   'GET /exchange/manual-rates': ADMIN_ONLY,
   'POST /exchange/manual-rates': ADMIN_ONLY,
   'PUT /exchange/manual-rates/:id': ADMIN_ONLY,
@@ -477,6 +496,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /payment-methods': BILLING,
   'POST /payment-methods': ADMIN_ONLY,
   'PATCH /payment-methods/:id': ADMIN_ONLY,
+  // DX-516: ajustes por medio de pago, solo ADMIN.
+  'POST /payment-methods/:id/adjustments': ADMIN_ONLY,
+  'PATCH /payment-methods/:id/adjustments/:adjustmentId': ADMIN_ONLY,
   'DELETE /appointment-types/:id': ADMIN_ONLY,
   // DX-211: sillones de cada sede; leerlos quien agenda, escribirlos ADMIN.
   'GET /chairs': EVERY_ROLE,
@@ -642,6 +664,14 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
     'ADMIN',
     'RECEPTION',
   ),
+  // DX-015: recall. La lista de llamada y sus contactos, el mostrador; fijar o
+  // pausar el recall de un paciente, el personal clínico; leer el bloque de la
+  // ficha (sin datos clínicos), los cuatro roles.
+  'GET /recall/due': BILLING,
+  'GET /recall/due/count': BILLING,
+  'POST /recall/:recallId/contacts': BILLING,
+  'GET /patients/:id/recalls': EVERY_ROLE,
+  'PUT /patients/:id/recalls/:kind': CLINICAL,
   // DX-150: cobranza (gestiones y compromisos de pago), mismo dato financiero.
   'POST /patients/:id/collection-notes': BILLING,
   'POST /patients/:id/payment-promises': BILLING,

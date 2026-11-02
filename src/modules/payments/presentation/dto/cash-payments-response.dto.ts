@@ -1,5 +1,10 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { PaymentMethod, TreatmentPlanStatus } from '@prisma/client';
+import { PaymentAdjustmentLineDto } from './payment-adjustment-line.dto';
+import {
+  PaymentAdjustmentType,
+  PaymentMethod,
+  TreatmentPlanStatus,
+} from '@prisma/client';
 
 // Forma de la respuesta de `GET /payments` (la caja). Existe solo para
 // documentar el contrato en Swagger —de ahí sale el tipo del cliente web vía
@@ -176,6 +181,20 @@ export class CashPaymentDto {
       'que el filtro no muestra); `null` en un abono suelto.',
   })
   splitLines!: number | null;
+
+  @ApiProperty({
+    type: [PaymentAdjustmentLineDto],
+    description:
+      'DX-516: ajustes por medio de pago congelados en el abono (vacío sin ajustes).',
+  })
+  adjustments!: PaymentAdjustmentLineDto[];
+
+  @ApiProperty({
+    example: 103,
+    description:
+      'DX-516: lo cobrado = importe + impuestos + recargos − descuentos (sin ajustes, el importe). El saldo del plan se mueve por `amount`.',
+  })
+  collectedAmount!: number;
 }
 
 export class CashCurrencyTotalDto {
@@ -231,6 +250,33 @@ export class CashPaymentMethodTotalDto {
   count!: number;
 }
 
+/** DX-516: total de los ajustes por medio de pago del período, por moneda y tipo. */
+export class CashAdjustmentTotalDto {
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
+  currency!: string;
+
+  @ApiProperty({
+    enum: PaymentAdjustmentType,
+    enumName: 'PaymentAdjustmentType',
+  })
+  type!: PaymentAdjustmentType;
+
+  @ApiProperty({ example: 3, description: 'Suma (en positivo) sin convertir.' })
+  total!: number;
+
+  @ApiProperty({ example: 1, description: 'Número de líneas de ajuste.' })
+  count!: number;
+}
+
+/** DX-516: lo cobrado del período en UNA moneda (abonos ± ajustes). */
+export class CashCollectedTotalDto {
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
+  currency!: string;
+
+  @ApiProperty({ example: 103 })
+  total!: number;
+}
+
 export class CashPaymentsSummaryDto {
   @ApiProperty({ description: 'Número de abonos del período' })
   count!: number;
@@ -253,6 +299,20 @@ export class CashPaymentsSummaryDto {
     description: 'DX-377: total por medio de pago de la clínica y moneda.',
   })
   byPaymentMethod!: CashPaymentMethodTotalDto[];
+
+  @ApiProperty({
+    type: [CashAdjustmentTotalDto],
+    description:
+      'DX-516: ajustes por medio de pago de los abonos del período, por moneda y tipo (vacío sin ajustes).',
+  })
+  adjustments!: CashAdjustmentTotalDto[];
+
+  @ApiProperty({
+    type: [CashCollectedTotalDto],
+    description:
+      'DX-516: lo cobrado por moneda: abonos + impuestos + recargos − descuentos (sin ajustes, igual que `byCurrency`).',
+  })
+  collected!: CashCollectedTotalDto[];
 }
 
 export class CashScopeDto {

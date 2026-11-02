@@ -1,3 +1,4 @@
+import { ClinicFiscalDto } from '../../../../shared/clinic/clinic-fiscal.dto';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   SignatureRequestChannel,
@@ -220,9 +221,9 @@ export class PlanQuoteDocumentDto {
   @ApiProperty({
     enum: [1, 2],
     description:
-      '2 = con convenio y ahorro (DX-105); 1 = foto firmada antes de DX-105 (sin convenio).',
+      '3 = con datos fiscales congelados (DX-019); 2 = con convenio y ahorro (DX-105); 1 = foto firmada antes de DX-105 (sin convenio).',
   })
-  version!: 1 | 2;
+  version!: 1 | 2 | 3;
 
   @ApiProperty({ format: 'uuid' })
   planId!: string;
@@ -241,6 +242,14 @@ export class PlanQuoteDocumentDto {
 
   @ApiProperty({ type: String, nullable: true })
   clinicLogoUrl!: string | null;
+
+  @ApiProperty({
+    type: ClinicFiscalDto,
+    nullable: true,
+    description:
+      'DX-019: datos fiscales. Aceptado: los congelados al firmar; null si no los llevaba (nunca los de hoy).',
+  })
+  clinicFiscal!: ClinicFiscalDto | null;
 
   @ApiProperty({ type: PlanQuoteLocationDto })
   location!: PlanQuoteLocationDto;

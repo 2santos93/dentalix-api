@@ -1,3 +1,4 @@
+import type { ClinicFiscalData } from '../../../../shared/clinic/clinic-fiscal';
 import type { AllergyMatch } from '../allergy-match';
 import type { PrescriptionItemContent } from '../prescription-hash';
 import type { SafetyAlert } from '../prescription-safety';
@@ -33,6 +34,8 @@ export interface CreatePrescriptionRepoInput {
   professionalSpecialty: string | null;
   professionalEmail: string | null;
   clinicName: string;
+  /** DX-019: la foto fiscal (o null). */
+  clinicFiscal: ClinicFiscalData | null;
   locationName: string;
   locationAddress: string | null;
   notes: string | null;

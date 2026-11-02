@@ -415,3 +415,34 @@ describe('computePrescriptionHash', () => {
     expect(roundWeightKg(72.55)).toBe(72.5);
   });
 });
+
+describe('datos fiscales congelados (DX-019)', () => {
+  const single = {
+    ...base,
+    country: undefined,
+    singleFormat: true as const,
+    printQuantityInWords: false,
+    safetyAlerts: [],
+  };
+  const FISCAL = {
+    legalName: 'Sonrisas S.A.',
+    taxIdLabel: null,
+    taxId: 'J-1',
+    address: null,
+    email: null,
+    phone: null,
+  };
+
+  it('sin foto, el hash v3 de siempre; con foto, v4 y la sella', () => {
+    const v3 = computePrescriptionHash(single);
+    expect(computePrescriptionHash({ ...single, clinicFiscal: null })).toBe(v3);
+    const v4 = computePrescriptionHash({ ...single, clinicFiscal: FISCAL });
+    expect(v4).not.toBe(v3);
+    expect(
+      computePrescriptionHash({
+        ...single,
+        clinicFiscal: { ...FISCAL, taxId: 'J-2' },
+      }),
+    ).not.toBe(v4);
+  });
+});
