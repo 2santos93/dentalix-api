@@ -181,6 +181,8 @@ describe('GetFamilyAccountStatementUseCase (DX-203)', () => {
         openingPending: 0,
         paid: 100000.25,
         balance: 250000.1,
+        convertedPaid: 100000.25,
+        convertedBalance: 250000.1,
         overdueAmount: 0,
       },
     ]);

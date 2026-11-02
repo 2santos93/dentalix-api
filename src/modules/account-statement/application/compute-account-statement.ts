@@ -360,6 +360,7 @@ export function computeBalances(
         a.budgetedCents !== 0 ||
         a.openingCents !== 0 ||
         a.paidCents !== 0 ||
+        a.convertedPaidCents !== 0 ||
         a.creditCents !== 0 ||
         a.hasInstallments,
     )
