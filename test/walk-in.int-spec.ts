@@ -133,6 +133,7 @@ describe('DX-470 · «Atender sin cita» en la BD (int)', () => {
 
   function write(c: Clinic, overrides: Partial<WalkInWrite> = {}): WalkInWrite {
     return {
+      chairId: null,
       patient: {
         kind: 'new',
         data: {

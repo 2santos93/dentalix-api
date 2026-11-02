@@ -19,6 +19,11 @@ export interface Interval {
 /** Un hueco libre de la agenda: cabe al menos una cita de la duración pedida. */
 export type Opening = Interval;
 
+/** DX-492: un hueco en el que también está libre este sillón. */
+export interface ChairOpening<Chair> extends Opening {
+  chair: Chair;
+}
+
 export interface OpeningsQuery {
   /** Primer día civil (YYYY-MM-DD) en la zona de la sede, incluido. */
   fromDay: string;
@@ -76,6 +81,37 @@ function subtract(interval: Interval, busy: readonly Interval[]): Interval[] {
   }
   if (cursor < end) free.push({ start: new Date(cursor), end: new Date(end) });
   return free;
+}
+
+/**
+ * DX-492: los huecos de cada sillón (en el orden pedido) en una sola lista por
+ * hora, con el sillón libre de cada uno. Un hueco que otro ya cubre entero no
+ * se repite: el de más duración primero y, a igualdad, el primer sillón.
+ */
+export function mergeChairOpenings<Chair>(
+  perChair: readonly { chair: Chair; result: OpeningsResult }[],
+  limit: number = MAX_OPENINGS,
+): { openings: ChairOpening<Chair>[]; truncated: boolean } {
+  const candidates = perChair
+    .flatMap(({ chair, result }, order) =>
+      result.openings.map((opening) => ({ ...opening, chair, order })),
+    )
+    .sort(
+      (a, b) =>
+        a.start.getTime() - b.start.getTime() ||
+        b.end.getTime() - a.end.getTime() ||
+        a.order - b.order,
+    );
+  const openings: ChairOpening<Chair>[] = [];
+  for (const { start, end, chair } of candidates) {
+    const covered = openings.some((o) => o.start <= start && end <= o.end);
+    if (!covered) openings.push({ start, end, chair });
+  }
+  return {
+    openings: openings.slice(0, limit),
+    truncated:
+      openings.length > limit || perChair.some((c) => c.result.truncated),
+  };
 }
 
 /**

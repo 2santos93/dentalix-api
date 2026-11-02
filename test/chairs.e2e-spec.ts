@@ -690,6 +690,80 @@ describe('Sillones por sede y anti-solape por sillón (e2e, DX-211)', () => {
         .expect(404);
     });
 
+    it('DX-492: B no busca huecos, atiende sin cita ni agenda desde pendientes con el sillón de A (404)', async () => {
+      const patientB = (
+        (
+          await as(api().post('/api/v1/patients'), other.adminToken, other.host)
+            .send({
+              firstName: 'Rosa',
+              lastName: 'Ajena',
+              docType: 'NATIONAL_ID',
+              docNumber: '492900',
+              sex: 'F',
+            })
+            .expect(201)
+        ).body as { id: string }
+      ).id;
+      await as(
+        api().get('/api/v1/appointments/openings').query({
+          providerId: other.adminUserId,
+          locationId: locationB,
+          from: DAY,
+          to: DAY,
+          durationMinutes: 30,
+          chairIds: chairA.id,
+        }),
+        other.adminToken,
+        other.host,
+      ).expect(404);
+      await as(
+        api().post('/api/v1/appointment-types'),
+        other.adminToken,
+        other.host,
+      )
+        .send({
+          name: 'Urgencia B',
+          durationMinutes: 30,
+          color: '#DC2626',
+          isUrgent: true,
+        })
+        .expect(201);
+      const walkIn = await as(
+        api().post('/api/v1/appointments/walk-in'),
+        other.adminToken,
+        other.host,
+      )
+        .send({
+          patientId: patientB,
+          providerId: other.adminUserId,
+          chairId: chairA.id,
+          overbookReason: 'Dolor agudo',
+        })
+        .expect(404);
+      expect((walkIn.body as { message: string }).message).toBe(
+        'Sillón no encontrado',
+      );
+      const entry = (
+        await as(api().post('/api/v1/waitlist'), other.adminToken, other.host)
+          .send({ patientId: patientB, durationMinutes: 30 })
+          .expect(201)
+      ).body as { id: string };
+      await as(
+        api().post(`/api/v1/waitlist/${entry.id}/schedule`),
+        other.adminToken,
+        other.host,
+      )
+        .send({
+          providerId: other.adminUserId,
+          start: at('19:00'),
+          chairId: chairA.id,
+        })
+        .expect(404);
+      expect(
+        await raw.appointment.count({ where: { tenantId: other.tenantId } }),
+      ).toBe(0);
+    });
+
     it('una cita de B con el sillón de A: 404 «Sillón no encontrado»; la agenda de B con ese sillón: 400', async () => {
       const patientB = (
         (

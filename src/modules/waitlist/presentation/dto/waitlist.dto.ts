@@ -279,6 +279,15 @@ export class ScheduleFromWaitlistDto {
   @IsUUID()
   appointmentTypeId?: string;
 
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'DX-492: sillón de la sede de la entrada (el que devolvió «Buscar hueco»).',
+  })
+  @IsOptional()
+  @IsUUID()
+  chairId?: string;
+
   @ApiPropertyOptional({ maxLength: 200 })
   @IsOptional()
   @IsString()

@@ -81,6 +81,30 @@ describe('ListInClinicUseCase (DX-200)', () => {
     });
   });
 
+  it('DX-492: cada persona trae su sillón', async () => {
+    const { repo, uc } = setup();
+    repo.chairDirectory.set('chair-1', {
+      id: 'chair-1',
+      name: 'Sillón 1',
+      active: true,
+    });
+    repo.seed({
+      locationId: 'bog',
+      status: AppointmentStatus.ARRIVED,
+      chairId: 'chair-1',
+      start: at('2026-10-19T14:00:00.000Z'),
+      end: at('2026-10-19T14:30:00.000Z'),
+    });
+    const view = await uc.execute(
+      { locationId: 'bog', role: ClinicRole.RECEPTION, userId: 'rec-1' },
+      NOW,
+    );
+    expect(view.waiting[0]).toMatchObject({
+      chairId: 'chair-1',
+      chair: { name: 'Sillón 1' },
+    });
+  });
+
   it('agrupa en espera / en sillón / listo para cobrar con minutos y color', async () => {
     const { repo, uc } = setup();
     // Llegó a las 08:50 a una cita de las 09:00: verde, 30 min esperando.
@@ -161,6 +185,8 @@ describe('ListInClinicUseCase (DX-200)', () => {
     );
     expect(view.waiting[0]).toEqual({
       appointmentId: early.id,
+      chairId: null,
+      chair: null,
       patientId: early.patientId,
       patientFirstName: 'Ana',
       patientLastName: 'Uno',

@@ -172,6 +172,7 @@ export class WaitlistController {
         start: new Date(dto.start),
         end: dto.end !== undefined ? new Date(dto.end) : undefined,
         appointmentTypeId: dto.appointmentTypeId,
+        chairId: dto.chairId,
         reason: dto.reason,
         notes: dto.notes,
       },

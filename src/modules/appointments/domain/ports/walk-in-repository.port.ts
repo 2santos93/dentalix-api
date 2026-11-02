@@ -24,6 +24,8 @@ export interface WalkInWrite {
   /** Sede ya resuelta y permitida (cabecera o sede de escritura). */
   locationId: string;
   appointmentTypeId: string;
+  /** DX-492: sillón ya validado y libre (la EXCLUDE cierra la carrera). */
+  chairId: string | null;
   start: Date;
   end: Date;
   /** Reloj del servidor: la llegada es ahora. */

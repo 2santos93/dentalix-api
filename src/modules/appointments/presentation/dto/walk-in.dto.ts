@@ -109,6 +109,15 @@ export class CreateWalkInDto {
   appointmentTypeId?: string;
 
   @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'DX-492: sillón activo de la sede. Ocupado a la hora de la cita: 409 con su nombre y horas; de otra sede o desactivado: 400; de otra clínica: 404.',
+  })
+  @IsOptional()
+  @IsUUID()
+  chairId?: string;
+
+  @ApiPropertyOptional({
     enum: TriageFlag,
     enumName: 'TriageFlag',
     isArray: true,
