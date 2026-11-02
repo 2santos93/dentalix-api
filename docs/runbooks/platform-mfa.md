@@ -36,7 +36,7 @@ arregle. El tope `MAIL_PLATFORM_RECIPIENT_COOLDOWN_SECONDS` (600 s) no deja sali
 un segundo correo enseguida: vale el código del primero.
 
 Quien activó el MFA antes de esta versión no tiene códigos de recuperación:
-`/platform` se lo avisa y los genera ahí (contraseña + código).
+`/admin` se lo avisa y los genera ahí (contraseña + código).
 
 ## Móvil y códigos perdidos
 

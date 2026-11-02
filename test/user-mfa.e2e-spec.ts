@@ -552,6 +552,7 @@ describe('Verificación en dos pasos de los miembros (e2e, DX-021)', () => {
       expect(policyEvents.map((e) => e.metadata)).toContainEqual({
         reason: 'MFA_POLICY',
         statusChange: { from: 'ADMIN_MFA_OPTIONAL', to: 'ADMIN_MFA_REQUIRED' },
+        sessionsClosed: 0,
       });
 
       // Otro ADMIN, sin MFA: la contraseña no le da tokens, solo el alta.

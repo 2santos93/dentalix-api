@@ -669,7 +669,7 @@ model Patient {
   lastAttentionAt              DateTime?             @map("last_attention_at")
   retentionExtended            RetentionExtension    @default(NONE) @map("retention_extended")
   /// DX-330 (R6): fecha de fin de conservación que la historia ya tenía cuando la clínica redujo su plazo. La escribe solo el cambio de plazo; nunca baja.
-  retentionFloorUntil          DateTime?             @map("retention_floor_until") @db.Date
+  retentionFloorUntil          DateTime?             @db.Date @map("retention_floor_until")
   partiallySuppressedAt        DateTime?             @map("partially_suppressed_at")
   // DX-128: canal OPERATIVO de los avisos automáticos (recordatorios), no el
   // consentimiento de marketing (DX-037). Nace con el de la clínica

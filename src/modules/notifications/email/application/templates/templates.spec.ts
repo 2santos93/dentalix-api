@@ -712,3 +712,43 @@ describe('plantillas reservadas para otras tareas', () => {
     });
   });
 });
+
+describe('avisos de la verificación en dos pasos (DX-021-bis)', () => {
+  it.each(['RECOVERY_CODE_USED', 'RESET_BY_ADMIN', 'ATTEMPTS_LOCKED'] as const)(
+    '%s dice qué pasó y qué hacer, sin marca de país',
+    (kind) => {
+      const { subject, text } = renderEmail(
+        'mfa-notice',
+        { kind, recoveryCodesRemaining: 1 },
+        null,
+      );
+      expect(subject).not.toBe('');
+      expect(text).toMatch(/Dentalix/);
+    },
+  );
+
+  it('los códigos que quedan concuerdan en número', () => {
+    const one = renderEmail(
+      'mfa-notice',
+      { kind: 'RECOVERY_CODE_USED', recoveryCodesRemaining: 1 },
+      null,
+    );
+    expect(one.text).toContain('Te queda 1 código.');
+    const many = renderEmail(
+      'mfa-notice',
+      { kind: 'RECOVERY_CODE_USED', recoveryCodesRemaining: 9 },
+      null,
+    );
+    expect(many.text).toContain('Te quedan 9 códigos.');
+  });
+
+  it('el código del alta avisa de que la contraseña está comprometida si no se pidió', () => {
+    const { text } = renderEmail(
+      'mfa-enrollment-code',
+      { code: '12345678', expiresInMinutes: 10 },
+      null,
+    );
+    expect(text).toContain('Tu código es: 12345678');
+    expect(text).toMatch(/contraseña está comprometida/);
+  });
+});
