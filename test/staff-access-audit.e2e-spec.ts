@@ -15,7 +15,6 @@ import {
 import { CapturingMailer } from './support/capture-mailer';
 import { MAILER } from '../src/modules/notifications/email/domain/ports/mailer.port';
 import { PasswordService } from '../src/shared/crypto/password.service';
-import { decodeBase32, totpCode } from '../src/shared/crypto/totp';
 import { hashInvitationToken } from '../src/modules/invitations/application/invitation-token';
 
 /**

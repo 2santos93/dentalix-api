@@ -796,7 +796,7 @@ describe('UserMfaService (DX-021)', () => {
       ).rejects.toBeInstanceOf(ForbiddenException);
       await expect(
         service.startEnrollment(USER, null, CTX),
-      ).resolves.toMatchObject({ secret: expect.any(String) });
+      ).resolves.toMatchObject({ secret: expect.any(String) as string });
     });
   });
 
