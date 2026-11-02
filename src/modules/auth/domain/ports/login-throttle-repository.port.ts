@@ -54,4 +54,6 @@ export interface LoginThrottleRepository {
 
   /** Hasta cuándo espera la cuenta, o `null` si no está en espera. */
   accountBlockedUntil(accountKeyHash: string): Promise<Date | null>;
+  /** Fallos seguidos de esa clave (0 si no hay fila). */
+  accountFailures(accountKeyHash: string): Promise<number>;
 }

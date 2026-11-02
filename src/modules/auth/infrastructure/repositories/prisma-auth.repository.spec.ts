@@ -11,7 +11,11 @@ describe('PrismaAuthRepository — refresh-token denylist', () => {
       findUnique: jest.fn(),
     };
     const prisma = { revokedToken } as never;
-    const repo = new PrismaAuthRepository(prisma, { platformMinYears: 15 });
+    const repo = new PrismaAuthRepository(
+      prisma,
+      { platformMinYears: 15 },
+      false,
+    );
     const exp = new Date('2030-01-01T00:00:00Z');
 
     await repo.revokeToken('jti-1', exp);
@@ -40,7 +44,11 @@ describe('PrismaAuthRepository — refresh-token denylist', () => {
       deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
     };
     const prisma = { revokedToken } as never;
-    const repo = new PrismaAuthRepository(prisma, { platformMinYears: 15 });
+    const repo = new PrismaAuthRepository(
+      prisma,
+      { platformMinYears: 15 },
+      false,
+    );
     const exp = new Date('2030-01-01T00:00:00Z');
 
     // INSERT (no upsert): la PK de `jti` es la que serializa dos refresh
@@ -59,9 +67,13 @@ describe('PrismaAuthRepository — refresh-token denylist', () => {
       create: jest.fn().mockRejectedValue(boom),
       deleteMany: jest.fn(),
     };
-    const repo = new PrismaAuthRepository({ revokedToken } as never, {
-      platformMinYears: 15,
-    });
+    const repo = new PrismaAuthRepository(
+      { revokedToken } as never,
+      {
+        platformMinYears: 15,
+      },
+      false,
+    );
 
     await expect(
       repo.consumeRefreshToken('jti-1', new Date('2030-01-01T00:00:00Z')),
@@ -81,9 +93,13 @@ describe('PrismaAuthRepository — createClinicWithOwner', () => {
     const prisma = {
       $transaction: (fn: (client: typeof tx) => Promise<unknown>) => fn(tx),
     };
-    const repo = new PrismaAuthRepository(prisma as never, {
-      platformMinYears: 20,
-    });
+    const repo = new PrismaAuthRepository(
+      prisma as never,
+      {
+        platformMinYears: 20,
+      },
+      false,
+    );
 
     await expect(
       repo.createClinicWithOwner({

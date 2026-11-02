@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import { isIPv6 } from 'net';
 
 /**
  * Bloqueo del login por FALLOS (DX-048, SEC-028). Dos contadores, guardados
@@ -76,13 +77,74 @@ export const accountKeyHash = (email: string): string =>
   sha256(`dentalix:login-account:${normalizeLoginEmail(email)}`);
 
 /**
- * SEC-008: clave del contador de fallos del CÓDIGO MFA de un superadmin. Va
- * aparte del de la cuenta porque un login correcto (p. ej. en el apex, que
- * solo pide contraseña) borra el de la cuenta: con él, quien tenga la
- * contraseña podría probar códigos sin fin.
+ * SEC-008: clave del contador de fallos del CÓDIGO MFA. Va aparte del de la
+ * cuenta porque una contraseña correcta borra el de la cuenta: con él, quien
+ * tenga la contraseña podría probar códigos sin fin.
  */
 export const mfaKeyHash = (userId: string): string =>
   sha256(`dentalix:login-mfa:${userId}`);
+
+/**
+ * Lo que identifica a un cliente en el contador del alta: la IP y, en IPv6, su
+ * /64 (a un cliente se le asigna el prefijo entero, y rotar dentro no lo
+ * convierte en otro). Una IPv4 mapeada (`::ffff:1.2.3.4`) es esa IPv4.
+ */
+export function ipBucket(ip: string): string {
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(ip);
+  if (mapped) return mapped[1];
+  if (!isIPv6(ip)) return ip;
+  const [head, tail] = ip.toLowerCase().split('::');
+  const left = head ? head.split(':') : [];
+  const right = tail ? tail.split(':') : [];
+  const groups =
+    tail === undefined
+      ? left
+      : [
+          ...left,
+          ...Array<string>(8 - left.length - right.length).fill('0'),
+          ...right,
+        ];
+  return `${groups
+    .slice(0, 4)
+    .map((g) => g.padStart(4, '0'))
+    .join(':')}::/64`;
+}
+
+/**
+ * DX-021-bis: clave del contador del código del CORREO en el alta de un
+ * superadmin, por cuenta y cliente. Con la del MFA, quien conoce la contraseña
+ * bloquearía al titular fallando a propósito, justo cuando este no tiene otra
+ * salida.
+ */
+export const mfaEnrollKeyHash = (userId: string, ip: string): string =>
+  sha256(`dentalix:login-mfa-enroll:${userId}:${ipBucket(ip)}`);
+
+/**
+ * Espera por cuenta y cliente en el alta: tope de 10 min, menos que la del login.
+ * Quien comparte IP con un atacante, o se equivoca él, nunca espera más que eso.
+ */
+export const MFA_ENROLL_CLIENT_BACKOFF = {
+  freeFailures: 5,
+  baseDelayMs: MINUTE,
+  maxDelayMs: 10 * MINUTE,
+  failureMemoryMs: 60 * MINUTE,
+};
+
+/**
+ * Intentos de UN código del correo, vengan de donde vengan: cada código nace con
+ * su `mfaToken` y muere con él. Un atacante agota el suyo, nunca el del titular,
+ * que tiene otro token y otro código. Al décimo fallo el token queda inservible
+ * hasta caducar (la espera supera sus 10 min de vida): hay que entrar de nuevo.
+ */
+export const MFA_ENROLL_CODE_ATTEMPTS = {
+  freeFailures: 10,
+  baseDelayMs: 30 * MINUTE,
+  maxDelayMs: 30 * MINUTE,
+  failureMemoryMs: 60 * MINUTE,
+};
+
+export const mfaEnrollCodeKeyHash = (jti: string): string =>
+  sha256(`dentalix:login-mfa-enroll-code:${jti}`);
 
 /** Clave del contador de la IP: nunca la IP en claro. */
 export const ipKeyHash = (ip: string): string =>

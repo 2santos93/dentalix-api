@@ -21,7 +21,9 @@ describe('PlatformAdminGuard', () => {
   it('deja pasar un token de plataforma cuyo usuario sigue siendo superadmin', async () => {
     const guard = new PlatformAdminGuard(makeRepo(true));
     await expect(
-      guard.canActivate(contextWith({ sub: 'super-1', platform: true })),
+      guard.canActivate(
+        contextWith({ sub: 'super-1', platform: true, mfa: true }),
+      ),
     ).resolves.toBe(true);
   });
 
@@ -39,7 +41,9 @@ describe('PlatformAdminGuard', () => {
     // quitar isPlatformAdmin debe surtir efecto YA, no cuando el token expire.
     const guard = new PlatformAdminGuard(makeRepo(false));
     await expect(
-      guard.canActivate(contextWith({ sub: 'super-1', platform: true })),
+      guard.canActivate(
+        contextWith({ sub: 'super-1', platform: true, mfa: true }),
+      ),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 

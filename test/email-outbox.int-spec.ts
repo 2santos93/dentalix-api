@@ -522,6 +522,8 @@ describe('DX-088 · email_outbox en la BD (int)', () => {
       'email_outbox_enqueue_platform',
       // DX-144: tope por destinatario y purga de los emails de plataforma.
       'email_outbox_enqueue_platform_capped',
+      // DX-021-bis: los correos de seguridad, fuera de ese tope.
+      'email_outbox_enqueue_platform_security',
       'email_outbox_platform_allowed',
       'email_outbox_purge_platform',
       'email_outbox_settle',
@@ -533,6 +535,7 @@ describe('DX-088 · email_outbox en la BD (int)', () => {
         // siguen como estaban.
         config: [
           r.fn === 'email_outbox_enqueue_platform_capped' ||
+          r.fn === 'email_outbox_enqueue_platform_security' ||
           r.fn === 'email_outbox_platform_allowed' ||
           r.fn === 'email_outbox_purge_platform'
             ? 'search_path=pg_catalog, public, pg_temp'
@@ -585,6 +588,7 @@ describe('DX-088 · email_outbox en la BD (int)', () => {
       { fn: 'email_outbox_claim', public: false },
       { fn: 'email_outbox_enqueue_platform', public: false },
       { fn: 'email_outbox_enqueue_platform_capped', public: false },
+      { fn: 'email_outbox_enqueue_platform_security', public: false },
       { fn: 'email_outbox_platform_allowed', public: false },
       { fn: 'email_outbox_purge_platform', public: false },
       { fn: 'email_outbox_settle', public: false },

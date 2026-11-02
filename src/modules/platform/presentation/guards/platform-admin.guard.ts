@@ -16,7 +16,8 @@ import type { PlatformRepository } from '../../domain/ports/platform-repository.
  * Deja pasar SOLO un token de plataforma cuyo usuario siga siendo superadmin.
  * Dos condiciones a propósito:
  *  1. la forma del token (un token de clínica, por muy ADMIN que sea, no vale
- *     aquí: ADMIN es un rol por-clínica, no un permiso de plataforma), y
+ *     aquí: ADMIN es un rol por-clínica, no un permiso de plataforma; y uno de
+ *     plataforma sin el claim `mfa` no pasó por el segundo factor), y
  *  2. un re-chequeo del flag en la DB, para que revocar `isPlatformAdmin`
  *     tenga efecto inmediato y no cuando expire el token.
  */
@@ -28,7 +29,7 @@ export class PlatformAdminGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const { user } = context.switchToHttp().getRequest<{ user?: JwtPayload }>();
-    if (!user || !isPlatformPayload(user)) {
+    if (!user || !isPlatformPayload(user) || !user.mfa) {
       throw new ForbiddenException('Platform admin only');
     }
     if (!(await this.repo.isPlatformAdmin(user.sub))) {

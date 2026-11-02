@@ -2,8 +2,12 @@ import { Inject, Injectable } from '@nestjs/common';
 import {
   LOGIN_LOCKOUT_CONFIG,
   LoginLockedError,
+  MFA_ENROLL_CLIENT_BACKOFF,
+  MFA_ENROLL_CODE_ATTEMPTS,
   accountKeyHash,
   ipKeyHash,
+  mfaEnrollCodeKeyHash,
+  mfaEnrollKeyHash,
   mfaKeyHash,
   type LoginLockoutConfig,
 } from '../domain/login-lockout';
@@ -84,6 +88,48 @@ export class LoginLockoutService {
   /** Código MFA correcto: su contador vuelve a empezar. */
   clearMfa(userId: string): Promise<void> {
     return this.repo.clearAccount(mfaKeyHash(userId));
+  }
+
+  /**
+   * ¿Este fallo es el que acaba de dejar la cuenta en espera? (DX-021-bis) Solo
+   * el primero de la serie: los siguientes renuevan la espera y no se avisan.
+   */
+  async mfaJustLocked(userId: string): Promise<boolean> {
+    const failures = await this.repo.accountFailures(mfaKeyHash(userId));
+    return failures === this.cfg.freeFailures;
+  }
+
+  /** DX-021-bis: cobra un intento del código del correo, por cuenta e IP. */
+  async claimMfaEnrollAttempt(
+    userId: string,
+    ip: string | null,
+  ): Promise<void> {
+    const seconds = await this.repo.claimAccountAttempt(
+      mfaEnrollKeyHash(userId, ip || UNKNOWN_IP),
+      MFA_ENROLL_CLIENT_BACKOFF,
+    );
+    if (seconds > 0) throw new LoginLockedError(seconds);
+  }
+
+  clearMfaEnroll(userId: string, ip: string | null): Promise<void> {
+    return this.repo.clearAccount(mfaEnrollKeyHash(userId, ip || UNKNOWN_IP));
+  }
+
+  /**
+   * Cobra un intento al código de ESE `mfaToken`, sin mirar de dónde viene.
+   * `false`: agotado, el código ya no vale aunque sea el correcto. Solo acertar
+   * lo borra (el alta lo pide dos veces y confirmar se puede reintentar).
+   */
+  async claimEnrollCodeAttempt(jti: string): Promise<boolean> {
+    const seconds = await this.repo.claimAccountAttempt(
+      mfaEnrollCodeKeyHash(jti),
+      MFA_ENROLL_CODE_ATTEMPTS,
+    );
+    return seconds === 0;
+  }
+
+  clearEnrollCode(jti: string): Promise<void> {
+    return this.repo.clearAccount(mfaEnrollCodeKeyHash(jti));
   }
 
   /** Desbloqueo por un ADMIN: borra espera y fallos de la cuenta. */

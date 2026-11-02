@@ -2,6 +2,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { JwtService } from '@nestjs/jwt';
 import request from 'supertest';
+import { TokenService } from '../src/shared/crypto/token.service';
 import { App } from 'supertest/types';
 import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import { AppModule } from '../src/app.module';
@@ -324,13 +325,11 @@ describe('Session revalidation on refresh (e2e)', () => {
       where: { id: admin.userId },
       data: { isPlatformAdmin: true },
     });
-    // Host apex (sin tenant) → login de plataforma.
-    const res = await http()
-      .post('/api/v1/auth/login')
-      .set('X-Tenant-Host', 'localhost')
-      .send({ email: admin.email, password: PASSWORD })
-      .expect(201);
-    const platform = res.body as Tokens;
+    // Directo del emisor: el login del apex (DX-021-bis) dejaría eventos de
+    // plataforma, que retienen al usuario y esta suite lo borra al acabar.
+    const platform = await app
+      .get(TokenService, { strict: false })
+      .issue({ sub: admin.userId, platform: true, mfa: true, tv: 0 });
     expect(claimsOf(platform.refreshToken).platform).toBe(true);
 
     const renewed = await refresh(platform.refreshToken).expect(201);

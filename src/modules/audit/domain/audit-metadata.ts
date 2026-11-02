@@ -21,6 +21,8 @@ export interface AuditMetadata {
   params?: Record<string, string>;
   /** Código de resultado, p. ej. `INVALID_CREDENTIALS` en un login fallido. */
   reason?: string;
+  /** DX-021-bis: sesiones que cerró endurecer la política de MFA (un recuento). */
+  sessionsClosed?: number;
   /**
    * DX-121: cita movida — hora y profesional antes y después. Solo instantes
    * ISO y uuids: ni paciente, ni motivo, ni notas.
@@ -1344,6 +1346,13 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (Object.keys(params).length > 0) out.params = params;
   if (typeof input.reason === 'string' && CODE.test(input.reason)) {
     out.reason = input.reason;
+  }
+  if (
+    typeof input.sessionsClosed === 'number' &&
+    Number.isSafeInteger(input.sessionsClosed) &&
+    input.sessionsClosed >= 0
+  ) {
+    out.sessionsClosed = input.sessionsClosed;
   }
   const move = appointmentMove(input.move);
   if (move) out.move = move;

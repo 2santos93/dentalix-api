@@ -82,6 +82,7 @@ function loginSetup(
   const cookie = {
     wantsCookie: jest.fn().mockReturnValue(false),
     deliver: jest.fn().mockReturnValue(pair),
+    readTrustedDevice: jest.fn(),
   };
   const controller = new AuthController(
     {} as never,

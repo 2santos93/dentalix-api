@@ -1,5 +1,6 @@
 import { seedInitialPaymentMethods } from '../../../payment-methods/infrastructure/prisma-payment-method.repository';
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { NEW_CLINIC_REQUIRES_ADMIN_MFA } from '../../domain/user-mfa';
 import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
 import { clinicRegisteredAuditEvent } from '../../domain/registration-audit';
 import { ClinicRole, Prisma } from '@prisma/client';
@@ -37,6 +38,8 @@ export class PrismaAuthRepository implements AuthRepository {
     private readonly prisma: PrismaService,
     @Inject(CLINICAL_RETENTION_CONFIG)
     private readonly retention: ClinicalRetentionConfig,
+    @Inject(NEW_CLINIC_REQUIRES_ADMIN_MFA)
+    private readonly newClinicRequiresAdminMfa: boolean,
   ) {}
 
   async findUserByEmail(
@@ -93,6 +96,7 @@ export class PrismaAuthRepository implements AuthRepository {
           // DX-330: igual con el plazo de la historia clínica (el mínimo de
           // plataforma del entorno; el default de la BD es el suelo, 15).
           clinicalRecordRetentionYears: this.retention.platformMinYears,
+          requireAdminMfa: this.newClinicRequiresAdminMfa,
           // DX-324: igual con los ajustes de la receta.
           prescriptionPrintQuantityInWords:
             PLATFORM_DEFAULT_PRESCRIPTION_SETTINGS.printQuantityInWords,

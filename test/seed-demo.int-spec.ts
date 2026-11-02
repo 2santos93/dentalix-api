@@ -55,6 +55,9 @@ import { hostFor } from './support/tenant-host';
 import { PAYER_TYPES } from '../src/modules/payers/domain/payer-type';
 import { DOCUMENT_TYPES } from '../src/modules/patients/domain/document-type';
 
+// DX-021-bis: la política por defecto, la que tiene un `seed:demo` real.
+process.env.NEW_CLINIC_REQUIRE_ADMIN_MFA = 'true';
+
 // Este spec escribe y BORRA EN DURO: solo puede correr contra una base de test.
 for (const key of ['DATABASE_URL', 'DIRECT_URL'] as const) {
   if (!process.env[key]?.includes('_test')) {

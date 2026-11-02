@@ -3626,6 +3626,16 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       checks: 'B → 404 al corregir la tasa manual sin usar de A (DX-375)',
       routes: ['PUT /exchange/manual-rates/:id'],
     },
+    {
+      spec: 'mfa-bis.e2e-spec.ts',
+      checks:
+        'B → 404 al ver y resetear el MFA de un miembro de A, y al revocar un dispositivo de confianza ajeno (DX-021-bis)',
+      routes: [
+        'GET /staff/:userId/mfa',
+        'POST /staff/:userId/mfa/reset',
+        'DELETE /me/mfa/trusted-devices/:id',
+      ],
+    },
   ];
 
   /** `MÉTODO /ruta` de un caso (las dos primeras palabras de su nombre). */
