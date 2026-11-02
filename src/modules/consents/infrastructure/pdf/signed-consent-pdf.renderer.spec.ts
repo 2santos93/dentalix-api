@@ -115,5 +115,5 @@ describe('PdfkitSignedConsentPdfRenderer (DX-422)', () => {
       );
       for (const pdf of batch) expect(pdf.equals(base)).toBe(true);
     }
-  });
+  }, 90_000); // CI con carga: las 600 rondas son las que cazan el fallo.
 });
