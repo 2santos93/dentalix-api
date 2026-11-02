@@ -23,6 +23,7 @@ import {
 import { CapturingMailer } from './support/capture-mailer';
 import {
   REGIONAL_CARACAS_FIXTURE,
+  REGIONAL_MADRID_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 import { MAILER } from '../src/modules/notifications/email/domain/ports/mailer.port';
@@ -601,11 +602,11 @@ describe('Baja de recordatorios (e2e, DX-128)', () => {
       // Guardado tal cual: sin «+», solo es válido con la región de la
       // segunda sede.
       const patientId = await createPatient('329101', {
-        phone: '0414-7654321',
+        phone: '612 34 56 78',
       });
       const reply = {
         tenantId: clinic.tenantId,
-        from: '584147654321',
+        from: '34612345678',
         text: 'BAJA',
       };
       await api()
@@ -613,10 +614,9 @@ describe('Baja de recordatorios (e2e, DX-128)', () => {
         .send(reply)
         .expect(200, { isOptOut: true, optedOut: [] });
       const second = await raw.location.create({
-        data: locationData(REGIONAL_CARACAS_FIXTURE, {
+        data: locationData(REGIONAL_MADRID_FIXTURE, {
           tenantId: clinic.tenantId,
-          name: 'Sede 329 VE',
-          defaultPhoneRegion: 'VE',
+          name: 'Sede 329 ES',
         }),
       });
       try {
@@ -634,20 +634,19 @@ describe('Baja de recordatorios (e2e, DX-128)', () => {
 
     it("an opt-out reply reads a location without a region with its country's suggestion, only to match", async () => {
       const patientId = await createPatient('329102', {
-        phone: '0416-5554321',
+        phone: '622 34 56 78',
       });
       const reply = {
         tenantId: clinic.tenantId,
-        from: '584165554321',
+        from: '34622345678',
         text: 'BAJA',
       };
-      // Sede VE sin región (vaciada por un ADMIN o creada por una réplica
+      // Sede española sin región (vaciada por un ADMIN o creada por una réplica
       // anterior): la baja casa con la sugerencia de su país.
       const withoutRegion = await raw.location.create({
-        data: locationData(REGIONAL_CARACAS_FIXTURE, {
+        data: locationData(REGIONAL_MADRID_FIXTURE, {
           tenantId: clinic.tenantId,
-          name: 'Sede 329 VE sin prefijo',
-          country: 'VE',
+          name: 'Sede 329 ES sin prefijo',
           defaultPhoneRegion: null,
           defaultPhoneRegionSetAt: new Date(),
         }),
@@ -662,7 +661,7 @@ describe('Baja de recordatorios (e2e, DX-128)', () => {
           where: { id: patientId },
           select: { phone: true },
         });
-        expect(patient.phone).toBe('0416-5554321');
+        expect(patient.phone).toBe('622 34 56 78');
         const location = await raw.location.findUniqueOrThrow({
           where: { id: withoutRegion.id },
           select: { defaultPhoneRegion: true },

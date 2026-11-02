@@ -142,7 +142,7 @@ describe('barrido de sedes sin configurar (int, G1 fase 1)', () => {
       await raw.location.findUniqueOrThrow({ where: { id: legacyA } }),
     ).toMatchObject({
       country: 'VE',
-      currency: 'VES',
+      currency: 'USD',
       timeZone: 'America/Caracas',
       locale: 'es-VE',
       // Por revisar: el ADMIN ve el aviso D5.
@@ -236,7 +236,7 @@ describe('barrido de sedes sin configurar (int, G1 fase 1)', () => {
     expect(
       await raw.location.findUniqueOrThrow({ where: { id: legacy } }),
     ).toMatchObject({
-      currency: 'VES',
+      currency: 'USD',
       hourCycle: 'h23',
       regionalSettingsReviewedAt: null,
     });

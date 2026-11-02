@@ -307,12 +307,12 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
       mergedRows: 1,
       preparedCount: 3,
       fileTotals: [
-        { currency: 'VES', rows: 4, amount: 201100.5 },
         { currency: 'USD', rows: 1, amount: 40 },
+        { currency: 'VES', rows: 4, amount: 201100.5 },
       ],
       validTotals: [
-        { currency: 'VES', rows: 3, amount: 201000.5 },
         { currency: 'USD', rows: 1, amount: 40 },
+        { currency: 'VES', rows: 3, amount: 201000.5 },
       ],
       imported: [],
     });
@@ -337,7 +337,7 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
         'moneda',
         'ERROR',
         expect.stringMatching(
-          /^La moneda «XYZ» no está admitida en la clínica\. Admitidas: .*VES.*USD/,
+          /^La moneda «XYZ» no está admitida en la clínica\. Admitidas: .*USD.*VES/,
         ),
       ],
     ]);
@@ -399,8 +399,8 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
       existing: 0,
     });
     expect(done.balances?.imported).toEqual([
-      { currency: 'VES', count: 2, amount: 201000.5 },
       { currency: 'USD', count: 1, amount: 40 },
+      { currency: 'VES', count: 2, amount: 201000.5 },
     ]);
     expect(done.balances?.imported.map((t) => [t.currency, t.amount])).toEqual(
       done.balances?.validTotals.map((t) => [t.currency, t.amount]),
@@ -493,8 +493,8 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
         balanceRows: 7,
         balanceErrors: 3,
         balanceTotals: [
-          { currency: 'VES', rows: 3, amount: 201000.5 },
           { currency: 'USD', rows: 1, amount: 40 },
+          { currency: 'VES', rows: 3, amount: 201000.5 },
         ],
       },
     });
@@ -592,7 +592,7 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
       .send({ ...body, amount: 150000.01 })
       .expect(400);
     expect((over.body as { message: string }).message).toMatch(
-      /^El abono supera lo pendiente del saldo migrado: quedan \$\s150\.000,00\.$/,
+      /^El abono supera lo pendiente del saldo migrado: quedan Bs\.S\s150\.000,00\.$/,
     );
     // G1-B (R12): el importe va en el formato de la sede del saldo, no en el
     // de la sede donde se cobra (otra, de-DE y sin reloj: no se le pide).
@@ -654,8 +654,8 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
       undoneCount: 3,
       imported: [],
       undoneTotals: [
-        { currency: 'VES', rows: 2, amount: 201000.5 },
         { currency: 'USD', rows: 1, amount: 40 },
+        { currency: 'VES', rows: 2, amount: 201000.5 },
       ],
     });
     const st = await statementOf(existingId);
@@ -674,8 +674,8 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
       importBatch: {
         balancesUndone: 3,
         balanceUndoneTotals: [
-          { currency: 'VES', rows: 2, amount: 201000.5 },
           { currency: 'USD', rows: 1, amount: 40 },
+          { currency: 'VES', rows: 2, amount: 201000.5 },
         ],
       },
     });
@@ -788,7 +788,7 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
         row: 2,
         kind: 'ERROR',
         message: expect.stringMatching(
-          /^Este paciente ya tiene un saldo migrado vivo de \$\s80\.000,00 \(lote «dora-1\.csv» del \d{2}\/\d{2}\/\d{4}, corte 01\/09\/2026\): no se crea otro\. Si es otra deuda, marca «Añadir aunque ya tenga saldo migrado» y vuelve a subir la hoja\.$/,
+          /^Este paciente ya tiene un saldo migrado vivo de Bs\.S\s80\.000,00 \(lote «dora-1\.csv» del \d{2}\/\d{2}\/\d{4}, corte 01\/09\/2026\): no se crea otro\. Si es otra deuda, marca «Añadir aunque ya tenga saldo migrado» y vuelve a subir la hoja\.$/,
         ) as string,
       }),
     ]);

@@ -179,7 +179,7 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
       where: { tenantId: clinicA.tenantId },
     });
     await as(clinicA)
-      .patch(`/locations/${location.id}`, { phone: '601 555 0101' })
+      .patch(`/locations/${location.id}`, { phone: '212 555 0101' })
       .expect(200);
 
     const type = await as(clinicA)
@@ -249,7 +249,7 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
         toResponsible: false,
       },
       whatsapp: { phone: '584141234567', reason: null },
-      locationPhone: '601 555 0101',
+      locationPhone: '212 555 0101',
       deliveries: [],
     });
     const audit = await raw.auditEvent.findFirstOrThrow({
@@ -300,7 +300,7 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
     });
     expect(row.tokenHash).toBeNull();
     expect(row.renderedText).toBe(
-      'Hola Carolina Duque: muerde la gasa 30 minutos. Te atendió Miembro DENTIST en Clinica dx222-entregas-a. Dudas: 601 555 0101.',
+      'Hola Carolina Duque: muerde la gasa 30 minutos. Te atendió Miembro DENTIST en Clinica dx222-entregas-a. Dudas: 212 555 0101.',
     );
     const audit = await raw.auditEvent.findFirstOrThrow({
       where: {
@@ -403,7 +403,7 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
       templateVersion: 1,
       clinic: { name: 'Clinica dx222-entregas-a' },
       locationName: 'Sede principal',
-      locationPhone: '601 555 0101',
+      locationPhone: '212 555 0101',
       patientName: 'Carolina Duque',
     });
 

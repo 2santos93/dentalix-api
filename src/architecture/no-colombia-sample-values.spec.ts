@@ -34,6 +34,13 @@ const EXCLUDED: readonly RegExp[] = [
   /^src\/architecture\/no-colombia-sample-values\.spec\.ts$/,
 ];
 
+/**
+ * Fuera de la guarda a propósito, y sin excepción que declarar: el código `'CO'`
+ * del enum legado `ClinicCountry`, que solo admite CO/ES y que aquí no se
+ * busca. Sigue en `LEGACY_ENUM_COUNTRY` (test/support/location-fixtures.ts,
+ * sedes anteriores a DX-312) y en las recetas legadas de `prescriptions`: el
+ * CHECK `prescriptions_legacy_country_fields_check` exige esa forma histórica.
+ */
 /** El nombre de una migración ya aplicada no es un valor de ejemplo. */
 const APPLIED_MIGRATION_NAME = /sin[_-]colombia[_-][a-z_-]+/g;
 

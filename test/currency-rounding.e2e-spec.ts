@@ -146,9 +146,13 @@ describe('DX-340: redondeo único por línea (e2e)', () => {
       minorUnits: 2,
       roundingDigits: 0,
     });
-    expect(byCode.get('USD')).toMatchObject({
+    expect(byCode.get('ALL')).toMatchObject({
       minorUnits: 2,
       roundingDigits: 0,
+    });
+    expect(byCode.get('USD')).toMatchObject({
+      minorUnits: 2,
+      roundingDigits: 2,
     });
   });
 

@@ -342,28 +342,28 @@ describe('GET /reports/locations-comparison (DX-014)', () => {
     const main = row(await report(), principal);
     expect(main.metrics.collected).toEqual([
       {
-        currency: 'VES',
-        value: 90_000,
-        previous: 75_000,
-        change: 20,
-        trend: 'BETTER',
-      },
-      {
         currency: 'USD',
         value: 50,
         previous: 0,
         change: null,
         trend: 'BETTER',
       },
+      {
+        currency: 'VES',
+        value: 90_000,
+        previous: 75_000,
+        change: 20,
+        trend: 'BETTER',
+      },
     ]);
     expect(amounts(main.metrics.collectionRate)).toEqual([
-      ['VES', 75],
       ['USD', null],
+      ['VES', 75],
     ]);
     // 3 pacientes distintos atendidos en octubre.
     expect(amounts(main.metrics.averageTicket)).toEqual([
-      ['VES', 30_000],
       ['USD', 16.67],
+      ['VES', 30_000],
     ]);
   });
 
@@ -390,12 +390,12 @@ describe('GET /reports/locations-comparison (DX-014)', () => {
   it('el total da un importe por moneda: nunca suma VES con USD', async () => {
     const { total } = await report();
     expect(amounts(total.metrics.production)).toEqual([
-      ['VES', 120_000],
       ['USD', 200],
+      ['VES', 120_000],
     ]);
     expect(amounts(total.metrics.collected)).toEqual([
-      ['VES', 1_090_000],
       ['USD', 150],
+      ['VES', 1_090_000],
     ]);
     expect(total.metrics.completedAppointments.value).toBe(11);
     expect(total.metrics.newPatients.value).toBe(2);
@@ -443,8 +443,8 @@ describe('GET /reports/locations-comparison (DX-014)', () => {
       const r = await report(OCTOBER, restrictedAdmin);
       expect(r.locations.map((l) => l.locationId)).toEqual([principal, norte]);
       expect(amounts(r.total.metrics.collected)).toEqual([
-        ['VES', 90_000],
         ['USD', 150],
+        ['VES', 90_000],
       ]);
       expect(JSON.stringify(r)).not.toContain(sur);
     });

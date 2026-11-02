@@ -482,13 +482,13 @@ describe('DX-256 visitas y agenda', () => {
       where: { id: otherLocation },
       select: { defaultPhoneRegion: true },
     });
-    const veneciana = await raw.patient.create({
+    const madrilena = await raw.patient.create({
       data: {
         tenantId: a.tenantId,
         firstName: 'Vera',
         lastName: 'Visitas',
-        phone: '0412-1234567',
-        countryCode: 'VE',
+        phone: '612 34 56 78',
+        countryCode: 'ES',
       },
     });
     const catalog = await raw.dentalCatalogItem.findFirstOrThrow({
@@ -497,7 +497,7 @@ describe('DX-256 visitas y agenda', () => {
     const plan = await raw.treatmentPlan.create({
       data: {
         tenantId: a.tenantId,
-        patientId: veneciana.id,
+        patientId: madrilena.id,
         currency: 'VES',
         status: 'ACCEPTED',
         acceptedAt: new Date(Date.now() - 2 * DAY),
@@ -528,9 +528,9 @@ describe('DX-256 visitas y agenda', () => {
       expect(await whatsAppOf()).toBeNull();
       await raw.location.update({
         where: { id: otherLocation },
-        data: { defaultPhoneRegion: 'VE' },
+        data: { defaultPhoneRegion: 'ES' },
       });
-      expect(await whatsAppOf()).toBe('584121234567');
+      expect(await whatsAppOf()).toBe('34612345678');
     } finally {
       await raw.location.update({
         where: { id: otherLocation },

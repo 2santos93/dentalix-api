@@ -253,9 +253,9 @@ describe('Caja por turno: concurrencia, monedas y sedes (e2e, DX-027)', () => {
     expect(
       detail.expected?.map((l) => [l.currency, l.method, l.expected]),
     ).toEqual([
-      ['VES', 'CASH', 25_000 + (await adjustmentsIn(id))],
       ['USD', 'CASH', 30],
       ['USD', 'CARD', 15],
+      ['VES', 'CASH', 25_000 + (await adjustmentsIn(id))],
     ]);
     expect(detail.payments).toHaveLength(3);
   });

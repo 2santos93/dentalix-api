@@ -26,7 +26,7 @@ function locationsWith(rows: Record<string, RegionalRow>): LocationRepository {
 }
 
 const LOCATIONS: Record<string, RegionalRow> = {
-  bog: { timeZone: 'America/Caracas', locale: 'es-VE', hourCycle: 'h23' },
+  ccs: { timeZone: 'America/Caracas', locale: 'es-VE', hourCycle: 'h23' },
   mad: { timeZone: 'Europe/Madrid', locale: 'es-ES', hourCycle: 'h23' },
   ny: { timeZone: 'America/New_York', locale: 'en-US', hourCycle: 'h12' },
   // Réplica de G1 sin reloj, y réplica anterior a G1 sin nada.

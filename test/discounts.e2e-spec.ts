@@ -335,8 +335,8 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
   });
 
   describe('«Descuento %» sobre varios ítems', () => {
-    it('USD sin decimales, tope ítem a ítem, un solo evento de auditoría', async () => {
-      const planId = await newPlan('USD');
+    it('RSD sin decimales, tope ítem a ítem, un solo evento de auditoría', async () => {
+      const planId = await newPlan('RSD');
       const items = [
         await addItem(planId, 85000),
         await addItem(planId, 123457),
@@ -929,7 +929,7 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
         .get(`/reports/discounts.csv?${period()}`)
         .expect(200);
       expect(csv.text).toContain(
-        'USD,1000000,800000,200000,0,200000,20.00,"Promoción o campaña"',
+        'USD,1000000.00,800000.00,200000.00,0.00,200000.00,20.00,"Promoción o campaña"',
       );
     });
 

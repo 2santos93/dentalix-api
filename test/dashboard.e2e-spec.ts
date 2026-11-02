@@ -517,14 +517,14 @@ describe('Dashboard (e2e)', () => {
           method: 'CASH',
         },
       });
-    // 31/10 22:00 en la zona de la sede = 01/11 03:00 UTC -> octubre.
-    await pay(1000, '2026-11-01T03:00:00.000Z');
-    // 01/11 00:30 en la zona de la sede = 01/11 05:30 UTC -> noviembre.
-    await pay(7, '2026-11-01T05:30:00.000Z');
-    // 01/10 00:30 en la zona de la sede = 01/10 05:30 UTC -> octubre.
-    await pay(20, '2026-10-01T05:30:00.000Z');
-    // 30/09 23:00 en la zona de la sede = 01/10 04:00 UTC -> septiembre.
-    await pay(300, '2026-10-01T04:00:00.000Z');
+    // 31/10 22:00 en la zona de la sede = 01/11 02:00 UTC -> octubre.
+    await pay(1000, '2026-11-01T02:00:00.000Z');
+    // 01/11 00:30 en la zona de la sede = 01/11 04:30 UTC -> noviembre.
+    await pay(7, '2026-11-01T04:30:00.000Z');
+    // 01/10 00:30 en la zona de la sede = 01/10 04:30 UTC -> octubre.
+    await pay(20, '2026-10-01T04:30:00.000Z');
+    // 30/09 23:00 en la zona de la sede = 01/10 03:00 UTC -> septiembre.
+    await pay(300, '2026-10-01T03:00:00.000Z');
 
     const dashboard = async (from: string, to: string) =>
       (

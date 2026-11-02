@@ -346,19 +346,6 @@ describe('Estado de cuenta — GET /patients/:patientId/account-statement (e2e)'
 
     expect(body.summary).toEqual([
       {
-        currency: 'VES',
-        budgeted: 500000,
-        // DX-262: sin saldo migrado.
-        openingBalance: 0,
-        openingPending: 0,
-        paid: 200000,
-        creditMovements: 0,
-        balance: 300000,
-        overdueCount: 0,
-        overdueAmount: 0,
-        nextInstallment: null,
-      },
-      {
         currency: 'USD',
         // 1000 + 200; el cancelado (500) y el borrador (PROPOSED) no suman.
         budgeted: 1200,
@@ -378,6 +365,19 @@ describe('Estado de cuenta — GET /patients/:patientId/account-statement (e2e)'
           dueDate: '2099-01-01T00:00:00.000Z',
           amount: 100,
         },
+      },
+      {
+        currency: 'VES',
+        budgeted: 500000,
+        // DX-262: sin saldo migrado.
+        openingBalance: 0,
+        openingPending: 0,
+        paid: 200000,
+        creditMovements: 0,
+        balance: 300000,
+        overdueCount: 0,
+        overdueAmount: 0,
+        nextInstallment: null,
       },
     ]);
 

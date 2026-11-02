@@ -545,7 +545,7 @@ describe('Alternativas de plan y presupuestos por seguir (e2e, DX-040)', () => {
       });
       await raw.patient.update({
         where: { id: plan.patientId },
-        data: { phone: '0412-1234567', countryCode: 'VE' },
+        data: { phone: '612 34 56 78', countryCode: 'ES' },
       });
       const read = async () =>
         (
@@ -562,12 +562,12 @@ describe('Alternativas de plan y presupuestos por seguir (e2e, DX-040)', () => {
       });
       await raw.location.update({
         where: { id: northLocationA },
-        data: { defaultPhoneRegion: 'VE' },
+        data: { defaultPhoneRegion: 'ES' },
       });
       try {
         expect(await read()).toMatchObject({
           planId: dueNorth,
-          patientWhatsApp: '584121234567',
+          patientWhatsApp: '34612345678',
         });
       } finally {
         await raw.location.update({

@@ -44,7 +44,7 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
-const NOW = new Date('2030-03-04T17:00:00Z'); // 12:00 en la zona de la sede
+const NOW = new Date('2030-03-04T16:00:00Z'); // 12:00 en la zona de la sede
 const at = (day: string, time: string) => new Date(`${day}T${time}:00-04:00`);
 const route = (locationId: string, suffix = '') =>
   `/locations/${locationId}/contingency-agenda${suffix}`;
@@ -133,7 +133,7 @@ describe('Agenda de contingencia por sede (DX-339, e2e)', () => {
     norte = await seed.location('Sede Norte');
     await raw.location.update({
       where: { id: principal },
-      data: { name: 'Sede Principal', phone: '6015550000' },
+      data: { name: 'Sede Principal', phone: '2125550000' },
     });
     tokens.ADMIN = a.adminToken;
     let dentistId = '';

@@ -465,11 +465,11 @@ describe('Plantillas de indicaciones postoperatorias (e2e, DX-222)', () => {
         .send(
           locationBody(REGIONAL_CARACAS_FIXTURE, {
             name: 'Sede Sur',
-            phone: '601 222 3333',
+            phone: '212 222 3333',
           }),
         )
         .expect(201);
-      expect((res.body as { phone: string }).phone).toBe('601 222 3333');
+      expect((res.body as { phone: string }).phone).toBe('212 222 3333');
     });
   });
 });

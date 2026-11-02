@@ -127,8 +127,24 @@ describe('Teléfono con formato internacional (e2e, DX-387)', () => {
         phone: 'llamar por la tarde',
         phoneInternational: null,
       });
-      const ambiguous = await newPatient('0058 412 1234567');
-      expect(ambiguous.phoneInternational).toBeNull();
+      // En una región cuyo prefijo de salida es 00, «0058…» se puede leer como
+      // internacional o como nacional: sin + no se decide. Con VE no lo es.
+      await raw.location.update({
+        where: { id: mainLocation },
+        data: { defaultPhoneRegion: 'TH' },
+      });
+      try {
+        const ambiguous = await newPatient('0058 412 1234567');
+        expect(ambiguous).toMatchObject({
+          phone: '0058 412 1234567',
+          phoneInternational: null,
+        });
+      } finally {
+        await raw.location.update({
+          where: { id: mainLocation },
+          data: { defaultPhoneRegion: 'VE' },
+        });
+      }
       const long = await newPatient('+58 414 555 0101 ext. 123456');
       expect(long.phoneInternational).toBe('+58 414 5550101 ext. 123456');
     });

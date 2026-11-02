@@ -29,6 +29,19 @@ export const REGIONAL_CARACAS_FIXTURE: RegionalFixture = {
   defaultPhoneRegion: 'VE',
 };
 
+/**
+ * Sede de Madrid: otra región telefónica que la principal, y un país que
+ * cabe en la columna legada `ClinicCountry` (CO/ES).
+ */
+export const REGIONAL_MADRID_FIXTURE: RegionalFixture = {
+  country: 'ES',
+  currency: 'EUR',
+  timeZone: 'Europe/Madrid',
+  locale: 'es-ES',
+  hourCycle: 'h23',
+  defaultPhoneRegion: 'ES',
+};
+
 /** Sede de Tokio: un número sin «+» se lee con su región (DX-329). */
 export const REGIONAL_TOKYO_FIXTURE: RegionalFixture = {
   country: 'JP',
@@ -97,10 +110,11 @@ export function registerBody<T extends object>(
 }
 
 /**
- * Excepción G5.3 (DX-334): columna anterior a DX-312: solo admite VE/ES. País
+ * Excepción G5.3 (DX-334): columna anterior a DX-312: solo admite CO/ES. País
  * de las sedes que los int de migraciones insertan en una etapa ANTERIOR a
  * DX-312 (sin la columna "countryCode"); no decide nada.
  */
+// El enum `ClinicCountry` solo admite CO/ES: un dato de esquema, no un ejemplo.
 export const LEGACY_ENUM_COUNTRY = 'CO';
 
 const quote = (text: string) => `'${text.replace(/'/g, "''")}'`;

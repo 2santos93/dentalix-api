@@ -451,8 +451,8 @@ describe('Caja — GET /payments (e2e)', () => {
     expect(items).toHaveLength(1);
     expect(summary.count).toBe(5);
     expect(summary.byCurrency).toEqual([
-      { currency: 'VES', total: 150000.5, count: 3 },
       { currency: 'USD', total: 60.25, count: 2 },
+      { currency: 'VES', total: 150000.5, count: 3 },
     ]);
     expect(summary.byMethod).toEqual([
       { method: 'CASH', currency: 'VES', total: 120000.5, count: 2 },
@@ -497,8 +497,8 @@ describe('Caja — GET /payments (e2e)', () => {
     );
     expect(body.scope.location).toEqual({ id: sedeNorte, name: 'Sede Norte' });
     expect(body.summary.byCurrency).toEqual([
-      { currency: 'VES', total: 30000, count: 1 },
       { currency: 'USD', total: 50.25, count: 1 },
+      { currency: 'VES', total: 30000, count: 1 },
     ]);
   });
 
@@ -729,7 +729,8 @@ describe('Caja — GET /payments (e2e)', () => {
         paidAt: string;
         paidOn: string;
       };
-      expect(payment.paidAt).toBe('2025-12-23T17:00:00.000Z');
+      // 12:00 en Caracas (UTC−4) = 16:00 UTC.
+      expect(payment.paidAt).toBe('2025-12-23T16:00:00.000Z');
       expect(payment.paidOn).toBe('2025-12-23');
 
       const list = await authA(

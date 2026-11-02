@@ -266,7 +266,7 @@ describe('Confirmación de cita por enlace (e2e)', () => {
       const patient = await createPatient(clinicA, '329002');
       await raw.patient.update({
         where: { id: patient },
-        data: { phone: '0412-1234567', countryCode: 'VE' },
+        data: { phone: '612 34 56 78', countryCode: 'ES' },
       });
       const appt = await createAppointment(clinicA, patient);
       // Con la región de la sede (VE), ese número no es válido: sin enlace.
@@ -279,11 +279,11 @@ describe('Confirmación de cita por enlace (e2e)', () => {
       });
       await raw.location.update({
         where: { id: location.location.id },
-        data: { defaultPhoneRegion: 'VE' },
+        data: { defaultPhoneRegion: 'ES' },
       });
       try {
         expect((await newLink(clinicA, appt.id)).body.whatsappPhone).toBe(
-          '584121234567',
+          '34612345678',
         );
       } finally {
         await raw.location.update({

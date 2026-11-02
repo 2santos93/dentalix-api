@@ -259,7 +259,7 @@ describe('Tasa manual de un día anterior a «manual desde» (e2e, DX-402)', () 
           exchangeRateBackup: {
             rateDate: DAY,
             manualSince: TODAY,
-            currencies: ['VES', 'USD'],
+            currencies: ['USD', 'VES'],
           },
         },
       }),

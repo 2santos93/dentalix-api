@@ -342,8 +342,8 @@ describe('Tareas programadas iniciales (e2e, DX-085)', () => {
       orderBy: { currency: 'asc' },
     });
     expect(rows.map((r) => [r.currency, r.rate.toNumber()])).toEqual([
-      ['VES', 4100.5],
       ['EUR', 0.91],
+      ['VES', 4100.5],
     ]);
   });
 });
