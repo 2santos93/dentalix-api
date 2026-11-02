@@ -27,9 +27,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -58,9 +58,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -148,9 +148,9 @@ jobs:
       # saltarse. `dentalix` es el superusuario del servicio postgres:16.
       REQUIRE_BACKUP_TESTS: '1'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -270,9 +270,9 @@ jobs:
       - name: Marcar el inicio del job
         run: echo "JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -289,7 +289,7 @@ jobs:
             | sed "s|^$GITHUB_WORKSPACE/||" | sort > e2e-shard-${{ matrix.shard }}.txt
           echo "Shard ${{ matrix.shard }}/${{ matrix.total }}: $(wc -l < e2e-shard-${{ matrix.shard }}.txt) specs"
           cat e2e-shard-${{ matrix.shard }}.txt
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: e2e-shard-${{ matrix.shard }}
           path: e2e-shard-${{ matrix.shard }}.txt
@@ -361,15 +361,15 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: npm
 
       - run: npm ci
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: e2e-shard-*
           path: e2e-shards
@@ -423,9 +423,9 @@ jobs:
       STORAGE_DIR: ./storage-test
       FILES_PUBLIC_BASE_URL: http://localhost:3000/api/v1/files
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -529,7 +529,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: docker build (sin publicar)
         run: docker build -t dentalix-api:ci .
       - name: Sin .env, sin devDependencies y sin root en la imagen
