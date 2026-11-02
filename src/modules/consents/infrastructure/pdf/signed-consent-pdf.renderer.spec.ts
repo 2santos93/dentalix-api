@@ -83,4 +83,37 @@ describe('PdfkitSignedConsentPdfRenderer (DX-422)', () => {
     const b = await renderer.render(model('Igual.'));
     expect(a.equals(b)).toBe(true);
   });
+
+  it('es determinista aunque el reloj cruce un segundo entre dos generaciones', async () => {
+    jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] });
+    try {
+      jest.setSystemTime(new Date('2026-11-02T10:00:00.999Z'));
+      const a = await renderer.render(model('Igual.'));
+      jest.setSystemTime(new Date('2026-11-02T10:00:01.001Z'));
+      const b = await renderer.render(model('Igual.'));
+      expect(a.equals(b)).toBe(true);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('es determinista también comprimido (el que corre en producción)', async () => {
+    const prod = new PdfkitSignedConsentPdfRenderer();
+    const a = await prod.render(model('Igual.'));
+    const b = await prod.render(model('Igual.'));
+    expect(a.equals(b)).toBe(true);
+  });
+
+  it('es determinista con generaciones simultáneas (el PNG se decodifica de forma asíncrona)', async () => {
+    // pdfkit decodifica cada firma PNG con zlib asíncrono: si dos firmas
+    // terminan en distinto orden, los objetos salen en otro orden (y con otros
+    // números). Se provoca solapando muchas generaciones.
+    const base = await renderer.render(model('Igual.'));
+    for (let round = 0; round < 600; round++) {
+      const batch = await Promise.all(
+        Array.from({ length: 8 }, () => renderer.render(model('Igual.'))),
+      );
+      for (const pdf of batch) expect(pdf.equals(base)).toBe(true);
+    }
+  });
 });
