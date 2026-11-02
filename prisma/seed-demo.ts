@@ -590,6 +590,12 @@ class DemoSeeder {
       // DX-359: el alta queda auditada, sin petición detrás.
       request: null,
     });
+    // DX-021-bis: la demo se entra con la contraseña documentada, sin el MFA
+    // que `createClinicWithOwner` exige a las clínicas nuevas.
+    await this.prisma.tenant.update({
+      where: { id: tenantId },
+      data: { requireAdminMfa: false },
+    });
 
     let confirmationUrl: string | undefined;
     try {
