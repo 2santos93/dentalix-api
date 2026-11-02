@@ -8,7 +8,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -74,10 +74,10 @@ async function seedClinic(subdomain: string): Promise<Seeded> {
     },
   });
   const sede1 = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, { tenantId, name: 'Sede 1' }),
+    data: locationData(REGIONAL_CARACAS_FIXTURE, { tenantId, name: 'Sede 1' }),
   });
   const sede2 = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, { tenantId, name: 'Sede 2' }),
+    data: locationData(REGIONAL_CARACAS_FIXTURE, { tenantId, name: 'Sede 2' }),
   });
   const catalog = await raw.dentalCatalogItem.create({
     data: {
@@ -307,7 +307,7 @@ describe('patient_ledgers: resumen por paciente mantenido por la BD (DX-155, int
   async function newPlan(
     s: Seeded,
     patientId: string,
-    currency = 'COP',
+    currency = 'VES',
   ): Promise<string> {
     const p = await as(s, (tx) =>
       tx.treatmentPlan.create({
@@ -362,7 +362,7 @@ describe('patient_ledgers: resumen por paciente mantenido por la BD (DX-155, int
             treatmentPlanId: planId,
             patientId,
             amount,
-            currency: options.currency ?? 'COP',
+            currency: options.currency ?? 'VES',
             paidAt: options.paidAt ?? new Date(),
             method: 'CASH',
           },
@@ -412,7 +412,7 @@ describe('patient_ledgers: resumen por paciente mantenido por la BD (DX-155, int
       ledger: { paymentPlans: [] },
     });
     expect(row?.ledger.plans.map((p) => p.slice(0, 3))).toEqual([
-      [planId, 'DRAFT', 'COP'],
+      [planId, 'DRAFT', 'VES'],
     ]);
     await expectInSync(a);
   });
@@ -510,7 +510,7 @@ describe('patient_ledgers: resumen por paciente mantenido por la BD (DX-155, int
       tx.treatmentPlan.update({
         where: { id: planId },
         data: {
-          currency: 'COP',
+          currency: 'VES',
           status: 'PRESENTED',
           presentedAt: new Date(),
           presentedLocationId: a.sede2,
@@ -563,7 +563,7 @@ describe('patient_ledgers: resumen por paciente mantenido por la BD (DX-155, int
           tenantId: a.tenantId,
           treatmentPlanId: planId,
           patientId: ana,
-          currency: 'COP',
+          currency: 'VES',
           totalToFinance: 300000,
           installmentsCount: 3,
           periodicity: 'MONTHLY',
@@ -651,7 +651,7 @@ describe('patient_ledgers: resumen por paciente mantenido por la BD (DX-155, int
         data: ids.map((patientId) => ({
           tenantId: a.tenantId,
           patientId,
-          currency: 'COP',
+          currency: 'VES',
         })),
       }),
     );
@@ -724,7 +724,7 @@ describe('patient_ledgers: resumen por paciente mantenido por la BD (DX-155, int
     const slow = (patientId: string, locked: ReturnType<typeof gate<string>>) =>
       as(a, async (tx) => {
         const plan = await tx.treatmentPlan.create({
-          data: { tenantId: a.tenantId, patientId, currency: 'COP' },
+          data: { tenantId: a.tenantId, patientId, currency: 'VES' },
           select: { id: true },
         });
         await tx.treatmentPlanItem.create({

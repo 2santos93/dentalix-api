@@ -1,7 +1,7 @@
 {
   "about": "DX-340: vectores de redondeo compartidos por la API (src/shared/money/rounding-vectors.json) y la web (src/lib/money/rounding-vectors.json, copia byte a byte). Fijan la regla vigente: cada línea se redondea a roundingDigits de su moneda (la mitad hacia arriba) y el total es la suma de líneas. No dependen de Intl.",
   "currencies": {
-    "COP": {
+    "ALL": {
       "minorUnits": 2,
       "roundingDigits": 0
     },
@@ -188,56 +188,56 @@
       "discount": 0.5
     },
     {
-      "currency": "COP",
+      "currency": "ALL",
       "price": 123.45,
       "percent": 7.5,
       "capPercent": 100,
       "discount": 9
     },
     {
-      "currency": "COP",
+      "currency": "ALL",
       "price": 1000,
       "percent": 10,
       "capPercent": 10,
       "discount": 100
     },
     {
-      "currency": "COP",
+      "currency": "ALL",
       "price": 1005,
       "percent": 10.01,
       "capPercent": 10,
       "discount": 100
     },
     {
-      "currency": "COP",
+      "currency": "ALL",
       "price": 99.99,
       "percent": 10,
       "capPercent": 10,
       "discount": 9
     },
     {
-      "currency": "COP",
+      "currency": "ALL",
       "price": 19.99,
       "percent": 50,
       "capPercent": 100,
       "discount": 10
     },
     {
-      "currency": "COP",
+      "currency": "ALL",
       "price": 0.4,
       "percent": 100,
       "capPercent": 100,
       "discount": 0
     },
     {
-      "currency": "COP",
+      "currency": "ALL",
       "price": 150000.5,
       "percent": 12.34,
       "capPercent": 15,
       "discount": 18510
     },
     {
-      "currency": "COP",
+      "currency": "ALL",
       "price": 10.05,
       "percent": 5,
       "capPercent": 5,
@@ -318,25 +318,25 @@
       "price": 0.25
     },
     {
-      "currency": "COP",
+      "currency": "ALL",
       "base": 123.45,
       "percent": 7.5,
       "price": 114
     },
     {
-      "currency": "COP",
+      "currency": "ALL",
       "base": 19.99,
       "percent": 12.34,
       "price": 18
     },
     {
-      "currency": "COP",
+      "currency": "ALL",
       "base": 100.5,
       "percent": 0,
       "price": 100
     },
     {
-      "currency": "COP",
+      "currency": "ALL",
       "base": 0.5,
       "percent": 50,
       "price": 0
@@ -353,13 +353,13 @@
       "note": "Si RSD redondeara a sus 2 minor units ISO: decisión pendiente del dueño, no vigente."
     },
     {
-      "currency": "COP",
+      "currency": "ALL",
       "roundingDigits": 2,
       "price": 123.45,
       "percent": 7.5,
       "capPercent": 100,
       "discount": 9.26,
-      "note": "Ídem COP."
+      "note": "Ídem ALL."
     }
   ],
   "discountLimits": [
@@ -458,7 +458,7 @@
       "total": 214.45
     },
     {
-      "currency": "COP",
+      "currency": "ALL",
       "lines": [
         {
           "price": 150000.5,

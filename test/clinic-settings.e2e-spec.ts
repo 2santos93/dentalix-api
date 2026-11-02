@@ -119,7 +119,7 @@ describe('Ajustes › Datos de la clínica (e2e, DX-019)', () => {
     const res = await as(a, receptionA)
       .post(`/treatment-plans/${planA}/payments`, {
         amount,
-        currency: 'COP',
+        currency: 'USD',
         paidAt: new Date().toISOString(),
         method: 'CASH',
       })
@@ -185,7 +185,7 @@ describe('Ajustes › Datos de la clínica (e2e, DX-019)', () => {
     planA = (
       (
         await as(a)
-          .post(`/patients/${patientA}/treatment-plans`, { currency: 'COP' })
+          .post(`/patients/${patientA}/treatment-plans`, { currency: 'USD' })
           .expect(201)
       ).body as { id: string }
     ).id;
@@ -635,7 +635,7 @@ describe('Ajustes › Datos de la clínica (e2e, DX-019)', () => {
       const plan = (
         (
           await as(a)
-            .post(`/patients/${patientA}/treatment-plans`, { currency: 'COP' })
+            .post(`/patients/${patientA}/treatment-plans`, { currency: 'USD' })
             .expect(201)
         ).body as { id: string }
       ).id;

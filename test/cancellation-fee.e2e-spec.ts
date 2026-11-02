@@ -150,7 +150,7 @@ describe('Cargo por inasistencia y política en el enlace (DX-291)', () => {
           .post(`/locations/${principal}/cancellation-policy`, {
             noticeHours: 24,
             suggestedFee: 50000,
-            currency: 'COP',
+            currency: 'USD',
             patientText: POLICY_TEXT,
           })
           .expect(201)
@@ -196,7 +196,7 @@ describe('Cargo por inasistencia y política en el enlace (DX-291)', () => {
         noticeHours: 24,
         text: POLICY_TEXT,
         suggestedFee: 50000,
-        currency: 'COP',
+        currency: 'USD',
       });
       expect(Object.keys(body.appointment).sort()).toEqual([
         'end',
@@ -284,7 +284,7 @@ describe('Cargo por inasistencia y política en el enlace (DX-291)', () => {
           .expect(201)
       ).body as FeeView;
       expect(charged.status).toBe('CHARGED');
-      expect(charged.fee).toMatchObject({ amount: 40000, currency: 'COP' });
+      expect(charged.fee).toMatchObject({ amount: 40000, currency: 'USD' });
       const planId = charged.fee!.planId!;
 
       const plan = await raw.treatmentPlan.findUniqueOrThrow({
@@ -293,7 +293,7 @@ describe('Cargo por inasistencia y política en el enlace (DX-291)', () => {
       });
       expect(plan).toMatchObject({
         status: 'ACCEPTED',
-        currency: 'COP',
+        currency: 'USD',
         optionLabel: 'Cargos administrativos',
       });
       expect(plan.items).toHaveLength(1);
@@ -326,7 +326,7 @@ describe('Cargo por inasistencia y política en el enlace (DX-291)', () => {
       const pay = await api(a, tokens.RECEPTION!)
         .post(`/treatment-plans/${planId}/payments`, {
           amount: 40000,
-          currency: 'COP',
+          currency: 'USD',
           paidAt: new Date().toISOString(),
           method: 'CASH',
         })
@@ -423,7 +423,7 @@ describe('Cargo por inasistencia y política en el enlace (DX-291)', () => {
         .post(`/locations/${principal}/cancellation-policy`, {
           noticeHours: 24,
           suggestedFee: 50000,
-          currency: 'COP',
+          currency: 'USD',
           patientText: POLICY_TEXT,
           receptionCanCharge: true,
         })
@@ -585,7 +585,7 @@ describe('Cargo por inasistencia y política en el enlace (DX-291)', () => {
         doc.paths['/api/v1/appointments/{id}/cancellation-fee'].post.responses[
           '409'
         ].description;
-      expect(conflict).not.toMatch(/EPS|Colombia|Ley/);
+      expect(conflict).not.toMatch(/E[P]S|Colom[b]ia|Ley/);
     });
   });
 

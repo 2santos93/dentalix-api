@@ -58,11 +58,11 @@ describe('kpi-definitions (DX-014)', () => {
   describe('computeKpis con datos fijos', () => {
     const fixed = aggregates({
       production: new Map([
-        ['COP', 1_000_000],
+        ['VES', 1_000_000],
         ['USD', 400],
       ]),
       collected: new Map([
-        ['COP', 750_000],
+        ['VES', 750_000],
         ['USD', 100],
       ]),
       completed: 46,
@@ -74,33 +74,33 @@ describe('kpi-definitions (DX-014)', () => {
     });
 
     it('producción y cobrado por moneda, sin sumar monedas distintas', () => {
-      const kpis = computeKpis(fixed, ['COP', 'USD']);
+      const kpis = computeKpis(fixed, ['VES', 'USD']);
       expect(kpis.production).toEqual([
-        { currency: 'COP', value: 1_000_000 },
+        { currency: 'VES', value: 1_000_000 },
         { currency: 'USD', value: 400 },
       ]);
       expect(kpis.collected).toEqual([
-        { currency: 'COP', value: 750_000 },
+        { currency: 'VES', value: 750_000 },
         { currency: 'USD', value: 100 },
       ]);
     });
 
     it('% de cobro = cobrado ÷ producción, en cada moneda', () => {
-      expect(computeKpis(fixed, ['COP', 'USD']).collectionRate).toEqual([
-        { currency: 'COP', value: 75 },
+      expect(computeKpis(fixed, ['VES', 'USD']).collectionRate).toEqual([
+        { currency: 'VES', value: 75 },
         { currency: 'USD', value: 25 },
       ]);
     });
 
     it('ticket medio = cobrado ÷ pacientes distintos atendidos', () => {
-      expect(computeKpis(fixed, ['COP', 'USD']).averageTicket).toEqual([
-        { currency: 'COP', value: 30_000 },
+      expect(computeKpis(fixed, ['VES', 'USD']).averageTicket).toEqual([
+        { currency: 'VES', value: 30_000 },
         { currency: 'USD', value: 4 },
       ]);
     });
 
     it('citas atendidas, no-show % sobre atendidas + no-show, nuevos y ocupación', () => {
-      const kpis = computeKpis(fixed, ['COP', 'USD']);
+      const kpis = computeKpis(fixed, ['VES', 'USD']);
       expect(kpis.completedAppointments).toBe(46);
       expect(kpis.noShowRate).toBe(8);
       expect(kpis.newPatients).toBe(3);
@@ -132,13 +132,13 @@ describe('kpi-definitions (DX-014)', () => {
     it('sin citas: no-show y ticket null; sin horario: ocupación null', () => {
       const kpis = computeKpis(
         aggregates({
-          collected: new Map([['COP', 10]]),
+          collected: new Map([['VES', 10]]),
           capacityMinutes: null,
         }),
-        ['COP'],
+        ['VES'],
       );
       expect(kpis.noShowRate).toBeNull();
-      expect(kpis.averageTicket).toEqual([{ currency: 'COP', value: null }]);
+      expect(kpis.averageTicket).toEqual([{ currency: 'VES', value: null }]);
       expect(kpis.occupancy).toBeNull();
     });
 
@@ -167,12 +167,12 @@ describe('kpi-definitions (DX-014)', () => {
     it('redondea los porcentajes a 2 decimales', () => {
       const kpis = computeKpis(
         aggregates({
-          production: new Map([['COP', 3]]),
-          collected: new Map([['COP', 1]]),
+          production: new Map([['VES', 3]]),
+          collected: new Map([['VES', 1]]),
           completed: 2,
           noShow: 1,
         }),
-        ['COP'],
+        ['VES'],
       );
       expect(kpis.collectionRate[0].value).toBe(33.33);
       expect(kpis.noShowRate).toBe(33.33);
@@ -242,9 +242,9 @@ describe('kpi-definitions (DX-014)', () => {
       expect(
         currenciesCollectedWithoutProduction(
           aggregates({
-            production: new Map([['COP', 100]]),
+            production: new Map([['VES', 100]]),
             collected: new Map([
-              ['COP', 50],
+              ['VES', 50],
               ['USD', 20],
               ['EUR', 0],
             ]),
@@ -276,8 +276,8 @@ describe('kpi-definitions (DX-014)', () => {
   describe('combineAggregates (Total clínica)', () => {
     it('suma por moneda, citas y minutos; los pacientes distintos van aparte', () => {
       const a = aggregates({
-        production: new Map([['COP', 100]]),
-        collected: new Map([['COP', 50]]),
+        production: new Map([['VES', 100]]),
+        collected: new Map([['VES', 50]]),
         completed: 10,
         noShow: 1,
         lateCancellations: 2,
@@ -289,7 +289,7 @@ describe('kpi-definitions (DX-014)', () => {
       const b = aggregates({
         production: new Map([['USD', 20]]),
         collected: new Map([
-          ['COP', 25],
+          ['VES', 25],
           ['USD', 5],
         ]),
         completed: 5,
@@ -302,12 +302,12 @@ describe('kpi-definitions (DX-014)', () => {
       });
       const total = combineAggregates([a, b], 11);
       expect([...total.production]).toEqual([
-        ['COP', 100],
         ['USD', 20],
+        ['VES', 100],
       ]);
       expect([...total.collected]).toEqual([
-        ['COP', 75],
         ['USD', 5],
+        ['VES', 75],
       ]);
       expect(total).toMatchObject({
         completed: 15,

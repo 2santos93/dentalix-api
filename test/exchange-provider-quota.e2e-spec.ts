@@ -15,7 +15,7 @@ import {
 } from '../src/modules/exchange/domain/ports/exchange-rate-provider.port';
 import { DEFAULT_PROVIDER_RATES_LIMITS } from '../src/modules/exchange/application/provider-rates-gate';
 import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
-import { REGIONAL_BOGOTA_FIXTURE } from './support/location-fixtures';
+import { REGIONAL_CARACAS_FIXTURE } from './support/location-fixtures';
 
 // SEC-054: la cuota del proveedor de tasas es una para toda la plataforma.
 // Con un doble del proveedor que cuenta las llamadas (nunca sale a la red):
@@ -60,11 +60,12 @@ describe('Cuota del proveedor de tasas (e2e, SEC-054)', () => {
         )
       : Promise.resolve({
           base: 'USD',
-          rates: { COP: 4000 + Number(date.slice(-2)) },
+          rates: { VES: 4000 + Number(date.slice(-2)) },
         }),
   );
 
-  const today = () => civilDateIn(new Date(), REGIONAL_BOGOTA_FIXTURE.timeZone);
+  const today = () =>
+    civilDateIn(new Date(), REGIONAL_CARACAS_FIXTURE.timeZone);
   const get = (clinic: Clinic, path: string) =>
     request(app.getHttpServer())
       .get(`/api/v1/exchange/${path}`)
@@ -73,7 +74,7 @@ describe('Cuota del proveedor de tasas (e2e, SEC-054)', () => {
   const rates = (clinic: Clinic, date: string) =>
     get(clinic, `rates?date=${date}`);
   const convert = (clinic: Clinic, date: string) =>
-    get(clinic, `convert?amount=100&from=USD&to=COP&date=${date}`);
+    get(clinic, `convert?amount=100&from=USD&to=VES&date=${date}`);
 
   beforeAll(async () => {
     app = await createE2eApp({
@@ -208,7 +209,7 @@ describe('Cuota del proveedor de tasas (e2e, SEC-054)', () => {
     // El día anterior al cambio que ya está guardado se lee de la caché.
     expect((await rates(manual, OLD_DAYS[0])).body).toMatchObject({
       source: 'AUTOMATIC',
-      rates: { COP: 4001 },
+      rates: { VES: 4001 },
     });
     expect(fetchRates).not.toHaveBeenCalled();
   });
@@ -222,7 +223,7 @@ describe('Cuota del proveedor de tasas (e2e, SEC-054)', () => {
       expect(past.body).toEqual({
         base: 'USD',
         source: 'AUTOMATIC',
-        rates: { COP: 4020 },
+        rates: { VES: 4020 },
       });
     }
     expect(fetchRates).toHaveBeenCalledTimes(1);

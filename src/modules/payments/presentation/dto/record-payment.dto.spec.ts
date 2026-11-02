@@ -13,7 +13,7 @@ describe('RecordPaymentDto currency validation', () => {
     paidAt: '2026-07-01T00:00:00.000Z',
   };
 
-  it.each(['USD', 'COP', 'usd'])(
+  it.each(['USD', 'VES', 'usd'])(
     'accepts a real ISO-4217 currency, case-insensitively (%s)',
     async (currency) => {
       const dto = plainToInstance(RecordPaymentDto, { ...base, currency });

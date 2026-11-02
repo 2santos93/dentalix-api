@@ -147,7 +147,7 @@ describe('Paciente archivado: sus enlaces públicos ya no sirven (e2e, DX-461)',
 
   async function presentedPlan(patientId: string): Promise<string> {
     const plan = await as(clinicA)
-      .post(`/patients/${patientId}/treatment-plans`, { currency: 'COP' })
+      .post(`/patients/${patientId}/treatment-plans`, { currency: 'USD' })
       .expect(201);
     const planId = (plan.body as { id: string }).id;
     await as(clinicA)

@@ -13,7 +13,7 @@ function aging(
     ageApproximate: false,
     currencies: [
       {
-        currency: 'COP',
+        currency: 'USD',
         balance: debt,
         debt,
         credit: 0,
@@ -56,7 +56,7 @@ describe('overdueView (DX-150)', () => {
     ).toEqual({
       hasOverdue: true,
       overdueDays: 75,
-      amounts: [{ currency: 'COP', amount: 150_000 }],
+      amounts: [{ currency: 'USD', amount: 150_000 }],
     });
   });
 

@@ -1,5 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { CURRENCY_DIGITS } from '../../../prisma/reference/currency-digits';
+import { CLDR_ZERO_FORMAT_DIGITS } from './cldr-format-digits';
 import { regionalFormat, UI_LANGUAGE, type HourCycle } from './regional-format';
 import type * as RegionalFormatModule from './regional-format';
 
@@ -125,12 +127,18 @@ describe('regionalFormat', () => {
     expect(fmt.date(AT_1505_UTC, 'UTC')).toBe('27/10/2026');
   });
 
-  it('money: JPY integer without decimals, JPY with cents 2, COP (rounds to 0, CLDR formats with 2) with 2', () => {
+  it('money: JPY integer without decimals, JPY with cents 2, the legacy currency (rounds to 0, CLDR formats with 2) with 2', () => {
     const fmt = regionalFormat({ locale: 'en-US', hourCycle: 'h12' });
     expect(fmt.money(1234, 'JPY')).toBe('¥1,234');
     expect(fmt.money(1234.5, 'JPY')).toBe('¥1,234.50');
-    // COP redondea a 0 (currencies.rounding_digits) pero su formato CLDR 47 tiene 2: se pinta con 2.
-    expect(fmt.money(1234, 'COP')).toBe('COP\u00a01,234.00');
+    // Redondea a 0 (currencies.rounding_digits) pero su formato CLDR 47 tiene 2: se pinta con 2.
+    const legacy = CURRENCY_DIGITS.find(
+      (c) =>
+        c.roundingDigits === 0 &&
+        c.minorUnits === 2 &&
+        !CLDR_ZERO_FORMAT_DIGITS.has(c.code),
+    )!.code;
+    expect(fmt.money(1234, legacy)).toBe(`${legacy}\u00a01,234.00`);
   });
 
   it('KWD and XYZ as code plus locale number', () => {

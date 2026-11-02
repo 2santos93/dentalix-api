@@ -24,7 +24,7 @@ import {
 } from '../src/modules/exchange/domain/ports/exchange-rate-provider.port';
 import { JobRegistry } from '../src/modules/jobs/application/job-registry';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 import { purgeTenants } from './support/tenant-purge';
@@ -54,7 +54,7 @@ const manualRepo = new PrismaManualExchangeRateRepository(
 );
 const retryRepo = new PrismaPaymentBaseRetryRepository(prisma, tenantContext);
 
-/** El proveedor: COP por 1 USD; sin VES. `down` lo tumba. */
+/** El proveedor: EUR por 1 USD; sin VES. `down` lo tumba. */
 const provider = {
   calls: [] as string[],
   down: false,
@@ -65,7 +65,7 @@ const provider = {
         new ExchangeRateUnavailableError('Open Exchange Rates returned 503'),
       );
     }
-    return Promise.resolve({ base: 'USD', rates: { COP: 4000 } });
+    return Promise.resolve({ base: 'USD', rates: { EUR: 4000 } });
   },
 };
 const convert = new ConvertAmountUseCase(
@@ -112,7 +112,7 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
   });
   const tenantId = tenant.id;
   await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, { tenantId, name: 'Sede' }),
+    data: locationData(REGIONAL_CARACAS_FIXTURE, { tenantId, name: 'Sede' }),
   });
   const user = await raw.user.create({
     data: {
@@ -283,7 +283,7 @@ describe('DX-380 · reintentos de abonos sin base (int)', () => {
 
   it('con 60 abonos atascados más nuevos, el resoluble más antiguo recibe su base en la primera pasada', async () => {
     const clinic = await seedClinic(`${PREFIX}-queue`);
-    const resolvable = await pay(clinic, 'COP', DAYS[1]);
+    const resolvable = await pay(clinic, 'EUR', DAYS[1]);
     const stuck: string[] = [];
     for (let i = 0; i < 60; i += 1)
       stuck.push(await pay(clinic, 'VES', DAYS[1]));
@@ -324,8 +324,8 @@ describe('DX-380 · reintentos de abonos sin base (int)', () => {
   it('con el proveedor caído, el fallo cuenta como «sin tasa» y el día no se vuelve a pedir (caché negativa)', async () => {
     const clinic = await seedClinic(`${PREFIX}-down`);
     provider.down = true;
-    const id = await pay(clinic, 'COP', DAYS[2]);
-    const other = await pay(clinic, 'COP', DAYS[2]);
+    const id = await pay(clinic, 'EUR', DAYS[2]);
+    const other = await pay(clinic, 'EUR', DAYS[2]);
 
     expect(await inClinic(clinic, () => retries.retryDue(50))).toEqual({
       resolved: 0,
@@ -354,7 +354,7 @@ describe('DX-380 · reintentos de abonos sin base (int)', () => {
         manualExchangeRatesSince: new Date(`${DAYS[3]}T00:00:00Z`),
       },
     });
-    const id = await pay(clinic, 'COP', DAYS[3]);
+    const id = await pay(clinic, 'EUR', DAYS[3]);
 
     expect(await inClinic(clinic, () => retries.retryDue(50))).toEqual({
       resolved: 0,
@@ -366,7 +366,7 @@ describe('DX-380 · reintentos de abonos sin base (int)', () => {
     await inClinic(clinic, () =>
       manualRepo.create({
         date: DAYS[3],
-        currency: 'COP',
+        currency: 'EUR',
         rate: 4000,
         createdById: clinic.userId,
       }),
@@ -390,7 +390,7 @@ describe('DX-380 · reintentos de abonos sin base (int)', () => {
       select: { id: true },
     });
     const pending = await seedClinic(`${PREFIX}-pending`);
-    const id = await pay(pending, 'COP', DAYS[1]);
+    const id = await pay(pending, 'EUR', DAYS[1]);
     const mine = new Set([...many.map((t) => t.id), pending.tenantId]);
     // La consulta real, acotada a las clínicas de esta prueba (BD compartida).
     const due = await retryRepo.dueTenantIds();

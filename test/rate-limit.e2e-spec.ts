@@ -352,7 +352,7 @@ describe('Rate limiting (e2e)', () => {
       const convert = (sub: string, tenantId: string) =>
         request(app.getHttpServer())
           .get(
-            '/api/v1/exchange/convert?amount=1&from=USD&to=COP&date=2026-10-01',
+            '/api/v1/exchange/convert?amount=1&from=USD&to=VES&date=2026-10-01',
           )
           .set('Authorization', bearer(sub, tenantId));
       expect((await rates('rx-1', 'clinica-1')).status).toBe(401);

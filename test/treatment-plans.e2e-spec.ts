@@ -15,7 +15,7 @@ import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   REGIONAL_TOKYO_FIXTURE,
   legacyLocationInsert,
   locationData,
@@ -88,7 +88,7 @@ async function registerAndLogin(
 }> {
   const register = await registerVerified(
     app,
-    clinicRegisterBody(REGIONAL_BOGOTA_FIXTURE, {
+    clinicRegisterBody(REGIONAL_CARACAS_FIXTURE, {
       clinicName: opts.clinicName,
       subdomain: opts.subdomain,
       email: opts.email,
@@ -444,9 +444,9 @@ describe('Treatment plans (e2e)', () => {
       return req.send(body);
     };
 
-    // Una sola sede (COP): sin sede activa se usa la moneda común.
+    // Una sola sede (VES): sin sede activa se usa la moneda común.
     const single = await createPlan().expect(201);
-    expect((single.body as { currency: string }).currency).toBe('COP');
+    expect((single.body as { currency: string }).currency).toBe('VES');
 
     const tokyo = (
       await raw.location.create({
@@ -460,7 +460,7 @@ describe('Treatment plans (e2e)', () => {
       raw,
       clinic.tenantId,
       'Sin configurar',
-      REGIONAL_BOGOTA_FIXTURE.country,
+      REGIONAL_CARACAS_FIXTURE.country,
     );
 
     // Sede activa JPY: JPY. Una moneda explícita sigue mandando.

@@ -34,7 +34,7 @@ async function messages(cls: new () => object, plain: object) {
 const valid = {
   category: 'Papelería',
   amount: 120000.5,
-  currency: 'cop',
+  currency: 'usd',
   invoiceDate: '2026-10-20',
 };
 
@@ -53,7 +53,7 @@ describe('DTOs de gastos (DX-274)', () => {
           attachmentUploadId: '9b2f9a6e-3f1c-4d2e-8a55-0d3f6a1b7c10',
         }),
       ).toEqual([]);
-      expect(plainToInstance(CreateExpenseDto, valid).currency).toBe('COP');
+      expect(plainToInstance(CreateExpenseDto, valid).currency).toBe('USD');
     });
 
     it('el pago admite fromCashSession booleano y rechaza otros tipos', async () => {
@@ -232,15 +232,15 @@ describe('DTOs de gastos (DX-274)', () => {
       const ok = plainToInstance(CreateCashOutflowDto, {
         category: 'Mensajería',
         amount: 15000,
-        currency: 'cop',
+        currency: 'usd',
       });
       expect(await validate(ok, { whitelist: true })).toEqual([]);
-      expect(ok.currency).toBe('COP');
+      expect(ok.currency).toBe('USD');
       expect(
         await messages(CreateCashOutflowDto, { category: 'x', amount: 0 }),
       ).toContain(AMOUNT_MESSAGE);
       expect(
-        await messages(CreateCashOutflowDto, { amount: 1, currency: 'COP' }),
+        await messages(CreateCashOutflowDto, { amount: 1, currency: 'USD' }),
       ).toContain(CATEGORY_INVALID_MESSAGE);
     });
 
@@ -248,7 +248,7 @@ describe('DTOs de gastos (DX-274)', () => {
       const dto = plainToInstance(CreateCashOutflowDto, {
         category: 'Mensajería',
         amount: 1,
-        currency: 'COP',
+        currency: 'USD',
         locationId: '00000000-0000-4000-8000-000000000000',
         invoiceDate: '2026-01-01',
         payment: { amount: 1, method: 'CARD' },

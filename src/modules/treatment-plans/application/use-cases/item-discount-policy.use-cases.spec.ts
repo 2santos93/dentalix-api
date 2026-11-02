@@ -50,7 +50,7 @@ function setup(plan: { status?: TreatmentPlanStatus; currency?: string } = {}) {
   repo.seedPlan({
     id: 'plan1',
     status: plan.status ?? TreatmentPlanStatus.DRAFT,
-    currency: plan.currency ?? 'COP',
+    currency: plan.currency ?? 'USD',
   });
   const policy = testDiscountPolicy();
   return {
@@ -308,8 +308,8 @@ describe('Tope de descuento por rol en los ítems del plan (DX-204)', () => {
       return ctx;
     }
 
-    it('COP: 7,5 % de tres ítems, sin decimales', async () => {
-      const { bulk } = withItems('COP', [85000, 123457, 99999]);
+    it('RSD: 7,5 % de tres ítems, sin decimales', async () => {
+      const { bulk } = withItems('RSD', [85000, 123457, 99999]);
       const { items } = await bulk.execute(
         'plan1',
         { itemIds: ['item1', 'item2', 'item3'], percent: 7.5 },
@@ -332,7 +332,7 @@ describe('Tope de descuento por rol en los ítems del plan (DX-204)', () => {
     });
 
     it('el tope se respeta ítem a ítem aunque el redondeo lo pase', async () => {
-      const { bulk } = withItems('COP', [1005, 2000, 3333]);
+      const { bulk } = withItems('RSD', [1005, 2000, 3333]);
       const { items } = await bulk.execute(
         'plan1',
         { itemIds: ['item1', 'item2', 'item3'], percent: 10 },
@@ -343,7 +343,7 @@ describe('Tope de descuento por rol en los ítems del plan (DX-204)', () => {
     });
 
     it('un % por encima del tope del rol: 403 y nada cambia', async () => {
-      const { bulk, repo } = withItems('COP', [1000, 2000, 3000]);
+      const { bulk, repo } = withItems('USD', [1000, 2000, 3000]);
       await expect(
         bulk.execute(
           'plan1',
@@ -360,7 +360,7 @@ describe('Tope de descuento por rol en los ítems del plan (DX-204)', () => {
     });
 
     it('por encima del umbral exige el motivo (422) y nada cambia', async () => {
-      const { bulk, repo } = withItems('COP', [1000, 2000]);
+      const { bulk, repo } = withItems('USD', [1000, 2000]);
       await expect(
         bulk.execute(
           'plan1',
@@ -386,7 +386,7 @@ describe('Tope de descuento por rol en los ítems del plan (DX-204)', () => {
     });
 
     it('un ítem que no es del plan: 404 y nada cambia', async () => {
-      const { bulk, repo } = withItems('COP', [1000]);
+      const { bulk, repo } = withItems('USD', [1000]);
       repo.seedItem({ id: 'other', planId: 'plan2', price: 1000 });
       await expect(
         bulk.execute(

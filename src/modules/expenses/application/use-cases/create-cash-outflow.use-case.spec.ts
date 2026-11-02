@@ -34,7 +34,7 @@ const body = (patch: Partial<CashOutflowInput> = {}): CashOutflowInput => ({
   supplier: ' Rappi ',
   description: 'Envío de modelos al laboratorio',
   amount: 15000,
-  currency: 'cop',
+  currency: 'usd',
   ...patch,
 });
 
@@ -81,7 +81,7 @@ describe('salida de caja menor (DX-274)', () => {
       category: 'Mensajería',
       supplier: 'Rappi',
       amount: 15000,
-      currency: 'COP',
+      currency: 'USD',
       invoiceDate: '2026-10-23',
       status: 'PAID',
       createdById: RECEPTION,

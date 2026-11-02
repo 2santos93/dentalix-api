@@ -112,7 +112,7 @@ describe('manual_exchange_rates (DX-374, int)', () => {
     expect(seenByB).toEqual([{ tenantId: b.tenantId }]);
     // Con el contexto de A, una fila de B no pasa el WITH CHECK.
     await expect(
-      asApp(a.tenantId, (tx) => insertRate(tx, b, { currency: 'COP' })),
+      asApp(a.tenantId, (tx) => insertRate(tx, b, { currency: 'GBP' })),
     ).rejects.toThrow(/row-level security/);
     // Sin clínica en el contexto (NULLIF de ''), nada.
     const anonymous = await appRole.$transaction(async (tx) => {
@@ -124,20 +124,20 @@ describe('manual_exchange_rates (DX-374, int)', () => {
 
   it('única por clínica, día y moneda; la misma en otra clínica sí entra', async () => {
     await asApp(a.tenantId, (tx) =>
-      insertRate(tx, a, { date: '2026-10-28', currency: 'COP' }),
+      insertRate(tx, a, { date: '2026-10-28', currency: 'GBP' }),
     );
     await expect(
       asApp(a.tenantId, (tx) =>
         insertRate(tx, a, {
           date: '2026-10-28',
-          currency: 'COP',
+          currency: 'GBP',
           rate: '4100',
         }),
       ),
     ).rejects.toThrow(/23505|Unique constraint/);
     await expect(
       asApp(b.tenantId, (tx) =>
-        insertRate(tx, b, { date: '2026-10-28', currency: 'COP' }),
+        insertRate(tx, b, { date: '2026-10-28', currency: 'GBP' }),
       ),
     ).resolves.toBe(1);
   });
@@ -204,7 +204,7 @@ describe('manual_exchange_rates (DX-374, int)', () => {
   it('el autor tiene que ser miembro de la MISMA clínica (FK compuesta)', async () => {
     await expect(
       asApp(a.tenantId, (tx) =>
-        insertRate(tx, a, { date: '2026-10-03', currency: 'COP' }, b),
+        insertRate(tx, a, { date: '2026-10-03', currency: 'GBP' }, b),
       ),
     ).rejects.toThrow(/manual_exchange_rates_created_by_fkey/);
   });
@@ -212,11 +212,11 @@ describe('manual_exchange_rates (DX-374, int)', () => {
   it('"createdAt" lo pone la BD en UTC (trigger), aunque el INSERT mande otra hora', async () => {
     const [row] = await asApp(a.tenantId, async (tx) => {
       await tx.$executeRawUnsafe(`SET LOCAL TIME ZONE 'America/Caracas'`);
-      await insertRate(tx, a, { date: '2026-10-04', currency: 'COP' });
+      await insertRate(tx, a, { date: '2026-10-04', currency: 'GBP' });
       await tx.$executeRawUnsafe(
         `INSERT INTO "manual_exchange_rates"
            ("id", "tenantId", "date", "currency", "rate", "createdById", "createdByMembershipId", "createdAt")
-         VALUES (gen_random_uuid(), $1::uuid, DATE '2026-10-05', 'COP', 1, $2::uuid, $3::uuid, '2001-01-01')`,
+         VALUES (gen_random_uuid(), $1::uuid, DATE '2026-10-05', 'GBP', 1, $2::uuid, $3::uuid, '2001-01-01')`,
         a.tenantId,
         a.userId,
         a.membershipId,

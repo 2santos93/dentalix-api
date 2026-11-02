@@ -19,7 +19,7 @@ import type { DentalCatalogItem } from '../src/modules/dental-catalog/domain/ent
 import type { PricingSource } from '../src/modules/treatment-plans/domain/ports/pricing-source.port';
 import { catalogPricing } from '../src/modules/treatment-plans/application/use-cases/__fixtures__/catalog-pricing-source';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -86,7 +86,7 @@ async function seed(): Promise<Seeded> {
     },
   });
   const location = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId: tenant.id,
       name: 'Sede principal',
     }),
@@ -121,7 +121,7 @@ async function draftPlanWithItem(): Promise<{
   itemId: string;
 }> {
   const plan = await raw.treatmentPlan.create({
-    data: { tenantId: s.tenantId, patientId: s.patientId, currency: 'COP' },
+    data: { tenantId: s.tenantId, patientId: s.patientId, currency: 'USD' },
   });
   const item = await raw.treatmentPlanItem.create({
     data: {

@@ -158,7 +158,7 @@ describe('plantillas reservadas para otras tareas', () => {
       patientName: 'Carolina',
       startsAtLabel: 'martes 20 de octubre de 2026 a las 9:30 a. m.',
       locationName: 'Sede Norte',
-      locationAddress: 'Cra 15 # 93-60',
+      locationAddress: 'Av. Francisco de Miranda 93',
       providerName: 'Dra. Laura Gómez',
       confirmUrl: 'https://demo.dentalix.app/confirmar/abc',
       unsubscribeUrl: null,
@@ -174,7 +174,9 @@ describe('plantillas reservadas para otras tareas', () => {
     expect(withLink.text).toContain(
       'Fecha y hora: martes 20 de octubre de 2026 a las 9:30 a. m. (hora de la sede)',
     );
-    expect(withLink.text).toContain('Sede: Sede Norte (Cra 15 # 93-60)');
+    expect(withLink.text).toContain(
+      'Sede: Sede Norte (Av. Francisco de Miranda 93)',
+    );
     expect(withLink.text).toContain('Profesional: Dra. Laura Gómez');
     expect(withLink.html).toContain('Confirmar o cancelar');
     expect(withLink.html).toContain(
@@ -208,13 +210,13 @@ describe('plantillas reservadas para otras tareas', () => {
         cancellationPolicy: {
           noticeHours: 24,
           text: 'Las citas no avisadas se cobran.',
-          feeLabel: '$ 50.000 COP',
+          feeLabel: '$ 50.000 USD',
         },
       },
       brand,
     );
     const expected =
-      'Política de cancelación: si no puedes asistir, avísanos con al menos 24 h de antelación. Las citas no avisadas se cobran. La inasistencia o la cancelación con menos aviso puede tener un cargo de $ 50.000 COP.';
+      'Política de cancelación: si no puedes asistir, avísanos con al menos 24 h de antelación. Las citas no avisadas se cobran. La inasistencia o la cancelación con menos aviso puede tener un cargo de $ 50.000 USD.';
     expect(withPolicy.text).toContain(expected);
     expect(withPolicy.html).toContain('Política de cancelación');
 
@@ -314,7 +316,7 @@ describe('plantillas reservadas para otras tareas', () => {
       reference: 'NOR-000123',
       legacy: false,
       locationName: 'Sede Norte',
-      locationAddress: 'Cra 15 # 93-60',
+      locationAddress: 'Av. Francisco de Miranda 93',
       fiscalLine: null,
       patientDocLabel: 'Documento nacional ******5678',
       amountLabel: '$ 150.000',
@@ -337,7 +339,9 @@ describe('plantillas reservadas para otras tareas', () => {
       expect(email.text).toContain('Documento: Documento nacional ******5678');
       expect(email.text).toContain('Valor: $ 150.000 · Efectivo · 17/10/2026');
       expect(email.text).toContain('Saldo del plan tras el abono: $ 450.000');
-      expect(email.text).toContain('Sede: Sede Norte (Cra 15 # 93-60)');
+      expect(email.text).toContain(
+        'Sede: Sede Norte (Av. Francisco de Miranda 93)',
+      );
       expect(email.text).toContain('Datos fiscales pendientes');
       expect(email.text).toContain('Este documento no es factura');
       expect(email.html).not.toContain('<a href');
@@ -398,7 +402,7 @@ describe('plantillas reservadas para otras tareas', () => {
           ...base,
           reference: 'REC-3f1c2b9e',
           legacy: true,
-          fiscalLine: 'Sonrisas S.A.S. · NIT 900123456-7',
+          fiscalLine: 'Sonrisas C.A. · Id. fiscal J-12345678-9',
           patientName: '<b>Ana</b>',
           patientDocLabel: null,
           balanceLabel: null,
@@ -406,7 +410,7 @@ describe('plantillas reservadas para otras tareas', () => {
         brand,
       );
       expect(email.text).toContain('sin serie');
-      expect(email.text).toContain('Sonrisas S.A.S. · NIT 900123456-7');
+      expect(email.text).toContain('Sonrisas C.A. · Id. fiscal J-12345678-9');
       expect(email.text).not.toContain('Datos fiscales pendientes');
       expect(email.text).not.toContain('Documento:');
       expect(email.text).not.toContain('Saldo del plan');

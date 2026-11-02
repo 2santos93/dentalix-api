@@ -14,7 +14,7 @@ function row(overrides: Partial<CashPaymentView> = {}): CashPaymentView {
     paidAt: new Date('2026-10-15T17:00:00.000Z'),
     paidOn: '2026-10-15',
     amount: 150000,
-    currency: 'COP',
+    currency: 'RSD',
     method: PaymentMethod.TRANSFER,
     paymentMethod: { id: 'pm-mobile', name: 'Pago móvil' },
     reference: 'ABC 123',
@@ -83,7 +83,7 @@ describe('CSV de la caja (DX-395)', () => {
         '"Pago móvil"',
         '"ABC 123"',
         '""',
-        'COP',
+        'RSD',
         '150000',
         // DX-516: sin ajustes, vacíos y lo cobrado = el importe.
         '',
@@ -153,7 +153,7 @@ describe('CSV de la caja (DX-395)', () => {
         '"Pago móvil"',
         '"ABC 123"',
         '"A/2026 00-77"',
-        'COP',
+        'RSD',
         '150000',
         '',
         '',
@@ -176,7 +176,7 @@ describe('CSV de la caja (DX-395)', () => {
           REFERENCE_CURRENCY_DIGITS,
         ),
       )[1];
-      expect(line).toContain(`,"ABC 123",${cell},COP,`);
+      expect(line).toContain(`,"ABC 123",${cell},RSD,`);
     }
   });
 

@@ -69,7 +69,7 @@ describe('idempotencia de gastos (DX-274)', () => {
       supplier: 'Papelería Luna',
       description: 'Resmas',
       amount: 120000,
-      currency: 'COP',
+      currency: 'VES',
       invoiceDate: '2026-10-20',
       dueDate: '2026-11-20',
       payment: { amount: 20000, method: 'CASH', paidOn: '2026-10-20' },
@@ -81,7 +81,7 @@ describe('idempotencia de gastos (DX-274)', () => {
           ...base,
           category: ' Papelería  ',
           supplier: '  Papelería   Luna ',
-          currency: 'cop',
+          currency: 'ves',
         }),
       );
       expect(expenseRequestFingerprint({ ...base, supplier: '' })).toBe(
@@ -111,7 +111,7 @@ describe('idempotencia de gastos (DX-274)', () => {
       category: 'Mensajería',
       supplier: 'Rappi',
       amount: 15000,
-      currency: 'COP',
+      currency: 'VES',
     };
 
     it('ignora espacios, mayúsculas de la moneda y vacíos equivalentes', () => {
@@ -119,7 +119,7 @@ describe('idempotencia de gastos (DX-274)', () => {
         cashOutflowFingerprint({
           ...base,
           supplier: '  Rappi ',
-          currency: 'cop',
+          currency: 'ves',
           description: '',
         }),
       );

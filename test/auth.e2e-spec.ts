@@ -12,7 +12,7 @@ import {
 import { resetDatabase } from './support/e2e-fixtures';
 import {
   REGIONAL_BERLIN_FIXTURE,
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   REGIONAL_NEW_YORK_FIXTURE,
   REGIONAL_TOKYO_FIXTURE,
   registerBody as clinicRegisterBody,
@@ -69,7 +69,7 @@ describe('Auth (e2e)', () => {
   it('registers a clinic and logs the owner in', async () => {
     const register = await registerVerified(
       app,
-      clinicRegisterBody(REGIONAL_BOGOTA_FIXTURE, {
+      clinicRegisterBody(REGIONAL_CARACAS_FIXTURE, {
         clinicName: 'Sonrisa',
         subdomain: 'sonrisa',
         email: 'owner@sonrisa.com',
@@ -96,7 +96,7 @@ describe('Auth (e2e)', () => {
   it('a registered clinic is created with majorityAge 18', async () => {
     const register = await registerVerified(
       app,
-      clinicRegisterBody(REGIONAL_BOGOTA_FIXTURE, {
+      clinicRegisterBody(REGIONAL_CARACAS_FIXTURE, {
         clinicName: 'Mayoría',
         subdomain: 'dx328-registro',
         email: 'owner@dx328-registro.com',
@@ -136,7 +136,7 @@ describe('Auth (e2e)', () => {
     // Nueva clínica aislada para no chocar con los otros tests.
     await registerVerified(
       app,
-      clinicRegisterBody(REGIONAL_BOGOTA_FIXTURE, {
+      clinicRegisterBody(REGIONAL_CARACAS_FIXTURE, {
         clinicName: 'Muela',
         subdomain: 'muela',
         email: 'owner@muela.com',
@@ -368,7 +368,7 @@ describe('Auth (e2e)', () => {
         .set('X-Tenant-Host', 'localhost')
         .send({
           ...subset,
-          locationCountry: 'CO',
+          locationCountry: 'VE',
           locationCurrency: 'JPY',
           locationLocale: 'ja-JP',
         })
@@ -544,7 +544,7 @@ describe('Auth (e2e)', () => {
         .set('X-Tenant-Host', 'localhost')
         .expect(200);
       const codes = (res.body as { code: string }[]).map((c) => c.code);
-      expect(codes).toEqual(expect.arrayContaining(['COP', 'EUR', 'JPY']));
+      expect(codes).toEqual(expect.arrayContaining(['GBP', 'EUR', 'JPY']));
       expect(codes).not.toContain('KWD');
       expect(res.body).toEqual(
         expect.arrayContaining([

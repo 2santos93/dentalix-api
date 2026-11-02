@@ -170,17 +170,17 @@ describe('política de descuentos (DX-204)', () => {
   });
 
   describe('redondeo por moneda', () => {
-    it('COP (y CLP) sin decimales; EUR, USD a céntimos', () => {
-      expect(digits('COP')).toBe(0);
+    it('RSD (y CLP) sin decimales; EUR, USD a céntimos', () => {
+      expect(digits('RSD')).toBe(0);
       expect(digits('CLP')).toBe(0);
       expect(digits('EUR')).toBe(2);
       expect(digits('USD')).toBe(2);
     });
 
-    it('discountForPercent: 7,5 % de tres precios en COP sin decimales', () => {
-      expect(discountForPercent(85000, 7.5, digits('COP'), 10)).toBe(6375);
-      expect(discountForPercent(123457, 7.5, digits('COP'), 10)).toBe(9259);
-      expect(discountForPercent(99999, 7.5, digits('COP'), 10)).toBe(7500);
+    it('discountForPercent: 7,5 % de tres precios en RSD sin decimales', () => {
+      expect(discountForPercent(85000, 7.5, digits('RSD'), 10)).toBe(6375);
+      expect(discountForPercent(123457, 7.5, digits('RSD'), 10)).toBe(9259);
+      expect(discountForPercent(99999, 7.5, digits('RSD'), 10)).toBe(7500);
     });
 
     it('discountForPercent: en EUR a céntimos', () => {
@@ -191,14 +191,14 @@ describe('política de descuentos (DX-204)', () => {
 
     it('si el redondeo pasara del tope del rol, baja a la unidad que lo respeta', () => {
       // 10 % de 1005 = 100,5 → redondeado 101 (10,05 %) > 10 % → 100.
-      expect(discountForPercent(1005, 10, digits('COP'), 10)).toBe(100);
+      expect(discountForPercent(1005, 10, digits('RSD'), 10)).toBe(100);
       // EUR: 10 % de 10,05 = 1,005 → 1,01 (10,05 %) > 10 % → 1,00.
       expect(discountForPercent(10.05, 10, digits('EUR'), 10)).toBe(1);
     });
 
     it('nunca supera el precio', () => {
-      expect(discountForPercent(0.5, 100, digits('COP'), 100)).toBe(0);
-      expect(discountForPercent(1500, 100, digits('COP'), 100)).toBe(1500);
+      expect(discountForPercent(0.5, 100, digits('RSD'), 100)).toBe(0);
+      expect(discountForPercent(1500, 100, digits('RSD'), 100)).toBe(1500);
     });
   });
 });

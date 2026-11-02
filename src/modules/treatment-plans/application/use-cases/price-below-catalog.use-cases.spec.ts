@@ -59,7 +59,7 @@ function setup(plan: { status?: TreatmentPlanStatus } = {}) {
   repo.seedPlan({
     id: 'plan1',
     status: plan.status ?? TreatmentPlanStatus.DRAFT,
-    currency: 'COP',
+    currency: 'USD',
   });
   const policy = testDiscountPolicy();
   return {

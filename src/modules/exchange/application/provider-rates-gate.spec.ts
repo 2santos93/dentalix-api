@@ -59,7 +59,7 @@ function setup(
 /** Deja correr el gasto del presupuesto (asíncrono) hasta llegar a `load`. */
 const settle = () => new Promise((r) => setImmediate(r));
 
-const ok = (rates: Record<string, number> = { COP: 4000 }) =>
+const ok = (rates: Record<string, number> = { USD: 4000 }) =>
   jest.fn(() => Promise.resolve(rates));
 const unavailable = () =>
   jest.fn(() =>
@@ -103,7 +103,7 @@ describe('ProviderRatesGate (SEC-054)', () => {
       ).rejects.toBeInstanceOf(ExchangeRateUnavailableError);
       const other = ok();
       await expect(gate.fetch('2026-10-02', A, other)).resolves.toEqual({
-        COP: 4000,
+        USD: 4000,
       });
       expect(other).toHaveBeenCalledTimes(1);
     });
@@ -127,12 +127,12 @@ describe('ProviderRatesGate (SEC-054)', () => {
       const load = jest
         .fn()
         .mockRejectedValueOnce(new Error('caída de la BD'))
-        .mockResolvedValueOnce({ COP: 1 });
+        .mockResolvedValueOnce({ USD: 1 });
       await expect(gate.fetch('2026-10-01', A, load)).rejects.toThrow(
         'caída de la BD',
       );
       await expect(gate.fetch('2026-10-01', A, load)).resolves.toEqual({
-        COP: 1,
+        USD: 1,
       });
     });
 
@@ -141,13 +141,13 @@ describe('ProviderRatesGate (SEC-054)', () => {
       await expect(
         gate.fetch('2026-10-30', A, unavailable()),
       ).rejects.toBeInstanceOf(ExchangeRateUnavailableError);
-      const load = ok({ COP: 4100 });
+      const load = ok({ USD: 4100 });
       await expect(gate.fetch('2026-10-30', PREFETCH, load)).resolves.toEqual({
-        COP: 4100,
+        USD: 4100,
       });
       expect(load).toHaveBeenCalledTimes(1);
       await expect(gate.fetch('2026-10-30', A, load)).resolves.toEqual({
-        COP: 4100,
+        USD: 4100,
       });
       expect(load).toHaveBeenCalledTimes(2);
     });
@@ -169,10 +169,10 @@ describe('ProviderRatesGate (SEC-054)', () => {
         ),
       );
       await settle();
-      resolve({ COP: 4000 });
+      resolve({ USD: 4000 });
       const results = await all;
       expect(load).toHaveBeenCalledTimes(1);
-      expect(results.every((r) => r.COP === 4000)).toBe(true);
+      expect(results.every((r) => r.USD === 4000)).toBe(true);
     });
 
     it('un fallo compartido lo reciben todas y deja la caché negativa', async () => {
@@ -268,7 +268,7 @@ describe('ProviderRatesGate (SEC-054)', () => {
       ).rejects.toBeInstanceOf(ExchangeRateBudgetExceededError);
 
       await expect(gate.fetch('2026-10-30', PREFETCH, load)).resolves.toEqual({
-        COP: 4000,
+        USD: 4000,
       });
       expect(load).toHaveBeenCalledTimes(3);
     });
@@ -279,7 +279,7 @@ describe('ProviderRatesGate (SEC-054)', () => {
       await gate.fetch('2026-10-29', PREFETCH, load);
       await gate.fetch('2026-10-30', PREFETCH, load);
       await expect(gate.fetch('2026-10-01', A, load)).resolves.toEqual({
-        COP: 4000,
+        USD: 4000,
       });
     });
 
@@ -433,28 +433,28 @@ describe('ProviderRatesGate (SEC-054)', () => {
     it('quien esperaba un día que no entró por el cupo de otra clínica lo pide con el suyo', async () => {
       const { gate } = setup({ clinicDaily: 1 });
       await gate.fetch('2000-01-01', A, ok());
-      const load = ok({ COP: 3900 });
+      const load = ok({ USD: 3900 });
       const [fromA, fromB] = await Promise.allSettled([
         gate.fetch('2000-02-01', A, load),
         gate.fetch('2000-02-01', B, load),
       ]);
       expect(fromA.status).toBe('rejected');
-      expect(fromB).toEqual({ status: 'fulfilled', value: { COP: 3900 } });
+      expect(fromB).toEqual({ status: 'fulfilled', value: { USD: 3900 } });
       expect(load).toHaveBeenCalledTimes(1);
     });
 
     it('un día que otra réplica ya guardó no gasta cupo ni llama', async () => {
       const { gate } = setup({ clinicDaily: 1 });
       const load = ok();
-      const stored = jest.fn(() => Promise.resolve({ COP: 3950 }));
+      const stored = jest.fn(() => Promise.resolve({ USD: 3950 }));
       await expect(gate.fetch('2000-03-01', A, load, stored)).resolves.toEqual({
-        COP: 3950,
+        USD: 3950,
       });
       expect(load).not.toHaveBeenCalled();
       // El cupo diario (1) sigue entero para un día sin guardar.
       await expect(
         gate.fetch('2000-03-02', A, load, () => Promise.resolve(null)),
-      ).resolves.toEqual({ COP: 4000 });
+      ).resolves.toEqual({ USD: 4000 });
       expect(load).toHaveBeenCalledTimes(1);
     });
   });

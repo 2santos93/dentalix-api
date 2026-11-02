@@ -21,7 +21,7 @@ import { PrismaProviderRatesBudget } from '../src/modules/exchange/infrastructur
 import { addCivilDays } from '../src/shared/time/civil-day';
 import { resetDatabase } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -79,7 +79,7 @@ const provider = jest.fn<
 >((date) =>
   Promise.resolve({
     base: 'USD',
-    rates: { COP: 4000 + Number(date.slice(-2)) },
+    rates: { VES: 4000 + Number(date.slice(-2)) },
   }),
 );
 
@@ -107,7 +107,7 @@ async function seedClinic(
   });
   await asOwner(tenant.id, (tx) =>
     tx.location.create({
-      data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      data: locationData(REGIONAL_CARACAS_FIXTURE, {
         tenantId: tenant.id,
         name: 'Sede',
       }),
@@ -206,7 +206,7 @@ describe('Presupuesto del proveedor de tasas en la BD (SEC-058, int)', () => {
       sweep: { reserve: 5, clinicLimit: 5 },
     });
     const [one, two] = [replica(limits), replica(limits)];
-    const load = jest.fn(() => Promise.resolve({ COP: 4000 }));
+    const load = jest.fn(() => Promise.resolve({ VES: 4000 }));
     // 120 llamadas a la vez (60 por réplica), de 10 clínicas y días distintos.
     const outcomes = await Promise.allSettled(
       Array.from({ length: 120 }, (_, i) =>
@@ -287,7 +287,7 @@ describe('Presupuesto del proveedor de tasas en la BD (SEC-058, int)', () => {
       sweep: { reserve: 4, clinicLimit: 3 },
     });
     const [one, two] = [replica(limits), replica(limits)];
-    const load = jest.fn(() => Promise.resolve({ COP: 4000 }));
+    const load = jest.fn(() => Promise.resolve({ VES: 4000 }));
     for (const [i, date] of days('2002-01-01', 8).entries()) {
       await fetchAs(
         i % 2 ? one : two,
@@ -343,7 +343,7 @@ describe('Presupuesto del proveedor de tasas en la BD (SEC-058, int)', () => {
       newClinic: { days: 30, limit: 3 },
     });
     const one = replica(limits);
-    const load = jest.fn(() => Promise.resolve({ COP: 4000 }));
+    const load = jest.fn(() => Promise.resolve({ VES: 4000 }));
     const outcomes = await Promise.allSettled(
       days('2004-01-01', 6).map((date) =>
         fetchAs(one, date, { kind: 'CLINIC', tenantId: newClinic }, load),
@@ -364,7 +364,7 @@ describe('Presupuesto del proveedor de tasas en la BD (SEC-058, int)', () => {
 
     it('solo ve los contadores de su clínica y nada del global', async () => {
       const one = replica(DEFAULT_PROVIDER_RATES_LIMITS);
-      const load = () => Promise.resolve({ COP: 4000 });
+      const load = () => Promise.resolve({ VES: 4000 });
       await fetchAs(
         one,
         '2005-01-01',

@@ -64,32 +64,32 @@ function makeSeededUseCase(
 }
 
 describe('ConvertAmountUseCase', () => {
-  it('converts USD -> COP using the base rate directly', async () => {
-    const uc = makeSeededUseCase({ COP: 4000 });
+  it('converts USD -> GBP using the base rate directly', async () => {
+    const uc = makeSeededUseCase({ GBP: 4000 });
 
     const result = await uc.execute({
       amount: 100,
       from: 'USD',
-      to: 'COP',
+      to: 'GBP',
       date: DATE,
     });
 
     expect(result).toEqual({
       amount: 100,
       from: 'USD',
-      to: 'COP',
+      to: 'GBP',
       date: DATE,
       result: 400000,
       rateUsed: 4000,
     });
   });
 
-  it('converts COP -> USD (division by the base rate)', async () => {
-    const uc = makeSeededUseCase({ COP: 4000 });
+  it('converts GBP -> USD (division by the base rate)', async () => {
+    const uc = makeSeededUseCase({ GBP: 4000 });
 
     const result = await uc.execute({
       amount: 400000,
-      from: 'COP',
+      from: 'GBP',
       to: 'USD',
       date: DATE,
     });
@@ -98,17 +98,17 @@ describe('ConvertAmountUseCase', () => {
     expect(result.rateUsed).toBeCloseTo(0.00025, 10);
   });
 
-  it('converts COP -> EUR via USD (cross-rate through the base)', async () => {
-    const uc = makeSeededUseCase({ COP: 4000, EUR: 0.92 });
+  it('converts GBP -> EUR via USD (cross-rate through the base)', async () => {
+    const uc = makeSeededUseCase({ GBP: 4000, EUR: 0.92 });
 
     const result = await uc.execute({
       amount: 4000,
-      from: 'COP',
+      from: 'GBP',
       to: 'EUR',
       date: DATE,
     });
 
-    // 4000 COP -> 1 USD -> 0.92 EUR
+    // 4000 GBP -> 1 USD -> 0.92 EUR
     expect(result.result).toBe(0.92);
   });
 
@@ -117,15 +117,15 @@ describe('ConvertAmountUseCase', () => {
 
     const result = await uc.execute({
       amount: 123.45,
-      from: 'COP',
-      to: 'COP',
+      from: 'GBP',
+      to: 'GBP',
       date: DATE,
     });
 
     expect(result).toEqual({
       amount: 123.45,
-      from: 'COP',
-      to: 'COP',
+      from: 'GBP',
+      to: 'GBP',
       date: DATE,
       result: 123.45,
       rateUsed: 1,
@@ -133,7 +133,7 @@ describe('ConvertAmountUseCase', () => {
   });
 
   it('rejects an unknown/unsupported currency with BadRequestException', async () => {
-    const uc = makeSeededUseCase({ COP: 4000 });
+    const uc = makeSeededUseCase({ GBP: 4000 });
 
     await expect(
       uc.execute({ amount: 10, from: 'USD', to: 'ZZZ', date: DATE }),
@@ -147,10 +147,10 @@ describe('ConvertAmountUseCase', () => {
   it.each([-1, -0.01, NaN, Infinity, -Infinity])(
     'rejects an invalid amount (%s) with BadRequestException',
     async (amount) => {
-      const uc = makeSeededUseCase({ COP: 4000 });
+      const uc = makeSeededUseCase({ GBP: 4000 });
 
       await expect(
-        uc.execute({ amount, from: 'USD', to: 'COP', date: DATE }),
+        uc.execute({ amount, from: 'USD', to: 'GBP', date: DATE }),
       ).rejects.toBeInstanceOf(BadRequestException);
     },
   );
@@ -158,21 +158,21 @@ describe('ConvertAmountUseCase', () => {
   it.each(['2026-7-22', '07-22-2026', 'not-a-date', ''])(
     'rejects an invalid date format (%s) with BadRequestException',
     async (date) => {
-      const uc = makeSeededUseCase({ COP: 4000 });
+      const uc = makeSeededUseCase({ GBP: 4000 });
 
       await expect(
-        uc.execute({ amount: 10, from: 'USD', to: 'COP', date }),
+        uc.execute({ amount: 10, from: 'USD', to: 'GBP', date }),
       ).rejects.toBeInstanceOf(BadRequestException);
     },
   );
 
   it('rounds the result to 2 decimal places', async () => {
-    const uc = makeSeededUseCase({ COP: 3891.23456 });
+    const uc = makeSeededUseCase({ GBP: 3891.23456 });
 
     const result = await uc.execute({
       amount: 10,
       from: 'USD',
-      to: 'COP',
+      to: 'GBP',
       date: DATE,
     });
 
@@ -181,11 +181,11 @@ describe('ConvertAmountUseCase', () => {
   });
 
   it('amount 0 does not divide by zero: rateUsed falls back to the unrounded from->to factor', async () => {
-    const uc = makeSeededUseCase({ COP: 4000, EUR: 0.92 });
+    const uc = makeSeededUseCase({ GBP: 4000, EUR: 0.92 });
 
     const result = await uc.execute({
       amount: 0,
-      from: 'COP',
+      from: 'GBP',
       to: 'EUR',
       date: DATE,
     });
@@ -268,11 +268,11 @@ describe('ConvertAmountUseCase', () => {
     const TENANT = '44444444-4444-4444-8444-444444444444';
 
     it('devuelve las tasas por 1 USD de las dos monedas y la fuente automática', async () => {
-      const uc = makeSeededUseCase({ COP: 4000, EUR: 0.9 });
+      const uc = makeSeededUseCase({ GBP: 4000, EUR: 0.9 });
       await expect(
-        uc.quote({ from: 'COP', to: 'EUR', date: DATE }),
+        uc.quote({ from: 'GBP', to: 'EUR', date: DATE }),
       ).resolves.toEqual({
-        from: 'COP',
+        from: 'GBP',
         to: 'EUR',
         date: DATE,
         source: 'AUTOMATIC',
@@ -282,9 +282,9 @@ describe('ConvertAmountUseCase', () => {
     });
 
     it('la moneda base vale 1 y no se busca', async () => {
-      const uc = makeSeededUseCase({ COP: 4000 });
+      const uc = makeSeededUseCase({ GBP: 4000 });
       await expect(
-        uc.quote({ from: 'USD', to: 'COP', date: DATE }),
+        uc.quote({ from: 'USD', to: 'GBP', date: DATE }),
       ).resolves.toMatchObject({ fromPerBase: 1, toPerBase: 4000 });
     });
 
@@ -311,18 +311,18 @@ describe('ConvertAmountUseCase', () => {
       ).resolves.toMatchObject({ source: 'MANUAL', fromPerBase: 40 });
       await expect(
         tenantContext.run(TENANT, () =>
-          uc.quote({ from: 'COP', to: 'USD', date: DATE }),
+          uc.quote({ from: 'GBP', to: 'USD', date: DATE }),
         ),
       ).rejects.toBeInstanceOf(MissingExchangeRateError);
     });
 
     it('convertWithQuote da el mismo resultado que execute', async () => {
-      const uc = makeSeededUseCase({ COP: 3950.5, EUR: 0.91234567 });
-      const quote = await uc.quote({ from: 'COP', to: 'EUR', date: DATE });
+      const uc = makeSeededUseCase({ GBP: 3950.5, EUR: 0.91234567 });
+      const quote = await uc.quote({ from: 'GBP', to: 'EUR', date: DATE });
       for (const amount of [1, 2, 5, 7, 100, 333, 1234567.89]) {
         const { result } = await uc.execute({
           amount,
-          from: 'COP',
+          from: 'GBP',
           to: 'EUR',
           date: DATE,
         });
@@ -348,7 +348,7 @@ describe('ConvertAmountUseCase', () => {
               tenantContext,
             ),
             makeManualRates(
-              { [TENANT]: { [DAY]: { COP: 4000 } } },
+              { [TENANT]: { [DAY]: { GBP: 4000 } } },
               tenantContext,
             ),
             tenantContext,
@@ -365,11 +365,11 @@ describe('ConvertAmountUseCase', () => {
         );
         await expect(
           tenantContext.run(TENANT, () =>
-            convert.quote({ from: 'USD', to: 'COP', date: DAY }),
+            convert.quote({ from: 'USD', to: 'GBP', date: DAY }),
           ),
         ).resolves.toEqual({
           from: 'USD',
-          to: 'COP',
+          to: 'GBP',
           date: DAY,
           source: 'MANUAL',
           fromPerBase: 1,
@@ -382,18 +382,18 @@ describe('ConvertAmountUseCase', () => {
       it('si la de respaldo no cubre las dos monedas, cotiza por el camino automático', async () => {
         const fetchRates = jest
           .fn()
-          .mockResolvedValue({ base: 'USD', rates: { COP: 3900, EUR: 0.9 } });
+          .mockResolvedValue({ base: 'USD', rates: { GBP: 3900, EUR: 0.9 } });
         const { uc, tenantContext } = backupUseCase(fetchRates);
         const convert = tenantContext.run(TENANT, () =>
           uc.memoized({ manualBackup: true }),
         );
         await expect(
           tenantContext.run(TENANT, () =>
-            convert.quote({ from: 'EUR', to: 'COP', date: DAY }),
+            convert.quote({ from: 'EUR', to: 'GBP', date: DAY }),
           ),
         ).resolves.toEqual({
           from: 'EUR',
-          to: 'COP',
+          to: 'GBP',
           date: DAY,
           source: 'AUTOMATIC',
           fromPerBase: 0.9,
@@ -410,7 +410,7 @@ describe('ConvertAmountUseCase', () => {
         const convert = tenantContext.run(TENANT, () => uc.memoized());
         await expect(
           tenantContext.run(TENANT, () =>
-            convert.quote({ from: 'USD', to: 'COP', date: DAY }),
+            convert.quote({ from: 'USD', to: 'GBP', date: DAY }),
           ),
         ).rejects.toThrow('proveedor caído');
       });
@@ -422,7 +422,7 @@ describe('ConvertAmountUseCase', () => {
           {
             id: 'x',
             date: DATE,
-            currency: 'COP',
+            currency: 'GBP',
             rate: 4000,
             fetchedAt: new Date(0),
           },
@@ -438,8 +438,8 @@ describe('ConvertAmountUseCase', () => {
         ),
       );
       const convert = uc.memoized();
-      await convert.quote({ from: 'COP', to: 'USD', date: DATE });
-      await convert.execute({ amount: 5, from: 'COP', to: 'USD', date: DATE });
+      await convert.quote({ from: 'GBP', to: 'USD', date: DATE });
+      await convert.execute({ amount: 5, from: 'GBP', to: 'USD', date: DATE });
       expect(findByDate).toHaveBeenCalledTimes(1);
     });
   });
@@ -454,7 +454,7 @@ describe('ConvertAmountUseCase', () => {
               {
                 id: 'x',
                 date: DATE,
-                currency: 'COP',
+                currency: 'GBP',
                 rate: 4000,
                 fetchedAt: new Date(0),
               },
@@ -474,13 +474,13 @@ describe('ConvertAmountUseCase', () => {
     const amounts = [1, 2, 5, 7, 100, 333];
     const memo = await Promise.all(
       amounts.map((amount) =>
-        convert.execute({ amount, from: 'COP', to: 'USD', date: DATE }),
+        convert.execute({ amount, from: 'GBP', to: 'USD', date: DATE }),
       ),
     );
     expect(findByDate).toHaveBeenCalledTimes(1);
     const fresh = await Promise.all(
       amounts.map((amount) =>
-        uc.execute({ amount, from: 'COP', to: 'USD', date: DATE }),
+        uc.execute({ amount, from: 'GBP', to: 'USD', date: DATE }),
       ),
     );
     expect(memo).toEqual(fresh);

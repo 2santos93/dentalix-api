@@ -20,7 +20,7 @@ import {
   UpdateTreatmentPlanUseCase,
 } from '../src/modules/treatment-plans/application/use-cases/update-treatment-plan.use-case';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -41,7 +41,7 @@ const credit = new PrismaPatientCreditRepository(prisma, tenantContext);
 const plans = new PrismaTreatmentPlanRepository(prisma, tenantContext);
 const updatePlan = new UpdateTreatmentPlanUseCase(
   plans,
-  { has: (code) => Promise.resolve(['COP', 'USD'].includes(code)) },
+  { has: (code) => Promise.resolve(['VES', 'USD'].includes(code)) },
   () => new Date(),
 );
 const DIAGNOSTIC_SQL = readFileSync(
@@ -57,7 +57,7 @@ interface Seeded {
   tenantId: string;
   locationId: string;
   patientId: string;
-  /** Cancelado con un abono de 300.000 COP: todo es saldo a favor. */
+  /** Cancelado con un abono de 300.000 VES: todo es saldo a favor. */
   sourcePlan: string;
 }
 
@@ -95,10 +95,10 @@ async function seed(subdomain: string): Promise<Seeded> {
     data: { name: subdomain, subdomain },
   });
   const location = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId: tenant.id,
       name: 'Sede',
-      country: 'CO',
+      country: 'VE',
     }),
   });
   const patient = await raw.patient.create({
@@ -113,7 +113,7 @@ async function seed(subdomain: string): Promise<Seeded> {
     data: {
       tenantId: tenant.id,
       patientId: patient.id,
-      currency: 'COP',
+      currency: 'VES',
       status: 'ACCEPTED',
     },
   });
@@ -124,7 +124,7 @@ async function seed(subdomain: string): Promise<Seeded> {
       treatmentPlanId: source.id,
       patientId: patient.id,
       amount: 300_000,
-      currency: 'COP',
+      currency: 'VES',
       paidAt: new Date(),
       method: 'CASH',
     },
@@ -147,7 +147,7 @@ async function draftPlan(seeded: Seeded): Promise<string> {
     data: {
       tenantId: seeded.tenantId,
       patientId: seeded.patientId,
-      currency: 'COP',
+      currency: 'VES',
       status: 'DRAFT',
     },
   });
@@ -183,7 +183,7 @@ function transferInput(
     sourcePlanId,
     targetPlanId,
     amountCents,
-    currency: 'COP',
+    currency: 'VES',
     reason: null,
     userId,
     fingerprint: 'f',
@@ -234,14 +234,14 @@ describe('DX-438 · saldo a favor y cambio de moneda del plan (int)', () => {
     });
 
     const state = await inContext(a, () => credit.readPlanCredit(target));
-    expect(state).toMatchObject({ currency: 'COP', entriesCents: 5_000_000 });
+    expect(state).toMatchObject({ currency: 'VES', entriesCents: 5_000_000 });
     expect(state?.creditCents).toBe(5_000_000);
     // El origen (TRANSFER_OUT) tampoco cambia de moneda.
     await expect(
       inContext(a, () =>
         updatePlan.execute(a.sourcePlan, { notes: 'Sin cambio' }, ADMIN),
       ),
-    ).resolves.toMatchObject({ currency: 'COP', notes: 'Sin cambio' });
+    ).resolves.toMatchObject({ currency: 'VES', notes: 'Sin cambio' });
   });
 
   it('carrera: el destino cambia de moneda (confirmado) entre la lectura y el bloqueo del traspaso → 409 y no escribe nada', async () => {
@@ -268,7 +268,7 @@ describe('DX-438 · saldo a favor y cambio de moneda del plan (int)', () => {
         referenceCurrencyDigitsCatalog(),
       ).execute(
         a.sourcePlan,
-        { targetPlanId: target, amount: 10_000, currency: 'COP' },
+        { targetPlanId: target, amount: 10_000, currency: 'VES' },
         { role: ClinicRole.ADMIN, userId },
       ),
     ).catch((e: unknown) => e);
@@ -278,16 +278,16 @@ describe('DX-438 · saldo a favor y cambio de moneda del plan (int)', () => {
   });
 
   it('carrera: el ORIGEN cambia de moneda (confirmado) entre la lectura y el bloqueo del traspaso → 409 y no escribe nada', async () => {
-    // Origen vivo sin ítems ni asientos: sus 1.000 COP abonados son saldo a
+    // Origen vivo sin ítems ni asientos: sus 1.000 VES abonados son saldo a
     // favor, y sin asientos nada impide cambiarle la moneda. También tiene un
     // abono de 1.000 USD: tras el cambio a USD el saldo seguiría alcanzando,
     // así que solo la comprobación de la moneda del origen lo detiene (sin
-    // ella saldría un TRANSFER_OUT en COP de un plan en USD).
+    // ella saldría un TRANSFER_OUT en VES de un plan en USD).
     const source = await raw.treatmentPlan.create({
       data: {
         tenantId: a.tenantId,
         patientId: a.patientId,
-        currency: 'COP',
+        currency: 'VES',
         status: 'DRAFT',
       },
     });
@@ -298,7 +298,7 @@ describe('DX-438 · saldo a favor y cambio de moneda del plan (int)', () => {
         treatmentPlanId: source.id,
         patientId: a.patientId,
         amount: 1_000,
-        currency: 'COP',
+        currency: 'VES',
         paidAt: new Date(),
         method: 'CASH',
       },
@@ -335,7 +335,7 @@ describe('DX-438 · saldo a favor y cambio de moneda del plan (int)', () => {
         referenceCurrencyDigitsCatalog(),
       ).execute(
         source.id,
-        { targetPlanId: target, amount: 500, currency: 'COP' },
+        { targetPlanId: target, amount: 500, currency: 'VES' },
         { role: ClinicRole.ADMIN, userId },
       ),
     ).catch((e: unknown) => e);
@@ -365,8 +365,8 @@ describe('DX-438 · saldo a favor y cambio de moneda del plan (int)', () => {
       where: { tenantId: a.tenantId, treatmentPlanId: target },
     });
     if (transfer.status === 'fulfilled') {
-      expect(plan.currency).toBe('COP');
-      expect(entries.map((e) => e.currency)).toEqual(['COP']);
+      expect(plan.currency).toBe('VES');
+      expect(entries.map((e) => e.currency)).toEqual(['VES']);
     } else {
       expect(plan.currency).toBe('USD');
       expect(entries).toEqual([]);
@@ -451,7 +451,7 @@ describe('DX-438 · saldo a favor y cambio de moneda del plan (int)', () => {
         asApp(
           a,
           (tx) =>
-            tx.$executeRaw`UPDATE "treatment_plans" SET "notes" = 'Notas', "currency" = 'COP' WHERE "id" = ${withEntries}::uuid`,
+            tx.$executeRaw`UPDATE "treatment_plans" SET "notes" = 'Notas', "currency" = 'VES' WHERE "id" = ${withEntries}::uuid`,
         ),
       ).resolves.toBe(1);
       await expect(
@@ -492,7 +492,7 @@ describe('DX-438 · saldo a favor y cambio de moneda del plan (int)', () => {
       // …y como superusuario, que ve los asientos de B: la búsqueda va por
       // la clínica y el plan de la fila.
       await expect(
-        raw.$executeRaw`UPDATE "treatment_plans" SET "currency" = 'COP' WHERE "id" = ${aPlan}::uuid`,
+        raw.$executeRaw`UPDATE "treatment_plans" SET "currency" = 'VES' WHERE "id" = ${aPlan}::uuid`,
       ).resolves.toBe(1);
       // El de B sigue bloqueado.
       expect(
@@ -520,7 +520,7 @@ describe('DX-438 · saldo a favor y cambio de moneda del plan (int)', () => {
       const transfer = await inContext(b, () =>
         credit.createTransfer(transferInput(b.sourcePlan, plan, 100)),
       );
-      // Un asiento en USD contra un plan en COP: lo que dejaba DB-066 antes
+      // Un asiento en USD contra un plan en VES: lo que dejaba DB-066 antes
       // de las guardas. Solo el superusuario puede escribirlo ya así.
       await raw.patientCreditEntry.create({
         data: {
@@ -550,7 +550,7 @@ describe('DX-438 · saldo a favor y cambio de moneda del plan (int)', () => {
           tenantId: b.tenantId,
           treatmentPlanId: plan,
           entryCurrency: 'USD',
-          planCurrency: 'COP',
+          planCurrency: 'VES',
         }),
       ]);
       const seenByA = await asApp(a, (tx) =>

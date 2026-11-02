@@ -115,7 +115,7 @@ async function signatureRequest(
           data: {
             tenantId: s.tenantId,
             patientId,
-            currency: 'COP',
+            currency: 'USD',
           },
         })
       : null;

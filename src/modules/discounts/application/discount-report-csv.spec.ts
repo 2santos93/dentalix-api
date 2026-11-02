@@ -85,17 +85,17 @@ describe('CSV del informe de descuentos (DX-204)', () => {
     );
   });
 
-  it('importes en la unidad de la moneda: COP sin decimales, EUR a céntimos', () => {
-    const cop: DiscountReportRowView = {
+  it('importes en la unidad de la moneda: RSD sin decimales, EUR a céntimos', () => {
+    const usd: DiscountReportRowView = {
       ...row,
-      currency: 'COP',
+      currency: 'RSD',
       price: 123457,
       itemDiscount: 9259,
       discount: 9259,
       percent: 7.5,
     };
-    const [, eurLine, copLine] = toDiscountReportCsv(
-      [row, cop],
+    const [, eurLine, usdLine] = toDiscountReportCsv(
+      [row, usd],
       REFERENCE_CURRENCY_DIGITS,
     )
       .slice(1)
@@ -108,7 +108,7 @@ describe('CSV del informe de descuentos (DX-204)', () => {
       '67.50',
       '15.00',
     ]);
-    expect(copLine.split(',').slice(7, 13)).toEqual([
+    expect(usdLine.split(',').slice(7, 13)).toEqual([
       '',
       '123457',
       '0',
@@ -121,7 +121,7 @@ describe('CSV del informe de descuentos (DX-204)', () => {
   it('la rebaja de precio frente al catálogo sale con su importe (SEC-041)', () => {
     const reduced: DiscountReportRowView = {
       ...row,
-      currency: 'COP',
+      currency: 'RSD',
       catalogPrice: 1000000,
       price: 500000,
       priceReduction: 500000,
@@ -163,7 +163,7 @@ describe('CSV del informe de descuentos (DX-204)', () => {
   it('SEC-047: la rebaja de convenio sale aparte, con quién asignó el convenio y quién creó el ítem', () => {
     const agreed: DiscountReportRowView = {
       ...row,
-      currency: 'COP',
+      currency: 'RSD',
       priceSource: 'AGREEMENT_PERCENT',
       agreementName: 'Cortesía socios',
       basePrice: 2000000,

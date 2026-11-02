@@ -18,7 +18,7 @@ import {
 } from '../src/shared/tenancy/location-access';
 import { PROVIDER_NOT_AT_LOCATION_MESSAGE } from '../src/modules/staff/domain/provider-location';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
 
@@ -169,7 +169,10 @@ describe('Personal restringido a sedes (DX-089)', () => {
       (
         (
           await admin()
-            .post('/locations', locationBody(REGIONAL_BOGOTA_FIXTURE, { name }))
+            .post(
+              '/locations',
+              locationBody(REGIONAL_CARACAS_FIXTURE, { name }),
+            )
             .expect(201)
         ).body as {
           id: string;
@@ -200,7 +203,7 @@ describe('Personal restringido a sedes (DX-089)', () => {
     patient = await createPatient('DX089-1');
     plan = (
       await raw.treatmentPlan.create({
-        data: { ...t, patientId: patient, currency: 'COP', status: 'ACCEPTED' },
+        data: { ...t, patientId: patient, currency: 'USD', status: 'ACCEPTED' },
       })
     ).id;
     // Citas de E en las tres sedes (marzo de 2027).
@@ -231,7 +234,7 @@ describe('Personal restringido a sedes (DX-089)', () => {
           treatmentPlanId: plan,
           patientId: patient,
           amount: 1000,
-          currency: 'COP',
+          currency: 'USD',
           paidAt: new Date('2026-09-15T17:00:00.000Z'),
         },
       });
@@ -275,7 +278,7 @@ describe('Personal restringido a sedes (DX-089)', () => {
           data: {
             ...t,
             patientId: p,
-            currency: 'COP',
+            currency: 'USD',
             status: 'PRESENTED',
             presentedAt: new Date(Date.now() - 30 * 24 * 3600 * 1000),
             presentedLocationId: locationId,
@@ -500,7 +503,7 @@ describe('Personal restringido a sedes (DX-089)', () => {
             await as(m)
               .post(`/treatment-plans/${plan}/payments`, {
                 amount: 10,
-                currency: 'COP',
+                currency: 'USD',
                 paidAt: '2026-10-01',
               })
               .expect(201)
@@ -538,7 +541,7 @@ describe('Personal restringido a sedes (DX-089)', () => {
       expectNotAllowed(
         await as(r2).post(`/patients/${patient}/payment-promises`, {
           amount: 100,
-          currency: 'COP',
+          currency: 'USD',
           dueDate: '2027-01-15',
           locationId: a1,
         }),
@@ -729,7 +732,7 @@ describe('Personal restringido a sedes (DX-089)', () => {
           patientId,
           treatmentPlanId,
           amount: 73,
-          currency: 'COP',
+          currency: 'USD',
           paidAt: new Date(),
           createdById,
         },
@@ -760,7 +763,7 @@ describe('Personal restringido a sedes (DX-089)', () => {
       );
       const patientId = await createPatient('DX089-BIS-VOID');
       const treatmentPlan = await raw.treatmentPlan.create({
-        data: { tenantId: a.tenantId, patientId, currency: 'COP' },
+        data: { tenantId: a.tenantId, patientId, currency: 'USD' },
       });
       const promise = await raw.paymentPromise.create({
         data: {
@@ -768,7 +771,7 @@ describe('Personal restringido a sedes (DX-089)', () => {
           patientId,
           locationId: a1,
           amount: 73,
-          currency: 'COP',
+          currency: 'USD',
           dueDate: new Date('2027-01-15'),
           createdById: r2.userId,
         },
@@ -854,7 +857,7 @@ describe('Personal restringido a sedes (DX-089)', () => {
         data: {
           tenantId: b.tenantId,
           patientId: foreignPatient.id,
-          currency: 'COP',
+          currency: 'USD',
         },
       });
       const payment = await raw.payment.create({
@@ -864,7 +867,7 @@ describe('Personal restringido a sedes (DX-089)', () => {
           patientId: foreignPatient.id,
           treatmentPlanId: foreignPlan.id,
           amount: 73,
-          currency: 'COP',
+          currency: 'USD',
           paidAt: new Date(),
         },
       });
@@ -1035,7 +1038,7 @@ describe('Personal restringido a sedes (DX-089)', () => {
       const res = await as(u)
         .post(`/treatment-plans/${plan}/payments`, {
           amount: 10,
-          currency: 'COP',
+          currency: 'USD',
           paidAt: '2026-10-01',
         })
         .expect(201);

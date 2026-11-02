@@ -197,7 +197,7 @@ describe('Tasas de cambio manuales (DX-374)', () => {
     for (const [date, currency] of [
       ['2026-10-27', 'VES'],
       ['2026-10-29', 'VES'],
-      ['2026-10-29', 'COP'],
+      ['2026-10-29', 'GBP'],
     ]) {
       await inClinic(B, () =>
         register().execute({ date, currency, rate: 2 }, ADMIN),
@@ -213,7 +213,7 @@ describe('Tasas de cambio manuales (DX-374)', () => {
       new ListManualExchangeRatesUseCase(manual).execute({}),
     );
     expect(list.map((r) => `${r.date} ${r.currency}`)).toEqual([
-      '2026-10-29 COP',
+      '2026-10-29 GBP',
       '2026-10-29 VES',
       '2026-10-27 VES',
     ]);
