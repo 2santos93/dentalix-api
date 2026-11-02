@@ -2505,16 +2505,14 @@ class DemoSeeder {
   /** La primera combinación profesional × paciente libre a esa hora, o null. */
   private async bookFirstFree(
     create: CreateAppointmentUseCase,
-    slot: { start: Date; end: Date; dentistIndexes: readonly number[] },
+    slot: { start: Date; end: Date },
     dentists: string[],
     patientIds: string[],
     used: Set<string>,
     createdById: string,
   ): Promise<{ id: string; patientId: string; providerId: string } | null> {
     const isFuture = slot.start.getTime() >= Date.now() + FUTURE_MARGIN_MS;
-    // Solo los dentistas a quienes les cabe el hueco en su horario (DX-233):
-    // la segunda no atiende, por ejemplo, los sábados.
-    for (const providerId of slot.dentistIndexes.map((i) => dentists[i])) {
+    for (const providerId of dentists) {
       for (const patientId of patientIds) {
         if (used.has(patientId)) continue;
         const input = {

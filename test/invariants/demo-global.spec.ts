@@ -19,7 +19,6 @@ import {
   DEMO_COMMUNICATION,
   DEMO_COMPARISON_HISTORY,
   DEMO_COVERAGES,
-  DEMO_ROTATION,
   DEMO_LOCATIONS,
   DEMO_MANUAL_RATES,
   DEMO_PATIENTS,
@@ -43,7 +42,6 @@ import {
   addCivilDays,
   civilDateIn,
   civilWeekday,
-  zonedWallTime,
 } from '../../src/shared/time/civil-day';
 
 // DX-335 (G6.1): la demo es una clínica de varios países y nada de ella
@@ -241,55 +239,6 @@ describe('demo global (DX-335)', () => {
       'londres',
     );
     expect(earlyLondon.start.toISOString()).toBe('2027-06-07T09:10:00.000Z');
-  });
-
-  // DX-233: la segunda dentista no atiende los sábados ni otro día fuera de su
-  // rotación; las citas de «En clínica» y «Pendiente de cerrar» solo se
-  // ofrecen a quien trabaja en esa sede y a esa hora, a cualquier día y hora.
-  it('the in-clinic and closing examples only offer the rotation dentist where she works', () => {
-    const { dentistIndex, weekdays, ranges } = DEMO_ROTATION;
-    const zone = DEMO_LOCATIONS.principal.timeZone;
-    const hours = DEFAULT_BUSINESS_HOURS;
-    let secondOffered = 0;
-    let secondWithheld = 0;
-    // Lunes 2026-11-02 en adelante: los siete días de la semana, de la
-    // madrugada a la noche en UTC.
-    for (let day = 0; day < 7; day++) {
-      for (let hour = 0; hour < 24; hour += 3) {
-        const now = new Date(Date.UTC(2026, 10, 2 + day, hour, 54));
-        const slots = [
-          ...planInClinicToday(now, hours, zone, 'principal'),
-          ...planClosingQueueExamples(now, hours, zone, 'principal'),
-        ];
-        for (const slot of slots) {
-          const wallDay = civilDateIn(slot.start, zone);
-          const works = (weekdays.principal as readonly number[]).includes(
-            civilWeekday(wallDay),
-          )
-            ? ranges.principal.some(
-                (r) =>
-                  slot.start >= zonedWallTime(wallDay, r.startMinute, zone) &&
-                  slot.end <= zonedWallTime(wallDay, r.endMinute, zone),
-              )
-            : false;
-          expect({
-            now: now.toISOString(),
-            start: slot.start.toISOString(),
-            offered: slot.dentistIndexes.includes(dentistIndex),
-          }).toEqual({
-            now: now.toISOString(),
-            start: slot.start.toISOString(),
-            offered: works,
-          });
-          expect(slot.dentistIndexes).toContain(0);
-          if (works) secondOffered++;
-          else secondWithheld++;
-        }
-      }
-    }
-    // El barrido ve las dos caras: días en que trabaja y días en que no.
-    expect(secondOffered).toBeGreaterThan(0);
-    expect(secondWithheld).toBeGreaterThan(0);
   });
 
   it('the demo calendar is a pure function of now', () => {

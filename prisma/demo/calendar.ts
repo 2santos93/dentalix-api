@@ -430,44 +430,12 @@ function statusFor(
   return AppointmentStatus.SCHEDULED;
 }
 
-/**
- * DX-233: índices de dentista (0 = dentista, 1 = dentista2) a quienes se puede
- * ofrecer una cita de la sede `key` en `[start, end)`. La primera dentista no
- * tiene horario propio y va siempre; la segunda solo si su rotación
- * (`DEMO_ROTATION`) la tiene en esa sede ese día de la semana y dentro de uno
- * de sus tramos, en la zona de la sede. Si no, la cita quedaría fuera de su
- * horario (p. ej. un sábado, en que no atiende).
- */
-function dentistIndexesAt(
-  key: DemoLocationKey,
-  start: Date,
-  end: Date,
-  timeZone: string,
-): number[] {
-  const indexes = [0];
-  if (key !== 'principal' && key !== 'norte') return indexes;
-  const day = civilDateIn(start, timeZone);
-  const works =
-    (DEMO_ROTATION.weekdays[key] as readonly number[]).includes(
-      civilWeekday(day),
-    ) &&
-    DEMO_ROTATION.ranges[key].some(
-      (r) =>
-        start >= zonedWallTime(day, r.startMinute, timeZone) &&
-        end <= zonedWallTime(day, r.endMinute, timeZone),
-    );
-  if (works) indexes.push(DEMO_ROTATION.dentistIndex);
-  return indexes;
-}
-
 /** Paso del flujo en la clínica (DX-200) hasta el que se lleva una cita. */
 export type InClinicStage = 'ARRIVED' | 'IN_CHAIR' | 'READY_FOR_CHECKOUT';
 
 export interface PlannedInClinic {
   start: Date;
   end: Date;
-  /** Dentistas (índice) a quienes les cabe en su horario, en orden de oferta. */
-  dentistIndexes: number[];
   stage: InClinicStage;
 }
 
@@ -530,12 +498,9 @@ export function planInClinicToday(
     }
     if (minute < first) continue;
     taken.push(minute);
-    const start = at(today, minute, timeZone);
-    const end = at(today, minute + IN_CLINIC_MINUTES, timeZone);
     planned.push({
-      start,
-      end,
-      dentistIndexes: dentistIndexesAt(key, start, end, timeZone),
+      start: at(today, minute, timeZone),
+      end: at(today, minute + IN_CLINIC_MINUTES, timeZone),
       stage,
     });
   }
@@ -657,8 +622,6 @@ export interface PlannedClosingExample {
   kind: ClosingExampleKind;
   start: Date;
   end: Date;
-  /** Dentistas (índice) a quienes les cabe en su horario, en orden de oferta. */
-  dentistIndexes: number[];
 }
 
 const CLOSING_EXAMPLE_MINUTES = 30;
@@ -693,13 +656,10 @@ export function planClosingQueueExamples(
     }
     return CLOSING_EXAMPLE_KINDS.map((kind, i) => {
       const startMinute = first + i * CLOSING_EXAMPLE_MINUTES;
-      const start = at(day, startMinute, timeZone);
-      const end = at(day, startMinute + CLOSING_EXAMPLE_MINUTES, timeZone);
       return {
         kind,
-        start,
-        end,
-        dentistIndexes: dentistIndexesAt(key, start, end, timeZone),
+        start: at(day, startMinute, timeZone),
+        end: at(day, startMinute + CLOSING_EXAMPLE_MINUTES, timeZone),
       };
     });
   }
