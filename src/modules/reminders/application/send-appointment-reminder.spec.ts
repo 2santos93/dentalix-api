@@ -176,7 +176,7 @@ describe('SendAppointmentReminder (DX-026)', () => {
     expect(call[0].vars.cancellationPolicy).toEqual({
       noticeHours: 24,
       text: 'Avísanos con tiempo.',
-      feeLabel: expect.stringContaining('50.000') as unknown,
+      feeLabel: expect.stringMatching(/50\.000.*COP|COP.*50\.000/) as unknown,
     });
     expect(repo.reminders[0]).toMatchObject({
       status: 'SENT',
@@ -237,7 +237,7 @@ describe('SendAppointmentReminder (DX-026)', () => {
     expect(call[0].vars.startsAtLabel).toBe(
       'martes 20 de octubre de 2026 a las 23:00',
     );
-    expect(call[0].vars.cancellationPolicy.feeLabel).toBe('￥3,000');
+    expect(call[0].vars.cancellationPolicy.feeLabel).toBe('JPY\u00a03,000');
   });
 
   it('un menor sin email con responsable que recibe avisos: sale al email del responsable y queda «enviado al responsable» (DX-203)', async () => {
