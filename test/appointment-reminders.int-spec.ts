@@ -1300,7 +1300,7 @@ describe('DX-026 · recordatorios automáticos por email (int)', () => {
       expect(text).toContain(
         'Fecha y hora: miércoles 10 de marzo de 2027 a las 3:05 p. m. (hora de la sede)',
       );
-      expect(text).toContain('un cargo de ￥3,000.');
+      expect(text).toContain('un cargo de JPY 3,000.');
     });
 
     it('reminder for a location without hourCycle is not sent', async () => {

@@ -270,7 +270,8 @@ describe('Política de cancelación por sede (DX-279)', () => {
       expect(rendered.text).toContain(
         'miércoles 21 de octubre de 2026 a las 3:05 p. m.',
       );
-      expect(rendered.text).toContain('$25.00');
+      // DX-528: el código ISO de la moneda, nunca «$».
+      expect(rendered.text).toMatch(/USD\s25\.00/);
     });
 
     it('DX-350: una sede sin reloj da 409 LOCATION_LOCALE_REQUIRED', async () => {
