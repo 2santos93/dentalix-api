@@ -95,10 +95,10 @@ describe('Presupuesto a distancia (e2e, DX-415)', () => {
     },
   });
 
-  /** Plan COP con dos ítems (300 000 − 30 000 y 120 000). */
+  /** Plan USD con dos ítems (300 000 − 30 000 y 120 000). */
   async function newPlan(): Promise<string> {
     const plan = await as(clinicA)
-      .post(`/patients/${patientId}/treatment-plans`, { currency: 'COP' })
+      .post(`/patients/${patientId}/treatment-plans`, { currency: 'USD' })
       .expect(201);
     const planId = (plan.body as { id: string }).id;
     await as(clinicA)
@@ -232,9 +232,9 @@ describe('Presupuesto a distancia (e2e, DX-415)', () => {
     expect(doc.type).toBe('BUDGET');
     expect(doc.body).toMatch(/Al firmar aceptas este presupuesto/);
     expect(doc.budget).toMatchObject({
-      currency: 'COP',
+      currency: 'USD',
       totals: [
-        { currency: 'COP', gross: 420000, discount: 30000, net: 390000 },
+        { currency: 'USD', gross: 420000, discount: 30000, net: 390000 },
       ],
     });
     expect(doc.budget?.items.map((i) => i.subtotal)).toEqual([270000, 120000]);

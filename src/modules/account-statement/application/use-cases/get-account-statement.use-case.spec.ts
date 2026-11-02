@@ -13,12 +13,12 @@ import {
 } from '../../domain/ports/account-statement-repository.port';
 import type { StatementNoticeData } from '../../domain/ports/statement-family-repository.port';
 
-// 2026-03-01 10:00 en la zona de la sede (UTC-5).
-const NOW = new Date('2026-03-01T15:00:00.000Z');
+// 2026-03-01 10:00 en la zona de la sede (UTC-4).
+const NOW = new Date('2026-03-01T14:00:00.000Z');
 const ADMIN: VoidActor = { userId: 'u-admin', role: ClinicRole.ADMIN };
 const RECEPTION: VoidActor = { userId: 'u-recep', role: ClinicRole.RECEPTION };
 // Alta de los abonos del fixture: hoy por la mañana en la sede.
-const CREATED_TODAY = new Date('2026-03-01T13:00:00.000Z');
+const CREATED_TODAY = new Date('2026-03-01T12:00:00.000Z');
 
 function data(): AccountStatementData {
   return {
@@ -36,7 +36,7 @@ function data(): AccountStatementData {
         {
           id: 'tp-1',
           status: 'ACCEPTED',
-          currency: 'COP',
+          currency: 'USD',
           createdAt: new Date('2026-01-01'),
           billable: 1000,
         },
@@ -46,7 +46,7 @@ function data(): AccountStatementData {
           id: 'pay-1',
           treatmentPlanId: 'tp-1',
           amount: 100,
-          currency: 'COP',
+          currency: 'USD',
           paidAt: new Date('2026-01-10T00:00:00.000Z'),
           method: 'CASH',
           paymentMethod: null,
@@ -54,7 +54,7 @@ function data(): AccountStatementData {
           location: { id: 'l-1', name: 'Sede' },
           createdById: 'u-recep',
           createdAt: CREATED_TODAY,
-          timeZone: 'America/Bogota',
+          timeZone: 'America/Caracas',
           voidedAt: null,
           voidedBy: null,
           voidReason: null,
@@ -63,7 +63,7 @@ function data(): AccountStatementData {
           id: 'pay-2',
           treatmentPlanId: 'tp-1',
           amount: 200,
-          currency: 'COP',
+          currency: 'USD',
           paidAt: new Date('2026-02-10T00:00:00.000Z'),
           method: 'CARD',
           paymentMethod: null,
@@ -71,7 +71,7 @@ function data(): AccountStatementData {
           location: { id: 'l-1', name: 'Sede' },
           createdById: 'u-recep',
           createdAt: CREATED_TODAY,
-          timeZone: 'America/Bogota',
+          timeZone: 'America/Caracas',
           voidedAt: null,
           voidedBy: null,
           voidReason: null,
@@ -171,7 +171,7 @@ describe('GetAccountStatementUseCase', () => {
         emergencyContactName: null,
       },
       responsibles: [],
-      settings: { timeZone: 'America/Bogota', majorityAge: 18 },
+      settings: { timeZone: 'America/Caracas', majorityAge: 18 },
     }).useCase.execute('p-1', {});
     expect(adult.addressee).toEqual({
       kind: 'PATIENT',
@@ -196,7 +196,7 @@ describe('GetAccountStatementUseCase', () => {
           optedOut: false,
         },
       ],
-      settings: { timeZone: 'America/Bogota', majorityAge: 18 },
+      settings: { timeZone: 'America/Caracas', majorityAge: 18 },
     }).useCase.execute('p-1', {});
     // Se imprime y se entrega: aunque el responsable no tenga email.
     expect(minor.addressee).toEqual({
@@ -225,7 +225,7 @@ describe('GetAccountStatementUseCase', () => {
           optedOut: false,
         },
       ],
-      settings: { timeZone: 'America/Bogota', majorityAge: 16 },
+      settings: { timeZone: 'America/Caracas', majorityAge: 16 },
     }).useCase.execute('p-1', {});
     expect(out.addressee).toEqual({
       kind: 'PATIENT',
@@ -283,7 +283,7 @@ describe('GetAccountStatementUseCase', () => {
           {},
           { createdById: 'u-otra' },
           // 23:30 del 28/02 en la zona de la sede: ya es 1/03 en UTC, pero no "hoy".
-          { createdAt: new Date('2026-03-01T04:30:00.000Z') },
+          { createdAt: new Date('2026-03-01T03:30:00.000Z') },
           { createdById: null },
           {
             voidedAt: NOW,

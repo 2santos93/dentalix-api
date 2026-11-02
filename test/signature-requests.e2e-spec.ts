@@ -14,7 +14,7 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
 import { LOCATION_NOT_ALLOWED_CODE } from '../src/shared/tenancy/location-access';
@@ -354,7 +354,7 @@ describe('Firma a distancia de consentimientos (e2e, DX-243)', () => {
     expect(view.body).toMatchObject({
       destinationMasked: 'la***@example.com',
       codeSent: false,
-      location: { timeZone: 'America/Bogota' },
+      location: { timeZone: 'America/Caracas' },
     });
     expect(JSON.stringify(view.body)).not.toMatch(/Laura|Exodoncia/);
     // Sin código verificado no hay documento.
@@ -667,7 +667,7 @@ describe('Firma a distancia de consentimientos (e2e, DX-243)', () => {
         await as(clinicA)
           .post(
             '/locations',
-            locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede DX-443' }),
+            locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede DX-443' }),
           )
           .expect(201)
       ).body as { id: string }

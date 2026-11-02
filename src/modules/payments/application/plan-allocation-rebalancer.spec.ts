@@ -274,12 +274,12 @@ describe('PlanAllocationRebalancer', () => {
       const repo = new InMemoryPlanAllocationRepository();
       const rebalancer = new PlanAllocationRebalancer(
         repo,
-        quoting({ COP: 4000 }),
+        quoting({ EUR: 4000 }),
       );
       repo.pendingRate = [
         {
-          paymentId: 'cop',
-          currency: 'COP',
+          paymentId: 'gbp',
+          currency: 'EUR',
           targetCurrency: 'USD',
           paidOn: '2026-10-20',
         },
@@ -294,7 +294,7 @@ describe('PlanAllocationRebalancer', () => {
         frozen: 1,
         withoutRate: 1,
       });
-      expect(repo.frozen.get('cop')).toEqual({
+      expect(repo.frozen.get('gbp')).toEqual({
         targetCurrency: 'USD',
         rate: {
           currency: 'USD',
@@ -336,11 +336,11 @@ describe('PlanAllocationRebalancer', () => {
       const repo = new InMemoryPlanAllocationRepository();
       const rebalancer = new PlanAllocationRebalancer(
         repo,
-        quoting({ COP: 4000 }),
+        quoting({ EUR: 4000 }),
       );
       repo.pendingRate = Array.from({ length: 5 }, (_, i) => ({
-        paymentId: `cop-${i}`,
-        currency: 'COP',
+        paymentId: `gbp-${i}`,
+        currency: 'EUR',
         targetCurrency: 'USD',
         paidOn: '2026-10-20',
       }));

@@ -144,7 +144,7 @@ export interface CashOutflow {
  */
 export interface CashCreditRefund {
   id: string;
-  /** Número del comprobante de devolución (`DEV-BOG-000001`). */
+  /** Número del comprobante de devolución (`DEV-CCS-000001`). */
   number: string;
   amount: number;
   currency: string;

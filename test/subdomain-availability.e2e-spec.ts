@@ -8,7 +8,7 @@ import { MAILER } from '../src/modules/notifications/email/domain/ports/mailer.p
 import { CapturingMailer } from './support/capture-mailer';
 import { registerVerified } from './support/register-verified';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   registerBody,
 } from './support/location-fixtures';
 import { purgeTenantsBySubdomain } from './support/tenant-purge';
@@ -54,7 +54,7 @@ describe('GET /public/subdomains/:slug/availability (e2e)', () => {
     for (const sub of [TAKEN, RETIRED]) {
       await registerVerified(
         app,
-        registerBody(REGIONAL_BOGOTA_FIXTURE, {
+        registerBody(REGIONAL_CARACAS_FIXTURE, {
           clinicName: `Clínica ${sub}`,
           subdomain: sub,
           email: `${sub}${DOMAIN}`,
@@ -118,7 +118,7 @@ describe('GET /public/subdomains/:slug/availability (e2e)', () => {
 
   describe('el registro aplica las MISMAS reglas', () => {
     const body = (subdomain: string) =>
-      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+      registerBody(REGIONAL_CARACAS_FIXTURE, {
         clinicName: 'Clínica Reglas',
         subdomain,
         email: `reglas${DOMAIN}`,

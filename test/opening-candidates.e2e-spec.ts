@@ -12,7 +12,7 @@ import {
   STAFF_CANCELLATION,
 } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
 
@@ -28,10 +28,10 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 });
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const BOGOTA_MS = 5 * 60 * 60 * 1000;
+const CARACAS_MS = 5 * 60 * 60 * 1000;
 
 function nextTuesday(): string {
-  let t = Date.now() - BOGOTA_MS + 7 * DAY_MS;
+  let t = Date.now() - CARACAS_MS + 7 * DAY_MS;
   while (new Date(t).getUTCDay() !== 2) t += DAY_MS;
   return new Date(t).toISOString().slice(0, 10);
 }
@@ -40,9 +40,9 @@ function addDays(day: string, n: number): string {
     .toISOString()
     .slice(0, 10);
 }
-/** Hora de pared de la sede (UTC−5 fijo) como instante ISO. */
+/** Hora de pared de la sede (UTC−4 fijo) como instante ISO. */
 function local(day: string, hhmm: string): string {
-  return new Date(`${day}T${hhmm}:00-05:00`).toISOString();
+  return new Date(`${day}T${hhmm}:00-04:00`).toISOString();
 }
 
 const TUE = nextTuesday();
@@ -111,7 +111,7 @@ describe('Hueco libre → candidatos (e2e, DX-210)', () => {
         docType: 'NATIONAL_ID',
         docNumber: doc,
         sex: 'F',
-        phone: '3101234567',
+        phone: '4141234567',
       })
       .expect(201);
     return (res.body as Body).id;
@@ -222,7 +222,7 @@ describe('Hueco libre → candidatos (e2e, DX-210)', () => {
     ).expect(200);
     locationId = (locations.body as Body[])[0].id;
     const north = await as(api().post('/api/v1/locations'), clinic.adminToken)
-      .send(locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }))
+      .send(locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede Norte' }))
       .expect(201);
     northId = (north.body as Body).id;
 
@@ -286,12 +286,12 @@ describe('Hueco libre → candidatos (e2e, DX-210)', () => {
       'Berta',
       'Elena',
     ]);
-    expect(view).toMatchObject({ offerCap: 2, timeZone: 'America/Bogota' });
+    expect(view).toMatchObject({ offerCap: 2, timeZone: 'America/Caracas' });
     expect(view.items[0]).toMatchObject({
       kind: 'WAITLIST',
       priority: 'URGENT',
       waitlistEntryId: entry.Ana,
-      whatsappPhone: '573101234567',
+      whatsappPhone: '584141234567',
       whatsappBlocked: false,
       whatsappBlockedReason: null,
       offersToday: 0,

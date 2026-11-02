@@ -8,7 +8,7 @@ import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   registerBody,
 } from './support/location-fixtures';
 
@@ -56,7 +56,7 @@ describe('treatment plan currency whitelist (e2e)', () => {
 
     await registerVerified(
       app,
-      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+      registerBody(REGIONAL_CARACAS_FIXTURE, {
         clinicName: 'Currency Clinic',
         subdomain: sub,
         email: 'owner@currency-clinic.com',
@@ -98,9 +98,9 @@ describe('treatment plan currency whitelist (e2e)', () => {
       .post(`/api/v1/patients/${patientId}/treatment-plans`)
       .set('X-Tenant-Host', hostFor(sub))
       .set('Authorization', `Bearer ${token}`)
-      .send({ currency: 'COP' })
+      .send({ currency: 'VES' })
       .expect(201);
-    expect((ok.body as { currency: string }).currency).toBe('COP');
+    expect((ok.body as { currency: string }).currency).toBe('VES');
 
     await request(app.getHttpServer())
       .post(`/api/v1/patients/${patientId}/treatment-plans`)
@@ -110,14 +110,14 @@ describe('treatment plan currency whitelist (e2e)', () => {
       .expect(400);
   });
 
-  it("defaults to the location's currency (COP), not USD, when currency is omitted", async () => {
+  it("defaults to the location's currency (VES), not USD, when currency is omitted", async () => {
     const res = await request(app.getHttpServer())
       .post(`/api/v1/patients/${patientId}/treatment-plans`)
       .set('X-Tenant-Host', hostFor(sub))
       .set('Authorization', `Bearer ${token}`)
       .send({})
       .expect(201);
-    expect((res.body as { currency: string }).currency).toBe('COP');
+    expect((res.body as { currency: string }).currency).toBe('VES');
   });
 
   it('accepts a lowercase currency (normalized to uppercase)', async () => {

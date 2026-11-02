@@ -43,7 +43,7 @@ import {
 import { clinicTables, TenantTable } from './support/tenant-tables';
 import { pdfFixture } from './support/document-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
 
@@ -427,7 +427,7 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     app,
     a,
     '/locations',
-    locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte A' }),
+    locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede Norte A' }),
   );
   // Recordatorios por sede (DX-026): A los activa en su sede nueva.
   await api(app, a, 'put', `/reminder-settings/${location.id}`, {
@@ -442,7 +442,7 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     {
       noticeHours: 24,
       suggestedFee: 50000,
-      currency: 'COP',
+      currency: 'VES',
       patientText: 'Avísanos con 24 horas.',
     },
   );
@@ -532,7 +532,7 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     supplier: 'Proveedor de A',
     description: 'Póliza anual de A',
     amount: 100000,
-    currency: 'COP',
+    currency: 'VES',
     invoiceDate: '2026-01-15',
   });
   const expensePaid = (
@@ -545,7 +545,7 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
   // DX-105: una lista de precios de A con un precio (para `price_list_items`).
   const priceList = await create(app, a, '/price-lists', {
     name: 'Lista de A',
-    currency: 'COP',
+    currency: 'VES',
   });
   await api(app, a, 'put', `/price-lists/${priceList.id}/items`, {
     items: [{ catalogItemId, price: 90000 }],
@@ -601,7 +601,7 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
   });
   await create(app, a, `/patients/${patientId}/payment-promises`, {
     amount: 1000,
-    currency: 'COP',
+    currency: 'VES',
     dueDate: futureAt(10, 15).slice(0, 10),
   });
 
@@ -785,7 +785,7 @@ async function seedBExtras(
   });
   const priceList = await create(app, b, '/price-lists', {
     name: 'Lista de B',
-    currency: 'COP',
+    currency: 'VES',
   });
   const agreement = await create(app, b, '/agreements', {
     name: 'Convenio de B',
@@ -1879,7 +1879,7 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       path: () => `/patients/${a.patientId}/payment-promises`,
       body: () => ({
         amount: 1000,
-        currency: 'COP',
+        currency: 'VES',
         dueDate: futureAt(10, 15).slice(0, 10),
       }),
       status: 404,
@@ -2196,7 +2196,7 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       responseBody: {
         items: [],
         nextCursor: null,
-        timeZone: 'America/Bogota',
+        timeZone: 'America/Caracas',
       },
     })),
     // --- indicaciones postoperatorias (DX-222) ---
@@ -2616,7 +2616,7 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       path: () => `/patients/${b.patientId}/payment-promises`,
       body: () => ({
         amount: 1000,
-        currency: 'COP',
+        currency: 'VES',
         dueDate: futureAt(10, 15).slice(0, 10),
         locationId: a.locationId,
       }),
@@ -2712,7 +2712,7 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       path: () => '/price-lists',
       body: () => ({
         name: 'Lista con sede ajena',
-        currency: 'COP',
+        currency: 'VES',
         locationId: a.locationId,
       }),
       bodyIds: ['locationId'],

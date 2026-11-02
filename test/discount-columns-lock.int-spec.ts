@@ -7,7 +7,7 @@ import {
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -57,13 +57,13 @@ async function seedClinic(subdomain: string): Promise<Seeded> {
     ),
   );
   const location = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId,
       name: 'Sede principal',
     }),
   });
   const otherLocation = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId,
       name: 'Sede norte',
     }),
@@ -118,7 +118,7 @@ async function seedDiscountedPlan(
   itemStatus: 'PROPOSED' | 'ACCEPTED' = 'ACCEPTED',
 ): Promise<{ planId: string; itemId: string }> {
   const plan = await raw.treatmentPlan.create({
-    data: { tenantId: s.tenantId, patientId: s.patientId, currency: 'COP' },
+    data: { tenantId: s.tenantId, patientId: s.patientId, currency: 'USD' },
   });
   const item = await raw.treatmentPlanItem.create({
     data: {

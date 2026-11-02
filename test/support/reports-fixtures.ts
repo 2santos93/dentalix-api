@@ -1,11 +1,11 @@
 import { AppointmentStatus, ClinicRole, PrismaClient } from '@prisma/client';
-import { REGIONAL_BOGOTA_FIXTURE, locationData } from './location-fixtures';
+import { REGIONAL_CARACAS_FIXTURE, locationData } from './location-fixtures';
 
 /**
  * DX-014: actividad fija de una clínica para los reportes, sembrada por `raw`
  * (DIRECT_URL, owner) para que las fechas sean exactas: los casos de uso no
  * registran el pasado. Las horas van en UTC; las sedes de los tests están en
- * America/Bogota (UTC−5 fijo).
+ * America/Caracas (UTC−4 fijo).
  */
 export class ReportSeeder {
   private readonly taken = new Set<string>();
@@ -19,7 +19,7 @@ export class ReportSeeder {
 
   async location(name: string): Promise<string> {
     const location = await this.raw.location.create({
-      data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      data: locationData(REGIONAL_CARACAS_FIXTURE, {
         tenantId: this.tenantId,
         name,
       }),
@@ -89,7 +89,7 @@ export class ReportSeeder {
         tenantId: this.tenantId,
         providerId: input.providerId,
         locationId: input.locationId,
-        timezone: 'America/Bogota',
+        timezone: 'America/Caracas',
       },
       select: { id: true },
     });
@@ -109,7 +109,11 @@ export class ReportSeeder {
     ranges: { weekday: number; startMinute: number; endMinute: number }[],
   ): Promise<void> {
     const schedule = await this.raw.locationSchedule.create({
-      data: { tenantId: this.tenantId, locationId, timezone: 'America/Bogota' },
+      data: {
+        tenantId: this.tenantId,
+        locationId,
+        timezone: 'America/Caracas',
+      },
       select: { id: true },
     });
     await this.raw.locationScheduleRange.createMany({

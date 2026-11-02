@@ -50,7 +50,7 @@ const staff = {
 const locations = {
   findById: known(['loc1', 'loc2'], (id) => ({
     id,
-    timeZone: 'America/Bogota',
+    timeZone: 'America/Caracas',
   })),
 } as unknown as LocationRepository;
 const noSchedule = {

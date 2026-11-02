@@ -11,7 +11,7 @@ import {
   validateTimeZone,
 } from './regional-settings';
 
-const KNOWN = new Set(['COP', 'EUR', 'JPY']);
+const KNOWN = new Set(['USD', 'EUR', 'JPY']);
 const currencies: CurrencyWhitelist = {
   has: (code) => Promise.resolve(KNOWN.has(code)),
 };

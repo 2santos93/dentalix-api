@@ -94,7 +94,7 @@ function setup(
   repo.seedPlan({
     id: 'plan1',
     patientId: 'p1',
-    currency: 'COP',
+    currency: 'VES',
     status: TreatmentPlanStatus.DRAFT,
   });
   const pricing = catalogPricing(catalog, extra);
@@ -127,7 +127,7 @@ describe('Precio resuelto y foto en el alta del ítem (DX-105)', () => {
       { toothNumber: '11', catalogItemId: 'endo' },
       ADMIN_ACTOR,
     );
-    expect(pricing.calls).toEqual([{ patientId: 'p1', currency: 'COP' }]);
+    expect(pricing.calls).toEqual([{ patientId: 'p1', currency: 'VES' }]);
     expect(item).toMatchObject({
       price: 85_000,
       catalogPrice: 85_000,
@@ -281,7 +281,7 @@ describe('Precio resuelto y foto en el alta del ítem (DX-105)', () => {
           percent: null,
           priceListId: 'list-1',
         },
-        agreementListPrice: { price: 60_000, currency: 'COP', active: true },
+        agreementListPrice: { price: 60_000, currency: 'VES', active: true },
       });
       const item = await add.execute(
         'plan1',
@@ -369,7 +369,7 @@ describe('Precio resuelto y foto en el alta del ítem (DX-105)', () => {
       repo.seedPlan({
         id: 'plan-closed',
         patientId: 'p1',
-        currency: 'COP',
+        currency: 'VES',
         status: TreatmentPlanStatus.CANCELLED,
       });
       await expect(
@@ -444,14 +444,14 @@ describe('GetPriceQuoteUseCase (DX-105)', () => {
       catalogPricing(catalog, { agreement: SURCO }),
       patients(true),
     );
-    await expect(quote.execute('p1', 'endo', 'COP')).resolves.toEqual({
+    await expect(quote.execute('p1', 'endo', 'VES')).resolves.toEqual({
       basePrice: 100_000,
       price: 85_000,
       source: PriceSource.AGREEMENT_PERCENT,
       agreementId: 'agr-surco',
       agreementName: 'Surco Salud',
       allowDiscount: true,
-      currency: 'COP',
+      currency: 'VES',
     });
   });
 
@@ -460,7 +460,7 @@ describe('GetPriceQuoteUseCase (DX-105)', () => {
       catalogPricing(catalog),
       patients(false),
     );
-    await expect(quote.execute('p1', 'endo', 'COP')).rejects.toThrow(
+    await expect(quote.execute('p1', 'endo', 'VES')).rejects.toThrow(
       new NotFoundException('Paciente no encontrado.'),
     );
   });
@@ -470,7 +470,7 @@ describe('GetPriceQuoteUseCase (DX-105)', () => {
       catalogPricing(catalog),
       patients(true),
     );
-    await expect(quote.execute('p1', 'nope', 'COP')).rejects.toBeInstanceOf(
+    await expect(quote.execute('p1', 'nope', 'VES')).rejects.toBeInstanceOf(
       NotFoundException,
     );
   });

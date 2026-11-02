@@ -22,7 +22,7 @@ import {
   hashSlotOfferToken,
 } from '../src/modules/waitlist/domain/slot-offer-link';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -81,7 +81,7 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
     data: { name: `Clínica ${subdomain}`, subdomain },
   });
   const location = await owner.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId: tenant.id,
       name: 'Sede Centro',
     }),
@@ -342,7 +342,7 @@ describe('oferta de hueco por enlace (int, DX-435)', () => {
         start: at('15:00'),
         end: at('15:30'),
         locationName: 'Sede Centro',
-        timeZone: REGIONAL_BOGOTA_FIXTURE.timeZone,
+        timeZone: REGIONAL_CARACAS_FIXTURE.timeZone,
       });
       const json = JSON.stringify(view);
       expect(json).not.toContain('Apellido0');

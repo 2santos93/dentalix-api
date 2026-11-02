@@ -15,7 +15,7 @@ function source(
   return {
     planId: 'plan-1',
     patientId: 'patient-1',
-    currency: 'COP',
+    currency: 'VES',
     clinicName: 'Clínica Sonrisa',
     location: { id: 'loc-1', name: 'Sede principal', address: 'Calle 1 # 2-3' },
     patient: { name: 'Ana Pérez', document: 'Documento nacional 123' },
@@ -77,7 +77,7 @@ describe('buildQuoteContent (DX-012)', () => {
     ]);
     expect(content.totals).toEqual([
       {
-        currency: 'COP',
+        currency: 'VES',
         gross: 3680000.5,
         discount: 350000,
         net: 3330000.5,
@@ -90,7 +90,7 @@ describe('buildQuoteContent (DX-012)', () => {
     const content = buildQuoteContent(source({ items: [] }), '2026-12-20');
     expect(content.items).toEqual([]);
     expect(content.totals).toEqual([
-      { currency: 'COP', gross: 0, discount: 0, net: 0, agreementSaving: 0 },
+      { currency: 'VES', gross: 0, discount: 0, net: 0, agreementSaving: 0 },
     ]);
     expect(content.validUntil).toBe('2027-01-19');
   });
@@ -158,7 +158,7 @@ describe('computeQuoteHash', () => {
 });
 
 describe('computeAcceptanceHash', () => {
-  const at = new Date('2026-10-16T15:00:00.000Z');
+  const at = new Date('2026-10-16T14:00:00.000Z');
 
   it('sella contenido, firmante, firma y hora', () => {
     const hash = computeAcceptanceHash({
@@ -172,7 +172,7 @@ describe('computeAcceptanceHash', () => {
       { contentHash: 'b'.repeat(64) },
       { signerName: 'Ana Perez' },
       { signature: 'iVBOS' },
-      { acceptedAt: new Date('2026-10-16T15:00:00.001Z') },
+      { acceptedAt: new Date('2026-10-16T14:00:00.001Z') },
     ]) {
       expect(
         computeAcceptanceHash({
@@ -202,7 +202,7 @@ const V1_STORED = {
   version: 1,
   planId: 'plan-1',
   patientId: 'patient-1',
-  currency: 'COP',
+  currency: 'VES',
   clinicName: 'Clínica Sonrisa',
   location: { id: 'loc-1', name: 'Sede principal', address: 'Calle 1 # 2-3' },
   patient: { name: 'Ana Pérez', document: 'CC 123' },
@@ -233,12 +233,14 @@ const V1_STORED = {
     },
   ],
   totals: [
-    { currency: 'COP', gross: 3680000.5, discount: 350000, net: 3330000.5 },
+    { currency: 'VES', gross: 3680000.5, discount: 350000, net: 3330000.5 },
   ],
 };
-// Calculado con el código de antes de DX-105 sobre ese mismo contenido.
+// Foto del algoritmo v1 sobre este contenido. Se recalculó al cambiar la moneda del
+// fixture, tras comprobar que el código actual reproduce el hash literal anterior
+// (el de antes de DX-105) sobre el contenido previo.
 const V1_HASH =
-  '9e5e1673f84665948396a7e22191fc5d89c945fe90dc8c243a2c3d75cc6c94f8';
+  'f73f79d6877ff561bdb8f0325581a06dd33dd411ef6badab883f60446f88af9a';
 
 describe('presupuesto v1 firmado (DX-105, R3)', () => {
   it('su hash no cambia: el algoritmo v1 se conserva byte a byte', () => {

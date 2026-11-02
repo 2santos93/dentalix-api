@@ -19,7 +19,7 @@ import type { PatientRepository } from '../src/modules/patients/domain/ports/pat
 import type { RecordAuditEventUseCase } from '../src/modules/audit/application/record-audit-event.use-case';
 import type { AuditRequestContext } from '../src/modules/audit/domain/audit-request-context';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -62,7 +62,7 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
     data: { name: subdomain, subdomain },
   });
   const location = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId: tenant.id,
       name: 'Sede',
     }),

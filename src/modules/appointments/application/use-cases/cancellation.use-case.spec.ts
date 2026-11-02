@@ -51,7 +51,7 @@ function setup() {
     new InMemoryScheduleBlockRepository(),
     {
       findById: (id: string) =>
-        Promise.resolve({ id, timeZone: 'America/Bogota' }),
+        Promise.resolve({ id, timeZone: 'America/Caracas' }),
     } as unknown as LocationRepository,
     tenantContext,
     inMemoryAvailability(),

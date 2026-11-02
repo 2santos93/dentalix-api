@@ -49,7 +49,7 @@ INSERT INTO treatment_plans (id, "tenantId", "patientId", status, currency,
                              "createdAt", "updatedAt")
 SELECT plan_id, tenant_id, patient_id,
        (CASE WHEN n % 5 = 0 THEN 'COMPLETED' ELSE 'ACCEPTED' END)::"TreatmentPlanStatus",
-       'COP',
+       'USD',
        timestamp '2026-01-01' + (n % 280) * interval '1 day',
        now()
   FROM bench_plans;
@@ -72,7 +72,7 @@ SELECT md5('pay:' || plan_id::text)::uuid, tenant_id,
             ELSE '00000000-0000-4000-b000-0000000000a2'::uuid END,
        plan_id, patient_id,
        CASE WHEN n % 3 = 0 THEN price * 2 ELSE price END,
-       'COP',
+       'USD',
        timestamp '2026-02-01 17:00' + (n % 250) * interval '1 day',
        'CASH', now()
   FROM bench_plans
@@ -82,7 +82,7 @@ SELECT md5('pay:' || plan_id::text)::uuid, tenant_id,
 INSERT INTO payment_plans (id, "tenantId", "treatmentPlanId", "patientId", currency,
                            "totalToFinance", "installmentsCount", periodicity,
                            "startDate", "updatedAt")
-SELECT md5('pp:' || plan_id::text)::uuid, tenant_id, plan_id, patient_id, 'COP',
+SELECT md5('pp:' || plan_id::text)::uuid, tenant_id, plan_id, patient_id, 'USD',
        price, 6, 'MONTHLY',
        timestamp '2026-05-01' + (n % 120) * interval '1 day', now()
   FROM bench_plans

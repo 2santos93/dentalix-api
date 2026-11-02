@@ -5,17 +5,17 @@ import type { OpenPromise, PatientPayment } from '../domain/collections.entity';
 import type { PromiseStatus } from '../domain/payment-promise-rule';
 import { SettlePaymentPromises } from './settle-payment-promises';
 
-const BOGOTA = 'America/Bogota';
+const CARACAS = 'America/Caracas';
 
 function promise(id: string, patientId: string): OpenPromise {
   return {
     id,
     patientId,
     amount: 200_000,
-    currency: 'COP',
+    currency: 'USD',
     dueDate: '2026-11-15',
-    createdAt: new Date('2026-11-01T15:00:00.000Z'),
-    timeZone: BOGOTA,
+    createdAt: new Date('2026-11-01T14:00:00.000Z'),
+    timeZone: CARACAS,
   };
 }
 
@@ -30,9 +30,9 @@ class FakeRepo {
     {
       patientId: 'p1',
       amount: 200_000,
-      currency: 'COP',
-      paidAt: new Date('2026-11-10T15:00:00.000Z'),
-      createdAt: new Date('2026-11-10T15:00:00.000Z'),
+      currency: 'USD',
+      paidAt: new Date('2026-11-10T14:00:00.000Z'),
+      createdAt: new Date('2026-11-10T14:00:00.000Z'),
     },
   ];
   closed: { id: string; status: string }[] = [];
@@ -85,7 +85,7 @@ describe('SettlePaymentPromises (DX-150)', () => {
   beforeEach(() => {
     repo = new FakeRepo();
     events = [];
-    now = new Date('2026-11-16T05:30:00.000Z'); // 00:30 del 16 en la zona de la sede
+    now = new Date('2026-11-16T04:30:00.000Z'); // 00:30 del 16 en la zona de la sede
     const audit = {
       record: (draft: AuditEventDraft) => {
         events.push(draft);
@@ -129,7 +129,7 @@ describe('SettlePaymentPromises (DX-150)', () => {
   });
 
   it('decide con los abonos releídos dentro del candado (DX-215): un abono anulado entretanto no lo cumple', async () => {
-    now = new Date('2026-11-10T16:00:00.000Z');
+    now = new Date('2026-11-10T15:00:00.000Z');
     repo.freshPayments = [];
     await expect(settle.run()).resolves.toEqual({ kept: 0, broken: 0 });
     expect(repo.closed).toEqual([]);
@@ -137,12 +137,12 @@ describe('SettlePaymentPromises (DX-150)', () => {
   });
 
   it('antes del día siguiente en la sede, lo no cubierto sigue abierto', async () => {
-    now = new Date('2026-11-16T04:59:00.000Z'); // 23:59 del 15 en la zona de la sede
+    now = new Date('2026-11-16T03:59:00.000Z'); // 23:59 del 15 en la zona de la sede
     await expect(settle.run()).resolves.toEqual({ kept: 1, broken: 0 });
   });
 
   it('tras un abono: solo el paciente, auditado con el usuario que lo registró', async () => {
-    now = new Date('2026-11-10T16:00:00.000Z');
+    now = new Date('2026-11-10T15:00:00.000Z');
     await settle.afterPayment('p1', {
       tenantId: 't1',
       locationId: 'loc-1',

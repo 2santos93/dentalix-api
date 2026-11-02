@@ -99,7 +99,7 @@ describe('DX-273 salida de «Completada» y reservas en otra cita', () => {
   };
   const acceptedItems = async (n: number) => {
     const plan = await raw.treatmentPlan.create({
-      data: { tenantId: a.tenantId, patientId, currency: 'COP' },
+      data: { tenantId: a.tenantId, patientId, currency: 'USD' },
     });
     const ids: string[] = [];
     for (let i = 0; i < n; i++)
@@ -251,7 +251,7 @@ describe('DX-273 salida de «Completada» y reservas en otra cita', () => {
           tenantId: a.tenantId,
           firstName: 'Marta',
           lastName: 'Implante',
-          phone: '+573001112244',
+          phone: '+584121112244',
         },
       })
     ).id;
@@ -853,7 +853,7 @@ describe('DX-273 salida de «Completada» y reservas en otra cita', () => {
           data: {
             tenantId: a.tenantId,
             patientId: patient.id,
-            currency: 'COP',
+            currency: 'USD',
           },
         });
         const { id: itemId } = await raw.treatmentPlanItem.create({

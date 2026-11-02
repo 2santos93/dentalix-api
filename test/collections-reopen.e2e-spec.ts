@@ -30,8 +30,8 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
-const BOGOTA = 'America/Bogota';
-const today = (): string => civilDateIn(new Date(), BOGOTA);
+const CARACAS = 'America/Caracas';
+const today = (): string => civilDateIn(new Date(), CARACAS);
 
 interface PromiseBody {
   id: string;
@@ -76,7 +76,7 @@ describe('Cobranza — un compromiso cumplido se reabre al anular su abono (e2e,
       data: {
         tenantId: clinicA.tenantId,
         patientId: patient.id,
-        currency: 'COP',
+        currency: 'USD',
         status: TreatmentPlanStatus.ACCEPTED,
         items: {
           create: {
@@ -99,7 +99,7 @@ describe('Cobranza — un compromiso cumplido se reabre al anular su abono (e2e,
       `/patients/${patientId}/payment-promises`,
       receptionToken,
     )
-      .send({ amount: 200000, currency: 'COP', dueDate })
+      .send({ amount: 200000, currency: 'USD', dueDate })
       .expect(201);
     return (res.body as { id: string }).id;
   }
@@ -113,7 +113,7 @@ describe('Cobranza — un compromiso cumplido se reabre al anular su abono (e2e,
     )
       .send({
         amount,
-        currency: 'COP',
+        currency: 'USD',
         paidAt: new Date().toISOString(),
         method: 'CASH',
       })

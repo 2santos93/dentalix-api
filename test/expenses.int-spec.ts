@@ -2,7 +2,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -46,17 +46,17 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
   });
   const tenantId = tenant.id;
   const location = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId,
       name: 'Sede',
-      country: 'CO',
+      country: 'VE',
     }),
   });
   const other = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId,
       name: 'Sede Norte',
-      country: 'CO',
+      country: 'VE',
     }),
   });
   return { tenantId, locationId: location.id, otherLocationId: other.id };
@@ -133,7 +133,7 @@ describe('gastos, pagos de gasto y salidas de caja: tablas, RLS e inmutabilidad 
         data: {
           tenantId: a.tenantId,
           sessionId: session.id,
-          currency: 'COP',
+          currency: 'VES',
           amount: 50_000,
         },
       });
@@ -159,7 +159,7 @@ describe('gastos, pagos de gasto y salidas de caja: tablas, RLS e inmutabilidad 
         data: {
           tenantId: a.tenantId,
           closingId: closing.id,
-          currency: 'COP',
+          currency: 'VES',
           method: 'CASH',
           opening: 50_000,
           expected: 50_000,
@@ -186,7 +186,7 @@ describe('gastos, pagos de gasto y salidas de caja: tablas, RLS e inmutabilidad 
         locationId,
         category: 'Insumos clínicos',
         amount: 100_000,
-        currency: 'COP',
+        currency: 'VES',
         invoiceDate: DAY,
         createdById: userId,
         ...extra,
@@ -204,7 +204,7 @@ describe('gastos, pagos de gasto y salidas de caja: tablas, RLS e inmutabilidad 
       expenseId,
       locationId: clinic.locationId,
       amount: 10_000,
-      currency: 'COP',
+      currency: 'VES',
       method: 'TRANSFER',
       paidOn: DAY,
       createdById: userId,
@@ -265,7 +265,7 @@ describe('gastos, pagos de gasto y salidas de caja: tablas, RLS e inmutabilidad 
             locationId: b.locationId,
             category: 'Otros',
             amount: 1,
-            currency: 'COP',
+            currency: 'VES',
             invoiceDate: DAY,
             createdById: userId,
           },
@@ -283,7 +283,7 @@ describe('gastos, pagos de gasto y salidas de caja: tablas, RLS e inmutabilidad 
             locationId: b.locationId,
             category: 'Otros',
             amount: 1,
-            currency: 'COP',
+            currency: 'VES',
             invoiceDate: DAY,
             createdById: userId,
           },
@@ -794,7 +794,7 @@ describe('gastos, pagos de gasto y salidas de caja: tablas, RLS e inmutabilidad 
         kind: 'OUTFLOW_VOID',
         expensePaymentId: payment.id,
         originalSessionId: payment.cashSessionId,
-        currency: 'COP',
+        currency: 'VES',
         method: 'CASH',
         amount: 10_000,
         reason: 'Salida registrada por error',
@@ -847,7 +847,7 @@ describe('gastos, pagos de gasto y salidas de caja: tablas, RLS e inmutabilidad 
           tenantId: a.tenantId,
           patientId: plan.id,
           status: 'ACCEPTED',
-          currency: 'COP',
+          currency: 'VES',
         },
       });
       const abono = await raw.payment.create({
@@ -857,7 +857,7 @@ describe('gastos, pagos de gasto y salidas de caja: tablas, RLS e inmutabilidad 
           treatmentPlanId: treatment.id,
           patientId: plan.id,
           amount: 5_000,
-          currency: 'COP',
+          currency: 'VES',
           paidAt: new Date(),
           method: 'CASH',
           createdById: userId,
@@ -883,7 +883,7 @@ describe('gastos, pagos de gasto y salidas de caja: tablas, RLS e inmutabilidad 
           tenantId: a.tenantId,
           patientId: patient.id,
           status: 'ACCEPTED',
-          currency: 'COP',
+          currency: 'VES',
         },
       });
       const abono = await raw.payment.create({
@@ -893,7 +893,7 @@ describe('gastos, pagos de gasto y salidas de caja: tablas, RLS e inmutabilidad 
           treatmentPlanId: treatment.id,
           patientId: patient.id,
           amount: 5_000,
-          currency: 'COP',
+          currency: 'VES',
           paidAt: new Date(),
           method: 'CASH',
           createdById: userId,
@@ -968,7 +968,7 @@ describe('gastos, pagos de gasto y salidas de caja: tablas, RLS e inmutabilidad 
                "createdById")
             VALUES (gen_random_uuid(), ${tenantId}::uuid, ${locationId}::uuid,
               'OUTFLOW_VOID', ${expensePaymentId}::uuid,
-              ${originalSessionId}::uuid, 'COP', 'CASH', 10000,
+              ${originalSessionId}::uuid, 'VES', 'CASH', 10000,
               'Salida registrada por error', ${userId}::uuid)`,
         );
       // Otra sede de la misma clínica: la FK compuesta lo aceptaría.

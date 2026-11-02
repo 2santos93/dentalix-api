@@ -7,7 +7,7 @@ import type { ReminderClock } from './reminder-clock';
 import { regionalFormat } from '../../../shared/format/regional-format';
 
 const HOUR = 3_600_000;
-const NOW = new Date('2026-10-20T12:00:00.000Z');
+const NOW = new Date('2026-10-20T11:00:00.000Z');
 const APPT = '5a1c7d2e-0000-4000-8000-000000000001';
 const TENANT = '9f3a1b2c-0000-4000-8000-0000000000aa';
 const START = new Date(NOW.getTime() + 2 * HOUR);
@@ -22,9 +22,9 @@ function context(over: Partial<ReminderSendContext> = {}): ReminderSendContext {
       deleted: false,
     },
     majorityAge: 18,
-    locationTimeZone: 'America/Bogota',
+    locationTimeZone: 'America/Caracas',
     // Ajustes explícitos de la sede: el reloj sale de aquí, nunca del país.
-    locationFormat: regionalFormat({ locale: 'es-CO', hourCycle: 'h12' }),
+    locationFormat: regionalFormat({ locale: 'es-VE', hourCycle: 'h12' }),
     patientId: PATIENT,
     contact: {
       contactChannel: 'EMAIL',
@@ -69,7 +69,7 @@ describe('SendAppointmentReminder (DX-026)', () => {
           end: new Date(START.getTime() + HOUR),
           providerName: 'Dra. Gómez',
           locationName: 'Sede Norte',
-          locationAddress: 'Cra 15 # 93-60',
+          locationAddress: 'Av. Francisco de Miranda 93',
         },
       }),
     };
@@ -136,7 +136,7 @@ describe('SendAppointmentReminder (DX-026)', () => {
         guardianName: null,
         startsAtLabel: 'martes 20 de octubre de 2026 a las 9:00 a. m.',
         locationName: 'Sede Norte',
-        locationAddress: 'Cra 15 # 93-60',
+        locationAddress: 'Av. Francisco de Miranda 93',
         providerName: 'Dra. Gómez',
         confirmUrl: 'https://demo.dentalix.app/confirmar/tok_123',
         unsubscribeUrl: 'https://demo.dentalix.app/baja/opt_tok',
@@ -164,7 +164,7 @@ describe('SendAppointmentReminder (DX-026)', () => {
           noticeHours: 24,
           patientText: 'Avísanos con tiempo.',
           suggestedFee: 50000,
-          currency: 'COP',
+          currency: 'USD',
         },
       }),
     );
@@ -176,7 +176,7 @@ describe('SendAppointmentReminder (DX-026)', () => {
     expect(call[0].vars.cancellationPolicy).toEqual({
       noticeHours: 24,
       text: 'Avísanos con tiempo.',
-      feeLabel: expect.stringContaining('50.000') as unknown,
+      feeLabel: expect.stringMatching(/50\.000.*USD|USD.*50\.000/) as unknown,
     });
     expect(repo.reminders[0]).toMatchObject({
       status: 'SENT',
@@ -233,11 +233,11 @@ describe('SendAppointmentReminder (DX-026)', () => {
         };
       },
     ];
-    // 14:00 UTC del 20 = 23:00 del 20 en Tokio, en 24 h y en español.
+    // 13:00 UTC del 20 = 22:00 del 20 en Tokio, en 24 h y en español.
     expect(call[0].vars.startsAtLabel).toBe(
-      'martes 20 de octubre de 2026 a las 23:00',
+      'martes 20 de octubre de 2026 a las 22:00',
     );
-    expect(call[0].vars.cancellationPolicy.feeLabel).toBe('￥3,000');
+    expect(call[0].vars.cancellationPolicy.feeLabel).toBe('JPY\u00a03,000');
   });
 
   it('un menor sin email con responsable que recibe avisos: sale al email del responsable y queda «enviado al responsable» (DX-203)', async () => {

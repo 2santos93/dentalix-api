@@ -11,10 +11,10 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 
-// DX-319: la sede ya no tiene código REPS y gana un nº de registro sanitario
+// DX-319: la sede ya no tiene código de habilitación anterior y gana un nº de registro sanitario
 // libre (sin formato por país) y si sale en los documentos. Solo ADMIN lo
 // edita; queda auditado con su antes y después; otra clínica no llega a la
-// sede (404) y un cliente que aún envíe el REPS recibe 400.
+// sede (404) y un cliente que aún envíe el código de habilitación anterior recibe 400.
 
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
@@ -68,7 +68,7 @@ describe('Nº de registro sanitario de la sede (DX-319, e2e)', () => {
     await raw.$disconnect();
   });
 
-  it('la sede nace sin nº, sin imprimirlo y sin campo REPS en la respuesta', () => {
+  it('la sede nace sin nº, sin imprimirlo y sin código de habilitación anterior en la respuesta', () => {
     expect(location.healthRegistrationNumber).toBeNull();
     expect(location.showHealthRegistrationNumber).toBe(false);
     expect(location).not.toHaveProperty('repsHabilitationCode');
@@ -184,13 +184,13 @@ describe('Nº de registro sanitario de la sede (DX-319, e2e)', () => {
     );
   });
 
-  it('el campo REPS en el cuerpo → 400 y no cambia nada', async () => {
+  it('el código de habilitación anterior en el cuerpo → 400 y no cambia nada', async () => {
     const before = await raw.location.findUniqueOrThrow({
       where: { id: location.id },
     });
     for (const value of ['110010123401', null]) {
       const res = await patch(a, a.adminToken, location.id, {
-        name: 'Con REPS',
+        name: 'Con código anterior',
         repsHabilitationCode: value,
       }).expect(400);
       expect(JSON.stringify(res.body)).toContain(

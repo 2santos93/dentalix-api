@@ -302,7 +302,7 @@ describe('buildAuditDraft (DX-009)', () => {
       },
       req({
         params: { id: PATIENT },
-        body: { phone: '3001234567', allergies: 'Penicilina' },
+        body: { phone: '4121234567', allergies: 'Penicilina' },
       }),
       { id: PATIENT },
       scope,
@@ -311,7 +311,7 @@ describe('buildAuditDraft (DX-009)', () => {
       changedFields: ['allergies', 'phone'],
       params: { id: PATIENT },
     });
-    expect(JSON.stringify(draft)).not.toMatch(/Penicilina|3001234567/);
+    expect(JSON.stringify(draft)).not.toMatch(/Penicilina|4121234567/);
   });
 
   it('DX-319: añade el antes/después que el handler deja en la petición, saneado', () => {
@@ -348,7 +348,7 @@ describe('buildAuditDraft (DX-009)', () => {
       { action: 'UPDATE', resource: 'PATIENT', resourceId: { param: 'id' } },
       req({
         params: { id: PATIENT },
-        body: { phone: '3001234567' },
+        body: { phone: '4121234567' },
         auditMetadata: {
           healthRegistration: {
             before: { number: null, shown: false },

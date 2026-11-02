@@ -14,7 +14,7 @@ import { PrismaReminderOptOutRepository } from '../src/modules/reminders/infrast
 import { PrismaPatientCommunicationRepository } from '../src/modules/patients/infrastructure/repositories/prisma-patient-communication.repository';
 import { waitFor } from './support/wait-for';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -82,7 +82,7 @@ beforeAll(async () => {
   ).id;
   for (const tenantId of [tenant, other])
     await owner.location.create({
-      data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      data: locationData(REGIONAL_CARACAS_FIXTURE, {
         tenantId,
         name: 'Principal',
         address: 'Fixture',
@@ -532,7 +532,7 @@ test('reactivación devuelve cambios efectivos sobre estado bloqueado y conserva
       (current) => {
         expect(current.reminderOptOutAt).toEqual(NOW);
         expect(current).toMatchObject({
-          phone: '+573209876543',
+          phone: '+584249876543',
           contactChannel: 'NONE',
         });
         return patch;
@@ -548,7 +548,7 @@ test('reactivación devuelve cambios efectivos sobre estado bloqueado y conserva
       ),
     ).toBe(true);
     await inTenant(() =>
-      comms.update(patient, { phone: '+573209876543', contactChannel: 'NONE' }),
+      comms.update(patient, { phone: '+584249876543', contactChannel: 'NONE' }),
     );
     resume.release();
     const result = await pending;
@@ -556,7 +556,7 @@ test('reactivación devuelve cambios efectivos sobre estado bloqueado y conserva
     expect(result.state).toMatchObject({
       reminderOptOutAt: null,
       reminderOptOutSource: null,
-      phone: '+573209876543',
+      phone: '+584249876543',
       contactChannel: 'NONE',
     });
     const unchanged = await inTenant(() => comms.update(patient, patch, NOW));

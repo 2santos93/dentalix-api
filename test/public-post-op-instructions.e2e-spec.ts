@@ -112,7 +112,7 @@ describe('Indicaciones postoperatorias por enlace público (e2e, DX-222)', () =>
       where: { tenantId: clinicA.tenantId },
     });
     await as(clinicA)
-      .patch(`/locations/${location.id}`, { phone: '601 555 0101' })
+      .patch(`/locations/${location.id}`, { phone: '212 555 0101' })
       .expect(200);
 
     const template = await as(clinicA)
@@ -182,7 +182,7 @@ describe('Indicaciones postoperatorias por enlace público (e2e, DX-222)', () =>
         logoUrl: tenant.logoKey,
         primaryColor: tenant.primaryColor,
       },
-      locationPhone: '601 555 0101',
+      locationPhone: '212 555 0101',
       title: 'Exodoncia',
       code: 'POI-EXO',
       version: 1,

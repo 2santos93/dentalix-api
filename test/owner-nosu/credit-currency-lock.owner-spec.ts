@@ -104,13 +104,13 @@ describe('DX-438 · el trigger de moneda con saldo a favor bajo el owner sin sup
       `INSERT INTO "patients" ("id","tenantId","firstName","lastName","updatedAt")
          VALUES ('${P_A}','${T_A}','Ana','Moneda',now())`,
       `INSERT INTO "treatment_plans" ("id","tenantId","patientId","status","currency","updatedAt")
-         VALUES ('${SOURCE}','${T_A}','${P_A}','CANCELLED','COP',now()),
-                ('${TARGET}','${T_A}','${P_A}','DRAFT','COP',now())`,
+         VALUES ('${SOURCE}','${T_A}','${P_A}','CANCELLED','VES',now()),
+                ('${TARGET}','${T_A}','${P_A}','DRAFT','VES',now())`,
       `INSERT INTO "patient_credit_transfers" ("id","tenantId","locationId","patientId","sourcePlanId","targetPlanId","currency","amount","createdById")
-         VALUES ('${TRANSFER}','${T_A}','${L_A}','${P_A}','${SOURCE}','${TARGET}','COP',50000,'${U_A}')`,
+         VALUES ('${TRANSFER}','${T_A}','${L_A}','${P_A}','${SOURCE}','${TARGET}','VES',50000,'${U_A}')`,
       `INSERT INTO "patient_credit_entries" ("id","tenantId","patientId","treatmentPlanId","currency","amount","kind","transferId")
-         VALUES (gen_random_uuid(),'${T_A}','${P_A}','${SOURCE}','COP',-50000,'TRANSFER_OUT','${TRANSFER}'),
-                (gen_random_uuid(),'${T_A}','${P_A}','${TARGET}','COP',50000,'TRANSFER_IN','${TRANSFER}')`,
+         VALUES (gen_random_uuid(),'${T_A}','${P_A}','${SOURCE}','VES',-50000,'TRANSFER_OUT','${TRANSFER}'),
+                (gen_random_uuid(),'${T_A}','${P_A}','${TARGET}','VES',50000,'TRANSFER_IN','${TRANSFER}')`,
     ]) {
       await target.$executeRawUnsafe(sql);
     }
@@ -132,7 +132,7 @@ describe('DX-438 · el trigger de moneda con saldo a favor bajo el owner sin sup
     );
     expect(r.status).not.toBe(0);
     expect(r.out).toMatch(/saldo a favor/);
-    expect(await planCurrency(TARGET)).toBe('COP');
+    expect(await planCurrency(TARGET)).toBe('VES');
   });
 
   it('con la clínica fijada, sí cambia otras columnas del mismo plan', async () => {
@@ -154,6 +154,6 @@ describe('DX-438 · el trigger de moneda con saldo a favor bajo el owner sin sup
     );
     expect(r.status).toBe(0);
     expect(r.out).toContain('UPDATE 0');
-    expect(await planCurrency(TARGET)).toBe('COP');
+    expect(await planCurrency(TARGET)).toBe('VES');
   });
 });

@@ -36,7 +36,7 @@ function row(over: Partial<ClosingAppointmentRow> = {}): ClosingAppointmentRow {
     status: 'CONFIRMED',
     locationId: MAIN,
     locationName: 'Principal',
-    timeZone: 'America/Bogota',
+    timeZone: 'America/Caracas',
     professionalId: 'd-1',
     professionalName: 'Dra. Uno',
     ...over,
@@ -58,7 +58,7 @@ function fakeRepo() {
     listLocations: fn<'listLocations'>((allowed) =>
       Promise.resolve(
         [
-          { id: MAIN, name: 'Principal', timeZone: 'America/Bogota' },
+          { id: MAIN, name: 'Principal', timeZone: 'America/Caracas' },
           { id: NORTH, name: 'Norte', timeZone: 'Europe/Madrid' },
         ].filter((l) => allowed === 'ALL' || allowed.includes(l.id)),
       ),
@@ -213,7 +213,7 @@ describe('ClosingQueueUseCases (DX-439)', () => {
   it('una sede sin zona no se omite en silencio: sale en locationsWithoutZone', async () => {
     const { repo, scopes } = fakeRepo();
     repo.listLocations.mockResolvedValueOnce([
-      { id: MAIN, name: 'Principal', timeZone: 'America/Bogota' },
+      { id: MAIN, name: 'Principal', timeZone: 'America/Caracas' },
       { id: NORTH, name: 'Norte', timeZone: null },
     ]);
     const q = await new ClosingQueueUseCases(repo, () => NOW).list(

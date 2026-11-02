@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Prisma, PrismaClient } from '@prisma/client';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -52,10 +52,10 @@ async function seedClinic(name: string): Promise<Seeded> {
     data: { tenantId, userId: user.id, role: 'RECEPTION' },
   });
   const location = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, { tenantId, name: 'Norte' }),
+    data: locationData(REGIONAL_CARACAS_FIXTURE, { tenantId, name: 'Norte' }),
   });
   const other = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, { tenantId, name: 'Sur' }),
+    data: locationData(REGIONAL_CARACAS_FIXTURE, { tenantId, name: 'Sur' }),
   });
   return {
     tenantId,

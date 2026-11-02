@@ -6,7 +6,7 @@ import { TenantContextService } from '../src/shared/tenancy/tenant-context.servi
 import { PrismaPatientRepository } from '../src/modules/patients/infrastructure/repositories/prisma-patient.repository';
 import { assertNotUnderRetention } from '../src/modules/patients/application/retention-guard';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -42,13 +42,13 @@ async function newPatient(tenantId: string, name: string): Promise<string> {
         tenantId,
         firstName: name,
         lastName: 'DX039',
-        phone: '3001112233',
+        phone: '4121112233',
         email: `${name.toLowerCase()}@example.com`,
         address: 'Calle 1 # 2-3',
         notes: 'Prefiere citas en la tarde',
         emergencyContactName: 'Luis',
         emergencyContactRelationship: 'Hermano',
-        emergencyContactPhone: '3004445566',
+        emergencyContactPhone: '4124445566',
         occupation: 'Docente',
       },
     })
@@ -119,7 +119,7 @@ describe('retención de la HC (DX-039, int)', () => {
     ).id;
     locationA = (
       await raw.location.create({
-        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        data: locationData(REGIONAL_CARACAS_FIXTURE, {
           tenantId: tenantA,
           name: 'Sede',
         }),

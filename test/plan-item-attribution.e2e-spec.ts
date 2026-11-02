@@ -33,7 +33,7 @@ import {
   REVERT_DONE_FORBIDDEN_MESSAGE,
 } from '../src/modules/treatment-plans/domain/plan-item-attribution';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
 
@@ -168,7 +168,7 @@ describe('DX-050 · ítem realizado con profesional, sede y hora (e2e)', () => {
       'post',
       '/locations',
       a.adminToken,
-      locationBody(REGIONAL_BOGOTA_FIXTURE, {
+      locationBody(REGIONAL_CARACAS_FIXTURE, {
         name: 'Sede Norte',
       }),
     ).expect(201);

@@ -16,7 +16,7 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
-const ZONE = 'America/Bogota';
+const ZONE = 'America/Caracas';
 const TODAY = civilDateIn(new Date(), ZONE);
 const YESTERDAY = addCivilDays(TODAY, -1);
 

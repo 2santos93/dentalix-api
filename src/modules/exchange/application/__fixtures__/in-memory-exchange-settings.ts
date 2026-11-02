@@ -142,7 +142,7 @@ export function makeManualRates(
     }
   }
   const currencies = new Set(
-    options.currencies ?? ['USD', 'COP', 'EUR', 'VES'],
+    options.currencies ?? ['USD', 'GBP', 'EUR', 'VES'],
   );
   return {
     rows: (tenantId) => store.get(tenantId) ?? [],

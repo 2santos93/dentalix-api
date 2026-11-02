@@ -70,7 +70,7 @@ async function seedClinic(
       data: {
         tenantId: tenant.id,
         patientId,
-        currency: 'COP',
+        currency: 'VES',
         status: 'ACCEPTED',
       },
     });
@@ -158,7 +158,7 @@ describe('Producción por procedimiento en la BD (DX-423, int)', () => {
       expect.objectContaining({
         catalogItemId: a.catalogItemId,
         category: 'Operatoria',
-        currency: 'COP',
+        currency: 'VES',
         count: 2,
         gross: 300,
         catalogCount: 2,
@@ -218,7 +218,7 @@ describe('Producción por procedimiento en la BD (DX-423, int)', () => {
     );
     expect(asDentist.totals).toEqual([
       {
-        currency: 'COP',
+        currency: 'VES',
         count: 1,
         gross: 100,
         discounts: 0,
@@ -229,7 +229,7 @@ describe('Producción por procedimiento en la BD (DX-423, int)', () => {
     // Su realizado sin fecha no es del período: aviso aparte.
     expect(asDentist.unattributed).toEqual([]);
     expect(asDentist.undated).toEqual([
-      { currency: 'COP', count: 1, gross: 7, discounts: 0, net: 7 },
+      { currency: 'VES', count: 1, gross: 7, discounts: 0, net: 7 },
     ]);
     const asAdmin = await context.run(a.tenantId, () =>
       useCase.execute({
@@ -267,9 +267,9 @@ describe('Producción por procedimiento en la BD (DX-423, int)', () => {
     expect(page.items).toHaveLength(1);
     expect(page.items[0]).toMatchObject({
       patientName: 'Paciente dx423-a',
-      currency: 'COP',
+      currency: 'VES',
       // La zona de la sede donde se realizó: la web fecha cada ítem con ella.
-      timeZone: 'America/Bogota',
+      timeZone: 'America/Caracas',
     });
   });
 
@@ -455,10 +455,10 @@ describe('Producción por procedimiento en la BD (DX-423, int)', () => {
       repo.unattributed(OCTOBER, { locationIds: [a.main, a.other] }, true),
     );
     expect(october.inPeriod).toEqual([
-      { currency: 'COP', count: 1, gross: 15, discounts: 0 },
+      { currency: 'VES', count: 1, gross: 15, discounts: 0 },
     ]);
     expect(october.undated).toEqual([
-      { currency: 'COP', count: 1, gross: 7, discounts: 0 },
+      { currency: 'VES', count: 1, gross: 7, discounts: 0 },
     ]);
     // Enero de 2020: el de 90.000 sin sede, y nada más del período.
     const january = await context.run(a.tenantId, () =>
@@ -470,7 +470,7 @@ describe('Producción por procedimiento en la BD (DX-423, int)', () => {
       }),
     );
     expect(january.unattributed).toEqual([
-      { currency: 'COP', count: 1, gross: 90000, discounts: 0, net: 90000 },
+      { currency: 'VES', count: 1, gross: 90000, discounts: 0, net: 90000 },
     ]);
     const february = await context.run(a.tenantId, () =>
       useCase.execute({
@@ -484,7 +484,7 @@ describe('Producción por procedimiento en la BD (DX-423, int)', () => {
     expect(february.hasActivity).toBe(false);
     expect(february.unattributed).toEqual([]);
     expect(february.undated).toEqual([
-      { currency: 'COP', count: 1, gross: 7, discounts: 0, net: 7 },
+      { currency: 'VES', count: 1, gross: 7, discounts: 0, net: 7 },
     ]);
     // Con una sede elegida, lo que no tiene sede no es de ella.
     const atMain = await context.run(a.tenantId, () =>

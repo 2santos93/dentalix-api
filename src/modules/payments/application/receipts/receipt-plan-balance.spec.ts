@@ -10,7 +10,7 @@ function makeCalculator(
         rateProviderTimedOut?: boolean;
       }
     | Error = {
-    planCurrency: 'COP',
+    planCurrency: 'USD',
     billable: 900000,
     paid: 300000,
   },
@@ -39,7 +39,7 @@ describe('ReceiptPlanBalanceCalculator (DX-136)', () => {
   it('saldo tras el abono: lo pagado antes más este abono, en la moneda del plan', async () => {
     const { calculator, balanceCalls } = makeCalculator();
     await expect(calculator.afterPayment('plan-1', 200000)).resolves.toEqual({
-      currency: 'COP',
+      currency: 'USD',
       billable: 900000,
       paid: 500000,
       balance: 400000,
@@ -49,12 +49,12 @@ describe('ReceiptPlanBalanceCalculator (DX-136)', () => {
 
   it('un abono ya convertido a la moneda del plan suma tal cual', async () => {
     const { calculator } = makeCalculator({
-      planCurrency: 'COP',
+      planCurrency: 'USD',
       billable: 900000,
       paid: 0,
     });
     await expect(calculator.afterPayment('plan-1', 200000)).resolves.toEqual({
-      currency: 'COP',
+      currency: 'USD',
       billable: 900000,
       paid: 200000,
       balance: 700000,
@@ -69,7 +69,7 @@ describe('ReceiptPlanBalanceCalculator (DX-136)', () => {
 
   it('DX-054: con el proveedor de tasas fuera de plazo (saldo previo incompleto), null', async () => {
     const { calculator } = makeCalculator({
-      planCurrency: 'COP',
+      planCurrency: 'USD',
       billable: 900000,
       paid: 0,
       rateProviderTimedOut: true,

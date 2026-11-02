@@ -16,7 +16,7 @@ export function quoteSource(
       id: 'plan-1',
       patientId: 'patient-1',
       status: TreatmentPlanStatus.DRAFT,
-      currency: 'COP',
+      currency: 'USD',
     },
     items: [
       {
@@ -60,7 +60,7 @@ export function quoteSource(
       id: 'loc-1',
       name: 'Sede principal',
       address: 'Calle 1',
-      timeZone: 'America/Bogota',
+      timeZone: 'America/Caracas',
     },
     professionalName: 'Dra. Gómez',
     acceptance: null,

@@ -15,7 +15,7 @@ import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   registerBody as clinicRegisterBody,
 } from './support/location-fixtures';
 
@@ -35,7 +35,7 @@ const SEEDED_PASSWORD = 'S3cret!!';
 // blank in .env.test (see .env.test / dashboard.e2e-spec.ts), so if
 // GetPlanBalanceUseCase's ConvertAmountUseCase ever fell through to the live
 // provider it would throw instead of silently hitting the network -- the
-// COP abono below must hit the seeded snapshot for RATE_DATE, never
+// VES abono below must hit the seeded snapshot for RATE_DATE, never
 // OpenExchangeRatesProvider. The USD abono never needs it at all: `from ===
 // to` is a passthrough in ConvertAmountUseCase (see
 // convert-amount.use-case.ts / sales.e2e-spec.ts convention).
@@ -98,7 +98,7 @@ async function registerAndLogin(
 }> {
   const register = await registerVerified(
     app,
-    clinicRegisterBody(REGIONAL_BOGOTA_FIXTURE, {
+    clinicRegisterBody(REGIONAL_CARACAS_FIXTURE, {
       clinicName: opts.clinicName,
       subdomain: opts.subdomain,
       email: opts.email,
@@ -211,13 +211,13 @@ describe('Payments (e2e)', () => {
 
     await cleanup();
 
-    // Seed the COP snapshot directly via DIRECT_URL so GetPlanBalanceUseCase
+    // Seed the VES snapshot directly via DIRECT_URL so GetPlanBalanceUseCase
     // -> ConvertAmountUseCase -> GetRatesForDateUseCase's cache-then-fetch
     // finds a row for RATE_DATE and returns immediately (cache hit) -- it
     // never calls OpenExchangeRatesProvider.fetchRates, so this suite needs
     // no network access and no real EXCHANGE_APP_ID.
     await raw.exchangeRateSnapshot.create({
-      data: { date: RATE_DATE, currency: 'COP', rate: RATE_COP },
+      data: { date: RATE_DATE, currency: 'VES', rate: RATE_COP },
     });
   });
 
@@ -259,7 +259,7 @@ describe('Payments (e2e)', () => {
         .expect(201);
       const catalogItem = createCatalogItem.body as CatalogItemResponseBody;
 
-      // --- 1. Create a treatment plan (explicit USD; the clinic's location is COP).
+      // --- 1. Create a treatment plan (explicit USD; the clinic's location is VES).
       const createPlan = await request(app.getHttpServer())
         .post(`/api/v1/patients/${patientA.id}/treatment-plans`)
         .set('X-Tenant-Host', hostFor(clinicA.subdomain))
@@ -342,22 +342,22 @@ describe('Payments (e2e)', () => {
       expect(balanceBody2.balance).toBe(150);
       expect(balanceBody2.paymentsCount).toBe(1);
 
-      // --- 5. POST an abono in a DIFFERENT currency (COP 200000, on
+      // --- 5. POST an abono in a DIFFERENT currency (VES 200000, on
       // RATE_DATE) -> converted via the seeded snapshot: 200000 / 4000 = 50
-      // USD. Balance drops by the converted amount, not the raw COP amount.
+      // USD. Balance drops by the converted amount, not the raw VES amount.
       const paymentCop = await request(app.getHttpServer())
         .post(`/api/v1/treatment-plans/${plan.id}/payments`)
         .set('X-Tenant-Host', hostFor(clinicA.subdomain))
         .set('Authorization', `Bearer ${clinicA.accessToken}`)
         .send({
           amount: 200000,
-          currency: 'COP',
+          currency: 'VES',
           paidAt: `${RATE_DATE}T10:00:00.000Z`,
           method: 'CASH',
         })
         .expect(201);
       const paymentCopBody = paymentCop.body as PaymentResponseBody;
-      expect(paymentCopBody.currency).toBe('COP');
+      expect(paymentCopBody.currency).toBe('VES');
 
       const balance3 = await request(app.getHttpServer())
         .get(`/api/v1/treatment-plans/${plan.id}/balance`)
@@ -365,7 +365,7 @@ describe('Payments (e2e)', () => {
         .set('Authorization', `Bearer ${clinicA.accessToken}`)
         .expect(200);
       const balanceBody3 = balance3.body as PlanBalanceResponseBody;
-      expect(balanceBody3.paid).toBe(100); // 50 (USD) + 50 (200000 COP converted)
+      expect(balanceBody3.paid).toBe(100); // 50 (USD) + 50 (200000 VES converted)
       expect(balanceBody3.balance).toBe(100); // 200 - 100
       expect(balanceBody3.paymentsCount).toBe(2);
 
@@ -380,7 +380,7 @@ describe('Payments (e2e)', () => {
         [paymentUsdBody.id, paymentCopBody.id].sort(),
       );
 
-      // --- 7. DELETE /payments/:id (anular the COP one) -> balance rises
+      // --- 7. DELETE /payments/:id (anular the VES one) -> balance rises
       // back to 150; a voided payment is soft-deleted, never hard-deleted.
       await request(app.getHttpServer())
         .delete(`/api/v1/payments/${paymentCopBody.id}`)

@@ -43,21 +43,21 @@ describe('resumen mensual de gastos (DX-274)', () => {
 
   it('une ingresos y gastos por mes, sede y moneda, con neto', async () => {
     repo.data.income = [
-      { month: '2026-10', locationId: NORTE, currency: 'COP', cents: 500000 },
+      { month: '2026-10', locationId: NORTE, currency: 'VES', cents: 500000 },
       { month: '2026-10', locationId: NORTE, currency: 'USD', cents: 1050 },
     ];
     repo.data.expenses = [
       {
         month: '2026-10',
         locationId: NORTE,
-        currency: 'COP',
+        currency: 'VES',
         category: 'Arriendo',
         cents: 300000,
       },
       {
         month: '2026-10',
         locationId: NORTE,
-        currency: 'COP',
+        currency: 'VES',
         category: 'Papelería',
         cents: 25050,
       },
@@ -68,7 +68,17 @@ describe('resumen mensual de gastos (DX-274)', () => {
         month: '2026-10',
         locationId: NORTE,
         locationName: 'Norte',
-        currency: 'COP',
+        currency: 'USD',
+        income: 10.5,
+        categories: [],
+        expensesTotal: 0,
+        net: 10.5,
+      },
+      {
+        month: '2026-10',
+        locationId: NORTE,
+        locationName: 'Norte',
+        currency: 'VES',
         income: 5000,
         categories: [
           { category: 'Arriendo', amount: 3000 },
@@ -76,16 +86,6 @@ describe('resumen mensual de gastos (DX-274)', () => {
         ],
         expensesTotal: 3250.5,
         net: 1749.5,
-      },
-      {
-        month: '2026-10',
-        locationId: NORTE,
-        locationName: 'Norte',
-        currency: 'USD',
-        income: 10.5,
-        categories: [],
-        expensesTotal: 0,
-        net: 10.5,
       },
     ]);
   });
@@ -95,7 +95,7 @@ describe('resumen mensual de gastos (DX-274)', () => {
       {
         month: '2026-09',
         locationId: SUR,
-        currency: 'COP',
+        currency: 'VES',
         category: 'Otros',
         cents: 10000,
       },
@@ -107,30 +107,30 @@ describe('resumen mensual de gastos (DX-274)', () => {
 
   it('ordena por mes, sede y moneda y las categorías de mayor a menor', async () => {
     repo.data.income = [
-      { month: '2026-10', locationId: NORTE, currency: 'COP', cents: 1 },
-      { month: '2026-09', locationId: SUR, currency: 'COP', cents: 1 },
+      { month: '2026-10', locationId: NORTE, currency: 'VES', cents: 1 },
+      { month: '2026-09', locationId: SUR, currency: 'VES', cents: 1 },
       { month: '2026-09', locationId: NORTE, currency: 'USD', cents: 1 },
-      { month: '2026-09', locationId: NORTE, currency: 'COP', cents: 1 },
+      { month: '2026-09', locationId: NORTE, currency: 'VES', cents: 1 },
     ];
     repo.data.expenses = [
       {
         month: '2026-09',
         locationId: SUR,
-        currency: 'COP',
+        currency: 'VES',
         category: 'B',
         cents: 5,
       },
       {
         month: '2026-09',
         locationId: SUR,
-        currency: 'COP',
+        currency: 'VES',
         category: 'A',
         cents: 5,
       },
       {
         month: '2026-09',
         locationId: SUR,
-        currency: 'COP',
+        currency: 'VES',
         category: 'C',
         cents: 9,
       },
@@ -139,10 +139,10 @@ describe('resumen mensual de gastos (DX-274)', () => {
     expect(
       rows.map((r) => `${r.month} ${r.locationName} ${r.currency}`),
     ).toEqual([
-      '2026-09 Norte COP',
       '2026-09 Norte USD',
-      '2026-09 Sur COP',
-      '2026-10 Norte COP',
+      '2026-09 Norte VES',
+      '2026-09 Sur VES',
+      '2026-10 Norte VES',
     ]);
     expect(rows[2].categories.map((c) => c.category)).toEqual(['C', 'A', 'B']);
   });

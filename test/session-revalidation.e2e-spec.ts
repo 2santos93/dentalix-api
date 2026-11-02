@@ -10,7 +10,7 @@ import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationBody,
   registerBody,
 } from './support/location-fixtures';
@@ -107,7 +107,7 @@ describe('Session revalidation on refresh (e2e)', () => {
 
     const reg = await registerVerified(
       app,
-      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+      registerBody(REGIONAL_CARACAS_FIXTURE, {
         clinicName: 'Sesiones E2E',
         subdomain: SUB,
         email: OWNER,
@@ -170,7 +170,7 @@ describe('Session revalidation on refresh (e2e)', () => {
       .post('/api/v1/locations')
       .set('X-Tenant-Host', hostFor(SUB))
       .set('Authorization', `Bearer ${ownerAccess}`)
-      .send(locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }))
+      .send(locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede Norte' }))
       .expect(201);
     const otherLocationId = (norte.body as { id: string }).id;
 

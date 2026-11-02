@@ -7,7 +7,7 @@ import { RecordAuditEventUseCase } from '../src/modules/audit/application/record
 import { PrismaAuditEventRepository } from '../src/modules/audit/infrastructure/prisma-audit-event.repository';
 import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -25,7 +25,7 @@ const prisma = new PrismaService(tenantContext);
 const SUBDOMAINS = ['dx150-int-a', 'dx150-int-b'];
 const FK_VIOLATION = { code: 'P2003' };
 const IMMUTABLE = /inalterable|no admite/;
-const BOGOTA = 'America/Bogota';
+const CARACAS = 'America/Caracas';
 
 interface Clinic {
   tenantId: string;
@@ -42,10 +42,10 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
   });
   const tenantId = tenant.id;
   const location = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId,
       name: 'Sede',
-      country: 'CO',
+      country: 'VE',
     }),
   });
   const patients: string[] = [];
@@ -59,7 +59,7 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
         tenantId,
         patientId: patient.id,
         status: 'ACCEPTED',
-        currency: 'COP',
+        currency: 'USD',
       },
     });
     patients.push(patient.id);
@@ -145,13 +145,13 @@ describe('cobranza: notas y compromisos de pago (int, DX-150)', () => {
     patientId,
     locationId: clinic.locationId,
     amount: 200_000,
-    currency: 'COP',
+    currency: 'USD',
     dueDate: new Date(`${dueDate}T00:00:00.000Z`),
     createdById: authorId,
     ...extra,
   });
 
-  const today = () => civilDateIn(new Date(), BOGOTA);
+  const today = () => civilDateIn(new Date(), CARACAS);
 
   describe.each(['collection_notes', 'payment_promises'])('%s', (table) => {
     it('tiene RLS ENABLE + FORCE y la política del tenant', async () => {
@@ -318,7 +318,7 @@ describe('cobranza: notas y compromisos de pago (int, DX-150)', () => {
         treatmentPlanId: a.planOf.get(kept)!,
         patientId: kept,
         amount: 200_000,
-        currency: 'COP',
+        currency: 'USD',
         paidAt: new Date(),
       },
     });

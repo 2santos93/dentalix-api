@@ -13,7 +13,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { ISO3166_COUNTRIES } from '../prisma/reference/iso3166';
 import { legacyClinicCountry } from '../src/shared/locations/legacy-clinic-country';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   REGIONAL_TOKYO_FIXTURE,
 } from './support/location-fixtures';
 
@@ -163,10 +163,10 @@ const SEED = [
   `INSERT INTO "locations" ("id", "tenantId", "name", "country", "currency",
                             "timeZone", "locale", "hourCycle", "deletedAt",
                             "updatedAt")
-   VALUES ('${L_CO}', '${T_A}', 'Sede 1', 'CO', ${regional(REGIONAL_BOGOTA_FIXTURE)}, NULL, now()),
+   VALUES ('${L_CO}', '${T_A}', 'Sede 1', 'CO', ${regional(REGIONAL_CARACAS_FIXTURE)}, NULL, now()),
           ('${L_ES}', '${T_A}', 'Sede 2', 'ES', ${regional(LEGACY_ES_REGIONAL)}, NULL, now()),
-          ('${L_DELETED}', '${T_A}', 'Sede 3', 'CO', ${regional(REGIONAL_BOGOTA_FIXTURE)}, now(), now()),
-          ('${L_WINDOW}', '${T_A}', 'Sede 5', 'CO', ${regional(REGIONAL_BOGOTA_FIXTURE)}, NULL, now()),
+          ('${L_DELETED}', '${T_A}', 'Sede 3', 'CO', ${regional(REGIONAL_CARACAS_FIXTURE)}, now(), now()),
+          ('${L_WINDOW}', '${T_A}', 'Sede 5', 'CO', ${regional(REGIONAL_CARACAS_FIXTURE)}, NULL, now()),
           ('${L_B_ES}', '${T_B}', 'Sede 1', 'ES', ${regional(LEGACY_ES_REGIONAL)}, NULL, now())`,
   `INSERT INTO "locations" ("id", "tenantId", "name", "country", "updatedAt")
    VALUES ('${L_BARE}', '${T_A}', 'Sede 4', 'CO', now())`,
@@ -492,7 +492,7 @@ describe('DX-312 · migraciones del país ISO de la sede (int)', () => {
     );
     const [bare] = await target.$queryRaw<{ currency: string | null }[]>`
       SELECT "currency" FROM "locations" WHERE "id" = ${L_BARE}::uuid`;
-    expect(bare.currency).toBe(REGIONAL_BOGOTA_FIXTURE.currency);
+    expect(bare.currency).toBe('COP');
     for (const loc of [L_CO, L_WINDOW, L_BARE]) {
       expect(await pairOf(loc)).toEqual({ country: 'CO', countryCode: null });
     }
@@ -975,8 +975,8 @@ describe('DX-312 · migraciones del país ISO de la sede (int)', () => {
     const sql = `
       INSERT INTO "locations" ("id", "tenantId", "name", "currency", "timeZone",
                                "locale", "updatedAt")
-      VALUES (gen_random_uuid(), '${T_A}', 'Regional', ${lit(REGIONAL_BOGOTA_FIXTURE.currency)},
-              ${lit(REGIONAL_BOGOTA_FIXTURE.timeZone)}, ${lit(REGIONAL_BOGOTA_FIXTURE.locale)}, now())
+      VALUES (gen_random_uuid(), '${T_A}', 'Regional', ${lit(REGIONAL_CARACAS_FIXTURE.currency)},
+              ${lit(REGIONAL_CARACAS_FIXTURE.timeZone)}, ${lit(REGIONAL_CARACAS_FIXTURE.locale)}, now())
       RETURNING "country"::text AS country, "countryCode"::text AS "countryCode"`;
     expect(await asApp<Pair>(T_A, sql)).toEqual([
       { country: 'CO', countryCode: 'CO' },
@@ -984,9 +984,9 @@ describe('DX-312 · migraciones del país ISO de la sede (int)', () => {
     // Basta UNO de los cuatro (moneda, zona, formato o revisión) para que no
     // sea la forma del registro legado: el paso 0 mira exactamente esa forma.
     const single: [string, string][] = [
-      ['currency', lit(REGIONAL_BOGOTA_FIXTURE.currency)],
-      ['timeZone', lit(REGIONAL_BOGOTA_FIXTURE.timeZone)],
-      ['locale', lit(REGIONAL_BOGOTA_FIXTURE.locale)],
+      ['currency', lit(REGIONAL_CARACAS_FIXTURE.currency)],
+      ['timeZone', lit(REGIONAL_CARACAS_FIXTURE.timeZone)],
+      ['locale', lit(REGIONAL_CARACAS_FIXTURE.locale)],
       ['regionalSettingsReviewedAt', 'now()'],
     ];
     for (const [column, value] of single) {

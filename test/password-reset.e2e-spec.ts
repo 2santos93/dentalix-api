@@ -12,7 +12,7 @@ import { createE2eApp } from './support/create-e2e-app';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   registerBody,
 } from './support/location-fixtures';
 import { purgeTenantsBySubdomain } from './support/tenant-purge';
@@ -117,7 +117,7 @@ describe('Recuperar la contraseña (e2e, DX-010)', () => {
     const register = (sub: string, email: string, clinicName: string) =>
       registerVerified(
         app,
-        registerBody(REGIONAL_BOGOTA_FIXTURE, {
+        registerBody(REGIONAL_CARACAS_FIXTURE, {
           clinicName,
           subdomain: sub,
           email,

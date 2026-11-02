@@ -9,7 +9,7 @@ import {
   requireOwnerNosuEnv,
 } from './owner-nosu-env';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from '../support/location-fixtures';
 
@@ -83,7 +83,7 @@ describe('DX-232: migración con owner sin superusuario', () => {
         },
       });
       const location = await raw.location.create({
-        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        data: locationData(REGIONAL_CARACAS_FIXTURE, {
           tenantId: tenant.id,
           name: 'Sede B',
         }),

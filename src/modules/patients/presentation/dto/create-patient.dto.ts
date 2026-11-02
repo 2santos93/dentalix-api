@@ -76,7 +76,7 @@ export class CreatePatientDto {
   @IsString()
   address?: string;
 
-  @ApiPropertyOptional({ example: 'CO', description: 'ISO 3166-1 alpha-2' })
+  @ApiPropertyOptional({ example: 'VE', description: 'ISO 3166-1 alpha-2' })
   @IsOptional()
   @IsString()
   countryCode?: string;

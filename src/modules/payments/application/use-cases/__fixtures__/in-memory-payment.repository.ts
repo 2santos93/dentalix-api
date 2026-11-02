@@ -57,7 +57,7 @@ export class InMemoryPaymentRepository implements PaymentRepository {
    * @param timeZone zona de la sede de TODOS los abonos de este fake (el real
    * la lee del horario de la sede de cada abono).
    */
-  constructor(private readonly timeZone = 'America/Bogota') {}
+  constructor(private readonly timeZone = 'America/Caracas') {}
 
   /** Test helper: el rastro de anulación guardado, o `null` si sigue activo. */
   voidAuditOf(id: string): PaymentVoidAudit | null {
@@ -300,7 +300,7 @@ export class InMemoryPaymentRepository implements PaymentRepository {
   readonly locations = new Map<
     string,
     { locale: string | null; hourCycle: string | null }
-  >([['loc-1', { locale: 'es-CO', hourCycle: 'h23' }]]);
+  >([['loc-1', { locale: 'es-VE', hourCycle: 'h23' }]]);
 
   locationFormat(locationId: string): Promise<RegionalFormat> {
     return Promise.resolve().then(() =>

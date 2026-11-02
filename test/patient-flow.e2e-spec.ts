@@ -12,7 +12,7 @@ import {
 } from './support/e2e-fixtures';
 import {
   REGIONAL_BERLIN_FIXTURE,
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   REGIONAL_NEW_YORK_FIXTURE,
   g1LocationInsert,
   legacyLocationInsert,
@@ -29,16 +29,16 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 });
 
 const MIN = 60_000;
-const TZ = 'America/Bogota';
+const TZ = 'America/Caracas';
 
 /** Hoy en la zona de la sede (YYYY-MM-DD). */
-function bogotaToday(): string {
+function caracasToday(): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(new Date());
 }
 
-/** Instante de una hora de pared de hoy en la zona de la sede (UTC−5 fijo). */
-function bogotaAt(hhmm: string): Date {
-  return new Date(`${bogotaToday()}T${hhmm}:00-05:00`);
+/** Instante de una hora de pared de hoy en la zona de la sede (UTC−4 fijo). */
+function caracasAt(hhmm: string): Date {
+  return new Date(`${caracasToday()}T${hhmm}:00-04:00`);
 }
 
 interface Member {
@@ -126,7 +126,7 @@ describe('Flujo del paciente en la clínica (e2e, DX-200)', () => {
     // pared, sin cruzar la medianoche ni solaparse) y se trae a HOY por `raw`: así el spec no depende de la hora a la que corra
     // (agendar en el pasado no se puede, y la llegada solo vale hoy).
     const later = new Date(
-      bogotaAt('00:00').getTime() + 2 * 24 * 60 * MIN + offsetMinutes * MIN,
+      caracasAt('00:00').getTime() + 2 * 24 * 60 * MIN + offsetMinutes * MIN,
     );
     const res = await as(
       api().post('/api/v1/appointments'),
@@ -142,7 +142,7 @@ describe('Flujo del paciente en la clínica (e2e, DX-200)', () => {
       })
       .expect(201);
     const id = (res.body as AppointmentBody).id;
-    const today = new Date(bogotaAt('00:00').getTime() + offsetMinutes * MIN);
+    const today = new Date(caracasAt('00:00').getTime() + offsetMinutes * MIN);
     await raw.appointment.update({
       where: { id },
       data: { start: today, end: new Date(today.getTime() + 10 * MIN) },
@@ -174,7 +174,7 @@ describe('Flujo del paciente en la clínica (e2e, DX-200)', () => {
     ).expect(200);
     mainId = (locations.body as { id: string }[])[0].id;
     const north = await as(api().post('/api/v1/locations'), clinic.adminToken)
-      .send(locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }))
+      .send(locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede Norte' }))
       .expect(201);
     northId = (north.body as { id: string }).id;
     const otherLocations = await as(
@@ -295,7 +295,7 @@ describe('Flujo del paciente en la clínica (e2e, DX-200)', () => {
     await setStatus(appt.id, 'IN_CHAIR', clinic.adminToken).expect(409);
 
     const patientId = await patient(clinic, 'Carla');
-    const later = new Date(bogotaAt('12:00').getTime() + 3 * 24 * 60 * MIN);
+    const later = new Date(caracasAt('12:00').getTime() + 3 * 24 * 60 * MIN);
     const future = await as(
       api().post('/api/v1/appointments'),
       reception.token,
@@ -360,14 +360,14 @@ describe('Flujo del paciente en la clínica (e2e, DX-200)', () => {
     const view = await panel(reception.token, mainId).expect(200);
     const body = view.body as InClinicBody;
     expect(body).toMatchObject({
-      date: bogotaToday(),
+      date: caracasToday(),
       timeZone: TZ,
       scope: 'LOCATION',
     });
     expect(body.waiting.map((i) => i.appointmentId)).toEqual([waiting.id]);
     expect(body.inChair.map((i) => i.appointmentId)).toEqual([seated.id]);
     // Elena tenía cita a las 09:00 y llegó «ahora» (a la hora que corra).
-    const late = Date.now() - bogotaAt('09:00').getTime();
+    const late = Date.now() - caracasAt('09:00').getTime();
     expect(body.waiting[0]).toMatchObject({
       patientFirstName: 'Elena',
       providerName: 'Miembro DENTIST',
@@ -429,8 +429,8 @@ describe('Flujo del paciente en la clínica (e2e, DX-200)', () => {
   it('in-clinic view includes locale and hourCycle', async () => {
     const main = await panel(reception.token, mainId).expect(200);
     expect(main.body).toMatchObject({
-      timeZone: REGIONAL_BOGOTA_FIXTURE.timeZone,
-      locale: REGIONAL_BOGOTA_FIXTURE.locale,
+      timeZone: REGIONAL_CARACAS_FIXTURE.timeZone,
+      locale: REGIONAL_CARACAS_FIXTURE.locale,
       hourCycle: 'h23',
     });
     const newYork = await as(api().post('/api/v1/locations'), clinic.adminToken)
@@ -466,7 +466,7 @@ describe('Flujo del paciente en la clínica (e2e, DX-200)', () => {
       raw,
       clinic.tenantId,
       'Réplica antigua',
-      REGIONAL_BOGOTA_FIXTURE.country,
+      REGIONAL_CARACAS_FIXTURE.country,
     );
     const noZone = await panel(clinic.adminToken, legacy).expect(409);
     expect(noZone.body).toMatchObject({

@@ -135,21 +135,21 @@ describe('normalización de campos', () => {
   });
 
   it('teléfono en E.164 con la región por defecto de la sede; un fijo corto tal cual', () => {
-    expect(normalizePhone('310 123 4567', 'CO')).toEqual({
-      value: '+573101234567',
+    expect(normalizePhone('0414-1234567', 'VE')).toEqual({
+      value: '+584141234567',
     });
-    expect(normalizePhone('+34 612 345 678', 'CO')).toEqual({
+    expect(normalizePhone('+34 612 345 678', 'VE')).toEqual({
       value: '+34612345678',
     });
     expect(normalizePhone('612345678', 'ES')).toEqual({
       value: '+34612345678',
     });
-    expect(normalizePhone('2345678', 'CO')).toEqual({ value: '2345678' });
+    expect(normalizePhone('2345678', 'VE')).toEqual({ value: '2345678' });
     expect(
-      errorOf(normalizePhone('310 123 4567 / 601 234 5678', 'CO')),
+      errorOf(normalizePhone('0414-1234567 / 0212-2345678', 'VE')),
     ).toMatch(/más de un teléfono/);
-    expect(normalizePhone('llamar', 'CO')).toHaveProperty('error');
-    expect(normalizePhone('123', 'CO')).toHaveProperty('error');
+    expect(normalizePhone('llamar', 'VE')).toHaveProperty('error');
+    expect(normalizePhone('123', 'VE')).toHaveProperty('error');
   });
 
   it('a phone without + takes the default region, and without one it is never rewritten', () => {
@@ -167,8 +167,8 @@ describe('normalización de campos', () => {
 
   it('the import stores E.164 only for a valid number', () => {
     // Válido como +, pero la librería no lo da por válido: tal cual.
-    expect(normalizePhone('+57 412 1234567', 'CO')).toEqual({
-      value: '+57 412 1234567',
+    expect(normalizePhone('+58 300 1234567', 'VE')).toEqual({
+      value: '+58 300 1234567',
     });
     // La región conserva el 0 que forma parte del número.
     expect(normalizePhone('06 1234 5678', 'IT')).toEqual({
@@ -178,7 +178,7 @@ describe('normalización de campos', () => {
   });
 
   it('an ambiguous number is never VALID, never a wa.me and never stored as E.164', () => {
-    expect(normalizePhone('0058 412 1234567', 'CO')).toEqual({
+    expect(normalizePhone('0058 412 1234567', 'TH')).toEqual({
       value: '0058 412 1234567',
     });
     expect(normalizePhone('49 151 23456789', 'DE')).toEqual({
@@ -539,7 +539,7 @@ describe('validateRow', () => {
     },
     defaultDocType: 'NATIONAL_ID',
   });
-  const ctx = { defaultRegion: 'CO', today: TODAY, clinicNames: NO_NAMES };
+  const ctx = { defaultRegion: 'VE', today: TODAY, clinicNames: NO_NAMES };
 
   it('fila válida normalizada; tipo vacío usa el de por defecto', () => {
     const r = validateRow(
@@ -552,7 +552,7 @@ describe('validateRow', () => {
           'Pérez',
           '03/05/1990',
           'F',
-          '3101234567',
+          '04141234567',
           'ANA@Example.com',
           'línea 1\nlínea 2',
         ],
@@ -568,7 +568,7 @@ describe('validateRow', () => {
       lastName: 'Pérez',
       birthDate: '1990-05-03',
       sex: 'F',
-      phone: '+573101234567',
+      phone: '+584141234567',
       email: 'ana@example.com',
       notes: 'línea 1\nlínea 2',
     });
@@ -819,14 +819,14 @@ describe('«Actualizar solo campos vacíos»', () => {
       ...data('NATIONAL_ID', '1'),
       birthDate: '1990-01-01',
       sex: 'F',
-      phone: '+573101234567',
+      phone: '+584141234567',
       email: 'otro@x.com',
       notes: 'nueva',
     });
     expect(filled).toEqual({
       birthDate: '1990-01-01',
       sex: 'F',
-      phone: '+573101234567',
+      phone: '+584141234567',
     });
   });
 
@@ -841,12 +841,12 @@ describe('«Actualizar solo campos vacíos»', () => {
     const filled = fillEmpty(suppressed, {
       ...data('NATIONAL_ID', '1'),
       birthDate: '1990-01-01',
-      phone: '+573101234567',
+      phone: '+584141234567',
       email: 'otro@x.com',
       address: 'Calle 1',
       notes: 'nueva',
       emergencyContactName: 'Luis',
-      emergencyContactPhone: '+573109999999',
+      emergencyContactPhone: '+584149999999',
       occupation: 'Docente',
     });
     expect(filled).toEqual({ birthDate: '1990-01-01', occupation: 'Docente' });
@@ -857,13 +857,13 @@ describe('«Actualizar solo campos vacíos»', () => {
       ...patient,
       birthDate: new Date('1990-01-01T00:00:00Z'),
       sex: 'F',
-      phone: '+570000000000',
+      phone: '+580000000000',
     };
     expect(
       fieldsToRevert(after, {
         birthDate: '1990-01-01',
         sex: 'F',
-        phone: '+573101234567',
+        phone: '+584141234567',
       }),
     ).toEqual(['birthDate', 'sex']);
   });
@@ -880,7 +880,7 @@ describe('CSV de la plantilla y del informe', () => {
     expect(csvCell('\tx')).toBe(`"'\tx"`);
     expect(csvCell('Ana')).toBe('"Ana"');
     const report = issuesCsv([
-      { row: 9, column: '=cmd', kind: 'ERROR', message: 'm', value: '+57' },
+      { row: 9, column: '=cmd', kind: 'ERROR', message: 'm', value: '+58' },
       {
         row: 3,
         column: null,
@@ -895,7 +895,7 @@ describe('CSV de la plantilla y del informe', () => {
     expect(report.split('\r\n')[1]).toBe(
       '3,"","Repetido en el archivo","d",""',
     );
-    expect(report.split('\r\n')[2]).toBe(`9,"'=cmd","Error","m","'+57"`);
+    expect(report.split('\r\n')[2]).toBe(`9,"'=cmd","Error","m","'+58"`);
   });
 
   it('la plantilla trae las columnas admitidas y se puede volver a leer con su mapeo sugerido', () => {
@@ -906,7 +906,7 @@ describe('CSV de la plantilla y del informe', () => {
     });
     const rows = table.rows.map((row) =>
       validateRow(row, mapping, {
-        defaultRegion: 'CO',
+        defaultRegion: 'VE',
         today: TODAY,
         clinicNames: NO_NAMES,
       }),
@@ -941,7 +941,7 @@ describe('fila con más celdas que la cabecera', () => {
     const r = validateRow(
       { rowNumber: 5, cells: ['1020', 'Ana', 'Pérez'], extraCells: true },
       mapping,
-      { defaultRegion: 'CO', today: TODAY, clinicNames: NO_NAMES },
+      { defaultRegion: 'VE', today: TODAY, clinicNames: NO_NAMES },
     );
     expect(r.data).toBeNull();
     expect(r.issues).toEqual([

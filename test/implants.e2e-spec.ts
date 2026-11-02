@@ -11,7 +11,7 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
 
@@ -584,7 +584,7 @@ describe('Implantes — /patients/:id/implants, /implant-card, /implants (DX-191
         clinic.adminToken,
         'post',
         `/patients/${patientId}/treatment-plans`,
-        { currency: 'COP' },
+        { currency: 'USD' },
       ).expect(201);
       const item = await call(
         clinic,
@@ -608,9 +608,9 @@ describe('Implantes — /patients/:id/implants, /implant-card, /implants (DX-191
             a.adminToken,
             'post',
             '/locations',
-            locationBody(REGIONAL_BOGOTA_FIXTURE, {
+            locationBody(REGIONAL_CARACAS_FIXTURE, {
               name: 'Sede Norte',
-              address: 'Cra 15',
+              address: 'Av. Bolívar 15',
             }),
           ).expect(201)
         ).body as { id: string }

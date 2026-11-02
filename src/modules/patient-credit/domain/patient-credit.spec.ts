@@ -91,8 +91,8 @@ describe('saldo a favor (DX-253)', () => {
     });
 
     it('el 409 de un abono de referencia nombra la devolución', () => {
-      expect(voidRefundReferenceMessage('DEV-BOG-000007')).toMatch(
-        /^No se puede anular: .*DEV-BOG-000007/,
+      expect(voidRefundReferenceMessage('DEV-CCS-000007')).toMatch(
+        /^No se puede anular: .*DEV-CCS-000007/,
       );
     });
   });
@@ -163,9 +163,9 @@ describe('saldo a favor (DX-253)', () => {
     });
 
     it('el 403 explica el tope en español', () => {
-      expect(receptionCapMessage(0, 'COP', 0)).toMatch(/administración/);
+      expect(receptionCapMessage(0, 'VES', 0)).toMatch(/administración/);
       // D3 (QA): el tope con los decimales de su moneda y su código, sin locale fijo.
-      expect(receptionCapMessage(1_000_000, 'COP', 0)).toContain('10000 COP');
+      expect(receptionCapMessage(1_000_000, 'VES', 0)).toContain('10000 VES');
       expect(receptionCapMessage(1_000_050, 'USD', 2)).toContain(
         '10000.50 USD',
       );
@@ -181,10 +181,10 @@ describe('saldo a favor (DX-253)', () => {
   });
 
   it('serie propia DEV-<serie de la sede> y número de 6 cifras', () => {
-    expect(refundSeriesOf('BOG')).toBe('DEV-BOG');
-    expect(formatRefundNumber('DEV-BOG', 7)).toBe('DEV-BOG-000007');
+    expect(refundSeriesOf('CCS')).toBe('DEV-CCS');
+    expect(formatRefundNumber('DEV-CCS', 7)).toBe('DEV-CCS-000007');
     expect(() => refundSeriesOf('bad prefix')).toThrow(RangeError);
-    expect(() => formatRefundNumber('DEV-BOG', 0)).toThrow(RangeError);
+    expect(() => formatRefundNumber('DEV-CCS', 0)).toThrow(RangeError);
   });
 
   it('Idempotency-Key: UUID o 400', () => {
@@ -200,13 +200,13 @@ describe('saldo a favor (DX-253)', () => {
     const base = {
       planId: 'A',
       amountCents: 100,
-      currency: 'cop',
+      currency: 'ves',
       method: 'CASH' as const,
       reason: 'Motivo',
       paymentIds: ['b', 'a', 'a'],
     };
     expect(refundFingerprint(base)).toBe(
-      refundFingerprint({ ...base, currency: 'COP', paymentIds: ['a', 'b'] }),
+      refundFingerprint({ ...base, currency: 'VES', paymentIds: ['a', 'b'] }),
     );
     expect(refundFingerprint(base)).not.toBe(
       refundFingerprint({ ...base, amountCents: 101 }),
@@ -215,7 +215,7 @@ describe('saldo a favor (DX-253)', () => {
       sourcePlanId: 'A',
       targetPlanId: 'B',
       amountCents: 1,
-      currency: 'COP',
+      currency: 'VES',
       reason: null,
     };
     expect(transferFingerprint(transfer)).not.toBe(

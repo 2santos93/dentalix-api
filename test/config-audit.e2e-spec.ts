@@ -116,11 +116,11 @@ describe('Auditoría de la configuración de la clínica (e2e, DX-360)', () => {
         .send('post', '/locations')
         .send({
           name: 'Sede Norte',
-          address: 'Calle 100 # 15-20',
-          country: 'CO',
-          currency: 'COP',
-          timeZone: 'America/Bogota',
-          locale: 'es-CO',
+          address: 'Av. Libertador 100',
+          country: 'VE',
+          currency: 'USD',
+          timeZone: 'America/Caracas',
+          locale: 'es-VE',
           hourCycle: 'h23',
         })
         .expect(201);
@@ -137,16 +137,16 @@ describe('Auditoría de la configuración de la clínica (e2e, DX-360)', () => {
           configChange: {
             after: {
               name: 'Sede Norte',
-              country: 'CO',
-              currency: 'COP',
-              timeZone: 'America/Bogota',
-              locale: 'es-CO',
+              country: 'VE',
+              currency: 'USD',
+              timeZone: 'America/Caracas',
+              locale: 'es-VE',
               hourCycle: 'h23',
             },
           },
         },
       });
-      expect(JSON.stringify(event)).not.toContain('Calle 100');
+      expect(JSON.stringify(event)).not.toContain('Av. Libertador');
     });
 
     it('PUT /locations/schedule: UPDATE LOCATION_SCHEDULE con los tramos antes y después; el mismo horario otra vez no deja evento', async () => {

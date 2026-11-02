@@ -38,12 +38,12 @@ const CTX: AuditRequestContext = {
 
 function makeLocations(): LocationRepository {
   const all = [
-    { id: A, name: 'Sede A', timeZone: 'America/Bogota', isActive: true },
-    { id: B, name: 'Sede B', timeZone: 'America/Bogota', isActive: true },
+    { id: A, name: 'Sede A', timeZone: 'America/Caracas', isActive: true },
+    { id: B, name: 'Sede B', timeZone: 'America/Caracas', isActive: true },
     {
       id: OFF,
       name: 'Sede Cerrada',
-      timeZone: 'America/Bogota',
+      timeZone: 'America/Caracas',
       isActive: false,
     },
   ];

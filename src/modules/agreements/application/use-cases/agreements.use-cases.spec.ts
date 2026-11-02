@@ -87,9 +87,9 @@ describe('casos de uso de convenios (DX-105)', () => {
     remove = new DeleteAgreementUseCase(repo);
 
     payerId = payers.seed({ name: 'Sanavida' }).id;
-    listId = priceLists.seed({ name: 'Lista Sanavida', currency: 'COP' }).id;
+    listId = priceLists.seed({ name: 'Lista Sanavida', currency: 'USD' }).id;
     repo.payers.set(payerId, 'Sanavida');
-    repo.priceLists.set(listId, { name: 'Lista Sanavida', currency: 'COP' });
+    repo.priceLists.set(listId, { name: 'Lista Sanavida', currency: 'USD' });
   });
 
   describe('listar', () => {
@@ -149,7 +149,7 @@ describe('casos de uso de convenios (DX-105)', () => {
         kind: 'PRICE_LIST',
         percent: null,
         percentByCategory: null,
-        priceList: { id: listId, name: 'Lista Sanavida', currency: 'COP' },
+        priceList: { id: listId, name: 'Lista Sanavida', currency: 'USD' },
         locationId: SEDE,
       });
     });
@@ -417,7 +417,7 @@ describe('casos de uso de convenios (DX-105)', () => {
       const a = repo.seed({
         kind: 'PRICE_LIST',
         percent: null,
-        priceList: { id: listId, name: 'Lista Sanavida', currency: 'COP' },
+        priceList: { id: listId, name: 'Lista Sanavida', currency: 'USD' },
       });
       await expect(
         update.execute(a.id, { kind: 'PERCENT_DISCOUNT' }),
@@ -447,7 +447,7 @@ describe('casos de uso de convenios (DX-105)', () => {
         name: 'Por lista',
         kind: 'PRICE_LIST',
         percent: null,
-        priceList: { id: listId, name: 'Lista Sanavida', currency: 'COP' },
+        priceList: { id: listId, name: 'Lista Sanavida', currency: 'USD' },
       });
       await expect(update.execute(byList.id, { percent: 5 })).rejects.toThrow(
         new BadRequestException(AGREEMENT_PERCENT_FORBIDDEN_MESSAGE),
@@ -525,7 +525,7 @@ describe('casos de uso de convenios (DX-105)', () => {
       const a = repo.seed({
         kind: 'PRICE_LIST',
         percent: null,
-        priceList: { id: listId, name: 'Lista Sanavida', currency: 'COP' },
+        priceList: { id: listId, name: 'Lista Sanavida', currency: 'USD' },
       });
       const off = priceLists.seed({ name: 'Apagada', active: false });
       await expect(

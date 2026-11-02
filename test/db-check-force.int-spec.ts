@@ -136,13 +136,13 @@ describe('db:check-force (DX-134)', () => {
     const [{ db }] = await raw.$queryRaw<{ db: string }[]>`
       SELECT current_database()::text AS db`;
     await raw.$executeRawUnsafe(
-      `ALTER ROLE dentalix_app IN DATABASE "${db}" SET timezone = 'America/Bogota'`,
+      `ALTER ROLE dentalix_app IN DATABASE "${db}" SET timezone = 'America/Caracas'`,
     );
     try {
       const { status, out } = checkForce();
       expect(out).toContain('"event":"db.check_force_failed"');
       expect(out).toContain(
-        '"timezone":["dentalix_app: TimeZone = America/Bogota (tiene que ser UTC)"]',
+        '"timezone":["dentalix_app: TimeZone = America/Caracas (tiene que ser UTC)"]',
       );
       expect(out).toContain('la hora del servidor tiene que ser UTC');
       expect(status).toBe(1);

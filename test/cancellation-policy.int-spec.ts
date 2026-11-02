@@ -1,7 +1,7 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { resetDatabase } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -58,7 +58,7 @@ async function insertPolicy(
     `INSERT INTO "cancellation_policy_versions"
        ("id", "tenantId", "locationId", "version", "noticeHours",
         "suggestedFee", "currency", "patientText", "createdById")
-     VALUES (gen_random_uuid(), $1::uuid, $2::uuid, $3, 24, 50000, 'COP',
+     VALUES (gen_random_uuid(), $1::uuid, $2::uuid, $3, 24, 50000, 'USD',
              'Avísanos con 24 horas.', $4::uuid)
      RETURNING "id"`,
     s.tenantId,
@@ -75,7 +75,7 @@ async function seedClinic(subdomain: string): Promise<Seeded> {
   });
   const tenantId = tenant.id;
   const location = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId,
       name: `Sede ${subdomain}`,
     }),
@@ -201,7 +201,7 @@ describe('política de cancelación y cancelación de la cita (DX-279, int)', ()
       const values: Record<string, string> = {
         noticeHours: '24',
         suggestedFee: '100',
-        currency: `'COP'`,
+        currency: `'USD'`,
         patientText: `''`,
       };
       const [col, val] = override.split(' = ');

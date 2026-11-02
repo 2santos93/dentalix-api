@@ -87,7 +87,7 @@ function makePlan(
 // Fake whitelist: allows the codes actually exercised by this suite. `has`
 // is case-sensitive here on purpose, to catch a regression where the use
 // case forgets to `.toUpperCase()` BEFORE calling it.
-function makeWhitelist(allowed: string[] = ['USD', 'COP']): CurrencyWhitelist {
+function makeWhitelist(allowed: string[] = ['USD', 'VES']): CurrencyWhitelist {
   return {
     has: (code: string): Promise<boolean> =>
       Promise.resolve(allowed.includes(code)),
@@ -128,7 +128,7 @@ class FakeConvertAmount {
 }
 
 /** Reloj fijo de los abonos (DX-054): las fechas de este spec son anteriores. */
-const RECORD_NOW = new Date('2026-10-31T15:00:00.000Z');
+const RECORD_NOW = new Date('2026-10-31T14:00:00.000Z');
 
 describe('RecordPaymentUseCase', () => {
   function makeUseCase() {
@@ -159,7 +159,7 @@ describe('RecordPaymentUseCase', () => {
     it('más de 24 h por delante del reloj → 400 en español, sin leer el plan ni registrar', async () => {
       const { repo, fakeGetPlan, uc } = makeUseCase();
       fakeGetPlan.plan = makePlan({ id: 'plan-1', currency: 'USD' });
-      for (const paidAt of ['2026-11-01T15:00:00.001Z', '2026-11-03']) {
+      for (const paidAt of ['2026-11-01T14:00:00.001Z', '2026-11-03']) {
         await expect(
           uc.execute('plan-1', { amount: 10, currency: 'USD', paidAt }),
         ).rejects.toThrow(new BadRequestException(PAID_AT_IN_FUTURE_MESSAGE));
@@ -173,7 +173,7 @@ describe('RecordPaymentUseCase', () => {
       await uc.execute('plan-1', {
         amount: 10,
         currency: 'USD',
-        paidAt: '2026-11-01T15:00:00.000Z',
+        paidAt: '2026-11-01T14:00:00.000Z',
       });
       expect(repo.lastCreateInput).not.toBeNull();
     });
@@ -185,16 +185,16 @@ describe('RecordPaymentUseCase', () => {
     it('passes planAmount converted at paidOn', async () => {
       const { repo, fakeGetPlan, uc, convert } = makeUseCase();
       fakeGetPlan.plan = makePlan({ id: 'plan-1', currency: 'USD' });
-      convert.perBase = { COP: 4000 };
+      convert.perBase = { VES: 4000 };
 
       await uc.execute(
         'plan-1',
-        { amount: 401_234, currency: 'cop', paidAt: '2026-03-05' },
+        { amount: 401_234, currency: 'ves', paidAt: '2026-03-05' },
         'user-1',
       );
 
       expect(convert.calls).toEqual([
-        { from: 'COP', to: 'USD', date: '2026-03-05' },
+        { from: 'VES', to: 'USD', date: '2026-03-05' },
       ]);
       expect(repo.lastCreateInput?.planAmount).toEqual({
         planCurrency: 'USD',
@@ -213,7 +213,7 @@ describe('RecordPaymentUseCase', () => {
 
       const payment = await uc.execute(
         'plan-1',
-        { amount: 50_000, currency: 'COP', paidAt: '2026-03-05' },
+        { amount: 50_000, currency: 'VES', paidAt: '2026-03-05' },
         'user-1',
       );
 
@@ -235,12 +235,12 @@ describe('RecordPaymentUseCase', () => {
     it('congela las dos tasas por 1 USD, la fuente y el día', async () => {
       const { repo, fakeGetPlan, uc, convert } = makeUseCase();
       fakeGetPlan.plan = makePlan({ id: 'plan-1', currency: 'USD' });
-      convert.perBase = { COP: 4000 };
+      convert.perBase = { VES: 4000 };
       convert.source = 'MANUAL';
 
       const payment = await uc.execute(
         'plan-1',
-        { amount: 200_000, currency: 'COP', paidAt: '2026-03-05' },
+        { amount: 200_000, currency: 'VES', paidAt: '2026-03-05' },
         'user-1',
       );
 
@@ -262,7 +262,7 @@ describe('RecordPaymentUseCase', () => {
 
       const payment = await uc.execute(
         'plan-1',
-        { amount: 200_000, currency: 'COP', paidAt: '2026-03-05' },
+        { amount: 200_000, currency: 'VES', paidAt: '2026-03-05' },
         'user-1',
       );
 
@@ -320,7 +320,7 @@ describe('RecordPaymentUseCase', () => {
       const payment = await uc.execute('plan-1', {
         amount: 10,
         currency: 'USD',
-        paidAt: '2026-03-05T15:00:00.000Z',
+        paidAt: '2026-03-05T14:00:00.000Z',
       });
 
       expect(payment.amount).toBe(10);
@@ -448,8 +448,8 @@ describe('RecordPaymentUseCase', () => {
       paidAt: '2026-10-16',
     });
 
-    // Sede del fake en la zona de la sede (UTC-5): 12:00 locales = 17:00 UTC.
-    expect(payment.paidAt.toISOString()).toBe('2026-10-16T17:00:00.000Z');
+    // Sede del fake en la zona de la sede (UTC-4): 12:00 locales = 16:00 UTC.
+    expect(payment.paidAt.toISOString()).toBe('2026-10-16T16:00:00.000Z');
   });
 
   it('DX-097: un paidAt con hora es un instante y se guarda tal cual', async () => {
@@ -475,7 +475,7 @@ describe('RecordPaymentUseCase', () => {
       paidAt: '2026-10-16T00:00:00.000Z',
     });
 
-    expect(payment.paidAt.toISOString()).toBe('2026-10-16T17:00:00.000Z');
+    expect(payment.paidAt.toISOString()).toBe('2026-10-16T16:00:00.000Z');
     expect(payment.paidOn).toBe('2026-10-16');
   });
 
@@ -671,7 +671,7 @@ describe('RecordPaymentUseCase', () => {
       await expect(
         uc.execute(
           'plan-1',
-          { ...body, paidAt: '2026-03-05T15:00:00Z' },
+          { ...body, paidAt: '2026-03-05T14:00:00Z' },
           'u1',
           key,
         ),

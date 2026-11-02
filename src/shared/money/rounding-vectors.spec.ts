@@ -12,7 +12,7 @@ import { linesTotal, roundingDigits } from './line-rounding';
 // DX-340: los mismos vectores (copia byte a byte en la web,
 // src/lib/money/rounding-vectors.json, que comprueba
 // scripts/check-api-reference-sync.mjs de la web) fijan la paridad API/web
-// del redondeo: RSD, JPY, EUR (y COP) con 123,45 × 7,5 %, límites del
+// del redondeo: RSD, JPY, EUR (y ALL) con 123,45 × 7,5 %, límites del
 // descuento y total de líneas. Ninguno depende del Intl del host.
 
 interface Vectors {

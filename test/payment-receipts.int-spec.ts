@@ -4,7 +4,7 @@ import { TenantContextService } from '../src/shared/tenancy/tenant-context.servi
 import { PrismaPaymentRepository } from '../src/modules/payments/infrastructure/repositories/prisma-payment.repository';
 import type { CreatePaymentRepoInput } from '../src/modules/payments/domain/ports/payment-repository.port';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -49,7 +49,7 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
     },
   });
   const location = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId: tenant.id,
       name: 'Sede principal',
       address: 'Calle 1',
@@ -67,7 +67,7 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
     data: {
       tenantId: tenant.id,
       patientId: patient.id,
-      currency: 'COP',
+      currency: 'USD',
       status: TreatmentPlanStatus.ACCEPTED,
     },
   });
@@ -118,12 +118,12 @@ function pay(
       treatmentPlanId: clinic.planId,
       patientId: clinic.patientId,
       amount: 100000,
-      currency: 'COP',
+      currency: 'USD',
       paidAt: new Date('2026-10-17T15:00:00.000Z'),
       method: 'CASH',
       createdById: clinic.userId,
       receiptPlanBalance: {
-        currency: 'COP',
+        currency: 'USD',
         billable: 900000,
         paid: 100000,
         balance: 800000,
@@ -177,7 +177,7 @@ describe('DX-136 · recibo de caja numerado por sede (int)', () => {
     b = await seedClinic(SUBDOMAINS[1]);
     northId = (
       await raw.location.create({
-        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        data: locationData(REGIONAL_CARACAS_FIXTURE, {
           tenantId: a.tenantId,
           name: 'Sede Norte',
         }),
@@ -198,7 +198,7 @@ describe('DX-136 · recibo de caja numerado por sede (int)', () => {
     it('se deriva del nombre (sin tildes ni palabras genéricas) y se desambigua dentro de la clínica', async () => {
       const second = await asApp(a.tenantId, (tx) =>
         tx.location.create({
-          data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+          data: locationData(REGIONAL_CARACAS_FIXTURE, {
             tenantId: a.tenantId,
             name: 'Sede Nórte',
           }),
@@ -347,7 +347,7 @@ describe('DX-136 · recibo de caja numerado por sede (int)', () => {
           treatmentPlanId: a.planId,
           patientId: a.patientId,
           amount: 1,
-          currency: 'COP',
+          currency: 'USD',
           paidAt: new Date(),
         },
       });
@@ -407,7 +407,7 @@ describe('DX-136 · recibo de caja numerado por sede (int)', () => {
           treatmentPlanId: a.planId,
           patientId: a.patientId,
           amount: 1,
-          currency: 'COP',
+          currency: 'USD',
           paidAt: new Date(),
         },
       });
@@ -501,7 +501,7 @@ describe('DX-136 · recibo de caja numerado por sede (int)', () => {
         clinic: { name: 'Clínica dx136-int-a', taxId: null },
         location: { name: 'Sede principal', address: 'Calle 1' },
         patient: { fullName: 'Carolina Duque', docNumberMasked: '*******5678' },
-        planBalance: { currency: 'COP', balance: 800000 },
+        planBalance: { currency: 'USD', balance: 800000 },
         cashier: { fullName: 'Recepción Prueba' },
         legalNotice: 'Este documento no es factura',
       });

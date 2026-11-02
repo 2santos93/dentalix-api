@@ -96,7 +96,7 @@ describe('civil-day (DX-097)', () => {
 
   describe('isValidTimeZone', () => {
     it('acepta IANA y rechaza basura', () => {
-      expect(isValidTimeZone('America/Bogota')).toBe(true);
+      expect(isValidTimeZone('America/Caracas')).toBe(true);
       expect(isValidTimeZone('Europe/Madrid')).toBe(true);
       expect(isValidTimeZone('UTC')).toBe(true);
       expect(isValidTimeZone('Mars/Olympus')).toBe(false);
@@ -105,24 +105,24 @@ describe('civil-day (DX-097)', () => {
   });
 
   describe('civilDateIn', () => {
-    it('20:00 en Bogotá del 16 es el 17 en UTC pero el 16 en la sede', () => {
-      const instant = new Date('2026-10-17T01:00:00.000Z');
-      expect(civilDateIn(instant, 'America/Bogota')).toBe('2026-10-16');
+    it('20:00 en Caracas del 16 es el 17 en UTC pero el 16 en la sede', () => {
+      const instant = new Date('2026-10-17T00:00:00.000Z');
+      expect(civilDateIn(instant, 'America/Caracas')).toBe('2026-10-16');
       expect(civilDateIn(instant, 'UTC')).toBe('2026-10-17');
     });
   });
 
   describe('zonedStartOfDay / civilDayRange', () => {
-    it('Bogotá (UTC-5 fijo): el día empieza a las 05:00 UTC y dura 24 h', () => {
-      const { start, end } = civilDayRange('2026-10-16', 'America/Bogota');
-      expect(iso(start)).toBe('2026-10-16T05:00:00.000Z');
-      expect(iso(end)).toBe('2026-10-17T05:00:00.000Z');
+    it('Caracas (UTC-4 fijo): el día empieza a las 04:00 UTC y dura 24 h', () => {
+      const { start, end } = civilDayRange('2026-10-16', 'America/Caracas');
+      expect(iso(start)).toBe('2026-10-16T04:00:00.000Z');
+      expect(iso(end)).toBe('2026-10-17T04:00:00.000Z');
     });
 
-    it('un abono a las 20:00 de Bogotá cae en ese día y no en el siguiente', () => {
-      const paidAt = new Date('2026-10-17T01:00:00.000Z'); // 16/10 20:00 -05
-      const today = civilDayRange('2026-10-16', 'America/Bogota');
-      const tomorrow = civilDayRange('2026-10-17', 'America/Bogota');
+    it('un abono a las 20:00 de Caracas cae en ese día y no en el siguiente', () => {
+      const paidAt = new Date('2026-10-17T00:00:00.000Z'); // 16/10 20:00 -04
+      const today = civilDayRange('2026-10-16', 'America/Caracas');
+      const tomorrow = civilDayRange('2026-10-17', 'America/Caracas');
       expect(paidAt >= today.start && paidAt < today.end).toBe(true);
       expect(paidAt >= tomorrow.start && paidAt < tomorrow.end).toBe(false);
     });
@@ -152,7 +152,7 @@ describe('civil-day (DX-097)', () => {
     });
 
     it('rechaza un día inválido o una zona inválida', () => {
-      expect(() => civilDayRange('2026-02-30', 'America/Bogota')).toThrow();
+      expect(() => civilDayRange('2026-02-30', 'America/Caracas')).toThrow();
       expect(() => civilDayRange('2026-10-16', 'Mars/Olympus')).toThrow();
     });
   });
@@ -177,21 +177,21 @@ describe('civil-day (DX-097)', () => {
       expect(secondTwoThirty >= start && secondTwoThirty < end).toBe(true);
     });
 
-    it('mes de octubre en Bogotá: incluye el 31 a las 22:00 y excluye el 1/11 a las 00:30', () => {
+    it('mes de octubre en Caracas: incluye el 31 a las 22:00 y excluye el 1/11 a las 00:30', () => {
       const { start, end } = civilRangeInZone(
         '2026-10-01',
         '2026-10-31',
-        'America/Bogota',
+        'America/Caracas',
       );
-      const oct31Late = new Date('2026-11-01T03:00:00.000Z'); // 31/10 22:00 -05
-      const nov1Early = new Date('2026-11-01T05:30:00.000Z'); // 1/11 00:30 -05
+      const oct31Late = new Date('2026-11-01T02:00:00.000Z'); // 31/10 22:00 -04
+      const nov1Early = new Date('2026-11-01T04:30:00.000Z'); // 1/11 00:30 -04
       expect(oct31Late >= start && oct31Late < end).toBe(true);
       expect(nov1Early >= start && nov1Early < end).toBe(false);
     });
 
     it('from > to es un error', () => {
       expect(() =>
-        civilRangeInZone('2026-10-02', '2026-10-01', 'America/Bogota'),
+        civilRangeInZone('2026-10-02', '2026-10-01', 'America/Caracas'),
       ).toThrow();
     });
   });
@@ -203,17 +203,17 @@ describe('civilPeriodByZone (varias sedes)', () => {
       '2026-10-16',
       '2026-10-16',
       new Map([
-        ['bog-1', 'America/Bogota'],
+        ['bog-1', 'America/Caracas'],
         ['mad-1', 'Europe/Madrid'],
-        ['bog-2', 'America/Bogota'],
+        ['bog-2', 'America/Caracas'],
       ]),
     );
     expect(branches).toEqual([
       {
-        timeZone: 'America/Bogota',
+        timeZone: 'America/Caracas',
         locationIds: ['bog-1', 'bog-2'],
-        start: new Date('2026-10-16T05:00:00.000Z'),
-        end: new Date('2026-10-17T05:00:00.000Z'),
+        start: new Date('2026-10-16T04:00:00.000Z'),
+        end: new Date('2026-10-17T04:00:00.000Z'),
       },
       {
         timeZone: 'Europe/Madrid',
@@ -233,8 +233,8 @@ describe('civilPeriodByZone (varias sedes)', () => {
 
 describe('civilNoonIn', () => {
   it('es el mediodía del día civil en la zona (dentro del día en cualquier zona)', () => {
-    expect(civilNoonIn('2026-10-16', 'America/Bogota').toISOString()).toBe(
-      '2026-10-16T17:00:00.000Z',
+    expect(civilNoonIn('2026-10-16', 'America/Caracas').toISOString()).toBe(
+      '2026-10-16T16:00:00.000Z',
     );
     expect(civilNoonIn('2026-10-16', 'Europe/Madrid').toISOString()).toBe(
       '2026-10-16T10:00:00.000Z',
@@ -244,9 +244,9 @@ describe('civilNoonIn', () => {
   });
 
   describe('zonedWallTime (DX-122)', () => {
-    it('una hora de pared de Bogotá (UTC−5 fijo)', () => {
-      expect(iso(zonedWallTime('2026-10-20', 9 * 60, 'America/Bogota'))).toBe(
-        '2026-10-20T14:00:00.000Z',
+    it('una hora de pared de Caracas (UTC−4 fijo)', () => {
+      expect(iso(zonedWallTime('2026-10-20', 9 * 60, 'America/Caracas'))).toBe(
+        '2026-10-20T13:00:00.000Z',
       );
     });
 
@@ -270,8 +270,8 @@ describe('civilNoonIn', () => {
     });
 
     it('el minuto 1440 es la medianoche del día siguiente', () => {
-      expect(zonedWallTime('2026-10-20', 24 * 60, 'America/Bogota')).toEqual(
-        zonedStartOfDay('2026-10-21', 'America/Bogota'),
+      expect(zonedWallTime('2026-10-20', 24 * 60, 'America/Caracas')).toEqual(
+        zonedStartOfDay('2026-10-21', 'America/Caracas'),
       );
     });
   });
@@ -287,7 +287,7 @@ describe('civilNoonIn', () => {
 
 describe('civilDateResolver (DX-145)', () => {
   it('da el mismo día que civilDateIn, también el día del cambio de hora', () => {
-    const zones = ['America/Bogota', 'Europe/Madrid', 'Asia/Kathmandu'];
+    const zones = ['America/Caracas', 'Europe/Madrid', 'Asia/Kathmandu'];
     // Cada 7 min durante el fin de semana del cambio de hora de octubre en
     // Madrid (25-oct-2026, 03:00 → 02:00) y el de marzo (29-mar-2026).
     const starts = [Date.UTC(2026, 9, 24, 0, 0), Date.UTC(2026, 2, 28, 0, 0)];

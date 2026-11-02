@@ -14,7 +14,7 @@ import { createE2eApp } from './support/create-e2e-app';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationBody,
   registerBody,
 } from './support/location-fixtures';
@@ -98,7 +98,7 @@ describe('Reglas de dominio por HTTP (DX-042, e2e)', () => {
 
     const register = await registerVerified(
       app,
-      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+      registerBody(REGIONAL_CARACAS_FIXTURE, {
         clinicName: 'DX-042',
         subdomain: SUBDOMAIN,
         email: ADMIN_EMAIL,
@@ -234,7 +234,7 @@ describe('Reglas de dominio por HTTP (DX-042, e2e)', () => {
 
     beforeAll(async () => {
       const res = await authed(api().post('/api/v1/locations'))
-        .send(locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }))
+        .send(locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede Norte' }))
         .expect(201);
       sedeNorte = (res.body as IdBody).id;
     });

@@ -37,7 +37,7 @@ import { GetPlanBalanceUseCase } from '../src/modules/payments/application/use-c
 import type { ConvertAmountUseCase } from '../src/modules/exchange/application/use-cases/convert-amount.use-case';
 import type { CurrencyWhitelist } from '../src/modules/treatment-plans/domain/ports/currency-whitelist.port';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -247,7 +247,10 @@ describe('DX-109 · reglas de cobro contra Postgres (int)', () => {
     });
     locationId = (
       await owner.location.create({
-        data: locationData(REGIONAL_BOGOTA_FIXTURE, { tenantId, name: 'Sede' }),
+        data: locationData(REGIONAL_CARACAS_FIXTURE, {
+          tenantId,
+          name: 'Sede',
+        }),
       })
     ).id;
     patientId = (

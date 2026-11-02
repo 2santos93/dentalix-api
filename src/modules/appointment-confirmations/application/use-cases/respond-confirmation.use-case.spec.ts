@@ -272,7 +272,7 @@ describe('Enlace público de confirmación (Get + Respond)', () => {
       noticeHours: 24,
       patientText: 'Avísanos con 24 h o se cobra la cita.',
       suggestedFee: 50000,
-      currency: 'COP',
+      currency: 'USD',
     };
     const fiveHours = () => ({ start: new Date(Date.now() + 5 * 3600_000) });
 
@@ -288,7 +288,7 @@ describe('Enlace público de confirmación (Get + Respond)', () => {
         noticeHours: 24,
         text: 'Avísanos con 24 h o se cobra la cita.',
         suggestedFee: 50000,
-        currency: 'COP',
+        currency: 'USD',
       });
       expect(view.isLate).toBe(true);
     });

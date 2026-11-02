@@ -82,7 +82,7 @@ function recipient(
     },
     responsibles,
     majorityAge: 18,
-    timeZone: 'America/Bogota',
+    timeZone: 'America/Caracas',
   };
 }
 
@@ -91,8 +91,8 @@ function setup() {
   const clock = () => now;
   const templates = new InMemoryConsentTemplateRepository();
   const consents = new InMemoryPatientConsentRepository();
-  consents.location = { id: 'loc-1', locale: 'es-CO', hourCycle: 'h12' };
-  consents.timeZone = 'America/Bogota';
+  consents.location = { id: 'loc-1', locale: 'es-VE', hourCycle: 'h12' };
+  consents.timeZone = 'America/Caracas';
   const template = templates.seed({
     title: 'Consentimiento de exodoncia',
     body: 'Yo, {{paciente}} ({{documento}}), autorizo a {{profesional}}.',
@@ -760,10 +760,10 @@ function presentedBudget(ctx: Ctx, planId = 'plan-1') {
         id: planId,
         patientId: 'p1',
         status: 'PRESENTED',
-        currency: 'COP',
+        currency: 'USD',
       },
     }),
-    location: { id: 'loc-1', locale: 'es-CO', hourCycle: 'h12' },
+    location: { id: 'loc-1', locale: 'es-VE', hourCycle: 'h12' },
   };
   ctx.repo.budgets.set(planId, budget);
   return budget;
@@ -884,7 +884,7 @@ describe('presupuesto a distancia (DX-415)', () => {
     expect(doc.body).toMatch(/Al firmar aceptas este presupuesto/);
     expect(doc.signerDocumentRequired).toBe(false);
     expect(doc.budget).toMatchObject({
-      currency: 'COP',
+      currency: 'USD',
       issuedOn: '2026-10-30',
       validUntil: '2026-11-29',
       totals: [{ gross: 3680000, discount: 350000, net: 3330000 }],

@@ -157,7 +157,7 @@ describe('edición de un gasto (DX-274)', () => {
       expect((await run(e.id, { amount: 40 })).status).toBe('PAID');
       expect((await run(e.id, { amount: 90 })).status).toBe('PARTIAL');
       await expect(run(e.id, { amount: 39.99 })).rejects.toThrow(
-        'El importe no puede ser menor a lo ya pagado (40 COP).',
+        'El importe no puede ser menor a lo ya pagado (40 VES).',
       );
     });
 

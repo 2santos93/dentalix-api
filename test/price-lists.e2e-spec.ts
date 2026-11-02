@@ -11,7 +11,7 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
 
@@ -141,7 +141,7 @@ describe('Listas de precios (e2e, DX-105)', () => {
     const sedes = await admin(api().get('/api/v1/locations')).expect(200);
     sedeNorte = (sedes.body as IdBody[])[0].id;
     const sur = await admin(api().post('/api/v1/locations'))
-      .send(locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Sur' }))
+      .send(locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede Sur' }))
       .expect(201);
     sedeSur = (sur.body as IdBody).id;
 
@@ -168,11 +168,11 @@ describe('Listas de precios (e2e, DX-105)', () => {
     it('ADMIN crea una lista con nombre normalizado y moneda en mayúsculas', async () => {
       const list = await createList({
         name: '  Convenio   Surco ',
-        currency: 'cop',
+        currency: 'ves',
       });
       expect(list).toMatchObject({
         name: 'Convenio Surco',
-        currency: 'COP',
+        currency: 'VES',
         locationId: null,
         active: true,
         itemCount: 0,
@@ -186,7 +186,7 @@ describe('Listas de precios (e2e, DX-105)', () => {
         ClinicRole.RECEPTION,
       ]) {
         await as(api().post('/api/v1/price-lists'), tokens[role])
-          .send({ name: 'Nada', currency: 'COP' })
+          .send({ name: 'Nada', currency: 'VES' })
           .expect(403);
       }
     });
@@ -203,9 +203,9 @@ describe('Listas de precios (e2e, DX-105)', () => {
     });
 
     it('un nombre que solo cambia en mayúsculas o tildes da 409 en español', async () => {
-      await createList({ name: 'Convenio Bolívar', currency: 'COP' });
+      await createList({ name: 'Convenio Bolívar', currency: 'VES' });
       const res = await admin(api().post('/api/v1/price-lists'))
-        .send({ name: ' CONVENIO  bolivar', currency: 'COP' })
+        .send({ name: ' CONVENIO  bolivar', currency: 'VES' })
         .expect(409);
       expect((res.body as MessageBody).message).toBe(
         'Ya existe una lista de precios con ese nombre.',
@@ -218,7 +218,7 @@ describe('Listas de precios (e2e, DX-105)', () => {
         .expect(400);
       expect((unknown.body as MessageBody).message).toBe('Moneda no válida.');
       await admin(api().post('/api/v1/price-lists'))
-        .send({ name: 'A', currency: 'COP' })
+        .send({ name: 'A', currency: 'VES' })
         .expect(400);
       await admin(api().post('/api/v1/price-lists')).send({}).expect(400);
     });
@@ -231,7 +231,7 @@ describe('Listas de precios (e2e, DX-105)', () => {
       ).expect(200);
       const ajena = (otherSedes.body as IdBody[])[0].id;
       const res = await admin(api().post('/api/v1/price-lists'))
-        .send({ name: 'Sede ajena', currency: 'COP', locationId: ajena })
+        .send({ name: 'Sede ajena', currency: 'VES', locationId: ajena })
         .expect(400);
       expect((res.body as MessageBody).message).toBe('Sede no encontrada.');
       expect(await names('?includeInactive=true')).not.toContain('Sede ajena');
@@ -244,12 +244,12 @@ describe('Listas de precios (e2e, DX-105)', () => {
     it('una lista por sede: la segunda activa da 409', async () => {
       norte = await createList({
         name: 'Lista Norte',
-        currency: 'COP',
+        currency: 'VES',
         locationId: sedeNorte,
       });
       expect(norte.locationId).toBe(sedeNorte);
       const res = await admin(api().post('/api/v1/price-lists'))
-        .send({ name: 'Otra Norte', currency: 'COP', locationId: sedeNorte })
+        .send({ name: 'Otra Norte', currency: 'VES', locationId: sedeNorte })
         .expect(409);
       expect((res.body as MessageBody).message).toBe(
         'Esa sede ya tiene una lista de precios activa.',
@@ -262,7 +262,7 @@ describe('Listas de precios (e2e, DX-105)', () => {
         .expect(200);
       const second = await createList({
         name: 'Otra Norte',
-        currency: 'COP',
+        currency: 'VES',
         locationId: sedeNorte,
       });
       const res = await admin(api().patch(`/api/v1/price-lists/${norte.id}`))
@@ -318,7 +318,7 @@ describe('Listas de precios (e2e, DX-105)', () => {
     let list: ListBody;
 
     beforeAll(async () => {
-      list = await createList({ name: 'Lista de precios', currency: 'COP' });
+      list = await createList({ name: 'Lista de precios', currency: 'VES' });
     });
 
     it('el directorio lista solo procedimientos activos con price null, paginado de a 20', async () => {
@@ -412,7 +412,7 @@ describe('Listas de precios (e2e, DX-105)', () => {
     });
 
     it('501 filas dan 400 por el tope del lote y no escriben nada', async () => {
-      const big = await createList({ name: 'Lista grande', currency: 'COP' });
+      const big = await createList({ name: 'Lista grande', currency: 'VES' });
       const rows = Array.from({ length: 501 }, (_v, i) => ({
         catalogItemId: catalogIds[i % catalogIds.length],
         price: 1000 + i,
@@ -425,7 +425,7 @@ describe('Listas de precios (e2e, DX-105)', () => {
     });
 
     it('500 filas distintas (catálogo de 500 procedimientos) entran en un solo PUT', async () => {
-      const lot = await createList({ name: 'Lista de 500', currency: 'COP' });
+      const lot = await createList({ name: 'Lista de 500', currency: 'VES' });
       const tenantId = clinic.tenantId;
       const ids = Array.from(
         { length: 500 },
@@ -530,10 +530,10 @@ describe('Listas de precios (e2e, DX-105)', () => {
       );
       // Repetir la moneda actual no estorba.
       await admin(api().patch(`/api/v1/price-lists/${list.id}`))
-        .send({ currency: 'COP', name: 'Lista de precios 2' })
+        .send({ currency: 'VES', name: 'Lista de precios 2' })
         .expect(200);
 
-      const empty = await createList({ name: 'Sin precios', currency: 'COP' });
+      const empty = await createList({ name: 'Sin precios', currency: 'VES' });
       const changed = await admin(
         api().patch(`/api/v1/price-lists/${empty.id}`),
       )
@@ -566,15 +566,15 @@ describe('Listas de precios (e2e, DX-105)', () => {
 
   describe('retiro', () => {
     it('retira una lista sin convenios (204), libera el nombre y 404 la segunda vez', async () => {
-      const gone = await createList({ name: 'Efímera', currency: 'COP' });
+      const gone = await createList({ name: 'Efímera', currency: 'VES' });
       await admin(api().delete(`/api/v1/price-lists/${gone.id}`)).expect(204);
       expect(await names('?includeInactive=true')).not.toContain('Efímera');
       await admin(api().delete(`/api/v1/price-lists/${gone.id}`)).expect(404);
-      await createList({ name: 'Efímera', currency: 'COP' });
+      await createList({ name: 'Efímera', currency: 'VES' });
     });
 
     it('con un convenio vivo da 409 y no se retira; sin convenio vivo, sí', async () => {
-      const used = await createList({ name: 'En uso', currency: 'COP' });
+      const used = await createList({ name: 'En uso', currency: 'VES' });
       const payer = await raw.payer.create({
         data: {
           tenantId: clinic.tenantId,
@@ -611,7 +611,7 @@ describe('Listas de precios (e2e, DX-105)', () => {
     });
 
     it('solo ADMIN retira (403 al dentista)', async () => {
-      const list = await createList({ name: 'Intocable', currency: 'COP' });
+      const list = await createList({ name: 'Intocable', currency: 'VES' });
       await as(
         api().delete(`/api/v1/price-lists/${list.id}`),
         tokens.DENTIST,
@@ -621,7 +621,7 @@ describe('Listas de precios (e2e, DX-105)', () => {
 
   describe('aislamiento entre clínicas', () => {
     it('otra clínica no ve, edita, retira ni lee los precios de mis listas (404) y su listado va vacío', async () => {
-      const mine = await createList({ name: 'Solo mía', currency: 'COP' });
+      const mine = await createList({ name: 'Solo mía', currency: 'VES' });
       await putItems(mine.id, [{ catalogItemId: catalogIds[0], price: 1234 }]);
       const asOther = (req: request.Test) =>
         as(req, other.adminToken, other.host);

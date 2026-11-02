@@ -39,7 +39,7 @@ import {
 import { PATIENT_ROLES } from '../../../auth/presentation/guards/clinic-role-sets';
 import { DOC_TAKEN_MESSAGE } from '../../../patients/infrastructure/repositories/prisma-patient.repository';
 
-// DX-470: «Atender sin cita». Martes 10 nov 2026 en la zona de la sede (UTC−5): las
+// DX-470: «Atender sin cita». Martes 10 nov 2026 en la zona de la sede (UTC−4): las
 // 10:07:42 del reloj del servidor son las 15:07:42 UTC.
 const NOW = new Date('2026-11-10T15:07:42.000Z');
 const utc = (hhmm: string) => new Date(`2026-11-10T${hhmm}:00.000Z`);
@@ -137,7 +137,7 @@ function setup(
   } as unknown as StaffRepository;
   const locations = {
     findById: (id: string) =>
-      Promise.resolve({ id, name: 'Sede', timeZone: 'America/Bogota' }),
+      Promise.resolve({ id, name: 'Sede', timeZone: 'America/Caracas' }),
   } as unknown as LocationRepository;
   const chairs = new InMemoryChairRepository();
   const uc = new CreateWalkInUseCase(
@@ -182,7 +182,7 @@ function setup(
 const NEW_PATIENT = {
   firstName: ' Lucía ',
   lastName: 'Pérez',
-  phone: ' +57 300 123 4567 ',
+  phone: ' +58 412 123 4567 ',
 };
 
 describe('CreateWalkInUseCase (DX-470)', () => {
@@ -280,7 +280,7 @@ describe('CreateWalkInUseCase (DX-470)', () => {
         data: {
           firstName: 'Lucía',
           lastName: 'Pérez',
-          phone: '+57 300 123 4567',
+          phone: '+58 412 123 4567',
           docType: DocumentType.OTHER,
           docTypeLabel: null,
           docNumber: undefined,

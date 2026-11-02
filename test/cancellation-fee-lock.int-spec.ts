@@ -163,7 +163,7 @@ describe('cargo por inasistencia protegido en la BD (SEC-050, int)', () => {
           .post(`/api/v1/locations/${location}/cancellation-policy`)
           .set('X-Tenant-Host', a.host)
           .set('Authorization', `Bearer ${a.adminToken}`)
-          .send({ noticeHours: 24, suggestedFee: 50000, currency: 'COP' })
+          .send({ noticeHours: 24, suggestedFee: 50000, currency: 'VES' })
           .expect(201)
       ).body as { id: string }
     ).id;
@@ -427,7 +427,7 @@ describe('cargo por inasistencia protegido en la BD (SEC-050, int)', () => {
       data: {
         tenantId: a.tenantId,
         patientId: plan.patientId,
-        currency: 'COP',
+        currency: 'VES',
         createdById: a.adminUserId,
       },
     });

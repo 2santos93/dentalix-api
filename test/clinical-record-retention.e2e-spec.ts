@@ -66,7 +66,7 @@ describe('Retención legal de la historia clínica (DX-039, e2e)', () => {
           tenantId: clinic.tenantId,
           firstName: name,
           lastName: 'Prueba',
-          phone: '3001112233',
+          phone: '4121112233',
           email: `${name.toLowerCase()}@example.com`,
           notes: 'Paga en efectivo',
         },

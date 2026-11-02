@@ -27,7 +27,7 @@ const NOTICE = {
     emergencyContactName: null,
   },
   responsibles: [],
-  settings: { timeZone: 'America/Bogota', majorityAge: 18 },
+  settings: { timeZone: 'America/Caracas', majorityAge: 18 },
 };
 
 const PAYMENT_ID = '3f1c2b9e-8a4d-4c1e-9f0a-1b2c3d4e5f60';
@@ -36,8 +36,8 @@ const PAYMENT_ID = '3f1c2b9e-8a4d-4c1e-9f0a-1b2c3d4e5f60';
 // plan no hay tasa que imprimir.
 const SAME_CURRENCY_RATE: PaymentReceiptSource['rate'] = {
   amount: 50000,
-  currency: 'COP',
-  exchangeRateCurrency: 'COP',
+  currency: 'EUR',
+  exchangeRateCurrency: 'EUR',
   frozenRate: null,
 };
 
@@ -55,7 +55,7 @@ const snapshotInput: Omit<ReceiptSnapshotInput, 'planBalance'> = {
   payment: {
     id: PAYMENT_ID,
     amount: 50000,
-    currency: 'COP',
+    currency: 'EUR',
     method: 'CARD',
     paidAt: new Date('2025-01-10T17:00:00.000Z'),
     paidOn: '2025-01-10',
@@ -68,7 +68,7 @@ const issuedSnapshot = buildReceiptSnapshot(
   {
     ...snapshotInput,
     planBalance: {
-      currency: 'COP',
+      currency: 'EUR',
       billable: 100000,
       paid: 50000,
       balance: 50000,
@@ -98,7 +98,7 @@ function makeUseCase(
       balance instanceof Error
         ? Promise.reject(balance)
         : Promise.resolve({
-            planCurrency: 'COP',
+            planCurrency: 'EUR',
             ...balance,
             balance: balance.billable - balance.paid,
             paymentsCount: 2,
@@ -230,7 +230,7 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
       paid: 1,
     }).execute(PAYMENT_ID);
     expect(view.snapshot.planBalance).toEqual({
-      currency: 'COP',
+      currency: 'EUR',
       billable: 100000,
       paid: 50000,
       balance: 50000,
@@ -264,7 +264,7 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
     });
     expect(view.snapshot.patient.docNumberMasked).toBe('****3456');
     expect(view.snapshot.planBalance).toEqual({
-      currency: 'COP',
+      currency: 'EUR',
       billable: 300000,
       paid: 120000,
       balance: 180000,
@@ -350,7 +350,7 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
 
   describe('DX-390: el recibo único de un cobro dividido', () => {
     const FROZEN = {
-      currency: 'COP',
+      currency: 'EUR',
       fromPerBase: 1,
       toPerBase: 4000,
       source: 'AUTOMATIC' as const,
@@ -365,15 +365,15 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
       paymentMethodName: n === 1 ? 'Transferencia' : 'Efectivo',
       reference: n === 1 ? 'TR-1' : null,
       // La línea en USD se emitió «sin tasa».
-      equivalentAmount: currency === 'COP' ? amount : null,
+      equivalentAmount: currency === 'EUR' ? amount : null,
     });
     const splitSnapshot = buildReceiptSnapshot(
       {
         ...snapshotInput,
         planBalance: null,
         split: {
-          lines: [line(1, 50, 'USD'), line(2, 100000, 'COP')],
-          planCurrency: 'COP',
+          lines: [line(1, 50, 'USD'), line(2, 100000, 'EUR')],
+          planCurrency: 'EUR',
         },
       },
       NO_LOCAL_NAMES,
@@ -386,14 +386,14 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
           paymentId: 'line-1',
           amount: 50,
           currency: 'USD',
-          exchangeRateCurrency: 'COP',
+          exchangeRateCurrency: 'EUR',
           frozenRate: usdRate,
         },
         {
           paymentId: 'line-2',
           amount: 100000,
-          currency: 'COP',
-          exchangeRateCurrency: 'COP',
+          currency: 'EUR',
+          exchangeRateCurrency: 'EUR',
           frozenRate: null,
         },
       ],
@@ -402,7 +402,7 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
     it('la foto guarda las líneas y el total al emitir (null si alguna estaba sin tasa)', () => {
       expect(splitSnapshot.split?.lines).toHaveLength(2);
       expect(splitSnapshot.split?.total).toEqual({
-        currency: 'COP',
+        currency: 'EUR',
         amount: null,
       });
     });
@@ -417,7 +417,7 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
         status: 'FROZEN',
         equivalentAmount: 200000,
       });
-      expect(view.split?.total).toEqual({ currency: 'COP', amount: 300000 });
+      expect(view.split?.total).toEqual({ currency: 'EUR', amount: 300000 });
     });
 
     it('mientras una línea siga sin tasa, el total es null', async () => {

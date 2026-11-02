@@ -9,7 +9,7 @@ import type {
 } from '../src/modules/payments/domain/ports/payment-repository.port';
 import { parseReceiptSnapshot } from '../src/modules/payments/domain/receipt-snapshot';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -54,7 +54,7 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
     },
   });
   const location = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId: tenant.id,
       name: 'Sede principal',
       address: 'Calle 1',
@@ -72,7 +72,7 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
     data: {
       tenantId: tenant.id,
       patientId: patient.id,
-      currency: 'COP',
+      currency: 'USD',
       status: TreatmentPlanStatus.ACCEPTED,
     },
   });
@@ -131,7 +131,7 @@ function line(
     treatmentPlanId: clinic.planId,
     patientId: clinic.patientId,
     amount: 100_000,
-    currency: 'COP',
+    currency: 'USD',
     paidAt: new Date('2026-10-30T15:00:00.000Z'),
     method: 'TRANSFER',
     paymentMethodId: clinic.methodId,
@@ -199,7 +199,7 @@ describe('DX-390 · cobro dividido con un solo recibo (int)', () => {
         }),
       ],
       receiptPlanBalance: {
-        currency: 'COP',
+        currency: 'USD',
         billable: 500_000,
         paid: 200_000,
         balance: 300_000,
@@ -230,7 +230,7 @@ describe('DX-390 · cobro dividido con un solo recibo (int)', () => {
       [2, 50_000, 'TR-1'],
     ]);
     // Misma moneda que el plan: el equivalente es el importe y suma el total.
-    expect(snapshot.split?.total).toEqual({ currency: 'COP', amount: 200_000 });
+    expect(snapshot.split?.total).toEqual({ currency: 'USD', amount: 200_000 });
     expect(snapshot.planBalance?.balance).toBe(300_000);
     expect(
       record.payments.every((p) => p.receiptNumber === record.receiptNumber),
@@ -301,7 +301,7 @@ describe('DX-390 · cobro dividido con un solo recibo (int)', () => {
       treatmentPlanId: a.planId,
       patientId: a.patientId,
       amount: 1,
-      currency: 'COP',
+      currency: 'USD',
       paidAt: new Date(),
     };
     // Una línea 1 que no es la cabeza.
@@ -344,7 +344,7 @@ describe('DX-390 · cobro dividido con un solo recibo (int)', () => {
             treatmentPlanId: b.planId,
             patientId: b.patientId,
             amount: 1,
-            currency: 'COP',
+            currency: 'USD',
             paidAt: new Date(),
             tenantId: b.tenantId,
             splitId: head,

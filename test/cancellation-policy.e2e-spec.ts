@@ -16,7 +16,7 @@ import {
   CANCELLATION_POLICY_MESSAGES,
 } from '../src/modules/cancellation-policies/domain/cancellation-policy';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
 
@@ -138,7 +138,7 @@ describe('Política de cancelación por sede y cancelaciones (DX-279)', () => {
         await admin()
           .post(
             '/locations',
-            locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }),
+            locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede Norte' }),
           )
           .expect(201)
       ).body as { id: string }
@@ -231,7 +231,7 @@ describe('Política de cancelación por sede y cancelaciones (DX-279)', () => {
       [{ noticeHours: -1 }, CANCELLATION_POLICY_MESSAGES.noticeHours],
       [{ noticeHours: 1.5 }, CANCELLATION_POLICY_MESSAGES.noticeHours],
       [
-        { noticeHours: 24, suggestedFee: -1, currency: 'COP' },
+        { noticeHours: 24, suggestedFee: -1, currency: 'USD' },
         CANCELLATION_POLICY_MESSAGES.fee,
       ],
       [
@@ -264,7 +264,7 @@ describe('Política de cancelación por sede y cancelaciones (DX-279)', () => {
           .post(`/locations/${principal}/cancellation-policy`, {
             noticeHours: 24,
             suggestedFee: 50000,
-            currency: 'cop',
+            currency: 'usd',
             patientText: 'Avísanos con 24 horas.',
           })
           .expect(201)
@@ -279,7 +279,7 @@ describe('Política de cancelación por sede y cancelaciones (DX-279)', () => {
         version: 2,
         noticeHours: 24,
         suggestedFee: 50000,
-        currency: 'COP',
+        currency: 'USD',
       });
       const res = await admin()
         .get(`/locations/${principal}/cancellation-policy`)

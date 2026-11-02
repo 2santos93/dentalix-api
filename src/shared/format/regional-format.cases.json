@@ -16,7 +16,7 @@
   { "locale": "en-US", "hourCycle": "h12", "op": "money", "args": [1234, "JPY"], "expected": "¥1,234" },
   { "locale": "en-US", "hourCycle": "h12", "op": "money", "args": [1234.5, "JPY"], "expected": "¥1,234.50" },
   { "locale": "en-US", "hourCycle": "h12", "op": "money", "args": [150000, "VND"], "expected": "₫150,000" },
-  { "locale": "en-US", "hourCycle": "h12", "op": "money", "args": [1234, "COP"], "expected": "COP\u00a01,234.00" },
+  { "locale": "en-US", "hourCycle": "h12", "op": "money", "args": [1234, "VES"], "expected": "VES\u00a01,234.00" },
   { "locale": "en-US", "hourCycle": "h12", "op": "money", "args": [1234.5, "KWD"], "expected": "KWD\u00a01,234.50" },
   { "locale": "en-US", "hourCycle": "h12", "op": "money", "args": [1234.5, "XYZ"], "expected": "XYZ\u00a01,234.50" },
   { "locale": "en-US", "hourCycle": "h12", "op": "money", "args": [1234.5, "US"], "expected": "US 1,234.50" },

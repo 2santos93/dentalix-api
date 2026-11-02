@@ -15,7 +15,7 @@ import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   registerBody,
 } from './support/location-fixtures';
 
@@ -80,13 +80,13 @@ describe('Planes cobrables — GET /patients/:patientId/billable-plans (e2e, DX-
   let dentist: string;
   let assistant: string;
 
-  // usdPlan       USD 1000 (DRAFT, ítem ACCEPTED) · abonos 300 USD + 100 USD (anulado) + 50000 COP
+  // usdPlan       USD 1000 (DRAFT, ítem ACCEPTED) · abonos 300 USD + 100 USD (anulado) + 50000 VES
   //               · plan de cuotas activo
-  // copPlan       COP 500000 COMPLETED · sin abonos
+  // vesPlan       VES 500000 COMPLETED · sin abonos
   // cancelledPlan USD 500 · luego CANCELLED (fuera)
   // proposedPlan  USD 999 solo PROPOSED (nada facturable: fuera)
   let usdPlan: string;
-  let copPlan: string;
+  let vesPlan: string;
   let cancelledPlan: string;
   let proposedPlan: string;
 
@@ -134,7 +134,7 @@ describe('Planes cobrables — GET /patients/:patientId/billable-plans (e2e, DX-
     const email = `owner@${subdomain}.com`;
     const reg = await registerVerified(
       app,
-      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+      registerBody(REGIONAL_CARACAS_FIXTURE, {
         clinicName: `Clinica ${subdomain}`,
         subdomain,
         email,
@@ -283,15 +283,15 @@ describe('Planes cobrables — GET /patients/:patientId/billable-plans (e2e, DX-
       .expect(201);
     // Después del plan de cuotas: su respuesta convierte cada abono a la
     // moneda del plan, y en test no hay proveedor de tasas.
-    await pay(usdPlan, 50000, 'COP');
+    await pay(usdPlan, 50000, 'VES');
 
-    copPlan = await createPlan('COP', 500000);
+    vesPlan = await createPlan('VES', 500000);
     // Máquina de estados (DX-040): un plan se completa después de aceptarse.
     await as(clinicA)
-      .patch(`/treatment-plans/${copPlan}`, { status: 'ACCEPTED' })
+      .patch(`/treatment-plans/${vesPlan}`, { status: 'ACCEPTED' })
       .expect(200);
     await as(clinicA)
-      .patch(`/treatment-plans/${copPlan}`, { status: 'COMPLETED' })
+      .patch(`/treatment-plans/${vesPlan}`, { status: 'COMPLETED' })
       .expect(200);
 
     cancelledPlan = await createPlan('USD', 500);
@@ -315,7 +315,7 @@ describe('Planes cobrables — GET /patients/:patientId/billable-plans (e2e, DX-
     const body = res.body as BillablePlanBody[];
 
     const ids = body.map((p) => p.id);
-    expect(ids).toEqual(expect.arrayContaining([usdPlan, copPlan]));
+    expect(ids).toEqual(expect.arrayContaining([usdPlan, vesPlan]));
     expect(ids).not.toContain(cancelledPlan);
     expect(ids).not.toContain(proposedPlan);
     expect(body).toHaveLength(2);
@@ -328,15 +328,15 @@ describe('Planes cobrables — GET /patients/:patientId/billable-plans (e2e, DX-
       currency: 'USD',
       createdAt: expect.any(String) as string,
       total: 1000,
-      // El anulado no suma; el abono en COP va aparte, sin convertir.
+      // El anulado no suma; el abono en VES va aparte, sin convertir.
       paid: 300,
-      paidOtherCurrencies: [{ currency: 'COP', amount: 50000 }],
+      paidOtherCurrencies: [{ currency: 'VES', amount: 50000 }],
       balance: 700,
       hasActivePaymentPlan: true,
     });
-    expect(byId.get(copPlan)).toMatchObject({
+    expect(byId.get(vesPlan)).toMatchObject({
       status: 'COMPLETED',
-      currency: 'COP',
+      currency: 'VES',
       total: 500000,
       paid: 0,
       balance: 500000,
@@ -406,9 +406,9 @@ describe('Planes cobrables — GET /patients/:patientId/billable-plans (e2e, DX-
     const key = '6f1d8f9e-3c1a-4b8e-9f2d-0a1b2c3d4e5f';
     const send = () =>
       as(clinicA, reception)
-        .post(`/treatment-plans/${copPlan}/payments`, {
+        .post(`/treatment-plans/${vesPlan}/payments`, {
           amount: 100000,
-          currency: 'COP',
+          currency: 'VES',
           paidAt: '2026-10-01T00:00:00.000Z',
           method: 'TRANSFER',
         })
@@ -423,13 +423,13 @@ describe('Planes cobrables — GET /patients/:patientId/billable-plans (e2e, DX-
     const res = await as(clinicA, reception)
       .get(`/patients/${patientId}/billable-plans`)
       .expect(200);
-    const cop = (res.body as BillablePlanBody[]).find((p) => p.id === copPlan);
-    expect(cop).toMatchObject({ paid: 100000, balance: 400000 });
+    const ves = (res.body as BillablePlanBody[]).find((p) => p.id === vesPlan);
+    expect(ves).toMatchObject({ paid: 100000, balance: 400000 });
   });
 
   it('recepción crea el plan de cuotas de un plan listado y queda marcado', async () => {
     await as(clinicA, reception)
-      .post(`/treatment-plans/${copPlan}/payment-plan`, {
+      .post(`/treatment-plans/${vesPlan}/payment-plan`, {
         installmentsCount: 4,
         periodicity: 'MONTHLY',
         startDate: '2099-02-01T00:00:00.000Z',
@@ -439,7 +439,7 @@ describe('Planes cobrables — GET /patients/:patientId/billable-plans (e2e, DX-
     const res = await as(clinicA, reception)
       .get(`/patients/${patientId}/billable-plans`)
       .expect(200);
-    const cop = (res.body as BillablePlanBody[]).find((p) => p.id === copPlan);
-    expect(cop?.hasActivePaymentPlan).toBe(true);
+    const ves = (res.body as BillablePlanBody[]).find((p) => p.id === vesPlan);
+    expect(ves?.hasActivePaymentPlan).toBe(true);
   });
 });

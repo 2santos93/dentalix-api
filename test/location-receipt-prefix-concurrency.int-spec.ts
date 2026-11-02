@@ -1,6 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -62,7 +62,7 @@ function createLocation(
 ) {
   const run = (client: Prisma.TransactionClient) =>
     client.location.create({
-      data: locationData(REGIONAL_BOGOTA_FIXTURE, { tenantId, name }),
+      data: locationData(REGIONAL_CARACAS_FIXTURE, { tenantId, name }),
       select: { id: true, receiptPrefix: true },
     });
   return tx ? run(tx) : asApp(tenantId, run);
@@ -239,7 +239,7 @@ describe('DX-216 · serie de recibos de la sede ante altas concurrentes (int)', 
     await expect(
       asApp(tenantA, (tx) =>
         tx.location.create({
-          data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+          data: locationData(REGIONAL_CARACAS_FIXTURE, {
             tenantId: tenantA,
             name: 'Sede Copia',
             receiptPrefix: 'SUR',

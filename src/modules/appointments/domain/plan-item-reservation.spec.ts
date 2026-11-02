@@ -16,9 +16,9 @@ import {
 } from './plan-item-reservation';
 
 describe('DX-271 reserva de ítems del plan', () => {
-  const now = new Date('2026-10-23T14:20:00Z');
-  const past = new Date('2026-10-23T14:00:00Z');
-  const future = new Date('2026-10-30T14:00:00Z');
+  const now = new Date('2026-10-23T13:20:00Z');
+  const past = new Date('2026-10-23T13:00:00Z');
+  const future = new Date('2026-10-30T13:00:00Z');
 
   it.each([
     AppointmentStatus.COMPLETED,
@@ -54,7 +54,7 @@ describe('DX-271 reserva de ítems del plan', () => {
   });
 
   // Sedes de prueba con ajustes explícitos: lo que mostraban (24 h, día/mes).
-  const h23 = { id: 'loc-1', locale: 'es-CO', hourCycle: 'h23' };
+  const h23 = { id: 'loc-1', locale: 'es-VE', hourCycle: 'h23' };
   const at = (
     start: Date,
     timeZone: string,
@@ -70,18 +70,18 @@ describe('DX-271 reserva de ítems del plan', () => {
   });
 
   it('dice en qué cita está el ítem, con la fecha y la hora de la sede', () => {
-    // 14:00 UTC = 9:00 en Bogotá y 15:00 en Madrid (CET desde el 25/10).
-    expect(reservedElsewhereMessage(at(future, 'America/Bogota'))).toBe(
+    // 13:00 UTC = 9:00 en Caracas y 14:00 en Madrid (CET desde el 25/10).
+    expect(reservedElsewhereMessage(at(future, 'America/Caracas'))).toBe(
       'Este tratamiento ya está reservado en otra cita, la del 30/10/2026 a las 09:00. Quítalo de esa cita o cancélala antes.',
     );
     expect(reservedElsewhereMessage(at(future, 'Europe/Madrid'))).toContain(
-      'la del 30/10/2026 a las 15:00',
+      'la del 30/10/2026 a las 14:00',
     );
     // Sin cita conocida (se canceló a la vez), el mensaje general.
     expect(reservedElsewhereMessage(null)).toBe(
       'Este tratamiento ya está reservado en otra cita. Quítalo de esa cita o cancélala antes.',
     );
-    expect(reservedElsewhereMessage(at(future, 'America/Bogota'))).not.toMatch(
+    expect(reservedElsewhereMessage(at(future, 'America/Caracas'))).not.toMatch(
       /agendarlo/,
     );
   });
@@ -97,7 +97,7 @@ describe('DX-271 reserva de ítems del plan', () => {
     expect(
       reservedElsewhereMessage(at(future, 'America/New_York', newYork)),
     ).toBe(
-      'Este tratamiento ya está reservado en otra cita, la del 10/30/2026 a las 10:00 a. m. Quítalo de esa cita o cancélala antes.',
+      'Este tratamiento ya está reservado en otra cita, la del 10/30/2026 a las 9:00 a. m. Quítalo de esa cita o cancélala antes.',
     );
   });
 
@@ -108,7 +108,7 @@ describe('DX-271 reserva de ítems del plan', () => {
     // El 409 lo lanza el constructor del mensaje al pintar la fecha.
     let thrown: unknown;
     try {
-      reservedElsewhereMessage(at(future, 'America/Bogota', unconfigured));
+      reservedElsewhereMessage(at(future, 'America/Caracas', unconfigured));
     } catch (error) {
       thrown = error;
     }
@@ -158,9 +158,9 @@ describe('DX-271 reserva de ítems del plan', () => {
 });
 
 describe('DX-288 (revisión M1) titular en la clínica de «Traer a esta cita»', () => {
-  const TZ = 'America/Bogota';
+  const TZ = 'America/Caracas';
   // 23/10/2026 15:00 en la zona de la sede.
-  const now = new Date('2026-10-23T20:00:00.000Z');
+  const now = new Date('2026-10-23T19:00:00.000Z');
 
   it.each([
     AppointmentStatus.ARRIVED,
@@ -169,7 +169,7 @@ describe('DX-288 (revisión M1) titular en la clínica de «Traer a esta cita»'
   ])('en la clínica (%s) y de hoy en la zona de su sede: bloquea', (status) => {
     expect(
       heldInClinicToday(
-        { status, start: new Date('2026-10-23T14:00:00.000Z') },
+        { status, start: new Date('2026-10-23T13:00:00.000Z') },
         TZ,
         now,
       ),
@@ -181,7 +181,7 @@ describe('DX-288 (revisión M1) titular en la clínica de «Traer a esta cita»'
       heldInClinicToday(
         {
           status: AppointmentStatus.ARRIVED,
-          start: new Date('2026-10-22T22:00:00.000Z'),
+          start: new Date('2026-10-22T21:00:00.000Z'),
         },
         TZ,
         now,
@@ -190,12 +190,12 @@ describe('DX-288 (revisión M1) titular en la clínica de «Traer a esta cita»'
   });
 
   it('el día civil es el de la zona de la sede, no el UTC', () => {
-    // 24/10 01:00 UTC = 23/10 20:00 en la zona de la sede: hoy.
+    // 24/10 00:00 UTC = 23/10 20:00 en la zona de la sede: hoy.
     expect(
       heldInClinicToday(
         {
           status: AppointmentStatus.IN_CHAIR,
-          start: new Date('2026-10-24T01:00:00.000Z'),
+          start: new Date('2026-10-24T00:00:00.000Z'),
         },
         TZ,
         now,
@@ -219,7 +219,7 @@ describe('DX-288 (revisión M1) titular en la clínica de «Traer a esta cita»'
     (status) => {
       expect(
         heldInClinicToday(
-          { status, start: new Date('2026-10-23T21:00:00.000Z') },
+          { status, start: new Date('2026-10-23T20:00:00.000Z') },
           TZ,
           now,
         ),
@@ -230,10 +230,10 @@ describe('DX-288 (revisión M1) titular en la clínica de «Traer a esta cita»'
   it('el 409 dice la hora y la sede de la cita titular (en su zona)', () => {
     expect(
       heldInClinicMessage({
-        start: new Date('2026-10-23T14:05:00.000Z'),
+        start: new Date('2026-10-23T13:05:00.000Z'),
         timeZone: TZ,
         locationName: 'Sede Norte',
-        fmt: regionalFormat({ locale: 'es-CO', hourCycle: 'h23' }),
+        fmt: regionalFormat({ locale: 'es-VE', hourCycle: 'h23' }),
       }),
     ).toBe(
       'Este tratamiento ya lo tiene otra cita con el paciente en la clínica, la de hoy a las 09:05 (Sede Norte). No se puede traer mientras esa cita siga en curso.',
@@ -260,9 +260,9 @@ describe('DX-288 (revisión M1) titular en la clínica de «Traer a esta cita»'
 });
 
 describe('DX-293 aviso de reserva en otra cita: heldInClinic', () => {
-  const TZ = 'America/Bogota';
+  const TZ = 'America/Caracas';
   // 23/10/2026 15:00 en la zona de la sede.
-  const now = new Date('2026-10-23T20:00:00.000Z');
+  const now = new Date('2026-10-23T19:00:00.000Z');
   const holder = (status: AppointmentStatus, start: string) => ({
     appointmentId: 'b1',
     status,
@@ -281,7 +281,7 @@ describe('DX-293 aviso de reserva en otra cita: heldInClinic', () => {
     'titular de hoy en la clínica (%s), sede permitida: heldInClinic con su hora y sede',
     (status) => {
       expect(
-        reservationHolderView(holder(status, '2026-10-23T14:05:00.000Z'), {
+        reservationHolderView(holder(status, '2026-10-23T13:05:00.000Z'), {
           timeZone: TZ,
           locationAllowed: true,
           now,
@@ -289,7 +289,7 @@ describe('DX-293 aviso de reserva en otra cita: heldInClinic', () => {
       ).toEqual({
         heldInClinic: true,
         appointmentId: 'b1',
-        start: new Date('2026-10-23T14:05:00.000Z'),
+        start: new Date('2026-10-23T13:05:00.000Z'),
         locationId: 'loc-norte',
         locationName: 'Sede Norte',
         timeZone: TZ,
@@ -301,11 +301,11 @@ describe('DX-293 aviso de reserva en otra cita: heldInClinic', () => {
 
   it('es la misma regla que el 409 de «Traer a esta cita» (heldInClinicToday)', () => {
     const cases = [
-      holder(AppointmentStatus.ARRIVED, '2026-10-23T14:05:00.000Z'),
-      holder(AppointmentStatus.ARRIVED, '2026-10-22T22:00:00.000Z'),
-      holder(AppointmentStatus.IN_CHAIR, '2026-10-24T01:00:00.000Z'),
-      holder(AppointmentStatus.SCHEDULED, '2026-10-30T14:00:00.000Z'),
-      holder(AppointmentStatus.CONFIRMED, '2026-10-23T21:00:00.000Z'),
+      holder(AppointmentStatus.ARRIVED, '2026-10-23T13:05:00.000Z'),
+      holder(AppointmentStatus.ARRIVED, '2026-10-22T21:00:00.000Z'),
+      holder(AppointmentStatus.IN_CHAIR, '2026-10-24T00:00:00.000Z'),
+      holder(AppointmentStatus.SCHEDULED, '2026-10-30T13:00:00.000Z'),
+      holder(AppointmentStatus.CONFIRMED, '2026-10-23T20:00:00.000Z'),
     ];
     for (const h of cases)
       expect(
@@ -317,7 +317,7 @@ describe('DX-293 aviso de reserva en otra cita: heldInClinic', () => {
   it('titular olvidada en la clínica de un día anterior: heldInClinic false («Traer» sigue)', () => {
     expect(
       reservationHolderView(
-        holder(AppointmentStatus.ARRIVED, '2026-10-22T22:00:00.000Z'),
+        holder(AppointmentStatus.ARRIVED, '2026-10-22T21:00:00.000Z'),
         { timeZone: TZ, locationAllowed: true, now },
       ),
     ).toMatchObject({ heldInClinic: false, appointmentId: 'b1' });
@@ -326,13 +326,13 @@ describe('DX-293 aviso de reserva en otra cita: heldInClinic', () => {
   it('titular futura: heldInClinic false y el resto igual que antes', () => {
     expect(
       reservationHolderView(
-        holder(AppointmentStatus.SCHEDULED, '2026-10-30T14:00:00.000Z'),
+        holder(AppointmentStatus.SCHEDULED, '2026-10-30T13:00:00.000Z'),
         { timeZone: TZ, locationAllowed: true, now },
       ),
     ).toEqual({
       heldInClinic: false,
       appointmentId: 'b1',
-      start: new Date('2026-10-30T14:00:00.000Z'),
+      start: new Date('2026-10-30T13:00:00.000Z'),
       locationId: 'loc-norte',
       locationName: 'Sede Norte',
       timeZone: TZ,
@@ -355,7 +355,7 @@ describe('DX-293 aviso de reserva en otra cita: heldInClinic', () => {
     expect(
       reservationHolderView(
         {
-          ...holder(AppointmentStatus.SCHEDULED, '2026-10-30T14:00:00.000Z'),
+          ...holder(AppointmentStatus.SCHEDULED, '2026-10-30T13:00:00.000Z'),
           locationLocale: null,
           locationHourCycle: null,
         },
@@ -364,7 +364,7 @@ describe('DX-293 aviso de reserva en otra cita: heldInClinic', () => {
     ).toEqual({
       heldInClinic: false,
       appointmentId: 'b1',
-      start: new Date('2026-10-30T14:00:00.000Z'),
+      start: new Date('2026-10-30T13:00:00.000Z'),
       locationId: 'loc-norte',
       locationName: 'Sede Norte',
       timeZone: TZ,
@@ -376,7 +376,7 @@ describe('DX-293 aviso de reserva en otra cita: heldInClinic', () => {
   it('sede no permitida y titular de hoy en la clínica: heldInClinic sin cita, hora ni sede (DX-089)', () => {
     expect(
       reservationHolderView(
-        holder(AppointmentStatus.IN_CHAIR, '2026-10-23T14:05:00.000Z'),
+        holder(AppointmentStatus.IN_CHAIR, '2026-10-23T13:05:00.000Z'),
         { timeZone: TZ, locationAllowed: false, now },
       ),
     ).toEqual({
@@ -392,11 +392,11 @@ describe('DX-293 aviso de reserva en otra cita: heldInClinic', () => {
   });
 
   it.each([
-    ['futura', AppointmentStatus.SCHEDULED, '2026-10-30T14:00:00.000Z'],
+    ['futura', AppointmentStatus.SCHEDULED, '2026-10-30T13:00:00.000Z'],
     [
       'olvidada de otro día',
       AppointmentStatus.ARRIVED,
-      '2026-10-22T22:00:00.000Z',
+      '2026-10-22T21:00:00.000Z',
     ],
   ])(
     'sede no permitida y titular %s: no se enseña (como en DX-273)',

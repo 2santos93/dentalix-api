@@ -167,7 +167,7 @@ function makeStaff(known?: string[]): StaffRepository {
 function makeLocations(): LocationRepository {
   return {
     findById: (id: string) =>
-      Promise.resolve({ id, timeZone: 'America/Bogota' }),
+      Promise.resolve({ id, timeZone: 'America/Caracas' }),
   } as unknown as LocationRepository;
 }
 
@@ -1114,7 +1114,7 @@ describe('UpdateAppointmentUseCase', () => {
       });
       expect(result.start).toEqual(at('18:00'));
       expect(result.warnings).toEqual([
-        'La cita cae en un bloqueo que permite agendar: Almuerzo (13:00–14:00).',
+        'La cita cae en un bloqueo que permite agendar: Almuerzo (14:00–15:00).',
       ]);
     });
 

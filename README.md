@@ -1346,7 +1346,7 @@ siguen admitiendo NULL hasta la fase 2.
 | ---------------------------------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | API antigua                                          | BD de fase 1                                          | INSERT de sede sin columnas nuevas → filas NULL, las rellena el barrido (desde DX-312, el paso 0 del trigger rechaza ese INSERT); lee `location_schedules.timezone`, que el código nuevo mantiene igual a `Location.timeZone` (R20)                                              |
 | Web antigua                                          | API nueva                                             | `PUT /locations/schedule` con `timezone` igual a la zona de la sede se acepta; `LocationDto` solo gana campos. El registro sin campos de sede (forma legada) es 400 con `field: locationCountry` desde DX-312                                                                    |
-| Web nueva                                            | API antigua                                           | `LocationDto` sin `currency` → `SedeConfigError`, nunca COP                                                                                                                                                                                                                      |
+| Web nueva                                            | API antigua                                           | `LocationDto` sin `currency` → `SedeConfigError`, nunca USD                                                                                                                                                                                                                      |
 | Enlace de registro de una réplica antigua            | API nueva                                             | Con los campos de sede, `verify` lo acepta. Sin ellos (forma legada), 410 `REGISTRATION_LINK_EXPIRED` sin consumirlo, desde DX-312                                                                                                                                               |
 | Web antigua                                          | API antigua (`PUT /locations/schedule` con otra zona) | La zona se guarda solo en `location_schedules.timezone`, que el código nuevo no lee: se pierde. El ADMIN la corrige en Ajustes → Sedes                                                                                                                                           |
 | Registro pendiente con los cuatro campos (API nueva) | `verify` en una réplica antigua                       | Desde DX-312, el paso 0 del trigger de `locations` rechaza la sede sin datos regionales que crearía esa réplica: el alta se deshace entera, la respuesta es un 400 genérico, no se crea ninguna clínica y el pendiente queda consumido (ver «País de la sede ISO 3166 (DX-312)») |
@@ -1611,7 +1611,7 @@ regla de SEC-013) un abono que contaba para él, ya no es verdad que se pagó:
   sede del request o la principal).
 - **«Descuento %» en bloque**: el % de cada precio, redondeado a los
   `roundingDigits` de la moneda del plan (`currencies.rounding_digits`, ver
-  «Redondeo de importes», DX-340: COP, JPY, RSD… sin decimales; EUR, USD a
+  «Redondeo de importes», DX-340: ALL, JPY, RSD… sin decimales; EUR, USD a
   céntimos) y nunca por encima del tope del rol ítem a ítem (si el redondeo lo
   pasara, baja a la unidad que lo respeta). Todo o nada, en una transacción;
   un evento de auditoría (`reason` BULK_DISCOUNT) sin importes ni la nota.
@@ -1722,14 +1722,14 @@ CLDR (DX-313); el campo se renombró a `cldrDigits` porque no son los de ISO.
 **Decisión de producto (vigente).** Los importes ya guardados no cambian: no se
 reescribe ni recalcula ningún documento histórico (la migración solo toca la
 tabla de referencia), y `rounding_digits` **congela** la regla anterior: 0 para
-las monedas sin decimales en CLDR 47 y para el conjunto anterior a G1 (COP,
-CLP, JPY, KRW, PYG); el resto, sus minor units. Así ningún descuento ni precio
+las monedas sin decimales en CLDR 47 y para el conjunto anterior a G1
+(CLP, JPY, KRW, PYG); el resto, sus minor units. Así ningún descuento ni precio
 nuevo cambia. Donde ISO y la regla difieren (minor units 2, redondeo 0): AFN,
-ALL, COP, IRR, KPW, LAK, LBP, MGA, MMK, RSD, SOS, SYP, YER. Caso de referencia:
+ALL, IRR, KPW, LAK, LBP, MGA, MMK, RSD, SOS, SYP, YER. Caso de referencia:
 **123,45 RSD × 7,5 % = 9,25875 → 9 RSD** (vigente, redondeo 0) frente a
 **9,26 RSD** si se redondeara a sus 2 minor units ISO (CLDR 48.1 separa
 `digits` 2 y `cashDigits` 0). Se mantiene 0 porque cambiarlo alteraría
-resultados actuales; pasar RSD/COP (u otra) a 2 es una **decisión pendiente
+resultados actuales; pasar RSD/ALL (u otra) a 2 es una **decisión pendiente
 del dueño**, compatible con los contratos (el campo ya existe) y sin tocar
 documentos guardados. Cómo se aplica, en este orden: (1) cambiar la regla en
 `prisma/scripts/generate-currency-digits.ts` y regenerar
@@ -1751,7 +1751,7 @@ JPY): repartirlas en unidades de la moneda es otra decisión pendiente.
 
 **Paridad API/web.** `src/shared/money/rounding-vectors.json` (copia byte a
 byte en la web, `src/lib/money/rounding-vectors.json`, vigilada por
-`scripts/check-api-reference-sync.mjs` de la web) fija RSD, JPY, EUR y COP con
+`scripts/check-api-reference-sync.mjs` de la web) fija RSD, JPY, EUR y ALL con
 123,45 × 7,5 %, límites del descuento y total de líneas; lo comprueban
 `rounding-vectors.spec.ts` (API) y `line-rounding.test.ts` (web).
 
@@ -4657,7 +4657,7 @@ los pacientes y antes de confirmar, se puede subir una **hoja de saldos**
 - **La misma hoja dos veces no duplica la deuda** (QA D1): si el paciente ya
   tiene un saldo migrado VIVO en esa moneda de otro lote, cada fila suya es
   un error del dry-run que dice cuál («Este paciente ya tiene un saldo
-  migrado vivo de 80.000,00 COP (lote «x.csv» del dd/mm/aaaa, corte
+  migrado vivo de 80.000,00 USD (lote «x.csv» del dd/mm/aaaa, corte
   dd/mm/aaaa): no se crea otro…») y no se importa. Solo con el campo
   `addToExisting=true` del multipart (casilla «Añadir aunque ya tenga saldo
   migrado» en la web, guardada en el lote como `balanceAddToExisting`) se

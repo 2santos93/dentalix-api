@@ -8,7 +8,7 @@ import { TenantContextService } from '../src/shared/tenancy/tenant-context.servi
 import { PrismaPaymentMethodRepository } from '../src/modules/payment-methods/infrastructure/prisma-payment-method.repository';
 import { PrismaPaymentRepository } from '../src/modules/payments/infrastructure/repositories/prisma-payment.repository';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   regionalLocationInsert,
 } from './support/location-fixtures';
 
@@ -54,7 +54,7 @@ async function seedClinic(
       db,
       tenant.id,
       'Sede',
-      REGIONAL_BOGOTA_FIXTURE,
+      REGIONAL_CARACAS_FIXTURE,
       { phoneRegion: !beforeDx377 },
     ),
   };
@@ -67,7 +67,7 @@ async function seedClinic(
     data: {
       tenantId: tenant.id,
       patientId: patient.id,
-      currency: 'COP',
+      currency: 'USD',
       status: 'ACCEPTED',
     },
   });
@@ -91,7 +91,7 @@ async function insertPayment(
        "patientId", "amount", "currency", "paidAt", "method", "updatedAt"
        ${extra.paymentMethodId ? ', "paymentMethodId", "reference", "referenceNormalized"' : ''})
      VALUES (gen_random_uuid(), $1::uuid, $2::uuid, $3::uuid, $4::uuid, 1000,
-       'COP', now(), $5::"PaymentMethod", now()
+       'USD', now(), $5::"PaymentMethod", now()
        ${extra.paymentMethodId ? ', $6::uuid, $7, $7' : ''})
      RETURNING "id"`,
     c.tenantId,

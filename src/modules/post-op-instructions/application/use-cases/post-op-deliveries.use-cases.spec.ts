@@ -507,7 +507,7 @@ describe('DeliverPostOpInstructionsUseCase (DX-222)', () => {
 
     const token = tokenOf(result.publicUrl);
     expect(result.whatsapp).toEqual({
-      phone: '573101234567',
+      phone: '584141234567',
       text: `Hola Carolina, te saludamos de Sonrisas del Norte. Aquí tienes tus indicaciones de cuidado tras la visita: ${result.publicUrl}`,
     });
     expect(result.whatsapp?.text).not.toMatch(/Exodoncia|gasa/);
@@ -645,7 +645,7 @@ describe('GetPostOpSuggestionsUseCase (DX-222)', () => {
     });
     // Los ítems realizados se buscan en el día civil de la cita en la sede.
     expect(deliveries.performedQueries).toEqual([
-      { day: '2026-10-20', timeZone: 'America/Bogota' },
+      { day: '2026-10-20', timeZone: 'America/Caracas' },
     ]);
     expect(view.email).toEqual({
       allowed: true,
@@ -653,7 +653,7 @@ describe('GetPostOpSuggestionsUseCase (DX-222)', () => {
       toMasked: 'ca***@example.com',
       toResponsible: false,
     });
-    expect(view.whatsapp).toEqual({ phone: '573101234567', reason: null });
+    expect(view.whatsapp).toEqual({ phone: '584141234567', reason: null });
     expect(view.locationPhone).toBe('601 555 0101');
     expect(view.deliveries).toEqual([]);
   });
@@ -735,7 +735,7 @@ describe('GetPostOpSuggestionsUseCase (DX-222)', () => {
       APPOINTMENT_ID,
       appointmentContext({
         patient: { phone: '0058 412 1234567' },
-        location: { defaultPhoneRegion: 'CO' },
+        location: { defaultPhoneRegion: 'TH' },
       }),
     );
     expect((await suggestions.execute(APPOINTMENT_ID)).whatsapp).toMatchObject({

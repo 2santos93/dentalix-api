@@ -8,7 +8,7 @@ import { registerVerified } from './support/register-verified';
 import { hostFor } from './support/tenant-host';
 import { resetDatabase } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   registerBody,
 } from './support/location-fixtures';
 
@@ -96,7 +96,7 @@ describe('Reglas de cobro (e2e, DX-109)', () => {
     const email = `owner@${subdomain}.com`;
     await registerVerified(
       app,
-      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+      registerBody(REGIONAL_CARACAS_FIXTURE, {
         clinicName: `Clinica ${subdomain}`,
         subdomain,
         email,
@@ -286,7 +286,7 @@ describe('Reglas de cobro (e2e, DX-109)', () => {
     await accept(planId);
     await pay(planId, 10).expect(201);
     const withPayments = await as(clinic)
-      .patch(`/treatment-plans/${planId}`, { currency: 'COP' })
+      .patch(`/treatment-plans/${planId}`, { currency: 'VES' })
       .expect(409);
     expect((withPayments.body as ErrorBody).message).toMatch(
       /abonos registrados/,
@@ -302,7 +302,7 @@ describe('Reglas de cobro (e2e, DX-109)', () => {
       })
       .expect(201);
     await as(clinic)
-      .patch(`/treatment-plans/${financed}`, { currency: 'COP' })
+      .patch(`/treatment-plans/${financed}`, { currency: 'VES' })
       .expect(409);
 
     const { planId: cancelled } = await createPlan();
@@ -310,13 +310,13 @@ describe('Reglas de cobro (e2e, DX-109)', () => {
       .patch(`/treatment-plans/${cancelled}`, { status: 'CANCELLED' })
       .expect(200);
     await as(clinic)
-      .patch(`/treatment-plans/${cancelled}`, { currency: 'COP' })
+      .patch(`/treatment-plans/${cancelled}`, { currency: 'VES' })
       .expect(409);
 
     // Sin abonos ni cuotas, un borrador sí cambia de moneda.
     const { planId: draft } = await createPlan();
     await as(clinic)
-      .patch(`/treatment-plans/${draft}`, { currency: 'COP' })
+      .patch(`/treatment-plans/${draft}`, { currency: 'VES' })
       .expect(200);
   });
 

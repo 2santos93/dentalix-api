@@ -21,7 +21,7 @@ export class FakeResponsiblePartyRepository implements ResponsiblePartyRepositor
   readonly parties: (ResponsiblePartyView & { deleted: boolean })[] = [];
   /** Zona de la sede y mayoría de edad de la clínica (DX-328). */
   noticeSettings: NoticeSettings = {
-    timeZone: 'America/Bogota',
+    timeZone: 'America/Caracas',
     majorityAge: 18,
   };
   private seq = 0;

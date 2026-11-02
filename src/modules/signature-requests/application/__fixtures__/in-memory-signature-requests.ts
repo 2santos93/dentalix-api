@@ -63,8 +63,8 @@ export class InMemorySignatureRequestRepository implements SignatureRequestRepos
   completed: { templateId: string; signedAt: Date }[] = [];
   clinic = { name: 'Clínica Demo', logoUrl: null, primaryColor: '#0E7490' };
   location = {
-    timeZone: 'America/Bogota',
-    locale: 'es-CO',
+    timeZone: 'America/Caracas',
+    locale: 'es-VE',
     hourCycle: 'h12',
   };
   private nextId = 1;

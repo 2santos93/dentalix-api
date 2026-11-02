@@ -41,7 +41,7 @@ describe('huella del cobro dividido (DX-390)', () => {
   const PLAN = '44444444-4444-4444-8444-444444444444';
   const lines = [
     { amount: 50, currency: 'usd', paymentMethodId: 'm1', reference: ' A1 ' },
-    { amount: 100000, currency: 'COP', paymentMethodId: 'm2' },
+    { amount: 100000, currency: 'VES', paymentMethodId: 'm2' },
   ];
 
   it('normaliza como la del abono y no depende del motivo ni de la confirmación', () => {

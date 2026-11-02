@@ -25,8 +25,8 @@ import { FixedDocumentTypeNamesReader } from '../../../document-type-names/__fix
 // PNG real de 1x1 (firma + IHDR).
 const PNG =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
-// 16 oct 2026, 10:00 en la zona de la sede (UTC-5).
-const NOW = new Date('2026-10-16T15:00:00.000Z');
+// 16 oct 2026, 10:00 en la zona de la sede (UTC-4).
+const NOW = new Date('2026-10-16T14:00:00.000Z');
 const META = {
   acceptedById: 'user-1',
   ipAddress: '10.0.0.1',
@@ -77,12 +77,12 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
 
   it('compone el presupuesto con la fecha de hoy en la zona de la sede y su hash', async () => {
     const { get } = setup();
-    // 23:30 del 15 en la zona de la sede = 04:30 UTC del 16: el presupuesto es del 15.
+    // 23:30 del 15 en la zona de la sede = 03:30 UTC del 16: el presupuesto es del 15.
     const lateRepo = new InMemoryPlanQuoteRepository();
     lateRepo.add(quoteSource());
     const late = new GetPlanQuoteUseCase(
       lateRepo,
-      () => new Date('2026-10-16T04:30:00.000Z'),
+      () => new Date('2026-10-16T03:30:00.000Z'),
       names,
     );
     const doc = await get.execute('patient-1', 'plan-1');
@@ -99,7 +99,7 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
     expect(doc.planStatus).toBe(TreatmentPlanStatus.DRAFT);
     expect(doc.totals).toEqual([
       {
-        currency: 'COP',
+        currency: 'USD',
         gross: 3680000,
         discount: 350000,
         net: 3330000,
@@ -112,7 +112,7 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
           {
             planId: 'plan-1',
             patientId: 'patient-1',
-            currency: 'COP',
+            currency: 'USD',
             clinicName: 'Clínica Sonrisa',
             location: {
               id: 'loc-1',
@@ -203,7 +203,7 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
 
     const later = new GetPlanQuoteUseCase(
       repo,
-      () => new Date('2026-12-01T15:00:00.000Z'),
+      () => new Date('2026-12-01T14:00:00.000Z'),
       names,
     );
     const doc = await later.execute('patient-1', 'plan-1');
@@ -282,7 +282,7 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
       version: 1,
       planId: 'plan-1',
       patientId: 'patient-1',
-      currency: 'COP',
+      currency: 'USD',
       clinicName: 'Clínica Sonrisa',
       location: { id: 'loc-1', name: 'Sede principal', address: 'Calle 1' },
       patient: { name: 'Ana Pérez', document: 'CC 123' },
@@ -302,17 +302,17 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
           subtotal: 1000,
         },
       ],
-      totals: [{ currency: 'COP', gross: 1000, discount: 0, net: 1000 }],
+      totals: [{ currency: 'USD', gross: 1000, discount: 0, net: 1000 }],
     };
     const contentHash = computeQuoteHash(parseQuoteContent(v1));
-    const acceptedAt = new Date('2026-10-02T15:00:00.000Z');
+    const acceptedAt = new Date('2026-10-02T14:00:00.000Z');
     repo.add(
       quoteSource({
         plan: {
           id: 'plan-1',
           patientId: 'patient-1',
           status: TreatmentPlanStatus.ACCEPTED,
-          currency: 'COP',
+          currency: 'USD',
         },
         acceptance: {
           content: v1,

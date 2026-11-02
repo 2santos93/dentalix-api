@@ -78,7 +78,7 @@ function makePlan(
     tenantId: 't1',
     patientId: 'patient-1',
     status: TreatmentPlanStatus.ACCEPTED,
-    currency: 'COP',
+    currency: 'VES',
     notes: null,
     createdById: null,
     ...PLAN_WITHOUT_OPTIONS,
@@ -93,7 +93,7 @@ function makePlan(
 
 /** Cotización de prueba (DX-375): unidades por 1 USD. */
 class FakeConvertAmount {
-  public perBase: Record<string, number> = { COP: 4000 };
+  public perBase: Record<string, number> = { VES: 4000 };
   execute(): Promise<never> {
     return Promise.reject(new Error('no debe convertir en vivo'));
   }
@@ -127,7 +127,7 @@ function makeUseCase() {
   const getPlanBalance = {
     execute: () =>
       Promise.resolve({
-        planCurrency: 'COP',
+        planCurrency: 'VES',
         billable: balance.billable,
         paid: balance.paid,
         balance: balance.billable - balance.paid,
@@ -149,7 +149,7 @@ function makeUseCase() {
   const recordPayment = new RecordPaymentUseCase(
     repo,
     getPlan as unknown as GetTreatmentPlanUseCase,
-    { has: (code: string) => Promise.resolve(['USD', 'COP'].includes(code)) },
+    { has: (code: string) => Promise.resolve(['USD', 'VES'].includes(code)) },
     {
       afterPayment: () => Promise.resolve(null),
     } as unknown as ReceiptPlanBalanceCalculator,
@@ -175,7 +175,7 @@ function makeUseCase() {
   };
 }
 
-/** 50 USD por transferencia + 100 000 COP en efectivo, el 30/10/2026. */
+/** 50 USD por transferencia + 100 000 VES en efectivo, el 30/10/2026. */
 function twoLines(
   overrides: Partial<RecordSplitPaymentInput> = {},
 ): RecordSplitPaymentInput {
@@ -188,7 +188,7 @@ function twoLines(
         paymentMethodId: 'm-transfer',
         reference: 'TR-001',
       },
-      { amount: 100_000, currency: 'COP', paymentMethodId: 'm-cash' },
+      { amount: 100_000, currency: 'VES', paymentMethodId: 'm-cash' },
     ],
     ...overrides,
   };
@@ -208,8 +208,8 @@ describe('RecordSplitPaymentUseCase (DX-390)', () => {
 
     const result = await uc.execute('plan-1', twoLines(), 'user-1', KEY);
 
-    expect(result.planCurrency).toBe('COP');
-    // 50 USD × 4000 + 100 000 COP.
+    expect(result.planCurrency).toBe('VES');
+    // 50 USD × 4000 + 100 000 VES.
     expect(result.total).toBe(300_000);
     expect(result.payments).toHaveLength(2);
     expect(result.id).toBe(result.payments[0].id);
@@ -224,21 +224,21 @@ describe('RecordSplitPaymentUseCase (DX-390)', () => {
       input?.lines.map((l) => [l.currency, l.method, l.reference]),
     ).toEqual([
       ['USD', 'TRANSFER', 'TR-001'],
-      ['COP', 'CASH', null],
+      ['VES', 'CASH', null],
     ]);
     expect(input?.lines[0].frozenRate).toMatchObject({
-      currency: 'COP',
+      currency: 'VES',
       fromPerBase: 1,
       toPerBase: 4000,
     });
     expect(input?.lines[0].planAmount).toEqual({
-      planCurrency: 'COP',
+      planCurrency: 'VES',
       amount: 200_000,
       rateDate: '2026-10-30',
     });
     // Saldo del recibo: 500 000 − (100 000 + 300 000).
     expect(input?.receiptPlanBalance).toEqual({
-      currency: 'COP',
+      currency: 'VES',
       billable: 500_000,
       paid: 400_000,
       balance: 100_000,
@@ -262,7 +262,7 @@ describe('RecordSplitPaymentUseCase (DX-390)', () => {
     ['seis líneas', 6],
   ])('%s → 400', async (_label, count) => {
     const { uc, repo } = makeUseCase();
-    const line = { amount: 1000, currency: 'COP', paymentMethodId: 'm-cash' };
+    const line = { amount: 1000, currency: 'VES', paymentMethodId: 'm-cash' };
     await expect(
       uc.execute('plan-1', {
         paidAt: '2026-10-30',
@@ -311,7 +311,7 @@ describe('RecordSplitPaymentUseCase (DX-390)', () => {
     const input = twoLines();
     input.lines[1] = {
       amount: 50_000,
-      currency: 'COP',
+      currency: 'VES',
       paymentMethodId: 'm-mobile',
       reference: 'PM-777',
     };
@@ -340,7 +340,7 @@ describe('RecordSplitPaymentUseCase (DX-390)', () => {
     const input = twoLines();
     input.lines[1] = {
       amount: 10_000,
-      currency: 'COP',
+      currency: 'VES',
       paymentMethodId: 'm-transfer',
       reference: 'tr 001',
     };
@@ -359,7 +359,7 @@ describe('RecordSplitPaymentUseCase (DX-390)', () => {
     expect(error).toBeInstanceOf(ConflictException);
     expect((error as ConflictException).getResponse()).toMatchObject({
       code: SPLIT_PAYMENT_EXCEEDS_BALANCE,
-      currency: 'COP',
+      currency: 'VES',
       total: 300_000,
       pending: 200_000,
       excess: 100_000,
@@ -499,7 +499,7 @@ describe('RecordSplitPaymentUseCase (DX-390)', () => {
       const singleKey = 'aa0a3f1e-9a51-4d1f-8f63-1c2d3e4f5a6b';
       await recordPayment.execute(
         'plan-1',
-        { amount: 1000, currency: 'COP', paidAt: '2026-10-30' },
+        { amount: 1000, currency: 'VES', paidAt: '2026-10-30' },
         'user-1',
         singleKey,
       );

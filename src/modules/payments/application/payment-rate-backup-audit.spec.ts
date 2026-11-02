@@ -29,7 +29,7 @@ describe('PaymentRateBackupAudit (DX-402)', () => {
       service.backupRateUsed(
         PAYMENT,
         {
-          currency: 'COP',
+          currency: 'VES',
           fromPerBase: 1,
           toPerBase: 4000,
           source: 'MANUAL',
@@ -57,7 +57,7 @@ describe('PaymentRateBackupAudit (DX-402)', () => {
           exchangeRateBackup: {
             rateDate: '2026-10-28',
             manualSince: '2026-10-30',
-            currencies: ['COP', 'USD'],
+            currencies: ['USD', 'VES'],
           },
         },
       },
@@ -67,7 +67,7 @@ describe('PaymentRateBackupAudit (DX-402)', () => {
   it('sin respaldo o sin clínica en el contexto no escribe nada', async () => {
     const { drafts, tenantContext, service } = setup();
     const rate = {
-      currency: 'COP',
+      currency: 'VES',
       fromPerBase: 1,
       toPerBase: 4000,
       source: 'MANUAL' as const,

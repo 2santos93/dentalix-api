@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { normalizeReference } from '../src/modules/payment-methods/domain/payment-method-rules';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   regionalLocationInsert,
 } from './support/location-fixtures';
 
@@ -47,7 +47,7 @@ async function seedClinic(
       db,
       tenant.id,
       'Sede',
-      REGIONAL_BOGOTA_FIXTURE,
+      REGIONAL_CARACAS_FIXTURE,
     ),
   };
   // Solo el id: el cliente leería columnas de paciente posteriores (DX-330).
@@ -59,7 +59,7 @@ async function seedClinic(
     data: {
       tenantId: tenant.id,
       patientId: patient.id,
-      currency: 'COP',
+      currency: 'USD',
       status: 'ACCEPTED',
     },
   });
@@ -102,7 +102,7 @@ async function insertPayment(
        "patientId", "amount", "currency", "paidAt", "method", "updatedAt",
        "paymentMethodId", "reference", "referenceNormalized")
      VALUES (gen_random_uuid(), $1::uuid, $2::uuid, $3::uuid, $4::uuid, 1000,
-       'COP', now(), $5::"PaymentMethod", now(), $6::uuid, $7, $8)
+       'USD', now(), $5::"PaymentMethod", now(), $6::uuid, $7, $8)
      RETURNING "id"`,
     c.tenantId,
     c.locationId,

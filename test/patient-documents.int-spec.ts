@@ -3,7 +3,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -38,7 +38,7 @@ async function seedClinic(subdomain: string): Promise<Seeded> {
     data: { name: subdomain, subdomain },
   });
   const location = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId: tenant.id,
       name: 'Sede',
     }),
@@ -535,10 +535,10 @@ describe('patient_documents: RLS, FK, CHECKs, hash único, inalterabilidad y hor
   });
 
   describe('hora del servidor', () => {
-    it('uploadedAt y createdAt los pone el servidor en UTC aunque la API mande otra y la sesión esté en Bogotá', async () => {
+    it('uploadedAt y createdAt los pone el servidor en UTC aunque la API mande otra y la sesión esté en Caracas', async () => {
       const row = await appRole.$transaction(async (tx) => {
         await tx.$executeRaw`SELECT set_config('app.current_tenant', ${a.tenantId}, true)`;
-        await tx.$executeRawUnsafe(`SET LOCAL TIME ZONE 'America/Bogota'`);
+        await tx.$executeRawUnsafe(`SET LOCAL TIME ZONE 'America/Caracas'`);
         const d = docData(a);
         const [inserted] = await tx.$queryRawUnsafe<
           { upload_drift: number; created_drift: number; same: boolean }[]

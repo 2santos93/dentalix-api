@@ -155,7 +155,7 @@ describe('País de la sede: cualquier código de la lista (DX-312, e2e)', () => 
   });
 
   it('PATCH /locations/:id with country null is 400; with a listed code is 200; with an unknown code is 400', async () => {
-    const { id } = (await create('CO', 'Sede editable').expect(201))
+    const { id } = (await create('VE', 'Sede editable').expect(201))
       .body as LocationBody;
     const nulled = await admin()
       .patch(`/locations/${id}`)
@@ -176,7 +176,7 @@ describe('País de la sede: cualquier código de la lista (DX-312, e2e)', () => 
       .patch(`/locations/${id}`)
       .send({ name: 'Renombrada' })
       .expect(200);
-    expect((await rawCountries(id)).countryCode).toBe('CO');
+    expect((await rawCountries(id)).countryCode).toBe('VE');
     const ok = await admin()
       .patch(`/locations/${id}`)
       .send({ country: 've' })
@@ -189,7 +189,7 @@ describe('País de la sede: cualquier código de la lista (DX-312, e2e)', () => 
   });
 
   it('changing the country is audited as a changed field without values', async () => {
-    const { id } = (await create('CO', 'Sede auditada').expect(201))
+    const { id } = (await create('VE', 'Sede auditada').expect(201))
       .body as LocationBody;
     await admin().patch(`/locations/${id}`).send({ country: 'JP' }).expect(200);
     const events = await raw.auditEvent.findMany({
