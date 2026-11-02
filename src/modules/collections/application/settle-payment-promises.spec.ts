@@ -85,7 +85,7 @@ describe('SettlePaymentPromises (DX-150)', () => {
   beforeEach(() => {
     repo = new FakeRepo();
     events = [];
-    now = new Date('2026-11-16T05:30:00.000Z'); // 00:30 del 16 en Bogotá
+    now = new Date('2026-11-16T05:30:00.000Z'); // 00:30 del 16 en la zona de la sede
     const audit = {
       record: (draft: AuditEventDraft) => {
         events.push(draft);
@@ -137,7 +137,7 @@ describe('SettlePaymentPromises (DX-150)', () => {
   });
 
   it('antes del día siguiente en la sede, lo no cubierto sigue abierto', async () => {
-    now = new Date('2026-11-16T04:59:00.000Z'); // 23:59 del 15 en Bogotá
+    now = new Date('2026-11-16T04:59:00.000Z'); // 23:59 del 15 en la zona de la sede
     await expect(settle.run()).resolves.toEqual({ kept: 1, broken: 0 });
   });
 

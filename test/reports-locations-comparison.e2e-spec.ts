@@ -22,14 +22,14 @@ import {
 
 /**
  * DX-014 · «Comparar sedes» por HTTP real, con actividad fija sembrada por
- * `raw` en tres sedes de la clínica A (Bogotá, UTC−5):
+ * `raw` en tres sedes de la clínica A (UTC−5):
  *
  *  - principal (con el horario por defecto del registro):
  *      octubre 2026 → producción 120.000 COP (100.000 + 30.000 − 10.000 de
  *      descuento), cobrado 90.000 COP y 50 USD, 9 atendidas + 1 no-show (10 %)
  *      de 3 pacientes, uno nuevo;
  *      31/08–30/09 → producción 100.000 COP, cobrado 75.000 COP (5.000 a las
- *      22:00 del 30/09 en Bogotá, que en UTC ya es 1/10), 23 atendidas + 2
+ *      22:00 del 30/09 en la zona de la sede, que en UTC ya es 1/10), 23 atendidas + 2
  *      no-show (8 %), dos pacientes nuevos;
  *  - Norte (sin horario): 200 USD de producción, 100 USD cobrados y 2
  *    atendidas en octubre;
@@ -167,12 +167,12 @@ describe('GET /reports/locations-comparison (DX-014)', () => {
         voided,
       });
     await pay(principal, copPlan, p1, 'COP', 60_000, '2026-10-03T16:00:00Z');
-    // 18:00 del 31/10 en Bogotá (23:00 UTC): aún es octubre.
+    // 18:00 del 31/10 en la zona de la sede (23:00 UTC): aún es octubre.
     await pay(principal, copPlan, p1, 'COP', 30_000, '2026-10-31T23:00:00Z');
     await pay(principal, copPlan, p1, 'COP', 999, '2026-10-04T16:00:00Z', true);
     await pay(principal, copPlan, p1, 'USD', 50, '2026-10-10T16:00:00Z');
     await pay(principal, copPlan, p1, 'COP', 70_000, '2026-09-15T16:00:00Z');
-    // 22:00 del 30/09 en Bogotá: del período anterior aunque en UTC sea 1/10.
+    // 22:00 del 30/09 en la zona de la sede: del período anterior aunque en UTC sea 1/10.
     await pay(principal, copPlan, p1, 'COP', 5_000, '2026-10-01T03:00:00Z');
     await pay(norte, usdPlan, p5, 'USD', 100, '2026-10-12T16:00:00Z');
     await pay(sur, copPlan, p1, 'COP', 1_000_000, '2026-10-15T16:00:00Z');

@@ -2,7 +2,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 
-// DX-038, capa DB de la historia clínica inalterable (Res. 1995/1999 art. 18).
+// DX-038, capa DB de la historia clínica inalterable.
 // Cada caso escribe POR LA MISMA RUTA que la app (runWithTenant, rol
 // dentalix_app, sujeto a RLS) o con una conexión directa como dentalix_app;
 // `raw` (DIRECT_URL, superusuario) solo siembra y limpia.

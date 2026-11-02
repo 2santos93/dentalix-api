@@ -33,7 +33,7 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 /**
  * Día de los abonos y de la caja: uno FIJO en el pasado reciente (el anterior
  * al real), no el de la carga del módulo frente a la hora del abono: una
- * corrida que cruce la medianoche de Bogotá ya no deja el abono fuera del
+ * corrida que cruce la medianoche de la sede ya no deja el abono fuera del
  * rango de la caja (DX-209, TST-049).
  */
 const TODAY = fixedSedeDay().day;

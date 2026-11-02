@@ -261,7 +261,7 @@ export class ReportSeeder {
   }
 
   /**
-   * Una cita de 30 min desde las 10:00 de Bogotá (15:00 UTC) del día civil
+   * Una cita de 30 min desde las 10:00 de la sede (15:00 UTC) del día civil
    * `day`: cada cita del día en la siguiente media hora libre, para no chocar
    * con los EXCLUDE de profesional y paciente.
    */

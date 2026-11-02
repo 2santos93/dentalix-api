@@ -14,15 +14,15 @@ describe('void window', () => {
   });
 
   it('compara días de la sede, no días UTC', () => {
-    const a = new Date('2026-10-16T04:59:00.000Z'); // 23:59 del 15 en Bogotá
-    const b = new Date('2026-10-16T05:00:00.000Z'); // 00:00 del 16 en Bogotá
+    const a = new Date('2026-10-16T04:59:00.000Z'); // 23:59 del 15 en la zona de la sede
+    const b = new Date('2026-10-16T05:00:00.000Z'); // 00:00 del 16 en la zona de la sede
     expect(isSameCivilDay(a, b, 'UTC')).toBe(true);
     expect(isSameCivilDay(a, b, 'America/Bogota')).toBe(false);
   });
 });
 
 describe('voidDenial / canVoidPayment (regla de anulación, DX-057)', () => {
-  // 2026-10-16 10:00 en Bogotá (UTC-5).
+  // 2026-10-16 10:00 en la zona de la sede (UTC-5).
   const NOW = new Date('2026-10-16T15:00:00.000Z');
   const RECEPTION = { userId: 'u-recep', role: ClinicRole.RECEPTION };
   const ADMIN = { userId: 'u-admin', role: ClinicRole.ADMIN };
@@ -46,7 +46,7 @@ describe('voidDenial / canVoidPayment (regla de anulación, DX-057)', () => {
   });
 
   it('recepción no puede anular un abono suyo de otro día de la sede', () => {
-    // 23:30 del 15 en Bogotá: ya es 16 en UTC, pero no "hoy" en la sede.
+    // 23:30 del 15 en la zona de la sede: ya es 16 en UTC, pero no "hoy" en la sede.
     const yesterday = {
       ...ownToday,
       createdAt: new Date('2026-10-16T04:30:00.000Z'),

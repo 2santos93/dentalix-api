@@ -352,7 +352,7 @@ describe('GetLocationsComparisonUseCase (DX-014)', () => {
   });
 
   describe('producción sin atribuir en el período comparado (BE-045)', () => {
-    // El 31/08 a medianoche de Bogotá es 05:00 UTC: DX-050 llegó después.
+    // El 31/08 a medianoche de la sede es 05:00 UTC: DX-050 llegó después.
     const beforePrevious = {
       attributedSince: new Date('2026-09-15T12:00:00Z'),
       hasUnattributed: true,

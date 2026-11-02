@@ -26,14 +26,14 @@ export class ConsentDecisionDto {
 }
 
 /**
- * Decisiones EXPLÍCITAS del titular sobre la versión vigente de la política.
+ * Decisiones EXPLÍCITAS del paciente sobre la versión vigente de la política.
  * Lo que no viene aquí no se registra: el silencio no es autorización.
  */
 export class RecordDataConsentsDto {
   @ApiProperty({
     format: 'uuid',
     description:
-      'Versión de la política que se le mostró al titular. Debe ser la vigente (409 si cambió).',
+      'Versión de la política que se le mostró al paciente. Debe ser la vigente (409 si cambió).',
   })
   @IsUUID()
   policyVersionId!: string;
@@ -117,7 +117,7 @@ export class ScopeConsentStatusDto {
   @ApiProperty({
     type: Boolean,
     nullable: true,
-    description: '`null` = el titular aún no ha decidido sobre este scope.',
+    description: '`null` = el paciente aún no ha decidido sobre este scope.',
   })
   granted!: boolean | null;
 

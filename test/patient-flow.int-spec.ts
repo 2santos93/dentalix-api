@@ -216,7 +216,7 @@ describe('DX-200 · panel «En clínica» y «Deshacer llegada» con RLS (int)',
     tenantContext,
   );
   const SUBDOMAINS = ['dx200-int-a', 'dx200-int-b'];
-  // Mediodía de Bogotá de un día fijo: las horas no dependen de la corrida.
+  // Mediodía de la sede de un día fijo: las horas no dependen de la corrida.
   const DAY = '2026-11-03';
   const NOON = new Date(`${DAY}T17:00:00.000Z`);
   const DOCTOR = randomUUID();

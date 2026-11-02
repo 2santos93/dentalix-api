@@ -11,7 +11,7 @@ import { TenantContextService } from '../../../../shared/tenancy/tenant-context.
 import { inMemoryAvailability } from '../../../provider-schedule/application/__fixtures__/availability';
 import { InMemoryProviderScheduleRepository } from '../../../provider-schedule/application/__fixtures__/in-memory-provider-schedule.repository';
 
-// Un martes futuro (para que "ahora" no recorte nada), en Bogotá (UTC−5).
+// Un martes futuro (para que "ahora" no recorte nada), en la zona de la sede (UTC−5).
 function nextTuesday(): string {
   const d = new Date(Date.now() + 7 * 86_400_000);
   while (d.getUTCDay() !== 2) d.setUTCDate(d.getUTCDate() + 1);

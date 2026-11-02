@@ -127,7 +127,7 @@ describe('reglas de bloqueos (DX-122)', () => {
 
   it('un bloqueo de días completos se dice con el último día elegido (no «al 23 00:00»)', () => {
     const wholeDays = block({
-      start: z('2026-10-21T05:00:00.000Z'), // 21/10 00:00 en Bogotá
+      start: z('2026-10-21T05:00:00.000Z'), // 21/10 00:00 en la zona de la sede
       end: z('2026-10-23T05:00:00.000Z'), // 23/10 00:00 = fin del 22
     });
     expect(blockConflictMessage(wholeDays, 'America/Bogota', H23)).toBe(

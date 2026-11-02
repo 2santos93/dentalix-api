@@ -3,7 +3,7 @@ import type { UserRef } from './privacy-policy.entity';
 
 export { DataConsentChannel, DataConsentScope };
 
-/** Una decisión explícita del titular sobre un scope. */
+/** Una decisión explícita del paciente sobre un scope. */
 export interface ConsentDecision {
   scope: DataConsentScope;
   granted: boolean;
@@ -37,7 +37,7 @@ export interface DataConsentRecord {
 /** Estado vigente de un scope: su última fila, o ninguna decisión aún. */
 export interface ScopeConsentStatus {
   scope: DataConsentScope;
-  /** `null` = el titular aún no ha decidido sobre este scope. */
+  /** `null` = el paciente aún no ha decidido sobre este scope. */
   granted: boolean | null;
   latest: DataConsentRecord | null;
 }

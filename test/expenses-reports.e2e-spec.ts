@@ -164,17 +164,17 @@ describe('Resumen mensual y CSV de gastos (e2e, DX-274)', () => {
           deletedAt,
         },
       });
-    // Octubre en la sede principal (mediodía de Bogotá = 17:00 UTC).
+    // Octubre en la sede principal (mediodía de la sede = 17:00 UTC).
     await income(loc1, 1000000, 'COP', '2026-10-05T17:00:00Z');
     await income(loc1, 500000.5, 'COP', '2026-10-20T17:00:00Z');
     // Anulado: no cuenta.
     await income(loc1, 999999, 'COP', '2026-10-06T17:00:00Z', new Date());
-    // 2026-10-01 03:00Z = 30 sep 22:00 en Bogotá: es septiembre.
+    // 2026-10-01 03:00Z = 30 sep 22:00 en la zona de la sede: es septiembre.
     await income(loc1, 200000, 'COP', '2026-10-01T03:00:00Z');
     // Otra sede y otra moneda.
     await income(loc2, 50.25, 'USD', '2026-10-10T17:00:00Z');
     // Sede Norte en Madrid: 23:30Z del 31 oct ya es 1 nov allí (UTC+1) y aún
-    // 31 oct en Bogotá, donde está la sede principal: dos zonas en una petición.
+    // 31 oct en la zona de la sede, donde está la sede principal: dos zonas en una petición.
     // G1: la zona es un campo real del alta: la propia sede queda en Madrid
     // (y su horario legado igual, R20), sin tocar el horario a mano.
     expect(

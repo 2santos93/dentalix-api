@@ -31,12 +31,12 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 const MIN = 60_000;
 const TZ = 'America/Bogota';
 
-/** Hoy en Bogotá (YYYY-MM-DD). */
+/** Hoy en la zona de la sede (YYYY-MM-DD). */
 function bogotaToday(): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(new Date());
 }
 
-/** Instante de una hora de pared de hoy en Bogotá (UTC−5 fijo). */
+/** Instante de una hora de pared de hoy en la zona de la sede (UTC−5 fijo). */
 function bogotaAt(hhmm: string): Date {
   return new Date(`${bogotaToday()}T${hhmm}:00-05:00`);
 }

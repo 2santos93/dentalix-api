@@ -29,7 +29,7 @@ import {
 } from '../src/modules/closing-queue/application/closing-queue.use-cases';
 
 /**
- * DX-439 · «Pendiente de cerrar» por HTTP real. Clínica A (Bogotá, UTC−5, o la zona de `safeTodayZone` cerca de su medianoche)
+ * DX-439 · «Pendiente de cerrar» por HTTP real. Clínica A (UTC−5, o la zona de `safeTodayZone` cerca de su medianoche)
  * con la sede principal y la Norte; la Dra. «DENTIST» (sembrada) y el Dr. Dos.
  * Las citas son de AYER en esa zona (sembradas por `raw`: la API no agenda en
  * el pasado) y una de HOY, que no sale nunca:
@@ -46,7 +46,7 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
-// DX-449: la zona de las dos sedes es Bogotá salvo cerca de su medianoche,
+// DX-449: la zona de las dos sedes es la fija (UTC−5) salvo cerca de su medianoche,
 // cuando pasa a la candidata más cerca del mediodía (el «hoy» y el «ayer» de
 // los fixtures no dependen de la hora de la CI).
 const ZONE = safeTodayZone();

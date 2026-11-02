@@ -15,7 +15,7 @@ import {
   SavePerioMeasuresUseCase,
 } from './perio-exams.use-cases';
 
-// 03:00 UTC del 16 de octubre = 22:00 del 15 en Bogotá: la fecha por defecto
+// 03:00 UTC del 16 de octubre = 22:00 del 15 en la zona de la sede: la fecha por defecto
 // del examen es la del calendario de la clínica, no la UTC.
 const NOW = new Date('2026-10-16T03:00:00.000Z');
 

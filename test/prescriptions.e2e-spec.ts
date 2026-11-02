@@ -360,7 +360,7 @@ describe('Recetas — /patients/:id/prescriptions, /prescriptions, /prescription
   describe('emitir', () => {
     it('issuer carries the deprecated legacy country of its location (phase 1, old web)', async () => {
       // DX-312 (R6): la sede principal es de Nueva York, fuera de los dos
-      // valores legados, y el emisor da NULL; una sede de Bogotá da el suyo.
+      // valores legados, y el emisor da NULL; una sede con zona da el suyo.
       const main = await as(clinicA, dentistA.token)
         .get('/prescriptions/issuer')
         .expect(200);

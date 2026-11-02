@@ -183,7 +183,7 @@ describe('CreateClinicalEntryUseCase ligada a la cita (DX-170)', () => {
   const start = new Date('2026-10-17T14:00:00.000Z');
   const timeZone = 'America/Bogota';
 
-  // «Hoy» en Bogotá: 17/10/2026 a las 15:00 (20:00 UTC).
+  // «Hoy» en la zona de la sede: 17/10/2026 a las 15:00 (20:00 UTC).
   beforeEach(() => {
     jest.useFakeTimers({ now: new Date('2026-10-17T20:00:00.000Z') });
   });
@@ -193,7 +193,7 @@ describe('CreateClinicalEntryUseCase ligada a la cita (DX-170)', () => {
 
   it('admite una cita del día aunque empiece más tarde (hora de la sede)', async () => {
     const { uc, entries } = setup();
-    // 23:30 del 17/10 en Bogotá = 04:30 UTC del 18/10.
+    // 23:30 del 17/10 en la zona de la sede = 04:30 UTC del 18/10.
     const tonight = new Date('2026-10-18T04:30:00.000Z');
     entries.appointments.push({
       id: 'a-hoy',
@@ -213,7 +213,7 @@ describe('CreateClinicalEntryUseCase ligada a la cita (DX-170)', () => {
 
   it('400 en español si la cita es de un día futuro (no crea nada)', async () => {
     const { uc, entries } = setup();
-    // 00:30 del 18/10 en Bogotá.
+    // 00:30 del 18/10 en la zona de la sede.
     entries.appointments.push({
       id: 'a-manana',
       patientId: 'p1',
@@ -258,7 +258,7 @@ describe('CreateClinicalEntryUseCase ligada a la cita (DX-170)', () => {
 
   it('el día de la cita es el de la zona de su sede, no el de UTC', async () => {
     const { uc, entries } = setup();
-    // 21:30 del 16/10 en Bogotá = 02:30 UTC del 17/10.
+    // 21:30 del 16/10 en la zona de la sede = 02:30 UTC del 17/10.
     entries.appointments.push({
       id: 'a-noche',
       patientId: 'p1',

@@ -250,7 +250,7 @@ describe('CreateAppointmentUseCase', () => {
 
   describe('registerHistorical (carga histórica: seed demo, importaciones)', () => {
     const DAY = 24 * 60 * 60 * 1000;
-    // Hace 3 días a las 15:00 UTC (10:00 en Bogotá).
+    // Hace 3 días a las 15:00 UTC (10:00 en la zona de la sede).
     const pastStart = new Date(
       Math.floor((Date.now() - 3 * DAY) / DAY) * DAY + 15 * 60 * 60 * 1000,
     );
@@ -361,7 +361,7 @@ describe('CreateAppointmentUseCase', () => {
     });
 
     it('sigue validando el horario de atención de la sede', async () => {
-      // Abre solo un día DISTINTO al de la cita (10:00 Bogotá), así que ese día
+      // Abre solo un día DISTINTO al de la cita (10:00 de la zona de la sede), así que ese día
       // está cerrado.
       const otherWeekday = (pastStart.getUTCDay() + 1) % 7;
       const closedThatDay: BusinessHours = {
@@ -395,7 +395,7 @@ describe('CreateAppointmentUseCase', () => {
   });
 
   describe('horario de atención de la sede', () => {
-    // Sede en Bogotá (UTC-5 fijo) que abre lunes 9-13. `at()` construye horas en
+    // Sede en la zona de la sede (UTC-5 fijo) que abre lunes 9-13. `at()` construye horas en
     // Z sobre un día futuro, así que se calcula el lunes explícitamente.
     function mondayHours(): BusinessHours {
       return {
@@ -403,7 +403,7 @@ describe('CreateAppointmentUseCase', () => {
         ranges: [{ weekday: 1, startMinute: 9 * 60, endMinute: 13 * 60 }],
       };
     }
-    /** Próximo lunes a la hora local indicada, como instante UTC (Bogotá = +5). */
+    /** Próximo lunes a la hora local indicada, como instante UTC (la zona del fake es UTC−5). */
     function nextMondayLocal(hour: number): Date {
       const d = new Date();
       d.setUTCDate(d.getUTCDate() + ((8 - d.getUTCDay()) % 7 || 7)); // próximo lunes
@@ -1379,7 +1379,7 @@ describe('CreateAppointmentUseCase', () => {
   });
 });
 
-/** «20/10 08:00 al 20/10 20:00» en la zona del fake de bloqueos (Bogotá). */
+/** «20/10 08:00 al 20/10 20:00» en la zona del fake de bloqueos. */
 function blockRangeLabel(from: Date, to: Date): string {
   const f = new Intl.DateTimeFormat('es-CO', {
     timeZone: 'America/Bogota',

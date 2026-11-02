@@ -52,7 +52,7 @@ async function cleanup(): Promise<void> {
   await raw.user.deleteMany({ where: { email: EMAIL } });
 }
 
-/** Como la API, pero con la sesión en Bogotá. */
+/** Como la API, pero con la sesión en la zona de la sede. */
 function inBogota<T>(fn: (tx: Prisma.TransactionClient) => Promise<T>) {
   return prisma.runWithTenant(tenantId, async (tx) => {
     await tx.$executeRawUnsafe(`SET LOCAL TIME ZONE '${ZONE}'`);

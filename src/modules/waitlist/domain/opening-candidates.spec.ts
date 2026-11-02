@@ -6,7 +6,7 @@ import {
   type EntryCandidateSource,
 } from './opening-candidates';
 
-// Bogotá (UTC−5 fijo): el hueco es el martes 20/10/2026 de 10:00 a 10:30.
+// En la zona de la sede (UTC−5 fijo): el hueco es el martes 20/10/2026 de 10:00 a 10:30.
 const TZ = 'America/Bogota';
 const local = (day: string, hhmm: string) =>
   new Date(`${day}T${hhmm}:00-05:00`);
@@ -118,7 +118,7 @@ describe('candidatos para un hueco libre (DX-210)', () => {
           start: local('2026-10-20', '17:00'),
           end: local('2026-10-20', '17:30'),
         }),
-        // Medianoche de Bogotá: ya es el día siguiente en la zona de la sede
+        // Medianoche de la sede: ya es el día siguiente en la zona de la sede
         // aunque en UTC siga siendo el 21 a las 05:00.
         appointment('manana', {
           start: local('2026-10-21', '00:00'),

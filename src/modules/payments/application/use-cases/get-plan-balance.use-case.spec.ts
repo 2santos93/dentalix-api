@@ -277,7 +277,7 @@ describe('GetPlanBalanceUseCase', () => {
     fakeGetPlan.plan = makePlan({
       items: [makeItem({ price: 1000, status: TreatmentPlanItemStatus.DONE })],
     });
-    // 05/03 a las 20:00 en Bogotá = 06/03 01:00 UTC.
+    // 05/03 a las 20:00 en la zona de la sede = 06/03 01:00 UTC.
     repo.seedPayment({
       treatmentPlanId: 'plan-1',
       amount: 400000,

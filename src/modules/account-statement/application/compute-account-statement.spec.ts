@@ -466,19 +466,19 @@ describe('computeAccountStatement', () => {
       snapshot({
         plans: [plan('tp-1', { billable: 1000 })],
         payments: [
-          // 31/01 23:00 en Bogotá (01/02 04:00 UTC): fuera.
+          // 31/01 23:00 en la zona de la sede (01/02 04:00 UTC): fuera.
           payment('tp-1', 100, {
             paidAt: new Date('2026-02-01T04:00:00.000Z'),
           }),
-          // 01/02 00:30 en Bogotá: dentro.
+          // 01/02 00:30 en la zona de la sede: dentro.
           payment('tp-1', 200, {
             paidAt: new Date('2026-02-01T05:30:00.000Z'),
           }),
-          // 28/02 22:00 en Bogotá (01/03 03:00 UTC): dentro.
+          // 28/02 22:00 en la zona de la sede (01/03 03:00 UTC): dentro.
           payment('tp-1', 300, {
             paidAt: new Date('2026-03-01T03:00:00.000Z'),
           }),
-          // 01/03 00:30 en Bogotá: fuera.
+          // 01/03 00:30 en la zona de la sede: fuera.
           payment('tp-1', 400, {
             paidAt: new Date('2026-03-01T05:30:00.000Z'),
           }),

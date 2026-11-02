@@ -26,7 +26,7 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
  * «Hoy» FIJO de las dos clínicas: el día anterior al real, a mediodía de la
  * sede, que la API ve por su EXCHANGE_RATE_CLOCK. Los abonos «de hace un
  * momento» son de ese mediodía: ninguno cae en «ayer» aunque la suite cruce
- * la medianoche de Bogotá (DX-209, TST-049).
+ * la medianoche de la sede (DX-209, TST-049).
  */
 const SEDE_DAY = fixedSedeDay();
 const TODAY = SEDE_DAY.day;

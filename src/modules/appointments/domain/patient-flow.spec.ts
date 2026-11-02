@@ -225,7 +225,7 @@ describe('patient-flow · máquina de transiciones (DX-200)', () => {
 });
 
 describe('patient-flow · espera y puntualidad (DX-200)', () => {
-  const start = new Date('2026-10-19T14:00:00.000Z'); // 09:00 en Bogotá
+  const start = new Date('2026-10-19T14:00:00.000Z'); // 09:00 en la zona de la sede
 
   it('verde si llegó antes (o justo a) la hora', () => {
     expect(

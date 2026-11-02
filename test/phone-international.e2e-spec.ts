@@ -59,7 +59,7 @@ describe('Teléfono con formato internacional (e2e, DX-387)', () => {
   beforeAll(async () => {
     app = await createE2eApp();
     await resetDatabase(raw);
-    // Bogotá: la sede principal nace con la región CO (DX-329).
+    // La sede principal nace con la región CO (DX-329).
     clinic = await registerClinic(app, 'dx387-telefonos');
     const main = await raw.location.findFirstOrThrow({
       where: { tenantId: clinic.tenantId },

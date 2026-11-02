@@ -1679,7 +1679,7 @@ model PrivacyPolicyVersion {
   version             Int
   // Texto completo de la política (aviso de privacidad).
   policyText          String
-  // Texto de cada casilla: lo que el titular autoriza, scope a scope.
+  // Texto de cada casilla: lo que el paciente autoriza, scope a scope.
   generalText         String
   sensitiveHealthText String
   marketingText       String

@@ -261,7 +261,7 @@ describe('Cobranza — un compromiso cumplido se reabre al anular su abono (e2e,
     const paymentId = await pay(d.planId);
     expect((await promiseOf(d.patientId)).status).toBe('KEPT');
 
-    // 00:30 del día siguiente a la fecha en Bogotá; solo ADMIN anula abonos
+    // 00:30 del día siguiente a la fecha en la zona de la sede; solo ADMIN anula abonos
     // de otro día.
     voidClock = new Date(`${addCivilDays(dueDate, 1)}T05:30:00.000Z`);
     await voidPayment(paymentId).expect(403);

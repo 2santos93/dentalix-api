@@ -479,7 +479,7 @@ describe('Dashboard (e2e)', () => {
     );
   });
 
-  // DX-097: el mes se corta a medianoche de la zona de la sede (Bogotá, la
+  // DX-097: el mes se corta a medianoche de la zona de la sede (la
   // del horario con que nace la sede principal), no a medianoche UTC.
   it('el resumen mensual incluye el último día a las 22:00 de la sede y excluye el primero del mes siguiente a las 00:30', async () => {
     const subdomain = 'clinica-dash-tz';
@@ -517,13 +517,13 @@ describe('Dashboard (e2e)', () => {
           method: 'CASH',
         },
       });
-    // 31/10 22:00 en Bogotá = 01/11 03:00 UTC -> octubre.
+    // 31/10 22:00 en la zona de la sede = 01/11 03:00 UTC -> octubre.
     await pay(1000, '2026-11-01T03:00:00.000Z');
-    // 01/11 00:30 en Bogotá = 01/11 05:30 UTC -> noviembre.
+    // 01/11 00:30 en la zona de la sede = 01/11 05:30 UTC -> noviembre.
     await pay(7, '2026-11-01T05:30:00.000Z');
-    // 01/10 00:30 en Bogotá = 01/10 05:30 UTC -> octubre.
+    // 01/10 00:30 en la zona de la sede = 01/10 05:30 UTC -> octubre.
     await pay(20, '2026-10-01T05:30:00.000Z');
-    // 30/09 23:00 en Bogotá = 01/10 04:00 UTC -> septiembre.
+    // 30/09 23:00 en la zona de la sede = 01/10 04:00 UTC -> septiembre.
     await pay(300, '2026-10-01T04:00:00.000Z');
 
     const dashboard = async (from: string, to: string) =>
