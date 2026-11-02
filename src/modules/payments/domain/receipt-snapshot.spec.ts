@@ -103,6 +103,43 @@ describe('buildReceiptSnapshot (DX-136)', () => {
     });
   });
 
+  describe('región de la sede (DX-521, R1)', () => {
+    const REGIONAL = {
+      timeZone: 'Europe/London',
+      locale: 'en-GB',
+      hourCycle: 'h23',
+    } as const;
+
+    it('congela zona, locale y reloj de la sede si vienen', () => {
+      const snapshot = buildReceiptSnapshot(
+        input({ regional: REGIONAL }),
+        NO_LOCAL_NAMES,
+      );
+      expect(snapshot.regional).toEqual(REGIONAL);
+      expect(snapshot.version).toBe(1);
+    });
+
+    it.each([
+      ['ausente', undefined],
+      ['null (sede sin ajustes válidos)', null],
+    ])('%s: la foto es la de antes, sin la clave', (_label, regional) => {
+      const snapshot = buildReceiptSnapshot(
+        input({ regional }),
+        NO_LOCAL_NAMES,
+      );
+      expect('regional' in snapshot).toBe(false);
+      expect(snapshot).toEqual(buildReceiptSnapshot(input(), NO_LOCAL_NAMES));
+    });
+
+    it('la foto no comparte el objeto de la entrada', () => {
+      const snapshot = buildReceiptSnapshot(
+        input({ regional: { ...REGIONAL } }),
+        NO_LOCAL_NAMES,
+      );
+      expect(snapshot.regional).not.toBe(REGIONAL);
+    });
+  });
+
   it('nunca guarda el documento del paciente en claro', () => {
     const json = JSON.stringify(buildReceiptSnapshot(input(), NO_LOCAL_NAMES));
     expect(json).not.toContain('1012345678');
