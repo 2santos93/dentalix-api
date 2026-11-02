@@ -17,6 +17,8 @@ import {
   locationBody,
   registerBody,
 } from './support/location-fixtures';
+import { DocumentTypeNamesReader } from '../src/modules/patients/domain/ports/document-type-names-repository.port';
+import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { registerVerified } from './support/register-verified';
 import { hostFor } from './support/tenant-host';
 
@@ -243,6 +245,38 @@ describe('Nombre del documento por sede (e2e, DX-524)', () => {
         after: { docTypeNameNationalId: 'Documento C' },
       },
     ]);
+  });
+
+  it('docTypeNames null or not an object is 400 in Spanish, not 500', async () => {
+    for (const bad of [null, 'x', ['a'], 3]) {
+      const res = await patchLocation(locC, { docTypeNames: bad }).expect(400);
+      expect(JSON.stringify(res.body)).toContain(
+        'Los nombres de los documentos',
+      );
+    }
+  });
+
+  it('a retired location keeps its own names for its old documents', async () => {
+    const reader = app.get(DocumentTypeNamesReader, { strict: false });
+    const ctx = app.get(TenantContextService, { strict: false });
+    await patchLocation(locC, {
+      docTypeNames: { NATIONAL_ID: 'Documento C' },
+    }).expect(200);
+    await raw.location.update({
+      where: { id: locC },
+      data: { deletedAt: new Date() },
+    });
+    try {
+      const one = await ctx.run(clinic.tenantId, () => reader.get(locC));
+      expect(one.NATIONAL_ID).toBe('Documento C');
+      const book = await ctx.run(clinic.tenantId, () => reader.book());
+      expect(book.forLocation(locC).NATIONAL_ID).toBe('Documento C');
+    } finally {
+      await raw.location.update({
+        where: { id: locC },
+        data: { deletedAt: null },
+      });
+    }
   });
 
   it('does not touch another clinic', async () => {

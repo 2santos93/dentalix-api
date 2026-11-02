@@ -7,6 +7,7 @@ import { Transform, Type } from 'class-transformer';
 import {
   Equals,
   IsBoolean,
+  IsObject,
   IsOptional,
   IsString,
   Matches,
@@ -282,8 +283,12 @@ export class UpdateLocationDto {
     type: DocumentTypeNamesValuesDto,
     description: DOC_TYPE_NAMES_DOC,
   })
-  @IsOptional()
-  @ValidateNested()
+  // Ausente no cambia; `null` o un valor que no es un objeto es 400.
+  @ValidateIf((_, value) => value !== undefined)
+  @IsObject({ message: 'Los nombres de los documentos deben ser un objeto.' })
+  @ValidateNested({
+    message: 'Los nombres de los documentos deben ser un objeto.',
+  })
   @Type(() => DocumentTypeNamesValuesDto)
   docTypeNames?: DocumentTypeNamesValuesDto;
 

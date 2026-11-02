@@ -56,7 +56,8 @@ export async function readDocumentTypeNames(
   );
   if (!locationId) return clinic;
   const location = await db.location.findFirst({
-    where: { id: locationId, tenantId, deletedAt: null },
+    // Sin `deletedAt`: un documento de una sede retirada conserva SU nombre.
+    where: { id: locationId, tenantId },
     select: SELECT,
   });
   return mergeDocumentTypeNames(clinic, location && fromColumns(location));
@@ -70,7 +71,8 @@ export async function readDocumentTypeNamesBook(
   const [tenant, locations] = await Promise.all([
     db.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: SELECT }),
     db.location.findMany({
-      where: { tenantId, deletedAt: null },
+      // Con las retiradas: sus documentos antiguos siguen con su nombre.
+      where: { tenantId },
       select: { id: true, ...SELECT },
     }),
   ]);
