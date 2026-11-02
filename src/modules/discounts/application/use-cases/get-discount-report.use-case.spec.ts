@@ -24,7 +24,7 @@ const row = (over: Partial<DiscountReportRow> = {}): DiscountReportRow => ({
   patientName: 'Ana Pérez',
   toothNumber: '11',
   procedure: 'Resina',
-  currency: 'COP',
+  currency: 'USD',
   catalogPrice: null,
   price: 300000,
   priceReduction: 0,
@@ -55,7 +55,7 @@ class FakeRepo implements DiscountReportRepository {
   locations = new Set(['l1']);
   summaryResult: DiscountReportSummary = {
     totals: [
-      { currency: 'COP', items: 2, gross: 1000000, discount: 75000 },
+      { currency: 'USD', items: 2, gross: 1000000, discount: 75000 },
       { currency: 'EUR', items: 1, gross: 3, discount: 1 },
     ],
     agreementTotals: [],
@@ -103,7 +103,7 @@ describe('GetDiscountReportUseCase (DX-204)', () => {
     });
     expect(report.totals).toEqual([
       {
-        currency: 'COP',
+        currency: 'USD',
         items: 2,
         gross: 1000000,
         discount: 75000,
@@ -191,7 +191,7 @@ describe('GetDiscountReportUseCase (DX-204)', () => {
     // los suyos, y sí cuenta para la paginación.
     repo.summaryResult = {
       totals: [],
-      agreementTotals: [{ currency: 'COP', items: 1, reduction: 500000 }],
+      agreementTotals: [{ currency: 'USD', items: 1, reduction: 500000 }],
       rows: 1,
     };
     repo.rows = () =>
@@ -218,7 +218,7 @@ describe('GetDiscountReportUseCase (DX-204)', () => {
     });
     expect(report.totals).toEqual([]);
     expect(report.agreementTotals).toEqual([
-      { currency: 'COP', items: 1, reduction: 500000 },
+      { currency: 'USD', items: 1, reduction: 500000 },
     ]);
     expect(report.total).toBe(1);
     expect(report.items[0]).toMatchObject({

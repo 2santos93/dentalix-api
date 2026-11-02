@@ -18,7 +18,7 @@ import {
   LOCATION_NOT_ALLOWED_MESSAGE,
 } from '../src/shared/tenancy/location-access';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
 
@@ -197,7 +197,10 @@ describe('Subrutas de la cita y sede permitida (SEC-045)', () => {
       (
         (
           await admin()
-            .post('/locations', locationBody(REGIONAL_BOGOTA_FIXTURE, { name }))
+            .post(
+              '/locations',
+              locationBody(REGIONAL_CARACAS_FIXTURE, { name }),
+            )
             .expect(201)
         ).body as {
           id: string;
@@ -236,7 +239,7 @@ describe('Subrutas de la cita y sede permitida (SEC-045)', () => {
             docNumber: 'SEC045-1',
             sex: Sex.F,
             email: PATIENT_EMAIL,
-            phone: '+57 310 555 0145',
+            phone: '+58 414 555 0145',
           })
           .expect(201)
       ).body as { id: string }

@@ -116,7 +116,7 @@ describe('DX-293 aviso de reserva en otra cita con heldInClinic', () => {
       },
     });
     const plan = await raw.treatmentPlan.create({
-      data: { tenantId: a.tenantId, patientId: patient.id, currency: 'COP' },
+      data: { tenantId: a.tenantId, patientId: patient.id, currency: 'USD' },
     });
     const { id: itemId } = await raw.treatmentPlanItem.create({
       data: {

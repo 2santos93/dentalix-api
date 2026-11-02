@@ -42,13 +42,13 @@ function record(extra: Partial<CashSessionRecord> = {}): CashSessionRecord {
     closedAt: null,
     closedBy: null,
     reopenCount: 0,
-    floats: [{ currency: 'COP', amount: 50_000 }],
+    floats: [{ currency: 'USD', amount: 50_000 }],
     differences: [],
     notes: null,
-    timeZone: 'America/Bogota',
+    timeZone: 'America/Caracas',
     expected: [
       {
-        currency: 'COP',
+        currency: 'USD',
         method: 'CASH',
         opening: 50_000,
         payments: 20_000,
@@ -171,13 +171,13 @@ describe('OpenCashSessionUseCase (DX-027)', () => {
   it('abre con el fondo en céntimos y quien abre del token', async () => {
     const { repo, open } = build();
     await open.execute(
-      { floats: [{ currency: 'cop', amount: 50_000.5 }], notes: '  Turno  ' },
+      { floats: [{ currency: 'usd', amount: 50_000.5 }], notes: '  Turno  ' },
       RECEPTION,
     );
     expect(repo.open).toHaveBeenCalledWith({
       locationId: 'loc-1',
       openedById: RECEPTION.userId,
-      floats: [{ currency: 'COP', cents: 5_000_050 }],
+      floats: [{ currency: 'USD', cents: 5_000_050 }],
       notes: 'Turno',
     });
   });
@@ -186,12 +186,12 @@ describe('OpenCashSessionUseCase (DX-027)', () => {
     const { repo, open } = build();
     // 555.555.555,55 × 100 = 55.555.555.554,999… en coma flotante.
     await open.execute(
-      { floats: [{ currency: 'COP', amount: 555_555_555.55 }] },
+      { floats: [{ currency: 'USD', amount: 555_555_555.55 }] },
       RECEPTION,
     );
     expect(repo.open).toHaveBeenCalledWith(
       expect.objectContaining({
-        floats: [{ currency: 'COP', cents: 55_555_555_555 }],
+        floats: [{ currency: 'USD', cents: 55_555_555_555 }],
       }),
     );
   });
@@ -218,15 +218,15 @@ describe('OpenCashSessionUseCase (DX-027)', () => {
       open.execute(
         {
           floats: [
-            { currency: 'COP', amount: 1 },
-            { currency: 'cop', amount: 2 },
+            { currency: 'USD', amount: 1 },
+            { currency: 'usd', amount: 2 },
           ],
         },
         RECEPTION,
       ),
     ).rejects.toThrow(BadRequestException);
     await expect(
-      open.execute({ floats: [{ currency: 'COP', amount: 1.005 }] }, RECEPTION),
+      open.execute({ floats: [{ currency: 'USD', amount: 1.005 }] }, RECEPTION),
     ).rejects.toThrow(BadRequestException);
     expect(repo.open).not.toHaveBeenCalled();
   });
@@ -236,11 +236,11 @@ describe('CloseCashSessionUseCase (DX-027)', () => {
   const ctx: CloseContext = {
     locationId: 'loc-1',
     openedById: RECEPTION.userId,
-    timeZone: 'America/Bogota',
+    timeZone: 'America/Caracas',
     blind: true,
     expected: [
       {
-        currency: 'COP',
+        currency: 'USD',
         method: 'CASH',
         openingCents: 5_000_000,
         paymentsCents: 2_000_000,
@@ -281,7 +281,7 @@ describe('CloseCashSessionUseCase (DX-027)', () => {
     await close.execute(
       's-1',
       {
-        counts: [{ currency: 'COP', method: 'CASH', counted: 70_000 }],
+        counts: [{ currency: 'USD', method: 'CASH', counted: 70_000 }],
         differenceReason: 'No hace falta',
       },
       RECEPTION,
@@ -305,7 +305,7 @@ describe('CloseCashSessionUseCase (DX-027)', () => {
     await expect(
       close.execute(
         's-1',
-        { counts: [{ currency: 'COP', method: 'CASH', counted: 69_000 }] },
+        { counts: [{ currency: 'USD', method: 'CASH', counted: 69_000 }] },
         RECEPTION,
       ),
     ).rejects.toThrow(
@@ -318,7 +318,7 @@ describe('CloseCashSessionUseCase (DX-027)', () => {
     await close.execute(
       's-1',
       {
-        counts: [{ currency: 'COP', method: 'CASH', counted: 69_000 }],
+        counts: [{ currency: 'USD', method: 'CASH', counted: 69_000 }],
         differenceReason: 'Faltó cambio',
       },
       RECEPTION,
@@ -360,8 +360,8 @@ describe('CloseCashSessionUseCase (DX-027)', () => {
         's-1',
         {
           counts: [
-            { currency: 'COP', method: 'CASH', counted: 1 },
-            { currency: 'COP', method: 'CASH', counted: 2 },
+            { currency: 'USD', method: 'CASH', counted: 1 },
+            { currency: 'USD', method: 'CASH', counted: 2 },
           ],
         },
         RECEPTION,
@@ -401,7 +401,7 @@ describe('ReopenCashSessionUseCase y AddCashAdjustmentUseCase (DX-027)', () => {
     const repo = fakeRepo();
     const adjust = new AddCashAdjustmentUseCase(asRepo(repo));
     const input = {
-      currency: 'COP',
+      currency: 'USD',
       method: 'CASH' as const,
       amount: -5_000,
       reason: 'Billete falso',
@@ -417,7 +417,7 @@ describe('ReopenCashSessionUseCase y AddCashAdjustmentUseCase (DX-027)', () => {
       NotFoundException,
     );
     expect(repo.addCorrection).toHaveBeenLastCalledWith('s-1', {
-      currency: 'COP',
+      currency: 'USD',
       method: 'CASH',
       cents: -500_000,
       reason: 'Billete falso',
@@ -489,7 +489,7 @@ describe('cajas y sedes permitidas (DX-089)', () => {
           locationId: 'loc-9',
           expected: [],
           blind: false,
-          timeZone: 'America/Bogota',
+          timeZone: 'America/Caracas',
         } as unknown as CloseContext);
         return Promise.resolve('CLOSED');
       },

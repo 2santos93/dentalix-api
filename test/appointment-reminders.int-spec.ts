@@ -35,7 +35,7 @@ import { OptOutByMessageUseCase } from '../src/modules/reminders/application/use
 import { CapturingMailer } from './support/capture-mailer';
 import { waitFor } from './support/wait-for';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   REGIONAL_TOKYO_FIXTURE,
   g1LocationInsert,
   locationData,
@@ -76,7 +76,7 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
     data: { name: `Clínica ${subdomain}`, subdomain },
   });
   const location = await owner.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId: tenant.id,
       name: 'Sede Centro',
       address: 'Calle 1 # 2-3',
@@ -321,8 +321,8 @@ describe('DX-026 · recordatorios automáticos por email (int)', () => {
     expect(text).toContain(
       `Fecha y hora: ${startsAtLabel(
         start,
-        REGIONAL_BOGOTA_FIXTURE.timeZone,
-        regionalFormat(REGIONAL_BOGOTA_FIXTURE),
+        REGIONAL_CARACAS_FIXTURE.timeZone,
+        regionalFormat(REGIONAL_CARACAS_FIXTURE),
       )} (hora de la sede)`,
     );
     expect(text).toContain('Sede: Sede Centro (Calle 1 # 2-3)');
@@ -1164,7 +1164,7 @@ describe('DX-026 · recordatorios automáticos por email (int)', () => {
         version: 1,
         noticeHours: 24,
         suggestedFee: 50000,
-        currency: 'COP',
+        currency: 'USD',
         patientText: 'Avísanos con 24 horas.',
         createdById: clinicA.providerId,
       },
@@ -1300,7 +1300,7 @@ describe('DX-026 · recordatorios automáticos por email (int)', () => {
       expect(text).toContain(
         'Fecha y hora: miércoles 10 de marzo de 2027 a las 3:05 p. m. (hora de la sede)',
       );
-      expect(text).toContain('un cargo de ￥3,000.');
+      expect(text).toContain('un cargo de JPY 3,000.');
     });
 
     it('reminder for a location without hourCycle is not sent', async () => {
@@ -1389,7 +1389,7 @@ describe('DX-026 · recordatorios automáticos por email (int)', () => {
       const none = await book('bea@example.com', { contactChannel: 'NONE' });
       const whatsapp = await book('cami@example.com', {
         contactChannel: 'WHATSAPP',
-        phone: '+573101234567',
+        phone: '+584141234567',
       });
       const optedOut = await book('dani@example.com', {
         reminderOptOutAt: new Date(Date.now() - HOUR),
@@ -1412,7 +1412,7 @@ describe('DX-026 · recordatorios automáticos por email (int)', () => {
       await configure(clinicA, [2]);
       const start = new Date(Date.now() + 2 * HOUR + 3 * MIN);
       const patientId = await patient(clinicA, 'ana@example.com', {
-        phone: '310 555 0001',
+        phone: '414 555 0001',
       });
       const id = await appointment(clinicA, patientId, start);
       await sweep(); // encolado para su hora (dentro de 3 min)
@@ -1422,7 +1422,7 @@ describe('DX-026 · recordatorios automáticos por email (int)', () => {
       const before = Date.now();
       const result = await a.get(OptOutByMessageUseCase).execute({
         tenantId: clinicA.tenantId,
-        fromPhone: '573105550001',
+        fromPhone: '584145550001',
         text: 'Baja',
       });
       expect(result).toEqual({ isOptOut: true, optedOut: [patientId] });

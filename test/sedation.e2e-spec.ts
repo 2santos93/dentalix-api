@@ -12,7 +12,7 @@ import {
 } from './support/e2e-fixtures';
 import {
   locationBody,
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
 } from './support/location-fixtures';
 
 // DX-407 · hoja de sedación consciente en la evolución, de punta a punta con
@@ -219,7 +219,7 @@ describe('Hoja de sedación en la evolución (DX-407, e2e)', () => {
     // Un odontólogo restringido a otra sede (DX-089).
     const north = (
       await call(a, 'post', '/locations', a.adminToken)
-        .send(locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }))
+        .send(locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede Norte' }))
         .expect(201)
     ).body as { id: string };
     const restrictedUser = await raw.user.create({

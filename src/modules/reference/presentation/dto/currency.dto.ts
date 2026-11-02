@@ -21,7 +21,7 @@ export class CurrencyDigitsDto {
     maximum: 2,
     example: 0,
     description:
-      'Decimales a los que Dentalix redondea cada línea (descuento en bloque, precio por convenio); el total de un documento es la suma de sus líneas. Puede ser menor que minorUnits (RSD, COP: 0).',
+      'Decimales a los que Dentalix redondea cada línea (descuento en bloque, precio por convenio); el total de un documento es la suma de sus líneas. Puede ser menor que minorUnits (RSD, ALL: 0).',
   })
   roundingDigits!: number;
 }

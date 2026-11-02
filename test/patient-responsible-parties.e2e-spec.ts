@@ -182,7 +182,7 @@ describe('Responsables de pago y avisos (e2e, DX-203)', () => {
         docType: 'NATIONAL_ID',
         docNumber: '79345678',
         email: 'Luis@Example.com',
-        phone: '+57 310 555 0101',
+        phone: '+58 414 555 0101',
         relationship: 'FATHER',
         receivesNotices: false,
       })
@@ -501,7 +501,7 @@ describe('Responsables de pago y avisos (e2e, DX-203)', () => {
         api().post(`/api/v1/patients/${patientId}/treatment-plans`),
         clinic.adminToken,
       )
-        .send({ currency: 'COP', notes: 'Nota clínica que no sale' })
+        .send({ currency: 'USD', notes: 'Nota clínica que no sale' })
         .expect(201);
       const planId = (plan.body as { id: string }).id;
       const item = await as(
@@ -526,7 +526,7 @@ describe('Responsables de pago y avisos (e2e, DX-203)', () => {
         api().post(`/api/v1/treatment-plans/${planId}/payments`),
         tokens.RECEPTION,
       )
-        .send({ amount, currency: 'COP', paidAt: '2026-01-15', method: 'CASH' })
+        .send({ amount, currency: 'USD', paidAt: '2026-01-15', method: 'CASH' })
         .expect(201);
     }
 
@@ -646,7 +646,7 @@ describe('Responsables de pago y avisos (e2e, DX-203)', () => {
       }
       expect(body.totals).toEqual([
         expect.objectContaining({
-          currency: 'COP',
+          currency: 'USD',
           budgeted: cents.budgeted / 100,
           paid: cents.paid / 100,
           balance: cents.balance / 100,

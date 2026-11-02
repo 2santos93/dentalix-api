@@ -99,7 +99,7 @@ describe('GetProductionByProcedureUseCase (DX-423)', () => {
         code: 'D2391',
         label: 'Resina',
         category: 'Operatoria',
-        currency: 'COP',
+        currency: 'USD',
         count: 3,
         gross: 280,
         discounts: 20,
@@ -108,7 +108,7 @@ describe('GetProductionByProcedureUseCase (DX-423)', () => {
         catalogPricedNet: 260,
       },
     ];
-    repo.pending = [{ currency: 'COP', count: 1, gross: 50, discounts: 10 }];
+    repo.pending = [{ currency: 'USD', count: 1, gross: 50, discounts: 10 }];
     const r = await useCase.execute({
       ...OCTOBER,
       actor: ADMIN,
@@ -123,7 +123,7 @@ describe('GetProductionByProcedureUseCase (DX-423)', () => {
     expect(r.scope).toBe('CLINIC');
     expect(r.rows[0]).toMatchObject({ net: 260, averageNet: 86.67 });
     expect(r.unattributed).toEqual([
-      { currency: 'COP', count: 1, gross: 50, discounts: 10, net: 40 },
+      { currency: 'USD', count: 1, gross: 50, discounts: 10, net: 40 },
     ]);
     expect(r.hasActivity).toBe(true);
     expect(r.filters).toEqual({
@@ -290,7 +290,7 @@ describe('GetProductionByProcedureUseCase (DX-423)', () => {
   });
 
   it('solo realizados sin fecha: aviso aparte (undated) y el período sigue vacío', async () => {
-    repo.undated = [{ currency: 'COP', count: 1, gross: 90000, discounts: 0 }];
+    repo.undated = [{ currency: 'USD', count: 1, gross: 90000, discounts: 0 }];
     const r = await useCase.execute({
       from: '2020-01-01',
       to: '2020-01-31',
@@ -300,7 +300,7 @@ describe('GetProductionByProcedureUseCase (DX-423)', () => {
     expect(r.hasActivity).toBe(false);
     expect(r.unattributed).toEqual([]);
     expect(r.undated).toEqual([
-      { currency: 'COP', count: 1, gross: 90000, discounts: 0, net: 90000 },
+      { currency: 'USD', count: 1, gross: 90000, discounts: 0, net: 90000 },
     ]);
   });
 
@@ -337,9 +337,9 @@ describe('GetProductionByProcedureUseCase (DX-423)', () => {
           professionalName: 'Dra. Ana',
           locationId: A,
           locationName: 'Sede A',
-          timeZone: 'America/Bogota',
+          timeZone: 'America/Caracas',
           toothNumber: '16',
-          currency: 'COP',
+          currency: 'USD',
           price: 80,
           discount: 20,
         },
@@ -347,7 +347,7 @@ describe('GetProductionByProcedureUseCase (DX-423)', () => {
       const r = await useCase.items({
         ...OCTOBER,
         catalogItemId: 'c1',
-        currency: 'COP',
+        currency: 'USD',
         page: 2,
         pageSize: 10,
         actor: DENTIST,
@@ -359,7 +359,7 @@ describe('GetProductionByProcedureUseCase (DX-423)', () => {
           locationIds: [A, B],
           professionalId: 'u-dent',
           catalogItemId: 'c1',
-          currency: 'COP',
+          currency: 'USD',
         },
         { skip: 10, take: 10 },
       ]);

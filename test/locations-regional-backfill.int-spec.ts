@@ -18,7 +18,7 @@ import {
   g1LocationInsert,
   legacyLocationInsert,
   locationData,
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
 } from './support/location-fixtures';
 
 /**
@@ -105,13 +105,13 @@ describe('barrido de sedes sin configurar (int, G1 fase 1)', () => {
       raw,
       tenantA,
       'Antigua A',
-      REGIONAL_BOGOTA_FIXTURE.country,
+      REGIONAL_CARACAS_FIXTURE.country,
     );
     legacyB = await legacyLocationInsert(
       raw,
       tenantB,
       'Antigua B',
-      REGIONAL_BOGOTA_FIXTURE.country,
+      REGIONAL_CARACAS_FIXTURE.country,
     );
     // Otro país (Z1): la misma tabla de todos los países, ningún caso propio.
     await raw.location.update({
@@ -141,10 +141,10 @@ describe('barrido de sedes sin configurar (int, G1 fase 1)', () => {
     expect(
       await raw.location.findUniqueOrThrow({ where: { id: legacyA } }),
     ).toMatchObject({
-      country: 'CO',
-      currency: 'COP',
-      timeZone: 'America/Bogota',
-      locale: 'es-CO',
+      country: 'VE',
+      currency: 'USD',
+      timeZone: 'America/Caracas',
+      locale: 'es-VE',
       // Por revisar: el ADMIN ve el aviso D5.
       regionalSettingsReviewedAt: null,
     });
@@ -213,7 +213,7 @@ describe('barrido de sedes sin configurar (int, G1 fase 1)', () => {
       raw,
       tenantB,
       'Antigua B2',
-      REGIONAL_BOGOTA_FIXTURE.country,
+      REGIONAL_CARACAS_FIXTURE.country,
     );
     const { stdout } = await runScript();
     const lines = stdout
@@ -236,7 +236,7 @@ describe('barrido de sedes sin configurar (int, G1 fase 1)', () => {
     expect(
       await raw.location.findUniqueOrThrow({ where: { id: legacy } }),
     ).toMatchObject({
-      currency: 'COP',
+      currency: 'USD',
       hourCycle: 'h23',
       regionalSettingsReviewedAt: null,
     });
@@ -248,13 +248,13 @@ describe('barrido de sedes sin configurar (int, G1 fase 1)', () => {
       raw,
       tenantA,
       'Sin barrer A',
-      REGIONAL_BOGOTA_FIXTURE.country,
+      REGIONAL_CARACAS_FIXTURE.country,
     );
     const nullB = await legacyLocationInsert(
       raw,
       tenantB,
       'Sin barrer B',
-      REGIONAL_BOGOTA_FIXTURE.country,
+      REGIONAL_CARACAS_FIXTURE.country,
     );
     // Una clínica retirada cuenta igual: la fase 2 pone NOT NULL en todas.
     await raw.tenant.update({

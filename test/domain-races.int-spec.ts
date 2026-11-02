@@ -16,7 +16,7 @@ import type { AuditRequestContext } from '../src/modules/audit/domain/audit-requ
 import { PrismaTreatmentPlanRepository } from '../src/modules/treatment-plans/infrastructure/repositories/prisma-treatment-plan.repository';
 import { PrismaPaymentRepository } from '../src/modules/payments/infrastructure/repositories/prisma-payment.repository';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -47,7 +47,7 @@ async function seed(): Promise<Seeded> {
   });
   const tenantId = tenant.id;
   await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId,
       name: 'Sede principal',
     }),

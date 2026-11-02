@@ -45,7 +45,7 @@ class FakeConvertAmountUseCase {
   public readonly infraFailingFrom = new Set<string>();
   /** units of `from` currency per 1 USD-equivalent `to`; mirrors
    * `rates[from]` in the real use case. */
-  private readonly unitsPerTarget: Record<string, number> = { COP: 4000 };
+  private readonly unitsPerTarget: Record<string, number> = { VES: 4000 };
 
   /** Test helper: register a fixed rate for a currency pair (units of
    * `from` per 1 unit of `to`), used by the mixed-amount regression test. */
@@ -105,16 +105,16 @@ describe('GetPaymentsTotalsUseCase', () => {
   it('converts each payment by its own paidAt date and sums the results', async () => {
     const { repo, fakeConvert, uc } = makeUseCase();
     repo.seedPayment({
-      id: 'p-cop',
-      currency: 'COP',
+      id: 'p-ves',
+      currency: 'VES',
       amount: 400000,
-      paidAt: new Date('2026-03-05T12:00:00.000Z'),
+      paidAt: new Date('2026-03-05T11:00:00.000Z'),
     });
     repo.seedPayment({
       id: 'p-usd',
       currency: 'USD',
       amount: 30,
-      paidAt: new Date('2026-03-10T08:00:00.000Z'),
+      paidAt: new Date('2026-03-10T07:00:00.000Z'),
     });
 
     const result = await uc.execute({
@@ -123,15 +123,15 @@ describe('GetPaymentsTotalsUseCase', () => {
       currency: 'USD',
     });
 
-    // 400000 COP / 4000 = 100 USD, plus 30 USD passthrough = 130.
+    // 400000 VES / 4000 = 100 USD, plus 30 USD passthrough = 130.
     expect(result.totalConverted).toBe(130);
     expect(result.count).toBe(2);
     expect(result.currency).toBe('USD');
-    expect(result.byCurrency).toEqual({ COP: 400000, USD: 30 });
+    expect(result.byCurrency).toEqual({ VES: 400000, USD: 30 });
 
     // DX-375: un abono en la moneda pedida no necesita tasa ni conversión.
     expect(fakeConvert.calls).toEqual([
-      { amount: 400000, from: 'COP', to: 'USD', date: '2026-03-05' },
+      { amount: 400000, from: 'VES', to: 'USD', date: '2026-03-05' },
     ]);
   });
 
@@ -139,7 +139,7 @@ describe('GetPaymentsTotalsUseCase', () => {
     const { repo, uc } = makeUseCase();
     const voidUc = new VoidPaymentUseCase(
       repo,
-      () => new Date('2026-03-06T15:00:00.000Z'),
+      () => new Date('2026-03-06T14:00:00.000Z'),
       new TenantContextService(),
     );
     repo.seedPayment({
@@ -193,27 +193,27 @@ describe('GetPaymentsTotalsUseCase', () => {
   });
 
   it('DX-097: el período y la fecha de la tasa son los días civiles de la sede, no los UTC', async () => {
-    const { repo, fakeConvert, uc } = makeUseCase('America/Bogota');
-    // 31/03 a las 22:00 en la zona de la sede = 01/04 03:00 UTC: es de marzo.
+    const { repo, fakeConvert, uc } = makeUseCase('America/Caracas');
+    // 31/03 a las 22:00 en la zona de la sede = 01/04 02:00 UTC: es de marzo.
     repo.seedPayment({
       id: 'late-march',
-      currency: 'COP',
+      currency: 'VES',
       amount: 4000,
-      paidAt: new Date('2026-04-01T03:00:00.000Z'),
+      paidAt: new Date('2026-04-01T02:00:00.000Z'),
     });
-    // 01/03 a las 00:30 en la zona de la sede = 01/03 05:30 UTC: es de marzo.
+    // 01/03 a las 00:30 en la zona de la sede = 01/03 04:30 UTC: es de marzo.
     repo.seedPayment({
       id: 'early-march',
       currency: 'USD',
       amount: 1,
-      paidAt: new Date('2026-03-01T05:30:00.000Z'),
+      paidAt: new Date('2026-03-01T04:30:00.000Z'),
     });
-    // 28/02 a las 23:00 en la zona de la sede = 01/03 04:00 UTC: es de febrero.
+    // 28/02 a las 23:00 en la zona de la sede = 01/03 03:00 UTC: es de febrero.
     repo.seedPayment({
       id: 'late-feb',
       currency: 'USD',
       amount: 100,
-      paidAt: new Date('2026-03-01T04:00:00.000Z'),
+      paidAt: new Date('2026-03-01T03:00:00.000Z'),
     });
 
     const result = await uc.execute({
@@ -223,8 +223,8 @@ describe('GetPaymentsTotalsUseCase', () => {
     });
 
     expect(result.count).toBe(2);
-    expect(result.byCurrency).toEqual({ COP: 4000, USD: 1 });
-    // El de USD no se convierte (DX-375): solo el COP, con su día civil.
+    expect(result.byCurrency).toEqual({ VES: 4000, USD: 1 });
+    // El de USD no se convierte (DX-375): solo el VES, con su día civil.
     expect(fakeConvert.calls.map((c) => c.date).sort()).toEqual(['2026-03-31']);
   });
 
@@ -232,12 +232,12 @@ describe('GetPaymentsTotalsUseCase', () => {
   // día cambie después; uno «sin tasa» no suma y no convierte en vivo.
   it('usa la tasa congelada de cada abono y no suma los que siguen sin tasa (DX-375)', async () => {
     const { repo, fakeConvert, uc } = makeUseCase();
-    fakeConvert.setRate('COP', 5000);
+    fakeConvert.setRate('VES', 5000);
     repo.seedPayment({
       id: 'frozen',
-      currency: 'COP',
+      currency: 'VES',
       amount: 400000,
-      paidAt: new Date('2026-03-05T17:00:00.000Z'),
+      paidAt: new Date('2026-03-05T16:00:00.000Z'),
       exchangeRateCurrency: 'USD',
       frozenRate: {
         currency: 'USD',
@@ -249,9 +249,9 @@ describe('GetPaymentsTotalsUseCase', () => {
     });
     repo.seedPayment({
       id: 'missing',
-      currency: 'COP',
+      currency: 'VES',
       amount: 1000,
-      paidAt: new Date('2026-03-06T17:00:00.000Z'),
+      paidAt: new Date('2026-03-06T16:00:00.000Z'),
       exchangeRateCurrency: 'USD',
     });
 
@@ -294,19 +294,19 @@ describe('GetPaymentsTotalsUseCase', () => {
     const { repo, fakeConvert, uc } = makeUseCase();
     repo.seedPayment({
       id: 'p1',
-      currency: 'COP',
+      currency: 'VES',
       amount: 400000,
-      paidAt: new Date('2026-03-05T09:00:00.000Z'),
+      paidAt: new Date('2026-03-05T08:00:00.000Z'),
     });
     repo.seedPayment({
       id: 'p2',
-      currency: 'COP',
+      currency: 'VES',
       amount: 200000,
-      paidAt: new Date('2026-03-05T18:00:00.000Z'),
+      paidAt: new Date('2026-03-05T17:00:00.000Z'),
     });
     repo.seedPayment({
       id: 'p3',
-      currency: 'COP',
+      currency: 'VES',
       amount: 40000,
       paidAt: new Date('2026-03-06T00:00:00.000Z'),
     });
@@ -405,10 +405,10 @@ describe('GetPaymentsTotalsUseCase', () => {
   // with no trace that anything went wrong.
   it('propagates a non-currency conversion error instead of silently skipping the payment', async () => {
     const { repo, fakeConvert, uc } = makeUseCase();
-    fakeConvert.infraFailingFrom.add('COP');
+    fakeConvert.infraFailingFrom.add('VES');
     repo.seedPayment({
       id: 'p-infra-fail',
-      currency: 'COP',
+      currency: 'VES',
       amount: 400000,
       paidAt: new Date('2026-03-05T00:00:00.000Z'),
     });
@@ -419,6 +419,6 @@ describe('GetPaymentsTotalsUseCase', () => {
         to: '2026-03-31',
         currency: 'USD',
       }),
-    ).rejects.toThrow('simulated infra failure converting COP');
+    ).rejects.toThrow('simulated infra failure converting VES');
   });
 });

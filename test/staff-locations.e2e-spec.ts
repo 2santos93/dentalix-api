@@ -16,7 +16,7 @@ import {
   UNKNOWN_LOCATION_MESSAGE,
 } from '../src/modules/staff/application/use-cases/staff-locations.use-cases';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
 
@@ -79,7 +79,7 @@ describe('Sedes permitidas por miembro (DX-089)', () => {
 
   async function createLocation(name: string): Promise<string> {
     const res = await api(a, a.adminToken)
-      .post('/locations', locationBody(REGIONAL_BOGOTA_FIXTURE, { name }))
+      .post('/locations', locationBody(REGIONAL_CARACAS_FIXTURE, { name }))
       .expect(201);
     return (res.body as { id: string }).id;
   }

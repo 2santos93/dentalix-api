@@ -33,7 +33,7 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
 
@@ -138,7 +138,7 @@ describe('Gastos de la sede (e2e, DX-274)', () => {
     category: 'Papelería',
     supplier: `Proveedor ${++seq}`,
     amount: 100000,
-    currency: 'COP',
+    currency: 'VES',
     invoiceDate: '2026-10-01',
     ...patch,
   });
@@ -239,7 +239,7 @@ describe('Gastos de la sede (e2e, DX-274)', () => {
     const sedes = await call('get', '/locations').expect(200);
     loc1 = (sedes.body as { id: string }[])[0].id;
     const second = await call('post', '/locations')
-      .send(locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }))
+      .send(locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede Norte' }))
       .expect(201);
     loc2 = (second.body as { id: string }).id;
   });
@@ -264,7 +264,7 @@ describe('Gastos de la sede (e2e, DX-274)', () => {
         supplier: '  Papelería   Luna  ',
         description: ' Resmas y carpetas ',
         category: 'papeleria',
-        currency: 'cop',
+        currency: 'ves',
         dueDate: '2099-12-31',
         amount: 120000.5,
       });
@@ -274,7 +274,7 @@ describe('Gastos de la sede (e2e, DX-274)', () => {
         supplier: 'Papelería Luna',
         description: 'Resmas y carpetas',
         amount: 120000.5,
-        currency: 'COP',
+        currency: 'VES',
         invoiceDate: '2026-10-01',
         dueDate: '2099-12-31',
         paidAmount: 0,
@@ -388,7 +388,7 @@ describe('Gastos de la sede (e2e, DX-274)', () => {
             .post('/api/v1/expenses')
             .set('X-Tenant-Host', listClinic.host)
             .set('Authorization', `Bearer ${token}`)
-            .send({ currency: 'COP', amount: 100000, ...payload })
+            .send({ currency: 'VES', amount: 100000, ...payload })
             .expect(201)
         ).body as ExpenseBody;
       const payOn = (id: string, amount: number) =>
@@ -533,7 +533,7 @@ describe('Gastos de la sede (e2e, DX-274)', () => {
       await pay(e.id, { amount: 99999.5, method: 'CARD' }).expect(201);
       const res = await pay(e.id, { amount: 0.51, method: 'CARD' }).expect(400);
       expect(messageOf(res)).toBe(
-        'El pago supera lo pendiente del gasto (0,50 COP).',
+        'El pago supera lo pendiente del gasto (0,50 VES).',
       );
       expect(
         await raw.expensePayment.count({ where: { expenseId: e.id } }),
@@ -869,7 +869,7 @@ describe('Gastos de la sede (e2e, DX-274)', () => {
         .send({ amount: 39999.99 })
         .expect(409);
       expect(messageOf(below)).toBe(
-        'El importe no puede ser menor a lo ya pagado (40.000 COP).',
+        'El importe no puede ser menor a lo ya pagado (40.000 VES).',
       );
       expect(
         (
@@ -1141,7 +1141,7 @@ describe('Gastos de la sede (e2e, DX-274)', () => {
             category: 'Otros',
             supplier,
             amount: 1000,
-            currency: 'COP',
+            currency: 'VES',
             invoiceDate: '2026-10-01',
           })
           .expect(201);

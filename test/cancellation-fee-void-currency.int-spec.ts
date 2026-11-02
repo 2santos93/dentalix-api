@@ -24,9 +24,9 @@ import { fixedSedeDay } from './support/sede-clock';
 // (DX-051, convertida con la tasa que congeló, DX-375), no la suma bruta de
 // importes en monedas mezcladas. Los tres escenarios en dos clínicas, una con
 // la fuente automática y otra con la manual (DX-374), con la misma tasa del
-// día (1 USD = 4.000 COP): mismo resultado, y ninguna ve ni mueve los cargos
+// día (1 USD = 4.000 GBP): mismo resultado, y ninguna ve ni mueve los cargos
 // de la otra. EXCHANGE_APP_ID está vacío en .env.test: el proveedor no se
-// llama nunca (snapshot de hoy con COP y sin EUR).
+// llama nunca (snapshot de hoy con GBP y sin EUR).
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
@@ -49,8 +49,8 @@ interface FeeView {
 interface Setup {
   clinic: Clinic;
   location: string;
-  /** Versión de la política en COP (sugerido 100.000) y en USD (sugerido 50). */
-  copVersion: string;
+  /** Versión de la política en GBP (sugerido 100.000) y en USD (sugerido 50). */
+  vesVersion: string;
   usdVersion: string;
 }
 
@@ -100,19 +100,19 @@ describe('anular un cargo compara en la moneda del plan (DX-382, int)', () => {
         .expect(200);
       await post(clinic, '/exchange/manual-rates', {
         date: TODAY,
-        currency: 'COP',
+        currency: 'GBP',
         rate: 4000,
       }).expect(201);
     }
-    const copVersion = await policyVersion(clinic, location, {
+    const vesVersion = await policyVersion(clinic, location, {
       suggestedFee: 100000,
-      currency: 'COP',
+      currency: 'GBP',
     });
     const usdVersion = await policyVersion(clinic, location, {
       suggestedFee: 50,
       currency: 'USD',
     });
-    return { clinic, location, copVersion, usdVersion };
+    return { clinic, location, vesVersion, usdVersion };
   }
 
   async function patient(s: Setup): Promise<string> {
@@ -206,7 +206,7 @@ describe('anular un cargo compara en la moneda del plan (DX-382, int)', () => {
     await raw.exchangeRateSnapshot.deleteMany({ where: { date: TODAY } });
     await raw.exchangeRateSnapshot.createMany({
       data: [
-        { date: TODAY, currency: 'COP', rate: 4000 },
+        { date: TODAY, currency: 'GBP', rate: 4000 },
         { date: TODAY, currency: 'VES', rate: 36.5 },
       ],
     });
@@ -228,10 +228,10 @@ describe('anular un cargo compara en la moneda del plan (DX-382, int)', () => {
   describe.each(['AUTOMATIC', 'MANUAL'] as const)('fuente %s', (source) => {
     const s = () => setups.get(source)!;
 
-    it('plan COP con dos cargos y un abono de 50 USD que cubre ambos: anular uno es 409 (ya cobrado) y nada cambia', async () => {
+    it('plan GBP con dos cargos y un abono de 50 USD que cubre ambos: anular uno es 409 (ya cobrado) y nada cambia', async () => {
       const p = await patient(s());
-      const first = await charge(s(), p, s().copVersion, 100000);
-      const second = await charge(s(), p, s().copVersion, 80000);
+      const first = await charge(s(), p, s().vesVersion, 100000);
+      const second = await charge(s(), p, s().vesVersion, 80000);
       expect(second.planId).toBe(first.planId);
       const payment = await pay(s(), first.planId, 50, 'USD');
       expect(payment.exchangeRateStatus).toBe('FROZEN');
@@ -239,7 +239,7 @@ describe('anular un cargo compara en la moneda del plan (DX-382, int)', () => {
       const base = await raw.paymentPlanAmount.findUniqueOrThrow({
         where: { paymentId: payment.id },
       });
-      expect(base.currency).toBe('COP');
+      expect(base.currency).toBe('GBP');
       expect(base.amount.toNumber()).toBe(200000);
 
       // Antes (BE-046): 50 > 100.000 era falso y el cargo se anulaba.
@@ -255,12 +255,12 @@ describe('anular un cargo compara en la moneda del plan (DX-382, int)', () => {
       }
     });
 
-    it('plan USD con un abono de 40.000 COP que cubre la mitad: la anulación pasa (201, el contrato de «Anular cargo»)', async () => {
+    it('plan USD con un abono de 40.000 GBP que cubre la mitad: la anulación pasa (201, el contrato de «Anular cargo»)', async () => {
       const p = await patient(s());
       const small = await charge(s(), p, s().usdVersion, 20);
       const big = await charge(s(), p, s().usdVersion, 30);
       expect(big.planId).toBe(small.planId);
-      const payment = await pay(s(), small.planId, 40000, 'COP');
+      const payment = await pay(s(), small.planId, 40000, 'GBP');
       expect(payment.exchangeRateStatus).toBe('FROZEN');
       const base = await raw.paymentPlanAmount.findUniqueOrThrow({
         where: { paymentId: payment.id },
@@ -283,7 +283,7 @@ describe('anular un cargo compara en la moneda del plan (DX-382, int)', () => {
 
     it('con un abono sin base («sin tasa») la anulación es 409 con el mensaje de abonos sin convertir', async () => {
       const p = await patient(s());
-      const fee = await charge(s(), p, s().copVersion, 100000);
+      const fee = await charge(s(), p, s().vesVersion, 100000);
       // Sin tasa EUR de hoy (ni en el snapshot ni manual): se guarda sin base.
       const payment = await pay(s(), fee.planId, 1, 'EUR');
       expect(payment.exchangeRateStatus).toBe('MISSING');
@@ -311,8 +311,8 @@ describe('anular un cargo compara en la moneda del plan (DX-382, int)', () => {
     });
     it('con la tasa ya congelada pero la base aún pendiente del barrido: 409 «sin convertir»; tras el barrido decide con la base (revisión DX-382)', async () => {
       const p = await patient(s());
-      const first = await charge(s(), p, s().copVersion, 100000);
-      const second = await charge(s(), p, s().copVersion, 80000);
+      const first = await charge(s(), p, s().vesVersion, 100000);
+      const second = await charge(s(), p, s().vesVersion, 80000);
       // La base que el alta no llega a crear (R9.3: p. ej. el plan cambió de
       // moneda entre la cotización y el INSERT): el repositorio recibe el alta
       // sin ella, como en producción, y el trigger diferido de DX-380 deja el
@@ -375,8 +375,8 @@ describe('anular un cargo compara en la moneda del plan (DX-382, int)', () => {
     it('anular el cargo y anular el abono a la vez no se bloquean en cruz (40P01) y nunca dejan un saldo a favor escondido (revisión DX-382)', async () => {
       for (let round = 0; round < 4; round++) {
         const p = await patient(s());
-        const first = await charge(s(), p, s().copVersion, 100000);
-        const second = await charge(s(), p, s().copVersion, 80000);
+        const first = await charge(s(), p, s().vesVersion, 100000);
+        const second = await charge(s(), p, s().vesVersion, 80000);
         const payment = await pay(s(), first.planId, 50, 'USD');
         const [fee, voidedPayment] = await Promise.all([
           voidFee(s(), second.appointmentId),
@@ -410,7 +410,7 @@ describe('anular un cargo compara en la moneda del plan (DX-382, int)', () => {
     const auto = setups.get('AUTOMATIC')!;
     const manual = setups.get('MANUAL')!;
     const p = await patient(auto);
-    const fee = await charge(auto, p, auto.copVersion, 100000);
+    const fee = await charge(auto, p, auto.vesVersion, 100000);
     await pay(auto, fee.planId, 50, 'USD');
 
     // Desde la otra clínica: 404 al anular y al cobrar en su plan.
@@ -429,7 +429,7 @@ describe('anular un cargo compara en la moneda del plan (DX-382, int)', () => {
     // Los abonos sin tasa de la otra clínica no cuentan aquí: «ya cobrado»,
     // no «sin convertir».
     const q = await patient(manual);
-    const other = await charge(manual, q, manual.copVersion, 100000);
+    const other = await charge(manual, q, manual.vesVersion, 100000);
     await pay(manual, other.planId, 1, 'EUR');
     const res = await voidFee(auto, fee.appointmentId).expect(409);
     expect((res.body as { message: string }).message).toBe(

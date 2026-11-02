@@ -11,7 +11,7 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
 
@@ -26,7 +26,7 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DAY = new Date(Date.now() + 3 * DAY_MS).toISOString().slice(0, 10);
-/** Instante UTC; la zona de la sede es UTC−5: 15:00Z son las 10:00. */
+/** Instante UTC; la zona de la sede es UTC−4: 15:00Z son las 11:00. */
 const at = (time: string) => `${DAY}T${time}:00.000Z`;
 const FROM = `${DAY}T00:00:00.000Z`;
 const TO = new Date(new Date(FROM).getTime() + DAY_MS).toISOString();
@@ -96,14 +96,14 @@ describe('Sillones por sede y anti-solape por sillón (e2e, DX-211)', () => {
     norte = (
       (
         await as(api().post('/api/v1/locations'), clinic.adminToken)
-          .send(locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }))
+          .send(locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede Norte' }))
           .expect(201)
       ).body as { id: string }
     ).id;
     sur = (
       (
         await as(api().post('/api/v1/locations'), clinic.adminToken)
-          .send(locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Sur' }))
+          .send(locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede Sur' }))
           .expect(201)
       ).body as { id: string }
     ).id;
@@ -324,7 +324,7 @@ describe('Sillones por sede y anti-solape por sillón (e2e, DX-211)', () => {
         end: at('15:45'),
       }).expect(409);
       expect((clash.body as { message: string }).message).toBe(
-        'El sillón «Sillón 1» ya está ocupado de 10:00 a 10:30',
+        'El sillón «Sillón 1» ya está ocupado de 11:00 a 11:30',
       );
     });
 
@@ -394,7 +394,7 @@ describe('Sillones por sede y anti-solape por sillón (e2e, DX-211)', () => {
         .send({ start: at('19:00'), end: at('19:30') })
         .expect(409);
       expect((clash.body as { message: string }).message).toBe(
-        'El sillón «Sillón 2» ya está ocupado de 14:00 a 14:30',
+        'El sillón «Sillón 2» ya está ocupado de 15:00 a 15:30',
       );
       const moved = await as(
         api().patch(`/api/v1/appointments/${mine.id}`),
@@ -417,7 +417,7 @@ describe('Sillones por sede y anti-solape por sillón (e2e, DX-211)', () => {
         .send({ chairId: two.id })
         .expect(409);
       expect((occupied.body as { message: string }).message).toBe(
-        'El sillón «Sillón 2» ya está ocupado de 16:00 a 16:30',
+        'El sillón «Sillón 2» ya está ocupado de 17:00 a 17:30',
       );
     });
 
@@ -688,6 +688,80 @@ describe('Sillones por sede y anti-solape por sillón (e2e, DX-211)', () => {
       )
         .send({ defaultProviderId: dentist.userId })
         .expect(404);
+    });
+
+    it('DX-492: B no busca huecos, atiende sin cita ni agenda desde pendientes con el sillón de A (404)', async () => {
+      const patientB = (
+        (
+          await as(api().post('/api/v1/patients'), other.adminToken, other.host)
+            .send({
+              firstName: 'Rosa',
+              lastName: 'Ajena',
+              docType: 'NATIONAL_ID',
+              docNumber: '492900',
+              sex: 'F',
+            })
+            .expect(201)
+        ).body as { id: string }
+      ).id;
+      await as(
+        api().get('/api/v1/appointments/openings').query({
+          providerId: other.adminUserId,
+          locationId: locationB,
+          from: DAY,
+          to: DAY,
+          durationMinutes: 30,
+          chairIds: chairA.id,
+        }),
+        other.adminToken,
+        other.host,
+      ).expect(404);
+      await as(
+        api().post('/api/v1/appointment-types'),
+        other.adminToken,
+        other.host,
+      )
+        .send({
+          name: 'Urgencia B',
+          durationMinutes: 30,
+          color: '#DC2626',
+          isUrgent: true,
+        })
+        .expect(201);
+      const walkIn = await as(
+        api().post('/api/v1/appointments/walk-in'),
+        other.adminToken,
+        other.host,
+      )
+        .send({
+          patientId: patientB,
+          providerId: other.adminUserId,
+          chairId: chairA.id,
+          overbookReason: 'Dolor agudo',
+        })
+        .expect(404);
+      expect((walkIn.body as { message: string }).message).toBe(
+        'Sillón no encontrado',
+      );
+      const entry = (
+        await as(api().post('/api/v1/waitlist'), other.adminToken, other.host)
+          .send({ patientId: patientB, durationMinutes: 30 })
+          .expect(201)
+      ).body as { id: string };
+      await as(
+        api().post(`/api/v1/waitlist/${entry.id}/schedule`),
+        other.adminToken,
+        other.host,
+      )
+        .send({
+          providerId: other.adminUserId,
+          start: at('19:00'),
+          chairId: chairA.id,
+        })
+        .expect(404);
+      expect(
+        await raw.appointment.count({ where: { tenantId: other.tenantId } }),
+      ).toBe(0);
     });
 
     it('una cita de B con el sillón de A: 404 «Sillón no encontrado»; la agenda de B con ese sillón: 400', async () => {

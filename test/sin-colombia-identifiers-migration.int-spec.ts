@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Prisma, PrismaClient } from '@prisma/client';
 
-// Sin Colombia (DX-323): una BD desechable recibe todas las migraciones
+// Identificadores genéricos (DX-323): una BD desechable recibe todas las migraciones
 // ANTERIORES a 20261110130000 y filas como las dejaba la API anterior (tipos
 // de pagador con código antiguo, pacientes y contactos con CC/TI/CE escritos
 // por un escritor anterior, el texto de aseguradora y su cobertura migrada);
@@ -179,7 +179,7 @@ function expected(line: string): string {
   return [kind, ...rest].join(':');
 }
 
-describe('Sin Colombia · migración de los identificadores (int)', () => {
+describe('Identificadores genéricos · migración de los identificadores (int)', () => {
   const admin = new PrismaClient<Prisma.PrismaClientOptions>({
     datasources: { db: { url: process.env.DIRECT_URL } },
   });

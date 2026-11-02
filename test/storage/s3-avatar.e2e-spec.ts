@@ -12,7 +12,7 @@ import { createS3Client } from '../../src/shared/storage/s3-file-storage';
 import { hostFor } from '../support/tenant-host';
 import { registerVerified } from '../support/register-verified';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   registerBody,
 } from '../support/location-fixtures';
 import { purgeTenantsBySubdomain } from '../support/tenant-purge';
@@ -73,7 +73,7 @@ describeWithMinio('Avatar con S3 y dos réplicas (e2e)', (cfg) => {
     await cleanup();
     const reg = await registerVerified(
       replicaA,
-      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+      registerBody(REGIONAL_CARACAS_FIXTURE, {
         clinicName: 'Avatar S3',
         subdomain: sub,
         email,

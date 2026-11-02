@@ -22,7 +22,7 @@ import { PrismaClinicExchangeSettingsRepository } from '../src/modules/exchange/
 import { PrismaManualExchangeRateRepository } from '../src/modules/exchange/infrastructure/repositories/prisma-manual-exchange-rate.repository';
 import { resetDatabase } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -84,7 +84,7 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
   const tenantId = tenant.id;
   return asOwner(tenantId, async (tx) => {
     const location = await tx.location.create({
-      data: locationData(REGIONAL_BOGOTA_FIXTURE, { tenantId, name: 'Sede' }),
+      data: locationData(REGIONAL_CARACAS_FIXTURE, { tenantId, name: 'Sede' }),
     });
     const patient = await tx.patient.create({
       data: { tenantId, firstName: 'Ana', lastName: 'Carrera' },
@@ -160,7 +160,7 @@ describe('Cuota del proveedor de tasas (SEC-054, int)', () => {
         tenantContext.run(b.tenantId, () => settingsRepo.providerWindow()),
       ).resolves.toEqual({
         since: tenant.createdAt,
-        timeZones: [REGIONAL_BOGOTA_FIXTURE.timeZone],
+        timeZones: [REGIONAL_CARACAS_FIXTURE.timeZone],
       });
     });
 
@@ -191,7 +191,7 @@ describe('Cuota del proveedor de tasas (SEC-054, int)', () => {
     >((date) =>
       Promise.resolve({
         base: 'USD',
-        rates: { COP: 4000 + Number(date.slice(-2)) },
+        rates: { VES: 4000 + Number(date.slice(-2)) },
       }),
     );
     const clock = () => NOW;
@@ -240,14 +240,14 @@ describe('Cuota del proveedor de tasas (SEC-054, int)', () => {
       where: { date: PREFETCH_DAY },
     });
     expect(stored.map((s) => [s.currency, Number(s.rate)])).toEqual([
-      ['COP', 4010],
+      ['VES', 4010],
     ]);
 
     // El día precargado lo leen las clínicas de la caché, sin presupuesto;
     // el global sigue agotado para lo demás.
     await expect(
       tenantContext.run(b.tenantId, () => rates.execute(PREFETCH_DAY)),
-    ).resolves.toMatchObject({ rates: { COP: 4010 } });
+    ).resolves.toMatchObject({ rates: { VES: 4010 } });
     await expect(
       tenantContext.run(b.tenantId, () => rates.execute(USER_DAYS[2])),
     ).rejects.toBeInstanceOf(ExchangeRateBudgetExceededError);

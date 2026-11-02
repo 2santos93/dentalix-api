@@ -17,7 +17,7 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
 
@@ -31,8 +31,8 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 });
 
 const DAY = 24 * 60 * 60 * 1000;
-/** Día civil de la sede (UTC−5 fijo) `offset` días desde hoy. */
-const bogotaDay = (offset = 0) =>
+/** Día civil de la sede (UTC−4 fijo) `offset` días desde hoy. */
+const caracasDay = (offset = 0) =>
   new Date(Date.now() - 5 * 60 * 60 * 1000 + offset * DAY)
     .toISOString()
     .slice(0, 10);
@@ -117,7 +117,7 @@ describe('Rebaja de convenio en el informe de descuentos (e2e, SEC-047)', () => 
   async function itemFor(patientId: string): Promise<string> {
     const plan = await create(
       `/patients/${patientId}/treatment-plans`,
-      { currency: 'COP' },
+      { currency: 'USD' },
       dentist.token,
     );
     return create(
@@ -133,7 +133,7 @@ describe('Rebaja de convenio en el informe de descuentos (e2e, SEC-047)', () => 
   ): Promise<Report> {
     const res = await as(clinic)
       .get('/reports/discounts')
-      .query({ from: bogotaDay(-1), to: bogotaDay(1), ...extra })
+      .query({ from: caracasDay(-1), to: caracasDay(1), ...extra })
       .expect(200);
     return res.body as Report;
   }
@@ -261,7 +261,7 @@ describe('Rebaja de convenio en el informe de descuentos (e2e, SEC-047)', () => 
     expect(out.total).toBe(2);
     expect(out.totals).toEqual([]);
     expect(out.agreementTotals).toEqual([
-      { currency: 'COP', items: 2, reduction: 2500000 },
+      { currency: 'USD', items: 2, reduction: 2500000 },
     ]);
   });
 
@@ -293,7 +293,7 @@ describe('Rebaja de convenio en el informe de descuentos (e2e, SEC-047)', () => 
   it('el CSV lleva el convenio, la rebaja y los dos autores', async () => {
     const res = await as(clinicA)
       .get('/reports/discounts.csv')
-      .query({ from: bogotaDay(-1), to: bogotaDay(1) })
+      .query({ from: caracasDay(-1), to: caracasDay(1) })
       .expect(200);
     const lines = res.text.slice(1).split('\r\n');
     expect(lines[0]).toContain(
@@ -301,7 +301,7 @@ describe('Rebaja de convenio en el informe de descuentos (e2e, SEC-047)', () => 
     );
     const surco = lines.find((l) => l.includes('Surco Salud −25 %'));
     expect(surco).toContain(
-      '"Surco Salud −25 %",2000000,500000,"Miembro RECEPTION","Miembro DENTIST"',
+      '"Surco Salud −25 %",2000000.00,500000.00,"Miembro RECEPTION","Miembro DENTIST"',
     );
     // B5: motivo «Convenio …» y el autor real en «Dado por».
     expect(surco).toContain(
@@ -322,7 +322,7 @@ describe('Rebaja de convenio en el informe de descuentos (e2e, SEC-047)', () => 
       await as(clinicA)
         .post(
           '/locations',
-          locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }),
+          locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede Norte' }),
         )
         .expect(201)
     ).body as { id: string };
@@ -338,7 +338,7 @@ describe('Rebaja de convenio en el informe de descuentos (e2e, SEC-047)', () => 
     // Un descuento discrecional del ADMIN en un paciente sin convenio.
     const patient = await createPatient('Descuento');
     const plan = await create(`/patients/${patient}/treatment-plans`, {
-      currency: 'COP',
+      currency: 'USD',
     });
     await create(`/treatment-plans/${plan}/items`, {
       toothNumber: '11',
@@ -350,7 +350,7 @@ describe('Rebaja de convenio en el informe de descuentos (e2e, SEC-047)', () => 
     const before = await report(clinicA);
     expect(before.totals).toEqual([
       {
-        currency: 'COP',
+        currency: 'USD',
         items: 1,
         gross: 2000000,
         discount: 200000,
@@ -369,7 +369,7 @@ describe('Rebaja de convenio en el informe de descuentos (e2e, SEC-047)', () => 
     expect(after.total).toBe(before.total + 1);
     expect(after.agreementTotals).toEqual([
       {
-        currency: 'COP',
+        currency: 'USD',
         items: before.agreementTotals[0].items + 1,
         reduction: before.agreementTotals[0].reduction + 500000,
       },

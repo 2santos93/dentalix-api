@@ -22,7 +22,7 @@ import {
 } from '../src/modules/treatment-plans/infrastructure/repositories/plan-option-group';
 import { resetDatabase } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -56,7 +56,7 @@ async function seedClinic(subdomain: string): Promise<Seeded> {
     data: { name: subdomain, subdomain },
   });
   const location = await owner.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId: tenant.id,
       name: `Sede ${subdomain}`,
     }),
@@ -103,7 +103,7 @@ async function presentedPlan(s: Seeded, groupId?: string): Promise<string> {
     data: {
       tenantId: s.tenantId,
       patientId: s.patientId,
-      currency: 'COP',
+      currency: 'USD',
       status: 'PRESENTED',
       presentedAt: new Date(),
       presentedLocationId: s.locationId,

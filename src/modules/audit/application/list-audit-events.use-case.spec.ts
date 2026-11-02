@@ -16,7 +16,7 @@ function event(i: number): AuditEventView {
     resourceType: 'PATIENT',
     resourceId: null,
     locationId: null,
-    timeZone: 'America/Bogota',
+    timeZone: 'America/Caracas',
     actor: null,
     patient: null,
     requestId: null,
@@ -33,7 +33,7 @@ function setup(rows: AuditEventView[] = []) {
       Parameters<AuditEventRepository['list']>
     >()
     .mockResolvedValue(rows);
-  const clinicTimeZone = jest.fn().mockResolvedValue('America/Bogota');
+  const clinicTimeZone = jest.fn().mockResolvedValue('America/Caracas');
   const repo: AuditEventRepository = {
     insert: jest.fn(),
     list,
@@ -56,7 +56,7 @@ describe('ListAuditEventsUseCase (DX-009)', () => {
     expect(out).toEqual({
       items: [],
       nextCursor: null,
-      timeZone: 'America/Bogota',
+      timeZone: 'America/Caracas',
     });
   });
 

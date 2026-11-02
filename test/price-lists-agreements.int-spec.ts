@@ -4,7 +4,7 @@ import { TenantContextService } from '../src/shared/tenancy/tenant-context.servi
 import { PrismaAgreementRepository } from '../src/modules/agreements/infrastructure/repositories/prisma-agreement.repository';
 import { PrismaPatientAgreementRepository } from '../src/modules/patient-agreements/infrastructure/repositories/prisma-patient-agreement.repository';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -55,13 +55,13 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
     data: { tenantId, name: 'Sanavida', type: 'PUBLIC_SYSTEM' },
   });
   const location = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId,
       name: 'Sede principal',
     }),
   });
   const otherLocation = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId,
       name: 'Sede norte',
     }),
@@ -76,7 +76,7 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
     },
   });
   const list = await raw.priceList.create({
-    data: { tenantId, name: 'Lista base', currency: 'COP', active: false },
+    data: { tenantId, name: 'Lista base', currency: 'VES', active: false },
   });
   const coverage = await raw.patientCoverage.create({
     data: { tenantId, patientId: patient.id, payerId: payer.id },
@@ -231,7 +231,7 @@ describe('listas de precios y convenios (int, DX-105)', () => {
         b.tenantId,
         (tx) =>
           tx.$executeRaw`INSERT INTO "price_lists" ("id", "tenantId", "name", "currency", "updatedAt")
-            VALUES (gen_random_uuid(), ${a.tenantId}::uuid, 'Intrusa', 'COP', now())`,
+            VALUES (gen_random_uuid(), ${a.tenantId}::uuid, 'Intrusa', 'VES', now())`,
       ),
     ).rejects.toThrow(/row-level security|42501/);
     expect(await asA((tx) => tx.agreement.count())).toBe(1);
@@ -272,7 +272,7 @@ describe('listas de precios y convenios (int, DX-105)', () => {
           data: {
             tenantId: a.tenantId,
             name: 'Sede ajena',
-            currency: 'COP',
+            currency: 'VES',
             locationId: b.locationId,
           },
         }),
@@ -343,7 +343,7 @@ describe('listas de precios y convenios (int, DX-105)', () => {
         data: {
           tenantId: a.tenantId,
           name: 'Sede 1',
-          currency: 'COP',
+          currency: 'VES',
           locationId: a.locationId,
         },
       });
@@ -351,7 +351,7 @@ describe('listas de precios y convenios (int, DX-105)', () => {
       await expect(
         insertViolating(
           `INSERT INTO "price_lists" ("id","tenantId","name","currency","locationId","updatedAt")
-          VALUES (gen_random_uuid(), '${a.tenantId}', 'Sede 1 bis', 'COP', '${a.locationId}', now())`,
+          VALUES (gen_random_uuid(), '${a.tenantId}', 'Sede 1 bis', 'VES', '${a.locationId}', now())`,
         ),
       ).rejects.toThrow(/price_lists_tenant_location_active_key/);
       // Por la ruta de la app también (P2002).
@@ -361,7 +361,7 @@ describe('listas de precios y convenios (int, DX-105)', () => {
             data: {
               tenantId: a.tenantId,
               name: 'Sede 1 ter',
-              currency: 'COP',
+              currency: 'VES',
               locationId: a.locationId,
             },
           }),
@@ -372,7 +372,7 @@ describe('listas de precios y convenios (int, DX-105)', () => {
         data: {
           tenantId: a.tenantId,
           name: 'Sede 2',
-          currency: 'COP',
+          currency: 'VES',
           locationId: a.otherLocationId,
         },
       });
@@ -380,15 +380,15 @@ describe('listas de precios y convenios (int, DX-105)', () => {
         data: {
           tenantId: a.tenantId,
           name: 'Inactiva',
-          currency: 'COP',
+          currency: 'VES',
           locationId: a.locationId,
           active: false,
         },
       });
       await raw.priceList.createMany({
         data: [
-          { tenantId: a.tenantId, name: 'Global 1', currency: 'COP' },
-          { tenantId: a.tenantId, name: 'Global 2', currency: 'COP' },
+          { tenantId: a.tenantId, name: 'Global 1', currency: 'VES' },
+          { tenantId: a.tenantId, name: 'Global 2', currency: 'VES' },
         ],
       });
       // Retirada la primera, otra activa vale.
@@ -400,7 +400,7 @@ describe('listas de precios y convenios (int, DX-105)', () => {
         data: {
           tenantId: a.tenantId,
           name: 'Sede 1 nueva',
-          currency: 'COP',
+          currency: 'VES',
           locationId: a.locationId,
         },
       });
@@ -408,7 +408,7 @@ describe('listas de precios y convenios (int, DX-105)', () => {
 
     it('nombre de lista y de convenio únicos entre los vivos; retirar libera el nombre', async () => {
       await raw.priceList.create({
-        data: { tenantId: a.tenantId, name: 'Repetida', currency: 'COP' },
+        data: { tenantId: a.tenantId, name: 'Repetida', currency: 'VES' },
       });
       await expect(
         insertViolating(
@@ -418,7 +418,7 @@ describe('listas de precios y convenios (int, DX-105)', () => {
       ).rejects.toThrow(/price_lists_tenant_name_key/);
       // Otra clínica puede usar el mismo nombre.
       await raw.priceList.create({
-        data: { tenantId: b.tenantId, name: 'Repetida', currency: 'COP' },
+        data: { tenantId: b.tenantId, name: 'Repetida', currency: 'VES' },
       });
 
       const first = await raw.agreement.create({ data: percentAgreement(a) });
@@ -610,7 +610,7 @@ describe('listas de precios y convenios (int, DX-105)', () => {
       for (const name of ['x', ' a ', 'y'.repeat(121)]) {
         await expect(
           raw.priceList.create({
-            data: { tenantId: a.tenantId, name, currency: 'COP' },
+            data: { tenantId: a.tenantId, name, currency: 'VES' },
           }),
         ).rejects.toThrow(/price_lists_name_length_check/);
         await expect(
@@ -619,7 +619,7 @@ describe('listas de precios y convenios (int, DX-105)', () => {
       }
       await expect(
         raw.priceList.create({
-          data: { tenantId: a.tenantId, name: 'Mala moneda', currency: 'cop' },
+          data: { tenantId: a.tenantId, name: 'Mala moneda', currency: 'ves' },
         }),
       ).rejects.toThrow(/price_lists_currency_format/);
       // Moneda inexistente: la FK al catálogo de monedas.

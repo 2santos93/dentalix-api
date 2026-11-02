@@ -31,7 +31,7 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 const SEDE_DAY = fixedSedeDay();
 const TODAY = SEDE_DAY.day;
 const YESTERDAY = addCivilDays(TODAY, -1);
-const PROVIDER = { COP: 4000, VES: 36.5 };
+const PROVIDER = { EUR: 4000, VES: 36.5 };
 const SETTINGS = '/api/v1/exchange/settings';
 const MANUAL_RATES = '/api/v1/exchange/manual-rates';
 
@@ -95,7 +95,7 @@ describe('Tasa congelada en cada abono (e2e, DX-375)', () => {
     clinic: Clinic,
     amount: number,
     paidAt: string,
-    currency = 'COP',
+    currency = 'EUR',
   ): Promise<PaymentBody> =>
     (
       await as(
@@ -203,7 +203,7 @@ describe('Tasa congelada en cada abono (e2e, DX-375)', () => {
   });
 
   it('BE-047: un abono de hoy cobrado antes de pasar a MANUAL conserva su tasa automática', async () => {
-    // 40.000 COP a 4.000 = 10 USD, hoy, todavía en AUTOMATIC.
+    // 40.000 EUR a 4.000 = 10 USD, hoy, todavía en AUTOMATIC.
     const before = await pay(manual, 40000, SEDE_DAY.before(60).toISOString());
     expect(before).toMatchObject({
       exchangeRateStatus: 'FROZEN',
@@ -259,7 +259,7 @@ describe('Tasa congelada en cada abono (e2e, DX-375)', () => {
         {
           paymentId: missing.id,
           amount: 41000,
-          currency: 'COP',
+          currency: 'EUR',
           paidOn: TODAY,
         },
       ],
@@ -267,7 +267,7 @@ describe('Tasa congelada en cada abono (e2e, DX-375)', () => {
   });
 
   it('dos clínicas el mismo día con fuentes distintas congelan cada una su tasa', async () => {
-    await registerRate(manual, { date: TODAY, currency: 'COP', rate: 4100 });
+    await registerRate(manual, { date: TODAY, currency: 'EUR', rate: 4100 });
     // El barrido congela el «sin tasa» con la manual: 41.000 / 4.100 = 10.
     await app.get(PaymentAllocationJobs).sweep();
     await expect(balance(manual)).resolves.toMatchObject({
@@ -296,9 +296,9 @@ describe('Tasa congelada en cada abono (e2e, DX-375)', () => {
   });
 
   it('una tasa manual usada responde 409 en español al cambiarla y no cambia el saldo', async () => {
-    const [cop] = (await listRates(manual)).filter((r) => r.currency === 'COP');
-    expect(cop).toMatchObject({ date: TODAY, inUse: true });
-    const res = await as(api().put(`${MANUAL_RATES}/${cop.id}`), manual)
+    const [gbp] = (await listRates(manual)).filter((r) => r.currency === 'EUR');
+    expect(gbp).toMatchObject({ date: TODAY, inUse: true });
+    const res = await as(api().put(`${MANUAL_RATES}/${gbp.id}`), manual)
       .send({ rate: 4500 })
       .expect(409);
     expect(res.body).toMatchObject({

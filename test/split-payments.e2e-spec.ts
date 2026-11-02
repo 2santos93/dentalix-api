@@ -19,7 +19,7 @@ import {
 } from './support/e2e-fixtures';
 import { civilDateIn } from '../src/shared/time/civil-day';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
 import { LOCATION_NOT_ALLOWED_CODE } from '../src/shared/tenancy/location-access';
@@ -35,9 +35,9 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
-const ZONE = 'America/Bogota';
+const ZONE = 'America/Caracas';
 const TODAY = civilDateIn(new Date(), ZONE);
-const PROVIDER = { COP: 4000 };
+const PROVIDER = { VES: 4000 };
 
 interface PaymentBody {
   id: string;
@@ -161,7 +161,7 @@ describe('Cobro dividido con un solo recibo (e2e, DX-390)', () => {
           api().post(`/api/v1/patients/${patient.id}/treatment-plans`),
           clinic,
         )
-          .send({ notes: 'Plan DX-390', currency: 'COP' })
+          .send({ notes: 'Plan DX-390', currency: 'VES' })
           .expect(201)
       ).body as { id: string }
     ).id;
@@ -239,10 +239,10 @@ describe('Cobro dividido con un solo recibo (e2e, DX-390)', () => {
   const firstBody = () => ({
     lines: [
       { amount: 50, currency: 'USD', paymentMethodId: cashA },
-      { amount: 100_000, currency: 'COP', paymentMethodId: cashA },
+      { amount: 100_000, currency: 'VES', paymentMethodId: cashA },
       {
         amount: 50_000,
-        currency: 'COP',
+        currency: 'VES',
         paymentMethodId: transferA,
         reference: 'TR-390-1',
       },
@@ -263,7 +263,7 @@ describe('Cobro dividido con un solo recibo (e2e, DX-390)', () => {
     const res = await split(firstBody(), { key: firstKey }).expect(201);
     first = res.body as SplitBody;
 
-    expect(first.planCurrency).toBe('COP');
+    expect(first.planCurrency).toBe('VES');
     // 50 USD × 4000 + 100 000 + 50 000.
     expect(first.total).toBe(350_000);
     expect(first.payments).toHaveLength(3);
@@ -283,7 +283,7 @@ describe('Cobro dividido con un solo recibo (e2e, DX-390)', () => {
       currency: 'USD',
       method: 'CASH',
       exchangeRateStatus: 'FROZEN',
-      frozenRate: { currency: 'COP', toPerBase: 4000 },
+      frozenRate: { currency: 'VES', toPerBase: 4000 },
     });
     expect(first.payments[2]).toMatchObject({
       method: 'TRANSFER',
@@ -302,7 +302,7 @@ describe('Cobro dividido con un solo recibo (e2e, DX-390)', () => {
     expect(receipt.paymentId).toBe(first.id);
     expect(receipt.reference).toBe(first.receiptNumber);
     expect(receipt.exchangeRate).toBeNull();
-    expect(receipt.split?.total).toEqual({ currency: 'COP', amount: 350_000 });
+    expect(receipt.split?.total).toEqual({ currency: 'VES', amount: 350_000 });
     expect(
       receipt.split?.lines.map((l) => [
         l.line,
@@ -314,8 +314,8 @@ describe('Cobro dividido con un solo recibo (e2e, DX-390)', () => {
       ]),
     ).toEqual([
       [1, 50, 'USD', 'Efectivo', null, 200_000],
-      [2, 100_000, 'COP', 'Efectivo', null, 100_000],
-      [3, 50_000, 'COP', 'Transferencia', 'TR-390-1', 50_000],
+      [2, 100_000, 'VES', 'Efectivo', null, 100_000],
+      [3, 50_000, 'VES', 'Transferencia', 'TR-390-1', 50_000],
     ]);
     expect(receipt.snapshot.planBalance?.balance).toBe(650_000);
     expect(
@@ -338,7 +338,7 @@ describe('Cobro dividido con un solo recibo (e2e, DX-390)', () => {
         (l) => l.currency === currency && l.method === method,
       );
     expect(line('USD', 'CASH')?.payments).toBe(50);
-    expect(line('COP', 'CASH')?.payments).toBe(100_000);
+    expect(line('VES', 'CASH')?.payments).toBe(100_000);
     expect(detail.payments.map((p) => p.id).sort()).toEqual(
       first.payments.map((p) => p.id).sort(),
     );
@@ -403,11 +403,11 @@ describe('Cobro dividido con un solo recibo (e2e, DX-390)', () => {
         lines: [
           {
             amount: 10_000,
-            currency: 'COP',
+            currency: 'VES',
             paymentMethodId: transferA,
             reference: 'TR-390-ATOM',
           },
-          { amount: 5_000, currency: 'COP', paymentMethodId: cashA },
+          { amount: 5_000, currency: 'VES', paymentMethodId: cashA },
         ],
       },
       { token: a.adminToken },
@@ -427,8 +427,8 @@ describe('Cobro dividido con un solo recibo (e2e, DX-390)', () => {
     const before = await countPayments();
     const missing = await split({
       lines: [
-        { amount: 1_000, currency: 'COP', paymentMethodId: cashA },
-        { amount: 1_000, currency: 'COP', paymentMethodId: mobileA },
+        { amount: 1_000, currency: 'VES', paymentMethodId: cashA },
+        { amount: 1_000, currency: 'VES', paymentMethodId: mobileA },
       ],
     }).expect(400);
     expect((missing.body as { message: string }).message).toBe(
@@ -436,12 +436,12 @@ describe('Cobro dividido con un solo recibo (e2e, DX-390)', () => {
     );
     await split({
       lines: [
-        { amount: 1_000, currency: 'COP', paymentMethodId: cashA },
-        { amount: 1_000, currency: 'COP', paymentMethodId: cashB },
+        { amount: 1_000, currency: 'VES', paymentMethodId: cashA },
+        { amount: 1_000, currency: 'VES', paymentMethodId: cashB },
       ],
     }).expect(400);
     const one = await split({
-      lines: [{ amount: 1_000, currency: 'COP', paymentMethodId: cashA }],
+      lines: [{ amount: 1_000, currency: 'VES', paymentMethodId: cashA }],
     }).expect(400);
     expect(JSON.stringify(one.body)).toContain('de 2 a 5 formas de pago');
     expect(await countPayments()).toBe(before);
@@ -449,10 +449,10 @@ describe('Cobro dividido con un solo recibo (e2e, DX-390)', () => {
 
   it('la referencia repetida de una línea → 409 con su línea; con el motivo de esa línea se registra', async () => {
     const lines = [
-      { amount: 1_000, currency: 'COP', paymentMethodId: cashA },
+      { amount: 1_000, currency: 'VES', paymentMethodId: cashA },
       {
         amount: 2_000,
-        currency: 'COP',
+        currency: 'VES',
         paymentMethodId: transferA,
         reference: 'tr 390 1',
       },
@@ -497,13 +497,13 @@ describe('Cobro dividido con un solo recibo (e2e, DX-390)', () => {
     const { balance: pending } = await balance();
     const lines = [
       { amount: 100, currency: 'USD', paymentMethodId: cashA },
-      { amount: pending, currency: 'COP', paymentMethodId: cashA },
+      { amount: pending, currency: 'VES', paymentMethodId: cashA },
     ];
     const key = randomUUID();
     const res = await split({ lines }, { key }).expect(409);
     expect(res.body).toMatchObject({
       code: 'SPLIT_PAYMENT_EXCEEDS_BALANCE',
-      currency: 'COP',
+      currency: 'VES',
       total: pending + 400_000,
       pending,
       excess: 400_000,
@@ -520,8 +520,8 @@ describe('Cobro dividido con un solo recibo (e2e, DX-390)', () => {
     // excedente de otro cobro es solo su total, sin los 400 000 de antes.
     const again = await split({
       lines: [
-        { amount: 30_000, currency: 'COP', paymentMethodId: cashA },
-        { amount: 30_000, currency: 'COP', paymentMethodId: cashA },
+        { amount: 30_000, currency: 'VES', paymentMethodId: cashA },
+        { amount: 30_000, currency: 'VES', paymentMethodId: cashA },
       ],
     }).expect(409);
     expect(again.body).toMatchObject({
@@ -589,17 +589,17 @@ describe('Cobro dividido con un solo recibo (e2e, DX-390)', () => {
     for (const name of ['Norte DX089', 'Sur DX089']) {
       const location = (
         await as(api().post('/api/v1/locations'), a)
-          .send(locationBody(REGIONAL_BOGOTA_FIXTURE, { name }))
+          .send(locationBody(REGIONAL_CARACAS_FIXTURE, { name }))
           .expect(201)
       ).body as { id: string };
       allowed.push(location.id);
     }
     // El saldo traspasable usa abonos en la moneda del plan (DX-253).
-    // Otros cobros COP dejan margen incluso tras anular el primer cobro.
+    // Otros cobros VES dejan margen incluso tras anular el primer cobro.
     await split({
       lines: [
-        { amount: 250_000, currency: 'COP', paymentMethodId: cashA },
-        { amount: 250_000, currency: 'COP', paymentMethodId: cashA },
+        { amount: 250_000, currency: 'VES', paymentMethodId: cashA },
+        { amount: 250_000, currency: 'VES', paymentMethodId: cashA },
       ],
       confirmCreditBalance: true,
     }).expect(201);
@@ -608,11 +608,11 @@ describe('Cobro dividido con un solo recibo (e2e, DX-390)', () => {
       data: {
         tenantId: a.tenantId,
         patientId: payment.patientId,
-        currency: 'COP',
+        currency: 'VES',
       },
     });
     await as(api().post(`/api/v1/treatment-plans/${planA}/credit-transfers`), a)
-      .send({ targetPlanId: target.id, amount: 10_000, currency: 'COP' })
+      .send({ targetPlanId: target.id, amount: 10_000, currency: 'VES' })
       .expect(201);
     const promise = await raw.paymentPromise.create({
       data: {
@@ -620,7 +620,7 @@ describe('Cobro dividido con un solo recibo (e2e, DX-390)', () => {
         patientId: payment.patientId,
         locationId: payment.locationId,
         amount: 1,
-        currency: 'COP',
+        currency: 'VES',
         dueDate: new Date(`${TODAY}T00:00:00.000Z`),
         createdById: author.id,
       },
@@ -736,8 +736,8 @@ describe('Cobro dividido con un solo recibo (e2e, DX-390)', () => {
       .send({
         paidAt: TODAY,
         lines: [
-          { amount: 1_000, currency: 'COP', paymentMethodId: cashB },
-          { amount: 1_000, currency: 'COP', paymentMethodId: cashB },
+          { amount: 1_000, currency: 'VES', paymentMethodId: cashB },
+          { amount: 1_000, currency: 'VES', paymentMethodId: cashB },
         ],
       })
       .expect(404);
@@ -747,8 +747,8 @@ describe('Cobro dividido con un solo recibo (e2e, DX-390)', () => {
       .send({
         paidAt: TODAY,
         lines: [
-          { amount: 1_000, currency: 'COP', paymentMethodId: cashB },
-          { amount: 2_000, currency: 'COP', paymentMethodId: cashB },
+          { amount: 1_000, currency: 'VES', paymentMethodId: cashB },
+          { amount: 2_000, currency: 'VES', paymentMethodId: cashB },
         ],
       })
       .expect(201);
@@ -760,8 +760,8 @@ describe('Cobro dividido con un solo recibo (e2e, DX-390)', () => {
     await split(
       {
         lines: [
-          { amount: 1_000, currency: 'COP', paymentMethodId: cashA },
-          { amount: 1_000, currency: 'COP', paymentMethodId: cashA },
+          { amount: 1_000, currency: 'VES', paymentMethodId: cashA },
+          { amount: 1_000, currency: 'VES', paymentMethodId: cashA },
         ],
       },
       { token },

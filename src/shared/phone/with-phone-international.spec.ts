@@ -13,9 +13,9 @@ describe('withPhoneInternational (DX-387)', () => {
 
   it('a number with + keeps its own code whatever the region', () => {
     expect(
-      withPhoneInternational({ phone: '+573105550101' }, 'VE')
+      withPhoneInternational({ phone: '+584145550101' }, 'VE')
         .phoneInternational,
-    ).toBe('+57 310 5550101');
+    ).toBe('+58 414 5550101');
   });
 
   it('no phone, an unreadable one or no region give null and the stored phone stays as is', () => {

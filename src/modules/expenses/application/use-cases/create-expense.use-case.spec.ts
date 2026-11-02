@@ -53,7 +53,7 @@ const input = (
   category: 'Papelería',
   supplier: 'Papelería Luna',
   amount: 120000,
-  currency: 'COP',
+  currency: 'VES',
   invoiceDate: '2026-10-20',
   ...patch,
 });
@@ -86,7 +86,7 @@ describe('alta de un gasto (DX-274)', () => {
       supplier: 'Papelería Luna',
       description: 'Resmas',
       amount: 120000,
-      currency: 'COP',
+      currency: 'VES',
       invoiceDate: '2026-10-20',
       dueDate: '2026-11-20',
       paidAmount: 0,
@@ -203,7 +203,7 @@ describe('alta de un gasto (DX-274)', () => {
     it('no admite un pago mayor que el gasto ni con día futuro', async () => {
       await expect(
         run(input({ payment: { amount: 120001, method: 'CARD' } })),
-      ).rejects.toThrow('El pago supera lo pendiente del gasto (120.000 COP).');
+      ).rejects.toThrow('El pago supera lo pendiente del gasto (120.000 VES).');
       await expect(
         run(
           input({

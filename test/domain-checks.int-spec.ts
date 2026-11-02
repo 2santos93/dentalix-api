@@ -7,7 +7,7 @@ import { PrismaExceptionFilter } from '../src/shared/prisma/prisma-exception.fil
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -61,7 +61,7 @@ async function seed(): Promise<Seeded> {
   const [locationA, locationB] = await Promise.all(
     ['Sede A', 'Sede B'].map((name) =>
       raw.location.create({
-        data: locationData(REGIONAL_BOGOTA_FIXTURE, { tenantId, name }),
+        data: locationData(REGIONAL_CARACAS_FIXTURE, { tenantId, name }),
       }),
     ),
   );

@@ -38,7 +38,7 @@ interface FakeConvertInput {
 
 /**
  * Deterministic fake for `ConvertAmountUseCase`: fixed rate per source
- * currency (1 USD = 4000 COP by default), same-currency passthrough.
+ * currency (1 USD = 4000 VES by default), same-currency passthrough.
  * Records every call so specs can assert per-payment-date conversion --
  * mirrors sales/get-sales-totals.use-case.spec.ts's
  * FakeConvertAmountUseCase.
@@ -74,7 +74,7 @@ class FakeConvertAmountUseCase {
   public readonly notRespondingFrom = new Set<string>();
   /** units of `from` currency per 1 USD-equivalent `to`; mirrors
    * `rates[from]` in the real use case. */
-  private readonly unitsPerTarget: Record<string, number> = { COP: 4000 };
+  private readonly unitsPerTarget: Record<string, number> = { VES: 4000 };
 
   /** Test helper: register a fixed rate for a currency pair (units of
    * `from` per 1 unit of `to`), used by the mixed-amount regression test. */
@@ -283,7 +283,7 @@ describe('GetPlanBalanceUseCase', () => {
 
   it('DX-097 (H2): la tasa es la del día civil del abono en su sede, igual que el dashboard', async () => {
     const { repo, fakeGetPlan, fakeConvert, uc } =
-      makeUseCase('America/Bogota');
+      makeUseCase('America/Caracas');
     fakeGetPlan.plan = makePlan({
       items: [makeItem({ price: 1000, status: TreatmentPlanItemStatus.DONE })],
     });
@@ -291,7 +291,7 @@ describe('GetPlanBalanceUseCase', () => {
     repo.seedPayment({
       treatmentPlanId: 'plan-1',
       amount: 400000,
-      currency: 'COP',
+      currency: 'VES',
       paidAt: new Date('2026-03-06T01:00:00.000Z'),
     });
 
@@ -310,7 +310,7 @@ describe('GetPlanBalanceUseCase', () => {
     repo.seedPayment({
       treatmentPlanId: 'plan-1',
       amount: 400000,
-      currency: 'COP',
+      currency: 'VES',
       paidAt: new Date('2026-03-05T12:00:00.000Z'),
     });
     repo.seedPayment({
@@ -322,14 +322,14 @@ describe('GetPlanBalanceUseCase', () => {
 
     const result = await uc.execute('plan-1');
 
-    // 400000 COP / 4000 = 100 USD, plus 30 USD passthrough = 130.
+    // 400000 VES / 4000 = 100 USD, plus 30 USD passthrough = 130.
     expect(result.paid).toBe(130);
     expect(result.billable).toBe(1000);
     expect(result.balance).toBe(870);
     expect(result.paymentsCount).toBe(2);
     // DX-375: el de USD está en la moneda del plan y no se convierte.
     expect(fakeConvert.calls).toEqual([
-      { amount: 400000, from: 'COP', to: 'USD', date: '2026-03-05' },
+      { amount: 400000, from: 'VES', to: 'USD', date: '2026-03-05' },
     ]);
   });
 
@@ -397,19 +397,19 @@ describe('GetPlanBalanceUseCase', () => {
     repo.seedPayment({
       treatmentPlanId: 'plan-1',
       amount: 400000,
-      currency: 'COP',
+      currency: 'VES',
       paidAt: new Date('2026-03-05T09:00:00.000Z'),
     });
     repo.seedPayment({
       treatmentPlanId: 'plan-1',
       amount: 200000,
-      currency: 'COP',
+      currency: 'VES',
       paidAt: new Date('2026-03-05T18:00:00.000Z'),
     });
     repo.seedPayment({
       treatmentPlanId: 'plan-1',
       amount: 40000,
-      currency: 'COP',
+      currency: 'VES',
       paidAt: new Date('2026-03-06T00:00:00.000Z'),
     });
 
@@ -501,14 +501,14 @@ describe('GetPlanBalanceUseCase', () => {
   // tasa. Solo ese fallo y «moneda sin tasa»; cualquier otro se propaga.
   it('skips a payment whose rate the provider cannot give instead of failing the balance', async () => {
     const { repo, fakeGetPlan, fakeConvert, uc } = makeUseCase();
-    fakeConvert.rateUnavailableFrom.add('COP');
+    fakeConvert.rateUnavailableFrom.add('VES');
     fakeGetPlan.plan = makePlan({
       items: [makeItem({ price: 500, status: TreatmentPlanItemStatus.DONE })],
     });
     repo.seedPayment({
       treatmentPlanId: 'plan-1',
       amount: 400000,
-      currency: 'COP',
+      currency: 'VES',
       paidAt: new Date('2026-03-05T00:00:00.000Z'),
     });
 
@@ -524,7 +524,7 @@ describe('GetPlanBalanceUseCase', () => {
 
     it(`a los ${BALANCE_CONVERSION_BUDGET_MS} ms responde sin esperar: los abonos sin convertir salen marcados y no suman`, async () => {
       const { repo, fakeGetPlan, fakeConvert, uc } = makeUseCase();
-      fakeConvert.hangingFrom.add('COP');
+      fakeConvert.hangingFrom.add('VES');
       fakeGetPlan.plan = makePlan({
         currency: 'USD',
         items: [makeItem({ price: 500, status: TreatmentPlanItemStatus.DONE })],
@@ -538,7 +538,7 @@ describe('GetPlanBalanceUseCase', () => {
       const slow = repo.seedPayment({
         treatmentPlanId: 'plan-1',
         amount: 400000,
-        currency: 'COP',
+        currency: 'VES',
         paidAt: new Date('2026-03-06T12:00:00.000Z'),
       });
 
@@ -554,7 +554,7 @@ describe('GetPlanBalanceUseCase', () => {
         {
           paymentId: slow.id,
           amount: 400000,
-          currency: 'COP',
+          currency: 'VES',
           paidOn: '2026-03-06',
         },
       ]);
@@ -634,13 +634,13 @@ describe('GetPlanBalanceUseCase', () => {
 
     it('el plazo es de todo el saldo, no por abono: un segundo abono lento no lo alarga', async () => {
       const { repo, fakeGetPlan, fakeConvert, uc } = makeUseCase();
-      fakeConvert.hangingFrom.add('COP');
+      fakeConvert.hangingFrom.add('VES');
       fakeGetPlan.plan = makePlan({ currency: 'USD' });
       for (const day of ['2026-03-05', '2026-03-06']) {
         repo.seedPayment({
           treatmentPlanId: 'plan-1',
           amount: 400000,
-          currency: 'COP',
+          currency: 'VES',
           paidAt: new Date(`${day}T12:00:00.000Z`),
         });
       }
@@ -656,13 +656,13 @@ describe('GetPlanBalanceUseCase', () => {
 
     it('vencido el plazo no se pide ninguna conversión más al proveedor', async () => {
       const { repo, fakeGetPlan, fakeConvert, uc } = makeUseCase();
-      fakeConvert.hangingFrom.add('COP');
+      fakeConvert.hangingFrom.add('VES');
       fakeGetPlan.plan = makePlan({ currency: 'USD' });
       for (const day of ['2026-03-05', '2026-03-06', '2026-03-07']) {
         repo.seedPayment({
           treatmentPlanId: 'plan-1',
           amount: 400000,
-          currency: 'COP',
+          currency: 'VES',
           paidAt: new Date(`${day}T12:00:00.000Z`),
         });
       }
@@ -681,7 +681,7 @@ describe('GetPlanBalanceUseCase', () => {
       repo.seedPayment({
         treatmentPlanId: 'plan-1',
         amount: 400000,
-        currency: 'COP',
+        currency: 'VES',
         paidAt: new Date('2026-03-05T12:00:00.000Z'),
       });
 
@@ -695,19 +695,19 @@ describe('GetPlanBalanceUseCase', () => {
 
   it('propagates a generic conversion error instead of silently skipping the payment', async () => {
     const { repo, fakeGetPlan, fakeConvert, uc } = makeUseCase();
-    fakeConvert.infraFailingFrom.add('COP');
+    fakeConvert.infraFailingFrom.add('VES');
     fakeGetPlan.plan = makePlan({
       items: [makeItem({ price: 500, status: TreatmentPlanItemStatus.DONE })],
     });
     repo.seedPayment({
       treatmentPlanId: 'plan-1',
       amount: 400000,
-      currency: 'COP',
+      currency: 'VES',
       paidAt: new Date('2026-03-05T00:00:00.000Z'),
     });
 
     await expect(uc.execute('plan-1')).rejects.toThrow(
-      'simulated infra failure converting COP',
+      'simulated infra failure converting VES',
     );
   });
 
@@ -891,14 +891,14 @@ describe('GetPlanBalanceUseCase', () => {
 
     it('invariant: sum of item paid plus unallocated equals paid', async () => {
       const { allocations, uc, fakeConvert } = makeUseCase();
-      fakeConvert.setRate('COP', 4000);
-      // Abono en COP convertido en vivo: 400000 COP = 100 USD = su base.
+      fakeConvert.setRate('VES', 4000);
+      // Abono en VES convertido en vivo: 400000 VES = 100 USD = su base.
       seed(allocations, {
         payments: [
           {
             id: 'a',
             amount: 400000,
-            currency: 'COP',
+            currency: 'VES',
             paidOn: '2026-03-05',
             exchangeRateCurrency: null,
             frozenRate: null,
@@ -954,13 +954,13 @@ describe('GetPlanBalanceUseCase', () => {
     // cobrado y el desglose por ítem no descuadran aunque la tasa cambie.
     it('paid usa la base del abono: lo imputado más lo sin imputar es lo cobrado (BE-050)', async () => {
       const { allocations, uc, fakeConvert } = makeUseCase();
-      fakeConvert.setRate('COP', 5000);
+      fakeConvert.setRate('VES', 5000);
       seed(allocations, {
         payments: [
           {
             id: 'p1',
             amount: 400000,
-            currency: 'COP',
+            currency: 'VES',
             paidOn: '2026-03-05',
             exchangeRateCurrency: null,
             frozenRate: null,
@@ -979,14 +979,14 @@ describe('GetPlanBalanceUseCase', () => {
 
     it('un abono «sin tasa» no cuenta en paid y sale en paymentsWithoutRate (DX-375)', async () => {
       const { allocations, uc, fakeConvert } = makeUseCase();
-      fakeConvert.setRate('COP', 4000);
+      fakeConvert.setRate('VES', 4000);
       seed(allocations, {
         payments: [
           pay('usd', 10),
           {
-            id: 'cop',
+            id: 'ves',
             amount: 40000,
-            currency: 'COP',
+            currency: 'VES',
             paidOn: '2026-03-06',
             exchangeRateCurrency: 'USD',
             frozenRate: null,
@@ -1001,9 +1001,9 @@ describe('GetPlanBalanceUseCase', () => {
       expect(result.paymentsCount).toBe(2);
       expect(result.paymentsWithoutRate).toEqual([
         {
-          paymentId: 'cop',
+          paymentId: 'ves',
           amount: 40000,
-          currency: 'COP',
+          currency: 'VES',
           paidOn: '2026-03-06',
         },
       ]);

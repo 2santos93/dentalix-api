@@ -81,7 +81,7 @@ describe('pagos de un gasto (DX-274)', () => {
       await pay(e.id, { amount: 99.5, method: 'CARD' });
       await expect(pay(e.id, { amount: 0.51, method: 'CARD' })).rejects.toThrow(
         new BadRequestException(
-          'El pago supera lo pendiente del gasto (0,50 COP).',
+          'El pago supera lo pendiente del gasto (0,50 VES).',
         ),
       );
       await expect(

@@ -34,6 +34,7 @@ import {
 import { parseIdempotencyKey } from '../../../expenses/domain/expense-idempotency';
 import { checkScheduleBlocks } from '../schedule-block-check';
 import { NO_WARNINGS, collectWarnings } from '../appointment-warnings';
+import { ChairAssignmentService } from '../chair-assignment';
 import {
   OVERLAP_MESSAGES,
   overlapExclusionScope,
@@ -85,6 +86,8 @@ export interface CreateWalkInInput {
   providerId: string;
   /** Tipo urgente concreto; sin él, el primer tipo urgente activo. */
   appointmentTypeId?: string;
+  /** DX-492: sillón de la sede; sin él, la cita va sin sillón. */
+  chairId?: string;
   triageFlags?: TriageFlag[];
   triageNote?: string | null;
   /** Sobrecupo AHORA con su motivo (5–300); sin él, hueco reservado o 409. */
@@ -124,6 +127,7 @@ export class CreateWalkInUseCase {
     @Inject(LOCATION_REPOSITORY)
     private readonly locations: LocationRepository,
     private readonly availability: ProviderAvailabilityService,
+    private readonly chairs: ChairAssignmentService,
     @Optional()
     @Inject(SCHEDULE_BLOCK_CLOCK)
     private readonly clock: ScheduleBlockClock = systemScheduleBlockClock,
@@ -199,6 +203,13 @@ export class CreateWalkInUseCase {
     const location = await this.locations.findById(locationId);
     if (!location) throw new NotFoundException('Sede no encontrada');
     const timeZone = requireLocationTimeZone(location);
+    const chair =
+      input.chairId === undefined
+        ? null
+        : await this.chairs.load(input.chairId, {
+            locationId,
+            requireActive: true,
+          });
 
     const arrivedAt = this.clock();
     const now = floorToMinute(arrivedAt);
@@ -270,6 +281,11 @@ export class CreateWalkInUseCase {
       }
     }
 
+    // El sillón no mueve el hueco: si está ocupado, se elige otro.
+    if (chair !== null) {
+      await this.chairs.assertFree(chair, { locationId, ...slot });
+    }
+
     try {
       const written = await this.walkIns.create(
         {
@@ -277,6 +293,7 @@ export class CreateWalkInUseCase {
           providerId: input.providerId,
           locationId,
           appointmentTypeId: type.id,
+          chairId: chair?.id ?? null,
           start: slot.start,
           end: slot.end,
           arrivedAt,
@@ -307,9 +324,11 @@ export class CreateWalkInUseCase {
       if (scope === 'provider') {
         throw new ConflictException(WALK_IN_MESSAGES.slotTaken);
       }
-      // Una cita sin cita previa no lleva sillón (DX-211): solo queda el paciente.
       if (scope === 'patient') {
         throw new ConflictException(OVERLAP_MESSAGES.patient);
+      }
+      if (scope === 'chair' && chair !== null) {
+        throw await this.chairs.raceConflict(chair.id, slot);
       }
       throw error;
     }

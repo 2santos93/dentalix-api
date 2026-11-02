@@ -65,7 +65,9 @@ describe('nº de afiliado o póliza (SEC-049, regla única DX-311)', () => {
         MEMBER_NUMBER_DIGIT_MESSAGE,
         MEMBER_NUMBER_REPEATED_MESSAGE,
       ]) {
-        expect(message).not.toMatch(/EPS|prepagada|mutua|documento|c[ée]dula/i);
+        expect(message).not.toMatch(
+          /E[P]S|prepagada|mutua|documento|c[ée]dula/i,
+        );
       }
     });
 

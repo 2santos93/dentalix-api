@@ -5,7 +5,7 @@ function row(overrides: Partial<BillablePlanRow> = {}): BillablePlanRow {
   return {
     id: 'tp-1',
     status: 'ACCEPTED',
-    currency: 'COP',
+    currency: 'VES',
     createdAt: new Date('2026-01-01T12:00:00.000Z'),
     billable: 1000,
     paidByCurrency: [],
@@ -17,12 +17,12 @@ function row(overrides: Partial<BillablePlanRow> = {}): BillablePlanRow {
 describe('computeBillablePlans', () => {
   it('total, abonado en la moneda del plan y saldo', () => {
     const [plan] = computeBillablePlans([
-      row({ paidByCurrency: [{ currency: 'COP', amount: 300.1 }] }),
+      row({ paidByCurrency: [{ currency: 'VES', amount: 300.1 }] }),
     ]);
     expect(plan).toEqual({
       id: 'tp-1',
       status: 'ACCEPTED',
-      currency: 'COP',
+      currency: 'VES',
       createdAt: new Date('2026-01-01T12:00:00.000Z'),
       total: 1000,
       paid: 300.1,
@@ -37,7 +37,7 @@ describe('computeBillablePlans', () => {
       row({
         paidByCurrency: [
           { currency: 'USD', amount: 10 },
-          { currency: 'COP', amount: 100 },
+          { currency: 'VES', amount: 100 },
           { currency: 'EUR', amount: 5 },
         ],
       }),
@@ -54,7 +54,7 @@ describe('computeBillablePlans', () => {
     const [plan] = computeBillablePlans([
       row({
         billable: 0.3,
-        paidByCurrency: [{ currency: 'COP', amount: 0.1 }],
+        paidByCurrency: [{ currency: 'VES', amount: 0.1 }],
       }),
     ]);
     expect(plan.balance).toBe(0.2);
@@ -85,7 +85,7 @@ describe('computeBillablePlans', () => {
 
   it('saldo negativo cuando se abonó de más (a favor del paciente)', () => {
     const [plan] = computeBillablePlans([
-      row({ paidByCurrency: [{ currency: 'COP', amount: 1500 }] }),
+      row({ paidByCurrency: [{ currency: 'VES', amount: 1500 }] }),
     ]);
     expect(plan.balance).toBe(-500);
   });

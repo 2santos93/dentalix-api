@@ -210,6 +210,7 @@ export interface WalkInRequestShape {
   };
   providerId: string;
   appointmentTypeId?: string;
+  chairId?: string;
   triageFlags?: readonly TriageFlag[];
   triageNote?: string | null;
   overbookReason?: string;
@@ -226,7 +227,7 @@ const trimmedOrNull = (value: string | null | undefined): string | null => {
  * DX-510: huella (SHA-256 hex) de la petición, con la normalización que
  * aplica el caso de uso (recortes, señales sin repetir y en su orden, ids en
  * minúsculas) y la sede: el mismo cuerpo escrito de dos formas es la misma
- * petición; otro paciente, profesional, tipo, triaje, motivo o sede, no.
+ * petición; otro paciente, profesional, tipo, sillón, triaje, motivo o sede, no.
  */
 export function walkInRequestFingerprint(input: WalkInRequestShape): string {
   const p = input.newPatient;
@@ -249,6 +250,8 @@ export function walkInRequestFingerprint(input: WalkInRequestShape): string {
     normalizeTriageFlags(input.triageFlags),
     normalizeTriageNote(input.triageNote),
     trimmedOrNull(input.overbookReason),
+    // DX-492: solo con sillón, para que las claves ya guardadas sigan valiendo.
+    ...(input.chairId === undefined ? [] : [input.chairId.toLowerCase()]),
   ];
   return createHash('sha256').update(JSON.stringify(parts)).digest('hex');
 }

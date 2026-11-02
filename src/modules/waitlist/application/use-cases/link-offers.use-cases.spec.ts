@@ -25,7 +25,7 @@ import {
 } from '../../domain/slot-offer-link';
 
 const local = (day: string, hhmm: string) =>
-  new Date(`${day}T${hhmm}:00-05:00`);
+  new Date(`${day}T${hhmm}:00-04:00`);
 let now = local('2026-10-19', '08:00');
 const clock = () => now;
 
@@ -36,10 +36,10 @@ const locations = {
         ? {
             id,
             name: 'Sede Centro',
-            country: 'CO',
-            defaultPhoneRegion: 'CO',
-            timeZone: 'America/Bogota',
-            locale: 'es-CO',
+            country: 'VE',
+            defaultPhoneRegion: 'VE',
+            timeZone: 'America/Caracas',
+            locale: 'es-VE',
             hourCycle: 'h12',
           }
         : null,
@@ -164,7 +164,7 @@ describe('«Enviar oferta con enlace» (DX-435)', () => {
       CTX,
     );
     expect(view.url).toMatch(/\/hueco\/[A-Za-z0-9_-]{43}$/);
-    expect(view.whatsappPhone).toBe('573101234567');
+    expect(view.whatsappPhone).toBe('584141234567');
     expect(sent).toHaveLength(0);
   });
 

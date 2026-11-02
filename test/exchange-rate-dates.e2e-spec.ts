@@ -21,7 +21,7 @@ import {
   PERIOD_DAY_MIN,
 } from '../src/shared/time/civil-day';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   REGIONAL_TOKYO_FIXTURE,
 } from './support/location-fixtures';
 
@@ -48,7 +48,7 @@ const OUT_OF_RANGE_MESSAGE =
   'date tiene que ser un día entre el 2000-01-01 y el 2100-12-31.';
 
 const todayIn = (timeZone: string) => civilDateIn(new Date(), timeZone);
-const bogotaToday = () => todayIn(REGIONAL_BOGOTA_FIXTURE.timeZone);
+const caracasToday = () => todayIn(REGIONAL_CARACAS_FIXTURE.timeZone);
 const tokyoToday = () => todayIn(REGIONAL_TOKYO_FIXTURE.timeZone);
 
 /**
@@ -86,7 +86,7 @@ describe('Fechas de /exchange/rates y /exchange/convert (e2e, BE-049, DX-383)', 
     }
     return Promise.resolve({
       base: 'USD',
-      rates: { COP: 4000 + Number(date.slice(-2)) },
+      rates: { VES: 4000 + Number(date.slice(-2)) },
     });
   });
 
@@ -99,7 +99,7 @@ describe('Fechas de /exchange/rates y /exchange/convert (e2e, BE-049, DX-383)', 
   const rates = (clinic: Clinic, date: string) =>
     get(clinic, `rates?date=${date}`);
   const convert = (clinic: Clinic, date: string) =>
-    get(clinic, `convert?amount=100&from=USD&to=COP&date=${date}`);
+    get(clinic, `convert?amount=100&from=USD&to=VES&date=${date}`);
   const both = async (clinic: Clinic, date: string) => [
     await rates(clinic, date),
     await convert(clinic, date),
@@ -108,8 +108,8 @@ describe('Fechas de /exchange/rates y /exchange/convert (e2e, BE-049, DX-383)', 
   const touchedDays = () => [
     CACHED_DAY,
     MISSING_DAY,
-    bogotaToday(),
-    addCivilDays(bogotaToday(), 1),
+    caracasToday(),
+    addCivilDays(caracasToday(), 1),
     tokyoToday(),
     addCivilDays(tokyoToday(), 1),
   ];
@@ -126,7 +126,7 @@ describe('Fechas de /exchange/rates y /exchange/convert (e2e, BE-049, DX-383)', 
       where: { date: { in: touchedDays() } },
     });
     await raw.exchangeRateSnapshot.create({
-      data: { date: CACHED_DAY, currency: 'COP', rate: 3900 },
+      data: { date: CACHED_DAY, currency: 'VES', rate: 3900 },
     });
     auto = await registerClinic(app, 'dx383-auto');
     manual = await registerClinic(app, 'dx383-manual');
@@ -185,11 +185,11 @@ describe('Fechas de /exchange/rates y /exchange/convert (e2e, BE-049, DX-383)', 
     );
 
     it('mañana en la zona de la sede es 400 EXCHANGE_RATE_DATE_FUTURE, aunque haya snapshot', async () => {
-      const today = bogotaToday();
+      const today = caracasToday();
       const tomorrow = addCivilDays(today, 1);
       await raw.exchangeRateSnapshot.upsert({
-        where: { date_currency: { date: tomorrow, currency: 'COP' } },
-        create: { date: tomorrow, currency: 'COP', rate: 1 },
+        where: { date_currency: { date: tomorrow, currency: 'VES' } },
+        create: { date: tomorrow, currency: 'VES', rate: 1 },
         update: {},
       });
       for (const res of await both(clinic(), tomorrow)) {
@@ -210,7 +210,7 @@ describe('Fechas de /exchange/rates y /exchange/convert (e2e, BE-049, DX-383)', 
     expect(cachedRates.body).toEqual({
       base: 'USD',
       source: 'AUTOMATIC',
-      rates: { COP: 3900 },
+      rates: { VES: 3900 },
     });
     expect(cachedConvert.body).toMatchObject({
       result: 390000,
@@ -223,7 +223,7 @@ describe('Fechas de /exchange/rates y /exchange/convert (e2e, BE-049, DX-383)', 
     expect(missRates.body).toEqual({
       base: 'USD',
       source: 'AUTOMATIC',
-      rates: { COP: 4006 },
+      rates: { VES: 4006 },
     });
     expect(missConvert.body).toMatchObject({ result: 400600 });
     expect(fetchRates).toHaveBeenCalledTimes(1);
@@ -231,16 +231,16 @@ describe('Fechas de /exchange/rates y /exchange/convert (e2e, BE-049, DX-383)', 
   });
 
   it('MANUAL: hoy responde con la tasa registrada, sin llamar al proveedor, como antes', async () => {
-    const today = bogotaToday();
+    const today = caracasToday();
     await as(manual, request(app.getHttpServer()).post(MANUAL_RATES))
-      .send({ date: today, currency: 'COP', rate: 4100 })
+      .send({ date: today, currency: 'VES', rate: 4100 })
       .expect(201);
     const [todayRates, todayConvert] = await both(manual, today);
     expect(todayRates.status).toBe(200);
     expect(todayRates.body).toEqual({
       base: 'USD',
       source: 'MANUAL',
-      rates: { COP: 4100 },
+      rates: { VES: 4100 },
     });
     expect(todayConvert.body).toMatchObject({ result: 410000, rateUsed: 4100 });
     expect(fetchRates).not.toHaveBeenCalled();

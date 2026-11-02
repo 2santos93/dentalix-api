@@ -72,7 +72,7 @@ function makeRepo(
 // Fake whitelist: allows the codes actually exercised by this suite. `has`
 // is case-sensitive here on purpose, to catch a regression where the use
 // case forgets to `.toUpperCase()` BEFORE calling it.
-function makeWhitelist(allowed: string[] = ['USD', 'COP']): CurrencyWhitelist {
+function makeWhitelist(allowed: string[] = ['USD', 'VES']): CurrencyWhitelist {
   return {
     has: (code: string): Promise<boolean> =>
       Promise.resolve(allowed.includes(code)),
@@ -82,7 +82,7 @@ function makeWhitelist(allowed: string[] = ['USD', 'COP']): CurrencyWhitelist {
 const LOC_COP = planCurrencySource({
   kind: 'location',
   locationId: 'loc-1',
-  currency: 'COP',
+  currency: 'VES',
 });
 
 describe('CreateTreatmentPlanUseCase', () => {
@@ -155,7 +155,7 @@ describe('CreateTreatmentPlanUseCase', () => {
 
   function makeUc(
     source: ReturnType<typeof planCurrencySource>,
-    allowed = ['USD', 'COP', 'JPY'],
+    allowed = ['USD', 'VES', 'JPY'],
   ) {
     let captured: CreateTreatmentPlanRepoInput | undefined;
     const repo = makeRepo({
@@ -194,7 +194,7 @@ describe('CreateTreatmentPlanUseCase', () => {
     const { uc, captured } = makeUc(
       planCurrencySource({
         kind: 'clinic',
-        currencies: ['COP', 'JPY'],
+        currencies: ['VES', 'JPY'],
         unconfigured: false,
       }),
     );
@@ -247,7 +247,7 @@ describe('CreateTreatmentPlanUseCase', () => {
     const { uc } = makeUc(
       planCurrencySource({
         kind: 'clinic',
-        currencies: ['COP'],
+        currencies: ['VES'],
         unconfigured: true,
       }),
     );
@@ -301,9 +301,9 @@ describe('CreateTreatmentPlanUseCase', () => {
       LOC_COP,
     );
 
-    await uc.execute({ patientId: 'p1', currency: 'cop' });
+    await uc.execute({ patientId: 'p1', currency: 'ves' });
 
-    expect(captured?.currency).toBe('COP');
+    expect(captured?.currency).toBe('VES');
   });
 
   it('rejects an unknown currency with BadRequestException, without calling the repo', async () => {

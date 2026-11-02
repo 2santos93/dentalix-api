@@ -31,7 +31,7 @@ describe('consultas por documento normalizado (DX-287)', () => {
     ['knownDocs (hoja de saldos)', knownDocsPatientsSql(TENANT, KEYS)],
     [
       'existingBalances',
-      existingBalancesByDocSql(TENANT, BATCH, KEYS, 'America/Bogota'),
+      existingBalancesByDocSql(TENANT, BATCH, KEYS, 'America/Caracas'),
     ],
     ['processBalanceChunk', balancePatientsByDocSql(TENANT, KEYS)],
     [

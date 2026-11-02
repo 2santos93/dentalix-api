@@ -33,7 +33,7 @@ class FakeGetTreatmentPlanUseCase {
   }
 }
 
-// 2026-10-16 10:00 en la zona de la sede (UTC-5).
+// 2026-10-16 10:00 en la zona de la sede (UTC-4).
 const NOW = new Date('2026-10-16T15:00:00.000Z');
 const clock = (): Date => NOW;
 

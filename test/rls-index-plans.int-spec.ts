@@ -17,7 +17,7 @@ import {
 } from '../src/modules/reminders/infrastructure/prisma-reminder-opt-out.repository';
 import { isInSweepWindow } from '../src/modules/reminders/domain/reminder-window';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -90,19 +90,19 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
     data: { name: subdomain, subdomain },
   });
   const location = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId: tenant.id,
       name: 'Sede Centro',
     }),
   });
   const other = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId: tenant.id,
       name: 'Sede Norte',
     }),
   });
   const retired = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId: tenant.id,
       name: 'Sede Cerrada',
       deletedAt: new Date(),
@@ -148,7 +148,7 @@ async function seedPatients(c: Clinic, total: number): Promise<void> {
   await raw.$executeRawUnsafe(`
     INSERT INTO "patients" ("id", "tenantId", "firstName", "lastName", "phone", "updatedAt")
     SELECT gen_random_uuid(), '${c.tenantId}', 'P' || n, 'Volumen',
-           '+57 3' || lpad(n::text, 9, '0'), now()
+           '+58 4' || lpad(n::text, 9, '0'), now()
       FROM generate_series(1, ${total}) AS n`);
 }
 
@@ -378,21 +378,21 @@ describe('DX-225 · índices que sirven bajo RLS (int)', () => {
 
     it('el trigger mantiene phoneTail al crear y al cambiar el teléfono', async () => {
       const repo = new PrismaReminderOptOutRepository(prisma, tenantContext);
-      const id = await patient(a, { phone: '310 555 0101' });
+      const id = await patient(a, { phone: '414 555 0101' });
       const found = () =>
-        tenantContext.run(a.tenantId, () => repo.findByPhoneTail('05550101'));
+        tenantContext.run(a.tenantId, () => repo.findByPhoneTail('45550101'));
       expect((await found()).map((m) => m.patientId)).toEqual([id]);
 
       await prisma.runWithTenant(a.tenantId, (tx) =>
         tx.patient.update({
           where: { id },
-          data: { phone: '+57 320 999 8877' },
+          data: { phone: '+58 424 999 8877' },
         }),
       );
       expect(await found()).toEqual([]);
       const [row] = await raw.$queryRaw<{ phoneTail: string }[]>`
         SELECT "phoneTail" FROM "patients" WHERE "id" = ${id}::uuid`;
-      expect(row.phoneTail).toBe('09998877');
+      expect(row.phoneTail).toBe('49998877');
 
       await prisma.runWithTenant(a.tenantId, (tx) =>
         tx.patient.update({ where: { id }, data: { phone: null } }),
@@ -403,12 +403,12 @@ describe('DX-225 · índices que sirven bajo RLS (int)', () => {
     });
 
     it('el valor que escriba el cliente no cuenta: lo recalcula el trigger', async () => {
-      const id = await patient(a, { phone: '300 111 2233' });
+      const id = await patient(a, { phone: '412 111 2233' });
       await raw.$executeRaw`UPDATE "patients" SET "phoneTail" = '99999999'
                              WHERE "id" = ${id}::uuid`;
       const [row] = await raw.$queryRaw<{ phoneTail: string }[]>`
         SELECT "phoneTail" FROM "patients" WHERE "id" = ${id}::uuid`;
-      expect(row.phoneTail).toBe('01112233');
+      expect(row.phoneTail).toBe('21112233');
     });
   });
 

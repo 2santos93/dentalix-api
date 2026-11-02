@@ -179,7 +179,7 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
       where: { tenantId: clinicA.tenantId },
     });
     await as(clinicA)
-      .patch(`/locations/${location.id}`, { phone: '601 555 0101' })
+      .patch(`/locations/${location.id}`, { phone: '212 555 0101' })
       .expect(200);
 
     const type = await as(clinicA)
@@ -212,7 +212,7 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
       firstName: 'Carolina',
       lastName: 'Duque',
       email: ADULT_EMAIL,
-      phone: '+57 310 123 4567',
+      phone: '+58 414 123 4567',
       birthDate: '1990-05-01',
     });
     appointmentId = await appointment(patientId, typeId);
@@ -248,8 +248,8 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
         toMasked: 'ca***@example.com',
         toResponsible: false,
       },
-      whatsapp: { phone: '573101234567', reason: null },
-      locationPhone: '601 555 0101',
+      whatsapp: { phone: '584141234567', reason: null },
+      locationPhone: '212 555 0101',
       deliveries: [],
     });
     const audit = await raw.auditEvent.findFirstOrThrow({
@@ -300,7 +300,7 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
     });
     expect(row.tokenHash).toBeNull();
     expect(row.renderedText).toBe(
-      'Hola Carolina Duque: muerde la gasa 30 minutos. Te atendió Miembro DENTIST en Clinica dx222-entregas-a. Dudas: 601 555 0101.',
+      'Hola Carolina Duque: muerde la gasa 30 minutos. Te atendió Miembro DENTIST en Clinica dx222-entregas-a. Dudas: 212 555 0101.',
     );
     const audit = await raw.auditEvent.findFirstOrThrow({
       where: {
@@ -356,7 +356,7 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
       201,
     );
     const created = res.body as Created;
-    expect(created.whatsapp?.phone).toBe('573101234567');
+    expect(created.whatsapp?.phone).toBe('584141234567');
     expect(created.whatsapp?.text).toContain(created.publicUrl);
     expect(created.whatsapp?.text).toContain('Hola Carolina');
     expect(created.whatsapp?.text).not.toContain('Exodoncia');
@@ -403,7 +403,7 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
       templateVersion: 1,
       clinic: { name: 'Clinica dx222-entregas-a' },
       locationName: 'Sede principal',
-      locationPhone: '601 555 0101',
+      locationPhone: '212 555 0101',
       patientName: 'Carolina Duque',
     });
 
@@ -453,7 +453,7 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
       firstName: 'Dado',
       lastName: 'Debaja',
       email: 'baja@example.com',
-      phone: '+57 310 999 0000',
+      phone: '+58 414 999 0000',
     });
     await raw.patient.update({
       where: { id },

@@ -19,7 +19,7 @@ function payment(
   id: string,
   planId: string,
   amount: number,
-  currency = 'COP',
+  currency = 'USD',
 ): StatementPaymentRow {
   return {
     id,
@@ -33,7 +33,7 @@ function payment(
     location: { id: 'l-1', name: 'Sede' },
     createdById: 'u-1',
     createdAt: new Date('2026-02-10T17:00:00.000Z'),
-    timeZone: 'America/Bogota',
+    timeZone: 'America/Caracas',
     voidedAt: null,
     voidedBy: null,
     voidReason: null,
@@ -66,7 +66,7 @@ function statement(
       plans: plans.map((p) => ({
         id: p.id,
         status: 'ACCEPTED',
-        currency: p.currency ?? 'COP',
+        currency: p.currency ?? 'USD',
         createdAt: new Date('2026-01-01'),
         billable: p.billable,
       })),
@@ -81,7 +81,7 @@ const MOTHER = statement('mother', 'Claudia', [], []);
 MOTHER.snapshot.openingBalances = [
   {
     id: 'ob-1',
-    currency: 'COP',
+    currency: 'USD',
     amount: 50000,
     asOfDate: '2025-11-30',
     asOfDateApproximate: false,
@@ -175,7 +175,7 @@ describe('GetFamilyAccountStatementUseCase (DX-203)', () => {
     ]);
     expect(out.members[1].summary).toEqual([
       {
-        currency: 'COP',
+        currency: 'USD',
         budgeted: 350000.35,
         openingBalance: 0,
         openingPending: 0,
@@ -210,17 +210,6 @@ describe('GetFamilyAccountStatementUseCase (DX-203)', () => {
     );
     expect(out.totals).toEqual([
       {
-        currency: 'COP',
-        budgeted: 1550000.55,
-        openingBalance: 50000,
-        openingPending: 50000,
-        paid: 550000.3,
-        balance: 1050000.25,
-        convertedPaid: 550000.3,
-        convertedBalance: 1050000.25,
-        overdueAmount: 0,
-      },
-      {
         currency: 'EUR',
         budgeted: 80.5,
         openingBalance: 0,
@@ -229,6 +218,17 @@ describe('GetFamilyAccountStatementUseCase (DX-203)', () => {
         balance: 60.25,
         convertedPaid: 20.25,
         convertedBalance: 60.25,
+        overdueAmount: 0,
+      },
+      {
+        currency: 'USD',
+        budgeted: 1550000.55,
+        openingBalance: 50000,
+        openingPending: 50000,
+        paid: 550000.3,
+        balance: 1050000.25,
+        convertedPaid: 550000.3,
+        convertedBalance: 1050000.25,
         overdueAmount: 0,
       },
     ]);

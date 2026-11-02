@@ -7,7 +7,7 @@ import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   registerBody,
 } from './support/location-fixtures';
 import { purgeTenantsBySubdomain } from './support/tenant-purge';
@@ -113,7 +113,7 @@ describe('Anamnesis: hábitos y embarazo tri-estado (e2e)', () => {
     await raw.user.deleteMany({ where: { email: EMAIL } });
     const reg = await registerVerified(
       app,
-      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+      registerBody(REGIONAL_CARACAS_FIXTURE, {
         clinicName: 'Clínica Tri',
         subdomain: SUB,
         email: EMAIL,

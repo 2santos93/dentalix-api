@@ -108,7 +108,7 @@ export class InMemoryExpenseRepository implements ExpenseRepository {
       supplier: null,
       description: null,
       amount: 100,
-      currency: 'COP',
+      currency: 'VES',
       invoiceDate: '2026-10-20',
       dueDate: null,
       attachment: null,
@@ -646,8 +646,8 @@ export class InMemoryExpenseCategoryRepository implements ExpenseCategoryReposit
   }
 }
 
-/** Moneda conocida para los tests: COP y USD. */
+/** Moneda conocida para los tests: VES y USD. */
 export const KNOWN_CURRENCIES = {
   has: (code: string): Promise<boolean> =>
-    Promise.resolve(['COP', 'USD'].includes(code)),
+    Promise.resolve(['VES', 'USD'].includes(code)),
 };

@@ -55,8 +55,8 @@ function target(over: Partial<SignedPdfCopyTarget> = {}): SignedPdfCopyTarget {
     clinicName: 'Sonrisas del Norte',
     location: {
       id: 'loc-1',
-      timeZone: 'America/Bogota',
-      locale: 'es-CO',
+      timeZone: 'America/Caracas',
+      locale: 'es-VE',
       hourCycle: 'h12',
     },
     ...over,

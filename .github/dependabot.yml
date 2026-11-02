@@ -7,7 +7,7 @@ updates:
     schedule:
       interval: weekly
       day: monday
-      timezone: America/Bogota
+      timezone: America/Caracas
     open-pull-requests-limit: 10
     groups:
       produccion-menores:
@@ -21,7 +21,7 @@ updates:
     schedule:
       interval: weekly
       day: monday
-      timezone: America/Bogota
+      timezone: America/Caracas
     groups:
       acciones:
         patterns: ['*']

@@ -30,7 +30,7 @@ function setup() {
       cache,
       { fetchRates },
       makeSettings({ [TENANT]: 'MANUAL' }, tenantContext),
-      makeManualRates({ [TENANT]: { [DAY]: { COP: 4000 } } }, tenantContext),
+      makeManualRates({ [TENANT]: { [DAY]: { VES: 4000 } } }, tenantContext),
       tenantContext,
     ),
   );
@@ -57,7 +57,7 @@ describe('tasa manual sin registrar en los consumidores (DX-374)', () => {
     const amount = await tenantContext.run(TENANT, () =>
       paymentInPlanCurrency(convert, {
         amount: 400000,
-        currency: 'COP',
+        currency: 'VES',
         planCurrency: 'USD',
         paidOn: DAY,
       }),
@@ -69,8 +69,8 @@ describe('tasa manual sin registrar en los consumidores (DX-374)', () => {
     const { convert, fetchRates, tenantContext } = setup();
     const repo = new InMemoryPaymentRepository('UTC');
     repo.seedPayment({
-      id: 'p-cop',
-      currency: 'COP',
+      id: 'p-ves',
+      currency: 'VES',
       amount: 400000,
       paidAt: new Date(`${DAY}T15:00:00.000Z`),
     });
@@ -88,7 +88,7 @@ describe('tasa manual sin registrar en los consumidores (DX-374)', () => {
 
     expect(result.totalConverted).toBe(100);
     expect(result.count).toBe(2);
-    expect(result.byCurrency).toEqual({ COP: 400000, EUR: 90 });
+    expect(result.byCurrency).toEqual({ VES: 400000, EUR: 90 });
     expect(fetchRates).not.toHaveBeenCalled();
   });
 });

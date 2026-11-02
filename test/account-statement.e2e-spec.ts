@@ -15,7 +15,7 @@ import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   registerBody,
 } from './support/location-fixtures';
 
@@ -134,7 +134,7 @@ describe('Estado de cuenta — GET /patients/:patientId/account-statement (e2e)'
     const email = `owner@${subdomain}.com`;
     const reg = await registerVerified(
       app,
-      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+      registerBody(REGIONAL_CARACAS_FIXTURE, {
         clinicName: `Clinica ${subdomain}`,
         subdomain,
         email,
@@ -251,12 +251,12 @@ describe('Estado de cuenta — GET /patients/:patientId/account-statement (e2e)'
   //   usdPlan       USD 1000 ACCEPTED · abonos 300 + 100 (anulado) · cuotas 3
   //                 mensuales desde 2026-01-10 (todas vencidas)
   //   futurePlan    USD 200 · cuotas 2 desde 2099-01-01 (próxima cuota)
-  //   copPlan       COP 500000 · abono 200000
+  //   vesPlan       VES 500000 · abono 200000
   //   cancelledPlan USD 500 · abono 50 · luego CANCELLED
   //   draftPlan     USD 999 PROPOSED (no facturable)
   let usdPlan: string;
   let futurePlan: string;
-  let copPlan: string;
+  let vesPlan: string;
   let cancelledPlan: string;
   let voidedPaymentId: string;
 
@@ -313,8 +313,8 @@ describe('Estado de cuenta — GET /patients/:patientId/account-statement (e2e)'
       })
       .expect(201);
 
-    copPlan = await createPlan('COP', 500000);
-    await pay(copPlan, 200000, 'COP', '2026-08-01');
+    vesPlan = await createPlan('VES', 500000);
+    await pay(vesPlan, 200000, 'VES', '2026-08-01');
 
     cancelledPlan = await createPlan('USD', 500);
     await pay(cancelledPlan, 50, 'USD', '2026-06-01');
@@ -346,21 +346,6 @@ describe('Estado de cuenta — GET /patients/:patientId/account-statement (e2e)'
 
     expect(body.summary).toEqual([
       {
-        currency: 'COP',
-        budgeted: 500000,
-        // DX-262: sin saldo migrado.
-        openingBalance: 0,
-        openingPending: 0,
-        paid: 200000,
-        creditMovements: 0,
-        balance: 300000,
-        convertedPaid: 200000,
-        convertedBalance: 300000,
-        overdueCount: 0,
-        overdueAmount: 0,
-        nextInstallment: null,
-      },
-      {
         currency: 'USD',
         // 1000 + 200; el cancelado (500) y el borrador (PROPOSED) no suman.
         budgeted: 1200,
@@ -383,6 +368,21 @@ describe('Estado de cuenta — GET /patients/:patientId/account-statement (e2e)'
           amount: 100,
         },
       },
+      {
+        currency: 'VES',
+        budgeted: 500000,
+        // DX-262: sin saldo migrado.
+        openingBalance: 0,
+        openingPending: 0,
+        paid: 200000,
+        creditMovements: 0,
+        balance: 300000,
+        convertedPaid: 200000,
+        convertedBalance: 300000,
+        overdueCount: 0,
+        overdueAmount: 0,
+        nextInstallment: null,
+      },
     ]);
 
     // Cada plan cuadra con sus propios abonos.
@@ -393,7 +393,7 @@ describe('Estado de cuenta — GET /patients/:patientId/account-statement (e2e)'
       paid: 300,
       balance: 700,
     });
-    expect(byId.get(copPlan)).toMatchObject({
+    expect(byId.get(vesPlan)).toMatchObject({
       budgeted: 500000,
       paid: 200000,
       balance: 300000,

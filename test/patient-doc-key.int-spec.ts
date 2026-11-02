@@ -310,7 +310,7 @@ describe('DX-287 · patients."docKey" indexada (int)', () => {
           a,
           a,
           keysOf(BALANCE_CHUNK_SIZE),
-          'America/Bogota',
+          'America/Caracas',
         ),
       );
       const onPatients = plan.filter((n) => n['Relation Name'] === 'patients');

@@ -166,7 +166,7 @@ export function refundSeriesOf(receiptPrefix: string): string {
   return `DEV-${receiptPrefix}`;
 }
 
-/** Número visible del comprobante: `DEV-BOG-000007`. */
+/** Número visible del comprobante: `DEV-CCS-000007`. */
 export function formatRefundNumber(series: string, number: number): string {
   if (!Number.isInteger(number) || number <= 0) {
     throw new RangeError(`Número de comprobante inválido: ${number}`);

@@ -8,7 +8,7 @@ import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   registerBody,
 } from './support/location-fixtures';
 
@@ -76,7 +76,7 @@ describe('Exchange (e2e)', () => {
     // this suite needs no network access and no real EXCHANGE_APP_ID.
     await raw.exchangeRateSnapshot.createMany({
       data: [
-        { date: RATE_DATE, currency: 'COP', rate: 4000 },
+        { date: RATE_DATE, currency: 'VES', rate: 4000 },
         { date: RATE_DATE, currency: 'EUR', rate: 0.92 },
       ],
     });
@@ -85,7 +85,7 @@ describe('Exchange (e2e)', () => {
     // patients.e2e-spec.ts (DX-374: con el host de la clínica).
     await registerVerified(
       app,
-      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+      registerBody(REGIONAL_CARACAS_FIXTURE, {
         clinicName: 'Clinica Exchange',
         subdomain: 'clinica-exchange',
         email: 'owner@clinica-exchange.com',
@@ -122,14 +122,14 @@ describe('Exchange (e2e)', () => {
     expect(body).toEqual({
       base: 'USD',
       source: 'AUTOMATIC',
-      rates: { COP: 4000, EUR: 0.92 },
+      rates: { VES: 4000, EUR: 0.92 },
     });
   });
 
-  it('GET /exchange/convert converts USD -> COP using the seeded rate', async () => {
+  it('GET /exchange/convert converts USD -> VES using the seeded rate', async () => {
     const res = await request(app.getHttpServer())
       .get(
-        `/api/v1/exchange/convert?amount=100&from=USD&to=COP&date=${RATE_DATE}`,
+        `/api/v1/exchange/convert?amount=100&from=USD&to=VES&date=${RATE_DATE}`,
       )
       .set('X-Tenant-Host', HOST)
       .set('Authorization', `Bearer ${accessToken}`)
@@ -137,13 +137,13 @@ describe('Exchange (e2e)', () => {
     const body = res.body as ConvertResponseBody;
     expect(body.result).toBe(400000);
     expect(body.from).toBe('USD');
-    expect(body.to).toBe('COP');
+    expect(body.to).toBe('VES');
   });
 
-  it('GET /exchange/convert converts COP -> USD using the seeded rate', async () => {
+  it('GET /exchange/convert converts VES -> USD using the seeded rate', async () => {
     const res = await request(app.getHttpServer())
       .get(
-        `/api/v1/exchange/convert?amount=400000&from=COP&to=USD&date=${RATE_DATE}`,
+        `/api/v1/exchange/convert?amount=400000&from=VES&to=USD&date=${RATE_DATE}`,
       )
       .set('X-Tenant-Host', HOST)
       .set('Authorization', `Bearer ${accessToken}`)
@@ -186,7 +186,7 @@ describe('Exchange (e2e)', () => {
   it('GET /exchange/convert rejects an invalid date format with 400', async () => {
     await request(app.getHttpServer())
       .get(
-        '/api/v1/exchange/convert?amount=100&from=USD&to=COP&date=not-a-date',
+        '/api/v1/exchange/convert?amount=100&from=USD&to=VES&date=not-a-date',
       )
       .set('X-Tenant-Host', HOST)
       .set('Authorization', `Bearer ${accessToken}`)
@@ -199,7 +199,7 @@ describe('Exchange (e2e)', () => {
       .expect(401);
     await request(app.getHttpServer())
       .get(
-        `/api/v1/exchange/convert?amount=100&from=USD&to=COP&date=${RATE_DATE}`,
+        `/api/v1/exchange/convert?amount=100&from=USD&to=VES&date=${RATE_DATE}`,
       )
       .expect(401);
   });

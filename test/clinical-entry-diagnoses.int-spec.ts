@@ -251,13 +251,13 @@ describe('diagnósticos CIE-10 de la evolución (DX-212, int)', () => {
 
     it('con la evolución entra aunque la sesión no esté en UTC (hora del servidor en UTC, DX-226)', async () => {
       const entryId = await asA(async (tx) => {
-        await tx.$executeRaw`SET LOCAL TIME ZONE 'America/Bogota'`;
+        await tx.$executeRaw`SET LOCAL TIME ZONE 'America/Caracas'`;
         const entry = await tx.clinicalEntry.create({
           data: {
             tenantId: a.tenantId,
             patientId: a.otherPatientId,
             entryDate: new Date('2026-10-02T00:00:00Z'),
-            notes: 'Control con sesión en Bogotá',
+            notes: 'Control con sesión en Caracas',
             performedById: authorId,
             diagnoses: {
               create: [{ icd10Code: 'K02.1', kind: 'PRINCIPAL', position: 0 }],

@@ -13,7 +13,7 @@ import {
 } from './support/e2e-fixtures';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
 
@@ -455,7 +455,7 @@ describe('Coberturas del paciente (e2e, DX-153)', () => {
   it('una recepcionista restringida a una sede desactivada sigue LEYENDO coberturas (200, nunca 403)', async () => {
     const north = (
       await as(api().post('/api/v1/locations'), clinic.adminToken)
-        .send(locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }))
+        .send(locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede Norte' }))
         .expect(201)
     ).body as { id: string };
     const member = await raw.user.create({

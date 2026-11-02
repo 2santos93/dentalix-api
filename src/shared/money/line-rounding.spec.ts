@@ -34,7 +34,7 @@ describe('redondeo por línea (DX-340)', () => {
     expect(roundToDigits(1.05, 1)).toBe(1.1);
   });
 
-  it('123,45 × 7,5 %: 9 con 0 dígitos (RSD/COP/JPY hoy) y 9,26 con 2 (EUR)', () => {
+  it('123,45 × 7,5 %: 9 con 0 dígitos (RSD/USD/JPY hoy) y 9,26 con 2 (EUR)', () => {
     const cents = 12345n;
     expect(
       unitsToAmount(percentOfCentsInUnits(cents, 750n, 0, 'half-up'), 0),

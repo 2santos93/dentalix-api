@@ -11,7 +11,7 @@ import {
   computeCountersignatureHash,
   computeRemoteConsentHash,
 } from '../../src/modules/consents/domain/consent-hash';
-import { REGIONAL_BOGOTA_FIXTURE, locationData } from './location-fixtures';
+import { REGIONAL_CARACAS_FIXTURE, locationData } from './location-fixtures';
 
 // Clínica, consentimiento firmado a distancia y firma del profesional contra
 // Postgres, para las pruebas de integración del PDF firmado (DX-422) y de su
@@ -41,7 +41,7 @@ export function signedConsentFixtures(deps: {
       data: { name: `Clínica ${subdomain}`, subdomain },
     });
     const location = await owner.location.create({
-      data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      data: locationData(REGIONAL_CARACAS_FIXTURE, {
         tenantId: tenant.id,
         name: `Sede ${subdomain}`,
       }),

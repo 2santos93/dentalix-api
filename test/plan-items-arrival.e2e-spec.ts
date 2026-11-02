@@ -17,7 +17,7 @@ import {
 } from './support/e2e-fixtures';
 import {
   REGIONAL_BERLIN_FIXTURE,
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   REGIONAL_NEW_YORK_FIXTURE,
   REGIONAL_TOKYO_FIXTURE,
   g1LocationInsert,
@@ -39,13 +39,13 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 });
 const MIN = 60000;
 const DAY = 86400000;
-const ZONE = 'America/Bogota';
+const ZONE = 'America/Caracas';
 const CLOSED = 'Esta cita ya pasó: sus tratamientos no se cambian.';
 
-/** «30/10/2026 a las 09:00» en la zona de la sede (UTC−5, sin horario de verano). */
+/** «30/10/2026 a las 09:00» en la zona de la sede (UTC−4, sin horario de verano). */
 function wall(instant: Date): string {
   const p = Object.fromEntries(
-    new Intl.DateTimeFormat('es-CO', {
+    new Intl.DateTimeFormat('es-VE', {
       timeZone: ZONE,
       day: '2-digit',
       month: '2-digit',
@@ -60,8 +60,8 @@ function wall(instant: Date): string {
   return `${p.day}/${p.month}/${p.year} a las ${p.hour}:${p.minute}`;
 }
 
-/** Minutos que lleva el día en la zona de la sede (UTC-5 fijo). */
-function minutesIntoBogotaDay(now: Date): number {
+/** Minutos que lleva el día en la zona de la sede (UTC-4 fijo). */
+function minutesIntoCaracasDay(now: Date): number {
   const local = new Date(now.getTime() - 5 * 60 * MIN);
   return local.getUTCHours() * 60 + local.getUTCMinutes();
 }
@@ -89,7 +89,7 @@ describe('DX-271 llegada tarde y vínculos de citas cerradas', () => {
   };
   const acceptedItems = async (n: number) => {
     const plan = await raw.treatmentPlan.create({
-      data: { tenantId: a.tenantId, patientId, currency: 'COP' },
+      data: { tenantId: a.tenantId, patientId, currency: 'USD' },
     });
     const ids: string[] = [];
     for (let i = 0; i < n; i++)
@@ -154,7 +154,7 @@ describe('DX-271 llegada tarde y vínculos de citas cerradas', () => {
     locationId = (
       await raw.location.findFirstOrThrow({ where: { tenantId: a.tenantId } })
     ).id;
-    // Sin horario: la sede usa la zona de su país (CO) y admite cualquier hora.
+    // Sin horario: la sede usa la zona de su país (VE) y admite cualquier hora.
     await raw.locationSchedule.updateMany({
       where: { tenantId: a.tenantId },
       data: { deletedAt: new Date() },
@@ -169,7 +169,7 @@ describe('DX-271 llegada tarde y vínculos de citas cerradas', () => {
           tenantId: a.tenantId,
           firstName: 'Luis',
           lastName: 'Tarde',
-          phone: '+573001112233',
+          phone: '+584121112233',
         },
       })
     ).id;
@@ -201,7 +201,7 @@ describe('DX-271 llegada tarde y vínculos de citas cerradas', () => {
     // Cita A de hoy (en la zona de la sede) que empezó hace un rato; el paciente no llega.
     const lateBy = Math.max(
       1,
-      Math.min(20, minutesIntoBogotaDay(new Date()) - 1),
+      Math.min(20, minutesIntoCaracasDay(new Date()) - 1),
     );
     const late = await rawAppointment(new Date(Date.now() - lateBy * MIN));
     await rawLink(late.id, itemId);
@@ -423,7 +423,7 @@ describe('DX-271 llegada tarde y vínculos de citas cerradas', () => {
     } = await acceptedItems(1);
     await accept(planId);
     const north = await raw.location.create({
-      data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      data: locationData(REGIONAL_CARACAS_FIXTURE, {
         tenantId: a.tenantId,
         name: 'Sede Norte DX271',
       }),
@@ -511,7 +511,7 @@ describe('DX-271 llegada tarde y vínculos de citas cerradas', () => {
   const arrivedLateWith = async (itemIds: string[]) => {
     const lateBy = Math.max(
       1,
-      Math.min(20, minutesIntoBogotaDay(new Date()) - 1),
+      Math.min(20, minutesIntoCaracasDay(new Date()) - 1),
     );
     const start = new Date(Date.now() - lateBy * MIN);
     const late = await raw.appointment.create({
@@ -765,7 +765,7 @@ describe('DX-271 llegada tarde y vínculos de citas cerradas', () => {
     await holderAt(g1, itemId, new Date(Date.now() + 50 * DAY), 'SCHEDULED');
     const lateBy = Math.max(
       1,
-      Math.min(20, minutesIntoBogotaDay(new Date()) - 1),
+      Math.min(20, minutesIntoCaracasDay(new Date()) - 1),
     );
     const lateStart = new Date(Date.now() - lateBy * MIN);
     const late = await raw.appointment.create({

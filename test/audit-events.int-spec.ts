@@ -109,7 +109,7 @@ describe('DX-009 · audit_events en la BD (int)', () => {
         data: {
           tenantId: tenantA,
           patientId: patientA,
-          currency: 'COP',
+          currency: 'USD',
           createdById: userA,
         },
       })

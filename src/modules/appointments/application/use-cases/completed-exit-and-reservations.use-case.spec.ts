@@ -34,7 +34,7 @@ const FOR_PATIENT = {
 // motivo, el aviso de tratamientos reservados en otra cita y «Traer a esta
 // cita», en UpdateAppointmentUseCase.
 
-const TZ = 'America/Bogota';
+const TZ = 'America/Caracas';
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
 
@@ -117,7 +117,7 @@ const reserved = (appointmentId: string): PlanItemReservedElsewhere => ({
   locationId: 'loc1',
   locationName: 'Sede Principal',
   timeZone: TZ,
-  locale: 'es-CO',
+  locale: 'es-VE',
   hourCycle: 'h23',
 });
 

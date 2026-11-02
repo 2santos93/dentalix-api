@@ -9,7 +9,7 @@ describe('toLedger (DX-155, DX-262)', () => {
         plans: [],
         paymentPlans: [],
         openings: [
-          ['ob-1', 'COP', 150000.5, '2026-03-15', false, 50000],
+          ['ob-1', 'VES', 150000.5, '2026-03-15', false, 50000],
           ['ob-2', 'USD', 40, '2026-10-23', true, 0],
         ],
       }),
@@ -17,7 +17,7 @@ describe('toLedger (DX-155, DX-262)', () => {
     expect(withOpenings.openings).toEqual([
       {
         id: 'ob-1',
-        currency: 'COP',
+        currency: 'VES',
         amount: 150000.5,
         asOfDate: '2026-03-15',
         asOfDateApproximate: false,
@@ -35,7 +35,7 @@ describe('toLedger (DX-155, DX-262)', () => {
       {
         treatmentPlanId: null,
         openingBalanceId: 'ob-1',
-        currency: 'COP',
+        currency: 'VES',
         amount: 50000,
       },
     ]);

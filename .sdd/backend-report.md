@@ -76,7 +76,7 @@ All 18 pre-existing files (10 unit specs + 8 e2e specs) that referenced `ClinicR
 
 ### e2e failures — none caused by this change
 
-- **`reference.e2e-spec.ts`, `patients-location.e2e-spec.ts`** — fail for missing Colombia
+- **`reference.e2e-spec.ts`, `patients-location.e2e-spec.ts`** — fail for missing Venezuela
   reference-seed data in this fresh DB. Pre-existing and explicitly expected per the task brief;
   unrelated to roles.
 - **`payments.e2e-spec.ts`, `treatment-plans.e2e-spec.ts`** — their actual test assertions **pass**
@@ -99,7 +99,7 @@ All 18 pre-existing files (10 unit specs + 8 e2e specs) that referenced `ClinicR
   `me.e2e-spec.ts` — confirmed both in the full run and in an isolated re-run of just these 5 files
   (17/17 tests green).
 
-I did not touch the `payments`/`treatment-plans` cleanup helpers or the Colombia seed — out of scope
+I did not touch the `payments`/`treatment-plans` cleanup helpers or the Venezuela seed — out of scope
 for this atomic role-removal change, and fixing them risks masking or conflating with this diff. Flagging
 for a separate follow-up.
 

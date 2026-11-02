@@ -7,15 +7,15 @@ function row(overrides: Partial<AgingCsvRow> = {}): AgingCsvRow {
     patient: {
       id: 'p1',
       fullName: 'Ana Pérez',
-      phone: '+57 300 123 4567',
-      whatsApp: '573001234567',
+      phone: '+58 412 123 4567',
+      whatsApp: '584121234567',
     },
     locationId: 'loc-1',
     oldestAgeDays: 120,
     ageApproximate: true,
     currencies: [
       {
-        currency: 'COP',
+        currency: 'VES',
         balance: 750000,
         debt: 800000,
         credit: 50000,
@@ -28,7 +28,7 @@ function row(overrides: Partial<AgingCsvRow> = {}): AgingCsvRow {
         },
       },
     ],
-    lastPayment: { paidOn: '2026-09-30', amount: 50000, currency: 'COP' },
+    lastPayment: { paidOn: '2026-09-30', amount: 50000, currency: 'VES' },
     nextInstallment: null,
     lastNote: null,
     lastNoteOn: null,
@@ -47,8 +47,8 @@ describe('toReceivablesCsv', () => {
       [
         '"Ana Pérez"',
         // Empieza por «+»: se neutraliza para que la hoja no lo lea como fórmula.
-        `"'+57 300 123 4567"`,
-        'COP',
+        `"'+58 412 123 4567"`,
+        'VES',
         '800000.00',
         '0.00',
         '300000.00',
@@ -61,7 +61,7 @@ describe('toReceivablesCsv', () => {
         'Sí',
         '2026-09-30',
         '50000.00',
-        'COP',
+        'VES',
         '2026-11-07',
         '100000.00',
         '',
@@ -111,7 +111,7 @@ describe('toReceivablesCsv', () => {
         promise: {
           id: 'pp1',
           amount: 200000,
-          currency: 'COP',
+          currency: 'VES',
           dueDate: '2026-11-15',
           status: 'BROKEN',
           reopenedAt: null,
@@ -128,7 +128,7 @@ describe('toReceivablesCsv', () => {
       'Fecha compromiso',
     ]);
     expect(csv.split('\r\n')[1]).toMatch(
-      /,"Llamada · Promete pago",2026-10-15,"Incumplido",200000\.00,COP,2026-11-15$/,
+      /,"Llamada · Promete pago",2026-10-15,"Incumplido",200000\.00,VES,2026-11-15$/,
     );
   });
 

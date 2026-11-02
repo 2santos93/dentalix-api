@@ -55,7 +55,7 @@ describe('DX-256 integridad real y concurrencia', () => {
     ).id;
     locationId = (
       await owner.location.create({
-        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        data: locationData(REGIONAL_CARACAS_FIXTURE, {
           tenantId,
           name: 'Principal',
         }),
@@ -88,7 +88,7 @@ describe('DX-256 integridad real y concurrencia', () => {
           tenantId,
           patientId,
           status: 'ACCEPTED',
-          currency: 'COP',
+          currency: 'VES',
           acceptedAt: new Date(),
           acceptedLocationId: locationId,
         },
@@ -201,7 +201,7 @@ describe('DX-256 integridad real y concurrencia', () => {
     });
     expect((await run(() => visits.unscheduled({ locationId }))).items).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ planId, total: 100, currency: 'COP' }),
+        expect.objectContaining({ planId, total: 100, currency: 'VES' }),
       ]),
     );
   });
@@ -334,7 +334,7 @@ describe('DX-256 integridad real y concurrencia', () => {
       expect(first.items).toHaveLength(1);
       expect(both.items).toHaveLength(2);
       expect(many).toBe(one);
-      expect(both.items.map((p) => p.currency).sort()).toEqual(['COP', 'USD']);
+      expect(both.items.map((p) => p.currency).sort()).toEqual(['USD', 'VES']);
     } finally {
       await observed.$disconnect();
     }
@@ -358,7 +358,7 @@ import {
 } from '../src/modules/appointments/infrastructure/appointment-plan-items';
 import { PrismaAppointmentRepository } from '../src/modules/appointments/infrastructure/repositories/prisma-appointment.repository';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 const appointmentRepo = new PrismaAppointmentRepository(prisma, context);
@@ -378,7 +378,7 @@ describe('DX-256 carreras de edición de vínculos', () => {
     tenantId = tenant.id;
     const locationId = (
       await owner.location.create({
-        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        data: locationData(REGIONAL_CARACAS_FIXTURE, {
           tenantId,
           name: 'Principal',
         }),
@@ -415,7 +415,7 @@ describe('DX-256 carreras de edición de vínculos', () => {
           tenantId,
           patientId,
           status: 'ACCEPTED',
-          currency: 'COP',
+          currency: 'VES',
           acceptedAt: new Date(),
           acceptedLocationId: locationId,
         },
@@ -637,10 +637,10 @@ describe('DX-256 carreras de edición de vínculos', () => {
       }),
     ).toBe(1);
   });
-  it('una sesión de Bogotá no desplaza la aceptación ni el historial ni convierte una cita pasada en reserva futura', async () => {
+  it('una sesión de Caracas no desplaza la aceptación ni el historial ni convierte una cita pasada en reserva futura', async () => {
     await run(() =>
       prisma.runWithTenant(async (tx) => {
-        await tx.$executeRawUnsafe("SET LOCAL TIME ZONE 'America/Bogota'");
+        await tx.$executeRawUnsafe("SET LOCAL TIME ZONE 'America/Caracas'");
         const [{ utcNow }] = await tx.$queryRaw<
           { utcNow: Date }[]
         >`SELECT timezone('UTC',now()) AS "utcNow"`;
@@ -651,7 +651,7 @@ describe('DX-256 carreras de edición de vínculos', () => {
           where: { id: cancelled },
         });
         const draft = await tx.treatmentPlan.create({
-          data: { tenantId, patientId, currency: 'COP' },
+          data: { tenantId, patientId, currency: 'VES' },
         });
         const freshItem = await tx.treatmentPlanItem.create({
           data: {

@@ -8,7 +8,7 @@ import type { ExpenseListFilters } from '../src/modules/expenses/domain/ports/ex
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -122,10 +122,10 @@ describe('DX-393 · lista de gastos con 20.000 gastos (int, rendimiento)', () =>
     locationIds = [];
     for (let i = 0; i < LOCATIONS; i += 1) {
       const location = await raw.location.create({
-        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        data: locationData(REGIONAL_CARACAS_FIXTURE, {
           tenantId,
           name: `Sede ${i + 1}`,
-          country: 'CO',
+          country: 'VE',
         }),
       });
       locationIds.push(location.id);
@@ -140,7 +140,7 @@ describe('DX-393 · lista de gastos con 20.000 gastos (int, rendimiento)', () =>
          "invoiceDate", "createdById", "updatedAt")
       SELECT gen_random_uuid(), ${tenantId}::uuid,
              (${locationIds}::uuid[])[1 + g % ${LOCATIONS}::int],
-             'Insumos clínicos', 100, 'COP',
+             'Insumos clínicos', 100, 'USD',
              date '2024-11-01' + (g % 730), ${user.id}::uuid, now()
         FROM generate_series(1, ${VOLUME}::int) AS g`;
     await raw.$executeRaw`

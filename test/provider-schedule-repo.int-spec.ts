@@ -10,7 +10,7 @@ import {
   type ProviderScheduleSnapshot,
 } from '../src/modules/provider-schedule/domain/provider-availability';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -45,12 +45,12 @@ describe('Repositorio del horario de los profesionales (DX-233, int)', () => {
     otherTenantId = o.id;
     locationA = (
       await raw.location.create({
-        data: locationData(REGIONAL_BOGOTA_FIXTURE, { tenantId, name: 'A' }),
+        data: locationData(REGIONAL_CARACAS_FIXTURE, { tenantId, name: 'A' }),
       })
     ).id;
     locationB = (
       await raw.location.create({
-        data: locationData(REGIONAL_BOGOTA_FIXTURE, { tenantId, name: 'B' }),
+        data: locationData(REGIONAL_CARACAS_FIXTURE, { tenantId, name: 'B' }),
       })
     ).id;
   });
@@ -101,7 +101,7 @@ describe('Repositorio del horario de los profesionales (DX-233, int)', () => {
     const first = [
       {
         locationId: locationA,
-        timezone: 'America/Bogota',
+        timezone: 'America/Caracas',
         ranges: [{ weekday: 1, startMinute: 480, endMinute: 780 }],
       },
     ];
@@ -122,7 +122,7 @@ describe('Repositorio del horario de los profesionales (DX-233, int)', () => {
         locations: [
           {
             locationId: locationB,
-            timezone: 'America/Bogota',
+            timezone: 'America/Caracas',
             ranges: [{ weekday: 4, startMinute: 840, endMinute: 1140 }],
           },
         ],
@@ -212,7 +212,7 @@ describe('Repositorio del horario de los profesionales (DX-233, int)', () => {
       const locations = [
         {
           locationId,
-          timezone: 'America/Bogota',
+          timezone: 'America/Caracas',
           ranges: [{ weekday: 2, startMinute, endMinute }],
         },
       ];

@@ -7,14 +7,14 @@ import {
 
 // DX-150 · regla de cumplimiento de un compromiso de pago, con los bordes de
 // día en la zona de la sede.
-const BOGOTA = 'America/Bogota'; // UTC-5 fijo
+const CARACAS = 'America/Caracas'; // UTC-4 fijo
 const MADRID = 'Europe/Madrid'; // UTC+1 en noviembre
 
 const promise = {
   amount: 200_000,
-  currency: 'COP',
+  currency: 'VES',
   dueDate: '2026-11-15',
-  createdAt: new Date('2026-11-01T15:00:00.000Z'),
+  createdAt: new Date('2026-11-01T14:00:00.000Z'),
 };
 
 function payment(
@@ -24,7 +24,7 @@ function payment(
 ): PromisePayment {
   return {
     amount,
-    currency: 'COP',
+    currency: 'VES',
     paidAt: new Date(paidAt),
     createdAt: new Date(paidAt),
     ...extra,
@@ -36,10 +36,10 @@ describe('evaluatePromise (DX-150)', () => {
     const result = evaluatePromise(
       promise,
       [
-        payment('2026-11-05T15:00:00.000Z', 120_000),
-        payment('2026-11-10T15:00:00.000Z', 80_000),
+        payment('2026-11-05T14:00:00.000Z', 120_000),
+        payment('2026-11-10T14:00:00.000Z', 80_000),
       ],
-      { now: new Date('2026-11-10T16:00:00.000Z'), timeZone: BOGOTA },
+      { now: new Date('2026-11-10T15:00:00.000Z'), timeZone: CARACAS },
     );
     expect(result).toEqual({ status: 'KEPT', covered: 200_000 });
   });
@@ -47,34 +47,34 @@ describe('evaluatePromise (DX-150)', () => {
   it('sigue ABIERTO con abonos parciales mientras no pasa la fecha', () => {
     const result = evaluatePromise(
       promise,
-      [payment('2026-11-05T15:00:00.000Z', 150_000)],
-      { now: new Date('2026-11-15T23:00:00.000Z'), timeZone: BOGOTA },
+      [payment('2026-11-05T14:00:00.000Z', 150_000)],
+      { now: new Date('2026-11-15T22:00:00.000Z'), timeZone: CARACAS },
     );
     expect(result).toEqual({ status: 'OPEN', covered: 150_000 });
   });
 
-  it('el último día cuenta entero en la zona de la sede (23:59 de Bogotá = 04:59 UTC del 16)', () => {
-    const lastMinute = '2026-11-16T04:59:00.000Z';
+  it('el último día cuenta entero en la zona de la sede (23:59 de Caracas = 03:59 UTC del 16)', () => {
+    const lastMinute = '2026-11-16T03:59:00.000Z';
     const result = evaluatePromise(promise, [payment(lastMinute, 200_000)], {
-      now: new Date('2026-11-16T05:30:00.000Z'),
-      timeZone: BOGOTA,
+      now: new Date('2026-11-16T04:30:00.000Z'),
+      timeZone: CARACAS,
     });
     expect(result.status).toBe('KEPT');
   });
 
   it('INCUMPLIDO desde las 00:00 del 16/11 en la zona de la sede, no antes', () => {
-    // 04:59 UTC del 16 = 23:59 del 15 en la zona de la sede: aún abierto.
+    // 03:59 UTC del 16 = 23:59 del 15 en la zona de la sede: aún abierto.
     expect(
       evaluatePromise(promise, [], {
-        now: new Date('2026-11-16T04:59:59.000Z'),
-        timeZone: BOGOTA,
+        now: new Date('2026-11-16T03:59:59.000Z'),
+        timeZone: CARACAS,
       }).status,
     ).toBe('OPEN');
-    // 05:00 UTC del 16 = 00:00 del 16 en la zona de la sede: incumplido.
+    // 04:00 UTC del 16 = 00:00 del 16 en la zona de la sede: incumplido.
     expect(
       evaluatePromise(promise, [], {
-        now: new Date('2026-11-16T05:00:00.000Z'),
-        timeZone: BOGOTA,
+        now: new Date('2026-11-16T04:00:00.000Z'),
+        timeZone: CARACAS,
       }).status,
     ).toBe('BROKEN');
     // En Madrid el 16 empieza a las 23:00 UTC del 15.
@@ -89,8 +89,8 @@ describe('evaluatePromise (DX-150)', () => {
   it('un abono fechado el 16 en la sede no cubre el compromiso del 15', () => {
     const result = evaluatePromise(
       promise,
-      [payment('2026-11-16T05:00:00.000Z', 200_000)],
-      { now: new Date('2026-11-16T06:00:00.000Z'), timeZone: BOGOTA },
+      [payment('2026-11-16T04:00:00.000Z', 200_000)],
+      { now: new Date('2026-11-16T05:00:00.000Z'), timeZone: CARACAS },
     );
     expect(result).toEqual({ status: 'BROKEN', covered: 0 });
   });
@@ -98,8 +98,8 @@ describe('evaluatePromise (DX-150)', () => {
   it('solo cuentan los abonos en la moneda del compromiso', () => {
     const result = evaluatePromise(
       promise,
-      [payment('2026-11-05T15:00:00.000Z', 200_000, { currency: 'USD' })],
-      { now: new Date('2026-11-05T16:00:00.000Z'), timeZone: BOGOTA },
+      [payment('2026-11-05T14:00:00.000Z', 200_000, { currency: 'USD' })],
+      { now: new Date('2026-11-05T15:00:00.000Z'), timeZone: CARACAS },
     );
     expect(result).toEqual({ status: 'OPEN', covered: 0 });
   });
@@ -108,11 +108,11 @@ describe('evaluatePromise (DX-150)', () => {
     const result = evaluatePromise(
       promise,
       [
-        payment('2026-11-05T15:00:00.000Z', 200_000, {
-          createdAt: new Date('2026-10-30T15:00:00.000Z'),
+        payment('2026-11-05T14:00:00.000Z', 200_000, {
+          createdAt: new Date('2026-10-30T14:00:00.000Z'),
         }),
       ],
-      { now: new Date('2026-11-05T16:00:00.000Z'), timeZone: BOGOTA },
+      { now: new Date('2026-11-05T15:00:00.000Z'), timeZone: CARACAS },
     );
     expect(result.status).toBe('OPEN');
   });
@@ -121,23 +121,26 @@ describe('evaluatePromise (DX-150)', () => {
     const result = evaluatePromise(
       promise,
       [
-        payment('2026-10-31T15:00:00.000Z', 200_000, {
-          createdAt: new Date('2026-11-02T15:00:00.000Z'),
+        payment('2026-10-31T14:00:00.000Z', 200_000, {
+          createdAt: new Date('2026-11-02T14:00:00.000Z'),
         }),
       ],
-      { now: new Date('2026-11-02T16:00:00.000Z'), timeZone: BOGOTA },
+      { now: new Date('2026-11-02T15:00:00.000Z'), timeZone: CARACAS },
     );
     expect(result.status).toBe('KEPT');
   });
 
   describe('borde de la hora de alta del compromiso (DX-226: las dos horas son de la BD)', () => {
     const at = (ms: number) => new Date(promise.createdAt.getTime() + ms);
-    const now = { now: new Date('2026-11-05T16:00:00.000Z'), timeZone: BOGOTA };
+    const now = {
+      now: new Date('2026-11-05T15:00:00.000Z'),
+      timeZone: CARACAS,
+    };
 
     it('un abono dado de alta en el MISMO instante que el compromiso cuenta', () => {
       const result = evaluatePromise(
         promise,
-        [payment('2026-11-01T15:00:00.000Z', 200_000, { createdAt: at(0) })],
+        [payment('2026-11-01T14:00:00.000Z', 200_000, { createdAt: at(0) })],
         now,
       );
       expect(result.status).toBe('KEPT');
@@ -146,7 +149,7 @@ describe('evaluatePromise (DX-150)', () => {
     it('un abono dado de alta 1 ms antes del compromiso no cuenta, aunque se feche el mismo día', () => {
       const result = evaluatePromise(
         promise,
-        [payment('2026-11-01T15:00:00.000Z', 200_000, { createdAt: at(-1) })],
+        [payment('2026-11-01T14:00:00.000Z', 200_000, { createdAt: at(-1) })],
         now,
       );
       expect(result).toEqual({ status: 'OPEN', covered: 0 });
@@ -155,7 +158,7 @@ describe('evaluatePromise (DX-150)', () => {
     it('un abono dado de alta 1 ms después cuenta', () => {
       const result = evaluatePromise(
         promise,
-        [payment('2026-11-01T15:00:00.000Z', 200_000, { createdAt: at(1) })],
+        [payment('2026-11-01T14:00:00.000Z', 200_000, { createdAt: at(1) })],
         now,
       );
       expect(result.status).toBe('KEPT');
@@ -163,14 +166,14 @@ describe('evaluatePromise (DX-150)', () => {
 
     it('el reloj del barrido desfasado ±5 s no cambia qué abonos cuentan', () => {
       const payments = [
-        payment('2026-11-01T15:00:00.000Z', 150_000, { createdAt: at(-1) }),
-        payment('2026-11-01T15:00:05.000Z', 50_000, { createdAt: at(1) }),
+        payment('2026-11-01T14:00:00.000Z', 150_000, { createdAt: at(-1) }),
+        payment('2026-11-01T14:00:05.000Z', 50_000, { createdAt: at(1) }),
       ];
       for (const skew of [-5_000, 0, 5_000]) {
         expect(
           evaluatePromise(promise, payments, {
             now: new Date(now.now.getTime() + skew),
-            timeZone: BOGOTA,
+            timeZone: CARACAS,
           }),
         ).toEqual({ status: 'OPEN', covered: 50_000 });
       }
@@ -181,10 +184,10 @@ describe('evaluatePromise (DX-150)', () => {
     const result = evaluatePromise(
       { ...promise, amount: 0.3 },
       [
-        payment('2026-11-05T15:00:00.000Z', 0.1),
-        payment('2026-11-05T16:00:00.000Z', 0.2),
+        payment('2026-11-05T14:00:00.000Z', 0.1),
+        payment('2026-11-05T15:00:00.000Z', 0.2),
       ],
-      { now: new Date('2026-11-05T17:00:00.000Z'), timeZone: BOGOTA },
+      { now: new Date('2026-11-05T16:00:00.000Z'), timeZone: CARACAS },
     );
     expect(result).toEqual({ status: 'KEPT', covered: 0.3 });
   });
@@ -192,8 +195,8 @@ describe('evaluatePromise (DX-150)', () => {
   it('cumplido gana a incumplido: el barrido tardío del 16 ve los abonos del 15', () => {
     const result = evaluatePromise(
       promise,
-      [payment('2026-11-15T20:00:00.000Z', 200_000)],
-      { now: new Date('2026-11-16T12:00:00.000Z'), timeZone: BOGOTA },
+      [payment('2026-11-15T19:00:00.000Z', 200_000)],
+      { now: new Date('2026-11-16T11:00:00.000Z'), timeZone: CARACAS },
     );
     expect(result.status).toBe('KEPT');
   });
@@ -204,8 +207,8 @@ describe('countsTowardPromise (DX-215)', () => {
     expect(
       countsTowardPromise(
         promise,
-        payment('2026-11-15T20:00:00.000Z', 1),
-        BOGOTA,
+        payment('2026-11-15T19:00:00.000Z', 1),
+        CARACAS,
       ),
     ).toBe(true);
   });
@@ -213,39 +216,39 @@ describe('countsTowardPromise (DX-215)', () => {
   it.each([
     [
       'otra moneda',
-      payment('2026-11-05T15:00:00.000Z', 1, { currency: 'USD' }),
+      payment('2026-11-05T14:00:00.000Z', 1, { currency: 'USD' }),
     ],
     [
       'registrado antes del compromiso',
-      payment('2026-11-05T15:00:00.000Z', 1, {
-        createdAt: new Date('2026-11-01T14:59:59.000Z'),
+      payment('2026-11-05T14:00:00.000Z', 1, {
+        createdAt: new Date('2026-11-01T13:59:59.000Z'),
       }),
     ],
-    ['fechado después de su día', payment('2026-11-16T05:00:00.000Z', 1)],
+    ['fechado después de su día', payment('2026-11-16T04:00:00.000Z', 1)],
   ])('no cuenta un abono de %s', (_label, p) => {
-    expect(countsTowardPromise(promise, p, BOGOTA)).toBe(false);
+    expect(countsTowardPromise(promise, p, CARACAS)).toBe(false);
   });
 });
 
 describe('statusAfterVoid (DX-215)', () => {
-  const beforeDue = new Date('2026-11-10T16:00:00.000Z');
-  const afterDue = new Date('2026-11-16T05:30:00.000Z'); // 00:30 del 16 en la zona de la sede
+  const beforeDue = new Date('2026-11-10T15:00:00.000Z');
+  const afterDue = new Date('2026-11-16T04:30:00.000Z'); // 00:30 del 16 en la zona de la sede
 
   it('anular el abono que lo cumplió ANTES de la fecha: vuelve a ABIERTO', () => {
     expect(
       statusAfterVoid(promise, [], {
         now: beforeDue,
-        timeZone: BOGOTA,
+        timeZone: CARACAS,
         anotherOpen: false,
       }),
     ).toBe('OPEN');
   });
 
-  it('el último día aún es ABIERTO (23:59 de Bogotá)', () => {
+  it('el último día aún es ABIERTO (23:59 de Caracas)', () => {
     expect(
       statusAfterVoid(promise, [], {
-        now: new Date('2026-11-16T04:59:00.000Z'),
-        timeZone: BOGOTA,
+        now: new Date('2026-11-16T03:59:00.000Z'),
+        timeZone: CARACAS,
         anotherOpen: false,
       }),
     ).toBe('OPEN');
@@ -253,9 +256,9 @@ describe('statusAfterVoid (DX-215)', () => {
 
   it('DESPUÉS de la fecha (zona de la sede): pasa a INCUMPLIDO', () => {
     expect(
-      statusAfterVoid(promise, [payment('2026-11-05T15:00:00.000Z', 50_000)], {
+      statusAfterVoid(promise, [payment('2026-11-05T14:00:00.000Z', 50_000)], {
         now: afterDue,
-        timeZone: BOGOTA,
+        timeZone: CARACAS,
         anotherOpen: false,
       }),
     ).toBe('BROKEN');
@@ -273,9 +276,9 @@ describe('statusAfterVoid (DX-215)', () => {
 
   it('si otro abono vigente sigue cubriendo el importe, sigue CUMPLIDO', () => {
     expect(
-      statusAfterVoid(promise, [payment('2026-11-08T15:00:00.000Z', 200_000)], {
+      statusAfterVoid(promise, [payment('2026-11-08T14:00:00.000Z', 200_000)], {
         now: afterDue,
-        timeZone: BOGOTA,
+        timeZone: CARACAS,
         anotherOpen: false,
       }),
     ).toBe('KEPT');
@@ -285,8 +288,8 @@ describe('statusAfterVoid (DX-215)', () => {
     expect(
       statusAfterVoid(
         promise,
-        [payment('2026-11-08T15:00:00.000Z', 200_000, { currency: 'USD' })],
-        { now: beforeDue, timeZone: BOGOTA, anotherOpen: false },
+        [payment('2026-11-08T14:00:00.000Z', 200_000, { currency: 'USD' })],
+        { now: beforeDue, timeZone: CARACAS, anotherOpen: false },
       ),
     ).toBe('OPEN');
   });
@@ -295,7 +298,7 @@ describe('statusAfterVoid (DX-215)', () => {
     expect(
       statusAfterVoid(promise, [], {
         now: beforeDue,
-        timeZone: BOGOTA,
+        timeZone: CARACAS,
         anotherOpen: true,
       }),
     ).toBe('BROKEN');

@@ -47,7 +47,7 @@ function rendered(run: () => unknown, fmt: RegionalFormat): string {
   }
   throw new Error('no lanzó');
 }
-const ES_CO = regionalFormat({ locale: 'es-CO', hourCycle: 'h23' });
+const ES_CO = regionalFormat({ locale: 'es-VE', hourCycle: 'h23' });
 const EN_US = regionalFormat({ locale: 'en-US', hourCycle: 'h12' });
 
 const csvBytes = (text: string, encoding: BufferEncoding = 'utf8') =>
@@ -265,7 +265,7 @@ describe('XLSX', () => {
     const book = buildXlsx([
       ['nombres', 'documento', 'nacimiento', 'telefono'],
       ['Ana & Eva <x>', 1020304050, { date: 32874 }, null],
-      ['Luis', 12345678901, { date: 45000 }, 3101234567],
+      ['Luis', 12345678901, { date: 45000 }, 4141234567],
     ]);
     expect(await records(book)).toEqual([
       {
@@ -275,7 +275,7 @@ describe('XLSX', () => {
       { rowNumber: 2, cells: ['Ana & Eva <x>', '1020304050', '1990-01-01'] },
       {
         rowNumber: 3,
-        cells: ['Luis', '12345678901', '2023-03-15', '3101234567'],
+        cells: ['Luis', '12345678901', '2023-03-15', '4141234567'],
       },
     ]);
     const inlined = await records(
@@ -737,7 +737,7 @@ describe('XLSX: topes de estructura y event loop (revisión 2026-10-23, B1)', ()
         `Nombre ${i}`,
         `Apellido ${i}`,
         String(1_000_000 + i),
-        '3001234567',
+        '4121234567',
       ]);
     }
     const { outcome, maxPerTurn, total } = await watchTurns(() =>

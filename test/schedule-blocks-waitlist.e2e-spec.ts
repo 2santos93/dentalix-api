@@ -20,7 +20,7 @@ import { blockConflictMessage } from '../src/modules/schedule-blocks/domain/sche
 import { regionalFormat } from '../src/shared/format/regional-format';
 import { zonedStartOfDay } from '../src/shared/time/civil-day';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   REGIONAL_NEW_YORK_FIXTURE,
 } from './support/location-fixtures';
 
@@ -34,11 +34,11 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 });
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const BOGOTA_MS = 5 * 60 * 60 * 1000;
+const CARACAS_MS = 5 * 60 * 60 * 1000;
 
 /** YYYY-MM-DD (zona de la sede) del primer martes a 7 días o más: siempre futuro. */
 function nextTuesday(): string {
-  let t = Date.now() - BOGOTA_MS + 7 * DAY_MS;
+  let t = Date.now() - CARACAS_MS + 7 * DAY_MS;
   while (new Date(t).getUTCDay() !== 2) t += DAY_MS;
   return new Date(t).toISOString().slice(0, 10);
 }
@@ -47,9 +47,9 @@ function addDays(day: string, n: number): string {
     .toISOString()
     .slice(0, 10);
 }
-/** Hora de pared de la sede (UTC−5 fijo) como instante ISO. */
+/** Hora de pared de la sede (UTC−4 fijo) como instante ISO. */
 function local(day: string, hhmm: string): string {
-  return new Date(`${day}T${hhmm}:00-05:00`).toISOString();
+  return new Date(`${day}T${hhmm}:00-04:00`).toISOString();
 }
 
 /**
@@ -317,8 +317,8 @@ describe('Bloqueos de agenda y pendientes por agendar (e2e, DX-122)', () => {
     // Del martes al viernes (último día elegido), en día/mes de la sede.
     expect((rejected.body as { message: string }).message).toBe(
       vacationMessage(
-        regionalFormat(REGIONAL_BOGOTA_FIXTURE),
-        'America/Bogota',
+        regionalFormat(REGIONAL_CARACAS_FIXTURE),
+        'America/Caracas',
         TUE,
         addDays(TUE, 3),
       ),
@@ -466,7 +466,7 @@ describe('Bloqueos de agenda y pendientes por agendar (e2e, DX-122)', () => {
       monday.body as { openings: { start: string; end: string }[] }
     ).openings;
     expect(monday.body).toMatchObject({
-      timeZone: 'America/Bogota',
+      timeZone: 'America/Caracas',
       durationMinutes: 30,
       truncated: false,
     });
@@ -765,7 +765,7 @@ describe('Bloqueos de agenda y pendientes por agendar (e2e, DX-122)', () => {
             const fmt = regionalFormat(REGIONAL_NEW_YORK_FIXTURE);
             const day = fmt.dayMonth(
               new Date(local(NEXT_TUE, '15:00')),
-              'America/Bogota',
+              'America/Caracas',
             );
             const rejected = await book(
               dentist2.userId,
@@ -841,7 +841,7 @@ describe('rango «día/mes» del 409 de vacaciones, a cualquier fecha (DX-252, D
   const vacationFrom = (
     from: string,
     toExclusive: string,
-    region: typeof REGIONAL_BOGOTA_FIXTURE,
+    region: typeof REGIONAL_CARACAS_FIXTURE,
   ) =>
     blockConflictMessage(
       {
@@ -875,7 +875,7 @@ describe('rango «día/mes» del 409 de vacaciones, a cualquier fecha (DX-252, D
   ])(
     'del %s al día anterior a %s',
     (from, toExclusive, esCo: string, enUs: string) => {
-      expect(vacationFrom(from, toExclusive, REGIONAL_BOGOTA_FIXTURE)).toBe(
+      expect(vacationFrom(from, toExclusive, REGIONAL_CARACAS_FIXTURE)).toBe(
         message(esCo),
       );
       // Nueva York cambia de horario el 1-nov-2026 y el 14-mar-2027: la

@@ -21,7 +21,7 @@ const DENTIST = { role: ClinicRole.DENTIST };
 // Fake whitelist: allows the codes actually exercised by this suite. `has`
 // is case-sensitive here on purpose, to catch a regression where the use
 // case forgets to `.toUpperCase()` BEFORE calling it.
-function makeWhitelist(allowed: string[] = ['USD', 'COP']): CurrencyWhitelist {
+function makeWhitelist(allowed: string[] = ['USD', 'VES']): CurrencyWhitelist {
   return {
     has: (code: string): Promise<boolean> =>
       Promise.resolve(allowed.includes(code)),
@@ -203,8 +203,8 @@ describe('UpdateTreatmentPlanUseCase', () => {
   it('validates and uppercases currency only when provided, forwarding it to the repo', async () => {
     const { repo, uc } = setup();
     const plan = repo.seedPlan();
-    const result = await uc.execute(plan.id, { currency: 'cop' }, DENTIST);
-    expect(result.currency).toBe('COP');
+    const result = await uc.execute(plan.id, { currency: 'ves' }, DENTIST);
+    expect(result.currency).toBe('VES');
   });
 
   it('rejects an unknown currency with BadRequestException, without writing', async () => {
@@ -218,13 +218,13 @@ describe('UpdateTreatmentPlanUseCase', () => {
 
   it('leaves currency untouched (no whitelist call needed) when omitted', async () => {
     const { repo, uc } = setup(makeWhitelist([]));
-    const plan = repo.seedPlan({ currency: 'COP' });
+    const plan = repo.seedPlan({ currency: 'VES' });
     const result = await uc.execute(
       plan.id,
       { notes: 'sin cambio de moneda' },
       DENTIST,
     );
-    expect(result.currency).toBe('COP');
+    expect(result.currency).toBe('VES');
   });
 
   describe('plan con un cargo por inasistencia vigente (SEC-050)', () => {
@@ -232,7 +232,7 @@ describe('UpdateTreatmentPlanUseCase', () => {
       'Este plan lleva un cargo por inasistencia o cancelación tardía vigente: no se cancela ni cambia de moneda. Anula antes el cargo desde la cita (con motivo).';
     function feePlan() {
       const ctx = setup();
-      const plan = ctx.repo.seedPlan({ status: ACCEPTED, currency: 'COP' });
+      const plan = ctx.repo.seedPlan({ status: ACCEPTED, currency: 'VES' });
       ctx.repo.seedItem({
         planId: plan.id,
         price: 50000,
@@ -270,7 +270,7 @@ describe('UpdateTreatmentPlanUseCase', () => {
     function creditPlan(status: TreatmentPlanStatus) {
       const ctx = setup();
       // Recibió un traspaso: tiene asientos, pero ningún abono.
-      const plan = ctx.repo.seedPlan({ status, currency: 'COP' });
+      const plan = ctx.repo.seedPlan({ status, currency: 'VES' });
       ctx.repo.creditEntryPlanIds.add(plan.id);
       return { ...ctx, plan };
     }
@@ -289,7 +289,7 @@ describe('UpdateTreatmentPlanUseCase', () => {
           code: 'PLAN_CURRENCY_LOCKED_BY_CREDIT',
           message: CREDIT_LOCKED,
         });
-        expect(repo.stored(plan.id).currency).toBe('COP');
+        expect(repo.stored(plan.id).currency).toBe('VES');
         expect(repo.stored(plan.id).notes).not.toBe('después');
       },
     );
@@ -297,11 +297,11 @@ describe('UpdateTreatmentPlanUseCase', () => {
     it('la misma moneda, las notas o cancelarlo sí pasan', async () => {
       const { uc, plan } = creditPlan(DRAFT);
       await expect(
-        uc.execute(plan.id, { currency: 'cop', notes: 'Notas' }, DENTIST),
-      ).resolves.toMatchObject({ currency: 'COP', notes: 'Notas' });
+        uc.execute(plan.id, { currency: 'ves', notes: 'Notas' }, DENTIST),
+      ).resolves.toMatchObject({ currency: 'VES', notes: 'Notas' });
       await expect(
         uc.execute(plan.id, { status: CANCELLED }, DENTIST),
-      ).resolves.toMatchObject({ status: CANCELLED, currency: 'COP' });
+      ).resolves.toMatchObject({ status: CANCELLED, currency: 'VES' });
     });
 
     it('con asientos y además abonos vivos, el 409 es el del saldo a favor (anular los abonos no lo desbloquearía)', async () => {
@@ -314,12 +314,12 @@ describe('UpdateTreatmentPlanUseCase', () => {
         code: 'PLAN_CURRENCY_LOCKED_BY_CREDIT',
         message: CREDIT_LOCKED,
       });
-      expect(repo.stored(plan.id).currency).toBe('COP');
+      expect(repo.stored(plan.id).currency).toBe('VES');
     });
 
     it('sin asientos ni abonos la moneda de un borrador sí cambia', async () => {
       const { repo, uc } = setup();
-      const plan = repo.seedPlan({ status: DRAFT, currency: 'COP' });
+      const plan = repo.seedPlan({ status: DRAFT, currency: 'VES' });
       await expect(
         uc.execute(plan.id, { currency: 'USD' }, DENTIST),
       ).resolves.toMatchObject({ currency: 'USD' });

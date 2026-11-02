@@ -9,7 +9,7 @@ import {
 } from '../src/modules/auth/application/registration-token';
 import type { ClinicLocationSettings } from '../src/modules/auth/domain/ports/auth-repository.port';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   REGIONAL_NEW_YORK_FIXTURE,
   REGIONAL_TOKYO_FIXTURE,
 } from './support/location-fixtures';
@@ -25,12 +25,12 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 });
 const EMAIL = 'registro.int@dx029.test';
 // G1: la primera sede del pendiente; datos de test con nombre, no defaults.
-const BOGOTA_LOCATION: ClinicLocationSettings = {
-  country: REGIONAL_BOGOTA_FIXTURE.country,
-  currency: REGIONAL_BOGOTA_FIXTURE.currency,
-  timeZone: REGIONAL_BOGOTA_FIXTURE.timeZone,
-  locale: REGIONAL_BOGOTA_FIXTURE.locale,
-  hourCycle: REGIONAL_BOGOTA_FIXTURE.hourCycle,
+const CARACAS_LOCATION: ClinicLocationSettings = {
+  country: REGIONAL_CARACAS_FIXTURE.country,
+  currency: REGIONAL_CARACAS_FIXTURE.currency,
+  timeZone: REGIONAL_CARACAS_FIXTURE.timeZone,
+  locale: REGIONAL_CARACAS_FIXTURE.locale,
+  hourCycle: REGIONAL_CARACAS_FIXTURE.hourCycle,
 };
 const TOKYO_LOCATION: ClinicLocationSettings = {
   country: REGIONAL_TOKYO_FIXTURE.country,
@@ -59,7 +59,7 @@ describe('PrismaRegistrationRepository (int, DX-029)', () => {
     token: string,
     subdomain = 'reg-int',
     replaceCreatedBefore = new Date(Date.now() + 60_000),
-    location: ClinicLocationSettings = BOGOTA_LOCATION,
+    location: ClinicLocationSettings = CARACAS_LOCATION,
   ) =>
     repo.savePending({
       replaceCreatedBefore,

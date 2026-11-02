@@ -70,7 +70,7 @@ describe('CreatePerioExamUseCase', () => {
 
   it('«hoy» es el de la zona horaria de la sede activa (Europe/Madrid)', async () => {
     const { create, repo } = setup();
-    // 03:00 UTC del 16 = 05:00 del 16 en Madrid (en Bogotá aún sería el 15).
+    // 03:00 UTC del 16 = 05:00 del 16 en Madrid (en Caracas aún sería el 15).
     repo.timeZone = 'Europe/Madrid';
     const exam = await create.execute('p1', {}, 'd');
     expect(exam.examDate).toBe('2026-10-16');

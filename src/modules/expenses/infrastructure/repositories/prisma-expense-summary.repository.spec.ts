@@ -80,7 +80,7 @@ describe('resumen de gastos: zonas horarias (DX-274)', () => {
   });
 
   it('en una zona normal no lanza y consulta ingresos y gastos', async () => {
-    const { tx, summarize } = build('America/Bogota');
+    const { tx, summarize } = build('America/Caracas');
     await expect(summarize('2026-10-01', '2026-10-31')).resolves.toMatchObject({
       income: [],
       expenses: [],

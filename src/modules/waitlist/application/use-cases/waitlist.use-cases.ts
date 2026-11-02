@@ -263,6 +263,8 @@ export interface ScheduleFromWaitlistInput {
   end?: Date;
   /** Si falta: el de la entrada, si sigue activo. */
   appointmentTypeId?: string;
+  /** DX-492: el sillón que devolvió «Buscar hueco». */
+  chairId?: string;
   reason?: string;
   notes?: string;
 }
@@ -306,6 +308,7 @@ export class ScheduleFromWaitlistUseCase {
         new Date(input.start.getTime() + entry.durationMinutes * 60_000),
       appointmentTypeId:
         input.appointmentTypeId ?? (await this.inheritedType(entry)),
+      chairId: input.chairId,
       reason: input.reason,
       notes: input.notes,
       createdById: ctx.actor.userId,

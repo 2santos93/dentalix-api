@@ -35,7 +35,7 @@ describe('dígitos de formato CLDR (DX-340)', () => {
     );
   });
 
-  it('formato, minor units ISO y redondeo son números distintos (RSD, COP, JPY)', () => {
+  it('formato, minor units ISO y redondeo son números distintos (RSD, la moneda de legado, JPY)', () => {
     const of = (code: string) => CURRENCY_DIGITS.find((c) => c.code === code);
     // RSD: se pinta sin decimales (CLDR 47), ISO le da 2 y se redondea a 0.
     expect(CLDR_ZERO_FORMAT_DIGITS.has('RSD')).toBe(true);
@@ -44,13 +44,14 @@ describe('dígitos de formato CLDR (DX-340)', () => {
       minorUnits: 2,
       roundingDigits: 0,
     });
-    // COP: se pinta con 2 (CLDR 47), ISO 2, se redondea al peso (legado).
-    expect(CLDR_ZERO_FORMAT_DIGITS.has('COP')).toBe(false);
-    expect(of('COP')).toEqual({
-      code: 'COP',
-      minorUnits: 2,
-      roundingDigits: 0,
-    });
+    // Legado: la única que se pinta con 2 (CLDR 47), ISO 2, y se redondea a 0.
+    const legacy = CURRENCY_DIGITS.filter(
+      (c) =>
+        c.minorUnits === 2 &&
+        c.roundingDigits === 0 &&
+        !CLDR_ZERO_FORMAT_DIGITS.has(c.code),
+    );
+    expect(legacy).toHaveLength(1);
     // JPY: 0 en los tres.
     expect(CLDR_ZERO_FORMAT_DIGITS.has('JPY')).toBe(true);
     expect(of('JPY')).toEqual({

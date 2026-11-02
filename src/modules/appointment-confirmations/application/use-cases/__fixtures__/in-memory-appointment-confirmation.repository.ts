@@ -65,7 +65,7 @@ export class InMemoryAppointmentConfirmationRepository implements AppointmentCon
       end: new Date(start.getTime() + 30 * 60_000),
       status: 'SCHEDULED' as const,
       patientFirstName: 'Ana María',
-      patientPhone: '+57 310 555 0101',
+      patientPhone: '+58 414 555 0101',
       providerName: 'Dra. Pérez',
       locationId: 'loc-principal',
       locationName: 'Sede Principal',

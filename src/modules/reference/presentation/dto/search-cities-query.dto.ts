@@ -4,7 +4,7 @@ import { IsInt, IsOptional, IsString, Length, Min } from 'class-validator';
 
 export class SearchCitiesQueryDto {
   @ApiProperty({
-    example: 'CO',
+    example: 'VE',
     description: 'ISO 3166-1 alpha-2 country code',
   })
   @IsString()

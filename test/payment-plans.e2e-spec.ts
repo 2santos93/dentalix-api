@@ -15,7 +15,7 @@ import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   registerBody as clinicRegisterBody,
 } from './support/location-fixtures';
 
@@ -105,7 +105,7 @@ async function registerAndLogin(
 }> {
   const register = await registerVerified(
     app,
-    clinicRegisterBody(REGIONAL_BOGOTA_FIXTURE, {
+    clinicRegisterBody(REGIONAL_CARACAS_FIXTURE, {
       clinicName: opts.clinicName,
       subdomain: opts.subdomain,
       email: opts.email,
@@ -255,7 +255,7 @@ describe('Payment plans / cuotas (e2e)', () => {
         .expect(201);
       const catalogItem = createCatalogItem.body as CatalogItemResponseBody;
 
-      // --- 1. Create a treatment plan (explicit USD; the clinic's location is COP).
+      // --- 1. Create a treatment plan (explicit USD; the clinic's location is VES).
       const createPlan = await request(app.getHttpServer())
         .post(`/api/v1/patients/${patient.id}/treatment-plans`)
         .set('X-Tenant-Host', hostFor(clinic.subdomain))

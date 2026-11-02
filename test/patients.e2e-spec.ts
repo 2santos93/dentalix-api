@@ -8,7 +8,7 @@ import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   REGIONAL_TOKYO_FIXTURE,
   registerBody as clinicRegisterBody,
   type RegionalFixture,
@@ -68,7 +68,7 @@ async function registerAndLogin(
 ): Promise<{ tenantId: string; accessToken: string; subdomain: string }> {
   const register = await registerVerified(
     app,
-    clinicRegisterBody(opts.fixture ?? REGIONAL_BOGOTA_FIXTURE, {
+    clinicRegisterBody(opts.fixture ?? REGIONAL_CARACAS_FIXTURE, {
       clinicName: opts.clinicName,
       subdomain: opts.subdomain,
       email: opts.email,
@@ -169,12 +169,12 @@ describe('Patients (e2e)', () => {
       .patch(`/api/v1/patients/${created.id}`)
       .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.accessToken}`)
-      .send({ phone: '3001234567' })
+      .send({ phone: '4121234567' })
       .expect(200);
     const updateBody = update.body as PatientResponseBody & {
       phone: string | null;
     };
-    expect(updateBody.phone).toBe('3001234567');
+    expect(updateBody.phone).toBe('4121234567');
 
     // Los campos administrativos se pueden CREAR (CreatePatientDto) pero hasta
     // ahora no editar: UpdatePatientDto no los aceptaba y ValidationPipe con
@@ -187,10 +187,10 @@ describe('Patients (e2e)', () => {
         occupation: 'Docente',
         maritalStatus: 'Casado',
         physicianName: 'Dra. Ruiz',
-        physicianPhone: '+57 300 000 0000',
+        physicianPhone: '+58 412 000 0000',
         emergencyContactName: 'Ana Pérez',
         emergencyContactRelationship: 'Madre',
-        emergencyContactPhone: '+57 300 111 1111',
+        emergencyContactPhone: '+58 412 111 1111',
         // DX-203: DEPRECADO y de solo lectura: se descartan sin error.
         guardianName: 'Luis Pérez',
         guardianDocNumber: '9001',

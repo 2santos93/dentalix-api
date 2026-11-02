@@ -80,7 +80,7 @@ describe('scripts de la imagen de runtime (DX-083)', () => {
 
     it('si hay cities.json (imagen) se leen de ahí, sin tocar el paquete', () => {
       const rows: CitySeedRow[] = [
-        { countryCode: 'CO', name: 'Bogotá', region: 'Bogotá D.C.' },
+        { countryCode: 'VE', name: 'Caracas', region: 'Caracas' },
       ];
       const file = join(dir, 'cities.json');
       writeFileSync(file, JSON.stringify(rows));
@@ -91,7 +91,7 @@ describe('scripts de la imagen de runtime (DX-083)', () => {
       const rows = loadCitySeedRows(join(dir, 'no-existe.json'));
       expect(rows.length).toBeGreaterThan(100_000);
       expect(rows).toEqual(citiesFromPackage());
-      expect(rows.some((r) => r.countryCode === 'CO')).toBe(true);
+      expect(rows.some((r) => r.countryCode === 'VE')).toBe(true);
     });
   });
 });

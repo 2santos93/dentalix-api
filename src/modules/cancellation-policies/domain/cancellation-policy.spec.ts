@@ -138,7 +138,7 @@ describe('policyInputError (DX-279)', () => {
   it('acepta una política válida', () => {
     expect(policyInputError(ok)).toBeNull();
     expect(
-      policyInputError({ ...ok, suggestedFee: 0, currency: 'COP' }),
+      policyInputError({ ...ok, suggestedFee: 0, currency: 'USD' }),
     ).toBeNull();
     expect(policyInputError({ ...ok, noticeHours: 0 })).toBeNull();
     expect(policyInputError({ ...ok, noticeHours: 168 })).toBeNull();
@@ -154,7 +154,7 @@ describe('policyInputError (DX-279)', () => {
   });
 
   it('rechaza un importe negativo', () => {
-    expect(policyInputError({ ...ok, suggestedFee: -1, currency: 'COP' })).toBe(
+    expect(policyInputError({ ...ok, suggestedFee: -1, currency: 'USD' })).toBe(
       CANCELLATION_POLICY_MESSAGES.fee,
     );
   });
@@ -163,7 +163,7 @@ describe('policyInputError (DX-279)', () => {
     expect(policyInputError({ ...ok, suggestedFee: 10 })).toBe(
       CANCELLATION_POLICY_MESSAGES.currencyRequired,
     );
-    expect(policyInputError({ ...ok, currency: 'COP' })).toBe(
+    expect(policyInputError({ ...ok, currency: 'USD' })).toBe(
       CANCELLATION_POLICY_MESSAGES.feeRequired,
     );
   });

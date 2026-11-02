@@ -90,7 +90,7 @@ export class UpdatePatientDto {
   address?: string;
 
   @ApiPropertyOptional({
-    example: 'CO',
+    example: 'VE',
     description: 'ISO 3166-1 alpha-2',
     nullable: true,
   })

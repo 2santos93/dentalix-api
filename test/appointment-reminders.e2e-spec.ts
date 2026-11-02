@@ -23,7 +23,7 @@ import {
   SEND_REMINDER_JOB,
 } from '../src/modules/reminders/application/plan-reminders';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
 
@@ -159,7 +159,7 @@ describe('Recordatorios de cita por email (e2e, DX-026)', () => {
       .send({ ranges: [] })
       .expect(200);
     await as(api().post('/api/v1/locations'), clinic.adminToken)
-      .send(locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }))
+      .send(locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede Norte' }))
       .expect(201);
   });
 

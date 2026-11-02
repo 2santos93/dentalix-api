@@ -89,7 +89,7 @@ describe('DX-288 «Traer a esta cita» con peticiones concurrentes (int)', () =>
           tenantId,
           patientId: patient,
           status: 'ACCEPTED',
-          currency: 'COP',
+          currency: 'USD',
           acceptedAt: new Date(),
           acceptedLocationId: locationId,
         },

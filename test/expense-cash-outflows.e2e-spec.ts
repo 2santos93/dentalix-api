@@ -14,7 +14,7 @@ import {
 } from './support/e2e-fixtures';
 import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
 
@@ -29,8 +29,8 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
-const BOGOTA = 'America/Bogota';
-const today = (): string => civilDateIn(new Date(), BOGOTA);
+const CARACAS = 'America/Caracas';
+const today = (): string => civilDateIn(new Date(), CARACAS);
 const KEY = '1b4e28ba-2fa1-41d2-883f-0016d3cca427';
 
 const OPEN_REQUIRED = 'Abre tu caja en esta sede para pagar desde el cajón.';
@@ -104,7 +104,7 @@ const expenseOf = (res: { body: unknown }): Expense => res.body as Expense;
 const messageOf = (res: { body: unknown }): string =>
   (res.body as { message: string }).message;
 const cashLine = (detail: Detail) =>
-  detail.expected?.find((l) => l.currency === 'COP' && l.method === 'CASH');
+  detail.expected?.find((l) => l.currency === 'USD' && l.method === 'CASH');
 
 describe('Salidas de caja menor en el arqueo (e2e, DX-274)', () => {
   let app: INestApplication<App>;
@@ -150,7 +150,7 @@ describe('Salidas de caja menor en el arqueo (e2e, DX-274)', () => {
     );
     return (key ? req.set('Idempotency-Key', key) : req).send({
       category: 'Mensajería',
-      currency: 'COP',
+      currency: 'USD',
       ...body,
     });
   };
@@ -170,7 +170,7 @@ describe('Salidas de caja menor en el arqueo (e2e, DX-274)', () => {
 
   const close = (id: string, counted: number, token = receptionToken) =>
     api('post', `/cash-sessions/${id}/close`, token)
-      .send({ counts: [{ currency: 'COP', method: 'CASH', counted }] })
+      .send({ counts: [{ currency: 'USD', method: 'CASH', counted }] })
       .expect(201)
       .then(detailOf);
 
@@ -197,7 +197,7 @@ describe('Salidas de caja menor en el arqueo (e2e, DX-274)', () => {
     sedeNorte = (
       (
         await api('post', '/locations')
-          .send(locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }))
+          .send(locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede Norte' }))
           .expect(201)
       ).body as { id: string }
     ).id;
@@ -220,7 +220,7 @@ describe('Salidas de caja menor en el arqueo (e2e, DX-274)', () => {
     );
     // Recepción no gestiona gastos (solo registra salidas desde su caja).
     await api('post', '/expenses', receptionToken)
-      .send({ category: 'Papelería', amount: 1, currency: 'COP' })
+      .send({ category: 'Papelería', amount: 1, currency: 'USD' })
       .expect(403);
     expect(
       await raw.expense.count({ where: { tenantId: clinic.tenantId } }),
@@ -229,7 +229,7 @@ describe('Salidas de caja menor en el arqueo (e2e, DX-274)', () => {
 
   it('salida → el efectivo esperado baja; repetir con la misma clave no duplica', async () => {
     receptionSession = await open(receptionToken, sedePrincipal, [
-      { currency: 'COP', amount: 100_000 },
+      { currency: 'USD', amount: 100_000 },
     ]);
     const res = await outflow(
       {
@@ -307,7 +307,7 @@ describe('Salidas de caja menor en el arqueo (e2e, DX-274)', () => {
         category: 'Mensajería',
         supplier: 'Rappi',
         amount: 15_000,
-        currency: 'COP',
+        currency: 'USD',
         createdBy: expect.objectContaining({ id: receptionId }) as unknown,
       }),
     ]);
@@ -355,7 +355,7 @@ describe('Salidas de caja menor en el arqueo (e2e, DX-274)', () => {
           locationId: sedePrincipal,
           category: 'Laboratorio',
           amount: 50_000,
-          currency: 'COP',
+          currency: 'USD',
           invoiceDate: today(),
           payment: { amount: 20_000, method: 'CASH', fromCashSession: true },
         })
@@ -393,7 +393,7 @@ describe('Salidas de caja menor en el arqueo (e2e, DX-274)', () => {
         locationId: sedeNorte,
         category: 'Laboratorio',
         amount: 1_000,
-        currency: 'COP',
+        currency: 'USD',
         invoiceDate: today(),
         payment: { amount: 1_000, method: 'CASH', fromCashSession: true },
       })
@@ -504,7 +504,7 @@ describe('Salidas de caja menor en el arqueo (e2e, DX-274)', () => {
 
   it('sin caja abierta de quien anula, el ajuste queda pendiente y entra en la siguiente caja de la sede', async () => {
     const norte = await open(receptionToken, sedeNorte, [
-      { currency: 'COP', amount: 30_000 },
+      { currency: 'USD', amount: 30_000 },
     ]);
     const paid = expenseOf(
       await outflow({ amount: 7_000 }, receptionToken, sedeNorte).expect(201),
@@ -577,7 +577,7 @@ describe('Salidas de caja menor en el arqueo (e2e, DX-274)', () => {
         locationId: sedePrincipal,
         category: 'Papelería',
         amount: 3_000,
-        currency: 'COP',
+        currency: 'USD',
         invoiceDate: today(),
         payment: { amount: 3_000, method: 'CASH' },
       })
@@ -589,7 +589,7 @@ describe('Salidas de caja menor en el arqueo (e2e, DX-274)', () => {
           locationId: sedePrincipal,
           category: 'Papelería',
           amount: 3_000,
-          currency: 'COP',
+          currency: 'USD',
           invoiceDate: today(),
           payment: { amount: 3_000, method: 'CASH', fromCashSession: true },
         })

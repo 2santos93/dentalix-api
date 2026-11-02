@@ -30,7 +30,7 @@ function makeLocations(known: string[] = ['loc1', 'loc2']): LocationRepository {
   return {
     findById: (id: string) =>
       Promise.resolve(
-        known.includes(id) ? { id, timeZone: 'America/Bogota' } : null,
+        known.includes(id) ? { id, timeZone: 'America/Caracas' } : null,
       ),
   } as unknown as LocationRepository;
 }

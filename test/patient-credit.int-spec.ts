@@ -4,7 +4,7 @@ import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaPatientCreditRepository } from '../src/modules/patient-credit/infrastructure/prisma-patient-credit.repository';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -67,10 +67,10 @@ async function seed(subdomain: string): Promise<Seeded> {
     data: { name: subdomain, subdomain },
   });
   const location = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId: tenant.id,
       name: 'Sede',
-      country: 'CO',
+      country: 'VE',
     }),
   });
   const patient = await raw.patient.create({
@@ -85,7 +85,7 @@ async function seed(subdomain: string): Promise<Seeded> {
     data: {
       tenantId: tenant.id,
       patientId: patient.id,
-      currency: 'COP',
+      currency: 'USD',
       status: 'ACCEPTED',
     },
   });
@@ -93,7 +93,7 @@ async function seed(subdomain: string): Promise<Seeded> {
     data: {
       tenantId: tenant.id,
       patientId: patient.id,
-      currency: 'COP',
+      currency: 'USD',
       status: 'ACCEPTED',
     },
   });
@@ -104,7 +104,7 @@ async function seed(subdomain: string): Promise<Seeded> {
       treatmentPlanId: cancelled.id,
       patientId: patient.id,
       amount: 300_000,
-      currency: 'COP',
+      currency: 'USD',
       paidAt: new Date(),
       method: 'CASH',
     },
@@ -190,7 +190,7 @@ describe('DX-253 · saldo a favor en la BD (int)', () => {
         sourcePlanId: a.cancelledPlan,
         targetPlanId: a.livePlan,
         amountCents: 20_000_000,
-        currency: 'COP',
+        currency: 'USD',
         reason: null,
         userId,
         fingerprint: 'f',
@@ -252,7 +252,7 @@ describe('DX-253 · saldo a favor en la BD (int)', () => {
               tenantId: a.tenantId,
               patientId: a.patientId,
               treatmentPlanId: a.livePlan,
-              currency: 'COP',
+              currency: 'USD',
               amount: 1,
               kind: 'TRANSFER_IN',
               transferId: a.cancelledPlan,
@@ -275,7 +275,7 @@ describe('DX-253 · saldo a favor en la BD (int)', () => {
               patientId: a.patientId,
               sourcePlanId: a.cancelledPlan,
               targetPlanId: b.livePlan,
-              currency: 'COP',
+              currency: 'USD',
               amount: 1,
               createdById: userId,
             },
@@ -294,7 +294,7 @@ describe('DX-253 · saldo a favor en la BD (int)', () => {
               patientId: a.patientId,
               sourcePlanId: a.cancelledPlan,
               targetPlanId: a.livePlan,
-              currency: 'COP',
+              currency: 'USD',
               amount: 1,
               createdById: userId,
             },
@@ -312,7 +312,7 @@ describe('DX-253 · saldo a favor en la BD (int)', () => {
               locationId: a.locationId,
               patientId: a.patientId,
               treatmentPlanId: a.cancelledPlan,
-              currency: 'COP',
+              currency: 'USD',
               amount: 1,
               method: 'CARD',
               reason: 'Motivo',
@@ -334,7 +334,7 @@ describe('DX-253 · saldo a favor en la BD (int)', () => {
         repository.createRefund({
           planId: a.cancelledPlan,
           amountCents: 6_000_000,
-          currency: 'COP',
+          currency: 'USD',
           method: 'TRANSFER',
           reason: 'Devolución pedida',
           paymentIds: [a.paymentId],

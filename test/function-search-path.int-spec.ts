@@ -1,6 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -93,7 +93,7 @@ async function seed(): Promise<Seeded> {
     data: { email: EMAIL, passwordHash: 'x', fullName: 'Dra. Prueba' },
   });
   const { id: locationId } = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, { tenantId, name: 'Sede' }),
+    data: locationData(REGIONAL_CARACAS_FIXTURE, { tenantId, name: 'Sede' }),
   });
   const { id: patientId } = await raw.patient.create({
     data: { tenantId, firstName: 'Ana', lastName: 'Search-path' },

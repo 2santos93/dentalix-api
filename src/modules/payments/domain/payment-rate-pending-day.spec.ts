@@ -10,10 +10,10 @@ describe('pendingOnDayOf (DX-402)', () => {
     expect(
       pendingOnDayOf(
         [
-          { currency: 'USD', targetCurrency: 'COP' },
-          { currency: 'COP', targetCurrency: 'USD' },
+          { currency: 'USD', targetCurrency: 'VES' },
+          { currency: 'VES', targetCurrency: 'USD' },
         ],
-        'COP',
+        'VES',
         none,
         false,
       ),
@@ -28,12 +28,12 @@ describe('pendingOnDayOf (DX-402)', () => {
     expect(
       pendingOnDayOf(
         [
-          { currency: 'EUR', targetCurrency: 'COP' },
-          { currency: 'PEN', targetCurrency: 'COP' },
-          { currency: 'PEN', targetCurrency: 'COP' },
-          { currency: 'USD', targetCurrency: 'COP' },
+          { currency: 'EUR', targetCurrency: 'VES' },
+          { currency: 'PEN', targetCurrency: 'VES' },
+          { currency: 'PEN', targetCurrency: 'VES' },
+          { currency: 'USD', targetCurrency: 'VES' },
         ],
-        'COP',
+        'VES',
         none,
         false,
       ),
@@ -47,8 +47,8 @@ describe('pendingOnDayOf (DX-402)', () => {
   it('entre dos monedas no USD, con la tasa manual de la otra ya registrada ese día, la cuenta', () => {
     expect(
       pendingOnDayOf(
-        [{ currency: 'EUR', targetCurrency: 'COP' }],
-        'COP',
+        [{ currency: 'EUR', targetCurrency: 'VES' }],
+        'VES',
         new Set(['EUR']),
         false,
       ),
@@ -64,9 +64,9 @@ describe('pendingOnDayOf (DX-402)', () => {
       pendingOnDayOf(
         [
           { currency: 'EUR', targetCurrency: 'USD' },
-          { currency: 'COP', targetCurrency: 'COP' },
+          { currency: 'VES', targetCurrency: 'VES' },
         ],
-        'COP',
+        'VES',
         none,
         true,
       ),

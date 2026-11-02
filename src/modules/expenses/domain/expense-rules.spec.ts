@@ -59,9 +59,9 @@ describe('reglas de un gasto (DX-274)', () => {
       expect(toCents(150000.1)).toBe(15000010);
     });
 
-    it('da formato «1.234,50 COP»: miles con punto y coma solo con céntimos', () => {
-      expect(formatMoney(15000000, 'COP')).toBe('150.000 COP');
-      expect(formatMoney(123450, 'COP')).toBe('1.234,50 COP');
+    it('da formato «1.234,50 VES»: miles con punto y coma solo con céntimos', () => {
+      expect(formatMoney(15000000, 'VES')).toBe('150.000 VES');
+      expect(formatMoney(123450, 'VES')).toBe('1.234,50 VES');
       expect(formatMoney(5, 'USD')).toBe('0,05 USD');
       expect(formatMoney(0, 'USD')).toBe('0 USD');
     });
@@ -205,7 +205,7 @@ describe('reglas de un gasto (DX-274)', () => {
         amountCents: 15000000,
         liveCents,
         paymentCents,
-        currency: 'COP',
+        currency: 'VES',
       });
 
     it('admite hasta lo pendiente, justo', () => {
@@ -217,13 +217,13 @@ describe('reglas de un gasto (DX-274)', () => {
       const denial = cap(10000000, 5000001);
       expect(denial?.kind).toBe('INVALID');
       expect(denial?.message).toBe(
-        'El pago supera lo pendiente del gasto (50.000 COP).',
+        'El pago supera lo pendiente del gasto (50.000 VES).',
       );
     });
 
     it('con todo pagado, lo pendiente es 0', () => {
       expect(cap(15000000, 1)?.message).toBe(
-        'El pago supera lo pendiente del gasto (0 COP).',
+        'El pago supera lo pendiente del gasto (0 VES).',
       );
     });
   });
@@ -232,7 +232,7 @@ describe('reglas de un gasto (DX-274)', () => {
     const current = {
       amountCents: 10000,
       locationId: 'loc-1',
-      currency: 'COP',
+      currency: 'VES',
       voided: false,
     };
     const edit = (
@@ -246,7 +246,7 @@ describe('reglas de un gasto (DX-274)', () => {
         patch,
         liveCents,
         paymentCount,
-        currency: 'COP',
+        currency: 'VES',
       });
 
     it('un gasto anulado no se edita', () => {
@@ -265,7 +265,7 @@ describe('reglas de un gasto (DX-274)', () => {
       );
       expect(edit({ currency: 'USD' }, 0, 1)?.kind).toBe('CONFLICT');
       // El mismo valor no es un cambio.
-      expect(edit({ locationId: 'loc-1', currency: 'COP' }, 0, 1)).toBeNull();
+      expect(edit({ locationId: 'loc-1', currency: 'VES' }, 0, 1)).toBeNull();
     });
 
     it('el importe cambia con pagos pero nunca por debajo de lo pagado', () => {
@@ -274,7 +274,7 @@ describe('reglas de un gasto (DX-274)', () => {
       const denial = edit({ amountCents: 5999 }, 6000, 1);
       expect(denial?.kind).toBe('CONFLICT');
       expect(denial?.message).toBe(
-        'El importe no puede ser menor a lo ya pagado (60 COP).',
+        'El importe no puede ser menor a lo ya pagado (60 VES).',
       );
     });
 

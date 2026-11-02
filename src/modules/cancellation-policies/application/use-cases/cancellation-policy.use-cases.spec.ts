@@ -49,7 +49,7 @@ class FakeRepo implements CancellationPolicyRepository {
       currency: input.currency,
       patientText: input.patientText,
       receptionCanCharge: input.receptionCanCharge ?? false,
-      createdAt: new Date('2026-10-23T12:00:00.000Z'),
+      createdAt: new Date('2026-10-23T11:00:00.000Z'),
       createdById,
       createdByName: 'Admin',
     };
@@ -58,12 +58,12 @@ class FakeRepo implements CancellationPolicyRepository {
   }
 
   currencyExists(code: string) {
-    return Promise.resolve(['COP', 'EUR', 'USD'].includes(code));
+    return Promise.resolve(['VES', 'EUR', 'USD'].includes(code));
   }
 
   /** Formato y reloj de la sede de la vista previa (ajustes explícitos). */
   previewRegional: { locale: string | null; hourCycle: string | null } = {
-    locale: 'es-CO',
+    locale: 'es-VE',
     hourCycle: 'h23',
   };
 
@@ -74,7 +74,7 @@ class FakeRepo implements CancellationPolicyRepository {
             id: locationId,
             name: 'Sede Principal',
             address: 'Calle 1 # 2-3',
-            timeZone: 'America/Bogota',
+            timeZone: 'America/Caracas',
             ...this.previewRegional,
           }
         : null,
@@ -117,7 +117,7 @@ describe('Política de cancelación por sede (DX-279)', () => {
       {
         noticeHours: 48,
         suggestedFee: 50000,
-        currency: 'cop',
+        currency: 'ves',
         patientText: 'Nueva',
       },
       USER,
@@ -130,7 +130,7 @@ describe('Política de cancelación por sede (DX-279)', () => {
     expect(v2).toMatchObject({
       version: 2,
       suggestedFee: 50000,
-      currency: 'COP',
+      currency: 'VES',
     });
     const view = await get.execute(LOCATION);
     expect(view.current?.id).toBe(v2.id);
@@ -156,7 +156,7 @@ describe('Política de cancelación por sede (DX-279)', () => {
     await expect(
       create.execute(
         LOCATION,
-        { noticeHours: 24, suggestedFee: -5, currency: 'COP', patientText: '' },
+        { noticeHours: 24, suggestedFee: -5, currency: 'VES', patientText: '' },
         USER,
       ),
     ).rejects.toEqual(
@@ -233,7 +233,7 @@ describe('Política de cancelación por sede (DX-279)', () => {
         {
           noticeHours: 24,
           suggestedFee: 50000,
-          currency: 'COP',
+          currency: 'VES',
           patientText: 'Avísanos con un día.',
         },
         USER,
@@ -262,19 +262,20 @@ describe('Política de cancelación por sede (DX-279)', () => {
         },
         USER,
       );
-      // Mañana a las 15:05 en la zona de la sede (UTC-5 en octubre).
-      const now = new Date('2026-10-20T20:05:00.000Z');
+      // Mañana a las 15:05 en la zona de la sede (UTC-4 en octubre).
+      const now = new Date('2026-10-20T19:05:00.000Z');
       const rendered = await ctx.run(TENANT, () =>
         preview().execute(LOCATION, now),
       );
       expect(rendered.text).toContain(
         'miércoles 21 de octubre de 2026 a las 3:05 p. m.',
       );
-      expect(rendered.text).toContain('$25.00');
+      // DX-528: el código ISO de la moneda, nunca «$».
+      expect(rendered.text).toMatch(/USD\s25\.00/);
     });
 
     it('DX-350: una sede sin reloj da 409 LOCATION_LOCALE_REQUIRED', async () => {
-      repo.previewRegional = { locale: 'es-CO', hourCycle: null };
+      repo.previewRegional = { locale: 'es-VE', hourCycle: null };
       const error = await ctx
         .run(TENANT, () => preview().execute(LOCATION))
         .catch((e: unknown) => e);

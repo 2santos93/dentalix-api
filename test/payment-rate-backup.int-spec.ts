@@ -20,7 +20,7 @@ import {
 import { RecordAuditEventUseCase } from '../src/modules/audit/application/record-audit-event.use-case';
 import { PrismaAuditEventRepository } from '../src/modules/audit/infrastructure/prisma-audit-event.repository';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 import { purgeTenants } from './support/tenant-purge';
@@ -100,7 +100,7 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
   });
   const tenantId = tenant.id;
   await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, { tenantId, name: 'Sede' }),
+    data: locationData(REGIONAL_CARACAS_FIXTURE, { tenantId, name: 'Sede' }),
   });
   const user = await raw.user.create({
     data: {
@@ -119,7 +119,7 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
     data: {
       tenantId,
       patientId: patient.id,
-      currency: 'COP',
+      currency: 'VES',
       status: 'ACCEPTED',
     },
   });
@@ -151,7 +151,7 @@ const pending = (count: number, missing: string[] = [], missingCount = 0) => ({
 const inClinic = <T>(clinic: Clinic, fn: () => Promise<T>): Promise<T> =>
   tenantContext.run(clinic.tenantId, fn);
 
-/** Un abono «sin tasa» (en USD por defecto) al plan en COP, como lo deja el alta. */
+/** Un abono «sin tasa» (en USD por defecto) al plan en VES, como lo deja el alta. */
 function pay(clinic: Clinic, day: string, currency = 'USD'): Promise<string> {
   return inClinic(clinic, async () => {
     const payment = await paymentRepo.create({
@@ -173,7 +173,7 @@ function registerRate(
   clinic: Clinic,
   date: string,
   rate: number,
-  currency = 'COP',
+  currency = 'VES',
 ): Promise<string> {
   return inClinic(clinic, async () => {
     const saved = await manualRepo.create({
@@ -224,7 +224,7 @@ describe('DX-402 · tasa de respaldo de un día anterior a manual (int)', () => 
 
     await registerRate(clinic, DAY, 4000);
     expect(
-      await inClinic(clinic, () => retries.pendingOnDay(DAY, 'COP')),
+      await inClinic(clinic, () => retries.pendingOnDay(DAY, 'VES')),
     ).toEqual({ ...pending(1), providerRateSaved: false });
     await inClinic(clinic, () => retries.wake());
     expect(await inClinic(clinic, () => retries.retryDue(50))).toEqual({
@@ -240,12 +240,12 @@ describe('DX-402 · tasa de respaldo de un día anterior a manual (int)', () => 
     });
     expect(
       await raw.paymentPlanAmount.findUnique({ where: { paymentId: id } }),
-    ).toMatchObject({ amount: new Prisma.Decimal(200000), currency: 'COP' });
+    ).toMatchObject({ amount: new Prisma.Decimal(200000), currency: 'VES' });
     expect(
       await raw.paymentBaseRetry.findFirst({ where: { paymentId: id } }),
     ).toBeNull();
     expect(
-      await inClinic(clinic, () => retries.pendingOnDay(DAY, 'COP')),
+      await inClinic(clinic, () => retries.pendingOnDay(DAY, 'VES')),
     ).toEqual(pending(0));
 
     const events = await raw.auditEvent.findMany({
@@ -264,7 +264,7 @@ describe('DX-402 · tasa de respaldo de un día anterior a manual (int)', () => 
           exchangeRateBackup: {
             rateDate: DAY,
             manualSince: SINCE,
-            currencies: ['COP', 'USD'],
+            currencies: ['USD', 'VES'],
           },
         },
       }),
@@ -297,12 +297,12 @@ describe('DX-402 · tasa de respaldo de un día anterior a manual (int)', () => 
   it('un día con tasa del proveedor guardada no usa la manual: se congela la automática', async () => {
     const clinic = await seedClinic(`${PREFIX}-snapshot`);
     await raw.exchangeRateSnapshot.create({
-      data: { date: SNAPSHOT_DAY, currency: 'COP', rate: 3900 },
+      data: { date: SNAPSHOT_DAY, currency: 'VES', rate: 3900 },
     });
     const id = await pay(clinic, SNAPSHOT_DAY);
     await registerRate(clinic, SNAPSHOT_DAY, 4000);
     expect(
-      await inClinic(clinic, () => retries.pendingOnDay(SNAPSHOT_DAY, 'COP')),
+      await inClinic(clinic, () => retries.pendingOnDay(SNAPSHOT_DAY, 'VES')),
     ).toEqual({ ...pending(1), providerRateSaved: true });
 
     await inClinic(clinic, () => retries.retryDue(50));
@@ -331,13 +331,13 @@ describe('DX-402 · tasa de respaldo de un día anterior a manual (int)', () => 
     });
     expect((await frozenOf(id)).exchangeRateSource).toBeNull();
     expect(
-      await inClinic(other, () => retries.pendingOnDay(DAY, 'COP')),
+      await inClinic(other, () => retries.pendingOnDay(DAY, 'VES')),
     ).toEqual(pending(0));
     expect(
       await inClinic(mine, () => retries.pendingOnDay(DAY, 'EUR')),
     ).toEqual(pending(0));
     expect(
-      await inClinic(mine, () => retries.pendingOnDay(DAY, 'COP')),
+      await inClinic(mine, () => retries.pendingOnDay(DAY, 'VES')),
     ).toEqual(pending(1));
   });
 
@@ -346,14 +346,14 @@ describe('DX-402 · tasa de respaldo de un día anterior a manual (int)', () => 
     const id = await pay(clinic, DAY, 'EUR');
     await registerRate(clinic, DAY, 4000);
     expect(
-      await inClinic(clinic, () => retries.pendingOnDay(DAY, 'COP')),
+      await inClinic(clinic, () => retries.pendingOnDay(DAY, 'VES')),
     ).toEqual(pending(0, ['EUR'], 1));
     await inClinic(clinic, () => retries.retryDue(50));
     expect((await frozenOf(id)).exchangeRateSource).toBeNull();
 
     await registerRate(clinic, DAY, 0.9, 'EUR');
     expect(
-      await inClinic(clinic, () => retries.pendingOnDay(DAY, 'COP')),
+      await inClinic(clinic, () => retries.pendingOnDay(DAY, 'VES')),
     ).toEqual(pending(1));
     expect(
       await inClinic(clinic, () => retries.pendingOnDay(DAY, 'EUR')),
@@ -375,7 +375,7 @@ describe('DX-402 · tasa de respaldo de un día anterior a manual (int)', () => 
     });
     await registerRate(clinic, DAY, 4000);
     expect(
-      await inClinic(clinic, () => retries.pendingOnDay(DAY, 'COP')),
+      await inClinic(clinic, () => retries.pendingOnDay(DAY, 'VES')),
     ).toEqual(pending(1));
     await inClinic(clinic, () => retries.retryDue(50));
     expect((await frozenOf(id)).exchangeRateSource).toBe('MANUAL');

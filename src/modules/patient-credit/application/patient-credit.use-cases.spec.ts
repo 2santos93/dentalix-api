@@ -28,7 +28,7 @@ function plan(
     planId: id,
     patientId: 'pat-1',
     status: 'ACCEPTED',
-    currency: 'COP',
+    currency: 'VES',
     billableCents: 0,
     paidCents: 0,
     entriesCents: 0,
@@ -72,14 +72,14 @@ describe('TransferCreditUseCase (DX-253)', () => {
       referenceCurrencyDigitsCatalog(),
     ).execute(
       'origen',
-      { targetPlanId: 'destino', amount: 200_000, currency: 'cop' },
+      { targetPlanId: 'destino', amount: 200_000, currency: 'ves' },
       ADMIN,
       KEY,
     );
     expect(r.createTransfer).toHaveBeenCalledWith(
       expect.objectContaining({
         amountCents: 20_000_000,
-        currency: 'COP',
+        currency: 'VES',
         idempotencyKey: KEY,
       }),
     );
@@ -105,7 +105,7 @@ describe('TransferCreditUseCase (DX-253)', () => {
         referenceCurrencyDigitsCatalog(),
       ).execute(
         'origen',
-        { targetPlanId: 'destino', amount: 1, currency: 'COP' },
+        { targetPlanId: 'destino', amount: 1, currency: 'VES' },
         ADMIN,
       ),
     ).rejects.toBeInstanceOf(error);
@@ -121,21 +121,21 @@ describe('TransferCreditUseCase (DX-253)', () => {
     await expect(
       uc.execute(
         'origen',
-        { targetPlanId: 'origen', amount: 1, currency: 'COP' },
+        { targetPlanId: 'origen', amount: 1, currency: 'VES' },
         ADMIN,
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
     await expect(
       uc.execute(
         'origen',
-        { targetPlanId: 'destino', amount: 300_000.01, currency: 'COP' },
+        { targetPlanId: 'destino', amount: 300_000.01, currency: 'VES' },
         ADMIN,
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
     await expect(
       uc.execute(
         'nada',
-        { targetPlanId: 'destino', amount: 1, currency: 'COP' },
+        { targetPlanId: 'destino', amount: 1, currency: 'VES' },
         ADMIN,
       ),
     ).rejects.toBeInstanceOf(NotFoundException);
@@ -153,7 +153,7 @@ describe('TransferCreditUseCase (DX-253)', () => {
         referenceCurrencyDigitsCatalog(),
       ).execute(
         'origen',
-        { targetPlanId: 'destino', amount: 1, currency: 'COP' },
+        { targetPlanId: 'destino', amount: 1, currency: 'VES' },
         ADMIN,
         KEY,
       ),
@@ -164,7 +164,7 @@ describe('TransferCreditUseCase (DX-253)', () => {
 describe('RefundCreditUseCase (DX-253)', () => {
   const body = {
     amount: 50_000,
-    currency: 'COP',
+    currency: 'VES',
     method: 'CASH' as const,
     reason: 'Se muda',
     paymentIds: ['p-1'],

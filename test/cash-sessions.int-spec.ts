@@ -6,7 +6,7 @@ import { recordVoidAdjustment } from '../src/modules/cash-sessions/infrastructur
 import { PrismaCashSessionRepository } from '../src/modules/cash-sessions/infrastructure/prisma-cash-session.repository';
 import { deferred, waitFor } from './support/wait-for';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -53,17 +53,17 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
   });
   const tenantId = tenant.id;
   const location = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId,
       name: 'Sede',
-      country: 'CO',
+      country: 'VE',
     }),
   });
   const other = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId,
       name: 'Sede Norte',
-      country: 'CO',
+      country: 'VE',
     }),
   });
   const patient = await raw.patient.create({
@@ -74,7 +74,7 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
       tenantId,
       patientId: patient.id,
       status: 'ACCEPTED',
-      currency: 'COP',
+      currency: 'VES',
     },
   });
   return {
@@ -155,7 +155,7 @@ describe('caja por turno: tablas, RLS e inmutabilidad (int, DX-027)', () => {
         data: {
           tenantId: a.tenantId,
           sessionId: session.id,
-          currency: 'COP',
+          currency: 'VES',
           amount: float,
         },
       });
@@ -181,7 +181,7 @@ describe('caja por turno: tablas, RLS e inmutabilidad (int, DX-027)', () => {
         data: {
           tenantId: a.tenantId,
           closingId: closing.id,
-          currency: 'COP',
+          currency: 'VES',
           method: 'CASH',
           opening: 50_000,
           expected: 50_000,
@@ -207,7 +207,7 @@ describe('caja por turno: tablas, RLS e inmutabilidad (int, DX-027)', () => {
       treatmentPlanId: clinic.planId,
       patientId: clinic.patientId,
       amount: 10_000,
-      currency: 'COP',
+      currency: 'VES',
       paidAt: new Date(),
       method: 'CASH',
       createdById: userId,
@@ -365,7 +365,7 @@ describe('caja por turno: tablas, RLS e inmutabilidad (int, DX-027)', () => {
           data: {
             tenantId: a.tenantId,
             closingId: closing.id,
-            currency: 'COP',
+            currency: 'VES',
             method: 'CASH',
             opening: 0,
             expected: 100,
@@ -532,7 +532,7 @@ describe('caja por turno: tablas, RLS e inmutabilidad (int, DX-027)', () => {
       kind: 'VOID',
       paymentId: paid.id,
       originalSessionId: closed.id,
-      currency: 'COP',
+      currency: 'VES',
       method: 'CASH',
       amount: -10_000,
       createdById: userId,
@@ -623,7 +623,7 @@ describe('caja por turno: tablas, RLS e inmutabilidad (int, DX-027)', () => {
   });
   it('abrir durante la anulación de un abono de caja cerrada recoge el VOID', async () => {
     const location = await raw.location.create({
-      data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      data: locationData(REGIONAL_CARACAS_FIXTURE, {
         tenantId: a.tenantId,
         name: 'Sede carrera VOID cerrado',
       }),
@@ -743,7 +743,7 @@ describe('caja por turno: tablas, RLS e inmutabilidad (int, DX-027)', () => {
   });
   it('abrir mientras se anula un abono tardío pendiente recoge juntos el positivo y su compensación', async () => {
     const location = await raw.location.create({
-      data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      data: locationData(REGIONAL_CARACAS_FIXTURE, {
         tenantId: a.tenantId,
         name: 'Sede carrera de ajustes',
       }),
@@ -757,7 +757,7 @@ describe('caja por turno: tablas, RLS e inmutabilidad (int, DX-027)', () => {
         locationId: location.id,
         paymentId: paid.id,
         kind: 'LATE_PAYMENT',
-        currency: 'COP',
+        currency: 'VES',
         method: 'CASH',
         amount: paid.amount,
         createdById: userId,
@@ -865,7 +865,7 @@ describe('caja por turno: tablas, RLS e inmutabilidad (int, DX-027)', () => {
         repo.close(session.id, {}, otherUserId, ({ expected, blind }) => {
           expect(expected).toEqual([
             expect.objectContaining({
-              currency: 'COP',
+              currency: 'VES',
               method: 'CASH',
               expectedCents: 0,
               adjustmentsCents: 0,

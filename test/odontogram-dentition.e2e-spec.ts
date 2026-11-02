@@ -57,7 +57,7 @@ interface GroupBody {
 }
 
 /** Día civil en la zona de la sede (zona por defecto de la clínica) `daysAgo` días atrás. */
-function bogotaDay(daysAgo = 0): string {
+function caracasDay(daysAgo = 0): string {
   return new Date(Date.now() - 5 * 60 * 60 * 1000 - daysAgo * DAY_MS)
     .toISOString()
     .slice(0, 10);
@@ -65,7 +65,7 @@ function bogotaDay(daysAgo = 0): string {
 
 /** Fecha de nacimiento de alguien que tiene `years` años (y un mes) hoy. */
 function birthDateFor(years: number): string {
-  const [y, m, d] = bogotaDay(31).split('-').map(Number);
+  const [y, m, d] = caracasDay(31).split('-').map(Number);
   return `${y - years}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 }
 
@@ -412,7 +412,7 @@ describe('Odontograma fase 2: dentición, anulación y asOf (DX-120, e2e)', () =
       const res = await call(
         a,
         'get',
-        `/patients/${adult}/odontogram?asOf=${bogotaDay(5)}`,
+        `/patients/${adult}/odontogram?asOf=${caracasDay(5)}`,
       ).expect(200);
       const groups = res.body as GroupBody[];
       expect(groups.map((g) => g.toothNumber)).toEqual(['36']);
@@ -423,7 +423,7 @@ describe('Odontograma fase 2: dentición, anulación y asOf (DX-120, e2e)', () =
       const res = await call(
         a,
         'get',
-        `/patients/${adult}/odontogram?asOf=${bogotaDay()}`,
+        `/patients/${adult}/odontogram?asOf=${caracasDay()}`,
       ).expect(200);
       expect((res.body as GroupBody[]).map((g) => g.toothNumber)).toEqual([
         '46',
@@ -434,10 +434,10 @@ describe('Odontograma fase 2: dentición, anulación y asOf (DX-120, e2e)', () =
       const res = await call(
         a,
         'get',
-        `/patients/${child}/dentition?asOf=${bogotaDay(1)}`,
+        `/patients/${child}/dentition?asOf=${caracasDay(1)}`,
       ).expect(200);
       const body = res.body as DentitionBody;
-      expect(body.asOf).toBe(bogotaDay(1));
+      expect(body.asOf).toBe(caracasDay(1));
       expect(body.positions.find((p) => p.position === '15')?.source).toBe(
         'AGE',
       );
@@ -453,7 +453,7 @@ describe('Odontograma fase 2: dentición, anulación y asOf (DX-120, e2e)', () =
       await call(
         a,
         'get',
-        `/patients/${adult}/dentition?asOf=${bogotaDay(-3)}`,
+        `/patients/${adult}/dentition?asOf=${caracasDay(-3)}`,
       ).expect(400);
     });
   });

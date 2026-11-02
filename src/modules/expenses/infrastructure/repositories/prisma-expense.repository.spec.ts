@@ -32,7 +32,7 @@ const expenseRow = {
   supplier: null,
   description: null,
   amount: new Prisma.Decimal(100),
-  currency: 'COP',
+  currency: 'USD',
   invoiceDate: new Date('2026-10-20T00:00:00.000Z'),
   dueDate: null,
   attachmentKey: null,
@@ -80,7 +80,7 @@ function build(options: {
           {
             id: EXPENSE,
             locationId: LOCATION,
-            currency: 'COP',
+            currency: 'USD',
             amountCents: 10_000n,
             voidedAt: options.voided ? NOW : null,
           },

@@ -413,7 +413,7 @@ describe('Elegibilidad para asignar un convenio (e2e, SEC-047)', () => {
     const plan = await post(
       clinic,
       `/api/v1/patients/${patient}/treatment-plans`,
-      { currency: 'COP' },
+      { currency: 'USD' },
       tokens.DENTIST,
     );
     const item = (body: Record<string, unknown>) =>

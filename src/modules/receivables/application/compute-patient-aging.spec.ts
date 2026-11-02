@@ -6,15 +6,15 @@ import type {
 } from '../domain/entities/receivables.entity';
 import { computePatientAging } from './compute-patient-aging';
 
-// 15:00 UTC = 10:00 en la zona de la sede: el mismo día civil en las dos zonas.
-const NOW = new Date('2026-10-17T15:00:00.000Z');
-const BOGOTA = 'America/Bogota';
+// 14:00 UTC = 10:00 en la zona de la sede: el mismo día civil en las dos zonas.
+const NOW = new Date('2026-10-17T14:00:00.000Z');
+const CARACAS = 'America/Caracas';
 
 function plan(id: string, overrides: Partial<AgingPlanRow> = {}): AgingPlanRow {
   return {
     id,
     status: 'ACCEPTED',
-    currency: 'COP',
+    currency: 'VES',
     createdAt: new Date('2026-01-01T12:00:00.000Z'),
     billable: 0,
     agingFrom: new Date('2026-10-17T12:00:00.000Z'),
@@ -30,7 +30,7 @@ function schedule(
   return {
     id: `pp-${treatmentPlanId}`,
     treatmentPlanId,
-    currency: 'COP',
+    currency: 'VES',
     status: 'ACTIVE',
     downPayment: 0,
     startDate: new Date(`${dues[0][0]}T00:00:00.000Z`),
@@ -73,12 +73,12 @@ describe('computePatientAging', () => {
           ]),
         ],
       }),
-      { now: NOW, timeZone: BOGOTA },
+      { now: NOW, timeZone: CARACAS },
     );
 
     expect(aging.currencies).toEqual([
       {
-        currency: 'COP',
+        currency: 'VES',
         balance: 800000,
         debt: 800000,
         credit: 0,
@@ -116,27 +116,27 @@ describe('computePatientAging', () => {
           plans: [plan('p', { billable: 100 })],
           paymentPlans: [schedule('p', [[dueDay, 100]])],
         }),
-        { now: NOW, timeZone: BOGOTA },
+        { now: NOW, timeZone: CARACAS },
       );
-      const [cop] = aging.currencies;
-      expect(cop.buckets[bucket]).toBe(100);
-      expect(cop.oldestAgeDays).toBe(age);
+      const [ves] = aging.currencies;
+      expect(ves.buckets[bucket]).toBe(100);
+      expect(ves.oldestAgeDays).toBe(age);
       // Una cuota tiene fecha cierta: no es aproximada.
-      expect(cop.ageApproximate).toBe(false);
+      expect(ves.ageApproximate).toBe(false);
     },
   );
 
-  it('cuenta «hoy» en la zona de la sede: a las 22:00 de Bogotá aún no venció la cuota de ese día', () => {
-    // 03:00 UTC del 17 = 22:00 del 16 en Bogotá = 05:00 del 17 en Madrid.
+  it('cuenta «hoy» en la zona de la sede: a las 22:00 de Caracas aún no venció la cuota de ese día', () => {
+    // 03:00 UTC del 17 = 22:00 del 16 en Caracas = 05:00 del 17 en Madrid.
     const now = new Date('2026-10-17T03:00:00.000Z');
     const input = ledger({
       plans: [plan('p', { billable: 100 })],
       paymentPlans: [schedule('p', [['2026-10-16', 100]])],
     });
 
-    const bogota = computePatientAging(input, { now, timeZone: BOGOTA });
-    expect(bogota.currencies[0].buckets.current).toBe(100);
-    expect(bogota.currencies[0].oldestAgeDays).toBeNull();
+    const caracas = computePatientAging(input, { now, timeZone: CARACAS });
+    expect(caracas.currencies[0].buckets.current).toBe(100);
+    expect(caracas.currencies[0].oldestAgeDays).toBeNull();
 
     const madrid = computePatientAging(input, {
       now,
@@ -146,7 +146,7 @@ describe('computePatientAging', () => {
     expect(madrid.currencies[0].oldestAgeDays).toBe(1);
   });
 
-  it('la fecha del saldo sin cuotas es el día civil de la sede (aceptado a las 21:00 de Bogotá)', () => {
+  it('la fecha del saldo sin cuotas es el día civil de la sede (aceptado a las 21:00 de Caracas)', () => {
     const aging = computePatientAging(
       ledger({
         plans: [
@@ -157,7 +157,7 @@ describe('computePatientAging', () => {
           }),
         ],
       }),
-      { now: NOW, timeZone: BOGOTA },
+      { now: NOW, timeZone: CARACAS },
     );
     expect(aging.currencies[0].oldestAgeDays).toBe(30);
     expect(aging.currencies[0].buckets.days0to30).toBe(100);
@@ -174,26 +174,26 @@ describe('computePatientAging', () => {
           plan('pagado-de-mas', { billable: 200 }),
         ],
         paid: [
-          { treatmentPlanId: 'pagado-de-mas', currency: 'COP', amount: 450 },
+          { treatmentPlanId: 'pagado-de-mas', currency: 'VES', amount: 450 },
         ],
       }),
-      { now: NOW, timeZone: BOGOTA },
+      { now: NOW, timeZone: CARACAS },
     );
-    const [cop] = aging.currencies;
-    expect(cop.buckets.over90).toBe(1000);
-    expect(cop.debt).toBe(1000);
-    expect(cop.credit).toBe(250);
+    const [ves] = aging.currencies;
+    expect(ves.buckets.over90).toBe(1000);
+    expect(ves.debt).toBe(1000);
+    expect(ves.credit).toBe(250);
     // Saldo neto = el del estado de cuenta.
-    expect(cop.balance).toBe(750);
+    expect(ves.balance).toBe(750);
   });
 
   it('un plan cancelado con abonos deja saldo a favor, como en el estado de cuenta', () => {
     const aging = computePatientAging(
       ledger({
         plans: [plan('cancelado', { status: 'CANCELLED', billable: 500 })],
-        paid: [{ treatmentPlanId: 'cancelado', currency: 'COP', amount: 50 }],
+        paid: [{ treatmentPlanId: 'cancelado', currency: 'VES', amount: 50 }],
       }),
-      { now: NOW, timeZone: BOGOTA },
+      { now: NOW, timeZone: CARACAS },
     );
     expect(aging.currencies).toEqual([
       expect.objectContaining({ debt: 0, credit: 50, balance: -50 }),
@@ -205,7 +205,7 @@ describe('computePatientAging', () => {
     const aging = computePatientAging(
       ledger({
         plans: [
-          plan('cop', { billable: 300000 }),
+          plan('ves', { billable: 300000 }),
           plan('usd', {
             currency: 'USD',
             billable: 200,
@@ -213,19 +213,19 @@ describe('computePatientAging', () => {
           }),
         ],
         paid: [
-          { treatmentPlanId: 'cop', currency: 'COP', amount: 100000 },
-          { treatmentPlanId: 'cop', currency: 'USD', amount: 20 },
+          { treatmentPlanId: 'ves', currency: 'VES', amount: 100000 },
+          { treatmentPlanId: 'ves', currency: 'USD', amount: 20 },
         ],
       }),
-      { now: NOW, timeZone: BOGOTA },
+      { now: NOW, timeZone: CARACAS },
     );
     expect(
       aging.currencies.map((c) => [c.currency, c.debt, c.credit, c.balance]),
     ).toEqual([
-      ['COP', 200000, 0, 200000],
       ['USD', 200, 20, 180],
+      ['VES', 200000, 0, 200000],
     ]);
-    expect(aging.currencies[1].buckets.days61to90).toBe(200);
+    expect(aging.currencies[0].buckets.days61to90).toBe(200);
   });
 
   it('el total de cada moneda es el saldo de computeBalances (el del estado de cuenta)', () => {
@@ -236,9 +236,9 @@ describe('computePatientAging', () => {
         plan('c', { billable: 300, status: 'REJECTED' }),
       ],
       paid: [
-        { treatmentPlanId: 'a', currency: 'COP', amount: 300 },
-        { treatmentPlanId: 'b', currency: 'COP', amount: 80 },
-        { treatmentPlanId: 'c', currency: 'COP', amount: 10 },
+        { treatmentPlanId: 'a', currency: 'VES', amount: 300 },
+        { treatmentPlanId: 'b', currency: 'VES', amount: 80 },
+        { treatmentPlanId: 'c', currency: 'VES', amount: 10 },
       ],
       paymentPlans: [
         schedule('a', [
@@ -247,7 +247,7 @@ describe('computePatientAging', () => {
         ]),
       ],
     });
-    const aging = computePatientAging(input, { now: NOW, timeZone: BOGOTA });
+    const aging = computePatientAging(input, { now: NOW, timeZone: CARACAS });
     const balances = computeBalances(
       {
         plans: input.plans,
@@ -257,10 +257,10 @@ describe('computePatientAging', () => {
       NOW,
     );
     expect(aging.currencies[0].balance).toBe(balances.summary[0].balance);
-    const [cop] = aging.currencies;
-    const bucketSum = Object.values(cop.buckets).reduce((s, v) => s + v, 0);
-    expect(bucketSum).toBe(cop.debt);
-    expect(cop.debt - cop.credit).toBe(cop.balance);
+    const [ves] = aging.currencies;
+    const bucketSum = Object.values(ves.buckets).reduce((s, v) => s + v, 0);
+    expect(bucketSum).toBe(ves.debt);
+    expect(ves.debt - ves.credit).toBe(ves.balance);
   });
 
   it('si las cuotas superan el saldo del plan, solo envejece el saldo, desde las cuotas más antiguas', () => {
@@ -276,7 +276,7 @@ describe('computePatientAging', () => {
           ]),
         ],
       }),
-      { now: NOW, timeZone: BOGOTA },
+      { now: NOW, timeZone: CARACAS },
     );
     expect(aging.currencies[0].buckets).toEqual({
       current: 0,
@@ -299,7 +299,7 @@ describe('computePatientAging', () => {
         ],
         paymentPlans: [schedule('p', [['2026-10-01', 400]])],
       }),
-      { now: NOW, timeZone: BOGOTA },
+      { now: NOW, timeZone: CARACAS },
     );
     expect(aging.currencies[0].buckets).toMatchObject({
       days0to30: 400,
@@ -312,7 +312,7 @@ describe('computePatientAging', () => {
     const aging = computePatientAging(
       ledger({
         plans: [plan('p', { billable: 300 })],
-        paid: [{ treatmentPlanId: 'p', currency: 'COP', amount: 150 }],
+        paid: [{ treatmentPlanId: 'p', currency: 'VES', amount: 150 }],
         paymentPlans: [
           schedule('p', [
             ['2026-06-01', 100],
@@ -321,7 +321,7 @@ describe('computePatientAging', () => {
           ]),
         ],
       }),
-      { now: NOW, timeZone: BOGOTA },
+      { now: NOW, timeZone: CARACAS },
     );
     expect(aging.currencies[0].buckets).toMatchObject({
       over90: 0,
@@ -335,9 +335,9 @@ describe('computePatientAging', () => {
     const aging = computePatientAging(
       ledger({
         plans: [plan('p', { billable: 100 })],
-        paid: [{ treatmentPlanId: 'p', currency: 'COP', amount: 100 }],
+        paid: [{ treatmentPlanId: 'p', currency: 'VES', amount: 100 }],
       }),
-      { now: NOW, timeZone: BOGOTA },
+      { now: NOW, timeZone: CARACAS },
     );
     expect(aging.currencies).toEqual([]);
   });
@@ -350,7 +350,7 @@ describe('computePatientAging', () => {
           openings: [
             {
               id: 'ob-1',
-              currency: 'COP',
+              currency: 'VES',
               amount: 500,
               asOfDate: '2026-07-01', // hace 108 días
               asOfDateApproximate: false,
@@ -364,16 +364,16 @@ describe('computePatientAging', () => {
             },
           ],
         }),
-        { now: NOW, timeZone: BOGOTA },
+        { now: NOW, timeZone: CARACAS },
       );
-      const [cop, usd] = aging.currencies;
-      expect(cop).toMatchObject({
-        currency: 'COP',
+      const [usd, ves] = aging.currencies;
+      expect(ves).toMatchObject({
+        currency: 'VES',
         balance: 600,
         debt: 600,
         oldestAgeDays: 108,
       });
-      expect(cop.buckets).toMatchObject({ over90: 500, days0to30: 100 });
+      expect(ves.buckets).toMatchObject({ over90: 500, days0to30: 100 });
       expect(usd).toMatchObject({
         currency: 'USD',
         balance: 30,
@@ -390,14 +390,14 @@ describe('computePatientAging', () => {
           openings: [
             {
               id: 'ob-1',
-              currency: 'COP',
+              currency: 'VES',
               amount: 80,
               asOfDate: '2026-10-10',
               asOfDateApproximate: false,
             },
           ],
         }),
-        { now: NOW, timeZone: BOGOTA },
+        { now: NOW, timeZone: CARACAS },
       );
       expect(aging.ageApproximate).toBe(false);
       expect(aging.currencies[0].buckets.days0to30).toBe(80);
@@ -409,7 +409,7 @@ describe('computePatientAging', () => {
           openings: [
             {
               id: 'ob-1',
-              currency: 'COP',
+              currency: 'VES',
               amount: 500,
               asOfDate: '2026-07-01',
               asOfDateApproximate: false,
@@ -426,7 +426,7 @@ describe('computePatientAging', () => {
             {
               treatmentPlanId: null,
               openingBalanceId: 'ob-1',
-              currency: 'COP',
+              currency: 'VES',
               amount: 200,
             },
             {
@@ -437,11 +437,11 @@ describe('computePatientAging', () => {
             },
           ],
         }),
-        { now: NOW, timeZone: BOGOTA },
+        { now: NOW, timeZone: CARACAS },
       );
       expect(aging.currencies).toHaveLength(1);
       expect(aging.currencies[0]).toMatchObject({
-        currency: 'COP',
+        currency: 'VES',
         balance: 300,
         debt: 300,
         credit: 0,

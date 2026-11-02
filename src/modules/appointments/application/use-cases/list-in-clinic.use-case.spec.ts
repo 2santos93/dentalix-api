@@ -26,7 +26,7 @@ function locationsWith(rows: Record<string, RegionalRow>): LocationRepository {
 }
 
 const LOCATIONS: Record<string, RegionalRow> = {
-  bog: { timeZone: 'America/Bogota', locale: 'es-CO', hourCycle: 'h23' },
+  ccs: { timeZone: 'America/Caracas', locale: 'es-VE', hourCycle: 'h23' },
   mad: { timeZone: 'Europe/Madrid', locale: 'es-ES', hourCycle: 'h23' },
   ny: { timeZone: 'America/New_York', locale: 'en-US', hourCycle: 'h12' },
   // Réplica de G1 sin reloj, y réplica anterior a G1 sin nada.
@@ -37,8 +37,8 @@ const LOCATIONS: Record<string, RegionalRow> = {
 const at = (iso: string) => new Date(iso);
 
 describe('ListInClinicUseCase (DX-200)', () => {
-  // 19 oct 2026, 09:20 en la zona de la sede (UTC−5).
-  const NOW = at('2026-10-19T14:20:00.000Z');
+  // 19 oct 2026, 09:20 en la zona de la sede (UTC−4).
+  const NOW = at('2026-10-19T13:20:00.000Z');
 
   function setup() {
     const repo = new InMemoryAppointmentRepository();
@@ -55,19 +55,19 @@ describe('ListInClinicUseCase (DX-200)', () => {
     const { repo, uc } = setup();
     repo.urgentTypeIds.add('type-urgent');
     const walkIn = repo.seed({
-      locationId: 'bog',
+      locationId: 'ccs',
       status: AppointmentStatus.ARRIVED,
       appointmentTypeId: 'type-urgent',
-      start: at('2026-10-19T14:20:00.000Z'),
-      end: at('2026-10-19T14:50:00.000Z'),
-      arrivedAt: at('2026-10-19T14:20:00.000Z'),
+      start: at('2026-10-19T13:20:00.000Z'),
+      end: at('2026-10-19T13:50:00.000Z'),
+      arrivedAt: at('2026-10-19T13:20:00.000Z'),
       walkIn: true,
       overbooked: true,
       triageFlags: [TriageFlag.PAIN, TriageFlag.SWELLING],
       triageNote: 'Muela 36',
     });
     const view = await uc.execute(
-      { locationId: 'bog', role: ClinicRole.RECEPTION, userId: 'rec-1' },
+      { locationId: 'ccs', role: ClinicRole.RECEPTION, userId: 'rec-1' },
       NOW,
     );
     expect(view.waiting).toHaveLength(1);
@@ -81,75 +81,99 @@ describe('ListInClinicUseCase (DX-200)', () => {
     });
   });
 
+  it('DX-492: cada persona trae su sillón', async () => {
+    const { repo, uc } = setup();
+    repo.chairDirectory.set('chair-1', {
+      id: 'chair-1',
+      name: 'Sillón 1',
+      active: true,
+    });
+    repo.seed({
+      locationId: 'ccs',
+      status: AppointmentStatus.ARRIVED,
+      chairId: 'chair-1',
+      start: at('2026-10-19T13:00:00.000Z'),
+      end: at('2026-10-19T13:30:00.000Z'),
+    });
+    const view = await uc.execute(
+      { locationId: 'ccs', role: ClinicRole.RECEPTION, userId: 'rec-1' },
+      NOW,
+    );
+    expect(view.waiting[0]).toMatchObject({
+      chairId: 'chair-1',
+      chair: { name: 'Sillón 1' },
+    });
+  });
+
   it('agrupa en espera / en sillón / listo para cobrar con minutos y color', async () => {
     const { repo, uc } = setup();
     // Llegó a las 08:50 a una cita de las 09:00: verde, 30 min esperando.
     const early = repo.seed({
-      locationId: 'bog',
+      locationId: 'ccs',
       providerId: 'dent-1',
       patientFirstName: 'Ana',
       patientLastName: 'Uno',
       status: AppointmentStatus.ARRIVED,
-      start: at('2026-10-19T14:00:00.000Z'),
-      end: at('2026-10-19T14:30:00.000Z'),
-      arrivedAt: at('2026-10-19T13:50:00.000Z'),
+      start: at('2026-10-19T13:00:00.000Z'),
+      end: at('2026-10-19T13:30:00.000Z'),
+      arrivedAt: at('2026-10-19T12:50:00.000Z'),
       reason: 'Endodoncia molar 36',
     });
     // Llegó 4 min tarde: naranja.
     repo.seed({
-      locationId: 'bog',
+      locationId: 'ccs',
       status: AppointmentStatus.ARRIVED,
-      start: at('2026-10-19T14:10:00.000Z'),
-      end: at('2026-10-19T14:40:00.000Z'),
-      arrivedAt: at('2026-10-19T14:14:00.000Z'),
+      start: at('2026-10-19T13:10:00.000Z'),
+      end: at('2026-10-19T13:40:00.000Z'),
+      arrivedAt: at('2026-10-19T13:14:00.000Z'),
     });
     // Llegó 15 min tarde y ya está en el sillón desde hace 2 min: rojo.
     repo.seed({
-      locationId: 'bog',
+      locationId: 'ccs',
       status: AppointmentStatus.IN_CHAIR,
-      start: at('2026-10-19T13:30:00.000Z'),
-      end: at('2026-10-19T14:30:00.000Z'),
-      arrivedAt: at('2026-10-19T13:45:00.000Z'),
-      seatedAt: at('2026-10-19T14:18:00.000Z'),
+      start: at('2026-10-19T12:30:00.000Z'),
+      end: at('2026-10-19T13:30:00.000Z'),
+      arrivedAt: at('2026-10-19T12:45:00.000Z'),
+      seatedAt: at('2026-10-19T13:18:00.000Z'),
     });
     repo.seed({
-      locationId: 'bog',
+      locationId: 'ccs',
       status: AppointmentStatus.READY_FOR_CHECKOUT,
-      start: at('2026-10-19T13:00:00.000Z'),
-      end: at('2026-10-19T13:30:00.000Z'),
-      arrivedAt: at('2026-10-19T12:55:00.000Z'),
-      seatedAt: at('2026-10-19T13:00:00.000Z'),
-      readyForCheckoutAt: at('2026-10-19T14:05:00.000Z'),
+      start: at('2026-10-19T12:00:00.000Z'),
+      end: at('2026-10-19T12:30:00.000Z'),
+      arrivedAt: at('2026-10-19T11:55:00.000Z'),
+      seatedAt: at('2026-10-19T12:00:00.000Z'),
+      readyForCheckoutAt: at('2026-10-19T13:05:00.000Z'),
     });
     // Fuera del panel: agendada, completada, otra sede, otro día.
-    repo.seed({ locationId: 'bog', start: at('2026-10-19T16:00:00.000Z') });
+    repo.seed({ locationId: 'ccs', start: at('2026-10-19T15:00:00.000Z') });
     repo.seed({
-      locationId: 'bog',
+      locationId: 'ccs',
       status: AppointmentStatus.COMPLETED,
-      start: at('2026-10-19T12:00:00.000Z'),
+      start: at('2026-10-19T11:00:00.000Z'),
     });
     repo.seed({
       locationId: 'mad',
       status: AppointmentStatus.ARRIVED,
-      start: at('2026-10-19T14:00:00.000Z'),
-      arrivedAt: at('2026-10-19T14:00:00.000Z'),
+      start: at('2026-10-19T13:00:00.000Z'),
+      arrivedAt: at('2026-10-19T13:00:00.000Z'),
     });
     repo.seed({
-      locationId: 'bog',
+      locationId: 'ccs',
       status: AppointmentStatus.ARRIVED,
-      start: at('2026-10-18T14:00:00.000Z'),
-      arrivedAt: at('2026-10-18T14:00:00.000Z'),
+      start: at('2026-10-18T13:00:00.000Z'),
+      arrivedAt: at('2026-10-18T13:00:00.000Z'),
     });
 
     const view = await uc.execute(
-      { locationId: 'bog', role: ClinicRole.RECEPTION, userId: 'rec-1' },
+      { locationId: 'ccs', role: ClinicRole.RECEPTION, userId: 'rec-1' },
       NOW,
     );
 
     expect(view).toMatchObject({
       date: '2026-10-19',
-      locationId: 'bog',
-      timeZone: 'America/Bogota',
+      locationId: 'ccs',
+      timeZone: 'America/Caracas',
       scope: 'LOCATION',
       now: NOW,
     });
@@ -161,6 +185,8 @@ describe('ListInClinicUseCase (DX-200)', () => {
     );
     expect(view.waiting[0]).toEqual({
       appointmentId: early.id,
+      chairId: null,
+      chair: null,
       patientId: early.patientId,
       patientFirstName: 'Ana',
       patientLastName: 'Uno',
@@ -169,7 +195,7 @@ describe('ListInClinicUseCase (DX-200)', () => {
       start: early.start,
       end: early.end,
       status: AppointmentStatus.ARRIVED,
-      arrivedAt: at('2026-10-19T13:50:00.000Z'),
+      arrivedAt: at('2026-10-19T12:50:00.000Z'),
       seatedAt: null,
       readyForCheckoutAt: null,
       minutesInStatus: 30,
@@ -198,19 +224,19 @@ describe('ListInClinicUseCase (DX-200)', () => {
   it('en espera, quien más lleva esperando va primero', async () => {
     const { repo, uc } = setup();
     const later = repo.seed({
-      locationId: 'bog',
+      locationId: 'ccs',
       status: AppointmentStatus.ARRIVED,
-      start: at('2026-10-19T14:00:00.000Z'),
-      arrivedAt: at('2026-10-19T14:10:00.000Z'),
+      start: at('2026-10-19T13:00:00.000Z'),
+      arrivedAt: at('2026-10-19T13:10:00.000Z'),
     });
     const first = repo.seed({
-      locationId: 'bog',
+      locationId: 'ccs',
       status: AppointmentStatus.ARRIVED,
-      start: at('2026-10-19T14:30:00.000Z'),
-      arrivedAt: at('2026-10-19T13:55:00.000Z'),
+      start: at('2026-10-19T13:30:00.000Z'),
+      arrivedAt: at('2026-10-19T12:55:00.000Z'),
     });
     const view = await uc.execute(
-      { locationId: 'bog', role: ClinicRole.ADMIN, userId: 'adm' },
+      { locationId: 'ccs', role: ClinicRole.ADMIN, userId: 'adm' },
       NOW,
     );
     expect(view.waiting.map((i) => i.appointmentId)).toEqual([
@@ -222,28 +248,28 @@ describe('ListInClinicUseCase (DX-200)', () => {
   it('DENTIST: solo sus pacientes («Te esperan»)', async () => {
     const { repo, uc } = setup();
     repo.seed({
-      locationId: 'bog',
+      locationId: 'ccs',
       providerId: 'dent-1',
       status: AppointmentStatus.ARRIVED,
-      start: at('2026-10-19T14:00:00.000Z'),
-      arrivedAt: at('2026-10-19T14:00:00.000Z'),
+      start: at('2026-10-19T13:00:00.000Z'),
+      arrivedAt: at('2026-10-19T13:00:00.000Z'),
     });
     repo.seed({
-      locationId: 'bog',
+      locationId: 'ccs',
       providerId: 'dent-2',
       status: AppointmentStatus.ARRIVED,
-      start: at('2026-10-19T14:00:00.000Z'),
-      arrivedAt: at('2026-10-19T14:00:00.000Z'),
+      start: at('2026-10-19T13:00:00.000Z'),
+      arrivedAt: at('2026-10-19T13:00:00.000Z'),
     });
     const mine = await uc.execute(
-      { locationId: 'bog', role: ClinicRole.DENTIST, userId: 'dent-1' },
+      { locationId: 'ccs', role: ClinicRole.DENTIST, userId: 'dent-1' },
       NOW,
     );
     expect(mine.scope).toBe('MINE');
     expect(mine.waiting.map((i) => i.providerId)).toEqual(['dent-1']);
 
     const all = await uc.execute(
-      { locationId: 'bog', role: ClinicRole.ASSISTANT, userId: 'asi' },
+      { locationId: 'ccs', role: ClinicRole.ASSISTANT, userId: 'asi' },
       NOW,
     );
     expect(all.scope).toBe('LOCATION');
@@ -253,11 +279,11 @@ describe('ListInClinicUseCase (DX-200)', () => {
   it('DX-273: cada persona trae los tratamientos reservados en otra cita', async () => {
     const { repo, uc } = setup();
     const waiting = repo.seed({
-      locationId: 'bog',
+      locationId: 'ccs',
       status: AppointmentStatus.ARRIVED,
-      start: at('2026-10-19T14:00:00.000Z'),
-      end: at('2026-10-19T14:30:00.000Z'),
-      arrivedAt: at('2026-10-19T13:58:00.000Z'),
+      start: at('2026-10-19T13:00:00.000Z'),
+      end: at('2026-10-19T13:30:00.000Z'),
+      arrivedAt: at('2026-10-19T12:58:00.000Z'),
     });
     const reserved = {
       planItemId: 'item-1',
@@ -265,26 +291,26 @@ describe('ListInClinicUseCase (DX-200)', () => {
       toothNumber: '36',
       heldInClinic: false,
       appointmentId: 'future-1',
-      start: at('2026-10-26T14:00:00.000Z'),
-      locationId: 'bog',
+      start: at('2026-10-26T13:00:00.000Z'),
+      locationId: 'ccs',
       locationName: 'Sede Principal',
-      timeZone: 'America/Bogota',
-      locale: 'es-CO',
+      timeZone: 'America/Caracas',
+      locale: 'es-VE',
       hourCycle: 'h23' as const,
     };
     repo.reservedElsewhere.set(waiting.id, [reserved]);
     const view = await uc.execute(
-      { locationId: 'bog', role: ClinicRole.RECEPTION, userId: 'r' },
+      { locationId: 'ccs', role: ClinicRole.RECEPTION, userId: 'r' },
       NOW,
     );
     expect(view.waiting[0].planItemsReservedElsewhere).toEqual([reserved]);
   });
 
-  it('«hoy» es el día civil de la sede: a las 22:30 de Bogotá ya es mañana en Madrid', async () => {
+  it('«hoy» es el día civil de la sede: a las 22:30 de Caracas ya es mañana en Madrid', async () => {
     const { uc } = setup();
-    const late = at('2026-10-20T03:30:00.000Z');
+    const late = at('2026-10-20T02:30:00.000Z');
     const bog = await uc.execute(
-      { locationId: 'bog', role: ClinicRole.ADMIN, userId: 'a' },
+      { locationId: 'ccs', role: ClinicRole.ADMIN, userId: 'a' },
       late,
     );
     const mad = await uc.execute(
@@ -296,22 +322,22 @@ describe('ListInClinicUseCase (DX-200)', () => {
     expect(mad.timeZone).toBe('Europe/Madrid');
   });
 
-  it('una cita de las 23:00 de Bogotá (04:00 UTC del día siguiente) cuenta en su día', async () => {
+  it('una cita de las 23:00 de Caracas (03:00 UTC del día siguiente) cuenta en su día', async () => {
     const { repo, uc } = setup();
     repo.seed({
-      locationId: 'bog',
+      locationId: 'ccs',
       status: AppointmentStatus.ARRIVED,
-      start: at('2026-10-20T04:00:00.000Z'),
-      arrivedAt: at('2026-10-20T03:50:00.000Z'),
+      start: at('2026-10-20T03:00:00.000Z'),
+      arrivedAt: at('2026-10-20T02:50:00.000Z'),
     });
     const view = await uc.execute(
       {
-        locationId: 'bog',
+        locationId: 'ccs',
         role: ClinicRole.ADMIN,
         userId: 'a',
         date: '2026-10-19',
       },
-      at('2026-10-20T04:05:00.000Z'),
+      at('2026-10-20T03:05:00.000Z'),
     );
     expect(view.waiting).toHaveLength(1);
     expect(view.waiting[0].minutesInStatus).toBe(15);
@@ -322,7 +348,7 @@ describe('ListInClinicUseCase (DX-200)', () => {
     await expect(
       uc.execute(
         {
-          locationId: 'bog',
+          locationId: 'ccs',
           role: ClinicRole.ADMIN,
           userId: 'a',
           date: '2026-02-30',
@@ -357,10 +383,10 @@ describe('ListInClinicUseCase (DX-200)', () => {
       hourCycle: 'h12',
     });
     const bog = await uc.execute(
-      { locationId: 'bog', role: ClinicRole.ADMIN, userId: 'a' },
+      { locationId: 'ccs', role: ClinicRole.ADMIN, userId: 'a' },
       NOW,
     );
-    expect(bog).toMatchObject({ locale: 'es-CO', hourCycle: 'h23' });
+    expect(bog).toMatchObject({ locale: 'es-VE', hourCycle: 'h23' });
   });
 
   it.each([

@@ -13,7 +13,7 @@ import {
 } from './support/e2e-fixtures';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   legacyLocationInsert,
   locationBody,
 } from './support/location-fixtures';
@@ -27,12 +27,12 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 });
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const BOGOTA_MS = 5 * 60 * 60 * 1000;
+const CARACAS_MS = 5 * 60 * 60 * 1000;
 const H = (h: number) => h * 60;
 
 /** YYYY-MM-DD (zona de la sede) del primer lunes a 7 días o más: siempre futuro. */
 function nextMonday(): string {
-  let t = Date.now() - BOGOTA_MS + 7 * DAY_MS;
+  let t = Date.now() - CARACAS_MS + 7 * DAY_MS;
   while (new Date(t).getUTCDay() !== 1) t += DAY_MS;
   return new Date(t).toISOString().slice(0, 10);
 }
@@ -41,9 +41,9 @@ function addDays(day: string, n: number): string {
     .toISOString()
     .slice(0, 10);
 }
-/** Hora de pared de la sede (UTC−5 fijo) como instante ISO. */
+/** Hora de pared de la sede (UTC−4 fijo) como instante ISO. */
 function local(day: string, hhmm: string): string {
-  return new Date(`${day}T${hhmm}:00-05:00`).toISOString();
+  return new Date(`${day}T${hhmm}:00-04:00`).toISOString();
 }
 
 const MON = nextMonday();
@@ -146,9 +146,9 @@ describe('Horario de los profesionales por sede (e2e, DX-233)', () => {
     sedeA = await firstLocation(clinic);
     const created = await as(api().post('/api/v1/locations'), clinic.adminToken)
       .send(
-        locationBody(REGIONAL_BOGOTA_FIXTURE, {
+        locationBody(REGIONAL_CARACAS_FIXTURE, {
           name: 'Sede B',
-          country: 'CO',
+          country: 'VE',
         }),
       )
       .expect(201);
@@ -350,7 +350,7 @@ describe('Horario de los profesionales por sede (e2e, DX-233)', () => {
           raw,
           clinic.tenantId,
           'Réplica antigua',
-          REGIONAL_BOGOTA_FIXTURE.country,
+          REGIONAL_CARACAS_FIXTURE.country,
         );
         try {
           const res = await roster().expect(200);
@@ -388,10 +388,10 @@ describe('Horario de los profesionales por sede (e2e, DX-233)', () => {
               }
             ).locations.map((l) => [l.locationId, l.timeZone]),
           );
-          expect(zones).toEqual({ [sedeA]: 'America/Bogota', [sedeB]: null });
+          expect(zones).toEqual({ [sedeA]: 'America/Caracas', [sedeB]: null });
         } finally {
           await raw.$executeRaw`
-            UPDATE "locations" SET "timeZone" = 'America/Bogota' WHERE "id" = ${sedeB}::uuid`;
+            UPDATE "locations" SET "timeZone" = 'America/Caracas' WHERE "id" = ${sedeB}::uuid`;
         }
       });
     });

@@ -54,7 +54,7 @@ const YESTERDAY = addCivilDays(TODAY, -1);
 const SETTINGS = '/api/v1/exchange/settings';
 const MANUAL = '/api/v1/exchange/manual-rates';
 /** Snapshot del proveedor sembrado para ayer y hoy. */
-const PROVIDER = { COP: 4000, VES: 36.5 };
+const PROVIDER = { EUR: 4000, VES: 36.5 };
 
 interface RatesBody {
   base: string;
@@ -127,7 +127,7 @@ describe('Tasa de cambio por clínica (e2e, DX-374)', () => {
     ).body as BalanceBody;
   const payCop = (amount: number, paidAt: string) =>
     inManual(api().post(`/api/v1/treatment-plans/${planId}/payments`))
-      .send({ amount, currency: 'COP', paidAt, method: 'CASH' })
+      .send({ amount, currency: 'EUR', paidAt, method: 'CASH' })
       .expect(201);
   const snapshots = () =>
     raw.exchangeRateSnapshot.count({
@@ -221,7 +221,7 @@ describe('Tasa de cambio por clínica (e2e, DX-374)', () => {
     }
   });
 
-  it('antes del cambio: un abono en COP de ayer se convierte con la tasa automática', async () => {
+  it('antes del cambio: un abono en EUR de ayer se convierte con la tasa automática', async () => {
     const token = manual.adminToken;
     const host = manual.host;
     const patient = (
@@ -273,7 +273,7 @@ describe('Tasa de cambio por clínica (e2e, DX-374)', () => {
     )
       .send({ status: 'DONE' })
       .expect(200);
-    // 40.000 COP a 4.000 por USD = 10 USD. 15:00 UTC es ayer también en la sede.
+    // 40.000 EUR a 4.000 por USD = 10 USD. 15:00 UTC es ayer también en la sede.
     await payCop(40000, `${YESTERDAY}T15:00:00.000Z`);
     await expect(balance()).resolves.toMatchObject({
       billable: 100,
@@ -338,7 +338,7 @@ describe('Tasa de cambio por clínica (e2e, DX-374)', () => {
     expect(await snapshots()).toBe(before);
   });
 
-  it('un abono de hoy en COP sin tasa manual se guarda y queda sin tasa; el saldo responde 200', async () => {
+  it('un abono de hoy en EUR sin tasa manual se guarda y queda sin tasa; el saldo responde 200', async () => {
     const res = await payCop(80000, SEDE_DAY.before(60).toISOString());
     expect(res.body).toMatchObject({
       exchangeRateStatus: 'MISSING',
@@ -349,7 +349,7 @@ describe('Tasa de cambio por clínica (e2e, DX-374)', () => {
       paid: 10,
       paymentsCount: 2,
       paymentsWithoutRate: [
-        { paymentId: (res.body as { id: string }).id, currency: 'COP' },
+        { paymentId: (res.body as { id: string }).id, currency: 'EUR' },
       ],
     });
   });
@@ -416,13 +416,13 @@ describe('Tasa de cambio por clínica (e2e, DX-374)', () => {
   });
 
   it.each([
-    ['tasa 0', { currency: 'COP', rate: 0 }, MANUAL_RATE_MESSAGE],
+    ['tasa 0', { currency: 'EUR', rate: 0 }, MANUAL_RATE_MESSAGE],
     [
       'tasa con 9 decimales',
-      { currency: 'COP', rate: 1.123456789 },
+      { currency: 'EUR', rate: 1.123456789 },
       MANUAL_RATE_MESSAGE,
     ],
-    ['tasa en texto', { currency: 'COP', rate: '36,5' }, MANUAL_RATE_MESSAGE],
+    ['tasa en texto', { currency: 'EUR', rate: '36,5' }, MANUAL_RATE_MESSAGE],
     [
       'moneda fuera de la lista',
       { currency: 'ZZZ', rate: 1 },
@@ -431,12 +431,12 @@ describe('Tasa de cambio por clínica (e2e, DX-374)', () => {
     ['USD', { currency: 'USD', rate: 1 }, MANUAL_RATE_BASE_CURRENCY_MESSAGE],
     [
       'fecha que no existe',
-      { date: '2026-02-30', currency: 'COP', rate: 1 },
+      { date: '2026-02-30', currency: 'EUR', rate: 1 },
       MANUAL_RATE_DATE_MESSAGE,
     ],
     [
       'fecha con otro formato',
-      { date: '02/07/2026', currency: 'COP', rate: 1 },
+      { date: '02/07/2026', currency: 'EUR', rate: 1 },
       MANUAL_RATE_DATE_MESSAGE,
     ],
   ])('%s es 400 en español', async (_label, body, message) => {
@@ -447,7 +447,7 @@ describe('Tasa de cambio por clínica (e2e, DX-374)', () => {
   it('un día que aún no ha llegado en la zona de la sede es 400', async () => {
     const res = await register({
       date: addCivilDays(TODAY, 1),
-      currency: 'COP',
+      currency: 'EUR',
       rate: 1,
     }).expect(400);
     expect(JSON.stringify(res.body)).toContain(MANUAL_RATE_FUTURE_DATE_MESSAGE);
@@ -463,7 +463,7 @@ describe('Tasa de cambio por clínica (e2e, DX-374)', () => {
       rates: PROVIDER,
     });
     // DX-375: el abono de hoy seguía «sin tasa» (antes de cambiar se
-    // congelaron los pendientes con la manual, y no había COP de hoy); el
+    // congelaron los pendientes con la manual, y no había EUR de hoy); el
     // barrido le congela ahora la automática: 80.000 / 4.000 = 20.
     await expect(balance()).resolves.toMatchObject({
       paid: 10,

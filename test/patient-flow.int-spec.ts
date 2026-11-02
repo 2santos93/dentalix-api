@@ -14,7 +14,7 @@ import { TenantContextService } from '../src/shared/tenancy/tenant-context.servi
 import { PrismaAppointmentRepository } from '../src/modules/appointments/infrastructure/repositories/prisma-appointment.repository';
 import { PrismaLocationRepository } from '../src/modules/locations/infrastructure/repositories/prisma-location.repository';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 import { ListInClinicUseCase } from '../src/modules/appointments/application/use-cases/list-in-clinic.use-case';
@@ -218,7 +218,7 @@ describe('DX-200 · panel «En clínica» y «Deshacer llegada» con RLS (int)',
   const SUBDOMAINS = ['dx200-int-a', 'dx200-int-b'];
   // Mediodía de la sede de un día fijo: las horas no dependen de la corrida.
   const DAY = '2026-11-03';
-  const NOON = new Date(`${DAY}T17:00:00.000Z`);
+  const NOON = new Date(`${DAY}T16:00:00.000Z`);
   const DOCTOR = randomUUID();
   const OTHER_DOCTOR = randomUUID();
 
@@ -236,13 +236,13 @@ describe('DX-200 · panel «En clínica» y «Deshacer llegada» con RLS (int)',
       data: { name: subdomain, subdomain },
     });
     const main = await raw.location.create({
-      data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      data: locationData(REGIONAL_CARACAS_FIXTURE, {
         tenantId: tenant.id,
         name: 'Principal',
       }),
     });
     const north = await raw.location.create({
-      data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      data: locationData(REGIONAL_CARACAS_FIXTURE, {
         tenantId: tenant.id,
         name: 'Norte',
       }),
@@ -264,7 +264,7 @@ describe('DX-200 · panel «En clínica» y «Deshacer llegada» con RLS (int)',
     hhmm: string,
     providerId = DOCTOR,
   ) {
-    const start = new Date(`${DAY}T${hhmm}:00.000-05:00`);
+    const start = new Date(`${DAY}T${hhmm}:00.000-04:00`);
     return raw.appointment.create({
       data: {
         tenantId: c.tenantId,
@@ -419,7 +419,7 @@ describe('DX-200 · panel «En clínica» y «Deshacer llegada» con RLS (int)',
     expect(String(rejected?.reason)).toMatch(/cambió mientras tanto/);
   });
   it('un no-show a la vez que «Llegó»: gana uno y el otro es 409 (no un 500 de la CHECK)', async () => {
-    const start = new Date(`${DAY}T15:00:00.000-05:00`);
+    const start = new Date(`${DAY}T15:00:00.000-04:00`);
     const appt = await raw.appointment.create({
       data: {
         tenantId: a.tenantId,
@@ -454,7 +454,7 @@ describe('DX-200 · panel «En clínica» y «Deshacer llegada» con RLS (int)',
   });
 
   it('reactivar una cita cancelada en un hueco ya ocupado sigue siendo un solape (23P01 → 409)', async () => {
-    const start = new Date(`${DAY}T16:00:00.000-05:00`);
+    const start = new Date(`${DAY}T16:00:00.000-04:00`);
     const base = {
       tenantId: a.tenantId,
       locationId: a.main,

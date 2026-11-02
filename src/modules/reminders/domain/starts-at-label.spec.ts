@@ -1,28 +1,28 @@
 import { regionalFormat } from '../../../shared/format/regional-format';
 import { startsAtLabel } from './starts-at-label';
 
-const h12 = regionalFormat({ locale: 'es-CO', hourCycle: 'h12' });
-const h23 = regionalFormat({ locale: 'es-CO', hourCycle: 'h23' });
+const h12 = regionalFormat({ locale: 'es-VE', hourCycle: 'h12' });
+const h23 = regionalFormat({ locale: 'es-VE', hourCycle: 'h23' });
 
 describe('startsAtLabel (DX-026, DX-350)', () => {
   it('fecha y hora en la zona de la sede, en español', () => {
-    // 14:30 UTC = 9:30 en UTC-5.
+    // 13:30 UTC = 9:30 en UTC-4.
     expect(
       startsAtLabel(
-        new Date('2026-10-20T14:30:00.000Z'),
-        'America/Bogota',
+        new Date('2026-10-20T13:30:00.000Z'),
+        'America/Caracas',
         h12,
       ),
     ).toBe('martes 20 de octubre de 2026 a las 9:30 a. m.');
   });
 
   it('reminder clock follows the location hourCycle, never the country', () => {
-    const start = new Date('2026-10-20T20:05:00.000Z');
+    const start = new Date('2026-10-20T19:05:00.000Z');
     // Misma sede (misma zona y locale): solo cambia su ajuste de reloj.
-    expect(startsAtLabel(start, 'America/Bogota', h12)).toBe(
+    expect(startsAtLabel(start, 'America/Caracas', h12)).toBe(
       'martes 20 de octubre de 2026 a las 3:05 p. m.',
     );
-    expect(startsAtLabel(start, 'America/Bogota', h23)).toBe(
+    expect(startsAtLabel(start, 'America/Caracas', h23)).toBe(
       'martes 20 de octubre de 2026 a las 15:05',
     );
   });
@@ -47,11 +47,11 @@ describe('startsAtLabel (DX-026, DX-350)', () => {
   });
 
   it('cambia de día si la zona lo pide', () => {
-    // 03:00 UTC del 21 = 22:00 del 20 en UTC-5.
+    // 02:00 UTC del 21 = 22:00 del 20 en UTC-4.
     expect(
       startsAtLabel(
-        new Date('2026-10-21T03:00:00.000Z'),
-        'America/Bogota',
+        new Date('2026-10-21T02:00:00.000Z'),
+        'America/Caracas',
         h12,
       ),
     ).toBe('martes 20 de octubre de 2026 a las 10:00 p. m.');

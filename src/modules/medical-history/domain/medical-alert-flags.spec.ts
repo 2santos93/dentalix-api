@@ -7,7 +7,7 @@ import {
 } from './medical-alert-flags';
 import type { Allergy, Condition } from './entities/medical-history.entity';
 
-const AT = { date: '2026-10-20', timeZone: 'America/Bogota' };
+const AT = { date: '2026-10-20', timeZone: 'America/Caracas' };
 const RECENT = new Date('2026-09-01T12:00:00.000Z');
 const OLD = new Date('2025-01-15T12:00:00.000Z');
 
@@ -180,7 +180,7 @@ describe('deriveMedicalAlertFlags (DX-247)', () => {
   it('se evalúa el día de la cita: la del jueves ve lo que valdrá el jueves', () => {
     const reviewed = new Date('2025-10-25T15:00:00.000Z');
     const snap = snapshot({}, reviewed);
-    const tz = 'America/Bogota';
+    const tz = 'America/Caracas';
     expect(
       deriveMedicalAlertFlags(snap, null, 12, {
         date: '2026-10-21',

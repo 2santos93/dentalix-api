@@ -201,7 +201,7 @@ export class RefundReceiptSnapshotDto {
 
 export class CreditRefundDto {
   @ApiProperty({ format: 'uuid' }) id!: string;
-  @ApiProperty({ example: 'DEV-BOG-000001' }) number!: string;
+  @ApiProperty({ example: 'DEV-CCS-000001' }) number!: string;
   @ApiProperty({ format: 'uuid' }) patientId!: string;
   @ApiProperty({ format: 'uuid' }) locationId!: string;
   @ApiProperty({ format: 'uuid' }) treatmentPlanId!: string;

@@ -17,7 +17,7 @@ import type { WalkInWrite } from '../src/modules/appointments/domain/ports/walk-
 import type { AuditRequestContext } from '../src/modules/audit/domain/audit-request-context';
 import { PATIENT_DUPLICATE_CODE } from '../src/modules/appointments/domain/walk-in';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 import { purgeTenantsBySubdomain } from './support/tenant-purge';
@@ -37,7 +37,7 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 
 const SUBDOMAINS = ['dx470-int-a', 'dx470-int-b'];
 const DAY = '2026-11-10';
-const at = (hhmm: string) => new Date(`${DAY}T${hhmm}:00.000-05:00`);
+const at = (hhmm: string) => new Date(`${DAY}T${hhmm}:00.000-04:00`);
 
 interface Clinic {
   tenantId: string;
@@ -60,7 +60,7 @@ describe('DX-470 · «Atender sin cita» en la BD (int)', () => {
       data: { name: subdomain, subdomain },
     });
     const location = await raw.location.create({
-      data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      data: locationData(REGIONAL_CARACAS_FIXTURE, {
         tenantId: tenant.id,
         name: 'Principal',
       }),
@@ -133,6 +133,7 @@ describe('DX-470 · «Atender sin cita» en la BD (int)', () => {
 
   function write(c: Clinic, overrides: Partial<WalkInWrite> = {}): WalkInWrite {
     return {
+      chairId: null,
       patient: {
         kind: 'new',
         data: {

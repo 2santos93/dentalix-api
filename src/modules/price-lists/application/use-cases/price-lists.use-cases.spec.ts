@@ -51,7 +51,7 @@ describe('casos de uso de listas de precios (DX-105)', () => {
     knownLocations = new Set([SEDE_NORTE, SEDE_SUR]);
     knownCatalogIds = new Set(['c1', 'c2', 'c3']);
     whitelist = {
-      has: (code) => Promise.resolve(['COP', 'USD', 'EUR'].includes(code)),
+      has: (code) => Promise.resolve(['VES', 'USD', 'EUR'].includes(code)),
     };
     locations = {
       findById: (id: string) =>
@@ -101,12 +101,12 @@ describe('casos de uso de listas de precios (DX-105)', () => {
   describe('crear', () => {
     it('normaliza el nombre y la moneda y nace activa', async () => {
       const created = await create.execute(
-        { name: '  Lista   Surco ', currency: 'cop' },
+        { name: '  Lista   Surco ', currency: 'ves' },
         'u1',
       );
       expect(created).toMatchObject({
         name: 'Lista Surco',
-        currency: 'COP',
+        currency: 'VES',
         locationId: null,
         active: true,
         itemCount: 0,
@@ -115,7 +115,7 @@ describe('casos de uso de listas de precios (DX-105)', () => {
 
     it('400 con nombre corto', async () => {
       await expect(
-        create.execute({ name: ' A ', currency: 'COP' }),
+        create.execute({ name: ' A ', currency: 'VES' }),
       ).rejects.toThrow(new BadRequestException(PRICE_LIST_NAME_MESSAGE));
     });
 
@@ -132,7 +132,7 @@ describe('casos de uso de listas de precios (DX-105)', () => {
       await expect(
         create.execute({
           name: 'Lista',
-          currency: 'COP',
+          currency: 'VES',
           locationId: '33333333-3333-4333-8333-333333333333',
         }),
       ).rejects.toThrow(
@@ -143,7 +143,7 @@ describe('casos de uso de listas de precios (DX-105)', () => {
     it('409 si el nombre solo cambia en mayúsculas o tildes', async () => {
       repo.seed({ name: 'Convenio Bolívar' });
       await expect(
-        create.execute({ name: ' CONVENIO  bolivar', currency: 'COP' }),
+        create.execute({ name: ' CONVENIO  bolivar', currency: 'VES' }),
       ).rejects.toThrow(new ConflictException(PRICE_LIST_DUPLICATE_MESSAGE));
     });
 
@@ -151,7 +151,7 @@ describe('casos de uso de listas de precios (DX-105)', () => {
       const old = repo.seed({ name: 'Vieja' });
       repo.deleted.add(old.id);
       await expect(
-        create.execute({ name: 'Vieja', currency: 'COP' }),
+        create.execute({ name: 'Vieja', currency: 'VES' }),
       ).resolves.toMatchObject({ name: 'Vieja' });
     });
 
@@ -160,7 +160,7 @@ describe('casos de uso de listas de precios (DX-105)', () => {
       await expect(
         create.execute({
           name: 'Otra Norte',
-          currency: 'COP',
+          currency: 'VES',
           locationId: SEDE_NORTE,
         }),
       ).rejects.toThrow(
@@ -171,16 +171,16 @@ describe('casos de uso de listas de precios (DX-105)', () => {
       await expect(
         create.execute({
           name: 'Otra Norte',
-          currency: 'COP',
+          currency: 'VES',
           locationId: SEDE_NORTE,
         }),
       ).resolves.toMatchObject({ locationId: SEDE_NORTE, active: true });
     });
 
     it('varias listas de clínica entera (sin sede) conviven', async () => {
-      await create.execute({ name: 'Uno', currency: 'COP' });
+      await create.execute({ name: 'Uno', currency: 'VES' });
       await expect(
-        create.execute({ name: 'Dos', currency: 'COP' }),
+        create.execute({ name: 'Dos', currency: 'VES' }),
       ).resolves.toMatchObject({ locationId: null });
     });
   });
@@ -214,22 +214,22 @@ describe('casos de uso de listas de precios (DX-105)', () => {
     });
 
     it('cambia la moneda de una lista sin precios', async () => {
-      const row = repo.seed({ currency: 'COP' });
+      const row = repo.seed({ currency: 'VES' });
       await expect(
         update.execute(row.id, { currency: 'usd' }),
       ).resolves.toMatchObject({ currency: 'USD' });
     });
 
     it('409 si cambia la moneda con precios; la misma moneda no molesta', async () => {
-      const row = repo.seed({ currency: 'COP' });
+      const row = repo.seed({ currency: 'VES' });
       repo.seedPrice(row.id, 'c1', 1000);
       await expect(update.execute(row.id, { currency: 'USD' })).rejects.toThrow(
         new ConflictException(PRICE_LIST_CURRENCY_LOCKED_MESSAGE),
       );
-      expect(row.currency).toBe('COP');
+      expect(row.currency).toBe('VES');
       await expect(
-        update.execute(row.id, { currency: 'cop', name: 'Nueva' }),
-      ).resolves.toMatchObject({ currency: 'COP', name: 'Nueva' });
+        update.execute(row.id, { currency: 'ves', name: 'Nueva' }),
+      ).resolves.toMatchObject({ currency: 'VES', name: 'Nueva' });
     });
 
     it('400 con moneda desconocida', async () => {

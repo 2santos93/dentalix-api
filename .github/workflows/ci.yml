@@ -441,8 +441,8 @@ jobs:
           PGPASSWORD: postgres
         run: |
           psql -v ON_ERROR_STOP=1 -h localhost -U postgres -d postgres \
-            -c "ALTER SYSTEM SET timezone = 'America/Bogota'" -c "SELECT pg_reload_conf()"
-          test "$(psql -h localhost -U postgres -d postgres -tAc 'SHOW TimeZone')" = America/Bogota
+            -c "ALTER SYSTEM SET timezone = 'America/Caracas'" -c "SELECT pg_reload_conf()"
+          test "$(psql -h localhost -U postgres -d postgres -tAc 'SHOW TimeZone')" = America/Caracas
 
       # Privilegios mínimos del owner (README): LOGIN, CREATEROLE (crea
       # dentalix_app y los roles NOLOGIN de las migraciones) y dueño de la base.

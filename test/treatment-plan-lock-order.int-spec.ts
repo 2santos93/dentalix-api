@@ -5,7 +5,7 @@ import { PrismaTreatmentPlanRepository } from '../src/modules/treatment-plans/in
 import { PrismaPlanQuoteRepository } from '../src/modules/treatment-plans/infrastructure/repositories/prisma-plan-quote.repository';
 import type { NewPlanAcceptance } from '../src/modules/treatment-plans/domain/ports/plan-quote-repository.port';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -47,7 +47,7 @@ async function seed(): Promise<Seeded> {
     },
   });
   await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId: tenant.id,
       name: 'Sede principal',
     }),

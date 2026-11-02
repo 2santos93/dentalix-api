@@ -137,7 +137,7 @@ describe('Convenios (e2e, DX-105)', () => {
     payerId = await createPayer(clinic, 'Sanavida');
     otherPayerId = await createPayer(other, 'Pagador de la otra');
     const list = await admin(api().post('/api/v1/price-lists'))
-      .send({ name: 'Lista Sanavida', currency: 'COP' })
+      .send({ name: 'Lista Sanavida', currency: 'USD' })
       .expect(201);
     listId = (list.body as IdBody).id;
     const sedes = await admin(api().get('/api/v1/locations')).expect(200);
@@ -184,7 +184,7 @@ describe('Convenios (e2e, DX-105)', () => {
         kind: 'PRICE_LIST',
         percent: null,
         percentByCategory: null,
-        priceList: { id: listId, name: 'Lista Sanavida', currency: 'COP' },
+        priceList: { id: listId, name: 'Lista Sanavida', currency: 'USD' },
         locationId: sedeId,
       });
     });
@@ -370,7 +370,7 @@ describe('Convenios (e2e, DX-105)', () => {
       ).toBe('Lista de precios no encontrada.');
 
       const offList = await admin(api().post('/api/v1/price-lists'))
-        .send({ name: 'Lista apagada', currency: 'COP' })
+        .send({ name: 'Lista apagada', currency: 'USD' })
         .expect(201);
       await admin(
         api().patch(`/api/v1/price-lists/${(offList.body as IdBody).id}`),
@@ -717,7 +717,7 @@ describe('Convenios (e2e, DX-105)', () => {
 
     it('una lista con un convenio vivo no se retira (409)', async () => {
       const list = await admin(api().post('/api/v1/price-lists'))
-        .send({ name: 'Lista con convenio', currency: 'COP' })
+        .send({ name: 'Lista con convenio', currency: 'USD' })
         .expect(201);
       const id = (list.body as IdBody).id;
       await createAgreement({

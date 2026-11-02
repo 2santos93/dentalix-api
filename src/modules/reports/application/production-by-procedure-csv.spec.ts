@@ -14,7 +14,7 @@ function report(
       code: 'D2391',
       label: 'Resina',
       category: 'Operatoria',
-      currency: 'COP',
+      currency: 'VES',
       count: 3,
       gross: 280,
       discounts: 20,
@@ -40,7 +40,7 @@ function report(
       code: '=HYPERLINK("x")',
       label: '+Blanqueamiento',
       category: null,
-      currency: 'COP',
+      currency: 'VES',
       count: 1,
       gross: 100,
       discounts: 0,
@@ -63,7 +63,7 @@ function report(
     options: { locations: [], professionals: [], categories: [] },
     ...production,
     unattributed: [
-      { currency: 'COP', count: 2, gross: 150, discounts: 10, net: 140 },
+      { currency: 'VES', count: 2, gross: 150, discounts: 10, net: 140 },
     ],
     undated: [],
     hasActivity: true,
@@ -88,15 +88,15 @@ describe('toProductionByProcedureCsv (DX-423)', () => {
       '"Importes","Por moneda, sin convertir"',
       '',
       PRODUCTION_CSV_COLUMNS.map((c) => `"${c}"`).join(','),
-      '"Procedimiento","Operatoria","D2391","Resina","COP",3,280.00,20.00,260.00,86.67,100.00,-13.3',
       '"Procedimiento","Operatoria","D2391","Resina","USD",1,50.00,0.00,50.00,50.00,,',
-      '"Subtotal","Operatoria","","","COP",3,280.00,20.00,260.00,86.67,,',
+      '"Procedimiento","Operatoria","D2391","Resina","VES",3,280.00,20.00,260.00,86.67,100.00,-13.3',
       '"Subtotal","Operatoria","","","USD",1,50.00,0.00,50.00,50.00,,',
-      `"Procedimiento","Sin categoría","'=HYPERLINK(""x"")","'+Blanqueamiento","COP",1,100.00,0.00,100.00,100.00,80.00,25.0`,
-      '"Subtotal","Sin categoría","","","COP",1,100.00,0.00,100.00,100.00,,',
-      '"Total","","","","COP",4,380.00,20.00,360.00,90.00,,',
+      '"Subtotal","Operatoria","","","VES",3,280.00,20.00,260.00,86.67,,',
+      `"Procedimiento","Sin categoría","'=HYPERLINK(""x"")","'+Blanqueamiento","VES",1,100.00,0.00,100.00,100.00,80.00,25.0`,
+      '"Subtotal","Sin categoría","","","VES",1,100.00,0.00,100.00,100.00,,',
       '"Total","","","","USD",1,50.00,0.00,50.00,50.00,,',
-      '"Sin atribuir","","","","COP",2,150.00,10.00,140.00,,,',
+      '"Total","","","","VES",4,380.00,20.00,360.00,90.00,,',
+      '"Sin atribuir","","","","VES",2,150.00,10.00,140.00,,,',
     ]);
   });
 
@@ -167,7 +167,7 @@ describe('toProductionByProcedureCsv (DX-423)', () => {
         report({
           undated: [
             {
-              currency: 'COP',
+              currency: 'VES',
               count: 1,
               gross: 90000,
               discounts: 0,
@@ -178,7 +178,7 @@ describe('toProductionByProcedureCsv (DX-423)', () => {
       ),
     );
     expect(out[out.length - 1]).toBe(
-      '"Sin fecha (fuera del período)","","","","COP",1,90000.00,0.00,90000.00,,,',
+      '"Sin fecha (fuera del período)","","","","VES",1,90000.00,0.00,90000.00,,,',
     );
   });
 

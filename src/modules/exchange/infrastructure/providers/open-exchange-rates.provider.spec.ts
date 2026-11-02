@@ -35,12 +35,12 @@ describe('OpenExchangeRatesProvider (SEC-054)', () => {
   it('pide el día histórico con base USD y un tiempo máximo de 10 s', async () => {
     const timeout = jest.spyOn(AbortSignal, 'timeout');
     fetchMock.mockResolvedValue(
-      new Response(JSON.stringify({ base: 'USD', rates: { COP: 4000 } })),
+      new Response(JSON.stringify({ base: 'USD', rates: { VES: 4000 } })),
     );
 
     await expect(makeProvider().fetchRates('2026-10-01')).resolves.toEqual({
       base: 'USD',
-      rates: { COP: 4000 },
+      rates: { VES: 4000 },
     });
 
     expect(PROVIDER_TIMEOUT_MS).toBe(10_000);
