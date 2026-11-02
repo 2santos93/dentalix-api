@@ -30,6 +30,7 @@ import {
   formatReceiptNumber,
   legacyReceiptReference,
 } from '../../domain/receipt-number';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { GetPlanBalanceUseCase } from '../use-cases/get-plan-balance.use-case';
 
 export const PAYMENT_NOT_FOUND_MESSAGE = 'No encontramos ese abono.';
@@ -136,6 +137,7 @@ export class GetPaymentReceiptUseCase {
     private readonly repo: PaymentReceiptRepository,
     private readonly getPlanBalance: GetPlanBalanceUseCase,
     private readonly documentTypeNames: DocumentTypeNamesReader,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   async execute(paymentId: string): Promise<PaymentReceiptView> {
@@ -147,6 +149,10 @@ export class GetPaymentReceiptUseCase {
     if (!source) {
       throw new NotFoundException(PAYMENT_NOT_FOUND_MESSAGE);
     }
+    // DX-525: la sede del abono manda (emitido o «sin serie», sede activa o
+    // retirada), como al anularlo: un miembro restringido a otras sedes no ve,
+    // reimprime ni envía este recibo (403 antes de leer nada más).
+    this.tenantContext.assertLocationAllowed(source.locationId);
     // DX-327 (spec §4.6): el nombre visible del documento se resuelve AQUÍ,
     // una vez, y de la vista salen la pantalla, el papel y el email.
     // DX-524: y con el nombre de la sede del abono, no el de la activa.

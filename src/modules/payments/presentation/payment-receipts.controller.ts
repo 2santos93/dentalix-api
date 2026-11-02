@@ -51,8 +51,9 @@ const RECEIPT_AUDIT = {
 /**
  * Recibo de caja de un abono (DX-136). Mismos roles que los pagos
  * (PAYMENT_ROLES: ADMIN y RECEPTION); el resto, 403 en español. El `:id` es
- * el del ABONO (anulado o no); la RLS lo limita a la clínica. No se filtra
- * por sede, igual que los abonos de un plan: el paciente es de la clínica.
+ * el del ABONO (anulado o no); la RLS lo limita a la clínica y, como al
+ * anular el abono, un miembro restringido solo ve, reimprime y envía los de
+ * sus sedes (403 `LOCATION_NOT_ALLOWED`, DX-525).
  * Cada lectura, reimpresión y envío deja su evento de auditoría.
  */
 @ApiTags('payments')

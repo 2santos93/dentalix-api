@@ -1,4 +1,6 @@
 import { NotFoundException } from '@nestjs/common';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import { LOCATION_NOT_ALLOWED_MESSAGE } from '../../../../shared/tenancy/location-access';
 import { GetPaymentReceiptUseCase } from './get-payment-receipt.use-case';
 import type {
   PaymentReceiptRepository,
@@ -75,6 +77,7 @@ const issuedSnapshot = buildReceiptSnapshot(
   NO_LOCAL_NAMES,
 );
 
+const tenantContext = new TenantContextService();
 let names: FixedDocumentTypeNamesReader;
 beforeEach(() => {
   names = new FixedDocumentTypeNamesReader();
@@ -101,7 +104,12 @@ function makeUseCase(
             paymentsCount: 2,
           }),
   } as unknown as GetPlanBalanceUseCase;
-  return new GetPaymentReceiptUseCase(repo, getPlanBalance, names);
+  return new GetPaymentReceiptUseCase(
+    repo,
+    getPlanBalance,
+    names,
+    tenantContext,
+  );
 }
 
 const issued = (
@@ -523,5 +531,78 @@ describe('GetPaymentReceiptUseCase · región de la sede (DX-521, R3 y PF3/PF4/P
     expect('regional' in view.snapshot).toBe(false);
     const none = await makeUseCase(legacy(null)).execute(PAYMENT_ID);
     expect(none.regional).toBeNull();
+  });
+
+  // DX-525: leer el recibo respeta las sedes permitidas, igual que anular el
+  // abono (VoidPaymentUseCase): la sede es la del abono.
+  describe('sedes permitidas (DX-525)', () => {
+    const legacy = (): PaymentReceiptSource => ({
+      kind: 'legacy',
+      paymentId: PAYMENT_ID,
+      locationId: 'loc-1',
+      treatmentPlanId: null,
+      patientEmail: null,
+      notice: NOTICE,
+      rate: SAME_CURRENCY_RATE,
+      splitRates: [],
+      locationRegional: null,
+      legacy: {
+        issuedAt: new Date('2025-01-10T17:00:00.000Z'),
+        voidedAt: null,
+        voidReason: null,
+        snapshotInput,
+      },
+    });
+
+    it.each([
+      ['emitido, vista consolidada', issued(), undefined, ['loc-2']],
+      ['«sin serie», vista consolidada', legacy(), undefined, ['loc-2']],
+      ['emitido, cabecera permitida', issued(), 'loc-2', ['loc-2']],
+      ['ninguna sede permitida', issued(), undefined, []],
+    ] as const)('403 en otra sede: %s', async (_, source, active, allowed) => {
+      const uc = makeUseCase(source);
+      await tenantContext.run(
+        't1',
+        active,
+        async () => {
+          await expect(uc.execute(PAYMENT_ID)).rejects.toThrow(
+            LOCATION_NOT_ALLOWED_MESSAGE,
+          );
+          await expect(uc.load(PAYMENT_ID)).rejects.toThrow(
+            LOCATION_NOT_ALLOWED_MESSAGE,
+          );
+        },
+        allowed,
+      );
+    });
+
+    it('su sede (emitido o «sin serie») y sin restricción: lo ve', async () => {
+      for (const source of [issued(), legacy()]) {
+        const uc = makeUseCase(source);
+        await tenantContext.run(
+          't1',
+          undefined,
+          async () => {
+            await expect(uc.execute(PAYMENT_ID)).resolves.toBeDefined();
+          },
+          ['loc-1', 'loc-9'],
+        );
+        await expect(uc.execute(PAYMENT_ID)).resolves.toBeDefined();
+      }
+    });
+
+    it('un abono que no existe sigue siendo 404 aunque esté restringido', async () => {
+      const uc = makeUseCase(null);
+      await tenantContext.run(
+        't1',
+        undefined,
+        async () => {
+          await expect(uc.execute(PAYMENT_ID)).rejects.toBeInstanceOf(
+            NotFoundException,
+          );
+        },
+        ['loc-2'],
+      );
+    });
   });
 });
