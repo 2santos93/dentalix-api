@@ -24,7 +24,7 @@ const owner = new PrismaClient<Prisma.PrismaClientOptions>({
 const tenantContext = new TenantContextService();
 const prisma = new PrismaService(tenantContext);
 const repo = new PrismaPaymentRepository(prisma, tenantContext);
-// 17/10/2026 10:00 en Bogotá: solo decide `canVoid`, no el período.
+// 17/10/2026 10:00 en la zona de la sede: solo decide `canVoid`, no el período.
 const cash = new ListCashPaymentsUseCase(
   repo,
   () => new Date('2026-10-17T15:00:00.000Z'),
@@ -188,18 +188,18 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
         })
       ).id;
     };
-    // 16/10 20:00 en Bogotá = 17/10 01:00 UTC.
+    // 16/10 20:00 en la zona de la sede = 17/10 01:00 UTC.
     await pay('bogEvening', bogota, '2026-10-17T01:00:00.000Z', 80000);
-    // 17/10 09:00 en Bogotá.
+    // 17/10 09:00 en la zona de la sede.
     await pay('bogNextMorning', bogota, '2026-10-17T14:00:00.000Z', 1);
     // 16/10 01:00 en Madrid (CEST) = 15/10 23:00 UTC = 15/10 18:00 en Bogotá.
     await pay('madEarly', madrid, '2026-10-15T23:00:00.000Z', 2);
     // 17/10 00:30 en Madrid = 16/10 22:30 UTC = 16/10 17:30 en Bogotá.
     await pay('madAfterMidnight', madrid, '2026-10-16T22:30:00.000Z', 4);
-    // Cambio de mes: 31/10 22:00 y 01/11 00:30 en Bogotá.
+    // Cambio de mes: 31/10 22:00 y 01/11 00:30 en la zona de la sede.
     await pay('bogOct31Late', bogota, '2026-11-01T03:00:00.000Z', 1000);
     await pay('bogNov1Early', bogota, '2026-11-01T05:30:00.000Z', 7);
-    // 30/09 23:59 en Bogotá (01/10 04:59 UTC): septiembre.
+    // 30/09 23:59 en la zona de la sede (01/10 04:59 UTC): septiembre.
     await pay('bogSep30Late', bogota, '2026-10-01T04:59:00.000Z', 9);
     // Otra clínica, mismo día.
     await pay('otherTenant', bogotaB, '2026-10-17T01:00:00.000Z', 5);

@@ -24,7 +24,7 @@ import { TenantContextService } from '../../../../shared/tenancy/tenant-context.
 import { inMemoryAvailability } from '../../../provider-schedule/application/__fixtures__/availability';
 import { InMemoryProviderScheduleRepository } from '../../../provider-schedule/application/__fixtures__/in-memory-provider-schedule.repository';
 
-// Hoy es el lunes 19/10/2026 a las 08:00 en Bogotá; el hueco, el martes 20 de
+// Hoy es el lunes 19/10/2026 a las 08:00 en la zona de la sede; el hueco, el martes 20 de
 // 10:00 a 10:30 con la Dra. X en la sede 1.
 const local = (day: string, hhmm: string) =>
   new Date(`${day}T${hhmm}:00-05:00`);

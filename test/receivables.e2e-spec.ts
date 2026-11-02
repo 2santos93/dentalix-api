@@ -40,10 +40,10 @@ const TOKYO = REGIONAL_TOKYO_FIXTURE.timeZone;
  * DX-209 (TST-025): la cartera corre con un instante FIJO (RECEIVABLES_CLOCK)
  * y todo se siembra respecto a él, no al día real: una corrida que cruza la
  * medianoche de la sede ya no mueve los tramos. Por defecto, el último
- * segundo del 29/02/2024 en Bogotá (04:59:59 UTC del 1/03): el día civil de
+ * segundo del 29/02/2024 en la zona de la sede (04:59:59 UTC del 1/03): el día civil de
  * la sede no es el de UTC y es un 29 de febrero. `RECEIVABLES_E2E_NOW`
  * cambia el instante sin tocar las aserciones (p. ej. 2024-03-01T05:00:01Z,
- * pasada la medianoche de Bogotá).
+ * pasada la medianoche de la sede).
  */
 const NOW = new Date(
   process.env.RECEIVABLES_E2E_NOW || '2024-03-01T04:59:59.000Z',
@@ -57,7 +57,7 @@ const today = (): string => civilDateIn(NOW, BOGOTA);
 /** Medianoche UTC del día civil de hace `n` días (como guarda las cuotas la API). */
 const dueDaysAgo = (n: number): Date =>
   new Date(`${addCivilDays(today(), -n)}T00:00:00.000Z`);
-/** Mediodía de Bogotá de hace `n` días. */
+/** Mediodía de la sede de hace `n` días. */
 const noonDaysAgo = (n: number): Date =>
   new Date(`${addCivilDays(today(), -n)}T17:00:00.000Z`);
 
@@ -997,11 +997,11 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
       select: { id: true },
     });
     // El plan nace hace 10 días de Tokio, a una hora elegida para que contar
-    // en la zona de Bogotá (14 h detrás) dé OTRA edad, sea cual sea NOW: si
+    // en la zona de la sede (14 h detrás) dé OTRA edad, sea cual sea NOW: si
     // hoy es el mismo día civil en las dos, nace a la 01:00 de Tokio (en
-    // Bogotá, aún el día anterior: 11 días); si Bogotá va un día por detrás
+    // la zona UTC−5, aún el día anterior: 11 días); si esa zona va un día por detrás
     // (antes de las 14:00 de Tokio, como el NOW por defecto), a las 20:00
-    // (en Bogotá, el mismo día: 9 días).
+    // (en esa zona, el mismo día: 9 días).
     const tokioToday = civilDateIn(NOW, TOKYO);
     const sameDay = tokioToday === today();
     const createdAt = new Date(
@@ -1042,7 +1042,7 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
     });
     expect(tokio.items[0].currencies[0].buckets.days0to30).toBe(70000);
 
-    // Sin sede: el «al día» es el de la sede principal (Bogotá), pero la edad
+    // Sin sede: el «al día» es el de la sede principal, pero la edad
     // de la deuda sigue en la zona de la sede de la deuda.
     const all = (await get(clinicE, '/receivables/aging').expect(200))
       .body as AgingPage;

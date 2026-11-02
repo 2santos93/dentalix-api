@@ -35,7 +35,7 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
  * «Hoy» FIJO: el día anterior al real, a mediodía de la sede, que la API ve
  * por su EXCHANGE_RATE_CLOCK (la tasa manual y su `manualSince`); los abonos
  * son de ese mediodía y no caen en «ayer» si la suite cruza la medianoche de
- * Bogotá (DX-209, TST-049).
+ * la zona de la sede (DX-209, TST-049).
  */
 const SEDE_DAY = fixedSedeDay();
 const TODAY = SEDE_DAY.day;

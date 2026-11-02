@@ -2,7 +2,7 @@
 -- ver docs/perf/DX-014.md). Corre como owner en una base DESECHABLE ya migrada
 -- (con la siembra de referencia: monedas). Determinista: sin random().
 --   Tenant "bench-reportes": 5 sedes con horario (lun-vie 9-13 y 15-19, sáb
---   9-13, Bogotá), 20 profesionales, 20.000 pacientes y 24 MESES de actividad
+--   9-13), 20 profesionales, 20.000 pacientes y 24 MESES de actividad
 --   (2024-10-25 → 2026-10-24) para poder comparar 12 meses con los 12
 --   anteriores: 24 citas por sede y día abierto (~75.000; 85 % atendidas, 7 %
 --   no-show, el resto canceladas), un ítem realizado (COP; 1 de cada 10 en USD)
@@ -65,7 +65,7 @@ VALUES (md5('bench-cat')::uuid, '00000000-0000-4000-a000-0000000000d1', 'BENCH',
         'PROCEDURE', 'Resina', '#2A2B3C', now());
 
 -- Cada sede: 4 profesionales propios, 6 citas de 30 min por profesional y día
--- (9:00-12:00 Bogotá = 14:00-17:00 UTC). Lunes a sábado.
+-- (9:00-12:00 en UTC-5 = 14:00-17:00 UTC). Lunes a sábado.
 CREATE TEMP TABLE bench_appts ON COMMIT DROP AS
 SELECT row_number() OVER () AS n, s, d, p, k,
        timestamp '2024-10-25 14:00' + d * interval '1 day' + k * interval '30 minutes' AS start

@@ -130,7 +130,7 @@ describe('consumidores de la zona de la sede: día civil en Tokio (int, G1)', ()
           lastName: 'Sato',
           email: 'aiko@g1-zone-consumers.test',
           // Cumple 18 el 21/10/2026: ya en Tokio a las 15:30 UTC del 20/10, aún
-          // no en Bogotá.
+          // no en la zona de la sede.
           birthDate: new Date('2008-10-21T00:00:00.000Z'),
         },
       })
@@ -189,7 +189,7 @@ describe('consumidores de la zona de la sede: día civil en Tokio (int, G1)', ()
       kind: 'PATIENT',
       minor: false,
     });
-    // Con la zona de Bogotá aún sería menor: el día de la sede decide.
+    // Con la zona UTC−5 aún sería menor: el día de la sede decide.
     expect(recipientOn('America/Bogota').minor).toBe(true);
     // 01:00 UTC del 21/10 = 10:00 del 21 en Tokio (20:00 del 20 en Bogotá).
     expect(
@@ -301,7 +301,7 @@ describe('consumidores de la zona de la sede: día civil en Tokio (int, G1)', ()
       return debtor.id;
     };
     // 20/09 23:30 en Tokio (09:30 en Bogotá): hoy (21/10 en Tokio) son 31
-    // días; con la zona de Bogotá serían 30.
+    // días; con la zona UTC−5 serían 30.
     const boundary = await debt('Tokio', '2026-09-20T14:30:00.000Z', tokyo);
     // Sin sede: envejece en la zona de la principal (Tokio), igual que arriba.
     const noLocation = await debt('Sin sede', '2026-09-20T14:30:00.000Z', null);

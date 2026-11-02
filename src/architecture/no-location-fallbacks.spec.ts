@@ -1758,9 +1758,10 @@ describe('textos sin ejemplos de un país (DX-368)', () => {
 });
 
 /**
- * DX-325: ningún texto de producción ni la demo cita una ley, una norma con
- * número o una autoridad de datos o sanitaria. Los comentarios quedan fuera:
- * son de DX-371. El nombre `AUTHORITY` ya lo usa DX-327 en este módulo.
+ * DX-325/DX-371: ningún texto de producción ni la demo cita una ley, una norma
+ * con número o una autoridad de datos o sanitaria, comentarios incluidos: la
+ * justificación de una regla es funcional, no una norma. El nombre `AUTHORITY`
+ * ya lo usa DX-327 en este módulo.
  */
 const NUM = String.raw`(?:n\.?[º°o]\.?\s*|no\.\s*)?`;
 /** Regímenes por su sigla y normas con número, en español, inglés y portugués. */
@@ -1782,9 +1783,6 @@ const citesLaw = (line: string): boolean =>
   LAW_CITATION.test(line) || LAW_AUTHORITY.test(line);
 
 describe('textos sin leyes ni autoridades (DX-325)', () => {
-  const citesLawInCode = (line: string): boolean =>
-    !isComment(line) && citesLaw(line);
-
   it('architecture: no production text or seed cites a law or an authority', () => {
     const files = [
       ...tsFiles(SRC).filter(isProduction),
@@ -1806,7 +1804,7 @@ describe('textos sin leyes ni autoridades (DX-325)', () => {
         join('prisma', 'seed.ts'),
       ]),
     );
-    expect(offending(files, citesLawInCode)).toEqual([]);
+    expect(offending(files, citesLaw)).toEqual([]);
   });
 
   it('the law patterns catch each citation and skip neutral text', () => {
@@ -1831,10 +1829,12 @@ describe('textos sin leyes ni autoridades (DX-325)', () => {
       `'${'Lei' + ' 13'}.709'`,
       `'registro ${'IN' + 'HRR'}'`,
       `'permiso ${'SA' + 'CS'}'`,
+      `// ${'Le' + 'y 1581'}, art. 6`,
+      ` * ${'Res. ' + '839'}/2017`,
       `'${'AN' + 'PD'}'`,
       `'${'CN' + 'IL'}'`,
     ]) {
-      expect({ line, caught: citesLawInCode(line) }).toEqual({
+      expect({ line, caught: citesLaw(line) }).toEqual({
         line,
         caught: true,
       });
@@ -1850,9 +1850,8 @@ describe('textos sin leyes ni autoridades (DX-325)', () => {
       `'(sic)'`,
       `'basic'`,
       `'artículos de limpieza'`,
-      `// ${'Le' + 'y 1581'}`,
     ]) {
-      expect({ line, caught: citesLawInCode(line) }).toEqual({
+      expect({ line, caught: citesLaw(line) }).toEqual({
         line,
         caught: false,
       });

@@ -12,7 +12,7 @@ import {
 import { isCheckedSpec, readSpecs, type SpecSource } from './bare-delete-many';
 
 // DX-449 (TST-053): los specs de agenda y reservas calculaban «hoy» con el
-// reloj real y la zona fija de Bogotá; entre las 04:40 y las 06:00 UTC (la
+// reloj real y una zona fija (UTC−5); entre las 04:40 y las 06:00 UTC (la
 // medianoche de la sede, cuando el loop fusiona) sus citas «de hoy que ya
 // empezaron» caían en ayer o se solapaban. Un spec nuevo que hable de «hoy»
 // (un identificador con today/TODAY) y lea el reloj real (`Date.now()` o
@@ -92,7 +92,7 @@ export function findRealClockToday(specs: SpecSource[]): string[] {
 describe('DX-449: «hoy» de la sede en los specs de agenda y reservas', () => {
   describe('safeTodayZone', () => {
     it('es Bogotá cuando su medianoche queda lejos', () => {
-      // 12:00 en Bogotá.
+      // 12:00 en la zona de la sede.
       expect(safeTodayZone(new Date('2026-10-31T17:00:00Z'))).toBe(
         SEDE_FIXTURE_ZONE,
       );

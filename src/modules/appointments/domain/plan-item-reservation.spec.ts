@@ -159,7 +159,7 @@ describe('DX-271 reserva de ítems del plan', () => {
 
 describe('DX-288 (revisión M1) titular en la clínica de «Traer a esta cita»', () => {
   const TZ = 'America/Bogota';
-  // 23/10/2026 15:00 en Bogotá.
+  // 23/10/2026 15:00 en la zona de la sede.
   const now = new Date('2026-10-23T20:00:00.000Z');
 
   it.each([
@@ -190,7 +190,7 @@ describe('DX-288 (revisión M1) titular en la clínica de «Traer a esta cita»'
   });
 
   it('el día civil es el de la zona de la sede, no el UTC', () => {
-    // 24/10 01:00 UTC = 23/10 20:00 en Bogotá: hoy.
+    // 24/10 01:00 UTC = 23/10 20:00 en la zona de la sede: hoy.
     expect(
       heldInClinicToday(
         {
@@ -261,7 +261,7 @@ describe('DX-288 (revisión M1) titular en la clínica de «Traer a esta cita»'
 
 describe('DX-293 aviso de reserva en otra cita: heldInClinic', () => {
   const TZ = 'America/Bogota';
-  // 23/10/2026 15:00 en Bogotá.
+  // 23/10/2026 15:00 en la zona de la sede.
   const now = new Date('2026-10-23T20:00:00.000Z');
   const holder = (status: AppointmentStatus, start: string) => ({
     appointmentId: 'b1',

@@ -34,7 +34,7 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 const MIN = 60000;
 const DAY = 86400000;
 /**
- * DX-449: Bogotá salvo cerca de su medianoche, cuando la sede pasa a una zona
+ * DX-449: la zona de la sede salvo cerca de su medianoche, cuando la sede pasa a una zona
  * donde ahora es mediodía: las citas «de hoy que ya empezaron» son de hoy a
  * cualquier hora de la CI.
  */

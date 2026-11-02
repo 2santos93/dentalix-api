@@ -36,7 +36,7 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 const DAY_MS = 24 * 60 * 60 * 1000;
 const BOGOTA_MS = 5 * 60 * 60 * 1000;
 
-/** YYYY-MM-DD (Bogotá) del primer martes a 7 días o más: siempre futuro. */
+/** YYYY-MM-DD (zona de la sede) del primer martes a 7 días o más: siempre futuro. */
 function nextTuesday(): string {
   let t = Date.now() - BOGOTA_MS + 7 * DAY_MS;
   while (new Date(t).getUTCDay() !== 2) t += DAY_MS;
@@ -47,7 +47,7 @@ function addDays(day: string, n: number): string {
     .toISOString()
     .slice(0, 10);
 }
-/** Hora de pared de Bogotá (UTC−5 fijo) como instante ISO. */
+/** Hora de pared de la sede (UTC−5 fijo) como instante ISO. */
 function local(day: string, hhmm: string): string {
   return new Date(`${day}T${hhmm}:00-05:00`).toISOString();
 }
@@ -218,7 +218,7 @@ describe('Bloqueos de agenda y pendientes por agendar (e2e, DX-122)', () => {
       token: await loginAs(app, clinic.host, d2.email),
     };
 
-    // Horario conocido de la sede: lun–vie 9–13 y 15–19, Bogotá.
+    // Horario conocido de la sede: lun–vie 9–13 y 15–19, en la zona de la sede.
     await as(api().put('/api/v1/locations/schedule'), clinic.adminToken)
       .send({
         ranges: [1, 2, 3, 4, 5].flatMap((weekday) => [

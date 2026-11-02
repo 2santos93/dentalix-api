@@ -12,7 +12,7 @@ import {
 } from '../../domain/ports/account-statement-repository.port';
 import type { StatementNoticeData } from '../../domain/ports/statement-family-repository.port';
 
-// 2026-03-01 10:00 en Bogotá (UTC-5).
+// 2026-03-01 10:00 en la zona de la sede (UTC-5).
 const NOW = new Date('2026-03-01T15:00:00.000Z');
 const ADMIN: VoidActor = { userId: 'u-admin', role: ClinicRole.ADMIN };
 const RECEPTION: VoidActor = { userId: 'u-recep', role: ClinicRole.RECEPTION };
@@ -281,7 +281,7 @@ describe('GetAccountStatementUseCase', () => {
         withPayments(
           {},
           { createdById: 'u-otra' },
-          // 23:30 del 28/02 en Bogotá: ya es 1/03 en UTC, pero no "hoy".
+          // 23:30 del 28/02 en la zona de la sede: ya es 1/03 en UTC, pero no "hoy".
           { createdAt: new Date('2026-03-01T04:30:00.000Z') },
           { createdById: null },
           {

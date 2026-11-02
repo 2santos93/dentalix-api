@@ -43,12 +43,12 @@ export function fixedSedeDay(daysAgo = 1, now = new Date()): SedeDay {
 /**
  * DX-449 (TST-053): «hoy» de una sede para los specs de agenda y reservas que
  * necesitan citas de hoy YA EMPEZADAS (la API decide «hoy» con su reloj real y
- * la zona de la sede, sin reloj inyectable). A las 00:56 de Bogotá solo caben
+ * la zona de la sede, sin reloj inyectable). A las 00:56 de la sede solo caben
  * 56 minutos entre la medianoche y «ahora»: las citas «de hace un rato» caían
  * en ayer o se recortaban al mismo hueco, y la CI de los merges nocturnos
  * (04:40–06:00 UTC) salía en rojo.
  *
- * La sede del fixture usa Bogotá mientras queden al menos
+ * La sede del fixture usa una zona fija (UTC−5) mientras queden al menos
  * `SEDE_TODAY_MARGIN_MINUTES` desde y hasta su medianoche; si no, una zona sin
  * horario de verano en la que ahora es cerca del mediodía. Así «hace N
  * minutos» y «dentro de N minutos» son de hoy en la sede para cualquier N
@@ -107,7 +107,7 @@ function minutesFromMidnight(now: Date, zone: string): number {
 }
 
 /**
- * La zona de la sede de los specs con citas «de hoy»: Bogotá si está a más de
+ * La zona de los specs con citas «de hoy»: una fija (UTC−5) si está a más de
  * `SEDE_TODAY_MARGIN_MINUTES` de su medianoche; si no, la candidata cuya hora
  * local esté más cerca del mediodía.
  */
@@ -122,7 +122,7 @@ export function safeTodayZone(now = new Date()): string {
   return best;
 }
 
-/** El fixture regional de Bogotá con la zona de `safeTodayZone(now)`. */
+/** El fixture regional de la sede con la zona de `safeTodayZone(now)`. */
 export function sedeTodayFixture(now = new Date()): RegionalFixture {
   return { ...REGIONAL_BOGOTA_FIXTURE, timeZone: safeTodayZone(now) };
 }

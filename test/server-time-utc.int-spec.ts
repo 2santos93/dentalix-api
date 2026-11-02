@@ -79,7 +79,7 @@ async function cleanup(): Promise<void> {
 }
 
 /**
- * Corre `sql` como dentalix_app, con la clínica fijada y la sesión en Bogotá,
+ * Corre `sql` como dentalix_app, con la clínica fijada y la sesión en la zona de la sede,
  * y devuelve la primera fila. `$1` es siempre el tenant.
  */
 function inBogota<T>(
@@ -103,7 +103,7 @@ function inBogota<T>(
 
 /**
  * Corre `fn` como dentalix_app (Prisma, como la API), con la clínica fijada y
- * la sesión en Bogotá.
+ * la sesión en la zona de la sede.
  */
 function txInBogota<T>(
   fn: (tx: Prisma.TransactionClient) => Promise<T>,
@@ -498,7 +498,7 @@ describe('hora del servidor en UTC con una sesión fuera de UTC (DX-226, int)', 
   });
 
   it('location_working_calendars y location_holidays: createdAt en UTC (DX-316)', async () => {
-    // El calendario lo crea el trigger de alta de sede, con la sesión en Bogotá.
+    // El calendario lo crea el trigger de alta de sede, con la sesión en la zona de la sede.
     await txInBogota(async (tx) => {
       const location = await tx.location.create({
         data: locationData(REGIONAL_BOGOTA_FIXTURE, {

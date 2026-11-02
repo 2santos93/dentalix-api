@@ -20,7 +20,7 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
-const REASON = 'Reclamo del titular de los datos';
+const REASON = 'Solicitud del paciente sobre sus datos';
 
 interface PatientBody {
   id: string;

@@ -24,7 +24,7 @@ const A = '11111111-1111-4111-8111-111111111111';
 const B = '22222222-2222-4222-8222-222222222222';
 const OFF = '33333333-3333-4333-8333-333333333333';
 const H = (h: number) => h * 60;
-// Martes 20-10-2026, 12:00 en Bogotá.
+// Martes 20-10-2026, 12:00 en la zona de la sede.
 const NOW = new Date('2026-10-20T17:00:00.000Z');
 
 const CTX: AuditRequestContext = {

@@ -19,7 +19,7 @@ const locations = {
     }),
 } as unknown as LocationRepository;
 
-const START = new Date('2031-03-03T15:00:00.000Z'); // 10:00 en Bogotá
+const START = new Date('2031-03-03T15:00:00.000Z'); // 10:00 en la zona de la sede
 const END = new Date('2031-03-03T15:30:00.000Z');
 
 describe('sillón de una cita (DX-211)', () => {

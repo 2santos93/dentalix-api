@@ -26,7 +26,7 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DAY = new Date(Date.now() + 3 * DAY_MS).toISOString().slice(0, 10);
-/** Instante UTC; la sede está en Bogotá (UTC−5): 15:00Z son las 10:00. */
+/** Instante UTC; la zona de la sede es UTC−5: 15:00Z son las 10:00. */
 const at = (time: string) => `${DAY}T${time}:00.000Z`;
 const FROM = `${DAY}T00:00:00.000Z`;
 const TO = new Date(new Date(FROM).getTime() + DAY_MS).toISOString();

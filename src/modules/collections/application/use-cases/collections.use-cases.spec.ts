@@ -19,7 +19,7 @@ import {
   PROMISE_TOO_FAR_MESSAGE,
 } from './collections.use-cases';
 
-const NOW = new Date('2026-11-01T15:00:00.000Z'); // 10:00 del 1/11 en Bogotá
+const NOW = new Date('2026-11-01T15:00:00.000Z'); // 10:00 del 1/11 en la zona de la sede
 
 function fakeRepo(overrides: Partial<CollectionsRepository> = {}) {
   const notes: NewCollectionNote[] = [];

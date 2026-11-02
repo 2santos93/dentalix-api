@@ -306,7 +306,7 @@ describe('retención de la HC (DX-039, int)', () => {
 
     const result = await tenantContext.run(tenantA, () =>
       repo.partiallySuppress(p, {
-        reason: 'Reclamo del titular de los datos',
+        reason: 'Solicitud del paciente sobre sus datos',
         actorId: userId,
         assertAllowed: () => undefined,
       }),
@@ -340,7 +340,7 @@ describe('retención de la HC (DX-039, int)', () => {
     expect(actions).toEqual([
       expect.objectContaining({
         kind: 'PARTIAL_SUPPRESSION',
-        reason: 'Reclamo del titular de los datos',
+        reason: 'Solicitud del paciente sobre sus datos',
         actorId: userId,
       }),
     ]);

@@ -42,7 +42,7 @@ describe('Vigencia de la anamnesis por día civil de la sede (DX-247)', () => {
   });
 
   it('caduca el día civil de la revisión en la sede más N meses', () => {
-    // 23:30 del 20/10 en Bogotá ya es el 21/10 en UTC: cuenta el 20 de la sede.
+    // 23:30 del 20/10 en la zona de la sede ya es el 21/10 en UTC: cuenta el 20 de la sede.
     expect(anamnesisExpiresOn(at('2025-10-21T04:30:00.000Z'), 12, TZ)).toBe(
       '2026-10-20',
     );
@@ -52,7 +52,7 @@ describe('Vigencia de la anamnesis por día civil de la sede (DX-247)', () => {
   });
 
   describe('anamnesisStatus', () => {
-    const reviewed = at('2025-10-21T15:00:00.000Z'); // 10:00 en Bogotá
+    const reviewed = at('2025-10-21T15:00:00.000Z'); // 10:00 en la zona de la sede
 
     it('sin anamnesis → MISSING', () => {
       expect(anamnesisStatus(null, 12, '2026-10-21', TZ)).toBe('MISSING');
@@ -70,7 +70,7 @@ describe('Vigencia de la anamnesis por día civil de la sede (DX-247)', () => {
     });
 
     it('revisada a las 23:30 de Bogotá: cuenta el día de la sede, no el de UTC', () => {
-      const late = at('2025-10-21T04:30:00.000Z'); // 20/10 23:30 en Bogotá
+      const late = at('2025-10-21T04:30:00.000Z'); // 20/10 23:30 en la zona de la sede
       expect(anamnesisStatus(late, 12, '2026-10-19', TZ)).toBe('CURRENT');
       expect(anamnesisStatus(late, 12, '2026-10-20', TZ)).toBe('EXPIRED');
     });
