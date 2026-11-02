@@ -644,6 +644,21 @@ describe('receta única (DX-324)', () => {
     expect((await issue()).patientDocument).toBeNull();
   });
 
+  it('DX-524: freezes the name of the issuing location, over the clinic and the active one', async () => {
+    names.names.NATIONAL_ID = 'Documento clínica';
+    names.byLocation.set(repo.issuer.location.id, {
+      NATIONAL_ID: 'Documento sede',
+    });
+    names.byLocation.set('otra-sede', { NATIONAL_ID: 'Documento otra' });
+    names.activeLocationId = 'otra-sede';
+    repo.patients.set(PATIENT_ID, makePatient({ docNumber: 'RX-3' }));
+    expect((await issue()).patientDocument).toBe('Documento sede RX-3');
+
+    // Una sede sin nombre propio hereda el de la clínica.
+    names.byLocation.clear();
+    expect((await issue()).patientDocument).toBe('Documento clínica RX-3');
+  });
+
   it('a new prescription freezes the display name: patient label, clinic name or generic', async () => {
     names.names.NATIONAL_ID = 'Documento A';
     repo.patients.set(

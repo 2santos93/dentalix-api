@@ -90,7 +90,8 @@ export async function issuePaymentReceipt(
           fiscalAddress: true,
         },
       }),
-      readDocumentTypeNames(tx, payment.tenantId),
+      // DX-524: el nombre de la sede del abono, congelado en la foto.
+      readDocumentTypeNames(tx, payment.tenantId, payment.locationId),
       tx.patient.findFirstOrThrow({
         where: { id: payment.patientId },
         select: {

@@ -3,6 +3,12 @@ import { seedDefaultBusinessHours } from '../../../../shared/locations/default-b
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
+import type { Location as LocationRow } from '@prisma/client';
+import {
+  DOC_TYPE_NAME_FIELD,
+  docTypeNamesFromColumns,
+  docTypeNamesToColumns,
+} from '../../../patients/domain/document-type-names';
 import { locationCreatedAuditEvent } from '../../domain/location-audit';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
@@ -15,12 +21,41 @@ import {
 } from '../../domain/ports/location-repository.port';
 
 /** DX-329: escribir la región (también null) deja la marca de quién decidió. */
-function withDecisionMark(
-  patch: UpdateLocationRepoInput,
-): UpdateLocationRepoInput & { defaultPhoneRegionSetAt?: Date } {
-  return patch.defaultPhoneRegion === undefined
-    ? patch
-    : { ...patch, defaultPhoneRegionSetAt: new Date() };
+function withDecisionMark(patch: UpdateLocationRepoInput): Omit<
+  UpdateLocationRepoInput,
+  'docTypeNames'
+> & {
+  defaultPhoneRegionSetAt?: Date;
+} {
+  // DX-524: los nombres de documento son cinco columnas, no un campo.
+  const { docTypeNames, ...rest } = patch;
+  return {
+    ...rest,
+    ...(docTypeNames ? docTypeNamesToColumns(docTypeNames) : {}),
+    ...(patch.defaultPhoneRegion === undefined
+      ? {}
+      : { defaultPhoneRegionSetAt: new Date() }),
+  };
+}
+
+/** DX-524: la fila con sus cinco columnas de nombres reunidas en un campo. */
+function toLocation(row: LocationRow): Location;
+function toLocation(row: LocationRow | null): Location | null;
+function toLocation(row: LocationRow | null): Location | null {
+  if (!row) return null;
+  const columns = Object.fromEntries(
+    Object.values(DOC_TYPE_NAME_FIELD).map((field) => [field, row[field]]),
+  ) as Record<
+    (typeof DOC_TYPE_NAME_FIELD)[keyof typeof DOC_TYPE_NAME_FIELD],
+    string | null
+  >;
+  const stripped: Partial<LocationRow> = { ...row };
+  for (const field of Object.values(DOC_TYPE_NAME_FIELD))
+    delete stripped[field];
+  return {
+    ...(stripped as LocationRow),
+    docTypeNames: docTypeNamesFromColumns(columns),
+  };
 }
 
 @Injectable()
@@ -70,8 +105,9 @@ export class PrismaLocationRepository implements LocationRepository {
       // (R20).
       await seedDefaultBusinessHours(tx, tenantId, location.id, input.timeZone);
       if (input.hourCycle !== null) {
-        await writeAuditEvent(tx, locationCreatedAuditEvent(audit, location));
-        return location;
+        const created = toLocation(location);
+        await writeAuditEvent(tx, locationCreatedAuditEvent(audit, created));
+        return created;
       }
       // G1-B fase 1 (spec §4.1): alta de la web de G1, sin reloj. La función
       // es lo único que rellena un NULL (R5), en esta misma transacción; no
@@ -85,8 +121,9 @@ export class PrismaLocationRepository implements LocationRepository {
       const filled = await tx.location.findUniqueOrThrow({
         where: { id: location.id },
       });
-      await writeAuditEvent(tx, locationCreatedAuditEvent(audit, filled));
-      return filled;
+      const created = toLocation(filled);
+      await writeAuditEvent(tx, locationCreatedAuditEvent(audit, created));
+      return created;
     });
   }
 
@@ -94,18 +131,20 @@ export class PrismaLocationRepository implements LocationRepository {
   // cual; un NULL (fila de una réplica antigua sin barrer) sale como null,
   // nunca como el valor de su país (R19). G1-B: igual el reloj.
   async list(): Promise<Location[]> {
-    return this.prisma.runWithTenant((tx) =>
+    const rows = await this.prisma.runWithTenant((tx) =>
       tx.location.findMany({
         where: { deletedAt: null },
         orderBy: { createdAt: 'asc' },
       }),
     );
+    return rows.map((row) => toLocation(row));
   }
 
   async findById(id: string): Promise<Location | null> {
-    return this.prisma.runWithTenant((tx) =>
+    const row = await this.prisma.runWithTenant((tx) =>
       tx.location.findFirst({ where: { id, deletedAt: null } }),
     );
+    return toLocation(row);
   }
 
   async update(
@@ -118,7 +157,9 @@ export class PrismaLocationRepository implements LocationRepository {
         data: withDecisionMark(patch),
       });
       if (result.count === 0) return null;
-      return tx.location.findFirst({ where: { id, deletedAt: null } });
+      return toLocation(
+        await tx.location.findFirst({ where: { id, deletedAt: null } }),
+      );
     });
   }
 
@@ -144,7 +185,7 @@ export class PrismaLocationRepository implements LocationRepository {
 
       const where = { tenantId, locationId: id };
       const write = await decide({
-        current,
+        current: toLocation(current),
         hasOpenCashSession: async () =>
           (await tx.cashSession.findFirst({
             where: { ...where, status: 'OPEN' },
@@ -187,7 +228,7 @@ export class PrismaLocationRepository implements LocationRepository {
           data: { timezone: write.timeZone },
         });
       }
-      return updated;
+      return toLocation(updated);
     });
   }
 

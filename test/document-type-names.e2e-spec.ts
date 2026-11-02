@@ -170,7 +170,8 @@ describe('Nombre local de cada tipo de documento (e2e, DX-327)', () => {
       });
     const viewsBefore = await patientViews();
     const res = await as(api().get(NAMES), tokens.RECEPTION).expect(200);
-    expect(res.body).toStrictEqual({ names: NONE });
+    // DX-524: `effective` = lo que rige en la sede activa (aquí, la clínica).
+    expect(res.body).toStrictEqual({ names: NONE, effective: NONE });
     expect(await patientViews()).toBe(viewsBefore);
   });
 

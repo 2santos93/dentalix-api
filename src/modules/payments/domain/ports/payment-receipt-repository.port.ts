@@ -52,6 +52,7 @@ interface ReceiptSourceBase {
    * DX-525: la sede del abono (la persistida, aunque la sede ya esté
    * retirada): con ella se comprueban las sedes permitidas del miembro, igual
    * que al anular el abono. Vale también para un recibo «sin serie».
+   * DX-524: sus nombres de documento rigen en una foto sin nombre congelado.
    */
   locationId: string;
   /** `null` en un abono contra un saldo migrado (DX-262). */

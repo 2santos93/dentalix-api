@@ -607,6 +607,39 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     ).toEqual([]);
   });
 
+  it('the demo sets the national document name per location, with none on the clinic (DX-524)', async () => {
+    const tenantId = await liveDemoTenantId();
+    const locations = await raw.location.findMany({
+      where: { tenantId, deletedAt: null },
+      select: {
+        name: true,
+        docTypeNameNationalId: true,
+        docTypeNamePassport: true,
+        docTypeNameResidencePermit: true,
+        docTypeNameTaxId: true,
+        docTypeNameOther: true,
+      },
+    });
+    const national = Object.fromEntries(
+      locations.map((l) => [l.name, l.docTypeNameNationalId]),
+    );
+    expect(national).toEqual({
+      'Sede principal': 'Cédula de identidad',
+      'Sede Norte': 'Cédula de identidad',
+      'Sede São Paulo': 'CPF',
+      'Sede Londres': null,
+    });
+    // Solo el documento nacional: los demás tipos siguen heredando.
+    for (const l of locations) {
+      expect([
+        l.docTypeNamePassport,
+        l.docTypeNameResidencePermit,
+        l.docTypeNameTaxId,
+        l.docTypeNameOther,
+      ]).toEqual([null, null, null, null]);
+    }
+  });
+
   it('every demo location is reviewed and complete (G1)', async () => {
     const tenantId = await liveDemoTenantId();
     const locations = await raw.location.findMany({

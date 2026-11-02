@@ -117,12 +117,20 @@ export class LocationsController {
     @Body() dto: UpdateLocationDto,
     @Req() req: AuditedRequest,
   ): Promise<LocationOutput> {
-    const { location, healthRegistration, regionalSettings } =
-      await this.updateLocation.execute(id, dto);
-    if (healthRegistration || regionalSettings) {
+    const {
+      location,
+      healthRegistration,
+      regionalSettings,
+      docTypeNamesChange,
+    } = await this.updateLocation.execute(id, dto);
+    if (healthRegistration || regionalSettings || docTypeNamesChange) {
       req.auditMetadata = {
         ...(healthRegistration ? { healthRegistration } : {}),
         ...(regionalSettings ? { regionalSettings } : {}),
+        // DX-524 (DX-360): los nombres de documento de la sede son
+        // configuración, no datos de un paciente: antes y después de los
+        // tipos que cambiaron.
+        ...(docTypeNamesChange ? { configChange: docTypeNamesChange } : {}),
       };
     }
     return present(location);

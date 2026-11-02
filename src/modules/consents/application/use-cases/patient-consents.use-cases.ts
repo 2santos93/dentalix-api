@@ -163,7 +163,11 @@ async function prepare(
   if (context.plan === null) {
     throw new NotFoundException(PLAN_NOT_FOUND_MESSAGE);
   }
-  const document = documentOf(context.patient, await documentTypeNames.get());
+  // DX-524: el nombre de la sede donde se firma.
+  const document = documentOf(
+    context.patient,
+    await documentTypeNames.get(context.location.id),
+  );
   const body = renderConsent(template.body, {
     paciente: `${context.patient.firstName} ${context.patient.lastName}`,
     documento: document ?? NO_DOCUMENT,

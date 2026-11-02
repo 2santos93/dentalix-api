@@ -18,7 +18,11 @@ import {
 /** Lo que una solicitud BUDGET lleva siempre (CHECK signature_requests_budget_check). */
 type BudgetRequest = Pick<
   SignatureRequestRecord,
-  'type' | 'treatmentPlanId' | 'budgetContent' | 'budgetContentHash'
+  | 'type'
+  | 'treatmentPlanId'
+  | 'budgetContent'
+  | 'budgetContentHash'
+  | 'locationId'
 >;
 
 /** La foto enviada, validada; `null` si la solicitud no es de un presupuesto. */
@@ -82,7 +86,8 @@ export class RemoteBudgetCheck {
         request.treatmentPlanId,
         request.locationId,
       ),
-      this.documentTypeNames.get(),
+      // DX-524: la sede desde la que se envió.
+      this.documentTypeNames.get(request.locationId),
     ]);
     return budget !== null && budgetStillMatches(request, budget.quote, names);
   }
@@ -95,7 +100,7 @@ export class RemoteBudgetCheck {
   async matcher(
     request: BudgetRequest,
   ): Promise<(quote: PlanQuoteSource) => boolean> {
-    const names = await this.documentTypeNames.get();
+    const names = await this.documentTypeNames.get(request.locationId);
     return (quote) => budgetStillMatches(request, quote, names);
   }
 }
