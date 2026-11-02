@@ -15,6 +15,7 @@ import {
   Max,
   MaxLength,
   Min,
+  ValidateIf,
 } from 'class-validator';
 import { AppointmentTypeSummaryDto } from '../../../appointment-types/presentation/dto/appointment-type.dto';
 import {
@@ -284,7 +285,8 @@ export class ScheduleFromWaitlistDto {
     description:
       'DX-492: sillón de la sede de la entrada (el que devolvió «Buscar hueco»).',
   })
-  @IsOptional()
+  // `null` no es «sin sillón»: se rechaza aquí, no con un 500 al buscarlo.
+  @ValidateIf((_object, value) => value !== undefined)
   @IsUUID()
   chairId?: string;
 

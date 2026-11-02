@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { INestApplication } from '@nestjs/common';
 import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
@@ -399,6 +400,26 @@ describe('Sillones en «Buscar hueco», «Atender sin cita» y «En clínica» (
         400,
       );
       await walkIn({ patientId: patients[4], chairId: off.id }).expect(400);
+    });
+
+    it('`chairId: null` es un dato inválido, no un 500', async () => {
+      await walkIn({ patientId: patients[0], chairId: null })
+        .set('Idempotency-Key', randomUUID())
+        .expect(400);
+      await walkIn({ patientId: patients[0], chairId: null }).expect(400);
+      const entry = (
+        await as(api().post('/api/v1/waitlist'))
+          .set('X-Location-Id', norte)
+          .send({ patientId: patients[0], durationMinutes: 30 })
+          .expect(201)
+      ).body as { id: string };
+      await as(api().post(`/api/v1/waitlist/${entry.id}/schedule`))
+        .send({
+          providerId: dentist.userId,
+          start: new Date(Date.now() + 86_400_000).toISOString(),
+          chairId: null,
+        })
+        .expect(400);
     });
 
     it('sin sillón sigue funcionando', async () => {
