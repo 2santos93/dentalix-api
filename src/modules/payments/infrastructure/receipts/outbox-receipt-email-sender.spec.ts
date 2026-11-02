@@ -60,6 +60,7 @@ const receipt: PaymentReceiptView = {
   voidReason: null,
   exchangeRate: null,
   split: null,
+  regional: null,
   snapshot,
 };
 
@@ -123,7 +124,7 @@ describe('OutboxReceiptEmailSender · formato de la sede del recibo (G1-B)', () 
     expect(enqueued).toHaveLength(1);
     expect(enqueued[0].vars).toMatchObject({
       paidOnLabel: '10/27/2026',
-      amountLabel: '$150.00',
+      amountLabel: 'USD\u00a0150.00',
     });
   });
 
@@ -145,5 +146,94 @@ describe('OutboxReceiptEmailSender · formato de la sede del recibo (G1-B)', () 
       locationId: 'loc-recibo',
     });
     expect(enqueued).toHaveLength(0);
+  });
+
+  describe('región congelada del recibo (DX-521, R6 y PF4)', () => {
+    const CARACAS = {
+      timeZone: 'America/Caracas',
+      locale: 'es-VE',
+      hourCycle: 'h23',
+    } as const;
+    const voidedAtNight = {
+      voided: true,
+      voidedAt: new Date('2026-11-02T01:30:00.000Z'),
+      voidReason: 'Cobro duplicado',
+    };
+
+    it('con `regional` en el recibo formatea con ella y no lee la sede', async () => {
+      // La sede de hoy dice otra cosa: la del recibo manda.
+      const { sender, requested, enqueued } = setup([
+        {
+          id: 'loc-recibo',
+          timeZone: 'Europe/Madrid',
+          locale: 'es-ES',
+          hourCycle: 'h23',
+        },
+      ]);
+      await sender.send('carolina@example.com', {
+        ...receipt,
+        ...voidedAtNight,
+        regional: CARACAS,
+      });
+      expect(requested).toEqual([]);
+      // 01:30 UTC del 2 es todavía el 1 en Caracas.
+      expect(enqueued[0].vars).toMatchObject({
+        paidOnLabel: '27/10/2026',
+        amountLabel: 'USD\u00a0150,00',
+        voided: { dateLabel: '01/11/2026', reason: 'Cobro duplicado' },
+      });
+    });
+
+    it('un recibo con `regional` no da 409 aunque la sede de hoy no tenga reloj', async () => {
+      const { sender, enqueued } = setup([
+        {
+          id: 'loc-recibo',
+          timeZone: 'America/New_York',
+          locale: 'en-US',
+          hourCycle: null,
+        },
+      ]);
+      await sender.send('carolina@example.com', {
+        ...receipt,
+        regional: CARACAS,
+      });
+      expect(enqueued).toHaveLength(1);
+    });
+
+    it.each([
+      ['zona', { ...CARACAS, timeZone: 'Mars/Olympus' }],
+      ['locale', { ...CARACAS, locale: 'zz-ZZ-not-a-tag-!!' }],
+    ])(
+      'PF4: una región con %s que este runtime no reconoce sigue por la sede (y su 409)',
+      async (_label, regional) => {
+        const ok = setup([
+          {
+            id: 'loc-recibo',
+            timeZone: 'America/New_York',
+            locale: 'en-US',
+            hourCycle: 'h12',
+          },
+        ]);
+        await ok.sender.send('carolina@example.com', { ...receipt, regional });
+        expect(ok.requested).toEqual([['loc-recibo']]);
+        expect(ok.enqueued[0].vars).toMatchObject({
+          paidOnLabel: '10/27/2026',
+        });
+
+        const broken = setup([
+          {
+            id: 'loc-recibo',
+            timeZone: 'America/New_York',
+            locale: 'en-US',
+            hourCycle: null,
+          },
+        ]);
+        const error = await broken.sender
+          .send('carolina@example.com', { ...receipt, regional })
+          .catch((e: unknown) => e);
+        expect(error).toBeInstanceOf(ConflictException);
+        expect(broken.enqueued).toHaveLength(0);
+      },
+    );
   });
 });
