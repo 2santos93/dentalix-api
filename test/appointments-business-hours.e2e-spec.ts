@@ -21,16 +21,6 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-/** YYYY-MM-DD del primer lunes a 7 días o más: siempre futuro (la API rechaza citas pasadas). */
-function nextMonday(): string {
-  let t = Date.now() + 7 * DAY_MS;
-  while (new Date(t).getUTCDay() !== 1) t += DAY_MS;
-  return new Date(t).toISOString().slice(0, 10);
-}
-const MON = nextMonday();
-
 describe('Horario de atención en la zona de la sede (e2e, G1)', () => {
   let app: INestApplication<App>;
   let clinic: Clinic;
@@ -79,18 +69,20 @@ describe('Horario de atención en la zona de la sede (e2e, G1)', () => {
     await raw.$disconnect();
   });
 
-  // `MON` es lunes. 10:00 en Tokio (UTC+9) = 01:00Z, que en Bogotá sería
-  // domingo 20:00: fuera de horario si se leyera en la zona de la sede.
+  // 2026-11-02 es lunes. 10:00 en Tokio (UTC+9) = 01:00Z, que en Bogotá
+  // sería domingo 20:00: fuera de horario si se leyera en la zona de la sede.
   it('una cita a las 10:00 de Tokio cabe en el horario de la sede de Tokio', async () => {
-    await book(`${MON}T01:00:00.000Z`, `${MON}T01:30:00.000Z`).expect(201);
+    await book('2026-11-02T01:00:00.000Z', '2026-11-02T01:30:00.000Z').expect(
+      201,
+    );
   });
 
   // 14:00 en Tokio = 05:00Z: el cierre de mediodía de la sede. 422 desde
   // DX-121 (la petición es válida, pero ese hueco no existe).
   it('appointment outside opening hours at a Tokyo location is rejected (422 since DX-121)', async () => {
     const res = await book(
-      `${MON}T05:00:00.000Z`,
-      `${MON}T05:30:00.000Z`,
+      '2026-11-02T05:00:00.000Z',
+      '2026-11-02T05:30:00.000Z',
     ).expect(422);
     expect((res.body as { message: string }).message).toMatch(
       /Fuera del horario de atención/,
