@@ -20,6 +20,10 @@ import {
   type ReceiptSnapshot,
   type ReceiptViewSnapshot,
 } from '../../domain/receipt-snapshot';
+import {
+  locationRegionalOrNull,
+  type LocationRegionalSettings,
+} from '../../../../shared/locations/location-regional';
 import type { ClinicDocumentTypeNames } from '../../../patients/domain/document-type';
 import { DocumentTypeNamesReader } from '../../../patients/domain/ports/document-type-names-repository.port';
 import {
@@ -34,7 +38,26 @@ function viewSnapshot(
   snapshot: ReceiptSnapshot,
   names: ClinicDocumentTypeNames,
 ): ReceiptViewSnapshot {
-  return { ...snapshot, patient: receiptPatientView(snapshot, names) };
+  // DX-521 (PF3): la región de la foto no se sirve dentro de `snapshot`; la
+  // respuesta lleva solo la de nivel superior (`PaymentReceiptView.regional`).
+  const { regional: _frozen, ...rest } = snapshot;
+  return { ...rest, patient: receiptPatientView(snapshot, names) };
+}
+
+/**
+ * DX-521 (R3, PF4, PF8): la región con la que se pinta el recibo. La de la
+ * foto si es válida en este runtime (prioridad siempre foto > sede de hoy:
+ * cambiar la zona de la sede no cambia un recibo que ya la congeló); si no, la
+ * de hoy de la sede; si tampoco, `null`. Leer nunca da un 409 por esto.
+ */
+function receiptRegional(
+  source: PaymentReceiptSource,
+): LocationRegionalSettings | null {
+  const frozen =
+    source.kind === 'issued'
+      ? locationRegionalOrNull(source.receipt.snapshot.regional ?? null)
+      : null;
+  return frozen ?? source.locationRegional;
 }
 
 /**
@@ -155,6 +178,7 @@ export class GetPaymentReceiptUseCase {
       voidReason: receipt.voidReason,
       exchangeRate: split ? null : receiptExchangeRate(source.rate),
       split,
+      regional: receiptRegional(source),
       snapshot: viewSnapshot(receipt.snapshot, names),
     };
   }
@@ -176,6 +200,7 @@ export class GetPaymentReceiptUseCase {
       voidReason: legacy.voidReason,
       exchangeRate: receiptExchangeRate(source.rate),
       split: null,
+      regional: receiptRegional(source),
       snapshot: viewSnapshot(
         buildReceiptSnapshot(
           {

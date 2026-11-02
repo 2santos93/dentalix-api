@@ -4,6 +4,7 @@ import type { PaymentReceiptEmailVars } from '../../../notifications/email/domai
 import { civilDateIn } from '../../../../shared/time/civil-day';
 import { documentText } from '../../../patients/domain/document-type';
 import type { RegionalFormat } from '../../../../shared/format/regional-format';
+import { moneyWithCode } from '../../../../shared/format/money-with-code';
 
 const METHOD_LABELS: Record<PaymentMethod, string> = {
   CASH: 'Efectivo',
@@ -60,7 +61,9 @@ function lineMethodLabel(
  * recibo: el día del plan y el de la anulación son días civiles de esa sede
  * (no puede decir «anulado el 18» si allí aún es el 17). `fmt` es su formato
  * (G1-B): fechas e importes como los escribe esa sede; los importes, con el
- * texto propio de cada moneda congelado en la foto (DX-517). El título y la
+ * código ISO de la moneda (DX-378) o el texto propio que la clínica le dio,
+ * congelado en la foto (DX-517), con la misma función que el papel
+ * (`moneyWithCode`, DX-521). Los demás emails no cambian. El título y la
  * leyenda congelados (DX-515) van también al email: sin ellos, como antes.
  */
 export function receiptEmailVars(
@@ -71,7 +74,7 @@ export function receiptEmailVars(
   const { snapshot } = receipt;
   const { clinic, patient, payment, plan, planBalance } = snapshot;
   const money = (amount: number, currency: string): string =>
-    fmt.money(amount, currency, snapshot.currencyTexts);
+    moneyWithCode(amount, currency, fmt, snapshot.currencyTexts);
   return {
     patientName: patient.fullName,
     reference: receipt.reference,

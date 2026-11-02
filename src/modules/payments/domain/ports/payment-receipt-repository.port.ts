@@ -3,6 +3,7 @@ import type {
   ReceiptSnapshotInput,
 } from '../receipt-snapshot';
 
+import type { LocationRegionalSettings } from '../../../../shared/locations/location-regional';
 import type { PaymentRateState } from '../payment-exchange-rate';
 import type {
   NoticeSettings,
@@ -52,6 +53,12 @@ interface ReceiptSourceBase {
   /** Email ACTUAL del paciente (para enviarle el recibo), o null si no tiene. */
   patientEmail: string | null;
   notice: ReceiptNoticeData;
+  /**
+   * DX-521: la región de HOY de la sede del abono (`locationRegionalOrNull`),
+   * o `null` si no tiene los tres ajustes válidos. Solo vale cuando la foto no
+   * trae la suya y en los «sin serie».
+   */
+  locationRegional: LocationRegionalSettings | null;
   /**
    * DX-376: el importe del abono y su tasa tal como la guarda hoy (DX-375).
    * No va en la foto: un abono «sin tasa» la congela después, y la tasa

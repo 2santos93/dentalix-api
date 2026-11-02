@@ -116,6 +116,7 @@ const issued = (
   notice: NOTICE,
   rate: SAME_CURRENCY_RATE,
   splitRates: [],
+  locationRegional: null,
   receipt: {
     seriesPrefix: 'NOR',
     number: 123,
@@ -141,6 +142,7 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
       voidReason: null,
       exchangeRate: null,
       split: null,
+      regional: null,
       snapshot: {
         ...issuedSnapshot,
         patient: {
@@ -215,6 +217,7 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
       notice: NOTICE,
       rate: SAME_CURRENCY_RATE,
       splitRates: [],
+      locationRegional: null,
       legacy: {
         issuedAt: new Date('2025-01-10T17:05:00.000Z'),
         voidedAt: null,
@@ -248,6 +251,7 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
         notice: NOTICE,
         rate: SAME_CURRENCY_RATE,
         splitRates: [],
+        locationRegional: null,
         legacy: {
           issuedAt: new Date(),
           voidedAt: new Date('2025-02-01T12:00:00.000Z'),
@@ -396,5 +400,104 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
     await expect(makeUseCase(null).execute(PAYMENT_ID)).rejects.toThrow(
       new NotFoundException('No encontramos ese abono.'),
     );
+  });
+});
+
+describe('GetPaymentReceiptUseCase · región de la sede (DX-521, R3 y PF3/PF4/PF8)', () => {
+  const PHOTO = {
+    timeZone: 'Europe/London',
+    locale: 'en-GB',
+    hourCycle: 'h23',
+  } as const;
+  const CURRENT = {
+    timeZone: 'America/Caracas',
+    locale: 'es-VE',
+    hourCycle: 'h23',
+  } as const;
+  const withRegional = (regional: unknown): PaymentReceiptSource => {
+    const base = issued();
+    if (base.kind !== 'issued') throw new Error('fixture');
+    return {
+      ...base,
+      receipt: {
+        ...base.receipt,
+        snapshot: { ...base.receipt.snapshot, regional } as ReceiptSnapshot,
+      },
+    };
+  };
+  const legacy = (
+    locationRegional: PaymentReceiptSource['locationRegional'],
+  ): PaymentReceiptSource => ({
+    kind: 'legacy',
+    paymentId: PAYMENT_ID,
+    treatmentPlanId: 'plan-1',
+    patientEmail: null,
+    notice: NOTICE,
+    rate: SAME_CURRENCY_RATE,
+    splitRates: [],
+    locationRegional,
+    legacy: {
+      issuedAt: new Date('2025-01-10T17:05:00.000Z'),
+      voidedAt: null,
+      voidReason: null,
+      snapshotInput,
+    },
+  });
+
+  it('la foto manda: sirve la región congelada aunque la sede tenga otra hoy', async () => {
+    const view = await makeUseCase({
+      ...withRegional(PHOTO),
+      locationRegional: CURRENT,
+    }).execute(PAYMENT_ID);
+    expect(view.regional).toEqual(PHOTO);
+  });
+
+  it('PF3: la foto servida no lleva `regional`; solo el de nivel superior', async () => {
+    const view = await makeUseCase(withRegional(PHOTO)).execute(PAYMENT_ID);
+    expect('regional' in view.snapshot).toBe(false);
+  });
+
+  it('una foto sin región usa los ajustes de hoy de la sede', async () => {
+    const view = await makeUseCase({
+      ...issued(),
+      locationRegional: CURRENT,
+    }).execute(PAYMENT_ID);
+    expect(view.regional).toEqual(CURRENT);
+  });
+
+  it('una foto sin región y una sede sin ajustes válidos (o retirada sin ellos): null, sin lanzar', async () => {
+    const view = await makeUseCase({
+      ...issued(),
+      locationRegional: null,
+    }).execute(PAYMENT_ID);
+    expect(view.regional).toBeNull();
+  });
+
+  it.each([
+    ['zona que este runtime no conoce', { ...PHOTO, timeZone: 'Mars/Olympus' }],
+    ['locale no soportado', { ...PHOTO, locale: 'zz-ZZ-not-a-tag-!!' }],
+    ['reloj inválido', { ...PHOTO, hourCycle: 'h11' }],
+  ])(
+    'PF4: una región de la foto con %s vale como ausente y se prueba con la sede actual',
+    async (_label, photo) => {
+      const withCurrent = await makeUseCase({
+        ...withRegional(photo),
+        locationRegional: CURRENT,
+      }).execute(PAYMENT_ID);
+      expect(withCurrent.regional).toEqual(CURRENT);
+      const withoutCurrent = await makeUseCase({
+        ...withRegional(photo),
+        locationRegional: null,
+      }).execute(PAYMENT_ID);
+      expect(withoutCurrent.regional).toBeNull();
+    },
+  );
+
+  it('un «sin serie» usa los ajustes actuales de la sede', async () => {
+    const view = await makeUseCase(legacy(CURRENT)).execute(PAYMENT_ID);
+    expect(view.regional).toEqual(CURRENT);
+    expect('regional' in view.snapshot).toBe(false);
+    const none = await makeUseCase(legacy(null)).execute(PAYMENT_ID);
+    expect(none.regional).toBeNull();
   });
 });

@@ -8,6 +8,7 @@ import {
 import { NO_LOCAL_NAMES } from '../../../document-type-names/__fixtures__/fixed-document-type-names.reader';
 import type { PaymentReceiptView } from '../../domain/entities/payment-receipt.entity';
 import { regionalFormat } from '../../../../shared/format/regional-format';
+import { moneyWithCode } from '../../../../shared/format/money-with-code';
 
 const SNAPSHOT_INPUT = {
   clinic: { name: 'Clínica Demo', legalName: null, taxId: null, address: null },
@@ -63,6 +64,7 @@ const view = (
   voidReason: null,
   exchangeRate: null,
   split: null,
+  regional: null,
   snapshot,
   ...overrides,
 });
@@ -78,9 +80,12 @@ describe('receiptEmailVars (DX-136)', () => {
       SEDE_ZONE,
       SEDE_FMT,
     );
-    expect(amountLabel).toBe(SEDE_FMT.money(150000, 'COP'));
-    expect(amountLabel).toMatch(/^\$\s150\.000,00$/);
-    expect(balanceLabel).toMatch(/^\$\s450\.000,00$/);
+    // DX-521: el código ISO, como el papel (DX-378); nunca el símbolo «$».
+    expect(amountLabel).toBe(moneyWithCode(150000, 'COP', SEDE_FMT, undefined));
+    expect(amountLabel).toMatch(/^COP\s150\.000,00$/);
+    expect(balanceLabel).toMatch(/^COP\s450\.000,00$/);
+    expect(amountLabel).not.toContain('$');
+    expect(balanceLabel).not.toContain('$');
     expect(vars).toEqual({
       patientName: 'Carolina Duque',
       reference: 'NOR-000123',
@@ -132,7 +137,9 @@ describe('receiptEmailVars (DX-136)', () => {
       total: { currency: 'COP', amount: 300000 },
     };
     const vars = receiptEmailVars(view({ split }), SEDE_ZONE, SEDE_FMT);
-    expect(vars.amountLabel).toBe(SEDE_FMT.money(300000, 'COP'));
+    expect(vars.amountLabel).toBe(
+      moneyWithCode(300000, 'COP', SEDE_FMT, undefined),
+    );
     expect(vars.methodLabel).toBe('Pago móvil + Efectivo');
 
     const withoutRate = receiptEmailVars(
@@ -141,7 +148,7 @@ describe('receiptEmailVars (DX-136)', () => {
       SEDE_FMT,
     );
     expect(withoutRate.amountLabel).toBe(
-      `${SEDE_FMT.money(50, 'USD')} + ${SEDE_FMT.money(100000, 'COP')}`,
+      `${moneyWithCode(50, 'USD', SEDE_FMT, undefined)} + ${moneyWithCode(100000, 'COP', SEDE_FMT, undefined)}`,
     );
   });
 
@@ -284,8 +291,8 @@ describe('receiptEmailVars (DX-136)', () => {
       'Asia/Tokyo',
       regionalFormat({ locale: 'ja-JP', hourCycle: 'h23' }),
     );
-    expect(vars.amountLabel).toBe('￥12,000');
-    expect(vars.balanceLabel).toBe('￥38,000');
+    expect(vars.amountLabel).toBe('JPY\u00a012,000');
+    expect(vars.balanceLabel).toBe('JPY\u00a038,000');
   });
 
   it('receipt email dates follow the location locale (en-US 10/27/2026)', () => {
@@ -321,7 +328,7 @@ describe('receiptEmailVars (DX-136)', () => {
       SEDE_FMT,
     );
     expect(vars.amountLabel).toBe(
-      SEDE_FMT.money(150000, 'COP', { COP: 'Col$' }),
+      moneyWithCode(150000, 'COP', SEDE_FMT, { COP: 'Col$' }),
     );
     expect(vars.amountLabel).toMatch(/^Col\$\s150\.000,00$/);
     expect(vars.balanceLabel).toMatch(/^Col\$\s450\.000,00$/);
@@ -352,5 +359,44 @@ describe('receiptEmailVars (DX-136)', () => {
       title: 'Recibo de pago',
       legend: 'Este recibo no es una factura',
     });
+  });
+
+  it('DX-521: con el texto «Bs.» congelado en la foto el email lo escribe, y sin él el código ISO, nunca «$»', () => {
+    const caracas = regionalFormat({ locale: 'es-VE', hourCycle: 'h23' });
+    const ves = (currencyTexts?: Record<string, string>) =>
+      forView(
+        buildReceiptSnapshot(
+          {
+            ...SNAPSHOT_INPUT,
+            payment: {
+              ...SNAPSHOT_INPUT.payment,
+              amount: 1234.5,
+              currency: 'VES',
+            },
+            planBalance: {
+              currency: 'USD',
+              billable: 100,
+              paid: 40,
+              balance: 60,
+            },
+            currencyTexts,
+          },
+          NO_LOCAL_NAMES,
+        ),
+      );
+    const withText = receiptEmailVars(
+      view({ snapshot: ves({ VES: 'Bs.' }) }),
+      'America/Caracas',
+      caracas,
+    );
+    expect(withText.amountLabel).toBe('Bs.\u00a01.234,50');
+    expect(withText.balanceLabel).toBe('USD\u00a060,00');
+    const without = receiptEmailVars(
+      view({ snapshot: ves() }),
+      'America/Caracas',
+      caracas,
+    );
+    expect(without.amountLabel).toBe('VES\u00a01.234,50');
+    expect(without.balanceLabel).not.toContain('$');
   });
 });
