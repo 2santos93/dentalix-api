@@ -307,8 +307,14 @@ export interface ReceiptPatientView {
   docNumberMasked: string | null;
 }
 
-/** La foto del recibo con su paciente ya leído (`receiptPatientView`). */
-export type ReceiptViewSnapshot = Omit<ReceiptSnapshot, 'patient'> & {
+/**
+ * La foto del recibo con su paciente ya leído (`receiptPatientView`). Sin
+ * `regional` (DX-521, PF3): se sirve solo el de nivel superior de la vista.
+ */
+export type ReceiptViewSnapshot = Omit<
+  ReceiptSnapshot,
+  'patient' | 'regional'
+> & {
   patient: ReceiptPatientView;
 };
 
