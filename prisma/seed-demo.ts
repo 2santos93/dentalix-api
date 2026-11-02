@@ -1640,6 +1640,14 @@ class DemoSeeder {
     typeByReason: Map<string, string>,
     norteChairs: DemoSeededChair[],
   ): Promise<AttendedAppointment[]> {
+    // Los ejemplos de «Pendiente de cerrar» son de la primera dentista: su
+    // agenda les deja el hueco, en cualquier sede (DX-439).
+    const closing = planClosingQueueExamples(
+      this.now,
+      hours.principal?.ranges ?? [],
+      DEMO_LOCATIONS.principal.timeZone,
+      'principal',
+    );
     // R3: en las sedes de la rotación, sus pacientes con `dentists`. DX-040:
     // el paciente de las opciones A/B no tiene cita futura (por eso sale en
     // «Presupuestos por seguir»); sus citas pasadas se quedan.
@@ -1656,6 +1664,11 @@ class DemoSeeder {
         (a) =>
           a.patientIndex !== DEMO_PLAN_OPTIONS.patientIndex ||
           a.end.getTime() <= this.now.getTime(),
+      )
+      .filter(
+        (a) =>
+          a.dentistIndex === DEMO_ROTATION.dentistIndex ||
+          !closing.some((c) => a.start < c.end && c.start < a.end),
       )
       .map((a) => ({ ...a, providerId: dentists[a.dentistIndex] }));
     // Cada sede con dentista propio: el suyo, con los pacientes de la sede.
@@ -2445,6 +2458,11 @@ class DemoSeeder {
     const candidates = localPatientIds.filter(
       (id) => id !== patientIds[DEMO_PLAN_OPTIONS.patientIndex],
     );
+    // La segunda dentista no: rota y quizá ese día no trabaje en la principal
+    // (DX-233), y el ejemplo caería fuera de su horario.
+    const providers = dentists.filter(
+      (_, index) => index !== DEMO_ROTATION.dentistIndex,
+    );
     const used = new Set<string>();
     await this.inTenant(tenantId, locations.principal, async () => {
       const create = this.use(CreateAppointmentUseCase);
@@ -2453,7 +2471,7 @@ class DemoSeeder {
         const booked = await this.bookFirstFree(
           create,
           example,
-          dentists,
+          providers,
           candidates,
           used,
           receptionId,
