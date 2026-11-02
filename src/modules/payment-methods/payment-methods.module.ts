@@ -3,8 +3,10 @@ import { JwtModule } from '@nestjs/jwt';
 import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 import {
+  CreatePaymentAdjustmentUseCase,
   CreatePaymentMethodUseCase,
   ListPaymentMethodsUseCase,
+  UpdatePaymentAdjustmentUseCase,
   UpdatePaymentMethodUseCase,
 } from './application/payment-methods.use-cases';
 import { PAYMENT_METHOD_REPOSITORY } from './domain/ports/payment-method-repository.port';
@@ -23,6 +25,8 @@ import { PaymentMethodsController } from './presentation/payment-methods.control
     ListPaymentMethodsUseCase,
     CreatePaymentMethodUseCase,
     UpdatePaymentMethodUseCase,
+    CreatePaymentAdjustmentUseCase,
+    UpdatePaymentAdjustmentUseCase,
     TokenService,
     TenantContextInterceptor,
     {

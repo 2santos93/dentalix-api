@@ -14,6 +14,7 @@ function method(
     kind: 'CASH',
     active: true,
     requiresReference: false,
+    adjustments: [],
     legacyMethod: 'CASH',
     createdAt: new Date(0),
     updatedAt: new Date(0),
@@ -34,6 +35,8 @@ function repoWith(row: ClinicPaymentMethodEntity | null) {
     nameTaken: jest.fn().mockResolvedValue(false),
     create: jest.fn(),
     update,
+    createAdjustment: jest.fn(),
+    updateAdjustment: jest.fn(),
   };
   return { repo, update };
 }

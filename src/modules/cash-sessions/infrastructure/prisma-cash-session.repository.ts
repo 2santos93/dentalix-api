@@ -12,6 +12,10 @@ import {
 import { civilDateIn, civilPeriodByZone } from '../../../shared/time/civil-day';
 import { formatReceiptNumber } from '../../payments/domain/receipt-number';
 import {
+  adjustmentsNetCents,
+  collectedAmount,
+} from '../../payment-methods/domain/payment-adjustments';
+import {
   ARQUEO_METHODS,
   centsOf,
   expectedLines,
@@ -92,6 +96,8 @@ const PAYMENT_SELECT = {
   voidedAt: true,
   voidedById: true,
   voidReason: true,
+  // DX-516: sus ajustes por medio de pago (lo cobrado).
+  methodAdjustments: { select: { type: true, amount: true } },
   receipt: { select: { seriesPrefix: true, number: true } },
   // DX-390: una línea 2..N de un cobro dividido lleva el recibo de su línea 1.
   splitHead: {
@@ -561,6 +567,7 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
             opening: fromCents(line.openingCents),
             payments: fromCents(line.paymentsCents),
             paymentsCount: line.paymentsCount,
+            paymentAdjustments: fromCents(line.paymentAdjustmentsCents),
             adjustments: fromCents(line.adjustmentsCents),
             outflows: fromCents(line.outflowsCents),
             outflowsCount: line.outflowsCount,
@@ -633,7 +640,13 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
         }),
         tx.payment.findMany({
           where: { tenantId, ...countedPayments(sessionId) },
-          select: { currency: true, method: true, amount: true },
+          select: {
+            currency: true,
+            method: true,
+            amount: true,
+            // DX-516: lo cobrado entra con el abono en el cajón.
+            methodAdjustments: { select: { type: true, amount: true } },
+          },
         }),
         tx.cashSessionAdjustment.findMany({
           where: { tenantId, sessionId },
@@ -661,6 +674,12 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
         currency: p.currency,
         method: p.method,
         cents: cents(p.amount),
+        adjustmentCents: adjustmentsNetCents(
+          p.methodAdjustments.map((a) => ({
+            type: a.type,
+            amount: a.amount.toNumber(),
+          })),
+        ),
       })),
       adjustments: adjustments.map((a) => ({
         currency: a.currency,
@@ -933,6 +952,13 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
         : null,
       patient: patientOf(row),
       createdBy: row.createdById ? this.staff(row.createdById, names) : null,
+      collectedAmount: collectedAmount(
+        amountOf(row.amount),
+        row.methodAdjustments.map((a) => ({
+          type: a.type,
+          amount: amountOf(a.amount),
+        })),
+      ),
     };
   }
 

@@ -7,6 +7,7 @@ import {
 } from '../../patients/domain/document-type';
 import { docTypeFromStored } from '../../patients/domain/legacy-document-codes';
 import type { ReceiptTexts } from './receipt-settings';
+import type { PaymentAdjustmentLine } from './payment-adjustment-line';
 import type { CurrencyTexts } from '../../../shared/format/currency-text';
 
 /** Pie legal por defecto del recibo de caja (DX-136). */
@@ -54,6 +55,11 @@ export interface ReceiptSplitLine {
   paymentMethodName: string | null;
   reference: string | null;
   equivalentAmount: number | null;
+  /**
+   * DX-516: los ajustes por medio de pago de esta línea (su propio medio),
+   * solo si los tiene: sin ajustes, la línea es la de antes.
+   */
+  adjustments?: PaymentAdjustmentLine[];
 }
 
 /**
@@ -88,6 +94,8 @@ export interface ReceiptSnapshotInput {
     reference?: string | null;
     paidAt: Date;
     paidOn: string;
+    /** DX-516: los ajustes congelados en el abono (vacío o ausente: ninguno). */
+    adjustments?: PaymentAdjustmentLine[];
   };
   /** Plan del abono; `null` si es contra un saldo migrado (DX-262). */
   plan: { id: string; optionLabel: string | null; createdAt: Date } | null;
@@ -148,6 +156,13 @@ export interface ReceiptSnapshot {
     reference?: string | null;
     paidAt: string;
     paidOn: string;
+    /**
+     * DX-516: los ajustes por medio de pago del abono (impuesto, recargo o
+     * descuento), con su base y su importe. AUSENTE si no tiene ninguno (la
+     * foto es la de antes) y en un cobro dividido (van en cada línea).
+     * Lo cobrado = importe + impuestos + recargos − descuentos.
+     */
+    adjustments?: PaymentAdjustmentLine[];
   };
   /** `null` en un abono contra un saldo migrado (DX-262). */
   plan: { id: string; optionLabel: string | null; createdAt: string } | null;
@@ -228,6 +243,10 @@ export function buildReceiptSnapshot(
       reference: input.payment.reference ?? null,
       paidAt: input.payment.paidAt.toISOString(),
       paidOn: input.payment.paidOn,
+      // DX-516: solo si los tiene y no es un cobro dividido (van por línea).
+      ...(!input.split && (input.payment.adjustments?.length ?? 0) > 0
+        ? { adjustments: input.payment.adjustments }
+        : {}),
     },
     plan: input.plan
       ? {

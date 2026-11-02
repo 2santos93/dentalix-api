@@ -617,7 +617,8 @@ describe('Recibo no fiscal: título, leyenda y nº de factura externa (e2e, DX-5
       .trim()
       .split('\r\n');
     expect(lines[0]).toBe(
-      'Fecha,Sede,Paciente,Destino,Medio,Referencia,Factura externa,Moneda,Importe',
+      // DX-516: las columnas de los ajustes van al final.
+      'Fecha,Sede,Paciente,Destino,Medio,Referencia,Factura externa,Moneda,Importe,Impuestos,Recargos,Descuentos,Total cobrado,Detalle de ajustes',
     );
     expect(lines).toHaveLength(1 + withNo.total);
     expect(csv.text).toContain('"F-0001"');

@@ -8,6 +8,8 @@ const LOCKABLE_TABLES = [
   'location_schedules',
   'locations',
   'payers',
+  // DX-516: el medio serializa el alta y el cambio de sus ajustes.
+  'payment_methods',
   'prescription_templates',
 ] as const;
 

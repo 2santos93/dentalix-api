@@ -124,7 +124,10 @@ export class RecordOpeningBalancePaymentUseCase {
       );
     }
 
-    const payMethod = await this.paymentMethodGate.resolve(input, paidAt);
+    const payMethod = await this.paymentMethodGate.resolve(input, paidAt, {
+      amount: input.amount,
+      currency,
+    });
     const payment = await this.repo.create({
       treatmentPlanId: null,
       openingBalanceId,
@@ -137,6 +140,7 @@ export class RecordOpeningBalancePaymentUseCase {
       reference: payMethod.reference,
       referenceNormalized: payMethod.referenceNormalized,
       duplicateReferenceReason: payMethod.duplicateReferenceReason,
+      adjustments: payMethod.adjustments,
       notes: input.notes,
       createdById,
       idempotencyKey: key,

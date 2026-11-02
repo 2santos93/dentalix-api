@@ -49,11 +49,19 @@ export interface CashExpectedLine {
   opening: number;
   payments: number;
   paymentsCount: number;
+  /**
+   * DX-516: ajustes por medio de pago de esos abonos, con signo (impuestos y
+   * recargos +, descuentos −). 0 sin ajustes.
+   */
+  paymentAdjustments: number;
   adjustments: number;
   /** Salidas de caja menor (DX-274), en positivo: se restan. */
   outflows: number;
   outflowsCount: number;
-  /** opening + payments + adjustments − outflows (puede ser negativo). */
+  /**
+   * opening + payments + paymentAdjustments + adjustments − outflows (puede
+   * ser negativo).
+   */
   expected: number;
 }
 
@@ -99,6 +107,8 @@ export interface CashSessionPayment {
   receiptNumber: string | null;
   patient: { id: string; fullName: string };
   createdBy: StaffRef | null;
+  /** DX-516: lo cobrado (importe ± ajustes por medio de pago). */
+  collectedAmount: number;
 }
 
 export interface CashVoidedPayment extends CashSessionPayment {

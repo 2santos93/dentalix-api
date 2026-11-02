@@ -437,6 +437,9 @@ describe('Caja — GET /payments (e2e)', () => {
       // DX-390: un abono suelto no es de ningún cobro dividido.
       splitId: null,
       splitLines: null,
+      // DX-516: sin ajustes por medio de pago, lo cobrado es el importe.
+      adjustments: [],
+      collectedAmount: 100000,
     });
   });
 
@@ -530,6 +533,9 @@ describe('Caja — GET /payments (e2e)', () => {
           count: 2,
         },
       ],
+      // DX-516: sin ajustes, lo cobrado es lo abonado.
+      adjustments: [],
+      collected: [{ currency: 'COP', total: 120000.5 }],
     });
   });
 
