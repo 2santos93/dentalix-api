@@ -122,6 +122,7 @@ export class PrismaPaymentReceiptRepository implements PaymentReceiptRepository 
       ]);
       const base = {
         paymentId: payment.id,
+        locationId: payment.locationId,
         treatmentPlanId: payment.treatmentPlanId,
         patientEmail,
         locationRegional: locationRegionalOrNull(payment.location),
