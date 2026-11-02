@@ -2177,7 +2177,7 @@ model Currency {
   // DX-340: minor units de ISO 4217 (SIX List One); dato normativo.
   minorUnits     Int    @default(2) @map("minor_units") @db.SmallInt
   // DX-340: decimales a los que se redondea cada línea (total = suma de
-  // líneas). Puede ser menor que minorUnits (RSD, COP…: README «Redondeo de
+  // líneas). Puede ser menor que minorUnits (RSD, ALL…: README «Redondeo de
   // importes»). Referencia: prisma/reference/currency-digits.ts.
   roundingDigits Int    @default(2) @map("rounding_digits") @db.SmallInt
 
