@@ -19,6 +19,36 @@ const SIGNATURE_BOX = { width: 200, height: 80 };
 const MUTED = '#555555';
 
 /**
+ * pdfkit decodifica los PNG con zlib asíncrono y escribe el objeto de la imagen
+ * (y su máscara de alfa, con los números de objeto que aún quedan) cuando
+ * termina. Con dos firmas el orden dependía de cuál acababa antes: mismo
+ * contenido, otros bytes (y otra huella). Se espera a cada imagen antes de
+ * seguir para que el orden sea siempre el mismo.
+ */
+function imageWritten(image: unknown): Promise<void> {
+  const obj = (image as { obj?: PdfkitRef }).obj;
+  if (!obj || obj.offset !== undefined) return Promise.resolve();
+  return new Promise((resolve) => {
+    const finalize = obj.finalize.bind(obj);
+    obj.finalize = () => {
+      finalize();
+      resolve();
+    };
+  });
+}
+
+/** `openImage` existe en pdfkit pero no está en sus tipos. */
+interface WithOpenImage {
+  openImage: (src: Buffer) => PDFKit.Mixins.ImageSrc;
+}
+
+/** Lo mínimo de las referencias internas de pdfkit que usa `imageWritten`. */
+interface PdfkitRef {
+  offset?: number;
+  finalize: () => void;
+}
+
+/**
  * PDF firmado con pdfkit (DX-422): JS puro, sin binarios nativos ni navegador.
  * Fuentes estándar (Helvetica, WinAnsi): el dominio ya rechazó lo que no
  * cabe en ellas, así que el texto se pinta tal cual, con sus saltos de línea.
@@ -30,7 +60,7 @@ const MUTED = '#555555';
 export class PdfkitSignedConsentPdfRenderer implements SignedConsentPdfRenderer {
   constructor(private readonly options: { compress?: boolean } = {}) {}
 
-  render(model: SignedConsentPdfModel): Promise<Buffer> {
+  async render(model: SignedConsentPdfModel): Promise<Buffer> {
     const doc = new PDFDocument({
       size: 'A4',
       margin: MARGIN,
@@ -54,7 +84,7 @@ export class PdfkitSignedConsentPdfRenderer implements SignedConsentPdfRenderer 
       doc.on('error', reject);
     });
 
-    this.document(doc, model);
+    await this.document(doc, model);
     this.evidence(doc, model);
     doc.file(Buffer.from(`${model.title}\n\n${model.body}`, 'utf8'), {
       name: SIGNED_TEXT_ATTACHMENT,
@@ -64,13 +94,13 @@ export class PdfkitSignedConsentPdfRenderer implements SignedConsentPdfRenderer 
       modifiedDate: model.completedAt,
     });
     doc.end();
-    return done;
+    return await done;
   }
 
-  private document(
+  private async document(
     doc: PDFKit.PDFDocument,
     model: SignedConsentPdfModel,
-  ): void {
+  ): Promise<void> {
     doc.font('Helvetica').fontSize(9).fillColor(MUTED).text(model.clinicName);
     doc.moveDown(0.5);
     doc
@@ -84,13 +114,13 @@ export class PdfkitSignedConsentPdfRenderer implements SignedConsentPdfRenderer 
       .fontSize(11)
       .text(model.body.replace(/\r\n/g, '\n'), { lineGap: 2 });
     doc.moveDown(2);
-    this.signature(
+    await this.signature(
       doc,
       'Firma de quien firma',
       model.signerLabel,
       model.patientSignature,
     );
-    this.signature(
+    await this.signature(
       doc,
       'Firma del profesional',
       model.professionalLabel,
@@ -98,19 +128,23 @@ export class PdfkitSignedConsentPdfRenderer implements SignedConsentPdfRenderer 
     );
   }
 
-  private signature(
+  private async signature(
     doc: PDFKit.PDFDocument,
     heading: string,
     name: string,
     pngBase64: string,
-  ): void {
+  ): Promise<void> {
     const needed = SIGNATURE_BOX.height + 50;
     if (doc.y + needed > doc.page.height - MARGIN) doc.addPage();
     doc.font('Helvetica-Bold').fontSize(10).text(heading);
     const top = doc.y + 4;
-    doc.image(Buffer.from(pngBase64, 'base64'), MARGIN, top, {
+    const image = (doc as unknown as WithOpenImage).openImage(
+      Buffer.from(pngBase64, 'base64'),
+    );
+    doc.image(image, MARGIN, top, {
       fit: [SIGNATURE_BOX.width, SIGNATURE_BOX.height],
     });
+    await imageWritten(image);
     doc.y = top + SIGNATURE_BOX.height + 4;
     doc.font('Helvetica').fontSize(10).text(name);
     doc.moveDown();
