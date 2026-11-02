@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { INestApplication } from '@nestjs/common';
 import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
@@ -28,7 +30,12 @@ import {
   LOGIN_LOCKOUT_CONFIG,
 } from '../src/modules/auth/domain/login-lockout';
 import { NEW_CLINIC_REQUIRES_ADMIN_MFA } from '../src/modules/auth/domain/user-mfa';
+import { mfaKeyHash } from '../src/modules/auth/domain/login-lockout';
+import { EmailOutbox } from '../src/modules/notifications/email/application/email-outbox.service';
+import { EmailPayloadCipher } from '../src/modules/notifications/email/infrastructure/email-payload-cipher';
+import { loadSecuritySettings } from '../src/shared/security/security-settings';
 import { PasswordService } from '../src/shared/crypto/password.service';
+import { TokenService } from '../src/shared/crypto/token.service';
 
 /**
  * DX-021-bis contra Postgres, con el bloqueo REAL (5 fallos → espera): segundo
@@ -140,8 +147,12 @@ describe('Verificación en dos pasos, ampliación (e2e, DX-021-bis)', () => {
   }
 
   beforeAll(async () => {
-    process.env.MAIL_PLATFORM_RECIPIENT_COOLDOWN_SECONDS = '0';
     app = await createE2eApp({
+      // 1 salto: para poder variar la IP con X-Forwarded-For.
+      securitySettings: {
+        ...loadSecuritySettings((k) => process.env[k]),
+        trustProxyHops: 1,
+      },
       override: (builder) => {
         builder
           .overrideProvider(LOGIN_LOCKOUT_CONFIG)
@@ -158,7 +169,6 @@ describe('Verificación en dos pasos, ampliación (e2e, DX-021-bis)', () => {
   });
 
   afterAll(async () => {
-    delete process.env.MAIL_PLATFORM_RECIPIENT_COOLDOWN_SECONDS;
     await resetDatabase(raw);
     await app.close();
     await raw.$disconnect();
@@ -208,21 +218,143 @@ describe('Verificación en dos pasos, ampliación (e2e, DX-021-bis)', () => {
         .expect(400);
     });
 
-    it('volver a escribir la contraseña da el mismo código, y fallarlo 5 veces deja la cuenta en espera', async () => {
+    it('volver a escribir la contraseña da el mismo código; fallarlo espera solo por cuenta e IP y deja rastro', async () => {
       const user = await seedSuper('reintento@platform.test');
       const first = await apexPassword(app, user.email);
       const second = await apexPassword(app, user.email);
       expect(second.mfaToken).not.toBe(first.mfaToken);
       const emailCode = enrollmentEmailCode(app, user.id, 0);
       const wrong = emailCode === '00000000' ? '11111111' : '00000000';
-      const start = (code: string) =>
+      const start = (code: string, ip: string) =>
         http()
           .post('/api/v1/auth/login/mfa/enrollment')
           .set('X-Tenant-Host', 'localhost')
+          .set('X-Forwarded-For', ip)
           .send({ mfaToken: second.mfaToken, emailCode: code });
-      for (let i = 0; i < 5; i += 1) await start(wrong).expect(400);
-      const locked = await start(emailCode).expect(429);
+      // Un atacante con la contraseña falla a propósito desde su IP…
+      for (let i = 0; i < 5; i += 1) {
+        await start(wrong, '198.51.100.7').expect(400);
+      }
+      const locked = await start(emailCode, '198.51.100.7').expect(429);
       expect(Number(locked.headers['retry-after'])).toBeGreaterThan(0);
+      // …y el titular, desde la suya, sigue adelante.
+      await start(emailCode, '203.0.113.20').expect(200);
+
+      const events = await raw.platformAuditEvent.count({
+        where: {
+          actorUserId: user.id,
+          action: 'LOGIN_FAILED',
+          metadata: { path: ['reason'], equals: 'INVALID_EMAIL_CODE' },
+        },
+      });
+      expect(events).toBe(5);
+    });
+
+    it('confirmar sin el código del correo no gasta el contador del titular', async () => {
+      const user = await seedSuper('escaneando@platform.test');
+      const { mfaToken } = await apexPassword(app, user.email);
+      const emailCode = enrollmentEmailCode(app, user.id, 0);
+      await http()
+        .post('/api/v1/auth/login/mfa/enrollment')
+        .set('X-Tenant-Host', 'localhost')
+        .send({ mfaToken, emailCode })
+        .expect(200);
+      const attacker = await apexPassword(app, user.email);
+      for (let i = 0; i < 6; i += 1) {
+        await http()
+          .post('/api/v1/auth/login/mfa/enrollment/confirm')
+          .set('X-Tenant-Host', 'localhost')
+          .set('X-Forwarded-For', '198.51.100.8')
+          .send({ mfaToken: attacker.mfaToken, code: '000000' });
+      }
+      expect(
+        await raw.loginThrottle.count({
+          where: { keyHash: mfaKeyHash(user.id) },
+        }),
+      ).toBe(0);
+    });
+
+    it('el código del alta no se pierde: el tope de plataforma no lo frena y no se puede agotar', async () => {
+      const user = await seedSuper('sincupo@platform.test');
+      const toHash = app
+        .get(EmailPayloadCipher, { strict: false })
+        .hashRecipient(user.email);
+      // El cupo de 3 al día del destinatario, gastado (lo que haría cualquiera).
+      await raw.$executeRaw`
+        INSERT INTO email_outbox
+          (id, "tenantId", template, "toHash", "toMasked", status, attempts,
+           "nextAttemptAt", "createdAt", "updatedAt")
+        SELECT gen_random_uuid(), NULL, 'registration-notice', ${toHash}, 's***@platform.test',
+               'SENT', 1, now(), timezone('utc', now()), timezone('utc', now())
+          FROM generate_series(1, 4)`;
+      const codes = () =>
+        raw.emailOutbox.count({
+          where: { toHash, template: 'MFA_ENROLLMENT_CODE' },
+        });
+      // Diez rondas de contraseña, cada una pasados más de 10 min.
+      for (let round = 1; round <= 10; round += 1) {
+        await apexPassword(app, user.email);
+        expect(await codes()).toBe(round);
+        // En el mismo plazo no sale otro: vale el que ya está en el buzón.
+        await apexPassword(app, user.email);
+        expect(await codes()).toBe(round);
+        await raw.$executeRaw`
+          UPDATE email_outbox SET "createdAt" = "createdAt" - interval '11 minutes'
+           WHERE "toHash" = ${toHash}`;
+      }
+    });
+
+    it('los correos de seguridad no gastan el cupo del registro público', async () => {
+      const user = await seedSuper('cupo@platform.test');
+      const outboxService = app.get(EmailOutbox, { strict: false });
+      await apexPassword(app, user.email);
+      await expect(
+        outboxService.withinPlatformRecipientQuota(user.email),
+      ).resolves.toBe(true);
+    });
+
+    it('DX-021-bis: una sesión de plataforma sin el claim `mfa` no vale ni se renueva', async () => {
+      const user = await seedSuper('vieja@platform.test');
+      // Lo que emitiría una réplica antigua tras migrar: solo con contraseña.
+      const old = await app
+        .get(TokenService, { strict: false })
+        .issue({ sub: user.id, platform: true, tv: user.tokenVersion });
+      await authed(
+        'get',
+        'localhost',
+        old.accessToken,
+        '/platform/tenants',
+      ).expect(403);
+      await refresh('localhost', old.refreshToken).expect(401);
+    });
+
+    it('una réplica antigua no puede enrolar a un superadmin: el trigger lo impide', async () => {
+      const user = await seedSuper('puerta@platform.test');
+      await expect(
+        raw.user.update({
+          where: { id: user.id },
+          data: { mfaTotpPendingSecretEnc: 'v1.secreto-del-atacante' },
+        }),
+      ).rejects.toThrow(/solo se hace en el login/);
+    });
+
+    it('`/me/mfa/enrollment` no es puerta de alta para un superadmin', async () => {
+      const member = await seedMember(raw, other, ClinicRole.ADMIN);
+      const token = await loginAs(app, other.host, member.email);
+      await raw.user.update({
+        where: { id: member.userId },
+        data: { isPlatformAdmin: true },
+      });
+      await authed('post', other.host, token, '/me/mfa/enrollment')
+        .send({ currentPassword: SEEDED_PASSWORD })
+        .expect(403);
+      await authed('post', other.host, token, '/me/mfa/enrollment/confirm')
+        .send({ code: '123456' })
+        .expect(403);
+      await raw.user.update({
+        where: { id: member.userId },
+        data: { isPlatformAdmin: false },
+      });
     });
 
     it('alta completa, entrada con código y refresh de plataforma; código malo auditado', async () => {
@@ -323,12 +455,42 @@ describe('Verificación en dos pasos, ampliación (e2e, DX-021-bis)', () => {
         await raw.userTrustedDevice.count({ where: { userId: user.id } }),
       ).toBe(0);
     });
+
+    it('ni entrando por una clínica de la que es miembro', async () => {
+      const member = await seedMember(raw, other, ClinicRole.DENTIST);
+      const token = await loginAs(app, other.host, member.email);
+      const { secret } = await enrollMember(other.host, token);
+      await raw.user.update({
+        where: { id: member.userId },
+        data: { isPlatformAdmin: true },
+      });
+      await forgetLastStep(member.userId);
+      const step = await login(other.host, member.email).expect(201);
+      const res = await verify(other.host, {
+        mfaToken: (step.body as Body).mfaToken,
+        code: totpAt(secret),
+        rememberDevice: true,
+      })
+        .set('X-Refresh-Transport', 'cookie')
+        .expect(200);
+      expect(String(res.headers['set-cookie'])).not.toContain('dentalix_td');
+      expect(
+        await raw.userTrustedDevice.count({
+          where: { userId: member.userId },
+        }),
+      ).toBe(0);
+      await raw.user.update({
+        where: { id: member.userId },
+        data: { isPlatformAdmin: false },
+      });
+    });
   });
 
   describe('códigos de recuperación del superadmin', () => {
     it('un código entra una sola vez, avisa por correo y el aviso no lleva clínica', async () => {
       const user = await seedSuper('recupera@platform.test');
       const { recoveryCodes } = await enrollPlatformAdmin(app, user);
+      await forgetLastStep(user.id);
       const before = await outbox('MFA_NOTICE');
       const first = await apexPassword(app, user.email);
       const ok = await verify('localhost', {
@@ -468,13 +630,32 @@ describe('Verificación en dos pasos, ampliación (e2e, DX-021-bis)', () => {
         mfa: 'MFA_REQUIRED',
       });
 
-      const stranger = await seedMember(raw, other, ClinicRole.DENTIST);
+      const stranger = await seedMember(raw, other, ClinicRole.RECEPTION);
       const token = await loginAs(app, other.host, stranger.email);
       await enrollMember(other.host, token);
       const res = await login(other.host, stranger.email)
         .set('Cookie', cookie)
         .expect(201);
       expect((res.body as Body).mfa).toBe('MFA_REQUIRED');
+    });
+
+    it('la cookie copiada no vale en otra clínica del mismo usuario', async () => {
+      const shared = await raw.clinicMembership.create({
+        data: {
+          tenantId: clinic.tenantId,
+          userId,
+          role: ClinicRole.ASSISTANT,
+        },
+        select: { id: true },
+      });
+      const res = await login(clinic.host, email)
+        .set('Cookie', cookie)
+        .expect(201);
+      expect((res.body as Body).mfa).toBe('MFA_REQUIRED');
+      await raw.clinicMembership.update({
+        where: { id: shared.id },
+        data: { deletedAt: new Date() },
+      });
     });
 
     it('se lista y se revoca; el de otro usuario es 404', async () => {
@@ -554,8 +735,9 @@ describe('Verificación en dos pasos, ampliación (e2e, DX-021-bis)', () => {
       const site = await registerClinic(app, 'clinica-bis-todos', VENEZUELA);
       const member = await seedMember(raw, site, ClinicRole.RECEPTION);
       const session = await login(site.host, member.email).expect(201);
-      const outsider = await seedMember(raw, other, ClinicRole.RECEPTION);
-      const outside = await login(other.host, outsider.email).expect(201);
+      const away = await registerClinic(app, 'clinica-bis-fuera', VENEZUELA);
+      const outsider = await seedMember(raw, away, ClinicRole.RECEPTION);
+      const outside = await login(away.host, outsider.email).expect(201);
 
       // Sin MFA propio no se puede encender.
       await authed('put', site.host, site.adminToken, '/security-policy')
@@ -579,7 +761,7 @@ describe('Verificación en dos pasos, ampliación (e2e, DX-021-bis)', () => {
       expect((forced.body as Body).mfa).toBe('MFA_ENROLLMENT_REQUIRED');
       expect((forced.body as Body).emailCodeRequired).toBeUndefined();
       // Otra clínica: nada cambia.
-      await refresh(other.host, (outside.body as Body).refreshToken!).expect(
+      await refresh(away.host, (outside.body as Body).refreshToken!).expect(
         201,
       );
 
@@ -784,7 +966,7 @@ describe('Verificación en dos pasos, ampliación (e2e, DX-021-bis)', () => {
     });
 
     it('otra clínica: 404, sin tocar nada', async () => {
-      const foreign = await seedMember(raw, other, ClinicRole.ADMIN);
+      const foreign = { userId: clinic.adminUserId };
       await reset(foreign.userId, totpAt(adminSecret)).expect(404);
       await authed(
         'get',
@@ -838,6 +1020,77 @@ describe('Verificación en dos pasos, ampliación (e2e, DX-021-bis)', () => {
     });
   });
 
+  describe('recuperación manual (docs/runbooks/mfa-support-reset.sql)', () => {
+    const block = readFileSync(
+      join(__dirname, '../docs/runbooks/mfa-support-reset.sql'),
+      'utf8',
+    ).match(/DO \$\$[\s\S]*?\$\$;/)![0];
+    const run = (email: string) =>
+      raw.$transaction([
+        raw.$queryRaw`SELECT set_config('dentalix.mfa_reset_email', ${email}, true)`,
+        raw.$executeRawUnsafe(block),
+      ]);
+
+    it('la dueña única sin móvil ni códigos recupera el acceso, con evento en su clínica y sus dispositivos muertos', async () => {
+      const site = await registerClinic(app, 'clinica-bis-sola', VENEZUELA);
+      const email = `owner@${site.subdomain}.test`;
+      const own = await enrollMember(site.host, site.adminToken);
+      await raw.tenant.update({
+        where: { id: site.tenantId },
+        data: { requireAdminMfa: true },
+      });
+      await forgetLastStep(site.adminUserId);
+      const step = await login(site.host, email).expect(201);
+      const opened = await verify(site.host, {
+        mfaToken: (step.body as Body).mfaToken,
+        code: totpAt(own.secret),
+        rememberDevice: true,
+      })
+        .set('X-Refresh-Transport', 'cookie')
+        .expect(200);
+      const device = (opened.headers['set-cookie'] as unknown as string[])
+        .find((c) => c.startsWith('dentalix_td='))!
+        .split(';')[0];
+
+      await run(email);
+
+      const res = await login(site.host, email)
+        .set('Cookie', device)
+        .expect(201);
+      expect((res.body as Body).mfa).toBe('MFA_ENROLLMENT_REQUIRED');
+      expect(
+        await raw.userMfaRecoveryCode.count({
+          where: { userId: site.adminUserId },
+        }),
+      ).toBe(0);
+      const events = await raw.auditEvent.findMany({
+        where: {
+          tenantId: site.tenantId,
+          resourceId: site.adminUserId,
+          metadata: { path: ['reason'], equals: 'MFA_RESET_BY_SUPPORT' },
+        },
+        select: { actorUserId: true, action: true },
+      });
+      expect(events).toEqual([
+        { actorUserId: site.adminUserId, action: 'UPDATE' },
+      ]);
+    });
+
+    it('rechaza a un superadmin y a quien no tiene la verificación', async () => {
+      const user = await seedSuper('intocable@platform.test');
+      await enrollPlatformAdmin(app, user);
+      await expect(run(user.email)).rejects.toThrow(/superadmin/);
+      await expect(run(`owner@${clinic.subdomain}.test`)).rejects.toThrow(
+        /no tiene la verificación/,
+      );
+      const row = await raw.user.findUniqueOrThrow({
+        where: { id: user.id },
+        select: { mfaEnabledAt: true },
+      });
+      expect(row.mfaEnabledAt).not.toBeNull();
+    });
+  });
+
   describe('quien conoce la contraseña y falla códigos', () => {
     it('5 fallos: espera y un solo aviso; un dispositivo de confianza entra igual y cambiar la contraseña corta la espera', async () => {
       const site = await registerClinic(app, 'clinica-bis-fallos', VENEZUELA);
@@ -868,6 +1121,15 @@ describe('Verificación en dos pasos, ampliación (e2e, DX-021-bis)', () => {
       }
       await verify(host, { mfaToken, code: totpAt(own.secret) }).expect(429);
       await verify(host, { mfaToken, code: totpAt(own.secret) }).expect(429);
+      expect(await outbox('MFA_NOTICE')).toBe(before + 1);
+      // Acabada la espera, otro fallo la renueva sin otro correo.
+      await raw.loginThrottle.updateMany({
+        where: { keyHash: mfaKeyHash(member.userId) },
+        data: { blockedUntil: new Date(Date.now() - 1000) },
+      });
+      await verify(host, { mfaToken, code: totpAt(own.secret, -4) }).expect(
+        401,
+      );
       expect(await outbox('MFA_NOTICE')).toBe(before + 1);
 
       // El dueño, desde su navegador de confianza, entra aunque haya espera.

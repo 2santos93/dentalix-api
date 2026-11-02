@@ -121,7 +121,13 @@ export class CompleteMfaLoginUseCase {
       input.request,
     );
     // Nunca en plataforma: el segundo factor del superadmin se pide siempre.
-    if (!input.rememberDevice || session.role === null) return pair;
+    if (
+      !input.rememberDevice ||
+      session.role === null ||
+      state.isPlatformAdmin
+    ) {
+      return pair;
+    }
     const trustedDeviceToken = await this.mfa.trustDevice(
       userId,
       state.tokenVersion,
@@ -142,22 +148,7 @@ export class CompleteMfaLoginUseCase {
       input.hostTenantId,
     );
     const userId = session.claims.sub;
-    const state = await this.mfa.state(userId);
-    if (state.isPlatformAdmin) {
-      // Cobra en el mismo contador que los códigos: lanza 429 en espera.
-      await this.lockout.claimMfaAttempt(userId);
-      if (
-        !input.emailCode ||
-        !this.challenges.matchesEmailCode(
-          userId,
-          session.claims.tv,
-          input.emailCode,
-        )
-      ) {
-        throw new BadRequestException(MFA_MESSAGES.emailCodeInvalid);
-      }
-      await this.lockout.clearMfa(userId);
-    }
+    await this.assertEmailCode(session, input.emailCode, input.request);
     // La contraseña se verificó en el primer paso (de ahí el token).
     return this.mfa.startEnrollment(
       userId,
@@ -170,6 +161,7 @@ export class CompleteMfaLoginUseCase {
     mfaToken: string;
     hostTenantId: string | undefined;
     code: string;
+    emailCode?: string;
     request: AuditRequestMeta;
   }): Promise<SessionPair & { recoveryCodes: string[] }> {
     const session = await this.open(
@@ -177,6 +169,9 @@ export class CompleteMfaLoginUseCase {
       'MFA_ENROLL',
       input.hostTenantId,
     );
+    // Se repite aquí: si no, quien solo tiene la contraseña podría gastar el
+    // contador del TOTP mientras el dueño escanea el QR.
+    await this.assertEmailCode(session, input.emailCode, input.request);
     const enabled = await this.mfa.confirmEnrollment(
       session.claims.sub,
       input.code,
@@ -207,6 +202,25 @@ export class CompleteMfaLoginUseCase {
       role,
       allowedLocationIds: state.tenant!.allowedLocationIds,
     };
+  }
+
+  /** DX-021-bis: el alta de un superadmin exige el código de su correo. */
+  private async assertEmailCode(
+    session: ChallengeSession,
+    emailCode: string | undefined,
+    request: AuditRequestMeta,
+  ): Promise<void> {
+    const userId = session.claims.sub;
+    if (!(await this.mfa.state(userId)).isPlatformAdmin) return;
+    await this.lockout.claimMfaEnrollAttempt(userId, request.ip);
+    if (
+      !emailCode ||
+      !this.challenges.matchesEmailCode(userId, session.claims.tv, emailCode)
+    ) {
+      await this.record(session, 'LOGIN_FAILED', 'INVALID_EMAIL_CODE', request);
+      throw new BadRequestException(MFA_MESSAGES.emailCodeInvalid);
+    }
+    await this.lockout.clearMfaEnroll(userId, request.ip);
   }
 
   /** Un solo uso: el `jti` del token intermedio entra en la denylist. */
@@ -251,6 +265,7 @@ export class CompleteMfaLoginUseCase {
       return this.tokens.issue({
         sub: session.claims.sub,
         platform: true,
+        mfa: true,
         tv,
       });
     }

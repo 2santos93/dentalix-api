@@ -68,4 +68,8 @@ export function mfaResetAuditEvent(
 
 /** Motivo del LOGIN (o LOGIN_FAILED) que cierra el paso del segundo factor. */
 export type MfaLoginReason =
-  'MFA_TOTP' | 'MFA_RECOVERY_CODE' | 'MFA_ENROLLED' | 'INVALID_MFA_CODE';
+  | 'MFA_TOTP'
+  | 'MFA_RECOVERY_CODE'
+  | 'MFA_ENROLLED'
+  | 'INVALID_MFA_CODE'
+  | 'INVALID_EMAIL_CODE';

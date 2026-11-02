@@ -165,6 +165,7 @@ export class LoginMfaController {
         mfaToken: dto.mfaToken,
         hostTenantId: req.tenantHost?.tenantId ?? undefined,
         code: dto.code,
+        emailCode: dto.emailCode,
         request: requestMeta(req),
       });
       return {

@@ -66,8 +66,9 @@ const NO_POLICY: ClinicMfaPolicy = {
   requireAllMfa: false,
 };
 
-const hashDeviceToken = (token: string): string =>
-  createHash('sha256').update(token).digest('hex');
+/** Con la clínica dentro: una cookie copiada no vale en otra clínica del usuario. */
+const hashDeviceToken = (tenantId: string, token: string): string =>
+  createHash('sha256').update(`${tenantId}:${token}`).digest('hex');
 
 /** Quién queda obligado con `after` y no lo estaba con `before`. */
 function newlyRequiredRoles(
@@ -245,7 +246,8 @@ export class UserMfaService {
    * Paso 1 del alta: secreto nuevo, guardado CIFRADO como pendiente. Desde
    * «Mi perfil» exige la contraseña actual (`currentPassword`): un access
    * token robado no basta para enrolar otro móvil. En el alta forzada del
-   * login la contraseña ya se verificó (`null`).
+   * login la contraseña ya se verificó (`null`). Un superadmin solo se enrola
+   * ahí, con el código de su correo (DX-021-bis).
    */
   async startEnrollment(
     userId: string,
@@ -253,8 +255,10 @@ export class UserMfaService {
     ctx: MfaActorContext,
   ): Promise<UserMfaEnrollment> {
     const state = await this.state(userId);
-    if (currentPassword !== null)
+    if (currentPassword !== null) {
+      this.assertSelfService(state);
       await this.assertPassword(state, currentPassword);
+    }
     if (state.enabledAt)
       throw new ConflictException(MFA_MESSAGES.alreadyEnabled);
     const secret = generateTotpSecret();
@@ -312,6 +316,11 @@ export class UserMfaService {
     );
     if (!enabled) throw new ConflictException(MFA_MESSAGES.alreadyEnabled);
     await this.lockout.clearMfa(userId);
+    await this.notifier.notice({
+      tenantId: 'tenantId' in ctx ? ctx.tenantId : null,
+      to: state.email,
+      kind: 'ENABLED',
+    });
     // Solo ids: un alta que su dueño no hizo es una contraseña robada.
     this.logger.warn({
       event: 'user_mfa.enabled',
@@ -376,7 +385,7 @@ export class UserMfaService {
     }
     if (kind) {
       await this.lockout.clearMfa(userId);
-    } else if (await this.lockout.mfaBlocked(userId)) {
+    } else if (await this.lockout.mfaJustLocked(userId)) {
       await this.notifier.notice({
         tenantId,
         to: state.email,
@@ -384,6 +393,17 @@ export class UserMfaService {
       });
     }
     return kind;
+  }
+
+  /** Rutas de «Mi perfil»: un superadmin se enrola solo en el login. */
+  async assertSelfServiceEnrollment(userId: string): Promise<void> {
+    this.assertSelfService(await this.state(userId));
+  }
+
+  private assertSelfService(state: Pick<UserMfaState, 'isPlatformAdmin'>) {
+    if (state.isPlatformAdmin) {
+      throw new ForbiddenException(MFA_MESSAGES.platformAdminEnrollsAtLogin);
+    }
   }
 
   /** La contraseña cambió: quien fallaba códigos ya no puede volver a probar. */
@@ -404,7 +424,7 @@ export class UserMfaService {
     const token = randomBytes(32).toString('base64url');
     await this.repo.addTrustedDevice({
       userId,
-      tokenHash: hashDeviceToken(token),
+      tokenHash: hashDeviceToken(ctx.tenantId, token),
       tokenVersion,
       label: trustedDeviceLabel(ctx.userAgent),
       expiresAt: new Date(
@@ -425,7 +445,7 @@ export class UserMfaService {
     if (!token || !state.enabledAt || state.isPlatformAdmin) return false;
     const trusted = await this.repo.touchTrustedDevice(
       userId,
-      hashDeviceToken(token),
+      hashDeviceToken(ctx.tenantId, token),
       state.tokenVersion,
     );
     if (trusted) {

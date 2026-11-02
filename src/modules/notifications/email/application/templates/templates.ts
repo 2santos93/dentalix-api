@@ -358,6 +358,12 @@ function mfaNoticeText(vars: MfaNoticeEmailVars): {
   note: string;
 } {
   switch (vars.kind) {
+    case 'ENABLED':
+      return {
+        subject: 'Se activó la verificación en dos pasos en tu cuenta',
+        body: `Acaban de activar la verificación en dos pasos de tu cuenta de ${PRODUCT_NAME}.`,
+        note: 'Si no fuiste tú, cambia tu contraseña ahora y avisa a la administración de tu clínica.',
+      };
     case 'RECOVERY_CODE_USED':
       return {
         subject: 'Se usó un código de recuperación en tu cuenta',

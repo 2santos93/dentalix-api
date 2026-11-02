@@ -14,7 +14,10 @@ export interface MfaNotifier {
     kind: MfaNoticeKind;
     recoveryCodesRemaining?: number;
   }): Promise<void>;
-  /** Código del alta de un superadmin. Si no sale, el alta no puede empezar. */
+  /**
+   * Código del alta de un superadmin: como mucho uno cada 10 min, sin más tope.
+   * Si no se puede encolar, lanza: el login no dice que se envió.
+   */
   sendEnrollmentCode(input: {
     to: string;
     code: string;

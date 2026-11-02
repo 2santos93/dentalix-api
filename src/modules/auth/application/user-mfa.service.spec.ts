@@ -597,8 +597,9 @@ describe('UserMfaService (DX-021)', () => {
         ),
       ).resolves.toBe(6);
 
-      const b = await setup({ isPlatformAdmin: true });
+      const b = await setup();
       await b.enroll();
+      b.repo.state.isPlatformAdmin = true;
       b.forgetLastStep();
       await expect(
         b.service.disable(
@@ -712,7 +713,7 @@ describe('UserMfaService (DX-021)', () => {
         { recoveryCode: recoveryCodes[0] },
         TENANT,
       );
-      expect(notices).toEqual([
+      expect(notices.slice(1)).toEqual([
         {
           tenantId: TENANT,
           to: 'ana@clinica.test',
@@ -742,6 +743,7 @@ describe('UserMfaService (DX-021)', () => {
         ),
       ).rejects.toThrow();
       expect(notices).toEqual([
+        { tenantId: TENANT, to: 'ana@clinica.test', kind: 'ENABLED' },
         { tenantId: TENANT, to: 'ana@clinica.test', kind: 'ATTEMPTS_LOCKED' },
       ]);
     });
@@ -775,13 +777,26 @@ describe('UserMfaService (DX-021)', () => {
     });
 
     it('un superadmin nunca se salta el código', async () => {
-      const { service, repo, enroll } = await setup({ isPlatformAdmin: true });
+      const { service, repo, enroll } = await setup();
       await enroll();
+      repo.state.isPlatformAdmin = true;
       const state = (await repo.find())!;
       const token = await service.trustDevice(USER, state.tokenVersion, CTX);
       await expect(
         service.isTrustedDevice(USER, state, token, CTX),
       ).resolves.toBe(false);
+    });
+  });
+
+  describe('un superadmin no se enrola desde «Mi perfil» (DX-021-bis)', () => {
+    it('403 con su contraseña; el alta del login (`null`) sí llega', async () => {
+      const { service } = await setup({ isPlatformAdmin: true });
+      await expect(
+        service.startEnrollment(USER, PASSWORD, CTX),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(
+        service.startEnrollment(USER, null, CTX),
+      ).resolves.toMatchObject({ secret: expect.any(String) });
     });
   });
 

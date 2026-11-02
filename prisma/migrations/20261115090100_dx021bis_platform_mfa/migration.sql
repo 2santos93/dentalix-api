@@ -37,7 +37,9 @@ ALTER TABLE "platform_audit_events" ADD CONSTRAINT "platform_audit_events_action
 
 -- Alta segura de los superadmin existentes (docs/runbooks/platform-mfa.md):
 --  - se cierran sus sesiones de plataforma, abiertas solo con contraseña: la
---    siguiente entrada ya pasa por el segundo factor;
+--    siguiente entrada ya pasa por el segundo factor (además, la API nueva solo
+--    acepta tokens de plataforma con el claim `mfa`, así que tampoco sobreviven
+--    las que abra una réplica antigua después de migrar);
 --  - se descarta el secreto PENDIENTE de quien no terminó el alta: pudo
 --    pedirlo cualquiera con la contraseña, y el alta nueva exige además el
 --    código enviado a su correo.
@@ -45,3 +47,27 @@ UPDATE "users"
    SET "tokenVersion" = "tokenVersion" + 1,
        "mfaTotpPendingSecretEnc" = NULL
  WHERE "isPlatformAdmin" = true;
+
+-- Mientras queden réplicas de la versión anterior sirviendo, sus rutas enrolarían
+-- a un superadmin solo con la contraseña. Ningún alta de superadmin puede guardar
+-- su secreto pendiente sin declarar que pasó por la puerta nueva, que exige el
+-- código del correo (PrismaUserMfaRepository.savePending). No depende del orden
+-- del despliegue: desde que esto aplica, las rutas antiguas fallan.
+CREATE FUNCTION "users_platform_mfa_enrollment_door"() RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF current_setting('dentalix.platform_mfa_enrollment', true) IS DISTINCT FROM 'email-verified' THEN
+    RAISE EXCEPTION 'El alta del MFA de un superadmin solo se hace en el login, con el código del correo.';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER "users_platform_mfa_enrollment_door"
+  BEFORE UPDATE OF "mfaTotpPendingSecretEnc" ON "users"
+  FOR EACH ROW
+  WHEN (NEW."isPlatformAdmin"
+        AND NEW."mfaTotpPendingSecretEnc" IS NOT NULL
+        AND NEW."mfaTotpPendingSecretEnc" IS DISTINCT FROM OLD."mfaTotpPendingSecretEnc")
+  EXECUTE FUNCTION "users_platform_mfa_enrollment_door"();

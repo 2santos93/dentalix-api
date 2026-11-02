@@ -56,21 +56,19 @@ export async function enrollPlatformAdmin(
 ): Promise<EnrolledPlatformAdmin> {
   const http = () => request(app.getHttpServer());
   const { mfaToken } = await apexPassword(app, user.email);
+  const emailCode = enrollmentEmailCode(app, user.id, user.tokenVersion ?? 0);
   const start = await http()
     .post('/api/v1/auth/login/mfa/enrollment')
     .set('X-Tenant-Host', 'localhost')
     .set('User-Agent', userAgent)
-    .send({
-      mfaToken,
-      emailCode: enrollmentEmailCode(app, user.id, user.tokenVersion ?? 0),
-    })
+    .send({ mfaToken, emailCode })
     .expect(200);
   const { secret } = start.body as { secret: string };
   const confirm = await http()
     .post('/api/v1/auth/login/mfa/enrollment/confirm')
     .set('X-Tenant-Host', 'localhost')
     .set('User-Agent', userAgent)
-    .send({ mfaToken, code: totpAt(secret, -1) })
+    .send({ mfaToken, emailCode, code: totpAt(secret, -1) })
     .expect(200);
   return { ...(confirm.body as Omit<EnrolledPlatformAdmin, 'secret'>), secret };
 }

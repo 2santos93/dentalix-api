@@ -64,6 +64,19 @@ export class PrismaEmailOutboxRepository implements EmailOutboxRepository {
     return created.id ? { id: created.id } : null;
   }
 
+  async insertPlatformSecurity(
+    row: NewPlatformOutboxEmail,
+    minIntervalSeconds: number,
+  ): Promise<{ id: string } | null> {
+    const [created] = await this.prisma.$queryRaw<{ id: string | null }[]>`
+      SELECT email_outbox_enqueue_platform_security(
+        ${row.template}::"EmailTemplate", ${row.toHash},
+        ${row.toMasked}, ${row.payload}, ${row.referenceId}::uuid,
+        ${minIntervalSeconds}::int
+      ) AS id`;
+    return created.id ? { id: created.id } : null;
+  }
+
   async platformRecipientAllowed(
     toHash: string,
     quota: PlatformRecipientQuota,

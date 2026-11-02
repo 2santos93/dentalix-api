@@ -83,6 +83,16 @@ export const accountKeyHash = (email: string): string =>
 export const mfaKeyHash = (userId: string): string =>
   sha256(`dentalix:login-mfa:${userId}`);
 
+/**
+ * DX-021-bis: clave del contador del código del CORREO en el alta de un
+ * superadmin: por cuenta e IP. Con la del MFA, quien conoce la contraseña
+ * bloquearía al titular fallando a propósito, justo cuando este no tiene otra
+ * salida. Son 8 dígitos que rotan cada 10 min: repartir los intentos entre IP no
+ * da para acertar.
+ */
+export const mfaEnrollKeyHash = (userId: string, ip: string): string =>
+  sha256(`dentalix:login-mfa-enroll:${userId}:${ip}`);
+
 /** Clave del contador de la IP: nunca la IP en claro. */
 export const ipKeyHash = (ip: string): string =>
   sha256(`dentalix:login-ip:${ip}`);

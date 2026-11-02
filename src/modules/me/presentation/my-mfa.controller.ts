@@ -214,6 +214,7 @@ export class MyMfaController {
     @Body() dto: ConfirmMyMfaDto,
   ): Promise<UserMfaStatus & DeliveredSession & { recoveryCodes: string[] }> {
     const { user, ctx } = this.context(req);
+    await this.mfa.assertSelfServiceEnrollment(user.sub);
     try {
       const enabled = await this.mfa.confirmEnrollment(user.sub, dto.code, ctx);
       const session = await this.reissue(req, res, enabled.tokenVersion);

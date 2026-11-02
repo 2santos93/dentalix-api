@@ -79,11 +79,16 @@ export class PrismaUserMfaRepository implements UserMfaRepository {
     userId: string,
     pendingSecretEnc: string,
   ): Promise<boolean> {
-    const { count } = await this.prisma.user.updateMany({
-      where: { id: userId, deletedAt: null, mfaEnabledAt: null },
-      data: { mfaTotpPendingSecretEnc: pendingSecretEnc },
+    return this.prisma.$transaction(async (tx) => {
+      // Lo exige el trigger `users_platform_mfa_enrollment_door` para un
+      // superadmin: UserMfaService solo llega aquí tras el código del correo.
+      await tx.$executeRaw`SELECT set_config('dentalix.platform_mfa_enrollment', 'email-verified', true)`;
+      const { count } = await tx.user.updateMany({
+        where: { id: userId, deletedAt: null, mfaEnabledAt: null },
+        data: { mfaTotpPendingSecretEnc: pendingSecretEnc },
+      });
+      return count === 1;
     });
-    return count === 1;
   }
 
   async enable(

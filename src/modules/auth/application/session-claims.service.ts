@@ -2,6 +2,7 @@ import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import { ClinicRole } from '@prisma/client';
 import {
   JwtPayload,
+  isPlatformPayload,
   isTenantPayload,
 } from '../../../shared/crypto/token.service';
 import { locationClaim } from '../../../shared/tenancy/location-access';
@@ -48,8 +49,10 @@ export class SessionClaimsService {
 
     if (tenantId === null) {
       if (!state.isPlatformAdmin) throw invalid();
+      // DX-021-bis: sin segundo factor no se renueva.
+      if (!isPlatformPayload(session) || !session.mfa) throw invalid();
       return {
-        claims: { sub: session.sub, platform: true },
+        claims: { sub: session.sub, platform: true, mfa: true },
         tokenVersion: state.tokenVersion,
       };
     }

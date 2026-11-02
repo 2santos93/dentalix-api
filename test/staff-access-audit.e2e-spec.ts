@@ -546,14 +546,16 @@ describe('Auditoría de personal y cuenta (e2e, DX-359)', () => {
       });
     }
 
-    it('el alta y su login van a platform_audit_events, sin secreto ni códigos; un código erróneo no activa nada', async () => {
+    it('el alta y su login van a platform_audit_events, sin secreto ni códigos; un código erróneo queda como LOGIN_FAILED y no activa nada', async () => {
       const { mfaToken } = await apexPassword(app, SUPER_EMAIL);
       await http()
         .post('/api/v1/auth/login/mfa/enrollment')
         .set('X-Tenant-Host', 'localhost')
         .send({ mfaToken, emailCode: '00000000' })
         .expect(400);
-      expect(await platformEvents()).toEqual([]);
+      expect((await platformEvents()).map((e) => e.action)).toEqual([
+        'LOGIN_FAILED',
+      ]);
       const enrolled = await enrollPlatformAdmin(
         app,
         { id: superId, email: SUPER_EMAIL },
@@ -563,11 +565,12 @@ describe('Auditoría de personal y cuenta (e2e, DX-359)', () => {
 
       const events = await platformEvents();
       expect(events.map((e) => [e.action, e.metadata])).toEqual([
+        ['LOGIN_FAILED', { reason: 'INVALID_EMAIL_CODE' }],
         ['MFA_ENROLLMENT_STARTED', {}],
         ['MFA_ENABLED', {}],
         ['LOGIN', { reason: 'MFA_ENROLLED' }],
       ]);
-      expect(events[0]).toMatchObject({
+      expect(events[1]).toMatchObject({
         resourceType: 'USER',
         resourceId: superId,
         userAgent: UA,

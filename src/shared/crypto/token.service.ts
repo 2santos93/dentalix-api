@@ -34,6 +34,12 @@ export interface TenantJwtPayload {
 export interface PlatformJwtPayload {
   sub: string;
   platform: true;
+  /**
+   * DX-021-bis: la sesión pasó por el segundo factor. La exige PlatformAdminGuard
+   * y /auth/refresh: un token sin él (abierto solo con contraseña por una versión
+   * anterior) no vale, sea cual sea el orden del despliegue.
+   */
+  mfa?: true;
 }
 
 export type JwtPayload = TenantJwtPayload | PlatformJwtPayload;

@@ -4,6 +4,7 @@ import {
   LoginLockedError,
   accountKeyHash,
   ipKeyHash,
+  mfaEnrollKeyHash,
   mfaKeyHash,
   type LoginLockoutConfig,
 } from '../domain/login-lockout';
@@ -86,9 +87,29 @@ export class LoginLockoutService {
     return this.repo.clearAccount(mfaKeyHash(userId));
   }
 
-  /** ¿Sus códigos MFA están en espera? (DX-021-bis: aviso a su dueño). */
-  async mfaBlocked(userId: string): Promise<boolean> {
-    return (await this.repo.accountBlockedUntil(mfaKeyHash(userId))) !== null;
+  /**
+   * ¿Este fallo es el que acaba de dejar la cuenta en espera? (DX-021-bis) Solo
+   * el primero de la serie: los siguientes renuevan la espera y no se avisan.
+   */
+  async mfaJustLocked(userId: string): Promise<boolean> {
+    const failures = await this.repo.accountFailures(mfaKeyHash(userId));
+    return failures === this.cfg.freeFailures;
+  }
+
+  /** DX-021-bis: cobra un intento del código del correo, por cuenta e IP. */
+  async claimMfaEnrollAttempt(
+    userId: string,
+    ip: string | null,
+  ): Promise<void> {
+    const seconds = await this.repo.claimAccountAttempt(
+      mfaEnrollKeyHash(userId, ip || UNKNOWN_IP),
+      this.cfg,
+    );
+    if (seconds > 0) throw new LoginLockedError(seconds);
+  }
+
+  clearMfaEnroll(userId: string, ip: string | null): Promise<void> {
+    return this.repo.clearAccount(mfaEnrollKeyHash(userId, ip || UNKNOWN_IP));
   }
 
   /** Desbloqueo por un ADMIN: borra espera y fallos de la cuenta. */

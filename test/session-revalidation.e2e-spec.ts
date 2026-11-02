@@ -329,7 +329,7 @@ describe('Session revalidation on refresh (e2e)', () => {
     // plataforma, que retienen al usuario y esta suite lo borra al acabar.
     const platform = await app
       .get(TokenService, { strict: false })
-      .issue({ sub: admin.userId, platform: true, tv: 0 });
+      .issue({ sub: admin.userId, platform: true, mfa: true, tv: 0 });
     expect(claimsOf(platform.refreshToken).platform).toBe(true);
 
     const renewed = await refresh(platform.refreshToken).expect(201);

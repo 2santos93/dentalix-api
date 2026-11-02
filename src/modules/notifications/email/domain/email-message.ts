@@ -195,7 +195,7 @@ export interface SignatureRequestEmailVars {
 /** DX-243: el código de 6 dígitos que abre el documento. Solo el código. */
 /** DX-021-bis: qué pasó con la verificación en dos pasos de la cuenta. */
 export type MfaNoticeKind =
-  'RECOVERY_CODE_USED' | 'RESET_BY_ADMIN' | 'ATTEMPTS_LOCKED';
+  'ENABLED' | 'RECOVERY_CODE_USED' | 'RESET_BY_ADMIN' | 'ATTEMPTS_LOCKED';
 
 export interface MfaNoticeEmailVars {
   kind: MfaNoticeKind;

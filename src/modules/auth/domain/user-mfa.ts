@@ -115,6 +115,8 @@ export const MFA_MESSAGES = {
     'Las cuentas de soporte de Dentalix deben mantener la verificación en dos pasos.',
   requiredByClinic:
     'Esta clínica exige la verificación en dos pasos a sus administradores: no puedes desactivarla.',
+  platformAdminEnrollsAtLogin:
+    'Las cuentas de soporte de Dentalix activan la verificación al iniciar sesión.',
   emailCodeInvalid:
     'El código del correo no es correcto. Revisa el último que te enviamos.',
   resetSelf:

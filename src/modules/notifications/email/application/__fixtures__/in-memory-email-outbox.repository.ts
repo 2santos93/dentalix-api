@@ -41,6 +41,23 @@ export class InMemoryEmailOutboxRepository implements EmailOutboxRepository {
     return Promise.resolve(this.store(row));
   }
 
+  /** Misma regla que email_outbox_enqueue_platform_security (DX-021-bis). */
+  insertPlatformSecurity(
+    row: NewPlatformOutboxEmail,
+    minIntervalSeconds: number,
+  ): Promise<{ id: string } | null> {
+    const recent = this.rows.some(
+      (r) =>
+        r.tenantId === null &&
+        r.toHash === row.toHash &&
+        r.template === row.template &&
+        Date.now() - r.createdAt.getTime() < minIntervalSeconds * 1000,
+    );
+    return Promise.resolve(
+      recent ? null : this.store({ ...row, tenantId: null }),
+    );
+  }
+
   /** Misma regla que email_outbox_platform_allowed (DX-144). */
   platformRecipientAllowed(
     toHash: string,
@@ -48,7 +65,10 @@ export class InMemoryEmailOutboxRepository implements EmailOutboxRepository {
   ): Promise<boolean> {
     const now = Date.now();
     const mine = this.rows.filter(
-      (r) => r.tenantId === null && r.toHash === toHash,
+      (r) =>
+        r.tenantId === null &&
+        r.toHash === toHash &&
+        !['mfa-notice', 'mfa-enrollment-code'].includes(r.template),
     );
     const inCooldown = mine.some(
       (r) =>
