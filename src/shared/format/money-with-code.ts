@@ -1,10 +1,13 @@
 import {
+  BIDI_MARKS_RE,
   currencyTextFor,
   moneyDigits,
   moneyWithCurrencyText,
   type CurrencyTexts,
 } from './currency-text';
 import type { RegionalFormat } from './regional-format';
+
+const codeFormatters = new Map<string, Intl.NumberFormat>();
 
 /**
  * DX-521: un importe con los separadores de la sede y SIEMPRE el código ISO de
@@ -50,6 +53,3 @@ export function moneyWithCode(
     return `${currency} ${fmt.number(amount, { min: digits, max: digits })}`;
   }
 }
-
-const BIDI_MARKS_RE = /[‎‏؜]/g;
-const codeFormatters = new Map<string, Intl.NumberFormat>();

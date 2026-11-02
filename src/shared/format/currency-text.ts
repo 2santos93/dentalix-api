@@ -26,7 +26,8 @@ export const CURRENCY_TEXTS_MAX_ENTRIES = 30;
 const CURRENCY_CODE_RE = /^[A-Z]{3}$/;
 // Controles, formato (marcas de dirección, ZWJ) y separadores de línea.
 const NOT_PLAIN_RE = /[\p{Cc}\p{Cf}\u2028\u2029]/u;
-const BIDI_MARKS_RE = /[\u200e\u200f\u061c]/g;
+/** Marcas bidi que `Intl` mete alrededor de las cifras; se quitan del texto. */
+export const BIDI_MARKS_RE = /[\u200e\u200f\u061c]/g;
 
 /** Un código con forma de ISO 4217 (tres letras mayúsculas). */
 export function isCurrencyCode(value: unknown): value is string {

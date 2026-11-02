@@ -1,5 +1,6 @@
 import { CLDR_ZERO_FORMAT_DIGITS } from './cldr-format-digits';
 import {
+  BIDI_MARKS_RE,
   currencyTextFor,
   moneyWithCurrencyText,
   type CurrencyTexts,
@@ -91,7 +92,6 @@ export interface RegionalFormat {
 
 const HOUR_CYCLES: readonly string[] = ['h12', 'h23'];
 const CIVIL_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
-const BIDI_MARKS_RE = /[\u200e\u200f\u061c]/g;
 const SPACES_RE = /\s+/g;
 
 /** Calendario y dígitos fijos para cualquier locale, también con `-u-ca-`/`-u-nu-`. */
