@@ -8,7 +8,7 @@ export const REDACTED = '[REDACTED]';
  * DX-470: y el triaje de una urgencia (señales y nota), que es de salud.
  */
 const SENSITIVE_KEY =
-  /^(authorization|proxy-authorization|cookie|set-cookie)$|password|token|secret|api[-_]?key|member[-_]?number|triage/i;
+  /^(authorization|proxy-authorization|cookie|set-cookie)$|password|token|secret|recovery[-_]?code|mfa[-_]?code|api[-_]?key|member[-_]?number|triage/i;
 
 /** Copia de `value` con los valores sensibles reemplazados por `[REDACTED]`. */
 export function redactSensitive(value: unknown): unknown {
