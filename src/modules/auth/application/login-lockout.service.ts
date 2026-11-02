@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import {
   LOGIN_LOCKOUT_CONFIG,
   LoginLockedError,
+  MFA_ENROLL_CLIENT_BACKOFF,
   MFA_ENROLL_CODE_ATTEMPTS,
   accountKeyHash,
   ipKeyHash,
@@ -105,7 +106,7 @@ export class LoginLockoutService {
   ): Promise<void> {
     const seconds = await this.repo.claimAccountAttempt(
       mfaEnrollKeyHash(userId, ip || UNKNOWN_IP),
-      this.cfg,
+      MFA_ENROLL_CLIENT_BACKOFF,
     );
     if (seconds > 0) throw new LoginLockedError(seconds);
   }

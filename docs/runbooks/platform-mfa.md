@@ -33,9 +33,10 @@ Quien no lo tenga activo:
    muestra. Vive lo que su token (10 min), se deriva de él y no se guarda.
 2. Escribe el código. Solo entonces ve el secreto. Quien tiene la contraseña
    pero no el correo no enrola su móvil; el dueño recibe el correo y sabe que su
-   contraseña está comprometida. Cada código admite **5 intentos en total**,
+   contraseña está comprometida. Cada código admite **10 intentos fallidos en total**,
    vengan de la IP que vengan; agotados, queda invalidado y hay que volver a
-   entrar. Además hay un contador por cuenta y cliente (IP, /64 en IPv6). Los
+   entrar. Además hay un contador por cuenta y cliente (IP, /64 en IPv6): 5 fallos
+   y espera creciente, como mucho 10 min. Los
    fallos quedan en `platform_audit_events` (`LOGIN_FAILED`,
    `INVALID_EMAIL_CODE`). Un atacante gasta su código, nunca el del titular: cada
    entrada tiene el suyo.

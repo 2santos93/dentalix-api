@@ -30,7 +30,10 @@ import {
   LOGIN_LOCKOUT_CONFIG,
 } from '../src/modules/auth/domain/login-lockout';
 import { NEW_CLINIC_REQUIRES_ADMIN_MFA } from '../src/modules/auth/domain/user-mfa';
-import { mfaKeyHash } from '../src/modules/auth/domain/login-lockout';
+import {
+  mfaEnrollKeyHash,
+  mfaKeyHash,
+} from '../src/modules/auth/domain/login-lockout';
 import { EmailOutbox } from '../src/modules/notifications/email/application/email-outbox.service';
 import { EmailPayloadCipher } from '../src/modules/notifications/email/infrastructure/email-payload-cipher';
 import { loadSecuritySettings } from '../src/shared/security/security-settings';
@@ -227,11 +230,11 @@ describe('Verificación en dos pasos, ampliación (e2e, DX-021-bis)', () => {
     const wrongFor = (code: string) =>
       code === '00000000' ? '11111111' : '00000000';
 
-    it('rotar de IP no da más intentos: al quinto el código queda invalidado, aunque luego llegue el bueno', async () => {
+    it('rotar de IP no da más intentos: al décimo fallo el código queda invalidado, aunque luego llegue el bueno', async () => {
       const user = await seedSuper('rotacion@platform.test');
       const { mfaToken } = await apexPassword(app, user.email, '198.51.100.1');
       const emailCode = enrollmentEmailCode(app, mfaToken);
-      for (let i = 2; i <= 6; i += 1) {
+      for (let i = 2; i <= 11; i += 1) {
         await enrollStart(
           mfaToken,
           wrongFor(emailCode),
@@ -241,7 +244,7 @@ describe('Verificación en dos pasos, ampliación (e2e, DX-021-bis)', () => {
       const dead = await enrollStart(
         mfaToken,
         emailCode,
-        '198.51.100.7',
+        '198.51.100.12',
       ).expect(401);
       expect((dead.body as Body).code).toBe('MFA_CHALLENGE_EXPIRED');
       expect(
@@ -252,14 +255,39 @@ describe('Verificación en dos pasos, ampliación (e2e, DX-021-bis)', () => {
             metadata: { path: ['reason'], equals: 'INVALID_EMAIL_CODE' },
           },
         }),
-      ).toBe(5);
+      ).toBe(10);
       // Volver a entrar da otro código, con sus intentos.
-      const fresh = await apexPassword(app, user.email, '198.51.100.8');
+      const fresh = await apexPassword(app, user.email, '198.51.100.13');
       await enrollStart(
         fresh.mfaToken,
         enrollmentEmailCode(app, fresh.mfaToken),
-        '198.51.100.8',
+        '198.51.100.13',
       ).expect(200);
+    });
+
+    it('quien comparte IP con un atacante nunca espera más de 10 min', async () => {
+      const user = await seedSuper('nat@platform.test');
+      const { mfaToken } = await apexPassword(app, user.email, '203.0.113.50');
+      const wrong = wrongFor(enrollmentEmailCode(app, mfaToken));
+      const key = mfaEnrollKeyHash(user.id, '203.0.113.50');
+      // Una serie larga: la espera crecería a 15 min con el tope del login.
+      await raw.loginThrottle.upsert({
+        where: { scope_keyHash: { scope: 'ACCOUNT', keyHash: key } },
+        create: {
+          scope: 'ACCOUNT',
+          keyHash: key,
+          failures: 30,
+          windowStartedAt: new Date(),
+          lastFailureAt: new Date(),
+        },
+        update: {},
+      });
+      await enrollStart(mfaToken, wrong, '203.0.113.50').expect(400);
+      const locked = await enrollStart(mfaToken, wrong, '203.0.113.50').expect(
+        429,
+      );
+      expect(Number(locked.headers['retry-after'])).toBeLessThanOrEqual(600);
+      expect(Number(locked.headers['retry-after'])).toBeGreaterThan(300);
     });
 
     it('un atacante con otra IP no bloquea al titular: gasta su código y su cuenta+IP, no los de él', async () => {
@@ -280,7 +308,7 @@ describe('Verificación en dos pasos, ampliación (e2e, DX-021-bis)', () => {
         attacker.mfaToken,
         enrollmentEmailCode(app, holder.mfaToken),
         '198.51.100.10',
-      ).expect(401);
+      ).expect(400);
       // Y el atacante sigue en espera desde su IP.
       const locked = await enrollStart(
         attacker.mfaToken,

@@ -120,13 +120,24 @@ export const mfaEnrollKeyHash = (userId: string, ip: string): string =>
   sha256(`dentalix:login-mfa-enroll:${userId}:${ipBucket(ip)}`);
 
 /**
+ * Espera por cuenta y cliente en el alta: tope de 10 min, menos que la del login.
+ * Quien comparte IP con un atacante, o se equivoca él, nunca espera más que eso.
+ */
+export const MFA_ENROLL_CLIENT_BACKOFF = {
+  freeFailures: 5,
+  baseDelayMs: MINUTE,
+  maxDelayMs: 10 * MINUTE,
+  failureMemoryMs: 60 * MINUTE,
+};
+
+/**
  * Intentos de UN código del correo, vengan de donde vengan: cada código nace con
  * su `mfaToken` y muere con él. Un atacante agota el suyo, nunca el del titular,
- * que tiene otro token y otro código. Al quinto fallo el token queda inservible
+ * que tiene otro token y otro código. Al décimo fallo el token queda inservible
  * hasta caducar (la espera supera sus 10 min de vida): hay que entrar de nuevo.
  */
 export const MFA_ENROLL_CODE_ATTEMPTS = {
-  freeFailures: 5,
+  freeFailures: 10,
   baseDelayMs: 30 * MINUTE,
   maxDelayMs: 30 * MINUTE,
   failureMemoryMs: 60 * MINUTE,

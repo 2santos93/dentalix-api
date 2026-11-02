@@ -94,7 +94,7 @@ export class StartLoginMfaEnrollmentDto {
   @ApiPropertyOptional({
     example: '12345678',
     description:
-      'DX-021-bis: alta de un superadmin (`emailCodeRequired`): el código de 8 dígitos de ESTE token. 5 intentos en total; agotados, el token queda inservible y hay que volver a entrar.',
+      'DX-021-bis: alta de un superadmin (`emailCodeRequired`): el código de 8 dígitos de ESTE token. 10 intentos fallidos en total; agotados, el token queda inservible y hay que volver a entrar.',
   })
   @IsOptional()
   @Transform(stripSpaces)
