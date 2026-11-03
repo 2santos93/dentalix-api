@@ -54,6 +54,18 @@ export class PrismaClinicalEntryAddendumRepository implements ClinicalEntryAdden
     return row !== null;
   }
 
+  findEntryLocation(
+    patientId: string,
+    entryId: string,
+  ): Promise<{ locationId: string | null } | null> {
+    return this.prisma.runWithTenant((tx) =>
+      tx.clinicalEntry.findFirst({
+        where: { id: entryId, patientId, deletedAt: null },
+        select: { locationId: true },
+      }),
+    );
+  }
+
   async create(
     input: CreateClinicalEntryAddendumRepoInput,
   ): Promise<ClinicalEntryAddendum> {

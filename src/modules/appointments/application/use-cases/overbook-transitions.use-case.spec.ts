@@ -43,7 +43,8 @@ const staff = {
   findById: (userId: string) => Promise.resolve({ userId }),
 } as unknown as StaffRepository;
 const locations = {
-  findById: (id: string) => Promise.resolve({ id, timeZone: TZ }),
+  findById: (id: string) =>
+    Promise.resolve({ id, timeZone: TZ, isActive: true }),
 } as unknown as LocationRepository;
 const FOR_PATIENT = {
   byKind: 'STAFF_FOR_PATIENT',

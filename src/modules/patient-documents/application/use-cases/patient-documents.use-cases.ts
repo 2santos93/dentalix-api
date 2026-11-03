@@ -877,6 +877,7 @@ export class VoidPatientDocumentUseCase {
     @Inject(PATIENT_DOCUMENT_REPOSITORY)
     private readonly repo: PatientDocumentRepository,
     @Inject(PATIENT_REPOSITORY) private readonly patients: PatientRepository,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   /**
@@ -896,6 +897,9 @@ export class VoidPatientDocumentUseCase {
       patientId,
       id,
     );
+    // SEC-014: el documento se ve desde toda la clínica (ficha), pero se
+    // anula solo desde una sede permitida (DX-089-bis).
+    this.tenantContext.assertRecordLocationAllowed(current.locationId);
     if (
       actor.role !== ClinicRole.ADMIN &&
       current.uploadedById !== actor.userId

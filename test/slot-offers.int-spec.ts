@@ -701,6 +701,32 @@ describe('oferta de hueco por enlace (int, DX-435)', () => {
       expect(await outcomeOf(offerId)).toBe('PENDING');
     });
 
+    it('SEC-014: con la sede desactivada, el enlace dice «no disponible», aceptar no crea nada y la oferta sigue PENDING', async () => {
+      const { token, offerId } = await offerToEntry(a, 0);
+      const appointments = await owner.appointment.count({
+        where: { tenantId: a.tenantId },
+      });
+      await owner.location.update({
+        where: { id: a.locationId },
+        data: { isActive: false },
+      });
+      try {
+        const seen = await inClinic(a, () => getOffer.execute(token));
+        expect(seen).toMatchObject({ state: 'UNAVAILABLE', offer: null });
+        const tried = await inClinic(a, () => acceptOffer.execute(token, META));
+        expect(tried.state).toBe('UNAVAILABLE');
+        expect(
+          await owner.appointment.count({ where: { tenantId: a.tenantId } }),
+        ).toBe(appointments);
+        expect(await outcomeOf(offerId)).toBe('PENDING');
+      } finally {
+        await owner.location.update({
+          where: { id: a.locationId },
+          data: { isActive: true },
+        });
+      }
+    });
+
     it('si la carrera la gana recepción (EXCLUDE 23P01), el paciente ve «no disponible», no un 500', async () => {
       const { token } = await offerToEntry(a, 0);
       // El pre-chequeo no ve la cita (recepción la escribe justo después).

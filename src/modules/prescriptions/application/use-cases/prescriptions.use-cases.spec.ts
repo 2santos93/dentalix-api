@@ -1,3 +1,5 @@
+import { LOCATION_NOT_ALLOWED_MESSAGE } from '../../../../shared/tenancy/location-access';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
   BadRequestException,
   ConflictException,
@@ -458,7 +460,11 @@ describe('Listar, ver y anular', () => {
   });
 
   it('anula con motivo, autor y fecha del servidor; la integridad sigue intacta', async () => {
-    const voidRx = new VoidPrescriptionUseCase(repo, () => later);
+    const voidRx = new VoidPrescriptionUseCase(
+      repo,
+      () => later,
+      new TenantContextService(),
+    );
     const voided = await voidRx.execute(id, '  Dosis equivocada  ', {
       userId: DENTIST_ID,
       role: ClinicRole.DENTIST,
@@ -476,7 +482,11 @@ describe('Listar, ver y anular', () => {
   });
 
   it('motivo vacío 400, inexistente 404, ya anulada 409', async () => {
-    const voidRx = new VoidPrescriptionUseCase(repo, () => later);
+    const voidRx = new VoidPrescriptionUseCase(
+      repo,
+      () => later,
+      new TenantContextService(),
+    );
     const actor = { userId: DENTIST_ID, role: ClinicRole.DENTIST };
     await expect(voidRx.execute(id, '   ', actor)).rejects.toThrow(
       'El motivo de la anulación es obligatorio',
@@ -491,7 +501,11 @@ describe('Listar, ver y anular', () => {
   });
 
   it('otro odontólogo no puede anularla (403); un ADMIN sí', async () => {
-    const voidRx = new VoidPrescriptionUseCase(repo, () => later);
+    const voidRx = new VoidPrescriptionUseCase(
+      repo,
+      () => later,
+      new TenantContextService(),
+    );
     await expect(
       voidRx.execute(id, 'No es mía', {
         userId: OTHER_DENTIST_ID,
@@ -503,6 +517,39 @@ describe('Listar, ver y anular', () => {
         userId: OTHER_DENTIST_ID,
         role: ClinicRole.ADMIN,
       }),
+    ).resolves.toMatchObject({ status: PrescriptionStatus.VOIDED });
+  });
+
+  it('SEC-014: desde otra sede no se anula (403 sin cambio); la lectura sigue', async () => {
+    const tenantContext = new TenantContextService();
+    const voidRx = new VoidPrescriptionUseCase(
+      repo,
+      () => later,
+      tenantContext,
+    );
+    const actor = { userId: DENTIST_ID, role: ClinicRole.DENTIST };
+    const otherLocation = tenantContext.run(
+      't1',
+      undefined,
+      () => voidRx.execute(id, 'Desde otra sede', actor),
+      ['otra-sede'],
+    );
+    await expect(otherLocation).rejects.toThrow(LOCATION_NOT_ALLOWED_MESSAGE);
+    await expect(
+      tenantContext.run(
+        't1',
+        undefined,
+        () => new GetPrescriptionUseCase(repo).execute(id),
+        ['otra-sede'],
+      ),
+    ).resolves.toMatchObject({ status: PrescriptionStatus.ISSUED });
+    await expect(
+      tenantContext.run(
+        't1',
+        undefined,
+        () => voidRx.execute(id, 'Desde su sede', actor),
+        [repo.rows[0].locationId],
+      ),
     ).resolves.toMatchObject({ status: PrescriptionStatus.VOIDED });
   });
 });

@@ -89,6 +89,7 @@ import {
 } from '../../domain/plan-item-reservation';
 import { requireLocationFormat } from '../../../../shared/locations/location-regional';
 import { requireLocationTimeZone } from '../../../../shared/locations/location-time-zone';
+import { assertLocationWritable } from '../../../../shared/tenancy/active-location';
 import {
   OVERBOOK_AUDIT_REASONS,
   OVERBOOK_SLOT_TAKEN_CODE,
@@ -427,6 +428,11 @@ export class UpdateAppointmentUseCase {
       patch.chairId !== undefined ? patch.chairId : existing.chairId;
     const isReschedule = moves;
     if (isReschedule) {
+      // SEC-014: una sede desactivada no recibe horas nuevas. Solo al
+      // reagendar: cancelar, completar o editar notas siguen abiertos para
+      // poder cerrar la agenda de la sede.
+      const site = await this.locations.findById(existing.locationId);
+      if (site) assertLocationWritable(site);
       const nextStart = patch.start ?? existing.start;
       const nextEnd = patch.end ?? existing.end;
       const nextProviderId = patch.providerId ?? existing.providerId;

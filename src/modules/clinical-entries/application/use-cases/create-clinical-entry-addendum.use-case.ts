@@ -9,6 +9,7 @@ import type { ClinicalEntryAddendumRepository } from '../../domain/ports/clinica
 import { ClinicalEntryAddendum } from '../../domain/entities/clinical-entry-addendum.entity';
 import { PATIENT_REPOSITORY } from '../../../patients/domain/ports/patient-repository.port';
 import type { PatientRepository } from '../../../patients/domain/ports/patient-repository.port';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { assertPatientInClinic } from '../../../patients/application/assert-patient-in-clinic';
 import {
   assertAuthor,
@@ -36,6 +37,7 @@ export class CreateClinicalEntryAddendumUseCase {
     private readonly repo: ClinicalEntryAddendumRepository,
     @Inject(PATIENT_REPOSITORY)
     private readonly patients: PatientRepository,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   /**
@@ -65,9 +67,13 @@ export class CreateClinicalEntryAddendumUseCase {
     }
 
     await assertPatientInClinic(this.patients, patientId);
-    if (!(await this.repo.entryExists(patientId, entryId))) {
+    const entry = await this.repo.findEntryLocation(patientId, entryId);
+    if (!entry) {
       throw new NotFoundException(CLINICAL_ENTRY_NOT_FOUND_MESSAGE);
     }
+    // SEC-014: la evolución se lee desde toda la clínica (ficha), pero la
+    // corrige solo quien trabaja en su sede, como su anestesia y su sedación.
+    this.tenantContext.assertRecordLocationAllowed(entry.locationId);
 
     return this.repo.create({
       patientId,

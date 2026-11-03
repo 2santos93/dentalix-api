@@ -141,6 +141,7 @@ describe('huecos libres → candidatos y ofertas (int, DX-210)', () => {
     create,
     noAudit,
     tenantContext,
+    new PrismaLocationRepository(prisma, tenantContext),
   );
 
   beforeAll(async () => {

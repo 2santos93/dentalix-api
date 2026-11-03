@@ -1,3 +1,4 @@
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
   BadRequestException,
   ConflictException,
@@ -118,6 +119,7 @@ export class VoidImplantUseCase {
     @Inject(PATIENT_IMPLANT_REPOSITORY)
     private readonly repo: PatientImplantRepository,
     @Inject(IMPLANT_CLOCK) private readonly now: ImplantClock,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   /** Lo anula quien lo registró o un ADMIN, con motivo; una sola vez. */
@@ -129,6 +131,8 @@ export class VoidImplantUseCase {
     const trimmed = validateVoidReason(reason);
     const current = await this.repo.findById(id);
     if (!current) throw new NotFoundException(IMPLANT_NOT_FOUND_MESSAGE);
+    // SEC-014: se anula solo desde una sede permitida (DX-089-bis).
+    this.tenantContext.assertRecordLocationAllowed(current.locationId);
     if (
       actor.role !== ClinicRole.ADMIN &&
       current.professionalId !== actor.userId
