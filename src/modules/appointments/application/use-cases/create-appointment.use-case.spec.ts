@@ -1526,7 +1526,10 @@ describe('CreateAppointmentUseCase · sedes permitidas y profesional ↔ sede', 
 describe('CreateAppointmentUseCase: horario del profesional en la sede (DX-233)', () => {
   // La sede del contexto es loc1 (zona UTC para leer las horas tal cual):
   // el profesional trabaja allí ese día de 08:00 a 12:00.
-  function withSchedule(strict = false) {
+  function withSchedule(
+    strict = false,
+    format?: { locale: string | null; hourCycle: string | null },
+  ) {
     const schedules = new InMemoryProviderScheduleRepository();
     schedules.currentLocationId = 'loc1';
     schedules.strict = strict;
@@ -1546,9 +1549,25 @@ describe('CreateAppointmentUseCase: horario del profesional en la sede (DX-233)'
       makeTypes(),
       makeBlocks(),
       new TenantContextService(),
-      inMemoryAvailability(schedules, 'UTC'),
+      inMemoryAvailability(schedules, 'UTC', format),
     );
   }
+
+  it('DX-354: sede sin reloj: el aviso fuera de horario se devuelve igual, sin horas, y nunca es 409', async () => {
+    const result = await withSchedule(false, {
+      locale: 'de-DE',
+      hourCycle: null,
+    }).execute({
+      patientId: 'p1',
+      providerId: 'prov1',
+      start: at('14:00'),
+      end: at('14:30'),
+    });
+    expect(result.warnings).toEqual([
+      expect.stringMatching(/^Fuera del horario del profesional en .*\.$/),
+    ]);
+    expect(JSON.stringify(result.warnings)).not.toMatch(/\d{1,2}:\d{2}/);
+  });
 
   it('dentro de su horario: sin aviso', async () => {
     const result = await withSchedule().execute({

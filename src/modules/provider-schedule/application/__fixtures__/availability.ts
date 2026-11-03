@@ -11,6 +11,10 @@ import { InMemoryProviderScheduleRepository } from './in-memory-provider-schedul
 export function inMemoryAvailability(
   repo = new InMemoryProviderScheduleRepository(),
   timeZone = 'America/Caracas',
+  format: { locale: string | null; hourCycle: string | null } = {
+    locale: 'de-DE',
+    hourCycle: 'h23',
+  },
 ): ProviderAvailabilityService {
   const locations = {
     findById: (id: string) =>
@@ -19,8 +23,7 @@ export function inMemoryAvailability(
         name: 'Sede',
         timeZone,
         // DX-354: los avisos escriben las horas con el formato y el reloj de la sede.
-        locale: 'de-DE',
-        hourCycle: 'h23',
+        ...format,
         isActive: true,
       }),
   } as unknown as LocationRepository;

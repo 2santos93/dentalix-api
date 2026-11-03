@@ -8,6 +8,7 @@ import {
   LOCATION_REPOSITORY,
   type LocationRepository,
 } from '../../locations/domain/ports/location-repository.port';
+import type { RegionalFormat } from '../../../shared/format/regional-format';
 import { civilDateIn } from '../../../shared/time/civil-day';
 import { requireLocationFormat } from '../../../shared/locations/location-regional';
 import {
@@ -40,6 +41,20 @@ export interface ProviderSlotCheck {
 export interface ScheduleWarning {
   code: typeof PROVIDER_OFF_SCHEDULE;
   message: string;
+}
+
+/** El formato de la sede, o `null` si le falta el formato o el reloj. */
+function formatOrNull(location: {
+  id: string;
+  locale: string | null;
+  hourCycle: string | null;
+}): RegionalFormat | null {
+  try {
+    return requireLocationFormat(location);
+  } catch (error) {
+    if (error instanceof ConflictException) return null;
+    throw error;
+  }
 }
 
 /**
@@ -87,8 +102,14 @@ export class ProviderAvailabilityService {
     }
     const ranges = providerRangesOn(snapshot, locationId, day) ?? [];
     // DX-354: el día y las horas con el formato y el reloj de la sede del
-    // horario; sin ellos (409 LOCATION_LOCALE_REQUIRED), nunca otro formato.
-    const fmt = requireLocationFormat(location);
+    // horario. Es un AVISO que no bloquea: si la sede no tiene formato o reloj
+    // se devuelve igual, sin horas escritas (nunca con otro formato ni 409).
+    const fmt = formatOrNull(location);
+    if (fmt === null) {
+      return ranges.length === 0
+        ? `Fuera del horario del profesional: no trabaja en ${location.name} ese día.`
+        : `Fuera del horario del profesional en ${location.name}.`;
+    }
     const when = fmt.civilLongDate(day, { weekday: true, year: false });
     return ranges.length === 0
       ? `Fuera del horario del profesional: no trabaja en ${location.name} el ${when}.`
