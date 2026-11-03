@@ -1,4 +1,3 @@
-import { referenceCurrencyDigitsCatalog } from '../src/shared/money/__fixtures__/reference-currency-digits';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ConflictException } from '@nestjs/common';
@@ -263,10 +262,7 @@ describe('DX-438 · saldo a favor y cambio de moneda del plan (int)', () => {
     const before = await movements(a);
 
     const error: unknown = await inContext(a, () =>
-      new TransferCreditUseCase(
-        racing,
-        referenceCurrencyDigitsCatalog(),
-      ).execute(
+      new TransferCreditUseCase(racing).execute(
         a.sourcePlan,
         { targetPlanId: target, amount: 10_000, currency: 'VES' },
         { role: ClinicRole.ADMIN, userId },
@@ -330,10 +326,7 @@ describe('DX-438 · saldo a favor y cambio de moneda del plan (int)', () => {
     const before = await movements(a);
 
     const error: unknown = await inContext(a, () =>
-      new TransferCreditUseCase(
-        racing,
-        referenceCurrencyDigitsCatalog(),
-      ).execute(
+      new TransferCreditUseCase(racing).execute(
         source.id,
         { targetPlanId: target, amount: 500, currency: 'VES' },
         { role: ClinicRole.ADMIN, userId },

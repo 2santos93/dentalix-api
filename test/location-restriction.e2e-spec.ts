@@ -9,6 +9,7 @@ import {
   registerClinic,
   resetDatabase,
   SEEDED_PASSWORD,
+  STAFF_CANCELLATION,
 } from './support/e2e-fixtures';
 import { TokenService } from '../src/shared/crypto/token.service';
 import { PasswordService } from '../src/shared/crypto/password.service';
@@ -16,6 +17,10 @@ import {
   LOCATION_NOT_ALLOWED_CODE,
   LOCATION_NOT_ALLOWED_MESSAGE,
 } from '../src/shared/tenancy/location-access';
+import {
+  LOCATION_INACTIVE_CODE,
+  LOCATION_INACTIVE_MESSAGE,
+} from '../src/shared/tenancy/active-location';
 import { PROVIDER_NOT_AT_LOCATION_MESSAGE } from '../src/modules/staff/domain/provider-location';
 import {
   REGIONAL_CARACAS_FIXTURE,
@@ -1189,6 +1194,583 @@ describe('Personal restringido a sedes (DX-089)', () => {
         where: { id: (res.body as { id: string }).id },
       });
       expect(row.locationId).toBe(a1);
+    });
+  });
+
+  // SEC-014: la ficha (recetas, documentos, implantes, evoluciones) se LEE
+  // desde toda la clínica, como el paciente; pero lo que se ESCRIBE sobre
+  // una fila sellada con su sede sigue la regla de DX-089-bis (403 con code).
+  describe('SEC-014: escrituras por id en la ficha de otra sede', () => {
+    const t = () => ({ tenantId: a.tenantId });
+    const hash = 'a'.repeat(64);
+    const seedRx = (locationId: string) =>
+      raw.prescription.create({
+        data: {
+          ...t(),
+          locationId,
+          patientId: patient,
+          professionalId: d.userId,
+          issuedAt: new Date('2026-10-20T14:00:00.000Z'),
+          dispensationDate: new Date('2026-10-20T00:00:00.000Z'),
+          validUntil: new Date('2026-11-19T00:00:00.000Z'),
+          patientName: 'Paciente DX089-1',
+          professionalName: 'Dr. D',
+          professionalLicense: 'MPPS-1234',
+          clinicName: 'Clínica A',
+          locationName: 'Sede',
+          singleFormat: true,
+          printQuantityInWords: true,
+          contentHash: hash,
+        },
+      });
+    const seedImplant = (locationId: string) =>
+      raw.patientImplant.create({
+        data: {
+          ...t(),
+          locationId,
+          patientId: patient,
+          professionalId: d.userId,
+          placedOn: new Date('2026-10-20T00:00:00.000Z'),
+          toothNumber: '36',
+          kind: 'IMPLANT',
+          manufacturer: 'Fabricante',
+          reference: 'REF-1',
+          lot: 'LOT-1',
+        },
+      });
+    const seedDocument = (locationId: string, n: number) =>
+      raw.patientDocument.create({
+        data: {
+          ...t(),
+          locationId,
+          patientId: patient,
+          category: 'REPORT',
+          originalName: `informe-${n}.pdf`,
+          mimeType: 'application/pdf',
+          sizeBytes: 10,
+          sha256: String(n).repeat(64).slice(0, 64),
+          storageKey: `patient-documents/${a.tenantId}/sec014-${n}.pdf`,
+          uploadedById: d.userId,
+        },
+      });
+    const seedEntry = (locationId: string) =>
+      raw.clinicalEntry.create({
+        data: {
+          ...t(),
+          locationId,
+          patientId: patient,
+          performedById: d.userId,
+          entryDate: new Date('2026-10-20T14:00:00.000Z'),
+          notes: 'Evolución SEC-014',
+        },
+      });
+    const reason = { reason: 'Registrado en la sede equivocada' };
+    const addendum = {
+      reason: 'Dato de la pieza dental mal transcrito',
+      text: 'Es la 36, no la 46.',
+    };
+
+    it('receta de otra sede: anular 403 sin cambio; verla, sí; en su sede, anula', async () => {
+      const other = await seedRx(a2);
+      for (const active of [undefined, a1]) {
+        expectNotAllowed(
+          await as(d, active).post(`/prescriptions/${other.id}/void`, reason),
+        );
+      }
+      expect(
+        await raw.prescription.findUniqueOrThrow({ where: { id: other.id } }),
+      ).toMatchObject({ status: 'ISSUED', voidedAt: null });
+      await as(d).get(`/prescriptions/${other.id}`).expect(200);
+      const mine = await seedRx(a1);
+      await as(d).post(`/prescriptions/${mine.id}/void`, reason).expect(200);
+    });
+
+    it('implante de otra sede: anular 403 sin cambio; en su sede, anula', async () => {
+      const other = await seedImplant(a2);
+      expectNotAllowed(await as(d).post(`/implants/${other.id}/void`, reason));
+      expect(
+        (
+          await raw.patientImplant.findUniqueOrThrow({
+            where: { id: other.id },
+          })
+        ).voidedAt,
+      ).toBeNull();
+      const mine = await seedImplant(a1);
+      await as(d).post(`/implants/${mine.id}/void`, reason).expect(200);
+    });
+
+    it('documento de otra sede: anular 403 sin cambio; verlo, sí; en su sede, anula', async () => {
+      const other = await seedDocument(a2, 1);
+      expectNotAllowed(
+        await as(d).post(
+          `/patients/${patient}/documents/${other.id}/void`,
+          reason,
+        ),
+      );
+      expect(
+        (
+          await raw.patientDocument.findUniqueOrThrow({
+            where: { id: other.id },
+          })
+        ).voidedAt,
+      ).toBeNull();
+      await as(d).get(`/patients/${patient}/documents/${other.id}`).expect(200);
+      const mine = await seedDocument(a1, 2);
+      await as(d)
+        .post(`/patients/${patient}/documents/${mine.id}/void`, reason)
+        .expect(200);
+    });
+
+    it('adenda a una evolución de otra sede: 403 sin escribir; leerlas, sí; en su sede, 201', async () => {
+      const other = await seedEntry(a2);
+      expectNotAllowed(
+        await as(d).post(
+          `/patients/${patient}/clinical-entries/${other.id}/addenda`,
+          addendum,
+        ),
+      );
+      expect(
+        await raw.clinicalEntryAddendum.count({
+          where: { clinicalEntryId: other.id },
+        }),
+      ).toBe(0);
+      await as(d)
+        .get(`/patients/${patient}/clinical-entries/${other.id}/addenda`)
+        .expect(200);
+      const mine = await seedEntry(a1);
+      await as(d)
+        .post(
+          `/patients/${patient}/clinical-entries/${mine.id}/addenda`,
+          addendum,
+        )
+        .expect(201);
+    });
+  });
+
+  // SEC-014: una sede desactivada conserva su historial, pero no admite
+  // escrituras nuevas con su cabecera (ni con el auto-pin de un token emitido
+  // antes de desactivarla).
+  describe('SEC-014: sede desactivada', () => {
+    let a4: string;
+    let z: Member;
+    let zToken: string;
+    let itemA4: string;
+    // Precondiciones reales en A4 (antes de desactivarla): sin el arreglo,
+    // las altas de abajo escribirían de verdad sobre ellas.
+    let entryA4: string;
+    let apptA4: string;
+
+    function expectInactive(res: request.Response) {
+      expect(res.status).toBe(400);
+      expect(res.body).toMatchObject({
+        code: LOCATION_INACTIVE_CODE,
+        message: LOCATION_INACTIVE_MESSAGE,
+        locationId: a4,
+      });
+    }
+
+    beforeAll(async () => {
+      a4 = (
+        (
+          await admin()
+            .post(
+              '/locations',
+              locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede Oeste' }),
+            )
+            .expect(201)
+        ).body as { id: string }
+      ).id;
+      itemA4 = (
+        await raw.inventoryItem.create({
+          data: {
+            tenantId: a.tenantId,
+            locationId: a4,
+            name: 'Guantes Oeste',
+            unit: 'caja',
+          },
+        })
+      ).id;
+      // Z trabaja solo en A4: su token lleva `loc = [A4]` (auto-pin).
+      z = await seedUser('z@dx089-restr-a.test', ClinicRole.ASSISTANT);
+      await restrict(z, [a4]);
+      zToken = await loginAs(app, a.host, z.email);
+      // Caja abierta en A4 (la salida de caja la usaría).
+      await admin()
+        .post('/cash-sessions/open', {
+          locationId: a4,
+          floats: [{ currency: 'USD', amount: 20 }],
+        })
+        .expect(201);
+      // Sillones de A4 para reordenar (además del que nace con la sede).
+      for (const name of ['Sillón Oeste 1', 'Sillón Oeste 2']) {
+        await admin().post('/chairs', { locationId: a4, name }).expect(201);
+      }
+      entryA4 = (
+        await raw.appointmentWaitlistEntry.create({
+          data: { tenantId: a.tenantId, locationId: a4, patientId: patient },
+        })
+      ).id;
+      apptA4 = (
+        await raw.appointment.create({
+          data: {
+            tenantId: a.tenantId,
+            locationId: a4,
+            patientId: patient,
+            providerId: e.userId,
+            start: new Date('2027-03-18T15:00:00.000Z'),
+            end: new Date('2027-03-18T15:30:00.000Z'),
+          },
+        })
+      ).id;
+      await admin().patch(`/locations/${a4}`, { isActive: false }).expect(200);
+    });
+
+    it('escribir con la cabecera de la sede desactivada → 400 en español, sin cambios', async () => {
+      const items = await raw.inventoryItem.count({
+        where: { tenantId: a.tenantId },
+      });
+      const movements = await raw.inventoryMovement.count({
+        where: { tenantId: a.tenantId },
+      });
+      const before = await raw.patient.findUniqueOrThrow({
+        where: { id: patient },
+      });
+      expectInactive(
+        await api(a.adminToken, a4).post('/inventory/items', {
+          name: 'Nuevo',
+          unit: 'caja',
+        }),
+      );
+      expectInactive(
+        await api(a.adminToken, a4).post(
+          `/inventory/items/${itemA4}/movements`,
+          { type: 'IN', quantity: 2 },
+        ),
+      );
+      expectInactive(
+        await api(a.adminToken, a4).patch(`/patients/${patient}`, {
+          firstName: 'Cambiado',
+        }),
+      );
+      expect(
+        await raw.inventoryItem.count({ where: { tenantId: a.tenantId } }),
+      ).toBe(items);
+      expect(
+        await raw.inventoryMovement.count({ where: { tenantId: a.tenantId } }),
+      ).toBe(movements);
+      expect(
+        await raw.patient.findUniqueOrThrow({ where: { id: patient } }),
+      ).toEqual(before);
+    });
+
+    it('leer el historial de la sede desactivada sigue funcionando', async () => {
+      const list = await api(a.adminToken, a4)
+        .get('/inventory/items')
+        .expect(200);
+      expect(itemIds(list.body)).toContain(itemA4);
+      await api(a.adminToken, a4).get(`/inventory/items/${itemA4}`).expect(200);
+      await api(a.adminToken, a4).get('/payments', PERIOD).expect(200);
+    });
+
+    it('auto-pin en la sede desactivada (token anterior): escribir 400, leer 200', async () => {
+      expectInactive(
+        await api(zToken).post(`/inventory/items/${itemA4}/movements`, {
+          type: 'IN',
+          quantity: 1,
+        }),
+      );
+      const list = await api(zToken).get('/inventory/items').expect(200);
+      expect(itemIds(list.body)).toContain(itemA4);
+    });
+
+    // Altas que fijan la sede por el CUERPO (o por la fila de la que nacen):
+    // sin cabecera, un ADMIN sin restricción. Una prueba por ruta, y cada una
+    // con lo necesario para que SIN el arreglo se escribiera de verdad (caja
+    // abierta, sillones y pendiente de A4 sembrados antes de desactivarla).
+    // Cada prueba compara A4 entera y la auditoría antes y después.
+    describe('altas con la sede desactivada en el cuerpo', () => {
+      const SLOT = {
+        slotStart: '2027-03-15T15:00:00.000Z',
+        slotEnd: '2027-03-15T15:30:00.000Z',
+      };
+      let priceList: string;
+      let agreement: string;
+      let payerId: string;
+      let before: unknown;
+
+      const snapshotA4 = async () => {
+        const inA4 = { tenantId: a.tenantId, locationId: a4 };
+        const byId = { orderBy: { id: 'asc' as const } };
+        return {
+          cashSessions: await raw.cashSession.findMany({
+            where: inA4,
+            ...byId,
+            select: { id: true, status: true },
+          }),
+          chairs: await raw.chair.findMany({
+            where: inA4,
+            ...byId,
+            select: { id: true, name: true, sortOrder: true },
+          }),
+          blocks: await raw.scheduleBlock.count({ where: inA4 }),
+          expenses: await raw.expense.count({ where: inA4 }),
+          // Todos los estados: agendar cerraría la entrada (SCHEDULED).
+          waitlist: await raw.appointmentWaitlistEntry.findMany({
+            where: inA4,
+            ...byId,
+            select: { id: true, status: true },
+          }),
+          appointments: await raw.appointment.findMany({
+            where: inA4,
+            ...byId,
+            select: { id: true, start: true, status: true },
+          }),
+          offers: await raw.waitlistOffer.count({ where: inA4 }),
+          promises: await raw.paymentPromise.count({ where: inA4 }),
+          priceLists: await raw.priceList.count({ where: inA4 }),
+          agreements: await raw.agreement.count({ where: inA4 }),
+          overrides: await raw.providerScheduleOverride.count({
+            where: inA4,
+          }),
+          audits: await raw.auditEvent.count({
+            where: { tenantId: a.tenantId },
+          }),
+        };
+      };
+
+      beforeAll(async () => {
+        const t = { tenantId: a.tenantId };
+        priceList = (
+          await raw.priceList.create({
+            data: { ...t, name: 'Tarifa SEC-014', currency: 'USD' },
+          })
+        ).id;
+        payerId = (
+          await raw.payer.create({
+            data: { ...t, name: 'Aseguradora SEC-014', type: 'INSURER' },
+          })
+        ).id;
+        agreement = (
+          await raw.agreement.create({
+            data: {
+              ...t,
+              name: 'Convenio SEC-014',
+              payerId,
+              kind: 'PERCENT_DISCOUNT',
+              percent: 10,
+            },
+          })
+        ).id;
+      });
+
+      beforeEach(async () => {
+        before = await snapshotA4();
+      });
+
+      afterEach(async () => {
+        expect(await snapshotA4()).toEqual(before);
+      });
+
+      it('abrir caja', async () => {
+        expectInactive(
+          await admin().post('/cash-sessions/open', {
+            locationId: a4,
+            floats: [{ currency: 'USD', amount: 20 }],
+          }),
+        );
+      });
+
+      it('crear sillón', async () => {
+        expectInactive(
+          await admin().post('/chairs', { locationId: a4, name: 'Sillón 9' }),
+        );
+      });
+
+      it('reordenar los sillones reales de A4', async () => {
+        expectInactive(
+          await admin().put('/chairs/order', {
+            locationId: a4,
+            // Todos los de A4 (también el que nace con la sede), al revés.
+            chairIds: (
+              await raw.chair.findMany({
+                where: { tenantId: a.tenantId, locationId: a4 },
+                orderBy: { sortOrder: 'asc' },
+                select: { id: true },
+              })
+            )
+              .map((c) => c.id)
+              .reverse(),
+          }),
+        );
+      });
+
+      it('crear bloqueo de agenda', async () => {
+        expectInactive(
+          await admin().post('/schedule-blocks', {
+            locationId: a4,
+            kind: 'MEETING',
+            start: '2027-03-12T15:00:00.000Z',
+            end: '2027-03-12T16:00:00.000Z',
+          }),
+        );
+      });
+
+      it('registrar gasto', async () => {
+        expectInactive(
+          await admin().post('/expenses', {
+            locationId: a4,
+            category: 'SUPPLIES',
+            amount: 25,
+            currency: 'USD',
+            invoiceDate: '2026-10-20',
+          }),
+        );
+      });
+
+      it('salida de la caja abierta de A4', async () => {
+        expectInactive(
+          await admin().post('/cash-sessions/current/outflows', {
+            locationId: a4,
+            category: 'Mensajería',
+            amount: 5,
+            currency: 'USD',
+          }),
+        );
+      });
+
+      it('añadir a la lista de espera', async () => {
+        expectInactive(
+          await admin().post('/waitlist', {
+            patientId: patient,
+            locationId: a4,
+          }),
+        );
+      });
+
+      it('agendar desde la lista de espera una entrada de A4', async () => {
+        expectInactive(
+          await admin().post(`/waitlist/${entryA4}/schedule`, {
+            providerId: e.userId,
+            start: '2027-03-16T15:00:00.000Z',
+          }),
+        );
+      });
+
+      it('ofrecer un hueco de A4', async () => {
+        expectInactive(
+          await admin().post(`/appointments/openings/${a4}/offers`, {
+            ...SLOT,
+            providerId: e.userId,
+            patientId: patient,
+            channel: 'PHONE',
+            outcome: 'NO_ANSWER',
+          }),
+        );
+      });
+
+      it('promesa de pago', async () => {
+        expectInactive(
+          await admin().post(`/patients/${patient}/payment-promises`, {
+            locationId: a4,
+            amount: 50,
+            currency: 'USD',
+            dueDate: '2026-11-30',
+          }),
+        );
+      });
+
+      it('crear y mover una tarifa', async () => {
+        expectInactive(
+          await admin().post('/price-lists', {
+            name: 'Tarifa Oeste',
+            currency: 'USD',
+            locationId: a4,
+          }),
+        );
+        expectInactive(
+          await admin().patch(`/price-lists/${priceList}`, { locationId: a4 }),
+        );
+      });
+
+      it('crear y mover un convenio', async () => {
+        expectInactive(
+          await admin().patch(`/agreements/${agreement}`, { locationId: a4 }),
+        );
+        expectInactive(
+          await admin().post('/agreements', {
+            name: 'Convenio Oeste',
+            payerId,
+            kind: 'PERCENT_DISCOUNT',
+            percent: 5,
+            locationId: a4,
+          }),
+        );
+      });
+
+      it('excepción de horario de un profesional que atiende en A4', async () => {
+        expectInactive(
+          await admin().post(`/providers/${e.userId}/schedule-overrides`, {
+            locationId: a4,
+            date: '2027-03-17',
+            ranges: [],
+          }),
+        );
+      });
+    });
+
+    // M1 de la revisión: reagendar una cita de A4 da 400 y no la mueve; pero
+    // cancelarla sigue abierto, para poder cerrar la agenda de la sede.
+    it('cita de A4: reagendar 400 sin moverla; cancelarla, 200', async () => {
+      const start = (
+        await raw.appointment.findUniqueOrThrow({ where: { id: apptA4 } })
+      ).start;
+      expectInactive(
+        await admin().patch(`/appointments/${apptA4}`, {
+          start: '2027-03-18T16:00:00.000Z',
+          end: '2027-03-18T16:30:00.000Z',
+        }),
+      );
+      expect(
+        (await raw.appointment.findUniqueOrThrow({ where: { id: apptA4 } }))
+          .start,
+      ).toEqual(start);
+      await admin()
+        .patch(`/appointments/${apptA4}`, {
+          status: 'CANCELLED',
+          ...STAFF_CANCELLATION,
+        })
+        .expect(200);
+      expect(
+        (await raw.appointment.findUniqueOrThrow({ where: { id: apptA4 } }))
+          .status,
+      ).toBe('CANCELLED');
+    });
+
+    // B3 de la revisión: como con la cabecera, primero el 403 y luego el 400.
+    // Un miembro acotado a A1 con A4 (ajena y desactivada) en el cuerpo
+    // recibe el 403 de siempre, sin saber si está desactivada.
+    it('miembro acotado a A1 con A4 en el cuerpo: 403 LOCATION_NOT_ALLOWED, no 400', async () => {
+      const sessions = await raw.cashSession.count({
+        where: { tenantId: a.tenantId },
+      });
+      expectNotAllowed(
+        await as(r).post('/cash-sessions/open', {
+          locationId: a4,
+          floats: [{ currency: 'USD', amount: 20 }],
+        }),
+      );
+      expect(
+        await raw.cashSession.count({ where: { tenantId: a.tenantId } }),
+      ).toBe(sessions);
+    });
+
+    it('una sede activa sigue admitiendo escrituras con su cabecera', async () => {
+      await api(a.adminToken, a1)
+        .post(`/inventory/items/${item.a1}/movements`, {
+          type: 'IN',
+          quantity: 1,
+        })
+        .expect(201);
     });
   });
 });

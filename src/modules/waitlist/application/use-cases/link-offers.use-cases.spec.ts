@@ -36,6 +36,7 @@ const locations = {
         ? {
             id,
             name: 'Sede Centro',
+            isActive: true,
             country: 'VE',
             defaultPhoneRegion: 'VE',
             timeZone: 'America/Caracas',

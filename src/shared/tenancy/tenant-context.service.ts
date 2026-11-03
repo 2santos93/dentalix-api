@@ -81,6 +81,16 @@ export class TenantContextService {
   }
 
   /**
+   * SEC-014: la regla de las ESCRITURAS por id sobre una fila sellada con su
+   * sede (DX-089-bis): 403 `LOCATION_NOT_ALLOWED` si es de una sede fuera de
+   * las permitidas. `null` = fila de toda la clínica (sin sede), que no se
+   * acota. Se llama tras cargar la fila y ANTES de escribir.
+   */
+  assertRecordLocationAllowed(locationId: string | null): void {
+    if (locationId !== null) this.assertLocationAllowed(locationId);
+  }
+
+  /**
    * Filtro `where` de las lecturas por sede: la sede de la cabecera; sin
    * cabecera, las sedes permitidas (con `loc = []` el `in` vacío no devuelve
    * nada); sin restricción ni cabecera, ningún filtro (vista consolidada).

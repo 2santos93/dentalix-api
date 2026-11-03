@@ -7,10 +7,6 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import {
-  CURRENCY_DIGITS_CATALOG,
-  type CurrencyDigitsCatalog,
-} from '../../../shared/money/currency-digits';
 import type { ClinicRole, PaymentMethod } from '@prisma/client';
 import {
   creditExceedsMessage,
@@ -87,7 +83,6 @@ async function loadPlan(
  */
 async function checkAmount(
   repo: PatientCreditRepository,
-  currencyDigits: CurrencyDigitsCatalog,
   source: PlanCreditState,
   amount: number,
   currency: string,
@@ -99,13 +94,11 @@ async function checkAmount(
   const amountCents = toCents(amount);
   const cap = await repo.receptionCapCents();
   if (!canMoveCredit(actor.role, amountCents, cap)) {
-    const digits = await currencyDigits.table([source.currency]);
+    // Perezoso (I4): el formato de la sede de referencia (R6) solo al
+    // rechazar; sin formato, 409 LOCATION_LOCALE_REQUIRED (DX-354b).
+    const fmt = await repo.referenceLocationFormat();
     throw new ForbiddenException(
-      receptionCapMessage(
-        cap,
-        source.currency,
-        digits.roundingDigits(source.currency),
-      ),
+      receptionCapMessage(cap, source.currency, fmt),
     );
   }
   if (amountCents > source.creditCents) {
@@ -134,8 +127,6 @@ export class TransferCreditUseCase {
   constructor(
     @Inject(PATIENT_CREDIT_REPOSITORY)
     private readonly repo: PatientCreditRepository,
-    @Inject(CURRENCY_DIGITS_CATALOG)
-    private readonly currencyDigits: CurrencyDigitsCatalog,
   ) {}
 
   async execute(
@@ -179,7 +170,6 @@ export class TransferCreditUseCase {
     }
     const amountCents = await checkAmount(
       this.repo,
-      this.currencyDigits,
       source,
       input.amount,
       currency,
@@ -229,8 +219,6 @@ export class RefundCreditUseCase {
   constructor(
     @Inject(PATIENT_CREDIT_REPOSITORY)
     private readonly repo: PatientCreditRepository,
-    @Inject(CURRENCY_DIGITS_CATALOG)
-    private readonly currencyDigits: CurrencyDigitsCatalog,
   ) {}
 
   async execute(
@@ -274,7 +262,6 @@ export class RefundCreditUseCase {
     const source = await loadPlan(this.repo, planId);
     const amountCents = await checkAmount(
       this.repo,
-      this.currencyDigits,
       source,
       input.amount,
       currency,

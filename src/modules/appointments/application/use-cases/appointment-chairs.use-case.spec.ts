@@ -54,6 +54,7 @@ const locations = {
       timeZone: 'America/Caracas',
       locale: 'es-VE',
       hourCycle: 'h23',
+      isActive: true,
     }),
 } as unknown as LocationRepository;
 

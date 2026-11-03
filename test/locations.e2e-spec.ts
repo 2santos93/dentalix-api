@@ -8,6 +8,7 @@ import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
+import { LAST_ACTIVE_LOCATION_MESSAGE } from '../src/modules/locations/application/use-cases/manage-locations.use-cases';
 import {
   REGIONAL_BERLIN_FIXTURE,
   REGIONAL_CARACAS_FIXTURE,
@@ -350,11 +351,14 @@ describe('Locations / multi-sede (e2e)', () => {
           .send({ isActive: false }),
       ).expect(200);
 
-      await auth(
+      const last = await auth(
         request(app.getHttpServer())
           .patch(`/api/v1/locations/${sedeA}`)
           .send({ isActive: false }),
       ).expect(409);
+      expect((last.body as { message: string }).message).toBe(
+        LAST_ACTIVE_LOCATION_MESSAGE,
+      );
     },
     30000,
   );

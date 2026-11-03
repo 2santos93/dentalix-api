@@ -13,6 +13,8 @@ import {
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { resolveLocationTimeZones } from '../../../../shared/locations/location-time-zone';
+import { requireLocationFormat } from '../../../../shared/locations/location-regional';
+import type { RegionalFormat } from '../../../../shared/format/regional-format';
 import { civilDateIn } from '../../../../shared/time/civil-day';
 import { isPlanBillable } from '../../../treatment-plans/domain/plan-status-machine';
 import {
@@ -840,6 +842,22 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
     }));
   }
 
+  /** G1-B: formato de la sede del abono, solo para pintar el mensaje (I4). */
+  private async locationFormatIn(
+    tx: Prisma.TransactionClient,
+    id: string,
+  ): Promise<RegionalFormat> {
+    const location = await tx.location.findFirst({
+      where: { id, tenantId: this.requireTenantId() },
+      select: { locale: true, hourCycle: true },
+    });
+    return requireLocationFormat({
+      id,
+      locale: location?.locale ?? null,
+      hourCycle: location?.hourCycle ?? null,
+    });
+  }
+
   async replaceAllocations(
     input: ReplaceAllocationsInput,
   ): Promise<{ previous: { itemId: string; cents: number }[] }> {
@@ -969,7 +987,13 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
         });
         if (violation) {
           throw new BadRequestException(
-            allocationViolationMessage(violation, plan.currency, baseCents),
+            allocationViolationMessage(
+              violation,
+              plan.currency,
+              baseCents,
+              // Perezoso (I4): solo al haber violación; la sede del abono (R12).
+              await this.locationFormatIn(tx, payment.locationId),
+            ),
           );
         }
       }
