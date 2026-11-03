@@ -73,6 +73,18 @@ export class AgingCurrencyDto {
 
   @ApiProperty({ type: AgingNextInstallmentDto, nullable: true })
   nextInstallment!: AgingNextInstallmentDto | null;
+
+  @ApiProperty({
+    description:
+      'DX-472-ter: abonos en otra moneda sin contar en los planes de ESTA moneda (sin tasa o sin respuesta del proveedor); el `paymentsWithoutRateCount` de la fila, por moneda',
+  })
+  paymentsWithoutRateCount!: number;
+
+  @ApiProperty({
+    description:
+      'DX-472-ter: el proveedor de tasas no respondió a tiempo para algún plan de esta moneda',
+  })
+  rateProviderTimedOut!: boolean;
 }
 
 export class AgingPatientDto {

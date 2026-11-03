@@ -95,6 +95,8 @@ describe('computePatientAging', () => {
           dueDate: new Date('2026-11-07T00:00:00.000Z'),
           amount: 100000,
         },
+        paymentsWithoutRateCount: 0,
+        rateProviderTimedOut: false,
       },
     ]);
     expect(aging.oldestAgeDays).toBe(120);
@@ -554,6 +556,11 @@ describe('computePatientAging', () => {
       expect(aging.oldestAgeDays).toBe(75);
       expect(aging.paymentsWithoutRateCount).toBe(1);
       expect(aging.rateProviderTimedOut).toBe(false);
+      // DX-472-ter: la línea USD (la del CSV) también lo dice.
+      expect(aging.currencies[0]).toMatchObject({
+        paymentsWithoutRateCount: 1,
+        rateProviderTimedOut: false,
+      });
     });
 
     it('con el proveedor sin responder, la deuda del plan va a «por vencer»: nada vencido', () => {
@@ -592,6 +599,10 @@ describe('computePatientAging', () => {
       });
       expect(aging.oldestAgeDays).toBeNull();
       expect(aging.rateProviderTimedOut).toBe(true);
+      expect(usd).toMatchObject({
+        paymentsWithoutRateCount: 1,
+        rateProviderTimedOut: true,
+      });
     });
 
     it('plan cancelado con abono en bolívares: a favor en USD, como el saldo negativo del plan', () => {
@@ -731,5 +742,22 @@ describe('computePatientAging', () => {
       paymentsWithoutRateCount: 1,
       rateProviderTimedOut: true,
     });
+    // DX-472-ter: cada moneda lleva solo los avisos de sus planes, con o sin filtro.
+    for (const flagsCurrency of [undefined, 'USD']) {
+      const { currencies } = computePatientAging(l, {
+        ...options,
+        flagsCurrency,
+      });
+      expect(
+        currencies.map((c) => [
+          c.currency,
+          c.paymentsWithoutRateCount,
+          c.rateProviderTimedOut,
+        ]),
+      ).toEqual([
+        ['EUR', 1, true],
+        ['USD', 0, false],
+      ]);
+    }
   });
 });

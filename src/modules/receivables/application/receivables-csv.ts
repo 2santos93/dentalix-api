@@ -20,6 +20,10 @@ import type { AgingCsvRow } from './use-cases/get-receivables-aging.use-case';
  * - DX-150: al final, la última gestión de cobro (canal · resultado y su día
  *   en la zona de la sede de la deuda; NUNCA el texto de la nota) y el último
  *   compromiso de pago con su estado.
+ * - DX-472-ter: «Cifras incompletas», la última para no mover las columnas de
+ *   quien ya importa el CSV. Vacía si la línea está completa; si no, por qué
+ *   (ver INCOMPLETE_LABELS). Vacía = completa: filtrar «no vacías» da todas
+ *   las líneas por revisar, y cada texto, las de una causa.
  */
 export const RECEIVABLES_CSV_HEADER = [
   'Paciente',
@@ -46,7 +50,31 @@ export const RECEIVABLES_CSV_HEADER = [
   'Importe compromiso',
   'Moneda compromiso',
   'Fecha compromiso',
+  'Cifras incompletas',
 ] as const;
+
+/*
+ * DX-472-ter: por qué la línea no cuenta algún abono en otra moneda. Un valor
+ * fijo por causa (sin el número de abonos) para que la hoja pueda filtrar y
+ * contar por él. «Proveedor sin respuesta» manda sobre «Sin tasa»: esos abonos
+ * también figuran como sin tasa, y basta volver a exportar cuando responda; con
+ * «Sin tasa», hay que registrar la tasa de su día (estado de cuenta).
+ */
+export const INCOMPLETE_LABELS = {
+  withoutRate: 'Sin tasa',
+  providerTimedOut: 'Proveedor sin respuesta',
+} as const;
+
+function incomplete(c: {
+  paymentsWithoutRateCount: number;
+  rateProviderTimedOut: boolean;
+}): string {
+  if (c.rateProviderTimedOut) return text(INCOMPLETE_LABELS.providerTimedOut);
+  if (c.paymentsWithoutRateCount > 0) {
+    return text(INCOMPLETE_LABELS.withoutRate);
+  }
+  return '';
+}
 
 // Mismas etiquetas que la pantalla de la cartera (web).
 const CHANNEL_LABELS: Record<CollectionChannel, string> = {
@@ -116,6 +144,7 @@ export function toReceivablesCsv(rows: readonly AgingCsvRow[]): string {
           row.promise ? money(row.promise.amount) : '',
           row.promise?.currency ?? '',
           row.promise?.dueDate ?? '',
+          incomplete(c),
         ].join(','),
       );
     }

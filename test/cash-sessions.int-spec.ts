@@ -441,6 +441,85 @@ describe('caja por turno: tablas, RLS e inmutabilidad (int, DX-027)', () => {
     ).rejects.toThrow(/reabre con motivo/);
   });
 
+  it('SEC-043: «diferencia sin justificar» solo en un cierre a ciegas, con diferencia y sin motivo', async () => {
+    const session = await open();
+    const closing = (
+      extra: Partial<Prisma.CashSessionClosingUncheckedCreateInput>,
+    ) =>
+      asA((tx) =>
+        tx.cashSessionClosing.create({
+          data: {
+            tenantId: a.tenantId,
+            sessionId: session.id,
+            sequence: 1,
+            closedById: userId,
+            blind: true,
+            hasDifference: true,
+            unjustifiedDifference: true,
+            suggestedLockDate: new Date('2026-10-17T00:00:00.000Z'),
+            ...extra,
+          },
+        }),
+      );
+    // Sin ciego, sin diferencia o con motivo, la marca no vale.
+    await expect(closing({ blind: false })).rejects.toThrow(/check constraint/);
+    await expect(closing({ hasDifference: false })).rejects.toThrow(
+      /check constraint/,
+    );
+    await expect(
+      closing({ differenceReason: 'Faltó el cambio' }),
+    ).rejects.toThrow(/check constraint/);
+    // Con diferencia y sin motivo ni marca, sigue siendo inválido (la regla
+    // de DX-027 no se relaja para nadie más).
+    await expect(closing({ unjustifiedDifference: false })).rejects.toThrow(
+      /check constraint/,
+    );
+    const saved = await asA(async (tx) => {
+      const row = await tx.cashSessionClosing.create({
+        data: {
+          tenantId: a.tenantId,
+          sessionId: session.id,
+          sequence: 1,
+          closedById: userId,
+          blind: true,
+          hasDifference: true,
+          unjustifiedDifference: true,
+          suggestedLockDate: new Date('2026-10-17T00:00:00.000Z'),
+        },
+      });
+      await tx.cashSessionClosingLine.create({
+        data: {
+          tenantId: a.tenantId,
+          closingId: row.id,
+          currency: 'VES',
+          method: 'CASH',
+          opening: 50_000,
+          expected: 50_000,
+          counted: 49_000,
+          difference: -1_000,
+        },
+      });
+      await tx.cashSession.update({
+        where: { id: session.id },
+        data: { status: 'CLOSED', closedById: userId },
+      });
+      return row;
+    });
+    expect(saved).toMatchObject({
+      unjustifiedDifference: true,
+      differenceReason: null,
+    });
+    // Inalterable como cualquier cierre: la marca no se quita.
+    await expect(
+      asA((tx) =>
+        tx.cashSessionClosing.update({
+          where: { id: saved.id },
+          data: { unjustifiedDifference: false },
+        }),
+      ),
+    ).rejects.toThrow(IMMUTABLE);
+  });
+
   it('la reapertura deja su fila con motivo y el siguiente cierre es la vuelta 2', async () => {
     const session = await open();
     const closing = await close(session.id);
@@ -879,6 +958,7 @@ describe('caja por turno: tablas, RLS e inmutabilidad (int, DX-027)', () => {
             })),
             hasDifference: false,
             differenceReason: null,
+            unjustifiedDifference: false,
             notes: null,
             blind,
             suggestedLockDate: '2026-10-19',

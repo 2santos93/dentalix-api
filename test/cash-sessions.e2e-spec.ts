@@ -393,6 +393,8 @@ describe('Caja por turno (e2e, DX-027)', () => {
         expected: 80_000,
         counted: 79_000,
         difference: -1_000,
+        // SEC-043: sin arqueo ciego, nunca se oculta.
+        amountHidden: false,
       },
       {
         currency: 'USD',
@@ -401,9 +403,12 @@ describe('Caja por turno (e2e, DX-027)', () => {
         expected: 80_000,
         counted: 80_000,
         difference: 0,
+        amountHidden: false,
       },
     ]);
-    expect(closed.differences).toEqual([{ currency: 'USD', amount: -1_000 }]);
+    expect(closed.differences).toEqual([
+      { currency: 'USD', amount: -1_000, amountHidden: false },
+    ]);
 
     const audit = await raw.auditEvent.findMany({
       where: {

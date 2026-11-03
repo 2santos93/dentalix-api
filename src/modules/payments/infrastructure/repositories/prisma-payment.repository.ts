@@ -6,7 +6,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { Prisma, TreatmentPlanStatus } from '@prisma/client';
+import { CashSessionStatus, Prisma, TreatmentPlanStatus } from '@prisma/client';
 import {
   isPlanBillable,
   notBillableMessage,
@@ -242,6 +242,27 @@ const CASH_PAYMENT_SELECT = {
 type PrismaCashPayment = Prisma.PaymentGetPayload<{
   select: typeof CASH_PAYMENT_SELECT;
 }>;
+
+/**
+ * SEC-043: el abono cuenta en una caja aún abierta, por su caja o por un
+ * ajuste de esa caja (LATE_PAYMENT, VOID), o entrará en la próxima que se
+ * abra en su sede (ajuste pendiente, `sessionId` null).
+ */
+const IN_OPEN_CASH_SESSION = {
+  OR: [
+    { cashSession: { is: { status: CashSessionStatus.OPEN } } },
+    {
+      cashAdjustments: {
+        some: {
+          OR: [
+            { session: { is: { status: CashSessionStatus.OPEN } } },
+            { sessionId: null },
+          ],
+        },
+      },
+    },
+  ],
+} satisfies Prisma.PaymentWhereInput;
 
 function mapToCashRow(
   row: PrismaCashPayment,
@@ -1277,6 +1298,15 @@ export class PrismaPaymentRepository implements PaymentRepository {
         // en esta misma foto; ver `periodScope` para los índices que la sirven.
         const scope = await this.periodScope(tx, params);
         const medium = params.paymentMethod;
+        // SEC-043: el ajuste de la clínica leído en esta misma foto.
+        const blindHidden =
+          params.blindViewer === true &&
+          (
+            await tx.tenant.findUniqueOrThrow({
+              where: { id: this.requireTenantId() },
+              select: { cashBlindClose: true },
+            })
+          ).cashBlindClose;
         const where: Prisma.PaymentWhereInput = {
           deletedAt: null,
           ...scope.where,
@@ -1287,12 +1317,12 @@ export class PrismaPaymentRepository implements PaymentRepository {
             : params.externalInvoice === 'WITHOUT'
               ? { externalInvoiceNumber: null }
               : {}),
-          // DX-395: el medio, y si es inicial también los abonos sin medio
-          // de su método (réplicas anteriores), como los nombra el resumen.
           // En AND: `scope.where` ya trae su propio OR (una rama por sede).
-          ...(medium
-            ? {
-                AND: [
+          AND: [
+            // DX-395: el medio, y si es inicial también los abonos sin medio
+            // de su método (réplicas anteriores), como los nombra el resumen.
+            ...(medium
+              ? [
                   {
                     OR: [
                       { paymentMethodId: medium.id },
@@ -1306,10 +1336,17 @@ export class PrismaPaymentRepository implements PaymentRepository {
                         : []),
                     ],
                   },
-                ],
-              }
-            : {}),
+                ]
+              : []),
+          ],
         };
+        // SEC-043: el resumen no suma lo que cuenta en una caja abierta de
+        // cualquiera (también la de otra recepcionista, que podría pasarle la
+        // cifra): el abono de esa caja, el que llegó tarde (LATE_PAYMENT) y el
+        // anulado que la descuenta (VOID). Las filas sí salen, sin importe.
+        const summaryWhere: Prisma.PaymentWhereInput = blindHidden
+          ? { AND: [where, { NOT: IN_OPEN_CASH_SESSION }] }
+          : where;
 
         // Página, conteo, agregado y sede en la MISMA transacción REPEATABLE
         // READ: todas las sentencias ven la misma foto, así que un abono
@@ -1337,7 +1374,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
             tx.payment.count({ where }),
             tx.payment.groupBy({
               by: ['currency', 'method', 'paymentMethodId'],
-              where,
+              where: summaryWhere,
               _sum: { amount: true },
               _count: { _all: true },
               orderBy: [
@@ -1362,20 +1399,36 @@ export class PrismaPaymentRepository implements PaymentRepository {
             // DX-516: los ajustes de esos mismos abonos, por moneda y tipo.
             tx.paymentAdjustment.groupBy({
               by: ['currency', 'type'],
-              where: { payment: where },
+              where: { payment: summaryWhere },
               _sum: { amount: true },
               _count: { _all: true },
               orderBy: [{ currency: 'asc' }, { type: 'asc' }],
             }),
           ]);
         const catalog = catalogOf(methods);
+        // SEC-043: qué filas de la página cuentan en una caja abierta (el
+        // caso de uso les quita el importe), en esta misma foto.
+        const inOpenSession = blindHidden
+          ? new Set(
+              (
+                await tx.payment.findMany({
+                  where: {
+                    id: { in: rows.map((row) => row.id) },
+                    ...IN_OPEN_CASH_SESSION,
+                  },
+                  select: { id: true },
+                })
+              ).map((row) => row.id),
+            )
+          : new Set<string>();
 
         // La zona de cada sede ya se leyó para el período, en la misma foto:
         // el `canVoid` de cada fila usa el mismo "hoy" que la anulación.
         return {
-          items: rows.map((row) =>
-            mapToCashRow(row, scope.timeZoneOf, catalog),
-          ),
+          items: rows.map((row) => ({
+            ...mapToCashRow(row, scope.timeZoneOf, catalog),
+            inOpenCashSession: inOpenSession.has(row.id),
+          })),
           total,
           groups: groups.map((group) => ({
             currency: group.currency,
@@ -1395,6 +1448,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
             count: group._count._all,
           })),
           scopeLocation,
+          blindHidden,
         };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
