@@ -62,6 +62,8 @@ export interface DashboardUpcomingAppointment {
   start: Date;
   end: Date;
   status: AppointmentStatus;
+  /** Sede de la cita (DX-354b): la web formatea su hora con el reloj de esa sede. */
+  locationId: string;
 }
 
 export interface GetDoctorDashboardResult {
@@ -194,6 +196,7 @@ export class GetDoctorDashboardUseCase {
       start: appt.start,
       end: appt.end,
       status: appt.status,
+      locationId: appt.locationId,
     }));
 
     const period = { from: civilDateLabel(from), to: civilDateLabel(to) };
