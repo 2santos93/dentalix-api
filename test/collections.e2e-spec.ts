@@ -337,7 +337,8 @@ describe('Cobranza — notas, compromisos y saldo vencido (e2e, DX-150)', () => 
       .find((l) => l.includes(`${dueDate}`) && l.includes('Cumplido'));
     expect(line).toMatch(
       new RegExp(
-        `,"Llamada · Promete pago",\\d{4}-\\d{2}-\\d{2},"Cumplido",200000\\.00,USD,${dueDate}$`,
+        // DX-472-ter: «Cifras incompletas» va detrás, vacía (cifras completas).
+        `,"Llamada · Promete pago",\\d{4}-\\d{2}-\\d{2},"Cumplido",200000\\.00,USD,${dueDate},$`,
       ),
     );
     expect(csv.text).not.toContain('Paga el viernes');

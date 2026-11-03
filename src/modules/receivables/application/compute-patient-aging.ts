@@ -74,6 +74,8 @@ interface DebtLine extends AgedAmount {
 interface CurrencyAcc {
   lines: DebtLine[];
   creditCents: number;
+  /** DX-472-ter: los avisos de los planes de esta moneda. */
+  flags: AgingRateFlags;
 }
 
 /*
@@ -127,7 +129,11 @@ export function computePatientAging(
   const acc = (currency: string): CurrencyAcc => {
     const existing = byCurrency.get(currency);
     if (existing) return existing;
-    const created: CurrencyAcc = { lines: [], creditCents: 0 };
+    const created: CurrencyAcc = {
+      lines: [],
+      creditCents: 0,
+      flags: { ...NO_RATE_FLAGS },
+    };
     byCurrency.set(currency, created);
     return created;
   };
@@ -140,6 +146,10 @@ export function computePatientAging(
         flags.paymentsWithoutRateCount += known.paymentsWithoutRate.length;
         flags.rateProviderTimedOut ||= known.rateProviderTimedOut;
       }
+      // DX-472-ter: y en la moneda del plan, para la línea del CSV.
+      const own = acc(line.currency).flags;
+      own.paymentsWithoutRateCount += known.paymentsWithoutRate.length;
+      own.rateProviderTimedOut ||= known.rateProviderTimedOut;
     } else {
       for (const other of line.paidOtherCurrencies) {
         acc(other.currency).creditCents += toCents(other.amount);
@@ -241,6 +251,7 @@ export function computePatientAging(
         nextInstallment: next
           ? { dueDate: next.dueDate, amount: next.amount }
           : null,
+        ...a.flags,
       };
     })
     .filter((c) => c.debt > 0 || c.credit > 0)

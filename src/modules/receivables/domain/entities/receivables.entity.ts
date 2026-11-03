@@ -120,6 +120,12 @@ export interface PatientAgingCurrency {
   /** Alguna parte de la deuda envejece desde una fecha aproximada. */
   ageApproximate: boolean;
   nextInstallment: { dueDate: Date; amount: number } | null;
+  /**
+   * DX-472-ter: lo mismo que los avisos de la fila, solo de los planes de
+   * esta moneda (la línea del CSV dice cuál está incompleta).
+   */
+  paymentsWithoutRateCount: number;
+  rateProviderTimedOut: boolean;
 }
 
 export interface PatientAging {
