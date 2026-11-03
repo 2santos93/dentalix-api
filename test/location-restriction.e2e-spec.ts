@@ -1360,6 +1360,7 @@ describe('Personal restringido a sedes (DX-089)', () => {
       expect(res.body).toMatchObject({
         code: LOCATION_INACTIVE_CODE,
         message: LOCATION_INACTIVE_MESSAGE,
+        locationId: a4,
       });
     }
 

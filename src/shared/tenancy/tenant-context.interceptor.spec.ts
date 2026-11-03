@@ -356,6 +356,8 @@ describe('TenantContextInterceptor', () => {
         code: 'LOCATION_INACTIVE',
         message:
           'Esta sede está desactivada: puedes consultar su historial, pero no registrar cambios en ella. Elige una sede activa.',
+        // Nombra la sede: el cliente suelta su cabecera solo si es esta.
+        locationId: 'loc-off',
       });
     }
 
@@ -467,6 +469,7 @@ describe('TenantContextInterceptor', () => {
         expect(err).toBeInstanceOf(BadRequestException);
         expect((err as BadRequestException).getResponse()).toMatchObject({
           code: 'LOCATION_INACTIVE',
+          locationId: OFF,
         });
       }
     });
@@ -478,6 +481,10 @@ describe('TenantContextInterceptor', () => {
         { 'x-location-id': ACTIVE },
       ).result.catch((e: unknown) => e);
       expect(err).toBeInstanceOf(BadRequestException);
+      // Es la del cuerpo, no la de la cabecera: el cliente no la suelta.
+      expect((err as BadRequestException).getResponse()).toMatchObject({
+        locationId: OFF,
+      });
     });
 
     it('sede activa: pasa con una consulta; la misma que la cabecera, sin otra', async () => {

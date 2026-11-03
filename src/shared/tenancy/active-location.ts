@@ -22,12 +22,17 @@ export function isWriteMethod(method: string | undefined): boolean {
   return method !== undefined && !READ_METHODS.has(method.toUpperCase());
 }
 
-export function locationInactive(): BadRequestException {
+/**
+ * `locationId` nombra la sede desactivada: así el cliente sabe si es la de
+ * su cabecera (la suelta y recarga) o la de un dato del cuerpo (la mantiene).
+ */
+export function locationInactive(locationId: string): BadRequestException {
   return new BadRequestException({
     statusCode: 400,
     error: 'Bad Request',
     code: LOCATION_INACTIVE_CODE,
     message: LOCATION_INACTIVE_MESSAGE,
+    locationId,
   });
 }
 
@@ -38,8 +43,11 @@ export function locationInactive(): BadRequestException {
  * uso que toman la sede de otra fila (la cita desde la lista de espera, las
  * ofertas de un hueco).
  */
-export function assertLocationWritable(location: { isActive: boolean }): void {
-  if (!location.isActive) throw locationInactive();
+export function assertLocationWritable(location: {
+  id: string;
+  isActive: boolean;
+}): void {
+  if (!location.isActive) throw locationInactive(location.id);
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -70,7 +78,7 @@ export async function assertBodyLocationWritable(
   const location = await prisma.runWithTenant(tenantId, (tx) =>
     tx.location.findFirst({
       where: { id: locationId, deletedAt: null },
-      select: { isActive: true },
+      select: { id: true, isActive: true },
     }),
   );
   if (location) assertLocationWritable(location);
@@ -130,7 +138,7 @@ export async function resolveActiveLocationId(
         select: { id: true, isActive: true },
       }),
     );
-    if (!location) throw locationInactive();
+    if (!location) throw locationInactive(pinned);
     assertLocationWritable(location);
   }
   return pinned;
