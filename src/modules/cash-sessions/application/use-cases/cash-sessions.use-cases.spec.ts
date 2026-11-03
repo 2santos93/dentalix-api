@@ -59,6 +59,7 @@ function record(extra: Partial<CashSessionRecord> = {}): CashSessionRecord {
         outflows: 0,
         outflowsCount: 0,
         expected: 70_000,
+        amountHidden: false,
       },
     ],
     payments: [],
@@ -71,6 +72,7 @@ function record(extra: Partial<CashSessionRecord> = {}): CashSessionRecord {
     closing: null,
     closings: [],
     reopenings: [],
+    openLaterGroups: [],
     ...extra,
   };
 }
@@ -190,6 +192,7 @@ describe('GetCashSessionUseCase (DX-027)', () => {
         expected: 70_000,
         counted: 70_000,
         difference: 0,
+        amountHidden: false,
       },
     ],
   };
@@ -293,7 +296,52 @@ describe('GetCashSessionUseCase (DX-027)', () => {
           voidedFor('p-pending'),
           voidedFor('p-CLOSED'),
         ],
+        // Ronda 4: el grupo USD·CASH tiene ajustes posteriores abiertos o
+        // pendientes; VES·CASH no.
+        openLaterGroups: [
+          { currency: 'USD', method: 'CASH' },
+          { currency: 'USD', method: 'CASH' },
+        ],
+        expected: [
+          { ...record().expected![0] },
+          {
+            ...record().expected![0],
+            currency: 'VES',
+            opening: 0,
+            payments: 1_000,
+            expected: 1_000,
+          },
+        ],
+        differences: [
+          { currency: 'USD', amount: 0, amountHidden: false },
+          { currency: 'VES', amount: -10, amountHidden: false },
+        ],
+        closing: earlierClosingWith(),
+        closings: [earlierClosingWith()],
       });
+    const earlierClosingWithLines = [
+      {
+        currency: 'USD',
+        method: 'CASH' as const,
+        opening: 50_000,
+        expected: 70_000,
+        counted: 70_000,
+        difference: 0,
+        amountHidden: false,
+      },
+      {
+        currency: 'VES',
+        method: 'CASH' as const,
+        opening: 0,
+        expected: 1_000,
+        counted: 990,
+        difference: -10,
+        amountHidden: false,
+      },
+    ];
+    function earlierClosingWith() {
+      return { ...earlierClosing, lines: earlierClosingWithLines };
+    }
 
     it.each([
       ['RECEPTION con ciego', RECEPTION, true, true],
@@ -339,6 +387,52 @@ describe('GetCashSessionUseCase (DX-027)', () => {
           amount: 40,
           amountHidden: false,
         });
+        // El grupo afectado (USD·CASH) va sin esperado, desglose, recuentos ni
+        // diferencia; lo contado y el fondo se quedan. VES·CASH, intacto.
+        const usd = view.expected?.find((l) => l.currency === 'USD');
+        const ves = view.expected?.find((l) => l.currency === 'VES');
+        expect(usd).toMatchObject(
+          hides
+            ? {
+                opening: 50_000,
+                payments: null,
+                paymentsCount: null,
+                paymentAdjustments: null,
+                adjustments: null,
+                outflows: null,
+                outflowsCount: null,
+                expected: null,
+                amountHidden: true,
+              }
+            : { payments: 20_000, expected: 70_000, amountHidden: false },
+        );
+        expect(ves).toMatchObject({ expected: 1_000, amountHidden: false });
+        for (const closing of [view.closing, ...view.closings]) {
+          const [usdLine, vesLine] = closing!.lines;
+          expect(usdLine).toMatchObject(
+            hides
+              ? {
+                  expected: null,
+                  difference: null,
+                  counted: 70_000,
+                  amountHidden: true,
+                }
+              : { expected: 70_000, difference: 0, amountHidden: false },
+          );
+          expect(vesLine).toMatchObject({
+            expected: 1_000,
+            difference: -10,
+            amountHidden: false,
+          });
+        }
+        expect(view.differences).toEqual([
+          hides
+            ? { currency: 'USD', amount: null, amountHidden: true }
+            : { currency: 'USD', amount: 0, amountHidden: false },
+          { currency: 'VES', amount: -10, amountHidden: false },
+        ]);
+        // El dato interno no sale en la respuesta.
+        expect(view).not.toHaveProperty('openLaterGroups');
         expect(view.adjustments?.[0]).toMatchObject({
           amount: 3_000,
           amountHidden: false,
@@ -778,6 +872,46 @@ describe('ListCashSessionsUseCase (DX-027)', () => {
       list.execute({ from: '2026-10-17', to: '2026-10-01' }, ADMIN),
     ).rejects.toThrow(BadRequestException);
   });
+
+  it.each([
+    ['RECEPTION con ciego', RECEPTION, true, true],
+    ['ADMIN con ciego', ADMIN, true, false],
+    ['RECEPTION sin ciego', RECEPTION, false, false],
+  ])(
+    'SEC-043 (ronda 4) %s: la diferencia de una moneda con anulación posterior abierta, oculta=%s; sin el dato interno',
+    async (_who, actor, blindClose, hides) => {
+      const repo = fakeRepo();
+      repo.getSettings.mockResolvedValue({
+        requireOpenSession: false,
+        blindClose,
+      });
+      const { expected: _e, ...summary } = record({ status: 'CLOSED' });
+      repo.list.mockResolvedValue({
+        items: [
+          {
+            ...summary,
+            differences: [
+              { currency: 'USD', amount: 0, amountHidden: false },
+              { currency: 'VES', amount: -10, amountHidden: false },
+            ],
+            openLaterGroups: [{ currency: 'USD', method: 'CASH' }],
+          },
+        ],
+        total: 1,
+      });
+      const page = await new ListCashSessionsUseCase(
+        asRepo(repo),
+        context,
+      ).execute({}, actor);
+      expect(page.items[0].differences).toEqual([
+        hides
+          ? { currency: 'USD', amount: null, amountHidden: true }
+          : { currency: 'USD', amount: 0, amountHidden: false },
+        { currency: 'VES', amount: -10, amountHidden: false },
+      ]);
+      expect(page.items[0]).not.toHaveProperty('openLaterGroups');
+    },
+  );
 });
 
 // DX-089: personal restringido a sedes.

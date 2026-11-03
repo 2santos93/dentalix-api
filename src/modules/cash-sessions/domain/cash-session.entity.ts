@@ -52,35 +52,63 @@ export interface MoneyAmount {
   amount: number;
 }
 
-export interface CashExpectedLine {
+/**
+ * SEC-043: diferencia por moneda del último cierre; `amount` null con
+ * `amountHidden` (ver `CashExpectedLine.amountHidden`).
+ */
+export interface CashDifference extends HiddenAmount {
+  currency: string;
+  amount: number | null;
+}
+
+/**
+ * SEC-043: un grupo (moneda, método) de una caja ya cerrada del que nació un
+ * ajuste que cuenta en otra caja abierta o pendiente.
+ */
+export interface CashGroupRef {
+  currency: string;
+  method: PaymentMethod;
+}
+
+/**
+ * Las cifras del esperado van a null con `amountHidden` (SEC-043): el grupo
+ * de una caja cerrada tiene una anulación posterior que cuenta en otra caja
+ * abierta o pendiente, y su desglose frente a los cobros vivos la delataría.
+ * El fondo (`opening`) se queda: es el que se declaró al abrir.
+ */
+export interface CashExpectedLine extends HiddenAmount {
   currency: string;
   method: PaymentMethod;
   opening: number;
-  payments: number;
-  paymentsCount: number;
+  payments: number | null;
+  paymentsCount: number | null;
   /**
    * DX-516: ajustes por medio de pago de esos abonos, con signo (impuestos y
    * recargos +, descuentos −). 0 sin ajustes.
    */
-  paymentAdjustments: number;
-  adjustments: number;
+  paymentAdjustments: number | null;
+  adjustments: number | null;
   /** Salidas de caja menor (DX-274), en positivo: se restan. */
-  outflows: number;
-  outflowsCount: number;
+  outflows: number | null;
+  outflowsCount: number | null;
   /**
    * opening + payments + paymentAdjustments + adjustments − outflows (puede
    * ser negativo).
    */
-  expected: number;
+  expected: number | null;
 }
 
-export interface CashClosingLine {
+/**
+ * SEC-043: `expected` y `difference` a null con `amountHidden` (como en
+ * `CashExpectedLine`). `counted` se queda: es lo que contó quien cerró.
+ */
+export interface CashClosingLine extends HiddenAmount {
   currency: string;
   method: PaymentMethod;
   opening: number;
-  expected: number;
+  expected: number | null;
   counted: number;
-  difference: number;
+  difference: number | null;
 }
 
 export interface CashClosingView {
@@ -237,7 +265,7 @@ export interface CashSessionSummary {
   reopenCount: number;
   floats: MoneyAmount[];
   /** Diferencia por moneda del último cierre (vacía si está abierta). */
-  differences: MoneyAmount[];
+  differences: CashDifference[];
   /** SEC-043: el último cierre (si está cerrada) es «diferencia sin justificar». */
   unjustifiedDifference: boolean;
 }

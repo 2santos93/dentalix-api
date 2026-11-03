@@ -18,6 +18,9 @@ import {
   CASH_MAX_CURRENCIES,
   type CashActor,
   type CashAdjustmentView,
+  type CashClosingView,
+  type CashDifference,
+  type CashGroupRef,
   type CashSessionDetail,
   type CashSessionSummary,
   type CashSettings,
@@ -71,6 +74,20 @@ const scopeFor = (actor: CashActor): CashSessionScope =>
 const countsInOpenSession = (a: CashAdjustmentView): boolean =>
   a.sessionId === null || a.sessionStatus === 'OPEN';
 
+const groupKey = (g: CashGroupRef): string => `${g.currency}|${g.method}`;
+
+/**
+ * SEC-043: la diferencia por moneda del último cierre, sin cifra en las
+ * monedas con un grupo oculto (con lo contado, daría el esperado).
+ */
+const hideDifferences = (
+  differences: CashDifference[],
+  currencies: ReadonlySet<string>,
+): CashDifference[] =>
+  differences.map((d) =>
+    currencies.has(d.currency) ? { ...d, amount: null, amountHidden: true } : d,
+  );
+
 const hideAdjustment = (a: CashAdjustmentView): CashAdjustmentView =>
   countsInOpenSession(a) ? { ...a, amount: null, amountHidden: true } : a;
 
@@ -82,6 +99,18 @@ const hideAdjustment = (a: CashAdjustmentView): CashAdjustmentView =>
  */
 function hideOpenSessionAmounts(record: CashSessionRecord): CashSessionRecord {
   const later = record.laterAdjustments.map(hideAdjustment);
+  // Revisión (ronda 4): en esos grupos, el esperado y el cierre de esta caja
+  // frente a sus cobros vivos también delatarían la anulación.
+  const groups = new Set(record.openLaterGroups.map(groupKey));
+  const currencies = new Set(record.openLaterGroups.map((g) => g.currency));
+  const hideLines = (closing: CashClosingView): CashClosingView => ({
+    ...closing,
+    lines: closing.lines.map((line) =>
+      groups.has(groupKey(line))
+        ? { ...line, expected: null, difference: null, amountHidden: true }
+        : line,
+    ),
+  });
   const hiddenPayments = new Set(
     later.flatMap((a) => (a.amountHidden && a.payment ? [a.payment.id] : [])),
   );
@@ -92,6 +121,25 @@ function hideOpenSessionAmounts(record: CashSessionRecord): CashSessionRecord {
   );
   return {
     ...record,
+    differences: hideDifferences(record.differences, currencies),
+    expected:
+      record.expected?.map((line) =>
+        groups.has(groupKey(line))
+          ? {
+              ...line,
+              payments: null,
+              paymentsCount: null,
+              paymentAdjustments: null,
+              adjustments: null,
+              outflows: null,
+              outflowsCount: null,
+              expected: null,
+              amountHidden: true,
+            }
+          : line,
+      ) ?? null,
+    closing: record.closing && hideLines(record.closing),
+    closings: record.closings.map(hideLines),
     laterAdjustments: later,
     adjustments: record.adjustments?.map(hideAdjustment) ?? null,
     voidedPayments:
@@ -195,7 +243,8 @@ export class GetCashSessionUseCase {
       this.repo.getSettings(),
     ]);
     if (!found) throw new NotFoundException(SESSION_NOT_FOUND_MESSAGE);
-    const record =
+    // `openLaterGroups` es interno: no sale en la respuesta.
+    const { openLaterGroups: _groups, ...record } =
       settings.blindClose && !actor.isAdmin
         ? hideOpenSessionAmounts(found)
         : found;
@@ -379,18 +428,37 @@ export class ListCashSessionsUseCase {
     if (input.locationId) {
       this.tenantContext.assertLocationAllowed(input.locationId);
     }
-    const result = await this.repo.list({
-      ...scopeFor(actor),
-      locationIds: input.locationId
-        ? [input.locationId]
-        : this.tenantContext.scopeLocationIds(),
-      from,
-      to,
-      status: input.status,
-      skip: (page - 1) * pageSize,
-      take: pageSize,
-    });
-    return { ...result, page, pageSize };
+    const [result, settings] = await Promise.all([
+      this.repo.list({
+        ...scopeFor(actor),
+        locationIds: input.locationId
+          ? [input.locationId]
+          : this.tenantContext.scopeLocationIds(),
+        from,
+        to,
+        status: input.status,
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      this.repo.getSettings(),
+    ]);
+    // SEC-043: con ciego y sin ser ADMIN, sin la diferencia de las monedas
+    // con una anulación posterior que cuenta en otra caja abierta o
+    // pendiente (con lo contado, daría el esperado). El resto, igual.
+    const blind = settings.blindClose && !actor.isAdmin;
+    const items = result.items.map(
+      ({ openLaterGroups, ...summary }): CashSessionSummary =>
+        blind
+          ? {
+              ...summary,
+              differences: hideDifferences(
+                summary.differences,
+                new Set(openLaterGroups.map((g) => g.currency)),
+              ),
+            }
+          : summary,
+    );
+    return { items, total: result.total, page, pageSize };
   }
 }
 

@@ -39,7 +39,11 @@ const today = (): string => civilDateIn(new Date(), ZONE);
 interface Line {
   currency: string;
   method: string;
-  expected: number;
+  payments?: number | null;
+  paymentsCount?: number | null;
+  outflows?: number | null;
+  expected: number | null;
+  amountHidden?: boolean;
 }
 
 interface Detail {
@@ -62,9 +66,26 @@ interface Detail {
     hasDifference: boolean;
     differenceReason: string | null;
     unjustifiedDifference: boolean;
-    lines: { expected: number; counted: number; difference: number }[];
+    lines: {
+      currency?: string;
+      method?: string;
+      expected: number | null;
+      counted: number;
+      difference: number | null;
+      amountHidden?: boolean;
+    }[];
   } | null;
   closings: { lines: unknown[] }[];
+  differences?: {
+    currency: string;
+    amount: number | null;
+    amountHidden: boolean;
+  }[];
+  voidedOutflows?: {
+    id: string;
+    amount: number | null;
+    amountHidden: boolean;
+  }[];
 }
 
 interface CashList {
@@ -596,6 +617,7 @@ describe('Arqueo ciego sin fugas (e2e, SEC-043)', () => {
     let anuladoA: string;
     let tarjetaA: string;
     let tardio: string;
+    let salida: { expenseId: string; paymentId: string };
     const yesterday = () => addCivilDays(today(), -1);
 
     beforeAll(async () => {
@@ -632,6 +654,54 @@ describe('Arqueo ciego sin fugas (e2e, SEC-043)', () => {
         ).expect(200),
       );
 
+    /**
+     * Ronda 4: el grupo USD·CASH de A (con anulaciones posteriores abiertas o
+     * pendientes) va sin esperado, desglose, recuentos ni diferencia; USD·CARD
+     * conserva sus cifras. La diferencia por moneda de USD, también oculta.
+     */
+    function expectGroupHidden(view: Detail, hidden: boolean): void {
+      const cash = view.expected?.find((l) => l.method === 'CASH');
+      const card = view.expected?.find((l) => l.method === 'CARD');
+      expect(cash).toMatchObject(
+        hidden
+          ? {
+              payments: null,
+              paymentsCount: null,
+              outflows: null,
+              expected: null,
+              amountHidden: true,
+            }
+          : { payments: 40, outflows: 5, expected: 35, amountHidden: false },
+      );
+      expect(card).toMatchObject({
+        payments: 25,
+        expected: 25,
+        amountHidden: false,
+      });
+      const cashLine = view.closing?.lines.find((l) => l.method === 'CASH');
+      const cardLine = view.closing?.lines.find((l) => l.method === 'CARD');
+      expect(cashLine).toMatchObject(
+        hidden
+          ? {
+              expected: null,
+              difference: null,
+              counted: 35,
+              amountHidden: true,
+            }
+          : { expected: 35, difference: 0, counted: 35, amountHidden: false },
+      );
+      expect(cardLine).toMatchObject({
+        expected: 25,
+        difference: 0,
+        amountHidden: false,
+      });
+      expect(view.differences).toEqual([
+        hidden
+          ? { currency: 'USD', amount: null, amountHidden: true }
+          : { currency: 'USD', amount: 0, amountHidden: false },
+      ]);
+    }
+
     it('la caja A cerrada a ciegas y cuadrada guarda el motivo que escribió quien contó (B4)', async () => {
       cajaA = idOf(
         await api('post', '/cash-sessions/open', recepcionDos, sedeNorte)
@@ -652,11 +722,23 @@ describe('Arqueo ciego sin fugas (e2e, SEC-043)', () => {
           sedeNorte,
         ).expect(201),
       );
+      // Una salida de caja menor de 5 desde A (la anula después un ADMIN).
+      const expense = (
+        await api(
+          'post',
+          '/cash-sessions/current/outflows',
+          recepcionDos,
+          sedeNorte,
+        )
+          .send({ category: 'Mensajería', currency: 'USD', amount: 5 })
+          .expect(201)
+      ).body as { id: string; payments: { id: string }[] };
+      salida = { expenseId: expense.id, paymentId: expense.payments[0].id };
       const closed = detailOf(
         await api('post', `/cash-sessions/${cajaA}/close`, recepcionDos)
           .send({
             counts: [
-              { currency: 'USD', method: 'CASH', counted: 40 },
+              { currency: 'USD', method: 'CASH', counted: 35 },
               { currency: 'USD', method: 'CARD', counted: 25 },
             ],
             differenceReason: 'Conté dos veces el cajón',
@@ -674,6 +756,12 @@ describe('Arqueo ciego sin fugas (e2e, SEC-043)', () => {
       await api('delete', `/payments/${anuladoA}`)
         .send({ reason: 'Abono duplicado' })
         .expect(200);
+      await api(
+        'post',
+        `/expenses/${salida.expenseId}/payments/${salida.paymentId}/void`,
+      )
+        .send({ reason: 'La mensajería se pagó dos veces' })
+        .expect(200);
       tardio = idOf(
         await pay(
           clinic.adminToken,
@@ -689,10 +777,22 @@ describe('Arqueo ciego sin fugas (e2e, SEC-043)', () => {
         expect.arrayContaining([
           { kind: 'VOID', sessionId: null, paymentId: anuladoA },
           { kind: 'LATE_PAYMENT', sessionId: null, paymentId: tardio },
+          { kind: 'OUTFLOW_VOID', sessionId: null, paymentId: null },
         ]),
       );
 
       const a = await detailFor(cajaA, recepcionDos);
+      expectGroupHidden(a, true);
+      expect(
+        a.laterAdjustments.find((x) => x.kind === 'OUTFLOW_VOID'),
+      ).toMatchObject({ amount: null, amountHidden: true });
+      expect(a.voidedOutflows).toEqual([
+        expect.objectContaining({
+          id: salida.paymentId,
+          amount: null,
+          amountHidden: true,
+        }),
+      ]);
       const voidAdj = a.laterAdjustments.find((x) => x.kind === 'VOID');
       expect(voidAdj).toMatchObject({ amount: null, amountHidden: true });
       expect(a.voidedPayments).toEqual([
@@ -704,6 +804,7 @@ describe('Arqueo ciego sin fugas (e2e, SEC-043)', () => {
       ]);
       // ADMIN lo ve.
       const admin = await detailFor(cajaA, clinic.adminToken);
+      expectGroupHidden(admin, false);
       expect(
         admin.laterAdjustments.find((x) => x.kind === 'VOID'),
       ).toMatchObject({ amount: -40, amountHidden: false });
@@ -747,21 +848,32 @@ describe('Arqueo ciego sin fugas (e2e, SEC-043)', () => {
       expect(collected.map((c) => c.sessionId)).toEqual([cajaB, cajaB]);
 
       const a = await detailFor(cajaA, recepcionDos);
+      expectGroupHidden(a, true);
       expect(a.laterAdjustments.find((x) => x.kind === 'VOID')).toMatchObject({
         amount: null,
         amountHidden: true,
       });
+      // La lista de turnos tampoco da la diferencia de USD de A.
+      const shifts = (
+        await api('get', '/cash-sessions?status=CLOSED', recepcionDos).expect(
+          200,
+        )
+      ).body as { items: { id: string; differences: unknown[] }[] };
+      expect(shifts.items.find((x) => x.id === cajaA)?.differences).toEqual([
+        { currency: 'USD', amount: null, amountHidden: true },
+      ]);
       expect(a.voidedPayments?.[0]).toMatchObject({ amount: null });
       const b = await detailFor(cajaB, recepcionDos);
       expect(b).toMatchObject({ blindHidden: true, adjustments: null });
       const prev = await listFor(recepcionDos, yesterday(), sedeNorte);
       expect(prev.items.find((i) => i.id === tardio)?.amountHidden).toBe(true);
 
-      // B se cierra (no cuadra: esperado −40 + 12 en efectivo).
+      // B se cierra (no cuadra: esperado −40 + 12 + 5 en efectivo).
       await api('post', `/cash-sessions/${cajaB}/close`, recepcionDos)
         .send({ counts: [{ currency: 'USD', method: 'CASH', counted: 0 }] })
         .expect(201);
       const after = await detailFor(cajaA, recepcionDos);
+      expectGroupHidden(after, false);
       expect(
         after.laterAdjustments.find((x) => x.kind === 'VOID'),
       ).toMatchObject({ amount: -40, amountHidden: false });

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma, type CashSessionStatus } from '@prisma/client';
+import { CashSessionStatus, Prisma } from '@prisma/client';
 import { formatRefundNumber } from '../../patient-credit/domain/patient-credit';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
@@ -29,7 +29,6 @@ import type {
   CashCreditRefund,
   CashOutflow,
   CashSessionPayment,
-  CashSessionSummary,
   CashSettings,
   CashVoidedOutflow,
   CashVoidedPayment,
@@ -38,6 +37,7 @@ import type {
 } from '../domain/cash-session.entity';
 import type {
   CashSessionRecord,
+  CashSessionSummaryRecord,
   CashSessionRepository,
   CashSessionScope,
   CloseContext,
@@ -79,6 +79,17 @@ const SUMMARY_SELECT = {
     },
     orderBy: { sequence: 'desc' },
     take: 1,
+  },
+  // SEC-043: los grupos con un ajuste nacido de esta caja que cuenta en otra
+  // abierta o está pendiente (el caso de uso oculta sus cifras con ciego).
+  originatedAdjustments: {
+    where: {
+      OR: [
+        { sessionId: null },
+        { session: { is: { status: CashSessionStatus.OPEN } } },
+      ],
+    },
+    select: { currency: true, method: true },
   },
 } satisfies Prisma.CashSessionSelect;
 
@@ -390,7 +401,7 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
 
   list(
     params: ListCashSessionsParams,
-  ): Promise<{ items: CashSessionSummary[]; total: number }> {
+  ): Promise<{ items: CashSessionSummaryRecord[]; total: number }> {
     const tenantId = this.tenantId();
     return this.prisma.runWithTenant(
       async (tx) => {
@@ -576,6 +587,7 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
             outflows: fromCents(line.outflowsCents),
             outflowsCount: line.outflowsCount,
             expected: fromCents(line.expectedCents),
+            amountHidden: false,
           })),
           payments: active.map((p) => this.toPayment(p, names, timeZone)),
           voidedPayments: voided.map((p): CashVoidedPayment => ({
@@ -911,7 +923,7 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
     row: SummaryRow,
     names: Map<string, string>,
     timeZone: string,
-  ): CashSessionSummary {
+  ): CashSessionSummaryRecord {
     const latest = row.status === 'CLOSED' ? row.closings[0] : undefined;
     const differences = new Map<string, number>();
     for (const line of latest?.lines ?? []) {
@@ -937,8 +949,16 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
       })),
       differences: [...differences.entries()]
         .sort(([a], [b]) => a.localeCompare(b))
-        .map(([currency, cents]) => ({ currency, amount: fromCents(cents) })),
+        .map(([currency, cents]) => ({
+          currency,
+          amount: fromCents(cents),
+          amountHidden: false,
+        })),
       unjustifiedDifference: latest?.unjustifiedDifference ?? false,
+      openLaterGroups: row.originatedAdjustments.map((a) => ({
+        currency: a.currency,
+        method: a.method,
+      })),
     };
   }
 
@@ -1057,6 +1077,7 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
           expected: amountOf(line.expected),
           counted: amountOf(line.counted),
           difference: amountOf(line.difference),
+          amountHidden: false,
         })),
     };
   }

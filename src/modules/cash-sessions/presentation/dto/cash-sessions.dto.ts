@@ -312,6 +312,24 @@ export class CashMoneyDto {
   amount!: number;
 }
 
+export class CashDifferenceDto {
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
+  currency!: string;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description: 'SEC-043: null con `amountHidden`.',
+  })
+  amount!: number | null;
+
+  @ApiProperty({
+    description:
+      'SEC-043: la moneda tiene una anulación posterior que cuenta en otra caja abierta o pendiente (con lo contado, daría el esperado).',
+  })
+  amountHidden!: boolean;
+}
+
 export class CashPatientRefDto {
   @ApiProperty({ format: 'uuid' })
   id!: string;
@@ -330,35 +348,56 @@ export class CashExpectedLineDto {
   @ApiProperty({ description: 'Fondo inicial (solo efectivo)' })
   opening!: number;
 
-  @ApiProperty({ description: 'Abonos del turno que cuentan' })
-  payments!: number;
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description:
+      'Abonos del turno que cuentan. SEC-043: null con `amountHidden`.',
+  })
+  payments!: number | null;
 
-  @ApiProperty()
-  paymentsCount!: number;
+  @ApiProperty({ type: Number, nullable: true })
+  paymentsCount!: number | null;
 
   @ApiProperty({
+    type: Number,
+    nullable: true,
     description:
       'DX-516: ajustes por medio de pago de esos abonos, con signo (impuestos y recargos +, descuentos −); 0 sin ajustes.',
   })
-  paymentAdjustments!: number;
-
-  @ApiProperty({ description: 'Ajustes que entraron en esta caja (con signo)' })
-  adjustments!: number;
+  paymentAdjustments!: number | null;
 
   @ApiProperty({
+    type: Number,
+    nullable: true,
+    description: 'Ajustes que entraron en esta caja (con signo)',
+  })
+  adjustments!: number | null;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
     description:
       'Salidas de caja menor del turno (DX-274), en positivo: se restan. Solo en efectivo.',
   })
-  outflows!: number;
+  outflows!: number | null;
 
-  @ApiProperty()
-  outflowsCount!: number;
+  @ApiProperty({ type: Number, nullable: true })
+  outflowsCount!: number | null;
 
   @ApiProperty({
+    type: Number,
+    nullable: true,
     description:
       'opening + payments + paymentAdjustments + adjustments − outflows (puede ser negativo)',
   })
-  expected!: number;
+  expected!: number | null;
+
+  @ApiProperty({
+    description:
+      'SEC-043: con arqueo ciego y sin ser ADMIN, en una caja cerrada con una anulación posterior que cuenta en otra caja abierta o pendiente, las cifras del grupo (salvo el fondo) van a null.',
+  })
+  amountHidden!: boolean;
 }
 
 export class CashClosingLineDto {
@@ -371,14 +410,28 @@ export class CashClosingLineDto {
   @ApiProperty()
   opening!: number;
 
-  @ApiProperty()
-  expected!: number;
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description: 'SEC-043: null con `amountHidden`.',
+  })
+  expected!: number | null;
 
   @ApiProperty()
   counted!: number;
 
-  @ApiProperty({ description: 'counted − expected' })
-  difference!: number;
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description: 'counted − expected. SEC-043: null con `amountHidden`.',
+  })
+  difference!: number | null;
+
+  @ApiProperty({
+    description:
+      'SEC-043: el grupo tiene una anulación posterior que cuenta en otra caja abierta o pendiente: sin esperado ni diferencia. `counted` se queda.',
+  })
+  amountHidden!: boolean;
 }
 
 export class CashClosingDto {
@@ -767,11 +820,11 @@ export class CashSessionSummaryDto {
   floats!: CashMoneyDto[];
 
   @ApiProperty({
-    type: [CashMoneyDto],
+    type: [CashDifferenceDto],
     description:
       'Diferencia por moneda del último cierre (vacía si está abierta)',
   })
-  differences!: CashMoneyDto[];
+  differences!: CashDifferenceDto[];
 
   @ApiProperty({
     description:
