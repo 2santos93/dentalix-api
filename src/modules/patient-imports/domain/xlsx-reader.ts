@@ -1,7 +1,9 @@
 import { inflateRaw } from 'node:zlib';
 import { promisify } from 'node:util';
+import type { RegionalFormat } from '../../../shared/format/regional-format';
 import {
   ImportFileError,
+  type ImportFileMessage,
   MAX_CELL_CHARS,
   MAX_COLUMNS,
   type RawRecord,
@@ -79,12 +81,14 @@ const YIELD_STEPS = 8_192;
 /** Una etiqueta de apertura más larga (atributos) no es de un .xlsx. */
 const MAX_TAG_CHARS = 16 * 1024;
 
-const TOO_MANY_CELLS_MESSAGE =
-  'Una fila de la hoja tiene más de 16.384 celdas (el máximo de Excel). Ábrela en Excel y guárdala de nuevo como .xlsx o como CSV.';
-const TOO_MANY_STYLES_MESSAGE =
-  'El Excel tiene más de 64.000 estilos de celda (el máximo de Excel). Ábrelo en Excel y guárdalo de nuevo como .xlsx o como CSV.';
-const TOO_MANY_STRINGS_MESSAGE =
-  'El Excel tiene más de 1.000.000 de cadenas de texto: no parece un listado de pacientes. Guarda solo la hoja de pacientes como .xlsx o como CSV.';
+// DX-354: los topes llevan cifras: se escriben con el formato de la sede del
+// lote (`fmt.number`), no con separadores fijos.
+const TOO_MANY_CELLS_MESSAGE = (fmt: RegionalFormat) =>
+  `Una fila de la hoja tiene más de ${fmt.number(MAX_CELLS_PER_ROW)} celdas (el máximo de Excel). Ábrela en Excel y guárdala de nuevo como .xlsx o como CSV.`;
+const TOO_MANY_STYLES_MESSAGE = (fmt: RegionalFormat) =>
+  `El Excel tiene más de ${fmt.number(MAX_CELL_STYLES)} estilos de celda (el máximo de Excel). Ábrelo en Excel y guárdalo de nuevo como .xlsx o como CSV.`;
+const TOO_MANY_STRINGS_MESSAGE = (fmt: RegionalFormat) =>
+  `El Excel tiene más de ${fmt.number(MAX_SHARED_STRINGS)} cadenas de texto: no parece un listado de pacientes. Guarda solo la hoja de pacientes como .xlsx o como CSV.`;
 const TOO_COMPLEX_MESSAGE =
   'El Excel es demasiado complejo para importarlo (tiene demasiados elementos). Guarda solo la hoja de pacientes como .xlsx o como CSV.';
 
@@ -343,7 +347,7 @@ async function* each(
   name: string,
   budget: XmlBudget,
   limit: number,
-  message: string,
+  message: ImportFileMessage,
 ): AsyncGenerator<XmlElement> {
   let count = 0;
   for (const el of scan(xml, name, budget, Number.POSITIVE_INFINITY)) {
