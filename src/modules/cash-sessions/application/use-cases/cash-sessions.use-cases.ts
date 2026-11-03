@@ -250,6 +250,13 @@ export class GetCashSessionUseCase {
         : found;
     // DX-089: una caja de una sede no permitida es 403 (no 404: existe).
     this.tenantContext.assertLocationAllowed(record.location.id);
+    if (actor.isAdmin) {
+      const closings = await this.withReceiptViews(record);
+      record.closings = closings;
+      record.closing =
+        record.closing &&
+        (closings.find((c) => c.id === record.closing?.id) ?? record.closing);
+    }
     const open = record.status === 'OPEN';
     const blindHidden = open && settings.blindClose && !actor.isAdmin;
     return {
@@ -271,6 +278,33 @@ export class GetCashSessionUseCase {
         adjust: !open && actor.isAdmin,
       },
     };
+  }
+
+  /**
+   * SEC-043-bis: en cada cierre a ciegas, cuántos recibos de abonos de esta
+   * caja (que llevan el importe que el ciego oculta) abrió o imprimió quien
+   * la cerró entre la apertura y ese cierre. Solo para ADMIN: es la señal de
+   * que quien contó pudo reconstruir el esperado. Los cierres con el esperado
+   * a la vista no la llevan (no hay nada que reconstruir).
+   */
+  private withReceiptViews(
+    record: Pick<CashSessionDetail, 'id' | 'openedAt' | 'closings'>,
+  ): Promise<CashClosingView[]> {
+    return Promise.all(
+      record.closings.map(async (closing) =>
+        closing.blind
+          ? {
+              ...closing,
+              receiptViews: await this.repo.countReceiptViews({
+                sessionId: record.id,
+                actorUserId: closing.closedBy.id,
+                from: record.openedAt,
+                to: closing.closedAt,
+              }),
+            }
+          : closing,
+      ),
+    );
   }
 }
 

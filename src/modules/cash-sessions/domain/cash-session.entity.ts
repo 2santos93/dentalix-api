@@ -112,6 +112,16 @@ export interface CashClosingLine extends HiddenAmount {
   difference: number | null;
 }
 
+/**
+ * SEC-043-bis: recibos de abonos de esta caja que quien la cerró abrió o
+ * imprimió entre la apertura y ese cierre (el recibo lleva el importe que el
+ * arqueo ciego oculta). `receipts`: recibos distintos; `views`: consultas.
+ */
+export interface CashReceiptViews {
+  receipts: number;
+  views: number;
+}
+
 export interface CashClosingView {
   id: string;
   sequence: number;
@@ -126,6 +136,11 @@ export interface CashClosingView {
    * marcado para que administración lo revise.
    */
   unjustifiedDifference: boolean;
+  /**
+   * SEC-043-bis: solo para ADMIN y en un cierre a ciegas; `null` en los demás
+   * casos (no se calcula).
+   */
+  receiptViews: CashReceiptViews | null;
   notes: string | null;
   /** Día civil (YYYY-MM-DD) que DX-091 podrá usar como fecha de bloqueo. */
   suggestedLockDate: string;

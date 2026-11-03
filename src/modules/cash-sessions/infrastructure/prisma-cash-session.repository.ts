@@ -30,6 +30,7 @@ import type {
   CashAdjustmentView,
   CashClosingView,
   CashExpectedLine,
+  CashReceiptViews,
   CashCreditRefund,
   CashOutflow,
   CashSessionPayment,
@@ -282,6 +283,42 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
     private readonly prisma: PrismaService,
     private readonly tenantContext: TenantContextService,
   ) {}
+
+  async countReceiptViews(params: {
+    sessionId: string;
+    actorUserId: string;
+    from: Date;
+    to: Date;
+  }): Promise<CashReceiptViews> {
+    const tenantId = this.tenantId();
+    return this.prisma.runWithTenant(async (tx) => {
+      // Los abonos de la caja (también los anulados) y los tardíos que
+      // entraron en ella como ajuste. El índice (tenantId, actorUserId,
+      // occurredAt) de audit_events acota la búsqueda.
+      const [row] = await tx.$queryRaw<{ receipts: number; views: number }[]>`
+        SELECT count(DISTINCT e."resourceId")::int AS "receipts",
+               count(*)::int AS "views"
+          FROM "audit_events" e
+         WHERE e."tenantId" = ${tenantId}::uuid
+           AND e."actorUserId" = ${params.actorUserId}::uuid
+           AND e."resourceType" = 'PAYMENT_RECEIPT'
+           AND e."action" IN ('VIEW', 'PRINT')
+           AND e."occurredAt" >= ${params.from}
+           AND e."occurredAt" < ${params.to}
+           AND e."resourceId" IN (
+             SELECT p."id" FROM "payments" p
+              WHERE p."tenantId" = ${tenantId}::uuid
+                AND p."cashSessionId" = ${params.sessionId}::uuid
+             UNION
+             SELECT a."paymentId" FROM "cash_session_adjustments" a
+              WHERE a."tenantId" = ${tenantId}::uuid
+                AND a."sessionId" = ${params.sessionId}::uuid
+                AND a."kind" = 'LATE_PAYMENT'
+                AND a."paymentId" IS NOT NULL
+           )`;
+      return { receipts: row?.receipts ?? 0, views: row?.views ?? 0 };
+    });
+  }
 
   private tenantId(): string {
     const tenantId = this.tenantContext.getTenantId();
@@ -1074,6 +1111,8 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
       hasDifference: row.hasDifference,
       differenceReason: row.differenceReason,
       unjustifiedDifference: row.unjustifiedDifference,
+      // SEC-043-bis: lo calcula el caso de uso, solo para ADMIN.
+      receiptViews: null,
       notes: row.notes,
       suggestedLockDate: civilOf(row.suggestedLockDate),
       lines: [...row.lines]
