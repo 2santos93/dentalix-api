@@ -10,6 +10,7 @@ import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
 import {
   REGIONAL_CARACAS_FIXTURE,
+  locationData,
   registerBody as clinicRegisterBody,
 } from './support/location-fixtures';
 
@@ -59,6 +60,7 @@ interface AppointmentResponseBody {
   id: string;
   start: string;
   end: string;
+  locationId: string;
 }
 
 interface DashboardIncomesBody {
@@ -80,6 +82,7 @@ interface DashboardUpcomingAppointmentBody {
   start: string;
   end: string;
   status: string;
+  locationId: string;
 }
 
 interface DashboardResponseBody {
@@ -335,8 +338,51 @@ describe('Dashboard (e2e)', () => {
         dash.upcomingAppointments.map((a) => ({
           id: a.id,
           start: a.start,
+          locationId: a.locationId,
         })),
-      ).toContainEqual({ id: appointment.id, start: appointment.start });
+      ).toContainEqual({
+        id: appointment.id,
+        start: appointment.start,
+        locationId: locationA.id,
+      });
+
+      // DX-354b: con dos sedes, cada próxima cita trae la suya.
+      const locationA2 = await raw.location.create({
+        data: locationData(REGIONAL_CARACAS_FIXTURE, {
+          tenantId: clinicA.tenantId,
+          name: 'Sede Norte DX354b',
+        }),
+        select: { id: true },
+      });
+      const secondStart = new Date(futureStart.getTime() + 24 * 60 * 60 * 1000);
+      const secondRes = await request(app.getHttpServer())
+        .post('/api/v1/appointments')
+        .set('X-Tenant-Host', hostFor(subdomainA))
+        .set('Authorization', `Bearer ${clinicA.accessToken}`)
+        .set('X-Location-Id', locationA2.id)
+        .send({
+          patientId: patient.id,
+          providerId: clinicA.userId,
+          start: secondStart.toISOString(),
+          end: new Date(secondStart.getTime() + 30 * 60 * 1000).toISOString(),
+          reason: 'Control norte',
+        })
+        .expect(201);
+      const second = secondRes.body as AppointmentResponseBody;
+      const dashTwoRes = await request(app.getHttpServer())
+        .get(
+          `/api/v1/dashboard?from=${FROM}&to=${TO}&currency=usd&upcomingLimit=5`,
+        )
+        .set('X-Tenant-Host', hostFor(subdomainA))
+        .set('Authorization', `Bearer ${clinicA.accessToken}`)
+        .expect(200);
+      const dashTwo = dashTwoRes.body as DashboardResponseBody;
+      expect(
+        dashTwo.upcomingAppointments.map((a) => [a.id, a.locationId]),
+      ).toEqual([
+        [appointment.id, locationA.id],
+        [second.id, locationA2.id],
+      ]);
 
       expect(dash.patientCount).toBeGreaterThanOrEqual(1);
 

@@ -1,3 +1,4 @@
+import { regionalFormat } from '../../../shared/format/regional-format';
 import { ClinicRole } from '@prisma/client';
 import {
   CREDIT_AMOUNT_EXCEEDS_MESSAGE,
@@ -165,13 +166,20 @@ describe('saldo a favor (DX-253)', () => {
     });
 
     it('el 403 explica el tope en español', () => {
-      expect(receptionCapMessage(0, 'VES', 0)).toMatch(/administración/);
-      // D3 (QA): el tope con los decimales de su moneda y su código, sin locale fijo.
-      expect(receptionCapMessage(1_000_000, 'VES', 0)).toContain('10000 VES');
-      expect(receptionCapMessage(1_000_050, 'USD', 2)).toContain(
-        '10000.50 USD',
+      const enUS = regionalFormat({ locale: 'en-US', hourCycle: 'h12' });
+      const esVE = regionalFormat({ locale: 'es-VE', hourCycle: 'h12' });
+      expect(receptionCapMessage(0, 'VES', esVE)).toMatch(/administración/);
+      // DX-354b: el tope con el formato de la sede y el código ISO de su moneda.
+      expect(receptionCapMessage(1_000_000, 'VES', esVE)).toContain(
+        'hasta VES\u00a010.000,00 por operación',
       );
-      expect(receptionCapMessage(500_000, 'JPY', 0)).toContain('5000 JPY');
+      expect(receptionCapMessage(1_000_050, 'USD', enUS)).toContain(
+        'USD\u00a010,000.50',
+      );
+      // JPY no tiene unidad menor: 0 decimales.
+      expect(receptionCapMessage(500_000, 'JPY', enUS)).toContain(
+        'JPY\u00a05,000 por',
+      );
     });
   });
 

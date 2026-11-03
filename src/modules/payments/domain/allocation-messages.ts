@@ -1,15 +1,12 @@
 import { TreatmentPlanStatus } from '@prisma/client';
 import { PLAN_STATUS_LABELS } from '../../treatment-plans/domain/plan-status-machine';
+import { moneyWithCode } from '../../../shared/format/money-with-code';
+import type { RegionalFormat } from '../../../shared/format/regional-format';
 import type { AllocationViolation } from './allocation-rules';
 
 // Mensajes de la imputación de abonos a ítems (DX-051, spec §5.3). Los
-// importes salen con 2 decimales y punto, sin miles ni símbolo: formato neutro
-// de locale a propósito.
-
-/** Céntimos enteros -> «1234.50». */
-export function formatCents(cents: number): string {
-  return (cents / 100).toFixed(2);
-}
+// importes salen con el formato de la sede del abono y el código ISO de la
+// moneda («USD 1,234.50», «1.234,50 EUR») (DX-354b).
 
 export const ALLOCATION_PAYMENT_NOT_FOUND = 'Abono no encontrado.';
 export const ALLOCATION_MIGRATED_BALANCE =
@@ -48,16 +45,18 @@ export function allocationNoRate(
 export function allocationOverItem(
   freeCents: number,
   currency: string,
+  fmt: RegionalFormat,
 ): string {
-  return `Un ítem admite como máximo ${formatCents(freeCents)} ${currency}: es lo que le queda por cubrir.`;
+  return `Un ítem admite como máximo ${moneyWithCode(freeCents / 100, currency, fmt, null)}: es lo que le queda por cubrir.`;
 }
 
 export function allocationOverPayment(
   sumCents: number,
   baseCents: number,
   currency: string,
+  fmt: RegionalFormat,
 ): string {
-  return `La suma imputada (${formatCents(sumCents)} ${currency}) supera el abono convertido a la moneda del plan (${formatCents(baseCents)} ${currency}).`;
+  return `La suma imputada (${moneyWithCode(sumCents / 100, currency, fmt, null)}) supera el abono convertido a la moneda del plan (${moneyWithCode(baseCents / 100, currency, fmt, null)}).`;
 }
 
 /**
@@ -68,6 +67,7 @@ export function allocationViolationMessage(
   violation: AllocationViolation,
   currency: string,
   baseCents: number,
+  fmt: RegionalFormat,
 ): string {
   switch (violation.code) {
     case 'DUPLICATE':
@@ -79,12 +79,13 @@ export function allocationViolationMessage(
     case 'PROPOSED':
       return ALLOCATION_ITEM_PROPOSED;
     case 'OVER_ITEM':
-      return allocationOverItem(violation.freeCents ?? 0, currency);
+      return allocationOverItem(violation.freeCents ?? 0, currency, fmt);
     case 'OVER_PAYMENT':
       return allocationOverPayment(
         violation.sumCents ?? 0,
         baseCents,
         currency,
+        fmt,
       );
     case 'NO_RATE':
       throw new Error('NO_RATE se responde antes de validar las líneas');
