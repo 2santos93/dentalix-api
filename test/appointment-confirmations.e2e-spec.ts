@@ -245,6 +245,10 @@ describe('Confirmación de cita por enlace (e2e)', () => {
         providerName: 'Dra. Dueña',
         locationName: expect.any(String) as string,
         locationAddress: null,
+        // DX-354: la sede de la cita, en crudo (sede de registro de la clínica).
+        timeZone: 'America/Caracas',
+        locale: 'es-VE',
+        hourCycle: 'h23',
       });
       expect(
         (await getAppointment(clinicA, appt.id)).confirmationSentAt,
@@ -397,6 +401,45 @@ describe('Confirmación de cita por enlace (e2e)', () => {
         clinicA.tenantId,
       ]) {
         expect(text).not.toContain(secret);
+      }
+    });
+
+    it('DX-354: trae zona, locale y reloj de la sede de la cita, y null con 200 si la sede no tiene reloj', async () => {
+      const appt = await createAppointment(clinicA, patientA);
+      const { token } = await newLink(clinicA, appt.id);
+      const { id: locationId } = await raw.location.findFirstOrThrow({
+        where: { tenantId: clinicA.tenantId },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true },
+      });
+      const before = await raw.location.findUniqueOrThrow({
+        where: { id: locationId },
+        select: { timeZone: true, locale: true, hourCycle: true },
+      });
+      const appointmentOf = async () =>
+        ((await view(clinicA.host, token).expect(200)).body as PublicBody)
+          .appointment;
+      try {
+        await raw.location.update({
+          where: { id: locationId },
+          data: { timeZone: 'Asia/Tokyo', locale: 'ja-JP', hourCycle: 'h23' },
+        });
+        expect(await appointmentOf()).toMatchObject({
+          timeZone: 'Asia/Tokyo',
+          locale: 'ja-JP',
+          hourCycle: 'h23',
+        });
+        await raw.location.update({
+          where: { id: locationId },
+          data: { hourCycle: null },
+        });
+        expect(await appointmentOf()).toMatchObject({
+          timeZone: 'Asia/Tokyo',
+          locale: 'ja-JP',
+          hourCycle: null,
+        });
+      } finally {
+        await raw.location.update({ where: { id: locationId }, data: before });
       }
     });
 

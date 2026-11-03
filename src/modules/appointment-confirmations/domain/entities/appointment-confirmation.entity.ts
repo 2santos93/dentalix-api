@@ -1,3 +1,4 @@
+import type { HourCycle } from '../../../../shared/format/regional-format';
 import {
   AppointmentConfirmationResponse,
   AppointmentStatus,
@@ -46,6 +47,14 @@ export interface ConfirmationAppointment {
    * ella se lee un número sin «+». null: la sede no tiene.
    */
   locationPhoneRegion: string | null;
+  /**
+   * DX-354: zona, formato y reloj de la sede de la cita, en crudo, para que la
+   * página pública pinte el día y la hora como la sede. null: la sede no los
+   * tiene (la página pinta «—» y pide llamar a la clínica).
+   */
+  locationTimeZone: string | null;
+  locationLocale: string | null;
+  locationHourCycle: HourCycle | null;
 }
 
 export interface ClinicBranding {

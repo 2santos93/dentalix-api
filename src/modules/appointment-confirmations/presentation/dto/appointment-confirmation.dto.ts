@@ -46,6 +46,34 @@ export class PublicConfirmationAppointmentDto {
 
   @ApiProperty({ type: String, nullable: true })
   locationAddress!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'America/Caracas',
+    description:
+      'DX-354: zona IANA de la sede de la cita, en crudo. null si la sede no la tiene.',
+  })
+  timeZone!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'es-VE',
+    description:
+      'DX-354: formato regional (BCP 47) de la sede de la cita, en crudo. null si la sede no lo tiene.',
+  })
+  locale!: string | null;
+
+  @ApiProperty({
+    enum: ['h12', 'h23'],
+    enumName: 'HourCycle',
+    nullable: true,
+    example: 'h12',
+    description:
+      'DX-354: reloj de la sede de la cita, en crudo. null si la sede no lo tiene: la página pinta «—» y pide llamar a la clínica.',
+  })
+  hourCycle!: 'h12' | 'h23' | null;
 }
 
 export class PublicConfirmationClinicDto {

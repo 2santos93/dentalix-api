@@ -1,3 +1,4 @@
+import { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { YES_NO_UNKNOWN } from '../../domain/anamnesis-questionnaire';
 
@@ -124,6 +125,13 @@ export class PublicAnamnesisDto {
   })
   patientFirstName!: string | null;
   @ApiProperty({ type: String, format: 'date-time' }) expiresAt!: Date;
+  @ApiProperty({
+    type: DocumentRegionalDto,
+    nullable: true,
+    description:
+      'DX-354: zona, locale y reloj de la sede principal de la clínica (la activa más antigua), para pintar `expiresAt`. null si le falta algo: la página pinta «—» y pide llamar a la clínica.',
+  })
+  regional!: DocumentRegionalDto | null;
   @ApiProperty({ type: AnamnesisQuestionnaireDto })
   questionnaire!: AnamnesisQuestionnaireDto;
   @ApiProperty({ type: PublicConsentDto }) consent!: PublicConsentDto;

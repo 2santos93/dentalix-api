@@ -1,3 +1,4 @@
+import type { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
 import type { MedicalHistorySubmissionStatus } from '@prisma/client';
 import type { MedicalHistory } from '../../../medical-history/domain/entities/medical-history.entity';
 import type { MedicalHistoryVersionData } from '../../../medical-history/domain/ports/medical-history-repository.port';
@@ -58,6 +59,8 @@ export interface PublicSubmissionView {
   patientFirstName: string;
   patientDeleted: boolean;
   clinic: { name: string; logoUrl: string | null; primaryColor: string | null };
+  /** DX-354: región de la sede principal (R6) de la clínica; `null` si le falta algo. */
+  regional: DocumentRegionalDto | null;
   sensitiveHealthGranted: boolean;
   policy: {
     id: string;

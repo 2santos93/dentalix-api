@@ -1,3 +1,4 @@
+import { isHourCycle } from '../../../../shared/locations/location-regional';
 import { withClinicLogoUrl } from '../../../../shared/storage/clinic-logo-url';
 import { Injectable } from '@nestjs/common';
 import {
@@ -45,7 +46,17 @@ const APPOINTMENT_SELECT = {
   locationId: true,
   patient: { select: { firstName: true, phone: true } },
   // Sin filtrar `deletedAt` (DX-329, m17): la sede de la cita da el prefijo.
-  location: { select: { name: true, address: true, defaultPhoneRegion: true } },
+  location: {
+    select: {
+      name: true,
+      address: true,
+      defaultPhoneRegion: true,
+      // DX-354: la página pública pinta con el formato de la sede de la cita.
+      timeZone: true,
+      locale: true,
+      hourCycle: true,
+    },
+  },
 } as const satisfies Prisma.AppointmentSelect;
 
 type SelectedAppointment = Prisma.AppointmentGetPayload<{
@@ -161,6 +172,11 @@ export class PrismaAppointmentConfirmationRepository implements AppointmentConfi
       locationName: a.location.name,
       locationAddress: a.location.address,
       locationPhoneRegion: phoneRegionOrNull(a.location.defaultPhoneRegion),
+      locationTimeZone: a.location.timeZone,
+      locationLocale: a.location.locale,
+      locationHourCycle: isHourCycle(a.location.hourCycle)
+        ? a.location.hourCycle
+        : null,
     };
   }
 

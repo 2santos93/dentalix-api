@@ -55,6 +55,9 @@ describe('CreateConfirmationLinkUseCase', () => {
       providerName: 'Dra. Pérez',
       locationName: 'Sede Principal',
       locationAddress: 'Calle 1 # 2-3',
+      timeZone: 'America/Caracas',
+      locale: 'es-VE',
+      hourCycle: 'h12',
     });
   });
 
