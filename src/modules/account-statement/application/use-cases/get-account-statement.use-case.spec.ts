@@ -105,6 +105,7 @@ function makeUseCase(
   const repo: AccountStatementRepository = {
     load,
     loadBillablePlans: jest.fn(),
+    loadRegional: () => Promise.resolve(null),
   };
   const uc = new GetAccountStatementUseCase(
     repo,

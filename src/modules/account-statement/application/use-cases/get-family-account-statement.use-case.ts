@@ -28,7 +28,6 @@ import {
   type AccountStatementClock,
 } from './get-account-statement.use-case';
 import { toCents } from '../../../../shared/money/money';
-import type { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
 import {
   CURRENCY_DIGITS_CATALOG,
   roundingDigitsLookup,
@@ -103,13 +102,12 @@ export class GetFamilyAccountStatementUseCase {
       logoUrl: null,
       fiscal: EMPTY_CLINIC_FISCAL,
     };
-    let regional: DocumentRegionalDto | null = null;
     const members: FamilyStatementMember[] = [];
     const totals = new Map<string, Record<(typeof FIELDS)[number], number>>();
     const loaded: { ref: (typeof refs)[number]; data: AccountStatementData }[] =
       [];
     for (const ref of refs) {
-      const data = await this.repo.load(ref.id);
+      const data = await this.repo.load(ref.id, { regional: false });
       // Retirado entre las dos lecturas: no cuenta.
       if (data) loaded.push({ ref, data });
     }
@@ -125,7 +123,6 @@ export class GetFamilyAccountStatementUseCase {
     );
     for (const { ref, data } of loaded) {
       clinic = data.clinic;
-      regional = data.regional;
       const { summary } = computeAccountStatement(data.snapshot, {
         today: issuedAt,
         planBalances,
@@ -154,6 +151,9 @@ export class GetFamilyAccountStatementUseCase {
         summary: rows,
       });
     }
+
+    // DX-354: una sola lectura de la región para toda la familia.
+    const regional = await this.repo.loadRegional();
 
     return {
       issuedAt,

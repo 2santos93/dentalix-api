@@ -23,13 +23,22 @@ export interface AccountStatementData {
 
 export interface AccountStatementRepository {
   /**
+   * DX-354: región de la sede en contexto (o la principal), leída UNA vez; la
+   * usa el estado de cuenta familiar en lugar de una lectura por miembro.
+   */
+  loadRegional(): Promise<DocumentRegionalDto | null>;
+
+  /**
    * Todo lo que necesita el estado de cuenta de un paciente, leído en UNA
    * transacción con RLS (misma foto para todas las consultas), o `null` si el
    * paciente no existe, está retirado o es de otra clínica — los tres casos
    * son indistinguibles a propósito (mismo 404, sin revelar si el UUID existe
    * en otro tenant).
    */
-  load(patientId: string): Promise<AccountStatementData | null>;
+  load(
+    patientId: string,
+    options?: { regional?: boolean },
+  ): Promise<AccountStatementData | null>;
 
   /**
    * Los planes vivos del paciente con su facturable, sus abonos vivos por

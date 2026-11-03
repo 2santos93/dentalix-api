@@ -418,9 +418,11 @@ export class PrismaExpenseRepository implements ExpenseRepository {
       SELECT "id", "locationId", "currency",
              ("amount" * 100)::bigint AS "amountCents", "voidedAt",
              (SELECT l."locale" FROM "locations" l
-               WHERE l."id" = "expenses"."locationId") AS "locale",
+               WHERE l."id" = "expenses"."locationId"
+                 AND l."tenantId" = ${tenantId}::uuid) AS "locale",
              (SELECT l."hourCycle" FROM "locations" l
-               WHERE l."id" = "expenses"."locationId") AS "hourCycle"
+               WHERE l."id" = "expenses"."locationId"
+                 AND l."tenantId" = ${tenantId}::uuid) AS "hourCycle"
         FROM "expenses"
        WHERE "tenantId" = ${tenantId}::uuid AND "id" = ${id}::uuid ${scopeSql}
        FOR UPDATE`;
