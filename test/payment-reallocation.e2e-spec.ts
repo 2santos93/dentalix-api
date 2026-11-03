@@ -667,8 +667,48 @@ describe('Reasignación de la imputación de un abono (DX-051, e2e)', () => {
         400,
       );
       expect(message(res)).toBe(
-        'Un ítem admite como máximo 30.00 EUR: es lo que le queda por cubrir.',
+        'Un ítem admite como máximo EUR\u00a030,00: es lo que le queda por cubrir.',
       );
+    });
+
+    it('el importe sigue el formato de la sede del abono, y sin formato es 409 (DX-354b)', async () => {
+      const before = await raw.location.findUniqueOrThrow({
+        where: { id: locationId },
+        select: { locale: true, hourCycle: true },
+      });
+      try {
+        // Sede en-US: «EUR 30.00» (código ISO + separadores de la sede).
+        await raw.location.update({
+          where: { id: locationId },
+          data: { locale: 'en-US', hourCycle: 'h12' },
+        });
+        const us = await put(
+          paymentId,
+          { mode: 'MANUAL', allocations: [line(accepted, 30.01)] },
+          400,
+        );
+        expect(message(us)).toBe(
+          'Un ítem admite como máximo EUR\u00a030.00: es lo que le queda por cubrir.',
+        );
+        expect(message(us)).not.toMatch(/30\.00 EUR/);
+
+        // Sede sin formato: igual que A1 de DX-354.
+        await raw.location.update({
+          where: { id: locationId },
+          data: { locale: null, hourCycle: null },
+        });
+        const none = await put(
+          paymentId,
+          { mode: 'MANUAL', allocations: [line(accepted, 30.01)] },
+          409,
+        );
+        expect(none.body).toMatchObject({
+          code: 'LOCATION_LOCALE_REQUIRED',
+          locationId,
+        });
+      } finally {
+        await raw.location.update({ where: { id: locationId }, data: before });
+      }
     });
 
     it('over the converted payment amount (USD payment)', async () => {
@@ -688,7 +728,7 @@ describe('Reasignación de la imputación de un abono (DX-051, e2e)', () => {
         400,
       );
       expect(message(res)).toBe(
-        'La suma imputada (90.01 EUR) supera el abono convertido a la moneda del plan (90.00 EUR).',
+        'La suma imputada (EUR\u00a090,01) supera el abono convertido a la moneda del plan (EUR\u00a090,00).',
       );
       await put(
         usd,
