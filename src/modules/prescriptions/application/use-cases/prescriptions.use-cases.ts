@@ -1,3 +1,4 @@
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { clinicFiscalToFreeze } from '../../../../shared/clinic/clinic-fiscal';
 import {
   BadRequestException,
@@ -462,6 +463,7 @@ export class VoidPrescriptionUseCase {
     private readonly repo: PrescriptionRepository,
     @Inject(PRESCRIPTION_CLOCK)
     private readonly now: PrescriptionClock,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   /**
@@ -481,6 +483,9 @@ export class VoidPrescriptionUseCase {
     if (!current) {
       throw new NotFoundException(PRESCRIPTION_NOT_FOUND_MESSAGE);
     }
+    // SEC-014: la receta se lee desde toda la clínica (ficha), pero se anula
+    // solo desde una sede permitida, como un abono (DX-089-bis).
+    this.tenantContext.assertRecordLocationAllowed(current.locationId);
     if (
       actor.role !== ClinicRole.ADMIN &&
       current.professionalId !== actor.userId

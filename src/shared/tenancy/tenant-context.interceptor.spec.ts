@@ -14,22 +14,30 @@ import { TenantHostRequest } from './tenant-host-request';
  * PrismaService falso para la validación de la sede: `runWithTenant(tenantId, fn)`
  * ejecuta el callback con un `tx` cuyo `location.findFirst` devuelve la sede
  * solo si su id está en `known` — así se puede simular "sede de otra clínica"
- * (que con RLS real tampoco sería visible).
+ * (que con RLS real tampoco sería visible). Las de `inactive` vuelven con
+ * `isActive: false` (SEC-014). `calls` cuenta las consultas.
  */
-function makePrisma(known: string[] = []) {
-  return {
+function makePrisma(known: string[] = [], inactive: string[] = []) {
+  const calls = { findFirst: 0 };
+  const prisma = {
+    calls,
     runWithTenant: (_tenantId: string, fn: (tx: unknown) => unknown) =>
       Promise.resolve(
         fn({
           location: {
-            findFirst: ({ where }: { where: { id: string } }) =>
-              Promise.resolve(
-                known.includes(where.id) ? { id: where.id } : null,
-              ),
+            findFirst: ({ where }: { where: { id: string } }) => {
+              calls.findFirst += 1;
+              return Promise.resolve(
+                known.includes(where.id)
+                  ? { id: where.id, isActive: !inactive.includes(where.id) }
+                  : null,
+              );
+            },
           },
         }),
       ),
-  } as never;
+  };
+  return prisma as never;
 }
 
 function makeCtx(req: Partial<TenantHostRequest>): ExecutionContext {
@@ -300,6 +308,115 @@ describe('TenantContextInterceptor', () => {
         locationId: undefined,
         allowed: 'ALL',
       });
+    });
+  });
+
+  describe('sede desactivada (SEC-014)', () => {
+    function runWith(
+      method: string,
+      user: { loc?: string[] },
+      headers: Record<string, string> = {},
+    ): { result: Promise<unknown>; calls: { findFirst: number } } {
+      const tenantContext = new TenantContextService();
+      const prisma = makePrisma(
+        ['loc-1', 'loc-off'],
+        ['loc-off'],
+      ) as unknown as {
+        calls: { findFirst: number };
+      };
+      const interceptor = new TenantContextInterceptor(
+        tenantContext,
+        prisma as never,
+      );
+      const ctx = makeCtx({
+        tenantHost: { tenantId: 't-1' },
+        user: { tenantId: 't-1', sub: 'u', role: 'RECEPTION', ...user },
+        headers,
+        method,
+      });
+      const result = new Promise((resolve, reject) => {
+        interceptor
+          .intercept(ctx, {
+            handle: () =>
+              new Observable((sub) => {
+                sub.next(tenantContext.getLocationId());
+                sub.complete();
+              }),
+          })
+          .subscribe({ next: resolve, error: reject });
+      });
+      return { result, calls: prisma.calls };
+    }
+
+    function expectInactive(err: unknown) {
+      expect(err).toBeInstanceOf(BadRequestException);
+      expect((err as BadRequestException).getResponse()).toEqual({
+        statusCode: 400,
+        error: 'Bad Request',
+        code: 'LOCATION_INACTIVE',
+        message:
+          'Esta sede está desactivada: puedes consultar su historial, pero no registrar cambios en ella. Elige una sede activa.',
+      });
+    }
+
+    it.each(['POST', 'PUT', 'PATCH', 'DELETE', 'post'])(
+      '%s con la cabecera de una sede desactivada → 400 LOCATION_INACTIVE',
+      async (method) => {
+        const err = await runWith(
+          method,
+          {},
+          {
+            'x-location-id': 'loc-off',
+          },
+        ).result.catch((e: unknown) => e);
+        expectInactive(err);
+      },
+    );
+
+    it.each(['GET', 'HEAD', 'OPTIONS'])(
+      '%s con la cabecera de una sede desactivada → se lee su historial',
+      async (method) => {
+        await expect(
+          runWith(method, {}, { 'x-location-id': 'loc-off' }).result,
+        ).resolves.toBe('loc-off');
+      },
+    );
+
+    it('el 403 de una sede no permitida va antes que el 400 de desactivada', async () => {
+      const err = await runWith(
+        'POST',
+        { loc: ['loc-1'] },
+        {
+          'x-location-id': 'loc-off',
+        },
+      ).result.catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ForbiddenException);
+    });
+
+    it('auto-pin en una sede desactivada (token anterior): escribir → 400, leer sí', async () => {
+      expectInactive(
+        await runWith('POST', { loc: ['loc-off'] }).result.catch(
+          (e: unknown) => e,
+        ),
+      );
+      await expect(runWith('GET', { loc: ['loc-off'] }).result).resolves.toBe(
+        'loc-off',
+      );
+    });
+
+    it('una escritura en sede activa pasa con UNA sola consulta, y sin sede no consulta', async () => {
+      const header = runWith('POST', {}, { 'x-location-id': 'loc-1' });
+      await expect(header.result).resolves.toBe('loc-1');
+      expect(header.calls.findFirst).toBe(1);
+      const pinned = runWith('POST', { loc: ['loc-1'] });
+      await expect(pinned.result).resolves.toBe('loc-1');
+      expect(pinned.calls.findFirst).toBe(1);
+      const pinnedRead = runWith('GET', { loc: ['loc-1'] });
+      await expect(pinnedRead.result).resolves.toBe('loc-1');
+      expect(pinnedRead.calls.findFirst).toBe(0);
+      const consolidated = runWith('POST', {});
+      await expect(consolidated.result).resolves.toBeUndefined();
+      expect(consolidated.calls.findFirst).toBe(0);
     });
   });
 });

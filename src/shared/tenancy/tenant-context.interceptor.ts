@@ -45,7 +45,13 @@ export class TenantContextInterceptor implements NestInterceptor {
       // resuelve ANTES de abrir el store: así el handler ya corre con la sede
       // definitiva y nunca con una a medio validar (ver resolveActiveLocationId).
       const allowed = allowedLocationsOf(req);
-      resolveActiveLocationId(this.prisma, req.headers, hostTenantId, allowed)
+      resolveActiveLocationId(
+        this.prisma,
+        req.headers,
+        hostTenantId,
+        allowed,
+        req.method,
+      )
         .then((locationId) => {
           this.tenantContext.run(
             hostTenantId,

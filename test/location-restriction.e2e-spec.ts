@@ -16,6 +16,10 @@ import {
   LOCATION_NOT_ALLOWED_CODE,
   LOCATION_NOT_ALLOWED_MESSAGE,
 } from '../src/shared/tenancy/location-access';
+import {
+  LOCATION_INACTIVE_CODE,
+  LOCATION_INACTIVE_MESSAGE,
+} from '../src/shared/tenancy/active-location';
 import { PROVIDER_NOT_AT_LOCATION_MESSAGE } from '../src/modules/staff/domain/provider-location';
 import {
   REGIONAL_CARACAS_FIXTURE,
@@ -1189,6 +1193,269 @@ describe('Personal restringido a sedes (DX-089)', () => {
         where: { id: (res.body as { id: string }).id },
       });
       expect(row.locationId).toBe(a1);
+    });
+  });
+
+  // SEC-014: la ficha (recetas, documentos, implantes, evoluciones) se LEE
+  // desde toda la clínica, como el paciente; pero lo que se ESCRIBE sobre
+  // una fila sellada con su sede sigue la regla de DX-089-bis (403 con code).
+  describe('SEC-014: escrituras por id en la ficha de otra sede', () => {
+    const t = () => ({ tenantId: a.tenantId });
+    const hash = 'a'.repeat(64);
+    const seedRx = (locationId: string) =>
+      raw.prescription.create({
+        data: {
+          ...t(),
+          locationId,
+          patientId: patient,
+          professionalId: d.userId,
+          issuedAt: new Date('2026-10-20T14:00:00.000Z'),
+          dispensationDate: new Date('2026-10-20T00:00:00.000Z'),
+          validUntil: new Date('2026-11-19T00:00:00.000Z'),
+          patientName: 'Paciente DX089-1',
+          professionalName: 'Dr. D',
+          professionalLicense: 'MPPS-1234',
+          clinicName: 'Clínica A',
+          locationName: 'Sede',
+          singleFormat: true,
+          printQuantityInWords: true,
+          contentHash: hash,
+        },
+      });
+    const seedImplant = (locationId: string) =>
+      raw.patientImplant.create({
+        data: {
+          ...t(),
+          locationId,
+          patientId: patient,
+          professionalId: d.userId,
+          placedOn: new Date('2026-10-20T00:00:00.000Z'),
+          toothNumber: '36',
+          kind: 'IMPLANT',
+          manufacturer: 'Fabricante',
+          reference: 'REF-1',
+          lot: 'LOT-1',
+        },
+      });
+    const seedDocument = (locationId: string, n: number) =>
+      raw.patientDocument.create({
+        data: {
+          ...t(),
+          locationId,
+          patientId: patient,
+          category: 'REPORT',
+          originalName: `informe-${n}.pdf`,
+          mimeType: 'application/pdf',
+          sizeBytes: 10,
+          sha256: String(n).repeat(64).slice(0, 64),
+          storageKey: `patient-documents/${a.tenantId}/sec014-${n}.pdf`,
+          uploadedById: d.userId,
+        },
+      });
+    const seedEntry = (locationId: string) =>
+      raw.clinicalEntry.create({
+        data: {
+          ...t(),
+          locationId,
+          patientId: patient,
+          performedById: d.userId,
+          entryDate: new Date('2026-10-20T14:00:00.000Z'),
+          notes: 'Evolución SEC-014',
+        },
+      });
+    const reason = { reason: 'Registrado en la sede equivocada' };
+    const addendum = {
+      reason: 'Dato de la pieza dental mal transcrito',
+      text: 'Es la 36, no la 46.',
+    };
+
+    it('receta de otra sede: anular 403 sin cambio; verla, sí; en su sede, anula', async () => {
+      const other = await seedRx(a2);
+      for (const active of [undefined, a1]) {
+        expectNotAllowed(
+          await as(d, active).post(`/prescriptions/${other.id}/void`, reason),
+        );
+      }
+      expect(
+        await raw.prescription.findUniqueOrThrow({ where: { id: other.id } }),
+      ).toMatchObject({ status: 'ISSUED', voidedAt: null });
+      await as(d).get(`/prescriptions/${other.id}`).expect(200);
+      const mine = await seedRx(a1);
+      await as(d).post(`/prescriptions/${mine.id}/void`, reason).expect(200);
+    });
+
+    it('implante de otra sede: anular 403 sin cambio; en su sede, anula', async () => {
+      const other = await seedImplant(a2);
+      expectNotAllowed(await as(d).post(`/implants/${other.id}/void`, reason));
+      expect(
+        (
+          await raw.patientImplant.findUniqueOrThrow({
+            where: { id: other.id },
+          })
+        ).voidedAt,
+      ).toBeNull();
+      const mine = await seedImplant(a1);
+      await as(d).post(`/implants/${mine.id}/void`, reason).expect(200);
+    });
+
+    it('documento de otra sede: anular 403 sin cambio; verlo, sí; en su sede, anula', async () => {
+      const other = await seedDocument(a2, 1);
+      expectNotAllowed(
+        await as(d).post(
+          `/patients/${patient}/documents/${other.id}/void`,
+          reason,
+        ),
+      );
+      expect(
+        (
+          await raw.patientDocument.findUniqueOrThrow({
+            where: { id: other.id },
+          })
+        ).voidedAt,
+      ).toBeNull();
+      await as(d).get(`/patients/${patient}/documents/${other.id}`).expect(200);
+      const mine = await seedDocument(a1, 2);
+      await as(d)
+        .post(`/patients/${patient}/documents/${mine.id}/void`, reason)
+        .expect(200);
+    });
+
+    it('adenda a una evolución de otra sede: 403 sin escribir; leerlas, sí; en su sede, 201', async () => {
+      const other = await seedEntry(a2);
+      expectNotAllowed(
+        await as(d).post(
+          `/patients/${patient}/clinical-entries/${other.id}/addenda`,
+          addendum,
+        ),
+      );
+      expect(
+        await raw.clinicalEntryAddendum.count({
+          where: { clinicalEntryId: other.id },
+        }),
+      ).toBe(0);
+      await as(d)
+        .get(`/patients/${patient}/clinical-entries/${other.id}/addenda`)
+        .expect(200);
+      const mine = await seedEntry(a1);
+      await as(d)
+        .post(
+          `/patients/${patient}/clinical-entries/${mine.id}/addenda`,
+          addendum,
+        )
+        .expect(201);
+    });
+  });
+
+  // SEC-014: una sede desactivada conserva su historial, pero no admite
+  // escrituras nuevas con su cabecera (ni con el auto-pin de un token emitido
+  // antes de desactivarla).
+  describe('SEC-014: sede desactivada', () => {
+    let a4: string;
+    let z: Member;
+    let zToken: string;
+    let itemA4: string;
+
+    function expectInactive(res: request.Response) {
+      expect(res.status).toBe(400);
+      expect(res.body).toMatchObject({
+        code: LOCATION_INACTIVE_CODE,
+        message: LOCATION_INACTIVE_MESSAGE,
+      });
+    }
+
+    beforeAll(async () => {
+      a4 = (
+        (
+          await admin()
+            .post(
+              '/locations',
+              locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede Oeste' }),
+            )
+            .expect(201)
+        ).body as { id: string }
+      ).id;
+      itemA4 = (
+        await raw.inventoryItem.create({
+          data: {
+            tenantId: a.tenantId,
+            locationId: a4,
+            name: 'Guantes Oeste',
+            unit: 'caja',
+          },
+        })
+      ).id;
+      // Z trabaja solo en A4: su token lleva `loc = [A4]` (auto-pin).
+      z = await seedUser('z@dx089-restr-a.test', ClinicRole.ASSISTANT);
+      await restrict(z, [a4]);
+      zToken = await loginAs(app, a.host, z.email);
+      await admin().patch(`/locations/${a4}`, { isActive: false }).expect(200);
+    });
+
+    it('escribir con la cabecera de la sede desactivada → 400 en español, sin cambios', async () => {
+      const items = await raw.inventoryItem.count({
+        where: { tenantId: a.tenantId },
+      });
+      const movements = await raw.inventoryMovement.count({
+        where: { tenantId: a.tenantId },
+      });
+      const before = await raw.patient.findUniqueOrThrow({
+        where: { id: patient },
+      });
+      expectInactive(
+        await api(a.adminToken, a4).post('/inventory/items', {
+          name: 'Nuevo',
+          unit: 'caja',
+        }),
+      );
+      expectInactive(
+        await api(a.adminToken, a4).post(
+          `/inventory/items/${itemA4}/movements`,
+          { type: 'IN', quantity: 2 },
+        ),
+      );
+      expectInactive(
+        await api(a.adminToken, a4).patch(`/patients/${patient}`, {
+          firstName: 'Cambiado',
+        }),
+      );
+      expect(
+        await raw.inventoryItem.count({ where: { tenantId: a.tenantId } }),
+      ).toBe(items);
+      expect(
+        await raw.inventoryMovement.count({ where: { tenantId: a.tenantId } }),
+      ).toBe(movements);
+      expect(
+        await raw.patient.findUniqueOrThrow({ where: { id: patient } }),
+      ).toEqual(before);
+    });
+
+    it('leer el historial de la sede desactivada sigue funcionando', async () => {
+      const list = await api(a.adminToken, a4)
+        .get('/inventory/items')
+        .expect(200);
+      expect(itemIds(list.body)).toContain(itemA4);
+      await api(a.adminToken, a4).get(`/inventory/items/${itemA4}`).expect(200);
+      await api(a.adminToken, a4).get('/payments', PERIOD).expect(200);
+    });
+
+    it('auto-pin en la sede desactivada (token anterior): escribir 400, leer 200', async () => {
+      expectInactive(
+        await api(zToken).post(`/inventory/items/${itemA4}/movements`, {
+          type: 'IN',
+          quantity: 1,
+        }),
+      );
+      const list = await api(zToken).get('/inventory/items').expect(200);
+      expect(itemIds(list.body)).toContain(itemA4);
+    });
+
+    it('una sede activa sigue admitiendo escrituras con su cabecera', async () => {
+      await api(a.adminToken, a1)
+        .post(`/inventory/items/${item.a1}/movements`, {
+          type: 'IN',
+          quantity: 1,
+        })
+        .expect(201);
     });
   });
 });
