@@ -27,8 +27,9 @@ export const OVERLAP_MESSAGES: Record<
 };
 
 /**
- * DX-509-bis: código del 409 de solape al MOVER una cita (profesional,
- * paciente o, DX-492-bis, sillón). Con él la web distingue «ese hueco está
+ * DX-509-bis: código del 409 de solape al EDITAR una cita (PATCH: mover,
+ * cambiar de sillón o reactivarla) por el profesional, el paciente o
+ * (DX-492-bis) el sillón. Al agendar o atender sin cita no lo lleva. Con él la web distingue «ese hueco está
  * ocupado» de los demás 409 (paciente en la clínica, ítem cerrado...) y ofrece
  * el siguiente hueco libre.
  */

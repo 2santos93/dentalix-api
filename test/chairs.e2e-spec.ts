@@ -407,6 +407,33 @@ describe('Sillones por sede y anti-solape por sillón (e2e, DX-211)', () => {
       ).toBe(before);
     });
 
+    it('DX-492-bis: al editar, un `chairId` que no es un id da 400 en español (null sí quita el sillón)', async () => {
+      const mine = (
+        await book({
+          chairId: one.id,
+          patientId: patients[2],
+          start: at('16:00'),
+          end: at('16:30'),
+        }).expect(201)
+      ).body as AppointmentBody;
+      const bad = await as(
+        api().patch(`/api/v1/appointments/${mine.id}`),
+        reception.token,
+      )
+        .send({ chairId: 'sillon-1' })
+        .expect(400);
+      expect((bad.body as { message: string[] }).message).toEqual([
+        'El sillón no es válido: elige uno de la sede o quítalo',
+      ]);
+      const cleared = await as(
+        api().patch(`/api/v1/appointments/${mine.id}`),
+        reception.token,
+      )
+        .send({ chairId: null })
+        .expect(200);
+      expect((cleared.body as AppointmentBody).chairId).toBeNull();
+    });
+
     it('reprogramar al hueco ocupado del sillón: 409; cambiar de sillón a uno libre: 200', async () => {
       const mine = (
         await book({

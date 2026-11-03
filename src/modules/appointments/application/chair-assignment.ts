@@ -55,8 +55,9 @@ export class ChairAssignmentService {
 
   /**
    * 409 si otra cita viva y no cancelada ocupa el sillón en `[start, end)`.
-   * DX-492-bis: al mover (`moving`), con el código y el ámbito de los demás
-   * solapes, para que la web ofrezca el siguiente hueco.
+   * DX-492-bis: con `moving` (al editar la cita: moverla, cambiarle el sillón
+   * o reactivarla), con el código y el ámbito de los demás solapes, para que
+   * la web ofrezca el siguiente hueco. Al agendar o atender sin cita, sin él.
    */
   async assertFree(
     chair: Chair,
@@ -127,7 +128,7 @@ export class ChairAssignmentService {
   }
 }
 
-/** El 409 del sillón: al mover, con código y ámbito; si no, solo el mensaje. */
+/** El 409 del sillón: al editar, con código y ámbito; al crear, solo el mensaje. */
 function conflict(
   message: string,
   opts: { moving?: boolean },

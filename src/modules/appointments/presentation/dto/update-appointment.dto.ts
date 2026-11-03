@@ -14,6 +14,7 @@ import {
   MaxLength,
 } from 'class-validator';
 import { AppointmentStatus, CancellationReasonCode } from '@prisma/client';
+import { CHAIR_ID_INVALID_ON_EDIT_MESSAGE } from '../../../chairs/domain/chair-rules';
 import {
   CANCEL_REASON_TEXT_MAX,
   CANCELLATION_MESSAGES,
@@ -68,10 +69,10 @@ export class UpdateAppointmentDto {
     format: 'uuid',
     nullable: true,
     description:
-      'DX-211: cambiar el sillón (de la sede de la cita y activo; si no, 400/404) o quitarlo con null. Al cambiarlo o reagendar una cita con sillón se mira que esté libre en la franja (409 con su nombre y horas). Cambiar solo el sillón no anula el enlace de confirmación; queda auditado como movimiento.',
+      'DX-211: cambiar el sillón (de la sede de la cita y activo; si no, 400/404) o quitarlo con null. Al cambiarlo o reagendar una cita con sillón se mira que esté libre en la franja (409 con su nombre y horas, `code: APPOINTMENT_OVERLAP` y `scope: chair`; DX-492-bis). Un valor que no es un id: 400 en español. Cambiar solo el sillón no anula el enlace de confirmación; queda auditado como movimiento.',
   })
   @IsOptional()
-  @IsUUID()
+  @IsUUID(undefined, { message: CHAIR_ID_INVALID_ON_EDIT_MESSAGE })
   chairId?: string | null;
 
   @ApiPropertyOptional({

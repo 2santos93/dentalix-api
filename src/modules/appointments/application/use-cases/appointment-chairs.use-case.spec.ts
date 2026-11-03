@@ -266,6 +266,46 @@ describe('sillón de la cita (DX-211)', () => {
       });
     });
 
+    it('DX-492-bis: la carrera que gana otra cita al mover (23P01 por sillón) da el 409 con código y ámbito', async () => {
+      const chair = seedChair({ name: 'Sillón 1' });
+      const mine = await book({
+        chairId: chair.id,
+        providerId: 'dr',
+        patientId: 'p2',
+        start: at('17:00'),
+        end: at('17:30'),
+      });
+      const winner = repo.seed({
+        chairId: chair.id,
+        start: at('14:00'),
+        end: at('14:30'),
+      });
+      // El pre-check no la ve (llegó a la vez); la EXCLUDE la rechaza al escribir.
+      jest
+        .spyOn(repo, 'findOverlappingForChair')
+        .mockResolvedValueOnce([])
+        .mockResolvedValue([winner]);
+      jest
+        .spyOn(repo, 'update')
+        .mockRejectedValue(
+          new Prisma.PrismaClientUnknownRequestError(
+            'ERROR: conflicting key value violates exclusion constraint "appointments_no_overlap_per_chair" (23P01)',
+            { clientVersion: 'test' },
+          ),
+        );
+      const err = await update
+        .execute(mine.id, { start: at('14:00'), end: at('14:30') })
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ConflictException);
+      expect((err as ConflictException).getResponse()).toEqual({
+        statusCode: 409,
+        error: 'Conflict',
+        code: 'APPOINTMENT_OVERLAP',
+        scope: 'chair',
+        message: 'El sillón «Sillón 1» ya está ocupado de 10:00 a 10:30',
+      });
+    });
+
     it('cambiar solo de sillón valida el sillón destino y deja el movimiento auditado', async () => {
       const one = seedChair({ name: 'Sillón 1' });
       const two = seedChair({ name: 'Sillón 2' });
