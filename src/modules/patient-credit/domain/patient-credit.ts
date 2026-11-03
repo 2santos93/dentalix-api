@@ -12,8 +12,11 @@ import { fromCents, toCents } from '../../../shared/money/money';
  * saldo a favor (traspasos recibidos − traspasos dados − devoluciones) −
  * facturable (0 si el plan está cancelado o rechazado), si es positivo. Es la
  * misma cifra que el estado de cuenta muestra como saldo negativo del plan
- * (`computeBalances`). Lo abonado en OTRA moneda que la del plan no entra: el
- * traspaso entre monedas está fuera de alcance.
+ * (`computeBalances`). DX-472-bis: lo abonado en OTRA moneda entra por su base
+ * (el abono convertido una vez a la moneda del plan con su tasa congelada,
+ * DX-051), como en el saldo del plan; sin base todavía, no entra. El saldo a
+ * favor se mueve siempre en la moneda del plan: el traspaso a un plan de otra
+ * moneda sigue fuera de alcance.
  */
 
 export const CREDIT_REASON_MIN = 3;
@@ -95,7 +98,7 @@ export { fromCents, toCents };
 export interface PlanCreditInput {
   /** Facturable del plan (0 si no se cobra: cancelado o rechazado). */
   billableCents: number;
-  /** Abonos vivos al plan en su moneda. */
+  /** Abonos vivos al plan en su moneda (DX-472-bis: y los de otra, por su base). */
   paidCents: number;
   /** Σ asientos del saldo a favor del plan en su moneda (con signo). */
   entriesCents: number;

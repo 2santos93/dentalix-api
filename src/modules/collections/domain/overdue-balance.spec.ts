@@ -23,6 +23,8 @@ function aging(
         nextInstallment: null,
       },
     ],
+    paymentsWithoutRateCount: 0,
+    rateProviderTimedOut: false,
   };
 }
 

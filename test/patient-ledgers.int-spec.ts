@@ -40,6 +40,9 @@ type Plan = [
   number,
   number | null,
   [string, number][] | null,
+  // DX-472-bis: Σ bases de lo abonado en otra moneda y los que no tienen base.
+  number,
+  unknown[][] | null,
 ];
 type Schedule = [
   string,
@@ -161,7 +164,7 @@ async function expectedOf(tenantId: string): Promise<LedgerRow[]> {
       treatmentPlans: {
         include: {
           items: true,
-          payments: true,
+          payments: { include: { planAmounts: true } },
           acceptance: true,
           paymentPlans: { include: { installments: true } },
         },
@@ -200,9 +203,14 @@ async function expectedOf(tenantId: string): Promise<LedgerRow[]> {
         .filter((x) => x.currency === p.currency)
         .reduce((s, x) => s + Number(x.amount), 0);
       const other = new Map<string, number>();
+      let based = 0;
+      const pending: (typeof paid)[number][] = [];
       for (const x of paid) {
         if (x.currency === p.currency) continue;
         other.set(x.currency, (other.get(x.currency) ?? 0) + Number(x.amount));
+        const [base] = x.planAmounts;
+        if (base) based += Number(base.amount);
+        else pending.push(x);
       }
       return [
         p.id,
@@ -215,6 +223,23 @@ async function expectedOf(tenantId: string): Promise<LedgerRow[]> {
         other.size === 0
           ? null
           : [...other.entries()].sort(([a], [b]) => a.localeCompare(b)),
+        based,
+        pending.length === 0
+          ? null
+          : pending
+              .sort((x, y) => ms(x.paidAt) - ms(y.paidAt) || byId(x, y))
+              .map((x) => [
+                x.id,
+                x.currency,
+                Number(x.amount),
+                ms(x.paidAt),
+                x.locationId,
+                x.exchangeRateCurrency,
+                x.exchangeRateFrom === null ? null : Number(x.exchangeRateFrom),
+                x.exchangeRateTo === null ? null : Number(x.exchangeRateTo),
+                x.exchangeRateSource,
+                x.exchangeRateDate?.toISOString().slice(0, 10) ?? null,
+              ]),
       ];
     });
     const paymentPlans: Schedule[] = live
@@ -260,7 +285,9 @@ async function expectedOf(tenantId: string): Promise<LedgerRow[]> {
         null,
       owing:
         pa.deletedAt === null &&
-        (plans.some(([, , , , , billable, own]) => billable > (own ?? 0)) ||
+        (plans.some(
+          ([, , , , , billable, own, , based]) => billable > (own ?? 0) + based,
+        ) ||
           openings.some(([, , amount, , , paid]) => amount > paid)),
       ledger: { plans, paymentPlans, openings },
     };
@@ -460,11 +487,11 @@ describe('patient_ledgers: resumen por paciente mantenido por la BD (DX-155, int
       paidAt: new Date(Date.now() - 86400000),
     });
     await pay(a, planId, ana, 50000, { locationId: a.sede2 });
-    await pay(a, planId, ana, 10, { currency: 'USD' });
-    await pay(a, planId, ana, 5, { currency: 'USD' });
-    await pay(a, planId, ana, 7, { currency: 'EUR' });
+    const usd10 = await pay(a, planId, ana, 10, { currency: 'USD' });
+    const usd5 = await pay(a, planId, ana, 5, { currency: 'USD' });
+    const eur7 = await pay(a, planId, ana, 7, { currency: 'EUR' });
     const row = await rowOf(a, ana);
-    expect(row?.ledger.plans[0].slice(5)).toEqual([
+    expect(row?.ledger.plans[0].slice(5, 8)).toEqual([
       300000,
       150000,
       [
@@ -472,6 +499,10 @@ describe('patient_ledgers: resumen por paciente mantenido por la BD (DX-155, int
         ['USD', 15],
       ],
     ]);
+    // DX-472-bis: sin bases, los tres van uno a uno, por fecha de abono.
+    const [, , , , , , , , based, pending] = row!.ledger.plans[0];
+    expect(based).toBe(0);
+    expect(pending?.map((p) => p[0])).toEqual([usd10, usd5, eur7]);
     await expectInSync(a);
 
     // Anulación: como la hace PrismaPaymentRepository.softDelete.

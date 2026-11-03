@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import {
   CollectionChannel,
   CollectionOutcome,
+  ExchangeRateSource,
   PaymentPlanStatus,
   PaymentPromiseStatus,
   Prisma,
@@ -15,6 +16,7 @@ import { loadTenantZones } from '../../../shared/locations/reference-location';
 import type {
   DebtorCollections,
   DebtorDetails,
+  LedgerPendingPayment,
   PatientLedger,
 } from '../domain/entities/receivables.entity';
 import type {
@@ -42,6 +44,28 @@ type PlanTuple = [
   billable: number,
   paidOwn: number | null,
   paidOther: [currency: string, amount: number][] | null,
+  /** DX-472-bis: Σ de las bases de los abonos en otra moneda; ausente antes. */
+  paidBased?: number,
+  /** DX-472-bis: los abonos en otra moneda sin base; ausente antes. */
+  pending?: PendingTuple[] | null,
+];
+
+/**
+ * DX-472-bis: abono vivo en otra moneda que la de su plan, aún sin base: id,
+ * moneda, importe, paidAt (epoch ms), sede y su tasa congelada (DX-375; todo
+ * `null` si no la tiene).
+ */
+type PendingTuple = [
+  id: string,
+  currency: string,
+  amount: number,
+  paidMs: number,
+  locationId: string,
+  rateCurrency: string | null,
+  rateFrom: number | null,
+  rateTo: number | null,
+  rateSource: ExchangeRateSource | null,
+  rateDate: string | null,
 ];
 
 /** Plan de cuotas con sus cuotas ([secuencia, vencimiento epoch ms, importe]). */
@@ -144,6 +168,8 @@ export function toLedger({
     billable,
     paidOwn,
     paidOther,
+    paidBased,
+    pending,
   ] of ledger.plans) {
     out.plans.push({
       id,
@@ -152,6 +178,15 @@ export function toLedger({
       createdAt: new Date(createdMs),
       billable,
       agingFrom: new Date(agingFromMs),
+      // Una fila anterior a DX-472-bis no trae la posición 9: sin convertir.
+      ...(paidOther && paidBased !== undefined
+        ? {
+            otherCurrency: {
+              based: paidBased,
+              pending: (pending ?? []).map(pendingPaymentOf),
+            },
+          }
+        : {}),
     });
     if (paidOwn !== null) {
       out.paid.push({ treatmentPlanId: id, currency, amount: paidOwn });
@@ -161,6 +196,44 @@ export function toLedger({
     }
   }
   return out;
+}
+
+function pendingPaymentOf([
+  id,
+  currency,
+  amount,
+  paidMs,
+  locationId,
+  rateCurrency,
+  rateFrom,
+  rateTo,
+  rateSource,
+  rateDate,
+]: PendingTuple): LedgerPendingPayment {
+  return {
+    id,
+    currency,
+    amount,
+    paidAt: new Date(paidMs),
+    locationId,
+    exchangeRateCurrency: rateCurrency,
+    // Las columnas van juntas (CHECK payments_exchange_rate_check), como lee
+    // `frozenRateOf` la fila del abono.
+    frozenRate:
+      rateCurrency !== null &&
+      rateFrom !== null &&
+      rateTo !== null &&
+      rateSource !== null &&
+      rateDate !== null
+        ? {
+            currency: rateCurrency,
+            fromPerBase: rateFrom,
+            toPerBase: rateTo,
+            source: rateSource,
+            date: rateDate,
+          }
+        : null,
+  };
 }
 
 /**

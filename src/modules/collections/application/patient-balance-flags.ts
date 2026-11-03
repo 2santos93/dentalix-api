@@ -7,6 +7,8 @@ import {
 } from '../domain/ports/collections-repository.port';
 import { overdueView, type OverdueBalance } from '../domain/overdue-balance';
 import { COLLECTIONS_CLOCK, type CollectionsClock } from './collections-clock';
+import { PlanBalanceCalculator } from '../../payments/application/plan-balance-calculator';
+import { ledgerPlanBalanceInputs } from '../../receivables/application/ledger-plan-balances';
 
 /** Roles que ven el IMPORTE vencido (dato financiero, como la cartera). */
 export const OVERDUE_AMOUNT_ROLES: readonly ClinicRole[] = [
@@ -18,7 +20,8 @@ export const OVERDUE_AMOUNT_ROLES: readonly ClinicRole[] = [
  * Marca «Saldo vencido» de un LOTE de pacientes (DX-150): la agenda pide la de
  * todos los pacientes de sus tarjetas a la vez. Número FIJO de consultas
  * (resumen `patient_ledgers` por clave primaria + zonas de las sedes), sin
- * importar cuántas citas haya: sin N+1. El saldo es el de la cartera (DX-145).
+ * importar cuántas citas haya: sin N+1. El saldo es el de la cartera (DX-145),
+ * con lo abonado en otra moneda convertido (DX-472-bis).
  */
 @Injectable()
 export class PatientBalanceFlags {
@@ -26,6 +29,7 @@ export class PatientBalanceFlags {
     @Inject(COLLECTIONS_REPOSITORY)
     private readonly repo: CollectionsRepository,
     @Inject(COLLECTIONS_CLOCK) private readonly now: CollectionsClock,
+    private readonly planBalance: PlanBalanceCalculator,
   ) {}
 
   async forPatients(
@@ -39,6 +43,11 @@ export class PatientBalanceFlags {
     const ledgers = await this.repo.ledgersOf(ids);
     if (ledgers.length === 0) return out;
     const zoneOf = await this.repo.locationTimeZones();
+    // DX-472-bis: lo abonado en otra moneda cuenta convertido, como en la
+    // cartera; con el proveedor sin responder, esa deuda no sale vencida.
+    const planBalances = await this.planBalance.computeMany(
+      ledgerPlanBalanceInputs(ledgers, zoneOf),
+    );
     const now = this.now();
     const withAmounts = role !== null && OVERDUE_AMOUNT_ROLES.includes(role);
     for (const ledger of ledgers) {
@@ -46,7 +55,7 @@ export class PatientBalanceFlags {
       out.set(
         ledger.patientId,
         overdueView(
-          computePatientAging(ledger, { now, timeZone }),
+          computePatientAging(ledger, { now, timeZone, planBalances }),
           withAmounts,
         ),
       );

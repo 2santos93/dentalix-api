@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { TreatmentPlanStatus } from '@prisma/client';
 import { AccountStatementOtherCurrencyDto } from './account-statement.dto';
+import { PaymentWithoutRateDto } from '../../../payments/presentation/dto/plan-balance.dto';
 
 // Forma de cada elemento de `GET /patients/:patientId/billable-plans` (DX-067).
 // Solo documenta el contrato en Swagger (de aquí sale el tipo del cliente web);
@@ -36,19 +37,24 @@ export class BillablePlanDto {
 
   @ApiProperty({
     example: 1200000,
-    description: 'Abonos vivos en la moneda del plan',
+    description:
+      'Abonado en la moneda del plan, con los traspasos del saldo a favor. ' +
+      'DX-472-bis: lo abonado en otra moneda cuenta convertido con su tasa, ' +
+      'el mismo `paid` + `creditMovements` de GET /treatment-plans/:id/balance',
   })
   paid!: number;
 
   @ApiProperty({
     type: [AccountStatementOtherCurrencyDto],
-    description: 'Abonos vivos del plan hechos en otra moneda (sin convertir)',
+    description:
+      'Abonos vivos del plan hechos en otra moneda, tal como se entregaron (ya convertidos en `paid`)',
   })
   paidOtherCurrencies!: AccountStatementOtherCurrencyDto[];
 
   @ApiProperty({
     example: 1800000,
-    description: '`total - paid`; negativo = a favor del paciente',
+    description:
+      '`total - paid`; negativo = a favor del paciente. El `balance` de GET /treatment-plans/:id/balance (DX-472-bis)',
   })
   balance!: number;
 
@@ -58,4 +64,17 @@ export class BillablePlanDto {
       'crear otro responde 409).',
   })
   hasActivePaymentPlan!: boolean;
+
+  @ApiProperty({
+    type: [PaymentWithoutRateDto],
+    description:
+      'DX-472-bis: abonos en otra moneda que no suman en `paid` por falta de tasa (o porque el proveedor no respondió): los de GET /treatment-plans/:id/balance',
+  })
+  paymentsWithoutRate!: PaymentWithoutRateDto[];
+
+  @ApiProperty({
+    description:
+      'DX-472-bis: el proveedor de tasas no respondió a tiempo; volver a pedir la lista lo completa',
+  })
+  rateProviderTimedOut!: boolean;
 }

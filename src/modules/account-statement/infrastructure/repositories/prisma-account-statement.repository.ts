@@ -369,10 +369,11 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
   }
 
   /**
-   * Planes cobrables (DX-067): CUATRO consultas fijas, sin N+1 — paciente,
-   * planes no cancelados, suma de ítems facturables por plan (`groupBy`) y
-   * suma de abonos vivos por plan y moneda (`groupBy`), más los planes de pago
-   * activos. Mismo `runWithTenant` (RLS) y `patientId` en cada `where` que
+   * Planes cobrables (DX-067): consultas fijas, sin N+1 — paciente, planes no
+   * cancelados, suma de ítems facturables por plan (`groupBy`), abonos vivos
+   * de esos planes con su tasa congelada y sus bases (DX-472-bis: el saldo
+   * convertido de `/balance`), asientos del saldo a favor, planes de pago
+   * activos y la zona de las sedes de los abonos. Mismo `runWithTenant` (RLS) y `patientId` en cada `where` que
    * `load`; los índices `(tenantId, patientId)` de treatment_plans, payments y
    * payment_plans y `(tenantId, planId)` de los ítems cubren los filtros.
    *
@@ -408,49 +409,72 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
           status: { notIn: [...NON_BILLABLE_PLAN_STATUSES] },
         };
 
-        const [plans, itemSums, paidSums, activePaymentPlans, creditSums] =
-          await Promise.all([
-            tx.treatmentPlan.findMany({
-              where: billablePlan,
-              select: {
-                id: true,
-                status: true,
-                currency: true,
-                createdAt: true,
-              },
-              orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-            }),
-            tx.treatmentPlanItem.groupBy({
-              by: ['planId'],
-              where: {
-                deletedAt: null,
-                status: { in: BILLABLE_ITEM_STATUSES },
-                plan: billablePlan,
-              },
-              _sum: { price: true, discount: true },
-            }),
-            tx.payment.groupBy({
-              by: ['treatmentPlanId', 'currency'],
-              where: { patientId, deletedAt: null, plan: billablePlan },
-              _sum: { amount: true },
-            }),
-            tx.paymentPlan.findMany({
-              where: {
-                patientId,
-                status: 'ACTIVE',
-                deletedAt: null,
-                plan: billablePlan,
-              },
-              select: { treatmentPlanId: true },
-            }),
-            // DX-253: el saldo a favor traspasado o devuelto cuenta como
-            // abonado del plan (en su moneda).
-            tx.patientCreditEntry.groupBy({
-              by: ['treatmentPlanId', 'currency'],
-              where: { patientId, plan: billablePlan },
-              _sum: { amount: true },
-            }),
-          ]);
+        const [
+          plans,
+          itemSums,
+          payments,
+          activePaymentPlans,
+          bases,
+          creditSums,
+        ] = await Promise.all([
+          tx.treatmentPlan.findMany({
+            where: billablePlan,
+            select: {
+              id: true,
+              status: true,
+              currency: true,
+              createdAt: true,
+            },
+            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          }),
+          tx.treatmentPlanItem.groupBy({
+            by: ['planId'],
+            where: {
+              deletedAt: null,
+              status: { in: BILLABLE_ITEM_STATUSES },
+              plan: billablePlan,
+            },
+            _sum: { price: true, discount: true },
+          }),
+          // DX-472-bis: uno a uno (no sumados) para el saldo convertido,
+          // con su tasa congelada y su sede, como `load`.
+          tx.payment.findMany({
+            where: { patientId, deletedAt: null, plan: billablePlan },
+            select: {
+              id: true,
+              treatmentPlanId: true,
+              amount: true,
+              currency: true,
+              paidAt: true,
+              locationId: true,
+              ...FROZEN_RATE_SELECT,
+            },
+          }),
+          tx.paymentPlan.findMany({
+            where: {
+              patientId,
+              status: 'ACTIVE',
+              deletedAt: null,
+              plan: billablePlan,
+            },
+            select: { treatmentPlanId: true },
+          }),
+          // DX-472-bis: con base, un abono cuenta por ella (como en `load`).
+          tx.paymentPlanAmount.findMany({
+            where: {
+              tenantId,
+              payment: { patientId, deletedAt: null, plan: billablePlan },
+            },
+            select: { paymentId: true, amount: true },
+          }),
+          // DX-253: el saldo a favor traspasado o devuelto cuenta como
+          // abonado del plan (en su moneda).
+          tx.patientCreditEntry.groupBy({
+            by: ['treatmentPlanId', 'currency'],
+            where: { patientId, plan: billablePlan },
+            _sum: { amount: true },
+          }),
+        ]);
 
         const billableByPlan = new Map(
           itemSums.map((row) => [row.planId, netOf(row._sum)]),
@@ -459,16 +483,16 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
           string,
           { currency: string; amount: number }[]
         >();
-        for (const row of paidSums) {
+        for (const p of payments) {
           // El filtro `plan: billablePlan` ya deja fuera los abonos a un saldo
           // migrado (DX-262), que no tienen plan.
-          if (!row.treatmentPlanId) continue;
-          const list = paidByPlan.get(row.treatmentPlanId) ?? [];
-          list.push({
-            currency: row.currency,
-            amount: row._sum.amount?.toNumber() ?? 0,
-          });
-          paidByPlan.set(row.treatmentPlanId, list);
+          if (!p.treatmentPlanId) continue;
+          const list = paidByPlan.get(p.treatmentPlanId) ?? [];
+          const amount = p.amount.toNumber();
+          const same = list.find((x) => x.currency === p.currency);
+          if (same) same.amount = round2(same.amount + amount);
+          else list.push({ currency: p.currency, amount });
+          paidByPlan.set(p.treatmentPlanId, list);
         }
         for (const row of creditSums) {
           const list = paidByPlan.get(row.treatmentPlanId) ?? [];
@@ -482,11 +506,46 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
           activePaymentPlans.map((pp) => pp.treatmentPlanId),
         );
 
+        // Día civil de cada abono en su sede (DX-097): el de su tasa.
+        const timeZoneOf = await resolveLocationTimeZones(
+          tx,
+          tenantId,
+          payments.map((p) => p.locationId),
+        );
+        const baseOf = new Map(
+          bases.map((b) => [b.paymentId, b.amount.toNumber()] as const),
+        );
+
         return plans.map((plan) => ({
           ...plan,
           billable: billableByPlan.get(plan.id) ?? 0,
           paidByCurrency: paidByPlan.get(plan.id) ?? [],
           hasActivePaymentPlan: withActivePaymentPlan.has(plan.id),
+          // DX-472-bis: el saldo del plan con la cuenta de `/balance`.
+          balanceInput: {
+            plan,
+            items: [],
+            billable: billableByPlan.get(plan.id) ?? 0,
+            payments: payments
+              .filter((p) => p.treatmentPlanId === plan.id)
+              .map((p) => ({
+                id: p.id,
+                amount: p.amount.toNumber(),
+                currency: p.currency,
+                paidOn: civilDateIn(p.paidAt, timeZoneOf(p.locationId)),
+                exchangeRateCurrency: p.exchangeRateCurrency,
+                frozenRate: frozenRateOf(p),
+              })),
+            baseOf,
+            creditMovements:
+              creditSums
+                .find(
+                  (c) =>
+                    c.treatmentPlanId === plan.id &&
+                    c.currency === plan.currency,
+                )
+                ?._sum.amount?.toNumber() ?? 0,
+          },
         }));
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },

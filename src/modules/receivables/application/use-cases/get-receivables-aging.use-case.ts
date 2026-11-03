@@ -20,6 +20,8 @@ import {
   summarizeCurrencies,
 } from '../compute-patient-aging';
 import { civilDateIn } from '../../../../shared/time/civil-day';
+import { PlanBalanceCalculator } from '../../../payments/application/plan-balance-calculator';
+import { ledgerPlanBalanceInputs } from '../ledger-plan-balances';
 import { whatsAppDigits } from '../../../../shared/phone/phone-number';
 
 export const RECEIVABLES_DEFAULT_PAGE_SIZE = 20;
@@ -94,6 +96,17 @@ export interface ReceivablesAgingPage {
   pageSize: number;
   /** Por moneda, sobre TODAS las filas filtradas (no solo la página). */
   totals: AgingTotal[];
+  /**
+   * DX-472-bis: abonos en otra moneda que no suman en las filas filtradas
+   * por falta de tasa (o porque el proveedor no respondió): cifras
+   * incompletas, como en el estado de cuenta.
+   */
+  paymentsWithoutRateCount: number;
+  /**
+   * DX-472-bis: el proveedor de tasas no respondió a tiempo para alguna fila
+   * filtrada; volver a pedir la cartera la completa cuando responda.
+   */
+  rateProviderTimedOut: boolean;
 }
 
 interface ScopedRow {
@@ -200,6 +213,7 @@ export class GetReceivablesAgingUseCase {
     private readonly repo: ReceivablesRepository,
     @Inject(RECEIVABLES_CLOCK)
     private readonly now: ReceivablesClock,
+    private readonly planBalance: PlanBalanceCalculator,
   ) {}
 
   async execute(input: ReceivablesAgingInput): Promise<ReceivablesAgingPage> {
@@ -220,6 +234,11 @@ export class GetReceivablesAgingUseCase {
       page,
       pageSize,
       totals: totalsOf(rows),
+      paymentsWithoutRateCount: rows.reduce(
+        (sum, r) => sum + r.aging.paymentsWithoutRateCount,
+        0,
+      ),
+      rateProviderTimedOut: rows.some((r) => r.aging.rateProviderTimedOut),
     };
   }
 
@@ -245,6 +264,11 @@ export class GetReceivablesAgingUseCase {
       this.repo.loadLedgers({ locationId: location?.id }),
       this.repo.locationTimeZones(),
     ]);
+    // DX-472-bis: lo abonado en otra moneda, convertido como en `/balance`,
+    // con UN plazo para toda la cartera; casi siempre sin red (tasa congelada).
+    const planBalances = await this.planBalance.computeMany(
+      ledgerPlanBalanceInputs(ledgers, zoneOf),
+    );
     const now = this.now();
     const minAge = filters.minAgeDays ?? null;
     const minBalanceCents =
@@ -253,10 +277,15 @@ export class GetReceivablesAgingUseCase {
     const rows: ScopedRow[] = [];
     for (const ledger of ledgers) {
       const timeZone = zoneOf(ledger.locationId);
-      const full = computePatientAging(ledger, { now, timeZone });
+      const full = computePatientAging(ledger, {
+        now,
+        timeZone,
+        planBalances,
+      });
       const aging = filters.currency
         ? summarizeCurrencies(
             full.currencies.filter((c) => c.currency === filters.currency),
+            full,
           )
         : full;
       // Deudor = debe algo; un saldo solo a favor no es cartera.

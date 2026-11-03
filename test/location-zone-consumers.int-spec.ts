@@ -7,6 +7,7 @@ import { PrismaMedicalAlertsRepository } from '../src/modules/medical-history/in
 import { PatientMedicalAlertFlags } from '../src/modules/medical-history/application/patient-medical-alert-flags';
 import { PrismaReceivablesRepository } from '../src/modules/receivables/infrastructure/prisma-receivables.repository';
 import { GetReceivablesAgingUseCase } from '../src/modules/receivables/application/use-cases/get-receivables-aging.use-case';
+import { planBalanceWithoutLiveRates } from '../src/modules/payments/application/__fixtures__/plan-balance-without-live-rates';
 import { PrismaPatientConsentRepository } from '../src/modules/consents/infrastructure/repositories/prisma-patient-consent.repository';
 import { PrismaDocumentTypeNamesRepository } from '../src/modules/patients/infrastructure/repositories/prisma-document-type-names.repository';
 import { PreviewPatientConsentUseCase } from '../src/modules/consents/application/use-cases/patient-consents.use-cases';
@@ -311,6 +312,7 @@ describe('consumidores de la zona de la sede: día civil en Tokio (int, G1)', ()
     const aging = new GetReceivablesAgingUseCase(
       new PrismaReceivablesRepository(prisma, tenantContext),
       () => NOW,
+      planBalanceWithoutLiveRates(),
     );
     const ageOf = (page: Awaited<ReturnType<typeof aging.execute>>) =>
       new Map(page.items.map((i) => [i.patient.id, i.oldestAgeDays]));

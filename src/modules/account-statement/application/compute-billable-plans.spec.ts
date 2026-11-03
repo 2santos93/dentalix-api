@@ -29,10 +29,12 @@ describe('computeBillablePlans', () => {
       paidOtherCurrencies: [],
       balance: 699.9,
       hasActivePaymentPlan: false,
+      paymentsWithoutRate: [],
+      rateProviderTimedOut: false,
     });
   });
 
-  it('un abono en otra moneda se informa aparte y no descuenta el saldo', () => {
+  it('sin el saldo de `/balance`, un abono en otra moneda se informa aparte y no descuenta el saldo', () => {
     const [plan] = computeBillablePlans([
       row({
         paidByCurrency: [
@@ -88,5 +90,68 @@ describe('computeBillablePlans', () => {
       row({ paidByCurrency: [{ currency: 'VES', amount: 1500 }] }),
     ]);
     expect(plan.balance).toBe(-500);
+  });
+
+  it('con el saldo de `/balance` (DX-472-bis): lo de otra moneda cuenta convertido y los avisos pasan', () => {
+    const withoutRate = {
+      paymentId: 'pay-2',
+      amount: 720,
+      currency: 'VES',
+      paidOn: '2026-03-06',
+    };
+    const [plan] = computeBillablePlans(
+      [
+        row({
+          currency: 'USD',
+          billable: 100,
+          paidByCurrency: [{ currency: 'VES', amount: 4320 }],
+        }),
+      ],
+      new Map([
+        [
+          'tp-1',
+          {
+            planCurrency: 'USD',
+            billable: 100,
+            paid: 100,
+            creditMovements: 0,
+            balance: 0,
+            paymentsCount: 2,
+            paymentsWithoutRate: [withoutRate],
+            rateProviderTimedOut: true,
+          },
+        ],
+      ]),
+    );
+    expect(plan).toMatchObject({
+      total: 100,
+      paid: 100,
+      balance: 0,
+      paidOtherCurrencies: [{ currency: 'VES', amount: 4320 }],
+      paymentsWithoutRate: [withoutRate],
+      rateProviderTimedOut: true,
+    });
+  });
+
+  it('con el saldo de `/balance`, los asientos del saldo a favor suman a lo abonado', () => {
+    const [plan] = computeBillablePlans(
+      [row({ currency: 'USD', billable: 100 })],
+      new Map([
+        [
+          'tp-1',
+          {
+            planCurrency: 'USD',
+            billable: 100,
+            paid: 30,
+            creditMovements: 20,
+            balance: 50,
+            paymentsCount: 1,
+            paymentsWithoutRate: [],
+            rateProviderTimedOut: false,
+          },
+        ],
+      ]),
+    );
+    expect(plan).toMatchObject({ paid: 50, balance: 50 });
   });
 });

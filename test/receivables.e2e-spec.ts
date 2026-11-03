@@ -85,6 +85,8 @@ interface AgingRow {
   locationId: string | null;
   oldestAgeDays: number | null;
   ageApproximate: boolean;
+  paymentsWithoutRateCount: number;
+  rateProviderTimedOut: boolean;
   currencies: AgingCurrency[];
   lastPayment: { paidOn: string; amount: number; currency: string } | null;
   nextInstallment: { dueDate: string; amount: number; currency: string } | null;
@@ -101,7 +103,7 @@ interface AgingPage {
 }
 
 interface StatementBody {
-  summary: { currency: string; balance: number }[];
+  summary: { currency: string; balance: number; convertedBalance: number }[];
 }
 
 describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () => {
@@ -453,7 +455,13 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
       .set('X-Location-Id', sedePrincipal)
       .expect(200);
     const body = res.body as Record<string, unknown>;
-    expect(Object.keys(body).sort()).toEqual(['asOf', 'scope', 'totals']);
+    expect(Object.keys(body).sort()).toEqual([
+      'asOf',
+      'paymentsWithoutRateCount',
+      'rateProviderTimedOut',
+      'scope',
+      'totals',
+    ]);
     expect(body.asOf).toBe(list.asOf);
     expect(body.scope).toEqual(list.scope);
     expect(body.totals).toEqual(list.totals);
@@ -522,7 +530,9 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
       });
 
     // mixto: VES 100.000, abona 30.000 VES y 10 USD; un abono de 50.000 VES
-    // anulado no cuenta. Debe 70.000 VES y tiene 10 USD a favor.
+    // anulado no cuenta. Debe 70.000 VES. Los 10 USD no tienen tasa (este
+    // entorno no tiene proveedor): como en el estado de cuenta desde DX-472,
+    // no suman ni quedan a favor en USD, y la fila lo avisa (DX-472-bis).
     const mixto = await patient(clinicC, 'Mixto', 'CAR-C1');
     const planMixto = await plan(clinicC, mixto, 100000, {
       createdDaysAgo: 45,
@@ -562,21 +572,20 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
         clinicC,
         `/patients/${row.patient.id}/account-statement`,
       ).expect(200);
+      // DX-472-bis: el saldo que pinta el estado de cuenta (`convertedBalance`);
+      // una moneda que queda a 0 no es fila de la cartera.
       expect(row.currencies.map((c) => [c.currency, c.balance])).toEqual(
-        (statement.body as StatementBody).summary.map((s) => [
-          s.currency,
-          s.balance,
-        ]),
+        (statement.body as StatementBody).summary
+          .filter((s) => s.convertedBalance !== 0)
+          .map((s) => [s.currency, s.convertedBalance]),
       );
     }
     const mixtoRow = all.items.find((r) => r.patient.id === mixto);
     expect(mixtoRow?.locationId).toBe(sedeC);
     expect(
       mixtoRow?.currencies.map((c) => [c.currency, c.debt, c.credit]),
-    ).toEqual([
-      ['USD', 0, 10],
-      ['VES', 70000, 0],
-    ]);
+    ).toEqual([['VES', 70000, 0]]);
+    expect(mixtoRow?.paymentsWithoutRateCount).toBe(1);
     expect(all.items.find((r) => r.patient.id === sinSede)?.locationId).toBe(
       null,
     );

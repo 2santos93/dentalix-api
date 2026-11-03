@@ -1,4 +1,8 @@
 import { TreatmentPlanStatus } from '@prisma/client';
+import type {
+  PaymentWithoutRate,
+  PlanBalanceInput,
+} from '../../../payments/application/use-cases/get-plan-balance.use-case';
 
 /*
  * Planes COBRABLES de un paciente (DX-067): lo mínimo para que quien cobra
@@ -22,6 +26,11 @@ export interface BillablePlanRow {
   paidByCurrency: { currency: string; amount: number }[];
   /** Si ya tiene un plan de pagos ACTIVE (solo admite uno). */
   hasActivePaymentPlan: boolean;
+  /**
+   * DX-472-bis: lo que necesita el saldo del plan (`PlanBalanceCalculator`).
+   * Sin él, lo abonado en otra moneda no cuenta (como antes).
+   */
+  balanceInput?: PlanBalanceInput;
 }
 
 export interface BillablePlan {
@@ -31,11 +40,19 @@ export interface BillablePlan {
   createdAt: Date;
   /** Facturable del plan, en su moneda. */
   total: number;
-  /** Abonos vivos hechos en la moneda del plan. */
+  /**
+   * Abonado en la moneda del plan, más los asientos del saldo a favor
+   * (DX-253). DX-472-bis: lo abonado en otra moneda cuenta convertido, como
+   * en `/balance` y en el estado de cuenta.
+   */
   paid: number;
-  /** Abonos vivos en otra moneda: se informan aparte, sin convertir. */
+  /** Abonos vivos en otra moneda tal como se entregaron, sin convertir. */
   paidOtherCurrencies: { currency: string; amount: number }[];
-  /** `total - paid`; negativo = a favor del paciente. */
+  /** `total - paid`; negativo = a favor del paciente. El de `/balance`. */
   balance: number;
   hasActivePaymentPlan: boolean;
+  /** DX-472-bis: abonos que no suman por falta de tasa (los de `/balance`). */
+  paymentsWithoutRate: PaymentWithoutRate[];
+  /** DX-472-bis: el proveedor no respondió a tiempo; volver a pedirlo. */
+  rateProviderTimedOut: boolean;
 }

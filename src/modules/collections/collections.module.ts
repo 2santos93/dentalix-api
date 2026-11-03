@@ -3,6 +3,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 import { JobsModule } from '../jobs/jobs.module';
+import { PlanBalanceModule } from '../payments/plan-balance.module';
 import { COLLECTIONS_CLOCK } from './application/collections-clock';
 import { CollectionsJobs } from './application/collections-jobs';
 import { PatientBalanceFlags } from './application/patient-balance-flags';
@@ -23,7 +24,8 @@ import { CollectionsController } from './presentation/collections.controller';
  * ficha) y `SettlePaymentPromises` (abonos).
  */
 @Module({
-  imports: [JwtModule.register({}), JobsModule],
+  // DX-472-bis: el chip cuenta lo abonado en otra moneda como la cartera.
+  imports: [JwtModule.register({}), JobsModule, PlanBalanceModule],
   controllers: [CollectionsController],
   providers: [
     CreateCollectionNoteUseCase,

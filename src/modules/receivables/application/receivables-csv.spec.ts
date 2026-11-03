@@ -13,6 +13,8 @@ function row(overrides: Partial<AgingCsvRow> = {}): AgingCsvRow {
     locationId: 'loc-1',
     oldestAgeDays: 120,
     ageApproximate: true,
+    paymentsWithoutRateCount: 0,
+    rateProviderTimedOut: false,
     currencies: [
       {
         currency: 'VES',

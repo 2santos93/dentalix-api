@@ -90,7 +90,7 @@ export class ReceivablesController {
   @ApiOperation({
     summary: 'Totales de la cartera por antigüedad, sin pacientes',
     description:
-      'Los `totals` de GET /receivables/aging con los mismos filtros, sin filas. Por moneda, sin convertir.',
+      'Los `totals` de GET /receivables/aging con los mismos filtros, sin filas. Por moneda; lo abonado en otra moneda, convertido a la del plan (DX-472-bis).',
   })
   @ApiHeader(LOCATION_HEADER)
   @ApiOkResponse({ type: ReceivablesAgingSummaryDto })
@@ -111,7 +111,13 @@ export class ReceivablesController {
       page: 1,
       pageSize: 1,
     });
-    return { asOf: page.asOf, scope: page.scope, totals: page.totals };
+    return {
+      asOf: page.asOf,
+      scope: page.scope,
+      totals: page.totals,
+      paymentsWithoutRateCount: page.paymentsWithoutRateCount,
+      rateProviderTimedOut: page.rateProviderTimedOut,
+    };
   }
 
   @Audit({
@@ -127,8 +133,10 @@ export class ReceivablesController {
       'El saldo de cada paciente es el de su estado de cuenta (mismo cálculo), ' +
       'repartido por antigüedad: cada cuota desde su vencimiento; el saldo sin ' +
       'cuotas desde la aceptación (o presentación, o creación) del plan, con ' +
-      '`ageApproximate`. Días civiles de la zona de la sede. Por moneda, sin ' +
-      'convertir; el saldo a favor va aparte. Sin datos clínicos. DX-150: ' +
+      '`ageApproximate`. Días civiles de la zona de la sede. Por moneda; lo ' +
+      'abonado en otra moneda cuenta convertido a la del plan, como en el ' +
+      'estado de cuenta (DX-472-bis; avisos `paymentsWithoutRateCount` y ' +
+      '`rateProviderTimedOut`); el saldo a favor va aparte. Sin datos clínicos. DX-150: ' +
       'cada fila trae su última gestión de cobro y su último compromiso de ' +
       'pago; filtros `providerId` y `hasPromise`.',
   })

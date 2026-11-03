@@ -41,6 +41,8 @@ const BILLABLE_PLAN_KEYS = [
   'id',
   'paid',
   'paidOtherCurrencies',
+  'paymentsWithoutRate',
+  'rateProviderTimedOut',
   'status',
   'total',
 ];
@@ -328,11 +330,17 @@ describe('Planes cobrables — GET /patients/:patientId/billable-plans (e2e, DX-
       currency: 'USD',
       createdAt: expect.any(String) as string,
       total: 1000,
-      // El anulado no suma; el abono en VES va aparte, sin convertir.
+      // El anulado no suma; el abono en VES se informa tal cual y, sin
+      // proveedor de tasas en test, queda «sin tasa» como en `/balance`
+      // (DX-472-bis): no suma y se avisa.
       paid: 300,
       paidOtherCurrencies: [{ currency: 'VES', amount: 50000 }],
       balance: 700,
       hasActivePaymentPlan: true,
+      paymentsWithoutRate: [
+        expect.objectContaining({ amount: 50000, currency: 'VES' }),
+      ],
+      rateProviderTimedOut: false,
     });
     expect(byId.get(vesPlan)).toMatchObject({
       status: 'COMPLETED',

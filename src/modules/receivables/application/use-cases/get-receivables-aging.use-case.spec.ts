@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { planBalanceWithoutLiveRates } from '../../../payments/application/__fixtures__/plan-balance-without-live-rates';
 import { locationZonesOf } from '../../../../shared/locations/location-time-zone';
 import type {
   DebtorCollections,
@@ -135,7 +136,11 @@ describe('GetReceivablesAgingUseCase', () => {
     repo = new InMemoryReceivablesRepository();
     // La región por defecto del teléfono de la sede Norte (DX-329).
     repo.phoneRegions.set(NORTE.id, 'VE');
-    useCase = new GetReceivablesAgingUseCase(repo, () => NOW);
+    useCase = new GetReceivablesAgingUseCase(
+      repo,
+      () => NOW,
+      planBalanceWithoutLiveRates(),
+    );
     repo.ledgers = [
       ledger('p-reciente', 100000, '2026-10-07T17:00:00.000Z'), // 10 días
       ledger('p-antiguo', 500000, '2026-06-19T17:00:00.000Z'), // 120 días

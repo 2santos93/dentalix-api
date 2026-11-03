@@ -449,4 +449,180 @@ describe('computePatientAging', () => {
       expect(aging.currencies[0].buckets.over90).toBe(300);
     });
   });
+
+  describe('DX-472-bis: lo abonado en otra moneda, convertido como en el estado de cuenta', () => {
+    const usdPlan = plan('tp-usd', {
+      currency: 'USD',
+      billable: 100,
+      agingFrom: new Date('2026-08-03T12:00:00.000Z'),
+    });
+    const usdSchedule = schedule(
+      'tp-usd',
+      [
+        ['2026-08-03', 50], // hace 75 días
+        ['2026-09-03', 50], // hace 44 días
+      ],
+      { currency: 'USD' },
+    );
+    const vesPaid = {
+      treatmentPlanId: 'tp-usd',
+      currency: 'VES',
+      amount: 3600,
+    };
+    const balance = (paid: number, overrides: object = {}) =>
+      new Map([
+        [
+          'tp-usd',
+          {
+            planCurrency: 'USD',
+            billable: 100,
+            paid,
+            creditMovements: 0,
+            balance: 100 - paid,
+            paymentsCount: 1,
+            paymentsWithoutRate: [],
+            rateProviderTimedOut: false,
+            ...overrides,
+          },
+        ],
+      ]);
+
+    it('USD 100 pagado con Bs 3.600 a tasa 36: nada que deber y ningún bolívar a favor', () => {
+      const aging = computePatientAging(
+        ledger({
+          plans: [usdPlan],
+          paid: [vesPaid],
+          paymentPlans: [usdSchedule],
+        }),
+        { now: NOW, timeZone: CARACAS, planBalances: balance(100) },
+      );
+      expect(aging).toEqual({
+        currencies: [],
+        oldestAgeDays: null,
+        ageApproximate: false,
+        paymentsWithoutRateCount: 0,
+        rateProviderTimedOut: false,
+      });
+    });
+
+    it('sin el saldo convertido (fila anterior): como antes, deuda en USD y bolívares a favor', () => {
+      const aging = computePatientAging(
+        ledger({
+          plans: [usdPlan],
+          paid: [vesPaid],
+          paymentPlans: [usdSchedule],
+        }),
+        { now: NOW, timeZone: CARACAS },
+      );
+      expect(
+        aging.currencies.map(({ currency, debt, credit }) => ({
+          currency,
+          debt,
+          credit,
+        })),
+      ).toEqual([
+        { currency: 'USD', debt: 100, credit: 0 },
+        { currency: 'VES', debt: 0, credit: 3600 },
+      ]);
+    });
+
+    it('un abono «sin tasa» no suma ni queda a favor; la fila lo cuenta y lo pasado sigue vencido', () => {
+      const aging = computePatientAging(
+        ledger({
+          plans: [usdPlan],
+          paid: [vesPaid],
+          paymentPlans: [usdSchedule],
+        }),
+        {
+          now: NOW,
+          timeZone: CARACAS,
+          planBalances: balance(0, {
+            paymentsWithoutRate: [
+              {
+                paymentId: 'pay-1',
+                amount: 3600,
+                currency: 'VES',
+                paidOn: '2026-10-14',
+              },
+            ],
+          }),
+        },
+      );
+      expect(
+        aging.currencies.map((c) => [c.currency, c.debt, c.credit]),
+      ).toEqual([['USD', 100, 0]]);
+      expect(aging.oldestAgeDays).toBe(75);
+      expect(aging.paymentsWithoutRateCount).toBe(1);
+      expect(aging.rateProviderTimedOut).toBe(false);
+    });
+
+    it('con el proveedor sin responder, la deuda del plan va a «por vencer»: nada vencido', () => {
+      const aging = computePatientAging(
+        ledger({
+          plans: [usdPlan],
+          paid: [vesPaid],
+          paymentPlans: [usdSchedule],
+        }),
+        {
+          now: NOW,
+          timeZone: CARACAS,
+          planBalances: balance(0, {
+            rateProviderTimedOut: true,
+            paymentsWithoutRate: [
+              {
+                paymentId: 'pay-1',
+                amount: 3600,
+                currency: 'VES',
+                paidOn: '2026-10-14',
+              },
+            ],
+          }),
+        },
+      );
+      const [usd] = aging.currencies;
+      expect(usd).toMatchObject({
+        currency: 'USD',
+        debt: 100,
+        oldestAgeDays: null,
+      });
+      expect(usd.buckets).toMatchObject({
+        current: 100,
+        days31to60: 0,
+        days61to90: 0,
+      });
+      expect(aging.oldestAgeDays).toBeNull();
+      expect(aging.rateProviderTimedOut).toBe(true);
+    });
+
+    it('plan cancelado con abono en bolívares: a favor en USD, como el saldo negativo del plan', () => {
+      const aging = computePatientAging(
+        ledger({
+          plans: [{ ...usdPlan, status: 'CANCELLED' }],
+          paid: [vesPaid],
+        }),
+        {
+          now: NOW,
+          timeZone: CARACAS,
+          planBalances: new Map([
+            [
+              'tp-usd',
+              {
+                planCurrency: 'USD',
+                billable: 0,
+                paid: 100,
+                creditMovements: 0,
+                balance: -100,
+                paymentsCount: 1,
+                paymentsWithoutRate: [],
+                rateProviderTimedOut: false,
+              },
+            ],
+          ]),
+        },
+      );
+      expect(
+        aging.currencies.map((c) => [c.currency, c.balance, c.debt, c.credit]),
+      ).toEqual([['USD', -100, 0, 100]]);
+    });
+  });
 });
