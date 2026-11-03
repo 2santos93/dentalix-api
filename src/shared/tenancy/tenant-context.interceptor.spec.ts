@@ -419,4 +419,94 @@ describe('TenantContextInterceptor', () => {
       expect(consolidated.calls.findFirst).toBe(0);
     });
   });
+
+  describe('locationId del cuerpo en escrituras (SEC-014)', () => {
+    const ACTIVE = '11111111-1111-4111-8111-111111111111';
+    const OFF = '22222222-2222-4222-8222-222222222222';
+    const UNKNOWN = '33333333-3333-4333-8333-333333333333';
+
+    function runWith(
+      method: string,
+      body: unknown,
+      headers: Record<string, string> = {},
+    ): { result: Promise<unknown>; calls: { findFirst: number } } {
+      const tenantContext = new TenantContextService();
+      const prisma = makePrisma([ACTIVE, OFF], [OFF]) as unknown as {
+        calls: { findFirst: number };
+      };
+      const interceptor = new TenantContextInterceptor(
+        tenantContext,
+        prisma as never,
+      );
+      const ctx = makeCtx({
+        tenantHost: { tenantId: 't-1' },
+        user: { tenantId: 't-1', sub: 'u', role: 'ADMIN' },
+        headers,
+        method,
+        body,
+      });
+      const result = new Promise((resolve, reject) => {
+        interceptor
+          .intercept(ctx, {
+            handle: () =>
+              new Observable((sub) => {
+                sub.next('handled');
+                sub.complete();
+              }),
+          })
+          .subscribe({ next: resolve, error: reject });
+      });
+      return { result, calls: prisma.calls };
+    }
+
+    it('alta con la sede del cuerpo desactivada → 400 LOCATION_INACTIVE, sin llegar al handler', async () => {
+      for (const method of ['POST', 'PUT', 'PATCH']) {
+        const err = await runWith(method, { locationId: OFF }).result.catch(
+          (e: unknown) => e,
+        );
+        expect(err).toBeInstanceOf(BadRequestException);
+        expect((err as BadRequestException).getResponse()).toMatchObject({
+          code: 'LOCATION_INACTIVE',
+        });
+      }
+    });
+
+    it('aunque la cabecera sea de una sede activa', async () => {
+      const err = await runWith(
+        'POST',
+        { locationId: OFF },
+        { 'x-location-id': ACTIVE },
+      ).result.catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(BadRequestException);
+    });
+
+    it('sede activa: pasa con una consulta; la misma que la cabecera, sin otra', async () => {
+      const body = runWith('POST', { locationId: ACTIVE });
+      await expect(body.result).resolves.toBe('handled');
+      expect(body.calls.findFirst).toBe(1);
+      const same = runWith(
+        'POST',
+        { locationId: ACTIVE },
+        { 'x-location-id': ACTIVE },
+      );
+      await expect(same.result).resolves.toBe('handled');
+      expect(same.calls.findFirst).toBe(1);
+    });
+
+    it('lecturas, null, sin locationId, no UUID o sede desconocida: no decide aquí', async () => {
+      const cases: [string, unknown, number][] = [
+        ['GET', { locationId: OFF }, 0],
+        ['POST', { locationId: null }, 0],
+        ['POST', { name: 'Sillón 1' }, 0],
+        ['POST', undefined, 0],
+        ['POST', { locationId: 'norte' }, 0],
+        ['POST', { locationId: UNKNOWN }, 1],
+      ];
+      for (const [method, body, queries] of cases) {
+        const run = runWith(method, body);
+        await expect(run.result).resolves.toBe('handled');
+        expect(run.calls.findFirst).toBe(queries);
+      }
+    });
+  });
 });

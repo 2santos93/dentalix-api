@@ -131,6 +131,7 @@ export class PrismaSlotOfferRepository implements SlotOfferRepository {
               select: {
                 id: true,
                 name: true,
+                isActive: true,
                 address: true,
                 timeZone: true,
                 locale: true,
@@ -177,6 +178,7 @@ export class PrismaSlotOfferRepository implements SlotOfferRepository {
           patientFirstName: row.patient.firstName,
           providerName: membership?.user.fullName ?? null,
           locationName: row.location.name,
+          locationActive: row.location.isActive,
           locationAddress: row.location.address,
           timeZone: requireLocationTimeZone(row.location),
           locale: row.location.locale,

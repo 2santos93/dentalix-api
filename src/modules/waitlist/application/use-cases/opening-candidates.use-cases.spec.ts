@@ -38,6 +38,8 @@ const SLOT = {
 };
 
 let defaultPhoneRegion = 'VE';
+/** SEC-014: sedes desactivadas del doble. */
+let inactiveLocations: string[] = [];
 const locations = {
   findById: (id: string) =>
     Promise.resolve(
@@ -45,6 +47,7 @@ const locations = {
         ? {
             id,
             name: 'Sede',
+            isActive: !inactiveLocations.includes(id),
             country: 'VE',
             defaultPhoneRegion,
             timeZone: 'America/Caracas',
@@ -347,6 +350,23 @@ describe('«Ocupar este hueco» (DX-210)', () => {
       providerId: 'drx',
       patientId: 'p1',
     };
+
+    it('SEC-014: el hueco de una sede desactivada no se ofrece (400, sin oferta)', async () => {
+      repo.addPatient({ id: 'p1' });
+      inactiveLocations = ['loc1'];
+      try {
+        const err = await offer
+          .execute({ ...base, channel: 'PHONE', outcome: 'NO_ANSWER' }, CTX)
+          .catch((e: unknown) => e);
+        expect(err).toBeInstanceOf(BadRequestException);
+        expect((err as BadRequestException).getResponse()).toMatchObject({
+          code: 'LOCATION_INACTIVE',
+        });
+        expect(repo.offers).toHaveLength(0);
+      } finally {
+        inactiveLocations = [];
+      }
+    });
 
     it('la tercera oferta del día al mismo paciente: 409 «Ya se le ofrecieron 2 huecos hoy»', async () => {
       addEntry('e1', 'p1');

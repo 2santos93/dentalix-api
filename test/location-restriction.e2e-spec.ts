@@ -1449,6 +1449,243 @@ describe('Personal restringido a sedes (DX-089)', () => {
       expect(itemIds(list.body)).toContain(itemA4);
     });
 
+    // Altas que fijan la sede por el CUERPO (o por la fila de la que nacen):
+    // sin cabecera, un ADMIN sin restricción. Una prueba por ruta; ninguna
+    // deja filas en A4 ni eventos de auditoría.
+    describe('altas con la sede desactivada en el cuerpo', () => {
+      const SLOT = {
+        slotStart: '2027-03-15T15:00:00.000Z',
+        slotEnd: '2027-03-15T15:30:00.000Z',
+      };
+      let priceList: string;
+      let agreement: string;
+      let audits: number;
+      // Entradas abiertas en A4 que el propio test siembra (no las crea la API).
+      let waitlistInA4 = 0;
+
+      beforeAll(async () => {
+        const t = { tenantId: a.tenantId };
+        priceList = (
+          await raw.priceList.create({
+            data: { ...t, name: 'Tarifa SEC-014', currency: 'USD' },
+          })
+        ).id;
+        const payer = await raw.payer.create({
+          data: { ...t, name: 'Aseguradora SEC-014', type: 'INSURER' },
+        });
+        agreement = (
+          await raw.agreement.create({
+            data: {
+              ...t,
+              name: 'Convenio SEC-014',
+              payerId: payer.id,
+              kind: 'PERCENT_DISCOUNT',
+              percent: 10,
+            },
+          })
+        ).id;
+      });
+
+      beforeEach(async () => {
+        audits = await raw.auditEvent.count({
+          where: { tenantId: a.tenantId },
+        });
+      });
+
+      afterEach(async () => {
+        const inA4 = { tenantId: a.tenantId, locationId: a4 };
+        expect({
+          cashSessions: await raw.cashSession.count({ where: inA4 }),
+          chairs: await raw.chair.count({ where: inA4 }),
+          blocks: await raw.scheduleBlock.count({ where: inA4 }),
+          expenses: await raw.expense.count({ where: inA4 }),
+          waitlist: await raw.appointmentWaitlistEntry.count({
+            where: { ...inA4, status: 'OPEN' },
+          }),
+          appointments: await raw.appointment.count({ where: inA4 }),
+          offers: await raw.waitlistOffer.count({ where: inA4 }),
+          promises: await raw.paymentPromise.count({ where: inA4 }),
+          priceLists: await raw.priceList.count({ where: inA4 }),
+          agreements: await raw.agreement.count({ where: inA4 }),
+          overrides: await raw.providerScheduleOverride.count({
+            where: inA4,
+          }),
+        }).toEqual({
+          cashSessions: 0,
+          chairs: 0,
+          blocks: 0,
+          expenses: 0,
+          waitlist: waitlistInA4,
+          appointments: 0,
+          offers: 0,
+          promises: 0,
+          priceLists: 0,
+          agreements: 0,
+          overrides: 0,
+        });
+        expect(
+          await raw.auditEvent.count({ where: { tenantId: a.tenantId } }),
+        ).toBe(audits);
+      });
+
+      it('abrir caja', async () => {
+        expectInactive(
+          await admin().post('/cash-sessions/open', {
+            locationId: a4,
+            floats: [{ currency: 'USD', amount: 20 }],
+          }),
+        );
+      });
+
+      it('crear sillón', async () => {
+        expectInactive(
+          await admin().post('/chairs', { locationId: a4, name: 'Sillón 9' }),
+        );
+      });
+
+      it('reordenar sillones', async () => {
+        expectInactive(
+          await admin().put('/chairs/order', { locationId: a4, chairIds: [] }),
+        );
+      });
+
+      it('crear bloqueo de agenda', async () => {
+        expectInactive(
+          await admin().post('/schedule-blocks', {
+            locationId: a4,
+            kind: 'MEETING',
+            start: '2027-03-12T15:00:00.000Z',
+            end: '2027-03-12T16:00:00.000Z',
+          }),
+        );
+      });
+
+      it('registrar gasto', async () => {
+        expectInactive(
+          await admin().post('/expenses', {
+            locationId: a4,
+            category: 'SUPPLIES',
+            amount: 25,
+            currency: 'USD',
+            invoiceDate: '2026-10-20',
+          }),
+        );
+      });
+
+      it('salida de caja', async () => {
+        expectInactive(
+          await admin().post('/cash-sessions/current/outflows', {
+            locationId: a4,
+            category: 'SUPPLIES',
+            amount: 5,
+            currency: 'USD',
+          }),
+        );
+      });
+
+      it('añadir a la lista de espera', async () => {
+        expectInactive(
+          await admin().post('/waitlist', {
+            patientId: patient,
+            locationId: a4,
+          }),
+        );
+      });
+
+      it('agendar desde la lista de espera una entrada de la sede desactivada', async () => {
+        const entry = await raw.appointmentWaitlistEntry.create({
+          data: { tenantId: a.tenantId, locationId: a4, patientId: patient },
+        });
+        waitlistInA4 = 1;
+        expectInactive(
+          await admin().post(`/waitlist/${entry.id}/schedule`, {
+            providerId: e.userId,
+            start: '2027-03-16T15:00:00.000Z',
+          }),
+        );
+        expect(
+          (
+            await raw.appointmentWaitlistEntry.findUniqueOrThrow({
+              where: { id: entry.id },
+            })
+          ).status,
+        ).toBe('OPEN');
+      });
+
+      it('ofrecer un hueco de la sede desactivada', async () => {
+        expectInactive(
+          await admin().post(`/appointments/openings/${a4}/offers`, {
+            ...SLOT,
+            providerId: e.userId,
+            patientId: patient,
+            channel: 'PHONE',
+            outcome: 'NO_ANSWER',
+          }),
+        );
+      });
+
+      it('promesa de pago', async () => {
+        expectInactive(
+          await admin().post(`/patients/${patient}/payment-promises`, {
+            locationId: a4,
+            amount: 50,
+            currency: 'USD',
+            dueDate: '2026-11-30',
+          }),
+        );
+      });
+
+      it('crear y mover una tarifa', async () => {
+        expectInactive(
+          await admin().post('/price-lists', {
+            name: 'Tarifa Oeste',
+            currency: 'USD',
+            locationId: a4,
+          }),
+        );
+        expectInactive(
+          await admin().patch(`/price-lists/${priceList}`, { locationId: a4 }),
+        );
+      });
+
+      it('crear y mover un convenio', async () => {
+        expectInactive(
+          await admin().patch(`/agreements/${agreement}`, { locationId: a4 }),
+        );
+        const payerId = (
+          await raw.agreement.findUniqueOrThrow({ where: { id: agreement } })
+        ).payerId;
+        expectInactive(
+          await admin().post('/agreements', {
+            name: 'Convenio Oeste',
+            payerId,
+            kind: 'PERCENT_DISCOUNT',
+            percent: 5,
+            locationId: a4,
+          }),
+        );
+      });
+
+      it('excepción de horario de un profesional', async () => {
+        expectInactive(
+          await admin().post(`/providers/${e.userId}/schedule-overrides`, {
+            locationId: a4,
+            date: '2027-03-17',
+            ranges: [],
+          }),
+        );
+      });
+
+      it('sin cuerpo con sede, el ADMIN sigue escribiendo (control)', async () => {
+        await admin()
+          .patch(`/price-lists/${priceList}`, { name: 'Tarifa SEC-014 bis' })
+          .expect(200);
+        audits = await raw.auditEvent.count({
+          where: { tenantId: a.tenantId },
+        });
+      });
+    });
+
     it('una sede activa sigue admitiendo escrituras con su cabecera', async () => {
       await api(a.adminToken, a1)
         .post(`/inventory/items/${item.a1}/movements`, {

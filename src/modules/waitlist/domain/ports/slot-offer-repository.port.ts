@@ -29,6 +29,8 @@ export interface PublicSlotOffer {
   patientFirstName: string;
   providerName: string | null;
   locationName: string;
+  /** SEC-014: una sede desactivada ya no recibe citas: el hueco no está. */
+  locationActive: boolean;
   locationAddress: string | null;
   timeZone: string;
   /** Formato de la sede (locale BCP 47 y 12/24 h) para pintar la hora como ella. */

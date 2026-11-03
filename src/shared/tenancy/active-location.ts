@@ -32,6 +32,51 @@ export function locationInactive(): BadRequestException {
 }
 
 /**
+ * SEC-014: la regla única para escribir EN una sede (crear algo en ella o
+ * fijarla como la sede de una fila): tiene que estar activa. La usan el
+ * interceptor (cabecera, auto-pin y `locationId` del cuerpo) y los casos de
+ * uso que toman la sede de otra fila (la cita desde la lista de espera, las
+ * ofertas de un hueco).
+ */
+export function assertLocationWritable(location: { isActive: boolean }): void {
+  if (!location.isActive) throw locationInactive();
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * SEC-014: en una escritura, el `locationId` del cuerpo (altas de caja,
+ * sillón, bloqueo, gasto, lista de espera, promesa de pago, tarifa,
+ * convenio, excepción de horario…) no puede ser una sede desactivada. Corre
+ * antes de la validación del DTO, así que solo mira un UUID de texto; uno
+ * desconocido o de otra clínica no se decide aquí (el caso de uso da su 404 o
+ * su 400, como siempre). `null` (fila de toda la clínica) no se mira.
+ * Una consulta por id, y ninguna si no hay `locationId` o es la de la
+ * cabecera, ya validada.
+ */
+export async function assertBodyLocationWritable(
+  prisma: PrismaService,
+  tenantId: string,
+  body: unknown,
+  method: string | undefined,
+  checkedLocationId: string | undefined,
+): Promise<void> {
+  if (!isWriteMethod(method) || typeof body !== 'object' || body === null) {
+    return;
+  }
+  const locationId = (body as { locationId?: unknown }).locationId;
+  if (typeof locationId !== 'string' || !UUID.test(locationId)) return;
+  if (locationId === checkedLocationId) return;
+  const location = await prisma.runWithTenant(tenantId, (tx) =>
+    tx.location.findFirst({
+      where: { id: locationId, deletedAt: null },
+      select: { isActive: true },
+    }),
+  );
+  if (location) assertLocationWritable(location);
+}
+
+/**
  * Sede activa de una petición de clínica: cabecera `X-Location-Id`, VALIDADA
  * contra la clínica (una sede de otra clínica no se ignora en silencio: eso
  * devolvería datos de la sede equivocada sin avisar; se rechaza) y contra las
@@ -74,7 +119,7 @@ export async function resolveActiveLocationId(
     if (allowed && !allowed.includes(location.id)) {
       throw locationNotAllowed();
     }
-    if (write && !location.isActive) throw locationInactive();
+    if (write) assertLocationWritable(location);
     return location.id;
   }
   const pinned = allowed?.length === 1 ? allowed[0] : undefined;
@@ -85,7 +130,8 @@ export async function resolveActiveLocationId(
         select: { id: true, isActive: true },
       }),
     );
-    if (!location?.isActive) throw locationInactive();
+    if (!location) throw locationInactive();
+    assertLocationWritable(location);
   }
   return pinned;
 }
