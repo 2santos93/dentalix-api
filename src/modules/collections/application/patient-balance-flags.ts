@@ -1,4 +1,4 @@
-import { Inject, Injectable, Optional } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { ClinicRole } from '@prisma/client';
 import { computePatientAging } from '../../receivables/application/compute-patient-aging';
 import {
@@ -30,6 +30,8 @@ export const OVERDUE_AMOUNT_ROLES: readonly ClinicRole[] = [
  */
 @Injectable()
 export class PatientBalanceFlags {
+  private readonly logger = new Logger('Collections');
+
   constructor(
     @Inject(COLLECTIONS_REPOSITORY)
     private readonly repo: CollectionsRepository,
@@ -53,13 +55,30 @@ export class PatientBalanceFlags {
     if (ledgers.length === 0) return out;
     const zoneOf = await this.repo.locationTimeZones();
     // DX-472-bis: lo abonado en otra moneda cuenta convertido, como en la
-    // cartera; con el proveedor sin responder, esa deuda no sale vencida.
+    // cartera, pero SIN red (revisión M1): la agenda no espera al proveedor.
+    // Un abono que necesitaría la tasa de su día (anterior a DX-375 sin
+    // congelar) no suma ni deja nada vencido, y la marca lo dice
+    // (`incomplete`). Si algo de esto falla, la marca se calcula como antes,
+    // sin convertir: la lista de citas nunca cae por las tasas.
     const [planBalances, roundingDigitsOf] = await Promise.all([
-      this.planBalance.computeMany(ledgerPlanBalanceInputs(ledgers, zoneOf)),
+      Promise.resolve()
+        .then(() =>
+          this.planBalance.computeMany(
+            ledgerPlanBalanceInputs(ledgers, zoneOf),
+            { offline: true },
+          ),
+        )
+        .catch((error: unknown) => {
+          this.logger.warn({
+            event: 'collections.balance_flags_unconverted',
+            error: error instanceof Error ? error.name : 'unknown',
+          });
+          return undefined;
+        }),
       roundingDigitsLookup(
         this.currencyDigits,
         ledgers.flatMap((l) => l.plans.map((p) => p.currency)),
-      ),
+      ).catch(() => undefined),
     ]);
     const now = this.now();
     const withAmounts = role !== null && OVERDUE_AMOUNT_ROLES.includes(role);

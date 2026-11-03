@@ -170,7 +170,7 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
               tenantId,
               payment: { patientId, deletedAt: null },
             },
-            select: { paymentId: true, amount: true },
+            select: { paymentId: true, amount: true, currency: true },
           }),
           // Un plan de pagos cancelado lleva status CANCELLED + deletedAt
           // (PrismaPaymentPlanRepository.cancel): fuera.
@@ -267,9 +267,14 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
           });
           itemsByPlan.set(item.planId, list);
         }
-        const baseOf = new Map(
-          bases.map((b) => [b.paymentId, b.amount.toNumber()] as const),
-        );
+        // DX-472-bis (revisión B1): una base cuenta solo si está en la moneda
+        // de su plan (como el reparto de DX-051).
+        const baseOf = (plan: { currency: string }) =>
+          new Map(
+            bases
+              .filter((b) => b.currency === plan.currency)
+              .map((b) => [b.paymentId, b.amount.toNumber()] as const),
+          );
 
         return {
           clinic: {
@@ -352,7 +357,7 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
                 exchangeRateCurrency: p.exchangeRateCurrency,
                 frozenRate: frozenRateOf(p),
               })),
-            baseOf,
+            baseOf: baseOf(plan),
             creditMovements:
               creditSums
                 .find(
@@ -465,7 +470,7 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
               tenantId,
               payment: { patientId, deletedAt: null, plan: billablePlan },
             },
-            select: { paymentId: true, amount: true },
+            select: { paymentId: true, amount: true, currency: true },
           }),
           // DX-253: el saldo a favor traspasado o devuelto cuenta como
           // abonado del plan (en su moneda).
@@ -512,9 +517,14 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
           tenantId,
           payments.map((p) => p.locationId),
         );
-        const baseOf = new Map(
-          bases.map((b) => [b.paymentId, b.amount.toNumber()] as const),
-        );
+        // DX-472-bis (revisión B1): una base cuenta solo si está en la moneda
+        // de su plan (como el reparto de DX-051).
+        const baseOf = (plan: { currency: string }) =>
+          new Map(
+            bases
+              .filter((b) => b.currency === plan.currency)
+              .map((b) => [b.paymentId, b.amount.toNumber()] as const),
+          );
 
         return plans.map((plan) => ({
           ...plan,
@@ -536,7 +546,7 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
                 exchangeRateCurrency: p.exchangeRateCurrency,
                 frozenRate: frozenRateOf(p),
               })),
-            baseOf,
+            baseOf: baseOf(plan),
             creditMovements:
               creditSums
                 .find(

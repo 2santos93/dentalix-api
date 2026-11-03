@@ -1,3 +1,5 @@
+import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
+import { REGIONAL_CARACAS_FIXTURE } from './support/location-fixtures';
 import { INestApplication } from '@nestjs/common';
 import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
@@ -56,11 +58,16 @@ interface GroupBody {
   records: RecordBody[];
 }
 
-/** Día civil en la zona de la sede (zona por defecto de la clínica) `daysAgo` días atrás. */
+/**
+ * Día civil en la zona IANA de la sede (la de `registerClinic`) `daysAgo` días
+ * atrás. Antes restaba 5 h fijas a UTC (Caracas es UTC−4) y entre las 04:00 y
+ * las 05:00 UTC daba el día anterior.
+ */
 function caracasDay(daysAgo = 0): string {
-  return new Date(Date.now() - 5 * 60 * 60 * 1000 - daysAgo * DAY_MS)
-    .toISOString()
-    .slice(0, 10);
+  return addCivilDays(
+    civilDateIn(new Date(), REGIONAL_CARACAS_FIXTURE.timeZone),
+    -daysAgo,
+  );
 }
 
 /** Fecha de nacimiento de alguien que tiene `years` años (y un mes) hoy. */

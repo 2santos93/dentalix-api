@@ -1,6 +1,8 @@
 import { ClinicRole } from '@prisma/client';
 import {
+  CREDIT_AMOUNT_EXCEEDS_MESSAGE,
   canMoveCredit,
+  creditExceedsMessage,
   formatRefundNumber,
   normalizeReason,
   parseIdempotencyKey,
@@ -220,6 +222,18 @@ describe('saldo a favor (DX-253)', () => {
     };
     expect(transferFingerprint(transfer)).not.toBe(
       transferFingerprint({ ...transfer, targetPlanId: 'C' }),
+    );
+  });
+});
+
+describe('creditExceedsMessage (DX-472-bis, revisión B3)', () => {
+  it('sin abonos en otra moneda pendientes, el mensaje de siempre', () => {
+    expect(creditExceedsMessage(0)).toBe(CREDIT_AMOUNT_EXCEEDS_MESSAGE);
+  });
+
+  it('con abonos en otra moneda que aún no cuentan, lo explica', () => {
+    expect(creditExceedsMessage(2)).toBe(
+      'El importe supera el saldo a favor del plan. 2 abonos en otra moneda todavía no cuentan en el saldo a favor: se suman en unos minutos, cuando quede registrada la tasa de su día. Vuelve a intentarlo después.',
     );
   });
 });

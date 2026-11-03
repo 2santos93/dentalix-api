@@ -196,8 +196,11 @@ AS $$
                        ORDER BY p."paidAt", p."id")
                        FILTER (WHERE b."paymentId" IS NULL) AS "pending"
                 FROM public."payments" p
+                -- Solo una base en la moneda del plan (como el reparto de
+                -- DX-051): otra no es una cifra en esta moneda.
                 LEFT JOIN public."payment_plan_amounts" b
                   ON b."tenantId" = p."tenantId" AND b."paymentId" = p."id"
+                 AND b."currency" = tp."currency"
                WHERE p."tenantId" = tp."tenantId"
                  AND p."treatmentPlanId" = tp."id"
                  AND p."currency" <> tp."currency"

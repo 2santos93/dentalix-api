@@ -13,7 +13,7 @@ import {
 } from '../../../shared/money/currency-digits';
 import type { ClinicRole, PaymentMethod } from '@prisma/client';
 import {
-  CREDIT_AMOUNT_EXCEEDS_MESSAGE,
+  creditExceedsMessage,
   CREDIT_CURRENCY_MISMATCH_MESSAGE,
   CREDIT_IDEMPOTENCY_INVALID_MESSAGE,
   CREDIT_IDEMPOTENCY_REUSED_MESSAGE,
@@ -109,7 +109,9 @@ async function checkAmount(
     );
   }
   if (amountCents > source.creditCents) {
-    throw new BadRequestException(CREDIT_AMOUNT_EXCEEDS_MESSAGE);
+    throw new BadRequestException(
+      creditExceedsMessage(source.pendingOtherCurrencyPayments ?? 0),
+    );
   }
   return amountCents;
 }

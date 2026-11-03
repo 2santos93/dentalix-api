@@ -225,4 +225,11 @@ export class OverdueBalanceDto {
       'Solo para ADMIN y RECEPTION, y solo con saldo vencido. DENTIST y ASSISTANT no lo reciben.',
   })
   amounts?: OverdueAmountDto[];
+
+  @ApiPropertyOptional({
+    enum: [true],
+    description:
+      'DX-472-bis: solo presente (true) si el saldo no cuenta algún abono en otra moneda (sin tasa, o el chip no lo convierte en vivo): la marca puede faltar o quedarse corta. El estado de cuenta lo detalla.',
+  })
+  incomplete?: true;
 }

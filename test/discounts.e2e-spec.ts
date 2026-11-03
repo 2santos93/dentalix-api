@@ -1,3 +1,4 @@
+import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
 import { INestApplication } from '@nestjs/common';
 import {
   CatalogKind,
@@ -36,11 +37,16 @@ const DAY = 24 * 60 * 60 * 1000;
 let requestSeq = 0;
 /** X-Request-Id propio para encontrar el evento de auditoría de la petición. */
 const nextRequestId = () => `dx204-e2e-${++requestSeq}-${Date.now()}`;
-/** Día civil de la sede (UTC−4 fijo) `offset` días desde hoy. */
+/**
+ * Día civil de la sede `offset` días desde hoy, en su zona IANA (la de
+ * `registerClinic`). Antes restaba 5 h fijas a UTC (Caracas es UTC−4) y entre
+ * las 04:00 y las 05:00 UTC daba el día anterior: el informe salía vacío.
+ */
 const caracasDay = (offset = 0) =>
-  new Date(Date.now() - 5 * 60 * 60 * 1000 + offset * DAY)
-    .toISOString()
-    .slice(0, 10);
+  addCivilDays(
+    civilDateIn(new Date(), REGIONAL_CARACAS_FIXTURE.timeZone),
+    offset,
+  );
 
 interface Item {
   id: string;

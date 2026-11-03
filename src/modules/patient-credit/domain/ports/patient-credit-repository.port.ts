@@ -13,6 +13,11 @@ export interface PlanCreditState {
   paidCents: number;
   entriesCents: number;
   creditCents: number;
+  /**
+   * DX-472-bis: abonos vivos en otra moneda aún sin base (sin tasa congelada
+   * todavía): no cuentan en `paidCents` hasta que el barrido la cree.
+   */
+  pendingOtherCurrencyPayments?: number;
 }
 
 export interface CreditTransferRecord {

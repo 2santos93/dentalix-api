@@ -681,4 +681,55 @@ describe('computePatientAging', () => {
     expect(before.currencies[0]).toMatchObject({ currency: 'JPY', debt: 0.13 });
     expect(before.oldestAgeDays).toBe(44);
   });
+
+  it('revisión B2: con filtro de moneda, los avisos solo cuentan los planes de esa moneda', () => {
+    const eurPlan = plan('tp-eur', { currency: 'EUR', billable: 100 });
+    const usdPlan = plan('tp-usd2', { currency: 'USD', billable: 50 });
+    const balance = (id: string, currency: string, billable: number) => ({
+      planCurrency: currency,
+      billable,
+      paid: 0,
+      creditMovements: 0,
+      balance: billable,
+      paymentsCount: 1,
+      paymentsWithoutRate:
+        id === 'tp-eur'
+          ? [
+              {
+                paymentId: 'p-eur',
+                amount: 3600,
+                currency: 'VES',
+                paidOn: '2026-10-16',
+              },
+            ]
+          : [],
+      rateProviderTimedOut: id === 'tp-eur',
+    });
+    const options = {
+      now: NOW,
+      timeZone: CARACAS,
+      planBalances: new Map([
+        ['tp-eur', balance('tp-eur', 'EUR', 100)],
+        ['tp-usd2', balance('tp-usd2', 'USD', 50)],
+      ]),
+    };
+    const l = ledger({ plans: [eurPlan, usdPlan] });
+
+    expect(computePatientAging(l, options)).toMatchObject({
+      paymentsWithoutRateCount: 1,
+      rateProviderTimedOut: true,
+    });
+    expect(
+      computePatientAging(l, { ...options, flagsCurrency: 'USD' }),
+    ).toMatchObject({
+      paymentsWithoutRateCount: 0,
+      rateProviderTimedOut: false,
+    });
+    expect(
+      computePatientAging(l, { ...options, flagsCurrency: 'EUR' }),
+    ).toMatchObject({
+      paymentsWithoutRateCount: 1,
+      rateProviderTimedOut: true,
+    });
+  });
 });

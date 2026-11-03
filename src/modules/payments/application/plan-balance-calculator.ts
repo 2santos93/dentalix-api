@@ -29,6 +29,29 @@ interface ConversionRun {
   deadline: ConversionDeadline;
 }
 
+/** DX-472-bis (revisión M1): opciones de `computeMany`. */
+export interface PlanBalanceOptions {
+  /**
+   * Sin conversiones en vivo: lo que necesitaría la tasa del día (un abono
+   * anterior a DX-375 aún sin congelar) no suma y el plan sale con
+   * `rateProviderTimedOut`, sin cuotas vencidas, como con el proveedor
+   * colgado. Para la agenda, que no puede esperar al proveedor.
+   */
+  offline?: boolean;
+}
+
+/** El convertidor de `offline`: nunca pide nada. */
+const OFFLINE_CONVERTER: AmountConverter = {
+  execute: () =>
+    Promise.reject(
+      new ExchangeRateProviderNotRespondingError('sin conversión en vivo'),
+    ),
+  quote: () =>
+    Promise.reject(
+      new ExchangeRateProviderNotRespondingError('sin conversión en vivo'),
+    ),
+};
+
 /** Sale de la conversión sin pasar por el «sin tasa» de `paymentAmountIn`. */
 const PROVIDER_UNANSWERED = new Error('PROVIDER_UNANSWERED');
 
@@ -56,8 +79,9 @@ export class PlanBalanceCalculator {
    */
   async computeMany(
     inputs: readonly PlanBalanceInput[],
+    { offline = false }: PlanBalanceOptions = {},
   ): Promise<Map<string, GetPlanBalanceResult>> {
-    const run = this.conversionRun();
+    const run = this.conversionRun(offline);
     const balances = new Map<string, GetPlanBalanceResult>();
     try {
       for (const input of inputs) {
@@ -69,12 +93,15 @@ export class PlanBalanceCalculator {
     return balances;
   }
 
-  private conversionRun(): ConversionRun {
+  private conversionRun(offline: boolean): ConversionRun {
     // DX-374: un convertidor por cálculo, que lee la fuente de la clínica y
     // las tasas de cada día una sola vez (no una lectura por abono). Con la
     // tasa congelada (DX-375) ni siquiera se usa: solo los abonos anteriores
-    // aún sin congelar se convierten con la tasa de su día.
-    const memoized = this.convertAmount.memoized();
+    // aún sin congelar se convierten con la tasa de su día. Sin red
+    // (`offline`), esos abonos salen como si el proveedor no respondiera.
+    const memoized: AmountConverter = offline
+      ? OFFLINE_CONVERTER
+      : this.convertAmount.memoized();
     // DX-054: un proveedor lento o colgado no retiene el saldo: todas las
     // conversiones en vivo comparten un plazo y lo que no llegue sale «sin
     // tasa», como un abono que el proveedor no puede convertir.

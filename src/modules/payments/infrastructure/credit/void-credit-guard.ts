@@ -92,6 +92,7 @@ export async function assertVoidKeepsPatientCredit(
                FROM "payments" p
                LEFT JOIN "payment_plan_amounts" b
                  ON b."tenantId" = p."tenantId" AND b."paymentId" = p."id"
+                  AND b."currency" = tp."currency"
               WHERE p."tenantId" = tp."tenantId" AND p."treatmentPlanId" = tp."id"
                 AND p."deletedAt" IS NULL
                 AND (p."currency" = tp."currency" OR b."paymentId" IS NOT NULL)
@@ -112,6 +113,7 @@ export async function assertVoidKeepsPatientCredit(
                FROM "payments" p
                LEFT JOIN "payment_plan_amounts" b
                  ON b."tenantId" = p."tenantId" AND b."paymentId" = p."id"
+                  AND b."currency" = tp."currency"
               WHERE p."tenantId" = tp."tenantId" AND p."treatmentPlanId" = tp."id"
                 AND p."deletedAt" IS NULL
                 AND (p."currency" = tp."currency" OR b."paymentId" IS NOT NULL)

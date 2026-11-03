@@ -36,6 +36,11 @@ export interface ComputePatientAgingOptions {
    * conversión que la moneda no tiene (¥0,13) no es deuda. Sin ellos, 2.
    */
   roundingDigitsOf?: RoundingDigitsOf;
+  /**
+   * DX-472-bis (revisión B2): con la cartera filtrada por moneda, los avisos
+   * solo cuentan los planes de esa moneda.
+   */
+  flagsCurrency?: string;
 }
 
 /** DX-472-bis: lo que la fila no pudo sumar por falta de tasa. */
@@ -131,8 +136,10 @@ export function computePatientAging(
   for (const line of balances.plans) {
     const known = options.planBalances?.get(line.id);
     if (known) {
-      flags.paymentsWithoutRateCount += known.paymentsWithoutRate.length;
-      flags.rateProviderTimedOut ||= known.rateProviderTimedOut;
+      if (!options.flagsCurrency || options.flagsCurrency === line.currency) {
+        flags.paymentsWithoutRateCount += known.paymentsWithoutRate.length;
+        flags.rateProviderTimedOut ||= known.rateProviderTimedOut;
+      }
     } else {
       for (const other of line.paidOtherCurrencies) {
         acc(other.currency).creditCents += toCents(other.amount);

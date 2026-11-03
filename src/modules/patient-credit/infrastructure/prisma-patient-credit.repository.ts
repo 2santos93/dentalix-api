@@ -49,6 +49,7 @@ interface PlanCreditRow {
   billable: string;
   paid: string;
   entries: string;
+  pendingOther: number;
 }
 
 const TRANSFER_SELECT = {
@@ -175,6 +176,7 @@ export class PrismaPatientCreditRepository implements PatientCreditRepository {
                  FROM "payments" p
                  LEFT JOIN "payment_plan_amounts" b
                    ON b."tenantId" = p."tenantId" AND b."paymentId" = p."id"
+                  AND b."currency" = tp."currency"
                 WHERE p."tenantId" = tp."tenantId" AND p."treatmentPlanId" = tp."id"
                   AND p."deletedAt" IS NULL
                   AND (p."currency" = tp."currency" OR b."paymentId" IS NOT NULL)
@@ -183,7 +185,16 @@ export class PrismaPatientCreditRepository implements PatientCreditRepository {
                SELECT pg_catalog.sum(e."amount") FROM "patient_credit_entries" e
                 WHERE e."tenantId" = tp."tenantId" AND e."treatmentPlanId" = tp."id"
                   AND e."currency" = tp."currency"
-             ), 0)::text AS "entries"
+             ), 0)::text AS "entries",
+             -- DX-472-bis (revisión B3): abonos en otra moneda aún sin base,
+             -- que todavía no cuentan (para explicar un «supera»).
+             (SELECT pg_catalog.count(*)::int FROM "payments" p
+               WHERE p."tenantId" = tp."tenantId" AND p."treatmentPlanId" = tp."id"
+                 AND p."deletedAt" IS NULL AND p."currency" <> tp."currency"
+                 AND NOT EXISTS (
+                   SELECT 1 FROM "payment_plan_amounts" b
+                    WHERE b."tenantId" = p."tenantId" AND b."paymentId" = p."id"
+                      AND b."currency" = tp."currency")) AS "pendingOther"
         FROM "treatment_plans" tp
        WHERE tp."tenantId" = ${tenantId}::uuid AND tp."id" = ${planId}::uuid
          AND tp."deletedAt" IS NULL`;
@@ -202,6 +213,7 @@ export class PrismaPatientCreditRepository implements PatientCreditRepository {
       paidCents,
       entriesCents,
       creditCents: planCreditCents({ billableCents, paidCents, entriesCents }),
+      pendingOtherCurrencyPayments: row.pendingOther,
     };
   }
 

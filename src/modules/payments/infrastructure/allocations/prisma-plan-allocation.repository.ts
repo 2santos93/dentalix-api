@@ -407,8 +407,14 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
             amount: true,
           },
         });
+        // DX-472-bis (revisión B1): solo una base en la moneda del plan.
         const bases = await tx.paymentPlanAmount.findMany({
-          where: { tenantId, treatmentPlanId: planId, payment: livePayment },
+          where: {
+            tenantId,
+            treatmentPlanId: planId,
+            currency: plan.currency,
+            payment: livePayment,
+          },
           select: { paymentId: true, amount: true, manual: true },
         });
         return {

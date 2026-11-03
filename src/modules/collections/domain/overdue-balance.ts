@@ -24,6 +24,12 @@ export interface OverdueBalance {
   overdueDays: number | null;
   /** Solo para los roles que ven importes (y solo si hay saldo vencido). */
   amounts?: OverdueAmount[];
+  /**
+   * DX-472-bis: el saldo no cuenta algún abono en otra moneda (sin tasa, o
+   * sin conversión en vivo en la agenda): la marca puede faltar o quedarse
+   * corta. Solo presente (`true`) en ese caso.
+   */
+  incomplete?: true;
 }
 
 export const NO_OVERDUE: OverdueBalance = Object.freeze({
@@ -61,8 +67,10 @@ export function overdueView(
 ): OverdueBalance {
   if (!aging) return { hasOverdue: false, overdueDays: null };
   const { hasOverdue, overdueDays, amounts } = overdueOf(aging);
-  if (!hasOverdue) return { hasOverdue, overdueDays };
+  const incomplete =
+    aging.paymentsWithoutRateCount > 0 ? { incomplete: true as const } : {};
+  if (!hasOverdue) return { hasOverdue, overdueDays, ...incomplete };
   return withAmounts
-    ? { hasOverdue, overdueDays, amounts }
-    : { hasOverdue, overdueDays };
+    ? { hasOverdue, overdueDays, amounts, ...incomplete }
+    : { hasOverdue, overdueDays, ...incomplete };
 }

@@ -300,6 +300,7 @@ export class GetReceivablesAgingUseCase {
         timeZone,
         planBalances,
         roundingDigitsOf,
+        flagsCurrency: filters.currency,
       });
       const aging = filters.currency
         ? summarizeCurrencies(

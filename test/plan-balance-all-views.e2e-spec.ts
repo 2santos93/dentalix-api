@@ -74,6 +74,7 @@ interface Chip {
   hasOverdue: boolean;
   overdueDays: number | null;
   amounts?: { currency: string; amount: number }[];
+  incomplete?: true;
 }
 interface BillablePlan {
   id: string;
@@ -474,6 +475,53 @@ describe('DX-472-bis: mismas cifras convertidas en estado de cuenta, cartera, ch
     });
   });
 
+  it('revisión B1: una base en otra moneda que la del plan no cuenta en ninguna vista ni en el saldo a favor', async () => {
+    const patientId = await newPatient('Basemala');
+    const planId = await planWith(patientId, 'USD', 100);
+    const target = await planWith(patientId, 'USD', 50);
+    const paymentId = await pay(planId, 3600, 'VES');
+    // Una base que no está en la moneda del plan (hoy no la crea la API: la
+    // moneda del plan se bloquea con abonos; la BD no lo impide).
+    await withoutBase(paymentId);
+    const [payment] = await raw.$queryRaw<
+      { tenantId: string; treatmentPlanId: string; paidAt: Date }[]
+    >`SELECT "tenantId", "treatmentPlanId", "paidAt" FROM "payments" WHERE "id" = ${paymentId}::uuid`;
+    await raw.paymentPlanAmount.create({
+      data: {
+        paymentId,
+        tenantId: payment.tenantId,
+        treatmentPlanId: payment.treatmentPlanId,
+        amount: 3600,
+        currency: 'VES',
+        rateDate: payment.paidAt,
+      },
+    });
+
+    const { statement, row, chip, billable } = await views(patientId);
+    // Cuenta por su tasa congelada (36): USD 100, no «USD 3.600».
+    expect(statement.plans.find((p) => p.id === planId)).toMatchObject({
+      paid: 100,
+      balance: 0,
+    });
+    expect(usdOf(row)).toMatchObject({ debt: 50, credit: 0 });
+    expect(chip.hasOverdue).toBe(false);
+    expect(billable.find((p) => p.id === planId)).toMatchObject({
+      paid: 100,
+      balance: 0,
+    });
+    // Sin saldo a favor que traspasar (con la base mala serían USD 3.500), y
+    // el 400 dice por qué (revisión B3): el abono aún no cuenta.
+    const refused = await as(
+      api().post(`/api/v1/treatment-plans/${planId}/credit-transfers`),
+    )
+      .set('Idempotency-Key', '472b0000-0000-4000-8000-0000000000b1')
+      .send({ targetPlanId: target, amount: 1, currency: 'USD' })
+      .expect(400);
+    expect((refused.body as { message: string }).message).toBe(
+      'El importe supera el saldo a favor del plan. 1 abono en otra moneda todavía no cuenta en el saldo a favor: se suma en unos minutos, cuando quede registrada la tasa de su día. Vuelve a intentarlo después.',
+    );
+  });
+
   it('otra clínica no ve esta cartera', async () => {
     const res = await as(
       api().get('/api/v1/receivables/aging?pageSize=100'),
@@ -487,6 +535,8 @@ describe('DX-472-bis: mismas cifras convertidas en estado de cuenta, cartera, ch
     let planId: string;
     let legacyId: string;
     let settledId: string;
+    // La agenda del día de su cita, en la zona de la sede.
+    const visitDay = fixedSedeDay(-2);
 
     beforeAll(async () => {
       settledId = await newPatient('Congelada');
@@ -511,6 +561,14 @@ describe('DX-472-bis: mismas cifras convertidas en estado de cuenta, cartera, ch
         },
       });
       await raw.exchangeRateSnapshot.deleteMany({ where: { date: legacyOn } });
+      await as(api().post('/api/v1/appointments'))
+        .send({
+          patientId,
+          providerId: clinic.adminUserId,
+          start: visitDay.at.toISOString(),
+          end: new Date(visitDay.at.getTime() + 30 * 60_000).toISOString(),
+        })
+        .expect(201);
       hanging = true;
     });
 
@@ -553,13 +611,39 @@ describe('DX-472-bis: mismas cifras convertidas en estado de cuenta, cartera, ch
         days31to60: 0,
       });
       expect(page.rateProviderTimedOut).toBe(true);
-      expect(chip).toEqual({ hasOverdue: false, overdueDays: null });
+      expect(chip).toEqual({
+        hasOverdue: false,
+        overdueDays: null,
+        incomplete: true,
+      });
 
       expect(billable.find((p) => p.id === planId)).toMatchObject({
         paid: 0,
         balance: 100,
         rateProviderTimedOut: true,
         paymentsWithoutRate: [expect.objectContaining({ paymentId: legacyId })],
+      });
+    });
+
+    it('revisión M1: la agenda no espera al proveedor (no convierte en vivo) y su marca dice «incompleto»', async () => {
+      const started = Date.now();
+      const res = await as(
+        api().get(
+          `/api/v1/appointments?from=${encodeURIComponent(
+            visitDay.before(12 * 3600).toISOString(),
+          )}&to=${encodeURIComponent(
+            new Date(visitDay.at.getTime() + 12 * 3600_000).toISOString(),
+          )}`,
+        ),
+      ).expect(200);
+      expect(Date.now() - started).toBeLessThan(1_500);
+      const visit = (res.body as { patientId: string; balance: Chip }[]).find(
+        (a) => a.patientId === patientId,
+      );
+      expect(visit?.balance).toEqual({
+        hasOverdue: false,
+        overdueDays: null,
+        incomplete: true,
       });
     });
 

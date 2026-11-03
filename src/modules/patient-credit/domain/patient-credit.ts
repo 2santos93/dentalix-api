@@ -28,6 +28,20 @@ export const CREDIT_PLAN_NOT_FOUND_MESSAGE =
 export const CREDIT_REFUND_NOT_FOUND_MESSAGE = 'Devolución no encontrada.';
 export const CREDIT_AMOUNT_EXCEEDS_MESSAGE =
   'El importe supera el saldo a favor del plan.';
+
+/**
+ * DX-472-bis (revisión B3): el «supera» cuando el plan tiene abonos en otra
+ * moneda que aún no cuentan: el estado de cuenta ya los suma con su tasa,
+ * pero el saldo a favor solo cuenta la cifra congelada (su base).
+ */
+export function creditExceedsMessage(pendingOtherCurrency: number): string {
+  if (pendingOtherCurrency <= 0) return CREDIT_AMOUNT_EXCEEDS_MESSAGE;
+  const what =
+    pendingOtherCurrency === 1
+      ? '1 abono en otra moneda todavía no cuenta en el saldo a favor: se suma'
+      : `${pendingOtherCurrency} abonos en otra moneda todavía no cuentan en el saldo a favor: se suman`;
+  return `${CREDIT_AMOUNT_EXCEEDS_MESSAGE} ${what} en unos minutos, cuando quede registrada la tasa de su día. Vuelve a intentarlo después.`;
+}
 export const CREDIT_CURRENCY_MISMATCH_MESSAGE =
   'La moneda no es la del plan: el saldo a favor se mueve en la moneda del plan de origen.';
 export const CREDIT_TARGET_CURRENCY_MESSAGE =
