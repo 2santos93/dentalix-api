@@ -647,6 +647,31 @@ describe('DX-472-bis: mismas cifras convertidas en estado de cuenta, cartera, ch
       });
     });
 
+    it('DX-472-ter: el CSV dice en su última columna qué líneas están incompletas y por qué', async () => {
+      const res = await as(api().get('/api/v1/receivables/aging.csv')).expect(
+        200,
+      );
+      expect(res.headers['content-type']).toMatch(/^text\/csv/);
+      const lines = res.text
+        .replace(/^\uFEFF/, '')
+        .trim()
+        .split('\r\n');
+      const header = lines[0].split(',');
+      // Al final: las columnas de antes no se mueven.
+      expect(header).toHaveLength(25);
+      expect(header[23]).toBe('Fecha compromiso');
+      expect(header.at(-1)).toBe('Cifras incompletas');
+      const lineOf = (name: string) => {
+        const found = lines.filter((l) => l.startsWith(`"${name} Cartera",`));
+        expect(found).toHaveLength(1);
+        return found[0];
+      };
+      // Completa: celda vacía. Sin tasa y proveedor colgado, cada uno lo suyo.
+      expect(lineOf('Parcial')).toMatch(/,USD,.*,$/);
+      expect(lineOf('Sintasa')).toMatch(/,USD,.*,"Sin tasa"$/);
+      expect(lineOf('Colgada')).toMatch(/,USD,.*,"Proveedor sin respuesta"$/);
+    });
+
     it('un abono con tasa congelada no depende del proveedor: sigue saldado en la cartera', async () => {
       const { row, chip } = await views(settledId);
       expect(row).toBeUndefined();

@@ -21,6 +21,8 @@ function aging(
         oldestAgeDays,
         ageApproximate: false,
         nextInstallment: null,
+        paymentsWithoutRateCount: 0,
+        rateProviderTimedOut: false,
       },
     ],
     paymentsWithoutRateCount: 0,
