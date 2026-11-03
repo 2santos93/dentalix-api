@@ -8,6 +8,7 @@ import {
   CreateLocationUseCase,
   ListLocationsUseCase,
   UpdateLocationUseCase,
+  LAST_ACTIVE_LOCATION_MESSAGE,
 } from './manage-locations.use-cases';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import type {
@@ -305,9 +306,9 @@ describe('UpdateLocationUseCase', () => {
       makeRepo({ countActive: () => Promise.resolve(1) }),
     );
 
-    await expect(
-      uc.execute('loc-1', { isActive: false }),
-    ).rejects.toBeInstanceOf(ConflictException);
+    await expect(uc.execute('loc-1', { isActive: false })).rejects.toThrow(
+      new ConflictException(LAST_ACTIVE_LOCATION_MESSAGE),
+    );
   });
 
   it('sí deja desactivar una sede cuando quedan otras activas', async () => {

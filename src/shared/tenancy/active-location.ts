@@ -61,6 +61,19 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  * su 400, como siempre). `null` (fila de toda la clínica) no se mira.
  * Una consulta por id, y ninguna si no hay `locationId` o es la de la
  * cabecera, ya validada.
+ *
+ * Mismo orden que con la cabecera: primero el 403 y luego el 400. Una sede
+ * fuera de las permitidas del miembro (`allowed`) no se mira aquí; la
+ * rechaza el caso de uso con su 403 `LOCATION_NOT_ALLOWED`, sin revelar si
+ * además está desactivada.
+ *
+ * OJO, multipart: en una petición `multipart/form-data` el cuerpo lo lee
+ * multer DESPUÉS de este interceptor (el `FileInterceptor` del método va
+ * dentro), así que aquí `body` llega vacío y un `locationId` de formulario NO
+ * queda cubierto. Hoy ninguna alta multipart fija la sede por el formulario
+ * (la importación de pacientes la toma de la cabecera y su repositorio exige
+ * que esté activa); una nueva que lo haga tiene que llamar a
+ * `assertLocationWritable` en su caso de uso.
  */
 export async function assertBodyLocationWritable(
   prisma: PrismaService,
@@ -68,6 +81,7 @@ export async function assertBodyLocationWritable(
   body: unknown,
   method: string | undefined,
   checkedLocationId: string | undefined,
+  allowed?: readonly string[],
 ): Promise<void> {
   if (!isWriteMethod(method) || typeof body !== 'object' || body === null) {
     return;
@@ -75,6 +89,7 @@ export async function assertBodyLocationWritable(
   const locationId = (body as { locationId?: unknown }).locationId;
   if (typeof locationId !== 'string' || !UUID.test(locationId)) return;
   if (locationId === checkedLocationId) return;
+  if (allowed && !allowed.includes(locationId)) return;
   const location = await prisma.runWithTenant(tenantId, (tx) =>
     tx.location.findFirst({
       where: { id: locationId, deletedAt: null },

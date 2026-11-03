@@ -9,6 +9,7 @@ import {
   registerClinic,
   resetDatabase,
   SEEDED_PASSWORD,
+  STAFF_CANCELLATION,
 } from './support/e2e-fixtures';
 import { TokenService } from '../src/shared/crypto/token.service';
 import { PasswordService } from '../src/shared/crypto/password.service';
@@ -1354,6 +1355,10 @@ describe('Personal restringido a sedes (DX-089)', () => {
     let z: Member;
     let zToken: string;
     let itemA4: string;
+    // Precondiciones reales en A4 (antes de desactivarla): sin el arreglo,
+    // las altas de abajo escribirían de verdad sobre ellas.
+    let entryA4: string;
+    let apptA4: string;
 
     function expectInactive(res: request.Response) {
       expect(res.status).toBe(400);
@@ -1389,6 +1394,34 @@ describe('Personal restringido a sedes (DX-089)', () => {
       z = await seedUser('z@dx089-restr-a.test', ClinicRole.ASSISTANT);
       await restrict(z, [a4]);
       zToken = await loginAs(app, a.host, z.email);
+      // Caja abierta en A4 (la salida de caja la usaría).
+      await admin()
+        .post('/cash-sessions/open', {
+          locationId: a4,
+          floats: [{ currency: 'USD', amount: 20 }],
+        })
+        .expect(201);
+      // Sillones de A4 para reordenar (además del que nace con la sede).
+      for (const name of ['Sillón Oeste 1', 'Sillón Oeste 2']) {
+        await admin().post('/chairs', { locationId: a4, name }).expect(201);
+      }
+      entryA4 = (
+        await raw.appointmentWaitlistEntry.create({
+          data: { tenantId: a.tenantId, locationId: a4, patientId: patient },
+        })
+      ).id;
+      apptA4 = (
+        await raw.appointment.create({
+          data: {
+            tenantId: a.tenantId,
+            locationId: a4,
+            patientId: patient,
+            providerId: e.userId,
+            start: new Date('2027-03-18T15:00:00.000Z'),
+            end: new Date('2027-03-18T15:30:00.000Z'),
+          },
+        })
+      ).id;
       await admin().patch(`/locations/${a4}`, { isActive: false }).expect(200);
     });
 
@@ -1451,8 +1484,10 @@ describe('Personal restringido a sedes (DX-089)', () => {
     });
 
     // Altas que fijan la sede por el CUERPO (o por la fila de la que nacen):
-    // sin cabecera, un ADMIN sin restricción. Una prueba por ruta; ninguna
-    // deja filas en A4 ni eventos de auditoría.
+    // sin cabecera, un ADMIN sin restricción. Una prueba por ruta, y cada una
+    // con lo necesario para que SIN el arreglo se escribiera de verdad (caja
+    // abierta, sillones y pendiente de A4 sembrados antes de desactivarla).
+    // Cada prueba compara A4 entera y la auditoría antes y después.
     describe('altas con la sede desactivada en el cuerpo', () => {
       const SLOT = {
         slotStart: '2027-03-15T15:00:00.000Z',
@@ -1460,9 +1495,48 @@ describe('Personal restringido a sedes (DX-089)', () => {
       };
       let priceList: string;
       let agreement: string;
-      let audits: number;
-      // Entradas abiertas en A4 que el propio test siembra (no las crea la API).
-      let waitlistInA4 = 0;
+      let payerId: string;
+      let before: unknown;
+
+      const snapshotA4 = async () => {
+        const inA4 = { tenantId: a.tenantId, locationId: a4 };
+        const byId = { orderBy: { id: 'asc' as const } };
+        return {
+          cashSessions: await raw.cashSession.findMany({
+            where: inA4,
+            ...byId,
+            select: { id: true, status: true },
+          }),
+          chairs: await raw.chair.findMany({
+            where: inA4,
+            ...byId,
+            select: { id: true, name: true, sortOrder: true },
+          }),
+          blocks: await raw.scheduleBlock.count({ where: inA4 }),
+          expenses: await raw.expense.count({ where: inA4 }),
+          // Todos los estados: agendar cerraría la entrada (SCHEDULED).
+          waitlist: await raw.appointmentWaitlistEntry.findMany({
+            where: inA4,
+            ...byId,
+            select: { id: true, status: true },
+          }),
+          appointments: await raw.appointment.findMany({
+            where: inA4,
+            ...byId,
+            select: { id: true, start: true, status: true },
+          }),
+          offers: await raw.waitlistOffer.count({ where: inA4 }),
+          promises: await raw.paymentPromise.count({ where: inA4 }),
+          priceLists: await raw.priceList.count({ where: inA4 }),
+          agreements: await raw.agreement.count({ where: inA4 }),
+          overrides: await raw.providerScheduleOverride.count({
+            where: inA4,
+          }),
+          audits: await raw.auditEvent.count({
+            where: { tenantId: a.tenantId },
+          }),
+        };
+      };
 
       beforeAll(async () => {
         const t = { tenantId: a.tenantId };
@@ -1471,15 +1545,17 @@ describe('Personal restringido a sedes (DX-089)', () => {
             data: { ...t, name: 'Tarifa SEC-014', currency: 'USD' },
           })
         ).id;
-        const payer = await raw.payer.create({
-          data: { ...t, name: 'Aseguradora SEC-014', type: 'INSURER' },
-        });
+        payerId = (
+          await raw.payer.create({
+            data: { ...t, name: 'Aseguradora SEC-014', type: 'INSURER' },
+          })
+        ).id;
         agreement = (
           await raw.agreement.create({
             data: {
               ...t,
               name: 'Convenio SEC-014',
-              payerId: payer.id,
+              payerId,
               kind: 'PERCENT_DISCOUNT',
               percent: 10,
             },
@@ -1488,45 +1564,11 @@ describe('Personal restringido a sedes (DX-089)', () => {
       });
 
       beforeEach(async () => {
-        audits = await raw.auditEvent.count({
-          where: { tenantId: a.tenantId },
-        });
+        before = await snapshotA4();
       });
 
       afterEach(async () => {
-        const inA4 = { tenantId: a.tenantId, locationId: a4 };
-        expect({
-          cashSessions: await raw.cashSession.count({ where: inA4 }),
-          chairs: await raw.chair.count({ where: inA4 }),
-          blocks: await raw.scheduleBlock.count({ where: inA4 }),
-          expenses: await raw.expense.count({ where: inA4 }),
-          waitlist: await raw.appointmentWaitlistEntry.count({
-            where: { ...inA4, status: 'OPEN' },
-          }),
-          appointments: await raw.appointment.count({ where: inA4 }),
-          offers: await raw.waitlistOffer.count({ where: inA4 }),
-          promises: await raw.paymentPromise.count({ where: inA4 }),
-          priceLists: await raw.priceList.count({ where: inA4 }),
-          agreements: await raw.agreement.count({ where: inA4 }),
-          overrides: await raw.providerScheduleOverride.count({
-            where: inA4,
-          }),
-        }).toEqual({
-          cashSessions: 0,
-          chairs: 0,
-          blocks: 0,
-          expenses: 0,
-          waitlist: waitlistInA4,
-          appointments: 0,
-          offers: 0,
-          promises: 0,
-          priceLists: 0,
-          agreements: 0,
-          overrides: 0,
-        });
-        expect(
-          await raw.auditEvent.count({ where: { tenantId: a.tenantId } }),
-        ).toBe(audits);
+        expect(await snapshotA4()).toEqual(before);
       });
 
       it('abrir caja', async () => {
@@ -1544,9 +1586,21 @@ describe('Personal restringido a sedes (DX-089)', () => {
         );
       });
 
-      it('reordenar sillones', async () => {
+      it('reordenar los sillones reales de A4', async () => {
         expectInactive(
-          await admin().put('/chairs/order', { locationId: a4, chairIds: [] }),
+          await admin().put('/chairs/order', {
+            locationId: a4,
+            // Todos los de A4 (también el que nace con la sede), al revés.
+            chairIds: (
+              await raw.chair.findMany({
+                where: { tenantId: a.tenantId, locationId: a4 },
+                orderBy: { sortOrder: 'asc' },
+                select: { id: true },
+              })
+            )
+              .map((c) => c.id)
+              .reverse(),
+          }),
         );
       });
 
@@ -1573,11 +1627,11 @@ describe('Personal restringido a sedes (DX-089)', () => {
         );
       });
 
-      it('salida de caja', async () => {
+      it('salida de la caja abierta de A4', async () => {
         expectInactive(
           await admin().post('/cash-sessions/current/outflows', {
             locationId: a4,
-            category: 'SUPPLIES',
+            category: 'Mensajería',
             amount: 5,
             currency: 'USD',
           }),
@@ -1593,27 +1647,16 @@ describe('Personal restringido a sedes (DX-089)', () => {
         );
       });
 
-      it('agendar desde la lista de espera una entrada de la sede desactivada', async () => {
-        const entry = await raw.appointmentWaitlistEntry.create({
-          data: { tenantId: a.tenantId, locationId: a4, patientId: patient },
-        });
-        waitlistInA4 = 1;
+      it('agendar desde la lista de espera una entrada de A4', async () => {
         expectInactive(
-          await admin().post(`/waitlist/${entry.id}/schedule`, {
+          await admin().post(`/waitlist/${entryA4}/schedule`, {
             providerId: e.userId,
             start: '2027-03-16T15:00:00.000Z',
           }),
         );
-        expect(
-          (
-            await raw.appointmentWaitlistEntry.findUniqueOrThrow({
-              where: { id: entry.id },
-            })
-          ).status,
-        ).toBe('OPEN');
       });
 
-      it('ofrecer un hueco de la sede desactivada', async () => {
+      it('ofrecer un hueco de A4', async () => {
         expectInactive(
           await admin().post(`/appointments/openings/${a4}/offers`, {
             ...SLOT,
@@ -1653,9 +1696,6 @@ describe('Personal restringido a sedes (DX-089)', () => {
         expectInactive(
           await admin().patch(`/agreements/${agreement}`, { locationId: a4 }),
         );
-        const payerId = (
-          await raw.agreement.findUniqueOrThrow({ where: { id: agreement } })
-        ).payerId;
         expectInactive(
           await admin().post('/agreements', {
             name: 'Convenio Oeste',
@@ -1667,7 +1707,7 @@ describe('Personal restringido a sedes (DX-089)', () => {
         );
       });
 
-      it('excepción de horario de un profesional', async () => {
+      it('excepción de horario de un profesional que atiende en A4', async () => {
         expectInactive(
           await admin().post(`/providers/${e.userId}/schedule-overrides`, {
             locationId: a4,
@@ -1676,15 +1716,52 @@ describe('Personal restringido a sedes (DX-089)', () => {
           }),
         );
       });
+    });
 
-      it('sin cuerpo con sede, el ADMIN sigue escribiendo (control)', async () => {
-        await admin()
-          .patch(`/price-lists/${priceList}`, { name: 'Tarifa SEC-014 bis' })
-          .expect(200);
-        audits = await raw.auditEvent.count({
-          where: { tenantId: a.tenantId },
-        });
+    // M1 de la revisión: reagendar una cita de A4 da 400 y no la mueve; pero
+    // cancelarla sigue abierto, para poder cerrar la agenda de la sede.
+    it('cita de A4: reagendar 400 sin moverla; cancelarla, 200', async () => {
+      const start = (
+        await raw.appointment.findUniqueOrThrow({ where: { id: apptA4 } })
+      ).start;
+      expectInactive(
+        await admin().patch(`/appointments/${apptA4}`, {
+          start: '2027-03-18T16:00:00.000Z',
+          end: '2027-03-18T16:30:00.000Z',
+        }),
+      );
+      expect(
+        (await raw.appointment.findUniqueOrThrow({ where: { id: apptA4 } }))
+          .start,
+      ).toEqual(start);
+      await admin()
+        .patch(`/appointments/${apptA4}`, {
+          status: 'CANCELLED',
+          ...STAFF_CANCELLATION,
+        })
+        .expect(200);
+      expect(
+        (await raw.appointment.findUniqueOrThrow({ where: { id: apptA4 } }))
+          .status,
+      ).toBe('CANCELLED');
+    });
+
+    // B3 de la revisión: como con la cabecera, primero el 403 y luego el 400.
+    // Un miembro acotado a A1 con A4 (ajena y desactivada) en el cuerpo
+    // recibe el 403 de siempre, sin saber si está desactivada.
+    it('miembro acotado a A1 con A4 en el cuerpo: 403 LOCATION_NOT_ALLOWED, no 400', async () => {
+      const sessions = await raw.cashSession.count({
+        where: { tenantId: a.tenantId },
       });
+      expectNotAllowed(
+        await as(r).post('/cash-sessions/open', {
+          locationId: a4,
+          floats: [{ currency: 'USD', amount: 20 }],
+        }),
+      );
+      expect(
+        await raw.cashSession.count({ where: { tenantId: a.tenantId } }),
+      ).toBe(sessions);
     });
 
     it('una sede activa sigue admitiendo escrituras con su cabecera', async () => {

@@ -63,6 +63,7 @@ export class TenantContextInterceptor implements NestInterceptor {
             req.body,
             req.method,
             locationId,
+            allowed,
           );
           return locationId;
         })

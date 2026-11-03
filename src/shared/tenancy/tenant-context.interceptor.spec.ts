@@ -431,6 +431,7 @@ describe('TenantContextInterceptor', () => {
       method: string,
       body: unknown,
       headers: Record<string, string> = {},
+      loc?: string[],
     ): { result: Promise<unknown>; calls: { findFirst: number } } {
       const tenantContext = new TenantContextService();
       const prisma = makePrisma([ACTIVE, OFF], [OFF]) as unknown as {
@@ -442,7 +443,9 @@ describe('TenantContextInterceptor', () => {
       );
       const ctx = makeCtx({
         tenantHost: { tenantId: 't-1' },
-        user: { tenantId: 't-1', sub: 'u', role: 'ADMIN' },
+        user: loc
+          ? { tenantId: 't-1', sub: 'u', role: 'RECEPTION', loc }
+          : { tenantId: 't-1', sub: 'u', role: 'ADMIN' },
         headers,
         method,
         body,
@@ -498,6 +501,15 @@ describe('TenantContextInterceptor', () => {
       );
       await expect(same.result).resolves.toBe('handled');
       expect(same.calls.findFirst).toBe(1);
+    });
+
+    it('miembro acotado y sede del cuerpo fuera de las suyas: no la mira (el 403 del caso de uso va primero)', async () => {
+      const run = runWith('POST', { locationId: OFF }, {}, [ACTIVE]);
+      await expect(run.result).resolves.toBe('handled');
+      // Solo la del auto-pin (ACTIVE): la desactivada ajena ni se consulta.
+      expect(run.calls.findFirst).toBe(1);
+      const own = runWith('POST', { locationId: OFF }, {}, [ACTIVE, OFF]);
+      await expect(own.result).rejects.toBeInstanceOf(BadRequestException);
     });
 
     it('lecturas, null, sin locationId, no UUID o sede desconocida: no decide aquí', async () => {
