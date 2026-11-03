@@ -711,6 +711,32 @@ describe('Horario de los profesionales por sede (e2e, DX-233)', () => {
       });
     });
 
+    it('DX-520-bis: con la sede en 12 h el aviso escribe las horas en 12 h, sin barras', async () => {
+      const before = await raw.location.findUniqueOrThrow({
+        where: { id: sedeB },
+        select: { locale: true, hourCycle: true },
+      });
+      await raw.location.update({
+        where: { id: sedeB },
+        data: { locale: 'en-US', hourCycle: 'h12' },
+      });
+      try {
+        const res = await as(
+          api().patch(`/api/v1/appointments/${thursdayAppointment}`),
+          reception.token,
+        )
+          .send({ start: local(THU, '19:30'), end: local(THU, '20:00') })
+          .expect(200);
+        const [warning] = (res.body as { warnings: string[] }).warnings;
+        expect(warning).toMatch(
+          /^Fuera del horario del profesional en Sede B \(jueves \d{1,2} de [a-záéíóú]+: 2:00 p\. m\.–7:00 p\. m\.\)\.$/,
+        );
+        expect(warning).not.toMatch(/\d{1,2}\/\d{1,2}/);
+      } finally {
+        await raw.location.update({ where: { id: sedeB }, data: before });
+      }
+    });
+
     it('«Ocupar este hueco»: fuera del horario de su profesional no hay candidatos', async () => {
       const res = await as(
         api()
