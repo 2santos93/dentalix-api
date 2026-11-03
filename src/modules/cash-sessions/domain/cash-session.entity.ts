@@ -5,6 +5,15 @@ import type {
   PaymentMethod,
 } from '@prisma/client';
 
+/**
+ * SEC-043: con arqueo ciego y quien consulta sin ser ADMIN, el importe de lo
+ * que cuenta en una caja aún abierta (o entrará en la próxima que se abra) va
+ * a null y la fila con `amountHidden`: sumado al fondo daría el esperado.
+ */
+export interface HiddenAmount {
+  amountHidden: boolean;
+}
+
 /*
  * Caja por turno (DX-027): la caja de UN usuario en UNA sede, con su fondo
  * inicial por moneda, los abonos que recibió, los ajustes que le llegaron de
@@ -44,35 +53,63 @@ export interface MoneyAmount {
   amount: number;
 }
 
-export interface CashExpectedLine {
+/**
+ * SEC-043: diferencia por moneda del último cierre; `amount` null con
+ * `amountHidden` (ver `CashExpectedLine.amountHidden`).
+ */
+export interface CashDifference extends HiddenAmount {
+  currency: string;
+  amount: number | null;
+}
+
+/**
+ * SEC-043: un grupo (moneda, método) de una caja ya cerrada del que nació un
+ * ajuste que cuenta en otra caja abierta o pendiente.
+ */
+export interface CashGroupRef {
+  currency: string;
+  method: PaymentMethod;
+}
+
+/**
+ * Las cifras del esperado van a null con `amountHidden` (SEC-043): el grupo
+ * de una caja cerrada tiene una anulación posterior que cuenta en otra caja
+ * abierta o pendiente, y su desglose frente a los cobros vivos la delataría.
+ * El fondo (`opening`) se queda: es el que se declaró al abrir.
+ */
+export interface CashExpectedLine extends HiddenAmount {
   currency: string;
   method: PaymentMethod;
   opening: number;
-  payments: number;
-  paymentsCount: number;
+  payments: number | null;
+  paymentsCount: number | null;
   /**
    * DX-516: ajustes por medio de pago de esos abonos, con signo (impuestos y
    * recargos +, descuentos −). 0 sin ajustes.
    */
-  paymentAdjustments: number;
-  adjustments: number;
+  paymentAdjustments: number | null;
+  adjustments: number | null;
   /** Salidas de caja menor (DX-274), en positivo: se restan. */
-  outflows: number;
-  outflowsCount: number;
+  outflows: number | null;
+  outflowsCount: number | null;
   /**
    * opening + payments + paymentAdjustments + adjustments − outflows (puede
    * ser negativo).
    */
-  expected: number;
+  expected: number | null;
 }
 
-export interface CashClosingLine {
+/**
+ * SEC-043: `expected` y `difference` a null con `amountHidden` (como en
+ * `CashExpectedLine`). `counted` se queda: es lo que contó quien cerró.
+ */
+export interface CashClosingLine extends HiddenAmount {
   currency: string;
   method: PaymentMethod;
   opening: number;
-  expected: number;
+  expected: number | null;
   counted: number;
-  difference: number;
+  difference: number | null;
 }
 
 export interface CashClosingView {
@@ -83,6 +120,12 @@ export interface CashClosingView {
   blind: boolean;
   hasDifference: boolean;
   differenceReason: string | null;
+  /**
+   * SEC-043: cierre a ciegas de quien no es ADMIN que no cuadró y llegó sin
+   * motivo. Se guarda igual (el cierre no dice antes si cuadra) y queda así
+   * marcado para que administración lo revise.
+   */
+  unjustifiedDifference: boolean;
   notes: string | null;
   /** Día civil (YYYY-MM-DD) que DX-091 podrá usar como fecha de bloqueo. */
   suggestedLockDate: string;
@@ -112,7 +155,11 @@ export interface CashSessionPayment {
   collectedAmount: number;
 }
 
-export interface CashVoidedPayment extends CashSessionPayment {
+export interface CashVoidedPayment
+  extends Omit<CashSessionPayment, 'amount' | 'collectedAmount'>, HiddenAmount {
+  /** SEC-043: null con `amountHidden` (su anulación cuenta en otra caja abierta). */
+  amount: number | null;
+  collectedAmount: number | null;
   voidedAt: Date | null;
   voidedBy: StaffRef | null;
   voidReason: string | null;
@@ -155,7 +202,10 @@ export interface CashCreditRefund {
   patient: { id: string; fullName: string };
 }
 
-export interface CashVoidedOutflow extends CashOutflow {
+export interface CashVoidedOutflow
+  extends Omit<CashOutflow, 'amount'>, HiddenAmount {
+  /** SEC-043: null con `amountHidden` (su anulación cuenta en otra caja abierta). */
+  amount: number | null;
   voidedAt: Date | null;
   voidedBy: StaffRef | null;
   voidReason: string | null;
@@ -172,17 +222,20 @@ export interface CashSessionRef {
   openedBy: StaffRef;
 }
 
-export interface CashAdjustmentView {
+export interface CashAdjustmentView extends HiddenAmount {
   id: string;
   kind: CashAdjustmentKind;
   currency: string;
   method: PaymentMethod;
-  amount: number;
+  /** SEC-043: null con `amountHidden`. */
+  amount: number | null;
   reason: string | null;
   createdAt: Date;
   createdBy: StaffRef;
   /** Caja donde cuenta; `null` = pendiente de la siguiente que se abra. */
   sessionId: string | null;
+  /** SEC-043: estado de esa caja; `null` si está pendiente. */
+  sessionStatus: CashSessionStatus | null;
   payment: {
     id: string;
     patient: { id: string; fullName: string };
@@ -213,7 +266,9 @@ export interface CashSessionSummary {
   reopenCount: number;
   floats: MoneyAmount[];
   /** Diferencia por moneda del último cierre (vacía si está abierta). */
-  differences: MoneyAmount[];
+  differences: CashDifference[];
+  /** SEC-043: el último cierre (si está cerrada) es «diferencia sin justificar». */
+  unjustifiedDifference: boolean;
 }
 
 export interface CashSessionDetail extends CashSessionSummary {
@@ -221,18 +276,22 @@ export interface CashSessionDetail extends CashSessionSummary {
   timeZone: string;
   /** DX-354: región de la sede de la caja; `null` si le falta algo. */
   regional: DocumentRegionalDto | null;
-  /** Arqueo ciego activo para quien consulta: sin esperado ni abonos. */
+  /**
+   * Arqueo ciego activo para quien consulta: sin esperado, abonos, anulados,
+   * ajustes ni líneas de cierres anteriores (SEC-043), que lo dejarían
+   * deducir.
+   */
   blindHidden: boolean;
   expected: CashExpectedLine[] | null;
   payments: CashSessionPayment[] | null;
-  voidedPayments: CashVoidedPayment[];
+  voidedPayments: CashVoidedPayment[] | null;
   /** Salidas de caja vivas del turno (DX-274). */
   outflows: CashOutflow[];
   /** Salidas anuladas (las anuladas con la caja cerrada siguen restando). */
   voidedOutflows: CashVoidedOutflow[];
   /** DX-253: devoluciones de saldo a favor en efectivo (restan en CASH). */
   creditRefunds: CashCreditRefund[];
-  adjustments: CashAdjustmentView[];
+  adjustments: CashAdjustmentView[] | null;
   /** Ajustes que nacieron de esta caja ya cerrada y cuentan en otra. */
   laterAdjustments: CashAdjustmentView[];
   /** Último cierre (el vigente si está cerrada). */

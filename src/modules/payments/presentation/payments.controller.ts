@@ -144,6 +144,8 @@ export class PaymentsController {
   @Get('payments')
   @ApiOperation({
     summary: 'Caja: abonos del período con resumen por moneda y método',
+    description:
+      'SEC-043: con «arqueo ciego», quien no es ADMIN recibe los abonos que cuentan en una caja aún abierta sin importe ni moneda (`amountHidden`), y el resumen no los suma: `blindHidden` lo indica. Recibo y anulación funcionan igual; las cifras vuelven al cerrarla.',
   })
   @ApiHeader({
     name: 'X-Location-Id',
@@ -190,7 +192,10 @@ export class PaymentsController {
       'misma sede (`X-Location-Id`), sin paginar: hasta 10 000 abonos. UTF-8 ' +
       'con BOM y CRLF; celdas protegidas contra fórmulas; importes con los ' +
       'decimales de su moneda. Columnas: Fecha, Sede, Paciente, Destino, ' +
-      'Medio, Referencia, Factura externa, Moneda, Importe.',
+      'Medio, Referencia, Factura externa, Moneda, Importe. SEC-043: con ' +
+      '«arqueo ciego», quien no es ADMIN recibe los abonos de cajas aún ' +
+      'abiertas sin moneda ni ajustes, con «Oculto durante el arqueo» en ' +
+      'Importe y Total cobrado (no suman en una hoja de cálculo).',
   })
   @ApiHeader({
     name: 'X-Location-Id',
@@ -222,7 +227,9 @@ export class PaymentsController {
     sendCsv(res, `caja-${from}-${to}.csv`);
     return toCashPaymentsCsv(
       items,
-      await this.currencyDigits.table(items.map((i) => i.currency)),
+      await this.currencyDigits.table(
+        items.flatMap((i) => (i.currency === null ? [] : [i.currency])),
+      ),
     );
   }
 

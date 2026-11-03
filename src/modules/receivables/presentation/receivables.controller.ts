@@ -83,9 +83,16 @@ export class ReceivablesController {
   }
 
   // Inicio (I1): solo los totales por moneda (pacientes, saldo, tramos), sin
-  // ninguna fila de paciente ni teléfono, así que no lleva @Audit (mismo
-  // criterio que GET /closing-queue/count). Mismos filtros, sede y roles que
-  // la lista: los totales son los mismos que pinta la cabecera de la cartera.
+  // ninguna fila de paciente ni teléfono. Mismos filtros, sede y roles que la
+  // lista: los totales son los mismos que pinta la cabecera de la cartera.
+  // SEC-043 (revisión M2): sí se audita. La diferencia del saldo total entre
+  // dos consultas aproxima lo abonado entre ellas (el esperado de una caja
+  // abierta con arqueo ciego): el ADMIN ve quién lo consultó y cuándo.
+  @Audit({
+    action: 'VIEW',
+    resource: 'ACCOUNT_STATEMENT',
+    reason: 'RECEIVABLES_AGING_SUMMARY',
+  })
   @Get('aging/summary')
   @ApiOperation({
     summary: 'Totales de la cartera por antigüedad, sin pacientes',

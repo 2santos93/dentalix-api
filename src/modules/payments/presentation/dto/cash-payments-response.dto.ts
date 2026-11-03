@@ -111,11 +111,27 @@ export class CashPaymentDto {
   })
   registeredToday!: boolean;
 
-  @ApiProperty({ example: 150000 })
-  amount!: number;
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    example: 150000,
+    description: 'SEC-043: `null` con `amountHidden`.',
+  })
+  amount!: number | null;
 
-  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
-  currency!: string;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'Código ISO 4217 de 3 letras. SEC-043: `null` con `amountHidden`.',
+  })
+  currency!: string | null;
+
+  @ApiProperty({
+    description:
+      'SEC-043: rige el arqueo ciego, quien consulta no es ADMIN y el abono cuenta en una caja aún abierta. Va sin `amount`, `currency`, `collectedAmount`, `notes` ni `reference` (null) y sin `adjustments` (vacío), y no suma en el resumen. Recibo y anulación funcionan igual. Las cifras vuelven al cerrar la caja.',
+  })
+  amountHidden!: boolean;
 
   @ApiProperty({ enum: PaymentMethod, nullable: true })
   method!: PaymentMethod | null;
@@ -190,11 +206,13 @@ export class CashPaymentDto {
   adjustments!: PaymentAdjustmentLineDto[];
 
   @ApiProperty({
+    type: Number,
+    nullable: true,
     example: 103,
     description:
-      'DX-516: lo cobrado = importe + impuestos + recargos − descuentos (sin ajustes, el importe). El saldo del plan se mueve por `amount`.',
+      'DX-516: lo cobrado = importe + impuestos + recargos − descuentos (sin ajustes, el importe). El saldo del plan se mueve por `amount`. SEC-043: `null` con `amountHidden`.',
   })
-  collectedAmount!: number;
+  collectedAmount!: number | null;
 }
 
 export class CashCurrencyTotalDto {
@@ -354,4 +372,10 @@ export class CashPaymentsResponseDto {
     description: 'Resumen del período entero con los mismos filtros.',
   })
   summary!: CashPaymentsSummaryDto;
+
+  @ApiProperty({
+    description:
+      'SEC-043: rige el arqueo ciego y quien consulta no es ADMIN: el resumen no suma los abonos que cuentan en una caja aún abierta y esas filas van sin importe (`amountHidden`). Las cifras vuelven al cerrarla.',
+  })
+  blindHidden!: boolean;
 }

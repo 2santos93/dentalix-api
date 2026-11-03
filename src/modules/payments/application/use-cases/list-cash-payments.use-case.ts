@@ -1,5 +1,5 @@
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
-import { PaymentMethod } from '@prisma/client';
+import { ClinicRole, PaymentMethod } from '@prisma/client';
 import { PAYMENT_REPOSITORY } from '../../domain/ports/payment-repository.port';
 import type {
   CashAdjustmentGroup,
@@ -77,11 +77,39 @@ export interface ListCashPaymentsInput {
   pageSize?: number;
 }
 
+/**
+ * SEC-043: lo que se quita de una fila de una caja abierta con arqueo ciego.
+ * Las notas y la referencia son texto libre (pueden llevar la cifra) y los
+ * ajustes por medio de pago llevan importes. El nº de factura externa se
+ * queda: es un número de factura, no un importe.
+ */
+const HIDDEN_AMOUNT: Pick<
+  CashPaymentView,
+  | 'amount'
+  | 'currency'
+  | 'collectedAmount'
+  | 'notes'
+  | 'reference'
+  | 'adjustments'
+  | 'amountHidden'
+> = {
+  amount: null,
+  currency: null,
+  collectedAmount: null,
+  notes: null,
+  // La referencia también es texto libre: el recibo la sigue mostrando.
+  reference: null,
+  adjustments: [],
+  amountHidden: true,
+};
+
 /** DX-395: lo que el CSV de la caja necesita, sin paginar. */
 export interface CashPaymentsExport {
   items: CashPaymentView[];
   from: string;
   to: string;
+  /** SEC-043: como en `ListCashPaymentsOutput`. */
+  blindHidden: boolean;
 }
 
 export interface CashPaymentsSummary {
@@ -105,6 +133,12 @@ export interface ListCashPaymentsOutput {
   to: string;
   scope: { location: { id: string; name: string } | null };
   summary: CashPaymentsSummary;
+  /**
+   * SEC-043: rige el arqueo ciego y quien consulta no es ADMIN: el resumen
+   * no suma los abonos de cajas aún abiertas y sus filas van sin importe
+   * (`amountHidden`).
+   */
+  blindHidden: boolean;
 }
 
 // Misma normalización que ListCatalogDirectoryUseCase / ListInventoryItemsUseCase.
@@ -276,8 +310,10 @@ export class ListCashPaymentsUseCase {
   ) {}
 
   /**
-   * `actor` (del token) solo decide `canVoid` de cada fila: qué abonos puede
-   * anular quien consulta, con la misma regla que aplica la anulación.
+   * `actor` (del token) decide `canVoid` de cada fila —qué abonos puede
+   * anular quien consulta, con la misma regla que aplica la anulación— y,
+   * con arqueo ciego, si se quitan los abonos de cajas abiertas (SEC-043:
+   * todo el que no es ADMIN).
    */
   async execute(
     input: ListCashPaymentsInput,
@@ -295,6 +331,7 @@ export class ListCashPaymentsUseCase {
       method: input.method,
       paymentMethod,
       externalInvoice: input.externalInvoice,
+      blindViewer: actor.role !== ClinicRole.ADMIN,
       skip: (page - 1) * pageSize,
       take: pageSize,
     });
@@ -308,6 +345,7 @@ export class ListCashPaymentsUseCase {
       to: input.to,
       scope: { location: result.scopeLocation },
       summary: summarize(result.groups, result.adjustmentGroups),
+      blindHidden: result.blindHidden ?? false,
     };
   }
 
@@ -327,6 +365,7 @@ export class ListCashPaymentsUseCase {
       method: input.method,
       paymentMethod,
       externalInvoice: input.externalInvoice,
+      blindViewer: actor.role !== ClinicRole.ADMIN,
       skip: 0,
       take: CASH_EXPORT_MAX_ROWS + 1,
     });
@@ -337,6 +376,7 @@ export class ListCashPaymentsUseCase {
       items: this.viewsOf(result.items, actor),
       from: input.from,
       to: input.to,
+      blindHidden: result.blindHidden ?? false,
     };
   }
 
@@ -380,13 +420,14 @@ export class ListCashPaymentsUseCase {
     actor: VoidActor,
   ): CashPaymentView[] {
     const now = this.now();
-    return rows.map(({ payment, voidSubject }) => {
+    return rows.map(({ payment, voidSubject, inOpenCashSession }) => {
       const registeredOn = civilDateIn(
         voidSubject.createdAt,
         voidSubject.timeZone,
       );
       return {
         ...payment,
+        ...(inOpenCashSession ? HIDDEN_AMOUNT : { amountHidden: false }),
         canVoid: canVoidPayment(voidSubject, actor, now),
         registeredOn,
         registeredToday:

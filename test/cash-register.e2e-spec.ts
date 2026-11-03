@@ -411,6 +411,8 @@ describe('Caja — GET /payments (e2e)', () => {
     expect(row).toEqual({
       id: ids.oct01Cash,
       createdById: null,
+      // SEC-043: sin arqueo ciego, nunca se oculta.
+      amountHidden: false,
       canVoid: true,
       registeredOn: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/) as string,
       registeredToday: true,
