@@ -2,7 +2,10 @@ import { createHash } from 'node:crypto';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
-import { PrismaPatientImportRepository } from '../src/modules/patient-imports/infrastructure/prisma-patient-import.repository';
+import {
+  PrismaPatientImportRepository,
+  type UndoResult,
+} from '../src/modules/patient-imports/infrastructure/prisma-patient-import.repository';
 import type { ImportPatientData } from '../src/modules/patient-imports/domain/import-fields';
 import {
   REGIONAL_CARACAS_FIXTURE,
@@ -19,6 +22,11 @@ import {
 // clínica) y el proxy de la web cortaba la petición; con
 // `plan_cache_mode = force_custom_plan` (migración 20261112090000) ~1 s.
 // Mediciones y planes en REPORT-DX-294.
+//
+// DX-294-ter: seguía siendo bimodal porque el refresco cruzaba los ids con un
+// join que el planificador estima en 5 filas, y el plan caía en un Materialize
+// de todo el tenant cuando las estadísticas viejas iban sobre páginas vacías.
+// Mediciones y planes en REPORT-DX-294-ter.
 //
 // `raw` (DIRECT_URL) solo siembra, lee, mide y limpia.
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
@@ -131,6 +139,39 @@ async function imported(s: Seeded, rows: ImportPatientData[]): Promise<string> {
   return batch.id;
 }
 
+/**
+ * Las estadísticas que dan el modo lento: `patients` analizada con pocas filas
+ * sobre las páginas vacías de borrados anteriores (densidad baja), y con
+ * índices que ya crecieron. Es lo que deja un ciclo de importar y purgar.
+ */
+async function staleStatsOverEmptyPages(tenantId: string): Promise<void> {
+  for (let cycle = 0; cycle < 3; cycle += 1) {
+    await raw.$executeRaw`
+      INSERT INTO "patients" ("id", "tenantId", "documentType", "docNumber", "firstName", "lastName", "updatedAt")
+      SELECT gen_random_uuid(), ${tenantId}::uuid, 'NATIONAL_ID', 'relleno-' || g, 'Relleno', 'Purgado', now()
+        FROM generate_series(1, ${ROWS}) g`;
+    await raw.$executeRaw`
+      DELETE FROM "patients"
+       WHERE "tenantId" = ${tenantId}::uuid AND "docNumber" LIKE 'relleno-%'`;
+    await raw.$executeRawUnsafe('VACUUM (TRUNCATE off) "patients"');
+  }
+  await raw.$executeRawUnsafe('VACUUM (ANALYZE, TRUNCATE off) "patients"');
+}
+
+/** Fila de cartera para todo el lote (lo que dejan unos saldos migrados). */
+async function withLedgerRows(
+  tenantId: string,
+  batchId: string,
+): Promise<void> {
+  await raw.$transaction([
+    raw.$executeRaw`SELECT set_config('dentalix.ledgers_refresh', 'on', true)`,
+    raw.$executeRaw`
+      INSERT INTO "patient_ledgers" ("tenantId", "patientId")
+      SELECT "tenantId", "id" FROM "patients"
+       WHERE "tenantId" = ${tenantId}::uuid AND "import_batch_id" = ${batchId}::uuid`,
+  ]);
+}
+
 async function timed<T>(
   fn: () => Promise<T>,
 ): Promise<{ value: T; ms: number }> {
@@ -161,8 +202,10 @@ describe('DX-294: deshacer 10.000 pacientes recién importados en < 3 s (int)', 
   });
 
   it('el refresco de cartera fija plan_cache_mode = force_custom_plan (un CREATE OR REPLACE sin él lo quitaría)', async () => {
-    const [fn] = await raw.$queryRaw<{ config: string[] | null }[]>`
-      SELECT p.proconfig AS config FROM pg_proc p
+    const [fn] = await raw.$queryRaw<
+      { config: string[] | null; source: string }[]
+    >`
+      SELECT p.proconfig AS config, p.prosrc AS source FROM pg_proc p
         JOIN pg_namespace n ON n.oid = p.pronamespace
        WHERE n.nspname = 'public' AND p.proname = 'patient_ledgers_refresh'`;
     expect(fn.config).toEqual(
@@ -171,6 +214,9 @@ describe('DX-294: deshacer 10.000 pacientes recién importados en < 3 s (int)', 
         'search_path=pg_catalog, public, pg_temp',
       ]),
     );
+    // DX-294-ter: ni un join contra el unnest de los ids: su plan depende de
+    // las estadísticas (ver la migración 20261115120000).
+    expect(fn.source).not.toMatch(/JOIN\s*\(\s*SELECT\s+DISTINCT/i);
   });
 
   it('con estadísticas de antes de importar: bloqueado por actividad sin tocar nada, y después deshecho solo lo del lote, todo en < 3 s', async () => {
@@ -266,5 +312,50 @@ describe('DX-294: deshacer 10.000 pacientes recién importados en < 3 s (int)', 
         })
       ).status,
     ).toBe('COMPLETED');
+  });
+
+  it('DX-294-ter: con estadísticas viejas sobre páginas vacías y fila de cartera en todo el lote, también < 3 s', async () => {
+    await purge();
+    a = await seed(SUBDOMAINS[0]);
+    b = await seed(SUBDOMAINS[1]);
+    await imported(b, people(50, '9'));
+    await raw.patient.create({
+      data: {
+        tenantId: a.tenantId,
+        documentType: 'NATIONAL_ID',
+        docNumber: '8000001',
+        firstName: 'Manual',
+        lastName: 'Fuera del lote',
+      },
+    });
+    // Sin autovacuum mientras dura: si analiza a mitad, la prueba no prueba nada.
+    await raw.$executeRawUnsafe(
+      'ALTER TABLE "patients" SET (autovacuum_enabled = false)',
+    );
+    let batchId: string;
+    let stats: { reltuples: number; relpages: number };
+    let undone: Awaited<ReturnType<typeof timed<UndoResult>>>;
+    try {
+      await staleStatsOverEmptyPages(b.tenantId);
+      batchId = await imported(a, people(ROWS, '7'));
+      await withLedgerRows(a.tenantId, batchId);
+      [stats] = await raw.$queryRaw<{ reltuples: number; relpages: number }[]>`
+        SELECT reltuples, relpages FROM pg_class WHERE oid = '"patients"'::regclass`;
+      undone = await timed(() =>
+        tenantContext.run(a.tenantId, () => repo.undo(batchId, a.userId)),
+      );
+    } finally {
+      await raw.$executeRawUnsafe(
+        'ALTER TABLE "patients" RESET (autovacuum_enabled)',
+      );
+    }
+    console.info(
+      `[DX-294-ter] deshacer ${ROWS} con cartera y reltuples=${stats.reltuples}, relpages=${stats.relpages}: ${undone.ms} ms`,
+    );
+    // El estado que da el modo lento: si deja de darse, esta prueba no vale.
+    expect(stats.reltuples).toBeLessThan(ROWS / 10);
+    expect(undone.value.undoneCreated).toBe(ROWS);
+    expect(undone.ms).toBeLessThan(UNDO_BUDGET_MS);
+    expect(await alive({ importBatchId: batchId })).toBe(0);
   });
 });
