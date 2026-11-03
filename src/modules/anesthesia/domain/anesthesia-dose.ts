@@ -1,3 +1,4 @@
+import { wholePercent } from '../../../shared/format/whole-percent';
 import { findAllergyMatches } from '../../prescriptions/domain/allergy-match';
 import {
   AAPD_SOURCE,
@@ -182,9 +183,9 @@ const fmtEpi = (n: number) => String(round4(n)).replace('.', ',');
  * umbral el % se queda por debajo de él; desde el umbral, nunca por debajo.
  */
 function percentOf(fraction: number): number {
-  const rounded = Math.round(fraction * 100);
+  const rounded = wholePercent(fraction);
   for (const threshold of [DOSE_BLOCK_FRACTION, DOSE_WARNING_FRACTION]) {
-    const limit = Math.round(threshold * 100);
+    const limit = wholePercent(threshold);
     if (fraction + EPSILON >= threshold) return Math.max(rounded, limit);
     if (rounded >= limit) return limit - 1;
   }
@@ -337,7 +338,7 @@ function maxSourceOf(
       ? `${AAPD_SOURCE}: ${fmt(anesthetic.pediatricMaxMgPerKg)} mg/kg en menores de ${PEDIATRIC_AGE_LIMIT} años`
       : MALAMED;
   return adjustment.factor < 1
-    ? `${base}; reducido un ${Math.round((1 - adjustment.factor) * 100)} % (${AAPD_SOURCE})`
+    ? `${base}; reducido un ${wholePercent(1 - adjustment.factor)} % (${AAPD_SOURCE})`
     : base;
 }
 

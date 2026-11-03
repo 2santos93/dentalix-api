@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { PaymentWithoutRateDto } from '../../../payments/presentation/dto/plan-balance.dto';
 
 // Response shape for POST/GET /treatment-plans/:id/payment-plan -- documents
 // GetPaymentPlanResult for Swagger (same convention as PlanBalanceDto: exists
@@ -98,8 +99,51 @@ export class PaymentPlanDto {
   startDate!: Date;
 
   @ApiProperty({
+    example: 1200,
+    description:
+      'DX-472: el billable de GET /treatment-plans/:id/balance: lo cobrable del plan de tratamiento (ítems ACCEPTED|DONE; 0 si está cancelado o rechazado). No es totalToFinance, que es lo que se pactó financiar.',
+  })
+  billable!: number;
+
+  @ApiProperty({
     example: 300,
-    description: 'Total pagado, convertido a currency del plan',
+    description:
+      'DX-472: el paid de /balance: abonos vivos convertidos a la moneda del plan. Los «sin tasa» (paymentsWithoutRate) no suman.',
+  })
+  paid!: number;
+
+  @ApiProperty({
+    example: 0,
+    description:
+      'DX-472: el creditMovements de /balance: traspasos y devoluciones de saldo a favor, con signo.',
+  })
+  creditMovements!: number;
+
+  @ApiProperty({
+    example: 900,
+    description:
+      'DX-472: el balance de /balance: billable - paid - creditMovements. No es remaining, que se mide contra totalToFinance.',
+  })
+  balance!: number;
+
+  @ApiProperty({
+    type: [PaymentWithoutRateDto],
+    description:
+      'DX-472: los paymentsWithoutRate de /balance: abonos que no suman en paid por no tener tasa.',
+  })
+  paymentsWithoutRate!: PaymentWithoutRateDto[];
+
+  @ApiProperty({
+    example: false,
+    description:
+      'DX-472: el proveedor de tasas no respondió a tiempo. paid está incompleto y, mientras tanto, ninguna cuota sale OVERDUE: quedan PARTIAL o PENDING, y overdueCount y overdueAmount en 0. Volver a pedirlo lo completa. Nunca es un 500.',
+  })
+  rateProviderTimedOut!: boolean;
+
+  @ApiProperty({
+    example: 300,
+    description:
+      'paid + creditMovements: lo que cubre cuotas (un traspaso cubre como un abono; una devolución deja de cubrir). Difiere de paid a propósito.',
   })
   paidTotal!: number;
 

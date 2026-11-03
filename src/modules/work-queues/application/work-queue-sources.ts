@@ -1,3 +1,4 @@
+import { round2 } from '../../../shared/money/money';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { ClosingQueueUseCases } from '../../closing-queue/application/closing-queue.use-cases';
 import { ListDueRecallsUseCase } from '../../recall/application/use-cases/recall.use-cases';
@@ -17,14 +18,11 @@ export function overdueOf(buckets: {
   days61to90: number;
   over90: number;
 }): number {
-  return (
-    Math.round(
-      (buckets.days0to30 +
-        buckets.days31to60 +
-        buckets.days61to90 +
-        buckets.over90) *
-        100,
-    ) / 100
+  return round2(
+    buckets.days0to30 +
+      buckets.days31to60 +
+      buckets.days61to90 +
+      buckets.over90,
   );
 }
 

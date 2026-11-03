@@ -19,6 +19,13 @@ import {
   methodRefOf,
 } from '../../../payment-methods/domain/method-catalog';
 import { round2 } from '../../../../shared/money/money';
+import { linesTotal } from '../../../../shared/money/line-rounding';
+import type { PlanBalanceInput } from '../../../payments/application/use-cases/get-plan-balance.use-case';
+import { civilDateIn } from '../../../payments/domain/void-window';
+import {
+  FROZEN_RATE_SELECT,
+  frozenRateOf,
+} from '../../../payments/infrastructure/repositories/frozen-exchange-rate.mapper';
 
 // Mismo "facturable" que GetPlanBalanceUseCase: un ítem PROPOSED aún no se debe.
 const BILLABLE_ITEM_STATUSES: TreatmentPlanItemStatus[] = [
@@ -44,12 +51,12 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
 
   /**
    * Número FIJO de consultas, sin importar cuántos planes, abonos o cuotas
-   * tenga el paciente (sin N+1): paciente, planes, suma de ítems por plan
-   * (`groupBy`), abonos con su sede (Prisma resuelve la relación con un `IN`
-   * para todas las filas), planes de pago con sus cuotas (ídem) y saldos
-   * migrados vivos (DX-262), el catálogo de medios de pago (DX-395), más el nombre
-   * de la clínica, y el nombre de quienes anularon abonos (una consulta más,
-   * solo si hay anulaciones con autor).
+   * tenga el paciente (sin N+1): paciente, planes, sus ítems cobrables, abonos
+   * con su sede (Prisma resuelve la relación con un `IN` para todas las filas),
+   * sus bases de imputación (DX-472), planes de pago con sus cuotas (ídem) y
+   * saldos migrados vivos (DX-262), el catálogo de medios de pago (DX-395), más
+   * el nombre de la clínica, y el nombre de quienes anularon abonos (una
+   * consulta más, solo si hay anulaciones con autor).
    *
    * Todo bajo `runWithTenant` (RLS por `app.current_tenant`) Y con
    * `patientId` en cada `where`: aunque una política RLS se rompiera, ninguna
@@ -91,8 +98,9 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
         const [
           tenant,
           plans,
-          itemSums,
+          items,
           payments,
+          bases,
           paymentPlans,
           openings,
           creditSums,
@@ -113,14 +121,19 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
             },
             orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
           }),
-          tx.treatmentPlanItem.groupBy({
-            by: ['planId'],
+          // Solo importes y estado: ningún dato clínico del ítem.
+          tx.treatmentPlanItem.findMany({
             where: {
               deletedAt: null,
               status: { in: BILLABLE_ITEM_STATUSES },
               plan: livePlan,
             },
-            _sum: { price: true, discount: true },
+            select: {
+              planId: true,
+              status: true,
+              price: true,
+              discount: true,
+            },
           }),
           // Anulados INCLUIDOS (sin filtro de deletedAt): el estado de cuenta
           // los lista marcados; el cálculo no los suma.
@@ -148,7 +161,16 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
               voidedById: true,
               voidReason: true,
               location: { select: { id: true, name: true } },
+              ...FROZEN_RATE_SELECT,
             },
+          }),
+          // DX-472: con base, un abono cuenta por ella (como en `/balance`).
+          tx.paymentPlanAmount.findMany({
+            where: {
+              tenantId,
+              payment: { patientId, deletedAt: null },
+            },
+            select: { paymentId: true, amount: true },
           }),
           // Un plan de pagos cancelado lleva status CANCELLED + deletedAt
           // (PrismaPaymentPlanRepository.cancel): fuera.
@@ -235,8 +257,18 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
           payments.map((p) => p.location.id),
         );
 
-        const billableByPlan = new Map(
-          itemSums.map((row) => [row.planId, netOf(row._sum)]),
+        const itemsByPlan = new Map<string, PlanBalanceInput['items']>();
+        for (const item of items) {
+          const list = itemsByPlan.get(item.planId) ?? [];
+          list.push({
+            status: item.status,
+            price: item.price.toNumber(),
+            discount: item.discount.toNumber(),
+          });
+          itemsByPlan.set(item.planId, list);
+        }
+        const baseOf = new Map(
+          bases.map((b) => [b.paymentId, b.amount.toNumber()] as const),
         );
 
         return {
@@ -256,7 +288,7 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
           snapshot: {
             plans: plans.map((plan) => ({
               ...plan,
-              billable: billableByPlan.get(plan.id) ?? 0,
+              billable: linesTotal(itemsByPlan.get(plan.id) ?? []),
             })),
             payments: payments.map((p) => ({
               id: p.id,
@@ -307,6 +339,29 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
               amount: c._sum.amount?.toNumber() ?? 0,
             })),
           },
+          planBalances: plans.map((plan) => ({
+            plan,
+            items: itemsByPlan.get(plan.id) ?? [],
+            payments: payments
+              .filter((p) => p.treatmentPlanId === plan.id && !p.deletedAt)
+              .map((p) => ({
+                id: p.id,
+                amount: p.amount.toNumber(),
+                currency: p.currency,
+                paidOn: civilDateIn(p.paidAt, timeZoneOf(p.location.id)),
+                exchangeRateCurrency: p.exchangeRateCurrency,
+                frozenRate: frozenRateOf(p),
+              })),
+            baseOf,
+            creditMovements:
+              creditSums
+                .find(
+                  (c) =>
+                    c.treatmentPlanId === plan.id &&
+                    c.currency === plan.currency,
+                )
+                ?._sum.amount?.toNumber() ?? 0,
+          })),
         };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },

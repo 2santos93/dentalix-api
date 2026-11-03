@@ -28,6 +28,7 @@ import {
   GetPaymentAllocationsUseCase,
   type PaymentAllocationsView,
 } from './get-payment-allocations.use-case';
+import { toCents } from '../../../../shared/money/money';
 
 export interface ReplacePaymentAllocationsCommand {
   expectedVersion: string;
@@ -77,7 +78,7 @@ export class ReplacePaymentAllocationsUseCase {
         command.mode === 'MANUAL'
           ? (command.allocations ?? []).map((l) => ({
               itemId: l.treatmentPlanItemId,
-              cents: Math.round(l.amount * 100),
+              cents: toCents(l.amount),
             }))
           : [],
       actorId,

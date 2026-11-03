@@ -27,6 +27,16 @@ describe('deriveStatuses', () => {
     expect(out[0]).toMatchObject({ covered: 40, status: 'OVERDUE' });
   });
 
+  it('DX-472: con lo abonado incompleto ningún tramo sale OVERDUE', () => {
+    const tramos = [
+      inst(1, '2026-01-15', 100),
+      inst(2, '2026-02-15', 100),
+      inst(3, '2026-04-15', 100),
+    ];
+    const out = deriveStatuses(tramos, 140, today, { paidIncomplete: true });
+    expect(out.map((t) => t.status)).toEqual(['PAID', 'PARTIAL', 'PENDING']);
+  });
+
   it('marks a future partially covered tramo PARTIAL', () => {
     const tramos = [inst(1, '2026-04-15', 100)];
     const out = deriveStatuses(tramos, 40, today);

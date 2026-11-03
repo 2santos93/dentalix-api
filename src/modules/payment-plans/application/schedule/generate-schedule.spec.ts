@@ -1,5 +1,5 @@
 import { generateSchedule } from './generate-schedule';
-import { round2 } from '../../../../shared/money/money';
+import { round2, toCents } from '../../../../shared/money/money';
 
 describe('generateSchedule', () => {
   const base = {
@@ -98,7 +98,7 @@ describe('generateSchedule', () => {
       downPayment: 200,
       installmentsCount: 12,
     });
-    const sumCents = rows.reduce((s, r) => s + Math.round(r.amount * 100), 0);
+    const sumCents = rows.reduce((s, r) => s + toCents(r.amount), 0);
     expect(sumCents).toBe(100000); // strict ===, exact in integer cents by construction
   });
 });

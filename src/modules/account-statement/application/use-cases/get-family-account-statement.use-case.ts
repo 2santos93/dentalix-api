@@ -15,6 +15,8 @@ import type {
   StatementClinic,
 } from '../../domain/entities/account-statement.entity';
 import { computeAccountStatement } from '../compute-account-statement';
+import { GetPlanBalanceUseCase } from '../../../payments/application/use-cases/get-plan-balance.use-case';
+import type { AccountStatementData } from '../../domain/ports/account-statement-repository.port';
 import { PATIENT_NOT_FOUND_MESSAGE } from '../../../patients/application/assert-patient-in-clinic';
 import {
   ACCOUNT_STATEMENT_CLOCK,
@@ -32,6 +34,8 @@ const FIELDS = [
   'openingPending',
   'paid',
   'balance',
+  'convertedPaid',
+  'convertedBalance',
   'overdueAmount',
 ] as const;
 
@@ -45,6 +49,8 @@ function addInto(
     openingPending: 0,
     paid: 0,
     balance: 0,
+    convertedPaid: 0,
+    convertedBalance: 0,
     overdueAmount: 0,
   };
   for (const f of FIELDS) current[f] += cents(row[f]);
@@ -68,6 +74,7 @@ export class GetFamilyAccountStatementUseCase {
     private readonly family: StatementFamilyRepository,
     @Inject(ACCOUNT_STATEMENT_CLOCK)
     private readonly now: AccountStatementClock,
+    private readonly getPlanBalance: GetPlanBalanceUseCase,
   ) {}
 
   async execute(payerPatientId: string): Promise<FamilyAccountStatement> {
@@ -83,13 +90,22 @@ export class GetFamilyAccountStatementUseCase {
     };
     const members: FamilyStatementMember[] = [];
     const totals = new Map<string, Record<(typeof FIELDS)[number], number>>();
+    const loaded: { ref: (typeof refs)[number]; data: AccountStatementData }[] =
+      [];
     for (const ref of refs) {
       const data = await this.repo.load(ref.id);
       // Retirado entre las dos lecturas: no cuenta.
-      if (!data) continue;
+      if (data) loaded.push({ ref, data });
+    }
+    // DX-472: los saldos de toda la familia comparten el plazo del proveedor.
+    const planBalances = await this.getPlanBalance.computeMany(
+      loaded.flatMap(({ data }) => data.planBalances),
+    );
+    for (const { ref, data } of loaded) {
       clinic = data.clinic;
       const { summary } = computeAccountStatement(data.snapshot, {
         today: issuedAt,
+        planBalances,
       });
       const rows = summary.map((s) => ({
         currency: s.currency,
@@ -98,6 +114,8 @@ export class GetFamilyAccountStatementUseCase {
         openingPending: s.openingPending,
         paid: s.paid,
         balance: s.balance,
+        convertedPaid: s.convertedPaid,
+        convertedBalance: s.convertedBalance,
         overdueAmount: s.overdueAmount,
       }));
       for (const row of rows) addInto(totals, row);
@@ -131,8 +149,17 @@ export class GetFamilyAccountStatementUseCase {
           openingPending: sum.openingPending / 100,
           paid: sum.paid / 100,
           balance: sum.balance / 100,
+          convertedPaid: sum.convertedPaid / 100,
+          convertedBalance: sum.convertedBalance / 100,
           overdueAmount: sum.overdueAmount / 100,
         })),
+      paymentsWithoutRateCount: [...planBalances.values()].reduce(
+        (n, b) => n + b.paymentsWithoutRate.length,
+        0,
+      ),
+      rateProviderTimedOut: [...planBalances.values()].some(
+        (b) => b.rateProviderTimedOut,
+      ),
     };
   }
 }

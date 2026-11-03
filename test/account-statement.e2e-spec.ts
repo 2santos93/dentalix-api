@@ -355,6 +355,8 @@ describe('Estado de cuenta — GET /patients/:patientId/account-statement (e2e)'
         paid: 350,
         creditMovements: 0,
         balance: 850,
+        convertedPaid: 350,
+        convertedBalance: 850,
         // 700 en 3 cuotas (233.33/233.33/233.34) con 300 abonados: la 1 pagada,
         // la 2 con 166.66 pendiente y la 3 entera.
         overdueCount: 2,
@@ -375,6 +377,8 @@ describe('Estado de cuenta — GET /patients/:patientId/account-statement (e2e)'
         paid: 200000,
         creditMovements: 0,
         balance: 300000,
+        convertedPaid: 200000,
+        convertedBalance: 300000,
         overdueCount: 0,
         overdueAmount: 0,
         nextInstallment: null,

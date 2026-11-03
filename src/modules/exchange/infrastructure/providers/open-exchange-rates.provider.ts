@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   ExchangeRateProvider,
+  ExchangeRateProviderNotRespondingError,
   ExchangeRateUnavailableError,
   ExchangeRatesResult,
 } from '../../domain/ports/exchange-rate-provider.port';
@@ -49,7 +50,7 @@ export class OpenExchangeRatesProvider implements ExchangeRateProvider {
         signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
       });
     } catch (error) {
-      throw new ExchangeRateUnavailableError(
+      throw new ExchangeRateProviderNotRespondingError(
         `Failed to reach Open Exchange Rates for date ${date}: ${errorName(error)}`,
       );
     }
@@ -58,18 +59,23 @@ export class OpenExchangeRatesProvider implements ExchangeRateProvider {
       // Sin leer el cuerpo: puede traer cualquier cosa y no debe llegar a
       // ningún mensaje. Se cancela para liberar la conexión.
       await response.body?.cancel().catch(() => undefined);
-      throw new ExchangeRateUnavailableError(
-        `Open Exchange Rates returned ${response.status} for date ${date}`,
-      );
+      const message = `Open Exchange Rates returned ${response.status} for date ${date}`;
+      throw response.status >= 500 ||
+        response.status === 429 ||
+        response.status === 408
+        ? new ExchangeRateProviderNotRespondingError(message)
+        : new ExchangeRateUnavailableError(message);
     }
 
     let payload: unknown;
     try {
       payload = await response.json();
     } catch (error) {
-      throw new ExchangeRateUnavailableError(
-        `Unreadable Open Exchange Rates response for date ${date}: ${errorName(error)}`,
-      );
+      const message = `Unreadable Open Exchange Rates response for date ${date}: ${errorName(error)}`;
+      // Un JSON roto es una respuesta; lo demás, un corte a medio cuerpo.
+      throw errorName(error) === 'SyntaxError'
+        ? new ExchangeRateUnavailableError(message)
+        : new ExchangeRateProviderNotRespondingError(message);
     }
     if (
       typeof payload !== 'object' ||

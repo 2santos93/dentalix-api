@@ -12,6 +12,7 @@ import {
   AccountStatementRepository,
 } from '../../domain/ports/account-statement-repository.port';
 import type { StatementNoticeData } from '../../domain/ports/statement-family-repository.port';
+import type { GetPlanBalanceUseCase } from '../../../payments/application/use-cases/get-plan-balance.use-case';
 
 // 2026-03-01 10:00 en la zona de la sede (UTC-4).
 const NOW = new Date('2026-03-01T14:00:00.000Z');
@@ -19,6 +20,11 @@ const ADMIN: VoidActor = { userId: 'u-admin', role: ClinicRole.ADMIN };
 const RECEPTION: VoidActor = { userId: 'u-recep', role: ClinicRole.RECEPTION };
 // Alta de los abonos del fixture: hoy por la mañana en la sede.
 const CREATED_TODAY = new Date('2026-03-01T12:00:00.000Z');
+
+// Sin saldos conocidos el cálculo usa sus propias cifras (camino de la cartera).
+const noPlanBalances = {
+  computeMany: () => Promise.resolve(new Map()),
+} as unknown as GetPlanBalanceUseCase;
 
 function data(): AccountStatementData {
   return {
@@ -31,6 +37,7 @@ function data(): AccountStatementData {
       docTypeLabel: null,
       docNumber: '123',
     },
+    planBalances: [],
     snapshot: {
       plans: [
         {
@@ -102,6 +109,7 @@ function makeUseCase(
       loadFamily: jest.fn(),
     },
     names,
+    noPlanBalances,
   );
   return {
     load,

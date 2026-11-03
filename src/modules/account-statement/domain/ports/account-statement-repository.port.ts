@@ -4,6 +4,7 @@ import {
   StatementSnapshot,
 } from '../entities/account-statement.entity';
 import { BillablePlanRow } from '../entities/billable-plan.entity';
+import type { PlanBalanceInput } from '../../../payments/application/use-cases/get-plan-balance.use-case';
 
 export const ACCOUNT_STATEMENT_REPOSITORY = Symbol(
   'ACCOUNT_STATEMENT_REPOSITORY',
@@ -13,6 +14,8 @@ export interface AccountStatementData {
   clinic: StatementClinic;
   patient: StatementPatient;
   snapshot: StatementSnapshot;
+  /** DX-472: lo que `GetPlanBalanceUseCase` necesita, de la misma foto. */
+  planBalances: PlanBalanceInput[];
 }
 
 export interface AccountStatementRepository {

@@ -9,6 +9,7 @@ import {
 } from './row-validation';
 import { ImportFileError, type TableRow } from './tabular-file';
 import type { RegionalFormat } from '../../../shared/format/regional-format';
+import { toCents } from '../../../shared/money/money';
 
 /*
  * Hoja de saldos del importador (DX-262): un «Saldo migrado» por paciente y
@@ -227,7 +228,7 @@ export function parseAmountCents(
     // tercer decimal real; ese (≥ 0,001) sigue siendo error.
     if (frac.length > 2) {
       const value = Number(text);
-      const cents = Math.round(value * 100);
+      const cents = toCents(value);
       if (
         Math.abs(value - cents / 100) <=
           Math.max(1e-9, Math.abs(value) * Number.EPSILON * 16) &&

@@ -27,20 +27,21 @@ describe('dinero en centavos (src/shared/money, DX-054)', () => {
 
 /**
  * DX-054 (criterio 7): ningún módulo define su propio redondeo de dinero; todos
- * usan `src/shared/money`. Escanea todo `src/modules`, specs incluidos (salvo `__fixtures__`).
+ * usan `src/shared/money`. Escanea todo `src/modules`, specs incluidos. DX-472:
+ * también los `Math.round(x * 100)` sueltos, en varias líneas o en `__fixtures__`
+ * (un porcentaje entero es `wholePercent`, de `shared/format`).
  */
 describe('guarda: un solo redondeo de dinero', () => {
   const MODULES = join(__dirname, '..', '..', 'modules');
   const OWN_HELPER =
     /\b(?:function|const|let|var)\s+(round2|toCents|fromCents)\b/;
-  const INLINE_ROUND2 = /Math\.round\(\s*[\w.]+\s*\*\s*100\s*\)\s*\/\s*100\b/;
+  // Un solo argumento sin `;`: 100 como factor, a cualquier lado del `*`.
+  const INLINE_CENTS = /Math\.round\([^;]*?(?:\*\s*100\b|\b100\s*\*)/g;
 
   function sources(dir: string): string[] {
     return readdirSync(dir).flatMap((name) => {
       const path = join(dir, name);
-      if (statSync(path).isDirectory()) {
-        return name === '__fixtures__' ? [] : sources(path);
-      }
+      if (statSync(path).isDirectory()) return sources(path);
       return path.endsWith('.ts') ? [path] : [];
     });
   }
@@ -50,9 +51,29 @@ describe('guarda: un solo redondeo de dinero', () => {
       readFileSync(path, 'utf8')
         .split('\n')
         .map((line, i) => ({ line, at: `${relative(MODULES, path)}:${i + 1}` }))
-        .filter(({ line }) => OWN_HELPER.test(line) || INLINE_ROUND2.test(line))
+        .filter(({ line }) => OWN_HELPER.test(line))
         .map(({ at, line }) => `${at}  ${line.trim()}`),
     );
     expect(offenders).toEqual([]);
+  });
+
+  it('ningún fichero de src/modules multiplica por 100 dentro de un Math.round', () => {
+    const offenders = sources(MODULES).flatMap((path) =>
+      [...readFileSync(path, 'utf8').matchAll(INLINE_CENTS)].map(
+        ([match]) => `${relative(MODULES, path)}  ${match}`,
+      ),
+    );
+    expect(offenders).toEqual([]);
+  });
+
+  it('la guarda reconoce las formas de un redondeo a mano', () => {
+    const caught = (text: string) => [...text.matchAll(INLINE_CENTS)].length;
+    expect(caught('const c = Math.round(x * 100);')).toBe(1);
+    expect(caught('Math.round(a.amount*100) / 100')).toBe(1);
+    expect(caught('Math.round(100 * x)')).toBe(1);
+    expect(caught('Math.round((a + b) * 100)')).toBe(1);
+    expect(caught('Math.round(\n  (a + b) *\n    100,\n)')).toBe(1);
+    expect(caught('Math.round(x * 10000) / 100')).toBe(0);
+    expect(caught('Math.round(x * 1000) / 10;\nconst y = z * 100;')).toBe(0);
   });
 });

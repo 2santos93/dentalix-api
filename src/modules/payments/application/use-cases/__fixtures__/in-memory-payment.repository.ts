@@ -20,6 +20,7 @@ import {
 import { civilDateIn, civilNoonIn } from '../../../../../shared/time/civil-day';
 import type { RegionalFormat } from '../../../../../shared/format/regional-format';
 import { requireLocationFormat } from '../../../../../shared/locations/location-regional';
+import { toCents } from '../../../../../shared/money/money';
 
 // `Payment` (the API-facing entity) deliberately has no `deletedAt` field —
 // same convention as Sale/TreatmentPlan. The fake still has to honour
@@ -322,7 +323,7 @@ export class InMemoryPaymentRepository implements PaymentRepository {
           p.deletedAt === null &&
           p.currency === balance.currency,
       )
-      .reduce((sum, p) => sum + Math.round(p.amount * 100), 0);
+      .reduce((sum, p) => sum + toCents(p.amount), 0);
     return Promise.resolve({
       ...balance,
       locationId: balance.locationId ?? 'loc-1',
