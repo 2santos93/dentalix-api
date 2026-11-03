@@ -61,7 +61,16 @@ interface Detail {
 }
 
 interface CashList {
-  items: { id: string; amount: number }[];
+  items: {
+    id: string;
+    amount: number | null;
+    currency: string | null;
+    collectedAmount: number | null;
+    notes: string | null;
+    adjustments: unknown[];
+    amountHidden: boolean;
+    canVoid: boolean;
+  }[];
   total: number;
   blindHidden: boolean;
   summary: {
@@ -315,11 +324,31 @@ describe('Arqueo ciego sin fugas (e2e, SEC-043)', () => {
   });
 
   describe('vía 2 · lista y resumen de abonos (GET /payments)', () => {
+    /** Las filas de la caja abierta: están, pero sin ninguna cifra. */
+    function expectHidden(list: CashList, ids: readonly string[]): void {
+      for (const id of ids) {
+        const item = list.items.find((i) => i.id === id);
+        expect(item).toMatchObject({
+          amountHidden: true,
+          amount: null,
+          currency: null,
+          collectedAmount: null,
+          notes: null,
+          adjustments: [],
+        });
+        // Ningún otro número de la fila puede llevar el importe.
+        const numeric = Object.entries(item ?? {})
+          .filter(([, v]) => typeof v === 'number')
+          .map(([k]) => k);
+        expect(numeric).toEqual([]);
+      }
+    }
+
     it.each([
       ['la recepcionista que cuenta', () => recepcion],
       ['otra recepcionista (podría pasarle la cifra)', () => recepcionDos],
     ])(
-      '%s: sin los abonos de la caja abierta, en ninguna sede ni filtro',
+      '%s: las filas de la caja abierta salen sin importe y el resumen no las suma, en ninguna sede ni filtro',
       async (_who, token) => {
         for (const [locationId, extra] of [
           [sedePrincipal, ''],
@@ -330,12 +359,21 @@ describe('Arqueo ciego sin fugas (e2e, SEC-043)', () => {
         ] as const) {
           const list = listOf(await dayList(token(), locationId, extra));
           expect(list.blindHidden).toBe(true);
-          const ids = list.items.map((i) => i.id);
-          for (const id of enCaja) expect(ids).not.toContain(id);
-          // El resumen no suma nada de esa caja: solo el abono fuera de caja.
-          expect(usdTotal(list)).toBe(
-            locationId !== sedeNorte && !extra ? 7 : 0,
+          const inScope = locationId !== sedeNorte;
+          const expectedIds = !inScope
+            ? []
+            : extra
+              ? enCaja.slice(0, 2)
+              : enCaja;
+          expect(list.items.map((i) => i.id)).toEqual(
+            expect.arrayContaining(expectedIds),
           );
+          expectHidden(list, expectedIds);
+          // El resumen no suma nada de esa caja: solo el abono fuera de caja.
+          expect(usdTotal(list)).toBe(inScope && !extra ? 7 : 0);
+          for (const line of list.summary.byMethod) {
+            expect(line.total).toBe(line.method === 'CARD' ? 7 : 0);
+          }
         }
         // El abono tardío (ajuste de la caja abierta) tampoco, en su día.
         const yesterday = addCivilDays(today(), -1);
@@ -346,10 +384,19 @@ describe('Arqueo ciego sin fugas (e2e, SEC-043)', () => {
             token(),
           ).expect(200),
         );
-        expect(prev.items.map((i) => i.id)).not.toContain(late);
+        expectHidden(prev, [late]);
         expect(usdTotal(prev)).toBe(0);
       },
     );
+
+    it('el abono fuera de toda caja sale con su importe', async () => {
+      const list = listOf(await dayList(recepcion, sedePrincipal));
+      expect(list.items.find((i) => i.id === fuera)).toMatchObject({
+        amountHidden: false,
+        amount: 7,
+        currency: 'USD',
+      });
+    });
 
     it('ADMIN lo ve completo y sin marca', async () => {
       const list = listOf(await dayList(clinic.adminToken, sedePrincipal));
@@ -357,6 +404,7 @@ describe('Arqueo ciego sin fugas (e2e, SEC-043)', () => {
       expect(list.items.map((i) => i.id)).toEqual(
         expect.arrayContaining([...enCaja, fuera]),
       );
+      for (const item of list.items) expect(item.amountHidden).toBe(false);
       expect(usdTotal(list)).toBe(30 + 20 + 15 + 7);
     });
 
@@ -369,10 +417,42 @@ describe('Arqueo ciego sin fugas (e2e, SEC-043)', () => {
         ).expect(403);
       }
     });
+
+    it('desde la lista, recepción imprime el recibo (con su importe) y anula un abono de la caja abierta', async () => {
+      const extra = idOf(
+        await pay(recepcion, { amount: 9, method: 'CASH' }).expect(201),
+      );
+      const before = listOf(await dayList(recepcion, sedePrincipal));
+      const row = before.items.find((i) => i.id === extra);
+      expect(row).toMatchObject({ amountHidden: true, canVoid: true });
+      // El recibo es del paciente: lleva su importe.
+      const receipt = (
+        await api('get', `/payments/${extra}/receipt`, recepcion).expect(200)
+      ).body as {
+        snapshot: { payment: { amount: number; currency: string } };
+      };
+      expect(receipt.snapshot.payment).toMatchObject({
+        amount: 9,
+        currency: 'USD',
+      });
+      await api('delete', `/payments/${extra}`, recepcion)
+        .send({ reason: 'Cobrado por error' })
+        .expect(200);
+      const after = listOf(await dayList(recepcion, sedePrincipal));
+      expect(after.items.map((i) => i.id)).not.toContain(extra);
+      // Anulado con la caja abierta: el esperado no cambia.
+      const admin = detailOf(
+        await api('get', `/cash-sessions/${caja}`).expect(200),
+      );
+      expect(
+        admin.expected?.find((l) => l.currency === 'USD' && l.method === 'CASH')
+          ?.expected,
+      ).toBe(162);
+    });
   });
 
   describe('vía 3 · exportación CSV (GET /payments.csv)', () => {
-    it('recepción no recibe los abonos de la caja abierta; ADMIN sí; dentista y asistente, 403', async () => {
+    it('recepción recibe las filas de la caja abierta sin moneda y con «Oculto durante el arqueo»; ADMIN, las cifras; dentista y asistente, 403', async () => {
       const csv = (token: string) =>
         api('get', `/payments.csv?from=${today()}&to=${today()}`, token)
           .buffer(true)
@@ -383,10 +463,15 @@ describe('Arqueo ciego sin fugas (e2e, SEC-043)', () => {
           });
       const reception = (await csv(recepcion).expect(200)).body as string;
       const rows = reception.trim().split(/\r?\n/).slice(1);
-      expect(rows).toHaveLength(1);
-      expect(rows[0]).toMatch(/7[.,]00/);
+      expect(rows).toHaveLength(4);
+      const hidden = rows.filter((r) => r.includes('Oculto durante el arqueo'));
+      expect(hidden).toHaveLength(3);
+      for (const r of hidden) expect(r).not.toMatch(/USD/);
+      expect(rows.filter((r) => !hidden.includes(r))[0]).toMatch(/7[.,]00/);
       const admin = (await csv(clinic.adminToken).expect(200)).body as string;
-      expect(admin.trim().split(/\r?\n/).slice(1)).toHaveLength(4);
+      const adminRows = admin.trim().split(/\r?\n/).slice(1);
+      expect(adminRows).toHaveLength(4);
+      expect(admin).not.toMatch(/Oculto durante el arqueo/);
       await csv(dentista).expect(403);
       await csv(asistente).expect(403);
     });
@@ -468,11 +553,12 @@ describe('Arqueo ciego sin fugas (e2e, SEC-043)', () => {
       );
     });
 
-    it('cerrada la caja, sus abonos vuelven a la lista de recepción', async () => {
+    it('cerrada la caja, sus abonos vuelven con su importe a la lista de recepción', async () => {
       const list = listOf(await dayList(recepcion, sedePrincipal));
-      expect(list.items.map((i) => i.id)).toEqual(
-        expect.arrayContaining(enCaja),
-      );
+      for (const id of enCaja) {
+        expect(list.items.find((i) => i.id === id)?.amountHidden).toBe(false);
+      }
+      expect(usdTotal(list)).toBe(30 + 20 + 15 + 7);
     });
 
     it('reabierta por ADMIN, recepción no ve las líneas del cierre anterior mientras recuenta', async () => {
@@ -485,10 +571,10 @@ describe('Arqueo ciego sin fugas (e2e, SEC-043)', () => {
       expect(view.blindHidden).toBe(true);
       expect(view.closings.map((c) => c.lines)).toEqual([[]]);
       expect(view.closing).toBeNull();
-      // Y sus abonos vuelven a salir de la lista mientras está abierta.
+      // Y sus abonos vuelven a ir sin importe mientras está abierta.
       const list = listOf(await dayList(recepcion, sedePrincipal));
       for (const id of enCaja) {
-        expect(list.items.map((i) => i.id)).not.toContain(id);
+        expect(list.items.find((i) => i.id === id)?.amountHidden).toBe(true);
       }
     });
   });

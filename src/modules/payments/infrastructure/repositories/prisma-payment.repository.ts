@@ -243,6 +243,21 @@ type PrismaCashPayment = Prisma.PaymentGetPayload<{
   select: typeof CASH_PAYMENT_SELECT;
 }>;
 
+/**
+ * SEC-043: el abono cuenta en una caja aún abierta, por su caja o por un
+ * ajuste de esa caja (LATE_PAYMENT, VOID).
+ */
+const IN_OPEN_CASH_SESSION = {
+  OR: [
+    { cashSession: { is: { status: CashSessionStatus.OPEN } } },
+    {
+      cashAdjustments: {
+        some: { session: { is: { status: CashSessionStatus.OPEN } } },
+      },
+    },
+  ],
+} satisfies Prisma.PaymentWhereInput;
+
 function mapToCashRow(
   row: PrismaCashPayment,
   timeZoneOf: (locationId: string) => string,
@@ -1317,33 +1332,15 @@ export class PrismaPaymentRepository implements PaymentRepository {
                   },
                 ]
               : []),
-            // SEC-043: fuera lo que cuenta en una caja abierta de cualquiera
-            // (también la de otra recepcionista, que podría pasarle la cifra):
-            // el abono de esa caja, el que llegó tarde (LATE_PAYMENT) y el
-            // anulado que la descuenta (VOID).
-            ...(blindHidden
-              ? [
-                  {
-                    OR: [
-                      { cashSessionId: null },
-                      {
-                        cashSession: {
-                          is: { status: { not: CashSessionStatus.OPEN } },
-                        },
-                      },
-                    ],
-                  },
-                  {
-                    cashAdjustments: {
-                      none: {
-                        session: { is: { status: CashSessionStatus.OPEN } },
-                      },
-                    },
-                  },
-                ]
-              : []),
           ],
         };
+        // SEC-043: el resumen no suma lo que cuenta en una caja abierta de
+        // cualquiera (también la de otra recepcionista, que podría pasarle la
+        // cifra): el abono de esa caja, el que llegó tarde (LATE_PAYMENT) y el
+        // anulado que la descuenta (VOID). Las filas sí salen, sin importe.
+        const summaryWhere: Prisma.PaymentWhereInput = blindHidden
+          ? { AND: [where, { NOT: IN_OPEN_CASH_SESSION }] }
+          : where;
 
         // Página, conteo, agregado y sede en la MISMA transacción REPEATABLE
         // READ: todas las sentencias ven la misma foto, así que un abono
@@ -1371,7 +1368,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
             tx.payment.count({ where }),
             tx.payment.groupBy({
               by: ['currency', 'method', 'paymentMethodId'],
-              where,
+              where: summaryWhere,
               _sum: { amount: true },
               _count: { _all: true },
               orderBy: [
@@ -1396,20 +1393,36 @@ export class PrismaPaymentRepository implements PaymentRepository {
             // DX-516: los ajustes de esos mismos abonos, por moneda y tipo.
             tx.paymentAdjustment.groupBy({
               by: ['currency', 'type'],
-              where: { payment: where },
+              where: { payment: summaryWhere },
               _sum: { amount: true },
               _count: { _all: true },
               orderBy: [{ currency: 'asc' }, { type: 'asc' }],
             }),
           ]);
         const catalog = catalogOf(methods);
+        // SEC-043: qué filas de la página cuentan en una caja abierta (el
+        // caso de uso les quita el importe), en esta misma foto.
+        const inOpenSession = blindHidden
+          ? new Set(
+              (
+                await tx.payment.findMany({
+                  where: {
+                    id: { in: rows.map((row) => row.id) },
+                    ...IN_OPEN_CASH_SESSION,
+                  },
+                  select: { id: true },
+                })
+              ).map((row) => row.id),
+            )
+          : new Set<string>();
 
         // La zona de cada sede ya se leyó para el período, en la misma foto:
         // el `canVoid` de cada fila usa el mismo "hoy" que la anulación.
         return {
-          items: rows.map((row) =>
-            mapToCashRow(row, scope.timeZoneOf, catalog),
-          ),
+          items: rows.map((row) => ({
+            ...mapToCashRow(row, scope.timeZoneOf, catalog),
+            inOpenCashSession: inOpenSession.has(row.id),
+          })),
           total,
           groups: groups.map((group) => ({
             currency: group.currency,

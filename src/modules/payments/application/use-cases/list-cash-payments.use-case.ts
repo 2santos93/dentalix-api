@@ -77,6 +77,28 @@ export interface ListCashPaymentsInput {
   pageSize?: number;
 }
 
+/**
+ * SEC-043: lo que se quita de una fila de una caja abierta con arqueo ciego.
+ * Las notas son texto libre (pueden llevar la cifra) y los ajustes por medio
+ * de pago llevan importes.
+ */
+const HIDDEN_AMOUNT: Pick<
+  CashPaymentView,
+  | 'amount'
+  | 'currency'
+  | 'collectedAmount'
+  | 'notes'
+  | 'adjustments'
+  | 'amountHidden'
+> = {
+  amount: null,
+  currency: null,
+  collectedAmount: null,
+  notes: null,
+  adjustments: [],
+  amountHidden: true,
+};
+
 /** DX-395: lo que el CSV de la caja necesita, sin paginar. */
 export interface CashPaymentsExport {
   items: CashPaymentView[];
@@ -108,8 +130,9 @@ export interface ListCashPaymentsOutput {
   scope: { location: { id: string; name: string } | null };
   summary: CashPaymentsSummary;
   /**
-   * SEC-043: rige el arqueo ciego y quien consulta no es ADMIN: filas,
-   * conteo y resumen no incluyen los abonos de cajas aún abiertas.
+   * SEC-043: rige el arqueo ciego y quien consulta no es ADMIN: el resumen
+   * no suma los abonos de cajas aún abiertas y sus filas van sin importe
+   * (`amountHidden`).
    */
   blindHidden: boolean;
 }
@@ -393,13 +416,14 @@ export class ListCashPaymentsUseCase {
     actor: VoidActor,
   ): CashPaymentView[] {
     const now = this.now();
-    return rows.map(({ payment, voidSubject }) => {
+    return rows.map(({ payment, voidSubject, inOpenCashSession }) => {
       const registeredOn = civilDateIn(
         voidSubject.createdAt,
         voidSubject.timeZone,
       );
       return {
         ...payment,
+        ...(inOpenCashSession ? HIDDEN_AMOUNT : { amountHidden: false }),
         canVoid: canVoidPayment(voidSubject, actor, now),
         registeredOn,
         registeredToday:

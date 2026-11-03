@@ -182,8 +182,8 @@ export interface ListCashRegisterParams extends CivilPeriod {
   externalInvoice?: ExternalInvoiceFilter;
   /**
    * SEC-043: quien consulta no es ADMIN. Si la clínica tiene «arqueo ciego»,
-   * se quitan los abonos que cuentan en una caja aún abierta (ver
-   * `CashRegisterPage.blindHidden`).
+   * el resumen no suma los abonos que cuentan en una caja aún abierta y sus
+   * filas se marcan (ver `CashRegisterPage.blindHidden`).
    */
   blindViewer?: boolean;
   /** Ya normalizado por el caso de uso. */
@@ -220,6 +220,11 @@ export interface CashAdjustmentGroup {
 export interface CashRegisterRow {
   payment: CashPayment;
   voidSubject: VoidSubject;
+  /**
+   * SEC-043: con arqueo ciego y quien consulta sin ser ADMIN, el abono cuenta
+   * en una caja aún abierta: sale sin importe (ver `CashPaymentView`).
+   */
+  inOpenCashSession?: boolean;
 }
 
 export interface CashRegisterPage {
@@ -236,10 +241,10 @@ export interface CashRegisterPage {
   /** La sede activa del request, o `null` en la vista consolidada. */
   scopeLocation: { id: string; name: string } | null;
   /**
-   * SEC-043: se quitaron (de filas, conteo y resumen) los abonos que cuentan
-   * en una caja abierta —por la caja del abono o por un ajuste de esa caja—
-   * porque rige el arqueo ciego y quien consulta no es ADMIN. Sumados al
-   * fondo darían el esperado antes de contar. Aparecen al cerrar la caja.
+   * SEC-043: rige el arqueo ciego y quien consulta no es ADMIN. Los abonos
+   * que cuentan en una caja abierta —por la caja del abono o por un ajuste de
+   * esa caja— no suman en el resumen y sus filas van marcadas: sumados al
+   * fondo darían el esperado antes de contar. Sus importes vuelven al cerrar.
    */
   blindHidden?: boolean;
 }

@@ -659,6 +659,61 @@ describe('ListCashPaymentsUseCase', () => {
       },
     );
 
+    it('una fila de una caja abierta sale sin importe, moneda, cobrado, notas ni ajustes; las demás, enteras', async () => {
+      const hidden = fakeRow('p-open', {
+        amount: 30,
+        notes: 'pagó 30 en billetes',
+        adjustments: [
+          {
+            type: 'TAX',
+            label: 'Impuesto',
+            calculation: 'FIXED',
+            percent: null,
+            fixedAmount: 1,
+            base: 30,
+            amount: 1,
+            currency: 'VES',
+          },
+        ],
+        collectedAmount: 31,
+      });
+      const page: CashRegisterPage = {
+        items: [
+          { ...hidden, inOpenCashSession: true },
+          fakeRow('p-closed', { amount: 20 }),
+        ],
+        total: 2,
+        groups: [],
+        scopeLocation: null,
+        blindHidden: true,
+      };
+      for (const run of ['execute', 'exportAll'] as const) {
+        const out = await useCaseFor(new SpyPaymentRepository(page), RECEPTION)[
+          run
+        ](RANGE);
+        const [open, closed] = out.items;
+        expect(open).toMatchObject({
+          id: 'p-open',
+          amount: null,
+          currency: null,
+          collectedAmount: null,
+          notes: null,
+          adjustments: [],
+          amountHidden: true,
+          // Lo que sirve para encontrarlo y actuar sigue.
+          patient: { fullName: 'Ana Gómez' },
+          method: PaymentMethod.CASH,
+          canVoid: true,
+        });
+        expect(closed).toMatchObject({
+          id: 'p-closed',
+          amount: 20,
+          currency: 'VES',
+          amountHidden: false,
+        });
+      }
+    });
+
     it('el repositorio dice si quitó algo: la lista y el CSV lo devuelven', async () => {
       const repo = new SpyPaymentRepository({
         items: [],

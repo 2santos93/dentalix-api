@@ -4,6 +4,7 @@ import { CSV_BOM } from '../../../shared/csv/csv-cells';
 import type { CashPaymentView } from '../domain/entities/cash-payment.entity';
 import {
   CASH_PAYMENTS_CSV_HEADER,
+  CSV_HIDDEN_AMOUNT,
   toCashPaymentsCsv,
 } from './cash-payments-csv';
 
@@ -32,6 +33,7 @@ function row(overrides: Partial<CashPaymentView> = {}): CashPaymentView {
     splitLines: null,
     adjustments: [],
     collectedAmount: overrides.amount ?? 150000,
+    amountHidden: false,
     canVoid: false,
     registeredOn: '2026-10-15',
     registeredToday: false,
@@ -260,5 +262,30 @@ describe('CSV de la caja (DX-395)', () => {
       ),
     )[1];
     expect(formula).toContain(`"'=HYPERLINK(""x"") -10.00"`);
+  });
+
+  it('SEC-043: un abono de una caja abierta con arqueo ciego va sin cifras ni moneda, con el texto en Importe y Total cobrado', () => {
+    const csv = toCashPaymentsCsv(
+      [
+        row({
+          amount: null,
+          currency: null,
+          collectedAmount: null,
+          notes: null,
+          amountHidden: true,
+        }),
+      ],
+      REFERENCE_CURRENCY_DIGITS,
+    );
+    const [, line] = csv.replace(CSV_BOM, '').trim().split(/\r?\n/);
+    const cells = line.split(',');
+    const col = (name: (typeof CASH_PAYMENTS_CSV_HEADER)[number]) =>
+      cells[CASH_PAYMENTS_CSV_HEADER.indexOf(name)];
+    expect(col('Moneda')).toBe('');
+    expect(col('Importe')).toBe(`"${CSV_HIDDEN_AMOUNT}"`);
+    expect(col('Total cobrado')).toBe(`"${CSV_HIDDEN_AMOUNT}"`);
+    expect(col('Impuestos')).toBe('');
+    expect(col('Paciente')).toBe('"Ana Gómez"');
+    expect(cells).toHaveLength(CASH_PAYMENTS_CSV_HEADER.length);
   });
 });

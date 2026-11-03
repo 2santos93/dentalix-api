@@ -145,7 +145,7 @@ export class PaymentsController {
   @ApiOperation({
     summary: 'Caja: abonos del período con resumen por moneda y método',
     description:
-      'SEC-043: con «arqueo ciego», quien no es ADMIN no recibe los abonos que cuentan en una caja aún abierta (ni en filas ni en el resumen): `blindHidden` lo indica. Aparecen al cerrarla.',
+      'SEC-043: con «arqueo ciego», quien no es ADMIN recibe los abonos que cuentan en una caja aún abierta sin importe ni moneda (`amountHidden`), y el resumen no los suma: `blindHidden` lo indica. Recibo y anulación funcionan igual; las cifras vuelven al cerrarla.',
   })
   @ApiHeader({
     name: 'X-Location-Id',
@@ -193,8 +193,9 @@ export class PaymentsController {
       'con BOM y CRLF; celdas protegidas contra fórmulas; importes con los ' +
       'decimales de su moneda. Columnas: Fecha, Sede, Paciente, Destino, ' +
       'Medio, Referencia, Factura externa, Moneda, Importe. SEC-043: con ' +
-      '«arqueo ciego», quien no es ADMIN no recibe los abonos de cajas aún ' +
-      'abiertas, como en `GET /payments`.',
+      '«arqueo ciego», quien no es ADMIN recibe los abonos de cajas aún ' +
+      'abiertas sin moneda ni ajustes, con «Oculto durante el arqueo» en ' +
+      'Importe y Total cobrado (no suman en una hoja de cálculo).',
   })
   @ApiHeader({
     name: 'X-Location-Id',
@@ -226,7 +227,9 @@ export class PaymentsController {
     sendCsv(res, `caja-${from}-${to}.csv`);
     return toCashPaymentsCsv(
       items,
-      await this.currencyDigits.table(items.map((i) => i.currency)),
+      await this.currencyDigits.table(
+        items.flatMap((i) => (i.currency === null ? [] : [i.currency])),
+      ),
     );
   }
 
