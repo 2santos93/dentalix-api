@@ -180,6 +180,12 @@ export interface ListCashRegisterParams extends CivilPeriod {
   paymentMethod?: { id: string; legacyMethod: PaymentMethod | null };
   /** DX-515: solo los abonos con (o sin) nº de factura externa. */
   externalInvoice?: ExternalInvoiceFilter;
+  /**
+   * SEC-043: quien consulta no es ADMIN. Si la clínica tiene «arqueo ciego»,
+   * se quitan los abonos que cuentan en una caja aún abierta (ver
+   * `CashRegisterPage.blindHidden`).
+   */
+  blindViewer?: boolean;
   /** Ya normalizado por el caso de uso. */
   skip: number;
   /** Ya acotado por el caso de uso. */
@@ -229,6 +235,13 @@ export interface CashRegisterPage {
   adjustmentGroups?: CashAdjustmentGroup[];
   /** La sede activa del request, o `null` en la vista consolidada. */
   scopeLocation: { id: string; name: string } | null;
+  /**
+   * SEC-043: se quitaron (de filas, conteo y resumen) los abonos que cuentan
+   * en una caja abierta —por la caja del abono o por un ajuste de esa caja—
+   * porque rige el arqueo ciego y quien consulta no es ADMIN. Sumados al
+   * fondo darían el esperado antes de contar. Aparecen al cerrar la caja.
+   */
+  blindHidden?: boolean;
 }
 
 /**

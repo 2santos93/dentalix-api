@@ -641,4 +641,37 @@ describe('ListCashPaymentsUseCase', () => {
       });
     });
   });
+
+  describe('arqueo ciego (SEC-043)', () => {
+    it.each([
+      ['ADMIN', ADMIN, false],
+      ['RECEPTION', RECEPTION, true],
+    ])(
+      '%s: la lista y el CSV piden quitar las cajas abiertas solo si no es ADMIN (%s)',
+      async (_who, actor, blindViewer) => {
+        const repo = new SpyPaymentRepository();
+        await useCaseFor(repo, actor).execute(RANGE);
+        await useCaseFor(repo, actor).exportAll(RANGE);
+        expect(repo.calls.map((c) => c.blindViewer)).toEqual([
+          blindViewer,
+          blindViewer,
+        ]);
+      },
+    );
+
+    it('el repositorio dice si quitó algo: la lista y el CSV lo devuelven', async () => {
+      const repo = new SpyPaymentRepository({
+        items: [],
+        total: 0,
+        groups: [],
+        scopeLocation: null,
+        blindHidden: true,
+      });
+      const uc = useCaseFor(repo, RECEPTION);
+      expect((await uc.execute(RANGE)).blindHidden).toBe(true);
+      expect((await uc.exportAll(RANGE)).blindHidden).toBe(true);
+      const plain = useCaseFor(new SpyPaymentRepository(), RECEPTION);
+      expect((await plain.execute(RANGE)).blindHidden).toBe(false);
+    });
+  });
 });

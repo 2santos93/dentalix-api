@@ -82,6 +82,12 @@ export interface CashClosingView {
   blind: boolean;
   hasDifference: boolean;
   differenceReason: string | null;
+  /**
+   * SEC-043: cierre a ciegas de quien no es ADMIN que no cuadró y llegó sin
+   * motivo. Se guarda igual (el cierre no dice antes si cuadra) y queda así
+   * marcado para que administración lo revise.
+   */
+  unjustifiedDifference: boolean;
   notes: string | null;
   /** Día civil (YYYY-MM-DD) que DX-091 podrá usar como fecha de bloqueo. */
   suggestedLockDate: string;
@@ -213,23 +219,29 @@ export interface CashSessionSummary {
   floats: MoneyAmount[];
   /** Diferencia por moneda del último cierre (vacía si está abierta). */
   differences: MoneyAmount[];
+  /** SEC-043: el último cierre (si está cerrada) es «diferencia sin justificar». */
+  unjustifiedDifference: boolean;
 }
 
 export interface CashSessionDetail extends CashSessionSummary {
   notes: string | null;
   timeZone: string;
-  /** Arqueo ciego activo para quien consulta: sin esperado ni abonos. */
+  /**
+   * Arqueo ciego activo para quien consulta: sin esperado, abonos, anulados,
+   * ajustes ni líneas de cierres anteriores (SEC-043), que lo dejarían
+   * deducir.
+   */
   blindHidden: boolean;
   expected: CashExpectedLine[] | null;
   payments: CashSessionPayment[] | null;
-  voidedPayments: CashVoidedPayment[];
+  voidedPayments: CashVoidedPayment[] | null;
   /** Salidas de caja vivas del turno (DX-274). */
   outflows: CashOutflow[];
   /** Salidas anuladas (las anuladas con la caja cerrada siguen restando). */
   voidedOutflows: CashVoidedOutflow[];
   /** DX-253: devoluciones de saldo a favor en efectivo (restan en CASH). */
   creditRefunds: CashCreditRefund[];
-  adjustments: CashAdjustmentView[];
+  adjustments: CashAdjustmentView[] | null;
   /** Ajustes que nacieron de esta caja ya cerrada y cuentan en otra. */
   laterAdjustments: CashAdjustmentView[];
   /** Último cierre (el vigente si está cerrada). */

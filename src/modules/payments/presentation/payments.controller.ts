@@ -144,6 +144,8 @@ export class PaymentsController {
   @Get('payments')
   @ApiOperation({
     summary: 'Caja: abonos del período con resumen por moneda y método',
+    description:
+      'SEC-043: con «arqueo ciego», quien no es ADMIN no recibe los abonos que cuentan en una caja aún abierta (ni en filas ni en el resumen): `blindHidden` lo indica. Aparecen al cerrarla.',
   })
   @ApiHeader({
     name: 'X-Location-Id',
@@ -190,7 +192,9 @@ export class PaymentsController {
       'misma sede (`X-Location-Id`), sin paginar: hasta 10 000 abonos. UTF-8 ' +
       'con BOM y CRLF; celdas protegidas contra fórmulas; importes con los ' +
       'decimales de su moneda. Columnas: Fecha, Sede, Paciente, Destino, ' +
-      'Medio, Referencia, Factura externa, Moneda, Importe.',
+      'Medio, Referencia, Factura externa, Moneda, Importe. SEC-043: con ' +
+      '«arqueo ciego», quien no es ADMIN no recibe los abonos de cajas aún ' +
+      'abiertas, como en `GET /payments`.',
   })
   @ApiHeader({
     name: 'X-Location-Id',

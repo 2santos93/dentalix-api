@@ -74,6 +74,7 @@ const SUMMARY_SELECT = {
   closings: {
     select: {
       sequence: true,
+      unjustifiedDifference: true,
       lines: { select: { currency: true, difference: true } },
     },
     orderBy: { sequence: 'desc' },
@@ -182,6 +183,7 @@ const CLOSING_SELECT = {
   blind: true,
   hasDifference: true,
   differenceReason: true,
+  unjustifiedDifference: true,
   notes: true,
   suggestedLockDate: true,
   lines: {
@@ -764,6 +766,7 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
           blind: draft.blind,
           hasDifference: draft.hasDifference,
           differenceReason: draft.differenceReason,
+          unjustifiedDifference: draft.unjustifiedDifference,
           notes: draft.notes,
           suggestedLockDate: new Date(
             `${draft.suggestedLockDate}T00:00:00.000Z`,
@@ -931,6 +934,7 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
       differences: [...differences.entries()]
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([currency, cents]) => ({ currency, amount: fromCents(cents) })),
+      unjustifiedDifference: latest?.unjustifiedDifference ?? false,
     };
   }
 
@@ -1031,6 +1035,7 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
       blind: row.blind,
       hasDifference: row.hasDifference,
       differenceReason: row.differenceReason,
+      unjustifiedDifference: row.unjustifiedDifference,
       notes: row.notes,
       suggestedLockDate: civilOf(row.suggestedLockDate),
       lines: [...row.lines]

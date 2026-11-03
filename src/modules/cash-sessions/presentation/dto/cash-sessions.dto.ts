@@ -403,6 +403,12 @@ export class CashClosingDto {
   @ApiProperty({ type: String, nullable: true })
   differenceReason!: string | null;
 
+  @ApiProperty({
+    description:
+      'SEC-043: cierre a ciegas que no cuadró y llegó sin motivo. Se guardó igual y queda para revisión de administración.',
+  })
+  unjustifiedDifference!: boolean;
+
   @ApiProperty({ type: String, nullable: true })
   notes!: string | null;
 
@@ -710,6 +716,12 @@ export class CashSessionSummaryDto {
       'Diferencia por moneda del último cierre (vacía si está abierta)',
   })
   differences!: CashMoneyDto[];
+
+  @ApiProperty({
+    description:
+      'SEC-043: el último cierre (si está cerrada) es una «diferencia sin justificar».',
+  })
+  unjustifiedDifference!: boolean;
 }
 
 export class CashSessionCapabilitiesDto {
@@ -732,7 +744,7 @@ export class CashSessionDetailDto extends CashSessionSummaryDto {
 
   @ApiProperty({
     description:
-      'Arqueo ciego para quien consulta: `expected` y `payments` vienen a null hasta cerrar.',
+      'Arqueo ciego para quien consulta: `expected`, `payments`, `voidedPayments` y `adjustments` vienen a null hasta cerrar, y los cierres anteriores (si se reabrió) sin líneas (SEC-043).',
   })
   blindHidden!: boolean;
 
@@ -744,10 +756,11 @@ export class CashSessionDetailDto extends CashSessionSummaryDto {
 
   @ApiProperty({
     type: [CashVoidedPaymentDto],
+    nullable: true,
     description:
-      'Anulados (DX-049): no cuentan en el esperado salvo si se anularon con la caja cerrada',
+      'Anulados (DX-049): no cuentan en el esperado salvo si se anularon con la caja cerrada. null con arqueo ciego.',
   })
-  voidedPayments!: CashVoidedPaymentDto[];
+  voidedPayments!: CashVoidedPaymentDto[] | null;
 
   @ApiProperty({
     type: [CashOutflowDto],
@@ -772,9 +785,10 @@ export class CashSessionDetailDto extends CashSessionSummaryDto {
 
   @ApiProperty({
     type: [CashAdjustmentDto],
-    description: 'Ajustes que cuentan en esta caja',
+    nullable: true,
+    description: 'Ajustes que cuentan en esta caja. null con arqueo ciego.',
   })
-  adjustments!: CashAdjustmentDto[];
+  adjustments!: CashAdjustmentDto[] | null;
 
   @ApiProperty({
     type: [CashAdjustmentDto],

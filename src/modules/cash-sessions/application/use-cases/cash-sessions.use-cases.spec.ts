@@ -44,6 +44,7 @@ function record(extra: Partial<CashSessionRecord> = {}): CashSessionRecord {
     reopenCount: 0,
     floats: [{ currency: 'USD', amount: 50_000 }],
     differences: [],
+    unjustifiedDifference: false,
     notes: null,
     timeZone: 'America/Caracas',
     expected: [
@@ -132,6 +133,113 @@ describe('GetCashSessionUseCase (DX-027)', () => {
     expect(admin.expected).not.toBeNull();
     expect(admin.can).toEqual({ close: true, reopen: false, adjust: false });
   });
+
+  // SEC-043: matriz arqueo ciego × rol × estado de la caja. Solo se oculta
+  // con ciego, caja abierta y quien no es ADMIN.
+  const voided = {
+    id: 'p-2',
+    paidAt: NOW,
+    paidOn: '2026-10-17',
+    amount: 5_000,
+    currency: 'USD',
+    method: 'CASH' as const,
+    receiptNumber: null,
+    patient: { id: 'pt-1', fullName: 'Ana' },
+    createdBy: null,
+    collectedAmount: 5_000,
+    voidedAt: NOW,
+    voidedBy: null,
+    voidReason: 'Error',
+    bookedAsAdjustment: false,
+  };
+  const adjustment = {
+    id: 'a-1',
+    kind: 'LATE_PAYMENT' as const,
+    currency: 'USD',
+    method: 'CASH' as const,
+    amount: 3_000,
+    reason: null,
+    createdAt: NOW,
+    createdBy: { id: 'u-x', fullName: null },
+    sessionId: 's-1',
+    payment: null,
+    expensePayment: null,
+    originalSession: null,
+  };
+  const earlierClosing = {
+    id: 'c-1',
+    sequence: 1,
+    closedAt: NOW,
+    closedBy: { id: RECEPTION.userId, fullName: 'Rita' },
+    blind: true,
+    hasDifference: false,
+    differenceReason: null,
+    unjustifiedDifference: false,
+    notes: null,
+    suggestedLockDate: '2026-10-17',
+    lines: [
+      {
+        currency: 'USD',
+        method: 'CASH' as const,
+        opening: 50_000,
+        expected: 70_000,
+        counted: 70_000,
+        difference: 0,
+      },
+    ],
+  };
+  describe.each([
+    { blindClose: true, status: 'OPEN' as const, hidden: [false, true] },
+    { blindClose: true, status: 'CLOSED' as const, hidden: [false, false] },
+    { blindClose: false, status: 'OPEN' as const, hidden: [false, false] },
+    { blindClose: false, status: 'CLOSED' as const, hidden: [false, false] },
+  ])(
+    'ciego=$blindClose, caja $status (SEC-043)',
+    ({ blindClose, status, hidden }) => {
+      it.each([
+        ['ADMIN', ADMIN, hidden[0]],
+        ['RECEPTION', RECEPTION, hidden[1]],
+      ])('%s: oculto=%s', async (_who, actor, isHidden) => {
+        const repo = fakeRepo();
+        repo.getSettings.mockResolvedValue({
+          requireOpenSession: false,
+          blindClose,
+        });
+        repo.detail.mockResolvedValue(
+          record({
+            status,
+            reopenCount: 1,
+            voidedPayments: [voided],
+            adjustments: [adjustment],
+            closing: earlierClosing,
+            closings: [earlierClosing],
+          }),
+        );
+        const view = await new GetCashSessionUseCase(
+          asRepo(repo),
+          context,
+        ).execute('s-1', actor);
+        expect(view.blindHidden).toBe(isHidden);
+        if (isHidden) {
+          expect(view).toMatchObject({
+            expected: null,
+            payments: null,
+            voidedPayments: null,
+            adjustments: null,
+          });
+          expect(view.closing?.lines).toEqual([]);
+          expect(view.closings.map((c) => c.lines)).toEqual([[]]);
+          // Lo que movió quien cuenta sigue a la vista.
+          expect(view.floats).toEqual([{ currency: 'USD', amount: 50_000 }]);
+        } else {
+          expect(view.expected).not.toBeNull();
+          expect(view.voidedPayments).toEqual([voided]);
+          expect(view.adjustments).toEqual([adjustment]);
+          expect(view.closings[0].lines).toHaveLength(1);
+        }
+      });
+    },
+  );
 
   it('cerrada: se ve el arqueo aunque sea ciego, y solo ADMIN reabre o corrige', async () => {
     const repo = fakeRepo();
@@ -254,7 +362,7 @@ describe('CloseCashSessionUseCase (DX-027)', () => {
     ],
   };
 
-  function build(repo = fakeRepo()) {
+  function build(repo = fakeRepo(), closeCtx: CloseContext = ctx) {
     let draft: ClosingDraft | undefined;
     repo.close.mockImplementation(
       (
@@ -263,7 +371,7 @@ describe('CloseCashSessionUseCase (DX-027)', () => {
         _by: string,
         decide: (c: CloseContext) => ClosingDraft,
       ) => {
-        draft = decide(ctx);
+        draft = decide(closeCtx);
         return Promise.resolve('CLOSED');
       },
     );
@@ -300,17 +408,114 @@ describe('CloseCashSessionUseCase (DX-027)', () => {
     });
   });
 
-  it('con diferencia exige motivo (sin decir cuánto: el arqueo puede ser ciego)', async () => {
-    const { close } = build();
-    await expect(
-      close.execute(
-        's-1',
-        { counts: [{ currency: 'USD', method: 'CASH', counted: 69_000 }] },
-        RECEPTION,
-      ),
-    ).rejects.toThrow(
-      new BadRequestException(DIFFERENCE_REASON_REQUIRED_MESSAGE),
+  // SEC-043: matriz arqueo ciego × rol × (cuadra / no cuadra) sin motivo. A
+  // ciegas y sin ser ADMIN, el cierre no responde distinto si cuadra: se
+  // guarda siempre, y si no cuadra queda «diferencia sin justificar».
+  describe.each([
+    {
+      blind: true,
+      actor: RECEPTION,
+      who: 'RECEPTION',
+      differs: { outcome: 'saved', unjustified: true },
+    },
+    {
+      blind: true,
+      actor: ADMIN,
+      who: 'ADMIN',
+      differs: { outcome: '400', unjustified: false },
+    },
+    {
+      blind: false,
+      actor: RECEPTION,
+      who: 'RECEPTION',
+      differs: { outcome: '400', unjustified: false },
+    },
+    {
+      blind: false,
+      actor: ADMIN,
+      who: 'ADMIN',
+      differs: { outcome: '400', unjustified: false },
+    },
+  ])(
+    'ciego=$blind, $who, sin motivo (SEC-043)',
+    ({ blind, actor, differs }) => {
+      const closeCtx = { ...ctx, blind };
+
+      it('si cuadra: cierra sin marca', async () => {
+        const { close, draft } = build(fakeRepo(), closeCtx);
+        await close.execute(
+          's-1',
+          { counts: [{ currency: 'USD', method: 'CASH', counted: 70_000 }] },
+          actor,
+        );
+        expect(draft()).toMatchObject({
+          hasDifference: false,
+          differenceReason: null,
+          unjustifiedDifference: false,
+          blind,
+        });
+      });
+
+      it(`si no cuadra: ${differs.outcome === 'saved' ? 'cierra igual y queda «diferencia sin justificar»' : '400 que pide el motivo'}`, async () => {
+        const { repo, close, draft } = build(fakeRepo(), closeCtx);
+        const attempt = close.execute(
+          's-1',
+          { counts: [{ currency: 'USD', method: 'CASH', counted: 69_000 }] },
+          actor,
+        );
+        if (differs.outcome === '400') {
+          await expect(attempt).rejects.toThrow(
+            new BadRequestException(DIFFERENCE_REASON_REQUIRED_MESSAGE),
+          );
+          return;
+        }
+        await expect(attempt).resolves.toBeDefined();
+        expect(repo.close).toHaveBeenCalledTimes(1);
+        expect(draft()).toMatchObject({
+          hasDifference: true,
+          differenceReason: null,
+          unjustifiedDifference: differs.unjustified,
+          blind: true,
+        });
+      });
+    },
+  );
+
+  it('a ciegas, RECEPTION recibe lo mismo (un cierre guardado) cuadre o no: no hay oráculo (SEC-043)', async () => {
+    const outcomes: unknown[] = [];
+    for (const counted of [70_000, 69_000, 71_000]) {
+      const { close } = build();
+      outcomes.push(
+        await close
+          .execute(
+            's-1',
+            { counts: [{ currency: 'USD', method: 'CASH', counted }] },
+            RECEPTION,
+          )
+          .then(
+            () => 'CLOSED',
+            (error: unknown) => error,
+          ),
+      );
+    }
+    expect(outcomes).toEqual(['CLOSED', 'CLOSED', 'CLOSED']);
+  });
+
+  it('a ciegas con diferencia y motivo: guarda el motivo sin marca', async () => {
+    const { close, draft } = build();
+    await close.execute(
+      's-1',
+      {
+        counts: [{ currency: 'USD', method: 'CASH', counted: 69_000 }],
+        differenceReason: 'Faltó cambio',
+      },
+      RECEPTION,
     );
+    expect(draft()).toMatchObject({
+      hasDifference: true,
+      differenceReason: 'Faltó cambio',
+      unjustifiedDifference: false,
+    });
   });
 
   it('con diferencia y motivo: la guarda', async () => {

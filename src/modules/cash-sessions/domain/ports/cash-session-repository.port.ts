@@ -47,6 +47,8 @@ export interface ClosingDraft {
   lines: ArqueoLine[];
   hasDifference: boolean;
   differenceReason: string | null;
+  /** SEC-043: no cuadró, a ciegas y sin motivo (ver `CashClosingView`). */
+  unjustifiedDifference: boolean;
   notes: string | null;
   blind: boolean;
   /** YYYY-MM-DD. */

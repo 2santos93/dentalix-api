@@ -4926,6 +4926,9 @@ model CashSessionClosing {
   blind             Boolean
   hasDifference     Boolean
   differenceReason  String?
+  /// SEC-043: cierre a ciegas que no cuadró y llegó sin motivo (para revisión
+  /// del ADMIN). CHECK en la migración 20261117090000.
+  unjustifiedDifference Boolean @default(false)
   notes             String?
   suggestedLockDate DateTime @db.Date
 

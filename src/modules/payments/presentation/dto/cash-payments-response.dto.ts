@@ -354,4 +354,10 @@ export class CashPaymentsResponseDto {
     description: 'Resumen del período entero con los mismos filtros.',
   })
   summary!: CashPaymentsSummaryDto;
+
+  @ApiProperty({
+    description:
+      'SEC-043: rige el arqueo ciego y quien consulta no es ADMIN: filas, total y resumen no incluyen los abonos que cuentan en una caja aún abierta (aparecen al cerrarla).',
+  })
+  blindHidden!: boolean;
 }

@@ -132,8 +132,11 @@ export class UpdateCashSettingsUseCase {
 
 /**
  * Una caja con su arqueo. RECEPTION solo ve las suyas (404 si no). Con
- * «arqueo ciego» y la caja abierta, quien no es ADMIN no ve el esperado ni la
- * lista de abonos del turno: cuenta antes de verlos.
+ * «arqueo ciego» y la caja abierta, quien no es ADMIN cuenta antes de ver
+ * nada que deje deducir el esperado (SEC-043): ni el esperado, ni los abonos,
+ * anulados y ajustes del turno, ni las líneas de un cierre anterior si se
+ * reabrió. Sí ve el fondo, sus salidas de caja y sus devoluciones: los movió
+ * ella.
  */
 @Injectable()
 export class GetCashSessionUseCase {
@@ -158,6 +161,14 @@ export class GetCashSessionUseCase {
       blindHidden,
       expected: blindHidden ? null : record.expected,
       payments: blindHidden ? null : record.payments,
+      voidedPayments: blindHidden ? null : record.voidedPayments,
+      adjustments: blindHidden ? null : record.adjustments,
+      ...(blindHidden
+        ? {
+            closing: record.closing && { ...record.closing, lines: [] },
+            closings: record.closings.map((c) => ({ ...c, lines: [] })),
+          }
+        : {}),
       can: {
         close: open && (actor.isAdmin || record.openedBy.id === actor.userId),
         reopen: !open && actor.isAdmin,
@@ -348,9 +359,15 @@ export interface CloseCashSessionInput {
 
 /**
  * Cierra con arqueo: el esperado lo calcula el repositorio con la caja
- * bloqueada; aquí se compara con lo contado. Una diferencia distinta de 0
- * exige motivo (el mensaje no dice cuánto: con arqueo ciego, quien cuenta aún
- * no ha visto el esperado). ADMIN cierra cualquiera; RECEPTION, las suyas.
+ * bloqueada; aquí se compara con lo contado. ADMIN cierra cualquiera;
+ * RECEPTION, las suyas.
+ *
+ * Con el esperado a la vista, una diferencia distinta de 0 exige motivo
+ * (400). A ciegas y sin ser ADMIN, NO (SEC-043): ese 400 contestaba «no
+ * cuadra» antes de cerrar y dejaba probar conteos hasta acertar. El cierre se
+ * guarda siempre igual; si no cuadró y no trae motivo, queda marcado
+ * «diferencia sin justificar» para que administración lo revise. Una vez
+ * cerrada, solo un ADMIN la reabre: no hay segundo intento.
  */
 @Injectable()
 export class CloseCashSessionUseCase {
@@ -396,13 +413,16 @@ export class CloseCashSessionUseCase {
           }
           throw error;
         }
-        if (result.hasDifference && reason === null) {
+        const unjustified = result.hasDifference && reason === null;
+        const countsBlind = context.blind && !actor.isAdmin;
+        if (unjustified && !countsBlind) {
           throw new BadRequestException(DIFFERENCE_REASON_REQUIRED_MESSAGE);
         }
         return {
           lines: result.lines,
           hasDifference: result.hasDifference,
           differenceReason: result.hasDifference ? reason : null,
+          unjustifiedDifference: unjustified,
           notes,
           blind: context.blind,
           suggestedLockDate: civilDateIn(now, context.timeZone),

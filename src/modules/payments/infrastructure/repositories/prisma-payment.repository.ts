@@ -6,7 +6,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { Prisma, TreatmentPlanStatus } from '@prisma/client';
+import { CashSessionStatus, Prisma, TreatmentPlanStatus } from '@prisma/client';
 import {
   isPlanBillable,
   notBillableMessage,
@@ -1277,6 +1277,15 @@ export class PrismaPaymentRepository implements PaymentRepository {
         // en esta misma foto; ver `periodScope` para los índices que la sirven.
         const scope = await this.periodScope(tx, params);
         const medium = params.paymentMethod;
+        // SEC-043: el ajuste de la clínica leído en esta misma foto.
+        const blindHidden =
+          params.blindViewer === true &&
+          (
+            await tx.tenant.findUniqueOrThrow({
+              where: { id: this.requireTenantId() },
+              select: { cashBlindClose: true },
+            })
+          ).cashBlindClose;
         const where: Prisma.PaymentWhereInput = {
           deletedAt: null,
           ...scope.where,
@@ -1287,12 +1296,12 @@ export class PrismaPaymentRepository implements PaymentRepository {
             : params.externalInvoice === 'WITHOUT'
               ? { externalInvoiceNumber: null }
               : {}),
-          // DX-395: el medio, y si es inicial también los abonos sin medio
-          // de su método (réplicas anteriores), como los nombra el resumen.
           // En AND: `scope.where` ya trae su propio OR (una rama por sede).
-          ...(medium
-            ? {
-                AND: [
+          AND: [
+            // DX-395: el medio, y si es inicial también los abonos sin medio
+            // de su método (réplicas anteriores), como los nombra el resumen.
+            ...(medium
+              ? [
                   {
                     OR: [
                       { paymentMethodId: medium.id },
@@ -1306,9 +1315,34 @@ export class PrismaPaymentRepository implements PaymentRepository {
                         : []),
                     ],
                   },
-                ],
-              }
-            : {}),
+                ]
+              : []),
+            // SEC-043: fuera lo que cuenta en una caja abierta de cualquiera
+            // (también la de otra recepcionista, que podría pasarle la cifra):
+            // el abono de esa caja, el que llegó tarde (LATE_PAYMENT) y el
+            // anulado que la descuenta (VOID).
+            ...(blindHidden
+              ? [
+                  {
+                    OR: [
+                      { cashSessionId: null },
+                      {
+                        cashSession: {
+                          is: { status: { not: CashSessionStatus.OPEN } },
+                        },
+                      },
+                    ],
+                  },
+                  {
+                    cashAdjustments: {
+                      none: {
+                        session: { is: { status: CashSessionStatus.OPEN } },
+                      },
+                    },
+                  },
+                ]
+              : []),
+          ],
         };
 
         // Página, conteo, agregado y sede en la MISMA transacción REPEATABLE
@@ -1395,6 +1429,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
             count: group._count._all,
           })),
           scopeLocation,
+          blindHidden,
         };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
