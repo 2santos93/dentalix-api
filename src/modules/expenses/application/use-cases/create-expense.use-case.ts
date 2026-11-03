@@ -208,7 +208,7 @@ export class CreateExpenseUseCase {
       amountCents: toCents(ctx.amount),
       liveCents: 0,
       paymentCents: toCents(paymentAmount),
-      money: expenseMoneyText(ctx.format, ctx.currency),
+      moneyText: expenseMoneyText(ctx.format, ctx.currency),
     });
     if (denial) throw new BadRequestException(denial.message);
     const plan = await planPaymentCash(

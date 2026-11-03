@@ -244,6 +244,54 @@ describe('formato regional y reloj solo desde el helper (G1-B, I5)', () => {
     ).toEqual([]);
   });
 
+  // DX-354 (D5): las horas de un texto salen de `fmt.clock`. Ningún literal de
+  // plantilla las compone a mano (`${pad(h)}:${pad(m)}`, `${String(h).padStart(2, '0')}:…`).
+  const TEMPLATE = /`(?:[^`\\]|\\.)*`/g;
+  const ZERO_PAD = /(?:padStart\(\s*2\s*,\s*'0'\s*\)|\bpad\w*\()/;
+  const handClock = (template: string): boolean =>
+    new RegExp(
+      `${ZERO_PAD.source}[^\`]*\\}:\\$\\{|\\}:\\$\\{[^\`]*${ZERO_PAD.source}`,
+    ).test(template);
+  /** Fechas de máquina y relojes de salida que sí componen ceros a mano. */
+  const MACHINE_CLOCK = [
+    join(SRC, 'shared', 'time', 'civil-day.ts'),
+    join(SRC, 'modules', 'recall', 'domain', 'recall-rules.ts'),
+  ];
+
+  it('DX-354: ningún literal de plantilla compone una hora con ceros a mano fuera de shared/format/', () => {
+    const files = production.filter(
+      (file) =>
+        !MACHINE_CLOCK.includes(file) && !file.endsWith(`${sep}csv-cells.ts`),
+    );
+    expect(
+      offendingMatches(files, TEMPLATE, (match) => handClock(match[0])),
+    ).toEqual([]);
+  });
+
+  it('DX-354: la regla de la hora a mano detecta ${pad(h)}:${pad(m)} y deja pasar fmt.clock', () => {
+    for (const template of [
+      '`${pad(h)}:${pad(m)}–${pad(h2)}:${pad(m2)}`',
+      "`${String(hour).padStart(2, '0')}:${mm}`",
+      "`${h}:${String(minute).padStart(2, '0')}`",
+    ]) {
+      expect({ template, caught: handClock(template) }).toEqual({
+        template,
+        caught: true,
+      });
+    }
+    for (const template of [
+      '`Fuera del horario (${fmt.clock(9, 0)}–${fmt.clock(13, 0)})`',
+      "`${series}-${String(number).padStart(6, '0')}`",
+      '`${locationId}:${weekday}`',
+      '`${pad(day)}/${pad(month)}`',
+    ]) {
+      expect({ template, caught: handClock(template) }).toEqual({
+        template,
+        caught: false,
+      });
+    }
+  });
+
   it('DX-316: every production file of the location calendar is in the country-free list', () => {
     const calendar = join(SRC, 'modules', 'location-calendar');
     for (const layer of [

@@ -580,7 +580,7 @@ export class PrismaExpenseRepository implements ExpenseRepository {
         },
         liveCents: totals.liveCents,
         paymentCount: totals.paymentCount,
-        money: this.moneyTextOf(locked),
+        moneyText: this.moneyTextOf(locked),
       });
       if (denial) throw denial;
       // El vencimiento contra la fecha de factura que quedará (el CHECK de la
@@ -701,7 +701,7 @@ export class PrismaExpenseRepository implements ExpenseRepository {
           amountCents: Number(locked.amountCents),
           liveCents,
           paymentCents: toCents(input.amount),
-          money: this.moneyTextOf(locked),
+          moneyText: this.moneyTextOf(locked),
         });
         if (denial) throw denial;
         await this.insertPayment(tx, locked, input);

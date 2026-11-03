@@ -441,7 +441,7 @@ export class InMemoryExpenseRepository implements ExpenseRepository {
       },
       liveCents: this.liveCents(id),
       paymentCount: this.paymentsOf(id).length,
-      money: expenseMoneyText(
+      moneyText: expenseMoneyText(
         { id: row.locationId, ...this.format },
         row.currency,
       ),
@@ -521,7 +521,7 @@ export class InMemoryExpenseRepository implements ExpenseRepository {
       amountCents: toCents(row.amount),
       liveCents: this.liveCents(expenseId),
       paymentCents: toCents(input.amount),
-      money: expenseMoneyText(
+      moneyText: expenseMoneyText(
         { id: row.locationId, ...this.format },
         row.currency,
       ),

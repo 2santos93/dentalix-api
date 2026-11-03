@@ -204,7 +204,7 @@ describe('reglas de un gasto (DX-274)', () => {
         amountCents: 15000000,
         liveCents,
         paymentCents,
-        money: venezuela,
+        moneyText: venezuela,
       });
 
     it('admite hasta lo pendiente, justo', () => {
@@ -236,7 +236,7 @@ describe('reglas de un gasto (DX-274)', () => {
         amountCents: 123450,
         liveCents: 0,
         paymentCents: 123451,
-        money: expenseMoneyText({ id: 'loc-1', ...location }, currency),
+        moneyText: expenseMoneyText({ id: 'loc-1', ...location }, currency),
       })?.message;
 
     it('de-DE / EUR: «1.234,50 EUR»', () => {
@@ -264,7 +264,7 @@ describe('reglas de un gasto (DX-274)', () => {
           amountCents: 100,
           liveCents: 0,
           paymentCents: 100,
-          money,
+          moneyText: money,
         }),
       ).toBeNull();
       expect(() =>
@@ -272,7 +272,7 @@ describe('reglas de un gasto (DX-274)', () => {
           amountCents: 100,
           liveCents: 0,
           paymentCents: 101,
-          money,
+          moneyText: money,
         }),
       ).toThrow('Configura el formato regional y el reloj de la sede');
     });
@@ -296,7 +296,7 @@ describe('reglas de un gasto (DX-274)', () => {
         patch,
         liveCents,
         paymentCount,
-        money: venezuela,
+        moneyText: venezuela,
       });
 
     it('un gasto anulado no se edita', () => {

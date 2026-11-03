@@ -277,12 +277,12 @@ export function paymentCapDenial(input: {
   liveCents: number;
   paymentCents: number;
   /** Importes del mensaje con el formato de la sede del gasto (perezoso). */
-  money: ExpenseMoneyText;
+  moneyText: ExpenseMoneyText;
 }): ExpenseRuleError | null {
   const pending = input.amountCents - input.liveCents;
   if (input.paymentCents > pending) {
     return invalid(
-      `El pago supera lo pendiente del gasto (${input.money(Math.max(pending, 0))}).`,
+      `El pago supera lo pendiente del gasto (${input.moneyText(Math.max(pending, 0))}).`,
     );
   }
   return null;
@@ -303,7 +303,7 @@ export interface ExpenseEditContext {
   /** Pagos del gasto, vivos o anulados (la FK de cuatro columnas los ata). */
   paymentCount: number;
   /** Importes del mensaje con el formato de la sede del gasto (perezoso). */
-  money: ExpenseMoneyText;
+  moneyText: ExpenseMoneyText;
 }
 
 /**
@@ -329,7 +329,7 @@ export function expenseEditDenial(
     ctx.patch.amountCents < ctx.liveCents
   ) {
     return conflict(
-      `El importe no puede ser menor a lo ya pagado (${ctx.money(ctx.liveCents)}).`,
+      `El importe no puede ser menor a lo ya pagado (${ctx.moneyText(ctx.liveCents)}).`,
     );
   }
   return null;
