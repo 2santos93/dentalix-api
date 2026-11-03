@@ -79,8 +79,9 @@ export interface ListCashPaymentsInput {
 
 /**
  * SEC-043: lo que se quita de una fila de una caja abierta con arqueo ciego.
- * Las notas son texto libre (pueden llevar la cifra) y los ajustes por medio
- * de pago llevan importes.
+ * Las notas y la referencia son texto libre (pueden llevar la cifra) y los
+ * ajustes por medio de pago llevan importes. El nº de factura externa se
+ * queda: es un número de factura, no un importe.
  */
 const HIDDEN_AMOUNT: Pick<
   CashPaymentView,
@@ -88,6 +89,7 @@ const HIDDEN_AMOUNT: Pick<
   | 'currency'
   | 'collectedAmount'
   | 'notes'
+  | 'reference'
   | 'adjustments'
   | 'amountHidden'
 > = {
@@ -95,6 +97,8 @@ const HIDDEN_AMOUNT: Pick<
   currency: null,
   collectedAmount: null,
   notes: null,
+  // La referencia también es texto libre: el recibo la sigue mostrando.
+  reference: null,
   adjustments: [],
   amountHidden: true,
 };

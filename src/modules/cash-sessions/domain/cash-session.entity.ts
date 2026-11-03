@@ -4,6 +4,15 @@ import type {
   PaymentMethod,
 } from '@prisma/client';
 
+/**
+ * SEC-043: con arqueo ciego y quien consulta sin ser ADMIN, el importe de lo
+ * que cuenta en una caja aún abierta (o entrará en la próxima que se abra) va
+ * a null y la fila con `amountHidden`: sumado al fondo daría el esperado.
+ */
+export interface HiddenAmount {
+  amountHidden: boolean;
+}
+
 /*
  * Caja por turno (DX-027): la caja de UN usuario en UNA sede, con su fondo
  * inicial por moneda, los abonos que recibió, los ajustes que le llegaron de
@@ -117,7 +126,11 @@ export interface CashSessionPayment {
   collectedAmount: number;
 }
 
-export interface CashVoidedPayment extends CashSessionPayment {
+export interface CashVoidedPayment
+  extends Omit<CashSessionPayment, 'amount' | 'collectedAmount'>, HiddenAmount {
+  /** SEC-043: null con `amountHidden` (su anulación cuenta en otra caja abierta). */
+  amount: number | null;
+  collectedAmount: number | null;
   voidedAt: Date | null;
   voidedBy: StaffRef | null;
   voidReason: string | null;
@@ -160,7 +173,10 @@ export interface CashCreditRefund {
   patient: { id: string; fullName: string };
 }
 
-export interface CashVoidedOutflow extends CashOutflow {
+export interface CashVoidedOutflow
+  extends Omit<CashOutflow, 'amount'>, HiddenAmount {
+  /** SEC-043: null con `amountHidden` (su anulación cuenta en otra caja abierta). */
+  amount: number | null;
   voidedAt: Date | null;
   voidedBy: StaffRef | null;
   voidReason: string | null;
@@ -177,17 +193,20 @@ export interface CashSessionRef {
   openedBy: StaffRef;
 }
 
-export interface CashAdjustmentView {
+export interface CashAdjustmentView extends HiddenAmount {
   id: string;
   kind: CashAdjustmentKind;
   currency: string;
   method: PaymentMethod;
-  amount: number;
+  /** SEC-043: null con `amountHidden`. */
+  amount: number | null;
   reason: string | null;
   createdAt: Date;
   createdBy: StaffRef;
   /** Caja donde cuenta; `null` = pendiente de la siguiente que se abra. */
   sessionId: string | null;
+  /** SEC-043: estado de esa caja; `null` si está pendiente. */
+  sessionStatus: CashSessionStatus | null;
   payment: {
     id: string;
     patient: { id: string; fullName: string };

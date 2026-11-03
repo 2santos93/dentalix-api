@@ -1,4 +1,4 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional, OmitType } from '@nestjs/swagger';
 import {
   CashAdjustmentKind,
   CashSessionStatus,
@@ -485,7 +485,30 @@ export class CashSessionPaymentDto {
   collectedAmount!: number;
 }
 
-export class CashVoidedPaymentDto extends CashSessionPaymentDto {
+export class CashVoidedPaymentDto extends OmitType(CashSessionPaymentDto, [
+  'amount',
+  'collectedAmount',
+] as const) {
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description: 'SEC-043: null con `amountHidden`.',
+  })
+  amount!: number | null;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description: 'SEC-043: null con `amountHidden`.',
+  })
+  collectedAmount!: number | null;
+
+  @ApiProperty({
+    description:
+      'SEC-043: con arqueo ciego y quien consulta sin ser ADMIN, cuenta en una caja aún abierta o pendiente: `amount` va a null.',
+  })
+  amountHidden!: boolean;
+
   @ApiProperty({ type: String, format: 'date-time', nullable: true })
   voidedAt!: Date | null;
 
@@ -555,7 +578,22 @@ export class CashCreditRefundDto {
   patient!: CashPatientRefDto;
 }
 
-export class CashVoidedOutflowDto extends CashOutflowDto {
+export class CashVoidedOutflowDto extends OmitType(CashOutflowDto, [
+  'amount',
+] as const) {
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description: 'SEC-043: null con `amountHidden`.',
+  })
+  amount!: number | null;
+
+  @ApiProperty({
+    description:
+      'SEC-043: con arqueo ciego y quien consulta sin ser ADMIN, cuenta en una caja aún abierta o pendiente: `amount` va a null.',
+  })
+  amountHidden!: boolean;
+
   @ApiProperty({ type: String, format: 'date-time', nullable: true })
   voidedAt!: Date | null;
 
@@ -634,8 +672,18 @@ export class CashAdjustmentDto {
   @ApiProperty({ enum: PaymentMethod, enumName: 'PaymentMethod' })
   method!: PaymentMethod;
 
-  @ApiProperty({ description: 'Con signo' })
-  amount!: number;
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description: 'Con signo. SEC-043: null con `amountHidden`.',
+  })
+  amount!: number | null;
+
+  @ApiProperty({
+    description:
+      'SEC-043: con arqueo ciego y quien consulta sin ser ADMIN, cuenta en una caja aún abierta o pendiente: `amount` va a null.',
+  })
+  amountHidden!: boolean;
 
   @ApiProperty({ type: String, nullable: true })
   reason!: string | null;
@@ -654,6 +702,14 @@ export class CashAdjustmentDto {
       'Caja donde cuenta; null = pendiente de la siguiente que se abra en la sede',
   })
   sessionId!: string | null;
+
+  @ApiProperty({
+    enum: CashSessionStatus,
+    enumName: 'CashSessionStatus',
+    nullable: true,
+    description: 'SEC-043: estado de esa caja; null si está pendiente.',
+  })
+  sessionStatus!: CashSessionStatus | null;
 
   @ApiProperty({ type: CashAdjustmentPaymentDto, nullable: true })
   payment!: CashAdjustmentPaymentDto | null;

@@ -245,14 +245,20 @@ type PrismaCashPayment = Prisma.PaymentGetPayload<{
 
 /**
  * SEC-043: el abono cuenta en una caja aún abierta, por su caja o por un
- * ajuste de esa caja (LATE_PAYMENT, VOID).
+ * ajuste de esa caja (LATE_PAYMENT, VOID), o entrará en la próxima que se
+ * abra en su sede (ajuste pendiente, `sessionId` null).
  */
 const IN_OPEN_CASH_SESSION = {
   OR: [
     { cashSession: { is: { status: CashSessionStatus.OPEN } } },
     {
       cashAdjustments: {
-        some: { session: { is: { status: CashSessionStatus.OPEN } } },
+        some: {
+          OR: [
+            { session: { is: { status: CashSessionStatus.OPEN } } },
+            { sessionId: null },
+          ],
+        },
       },
     },
   ],

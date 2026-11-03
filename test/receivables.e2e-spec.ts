@@ -442,7 +442,7 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
     ]);
   });
 
-  it('I1: /receivables/aging/summary da los mismos totales sin filas de pacientes y sin auditar', async () => {
+  it('I1: /receivables/aging/summary da los mismos totales sin filas de pacientes; SEC-043: queda auditado como lectura', async () => {
     const list = (
       await get(clinicA, '/receivables/aging', receptionToken)
         .set('X-Location-Id', sedePrincipal)
@@ -465,9 +465,21 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
     expect(body.asOf).toBe(list.asOf);
     expect(body.scope).toEqual(list.scope);
     expect(body.totals).toEqual(list.totals);
+    // SEC-043 (M2): la diferencia de totales entre dos consultas aproxima lo
+    // abonado; quién los mira queda en la auditoría (sin importes).
     expect(
       await raw.auditEvent.count({ where: { tenantId: clinicA.tenantId } }),
-    ).toBe(before);
+    ).toBe(before + 1);
+    const event = await raw.auditEvent.findFirst({
+      where: { tenantId: clinicA.tenantId, action: 'VIEW' },
+      orderBy: { occurredAt: 'desc' },
+    });
+    expect(event).toMatchObject({
+      resourceType: 'ACCOUNT_STATEMENT',
+      locationId: sedePrincipal,
+      patientId: null,
+      metadata: { reason: 'RECEIVABLES_AGING_SUMMARY' },
+    });
     // Mismos roles que la lista: el clínico no ve la cartera.
     for (const token of [dentistToken, assistantToken]) {
       await get(clinicA, '/receivables/aging/summary', token).expect(403);

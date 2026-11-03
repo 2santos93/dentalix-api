@@ -129,7 +129,7 @@ export class CashPaymentDto {
 
   @ApiProperty({
     description:
-      'SEC-043: rige el arqueo ciego, quien consulta no es ADMIN y el abono cuenta en una caja aún abierta. Va sin `amount`, `currency`, `collectedAmount` ni `notes` (null) y sin `adjustments` (vacío), y no suma en el resumen. Recibo y anulación funcionan igual. Las cifras vuelven al cerrar la caja.',
+      'SEC-043: rige el arqueo ciego, quien consulta no es ADMIN y el abono cuenta en una caja aún abierta. Va sin `amount`, `currency`, `collectedAmount`, `notes` ni `reference` (null) y sin `adjustments` (vacío), y no suma en el resumen. Recibo y anulación funcionan igual. Las cifras vuelven al cerrar la caja.',
   })
   amountHidden!: boolean;
 

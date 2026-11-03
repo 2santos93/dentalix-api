@@ -49,8 +49,15 @@ interface Detail {
   floats: { currency: string; amount: number }[];
   expected: Line[] | null;
   payments: { id: string; amount: number }[] | null;
-  voidedPayments: { id: string; amount: number }[] | null;
-  adjustments: { kind: string; amount: number }[] | null;
+  voidedPayments:
+    { id: string; amount: number | null; amountHidden: boolean }[] | null;
+  adjustments: { kind: string; amount: number | null }[] | null;
+  laterAdjustments: {
+    kind: string;
+    amount: number | null;
+    amountHidden: boolean;
+    payment: { id: string } | null;
+  }[];
   closing: {
     hasDifference: boolean;
     differenceReason: string | null;
@@ -67,6 +74,7 @@ interface CashList {
     currency: string | null;
     collectedAmount: number | null;
     notes: string | null;
+    reference: string | null;
     adjustments: unknown[];
     amountHidden: boolean;
     canVoid: boolean;
@@ -576,6 +584,306 @@ describe('Arqueo ciego sin fugas (e2e, SEC-043)', () => {
       for (const id of enCaja) {
         expect(list.items.find((i) => i.id === id)?.amountHidden).toBe(true);
       }
+    });
+  });
+
+  // Revisión (ronda 3): lo que, nacido de una caja ya cerrada, cuenta en otra
+  // abierta o está pendiente de la próxima; dos sedes; cobro dividido; la
+  // cartera auditada. Sede Norte: la segunda recepcionista.
+  describe('revisión · ajustes de otras cajas, pendientes, dos sedes, cobro dividido y cartera', () => {
+    let cajaA: string;
+    let cajaB: string;
+    let anuladoA: string;
+    let tarjetaA: string;
+    let tardio: string;
+    const yesterday = () => addCivilDays(today(), -1);
+
+    beforeAll(async () => {
+      // Una caja de AYER ya cerrada en la Sede Norte (para el abono tardío).
+      const start = zonedStartOfDay(yesterday(), ZONE).getTime();
+      const hour = 60 * 60 * 1000;
+      await raw.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe(
+          `SET LOCAL session_replication_role = replica`,
+        );
+        await tx.cashSession.create({
+          data: {
+            tenantId: clinic.tenantId,
+            locationId: sedeNorte,
+            openedById: clinic.adminUserId,
+            openedAt: new Date(start + 8 * hour),
+            status: 'CLOSED',
+            closedAt: new Date(start + 18 * hour),
+            closedById: clinic.adminUserId,
+          },
+        });
+      });
+    });
+
+    const detailFor = async (id: string, token: string) =>
+      detailOf(await api('get', `/cash-sessions/${id}`, token).expect(200));
+    const listFor = async (token: string, day: string, locationId?: string) =>
+      listOf(
+        await api(
+          'get',
+          `/payments?from=${day}&to=${day}`,
+          token,
+          locationId,
+        ).expect(200),
+      );
+
+    it('la caja A cerrada a ciegas y cuadrada guarda el motivo que escribió quien contó (B4)', async () => {
+      cajaA = idOf(
+        await api('post', '/cash-sessions/open', recepcionDos, sedeNorte)
+          .send({ floats: [] })
+          .expect(201),
+      );
+      anuladoA = idOf(
+        await pay(
+          recepcionDos,
+          { amount: 40, method: 'CASH' },
+          sedeNorte,
+        ).expect(201),
+      );
+      tarjetaA = idOf(
+        await pay(
+          recepcionDos,
+          { amount: 25, method: 'CARD' },
+          sedeNorte,
+        ).expect(201),
+      );
+      const closed = detailOf(
+        await api('post', `/cash-sessions/${cajaA}/close`, recepcionDos)
+          .send({
+            counts: [
+              { currency: 'USD', method: 'CASH', counted: 40 },
+              { currency: 'USD', method: 'CARD', counted: 25 },
+            ],
+            differenceReason: 'Conté dos veces el cajón',
+          })
+          .expect(201),
+      );
+      expect(closed.closing).toMatchObject({
+        hasDifference: false,
+        differenceReason: 'Conté dos veces el cajón',
+        unjustifiedDifference: false,
+      });
+    });
+
+    it('M1: un ADMIN sin caja anula un abono de A y cobra uno tardío: los ajustes quedan pendientes y A no deja ver su importe', async () => {
+      await api('delete', `/payments/${anuladoA}`)
+        .send({ reason: 'Abono duplicado' })
+        .expect(200);
+      tardio = idOf(
+        await pay(
+          clinic.adminToken,
+          { amount: 12, method: 'CASH', paidAt: yesterday() },
+          sedeNorte,
+        ).expect(201),
+      );
+      const pending = await raw.cashSessionAdjustment.findMany({
+        where: { tenantId: clinic.tenantId, locationId: sedeNorte },
+        select: { kind: true, sessionId: true, paymentId: true },
+      });
+      expect(pending).toEqual(
+        expect.arrayContaining([
+          { kind: 'VOID', sessionId: null, paymentId: anuladoA },
+          { kind: 'LATE_PAYMENT', sessionId: null, paymentId: tardio },
+        ]),
+      );
+
+      const a = await detailFor(cajaA, recepcionDos);
+      const voidAdj = a.laterAdjustments.find((x) => x.kind === 'VOID');
+      expect(voidAdj).toMatchObject({ amount: null, amountHidden: true });
+      expect(a.voidedPayments).toEqual([
+        expect.objectContaining({
+          id: anuladoA,
+          amount: null,
+          amountHidden: true,
+        }),
+      ]);
+      // ADMIN lo ve.
+      const admin = await detailFor(cajaA, clinic.adminToken);
+      expect(
+        admin.laterAdjustments.find((x) => x.kind === 'VOID'),
+      ).toMatchObject({ amount: -40, amountHidden: false });
+      // El tardío pendiente va sin importe en la lista de su día.
+      const prev = await listFor(recepcionDos, yesterday(), sedeNorte);
+      expect(prev.items.find((i) => i.id === tardio)).toMatchObject({
+        amountHidden: true,
+        amount: null,
+      });
+      expect(usdTotal(prev)).toBe(0);
+    });
+
+    it('dos sedes: el resumen consolidado solo deja fuera lo de la caja abierta (Sede principal), no lo de la cerrada (Norte)', async () => {
+      const all = await listFor(recepcionDos, today());
+      expect(all.items.find((i) => i.id === tarjetaA)).toMatchObject({
+        amountHidden: false,
+        amount: 25,
+      });
+      for (const id of enCaja) {
+        expect(all.items.find((i) => i.id === id)?.amountHidden).toBe(true);
+      }
+      expect(usdTotal(all)).toBe(25 + 7);
+      expect(usdTotal(await listFor(recepcionDos, today(), sedeNorte))).toBe(
+        25,
+      );
+      expect(
+        usdTotal(await listFor(recepcionDos, today(), sedePrincipal)),
+      ).toBe(7);
+    });
+
+    it('M1: la caja B recoge los pendientes; siguen ocultos mientras B está abierta y se ven al cerrarla', async () => {
+      cajaB = idOf(
+        await api('post', '/cash-sessions/open', recepcionDos, sedeNorte)
+          .send({ floats: [] })
+          .expect(201),
+      );
+      const collected = await raw.cashSessionAdjustment.findMany({
+        where: { paymentId: { in: [anuladoA, tardio] } },
+        select: { sessionId: true },
+      });
+      expect(collected.map((c) => c.sessionId)).toEqual([cajaB, cajaB]);
+
+      const a = await detailFor(cajaA, recepcionDos);
+      expect(a.laterAdjustments.find((x) => x.kind === 'VOID')).toMatchObject({
+        amount: null,
+        amountHidden: true,
+      });
+      expect(a.voidedPayments?.[0]).toMatchObject({ amount: null });
+      const b = await detailFor(cajaB, recepcionDos);
+      expect(b).toMatchObject({ blindHidden: true, adjustments: null });
+      const prev = await listFor(recepcionDos, yesterday(), sedeNorte);
+      expect(prev.items.find((i) => i.id === tardio)?.amountHidden).toBe(true);
+
+      // B se cierra (no cuadra: esperado −40 + 12 en efectivo).
+      await api('post', `/cash-sessions/${cajaB}/close`, recepcionDos)
+        .send({ counts: [{ currency: 'USD', method: 'CASH', counted: 0 }] })
+        .expect(201);
+      const after = await detailFor(cajaA, recepcionDos);
+      expect(
+        after.laterAdjustments.find((x) => x.kind === 'VOID'),
+      ).toMatchObject({ amount: -40, amountHidden: false });
+      expect(after.voidedPayments?.[0]).toMatchObject({
+        amount: 40,
+        amountHidden: false,
+      });
+      const prevAfter = await listFor(recepcionDos, yesterday(), sedeNorte);
+      expect(prevAfter.items.find((i) => i.id === tardio)).toMatchObject({
+        amountHidden: false,
+        amount: 12,
+      });
+    });
+
+    it('un cobro dividido en USD y VES de la caja abierta va sin importe, moneda ni referencia en la lista y en el CSV', async () => {
+      await raw.exchangeRateSnapshot.deleteMany({
+        where: { date: today(), currency: 'VES' },
+      });
+      await raw.exchangeRateSnapshot.create({
+        data: { date: today(), currency: 'VES', rate: 4000 },
+      });
+      try {
+        const methods = (await api('get', '/payment-methods').expect(200))
+          .body as { id: string; legacyMethod: string | null }[];
+        const cash = methods.find((m) => m.legacyMethod === 'CASH')!.id;
+        const transfer = methods.find((m) => m.legacyMethod === 'TRANSFER')!.id;
+        const split = (
+          await api(
+            'post',
+            `/treatment-plans/${planId}/split-payments`,
+            recepcion,
+            sedePrincipal,
+          )
+            .send({
+              paidAt: today(),
+              // El plan de la prueba no tiene ítems: el cobro queda a favor.
+              confirmCreditBalance: true,
+              lines: [
+                { amount: 10, currency: 'USD', paymentMethodId: cash },
+                {
+                  amount: 40_000,
+                  currency: 'VES',
+                  paymentMethodId: transfer,
+                  reference: 'TR-VES-40000',
+                },
+              ],
+            })
+            .expect(201)
+        ).body as { payments: { id: string }[] };
+        const ids = split.payments.map((p) => p.id);
+        expect(ids).toHaveLength(2);
+
+        const list = await listFor(recepcion, today(), sedePrincipal);
+        for (const id of ids) {
+          expect(list.items.find((i) => i.id === id)).toMatchObject({
+            amountHidden: true,
+            amount: null,
+            currency: null,
+            reference: null,
+          });
+        }
+        expect(list.summary.byCurrency.map((c) => c.currency)).not.toContain(
+          'VES',
+        );
+        const csv = (
+          await api(
+            'get',
+            `/payments.csv?from=${today()}&to=${today()}`,
+            recepcion,
+            sedePrincipal,
+          )
+            .buffer(true)
+            .parse((res, done) => {
+              let text = '';
+              res.on('data', (chunk: Buffer) => (text += chunk.toString()));
+              res.on('end', () => done(null, text));
+            })
+            .expect(200)
+        ).body as string;
+        expect(csv).not.toMatch(/VES|TR-VES-40000/);
+        const adminCsv = (
+          await api(
+            'get',
+            `/payments.csv?from=${today()}&to=${today()}`,
+            clinic.adminToken,
+            sedePrincipal,
+          )
+            .buffer(true)
+            .parse((res, done) => {
+              let text = '';
+              res.on('data', (chunk: Buffer) => (text += chunk.toString()));
+              res.on('end', () => done(null, text));
+            })
+            .expect(200)
+        ).body as string;
+        expect(adminCsv).toMatch(/VES/);
+        expect(adminCsv).toMatch(/TR-VES-40000/);
+      } finally {
+        await raw.exchangeRateSnapshot.deleteMany({
+          where: { date: today(), currency: 'VES' },
+        });
+      }
+    });
+
+    it('M2: los totales de la cartera dejan su evento de auditoría (quién y cuándo, sin importes)', async () => {
+      await api(
+        'get',
+        '/receivables/aging/summary',
+        recepcion,
+        sedePrincipal,
+      ).expect(200);
+      const event = await raw.auditEvent.findFirst({
+        where: { tenantId: clinic.tenantId, action: 'VIEW' },
+        orderBy: { occurredAt: 'desc' },
+      });
+      expect(event).toMatchObject({
+        resourceType: 'ACCOUNT_STATEMENT',
+        actorRole: 'RECEPTION',
+        locationId: sedePrincipal,
+        patientId: null,
+        metadata: { reason: 'RECEIVABLES_AGING_SUMMARY' },
+      });
     });
   });
 

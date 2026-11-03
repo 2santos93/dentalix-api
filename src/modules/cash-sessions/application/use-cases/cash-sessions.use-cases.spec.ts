@@ -151,6 +151,7 @@ describe('GetCashSessionUseCase (DX-027)', () => {
     voidedBy: null,
     voidReason: 'Error',
     bookedAsAdjustment: false,
+    amountHidden: false,
   };
   const adjustment = {
     id: 'a-1',
@@ -162,6 +163,10 @@ describe('GetCashSessionUseCase (DX-027)', () => {
     createdAt: NOW,
     createdBy: { id: 'u-x', fullName: null },
     sessionId: 's-1',
+    // Cuenta en s-1; en la matriz solo se mira cuando s-1 está cerrada o
+    // quien consulta no cuenta a ciegas.
+    sessionStatus: 'CLOSED' as const,
+    amountHidden: false,
     payment: null,
     expensePayment: null,
     originalSession: null,
@@ -240,6 +245,107 @@ describe('GetCashSessionUseCase (DX-027)', () => {
       });
     },
   );
+
+  // SEC-043 (revisión M1): una caja A ya cerrada no deja ver el importe de lo
+  // que, nacido de ella, cuenta en otra caja abierta o está pendiente.
+  describe('caja cerrada con ajustes posteriores en otra caja (SEC-043, M1)', () => {
+    const voidOf = (
+      sessionId: string | null,
+      status: 'OPEN' | 'CLOSED' | null,
+    ) => ({
+      ...adjustment,
+      id: `adj-${status ?? 'pending'}`,
+      kind: 'VOID' as const,
+      amount: -40,
+      sessionId,
+      sessionStatus: status,
+      payment: {
+        id: `p-${status ?? 'pending'}`,
+        patient: { id: 'pt-1', fullName: 'Ana' },
+        paidOn: '2026-10-17',
+        receiptNumber: null,
+      },
+      originalSession: {
+        id: 's-1',
+        openedAt: NOW,
+        openedBy: { id: RECEPTION.userId, fullName: 'Rita' },
+      },
+    });
+    const voidedFor = (id: string) => ({
+      ...voided,
+      id,
+      amount: 40,
+      collectedAmount: 40,
+      bookedAsAdjustment: true,
+    });
+    const closedA = () =>
+      record({
+        status: 'CLOSED',
+        // Lo que cuenta en A (cerrada) se ve siempre.
+        adjustments: [{ ...adjustment, sessionStatus: 'CLOSED' as const }],
+        laterAdjustments: [
+          voidOf('s-b', 'OPEN'),
+          voidOf(null, null),
+          voidOf('s-c', 'CLOSED'),
+        ],
+        voidedPayments: [
+          voidedFor('p-OPEN'),
+          voidedFor('p-pending'),
+          voidedFor('p-CLOSED'),
+        ],
+      });
+
+    it.each([
+      ['RECEPTION con ciego', RECEPTION, true, true],
+      ['ADMIN con ciego', ADMIN, true, false],
+      ['RECEPTION sin ciego', RECEPTION, false, false],
+    ])(
+      '%s: oculto=%s en lo abierto o pendiente',
+      async (_who, actor, blindClose, hides) => {
+        const repo = fakeRepo();
+        repo.getSettings.mockResolvedValue({
+          requireOpenSession: false,
+          blindClose,
+        });
+        repo.detail.mockResolvedValue(closedA());
+        const view = await new GetCashSessionUseCase(
+          asRepo(repo),
+          context,
+        ).execute('s-1', actor);
+        const later = Object.fromEntries(
+          view.laterAdjustments.map((a) => [a.id, a]),
+        );
+        const voidedById = Object.fromEntries(
+          (view.voidedPayments ?? []).map((p) => [p.id, p]),
+        );
+        for (const key of ['OPEN', 'pending']) {
+          expect(later[`adj-${key}`]).toMatchObject(
+            hides
+              ? { amount: null, amountHidden: true }
+              : { amount: -40, amountHidden: false },
+          );
+          expect(voidedById[`p-${key}`]).toMatchObject(
+            hides
+              ? { amount: null, collectedAmount: null, amountHidden: true }
+              : { amount: 40, amountHidden: false },
+          );
+        }
+        // Lo que cuenta en una caja ya cerrada, y lo de esta, nunca se oculta.
+        expect(later['adj-CLOSED']).toMatchObject({
+          amount: -40,
+          amountHidden: false,
+        });
+        expect(voidedById['p-CLOSED']).toMatchObject({
+          amount: 40,
+          amountHidden: false,
+        });
+        expect(view.adjustments?.[0]).toMatchObject({
+          amount: 3_000,
+          amountHidden: false,
+        });
+      },
+    );
+  });
 
   it('cerrada: se ve el arqueo aunque sea ciego, y solo ADMIN reabre o corrige', async () => {
     const repo = fakeRepo();
@@ -384,8 +490,8 @@ describe('CloseCashSessionUseCase (DX-027)', () => {
     return { repo, close, draft: () => draft };
   }
 
-  it('cuadrado: guarda contado y diferencia 0, sin motivo, con la fecha de bloqueo del día de la sede', async () => {
-    const { close, draft } = build();
+  it('cuadrado con el esperado a la vista: guarda contado y diferencia 0, sin motivo, con la fecha de bloqueo del día de la sede', async () => {
+    const { close, draft } = build(fakeRepo(), { ...ctx, blind: false });
     await close.execute(
       's-1',
       {
@@ -397,7 +503,7 @@ describe('CloseCashSessionUseCase (DX-027)', () => {
     expect(draft()).toMatchObject({
       hasDifference: false,
       differenceReason: null,
-      blind: true,
+      blind: false,
       suggestedLockDate: '2026-10-17',
       lines: [
         expect.objectContaining({
@@ -499,6 +605,28 @@ describe('CloseCashSessionUseCase (DX-027)', () => {
       );
     }
     expect(outcomes).toEqual(['CLOSED', 'CLOSED', 'CLOSED']);
+  });
+
+  it('a ciegas y cuadrado, RECEPTION: el motivo que escribió no se pierde (SEC-043, B4); ADMIN, como siempre', async () => {
+    for (const [actor, kept] of [
+      [RECEPTION, 'Creo que faltó el cambio de una consulta'],
+      [ADMIN, null],
+    ] as const) {
+      const { close, draft } = build();
+      await close.execute(
+        's-1',
+        {
+          counts: [{ currency: 'USD', method: 'CASH', counted: 70_000 }],
+          differenceReason: 'Creo que faltó el cambio de una consulta',
+        },
+        actor,
+      );
+      expect(draft()).toMatchObject({
+        hasDifference: false,
+        differenceReason: kept,
+        unjustifiedDifference: false,
+      });
+    }
   });
 
   it('a ciegas con diferencia y motivo: guarda el motivo sin marca', async () => {

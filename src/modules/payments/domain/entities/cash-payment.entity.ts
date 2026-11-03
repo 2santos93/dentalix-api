@@ -70,7 +70,7 @@ export interface CashPaymentView extends Omit<
 > {
   /**
    * SEC-043: `null` con `amountHidden` (lo mismo `currency`,
-   * `collectedAmount` y `notes`, y `adjustments` va vacío).
+   * `collectedAmount`, `notes` y `reference`, y `adjustments` va vacío).
    */
   amount: number | null;
   currency: string | null;

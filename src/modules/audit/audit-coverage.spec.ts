@@ -1025,6 +1025,13 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'ACCOUNT_STATEMENT',
     reason: 'RECEIVABLES_AGING',
   },
+  // SEC-043 (M2): los totales de la cartera aproximan lo abonado entre dos
+  // consultas; quién los mira queda en la auditoría.
+  'GET /receivables/aging/summary': {
+    action: 'VIEW',
+    resource: 'ACCOUNT_STATEMENT',
+    reason: 'RECEIVABLES_AGING_SUMMARY',
+  },
   // DX-204: política de descuentos (solo ADMIN) e informe de descuentos (lista
   // de muchos pacientes, sin paciente en el evento) y su CSV.
   'PUT /discount-policy': { action: 'UPDATE', resource: 'DISCOUNT_POLICY' },

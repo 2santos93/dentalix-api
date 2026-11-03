@@ -25,6 +25,7 @@ import {
 import {
   CASH_SESSION_REPOSITORY,
   type CashSessionRepository,
+  type CashSessionRecord,
   type CashSessionScope,
   type ClosingDraft,
 } from '../../domain/ports/cash-session-repository.port';
@@ -62,6 +63,48 @@ const MAX_PAGE_SIZE = 100;
 
 const scopeFor = (actor: CashActor): CashSessionScope =>
   actor.isAdmin ? {} : { openedById: actor.userId };
+
+/**
+ * SEC-043: el ajuste cuenta en una caja aún abierta o entrará en la próxima
+ * que se abra (pendiente): su importe dejaría deducir ese esperado.
+ */
+const countsInOpenSession = (a: CashAdjustmentView): boolean =>
+  a.sessionId === null || a.sessionStatus === 'OPEN';
+
+const hideAdjustment = (a: CashAdjustmentView): CashAdjustmentView =>
+  countsInOpenSession(a) ? { ...a, amount: null, amountHidden: true } : a;
+
+/**
+ * SEC-043: con arqueo ciego y quien consulta sin ser ADMIN, sin el importe de
+ * lo que cuenta en otra caja abierta o pendiente, aunque esta ya esté
+ * cerrada: los ajustes posteriores (una anulación de esta caja que va a otra)
+ * y el abono o la salida anulados que los originan.
+ */
+function hideOpenSessionAmounts(record: CashSessionRecord): CashSessionRecord {
+  const later = record.laterAdjustments.map(hideAdjustment);
+  const hiddenPayments = new Set(
+    later.flatMap((a) => (a.amountHidden && a.payment ? [a.payment.id] : [])),
+  );
+  const hiddenOutflows = new Set(
+    later.flatMap((a) =>
+      a.amountHidden && a.expensePayment ? [a.expensePayment.id] : [],
+    ),
+  );
+  return {
+    ...record,
+    laterAdjustments: later,
+    adjustments: record.adjustments?.map(hideAdjustment) ?? null,
+    voidedPayments:
+      record.voidedPayments?.map((p) =>
+        hiddenPayments.has(p.id)
+          ? { ...p, amount: null, collectedAmount: null, amountHidden: true }
+          : p,
+      ) ?? null,
+    voidedOutflows: record.voidedOutflows.map((o) =>
+      hiddenOutflows.has(o.id) ? { ...o, amount: null, amountHidden: true } : o,
+    ),
+  };
+}
 
 const unknownCurrencies = (codes: string[]) =>
   `Monedas desconocidas: ${codes.join(', ')}.`;
@@ -147,11 +190,15 @@ export class GetCashSessionUseCase {
   ) {}
 
   async execute(id: string, actor: CashActor): Promise<CashSessionDetail> {
-    const [record, settings] = await Promise.all([
+    const [found, settings] = await Promise.all([
       this.repo.detail(id, scopeFor(actor)),
       this.repo.getSettings(),
     ]);
-    if (!record) throw new NotFoundException(SESSION_NOT_FOUND_MESSAGE);
+    if (!found) throw new NotFoundException(SESSION_NOT_FOUND_MESSAGE);
+    const record =
+      settings.blindClose && !actor.isAdmin
+        ? hideOpenSessionAmounts(found)
+        : found;
     // DX-089: una caja de una sede no permitida es 403 (no 404: existe).
     this.tenantContext.assertLocationAllowed(record.location.id);
     const open = record.status === 'OPEN';
@@ -421,7 +468,11 @@ export class CloseCashSessionUseCase {
         return {
           lines: result.lines,
           hasDifference: result.hasDifference,
-          differenceReason: result.hasDifference ? reason : null,
+          // SEC-043 (revisión B4): a ciegas, quien cuenta escribe el motivo
+          // sin saber si cuadra; si cuadró, su texto no se pierde (las CHECK
+          // admiten motivo sin diferencia). Con el esperado a la vista, como
+          // antes: el motivo solo acompaña a una diferencia.
+          differenceReason: result.hasDifference || countsBlind ? reason : null,
           unjustifiedDifference: unjustified,
           notes,
           blind: context.blind,

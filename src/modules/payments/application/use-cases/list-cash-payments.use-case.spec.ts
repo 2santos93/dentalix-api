@@ -663,6 +663,8 @@ describe('ListCashPaymentsUseCase', () => {
       const hidden = fakeRow('p-open', {
         amount: 30,
         notes: 'pagó 30 en billetes',
+        reference: 'Pago móvil 30 USD',
+        externalInvoiceNumber: 'F-0001',
         adjustments: [
           {
             type: 'TAX',
@@ -698,6 +700,9 @@ describe('ListCashPaymentsUseCase', () => {
           currency: null,
           collectedAmount: null,
           notes: null,
+          reference: null,
+          // El nº de factura externa no es un importe: se queda.
+          externalInvoiceNumber: 'F-0001',
           adjustments: [],
           amountHidden: true,
           // Lo que sirve para encontrarlo y actuar sigue.

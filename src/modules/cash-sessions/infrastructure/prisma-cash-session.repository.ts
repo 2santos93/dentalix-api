@@ -140,6 +140,8 @@ const ADJUSTMENT_SELECT = {
   createdAt: true,
   createdById: true,
   sessionId: true,
+  // SEC-043: si cuenta en una caja abierta, su importe se oculta (ciego).
+  session: { select: { status: true } },
   payment: { select: PAYMENT_SELECT },
   expensePayment: {
     select: {
@@ -582,6 +584,7 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
             voidedBy: p.voidedById ? this.staff(p.voidedById, names) : null,
             voidReason: p.voidReason,
             bookedAsAdjustment: p.cashAdjustments.length > 0,
+            amountHidden: false,
           })),
           outflows: liveOutflows.map((o) => this.toOutflow(o, names)),
           creditRefunds: creditRefunds.map((r): CashCreditRefund => ({
@@ -605,6 +608,7 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
             voidedBy: o.voidedById ? this.staff(o.voidedById, names) : null,
             voidReason: o.voidReason,
             bookedAsAdjustment: o.cashAdjustments.length > 0,
+            amountHidden: false,
           })),
           adjustments: adjustments.map((a) =>
             this.toAdjustment(a, names, timeZone),
@@ -997,6 +1001,8 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
       createdAt: row.createdAt,
       createdBy: this.staff(row.createdById, names),
       sessionId: row.sessionId,
+      sessionStatus: row.session?.status ?? null,
+      amountHidden: false,
       payment: payment
         ? {
             id: payment.id,
