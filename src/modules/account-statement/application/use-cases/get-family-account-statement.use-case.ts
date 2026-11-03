@@ -1,5 +1,10 @@
 import { EMPTY_CLINIC_FISCAL } from '../../../../shared/clinic/clinic-fiscal';
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
 import {
   ACCOUNT_STATEMENT_REPOSITORY,
   type AccountStatementRepository,
@@ -23,6 +28,11 @@ import {
   type AccountStatementClock,
 } from './get-account-statement.use-case';
 import { toCents } from '../../../../shared/money/money';
+import {
+  CURRENCY_DIGITS_CATALOG,
+  roundingDigitsLookup,
+  type CurrencyDigitsCatalog,
+} from '../../../../shared/money/currency-digits';
 
 // Montos Decimal(14,2): se suman en céntimos enteros (como el cálculo
 // individual), así el total cuadra al céntimo con la suma de los subtotales.
@@ -75,6 +85,10 @@ export class GetFamilyAccountStatementUseCase {
     @Inject(ACCOUNT_STATEMENT_CLOCK)
     private readonly now: AccountStatementClock,
     private readonly getPlanBalance: GetPlanBalanceUseCase,
+    // B4 (DX-472-bis): decimales de cada moneda para los estados de cuota.
+    @Optional()
+    @Inject(CURRENCY_DIGITS_CATALOG)
+    private readonly currencyDigits?: CurrencyDigitsCatalog,
   ) {}
 
   async execute(payerPatientId: string): Promise<FamilyAccountStatement> {
@@ -101,11 +115,18 @@ export class GetFamilyAccountStatementUseCase {
     const planBalances = await this.getPlanBalance.computeMany(
       loaded.flatMap(({ data }) => data.planBalances),
     );
+    const roundingDigitsOf = await roundingDigitsLookup(
+      this.currencyDigits,
+      loaded.flatMap(({ data }) =>
+        data.snapshot.paymentPlans.map((pp) => pp.currency),
+      ),
+    );
     for (const { ref, data } of loaded) {
       clinic = data.clinic;
       const { summary } = computeAccountStatement(data.snapshot, {
         today: issuedAt,
         planBalances,
+        roundingDigitsOf,
       });
       const rows = summary.map((s) => ({
         currency: s.currency,

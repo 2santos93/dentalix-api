@@ -3,6 +3,7 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { ACCOUNT_STATEMENT_REPOSITORY } from '../../domain/ports/account-statement-repository.port';
 import type { AccountStatementRepository } from '../../domain/ports/account-statement-repository.port';
@@ -19,6 +20,11 @@ import {
 import { statementAddressee } from '../statement-addressee';
 import { DocumentTypeNamesReader } from '../../../patients/domain/ports/document-type-names-repository.port';
 import { documentTypeName } from '../../../patients/domain/document-type';
+import {
+  CURRENCY_DIGITS_CATALOG,
+  roundingDigitsLookup,
+  type CurrencyDigitsCatalog,
+} from '../../../../shared/money/currency-digits';
 
 export interface GetAccountStatementInput {
   /** Primer día de los movimientos (YYYY-MM-DD), inclusive. */
@@ -58,6 +64,10 @@ export class GetAccountStatementUseCase {
     private readonly family: StatementFamilyRepository,
     private readonly documentTypeNames: DocumentTypeNamesReader,
     private readonly getPlanBalance: GetPlanBalanceUseCase,
+    // B4 (DX-472-bis): decimales de cada moneda para los estados de cuota.
+    @Optional()
+    @Inject(CURRENCY_DIGITS_CATALOG)
+    private readonly currencyDigits?: CurrencyDigitsCatalog,
   ) {}
 
   /** `actor` (del token) solo decide el `canVoid` de cada movimiento. */
@@ -89,7 +99,12 @@ export class GetAccountStatementUseCase {
     const planBalances = await this.getPlanBalance.computeMany(
       data.planBalances,
     );
+    const roundingDigitsOf = await roundingDigitsLookup(
+      this.currencyDigits,
+      data.snapshot.paymentPlans.map((pp) => pp.currency),
+    );
     const computed = computeAccountStatement(data.snapshot, {
+      roundingDigitsOf,
       today: issuedAt,
       voidActor: actor,
       movementsFrom: from,

@@ -1,7 +1,9 @@
 import {
   computeBalances,
   type PlanBalances,
+  type RoundingDigitsOf,
 } from '../../account-statement/application/compute-account-statement';
+import { roundToDigits } from '../../../shared/money/line-rounding';
 import { civilDateResolver } from '../../../shared/time/civil-day';
 import {
   addToBuckets,
@@ -29,6 +31,11 @@ export interface ComputePatientAgingOptions {
    * convertido, como en el estado de cuenta. Sin él, sin convertir.
    */
   planBalances?: PlanBalances;
+  /**
+   * B4 (DX-472-bis): decimales de redondeo de cada moneda: un residuo de la
+   * conversión que la moneda no tiene (¥0,13) no es deuda. Sin ellos, 2.
+   */
+  roundingDigitsOf?: RoundingDigitsOf;
 }
 
 /** DX-472-bis: lo que la fila no pudo sumar por falta de tasa. */
@@ -105,6 +112,7 @@ export function computePatientAging(
     },
     options.now,
     options.planBalances,
+    options.roundingDigitsOf,
   );
   const dayOf = civilDayIn(options.timeZone);
   const today = dayOf(options.now);
@@ -138,6 +146,15 @@ export function computePatientAging(
       continue;
     }
     if (balanceCents === 0) continue;
+    // B4: lo que la moneda no tiene (¥0,13 tras convertir) no es deuda.
+    if (
+      roundToDigits(
+        fromCents(balanceCents),
+        options.roundingDigitsOf?.(line.currency) ?? 2,
+      ) === 0
+    ) {
+      continue;
+    }
 
     const target = acc(line.currency);
     let remaining = balanceCents;

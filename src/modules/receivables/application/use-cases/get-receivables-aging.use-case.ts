@@ -1,4 +1,9 @@
-import { BadRequestException, Inject, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  Optional,
+} from '@nestjs/common';
 import { RECEIVABLES_REPOSITORY } from '../../domain/ports/receivables-repository.port';
 import type { ReceivablesRepository } from '../../domain/ports/receivables-repository.port';
 import type {
@@ -21,6 +26,11 @@ import {
 } from '../compute-patient-aging';
 import { civilDateIn } from '../../../../shared/time/civil-day';
 import { PlanBalanceCalculator } from '../../../payments/application/plan-balance-calculator';
+import {
+  CURRENCY_DIGITS_CATALOG,
+  roundingDigitsLookup,
+  type CurrencyDigitsCatalog,
+} from '../../../../shared/money/currency-digits';
 import { ledgerPlanBalanceInputs } from '../ledger-plan-balances';
 import { whatsAppDigits } from '../../../../shared/phone/phone-number';
 
@@ -214,6 +224,10 @@ export class GetReceivablesAgingUseCase {
     @Inject(RECEIVABLES_CLOCK)
     private readonly now: ReceivablesClock,
     private readonly planBalance: PlanBalanceCalculator,
+    // B4 (DX-472-bis): decimales de cada moneda para los estados de cuota.
+    @Optional()
+    @Inject(CURRENCY_DIGITS_CATALOG)
+    private readonly currencyDigits?: CurrencyDigitsCatalog,
   ) {}
 
   async execute(input: ReceivablesAgingInput): Promise<ReceivablesAgingPage> {
@@ -266,9 +280,13 @@ export class GetReceivablesAgingUseCase {
     ]);
     // DX-472-bis: lo abonado en otra moneda, convertido como en `/balance`,
     // con UN plazo para toda la cartera; casi siempre sin red (tasa congelada).
-    const planBalances = await this.planBalance.computeMany(
-      ledgerPlanBalanceInputs(ledgers, zoneOf),
-    );
+    const [planBalances, roundingDigitsOf] = await Promise.all([
+      this.planBalance.computeMany(ledgerPlanBalanceInputs(ledgers, zoneOf)),
+      roundingDigitsLookup(
+        this.currencyDigits,
+        ledgers.flatMap((l) => l.plans.map((p) => p.currency)),
+      ),
+    ]);
     const now = this.now();
     const minAge = filters.minAgeDays ?? null;
     const minBalanceCents =
@@ -281,6 +299,7 @@ export class GetReceivablesAgingUseCase {
         now,
         timeZone,
         planBalances,
+        roundingDigitsOf,
       });
       const aging = filters.currency
         ? summarizeCurrencies(

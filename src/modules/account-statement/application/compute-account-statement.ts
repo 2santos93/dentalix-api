@@ -24,6 +24,7 @@ import {
 import { isPlanBillable } from '../../treatment-plans/domain/plan-status-machine';
 import type { GetPlanBalanceResult } from '../../payments/application/use-cases/get-plan-balance.use-case';
 import { fromCents, toCents } from '../../../shared/money/money';
+import type { RoundingDigits } from '../../../shared/money/line-rounding';
 
 /**
  * DX-472: el saldo de cada plan según `GetPlanBalanceUseCase`, por id de plan.
@@ -46,7 +47,12 @@ export interface ComputeAccountStatementOptions {
   movementsTo?: string;
   /** El saldo de cada plan (DX-472): lo que se muestra de él y de sus cuotas. */
   planBalances?: PlanBalances;
+  /** B4 (DX-472-bis): decimales de redondeo de cada moneda; sin ellos, 2. */
+  roundingDigitsOf?: RoundingDigitsOf;
 }
+
+/** Decimales de redondeo de una moneda (`currencies.rounding_digits`). */
+export type RoundingDigitsOf = (currency: string) => RoundingDigits;
 
 /*
  * CRITERIOS (documentados también en el informe DX-011):
@@ -183,6 +189,7 @@ export function computeBalances(
   snapshot: BalanceSnapshot,
   today: Date,
   planBalances?: PlanBalances,
+  roundingDigitsOf?: RoundingDigitsOf,
 ): ComputedBalances {
   const currencies = new Map<string, CurrencyAccumulator>();
   const acc = (currency: string): CurrencyAccumulator => {
@@ -306,7 +313,12 @@ export function computeBalances(
       buildTramos(paymentPlan),
       fromCents(paidCents),
       today,
-      { paidIncomplete: known?.rateProviderTimedOut },
+      {
+        paidIncomplete: known?.rateProviderTimedOut,
+        // B4: un residuo de la conversión que la moneda no tiene no deja una
+        // cuota vencida de «0».
+        roundingDigits: roundingDigitsOf?.(paymentPlan.currency),
+      },
     );
     const currencyAcc = acc(paymentPlan.currency);
     currencyAcc.hasInstallments ||= derived.length > 0;
@@ -398,6 +410,7 @@ export function computeAccountStatement(
     snapshot,
     options.today,
     options.planBalances,
+    options.roundingDigitsOf,
   );
 
   // --- Movimientos ----------------------------------------------------------

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import {
   PaymentPlanStatus,
   PaymentPlanWithInstallments,
@@ -17,6 +17,11 @@ import {
 } from '../schedule/derive-statuses';
 import { Inject } from '@nestjs/common';
 import { round2 } from '../../../../shared/money/money';
+import { roundToDigits } from '../../../../shared/money/line-rounding';
+import {
+  CURRENCY_DIGITS_CATALOG,
+  type CurrencyDigitsCatalog,
+} from '../../../../shared/money/currency-digits';
 
 export interface DerivedInstallmentView {
   sequence: number;
@@ -74,6 +79,11 @@ export class GetPaymentPlanUseCase {
     private readonly getPlanBalance: GetPlanBalanceUseCase,
     @Inject(CLOCK)
     private readonly now: Clock,
+    // B4 (DX-472-bis): los decimales de la moneda del plan de pagos; sin el
+    // catálogo (specs que no lo dan), 2.
+    @Optional()
+    @Inject(CURRENCY_DIGITS_CATALOG)
+    private readonly currencyDigits?: CurrencyDigitsCatalog,
   ) {}
 
   async execute(treatmentPlanId: string): Promise<GetPaymentPlanResult> {
@@ -92,8 +102,14 @@ export class GetPaymentPlanUseCase {
     const paidTotal = round2(balance.paid + balance.creditMovements);
 
     const tramos = this.buildTramos(plan);
+    const roundingDigits = this.currencyDigits
+      ? (await this.currencyDigits.table([plan.currency])).roundingDigits(
+          plan.currency,
+        )
+      : 2;
     const derived = deriveStatuses(tramos, paidTotal, this.now(), {
       paidIncomplete: balance.rateProviderTimedOut,
+      roundingDigits,
     });
 
     const financedAmount = round2(plan.totalToFinance - plan.downPayment);
@@ -153,7 +169,8 @@ export class GetPaymentPlanUseCase {
       overdueAmount: round2(
         overdue.reduce((s, t) => s + (t.amount - t.covered), 0),
       ),
-      isFullyPaid: remaining <= 0,
+      // B4: un residuo que la moneda no tiene no deja el plan sin pagar.
+      isFullyPaid: roundToDigits(remaining, roundingDigits) <= 0,
     };
   }
 

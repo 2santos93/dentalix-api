@@ -625,4 +625,60 @@ describe('computePatientAging', () => {
       ).toEqual([['USD', -100, 0, 100]]);
     });
   });
+
+  it('B4 (DX-472-bis): un residuo de la conversión que la moneda no tiene (¥0,13) no es deuda ni vence', () => {
+    const jpy = plan('tp-jpy', {
+      currency: 'JPY',
+      billable: 15000,
+      agingFrom: new Date('2026-08-03T12:00:00.000Z'),
+    });
+    const ledgerJpy = ledger({
+      plans: [jpy],
+      paid: [{ treatmentPlanId: 'tp-jpy', currency: 'USD', amount: 100 }],
+      paymentPlans: [
+        schedule(
+          'tp-jpy',
+          [
+            ['2026-08-03', 7500],
+            ['2026-09-03', 7500],
+          ],
+          { currency: 'JPY' },
+        ),
+      ],
+    });
+    const planBalances = new Map([
+      [
+        'tp-jpy',
+        {
+          planCurrency: 'JPY',
+          billable: 15000,
+          paid: 14999.87,
+          creditMovements: 0,
+          balance: 0.13,
+          paymentsCount: 1,
+          paymentsWithoutRate: [],
+          rateProviderTimedOut: false,
+        },
+      ],
+    ]);
+    const roundingDigitsOf = (currency: string) =>
+      currency === 'JPY' ? (0 as const) : (2 as const);
+
+    expect(
+      computePatientAging(ledgerJpy, {
+        now: NOW,
+        timeZone: CARACAS,
+        planBalances,
+        roundingDigitsOf,
+      }).currencies,
+    ).toEqual([]);
+    // Sin los decimales de la moneda (antes): ¥0,13 de la 2.ª cuota, vencida el 3/9.
+    const before = computePatientAging(ledgerJpy, {
+      now: NOW,
+      timeZone: CARACAS,
+      planBalances,
+    });
+    expect(before.currencies[0]).toMatchObject({ currency: 'JPY', debt: 0.13 });
+    expect(before.oldestAgeDays).toBe(44);
+  });
 });

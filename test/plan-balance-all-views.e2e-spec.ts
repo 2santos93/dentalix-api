@@ -96,6 +96,8 @@ describe('DX-472-bis: mismas cifras convertidas en estado de cuenta, cartera, ch
 
   const paidOn = fixedSedeDay(3).day;
   const legacyOn = fixedSedeDay(5).day;
+  // B4: el día en que 1 USD = 149,9987 JPY, así USD 100 son ¥14.999,87.
+  const residueOn = fixedSedeDay(6).day;
   // Cuotas con vencimientos ya pasados: si el abono no contara, saldrían vencidas.
   const start = fixedSedeDay(70).day;
 
@@ -199,13 +201,16 @@ describe('DX-472-bis: mismas cifras convertidas en estado de cuenta, cartera, ch
     row?.currencies.find((c) => c.currency === 'USD');
 
   beforeAll(async () => {
-    provider = createServer((_req, res) => {
+    provider = createServer((req, res) => {
       if (hanging) {
         open.add(res);
         return;
       }
       res.setHeader('content-type', 'application/json');
-      res.end(JSON.stringify({ base: 'USD', rates: RATES }));
+      const rates = req.url?.includes(residueOn)
+        ? { ...RATES, JPY: 149.9987 }
+        : RATES;
+      res.end(JSON.stringify({ base: 'USD', rates }));
     });
     provider.on('connection', (socket) => {
       sockets.add(socket);
@@ -250,7 +255,7 @@ describe('DX-472-bis: mismas cifras convertidas en estado de cuenta, cartera, ch
     for (const socket of sockets) socket.destroy();
     await new Promise((resolve) => provider.close(resolve));
     await raw.exchangeRateSnapshot.deleteMany({
-      where: { date: { in: [paidOn, legacyOn] } },
+      where: { date: { in: [paidOn, legacyOn, residueOn] } },
     });
     await resetDatabase(raw);
     await app.close();
@@ -431,6 +436,41 @@ describe('DX-472-bis: mismas cifras convertidas en estado de cuenta, cartera, ch
     );
     expect(after.billable.find((p) => p.id === target)).toMatchObject({
       balance: -50,
+    });
+  });
+
+  it('B4: plan JPY cubierto con USD que convierten a ¥14.999,87: ninguna cuota vencida de ¥0 en ninguna vista', async () => {
+    const patientId = await newPatient('Residuo');
+    const planId = await planWith(patientId, 'JPY', 15000);
+    await finance(planId, 15000);
+    await pay(planId, 100, 'USD', residueOn);
+
+    const { statement, row, chip, billable } = await views(patientId);
+    // El residuo es real en las cifras (2 decimales), pero no es deuda en yenes.
+    expect(statement.plans.find((p) => p.id === planId)).toMatchObject({
+      paid: 14999.87,
+      balance: 0.13,
+    });
+    const jpy = statement.summary.find((s) => s.currency === 'JPY');
+    expect(jpy).toMatchObject({ overdueCount: 0, overdueAmount: 0 });
+    const paymentPlan = (
+      await as(
+        api().get(`/api/v1/treatment-plans/${planId}/payment-plan`),
+      ).expect(200)
+    ).body as {
+      overdueCount: number;
+      isFullyPaid: boolean;
+      installments: { status: string }[];
+    };
+    expect(paymentPlan.installments.map((i) => i.status)).toEqual([
+      'PAID',
+      'PAID',
+    ]);
+    expect(paymentPlan).toMatchObject({ overdueCount: 0, isFullyPaid: true });
+    expect(row).toBeUndefined();
+    expect(chip).toEqual({ hasOverdue: false, overdueDays: null });
+    expect(billable.find((p) => p.id === planId)).toMatchObject({
+      balance: 0.13,
     });
   });
 

@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { ClinicRole } from '@prisma/client';
 import { computePatientAging } from '../../receivables/application/compute-patient-aging';
 import {
@@ -8,6 +8,11 @@ import {
 import { overdueView, type OverdueBalance } from '../domain/overdue-balance';
 import { COLLECTIONS_CLOCK, type CollectionsClock } from './collections-clock';
 import { PlanBalanceCalculator } from '../../payments/application/plan-balance-calculator';
+import {
+  CURRENCY_DIGITS_CATALOG,
+  roundingDigitsLookup,
+  type CurrencyDigitsCatalog,
+} from '../../../shared/money/currency-digits';
 import { ledgerPlanBalanceInputs } from '../../receivables/application/ledger-plan-balances';
 
 /** Roles que ven el IMPORTE vencido (dato financiero, como la cartera). */
@@ -30,6 +35,10 @@ export class PatientBalanceFlags {
     private readonly repo: CollectionsRepository,
     @Inject(COLLECTIONS_CLOCK) private readonly now: CollectionsClock,
     private readonly planBalance: PlanBalanceCalculator,
+    // B4 (DX-472-bis): decimales de cada moneda para los estados de cuota.
+    @Optional()
+    @Inject(CURRENCY_DIGITS_CATALOG)
+    private readonly currencyDigits?: CurrencyDigitsCatalog,
   ) {}
 
   async forPatients(
@@ -45,9 +54,13 @@ export class PatientBalanceFlags {
     const zoneOf = await this.repo.locationTimeZones();
     // DX-472-bis: lo abonado en otra moneda cuenta convertido, como en la
     // cartera; con el proveedor sin responder, esa deuda no sale vencida.
-    const planBalances = await this.planBalance.computeMany(
-      ledgerPlanBalanceInputs(ledgers, zoneOf),
-    );
+    const [planBalances, roundingDigitsOf] = await Promise.all([
+      this.planBalance.computeMany(ledgerPlanBalanceInputs(ledgers, zoneOf)),
+      roundingDigitsLookup(
+        this.currencyDigits,
+        ledgers.flatMap((l) => l.plans.map((p) => p.currency)),
+      ),
+    ]);
     const now = this.now();
     const withAmounts = role !== null && OVERDUE_AMOUNT_ROLES.includes(role);
     for (const ledger of ledgers) {
@@ -55,7 +68,12 @@ export class PatientBalanceFlags {
       out.set(
         ledger.patientId,
         overdueView(
-          computePatientAging(ledger, { now, timeZone, planBalances }),
+          computePatientAging(ledger, {
+            now,
+            timeZone,
+            planBalances,
+            roundingDigitsOf,
+          }),
           withAmounts,
         ),
       );
