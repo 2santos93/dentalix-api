@@ -1,3 +1,4 @@
+import type { RegionalFormat } from '../../../../shared/format/regional-format';
 import type { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
 import type { PaymentMethod, TreatmentPlanStatus } from '@prisma/client';
 
@@ -123,6 +124,12 @@ export interface PatientCreditMovements {
 export interface PatientCreditRepository {
   readPlanCredit(planId: string): Promise<PlanCreditState | null>;
   receptionCapCents(): Promise<number>;
+  /**
+   * Formato de la sede de referencia (la activa o, sin ella, la principal, R6)
+   * para pintar el tope de RECEPCIÓN. Perezoso: 409 `LOCATION_LOCALE_REQUIRED`
+   * si no tiene locale o reloj.
+   */
+  referenceLocationFormat(): Promise<RegionalFormat>;
   updateReceptionCap(cents: number): Promise<number>;
   findTransferByKey(key: string): Promise<CreditTransferRecord | null>;
   findRefundByKey(key: string): Promise<CreditRefundRecord | null>;

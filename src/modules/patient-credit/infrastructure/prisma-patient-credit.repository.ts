@@ -12,6 +12,9 @@ import { Prisma, type TreatmentPlanStatus } from '@prisma/client';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { prismaRuleCode } from '../../../shared/prisma/prisma-exception.filter';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
+import type { RegionalFormat } from '../../../shared/format/regional-format';
+import { requireLocationFormat } from '../../../shared/locations/location-regional';
+import { resolveReferenceLocation } from '../../../shared/locations/reference-location';
 import { resolveLocationTimeZones } from '../../../shared/locations/location-time-zone';
 import { lockOpenSessionOf } from '../../cash-sessions/infrastructure/payment-cash-session';
 import {
@@ -247,6 +250,15 @@ export class PrismaPatientCreditRepository implements PatientCreditRepository {
       }),
     );
     return toCents(tenant?.creditReceptionMaxAmount.toNumber() ?? 0);
+  }
+
+  async referenceLocationFormat(): Promise<RegionalFormat> {
+    const tenantId = this.tenantId();
+    const locationId = this.tenantContext.getLocationId() ?? null;
+    const reference = await this.prisma.runWithTenant((tx) =>
+      resolveReferenceLocation(tx, tenantId, locationId),
+    );
+    return requireLocationFormat(reference);
   }
 
   async updateReceptionCap(cents: number): Promise<number> {

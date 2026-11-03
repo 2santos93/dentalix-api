@@ -525,6 +525,48 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
     expect(ok.number).toMatch(/-000003$/);
   });
 
+  it('el 403 del tope de RECEPCIÓN dice el importe con el formato de la sede (DX-354b); sin formato, 409', async () => {
+    await as(api().put('/api/v1/patient-credit/policy'), a)
+      .send({ receptionMaxAmount: 100 })
+      .expect(200);
+    try {
+      const before = await counts();
+      const denied = await refund(
+        { amount: 100.01, method: 'TRANSFER' },
+        { token: receptionA },
+      ).expect(403);
+      expect((denied.body as { message: string }).message).toBe(
+        'Recepción puede mover hasta VES\u00a0100,00 por operación: pídeselo a administración.',
+      );
+
+      const location = await raw.location.findUniqueOrThrow({
+        where: { id: sede },
+        select: { locale: true, hourCycle: true },
+      });
+      await raw.location.update({
+        where: { id: sede },
+        data: { locale: null, hourCycle: null },
+      });
+      try {
+        const none = await refund(
+          { amount: 100.01, method: 'TRANSFER' },
+          { token: receptionA },
+        ).expect(409);
+        expect(none.body).toMatchObject({
+          code: 'LOCATION_LOCALE_REQUIRED',
+          locationId: sede,
+        });
+      } finally {
+        await raw.location.update({ where: { id: sede }, data: location });
+      }
+      expect(await counts()).toEqual(before);
+    } finally {
+      await as(api().put('/api/v1/patient-credit/policy'), a)
+        .send({ receptionMaxAmount: 10_000 })
+        .expect(200);
+    }
+  });
+
   it('inmutable: la app no puede actualizar ni borrar un asiento', async () => {
     const entry = await raw.patientCreditEntry.findFirstOrThrow({
       where: { tenantId: a.tenantId },
