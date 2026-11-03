@@ -254,13 +254,16 @@ describe('sillón de la cita (DX-211)', () => {
         providerId: 'dr',
         patientId: 'p2',
       });
-      await expect(
-        update.execute(mine.id, { start: at('15:15'), end: at('15:45') }),
-      ).rejects.toThrow(
-        new ConflictException(
-          'El sillón «Sillón 1» ya está ocupado de 11:00 a 11:30',
-        ),
-      );
+      const err = await update
+        .execute(mine.id, { start: at('15:15'), end: at('15:45') })
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ConflictException);
+      // DX-492-bis: con el código y el ámbito de los demás solapes al mover.
+      expect((err as ConflictException).getResponse()).toMatchObject({
+        code: 'APPOINTMENT_OVERLAP',
+        scope: 'chair',
+        message: 'El sillón «Sillón 1» ya está ocupado de 11:00 a 11:30',
+      });
     });
 
     it('cambiar solo de sillón valida el sillón destino y deja el movimiento auditado', async () => {

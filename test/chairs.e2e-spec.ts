@@ -423,9 +423,12 @@ describe('Sillones por sede y anti-solape por sillón (e2e, DX-211)', () => {
       )
         .send({ start: at('19:00'), end: at('19:30') })
         .expect(409);
-      expect((clash.body as { message: string }).message).toBe(
-        'El sillón «Sillón 2» ya está ocupado de 15:00 a 15:30',
-      );
+      // DX-492-bis: al mover, con el código y el ámbito de los demás solapes.
+      expect(clash.body).toMatchObject({
+        code: 'APPOINTMENT_OVERLAP',
+        scope: 'chair',
+        message: 'El sillón «Sillón 2» ya está ocupado de 15:00 a 15:30',
+      });
       const moved = await as(
         api().patch(`/api/v1/appointments/${mine.id}`),
         reception.token,
@@ -446,9 +449,12 @@ describe('Sillones por sede y anti-solape por sillón (e2e, DX-211)', () => {
       )
         .send({ chairId: two.id })
         .expect(409);
-      expect((occupied.body as { message: string }).message).toBe(
-        'El sillón «Sillón 2» ya está ocupado de 17:00 a 17:30',
-      );
+      // DX-492-bis: al mover, con el código y el ámbito de los demás solapes.
+      expect(occupied.body).toMatchObject({
+        code: 'APPOINTMENT_OVERLAP',
+        scope: 'chair',
+        message: 'El sillón «Sillón 2» ya está ocupado de 17:00 a 17:30',
+      });
     });
 
     it('la agenda filtra por chairIds; un sillón de otra sede da 400', async () => {
