@@ -29,6 +29,13 @@ import {
 // Mediciones y planes en REPORT-DX-294-ter.
 //
 // `raw` (DIRECT_URL) solo siembra, lee, mide y limpia.
+// Plan genérico por defecto en las conexiones de la app, lo que PostgreSQL acaba
+// eligiendo tras 5 ejecuciones de una sentencia preparada si le sale barato:
+// el deshacer tiene que imponer los suyos a medida en su transacción.
+const appUrl = new URL(process.env.DATABASE_URL ?? '');
+appUrl.searchParams.set('options', '-c plan_cache_mode=force_generic_plan');
+process.env.DATABASE_URL = appUrl.toString();
+
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
@@ -50,7 +57,7 @@ interface Seeded {
 
 async function purge(): Promise<void> {
   const tenants = await raw.tenant.findMany({
-    where: { subdomain: { in: SUBDOMAINS } },
+    where: { subdomain: { startsWith: 'imports-undo-10k-' } },
   });
   const ids = tenants.map((t) => t.id);
   if (ids.length > 0) {
@@ -361,6 +368,58 @@ describe('DX-294: deshacer 10.000 pacientes recién importados en < 3 s (int)', 
     );
     // El estado que da el modo lento: si deja de darse, esta prueba no vale.
     expect(stats.reltuples).toBeLessThan(ROWS / 10);
+    expect(undone.value.undoneCreated).toBe(ROWS);
+    expect(undone.ms).toBeLessThan(UNDO_BUDGET_MS);
+    expect(await alive({ importBatchId: batchId })).toBe(0);
+  });
+
+  it('DX-294-ter: con plan genérico en la conexión y la clínica pequeña en las estadísticas, también < 3 s', async () => {
+    await purge();
+    a = await seed(SUBDOMAINS[0]);
+    b = await seed(SUBDOMAINS[1]);
+    // La forma del e2e: muchas clínicas pequeñas en las estadísticas. El plan
+    // genérico no sabe cuál es la clínica y estima filas / n_distinct(tenant).
+    const others = await Promise.all(
+      Array.from({ length: 73 }, (_, i) =>
+        raw.tenant.create({
+          data: { name: `Otra ${i}`, subdomain: `${SUBDOMAINS[0]}-otra-${i}` },
+        }),
+      ),
+    );
+    await raw.patient.createMany({
+      data: [a.tenantId, ...others.map((t) => t.id)].flatMap((tenantId, n) =>
+        Array.from({ length: n === 0 ? 33 : 1 }, (_, i) => ({
+          tenantId,
+          documentType: 'NATIONAL_ID' as const,
+          docNumber: `5${n}${i}`,
+          firstName: 'Previo',
+          lastName: 'Sembrado',
+        })),
+      ),
+    });
+    for (const table of AUTOVACUUM_OFF) {
+      await raw.$executeRawUnsafe(
+        `ALTER TABLE "${table}" SET (autovacuum_enabled = false)`,
+      );
+    }
+    let batchId: string;
+    let undone: Awaited<ReturnType<typeof timed<UndoResult>>>;
+    try {
+      await raw.$executeRawUnsafe('VACUUM ANALYZE "patients"');
+      batchId = await imported(a, people(ROWS, '7'));
+      undone = await timed(() =>
+        tenantContext.run(a.tenantId, () => repo.undo(batchId, a.userId)),
+      );
+    } finally {
+      for (const table of AUTOVACUUM_OFF) {
+        await raw.$executeRawUnsafe(
+          `ALTER TABLE "${table}" RESET (autovacuum_enabled)`,
+        );
+      }
+    }
+    console.info(
+      `[DX-294-ter] deshacer ${ROWS} con plan genérico en la conexión: ${undone.ms} ms`,
+    );
     expect(undone.value.undoneCreated).toBe(ROWS);
     expect(undone.ms).toBeLessThan(UNDO_BUDGET_MS);
     expect(await alive({ importBatchId: batchId })).toBe(0);

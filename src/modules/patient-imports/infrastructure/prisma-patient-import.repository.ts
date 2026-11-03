@@ -189,6 +189,18 @@ const EMPTY_RESULT: ChunkResult = {
 };
 
 /**
+ * Planes a medida en esta transacción (DX-294-ter). Prisma prepara cada
+ * sentencia: tras 5 ejecuciones en una conexión, PostgreSQL puede pasar al plan
+ * genérico, donde `"id" = ANY($n)` no se resuelve con tabla hash ni por índice
+ * si las estadísticas (de antes de importar) dan pocas filas a la clínica:
+ * cada fila de la clínica compara contra los 1.000 ids, 2 s por sentencia.
+ * Con el array conocido al planificar el coste es lineal en cualquier plan.
+ */
+async function customPlansForLargeArrays(tx: Tx): Promise<void> {
+  await tx.$executeRaw`SET LOCAL plan_cache_mode = force_custom_plan`;
+}
+
+/**
  * Pacientes del lote con algo registrado después, o saldos migrados del lote
  * con un abono imputado (DX-262): el deshacer se niega.
  */
@@ -1602,6 +1614,7 @@ export class PrismaPatientImportRepository {
   ): Promise<{ undoneBalances: number }> {
     const references = await this.openingBalanceReferences();
     return this.prisma.runWithTenant(async (tx) => {
+      await customPlansForLargeArrays(tx);
       const status = await this.lockStatus(tx, id);
       if (status === null) throw new BatchStateError('EXPIRED');
       if (status !== 'COMPLETED' && status !== 'FAILED')
@@ -1625,6 +1638,7 @@ export class PrismaPatientImportRepository {
     const references = await this.patientReferences();
     const balanceReferences = await this.openingBalanceReferences();
     return this.prisma.runWithTenant(async (tx) => {
+      await customPlansForLargeArrays(tx);
       const locked = await tx.$queryRaw<{ status: PatientImportStatus }[]>`
         SELECT "status" FROM "patient_import_batches" WHERE "id" = ${id}::uuid FOR UPDATE`;
       if (locked.length === 0) throw new BatchStateError('EXPIRED');
