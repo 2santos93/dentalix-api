@@ -259,6 +259,7 @@ export class PatientConsentsController {
     return {
       ...toConsentDto(doc),
       clinic: doc.clinic,
+      regional: doc.regional,
       patient: doc.patient,
       integrityOk: doc.integrityOk,
       // DX-243: la IP del paciente a distancia es evidencia de la firma y se

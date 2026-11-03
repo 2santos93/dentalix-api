@@ -3,6 +3,7 @@ import {
   StatementPatient,
   StatementSnapshot,
 } from '../entities/account-statement.entity';
+import type { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
 import { BillablePlanRow } from '../entities/billable-plan.entity';
 import type { PlanBalanceInput } from '../../../payments/application/use-cases/get-plan-balance.use-case';
 
@@ -12,6 +13,8 @@ export const ACCOUNT_STATEMENT_REPOSITORY = Symbol(
 
 export interface AccountStatementData {
   clinic: StatementClinic;
+  /** DX-354: región de la sede en contexto (o la principal); `null` si le falta algo. */
+  regional: DocumentRegionalDto | null;
   patient: StatementPatient;
   snapshot: StatementSnapshot;
   /** DX-472: lo que `GetPlanBalanceUseCase` necesita, de la misma foto. */

@@ -1,3 +1,4 @@
+import type { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
 import type { ClinicFiscalData } from '../../../../shared/clinic/clinic-fiscal';
 import type {
   DocumentType,
@@ -64,6 +65,8 @@ export interface PlanQuoteSource {
   /** DX-019: `fiscal`, los de hoy: entran en el contenido que se presenta y se firma. */
   clinic: { name: string; logoUrl: string | null; fiscal: ClinicFiscalData };
   location: QuoteLocation & { timeZone: string };
+  /** DX-354: región de la sede del presupuesto; `null` si le falta algo. No entra en el contenido firmado ni en su hash. */
+  regional: DocumentRegionalDto | null;
   /** Quien creó el plan; `null` si no consta. */
   professionalName: string | null;
   acceptance: StoredPlanAcceptance | null;

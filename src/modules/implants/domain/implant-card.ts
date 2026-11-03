@@ -1,3 +1,4 @@
+import type { DocumentRegionalDto } from '../../../shared/locations/document-regional.dto';
 import type { PatientImplantKind } from '@prisma/client';
 import type {
   ImplantCardPatient,
@@ -54,6 +55,8 @@ export interface ImplantCard {
   patientDocument: string | null;
   patientBirthDate: string | null;
   clinicName: string;
+  /** DX-354: región de la sede de la tarjeta; `null` si le falta algo. */
+  regional: DocumentRegionalDto | null;
   locations: ImplantCardLocation[];
   placedOn: string;
   professionals: string[];
@@ -85,6 +88,7 @@ function unique<T>(values: T[]): T[] {
  */
 export function composeImplantCard(input: {
   clinicName: string;
+  regional: DocumentRegionalDto | null;
   patient: ImplantCardPatient;
   /** Nombres locales de la clínica (R16), leídos una vez por tarjeta. */
   documentTypeNames: ClinicDocumentTypeNames;
@@ -110,6 +114,7 @@ export function composeImplantCard(input: {
       ? input.patient.birthDate.toISOString().slice(0, 10)
       : null,
     clinicName: input.clinicName,
+    regional: input.regional,
     locations: input.locations.filter((l) => locationIds.includes(l.id)),
     placedOn: input.placedOn,
     professionals: unique(sorted.map((i) => i.professionalName)),

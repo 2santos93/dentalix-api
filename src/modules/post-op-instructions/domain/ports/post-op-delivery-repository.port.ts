@@ -1,3 +1,4 @@
+import type { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
 import type { ContactChannel } from '@prisma/client';
 import type { NoticeResponsible } from '../../../patients/domain/communication/notice-recipient';
 import type {
@@ -74,6 +75,8 @@ export interface PostOpDeliveryDocumentView extends PostOpDelivery {
   clinic: { name: string; logoUrl: string | null; primaryColor: string | null };
   locationName: string;
   locationPhone: string | null;
+  /** DX-354: región de la sede de la entrega; `null` si le falta algo. */
+  regional: DocumentRegionalDto | null;
   patientName: string;
 }
 

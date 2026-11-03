@@ -1,3 +1,4 @@
+import { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import {
@@ -217,6 +218,13 @@ export class CreditRefundDto {
   @ApiProperty() createdAt!: Date;
   @ApiProperty({ type: RefundReceiptSnapshotDto })
   snapshot!: RefundReceiptSnapshotDto;
+  @ApiProperty({
+    type: DocumentRegionalDto,
+    nullable: true,
+    description:
+      'DX-354: zona, locale y reloj de la sede del comprobante. null si le falta algo: el comprobante se lee igual y la web pinta «—».',
+  })
+  regional!: DocumentRegionalDto | null;
 }
 
 export class PatientCreditMovementsDto {

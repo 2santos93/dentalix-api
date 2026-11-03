@@ -1,3 +1,4 @@
+import type { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
 import {
   BadRequestException,
   ConflictException,
@@ -63,6 +64,8 @@ export interface PlanQuoteDocument extends QuoteContent {
   visitOrganization?: PlanQuoteSource['visitOrganization'];
   planStatus: TreatmentPlanStatus;
   clinicLogoUrl: string | null;
+  /** DX-354: región de la sede del documento; fuera del contenido firmado. */
+  regional: DocumentRegionalDto | null;
   contentHash: string;
   acceptance: PlanQuoteAcceptanceView | null;
 }
@@ -167,6 +170,7 @@ function toDocument(
       })),
     planStatus: source.plan.status,
     clinicLogoUrl: source.clinic.logoUrl,
+    regional: source.regional,
   };
   const stored = source.acceptance;
   if (!stored) {

@@ -53,6 +53,11 @@ function statement(
 ): AccountStatementData {
   return {
     clinic: { name: 'Clínica Uno', logoUrl: null, fiscal: EMPTY_CLINIC_FISCAL },
+    regional: {
+      timeZone: 'America/Caracas',
+      locale: 'es-VE',
+      hourCycle: 'h12',
+    },
     patient: {
       id,
       firstName,
@@ -232,6 +237,22 @@ describe('GetFamilyAccountStatementUseCase (DX-203)', () => {
         overdueAmount: 0,
       },
     ]);
+  });
+
+  it('DX-354: lleva la región de la sede del documento', async () => {
+    const { repo, family } = makeRepos();
+    const uc = new GetFamilyAccountStatementUseCase(
+      repo,
+      family,
+      () => NOW,
+      noPlanBalances,
+    );
+    const out = await uc.execute('mother');
+    expect(out.regional).toEqual({
+      timeZone: 'America/Caracas',
+      locale: 'es-VE',
+      hourCycle: 'h12',
+    });
   });
 
   it('DX-472: cuenta los abonos sin tasa de toda la familia, que los impresos avisan', async () => {

@@ -28,6 +28,7 @@ import {
   type AccountStatementClock,
 } from './get-account-statement.use-case';
 import { toCents } from '../../../../shared/money/money';
+import type { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
 import {
   CURRENCY_DIGITS_CATALOG,
   roundingDigitsLookup,
@@ -102,6 +103,7 @@ export class GetFamilyAccountStatementUseCase {
       logoUrl: null,
       fiscal: EMPTY_CLINIC_FISCAL,
     };
+    let regional: DocumentRegionalDto | null = null;
     const members: FamilyStatementMember[] = [];
     const totals = new Map<string, Record<(typeof FIELDS)[number], number>>();
     const loaded: { ref: (typeof refs)[number]; data: AccountStatementData }[] =
@@ -123,6 +125,7 @@ export class GetFamilyAccountStatementUseCase {
     );
     for (const { ref, data } of loaded) {
       clinic = data.clinic;
+      regional = data.regional;
       const { summary } = computeAccountStatement(data.snapshot, {
         today: issuedAt,
         planBalances,
@@ -155,6 +158,7 @@ export class GetFamilyAccountStatementUseCase {
     return {
       issuedAt,
       clinic,
+      regional,
       payer: {
         id: family.payer.id,
         firstName: family.payer.firstName,

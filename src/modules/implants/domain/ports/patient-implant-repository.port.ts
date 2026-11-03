@@ -1,3 +1,4 @@
+import type { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
 import type { DocumentTypeNamesBook } from '../../../patients/domain/ports/document-type-names-repository.port';
 import type { NormalizedImplantInput } from '../implant-rules';
 import type { ImplantCardLocation } from '../implant-card';
@@ -59,6 +60,12 @@ export interface PatientImplantRepository {
     input: { deliveredById: string; deliveredAt: Date },
   ): Promise<void>;
   clinicName(): Promise<string>;
+  /**
+   * DX-354: región de la sede de la tarjeta (`locationId`), o la de la sede en
+   * contexto / principal si la tarjeta junta varias sedes (`undefined`).
+   * `null` si a la sede le falta algo: la tarjeta se lee igual.
+   */
+  regional(locationId: string | undefined): Promise<DocumentRegionalDto | null>;
   locations(ids: string[]): Promise<ImplantCardLocation[]>;
   catalog(): Promise<ImplantCatalogEntry[]>;
   /**

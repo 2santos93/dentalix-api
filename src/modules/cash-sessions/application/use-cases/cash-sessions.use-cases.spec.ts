@@ -46,6 +46,11 @@ function record(extra: Partial<CashSessionRecord> = {}): CashSessionRecord {
     differences: [],
     notes: null,
     timeZone: 'America/Caracas',
+    regional: {
+      timeZone: 'America/Caracas',
+      locale: 'es-VE',
+      hourCycle: 'h12',
+    },
     expected: [
       {
         currency: 'USD',
@@ -111,6 +116,20 @@ describe('GetCashSessionUseCase (DX-027)', () => {
     });
     await get.execute('s-1', ADMIN).catch(() => undefined);
     expect(repo.detail).toHaveBeenLastCalledWith('s-1', {});
+  });
+
+  it('DX-354: el detalle conserva la región de la sede de la caja, también con arqueo ciego', async () => {
+    const repo = fakeRepo();
+    repo.getSettings.mockResolvedValue({
+      requireOpenSession: false,
+      blindClose: true,
+    });
+    const get = new GetCashSessionUseCase(asRepo(repo), context);
+    expect((await get.execute('s-1', RECEPTION)).regional).toEqual({
+      timeZone: 'America/Caracas',
+      locale: 'es-VE',
+      hourCycle: 'h12',
+    });
   });
 
   it('con arqueo ciego, quien cuenta no ve el esperado ni los abonos mientras está abierta; ADMIN sí', async () => {

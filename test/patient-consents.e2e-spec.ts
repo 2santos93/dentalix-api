@@ -20,6 +20,8 @@ import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
 import {
   REGIONAL_CARACAS_FIXTURE,
+  REGIONAL_NEW_YORK_FIXTURE,
+  locationBody,
   registerBody,
 } from './support/location-fixtures';
 
@@ -546,6 +548,45 @@ describe('Consentimientos informados — /consent-templates y /patients/:id/cons
           signBody(templateA, { treatmentPlanId: planOtherPatientA }),
         )
         .expect(404);
+    });
+
+    it('DX-354: el documento lleva el regional de la sede en contexto, y null sin reloj (200, sin 409)', async () => {
+      const east = await as(clinicA)
+        .post(
+          '/locations',
+          locationBody(REGIONAL_NEW_YORK_FIXTURE, { name: 'Sede Este' }),
+        )
+        .expect(201);
+      const eastId = (east.body as { id: string }).id;
+      const url = `/patients/${patientA}/consents/${signed.id}`;
+
+      const inEast = await as(clinicA, dentistA)
+        .get(url)
+        .set('X-Location-Id', eastId)
+        .expect(200);
+      expect((inEast.body as { regional: unknown }).regional).toEqual({
+        timeZone: 'America/New_York',
+        locale: 'en-US',
+        hourCycle: 'h12',
+      });
+
+      // «Todas las sedes»: la principal (Caracas, h23).
+      const inMain = await as(clinicA, dentistA).get(url).expect(200);
+      expect((inMain.body as { regional: unknown }).regional).toEqual({
+        timeZone: 'America/Caracas',
+        locale: 'es-VE',
+        hourCycle: 'h23',
+      });
+
+      await raw.location.update({
+        where: { id: eastId },
+        data: { hourCycle: null },
+      });
+      const noClock = await as(clinicA, dentistA)
+        .get(url)
+        .set('X-Location-Id', eastId)
+        .expect(200);
+      expect((noClock.body as { regional: unknown }).regional).toBeNull();
     });
 
     it('editar la plantilla NO cambia lo firmado; firmar con la versión vieja da 409', async () => {

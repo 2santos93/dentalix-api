@@ -11,6 +11,7 @@ import {
   AccountStatementData,
   AccountStatementRepository,
 } from '../../domain/ports/account-statement-repository.port';
+import { loadDocumentRegional } from '../../../../shared/locations/document-regional';
 import { resolveLocationTimeZones } from '../../../../shared/locations/location-time-zone';
 import { BillablePlanRow } from '../../domain/entities/billable-plan.entity';
 import { NON_BILLABLE_PLAN_STATUSES } from '../../../treatment-plans/domain/plan-status-machine';
@@ -276,7 +277,15 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
               .map((b) => [b.paymentId, b.amount.toNumber()] as const),
           );
 
+        // DX-354: la sede en contexto o, en «Todas las sedes», la principal.
+        const regional = await loadDocumentRegional(
+          tx,
+          tenantId,
+          this.tenantContext.getLocationId() ?? null,
+        );
+
         return {
+          regional,
           clinic: {
             name: tenant?.name ?? '',
             logoUrl: clinicLogoPublicUrl(tenant?.logoKey ?? null),

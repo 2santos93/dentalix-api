@@ -1,3 +1,5 @@
+import { loadDocumentRegional } from '../../../shared/locations/document-regional';
+import type { DocumentRegionalDto } from '../../../shared/locations/document-regional.dto';
 import { Injectable } from '@nestjs/common';
 import {
   Prisma,
@@ -305,6 +307,19 @@ export class PrismaPatientImplantRepository implements PatientImplantRepository 
       tx.tenant.findFirst({ where: { id: tenantId }, select: { name: true } }),
     );
     return tenant?.name ?? '';
+  }
+
+  regional(
+    locationId: string | undefined,
+  ): Promise<DocumentRegionalDto | null> {
+    const tenantId = this.requireTenantId();
+    return this.prisma.runWithTenant((tx) =>
+      loadDocumentRegional(
+        tx,
+        tenantId,
+        locationId ?? this.tenantContext.getLocationId() ?? null,
+      ),
+    );
   }
 
   locations(ids: string[]): Promise<ImplantCardLocation[]> {

@@ -187,6 +187,11 @@ export class InMemoryPatientConsentRepository implements PatientConsentRepositor
     return Promise.resolve({
       ...row,
       clinic: { name: 'Clínica Demo', logoUrl: null },
+      regional: {
+        timeZone: 'America/Caracas',
+        locale: 'es-VE',
+        hourCycle: 'h12',
+      },
       patient: { id: patientId, ...patient },
       countersignature: this.countersignatures.get(row.id) ?? null,
     });

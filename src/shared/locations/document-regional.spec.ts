@@ -1,4 +1,5 @@
-import { documentRegional } from './document-regional';
+import type { Prisma } from '@prisma/client';
+import { documentRegional, loadDocumentRegional } from './document-regional';
 
 const complete = {
   timeZone: 'America/Caracas',
@@ -45,5 +46,43 @@ describe('documentRegional', () => {
 
   it('null si no hay sede', () => {
     expect(documentRegional(null)).toBeNull();
+  });
+});
+
+describe('loadDocumentRegional', () => {
+  function txWith(found: unknown) {
+    const findFirst = jest.fn().mockResolvedValue(found);
+    const tx = {
+      location: { findFirst },
+    } as unknown as Prisma.TransactionClient;
+    return { tx, findFirst };
+  }
+
+  it('con sede en contexto lee esa sede', async () => {
+    const { tx, findFirst } = txWith(complete);
+    await expect(loadDocumentRegional(tx, 't1', 'l1')).resolves.toEqual(
+      complete,
+    );
+    expect(findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'l1', tenantId: 't1', deletedAt: null },
+      }),
+    );
+  });
+
+  it('sin sede en contexto lee la principal (la activa más antigua)', async () => {
+    const { tx, findFirst } = txWith(complete);
+    await loadDocumentRegional(tx, 't1', null);
+    expect(findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { tenantId: 't1', deletedAt: null, isActive: true },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      }),
+    );
+  });
+
+  it('null si la sede no existe, sin lanzar', async () => {
+    const { tx } = txWith(null);
+    await expect(loadDocumentRegional(tx, 't1', 'l1')).resolves.toBeNull();
   });
 });

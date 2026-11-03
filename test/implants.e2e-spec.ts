@@ -12,6 +12,7 @@ import {
 } from './support/e2e-fixtures';
 import {
   REGIONAL_CARACAS_FIXTURE,
+  REGIONAL_NEW_YORK_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
 
@@ -318,6 +319,43 @@ describe('Implantes — /patients/:id/implants, /implant-card, /implants (DX-191
         },
       });
       expect(prints).toBe(2);
+    });
+
+    it('DX-354: la tarjeta lleva el regional de la sede donde se colocó, no el de la activa; null sin reloj (200)', async () => {
+      const east = (
+        (
+          await call(
+            a,
+            a.adminToken,
+            'post',
+            '/locations',
+            locationBody(REGIONAL_NEW_YORK_FIXTURE, { name: 'Sede Este' }),
+          ).expect(201)
+        ).body as { id: string }
+      ).id;
+      const patient = await createPatient(a, 'Sofía', '52000009');
+      await call(a, dentist.token, 'post', `/patients/${patient}/implants`, {
+        ...IMPLANT,
+        lot: 'LOT-REGIONAL-01',
+      })
+        .set('X-Location-Id', east)
+        .expect(201);
+      const path = `/patients/${patient}/implant-card?date=${today}`;
+
+      // Se abre sin sede activa (o con otra): sale la sede del implante.
+      const card = await call(a, reception, 'get', path).expect(200);
+      expect((card.body as { regional: unknown }).regional).toEqual({
+        timeZone: 'America/New_York',
+        locale: 'en-US',
+        hourCycle: 'h12',
+      });
+
+      await raw.location.update({
+        where: { id: east },
+        data: { hourCycle: null },
+      });
+      const noClock = await call(a, reception, 'get', path).expect(200);
+      expect((noClock.body as { regional: unknown }).regional).toBeNull();
     });
 
     it('400 sin día y 404 sin implantes ese día', async () => {

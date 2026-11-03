@@ -431,6 +431,17 @@ describe('ListPatientConsentsUseCase / GetPatientConsentUseCase', () => {
     expect((await get.execute('p1', signed.id)).integrityOk).toBe(false);
   });
 
+  it('DX-354: el detalle lleva la región de la sede del documento', async () => {
+    const { sign, get, template } = setup();
+    const signed = await sign.execute('p1', signInput(template.id), META);
+
+    expect((await get.execute('p1', signed.id)).regional).toEqual({
+      timeZone: 'America/Caracas',
+      locale: 'es-VE',
+      hourCycle: 'h12',
+    });
+  });
+
   it('404 si el consentimiento no es de ese paciente', async () => {
     const { get } = setup();
     await expect(get.execute('p1', 'pc-999')).rejects.toThrow(

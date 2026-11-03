@@ -413,6 +413,51 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
       });
     });
 
+    it('DX-354: lleva el regional de la sede del request, no el de la principal; null sin reloj (200)', async () => {
+      const north = await raw.location.findUniqueOrThrow({
+        where: { id: northLocationA },
+        select: { timeZone: true, locale: true, hourCycle: true },
+      });
+      const regionalAt = async (locationId?: string) => {
+        const req = as(clinicA).get(quotePath(patientA, planA));
+        const res = await (
+          locationId ? req.set('X-Location-Id', locationId) : req
+        ).expect(200);
+        return (res.body as { regional: unknown }).regional;
+      };
+      try {
+        await raw.location.update({
+          where: { id: northLocationA },
+          data: {
+            timeZone: 'America/New_York',
+            locale: 'en-US',
+            hourCycle: 'h12',
+          },
+        });
+        expect(await regionalAt(northLocationA)).toEqual({
+          timeZone: 'America/New_York',
+          locale: 'en-US',
+          hourCycle: 'h12',
+        });
+        // Sin sede en el request: la principal (Caracas).
+        expect(await regionalAt()).toEqual({
+          timeZone: 'America/Caracas',
+          locale: 'es-VE',
+          hourCycle: 'h23',
+        });
+        await raw.location.update({
+          where: { id: northLocationA },
+          data: { hourCycle: null },
+        });
+        expect(await regionalAt(northLocationA)).toBeNull();
+      } finally {
+        await raw.location.update({
+          where: { id: northLocationA },
+          data: north,
+        });
+      }
+    });
+
     it('la sede de otra clínica en X-Location-Id no vale (400)', async () => {
       await as(clinicA)
         .get(quotePath(patientA, planA))

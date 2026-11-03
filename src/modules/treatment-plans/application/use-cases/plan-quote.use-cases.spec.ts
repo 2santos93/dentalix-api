@@ -181,6 +181,21 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
     );
   });
 
+  it('DX-354: lleva el regional de la sede del documento y no cambia el hash', async () => {
+    const { repo, get } = setup();
+    const withRegional = await get.execute('patient-1', 'plan-1');
+    expect(withRegional.regional).toEqual({
+      timeZone: 'America/Caracas',
+      locale: 'es-VE',
+      hourCycle: 'h12',
+    });
+    // Sin reloj: null y el mismo hash (la región no es contenido firmado).
+    repo.add({ ...repo.sources.get('plan-1')!, regional: null });
+    const without = await get.execute('patient-1', 'plan-1');
+    expect(without.regional).toBeNull();
+    expect(without.contentHash).toBe(withRegional.contentHash);
+  });
+
   it('un plan aceptado devuelve la foto firmada (no el plan vivo) y verifica su integridad', async () => {
     const { repo, get, accept } = setup();
     const shown = await get.execute('patient-1', 'plan-1');

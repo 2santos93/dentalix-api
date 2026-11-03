@@ -1,3 +1,4 @@
+import { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
 import { ApiProperty } from '@nestjs/swagger';
 import { PostOpDeliveryChannel } from '@prisma/client';
 import { IsEnum, IsUUID } from 'class-validator';
@@ -173,5 +174,12 @@ export class PostOpDeliveryDocumentDto extends PostOpDeliverySummaryDto {
   clinic!: PostOpClinicBrandingDto;
   @ApiProperty() locationName!: string;
   @ApiProperty({ type: String, nullable: true }) locationPhone!: string | null;
+  @ApiProperty({
+    type: DocumentRegionalDto,
+    nullable: true,
+    description:
+      'DX-354: zona, locale y reloj de la sede de la entrega. null si le falta algo: la entrega se lee igual y la web pinta «—».',
+  })
+  regional!: DocumentRegionalDto | null;
   @ApiProperty() patientName!: string;
 }

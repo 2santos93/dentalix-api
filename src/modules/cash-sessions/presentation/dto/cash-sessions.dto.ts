@@ -1,3 +1,4 @@
+import { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   CashAdjustmentKind,
@@ -729,6 +730,14 @@ export class CashSessionDetailDto extends CashSessionSummaryDto {
 
   @ApiProperty({ example: 'UTC' })
   timeZone!: string;
+
+  @ApiProperty({
+    type: DocumentRegionalDto,
+    nullable: true,
+    description:
+      'DX-354: zona, locale y reloj de la sede de la caja para formatear el cierre impreso. null si le falta algo: la caja se lee igual y la web pinta «—».',
+  })
+  regional!: DocumentRegionalDto | null;
 
   @ApiProperty({
     description:

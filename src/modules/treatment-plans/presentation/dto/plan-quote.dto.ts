@@ -1,3 +1,4 @@
+import { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
 import { ClinicFiscalDto } from '../../../../shared/clinic/clinic-fiscal.dto';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
@@ -253,6 +254,14 @@ export class PlanQuoteDocumentDto {
 
   @ApiProperty({ type: PlanQuoteLocationDto })
   location!: PlanQuoteLocationDto;
+
+  @ApiProperty({
+    type: DocumentRegionalDto,
+    nullable: true,
+    description:
+      'DX-354: zona, locale y reloj de la sede del presupuesto (la de la firma si ya se aceptó). null si le falta algo: el presupuesto se lee igual y la web pinta «—». No forma parte del contenido firmado.',
+  })
+  regional!: DocumentRegionalDto | null;
 
   @ApiProperty({ type: PlanQuotePatientDto })
   patient!: PlanQuotePatientDto;
