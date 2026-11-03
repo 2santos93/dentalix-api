@@ -20,7 +20,10 @@ import {
   type AmountConverter,
   ConvertAmountUseCase,
 } from '../../../exchange/application/use-cases/convert-amount.use-case';
-import { ExchangeRateProviderNotRespondingError } from '../../../exchange/domain/ports/exchange-rate-provider.port';
+import {
+  ExchangeRateBudgetExceededError,
+  ExchangeRateProviderNotRespondingError,
+} from '../../../exchange/domain/ports/exchange-rate-provider.port';
 import {
   CONVERSION_TIMED_OUT,
   conversionDeadline,
@@ -61,8 +64,8 @@ export interface GetPlanBalanceResult {
   paymentsWithoutRate: PaymentWithoutRate[];
   /**
    * DX-054: el proveedor de tasas no respondió dentro del plazo del saldo
-   * (`BALANCE_CONVERSION_BUDGET_MS`) o ya se sabe que no contesta (DX-472):
-   * los abonos que esperaban su tasa salen en `paymentsWithoutRate` y no
+   * (`BALANCE_CONVERSION_BUDGET_MS`), se sabe que no contesta o su cupo está
+   * agotado (DX-472): no consta que falte la tasa. Los abonos que esperaban su tasa salen en `paymentsWithoutRate` y no
    * suman. Volver a pedir el saldo lo completa cuando el proveedor responda.
    * `false` en el caso normal.
    */
@@ -132,6 +135,9 @@ export interface GetPlanBalanceWithItemsResult extends GetPlanBalanceResult {
   /** En el orden del plan. */
   items: PlanItemBalance[];
 }
+
+/** Sale de la conversión sin pasar por el «sin tasa» de `paymentAmountIn`. */
+const PROVIDER_UNANSWERED = new Error('PROVIDER_UNANSWERED');
 
 const BILLABLE_STATUSES: ReadonlySet<TreatmentPlanItemStatus> = new Set([
   TreatmentPlanItemStatus.ACCEPTED,
@@ -304,19 +310,21 @@ export class GetPlanBalanceUseCase {
     // la da por vencida al instante. Lo que no pide tasa (misma moneda, tasa
     // congelada) no pasa por aquí y sigue sumando.
     const never = <T>(): Promise<T> => new Promise<T>(() => undefined);
-    // DX-472: un proveedor que ya dijo que no contesta (el plazo de la llamada
-    // pasó, o sigue en su caché negativa) es lo mismo: el saldo avisa de que
-    // se reintente; no es un abono «sin tasa».
+    // DX-472: un proveedor que no contesta o sin cupo no dice que falte la
+    // tasa: el saldo pide reintentar. Solo ese abono se queda sin contar; los
+    // demás siguen, y los días con tasa guardada suman.
     const guarded = async <T>(work: () => Promise<T>): Promise<T> => {
       if (deadline.timedOut) return never();
       try {
         return await work();
       } catch (error) {
-        if (!(error instanceof ExchangeRateProviderNotRespondingError)) {
-          throw error;
+        if (
+          error instanceof ExchangeRateProviderNotRespondingError ||
+          error instanceof ExchangeRateBudgetExceededError
+        ) {
+          throw PROVIDER_UNANSWERED;
         }
-        deadline.expire();
-        return never();
+        throw error;
       }
     };
     return {
@@ -357,7 +365,12 @@ export class GetPlanBalanceUseCase {
       const base = baseOf.get(payment.id);
       const converted =
         base ??
-        (await deadline.race(paymentAmountIn(convert, payment, plan.currency)));
+        (await deadline
+          .race(paymentAmountIn(convert, payment, plan.currency))
+          .catch((error: unknown): typeof CONVERSION_TIMED_OUT => {
+            if (error === PROVIDER_UNANSWERED) return CONVERSION_TIMED_OUT;
+            throw error;
+          }));
       if (converted === CONVERSION_TIMED_OUT) rateProviderTimedOut = true;
       if (converted === null || converted === CONVERSION_TIMED_OUT) {
         paymentsWithoutRate.push({

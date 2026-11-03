@@ -9,6 +9,7 @@ import { BALANCE_CONVERSION_BUDGET_MS } from '../conversion-deadline';
 import { InMemoryPaymentRepository } from './__fixtures__/in-memory-payment.repository';
 import { GetTreatmentPlanUseCase } from '../../../treatment-plans/application/use-cases/get-treatment-plan.use-case';
 import {
+  ExchangeRateBudgetExceededError,
   ExchangeRateProviderNotRespondingError,
   ExchangeRateUnavailableError,
 } from '../../../exchange/domain/ports/exchange-rate-provider.port';
@@ -72,6 +73,10 @@ class FakeConvertAmountUseCase {
   public readonly hangingFrom = new Set<string>();
   /** Currencies (as `from`) whose provider is known not to answer (DX-472). */
   public readonly notRespondingFrom = new Set<string>();
+  /** Days whose provider is known not to answer (DX-472). */
+  public readonly notRespondingOn = new Set<string>();
+  /** Currencies (as `from`) whose quota is exhausted (DX-472). */
+  public readonly budgetExceededFrom = new Set<string>();
   /** units of `from` currency per 1 USD-equivalent `to`; mirrors
    * `rates[from]` in the real use case. */
   private readonly unitsPerTarget: Record<string, number> = { VES: 4000 };
@@ -94,7 +99,13 @@ class FakeConvertAmountUseCase {
     if (this.hangingFrom.has(input.from)) {
       return new Promise(() => undefined);
     }
-    if (this.notRespondingFrom.has(input.from)) {
+    if (this.budgetExceededFrom.has(input.from)) {
+      return Promise.reject(new ExchangeRateBudgetExceededError('CLINIC', 60));
+    }
+    if (
+      this.notRespondingFrom.has(input.from) ||
+      this.notRespondingOn.has(input.date)
+    ) {
       return Promise.reject(
         new ExchangeRateProviderNotRespondingError('sin respuesta'),
       );
@@ -630,6 +641,47 @@ describe('GetPlanBalanceUseCase', () => {
       expect(result.paid).toBe(0);
       expect(result.rateProviderTimedOut).toBe(true);
       expect(result.paymentsWithoutRate).toHaveLength(1);
+    });
+
+    it('con el cupo del proveedor agotado no falta ninguna tasa: avisa igual (DX-472)', async () => {
+      const { repo, fakeGetPlan, fakeConvert, uc } = makeUseCase();
+      fakeConvert.budgetExceededFrom.add('VES');
+      fakeGetPlan.plan = makePlan({ currency: 'USD' });
+      repo.seedPayment({
+        treatmentPlanId: 'plan-1',
+        amount: 3600,
+        currency: 'VES',
+        paidAt: new Date('2026-03-05T12:00:00.000Z'),
+      });
+
+      const result = await uc.execute('plan-1');
+
+      expect(result.rateProviderTimedOut).toBe(true);
+      expect(result.paymentsWithoutRate).toHaveLength(1);
+    });
+
+    it('un día que no contesta no se lleva los abonos de otro día que sí tiene tasa (DX-472)', async () => {
+      const { repo, fakeGetPlan, fakeConvert, uc } = makeUseCase();
+      fakeConvert.setRate('VES', 36);
+      fakeGetPlan.plan = makePlan({ currency: 'USD' });
+      const paidOn = (day: string) =>
+        repo.seedPayment({
+          treatmentPlanId: 'plan-1',
+          amount: 3600,
+          currency: 'VES',
+          paidAt: new Date(`${day}T12:00:00.000Z`),
+        });
+      const silent = paidOn('2026-03-06');
+      paidOn('2026-03-05');
+      fakeConvert.notRespondingOn.add('2026-03-06');
+
+      const result = await uc.execute('plan-1');
+
+      expect(result.paid).toBe(100);
+      expect(result.rateProviderTimedOut).toBe(true);
+      expect(result.paymentsWithoutRate.map((p) => p.paymentId)).toEqual([
+        silent.id,
+      ]);
     });
 
     it('el plazo es de todo el saldo, no por abono: un segundo abono lento no lo alarga', async () => {

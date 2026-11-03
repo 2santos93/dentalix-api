@@ -388,6 +388,8 @@ export interface FamilyAccountStatement {
   members: FamilyStatementMember[];
   /** Suma de los subtotales, por moneda y al céntimo. */
   totals: FamilyCurrencyAmounts[];
+  /** DX-472: abonos de la familia que no suman por no tener tasa. */
+  paymentsWithoutRateCount: number;
   /** DX-472: en algún plan, el proveedor de tasas no respondió a tiempo. */
   rateProviderTimedOut: boolean;
 }

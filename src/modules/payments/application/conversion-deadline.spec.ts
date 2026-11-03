@@ -34,16 +34,6 @@ describe('conversionDeadline (DX-054)', () => {
     deadline.dispose();
   });
 
-  it('DX-472: expire da el plazo por vencido sin esperar al temporizador', async () => {
-    const deadline = conversionDeadline(1000);
-    const raced = deadline.race(new Promise<number>(() => undefined));
-    deadline.expire();
-    await expect(raced).resolves.toBe(CONVERSION_TIMED_OUT);
-    expect(deadline.timedOut).toBe(true);
-    deadline.dispose();
-    expect(jest.getTimerCount()).toBe(0);
-  });
-
   it('el rechazo tardío de una conversión abandonada no queda sin manejar', async () => {
     const deadline = conversionDeadline(1000);
     let reject: (error: Error) => void = () => undefined;

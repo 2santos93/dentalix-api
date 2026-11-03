@@ -68,12 +68,32 @@ describe('OpenExchangeRatesProvider (SEC-054)', () => {
     expect(error.message).not.toContain('secreto');
   });
 
-  it('DX-472: un 5xx es que el proveedor no contesta, no que falte la tasa', async () => {
-    fetchMock.mockResolvedValue(new Response('caído', { status: 503 }));
-    await expect(
-      makeProvider().fetchRates('2026-10-01'),
-    ).rejects.toBeInstanceOf(ExchangeRateProviderNotRespondingError);
-  });
+  it.each([503, 500, 429, 408])(
+    'DX-472: un %i es que el proveedor no contesta, no que falte la tasa',
+    async (status) => {
+      fetchMock.mockResolvedValue(new Response('caído', { status }));
+      await expect(
+        makeProvider().fetchRates('2026-10-01'),
+      ).rejects.toBeInstanceOf(ExchangeRateProviderNotRespondingError);
+    },
+  );
+
+  it.each([
+    ['plazo agotado', new DOMException('agotado', 'TimeoutError')],
+    ['abortado', new DOMException('abortado', 'AbortError')],
+    ['conexión cortada', new TypeError('terminated')],
+  ])(
+    'DX-472: un corte durante el cuerpo (%s) es que no contesta',
+    async (_name, failure) => {
+      fetchMock.mockResolvedValue({
+        ok: true,
+        json: () => Promise.reject(failure),
+      });
+      await expect(
+        makeProvider().fetchRates('2026-10-01'),
+      ).rejects.toBeInstanceOf(ExchangeRateProviderNotRespondingError);
+    },
+  );
 
   it('el tiempo agotado (o la red) es «sin tasa», sin el mensaje del error', async () => {
     fetchMock.mockRejectedValue(
@@ -92,9 +112,11 @@ describe('OpenExchangeRatesProvider (SEC-054)', () => {
 
   it('un cuerpo que no es JSON es «sin tasa», no un 500', async () => {
     fetchMock.mockResolvedValue(new Response('<html>caído</html>'));
-    await expect(
-      makeProvider().fetchRates('2026-10-01'),
-    ).rejects.toBeInstanceOf(ExchangeRateUnavailableError);
+    const error = await makeProvider()
+      .fetchRates('2026-10-01')
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ExchangeRateUnavailableError);
+    expect(error).not.toBeInstanceOf(ExchangeRateProviderNotRespondingError);
   });
 
   it('sin EXCHANGE_APP_ID no llama', async () => {

@@ -74,7 +74,8 @@ export class PlanBalanceDto {
     example: false,
     description:
       'DX-054: el proveedor de tasas no respondió a tiempo (el saldo espera ' +
-      'como mucho 4 s a las conversiones en vivo) o se sabe que no contesta: ' +
+      'como mucho 4 s a las conversiones en vivo), se sabe que no contesta o ' +
+      'su cupo está agotado: ' +
       'no es que falte la tasa. Los abonos que esperaban ' +
       'su tasa salen en paymentsWithoutRate y no suman en paid: el saldo está ' +
       'incompleto y volver a pedirlo lo completa cuando el proveedor responda. ' +

@@ -334,6 +334,9 @@ export function computeBalances(
         currencyAcc.overdueCents += outstandingCents;
       } else if (
         (tramo.status === 'PENDING' || tramo.status === 'PARTIAL') &&
+        // DX-472: una cuota pasada sin marcar vencida no es la próxima.
+        tramo.dueDate.toISOString().slice(0, 10) >=
+          today.toISOString().slice(0, 10) &&
         (currencyAcc.next === null ||
           tramo.dueDate.getTime() < currencyAcc.next.dueDate.getTime())
       ) {

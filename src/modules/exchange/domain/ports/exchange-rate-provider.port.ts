@@ -12,7 +12,8 @@ export class ExchangeRateUnavailableError extends Error {
 }
 
 /**
- * DX-472: el proveedor no contestó (plazo agotado, sin conexión o un 5xx): es
+ * DX-472: el proveedor no contestó (plazo agotado, sin conexión, corte a medio
+ * cuerpo, un 5xx, 429 o 408): es
  * pasajero y no dice nada de si hay tasa ese día. Quien solo convierte lo trata
  * como «sin tasa»; el saldo lo distingue para pedir que se reintente en vez de
  * que se registre una tasa.

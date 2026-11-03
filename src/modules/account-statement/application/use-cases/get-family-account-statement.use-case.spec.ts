@@ -234,6 +234,47 @@ describe('GetFamilyAccountStatementUseCase (DX-203)', () => {
     ]);
   });
 
+  it('DX-472: cuenta los abonos sin tasa de toda la familia, que los impresos avisan', async () => {
+    const { repo, family } = makeRepos();
+    const withoutRate = {
+      paymentId: 'x',
+      amount: 3600,
+      currency: 'VES',
+      paidOn: '2026-02-01',
+    };
+    const balances = {
+      computeMany: () =>
+        Promise.resolve(
+          new Map([
+            [
+              'uno',
+              {
+                paymentsWithoutRate: [withoutRate, withoutRate],
+                rateProviderTimedOut: false,
+              },
+            ],
+            [
+              'dos',
+              {
+                paymentsWithoutRate: [withoutRate],
+                rateProviderTimedOut: false,
+              },
+            ],
+          ]),
+        ),
+    } as unknown as GetPlanBalanceUseCase;
+
+    const out = await new GetFamilyAccountStatementUseCase(
+      repo,
+      family,
+      () => NOW,
+      balances,
+    ).execute('mother');
+
+    expect(out.paymentsWithoutRateCount).toBe(3);
+    expect(out.rateProviderTimedOut).toBe(false);
+  });
+
   it('solo importes y nombres: nada de documentos, planes ni movimientos', async () => {
     const { repo, family } = makeRepos();
     const out = await new GetFamilyAccountStatementUseCase(

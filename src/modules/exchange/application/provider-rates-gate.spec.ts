@@ -98,26 +98,71 @@ describe('ProviderRatesGate (SEC-054)', () => {
       expect(load).toHaveBeenCalledTimes(2);
     });
 
-    it('DX-472: un proveedor que no contestó se reprueba al minuto y repite su error', async () => {
-      const { gate, clock } = setup({ negativeTtlMs: HOUR });
-      const load = jest.fn(() =>
-        Promise.reject(new ExchangeRateProviderNotRespondingError('colgado')),
-      );
+    describe('DX-472: un proveedor que no contesta', () => {
+      const silent = () =>
+        jest.fn(() =>
+          Promise.reject(new ExchangeRateProviderNotRespondingError('colgado')),
+        );
+      const failed = (
+        gate: ProviderRatesGate,
+        date: string,
+        load: () => Promise<Record<string, number>>,
+      ) =>
+        expect(gate.fetch(date, A, load)).rejects.toBeInstanceOf(
+          ExchangeRateProviderNotRespondingError,
+        );
 
-      await expect(gate.fetch('2026-10-01', A, load)).rejects.toBeInstanceOf(
-        ExchangeRateProviderNotRespondingError,
-      );
-      clock.advance(NOT_RESPONDING_NEGATIVE_TTL_MS - 1);
-      await expect(gate.fetch('2026-10-01', A, load)).rejects.toBeInstanceOf(
-        ExchangeRateProviderNotRespondingError,
-      );
-      expect(load).toHaveBeenCalledTimes(1);
+      it('se reprueba al minuto y repite su error', async () => {
+        const { gate, clock } = setup({ negativeTtlMs: HOUR });
+        const load = silent();
 
-      clock.advance(1);
-      await expect(gate.fetch('2026-10-01', A, load)).rejects.toBeInstanceOf(
-        ExchangeRateProviderNotRespondingError,
-      );
-      expect(load).toHaveBeenCalledTimes(2);
+        await failed(gate, '2026-10-01', load);
+        clock.advance(NOT_RESPONDING_NEGATIVE_TTL_MS - 1);
+        await failed(gate, '2026-10-01', load);
+        expect(load).toHaveBeenCalledTimes(1);
+
+        clock.advance(1);
+        await failed(gate, '2026-10-01', load);
+        expect(load).toHaveBeenCalledTimes(2);
+      });
+
+      it('la espera se dobla hasta negativeTtlMs: una petición cada 5 s durante una hora llama unas pocas veces', async () => {
+        const { gate, clock } = setup({ negativeTtlMs: HOUR });
+        const load = silent();
+
+        for (let elapsed = 0; elapsed < HOUR; elapsed += 5_000) {
+          await failed(gate, '2026-10-01', load);
+          clock.advance(5_000);
+        }
+
+        expect(load.mock.calls.length).toBeLessThanOrEqual(6);
+      });
+
+      it('la espera es del proveedor, no del día: otro día tampoco gasta cupo', async () => {
+        const { gate } = setup();
+        const load = silent();
+
+        await failed(gate, '2026-10-01', load);
+        await failed(gate, '2026-10-02', load);
+
+        expect(load).toHaveBeenCalledTimes(1);
+      });
+
+      it('una respuesta buena borra la espera', async () => {
+        const { gate, clock } = setup({ negativeTtlMs: HOUR });
+        const load = silent();
+        await failed(gate, '2026-10-01', load);
+        clock.advance(NOT_RESPONDING_NEGATIVE_TTL_MS);
+        await failed(gate, '2026-10-01', load);
+        clock.advance(2 * NOT_RESPONDING_NEGATIVE_TTL_MS);
+
+        await gate.fetch('2026-10-01', A, () => Promise.resolve({ VES: 36 }));
+
+        await failed(gate, '2026-10-02', load);
+        clock.advance(NOT_RESPONDING_NEGATIVE_TTL_MS);
+        await failed(gate, '2026-10-02', load);
+        expect(load).toHaveBeenCalledTimes(4);
+      });
     });
 
     it('solo vale para ese día', async () => {

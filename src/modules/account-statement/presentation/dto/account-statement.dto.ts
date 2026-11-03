@@ -638,6 +638,13 @@ export class FamilyAccountStatementDto {
   totals!: FamilyCurrencyAmountsDto[];
 
   @ApiProperty({
+    example: 0,
+    description:
+      'DX-472: abonos de la familia que no suman por no tener tasa (paymentsWithoutRate de sus planes): las cifras están incompletas.',
+  })
+  paymentsWithoutRateCount!: number;
+
+  @ApiProperty({
     example: false,
     description:
       'DX-472: en algún plan de la familia, el proveedor de tasas no respondió a tiempo: las cifras están incompletas.',

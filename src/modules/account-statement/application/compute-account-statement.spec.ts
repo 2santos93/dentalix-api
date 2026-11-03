@@ -865,6 +865,34 @@ describe('computeAccountStatement con el saldo de cada plan (DX-472)', () => {
     expect(out.summary[0]).toMatchObject({ overdueCount: 0, overdueAmount: 0 });
   });
 
+  it('con el proveedor colgado, la próxima cuota nunca es una de fecha pasada', () => {
+    const out = computeAccountStatement(
+      {
+        ...snapshot(),
+        paymentPlans: [
+          {
+            ...tramos,
+            installments: [
+              ...tramos.installments,
+              {
+                sequence: 3,
+                dueDate: new Date('2026-04-15T00:00:00.000Z'),
+                amount: 50,
+              },
+            ],
+          },
+        ],
+      },
+      {
+        today: TODAY,
+        planBalances: new Map([
+          ['p1', figures({ rateProviderTimedOut: true })],
+        ]),
+      },
+    );
+    expect(out.summary[0].nextInstallment).toMatchObject({ sequence: 3 });
+  });
+
   it('un abono a un saldo migrado no se convierte: suma en su moneda', () => {
     const out = computeAccountStatement(
       {

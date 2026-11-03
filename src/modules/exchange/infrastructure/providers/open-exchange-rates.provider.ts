@@ -60,7 +60,9 @@ export class OpenExchangeRatesProvider implements ExchangeRateProvider {
       // ningún mensaje. Se cancela para liberar la conexión.
       await response.body?.cancel().catch(() => undefined);
       const message = `Open Exchange Rates returned ${response.status} for date ${date}`;
-      throw response.status >= 500
+      throw response.status >= 500 ||
+        response.status === 429 ||
+        response.status === 408
         ? new ExchangeRateProviderNotRespondingError(message)
         : new ExchangeRateUnavailableError(message);
     }
@@ -69,9 +71,11 @@ export class OpenExchangeRatesProvider implements ExchangeRateProvider {
     try {
       payload = await response.json();
     } catch (error) {
-      throw new ExchangeRateUnavailableError(
-        `Unreadable Open Exchange Rates response for date ${date}: ${errorName(error)}`,
-      );
+      const message = `Unreadable Open Exchange Rates response for date ${date}: ${errorName(error)}`;
+      // Un JSON roto es una respuesta; lo demás, un corte a medio cuerpo.
+      throw errorName(error) === 'SyntaxError'
+        ? new ExchangeRateUnavailableError(message)
+        : new ExchangeRateProviderNotRespondingError(message);
     }
     if (
       typeof payload !== 'object' ||

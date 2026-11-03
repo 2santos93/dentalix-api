@@ -42,9 +42,10 @@ function forget<K>(map: Map<K, unknown>, key: K): void {
 export type StoredRates = () => Promise<Record<string, number> | null>;
 
 /**
- * DX-472: un proveedor que no contestó se vuelve a probar antes que un día que
- * no tiene: el «Reintentar» del saldo tiene que poder completarlo. Nunca más
- * que `negativeTtlMs`.
+ * DX-472: la primera espera tras un proveedor que no contestó, para que
+ * «Reintentar» pueda completar el saldo pronto. Se dobla en cada fallo seguido
+ * hasta `negativeTtlMs`: cada intento gasta cupo (SEC-058), y en una caída larga
+ * no se puede consumir más rápido que con la caché negativa.
  */
 export const NOT_RESPONDING_NEGATIVE_TTL_MS = 60_000;
 
@@ -67,9 +68,10 @@ const sameCaller = (a: ProviderRatesCaller, b: ProviderRatesCaller) =>
  *    OTRA clínica, quien esperaba lo intenta con el suyo;
  * 2. caché negativa compartida: un día que el proveedor no tuvo o en que
  *    falló (`ExchangeRateUnavailableError`) no se pide otra vez durante
- *    `negativeTtlMs` (`NOT_RESPONDING_NEGATIVE_TTL_MS` si no contestó, y se
- *    repite ese error), para ninguna clínica. La precarga no la lee (reintenta
- *    con su propio backoff) y un acierto la limpia;
+ *    `negativeTtlMs`, para ninguna clínica. Si el proveedor no contestó, la
+ *    espera es de él y no del día (DX-472): vale para todos los días, crece
+ *    desde `NOT_RESPONDING_NEGATIVE_TTL_MS` y repite ese error. La precarga no
+ *    la lee (reintenta con su propio backoff) y un acierto la limpia;
  * 3. presupuesto (SEC-058, `ProviderRatesBudget`): los cupos de la clínica
  *    (por hora, por día o el de clínica nueva, y el de su barrido) y el
  *    global, en contadores de la BD compartidos por todas las réplicas.
@@ -87,10 +89,8 @@ export class ProviderRatesGate {
     string,
     { caller: ProviderRatesCaller; call: Promise<Record<string, number>> }
   >();
-  private readonly unavailableUntil = new Map<
-    string,
-    { until: number; notResponding: boolean }
-  >();
+  private readonly unavailableUntil = new Map<string, number>();
+  private notResponding = { until: 0, failures: 0 };
 
   constructor(
     @Inject(PROVIDER_RATES_LIMITS)
@@ -154,16 +154,16 @@ export class ProviderRatesGate {
       if (caller.kind !== 'PREFETCH') await this.spendBudget(caller);
       const rates = await load();
       forget(this.unavailableUntil, date);
+      this.notResponding = { until: 0, failures: 0 };
       return rates;
     } catch (error) {
-      if (
+      if (error instanceof ExchangeRateProviderNotRespondingError) {
+        this.rememberNotResponding();
+      } else if (
         error instanceof ExchangeRateUnavailableError &&
         !(error instanceof ExchangeRateBudgetExceededError)
       ) {
-        this.rememberUnavailable(
-          date,
-          error instanceof ExchangeRateProviderNotRespondingError,
-        );
+        this.rememberUnavailable(date);
       }
       throw error;
     } finally {
@@ -172,31 +172,46 @@ export class ProviderRatesGate {
   }
 
   private assertNotKnownUnavailable(date: string, now: number): void {
-    const known = this.unavailableUntil.get(date);
-    if (known === undefined) return;
-    if (known.until > now) {
-      const message = `El proveedor no dio las tasas del ${date} hace poco; no se vuelve a pedir hasta ${new Date(known.until).toISOString()}`;
-      throw known.notResponding
-        ? new ExchangeRateProviderNotRespondingError(message)
-        : new ExchangeRateUnavailableError(message);
+    if (this.notResponding.until > now) {
+      throw new ExchangeRateProviderNotRespondingError(
+        `El proveedor de tasas no contesta; no se vuelve a pedir hasta ${new Date(this.notResponding.until).toISOString()}`,
+      );
+    }
+    const until = this.unavailableUntil.get(date);
+    if (until === undefined) return;
+    if (until > now) {
+      throw new ExchangeRateUnavailableError(
+        `El proveedor no dio las tasas del ${date} hace poco; no se vuelve a pedir hasta ${new Date(until).toISOString()}`,
+      );
     }
     forget(this.unavailableUntil, date);
   }
 
-  private rememberUnavailable(date: string, notResponding: boolean): void {
+  private rememberNotResponding(): void {
+    const now = this.now().getTime();
+    const { until, failures } = this.notResponding;
+    // Varios días en vuelo que fallan juntos son un solo fallo.
+    if (until > now) return;
+    // Mucho después de la última espera es otra caída: empieza de nuevo.
+    const next =
+      failures > 0 && now - until < this.limits.negativeTtlMs
+        ? failures + 1
+        : 1;
+    const wait = NOT_RESPONDING_NEGATIVE_TTL_MS * 2 ** (next - 1);
+    this.notResponding = {
+      until: now + Math.min(wait, this.limits.negativeTtlMs),
+      failures: next,
+    };
+  }
+
+  private rememberUnavailable(date: string): void {
     const now = this.now().getTime();
     if (this.unavailableUntil.size >= SWEEP_THRESHOLD) {
-      for (const [day, { until }] of this.unavailableUntil) {
+      for (const [day, until] of this.unavailableUntil) {
         if (until <= now) forget(this.unavailableUntil, day);
       }
     }
-    const ttl = notResponding
-      ? Math.min(NOT_RESPONDING_NEGATIVE_TTL_MS, this.limits.negativeTtlMs)
-      : this.limits.negativeTtlMs;
-    this.unavailableUntil.set(date, {
-      until: now + ttl,
-      notResponding,
-    });
+    this.unavailableUntil.set(date, now + this.limits.negativeTtlMs);
   }
 
   /** Gasta una llamada de todos los cupos que tocan, o lanza el 429 interno. */

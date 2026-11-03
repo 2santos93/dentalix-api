@@ -153,6 +153,10 @@ export class GetFamilyAccountStatementUseCase {
           convertedBalance: sum.convertedBalance / 100,
           overdueAmount: sum.overdueAmount / 100,
         })),
+      paymentsWithoutRateCount: [...planBalances.values()].reduce(
+        (n, b) => n + b.paymentsWithoutRate.length,
+        0,
+      ),
       rateProviderTimedOut: [...planBalances.values()].some(
         (b) => b.rateProviderTimedOut,
       ),
