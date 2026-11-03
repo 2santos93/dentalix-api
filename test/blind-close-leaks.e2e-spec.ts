@@ -656,8 +656,12 @@ describe('Arqueo ciego sin fugas (e2e, SEC-043)', () => {
 
     /**
      * Ronda 4: el grupo USD·CASH de A (con anulaciones posteriores abiertas o
-     * pendientes) va sin esperado, desglose, recuentos ni diferencia; USD·CARD
-     * conserva sus cifras. La diferencia por moneda de USD, también oculta.
+     * pendientes) no lleva en la respuesta esperado, desglose, recuentos ni
+     * diferencia; USD·CARD conserva sus cifras, y la diferencia por moneda de
+     * USD tampoco viaja. Comprueba qué campos no viajan, no que la cifra sea
+     * imposible de despejar: con lo contado y «cuadra» de su propio cierre,
+     * quien abrió A despeja el total anulado (residual (d) del informe; ya lo
+     * vio al cerrarla).
      */
     function expectGroupHidden(view: Detail, hidden: boolean): void {
       const cash = view.expected?.find((l) => l.method === 'CASH');
@@ -752,7 +756,7 @@ describe('Arqueo ciego sin fugas (e2e, SEC-043)', () => {
       });
     });
 
-    it('M1: un ADMIN sin caja anula un abono de A y cobra uno tardío: los ajustes quedan pendientes y A no deja ver su importe', async () => {
+    it('M1: un ADMIN sin caja anula un abono de A y cobra uno tardío: los ajustes quedan pendientes y A no envía sus importes', async () => {
       await api('delete', `/payments/${anuladoA}`)
         .send({ reason: 'Abono duplicado' })
         .expect(200);
