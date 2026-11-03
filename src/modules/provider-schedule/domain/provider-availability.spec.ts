@@ -3,7 +3,6 @@ import {
   crossLocationConflictOn,
   crossLocationMessage,
   describeRange,
-  minuteText,
   rangeShapeError,
   intersectRanges,
   overrideRangesError,
@@ -530,19 +529,18 @@ describe('overrideRangesError y crossLocationConflictOn', () => {
 });
 
 describe('horas de los mensajes con el reloj de la sede (DX-354)', () => {
-  it('describeRange: 24 h con h23 y 12 h con h12; la medianoche final es 24:00 / 12:00 a. m.', () => {
+  it('describeRange: 24 h con h23 y 12 h con h12; la medianoche final es 24:00 / medianoche', () => {
     const r = { startMinute: H(9), endMinute: H(13) };
     expect(describeRange(r, H23)).toBe('09:00–13:00');
     expect(describeRange(r, H12)).toBe('9:00 a. m.–1:00 p. m.');
     const night = { startMinute: H(21), endMinute: 1440 };
     expect(describeRange(night, H23)).toBe('21:00–24:00');
-    expect(describeRange(night, H12)).toBe('9:00 p. m.–12:00 a. m.');
-    expect(minuteText(1440, H12)).toBe('12:00 a. m.');
+    expect(describeRange(night, H12)).toBe('9:00 p. m.–medianoche');
   });
 
   it('rangeShapeError con h12 escribe 0 y 1440 con el reloj de la sede', () => {
     expect(rangeShapeError({ startMinute: -5, endMinute: 60 }, () => H12)).toBe(
-      'Los minutos de un tramo tienen que ser enteros entre 0 (12:00 a. m.) y 1440 (12:00 a. m.).',
+      'Los minutos de un tramo tienen que ser enteros entre 0 (12:00 a. m.) y 1440 (medianoche).',
     );
     expect(rangeShapeError({ startMinute: -5, endMinute: 60 }, () => H23)).toBe(
       'Los minutos de un tramo tienen que ser enteros entre 0 (00:00) y 1440 (24:00).',

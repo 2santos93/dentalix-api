@@ -4,7 +4,6 @@ import {
   businessHoursErrorMessage,
   describeDayRanges,
   fitsBusinessHours,
-  minuteText,
   toWallClockSlot,
 } from './business-hours';
 
@@ -171,13 +170,6 @@ describe('mensajes', () => {
     expect(describeDayRanges(1, caracasHours(), H12)).toBe(
       '9:00 a. m.–1:00 p. m., 3:00 p. m.–7:00 p. m.',
     );
-  });
-
-  it('un tramo que llega a medianoche: 24:00 en 24 h, 12:00 a. m. en 12 h', () => {
-    expect(minuteText(1440, H23)).toBe('24:00');
-    expect(minuteText(1440, H12)).toBe('12:00 a. m.');
-    expect(minuteText(0, H23)).toBe('00:00');
-    expect(minuteText(13 * 60 + 5, H12)).toBe('1:05 p. m.');
   });
 
   it('el error dice el horario real del día cuando el día abre (h23 de-DE)', () => {

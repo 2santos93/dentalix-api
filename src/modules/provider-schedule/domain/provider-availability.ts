@@ -1,4 +1,5 @@
 import type { RegionalFormat } from '../../../shared/format/regional-format';
+import { minuteText } from '../../../shared/format/minute-text';
 import {
   civilDateIn,
   civilWeekday,
@@ -196,18 +197,6 @@ const WEEKDAY_NAMES = [
 
 export function weekdayName(weekday: number): string {
   return WEEKDAY_NAMES[weekday] ?? String(weekday);
-}
-
-/**
- * Hora de pared (minutos desde 00:00) con el reloj de la sede. Un tramo que
- * llega a medianoche (1440) termina en «24:00» en 24 h y en «12:00 a. m.» en
- * 12 h: la misma regla que el horario de la sede.
- */
-export function minuteText(minute: number, fmt: RegionalFormat): string {
-  if (minute === 1440) {
-    return fmt.hourCycle === 'h23' ? '24:00' : fmt.clock(0, 0);
-  }
-  return fmt.clock(Math.floor(minute / 60), minute % 60);
 }
 
 /** «08:00–13:00» (24 h) o «8:00 a. m.–1:00 p. m.» (12 h), con el reloj de la sede. */
