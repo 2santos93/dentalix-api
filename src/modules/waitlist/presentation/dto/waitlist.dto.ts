@@ -18,6 +18,7 @@ import {
   ValidateIf,
 } from 'class-validator';
 import { AppointmentTypeSummaryDto } from '../../../appointment-types/presentation/dto/appointment-type.dto';
+import { CHAIR_ID_INVALID_MESSAGE } from '../../../chairs/domain/chair-rules';
 import {
   WAITLIST_DISMISS_REASON_MAX,
   WAITLIST_MAX_PAGE_SIZE,
@@ -287,7 +288,7 @@ export class ScheduleFromWaitlistDto {
   })
   // `null` no es «sin sillón»: se rechaza aquí, no con un 500 al buscarlo.
   @ValidateIf((_object, value) => value !== undefined)
-  @IsUUID()
+  @IsUUID(undefined, { message: CHAIR_ID_INVALID_MESSAGE })
   chairId?: string;
 
   @ApiPropertyOptional({ maxLength: 200 })

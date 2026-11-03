@@ -24,6 +24,10 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
+/** DX-492-bis: el 400 de `chairId` que no es un id (también `null`). */
+const CHAIR_ID_INVALID =
+  'El sillón no es válido: elige uno de la sede o deja la cita sin sillón';
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DAY = new Date(Date.now() + 3 * DAY_MS).toISOString().slice(0, 10);
 /** Instante UTC; la zona de la sede es UTC−4: 15:00Z son las 11:00. */
@@ -375,6 +379,32 @@ describe('Sillones por sede y anti-solape por sillón (e2e, DX-211)', () => {
       expect((res.body as { message: string }).message).toBe(
         'El sillón «Sillón 1» es de otra sede: elige un sillón de la sede de la cita',
       );
+    });
+
+    it('DX-492-bis: `chairId: null` al agendar es un dato inválido: 400 en español, no un 500, y no guarda nada', async () => {
+      const before = await raw.appointment.count({
+        where: { tenantId: clinic.tenantId },
+      });
+      const res = await book({
+        chairId: null,
+        patientId: patients[3],
+        start: at('20:00'),
+        end: at('20:30'),
+      }).expect(400);
+      expect((res.body as { message: string[] }).message).toEqual([
+        CHAIR_ID_INVALID,
+      ]);
+      // Sin profesional y con `null`, tampoco llega a buscar el sillón.
+      await book({
+        chairId: null,
+        providerId: undefined,
+        patientId: patients[3],
+        start: at('20:00'),
+        end: at('20:30'),
+      }).expect(400);
+      expect(
+        await raw.appointment.count({ where: { tenantId: clinic.tenantId } }),
+      ).toBe(before);
     });
 
     it('reprogramar al hueco ocupado del sillón: 409; cambiar de sillón a uno libre: 200', async () => {
