@@ -39,6 +39,7 @@ import type { ScheduleBlockRepository } from '../../../schedule-blocks/domain/po
 import { assertAttendsAt } from '../../../staff/domain/provider-location';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { ProviderAvailabilityService } from '../../../provider-schedule/application/provider-availability.service';
+import { requireLocationFormat } from '../../../../shared/locations/location-regional';
 import { collectWarnings } from '../appointment-warnings';
 import { ChairAssignmentService } from '../chair-assignment';
 import type { Chair } from '../../../chairs/domain/entities/chair.entity';
@@ -261,8 +262,13 @@ export class CreateAppointmentUseCase {
         ? await this.schedule.findByLocation(input.locationId)
         : await this.schedule.findForCurrentLocation();
     if (!fitsBusinessHours(input.start, input.end, hours)) {
+      // DX-354: las horas del mensaje, con el formato y el reloj de la sede;
+      // el formato se pide solo si el mensaje lleva horas (día abierto).
+      const source = await this.schedule.formatSourceOf(input.locationId);
       throw new UnprocessableEntityException(
-        businessHoursErrorMessage(input.start, input.end, hours!),
+        businessHoursErrorMessage(input.start, input.end, hours!, () =>
+          requireLocationFormat(source),
+        ),
       );
     }
 

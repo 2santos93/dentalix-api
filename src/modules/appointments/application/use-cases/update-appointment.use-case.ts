@@ -87,6 +87,7 @@ import {
   planItemsClosedMessage,
   planItemsEditable,
 } from '../../domain/plan-item-reservation';
+import { requireLocationFormat } from '../../../../shared/locations/location-regional';
 import { requireLocationTimeZone } from '../../../../shared/locations/location-time-zone';
 import {
   OVERBOOK_AUDIT_REASONS,
@@ -470,8 +471,13 @@ export class UpdateAppointmentUseCase {
       // petición es válida, pero el hueco no existe (DX-121).
       const hours = await this.schedule.findByLocation(existing.locationId);
       if (!fitsBusinessHours(nextStart, nextEnd, hours)) {
+        // DX-354: formato y reloj de la sede de la cita, pedido solo si el
+        // mensaje lleva horas.
+        const source = await this.schedule.formatSourceOf(existing.locationId);
         throw new UnprocessableEntityException(
-          businessHoursErrorMessage(nextStart, nextEnd, hours!),
+          businessHoursErrorMessage(nextStart, nextEnd, hours!, () =>
+            requireLocationFormat(source),
+          ),
         );
       }
 

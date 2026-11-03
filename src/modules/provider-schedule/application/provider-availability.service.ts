@@ -8,7 +8,8 @@ import {
   LOCATION_REPOSITORY,
   type LocationRepository,
 } from '../../locations/domain/ports/location-repository.port';
-import { civilDateIn, civilWeekday } from '../../../shared/time/civil-day';
+import { civilDateIn } from '../../../shared/time/civil-day';
+import { requireLocationFormat } from '../../../shared/locations/location-regional';
 import {
   PROVIDER_SCHEDULE_REPOSITORY,
   type ProviderScheduleRepository,
@@ -17,7 +18,6 @@ import {
   describeRanges,
   providerRangesOn,
   providerWorksAt,
-  weekdayName,
   type MinuteRange,
 } from '../domain/provider-availability';
 import { requireLocationTimeZone } from '../../../shared/locations/location-time-zone';
@@ -40,11 +40,6 @@ export interface ProviderSlotCheck {
 export interface ScheduleWarning {
   code: typeof PROVIDER_OFF_SCHEDULE;
   message: string;
-}
-
-function dayMonth(day: string): string {
-  const [, m, d] = day.split('-');
-  return `${d}/${m}`;
 }
 
 /**
@@ -91,10 +86,13 @@ export class ProviderAvailabilityService {
       return null;
     }
     const ranges = providerRangesOn(snapshot, locationId, day) ?? [];
-    const weekday = weekdayName(civilWeekday(day));
+    // DX-354: el día y las horas con el formato y el reloj de la sede del
+    // horario; sin ellos (409 LOCATION_LOCALE_REQUIRED), nunca otro formato.
+    const fmt = requireLocationFormat(location);
+    const when = fmt.civilLongDate(day, { weekday: true, year: false });
     return ranges.length === 0
-      ? `Fuera del horario del profesional: no trabaja en ${location.name} el ${weekday} ${dayMonth(day)}.`
-      : `Fuera del horario del profesional en ${location.name} (${weekday} ${dayMonth(day)}: ${describeRanges(ranges)}).`;
+      ? `Fuera del horario del profesional: no trabaja en ${location.name} el ${when}.`
+      : `Fuera del horario del profesional en ${location.name} (${when}: ${describeRanges(ranges, fmt)}).`;
   }
 
   /**

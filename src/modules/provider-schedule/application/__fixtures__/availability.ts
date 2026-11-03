@@ -14,7 +14,15 @@ export function inMemoryAvailability(
 ): ProviderAvailabilityService {
   const locations = {
     findById: (id: string) =>
-      Promise.resolve({ id, name: 'Sede', timeZone, isActive: true }),
+      Promise.resolve({
+        id,
+        name: 'Sede',
+        timeZone,
+        // DX-354: los avisos escriben las horas con el formato y el reloj de la sede.
+        locale: 'de-DE',
+        hourCycle: 'h23',
+        isActive: true,
+      }),
   } as unknown as LocationRepository;
   return new ProviderAvailabilityService(repo, locations);
 }

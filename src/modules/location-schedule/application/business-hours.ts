@@ -1,3 +1,5 @@
+import type { RegionalFormat } from '../../../shared/format/regional-format';
+
 /** Un tramo de atención de un día, en minutos de pared desde 00:00. */
 export interface ScheduleRange {
   weekday: number; // 0=domingo .. 6=sábado (Date.getDay())
@@ -105,22 +107,29 @@ export function fitsBusinessHours(
     );
 }
 
-function pad(n: number): string {
-  return String(n).padStart(2, '0');
+/**
+ * Hora de pared (minutos desde 00:00) con el reloj de la sede. El final de un
+ * tramo que llega a medianoche (1440) se escribe «24:00» en 24 h y «12:00 a. m.»
+ * en 12 h (DX-354). Sin ceros ni separadores a mano: sale de `fmt.clock`.
+ */
+export function minuteText(minute: number, fmt: RegionalFormat): string {
+  if (minute === 1440)
+    return fmt.hourCycle === 'h23' ? '24:00' : fmt.clock(0, 0);
+  return fmt.clock(Math.floor(minute / 60), minute % 60);
 }
 
-/** "9:00–13:00, 15:00–19:00" — para decirle al usuario cuándo SÍ se atiende. */
+/** "09:00–13:00, 15:00–19:00" — para decirle al usuario cuándo SÍ se atiende. */
 export function describeDayRanges(
   weekday: number,
   hours: BusinessHours,
+  fmt: RegionalFormat,
 ): string {
   const ranges = hours.ranges
     .filter((r) => r.weekday === weekday)
     .sort((a, b) => a.startMinute - b.startMinute)
     .map(
       (r) =>
-        `${pad(Math.floor(r.startMinute / 60))}:${pad(r.startMinute % 60)}–` +
-        `${pad(Math.floor(r.endMinute / 60))}:${pad(r.endMinute % 60)}`,
+        `${minuteText(r.startMinute, fmt)}–${minuteText(r.endMinute, fmt)}`,
     );
   return ranges.join(', ');
 }
@@ -136,23 +145,27 @@ const WEEKDAY_NAMES = [
 ];
 
 /**
- * Mensaje 400 que explica el rechazo. Dice el horario real del día cuando lo
- * hay, y "no atiende" cuando el día está cerrado — que es la diferencia que el
- * usuario necesita para corregir.
+ * Mensaje que explica el rechazo. Dice el horario real del día cuando lo hay,
+ * y "no atiende" cuando el día está cerrado — que es la diferencia que el
+ * usuario necesita para corregir. `fmt` es PEREZOSO (DX-354): solo se pide si
+ * el día abre y hay horas que escribir; un día cerrado no necesita el formato
+ * de la sede.
  */
 export function businessHoursErrorMessage(
   start: Date,
   end: Date,
   hours: BusinessHours,
+  fmt: () => RegionalFormat,
 ): string {
   const slot = toWallClockSlot(start, end, hours.timezone);
   const dayName = WEEKDAY_NAMES[slot.weekday];
-  const ranges = describeDayRanges(slot.weekday, hours);
-  if (ranges === '') {
+  const isClosed = !hours.ranges.some((r) => r.weekday === slot.weekday);
+  if (isClosed) {
     // "los lunes" pero "los domingos": en español los días terminados en -s son
     // invariables en plural, y solo sábado y domingo lo añaden.
     const plural = dayName.endsWith('s') ? dayName : `${dayName}s`;
     return `La sede no atiende los ${plural}`;
   }
+  const ranges = describeDayRanges(slot.weekday, hours, fmt());
   return `Fuera del horario de atención (${dayName}: ${ranges})`;
 }
