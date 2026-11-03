@@ -40,6 +40,7 @@ const SUBDOMAINS = ['imports-undo-10k-a', 'imports-undo-10k-b'];
 const ROWS = 10_000;
 /** Criterio de DX-294: por debajo del corte del proxy (30 s) con margen. */
 const UNDO_BUDGET_MS = 3_000;
+const AUTOVACUUM_OFF = ['patients', 'patient_ledgers'];
 
 interface Seeded {
   tenantId: string;
@@ -155,6 +156,8 @@ async function staleStatsOverEmptyPages(tenantId: string): Promise<void> {
        WHERE "tenantId" = ${tenantId}::uuid AND "docNumber" LIKE 'relleno-%'`;
     await raw.$executeRawUnsafe('VACUUM (TRUNCATE off) "patients"');
   }
+  // `patient_ledgers` y demás, analizadas vacías, como tras cualquier autovacuum.
+  await raw.$executeRawUnsafe('ANALYZE');
   await raw.$executeRawUnsafe('VACUUM (ANALYZE, TRUNCATE off) "patients"');
 }
 
@@ -329,9 +332,11 @@ describe('DX-294: deshacer 10.000 pacientes recién importados en < 3 s (int)', 
       },
     });
     // Sin autovacuum mientras dura: si analiza a mitad, la prueba no prueba nada.
-    await raw.$executeRawUnsafe(
-      'ALTER TABLE "patients" SET (autovacuum_enabled = false)',
-    );
+    for (const table of AUTOVACUUM_OFF) {
+      await raw.$executeRawUnsafe(
+        `ALTER TABLE "${table}" SET (autovacuum_enabled = false)`,
+      );
+    }
     let batchId: string;
     let stats: { reltuples: number; relpages: number };
     let undone: Awaited<ReturnType<typeof timed<UndoResult>>>;
@@ -345,9 +350,11 @@ describe('DX-294: deshacer 10.000 pacientes recién importados en < 3 s (int)', 
         tenantContext.run(a.tenantId, () => repo.undo(batchId, a.userId)),
       );
     } finally {
-      await raw.$executeRawUnsafe(
-        'ALTER TABLE "patients" RESET (autovacuum_enabled)',
-      );
+      for (const table of AUTOVACUUM_OFF) {
+        await raw.$executeRawUnsafe(
+          `ALTER TABLE "${table}" RESET (autovacuum_enabled)`,
+        );
+      }
     }
     console.info(
       `[DX-294-ter] deshacer ${ROWS} con cartera y reltuples=${stats.reltuples}, relpages=${stats.relpages}: ${undone.ms} ms`,

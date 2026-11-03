@@ -15,13 +15,19 @@
 -- índice. Esa moneda al aire es el modo lento y por eso el reintento vuela.
 -- Medido en REPORT-DX-294-ter.
 --
--- Ahora no hay join que estimar: cada búsqueda es un filtro `= ANY(array)`,
--- que PostgreSQL resuelve por índice o con la tabla hash de la ScalarArrayOp
--- (a medida, por eso sigue `plan_cache_mode = force_custom_plan`), con coste
--- lineal en cualquier plan. El id de un paciente es único, así que los dos
--- `= ANY` eligen las mismas filas que el join por pares. El resto del cuerpo
--- es el de 20261115100000_dx527_ledgers_refresh_skip_without_rows y conserva
--- los dos SET (los vigila test/patient-imports-undo-10k.int-spec.ts).
+-- El UPDATE contra `patient_ledgers_compute()` tenía el mismo mal con otra
+-- cara: con `patient_ledgers` analizada vacía, un Seq Scan de `patients` por
+-- cada fila de cartera (13 s en la CI, 67 s en local).
+--
+-- Ahora no hay join que estimar: los bloqueos filtran con `= ANY(array)`, que
+-- PostgreSQL resuelve por índice o con la tabla hash de la ScalarArrayOp (a
+-- medida, por eso sigue `plan_cache_mode = force_custom_plan`), y el UPDATE
+-- calcula cada cartera en una subconsulta correlacionada por clave primaria.
+-- Coste lineal en cualquier plan. El id de un paciente es único, así que los
+-- dos `= ANY` eligen las mismas filas que el join por pares, y todo id con
+-- fila tiene paciente (el bloqueo de arriba ya lo comprobó). El resto del
+-- cuerpo es el de 20261115100000_dx527_ledgers_refresh_skip_without_rows y
+-- conserva los dos SET (los vigila test/patient-imports-undo-10k.int-spec.ts).
 --
 -- Vuelta atrás: volver a aplicar el cuerpo de
 -- 20261115100000_dx527_ledgers_refresh_skip_without_rows.
@@ -93,14 +99,15 @@ BEGIN
   IF with_row_t IS NOT NULL THEN
     -- Sentencia aparte, después del bloqueo: en READ COMMITTED toma una foto
     -- nueva, que ya incluye lo que confirmó quien tenía el bloqueo.
+    -- Subconsulta correlacionada, no join: un cálculo por fila, por clave
+    -- primaria del paciente, sea cual sea la estimación.
     UPDATE public."patient_ledgers" l
-       SET "locationId" = c."locationId",
-           "owing" = c."owing",
-           "ledger" = c."ledger",
-           "updatedAt" = pg_catalog.timezone('UTC', pg_catalog.now())
-      FROM public."patient_ledgers_compute"() c
-     WHERE c."tenantId" = ANY (with_row_t) AND c."patientId" = ANY (with_row_p)
-       AND l."tenantId" = c."tenantId" AND l."patientId" = c."patientId";
+       SET ("locationId", "owing", "ledger", "updatedAt") = (
+             SELECT c."locationId", c."owing", c."ledger",
+                    pg_catalog.timezone('UTC', pg_catalog.now())
+               FROM public."patient_ledgers_compute"() c
+              WHERE c."tenantId" = l."tenantId" AND c."patientId" = l."patientId")
+     WHERE l."tenantId" = ANY (with_row_t) AND l."patientId" = ANY (with_row_p);
   END IF;
 
   PERFORM pg_catalog.set_config('dentalix.ledgers_refresh', '', true);
