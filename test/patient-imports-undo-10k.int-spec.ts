@@ -29,19 +29,32 @@ import {
 // Mediciones y planes en REPORT-DX-294-ter.
 //
 // `raw` (DIRECT_URL) solo siembra, lee, mide y limpia.
-// Plan genérico por defecto en las conexiones de la app, lo que PostgreSQL acaba
-// eligiendo tras 5 ejecuciones de una sentencia preparada si le sale barato:
-// el deshacer tiene que imponer los suyos a medida en su transacción.
-const appUrl = new URL(process.env.DATABASE_URL ?? '');
-appUrl.searchParams.set('options', '-c plan_cache_mode=force_generic_plan');
-process.env.DATABASE_URL = appUrl.toString();
-
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const tenantContext = new TenantContextService();
 const prisma = new PrismaService(tenantContext);
 const repo = new PrismaPatientImportRepository(prisma, tenantContext);
+
+/**
+ * Cliente de la app con plan genérico por defecto en su conexión: lo que
+ * PostgreSQL acaba eligiendo tras 5 ejecuciones de una sentencia preparada si
+ * le sale barato. Solo para la prueba que lo pide; las demás miden con el
+ * comportamiento normal.
+ */
+async function genericPlanPrisma(): Promise<PrismaService> {
+  const original = process.env.DATABASE_URL;
+  const url = new URL(original ?? '');
+  url.searchParams.set('options', '-c plan_cache_mode=force_generic_plan');
+  process.env.DATABASE_URL = url.toString();
+  try {
+    const client = new PrismaService(tenantContext);
+    await client.onModuleInit();
+    return client;
+  } finally {
+    process.env.DATABASE_URL = original;
+  }
+}
 
 const SUBDOMAINS = ['imports-undo-10k-a', 'imports-undo-10k-b'];
 const ROWS = 10_000;
@@ -168,7 +181,10 @@ async function staleStatsOverEmptyPages(tenantId: string): Promise<void> {
   await raw.$executeRawUnsafe('VACUUM (ANALYZE, TRUNCATE off) "patients"');
 }
 
-/** Fila de cartera para todo el lote (lo que dejan unos saldos migrados). */
+/**
+ * Fila de cartera para todo el lote (lo que dejan unos saldos migrados), con
+ * valores que el refresco tiene que sobrescribir: si deja de tocarlas, se ve.
+ */
 async function withLedgerRows(
   tenantId: string,
   batchId: string,
@@ -176,8 +192,9 @@ async function withLedgerRows(
   await raw.$transaction([
     raw.$executeRaw`SELECT set_config('dentalix.ledgers_refresh', 'on', true)`,
     raw.$executeRaw`
-      INSERT INTO "patient_ledgers" ("tenantId", "patientId")
-      SELECT "tenantId", "id" FROM "patients"
+      INSERT INTO "patient_ledgers" ("tenantId", "patientId", "owing", "ledger", "updatedAt")
+      SELECT "tenantId", "id", true, '{"viejo": true}'::jsonb, TIMESTAMP '2000-01-01'
+        FROM "patients"
        WHERE "tenantId" = ${tenantId}::uuid AND "import_batch_id" = ${batchId}::uuid`,
   ]);
 }
@@ -200,6 +217,12 @@ describe('DX-294: deshacer 10.000 pacientes recién importados en < 3 s (int)', 
 
   beforeAll(async () => {
     await prisma.onModuleInit();
+    // Por si una ejecución anterior murió a mitad sin su `finally`.
+    for (const table of AUTOVACUUM_OFF) {
+      await raw.$executeRawUnsafe(
+        `ALTER TABLE "${table}" RESET (autovacuum_enabled)`,
+      );
+    }
     await purge();
     a = await seed(SUBDOMAINS[0]);
     b = await seed(SUBDOMAINS[1]);
@@ -371,6 +394,25 @@ describe('DX-294: deshacer 10.000 pacientes recién importados en < 3 s (int)', 
     expect(undone.value.undoneCreated).toBe(ROWS);
     expect(undone.ms).toBeLessThan(UNDO_BUDGET_MS);
     expect(await alive({ importBatchId: batchId })).toBe(0);
+    // Cada fila de cartera del lote, recalculada: paciente retirado, sin
+    // planes ni saldos, no debe nada (la misma cartera que con el join).
+    const ledgers = await raw.$queryRaw<
+      { owing: boolean; ledger: unknown; refreshed: boolean; n: number }[]
+    >`
+      SELECT l."owing", l."ledger", l."updatedAt" > TIMESTAMP '2000-01-02' AS refreshed,
+             count(*)::int AS n
+        FROM "patient_ledgers" l
+        JOIN "patients" p ON p."tenantId" = l."tenantId" AND p."id" = l."patientId"
+       WHERE p."import_batch_id" = ${batchId}::uuid
+       GROUP BY 1, 2, 3`;
+    expect(ledgers).toEqual([
+      {
+        owing: false,
+        ledger: { plans: [], paymentPlans: [], openings: [] },
+        refreshed: true,
+        n: ROWS,
+      },
+    ]);
   });
 
   it('DX-294-ter: con plan genérico en la conexión y la clínica pequeña en las estadísticas, también < 3 s', async () => {
@@ -402,15 +444,23 @@ describe('DX-294: deshacer 10.000 pacientes recién importados en < 3 s (int)', 
         `ALTER TABLE "${table}" SET (autovacuum_enabled = false)`,
       );
     }
+    const generic = await genericPlanPrisma();
+    const genericRepo = new PrismaPatientImportRepository(
+      generic,
+      tenantContext,
+    );
     let batchId: string;
     let undone: Awaited<ReturnType<typeof timed<UndoResult>>>;
     try {
       await raw.$executeRawUnsafe('VACUUM ANALYZE "patients"');
       batchId = await imported(a, people(ROWS, '7'));
       undone = await timed(() =>
-        tenantContext.run(a.tenantId, () => repo.undo(batchId, a.userId)),
+        tenantContext.run(a.tenantId, () =>
+          genericRepo.undo(batchId, a.userId),
+        ),
       );
     } finally {
+      await generic.onModuleDestroy();
       for (const table of AUTOVACUUM_OFF) {
         await raw.$executeRawUnsafe(
           `ALTER TABLE "${table}" RESET (autovacuum_enabled)`,
