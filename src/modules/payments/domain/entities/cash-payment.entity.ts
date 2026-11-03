@@ -64,7 +64,25 @@ export interface CashPayment {
  * (misma regla que `DELETE /payments/:id`, ver `voidDenial`). Es solo una pista
  * para la interfaz: el endpoint de anulación vuelve a aplicar la regla.
  */
-export interface CashPaymentView extends CashPayment {
+export interface CashPaymentView extends Omit<
+  CashPayment,
+  'amount' | 'currency' | 'collectedAmount' | 'notes'
+> {
+  /**
+   * SEC-043: `null` con `amountHidden` (lo mismo `currency`,
+   * `collectedAmount`, `notes` y `reference`, y `adjustments` va vacío).
+   */
+  amount: number | null;
+  currency: string | null;
+  collectedAmount: number | null;
+  notes: string | null;
+  /**
+   * SEC-043: rige el arqueo ciego, quien consulta no es ADMIN y el abono
+   * cuenta en una caja aún abierta. La fila sirve para encontrarlo, ver su
+   * recibo o anularlo, pero sin cifras: sumadas al fondo darían el esperado
+   * antes de contar. Vuelven al cerrar la caja.
+   */
+  amountHidden: boolean;
   canVoid: boolean;
   /**
    * Día civil (YYYY-MM-DD) en que se REGISTRÓ el abono, en la zona de su sede

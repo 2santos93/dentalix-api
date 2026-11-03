@@ -2,6 +2,7 @@ import type { CashSessionStatus, PaymentMethod } from '@prisma/client';
 import type { ArqueoLine, ExpectedLine } from '../arqueo';
 import type {
   CashAdjustmentView,
+  CashGroupRef,
   CashSessionDetail,
   CashSessionSummary,
   CashSettings,
@@ -47,6 +48,8 @@ export interface ClosingDraft {
   lines: ArqueoLine[];
   hasDifference: boolean;
   differenceReason: string | null;
+  /** SEC-043: no cuadró, a ciegas y sin motivo (ver `CashClosingView`). */
+  unjustifiedDifference: boolean;
   notes: string | null;
   blind: boolean;
   /** YYYY-MM-DD. */
@@ -70,8 +73,23 @@ export type CorrectionOutcome =
   | { kind: 'NOT_FOUND' }
   | { kind: 'NOT_CLOSED' };
 
+/**
+ * Resumen tal como sale de la BD. SEC-043: `openLaterGroups` son los grupos
+ * (moneda, método) con un ajuste nacido de esta caja que cuenta en otra
+ * abierta o está pendiente; el caso de uso oculta sus cifras con arqueo
+ * ciego y no lo devuelve.
+ */
+export type CashSessionSummaryRecord = CashSessionSummary & {
+  openLaterGroups: CashGroupRef[];
+};
+
 /** Detalle tal como sale de la BD; el caso de uso decide qué se enseña. */
-export type CashSessionRecord = Omit<CashSessionDetail, 'blindHidden' | 'can'>;
+export type CashSessionRecord = Omit<
+  CashSessionDetail,
+  'blindHidden' | 'can'
+> & {
+  openLaterGroups: CashGroupRef[];
+};
 
 export interface CashSessionRepository {
   getSettings(): Promise<CashSettings>;
@@ -98,7 +116,7 @@ export interface CashSessionRepository {
 
   list(
     params: ListCashSessionsParams,
-  ): Promise<{ items: CashSessionSummary[]; total: number }>;
+  ): Promise<{ items: CashSessionSummaryRecord[]; total: number }>;
 
   detail(
     id: string,

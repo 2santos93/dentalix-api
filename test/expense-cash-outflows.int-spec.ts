@@ -105,6 +105,7 @@ function closeSession(id: string, seen: ExpectedLine[][] = []) {
         lines: result.lines,
         hasDifference: false,
         differenceReason: null,
+        unjustifiedDifference: false,
         notes: null,
         blind: context.blind,
         suggestedLockDate: '2026-10-23',

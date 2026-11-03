@@ -641,4 +641,97 @@ describe('ListCashPaymentsUseCase', () => {
       });
     });
   });
+
+  describe('arqueo ciego (SEC-043)', () => {
+    it.each([
+      ['ADMIN', ADMIN, false],
+      ['RECEPTION', RECEPTION, true],
+    ])(
+      '%s: la lista y el CSV piden quitar las cajas abiertas solo si no es ADMIN (%s)',
+      async (_who, actor, blindViewer) => {
+        const repo = new SpyPaymentRepository();
+        await useCaseFor(repo, actor).execute(RANGE);
+        await useCaseFor(repo, actor).exportAll(RANGE);
+        expect(repo.calls.map((c) => c.blindViewer)).toEqual([
+          blindViewer,
+          blindViewer,
+        ]);
+      },
+    );
+
+    it('una fila de una caja abierta sale sin importe, moneda, cobrado, notas ni ajustes; las demás, enteras', async () => {
+      const hidden = fakeRow('p-open', {
+        amount: 30,
+        notes: 'pagó 30 en billetes',
+        reference: 'Pago móvil 30 USD',
+        externalInvoiceNumber: 'F-0001',
+        adjustments: [
+          {
+            type: 'TAX',
+            label: 'Impuesto',
+            calculation: 'FIXED',
+            percent: null,
+            fixedAmount: 1,
+            base: 30,
+            amount: 1,
+            currency: 'VES',
+          },
+        ],
+        collectedAmount: 31,
+      });
+      const page: CashRegisterPage = {
+        items: [
+          { ...hidden, inOpenCashSession: true },
+          fakeRow('p-closed', { amount: 20 }),
+        ],
+        total: 2,
+        groups: [],
+        scopeLocation: null,
+        blindHidden: true,
+      };
+      for (const run of ['execute', 'exportAll'] as const) {
+        const out = await useCaseFor(new SpyPaymentRepository(page), RECEPTION)[
+          run
+        ](RANGE);
+        const [open, closed] = out.items;
+        expect(open).toMatchObject({
+          id: 'p-open',
+          amount: null,
+          currency: null,
+          collectedAmount: null,
+          notes: null,
+          reference: null,
+          // El nº de factura externa no es un importe: se queda.
+          externalInvoiceNumber: 'F-0001',
+          adjustments: [],
+          amountHidden: true,
+          // Lo que sirve para encontrarlo y actuar sigue.
+          patient: { fullName: 'Ana Gómez' },
+          method: PaymentMethod.CASH,
+          canVoid: true,
+        });
+        expect(closed).toMatchObject({
+          id: 'p-closed',
+          amount: 20,
+          currency: 'VES',
+          amountHidden: false,
+        });
+      }
+    });
+
+    it('el repositorio dice si quitó algo: la lista y el CSV lo devuelven', async () => {
+      const repo = new SpyPaymentRepository({
+        items: [],
+        total: 0,
+        groups: [],
+        scopeLocation: null,
+        blindHidden: true,
+      });
+      const uc = useCaseFor(repo, RECEPTION);
+      expect((await uc.execute(RANGE)).blindHidden).toBe(true);
+      expect((await uc.exportAll(RANGE)).blindHidden).toBe(true);
+      const plain = useCaseFor(new SpyPaymentRepository(), RECEPTION);
+      expect((await plain.execute(RANGE)).blindHidden).toBe(false);
+    });
+  });
 });

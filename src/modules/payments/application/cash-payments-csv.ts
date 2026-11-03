@@ -35,6 +35,14 @@ export const CASH_PAYMENTS_CSV_HEADER = [
 ] as const;
 
 const NO_METHOD = 'Sin método';
+/**
+ * SEC-043: el abono de una caja aún abierta con arqueo ciego va en el CSV
+ * (como en la pantalla, para encontrarlo) pero sin cifras: Moneda y ajustes
+ * vacíos e Importe y Total cobrado con este texto. Un texto en una columna de
+ * importes no suma en una hoja de cálculo, así que ningún total lo incluye y
+ * nadie lo confunde con un 0.
+ */
+export const CSV_HIDDEN_AMOUNT = 'Oculto durante el arqueo';
 
 /** DX-516: la suma de un tipo de ajuste del abono, o vacío si no tiene. */
 function adjustmentCell(
@@ -77,6 +85,27 @@ export function toCashPaymentsCsv(
 ): string {
   const lines: string[] = [CASH_PAYMENTS_CSV_HEADER.join(',')];
   for (const row of rows) {
+    if (row.amountHidden || row.currency === null) {
+      lines.push(
+        [
+          row.paidOn,
+          csvText(row.location.name),
+          csvText(row.patient.fullName),
+          csvText(destinationOf(row)),
+          csvText(row.paymentMethod?.name ?? NO_METHOD),
+          csvText(row.reference),
+          csvText(row.externalInvoiceNumber),
+          '',
+          csvText(CSV_HIDDEN_AMOUNT),
+          '',
+          '',
+          '',
+          csvText(CSV_HIDDEN_AMOUNT),
+          '',
+        ].join(','),
+      );
+      continue;
+    }
     lines.push(
       [
         row.paidOn,
@@ -87,11 +116,14 @@ export function toCashPaymentsCsv(
         csvText(row.reference),
         csvText(row.externalInvoiceNumber),
         row.currency,
-        csvAmount(row.amount, digits.roundingDigits(row.currency)),
+        csvAmount(row.amount ?? 0, digits.roundingDigits(row.currency)),
         adjustmentCell(row, 'TAX', digits.roundingDigits(row.currency)),
         adjustmentCell(row, 'SURCHARGE', digits.roundingDigits(row.currency)),
         adjustmentCell(row, 'DISCOUNT', digits.roundingDigits(row.currency)),
-        csvAmount(row.collectedAmount, digits.roundingDigits(row.currency)),
+        csvAmount(
+          row.collectedAmount ?? 0,
+          digits.roundingDigits(row.currency),
+        ),
         csvText(adjustmentDetail(row, digits.roundingDigits(row.currency))),
       ].join(','),
     );
