@@ -66,7 +66,7 @@ export const COUNTRY_TERMS: readonly CountryTerm[] = [
     id: 'PREPAGADA_' + 'CO',
     pattern: new RegExp(`${B}PREPAGADA_` + `CO${E}`, 'u'),
   },
-  // `\s` Unicode cubre el espacio duro y el salto dentro de un texto JSX.
+  // `\s` Unicode cubre el espacio duro y los espacios repetidos (el escaneo es por línea).
   {
     id: 'Ley\\s+' + '1581',
     pattern: new RegExp(`${B}Ley\\s+` + `1581${E}`, 'u'),
@@ -84,8 +84,8 @@ export const COUNTRY_TERMS: readonly CountryTerm[] = [
     pattern: new RegExp(`${B}Res\\.\\s*` + `1995${E}`, 'u'),
   },
   {
-    id: 'C[eé]dula de ' + 'ciudadan[ií]a',
-    pattern: new RegExp(`${B}C[eé]dula de ` + `ciudadan[ií]a${E}`, 'iu'),
+    id: 'C[eé]dula\\s+de\\s+' + 'ciudadan[ií]a',
+    pattern: new RegExp(`${B}C[eé]dula\\s+de\\s+` + `ciudadan[ií]a${E}`, 'iu'),
   },
 ];
 
@@ -109,7 +109,8 @@ const NOT_PRODUCTION = [
   /\.test\.tsx?$/,
   /(^|\/)__fixtures__\//,
   /(^|\/)lib\/test\//,
-  /fixture/i,
+  // Solo el nombre del fichero: un directorio `fixtures-loader/` de producción sí se escanea.
+  /(^|\/)[^/]*fixture[^/]*$/i,
   /(^|\/)lib\/api\/schema\.d\.ts$/,
 ];
 
@@ -143,7 +144,11 @@ export function scanCountryAssumptions(
   root: string,
   exceptions: readonly CountryException[],
 ): Finding[] {
-  const allowed = new Set(exceptions.map((e) => `${e.path}|${e.term}`));
+  const allowed = new Set(
+    (Array.isArray(exceptions) ? exceptions : []).map(
+      (e: CountryException) => `${e?.path}|${e?.term}`,
+    ),
+  );
   return scannedFiles(root).flatMap((path) =>
     readFileSync(join(root, path), 'utf8')
       .split('\n')
@@ -156,14 +161,21 @@ export function scanCountryAssumptions(
 }
 
 /** Problemas de forma y excepciones obsoletas; cada mensaje dice qué quitar. */
-export function exceptionProblems(
-  root: string,
-  exceptions: readonly CountryException[],
-): string[] {
+export function exceptionProblems(root: string, exceptions: unknown): string[] {
+  if (!Array.isArray(exceptions)) {
+    return [
+      'country-assumptions.exceptions.json debe ser un array de { path, term, reason }.',
+    ];
+  }
   const ids = new Set(COUNTRY_TERMS.map((t) => t.id));
   const files = new Set(scannedFiles(root));
   const seen = new Set<string>();
-  return exceptions.flatMap((e) => {
+  return (exceptions as CountryException[]).flatMap((e, index) => {
+    if (typeof e?.path !== 'string' || typeof e?.term !== 'string') {
+      return [
+        `entrada ${index} (${JSON.stringify(e)}): faltan path o term (string); corrígela o quítala.`,
+      ];
+    }
     const where = `${e.path} · ${e.term}`;
     if (!ids.has(e.term))
       return [`${where}: término desconocido; usa un id de COUNTRY_TERMS.`];
@@ -250,9 +262,10 @@ describe('sin suposiciones de país en src/ (DX-334)', () => {
       ['PREPAGADA_' + 'CO']: 'kind: PREPAGADA_' + 'CO',
       ['Ley\\s+' + '1581']: 'según la Ley ' + '1581',
       ['Decreto\\s+' + '1377']: 'el Decreto ' + '1377',
-      ['Res\\.\\s*' + '839']: 'Res. ' + '839',
+      ['Res\\.\\s*' + '839']: 'Res.\u00a0' + '839',
       ['Res\\.\\s*' + '1995']: 'Res.' + '1995',
-      ['C[eé]dula de ' + 'ciudadan[ií]a']: 'CEDULA DE ' + 'CIUDADANIA',
+      ['C[eé]dula\\s+de\\s+' + 'ciudadan[ií]a']:
+        'CEDULA  DE\u00a0' + 'CIUDADANIA',
     };
     for (const term of COUNTRY_TERMS) {
       expect({ term: term.id, ids: termsInLine(samples[term.id]) }).toEqual({
@@ -308,6 +321,20 @@ describe('sin suposiciones de país en src/ (DX-334)', () => {
     }
   });
 
+  it('la exclusión por fixture mira solo el nombre del fichero', () => {
+    const root = fakeSrc({
+      'fixtures-loader/d.ts': 'export const d = 1;\n',
+      'modules/x-fixture.ts': 'export const x = 1;\n',
+    });
+    try {
+      const files = scannedFiles(root);
+      expect(files).toContain('fixtures-loader/d.ts');
+      expect(files).not.toContain('modules/x-fixture.ts');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('valida las excepciones: motivo, término conocido y sin duplicados', () => {
     const term = 'Clinic' + 'Country';
     const root = fakeSrc({ 'a.ts': `// ${term}\n` });
@@ -329,6 +356,16 @@ describe('sin suposiciones de país en src/ (DX-334)', () => {
         expect(exceptionProblems(root, [bad])).toHaveLength(1);
       }
       expect(exceptionProblems(root, [base, { ...base }])).toHaveLength(1);
+      // Forma rota: un mensaje que nombra la entrada, nunca un TypeError.
+      expect(exceptionProblems(root, { path: 'a.ts' })).toEqual([
+        expect.stringContaining('debe ser un array'),
+      ]);
+      expect(exceptionProblems(root, [{ term, reason: base.reason }])).toEqual([
+        expect.stringContaining('entrada 0'),
+      ]);
+      expect(
+        exceptionProblems(root, [{ path: 'a.ts', reason: base.reason }]),
+      ).toEqual([expect.stringContaining('entrada 0')]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
