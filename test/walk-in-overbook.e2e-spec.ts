@@ -359,6 +359,83 @@ describe('Sobrecupo de urgencia y «Atender sin cita» idempotente (e2e, DX-509/
       expect((await agendaRow(a.id)).overbooked).toBe(false);
     });
 
+    it('DX-492-bis: con el sillón ocupado a esa hora, el 409 es de solape (código y ámbito `chair`) y «Buscar hueco» con ese sillón da el siguiente', async () => {
+      const chair = (
+        await as(api().post('/api/v1/chairs'), clinic.adminToken)
+          .send({ locationId: mainId, name: 'Sillón Ávila' })
+          .expect(201)
+      ).body as Body;
+      clockNow = local('13:00');
+      const a = (
+        await as(api().post('/api/v1/appointments/walk-in'), reception.token)
+          .send({
+            patientId: urgentPatientId,
+            providerId: dentist.userId,
+            chairId: chair.id,
+            triageFlags: ['PAIN'],
+            overbookReason: 'Dolor agudo, no puede esperar',
+          })
+          .expect(201)
+      ).body as Body;
+      expect(a).toMatchObject({ overbooked: true, chairId: chair.id });
+      // Otra profesional y otra paciente ocupan el sillón de 15:30 a 16:00; la
+      // dentista y la paciente de la urgencia están libres: solo choca el
+      // sillón.
+      await as(api().post('/api/v1/appointments'), reception.token)
+        .send({
+          patientId: await createPatient(clinic, '492101', 'Carmen'),
+          providerId: dentist2.userId,
+          chairId: chair.id,
+          start: local('15:30').toISOString(),
+          end: local('16:00').toISOString(),
+        })
+        .expect(201);
+
+      const clash = await patch(a.id, {
+        start: local('15:40').toISOString(),
+        end: local('16:10').toISOString(),
+      }).expect(409);
+      expect(clash.body).toMatchObject({
+        statusCode: 409,
+        code: 'APPOINTMENT_OVERLAP',
+        scope: 'chair',
+        message: 'El sillón «Sillón Ávila» ya está ocupado de 15:30 a 16:00',
+      });
+      expect(await overbookedInDb(a.id)).toBe(true);
+
+      // Lo que pide la web para ofrecer el hueco: con ese sillón, el primero
+      // desde las 15:30 empieza a las 16:00; sin él, a las 15:30.
+      const firstFrom = async (chairIds?: string) => {
+        const res = await as(
+          api().get('/api/v1/appointments/openings'),
+          reception.token,
+        )
+          .query({
+            providerId: dentist.userId,
+            locationId: mainId,
+            from: DAY,
+            to: DAY,
+            durationMinutes: 30,
+            patientId: urgentPatientId,
+            excludeAppointmentId: a.id,
+            ...(chairIds ? { chairIds } : {}),
+          })
+          .expect(200);
+        const list = (
+          res.body as { openings: { start: string; end: string }[] }
+        ).openings;
+        const at = list.find((o) => new Date(o.end) > local('15:30'));
+        return (
+          at &&
+          new Date(
+            Math.max(new Date(at.start).getTime(), local('15:30').getTime()),
+          ).toISOString()
+        );
+      };
+      expect(await firstFrom(chair.id)).toBe(local('16:00').toISOString());
+      expect(await firstFrom()).toBe(local('15:30').toISOString());
+    });
+
     it('a otro profesional: normal y ocupa SU hueco', async () => {
       const a = await overbookedAt('12:00');
       const moved = await patch(a.id, { providerId: dentist2.userId }).expect(

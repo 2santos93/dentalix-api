@@ -24,6 +24,10 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
+/** DX-492-bis: el 400 de `chairId` que no es un id (también `null`). */
+const CHAIR_ID_INVALID =
+  'El sillón no es válido: elige uno de la sede o deja la cita sin sillón';
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DAY = new Date(Date.now() + 3 * DAY_MS).toISOString().slice(0, 10);
 /** Instante UTC; la zona de la sede es UTC−4: 15:00Z son las 11:00. */
@@ -377,6 +381,59 @@ describe('Sillones por sede y anti-solape por sillón (e2e, DX-211)', () => {
       );
     });
 
+    it('DX-492-bis: `chairId: null` al agendar es un dato inválido: 400 en español, no un 500, y no guarda nada', async () => {
+      const before = await raw.appointment.count({
+        where: { tenantId: clinic.tenantId },
+      });
+      const res = await book({
+        chairId: null,
+        patientId: patients[3],
+        start: at('20:00'),
+        end: at('20:30'),
+      }).expect(400);
+      expect((res.body as { message: string[] }).message).toEqual([
+        CHAIR_ID_INVALID,
+      ]);
+      // Sin profesional y con `null`, tampoco llega a buscar el sillón.
+      await book({
+        chairId: null,
+        providerId: undefined,
+        patientId: patients[3],
+        start: at('20:00'),
+        end: at('20:30'),
+      }).expect(400);
+      expect(
+        await raw.appointment.count({ where: { tenantId: clinic.tenantId } }),
+      ).toBe(before);
+    });
+
+    it('DX-492-bis: al editar, un `chairId` que no es un id da 400 en español (null sí quita el sillón)', async () => {
+      const mine = (
+        await book({
+          chairId: one.id,
+          patientId: patients[2],
+          start: at('16:00'),
+          end: at('16:30'),
+        }).expect(201)
+      ).body as AppointmentBody;
+      const bad = await as(
+        api().patch(`/api/v1/appointments/${mine.id}`),
+        reception.token,
+      )
+        .send({ chairId: 'sillon-1' })
+        .expect(400);
+      expect((bad.body as { message: string[] }).message).toEqual([
+        'El sillón no es válido: elige uno de la sede o quítalo',
+      ]);
+      const cleared = await as(
+        api().patch(`/api/v1/appointments/${mine.id}`),
+        reception.token,
+      )
+        .send({ chairId: null })
+        .expect(200);
+      expect((cleared.body as AppointmentBody).chairId).toBeNull();
+    });
+
     it('reprogramar al hueco ocupado del sillón: 409; cambiar de sillón a uno libre: 200', async () => {
       const mine = (
         await book({
@@ -393,9 +450,12 @@ describe('Sillones por sede y anti-solape por sillón (e2e, DX-211)', () => {
       )
         .send({ start: at('19:00'), end: at('19:30') })
         .expect(409);
-      expect((clash.body as { message: string }).message).toBe(
-        'El sillón «Sillón 2» ya está ocupado de 15:00 a 15:30',
-      );
+      // DX-492-bis: al mover, con el código y el ámbito de los demás solapes.
+      expect(clash.body).toMatchObject({
+        code: 'APPOINTMENT_OVERLAP',
+        scope: 'chair',
+        message: 'El sillón «Sillón 2» ya está ocupado de 15:00 a 15:30',
+      });
       const moved = await as(
         api().patch(`/api/v1/appointments/${mine.id}`),
         reception.token,
@@ -416,9 +476,12 @@ describe('Sillones por sede y anti-solape por sillón (e2e, DX-211)', () => {
       )
         .send({ chairId: two.id })
         .expect(409);
-      expect((occupied.body as { message: string }).message).toBe(
-        'El sillón «Sillón 2» ya está ocupado de 17:00 a 17:30',
-      );
+      // DX-492-bis: al mover, con el código y el ámbito de los demás solapes.
+      expect(occupied.body).toMatchObject({
+        code: 'APPOINTMENT_OVERLAP',
+        scope: 'chair',
+        message: 'El sillón «Sillón 2» ya está ocupado de 17:00 a 17:30',
+      });
     });
 
     it('la agenda filtra por chairIds; un sillón de otra sede da 400', async () => {

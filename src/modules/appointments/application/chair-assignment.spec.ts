@@ -75,6 +75,33 @@ describe('sillón de una cita (DX-211)', () => {
     );
   });
 
+  it('DX-492-bis: al mover, el 409 lleva el código y el ámbito de los demás solapes', async () => {
+    const chair = chairs.seed({ locationId: 'norte', name: 'Sillón 2' });
+    appointments.seed({ chairId: chair.id, start: START, end: END });
+    const slot = { locationId: 'norte', start: START, end: END };
+    const response = (err: unknown) =>
+      (err as ConflictException).getResponse() as Record<string, unknown>;
+    const moving = await service
+      .assertFree(chair, slot, { moving: true })
+      .catch(response);
+    expect(moving).toEqual({
+      statusCode: 409,
+      error: 'Conflict',
+      code: 'APPOINTMENT_OVERLAP',
+      scope: 'chair',
+      message: 'El sillón «Sillón 2» ya está ocupado de 10:00 a 10:30',
+    });
+    // Al agendar, como antes: sin código.
+    expect(
+      await service.assertFree(chair, slot).catch(response),
+    ).not.toHaveProperty('code');
+    expect(
+      (
+        await service.raceConflict(chair.id, slot, { moving: true })
+      ).getResponse(),
+    ).toMatchObject({ code: 'APPOINTMENT_OVERLAP', scope: 'chair' });
+  });
+
   it('contigua, cancelada o la propia cita no ocupan el sillón', async () => {
     const chair = chairs.seed({ locationId: 'norte' });
     const own = appointments.seed({

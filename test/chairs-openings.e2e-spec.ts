@@ -3,6 +3,7 @@ import { INestApplication } from '@nestjs/common';
 import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
+import { CHAIR_ID_INVALID_MESSAGE } from '../src/modules/chairs/domain/chair-rules';
 import {
   Clinic,
   createE2eApp,
@@ -403,9 +404,12 @@ describe('Sillones en «Buscar hueco», «Atender sin cita» y «En clínica» (
     });
 
     it('`chairId: null` es un dato inválido, no un 500', async () => {
-      await walkIn({ patientId: patients[0], chairId: null })
+      // DX-492-bis: con el mismo mensaje en español que al agendar.
+      const invalid = { message: [CHAIR_ID_INVALID_MESSAGE] };
+      const keyed = await walkIn({ patientId: patients[0], chairId: null })
         .set('Idempotency-Key', randomUUID())
         .expect(400);
+      expect(keyed.body).toMatchObject(invalid);
       await walkIn({ patientId: patients[0], chairId: null }).expect(400);
       const entry = (
         await as(api().post('/api/v1/waitlist'))
@@ -419,7 +423,8 @@ describe('Sillones en «Buscar hueco», «Atender sin cita» y «En clínica» (
           start: new Date(Date.now() + 86_400_000).toISOString(),
           chairId: null,
         })
-        .expect(400);
+        .expect(400)
+        .expect((res) => expect(res.body).toMatchObject(invalid));
     });
 
     it('sin sillón sigue funcionando', async () => {

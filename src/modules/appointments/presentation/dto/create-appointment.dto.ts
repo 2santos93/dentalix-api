@@ -9,7 +9,9 @@ import {
   IsString,
   IsUUID,
   MaxLength,
+  ValidateIf,
 } from 'class-validator';
+import { CHAIR_ID_INVALID_MESSAGE } from '../../../chairs/domain/chair-rules';
 
 // NOTE: deliberately NO `tenantId`/`status`/`createdById` field — the tenant
 // comes from the guarded request context (never the client, same convention
@@ -46,10 +48,12 @@ export class CreateAppointmentDto {
   @ApiPropertyOptional({
     format: 'uuid',
     description:
-      'DX-211: sillón de la cita. De esta clínica (si no, 404), de la sede de la cita y activo (si no, 400). Otra cita viva en ese sillón y franja: 409 «El sillón X ya está ocupado de HH:MM a HH:MM» (horas de la sede). Sin él, nada cambia.',
+      'DX-211: sillón de la cita. De esta clínica (si no, 404), de la sede de la cita y activo (si no, 400). Otra cita viva en ese sillón y franja: 409 «El sillón X ya está ocupado de HH:MM a HH:MM» (horas de la sede). Sin él, nada cambia. `null` no es «sin sillón»: 400 (DX-492-bis).',
   })
-  @IsOptional()
-  @IsUUID()
+  // DX-492-bis: `null` no es «sin sillón» (eso es no mandarlo): se rechaza
+  // aquí, no con un 500 al buscarlo, como en «Atender sin cita».
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsUUID(undefined, { message: CHAIR_ID_INVALID_MESSAGE })
   chairId?: string;
 
   @ApiProperty({ type: String, format: 'date-time' })

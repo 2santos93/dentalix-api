@@ -12,6 +12,15 @@ export const CHAIR_SORT_ORDER_MAX = 999;
 export const MAX_CHAIR_COLUMNS = 12;
 
 export const CHAIR_NOT_FOUND_MESSAGE = 'Sillón no encontrado';
+/**
+ * DX-492-bis: `chairId` que no es un id al agendar (también `null`, que no es
+ * «sin sillón»: sin sillón es no mandarlo).
+ */
+export const CHAIR_ID_INVALID_MESSAGE =
+  'El sillón no es válido: elige uno de la sede o deja la cita sin sillón';
+/** DX-492-bis: lo mismo al editar, donde `null` sí es «quitar el sillón». */
+export const CHAIR_ID_INVALID_ON_EDIT_MESSAGE =
+  'El sillón no es válido: elige uno de la sede o quítalo';
 export const DUPLICATE_CHAIR_NAME_MESSAGE =
   'Ya existe un sillón con ese nombre en esta sede.';
 

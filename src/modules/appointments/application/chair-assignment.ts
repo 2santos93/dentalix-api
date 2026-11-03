@@ -18,6 +18,7 @@ import { LOCATION_REPOSITORY } from '../../locations/domain/ports/location-repos
 import type { LocationRepository } from '../../locations/domain/ports/location-repository.port';
 import { regionalFormat } from '../../../shared/format/regional-format';
 import { APPOINTMENT_REPOSITORY } from '../domain/ports/appointment-repository.port';
+import { overlapConflict } from './appointment-overlap-error';
 import type { AppointmentRepository } from '../domain/ports/appointment-repository.port';
 
 /**
@@ -52,10 +53,16 @@ export class ChairAssignmentService {
     return chair!;
   }
 
-  /** 409 si otra cita viva y no cancelada ocupa el sillón en `[start, end)`. */
+  /**
+   * 409 si otra cita viva y no cancelada ocupa el sillón en `[start, end)`.
+   * DX-492-bis: con `moving` (al editar la cita: moverla, cambiarle el sillón
+   * o reactivarla), con el código y el ámbito de los demás solapes, para que
+   * la web ofrezca el siguiente hueco. Al agendar o atender sin cita, sin él.
+   */
   async assertFree(
     chair: Chair,
     slot: { locationId: string; start: Date; end: Date; excludeId?: string },
+    opts: { moving?: boolean } = {},
   ): Promise<void> {
     const [occupied] = await this.appointments.findOverlappingForChair(
       chair.id,
@@ -64,8 +71,9 @@ export class ChairAssignmentService {
       slot.excludeId,
     );
     if (occupied) {
-      throw new ConflictException(
+      throw conflict(
         await this.message(chair.name, slot.locationId, occupied),
+        opts,
       );
     }
   }
@@ -77,6 +85,7 @@ export class ChairAssignmentService {
   async raceConflict(
     chairId: string,
     slot: { start: Date; end: Date; excludeId?: string },
+    opts: { moving?: boolean } = {},
   ): Promise<ConflictException> {
     const chair = await this.chairs.findById(chairId);
     const name = chair?.name ?? '';
@@ -87,11 +96,9 @@ export class ChairAssignmentService {
       slot.excludeId,
     );
     if (!chair || !occupied) {
-      return new ConflictException(chairOverlapMessage(name, null));
+      return conflict(chairOverlapMessage(name, null), opts);
     }
-    return new ConflictException(
-      await this.message(name, chair.locationId, occupied),
-    );
+    return conflict(await this.message(name, chair.locationId, occupied), opts);
   }
 
   /**
@@ -119,4 +126,14 @@ export class ChairAssignmentService {
       to: fmt.time(occupied.end, location.timeZone),
     });
   }
+}
+
+/** El 409 del sillón: al editar, con código y ámbito; al crear, solo el mensaje. */
+function conflict(
+  message: string,
+  opts: { moving?: boolean },
+): ConflictException {
+  return opts.moving
+    ? overlapConflict('chair', message)
+    : new ConflictException(message);
 }

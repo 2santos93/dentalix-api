@@ -27,22 +27,35 @@ export const OVERLAP_MESSAGES: Record<
 };
 
 /**
- * DX-509-bis: código del 409 de solape al MOVER una cita (profesional o
- * paciente). Con él la web distingue «ese hueco está ocupado» de los demás 409
- * (paciente en la clínica, ítem cerrado...) y ofrece el siguiente hueco libre.
+ * DX-509-bis: código del 409 de solape al EDITAR una cita (PATCH: mover,
+ * cambiar de sillón o reactivarla) por el profesional, el paciente o
+ * (DX-492-bis) el sillón. Al agendar o atender sin cita no lo lleva. Con él la web distingue «ese hueco está
+ * ocupado» de los demás 409 (paciente en la clínica, ítem cerrado...) y ofrece
+ * el siguiente hueco libre.
  */
 export const APPOINTMENT_OVERLAP_CODE = 'APPOINTMENT_OVERLAP';
 
-/** El 409 de solape con su código y ámbito; el mensaje es el de siempre. */
+/**
+ * El 409 de solape con su código y ámbito. El mensaje es el de siempre; el del
+ * sillón (con su nombre y horas) lo da ChairAssignmentService.
+ */
 export function overlapConflict(
   scope: Exclude<OverlapScope, 'chair'>,
+): ConflictException;
+export function overlapConflict(
+  scope: 'chair',
+  message: string,
+): ConflictException;
+export function overlapConflict(
+  scope: OverlapScope,
+  message?: string,
 ): ConflictException {
   return new ConflictException({
     statusCode: 409,
     error: 'Conflict',
     code: APPOINTMENT_OVERLAP_CODE,
     scope,
-    message: OVERLAP_MESSAGES[scope],
+    message: scope === 'chair' ? message : OVERLAP_MESSAGES[scope],
   });
 }
 

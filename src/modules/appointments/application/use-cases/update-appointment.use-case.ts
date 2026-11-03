@@ -561,12 +561,16 @@ export class UpdateAppointmentUseCase {
         requireActive: true,
       });
       if (finalStatus !== AppointmentStatus.CANCELLED) {
-        await this.requireChairs().assertFree(chair, {
-          locationId: existing.locationId,
-          start: patch.start ?? existing.start,
-          end: patch.end ?? existing.end,
-          excludeId: existing.id,
-        });
+        await this.requireChairs().assertFree(
+          chair,
+          {
+            locationId: existing.locationId,
+            start: patch.start ?? existing.start,
+            end: patch.end ?? existing.end,
+            excludeId: existing.id,
+          },
+          { moving: true },
+        );
       }
     }
 
@@ -652,11 +656,15 @@ export class UpdateAppointmentUseCase {
       const scope = overlapExclusionScope(error);
       // DX-211: también al reactivar una cancelada cuyo sillón se ocupó.
       if (scope === 'chair' && nextChairId !== null) {
-        throw await this.requireChairs().raceConflict(nextChairId, {
-          start: patch.start ?? existing.start,
-          end: patch.end ?? existing.end,
-          excludeId: existing.id,
-        });
+        throw await this.requireChairs().raceConflict(
+          nextChairId,
+          {
+            start: patch.start ?? existing.start,
+            end: patch.end ?? existing.end,
+            excludeId: existing.id,
+          },
+          { moving: true },
+        );
       }
       // DX-509: el hueco del sobrecupo reactivado se ocupó a la vez: se
       // puede reintentar manteniéndolo en sobrecupo.
