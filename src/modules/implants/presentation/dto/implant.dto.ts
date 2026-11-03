@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { PatientImplantKind } from '@prisma/client';
 import { Type } from 'class-transformer';
+import { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
 import {
   IsEnum,
   IsNumber,
@@ -222,6 +223,13 @@ export class ImplantCardDto {
   @ApiProperty({ type: String, format: 'date', nullable: true })
   patientBirthDate!: string | null;
   @ApiProperty() clinicName!: string;
+  @ApiProperty({
+    type: DocumentRegionalDto,
+    nullable: true,
+    description:
+      'DX-354: zona, locale y reloj de la sede de la tarjeta (la de los implantes si es una; si junta varias, la activa). null si le falta algo: la tarjeta se lee igual y la web pinta «—».',
+  })
+  regional!: DocumentRegionalDto | null;
   @ApiProperty({ type: [ImplantCardLocationDto] })
   locations!: ImplantCardLocationDto[];
   @ApiProperty({ format: 'date' }) placedOn!: string;

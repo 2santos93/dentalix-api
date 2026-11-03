@@ -71,8 +71,21 @@ describe('Baja de recordatorios por enlace (DX-128)', () => {
         primaryColor: '#0E7490',
         logoUrl: null,
       },
+      // DX-354: la región de la sede principal, para pintar la fecha de la baja.
+      regional: {
+        timeZone: 'America/Caracas',
+        locale: 'es-VE',
+        hourCycle: 'h12',
+      },
     });
     expect(repo.patients.get(ANA)?.optedOutAt).toBeNull();
+  });
+
+  it('DX-354: sin reloj en la sede principal, regional null y la vista se sirve igual', async () => {
+    repo.regional = null;
+    const view = await get().execute(TOKEN);
+    expect(view.regional).toBeNull();
+    expect(view.status).toBe('ACTIVE');
   });
 
   it('confirmar registra la baja con origen LINK y la audita sin actor', async () => {

@@ -1,4 +1,8 @@
 import {
+  DOCUMENT_REGIONAL_SELECT,
+  documentRegional,
+} from '../../../shared/locations/document-regional';
+import {
   BadRequestException,
   ConflictException,
   Injectable,
@@ -82,6 +86,8 @@ const REFUND_SELECT = {
   createdById: true,
   createdAt: true,
   idempotencyFingerprint: true,
+  // DX-354: la región de la sede del comprobante.
+  location: { select: DOCUMENT_REGIONAL_SELECT },
   payments: { select: { paymentId: true }, orderBy: { paymentId: 'asc' } },
 } satisfies Prisma.PatientCreditRefundSelect;
 
@@ -97,9 +103,10 @@ function toTransfer(row: TransferRow): CreditTransferRecord {
 }
 
 function toRefund(row: RefundRow): CreditRefundRecord {
-  const { payments, seriesPrefix, number, snapshot, ...rest } = row;
+  const { payments, seriesPrefix, number, snapshot, location, ...rest } = row;
   return {
     ...rest,
+    regional: documentRegional(location),
     amount: row.amount.toNumber(),
     number: formatRefundNumber(seriesPrefix, number),
     paymentIds: payments.map((p) => p.paymentId),

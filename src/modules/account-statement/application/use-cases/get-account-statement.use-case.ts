@@ -115,6 +115,7 @@ export class GetAccountStatementUseCase {
     return {
       issuedAt,
       clinic: data.clinic,
+      regional: data.regional,
       // En vivo: el nombre visible de hoy (DX-327, R17 y R18).
       patient: {
         ...data.patient,

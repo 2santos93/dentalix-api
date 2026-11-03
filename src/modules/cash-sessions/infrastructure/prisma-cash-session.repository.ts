@@ -1,3 +1,7 @@
+import {
+  DOCUMENT_REGIONAL_SELECT,
+  documentRegional,
+} from '../../../shared/locations/document-regional';
 import { Injectable } from '@nestjs/common';
 import { CashSessionStatus, Prisma } from '@prisma/client';
 import { formatRefundNumber } from '../../patient-credit/domain/patient-credit';
@@ -553,6 +557,13 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
         const timeZone = (
           await resolveLocationTimeZones(tx, tenantId, [session.locationId])
         )(session.locationId);
+        // DX-354: la región de la sede de la caja, para imprimir el cierre.
+        const regional = documentRegional(
+          await tx.location.findFirst({
+            where: { id: session.locationId, tenantId },
+            select: DOCUMENT_REGIONAL_SELECT,
+          }),
+        );
         const names = await this.staffNames(tx, [
           session.openedById,
           ...(session.closedById ? [session.closedById] : []),
@@ -576,6 +587,7 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
           ...this.toSummary(session, names, timeZone),
           notes: session.notes,
           timeZone,
+          regional,
           expected: expectedLines(source).map((line): CashExpectedLine => ({
             currency: line.currency,
             method: line.method,

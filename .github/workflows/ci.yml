@@ -80,6 +80,9 @@ jobs:
       - name: tsc --noEmit
         if: ${{ !cancelled() && steps.prisma.outcome == 'success' }}
         run: npx tsc --noEmit
+      - name: Supuestos de país (check:country-assumptions)
+        if: ${{ !cancelled() && steps.prisma.outcome == 'success' }}
+        run: npm run check:country-assumptions
       - name: Unit (npm test)
         if: ${{ !cancelled() && steps.prisma.outcome == 'success' }}
         run: npm test

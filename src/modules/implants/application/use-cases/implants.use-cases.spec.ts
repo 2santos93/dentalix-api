@@ -204,6 +204,21 @@ describe('Implantes (DX-191, casos de uso)', () => {
       expect(delivered.deliveredAt).toEqual(NOW);
     });
 
+    it('DX-354: la tarjeta lleva el regional de la sede de sus implantes, sin 409 si no hay', async () => {
+      const card = new GetImplantCardUseCase(repo, clock, names);
+      await register.execute('p1', IMPLANT, 'dr-1');
+      const shown = await card.execute('p1', '2026-10-17');
+      expect(shown.regional).toEqual({
+        timeZone: 'America/Caracas',
+        locale: 'es-VE',
+        hourCycle: 'h12',
+      });
+      // Una sola sede: se pide esa, no la activa.
+      expect(repo.regionalAsked).toBe('loc-1');
+      repo.regionalResult = null;
+      expect((await card.execute('p1', '2026-10-17')).regional).toBeNull();
+    });
+
     it('400 sin día válido y 404 sin implantes ese día', async () => {
       const card = new GetImplantCardUseCase(repo, clock, names);
       await expect(card.execute('p1', undefined)).rejects.toThrow(

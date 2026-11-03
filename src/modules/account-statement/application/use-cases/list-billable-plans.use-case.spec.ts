@@ -21,6 +21,7 @@ function repoWith(result: BillableRows) {
   const repo: AccountStatementRepository = {
     load: jest.fn(),
     loadBillablePlans,
+    loadRegional: () => Promise.resolve(null),
   };
   return { repo, loadBillablePlans };
 }

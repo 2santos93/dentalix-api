@@ -89,7 +89,7 @@ describe('RecordOpeningBalancePaymentUseCase (DX-262, revisión C1)', () => {
       }),
     ).rejects.toThrow(
       // La sede del fake: es-VE/h23.
-      /^El abono supera lo pendiente del saldo migrado: quedan Bs\.S\s50\.000,00\.$/,
+      /^El abono supera lo pendiente del saldo migrado: quedan VES\s50\.000,00\.$/,
     );
     await uc.execute('ob-1', {
       amount: 50000,

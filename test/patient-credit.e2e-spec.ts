@@ -457,6 +457,42 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
       await as(api().get(`/api/v1/credit-refunds/${res.id}`), a).expect(200)
     ).body as RefundBody;
     expect(receipt.snapshot.number).toBe(res.number);
+
+    // DX-354: el comprobante lleva la región de su sede (también en el
+    // listado de movimientos) y, sin reloj, `null` con 200.
+    const caracas = {
+      timeZone: 'America/Caracas',
+      locale: 'es-VE',
+      hourCycle: 'h23',
+    };
+    const regionalOf = async () =>
+      (
+        (await as(api().get(`/api/v1/credit-refunds/${res.id}`), a).expect(200))
+          .body as { regional: unknown }
+      ).regional;
+    expect(await regionalOf()).toEqual(caracas);
+    expect((res as unknown as { regional: unknown }).regional).toEqual(caracas);
+    const movements = (
+      await as(
+        api().get(`/api/v1/patients/${patientId}/credit-movements`),
+        a,
+      ).expect(200)
+    ).body as { refunds: { id: string; regional: unknown }[] };
+    expect(movements.refunds.find((r) => r.id === res.id)?.regional).toEqual(
+      caracas,
+    );
+    await raw.location.update({
+      where: { id: sede },
+      data: { hourCycle: null },
+    });
+    try {
+      expect(await regionalOf()).toBeNull();
+    } finally {
+      await raw.location.update({
+        where: { id: sede },
+        data: { hourCycle: caracas.hourCycle },
+      });
+    }
   });
 
   it('dos devoluciones a la vez sobre el mismo saldo: una 201 y otra 409', async () => {

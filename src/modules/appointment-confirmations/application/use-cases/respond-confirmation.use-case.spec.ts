@@ -55,6 +55,9 @@ describe('Enlace público de confirmación (Get + Respond)', () => {
           providerName: 'Dra. Pérez',
           locationName: 'Sede Principal',
           locationAddress: 'Calle 1 # 2-3',
+          timeZone: 'America/Caracas',
+          locale: 'es-VE',
+          hourCycle: 'h12',
         },
         response: null,
         respondedAt: null,
@@ -354,11 +357,14 @@ describe('Enlace público de confirmación (Get + Respond)', () => {
       const view = await inTenant(() => get.execute(token));
       expect(Object.keys(view.appointment ?? {}).sort()).toEqual([
         'end',
+        'hourCycle',
+        'locale',
         'locationAddress',
         'locationName',
         'patientFirstName',
         'providerName',
         'start',
+        'timeZone',
       ]);
     });
   });

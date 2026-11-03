@@ -1,7 +1,8 @@
 import { ConflictException } from '@nestjs/common';
+import type { RegionalFormat } from '../../../shared/format/regional-format';
+import { requireLocationFormat } from '../../../shared/locations/location-regional';
 import type { PatientRetentionState } from '../domain/ports/patient-repository.port';
 import {
-  formatRetentionDate,
   isUnderRetention,
   retentionUntil,
   type RetentionBasis,
@@ -36,12 +37,14 @@ export function assertNoPendingAppointments(pendingAppointments: number): void {
  * Mensaje en español con la fecha hasta la que se conserva la HC. El motivo
  * entre paréntesis sigue a lo que dio la fecha: con DOUBLE el doble del plazo
  * de la clínica (`years`), y con el suelo el plazo anterior, porque decir el
- * plazo de hoy contradiría la fecha.
+ * plazo de hoy contradiría la fecha. La fecha sale con el formato de la sede
+ * principal (DX-354); `fmt` es perezoso: «permanente» no lleva fecha.
  */
 export function retentionMessage(
   until: Date | 'PERMANENT',
   basis: RetentionBasis,
   years: number,
+  fmt: () => RegionalFormat | null,
 ): string {
   if (until === 'PERMANENT') {
     return 'La historia clínica de este paciente tiene retención permanente: no se puede archivar ni borrar. Si necesitas retirar sus datos de contacto, usa la supresión parcial.';
@@ -52,7 +55,29 @@ export function retentionMessage(
       : basis === 'DOUBLE'
         ? `plazo doble: ${2 * years} años desde la última atención`
         : `${years} años desde la última atención`;
-  return `La historia clínica de este paciente está en retención hasta el ${formatRetentionDate(until)} (${reason}): no se puede archivar ni borrar. Si necesitas retirar sus datos de contacto, usa la supresión parcial.`;
+  const format = fmt();
+  const when = format
+    ? `hasta el ${format.civilDate(until.toISOString().slice(0, 10))} `
+    : 'todavía dentro de su plazo ';
+  return `La historia clínica de este paciente está en retención ${when}(${reason}): no se puede archivar ni borrar. Si necesitas retirar sus datos de contacto, usa la supresión parcial.`;
+}
+
+/**
+ * El formato de la sede principal de la clínica (R6) con el que se escribe la
+ * fecha, o `null` si no hay sede activa o le falta el formato o el reloj: el
+ * 409 de retención se mantiene (mismo código y `retentionUntil`) y el mensaje
+ * va sin la fecha escrita. Nunca otro formato.
+ */
+function retentionFormat(state: PatientRetentionState): RegionalFormat | null {
+  if (!state.format) return null;
+  try {
+    return requireLocationFormat(state.format);
+  } catch (error) {
+    // Sede sin formato o reloj: la retención se dice igual, sin la fecha
+    // escrita (nunca con otro formato).
+    if (error instanceof ConflictException) return null;
+    throw error;
+  }
 }
 
 function retentionEnd(state: PatientRetentionState): RetentionEnd {
@@ -79,7 +104,9 @@ export function assertNotUnderRetention(
     statusCode: 409,
     error: 'Conflict',
     code: CLINICAL_RECORD_RETENTION,
-    message: retentionMessage(until, basis, state.years),
+    message: retentionMessage(until, basis, state.years, () =>
+      retentionFormat(state),
+    ),
     retentionUntil:
       until === 'PERMANENT' ? null : until.toISOString().slice(0, 10),
   });

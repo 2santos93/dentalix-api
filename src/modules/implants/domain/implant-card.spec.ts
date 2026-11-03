@@ -49,6 +49,11 @@ const PATIENT: ImplantCardPatient = {
 describe('composeImplantCard (DX-191)', () => {
   const card = composeImplantCard({
     clinicName: 'Clínica Demo',
+    regional: {
+      timeZone: 'America/Caracas',
+      locale: 'es-VE',
+      hourCycle: 'h12',
+    },
     patient: PATIENT,
     documentTypeNames: NO_LOCAL_NAMES,
     placedOn: '2026-10-10',
@@ -88,6 +93,14 @@ describe('composeImplantCard (DX-191)', () => {
     });
   });
 
+  it('DX-354: lleva el regional de la sede de la tarjeta', () => {
+    expect(card.regional).toEqual({
+      timeZone: 'America/Caracas',
+      locale: 'es-VE',
+      hourCycle: 'h12',
+    });
+  });
+
   it('lista los dos componentes por diente y hora, y marca el anulado', () => {
     expect(card.items.map((i) => [i.id, i.kindLabel, i.voided])).toEqual([
       ['impl', 'Implante', false],
@@ -112,6 +125,7 @@ describe('composeImplantCard (DX-191)', () => {
     ) =>
       composeImplantCard({
         clinicName: 'C',
+        regional: null,
         patient: { ...PATIENT, ...patient },
         documentTypeNames: names,
         placedOn: '2026-10-10',
@@ -131,6 +145,7 @@ describe('composeImplantCard (DX-191)', () => {
   it('sin documento, null (nunca se inventa)', () => {
     const noDoc = composeImplantCard({
       clinicName: 'C',
+      regional: null,
       patient: { ...PATIENT, docNumber: ' ' },
       documentTypeNames: NO_LOCAL_NAMES,
       placedOn: '2026-10-10',

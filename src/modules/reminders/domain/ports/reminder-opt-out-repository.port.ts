@@ -1,3 +1,4 @@
+import type { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
 import type { ReminderOptOutSource } from '@prisma/client';
 import type { PhoneRegion } from '../../../../shared/phone/phone-number';
 
@@ -68,4 +69,10 @@ export interface ReminderOptOutRepository {
    */
   liveLocationPhoneRegions(): Promise<PhoneRegion[]>;
   clinicBranding(): Promise<OptOutClinicBranding | null>;
+  /**
+   * DX-354: región de la sede principal (R6) de la clínica, para pintar la
+   * fecha de la baja; `null` si le falta algo. El enlace es público: no hay
+   * sede activa.
+   */
+  principalRegional(): Promise<DocumentRegionalDto | null>;
 }

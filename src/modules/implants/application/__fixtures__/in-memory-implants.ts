@@ -1,3 +1,4 @@
+import type { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
 import type { DocumentTypeNamesBook } from '../../../patients/domain/ports/document-type-names-repository.port';
 import type {
   ImplantCardPatient,
@@ -110,6 +111,21 @@ export class InMemoryImplantRepository implements PatientImplantRepository {
 
   clinicName(): Promise<string> {
     return Promise.resolve('Clínica Demo');
+  }
+
+  /** Sede pedida en la última tarjeta (para comprobar de qué sede sale el `regional`). */
+  regionalAsked: string | undefined | null = null;
+  regionalResult: DocumentRegionalDto | null = {
+    timeZone: 'America/Caracas',
+    locale: 'es-VE',
+    hourCycle: 'h12',
+  };
+
+  regional(
+    locationId: string | undefined,
+  ): Promise<DocumentRegionalDto | null> {
+    this.regionalAsked = locationId;
+    return Promise.resolve(this.regionalResult);
   }
 
   locations(ids: string[]): Promise<ImplantCardLocation[]> {

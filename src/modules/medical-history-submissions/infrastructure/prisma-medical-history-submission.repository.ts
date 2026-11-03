@@ -1,3 +1,4 @@
+import { loadDocumentRegional } from '../../../shared/locations/document-regional';
 import { withClinicLogoUrl } from '../../../shared/storage/clinic-logo-url';
 import { Injectable } from '@nestjs/common';
 import {
@@ -293,7 +294,7 @@ export class PrismaMedicalHistorySubmissionRepository implements MedicalHistoryS
         },
       });
       if (!row) return null;
-      const [tenant, granted, policy] = await Promise.all([
+      const [tenant, granted, policy, regional] = await Promise.all([
         tx.tenant.findUniqueOrThrow({
           where: { id: tenantId },
           select: { name: true, logoKey: true, primaryColor: true },
@@ -309,12 +310,15 @@ export class PrismaMedicalHistorySubmissionRepository implements MedicalHistoryS
             policyText: true,
           },
         }),
+        // DX-354: el enlace es público (sin sede activa): la sede principal.
+        loadDocumentRegional(tx, tenantId, null),
       ]);
       return {
         submission: toEntity(row),
         patientFirstName: row.patient.firstName,
         patientDeleted: row.patient.deletedAt !== null,
         clinic: withClinicLogoUrl(tenant),
+        regional,
         sensitiveHealthGranted: granted,
         policy,
       };

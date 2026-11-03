@@ -18,6 +18,8 @@ import type { StaffMember } from '../../../staff/domain/entities/staff-member.en
 import { attendsAt } from '../../../staff/domain/provider-location';
 import { ATTENDING_ROLES } from '../../../schedule-blocks/domain/schedule-block-rules';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import type { RegionalFormat } from '../../../../shared/format/regional-format';
+import { requireLocationFormat } from '../../../../shared/locations/location-regional';
 import { isLocationAllowed } from '../../../../shared/tenancy/location-access';
 import { RecordAuditEventUseCase } from '../../../audit/application/record-audit-event.use-case';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
@@ -202,6 +204,22 @@ async function locationsById(
   return new Map((await locations.list()).map((l) => [l.id, l]));
 }
 
+/**
+ * DX-354 (D4): el formato de la sede de la petición (`X-Location-Id`) o, en
+ * «Todas las sedes», el de la principal (la activa más antigua). Un mensaje con
+ * varias sedes del profesional usa este reloj para todos sus tramos. Sin
+ * formato o reloj: 409 `LOCATION_LOCALE_REQUIRED`.
+ */
+function requestFormat(
+  byId: ReadonlyMap<string, Location>,
+  ctx: AuditRequestContext,
+): RegionalFormat {
+  const requested = ctx.locationId ? byId.get(ctx.locationId) : undefined;
+  const principal = [...byId.values()].find((l) => l.isActive);
+  const location = requested ?? principal ?? [...byId.values()][0];
+  return requireLocationFormat(location);
+}
+
 function requireCivilDate(value: string): string {
   if (parseCivilDate(value) === null) {
     throw new BadRequestException(CIVIL_DATE_MESSAGE);
@@ -333,7 +351,10 @@ export class ReplaceProviderScheduleUseCase {
       }
     }
     const nameOf = (id: string) => byId.get(id)?.name ?? id;
-    const error = weeklyScheduleError(input.locations, nameOf);
+    // DX-354 (D4): las horas de los mensajes, con el reloj de la sede de la
+    // petición y el mismo para todos los tramos; se pide solo si hay mensaje.
+    const fmt = () => requestFormat(byId, ctx);
+    const error = weeklyScheduleError(input.locations, nameOf, fmt);
     if (error) throw new BadRequestException(error);
 
     // Una sede sin tramos es «no trabaja allí»: no se guarda fila.
@@ -379,6 +400,7 @@ export class ReplaceProviderScheduleUseCase {
                   name: nameOf(conflict.otherLocationId),
                   range: conflict.theirs,
                 },
+                fmt(),
               ),
             );
           }
@@ -536,7 +558,9 @@ export class SetProviderOverrideUseCase {
     if (note && note.length > 200) {
       throw new BadRequestException('La nota admite hasta 200 caracteres');
     }
-    const error = overrideRangesError(input.ranges);
+    // DX-354 (D4): el reloj de la sede de la petición; se pide solo si hay mensaje.
+    const fmt = () => requestFormat(byId, ctx);
+    const error = overrideRangesError(input.ranges, fmt);
     if (error) throw new BadRequestException(error);
     const ranges = [...input.ranges].sort(
       (a, b) => a.startMinute - b.startMinute,
@@ -566,6 +590,7 @@ export class SetProviderOverrideUseCase {
                 name: nameOf(conflict.otherLocationId),
                 range: conflict.theirs,
               },
+              fmt(),
             ),
           );
         }

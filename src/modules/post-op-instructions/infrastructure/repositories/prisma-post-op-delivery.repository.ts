@@ -1,3 +1,7 @@
+import {
+  DOCUMENT_REGIONAL_SELECT,
+  documentRegional,
+} from '../../../../shared/locations/document-regional';
 import { withClinicLogoUrl } from '../../../../shared/storage/clinic-logo-url';
 import { Injectable } from '@nestjs/common';
 import type { PostOpInstructionDelivery, Prisma } from '@prisma/client';
@@ -239,7 +243,9 @@ export class PrismaPostOpDeliveryRepository implements PostOpDeliveryRepository 
       const row = await tx.postOpInstructionDelivery.findFirst({
         where: { id, patientId },
         include: {
-          location: { select: { name: true, phone: true } },
+          location: {
+            select: { name: true, phone: true, ...DOCUMENT_REGIONAL_SELECT },
+          },
           patient: { select: { firstName: true, lastName: true } },
         },
       });
@@ -256,6 +262,7 @@ export class PrismaPostOpDeliveryRepository implements PostOpDeliveryRepository 
         clinic,
         locationName: location.name,
         locationPhone: location.phone,
+        regional: documentRegional(location),
         patientName: `${patient.firstName} ${patient.lastName}`,
       };
     });

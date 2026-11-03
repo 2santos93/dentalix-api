@@ -9,6 +9,7 @@ import {
   resetDatabase,
 } from './support/e2e-fixtures';
 import {
+  REGIONAL_NEW_YORK_FIXTURE,
   REGIONAL_TOKYO_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
@@ -101,5 +102,52 @@ describe('Horario de atención en la zona de la sede (e2e, G1)', () => {
       .set('X-Location-Id', tokyoId)
       .expect(200);
     expect((res.body as { timezone: string }).timezone).toBe('Asia/Tokyo');
+  });
+
+  // DX-354: las horas del mensaje salen con el reloj de la sede, no en 24 h fijas.
+  describe('el mensaje de horario con el reloj de la sede (DX-354)', () => {
+    let newYorkId: string;
+    const bookAtNewYork = () =>
+      as(api().post('/api/v1/appointments'))
+        .set('X-Location-Id', newYorkId)
+        // 13:30–14:30 EST/EDT según la fecha: cae siempre en el cierre de mediodía.
+        .send({
+          patientId,
+          providerId: clinic.adminUserId,
+          start: `${monday}T18:30:00.000Z`,
+          end: `${monday}T19:00:00.000Z`,
+        });
+
+    beforeAll(async () => {
+      const res = await as(api().post('/api/v1/locations'))
+        .send(locationBody(REGIONAL_NEW_YORK_FIXTURE, { name: 'Nueva York' }))
+        .expect(201);
+      newYorkId = (res.body as { id: string }).id;
+    });
+
+    it('sede h12: el 422 dice las horas en 12 h', async () => {
+      const res = await bookAtNewYork().expect(422);
+      expect((res.body as { message: string }).message).toBe(
+        'Fuera del horario de atención (lunes: 9:00 a. m.–1:00 p. m., 3:00 p. m.–7:00 p. m.)',
+      );
+    });
+
+    it('sede sin reloj: 409 LOCATION_LOCALE_REQUIRED al rechazar por horario', async () => {
+      await raw.location.update({
+        where: { id: newYorkId },
+        data: { hourCycle: null },
+      });
+      try {
+        const res = await bookAtNewYork().expect(409);
+        expect((res.body as { code: string }).code).toBe(
+          'LOCATION_LOCALE_REQUIRED',
+        );
+      } finally {
+        await raw.location.update({
+          where: { id: newYorkId },
+          data: { hourCycle: 'h12' },
+        });
+      }
+    });
   });
 });

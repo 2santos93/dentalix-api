@@ -72,6 +72,9 @@ export class InMemoryAppointmentConfirmationRepository implements AppointmentCon
       locationAddress: 'Calle 1 # 2-3',
       // Sin región por defecto: cada test fija la suya (DX-329, m13).
       locationPhoneRegion: null,
+      locationTimeZone: 'America/Caracas',
+      locationLocale: 'es-VE',
+      locationHourCycle: 'h12' as const,
       ...overrides,
       confirmationSentAt: null,
       callbackRequestedAt: null,

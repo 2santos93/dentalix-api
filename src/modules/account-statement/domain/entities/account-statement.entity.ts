@@ -1,3 +1,4 @@
+import type { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
 import type { ClinicFiscalData } from '../../../../shared/clinic/clinic-fiscal';
 import {
   DocumentType,
@@ -344,6 +345,8 @@ export interface StatementAddressee {
 export interface AccountStatement extends ComputedAccountStatement {
   issuedAt: Date;
   clinic: StatementClinic;
+  /** DX-354: región de la sede en contexto (o la principal) para formatear el impreso; `null` si le falta algo. */
+  regional: DocumentRegionalDto | null;
   /** En vivo, con el nombre visible de hoy (DX-327, R17). */
   patient: StatementPatient & { docTypeName: string };
   addressee: StatementAddressee;
@@ -384,6 +387,8 @@ export interface FamilyStatementMember {
 export interface FamilyAccountStatement {
   issuedAt: Date;
   clinic: StatementClinic;
+  /** DX-354: como `AccountStatement.regional`. */
+  regional: DocumentRegionalDto | null;
   payer: { id: string; firstName: string; lastName: string };
   members: FamilyStatementMember[];
   /** Suma de los subtotales, por moneda y al céntimo. */

@@ -1,3 +1,4 @@
+import type { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
 import {
   BadRequestException,
   Inject,
@@ -88,6 +89,7 @@ export type PostOpDeliveryDocument = PostOpDeliverySummary & {
   clinic: PostOpDeliveryDocumentView['clinic'];
   locationName: string;
   locationPhone: string | null;
+  regional: DocumentRegionalDto | null;
   patientName: string;
 };
 
@@ -547,6 +549,7 @@ export class GetPatientPostOpDeliveryUseCase {
       clinic: view.clinic,
       locationName: view.locationName,
       locationPhone: view.locationPhone,
+      regional: view.regional,
       patientName: view.patientName,
     };
   }

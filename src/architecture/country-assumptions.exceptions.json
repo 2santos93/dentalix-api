@@ -1,0 +1,13 @@
+[
+  {
+    "path": "shared/locations/legacy-clinic-country.ts",
+    "term": "ClinicCountry",
+    "reason": "Proyección al enum legado que leen las réplicas anteriores a DX-312; la fase 2 lo borra.",
+    "removeWhen": "DX-364"
+  },
+  {
+    "path": "shared/time/iana-zone-names.ts",
+    "term": "America/Bogota",
+    "reason": "Lista IANA completa generada: catálogo de zonas del mundo, no una suposición de país."
+  }
+]

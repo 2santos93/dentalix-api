@@ -341,6 +341,37 @@ describe('Anamnesis previa a la cita por enlace (e2e, DX-099)', () => {
       expect(invalid.headers['cache-control']).toBe('no-store');
     });
 
+    it('DX-354: trae el regional de la sede principal y null con 200 si no tiene reloj; no filtra ids', async () => {
+      const read = async () =>
+        (await publicGet(clinicA.host, link.token).expect(200)).body as {
+          regional: unknown;
+        };
+      expect((await read()).regional).toEqual({
+        timeZone: 'America/Caracas',
+        locale: 'es-VE',
+        hourCycle: 'h23',
+      });
+      const principal = await raw.location.findFirstOrThrow({
+        where: { tenantId: clinicA.tenantId },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true },
+      });
+      await raw.location.update({
+        where: { id: principal.id },
+        data: { hourCycle: null },
+      });
+      try {
+        const body = await read();
+        expect(body.regional).toBeNull();
+        expect(JSON.stringify(body)).not.toContain(principal.id);
+      } finally {
+        await raw.location.update({
+          where: { id: principal.id },
+          data: { hourCycle: 'h23' },
+        });
+      }
+    });
+
     // ISOLATION_COVERS: GET /public/medical-history/:token
     // ISOLATION_COVERS: POST /public/medical-history/:token
     it('el token de A en el host de B → 404', async () => {

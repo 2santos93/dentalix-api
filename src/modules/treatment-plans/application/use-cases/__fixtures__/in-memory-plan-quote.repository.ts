@@ -62,6 +62,11 @@ export function quoteSource(
       address: 'Calle 1',
       timeZone: 'America/Caracas',
     },
+    regional: {
+      timeZone: 'America/Caracas',
+      locale: 'es-VE',
+      hourCycle: 'h12',
+    },
     professionalName: 'Dra. Gómez',
     acceptance: null,
     ...overrides,

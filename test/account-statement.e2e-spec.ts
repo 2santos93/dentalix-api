@@ -16,6 +16,8 @@ import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
 import {
   REGIONAL_CARACAS_FIXTURE,
+  REGIONAL_NEW_YORK_FIXTURE,
+  locationBody,
   registerBody,
 } from './support/location-fixtures';
 
@@ -555,5 +557,86 @@ describe('Estado de cuenta — GET /patients/:patientId/account-statement (e2e)'
     await as(clinicA)
       .get(`/patients/${patientId}/account-statement?from=ayer`)
       .expect(400);
+  });
+  describe('DX-354: `regional`, la sede del documento', () => {
+    const NEW_YORK = {
+      timeZone: 'America/New_York',
+      locale: 'en-US',
+      hourCycle: 'h12',
+    };
+    const CARACAS = {
+      timeZone: 'America/Caracas',
+      locale: 'es-VE',
+      hourCycle: 'h23',
+    };
+    let eastLocationId: string;
+    let mainLocationId: string;
+
+    beforeAll(async () => {
+      mainLocationId = (
+        await raw.location.findFirstOrThrow({
+          where: { tenantId: clinicA.tenantId },
+          orderBy: { createdAt: 'asc' },
+          select: { id: true },
+        })
+      ).id;
+      const east = await as(clinicA)
+        .post(
+          '/locations',
+          locationBody(REGIONAL_NEW_YORK_FIXTURE, { name: 'Sede Este' }),
+        )
+        .expect(201);
+      eastLocationId = (east.body as { id: string }).id;
+    });
+
+    const statementAt = (
+      locationId: string | null,
+      path = 'account-statement',
+    ) => {
+      const req = request(server())
+        .get(`/api/v1/patients/${patientId}/${path}`)
+        .set('X-Tenant-Host', hostFor(clinicA.subdomain))
+        .set('Authorization', `Bearer ${clinicA.accessToken}`);
+      return locationId ? req.set('X-Location-Id', locationId) : req;
+    };
+
+    it('devuelve regional de la sede del estado de cuenta (h12, en-US), no la principal', async () => {
+      const res = await statementAt(eastLocationId).expect(200);
+      expect((res.body as { regional: unknown }).regional).toEqual(NEW_YORK);
+    });
+
+    it('en «Todas las sedes» sale la sede principal', async () => {
+      const res = await statementAt(null).expect(200);
+      expect((res.body as { regional: unknown }).regional).toEqual(CARACAS);
+    });
+
+    it('el familiar lleva el regional de la misma sede', async () => {
+      const res = await statementAt(
+        eastLocationId,
+        'family-account-statement',
+      ).expect(200);
+      expect((res.body as { regional: unknown }).regional).toEqual(NEW_YORK);
+    });
+
+    it('regional null sin reloj: 200 y sin 409', async () => {
+      await raw.location.update({
+        where: { id: mainLocationId },
+        data: { hourCycle: null },
+      });
+      try {
+        const res = await statementAt(mainLocationId).expect(200);
+        expect((res.body as { regional: unknown }).regional).toBeNull();
+        const family = await statementAt(
+          mainLocationId,
+          'family-account-statement',
+        ).expect(200);
+        expect((family.body as { regional: unknown }).regional).toBeNull();
+      } finally {
+        await raw.location.update({
+          where: { id: mainLocationId },
+          data: { hourCycle: CARACAS.hourCycle },
+        });
+      }
+    });
   });
 });

@@ -700,6 +700,74 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
     }
   });
 
+  it('DX-354: el tope de celdas del .xlsx dice su cifra con el formato de la sede, y sin reloj es 409', async () => {
+    // Una fila con más celdas que la última columna de Excel (XFD = 16.384).
+    const book = zip([
+      {
+        name: 'xl/workbook.xml',
+        data: Buffer.from(
+          '<workbook><sheets><sheet name="a" r:id="rId1"/></sheets></workbook>',
+        ),
+      },
+      {
+        name: 'xl/_rels/workbook.xml.rels',
+        data: Buffer.from(
+          '<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>',
+        ),
+      },
+      {
+        name: 'xl/worksheets/sheet1.xml',
+        data: Buffer.from(
+          `<worksheet><sheetData><row r="1">${'<c/>'.repeat(20_000)}</row></sheetData></worksheet>`,
+        ),
+      },
+    ]);
+    const send = () =>
+      as(api().post('/api/v1/patient-imports'), a.adminToken).attach(
+        'file',
+        book,
+        {
+          filename: 'ancho.xlsx',
+          contentType:
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        },
+      );
+    const before = await raw.location.findUniqueOrThrow({
+      where: { id: mainLocationId },
+      select: { locale: true, hourCycle: true },
+    });
+    const messageAt = async (locale: string, hourCycle: string) => {
+      await raw.location.update({
+        where: { id: mainLocationId },
+        data: { locale, hourCycle },
+      });
+      const res = await send().expect(400);
+      return (res.body as { message: string }).message.replace(
+        /[\u202f\u00a0]/g,
+        ' ',
+      );
+    };
+    try {
+      expect(await messageAt('en-US', 'h12')).toContain('más de 16,384 celdas');
+      expect(await messageAt('de-DE', 'h23')).toContain('más de 16.384 celdas');
+      expect(await messageAt('fr-FR', 'h23')).toContain('más de 16 384 celdas');
+      await raw.location.update({
+        where: { id: mainLocationId },
+        data: { hourCycle: null },
+      });
+      const unclocked = await send().expect(409);
+      expect(unclocked.body).toMatchObject({
+        code: 'LOCATION_LOCALE_REQUIRED',
+        locationId: mainLocationId,
+      });
+    } finally {
+      await raw.location.update({
+        where: { id: mainLocationId },
+        data: before,
+      });
+    }
+  });
+
   it('10.000 filas: el dry-run tarda menos de 60 s', async () => {
     const started = Date.now();
     const res = await upload('', bulkCsv(10_000, '5'), 'diez-mil.csv').expect(

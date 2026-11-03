@@ -540,6 +540,52 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
     });
   });
 
+  it('DX-354: el documento lleva el regional de la sede de la entrega (no el de la sede activa) y null sin reloj, con 200', async () => {
+    const list = await as(clinicA)
+      .get(`/patients/${patientId}/post-op-deliveries`)
+      .expect(200);
+    const deliveryId = (list.body as Summary[])[0].id;
+    const { locationId } =
+      await raw.postOpInstructionDelivery.findUniqueOrThrow({
+        where: { id: deliveryId },
+        select: { locationId: true },
+      });
+    const before = await raw.location.findUniqueOrThrow({
+      where: { id: locationId },
+      select: { timeZone: true, locale: true, hourCycle: true },
+    });
+    const read = async () =>
+      (
+        (
+          await as(clinicA, reception)
+            .get(`/patients/${patientId}/post-op-deliveries/${deliveryId}`)
+            .expect(200)
+        ).body as { regional: unknown }
+      ).regional;
+    try {
+      await raw.location.update({
+        where: { id: locationId },
+        data: {
+          timeZone: 'America/New_York',
+          locale: 'en-US',
+          hourCycle: 'h12',
+        },
+      });
+      expect(await read()).toEqual({
+        timeZone: 'America/New_York',
+        locale: 'en-US',
+        hourCycle: 'h12',
+      });
+      await raw.location.update({
+        where: { id: locationId },
+        data: { hourCycle: null },
+      });
+      expect(await read()).toBeNull();
+    } finally {
+      await raw.location.update({ where: { id: locationId }, data: before });
+    }
+  });
+
   it('una entrega no se edita ni se borra: no hay PATCH ni DELETE', async () => {
     const list = await as(clinicA)
       .get(`/patients/${patientId}/post-op-deliveries`)

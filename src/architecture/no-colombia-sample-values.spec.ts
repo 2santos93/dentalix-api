@@ -32,6 +32,9 @@ const EXCLUDED: readonly RegExp[] = [
   // Guardas: siembran justo lo que prohíben.
   /^src\/architecture\/no-location-fallbacks\.spec\.ts$/,
   /^src\/architecture\/no-colombia-sample-values\.spec\.ts$/,
+  // DX-334: la guarda de supuestos de país y sus excepciones nombran los catálogos.
+  /^src\/architecture\/no-country-assumptions\.spec\.ts$/,
+  /^src\/architecture\/country-assumptions\.exceptions\.json$/,
 ];
 
 /**

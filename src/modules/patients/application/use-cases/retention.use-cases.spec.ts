@@ -35,6 +35,7 @@ function repoWith(
     retentionExtended: 'NONE',
     retentionFloorUntil: null,
     years: 15,
+    format: { id: 'loc-1', locale: 'es-VE', hourCycle: 'h23' },
     ...retention,
     pendingAppointments,
   };

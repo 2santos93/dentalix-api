@@ -53,6 +53,11 @@ function statement(
 ): AccountStatementData {
   return {
     clinic: { name: 'Clínica Uno', logoUrl: null, fiscal: EMPTY_CLINIC_FISCAL },
+    regional: {
+      timeZone: 'America/Caracas',
+      locale: 'es-VE',
+      hourCycle: 'h12',
+    },
     patient: {
       id,
       firstName,
@@ -114,9 +119,17 @@ const DATA: Record<string, AccountStatementData> = {
   ),
 };
 
+const loadMember = jest.fn((id: string) => Promise.resolve(DATA[id] ?? null));
+
 function makeRepos() {
   const repo: AccountStatementRepository = {
-    load: (id) => Promise.resolve(DATA[id] ?? null),
+    load: loadMember,
+    loadRegional: () =>
+      Promise.resolve({
+        timeZone: 'America/Caracas',
+        locale: 'es-VE',
+        hourCycle: 'h12',
+      }),
     loadBillablePlans: jest.fn(),
   };
   const family: StatementFamilyRepository = {
@@ -232,6 +245,28 @@ describe('GetFamilyAccountStatementUseCase (DX-203)', () => {
         overdueAmount: 0,
       },
     ]);
+  });
+
+  it('DX-354: lleva la región de la sede del documento', async () => {
+    const { repo, family } = makeRepos();
+    const uc = new GetFamilyAccountStatementUseCase(
+      repo,
+      family,
+      () => NOW,
+      noPlanBalances,
+    );
+    loadMember.mockClear();
+    const out = await uc.execute('mother');
+    // Una sola lectura de la región: ningún miembro la pide.
+    expect(loadMember).toHaveBeenCalledTimes(3);
+    for (const call of loadMember.mock.calls) {
+      expect(call).toEqual([expect.any(String), { regional: false }]);
+    }
+    expect(out.regional).toEqual({
+      timeZone: 'America/Caracas',
+      locale: 'es-VE',
+      hourCycle: 'h12',
+    });
   });
 
   it('DX-472: cuenta los abonos sin tasa de toda la familia, que los impresos avisan', async () => {

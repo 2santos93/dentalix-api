@@ -1,3 +1,4 @@
+import type { LocationFormatSource } from '../../../../shared/locations/location-regional';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { DocumentType, RetentionExtension, Sex } from '@prisma/client';
 import { Patient } from '../entities/patient.entity';
@@ -119,6 +120,12 @@ export interface PatientRetentionState {
   retentionFloorUntil: Date | null;
   /** DX-330: plazo vigente de la clínica en años, leído con `tenants` bloqueada. */
   years: number;
+  /**
+   * DX-354: la sede principal (R6) de la clínica, con el formato en crudo de la
+   * fecha del mensaje de retención; `null` si no hay ninguna sede activa o
+   * si el flujo no la usa (solo la lee el archivado).
+   */
+  format: LocationFormatSource | null;
 }
 
 /**

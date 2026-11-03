@@ -1,3 +1,5 @@
+import type { RegionalFormat } from '../../../shared/format/regional-format';
+import { minuteText } from '../../../shared/format/minute-text';
 import {
   civilDateIn,
   civilWeekday,
@@ -197,36 +199,41 @@ export function weekdayName(weekday: number): string {
   return WEEKDAY_NAMES[weekday] ?? String(weekday);
 }
 
-function hhmm(minute: number): string {
-  const h = Math.floor(minute / 60);
-  const m = minute % 60;
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-}
-
-/** «08:00–13:00». */
-export function describeRange(r: MinuteRange): string {
-  return `${hhmm(r.startMinute)}–${hhmm(r.endMinute)}`;
+/** «08:00–13:00» (24 h) o «8:00 a. m.–1:00 p. m.» (12 h), con el reloj de la sede. */
+export function describeRange(r: MinuteRange, fmt: RegionalFormat): string {
+  return `${minuteText(r.startMinute, fmt)}–${minuteText(r.endMinute, fmt)}`;
 }
 
 /** «08:00–13:00, 15:00–19:00». */
-export function describeRanges(ranges: readonly MinuteRange[]): string {
-  return [...ranges].sort(byStart).map(describeRange).join(', ');
+export function describeRanges(
+  ranges: readonly MinuteRange[],
+  fmt: RegionalFormat,
+): string {
+  return [...ranges]
+    .sort(byStart)
+    .map((r) => describeRange(r, fmt))
+    .join(', ');
 }
 
 /**
  * Error de forma de un tramo (minutos enteros múltiplos de 5, dentro del día
- * y fin posterior al inicio), o `null` si está bien.
+ * y fin posterior al inicio), o `null` si está bien. `fmt` es PEREZOSO
+ * (DX-354): solo se pide si hay un error con horas que escribir.
  */
-export function rangeShapeError(r: MinuteRange): string | null {
+export function rangeShapeError(
+  r: MinuteRange,
+  fmt: () => RegionalFormat,
+): string | null {
   const ints = Number.isInteger(r.startMinute) && Number.isInteger(r.endMinute);
   if (!ints || r.startMinute < 0 || r.endMinute > 1440) {
-    return 'Los minutos de un tramo tienen que ser enteros entre 0 (00:00) y 1440 (24:00).';
+    const f = fmt();
+    return `Los minutos de un tramo tienen que ser enteros entre 0 (${minuteText(0, f)}) y 1440 (${minuteText(1440, f)}).`;
   }
   if (r.startMinute % MINUTE_STEP !== 0 || r.endMinute % MINUTE_STEP !== 0) {
-    return `Las horas de un tramo van de ${MINUTE_STEP} en ${MINUTE_STEP} minutos (${describeRange(r)}).`;
+    return `Las horas de un tramo van de ${MINUTE_STEP} en ${MINUTE_STEP} minutos (${describeRange(r, fmt())}).`;
   }
   if (r.endMinute <= r.startMinute) {
-    return `El fin de un tramo tiene que ser posterior a su inicio y no puede pasar de medianoche (${describeRange(r)}).`;
+    return `El fin de un tramo tiene que ser posterior a su inicio y no puede pasar de medianoche (${describeRange(r, fmt())}).`;
   }
   return null;
 }
@@ -258,6 +265,7 @@ export interface WeeklyLocationInput {
 export function weeklyScheduleError(
   locations: readonly WeeklyLocationInput[],
   nameOf: (locationId: string) => string,
+  fmt: () => RegionalFormat,
 ): string | null {
   const seen = new Set<string>();
   for (const loc of locations) {
@@ -269,7 +277,7 @@ export function weeklyScheduleError(
       if (!Number.isInteger(r.weekday) || r.weekday < 0 || r.weekday > 6) {
         return 'El día de la semana tiene que ser un entero de 0 (domingo) a 6 (sábado).';
       }
-      const shape = rangeShapeError(r);
+      const shape = rangeShapeError(r, fmt);
       if (shape) return shape;
     }
     for (let weekday = 0; weekday <= 6; weekday++) {
@@ -279,7 +287,7 @@ export function weeklyScheduleError(
       }
       const overlap = firstOverlap(day);
       if (overlap) {
-        return `Hay tramos solapados el ${weekdayName(weekday)} en ${nameOf(loc.locationId)} (${describeRange(overlap[0])} y ${describeRange(overlap[1])}): únelos en uno.`;
+        return `Hay tramos solapados el ${weekdayName(weekday)} en ${nameOf(loc.locationId)} (${describeRange(overlap[0], fmt())} y ${describeRange(overlap[1], fmt())}): únelos en uno.`;
       }
     }
   }
@@ -299,6 +307,7 @@ export function weeklyScheduleError(
             `el ${weekdayName(weekday)}`,
             { name: nameOf(a.locationId), range: a.range },
             { name: nameOf(b.locationId), range: b.range },
+            fmt(),
           );
         }
       }
@@ -307,15 +316,19 @@ export function weeklyScheduleError(
   return null;
 }
 
-/** Mensaje 400 del solape entre dos sedes el mismo día. */
+/**
+ * Mensaje 400 del solape entre dos sedes el mismo día. Un solo `fmt` para toda
+ * la frase (D4, DX-354): la de la sede de la petición, no una por tramo.
+ */
 export function crossLocationMessage(
   when: string,
   a: { name: string; range: MinuteRange },
   b: { name: string; range: MinuteRange },
+  fmt: RegionalFormat,
 ): string {
   return (
-    `El tramo ${describeRange(a.range)} en ${a.name} se solapa ${when} con ` +
-    `${describeRange(b.range)} en ${b.name}: un profesional no puede estar en dos sedes a la vez.`
+    `El tramo ${describeRange(a.range, fmt)} en ${a.name} se solapa ${when} con ` +
+    `${describeRange(b.range, fmt)} en ${b.name}: un profesional no puede estar en dos sedes a la vez.`
   );
 }
 
@@ -325,17 +338,18 @@ export function crossLocationMessage(
  */
 export function overrideRangesError(
   ranges: readonly MinuteRange[],
+  fmt: () => RegionalFormat,
 ): string | null {
   if (ranges.length > MAX_RANGES_PER_DAY) {
     return `Como mucho ${MAX_RANGES_PER_DAY} tramos en una excepción.`;
   }
   for (const r of ranges) {
-    const shape = rangeShapeError(r);
+    const shape = rangeShapeError(r, fmt);
     if (shape) return shape;
   }
   const overlap = firstOverlap(ranges);
   if (overlap) {
-    return `Hay tramos solapados en la excepción (${describeRange(overlap[0])} y ${describeRange(overlap[1])}): únelos en uno.`;
+    return `Hay tramos solapados en la excepción (${describeRange(overlap[0], fmt())} y ${describeRange(overlap[1], fmt())}): únelos en uno.`;
   }
   return null;
 }

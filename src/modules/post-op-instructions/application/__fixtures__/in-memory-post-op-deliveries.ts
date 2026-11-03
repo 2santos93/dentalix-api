@@ -1,3 +1,4 @@
+import { documentRegional } from '../../../../shared/locations/document-regional';
 import { randomUUID } from 'node:crypto';
 import type { PostOpDelivery } from '../../domain/entities/post-op-delivery.entity';
 import type {
@@ -136,6 +137,7 @@ export class InMemoryPostOpDeliveryRepository implements PostOpDeliveryRepositor
       clinic: { name: ctx.clinicName, logoUrl: null, primaryColor: '#0F5E9C' },
       locationName: ctx.location.name,
       locationPhone: ctx.location.phone,
+      regional: documentRegional(ctx.location),
       patientName: `${ctx.patient.firstName} ${ctx.patient.lastName}`,
     });
   }

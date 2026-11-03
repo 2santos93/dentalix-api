@@ -11,6 +11,8 @@ import {
   AccountStatementData,
   AccountStatementRepository,
 } from '../../domain/ports/account-statement-repository.port';
+import type { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
+import { loadDocumentRegional } from '../../../../shared/locations/document-regional';
 import { resolveLocationTimeZones } from '../../../../shared/locations/location-time-zone';
 import { BillablePlanRow } from '../../domain/entities/billable-plan.entity';
 import { NON_BILLABLE_PLAN_STATUSES } from '../../../treatment-plans/domain/plan-status-machine';
@@ -49,6 +51,18 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
     private readonly tenantContext: TenantContextService,
   ) {}
 
+  async loadRegional(): Promise<DocumentRegionalDto | null> {
+    const tenantId = this.tenantContext.getTenantId();
+    if (!tenantId) throw new Error('No tenant in context');
+    return this.prisma.runWithTenant((tx) =>
+      loadDocumentRegional(
+        tx,
+        tenantId,
+        this.tenantContext.getLocationId() ?? null,
+      ),
+    );
+  }
+
   /**
    * Número FIJO de consultas, sin importar cuántos planes, abonos o cuotas
    * tenga el paciente (sin N+1): paciente, planes, sus ítems cobrables, abonos
@@ -67,7 +81,10 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
    * NO filtra por sede: el estado de cuenta es del paciente, que es de la
    * clínica (ver PrismaPaymentRepository.listByPatient).
    */
-  async load(patientId: string): Promise<AccountStatementData | null> {
+  async load(
+    patientId: string,
+    options: { regional?: boolean } = {},
+  ): Promise<AccountStatementData | null> {
     const tenantId = this.tenantContext.getTenantId();
     if (!tenantId) {
       throw new Error('No tenant in context');
@@ -276,7 +293,18 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
               .map((b) => [b.paymentId, b.amount.toNumber()] as const),
           );
 
+        // DX-354: la sede en contexto o, en «Todas las sedes», la principal.
+        const regional =
+          options.regional === false
+            ? null
+            : await loadDocumentRegional(
+                tx,
+                tenantId,
+                this.tenantContext.getLocationId() ?? null,
+              );
+
         return {
+          regional,
           clinic: {
             name: tenant?.name ?? '',
             logoUrl: clinicLogoPublicUrl(tenant?.logoKey ?? null),

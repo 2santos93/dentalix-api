@@ -29,6 +29,11 @@ const noPlanBalances = {
 function data(): AccountStatementData {
   return {
     clinic: { name: 'Clínica Uno', logoUrl: null, fiscal: EMPTY_CLINIC_FISCAL },
+    regional: {
+      timeZone: 'America/Caracas',
+      locale: 'es-VE',
+      hourCycle: 'h12',
+    },
     patient: {
       id: 'p-1',
       firstName: 'Ana',
@@ -100,6 +105,7 @@ function makeUseCase(
   const repo: AccountStatementRepository = {
     load,
     loadBillablePlans: jest.fn(),
+    loadRegional: () => Promise.resolve(null),
   };
   const uc = new GetAccountStatementUseCase(
     repo,
@@ -142,6 +148,16 @@ describe('GetAccountStatementUseCase', () => {
     expect(out.range).toEqual({ from: null, to: null });
     expect(out.summary[0]).toMatchObject({ budgeted: 1000, paid: 300 });
     expect(out.movements).toHaveLength(2);
+  });
+
+  it('DX-354: lleva la región de la sede del documento tal como la lee el repositorio', async () => {
+    const { useCase } = makeUseCase();
+    const out = await useCase.execute('p-1', {});
+    expect(out.regional).toEqual({
+      timeZone: 'America/Caracas',
+      locale: 'es-VE',
+      hourCycle: 'h12',
+    });
   });
 
   it('the statement carries the generic type, the label and the display name', async () => {

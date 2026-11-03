@@ -1,3 +1,4 @@
+import { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class PublicReminderOptOutClinicDto {
@@ -33,4 +34,12 @@ export class PublicReminderOptOutDto {
 
   @ApiProperty({ type: PublicReminderOptOutClinicDto, nullable: true })
   clinic!: PublicReminderOptOutClinicDto | null;
+
+  @ApiProperty({
+    type: DocumentRegionalDto,
+    nullable: true,
+    description:
+      'DX-354: zona, locale y reloj de la sede principal de la clínica (la activa más antigua), para pintar `optedOutAt`. null si le falta algo: la página pinta «—» y pide llamar a la clínica.',
+  })
+  regional!: DocumentRegionalDto | null;
 }

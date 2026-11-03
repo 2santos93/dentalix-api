@@ -1,3 +1,4 @@
+import type { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
 import type { PaymentMethod, TreatmentPlanStatus } from '@prisma/client';
 
 export const PATIENT_CREDIT_REPOSITORY = Symbol('PATIENT_CREDIT_REPOSITORY');
@@ -86,6 +87,8 @@ export interface CreditRefundRecord {
   createdById: string;
   createdAt: Date;
   snapshot: RefundReceiptSnapshot;
+  /** DX-354: región de la sede del comprobante; `null` si le falta algo. */
+  regional: DocumentRegionalDto | null;
   idempotencyFingerprint: string | null;
 }
 

@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
 import {
   ConsentSignerType,
   SignatureRequestChannel,
@@ -176,6 +177,14 @@ class ConsentPatientDto {
 export class PatientConsentDocumentDto extends PatientConsentDto {
   @ApiProperty({ type: ConsentClinicDto })
   clinic!: ConsentClinicDto;
+
+  @ApiProperty({
+    type: DocumentRegionalDto,
+    nullable: true,
+    description:
+      'DX-354: zona, locale y reloj de la sede del documento (la de la firma a distancia, o la sede en contexto). null si le falta algo: el documento se lee igual y la web pinta «—».',
+  })
+  regional!: DocumentRegionalDto | null;
 
   @ApiProperty({ type: ConsentPatientDto })
   patient!: ConsentPatientDto;
