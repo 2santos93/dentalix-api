@@ -7,6 +7,8 @@ import {
 import { CURRENCY_WHITELIST } from '../../../treatment-plans/domain/ports/currency-whitelist.port';
 import type { CurrencyWhitelist } from '../../../treatment-plans/domain/ports/currency-whitelist.port';
 import type { ExpenseAttachment } from '../../domain/entities/expense.entity';
+import { expenseMoneyText } from '../../domain/expense-money';
+import type { LocationFormatSource } from '../../../../shared/locations/location-regional';
 import {
   expenseRequestFingerprint,
   parseIdempotencyKey,
@@ -127,7 +129,7 @@ export class CreateExpenseUseCase {
     }
     const supplier = rule(() => validateSupplier(input.supplier));
     const description = rule(() => validateDescription(input.description));
-    const { locationId, today } = await guarded(() =>
+    const { locationId, today, format } = await guarded(() =>
       this.repo.resolveLocation(input.locationId, now),
     );
     const invoiceDate = rule(() =>
@@ -141,6 +143,7 @@ export class CreateExpenseUseCase {
           currency,
           today,
           createdById,
+          format,
         })
       : undefined;
 
@@ -196,6 +199,8 @@ export class CreateExpenseUseCase {
       currency: string;
       today: string;
       createdById: string;
+      /** DX-354: el formato de la sede del gasto, para los importes del mensaje. */
+      format: LocationFormatSource;
     },
   ): Promise<CreateExpensePaymentRepoInput> {
     const paymentAmount = rule(() => validateAmount(payment.amount));
@@ -203,7 +208,7 @@ export class CreateExpenseUseCase {
       amountCents: toCents(ctx.amount),
       liveCents: 0,
       paymentCents: toCents(paymentAmount),
-      currency: ctx.currency,
+      money: expenseMoneyText(ctx.format, ctx.currency),
     });
     if (denial) throw new BadRequestException(denial.message);
     const plan = await planPaymentCash(

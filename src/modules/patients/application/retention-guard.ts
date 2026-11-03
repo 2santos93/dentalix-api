@@ -1,7 +1,9 @@
 import { ConflictException } from '@nestjs/common';
+import type { RegionalFormat } from '../../../shared/format/regional-format';
+import { requireLocationFormat } from '../../../shared/locations/location-regional';
+import { locationRequired } from '../../../shared/locations/reference-location';
 import type { PatientRetentionState } from '../domain/ports/patient-repository.port';
 import {
-  formatRetentionDate,
   isUnderRetention,
   retentionUntil,
   type RetentionBasis,
@@ -36,12 +38,14 @@ export function assertNoPendingAppointments(pendingAppointments: number): void {
  * Mensaje en español con la fecha hasta la que se conserva la HC. El motivo
  * entre paréntesis sigue a lo que dio la fecha: con DOUBLE el doble del plazo
  * de la clínica (`years`), y con el suelo el plazo anterior, porque decir el
- * plazo de hoy contradiría la fecha.
+ * plazo de hoy contradiría la fecha. La fecha sale con el formato de la sede
+ * principal (DX-354); `fmt` es perezoso: «permanente» no lleva fecha.
  */
 export function retentionMessage(
   until: Date | 'PERMANENT',
   basis: RetentionBasis,
   years: number,
+  fmt: () => RegionalFormat,
 ): string {
   if (until === 'PERMANENT') {
     return 'La historia clínica de este paciente tiene retención permanente: no se puede archivar ni borrar. Si necesitas retirar sus datos de contacto, usa la supresión parcial.';
@@ -52,7 +56,17 @@ export function retentionMessage(
       : basis === 'DOUBLE'
         ? `plazo doble: ${2 * years} años desde la última atención`
         : `${years} años desde la última atención`;
-  return `La historia clínica de este paciente está en retención hasta el ${formatRetentionDate(until)} (${reason}): no se puede archivar ni borrar. Si necesitas retirar sus datos de contacto, usa la supresión parcial.`;
+  return `La historia clínica de este paciente está en retención hasta el ${fmt().civilDate(until.toISOString().slice(0, 10))} (${reason}): no se puede archivar ni borrar. Si necesitas retirar sus datos de contacto, usa la supresión parcial.`;
+}
+
+/**
+ * El formato de la sede principal de la clínica (R6) con el que se escribe la
+ * fecha: sin sede activa, 409 `LOCATION_REQUIRED`; sin formato o reloj, 409
+ * `LOCATION_LOCALE_REQUIRED`. Nunca otro formato.
+ */
+function retentionFormat(state: PatientRetentionState): RegionalFormat {
+  if (!state.format) throw locationRequired();
+  return requireLocationFormat(state.format);
 }
 
 function retentionEnd(state: PatientRetentionState): RetentionEnd {
@@ -79,7 +93,9 @@ export function assertNotUnderRetention(
     statusCode: 409,
     error: 'Conflict',
     code: CLINICAL_RECORD_RETENTION,
-    message: retentionMessage(until, basis, state.years),
+    message: retentionMessage(until, basis, state.years, () =>
+      retentionFormat(state),
+    ),
     retentionUntil:
       until === 'PERMANENT' ? null : until.toISOString().slice(0, 10),
   });

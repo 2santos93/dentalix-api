@@ -14,7 +14,6 @@ import {
   VOID_REASON_MESSAGE,
   expenseEditDenial,
   expenseStatus,
-  formatMoney,
   paymentCapDenial,
   toCents,
   validateAmount,
@@ -29,6 +28,13 @@ import {
   FROM_CASH_PAID_ON_MESSAGE,
   validateFromCashPayment,
 } from './expense-rules';
+import { expenseMoneyText } from './expense-money';
+
+// Datos de test: una sede de Venezuela (VES) y otras dos con formatos distintos.
+const venezuela = expenseMoneyText(
+  { id: 'loc-1', locale: 'es-VE', hourCycle: 'h12' },
+  'VES',
+);
 
 const messageOf = (fn: () => unknown): string | null => {
   try {
@@ -57,13 +63,6 @@ describe('reglas de un gasto (DX-274)', () => {
       expect(toCents(0.29)).toBe(29);
       expect(toCents(1.15)).toBe(115);
       expect(toCents(150000.1)).toBe(15000010);
-    });
-
-    it('da formato «1.234,50 VES»: miles con punto y coma solo con céntimos', () => {
-      expect(formatMoney(15000000, 'VES')).toBe('150.000 VES');
-      expect(formatMoney(123450, 'VES')).toBe('1.234,50 VES');
-      expect(formatMoney(5, 'USD')).toBe('0,05 USD');
-      expect(formatMoney(0, 'USD')).toBe('0 USD');
     });
   });
 
@@ -205,7 +204,7 @@ describe('reglas de un gasto (DX-274)', () => {
         amountCents: 15000000,
         liveCents,
         paymentCents,
-        currency: 'VES',
+        money: venezuela,
       });
 
     it('admite hasta lo pendiente, justo', () => {
@@ -217,14 +216,65 @@ describe('reglas de un gasto (DX-274)', () => {
       const denial = cap(10000000, 5000001);
       expect(denial?.kind).toBe('INVALID');
       expect(denial?.message).toBe(
-        'El pago supera lo pendiente del gasto (50.000 VES).',
+        'El pago supera lo pendiente del gasto (VES\u00a050.000,00).',
       );
     });
 
     it('con todo pagado, lo pendiente es 0', () => {
       expect(cap(15000000, 1)?.message).toBe(
-        'El pago supera lo pendiente del gasto (0 VES).',
+        'El pago supera lo pendiente del gasto (VES\u00a00,00).',
       );
+    });
+  });
+
+  describe('importes con el formato de la sede (DX-354)', () => {
+    const capWith = (
+      location: { locale: string; hourCycle: string },
+      currency: string,
+    ) =>
+      paymentCapDenial({
+        amountCents: 123450,
+        liveCents: 0,
+        paymentCents: 123451,
+        money: expenseMoneyText({ id: 'loc-1', ...location }, currency),
+      })?.message;
+
+    it('de-DE / EUR: «1.234,50 EUR»', () => {
+      expect(capWith({ locale: 'de-DE', hourCycle: 'h23' }, 'EUR')).toBe(
+        'El pago supera lo pendiente del gasto (1.234,50\u00a0EUR).',
+      );
+    });
+
+    it('en-US / USD: «USD 1,234.50», con el código y nunca «$»', () => {
+      const message = capWith({ locale: 'en-US', hourCycle: 'h12' }, 'USD');
+      expect(message).toBe(
+        'El pago supera lo pendiente del gasto (USD\u00a01,234.50).',
+      );
+      expect(message).not.toContain('$');
+    });
+
+    it('sede sin formato: 409 LOCATION_LOCALE_REQUIRED solo al escribir el importe', () => {
+      const money = expenseMoneyText(
+        { id: 'loc-1', locale: null, hourCycle: null },
+        'USD',
+      );
+      // Dentro del tope no hay mensaje: no se pide el formato.
+      expect(
+        paymentCapDenial({
+          amountCents: 100,
+          liveCents: 0,
+          paymentCents: 100,
+          money,
+        }),
+      ).toBeNull();
+      expect(() =>
+        paymentCapDenial({
+          amountCents: 100,
+          liveCents: 0,
+          paymentCents: 101,
+          money,
+        }),
+      ).toThrow('Configura el formato regional y el reloj de la sede');
     });
   });
 
@@ -246,7 +296,7 @@ describe('reglas de un gasto (DX-274)', () => {
         patch,
         liveCents,
         paymentCount,
-        currency: 'VES',
+        money: venezuela,
       });
 
     it('un gasto anulado no se edita', () => {
@@ -274,7 +324,7 @@ describe('reglas de un gasto (DX-274)', () => {
       const denial = edit({ amountCents: 5999 }, 6000, 1);
       expect(denial?.kind).toBe('CONFLICT');
       expect(denial?.message).toBe(
-        'El importe no puede ser menor a lo ya pagado (60 VES).',
+        'El importe no puede ser menor a lo ya pagado (VES\u00a060,00).',
       );
     });
 

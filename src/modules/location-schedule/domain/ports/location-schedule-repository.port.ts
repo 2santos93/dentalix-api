@@ -1,3 +1,4 @@
+import type { LocationFormatSource } from '../../../../shared/locations/location-regional';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { BusinessHours, ScheduleRange } from '../../application/business-hours';
 
@@ -16,13 +17,6 @@ export interface ReplaceScheduleInput {
   ranges: ScheduleRange[];
   /** `timezone` del cuerpo de una web antigua (R15), sin guardar. */
   legacyTimeZone?: string;
-}
-
-/** Los datos de una sede que `requireLocationFormat` necesita. */
-export interface LocationFormatSource {
-  id: string;
-  locale: string | null;
-  hourCycle: string | null;
 }
 
 export interface LocationScheduleRepository {

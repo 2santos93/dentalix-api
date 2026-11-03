@@ -37,16 +37,24 @@ export function isHourCycle(value: unknown): value is HourCycle {
 }
 
 /**
+ * Lo que `requireLocationFormat` necesita de una sede: su id y el formato y el
+ * reloj en crudo (pueden faltar en una fila sin barrer).
+ */
+export interface LocationFormatSource {
+  id: string;
+  locale: string | null;
+  hourCycle: string | null;
+}
+
+/**
  * El formato de la sede; si le falta el locale o el reloj, o no son válidos,
  * el 409 de arriba. PEREZOSO (pre-flight I4): lo llama quien va a formatear,
  * en el momento de formatear; la lógica sigue con los cargadores de zona y una
  * sede sin reloj no bloquea lecturas que no pintan nada.
  */
-export function requireLocationFormat(location: {
-  id: string;
-  locale: string | null;
-  hourCycle: string | null;
-}): RegionalFormat {
+export function requireLocationFormat(
+  location: LocationFormatSource,
+): RegionalFormat {
   const { locale, hourCycle } = location;
   if (!locale || !isHourCycle(hourCycle)) {
     throw locationLocaleRequired(location.id);

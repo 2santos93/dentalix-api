@@ -3,6 +3,7 @@ import {
   decimalPlaces,
 } from '../../../shared/validation/bounded-decimal';
 import type { ExpenseStatus } from './entities/expense.entity';
+import type { ExpenseMoneyText } from './expense-money';
 import { fromCents, toCents } from '../../../shared/money/money';
 
 /**
@@ -118,21 +119,6 @@ export function validateAmount(amount: unknown): number {
     throw invalid(AMOUNT_MESSAGE);
   }
   return amount;
-}
-
-/**
- * «1.234,50 USD»: miles con punto y coma decimal solo si hay céntimos. Es el
- * formato del mensaje de tope (R2), el mismo que ve la clínica en pantalla.
- */
-export function formatMoney(cents: number, currency: string): string {
-  const abs = Math.abs(cents);
-  const whole = Math.floor(abs / 100)
-    .toString()
-    .replace(/\B(?=(\d{3})+(?!\d))/g, '.');
-  const fraction = abs % 100;
-  const decimals =
-    fraction === 0 ? '' : `,${fraction.toString().padStart(2, '0')}`;
-  return `${cents < 0 ? '-' : ''}${whole}${decimals} ${currency}`;
 }
 
 // --- Textos -----------------------------------------------------------------
@@ -290,12 +276,13 @@ export function paymentCapDenial(input: {
   amountCents: number;
   liveCents: number;
   paymentCents: number;
-  currency: string;
+  /** Importes del mensaje con el formato de la sede del gasto (perezoso). */
+  money: ExpenseMoneyText;
 }): ExpenseRuleError | null {
   const pending = input.amountCents - input.liveCents;
   if (input.paymentCents > pending) {
     return invalid(
-      `El pago supera lo pendiente del gasto (${formatMoney(Math.max(pending, 0), input.currency)}).`,
+      `El pago supera lo pendiente del gasto (${input.money(Math.max(pending, 0))}).`,
     );
   }
   return null;
@@ -315,7 +302,8 @@ export interface ExpenseEditContext {
   liveCents: number;
   /** Pagos del gasto, vivos o anulados (la FK de cuatro columnas los ata). */
   paymentCount: number;
-  currency: string;
+  /** Importes del mensaje con el formato de la sede del gasto (perezoso). */
+  money: ExpenseMoneyText;
 }
 
 /**
@@ -341,7 +329,7 @@ export function expenseEditDenial(
     ctx.patch.amountCents < ctx.liveCents
   ) {
     return conflict(
-      `El importe no puede ser menor a lo ya pagado (${formatMoney(ctx.liveCents, ctx.currency)}).`,
+      `El importe no puede ser menor a lo ya pagado (${ctx.money(ctx.liveCents)}).`,
     );
   }
   return null;

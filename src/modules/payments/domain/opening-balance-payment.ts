@@ -5,6 +5,7 @@
  */
 import type { RegionalFormat } from '../../../shared/format/regional-format';
 import { endSentence } from '../../../shared/format/end-sentence';
+import { moneyWithCode } from '../../../shared/format/money-with-code';
 
 export const OPENING_BALANCE_NOT_FOUND_MESSAGE =
   'Saldo migrado no encontrado en esta clínica (o ya retirado).';
@@ -28,6 +29,6 @@ export function openingBalanceOverpaidMessage(
   fmt: RegionalFormat,
 ): string {
   return endSentence(
-    `El abono supera lo pendiente del saldo migrado: quedan ${fmt.money(pending, currency)}`,
+    `El abono supera lo pendiente del saldo migrado: quedan ${moneyWithCode(pending, currency, fmt, null)}`,
   );
 }

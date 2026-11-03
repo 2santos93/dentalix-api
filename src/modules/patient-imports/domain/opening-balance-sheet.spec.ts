@@ -374,7 +374,7 @@ describe('agregado por paciente y moneda (DX-262)', () => {
           column: 'numero_documento',
           kind: 'ERROR',
           message: expect.stringMatching(
-            /^Este paciente ya tiene un saldo migrado vivo de Bs\.S\s1\.500\.000,00 \(lote «existentes\.csv» del 22\/10\/2026, corte 09\/08\/2026\): no se crea otro\. Si es otra deuda, marca «Añadir aunque ya tenga saldo migrado» y vuelve a subir la hoja\.$/,
+            /^Este paciente ya tiene un saldo migrado vivo de VES\s1\.500\.000,00 \(lote «existentes\.csv» del 22\/10\/2026, corte 09\/08\/2026\): no se crea otro\. Si es otra deuda, marca «Añadir aunque ya tenga saldo migrado» y vuelve a subir la hoja\.$/,
           ) as string,
           value: '111',
         },
@@ -384,7 +384,7 @@ describe('agregado por paciente y moneda (DX-262)', () => {
           column: 'numero_documento',
           kind: 'ERROR',
           message: expect.stringMatching(
-            /^Este paciente ya tiene 2 saldos migrados vivos en VES por Bs\.S\s3\.000,00 \(el último, Bs\.S\s1\.000,00 del lote «otra\.csv» del 21\/10\/2026, corte 01\/09\/2026\): no se crea otro\./,
+            /^Este paciente ya tiene 2 saldos migrados vivos en VES por VES\s3\.000,00 \(el último, VES\s1\.000,00 del lote «otra\.csv» del 21\/10\/2026, corte 01\/09\/2026\): no se crea otro\./,
           ) as string,
           value: '222',
         },
@@ -408,6 +408,23 @@ describe('agregado por paciente y moneda (DX-262)', () => {
       );
       expect(result.issues[2].message).toMatch(
         /por VES\s3,000\.00 \(el último, VES\s1,000\.00 del lote/,
+      );
+      // DX-354: las fechas del lote con el orden del locale (en-US: mes/día/año).
+      expect(result.issues[0].message).toContain(
+        'del 10/22/2026, corte 08/09/2026',
+      );
+    });
+
+    it('DX-354: las fechas del lote salen con el orden de la sede (de-DE: día.mes.año)', () => {
+      const result = aggregateBalances(
+        rows,
+        docs,
+        'numero_documento',
+        () => regionalFormat({ locale: 'de-DE', hourCycle: 'h23' }),
+        existing,
+      );
+      expect(result.issues[0].message).toContain(
+        'del 22.10.2026, corte 09.08.2026',
       );
       // Sin saldos vivos que describir no se pide el formato (G1-B, I4).
       expect(() =>

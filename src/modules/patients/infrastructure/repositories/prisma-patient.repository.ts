@@ -135,7 +135,9 @@ async function lockRetentionContext(
     FROM "tenants"
     WHERE "id" = ${tenantId}::uuid
     FOR SHARE`;
-  const rows = await tx.$queryRaw<Omit<PatientRetentionState, 'years'>[]>`
+  const rows = await tx.$queryRaw<
+    Omit<PatientRetentionState, 'years' | 'format'>[]
+  >`
     SELECT "last_attention_at" AS "lastAttentionAt",
            "retention_extended" AS "retentionExtended",
            "retention_floor_until" AS "retentionFloorUntil"
@@ -143,12 +145,20 @@ async function lockRetentionContext(
     WHERE "id" = ${id}::uuid AND "deletedAt" IS NULL
     FOR UPDATE`;
   if (rows.length === 0) throw new NotFoundException(PATIENT_NOT_FOUND);
+  // DX-354: la fecha del mensaje de retención se escribe con el formato de la
+  // sede principal (R6, la activa más antigua).
+  const principal = await tx.location.findFirst({
+    where: { tenantId, deletedAt: null, isActive: true },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    select: { id: true, locale: true, hourCycle: true },
+  });
   return {
     ...rows[0],
     years: effectiveRetentionYears(
       clinic.clinicalRecordRetentionYears,
       platformMinYears,
     ),
+    format: principal,
   };
 }
 

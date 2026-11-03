@@ -81,7 +81,7 @@ describe('pagos de un gasto (DX-274)', () => {
       await pay(e.id, { amount: 99.5, method: 'CARD' });
       await expect(pay(e.id, { amount: 0.51, method: 'CARD' })).rejects.toThrow(
         new BadRequestException(
-          'El pago supera lo pendiente del gasto (0,50 VES).',
+          'El pago supera lo pendiente del gasto (VES\u00a00,50).',
         ),
       );
       await expect(
@@ -89,6 +89,37 @@ describe('pagos de un gasto (DX-274)', () => {
       ).resolves.toMatchObject({
         status: 'PAID',
       });
+    });
+
+    it('DX-354: el tope dice el importe con el formato de la sede y el código ISO', async () => {
+      kit.repo.format = { locale: 'de-DE', hourCycle: 'h23' };
+      const e = kit.repo.seed({ amount: 1234.5, currency: 'EUR' });
+      await expect(
+        pay(e.id, { amount: 1234.51, method: 'CARD' }),
+      ).rejects.toThrow(
+        'El pago supera lo pendiente del gasto (1.234,50\u00a0EUR).',
+      );
+      kit.repo.format = { locale: 'en-US', hourCycle: 'h12' };
+      const usd = kit.repo.seed({ amount: 1234.5, currency: 'USD' });
+      await expect(
+        pay(usd.id, { amount: 1234.51, method: 'CARD' }),
+      ).rejects.toThrow(
+        'El pago supera lo pendiente del gasto (USD\u00a01,234.50).',
+      );
+    });
+
+    it('DX-354: una sede sin formato da 409 LOCATION_LOCALE_REQUIRED solo al rechazar el tope', async () => {
+      kit.repo.format = { locale: null, hourCycle: null };
+      const e = kit.repo.seed({ amount: 10 });
+      await expect(
+        pay(e.id, { amount: 10.01, method: 'CARD' }),
+      ).rejects.toMatchObject({
+        response: { code: 'LOCATION_LOCALE_REQUIRED' },
+      });
+      // Dentro del tope no hay mensaje con cifras: se paga igual.
+      await expect(
+        pay(e.id, { amount: 10, method: 'CARD' }),
+      ).resolves.toMatchObject({ status: 'PAID' });
     });
 
     it('anular un pago libera su importe para volver a pagar', async () => {

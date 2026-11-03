@@ -1,4 +1,5 @@
 import { ConflictException } from '@nestjs/common';
+import { regionalFormat } from '../../../shared/format/regional-format';
 import type { PatientRetentionState } from '../domain/ports/patient-repository.port';
 import {
   assertNotUnderRetention,
@@ -26,6 +27,8 @@ function state(over: Partial<PatientRetentionState>): PatientRetentionState {
     retentionExtended: 'NONE',
     retentionFloorUntil: null,
     years: 15,
+    // DX-354: la sede principal de los tests es de Venezuela (es-VE, 24 h).
+    format: { id: 'loc-1', locale: 'es-VE', hourCycle: 'h23' },
     ...over,
   };
 }
@@ -176,30 +179,31 @@ describe('assertUnderRetention', () => {
 
 describe('retentionMessage (DX-330)', () => {
   const until = new Date('2035-06-15T00:00:00Z');
+  const fmt = () => regionalFormat({ locale: 'es-VE', hourCycle: 'h23' });
 
   it.each([15, 20])('TERM con N = %i', (years) => {
-    expect(retentionMessage(until, 'TERM', years)).toContain(
+    expect(retentionMessage(until, 'TERM', years, fmt)).toContain(
       `(${years} años desde la última atención)`,
     );
   });
 
   it('DOUBLE con 2N', () => {
-    expect(retentionMessage(until, 'DOUBLE', 20)).toContain(
+    expect(retentionMessage(until, 'DOUBLE', 20, fmt)).toContain(
       '(plazo doble: 40 años desde la última atención)',
     );
   });
 
   it('PREVIOUS_TERM no dice años', () => {
-    expect(retentionMessage(until, 'PREVIOUS_TERM', 20)).toContain(
+    expect(retentionMessage(until, 'PREVIOUS_TERM', 20, fmt)).toContain(
       '(plazo anterior de la clínica)',
     );
-    expect(retentionMessage(until, 'PREVIOUS_TERM', 20)).not.toContain(
+    expect(retentionMessage(until, 'PREVIOUS_TERM', 20, fmt)).not.toContain(
       '20 años',
     );
   });
 
   it('PERMANENT', () => {
-    expect(retentionMessage('PERMANENT', 'PERMANENT', 20)).toContain(
+    expect(retentionMessage('PERMANENT', 'PERMANENT', 20, fmt)).toContain(
       'tiene retención permanente',
     );
   });
@@ -210,6 +214,59 @@ describe('retentionMessage (DX-330)', () => {
     [until, 'PREVIOUS_TERM'],
     ['PERMANENT', 'PERMANENT'],
   ] as const)('sin «legal» (%#)', (date, basis) => {
-    expect(retentionMessage(date, basis, 20)).not.toMatch(/legal/);
+    expect(retentionMessage(date, basis, 20, fmt)).not.toMatch(/legal/);
+  });
+});
+
+describe('la fecha del mensaje de retención usa el formato de la sede (DX-354)', () => {
+  const lastAttentionAt = new Date('2026-11-01T15:00:00Z');
+  // 15 años después: hasta el 1 de noviembre de 2041.
+  const messageIn = (locale: string, hourCycle: string) =>
+    conflictBody(() =>
+      assertNotUnderRetention(
+        state({
+          lastAttentionAt,
+          format: { id: 'loc-1', locale, hourCycle },
+        }),
+        now,
+      ),
+    ).message as string;
+
+  it('en-US: mes/día/año', () => {
+    expect(messageIn('en-US', 'h12')).toContain('hasta el 11/01/2041 (');
+  });
+
+  it('de-DE: día.mes.año', () => {
+    expect(messageIn('de-DE', 'h23')).toContain('hasta el 01.11.2041 (');
+  });
+
+  it('sede sin formato: 409 LOCATION_LOCALE_REQUIRED, nunca otro formato', () => {
+    const body = conflictBody(() =>
+      assertNotUnderRetention(
+        state({
+          lastAttentionAt,
+          format: { id: 'loc-1', locale: null, hourCycle: null },
+        }),
+        now,
+      ),
+    );
+    expect(body.code).toBe('LOCATION_LOCALE_REQUIRED');
+  });
+
+  it('clínica sin sede activa: 409 LOCATION_REQUIRED', () => {
+    const body = conflictBody(() =>
+      assertNotUnderRetention(state({ lastAttentionAt, format: null }), now),
+    );
+    expect(body.code).toBe('LOCATION_REQUIRED');
+  });
+
+  it('retención permanente no lleva fecha: no pide el formato', () => {
+    const body = conflictBody(() =>
+      assertNotUnderRetention(
+        state({ retentionExtended: 'PERMANENT', format: null }),
+        now,
+      ),
+    );
+    expect(body.code).toBe(CLINICAL_RECORD_RETENTION);
   });
 });

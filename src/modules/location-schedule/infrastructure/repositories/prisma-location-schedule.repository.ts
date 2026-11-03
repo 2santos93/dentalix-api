@@ -4,11 +4,11 @@ import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { requireLocationTimeZone } from '../../../../shared/locations/location-time-zone';
 import {
-  LocationFormatSource,
   LocationScheduleRepository,
   ReplaceScheduleInput,
   SCHEDULE_TIME_ZONE_MOVED,
 } from '../../domain/ports/location-schedule-repository.port';
+import type { LocationFormatSource } from '../../../../shared/locations/location-regional';
 import { BusinessHours } from '../../application/business-hours';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';

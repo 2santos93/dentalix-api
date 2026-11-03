@@ -14,6 +14,10 @@ import type {
   ExpenseDetail,
   ExpensePayment,
 } from '../../domain/entities/expense.entity';
+import {
+  expenseMoneyText,
+  type ExpenseMoneyText,
+} from '../../domain/expense-money';
 import { categoryKey } from '../../domain/expense-categories';
 import {
   ATTACHMENT_ALREADY_MESSAGE,
@@ -34,6 +38,7 @@ import {
   validateInvoiceDate,
 } from '../../domain/expense-rules';
 import type { ExpenseCashLink } from '../../domain/ports/expense-cash-link.port';
+import type { ResolvedExpenseLocation } from '../../domain/ports/expense-repository.port';
 import type {
   CreateExpensePaymentRepoInput,
   CreateExpenseRepoInput,
@@ -104,6 +109,9 @@ interface LockedExpense {
   currency: string;
   amountCents: bigint;
   voidedAt: Date | null;
+  /** DX-354: formato y reloj de la sede del gasto (null: sede sin barrer). */
+  locale?: string | null;
+  hourCycle?: string | null;
 }
 
 @Injectable()
@@ -123,7 +131,7 @@ export class PrismaExpenseRepository implements ExpenseRepository {
   resolveLocation(
     requested: string | undefined,
     now: Date,
-  ): Promise<{ locationId: string; today: string }> {
+  ): Promise<ResolvedExpenseLocation> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
       let locationId: string;
@@ -141,7 +149,16 @@ export class PrismaExpenseRepository implements ExpenseRepository {
         locationId = await this.tenantContext.writeLocationId(tx);
       }
       const zoneOf = await resolveLocationTimeZones(tx, tenantId, [locationId]);
-      return { locationId, today: civilDateIn(now, zoneOf(locationId)) };
+      // DX-354: el formato de la sede, en crudo, para los importes de los mensajes.
+      const format = await tx.location.findFirst({
+        where: { tenantId, id: locationId },
+        select: { id: true, locale: true, hourCycle: true },
+      });
+      return {
+        locationId,
+        today: civilDateIn(now, zoneOf(locationId)),
+        format: format ?? { id: locationId, locale: null, hourCycle: null },
+      };
     });
   }
 
@@ -399,12 +416,33 @@ export class PrismaExpenseRepository implements ExpenseRepository {
         : Prisma.sql`AND "locationId" = ANY(${scope}::uuid[])`;
     const rows = await tx.$queryRaw<LockedExpense[]>`
       SELECT "id", "locationId", "currency",
-             ("amount" * 100)::bigint AS "amountCents", "voidedAt"
+             ("amount" * 100)::bigint AS "amountCents", "voidedAt",
+             (SELECT l."locale" FROM "locations" l
+               WHERE l."id" = "expenses"."locationId") AS "locale",
+             (SELECT l."hourCycle" FROM "locations" l
+               WHERE l."id" = "expenses"."locationId") AS "hourCycle"
         FROM "expenses"
        WHERE "tenantId" = ${tenantId}::uuid AND "id" = ${id}::uuid ${scopeSql}
        FOR UPDATE`;
     if (rows.length === 0) throw notFound();
     return rows[0];
+  }
+
+  /**
+   * DX-354: los importes de los mensajes del gasto bloqueado, con el formato
+   * de SU sede (leído con el bloqueo) y el código de su moneda. Perezoso: el
+   * formato se exige al escribir el primer importe (409
+   * `LOCATION_LOCALE_REQUIRED`).
+   */
+  private moneyTextOf(locked: LockedExpense): ExpenseMoneyText {
+    return expenseMoneyText(
+      {
+        id: locked.locationId,
+        locale: locked.locale ?? null,
+        hourCycle: locked.hourCycle ?? null,
+      },
+      locked.currency,
+    );
   }
 
   /** Σ de pagos vivos y nº de pagos (vivos o anulados), en céntimos. */
@@ -542,7 +580,7 @@ export class PrismaExpenseRepository implements ExpenseRepository {
         },
         liveCents: totals.liveCents,
         paymentCount: totals.paymentCount,
-        currency: locked.currency,
+        money: this.moneyTextOf(locked),
       });
       if (denial) throw denial;
       // El vencimiento contra la fecha de factura que quedará (el CHECK de la
@@ -663,7 +701,7 @@ export class PrismaExpenseRepository implements ExpenseRepository {
           amountCents: Number(locked.amountCents),
           liveCents,
           paymentCents: toCents(input.amount),
-          currency: locked.currency,
+          money: this.moneyTextOf(locked),
         });
         if (denial) throw denial;
         await this.insertPayment(tx, locked, input);

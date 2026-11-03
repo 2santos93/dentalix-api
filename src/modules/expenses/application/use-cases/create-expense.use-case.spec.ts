@@ -203,7 +203,9 @@ describe('alta de un gasto (DX-274)', () => {
     it('no admite un pago mayor que el gasto ni con día futuro', async () => {
       await expect(
         run(input({ payment: { amount: 120001, method: 'CARD' } })),
-      ).rejects.toThrow('El pago supera lo pendiente del gasto (120.000 VES).');
+      ).rejects.toThrow(
+        'El pago supera lo pendiente del gasto (VES\u00a0120.000,00).',
+      );
       await expect(
         run(
           input({

@@ -1,3 +1,4 @@
+import type { LocationFormatSource } from '../../../../shared/locations/location-regional';
 import type { PaymentMethod } from '@prisma/client';
 import type {
   Expense,
@@ -92,6 +93,14 @@ export interface IdempotentWrite {
   fingerprint: string | null;
 }
 
+/** La sede donde se escribe un gasto: su «hoy» civil y su formato en crudo. */
+export interface ResolvedExpenseLocation {
+  locationId: string;
+  today: string;
+  /** DX-354: para escribir los importes de los mensajes con el formato de la sede. */
+  format: LocationFormatSource;
+}
+
 export interface ExpenseRepository {
   /**
    * Sede donde se escribe y su «hoy» civil. Con `requested`: debe estar entre
@@ -101,7 +110,7 @@ export interface ExpenseRepository {
   resolveLocation(
     requested: string | undefined,
     now: Date,
-  ): Promise<{ locationId: string; today: string }>;
+  ): Promise<ResolvedExpenseLocation>;
 
   /** Día civil de hoy en la sede (aunque ya no esté activa). */
   locationToday(locationId: string, now: Date): Promise<string>;

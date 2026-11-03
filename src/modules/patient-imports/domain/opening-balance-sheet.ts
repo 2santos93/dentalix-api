@@ -9,6 +9,7 @@ import {
 } from './row-validation';
 import { ImportFileError, type TableRow } from './tabular-file';
 import type { RegionalFormat } from '../../../shared/format/regional-format';
+import { moneyWithCode } from '../../../shared/format/money-with-code';
 import { toCents } from '../../../shared/money/money';
 
 /*
@@ -459,16 +460,17 @@ export type ExistingBalanceLookup = ReadonlyMap<string, ExistingBalance>;
 /** Rótulo de la casilla de la web que deja añadir otro saldo (QA D1). */
 export const ADD_TO_EXISTING_LABEL = 'Añadir aunque ya tenga saldo migrado';
 
-const ddmmyyyy = (day: string): string => day.split('-').reverse().join('/');
-
-/** Importes con el formato de la sede del lote (G1-B). */
+/** Importes y fechas con el formato de la sede del lote (G1-B, DX-354). */
 function existingDescription(
   e: ExistingBalance,
   currency: string,
   fmt: RegionalFormat,
 ): string {
-  const money = (cents: number) => fmt.money(cents / 100, currency);
-  const where = `lote «${e.latest.fileName}» del ${ddmmyyyy(e.latest.importedOn)}, corte ${ddmmyyyy(e.latest.asOfDate)}`;
+  // DX-354: importes con el código ISO y fechas con el orden del locale de la
+  // sede, nunca «$» ni DD/MM/AAAA fijos.
+  const money = (cents: number) =>
+    moneyWithCode(cents / 100, currency, fmt, null);
+  const where = `lote «${e.latest.fileName}» del ${fmt.civilDate(e.latest.importedOn)}, corte ${fmt.civilDate(e.latest.asOfDate)}`;
   return e.count === 1
     ? `Este paciente ya tiene un saldo migrado vivo de ${money(e.cents)} (${where})`
     : `Este paciente ya tiene ${e.count} saldos migrados vivos en ${currency} por ${money(e.cents)} (el último, ${money(e.latest.cents)} del ${where})`;
