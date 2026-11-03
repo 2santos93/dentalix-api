@@ -63,6 +63,13 @@ function normalizePhone(
 }
 
 /**
+ * 409 al desactivar la única sede activa. En español, como el resto de
+ * mensajes que ve el usuario.
+ */
+export const LAST_ACTIVE_LOCATION_MESSAGE =
+  'No se puede desactivar la única sede activa: la clínica necesita al menos una para agendar, cobrar y llevar el inventario. Activa o crea otra sede antes.';
+
+/**
  * Sedes de la clínica. DX-089: un miembro restringido solo ve las suyas (el
  * selector de sede, la agenda y la caja no le ofrecen las demás); el ADMIN
  * y quien no tiene restricción, todas.
@@ -279,7 +286,7 @@ export class UpdateLocationUseCase {
       current.isActive &&
       (await this.repo.countActive()) <= 1
     ) {
-      throw new ConflictException('Cannot deactivate the last active location');
+      throw new ConflictException(LAST_ACTIVE_LOCATION_MESSAGE);
     }
 
     // El país va primero (como en el alta): ausente no cambia; null o vacío es

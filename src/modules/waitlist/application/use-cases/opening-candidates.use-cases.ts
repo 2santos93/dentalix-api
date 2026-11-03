@@ -1,3 +1,4 @@
+import { assertLocationWritable } from '../../../../shared/tenancy/active-location';
 import {
   BadRequestException,
   ConflictException,
@@ -547,6 +548,8 @@ export class CreateWaitlistOfferUseCase {
       this.tenantContext,
       input.locationId,
     );
+    // SEC-014: no se ofrecen huecos de una sede desactivada.
+    assertLocationWritable(location);
     await requireProvider(this.staff, input.providerId, location.id);
     const patient = await this.repo.patientContact(input.patientId);
     if (!patient) throw new NotFoundException('Paciente no encontrado');

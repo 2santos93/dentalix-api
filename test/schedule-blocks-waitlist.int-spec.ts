@@ -563,6 +563,7 @@ describe('bloqueos de agenda y pendientes por agendar (int, DX-122)', () => {
         create,
         noAudit,
         tenantContext,
+        new PrismaLocationRepository(prisma, tenantContext),
       );
       const results = await Promise.allSettled([
         inA(() =>

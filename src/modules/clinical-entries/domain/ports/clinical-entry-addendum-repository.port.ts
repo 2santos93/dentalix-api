@@ -21,6 +21,15 @@ export interface ClinicalEntryAddendumRepository {
    */
   entryExists(patientId: string, entryId: string): Promise<boolean>;
 
+  /**
+   * SEC-014: la sede de esa misma evolución (`null` si no tiene: anterior a
+   * multi-sede), o `null` entero si no existe como en `entryExists`.
+   */
+  findEntryLocation(
+    patientId: string,
+    entryId: string,
+  ): Promise<{ locationId: string | null } | null>;
+
   /** Append-only: siempre INSERTA. No hay método de edición ni de borrado. */
   create(
     input: CreateClinicalEntryAddendumRepoInput,

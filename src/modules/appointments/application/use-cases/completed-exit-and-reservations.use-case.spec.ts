@@ -45,7 +45,8 @@ const staff = {
   findById: (userId: string) => Promise.resolve({ userId }),
 } as unknown as StaffRepository;
 const locations = {
-  findById: (id: string) => Promise.resolve({ id, timeZone: TZ }),
+  findById: (id: string) =>
+    Promise.resolve({ id, timeZone: TZ, isActive: true }),
 } as unknown as LocationRepository;
 
 function ctx(role: ClinicRole): AppointmentAuditContext {

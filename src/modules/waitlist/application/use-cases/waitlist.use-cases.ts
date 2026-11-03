@@ -55,6 +55,7 @@ import type { AppointmentWriteResult } from '../../../appointments/domain/entiti
 import { RecordAuditEventUseCase } from '../../../audit/application/record-audit-event.use-case';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import { assertLocationWritable } from '../../../../shared/tenancy/active-location';
 
 function assertValid(error: string | null): void {
   if (error !== null) throw new BadRequestException(error);
@@ -279,6 +280,8 @@ export class ScheduleFromWaitlistUseCase {
     private readonly createAppointment: CreateAppointmentUseCase,
     private readonly audit: RecordAuditEventUseCase,
     private readonly tenantContext: TenantContextService,
+    @Inject(LOCATION_REPOSITORY)
+    private readonly locations: LocationRepository,
   ) {}
 
   /**
@@ -298,6 +301,9 @@ export class ScheduleFromWaitlistUseCase {
     if (entry.status !== WaitlistStatus.OPEN) {
       throw new ConflictException(WAITLIST_NOT_OPEN_MESSAGE);
     }
+    // SEC-014: y activa: una sede desactivada no recibe citas nuevas.
+    const location = await this.locations.findById(entry.locationId);
+    if (location) assertLocationWritable(location);
 
     const appointment = await this.createAppointment.execute({
       patientId: entry.patientId,

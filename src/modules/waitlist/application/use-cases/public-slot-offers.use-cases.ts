@@ -121,8 +121,10 @@ export class GetPublicSlotOfferUseCase {
     const offer = await findOffer(this.tenantContext, this.repo, token);
     const now = this.clock();
     const base = publicSlotOfferState(offer, now, false);
+    // SEC-014: el hueco de una sede desactivada tampoco está disponible.
     const state =
-      base === 'OPEN' && (await this.repo.slotTaken(offer))
+      base === 'OPEN' &&
+      (!offer.locationActive || (await this.repo.slotTaken(offer)))
         ? 'UNAVAILABLE'
         : base;
     return viewOf(this.repo, offer, state);
@@ -165,6 +167,8 @@ export class AcceptSlotOfferUseCase {
 
   /** Horario de la sede, del profesional y bloqueos, como al reagendar. */
   private async fitsAgenda(offer: PublicSlotOffer): Promise<boolean> {
+    // SEC-014: el paciente no recibe un error; el hueco ya no está.
+    if (!offer.locationActive) return false;
     const start = offer.slotStart;
     const end = offer.appointmentEnd;
     const hours = await this.schedule.findByLocation(offer.locationId);

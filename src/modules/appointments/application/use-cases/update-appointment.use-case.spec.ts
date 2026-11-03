@@ -173,10 +173,10 @@ function makeStaff(known?: string[]): StaffRepository {
 }
 
 // Doble de las sedes (DX-200): la zona con la que se decide qué día es hoy.
-function makeLocations(): LocationRepository {
+function makeLocations(isActive = true): LocationRepository {
   return {
     findById: (id: string) =>
-      Promise.resolve({ id, timeZone: 'America/Caracas' }),
+      Promise.resolve({ id, timeZone: 'America/Caracas', isActive }),
   } as unknown as LocationRepository;
 }
 
@@ -263,6 +263,42 @@ describe('UpdateAppointmentUseCase', () => {
       expectStatus: AppointmentStatus.SCHEDULED,
     });
     expect(overlapChecked).toBe(false);
+  });
+
+  it('SEC-014: en una sede desactivada no se reagenda (400 sin escribir); editar notas sí', async () => {
+    const existing = fakeAppointment();
+    let writes = 0;
+    const repo = makeRepo({
+      findById: (id: string): Promise<Appointment | null> =>
+        Promise.resolve(id === existing.id ? existing : null),
+      findOverlapping: (): Promise<Appointment[]> => Promise.resolve([]),
+      update: (): Promise<Appointment> => {
+        writes += 1;
+        return Promise.resolve(existing);
+      },
+    });
+    const uc = new UpdateAppointmentUseCase(
+      repo,
+      makeSchedule(),
+      makeStaff(),
+      makeAudit(),
+      makeBlocks(),
+      makeLocations(false),
+      new TenantContextService(),
+      inMemoryAvailability(),
+    );
+    const err = await uc
+      .execute(existing.id, { start: at('14:00'), end: at('14:30') })
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(BadRequestException);
+    expect((err as BadRequestException).getResponse()).toMatchObject({
+      code: 'LOCATION_INACTIVE',
+    });
+    expect(writes).toBe(0);
+    await uc.execute(existing.id, {
+      notes: 'Paciente avisado del cierre de la sede',
+    });
+    expect(writes).toBe(1);
   });
 
   it('reschedules (start/end) and re-checks overlap EXCLUDING its own id', async () => {
