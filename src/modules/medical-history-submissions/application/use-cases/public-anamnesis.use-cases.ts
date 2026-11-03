@@ -1,3 +1,4 @@
+import type { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
 import {
   BadRequestException,
   ConflictException,
@@ -46,6 +47,8 @@ export interface PublicAnamnesis {
   /** Solo el nombre de pila: ni apellidos, ni documento, ni datos previos. */
   patientFirstName: string | null;
   expiresAt: Date;
+  /** DX-354: región de la sede principal de la clínica, para pintar `expiresAt`. */
+  regional: DocumentRegionalDto | null;
   questionnaire: QuestionnaireDefinition;
   consent: {
     /** El paciente no tiene vigente SENSITIVE_HEALTH: se pide antes. */
@@ -115,6 +118,7 @@ export class GetPublicAnamnesisUseCase {
       clinic: view.clinic,
       patientFirstName: firstNameOnly(view.patientFirstName),
       expiresAt: view.submission.expiresAt,
+      regional: view.regional,
       questionnaire: anamnesisQuestionnaire(),
       consent: { required, policy: required ? view.policy : null },
     };

@@ -107,7 +107,7 @@ export class GetFamilyAccountStatementUseCase {
     const loaded: { ref: (typeof refs)[number]; data: AccountStatementData }[] =
       [];
     for (const ref of refs) {
-      const data = await this.repo.load(ref.id);
+      const data = await this.repo.load(ref.id, { regional: false });
       // Retirado entre las dos lecturas: no cuenta.
       if (data) loaded.push({ ref, data });
     }
@@ -152,9 +152,13 @@ export class GetFamilyAccountStatementUseCase {
       });
     }
 
+    // DX-354: una sola lectura de la región para toda la familia.
+    const regional = await this.repo.loadRegional();
+
     return {
       issuedAt,
       clinic,
+      regional,
       payer: {
         id: family.payer.id,
         firstName: family.payer.firstName,

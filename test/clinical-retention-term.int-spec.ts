@@ -14,7 +14,10 @@ import {
 } from '../src/modules/patients/application/retention-guard';
 import { floorCandidate } from '../src/modules/patients/domain/retention/clinical-record-retention';
 import { ListRetentionExpiringUseCase } from '../src/modules/patients/application/use-cases/retention.use-cases';
-import { REGIONAL_CARACAS_FIXTURE } from './support/location-fixtures';
+import {
+  REGIONAL_CARACAS_FIXTURE,
+  regionalLocationInsert,
+} from './support/location-fixtures';
 import {
   gate,
   settle,
@@ -67,6 +70,10 @@ describe('plazo de conservación de la HC por clínica (DX-330, int)', () => {
         data: { name: 'dx330-b', subdomain: `dx330-t1-b-${SUFFIX}` },
       })
     ).id;
+    // DX-354: el mensaje de retención escribe la fecha con el formato de la sede principal.
+    for (const id of [tenantA, tenantB]) {
+      await regionalLocationInsert(raw, id, 'Sede', REGIONAL_CARACAS_FIXTURE);
+    }
   });
 
   afterAll(async () => {
@@ -208,6 +215,9 @@ describe('el plazo de la clínica manda en la fecha de fin (DX-330, int)', () =>
         data: { name: 'dx330-t3-b', subdomain: `dx330-t3-b-${SUFFIX}` },
       })
     ).id;
+    for (const id of [clinicA, clinicB]) {
+      await regionalLocationInsert(raw, id, 'Sede', REGIONAL_CARACAS_FIXTURE);
+    }
   });
 
   beforeEach(async () => {
@@ -418,6 +428,7 @@ describe('cambiar el plazo: suelos, ventana y evento (DX-330, int)', () => {
         clinicalRecordRetentionYears: years,
       },
     });
+    await regionalLocationInsert(raw, id, 'Sede', REGIONAL_CARACAS_FIXTURE);
     tenants.push(id);
     return id;
   }

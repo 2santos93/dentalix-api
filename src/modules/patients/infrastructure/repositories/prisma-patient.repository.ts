@@ -127,6 +127,7 @@ async function lockRetentionContext(
   tenantId: string,
   id: string,
   platformMinYears: number,
+  withFormat = false,
 ): Promise<PatientRetentionState> {
   const [clinic] = await tx.$queryRaw<
     { clinicalRecordRetentionYears: number }[]
@@ -135,7 +136,9 @@ async function lockRetentionContext(
     FROM "tenants"
     WHERE "id" = ${tenantId}::uuid
     FOR SHARE`;
-  const rows = await tx.$queryRaw<Omit<PatientRetentionState, 'years'>[]>`
+  const rows = await tx.$queryRaw<
+    Omit<PatientRetentionState, 'years' | 'format'>[]
+  >`
     SELECT "last_attention_at" AS "lastAttentionAt",
            "retention_extended" AS "retentionExtended",
            "retention_floor_until" AS "retentionFloorUntil"
@@ -143,12 +146,23 @@ async function lockRetentionContext(
     WHERE "id" = ${id}::uuid AND "deletedAt" IS NULL
     FOR UPDATE`;
   if (rows.length === 0) throw new NotFoundException(PATIENT_NOT_FOUND);
+  // DX-354: la fecha del mensaje de retención se escribe con el formato de la
+  // sede principal (R6, la activa más antigua).
+  // Solo el archivado la escribe (`withFormat`): los otros flujos no la usan.
+  const principal = withFormat
+    ? await tx.location.findFirst({
+        where: { tenantId, deletedAt: null, isActive: true },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        select: { id: true, locale: true, hourCycle: true },
+      })
+    : null;
   return {
     ...rows[0],
     years: effectiveRetentionYears(
       clinic.clinicalRecordRetentionYears,
       platformMinYears,
     ),
+    format: principal,
   };
 }
 
@@ -339,12 +353,14 @@ export class PrismaPatientRepository implements PatientRepository {
   private lockRetention(
     tx: TxClient,
     id: string,
+    withFormat = false,
   ): Promise<PatientRetentionState> {
     return lockRetentionContext(
       tx,
       this.requireTenantId(),
       id,
       this.retention.platformMinYears,
+      withFormat,
     );
   }
 
@@ -549,7 +565,7 @@ export class PrismaPatientRepository implements PatientRepository {
   ): Promise<void> {
     const tenantId = this.requireTenantId();
     await this.prisma.runWithTenant(async (tx) => {
-      const retention = await this.lockRetention(tx, id);
+      const retention = await this.lockRetention(tx, id, true);
       // Todas las sedes: el paciente es de la clínica, no de una sede.
       const pendingAppointments = await tx.appointment.count({
         where: {

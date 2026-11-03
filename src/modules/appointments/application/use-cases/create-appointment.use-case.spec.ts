@@ -132,12 +132,21 @@ function makePatients(found: unknown = { id: 'p1' }): PatientRepository {
 // Doble del horario de la sede: por defecto SIN horario configurado (null), que
 // el dominio interpreta como "sin restricción" — así los tests existentes siguen
 // probando lo suyo sin que el horario interfiera. Los tests del horario lo pasan.
-function makeSchedule(hours: unknown = null): LocationScheduleRepository {
+function makeSchedule(
+  hours: unknown = null,
+  format: { locale: string | null; hourCycle: string | null } = {
+    locale: 'de-DE',
+    hourCycle: 'h23',
+  },
+): LocationScheduleRepository {
   return {
     findByLocation: (): Promise<never> =>
       Promise.resolve(hours) as Promise<never>,
     findForCurrentLocation: (): Promise<never> =>
       Promise.resolve(hours) as Promise<never>,
+    // DX-354: la sede del doble, de 24 h salvo que el test cambie `format`.
+    formatSourceOf: (locationId = 'loc-1') =>
+      Promise.resolve({ id: locationId, ...format }),
     replaceForCurrentLocation: (): Promise<never> =>
       Promise.reject(new Error('not implemented in this fake')),
   };
@@ -445,6 +454,58 @@ describe('CreateAppointmentUseCase', () => {
           end: new Date(start.getTime() + 30 * 60 * 1000),
         }),
       ).rejects.toBeInstanceOf(UnprocessableEntityException);
+    });
+
+    it('DX-354: el mensaje usa el reloj de la sede (12 h), no 24 h fijas', async () => {
+      const uc = new CreateAppointmentUseCase(
+        makeRepo({
+          create: (): Promise<Appointment> =>
+            Promise.reject(new Error('create should not be called')),
+        }),
+        makePatients(),
+        makeStaff(),
+        makeSchedule(mondayHours(), { locale: 'en-US', hourCycle: 'h12' }),
+        makeTypes(),
+        makeBlocks(),
+        new TenantContextService(),
+        inMemoryAvailability(),
+      );
+      const start = nextMondayLocal(20);
+      await expect(
+        uc.execute({
+          patientId: 'p1',
+          providerId: 'prov1',
+          start,
+          end: new Date(start.getTime() + 30 * 60 * 1000),
+        }),
+      ).rejects.toThrow(
+        'Fuera del horario de atención (lunes: 9:00 a. m.–1:00 p. m.)',
+      );
+    });
+
+    it('DX-354: sede sin reloj: 409 LOCATION_LOCALE_REQUIRED al rechazar por horario', async () => {
+      const uc = new CreateAppointmentUseCase(
+        makeRepo({
+          create: (): Promise<Appointment> =>
+            Promise.reject(new Error('create should not be called')),
+        }),
+        makePatients(),
+        makeStaff(),
+        makeSchedule(mondayHours(), { locale: 'en-US', hourCycle: null }),
+        makeTypes(),
+        makeBlocks(),
+        new TenantContextService(),
+        inMemoryAvailability(),
+      );
+      const start = nextMondayLocal(20);
+      await expect(
+        uc.execute({
+          patientId: 'p1',
+          providerId: 'prov1',
+          start,
+          end: new Date(start.getTime() + 30 * 60 * 1000),
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
     });
 
     it('acepta una cita dentro del horario', async () => {
@@ -1465,7 +1526,10 @@ describe('CreateAppointmentUseCase · sedes permitidas y profesional ↔ sede', 
 describe('CreateAppointmentUseCase: horario del profesional en la sede (DX-233)', () => {
   // La sede del contexto es loc1 (zona UTC para leer las horas tal cual):
   // el profesional trabaja allí ese día de 08:00 a 12:00.
-  function withSchedule(strict = false) {
+  function withSchedule(
+    strict = false,
+    format?: { locale: string | null; hourCycle: string | null },
+  ) {
     const schedules = new InMemoryProviderScheduleRepository();
     schedules.currentLocationId = 'loc1';
     schedules.strict = strict;
@@ -1485,9 +1549,25 @@ describe('CreateAppointmentUseCase: horario del profesional en la sede (DX-233)'
       makeTypes(),
       makeBlocks(),
       new TenantContextService(),
-      inMemoryAvailability(schedules, 'UTC'),
+      inMemoryAvailability(schedules, 'UTC', format),
     );
   }
+
+  it('DX-354: sede sin reloj: el aviso fuera de horario se devuelve igual, sin horas, y nunca es 409', async () => {
+    const result = await withSchedule(false, {
+      locale: 'de-DE',
+      hourCycle: null,
+    }).execute({
+      patientId: 'p1',
+      providerId: 'prov1',
+      start: at('14:00'),
+      end: at('14:30'),
+    });
+    expect(result.warnings).toEqual([
+      expect.stringMatching(/^Fuera del horario del profesional en .*\.$/),
+    ]);
+    expect(JSON.stringify(result.warnings)).not.toMatch(/\d{1,2}:\d{2}/);
+  });
 
   it('dentro de su horario: sin aviso', async () => {
     const result = await withSchedule().execute({

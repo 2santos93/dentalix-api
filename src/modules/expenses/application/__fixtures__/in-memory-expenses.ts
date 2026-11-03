@@ -7,6 +7,7 @@ import type {
   ExpensePayment,
 } from '../../domain/entities/expense.entity';
 import { categoryKey } from '../../domain/expense-categories';
+import { expenseMoneyText } from '../../domain/expense-money';
 import {
   ATTACHMENT_ALREADY_MESSAGE,
   EXPENSE_ALREADY_VOIDED_MESSAGE,
@@ -34,6 +35,7 @@ import type {
   IdempotentWrite,
   SupplierSuggestion,
   UpdateExpenseRepoInput,
+  ResolvedExpenseLocation,
 } from '../../domain/ports/expense-repository.port';
 
 export const TENANT_ID = '11111111-1111-4111-8111-111111111111';
@@ -84,6 +86,11 @@ export class InMemoryExpenseRepository implements ExpenseRepository {
   /** Día civil que devuelve el «hoy» de cualquier sede. */
   today = '2026-10-23';
   defaultLocationId = LOCATION_ID;
+  /** Formato de la sede de los gastos (DX-354); por defecto Venezuela, 12 h. */
+  format: { locale: string | null; hourCycle: string | null } = {
+    locale: 'es-VE',
+    hourCycle: 'h12',
+  };
   /** Sedes que `resolveLocation` rechaza (400). */
   invalidLocations = new Set<string>();
   /** El efectivo exige caja abierta en esta clínica. */
@@ -160,13 +167,15 @@ export class InMemoryExpenseRepository implements ExpenseRepository {
   // --- Puerto ------------------------------------------------------------------
   resolveLocation(
     requested: string | undefined,
-  ): Promise<{ locationId: string; today: string }> {
+  ): Promise<ResolvedExpenseLocation> {
     if (requested && this.invalidLocations.has(requested)) {
       return Promise.reject(rule(LOCATION_INVALID_MESSAGE, 'INVALID'));
     }
+    const locationId = requested ?? this.defaultLocationId;
     return Promise.resolve({
-      locationId: requested ?? this.defaultLocationId,
+      locationId,
       today: this.today,
+      format: { id: locationId, ...this.format },
     });
   }
 
@@ -432,7 +441,10 @@ export class InMemoryExpenseRepository implements ExpenseRepository {
       },
       liveCents: this.liveCents(id),
       paymentCount: this.paymentsOf(id).length,
-      currency: row.currency,
+      moneyText: expenseMoneyText(
+        { id: row.locationId, ...this.format },
+        row.currency,
+      ),
     });
     if (denial) return Promise.reject(denial);
     validateDueDate(
@@ -509,7 +521,10 @@ export class InMemoryExpenseRepository implements ExpenseRepository {
       amountCents: toCents(row.amount),
       liveCents: this.liveCents(expenseId),
       paymentCents: toCents(input.amount),
-      currency: row.currency,
+      moneyText: expenseMoneyText(
+        { id: row.locationId, ...this.format },
+        row.currency,
+      ),
     });
     if (denial) throw denial;
     const cashSessionId = input.cashLink

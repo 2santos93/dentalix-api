@@ -1,3 +1,4 @@
+import { regionalFormat } from '../../../shared/format/regional-format';
 import {
   BusinessHours,
   businessHoursErrorMessage,
@@ -5,6 +6,10 @@ import {
   fitsBusinessHours,
   toWallClockSlot,
 } from './business-hours';
+
+// Datos de test: una sede de 24 h y otra de 12 h.
+const H23 = regionalFormat({ locale: 'de-DE', hourCycle: 'h23' });
+const H12 = regionalFormat({ locale: 'en-US', hourCycle: 'h12' });
 
 // Horario típico con cierre de mediodía: lun-vie 9-13 y 15-19, sáb 9-13,
 // domingo cerrado. La zona del fixture es UTC-4 fijo (sin DST), así que las cuentas de abajo
@@ -156,31 +161,55 @@ describe('fitsBusinessHours', () => {
 
 describe('mensajes', () => {
   it('describe los tramos del día', () => {
-    expect(describeDayRanges(1, caracasHours())).toBe(
+    expect(describeDayRanges(1, caracasHours(), H23)).toBe(
       '09:00–13:00, 15:00–19:00',
     );
   });
 
-  it('el error dice el horario real del día cuando el día abre', () => {
+  it('describe los tramos del día en 12 h con una sede h12', () => {
+    expect(describeDayRanges(1, caracasHours(), H12)).toBe(
+      '9:00 a. m.–1:00 p. m., 3:00 p. m.–7:00 p. m.',
+    );
+  });
+
+  it('el error dice el horario real del día cuando el día abre (h23 de-DE)', () => {
     const start = new Date('2026-08-03T18:00:00.000Z'); // lunes 14:00 local
     expect(
       businessHoursErrorMessage(
         start,
         new Date(start.getTime() + 1800000),
         caracasHours(),
+        () => H23,
       ),
     ).toBe('Fuera del horario de atención (lunes: 09:00–13:00, 15:00–19:00)');
   });
 
-  it('el error dice que no se atiende cuando el día está cerrado', () => {
-    const start = new Date('2026-08-02T14:00:00.000Z'); // domingo
+  it('el error dice el horario real del día en 12 h (h12 en-US)', () => {
+    const start = new Date('2026-08-03T18:00:00.000Z'); // lunes 14:00 local
     expect(
       businessHoursErrorMessage(
         start,
         new Date(start.getTime() + 1800000),
         caracasHours(),
+        () => H12,
+      ),
+    ).toBe(
+      'Fuera del horario de atención (lunes: 9:00 a. m.–1:00 p. m., 3:00 p. m.–7:00 p. m.)',
+    );
+  });
+
+  it('el error dice que no se atiende cuando el día está cerrado, sin pedir el formato', () => {
+    const start = new Date('2026-08-02T14:00:00.000Z'); // domingo
+    const fmt = jest.fn(() => H23);
+    expect(
+      businessHoursErrorMessage(
+        start,
+        new Date(start.getTime() + 1800000),
+        caracasHours(),
+        fmt,
       ),
     ).toBe('La sede no atiende los domingos');
+    expect(fmt).not.toHaveBeenCalled();
   });
 
   it('pluraliza solo los días que lo necesitan (sábado sí, martes no)', () => {
@@ -196,6 +225,7 @@ describe('mensajes', () => {
         sabado,
         new Date(sabado.getTime() + 1800000),
         soloLunes,
+        () => H23,
       ),
     ).toBe('La sede no atiende los sábados');
     expect(
@@ -203,6 +233,7 @@ describe('mensajes', () => {
         martes,
         new Date(martes.getTime() + 1800000),
         soloLunes,
+        () => H23,
       ),
     ).toBe('La sede no atiende los martes');
   });

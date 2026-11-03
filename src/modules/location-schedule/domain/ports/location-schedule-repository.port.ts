@@ -1,3 +1,4 @@
+import type { LocationFormatSource } from '../../../../shared/locations/location-regional';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { BusinessHours, ScheduleRange } from '../../application/business-hours';
 
@@ -40,6 +41,16 @@ export interface LocationScheduleRepository {
    * `resolveDefaultLocationId`, este método se simplifica con el resto.
    */
   findForCurrentLocation(): Promise<BusinessHours | null>;
+
+  /**
+   * DX-354: lo que `requireLocationFormat` pide de la sede (formato y reloj)
+   * para escribir las horas de un mensaje con SU formato. `locationId`
+   * indefinido = la sede en contexto, la misma de `findForCurrentLocation`.
+   * No lanza por falta de formato: quien formatea llama a
+   * `requireLocationFormat` (409 `LOCATION_LOCALE_REQUIRED`) solo si hay horas
+   * que escribir.
+   */
+  formatSourceOf(locationId?: string): Promise<LocationFormatSource>;
 
   /**
    * Reemplaza TODA la semana de la sede en contexto (semántica atómica simple

@@ -197,6 +197,52 @@ describe('Retención legal de la historia clínica (DX-039, e2e)', () => {
     await call(a, 'get', `/patients/${p}`, a.adminToken).expect(200);
   });
 
+  it('DX-354: la fecha del mensaje de retención sale con el orden del locale de la sede principal, y sin formato sigue el 409 de retención sin fecha', async () => {
+    const p = await createPatient(a, 'Retenida formato');
+    await attend(a, p);
+    const detail = (
+      await call(a, 'get', `/patients/${p}`, a.adminToken).expect(200)
+    ).body as PatientBody;
+    const [y, m, d] = (detail.retentionUntil as string).slice(0, 10).split('-');
+    const principal = await raw.location.findFirstOrThrow({
+      where: { tenantId: a.tenantId },
+      orderBy: { createdAt: 'asc' },
+    });
+    const messageWith = async (data: {
+      locale?: string;
+      hourCycle?: string | null;
+    }) => {
+      await raw.location.update({ where: { id: principal.id }, data });
+      const res = await call(a, 'delete', `/patients/${p}`, a.adminToken);
+      return res;
+    };
+    try {
+      const enUs = await messageWith({ locale: 'en-US', hourCycle: 'h12' });
+      expect(enUs.status).toBe(409);
+      expect((enUs.body as { message: string }).message).toContain(
+        `retención hasta el ${m}/${d}/${y} (`,
+      );
+      const deDe = await messageWith({ locale: 'de-DE', hourCycle: 'h23' });
+      expect((deDe.body as { message: string }).message).toContain(
+        `retención hasta el ${d}.${m}.${y} (`,
+      );
+      const none = await messageWith({ hourCycle: null });
+      expect(none.status).toBe(409);
+      expect(none.body).toMatchObject({
+        code: 'CLINICAL_RECORD_RETENTION',
+        retentionUntil: detail.retentionUntil,
+      });
+      expect((none.body as { message: string }).message).toContain(
+        'todavía dentro de su plazo',
+      );
+    } finally {
+      await raw.location.update({
+        where: { id: principal.id },
+        data: { locale: principal.locale, hourCycle: principal.hourCycle },
+      });
+    }
+  });
+
   it('una cita atendida también pone la HC en retención', async () => {
     const p = await createPatient(a, 'Cita');
     const location = await raw.location.findFirstOrThrow({

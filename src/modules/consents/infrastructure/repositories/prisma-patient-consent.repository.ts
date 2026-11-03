@@ -2,6 +2,7 @@ import { clinicLogoPublicUrl } from '../../../../shared/storage/clinic-logo-url'
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
+import { loadDocumentRegional } from '../../../../shared/locations/document-regional';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { resolveReferenceLocation } from '../../../../shared/locations/reference-location';
 import {
@@ -372,6 +373,10 @@ export class PrismaPatientConsentRepository implements PatientConsentRepository 
         where: { id, patientId },
         include: {
           ...FULL_INCLUDE,
+          // DX-354: la sede de una firma a distancia, para el `regional`.
+          signatureRequest: {
+            select: { professionalUserId: true, locationId: true },
+          },
           patient: {
             select: {
               id: true,
@@ -393,8 +398,19 @@ export class PrismaPatientConsentRepository implements PatientConsentRepository 
         patient: { documentType, ...patient },
         ...consent
       } = row;
+      // DX-354: el consentimiento no guarda sede propia. La de su solicitud de
+      // firma a distancia; uno firmado en pantalla, la sede en contexto o, sin
+      // ella, la principal. Un impreso nunca se formatea con el navegador.
+      const regional = await loadDocumentRegional(
+        tx,
+        tenantId,
+        consent.signatureRequest?.locationId ??
+          this.tenantContext.getLocationId() ??
+          null,
+      );
       return {
         ...mapToEntity(consent),
+        regional,
         clinic: {
           name: tenant?.name ?? '',
           logoUrl: clinicLogoPublicUrl(tenant?.logoKey ?? null),

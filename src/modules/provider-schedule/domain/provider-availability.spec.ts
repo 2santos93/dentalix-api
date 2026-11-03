@@ -1,5 +1,9 @@
+import { regionalFormat } from '../../../shared/format/regional-format';
 import {
   crossLocationConflictOn,
+  crossLocationMessage,
+  describeRange,
+  rangeShapeError,
   intersectRanges,
   overrideRangesError,
   providerDayAssignments,
@@ -14,6 +18,9 @@ const B = 'sede-b';
 const CARACAS = 'America/Caracas';
 const MADRID = 'Europe/Madrid';
 const H = (h: number, m = 0) => h * 60 + m;
+// Datos de test: una sede de 24 h y otra de 12 h.
+const H23 = regionalFormat({ locale: 'de-DE', hourCycle: 'h23' });
+const H12 = regionalFormat({ locale: 'en-US', hourCycle: 'h12' });
 
 /** Dra. X: lunes y miércoles 8–13 en A, jueves 14–19 en B. */
 function draX(
@@ -390,7 +397,7 @@ describe('weeklyScheduleError', () => {
   ];
 
   it('acepta la rotación de la Dra. X', () => {
-    expect(weeklyScheduleError(ok, names)).toBeNull();
+    expect(weeklyScheduleError(ok, names, () => H23)).toBeNull();
   });
 
   it('rechaza un solape del mismo día en dos sedes, en español', () => {
@@ -404,6 +411,7 @@ describe('weeklyScheduleError', () => {
           },
         ],
         names,
+        () => H23,
       ),
     ).toBe(
       'El tramo 08:00–13:00 en Sede A se solapa el lunes con 12:00–15:00 en Sede B: un profesional no puede estar en dos sedes a la vez.',
@@ -421,6 +429,7 @@ describe('weeklyScheduleError', () => {
           },
         ],
         names,
+        () => H23,
       ),
     ).toBeNull();
   });
@@ -464,13 +473,13 @@ describe('weeklyScheduleError', () => {
       /Como mucho 7 tramos por día y sede \(viernes en Sede A\)/,
     ],
   ])('rechaza %s', (_label, ranges, message) => {
-    expect(weeklyScheduleError([{ locationId: A, ranges }], names)).toMatch(
-      message,
-    );
+    expect(
+      weeklyScheduleError([{ locationId: A, ranges }], names, () => H23),
+    ).toMatch(message);
   });
 
   it('rechaza la misma sede dos veces', () => {
-    expect(weeklyScheduleError([ok[0], ok[0]], names)).toMatch(
+    expect(weeklyScheduleError([ok[0], ok[0]], names, () => H23)).toMatch(
       /viene dos veces/,
     );
   });
@@ -478,15 +487,21 @@ describe('weeklyScheduleError', () => {
 
 describe('overrideRangesError y crossLocationConflictOn', () => {
   it('«no trabaja» (sin tramos) es válido; el resto, con las reglas del semanal', () => {
-    expect(overrideRangesError([])).toBeNull();
+    expect(overrideRangesError([], () => H23)).toBeNull();
     expect(
-      overrideRangesError([{ startMinute: H(9), endMinute: H(9, 7) }]),
+      overrideRangesError(
+        [{ startMinute: H(9), endMinute: H(9, 7) }],
+        () => H23,
+      ),
     ).toMatch(/de 5 en 5/);
     expect(
-      overrideRangesError([
-        { startMinute: H(9), endMinute: H(11) },
-        { startMinute: H(10), endMinute: H(12) },
-      ]),
+      overrideRangesError(
+        [
+          { startMinute: H(9), endMinute: H(11) },
+          { startMinute: H(10), endMinute: H(12) },
+        ],
+        () => H23,
+      ),
     ).toMatch(/solapados/);
   });
 
@@ -510,5 +525,50 @@ describe('overrideRangesError y crossLocationConflictOn', () => {
         { startMinute: H(15), endMinute: H(17) },
       ]),
     ).toBeNull();
+  });
+});
+
+describe('horas de los mensajes con el reloj de la sede (DX-354)', () => {
+  it('describeRange: 24 h con h23 y 12 h con h12; la medianoche final es 24:00 / medianoche', () => {
+    const r = { startMinute: H(9), endMinute: H(13) };
+    expect(describeRange(r, H23)).toBe('09:00–13:00');
+    expect(describeRange(r, H12)).toBe('9:00 a. m.–1:00 p. m.');
+    const night = { startMinute: H(21), endMinute: 1440 };
+    expect(describeRange(night, H23)).toBe('21:00–24:00');
+    expect(describeRange(night, H12)).toBe('9:00 p. m.–medianoche');
+  });
+
+  it('rangeShapeError con h12 escribe 0 y 1440 con el reloj de la sede', () => {
+    expect(rangeShapeError({ startMinute: -5, endMinute: 60 }, () => H12)).toBe(
+      'Los minutos de un tramo tienen que ser enteros entre 0 (12:00 a. m.) y 1440 (medianoche).',
+    );
+    expect(rangeShapeError({ startMinute: -5, endMinute: 60 }, () => H23)).toBe(
+      'Los minutos de un tramo tienen que ser enteros entre 0 (00:00) y 1440 (24:00).',
+    );
+    expect(
+      rangeShapeError({ startMinute: H(9, 7), endMinute: H(10) }, () => H12),
+    ).toBe(
+      'Las horas de un tramo van de 5 en 5 minutos (9:07 a. m.–10:00 a. m.).',
+    );
+  });
+
+  it('rangeShapeError no pide el formato si el tramo está bien', () => {
+    const fmt = jest.fn(() => H23);
+    expect(
+      rangeShapeError({ startMinute: H(9), endMinute: H(10) }, fmt),
+    ).toBeNull();
+    expect(fmt).not.toHaveBeenCalled();
+  });
+
+  it('crossLocationMessage usa un solo reloj para toda la frase', () => {
+    const message = crossLocationMessage(
+      'el lunes',
+      { name: 'Sede A', range: { startMinute: H(8), endMinute: H(13) } },
+      { name: 'Sede B', range: { startMinute: H(12), endMinute: H(15) } },
+      H12,
+    );
+    expect(message).toBe(
+      'El tramo 8:00 a. m.–1:00 p. m. en Sede A se solapa el lunes con 12:00 p. m.–3:00 p. m. en Sede B: un profesional no puede estar en dos sedes a la vez.',
+    );
   });
 });

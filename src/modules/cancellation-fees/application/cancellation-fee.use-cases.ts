@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import type { ClinicRole } from '@prisma/client';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
+import { moneyWithCode } from '../../../shared/format/money-with-code';
 import { requireLocationFormat } from '../../../shared/locations/location-regional';
 import {
   CANCELLATION_FEE_MESSAGES,
@@ -180,11 +181,16 @@ export class ChargeCancellationFeeUseCase {
       amount,
       communicated.suggestedFee!,
       (value) =>
-        requireLocationFormat({
-          id: ctx.appointment.locationId,
-          locale: ctx.locationLocale,
-          hourCycle: ctx.locationHourCycle,
-        }).money(value, currency),
+        moneyWithCode(
+          value,
+          currency,
+          requireLocationFormat({
+            id: ctx.appointment.locationId,
+            locale: ctx.locationLocale,
+            hourCycle: ctx.locationHourCycle,
+          }),
+          null,
+        ),
     );
     if (!resolved.ok) throw new BadRequestException(resolved.message);
 

@@ -88,10 +88,3 @@ export function isUnderRetention(
   );
   return today <= until.getTime();
 }
-
-/** `DD/MM/AAAA` de una fecha de retención (formato del mensaje al usuario). */
-export function formatRetentionDate(until: Date): string {
-  const dd = String(until.getUTCDate()).padStart(2, '0');
-  const mm = String(until.getUTCMonth() + 1).padStart(2, '0');
-  return `${dd}/${mm}/${until.getUTCFullYear()}`;
-}

@@ -33,7 +33,9 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import {
+  REGIONAL_BERLIN_FIXTURE,
   REGIONAL_CARACAS_FIXTURE,
+  REGIONAL_NEW_YORK_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
 
@@ -533,11 +535,64 @@ describe('Gastos de la sede (e2e, DX-274)', () => {
       await pay(e.id, { amount: 99999.5, method: 'CARD' }).expect(201);
       const res = await pay(e.id, { amount: 0.51, method: 'CARD' }).expect(400);
       expect(messageOf(res)).toBe(
-        'El pago supera lo pendiente del gasto (0,50 VES).',
+        'El pago supera lo pendiente del gasto (VES\u00a00,50).',
       );
       expect(
         await raw.expensePayment.count({ where: { expenseId: e.id } }),
       ).toBe(1);
+    });
+
+    it('DX-354: el tope dice el importe con el formato de la sede del gasto y el código ISO, y 409 si la sede no tiene formato', async () => {
+      const berlin = (
+        (
+          await call('post', '/locations')
+            .send(locationBody(REGIONAL_BERLIN_FIXTURE, { name: 'Berlín' }))
+            .expect(201)
+        ).body as { id: string }
+      ).id;
+      const newYork = (
+        (
+          await call('post', '/locations')
+            .send(
+              locationBody(REGIONAL_NEW_YORK_FIXTURE, { name: 'Nueva York' }),
+            )
+            .expect(201)
+        ).body as { id: string }
+      ).id;
+      const eur = await createExpense({
+        locationId: berlin,
+        currency: 'EUR',
+        amount: 1234.5,
+      });
+      const usd = await createExpense({
+        locationId: newYork,
+        currency: 'USD',
+        amount: 1234.5,
+      });
+      expect(
+        messageOf(
+          await pay(eur.id, { amount: 1234.51, method: 'CARD' }).expect(400),
+        ),
+      ).toBe('El pago supera lo pendiente del gasto (1.234,50\u00a0EUR).');
+      expect(
+        messageOf(
+          await pay(usd.id, { amount: 1234.51, method: 'CARD' }).expect(400),
+        ),
+      ).toBe('El pago supera lo pendiente del gasto (USD\u00a01,234.50).');
+
+      await raw.location.update({
+        where: { id: newYork },
+        data: { hourCycle: null },
+      });
+      const noFormat = await pay(usd.id, {
+        amount: 1234.51,
+        method: 'CARD',
+      }).expect(409);
+      expect((noFormat.body as { code: string }).code).toBe(
+        'LOCATION_LOCALE_REQUIRED',
+      );
+      // Dentro del tope no hay mensaje con cifras: se paga igual.
+      await pay(usd.id, { amount: 1234.5, method: 'CARD' }).expect(201);
     });
 
     it('dos pagos simultáneos que juntos pasan lo pendiente: uno entra y otro es 400', async () => {
@@ -869,7 +924,7 @@ describe('Gastos de la sede (e2e, DX-274)', () => {
         .send({ amount: 39999.99 })
         .expect(409);
       expect(messageOf(below)).toBe(
-        'El importe no puede ser menor a lo ya pagado (40.000 VES).',
+        'El importe no puede ser menor a lo ya pagado (VES\u00a040.000,00).',
       );
       expect(
         (

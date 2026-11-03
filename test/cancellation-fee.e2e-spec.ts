@@ -200,11 +200,14 @@ describe('Cargo por inasistencia y política en el enlace (DX-291)', () => {
       });
       expect(Object.keys(body.appointment).sort()).toEqual([
         'end',
+        'hourCycle',
+        'locale',
         'locationAddress',
         'locationName',
         'patientFirstName',
         'providerName',
         'start',
+        'timeZone',
       ]);
       expect(body.appointment.patientFirstName).toBe('Ana');
     });

@@ -7,6 +7,10 @@ import { Injectable } from '@nestjs/common';
 import { Prisma, type SignatureRequestChannel } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import {
+  DOCUMENT_REGIONAL_SELECT,
+  documentRegional,
+} from '../../../../shared/locations/document-regional';
 import { resolveLocationTimeZones } from '../../../../shared/locations/location-time-zone';
 import type {
   AcceptPlanOutcome,
@@ -226,7 +230,12 @@ export async function readPlanQuoteSource(
   const [location, tenant, professional, catalog, zoneOf] = await Promise.all([
     tx.location.findFirstOrThrow({
       where: { id: locationId, deletedAt: null },
-      select: { id: true, name: true, address: true },
+      select: {
+        id: true,
+        name: true,
+        address: true,
+        ...DOCUMENT_REGIONAL_SELECT,
+      },
     }),
     tx.tenant.findFirst({
       where: { id: tenantId },
@@ -303,7 +312,13 @@ export async function readPlanQuoteSource(
       logoUrl: clinicLogoPublicUrl(tenant?.logoKey ?? null),
       fiscal: clinicFiscalOf(tenant),
     },
-    location: { ...location, timeZone: zoneOf(location.id) },
+    location: {
+      id: location.id,
+      name: location.name,
+      address: location.address,
+      timeZone: zoneOf(location.id),
+    },
+    regional: documentRegional(location),
     professionalName: plan.createdById
       ? (professional?.fullName ?? UNKNOWN_PROFESSIONAL)
       : null,

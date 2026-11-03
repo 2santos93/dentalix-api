@@ -141,12 +141,21 @@ function makeBlocks(
 // Doble del horario de la sede: por defecto SIN horario configurado (null), que
 // el dominio interpreta como "sin restricción" — así los tests existentes siguen
 // probando lo suyo sin que el horario interfiera. Los tests del horario lo pasan.
-function makeSchedule(hours: unknown = null): LocationScheduleRepository {
+function makeSchedule(
+  hours: unknown = null,
+  format: { locale: string | null; hourCycle: string | null } = {
+    locale: 'de-DE',
+    hourCycle: 'h23',
+  },
+): LocationScheduleRepository {
   return {
     findByLocation: (): Promise<never> =>
       Promise.resolve(hours) as Promise<never>,
     findForCurrentLocation: (): Promise<never> =>
       Promise.resolve(hours) as Promise<never>,
+    // DX-354: la sede del doble, de 24 h salvo que el test cambie `format`.
+    formatSourceOf: (locationId = 'loc-1') =>
+      Promise.resolve({ id: locationId, ...format }),
     replaceForCurrentLocation: (): Promise<never> =>
       Promise.reject(new Error('not implemented in this fake')),
   };
@@ -1558,6 +1567,45 @@ describe('UpdateAppointmentUseCase', () => {
       await expect(
         uc.moveToOpening(a.id, { start: at('15:00') }, ctx('RECEPTION')),
       ).rejects.toBeInstanceOf(UnprocessableEntityException);
+    });
+
+    it('DX-354: el mensaje del horario sale en 12 h con una sede h12 y en 24 h con una h23', async () => {
+      const hours: BusinessHours = {
+        timezone: 'UTC',
+        ranges: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({
+          weekday,
+          startMinute: 480,
+          endMinute: 540,
+        })),
+      };
+      const messageWith = async (hourCycle: string, locale: string) => {
+        const repo = new InMemoryAppointmentRepository();
+        const a = repo.seed({
+          start: far('10:00'),
+          end: far('10:30'),
+          wantsEarlier: true,
+        });
+        const uc = new UpdateAppointmentUseCase(
+          repo,
+          makeSchedule(hours, { locale, hourCycle }),
+          makeStaff(),
+          makeAudit(),
+          makeBlocks(),
+          makeLocations(),
+          new TenantContextService(),
+          inMemoryAvailability(),
+        );
+        return uc
+          .moveToOpening(a.id, { start: at('15:00') }, ctx('RECEPTION'))
+          .then(
+            () => '',
+            (error: Error) => error.message,
+          );
+      };
+      expect(await messageWith('h12', 'en-US')).toMatch(
+        /\(\w+: 8:00 a\. m\.–9:00 a\. m\.\)/,
+      );
+      expect(await messageWith('h23', 'de-DE')).toMatch(/\(\w+: 08:00–09:00\)/);
     });
   });
 });

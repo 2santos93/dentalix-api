@@ -176,7 +176,7 @@ describe('casos de uso del cargo por inasistencia (DX-291)', () => {
     repo.ctx!.communicated!.currency = 'JPY';
     await expect(charge(60000)).rejects.toThrow(
       new BadRequestException(
-        'El importe no puede superar el sugerido por la política comunicada (¥50,000).',
+        'El importe no puede superar el sugerido por la política comunicada (JPY\u00a050,000).',
       ),
     );
     repo.ctx!.locationLocale = 'de-DE';
@@ -184,7 +184,7 @@ describe('casos de uso del cargo por inasistencia (DX-291)', () => {
     repo.ctx!.communicated!.currency = 'EUR';
     await expect(charge(60000)).rejects.toThrow(
       new BadRequestException(
-        'El importe no puede superar el sugerido por la política comunicada (50.000,00\u00a0€).',
+        'El importe no puede superar el sugerido por la política comunicada (50.000,00\u00a0EUR).',
       ),
     );
     // Sin reloj: el 409 solo al pintar el importe; un cargo válido se cobra.

@@ -810,6 +810,12 @@ describe('Historial de entregas del paciente (DX-222)', () => {
       patientName: 'Carolina Duque',
     });
     expect(doc.renderedText).toContain('Muerde la gasa.');
+    // DX-354: la región de la sede de la entrega, en crudo.
+    expect(doc.regional).toEqual({
+      timeZone: 'America/Caracas',
+      locale: 'es-VE',
+      hourCycle: 'h23',
+    });
     await expect(get.execute(PATIENT_ID, 'nada')).rejects.toThrow(
       POSTOP_DELIVERY_NOT_FOUND_MESSAGE,
     );

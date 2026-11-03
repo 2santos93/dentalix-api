@@ -1,3 +1,4 @@
+import type { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
 import type {
   ConsentSignerType,
   DocumentType,
@@ -81,6 +82,11 @@ export interface ConsentDocumentPatient {
 /** El consentimiento con lo que necesita la vista imprimible. */
 export interface PatientConsentDocument extends PatientConsent {
   clinic: { name: string; logoUrl: string | null };
+  /**
+   * DX-354: región de la sede del documento (la de la firma a distancia, o la
+   * sede en contexto) para formatear el impreso; `null` si le falta algo.
+   */
+  regional: DocumentRegionalDto | null;
   /** `docTypeName`: el nombre visible de hoy (R17), en vivo como la cabecera. */
   patient: ConsentDocumentPatient & { docTypeName: string };
   /** `true` si el hash guardado coincide con el recalculado al leer. */

@@ -1,5 +1,6 @@
 import { ClinicFiscalDto } from '../../../../shared/clinic/clinic-fiscal.dto';
 import { ApiProperty } from '@nestjs/swagger';
+import { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
 import {
   type DocumentType,
   PaymentMethod,
@@ -511,6 +512,14 @@ export class AccountStatementDto {
   @ApiProperty({ type: AccountStatementClinicDto })
   clinic!: AccountStatementClinicDto;
 
+  @ApiProperty({
+    type: DocumentRegionalDto,
+    nullable: true,
+    description:
+      'DX-354: zona, locale y reloj de la sede en contexto (o la principal) para formatear el impreso. null si a la sede le falta algo: el documento se lee igual y la web pinta «—».',
+  })
+  regional!: DocumentRegionalDto | null;
+
   @ApiProperty({ type: AccountStatementPatientDto })
   patient!: AccountStatementPatientDto;
 
@@ -624,6 +633,14 @@ export class FamilyAccountStatementDto {
 
   @ApiProperty({ type: AccountStatementClinicDto })
   clinic!: AccountStatementClinicDto;
+
+  @ApiProperty({
+    type: DocumentRegionalDto,
+    nullable: true,
+    description:
+      'DX-354: zona, locale y reloj de la sede en contexto (o la principal) para formatear el impreso. null si a la sede le falta algo: el documento se lee igual y la web pinta «—».',
+  })
+  regional!: DocumentRegionalDto | null;
 
   @ApiProperty({ type: FamilyMemberPatientDto })
   payer!: FamilyMemberPatientDto;

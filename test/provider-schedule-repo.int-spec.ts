@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { BadRequestException } from '@nestjs/common';
 import { Prisma, PrismaClient } from '@prisma/client';
+import { regionalFormat } from '../src/shared/format/regional-format';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaProviderScheduleRepository } from '../src/modules/provider-schedule/infrastructure/prisma-provider-schedule.repository';
@@ -92,7 +93,11 @@ describe('Repositorio del horario de los profesionales (DX-233, int)', () => {
           ranges: others.filter((r) => r.locationId === locationId),
         })),
       ];
-      const error = weeklyScheduleError(merged, (id) => id);
+      const error = weeklyScheduleError(
+        merged,
+        (id) => id,
+        () => regionalFormat({ locale: 'de-DE', hourCycle: 'h23' }),
+      );
       if (error) throw new BadRequestException(error);
     };
   }

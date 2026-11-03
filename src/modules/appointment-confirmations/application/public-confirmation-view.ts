@@ -1,3 +1,4 @@
+import type { HourCycle } from '../../../shared/format/regional-format';
 import { AppointmentConfirmationResponse } from '@prisma/client';
 import {
   AppointmentConfirmation,
@@ -41,6 +42,10 @@ export interface PublicAppointmentView {
   providerName: string | null;
   locationName: string;
   locationAddress: string | null;
+  /** DX-354: zona, locale y reloj de la sede de la cita, en crudo (null si no los tiene). */
+  timeZone: string | null;
+  locale: string | null;
+  hourCycle: HourCycle | null;
 }
 
 /** DX-291: la política que lee el paciente antes de responder. */
@@ -80,6 +85,9 @@ export function toPublicAppointmentView(
     providerName: appointment.providerName,
     locationName: appointment.locationName,
     locationAddress: appointment.locationAddress,
+    timeZone: appointment.locationTimeZone,
+    locale: appointment.locationLocale,
+    hourCycle: appointment.locationHourCycle,
   };
 }
 

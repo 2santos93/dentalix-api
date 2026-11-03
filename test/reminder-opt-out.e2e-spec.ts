@@ -76,6 +76,7 @@ interface OptOutBody {
   patientFirstName: string | null;
   optedOutAt: string | null;
   clinic: { name: string } | null;
+  regional: { timeZone: string; locale: string; hourCycle: string } | null;
 }
 
 describe('Baja de recordatorios (e2e, DX-128)', () => {
@@ -208,11 +209,40 @@ describe('Baja de recordatorios (e2e, DX-128)', () => {
         patientFirstName: 'Carolina',
         optedOutAt: null,
         clinic: expect.objectContaining({ name: 'Clinica dx128-baja' }),
+        // DX-354: la región de la sede principal, para pintar la fecha de la baja.
+        regional: {
+          timeZone: 'America/Caracas',
+          locale: 'es-VE',
+          hourCycle: 'h23',
+        },
       } satisfies Record<keyof OptOutBody, unknown>);
       const row = await raw.patient.findUniqueOrThrow({
         where: { id: patientId },
       });
       expect(row.reminderOptOutAt).toBeNull();
+    });
+
+    it('DX-354: sin reloj en la sede principal, regional es null y la página se sirve (200)', async () => {
+      const principal = await raw.location.findFirstOrThrow({
+        where: { tenantId: clinic.tenantId },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true },
+      });
+      await raw.location.update({
+        where: { id: principal.id },
+        data: { hourCycle: null },
+      });
+      try {
+        const res = await pub(
+          api().get(`/api/v1/public/reminder-opt-outs/${token}`),
+        ).expect(200);
+        expect((res.body as OptOutBody).regional).toBeNull();
+      } finally {
+        await raw.location.update({
+          where: { id: principal.id },
+          data: { hourCycle: 'h23' },
+        });
+      }
     });
 
     // ISOLATION_COVERS: GET /public/reminder-opt-outs/:token

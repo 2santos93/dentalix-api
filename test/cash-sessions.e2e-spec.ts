@@ -298,6 +298,37 @@ describe('Caja por turno (e2e, DX-027)', () => {
     ]);
   });
 
+  it('DX-354: el detalle lleva el regional de la sede de la caja y, sin reloj, null con 200', async () => {
+    const regionalOf = async () =>
+      (
+        detailOf(
+          await api(
+            clinicA,
+            'get',
+            `/cash-sessions/${sessionId}`,
+            receptionToken,
+          ).expect(200),
+        ) as unknown as { regional: unknown }
+      ).regional;
+    expect(await regionalOf()).toEqual({
+      timeZone: 'America/Caracas',
+      locale: 'es-VE',
+      hourCycle: 'h23',
+    });
+    await raw.location.update({
+      where: { id: sedePrincipal },
+      data: { hourCycle: null },
+    });
+    try {
+      expect(await regionalOf()).toBeNull();
+    } finally {
+      await raw.location.update({
+        where: { id: sedePrincipal },
+        data: { hourCycle: 'h23' },
+      });
+    }
+  });
+
   it('RECEPTION solo ve y cierra las suyas; ADMIN ve todas', async () => {
     const adminSession = detailOf(
       await api(

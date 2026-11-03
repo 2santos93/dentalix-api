@@ -1,3 +1,5 @@
+import { loadDocumentRegional } from '../../../shared/locations/document-regional';
+import type { DocumentRegionalDto } from '../../../shared/locations/document-regional.dto';
 import { withClinicLogoUrl } from '../../../shared/storage/clinic-logo-url';
 import { ConfigService } from '@nestjs/config';
 import { ReminderClock } from '../application/reminder-clock';
@@ -204,6 +206,13 @@ export class PrismaReminderOptOutRepository implements ReminderOptOutRepository 
     );
     return [...new Set(regions)].filter(
       (region): region is PhoneRegion => region !== null,
+    );
+  }
+
+  principalRegional(): Promise<DocumentRegionalDto | null> {
+    const tenantId = this.requireTenantId();
+    return this.prisma.runWithTenant((tx) =>
+      loadDocumentRegional(tx, tenantId, null),
     );
   }
 

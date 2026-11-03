@@ -195,8 +195,11 @@ export class GetImplantCardUseCase {
       );
     }
     const locationIds = [...new Set(implants.map((i) => i.locationId))];
-    const [clinicName, locations, names] = await Promise.all([
+    const only = locationIds.length === 1 ? locationIds[0] : undefined;
+    const [clinicName, regional, locations, names] = await Promise.all([
       this.repo.clinicName(),
+      // DX-354: la sede de los implantes si es una; si junta varias, la activa.
+      this.repo.regional(only),
       this.repo.locations(locationIds),
       // DX-524: la sede de los implantes si es una; si la tarjeta junta
       // varias, la activa (`undefined`).
@@ -206,6 +209,7 @@ export class GetImplantCardUseCase {
     ]);
     return composeImplantCard({
       clinicName,
+      regional,
       patient,
       documentTypeNames: names,
       placedOn,

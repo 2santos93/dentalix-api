@@ -36,15 +36,38 @@ const CTX: AuditRequestContext = {
   userAgent: null,
 };
 
-function makeLocations(): LocationRepository {
+// DX-354: datos de test; la sede A es de 24 h (de-DE) y la B de 12 h (en-US).
+const FORMAT_A = { locale: 'de-DE', hourCycle: 'h23' };
+const FORMAT_B = { locale: 'en-US', hourCycle: 'h12' };
+
+function makeLocations(
+  formats: { a: object | null; b: object | null } = {
+    a: FORMAT_A,
+    b: FORMAT_B,
+  },
+): LocationRepository {
+  const noFormat = { locale: null, hourCycle: null };
   const all = [
-    { id: A, name: 'Sede A', timeZone: 'America/Caracas', isActive: true },
-    { id: B, name: 'Sede B', timeZone: 'America/Caracas', isActive: true },
+    {
+      id: A,
+      name: 'Sede A',
+      timeZone: 'America/Caracas',
+      isActive: true,
+      ...(formats.a ?? noFormat),
+    },
+    {
+      id: B,
+      name: 'Sede B',
+      timeZone: 'America/Caracas',
+      isActive: true,
+      ...(formats.b ?? noFormat),
+    },
     {
       id: OFF,
       name: 'Sede Cerrada',
       timeZone: 'America/Caracas',
       isActive: false,
+      ...FORMAT_A,
     },
   ];
   return {
@@ -173,6 +196,56 @@ describe('horario de los profesionales (DX-233)', () => {
         'El tramo 08:00–13:00 en Sede A se solapa el lunes con 12:00–15:00 en Sede B: un profesional no puede estar en dos sedes a la vez.',
       );
       expect(audits).toHaveLength(0);
+    });
+
+    const CROSSING = {
+      locations: [
+        DRA_X.locations[0],
+        {
+          locationId: B,
+          ranges: [{ weekday: 1, startMinute: H(12), endMinute: H(15) }],
+        },
+      ],
+    };
+
+    it('DX-354: el mensaje usa el reloj de la sede de la petición (12 h con la sede B), un solo reloj para toda la frase', async () => {
+      await expect(
+        replace.execute('dra-x', CROSSING, { ...CTX, locationId: B }),
+      ).rejects.toThrow(
+        'El tramo 8:00 a. m.–1:00 p. m. en Sede A se solapa el lunes con 12:00 p. m.–3:00 p. m. en Sede B: un profesional no puede estar en dos sedes a la vez.',
+      );
+    });
+
+    it('DX-354: si la sede de la petición no tiene formato, 409 LOCATION_LOCALE_REQUIRED y no guarda', async () => {
+      const noFormat = new ReplaceProviderScheduleUseCase(
+        repo,
+        makeStaff(),
+        makeLocations({ a: null, b: null }),
+        {
+          record: () => Promise.resolve(),
+        } as unknown as RecordAuditEventUseCase,
+        () => NOW,
+      );
+      await expect(
+        noFormat.execute('dra-x', CROSSING, CTX),
+      ).rejects.toMatchObject({
+        response: { code: 'LOCATION_LOCALE_REQUIRED' },
+      });
+    });
+
+    it('DX-354: sin error, el formato no se pide (una sede sin formato sigue guardando)', async () => {
+      const noFormat = new ReplaceProviderScheduleUseCase(
+        repo,
+        makeStaff(),
+        makeLocations({ a: null, b: null }),
+        {
+          record: () => Promise.resolve(),
+        } as unknown as RecordAuditEventUseCase,
+        () => NOW,
+      );
+      await expect(
+        noFormat.execute('dra-x', DRA_X, CTX),
+      ).resolves.toBeDefined();
     });
 
     it('sede sin tramos no se guarda; lista vacía deja al profesional sin horario', async () => {

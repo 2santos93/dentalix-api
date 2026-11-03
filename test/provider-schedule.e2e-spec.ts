@@ -225,6 +225,43 @@ describe('Horario de los profesionales por sede (e2e, DX-233)', () => {
       );
     });
 
+    it('DX-354: el solape sale en 12 h con una sede de la petición h12, y 409 si esa sede no tiene reloj', async () => {
+      const body = ROTATION();
+      body.locations[1].ranges.push({
+        weekday: 1,
+        startMinute: H(12),
+        endMinute: H(15),
+      });
+      const before = await raw.location.findUniqueOrThrow({
+        where: { id: sedeB },
+        select: { locale: true, hourCycle: true },
+      });
+      try {
+        await raw.location.update({
+          where: { id: sedeB },
+          data: { locale: 'en-US', hourCycle: 'h12' },
+        });
+        const res = await putSchedule(body)
+          .set('X-Location-Id', sedeB)
+          .expect(400);
+        expect((res.body as { message: string }).message).toBe(
+          'El tramo 8:00 a. m.–1:00 p. m. en Sede principal se solapa el lunes con 12:00 p. m.–3:00 p. m. en Sede B: un profesional no puede estar en dos sedes a la vez.',
+        );
+        await raw.location.update({
+          where: { id: sedeB },
+          data: { hourCycle: null },
+        });
+        const noClock = await putSchedule(body)
+          .set('X-Location-Id', sedeB)
+          .expect(409);
+        expect((noClock.body as { code: string }).code).toBe(
+          'LOCATION_LOCALE_REQUIRED',
+        );
+      } finally {
+        await raw.location.update({ where: { id: sedeB }, data: before });
+      }
+    });
+
     it('validación estricta: múltiplos de 5, ≤ 7 tramos, sede de otra clínica', async () => {
       await putSchedule({
         locations: [
@@ -638,7 +675,7 @@ describe('Horario de los profesionales por sede (e2e, DX-233)', () => {
         warningCodes: ['PROVIDER_OFF_SCHEDULE'],
         warnings: [
           expect.stringMatching(
-            /^Fuera del horario del profesional: no trabaja en Sede principal el jueves \d{2}\/\d{2}\.$/,
+            /^Fuera del horario del profesional: no trabaja en Sede principal el jueves \d{1,2} de [a-záéíóú]+\.$/,
           ),
         ],
       });
@@ -668,7 +705,7 @@ describe('Horario de los profesionales por sede (e2e, DX-233)', () => {
         warningCodes: ['PROVIDER_OFF_SCHEDULE'],
         warnings: [
           expect.stringMatching(
-            /^Fuera del horario del profesional en Sede B \(jueves \d{2}\/\d{2}: 14:00–19:00\)\.$/,
+            /^Fuera del horario del profesional en Sede B \(jueves \d{1,2} de [a-záéíóú]+: 14:00–19:00\)\.$/,
           ),
         ],
       });

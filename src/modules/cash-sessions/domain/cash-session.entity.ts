@@ -1,3 +1,4 @@
+import type { DocumentRegionalDto } from '../../../shared/locations/document-regional.dto';
 import type {
   CashAdjustmentKind,
   CashSessionStatus,
@@ -273,6 +274,8 @@ export interface CashSessionSummary {
 export interface CashSessionDetail extends CashSessionSummary {
   notes: string | null;
   timeZone: string;
+  /** DX-354: región de la sede de la caja; `null` si le falta algo. */
+  regional: DocumentRegionalDto | null;
   /**
    * Arqueo ciego activo para quien consulta: sin esperado, abonos, anulados,
    * ajustes ni líneas de cierres anteriores (SEC-043), que lo dejarían
