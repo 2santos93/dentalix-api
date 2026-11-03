@@ -240,7 +240,7 @@ describe('la fecha del mensaje de retención usa el formato de la sede (DX-354)'
     expect(messageIn('de-DE', 'h23')).toContain('hasta el 01.11.2041 (');
   });
 
-  it('sede sin formato: 409 LOCATION_LOCALE_REQUIRED, nunca otro formato', () => {
+  it('sede sin formato: sigue el 409 de retención con retentionUntil, sin la fecha escrita', () => {
     const body = conflictBody(() =>
       assertNotUnderRetention(
         state({
@@ -250,14 +250,18 @@ describe('la fecha del mensaje de retención usa el formato de la sede (DX-354)'
         now,
       ),
     );
-    expect(body.code).toBe('LOCATION_LOCALE_REQUIRED');
+    expect(body.code).toBe(CLINICAL_RECORD_RETENTION);
+    expect(body.retentionUntil).toBe('2041-11-01');
+    expect(body.message).toContain('todavía dentro de su plazo (15 años');
+    expect(body.message).not.toMatch(/\d{2}[/.]\d{2}[/.]\d{4}/);
   });
 
-  it('clínica sin sede activa: 409 LOCATION_REQUIRED', () => {
+  it('clínica sin sede activa: también 409 de retención sin fecha escrita', () => {
     const body = conflictBody(() =>
       assertNotUnderRetention(state({ lastAttentionAt, format: null }), now),
     );
-    expect(body.code).toBe('LOCATION_REQUIRED');
+    expect(body.code).toBe(CLINICAL_RECORD_RETENTION);
+    expect(body.retentionUntil).toBe('2041-11-01');
   });
 
   it('retención permanente no lleva fecha: no pide el formato', () => {

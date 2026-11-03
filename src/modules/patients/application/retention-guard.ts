@@ -1,7 +1,6 @@
 import { ConflictException } from '@nestjs/common';
 import type { RegionalFormat } from '../../../shared/format/regional-format';
 import { requireLocationFormat } from '../../../shared/locations/location-regional';
-import { locationRequired } from '../../../shared/locations/reference-location';
 import type { PatientRetentionState } from '../domain/ports/patient-repository.port';
 import {
   isUnderRetention,
@@ -45,7 +44,7 @@ export function retentionMessage(
   until: Date | 'PERMANENT',
   basis: RetentionBasis,
   years: number,
-  fmt: () => RegionalFormat,
+  fmt: () => RegionalFormat | null,
 ): string {
   if (until === 'PERMANENT') {
     return 'La historia clínica de este paciente tiene retención permanente: no se puede archivar ni borrar. Si necesitas retirar sus datos de contacto, usa la supresión parcial.';
@@ -56,17 +55,29 @@ export function retentionMessage(
       : basis === 'DOUBLE'
         ? `plazo doble: ${2 * years} años desde la última atención`
         : `${years} años desde la última atención`;
-  return `La historia clínica de este paciente está en retención hasta el ${fmt().civilDate(until.toISOString().slice(0, 10))} (${reason}): no se puede archivar ni borrar. Si necesitas retirar sus datos de contacto, usa la supresión parcial.`;
+  const format = fmt();
+  const when = format
+    ? `hasta el ${format.civilDate(until.toISOString().slice(0, 10))} `
+    : 'todavía dentro de su plazo ';
+  return `La historia clínica de este paciente está en retención ${when}(${reason}): no se puede archivar ni borrar. Si necesitas retirar sus datos de contacto, usa la supresión parcial.`;
 }
 
 /**
  * El formato de la sede principal de la clínica (R6) con el que se escribe la
- * fecha: sin sede activa, 409 `LOCATION_REQUIRED`; sin formato o reloj, 409
- * `LOCATION_LOCALE_REQUIRED`. Nunca otro formato.
+ * fecha, o `null` si no hay sede activa o le falta el formato o el reloj: el
+ * 409 de retención se mantiene (mismo código y `retentionUntil`) y el mensaje
+ * va sin la fecha escrita. Nunca otro formato.
  */
-function retentionFormat(state: PatientRetentionState): RegionalFormat {
-  if (!state.format) throw locationRequired();
-  return requireLocationFormat(state.format);
+function retentionFormat(state: PatientRetentionState): RegionalFormat | null {
+  if (!state.format) return null;
+  try {
+    return requireLocationFormat(state.format);
+  } catch (error) {
+    // Sede sin formato o reloj: la retención se dice igual, sin la fecha
+    // escrita (nunca con otro formato).
+    if (error instanceof ConflictException) return null;
+    throw error;
+  }
 }
 
 function retentionEnd(state: PatientRetentionState): RetentionEnd {

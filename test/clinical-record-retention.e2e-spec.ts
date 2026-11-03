@@ -197,7 +197,7 @@ describe('Retención legal de la historia clínica (DX-039, e2e)', () => {
     await call(a, 'get', `/patients/${p}`, a.adminToken).expect(200);
   });
 
-  it('DX-354: la fecha del mensaje de retención sale con el orden del locale de la sede principal, y sin formato es 409', async () => {
+  it('DX-354: la fecha del mensaje de retención sale con el orden del locale de la sede principal, y sin formato sigue el 409 de retención sin fecha', async () => {
     const p = await createPatient(a, 'Retenida formato');
     await attend(a, p);
     const detail = (
@@ -228,8 +228,12 @@ describe('Retención legal de la historia clínica (DX-039, e2e)', () => {
       );
       const none = await messageWith({ hourCycle: null });
       expect(none.status).toBe(409);
-      expect((none.body as { code: string }).code).toBe(
-        'LOCATION_LOCALE_REQUIRED',
+      expect(none.body).toMatchObject({
+        code: 'CLINICAL_RECORD_RETENTION',
+        retentionUntil: detail.retentionUntil,
+      });
+      expect((none.body as { message: string }).message).toContain(
+        'todavía dentro de su plazo',
       );
     } finally {
       await raw.location.update({

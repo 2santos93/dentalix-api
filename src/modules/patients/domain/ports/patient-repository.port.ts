@@ -122,7 +122,8 @@ export interface PatientRetentionState {
   years: number;
   /**
    * DX-354: la sede principal (R6) de la clínica, con el formato en crudo de la
-   * fecha del mensaje de retención; `null` si no hay ninguna sede activa.
+   * fecha del mensaje de retención; `null` si no hay ninguna sede activa o
+   * si el flujo no la usa (solo la lee el archivado).
    */
   format: LocationFormatSource | null;
 }
