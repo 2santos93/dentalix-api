@@ -9,7 +9,10 @@ import {
   RefundCreditUseCase,
   TransferCreditUseCase,
 } from './application/patient-credit.use-cases';
-import { PATIENT_CREDIT_REPOSITORY } from './domain/ports/patient-credit-repository.port';
+import {
+  PATIENT_CREDIT_CLOCK,
+  PATIENT_CREDIT_REPOSITORY,
+} from './domain/ports/patient-credit-repository.port';
 import { PrismaPatientCreditRepository } from './infrastructure/prisma-patient-credit.repository';
 import { PatientCreditController } from './presentation/patient-credit.controller';
 
@@ -25,6 +28,7 @@ import { PatientCreditController } from './presentation/patient-credit.controlle
     CreditPolicyUseCases,
     TokenService,
     TenantContextInterceptor,
+    { provide: PATIENT_CREDIT_CLOCK, useValue: () => new Date() },
     {
       provide: PATIENT_CREDIT_REPOSITORY,
       useClass: PrismaPatientCreditRepository,

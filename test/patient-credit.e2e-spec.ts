@@ -567,6 +567,34 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
     }
   });
 
+  it('DX-462: el tope de RECEPCIÓN se acumula por día y sede: tras 10.000 ya devueltos, con tope 10.100 → 60 entra, otra de 60 es 403 con lo que queda; ADMIN 201', async () => {
+    // receptionA ya devolvió 10.000 hoy en esta sede (test anterior).
+    await as(api().put('/api/v1/patient-credit/policy'), a)
+      .send({ receptionMaxAmount: 10_100 })
+      .expect(200);
+    try {
+      const recep = { token: receptionA };
+      await refund({ amount: 60, method: 'TRANSFER' }, recep).expect(201);
+      const before = await counts();
+      const denied = await refund(
+        { amount: 60, method: 'TRANSFER' },
+        recep,
+      ).expect(403);
+      expect((denied.body as { message: string }).message).toBe(
+        'Supera tu tope diario de devoluciones en esta sede. Te quedan VES\u00a040,00 hoy; pide a un administrador que la registre.',
+      );
+      expect(await counts()).toEqual(before);
+      // Lo que queda sí se puede devolver.
+      await refund({ amount: 40, method: 'TRANSFER' }, recep).expect(201);
+      // ADMIN no tiene tope diario.
+      await refund({ amount: 200, method: 'TRANSFER' }).expect(201);
+    } finally {
+      await as(api().put('/api/v1/patient-credit/policy'), a)
+        .send({ receptionMaxAmount: 10_000 })
+        .expect(200);
+    }
+  });
+
   it('inmutable: la app no puede actualizar ni borrar un asiento', async () => {
     const entry = await raw.patientCreditEntry.findFirstOrThrow({
       where: { tenantId: a.tenantId },
@@ -670,7 +698,8 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
       ).expect(200)
     ).body as { transfers: unknown[]; refunds: unknown[] };
     expect(res.transfers).toHaveLength(1);
-    expect(res.refunds).toHaveLength(3);
+    // 3 de antes + 3 del tope diario (DX-462: 60, 40 de RECEPCIÓN y 200 de ADMIN).
+    expect(res.refunds).toHaveLength(6);
     const events = await raw.auditEvent.count({
       where: {
         tenantId: a.tenantId,

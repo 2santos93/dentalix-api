@@ -28,6 +28,9 @@ import {
   CREDIT_IDEMPOTENCY_REUSED_MESSAGE,
   CREDIT_PAYMENT_NOT_OF_PLAN_MESSAGE,
   CREDIT_TARGET_NOT_BILLABLE_MESSAGE,
+  DailyRefundCapExceededError,
+  dailyRefundRemainingCents,
+  dailyRefundWindow,
   formatRefundNumber,
   fromCents,
   planCreditCents,
@@ -430,6 +433,21 @@ export class PrismaPatientCreditRepository implements PatientCreditRepository {
           await this.assertSingleWriteLocation(tx);
         }
         const locationId = await this.tenantContext.writeLocationId(tx);
+        // DX-378: el comprobante pinta fechas y horas en la zona de la sede
+        // (y DX-462: el día del tope diario es el civil de esa zona).
+        const timeZone = (
+          await resolveLocationTimeZones(tx, tenantId, [locationId])
+        )(locationId);
+        if (input.dailyCap) {
+          await this.assertDailyRefundCap(
+            tx,
+            tenantId,
+            locationId,
+            timeZone,
+            input,
+            input.dailyCap,
+          );
+        }
         let cashSessionId: string | null = null;
         if (input.method === 'CASH') {
           // FOR SHARE hasta el COMMIT: un cierre simultáneo espera al egreso.
@@ -489,10 +507,6 @@ export class PrismaPatientCreditRepository implements PatientCreditRepository {
           throw new Error('La sede no tiene serie de recibos');
         }
         const series = refundSeriesOf(location.receiptPrefix);
-        // DX-378: el comprobante pinta fechas y horas en la zona de la sede.
-        const timeZone = (
-          await resolveLocationTimeZones(tx, tenantId, [location.id])
-        )(location.id);
         // UPSERT del contador: la fila queda bloqueada hasta el COMMIT (dos
         // devoluciones de la misma sede se ordenan; un rollback no deja hueco).
         const [{ lastNumber }] = await tx.$queryRaw<{ lastNumber: number }[]>`
@@ -600,6 +614,45 @@ export class PrismaPatientCreditRepository implements PatientCreditRepository {
         if (existing) return sameRequestOrThrow(existing, input.fingerprint);
       }
       throw error;
+    }
+  }
+
+  /**
+   * DX-462: tope diario acumulado de RECEPTION. Bajo un bloqueo consultivo por
+   * (clínica, sede, usuario, día de la sede) se suman sus devoluciones del día
+   * en esta moneda (de cualquier paciente) y, si con esta pasan del tope,
+   * `DailyRefundCapExceededError`. El bloqueo dura hasta el COMMIT, que es
+   * cuando la devolución nueva entra en la suma de la siguiente.
+   */
+  private async assertDailyRefundCap(
+    tx: Tx,
+    tenantId: string,
+    locationId: string,
+    timeZone: string,
+    input: CreateRefundInput,
+    cap: { capCents: number; now: Date },
+  ): Promise<void> {
+    const window = dailyRefundWindow(cap.now, timeZone);
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(
+      hashtext('dx462_refund_cap:' || ${tenantId} || ':' || ${locationId}),
+      hashtext(${input.userId} || ':' || ${window.day})
+    )`;
+    const total = await tx.patientCreditRefund.aggregate({
+      where: {
+        tenantId,
+        locationId,
+        createdById: input.userId,
+        currency: input.currency,
+        createdAt: { gte: window.start, lt: window.end },
+      },
+      _sum: { amount: true },
+    });
+    const usedCents = toCents(total._sum.amount?.toNumber() ?? 0);
+    if (usedCents + input.amountCents > cap.capCents) {
+      throw new DailyRefundCapExceededError(
+        dailyRefundRemainingCents(cap.capCents, usedCents),
+        input.currency,
+      );
     }
   }
 

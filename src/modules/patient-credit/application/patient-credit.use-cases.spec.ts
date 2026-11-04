@@ -14,6 +14,7 @@ import type {
   PatientCreditRepository,
   PlanCreditState,
 } from '../domain/ports/patient-credit-repository.port';
+import { DailyRefundCapExceededError } from '../domain/patient-credit';
 import {
   RefundCreditUseCase,
   TransferCreditUseCase,
@@ -50,7 +51,9 @@ function repo(
   const createTransfer = jest.fn((input: { sourcePlanId: string }) =>
     Promise.resolve({ id: 't-1', sourcePlanId: input.sourcePlanId }),
   );
-  const createRefund = jest.fn(() => Promise.resolve({ id: 'r-1' }));
+  const createRefund = jest.fn((_input?: unknown) =>
+    Promise.resolve({ id: 'r-1' }),
+  );
   const findTransferByKey = jest.fn(() => Promise.resolve(null));
   const referenceLocationFormat = jest.fn(format);
   const mock = {
@@ -216,6 +219,49 @@ describe('RefundCreditUseCase (DX-253)', () => {
       RECEPTION,
     );
     expect(allowed.referenceLocationFormat).not.toHaveBeenCalled();
+  });
+
+  describe('tope diario acumulado (DX-462)', () => {
+    const NOW = new Date('2026-11-04T15:00:00Z');
+
+    it('RECEPTION: pasa al repositorio el tope y el reloj para acumular dentro del bloqueo', async () => {
+      const r = repo([origin], 5_000_000);
+      await new RefundCreditUseCase(r.mock, () => NOW).execute(
+        'origen',
+        body,
+        RECEPTION,
+      );
+      expect(r.createRefund).toHaveBeenCalledWith(
+        expect.objectContaining({
+          dailyCap: { capCents: 5_000_000, now: NOW },
+        }),
+      );
+    });
+
+    it('ADMIN no tiene tope diario', async () => {
+      const r = repo([origin], 1);
+      await new RefundCreditUseCase(r.mock, () => NOW).execute(
+        'origen',
+        body,
+        ADMIN,
+      );
+      expect(r.createRefund.mock.calls[0][0]).not.toHaveProperty('dailyCap');
+    });
+
+    it('si el repositorio dice que la suma pasa del tope: 403 con lo que queda', async () => {
+      const r = repo([origin], 10_000);
+      const smallBody = { ...body, amount: 60 };
+      r.createRefund.mockRejectedValueOnce(
+        new DailyRefundCapExceededError(4_000, 'VES'),
+      );
+      const error = await new RefundCreditUseCase(r.mock, () => NOW)
+        .execute('origen', smallBody, RECEPTION)
+        .catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(ForbiddenException);
+      expect((error as ForbiddenException).message).toBe(
+        'Supera tu tope diario de devoluciones en esta sede. Te quedan VES\u00a040,00 hoy; pide a un administrador que la registre.',
+      );
+    });
   });
 
   it.each([

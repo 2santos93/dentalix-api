@@ -5,9 +5,10 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import type { ClinicRole, PaymentMethod } from '@prisma/client';
+import { ClinicRole, type PaymentMethod } from '@prisma/client';
 import {
   creditExceedsMessage,
   CREDIT_CURRENCY_MISMATCH_MESSAGE,
@@ -22,7 +23,9 @@ import {
   CREDIT_TARGET_CURRENCY_MESSAGE,
   CREDIT_TARGET_NOT_BILLABLE_MESSAGE,
   CREDIT_TARGET_OTHER_PATIENT_MESSAGE,
+  DailyRefundCapExceededError,
   canMoveCredit,
+  dailyRefundCapMessage,
   fromCents,
   normalizeReason,
   parseIdempotencyKey,
@@ -32,7 +35,9 @@ import {
   transferFingerprint,
 } from '../domain/patient-credit';
 import {
+  PATIENT_CREDIT_CLOCK,
   PATIENT_CREDIT_REPOSITORY,
+  type PatientCreditClock,
   type CreditRefundRecord,
   type CreditTransferRecord,
   type PatientCreditMovements,
@@ -219,6 +224,9 @@ export class RefundCreditUseCase {
   constructor(
     @Inject(PATIENT_CREDIT_REPOSITORY)
     private readonly repo: PatientCreditRepository,
+    @Optional()
+    @Inject(PATIENT_CREDIT_CLOCK)
+    private readonly clock: PatientCreditClock = () => new Date(),
   ) {}
 
   async execute(
@@ -267,17 +275,34 @@ export class RefundCreditUseCase {
       currency,
       actor,
     );
-    return this.repo.createRefund({
-      planId: source.planId,
-      amountCents,
-      currency: source.currency,
-      method: input.method,
-      reason,
-      paymentIds,
-      userId: actor.userId,
-      idempotencyKey: key,
-      fingerprint,
-    });
+    // DX-462: RECEPTION además tiene un tope DIARIO acumulado; se comprueba
+    // dentro del bloqueo del repositorio. ADMIN no tiene tope.
+    const dailyCap =
+      actor.role === ClinicRole.RECEPTION
+        ? { capCents: await this.repo.receptionCapCents(), now: this.clock() }
+        : undefined;
+    try {
+      return await this.repo.createRefund({
+        planId: source.planId,
+        amountCents,
+        currency: source.currency,
+        method: input.method,
+        reason,
+        paymentIds,
+        userId: actor.userId,
+        idempotencyKey: key,
+        fingerprint,
+        ...(dailyCap ? { dailyCap } : {}),
+      });
+    } catch (error) {
+      if (error instanceof DailyRefundCapExceededError) {
+        const fmt = await this.repo.referenceLocationFormat();
+        throw new ForbiddenException(
+          dailyRefundCapMessage(error.remainingCents, error.currency, fmt),
+        );
+      }
+      throw error;
+    }
   }
 }
 
