@@ -17,7 +17,10 @@ import { PLAN_WITHOUT_OPTIONS } from '../../../treatment-plans/application/use-c
 import type { ReceiptPlanBalanceCalculator } from '../receipts/receipt-plan-balance';
 import type { GetPlanBalanceUseCase } from './get-plan-balance.use-case';
 import { RecordPaymentUseCase } from './record-payment.use-case';
-import { PAID_AT_IN_FUTURE_MESSAGE } from '../../domain/paid-at-window';
+import {
+  PAID_AT_AFTER_SITE_TODAY_MESSAGE,
+  PAID_AT_IN_FUTURE_MESSAGE,
+} from '../../domain/paid-at-window';
 import {
   RecordSplitPaymentUseCase,
   type RecordSplitPaymentInput,
@@ -113,7 +116,7 @@ class FakeConvertAmount {
   }
 }
 
-function makeUseCase() {
+function makeUseCase(now: Date = new Date('2026-10-31T15:00:00.000Z')) {
   const repo = new InMemoryPaymentRepository();
   let plan: TreatmentPlanDetail | null = makePlan();
   const getPlan = {
@@ -155,7 +158,7 @@ function makeUseCase() {
     } as unknown as ReceiptPlanBalanceCalculator,
     convert as unknown as ConvertAmountUseCase,
     gate,
-    () => new Date('2026-10-31T15:00:00.000Z'),
+    () => now,
   );
   const uc = new RecordSplitPaymentUseCase(
     repo,
@@ -195,12 +198,34 @@ function twoLines(
 }
 
 describe('RecordSplitPaymentUseCase (DX-390)', () => {
-  it('DX-054: fecha a más de 24 h en el futuro → 400 en español y no se registra nada', async () => {
+  it('DX-054: un instante a más de 24 h en el futuro → 400 en español y no se registra nada', async () => {
     const { uc, repo } = makeUseCase();
     await expect(
-      uc.execute('plan-1', twoLines({ paidAt: '2026-11-05' }), 'user-1', KEY),
+      uc.execute(
+        'plan-1',
+        twoLines({ paidAt: '2026-11-05T12:00:00.000Z' }),
+        'user-1',
+        KEY,
+      ),
     ).rejects.toThrow(new BadRequestException(PAID_AT_IN_FUTURE_MESSAGE));
     expect(repo.lastSplitInput).toBeNull();
+  });
+
+  it('DX-075: sede en Caracas cerca de medianoche (03:30Z del 5): el 4 se registra, el 5 → 400 y no se registra nada', async () => {
+    const { uc, repo } = makeUseCase(new Date('2026-11-05T03:30:00.000Z'));
+    await expect(
+      uc.execute('plan-1', twoLines({ paidAt: '2026-11-05' }), 'user-1', KEY),
+    ).rejects.toThrow(
+      new BadRequestException(PAID_AT_AFTER_SITE_TODAY_MESSAGE),
+    );
+    expect(repo.lastSplitInput).toBeNull();
+    await uc.execute(
+      'plan-1',
+      twoLines({ paidAt: '2026-11-04' }),
+      'user-1',
+      KEY,
+    );
+    expect(repo.lastSplitInput).not.toBeNull();
   });
 
   it('registra un abono por línea en UNA llamada al repositorio, con su tasa, su base y el total en la moneda del plan', async () => {

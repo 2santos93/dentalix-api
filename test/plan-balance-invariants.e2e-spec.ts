@@ -137,8 +137,11 @@ describe('DX-054: invariantes del saldo y del plan (e2e)', () => {
     expect((balance.body as { billable: number }).billable).toBe(100);
   });
 
-  it('un abono con fecha a más de 24 h en el futuro → 400 en español y no se registra', async () => {
-    for (const paidAt of ['2026-11-03', '2026-11-01T15:00:01.000Z']) {
+  it('un abono con instante a más de 24 h en el futuro → 400 en español y no se registra', async () => {
+    for (const paidAt of [
+      '2026-11-03T12:00:00.000Z',
+      '2026-11-01T15:00:01.000Z',
+    ]) {
       const res = await as(
         api().post(`/api/v1/treatment-plans/${planId}/payments`),
       )

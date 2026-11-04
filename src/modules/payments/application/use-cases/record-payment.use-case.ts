@@ -95,32 +95,35 @@ function isUtcMidnight(instant: Date): boolean {
 }
 
 /**
- * DX-097: `YYYY-MM-DD` es un día civil (el formulario de abono), y también una
- * medianoche UTC exacta (clientes antiguos, ver `isUtcMidnight`); cualquier
- * otra fecha ISO con hora es un instante y debe traer `Z` o desfase. Sin esta
- * distinción, `new Date` leería el día como medianoche UTC, que en una sede
- * al oeste de UTC es la tarde del día ANTERIOR.
- */
-/**
  * La ventana de fecha de un abono, una sola vez para los tres caminos (suelto,
- * repartido y saldo inicial): 24 h por delante del reloj (DX-054) y, si llega
- * un día civil, que no sea posterior a hoy en la sede (DX-075). Sin zona en la
- * sede solo rige la primera.
+ * repartido y saldo inicial): un día civil no puede ser
+ * posterior a hoy en la sede (DX-075; se mira primero, así que mañana, o dentro
+ * de 3 días, da el mismo mensaje) y, para un instante o si la sede no tiene
+ * zona, rige la ventana de 24 h por delante del reloj (DX-054).
  */
 export async function assertPaidAtWindow(
   repo: Pick<PaymentRepository, 'siteToday'>,
   paidAt: Date | CivilPaidDay,
   now: Date,
 ): Promise<void> {
+  if (
+    !(paidAt instanceof Date) &&
+    isPaidAtAfterSiteToday(paidAt, await repo.siteToday(now))
+  ) {
+    throw new BadRequestException(PAID_AT_AFTER_SITE_TODAY_MESSAGE);
+  }
   if (isPaidAtTooFarInFuture(paidAt, now)) {
     throw new BadRequestException(PAID_AT_IN_FUTURE_MESSAGE);
   }
-  if (paidAt instanceof Date) return;
-  if (isPaidAtAfterSiteToday(paidAt, await repo.siteToday(now))) {
-    throw new BadRequestException(PAID_AT_AFTER_SITE_TODAY_MESSAGE);
-  }
 }
 
+/**
+ * DX-097: `YYYY-MM-DD` es un día civil (el formulario de abono), y también una
+ * medianoche UTC exacta (clientes antiguos, ver `isUtcMidnight`); cualquier
+ * otra fecha ISO con hora es un instante y debe traer `Z` o desfase. Sin esta
+ * distinción, `new Date` leería el día como medianoche UTC, que en una sede
+ * al oeste de UTC es la tarde del día ANTERIOR.
+ */
 export function normalizePaidAt(value: string | Date): Date | CivilPaidDay {
   if (typeof value === 'string' && CIVIL_DATE_SHAPE.test(value)) {
     const civilDate = parseCivilDate(value);

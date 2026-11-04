@@ -19,7 +19,7 @@ const whitelist: CurrencyWhitelist = {
   has: (code) => Promise.resolve(['VES', 'USD'].includes(code)),
 };
 
-function setup() {
+function setup(now: Date = new Date('2026-10-31T15:00:00.000Z')) {
   const repo = new InMemoryPaymentRepository();
   repo.openingBalances.set('ob-1', {
     id: 'ob-1',
@@ -38,19 +38,19 @@ function setup() {
       repo,
       referenceCurrencyDigitsCatalog(),
     ),
-    () => new Date('2026-10-31T15:00:00.000Z'),
+    () => now,
   );
   return { repo, uc };
 }
 
 describe('RecordOpeningBalancePaymentUseCase (DX-262, revisión C1)', () => {
-  it('DX-054: fecha a más de 24 h en el futuro → 400 en español y no se registra', async () => {
+  it('DX-054: un instante a más de 24 h en el futuro → 400 en español y no se registra', async () => {
     const { repo, uc } = setup();
     await expect(
       uc.execute('ob-1', {
         amount: 1000,
         currency: 'VES',
-        paidAt: '2026-11-05',
+        paidAt: '2026-11-05T12:00:00.000Z',
       }),
     ).rejects.toThrow(new BadRequestException(PAID_AT_IN_FUTURE_MESSAGE));
     expect(repo.lastCreateInput).toBeNull();
@@ -72,6 +72,27 @@ describe('RecordOpeningBalancePaymentUseCase (DX-262, revisión C1)', () => {
       amount: 1000,
       currency: 'VES',
       paidAt: '2026-10-31',
+      method: 'CASH',
+    });
+    expect(repo.lastCreateInput).not.toBeNull();
+  });
+
+  it('DX-075: sede en Caracas cerca de medianoche (03:30Z del 5): el 4 se registra, el 5 → 400', async () => {
+    const { repo, uc } = setup(new Date('2026-11-05T03:30:00.000Z'));
+    await expect(
+      uc.execute('ob-1', {
+        amount: 1000,
+        currency: 'VES',
+        paidAt: '2026-11-05',
+      }),
+    ).rejects.toThrow(
+      new BadRequestException(PAID_AT_AFTER_SITE_TODAY_MESSAGE),
+    );
+    expect(repo.lastCreateInput).toBeNull();
+    await uc.execute('ob-1', {
+      amount: 1000,
+      currency: 'VES',
+      paidAt: '2026-11-04',
       method: 'CASH',
     });
     expect(repo.lastCreateInput).not.toBeNull();
