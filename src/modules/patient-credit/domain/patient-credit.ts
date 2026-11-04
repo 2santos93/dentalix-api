@@ -4,6 +4,11 @@ import { RECEIPT_PREFIX_PATTERN } from '../../payments/domain/receipt-number';
 import { moneyWithCode } from '../../../shared/format/money-with-code';
 import type { RegionalFormat } from '../../../shared/format/regional-format';
 import { fromCents, toCents } from '../../../shared/money/money';
+import {
+  civilDateIn,
+  civilDayRange,
+  type InstantRange,
+} from '../../../shared/time/civil-day';
 
 /*
  * Saldo a favor del paciente (DX-253): reglas puras del traspaso a otro plan y
@@ -97,6 +102,56 @@ export function receptionCapMessage(
   return capCents === 0
     ? 'Recepción no puede traspasar ni devolver saldo a favor en esta clínica: pídeselo a administración.'
     : `Recepción puede mover hasta ${moneyWithCode(capCents / 100, currency, fmt, null)} por operación: pídeselo a administración.`;
+}
+
+/**
+ * DX-462: el tope de RECEPCIÓN para DEVOLVER se acumula por (clínica, sede,
+ * quien devuelve, día civil de la sede, moneda de la devolución). La cifra del
+ * tope es una sola por clínica y se compara tal cual con el importe de cada
+ * moneda (como ya hacía la regla por operación); por eso la suma es por
+ * moneda. Cuentan todas las devoluciones de ese usuario en esa sede ese día, de
+ * cualquier paciente (el control es de caja). Las devoluciones no se anulan
+ * (son inmutables), así que no hay "anuladas" que excluir. ADMIN sin tope.
+ * Los traspasos no sacan dinero de caja y siguen con el tope por operación.
+ */
+export function dailyRefundRemainingCents(
+  capCents: number,
+  usedTodayCents: number,
+): number {
+  return Math.max(0, capCents - usedTodayCents);
+}
+
+/** Día civil de la sede en `now` y su rango `[start, end)` de instantes. */
+export type DailyRefundWindow = InstantRange & { day: string };
+
+export function dailyRefundWindow(
+  now: Date,
+  timeZone: string,
+): DailyRefundWindow {
+  const day = civilDateIn(now, timeZone);
+  return { day, ...civilDayRange(day, timeZone) };
+}
+
+/** 403 de RECEPTION al superar el tope diario acumulado de devoluciones. */
+export function dailyRefundCapMessage(
+  remainingCents: number,
+  currency: string,
+  fmt: RegionalFormat,
+): string {
+  return `Supera tu tope diario de devoluciones en esta sede. Te quedan ${moneyWithCode(remainingCents / 100, currency, fmt, null)} hoy; pide a un administrador que la registre.`;
+}
+
+/** Lo lanza el repositorio (dentro del bloqueo) cuando la suma pasa del tope. */
+export class DailyRefundCapExceededError extends Error {
+  constructor(
+    readonly remainingCents: number,
+    readonly currency: string,
+    /** Sede de la devolución: con su formato se pinta el importe. */
+    readonly locationId: string,
+  ) {
+    super('Daily refund cap exceeded');
+    this.name = 'DailyRefundCapExceededError';
+  }
 }
 
 export { fromCents, toCents };

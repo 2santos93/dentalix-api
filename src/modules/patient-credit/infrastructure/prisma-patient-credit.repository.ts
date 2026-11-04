@@ -16,6 +16,7 @@ import type { RegionalFormat } from '../../../shared/format/regional-format';
 import { requireLocationFormat } from '../../../shared/locations/location-regional';
 import { resolveReferenceLocation } from '../../../shared/locations/reference-location';
 import { resolveLocationTimeZones } from '../../../shared/locations/location-time-zone';
+import { lockDailyRefundDay } from './daily-refund-cap-lock';
 import { lockOpenSessionOf } from '../../cash-sessions/infrastructure/payment-cash-session';
 import {
   formatReceiptNumber,
@@ -28,6 +29,8 @@ import {
   CREDIT_IDEMPOTENCY_REUSED_MESSAGE,
   CREDIT_PAYMENT_NOT_OF_PLAN_MESSAGE,
   CREDIT_TARGET_NOT_BILLABLE_MESSAGE,
+  DailyRefundCapExceededError,
+  dailyRefundRemainingCents,
   formatRefundNumber,
   fromCents,
   planCreditCents,
@@ -261,6 +264,17 @@ export class PrismaPatientCreditRepository implements PatientCreditRepository {
     return requireLocationFormat(reference);
   }
 
+  async locationFormat(locationId: string): Promise<RegionalFormat> {
+    const tenantId = this.tenantId();
+    const location = await this.prisma.runWithTenant((tx) =>
+      tx.location.findFirstOrThrow({
+        where: { tenantId, id: locationId },
+        select: { id: true, locale: true, hourCycle: true },
+      }),
+    );
+    return requireLocationFormat(location);
+  }
+
   async updateReceptionCap(cents: number): Promise<number> {
     const tenantId = this.tenantId();
     const tenant = await this.prisma.runWithTenant((tx) =>
@@ -386,6 +400,10 @@ export class PrismaPatientCreditRepository implements PatientCreditRepository {
     try {
       return await this.prisma.runWithTenant(async (tx) => {
         await this.lockPlans(tx, tenantId, [input.planId]);
+        // DX-462: un reintento con la misma clave que esperaba al bloqueo
+        // devuelve la devolución original (ya en la suma del tope), no un 403.
+        const replayed = await this.replayRefundIn(tx, tenantId, input);
+        if (replayed) return replayed;
         const plan = await this.planCredit(tx, tenantId, input.planId);
         // DX-438: el saldo se leyó en la moneda del plan; si cambió antes del
         // bloqueo, la devolución saldría en una moneda que ya no es la suya.
@@ -430,6 +448,25 @@ export class PrismaPatientCreditRepository implements PatientCreditRepository {
           await this.assertSingleWriteLocation(tx);
         }
         const locationId = await this.tenantContext.writeLocationId(tx);
+        // DX-378: el comprobante pinta fechas y horas en la zona de la sede
+        // (y DX-462: el día del tope diario es el civil de esa zona).
+        const timeZone = (
+          await resolveLocationTimeZones(tx, tenantId, [locationId])
+        )(locationId);
+        if (input.dailyCap) {
+          await this.assertDailyRefundCap(
+            tx,
+            tenantId,
+            locationId,
+            timeZone,
+            input,
+            input.dailyCap,
+          );
+          // Tras esperar el bloqueo, otra petición con la misma clave pudo
+          // entrar: es la original, no un exceso del tope.
+          const again = await this.replayRefundIn(tx, tenantId, input);
+          if (again) return again;
+        }
         let cashSessionId: string | null = null;
         if (input.method === 'CASH') {
           // FOR SHARE hasta el COMMIT: un cierre simultáneo espera al egreso.
@@ -489,10 +526,6 @@ export class PrismaPatientCreditRepository implements PatientCreditRepository {
           throw new Error('La sede no tiene serie de recibos');
         }
         const series = refundSeriesOf(location.receiptPrefix);
-        // DX-378: el comprobante pinta fechas y horas en la zona de la sede.
-        const timeZone = (
-          await resolveLocationTimeZones(tx, tenantId, [location.id])
-        )(location.id);
         // UPSERT del contador: la fila queda bloqueada hasta el COMMIT (dos
         // devoluciones de la misma sede se ordenan; un rollback no deja hueco).
         const [{ lastNumber }] = await tx.$queryRaw<{ lastNumber: number }[]>`
@@ -600,6 +633,64 @@ export class PrismaPatientCreditRepository implements PatientCreditRepository {
         if (existing) return sameRequestOrThrow(existing, input.fingerprint);
       }
       throw error;
+    }
+  }
+
+  /** La devolución ya guardada con esa clave (misma petición), si existe. */
+  private async replayRefundIn(
+    tx: Tx,
+    tenantId: string,
+    input: CreateRefundInput,
+  ): Promise<CreditRefundRecord | null> {
+    if (!input.idempotencyKey) return null;
+    const row = await tx.patientCreditRefund.findFirst({
+      where: { tenantId, idempotencyKey: input.idempotencyKey },
+      select: REFUND_SELECT,
+    });
+    return row ? sameRequestOrThrow(toRefund(row), input.fingerprint) : null;
+  }
+
+  /**
+   * DX-462: tope diario acumulado de RECEPTION. Bajo un bloqueo consultivo por
+   * (clínica, sede, usuario, día de la sede) se suman sus devoluciones del día
+   * en esta moneda (de cualquier paciente) y, si con esta pasan del tope,
+   * `DailyRefundCapExceededError`. El bloqueo dura hasta el COMMIT, que es
+   * cuando la devolución nueva entra en la suma de la siguiente. El día sale
+   * del reloj inyectado, leído TRAS esperar el bloqueo (ver
+   * `lockDailyRefundDay`); el `createdAt` lo fija el trigger del servidor
+   * (DX-226, `now()` de la BD al abrir la transacción) y no admite otro valor.
+   */
+  private async assertDailyRefundCap(
+    tx: Tx,
+    tenantId: string,
+    locationId: string,
+    timeZone: string,
+    input: CreateRefundInput,
+    cap: { capCents: number; clock: () => Date },
+  ): Promise<void> {
+    const { window } = await lockDailyRefundDay(
+      tx,
+      { tenantId, locationId, userId: input.userId },
+      timeZone,
+      cap.clock,
+    );
+    const total = await tx.patientCreditRefund.aggregate({
+      where: {
+        tenantId,
+        locationId,
+        createdById: input.userId,
+        currency: input.currency,
+        createdAt: { gte: window.start, lt: window.end },
+      },
+      _sum: { amount: true },
+    });
+    const usedCents = toCents(total._sum.amount?.toNumber() ?? 0);
+    if (usedCents + input.amountCents > cap.capCents) {
+      throw new DailyRefundCapExceededError(
+        dailyRefundRemainingCents(cap.capCents, usedCents),
+        input.currency,
+        locationId,
+      );
     }
   }
 

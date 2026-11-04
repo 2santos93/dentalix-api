@@ -4,6 +4,9 @@ import {
   CREDIT_AMOUNT_EXCEEDS_MESSAGE,
   canMoveCredit,
   creditExceedsMessage,
+  dailyRefundCapMessage,
+  dailyRefundRemainingCents,
+  dailyRefundWindow,
   formatRefundNumber,
   normalizeReason,
   parseIdempotencyKey,
@@ -243,5 +246,58 @@ describe('creditExceedsMessage (DX-472-bis, revisión B3)', () => {
     expect(creditExceedsMessage(2)).toBe(
       'El importe supera el saldo a favor del plan. 2 abonos en otra moneda todavía no cuentan en el saldo a favor: se suman en unos minutos, cuando quede registrada la tasa de su día. Vuelve a intentarlo después.',
     );
+  });
+
+  describe('tope diario de devoluciones de RECEPCIÓN (DX-462)', () => {
+    const esVE = regionalFormat({ locale: 'es-VE', hourCycle: 'h12' });
+    const enUS = regionalFormat({ locale: 'en-US', hourCycle: 'h12' });
+
+    it('lo que queda es el tope menos lo ya devuelto hoy (nunca negativo)', () => {
+      expect(dailyRefundRemainingCents(10_000, 6_000)).toBe(4_000);
+      expect(dailyRefundRemainingCents(10_000, 10_000)).toBe(0);
+      expect(dailyRefundRemainingCents(10_000, 12_000)).toBe(0);
+    });
+
+    it('el mensaje dice lo que queda con el formato de la sede y el código ISO', () => {
+      expect(dailyRefundCapMessage(4_000, 'USD', enUS)).toBe(
+        'Supera tu tope diario de devoluciones en esta sede. Te quedan USD\u00a040.00 hoy; pide a un administrador que la registre.',
+      );
+      expect(dailyRefundCapMessage(0, 'VES', esVE)).toContain(
+        'Te quedan VES\u00a00,00 hoy',
+      );
+    });
+
+    it('el día es el civil de la sede: Caracas (UTC−4) cerca de la medianoche', () => {
+      // 23:30 del 4 nov en Caracas = 03:30Z del 5 nov.
+      const late = dailyRefundWindow(
+        new Date('2026-11-05T03:30:00Z'),
+        'America/Caracas',
+      );
+      // 00:30 del 5 nov en Caracas = 04:30Z del 5 nov.
+      const early = dailyRefundWindow(
+        new Date('2026-11-05T04:30:00Z'),
+        'America/Caracas',
+      );
+      expect(late.day).toBe('2026-11-04');
+      expect(early.day).toBe('2026-11-05');
+      expect(late.end).toEqual(early.start);
+      expect(early.start).toEqual(new Date('2026-11-05T04:00:00Z'));
+    });
+
+    it('el día es el civil de la sede: Madrid (UTC+1) cerca de la medianoche', () => {
+      // 23:30 del 4 nov en Madrid = 22:30Z; 00:30 del 5 nov = 23:30Z.
+      const late = dailyRefundWindow(
+        new Date('2026-11-04T22:30:00Z'),
+        'Europe/Madrid',
+      );
+      const early = dailyRefundWindow(
+        new Date('2026-11-04T23:30:00Z'),
+        'Europe/Madrid',
+      );
+      expect(late.day).toBe('2026-11-04');
+      expect(early.day).toBe('2026-11-05');
+      expect(late.end).toEqual(early.start);
+      expect(early.start).toEqual(new Date('2026-11-04T23:00:00Z'));
+    });
   });
 });

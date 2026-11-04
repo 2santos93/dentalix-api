@@ -4,6 +4,10 @@ import type { PaymentMethod, TreatmentPlanStatus } from '@prisma/client';
 
 export const PATIENT_CREDIT_REPOSITORY = Symbol('PATIENT_CREDIT_REPOSITORY');
 
+/** Reloj inyectado (DX-462): el día civil del tope diario sale de aquí. */
+export const PATIENT_CREDIT_CLOCK = Symbol('PATIENT_CREDIT_CLOCK');
+export type PatientCreditClock = () => Date;
+
 /** Lo que el saldo a favor necesita de un plan (sumas en su moneda). */
 export interface PlanCreditState {
   planId: string;
@@ -114,6 +118,13 @@ export interface CreateRefundInput {
   userId: string;
   idempotencyKey?: string;
   fingerprint: string;
+  /**
+   * DX-462: solo para RECEPTION. Dentro del bloqueo por (clínica, sede,
+   * usuario, día de la sede) se suman sus devoluciones del día en esta moneda;
+   * si con esta pasan de `capCents` se lanza `DailyRefundCapExceededError`.
+   * El reloj se lee dentro del bloqueo (no es el `createdAt`: lo fija la BD).
+   */
+  dailyCap?: { capCents: number; clock: PatientCreditClock };
 }
 
 export interface PatientCreditMovements {
@@ -130,6 +141,8 @@ export interface PatientCreditRepository {
    * si no tiene locale o reloj.
    */
   referenceLocationFormat(): Promise<RegionalFormat>;
+  /** Formato de una sede concreta (DX-462: la de la devolución rechazada). */
+  locationFormat(locationId: string): Promise<RegionalFormat>;
   updateReceptionCap(cents: number): Promise<number>;
   findTransferByKey(key: string): Promise<CreditTransferRecord | null>;
   findRefundByKey(key: string): Promise<CreditRefundRecord | null>;
