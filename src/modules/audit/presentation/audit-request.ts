@@ -301,7 +301,8 @@ export function buildAuditDraft(
 /**
  * Los eventos de una petición que terminó bien: el de `buildAuditDraft` o,
  * en un cobro dividido (DX-390, `splitPayment`), uno por línea de la
- * respuesta (`payments`), cada uno con su abono y su referencia.
+ * respuesta (`payments`), cada uno con su abono y su referencia; y en «¿Quién
+ * llama?» (DX-224, `perMatch`), uno por paciente de `matches`.
  */
 export function buildAuditDrafts(
   options: AuditOptions,
@@ -310,6 +311,18 @@ export function buildAuditDrafts(
   scope: AuditScope,
   resultCount: number | null = null,
 ): AuditEventDraft[] {
+  if (options.perMatch) {
+    const matches =
+      typeof responseBody === 'object' &&
+      responseBody !== null &&
+      Array.isArray((responseBody as { matches?: unknown }).matches)
+        ? (responseBody as { matches: unknown[] }).matches
+        : [];
+    return matches.flatMap((match) => {
+      const draft = buildAuditDraft(options, req, match, scope, resultCount);
+      return draft ? [draft] : [];
+    });
+  }
   if (!options.splitPayment) {
     const draft = buildAuditDraft(
       options,

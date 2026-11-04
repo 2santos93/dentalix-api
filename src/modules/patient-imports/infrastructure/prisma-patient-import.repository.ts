@@ -1,3 +1,7 @@
+import {
+  defaultPhoneRegionIn,
+  reconcilePatientPhoneE164,
+} from '../../patients/infrastructure/phone-e164';
 import { Injectable } from '@nestjs/common';
 import {
   Prisma,
@@ -1205,7 +1209,10 @@ export class PrismaPatientImportRepository {
    * siga fallando queda FAILED: el resto del lote sigue.
    */
   async processChunk(
-    batch: Pick<PatientImportBatch, 'id' | 'duplicateMode' | 'confirmedById'>,
+    batch: Pick<
+      PatientImportBatch,
+      'id' | 'duplicateMode' | 'confirmedById' | 'locationId'
+    >,
     size: number,
     channel: ContactChannel,
   ): Promise<ChunkResult> {
@@ -1292,7 +1299,10 @@ export class PrismaPatientImportRepository {
 
   private async applyRows(
     tx: Tx,
-    batch: Pick<PatientImportBatch, 'id' | 'duplicateMode' | 'confirmedById'>,
+    batch: Pick<
+      PatientImportBatch,
+      'id' | 'duplicateMode' | 'confirmedById' | 'locationId'
+    >,
     rows: { id: string; rowNumber: number; data: Prisma.JsonValue }[],
     channel: ContactChannel,
   ): Promise<ChunkResult> {
@@ -1415,6 +1425,21 @@ export class PrismaPatientImportRepository {
         patientId: null,
         filled: null,
       });
+    }
+
+    // DX-224: el E.164 de los teléfonos que acaban de entrar o se rellenaron,
+    // con el prefijo de la sede del lote.
+    const touched = outcomes.flatMap((o) =>
+      (o.outcome === 'CREATED' || o.outcome === 'FILLED') && o.patientId
+        ? [o.patientId]
+        : [],
+    );
+    if (touched.length > 0) {
+      await reconcilePatientPhoneE164(
+        tx,
+        touched,
+        await defaultPhoneRegionIn(tx, batch.locationId),
+      );
     }
 
     // Solo cuenta lo que de verdad pasó de PENDING a su resultado.

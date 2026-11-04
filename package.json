@@ -30,6 +30,7 @@
     "allocations:backfill": "ts-node --transpile-only prisma/backfill-payment-allocations.ts",
     "g1:backfill-locations": "ts-node --transpile-only prisma/scripts/g1-backfill-locations.ts",
     "phones:report": "ts-node --transpile-only prisma/scripts/phones-report.ts",
+    "phones:e164-backfill": "ts-node --transpile-only prisma/scripts/patients-phone-e164-backfill.ts",
     "audit:purge": "ts-node --transpile-only prisma/audit-purge.ts",
     "retention:raise-floor": "ts-node --transpile-only prisma/retention-raise-floor.ts",
     "seed:prod": "node dist/scripts/prisma/seed.js",

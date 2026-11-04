@@ -511,6 +511,42 @@ describe('buildAuditDrafts (DX-390)', () => {
   });
 });
 
+describe('buildAuditDrafts: «¿Quién llama?» (DX-224)', () => {
+  const A = '99999999-9999-4999-8999-999999999991';
+  const B = '99999999-9999-4999-8999-999999999992';
+  const lookup: AuditOptions = {
+    action: 'VIEW',
+    resource: 'PATIENT',
+    resourceId: { response: 'id' },
+    patient: { response: 'id' },
+    reason: 'CALLER_LOOKUP',
+    perMatch: true,
+  };
+
+  it('deja una lectura por paciente encontrado y nunca el número buscado', () => {
+    const drafts = buildAuditDrafts(
+      lookup,
+      req({ body: { phone: '0412-1234567' } }),
+      { matches: [{ id: A }, { id: B }] },
+      scope,
+    );
+    expect(drafts.map((d) => d.resourceId)).toEqual([A, B]);
+    expect(drafts.map((d) => d.patient)).toEqual([
+      { kind: 'patient', id: A },
+      { kind: 'patient', id: B },
+    ]);
+    expect(drafts.every((d) => d.action === 'VIEW')).toBe(true);
+    expect(drafts.every((d) => d.metadata.reason === 'CALLER_LOOKUP')).toBe(
+      true,
+    );
+    expect(JSON.stringify(drafts)).not.toContain('1234567');
+  });
+
+  it('sin coincidencias no deja ningún evento', () => {
+    expect(buildAuditDrafts(lookup, req(), { matches: [] }, scope)).toEqual([]);
+  });
+});
+
 describe('loginActor (DX-009)', () => {
   const token = (payload: object) =>
     `h.${Buffer.from(JSON.stringify(payload)).toString('base64url')}.s`;

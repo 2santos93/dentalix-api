@@ -137,6 +137,7 @@ export class PrismaWalkInRepository implements WalkInRepository {
               message: DOC_TAKEN_MESSAGE,
               existingPatientId,
             }),
+          input.locationId,
         );
         patientId = created.id;
         patientCreated = true;

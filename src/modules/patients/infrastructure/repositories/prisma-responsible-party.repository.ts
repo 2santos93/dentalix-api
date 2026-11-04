@@ -13,6 +13,10 @@ import {
   type UpdateResponsiblePartyData,
 } from '../../domain/ports/responsible-party-repository.port';
 import {
+  defaultPhoneRegionIn,
+  reconcileResponsiblePhoneE164,
+} from '../phone-e164';
+import {
   loadNoticeSettings,
   loadNoticeResponsibles,
 } from '../notices/notice-context';
@@ -228,26 +232,40 @@ export class PrismaResponsiblePartyRepository implements ResponsiblePartyReposit
   ): Promise<ResponsiblePartyView> {
     const tenantId = this.requireTenantId();
     try {
-      return await this.prisma.runWithTenant(async (tx) =>
-        toView(
-          await tx.patientResponsibleParty.create({
-            data: {
-              tenantId,
-              patientId,
-              responsiblePatientId: data.responsiblePatientId,
-              ...(data.contact ? contactCreateData(data.contact) : {}),
-              relationship: data.relationship,
-              isPayer: data.isPayer,
-              receivesNotices: data.receivesNotices,
-              createdById,
-            },
-            select: PARTY_SELECT,
-          }),
-        ),
-      );
+      return await this.prisma.runWithTenant(async (tx) => {
+        const created = await tx.patientResponsibleParty.create({
+          data: {
+            tenantId,
+            patientId,
+            responsiblePatientId: data.responsiblePatientId,
+            ...(data.contact ? contactCreateData(data.contact) : {}),
+            relationship: data.relationship,
+            isPayer: data.isPayer,
+            receivesNotices: data.receivesNotices,
+            createdById,
+          },
+          select: PARTY_SELECT,
+        });
+        await this.reconcilePhone(tx, created.id, data.contact?.phone);
+        return toView(created);
+      });
     } catch (err) {
       throw conflictOf(err) ?? err;
     }
+  }
+
+  /** DX-224: el E.164 del contacto, con el prefijo de la sede activa. */
+  private async reconcilePhone(
+    tx: Prisma.TransactionClient,
+    partyId: string,
+    phone: string | null | undefined,
+  ): Promise<void> {
+    if (!phone) return;
+    await reconcileResponsiblePhoneE164(
+      tx,
+      [partyId],
+      await defaultPhoneRegionIn(tx, this.tenantContext.getLocationId()),
+    );
   }
 
   async update(
@@ -279,6 +297,7 @@ export class PrismaResponsiblePartyRepository implements ResponsiblePartyReposit
           },
         });
         if (count === 0) return null;
+        await this.reconcilePhone(tx, partyId, data.contact?.phone);
         return toView(
           await tx.patientResponsibleParty.findFirstOrThrow({
             where: { id: partyId },

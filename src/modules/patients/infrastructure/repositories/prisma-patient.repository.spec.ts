@@ -27,6 +27,7 @@ function row(over: Partial<PrismaPatient> = {}): PrismaPatient {
     birthDate: null,
     sex: 'F',
     phone: null,
+    phoneE164: null,
     email: null,
     address: null,
     countryCode: null,

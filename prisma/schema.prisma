@@ -702,6 +702,11 @@ model Patient {
   // DX-225: últimos 8 dígitos del teléfono (dx_phone_tail). Lo mantiene el
   // trigger `patients_phone_tail`; la app solo lo lee en SQL (BAJA por móvil).
   phoneTail                    String?               @ignore
+  /// DX-224: E.164 con «+» de `phone`, leído con el prefijo por defecto de la
+  /// sede al escribirlo (libphonenumber). Lo escribe la aplicación; el trigger
+  /// `patients_phone_e164_stale` lo pone a NULL si `phone` cambia. NULL: sin
+  /// teléfono, no válido, ambiguo o aún sin rellenar (`phones:e164-backfill`).
+  phoneE164                    String?
   // DX-287: clave del documento (public.dx_doc_key: solo [0-9A-Z], la regla de
   // docKey() en patients/domain/doc-key.ts). La mantiene el trigger
   // `patients_doc_key`; la app solo la lee en SQL (alta, edición e importación
@@ -789,6 +794,9 @@ model Patient {
   //     -> búsqueda (dx_patient_search_ids/_count).
   //   patients_tenant_last_attention_live_idx ("tenantId", last_attention_at)
   //     -> historias que salen de retención (DX-039).
+  //   patients_tenant_phone_e164_idx ("tenantId", "phoneE164")
+  //     WHERE "deletedAt" IS NULL AND "phoneE164" IS NOT NULL
+  //     -> «¿Quién llama?» (DX-224): paciente vivo por el E.164 completo.
   //   patients_tenant_phone_tail_idx ("tenantId", "phoneTail")
   //     WHERE "deletedAt" IS NULL AND "phoneTail" IS NOT NULL
   //     -> pacientes de un móvil que respondió «BAJA» (DX-128, DX-225).
@@ -4600,6 +4608,8 @@ model PatientResponsibleParty {
   docNumber            String?
   email                String?
   phone                String?
+  /// DX-224: E.164 de `phone` (como `Patient.phoneE164`).
+  phoneE164            String?
   relationship         ResponsibleRelationship
   isPayer              Boolean                 @default(false)
   receivesNotices      Boolean                 @default(true)
@@ -4620,6 +4630,7 @@ model PatientResponsibleParty {
   //   patient_responsible_parties_one_payer_key   UNIQUE ("tenantId", "patientId") WHERE "isPayer" AND "deletedAt" IS NULL
   //   patient_responsible_parties_patient_link_key UNIQUE ("tenantId", "patientId", "responsiblePatientId") WHERE "deletedAt" IS NULL AND "responsiblePatientId" IS NOT NULL
   //   patient_responsible_parties_migrated_key    UNIQUE ("tenantId", "patientId") WHERE "migratedFromGuardian"
+  //   patient_responsible_parties_tenant_phone_e164_idx ("tenantId", "phoneE164") WHERE "deletedAt" IS NULL AND "phoneE164" IS NOT NULL
   //   patient_responsible_parties_responsible_idx ("tenantId", "responsiblePatientId") WHERE "responsiblePatientId" IS NOT NULL
   @@map("patient_responsible_parties")
 }

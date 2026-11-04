@@ -5,7 +5,11 @@ import {
   COLLECTIONS_REPOSITORY,
   type CollectionsRepository,
 } from '../domain/ports/collections-repository.port';
-import { overdueView, type OverdueBalance } from '../domain/overdue-balance';
+import {
+  overdueView,
+  type OverdueAmount,
+  type OverdueBalance,
+} from '../domain/overdue-balance';
 import { COLLECTIONS_CLOCK, type CollectionsClock } from './collections-clock';
 import { PlanBalanceCalculator } from '../../payments/application/plan-balance-calculator';
 import {
@@ -20,6 +24,12 @@ export const OVERDUE_AMOUNT_ROLES: readonly ClinicRole[] = [
   ClinicRole.ADMIN,
   ClinicRole.RECEPTION,
 ];
+
+/** La marca de vencido y el saldo pendiente por moneda de un paciente. */
+export interface PatientBalanceView {
+  overdue: OverdueBalance;
+  pending: OverdueAmount[];
+}
 
 /**
  * Marca «Saldo vencido» de un LOTE de pacientes (DX-150): la agenda pide la de
@@ -47,9 +57,26 @@ export class PatientBalanceFlags {
     patientIds: readonly string[],
     role: ClinicRole | null,
   ): Promise<Map<string, OverdueBalance>> {
-    const out = new Map<string, OverdueBalance>();
+    const views = await this.viewsForPatients(patientIds, role);
+    return new Map([...views].map(([id, v]) => [id, v.overdue]));
+  }
+
+  /**
+   * La marca de `forPatients` y, además, el saldo PENDIENTE por moneda (lo que
+   * se debe menos el saldo a favor, solo si es positivo; DX-224 «¿Quién
+   * llama?»). Como el importe vencido, el pendiente solo lo ven ADMIN y
+   * RECEPTION (`pending` vacío para los demás). Las mismas consultas que
+   * `forPatients`: la antigüedad se calcula una vez.
+   */
+  async viewsForPatients(
+    patientIds: readonly string[],
+    role: ClinicRole | null,
+  ): Promise<Map<string, PatientBalanceView>> {
+    const out = new Map<string, PatientBalanceView>();
     const ids = [...new Set(patientIds)];
-    for (const id of ids) out.set(id, overdueView(undefined, false));
+    for (const id of ids) {
+      out.set(id, { overdue: overdueView(undefined, false), pending: [] });
+    }
     if (ids.length === 0) return out;
     const ledgers = await this.repo.ledgersOf(ids);
     if (ledgers.length === 0) return out;
@@ -84,18 +111,20 @@ export class PatientBalanceFlags {
     const withAmounts = role !== null && OVERDUE_AMOUNT_ROLES.includes(role);
     for (const ledger of ledgers) {
       const timeZone = zoneOf(ledger.locationId);
-      out.set(
-        ledger.patientId,
-        overdueView(
-          computePatientAging(ledger, {
-            now,
-            timeZone,
-            planBalances,
-            roundingDigitsOf,
-          }),
-          withAmounts,
-        ),
-      );
+      const aging = computePatientAging(ledger, {
+        now,
+        timeZone,
+        planBalances,
+        roundingDigitsOf,
+      });
+      out.set(ledger.patientId, {
+        overdue: overdueView(aging, withAmounts),
+        pending: withAmounts
+          ? aging.currencies
+              .filter((c) => c.balance > 0)
+              .map((c) => ({ currency: c.currency, amount: c.balance }))
+          : [],
+      });
     }
     return out;
   }
