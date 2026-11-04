@@ -6,7 +6,10 @@
  */
 import { config as loadDotenv } from 'dotenv';
 import { Prisma } from '@prisma/client';
-import { backfillTenantPhoneE164 } from '../../src/modules/patients/infrastructure/phone-e164-backfill';
+import {
+  backfillTenantPhoneE164,
+  clearPhoneE164Checked,
+} from '../../src/modules/patients/infrastructure/phone-e164-backfill';
 import { PrismaService } from '../../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../../src/shared/tenancy/tenant-context.service';
 
@@ -19,6 +22,10 @@ async function main(): Promise<void> {
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     });
     for (const tenant of tenants) {
+      // --recheck: vuelve a leer también lo ya revisado (cambió un prefijo).
+      if (process.argv.includes('--recheck')) {
+        await clearPhoneE164Checked(prisma, tenant.id);
+      }
       const counts = await backfillTenantPhoneE164(prisma, tenant.id);
       console.log(
         JSON.stringify({

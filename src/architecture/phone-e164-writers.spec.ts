@@ -39,6 +39,11 @@ const WRITERS: Record<string, Writer> = {
     kind: 'exempt',
     reason: 'solo el resumen de la autorización de datos',
   },
+  'modules/patients/infrastructure/phone-e164-backfill.ts': {
+    kind: 'exempt',
+    reason:
+      'solo la marca phoneE164CheckedAt; el E.164 lo escribe phone-e164.ts',
+  },
   'modules/reminders/infrastructure/prisma-reminder-opt-out.repository.ts': {
     kind: 'exempt',
     reason: 'solo la baja de recordatorios',

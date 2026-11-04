@@ -74,6 +74,7 @@ async function reconcile(
   ids: readonly string[],
   region: PhoneRegion | null,
   ownSede = false,
+  markChecked = false,
 ): Promise<number> {
   let written = 0;
   const name = Prisma.raw(`"${table}"`);
@@ -87,13 +88,26 @@ async function reconcile(
       );
       return e164 ? [{ id: r.id, e164 }] : [];
     });
-    if (pairs.length === 0) continue;
-    await tx.$executeRaw`
-      UPDATE ${name} t SET "phoneE164" = v.e164
-        FROM unnest(${pairs.map((p) => p.id)}::uuid[],
-                    ${pairs.map((p) => p.e164)}::text[]) AS v(id, e164)
-       WHERE t."id" = v.id AND t."phoneE164" IS NULL`;
-    written += pairs.length;
+    if (pairs.length > 0) {
+      await tx.$executeRaw`
+        UPDATE ${name} t SET "phoneE164" = v.e164
+          FROM unnest(${pairs.map((p) => p.id)}::uuid[],
+                      ${pairs.map((p) => p.e164)}::text[]) AS v(id, e164)
+         WHERE t."id" = v.id AND t."phoneE164" IS NULL`;
+      written += pairs.length;
+    }
+    if (markChecked) {
+      // Lo leído y sin E.164 no se vuelve a leer hasta que `phone` cambie.
+      const resolved = new Set(pairs.map((p) => p.id));
+      const unresolved = rows
+        .map((r) => r.id)
+        .filter((id) => !resolved.has(id));
+      if (unresolved.length > 0) {
+        await tx.$executeRaw`
+          UPDATE ${name} SET "phoneE164CheckedAt" = now()
+           WHERE "id" = ANY(${unresolved}::uuid[]) AND "phoneE164" IS NULL`;
+      }
+    }
   }
   return written;
 }
@@ -117,14 +131,23 @@ export function reconcilePatientPhoneE164FromOrigin(
   ids: readonly string[],
   fallback: PhoneRegion | null,
 ): Promise<number> {
-  return reconcile(tx, 'patients', ids, fallback, true);
+  return reconcile(tx, 'patients', ids, fallback, true, true);
 }
 
-/** Lo mismo para los contactos responsables. */
+/** Lo mismo para los contactos responsables (escritura en vivo, sin marca). */
 export function reconcileResponsiblePhoneE164(
   tx: Tx,
   ids: readonly string[],
   region: PhoneRegion | null,
 ): Promise<number> {
   return reconcile(tx, 'patient_responsible_parties', ids, region);
+}
+
+/** El relleno de responsables: lo que no se lee se marca como revisado. */
+export function reconcileResponsiblePhoneE164Backfill(
+  tx: Tx,
+  ids: readonly string[],
+  region: PhoneRegion | null,
+): Promise<number> {
+  return reconcile(tx, 'patient_responsible_parties', ids, region, false, true);
 }

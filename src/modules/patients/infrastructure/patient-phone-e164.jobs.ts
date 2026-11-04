@@ -9,6 +9,47 @@ import { JobQueue } from '../../jobs/application/job-queue.service';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { backfillTenantPhoneE164 } from './phone-e164-backfill';
 
+export interface PhoneE164BackfillRun {
+  tenantIds: readonly string[];
+  backfill: (
+    tenantId: string,
+    shouldStop: () => boolean,
+  ) => Promise<{ patientsWritten: number; responsiblesWritten: number }>;
+  /** Pierde el arriendo o se apaga: dejar de producir efectos. */
+  shouldStop: () => boolean;
+  onTenantError: (tenantId: string, error: unknown) => void;
+}
+
+/**
+ * Recorre las clínicas una a una. El fallo de una (un `57014`, un tiempo
+ * agotado) se registra —id de clínica y clase del error, nunca un teléfono— y
+ * NO impide rellenar las siguientes; entre clínicas y entre lotes se consulta
+ * la señal del trabajo y, si se abortó, se para.
+ */
+export async function runPhoneE164Backfill(run: PhoneE164BackfillRun) {
+  let written = 0;
+  let failed = 0;
+  let done = 0;
+  for (const tenantId of run.tenantIds) {
+    if (run.shouldStop()) break;
+    try {
+      const counts = await run.backfill(tenantId, run.shouldStop);
+      written += counts.patientsWritten + counts.responsiblesWritten;
+      done += 1;
+    } catch (error) {
+      failed += 1;
+      run.onTenantError(tenantId, error);
+    }
+  }
+  return {
+    tenants: run.tenantIds.length,
+    done,
+    failed,
+    written,
+    stopped: run.shouldStop(),
+  };
+}
+
 export const PHONE_E164_BACKFILL_JOB = 'patients.phone-e164-backfill';
 export const PHONE_E164_BACKFILL_SCHEDULE =
   'patients.phone-e164-backfill.hourly';
@@ -38,21 +79,29 @@ export class PatientPhoneE164Jobs
     this.registry.register({
       name: PHONE_E164_BACKFILL_JOB,
       maxAttempts: 3,
-      handle: async () => {
+      handle: async (_payload, { signal }) => {
         const tenants = await this.prisma.tenant.findMany({
           select: { id: true },
           orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
         });
-        let written = 0;
-        for (const { id } of tenants) {
-          const counts = await backfillTenantPhoneE164(this.prisma, id);
-          written += counts.patientsWritten + counts.responsiblesWritten;
-        }
-        this.logger.log({
-          event: 'patients.phone_e164_backfill',
-          tenants: tenants.length,
-          written,
+        const result = await runPhoneE164Backfill({
+          tenantIds: tenants.map((t) => t.id),
+          backfill: (tenantId, shouldStop) =>
+            backfillTenantPhoneE164(
+              this.prisma,
+              tenantId,
+              undefined,
+              shouldStop,
+            ),
+          shouldStop: () => signal.aborted,
+          onTenantError: (tenantId, error) =>
+            this.logger.error({
+              event: 'patients.phone_e164_backfill_tenant_failed',
+              tenantId,
+              error: error instanceof Error ? error.name : 'unknown',
+            }),
         });
+        this.logger.log({ event: 'patients.phone_e164_backfill', ...result });
       },
     });
     this.registry.schedule({

@@ -402,7 +402,7 @@ describe('¿Quién llama? (e2e, DX-224)', () => {
   });
 
   it('el backfill es idempotente y rellena lo que falta', async () => {
-    await raw.$executeRaw`UPDATE "patients" SET "phoneE164" = NULL WHERE "tenantId" = ${clinic.tenantId}::uuid`;
+    await raw.$executeRaw`UPDATE "patients" SET "phoneE164" = NULL, "phoneE164CheckedAt" = NULL WHERE "tenantId" = ${clinic.tenantId}::uuid`;
     const prisma = new PrismaService(new TenantContextService());
     try {
       const first = await backfillTenantPhoneE164(prisma, clinic.tenantId, 2);
@@ -635,6 +635,65 @@ describe('¿Quién llama? (e2e, DX-224)', () => {
       select: { phone: true, phoneE164: true },
     });
     expect(row).toEqual({ phone: null, phoneE164: null });
+  });
+
+  it('ronda 2: lo que no se puede leer se marca y no se relee; cambiar el teléfono quita la marca', async () => {
+    const id = (
+      await raw.patient.create({
+        data: {
+          tenantId: clinic.tenantId,
+          firstName: 'Ilegible',
+          lastName: 'Telefono',
+          phone: 'llamar a mamá',
+        },
+        select: { id: true },
+      })
+    ).id;
+    const prisma = new PrismaService(new TenantContextService());
+    try {
+      const first = await backfillTenantPhoneE164(prisma, clinic.tenantId);
+      expect(first.patientsScanned).toBeGreaterThanOrEqual(1);
+      expect(first.patientsWritten).toBe(0);
+      const marked = await raw.patient.findUniqueOrThrow({
+        where: { id },
+        select: { phoneE164: true, phoneE164CheckedAt: true },
+      });
+      expect(marked.phoneE164).toBeNull();
+      expect(marked.phoneE164CheckedAt).not.toBeNull();
+      // Ya no es residuo: la segunda pasada no lo vuelve a leer.
+      const second = await backfillTenantPhoneE164(prisma, clinic.tenantId);
+      expect(second.patientsScanned).toBe(0);
+      // Un teléfono nuevo quita la marca (trigger) y se lee otra vez.
+      await raw.patient.update({
+        where: { id },
+        data: { phone: '0412 900 10 20' },
+      });
+      const reset = await raw.patient.findUniqueOrThrow({
+        where: { id },
+        select: { phoneE164CheckedAt: true },
+      });
+      expect(reset.phoneE164CheckedAt).toBeNull();
+      const third = await backfillTenantPhoneE164(prisma, clinic.tenantId);
+      expect(third.patientsWritten).toBe(1);
+      expect((await found('0412 9001020')).map((m) => m.id)).toEqual([id]);
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
+
+  it('ronda 2: la consulta de pendientes usa el índice parcial', async () => {
+    const plan = await raw.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL enable_seqscan = off`;
+      return tx.$queryRaw<{ 'QUERY PLAN': string }[]>`
+        EXPLAIN SELECT "id" FROM "patients"
+         WHERE "tenantId" = ${clinic.tenantId}::uuid
+           AND "phone" IS NOT NULL AND "phoneE164" IS NULL
+           AND "phoneE164CheckedAt" IS NULL
+         ORDER BY "id" LIMIT 1000`;
+    });
+    expect(plan.map((r) => r['QUERY PLAN']).join('\n')).toContain(
+      'patients_tenant_phone_e164_pending_idx',
+    );
   });
 
   async function seedRestricted(): Promise<string> {

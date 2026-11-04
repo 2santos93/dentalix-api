@@ -3,7 +3,7 @@ import { PrismaService } from '../../../shared/prisma/prisma.service';
 import {
   defaultPhoneRegionIn,
   reconcilePatientPhoneE164FromOrigin,
-  reconcileResponsiblePhoneE164,
+  reconcileResponsiblePhoneE164Backfill,
 } from './phone-e164';
 
 /**
@@ -32,13 +32,16 @@ type Table = 'patients' | 'patient_responsible_parties';
 async function pendingIds(
   tx: Prisma.TransactionClient,
   table: Table,
+  tenantId: string,
   after: string | null,
   size: number,
 ): Promise<string[]> {
   const name = Prisma.raw(`"${table}"`);
   const rows = await tx.$queryRaw<{ id: string }[]>`
     SELECT "id" FROM ${name}
-     WHERE "phone" IS NOT NULL AND "phoneE164" IS NULL
+     WHERE "tenantId" = ${tenantId}::uuid
+       AND "phone" IS NOT NULL AND "phoneE164" IS NULL
+       AND "phoneE164CheckedAt" IS NULL
        AND (${after}::uuid IS NULL OR "id" > ${after}::uuid)
      ORDER BY "id" LIMIT ${size}`;
   return rows.map((r) => r.id);
@@ -48,6 +51,8 @@ export async function backfillTenantPhoneE164(
   prisma: PrismaService,
   tenantId: string,
   batchSize = BATCH_SIZE,
+  /** Se consulta entre lotes: el trabajo perdió su arriendo o se apaga. */
+  shouldStop: () => boolean = () => false,
 ): Promise<PhoneE164BackfillCounts> {
   const counts: PhoneE164BackfillCounts = {
     patientsScanned: 0,
@@ -59,17 +64,18 @@ export async function backfillTenantPhoneE164(
   for (const table of ['patients', 'patient_responsible_parties'] as const) {
     let after: string | null = null;
     for (;;) {
+      if (shouldStop()) return counts;
       const done: { scanned: number; written: number; last: string | null } =
         await prisma.runWithTenant(
           tenantId,
           async (tx) => {
-            const ids = await pendingIds(tx, table, after, batchSize);
+            const ids = await pendingIds(tx, table, tenantId, after, batchSize);
             if (ids.length === 0) return { scanned: 0, written: 0, last: null };
             const region = await defaultPhoneRegionIn(tx);
             const written =
               table === 'patients'
                 ? await reconcilePatientPhoneE164FromOrigin(tx, ids, region)
-                : await reconcileResponsiblePhoneE164(tx, ids, region);
+                : await reconcileResponsiblePhoneE164Backfill(tx, ids, region);
             return {
               scanned: ids.length,
               written,
@@ -91,4 +97,20 @@ export async function backfillTenantPhoneE164(
     }
   }
   return counts;
+}
+
+/**
+ * Fuerza una nueva lectura de lo ya revisado y sin E.164 (p. ej. tras cambiar
+ * el prefijo de una sede): quita la marca. Cambiar `phone` ya la quita solo.
+ */
+export async function clearPhoneE164Checked(
+  prisma: PrismaService,
+  tenantId: string,
+): Promise<void> {
+  await prisma.runWithTenant(tenantId, async (tx) => {
+    await tx.$executeRaw`UPDATE "patients" SET "phoneE164CheckedAt" = NULL
+      WHERE "tenantId" = ${tenantId}::uuid AND "phoneE164CheckedAt" IS NOT NULL`;
+    await tx.$executeRaw`UPDATE "patient_responsible_parties" SET "phoneE164CheckedAt" = NULL
+      WHERE "tenantId" = ${tenantId}::uuid AND "phoneE164CheckedAt" IS NOT NULL`;
+  });
 }

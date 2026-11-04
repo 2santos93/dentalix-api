@@ -707,6 +707,9 @@ model Patient {
   /// `patients_phone_e164_stale` lo pone a NULL si `phone` cambia. NULL: sin
   /// teléfono, no válido, ambiguo o aún sin rellenar (`phones:e164-backfill`).
   phoneE164                    String?
+  /// DX-224: el relleno ya intentó leer `phone` y no salió un E.164 (no se vuelve
+  /// a leer cada hora). El trigger la anula si `phone` cambia.
+  phoneE164CheckedAt           DateTime?             @db.Timestamptz(3)
   // DX-287: clave del documento (public.dx_doc_key: solo [0-9A-Z], la regla de
   // docKey() en patients/domain/doc-key.ts). La mantiene el trigger
   // `patients_doc_key`; la app solo la lee en SQL (alta, edición e importación
@@ -794,6 +797,9 @@ model Patient {
   //     -> búsqueda (dx_patient_search_ids/_count).
   //   patients_tenant_last_attention_live_idx ("tenantId", last_attention_at)
   //     -> historias que salen de retención (DX-039).
+  //   patients_tenant_phone_e164_pending_idx ("tenantId", id)
+  //     WHERE phone IS NOT NULL AND "phoneE164" IS NULL AND "phoneE164CheckedAt" IS NULL
+  //     -> residuo del relleno de phoneE164 (DX-224).
   //   patients_tenant_phone_e164_idx ("tenantId", "phoneE164")
   //     WHERE "deletedAt" IS NULL AND "phoneE164" IS NOT NULL
   //     -> «¿Quién llama?» (DX-224): paciente vivo por el E.164 completo.
@@ -4610,6 +4616,8 @@ model PatientResponsibleParty {
   phone                String?
   /// DX-224: E.164 de `phone` (como `Patient.phoneE164`).
   phoneE164            String?
+  /// DX-224: ver `Patient.phoneE164CheckedAt`.
+  phoneE164CheckedAt   DateTime?               @db.Timestamptz(3)
   relationship         ResponsibleRelationship
   isPayer              Boolean                 @default(false)
   receivesNotices      Boolean                 @default(true)

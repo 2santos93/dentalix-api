@@ -3826,6 +3826,12 @@ país.
   prefijo de la sede de SU lote; el resto, con el de la sede principal. No
   hace falta ningún paso tras `prisma migrate deploy`; hasta que corra (como
   mucho una hora), un paciente antiguo puede no aparecer en la búsqueda.
+  Lo que ninguna región entiende se marca (`phoneE164CheckedAt`) y NO se relee
+  cada hora; cambiar el teléfono quita la marca. Un índice parcial deja el
+  barrido en el residuo. Una clínica que falla se registra (id y clase del
+  error) y no frena a las demás; el trabajo para entre lotes si pierde el
+  arriendo. Tras corregir el prefijo de una sede:
+  `npm run phones:e164-backfill -- --recheck` (vuelve a leer lo marcado).
   Para forzarlo: `npm run phones:e164-backfill` (mismo código, idempotente; con
   una clínica enorme y `57014`, `statement_timeout=0` solo para esa
   ejecución, como más abajo). Benchmark: `docs/perf/DX-224.md`.
