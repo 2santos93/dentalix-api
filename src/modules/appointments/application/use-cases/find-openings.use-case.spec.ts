@@ -223,6 +223,7 @@ describe('FindOpeningsUseCase (DX-122)', () => {
       [z('16:30'), z('17:00')],
     ]);
     expect(result.truncated).toBe(false);
+    expect(result.defaultHours).toBe(false);
   });
 
   it('con paciente, sus otras citas también ocupan', async () => {
@@ -271,12 +272,13 @@ describe('FindOpeningsUseCase (DX-122)', () => {
     ).rejects.toThrow(new NotFoundException('Cita no encontrada'));
   });
 
-  it('sede sin horario: propone el horario por defecto en la zona de la sede', async () => {
+  it('sede sin horario: propone el horario por defecto en la zona de la sede y lo dice (DX-533)', async () => {
     const result = await build(undefined, undefined, null).execute(query);
     expect(result.openings.map((o) => [o.start, o.end])).toEqual([
       [z('13:00'), z('17:00')],
       [z('19:00'), z('23:00')],
     ]);
+    expect(result.defaultHours).toBe(true);
   });
 
   it('valida fechas, tope de 31 días y que todo sea de la clínica', async () => {

@@ -62,6 +62,12 @@ export interface OpeningsView {
   durationMinutes: number;
   openings: (Opening | ChairOpening<ChairSummary>)[];
   truncated: boolean;
+  /**
+   * DX-533: la sede no tiene horario y se buscó dentro del de alta
+   * (`DEFAULT_BUSINESS_HOURS`). La agenda sigue aceptando cualquier hora; la
+   * interfaz lo dice para que «no hay huecos a las 23:30» no parezca un fallo.
+   */
+  defaultHours: boolean;
 }
 
 /**
@@ -152,8 +158,8 @@ export class FindOpeningsUseCase {
     const hours = await this.schedule.findByLocation(input.locationId);
     // G1 (R4): la zona es la de la sede, tenga o no horario.
     const timeZone = requireLocationTimeZone(location);
-    const ranges =
-      hours && hours.ranges.length > 0 ? hours.ranges : DEFAULT_BUSINESS_HOURS;
+    const defaultHours = !hours || hours.ranges.length === 0;
+    const ranges = defaultHours ? DEFAULT_BUSINESS_HOURS : hours.ranges;
     const range = civilRangeInZone(input.from, input.to, timeZone);
 
     const busy: Interval[] = [
@@ -204,6 +210,7 @@ export class FindOpeningsUseCase {
       return {
         timeZone,
         durationMinutes: input.durationMinutes,
+        defaultHours,
         ...openingsWith([]),
       };
     }
@@ -223,6 +230,7 @@ export class FindOpeningsUseCase {
     return {
       timeZone,
       durationMinutes: input.durationMinutes,
+      defaultHours,
       ...mergeChairOpenings(perChair),
     };
   }
