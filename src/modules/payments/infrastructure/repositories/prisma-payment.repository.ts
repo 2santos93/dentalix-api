@@ -62,7 +62,7 @@ import {
   manualRatesStillMatch,
 } from './frozen-exchange-rate.mapper';
 import { CashPayment } from '../../domain/entities/cash-payment.entity';
-import { formatReceiptNumber } from '../../domain/receipt-number';
+import { receiptNumberOf } from '../../domain/receipt-number';
 import {
   SPLIT_PAYMENT_BALANCE_CHANGED,
   SPLIT_PAYMENT_BALANCE_CHANGED_MESSAGE,
@@ -148,14 +148,6 @@ function isUniqueViolation(error: unknown): boolean {
     error instanceof Prisma.PrismaClientKnownRequestError &&
     error.code === 'P2002'
   );
-}
-
-function receiptNumberOf(
-  receipt: { seriesPrefix: string; number: number } | null,
-): string | null {
-  return receipt
-    ? formatReceiptNumber(receipt.seriesPrefix, receipt.number)
-    : null;
 }
 
 function mapToEntity(payment: PrismaPayment, timeZone: string): Payment {

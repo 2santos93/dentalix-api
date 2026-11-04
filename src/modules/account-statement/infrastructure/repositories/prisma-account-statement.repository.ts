@@ -24,7 +24,7 @@ import { round2 } from '../../../../shared/money/money';
 import { linesTotal } from '../../../../shared/money/line-rounding';
 import type { PlanBalanceInput } from '../../../payments/application/use-cases/get-plan-balance.use-case';
 import { civilDateIn } from '../../../payments/domain/void-window';
-import { formatReceiptNumber } from '../../../payments/domain/receipt-number';
+import { receiptNumberOf } from '../../../payments/domain/receipt-number';
 import {
   FROZEN_RATE_SELECT,
   frozenRateOf,
@@ -343,12 +343,9 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
               reference: p.reference,
               externalInvoiceNumber: p.externalInvoiceNumber,
               splitId: p.splitId,
-              receiptNumber: (() => {
-                const receipt = p.receipt ?? p.splitHead?.receipt ?? null;
-                return receipt
-                  ? formatReceiptNumber(receipt.seriesPrefix, receipt.number)
-                  : null;
-              })(),
+              receiptNumber: receiptNumberOf(
+                p.receipt ?? p.splitHead?.receipt ?? null,
+              ),
               location: p.location,
               createdById: p.createdById,
               createdAt: p.createdAt,
