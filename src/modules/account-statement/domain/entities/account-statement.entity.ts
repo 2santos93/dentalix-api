@@ -68,6 +68,11 @@ export interface StatementPaymentRow {
   voidedBy: StatementVoidedBy | null;
   /** Motivo de la anulación; `null` si está activo o es una anulación antigua. */
   voidReason: string | null;
+  /**
+   * DX-432: número de la devolución de la que este abono es referencia
+   * (`DEV-CCS-000001`), o `null`/ausente. Un abono así no se anula.
+   */
+  refundNumber?: string | null;
 }
 
 /** Medio de pago de la clínica de un abono (DX-395): id y nombre. */
@@ -270,6 +275,12 @@ export interface StatementMovement {
    * `DELETE /payments/:id` (`voidDenial`); siempre `false` si ya está anulado.
    */
   canVoid: boolean;
+  /**
+   * DX-432: por qué NO se puede anular aunque la regla del rol lo permita
+   * (el abono es referencia de una devolución), con el mismo texto del 409;
+   * `null` si nada lo impide.
+   */
+  voidBlockedReason: string | null;
   voided: boolean;
   voidedAt: Date | null;
   voidedBy: StatementVoidedBy | null;

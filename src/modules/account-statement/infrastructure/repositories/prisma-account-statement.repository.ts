@@ -21,6 +21,7 @@ import {
   methodRefOf,
 } from '../../../payment-methods/domain/method-catalog';
 import { round2 } from '../../../../shared/money/money';
+import { formatRefundNumber } from '../../../patient-credit/domain/patient-credit';
 import { linesTotal } from '../../../../shared/money/line-rounding';
 import type { PlanBalanceInput } from '../../../payments/application/use-cases/get-plan-balance.use-case';
 import { civilDateIn } from '../../../payments/domain/void-window';
@@ -282,6 +283,41 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
           payments.map((p) => p.location.id),
         );
 
+        // DX-432: abonos que son referencia de una devolución (no se anulan);
+        // UNA consulta, con el número del comprobante más antiguo de cada uno.
+        const referenced =
+          payments.length === 0
+            ? []
+            : await tx.patientCreditRefundPayment.findMany({
+                where: {
+                  tenantId,
+                  paymentId: { in: payments.map((p) => p.id) },
+                },
+                select: {
+                  paymentId: true,
+                  refund: {
+                    select: {
+                      seriesPrefix: true,
+                      number: true,
+                      createdAt: true,
+                    },
+                  },
+                },
+                orderBy: [
+                  { refund: { createdAt: 'asc' } },
+                  { refundId: 'asc' },
+                ],
+              });
+        const refundNumberOf = new Map<string, string>();
+        for (const r of referenced) {
+          if (!refundNumberOf.has(r.paymentId)) {
+            refundNumberOf.set(
+              r.paymentId,
+              formatRefundNumber(r.refund.seriesPrefix, r.refund.number),
+            );
+          }
+        }
+
         const itemsByPlan = new Map<string, PlanBalanceInput['items']>();
         for (const item of items) {
           const list = itemsByPlan.get(item.planId) ?? [];
@@ -358,6 +394,7 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
                   }
                 : null,
               voidReason: p.voidReason,
+              refundNumber: refundNumberOf.get(p.id) ?? null,
             })),
             paymentPlans: paymentPlans.map((pp) => ({
               id: pp.id,

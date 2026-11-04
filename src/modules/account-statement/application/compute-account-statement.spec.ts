@@ -686,6 +686,22 @@ describe('computeAccountStatement — saldo a favor (DX-253)', () => {
   const cancelled = plan('origen', { status: 'CANCELLED', billable: 500_000 });
   const live = plan('destino', { billable: 400_000 });
 
+  it('DX-432: un abono de referencia de una devolución lleva el motivo por el que no se anula; el resto, null', () => {
+    const referenced = payment('origen', 300_000, {
+      refundNumber: 'DEV-CCS-000007',
+    });
+    const free = payment('origen', 10);
+    const out = computeAccountStatement(
+      snapshot({ plans: [cancelled], payments: [referenced, free] }),
+      { today: TODAY },
+    );
+    const byId = new Map(out.movements.map((m) => [m.id, m]));
+    expect(byId.get(referenced.id)?.voidBlockedReason).toMatch(
+      /referencia de la devolución DEV-CCS-000007/,
+    );
+    expect(byId.get(free.id)?.voidBlockedReason).toBeNull();
+  });
+
   it('traspaso: el origen cancelado queda con 100.000 a favor y el destino baja 200.000, sin tocar los abonos', () => {
     const paid = payment('origen', 300_000);
     const out = computeAccountStatement(

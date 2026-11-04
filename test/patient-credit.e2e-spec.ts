@@ -587,6 +587,26 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
       .expect(200);
   });
 
+  it('DX-432: el estado de cuenta dice por qué no se anula un abono de referencia de una devolución (y solo ese)', async () => {
+    const movements = (
+      await as(
+        api().get(`/api/v1/patients/${patientId}/account-statement`),
+        a,
+      ).expect(200)
+    ).body as {
+      movements: {
+        id: string;
+        canVoid: boolean;
+        voidBlockedReason: string | null;
+      }[];
+    };
+    const byId = new Map(movements.movements.map((m) => [m.id, m]));
+    expect(byId.get(originPayment)?.voidBlockedReason).toMatch(
+      /^No se puede anular: el abono es referencia de la devolución DEV-[A-Z0-9]+-\d{6}/,
+    );
+    expect(byId.get(otherPayment)?.voidBlockedReason).toBeNull();
+  });
+
   it('DX-432: ni el alta, ni el comprobante, ni el listado exponen idempotencyFingerprint', async () => {
     // Los de hasta aquí se crearon con la API (el alta ya se comprobó arriba).
     const listed = (

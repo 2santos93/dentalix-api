@@ -23,6 +23,7 @@ import {
 } from '../../payments/domain/void-window';
 import { isPlanBillable } from '../../treatment-plans/domain/plan-status-machine';
 import type { GetPlanBalanceResult } from '../../payments/application/use-cases/get-plan-balance.use-case';
+import { voidRefundReferenceMessage } from '../../patient-credit/domain/patient-credit';
 import { fromCents, toCents } from '../../../shared/money/money';
 import type { RoundingDigits } from '../../../shared/money/line-rounding';
 
@@ -448,6 +449,10 @@ export function computeAccountStatement(
         p.voidedAt === null &&
         options.voidActor !== undefined &&
         canVoidPayment(p, options.voidActor, options.today),
+      voidBlockedReason:
+        p.voidedAt === null && p.refundNumber
+          ? voidRefundReferenceMessage(p.refundNumber)
+          : null,
       voided: p.voidedAt !== null,
       voidedAt: p.voidedAt,
       voidedBy: p.voidedBy,
