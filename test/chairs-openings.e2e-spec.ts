@@ -446,8 +446,6 @@ describe('Sillones en «Buscar hueco», «Atender sin cita» y «En clínica» (
   describe('«Buscar hueco» en una sede sin horario (DX-533)', () => {
     let oeste: string;
     let oesteChair: ChairBody;
-    // Un profesional sin otras citas: los huecos dependen solo de la sede y del sillón.
-    let late: Member;
     const NEXT = addCivilDays(DAY, 1); // miércoles
     const at = (day: string, hhmm: string): string => {
       const [h, m] = hhmm.split(':').map(Number);
@@ -456,7 +454,7 @@ describe('Sillones en «Buscar hueco», «Atender sin cita» y «En clínica» (
     const bookInOeste = (start: string, end: string) =>
       as(api().post('/api/v1/appointments')).set('X-Location-Id', oeste).send({
         patientId: patients[4],
-        providerId: late.userId,
+        providerId: dentist.userId,
         chairId: oesteChair.id,
         start,
         end,
@@ -473,14 +471,12 @@ describe('Sillones en «Buscar hueco», «Atender sin cita» y «En clínica» (
         .send({ ranges: [] })
         .expect(200);
       oesteChair = await createChair('Sillón Ávila', oeste);
-      late = await member(ClinicRole.DENTIST);
       // La agenda acepta una cita tardía: la sede no tiene horario.
       await bookInOeste(at(DAY, '23:00'), at(DAY, '23:30')).expect(201);
     });
 
     it('con el sillón ocupado a las 23:00, el siguiente hueco es el de las 09:00 del día siguiente (hora de Caracas) y lo marca `defaultHours`', async () => {
       const res = await openings({
-        providerId: late.userId,
         locationId: oeste,
         chairIds: oesteChair.id,
         from: DAY,
@@ -493,10 +489,23 @@ describe('Sillones en «Buscar hueco», «Atender sin cita» y «En clínica» (
       };
       expect(body.timeZone).toBe('America/Caracas');
       expect(body.defaultHours).toBe(true);
-      // Martes y miércoles, solo dentro del horario de alta (9–13 y 15–19).
-      expect(body.openings.map((o) => [o.start, o.end])).toEqual([
-        [at(DAY, '09:00'), at(DAY, '13:00')],
-        [at(DAY, '15:00'), at(DAY, '19:00')],
+      // Solo dentro del horario de alta (9–13 y 15–19), aunque la sede no
+      // restrinja la agenda. El martes el profesional tiene otras citas en
+      // Norte: se comprueban los bordes, no cada hueco.
+      const windows = [DAY, NEXT].flatMap((d) => [
+        [at(d, '09:00'), at(d, '13:00')],
+        [at(d, '15:00'), at(d, '19:00')],
+      ]);
+      expect(body.openings.length).toBeGreaterThan(0);
+      for (const o of body.openings) {
+        expect(
+          windows.some(([from, to]) => o.start >= from && o.end <= to),
+        ).toBe(true);
+      }
+      // Nada después de las 19:00 del martes: tras la cita de las 23:00, lo
+      // siguiente es el miércoles a las 09:00 (hora de Caracas).
+      const late = body.openings.filter((o) => o.start >= at(DAY, '19:00'));
+      expect(late.map((o) => [o.start, o.end])).toEqual([
         [at(NEXT, '09:00'), at(NEXT, '13:00')],
         [at(NEXT, '15:00'), at(NEXT, '19:00')],
       ]);
