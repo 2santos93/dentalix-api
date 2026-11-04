@@ -10,7 +10,9 @@ import { PaymentMethod } from '@prisma/client';
 import { PAYMENT_REPOSITORY } from '../../domain/ports/payment-repository.port';
 import { PAYMENT_CLOCK, type PaymentClock } from './void-payment.use-case';
 import {
+  PAID_AT_AFTER_SITE_TODAY_MESSAGE,
   PAID_AT_IN_FUTURE_MESSAGE,
+  isPaidAtAfterSiteToday,
   isPaidAtTooFarInFuture,
 } from '../../domain/paid-at-window';
 import type {
@@ -99,6 +101,26 @@ function isUtcMidnight(instant: Date): boolean {
  * distinción, `new Date` leería el día como medianoche UTC, que en una sede
  * al oeste de UTC es la tarde del día ANTERIOR.
  */
+/**
+ * La ventana de fecha de un abono, una sola vez para los tres caminos (suelto,
+ * repartido y saldo inicial): 24 h por delante del reloj (DX-054) y, si llega
+ * un día civil, que no sea posterior a hoy en la sede (DX-075). Sin zona en la
+ * sede solo rige la primera.
+ */
+export async function assertPaidAtWindow(
+  repo: Pick<PaymentRepository, 'siteToday'>,
+  paidAt: Date | CivilPaidDay,
+  now: Date,
+): Promise<void> {
+  if (isPaidAtTooFarInFuture(paidAt, now)) {
+    throw new BadRequestException(PAID_AT_IN_FUTURE_MESSAGE);
+  }
+  if (paidAt instanceof Date) return;
+  if (isPaidAtAfterSiteToday(paidAt, await repo.siteToday(now))) {
+    throw new BadRequestException(PAID_AT_AFTER_SITE_TODAY_MESSAGE);
+  }
+}
+
 export function normalizePaidAt(value: string | Date): Date | CivilPaidDay {
   if (typeof value === 'string' && CIVIL_DATE_SHAPE.test(value)) {
     const civilDate = parseCivilDate(value);
@@ -160,14 +182,13 @@ export class RecordPaymentUseCase {
   ) {}
 
   /**
-   * `normalizePaidAt` más la ventana de DX-054 (400 si va a más de 24 h en
-   * el futuro). La usan el abono suelto y el repartido.
+   * `normalizePaidAt` más la ventana de fecha: DX-054 (400 si va a más de 24 h
+   * en el futuro) y DX-075 (400 si es un día civil posterior a hoy en la
+   * sede). La usan el abono suelto y el repartido.
    */
-  checkedPaidAt(value: string | Date): Date | CivilPaidDay {
+  async checkedPaidAt(value: string | Date): Promise<Date | CivilPaidDay> {
     const paidAt = normalizePaidAt(value);
-    if (isPaidAtTooFarInFuture(paidAt, this.now())) {
-      throw new BadRequestException(PAID_AT_IN_FUTURE_MESSAGE);
-    }
+    await assertPaidAtWindow(this.repo, paidAt, this.now());
     return paidAt;
   }
 
@@ -209,7 +230,7 @@ export class RecordPaymentUseCase {
     }
 
     const currency = await this.validCurrency(input);
-    const paidAt = this.checkedPaidAt(input.paidAt);
+    const paidAt = await this.checkedPaidAt(input.paidAt);
 
     // Throws NotFoundException when the plan is absent, soft-deleted, or
     // belongs to another tenant — never re-derived here.

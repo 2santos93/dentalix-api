@@ -139,7 +139,7 @@ export class RecordSplitPaymentUseCase {
       }
       currencies.push(await this.recordPayment.validCurrency(line));
     }
-    const paidAt = this.recordPayment.checkedPaidAt(input.paidAt);
+    const paidAt = await this.recordPayment.checkedPaidAt(input.paidAt);
 
     const plan = await this.getTreatmentPlan.execute(treatmentPlanId);
     if (!isPlanBillable(plan.status)) {

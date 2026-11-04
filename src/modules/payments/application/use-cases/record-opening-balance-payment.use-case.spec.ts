@@ -1,6 +1,9 @@
 import { referenceCurrencyDigitsCatalog } from '../../../../shared/money/__fixtures__/reference-currency-digits';
 import { PaymentMethodGate } from '../payment-method-gate';
-import { PAID_AT_IN_FUTURE_MESSAGE } from '../../domain/paid-at-window';
+import {
+  PAID_AT_AFTER_SITE_TODAY_MESSAGE,
+  PAID_AT_IN_FUTURE_MESSAGE,
+} from '../../domain/paid-at-window';
 import type { PaymentMethodRepository } from '../../../payment-methods/domain/ports/payment-method-repository.port';
 import {
   BadRequestException,
@@ -51,6 +54,27 @@ describe('RecordOpeningBalancePaymentUseCase (DX-262, revisión C1)', () => {
       }),
     ).rejects.toThrow(new BadRequestException(PAID_AT_IN_FUTURE_MESSAGE));
     expect(repo.lastCreateInput).toBeNull();
+  });
+
+  it('DX-075: mañana en la sede (Caracas, 15:00Z del 31) → 400 en español; hoy se registra', async () => {
+    const { repo, uc } = setup();
+    await expect(
+      uc.execute('ob-1', {
+        amount: 1000,
+        currency: 'VES',
+        paidAt: '2026-11-01',
+      }),
+    ).rejects.toThrow(
+      new BadRequestException(PAID_AT_AFTER_SITE_TODAY_MESSAGE),
+    );
+    expect(repo.lastCreateInput).toBeNull();
+    await uc.execute('ob-1', {
+      amount: 1000,
+      currency: 'VES',
+      paidAt: '2026-10-31',
+      method: 'CASH',
+    });
+    expect(repo.lastCreateInput).not.toBeNull();
   });
 
   it('registra el abono contra el saldo migrado, sin plan y con el paciente del saldo', async () => {

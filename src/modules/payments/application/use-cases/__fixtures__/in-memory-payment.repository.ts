@@ -150,6 +150,10 @@ export class InMemoryPaymentRepository implements PaymentRepository {
     );
   }
 
+  siteToday(now: Date): Promise<string | null> {
+    return Promise.resolve(civilDateIn(now, this.timeZone));
+  }
+
   create(input: CreatePaymentRepoInput): Promise<Payment> {
     this.lastCreateInput = input;
     return Promise.resolve(this.toEntity(this.insertRow(input, null)));

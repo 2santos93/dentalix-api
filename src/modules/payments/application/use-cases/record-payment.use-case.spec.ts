@@ -10,7 +10,10 @@ import {
 } from '@nestjs/common';
 import { TreatmentPlanStatus } from '@prisma/client';
 import { RecordPaymentUseCase } from './record-payment.use-case';
-import { PAID_AT_IN_FUTURE_MESSAGE } from '../../domain/paid-at-window';
+import {
+  PAID_AT_AFTER_SITE_TODAY_MESSAGE,
+  PAID_AT_IN_FUTURE_MESSAGE,
+} from '../../domain/paid-at-window';
 import { InMemoryPaymentRepository } from './__fixtures__/in-memory-payment.repository';
 import { GetTreatmentPlanUseCase } from '../../../treatment-plans/application/use-cases/get-treatment-plan.use-case';
 import { TreatmentPlanDetail } from '../../../treatment-plans/domain/entities/treatment-plan.entity';
@@ -131,7 +134,7 @@ class FakeConvertAmount {
 const RECORD_NOW = new Date('2026-10-31T14:00:00.000Z');
 
 describe('RecordPaymentUseCase', () => {
-  function makeUseCase() {
+  function makeUseCase(now: Date = RECORD_NOW) {
     const repo = new InMemoryPaymentRepository();
     const fakeGetPlan = new FakeGetTreatmentPlanUseCase();
     const receiptBalance = new FakeReceiptPlanBalance();
@@ -150,7 +153,7 @@ describe('RecordPaymentUseCase', () => {
         repo,
         referenceCurrencyDigitsCatalog(),
       ),
-      () => RECORD_NOW,
+      () => now,
     );
     return { repo, fakeGetPlan, uc, receiptBalance, convert };
   }
@@ -167,13 +170,40 @@ describe('RecordPaymentUseCase', () => {
       expect(repo.lastCreateInput).toBeNull();
     });
 
-    it('hasta 24 h por delante (otra zona, reloj desfasado) se registra', async () => {
+    it('un instante hasta 24 h por delante (reloj desfasado) se registra', async () => {
       const { repo, fakeGetPlan, uc } = makeUseCase();
       fakeGetPlan.plan = makePlan({ id: 'plan-1', currency: 'USD' });
       await uc.execute('plan-1', {
         amount: 10,
         currency: 'USD',
         paidAt: '2026-11-01T14:00:00.000Z',
+      });
+      expect(repo.lastCreateInput).not.toBeNull();
+    });
+  });
+
+  describe('DX-075: día civil posterior a hoy en la sede', () => {
+    // 2026-11-05T03:30Z en Caracas (UTC-4, zona del fake) sigue siendo el 4.
+    const caracasNearMidnight = () =>
+      makeUseCase(new Date('2026-11-05T03:30:00.000Z'));
+
+    it('mañana en la sede → 400 en español y no se registra; hoy en la sede se registra', async () => {
+      const { repo, fakeGetPlan, uc } = caracasNearMidnight();
+      fakeGetPlan.plan = makePlan({ id: 'plan-1', currency: 'USD' });
+      await expect(
+        uc.execute('plan-1', {
+          amount: 10,
+          currency: 'USD',
+          paidAt: '2026-11-05',
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(PAID_AT_AFTER_SITE_TODAY_MESSAGE),
+      );
+      expect(repo.lastCreateInput).toBeNull();
+      await uc.execute('plan-1', {
+        amount: 10,
+        currency: 'USD',
+        paidAt: '2026-11-04',
       });
       expect(repo.lastCreateInput).not.toBeNull();
     });

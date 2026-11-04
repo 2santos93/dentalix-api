@@ -3,7 +3,10 @@ import { Prisma, PrismaClient, Sex } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { PAYMENT_CLOCK } from '../src/modules/payments/application/use-cases/void-payment.use-case';
-import { PAID_AT_IN_FUTURE_MESSAGE } from '../src/modules/payments/domain/paid-at-window';
+import {
+  PAID_AT_AFTER_SITE_TODAY_MESSAGE,
+  PAID_AT_IN_FUTURE_MESSAGE,
+} from '../src/modules/payments/domain/paid-at-window';
 import { DONE_ITEM_PRICE_LOCKED_MESSAGE } from '../src/modules/treatment-plans/domain/plan-status-machine';
 import {
   type Clinic,
@@ -155,12 +158,28 @@ describe('DX-054: invariantes del saldo y del plan (e2e)', () => {
     });
   });
 
-  it('dentro de las 24 h (mañana en otra zona) se registra', async () => {
-    await as(api().post(`/api/v1/treatment-plans/${planId}/payments`))
+  it('DX-075: un día civil posterior a hoy en la sede (mañana) → 400 en español y no se registra', async () => {
+    const res = await as(
+      api().post(`/api/v1/treatment-plans/${planId}/payments`),
+    )
       .send({
         amount: 10,
         currency: 'USD',
         paidAt: '2026-11-01',
+        method: 'CASH',
+      })
+      .expect(400);
+    expect((res.body as { message: string }).message).toBe(
+      PAID_AT_AFTER_SITE_TODAY_MESSAGE,
+    );
+  });
+
+  it('hoy en la sede se registra', async () => {
+    await as(api().post(`/api/v1/treatment-plans/${planId}/payments`))
+      .send({
+        amount: 10,
+        currency: 'USD',
+        paidAt: '2026-10-31',
         method: 'CASH',
       })
       .expect(201);
