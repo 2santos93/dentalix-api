@@ -148,6 +148,51 @@ describe('tasa manual de respaldo hasta N días (DX-384)', () => {
       ).rejects.toBeInstanceOf(MissingExchangeRateError);
     });
 
+    it('«manual desde» es el suelo: la tasa del domingo (DX-402) no la usa el abono del lunes', async () => {
+      const SUN = '2026-11-01';
+      const tenantContext = new TenantContextService();
+      const settings = makeSettings(
+        {
+          [WITH_3]: {
+            source: 'MANUAL',
+            manualSince: MON,
+            manualRateMaxAgeDays: 3,
+          },
+        },
+        tenantContext,
+      );
+      const rates = new GetRatesForDateUseCase(
+        noProviderRepo,
+        { fetchRates: jest.fn() },
+        settings,
+        makeManualRates({ [WITH_3]: { [SUN]: { VES: 36 } } }, tenantContext),
+        tenantContext,
+      );
+      const convert = new ConvertAmountUseCase(rates);
+      await expect(
+        tenantContext.run(WITH_3, () =>
+          convert.quote({ from: 'VES', to: 'USD', date: MON }),
+        ),
+      ).rejects.toBeInstanceOf(MissingExchangeRateError);
+      // Desde el lunes sí cuenta lo registrado dentro de los días manuales.
+      const ok = new GetRatesForDateUseCase(
+        noProviderRepo,
+        { fetchRates: jest.fn() },
+        settings,
+        makeManualRates({ [WITH_3]: { [MON]: { VES: 37 } } }, tenantContext),
+        tenantContext,
+      );
+      await expect(
+        tenantContext.run(WITH_3, () =>
+          new ConvertAmountUseCase(ok).quote({
+            from: 'VES',
+            to: 'USD',
+            date: '2026-11-03',
+          }),
+        ),
+      ).resolves.toMatchObject({ rateDate: MON });
+    });
+
     it('nunca llama al proveedor', async () => {
       const { convert, as, fetchRates } = setup();
       await as(WITH_3, () =>

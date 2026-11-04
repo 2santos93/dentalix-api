@@ -42,6 +42,20 @@ export interface SelectedManualRates {
 }
 
 /**
+ * Primer día de la ventana: `day − N`, pero nunca antes de `floor`, el día
+ * desde el que rige la fuente MANUAL («manual desde»). Una tasa anterior es
+ * terreno de DX-402 (respaldo de ese mismo día): el plazo no la usa para otro.
+ */
+export function windowStart(
+  day: string,
+  maxAgeDays: number,
+  floor: string | null,
+): string {
+  const oldest = addCivilDays(day, -maxAgeDays);
+  return floor !== null && floor > oldest ? floor : oldest;
+}
+
+/**
  * DX-384: de las tasas manuales de UNA moneda, la del día `day` o, si no la
  * hay, la de mayor fecha anterior que no sea más antigua que `maxAgeDays`
  * días de calendario. Una tasa posterior a `day` nunca se usa. `null`: sin
@@ -80,10 +94,11 @@ export function selectManualRatesForPair(
   maxAgeDays: number,
   currencies: readonly string[],
   rows: readonly ManualRateRow[],
+  floor: string | null = null,
 ): SelectedManualRates | null {
   const wanted = [...new Set(currencies)].filter((c) => c !== BASE_CURRENCY);
   if (wanted.length === 0) return { rateDate: day, rates: {} };
-  const oldest = addCivilDays(day, -maxAgeDays);
+  const oldest = windowStart(day, maxAgeDays, floor);
   const byDate = new Map<string, Record<string, number>>();
   for (const row of rows) {
     if (row.date > day || row.date < oldest) continue;

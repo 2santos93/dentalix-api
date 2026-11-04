@@ -18,8 +18,8 @@ import {
 } from './support/e2e-fixtures';
 import { EXCHANGE_RATE_SETTINGS_FORBIDDEN_MESSAGE } from '../src/modules/exchange/presentation/exchange-settings.controller';
 import { MANUAL_RATE_MAX_AGE_MESSAGE } from '../src/modules/exchange/domain/manual-rate-fallback';
-import { addCivilDays } from '../src/shared/time/civil-day';
 import { EXCHANGE_RATE_CLOCK } from '../src/modules/exchange/application/use-cases/manual-exchange-rates.use-cases';
+import { addCivilDays } from '../src/shared/time/civil-day';
 import { fixedSedeDay } from './support/sede-clock';
 import { PaymentAllocationJobs } from '../src/modules/payments/application/payment-allocation-jobs';
 
@@ -34,9 +34,13 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
-const SEDE_DAY = fixedSedeDay();
+// «Manual desde» es el viernes (la API ve ese día como «hoy» al pasar a MANUAL):
+// una tasa anterior a ese día no cuenta para el plazo. Luego el reloj pasa al sábado.
+const FRIDAY_DAY = fixedSedeDay(2);
+const SEDE_DAY = fixedSedeDay(1);
 const SATURDAY = SEDE_DAY.day;
-const FRIDAY = addCivilDays(SATURDAY, -1);
+const FRIDAY = FRIDAY_DAY.day;
+let clockAt = FRIDAY_DAY.at;
 const SETTINGS = '/api/v1/exchange/settings';
 const MANUAL_RATES = '/api/v1/exchange/manual-rates';
 
@@ -172,9 +176,7 @@ describe('Tasa manual de respaldo hasta N días (e2e, DX-384)', () => {
   beforeAll(async () => {
     app = await createE2eApp({
       override: (builder) =>
-        builder
-          .overrideProvider(EXCHANGE_RATE_CLOCK)
-          .useValue(() => SEDE_DAY.at),
+        builder.overrideProvider(EXCHANGE_RATE_CLOCK).useValue(() => clockAt),
     });
     await resetDatabase(raw);
     withDefault = await registerClinic(app, 'dx384-default');
@@ -189,6 +191,8 @@ describe('Tasa manual de respaldo hasta N días (e2e, DX-384)', () => {
       // La misma tasa del «viernes» en las dos clínicas.
       await register(clinic, FRIDAY, 4000);
     }
+    // A partir de aquí «hoy» es el sábado.
+    clockAt = SEDE_DAY.at;
   });
 
   afterAll(async () => {
@@ -265,6 +269,24 @@ describe('Tasa manual de respaldo hasta N días (e2e, DX-384)', () => {
       api().get(`/api/v1/exchange/rates?date=${SATURDAY}&currencies=EURO`),
       withDefault,
     ).expect(400);
+  });
+
+  it('una tasa anterior a «manual desde» no sirve al plazo (es el respaldo de DX-402 de su día)', async () => {
+    const thursday = addCivilDays(FRIDAY, -1);
+    await as(api().post(MANUAL_RATES), withDefault)
+      .send({ date: thursday, currency: 'GBP', rate: 0.8 })
+      .expect(201);
+    await expect(
+      as(
+        api().get(`/api/v1/exchange/rates?date=${SATURDAY}&currencies=GBP`),
+        withDefault,
+      ).then((r) => r.body as unknown),
+    ).resolves.toEqual({
+      base: 'USD',
+      source: 'MANUAL',
+      rates: {},
+      rateDate: SATURDAY,
+    });
   });
 
   it('el sábado, N=3 usa la tasa del viernes y N=0 queda «sin tasa»', async () => {

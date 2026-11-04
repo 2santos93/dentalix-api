@@ -192,6 +192,21 @@ describe('plazo de la última tasa manual (DX-384, int)', () => {
     ]);
   });
 
+  it('«manual desde» es el suelo: una tasa anterior (DX-402) no la usa otro día', async () => {
+    const clinic = await seedClinic(`${PREFIX}-floor`, 3);
+    // Desde el sábado; la tasa del viernes (anterior) existe pero no cuenta.
+    await raw.tenant.update({
+      where: { id: clinic.tenantId },
+      data: { manualExchangeRatesSince: new Date(`${SATURDAY}T00:00:00Z`) },
+    });
+    await expect(quote(clinic, SATURDAY)).rejects.toBeInstanceOf(
+      MissingExchangeRateError,
+    );
+    await expect(quote(clinic, MONDAY)).rejects.toBeInstanceOf(
+      MissingExchangeRateError,
+    );
+  });
+
   it('el CHECK solo admite de 0 a 30', async () => {
     for (const ok of [0, 30]) {
       await raw.tenant.update({

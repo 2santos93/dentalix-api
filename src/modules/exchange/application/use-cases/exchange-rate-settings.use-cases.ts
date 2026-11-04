@@ -125,6 +125,11 @@ export class UpdateExchangeRateSettingsUseCase {
             manualRateMaxAgeDays: days,
           };
     }, ctx);
+    // DX-384: el evento del plazo (EXCHANGE_RATE_MAX_AGE, con el id de la
+    // clínica) lo escribe el repositorio en la transacción del cambio; este,
+    // el de la fuente (DX-374, `resourceId` null), sigue yendo fuera para no
+    // tocar su contrato ni su orden con los hooks de congelación. Un PUT con
+    // los dos campos deja los dos eventos.
     // Como la mayoría de edad y la receta: el evento va tras confirmar el
     // cambio y `record` nunca lanza (DX-009).
     if (before.source !== after.source) {

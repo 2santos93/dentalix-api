@@ -23,10 +23,12 @@ import {
   BASE_CURRENCY,
   type ExchangeRateSource,
 } from '../../domain/exchange-rate-source';
-import { selectManualRatesForPair } from '../../domain/manual-rate-fallback';
+import {
+  selectManualRatesForPair,
+  windowStart,
+} from '../../domain/manual-rate-fallback';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
-  addCivilDays,
   civilDateIn,
   parseCivilDate,
   PERIOD_DAY_MAX,
@@ -329,7 +331,12 @@ export class GetRatesForDateUseCase {
       settings?.source === 'MANUAL' &&
       (settings.manualSince === null || date >= settings.manualSince)
     ) {
-      return this.manualRates(date, settings.manualRateMaxAgeDays, currencies);
+      return this.manualRates(
+        date,
+        settings.manualRateMaxAgeDays,
+        settings.manualSince,
+        currencies,
+      );
     }
     if (manualBackup && settings?.source === 'MANUAL' && settings.manualSince) {
       const backup = await this.backupRates(date, settings.manualSince);
@@ -357,6 +364,7 @@ export class GetRatesForDateUseCase {
   private async manualRates(
     date: string,
     maxAgeDays: number,
+    manualSince: string | null,
     currencies?: readonly string[],
   ): Promise<RatesForDate> {
     const exact = await this.manual.ratesOn(date);
@@ -368,10 +376,11 @@ export class GetRatesForDateUseCase {
         maxAgeDays,
         wanted,
         await this.manual.ratesBetween(
-          addCivilDays(date, -maxAgeDays),
+          windowStart(date, maxAgeDays, manualSince),
           date,
           wanted,
         ),
+        manualSince,
       );
       if (fallback) {
         return {

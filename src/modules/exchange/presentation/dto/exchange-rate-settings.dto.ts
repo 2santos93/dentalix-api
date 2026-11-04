@@ -12,7 +12,7 @@ import {
 } from '../../domain/exchange-rate-source';
 
 const MAX_AGE_DESCRIPTION =
-  'DX-384. Con fuente MANUAL, hasta cuántos días de antigüedad puede tener la última tasa manual registrada que se usa cuando no hay tasa del día del abono (día civil de su sede). 0 = solo la tasa del mismo día. El abono congela esa tasa con su fecha; registrar después la del día no la cambia. Pasado el plazo, el abono queda «sin tasa». 3 por defecto en una clínica nueva; en el PUT, sin este campo el plazo no cambia.';
+  'DX-384. Con fuente MANUAL, hasta cuántos días de antigüedad puede tener la última tasa manual registrada que se usa cuando no hay tasa del día del abono (día civil de su sede). 0 = solo la tasa del mismo día. El abono congela esa tasa con su fecha; registrar después la del día no la cambia. Pasado el plazo, el abono queda «sin tasa». Nunca se usa una tasa anterior a `manualSince` (esas son el respaldo de DX-402 de su propio día). 3 por defecto en una clínica nueva; en el PUT, sin este campo el plazo no cambia.';
 
 /**
  * Cuerpo de PUT /exchange/settings (DX-374 y DX-384): la fuente y/o el plazo de

@@ -3,6 +3,7 @@ import {
   isValidManualRateMaxAge,
   selectManualRate,
   selectManualRatesForPair,
+  windowStart,
   type ManualRateRow,
 } from './manual-rate-fallback';
 
@@ -134,5 +135,23 @@ describe('plazo de la tasa manual', () => {
     for (const bad of [-1, 31, 1.5, NaN, '3', null, undefined]) {
       expect(isValidManualRateMaxAge(bad)).toBe(false);
     }
+  });
+});
+
+describe('límite inferior «manual desde» (DX-384)', () => {
+  it('la ventana nunca empieza antes del suelo', () => {
+    expect(windowStart('2026-11-02', 3, null)).toBe('2026-10-30');
+    expect(windowStart('2026-11-02', 3, '2026-11-02')).toBe('2026-11-02');
+    expect(windowStart('2026-11-02', 3, '2026-10-01')).toBe('2026-10-30');
+  });
+
+  it('la tasa del domingo no la usa el lunes si «manual desde» es el lunes', () => {
+    const rows = [ves('2026-11-01', 36)];
+    expect(
+      selectManualRatesForPair('2026-11-02', 3, ['VES'], rows)?.rateDate,
+    ).toBe('2026-11-01');
+    expect(
+      selectManualRatesForPair('2026-11-02', 3, ['VES'], rows, '2026-11-02'),
+    ).toBeNull();
   });
 });
