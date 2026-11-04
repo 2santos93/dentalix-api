@@ -250,6 +250,13 @@ export class GetCashSessionUseCase {
         : found;
     // DX-089: una caja de una sede no permitida es 403 (no 404: existe).
     this.tenantContext.assertLocationAllowed(record.location.id);
+    if (actor.isAdmin) {
+      const closings = await this.withReceiptViews(record);
+      record.closings = closings;
+      record.closing =
+        record.closing &&
+        (closings.find((c) => c.id === record.closing?.id) ?? record.closing);
+    }
     const open = record.status === 'OPEN';
     const blindHidden = open && settings.blindClose && !actor.isAdmin;
     return {
@@ -271,6 +278,42 @@ export class GetCashSessionUseCase {
         adjust: !open && actor.isAdmin,
       },
     };
+  }
+
+  /**
+   * SEC-043-bis: en cada cierre a ciegas, cuántos recibos de abonos de esta
+   * caja (que llevan el importe que el ciego oculta) abrió o imprimió quien
+   * la cerró desde que la caja se abrió (o se reabrió, para la vuelta 2 y
+   * siguientes: con la caja cerrada no hay nada que reconstruir) hasta ese
+   * cierre. Solo para ADMIN: es la señal de
+   * que quien contó pudo reconstruir el esperado. Los cierres con el esperado
+   * a la vista no la llevan (no hay nada que reconstruir).
+   */
+  private withReceiptViews(
+    record: Pick<
+      CashSessionDetail,
+      'id' | 'openedAt' | 'closings' | 'reopenings'
+    >,
+  ): Promise<CashClosingView[]> {
+    // La reapertura n reabre el cierre n: la vuelta n + 1 empieza en ella.
+    const reopenedAt = new Map(
+      record.reopenings.map((r) => [r.sequence + 1, r.reopenedAt]),
+    );
+    return Promise.all(
+      record.closings.map(async (closing) =>
+        closing.blind
+          ? {
+              ...closing,
+              receiptViews: await this.repo.countReceiptViews({
+                sessionId: record.id,
+                actorUserId: closing.closedBy.id,
+                from: reopenedAt.get(closing.sequence) ?? record.openedAt,
+                to: closing.closedAt,
+              }),
+            }
+          : closing,
+      ),
+    );
   }
 }
 

@@ -2,6 +2,7 @@ import type { CashSessionStatus, PaymentMethod } from '@prisma/client';
 import type { ArqueoLine, ExpectedLine } from '../arqueo';
 import type {
   CashAdjustmentView,
+  CashReceiptViews,
   CashGroupRef,
   CashSessionDetail,
   CashSessionSummary,
@@ -146,4 +147,16 @@ export interface CashSessionRepository {
    * quien la hace en esa sede, o pendiente de la siguiente que se abra.
    */
   addCorrection(id: string, data: CorrectionData): Promise<CorrectionOutcome>;
+
+  /**
+   * SEC-043-bis: consultas de recibos (VIEW y PRINT en la auditoría) de los
+   * abonos de la caja —los suyos y los de todo ajuste que cuenta en ella— hechas
+   * por `actorUserId` en [`from`, `to`).
+   */
+  countReceiptViews(params: {
+    sessionId: string;
+    actorUserId: string;
+    from: Date;
+    to: Date;
+  }): Promise<CashReceiptViews>;
 }

@@ -30,6 +30,7 @@ import type {
   CashAdjustmentView,
   CashClosingView,
   CashExpectedLine,
+  CashReceiptViews,
   CashCreditRefund,
   CashOutflow,
   CashSessionPayment,
@@ -192,6 +193,13 @@ type OutflowRow = Prisma.ExpensePaymentGetPayload<{
   select: typeof OUTFLOW_SELECT;
 }>;
 
+/**
+ * Un instante JS como `timestamp` UTC, sin depender del TimeZone de la sesión
+ * (las columnas son `timestamp(3)` sin zona, en UTC; como en jobs).
+ */
+const utc = (date: Date): Prisma.Sql =>
+  Prisma.sql`(${date.toISOString()}::timestamptz AT TIME ZONE 'UTC')`;
+
 const CLOSING_SELECT = {
   id: true,
   sequence: true,
@@ -282,6 +290,42 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
     private readonly prisma: PrismaService,
     private readonly tenantContext: TenantContextService,
   ) {}
+
+  async countReceiptViews(params: {
+    sessionId: string;
+    actorUserId: string;
+    from: Date;
+    to: Date;
+  }): Promise<CashReceiptViews> {
+    const tenantId = this.tenantId();
+    return this.prisma.runWithTenant(async (tx) => {
+      // Los abonos de la caja (también los anulados) y los de todo ajuste que
+      // cuenta en ella (un tardío, la anulación de un abono de otra caja ya
+      // cerrada…): todos suman en su esperado y su recibo lleva el importe.
+      // El índice (tenantId, actorUserId, occurredAt) acota la búsqueda.
+      const [row] = await tx.$queryRaw<{ receipts: number; views: number }[]>`
+        SELECT count(DISTINCT e."resourceId")::int AS "receipts",
+               count(*)::int AS "views"
+          FROM "audit_events" e
+         WHERE e."tenantId" = ${tenantId}::uuid
+           AND e."actorUserId" = ${params.actorUserId}::uuid
+           AND e."resourceType" = 'PAYMENT_RECEIPT'
+           AND e."action" IN ('VIEW', 'PRINT')
+           AND e."occurredAt" >= ${utc(params.from)}
+           AND e."occurredAt" < ${utc(params.to)}
+           AND e."resourceId" IN (
+             SELECT p."id" FROM "payments" p
+              WHERE p."tenantId" = ${tenantId}::uuid
+                AND p."cashSessionId" = ${params.sessionId}::uuid
+             UNION
+             SELECT a."paymentId" FROM "cash_session_adjustments" a
+              WHERE a."tenantId" = ${tenantId}::uuid
+                AND a."sessionId" = ${params.sessionId}::uuid
+                AND a."paymentId" IS NOT NULL
+           )`;
+      return { receipts: row?.receipts ?? 0, views: row?.views ?? 0 };
+    });
+  }
 
   private tenantId(): string {
     const tenantId = this.tenantContext.getTenantId();
@@ -1074,6 +1118,8 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
       hasDifference: row.hasDifference,
       differenceReason: row.differenceReason,
       unjustifiedDifference: row.unjustifiedDifference,
+      // SEC-043-bis: lo calcula el caso de uso, solo para ADMIN.
+      receiptViews: null,
       notes: row.notes,
       suggestedLockDate: civilOf(row.suggestedLockDate),
       lines: [...row.lines]

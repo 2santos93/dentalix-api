@@ -435,6 +435,14 @@ export class CashClosingLineDto {
   amountHidden!: boolean;
 }
 
+export class CashReceiptViewsDto {
+  @ApiProperty({ description: 'Recibos distintos abiertos o impresos' })
+  receipts!: number;
+
+  @ApiProperty({ description: 'Consultas en total (ver e imprimir)' })
+  views!: number;
+}
+
 export class CashClosingDto {
   @ApiProperty({ format: 'uuid' })
   id!: string;
@@ -462,6 +470,14 @@ export class CashClosingDto {
       'SEC-043: cierre a ciegas que no cuadró y llegó sin motivo. Se guardó igual y queda para revisión de administración.',
   })
   unjustifiedDifference!: boolean;
+
+  @ApiProperty({
+    type: CashReceiptViewsDto,
+    nullable: true,
+    description:
+      'SEC-043-bis: recibos de abonos de esta caja que quien la cerró abrió o imprimió entre la apertura (o la última reapertura) y este cierre (VIEW y PRINT de la auditoría; abonos de la caja y de todo ajuste que cuenta en ella). Solo para ADMIN y en un cierre a ciegas; null en los demás casos.',
+  })
+  receiptViews!: CashReceiptViewsDto | null;
 
   @ApiProperty({ type: String, nullable: true })
   notes!: string | null;

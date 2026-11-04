@@ -101,6 +101,7 @@ function fakeRepo(): FakeRepo {
     close: jest.fn().mockResolvedValue('CLOSED'),
     reopen: jest.fn().mockResolvedValue('REOPENED'),
     addCorrection: jest.fn().mockResolvedValue({ kind: 'NOT_CLOSED' }),
+    countReceiptViews: jest.fn().mockResolvedValue({ receipts: 0, views: 0 }),
   };
 }
 
@@ -201,6 +202,7 @@ describe('GetCashSessionUseCase (DX-027)', () => {
     hasDifference: false,
     differenceReason: null,
     unjustifiedDifference: false,
+    receiptViews: null,
     notes: null,
     suggestedLockDate: '2026-10-17',
     lines: [
@@ -458,6 +460,108 @@ describe('GetCashSessionUseCase (DX-027)', () => {
         });
       },
     );
+  });
+
+  // SEC-043-bis: recibos consultados antes de cerrar a ciegas, solo para ADMIN.
+  describe('recibos consultados por quien cerró a ciegas (SEC-043-bis)', () => {
+    const closedAt = new Date('2026-10-18T01:00:00.000Z');
+    const closingOf = (blind: boolean, id = 'c-1') => ({
+      ...earlierClosing,
+      id,
+      blind,
+      closedAt,
+    });
+
+    it('ADMIN: cada cierre a ciegas lleva los recibos que abrió quien cerró, entre la apertura y ese cierre', async () => {
+      const repo = fakeRepo();
+      repo.countReceiptViews.mockResolvedValue({ receipts: 3, views: 5 });
+      const blind = closingOf(true);
+      repo.detail.mockResolvedValue(
+        record({ status: 'CLOSED', closing: blind, closings: [blind] }),
+      );
+      const view = await new GetCashSessionUseCase(
+        asRepo(repo),
+        context,
+      ).execute('s-1', ADMIN);
+      expect(repo.countReceiptViews).toHaveBeenCalledWith({
+        sessionId: 's-1',
+        actorUserId: RECEPTION.userId,
+        from: NOW,
+        to: closedAt,
+      });
+      expect(view.closing?.receiptViews).toEqual({ receipts: 3, views: 5 });
+      expect(view.closings[0].receiptViews).toEqual({ receipts: 3, views: 5 });
+    });
+
+    it('tras una reapertura, la vuelta 2 cuenta desde esa reapertura (con la caja cerrada no hay nada que reconstruir)', async () => {
+      const repo = fakeRepo();
+      const reopenedAt = new Date('2026-10-18T02:00:00.000Z');
+      const secondClosedAt = new Date('2026-10-18T03:00:00.000Z');
+      const first = { ...closingOf(true, 'c-1'), sequence: 1 };
+      const second = {
+        ...closingOf(true, 'c-2'),
+        sequence: 2,
+        closedAt: secondClosedAt,
+      };
+      repo.detail.mockResolvedValue(
+        record({
+          status: 'CLOSED',
+          closing: second,
+          closings: [second, first],
+          reopenings: [
+            {
+              id: 'r-1',
+              sequence: 1,
+              reopenedAt,
+              reopenedBy: { id: ADMIN.userId, fullName: 'Admin' },
+              reason: 'Revisar el cambio',
+            },
+          ],
+        }),
+      );
+      await new GetCashSessionUseCase(asRepo(repo), context).execute(
+        's-1',
+        ADMIN,
+      );
+      expect(repo.countReceiptViews).toHaveBeenCalledWith(
+        expect.objectContaining({ from: reopenedAt, to: secondClosedAt }),
+      );
+      expect(repo.countReceiptViews).toHaveBeenCalledWith(
+        expect.objectContaining({ from: NOW, to: closedAt }),
+      );
+    });
+
+    it('un cierre con el esperado a la vista no la lleva (no hay nada que reconstruir)', async () => {
+      const repo = fakeRepo();
+      const plain = closingOf(false);
+      repo.detail.mockResolvedValue(
+        record({ status: 'CLOSED', closing: plain, closings: [plain] }),
+      );
+      const view = await new GetCashSessionUseCase(
+        asRepo(repo),
+        context,
+      ).execute('s-1', ADMIN);
+      expect(repo.countReceiptViews).not.toHaveBeenCalled();
+      expect(view.closing?.receiptViews).toBeNull();
+    });
+
+    it('RECEPTION nunca la recibe ni se calcula', async () => {
+      const repo = fakeRepo();
+      repo.getSettings.mockResolvedValue({
+        requireOpenSession: false,
+        blindClose: true,
+      });
+      const blind = closingOf(true);
+      repo.detail.mockResolvedValue(
+        record({ status: 'CLOSED', closing: blind, closings: [blind] }),
+      );
+      const view = await new GetCashSessionUseCase(
+        asRepo(repo),
+        context,
+      ).execute('s-1', RECEPTION);
+      expect(repo.countReceiptViews).not.toHaveBeenCalled();
+      expect(view.closing?.receiptViews).toBeNull();
+    });
   });
 
   it('cerrada: se ve el arqueo aunque sea ciego, y solo ADMIN reabre o corrige', async () => {
