@@ -70,7 +70,7 @@ export class CallerMatchDto {
     enum: ['PATIENT', 'RESPONSIBLE_PARTY'],
     description:
       'PATIENT: el número es el del paciente. RESPONSIBLE_PARTY: es el de ' +
-      'su responsable de pago.',
+      'alguno de sus responsables (contacto o paciente).',
   })
   matchedBy!: 'PATIENT' | 'RESPONSIBLE_PARTY';
   @ApiProperty({ type: CallerNextAppointmentDto, nullable: true })
@@ -88,4 +88,9 @@ export class CallerMatchDto {
 
 export class CallerLookupResponseDto {
   @ApiProperty({ type: [CallerMatchDto] }) matches!: CallerMatchDto[];
+  @ApiProperty({
+    description:
+      'Hay más pacientes con ese número que los 20 devueltos: afinar la búsqueda.',
+  })
+  truncated!: boolean;
 }

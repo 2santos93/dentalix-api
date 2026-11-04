@@ -542,8 +542,21 @@ describe('buildAuditDrafts: «¿Quién llama?» (DX-224)', () => {
     expect(JSON.stringify(drafts)).not.toContain('1234567');
   });
 
-  it('sin coincidencias no deja ningún evento', () => {
-    expect(buildAuditDrafts(lookup, req(), { matches: [] }, scope)).toEqual([]);
+  it('sin coincidencias deja un solo evento sin paciente, con rows 0 y sin el número', () => {
+    const drafts = buildAuditDrafts(
+      lookup,
+      req({ body: { phone: '0412-1234567' } }),
+      { matches: [] },
+      scope,
+    );
+    expect(drafts).toHaveLength(1);
+    expect(drafts[0].patient).toBeNull();
+    expect(drafts[0].resourceId).toBeNull();
+    expect(drafts[0].metadata).toMatchObject({
+      reason: 'CALLER_LOOKUP_NO_MATCH',
+      search: { rows: 0 },
+    });
+    expect(JSON.stringify(drafts)).not.toContain('1234567');
   });
 });
 

@@ -40,6 +40,7 @@ const iso = (d: Date) => d.toISOString();
 /** La respuesta pública: instantes ISO y la sede con su zona. */
 function present(result: CallerLookupResult) {
   return {
+    truncated: result.truncated,
     matches: result.matches.map((m) => ({
       id: m.id,
       firstName: m.firstName,
@@ -98,8 +99,8 @@ export class CallerLookupController {
     description:
       'Lee el número en cualquier formato (sin «+», con el prefijo de la ' +
       'sede activa) y lo compara por E.164 completo con el teléfono del ' +
-      'paciente y el de su responsable de pago. Varios pacientes con el mismo ' +
-      'número (grupo familiar) salen todos, hasta 20. Cada uno trae su próxima ' +
+      'paciente y el de sus responsables (contacto o paciente). Varios pacientes con el mismo ' +
+      'número (grupo familiar) salen todos, hasta 20 (`truncated` avisa si hay más). Cada uno trae su próxima ' +
       'cita, su última visita (solo de las sedes del miembro) y su saldo. ' +
       '`hasCriticalAlert` solo para los roles clínicos. Un evento de lectura ' +
       'por paciente; el número no se registra.',

@@ -27,6 +27,7 @@ class FakeRepo implements CallerLookupRepository {
   region: string | null = 'VE';
   seen: string[][] = [];
   matches: CallerMatch[] = [];
+  truncated = false;
   next = new Map<string, CallerNextAppointment>();
   last = new Map<string, CallerVisitRef>();
   defaultPhoneRegion() {
@@ -34,7 +35,10 @@ class FakeRepo implements CallerLookupRepository {
   }
   findByPhoneE164(e164s: readonly string[]) {
     this.seen.push([...e164s]);
-    return Promise.resolve(this.matches);
+    return Promise.resolve({
+      matches: this.matches,
+      truncated: this.truncated,
+    });
   }
   nextAppointments() {
     return Promise.resolve(this.next);
@@ -119,9 +123,22 @@ describe('CallerLookupUseCase (DX-224)', () => {
     await expect(useCase.execute('1234567', ClinicRole.ADMIN)).resolves.toEqual(
       {
         matches: [],
+        truncated: false,
       },
     );
     expect(repo.seen).toEqual([]);
+  });
+
+  it('más de 20 pacientes: devuelve los que dice el repositorio y lo avisa', async () => {
+    const repo = new FakeRepo();
+    repo.truncated = true;
+    repo.matches = [
+      { patientId: ANA, firstName: 'Ana', lastName: 'P', matchedBy: 'PATIENT' },
+    ];
+    const { useCase } = build(repo);
+    const res = await useCase.execute('0412 1234567', ClinicRole.ADMIN);
+    expect(res.truncated).toBe(true);
+    expect(res.matches).toHaveLength(1);
   });
 
   it('sin coincidencias: lista vacía', async () => {
@@ -129,7 +146,7 @@ describe('CallerLookupUseCase (DX-224)', () => {
     const { useCase } = build(repo);
     await expect(
       useCase.execute('0412 1234567', ClinicRole.ADMIN),
-    ).resolves.toEqual({ matches: [] });
+    ).resolves.toEqual({ matches: [], truncated: false });
   });
 
   it('varios pacientes con el mismo número salen todos, con su contexto', async () => {

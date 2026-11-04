@@ -41,11 +41,16 @@ export class PrismaCallerLookupRepository implements CallerLookupRepository {
   }
 
   /**
-   * Dos ramas sobre los índices parciales de DX-224: el paciente por su
-   * `phoneE164` y el paciente de un contacto responsable que lo tiene. Sin
-   * archivados. Si un mismo paciente sale por las dos, gana su propio teléfono.
+   * Tres ramas sobre los índices parciales de DX-224: el paciente por su
+   * `phoneE164`; el paciente de un contacto responsable que lo tiene; y los
+   * pacientes cuyo responsable ES otro paciente con ese teléfono (la madre
+   * paciente con sus hijos: el contacto no guarda teléfono propio). Sin
+   * archivados. Si un mismo paciente sale por varias, gana su propio teléfono.
+   * El tope va en SQL (21: uno más que el máximo, para saber si hay más).
    */
-  findByPhoneE164(e164s: readonly string[]): Promise<CallerMatch[]> {
+  findByPhoneE164(
+    e164s: readonly string[],
+  ): Promise<{ matches: CallerMatch[]; truncated: boolean }> {
     const tenantId = this.requireTenantId();
     const list = [...e164s];
     return this.prisma.runWithTenant(async (tx) => {
@@ -57,38 +62,50 @@ export class PrismaCallerLookupRepository implements CallerLookupRepository {
           matchedBy: CallerMatch['matchedBy'];
         }[]
       >`
-        SELECT DISTINCT ON (m."id") m."id", m."firstName", m."lastName", m."matchedBy"
+        SELECT d."id", d."firstName", d."lastName", d."matchedBy"
           FROM (
-            SELECT p."id", p."firstName", p."lastName", 'PATIENT' AS "matchedBy", 0 AS "rank"
-              FROM "patients" p
-             WHERE p."tenantId" = ${tenantId}::uuid
-               AND p."phoneE164" = ANY(${list}::text[])
-               AND p."deletedAt" IS NULL
-            UNION ALL
-            SELECT p."id", p."firstName", p."lastName", 'RESPONSIBLE_PARTY', 1
-              FROM "patient_responsible_parties" r
-              JOIN "patients" p
-                ON p."tenantId" = r."tenantId" AND p."id" = r."patientId"
-             WHERE r."tenantId" = ${tenantId}::uuid
-               AND r."phoneE164" = ANY(${list}::text[])
-               AND r."deletedAt" IS NULL
-               AND p."deletedAt" IS NULL
-          ) m
-         ORDER BY m."id", m."rank"`;
-      return rows
+            SELECT DISTINCT ON (m."id") m."id", m."firstName", m."lastName", m."matchedBy"
+              FROM (
+                SELECT p."id", p."firstName", p."lastName", 'PATIENT' AS "matchedBy", 0 AS "rank"
+                  FROM "patients" p
+                 WHERE p."tenantId" = ${tenantId}::uuid
+                   AND p."phoneE164" = ANY(${list}::text[])
+                   AND p."deletedAt" IS NULL
+                UNION ALL
+                SELECT p."id", p."firstName", p."lastName", 'RESPONSIBLE_PARTY', 1
+                  FROM "patient_responsible_parties" r
+                  JOIN "patients" p
+                    ON p."tenantId" = r."tenantId" AND p."id" = r."patientId"
+                 WHERE r."tenantId" = ${tenantId}::uuid
+                   AND r."phoneE164" = ANY(${list}::text[])
+                   AND r."deletedAt" IS NULL
+                   AND p."deletedAt" IS NULL
+                UNION ALL
+                SELECT p."id", p."firstName", p."lastName", 'RESPONSIBLE_PARTY', 1
+                  FROM "patients" rp
+                  JOIN "patient_responsible_parties" r
+                    ON r."tenantId" = rp."tenantId" AND r."responsiblePatientId" = rp."id"
+                  JOIN "patients" p
+                    ON p."tenantId" = r."tenantId" AND p."id" = r."patientId"
+                 WHERE rp."tenantId" = ${tenantId}::uuid
+                   AND rp."phoneE164" = ANY(${list}::text[])
+                   AND rp."deletedAt" IS NULL
+                   AND r."deletedAt" IS NULL
+                   AND p."deletedAt" IS NULL
+              ) m
+             ORDER BY m."id", m."rank"
+          ) d
+         ORDER BY d."lastName", d."firstName", d."id"
+         LIMIT ${CALLER_LOOKUP_MAX_MATCHES + 1}`;
+      const matches = rows
+        .slice(0, CALLER_LOOKUP_MAX_MATCHES)
         .map((r): CallerMatch => ({
           patientId: r.id,
           firstName: r.firstName,
           lastName: r.lastName,
           matchedBy: r.matchedBy,
-        }))
-        .sort(
-          (a, b) =>
-            a.lastName.localeCompare(b.lastName, 'es') ||
-            a.firstName.localeCompare(b.firstName, 'es') ||
-            a.patientId.localeCompare(b.patientId),
-        )
-        .slice(0, CALLER_LOOKUP_MAX_MATCHES);
+        }));
+      return { matches, truncated: rows.length > CALLER_LOOKUP_MAX_MATCHES };
     });
   }
 

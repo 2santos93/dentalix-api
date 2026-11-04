@@ -36,11 +36,13 @@ export interface CallerLookupMatch {
 
 export interface CallerLookupResult {
   matches: CallerLookupMatch[];
+  /** Hay más pacientes con ese número que los devueltos: afinar la búsqueda. */
+  truncated: boolean;
 }
 
 /**
  * «¿Quién llama?» (DX-224): los pacientes que tienen ese teléfono (o cuyo
- * responsable de pago lo tiene), con su contexto para atender la llamada. El
+ * responsable lo tiene), con su contexto para atender la llamada. El
  * número se lee con el prefijo de la sede activa y se compara por E.164
  * completo. Nunca lo registra: ni logs ni auditoría.
  */
@@ -66,10 +68,12 @@ export class CallerLookupUseCase {
         minDigits: MIN_CALLER_DIGITS,
       });
     }
-    if (candidates.status === 'NONE') return { matches: [] };
+    if (candidates.status === 'NONE') return { matches: [], truncated: false };
 
-    const found = await this.repo.findByPhoneE164(candidates.e164s);
-    if (found.length === 0) return { matches: [] };
+    const { matches: found, truncated } = await this.repo.findByPhoneE164(
+      candidates.e164s,
+    );
+    if (found.length === 0) return { matches: [], truncated: false };
     const ids = found.map((m) => m.patientId);
     const now = this.now();
     const clinical = CLINICAL_ROLES.includes(role);
@@ -86,6 +90,7 @@ export class CallerLookupUseCase {
     ]);
 
     return {
+      truncated,
       matches: found.map((m) => ({
         id: m.patientId,
         firstName: m.firstName,

@@ -3,7 +3,7 @@
  * suite: se corre a mano (docs/perf/DX-224.md) contra una base DESECHABLE
  * sembrada con dx224-seed.sql (60.000 pacientes). Mide, por `dentalix_app`
  * (sin BYPASSRLS), el caso de uso entero y la consulta de coincidencias, y
- * muestra el EXPLAIN (ANALYZE) de esta última para comprobar que usa
+ * muestra el EXPLAIN (ANALYZE) de ella (la consulta REAL de tres ramas: copia de `PrismaCallerLookupRepository.findByPhoneE164`; si cambia, cambia aquí) para comprobar que usa
  * patients_tenant_phone_e164_idx. Criterio: mediana y p95 < 300 ms.
  */
 import { loadavg } from 'node:os';
@@ -35,10 +35,33 @@ async function main(): Promise<void> {
     prisma.runWithTenant(async (tx) => {
       const rows = await tx.$queryRawUnsafe<{ 'QUERY PLAN': string }[]>(
         `EXPLAIN (ANALYZE, BUFFERS)
-         SELECT p."id" FROM "patients" p
-          WHERE p."tenantId" = '${TENANT}'::uuid
-            AND p."phoneE164" = ANY(ARRAY['+584125550000']::text[])
-            AND p."deletedAt" IS NULL`,
+         SELECT d."id" FROM (
+           SELECT DISTINCT ON (m."id") m."id", m."lastName", m."firstName", m."rank"
+             FROM (
+               SELECT p."id", p."firstName", p."lastName", 0 AS "rank"
+                 FROM "patients" p
+                WHERE p."tenantId" = '${TENANT}'::uuid
+                  AND p."phoneE164" = ANY(ARRAY['+584125550000']::text[])
+                  AND p."deletedAt" IS NULL
+               UNION ALL
+               SELECT p."id", p."firstName", p."lastName", 1
+                 FROM "patient_responsible_parties" r
+                 JOIN "patients" p ON p."tenantId" = r."tenantId" AND p."id" = r."patientId"
+                WHERE r."tenantId" = '${TENANT}'::uuid
+                  AND r."phoneE164" = ANY(ARRAY['+584125550000']::text[])
+                  AND r."deletedAt" IS NULL AND p."deletedAt" IS NULL
+               UNION ALL
+               SELECT p."id", p."firstName", p."lastName", 1
+                 FROM "patients" rp
+                 JOIN "patient_responsible_parties" r
+                   ON r."tenantId" = rp."tenantId" AND r."responsiblePatientId" = rp."id"
+                 JOIN "patients" p ON p."tenantId" = r."tenantId" AND p."id" = r."patientId"
+                WHERE rp."tenantId" = '${TENANT}'::uuid
+                  AND rp."phoneE164" = ANY(ARRAY['+584125550000']::text[])
+                  AND rp."deletedAt" IS NULL AND r."deletedAt" IS NULL
+                  AND p."deletedAt" IS NULL
+             ) m ORDER BY m."id", m."rank"
+         ) d ORDER BY d."lastName", d."firstName", d."id" LIMIT 21`,
       );
       return rows.map((r) => r['QUERY PLAN']);
     }),

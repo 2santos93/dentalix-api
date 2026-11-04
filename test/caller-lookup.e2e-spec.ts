@@ -14,9 +14,10 @@ import {
   REGIONAL_MADRID_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
+import { JobWorker } from '../src/modules/jobs/application/job-worker.service';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
-import { backfillTenantPhoneE164 } from '../prisma/scripts/patients-phone-e164-backfill';
+import { backfillTenantPhoneE164 } from '../src/modules/patients/infrastructure/phone-e164-backfill';
 
 // DX-224 en HTTP real: «¿Quién llama?». Sede principal de Caracas (+58) y una
 // segunda de Madrid (+34). El número va en el cuerpo, se compara por E.164
@@ -282,7 +283,7 @@ describe('¿Quién llama? (e2e, DX-224)', () => {
 
   it('sin coincidencias, 200 con la lista vacía', async () => {
     const res = await lookup('0426 7771122').expect(200);
-    expect(res.body).toEqual({ matches: [] });
+    expect(res.body).toEqual({ matches: [], truncated: false });
   });
 
   it('menos de 7 dígitos: 400 «Escribe el número completo»', async () => {
@@ -413,6 +414,227 @@ describe('¿Quién llama? (e2e, DX-224)', () => {
     }
     const matches = await found('0412 1234567');
     expect(matches.map((m) => m.id).sort()).toEqual([p.ana, p.luis].sort());
+  });
+
+  it('I1: la madre-paciente con sus hijos sin teléfono: salen ella y los dos hijos', async () => {
+    const madre = await createPatient({
+      firstName: 'María',
+      lastName: 'Suárez',
+      docNumber: '224101',
+      phone: '0416 555 03 99',
+    });
+    const hijos: string[] = [];
+    for (const [i, name] of ['Pía', 'Leo'].entries()) {
+      const hijo = await createPatient({
+        firstName: name,
+        lastName: 'Suárez',
+        docNumber: `22411${i}`,
+      });
+      hijos.push(hijo);
+      await as(
+        api().post(`/api/v1/patients/${hijo}/responsible-parties`),
+        clinic.adminToken,
+      )
+        .send({
+          responsiblePatientId: madre,
+          relationship: 'MOTHER',
+          isPayer: true,
+        })
+        .expect(201);
+    }
+    const matches = await found('(0416) 555-0399');
+    expect(matches.map((m) => [m.id, m.matchedBy]).sort()).toEqual(
+      [
+        [madre, 'PATIENT'],
+        [hijos[0], 'RESPONSIBLE_PARTY'],
+        [hijos[1], 'RESPONSIBLE_PARTY'],
+      ].sort(),
+    );
+  });
+
+  it('M3: más de 20 con el mismo número: 20 y truncated', async () => {
+    const rows = Array.from({ length: 21 }, (_, i) => ({
+      tenantId: clinic.tenantId,
+      firstName: `Placeholder${i}`,
+      lastName: 'Mismo',
+      phone: '0426 000 11 22',
+    }));
+    await raw.patient.createMany({ data: rows });
+    await raw.patient.updateMany({
+      where: { tenantId: clinic.tenantId, lastName: 'Mismo' },
+      data: { phoneE164: '+584260001122' },
+    });
+    const res = (await lookup('0426 000 11 22').expect(200)).body as {
+      matches: Match[];
+      truncated: boolean;
+    };
+    expect(res.matches).toHaveLength(20);
+    expect(res.truncated).toBe(true);
+    await raw.patient.updateMany({
+      where: { tenantId: clinic.tenantId, lastName: 'Mismo' },
+      data: { deletedAt: new Date() },
+    });
+    const ok = (await lookup('0412 1234567').expect(200)).body as {
+      truncated: boolean;
+    };
+    expect(ok.truncated).toBe(false);
+  });
+
+  it('M5: una búsqueda sin coincidencias también queda auditada, sin el número', async () => {
+    await raw.auditEvent.deleteMany({
+      where: { tenantId: clinic.tenantId, resourceType: 'PATIENT' },
+    });
+    await lookup('0426 777 66 55').expect(200);
+    const events = await raw.auditEvent.findMany({
+      where: { tenantId: clinic.tenantId, resourceType: 'PATIENT' },
+    });
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ action: 'VIEW', patientId: null });
+    expect(events[0].metadata).toMatchObject({
+      reason: 'CALLER_LOOKUP_NO_MATCH',
+      search: { rows: 0 },
+    });
+    expect(JSON.stringify(events)).not.toContain('7776655');
+  });
+
+  it('I2 comunicación: cambiar el móvil por su endpoint mueve la búsqueda', async () => {
+    const id = await createPatient({
+      firstName: 'Com',
+      lastName: 'Unica',
+      docNumber: '224201',
+      phone: '0412 300 40 50',
+    });
+    await as(
+      api().patch(`/api/v1/patients/${id}/communication`),
+      tokens[ClinicRole.RECEPTION],
+    )
+      .send({ phone: '0424 300 40 51' })
+      .expect(200);
+    expect(await found('0412 300 40 50')).toEqual([]);
+    expect((await found('0424 3004051')).map((m) => m.id)).toEqual([id]);
+  });
+
+  it('I2 responsables: crear y editar el teléfono del contacto mueve la búsqueda', async () => {
+    const id = await createPatient({
+      firstName: 'Niño',
+      lastName: 'Contacto',
+      docNumber: '224301',
+    });
+    const created = await as(
+      api().post(`/api/v1/patients/${id}/responsible-parties`),
+      clinic.adminToken,
+    )
+      .send({
+        fullName: 'Tutor Uno',
+        phone: '0414 300 50 60',
+        relationship: 'FATHER',
+        isPayer: false,
+      })
+      .expect(201);
+    const partyId = (created.body as { id: string }).id;
+    expect((await found('0414 3005060')).map((m) => m.id)).toEqual([id]);
+    await as(
+      api().patch(`/api/v1/patients/${id}/responsible-parties/${partyId}`),
+      clinic.adminToken,
+    )
+      .send({ phone: '0426 300 50 61' })
+      .expect(200);
+    expect(await found('0414 3005060')).toEqual([]);
+    expect((await found('0426 3005061')).map((m) => m.id)).toEqual([id]);
+  });
+
+  it('I2 importación: crear y rellenar vacíos dejan el E.164 (con el prefijo de la sede del lote)', async () => {
+    const header =
+      'tipo_documento;numero_documento;nombres;apellidos;fecha_nacimiento;sexo;telefono;email;notas';
+    const csv = (lines: string[]) =>
+      Buffer.from(`${header}\n${lines.join('\n')}\n`, 'utf8');
+    // Uno existente SIN teléfono (se rellena) y dos nuevos.
+    const vacio = await createPatient({
+      firstName: 'Sin',
+      lastName: 'Telefono',
+      docNumber: '224401',
+    });
+    const upload = (
+      path: string,
+      bytes: Buffer,
+      fields: Record<string, string>,
+    ) => {
+      let req = as(
+        api().post(`/api/v1/patient-imports${path}`),
+        clinic.adminToken,
+      ).set('X-Location-Id', madrid);
+      for (const [k, v] of Object.entries(fields)) req = req.field(k, v);
+      return req.attach('file', bytes, {
+        filename: 'p.csv',
+        contentType: 'text/csv',
+      });
+    };
+    const batch = (
+      await upload(
+        '',
+        csv([
+          'NATIONAL_ID;224402;Nueva;Importada;;F;612 345 600;;',
+          'NATIONAL_ID;224401;Sin;Telefono;;;0412 400 70 80;;',
+        ]),
+        { defaultDocType: 'NATIONAL_ID' },
+      ).expect(201)
+    ).body as { id: string };
+    await as(
+      api().post(`/api/v1/patient-imports/${batch.id}/confirm`),
+      clinic.adminToken,
+    )
+      .send({ duplicateMode: 'FILL_EMPTY' })
+      .expect(200);
+    await app.get(JobWorker).drain();
+    const importada = await raw.patient.findFirstOrThrow({
+      where: { tenantId: clinic.tenantId, docNumber: '224402' },
+      select: { id: true, phoneE164: true },
+    });
+    // Lote de la sede de Madrid (+34): «612 345 600» sin «+» se lee con ella.
+    expect(importada.phoneE164).toBe('+34612345600');
+    // El existente se rellena con «+58» explícito en el teléfono (0412 → VE no
+    // vale en Madrid): sin «+» y con la región ES no es válido, así que queda NULL
+    // hasta que el trabajo de relleno lo lea con la sede principal.
+    const rellenado = await raw.patient.findUniqueOrThrow({
+      where: { id: vacio },
+      select: { phone: true, phoneE164: true },
+    });
+    expect(rellenado.phone).not.toBeNull();
+    expect(rellenado.phoneE164).toBeNull();
+    // El barrido (el mismo trabajo que corre cada hora) lo resuelve con la sede
+    // principal (Caracas, +58).
+    const prisma = new PrismaService(new TenantContextService());
+    try {
+      await backfillTenantPhoneE164(prisma, clinic.tenantId);
+    } finally {
+      await prisma.$disconnect();
+    }
+    expect((await found('0412 4007080')).map((m) => m.id)).toEqual([vacio]);
+  });
+
+  it('I2 supresión parcial (caso de uso real): el teléfono deja de encontrarse', async () => {
+    const id = await createPatient({
+      firstName: 'Su',
+      lastName: 'Primida',
+      docNumber: '224501',
+      phone: '0416 800 90 10',
+    });
+    expect((await found('0416 8009010')).map((m) => m.id)).toEqual([id]);
+    // Una cita completada lo pone bajo retención (la fecha de última atención
+    // la mantiene un trigger de BD).
+    await appointment(id, caracas, new Date(Date.now() - DAY), 'COMPLETED');
+    await as(
+      api().post(`/api/v1/patients/${id}/partial-suppression`),
+      clinic.adminToken,
+    )
+      .send({ reason: 'Solicitud de supresión del titular' })
+      .expect(200);
+    expect(await found('0416 8009010')).toEqual([]);
+    const row = await raw.patient.findUniqueOrThrow({
+      where: { id },
+      select: { phone: true, phoneE164: true },
+    });
+    expect(row).toEqual({ phone: null, phoneE164: null });
   });
 
   async function seedRestricted(): Promise<string> {

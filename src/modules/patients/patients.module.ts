@@ -62,6 +62,8 @@ import { PrismaReferenceLookup } from './infrastructure/adapters/prisma-referenc
 import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 
+import { JobsModule } from '../jobs/jobs.module';
+import { PatientPhoneE164Jobs } from './infrastructure/patient-phone-e164.jobs';
 import { PatientCoveragesModule } from '../patient-coverages/patient-coverages.module';
 import { PatientAgreementsModule } from '../patient-agreements/patient-agreements.module';
 
@@ -74,6 +76,8 @@ import { PatientAgreementsModule } from '../patient-agreements/patient-agreement
   // DX-150: CollectionsModule da la marca «Saldo vencido» de la ficha.
   imports: [
     JwtModule.register({}),
+    // DX-224: trabajo que rellena `phoneE164` (barrido horario + al arrancar).
+    JobsModule,
     CollectionsModule,
     PatientCoveragesModule,
     PatientAgreementsModule,
@@ -141,6 +145,7 @@ import { PatientAgreementsModule } from '../patient-agreements/patient-agreement
       provide: DefaultPhoneRegionReader,
       useExisting: PATIENT_COMMUNICATION_REPOSITORY,
     },
+    PatientPhoneE164Jobs,
     TokenService,
     // TenantContextInterceptor only depends on the @Global TenantContextService;
     // listing it here makes it resolvable for @UseInterceptors on PatientsController.

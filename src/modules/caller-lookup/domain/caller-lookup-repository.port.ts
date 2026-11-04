@@ -1,6 +1,6 @@
 import type { PhoneRegion } from '../../../shared/phone/phone-number';
 
-/** Cuántos pacientes devuelve como máximo una búsqueda (un grupo familiar). */
+/** Cuántos pacientes devuelve como máximo una búsqueda (un grupo familiar). Se piden 21 para saber si hay más. */
 export const CALLER_LOOKUP_MAX_MATCHES = 20;
 
 export type CallerMatchedBy = 'PATIENT' | 'RESPONSIBLE_PARTY';
@@ -9,7 +9,7 @@ export interface CallerMatch {
   patientId: string;
   firstName: string;
   lastName: string;
-  /** Por su teléfono, o por el de su responsable de pago (DX-203). */
+  /** Por su teléfono, o por el de alguno de sus responsables (DX-203; contacto o paciente). */
   matchedBy: CallerMatchedBy;
 }
 
@@ -35,8 +35,10 @@ export const CALLER_LOOKUP_REPOSITORY = Symbol('CALLER_LOOKUP_REPOSITORY');
 export interface CallerLookupRepository {
   /** Prefijo por defecto de la sede activa (o de la principal, sin sede activa). */
   defaultPhoneRegion(): Promise<PhoneRegion | null>;
-  /** Pacientes vivos cuyo E.164 (o el de su responsable) es alguno de `e164s`. */
-  findByPhoneE164(e164s: readonly string[]): Promise<CallerMatch[]>;
+  /** Pacientes vivos cuyo E.164 (o el de un responsable suyo) es alguno de `e164s`; como mucho `CALLER_LOOKUP_MAX_MATCHES`. */
+  findByPhoneE164(
+    e164s: readonly string[],
+  ): Promise<{ matches: CallerMatch[]; truncated: boolean }>;
   /** La próxima cita (SCHEDULED o CONFIRMED, desde `now`) por paciente. */
   nextAppointments(
     patientIds: readonly string[],

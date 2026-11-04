@@ -318,6 +318,24 @@ export function buildAuditDrafts(
       Array.isArray((responseBody as { matches?: unknown }).matches)
         ? (responseBody as { matches: unknown[] }).matches
         : [];
+    if (matches.length === 0) {
+      // Sin coincidencias también queda rastro (probar números a ciegas no
+      // puede ser invisible): un evento sin paciente, sin el número y con
+      // `rows: 0`.
+      const draft = buildAuditDraft(options, req, {}, scope, resultCount);
+      return draft
+        ? [
+            {
+              ...draft,
+              metadata: {
+                ...draft.metadata,
+                reason: 'CALLER_LOOKUP_NO_MATCH',
+                search: { rows: 0 },
+              },
+            },
+          ]
+        : [];
+    }
     return matches.flatMap((match) => {
       const draft = buildAuditDraft(options, req, match, scope, resultCount);
       return draft ? [draft] : [];
