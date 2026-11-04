@@ -34,6 +34,7 @@ interface Line {
 interface Allocations {
   paymentId: string;
   receiptNumber: string | null;
+  locationId: string;
   treatmentPlanId: string;
   paymentAmount: number;
   paymentCurrency: string;
@@ -232,6 +233,8 @@ describe('Reasignación de la imputación de un abono (DX-051, e2e)', () => {
     const paymentId = await pay(planId, 100);
     const before = await allocationsOf(paymentId);
     expect(before).toMatchObject({
+      // DX-354c: la sede del abono, con la que la web pinta importes y fechas.
+      locationId,
       manual: false,
       allocated: 100,
       unallocated: 0,

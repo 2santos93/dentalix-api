@@ -37,6 +37,7 @@ const POLICY_TEXT =
 
 interface FeeView {
   appointmentId: string;
+  locationId: string;
   patientId: string;
   eligible: boolean;
   status: 'NONE' | 'CHARGED' | 'WAIVED' | 'VOIDED';
@@ -269,6 +270,8 @@ describe('Cargo por inasistencia y política en el enlace (DX-291)', () => {
         await admin().get(`/appointments/${id}/cancellation-fee`).expect(200)
       ).body as FeeView;
       expect(view).toMatchObject({
+        // DX-354c: la sede de la cita, con la que la web pinta importes y fechas.
+        locationId: principal,
         eligible: true,
         status: 'NONE',
         chargeBlock: null,

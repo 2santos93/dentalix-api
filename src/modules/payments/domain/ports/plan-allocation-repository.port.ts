@@ -89,6 +89,8 @@ export interface PlanBalanceSnapshot {
 export interface AllocationTarget extends PaymentRateState {
   paymentId: string;
   receiptNumber: string | null;
+  /** Sede del abono (DX-354c): la web pinta con el formato de la sede del dato. */
+  locationId: string;
   treatmentPlanId: string | null;
   /** En la moneda del abono. */
   amount: number;

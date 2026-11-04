@@ -80,6 +80,13 @@ export class PaymentAllocationsDto {
   })
   receiptNumber!: string | null;
 
+  @ApiProperty({
+    format: 'uuid',
+    description:
+      'Sede del abono: el importe y la fecha se pintan con el formato de esa sede',
+  })
+  locationId!: string;
+
   @ApiProperty({ format: 'uuid' })
   treatmentPlanId!: string;
 
