@@ -26,6 +26,7 @@ import {
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import {
   firstLocationWithRows,
+  loadLocationZones,
   loadPeriodLocationZones,
   resolveLocationTimeZones,
 } from '../../../../shared/locations/location-time-zone';
@@ -907,6 +908,16 @@ export class PrismaPaymentRepository implements PaymentRepository {
         await resolveLocationTimeZones(tx, tenantId, [locationId])
       )(locationId);
       return civilDateIn(paidAt, timeZone);
+    });
+  }
+
+  async siteToday(now: Date): Promise<string | null> {
+    const tenantId = this.requireTenantId();
+    return this.prisma.runWithTenant(async (tx) => {
+      const locationId = await this.tenantContext.writeLocationId(tx);
+      const zones = await loadLocationZones(tx, tenantId, [locationId]);
+      const timeZone = zones.configured.get(locationId);
+      return timeZone === undefined ? null : civilDateIn(now, timeZone);
     });
   }
 

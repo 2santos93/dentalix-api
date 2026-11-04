@@ -7,10 +7,6 @@ import {
 } from '@nestjs/common';
 import { PAYMENT_REPOSITORY } from '../../domain/ports/payment-repository.port';
 import { PAYMENT_CLOCK, type PaymentClock } from './void-payment.use-case';
-import {
-  PAID_AT_IN_FUTURE_MESSAGE,
-  isPaidAtTooFarInFuture,
-} from '../../domain/paid-at-window';
 import type { PaymentRepository } from '../../domain/ports/payment-repository.port';
 import { Payment } from '../../domain/entities/payment.entity';
 import {
@@ -30,6 +26,7 @@ import type { CurrencyWhitelist } from '../../../treatment-plans/domain/ports/cu
 import {
   UUID_RE,
   isFinitePositive,
+  assertPaidAtWindow,
   normalizePaidAt,
   type RecordPaymentInput,
 } from './record-payment.use-case';
@@ -96,9 +93,7 @@ export class RecordOpeningBalancePaymentUseCase {
       throw new BadRequestException(`Unknown currency: ${currency}`);
     }
     const paidAt = normalizePaidAt(input.paidAt);
-    if (isPaidAtTooFarInFuture(paidAt, this.now())) {
-      throw new BadRequestException(PAID_AT_IN_FUTURE_MESSAGE);
-    }
+    await assertPaidAtWindow(this.repo, paidAt, this.now());
 
     const balance = await this.repo.findOpeningBalance(openingBalanceId);
     if (!balance) {

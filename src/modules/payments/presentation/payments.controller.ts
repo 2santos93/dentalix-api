@@ -257,7 +257,8 @@ export class PaymentsController {
   @ApiBadRequestResponse({
     description:
       'DX-377: el medio pide referencia y no llegó, o el medio no es de la clínica o está desactivado. ' +
-      'DX-054: `paidAt` a más de 24 h en el futuro («La fecha del abono no puede estar más de 24 horas en el futuro.»).',
+      'DX-075: `paidAt` como día civil posterior a hoy en la sede («La fecha del abono no puede ser posterior a hoy en la sede.»). ' +
+      'DX-054: `paidAt` como instante a más de 24 h en el futuro («La fecha del abono no puede estar más de 24 horas en el futuro.»).',
   })
   @ApiUnprocessableEntityResponse({
     description:
@@ -347,7 +348,8 @@ export class PaymentsController {
     description:
       'Menos de 2 o más de 5 líneas, una línea sin medio, un medio de otra clínica o desactivado, ' +
       'una referencia que falta, o dos líneas con el mismo medio y referencia. ' +
-      'DX-054: `paidAt` a más de 24 h en el futuro.',
+      'DX-075: `paidAt` como día civil posterior a hoy en la sede. ' +
+      'DX-054: `paidAt` como instante a más de 24 h en el futuro.',
   })
   @ApiNotFoundResponse({
     description: 'El plan no existe o es de otra clínica',
@@ -406,7 +408,8 @@ export class PaymentsController {
   @ApiBadRequestResponse({
     description:
       'Otra moneda que la del saldo, o el abono supera lo pendiente (mensaje en español). ' +
-      'DX-054: `paidAt` a más de 24 h en el futuro.',
+      'DX-075: `paidAt` como día civil posterior a hoy en la sede. ' +
+      'DX-054: `paidAt` como instante a más de 24 h en el futuro.',
   })
   @ApiNotFoundResponse({ description: OPENING_BALANCE_NOT_FOUND_MESSAGE })
   @ApiUnprocessableEntityResponse({

@@ -348,6 +348,14 @@ export interface PaymentRepository {
   resolvePaidOn(paidAt: Date | CivilPaidDay): Promise<string>;
 
   /**
+   * DX-075: el día civil (YYYY-MM-DD) de `now` en la zona de la sede donde se
+   * va a registrar el abono (la misma de `resolvePaidOn`), o `null` si la sede
+   * no tiene zona válida: no lanza, la validación del abono cae entonces en la
+   * regla de 24 h.
+   */
+  siteToday(now: Date): Promise<string | null>;
+
+  /**
    * G1-B: el formato de una sede de la clínica (la del dato, R12), para
    * pintar un importe en un mensaje. Sin formato o sin reloj, 409
    * `LOCATION_LOCALE_REQUIRED`: se pide solo al pintar (I4).

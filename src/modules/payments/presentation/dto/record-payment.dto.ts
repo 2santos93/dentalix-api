@@ -64,8 +64,10 @@ export class RecordPaymentDto {
       'solo el día civil `YYYY-MM-DD`, que se guarda al mediodía de la zona ' +
       'horaria de la sede del abono (DX-097). La caja y el dashboard lo ' +
       'cuentan en su día civil en la zona de la sede. GET .../balance busca ' +
-      'la tasa de cambio por su fecha UTC. DX-054: 400 si va a más de 24 h ' +
-      'en el futuro (un día civil cuenta desde su primer instante en UTC+14); ' +
+      'la tasa de cambio por su fecha UTC. DX-075: un día civil posterior a ' +
+      'hoy en la zona de la sede es 400 («La fecha del abono no puede ser ' +
+      'posterior a hoy en la sede.»). DX-054: un instante a más de 24 h en ' +
+      'el futuro es 400 (también un día civil si la sede no tiene zona); ' +
       'las fechas pasadas no tienen límite. También en el abono al saldo migrado.',
   })
   @IsDateString()
