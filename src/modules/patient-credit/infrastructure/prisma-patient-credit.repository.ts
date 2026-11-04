@@ -770,8 +770,23 @@ export class PrismaPatientCreditRepository implements PatientCreditRepository {
             orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
           }),
         ]);
+        // DX-432: el nombre de quien traspasó, por su membresía (RLS y
+        // `tenantId`); sin filtrar `deletedAt`: si dejó la clínica, el
+        // traspaso sigue siendo suyo.
+        const authorIds = [...new Set(transfers.map((t) => t.createdById))];
+        const authors =
+          authorIds.length === 0
+            ? []
+            : await tx.clinicMembership.findMany({
+                where: { tenantId, userId: { in: authorIds } },
+                select: { userId: true, user: { select: { fullName: true } } },
+              });
+        const nameOf = new Map(authors.map((m) => [m.userId, m.user.fullName]));
         return {
-          transfers: transfers.map(toTransfer),
+          transfers: transfers.map((t) => ({
+            ...toTransfer(t),
+            createdByName: nameOf.get(t.createdById) ?? null,
+          })),
           refunds: refunds.map(toRefund),
         };
       },

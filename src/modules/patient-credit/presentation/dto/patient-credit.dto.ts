@@ -227,7 +227,18 @@ export class CreditRefundDto {
   regional!: DocumentRegionalDto | null;
 }
 
+export class CreditTransferMovementDto extends CreditTransferDto {
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'DX-432: nombre de quien traspasó; `null` si ya no es (ni fue) miembro de la clínica.',
+  })
+  createdByName!: string | null;
+}
+
 export class PatientCreditMovementsDto {
-  @ApiProperty({ type: [CreditTransferDto] }) transfers!: CreditTransferDto[];
+  @ApiProperty({ type: [CreditTransferMovementDto] })
+  transfers!: CreditTransferMovementDto[];
   @ApiProperty({ type: [CreditRefundDto] }) refunds!: CreditRefundDto[];
 }

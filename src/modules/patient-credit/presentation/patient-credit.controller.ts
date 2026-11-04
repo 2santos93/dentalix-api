@@ -54,6 +54,7 @@ import {
 } from '../application/patient-credit.use-cases';
 import type {
   CreditRefundRecord,
+  CreditTransferMovement,
   CreditTransferRecord,
   PatientCreditMovements,
 } from '../domain/ports/patient-credit-repository.port';
@@ -249,7 +250,7 @@ export class PatientCreditController {
     description: 'Paciente inexistente o de otra clínica.',
   })
   async list(@Param('id', ParseUUIDPipe) id: string): Promise<{
-    transfers: Omit<CreditTransferRecord, 'idempotencyFingerprint'>[];
+    transfers: Omit<CreditTransferMovement, 'idempotencyFingerprint'>[];
     refunds: Omit<CreditRefundRecord, 'idempotencyFingerprint'>[];
   }> {
     const movements: PatientCreditMovements = await this.listCredit.execute(id);

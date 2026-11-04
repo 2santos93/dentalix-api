@@ -128,8 +128,14 @@ export interface CreateRefundInput {
   dailyCap?: { capCents: number; clock: PatientCreditClock };
 }
 
+/** Un traspaso del listado (DX-432): con el nombre de quien lo hizo. */
+export interface CreditTransferMovement extends CreditTransferRecord {
+  /** `null` si ya no es (ni fue) miembro de la clínica. */
+  createdByName: string | null;
+}
+
 export interface PatientCreditMovements {
-  transfers: CreditTransferRecord[];
+  transfers: CreditTransferMovement[];
   refunds: CreditRefundRecord[];
 }
 

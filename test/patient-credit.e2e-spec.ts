@@ -835,8 +835,20 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
         api().get(`/api/v1/patients/${patientId}/credit-movements`),
         a,
       ).expect(200)
-    ).body as { transfers: unknown[]; refunds: unknown[] };
+    ).body as {
+      transfers: { createdById: string; createdByName: string | null }[];
+      refunds: unknown[];
+    };
     expect(res.transfers).toHaveLength(1);
+    // DX-432: quién traspasó, con su nombre (el comprobante ya trae el de la devolución).
+    const admin = await raw.user.findUniqueOrThrow({
+      where: { id: a.adminUserId },
+      select: { fullName: true },
+    });
+    expect(res.transfers[0]).toMatchObject({
+      createdById: a.adminUserId,
+      createdByName: admin.fullName,
+    });
     // 3 de antes + 3 del tope diario (DX-462: 60, 40 de RECEPCIÓN y 200 de ADMIN).
     expect(res.refunds).toHaveLength(6);
     const events = await raw.auditEvent.count({
