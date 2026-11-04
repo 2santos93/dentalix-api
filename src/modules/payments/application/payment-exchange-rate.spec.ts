@@ -13,6 +13,7 @@ import {
   makeManualRates,
   makeSettings,
 } from '../../exchange/application/__fixtures__/in-memory-exchange-settings';
+import type { AuditRequestContext } from '../../audit/domain/audit-request-context';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 
 const DAY = '2026-10-30';
@@ -173,6 +174,7 @@ describe('tasa congelada de un abono (DX-375)', () => {
         from: 'VES',
         to: 'EUR',
         date: DAY,
+        rateDate: DAY,
         source: 'MANUAL',
         fromPerBase: 40.12345678,
         toPerBase: 0.9,
@@ -193,6 +195,7 @@ describe('tasa congelada de un abono (DX-375)', () => {
         toPerBase: 0.9,
         source: 'MANUAL',
         date: DAY,
+        quotedOn: DAY,
       });
       expect(quote).toHaveBeenCalledWith({
         from: 'VES',
@@ -247,6 +250,7 @@ describe('tasa congelada de un abono (DX-375)', () => {
             from: 'GBP',
             to: 'USD',
             date: DAY,
+            rateDate: DAY,
             source: 'AUTOMATIC',
             fromPerBase: 3912.123456789,
             toPerBase: 1,
@@ -271,6 +275,7 @@ describe('tasa congelada de un abono (DX-375)', () => {
             from: 'XAU',
             to: 'USD',
             date: DAY,
+            rateDate: DAY,
             source: 'AUTOMATIC',
             fromPerBase: 0.000000004,
             toPerBase: 1,
@@ -356,6 +361,7 @@ describe('tasa congelada de un abono (DX-375)', () => {
         toPerBase: 1,
         source: 'AUTOMATIC',
         date: DAY,
+        quotedOn: DAY,
       });
       expect(b).toEqual({
         currency: 'USD',
@@ -363,6 +369,7 @@ describe('tasa congelada de un abono (DX-375)', () => {
         toPerBase: 1,
         source: 'MANUAL',
         date: DAY,
+        quotedOn: DAY,
       });
 
       const amountWith = (tenant: string, frozenRate: FrozenExchangeRate) =>
@@ -386,10 +393,130 @@ describe('tasa congelada de un abono (DX-375)', () => {
       c.provider.GBP = 5000;
       c.manual.rows(B)[0].rate = 5100;
       await c.tenantContext.run(A, () =>
-        c.settings.set(() => ({ source: 'MANUAL', manualSince: DAY })),
+        c.settings.set(
+          (before) => ({ ...before, source: 'MANUAL', manualSince: DAY }),
+          {} as AuditRequestContext,
+        ),
       );
       await expect(amountWith(A, a!)).resolves.toBe(102.5);
       await expect(amountWith(B, b!)).resolves.toBe(100);
+    });
+  });
+
+  // DX-384: con tasa manual, el abono de un día sin tasa congela la última
+  // registrada dentro del plazo de la clínica, con su fecha.
+  describe('tasa manual de respaldo hasta N días (DX-384)', () => {
+    const FRI = '2026-10-30';
+    const SAT = '2026-10-31';
+    const T = '55555555-5555-4555-8555-555555555555';
+
+    function clinic(maxAgeDays: number) {
+      const tenantContext = new TenantContextService();
+      const settings = makeSettings(
+        {
+          [T]: {
+            source: 'MANUAL',
+            manualSince: '2026-10-01',
+            manualRateMaxAgeDays: maxAgeDays,
+          },
+        },
+        tenantContext,
+      );
+      const manual = makeManualRates(
+        { [T]: { [FRI]: { VES: 36.5 } } },
+        tenantContext,
+      );
+      const convert = new ConvertAmountUseCase(
+        new GetRatesForDateUseCase(
+          {
+            findByDate: () => Promise.reject(new Error('sin proveedor')),
+            upsertMany: () => Promise.reject(new Error('sin proveedor')),
+          },
+          { fetchRates: () => Promise.reject(new Error('sin proveedor')) },
+          settings,
+          manual,
+          tenantContext,
+        ),
+      );
+      const run = <R>(fn: () => Promise<R>) => tenantContext.run(T, fn);
+      return { manual, convert, run };
+    }
+
+    it('el abono del sábado congela la tasa del viernes con su fecha y el día para el que se cotizó', async () => {
+      const { convert, run } = clinic(3);
+      await expect(
+        run(() =>
+          freezePaymentRate(convert, {
+            currency: 'VES',
+            targetCurrency: 'USD',
+            paidOn: SAT,
+          }),
+        ),
+      ).resolves.toEqual({
+        currency: 'USD',
+        fromPerBase: 36.5,
+        toPerBase: 1,
+        source: 'MANUAL',
+        date: FRI,
+        quotedOn: SAT,
+      });
+    });
+
+    it('registrar después la tasa del sábado no cambia un abono ya congelado', async () => {
+      const { manual, convert, run } = clinic(3);
+      const frozenRate = await run(() =>
+        freezePaymentRate(convert, {
+          currency: 'VES',
+          targetCurrency: 'USD',
+          paidOn: SAT,
+        }),
+      );
+      await run(() =>
+        manual.create({
+          date: SAT,
+          currency: 'VES',
+          rate: 40,
+          createdById: 'admin-1',
+        }),
+      );
+      const amount = () =>
+        run(() =>
+          paymentAmountIn(
+            convert,
+            {
+              amount: 3650,
+              currency: 'VES',
+              paidOn: SAT,
+              exchangeRateCurrency: 'USD',
+              frozenRate,
+            },
+            'USD',
+          ),
+        );
+      await expect(amount()).resolves.toBe(100);
+      // Un abono nuevo del sábado ya usa la del día.
+      await expect(
+        run(() =>
+          freezePaymentRate(convert, {
+            currency: 'VES',
+            targetCurrency: 'USD',
+            paidOn: SAT,
+          }),
+        ),
+      ).resolves.toMatchObject({ fromPerBase: 40, date: SAT });
+    });
+
+    it('con N=0 el abono del sábado queda «sin tasa» (null), nunca 1:1', async () => {
+      const { convert, run } = clinic(0);
+      await expect(
+        run(() =>
+          freezePaymentRate(convert, {
+            currency: 'VES',
+            targetCurrency: 'USD',
+            paidOn: SAT,
+          }),
+        ),
+      ).resolves.toBeNull();
     });
   });
 });

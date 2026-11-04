@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { resolveReferenceLocation } from '../../../../shared/locations/reference-location';
+import type { ManualRateRow } from '../../domain/manual-rate-fallback';
 import type { ManualExchangeRate } from '../../domain/entities/manual-exchange-rate.entity';
 import {
   ManualExchangeRateAuthorError,
@@ -97,6 +98,29 @@ export class PrismaManualExchangeRateRepository implements ManualExchangeRateRep
     const rates: Record<string, number> = {};
     for (const row of rows) rates[row.currency] = row.rate.toNumber();
     return rates;
+  }
+
+  async ratesBetween(
+    from: string,
+    to: string,
+    currencies?: readonly string[],
+  ): Promise<ManualRateRow[]> {
+    const tenantId = this.tenantId();
+    const rows = await this.prisma.runWithTenant(tenantId, (tx) =>
+      tx.manualExchangeRate.findMany({
+        where: {
+          tenantId,
+          date: { gte: toDateColumn(from), lte: toDateColumn(to) },
+          ...(currencies ? { currency: { in: [...currencies] } } : {}),
+        },
+        select: { date: true, currency: true, rate: true },
+      }),
+    );
+    return rows.map((row) => ({
+      date: fromDateColumn(row.date),
+      currency: row.currency,
+      rate: row.rate.toNumber(),
+    }));
   }
 
   async listRecent(limit: number): Promise<ManualExchangeRate[]> {

@@ -205,7 +205,12 @@ describe('Cuota del proveedor de tasas (e2e, SEC-054)', () => {
   it('una clínica en MANUAL nunca llama al proveedor por los días de su tasa manual', async () => {
     const todays = await rates(manual, today());
     expect(todays.status).toBe(200);
-    expect(todays.body).toEqual({ base: 'USD', source: 'MANUAL', rates: {} });
+    expect(todays.body).toEqual({
+      base: 'USD',
+      source: 'MANUAL',
+      rates: {},
+      rateDate: today(),
+    });
     // El día anterior al cambio que ya está guardado se lee de la caché.
     expect((await rates(manual, OLD_DAYS[0])).body).toMatchObject({
       source: 'AUTOMATIC',
@@ -224,6 +229,7 @@ describe('Cuota del proveedor de tasas (e2e, SEC-054)', () => {
         base: 'USD',
         source: 'AUTOMATIC',
         rates: { VES: 4020 },
+        rateDate: MANUAL_PAST_DAY,
       });
     }
     expect(fetchRates).toHaveBeenCalledTimes(1);

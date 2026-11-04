@@ -1,3 +1,4 @@
+import type { ManualRateRow } from '../manual-rate-fallback';
 import type { ManualExchangeRate } from '../entities/manual-exchange-rate.entity';
 
 export const MANUAL_EXCHANGE_RATE_REPOSITORY = Symbol(
@@ -50,6 +51,16 @@ export class ManualExchangeRateInUseError extends Error {
 export interface ManualExchangeRateRepository {
   /** Las tasas de un día civil, `{ moneda: tasa }` (vacío si no hay). */
   ratesOn(date: string): Promise<Record<string, number>>;
+  /**
+   * DX-384: las tasas de los días `from`..`to` (ambos incluidos, días
+   * civiles), de `currencies` si se dan; con ellas se elige la última tasa
+   * dentro del plazo de la clínica. Sin orden.
+   */
+  ratesBetween(
+    from: string,
+    to: string,
+    currencies?: readonly string[],
+  ): Promise<ManualRateRow[]>;
   /** Las últimas, del día más reciente al más antiguo y por moneda. */
   listRecent(limit: number): Promise<ManualExchangeRate[]>;
   /**

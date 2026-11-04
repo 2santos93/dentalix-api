@@ -28,6 +28,8 @@ export interface ConvertAmountResult {
   to: string;
   date: string;
   result: number;
+  /** DX-384: día civil de la tasa usada (anterior a `date` solo con tasa manual de respaldo). */
+  rateDate: string;
   /** Effective from→to rate actually applied (see rounding note below). */
   rateUsed: number;
 }
@@ -66,13 +68,15 @@ export class ConvertAmountUseCase implements AmountConverter {
   constructor(private readonly getRatesForDate: GetRatesForDateUseCase) {}
 
   execute(input: ConvertAmountInput): Promise<ConvertAmountResult> {
-    return this.convertWith(input, (date) =>
-      this.getRatesForDate.execute(date),
+    return this.convertWith(input, (date, options) =>
+      this.getRatesForDate.execute(date, options),
     );
   }
 
   quote(input: QuoteInput): Promise<ExchangeRateQuote> {
-    return this.quoteWith(input, (date) => this.getRatesForDate.execute(date));
+    return this.quoteWith(input, (date, options) =>
+      this.getRatesForDate.execute(date, options),
+    );
   }
 
   /**
@@ -80,8 +84,8 @@ export class ConvertAmountUseCase implements AmountConverter {
    * proveedor los días de la ventana de la clínica (`forRequest`).
    */
   forRequest(input: ConvertAmountInput): Promise<ConvertAmountResult> {
-    return this.convertWith(input, (date) =>
-      this.getRatesForDate.forRequest(date),
+    return this.convertWith(input, (date, options) =>
+      this.getRatesForDate.forRequest(date, options),
     );
   }
 
@@ -104,15 +108,18 @@ export class ConvertAmountUseCase implements AmountConverter {
   ): Promise<ExchangeRateQuote> {
     if (!isValidRateDate(input.date)) throw invalidRateDate();
     const { from, to, date } = input;
-    let read = await ratesFor(date);
+    // DX-384: las dos monedas, para que con tasa manual la del día pueda ser
+    // la última registrada dentro del plazo de la clínica.
+    const currencies = [from, to];
+    let read = await ratesFor(date, { currencies });
     // DX-402: la tasa de respaldo solo vale si cubre las dos monedas; si no,
     // la cotización entera sale del camino automático (una sola fuente).
     const covered = (currency: string) =>
       currency === BASE_CURRENCY || read.rates[currency] !== undefined;
     if (read.backup && !(covered(from) && covered(to))) {
-      read = await ratesFor(date, { noBackup: true });
+      read = await ratesFor(date, { noBackup: true, currencies });
     }
-    const { rates, source, backup } = read;
+    const { rates, source, backup, rateDate } = read;
     // DX-374: con tasa manual, una moneda ausente es la tasa que la clínica
     // aún no registró ese día (error de dominio en español); con el
     // proveedor, una moneda que no trae.
@@ -132,6 +139,7 @@ export class ConvertAmountUseCase implements AmountConverter {
       from,
       to,
       date,
+      rateDate,
       source,
       fromPerBase,
       toPerBase,
@@ -151,7 +159,15 @@ export class ConvertAmountUseCase implements AmountConverter {
     const { amount, from, to, date } = input;
 
     if (from === to) {
-      return { amount, from, to, date, result: amount, rateUsed: 1 };
+      return {
+        amount,
+        from,
+        to,
+        date,
+        rateDate: date,
+        result: amount,
+        rateUsed: 1,
+      };
     }
 
     const quote = await this.quoteWith({ from, to, date }, ratesFor);
@@ -171,6 +187,14 @@ export class ConvertAmountUseCase implements AmountConverter {
     const rateUsed =
       amount !== 0 ? result / amount : quote.toPerBase / quote.fromPerBase;
 
-    return { amount, from, to, date, result, rateUsed };
+    return {
+      amount,
+      from,
+      to,
+      date,
+      rateDate: quote.rateDate,
+      result,
+      rateUsed,
+    };
   }
 }

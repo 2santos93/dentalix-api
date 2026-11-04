@@ -105,7 +105,10 @@ export async function freezePaymentRate(
       fromPerBase,
       toPerBase,
       source: quote.source,
-      date: quote.date,
+      // DX-384: el día de la tasa usada, que con tasa manual puede ser
+      // anterior al del abono.
+      date: quote.rateDate,
+      quotedOn: payment.paidOn,
       ...(quote.backup ? { backup: quote.backup } : {}),
     };
   } catch (error) {

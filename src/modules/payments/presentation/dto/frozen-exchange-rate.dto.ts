@@ -36,13 +36,14 @@ export class FrozenExchangeRateDto {
     enum: EXCHANGE_RATE_SOURCES,
     enumName: 'ExchangeRateSource',
     description:
-      'AUTOMATIC: la del proveedor; MANUAL: la que registró la clínica para ese día',
+      'AUTOMATIC: la del proveedor; MANUAL: la que registró la clínica (para ese día o, DX-384, la última dentro del plazo de la clínica)',
   })
   source!: 'AUTOMATIC' | 'MANUAL';
 
   @ApiProperty({
     example: '2026-10-30',
-    description: 'Día civil (AAAA-MM-DD) de la tasa: el del abono en su sede',
+    description:
+      'Día civil (AAAA-MM-DD) de la tasa USADA. Es el del abono en su sede salvo con fuente MANUAL cuando la clínica no registró la de ese día y se usó la última dentro de su plazo (DX-384, `manualRateMaxAgeDays`): entonces es anterior al del abono. Se congela con el abono: registrar después la tasa del día no lo cambia.',
   })
   date!: string;
 }

@@ -4,6 +4,9 @@ import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { resolveReferenceLocation } from '../../../../shared/locations/reference-location';
 import { isValidTimeZone } from '../../../../shared/time/civil-day';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+import { configAuditEvent } from '../../../audit/domain/config-audit';
+import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
 import type {
   ClinicExchangeSettings,
   ClinicProviderWindow,
@@ -13,11 +16,13 @@ import type {
 interface SettingsRow {
   exchangeRateSource: ExchangeRateSource;
   manualExchangeRatesSince: Date | null;
+  manualRateMaxAgeDays: number;
 }
 
 const SETTINGS_SELECT = {
   exchangeRateSource: true,
   manualExchangeRatesSince: true,
+  manualRateMaxAgeDays: true,
 } as const;
 
 /** Día civil ↔ columna DATE: Prisma la lee y escribe como medianoche UTC. */
@@ -26,6 +31,7 @@ const toSettings = (row: SettingsRow): ClinicExchangeSettings => ({
   manualSince: row.manualExchangeRatesSince
     ? row.manualExchangeRatesSince.toISOString().slice(0, 10)
     : null,
+  manualRateMaxAgeDays: row.manualRateMaxAgeDays,
 });
 
 @Injectable()
@@ -53,15 +59,17 @@ export class PrismaClinicExchangeSettingsRepository implements ClinicExchangeSet
 
   async set(
     next: (before: ClinicExchangeSettings) => ClinicExchangeSettings,
+    ctx: AuditRequestContext,
   ): Promise<{
     before: ClinicExchangeSettings;
     after: ClinicExchangeSettings;
   }> {
     const id = this.tenantId();
-    // Lectura con la fila bloqueada y escritura en la misma transacción.
-    return this.prisma.$transaction(async (tx) => {
+    // Lectura con la fila bloqueada y escritura en la misma transacción, con
+    // el evento del plazo de la tasa (DX-384, patrón de DX-360).
+    return this.prisma.runWithTenant(id, async (tx) => {
       const [locked] = await tx.$queryRaw<SettingsRow[]>`
-        SELECT "exchangeRateSource", "manualExchangeRatesSince"
+        SELECT "exchangeRateSource", "manualExchangeRatesSince", "manualRateMaxAgeDays"
           FROM "tenants" WHERE "id" = ${id}::uuid FOR UPDATE`;
       const before = toSettings(locked);
       const wanted = next(before);
@@ -72,10 +80,21 @@ export class PrismaClinicExchangeSettingsRepository implements ClinicExchangeSet
           manualExchangeRatesSince: wanted.manualSince
             ? new Date(`${wanted.manualSince}T00:00:00.000Z`)
             : null,
+          manualRateMaxAgeDays: wanted.manualRateMaxAgeDays,
         },
         select: SETTINGS_SELECT,
       });
-      return { before, after: toSettings(tenant) };
+      const after = toSettings(tenant);
+      const event = configAuditEvent(ctx, {
+        action: 'UPDATE',
+        resourceType: 'CLINIC_SETTINGS',
+        resourceId: id,
+        reason: 'EXCHANGE_RATE_MAX_AGE',
+        before: { manualRateMaxAgeDays: before.manualRateMaxAgeDays },
+        after: { manualRateMaxAgeDays: after.manualRateMaxAgeDays },
+      });
+      if (event) await writeAuditEvent(tx, event);
+      return { before, after };
     });
   }
 

@@ -181,12 +181,14 @@ describe('Tasa de cambio por clínica (e2e, DX-374)', () => {
     await inManual(api().get(SETTINGS)).expect(200).expect({
       source: 'AUTOMATIC',
       manualSince: null,
+      manualRateMaxAgeDays: 3,
       baseCurrency: 'USD',
     });
     await expect(rates(manual, TODAY)).resolves.toEqual({
       base: 'USD',
       source: 'AUTOMATIC',
       rates: PROVIDER,
+      rateDate: TODAY,
     });
   });
 
@@ -287,7 +289,12 @@ describe('Tasa de cambio por clínica (e2e, DX-374)', () => {
     await inManual(api().put(SETTINGS))
       .send({ source: 'MANUAL' })
       .expect(200)
-      .expect({ source: 'MANUAL', manualSince: TODAY, baseCurrency: 'USD' });
+      .expect({
+        source: 'MANUAL',
+        manualSince: TODAY,
+        manualRateMaxAgeDays: 3,
+        baseCurrency: 'USD',
+      });
     await inManual(api().put(SETTINGS))
       .send({ source: 'MANUAL' })
       .expect(200)
@@ -315,6 +322,7 @@ describe('Tasa de cambio por clínica (e2e, DX-374)', () => {
       base: 'USD',
       source: 'AUTOMATIC',
       rates: PROVIDER,
+      rateDate: YESTERDAY,
     });
   });
 
@@ -324,6 +332,7 @@ describe('Tasa de cambio por clínica (e2e, DX-374)', () => {
       base: 'USD',
       source: 'MANUAL',
       rates: {},
+      rateDate: TODAY,
     });
     const res = await inManual(
       api().get(
@@ -404,11 +413,13 @@ describe('Tasa de cambio por clínica (e2e, DX-374)', () => {
       base: 'USD',
       source: 'AUTOMATIC',
       rates: PROVIDER,
+      rateDate: TODAY,
     });
     await expect(rates(manual, TODAY)).resolves.toEqual({
       base: 'USD',
       source: 'MANUAL',
       rates: { VES: 40.12345678 },
+      rateDate: TODAY,
     });
     // La clínica automática no ve las tasas manuales de la otra.
     await as(api().get(MANUAL), auto.adminToken, auto.host)
@@ -463,7 +474,12 @@ describe('Tasa de cambio por clínica (e2e, DX-374)', () => {
     await inManual(api().put(SETTINGS))
       .send({ source: 'AUTOMATIC' })
       .expect(200)
-      .expect({ source: 'AUTOMATIC', manualSince: null, baseCurrency: 'USD' });
+      .expect({
+        source: 'AUTOMATIC',
+        manualSince: null,
+        manualRateMaxAgeDays: 3,
+        baseCurrency: 'USD',
+      });
     await expect(rates(manual, TODAY)).resolves.toMatchObject({
       source: 'AUTOMATIC',
       rates: PROVIDER,

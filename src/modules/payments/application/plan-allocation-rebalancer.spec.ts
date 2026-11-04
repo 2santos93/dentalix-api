@@ -261,6 +261,7 @@ describe('PlanAllocationRebalancer', () => {
           }
           return Promise.resolve({
             ...input,
+            rateDate: input.date,
             source,
             fromPerBase: perBase(input.from),
             toPerBase: perBase(input.to),
@@ -302,6 +303,7 @@ describe('PlanAllocationRebalancer', () => {
           toPerBase: 1,
           source: 'AUTOMATIC',
           date: '2026-10-20',
+          quotedOn: '2026-10-20',
         },
       });
       // Sin tasa también queda con su moneda de destino (deja de ser anterior).

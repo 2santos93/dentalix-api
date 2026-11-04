@@ -99,6 +99,7 @@ describe('GetRatesForDateUseCase', () => {
       base: 'USD',
       source: 'AUTOMATIC',
       rates: { GBP: 4000, EUR: 0.92 },
+      rateDate: '2026-07-20',
     });
     expect(fetchRates).not.toHaveBeenCalled();
   });
@@ -119,6 +120,7 @@ describe('GetRatesForDateUseCase', () => {
       base: 'USD',
       source: 'AUTOMATIC',
       rates: { GBP: 4100, EUR: 0.93 },
+      rateDate: '2026-07-21',
     });
     // Persisted, so a subsequent read of the same date sees it.
     const stored = await repo.findByDate('2026-07-21');
@@ -194,6 +196,7 @@ describe('GetRatesForDateUseCase', () => {
         base: 'USD',
         source: 'AUTOMATIC',
         rates: { GBP: 4000, VES: 36.5 },
+        rateDate: '2026-10-30',
       });
     });
 
@@ -205,6 +208,7 @@ describe('GetRatesForDateUseCase', () => {
         base: 'USD',
         source: 'MANUAL',
         rates: { VES: 40.12345678 },
+        rateDate: '2026-10-30',
       });
       expect(fetchRates).not.toHaveBeenCalled();
     });
@@ -223,7 +227,12 @@ describe('GetRatesForDateUseCase', () => {
       const { uc, tenantContext, fetchRates } = setup();
       await expect(
         tenantContext.run(B, () => uc.execute('2026-10-29')),
-      ).resolves.toEqual({ base: 'USD', source: 'MANUAL', rates: {} });
+      ).resolves.toEqual({
+        base: 'USD',
+        source: 'MANUAL',
+        rates: {},
+        rateDate: '2026-10-29',
+      });
       expect(fetchRates).not.toHaveBeenCalled();
     });
 
@@ -270,6 +279,7 @@ describe('GetRatesForDateUseCase', () => {
         base: 'USD',
         source: 'AUTOMATIC',
         rates: { VES: 35 },
+        rateDate: '2026-10-29',
       });
     });
 
@@ -277,10 +287,20 @@ describe('GetRatesForDateUseCase', () => {
       const { uc, tenantContext, fetchRates } = setup();
       await expect(
         tenantContext.run(C, () => uc.execute(SINCE)),
-      ).resolves.toEqual({ base: 'USD', source: 'MANUAL', rates: { VES: 40 } });
+      ).resolves.toEqual({
+        base: 'USD',
+        source: 'MANUAL',
+        rates: { VES: 40 },
+        rateDate: '2026-10-30',
+      });
       await expect(
         tenantContext.run(C, () => uc.execute('2026-10-31')),
-      ).resolves.toEqual({ base: 'USD', source: 'MANUAL', rates: {} });
+      ).resolves.toEqual({
+        base: 'USD',
+        source: 'MANUAL',
+        rates: {},
+        rateDate: '2026-10-31',
+      });
       expect(fetchRates).not.toHaveBeenCalled();
     });
 
@@ -349,6 +369,7 @@ describe('GetRatesForDateUseCase', () => {
         base: 'USD',
         source: 'MANUAL',
         rates: { GBP: 4000 },
+        rateDate: '2026-10-28',
         backup: { manualSince: SINCE },
       });
       expect(fetchRates).not.toHaveBeenCalled();
@@ -365,6 +386,7 @@ describe('GetRatesForDateUseCase', () => {
         base: 'USD',
         source: 'AUTOMATIC',
         rates: { GBP: 3900 },
+        rateDate: '2026-10-28',
       });
     });
 
@@ -431,6 +453,7 @@ describe('GetRatesForDateUseCase', () => {
         base: 'USD',
         source: 'MANUAL',
         rates: {},
+        rateDate: '2026-10-30',
       });
     });
   });
@@ -592,6 +615,7 @@ describe('GetRatesForDateUseCase', () => {
         base: 'USD',
         source: 'MANUAL',
         rates: {},
+        rateDate: '2026-10-31',
       });
       const body = await badRequestBody(asA(() => uc.forRequest('2026-11-01')));
       expect(body).toMatchObject({
@@ -643,6 +667,7 @@ describe('GetRatesForDateUseCase', () => {
         base: 'USD',
         source: 'AUTOMATIC',
         rates: { GBP: 3200 },
+        rateDate: '2020-01-02',
       });
       expect(fetchRates).not.toHaveBeenCalled();
     });
@@ -715,17 +740,20 @@ describe('GetRatesForDateUseCase', () => {
         base: 'USD',
         source: 'MANUAL',
         rates: {},
+        rateDate: '2026-10-15',
       });
       await expect(asM(() => uc.execute('2026-10-30'))).resolves.toEqual({
         base: 'USD',
         source: 'MANUAL',
         rates: {},
+        rateDate: '2026-10-30',
       });
       // El día anterior al cambio que ya está guardado se lee de la caché.
       await expect(asM(() => uc.execute('2020-01-02'))).resolves.toEqual({
         base: 'USD',
         source: 'AUTOMATIC',
         rates: { GBP: 3200 },
+        rateDate: '2020-01-02',
       });
       expect(fetchRates).not.toHaveBeenCalled();
     });
@@ -740,11 +768,13 @@ describe('GetRatesForDateUseCase', () => {
         base: 'USD',
         source: 'AUTOMATIC',
         rates: { GBP: 4010 },
+        rateDate: '2026-09-15',
       });
       await expect(asM(() => uc.forRequest('2026-09-15'))).resolves.toEqual({
         base: 'USD',
         source: 'AUTOMATIC',
         rates: { GBP: 4010 },
+        rateDate: '2026-09-15',
       });
       expect(fetchRates).toHaveBeenCalledTimes(1);
       expect(await repo.findByDate('2026-09-15')).toHaveLength(1);
