@@ -89,6 +89,41 @@ function snapshot(partial: Partial<StatementSnapshot>): StatementSnapshot {
 }
 
 describe('computeAccountStatement', () => {
+  it('DX-414: cada línea de un cobro dividido lleva el recibo único; un abono sin recibo, null', () => {
+    const out = computeAccountStatement(
+      snapshot({
+        plans: [plan('tp-1', { billable: 1000 })],
+        payments: [
+          payment('tp-1', 100, {
+            id: 'a',
+            splitId: 'a',
+            receiptNumber: 'PRI-000007',
+          }),
+          payment('tp-1', 50, {
+            id: 'b',
+            splitId: 'a',
+            receiptNumber: 'PRI-000007',
+          }),
+          payment('tp-1', 10, { id: 'c' }),
+        ],
+      }),
+      { today: TODAY },
+    );
+    const byId = new Map(out.movements.map((m) => [m.id, m]));
+    expect(byId.get('a')).toMatchObject({
+      splitLines: 2,
+      receiptNumber: 'PRI-000007',
+    });
+    expect(byId.get('b')).toMatchObject({
+      splitLines: 2,
+      receiptNumber: 'PRI-000007',
+    });
+    expect(byId.get('c')).toMatchObject({
+      splitLines: null,
+      receiptNumber: null,
+    });
+  });
+
   it('returns an empty statement for a patient with no plans or payments', () => {
     const out = computeAccountStatement(snapshot({}), { today: TODAY });
     expect(out).toEqual({

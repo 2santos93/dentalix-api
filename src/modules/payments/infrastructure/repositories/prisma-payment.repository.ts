@@ -235,7 +235,14 @@ const CASH_PAYMENT_SELECT = {
   // DX-390: el cobro dividido y cuántas líneas tiene (la línea 1 también se
   // apunta a sí misma), aunque el filtro de la caja deje ver solo una.
   splitId: true,
-  splitHead: { select: { _count: { select: { splitLines: true } } } },
+  splitHead: {
+    select: {
+      _count: { select: { splitLines: true } },
+      receipt: RECEIPT_NUMBER_SELECT,
+    },
+  },
+  // DX-414: el recibo del abono (o el de la línea 1 de su cobro dividido).
+  receipt: RECEIPT_NUMBER_SELECT,
   // DX-516: sus ajustes por medio de pago, en orden.
   methodAdjustments: ADJUSTMENT_LINE_SELECT,
 } satisfies Prisma.PaymentSelect;
@@ -315,6 +322,9 @@ function mapToCashPayment(
       : null,
     splitId: row.splitId,
     splitLines: row.splitHead?._count.splitLines ?? null,
+    receiptNumber: receiptNumberOf(
+      row.receipt ?? row.splitHead?.receipt ?? null,
+    ),
     adjustments,
     collectedAmount: collectedAmount(row.amount.toNumber(), adjustments),
   };

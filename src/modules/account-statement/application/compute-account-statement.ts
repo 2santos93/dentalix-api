@@ -439,6 +439,7 @@ export function computeAccountStatement(
       externalInvoiceNumber: p.externalInvoiceNumber ?? null,
       splitId: p.splitId ?? null,
       splitLines: p.splitId ? (splitLines.get(p.splitId) ?? null) : null,
+      receiptNumber: p.receiptNumber ?? null,
       location: p.location,
       treatmentPlanId: p.treatmentPlanId,
       openingBalanceId: p.openingBalanceId ?? null,

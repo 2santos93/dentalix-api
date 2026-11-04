@@ -550,10 +550,16 @@ describe('Cobro dividido con un solo recibo (e2e, DX-390)', () => {
         id: string;
         splitId: string | null;
         splitLines: number | null;
+        receiptNumber: string | null;
       }[];
     };
     const cashLine = cash.items.find((item) => item.id === ids[2]);
-    expect(cashLine).toMatchObject({ splitId: first.id, splitLines: 3 });
+    expect(cashLine).toMatchObject({
+      splitId: first.id,
+      splitLines: 3,
+      // DX-414: el recibo único del cobro, en cada línea.
+      receiptNumber: first.receiptNumber,
+    });
     expect(cash.items.filter((item) => ids.includes(item.id))).toHaveLength(1);
 
     const statement = (
@@ -569,12 +575,17 @@ describe('Cobro dividido con un solo recibo (e2e, DX-390)', () => {
         id: string;
         splitId: string | null;
         splitLines: number | null;
+        receiptNumber: string | null;
       }[];
     };
     const lines = statement.movements.filter((m) => ids.includes(m.id));
     expect(lines).toHaveLength(3);
     for (const movement of lines) {
-      expect(movement).toMatchObject({ splitId: first.id, splitLines: 3 });
+      expect(movement).toMatchObject({
+        splitId: first.id,
+        splitLines: 3,
+        receiptNumber: first.receiptNumber,
+      });
     }
   });
 

@@ -199,6 +199,17 @@ export class CashPaymentDto {
   splitLines!: number | null;
 
   @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'PRI-000123',
+    description:
+      'DX-414: número del recibo de caja del abono (DX-136); todas las líneas ' +
+      'de un cobro dividido llevan el de su recibo único. `null` en un abono ' +
+      'anterior a la numeración.',
+  })
+  receiptNumber!: string | null;
+
+  @ApiProperty({
     type: [PaymentAdjustmentLineDto],
     description:
       'DX-516: ajustes por medio de pago congelados en el abono (vacío sin ajustes).',
