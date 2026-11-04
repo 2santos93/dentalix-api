@@ -475,7 +475,7 @@ export class CashClosingDto {
     type: CashReceiptViewsDto,
     nullable: true,
     description:
-      'SEC-043-bis: recibos de abonos de esta caja que quien la cerró abrió o imprimió entre la apertura y este cierre (VIEW y PRINT de la auditoría). Solo para ADMIN y en un cierre a ciegas; null en los demás casos.',
+      'SEC-043-bis: recibos de abonos de esta caja que quien la cerró abrió o imprimió entre la apertura (o la última reapertura) y este cierre (VIEW y PRINT de la auditoría; abonos de la caja y de todo ajuste que cuenta en ella). Solo para ADMIN y en un cierre a ciegas; null en los demás casos.',
   })
   receiptViews!: CashReceiptViewsDto | null;
 

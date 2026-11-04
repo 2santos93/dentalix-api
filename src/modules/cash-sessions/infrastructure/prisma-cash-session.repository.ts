@@ -193,6 +193,13 @@ type OutflowRow = Prisma.ExpensePaymentGetPayload<{
   select: typeof OUTFLOW_SELECT;
 }>;
 
+/**
+ * Un instante JS como `timestamp` UTC, sin depender del TimeZone de la sesión
+ * (las columnas son `timestamp(3)` sin zona, en UTC; como en jobs).
+ */
+const utc = (date: Date): Prisma.Sql =>
+  Prisma.sql`(${date.toISOString()}::timestamptz AT TIME ZONE 'UTC')`;
+
 const CLOSING_SELECT = {
   id: true,
   sequence: true,
@@ -292,9 +299,10 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
   }): Promise<CashReceiptViews> {
     const tenantId = this.tenantId();
     return this.prisma.runWithTenant(async (tx) => {
-      // Los abonos de la caja (también los anulados) y los tardíos que
-      // entraron en ella como ajuste. El índice (tenantId, actorUserId,
-      // occurredAt) de audit_events acota la búsqueda.
+      // Los abonos de la caja (también los anulados) y los de todo ajuste que
+      // cuenta en ella (un tardío, la anulación de un abono de otra caja ya
+      // cerrada…): todos suman en su esperado y su recibo lleva el importe.
+      // El índice (tenantId, actorUserId, occurredAt) acota la búsqueda.
       const [row] = await tx.$queryRaw<{ receipts: number; views: number }[]>`
         SELECT count(DISTINCT e."resourceId")::int AS "receipts",
                count(*)::int AS "views"
@@ -303,8 +311,8 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
            AND e."actorUserId" = ${params.actorUserId}::uuid
            AND e."resourceType" = 'PAYMENT_RECEIPT'
            AND e."action" IN ('VIEW', 'PRINT')
-           AND e."occurredAt" >= ${params.from}
-           AND e."occurredAt" < ${params.to}
+           AND e."occurredAt" >= ${utc(params.from)}
+           AND e."occurredAt" < ${utc(params.to)}
            AND e."resourceId" IN (
              SELECT p."id" FROM "payments" p
               WHERE p."tenantId" = ${tenantId}::uuid
@@ -313,7 +321,6 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
              SELECT a."paymentId" FROM "cash_session_adjustments" a
               WHERE a."tenantId" = ${tenantId}::uuid
                 AND a."sessionId" = ${params.sessionId}::uuid
-                AND a."kind" = 'LATE_PAYMENT'
                 AND a."paymentId" IS NOT NULL
            )`;
       return { receipts: row?.receipts ?? 0, views: row?.views ?? 0 };

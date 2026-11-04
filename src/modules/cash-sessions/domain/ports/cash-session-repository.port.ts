@@ -150,7 +150,7 @@ export interface CashSessionRepository {
 
   /**
    * SEC-043-bis: consultas de recibos (VIEW y PRINT en la auditoría) de los
-   * abonos de la caja —los suyos y los tardíos que entraron en ella— hechas
+   * abonos de la caja —los suyos y los de todo ajuste que cuenta en ella— hechas
    * por `actorUserId` en [`from`, `to`).
    */
   countReceiptViews(params: {

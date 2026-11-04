@@ -493,6 +493,44 @@ describe('GetCashSessionUseCase (DX-027)', () => {
       expect(view.closings[0].receiptViews).toEqual({ receipts: 3, views: 5 });
     });
 
+    it('tras una reapertura, la vuelta 2 cuenta desde esa reapertura (con la caja cerrada no hay nada que reconstruir)', async () => {
+      const repo = fakeRepo();
+      const reopenedAt = new Date('2026-10-18T02:00:00.000Z');
+      const secondClosedAt = new Date('2026-10-18T03:00:00.000Z');
+      const first = { ...closingOf(true, 'c-1'), sequence: 1 };
+      const second = {
+        ...closingOf(true, 'c-2'),
+        sequence: 2,
+        closedAt: secondClosedAt,
+      };
+      repo.detail.mockResolvedValue(
+        record({
+          status: 'CLOSED',
+          closing: second,
+          closings: [second, first],
+          reopenings: [
+            {
+              id: 'r-1',
+              sequence: 1,
+              reopenedAt,
+              reopenedBy: { id: ADMIN.userId, fullName: 'Admin' },
+              reason: 'Revisar el cambio',
+            },
+          ],
+        }),
+      );
+      await new GetCashSessionUseCase(asRepo(repo), context).execute(
+        's-1',
+        ADMIN,
+      );
+      expect(repo.countReceiptViews).toHaveBeenCalledWith(
+        expect.objectContaining({ from: reopenedAt, to: secondClosedAt }),
+      );
+      expect(repo.countReceiptViews).toHaveBeenCalledWith(
+        expect.objectContaining({ from: NOW, to: closedAt }),
+      );
+    });
+
     it('un cierre con el esperado a la vista no la lleva (no hay nada que reconstruir)', async () => {
       const repo = fakeRepo();
       const plain = closingOf(false);

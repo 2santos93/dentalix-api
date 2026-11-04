@@ -114,7 +114,7 @@ export interface CashClosingLine extends HiddenAmount {
 
 /**
  * SEC-043-bis: recibos de abonos de esta caja que quien la cerró abrió o
- * imprimió entre la apertura y ese cierre (el recibo lleva el importe que el
+ * imprimió entre la apertura (o la última reapertura) y ese cierre (el recibo lleva el importe que el
  * arqueo ciego oculta). `receipts`: recibos distintos; `views`: consultas.
  */
 export interface CashReceiptViews {
