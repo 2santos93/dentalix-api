@@ -90,3 +90,35 @@ export function staffStatusAuditEvent(
     },
   });
 }
+
+function sameLocationSet(a: string[] | null, b: string[] | null): boolean {
+  if (a === null || b === null) return a === b;
+  const left = new Set(a);
+  return left.size === new Set(b).size && b.every((id) => left.has(id));
+}
+
+/**
+ * DX-381: evento de `PUT /staff/:userId/locations` con las sedes antes y
+ * después (`null` = todas). Mismo conjunto, sin importar el orden → `null`
+ * (sin evento, como en `PATCH /staff/:userId`).
+ */
+export function staffLocationsAuditEvent(
+  ctx: AuditRequestContext,
+  userId: string,
+  before: string[] | null,
+  after: string[] | null,
+): AuditEventDraft | null {
+  if (sameLocationSet(before, after)) return null;
+  return auditDraftFromContext(ctx, {
+    action: 'UPDATE',
+    resourceType: 'STAFF_MEMBER',
+    resourceId: userId,
+    metadata: {
+      reason: 'LOCATIONS_CHANGED',
+      staffAccess: {
+        before: { locationIds: before },
+        after: { locationIds: after },
+      },
+    },
+  });
+}

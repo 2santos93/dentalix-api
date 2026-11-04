@@ -155,8 +155,52 @@ describe('Sedes permitidas por miembro (DX-089)', () => {
     expect(events[0]).toMatchObject({
       actorUserId: a.adminUserId,
       actorRole: 'ADMIN',
-      metadata: { reason: 'LOCATIONS_CHANGED' },
+      metadata: {
+        reason: 'LOCATIONS_CHANGED',
+        // DX-381: antes (null = todas) y después, por id; nada más.
+        staffAccess: {
+          before: { locationIds: null },
+          after: { locationIds: [a1] },
+        },
+      },
     });
+  });
+
+  it('DX-381: cada cambio de conjunto deja su evento; el mismo conjunto (en otro orden) o un rechazo, ninguno', async () => {
+    const put = (locationIds: string[]) =>
+      api(a, a.adminToken).put(`/staff/${recepcion.userId}/locations`, {
+        locationIds,
+      });
+    const changes = async () =>
+      (
+        await raw.auditEvent.findMany({
+          where: {
+            tenantId: a.tenantId,
+            resourceType: 'STAFF_MEMBER',
+            resourceId: recepcion.userId,
+            metadata: { path: ['reason'], equals: 'LOCATIONS_CHANGED' },
+          },
+          orderBy: [{ occurredAt: 'asc' }, { id: 'asc' }],
+        })
+      ).map((e) => (e.metadata as { staffAccess: unknown }).staffAccess);
+
+    await put([a1, a2]).expect(200);
+    expect(await changes()).toHaveLength(2);
+    await put([a2, a1]).expect(200); // mismo conjunto: sin evento
+    await put([a1, a2]).expect(200);
+    await put([aInactiva]).expect(400); // rechazo: sin evento
+    expect(await changes()).toHaveLength(2);
+
+    await put([a1]).expect(200);
+    await put([]).expect(200); // vuelve a todas las sedes
+    await put([a1]).expect(200);
+    const all = await changes();
+    expect(all.slice(1)).toEqual([
+      { before: { locationIds: [a1] }, after: { locationIds: [a1, a2] } },
+      { before: { locationIds: [a1, a2] }, after: { locationIds: [a1] } },
+      { before: { locationIds: [a1] }, after: { locationIds: null } },
+      { before: { locationIds: null }, after: { locationIds: [a1] } },
+    ]);
   });
 
   it('GET /staff y el perfil muestran las sedes de recepción y null en el resto', async () => {

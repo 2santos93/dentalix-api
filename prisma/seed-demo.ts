@@ -1048,11 +1048,14 @@ class DemoSeeder {
   ): Promise<void> {
     for (const [index, member] of DEMO_USERS.entries()) {
       if (!member.locations) continue;
-      await this.use(ReplaceStaffLocationsUseCase).execute({
-        userId: userIds[index],
-        locationIds: member.locations.map((key) => locations[key]),
-        actorUserId: ownerId,
-      });
+      await this.use(ReplaceStaffLocationsUseCase).execute(
+        {
+          userId: userIds[index],
+          locationIds: member.locations.map((key) => locations[key]),
+          actorUserId: ownerId,
+        },
+        this.auditAs(ownerId, ClinicRole.ADMIN),
+      );
     }
   }
 

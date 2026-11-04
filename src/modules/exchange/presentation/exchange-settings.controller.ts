@@ -68,8 +68,15 @@ import {
 export const EXCHANGE_RATE_SETTINGS_FORBIDDEN_MESSAGE =
   'Solo un administrador puede ver y cambiar la tasa de cambio de la clínica.';
 
+/** Decimal en texto, sin notación científica ni ceros de más («0.91»). */
+function rateText(rate: number): string {
+  return rate.toFixed(8).replace(/\.?0+$/, '');
+}
+
 interface AuthenticatedRequest extends AuditableRequest {
   user: TenantJwtPayload;
+  /** DX-381: metadata que el handler añade al evento de `@Audit`. */
+  auditMetadata?: Record<string, unknown>;
 }
 
 /**
@@ -174,14 +181,23 @@ export class ExchangeSettingsController {
   })
   @ApiConflictResponse({ description: MANUAL_RATE_DUPLICATE_MESSAGE })
   @ApiForbiddenResponse({ description: MANUAL_RATE_NOT_A_MEMBER_MESSAGE })
-  register(
+  async register(
     @Body() dto: RegisterManualExchangeRateDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<ManualExchangeRate> {
-    return this.registerManualRate.execute(
+    const created = await this.registerManualRate.execute(
       { date: dto.date, currency: dto.currency, rate: dto.rate },
       req.user.sub,
     );
+    // DX-381: moneda, día y tasa, sin el autor (metadata cerrada).
+    req.auditMetadata = {
+      exchangeRate: {
+        currency: created.currency,
+        day: created.date,
+        rate: rateText(created.rate),
+      },
+    };
+    return created;
   }
 
   @Audit({

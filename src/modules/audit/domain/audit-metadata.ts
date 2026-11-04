@@ -141,6 +141,12 @@ export interface AuditMetadata {
    */
   exchangeRateBackup?: AuditExchangeRateBackup;
   /**
+   * DX-381: alta de una tasa de cambio manual (`resourceId` = la tasa): la
+   * moneda, el día civil y la tasa como decimal en texto. Nada del autor ni
+   * de los abonos que la usen.
+   */
+  exchangeRate?: AuditExchangeRate;
+  /**
    * G1 (R13): moneda, zona y formato de una sede antes y después de una
    * edición, y si quedó revisada. Códigos de configuración de la sede (ISO
    * 4217, IANA, BCP 47); un lado puede traer null (sede sin configurar).
@@ -337,6 +343,15 @@ export interface AuditExchangeRateBackup {
   manualSince: string;
   /** Las monedas de la cotización (ISO 4217), una o dos. */
   currencies: string[];
+}
+
+export interface AuditExchangeRate {
+  /** ISO 4217, nunca USD. */
+  currency: string;
+  /** Día civil de la tasa, AAAA-MM-DD. */
+  day: string;
+  /** Unidades de `currency` por 1 USD, decimal en texto («0.91»). */
+  rate: string;
 }
 
 export interface AuditPaymentReference {
@@ -1309,6 +1324,26 @@ function exchangeRateBackup(value: unknown): AuditExchangeRateBackup | null {
   return { rateDate, manualSince, currencies: [...(currencies as string[])] };
 }
 
+const RATE_TEXT = /^\d{1,12}(\.\d{1,8})?$/;
+
+/** DX-381: moneda, día real y tasa decimal; lo que no encaja se descarta. */
+function exchangeRate(value: unknown): AuditExchangeRate | null {
+  if (!isRecord(value)) return null;
+  const { currency, day, rate } = value;
+  if (
+    typeof currency !== 'string' ||
+    !CURRENCY_CODE.test(currency) ||
+    currency === 'USD' ||
+    typeof day !== 'string' ||
+    parseCivilDate(day) !== day ||
+    typeof rate !== 'string' ||
+    !RATE_TEXT.test(rate)
+  ) {
+    return null;
+  }
+  return { currency, day, rate };
+}
+
 /**
  * Deja pasar solo lo que la lista admite, con el formato que admite. Lo que
  * no encaja se DESCARTA (no se trunca ni se escapa): así un valor clínico que
@@ -1382,6 +1417,8 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (referenced) out.paymentReference = referenced;
   const backup = exchangeRateBackup(input.exchangeRateBackup);
   if (backup) out.exchangeRateBackup = backup;
+  const rated = exchangeRate(input.exchangeRate);
+  if (rated) out.exchangeRate = rated;
   const covered = coverage(input.coverage);
   if (covered) out.coverage = covered;
   const validity = coverageValidity(input.coverageValidity);
