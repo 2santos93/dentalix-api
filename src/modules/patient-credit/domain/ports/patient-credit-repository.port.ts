@@ -122,8 +122,9 @@ export interface CreateRefundInput {
    * DX-462: solo para RECEPTION. Dentro del bloqueo por (clínica, sede,
    * usuario, día de la sede) se suman sus devoluciones del día en esta moneda;
    * si con esta pasan de `capCents` se lanza `DailyRefundCapExceededError`.
+   * El reloj se lee dentro del bloqueo (no es el `createdAt`: lo fija la BD).
    */
-  dailyCap?: { capCents: number; now: Date };
+  dailyCap?: { capCents: number; clock: PatientCreditClock };
 }
 
 export interface PatientCreditMovements {
@@ -140,6 +141,8 @@ export interface PatientCreditRepository {
    * si no tiene locale o reloj.
    */
   referenceLocationFormat(): Promise<RegionalFormat>;
+  /** Formato de una sede concreta (DX-462: la de la devolución rechazada). */
+  locationFormat(locationId: string): Promise<RegionalFormat>;
   updateReceptionCap(cents: number): Promise<number>;
   findTransferByKey(key: string): Promise<CreditTransferRecord | null>;
   findRefundByKey(key: string): Promise<CreditRefundRecord | null>;

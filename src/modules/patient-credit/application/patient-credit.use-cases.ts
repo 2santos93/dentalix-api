@@ -92,7 +92,7 @@ async function checkAmount(
   amount: number,
   currency: string,
   actor: CreditActor,
-): Promise<number> {
+): Promise<{ amountCents: number; capCents: number }> {
   if (currency.trim().toUpperCase() !== source.currency) {
     throw new BadRequestException(CREDIT_CURRENCY_MISMATCH_MESSAGE);
   }
@@ -111,7 +111,7 @@ async function checkAmount(
       creditExceedsMessage(source.pendingOtherCurrencyPayments ?? 0),
     );
   }
-  return amountCents;
+  return { amountCents, capCents: cap };
 }
 
 function keyOf(raw: string | undefined): string | undefined {
@@ -173,7 +173,7 @@ export class TransferCreditUseCase {
     if (!isPlanBillable(target.status)) {
       throw new ConflictException(CREDIT_TARGET_NOT_BILLABLE_MESSAGE);
     }
-    const amountCents = await checkAmount(
+    const { amountCents } = await checkAmount(
       this.repo,
       source,
       input.amount,
@@ -268,7 +268,7 @@ export class RefundCreditUseCase {
       }
     }
     const source = await loadPlan(this.repo, planId);
-    const amountCents = await checkAmount(
+    const { amountCents, capCents } = await checkAmount(
       this.repo,
       source,
       input.amount,
@@ -279,7 +279,7 @@ export class RefundCreditUseCase {
     // dentro del bloqueo del repositorio. ADMIN no tiene tope.
     const dailyCap =
       actor.role === ClinicRole.RECEPTION
-        ? { capCents: await this.repo.receptionCapCents(), now: this.clock() }
+        ? { capCents, clock: this.clock }
         : undefined;
     try {
       return await this.repo.createRefund({
@@ -296,7 +296,7 @@ export class RefundCreditUseCase {
       });
     } catch (error) {
       if (error instanceof DailyRefundCapExceededError) {
-        const fmt = await this.repo.referenceLocationFormat();
+        const fmt = await this.repo.locationFormat(error.locationId);
         throw new ForbiddenException(
           dailyRefundCapMessage(error.remainingCents, error.currency, fmt),
         );

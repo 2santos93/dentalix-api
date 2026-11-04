@@ -1,8 +1,13 @@
+import { randomUUID } from 'node:crypto';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaPatientCreditRepository } from '../src/modules/patient-credit/infrastructure/prisma-patient-credit.repository';
-import { DailyRefundCapExceededError } from '../src/modules/patient-credit/domain/patient-credit';
+import {
+  DailyRefundCapExceededError,
+  dailyRefundWindow,
+} from '../src/modules/patient-credit/domain/patient-credit';
+import { lockDailyRefundCap } from '../src/modules/patient-credit/infrastructure/daily-refund-cap-lock';
 import {
   REGIONAL_CARACAS_FIXTURE,
   REGIONAL_MADRID_FIXTURE,
@@ -138,6 +143,7 @@ function createRefund(
   now: Date,
   capCents: number | null = CAP,
   other = false,
+  idempotencyKey?: string,
 ) {
   return tenantContext.run(s.tenantId, s.locationId, () =>
     repository.createRefund({
@@ -149,12 +155,19 @@ function createRefund(
       paymentIds: [other ? s.otherPaymentId : s.paymentId],
       userId,
       fingerprint: 'f',
-      ...(capCents === null ? {} : { dailyCap: { capCents, now } }),
+      ...(idempotencyKey ? { idempotencyKey } : {}),
+      ...(capCents === null
+        ? {}
+        : { dailyCap: { capCents, clock: () => now } }),
     }),
   );
 }
 
-/** La devolución entra con `createdAt` = el reloj inyectado de la prueba. */
+/**
+ * El `createdAt` lo fija un trigger del servidor (DX-226): para situar la
+ * devolución en el día del reloj inyectado se reescribe como superusuario
+ * (tabla append-only: se salta el trigger con session_replication_role).
+ */
 async function refund(
   s: Seeded,
   userId: string,
@@ -163,16 +176,11 @@ async function refund(
   capCents: number | null = CAP,
 ) {
   const created = await createRefund(s, userId, amountCents, now, capCents);
-  await setCreatedAt(created.id, now);
-  return created;
-}
-
-async function setCreatedAt(id: string, at: Date): Promise<void> {
-  // Tabla append-only (DX-253): el superusuario de la prueba salta el trigger.
   await raw.$transaction([
     raw.$executeRaw`SET LOCAL session_replication_role = replica`,
-    raw.$executeRaw`UPDATE "patient_credit_refunds" SET "createdAt" = ${at} WHERE "id" = ${id}::uuid`,
+    raw.$executeRaw`UPDATE "patient_credit_refunds" SET "createdAt" = ${now} WHERE "id" = ${created.id}::uuid`,
   ]);
+  return created;
 }
 
 describe('DX-462 · tope diario de devoluciones en la BD (int)', () => {
@@ -248,46 +256,72 @@ describe('DX-462 · tope diario de devoluciones en la BD (int)', () => {
     await expect(refund(es, userB, 50_000, now, null)).resolves.toBeDefined();
   });
 
-  it('carrera: dos devoluciones simultáneas (planes distintos) de 10 con tope 15 → una entra y la otra pasa del tope', async () => {
-    const now = new Date(); // las filas nacen con el reloj real de la BD
+  it('humo: dos devoluciones simultáneas (planes distintos) de 10 con tope 15', async () => {
+    const now = new Date();
     const results = await Promise.allSettled([
       createRefund(es, userC, 1_000, now, 1_500),
       createRefund(es, userC, 1_000, now, 1_500, true),
     ]);
-    const rejected = results.filter((r) => r.status === 'rejected');
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    const rejected = results.filter((r) => r.status === 'rejected');
     expect(rejected).toHaveLength(1);
     expect(rejected[0].reason).toBeInstanceOf(DailyRefundCapExceededError);
   });
 
-  it('la comprobación espera al bloqueo consultivo de (sede, usuario, día) hasta el COMMIT del otro', async () => {
+  it('A5: la comprobación espera al bloqueo de (sede, usuario, día) hasta el COMMIT del otro', async () => {
     const now = new Date('2026-11-09T15:00:00Z'); // 9 nov en Caracas
-    const day = '2026-11-09';
     let release!: () => void;
     const held = new Promise<void>((resolve) => (release = resolve));
     let locked!: () => void;
     const hasLock = new Promise<void>((resolve) => (locked = resolve));
-    // Otra «petición» ya tiene el bloqueo de ese usuario y día.
+    // Otra «petición» ya tiene el bloqueo (la MISMA función que usa producción).
     const holder = raw.$transaction(
       async (tx) => {
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(
-          hashtext('dx462_refund_cap:' || ${ve.tenantId} || ':' || ${ve.locationId}),
-          hashtext(${userC} || ':' || ${day})
-        )`;
+        await lockDailyRefundCap(tx, {
+          tenantId: ve.tenantId,
+          locationId: ve.locationId,
+          userId: userC,
+          day: dailyRefundWindow(now, 'America/Caracas').day,
+        });
         locked();
         await held;
       },
-      { timeout: 20_000 },
+      { timeout: 30_000 },
     );
     await hasLock;
     let settled = false;
-    const waiting = createRefund(ve, userC, 1_000, now, 1_500).finally(() => {
+    const waiting = refund(ve, userC, 1_000, now, 1_500).finally(() => {
       settled = true;
     });
-    await new Promise((resolve) => setTimeout(resolve, 1_500));
-    expect(settled).toBe(false);
+    // Espera determinista: hasta que Postgres muestra un bloqueo consultivo SIN
+    // conceder en esta BD (la devolución esperando), o falla si acaba antes.
+    let waiter = false;
+    for (let i = 0; i < 300 && !settled && !waiter; i++) {
+      const [{ n }] = await raw.$queryRaw<{ n: number }[]>`
+        SELECT count(*)::int AS n FROM pg_locks
+         WHERE locktype = 'advisory' AND NOT granted
+           AND database = (SELECT oid FROM pg_database WHERE datname = current_database())`;
+      waiter = n > 0;
+      if (!waiter) await new Promise((resolve) => setTimeout(resolve, 20));
+    }
     release();
     await holder;
-    await expect(waiting).resolves.toBeDefined();
+    await waiting;
+    expect(waiter).toBe(true);
+  });
+
+  it('A5: un reintento con la misma Idempotency-Key en vuelo devuelve la devolución original, no 403', async () => {
+    const now = new Date();
+    const key = randomUUID();
+    // Tope 15, importe 10: la réplica sumaría 20 y daría 403 si no se reconoce.
+    const results = await Promise.all([
+      createRefund(ve, userC, 1_000, now, 1_500, false, key),
+      createRefund(ve, userC, 1_000, now, 1_500, false, key),
+    ]);
+    expect(results[1].id).toBe(results[0].id);
+    const count = await raw.patientCreditRefund.count({
+      where: { tenantId: ve.tenantId, idempotencyKey: key },
+    });
+    expect(count).toBe(1);
   });
 });

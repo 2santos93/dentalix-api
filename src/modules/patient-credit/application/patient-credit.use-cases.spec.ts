@@ -60,6 +60,7 @@ function repo(
     readPlanCredit: (id: string) => Promise.resolve(byId.get(id) ?? null),
     receptionCapCents: () => Promise.resolve(capCents),
     referenceLocationFormat,
+    locationFormat: referenceLocationFormat,
     updateReceptionCap: jest.fn(),
     findTransferByKey,
     findRefundByKey: () => Promise.resolve(null),
@@ -226,14 +227,15 @@ describe('RefundCreditUseCase (DX-253)', () => {
 
     it('RECEPTION: pasa al repositorio el tope y el reloj para acumular dentro del bloqueo', async () => {
       const r = repo([origin], 5_000_000);
-      await new RefundCreditUseCase(r.mock, () => NOW).execute(
+      const clock = () => NOW;
+      await new RefundCreditUseCase(r.mock, clock).execute(
         'origen',
         body,
         RECEPTION,
       );
       expect(r.createRefund).toHaveBeenCalledWith(
         expect.objectContaining({
-          dailyCap: { capCents: 5_000_000, now: NOW },
+          dailyCap: { capCents: 5_000_000, clock },
         }),
       );
     });
@@ -252,7 +254,7 @@ describe('RefundCreditUseCase (DX-253)', () => {
       const r = repo([origin], 10_000);
       const smallBody = { ...body, amount: 60 };
       r.createRefund.mockRejectedValueOnce(
-        new DailyRefundCapExceededError(4_000, 'VES'),
+        new DailyRefundCapExceededError(4_000, 'VES', 'sede-1'),
       );
       const error = await new RefundCreditUseCase(r.mock, () => NOW)
         .execute('origen', smallBody, RECEPTION)

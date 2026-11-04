@@ -122,10 +122,12 @@ export function dailyRefundRemainingCents(
 }
 
 /** Día civil de la sede en `now` y su rango `[start, end)` de instantes. */
+export type DailyRefundWindow = InstantRange & { day: string };
+
 export function dailyRefundWindow(
   now: Date,
   timeZone: string,
-): InstantRange & { day: string } {
+): DailyRefundWindow {
   const day = civilDateIn(now, timeZone);
   return { day, ...civilDayRange(day, timeZone) };
 }
@@ -144,6 +146,8 @@ export class DailyRefundCapExceededError extends Error {
   constructor(
     readonly remainingCents: number,
     readonly currency: string,
+    /** Sede de la devolución: con su formato se pinta el importe. */
+    readonly locationId: string,
   ) {
     super('Daily refund cap exceeded');
     this.name = 'DailyRefundCapExceededError';

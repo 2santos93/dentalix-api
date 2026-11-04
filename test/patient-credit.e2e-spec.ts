@@ -17,7 +17,7 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
-import { civilDateIn } from '../src/shared/time/civil-day';
+import { civilDateIn, civilDayRange } from '../src/shared/time/civil-day';
 import {
   REGIONAL_CARACAS_FIXTURE,
   locationBody,
@@ -567,27 +567,64 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
     }
   });
 
-  it('DX-462: el tope de RECEPCIÓN se acumula por día y sede: tras 10.000 ya devueltos, con tope 10.100 → 60 entra, otra de 60 es 403 con lo que queda; ADMIN 201', async () => {
-    // receptionA ya devolvió 10.000 hoy en esta sede (test anterior).
+  it('DX-462: el tope de RECEPCIÓN se acumula por día y sede: lo ya devuelto hoy cuenta, la que pasa del tope es 403 con lo que queda; ADMIN 201', async () => {
+    // Estado propio: un plan cancelado con saldo a favor solo para este test.
+    const plan = await seedPlan(5_000, 'TOPE');
+    const payment = await pay(plan, 1_000);
+    await as(api().patch(`/api/v1/treatment-plans/${plan}`), a)
+      .send({ status: 'CANCELLED' })
+      .expect(200);
+    const refundOwn = (amount: number, token: string) =>
+      as(
+        api().post(`/api/v1/treatment-plans/${plan}/credit-refunds`),
+        a,
+        token,
+      ).send({
+        amount,
+        currency: 'VES',
+        method: 'TRANSFER',
+        reason: 'El paciente se muda de ciudad',
+        paymentIds: [payment],
+      });
+    // Lo que receptionA ya devolvió hoy en la sede (día civil de la sede).
+    const user = await raw.user.findFirstOrThrow({
+      where: { email: `reception@${a.subdomain}.test` },
+      select: { id: true },
+    });
+    const zone = (
+      await raw.location.findFirstOrThrow({
+        where: { id: sede },
+        select: { timeZone: true },
+      })
+    ).timeZone as string;
+    const range = civilDayRange(civilDateIn(new Date(), zone), zone);
+    const used = await raw.patientCreditRefund.aggregate({
+      where: {
+        tenantId: a.tenantId,
+        locationId: sede,
+        createdById: user.id,
+        currency: 'VES',
+        createdAt: { gte: range.start, lt: range.end },
+      },
+      _sum: { amount: true },
+    });
+    const usedToday = used._sum.amount?.toNumber() ?? 0;
+    // Tope = lo usado + 100: caben 60 y 40, y la segunda de 60 pasa.
     await as(api().put('/api/v1/patient-credit/policy'), a)
-      .send({ receptionMaxAmount: 10_100 })
+      .send({ receptionMaxAmount: usedToday + 100 })
       .expect(200);
     try {
-      const recep = { token: receptionA };
-      await refund({ amount: 60, method: 'TRANSFER' }, recep).expect(201);
+      await refundOwn(60, receptionA).expect(201);
       const before = await counts();
-      const denied = await refund(
-        { amount: 60, method: 'TRANSFER' },
-        recep,
-      ).expect(403);
+      const denied = await refundOwn(60, receptionA).expect(403);
       expect((denied.body as { message: string }).message).toBe(
         'Supera tu tope diario de devoluciones en esta sede. Te quedan VES\u00a040,00 hoy; pide a un administrador que la registre.',
       );
       expect(await counts()).toEqual(before);
       // Lo que queda sí se puede devolver.
-      await refund({ amount: 40, method: 'TRANSFER' }, recep).expect(201);
+      await refundOwn(40, receptionA).expect(201);
       // ADMIN no tiene tope diario.
-      await refund({ amount: 200, method: 'TRANSFER' }).expect(201);
+      await refundOwn(200, a.adminToken).expect(201);
     } finally {
       await as(api().put('/api/v1/patient-credit/policy'), a)
         .send({ receptionMaxAmount: 10_000 })
