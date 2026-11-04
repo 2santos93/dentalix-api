@@ -21,6 +21,8 @@ import { fromCents, toCents } from '../../../../shared/money/money';
 export interface PaymentAllocationsView {
   paymentId: string;
   receiptNumber: string | null;
+  /** Sede del abono (DX-354c). */
+  locationId: string;
   treatmentPlanId: string;
   paymentAmount: number;
   paymentCurrency: string;
@@ -91,6 +93,7 @@ function toView(snapshot: PaymentAllocationsSnapshot): PaymentAllocationsView {
   return {
     paymentId: target.paymentId,
     receiptNumber: target.receiptNumber,
+    locationId: target.locationId,
     treatmentPlanId: target.treatmentPlanId,
     paymentAmount: target.amount,
     paymentCurrency: target.currency,

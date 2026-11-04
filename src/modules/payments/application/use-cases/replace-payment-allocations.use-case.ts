@@ -130,6 +130,7 @@ export class ReplacePaymentAllocationsUseCase {
       return {
         paymentId: target.paymentId,
         receiptNumber: target.receiptNumber,
+        locationId: target.locationId,
         treatmentPlanId: target.treatmentPlanId as string,
         paymentAmount: target.amount,
         paymentCurrency: target.currency,

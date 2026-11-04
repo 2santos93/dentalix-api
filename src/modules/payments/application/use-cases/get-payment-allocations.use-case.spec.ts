@@ -16,6 +16,7 @@ function target(over: Partial<AllocationTarget> = {}): AllocationTarget {
   return {
     paymentId: 'pay-1',
     receiptNumber: 'NOR-000123',
+    locationId: 'loc-1',
     treatmentPlanId: 'plan-1',
     amount: 100,
     currency: 'USD',
@@ -95,6 +96,7 @@ describe('GetPaymentAllocationsUseCase (DX-051, spec §5.2)', () => {
     expect(view).toEqual({
       paymentId: 'pay-1',
       receiptNumber: 'NOR-000123',
+      locationId: 'loc-1',
       treatmentPlanId: 'plan-1',
       paymentAmount: 100,
       paymentCurrency: 'USD',

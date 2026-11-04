@@ -24,6 +24,7 @@ function target(over: Partial<AllocationTarget> = {}): AllocationTarget {
   return {
     paymentId: 'pay-1',
     receiptNumber: 'NOR-000123',
+    locationId: 'loc-1',
     treatmentPlanId: 'plan-1',
     amount: 100,
     currency: 'USD',

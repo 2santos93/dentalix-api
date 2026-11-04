@@ -760,6 +760,7 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
     ]);
     return {
       paymentId: payment.id,
+      locationId: payment.locationId,
       receiptNumber: payment.receipt
         ? formatReceiptNumber(
             payment.receipt.seriesPrefix,

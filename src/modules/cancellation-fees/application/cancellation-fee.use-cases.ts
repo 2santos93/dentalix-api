@@ -39,6 +39,8 @@ export interface FeeActor {
 /** El cargo de una cita tal como lo ve recepción/administración. */
 export interface CancellationFeeView {
   appointmentId: string;
+  /** Sede de la cita (DX-354c): la web pinta con el formato de esa sede. */
+  locationId: string;
   patientId: string;
   /** NO_SHOW o cancelación tardía. */
   eligible: boolean;
@@ -87,6 +89,7 @@ function toView(
   });
   return {
     appointmentId: ctx.appointment.id,
+    locationId: ctx.appointment.locationId,
     patientId: ctx.appointment.patientId,
     eligible: isFeeEligible(ctx.appointment),
     status: ctx.fee?.voidedAt ? 'VOIDED' : (ctx.fee?.status ?? 'NONE'),
