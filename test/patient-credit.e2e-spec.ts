@@ -282,6 +282,9 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
     const again = (await transfer(body, { key }).expect(201))
       .body as TransferBody;
     expect(again.id).toBe(first.id);
+    // DX-432: la huella de idempotencia es interna; ni el alta ni la repetición.
+    expect(first).not.toHaveProperty('idempotencyFingerprint');
+    expect(again).not.toHaveProperty('idempotencyFingerprint');
     await transfer({ ...body, amount: 1 }, { key }).expect(422);
     expect(await counts()).toEqual({ transfers: 1, refunds: 0, entries: 2 });
 
@@ -419,6 +422,8 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
     const res = (await refund({ amount: 40_000 }, { key }).expect(201))
       .body as RefundBody;
     expect(res.number).toMatch(/^DEV-[A-Z0-9]+-000001$/);
+    // DX-432: ninguna huella ni interno de idempotencia en la respuesta.
+    expect(JSON.stringify(res)).not.toMatch(/idempotency/i);
     expect(res).toMatchObject({
       amount: 40_000,
       method: 'CASH',
@@ -523,6 +528,83 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
       ).expect(201)
     ).body as RefundBody;
     expect(ok.number).toMatch(/-000003$/);
+  });
+
+  it('DX-432: el cambio del tope queda auditado con antes y después en la misma transacción; RECEPTION no lo cambia; sin cambio, sin evento', async () => {
+    const policyEvents = () =>
+      raw.auditEvent.findMany({
+        where: {
+          tenantId: a.tenantId,
+          resourceType: 'PATIENT_CREDIT',
+          metadata: { path: ['reason'], equals: 'POLICY' },
+        },
+        orderBy: { occurredAt: 'asc' },
+      });
+    const before = await policyEvents();
+    // RECEPTION y DENTIST: 403 y ni cambio ni evento.
+    for (const token of [receptionA, dentistA]) {
+      await as(api().put('/api/v1/patient-credit/policy'), a, token)
+        .send({ receptionMaxAmount: 777 })
+        .expect(403);
+    }
+    expect(
+      (await as(api().get('/api/v1/patient-credit/policy'), a).expect(200))
+        .body,
+    ).toEqual({ receptionMaxAmount: 10_000 });
+    // Valores inválidos: 400 y nada.
+    for (const bad of [-1, 'diez', 1.234]) {
+      await as(api().put('/api/v1/patient-credit/policy'), a)
+        .send({ receptionMaxAmount: bad })
+        .expect(400);
+    }
+    expect(await policyEvents()).toHaveLength(before.length);
+
+    await as(api().put('/api/v1/patient-credit/policy'), a)
+      .send({ receptionMaxAmount: 2_500.5 })
+      .expect(200);
+    const events = await policyEvents();
+    expect(events).toHaveLength(before.length + 1);
+    expect(events[events.length - 1]).toMatchObject({
+      action: 'UPDATE',
+      actorUserId: a.adminUserId,
+      metadata: {
+        reason: 'POLICY',
+        changedFields: ['creditReceptionMaxAmount'],
+        configChange: {
+          before: { creditReceptionMaxAmount: 10_000 },
+          after: { creditReceptionMaxAmount: 2_500.5 },
+        },
+      },
+    });
+    // El mismo valor otra vez: 200 y sin evento nuevo.
+    await as(api().put('/api/v1/patient-credit/policy'), a)
+      .send({ receptionMaxAmount: 2_500.5 })
+      .expect(200);
+    expect(await policyEvents()).toHaveLength(before.length + 1);
+    // Se deja como estaba para el resto de la suite.
+    await as(api().put('/api/v1/patient-credit/policy'), a)
+      .send({ receptionMaxAmount: 10_000 })
+      .expect(200);
+  });
+
+  it('DX-432: ni el alta, ni el comprobante, ni el listado exponen idempotencyFingerprint', async () => {
+    // Los de hasta aquí se crearon con la API (el alta ya se comprobó arriba).
+    const listed = (
+      await as(
+        api().get(`/api/v1/patients/${patientId}/credit-movements`),
+        a,
+      ).expect(200)
+    ).body as { transfers: object[]; refunds: { id: string }[] };
+    expect(listed.refunds.length).toBeGreaterThan(0);
+    const fetched = (
+      await as(
+        api().get(`/api/v1/credit-refunds/${listed.refunds[0].id}`),
+        a,
+      ).expect(200)
+    ).body as RefundBody;
+    for (const body of [fetched, ...listed.transfers, ...listed.refunds]) {
+      expect(JSON.stringify(body)).not.toMatch(/idempotency/i);
+    }
   });
 
   it('el 403 del tope de RECEPCIÓN dice el importe con el formato de la sede (DX-354b); sin formato, 409', async () => {

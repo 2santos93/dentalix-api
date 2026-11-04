@@ -44,6 +44,7 @@ import {
   type PatientCreditRepository,
   type PlanCreditState,
 } from '../domain/ports/patient-credit-repository.port';
+import type { AuditRequestContext } from '../../audit/domain/audit-request-context';
 import { isPlanBillable } from '../../treatment-plans/domain/plan-status-machine';
 
 /** Quién actúa, del token (nunca del cuerpo). */
@@ -352,9 +353,13 @@ export class CreditPolicyUseCases {
     };
   }
 
-  async update(receptionMaxAmount: number): Promise<CreditPolicyView> {
+  async update(
+    receptionMaxAmount: number,
+    audit: AuditRequestContext,
+  ): Promise<CreditPolicyView> {
     const cents = await this.repo.updateReceptionCap(
       toCents(receptionMaxAmount),
+      audit,
     );
     return { receptionMaxAmount: fromCents(cents) };
   }

@@ -39,6 +39,11 @@ import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context
 import type { TenantJwtPayload } from '../../../shared/crypto/token.service';
 import { Audit } from '../../audit/presentation/audit.decorator';
 import {
+  requireAuditRequestContext,
+  type AuditableRequest,
+} from '../../audit/presentation/audit-request-context';
+import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
+import {
   CreditPolicyUseCases,
   GetCreditRefundUseCase,
   ListPatientCreditUseCase,
@@ -49,6 +54,7 @@ import {
 } from '../application/patient-credit.use-cases';
 import type {
   CreditRefundRecord,
+  CreditTransferRecord,
   PatientCreditMovements,
 } from '../domain/ports/patient-credit-repository.port';
 import { CREDIT_ROLE_FORBIDDEN_MESSAGE } from '../domain/patient-credit';
@@ -72,6 +78,26 @@ const IDEMPOTENCY_HEADER = {
   description:
     'UUID. Repetir la MISMA petición con la misma clave devuelve el movimiento original (DX-109); con otro cuerpo, 422.',
 };
+
+/**
+ * DX-432: la huella de idempotencia es de uso interno (compara repeticiones);
+ * ninguna respuesta la expone, ni el alta, ni la repetición, ni el listado.
+ */
+function publicTransfer<T extends CreditTransferRecord>(
+  record: T,
+): Omit<T, 'idempotencyFingerprint'> {
+  const { idempotencyFingerprint: _internal, ...rest } = record;
+  void _internal;
+  return rest;
+}
+
+function publicRefund(
+  record: CreditRefundRecord,
+): Omit<CreditRefundRecord, 'idempotencyFingerprint'> {
+  const { idempotencyFingerprint: _internal, ...rest } = record;
+  void _internal;
+  return rest;
+}
 
 const POLICY_WRITE_FORBIDDEN_MESSAGE =
   'Solo la administración cambia el tope de saldo a favor de recepción.';
@@ -97,6 +123,7 @@ export class PatientCreditController {
     private readonly getRefund: GetCreditRefundUseCase,
     private readonly listCredit: ListPatientCreditUseCase,
     private readonly policy: CreditPolicyUseCases,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   @Audit({
@@ -129,17 +156,19 @@ export class PatientCreditController {
   @ApiUnprocessableEntityResponse({
     description: 'La Idempotency-Key ya se usó con otro cuerpo.',
   })
-  transfer(
+  async transfer(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: TransferCreditDto,
     @Headers('idempotency-key') key: string | undefined,
     @Req() req: AuthenticatedRequest,
-  ): Promise<TransferResult> {
-    return this.transferCredit.execute(
-      id,
-      dto,
-      { userId: req.user.sub, role: req.user.role },
-      key,
+  ): Promise<Omit<TransferResult, 'idempotencyFingerprint'>> {
+    return publicTransfer(
+      await this.transferCredit.execute(
+        id,
+        dto,
+        { userId: req.user.sub, role: req.user.role },
+        key,
+      ),
     );
   }
 
@@ -173,17 +202,19 @@ export class PatientCreditController {
   @ApiUnprocessableEntityResponse({
     description: 'La Idempotency-Key ya se usó con otro cuerpo.',
   })
-  refund(
+  async refund(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: RefundCreditDto,
     @Headers('idempotency-key') key: string | undefined,
     @Req() req: AuthenticatedRequest,
-  ): Promise<CreditRefundRecord> {
-    return this.refundCredit.execute(
-      id,
-      dto,
-      { userId: req.user.sub, role: req.user.role },
-      key,
+  ): Promise<Omit<CreditRefundRecord, 'idempotencyFingerprint'>> {
+    return publicRefund(
+      await this.refundCredit.execute(
+        id,
+        dto,
+        { userId: req.user.sub, role: req.user.role },
+        key,
+      ),
     );
   }
 
@@ -198,8 +229,10 @@ export class PatientCreditController {
   @ApiOperation({ summary: 'Comprobante de una devolución (para imprimir)' })
   @ApiOkResponse({ type: CreditRefundDto })
   @ApiNotFoundResponse({ description: 'Inexistente o de otra clínica.' })
-  get(@Param('id', ParseUUIDPipe) id: string): Promise<CreditRefundRecord> {
-    return this.getRefund.execute(id);
+  async get(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<Omit<CreditRefundRecord, 'idempotencyFingerprint'>> {
+    return publicRefund(await this.getRefund.execute(id));
   }
 
   @Audit({
@@ -215,10 +248,15 @@ export class PatientCreditController {
   @ApiNotFoundResponse({
     description: 'Paciente inexistente o de otra clínica.',
   })
-  list(
-    @Param('id', ParseUUIDPipe) id: string,
-  ): Promise<PatientCreditMovements> {
-    return this.listCredit.execute(id);
+  async list(@Param('id', ParseUUIDPipe) id: string): Promise<{
+    transfers: Omit<CreditTransferRecord, 'idempotencyFingerprint'>[];
+    refunds: Omit<CreditRefundRecord, 'idempotencyFingerprint'>[];
+  }> {
+    const movements: PatientCreditMovements = await this.listCredit.execute(id);
+    return {
+      transfers: movements.transfers.map(publicTransfer),
+      refunds: movements.refunds.map(publicRefund),
+    };
   }
 
   @Get('patient-credit/policy')
@@ -228,7 +266,8 @@ export class PatientCreditController {
     return this.policy.get();
   }
 
-  @Audit({ action: 'UPDATE', resource: 'PATIENT_CREDIT', reason: 'POLICY' })
+  // DX-432: auditado en la transacción del cambio (UPDATE PATIENT_CREDIT
+  // POLICY con el tope antes y después; sin evento si no cambia).
   @Put('patient-credit/policy')
   @HttpCode(200)
   @Roles(...PATIENT_CREDIT_POLICY_WRITE_ROLES)
@@ -236,7 +275,13 @@ export class PatientCreditController {
   @ApiOperation({ summary: 'Cambiar el tope de recepción (solo ADMIN)' })
   @ApiOkResponse({ type: CreditPolicyDto })
   @ApiForbiddenResponse({ description: POLICY_WRITE_FORBIDDEN_MESSAGE })
-  updatePolicy(@Body() dto: UpdateCreditPolicyDto): Promise<CreditPolicyView> {
-    return this.policy.update(dto.receptionMaxAmount);
+  updatePolicy(
+    @Body() dto: UpdateCreditPolicyDto,
+    @Req() req: AuditableRequest,
+  ): Promise<CreditPolicyView> {
+    return this.policy.update(
+      dto.receptionMaxAmount,
+      requireAuditRequestContext(req, this.tenantContext),
+    );
   }
 }
