@@ -1274,4 +1274,37 @@ describe('sanitizeAuditMetadata — cambio del plazo de la HC (DX-330)', () => {
       expect(sanitizeAuditMetadata({ retentionTermChange: value })).toEqual({});
     }
   });
+
+  describe('exchangeRate (DX-381)', () => {
+    it('deja pasar moneda, día y tasa decimal en texto', () => {
+      const exchangeRate = { currency: 'VES', day: '2026-10-29', rate: '36.5' };
+      expect(sanitizeAuditMetadata({ exchangeRate })).toEqual({ exchangeRate });
+    });
+
+    it('descarta lo que no encaja y no deja pasar campos de más', () => {
+      for (const exchangeRate of [
+        { currency: 'USD', day: '2026-10-29', rate: '1' },
+        { currency: 'ves', day: '2026-10-29', rate: '36.5' },
+        { currency: 'VES', day: '2026-02-30', rate: '36.5' },
+        { currency: 'VES', day: '2026-10-29', rate: 36.5 },
+        { currency: 'VES', day: '2026-10-29', rate: '1e3' },
+        { currency: 'VES', day: '2026-10-29', rate: '36,5' },
+        'VES',
+      ]) {
+        expect(sanitizeAuditMetadata({ exchangeRate })).toEqual({});
+      }
+      expect(
+        sanitizeAuditMetadata({
+          exchangeRate: {
+            currency: 'VES',
+            day: '2026-10-29',
+            rate: '36.5',
+            createdBy: 'Ana Pérez',
+          },
+        }),
+      ).toEqual({
+        exchangeRate: { currency: 'VES', day: '2026-10-29', rate: '36.5' },
+      });
+    });
+  });
 });

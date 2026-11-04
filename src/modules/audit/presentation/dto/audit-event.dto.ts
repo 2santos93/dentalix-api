@@ -256,6 +256,20 @@ export class AuditStaffAccessChangeDto {
   after?: AuditStaffAccessSideDto;
 }
 
+export class AuditExchangeRateDto {
+  @ApiProperty({ description: 'ISO 4217, nunca USD.' })
+  currency!: string;
+
+  @ApiProperty({ format: 'date', example: '2026-10-29' })
+  day!: string;
+
+  @ApiProperty({
+    example: '36.5',
+    description: 'Unidades de la moneda por 1 USD, decimal en texto.',
+  })
+  rate!: string;
+}
+
 export class AuditExchangeRateBackupDto {
   @ApiProperty({
     format: 'date',
@@ -450,6 +464,13 @@ export class AuditMetadataDto {
       'DX-402: el barrido congeló en un abono (`reason` EXCHANGE_RATE_BACKUP, `origin` JOB, sin usuario) la tasa manual de un día anterior a «manual desde», como tasa de respaldo de un día sin tasa del proveedor. Solo días y monedas; ni importes ni la tasa.',
   })
   exchangeRateBackup?: AuditExchangeRateBackupDto;
+
+  @ApiPropertyOptional({
+    type: AuditExchangeRateDto,
+    description:
+      'DX-381: alta de una tasa de cambio manual (`resourceId` = la tasa): moneda, día y tasa. Nada del autor ni de los abonos.',
+  })
+  exchangeRate?: AuditExchangeRateDto;
 
   @ApiPropertyOptional({
     type: AuditConfigChangeDto,

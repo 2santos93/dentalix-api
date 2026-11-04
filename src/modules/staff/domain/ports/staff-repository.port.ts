@@ -100,11 +100,15 @@ export interface StaffRepository {
    * comprueba que no sea ADMIN y que todas las sedes sean activas de esta
    * clínica, y reemplaza las filas. Un ascenso concurrente a ADMIN se
    * serializa con este bloqueo. `actorUserId` queda en `createdById`.
+   *
+   * DX-381: escribe en la misma transacción el evento LOCATIONS_CHANGED con
+   * las sedes antes y después (`null` = todas); mismo conjunto → sin evento.
    */
   replaceLocations(
     userId: string,
     locationIds: string[],
     actorUserId: string,
+    audit: AuditRequestContext,
   ): Promise<ReplaceLocationsOutcome>;
 
   /**

@@ -24,6 +24,7 @@ import { StaffMember } from '../../domain/entities/staff-member.entity';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
 import {
+  staffLocationsAuditEvent,
   staffStatusAuditEvent,
   staffUpdateAuditEvent,
   type StaffAccessSnapshot,
@@ -307,6 +308,7 @@ export class PrismaStaffRepository implements StaffRepository {
     userId: string,
     locationIds: string[],
     actorUserId: string,
+    audit: AuditRequestContext,
   ): Promise<ReplaceLocationsOutcome> {
     const tenantId = this.tenantContext.getTenantId();
     if (!tenantId) throw new Error('No tenant in context');
@@ -335,6 +337,10 @@ export class PrismaStaffRepository implements StaffRepository {
       if (locations.length !== locationIds.length) {
         return { kind: 'UNKNOWN_LOCATION' };
       }
+      const before = allowedLocationIds(
+        membership.role,
+        await accessSnapshotLocations(tx, membership.id),
+      );
       // DX-089: las filas son configuración de acceso, sin datos de pacientes;
       // el PUT las sustituye en la MISMA transacción y el cambio queda en
       // audit_events (allowlist de no-hard-delete).
@@ -352,6 +358,15 @@ export class PrismaStaffRepository implements StaffRepository {
           })),
         });
       }
+      // DX-381: el antes y el después en la MISMA transacción; sin cambio de
+      // conjunto no hay evento. `[]` = todas las sedes (`null`).
+      const event = staffLocationsAuditEvent(
+        audit,
+        userId,
+        before,
+        locations.length === 0 ? null : locations.map(({ id }) => id),
+      );
+      if (event) await writeAuditEvent(tx, event);
       return { kind: 'UPDATED', locationIds: locations.map(({ id }) => id) };
     });
   }
@@ -533,6 +548,18 @@ async function accessSnapshot(
     professionalLicense: m.professionalLicense,
     professionalSpecialty: m.professionalSpecialty,
   };
+}
+
+/** DX-381: las filas de sedes de la membresía, antes de sustituirlas. */
+async function accessSnapshotLocations(
+  tx: Prisma.TransactionClient,
+  membershipId: string,
+): Promise<Parameters<typeof activeLocationIds>[0]> {
+  const m = await tx.clinicMembership.findUniqueOrThrow({
+    where: { id: membershipId },
+    select: { locations: MEMBERSHIP_LOCATIONS_SELECT },
+  });
+  return m.locations;
 }
 
 /**

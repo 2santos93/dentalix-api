@@ -1382,14 +1382,6 @@ const EXPECTED: Record<string, AuditOptions> = {
     reason: 'LOGIN_UNLOCKED',
   },
 
-  // DX-089: un ADMIN cambia las sedes en las que puede trabajar un miembro.
-  'PUT /staff/:userId/locations': {
-    action: 'UPDATE',
-    resource: 'STAFF_MEMBER',
-    resourceId: { param: 'userId' },
-    reason: 'LOCATIONS_CHANGED',
-  },
-
   // DX-170: plantillas de evolución (sin paciente: no llevan sus datos).
   // Desactivar es un PATCH con `active` en `changedFields`.
   'POST /clinical-note-templates': {
@@ -1621,6 +1613,10 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // changedFields); sin evento si nada cambió.
   'PATCH /staff/:userId':
     'staff-audit.spec.ts, update-staff.use-case.spec.ts y staff-access-audit.e2e-spec.ts',
+  // DX-089 / DX-381: UPDATE STAFF_MEMBER LOCATIONS_CHANGED con las sedes
+  // antes y después (null = todas); sin evento si el conjunto no cambia.
+  'PUT /staff/:userId/locations':
+    'staff-audit.spec.ts, staff-locations.use-cases.spec.ts y staff-access-audit.e2e-spec.ts',
   // STAFF_REACTIVATED / STAFF_DEACTIVATED con el estado antes y después.
   'POST /staff/:userId/reactivate':
     'staff-audit.spec.ts y staff-access-audit.e2e-spec.ts',

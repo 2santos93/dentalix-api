@@ -68,11 +68,6 @@ import {
   STAFF_WRITE_ROLES,
 } from '../../auth/presentation/guards/clinic-role-sets';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
-import { JwtPayload } from '../../../shared/crypto/token.service';
-
-interface AuthenticatedRequest {
-  user: JwtPayload;
-}
 
 // GET /staff feeds the appointments provider selector — every role that can
 // touch the agenda (or just needs to see who's on staff) can read it, so it
@@ -240,12 +235,8 @@ export class StaffController {
 
   // DX-089: sustituye sus sedes ([] = todas). El cambio llega a la sesión del
   // miembro en su siguiente refresh (claim `loc`).
-  @Audit({
-    action: 'UPDATE',
-    resource: 'STAFF_MEMBER',
-    resourceId: { param: 'userId' },
-    reason: 'LOCATIONS_CHANGED',
-  })
+  // DX-381: auditado en la transacción (LOCATIONS_CHANGED con las sedes antes
+  // y después; sin evento si el conjunto no cambia).
   @Put(':userId/locations')
   @Roles(...STAFF_WRITE_ROLES)
   @ApiOperation({
@@ -265,13 +256,16 @@ export class StaffController {
   replaceLocations(
     @Param('userId', ParseUUIDPipe) userId: string,
     @Body() dto: ReplaceStaffLocationsDto,
-    @Req() req: AuthenticatedRequest,
+    @Req() req: AuditableRequest,
   ): Promise<StaffLocations> {
-    return this.replaceStaffLocations.execute({
-      userId,
-      locationIds: dto.locationIds,
-      actorUserId: req.user.sub,
-    });
+    return this.replaceStaffLocations.execute(
+      {
+        userId,
+        locationIds: dto.locationIds,
+        actorUserId: req.user.sub,
+      },
+      this.auditCtx(req),
+    );
   }
 
   // DX-359: auditado en la transacción (STAFF_DEACTIVATED, ACTIVE → INACTIVE).

@@ -5,6 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { STAFF_REPOSITORY } from '../../domain/ports/staff-repository.port';
 import type { StaffRepository } from '../../domain/ports/staff-repository.port';
 
@@ -58,7 +59,10 @@ export class ReplaceStaffLocationsUseCase {
     @Inject(STAFF_REPOSITORY) private readonly repo: StaffRepository,
   ) {}
 
-  async execute(input: ReplaceStaffLocationsInput): Promise<StaffLocations> {
+  async execute(
+    input: ReplaceStaffLocationsInput,
+    audit: AuditRequestContext,
+  ): Promise<StaffLocations> {
     // Postgres compara los uuid sin distinguir mayúsculas: se normaliza antes
     // de quitar duplicados para no intentar insertar la misma sede dos veces.
     const locationIds = [
@@ -70,6 +74,7 @@ export class ReplaceStaffLocationsUseCase {
       input.userId,
       locationIds,
       input.actorUserId,
+      audit,
     );
     switch (outcome.kind) {
       case 'NOT_FOUND':

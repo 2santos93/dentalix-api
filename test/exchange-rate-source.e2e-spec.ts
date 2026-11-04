@@ -78,6 +78,7 @@ interface AuditItem {
   actor: { id: string; role: string } | null;
   metadata: {
     reason?: string;
+    exchangeRate?: { currency: string; day: string; rate: string };
     statusChange?: { from: string; to: string };
   };
 }
@@ -374,7 +375,12 @@ describe('Tasa de cambio por clínica (e2e, DX-374)', () => {
       resourceType: 'EXCHANGE_RATE',
       resourceId: saved.id,
       actor: { id: manual.adminUserId, role: 'ADMIN' },
+      // DX-381: moneda, día y tasa en texto; nada del autor.
+      metadata: {
+        exchangeRate: { currency: 'VES', day: TODAY, rate: '40.12345678' },
+      },
     });
+    expect(JSON.stringify(created[0].metadata)).not.toContain('Dr. Owner');
   });
 
   it('una tasa ya registrada para ese día y moneda no se sobrescribe: 409 en español', async () => {
