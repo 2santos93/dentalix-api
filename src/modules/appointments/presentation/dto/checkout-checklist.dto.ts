@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import type { OverdueBalance } from '../../../collections/domain/overdue-balance';
+import { OverdueBalanceDto } from '../../../collections/presentation/dto/collections.dto';
 
 /** DX-202: la salida del paciente. Sin datos clínicos. */
 export class CheckoutChecklistDto {
@@ -25,10 +25,10 @@ export class CheckoutChecklistDto {
   remindersOptedOut!: boolean;
 
   @ApiProperty({
-    type: Object,
+    type: () => OverdueBalanceDto,
     nullable: true,
     description:
       'Saldo vencido (`hasOverdue`, `overdueDays`, `amounts`); null si el rol no cobra.',
   })
-  balance!: OverdueBalance | null;
+  balance!: OverdueBalanceDto | null;
 }

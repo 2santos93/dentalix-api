@@ -47,7 +47,7 @@ export class TreatmentPlanAcceptanceSummaryDto {
 // return the bare plan, so those two fields are optional here.
 export class TreatmentPlanDto {
   @ApiPropertyOptional({
-    type: Object,
+    type: 'object',
     additionalProperties: { type: 'integer' },
   })
   visitIntervals!: Record<string, number>;

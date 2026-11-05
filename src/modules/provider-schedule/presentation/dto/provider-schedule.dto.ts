@@ -200,6 +200,7 @@ export class SetProviderOverrideDto {
   ranges!: MinuteRangeDto[];
 
   @ApiPropertyOptional({
+    type: String,
     maxLength: 200,
     nullable: true,
     example: 'Cubre a la Dra. Ruiz',
