@@ -472,6 +472,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /appointments': EVERY_ROLE,
   'GET /appointments': EVERY_ROLE,
   'GET /appointments/:id': EVERY_ROLE,
+  // DX-202: la salida del paciente; el saldo solo para los roles de cobro.
+  'GET /appointments/:id/checkout-checklist': EVERY_ROLE,
   'PATCH /appointments/:id': EVERY_ROLE,
   'POST /appointments/:id/confirmation-link': EVERY_ROLE,
   // Estado de los recordatorios de la cita (DX-026): quien gestiona la agenda.
