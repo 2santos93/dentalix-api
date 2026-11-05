@@ -10,9 +10,11 @@ import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { fixedSedeDay } from './support/sede-clock';
 import {
   pauseAfterSql,
+  reachedWithin,
   settle,
   sqlStop,
   waitForLockWaiters,
+  waitingQueries,
 } from './support/postgres-concurrency';
 
 // DX-397 (TST-048) contra Postgres: los dos candados de la tasa manual
@@ -41,6 +43,11 @@ const MANUAL_RATES = '/api/v1/exchange/manual-rates';
 const READ_RATES_TO_FREEZE =
   /FROM "manual_exchange_rates"[\s\S]*"currency" = ANY/;
 const LOCK_RATE_TO_CORRECT = /FROM "manual_exchange_rates"[\s\S]*"id" =/;
+
+// Las transacciones pausadas viven más que la espera de 5 s del helper: con
+// el tope por defecto (5 s) un runner lento las deshacería («Transaction
+// already closed») antes de que falle la aserción del bloqueo.
+process.env.TENANT_TX_TIMEOUT_MS = '30000';
 
 describe('tasa manual congelada: alta de abono frente a corrección (DX-397, int)', () => {
   let app: INestApplication<App>;
@@ -151,14 +158,23 @@ describe('tasa manual congelada: alta de abono frente a corrección (DX-397, int
 
     // El abono congela la VES 40 y se queda con las tasas FOR SHARE.
     const paying = settle(pay('VES', 400));
-    const payingPid = await inPayment.reached.wait;
+    const payingPid = await reachedWithin(inPayment, paying, 'abono');
 
     // Una corrección que llega a medias: espera al pid del abono.
     const correcting = settle(correct(rate.id, 45));
-    await waitForLockWaiters(raw, [payingPid]);
-    await expect(rateOf(rate.id)).resolves.toBe(40);
-
-    inPayment.release.open();
+    try {
+      await waitForLockWaiters(raw, [payingPid]);
+      // Espera en el FOR UPDATE de correct() (su primera sentencia), no en
+      // el UPDATE ni en el trigger de la BD: sin ese FOR UPDATE la
+      // corrección pasaría por usedRateKeys, esperaría después en el UPDATE y
+      // el trigger la dejaría también en 409 (eso lo fija el otro caso).
+      expect(await waitingQueries(raw, [payingPid])).toEqual([
+        expect.stringMatching(/FOR UPDATE/),
+      ]);
+      await expect(rateOf(rate.id)).resolves.toBe(40);
+    } finally {
+      inPayment.release.open();
+    }
     const payment = await paying;
     const correction = await correcting;
 
@@ -193,13 +209,19 @@ describe('tasa manual congelada: alta de abono frente a corrección (DX-397, int
 
     // La corrección tiene la fila FOR UPDATE y aún no ha escrito la nueva.
     const correcting = settle(correct(rate.id, 0.95));
-    const correctingPid = await inCorrection.reached.wait;
+    const correctingPid = await reachedWithin(
+      inCorrection,
+      correcting,
+      'corrección',
+    );
 
     // El abono cotiza la tasa vieja (0,9) y espera a la fila en su FOR SHARE.
     const paying = settle(pay('EUR', 90));
-    await waitForLockWaiters(raw, [correctingPid]);
-
-    inCorrection.release.open();
+    try {
+      await waitForLockWaiters(raw, [correctingPid]);
+    } finally {
+      inCorrection.release.open();
+    }
     const correction = await correcting;
     const payment = await paying;
 

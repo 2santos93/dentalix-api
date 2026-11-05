@@ -21,6 +21,7 @@ import { fixedSedeDay } from './support/sede-clock';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import {
   pauseAfterSql,
+  reachedWithin,
   settle,
   sqlStop,
   waitForLockWaiters,
@@ -65,6 +66,11 @@ interface Setup {
 // única que lo bloquea) de «anular cargo» y de «anular abono». Sin la
 // cláusula FOR a propósito: quitar el candado deja el int en rojo por la
 // espera que no llega, no colgado.
+// Las transacciones pausadas viven más que la espera de 5 s del helper (tope
+// por defecto de 5 s: un runner lento las deshace con «Transaction already
+// closed» antes de la aserción del bloqueo).
+process.env.TENANT_TX_TIMEOUT_MS = '30000';
+
 const FEE_VOID_LOCKS_PLAN = /FROM "treatment_plans"/;
 const PAYMENT_VOID_LOCKS_PLAN = /FROM "treatment_plans"[\s\S]*"id" = ANY/;
 
@@ -415,14 +421,20 @@ describe('anular un cargo compara en la moneda del plan (DX-382, int)', () => {
       undo = pauseAfterSql(prisma, [inPaymentVoid]);
 
       const voidingPayment = settle(voidPayment(s(), paymentId));
-      const paymentPid = await inPaymentVoid.reached.wait;
-      const voidingFee = settle(voidFee(s(), second.appointmentId));
-      await waitForLockWaiters(raw, [paymentPid]);
-      await expect(state(second.appointmentId, second.itemId)).resolves.toEqual(
-        { voided: false, removed: false },
+      const paymentPid = await reachedWithin(
+        inPaymentVoid,
+        voidingPayment,
+        'anular abono',
       );
-
-      inPaymentVoid.release.open();
+      const voidingFee = settle(voidFee(s(), second.appointmentId));
+      try {
+        await waitForLockWaiters(raw, [paymentPid]);
+        await expect(
+          state(second.appointmentId, second.itemId),
+        ).resolves.toEqual({ voided: false, removed: false });
+      } finally {
+        inPaymentVoid.release.open();
+      }
       expect(await voidingPayment).toMatchObject({
         status: 'fulfilled',
         value: { status: 200 },
@@ -445,14 +457,16 @@ describe('anular un cargo compara en la moneda del plan (DX-382, int)', () => {
       undo = pauseAfterSql(prisma, [inFeeVoid]);
 
       const voidingFee = settle(voidFee(s(), second.appointmentId));
-      const feePid = await inFeeVoid.reached.wait;
+      const feePid = await reachedWithin(inFeeVoid, voidingFee, 'anular cargo');
       const voidingPayment = settle(voidPayment(s(), paymentId));
-      await waitForLockWaiters(raw, [feePid]);
-      await expect(
-        raw.payment.count({ where: { id: paymentId, voidedAt: null } }),
-      ).resolves.toBe(1);
-
-      inFeeVoid.release.open();
+      try {
+        await waitForLockWaiters(raw, [feePid]);
+        await expect(
+          raw.payment.count({ where: { id: paymentId, voidedAt: null } }),
+        ).resolves.toBe(1);
+      } finally {
+        inFeeVoid.release.open();
+      }
       const fee = await voidingFee;
       expect(fee).toMatchObject({
         status: 'fulfilled',

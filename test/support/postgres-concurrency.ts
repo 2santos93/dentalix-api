@@ -160,6 +160,8 @@ export function pauseAfterSql(
   };
   return () => {
     delete (target as { runWithTenant?: unknown }).runWithTenant;
+    // Nunca deja una transacción pausada reteniendo bloqueos si el caso falló.
+    for (const stop of stops) stop.release.open();
   };
 }
 
@@ -167,4 +169,53 @@ function sqlText(first: unknown): string {
   if (Array.isArray(first)) return first.join(' ');
   const strings = (first as { strings?: string[] } | null)?.strings;
   return strings ? strings.join(' ') : String(first);
+}
+
+/**
+ * `stop.reached` con tope: si la petición pausada termina antes de llegar a la
+ * parada (p. ej. un 4xx/5xx) o no llega en `ms`, falla con un mensaje claro en
+ * vez de esperar al timeout de jest.
+ */
+export async function reachedWithin(
+  stop: SqlStop,
+  request: Promise<Outcome<unknown>>,
+  label: string,
+  ms = 5000,
+): Promise<number> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      stop.reached.wait,
+      request.then((outcome) => {
+        throw new Error(
+          `${label}: la petición terminó sin llegar a la pausa: ${JSON.stringify(
+            outcome.status === 'fulfilled'
+              ? { status: (outcome.value as { status?: number }).status }
+              : String(outcome.reason),
+          )}`,
+        );
+      }),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`${label}: no llegó a la pausa en ${ms} ms`)),
+          ms,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Las sentencias que esperan ahora un bloqueo de los `holderPids`. */
+export async function waitingQueries(
+  observer: PrismaClient,
+  holderPids: number[],
+): Promise<string[]> {
+  const rows = await observer.$queryRaw<{ query: string }[]>`
+    SELECT a.query FROM pg_catalog.pg_stat_activity a
+     WHERE a.datname = current_database()
+       AND a.wait_event_type = 'Lock'
+       AND pg_blocking_pids(a.pid) && ${holderPids}::int[]`;
+  return rows.map((r) => r.query);
 }
