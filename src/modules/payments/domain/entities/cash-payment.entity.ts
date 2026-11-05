@@ -56,6 +56,8 @@ export interface CashPayment {
    * numeración.
    */
   receiptNumber: string | null;
+  /** DX-389: el abono tiene comprobante del cobro adjunto. */
+  hasProof: boolean;
   /**
    * DX-516: los ajustes por medio de pago congelados en el abono (vacío sin
    * ajustes) y lo cobrado: importe + impuestos + recargos − descuentos. Sin

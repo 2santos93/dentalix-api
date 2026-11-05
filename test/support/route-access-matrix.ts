@@ -596,6 +596,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /treatment-plans/:id/payments': BILLING,
   'GET /treatment-plans/:id/balance': BILLING,
   'DELETE /payments/:id': BILLING,
+  // DX-389: comprobante del cobro (subida directa y URL firmada).
+  'POST /payments/proofs/upload-url': BILLING,
+  'GET /payments/:id/proof/url': BILLING,
   // DX-515: el nº de la factura fiscal externa lo ponen los roles de cobro.
   'PUT /payments/:id/external-invoice-number': BILLING,
   // Recibo de caja (DX-136): loop/informes/DX-136.md.

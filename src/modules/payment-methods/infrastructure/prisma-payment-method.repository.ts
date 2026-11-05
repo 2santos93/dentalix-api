@@ -59,6 +59,7 @@ function mapToEntity(row: PrismaPaymentMethod): ClinicPaymentMethodEntity {
     kind: row.kind,
     active: row.active,
     requiresReference: row.requiresReference,
+    proofPolicy: row.proofPolicy,
     legacyMethod: row.legacyMethod,
     adjustments: row.adjustments.map(mapAdjustment),
     createdAt: row.createdAt,

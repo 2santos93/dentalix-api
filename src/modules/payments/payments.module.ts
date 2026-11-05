@@ -3,8 +3,21 @@ import { RecordOpeningBalancePaymentUseCase } from './application/use-cases/reco
 import { Module } from '@nestjs/common';
 import { PaymentMethodsModule } from '../payment-methods/payment-methods.module';
 import { PaymentMethodGate } from './application/payment-method-gate';
+import { PaymentProofUploads } from './application/payment-proof-uploads';
+import { PaymentProofs } from './application/payment-proofs';
+import {
+  PAYMENT_PROOF_UPLOAD_TTL,
+  PAYMENT_PROOF_URL_TTL,
+} from './application/payment-proof-tokens';
+import {
+  PROOF_UPLOAD_TTL_SECONDS,
+  PROOF_URL_TTL_SECONDS,
+} from './domain/payment-proof';
+import { CreatePaymentProofUploadUseCase } from './application/use-cases/create-payment-proof-upload.use-case';
+import { GetPaymentProofUrlUseCase } from './application/use-cases/get-payment-proof-url.use-case';
 import { DocumentTypeNamesModule } from '../document-type-names/document-type-names.module';
 import { JwtModule } from '@nestjs/jwt';
+import { StorageModule } from '../../shared/storage/storage.module';
 import { RecordPaymentUseCase } from './application/use-cases/record-payment.use-case';
 import { ListPaymentsUseCase } from './application/use-cases/list-payments.use-case';
 import {
@@ -65,6 +78,8 @@ import { PrismaExternalInvoiceRepository } from './infrastructure/repositories/p
   // EmailModule (DX-136): el recibo se envía por el outbox de DX-088.
   imports: [
     JwtModule.register({}),
+    // DX-389: el almacén privado de los comprobantes.
+    StorageModule,
     ExchangeModule,
     DocumentTypeNamesModule,
     TreatmentPlansModule,
@@ -92,6 +107,13 @@ import { PrismaExternalInvoiceRepository } from './infrastructure/repositories/p
     // DX-262: abono contra el saldo migrado.
     RecordOpeningBalancePaymentUseCase,
     PaymentMethodGate,
+    // DX-389: comprobante del cobro (subida directa al almacén privado).
+    PaymentProofUploads,
+    PaymentProofs,
+    CreatePaymentProofUploadUseCase,
+    GetPaymentProofUrlUseCase,
+    { provide: PAYMENT_PROOF_URL_TTL, useValue: PROOF_URL_TTL_SECONDS },
+    { provide: PAYMENT_PROOF_UPLOAD_TTL, useValue: PROOF_UPLOAD_TTL_SECONDS },
     ListPaymentsUseCase,
     VoidPaymentUseCase,
     GetPlanBalanceUseCase,

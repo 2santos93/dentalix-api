@@ -406,6 +406,12 @@ export class AccountStatementMovementDto {
   })
   receiptNumber!: string | null;
 
+  @ApiProperty({
+    description:
+      'DX-389: el abono tiene comprobante del cobro (la captura del pago móvil o de la transferencia). Se ve con `GET /payments/:id/proof/url` (solo ADMIN y recepción).',
+  })
+  hasProof!: boolean;
+
   @ApiProperty({ type: AccountStatementLocationRefDto })
   location!: AccountStatementLocationRefDto;
 

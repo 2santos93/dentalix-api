@@ -1,3 +1,4 @@
+import { buildPaymentProofKit } from '../__fixtures__/payment-proof-kit';
 import { referenceCurrencyDigitsCatalog } from '../../../../shared/money/__fixtures__/reference-currency-digits';
 import { PaymentMethodGate } from '../payment-method-gate';
 import type { PaymentMethodRepository } from '../../../payment-methods/domain/ports/payment-method-repository.port';
@@ -154,6 +155,7 @@ describe('RecordPaymentUseCase', () => {
         repo,
         referenceCurrencyDigitsCatalog(),
       ),
+      buildPaymentProofKit(repo).proofs,
       () => now,
     );
     return { repo, fakeGetPlan, uc, receiptBalance, convert };

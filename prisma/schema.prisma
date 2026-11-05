@@ -135,6 +135,8 @@ model Tenant {
   paymentMethods                          ClinicPaymentMethod[]
   // DX-516: ajustes por medio de pago (configurados y congelados en abonos).
   paymentMethodAdjustments                PaymentMethodAdjustment[]
+  // DX-389: comprobantes de cobro adjuntos a los abonos.
+  paymentProofs                           PaymentProof[]
   paymentAdjustments                      PaymentAdjustment[]
   jobs                                    Job[]
   outboundMessages                        OutboundMessage[]
@@ -2311,6 +2313,15 @@ enum PaymentMethod {
   OTHER
 }
 
+// DX-389: si el medio de pago pide el comprobante del cobro (la captura del
+// pago móvil o de la transferencia): NONE no lo pide ni lo admite, OPTIONAL
+// lo admite y REQUIRED lo exige al registrar el abono.
+enum PaymentProofPolicy {
+  NONE
+  OPTIONAL
+  REQUIRED
+}
+
 // DX-377: tipo base de un medio de pago del catálogo de la clínica. DIGITAL
 // existe solo aquí (no en PaymentMethod): un abono con un medio DIGITAL sigue
 // escribiendo `method = TRANSFER` (ver `legacyPaymentMethodOf`).
@@ -2334,6 +2345,8 @@ model ClinicPaymentMethod {
   kind              PaymentMethodKind
   active            Boolean           @default(true)
   requiresReference Boolean           @default(false)
+  // DX-389: «Pide comprobante» (NONE por defecto).
+  proofPolicy       PaymentProofPolicy @default(NONE)
   legacyMethod      PaymentMethod?
   createdById       String?           @db.Uuid
   updatedById       String?           @db.Uuid
@@ -2352,6 +2365,30 @@ model ClinicPaymentMethod {
   // Único PARCIAL (WHERE "legacyMethod" IS NOT NULL) en la migración.
   @@unique([tenantId, legacyMethod], map: "payment_methods_tenant_legacy_key")
   @@map("payment_methods")
+}
+
+// DX-389: comprobante del cobro adjunto a un abono (captura del pago móvil o
+// de la transferencia; JPG, PNG, WebP o PDF de hasta 10 MB). Como mucho uno
+// por abono, nace con él en la misma transacción y no cambia (append-only).
+// `key` es la clave en el almacén privado: no sale nunca por la API.
+model PaymentProof {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @db.Uuid
+  paymentId String   @db.Uuid
+  key       String
+  mime      String
+  size      Int
+  sha256    String
+  name      String
+  createdById String? @db.Uuid
+  createdAt DateTime @default(now())
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id])
+  payment Payment @relation(fields: [tenantId, paymentId], references: [tenantId, id], onDelete: Restrict, map: "payment_proofs_payment_fkey")
+
+  @@unique([tenantId, paymentId], map: "payment_proofs_tenant_payment_key")
+  @@unique([key], map: "payment_proofs_key_key")
+  @@map("payment_proofs")
 }
 
 // DX-516: tipo genérico de un ajuste por medio de pago. Ninguno nombra un
@@ -2535,6 +2572,8 @@ model Payment {
   allocationMovements PaymentAllocationMovement[]
   // DX-380: su reintento si se quedó sin tasa o sin base (una fila como mucho).
   baseRetry           PaymentBaseRetry?
+  // DX-389: su comprobante del cobro (como mucho uno, fijo desde el alta).
+  proof               PaymentProof?
 
   // DX-390: la línea 1 del cobro dividido (de la MISMA clínica: FK compuesta
   // NOT VALID, como payments_payment_method_fkey) y, en ella, todas sus líneas.

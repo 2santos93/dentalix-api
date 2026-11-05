@@ -3,7 +3,9 @@ import {
   Controller,
   Delete,
   Get,
+  Header,
   Headers,
+  HttpCode,
   Inject,
   Param,
   ParseUUIDPipe,
@@ -35,6 +37,15 @@ import {
 } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { RecordPaymentDto } from './dto/record-payment.dto';
+import {
+  CreatePaymentProofUploadDto,
+  PaymentProofUploadDto,
+  PaymentProofUrlDto,
+  PaymentProofUrlQueryDto,
+} from './dto/payment-proof.dto';
+import { CreatePaymentProofUploadUseCase } from '../application/use-cases/create-payment-proof-upload.use-case';
+import { GetPaymentProofUrlUseCase } from '../application/use-cases/get-payment-proof-url.use-case';
+import { RateLimit } from '../../../shared/security/rate-limit.decorator';
 import { VoidPaymentDto } from './dto/void-payment.dto';
 import { PaymentDto } from './dto/payment.dto';
 import { PlanBalanceWithItemsDto } from './dto/plan-balance.dto';
@@ -131,6 +142,9 @@ export class PaymentsController {
     private readonly currencyDigits: CurrencyDigitsCatalog,
     // DX-515: nº de la factura fiscal emitida fuera de Dentalix.
     private readonly setExternalInvoice: SetExternalInvoiceNumberUseCase,
+    // DX-389: comprobante del cobro (subida directa y URL firmada).
+    private readonly createProofUpload: CreatePaymentProofUploadUseCase,
+    private readonly proofUrlOf: GetPaymentProofUrlUseCase,
   ) {}
 
   /**
@@ -140,6 +154,56 @@ export class PaymentsController {
    * `X-Location-Id` (validada por TenantContextInterceptor); sin ella, la vista
    * consolidada de la clínica.
    */
+  // DX-389: comprobante del cobro. Mismos roles que el resto de pagos
+  // (ADMIN y RECEPTION; DENTIST/ASSISTANT 403). La subida no audita (como la
+  // de los gastos): nada se asocia a un abono hasta registrarlo.
+  @Post('payments/proofs/upload-url')
+  @RateLimit('direct-upload')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  @ApiOperation({
+    summary: 'Autorización para subir el comprobante de un cobro al almacén',
+    description:
+      'POST prefirmado de pocos minutos para UN fichero (JPG, PNG, WebP o PDF de 1 B a 10 MB) con el SHA-256 declarado. El navegador envía `target.fields` y el fichero (campo `file`, al final) a `target.url` y después entrega el `uploadId` al registrar el abono (`proofUploadId`). El almacén es privado: el comprobante solo se ve con una URL firmada de corta vida.',
+  })
+  @ApiOkResponse({ type: PaymentProofUploadDto })
+  @ApiBadRequestResponse({
+    description:
+      'Tamaño (más de 10 MB), huella o tipo declarado no válidos, o archivo vacío',
+  })
+  @ApiForbiddenResponse({ description: 'Solo ADMIN y recepción' })
+  proofUploadUrl(
+    @Body() dto: CreatePaymentProofUploadDto,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<PaymentProofUploadDto> {
+    return this.createProofUpload.execute(dto, req.user.sub);
+  }
+
+  // Auditada en el caso de uso: VIEW si se abre en el navegador, EXPORT si se
+  // descarga (el decorador no puede elegir la acción por la query).
+  @Get('payments/:id/proof/url')
+  @Header('Cache-Control', 'no-store')
+  @ApiOperation({
+    summary:
+      'URL firmada (5 min) para ver o descargar el comprobante del cobro',
+  })
+  @ApiOkResponse({ type: PaymentProofUrlDto })
+  @ApiNotFoundResponse({
+    description: 'Abono no encontrado en esta clínica o sin comprobante',
+  })
+  @ApiForbiddenResponse({ description: 'Solo ADMIN y recepción' })
+  proofUrl(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: PaymentProofUrlQueryDto,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<PaymentProofUrlDto> {
+    return this.proofUrlOf.execute(
+      id,
+      query.disposition ?? 'inline',
+      auditRequestContext(req, this.tenantContext),
+    );
+  }
+
   @Audit({ action: 'VIEW', resource: 'PAYMENT' })
   @Get('payments')
   @ApiOperation({
@@ -287,6 +351,7 @@ export class PaymentsController {
         paymentMethodId: dto.paymentMethodId,
         reference: dto.reference,
         duplicateReferenceReason: dto.duplicateReferenceReason,
+        proofUploadId: dto.proofUploadId,
         notes: dto.notes,
       },
       req.user.sub,
@@ -376,6 +441,7 @@ export class PaymentsController {
           paymentMethodId: line.paymentMethodId,
           reference: line.reference,
           duplicateReferenceReason: line.duplicateReferenceReason,
+          proofUploadId: line.proofUploadId,
         })),
       },
       req.user.sub,
@@ -432,6 +498,7 @@ export class PaymentsController {
         paymentMethodId: dto.paymentMethodId,
         reference: dto.reference,
         duplicateReferenceReason: dto.duplicateReferenceReason,
+        proofUploadId: dto.proofUploadId,
         notes: dto.notes,
       },
       req.user.sub,

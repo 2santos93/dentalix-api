@@ -85,6 +85,15 @@ export class SplitPaymentLineDto {
     message: DUPLICATE_REFERENCE_REASON_TOO_LONG_MESSAGE,
   })
   duplicateReferenceReason?: string;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'DX-389: el `uploadId` del comprobante de ESTA línea (cada línea, el suyo). Mismas reglas que en el abono suelto.',
+  })
+  @IsOptional()
+  @IsUUID('all', { message: 'La subida del comprobante no es válida.' })
+  proofUploadId?: string;
 }
 
 // Sin `tenantId`/`treatmentPlanId`/`createdById`, como RecordPaymentDto.

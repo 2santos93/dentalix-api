@@ -4,6 +4,7 @@ import {
   PaymentAdjustmentType,
   PaymentMethod,
   PaymentMethodKind,
+  PaymentProofPolicy,
 } from '@prisma/client';
 import { Transform } from 'class-transformer';
 import {
@@ -107,6 +108,14 @@ export class PaymentMethodDto {
   requiresReference!: boolean;
 
   @ApiProperty({
+    enum: PaymentProofPolicy,
+    enumName: 'PaymentProofPolicy',
+    description:
+      'DX-389 «Pide comprobante»: NONE no lo admite, OPTIONAL lo admite y REQUIRED lo exige al registrar el abono.',
+  })
+  proofPolicy!: PaymentProofPolicy;
+
+  @ApiProperty({
     enum: PaymentMethod,
     enumName: 'PaymentMethod',
     nullable: true,
@@ -147,6 +156,15 @@ export class CreatePaymentMethodDto {
   @IsOptional()
   @IsBoolean()
   requiresReference?: boolean;
+
+  @ApiPropertyOptional({
+    enum: PaymentProofPolicy,
+    enumName: 'PaymentProofPolicy',
+    description: 'Sin indicarlo, NONE (no pide comprobante).',
+  })
+  @IsOptional()
+  @IsEnum(PaymentProofPolicy)
+  proofPolicy?: PaymentProofPolicy;
 }
 
 export class UpdatePaymentMethodDto extends PartialType(

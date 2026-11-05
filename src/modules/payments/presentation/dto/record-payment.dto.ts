@@ -121,6 +121,17 @@ export class RecordPaymentDto {
   })
   duplicateReferenceReason?: string;
 
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'DX-389: el `uploadId` de `POST /payments/proofs/upload-url` (el comprobante ya subido al almacén). ' +
+      'Si el medio «Pide comprobante» = REQUIRED y no llega: 400; si es NONE y llega: 400. ' +
+      'Se comprueba (tamaño, huella y tipo por contenido: JPG, PNG, WebP o PDF de hasta 10 MB) al registrar el abono.',
+  })
+  @IsOptional()
+  @IsUUID('all', { message: 'La subida del comprobante no es válida.' })
+  proofUploadId?: string;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
