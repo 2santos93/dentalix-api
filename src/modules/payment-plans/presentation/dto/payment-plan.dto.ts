@@ -49,6 +49,7 @@ export class DerivedInstallmentDto {
 
 export class NextDueDto {
   @ApiProperty({
+    type: Number,
     example: 2,
     nullable: true,
     description:

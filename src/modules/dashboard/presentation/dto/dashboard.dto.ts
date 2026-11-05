@@ -46,6 +46,8 @@ export class DashboardIncomesDto {
   count!: number;
 
   @ApiProperty({
+    type: 'object',
+    additionalProperties: { type: 'number' },
     description:
       "Breakdown of the ORIGINAL (unconverted) amounts grouped by each payment's own currency, keyed by its ISO 4217 code (3 letters).",
   })

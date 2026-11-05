@@ -35,7 +35,7 @@ export class UpdatePlanVisitsDto {
   @Type(() => VisitItemDto)
   items!: VisitItemDto[];
   @ApiProperty({
-    type: Object,
+    type: 'object',
     additionalProperties: { type: 'integer', minimum: 0, maximum: 3650 },
   })
   @IsObject()
@@ -96,7 +96,7 @@ export class PlanVisitSummaryDto {
 export class PlanVisitsDto {
   @ApiProperty({ format: 'uuid' }) planId!: string;
   @ApiProperty({ type: [PlanVisitItemViewDto] }) items!: PlanVisitItemViewDto[];
-  @ApiProperty({ type: Object, additionalProperties: { type: 'integer' } })
+  @ApiProperty({ type: 'object', additionalProperties: { type: 'integer' } })
   visitIntervals!: Record<string, number>;
   @ApiProperty({ type: [PlanVisitSummaryDto] }) visits!: PlanVisitSummaryDto[];
 }
