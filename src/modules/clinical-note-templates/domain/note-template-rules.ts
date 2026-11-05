@@ -157,7 +157,15 @@ export function noteTemplateError(raw: NoteTemplateDraft): string | null {
   }
 
   const keys = new Set<string>();
+  const ids = new Set<string>();
   for (const prompt of draft.prompts) {
+    // DX-231: un id repetido haría que dos preguntas se fundan en una fila.
+    if (prompt.id !== undefined) {
+      if (ids.has(prompt.id)) {
+        return 'Dos preguntas llevan el mismo id: cada pregunta existente aparece una sola vez';
+      }
+      ids.add(prompt.id);
+    }
     const error = promptError(prompt);
     if (error) return error;
     const key = promptKey(prompt.label);

@@ -11,6 +11,7 @@ import {
   seedMember,
   STAFF_CANCELLATION,
 } from './support/e2e-fixtures';
+import { civilDateIn } from '../src/shared/time/civil-day';
 import { setLocationZone } from './support/location-fixtures';
 
 // DX-170 en HTTP real: CRUD de plantillas de evolución por rol (solo ADMIN
@@ -21,6 +22,8 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
+// Zona de la sede de este spec (G1: la zona es de la sede).
+const SEDE_ZONE = 'UTC';
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DAY = new Date(Date.now() + 2 * DAY_MS).toISOString().slice(0, 10);
 const at = (time: string): string => `${DAY}T${time}:00.000Z`;
@@ -180,7 +183,7 @@ describe('Plantillas de evolución ligadas a la cita (e2e, DX-170)', () => {
         where: { tenantId: c.tenantId },
         select: { id: true },
       })) {
-        await setLocationZone(raw, c.tenantId, id, 'UTC');
+        await setLocationZone(raw, c.tenantId, id, SEDE_ZONE);
       }
       await as(api().put('/api/v1/locations/schedule'), c.adminToken, c.host)
         .send({ ranges: [] })
@@ -246,6 +249,7 @@ describe('Plantillas de evolución ligadas a la cita (e2e, DX-170)', () => {
         clinic.adminToken,
       )
         .send({
+          version: resin.version,
           body: 'Resina en {{Superficie}}.',
           prompts: [{ label: 'Superficie', type: 'ONE', options: ['O', 'M'] }],
         })
@@ -259,7 +263,11 @@ describe('Plantillas de evolución ligadas a la cita (e2e, DX-170)', () => {
         api().patch(`/api/v1/clinical-note-templates/${resin.id}`),
         clinic.adminToken,
       )
-        .send({ body: RESIN.body, prompts: RESIN.prompts })
+        .send({
+          version: (edited.body as TemplateBody).version,
+          body: RESIN.body,
+          prompts: RESIN.prompts,
+        })
         .expect(200);
       expect(
         (restored.body as TemplateBody).prompts.map((p) => p.label),
@@ -297,7 +305,7 @@ describe('Plantillas de evolución ligadas a la cita (e2e, DX-170)', () => {
           api().patch(`/api/v1/clinical-note-templates/${resin.id}`),
           token(),
         )
-          .send({ active: false })
+          .send({ active: false, version: 1 })
           .expect(403);
         await as(
           api().post('/api/v1/clinical-note-templates/samples'),
@@ -443,6 +451,7 @@ describe('Plantillas de evolución ligadas a la cita (e2e, DX-170)', () => {
         clinic.adminToken,
       )
         .send({
+          version: resin.version,
           name: 'Resina compuesta',
           body: 'Nuevo {{Superficie}} {{Material}} {{Observaciones}}',
         })
@@ -451,7 +460,7 @@ describe('Plantillas de evolución ligadas a la cita (e2e, DX-170)', () => {
         api().patch(`/api/v1/clinical-note-templates/${resin.id}`),
         clinic.adminToken,
       )
-        .send({ active: false })
+        .send({ active: false, version: resin.version + 1 })
         .expect(200);
       expect((off.body as TemplateBody).active).toBe(false);
       // + las 2 ediciones de preguntas de «CRUD por rol».
@@ -564,7 +573,8 @@ describe('Plantillas de evolución ligadas a la cita (e2e, DX-170)', () => {
   });
 
   describe('DX-231: fecha de la evolución y plantillas en edición', () => {
-    const utcDay = () => new Date().toISOString().slice(0, 10);
+    // «Hoy» en la zona de la sede del spec (SEDE_ZONE), no el día UTC.
+    const sedeDay = () => civilDateIn(new Date(), SEDE_ZONE);
     const dayAfter = (day: string, n: number) =>
       new Date(new Date(`${day}T00:00:00.000Z`).getTime() + n * DAY_MS)
         .toISOString()
@@ -613,6 +623,44 @@ describe('Plantillas de evolución ligadas a la cita (e2e, DX-170)', () => {
       );
     });
 
+    it('400 si falta la versión en el PATCH y si dos preguntas llevan el mismo id', async () => {
+      const mine = await as(
+        api().post('/api/v1/clinical-note-templates'),
+        clinic.adminToken,
+      )
+        .send({
+          name: 'Id repetido DX-231',
+          body: 'A {{Uno}} B {{Dos}}.',
+          prompts: [
+            { label: 'Uno', type: 'TEXT' },
+            { label: 'Dos', type: 'TEXT' },
+          ],
+        })
+        .expect(201);
+      const tpl = mine.body as TemplateBody;
+      const path = `/api/v1/clinical-note-templates/${tpl.id}`;
+      await as(api().patch(path), clinic.adminToken)
+        .send({ active: false })
+        .expect(400);
+      const dup = await as(api().patch(path), clinic.adminToken)
+        .send({
+          version: tpl.version,
+          body: 'A {{Uno}} B {{Dos}}.',
+          prompts: [
+            { id: tpl.prompts[0].id, label: 'Uno', type: 'TEXT' },
+            { id: tpl.prompts[0].id, label: 'Dos', type: 'TEXT' },
+          ],
+        })
+        .expect(400);
+      expect(message(dup)).toMatch(/mismo id/);
+      const row = await raw.clinicalNoteTemplate.findUniqueOrThrow({
+        where: { id: tpl.id },
+        include: { prompts: true },
+      });
+      expect(row.version).toBe(1);
+      expect(row.prompts).toHaveLength(2);
+    });
+
     it('con cita y su mismo día vale; sin entryDate toma el día de la cita', async () => {
       const same = await postEntry({
         appointmentId,
@@ -634,18 +682,18 @@ describe('Plantillas de evolución ligadas a la cita (e2e, DX-170)', () => {
     it('sin cita: una fecha futura (día civil de la sede) da 400; hoy y el pasado valen', async () => {
       const res = await postEntry({
         notes: 'Futura',
-        entryDate: `${dayAfter(utcDay(), 1)}T00:00:00.000Z`,
+        entryDate: `${dayAfter(sedeDay(), 1)}T00:00:00.000Z`,
       }).expect(400);
       expect(message(res)).toBe(
         'La fecha de atención no puede ser una fecha futura',
       );
       await postEntry({
         notes: 'Hoy',
-        entryDate: `${utcDay()}T00:00:00.000Z`,
+        entryDate: `${sedeDay()}T00:00:00.000Z`,
       }).expect(201);
       await postEntry({
         notes: 'Pasada',
-        entryDate: `${dayAfter(utcDay(), -30)}T00:00:00.000Z`,
+        entryDate: `${dayAfter(sedeDay(), -30)}T00:00:00.000Z`,
       }).expect(201);
     });
 
@@ -796,7 +844,7 @@ describe('Plantillas de evolución ligadas a la cita (e2e, DX-170)', () => {
         api().patch(`/api/v1/clinical-note-templates/${otherTemplate.id}`),
         clinic.adminToken,
       )
-        .send({ active: false })
+        .send({ active: false, version: 1 })
         .expect(404);
       await as(
         api().post(`/api/v1/patients/${patientId}/clinical-entries`),
@@ -828,6 +876,7 @@ describe('Plantillas de evolución ligadas a la cita (e2e, DX-170)', () => {
         clinic.adminToken,
       )
         .send({
+          version: tpl.version,
           body: 'Nota {{Texto}}.',
           prompts: [{ id: foreign.id, label: 'Texto', type: 'TEXT' }],
         })

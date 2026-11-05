@@ -214,6 +214,25 @@ describe('UpdateNoteTemplateUseCase', () => {
       expect(repo.rows[0].name).toBe('Primera');
     });
 
+    it('400 si dos preguntas llevan el mismo id (no se funden en una)', async () => {
+      const repo = new InMemoryClinicalNoteTemplateRepository();
+      const t = repo.seed(base);
+      const [diente] = t.prompts;
+      const call = new UpdateNoteTemplateUseCase(repo).execute(t.id, {
+        body: 'En {{Cara}} con {{Material}}.',
+        prompts: [
+          { id: diente.id, label: 'Cara', type: 'TEXT' },
+          { id: diente.id, label: 'Material', type: 'TEXT' },
+        ],
+      });
+      await expect(call).rejects.toThrow(BadRequestException);
+      await expect(call).rejects.toThrow(/mismo id/);
+      expect(repo.rows[0].prompts.map((p) => p.label)).toEqual([
+        'Diente',
+        'Material',
+      ]);
+    });
+
     it('sin version en el PATCH no hay comprobación (clientes anteriores)', async () => {
       const repo = new InMemoryClinicalNoteTemplateRepository();
       const t = repo.seed(base);

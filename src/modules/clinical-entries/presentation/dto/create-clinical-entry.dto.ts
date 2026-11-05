@@ -89,7 +89,7 @@ export class CreateClinicalEntryDto {
     type: String,
     format: 'date-time',
     description:
-      'Fecha de atención (fecha civil). Si falta: el día de la cita ligada en la zona de su sede o, sin cita, ahora. Con cita debe ser el día de la cita y sin cita no puede ser futura (día civil de la sede): si no, 400.',
+      'Fecha de atención (fecha civil). Si falta: el día de la cita ligada en la zona de su sede o, sin cita, ahora. Con cita debe ser el día de la cita y sin cita no puede ser futura (día civil de la sede): si no, 400. Una hora exactamente 00:00:00.000Z se lee como fecha civil (ese día); con otra hora es un instante y se lee en la zona de la sede.',
   })
   @IsOptional()
   @IsDateString()

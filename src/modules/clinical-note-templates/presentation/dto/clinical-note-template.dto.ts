@@ -242,15 +242,14 @@ export class UpdateClinicalNoteTemplateDto {
   @IsBoolean()
   active?: boolean;
 
-  @ApiPropertyOptional({
+  @ApiProperty({
     minimum: 1,
     description:
-      'Versión que el cliente leyó. Si la plantilla ya cambió: 409 «La plantilla cambió, recárgala». Sin ella no se comprueba.',
+      'Versión que el cliente leyó (la `version` de la plantilla). Si la plantilla ya cambió: 409 «La plantilla cambió, recárgala». Obligatoria.',
   })
-  @IsOptional()
-  @IsInt()
+  @IsInt({ message: 'Falta la versión de la plantilla: recárgala' })
   @Min(1)
-  version?: number;
+  version!: number;
 }
 
 export class ListClinicalNoteTemplatesQueryDto {
