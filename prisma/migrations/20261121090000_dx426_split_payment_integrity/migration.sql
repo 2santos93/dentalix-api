@@ -7,25 +7,38 @@
 -- dato cambia):
 --   dx_payment_split_guard()        BEFORE INSERT | UPDATE en `payments`
 --                      (trigger payments_split_guard):
---                      - INSERT de una línea > 1: su paciente y su sede son
---                        los de la línea 1 (la FK ya exige que la línea 1
---                        exista y sea de la misma clínica).
+--                      - INSERT de una línea > 1: la fila a la que apunta
+--                        ("tenantId", "splitId") tiene que ser una línea 1 de
+--                        verdad (su "splitId" es su propio "id"; la FK solo
+--                        pide que sea un abono de la clínica), y se bloquea
+--                        FOR SHARE: una anulación del cobro (que escribe la
+--                        línea 1 primero, FOR NO KEY UPDATE) o espera a este
+--                        alta o termina antes y el COMMIT ya la ve. Si la
+--                        línea 1 aún no es visible (una sola sentencia
+--                        INSERT con las líneas en otro orden) no decide: lo
+--                        hace el trigger diferido.
 --                      - UPDATE: tenantId, patientId, locationId, splitId y
 --                        splitLine no cambian en una fila que es o pasaría a
 --                        ser de un cobro dividido (ni se mueve una línea de
 --                        sede o de cobro, ni la línea 1, ni se mete un abono
 --                        suelto en un cobro después).
---   dx_payment_split_void_check()   AFTER INSERT | UPDATE OF deletedAt,
+--   dx_payment_split_check()        AFTER INSERT | UPDATE OF deletedAt,
 --                      voidedAt en `payments`, CONSTRAINT TRIGGER DEFERRABLE
---                      INITIALLY DEFERRED (payments_split_void_together): al
---                      COMMIT, ninguna línea viva comparte cobro con una
---                      anulada. Anular una sola línea, o añadir una viva a un
---                      cobro anulado, falla; anular todas en la misma
---                      transacción (PrismaPaymentRepository.softDelete: una
---                      UPDATE por línea) pasa.
+--                      INITIALLY DEFERRED (payments_split_deferred_check): al
+--                      COMMIT, con todas las filas visibles (sea cual sea el
+--                      orden de las líneas o de las sentencias), el cobro
+--                      tiene su línea 1, todas sus líneas son del mismo
+--                      paciente y sede, y ninguna línea viva comparte cobro
+--                      con una anulada. Anular una sola línea, o añadir una
+--                      viva a un cobro anulado, falla; anular todas en la
+--                      misma transacción (PrismaPaymentRepository.softDelete:
+--                      una UPDATE por línea) pasa.
 --   dx_payment_receipt_split_head() BEFORE INSERT en `payment_receipts`
 --                      (trigger payment_receipts_split_head): un cobro
---                      dividido tiene UN recibo, el de su línea 1.
+--                      dividido tiene UN recibo, el de su línea 1. Inmediato
+--                      basta: DX-136 exige que el abono ya exista, y
+--                      payments_split_guard impide meter después un abono con
+--                      recibo en un cobro.
 --
 -- Convivencia con SEC-042 (payments_void_immutable, BEFORE ... FOR EACH ROW):
 -- los dos BEFORE son independientes (el de SEC-042 solo deja pasar la
@@ -74,8 +87,7 @@ CREATE FUNCTION public.dx_payment_split_guard() RETURNS trigger
   SET search_path = pg_catalog, pg_temp
 AS $$
 DECLARE
-  head_patient uuid;
-  head_location uuid;
+  head_split uuid;
 BEGIN
   IF public.dx_cash_is_superuser() THEN
     RETURN NEW;
@@ -83,17 +95,18 @@ BEGIN
 
   IF TG_OP = 'INSERT' THEN
     -- Suelto, o la línea 1 (splitId = id, payments_split_check): nada que
-    -- comparar.
+    -- comprobar aquí.
     IF NEW."splitId" IS NULL OR NEW."splitId" = NEW."id" THEN
       RETURN NEW;
     END IF;
-    SELECT h."patientId", h."locationId"
-      INTO head_patient, head_location
+    -- FOR SHARE choca con el FOR NO KEY UPDATE de la anulación de la línea 1.
+    SELECT h."splitId" INTO head_split
       FROM public."payments" h
-     WHERE h."tenantId" = NEW."tenantId" AND h."id" = NEW."splitId";
-    -- Sin línea 1 visible no hay con qué comparar: lo rechaza la FK.
-    IF FOUND AND (NEW."patientId" <> head_patient OR NEW."locationId" <> head_location) THEN
-      RAISE EXCEPTION 'Las líneas de un cobro dividido son del mismo paciente y de la misma sede que su línea 1 (DX-426)'
+     WHERE h."tenantId" = NEW."tenantId" AND h."id" = NEW."splitId"
+       FOR SHARE;
+    -- Sin fila visible no decide (la FK y el diferido, al COMMIT).
+    IF FOUND AND head_split IS DISTINCT FROM NEW."splitId" THEN
+      RAISE EXCEPTION 'Una línea de un cobro dividido apunta a su línea 1, no a un abono suelto ni a otra línea (DX-426)'
         USING ERRCODE = 'check_violation';
     END IF;
     RETURN NEW;
@@ -116,27 +129,39 @@ CREATE TRIGGER "payments_split_guard"
   BEFORE INSERT OR UPDATE ON "payments"
   FOR EACH ROW EXECUTE FUNCTION public.dx_payment_split_guard();
 
-CREATE FUNCTION public.dx_payment_split_void_check() RETURNS trigger
+CREATE FUNCTION public.dx_payment_split_check() RETURNS trigger
   LANGUAGE plpgsql
   SET search_path = pg_catalog, pg_temp
 AS $$
+DECLARE
+  has_head boolean;
+  parties bigint;
+  has_live boolean;
+  has_voided boolean;
 BEGIN
   IF public.dx_cash_is_superuser() THEN
     RETURN NULL;
   END IF;
   -- Viva = sin "deletedAt" ni "voidedAt"; anulada = alguna de las dos (filas
   -- antiguas pueden tener solo una, como en SEC-042).
-  IF EXISTS (
-       SELECT 1 FROM public."payments" p
-        WHERE p."tenantId" = NEW."tenantId" AND p."splitId" = NEW."splitId"
-          AND p."deletedAt" IS NULL AND p."voidedAt" IS NULL
-     )
-     AND EXISTS (
-       SELECT 1 FROM public."payments" p
-        WHERE p."tenantId" = NEW."tenantId" AND p."splitId" = NEW."splitId"
-          AND (p."deletedAt" IS NOT NULL OR p."voidedAt" IS NOT NULL)
-     )
-  THEN
+  SELECT pg_catalog.bool_or(p."id" = NEW."splitId"),
+         pg_catalog.count(DISTINCT (p."patientId", p."locationId")),
+         pg_catalog.bool_or(p."deletedAt" IS NULL AND p."voidedAt" IS NULL),
+         pg_catalog.bool_or(p."deletedAt" IS NOT NULL OR p."voidedAt" IS NOT NULL)
+    INTO has_head, parties, has_live, has_voided
+    FROM public."payments" p
+   WHERE p."tenantId" = NEW."tenantId" AND p."splitId" = NEW."splitId";
+
+  -- La línea 1 es la de "splitId" = "id" (payments_split_check).
+  IF NOT COALESCE(has_head, false) THEN
+    RAISE EXCEPTION 'Un cobro dividido tiene que tener su línea 1 (DX-426)'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  IF parties > 1 THEN
+    RAISE EXCEPTION 'Las líneas de un cobro dividido son del mismo paciente y de la misma sede (DX-426)'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  IF has_live AND has_voided THEN
     RAISE EXCEPTION 'Un cobro dividido se anula completo: todas sus líneas a la vez, en la misma transacción (DX-426)'
       USING ERRCODE = 'check_violation';
   END IF;
@@ -144,12 +169,12 @@ BEGIN
 END;
 $$;
 
-CREATE CONSTRAINT TRIGGER "payments_split_void_together"
+CREATE CONSTRAINT TRIGGER "payments_split_deferred_check"
   AFTER INSERT OR UPDATE OF "deletedAt", "voidedAt" ON "payments"
   DEFERRABLE INITIALLY DEFERRED
   FOR EACH ROW
   WHEN (NEW."splitId" IS NOT NULL)
-  EXECUTE FUNCTION public.dx_payment_split_void_check();
+  EXECUTE FUNCTION public.dx_payment_split_check();
 
 CREATE FUNCTION public.dx_payment_receipt_split_head() RETURNS trigger
   LANGUAGE plpgsql
@@ -192,15 +217,18 @@ BEGIN
     SELECT pg_catalog.count(*) INTO other_party
       FROM public."payments" l
       JOIN public."payments" h ON h."tenantId" = l."tenantId" AND h."id" = l."splitId"
+                              AND h."splitId" = h."id"
      WHERE l."tenantId" = t AND l."splitId" IS NOT NULL AND l."splitId" <> l."id"
        AND (l."patientId" <> h."patientId" OR l."locationId" <> h."locationId");
 
+    -- Sin línea 1, o apuntando a un abono que no lo es ("splitId" <> "id").
     SELECT pg_catalog.count(*) INTO no_head
       FROM public."payments" l
      WHERE l."tenantId" = t AND l."splitId" IS NOT NULL
        AND NOT EXISTS (
          SELECT 1 FROM public."payments" h
           WHERE h."tenantId" = l."tenantId" AND h."id" = l."splitId"
+            AND h."splitId" = h."id"
        );
 
     SELECT pg_catalog.count(*) INTO half_void FROM (

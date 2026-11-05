@@ -5,6 +5,12 @@ import { Prisma, PrismaClient, TreatmentPlanStatus } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import {
+  gate,
+  settle,
+  transactionId,
+  waitForTransactionWaiters,
+} from './support/postgres-concurrency';
+import {
   REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
@@ -25,6 +31,7 @@ const EMAILS = SUBDOMAINS.map((s) => `${s}@example.com`);
 
 const SAME_PATIENT_LOCATION = /mismo paciente y de la misma sede/;
 const NOT_MOVABLE = /no cambia de paciente, sede ni cobro/;
+const HEAD_IS_LINE_1 = /apunta a su línea 1/;
 const VOID_TOGETHER = /se anula completo/;
 const RECEIPT_HEAD = /recibo de un cobro dividido es el de su línea 1/;
 
@@ -280,6 +287,123 @@ describe('cobro dividido: integridad en la BD (int, DX-426)', () => {
       ).resolves.toBeDefined();
     });
 
+    // Una sola sentencia con varias filas: el BEFORE ROW de la línea 2 corre
+    // antes de que exista la 1, así que lo decide el trigger diferido (COMMIT).
+    const insertRows = (
+      tx: Prisma.TransactionClient,
+      c: Clinic,
+      splitId: string,
+      rows: {
+        id: string;
+        line: number;
+        patientId: string;
+        planId: string;
+        locationId: string;
+      }[],
+    ) =>
+      tx.$executeRaw(Prisma.sql`
+        INSERT INTO "payments" ("id","tenantId","locationId","treatmentPlanId","patientId","amount","currency","paidAt","updatedAt","splitId","splitLine")
+        VALUES ${Prisma.join(
+          rows.map(
+            (r) =>
+              Prisma.sql`(${r.id}::uuid, ${c.tenantId}::uuid, ${r.locationId}::uuid, ${r.planId}::uuid, ${r.patientId}::uuid, 10, 'USD', now(), now(), ${splitId}::uuid, ${r.line})`,
+          ),
+        )}`);
+
+    it('una sola sentencia con la línea 2 (otro paciente) antes que la 1 falla al COMMIT', async () => {
+      const splitId = randomUUID();
+      await expect(
+        asApp(a.tenantId, (tx) =>
+          insertRows(tx, a, splitId, [
+            {
+              id: randomUUID(),
+              line: 2,
+              patientId: a.otherPatientId,
+              planId: a.otherPlanId,
+              locationId: a.locationId,
+            },
+            {
+              id: splitId,
+              line: 1,
+              patientId: a.patientId,
+              planId: a.planId,
+              locationId: a.locationId,
+            },
+          ]),
+        ),
+      ).rejects.toThrow(SAME_PATIENT_LOCATION);
+      expect(await raw.payment.count({ where: { splitId } })).toBe(0);
+    });
+
+    it('lo mismo con otra sede', async () => {
+      const splitId = randomUUID();
+      await expect(
+        asApp(a.tenantId, (tx) =>
+          insertRows(tx, a, splitId, [
+            {
+              id: randomUUID(),
+              line: 2,
+              patientId: a.patientId,
+              planId: a.planId,
+              locationId: a.otherLocationId,
+            },
+            {
+              id: splitId,
+              line: 1,
+              patientId: a.patientId,
+              planId: a.planId,
+              locationId: a.locationId,
+            },
+          ]),
+        ),
+      ).rejects.toThrow(SAME_PATIENT_LOCATION);
+    });
+
+    it('control: la misma sentencia coherente, con la línea 2 primero, pasa', async () => {
+      const splitId = randomUUID();
+      const row = (line: number) => ({
+        id: line === 1 ? splitId : randomUUID(),
+        line,
+        patientId: a.patientId,
+        planId: a.planId,
+        locationId: a.locationId,
+      });
+      await asApp(a.tenantId, (tx) =>
+        insertRows(tx, a, splitId, [row(2), row(1)]),
+      );
+      expect(await raw.payment.count({ where: { splitId } })).toBe(2);
+    });
+
+    it('un cobro sin su línea 1 no se confirma', async () => {
+      await expect(
+        asApp(a.tenantId, (tx) =>
+          tx.payment.create({ data: lineData(a, randomUUID(), 2) }),
+        ),
+      ).rejects.toThrow();
+    });
+
+    it('una línea no puede apuntar a un abono suelto ni a otra línea como si fuera la 1', async () => {
+      const loose = await raw.payment.create({
+        data: lineData(a, randomUUID(), 1, { splitId: null, splitLine: null }),
+      });
+      await expect(
+        asApp(a.tenantId, (tx) =>
+          tx.payment.create({ data: lineData(a, loose.id, 2) }),
+        ),
+      ).rejects.toThrow(HEAD_IS_LINE_1);
+      const { ids } = await seedSplit(a, 2);
+      await expect(
+        asApp(a.tenantId, (tx) =>
+          tx.payment.create({ data: lineData(a, ids[1], 3) }),
+        ),
+      ).rejects.toThrow(HEAD_IS_LINE_1);
+      expect(
+        await raw.payment.count({
+          where: { splitId: { in: [loose.id, ids[1]] } },
+        }),
+      ).toBe(0);
+    });
+
     it('no se mueve la sede de ninguna línea (ni de la 1) ni se cambia de cobro', async () => {
       const { splitId, ids } = await seedSplit(a, 3);
       for (const id of [ids[0], ids[2]]) {
@@ -400,6 +524,68 @@ describe('cobro dividido: integridad en la BD (int, DX-426)', () => {
       expect(await raw.payment.count({ where: { splitId } })).toBe(ids.length);
     });
 
+    it('anular el cobro y añadirle una línea a la vez: el alta espera a la anulación y falla', async () => {
+      const { splitId, ids } = await seedSplit(a, 2);
+      const started = gate<string>();
+      const release = gate();
+      const voider = settle(
+        asApp(a.tenantId, async (tx) => {
+          await voidLines(tx, a, ids);
+          started.open(await transactionId(tx));
+          await release.wait;
+        }),
+      );
+      const xid = await started.wait;
+      const inserter = settle(
+        asApp(a.tenantId, (tx) =>
+          tx.payment.create({ data: lineData(a, splitId, 3) }),
+        ),
+      );
+      try {
+        // El alta se queda esperando el bloqueo de la línea 1 (FOR SHARE).
+        await waitForTransactionWaiters(raw, xid);
+      } finally {
+        release.open(undefined);
+      }
+      expect((await voider).status).toBe('fulfilled');
+      const outcome = await inserter;
+      expect(outcome.status).toBe('rejected');
+      expect(String((outcome as { reason: unknown }).reason)).toMatch(
+        VOID_TOGETHER,
+      );
+      expect(await raw.payment.count({ where: { splitId } })).toBe(2);
+    });
+
+    it('el alta de una línea bloquea la línea 1 FOR SHARE: espera a quien la tiene FOR NO KEY UPDATE', async () => {
+      // Solo el bloqueo de la fila (lo que toma el UPDATE de la anulación),
+      // sin tocar nada más: así la espera es la de la guarda y no la de otro
+      // trigger (el libro del paciente).
+      const { splitId } = await seedSplit(a, 2);
+      const started = gate<string>();
+      const release = gate();
+      const holder = settle(
+        asApp(a.tenantId, async (tx) => {
+          await tx.$queryRaw`SELECT "id" FROM "payments" WHERE "id" = ${splitId}::uuid FOR NO KEY UPDATE`;
+          started.open(await transactionId(tx));
+          await release.wait;
+        }),
+      );
+      const xid = await started.wait;
+      const inserter = settle(
+        asApp(a.tenantId, (tx) =>
+          tx.payment.create({ data: lineData(a, splitId, 3) }),
+        ),
+      );
+      try {
+        await waitForTransactionWaiters(raw, xid);
+      } finally {
+        release.open(undefined);
+      }
+      expect((await holder).status).toBe('fulfilled');
+      expect((await inserter).status).toBe('fulfilled');
+      expect(await raw.payment.count({ where: { splitId } })).toBe(3);
+    });
+
     it('un abono suelto se sigue anulando solo (SEC-042 intacto)', async () => {
       const loose = await raw.payment.create({
         data: lineData(a, randomUUID(), 1, { splitId: null, splitLine: null }),
@@ -419,8 +605,10 @@ describe('cobro dividido: integridad en la BD (int, DX-426)', () => {
   });
 
   describe('informe previo de la migración', () => {
-    // El bloque DO de la migración (lee clínica a clínica con app.current_tenant;
-    // aquí lo ejecuta el superusuario, que salta los triggers al sembrar).
+    // El bloque DO de la migración, leído del fichero, para las clínicas de
+    // este test y como dentalix_app (FORCE RLS, sin BYPASSRLS: el camino de un
+    // owner sin superusuario). Las filas incoherentes se siembran como
+    // superusuario, que salta los triggers.
     const migration = readFileSync(
       join(
         __dirname,
@@ -429,11 +617,25 @@ describe('cobro dividido: integridad en la BD (int, DX-426)', () => {
       'utf8',
     );
     const report = migration.slice(migration.indexOf('DO $$'));
+    const runReport = (...clinics: Clinic[]) => {
+      const ids = clinics.map((c) => `'${c.tenantId}'`).join(',');
+      const scoped = report.replace(
+        'FROM public."tenants" ORDER BY',
+        `FROM public."tenants" WHERE "id" IN (${ids}) ORDER BY`,
+      );
+      expect(scoped).not.toBe(report);
+      return raw.$transaction([
+        raw.$executeRawUnsafe('SET LOCAL ROLE dentalix_app'),
+        raw.$executeRawUnsafe(scoped),
+      ]);
+    };
+    const hint = (c: Clinic, text: string) =>
+      new RegExp(`clínica ${c.tenantId}: ${text}`);
 
     it('pasa con los cobros divididos coherentes', async () => {
       await seedSplit(a, 3);
       await seedSplit(a, 2, true);
-      await expect(raw.$executeRawUnsafe(report)).resolves.toBeDefined();
+      await expect(runReport(a, b)).resolves.toBeDefined();
     });
 
     it.each([
@@ -455,10 +657,37 @@ describe('cobro dividido: integridad en la BD (int, DX-426)', () => {
       const bad = await raw.payment.create({
         data: lineData(a, splitId, 3, change(a)),
       });
-      await expect(raw.$executeRawUnsafe(report)).rejects.toThrow(
-        new RegExp(`clínica ${a.tenantId}: 1 líneas de otro paciente o sede`),
+      await expect(runReport(a)).rejects.toThrow(
+        hint(a, '1 líneas de otro paciente o sede'),
       );
       await raw.payment.delete({ where: { id: bad.id } });
+    });
+
+    it('falla si una línea apunta a un abono suelto como si fuera su línea 1', async () => {
+      const loose = await raw.payment.create({
+        data: lineData(a, randomUUID(), 1, { splitId: null, splitLine: null }),
+      });
+      const bad = await raw.payment.create({
+        data: lineData(a, loose.id, 2),
+      });
+      await expect(runReport(a)).rejects.toThrow(
+        hint(a, '0 líneas de otro paciente o sede, 1 líneas sin línea 1'),
+      );
+      await raw.payment.delete({ where: { id: bad.id } });
+    });
+
+    it('falla si una línea no tiene línea 1', async () => {
+      const orphan = lineData(a, randomUUID(), 2);
+      // Sin FK ni triggers (réplica restaurada): el único modo de tenerla.
+      await raw.$transaction([
+        raw.$executeRawUnsafe('SET LOCAL session_replication_role = replica'),
+        raw.$executeRaw`INSERT INTO "payments" ("id","tenantId","locationId","treatmentPlanId","patientId","amount","currency","paidAt","updatedAt","splitId","splitLine")
+          VALUES (${orphan.id}::uuid, ${a.tenantId}::uuid, ${a.locationId}::uuid, ${a.planId}::uuid, ${a.patientId}::uuid, 10, 'USD', now(), now(), ${orphan.splitId}::uuid, 2)`,
+      ]);
+      await expect(runReport(a)).rejects.toThrow(
+        hint(a, '0 líneas de otro paciente o sede, 1 líneas sin línea 1'),
+      );
+      await raw.payment.delete({ where: { id: orphan.id } });
     });
 
     it('falla si un cobro está anulado a medias', async () => {
@@ -468,13 +697,39 @@ describe('cobro dividido: integridad en la BD (int, DX-426)', () => {
         where: { id: ids[1] },
         data: { deletedAt: now, voidedAt: now },
       });
-      await expect(raw.$executeRawUnsafe(report)).rejects.toThrow(
-        /1 cobros anulados a medias/,
-      );
+      await expect(runReport(a)).rejects.toThrow(/1 cobros anulados a medias/);
       await raw.payment.update({
         where: { id: ids[1] },
         data: { deletedAt: null, voidedAt: null },
       });
+    });
+
+    it('falla si una línea > 1 lleva recibo', async () => {
+      const { ids } = await seedSplit(b, 2);
+      const location = await raw.location.findUniqueOrThrow({
+        where: { id: b.locationId },
+      });
+      const prefix = location.receiptPrefix as string;
+      await raw.paymentReceiptCounter.create({
+        data: { tenantId: b.tenantId, seriesPrefix: prefix, lastNumber: 1 },
+      });
+      const receipt = await raw.paymentReceipt.create({
+        data: {
+          tenantId: b.tenantId,
+          locationId: b.locationId,
+          paymentId: ids[1],
+          seriesPrefix: prefix,
+          number: 1,
+          snapshot: { version: 1 },
+        },
+      });
+      await expect(runReport(b)).rejects.toThrow(
+        hint(
+          b,
+          '0 líneas de otro paciente o sede, 0 líneas sin línea 1, 0 cobros anulados a medias, 1 recibos',
+        ),
+      );
+      await raw.paymentReceipt.delete({ where: { id: receipt.id } });
     });
   });
 });
