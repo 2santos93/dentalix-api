@@ -426,6 +426,9 @@ async function assertInvariants(planId: string): Promise<Map<string, number>> {
         createdAt: base.payment.createdAt,
         baseCents: cents(base.amount),
         allocatedCents: used,
+        // Estas carreras no tienen devoluciones ni traspasos: con salidas habría
+        // que atribuirlas (credit-netting) o `hasFixedPointViolation` daría falsos positivos.
+        creditOutCents: 0,
       });
     }
   }

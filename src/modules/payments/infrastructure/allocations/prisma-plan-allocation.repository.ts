@@ -30,6 +30,7 @@ import {
 } from '../../domain/allocation-rules';
 import {
   ALLOCATION_MIGRATED_BALANCE,
+  ALLOCATION_OVER_CREDIT_OUT,
   ALLOCATION_PAYMENT_NOT_FOUND,
   ALLOCATION_VERSION_CONFLICT,
   allocationNoRate,
@@ -213,6 +214,7 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
     const donors = await this.readDonors(
       tx,
       tenantId,
+      planId,
       plan.currency,
       bases.map((b) => b.paymentId),
     );
@@ -235,6 +237,7 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
   private async readDonors(
     tx: Prisma.TransactionClient,
     tenantId: string,
+    planId: string,
     planCurrency: string,
     paymentIds: string[],
   ): Promise<Donor[]> {
@@ -259,12 +262,24 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
          AND b."manual" = false
          AND b."currency" = ${planCurrency}
          AND p."deletedAt" IS NULL`;
+    // DX-399-bis: lo devuelto o traspasado sale del disponible de cada abono por
+    // la MISMA regla que el informe (`credit-netting`, la cascada del plan
+    // entero). Se lee tras los bloqueos: la devolución y el traspaso toman el
+    // plan FOR NO KEY UPDATE, que choca con nuestro FOR SHARE, así que sus
+    // asientos confirmados no cambian durante este reparto.
+    // Sin sobrante bruto no hay nada que descontar: se salta la cascada.
+    const creditOut = rows.some(
+      (r) => decimalCents(r.amount) > decimalCents(r.allocated),
+    )
+      ? (await this.planCreditOut(tx, tenantId, planId)).byPayment
+      : new Map<string, number>();
     return rows.map((r) => ({
       paymentId: r.paymentId,
       paidAt: r.paidAt,
       createdAt: r.createdAt,
       baseCents: decimalCents(r.amount),
       allocatedCents: decimalCents(r.allocated),
+      creditOutCents: creditOut.get(r.paymentId) ?? 0,
     }));
   }
 
@@ -660,15 +675,31 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
     planId: string,
     paymentId: string,
   ): Promise<number> {
+    const { byPayment } = await this.planCreditOut(tx, tenantId, planId);
+    return byPayment.get(paymentId) ?? 0;
+  }
+
+  /**
+   * La cascada de `credit-netting` del plan entero (la MISMA regla del informe):
+   * lo devuelto o traspasado que se atribuye a cada abono y el total atribuido.
+   */
+  private async planCreditOut(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    planId: string,
+  ): Promise<{ byPayment: Map<string, number>; totalCents: number }> {
     const { facts, entries } = await loadNettingFacts(
       tx,
       tenantId,
       Prisma.sql`tp."id" = ${planId}::uuid`,
     );
-    return (
-      nettedFacts(facts, entries).find((n) => n.fact.id === paymentId)?.net
-        .creditOutCents ?? 0
-    );
+    const byPayment = new Map<string, number>();
+    let totalCents = 0;
+    for (const n of nettedFacts(facts, entries)) {
+      byPayment.set(n.fact.id, n.net.creditOutCents);
+      totalCents += n.net.creditOutCents;
+    }
+    return { byPayment, totalCents };
   }
 
   /** El abono vivo con su plan (vivo) y su base; `null` si no. */
@@ -924,9 +955,15 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
       }
 
       const baseCents = decimalCents(base.amount);
+      // DX-399-bis: lo devuelto o traspasado no se imputa a mano tampoco.
+      const creditBefore =
+        input.mode === 'MANUAL'
+          ? await this.planCreditOut(tx, tenantId, planId)
+          : null;
       if (input.mode === 'MANUAL') {
         const violation = validateManualAllocation({
           baseCents,
+          creditOutCents: creditBefore?.byPayment.get(paymentId) ?? 0,
           lines: input.lines,
           items: await this.readLineItems(
             tx,
@@ -990,6 +1027,19 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
         });
       }
       await tx.$executeRaw`SELECT set_config('app.allocation_cause', '', true)`;
+      // NO debería saltar nunca con la regla actual (cada salida elige entre
+      // un conjunto de abonos que solo crece y la validación previa deja a este
+      // abono con lo que ya tenía atribuido): protege de cambios futuros de la
+      // regla, y por eso no tiene un caso rojo de integración.
+      // Red de DX-399-bis: la cascada puede mover la salida a otro abono. Si
+      // tras escribir quedara menos devuelto atribuido que antes, esta
+      // imputación dejaría dinero devuelto imputado dos veces: se deshace.
+      if (creditBefore) {
+        const after = await this.planCreditOut(tx, tenantId, planId);
+        if (after.totalCents < creditBefore.totalCents) {
+          throw new BadRequestException(ALLOCATION_OVER_CREDIT_OUT);
+        }
+      }
       // DX-399: el evento de auditoría en la MISMA transacción: usuario, modo y
       // las líneas de antes y de después (en AUTO, `after` vacío: el reparto lo
       // hace el sistema después del COMMIT y queda en el historial de movimientos).

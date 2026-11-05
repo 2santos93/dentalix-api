@@ -5731,6 +5731,36 @@ automática). Ahora:
   qué abonos se aplicará, qué otra tasa falta o que no se usará.
 - **Fuera**: la tasa de respaldo de N días (DX-384).
 
+### Devoluciones y traspasos del saldo a favor en la imputación (DX-399-bis)
+
+- El disponible de un abono para imputar es su base menos lo imputado y menos lo
+  que `payments/domain/credit-netting.ts` (la regla del informe «Cobrado sin
+  imputar», DX-399) atribuye a ese abono como devuelto o traspasado. Lo aplican
+  el reparto automático (`readDonors`) y la imputación manual
+  (`replaceAllocations`: 400 en español «supera lo que queda a cuenta…» y, si la
+  cascada moviera la salida a otro abono, «dejaría imputado dinero que ya se
+  devolvió…»; en ambos casos no se escribe nada).
+- Bloqueos: sin ninguno nuevo. Plan `FOR SHARE` → bases `FOR UPDATE` por
+  `paymentId` → ítems `FOR UPDATE` por id; la lectura del netting va después, sin
+  bloqueo. Devolución y traspaso toman el plan `FOR NO KEY UPDATE`, que choca con
+  ese `FOR SHARE`: o su asiento ya está confirmado o el reparto espera.
+- **Sin backfill automático.** Un plan que el fallo dejó mal puede corregirse
+  sin cambiar totales cuando hay un abono posterior con sobrante (cambiar el
+  abono que cubre el ítem), y si no lo hay hay que quitar cobertura: decisión
+  humana, plan a plan. Para listarlos (solo lectura, rol de la app, una línea
+  JSON por plan con céntimos enteros):
+
+```bash
+npm run credit-netting:report                      # todas las clínicas
+npm run credit-netting:report -- --tenant <uuid>   # una clínica
+```
+
+- Limitaciones conocidas (ticket aparte): un traspaso de ENTRADA no absorbe
+  devoluciones (la cascada solo conoce abonos), y el estado de cuenta y la
+  pestaña del plan siguen mostrando «Sin imputar» en bruto (sin descontar lo
+  devuelto). Un plan con traspaso de entrada y luego salida también aparece en
+  el diagnóstico.
+
 ## Despliegue: roles de la BD (DX-113)
 
 Requiere **PostgreSQL ≥ 16** (las migraciones usan `GRANT … WITH SET`, y

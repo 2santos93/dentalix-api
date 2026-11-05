@@ -108,6 +108,7 @@ export class InMemoryPlanAllocationRepository implements PlanAllocationRepositor
           createdAt: p.createdAt,
           baseCents: p.baseCents ?? 0,
           allocatedCents: this.allocatedCents({ paymentId: p.id }),
+          creditOutCents: 0,
         })),
       items: this.items
         .filter((i) => i.planId === planId && i.billableCents > 0)

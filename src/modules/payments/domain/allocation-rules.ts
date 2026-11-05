@@ -12,6 +12,20 @@ export interface Donor {
   createdAt: Date;
   baseCents: number;
   allocatedCents: number;
+  /**
+   * Lo devuelto o traspasado del saldo a favor que `credit-netting` atribuye a
+   * este abono (DX-399-bis): ese dinero ya no está a cuenta y no se reparte.
+   * Obligatorio: quien construya un donante debe decidirlo (0 si no hay salidas).
+   */
+  creditOutCents: number;
+}
+
+/** Lo que un donante puede dar: su base menos lo imputado y lo devuelto o traspasado. */
+export function donorAvailableCents(donor: Donor): number {
+  return Math.max(
+    0,
+    donor.baseCents - donor.allocatedCents - donor.creditOutCents,
+  );
 }
 
 export interface AllocatableItem {
@@ -73,7 +87,7 @@ export function respreadSurplus(
   const orderedItems = orderItems(items);
   const out: AllocationIncrement[] = [];
   for (const donor of orderDonors(donors)) {
-    let surplus = Math.max(0, donor.baseCents - donor.allocatedCents);
+    let surplus = donorAvailableCents(donor);
     for (const item of orderedItems) {
       if (surplus === 0) break;
       const take = Math.min(surplus, free.get(item.id) ?? 0);
@@ -92,7 +106,7 @@ export function hasFixedPointViolation(
   items: AllocatableItem[],
 ): boolean {
   return (
-    donors.some((d) => d.baseCents - d.allocatedCents > 0) &&
+    donors.some((d) => donorAvailableCents(d) > 0) &&
     items.some((i) => i.billableCents - i.allocatedCents > 0)
   );
 }
@@ -104,18 +118,26 @@ export type AllocationViolationCode =
   | 'NOT_IN_PLAN'
   | 'PROPOSED'
   | 'OVER_ITEM'
-  | 'OVER_PAYMENT';
+  | 'OVER_PAYMENT'
+  | 'OVER_NET';
 
 export interface AllocationViolation {
   code: AllocationViolationCode;
   freeCents?: number;
   sumCents?: number;
+  /** OVER_NET: lo devuelto o traspasado que se atribuye al abono. */
+  creditOutCents?: number;
 }
 
 export const MAX_ALLOCATION_LINES = 200;
 
 export interface ManualAllocationInput {
   baseCents: number | null;
+  /**
+   * Lo devuelto o traspasado que `credit-netting` atribuye a este abono
+   * (DX-399-bis): no se puede imputar a ítems, igual que en el reparto automático.
+   */
+  creditOutCents: number;
   lines: { itemId: string; cents: number }[];
   /** `freeCents`: libre del ítem sin contar las imputaciones de este abono. */
   items: Map<
@@ -128,7 +150,7 @@ export interface ManualAllocationInput {
 export function validateManualAllocation(
   input: ManualAllocationInput,
 ): AllocationViolation | null {
-  const { baseCents, lines, items } = input;
+  const { baseCents, creditOutCents, lines, items } = input;
   if (baseCents === null) return { code: 'NO_RATE' };
   if (lines.length > MAX_ALLOCATION_LINES) return { code: 'TOO_MANY' };
   if (new Set(lines.map((l) => l.itemId)).size !== lines.length) {
@@ -146,6 +168,9 @@ export function validateManualAllocation(
   }
   const sumCents = lines.reduce((sum, l) => sum + l.cents, 0);
   if (sumCents > baseCents) return { code: 'OVER_PAYMENT', sumCents };
+  if (sumCents > baseCents - creditOutCents) {
+    return { code: 'OVER_NET', sumCents, creditOutCents };
+  }
   return null;
 }
 

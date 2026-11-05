@@ -137,3 +137,71 @@ export function nettedFacts(
     net: net.get(fact.id) as NettedPayment,
   }));
 }
+
+interface AffectedPlan {
+  tenantId: string;
+  planId: string;
+  patientId: string;
+  /** Σ devoluciones y traspasos de salida del plan (céntimos). */
+  creditOutCents: number;
+  /** Lo que la cascada atribuye a abonos del plan. */
+  attributedCents: number;
+  /** creditOutCents - attributedCents (> 0 = afectado). */
+  discardedCents: number;
+}
+
+/**
+ * Planes cuyas salidas del saldo a favor superan lo que la cascada atribuye a
+ * sus abonos (DX-399-bis, diagnóstico de solo lectura).
+ */
+export async function findAffectedPlans(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+): Promise<AffectedPlan[]> {
+  const outs = await tx.$queryRaw<
+    { planId: string; patientId: string; cents: bigint }[]
+  >`
+    SELECT e."treatmentPlanId" AS "planId", e."patientId",
+           round(-sum(e."amount") * 100)::bigint AS "cents"
+      FROM "patient_credit_entries" e
+      JOIN "treatment_plans" tp
+        ON tp."tenantId" = e."tenantId" AND tp."id" = e."treatmentPlanId"
+      JOIN "patients" pt
+        ON pt."tenantId" = e."tenantId" AND pt."id" = e."patientId"
+     WHERE e."tenantId" = ${tenantId}::uuid
+       AND e."kind" IN ('REFUND', 'TRANSFER_OUT')
+       -- Las MISMAS condiciones de \`loadNettingFacts\`: un plan cancelado,
+       -- rechazado o borrado, o un paciente borrado, no tiene imputaciones que
+       -- el fallo pudiera tocar (devolver desde un plan cancelado es normal).
+       AND tp."deletedAt" IS NULL
+       AND tp."status"::text NOT IN (${Prisma.join([...NON_BILLABLE_PLAN_STATUSES])})
+       AND pt."deletedAt" IS NULL
+     GROUP BY e."treatmentPlanId", e."patientId"`;
+  if (outs.length === 0) return [];
+  const planIds = outs.map((o) => o.planId);
+  const { facts, entries } = await loadNettingFacts(
+    tx,
+    tenantId,
+    Prisma.sql`tp."id" = ANY(${planIds}::uuid[])`,
+  );
+  const planOf = new Map(facts.map((f) => [f.id, f.planId]));
+  const attributed = new Map<string, number>();
+  for (const { fact, net } of nettedFacts(facts, entries)) {
+    const planId = planOf.get(fact.id) as string;
+    attributed.set(planId, (attributed.get(planId) ?? 0) + net.creditOutCents);
+  }
+  return outs
+    .map((o) => {
+      const creditOutCents = Number(o.cents);
+      const attributedCents = attributed.get(o.planId) ?? 0;
+      return {
+        tenantId,
+        planId: o.planId,
+        patientId: o.patientId,
+        creditOutCents,
+        attributedCents,
+        discardedCents: creditOutCents - attributedCents,
+      };
+    })
+    .filter((p) => p.discardedCents > 0);
+}
