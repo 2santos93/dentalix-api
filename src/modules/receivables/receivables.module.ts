@@ -4,6 +4,8 @@ import {
   GetReceivablesAgingUseCase,
   RECEIVABLES_CLOCK,
 } from './application/use-cases/get-receivables-aging.use-case';
+import { ListCreditBalancesUseCase } from './application/use-cases/list-credit-balances.use-case';
+import { CREDIT_BALANCES_REPOSITORY } from './domain/ports/credit-balances-repository.port';
 import { RECEIVABLES_REPOSITORY } from './domain/ports/receivables-repository.port';
 import { PrismaReceivablesRepository } from './infrastructure/prisma-receivables.repository';
 import { ReceivablesController } from './presentation/receivables.controller';
@@ -24,11 +26,17 @@ import { PlanBalanceModule } from '../payments/plan-balance.module';
   controllers: [ReceivablesController],
   providers: [
     GetReceivablesAgingUseCase,
+    ListCreditBalancesUseCase,
     TokenService,
     TenantContextInterceptor,
     {
       provide: RECEIVABLES_REPOSITORY,
       useClass: PrismaReceivablesRepository,
+    },
+    // DX-430: la misma clase lee las dos listas.
+    {
+      provide: CREDIT_BALANCES_REPOSITORY,
+      useExisting: RECEIVABLES_REPOSITORY,
     },
     { provide: RECEIVABLES_CLOCK, useValue: () => new Date() },
   ],

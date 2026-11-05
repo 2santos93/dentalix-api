@@ -622,6 +622,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // personal de muchos pacientes: solo ADMIN.
   'GET /receivables/aging': BILLING,
   'GET /receivables/aging/summary': BILLING,
+  // DX-430: saldo a favor por paciente, mismo dato financiero que la lista.
+  'GET /receivables/credit-balances': BILLING,
   'GET /receivables/aging.csv': ADMIN_ONLY,
   // Descuentos (loop/informes/DX-204.md): la política la leen quienes editan
   // ítems de plan y la cambia ADMIN; el informe y su CSV, solo ADMIN.

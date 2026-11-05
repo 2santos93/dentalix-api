@@ -8,6 +8,8 @@ import {
   Prisma,
   TreatmentPlanStatus,
 } from '@prisma/client';
+import { NON_BILLABLE_PLAN_STATUSES } from '../../treatment-plans/domain/plan-status-machine';
+import { toCents } from '../../../shared/money/money';
 import { phoneRegionOrNull } from '../../../shared/phone/phone-number';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
@@ -19,6 +21,8 @@ import type {
   LedgerPendingPayment,
   PatientLedger,
 } from '../domain/entities/receivables.entity';
+import type { PlanCreditFacts } from '../domain/entities/credit-balances.entity';
+import type { CreditBalancesRepository } from '../domain/ports/credit-balances-repository.port';
 import type {
   LedgersQuery,
   ReceivablesLocation,
@@ -276,7 +280,9 @@ interface DebtorSqlRow {
  * un double y el cálculo redondea a centavos.
  */
 @Injectable()
-export class PrismaReceivablesRepository implements ReceivablesRepository {
+export class PrismaReceivablesRepository
+  implements ReceivablesRepository, CreditBalancesRepository
+{
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantContext: TenantContextService,
@@ -548,5 +554,166 @@ export class PrismaReceivablesRepository implements ReceivablesRepository {
       }
       return out;
     });
+  }
+
+  /**
+   * DX-430: los pacientes vivos que PUEDEN tener saldo a favor, leídos del
+   * mismo resumen `patient_ledgers` (DX-155) que la cartera, sin filtrar por
+   * su sede (la de un saldo se atribuye por plan, ver `originOfPlanCredit`). El resumen ya trae los asientos del saldo a favor dentro de
+   * lo abonado del plan (posición 6) y las bases de lo abonado en otra moneda
+   * (posición 8). Un plan puede tener saldo a favor si
+   *    abonado + bases > facturable        (0 si está cancelado o rechazado),
+   * o si tiene abonos en otra moneda aún sin base (posición 9): la API los
+   * convierte y solo puede SUBIR lo abonado. Es un superconjunto exacto de
+   * quien tiene saldo a favor en `computeBalances`; no decide ninguna cifra,
+   * solo evita traer a quien seguro no tiene. Sin filtro de sede (la sede de
+   * un saldo es la de su plan, no la de la cartera del paciente) ni índice
+   * propio: recorre las filas de la clínica por la clave primaria; ver el
+   * informe de DX-430 para el EXPLAIN.
+   */
+  async loadCreditLedgers(): Promise<PatientLedger[]> {
+    const tenantId = this.tenantId();
+    const nonBillable: string[] = [...NON_BILLABLE_PLAN_STATUSES];
+
+    const rows = await this.prisma.runWithTenant(
+      (tx) =>
+        tx.$queryRaw<LedgerSqlRow[]>`
+          SELECT l."patientId", l."locationId", l."ledger"::text AS "ledger"
+            FROM "patient_ledgers" l
+            JOIN "patients" pa
+              ON pa."tenantId" = l."tenantId" AND pa."id" = l."patientId"
+             AND pa."deletedAt" IS NULL
+           WHERE l."tenantId" = ${tenantId}::uuid
+             AND EXISTS (
+               SELECT 1
+                 FROM jsonb_array_elements(l."ledger" -> 'plans') AS p("plan")
+                WHERE COALESCE((p."plan" ->> 6)::numeric, 0)
+                      + COALESCE((p."plan" ->> 8)::numeric, 0)
+                      > CASE WHEN (p."plan" ->> 1) = ANY(${nonBillable}::text[])
+                             THEN 0 ELSE (p."plan" ->> 5)::numeric END
+                   OR jsonb_array_length(
+                        COALESCE(NULLIF(p."plan" -> 9, 'null'::jsonb), '[]'::jsonb)
+                      ) > 0)`,
+    );
+    return rows.map(toLedger);
+  }
+
+  allowedLocationIds(): string[] | undefined {
+    return this.tenantContext.scopeLocationIds();
+  }
+
+  async patientNames(
+    patientIds: readonly string[],
+  ): Promise<Map<string, string>> {
+    const tenantId = this.tenantId();
+    const ids = [...new Set(patientIds)];
+    if (ids.length === 0) return new Map();
+    const patients = await this.prisma.runWithTenant((tx) =>
+      tx.patient.findMany({
+        where: { tenantId, id: { in: ids }, deletedAt: null },
+        select: { id: true, firstName: true, lastName: true },
+      }),
+    );
+    return new Map(
+      patients.map((p) => [p.id, `${p.firstName} ${p.lastName}`.trim()]),
+    );
+  }
+
+  async locationNames(): Promise<Map<string, string>> {
+    const tenantId = this.tenantId();
+    const locations = await this.prisma.runWithTenant((tx) =>
+      tx.location.findMany({
+        where: { tenantId },
+        select: { id: true, name: true },
+      }),
+    );
+    return new Map(locations.map((l) => [l.id, l.name]));
+  }
+
+  /**
+   * DX-430: los hechos de cada plan para atribuir su saldo a una sede y
+   * fecharlo (ver `originOfPlanCredit`). Los abonos propios del plan y, solo
+   * si no tiene, los de los planes que le traspasaron saldo (CTE recursivo;
+   * `UNION` descarta los ciclos). Por el índice de abonos por plan. Lo
+   * abonado en otra moneda cuenta por su base en la moneda del plan (DX-051);
+   * sin base, `planCents` es null.
+   */
+  async planCreditFacts(
+    planIds: readonly string[],
+  ): Promise<Map<string, PlanCreditFacts>> {
+    const tenantId = this.tenantId();
+    const ids = [...new Set(planIds)];
+    const out = new Map<string, PlanCreditFacts>();
+    if (ids.length === 0) return out;
+    const { plans, payments } = await this.prisma.runWithTenant(async (tx) => {
+      const plans = await tx.$queryRaw<
+        { id: string; locationId: string | null }[]
+      >`
+        SELECT tp."id",
+               COALESCE(tp."acceptedLocationId", tp."presentedLocationId")
+                 AS "locationId"
+          FROM "treatment_plans" tp
+         WHERE tp."tenantId" = ${tenantId}::uuid
+           AND tp."id" = ANY(${ids}::uuid[])`;
+      const payments = await tx.$queryRaw<
+        {
+          planId: string;
+          depth: number;
+          paidAt: Date;
+          locationId: string;
+          planAmount: number | null;
+        }[]
+      >`
+        WITH RECURSIVE src("planId", "rootId", "depth") AS (
+          SELECT x, x, 0 FROM unnest(${ids}::uuid[]) AS u(x)
+          UNION
+          SELECT t."sourcePlanId", s."rootId", s."depth" + 1
+            FROM src s
+            JOIN "patient_credit_transfers" t
+              ON t."tenantId" = ${tenantId}::uuid
+             AND t."targetPlanId" = s."planId"
+        )
+        SELECT s."rootId" AS "planId", s."depth", p."paidAt", p."locationId",
+               (CASE WHEN p."currency" = rp."currency" THEN p."amount"
+                     ELSE b."amount" END)::float8 AS "planAmount"
+          FROM src s
+          JOIN "treatment_plans" rp
+            ON rp."tenantId" = ${tenantId}::uuid AND rp."id" = s."rootId"
+          JOIN "payments" p
+            ON p."tenantId" = ${tenantId}::uuid
+           AND p."treatmentPlanId" = s."planId"
+           AND p."deletedAt" IS NULL
+          LEFT JOIN "payment_plan_amounts" b
+            ON b."tenantId" = p."tenantId" AND b."paymentId" = p."id"
+           AND b."currency" = rp."currency"
+         ORDER BY s."rootId", s."depth", p."paidAt", p."id"`;
+      return { plans, payments };
+    });
+    for (const p of plans) {
+      out.set(p.id, {
+        planLocationId: p.locationId,
+        ownPayments: [],
+        transferredPayments: [],
+      });
+    }
+    for (const row of payments) {
+      const facts = out.get(row.planId);
+      if (!facts) continue;
+      const payment = {
+        paidAt: row.paidAt,
+        locationId: row.locationId,
+        planCents: row.planAmount === null ? null : toCents(row.planAmount),
+      };
+      (row.depth === 0 ? facts.ownPayments : facts.transferredPayments).push(
+        payment,
+      );
+    }
+    // Sin abonos propios, el más antiguo de los traspasados primero.
+    for (const facts of out.values()) {
+      facts.transferredPayments.sort(
+        (a, b) => a.paidAt.getTime() - b.paidAt.getTime(),
+      );
+    }
+    return out;
   }
 }

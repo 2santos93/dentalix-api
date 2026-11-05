@@ -2459,6 +2459,15 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
         },
       },
     ]),
+    // DX-430: el saldo a favor, con el mismo rechazo de la sede de A.
+    {
+      name: 'GET /receivables/credit-balances ?locationId de A',
+      verb: 'get',
+      path: () => `/receivables/credit-balances?locationId=${a.locationId}`,
+      queryIds: ['locationId'],
+      status: 400,
+      message: 'La sede no es de esta clínica.',
+    },
     // DX-423: producción por procedimiento. Una sede de A es 403; el
     // profesional o el procedimiento de A dan un reporte vacío.
     ...(
