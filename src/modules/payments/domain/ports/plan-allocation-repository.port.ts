@@ -1,3 +1,4 @@
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import type {
   Prisma,
   TreatmentPlanItemStatus,
@@ -130,6 +131,8 @@ export interface ReplaceAllocationsInput {
   expectedVersion: string;
   lines: { itemId: string; cents: number }[];
   actorId: string;
+  /** DX-399: quién y desde dónde; el evento de auditoría se escribe en la MISMA transacción. */
+  audit: AuditRequestContext;
 }
 
 export const PLAN_ALLOCATION_REPOSITORY = Symbol('PLAN_ALLOCATION_REPOSITORY');

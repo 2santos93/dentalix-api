@@ -953,14 +953,6 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: { param: 'id' },
     patient: { lookup: 'payment', param: 'id' },
   },
-  'PUT /payments/:id/allocations': {
-    action: 'UPDATE',
-    resource: 'PAYMENT_ALLOCATION',
-    resourceId: { param: 'id' },
-    patient: { lookup: 'payment', param: 'id' },
-    reason: 'PAYMENT_REALLOCATED',
-    allocation: true,
-  },
   // DX-136: ver, reimprimir y enviar el recibo de caja.
   'GET /payments/:id/receipt': {
     action: 'VIEW',
@@ -1492,6 +1484,9 @@ const EXPECTED: Record<string, AuditOptions> = {
  * (sería un evento doble).
  */
 const AUDITED_IN_USE_CASE: Record<string, string> = {
+  // DX-399: PAYMENT_ALLOCATION / PAYMENT_REALLOCATED con las líneas antes y
+  // después, en la MISMA transacción del cambio (si algo falla, se deshacen juntos).
+  'PUT /payments/:id/allocations': 'payment-reallocation.e2e-spec.ts',
   // DX-222: CREATE POSTOP_DELIVERY con el id de `delivery` y el canal como
   // `reason`; queda auditada aunque el email no se pueda encolar.
   'POST /appointments/:appointmentId/post-op-instructions/deliveries':

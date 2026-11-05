@@ -8,7 +8,6 @@ import type {
   UnallocatedLocation,
   UnallocatedPaymentRow,
   UnallocatedPaymentsRepository,
-  UnallocatedSums,
 } from '../../domain/ports/unallocated-payments-repository.port';
 
 const PRINCIPAL = '11111111-1111-4111-8111-111111111111';
@@ -40,7 +39,7 @@ function fakeRepo(rows: UnallocatedPaymentRow[] = [row()]) {
     { id: PRINCIPAL, name: 'Sede Principal', isActive: true },
     { id: NORTE, name: 'Sede Norte', isActive: true },
   ];
-  const calls = { list: [] as unknown[], totals: [] as unknown[] };
+  const calls = { list: [] as unknown[] };
   const repo: UnallocatedPaymentsRepository = {
     listLocations: (allowed) =>
       Promise.resolve(
@@ -50,23 +49,31 @@ function fakeRepo(rows: UnallocatedPaymentRow[] = [row()]) {
       ),
     locationInClinic: (id) =>
       Promise.resolve(locations.some((l) => l.id === id)),
-    list: (period, scope, page) => {
+    report: (period, scope, page) => {
       calls.list.push({ period, scope, page });
-      return Promise.resolve({ rows, total: rows.length });
+      return Promise.resolve({
+        rows,
+        total: rows.length,
+        totals:
+          rows.length > 0
+            ? [
+                {
+                  currency: 'USD',
+                  count: rows.length,
+                  allocatedCents: rows.reduce(
+                    (n, r) => n + r.allocatedCents,
+                    0,
+                  ),
+                  unallocatedCents: rows.reduce(
+                    (n, r) => n + r.unallocatedCents,
+                    0,
+                  ),
+                },
+              ]
+            : [],
+        withoutRateCount: 2,
+      });
     },
-    totals: (period, scope) => {
-      calls.totals.push({ period, scope });
-      const sums: UnallocatedSums[] = [
-        {
-          currency: 'USD',
-          count: rows.length,
-          allocatedCents: rows.reduce((n, r) => n + r.allocatedCents, 0),
-          unallocatedCents: rows.reduce((n, r) => n + r.unallocatedCents, 0),
-        },
-      ];
-      return Promise.resolve(rows.length > 0 ? sums : []);
-    },
-    withoutRateCount: () => Promise.resolve(2),
   };
   return { repo, calls };
 }

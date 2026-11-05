@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { TreatmentPlanStatus } from '@prisma/client';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { ConvertAmountUseCase } from '../../../exchange/application/use-cases/convert-amount.use-case';
 import { isPlanBillable } from '../../../treatment-plans/domain/plan-status-machine';
 import { allocationVersion } from '../../domain/allocation-rules';
@@ -64,8 +65,9 @@ export class ReplacePaymentAllocationsUseCase {
   async execute(
     paymentId: string,
     command: ReplacePaymentAllocationsCommand,
-    actorId: string,
+    audit: AuditRequestContext,
   ): Promise<ReplacedPaymentAllocations> {
+    const actorId = audit.actor.userId;
     const found = await this.repo.findAllocationTarget(paymentId);
     const target = await this.withBase(checkTarget(found));
     const planId = target.treatmentPlanId as string;
@@ -82,6 +84,7 @@ export class ReplacePaymentAllocationsUseCase {
             }))
           : [],
       actorId,
+      audit,
     });
 
     // Si el reparto falla, la respuesta (y el `after` de la auditoría) es la

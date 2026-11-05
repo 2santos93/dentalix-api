@@ -321,7 +321,14 @@ describe('backfill de imputaciones de abonos (DX-051, R17)', () => {
             amount: l.amount,
           })),
         },
-        adminId,
+        {
+          tenantId: demoId,
+          locationId: null,
+          actor: { userId: adminId, role: 'ADMIN' },
+          requestId: null,
+          ip: null,
+          userAgent: null,
+        },
       ),
     );
     const manualBefore = await raw.paymentAllocation.findMany({

@@ -42,8 +42,9 @@ export const UNALLOCATED_PAYMENTS_FORBIDDEN_MESSAGE =
 
 const SCOPE =
   'Abonos vivos a un plan que se cobra (ni cancelado ni rechazado) de pacientes vivos, con base en la moneda del plan, cuyo día civil (en la zona de la sede del abono) cae en el período y cuya sede ve quien consulta (DX-089). ' +
-  '`allocated` es la suma de sus imputaciones vivas y `unallocated` la base menos lo imputado (> 0), por moneda del plan y sin convertir: son las cifras de GET /payments/:id/allocations. ' +
-  'Los abonos sin tasa para su día (sin base) no se pueden imputar: se cuentan en `paymentsWithoutRateCount`. Sin datos clínicos.';
+  '`allocated` es la suma de sus imputaciones vivas y `unallocated` la base menos lo imputado (> 0), en la moneda del plan (el abono convertido con la tasa de su día; los totales van por moneda y no se suman entre monedas): son las cifras de GET /payments/:id/allocations, ' +
+  'MENOS lo que el plan ya devolvió o traspasó de su saldo a favor (DX-253): ese dinero se descuenta por plan de los abonos más recientes primero (LIFO), nunca por debajo de 0, y el abono que queda en 0 desaparece. ' +
+  'Los abonos en otra moneda sin tasa para su día (sin base) no se pueden imputar: se cuentan en `paymentsWithoutRateCount`. Sin datos clínicos.';
 
 const BAD_REQUEST = 'Período inválido o de más de 24 meses';
 

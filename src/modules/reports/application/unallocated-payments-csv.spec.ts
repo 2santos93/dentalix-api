@@ -38,13 +38,13 @@ describe('toUnallocatedPaymentsCsv (DX-399)', () => {
     expect(lines[0]).toBe('"Cobrado sin imputar / a cuenta"');
     expect(lines[1]).toBe('"Período","2026-10-01 a 2026-10-31"');
     expect(lines[2]).toBe('"Sede","Todas tus sedes"');
-    expect(lines[5]).toBe(
+    expect(lines[6]).toBe(
       '"Fila","Paciente","Sede","Fecha del abono","Moneda del abono","Importe del abono","Moneda del plan","Imputado","Sin imputar"',
     );
-    expect(lines[6]).toBe(
+    expect(lines[7]).toBe(
       '"Abono","\'=HYPERLINK(""x"")","Sede ""Centro""","2026-10-20","VES",4000.00,"USD",70.00,30.50',
     );
-    expect(lines[7]).toBe('"Total","1 abono","","","",,"USD",70.00,30.50');
+    expect(lines[8]).toBe('"Total","1 abono","","","",,"USD",70.00,30.50');
   });
 
   it('names the sede filter and leaves only header+columns when empty', () => {
@@ -56,7 +56,7 @@ describe('toUnallocatedPaymentsCsv (DX-399)', () => {
       }),
     );
     const lines = csv.slice(1).trim().split('\r\n');
-    expect(lines).toHaveLength(6);
+    expect(lines).toHaveLength(7);
     expect(lines[2]).toBe('"Sede","Sede Norte"');
   });
 });

@@ -124,6 +124,16 @@ const DAY = new Date('2026-10-20T15:00:00.000Z');
 const REPEAT = 20;
 const DEADLOCK = '40P01';
 
+/** Quién y desde dónde, para el evento de auditoría de la reimputación (DX-399). */
+const auditOf = (clinic: { tenantId: string; userId: string }) => ({
+  tenantId: clinic.tenantId,
+  locationId: null,
+  actor: { userId: clinic.userId, role: 'ADMIN' as const },
+  requestId: null,
+  ip: null,
+  userAgent: null,
+});
+
 interface Clinic {
   tenantId: string;
   locationId: string;
@@ -897,7 +907,7 @@ describe('DX-051 · reparto automático con conexiones reales (int)', () => {
               amount: l.amount,
             })),
           },
-          a.userId,
+          auditOf(a),
         ),
       );
 
@@ -1002,6 +1012,7 @@ describe('DX-051 · reparto automático con conexiones reales (int)', () => {
             expectedVersion: version,
             lines: [{ itemId: v, cents: 5_000 }],
             actorId: a.userId,
+            audit: auditOf(a),
           }),
         ),
       );

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { INestApplication } from '@nestjs/common';
 import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
@@ -488,6 +489,296 @@ describe('Cobrado sin imputar / a cuenta (e2e, DX-399)', () => {
       expect(res.text).toContain('"Sede","Sede Norte"');
       expect(res.text).toContain('Beto Cuenta');
       expect(res.text).not.toContain('Ana Cuenta');
+    });
+  });
+
+  describe('net of credit refunded or transferred out (DX-253, round 1)', () => {
+    const AUGUST = 'from=2026-08-01&to=2026-08-31';
+    const creditPatients: Record<string, string> = {};
+
+    const refund = (planId: string, paymentIds: string[], amount: number) =>
+      call(
+        'post',
+        a,
+        `/treatment-plans/${planId}/credit-refunds`,
+        a.adminToken,
+        principal,
+      )
+        .send({
+          amount,
+          currency: 'USD',
+          method: 'TRANSFER',
+          reason: 'El paciente se muda de ciudad',
+          paymentIds,
+        })
+        .expect(201);
+    const unallocatedOf = async (query = AUGUST) =>
+      new Map(
+        (await report(a, query)).items.map((r) => [r.paymentId, r.unallocated]),
+      );
+
+    /** Referencia independiente: LIFO por plan sobre las tablas crudas. */
+    async function expectedNet(): Promise<Map<string, number>> {
+      const livePatients = await raw.patient.findMany({
+        where: { tenantId: a.tenantId, deletedAt: null },
+        select: { id: true },
+      });
+      const payments = await raw.payment.findMany({
+        where: {
+          tenantId: a.tenantId,
+          deletedAt: null,
+          treatmentPlanId: { not: null },
+          plan: {
+            status: { notIn: ['CANCELLED', 'REJECTED'] },
+            deletedAt: null,
+          },
+          patientId: { in: livePatients.map((x) => x.id) },
+        },
+        select: { id: true, treatmentPlanId: true, paidAt: true },
+      });
+      const out = new Map<string, number>();
+      const entries = await raw.patientCreditEntry.findMany({
+        where: {
+          tenantId: a.tenantId,
+          kind: { in: ['REFUND', 'TRANSFER_OUT'] },
+        },
+      });
+      for (const e of entries) {
+        out.set(
+          e.treatmentPlanId,
+          (out.get(e.treatmentPlanId) ?? 0) -
+            Math.round(Number(e.amount) * 100),
+        );
+      }
+      const result = new Map<string, number>();
+      const byPlan = new Map<string, typeof payments>();
+      for (const p of payments)
+        byPlan.set(p.treatmentPlanId!, [
+          ...(byPlan.get(p.treatmentPlanId!) ?? []),
+          p,
+        ]);
+      for (const [planId, list] of byPlan) {
+        let credit = out.get(planId) ?? 0;
+        list.sort(
+          (x, y) =>
+            y.paidAt.getTime() - x.paidAt.getTime() || (x.id < y.id ? 1 : -1),
+        );
+        for (const p of list) {
+          const base = await raw.paymentPlanAmount.findUnique({
+            where: { paymentId: p.id },
+          });
+          if (!base) continue;
+          const alloc = await raw.paymentAllocation.findMany({
+            where: { paymentId: p.id },
+          });
+          const un =
+            Math.round(Number(base.amount) * 100) -
+            alloc.reduce((n, l) => n + Math.round(Number(l.amount) * 100), 0);
+          if (un <= 0) continue;
+          const absorbed = Math.min(un, Math.max(0, credit));
+          credit -= absorbed;
+          if (un - absorbed > 0) result.set(p.id, un - absorbed);
+        }
+      }
+      return result;
+    }
+
+    beforeAll(async () => {
+      for (const name of ['Dora', 'Eva', 'Fede', 'Gina', 'Hugo', 'Ines']) {
+        creditPatients[name] = await patient(a, name);
+      }
+    });
+
+    it('a partial refund reduces the row; a total refund removes it', async () => {
+      const dora = await plan(a, creditPatients.Dora, catalogA, [100]);
+      const doraPay = await pay(a, dora.planId, 130, '2026-08-05');
+      const eva = await plan(a, creditPatients.Eva, catalogA, [100]);
+      const evaPay = await pay(a, eva.planId, 130, '2026-08-06');
+      expect(await unallocatedOf()).toEqual(
+        new Map([
+          [evaPay, 30],
+          [doraPay, 30],
+        ]),
+      );
+
+      await refund(dora.planId, [doraPay], 10);
+      expect(await unallocatedOf()).toEqual(
+        new Map([
+          [evaPay, 30],
+          [doraPay, 20],
+        ]),
+      );
+      const page = await report(a, AUGUST);
+      expect(page.totals).toEqual([
+        { currency: 'USD', count: 2, allocated: 200, unallocated: 50 },
+      ]);
+
+      await refund(eva.planId, [evaPay], 30);
+      expect(await unallocatedOf()).toEqual(new Map([[doraPay, 20]]));
+      await refund(dora.planId, [doraPay], 20);
+      expect((await report(a, AUGUST)).items).toEqual([]);
+    });
+
+    it('a transfer out removes the money from the source row', async () => {
+      const fede = await plan(a, creditPatients.Fede, catalogA, [100]);
+      const fedePay = await pay(a, fede.planId, 130, '2026-08-07');
+      const target = await plan(a, creditPatients.Fede, catalogA, [50]);
+      expect((await unallocatedOf()).get(fedePay)).toBe(30);
+      await call(
+        'post',
+        a,
+        `/treatment-plans/${fede.planId}/credit-transfers`,
+        a.adminToken,
+        principal,
+      )
+        .send({ targetPlanId: target.planId, amount: 30, currency: 'USD' })
+        .expect(201);
+      expect((await unallocatedOf()).has(fedePay)).toBe(false);
+    });
+
+    it('applies the refund to the most recent payments first, never below 0', async () => {
+      const gina = await plan(a, creditPatients.Gina, catalogA, [50]);
+      const older = await pay(a, gina.planId, 40, '2026-08-10');
+      const newer = await pay(a, gina.planId, 40, '2026-08-11');
+      for (const id of [older, newer]) {
+        const { version } = (
+          await call('get', a, `/payments/${id}/allocations`).expect(200)
+        ).body as { version: string };
+        await call('put', a, `/payments/${id}/allocations`)
+          .send({ expectedVersion: version, mode: 'MANUAL', allocations: [] })
+          .expect(200);
+      }
+      expect(await unallocatedOf()).toEqual(
+        new Map([
+          [newer, 40],
+          [older, 40],
+        ]),
+      );
+      // Las dos quedaron a cuenta (80) con un plan de 50: hay 30 de saldo a favor.
+      await refund(gina.planId, [older, newer], 30);
+      expect(await unallocatedOf()).toEqual(
+        new Map([
+          [newer, 10],
+          [older, 40],
+        ]),
+      );
+    });
+
+    it('equivalence: every live payment matches the reference, and the excluded ones have nothing unallocated net of credit', async () => {
+      const expected = await expectedNet();
+      const page = await report(
+        a,
+        'from=2026-01-01&to=2026-12-31&pageSize=100',
+      );
+      const listed = new Map(
+        page.items.map((r) => [r.paymentId, Math.round(r.unallocated * 100)]),
+      );
+      expect(listed).toEqual(expected);
+      // Los excluidos (todos los demás abonos vivos del alcance) no tienen nada a cuenta neto.
+      const others = await raw.payment.findMany({
+        where: {
+          tenantId: a.tenantId,
+          deletedAt: null,
+          id: { notIn: [...listed.keys()] },
+        },
+        select: { id: true },
+      });
+      for (const { id } of others) expect(expected.get(id) ?? 0).toBe(0);
+    });
+
+    it('a VES payment to a USD plan is listed in the plan currency with its own amount', async () => {
+      await raw.exchangeRateSnapshot.deleteMany({
+        where: { date: '2026-08-12' },
+      });
+      await raw.exchangeRateSnapshot.create({
+        data: { date: '2026-08-12', currency: 'VES', rate: 40 },
+      });
+      const hugo = await plan(a, creditPatients.Hugo, catalogA, [60]);
+      const id = await pay(a, hugo.planId, 4000, '2026-08-12', {
+        currency: 'VES',
+      });
+      const row = (await report(a, AUGUST)).items.find(
+        (r) => r.paymentId === id,
+      );
+      expect(row).toMatchObject({
+        paymentAmount: 4000,
+        paymentCurrency: 'VES',
+        planCurrency: 'USD',
+        allocated: 60,
+        unallocated: 40,
+      });
+      await raw.exchangeRateSnapshot.deleteMany({
+        where: { date: '2026-08-12' },
+      });
+    });
+
+    it('excludes a migrated-balance payment and a deleted patient; a same-currency payment awaiting its base is not a missing rate', async () => {
+      const batch = await raw.patientImportBatch.create({
+        data: {
+          tenantId: a.tenantId,
+          createdById: a.adminUserId,
+          locationId: principal,
+          fileName: 'saldos.csv',
+          fileSha256: randomUUID().replace(/-/g, '').padEnd(64, '0'),
+          fileFormat: 'CSV',
+          fileSizeBytes: 10,
+          columnMapping: {},
+          totalRows: 1,
+          validRows: 1,
+          duplicateRows: 0,
+          errorRows: 0,
+          preparedRows: 1,
+        },
+      });
+      const opening = await raw.openingBalance.create({
+        data: {
+          tenantId: a.tenantId,
+          locationId: principal,
+          patientId: creditPatients.Ines,
+          importBatchId: batch.id,
+          currency: 'USD',
+          amount: 500,
+          asOfDate: new Date('2026-07-01T00:00:00.000Z'),
+          concept: 'Saldo anterior',
+          createdById: a.adminUserId,
+        },
+      });
+      const migrated = (
+        await call(
+          'post',
+          a,
+          `/opening-balances/${opening.id}/payments`,
+          a.adminToken,
+          principal,
+        )
+          .send({
+            amount: 100,
+            currency: 'USD',
+            paidAt: '2026-08-14',
+            method: 'CASH',
+          })
+          .expect(201)
+      ).body as { id: string };
+      expect(idsOf(await report(a, AUGUST))).not.toContain(migrated.id);
+
+      const gone = await patient(a, 'Borrada');
+      const gonePlan = await plan(a, gone, catalogA, [10]);
+      const gonePay = await pay(a, gonePlan.planId, 50, '2026-08-15');
+      expect(idsOf(await report(a, AUGUST))).toContain(gonePay);
+      await raw.patient.update({
+        where: { id: gone },
+        data: { deletedAt: new Date() },
+      });
+      expect(idsOf(await report(a, AUGUST))).not.toContain(gonePay);
+
+      // Mismo moneda que el plan y sin base (espera al barrido): no es «falta la tasa».
+      const before = (await report(a, AUGUST)).paymentsWithoutRateCount;
+      const wait = await plan(a, creditPatients.Ines, catalogA, [10]);
+      const waiting = await pay(a, wait.planId, 20, '2026-08-16');
+      await raw.paymentPlanAmount
+        .delete({ where: { paymentId: waiting } })
+        .catch(() => undefined);
+      expect((await report(a, AUGUST)).paymentsWithoutRateCount).toBe(before);
     });
   });
 

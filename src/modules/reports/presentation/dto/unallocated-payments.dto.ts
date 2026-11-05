@@ -123,7 +123,7 @@ export class UnallocatedPaymentRowDto {
   @ApiProperty({
     example: 30,
     description:
-      'Lo que queda a cuenta: el abono en la moneda del plan menos lo imputado; siempre > 0',
+      'Lo que queda a cuenta: el abono en la moneda del plan menos lo imputado y menos lo que el plan ya devolvió o traspasó de su saldo a favor (DX-253; se descuenta de los abonos más recientes primero, nunca por debajo de 0); siempre > 0. Un abono que queda en 0 no sale',
   })
   unallocated!: number;
 }
@@ -176,7 +176,7 @@ export class UnallocatedPaymentsPageDto {
   @ApiProperty({
     type: [UnallocatedPaymentRowDto],
     description:
-      'Del abono más reciente al más antiguo. Solo abonos vivos a un plan que se cobra (no cancelado ni rechazado), con base y con algo sin imputar',
+      'Del abono más reciente al más antiguo. Solo abonos vivos a un plan que se cobra (no cancelado ni rechazado), con base y con algo sin imputar, neto de lo ya devuelto o traspasado (ver `unallocated`)',
   })
   items!: UnallocatedPaymentRowDto[];
 
@@ -201,7 +201,7 @@ export class UnallocatedPaymentsPageDto {
 
   @ApiProperty({
     description:
-      'Abonos del período sin tasa para su día: no se pueden imputar todavía y no están en las cifras',
+      'Abonos del período en otra moneda que la del plan a los que todavía les falta la tasa de su día: no se pueden imputar y no están en las cifras (uno en la moneda del plan sin base espera al barrido y no se cuenta)',
   })
   paymentsWithoutRateCount!: number;
 }

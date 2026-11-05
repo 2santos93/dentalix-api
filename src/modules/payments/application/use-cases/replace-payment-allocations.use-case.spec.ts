@@ -1,3 +1,4 @@
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import {
   BadRequestException,
   ConflictException,
@@ -129,10 +130,19 @@ async function errorOf(promise: Promise<unknown>): Promise<Error> {
   );
 }
 
+const AUDIT: AuditRequestContext = {
+  tenantId: 'tenant-1',
+  locationId: null,
+  actor: { userId: 'admin-1', role: 'ADMIN' },
+  requestId: null,
+  ip: null,
+  userAgent: null,
+};
+
 describe('ReplacePaymentAllocationsUseCase (DX-051, spec R10)', () => {
   it('404 for a voided payment', async () => {
     const { uc, repo } = makeUseCase([null]);
-    const error = await errorOf(uc.execute('pay-1', manual([]), 'admin-1'));
+    const error = await errorOf(uc.execute('pay-1', manual([]), AUDIT));
     expect(error).toBeInstanceOf(NotFoundException);
     expect(error.message).toBe(ALLOCATION_PAYMENT_NOT_FOUND);
     expect(repo.replaceAllocations).not.toHaveBeenCalled();
@@ -147,7 +157,7 @@ describe('ReplacePaymentAllocationsUseCase (DX-051, spec R10)', () => {
         base: null,
       }),
     ]);
-    const error = await errorOf(uc.execute('pay-1', manual([]), 'admin-1'));
+    const error = await errorOf(uc.execute('pay-1', manual([]), AUDIT));
     expect(error).toBeInstanceOf(ConflictException);
     expect(error.message).toBe(ALLOCATION_MIGRATED_BALANCE);
     expect(repo.replaceAllocations).not.toHaveBeenCalled();
@@ -157,7 +167,7 @@ describe('ReplacePaymentAllocationsUseCase (DX-051, spec R10)', () => {
     const { uc, repo } = makeUseCase([
       target({ planStatus: TreatmentPlanStatus.CANCELLED }),
     ]);
-    const error = await errorOf(uc.execute('pay-1', manual([]), 'admin-1'));
+    const error = await errorOf(uc.execute('pay-1', manual([]), AUDIT));
     expect(error).toBeInstanceOf(ConflictException);
     expect(error.message).toBe(
       'El plan está «Cancelado»: sus abonos no se imputan a ítems.',
@@ -167,7 +177,7 @@ describe('ReplacePaymentAllocationsUseCase (DX-051, spec R10)', () => {
 
   it('409 no rate after trying to create the base', async () => {
     const { uc, repo, convert } = makeUseCase([target({ base: null })]);
-    const error = await errorOf(uc.execute('pay-1', manual([]), 'admin-1'));
+    const error = await errorOf(uc.execute('pay-1', manual([]), AUDIT));
     expect(convert.execute).toHaveBeenCalledWith({
       amount: 100,
       from: 'USD',
@@ -201,7 +211,7 @@ describe('ReplacePaymentAllocationsUseCase (DX-051, spec R10)', () => {
       ],
       { rate: 0.9 },
     );
-    await uc.execute('pay-1', manual([]), 'admin-1');
+    await uc.execute('pay-1', manual([]), AUDIT);
     expect(repo.freezeRate).toHaveBeenCalledWith('pay-1', 'EUR', frozenRate);
     expect(repo.ensureBase).toHaveBeenCalledWith(
       'pay-1',
@@ -216,7 +226,7 @@ describe('ReplacePaymentAllocationsUseCase (DX-051, spec R10)', () => {
     const { uc, repo } = makeUseCase([
       target({ base: null, exchangeRateCurrency: 'EUR' }),
     ]);
-    const error = await errorOf(uc.execute('pay-1', manual([]), 'admin-1'));
+    const error = await errorOf(uc.execute('pay-1', manual([]), AUDIT));
     expect(error).toBeInstanceOf(ConflictException);
     expect(repo.freezeRate).not.toHaveBeenCalled();
   });
@@ -226,7 +236,7 @@ describe('ReplacePaymentAllocationsUseCase (DX-051, spec R10)', () => {
       [target({ base: null }), target({ base: null })],
       { rate: 0.9 },
     );
-    const error = await errorOf(uc.execute('pay-1', manual([]), 'admin-1'));
+    const error = await errorOf(uc.execute('pay-1', manual([]), AUDIT));
     expect(error).toBeInstanceOf(ConflictException);
     expect(repo.replaceAllocations).not.toHaveBeenCalled();
   });
@@ -235,7 +245,7 @@ describe('ReplacePaymentAllocationsUseCase (DX-051, spec R10)', () => {
     const { uc, repo } = makeUseCase([target({ base: null }), null], {
       rate: 0.9,
     });
-    const error = await errorOf(uc.execute('pay-1', manual([]), 'admin-1'));
+    const error = await errorOf(uc.execute('pay-1', manual([]), AUDIT));
     expect(error).toBeInstanceOf(NotFoundException);
     expect(repo.replaceAllocations).not.toHaveBeenCalled();
   });
@@ -249,7 +259,7 @@ describe('ReplacePaymentAllocationsUseCase (DX-051, spec R10)', () => {
     await uc.execute(
       'pay-1',
       manual([{ treatmentPlanItemId: 'item-a', amount: 40 }]),
-      'admin-1',
+      AUDIT,
     );
 
     expect(repo.ensureBase).toHaveBeenCalledWith(
@@ -270,7 +280,7 @@ describe('ReplacePaymentAllocationsUseCase (DX-051, spec R10)', () => {
         { treatmentPlanItemId: 'item-a', amount: 10.1 },
         { treatmentPlanItemId: 'item-b', amount: 0.29 },
       ]),
-      'admin-1',
+      AUDIT,
     );
 
     expect(repo.ensureBase).not.toHaveBeenCalled();
@@ -283,6 +293,7 @@ describe('ReplacePaymentAllocationsUseCase (DX-051, spec R10)', () => {
         { itemId: 'item-b', cents: 29 },
       ],
       actorId: 'admin-1',
+      audit: AUDIT,
     });
     expect(rebalancer.rebalancePlan).toHaveBeenCalledWith('plan-1', 'admin-1');
     expect(calls).toEqual(['replace', 'rebalance', 'read']);
@@ -294,7 +305,7 @@ describe('ReplacePaymentAllocationsUseCase (DX-051, spec R10)', () => {
     await uc.execute(
       'pay-1',
       { expectedVersion: VERSION, mode: 'AUTO' },
-      'admin-1',
+      AUDIT,
     );
 
     expect(repo.replaceAllocations).toHaveBeenCalledWith(
@@ -305,7 +316,7 @@ describe('ReplacePaymentAllocationsUseCase (DX-051, spec R10)', () => {
   it('returns receiptNumber and the previous lines', async () => {
     const { uc } = makeUseCase([target()]);
 
-    const result = await uc.execute('pay-1', manual([]), 'admin-1');
+    const result = await uc.execute('pay-1', manual([]), AUDIT);
 
     expect(result.receiptNumber).toBe('NOR-000123');
     expect(result.manual).toBe(true);
@@ -320,7 +331,7 @@ describe('ReplacePaymentAllocationsUseCase (DX-051, spec R10)', () => {
   it('a failing rebalance does not fail the reallocation (the plan stays queued)', async () => {
     const { uc, calls } = makeUseCase([target()], { rebalanceFails: true });
 
-    const result = await uc.execute('pay-1', manual([]), 'admin-1');
+    const result = await uc.execute('pay-1', manual([]), AUDIT);
 
     expect(result.previous).toHaveLength(1);
     expect(calls).toEqual(['replace', 'rebalance', 'read']);
@@ -332,7 +343,7 @@ describe('ReplacePaymentAllocationsUseCase (DX-051, spec R10)', () => {
     const result = await uc.execute(
       'pay-1',
       manual([{ treatmentPlanItemId: 'item-a', amount: 40 }]),
-      'admin-1',
+      AUDIT,
     );
 
     expect(calls).toEqual(['replace', 'rebalance', 'read']);
@@ -355,7 +366,7 @@ describe('ReplacePaymentAllocationsUseCase (DX-051, spec R10)', () => {
     const { uc, repo } = makeUseCase([target()]);
     repo.readPaymentAllocations.mockRejectedValueOnce(new Error('BD caída'));
 
-    const error = await errorOf(uc.execute('pay-1', manual([]), 'admin-1'));
+    const error = await errorOf(uc.execute('pay-1', manual([]), AUDIT));
 
     expect(error.message).toBe('BD caída');
   });

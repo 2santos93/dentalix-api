@@ -157,17 +157,13 @@ export class GetUnallocatedPaymentsUseCase {
     page: { page: number; pageSize: number } | null,
   ): Promise<UnallocatedPayments> {
     const { period, locations, location, scope } = await this.resolve(input);
-    const [listed, totals, withoutRate] = await Promise.all([
-      this.repo.list(
-        period,
-        scope,
-        page
-          ? { skip: (page.page - 1) * page.pageSize, take: page.pageSize }
-          : undefined,
-      ),
-      this.repo.totals(period, scope),
-      this.repo.withoutRateCount(period, scope),
-    ]);
+    const report = await this.repo.report(
+      period,
+      scope,
+      page
+        ? { skip: (page.page - 1) * page.pageSize, take: page.pageSize }
+        : undefined,
+    );
     return {
       from: period.from,
       to: period.to,
@@ -176,17 +172,17 @@ export class GetUnallocatedPaymentsUseCase {
         locationName: location?.name ?? null,
       },
       options: { locations },
-      items: listed.rows.map(view),
-      total: listed.total,
+      items: report.rows.map(view),
+      total: report.total,
       page: page?.page ?? 1,
-      pageSize: page?.pageSize ?? listed.rows.length,
-      totals: totals.map((t) => ({
+      pageSize: page?.pageSize ?? report.rows.length,
+      totals: report.totals.map((t) => ({
         currency: t.currency,
         count: t.count,
         allocated: fromCents(t.allocatedCents),
         unallocated: fromCents(t.unallocatedCents),
       })),
-      paymentsWithoutRateCount: withoutRate,
+      paymentsWithoutRateCount: report.withoutRateCount,
     };
   }
 

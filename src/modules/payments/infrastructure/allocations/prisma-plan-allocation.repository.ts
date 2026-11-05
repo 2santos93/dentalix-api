@@ -10,6 +10,8 @@ import {
   TreatmentPlanItemStatus,
   TreatmentPlanStatus,
 } from '@prisma/client';
+import { auditDraftFromContext } from '../../../audit/domain/audit-request-context';
+import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { resolveLocationTimeZones } from '../../../../shared/locations/location-time-zone';
@@ -871,9 +873,10 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
           currency: string;
           paidAt: Date;
           locationId: string;
+          patientId: string;
         }[]
       >`
-        SELECT "treatmentPlanId", "currency", "paidAt", "locationId"
+        SELECT "treatmentPlanId", "currency", "paidAt", "locationId", "patientId"
           FROM "payments"
          WHERE "tenantId" = ${tenantId}::uuid AND "id" = ${paymentId}::uuid
            AND "deletedAt" IS NULL`;
@@ -1040,6 +1043,35 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
         });
       }
       await tx.$executeRaw`SELECT set_config('app.allocation_cause', '', true)`;
+      // DX-399: el evento de auditoría en la MISMA transacción: usuario, modo y
+      // las líneas de antes y de después (en AUTO, `after` vacío: el reparto lo
+      // hace el sistema después del COMMIT y queda en el historial de movimientos).
+      // Si algo falla, el cambio y el evento se deshacen juntos.
+      await writeAuditEvent(tx, {
+        ...auditDraftFromContext(input.audit, {
+          action: 'UPDATE',
+          resourceType: 'PAYMENT_ALLOCATION',
+          resourceId: paymentId,
+          metadata: {
+            reason: 'PAYMENT_REALLOCATED',
+            changedFields: ['allocations', 'expectedVersion', 'mode'],
+            params: { id: paymentId },
+            allocation: {
+              currency: plan.currency,
+              mode: input.mode,
+              before: previous.map((r) => ({
+                itemId: r.itemId,
+                amount: r.cents / 100,
+              })),
+              after: [...wanted].map(([itemId, cents]) => ({
+                itemId,
+                amount: cents / 100,
+              })),
+            },
+          },
+        }),
+        patient: { kind: 'payment', id: paymentId },
+      });
       // Lo que este abono deja libre lo llenan otros abonos (R9).
       await enqueuePlanRebalance(tx, tenantId, planId);
       return { previous };

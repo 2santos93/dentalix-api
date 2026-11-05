@@ -48,7 +48,13 @@ export function toUnallocatedPaymentsCsv(report: UnallocatedPayments): string {
     [text('Sede'), text(report.filters.locationName ?? 'Todas tus sedes')],
     [
       text('Importes'),
-      text('Imputado y sin imputar, en la moneda del plan, sin convertir'),
+      text(
+        'Imputado y sin imputar en la moneda del plan (el abono convertido con la tasa de su día); los totales no mezclan monedas',
+      ),
+    ],
+    [
+      text('Sin imputar'),
+      text('Neto de lo ya devuelto o traspasado del saldo a favor (DX-253)'),
     ],
     [],
     UNALLOCATED_CSV_COLUMNS.map(text),
