@@ -332,9 +332,13 @@ describe('Firma a distancia de consentimientos (e2e, DX-243)', () => {
     });
     expect(JSON.stringify(row)).not.toContain(token);
     expect(row.body).toContain('Yo, Laura Castro');
-    expect(row.expiresAt.getTime() - row.createdAt.getTime()).toBe(
-      72 * HOUR_MS,
-    );
+    // DX-425: `createdAt` lo pone la BD y `expiresAt` el reloj de la app (72 h
+    // desde el envío): coinciden salvo los milisegundos entre los dos relojes.
+    expect(
+      Math.abs(
+        row.expiresAt.getTime() - row.createdAt.getTime() - 72 * HOUR_MS,
+      ),
+    ).toBeLessThan(2000);
     expect(
       await raw.auditEvent.count({
         where: {
