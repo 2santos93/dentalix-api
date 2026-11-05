@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { Prisma, PrismaClient, TreatmentPlanStatus } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
@@ -13,7 +14,13 @@ import { RecordPaymentUseCase } from '../src/modules/payments/application/use-ca
 import { GetPlanBalanceUseCase } from '../src/modules/payments/application/use-cases/get-plan-balance.use-case';
 import type { ConvertAmountUseCase } from '../src/modules/exchange/application/use-cases/convert-amount.use-case';
 import type { CurrencyWhitelist } from '../src/modules/treatment-plans/domain/ports/currency-whitelist.port';
-import { gate } from './support/postgres-concurrency';
+import {
+  gate,
+  settle,
+  transactionId,
+  waitForTransactionWaiters,
+} from './support/postgres-concurrency';
+import type { ReceiptBalanceInTx } from '../src/modules/payments/domain/ports/payment-repository.port';
 import {
   REGIONAL_CARACAS_FIXTURE,
   locationData,
@@ -47,6 +54,18 @@ const identityConvert = {
   quote: identityQuote,
   memoized: () => ({ execute: identityExecute, quote: identityQuote }),
 } as unknown as ConvertAmountUseCase;
+/** Sin tasa para ningún par de monedas distintas (p. ej. VES → USD ese día). */
+const noRateReject = (input: { from: string; to: string }) =>
+  input.from === input.to
+    ? Promise.resolve({ ...input, result: 0, rateUsed: 1 })
+    : Promise.reject(
+        new BadRequestException(`unsupported currency: ${input.from}`),
+      );
+const noRateConvert = {
+  execute: noRateReject,
+  quote: noRateReject,
+  memoized: () => ({ execute: noRateReject, quote: noRateReject }),
+} as unknown as ConvertAmountUseCase;
 const balance = new GetPlanBalanceUseCase(
   paymentRepo,
   getPlan,
@@ -55,19 +74,57 @@ const balance = new GetPlanBalanceUseCase(
 );
 
 /**
- * La barrera determinista: el saldo «de antes» se lee fuera de la transacción;
+ * Segunda barrera, DENTRO de la transacción (tras el INSERT del abono y antes
+ * de leer la foto del plan): ninguna sigue hasta que cada una de las N, o ha
+ * llegado aquí, o espera a un bloqueo de otra (`pg_stat_activity`). Con el plan
+ * FOR SHARE llegan las N a la vez y todas leen la misma foto (rojo seguro);
+ * con FOR NO KEY UPDATE llega una y las demás esperan el bloqueo (verde). El
+ * sondeo solo limita el intervalo; la condición de avance es el estado de la BD.
+ */
+class InTransactionBarrier {
+  private arrived = 0;
+  private readonly release = gate();
+  private open = false;
+  constructor(private readonly parties: number) {}
+
+  wrap(inner: ReceiptBalanceInTx): ReceiptBalanceInTx {
+    return async (data) => {
+      this.arrived += 1;
+      const deadline = Date.now() + 8000;
+      while (!this.open) {
+        const [row] = await owner.$queryRaw<{ waiting: number }[]>`
+          SELECT count(*)::int AS waiting FROM pg_stat_activity
+           WHERE datname = current_database() AND wait_event_type = 'Lock'`;
+        if (this.arrived + row.waiting >= this.parties) {
+          this.open = true;
+          this.release.open();
+          break;
+        }
+        if (Date.now() > deadline) {
+          throw new Error('la barrera de la transacción no se completó');
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      await this.release.wait;
+      return inner(data);
+    };
+  }
+}
+
+/**
+ * La barrera de fuera: el saldo «de antes» se lee fuera de la transacción;
  * ningún abono sigue hasta que TODOS lo han leído (sin sleeps), que es el peor
- * intercalado posible del cobro.
+ * intercalado del cobro con el saldo calculado fuera. Y la de dentro.
  */
 class BarrierBalance extends ReceiptPlanBalanceCalculator {
   private arrived = 0;
   private release = gate();
   constructor(private readonly parties: number) {
     super(balance);
-  }
-  rearm(): void {
-    this.arrived = 0;
-    this.release = gate();
+    const inner = this.inTransaction;
+    const inside = new InTransactionBarrier(parties);
+    (this as { inTransaction: ReceiptBalanceInTx }).inTransaction =
+      inside.wrap(inner);
   }
   override async afterPayment(
     ...args: Parameters<ReceiptPlanBalanceCalculator['afterPayment']>
@@ -226,7 +283,6 @@ describe('DX-182 · saldo exacto en el recibo con abonos concurrentes (int)', ()
         ),
         () => NOW,
       );
-      calculator.rearm();
       await Promise.all(
         Array.from({ length: count }, () =>
           inTenant(() =>
@@ -256,6 +312,7 @@ describe('DX-182 · saldo exacto en el recibo con abonos concurrentes (int)', ()
 
   it('cobros divididos simultáneos al mismo plan: el recibo de cada uno suma las líneas anteriores y las suyas', async () => {
     const planId = await seedPlan();
+    const inside = new InTransactionBarrier(3);
     const calculator = new ReceiptPlanBalanceCalculator(balance);
     const line = {
       treatmentPlanId: planId,
@@ -279,7 +336,7 @@ describe('DX-182 · saldo exacto en el recibo con abonos concurrentes (int)', ()
           paymentRepo.createSplit({
             lines: [line, line],
             receiptPlanBalance: null,
-            receiptBalanceInTx: calculator.inTransaction,
+            receiptBalanceInTx: inside.wrap(calculator.inTransaction),
           }),
         ),
       ),
@@ -291,5 +348,112 @@ describe('DX-182 · saldo exacto en el recibo con abonos concurrentes (int)', ()
       BILLABLE - 2 * CHUNK,
       BILLABLE - 3 * CHUNK,
     ]);
+  });
+
+  describe('abono sin tasa de su día (VES en un plan en USD)', () => {
+    it('suelto: el abono no cuenta en el saldo, así que el recibo sale SIN saldo', async () => {
+      const planId = await seedPlan();
+      const recordPayment = new RecordPaymentUseCase(
+        paymentRepo,
+        getPlan,
+        whitelist,
+        new ReceiptPlanBalanceCalculator(balance),
+        noRateConvert,
+        new PaymentMethodGate(
+          new PrismaPaymentMethodRepository(prisma, tenantContext),
+          paymentRepo,
+          referenceCurrencyDigitsCatalog(),
+        ),
+        () => NOW,
+      );
+      const payment = await inTenant(() =>
+        recordPayment.execute(planId, {
+          amount: 100000,
+          currency: 'VES',
+          paidAt: '2026-10-16',
+        }),
+      );
+      expect(payment.receiptNumber).toBeTruthy();
+      expect(await receiptBalances(planId)).toEqual([null]);
+    });
+
+    it('dividido: con una línea en VES sin tasa, el recibo único sale SIN saldo', async () => {
+      const planId = await seedPlan();
+      const base = {
+        treatmentPlanId: planId,
+        patientId,
+        paidAt: NOW,
+        method: 'CASH' as const,
+        createdById: userId,
+        receiptPlanBalance: null,
+        frozenRate: null,
+      };
+      await inTenant(() =>
+        paymentRepo.createSplit({
+          lines: [
+            {
+              ...base,
+              amount: 50,
+              currency: 'USD',
+              planAmount: {
+                planCurrency: 'USD',
+                amount: 50,
+                rateDate: '2026-10-16',
+              },
+            },
+            {
+              ...base,
+              amount: 100000,
+              currency: 'VES',
+              planAmount: null,
+            },
+          ],
+          receiptPlanBalance: null,
+          receiptBalanceInTx: new ReceiptPlanBalanceCalculator(balance)
+            .inTransaction,
+        }),
+      );
+      expect(await receiptBalances(planId)).toEqual([null]);
+    });
+  });
+
+  // El INSERT de `payments` ya serializa los abonos de un mismo paciente (el
+  // disparador de `patient_ledgers` actualiza una fila por paciente), así que
+  // las pruebas de arriba no distinguen FOR SHARE de FOR NO KEY UPDATE en el
+  // plan. Esta sí: un titular de FOR SHARE sobre el plan (como el reparto, el
+  // barrido o la reasignación) hace ESPERAR al abono. Con FOR SHARE en el
+  // repositorio el abono no espera y la prueba da rojo.
+  it('el abono bloquea el plan en exclusiva frente a quien lo tiene FOR SHARE', async () => {
+    const planId = await seedPlan();
+    const holding = gate();
+    const held = gate<string>();
+    const holder = owner.$transaction(async (tx) => {
+      await tx.$queryRaw`
+        SELECT 1 FROM "treatment_plans" WHERE "id" = ${planId}::uuid FOR SHARE`;
+      held.open(await transactionId(tx));
+      await holding.wait;
+    });
+    const xid = await held.wait;
+    const pending = settle(
+      inTenant(() =>
+        paymentRepo.create({
+          treatmentPlanId: planId,
+          patientId,
+          amount: CHUNK,
+          currency: 'USD',
+          paidAt: NOW,
+          receiptPlanBalance: null,
+          planAmount: null,
+          frozenRate: null,
+        }),
+      ),
+    );
+    try {
+      await waitForTransactionWaiters(owner, xid);
+    } finally {
+      holding.open();
+      await holder;
+    }
+    expect((await pending).status).toBe('fulfilled');
   });
 });

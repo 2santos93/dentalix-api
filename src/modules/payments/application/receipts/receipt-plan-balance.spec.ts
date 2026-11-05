@@ -116,11 +116,13 @@ describe('ReceiptPlanBalanceCalculator (DX-136)', () => {
         paid: 300,
         balance: 700,
         creditMovements: 0,
+        paymentsWithoutRate: [],
         rateProviderTimedOut: false,
       });
       await expect(
         calculator.inTransaction({
           planId: 'plan-1',
+          paymentIds: ['p-1'],
           snapshot,
           creditMovements: 0,
         }),
@@ -131,6 +133,34 @@ describe('ReceiptPlanBalanceCalculator (DX-136)', () => {
         balance: 700,
       });
       expect(calls).toEqual([['plan-1', snapshot, 0, { offline: true }]]);
+    });
+
+    it('un abono de este cobro sin tasa de su día no cuenta en el saldo: el recibo sale sin saldo', async () => {
+      const { calculator } = withFromSnapshot({
+        planCurrency: 'USD',
+        billable: 1000,
+        paid: 0,
+        balance: 1000,
+        creditMovements: 0,
+        paymentsWithoutRate: [
+          {
+            paymentId: 'p-2',
+            amount: 100,
+            currency: 'VES',
+            paidOn: '2026-10-16',
+          },
+        ],
+        rateProviderTimedOut: false,
+      });
+      const data = { planId: 'plan-1', snapshot, creditMovements: 0 };
+      // Un abono sin tasa AJENO al cobro no cambia nada...
+      await expect(
+        calculator.inTransaction({ ...data, paymentIds: ['p-1'] }),
+      ).resolves.toMatchObject({ balance: 1000 });
+      // ...el propio, sí: sin saldo.
+      await expect(
+        calculator.inTransaction({ ...data, paymentIds: ['p-1', 'p-2'] }),
+      ).resolves.toBeNull();
     });
 
     it('con una tasa que no se pudo leer sin red, o un fallo, el recibo sale sin saldo', async () => {
@@ -145,6 +175,7 @@ describe('ReceiptPlanBalanceCalculator (DX-136)', () => {
       await expect(
         timedOut.calculator.inTransaction({
           planId: 'plan-1',
+          paymentIds: ['p-1'],
           snapshot,
           creditMovements: 0,
         }),
@@ -153,6 +184,7 @@ describe('ReceiptPlanBalanceCalculator (DX-136)', () => {
       await expect(
         failed.calculator.inTransaction({
           planId: 'plan-1',
+          paymentIds: ['p-1'],
           snapshot,
           creditMovements: 0,
         }),

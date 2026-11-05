@@ -37,6 +37,12 @@ export interface CivilPaidDay {
  */
 export type ReceiptBalanceInTx = (data: {
   planId: string;
+  /**
+   * Los abonos que esta transacción acaba de insertar (el suelto, o todas las
+   * líneas del cobro dividido). Si alguno no cuenta en el saldo por falta de
+   * tasa, el saldo no los incluye y el recibo sale SIN saldo (`null`).
+   */
+  paymentIds: readonly string[];
   snapshot: PlanBalanceSnapshot;
   /** Σ de los asientos del saldo a favor del plan, en su moneda (DX-253). */
   creditMovements: number;
