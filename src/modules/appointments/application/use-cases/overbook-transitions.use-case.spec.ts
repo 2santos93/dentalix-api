@@ -292,7 +292,7 @@ describe('UpdateAppointmentUseCase · sobrecupo (DX-509)', () => {
     it('pasar al sillón, notas o `keepOverbooked` sin reactivar no lo cambian', async () => {
       const { uc, overbooked, booked, reasons } = setup();
       booked();
-      const a = overbooked();
+      const a = overbooked({ providerId: `u-${ClinicRole.DENTIST}` });
       await uc.execute(a.id, { notes: 'Llamó la familia' }, ctx());
       const seated = await uc.execute(
         a.id,

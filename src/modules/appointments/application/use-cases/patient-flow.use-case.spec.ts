@@ -88,6 +88,8 @@ function todayAppointment(
     Math.min(Date.now() + 30 * 60 * 1000, today.end.getTime() - HOUR),
   );
   return repo.seed({
+    // DX-237: la cita es del odontólogo que actúa en estas pruebas.
+    providerId: `u-${ClinicRole.DENTIST}`,
     status,
     start,
     end: new Date(start.getTime() + 30 * 60 * 1000),
@@ -96,6 +98,28 @@ function todayAppointment(
 }
 
 describe('UpdateAppointmentUseCase · flujo del paciente (DX-200)', () => {
+  it('DX-237: el odontólogo no sienta la cita de otro profesional; la asistente sí', async () => {
+    const { repo, uc } = setup();
+    const a = repo.seed({
+      ...todayAppointment(repo),
+      providerId: 'otro-odontologo',
+      status: AppointmentStatus.ARRIVED,
+    });
+    await expect(
+      uc.execute(
+        a.id,
+        { status: AppointmentStatus.IN_CHAIR },
+        ctx(ClinicRole.DENTIST),
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    const seated = await uc.execute(
+      a.id,
+      { status: AppointmentStatus.IN_CHAIR },
+      ctx(ClinicRole.ASSISTANT),
+    );
+    expect(seated.status).toBe(AppointmentStatus.IN_CHAIR);
+  });
+
   it('llegó → en sillón → listo para cobrar → completada, con sus horas', async () => {
     const { repo, uc } = setup();
     const a = todayAppointment(repo);

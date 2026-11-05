@@ -169,6 +169,7 @@ describe('patient-flow · máquina de transiciones (DX-200)', () => {
         to,
         role,
         isToday: true,
+        ownAppointment: true,
         statusReason,
       });
 

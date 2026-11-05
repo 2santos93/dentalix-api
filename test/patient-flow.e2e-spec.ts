@@ -291,8 +291,7 @@ describe('Flujo del paciente en la clínica (e2e, DX-200)', () => {
   });
 
   it('DX-237: un odontólogo no sienta ni deja lista la cita de otro; la asistente y la administración sí', async () => {
-    const colleague = await member(ClinicRole.DENTIST);
-    const appt = await book('Ajena', mainId, 200, colleague.userId);
+    const appt = await book('Ajena', mainId, 200, clinic.adminUserId);
     await setStatus(appt.id, 'ARRIVED', reception.token).expect(200);
 
     const refused = await setStatus(appt.id, 'IN_CHAIR', dentist.token).expect(
