@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import type { AppointmentStatus } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { addCivilMonths } from '../../../recall/domain/recall-rules';
@@ -66,7 +67,7 @@ export class GetCheckoutChecklistUseCase {
           deletedAt: null,
           id: { not: appointment.id },
           start: { gt: now },
-          status: { in: [...RESERVED_APPOINTMENT_STATUSES] },
+          status: { in: RESERVED_APPOINTMENT_STATUSES as AppointmentStatus[] },
         },
         orderBy: { start: 'asc' },
         select: { start: true },

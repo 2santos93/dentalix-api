@@ -430,10 +430,10 @@ describe('Flujo del paciente en la clínica (e2e, DX-200)', () => {
 
     it('una cita futura del paciente cuenta; las canceladas no', async () => {
       const appt = await book('Salida Futura', mainId, 120);
-      const { patientId } = (await raw.appointment.findUniqueOrThrow({
+      const { patientId } = await raw.appointment.findUniqueOrThrow({
         where: { id: appt.id },
         select: { patientId: true },
-      })) as { patientId: string };
+      });
       const start = new Date(Date.now() + 30 * 24 * 60 * MIN);
       const future = await as(
         api().post('/api/v1/appointments'),
@@ -484,7 +484,7 @@ describe('Flujo del paciente en la clínica (e2e, DX-200)', () => {
           'APPOINTMENT_CHECKOUT_PENDING',
       );
       expect(pending?.metadata).toMatchObject({
-        changedFields: ['NEXT_VISIT', 'EMAIL'],
+        changedFields: ['EMAIL', 'NEXT_VISIT'],
       });
       expect(pending?.actorUserId).toBe(reception.userId);
     });

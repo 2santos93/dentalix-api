@@ -1261,6 +1261,13 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     },
     // --- calendario de la sede (DX-316): la sede de A no existe para B ---
     {
+      name: 'GET /appointments/:id/checkout-checklist',
+      verb: 'get',
+      path: () => `/appointments/${a.appointmentId}/checkout-checklist`,
+      status: 404,
+      message: 'Cita no encontrada',
+    },
+    {
       name: 'GET /locations/:id/calendar',
       verb: 'get',
       path: () => `/locations/${a.locationId}/calendar`,
