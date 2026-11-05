@@ -119,6 +119,15 @@ describe('bloqueos de agenda y pendientes por agendar (int, DX-122)', () => {
   const appointments = new PrismaAppointmentRepository(prisma, tenantContext);
   const blocks = new PrismaScheduleBlockRepository(prisma, tenantContext);
   const waitlist = new PrismaWaitlistRepository(prisma, tenantContext);
+
+  // DX-161: `create` da `null` si el paciente ya tiene una OPEN; aquí no debe pasar.
+  const createEntry = async (
+    input: Parameters<typeof waitlist.create>[0],
+  ): Promise<NonNullable<Awaited<ReturnType<typeof waitlist.create>>>> => {
+    const entry = await waitlist.create(input);
+    if (!entry) throw new Error('El paciente ya tenía una entrada OPEN');
+    return entry;
+  };
   const types = new PrismaAppointmentTypeRepository(prisma, tenantContext);
   const create = new CreateAppointmentUseCase(
     appointments,
@@ -431,7 +440,7 @@ describe('bloqueos de agenda y pendientes por agendar (int, DX-122)', () => {
               priority: 'NORMAL',
               preferredWindow: null,
               note: null,
-              createdById: null,
+              createdById: DOCTOR,
             }),
           ),
         ),
@@ -608,7 +617,7 @@ describe('bloqueos de agenda y pendientes por agendar (int, DX-122)', () => {
 
     it('dos «Agendar aquí» a la vez sobre la misma entrada: una cita y una 409', async () => {
       const entry = await inA(() =>
-        waitlist.create({
+        createEntry({
           patientId: a.patientIds[2],
           providerId: null,
           appointmentTypeId: null,
