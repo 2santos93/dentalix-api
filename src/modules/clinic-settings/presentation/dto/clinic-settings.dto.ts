@@ -10,6 +10,7 @@ const NULLABLE_TEXT = { type: String, nullable: true } as const;
 
 export class UpdateClinicSettingsDto {
   @ApiPropertyOptional({
+    type: String,
     description: 'Nombre comercial (obligatorio si se envía). 1..120.',
   })
   @IsOptional()
@@ -74,6 +75,7 @@ export class UpdateClinicSettingsDto {
   contactPhone?: string | null;
 
   @ApiPropertyOptional({
+    type: String,
     description: 'Color de la marca, #RRGGBB.',
     example: '#0E7490',
   })
