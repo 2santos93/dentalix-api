@@ -4,10 +4,13 @@ import {
   ArrayMaxSize,
   IsArray,
   IsBoolean,
+  IsInt,
   IsIn,
   IsOptional,
   IsString,
+  IsUUID,
   MaxLength,
+  Min,
   ValidateNested,
 } from 'class-validator';
 import { ClinicalNotePromptType } from '@prisma/client';
@@ -71,6 +74,13 @@ export class ClinicalNoteTemplateDto {
   @ApiProperty()
   active!: boolean;
 
+  @ApiProperty({
+    minimum: 1,
+    description:
+      'Versión optimista: se envía de vuelta en el PATCH; sube en 1 con cada edición',
+  })
+  version!: number;
+
   @ApiProperty({ type: [ClinicalNoteTemplatePromptDto] })
   prompts!: ClinicalNoteTemplatePromptDto[];
 
@@ -84,6 +94,15 @@ export class ClinicalNoteTemplateDto {
 const PROMPT_TYPE_MESSAGE = 'El tipo de pregunta debe ser ONE, MULTI o TEXT';
 
 export class NotePromptInputDto {
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'Id de la pregunta existente que se conserva al editar (upsert por id). Sin id, o con uno que no es de la plantilla, es una pregunta nueva.',
+  })
+  @IsOptional()
+  @IsUUID()
+  id?: string;
+
   @ApiProperty({ minLength: 1, maxLength: NOTE_PROMPT_LABEL_MAX })
   @IsString({ message: 'Cada pregunta necesita una etiqueta' })
   @MaxLength(NOTE_PROMPT_LABEL_MAX, {
@@ -222,6 +241,15 @@ export class UpdateClinicalNoteTemplateDto {
   @IsOptional()
   @IsBoolean()
   active?: boolean;
+
+  @ApiProperty({
+    minimum: 1,
+    description:
+      'Versión que el cliente leyó (la `version` de la plantilla). Si la plantilla ya cambió: 409 «La plantilla cambió, recárgala». Obligatoria.',
+  })
+  @IsInt({ message: 'Falta la versión de la plantilla: recárgala' })
+  @Min(1, { message: 'Falta la versión de la plantilla: recárgala' })
+  version!: number;
 }
 
 export class ListClinicalNoteTemplatesQueryDto {

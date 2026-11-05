@@ -1910,7 +1910,7 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       name: 'PATCH /clinical-note-templates/:id',
       verb: 'patch',
       path: () => `/clinical-note-templates/${a.noteTemplateId}`,
-      body: () => ({ name: 'Hackeada', active: false }),
+      body: () => ({ name: 'Hackeada', active: false, version: 1 }),
       status: 404,
     },
     // La evolución de B no puede colgarse de la cita ni de la plantilla de A

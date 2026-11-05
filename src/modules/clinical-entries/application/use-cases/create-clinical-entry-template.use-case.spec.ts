@@ -275,7 +275,7 @@ describe('CreateClinicalEntryUseCase ligada a la cita (DX-170)', () => {
     expect(entry.entryDate).toEqual(new Date('2026-10-16T00:00:00.000Z'));
   });
 
-  it('una fecha de atención enviada manda sobre la de la cita', async () => {
+  it('acepta una fecha de atención que es el día de la cita (zona de la sede)', async () => {
     const { uc, entries } = setup();
     entries.appointments.push({
       id: 'a1',
@@ -285,13 +285,41 @@ describe('CreateClinicalEntryUseCase ligada a la cita (DX-170)', () => {
       start,
       timeZone,
     });
-    const entryDate = new Date('2026-10-15T00:00:00.000Z');
+    const entryDate = new Date('2026-10-17T00:00:00.000Z');
     const entry = await uc.execute(
       'p1',
       { notes: 'Control', appointmentId: 'a1', entryDate },
       'd',
     );
     expect(entry.entryDate).toEqual(entryDate);
+  });
+
+  it('400 en español si la fecha de atención es de otro día que la cita (no crea nada)', async () => {
+    const { uc, entries } = setup();
+    entries.appointments.push({
+      id: 'a1',
+      patientId: 'p1',
+      locationId: 'loc-1',
+      status: 'COMPLETED',
+      start,
+      timeZone,
+    });
+    for (const day of ['2026-10-15', '2026-10-16', '2026-10-18']) {
+      const call = uc.execute(
+        'p1',
+        {
+          notes: 'Control',
+          appointmentId: 'a1',
+          entryDate: new Date(`${day}T00:00:00.000Z`),
+        },
+        'd',
+      );
+      await expect(call).rejects.toThrow(BadRequestException);
+      await expect(call).rejects.toThrow(
+        'La fecha de atención tiene que ser el día de la cita',
+      );
+    }
+    expect(entries.rows).toHaveLength(0);
   });
 
   it('404 en español si la cita no es de la clínica', async () => {
@@ -359,4 +387,46 @@ describe('CreateClinicalEntryUseCase ligada a la cita (DX-170)', () => {
       ).rejects.toThrow(/cancelada o .*no asistió/);
     },
   );
+});
+
+describe('CreateClinicalEntryUseCase sin cita: fecha no futura (DX-231)', () => {
+  // 21:00 del 17/10/2026 en Caracas = 01:00 UTC del 18/10.
+  beforeEach(() => {
+    jest.useFakeTimers({ now: new Date('2026-10-18T01:00:00.000Z') });
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('400 en español con una fecha posterior a hoy en la sede (no crea nada)', async () => {
+    const { uc, entries } = setup();
+    const call = uc.execute(
+      'p1',
+      { notes: 'x', entryDate: new Date('2026-10-18T00:00:00.000Z') },
+      'd',
+    );
+    await expect(call).rejects.toThrow(BadRequestException);
+    await expect(call).rejects.toThrow(
+      'La fecha de atención no puede ser una fecha futura',
+    );
+    expect(entries.rows).toHaveLength(0);
+  });
+
+  it('hoy en la sede vale aunque en UTC ya sea mañana; el pasado también', async () => {
+    const { uc } = setup();
+    await expect(
+      uc.execute(
+        'p1',
+        { notes: 'x', entryDate: new Date('2026-10-17T00:00:00.000Z') },
+        'd',
+      ),
+    ).resolves.toBeDefined();
+    await expect(
+      uc.execute(
+        'p1',
+        { notes: 'x', entryDate: new Date('2026-09-01T00:00:00.000Z') },
+        'd',
+      ),
+    ).resolves.toBeDefined();
+  });
 });

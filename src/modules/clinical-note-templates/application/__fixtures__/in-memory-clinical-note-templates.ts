@@ -6,7 +6,10 @@ import type {
   UpdateNoteTemplateRepoInput,
 } from '../../domain/ports/clinical-note-template-repository.port';
 import type { NoteTemplateDraft } from '../../domain/note-template-rules';
-import { DUPLICATE_NOTE_TEMPLATE_MESSAGE } from '../note-template-errors';
+import {
+  DUPLICATE_NOTE_TEMPLATE_MESSAGE,
+  staleNoteTemplate,
+} from '../note-template-errors';
 
 /**
  * Repositorio de plantillas en memoria con estado: los tests afirman sobre
@@ -16,15 +19,32 @@ export class InMemoryClinicalNoteTemplateRepository implements ClinicalNoteTempl
   readonly rows: ClinicalNoteTemplate[] = [];
   private nextId = 1;
 
-  private toPrompts(templateId: string, prompts: NoteTemplateDraft['prompts']) {
-    return prompts.map((p, position) => ({
-      id: `${templateId}-p${position}`,
-      label: p.label,
-      type: p.type,
-      options: [...p.options],
-      defaultValue: p.defaultValue,
-      position,
-    }));
+  /** Como el repositorio real: conserva el id de las preguntas que ya eran de la plantilla. */
+  private toPrompts(
+    templateId: string,
+    prompts: NoteTemplateDraft['prompts'],
+    existing: ClinicalNoteTemplate['prompts'] = [],
+  ) {
+    const own = new Set(existing.map((p) => p.id));
+    const taken = new Set(own);
+    return prompts.map((p, position) => {
+      let id = p.id;
+      if (id === undefined || !own.has(id)) {
+        id = `${templateId}-p${position}`;
+        for (let n = 1; taken.has(id); n++) {
+          id = `${templateId}-p${position}-${n}`;
+        }
+        taken.add(id);
+      }
+      return {
+        id,
+        label: p.label,
+        type: p.type,
+        options: [...p.options],
+        defaultValue: p.defaultValue,
+        position,
+      };
+    });
   }
 
   seed(
@@ -39,6 +59,7 @@ export class InMemoryClinicalNoteTemplateRepository implements ClinicalNoteTempl
       category: draft.category,
       body: draft.body,
       active: true,
+      version: 1,
       prompts: this.toPrompts(id, draft.prompts),
       createdAt: new Date('2026-10-01T00:00:00.000Z'),
       updatedAt: new Date('2026-10-01T00:00:00.000Z'),
@@ -82,12 +103,19 @@ export class InMemoryClinicalNoteTemplateRepository implements ClinicalNoteTempl
   ): Promise<ClinicalNoteTemplate> {
     const row = this.rows.find((r) => r.id === id);
     if (!row) throw new Error('not found');
+    if (
+      input.expectedVersion !== undefined &&
+      input.expectedVersion !== row.version
+    ) {
+      throw staleNoteTemplate();
+    }
+    row.version += 1;
     if (input.name !== undefined) row.name = input.name;
     if (input.category !== undefined) row.category = input.category;
     if (input.body !== undefined) row.body = input.body;
     if (input.active !== undefined) row.active = input.active;
     if (input.prompts !== undefined)
-      row.prompts = this.toPrompts(id, input.prompts);
+      row.prompts = this.toPrompts(id, input.prompts, row.prompts);
     return Promise.resolve(structuredClone(row));
   }
 }

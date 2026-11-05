@@ -68,6 +68,12 @@ export interface ClinicalEntryRepository {
     params?: ListClinicalEntriesParams,
   ): Promise<ClinicalEntry[]>;
 
+  /**
+   * DX-231: zona IANA de la sede donde se escribe una evolución SIN cita (la
+   * del contexto, la misma que `create` le asigna). Decide qué es «hoy».
+   */
+  writeLocationTimeZone(): Promise<string>;
+
   /** DX-212: de `codes`, los que existen en la tabla CIE-10. */
   existingIcd10Codes(codes: string[]): Promise<Set<string>>;
 }

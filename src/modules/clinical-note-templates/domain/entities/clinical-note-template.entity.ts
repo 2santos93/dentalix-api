@@ -26,6 +26,8 @@ export interface ClinicalNoteTemplate {
   category: string | null;
   body: string;
   active: boolean;
+  /** DX-231: versión optimista; sube en 1 con cada edición. */
+  version: number;
   prompts: ClinicalNoteTemplatePrompt[];
   createdAt: Date;
   updatedAt: Date;

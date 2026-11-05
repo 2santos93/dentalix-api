@@ -11,6 +11,7 @@ import {
   seedMember,
   STAFF_CANCELLATION,
 } from './support/e2e-fixtures';
+import { civilDateIn } from '../src/shared/time/civil-day';
 import { setLocationZone } from './support/location-fixtures';
 
 // DX-170 en HTTP real: CRUD de plantillas de evolución por rol (solo ADMIN
@@ -21,6 +22,8 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
+// Zona de la sede de este spec (G1: la zona es de la sede).
+const SEDE_ZONE = 'UTC';
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DAY = new Date(Date.now() + 2 * DAY_MS).toISOString().slice(0, 10);
 const at = (time: string): string => `${DAY}T${time}:00.000Z`;
@@ -42,6 +45,7 @@ interface TemplateBody {
   category: string | null;
   body: string;
   active: boolean;
+  version: number;
   prompts: PromptBody[];
 }
 
@@ -179,7 +183,7 @@ describe('Plantillas de evolución ligadas a la cita (e2e, DX-170)', () => {
         where: { tenantId: c.tenantId },
         select: { id: true },
       })) {
-        await setLocationZone(raw, c.tenantId, id, 'UTC');
+        await setLocationZone(raw, c.tenantId, id, SEDE_ZONE);
       }
       await as(api().put('/api/v1/locations/schedule'), c.adminToken, c.host)
         .send({ ranges: [] })
@@ -245,6 +249,7 @@ describe('Plantillas de evolución ligadas a la cita (e2e, DX-170)', () => {
         clinic.adminToken,
       )
         .send({
+          version: resin.version,
           body: 'Resina en {{Superficie}}.',
           prompts: [{ label: 'Superficie', type: 'ONE', options: ['O', 'M'] }],
         })
@@ -258,7 +263,11 @@ describe('Plantillas de evolución ligadas a la cita (e2e, DX-170)', () => {
         api().patch(`/api/v1/clinical-note-templates/${resin.id}`),
         clinic.adminToken,
       )
-        .send({ body: RESIN.body, prompts: RESIN.prompts })
+        .send({
+          version: (edited.body as TemplateBody).version,
+          body: RESIN.body,
+          prompts: RESIN.prompts,
+        })
         .expect(200);
       expect(
         (restored.body as TemplateBody).prompts.map((p) => p.label),
@@ -296,7 +305,7 @@ describe('Plantillas de evolución ligadas a la cita (e2e, DX-170)', () => {
           api().patch(`/api/v1/clinical-note-templates/${resin.id}`),
           token(),
         )
-          .send({ active: false })
+          .send({ active: false, version: 1 })
           .expect(403);
         await as(
           api().post('/api/v1/clinical-note-templates/samples'),
@@ -442,6 +451,7 @@ describe('Plantillas de evolución ligadas a la cita (e2e, DX-170)', () => {
         clinic.adminToken,
       )
         .send({
+          version: resin.version,
           name: 'Resina compuesta',
           body: 'Nuevo {{Superficie}} {{Material}} {{Observaciones}}',
         })
@@ -450,7 +460,7 @@ describe('Plantillas de evolución ligadas a la cita (e2e, DX-170)', () => {
         api().patch(`/api/v1/clinical-note-templates/${resin.id}`),
         clinic.adminToken,
       )
-        .send({ active: false })
+        .send({ active: false, version: resin.version + 1 })
         .expect(200);
       expect((off.body as TemplateBody).active).toBe(false);
       // + las 2 ediciones de preguntas de «CRUD por rol».
@@ -562,6 +572,230 @@ describe('Plantillas de evolución ligadas a la cita (e2e, DX-170)', () => {
     });
   });
 
+  describe('DX-231: fecha de la evolución y plantillas en edición', () => {
+    // «Hoy» en la zona de la sede del spec (SEDE_ZONE), no el día UTC.
+    const sedeDay = () => civilDateIn(new Date(), SEDE_ZONE);
+    const dayAfter = (day: string, n: number) =>
+      new Date(new Date(`${day}T00:00:00.000Z`).getTime() + n * DAY_MS)
+        .toISOString()
+        .slice(0, 10);
+    const postEntry = (body: object) =>
+      as(
+        api().post(`/api/v1/patients/${patientId}/clinical-entries`),
+        dentist.token,
+      ).send(body);
+    const message = (res: request.Response) =>
+      (res.body as { message: string }).message;
+
+    let appointmentId: string;
+    let appointmentDay: string;
+
+    beforeAll(async () => {
+      appointmentId = await book(
+        clinic,
+        patientId,
+        dentist.userId,
+        at('15:00'),
+        at('15:30'),
+      );
+      await setStatus(clinic, appointmentId, 'COMPLETED');
+      await moveToPast(appointmentId, 3);
+      appointmentDay = daysBefore(at('00:00'), 3).slice(0, 10);
+    });
+
+    it('con cita y entryDate de otro día: 400 en español y no se guarda', async () => {
+      const before = await raw.clinicalEntry.count({ where: { patientId } });
+      for (const day of [
+        dayAfter(appointmentDay, -1),
+        dayAfter(appointmentDay, 1),
+      ]) {
+        const res = await postEntry({
+          appointmentId,
+          notes: 'Control',
+          entryDate: `${day}T00:00:00.000Z`,
+        }).expect(400);
+        expect(message(res)).toBe(
+          'La fecha de atención tiene que ser el día de la cita; si no la indicas, se usa ese día',
+        );
+      }
+      expect(await raw.clinicalEntry.count({ where: { patientId } })).toBe(
+        before,
+      );
+    });
+
+    it('400 si falta la versión en el PATCH y si dos preguntas llevan el mismo id', async () => {
+      const mine = await as(
+        api().post('/api/v1/clinical-note-templates'),
+        clinic.adminToken,
+      )
+        .send({
+          name: 'Id repetido DX-231',
+          body: 'A {{Uno}} B {{Dos}}.',
+          prompts: [
+            { label: 'Uno', type: 'TEXT' },
+            { label: 'Dos', type: 'TEXT' },
+          ],
+        })
+        .expect(201);
+      const tpl = mine.body as TemplateBody;
+      const path = `/api/v1/clinical-note-templates/${tpl.id}`;
+      await as(api().patch(path), clinic.adminToken)
+        .send({ active: false })
+        .expect(400);
+      const dup = await as(api().patch(path), clinic.adminToken)
+        .send({
+          version: tpl.version,
+          body: 'A {{Uno}} B {{Dos}}.',
+          prompts: [
+            { id: tpl.prompts[0].id, label: 'Uno', type: 'TEXT' },
+            { id: tpl.prompts[0].id, label: 'Dos', type: 'TEXT' },
+          ],
+        })
+        .expect(400);
+      expect(message(dup)).toMatch(/mismo id/);
+      const row = await raw.clinicalNoteTemplate.findUniqueOrThrow({
+        where: { id: tpl.id },
+        include: { prompts: true },
+      });
+      expect(row.version).toBe(1);
+      expect(row.prompts).toHaveLength(2);
+    });
+
+    it('con cita y su mismo día vale; sin entryDate toma el día de la cita', async () => {
+      const same = await postEntry({
+        appointmentId,
+        notes: 'Control A',
+        entryDate: `${appointmentDay}T00:00:00.000Z`,
+      }).expect(201);
+      expect((same.body as EntryBody).entryDate).toBe(
+        `${appointmentDay}T00:00:00.000Z`,
+      );
+      const implicit = await postEntry({
+        appointmentId,
+        notes: 'Control B',
+      }).expect(201);
+      expect((implicit.body as EntryBody).entryDate).toBe(
+        `${appointmentDay}T00:00:00.000Z`,
+      );
+    });
+
+    it('sin cita: una fecha futura (día civil de la sede) da 400; hoy y el pasado valen', async () => {
+      const res = await postEntry({
+        notes: 'Futura',
+        entryDate: `${dayAfter(sedeDay(), 1)}T00:00:00.000Z`,
+      }).expect(400);
+      expect(message(res)).toBe(
+        'La fecha de atención no puede ser una fecha futura',
+      );
+      await postEntry({
+        notes: 'Hoy',
+        entryDate: `${sedeDay()}T00:00:00.000Z`,
+      }).expect(201);
+      await postEntry({
+        notes: 'Pasada',
+        entryDate: `${dayAfter(sedeDay(), -30)}T00:00:00.000Z`,
+      }).expect(201);
+    });
+
+    describe('plantilla en edición', () => {
+      let tpl: TemplateBody;
+      const patch = (id: string, body: object) =>
+        as(
+          api().patch(`/api/v1/clinical-note-templates/${id}`),
+          clinic.adminToken,
+        ).send(body);
+
+      beforeAll(async () => {
+        const res = await as(
+          api().post('/api/v1/clinical-note-templates'),
+          clinic.adminToken,
+        )
+          .send({
+            name: 'Endodoncia DX-231',
+            body: 'Conducto {{Conducto}} con {{Irrigante}}.',
+            prompts: [
+              { label: 'Conducto', type: 'TEXT' },
+              { label: 'Irrigante', type: 'ONE', options: ['NaOCl', 'EDTA'] },
+            ],
+          })
+          .expect(201);
+        tpl = res.body as TemplateBody;
+        expect(tpl.version).toBe(1);
+      });
+
+      it('editar el texto de una pregunta conserva su id y una composición en curso se guarda', async () => {
+        // El otro profesional ya cargó la plantilla con estos ids.
+        const stale = tpl;
+        const [conducto, irrigante] = stale.prompts;
+        const edited = await patch(tpl.id, {
+          version: tpl.version,
+          body: 'Conducto {{Conducto mesial}} con {{Irrigante}} y {{Nota}}.',
+          prompts: [
+            { id: conducto.id, label: 'Conducto mesial', type: 'TEXT' },
+            {
+              id: irrigante.id,
+              label: 'Irrigante',
+              type: 'ONE',
+              options: ['NaOCl', 'EDTA'],
+            },
+            { label: 'Nota', type: 'TEXT' },
+          ],
+        });
+        expect(edited.body).toMatchObject({});
+        console.log(JSON.stringify(edited.body));
+        tpl = edited.body as TemplateBody;
+        expect(tpl.version).toBe(2);
+        expect(tpl.prompts.map((p) => p.id).slice(0, 2)).toEqual([
+          conducto.id,
+          irrigante.id,
+        ]);
+        expect(tpl.prompts[2].id).not.toBe(conducto.id);
+
+        const saved = await postEntry({
+          templateId: tpl.id,
+          answers: [
+            { promptId: conducto.id, values: ['MB'] },
+            { promptId: irrigante.id, values: ['NaOCl'] },
+          ],
+        }).expect(201);
+        expect((saved.body as EntryBody).notes).toBe(
+          'Conducto MB con NaOCl y [sin respuesta].',
+        );
+      });
+
+      it('dos PATCH con la misma versión: el segundo da 409 «La plantilla cambió, recárgala»', async () => {
+        await patch(tpl.id, {
+          version: tpl.version,
+          category: 'Primera',
+        }).expect(200);
+        const second = await patch(tpl.id, {
+          version: tpl.version,
+          category: 'Segunda',
+        }).expect(409);
+        expect(message(second)).toBe('La plantilla cambió, recárgala');
+        expect((second.body as { code: string }).code).toBe(
+          'NOTE_TEMPLATE_STALE',
+        );
+        const row = await raw.clinicalNoteTemplate.findUniqueOrThrow({
+          where: { id: tpl.id },
+        });
+        expect(row).toMatchObject({ category: 'Primera', version: 3 });
+      });
+
+      it('dos PATCH simultáneos con la misma versión: uno 200 y otro 409', async () => {
+        const row = await raw.clinicalNoteTemplate.findUniqueOrThrow({
+          where: { id: tpl.id },
+        });
+        const results = await Promise.all(
+          ['A', 'B'].map((c) =>
+            patch(tpl.id, { version: row.version, category: c }),
+          ),
+        );
+        expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
+      });
+    });
+  });
+
   describe('aislamiento entre clínicas', () => {
     let otherAppointmentId: string;
     let otherTemplate: TemplateBody;
@@ -610,7 +844,7 @@ describe('Plantillas de evolución ligadas a la cita (e2e, DX-170)', () => {
         api().patch(`/api/v1/clinical-note-templates/${otherTemplate.id}`),
         clinic.adminToken,
       )
-        .send({ active: false })
+        .send({ active: false, version: 1 })
         .expect(404);
       await as(
         api().post(`/api/v1/patients/${patientId}/clinical-entries`),
@@ -622,6 +856,41 @@ describe('Plantillas de evolución ligadas a la cita (e2e, DX-170)', () => {
         where: { id: otherTemplate.id },
       });
       expect(untouched.active).toBe(true);
+    });
+
+    it('DX-231: el id de una pregunta de otra clínica en un PATCH no se adopta: es una pregunta nueva y la ajena no cambia', async () => {
+      const foreign = otherTemplate.prompts[0];
+      const mine = await as(
+        api().post('/api/v1/clinical-note-templates'),
+        clinic.adminToken,
+      )
+        .send({
+          name: 'Con id ajeno',
+          body: 'Nota {{Nota}}.',
+          prompts: [{ label: 'Nota', type: 'TEXT' }],
+        })
+        .expect(201);
+      const tpl = mine.body as TemplateBody;
+      const edited = await as(
+        api().patch(`/api/v1/clinical-note-templates/${tpl.id}`),
+        clinic.adminToken,
+      )
+        .send({
+          version: tpl.version,
+          body: 'Nota {{Texto}}.',
+          prompts: [{ id: foreign.id, label: 'Texto', type: 'TEXT' }],
+        })
+        .expect(200);
+      const [prompt] = (edited.body as TemplateBody).prompts;
+      expect(prompt.id).not.toBe(foreign.id);
+      const intact = await raw.clinicalNoteTemplatePrompt.findUniqueOrThrow({
+        where: { id: foreign.id },
+      });
+      expect(intact).toMatchObject({
+        tenantId: other.tenantId,
+        templateId: otherTemplate.id,
+        label: foreign.label,
+      });
     });
   });
 });

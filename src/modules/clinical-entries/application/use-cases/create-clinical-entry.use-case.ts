@@ -33,6 +33,12 @@ import {
   INACTIVE_NOTE_TEMPLATE_MESSAGE,
   NOTE_TEMPLATE_NOT_FOUND_MESSAGE,
 } from '../../../clinical-note-templates/application/note-template-errors';
+import {
+  ENTRY_DATE_FUTURE_MESSAGE,
+  ENTRY_DATE_OTHER_DAY_MESSAGE,
+  isAppointmentDay,
+  isFutureEntryDate,
+} from '../../domain/entry-date-rules';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 
 export const ENTRY_APPOINTMENT_NOT_FOUND_MESSAGE =
@@ -43,6 +49,7 @@ export const ENTRY_APPOINTMENT_NOT_ATTENDED_MESSAGE =
   'No se puede registrar una evolución en una cita cancelada o en la que el paciente no asistió';
 export const ENTRY_APPOINTMENT_FUTURE_MESSAGE =
   'No se puede registrar una evolución en una cita de un día futuro';
+export { ENTRY_DATE_FUTURE_MESSAGE, ENTRY_DATE_OTHER_DAY_MESSAGE };
 export const BLANK_NOTES_MESSAGE =
   'El texto de la evolución no puede estar vacío';
 
@@ -130,6 +137,7 @@ export class CreateClinicalEntryUseCase {
     const appointment = input.appointmentId
       ? await this.appointmentFor(patientId, input.appointmentId)
       : null;
+    await this.assertEntryDate(input.entryDate, appointment);
     const notes = input.templateId
       ? await this.templateNotes(input.templateId, input)
       : (input.notes as string);
@@ -154,6 +162,31 @@ export class CreateClinicalEntryUseCase {
       templateId: input.templateId,
       diagnoses,
     });
+  }
+
+  /**
+   * DX-231 (BE-033): con cita, la fecha de atención es el día civil de la cita
+   * en la zona de su sede; sin cita, no puede ser posterior a «hoy» en la zona
+   * de la sede de escritura. Sin fecha no hay nada que comprobar (el día de la
+   * cita, o ahora).
+   */
+  private async assertEntryDate(
+    entryDate: Date | undefined,
+    appointment: ClinicalEntryAppointmentRef | null,
+  ): Promise<void> {
+    if (entryDate === undefined) return;
+    if (appointment) {
+      if (
+        !isAppointmentDay(entryDate, appointment.start, appointment.timeZone)
+      ) {
+        throw new BadRequestException(ENTRY_DATE_OTHER_DAY_MESSAGE);
+      }
+      return;
+    }
+    const timeZone = await this.repo.writeLocationTimeZone();
+    if (isFutureEntryDate(entryDate, new Date(), timeZone)) {
+      throw new BadRequestException(ENTRY_DATE_FUTURE_MESSAGE);
+    }
   }
 
   /**

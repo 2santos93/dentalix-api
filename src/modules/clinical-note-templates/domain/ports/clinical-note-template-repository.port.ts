@@ -16,6 +16,11 @@ export interface UpdateNoteTemplateRepoInput {
   /** Si viene, sustituye TODAS las preguntas (en este orden). */
   prompts?: NoteTemplateDraft['prompts'];
   updatedById?: string;
+  /**
+   * DX-231: versión que el cliente leyó. Si la fila ya no la tiene, el
+   * repositorio lanza 409 sin escribir nada (comprobación atómica).
+   */
+  expectedVersion?: number;
 }
 
 export const CLINICAL_NOTE_TEMPLATE_REPOSITORY = Symbol(
@@ -34,6 +39,11 @@ export interface ClinicalNoteTemplateRepository {
   createMany(
     inputs: CreateNoteTemplateRepoInput[],
   ): Promise<ClinicalNoteTemplate[]>;
+  /**
+   * Sube `version` en 1. Las preguntas con `id` de la plantilla conservan ese
+   * id (se actualizan en su sitio); las demás se crean y las que ya no vienen
+   * se quitan.
+   */
   update(
     id: string,
     input: UpdateNoteTemplateRepoInput,
