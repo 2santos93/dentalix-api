@@ -1283,9 +1283,12 @@ describe('cambiar el plazo: suelos, ventana y evento (DX-330, int)', () => {
 
     it('a busy reduction writes nothing', async () => {
       const b = await clinicAt(25);
-      // Ids en orden y fila detenida la última, en orden físico y de `id`: el
-      // `UPDATE` llega a ella con las demás ya escritas.
-      const ids = Array.from({ length: 12 }, () => randomUUID()).sort();
+      // El `UPDATE` de la reducción recorre `patients` en ORDEN FÍSICO, que no
+      // tiene por qué ser el de `id` (los huecos que dejan otras suites hacen
+      // que las altas caigan en páginas anteriores). Se detiene la fila que el
+      // `UPDATE` alcanza la ÚLTIMA, la de mayor `ctid` de la clínica: llega a
+      // ella con todas las demás ya escritas y bloqueadas.
+      const ids = Array.from({ length: 12 }, () => randomUUID());
       await raw.patient.createMany({
         data: ids.map((id) => ({
           id,
@@ -1295,8 +1298,11 @@ describe('cambiar el plazo: suelos, ventana y evento (DX-330, int)', () => {
           lastAttentionAt: new Date('2010-06-15T10:00:00Z'),
         })),
       });
+      const [last] = await raw.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "patients" WHERE "tenantId" = ${b}::uuid
+         ORDER BY "ctid" DESC LIMIT 1`;
       const before = await storedIn(b);
-      const held = await holdPatientRow(ids[ids.length - 1]);
+      const held = await holdPatientRow(last.id);
       try {
         const reducing = settle(put(b, 15, T));
         await waitForTransactionWaiters(raw, held.xid);
