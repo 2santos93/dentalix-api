@@ -271,7 +271,8 @@ describe('tipos de cita y agenda en columnas (int, DX-121)', () => {
         },
       } as unknown as LocationScheduleRepository;
       const staff = {
-        findById: (userId: string) => Promise.resolve({ userId }),
+        findById: (userId: string) =>
+          Promise.resolve({ userId, role: 'DENTIST' }),
       } as unknown as StaffRepository;
       const audit = {
         record: () => Promise.resolve(),

@@ -104,7 +104,7 @@ const noSchedule = {
   findForCurrentLocation: () => Promise.resolve(null),
 } as unknown as LocationScheduleRepository;
 const anyStaff = {
-  findById: (userId: string) => Promise.resolve({ userId }),
+  findById: (userId: string) => Promise.resolve({ userId, role: 'DENTIST' }),
 } as unknown as StaffRepository;
 const anyPatient = {
   findById: (id: string) => Promise.resolve({ id }),

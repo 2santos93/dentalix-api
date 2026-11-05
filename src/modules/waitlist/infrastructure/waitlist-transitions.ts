@@ -35,7 +35,8 @@ export async function enqueueWaitlistFromAppointment(
   // DX-161: una sola OPEN por paciente. Con el candado, dos cancelaciones (o una
   // cancelación y un alta manual) del mismo paciente van en fila; si ya tiene
   // una OPEN, la cita se suma a ella: no se crea ni se reabre otra.
-  await tx.$queryRaw`
+  // $executeRaw: $queryRaw no sabe leer el `void` que devuelve el candado.
+  await tx.$executeRaw`
     SELECT pg_advisory_xact_lock(hashtextextended('waitlist-open:' || a."patientId"::text, 0))
       FROM "appointments" a
      WHERE a."id" = ${appointmentId}::uuid`;
@@ -135,5 +136,5 @@ export async function lockPatientWaitlist(
   tx: Prisma.TransactionClient,
   patientId: string,
 ): Promise<void> {
-  await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${'waitlist-open:' + patientId}, 0))`;
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${'waitlist-open:' + patientId}, 0))`;
 }
