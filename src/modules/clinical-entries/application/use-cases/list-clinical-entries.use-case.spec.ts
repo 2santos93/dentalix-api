@@ -36,6 +36,7 @@ function makeRepo(
       Promise.reject(new Error('not implemented in this fake')),
     listByPatient: (): Promise<ClinicalEntry[]> => Promise.resolve([]),
     findAppointment: () => Promise.resolve(null),
+    writeLocationTimeZone: () => Promise.resolve('America/Caracas'),
     existingIcd10Codes: () => Promise.resolve(new Set<string>()),
     ...overrides,
   };
@@ -59,6 +60,10 @@ class InMemoryClinicalEntryRepository implements ClinicalEntryRepository {
 
   create(): Promise<ClinicalEntry> {
     return Promise.reject(new Error('not implemented in this fake'));
+  }
+
+  writeLocationTimeZone(): Promise<string> {
+    return Promise.resolve('America/Caracas');
   }
 
   findAppointment(): Promise<null> {

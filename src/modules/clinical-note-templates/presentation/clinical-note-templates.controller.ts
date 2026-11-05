@@ -141,7 +141,7 @@ export class ClinicalNoteTemplatesController {
   @ApiOperation({
     summary: 'Editar o desactivar una plantilla',
     description:
-      'Las evoluciones ya guardadas no cambian: llevan su texto compuesto. `prompts`, si viene, sustituye todas las preguntas.',
+      'Las evoluciones ya guardadas no cambian: llevan su texto compuesto. `prompts`, si viene, sustituye todas las preguntas: las que llevan el `id` de una pregunta de la plantilla lo conservan (una evolución en curso sigue guardándose), las demás son nuevas. `version` activa el control optimista (409 si cambió).',
   })
   @ApiOkResponse({ type: ClinicalNoteTemplateDto })
   @ApiBadRequestResponse({ description: 'Plantilla resultante inválida' })
@@ -149,7 +149,8 @@ export class ClinicalNoteTemplatesController {
     description: 'Plantilla no encontrada en esta clínica',
   })
   @ApiConflictResponse({
-    description: 'Ya existe una plantilla con ese nombre',
+    description:
+      'Ya existe una plantilla con ese nombre, o `version` ya no es la actual («La plantilla cambió, recárgala»)',
   })
   @ApiForbiddenResponse({ description: 'Solo ADMIN' })
   update(
@@ -165,6 +166,7 @@ export class ClinicalNoteTemplatesController {
         body: dto.body,
         prompts: dto.prompts,
         active: dto.active,
+        version: dto.version,
       },
       req.user.sub,
     );

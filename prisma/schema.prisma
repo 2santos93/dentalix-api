@@ -1028,6 +1028,9 @@ model ClinicalNoteTemplate {
   category    String?
   body        String
   active      Boolean  @default(true)
+  // DX-231: versión optimista. Cada edición la sube en 1; un PATCH con otra
+  // versión que la actual da 409 (dos ADMIN no se pisan sin aviso).
+  version     Int      @default(1)
   createdById String?  @db.Uuid
   updatedById String?  @db.Uuid
   createdAt   DateTime @default(now())

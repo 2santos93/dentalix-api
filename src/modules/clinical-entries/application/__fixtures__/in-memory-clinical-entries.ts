@@ -16,7 +16,13 @@ export class InMemoryClinicalEntryRepository implements ClinicalEntryRepository 
   readonly appointments: ClinicalEntryAppointmentRef[] = [];
   /** DX-212: la tabla CIE-10 de los tests. */
   readonly icd10 = new Set(['K02.1', 'K05.1', 'K04.0', 'Z01.2']);
+  /** DX-231: zona de la sede de escritura de los tests (Caracas, UTC−4). */
+  writeTimeZone = 'America/Caracas';
   private nextId = 1;
+
+  writeLocationTimeZone(): Promise<string> {
+    return Promise.resolve(this.writeTimeZone);
+  }
 
   create(input: CreateClinicalEntryRepoInput): Promise<ClinicalEntry> {
     const row: ClinicalEntry = {

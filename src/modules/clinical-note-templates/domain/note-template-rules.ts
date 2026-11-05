@@ -24,6 +24,11 @@ export const SKIPPED_ANSWER = '[sin respuesta]';
 export type NotePromptType = 'ONE' | 'MULTI' | 'TEXT';
 
 export interface NotePromptDraft {
+  /**
+   * DX-231: id de la pregunta existente que esta conserva al editar la
+   * plantilla (upsert por id). Sin id, o con uno ajeno, es una pregunta nueva.
+   */
+  id?: string;
   label: string;
   type: NotePromptType;
   options: string[];
@@ -79,6 +84,7 @@ export function normalizeNoteTemplate(
     category: trimOrNull(draft.category),
     body: draft.body.trim(),
     prompts: draft.prompts.map((p) => ({
+      ...(p.id !== undefined ? { id: p.id } : {}),
       label: p.label.trim(),
       type: p.type,
       options: p.options.map((o) => o.trim()),

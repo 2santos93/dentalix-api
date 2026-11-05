@@ -42,6 +42,7 @@ interface TemplateBody {
   category: string | null;
   body: string;
   active: boolean;
+  version: number;
   prompts: PromptBody[];
 }
 
@@ -559,6 +560,188 @@ describe('Plantillas de evolución ligadas a la cita (e2e, DX-170)', () => {
       )
         .send({ appointmentId, notes: 'Control' })
         .expect(403);
+    });
+  });
+
+  describe('DX-231: fecha de la evolución y plantillas en edición', () => {
+    const today = () => new Date().toISOString().slice(0, 10);
+    const dayAfter = (day: string, n: number) =>
+      new Date(new Date(`${day}T00:00:00.000Z`).getTime() + n * DAY_MS)
+        .toISOString()
+        .slice(0, 10);
+    const postEntry = (body: object) =>
+      as(
+        api().post(`/api/v1/patients/${patientId}/clinical-entries`),
+        dentist.token,
+      ).send(body);
+    const message = (res: request.Response) =>
+      (res.body as { message: string }).message;
+
+    let appointmentId: string;
+    let appointmentDay: string;
+
+    beforeAll(async () => {
+      appointmentId = await book(
+        clinic,
+        patientId,
+        dentist.userId,
+        at('15:00'),
+        at('15:30'),
+      );
+      await setStatus(clinic, appointmentId, 'COMPLETED');
+      await moveToPast(appointmentId, 3);
+      appointmentDay = daysBefore(at('00:00'), 3).slice(0, 10);
+    });
+
+    it('con cita y entryDate de otro día: 400 en español y no se guarda', async () => {
+      const before = await raw.clinicalEntry.count({ where: { patientId } });
+      for (const day of [
+        dayAfter(appointmentDay, -1),
+        dayAfter(appointmentDay, 1),
+      ]) {
+        const res = await postEntry({
+          appointmentId,
+          notes: 'Control',
+          entryDate: `${day}T00:00:00.000Z`,
+        }).expect(400);
+        expect(message(res)).toBe(
+          'La fecha de atención tiene que ser el día de la cita; si no la indicas, se usa ese día',
+        );
+      }
+      expect(await raw.clinicalEntry.count({ where: { patientId } })).toBe(
+        before,
+      );
+    });
+
+    it('con cita y su mismo día vale; sin entryDate toma el día de la cita', async () => {
+      const same = await postEntry({
+        appointmentId,
+        notes: 'Control A',
+        entryDate: `${appointmentDay}T00:00:00.000Z`,
+      }).expect(201);
+      expect((same.body as EntryBody).entryDate).toBe(
+        `${appointmentDay}T00:00:00.000Z`,
+      );
+      const implicit = await postEntry({
+        appointmentId,
+        notes: 'Control B',
+      }).expect(201);
+      expect((implicit.body as EntryBody).entryDate).toBe(
+        `${appointmentDay}T00:00:00.000Z`,
+      );
+    });
+
+    it('sin cita: una fecha futura (día civil de la sede) da 400; hoy y el pasado valen', async () => {
+      const res = await postEntry({
+        notes: 'Futura',
+        entryDate: `${dayAfter(today(), 1)}T00:00:00.000Z`,
+      }).expect(400);
+      expect(message(res)).toBe(
+        'La fecha de atención no puede ser una fecha futura',
+      );
+      await postEntry({
+        notes: 'Hoy',
+        entryDate: `${today()}T00:00:00.000Z`,
+      }).expect(201);
+      await postEntry({
+        notes: 'Pasada',
+        entryDate: `${dayAfter(today(), -30)}T00:00:00.000Z`,
+      }).expect(201);
+    });
+
+    describe('plantilla en edición', () => {
+      let tpl: TemplateBody;
+      const patch = (id: string, body: object) =>
+        as(
+          api().patch(`/api/v1/clinical-note-templates/${id}`),
+          clinic.adminToken,
+        ).send(body);
+
+      beforeAll(async () => {
+        const res = await as(
+          api().post('/api/v1/clinical-note-templates'),
+          clinic.adminToken,
+        )
+          .send({
+            name: 'Endodoncia DX-231',
+            body: 'Conducto {{Conducto}} con {{Irrigante}}.',
+            prompts: [
+              { label: 'Conducto', type: 'TEXT' },
+              { label: 'Irrigante', type: 'ONE', options: ['NaOCl', 'EDTA'] },
+            ],
+          })
+          .expect(201);
+        tpl = res.body as TemplateBody;
+        expect(tpl.version).toBe(1);
+      });
+
+      it('editar el texto de una pregunta conserva su id y una composición en curso se guarda', async () => {
+        // El otro profesional ya cargó la plantilla con estos ids.
+        const stale = tpl;
+        const [conducto, irrigante] = stale.prompts;
+        const edited = await patch(tpl.id, {
+          version: tpl.version,
+          body: 'Conducto {{Conducto mesial}} con {{Irrigante}} y {{Nota}}.',
+          prompts: [
+            { id: conducto.id, label: 'Conducto mesial', type: 'TEXT' },
+            {
+              id: irrigante.id,
+              label: 'Irrigante',
+              type: 'ONE',
+              options: ['NaOCl', 'EDTA'],
+            },
+            { label: 'Nota', type: 'TEXT' },
+          ],
+        });
+        expect(edited.body).toMatchObject({});
+        console.log(JSON.stringify(edited.body));
+        tpl = edited.body as TemplateBody;
+        expect(tpl.version).toBe(2);
+        expect(tpl.prompts.map((p) => p.id).slice(0, 2)).toEqual([
+          conducto.id,
+          irrigante.id,
+        ]);
+        expect(tpl.prompts[2].id).not.toBe(conducto.id);
+
+        const saved = await postEntry({
+          templateId: tpl.id,
+          answers: [
+            { promptId: conducto.id, values: ['MB'] },
+            { promptId: irrigante.id, values: ['NaOCl'] },
+          ],
+        }).expect(201);
+        expect((saved.body as EntryBody).notes).toBe(
+          'Conducto MB con NaOCl y [sin respuesta].',
+        );
+      });
+
+      it('dos PATCH con la misma versión: el segundo da 409 «La plantilla cambió, recárgala»', async () => {
+        await patch(tpl.id, {
+          version: tpl.version,
+          category: 'Primera',
+        }).expect(200);
+        const second = await patch(tpl.id, {
+          version: tpl.version,
+          category: 'Segunda',
+        }).expect(409);
+        expect(message(second)).toBe('La plantilla cambió, recárgala');
+        const row = await raw.clinicalNoteTemplate.findUniqueOrThrow({
+          where: { id: tpl.id },
+        });
+        expect(row).toMatchObject({ category: 'Primera', version: 3 });
+      });
+
+      it('dos PATCH simultáneos con la misma versión: uno 200 y otro 409', async () => {
+        const row = await raw.clinicalNoteTemplate.findUniqueOrThrow({
+          where: { id: tpl.id },
+        });
+        const results = await Promise.all(
+          ['A', 'B'].map((c) =>
+            patch(tpl.id, { version: row.version, category: c }),
+          ),
+        );
+        expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
+      });
     });
   });
 

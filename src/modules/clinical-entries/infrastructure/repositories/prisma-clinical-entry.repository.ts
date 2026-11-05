@@ -170,6 +170,17 @@ export class PrismaClinicalEntryRepository implements ClinicalEntryRepository {
     });
   }
 
+  writeLocationTimeZone(): Promise<string> {
+    return this.prisma.runWithTenant(async (tx) => {
+      const locationId = await this.tenantContext.writeLocationId(tx);
+      const location = await tx.location.findFirstOrThrow({
+        where: { id: locationId },
+        select: { id: true, timeZone: true },
+      });
+      return requireLocationTimeZone(location);
+    });
+  }
+
   async findAppointment(
     id: string,
   ): Promise<ClinicalEntryAppointmentRef | null> {
