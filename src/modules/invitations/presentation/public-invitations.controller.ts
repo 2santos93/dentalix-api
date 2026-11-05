@@ -29,6 +29,7 @@ import {
   DeliveredSession,
   SessionCookieService,
 } from '../../auth/presentation/session-cookie.service';
+import { NoStoreHeadersInterceptor } from '../../../shared/http/no-store-headers.interceptor';
 
 // PUBLIC endpoints — no JwtAuthGuard/RolesGuard. Whoever is opening the
 // invitation link doesn't have a session yet (that's the whole point of an
@@ -36,7 +37,7 @@ import {
 // (see PublicTenantContextInterceptor + TenantHostMiddleware), same as
 // public-branding.controller.ts; there is no JWT to cross-check.
 @ApiTags('public')
-@UseInterceptors(PublicTenantContextInterceptor)
+@UseInterceptors(NoStoreHeadersInterceptor, PublicTenantContextInterceptor)
 // Por IP: frena la enumeración de tokens. Ver y aceptar usan la misma
 // política, pero cada ruta cuenta en su propio balde.
 @RateLimit('invitation')

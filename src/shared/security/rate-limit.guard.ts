@@ -15,6 +15,11 @@ export class RateLimitGuard extends ThrottlerGuard {
   ): Promise<void> {
     const { res } = this.getRequestResponse(context);
     this.setResponseHeader(res, 'Retry-After', detail.timeToBlockExpire);
+    // SEC-064: este guard corre antes que los interceptores, así que el 429 de
+    // una ruta pública no pasaría por NoStoreHeadersInterceptor. Un 429 nunca
+    // debe guardarse en una caché.
+    this.setResponseHeader(res, 'Cache-Control', 'no-store');
+    this.setResponseHeader(res, 'Pragma', 'no-cache');
     return Promise.reject(tooManyRequestsException(detail.timeToBlockExpire));
   }
 }

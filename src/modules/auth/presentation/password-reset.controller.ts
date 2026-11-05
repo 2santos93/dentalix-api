@@ -33,6 +33,7 @@ import {
   PasswordResetTokenStatusDto,
   ResetPasswordDto,
 } from './dto/password-reset.dto';
+import { NoStoreHeadersInterceptor } from '../../../shared/http/no-store-headers.interceptor';
 
 export const FORGOT_PASSWORD_MESSAGE =
   'Si el correo pertenece a una cuenta de esta clínica, te enviamos un enlace para restablecer la contraseña. Revisa también la carpeta de spam.';
@@ -51,7 +52,7 @@ function header(req: PublicRequest, name: string): string | null {
  * balde por ruta.
  */
 @ApiTags('auth')
-@UseInterceptors(PublicTenantContextInterceptor)
+@UseInterceptors(NoStoreHeadersInterceptor, PublicTenantContextInterceptor)
 @RateLimit('password-reset')
 @Controller('auth')
 export class PasswordResetController {

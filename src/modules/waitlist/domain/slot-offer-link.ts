@@ -169,6 +169,41 @@ export function publicSlotOfferState(
   }
 }
 
+/**
+ * SEC-064: una oferta ACCEPTED enseña nombre de pila, fecha, sede y
+ * profesional a quien tenga el enlace; no para siempre. Pasados estos días
+ * desde que se aceptó o desde que terminó la cita (lo que llegue DESPUÉS),
+ * responde como un enlace caducado.
+ */
+export const ACCEPTED_OFFER_VISIBLE_DAYS = 7;
+
+/** Hasta cuándo sigue visible una oferta aceptada (el instante ya no lo es). */
+export function acceptedOfferVisibleUntil(offer: {
+  outcomeAt: Date | null;
+  appointmentEnd: Date;
+}): Date {
+  const from = Math.max(
+    offer.outcomeAt?.getTime() ?? 0,
+    offer.appointmentEnd.getTime(),
+  );
+  return new Date(from + ACCEPTED_OFFER_VISIBLE_DAYS * 24 * 60 * MINUTE);
+}
+
+/** ¿Una oferta aceptada cuyo plazo venció? Las demás nunca. */
+export function acceptedOfferLapsed(
+  offer: {
+    outcome: WaitlistOfferOutcome;
+    outcomeAt: Date | null;
+    appointmentEnd: Date;
+  },
+  now: Date,
+): boolean {
+  return (
+    offer.outcome === 'ACCEPTED' &&
+    now.getTime() >= acceptedOfferVisibleUntil(offer).getTime()
+  );
+}
+
 /** Solo una oferta PENDING cambia de resultado, y a uno final. */
 export function canResolveOffer(
   from: WaitlistOfferOutcome,

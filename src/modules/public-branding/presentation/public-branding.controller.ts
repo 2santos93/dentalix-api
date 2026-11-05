@@ -3,6 +3,7 @@ import { ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { GetTenantBrandingUseCase } from '../application/use-cases/get-tenant-branding.use-case';
 import { BrandingDto } from './dto/branding.dto';
 import { PublicTenantContextInterceptor } from '../../../shared/tenancy/public-tenant-context.interceptor';
+import { NoStoreHeadersInterceptor } from '../../../shared/http/no-store-headers.interceptor';
 
 // PUBLIC endpoint — no JwtAuthGuard/RolesGuard. The web app's login/marketing
 // shell needs the tenant's white-label branding before any user is
@@ -10,7 +11,7 @@ import { PublicTenantContextInterceptor } from '../../../shared/tenancy/public-t
 // (see PublicTenantContextInterceptor + TenantHostMiddleware); there is no
 // JWT to cross-check.
 @ApiTags('public')
-@UseInterceptors(PublicTenantContextInterceptor)
+@UseInterceptors(NoStoreHeadersInterceptor, PublicTenantContextInterceptor)
 @Controller('public/tenant')
 export class PublicBrandingController {
   constructor(private readonly getTenantBranding: GetTenantBrandingUseCase) {}

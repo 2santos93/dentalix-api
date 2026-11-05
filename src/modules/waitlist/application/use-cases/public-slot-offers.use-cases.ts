@@ -15,6 +15,7 @@ import { civilDateIn } from '../../../../shared/time/civil-day';
 import {
   SLOT_OFFER_MESSAGES,
   SLOT_OFFER_NOT_FOUND_MESSAGE,
+  acceptedOfferLapsed,
   hashSlotOfferToken,
   isWellFormedSlotOfferToken,
   publicSlotOfferState,
@@ -108,6 +109,21 @@ async function viewOf(
   };
 }
 
+/**
+ * SEC-064: una oferta aceptada cuyo plazo venció se contesta como un enlace
+ * caducado (sin datos del hueco), también al volver a pulsar «Aceptar» o
+ * «No me viene bien»; no se escribe nada.
+ */
+async function lapsedView(
+  repo: SlotOfferRepository,
+  offer: PublicSlotOffer,
+  now: Date,
+): Promise<PublicSlotOfferView | null> {
+  return acceptedOfferLapsed(offer, now)
+    ? viewOf(repo, offer, 'EXPIRED')
+    : null;
+}
+
 /** Abrir el enlace: SOLO LECTURA (los previsualizadores de WhatsApp lo abren solos). */
 @Injectable()
 export class GetPublicSlotOfferUseCase {
@@ -120,6 +136,8 @@ export class GetPublicSlotOfferUseCase {
   async execute(token: string): Promise<PublicSlotOfferView> {
     const offer = await findOffer(this.tenantContext, this.repo, token);
     const now = this.clock();
+    const lapsed = await lapsedView(this.repo, offer, now);
+    if (lapsed) return lapsed;
     const base = publicSlotOfferState(offer, now, false);
     // SEC-014: el hueco de una sede desactivada tampoco está disponible.
     const state =
@@ -156,6 +174,8 @@ export class AcceptSlotOfferUseCase {
   ): Promise<PublicSlotOfferView> {
     const offer = await findOffer(this.tenantContext, this.repo, token);
     const now = this.clock();
+    const lapsed = await lapsedView(this.repo, offer, now);
+    if (lapsed) return lapsed;
     const before = publicSlotOfferState(offer, now, false);
     // Lo resuelto se contesta sin escribir; lo caducado lo marca el repo.
     if (before === 'OPEN' && !(await this.fitsAgenda(offer))) {
@@ -206,7 +226,10 @@ export class DeclineSlotOfferUseCase {
     meta: AuditRequestMeta,
   ): Promise<PublicSlotOfferView> {
     const offer = await findOffer(this.tenantContext, this.repo, token);
-    const result = await this.repo.decline(offer, this.clock(), meta);
+    const now = this.clock();
+    const lapsed = await lapsedView(this.repo, offer, now);
+    if (lapsed) return lapsed;
+    const result = await this.repo.decline(offer, now, meta);
     return viewOf(this.repo, offer, result.state);
   }
 }
