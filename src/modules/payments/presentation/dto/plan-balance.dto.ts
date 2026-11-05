@@ -126,7 +126,8 @@ export class PlanBalanceWithItemsDto extends PlanBalanceDto {
 
   @ApiProperty({
     example: 30,
-    description: 'Cobrado (con base) que aún no está imputado a ningún ítem',
+    description:
+      'Cobrado (con base) sin imputar a ningún ítem, NETO de lo devuelto o traspasado del saldo a favor que se atribuye a los abonos (DX-399-ter, también en un plan cancelado o rechazado): la suma de `onAccount` de `GET /payments/:id/allocations` de los abonos del plan y, si el plan se cobra, lo que da el informe «Cobrado sin imputar»',
   })
   unallocated!: number;
 

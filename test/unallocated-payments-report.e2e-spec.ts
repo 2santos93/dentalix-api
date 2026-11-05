@@ -517,8 +517,16 @@ describe('Cobrado sin imputar / a cuenta (e2e, DX-399)', () => {
         (await report(a, query)).items.map((r) => [r.paymentId, r.unallocated]),
       );
 
-    /** Referencia independiente: LIFO por plan sobre las tablas crudas. */
+    /**
+     * Referencia independiente sobre las tablas crudas (no usa `credit-netting`):
+     * por plan cobrable, cada salida en orden cronológico gasta primero lo
+     * recibido por traspaso (TRANSFER_IN, sin mirar su fecha, DX-399-ter) y
+     * después el excedente de los abonos registrados ANTES que ella, del
+     * `paidAt` más reciente al más antiguo (DX-399/DX-399-bis). No depende del
+     * orden de los tests: vale con cualquier dato del tenant.
+     */
     async function expectedNet(): Promise<Map<string, number>> {
+      const cents = (v: unknown) => Math.round(Number(v) * 100);
       const livePatients = await raw.patient.findMany({
         where: { tenantId: a.tenantId, deletedAt: null },
         select: { id: true },
@@ -534,53 +542,93 @@ describe('Cobrado sin imputar / a cuenta (e2e, DX-399)', () => {
           },
           patientId: { in: livePatients.map((x) => x.id) },
         },
-        select: { id: true, treatmentPlanId: true, paidAt: true },
-      });
-      const out = new Map<string, number>();
-      const entries = await raw.patientCreditEntry.findMany({
-        where: {
-          tenantId: a.tenantId,
-          kind: { in: ['REFUND', 'TRANSFER_OUT'] },
+        select: {
+          id: true,
+          treatmentPlanId: true,
+          paidAt: true,
+          createdAt: true,
         },
       });
-      for (const e of entries) {
-        out.set(
-          e.treatmentPlanId,
-          (out.get(e.treatmentPlanId) ?? 0) -
-            Math.round(Number(e.amount) * 100),
-        );
+      const left = new Map<string, number>();
+      for (const p of payments) {
+        const base = await raw.paymentPlanAmount.findUnique({
+          where: { paymentId: p.id },
+        });
+        if (!base) continue;
+        const alloc = await raw.paymentAllocation.findMany({
+          where: { paymentId: p.id },
+        });
+        const un =
+          cents(base.amount) - alloc.reduce((n, l) => n + cents(l.amount), 0);
+        if (un > 0) left.set(p.id, un);
       }
-      const result = new Map<string, number>();
-      const byPlan = new Map<string, typeof payments>();
-      for (const p of payments)
-        byPlan.set(p.treatmentPlanId!, [
-          ...(byPlan.get(p.treatmentPlanId!) ?? []),
-          p,
-        ]);
-      for (const [planId, list] of byPlan) {
-        let credit = out.get(planId) ?? 0;
-        list.sort(
-          (x, y) =>
-            y.paidAt.getTime() - x.paidAt.getTime() || (x.id < y.id ? 1 : -1),
-        );
-        for (const p of list) {
-          const base = await raw.paymentPlanAmount.findUnique({
-            where: { paymentId: p.id },
-          });
-          if (!base) continue;
-          const alloc = await raw.paymentAllocation.findMany({
-            where: { paymentId: p.id },
-          });
-          const un =
-            Math.round(Number(base.amount) * 100) -
-            alloc.reduce((n, l) => n + Math.round(Number(l.amount) * 100), 0);
-          if (un <= 0) continue;
-          const absorbed = Math.min(un, Math.max(0, credit));
-          credit -= absorbed;
-          if (un - absorbed > 0) result.set(p.id, un - absorbed);
+      const entries = await raw.patientCreditEntry.findMany({
+        where: { tenantId: a.tenantId },
+        orderBy: { createdAt: 'asc' },
+      });
+      const received = new Map<string, number>();
+      for (const e of entries) {
+        if (e.kind === 'TRANSFER_IN') {
+          received.set(
+            e.treatmentPlanId,
+            (received.get(e.treatmentPlanId) ?? 0) + cents(e.amount),
+          );
         }
       }
-      return result;
+      for (const e of entries) {
+        if (e.kind === 'TRANSFER_IN') continue;
+        let out = -cents(e.amount);
+        const fromTransfers = Math.min(
+          out,
+          received.get(e.treatmentPlanId) ?? 0,
+        );
+        received.set(
+          e.treatmentPlanId,
+          (received.get(e.treatmentPlanId) ?? 0) - fromTransfers,
+        );
+        out -= fromTransfers;
+        const candidates = payments
+          .filter(
+            (p) =>
+              p.treatmentPlanId === e.treatmentPlanId &&
+              left.has(p.id) &&
+              p.createdAt.getTime() <= e.createdAt.getTime(),
+          )
+          .sort(
+            (x, y) =>
+              y.paidAt.getTime() - x.paidAt.getTime() ||
+              y.createdAt.getTime() - x.createdAt.getTime() ||
+              (x.id < y.id ? 1 : -1),
+          );
+        for (const p of candidates) {
+          if (out <= 0) break;
+          const take = Math.min(out, left.get(p.id) as number);
+          left.set(p.id, (left.get(p.id) as number) - take);
+          out -= take;
+        }
+      }
+      return new Map([...left].filter(([, v]) => v > 0));
+    }
+
+    /** El informe del año entero = la referencia, y cada fila = el detalle de su abono. */
+    async function expectEquivalence(): Promise<void> {
+      const expected = await expectedNet();
+      const page = await report(
+        a,
+        'from=2026-01-01&to=2026-12-31&pageSize=100',
+      );
+      const listed = new Map(
+        page.items.map((r) => [r.paymentId, Math.round(r.unallocated * 100)]),
+      );
+      expect(listed).toEqual(expected);
+      for (const row of page.items) {
+        const detail = (
+          await call('get', a, `/payments/${row.paymentId}/allocations`).expect(
+            200,
+          )
+        ).body as { onAccount: number };
+        expect(detail.onAccount).toBe(row.unallocated);
+      }
     }
 
     beforeAll(async () => {
@@ -674,24 +722,7 @@ describe('Cobrado sin imputar / a cuenta (e2e, DX-399)', () => {
     });
 
     it('equivalence: every live payment matches the reference, and the excluded ones have nothing unallocated net of credit', async () => {
-      const expected = await expectedNet();
-      const page = await report(
-        a,
-        'from=2026-01-01&to=2026-12-31&pageSize=100',
-      );
-      const listed = new Map(
-        page.items.map((r) => [r.paymentId, Math.round(r.unallocated * 100)]),
-      );
-      expect(listed).toEqual(expected);
-      // Y cada fila es lo que dice el detalle del mismo abono (a cuenta neto).
-      for (const row of page.items) {
-        const detail = (
-          await call('get', a, `/payments/${row.paymentId}/allocations`).expect(
-            200,
-          )
-        ).body as { onAccount: number };
-        expect(detail.onAccount).toBe(row.unallocated);
-      }
+      await expectEquivalence();
     });
 
     it('a VES payment to a USD plan is listed in the plan currency with its own amount', async () => {
@@ -993,6 +1024,43 @@ describe('Cobrado sin imputar / a cuenta (e2e, DX-399)', () => {
         await call('get', a, `/payments/${over}/allocations`).expect(200)
       ).body as { onAccount: number };
       expect(detail.onAccount).toBe(20);
+    });
+
+    it('DX-399-ter (F1): a cancelled plan refunded in full shows nothing on account on the statement and the payment window, like Cartera', async () => {
+      const olga = await patient(a, 'Olga');
+      const p = await plan(a, olga, catalogA, [100]);
+      const paid = await pay(a, p.planId, 100, '2026-09-14');
+      await call('patch', a, `/treatment-plans/${p.planId}`)
+        .send({ status: 'CANCELLED' })
+        .expect(200);
+      await refund(p.planId, [paid], 100);
+      const balance = (
+        await call('get', a, `/treatment-plans/${p.planId}/balance`).expect(200)
+      ).body as { balance: number; paid: number; unallocated: number };
+      expect(balance).toMatchObject({ balance: 0, paid: 100, unallocated: 0 });
+      const detail = (
+        await call('get', a, `/payments/${paid}/allocations`).expect(200)
+      ).body as { unallocated: number; creditOut: number; onAccount: number };
+      expect(detail).toMatchObject({
+        unallocated: 100,
+        creditOut: 100,
+        onAccount: 0,
+      });
+      const credit = (
+        await call(
+          'get',
+          a,
+          '/receivables/credit-balances?pageSize=100',
+        ).expect(200)
+      ).body as { items: { patient: { id: string } }[] };
+      expect(credit.items.map((r) => r.patient.id)).not.toContain(olga);
+      // Un plan cancelado no está en el informe.
+      const sept = await report(a, 'from=2026-09-01&to=2026-09-30');
+      expect(idsOf(sept)).not.toContain(paid);
+    });
+
+    it('F4: the equivalence still holds at the end, after every chronology and transfer scenario above', async () => {
+      await expectEquivalence();
     });
   });
 

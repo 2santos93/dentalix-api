@@ -111,7 +111,16 @@ export async function loadNettingFacts(
   tx: Prisma.TransactionClient,
   tenantId: string,
   planScope: Prisma.Sql,
+  options: { anyPlanStatus?: boolean } = {},
 ): Promise<NettingInput> {
+  // DX-399-ter (F1): el saldo de UN plan (estado de cuenta, pestaña Plan y
+  // ventana «Ver imputación») netea también un plan cancelado o rechazado:
+  // cancelar y devolver es el camino normal de una devolución. Ese plan no
+  // tiene imputaciones ni reparto, así que netearlo no mueve nada; el informe y
+  // el diagnóstico siguen solo con planes que se cobran.
+  const statusFilter = options.anyPlanStatus
+    ? Prisma.sql`TRUE`
+    : Prisma.sql`tp."status"::text NOT IN (${Prisma.join([...NON_BILLABLE_PLAN_STATUSES])})`;
   const rows = await tx.$queryRaw<FactRow[]>`
     SELECT p."id", tp."id" AS "planId", p."paidAt", p."createdAt", pt."id" AS "patientId",
            btrim(pt."firstName" || ' ' || pt."lastName") AS "patientName",
@@ -137,7 +146,7 @@ export async function loadNettingFacts(
        AND p."deletedAt" IS NULL
        AND p."treatmentPlanId" IS NOT NULL
        AND tp."deletedAt" IS NULL
-       AND tp."status"::text NOT IN (${Prisma.join([...NON_BILLABLE_PLAN_STATUSES])})
+       AND ${statusFilter}
        AND pt."deletedAt" IS NULL
        AND b."amount" - al."allocated" > 0
        AND ${planScope}`;

@@ -11,12 +11,12 @@
  * devoluciones y los traspasos de salida (REFUND, TRANSFER_OUT).
  *
  * Orden de consumo (DX-399-ter). Los asientos de salida se aplican en orden
- * cronológico (`createdAt`); cada uno solo puede consumir fuentes REGISTRADAS
- * antes que él (`createdAt <= el del asiento`, instantes del servidor: `paidAt`
- * es un día y puede ser anterior), sin bajar ninguna de 0, en este orden:
+ * cronológico (`createdAt`), sin bajar ninguna fuente de 0, en este orden:
  *   1. lo recibido por traspaso, del más reciente al más antiguo (`createdAt`
- *      y luego id);
- *   2. los abonos, del de `paidAt` más reciente al más antiguo (`createdAt` y
+ *      y luego id), SIN mirar si llegó antes o después de la salida;
+ *   2. los abonos REGISTRADOS antes que la salida (`createdAt <= el del
+ *      asiento`, instantes del servidor: `paidAt` es un día y puede ser
+ *      anterior), del de `paidAt` más reciente al más antiguo (`createdAt` y
  *      luego id): el LIFO de DX-399, sin cambios.
  * Lo que no encuentre fuente se descarta (no es dinero a cuenta de ninguna).
  *
@@ -29,6 +29,14 @@
  * es más antiguo, y el ítem quedaría pendiente. Nunca se reparte dinero que ya
  * salió: lo que la regla deja a los abonos es como mucho Σ sin imputar −
  * (salidas − recibido por traspaso), que no pasa de lo que el plan tiene.
+ *
+ * Por qué lo recibido no mira la fecha (F2): un traspaso de ida y vuelta (P
+ * traspasa 30 a Q y Q se los devuelve) dejaría la salida de P cargada al
+ * abono y el ítem siguiente «pendiente» con el saldo en 0. Que un traspaso
+ * posterior la absorba no reparte dinero que no esté: la cota de arriba usa
+ * todo lo recibido, y los asientos son inmutables (ni se anulan ni se borran).
+ * Los abonos sí miran la fecha: un abono posterior es dinero nuevo para ítems
+ * y su excedente no estaba cuando salió el dinero.
  * Un plan sin traspasos recibidos da exactamente lo de DX-399. Todo en
  * céntimos enteros.
  */
@@ -124,13 +132,11 @@ export function netCredit(
     const before = (x: { createdAt: Date }) =>
       x.createdAt.getTime() <= entry.createdAt.getTime();
     let remaining = entry.cents;
-    // 1. Lo recibido por traspaso, del más reciente al más antiguo.
-    const transfers = (transfersOf.get(entry.planId) ?? [])
-      .filter(before)
-      .sort(
-        (a, b) =>
-          b.createdAt.getTime() - a.createdAt.getTime() || byIdDesc(a, b),
-      );
+    // 1. Lo recibido por traspaso, del más reciente al más antiguo, aunque
+    //    llegara DESPUÉS de la salida (F2, ver la cabecera).
+    const transfers = [...(transfersOf.get(entry.planId) ?? [])].sort(
+      (a, b) => b.createdAt.getTime() - a.createdAt.getTime() || byIdDesc(a, b),
+    );
     for (const t of transfers) {
       if (remaining <= 0) break;
       const left = inLeft.get(t.id) as number;

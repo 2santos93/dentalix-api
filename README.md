@@ -5756,16 +5756,20 @@ npm run credit-netting:report -- --tenant <uuid>   # una clínica
 ```
 
 - **Orden de consumo (DX-399-ter).** Cada devolución o traspaso de salida, en
-  orden cronológico, consume solo fuentes registradas antes que él: primero lo
-  que el plan recibió por traspaso (TRANSFER_IN, del más reciente al más
-  antiguo), que no se puede imputar a ítems, y después el excedente de los
-  abonos (del `paidAt` más reciente al más antiguo, el LIFO de DX-399). Así un
+  orden cronológico, consume primero lo que el plan recibió por traspaso
+  (TRANSFER_IN, del más reciente al más antiguo, llegara antes o después de la
+  salida: un traspaso de ida y vuelta no deja nada pendiente), que no se puede
+  imputar a ítems, y después el excedente de los abonos registrados antes que
+  ella (del `paidAt` más reciente al más antiguo, el LIFO de DX-399). Así un
   ítem nuevo no queda pendiente con el saldo del plan en 0. Un plan sin
   traspasos recibidos da lo de siempre. El diagnóstico tampoco lista lo que
   absorbió un traspaso recibido.
 - El estado de cuenta y la pestaña del plan (`GET /treatment-plans/:id/balance`,
-  `unallocated`) dan «Sin imputar» NETO, la misma cifra que el informe y la
-  ventana «Ver imputación» (mismo contrato, solo cambia el valor).
+  `unallocated`) dan «Sin imputar» NETO, la misma cifra que el informe y que
+  `onAccount` de la ventana «Ver imputación», también en un plan cancelado o
+  rechazado (cancelar y devolver).
+- Límite conocido: lo recibido por traspaso no cubre ítems; con un ítem mayor
+  que el excedente de los abonos queda pendiente aunque Cartera dé 0.
 
 ## Despliegue: roles de la BD (DX-113)
 

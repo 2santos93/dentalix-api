@@ -387,8 +387,8 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
         const snapshot = await readPlanBalanceSnapshotIn(tx, tenantId, planId);
         if (!snapshot) return null;
         // DX-399-ter: «Sin imputar» neto. La MISMA cascada del informe y de la
-        // ventana, en la misma foto (RepeatableRead). Un plan que no se cobra
-        // no tiene abonos candidatos: 0, igual que en la ventana.
+        // ventana, en la misma foto (RepeatableRead), también para un plan
+        // cancelado o rechazado (F1).
         const { totalCents } = await this.planCreditOut(tx, tenantId, planId);
         return { ...snapshot, creditOutCents: totalCents };
       },
@@ -659,11 +659,10 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
                 paymentId,
               )
             : [];
+        // DX-399-ter (F1): también en un plan cancelado o rechazado, para que
+        // «a cuenta» diga lo mismo que el estado de cuenta.
         const creditOutCents =
-          target.treatmentPlanId &&
-          target.base &&
-          target.planStatus &&
-          isPlanBillable(target.planStatus)
+          target.treatmentPlanId && target.base
             ? await this.creditOutOf(
                 tx,
                 tenantId,
@@ -691,6 +690,9 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
   /**
    * La cascada de `credit-netting` del plan entero (la MISMA regla del informe):
    * lo devuelto o traspasado que se atribuye a cada abono y el total atribuido.
+   * De UN plan, sea cual sea su estado (DX-399-ter, F1): un plan que se cobra da
+   * lo mismo que en el informe; uno cancelado o rechazado (sin imputaciones ni
+   * reparto) netea sus devoluciones para el estado de cuenta y la ventana.
    */
   private async planCreditOut(
     tx: Prisma.TransactionClient,
@@ -701,6 +703,7 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
       tx,
       tenantId,
       Prisma.sql`tp."id" = ${planId}::uuid`,
+      { anyPlanStatus: true },
     );
     const byPayment = new Map<string, number>();
     let totalCents = 0;

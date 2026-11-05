@@ -209,11 +209,18 @@ async function payAfterCredit(planId: string, amount: number) {
  * par de asientos (sale del origen, entra en el destino). `createdAt` lo pone
  * la BD (ahora).
  */
-async function creditIn(planId: string, amount: number): Promise<void> {
+async function creditIn(
+  planId: string,
+  amount: number,
+  from?: string,
+): Promise<void> {
   const common = { tenantId, patientId, currency: 'EUR' };
-  // El origen tiene su propio abono sin imputar: de ahí sale el traspaso.
-  const sourcePlanId = await plan();
-  await pay(sourcePlanId, amount, at(0));
+  // Sin origen dado, uno con su propio abono sin imputar: de ahí sale el traspaso.
+  let sourcePlanId = from;
+  if (!sourcePlanId) {
+    sourcePlanId = await plan();
+    await pay(sourcePlanId, amount, at(0));
+  }
   const transfer = await raw.patientCreditTransfer.create({
     data: {
       ...common,
@@ -255,8 +262,10 @@ async function planBalanceCents(planId: string): Promise<number> {
                   JOIN "payments" p ON p."id" = b."paymentId"
                  WHERE b."treatmentPlanId" = ${planId}::uuid AND p."deletedAt" IS NULL), 0)
       - COALESCE((SELECT sum(i."price" - i."discount") FROM "treatment_plan_items" i
+                    JOIN "treatment_plans" tp ON tp."id" = i."planId"
                    WHERE i."planId" = ${planId}::uuid AND i."deletedAt" IS NULL
-                     AND i."status" IN ('ACCEPTED', 'DONE')), 0)
+                     AND i."status" IN ('ACCEPTED', 'DONE')
+                     AND tp."status" NOT IN ('CANCELLED', 'REJECTED')), 0)
       + COALESCE((SELECT sum(e."amount") FROM "patient_credit_entries" e
                    WHERE e."treatmentPlanId" = ${planId}::uuid), 0)
     ) * 100)::bigint AS "cents"`;
@@ -501,6 +510,56 @@ describe('La imputación automática descuenta lo devuelto o traspasado (DX-399-
     );
     expect(affected.map((p) => p.planId)).not.toContain(planId);
   });
+  it('DX-399-ter (F2), ida y vuelta: P traspasa 30 a Q, Q se los devuelve y un ítem nuevo de P queda cubierto (saldo 0, nada pendiente)', async () => {
+    const p = await plan();
+    const first = await item(p, 70);
+    const own = await pay(p, 100, at(0));
+    await rebalance(p);
+    const q = await plan();
+    await item(q, 20);
+    await pay(q, 20, at(0));
+    await rebalance(q);
+    // P -> Q 30 (sale del excedente de P: aún no había nada recibido) y Q -> P 30.
+    await creditIn(q, 30, p);
+    await creditIn(p, 30, q);
+    const second = await item(p, 30);
+    // Lo recibido de vuelta absorbe la salida anterior: el abono recupera sus 30.
+    expect(await rebalance(p)).toEqual({ allocatedCents: 3_000 });
+    expect(await allocatedTo(second)).toBe(3_000);
+    expect(await allocatedTo(first)).toBe(7_000);
+    expect(await allocatedBy(own)).toBe(10_000);
+    expect(await planBalanceCents(p)).toBe(0);
+    expect(await planBalanceCents(q)).toBe(0);
+    const affected = await inTenant(() =>
+      prisma.runWithTenant((tx) => findAffectedPlans(tx, tenantId)),
+    );
+    expect(affected.map((x) => x.planId)).not.toContain(p);
+    expect(affected.map((x) => x.planId)).not.toContain(q);
+  });
+
+  it('DX-399-ter (F1): plan cancelado y devuelto entero -> el estado de cuenta y la ventana dan 0 a cuenta, como Cartera', async () => {
+    const planId = await plan();
+    await item(planId, 100);
+    const paid = await pay(planId, 100, at(0));
+    await rebalance(planId);
+    // Cancelar libera las imputaciones (DX-109); luego se devuelve todo.
+    await raw.treatmentPlan.update({
+      where: { id: planId },
+      data: { status: 'CANCELLED' },
+    });
+    await raw.paymentAllocation.deleteMany({ where: { paymentId: paid } });
+    await creditOut(planId, 100);
+    const snapshot = await inTenant(() =>
+      allocationRepo.readPlanBalanceSnapshot(planId),
+    );
+    expect(snapshot?.creditOutCents).toBe(10_000);
+    const window = await inTenant(() =>
+      allocationRepo.readPaymentAllocations(paid),
+    );
+    expect(window?.creditOutCents).toBe(10_000);
+    expect(await planBalanceCents(planId)).toBe(0);
+  });
+
   it('diagnóstico (solo lectura): lista el plan que dejó el fallo y no el sano; reparar no es automático', async () => {
     const healthy = await plan();
     await item(healthy, 100);

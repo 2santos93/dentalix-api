@@ -168,17 +168,35 @@ describe('netCredit: el saldo recibido por traspaso absorbe primero (DX-399-ter)
     });
   });
 
-  it('un traspaso recibido DESPUÉS de la salida no la absorbe', () => {
+  it('F2: un traspaso recibido DESPUÉS de la salida también la absorbe (ida y vuelta): el abono recupera su excedente', () => {
     const result = netCredit(
       [pay('a', '2026-10-01', 3000)],
       [out('2026-10-10', 3000)],
       [tin('t', '2026-10-15', 3000)],
     );
     expect(result.byPayment.get('a')).toEqual({
+      netCents: 3000,
+      creditOutCents: 0,
+    });
+    expect(result.byPlan.get('plan-1')?.absorbedByTransfersInCents).toBe(3000);
+  });
+
+  it('F2: lo recibido después se gasta una sola vez: la salida posterior que lo vuelve a sacar cae en el abono', () => {
+    const result = netCredit(
+      [pay('a', '2026-10-01', 3000)],
+      [out('2026-10-10', 3000), out('2026-10-20', 3000)],
+      [tin('t', '2026-10-15', 3000)],
+    );
+    expect(result.byPayment.get('a')).toEqual({
       netCents: 0,
       creditOutCents: 3000,
     });
-    expect(result.byPlan.get('plan-1')?.absorbedByTransfersInCents).toBe(0);
+    expect(result.byPlan.get('plan-1')).toEqual({
+      outCents: 6000,
+      absorbedByTransfersInCents: 3000,
+      absorbedByPaymentsCents: 3000,
+      discardedCents: 0,
+    });
   });
 
   it('con varios traspasos recibidos, empieza por el más reciente; cada plan con los suyos', () => {
@@ -204,14 +222,20 @@ describe('netCredit: el saldo recibido por traspaso absorbe primero (DX-399-ter)
     });
   });
 
-  it('un plan sin traspasos da lo de siempre (lo mismo que netUnallocated sin entradas)', () => {
+  it('un plan sin traspasos da lo de siempre (LIFO de DX-399, calculado a mano)', () => {
     const payments = [
       pay('old', '2026-10-01', 4000),
       pay('new', '2026-10-02', 4000),
     ];
     const outs = [out('2026-10-10', 6000)];
     const result = netCredit(payments, outs, []);
-    expect(result.byPayment).toEqual(netUnallocated(payments, outs, []));
+    // 6000 salen: 4000 del más reciente y 2000 del antiguo.
+    expect(result.byPlan.get('plan-1')).toEqual({
+      outCents: 6000,
+      absorbedByTransfersInCents: 0,
+      absorbedByPaymentsCents: 6000,
+      discardedCents: 0,
+    });
     expect(result.byPayment.get('new')).toEqual({
       netCents: 0,
       creditOutCents: 4000,
