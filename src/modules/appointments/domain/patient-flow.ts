@@ -74,6 +74,8 @@ export const PATIENT_FLOW_MESSAGES = {
     'La llegada la marcan recepción, la asistente o la administración.',
   chairsideForbidden:
     '«En sillón» y «Listo para cobrar» los marcan el odontólogo, la asistente o la administración.',
+  chairsideOwnOnly:
+    'Solo puedes pasar al sillón o dejar lista para cobrar una cita tuya. La de otro odontólogo la marcan él, la asistente o la administración.',
   checkoutForbidden:
     'La salida de un paciente en la clínica la marcan recepción, la asistente o la administración.',
   notToday: 'La llegada solo se marca el día de la cita.',
@@ -125,6 +127,16 @@ function allowed(
   return role !== null && roles.includes(role);
 }
 
+/** DX-237: el odontólogo, solo en sus citas; la asistente y la administración, en cualquiera. */
+function checkChairside(input: TransitionInput): TransitionCheck {
+  if (!allowed(input.role, CHAIRSIDE_ROLES)) {
+    return forbidden(PATIENT_FLOW_MESSAGES.chairsideForbidden);
+  }
+  return input.role === ClinicRole.DENTIST && !input.ownAppointment
+    ? forbidden(PATIENT_FLOW_MESSAGES.chairsideOwnOnly)
+    : OK;
+}
+
 export interface TransitionInput {
   from: AppointmentStatus;
   to: AppointmentStatus;
@@ -139,6 +151,8 @@ export interface TransitionInput {
   arrived?: boolean;
   /** DX-273: motivo de la salida de COMPLETED (obligatorio para ella). */
   statusReason?: string | null;
+  /** DX-237: quien hace el cambio es el profesional de la cita. */
+  ownAppointment: boolean;
 }
 
 /** ¿El cambio saca la cita de COMPLETED? */
@@ -174,16 +188,12 @@ export function checkStatusTransition(input: TransitionInput): TransitionCheck {
       if (from !== AppointmentStatus.ARRIVED) {
         return conflict(PATIENT_FLOW_MESSAGES.seatFrom);
       }
-      return allowed(role, CHAIRSIDE_ROLES)
-        ? OK
-        : forbidden(PATIENT_FLOW_MESSAGES.chairsideForbidden);
+      return checkChairside(input);
     case AppointmentStatus.READY_FOR_CHECKOUT:
       if (from !== AppointmentStatus.IN_CHAIR) {
         return conflict(PATIENT_FLOW_MESSAGES.readyFrom);
       }
-      return allowed(role, CHAIRSIDE_ROLES)
-        ? OK
-        : forbidden(PATIENT_FLOW_MESSAGES.chairsideForbidden);
+      return checkChairside(input);
   }
 
   // Llegó (aunque luego se completara o se cancelara): nunca un no-show.

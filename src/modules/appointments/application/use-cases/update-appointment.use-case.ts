@@ -850,6 +850,7 @@ export class UpdateAppointmentUseCase {
       isToday,
       arrived: existing.arrivedAt !== null,
       statusReason,
+      ownAppointment: existing.providerId === auditContext?.actor.userId,
     });
     if (!verdict.ok) {
       if (verdict.kind === 'FORBIDDEN')
