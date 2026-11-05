@@ -702,7 +702,11 @@ describe('Horario de los profesionales por sede (e2e, DX-233)', () => {
           api().patch(`/api/v1/appointments/${appointment}`),
           reception.token,
         )
-          .send({ status: 'CANCELLED', cancelledByKind: 'PATIENT' })
+          .send({
+            status: 'CANCELLED',
+            cancelledByKind: 'PATIENT',
+            cancelReasonCode: 'ILLNESS',
+          })
           .expect(200);
       }
     });
