@@ -446,14 +446,15 @@ describe('firma a distancia en Postgres (DX-243)', () => {
     it('no se borra una solicitud (solo la purga de un superusuario)', async () => {
       const { id } = await issue(a);
       // Con SQL: la app ni siquiera tiene `delete` (no-hard-delete.ts); esto
-      // prueba la red de la base.
+      // prueba la red de la base: sin el privilegio DELETE (DX-425, REVOKE);
+      // el trigger sigue siendo la segunda red (solo un superusuario borra).
       await expect(
         asApp(
           a,
           (tx) =>
             tx.$executeRaw`DELETE FROM "signature_requests" WHERE "id" = ${id}::uuid`,
         ),
-      ).rejects.toThrow(/inalterable/);
+      ).rejects.toThrow(/permission denied/i);
     });
 
     it('el consentimiento firmado a distancia es inmutable y la firma del profesional, también', async () => {

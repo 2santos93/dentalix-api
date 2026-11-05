@@ -100,6 +100,7 @@ function setup() {
   const names = new FixedDocumentTypeNamesReader();
   const renderer = new ConsentDocumentRenderer(templates, consents, names);
   const repo = new InMemorySignatureRequestRepository({ p1: recipient() });
+  repo.dbClock = clock;
   const links: { to: string; vars: SignatureRequestEmailVars }[] = [];
   const codes: { to: string; vars: SignatureCodeEmailVars }[] = [];
   const cancelled: string[] = [];

@@ -1,0 +1,13 @@
+-- DX-425 (DB-061): un solo enlace vivo (sin firmar ni anular) por paciente y
+-- plantilla de consentimiento. La API anula el anterior al reenviar; este
+-- índice es la red cuando dos envíos corren a la vez (el segundo recibe 409).
+-- Parcial: solo los vivos, así que es pequeño. Los duplicados que hubiera ya
+-- los anuló la migración 20261121090000 (los más antiguos, sin borrar).
+-- CONCURRENTLY (DB-025): no bloquea las escrituras; por eso es la ÚNICA
+-- sentencia del fichero (Prisma la ejecuta fuera de transacción). Si falla
+-- (p. ej. un duplicado vivo nacido entre las dos migraciones) deja un índice
+-- INVALID: DROP INDEX CONCURRENTLY "signature_requests_live_consent_key",
+-- anular a mano los duplicados (los más antiguos),
+-- `prisma migrate resolve --rolled-back 20261121090200_dx425_signature_live_consent_idx`
+-- y reintentar.
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS "signature_requests_live_consent_key" ON "signature_requests" ("tenantId", "patientId", "templateId") WHERE "type" = 'CONSENT' AND "signedAt" IS NULL AND "revokedAt" IS NULL;

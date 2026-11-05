@@ -270,11 +270,21 @@ export interface SignatureRequestRepository {
    * intentos sobre un mismo enlace: nunca se evalúan más de 5 códigos.
    * `null` si la fila no existe (o es de otra clínica) o, DX-461, si el
    * paciente está archivado.
+   *
+   * `dbNow` (DX-425) es la hora de la BD en esta transacción
+   * (`transaction_timestamp()`, a milisegundos): la MISMA con la que el
+   * trigger `signature_requests_evidence_clock` sellará apertura, envío del
+   * código, verificación, bloqueo y firma. Las horas de evidencia que `decide`
+   * escribe (y los hashes que las sellan) salen de aquí, no del reloj de la
+   * app (que sigue mandando en la caducidad).
    */
   withLockedRequest<T>(
     id: string,
     evidence: PublicRequestEvidence,
-    decide: (request: SignatureRequestRecord) => {
+    decide: (
+      request: SignatureRequestRecord,
+      dbNow: Date,
+    ) => {
       write: LockedWrite | null;
       result: T;
     },

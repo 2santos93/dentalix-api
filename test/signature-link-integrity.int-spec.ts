@@ -157,7 +157,7 @@ function budgetInput(
     treatmentPlanId: planId,
     budgetContent: { total: '120.00', currency: 'USD' },
     budgetContentHash: 'c'.repeat(64),
-  } as CreateSignatureRequestRepoInput;
+  };
 }
 
 /** Inserta SIN pasar por `repo.create` (que revoca la anterior viva). */
@@ -245,6 +245,8 @@ describe('integridad del enlace de firma en la BD (DX-425)', () => {
           tenantId: a.tenantId,
           patientId: a.patientId,
           templateId: a.templateId,
+          signedAt: null,
+          revokedAt: null,
         },
         data: { revokedAt: new Date(), revokedById: a.userId },
       });
@@ -421,6 +423,114 @@ describe('integridad del enlace de firma en la BD (DX-425)', () => {
       }
     });
 
+    it('un superusuario (semillas, importaciones) conserva las horas que escribe', async () => {
+      const past = new Date('2001-02-03T04:05:06.000Z');
+      const { id } = await owner.signatureRequest.create({
+        data: {
+          tenantId: a.tenantId,
+          ...consentInput(a, {
+            createdAt: past,
+            expiresAt: new Date(past.getTime() + 3_600_000),
+          }),
+          openedAt: past,
+        },
+        select: { id: true },
+      });
+      const row = await owner.signatureRequest.findUniqueOrThrow({
+        where: { id },
+      });
+      expect(row.createdAt).toEqual(past);
+      expect(row.openedAt).toEqual(past);
+    });
+
+    it('el envío (createdAt) lo pone la BD aunque la app mande otra hora', async () => {
+      const before = await dbNow();
+      const { id } = await insertRaw(
+        a,
+        consentInput(a, { createdAt: new Date('2001-02-03T04:05:06.000Z') }),
+      );
+      const after = await dbNow();
+      const { createdAt } = await owner.signatureRequest.findUniqueOrThrow({
+        where: { id },
+      });
+      expect(createdAt.getTime()).toBeGreaterThanOrEqual(before.getTime());
+      expect(createdAt.getTime()).toBeLessThanOrEqual(after.getTime());
+    });
+
+    it('withLockedRequest entrega la hora de la BD y lo que se sella con ella coincide con lo guardado', async () => {
+      const { id } = await asClinic(a.tenantId, () =>
+        repo.create(consentInput(a)),
+      );
+      const seen: Date[] = [];
+      const step = (
+        patch: Prisma.SignatureRequestUpdateInput,
+        consent = false,
+      ) =>
+        asClinic(a.tenantId, () =>
+          repo.withLockedRequest(
+            id,
+            { ipAddress: '203.0.113.7', userAgent: 'int', requestId: null },
+            (r, dbNow) => {
+              seen.push(dbNow);
+              return {
+                write: {
+                  patch: Object.fromEntries(
+                    Object.entries(patch).map(([k, v]) => [
+                      k,
+                      v === true ? dbNow : v,
+                    ]),
+                  ),
+                  audit: [],
+                  ...(consent
+                    ? {
+                        consent: {
+                          templateId: r.templateId!,
+                          templateVersion: 1,
+                          treatmentPlanId: null,
+                          title: r.title,
+                          body: r.body,
+                          signerType: 'PATIENT' as const,
+                          signerName: r.signerName,
+                          signerDocument: null,
+                          professionalName: r.professionalName,
+                          patientSignature: 'iVBORw0KGgo=',
+                          contentHash: 'b'.repeat(64),
+                          signedAt: dbNow,
+                          recordedById: r.createdById,
+                          ipAddress: '203.0.113.7',
+                          userAgent: 'int',
+                          remoteChannel: 'EMAIL' as const,
+                          remoteDestinationMasked: r.destinationMasked,
+                          remoteSentAt: r.createdAt,
+                          remoteOpenedAt: r.openedAt!,
+                          remoteVerifiedAt: r.verifiedAt!,
+                        },
+                      }
+                    : {}),
+                },
+                result: null,
+              };
+            },
+          ),
+        );
+      await step({ openedAt: true as never });
+      await step({ verifiedAt: true as never });
+      await step({ signedAt: true as never }, true);
+      const row = await owner.signatureRequest.findUniqueOrThrow({
+        where: { id },
+      });
+      expect(row.openedAt).toEqual(seen[0]);
+      expect(row.verifiedAt).toEqual(seen[1]);
+      expect(row.signedAt).toEqual(seen[2]);
+      const consent = await owner.patientConsent.findFirstOrThrow({
+        where: { signatureRequestId: id },
+      });
+      expect(consent.signedAt).toEqual(row.signedAt);
+      expect(consent.remoteOpenedAt).toEqual(row.openedAt);
+      expect(consent.remoteVerifiedAt).toEqual(row.verifiedAt);
+      expect(consent.remoteSentAt).toEqual(row.createdAt);
+    });
+
     it('el bloqueo por intentos fallidos lleva la hora de la BD', async () => {
       const id = await fresh(a);
       const forged = new Date('2001-02-03T04:05:06.000Z');
@@ -465,14 +575,12 @@ describe('integridad del enlace de firma en la BD (DX-425)', () => {
 
   describe('firmar después de la caducidad (DB-062)', () => {
     it('la BD rechaza la firma con el enlace caducado aunque la app lo intente', async () => {
-      const hour = 3_600_000;
+      // Caduca en 1,5 s; el createdAt lo pone la BD (para la app), así que no
+      // se puede sembrar ya caducado: se espera a que pase.
       const id = (
         await insertRaw(
           a,
-          consentInput(a, {
-            createdAt: new Date(Date.now() - 3 * hour),
-            expiresAt: new Date(Date.now() - hour),
-          }),
+          consentInput(a, { expiresAt: new Date(Date.now() + 1500) }),
         )
       ).id;
       await asApp(a, (tx) =>
@@ -481,13 +589,14 @@ describe('integridad del enlace de firma en la BD (DX-425)', () => {
           data: { openedAt: new Date(), verifiedAt: new Date() },
         }),
       );
+      await new Promise((resolve) => setTimeout(resolve, 2000));
       await expect(
         asApp(a, (tx) =>
           tx.signatureRequest.update({
             where: { id },
             // Aunque la app «diga» que firmó antes de caducar, la hora la
             // pone la BD.
-            data: { signedAt: new Date(Date.now() - 2 * hour) },
+            data: { signedAt: new Date(Date.now() - 3_600_000) },
           }),
         ),
       ).rejects.toThrow(/signature_requests_signed_before_expiry_check/);
@@ -536,9 +645,7 @@ describe('integridad del enlace de firma en la BD (DX-425)', () => {
     it('la purga de un superusuario sigue pudiendo borrar', async () => {
       const id = await fresh(a);
       await owner.$executeRaw`DELETE FROM "signature_requests" WHERE "id" = ${id}::uuid`;
-      expect(
-        await owner.signatureRequest.count({ where: { id } }),
-      ).toBe(0);
+      expect(await owner.signatureRequest.count({ where: { id } })).toBe(0);
     });
   });
 

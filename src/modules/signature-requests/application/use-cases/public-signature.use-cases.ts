@@ -264,7 +264,7 @@ export class RequestSignatureCodeUseCase {
     const outcome = await this.repo.withLockedRequest<CodeOutcome>(
       ctx.request.id,
       evidence,
-      (request) => {
+      (request, dbNow) => {
         if (!isLinkUsable(request, now)) {
           return { write: null, result: { kind: 'INVALID' } };
         }
@@ -280,9 +280,11 @@ export class RequestSignatureCodeUseCase {
           patch: {
             codeHash: hmacSignatureCode(this.codeKey, request.id, code),
             codeExpiresAt: signatureCodeExpiry(now),
-            codeSentAt: now,
+            // DX-425: las horas de la evidencia son las de la BD (`dbNow`); el
+            // trigger las pone igual, esto solo las lleva a la respuesta.
+            codeSentAt: dbNow,
             codeSendCount: request.codeSendCount + 1,
-            openedAt: request.openedAt ?? now,
+            openedAt: request.openedAt ?? dbNow,
           },
           audit: [
             ...(request.openedAt
@@ -383,7 +385,7 @@ export class VerifySignatureCodeUseCase {
     const outcome = await this.repo.withLockedRequest<VerifyOutcome>(
       ctx.request.id,
       evidence,
-      (request) => {
+      (request, dbNow) => {
         if (!isLinkUsable(request, now)) {
           return { write: null, result: { kind: 'INVALID' } };
         }
@@ -407,7 +409,7 @@ export class VerifySignatureCodeUseCase {
               patch: {
                 codeHash: null,
                 codeExpiresAt: null,
-                verifiedAt: request.verifiedAt ?? now,
+                verifiedAt: request.verifiedAt ?? dbNow,
                 sessionHash: hashSignatureToken(session),
                 sessionExpiresAt,
               },
@@ -422,7 +424,7 @@ export class VerifySignatureCodeUseCase {
             write: {
               patch: {
                 failedAttempts,
-                lockedAt: now,
+                lockedAt: dbNow,
                 codeHash: null,
                 codeExpiresAt: null,
                 sessionHash: null,
@@ -691,7 +693,7 @@ export class SignPublicSignatureUseCase {
     const outcome = await this.repo.withLockedRequest<SignOutcome>(
       ctx.request.id,
       evidence,
-      (request) => {
+      (request, dbNow) => {
         if (!isLinkUsable(request, now)) {
           return { write: null, result: { kind: 'INVALID' } };
         }
@@ -716,7 +718,7 @@ export class SignPublicSignatureUseCase {
           signerDocument,
           professionalName: request.professionalName,
           patientSignature: signature,
-          signedAt: now,
+          signedAt: dbNow,
           channel: request.channel,
           destinationMasked: request.destinationMasked,
           sentAt: request.createdAt,
@@ -728,7 +730,7 @@ export class SignPublicSignatureUseCase {
         return {
           write: {
             patch: {
-              signedAt: now,
+              signedAt: dbNow,
               sessionHash: null,
               sessionExpiresAt: null,
               codeHash: null,
@@ -747,7 +749,7 @@ export class SignPublicSignatureUseCase {
               professionalName: request.professionalName,
               patientSignature: signature,
               contentHash,
-              signedAt: now,
+              signedAt: dbNow,
               recordedById: request.createdById,
               ipAddress: evidence.ipAddress,
               userAgent,
@@ -760,7 +762,7 @@ export class SignPublicSignatureUseCase {
           },
           result: {
             kind: 'SIGNED',
-            signedAt: now,
+            signedAt: dbNow,
             contentHash,
             signerDocument,
           },
@@ -800,7 +802,7 @@ export class SignPublicSignatureUseCase {
       outcome = await this.repo.withLockedRequest<SignOutcome>(
         ctx.request.id,
         evidence,
-        (request) => {
+        (request, dbNow) => {
           if (!isLinkUsable(request, now)) {
             return { write: null, result: { kind: 'INVALID' } };
           }
@@ -819,12 +821,12 @@ export class SignPublicSignatureUseCase {
             contentHash: request.budgetContentHash,
             signerName: request.signerName,
             signature,
-            acceptedAt: now,
+            acceptedAt: dbNow,
           });
           return {
             write: {
               patch: {
-                signedAt: now,
+                signedAt: dbNow,
                 sessionHash: null,
                 sessionExpiresAt: null,
                 codeHash: null,
@@ -840,7 +842,7 @@ export class SignPublicSignatureUseCase {
                 content,
                 contentHash: request.budgetContentHash,
                 acceptanceHash,
-                acceptedAt: now,
+                acceptedAt: dbNow,
                 acceptedById: request.createdById,
                 ipAddress: evidence.ipAddress,
                 userAgent: evidence.userAgent?.slice(0, 512) ?? null,
@@ -853,7 +855,7 @@ export class SignPublicSignatureUseCase {
             },
             result: {
               kind: 'SIGNED',
-              signedAt: now,
+              signedAt: dbNow,
               contentHash: acceptanceHash,
               signerDocument: request.signerDocument,
             },

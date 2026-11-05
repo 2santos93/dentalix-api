@@ -68,6 +68,8 @@ export class InMemorySignatureRequestRepository implements SignatureRequestRepos
     hourCycle: 'h12',
   };
   private nextId = 1;
+  /** DX-425: la hora de la BD; los specs la igualan a su reloj. */
+  dbClock: () => Date = () => new Date();
 
   constructor(
     readonly recipients: Record<string, SignatureRecipientContext> = {},
@@ -215,14 +217,17 @@ export class InMemorySignatureRequestRepository implements SignatureRequestRepos
   withLockedRequest<T>(
     id: string,
     evidence: PublicRequestEvidence,
-    decide: (request: SignatureRequestRecord) => {
+    decide: (
+      request: SignatureRequestRecord,
+      dbNow: Date,
+    ) => {
       write: LockedWrite | null;
       result: T;
     },
   ): Promise<T | null> {
     const row = this.rows.find((r) => r.id === id);
     if (!row) return Promise.resolve(null);
-    const { write, result } = decide({ ...row });
+    const { write, result } = decide({ ...row }, this.dbClock());
     if (write?.budget) {
       const { stillMatches, ...acceptance } = write.budget;
       const budget = this.budgets.get(acceptance.planId);
