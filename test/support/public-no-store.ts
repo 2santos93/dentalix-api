@@ -9,7 +9,9 @@
 export const PUBLIC_WITHOUT_NO_STORE: RegExp[] = [
   /^GET \/$/,
   /^GET \/health(\/ready)?$/,
-  /^(GET|POST) \/files\//,
+  /^GET \/files\/(avatars|logos)\/:name$/,
+  /^GET \/files\/signed$/,
+  /^POST \/files\/uploads$/,
 ];
 
 export function isNoStoreExempt(routeKey: string): boolean {

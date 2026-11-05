@@ -15,6 +15,10 @@ import {
   REGIONAL_CARACAS_FIXTURE,
   registerBody,
 } from './support/location-fixtures';
+import {
+  RATE_LIMIT_CONFIG,
+  loadRateLimitConfig,
+} from '../src/shared/security/rate-limit.config';
 import { purgeTenantsBySubdomain } from './support/tenant-purge';
 
 // SEC-064: TODA ruta pública de la API (enlaces por token del paciente, login,
@@ -108,10 +112,7 @@ describe('Rutas públicas con no-store (e2e, SEC-064)', () => {
               .post(url)
               .send({ email: `x${DOMAIN}` });
       const res = await call.set('X-Tenant-Host', hostFor(SUB));
-      // Un 429 lo corta el limitador antes de cualquier interceptor: no dice
-      // nada de la ruta, así que se declara como fallo en vez de pasar.
       if (
-        res.status === 429 ||
         res.headers['cache-control'] !== 'no-store' ||
         res.headers['pragma'] !== 'no-cache'
       ) {
@@ -152,7 +153,32 @@ describe('Rutas públicas con no-store (e2e, SEC-064)', () => {
     expect(login.headers['pragma']).toBe('no-cache');
   });
 
-  it('las rutas con sesión NO cambian de política (no se les añade no-store por esto)', async () => {
+  it('el 429 del limitador (que corta antes de los interceptores) también lleva no-store', async () => {
+    const limited = await createE2eApp({
+      override: (builder) =>
+        builder.overrideProvider(RATE_LIMIT_CONFIG).useValue({
+          ...loadRateLimitConfig((key) => process.env[key]),
+          'slot-offer': { limit: 1, ttlMs: 60_000 },
+        }),
+    });
+    try {
+      const get = () =>
+        request(limited.getHttpServer())
+          .get(`/api/v1/public/slot-offers/${FAKE_TOKEN}`)
+          .set('X-Tenant-Host', hostFor(SUB));
+      const first = await get();
+      expect(first.status).toBe(404);
+      const blocked = await get();
+      expect(blocked.status).toBe(429);
+      expect(blocked.headers['retry-after']).toBeDefined();
+      expect(blocked.headers['cache-control']).toBe('no-store');
+      expect(blocked.headers['pragma']).toBe('no-cache');
+    } finally {
+      await limited.close();
+    }
+  });
+
+  it('una ruta exenta (la salud, sondas del orquestador) no cambia de política', async () => {
     const res = await http().get('/api/v1/health').expect(200);
     expect(res.headers['cache-control']).toBeUndefined();
   });

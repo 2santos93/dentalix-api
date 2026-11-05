@@ -499,22 +499,25 @@ describe('oferta de hueco por enlace (int, DX-435)', () => {
       expect(seen.state).toBe('ACCEPTED');
       expect(seen.offer?.patientFirstName).toBeTruthy();
 
-      // Vencido el plazo: igual que un enlace caducado, sin datos del hueco.
+      // Vencido el plazo: IGUAL que la respuesta de un enlace caducado de
+      // verdad (una oferta PENDING pasada su expiresAt), sin datos del hueco.
       const lapsed = cases(lateClock(at('15:30'), 7 * DAY_MS));
-      const expired = await inClinic(a, () => lapsed.get.execute(first.token));
-      expect(expired).toMatchObject({
-        state: 'EXPIRED',
-        message: 'Este enlace ya no está disponible',
-        offer: null,
+      const pendingOffer = await offerToEntry(a, 1);
+      await owner.waitlistOffer.update({
+        where: { id: pendingOffer.offerId },
+        data: { expiresAt: new Date(Date.now() - 60_000) },
       });
+      const reference = await inClinic(a, () =>
+        lapsed.get.execute(pendingOffer.token),
+      );
+      expect(reference).toMatchObject({ state: 'EXPIRED', offer: null });
+      const expired = await inClinic(a, () => lapsed.get.execute(first.token));
+      expect(expired).toEqual(reference);
       for (const run of [
         () => lapsed.accept.execute(first.token, META),
         () => lapsed.decline.execute(first.token, META),
       ]) {
-        expect(await inClinic(a, run)).toMatchObject({
-          state: 'EXPIRED',
-          offer: null,
-        });
+        expect(await inClinic(a, run)).toEqual(reference);
       }
       // No se escribe nada: la oferta sigue ACCEPTED y la cita, una.
       expect(await outcomeOf(first.offerId)).toBe('ACCEPTED');
