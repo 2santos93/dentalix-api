@@ -7,6 +7,7 @@ import {
   Req,
   Res,
   UnauthorizedException,
+  UseInterceptors,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { currentRequestId } from '../../../shared/observability/request-context';
@@ -58,6 +59,7 @@ import { Audit } from '../../audit/presentation/audit.decorator';
 import { LoginLockoutService } from '../application/login-lockout.service';
 import { lockedOr } from './locked-response';
 import { MfaChallengeDto } from './dto/login-mfa.dto';
+import { NoStoreHeadersInterceptor } from '../../../shared/http/no-store-headers.interceptor';
 
 /** SEC-008: respuesta del login break-glass (solo access token). */
 interface BreakGlassResponse {
@@ -84,6 +86,7 @@ export const REGISTER_ACCEPTED_MESSAGE =
   'Te enviamos un correo para confirmar el registro. Abre el enlace para activar tu clínica (revisa también la carpeta de spam).';
 
 @ApiTags('auth')
+@UseInterceptors(NoStoreHeadersInterceptor)
 @Controller('auth')
 export class AuthController {
   constructor(

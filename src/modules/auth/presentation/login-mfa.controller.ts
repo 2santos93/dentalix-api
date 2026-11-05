@@ -6,6 +6,7 @@ import {
   Post,
   Req,
   Res,
+  UseInterceptors,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import {
@@ -36,6 +37,7 @@ import {
   DeliveredSession,
   SessionCookieService,
 } from './session-cookie.service';
+import { NoStoreHeadersInterceptor } from '../../../shared/http/no-store-headers.interceptor';
 
 type HostRequest = TenantHostRequest & { ip?: string };
 
@@ -59,6 +61,7 @@ const TOO_MANY = {
  * un superadmin (DX-021-bis), en el apex. Rate limit `auth` por IP además del contador por usuario.
  */
 @ApiTags('auth')
+@UseInterceptors(NoStoreHeadersInterceptor)
 @Controller('auth/login/mfa')
 export class LoginMfaController {
   constructor(

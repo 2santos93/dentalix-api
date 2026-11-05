@@ -10,6 +10,9 @@ import {
   linkOfferExpiresAt,
   linkOfferWindowOpen,
   loadLinkOfferConfig,
+  ACCEPTED_OFFER_VISIBLE_DAYS,
+  acceptedOfferLapsed,
+  acceptedOfferVisibleUntil,
   publicSlotOfferState,
 } from './slot-offer-link';
 
@@ -67,6 +70,64 @@ describe('enlace de la oferta de hueco (DX-435)', () => {
       expect(() => loadLinkOfferConfig(() => '-1')).toThrow();
       expect(() => loadLinkOfferConfig(() => '2000')).toThrow();
       expect(() => loadLinkOfferConfig(() => 'x')).toThrow();
+    });
+  });
+
+  describe('plazo de una oferta aceptada (SEC-064)', () => {
+    const DAY = 24 * 60 * MIN;
+    const appointmentEnd = new Date(slotStart.getTime() + 30 * MIN);
+    const accepted = (outcomeAt: Date | null) => ({
+      outcome: 'ACCEPTED' as const,
+      outcomeAt,
+      appointmentEnd,
+    });
+
+    it('el plazo es de 7 días', () => {
+      expect(ACCEPTED_OFFER_VISIBLE_DAYS).toBe(7);
+    });
+
+    it('cuenta desde la cita si esta termina después de aceptar', () => {
+      const acceptedAt = new Date(slotStart.getTime() - 2 * DAY);
+      const until = acceptedOfferVisibleUntil(accepted(acceptedAt));
+      expect(until.getTime()).toBe(appointmentEnd.getTime() + 7 * DAY);
+    });
+
+    it('cuenta desde que se aceptó si es posterior a la cita', () => {
+      const acceptedAt = new Date(appointmentEnd.getTime() + 3 * DAY);
+      const until = acceptedOfferVisibleUntil(accepted(acceptedAt));
+      expect(until.getTime()).toBe(acceptedAt.getTime() + 7 * DAY);
+    });
+
+    it('sin fecha de resolución cuenta desde la cita', () => {
+      expect(acceptedOfferVisibleUntil(accepted(null)).getTime()).toBe(
+        appointmentEnd.getTime() + 7 * DAY,
+      );
+    });
+
+    it('vigente hasta el último instante y caducada desde el límite', () => {
+      const offer = accepted(new Date(slotStart.getTime() - DAY));
+      const until = acceptedOfferVisibleUntil(offer);
+      expect(acceptedOfferLapsed(offer, new Date(until.getTime() - 1))).toBe(
+        false,
+      );
+      expect(acceptedOfferLapsed(offer, until)).toBe(true);
+    });
+
+    it('solo las aceptadas caducan por plazo', () => {
+      const later = new Date(appointmentEnd.getTime() + 30 * DAY);
+      for (const outcome of [
+        'PENDING',
+        'DECLINED',
+        'EXPIRED',
+        'TAKEN_BY_OTHER',
+      ] as const) {
+        expect(
+          acceptedOfferLapsed(
+            { outcome, outcomeAt: null, appointmentEnd },
+            later,
+          ),
+        ).toBe(false);
+      }
     });
   });
 

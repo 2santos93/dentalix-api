@@ -25,6 +25,7 @@ import {
   type PublicSlotOfferView,
 } from '../application/use-cases/public-slot-offers.use-cases';
 import { PublicSlotOfferDto } from './dto/public-slot-offer.dto';
+import { NoStoreHeadersInterceptor } from '../../../shared/http/no-store-headers.interceptor';
 
 function requestMeta(
   req: TenantHostRequest & { ip?: string },
@@ -41,7 +42,7 @@ function requestMeta(
 // El tenant sale SOLO del host (PublicTenantContextInterceptor, invariante de
 // DX-207); la RLS hace invisible un token de otra clínica (→ 404 genérico).
 @ApiTags('public')
-@UseInterceptors(PublicTenantContextInterceptor)
+@UseInterceptors(NoStoreHeadersInterceptor, PublicTenantContextInterceptor)
 // Por IP y por token: frena la enumeración y el martilleo de un enlace.
 @RateLimit('slot-offer', 'slot-token')
 @Controller('public/slot-offers')
