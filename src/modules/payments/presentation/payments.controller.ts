@@ -33,6 +33,7 @@ import {
   ApiOperation,
   ApiProduces,
   ApiTags,
+  ApiServiceUnavailableResponse,
   ApiUnprocessableEntityResponse,
 } from '@nestjs/swagger';
 import type { Response } from 'express';
@@ -405,8 +406,8 @@ export class PaymentsController {
       '`duplicateReferenceReason`. `code: SPLIT_PAYMENT_EXCEEDS_BALANCE` (con `total`, `pending` —nunca bajo 0—, ' +
       '`excess` —lo que este cobro supera lo pendiente— y `currency`, la del plan) si el total supera lo pendiente: ' +
       'se confirma con `confirmCreditBalance`. ' +
-      '`code: SPLIT_PAYMENT_BALANCE_CHANGED` si, sin esa confirmación, otro abono entró al plan mientras ' +
-      'se registraba el cobro: no se registra nada y se repite la petición (misma clave). ' +
+      '`code: SPLIT_PAYMENT_BALANCE_CHANGED` si, sin esa confirmación, otro movimiento del plan (un abono, un traspaso o una devolución de saldo a favor) ' +
+      'entró mientras se registraba el cobro: no se registra nada y se repite la petición (misma clave). ' +
       'Sin caja abierta, si la clínica la exige para el efectivo (DX-027).',
   })
   @ApiBadRequestResponse({
@@ -422,6 +423,13 @@ export class PaymentsController {
   @ApiUnprocessableEntityResponse({
     description:
       'La Idempotency-Key ya se usó con otro plan, otro cuerpo o un abono suelto: genera una clave nueva.',
+  })
+  @ApiServiceUnavailableResponse({
+    description:
+      '`code: SPLIT_PAYMENT_BALANCE_UNAVAILABLE` (DX-463): sin `confirmCreditBalance`, no se pudo leer lo pendiente ' +
+      'del plan ANTES de la transacción (fallo de lectura o proveedor de tasas fuera de plazo), así que no se puede comprobar si el total ' +
+      'lo supera. No se registra nada: se repite la petición (misma clave) en un momento. ' +
+      'Un abono del plan «sin tasa» no lo provoca: el excedente se comprueba contra lo conocido.',
   })
   async createSplit(
     @Param('id', ParseUUIDPipe) id: string,

@@ -5,6 +5,7 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import { IDEMPOTENCY_KEY_INVALID_MESSAGE } from '../../../../shared/validation/idempotency-key';
 import { PAYMENT_REPOSITORY } from '../../domain/ports/payment-repository.port';
 import { PAYMENT_CLOCK, type PaymentClock } from './void-payment.use-case';
 import type { PaymentRepository } from '../../domain/ports/payment-repository.port';
@@ -72,7 +73,7 @@ export class RecordOpeningBalancePaymentUseCase {
     const requestFingerprint = paymentRequestFingerprint(target, input);
     if (key !== undefined) {
       if (!UUID_RE.test(key)) {
-        throw new BadRequestException('Idempotency-Key must be a UUID');
+        throw new BadRequestException(IDEMPOTENCY_KEY_INVALID_MESSAGE);
       }
       const existing = await this.repo.findByIdempotencyKey(key);
       if (existing) {

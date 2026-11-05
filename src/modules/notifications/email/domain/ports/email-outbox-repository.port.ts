@@ -1,3 +1,4 @@
+import type { Prisma } from '@prisma/client';
 import { EmailTemplateName } from '../email-message';
 
 export const EMAIL_OUTBOX_REPOSITORY = Symbol('EMAIL_OUTBOX_REPOSITORY');
@@ -48,6 +49,16 @@ export type OutboxSettlement =
 
 export interface EmailOutboxRepository {
   insert(row: NewOutboxEmail): Promise<{ id: string }>;
+
+  /**
+   * DX-463: como `insert`, pero dentro de la transacción de quien llama (ya
+   * bajo la RLS de la clínica): el email y lo que lo motiva confirman o se
+   * deshacen juntos.
+   */
+  insertInTx(
+    tx: Prisma.TransactionClient,
+    row: NewOutboxEmail,
+  ): Promise<{ id: string }>;
 
   /**
    * Encola un email de plataforma SOLO si cabe en el tope de su destinatario

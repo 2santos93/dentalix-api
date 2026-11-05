@@ -28,6 +28,7 @@ import {
   ApiUnprocessableEntityResponse,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
+import { IDEMPOTENCY_KEY_INVALID_MESSAGE } from '../../../shared/validation/idempotency-key';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import { Roles } from '../../auth/presentation/guards/roles.decorator';
 import { POSTOP_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
@@ -132,9 +133,7 @@ export class AppointmentPostOpController {
     @Headers('idempotency-key') idempotencyKey: string | undefined,
   ): Promise<PostOpDeliveryCreatedDto> {
     if (idempotencyKey !== undefined && !isUUID(idempotencyKey)) {
-      throw new BadRequestException(
-        'La Idempotency-Key debe ser un UUID: genera uno nuevo por cada clic.',
-      );
+      throw new BadRequestException(IDEMPOTENCY_KEY_INVALID_MESSAGE);
     }
     // Como el enlace de confirmación (DX-005): el host entero se valida
     // antes de registrar nada; uno manipulado no arma un enlace hacia otro

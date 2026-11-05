@@ -6,6 +6,7 @@ import { InMemoryFileStorage } from '../src/shared/storage/__fixtures__/in-memor
 import { PrismaSignatureRequestRepository } from '../src/modules/signature-requests/infrastructure/prisma-signature-request.repository';
 import { PrismaPatientConsentRepository } from '../src/modules/consents/infrastructure/repositories/prisma-patient-consent.repository';
 import { PrismaSignedConsentPdfRepository } from '../src/modules/consents/infrastructure/repositories/prisma-signed-consent-pdf.repository';
+import { PrismaEmailOutboxRepository } from '../src/modules/notifications/email/infrastructure/repositories/prisma-email-outbox.repository';
 import { PrismaSignedPdfCopyRepository } from '../src/modules/consents/infrastructure/repositories/prisma-signed-pdf-copy.repository';
 import { PdfkitSignedConsentPdfRenderer } from '../src/modules/consents/infrastructure/pdf/signed-consent-pdf.renderer';
 import {
@@ -17,6 +18,7 @@ import {
 } from '../src/modules/consents/application/signed-consent-pdf.service';
 import {
   BackfillSignedConsentPdfs,
+  DownloadSignedPdfCopyUseCase,
   SIGNED_PDF_COPY_JOB,
   SendSignedPdfCopyJob,
   SignedPdfCopyQueue,
@@ -109,10 +111,14 @@ const emails: {
 const sender = new SignedPdfCopySender(
   copies,
   {
-    send: (input) => {
-      emails.push(input);
-      return Promise.resolve();
-    },
+    prepare: (input) =>
+      Promise.resolve({
+        insert: () => {
+          emails.push(input);
+          return Promise.resolve({ id: randomUUID() });
+        },
+        kick: () => undefined,
+      }),
   },
   { forTenant: () => Promise.resolve('http://int.localhost:3001') },
   tenantContext,
@@ -120,6 +126,14 @@ const sender = new SignedPdfCopySender(
   () => new Date(),
 );
 const sendJob = new SendSignedPdfCopyJob(copies, sender);
+/** DX-463: un outbox que falla al encolar. */
+const failingEmail = () => ({
+  prepare: () =>
+    Promise.resolve({
+      insert: () => Promise.reject(new Error('outbox caído')),
+      kick: () => undefined,
+    }),
+});
 const META = { requestId: null, ip: '203.0.113.9', userAgent: 'int-public' };
 
 const jobContext = (tenantId: string): JobContext => ({
@@ -330,6 +344,121 @@ describe('Copia del PDF firmado en Postgres (DX-443)', () => {
     expect(
       await owner.signedConsentPdfLink.count({ where: { consentId } }),
     ).toBe(4);
+  });
+
+  // DX-463 (BE-059): si encolar el email del reenvío falla, el enlace
+  // anterior sigue sirviendo (antes se revocaba primero y el paciente se
+  // quedaba sin enlace ni email).
+  it('DX-463: si encolar el email del reenvío falla, el enlace anterior sigue válido y no queda uno nuevo', async () => {
+    const { consentId, token } = await readyWithCopy(a);
+    const target = await asClinic(a.tenantId, () =>
+      copies.loadTarget(consentId, a.patientId),
+    );
+    const failing = new SignedPdfCopySender(
+      copies,
+      failingEmail(),
+      { forTenant: () => Promise.resolve('http://int.localhost:3001') },
+      tenantContext,
+      { ttlHours: 168 },
+      () => new Date(),
+    );
+    await expect(
+      asClinic(a.tenantId, () => failing.send(target!, a.userId)),
+    ).rejects.toThrow('outbox caído');
+    const rows = await owner.signedConsentPdfLink.findMany({
+      where: { consentId },
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ usedAt: null, revokedAt: null });
+    const old = await asClinic(a.tenantId, () =>
+      copies.findLinkByTokenHash(hashSignedPdfCopyToken(token)),
+    );
+    const outcome = await asClinic(a.tenantId, () =>
+      copies.consumeLink(old!.id, new Date(), META),
+    );
+    expect(outcome.kind).toBe('CONSUMED');
+  });
+
+  it('DX-463: el email se encola en la misma transacción que el enlace: si algo falla después de insertarlo, tampoco queda en el outbox', async () => {
+    const { consentId } = await readyWithCopy(a);
+    const outbox = new PrismaEmailOutboxRepository(prisma);
+    const issue = (fail: boolean) =>
+      asClinic(a.tenantId, () =>
+        copies.issueLink({
+          id: randomUUID(),
+          consentId,
+          patientId: a.patientId,
+          tokenHash: randomUUID().replace(/-/g, '').padEnd(64, '0'),
+          expiresAt: new Date(Date.now() + 3600_000),
+          createdById: a.userId,
+          now: new Date(),
+          enqueue: async (tx) => {
+            await outbox.insertInTx(tx, {
+              tenantId: a.tenantId,
+              template: 'signed-consent-copy',
+              toHash: 'a'.repeat(64),
+              toMasked: 'ma***@example.com',
+              referenceId: randomUUID(),
+              payload: Buffer.from('cifrado'),
+            });
+            if (fail) throw new Error('falló tras encolar');
+          },
+        }),
+      );
+    const outboxRows = () =>
+      owner.emailOutbox.count({
+        where: { tenantId: a.tenantId, toHash: 'a'.repeat(64) },
+      });
+    await expect(issue(true)).rejects.toThrow('falló tras encolar');
+    expect(await outboxRows()).toBe(0);
+    expect(
+      await owner.signedConsentPdfLink.count({
+        where: { consentId, usedAt: null, revokedAt: null },
+      }),
+    ).toBe(1);
+    await issue(false);
+    expect(await outboxRows()).toBe(1);
+  });
+
+  // DX-463 (BE-059): si la URL firmada no se pudo generar, el enlace no se
+  // gasta ni se audita la descarga: el paciente reintenta con el mismo enlace.
+  it('DX-463: si generar la URL de descarga falla, el enlace no se gasta ni se audita', async () => {
+    const { consentId, token } = await readyWithCopy(a);
+    const broken = new DownloadSignedPdfCopyUseCase(
+      copies,
+      tenantContext,
+      () => new Date(),
+      {
+        getSignedUrl: () => Promise.reject(new Error('storage caído')),
+      },
+    );
+    await expect(
+      asClinic(a.tenantId, () => broken.execute(token, META)),
+    ).rejects.toThrow('storage caído');
+    const link = await owner.signedConsentPdfLink.findFirstOrThrow({
+      where: { consentId },
+    });
+    expect(link.usedAt).toBeNull();
+    expect(
+      await owner.auditEvent.count({
+        where: { resourceId: consentId, action: 'EXPORT' },
+      }),
+    ).toBe(0);
+    const working = new DownloadSignedPdfCopyUseCase(
+      copies,
+      tenantContext,
+      () => new Date(),
+      { getSignedUrl: () => Promise.resolve('http://files.local/x?sig=1') },
+    );
+    const result = await asClinic(a.tenantId, () =>
+      working.execute(token, META),
+    );
+    expect(result.url).toBe('http://files.local/x?sig=1');
+    expect(
+      await owner.signedConsentPdfLink.findFirstOrThrow({
+        where: { consentId },
+      }),
+    ).toMatchObject({ usedAt: expect.any(Date) as Date });
   });
 
   it('RLS: desde otra clínica el enlace y el consentimiento no existen', async () => {
