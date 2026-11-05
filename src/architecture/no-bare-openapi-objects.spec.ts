@@ -17,7 +17,8 @@ import { FREE_MAP_EXCEPTIONS, findBareObjects } from './openapi-bare-objects';
  */
 const SRC = join(__dirname, '..');
 
-const BARE_TYPE = /\btype\s*:\s*\[?\s*Object\s*\]?\s*[,}\n]/;
+const BARE_TYPE =
+  /\btype\s*:\s*(?:\(\s*\)\s*=>\s*)?\[?\s*Object\s*\]?\s*(?:[,}]|$)/;
 
 export function declaresBareObject(line: string): boolean {
   return BARE_TYPE.test(line);
@@ -51,6 +52,9 @@ describe('sin objetos vacíos en el contrato OpenAPI (DX-539)', () => {
   it('autoprueba de la guarda de fuente', () => {
     expect(declaresBareObject('    type: Object,')).toBe(true);
     expect(declaresBareObject('@ApiProperty({ type: [Object] })')).toBe(true);
+    expect(declaresBareObject('    type: Object')).toBe(true);
+    expect(declaresBareObject('    type: () => Object,')).toBe(true);
+    expect(declaresBareObject('    type: () => [Object]')).toBe(true);
     expect(declaresBareObject("    type: 'object',")).toBe(false);
     expect(declaresBareObject('    type: ObjectIdDto,')).toBe(false);
     expect(declaresBareObject('    type: () => OverdueBalanceDto,')).toBe(
