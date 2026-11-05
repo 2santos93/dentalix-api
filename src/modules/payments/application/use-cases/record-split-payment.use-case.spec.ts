@@ -135,6 +135,7 @@ function makeUseCase(now: Date = new Date('2026-10-31T15:00:00.000Z')) {
     paid: 100_000,
     unreadable: false,
     notFound: false,
+    withoutRate: false,
     timedOut: false,
   };
   const current = () => ({
@@ -144,7 +145,9 @@ function makeUseCase(now: Date = new Date('2026-10-31T15:00:00.000Z')) {
     balance: balance.billable - balance.paid,
     creditMovements: 0,
     paymentsCount: 1,
-    paymentsWithoutRate: [],
+    paymentsWithoutRate: balance.withoutRate
+      ? [{ paymentId: 'p-ves', amount: 1, currency: 'VES' }]
+      : [],
     rateProviderTimedOut: balance.timedOut,
   });
   const getPlanBalance = {
@@ -493,8 +496,21 @@ describe('RecordSplitPaymentUseCase (DX-390)', () => {
       pending: 100_000,
       excess: 200_000,
     });
+  });
+
+  // DX-463 ronda 2: un abono «sin tasa» solo puede reducir lo pendiente.
+  it('DX-463: con un abono sin tasa en el plan, la guarda de la transacción compara con lo conocido (cabe: sigue; excede: 409), nunca 503', async () => {
+    const { uc, repo, balance } = makeUseCase();
+    await uc.execute('plan-1', twoLines(), 'user-1');
+    const guard = repo.lastSplitInput?.excessGuardInTx;
+    const run = () =>
+      guard!({ planId: 'plan-1', snapshot: {} as never, creditMovements: 0 });
+    balance.withoutRate = true;
     balance.timedOut = true;
-    await expect(run()).rejects.toBeInstanceOf(ServiceUnavailableException);
+    balance.paid = 100_000; // conocido: pendiente 400 000, el cobro (300 000) cabe
+    await expect(run()).resolves.toBeUndefined();
+    balance.paid = 400_000; // conocido: pendiente 100 000 < 300 000
+    await expect(run()).rejects.toBeInstanceOf(ConflictException);
   });
 
   it('DX-463: con el excedente ya confirmado, el saldo ilegible no frena el cobro (no hay comprobación que saltar) y el recibo sale sin saldo', async () => {

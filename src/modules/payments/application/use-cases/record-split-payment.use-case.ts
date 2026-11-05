@@ -387,8 +387,7 @@ export class RecordSplitPaymentUseCase {
   /**
    * DX-463 (L4): la comprobación del excedente DENTRO de la transacción, con
    * la misma cuenta del saldo del plan sobre la foto bajo el bloqueo. Sin red
-   * (`offline`): si el proveedor de tasas o un abono sin base dejan lo
-   * pendiente incierto, 503 como un saldo ilegible; nunca se salta.
+   * (`offline`); con abonos sin tasa se comprueba contra lo CONOCIDO.
    */
   private excessGuard(converted: (number | null)[]): ReceiptExcessGuardInTx {
     return async ({ planId, snapshot, creditMovements }) => {
@@ -398,14 +397,10 @@ export class RecordSplitPaymentUseCase {
         creditMovements,
         { offline: true },
       );
-      if (now.rateProviderTimedOut || now.paymentsWithoutRate.length > 0) {
-        this.logger.warn({
-          event: 'payment_receipt.balance_unavailable',
-          error: 'BalanceIncompleteInTransaction',
-        });
-        this.unavailable(false);
-        return;
-      }
+      // Un abono «sin tasa» (anterior a DX-375 o MISSING) no suma en `paid`:
+      // solo puede REDUCIR lo pendiente, así que un excedente sobre lo
+      // conocido es real y se rechaza igual; si no lo hay, sigue (el conteo
+      // de `balanceGuard` ya se comprobó). Nunca 503 aquí.
       const known = knownSplitTotal(converted);
       if (exceedsPending(known, now.balance)) {
         throw exceedsBalance(now.planCurrency, known, now.balance);

@@ -1,5 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { ConflictException } from '@nestjs/common';
+import { GetPlanBalanceUseCase } from '../src/modules/payments/application/use-cases/get-plan-balance.use-case';
+import { GetTreatmentPlanUseCase } from '../src/modules/treatment-plans/application/use-cases/get-treatment-plan.use-case';
+import { PrismaTreatmentPlanRepository } from '../src/modules/treatment-plans/infrastructure/repositories/prisma-treatment-plan.repository';
+import { PrismaPlanAllocationRepository } from '../src/modules/payments/infrastructure/allocations/prisma-plan-allocation.repository';
+import type { ConvertAmountUseCase } from '../src/modules/exchange/application/use-cases/convert-amount.use-case';
+import type { PlanBalanceSnapshot } from '../src/modules/payments/domain/ports/plan-allocation-repository.port';
 import { Prisma, PrismaClient, TreatmentPlanStatus } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
@@ -653,5 +659,96 @@ describe('DX-390 · cobro dividido con un solo recibo (int)', () => {
         where: { tenantId: a.tenantId, treatmentPlanId: plan.id },
       }),
     ).toBe(rowsBefore);
+  });
+
+  // DX-463 ronda 2: un abono «sin tasa» (VES en un plan en USD, sin base) no
+  // suma en `paid` y solo puede reducir lo pendiente: la guarda compara con lo
+  // conocido, con la cuenta REAL del saldo sobre la foto bajo el bloqueo.
+  it('DX-463: con un abono VES sin tasa en un plan en USD, el cobro que cabe en lo conocido entra y el que lo supera da 409 (nunca 503)', async () => {
+    const plan = await raw.treatmentPlan.create({
+      data: {
+        tenantId: a.tenantId,
+        patientId: a.patientId,
+        currency: 'USD',
+        status: TreatmentPlanStatus.ACCEPTED,
+      },
+    });
+    const catalog = await raw.dentalCatalogItem.create({
+      data: {
+        tenantId: a.tenantId,
+        code: 'dx463b',
+        kind: 'PROCEDURE',
+        labelEs: 'Corona',
+        color: '#123456',
+      },
+    });
+    await raw.treatmentPlanItem.create({
+      data: {
+        tenantId: a.tenantId,
+        planId: plan.id,
+        catalogItemId: catalog.id,
+        toothNumber: '12',
+        price: 100,
+        discount: 0,
+        status: 'ACCEPTED',
+      },
+    });
+    // El abono en VES queda sin base (sin tasa de su día).
+    await tenantContext.run(a.tenantId, a.locationId, () =>
+      payments.create(
+        line(a, { treatmentPlanId: plan.id, amount: 400, currency: 'VES' }),
+      ),
+    );
+    const balance = new GetPlanBalanceUseCase(
+      payments,
+      new GetTreatmentPlanUseCase(
+        new PrismaTreatmentPlanRepository(prisma, tenantContext),
+      ),
+      {} as unknown as ConvertAmountUseCase,
+      new PrismaPlanAllocationRepository(prisma, tenantContext),
+    );
+    const guardFor =
+      (total: number, seenNow: { withoutRate: number }[]) =>
+      async (data: {
+        planId: string;
+        snapshot: PlanBalanceSnapshot;
+        creditMovements: number;
+      }) => {
+        const now = await balance.fromSnapshot(
+          data.planId,
+          data.snapshot,
+          data.creditMovements,
+          { offline: true },
+        );
+        seenNow.push({ withoutRate: now.paymentsWithoutRate.length });
+        if (total > now.balance) {
+          throw new ConflictException({
+            code: 'SPLIT_PAYMENT_EXCEEDS_BALANCE',
+          });
+        }
+      };
+    const attempt = async (amounts: [number, number]) => {
+      const seenNow: { withoutRate: number }[] = [];
+      const seen = await tenantContext.run(a.tenantId, a.locationId, () =>
+        payments.countPlanMovements(plan.id),
+      );
+      const outcome = await split(a, {
+        lines: amounts.map((amount) =>
+          line(a, { treatmentPlanId: plan.id, amount }),
+        ),
+        balanceGuard: { planMovementsSeen: seen },
+        excessGuardInTx: guardFor(amounts[0] + amounts[1], seenNow),
+      }).then(
+        () => 'ok' as const,
+        (e: unknown) => e,
+      );
+      expect(seenNow).toEqual([{ withoutRate: 1 }]);
+      return outcome;
+    };
+    // Conocido: pendiente 100. 120 lo supera -> 409; 100 cabe -> entra.
+    expect(await attempt([70, 50])).toMatchObject({
+      response: { code: 'SPLIT_PAYMENT_EXCEEDS_BALANCE' },
+    });
+    expect(await attempt([60, 40])).toBe('ok');
   });
 });
