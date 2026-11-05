@@ -13,12 +13,19 @@ import { PrismaPaymentRepository } from '../src/modules/payments/infrastructure/
 import type {
   CreatePaymentRepoInput,
   CreateSplitPaymentRepoInput,
+  SplitPaymentRecord,
 } from '../src/modules/payments/domain/ports/payment-repository.port';
 import { parseReceiptSnapshot } from '../src/modules/payments/domain/receipt-snapshot';
 import {
   REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
+import {
+  holdPlanRowLock,
+  settle,
+  type Outcome,
+  waitForLockWaiters,
+} from './support/postgres-concurrency';
 
 // DX-390: el cobro dividido contra Postgres real. Las líneas se registran con
 // el repositorio de la API (rol dentalix_app, RLS) en UNA transacción: si una
@@ -182,6 +189,9 @@ const counterOf = async (tenantId: string): Promise<number> =>
     0,
   );
 
+const holdPlanLock = (clinic: Clinic, planId = clinic.planId) =>
+  holdPlanRowLock(raw, planId);
+
 describe('DX-390 · cobro dividido con un solo recibo (int)', () => {
   beforeAll(async () => {
     await cleanup();
@@ -292,7 +302,22 @@ describe('DX-390 · cobro dividido con un solo recibo (int)', () => {
       idempotencyKey: key,
       requestFingerprint: 'a'.repeat(64),
     };
-    const [one, two] = await Promise.all([split(a, input), split(a, input)]);
+    // DX-450: el plan retenido; los dos reintentos llegan y esperan EN el plan
+    // (no en serie), y solo entonces se suelta.
+    const lock = await holdPlanLock(a);
+    let attempts: Promise<Outcome<SplitPaymentRecord>>[] = [];
+    try {
+      attempts = [settle(split(a, input)), settle(split(a, input))];
+      await waitForLockWaiters(raw, [lock.pid], 2);
+    } finally {
+      lock.release();
+      await lock.done;
+    }
+    const outcomes = await Promise.all(attempts);
+    expect(outcomes.map((o) => o.status)).toEqual(['fulfilled', 'fulfilled']);
+    const [one, two] = outcomes.map(
+      (o) => (o as { value: SplitPaymentRecord }).value,
+    );
     expect(one.splitId).toBe(two.splitId);
     expect(await raw.payment.count({ where: { splitId: one.splitId } })).toBe(
       2,
@@ -452,105 +477,108 @@ describe('DX-390 · cobro dividido con un solo recibo (int)', () => {
     const seen = await tenantContext.run(a.tenantId, a.locationId, () =>
       payments.countPlanMovements(a.planId),
     );
-    const results = await Promise.allSettled([
-      split(a, {
-        lines: [line(a, { amount: 12 }), line(a, { amount: 13 })],
-        balanceGuard: { planMovementsSeen: seen },
-      }),
-      split(a, {
-        lines: [line(a, { amount: 14 }), line(a, { amount: 15 })],
-        balanceGuard: { planMovementsSeen: seen },
-      }),
-    ]);
+    // DX-450: con el plan retenido, los dos cobros llegan con la MISMA
+    // lectura y esperan EN el plan; al soltar, el primero entra y el segundo
+    // ve el conteo ya cambiado. Sin ese candado ninguno espera (y, si
+    // esperaran en serie, el resultado sería el mismo: por eso se comprueba
+    // la espera, no solo el desenlace).
+    const lock = await holdPlanLock(a);
+    let attempts: Promise<Outcome<SplitPaymentRecord>>[] = [];
+    try {
+      attempts = [
+        settle(
+          split(a, {
+            lines: [line(a, { amount: 12 }), line(a, { amount: 13 })],
+            balanceGuard: { planMovementsSeen: seen },
+          }),
+        ),
+        settle(
+          split(a, {
+            lines: [line(a, { amount: 14 }), line(a, { amount: 15 })],
+            balanceGuard: { planMovementsSeen: seen },
+          }),
+        ),
+      ];
+      await waitForLockWaiters(raw, [lock.pid], 2);
+    } finally {
+      lock.release();
+      await lock.done;
+    }
+    const results = await Promise.all(attempts);
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
     const [rejected] = results.filter((r) => r.status === 'rejected');
     expect(rejected).toMatchObject({
       reason: { response: { code: 'SPLIT_PAYMENT_BALANCE_CHANGED' } },
     });
+    // Y solo entró UN cobro de dos líneas desde la lectura.
+    const winner = results.find((r) => r.status === 'fulfilled') as {
+      value: SplitPaymentRecord;
+    };
+    expect(
+      await tenantContext.run(a.tenantId, a.locationId, () =>
+        payments.countPlanMovements(a.planId),
+      ),
+    ).toBe(seen + 2);
+    expect(winner.value.payments).toHaveLength(2);
   });
   // DX-463 (BE-058): un traspaso de saldo a favor al plan (DX-253) también
   // cambia lo pendiente, aunque no sea un abono: la guarda lo cuenta.
   describe('DX-463 · traspaso de saldo a favor a la vez que un cobro dividido', () => {
-    const waitForLockWaiter = async (): Promise<void> => {
-      for (let i = 0; i < 400; i++) {
-        const [{ waiting }] = await raw.$queryRaw<{ waiting: number }[]>`
-          SELECT count(*)::int AS waiting FROM pg_stat_activity
-           WHERE datname = current_database() AND wait_event_type = 'Lock'`;
-        if (waiting >= 1) return;
-        await new Promise((resolve) => setTimeout(resolve, 25));
-      }
-      throw new Error('el cobro no llegó a esperar el bloqueo del plan');
-    };
-    const settled = <T>(p: Promise<T>) =>
-      p.then(
-        (value) => ({ status: 'fulfilled', value }) as const,
-        (reason: unknown) => ({ status: 'rejected', reason }) as const,
-      );
     /**
      * Otra conexión con el plan bloqueado (como un traspaso en curso): el
-     * cobro llega, espera el bloqueo, y solo entonces el traspaso confirma.
+     * cobro llega, espera el bloqueo (visto en pg_locks, por el PID del
+     * holder), y solo entonces el traspaso confirma.
      */
     const transferWhileSplitWaits = async (
       clinic: Clinic,
       sourcePlanId: string,
       startSplit: () => Promise<unknown>,
     ) => {
-      let locked!: () => void;
-      const isLocked = new Promise<void>((resolve) => {
-        locked = resolve;
-      });
-      let release!: () => void;
-      const released = new Promise<void>((resolve) => {
-        release = resolve;
-      });
-      const holder = raw.$transaction(
-        async (tx) => {
-          await tx.$queryRaw`SELECT 1 FROM "treatment_plans" WHERE "id" = ${clinic.planId}::uuid FOR NO KEY UPDATE`;
-          locked();
-          await released;
-          const transfer = await tx.patientCreditTransfer.create({
-            data: {
+      const lock = await holdPlanRowLock(raw, clinic.planId, async (tx) => {
+        const transfer = await tx.patientCreditTransfer.create({
+          data: {
+            tenantId: clinic.tenantId,
+            locationId: clinic.locationId,
+            patientId: clinic.patientId,
+            sourcePlanId,
+            targetPlanId: clinic.planId,
+            currency: 'USD',
+            amount: new Prisma.Decimal('25.00'),
+            reason: 'Traspaso de prueba DX-463',
+            createdById: clinic.userId,
+          },
+        });
+        await tx.patientCreditEntry.createMany({
+          data: [
+            {
               tenantId: clinic.tenantId,
-              locationId: clinic.locationId,
               patientId: clinic.patientId,
-              sourcePlanId,
-              targetPlanId: clinic.planId,
+              treatmentPlanId: sourcePlanId,
+              currency: 'USD',
+              amount: new Prisma.Decimal('-25.00'),
+              kind: 'TRANSFER_OUT',
+              transferId: transfer.id,
+            },
+            {
+              tenantId: clinic.tenantId,
+              patientId: clinic.patientId,
+              treatmentPlanId: clinic.planId,
               currency: 'USD',
               amount: new Prisma.Decimal('25.00'),
-              reason: 'Traspaso de prueba DX-463',
-              createdById: clinic.userId,
+              kind: 'TRANSFER_IN',
+              transferId: transfer.id,
             },
-          });
-          await tx.patientCreditEntry.createMany({
-            data: [
-              {
-                tenantId: clinic.tenantId,
-                patientId: clinic.patientId,
-                treatmentPlanId: sourcePlanId,
-                currency: 'USD',
-                amount: new Prisma.Decimal('-25.00'),
-                kind: 'TRANSFER_OUT',
-                transferId: transfer.id,
-              },
-              {
-                tenantId: clinic.tenantId,
-                patientId: clinic.patientId,
-                treatmentPlanId: clinic.planId,
-                currency: 'USD',
-                amount: new Prisma.Decimal('25.00'),
-                kind: 'TRANSFER_IN',
-                transferId: transfer.id,
-              },
-            ],
-          });
-        },
-        { timeout: 30_000 },
-      );
-      await isLocked;
-      const attempt = settled(startSplit());
-      await waitForLockWaiter();
-      release();
-      await holder;
+          ],
+        });
+      });
+      let attempt: Promise<Outcome<unknown>> | undefined;
+      try {
+        attempt = settle(startSplit());
+        await waitForLockWaiters(raw, [lock.pid], 1);
+      } finally {
+        lock.release();
+        await lock.done;
+      }
       return attempt;
     };
 

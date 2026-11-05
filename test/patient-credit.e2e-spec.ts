@@ -22,6 +22,11 @@ import {
   REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
+import {
+  holdPlanRowLock,
+  settle,
+  waitForLockWaiters,
+} from './support/postgres-concurrency';
 
 // DX-253 en HTTP real: un plan CANCELADO con 300.000 abonados traspasa 200.000
 // a un plan vivo del mismo paciente (el origen queda con 100.000 a favor, el
@@ -88,6 +93,32 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
   let otherPayment: string;
 
   const api = () => request(app.getHttpServer());
+  /**
+   * DX-450: el plan retenido FOR NO KEY UPDATE por otra transacción; quien
+   * escriba sobre el saldo del plan espera aquí (visto en pg_locks, por PID).
+   */
+  const holdPlanLock = (planId: string) => holdPlanRowLock(raw, planId);
+  /** Lanza las peticiones, espera a que TODAS estén bloqueadas y suelta. */
+  const raceOnPlanLock = async (
+    planId: string,
+    launch: () => request.Test[],
+  ): Promise<request.Response[]> => {
+    const lock = await holdPlanLock(planId);
+    let attempts: ReturnType<typeof settle<request.Response>>[] = [];
+    try {
+      attempts = launch().map((test) =>
+        settle(test as unknown as Promise<request.Response>),
+      );
+      await waitForLockWaiters(raw, [lock.pid], attempts.length);
+    } finally {
+      lock.release();
+      await lock.done;
+    }
+    return (await Promise.all(attempts)).map((o) => {
+      if (o.status === 'rejected') throw o.reason;
+      return o.value;
+    });
+  };
   const as = (req: request.Test, clinic: Clinic, token = clinic.adminToken) => {
     const withAuth = req
       .set('X-Tenant-Host', clinic.host)
@@ -514,7 +545,7 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
   });
 
   it('dos devoluciones a la vez sobre el mismo saldo: una 201 y otra 409', async () => {
-    const [x, y] = await Promise.all([
+    const [x, y] = await raceOnPlanLock(origin, () => [
       refund({ amount: 40_000, method: 'TRANSFER' }),
       refund({ amount: 40_000, method: 'TRANSFER' }),
     ]);
@@ -977,7 +1008,7 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
       const plan = await seedPlan(100_000, 'CARRERA');
       const payment = await pay(plan, 30_000);
       await cancel(plan);
-      const [voided, refunded] = await Promise.all([
+      const [voided, refunded] = await raceOnPlanLock(plan, () => [
         voidPayment(payment),
         as(
           api().post(`/api/v1/treatment-plans/${plan}/credit-refunds`),
