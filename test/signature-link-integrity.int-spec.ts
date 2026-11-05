@@ -575,21 +575,28 @@ describe('integridad del enlace de firma en la BD (DX-425)', () => {
 
   describe('firmar después de la caducidad (DB-062)', () => {
     it('la BD rechaza la firma con el enlace caducado aunque la app lo intente', async () => {
-      // Caduca en 1,5 s; el createdAt lo pone la BD (para la app), así que no
-      // se puede sembrar ya caducado: se espera a que pase.
-      const id = (
-        await insertRaw(
-          a,
-          consentInput(a, { expiresAt: new Date(Date.now() + 1500) }),
-        )
-      ).id;
-      await asApp(a, (tx) =>
-        tx.signatureRequest.update({
-          where: { id },
-          data: { openedAt: new Date(), verifiedAt: new Date() },
-        }),
-      );
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      // El trigger de horas respeta las que escribe un superusuario (el owner
+      // de la suite) y la fila no admite cambiar sus horas después, así que
+      // se siembra ya caducada en vez de esperar a que caduque (DX-450: sin
+      // sleeps en estos specs).
+      await owner.signatureRequest.updateMany({
+        where: { tenantId: a.tenantId, signedAt: null, revokedAt: null },
+        data: { revokedAt: new Date(), revokedById: a.userId },
+      });
+      const now = await dbNow();
+      const ago = (ms: number) => new Date(now.getTime() - ms);
+      const { id } = await owner.signatureRequest.create({
+        data: {
+          tenantId: a.tenantId,
+          ...consentInput(a, {
+            createdAt: ago(2 * 3600_000),
+            expiresAt: ago(3600_000),
+          }),
+          openedAt: ago(2 * 3600_000 - 60_000),
+          verifiedAt: ago(2 * 3600_000 - 30_000),
+        },
+        select: { id: true },
+      });
       await expect(
         asApp(a, (tx) =>
           tx.signatureRequest.update({
