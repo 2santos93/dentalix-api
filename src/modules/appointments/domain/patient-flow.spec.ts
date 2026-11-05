@@ -19,8 +19,9 @@ function check(
   to: AppointmentStatus,
   role: ClinicRole | null = ADMIN,
   isToday = true,
+  ownAppointment = true,
 ) {
-  return checkStatusTransition({ from, to, role, isToday });
+  return checkStatusTransition({ from, to, role, isToday, ownAppointment });
 }
 
 describe('patient-flow · máquina de transiciones (DX-200)', () => {
@@ -62,6 +63,26 @@ describe('patient-flow · máquina de transiciones (DX-200)', () => {
 
     it('repetir el estado actual no es un cambio (sin error)', () => {
       expect(check(ARRIVED, ARRIVED, DENTIST)).toEqual({ ok: true });
+    });
+  });
+
+  describe('DX-237: la cita de otro profesional', () => {
+    it.each([
+      [ARRIVED, IN_CHAIR],
+      [IN_CHAIR, READY_FOR_CHECKOUT],
+    ])('%s → %s: el odontólogo, 403 si no es suya', (from, to) => {
+      expect(check(from, to, DENTIST, true, false)).toMatchObject({
+        ok: false,
+        kind: 'FORBIDDEN',
+        message: PATIENT_FLOW_MESSAGES.chairsideOwnOnly,
+      });
+      expect(check(from, to, DENTIST, true, true)).toEqual({ ok: true });
+      expect(check(from, to, ClinicRole.ASSISTANT, true, false)).toEqual({
+        ok: true,
+      });
+      expect(check(from, to, ClinicRole.ADMIN, true, false)).toEqual({
+        ok: true,
+      });
     });
   });
 
@@ -148,6 +169,7 @@ describe('patient-flow · máquina de transiciones (DX-200)', () => {
         to,
         role,
         isToday: true,
+        ownAppointment: true,
         statusReason,
       });
 
