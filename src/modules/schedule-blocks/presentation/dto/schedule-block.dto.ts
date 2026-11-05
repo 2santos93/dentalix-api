@@ -6,8 +6,8 @@ import {
   ArrayMinSize,
   IsArray,
   IsBoolean,
-  IsDateString,
   IsEnum,
+  IsISO8601,
   IsInt,
   IsOptional,
   IsString,
@@ -166,7 +166,7 @@ export class CreateScheduleBlockDto {
   locationId?: string;
 
   @ApiProperty({ type: String, format: 'date-time' })
-  @IsDateString()
+  @IsISO8601({ strict: true })
   start!: string;
 
   @ApiProperty({
@@ -174,7 +174,7 @@ export class CreateScheduleBlockDto {
     format: 'date-time',
     description: 'Posterior a `start`; como mucho 366 días después.',
   })
-  @IsDateString()
+  @IsISO8601({ strict: true })
   end!: string;
 
   @ApiProperty({
@@ -234,12 +234,12 @@ export class CreateScheduleBlockDto {
 export class UpdateScheduleBlockDto {
   @ApiPropertyOptional({ type: String, format: 'date-time' })
   @IsOptional()
-  @IsDateString()
+  @IsISO8601({ strict: true })
   start?: string;
 
   @ApiPropertyOptional({ type: String, format: 'date-time' })
   @IsOptional()
-  @IsDateString()
+  @IsISO8601({ strict: true })
   end?: string;
 
   @ApiPropertyOptional({
@@ -307,7 +307,7 @@ function toArray({ value }: { value: unknown }): unknown {
 
 export class ListScheduleBlocksQueryDto {
   @ApiProperty({ type: String, format: 'date-time' })
-  @IsDateString()
+  @IsISO8601({ strict: true })
   from!: string;
 
   @ApiProperty({
@@ -315,7 +315,7 @@ export class ListScheduleBlocksQueryDto {
     format: 'date-time',
     description: 'Como mucho 92 días después de `from`.',
   })
-  @IsDateString()
+  @IsISO8601({ strict: true })
   to!: string;
 
   @ApiPropertyOptional({
@@ -340,11 +340,11 @@ export class ListScheduleBlocksQueryDto {
 
 export class AffectedAppointmentsQueryDto {
   @ApiProperty({ type: String, format: 'date-time' })
-  @IsDateString()
+  @IsISO8601({ strict: true })
   start!: string;
 
   @ApiProperty({ type: String, format: 'date-time' })
-  @IsDateString()
+  @IsISO8601({ strict: true })
   end!: string;
 
   @ApiPropertyOptional({ format: 'uuid' })

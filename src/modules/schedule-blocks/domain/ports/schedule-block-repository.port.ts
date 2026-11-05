@@ -95,9 +95,9 @@ export interface ScheduleBlockRepository {
   update(
     id: string,
     patch: UpdateScheduleBlockRepoInput,
-  ): Promise<ScheduleBlock>;
+  ): Promise<ScheduleBlock | null>;
   /** Borrado lógico. */
-  softDelete(id: string, deletedById: string): Promise<void>;
+  softDelete(id: string, deletedById: string): Promise<boolean>;
   /**
    * Bloqueos vivos que se solapan con una cita de `providerId` en su sede:
    * los suyos en esa sede o en todas, y los de toda la sede.

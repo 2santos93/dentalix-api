@@ -1,3 +1,4 @@
+import { NOT_ATTENDING_MESSAGE } from '../../../staff/domain/attending';
 import {
   BadRequestException,
   ConflictException,
@@ -45,7 +46,10 @@ const patients = {
   findById: known(['p1', 'p2'], (id) => ({ id })),
 } as unknown as PatientRepository;
 const staff = {
-  findById: known(['prov1', 'prov2'], (userId) => ({ userId })),
+  findById: known(['prov1', 'prov2', 'rec'], (userId) => ({
+    userId,
+    role: userId === 'rec' ? 'RECEPTION' : 'DENTIST',
+  })),
 } as unknown as StaffRepository;
 const locations = {
   findById: known(['loc1', 'loc2'], (id) => ({
@@ -172,6 +176,12 @@ describe('pendientes por agendar (DX-122)', () => {
       );
       expect(waitlist.rows).toHaveLength(1);
       expect(drafts).toHaveLength(0);
+    });
+
+    it('DX-161: con recepción como profesional preferido es 400', async () => {
+      await expect(
+        useCase().execute({ patientId: 'p1', providerId: 'rec' }, CTX),
+      ).rejects.toThrow(NOT_ATTENDING_MESSAGE);
     });
 
     it('rechaza paciente, sede o profesional ajenos (404) y tipo desactivado (400)', async () => {

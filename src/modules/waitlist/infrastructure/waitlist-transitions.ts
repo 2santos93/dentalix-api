@@ -32,6 +32,13 @@ export async function enqueueWaitlistFromAppointment(
   appointmentId: string,
   createdById: string | null,
 ): Promise<EnqueuedWaitlistEntry | null> {
+  // DX-161: una sola OPEN por paciente. Con el candado, dos cancelaciones (o una
+  // cancelación y un alta manual) del mismo paciente van en fila; si ya tiene
+  // una OPEN, la cita se suma a ella: no se crea ni se reabre otra.
+  await tx.$queryRaw`
+    SELECT pg_advisory_xact_lock(hashtextextended('waitlist-open:' || a."patientId"::text, 0))
+      FROM "appointments" a
+     WHERE a."id" = ${appointmentId}::uuid`;
   const rows = await tx.$queryRaw<{ id: string; inserted: boolean }[]>`
     INSERT INTO "appointment_waitlist" (
       "id", "tenantId", "locationId", "patientId", "sourceAppointmentId",
@@ -46,6 +53,10 @@ export async function enqueueWaitlistFromAppointment(
       FROM "appointments" a
      WHERE a."id" = ${appointmentId}::uuid
        AND a."deletedAt" IS NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM "appointment_waitlist" w
+          WHERE w."patientId" = a."patientId" AND w."status" = 'OPEN'
+       )
     ON CONFLICT ("tenantId", "sourceAppointmentId")
       WHERE "sourceAppointmentId" IS NOT NULL
       DO UPDATE SET "status" = 'OPEN',
@@ -55,6 +66,10 @@ export async function enqueueWaitlistFromAppointment(
                     "updatedAt" = CURRENT_TIMESTAMP
        WHERE "appointment_waitlist"."status" = 'SCHEDULED'
          AND "appointment_waitlist"."resolvedAppointmentId" = "appointment_waitlist"."sourceAppointmentId"
+         AND NOT EXISTS (
+           SELECT 1 FROM "appointment_waitlist" w
+            WHERE w."patientId" = "appointment_waitlist"."patientId" AND w."status" = 'OPEN'
+         )
     RETURNING "id", (xmax = 0) AS "inserted"`;
   const row = rows[0];
   return row ? { id: row.id, reopened: !row.inserted } : null;
@@ -109,4 +124,16 @@ export async function resolveWaitlistForReactivated(
     },
   });
   return count === 1 ? open.id : null;
+}
+
+/**
+ * DX-161: candado de transacción por paciente para sus entradas OPEN. Lo toman
+ * el alta manual y la automática: la segunda espera a la primera y ve su fila.
+ * El único parcial `appointment_waitlist_open_patient_key` es la red de seguridad.
+ */
+export async function lockPatientWaitlist(
+  tx: Prisma.TransactionClient,
+  patientId: string,
+): Promise<void> {
+  await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${'waitlist-open:' + patientId}, 0))`;
 }

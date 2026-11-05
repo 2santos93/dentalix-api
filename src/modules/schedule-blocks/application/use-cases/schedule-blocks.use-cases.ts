@@ -473,7 +473,7 @@ export class UpdateScheduleBlockUseCase {
       if (total > 0) throw new ConflictException(affectedMessage(total));
     }
 
-    return this.repo.update(id, {
+    const updated = await this.repo.update(id, {
       start: input.start,
       end: input.end,
       kind: input.kind,
@@ -483,6 +483,9 @@ export class UpdateScheduleBlockUseCase {
       releaseAtMinute,
       updatedById: actor.userId,
     });
+    // DX-161: otra petición lo retiró mientras tanto.
+    if (!updated) throw new NotFoundException(SCHEDULE_BLOCK_NOT_FOUND_MESSAGE);
+    return updated;
   }
 }
 
@@ -500,6 +503,9 @@ export class DeleteScheduleBlockUseCase {
     if (!current) throw new NotFoundException(SCHEDULE_BLOCK_NOT_FOUND_MESSAGE);
     assertCanWrite(actor, current.providerId);
     assertLocationWritable(this.tenantContext, current.locationId);
-    await this.repo.softDelete(id, actor.userId);
+    // DX-161: dos borrados a la vez: el segundo, 404 (el primero queda como autor).
+    if (!(await this.repo.softDelete(id, actor.userId))) {
+      throw new NotFoundException(SCHEDULE_BLOCK_NOT_FOUND_MESSAGE);
+    }
   }
 }

@@ -11,6 +11,7 @@ import type {
   ListWaitlistParams,
   WaitlistRepository,
 } from '../../domain/ports/waitlist-repository.port';
+import { lockPatientWaitlist } from '../waitlist-transitions';
 
 /** Lo que el panel enseña sin otra petición: paciente, cita de origen y tipo. */
 const INCLUDE_VIEW = {
@@ -128,10 +129,19 @@ export class PrismaWaitlistRepository implements WaitlistRepository {
     });
   }
 
-  async create(input: CreateWaitlistEntryRepoInput): Promise<WaitlistEntry> {
+  async create(
+    input: CreateWaitlistEntryRepoInput,
+  ): Promise<WaitlistEntry | null> {
     const tenantId = this.requireTenantId();
-    const row = await this.prisma.runWithTenant(async (tx) =>
-      tx.appointmentWaitlistEntry.create({
+    const row = await this.prisma.runWithTenant(async (tx) => {
+      // DX-161: el mismo candado que el alta automática; luego, ¿ya tiene una OPEN?
+      await lockPatientWaitlist(tx, input.patientId);
+      const open = await tx.appointmentWaitlistEntry.findFirst({
+        where: { patientId: input.patientId, status: WaitlistStatus.OPEN },
+        select: { id: true },
+      });
+      if (open) return null;
+      return tx.appointmentWaitlistEntry.create({
         data: {
           tenantId,
           locationId:
@@ -146,9 +156,9 @@ export class PrismaWaitlistRepository implements WaitlistRepository {
           createdById: input.createdById,
         },
         include: INCLUDE_VIEW,
-      }),
-    );
-    return mapToEntity(row);
+      });
+    });
+    return row ? mapToEntity(row) : null;
   }
 
   dismiss(

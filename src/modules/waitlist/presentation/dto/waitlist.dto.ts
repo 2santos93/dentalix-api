@@ -6,8 +6,8 @@ import {
 } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
-  IsDateString,
   IsEnum,
+  IsISO8601,
   IsInt,
   IsOptional,
   IsString,
@@ -261,7 +261,7 @@ export class ScheduleFromWaitlistDto {
   providerId!: string;
 
   @ApiProperty({ type: String, format: 'date-time' })
-  @IsDateString()
+  @IsISO8601({ strict: true })
   start!: string;
 
   @ApiPropertyOptional({
@@ -270,7 +270,7 @@ export class ScheduleFromWaitlistDto {
     description: 'Si falta, `start` + la duración de la entrada.',
   })
   @IsOptional()
-  @IsDateString()
+  @IsISO8601({ strict: true })
   end?: string;
 
   @ApiPropertyOptional({

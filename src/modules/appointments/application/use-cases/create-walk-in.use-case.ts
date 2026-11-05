@@ -53,6 +53,7 @@ import { DOC_TAKEN_MESSAGE } from '../../../patients/infrastructure/repositories
 import { STAFF_REPOSITORY } from '../../../staff/domain/ports/staff-repository.port';
 import type { StaffRepository } from '../../../staff/domain/ports/staff-repository.port';
 import { assertAttendsAt } from '../../../staff/domain/provider-location';
+import { assertAttendingRole } from '../../../staff/domain/attending';
 import { APPOINTMENT_TYPE_REPOSITORY } from '../../../appointment-types/domain/ports/appointment-type-repository.port';
 import type { AppointmentTypeRepository } from '../../../appointment-types/domain/ports/appointment-type-repository.port';
 import type { AppointmentType } from '../../../appointment-types/domain/entities/appointment-type.entity';
@@ -200,6 +201,8 @@ export class CreateWalkInUseCase {
     // dentro de las permitidas); el profesional tiene que atender en ella.
     const locationId = await this.appointments.resolveWriteLocationId();
     assertAttendsAt(provider, locationId);
+    // DX-161: tampoco sin cita se atiende con recepción o asistencia.
+    assertAttendingRole(provider);
     const location = await this.locations.findById(locationId);
     if (!location) throw new NotFoundException('Sede no encontrada');
     const timeZone = requireLocationTimeZone(location);

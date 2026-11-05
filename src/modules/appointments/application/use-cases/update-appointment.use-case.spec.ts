@@ -1,3 +1,4 @@
+import { NOT_ATTENDING_MESSAGE } from '../../../staff/domain/attending';
 import {
   BadRequestException,
   ConflictException,
@@ -167,7 +168,7 @@ function makeStaff(known?: string[]): StaffRepository {
   return {
     findById: (userId: string): Promise<never> =>
       Promise.resolve(
-        !known || known.includes(userId) ? { userId } : null,
+        !known || known.includes(userId) ? { userId, role: 'DENTIST' } : null,
       ) as Promise<never>,
   } as unknown as StaffRepository;
 }
@@ -1678,10 +1679,28 @@ describe('UpdateAppointmentUseCase · sedes permitidas y profesional ↔ sede', 
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
+  it('DX-161: pasar la cita a recepción o asistencia es 400', async () => {
+    const staff = {
+      findById: (userId: string): Promise<never> =>
+        Promise.resolve({
+          userId,
+          role: 'ASSISTANT',
+          locationIds: null,
+        }) as Promise<never>,
+    } as unknown as StaffRepository;
+    await expect(
+      uc(staff).execute('a1', { providerId: 'prov2' }),
+    ).rejects.toThrow(NOT_ATTENDING_MESSAGE);
+  });
+
   it('pasar la cita a un profesional que no atiende en su sede es 400', async () => {
     const staff = {
       findById: (userId: string): Promise<never> =>
-        Promise.resolve({ userId, locationIds: ['loc2'] }) as Promise<never>,
+        Promise.resolve({
+          userId,
+          role: 'DENTIST',
+          locationIds: ['loc2'],
+        }) as Promise<never>,
     } as unknown as StaffRepository;
     await expect(
       uc(staff).execute('a1', { providerId: 'prov2' }),

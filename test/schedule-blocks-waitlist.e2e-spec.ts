@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { INestApplication } from '@nestjs/common';
 import {
   ClinicRole,
@@ -649,6 +650,28 @@ describe('Bloqueos de agenda y pendientes por agendar (e2e, DX-122)', () => {
   });
 
   describe('cambios tras revisión y QA', () => {
+    it('DX-161: recepción como profesional es 400 y una fecha que no existe también', async () => {
+      const asProvider = await book(reception.userId, THU, '09:00', 1).expect(
+        400,
+      );
+      expect((asProvider.body as { message: string }).message).toMatch(
+        /no atiende pacientes/,
+      );
+      const bad = await block(dentist.token, {
+        providerId: dentist.userId,
+        start: '2026-02-30T10:00:00Z',
+        end: '2026-02-30T11:00:00Z',
+        kind: 'MEETING',
+      }).expect(400);
+      expect(JSON.stringify(bad.body)).toMatch(/start/);
+      await as(
+        api().post(`/api/v1/waitlist/${randomUUID()}/schedule`),
+        reception.token,
+      )
+        .send({ providerId: dentist.userId, start: '2026-02-30T10:00:00Z' })
+        .expect(400);
+    });
+
     it('reactivar una cita cancelada la saca de pendientes (queda SCHEDULED con la propia cita)', async () => {
       const appt = await book(dentist2.userId, THU, '17:00', 0).expect(201);
       const id = (appt.body as Body).id;

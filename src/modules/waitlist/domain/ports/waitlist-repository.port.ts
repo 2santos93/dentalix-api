@@ -33,7 +33,11 @@ export interface WaitlistRepository {
   findById(id: string): Promise<WaitlistEntry | null>;
   /** ¿El paciente ya tiene una entrada OPEN? (no se duplica a mano). */
   hasOpenForPatient(patientId: string): Promise<boolean>;
-  create(input: CreateWaitlistEntryRepoInput): Promise<WaitlistEntry>;
+  /**
+   * Alta manual. `null` si el paciente ya tiene una entrada OPEN: candado por
+   * paciente y único parcial de OPEN (DX-161) hacen de árbitro entre dos altas.
+   */
+  create(input: CreateWaitlistEntryRepoInput): Promise<WaitlistEntry | null>;
   /**
    * Descarta la entrada SOLO si sigue OPEN (a prueba de carreras). `null` si
    * ya no lo estaba.

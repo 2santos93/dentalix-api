@@ -37,6 +37,7 @@ import { endFromDuration } from '../../../appointment-types/domain/appointment-t
 import { SCHEDULE_BLOCK_REPOSITORY } from '../../../schedule-blocks/domain/ports/schedule-block-repository.port';
 import type { ScheduleBlockRepository } from '../../../schedule-blocks/domain/ports/schedule-block-repository.port';
 import { assertAttendsAt } from '../../../staff/domain/provider-location';
+import { assertAttendingRole } from '../../../staff/domain/attending';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { ProviderAvailabilityService } from '../../../provider-schedule/application/provider-availability.service';
 import { requireLocationFormat } from '../../../../shared/locations/location-regional';
@@ -241,6 +242,8 @@ export class CreateAppointmentUseCase {
       throw new NotFoundException('Profesional no encontrado');
     }
     assertAttendsAt(provider, target);
+    // DX-161: recepción y asistencia no atienden: no se les agenda.
+    assertAttendingRole(provider);
     return this.createFor({ ...input, providerId }, target, chair);
   }
 
