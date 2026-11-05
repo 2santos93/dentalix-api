@@ -10,6 +10,7 @@ import { TenantContextModule } from './shared/tenancy/tenant-context.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { MeModule } from './modules/me/me.module';
 import { PatientsModule } from './modules/patients/patients.module';
+import { CallerLookupModule } from './modules/caller-lookup/caller-lookup.module';
 import { DentalCatalogModule } from './modules/dental-catalog/dental-catalog.module';
 import { MedicalHistoryModule } from './modules/medical-history/medical-history.module';
 import { ClinicalEntriesModule } from './modules/clinical-entries/clinical-entries.module';
@@ -97,6 +98,7 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     InvitationsModule,
     MeModule,
     PatientsModule,
+    CallerLookupModule,
     DentalCatalogModule,
     MedicalHistoryModule,
     ClinicalEntriesModule,

@@ -179,6 +179,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /patients': EVERY_ROLE,
   'GET /patients': EVERY_ROLE,
   'GET /patients/:id': EVERY_ROLE,
+  // DX-224: «¿Quién llama?» (POST: el número va en el cuerpo, no en la URL).
+  'POST /patients/lookup-by-phone': EVERY_ROLE,
   'PATCH /patients/:id': EVERY_ROLE,
   // DX-128: bloque «Comunicaciones». Lo ven todos (el profesional en solo
   // lectura); el canal lo cambian recepción y ADMIN.

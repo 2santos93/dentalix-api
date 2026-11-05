@@ -228,6 +228,12 @@ describe('«Atender sin cita» (e2e, DX-470)', () => {
     }).expect(201);
     const body = res.body as Body & Record<string, unknown>;
     firstWalkInId = body.id;
+    // DX-224: el alta de «Atender sin cita» deja el E.164 para «¿Quién llama?».
+    const created = await raw.patient.findFirstOrThrow({
+      where: { tenantId: clinic.tenantId, firstName: 'Lucía' },
+      select: { phoneE164: true },
+    });
+    expect(created.phoneE164).toBe('+584125550101');
     expect(body).toMatchObject({
       status: 'ARRIVED',
       walkIn: true,

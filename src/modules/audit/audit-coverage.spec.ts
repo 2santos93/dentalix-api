@@ -11,6 +11,7 @@ import { AUDIT_OPTIONS, type AuditOptions } from './presentation/audit-options';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 import { AuthController } from '../auth/presentation/auth.controller';
 import { PatientsController } from '../patients/presentation/patients.controller';
+import { CallerLookupController } from '../caller-lookup/presentation/caller-lookup.controller';
 import { PatientAgreementsController } from '../patient-agreements/presentation/patient-agreements.controller';
 import { PatientCoveragesController } from '../patient-coverages/presentation/patient-coverages.controller';
 import { PatientResponsiblePartiesController } from '../patients/presentation/patient-responsible-parties.controller';
@@ -150,6 +151,16 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'PATIENT',
     resourceId: RES,
     patient: RES,
+  },
+  // DX-224: «¿Quién llama?», una lectura por paciente encontrado (`perMatch`);
+  // el número buscado nunca va al evento.
+  'POST /patients/lookup-by-phone': {
+    action: 'VIEW',
+    resource: 'PATIENT',
+    resourceId: RES,
+    patient: RES,
+    reason: 'CALLER_LOOKUP',
+    perMatch: true,
   },
   'GET /patients/:id': {
     action: 'VIEW',
@@ -1792,6 +1803,7 @@ const KNOWN_UNAUDITED: Record<string, string> = {
 const CONTROLLERS: Type[] = [
   AuthController,
   PatientsController,
+  CallerLookupController,
   PatientAnamnesisRequestsController,
   PatientSignatureRequestsController,
   MedicalHistorySubmissionsController,

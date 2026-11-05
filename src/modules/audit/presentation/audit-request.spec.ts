@@ -576,6 +576,55 @@ describe('buildAuditDrafts: estado de cuenta familiar (SEC-044)', () => {
   });
 });
 
+describe('buildAuditDrafts: «¿Quién llama?» (DX-224)', () => {
+  const A = '99999999-9999-4999-8999-999999999991';
+  const B = '99999999-9999-4999-8999-999999999992';
+  const lookup: AuditOptions = {
+    action: 'VIEW',
+    resource: 'PATIENT',
+    resourceId: { response: 'id' },
+    patient: { response: 'id' },
+    reason: 'CALLER_LOOKUP',
+    perMatch: true,
+  };
+
+  it('deja una lectura por paciente encontrado y nunca el número buscado', () => {
+    const drafts = buildAuditDrafts(
+      lookup,
+      req({ body: { phone: '0412-1234567' } }),
+      { matches: [{ id: A }, { id: B }] },
+      scope,
+    );
+    expect(drafts.map((d) => d.resourceId)).toEqual([A, B]);
+    expect(drafts.map((d) => d.patient)).toEqual([
+      { kind: 'patient', id: A },
+      { kind: 'patient', id: B },
+    ]);
+    expect(drafts.every((d) => d.action === 'VIEW')).toBe(true);
+    expect(drafts.every((d) => d.metadata.reason === 'CALLER_LOOKUP')).toBe(
+      true,
+    );
+    expect(JSON.stringify(drafts)).not.toContain('1234567');
+  });
+
+  it('sin coincidencias deja un solo evento sin paciente, con rows 0 y sin el número', () => {
+    const drafts = buildAuditDrafts(
+      lookup,
+      req({ body: { phone: '0412-1234567' } }),
+      { matches: [] },
+      scope,
+    );
+    expect(drafts).toHaveLength(1);
+    expect(drafts[0].patient).toBeNull();
+    expect(drafts[0].resourceId).toBeNull();
+    expect(drafts[0].metadata).toMatchObject({
+      reason: 'CALLER_LOOKUP_NO_MATCH',
+      search: { rows: 0 },
+    });
+    expect(JSON.stringify(drafts)).not.toContain('1234567');
+  });
+});
+
 describe('loginActor (DX-009)', () => {
   const token = (payload: object) =>
     `h.${Buffer.from(JSON.stringify(payload)).toString('base64url')}.s`;

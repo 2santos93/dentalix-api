@@ -147,6 +147,12 @@ function throttlers(
       generateKey: (context, _ip, name) =>
         staffActorRateLimitKey(name, request(context).headers.authorization),
     },
+    {
+      // DX-224: «¿Quién llama?», un balde por clínica + usuario.
+      ...strict('caller-lookup'),
+      generateKey: (context, _ip, name) =>
+        staffActorRateLimitKey(name, request(context).headers.authorization),
+    },
   ];
 }
 

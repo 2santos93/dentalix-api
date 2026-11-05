@@ -84,4 +84,10 @@ export interface AuditOptions {
    * encuentra la lectura. Sin importes ni nombres.
    */
   familyStatement?: true;
+  /**
+   * DX-224: «¿Quién llama?». La respuesta trae `matches` (los pacientes que
+   * tienen ese teléfono): se registra UN evento de lectura por paciente, con
+   * su `id` como recurso y paciente. Nada del número buscado va al evento.
+   */
+  perMatch?: true;
 }

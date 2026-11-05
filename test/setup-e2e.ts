@@ -25,6 +25,7 @@ for (const policy of [
   'DIRECT_UPLOAD',
   'PATIENT_IMPORT',
   'EXCHANGE_RATES',
+  'CALLER_LOOKUP',
   'ANAMNESIS',
   'ANAMNESIS_TOKEN',
   'SIGNATURE',

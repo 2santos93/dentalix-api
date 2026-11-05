@@ -125,3 +125,39 @@ describe('PatientBalanceFlags (DX-472-bis, revisión M1): la agenda no depende d
     });
   });
 });
+
+describe('PatientBalanceFlags.viewsForPatients (DX-224): saldo pendiente por moneda', () => {
+  const calculator = {
+    computeMany: jest.fn(() => Promise.resolve(new Map())),
+  } as unknown as PlanBalanceCalculator;
+
+  it('ADMIN y RECEPTION ven el pendiente; DENTIST y ASSISTANT solo la marca', async () => {
+    const flags = new PatientBalanceFlags(repo, () => NOW, calculator);
+    for (const role of [ClinicRole.ADMIN, ClinicRole.RECEPTION]) {
+      const view = (await flags.viewsForPatients(['pat-1'], role)).get('pat-1');
+      expect(view?.pending).toEqual([{ currency: 'USD', amount: 100 }]);
+      expect(view?.overdue.hasOverdue).toBe(true);
+    }
+    for (const role of [ClinicRole.DENTIST, ClinicRole.ASSISTANT]) {
+      const view = (await flags.viewsForPatients(['pat-1'], role)).get('pat-1');
+      expect(view?.pending).toEqual([]);
+      expect(view?.overdue).toMatchObject({ hasOverdue: true });
+      expect(view?.overdue.amounts).toBeUndefined();
+    }
+  });
+
+  it('un paciente sin deuda (o sin libro) trae la vista vacía', async () => {
+    const empty = {
+      ledgersOf: () => Promise.resolve([]),
+      locationTimeZones: () => Promise.resolve(() => 'America/Caracas'),
+    } as unknown as CollectionsRepository;
+    const flags = new PatientBalanceFlags(empty, () => NOW, calculator);
+    const view = (
+      await flags.viewsForPatients(['pat-9'], ClinicRole.ADMIN)
+    ).get('pat-9');
+    expect(view).toEqual({
+      overdue: { hasOverdue: false, overdueDays: null },
+      pending: [],
+    });
+  });
+});

@@ -318,7 +318,8 @@ function familyMemberIds(body: unknown): string[] {
 /**
  * Los eventos de una petición que terminó bien: el de `buildAuditDraft` o,
  * en un cobro dividido (DX-390, `splitPayment`), uno por línea de la
- * respuesta (`payments`), cada uno con su abono y su referencia.
+ * respuesta (`payments`), cada uno con su abono y su referencia; y en «¿Quién
+ * llama?» (DX-224, `perMatch`), uno por paciente de `matches`.
  */
 export function buildAuditDrafts(
   options: AuditOptions,
@@ -340,6 +341,36 @@ export function buildAuditDrafts(
     return ids.length === 0
       ? [base]
       : ids.map((id) => ({ ...base, patient: { kind: 'patient', id } }));
+  }
+  if (options.perMatch) {
+    const matches =
+      typeof responseBody === 'object' &&
+      responseBody !== null &&
+      Array.isArray((responseBody as { matches?: unknown }).matches)
+        ? (responseBody as { matches: unknown[] }).matches
+        : [];
+    if (matches.length === 0) {
+      // Sin coincidencias también queda rastro (probar números a ciegas no
+      // puede ser invisible): un evento sin paciente, sin el número y con
+      // `rows: 0`.
+      const draft = buildAuditDraft(options, req, {}, scope, resultCount);
+      return draft
+        ? [
+            {
+              ...draft,
+              metadata: {
+                ...draft.metadata,
+                reason: 'CALLER_LOOKUP_NO_MATCH',
+                search: { rows: 0 },
+              },
+            },
+          ]
+        : [];
+    }
+    return matches.flatMap((match) => {
+      const draft = buildAuditDraft(options, req, match, scope, resultCount);
+      return draft ? [draft] : [];
+    });
   }
   if (!options.splitPayment) {
     const draft = buildAuditDraft(

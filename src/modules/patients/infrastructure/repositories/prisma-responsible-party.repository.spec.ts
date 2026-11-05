@@ -84,9 +84,13 @@ describe('PrismaResponsiblePartyRepository (DX-327, fase 1)', () => {
     const locks: string[] = [];
     const tx = {
       $queryRaw: (sql: TemplateStringsArray) => {
-        locks.push(sql.join('?'));
+        const text = sql.join('?');
+        // DX-224: la lectura del teléfono sin E.164 no es un bloqueo de fila.
+        if (text.includes('"phoneE164"')) return Promise.resolve([]);
+        locks.push(text);
         return Promise.resolve([{ documentType: stored }]);
       },
+      location: { findFirst: () => Promise.resolve(null) },
       patientResponsibleParty: {
         create: ({ data }: { data: Record<string, unknown> }) => {
           writes.push(data);
@@ -102,7 +106,10 @@ describe('PrismaResponsiblePartyRepository (DX-327, fase 1)', () => {
     const prisma = {
       runWithTenant: <T>(work: (client: typeof tx) => Promise<T>) => work(tx),
     };
-    const tenantContext = { getTenantId: () => 't1' };
+    const tenantContext = {
+      getTenantId: () => 't1',
+      getLocationId: () => undefined,
+    };
     const repo = new PrismaResponsiblePartyRepository(
       prisma as never,
       tenantContext as never,

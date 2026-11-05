@@ -1,3 +1,8 @@
+import { storedPhoneE164 } from '../../patients/domain/caller-lookup/caller-phone';
+import {
+  defaultPhoneRegionIn,
+  reconcilePatientPhoneE164,
+} from '../../patients/infrastructure/phone-e164';
 import { Injectable } from '@nestjs/common';
 import {
   Prisma,
@@ -1205,7 +1210,10 @@ export class PrismaPatientImportRepository {
    * siga fallando queda FAILED: el resto del lote sigue.
    */
   async processChunk(
-    batch: Pick<PatientImportBatch, 'id' | 'duplicateMode' | 'confirmedById'>,
+    batch: Pick<
+      PatientImportBatch,
+      'id' | 'duplicateMode' | 'confirmedById' | 'locationId'
+    >,
     size: number,
     channel: ContactChannel,
   ): Promise<ChunkResult> {
@@ -1292,7 +1300,10 @@ export class PrismaPatientImportRepository {
 
   private async applyRows(
     tx: Tx,
-    batch: Pick<PatientImportBatch, 'id' | 'duplicateMode' | 'confirmedById'>,
+    batch: Pick<
+      PatientImportBatch,
+      'id' | 'duplicateMode' | 'confirmedById' | 'locationId'
+    >,
     rows: { id: string; rowNumber: number; data: Prisma.JsonValue }[],
     channel: ContactChannel,
   ): Promise<ChunkResult> {
@@ -1372,18 +1383,21 @@ export class PrismaPatientImportRepository {
       const now = new Date();
       // ON CONFLICT DO NOTHING (patients_tenant_doc_key): dos filas del mismo
       // documento en el bloque (no debería: el dry-run las quita) crean uno.
+      // DX-224: el E.164 en el mismo INSERT, con el prefijo de la sede del lote.
+      const batchRegion = await defaultPhoneRegionIn(tx, batch.locationId);
       const created = await tx.patient.createManyAndReturn({
         skipDuplicates: true,
         select: { id: true, docNumber: true },
-        data: fresh.map((r) =>
-          importedPatientData(r.data, {
+        data: fresh.map((r) => ({
+          ...importedPatientData(r.data, {
             tenantId,
             importBatchId: batch.id,
             contactChannel: channel,
             createdById: batch.confirmedById,
             now,
           }),
-        ),
+          phoneE164: storedPhoneE164(r.data.phone, batchRegion),
+        })),
       });
       const idByDoc = new Map(created.map((p) => [p.docNumber, p.id]));
       const used = new Set<string>();
@@ -1415,6 +1429,21 @@ export class PrismaPatientImportRepository {
         patientId: null,
         filled: null,
       });
+    }
+
+    // DX-224: el E.164 de los teléfonos que acaban de entrar o se rellenaron,
+    // con el prefijo de la sede del lote.
+    const touched = outcomes.flatMap((o) =>
+      (o.outcome === 'CREATED' || o.outcome === 'FILLED') && o.patientId
+        ? [o.patientId]
+        : [],
+    );
+    if (touched.length > 0) {
+      await reconcilePatientPhoneE164(
+        tx,
+        touched,
+        await defaultPhoneRegionIn(tx, batch.locationId),
+      );
     }
 
     // Solo cuenta lo que de verdad pasó de PENDING a su resultado.
