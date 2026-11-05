@@ -6,6 +6,11 @@ import { PaymentMethodGate } from './application/payment-method-gate';
 import { PaymentProofUploads } from './application/payment-proof-uploads';
 import { PaymentProofs } from './application/payment-proofs';
 import {
+  PaymentProofJobs,
+  PaymentProofPendingSweep,
+} from './application/payment-proof-sweep';
+import { JobsModule } from '../jobs/jobs.module';
+import {
   PAYMENT_PROOF_UPLOAD_TTL,
   PAYMENT_PROOF_URL_TTL,
 } from './application/payment-proof-tokens';
@@ -80,6 +85,7 @@ import { PrismaExternalInvoiceRepository } from './infrastructure/repositories/p
     JwtModule.register({}),
     // DX-389: el almacén privado de los comprobantes.
     StorageModule,
+    JobsModule,
     ExchangeModule,
     DocumentTypeNamesModule,
     TreatmentPlansModule,
@@ -110,6 +116,9 @@ import { PrismaExternalInvoiceRepository } from './infrastructure/repositories/p
     // DX-389: comprobante del cobro (subida directa al almacén privado).
     PaymentProofUploads,
     PaymentProofs,
+    // DX-389 (M1): barrido diario de los comprobantes pendientes sin entregar.
+    PaymentProofPendingSweep,
+    PaymentProofJobs,
     CreatePaymentProofUploadUseCase,
     GetPaymentProofUrlUseCase,
     { provide: PAYMENT_PROOF_URL_TTL, useValue: PROOF_URL_TTL_SECONDS },

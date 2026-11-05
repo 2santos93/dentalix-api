@@ -154,7 +154,12 @@ export class InMemoryPaymentRepository implements PaymentRepository {
     const attachment = this.proofs.get(paymentId);
     return Promise.resolve(
       row && attachment
-        ? { paymentId, patientId: row.patientId, attachment }
+        ? {
+            paymentId,
+            patientId: row.patientId,
+            locationId: row.locationId,
+            attachment,
+          }
         : null,
     );
   }

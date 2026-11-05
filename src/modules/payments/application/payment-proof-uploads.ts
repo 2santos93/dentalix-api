@@ -263,6 +263,7 @@ export class PaymentProofUploads {
     }
     return {
       attachment: {
+        uploadId,
         key,
         mime: detected,
         size: info.size,

@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { INestApplication } from '@nestjs/common';
@@ -12,8 +12,10 @@ import {
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createE2eApp } from './support/create-e2e-app';
+import { PasswordService } from '../src/shared/crypto/password.service';
 import {
   Clinic,
+  SEEDED_PASSWORD,
   loginAs,
   registerClinic,
   resetDatabase,
@@ -26,6 +28,11 @@ import {
   webpFixture,
 } from './support/document-fixtures';
 import { fixedSedeDay } from './support/sede-clock';
+import { PAYMENT_PROOF_URL_TTL } from '../src/modules/payments/application/payment-proof-tokens';
+import {
+  REGIONAL_CARACAS_FIXTURE,
+  locationBody,
+} from './support/location-fixtures';
 
 // DX-389 en HTTP real: el comprobante del cobro (captura del pago móvil o de
 // la transferencia) se sube con un POST prefirmado al almacén privado, se
@@ -38,6 +45,8 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 const STORAGE_ROOT = process.env.STORAGE_DIR ?? './storage-test';
 // Un día fijo y pasado en la sede: no cruza la medianoche de la sede (DX-209).
 const TODAY = fixedSedeDay().day;
+/** TTL de la URL firmada en este spec: corto, para probar que caduca. */
+const URL_TTL_SECONDS = 2;
 const hex = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
 
 interface TicketBody {
@@ -188,7 +197,12 @@ describe('Comprobante del cobro (e2e, DX-389)', () => {
     ).body as MethodBody[];
 
   beforeAll(async () => {
-    app = await createE2eApp();
+    app = await createE2eApp({
+      override: (builder) =>
+        builder
+          .overrideProvider(PAYMENT_PROOF_URL_TTL)
+          .useValue(URL_TTL_SECONDS),
+    });
     await resetDatabase(raw);
     a = await registerClinic(app, 'dx389-a');
     b = await registerClinic(app, 'dx389-b');
@@ -586,6 +600,18 @@ describe('Comprobante del cobro (e2e, DX-389)', () => {
         .expect(404);
     });
 
+    it('la URL caduca: pasado el TTL el almacén responde 403', async () => {
+      const body = (
+        await callA('get', `/payments/${paymentId}/proof/url`).expect(200)
+      ).body as { url: string; expiresAt: string };
+      expect(Date.parse(body.expiresAt) - Date.now()).toBeLessThanOrEqual(
+        URL_TTL_SECONDS * 1000,
+      );
+      await fetchSigned(body.url).expect(200);
+      await new Promise((r) => setTimeout(r, (URL_TTL_SECONDS + 1.2) * 1000));
+      await fetchSigned(body.url).expect(403);
+    });
+
     it('la fila es append-only para la app (no se cambia ni se borra)', async () => {
       const row = await raw.paymentProof.findFirstOrThrow({
         where: { paymentId },
@@ -612,6 +638,184 @@ describe('Comprobante del cobro (e2e, DX-389)', () => {
       } finally {
         await app_.$disconnect();
       }
+    });
+  });
+  describe('sede del abono (DX-089)', () => {
+    let sedeA: string;
+    let sedeB: string;
+    let restricted: string;
+    let paymentA: string;
+    let paymentB: string;
+
+    const payAt = async (locationId: string) => {
+      const ticket = await uploadFile(pngFixture(), {
+        name: 'sede.png',
+        mimeType: 'image/png',
+      });
+      const res = await pay({
+        paymentMethodId: optional,
+        proofUploadId: ticket.uploadId,
+      })
+        .set('X-Location-Id', locationId)
+        .expect(201);
+      return (res.body as PaymentBody).id;
+    };
+
+    beforeAll(async () => {
+      sedeA = (
+        (await callA('get', '/locations', ClinicRole.ADMIN).expect(200))
+          .body as { id: string }[]
+      )[0].id;
+      sedeB = (
+        (
+          await callA('post', '/locations', ClinicRole.ADMIN)
+            .send(
+              locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede Norte' }),
+            )
+            .expect(201)
+        ).body as { id: string }
+      ).id;
+      const member = await raw.user.create({
+        data: {
+          email: 'recepcion-sede-a@dx389.test',
+          passwordHash: await new PasswordService().hash(SEEDED_PASSWORD),
+          fullName: 'Recepción Sede A',
+          emailVerifiedAt: new Date(),
+        },
+        select: { id: true },
+      });
+      await raw.clinicMembership.create({
+        data: {
+          tenantId: a.tenantId,
+          userId: member.id,
+          role: ClinicRole.RECEPTION,
+        },
+      });
+      await as(
+        api().put(`/api/v1/staff/${member.id}/locations`),
+        a,
+        a.adminToken,
+      )
+        .send({ locationIds: [sedeA] })
+        .expect(200);
+      paymentA = await payAt(sedeA);
+      paymentB = await payAt(sedeB);
+      restricted = await loginAs(app, a.host, 'recepcion-sede-a@dx389.test');
+    });
+
+    it('un miembro restringido a la Sede A ve el comprobante de su sede y NO el de la Sede B (403, como el recibo)', async () => {
+      const as_ = (url: string) =>
+        as(api().get(`/api/v1${url}`), a, restricted);
+      await as_(`/payments/${paymentA}/proof/url`).expect(200);
+      const denied = await as_(`/payments/${paymentB}/proof/url`).expect(403);
+      expect(denied.body).toMatchObject({ code: 'LOCATION_NOT_ALLOWED' });
+      await as_(`/payments/${paymentB}/receipt`).expect(403);
+      // Sin auditoría de la consulta denegada.
+      const events = await raw.auditEvent.findMany({
+        where: { resourceType: 'PAYMENT', resourceId: paymentB },
+      });
+      expect(JSON.stringify(events.map((e) => e.metadata))).not.toContain(
+        'PAYMENT_PROOF_VIEW',
+      );
+      // ADMIN (sin restricción) sí.
+      await callA(
+        'get',
+        `/payments/${paymentB}/proof/url`,
+        ClinicRole.ADMIN,
+      ).expect(200);
+    });
+  });
+
+  describe('una subida respalda un solo abono (L1, L3)', () => {
+    it('reusar una subida ya entregada es 404; repetirla en dos líneas de un cobro dividido es 400', async () => {
+      const ticket = await uploadFile(pngFixture(), {
+        name: 'u.png',
+        mimeType: 'image/png',
+      });
+      await pay({
+        paymentMethodId: optional,
+        proofUploadId: ticket.uploadId,
+      }).expect(201);
+      await pay({
+        paymentMethodId: optional,
+        proofUploadId: ticket.uploadId,
+      }).expect(404);
+
+      const again = await uploadFile(pngFixture(), {
+        name: 'v.png',
+        mimeType: 'image/png',
+      });
+      const before = await raw.payment.count({
+        where: { tenantId: a.tenantId },
+      });
+      const res = await callA(
+        'post',
+        `/treatment-plans/${planA}/split-payments`,
+      )
+        .send({
+          paidAt: TODAY,
+          lines: [
+            {
+              amount: 500,
+              currency: 'VES',
+              paymentMethodId: optional,
+              proofUploadId: again.uploadId,
+            },
+            {
+              amount: 600,
+              currency: 'VES',
+              paymentMethodId: required,
+              proofUploadId: again.uploadId,
+            },
+          ],
+        })
+        .expect(400);
+      expect(messageOf(res)).toContain('propio comprobante');
+      expect(await raw.payment.count({ where: { tenantId: a.tenantId } })).toBe(
+        before,
+      );
+    });
+
+    it('Idempotency-Key: repetir la misma petición devuelve el abono original; con otro comprobante, 422', async () => {
+      const key = randomUUID();
+      const first = await uploadFile(pngFixture(), {
+        name: 'k1.png',
+        mimeType: 'image/png',
+      });
+      const send = (proofUploadId: string) =>
+        pay({ paymentMethodId: optional, proofUploadId }).set(
+          'Idempotency-Key',
+          key,
+        );
+      const created = (await send(first.uploadId).expect(201))
+        .body as PaymentBody;
+      const replay = (await send(first.uploadId).expect(201))
+        .body as PaymentBody;
+      expect(replay.id).toBe(created.id);
+      expect(
+        await raw.paymentProof.count({ where: { paymentId: created.id } }),
+      ).toBe(1);
+      const other = await uploadFile(pngFixture(), {
+        name: 'k2.png',
+        mimeType: 'image/png',
+      });
+      await send(other.uploadId).expect(422);
+    });
+
+    it('un abono sin medio admite comprobante (OPTIONAL)', async () => {
+      const ticket = await uploadFile(pngFixture(), {
+        name: 'm.png',
+        mimeType: 'image/png',
+      });
+      const res = await callA('post', `/treatment-plans/${planA}/payments`)
+        .send({
+          amount: 100,
+          currency: 'VES',
+          paidAt: TODAY,
+          proofUploadId: ticket.uploadId,
+        })
+        .expect(201);
+      expect((res.body as PaymentBody).hasProof).toBe(true);
     });
   });
 });

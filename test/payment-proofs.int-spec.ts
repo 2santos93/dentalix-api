@@ -25,11 +25,20 @@ const SUBDOMAINS = ['proof-int-a', 'proof-int-b'];
 interface Seeded {
   tenantId: string;
   paymentId: string;
+  locationId: string;
+  patientId: string;
+  planId: string;
 }
 
-const proofData = (tenantId: string, paymentId: string, key: string) => ({
+const proofData = (
+  tenantId: string,
+  paymentId: string,
+  key: string,
+  uploadId: string = randomUUID(),
+) => ({
   tenantId,
   paymentId,
+  uploadId,
   key,
   mime: 'image/png',
   size: 120,
@@ -80,7 +89,13 @@ async function seed(subdomain: string): Promise<Seeded> {
       paidAt: new Date('2026-11-04T16:00:00.000Z'),
     },
   });
-  return { tenantId: tenant.id, paymentId: payment.id };
+  return {
+    tenantId: tenant.id,
+    paymentId: payment.id,
+    locationId: location.id,
+    patientId: patient.id,
+    planId: plan.id,
+  };
 }
 
 describe('payment_proofs en la BD (DX-389)', () => {
@@ -158,6 +173,50 @@ describe('payment_proofs en la BD (DX-389)', () => {
         data: proofData(b.tenantId, b.paymentId, keyA),
       }),
     ).rejects.toThrow(/unique/i);
+  });
+
+  it('una subida respalda un solo abono: la misma en otro abono de la clínica es único (L1)', async () => {
+    const uploadId = randomUUID();
+    const second = await raw.payment.create({
+      data: {
+        tenantId: a.tenantId,
+        locationId: a.locationId,
+        treatmentPlanId: a.planId,
+        patientId: a.patientId,
+        amount: 10,
+        currency: 'USD',
+        paidAt: new Date('2026-11-04T17:00:00.000Z'),
+      },
+    });
+    const third = await raw.payment.create({
+      data: {
+        tenantId: a.tenantId,
+        locationId: a.locationId,
+        treatmentPlanId: a.planId,
+        patientId: a.patientId,
+        amount: 11,
+        currency: 'USD',
+        paidAt: new Date('2026-11-04T18:00:00.000Z'),
+      },
+    });
+    await raw.paymentProof.create({
+      data: proofData(a.tenantId, second.id, `x/${randomUUID()}.png`, uploadId),
+    });
+    await expect(
+      raw.paymentProof.create({
+        data: proofData(
+          a.tenantId,
+          third.id,
+          `x/${randomUUID()}.png`,
+          uploadId,
+        ),
+      }),
+    ).rejects.toThrow(/unique/i);
+  });
+
+  it('la ubicación del abono llega con el comprobante (sede, DX-089)', async () => {
+    const found = await inTenant(a.tenantId, () => repo.findProof(a.paymentId));
+    expect(found?.locationId).toBe(a.locationId);
   });
 
   it('CHECK: solo JPG, PNG, WebP o PDF de hasta 10 MB y huella hex', async () => {

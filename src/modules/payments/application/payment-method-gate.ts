@@ -122,7 +122,9 @@ export class PaymentMethodGate {
     if (error !== null) throw new BadRequestException(error);
     const proofUploadId = input.proofUploadId?.trim() || null;
     const proofError = proofPolicyError(
-      medium?.proofPolicy ?? 'NONE',
+      // Sin medio resuelto (abono sin método) no hay política que aplicar: el
+      // comprobante se admite como OPTIONAL, nunca se exige (DX-389, L5).
+      medium?.proofPolicy ?? 'OPTIONAL',
       proofUploadId !== null,
     );
     if (proofError !== null) throw new BadRequestException(proofError);

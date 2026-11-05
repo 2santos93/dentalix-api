@@ -5,6 +5,7 @@ import {
 } from '../../../../shared/storage/file-storage.port';
 import { RecordAuditEventUseCase } from '../../../audit/application/record-audit-event.use-case';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { PROOF_NOT_FOUND_MESSAGE } from '../../domain/payment-proof';
 import {
   PAYMENT_REPOSITORY,
@@ -29,6 +30,7 @@ export class GetPaymentProofUrlUseCase {
     private readonly audit: RecordAuditEventUseCase,
     @Inject(PAYMENT_CLOCK) private readonly clock: PaymentClock,
     @Inject(PAYMENT_PROOF_URL_TTL) private readonly ttlSeconds: number,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   /**
@@ -47,6 +49,9 @@ export class GetPaymentProofUrlUseCase {
     const issuedAt = this.clock();
     const proof = await this.repo.findProof(paymentId);
     if (!proof) throw new NotFoundException(PROOF_NOT_FOUND_MESSAGE);
+    // DX-089 / DX-525: la sede del abono manda, como en su recibo: un miembro
+    // restringido a otras sedes no ve su comprobante (403 antes de firmar nada).
+    this.tenantContext.assertLocationAllowed(proof.locationId);
     const { attachment } = proof;
     const url = await this.storage.getSignedUrl(
       attachment.key,

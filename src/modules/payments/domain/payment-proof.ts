@@ -29,7 +29,16 @@ export const PROOF_REQUIRED_MESSAGE =
 export const PROOF_NOT_ALLOWED_MESSAGE =
   'Este medio de pago no admite comprobante.';
 export const PROOF_REJECTED_CODE = 'PAYMENT_PROOF_REJECTED';
+export const PROOF_ALREADY_USED_MESSAGE =
+  'Este comprobante ya está adjunto a otro abono. Sube un archivo nuevo.';
+export const PROOF_DUPLICATE_LINES_MESSAGE =
+  'Cada forma de pago lleva su propio comprobante: no repitas la misma subida.';
 export const PROOF_NOT_FOUND_MESSAGE = 'El abono no tiene comprobante.';
+
+/** Todo lo subido y aún sin entregar a un abono vive bajo este prefijo. */
+export const PENDING_PROOF_PREFIX = 'payment-proofs/pending/';
+/** Un pendiente de más de 24 h ya no lo entregará nadie (el POST prefirmado vale 15 min). */
+export const PENDING_PROOF_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 /** Las URL firmadas para ver o descargar el comprobante viven 5 minutos. */
 export const PROOF_URL_TTL_SECONDS = 300;
@@ -202,6 +211,11 @@ export function declaredMatchesDetected(
 
 /** Lo ya comprobado y copiado a su clave definitiva, listo para la fila. */
 export interface PaymentProofAttachment {
+  /**
+   * La subida (`uploadId`) que lo originó: la BD la deja usar una sola vez
+   * (único por clínica), así un mismo archivo no respalda dos abonos.
+   */
+  uploadId: string;
   /** Clave en el almacén: no sale nunca por la API. */
   key: string;
   mime: PaymentProofMime;

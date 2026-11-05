@@ -1,4 +1,9 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { TreatmentPlanStatus } from '@prisma/client';
 import {
   heicFixture,
@@ -23,6 +28,7 @@ import type { TreatmentPlanDetail } from '../../treatment-plans/domain/entities/
 import {
   MAX_PAYMENT_PROOF_BYTES,
   PROOF_NOT_ALLOWED_MESSAGE,
+  PROOF_ALREADY_USED_MESSAGE,
   PROOF_NOT_FOUND_MESSAGE,
   PROOF_REJECTED_CODE,
   PROOF_REQUIRED_MESSAGE,
@@ -32,6 +38,7 @@ import {
 import { PaymentMethodGate } from './payment-method-gate';
 import { InMemoryPaymentRepository } from './use-cases/__fixtures__/in-memory-payment.repository';
 import {
+  PROOF_TENANT_ID,
   PROOF_USER,
   buildPaymentProofKit,
   sha256Of,
@@ -405,6 +412,7 @@ describe('ver o descargar el comprobante (DX-389)', () => {
       audit,
       () => NOW,
       300,
+      kit.tenant,
     );
     return { repo, kit, payment, url, events };
   }
@@ -493,5 +501,204 @@ describe('abono al saldo migrado con comprobante (DX-389)', () => {
     });
     expect(payment.hasProof).toBe(true);
     expect(repo.lastCreateInput?.proof?.mime).toBe('image/webp');
+  });
+});
+
+describe('revisión DX-389 (ronda 1)', () => {
+  const PAYMENT_KEY = '3f2504e0-4f89-41d3-9a0c-0305e82c3301';
+
+  // --- L4 / H1: la sede del abono manda para ver su comprobante ---
+  describe('sede del abono (H1, DX-089)', () => {
+    async function withProofIn() {
+      const { repo, kit, uc } = build();
+      const uploadId = await kit.upload(pngFixture());
+      const payment = await pay(uc, kit, {
+        paymentMethodId: 'm-opt',
+        proofUploadId: uploadId,
+      });
+      const events: AuditEventDraft[] = [];
+      const audit = {
+        record: (e: AuditEventDraft) => {
+          events.push(e);
+          return Promise.resolve();
+        },
+      } as unknown as RecordAuditEventUseCase;
+      const url = new GetPaymentProofUrlUseCase(
+        repo,
+        kit.storage,
+        audit,
+        () => NOW,
+        300,
+        kit.tenant,
+      );
+      const sign = jest.spyOn(kit.storage, 'getSignedUrl');
+      const ctx = {
+        tenantId: 't1',
+        locationId: null,
+        actor: { userId: PROOF_USER, role: 'RECEPTION' },
+        requestId: 'r',
+        ip: null,
+        userAgent: null,
+      } as unknown as AuditRequestContext;
+      return { kit, payment, url, events, sign, ctx };
+    }
+
+    it('un miembro restringido a otras sedes: 403 antes de firmar y sin auditar', async () => {
+      const { kit, payment, url, events, sign, ctx } = await withProofIn();
+      // El abono del fake es de la sede `loc-1`.
+      await expect(
+        kit.tenant.run(
+          PROOF_TENANT_ID,
+          undefined,
+          () => url.execute(payment.id, 'inline', ctx),
+          ['loc-2'],
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(sign).not.toHaveBeenCalled();
+      expect(events).toEqual([]);
+    });
+
+    it('con su sede (o sin restricción) lo ve', async () => {
+      const { kit, payment, url, ctx } = await withProofIn();
+      await expect(
+        kit.tenant.run(
+          PROOF_TENANT_ID,
+          undefined,
+          () => url.execute(payment.id, 'inline', ctx),
+          ['loc-1'],
+        ),
+      ).resolves.toMatchObject({ disposition: 'inline' });
+      await expect(
+        kit.inTenant(() => url.execute(payment.id, 'attachment', ctx)),
+      ).resolves.toMatchObject({ disposition: 'attachment' });
+    });
+  });
+
+  // --- L1: una subida respalda un solo abono ---
+  it('reusar la subida de un abono ya registrado: 404 (el pendiente se consumió)', async () => {
+    const { kit, uc } = build();
+    const uploadId = await kit.upload(pngFixture());
+    await pay(uc, kit, { paymentMethodId: 'm-opt', proofUploadId: uploadId });
+    await expect(
+      pay(uc, kit, { paymentMethodId: 'm-opt', proofUploadId: uploadId }),
+    ).rejects.toThrow(new NotFoundException(UPLOAD_NOT_FOUND_MESSAGE));
+  });
+
+  it('si la BD dice que la subida ya respalda otro abono (carrera), 400 en español y no queda la copia', async () => {
+    const { repo, kit, uc } = build();
+    const uploadId = await kit.upload(pngFixture());
+    jest
+      .spyOn(repo, 'create')
+      .mockRejectedValueOnce(
+        new BadRequestException(PROOF_ALREADY_USED_MESSAGE),
+      );
+    await expect(
+      pay(uc, kit, { paymentMethodId: 'm-opt', proofUploadId: uploadId }),
+    ).rejects.toThrow(new BadRequestException(PROOF_ALREADY_USED_MESSAGE));
+    expect(
+      [...kit.storage.files.keys()].filter((k) => !k.includes('/pending/')),
+    ).toEqual([]);
+  });
+
+  // --- L2: la limpieza no tapa el error original ---
+  it('si falla el alta Y la limpieza, el error es el del alta y la copia se intenta borrar igual', async () => {
+    const { repo, kit, uc } = build();
+    const uploadId = await kit.upload(pngFixture());
+    jest.spyOn(repo, 'create').mockRejectedValueOnce(new Error('alta rota'));
+    jest
+      .spyOn(repo, 'proofKeyInUse')
+      .mockRejectedValueOnce(new Error('BD caída'));
+    await expect(
+      pay(uc, kit, { paymentMethodId: 'm-opt', proofUploadId: uploadId }),
+    ).rejects.toThrow('alta rota');
+    expect(
+      [...kit.storage.files.keys()].filter((k) => !k.includes('/pending/')),
+    ).toEqual([]);
+  });
+
+  it('si el borrado del pendiente falla tras registrar, el abono sigue siendo correcto', async () => {
+    const { kit, uc } = build();
+    const uploadId = await kit.upload(pngFixture());
+    jest
+      .spyOn(kit.storage, 'delete')
+      .mockRejectedValue(new Error('bucket caído'));
+    const payment = await pay(uc, kit, {
+      paymentMethodId: 'm-opt',
+      proofUploadId: uploadId,
+    });
+    expect(payment.hasProof).toBe(true);
+  });
+
+  // --- L3 / L4: idempotencia con comprobante ---
+  describe('Idempotency-Key con comprobante', () => {
+    const payWithKey = (
+      uc: RecordPaymentUseCase,
+      kit: PaymentProofKit,
+      proofUploadId: string,
+    ) =>
+      kit.inTenant(() =>
+        uc.execute(
+          'plan-1',
+          {
+            amount: 50,
+            currency: 'USD',
+            paidAt: '2026-11-04',
+            paymentMethodId: 'm-opt',
+            proofUploadId,
+          },
+          PROOF_USER,
+          PAYMENT_KEY,
+        ),
+      );
+
+    it('repetir la MISMA petición devuelve el abono original: un solo abono, una sola copia', async () => {
+      const { repo, kit, uc } = build();
+      const uploadId = await kit.upload(pngFixture());
+      const first = await payWithKey(uc, kit, uploadId);
+      const filesAfterFirst = kit.storage.files.size;
+      const spy = jest.spyOn(repo, 'create');
+      const again = await payWithKey(uc, kit, uploadId);
+      expect(again.id).toBe(first.id);
+      expect(spy).not.toHaveBeenCalled();
+      expect(kit.storage.files.size).toBe(filesAfterFirst);
+    });
+
+    it('la misma clave con OTRO comprobante es 422, no el abono original sin él', async () => {
+      const { kit, uc } = build();
+      const first = await kit.upload(pngFixture());
+      await payWithKey(uc, kit, first);
+      const other = await kit.upload(pngFixture());
+      await expect(payWithKey(uc, kit, other)).rejects.toBeInstanceOf(
+        UnprocessableEntityException,
+      );
+    });
+  });
+
+  // --- L5: sin medio resuelto el comprobante se admite como OPTIONAL ---
+  it('un abono sin medio ni método admite comprobante (OPTIONAL) y no lo exige', async () => {
+    const { repo, kit, uc } = build();
+    const bare = await kit.inTenant(() =>
+      uc.execute(
+        'plan-1',
+        { amount: 50, currency: 'USD', paidAt: '2026-11-04' },
+        PROOF_USER,
+      ),
+    );
+    expect(bare.hasProof).toBe(false);
+    const uploadId = await kit.upload(pngFixture());
+    const withProof = await kit.inTenant(() =>
+      uc.execute(
+        'plan-1',
+        {
+          amount: 50,
+          currency: 'USD',
+          paidAt: '2026-11-04',
+          proofUploadId: uploadId,
+        },
+        PROOF_USER,
+      ),
+    );
+    expect(withProof.hasProof).toBe(true);
+    expect(repo.lastCreateInput?.proof?.mime).toBe('image/png');
   });
 });

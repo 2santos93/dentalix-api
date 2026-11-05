@@ -684,7 +684,7 @@ model Patient {
   lastAttentionAt              DateTime?             @map("last_attention_at")
   retentionExtended            RetentionExtension    @default(NONE) @map("retention_extended")
   /// DX-330 (R6): fecha de fin de conservación que la historia ya tenía cuando la clínica redujo su plazo. La escribe solo el cambio de plazo; nunca baja.
-  retentionFloorUntil          DateTime?             @db.Date @map("retention_floor_until")
+  retentionFloorUntil          DateTime?             @map("retention_floor_until") @db.Date
   partiallySuppressedAt        DateTime?             @map("partially_suppressed_at")
   // DX-128: canal OPERATIVO de los avisos automáticos (recordatorios), no el
   // consentimiento de marketing (DX-037). Nace con el de la clínica
@@ -2339,19 +2339,19 @@ enum PaymentMethodKind {
 // a ellos se enlazan los abonos anteriores y los de una réplica o un cliente
 // que solo mandan `method`.
 model ClinicPaymentMethod {
-  id                String            @id @default(uuid()) @db.Uuid
-  tenantId          String            @db.Uuid
+  id                String             @id @default(uuid()) @db.Uuid
+  tenantId          String             @db.Uuid
   name              String
   kind              PaymentMethodKind
-  active            Boolean           @default(true)
-  requiresReference Boolean           @default(false)
+  active            Boolean            @default(true)
+  requiresReference Boolean            @default(false)
   // DX-389: «Pide comprobante» (NONE por defecto).
   proofPolicy       PaymentProofPolicy @default(NONE)
   legacyMethod      PaymentMethod?
-  createdById       String?           @db.Uuid
-  updatedById       String?           @db.Uuid
-  createdAt         DateTime          @default(now())
-  updatedAt         DateTime          @updatedAt
+  createdById       String?            @db.Uuid
+  updatedById       String?            @db.Uuid
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
 
   tenant      Tenant                    @relation(fields: [tenantId], references: [id])
   payments    Payment[]
@@ -2372,21 +2372,24 @@ model ClinicPaymentMethod {
 // por abono, nace con él en la misma transacción y no cambia (append-only).
 // `key` es la clave en el almacén privado: no sale nunca por la API.
 model PaymentProof {
-  id        String   @id @default(uuid()) @db.Uuid
-  tenantId  String   @db.Uuid
-  paymentId String   @db.Uuid
-  key       String
-  mime      String
-  size      Int
-  sha256    String
-  name      String
-  createdById String? @db.Uuid
-  createdAt DateTime @default(now())
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @db.Uuid
+  paymentId   String   @db.Uuid
+  // La subida que lo originó: se consume una sola vez (único por clínica).
+  uploadId    String   @db.Uuid
+  key         String
+  mime        String
+  size        Int
+  sha256      String
+  name        String
+  createdById String?  @db.Uuid
+  createdAt   DateTime @default(now())
 
   tenant  Tenant  @relation(fields: [tenantId], references: [id])
   payment Payment @relation(fields: [tenantId, paymentId], references: [tenantId, id], onDelete: Restrict, map: "payment_proofs_payment_fkey")
 
   @@unique([tenantId, paymentId], map: "payment_proofs_tenant_payment_key")
+  @@unique([tenantId, uploadId], map: "payment_proofs_tenant_upload_key")
   @@unique([key], map: "payment_proofs_key_key")
   @@map("payment_proofs")
 }

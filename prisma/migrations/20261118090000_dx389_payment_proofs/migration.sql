@@ -2,7 +2,8 @@
 --   payment_methods.proofPolicy   «Pide comprobante»: NONE | OPTIONAL | REQUIRED
 --                                 (defecto NONE: aditiva, ningún medio cambia).
 --   payment_proofs                como mucho un comprobante por abono (JPG, PNG,
---                                 WebP o PDF); la clave del objeto es privada.
+--                                 WebP o PDF); la clave del objeto es privada y
+--                                 cada subida respalda un solo abono.
 -- Aditiva: columna con defecto + tabla nueva. RLS FORCE por clínica.
 -- Grants: ALTER DEFAULT PRIVILEGES ya cubre a dentalix_app en tablas nuevas.
 
@@ -17,6 +18,7 @@ CREATE TABLE "payment_proofs" (
     "id" UUID NOT NULL,
     "tenantId" UUID NOT NULL,
     "paymentId" UUID NOT NULL,
+    "uploadId" UUID NOT NULL,
     "key" TEXT NOT NULL,
     "mime" TEXT NOT NULL,
     "size" INTEGER NOT NULL,
@@ -40,6 +42,9 @@ CREATE TABLE "payment_proofs" (
 
 -- Como mucho un comprobante por abono.
 CREATE UNIQUE INDEX "payment_proofs_tenant_payment_key" ON "payment_proofs"("tenantId", "paymentId");
+-- Una subida (el objeto pendiente) respalda un solo abono: se consume al
+-- registrarlo, también con dos peticiones a la vez.
+CREATE UNIQUE INDEX "payment_proofs_tenant_upload_key" ON "payment_proofs"("tenantId", "uploadId");
 -- Una clave de almacén pertenece a una sola fila.
 CREATE UNIQUE INDEX "payment_proofs_key_key" ON "payment_proofs"("key");
 

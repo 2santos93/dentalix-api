@@ -95,7 +95,10 @@ import {
   ADJUSTMENT_LINE_SELECT,
   insertPaymentAdjustments,
 } from './payment-adjustments.persistence';
-import type { PaymentProofAttachment } from '../../domain/payment-proof';
+import {
+  PROOF_ALREADY_USED_MESSAGE,
+  type PaymentProofAttachment,
+} from '../../domain/payment-proof';
 import { collectedAmount } from '../../../payment-methods/domain/payment-adjustments';
 import { toCents } from '../../../../shared/money/money';
 
@@ -725,19 +728,29 @@ export class PrismaPaymentRepository implements PaymentRepository {
     );
     // DX-389: el comprobante nace con el abono, en la misma transacción.
     const proof = input.proof
-      ? await tx.paymentProof.create({
-          data: {
-            tenantId,
-            paymentId: created.id,
-            key: input.proof.key,
-            mime: input.proof.mime,
-            size: input.proof.size,
-            sha256: input.proof.sha256,
-            name: input.proof.name,
-            createdById: input.createdById ?? null,
-          },
-          select: { id: true },
-        })
+      ? await tx.paymentProof
+          .create({
+            data: {
+              tenantId,
+              paymentId: created.id,
+              uploadId: input.proof.uploadId,
+              key: input.proof.key,
+              mime: input.proof.mime,
+              size: input.proof.size,
+              sha256: input.proof.sha256,
+              name: input.proof.name,
+              createdById: input.createdById ?? null,
+            },
+            select: { id: true },
+          })
+          // La subida ya respalda otro abono (único por clínica): 400 en
+          // español, y la transacción entera se deshace.
+          .catch((error: unknown) => {
+            if (isUniqueViolation(error)) {
+              throw new BadRequestException(PROOF_ALREADY_USED_MESSAGE);
+            }
+            throw error;
+          })
       : null;
     const entity = mapToEntity(
       {
@@ -972,13 +985,17 @@ export class PrismaPaymentRepository implements PaymentRepository {
       // anulado conserva su comprobante (es evidencia para conciliar).
       const row = await tx.paymentProof.findFirst({
         where: { tenantId, paymentId },
-        include: { payment: { select: { patientId: true } } },
+        include: {
+          payment: { select: { patientId: true, locationId: true } },
+        },
       });
       if (!row) return null;
       return {
         paymentId: row.paymentId,
         patientId: row.payment.patientId,
+        locationId: row.payment.locationId,
         attachment: {
+          uploadId: row.uploadId,
           key: row.key,
           mime: row.mime as PaymentProofAttachment['mime'],
           size: row.size,

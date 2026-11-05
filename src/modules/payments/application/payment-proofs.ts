@@ -1,4 +1,5 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { currentRequestId } from '../../../shared/observability/request-context';
 import {
   PAYMENT_REPOSITORY,
   type PaymentRepository,
@@ -19,6 +20,8 @@ import {
  */
 @Injectable()
 export class PaymentProofs {
+  private readonly logger = new Logger('PaymentProofs');
+
   constructor(
     private readonly uploads: PaymentProofUploads,
     @Inject(PAYMENT_REPOSITORY) private readonly repo: PaymentRepository,
@@ -33,16 +36,32 @@ export class PaymentProofs {
     return this.uploads.complete(uploadId, uploadedById ?? '');
   }
 
-  /** Tras el intento de alta: `created` dice si el abono se registró. */
+  /**
+   * Tras el intento de alta: `created` dice si el abono se registró. Nunca
+   * lanza: en la ruta de fallo no puede tapar el error original (revisión L2),
+   * y un fallo de limpieza se avisa (sin claves) para que el barrido de
+   * pendientes y el aviso lo recojan.
+   */
   async settle(
     proofs: readonly (CompletedProof | null)[],
     created: boolean,
   ): Promise<void> {
     for (const proof of proofs) {
       if (!proof) continue;
-      if (created) void this.uploads.discard(proof.pendingKey);
-      if (!(await this.repo.proofKeyInUse(proof.attachment.key))) {
-        await this.uploads.discard(proof.attachment.key);
+      try {
+        // El pendiente se borra (esperando) cuando el abono existe: la subida
+        // queda consumida y no se puede entregar a otro abono (revisión L1).
+        if (created) await this.uploads.discard(proof.pendingKey);
+        if (!(await this.repo.proofKeyInUse(proof.attachment.key))) {
+          await this.uploads.discard(proof.attachment.key);
+        }
+      } catch (error) {
+        this.logger.warn(
+          `No se pudo limpiar un comprobante (requestId=${currentRequestId() ?? '-'}, created=${created}, error=${error instanceof Error ? error.name : 'NonError'})`,
+        );
+        // La copia sin fila queda fuera de `pending/`: se intenta borrar sin
+        // consultar la BD (si el abono falló, nadie la usa).
+        if (!created) await this.uploads.discard(proof.attachment.key);
       }
     }
   }

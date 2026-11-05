@@ -12,11 +12,14 @@ import type {
   StoredFile,
   StoredFileStream,
   StoredObjectInfo,
+  StoredObjectPage,
 } from '../file-storage.port';
 import { StorageObjectChangedError } from '../storage-errors';
 
 interface MemoryObject extends StoredFile {
   etag: string;
+  /** Cuándo se guardó (para los barridos de pendientes). */
+  lastModified: Date;
   sha256Base64: string | null;
   metadata: Record<string, string>;
   cacheControl?: string;
@@ -46,6 +49,7 @@ export class InMemoryFileStorage implements FileStoragePort {
       bytes,
       contentType,
       etag: `"v${this.version}"`,
+      lastModified: new Date(),
       sha256Base64: null,
       metadata: {},
       ...extra,
@@ -181,6 +185,34 @@ export class InMemoryFileStorage implements FileStoragePort {
     // eslint-disable-next-line no-restricted-syntax
     this.files.delete(key);
     return Promise.resolve();
+  }
+
+  /** Test helper: envejece un objeto (su `lastModified` pasa a `at`). */
+  touch(key: string, at: Date): void {
+    const file = this.files.get(key);
+    if (file) file.lastModified = at;
+  }
+
+  listObjects(
+    prefix: string,
+    options: { token?: string | null; maxKeys?: number } = {},
+  ): Promise<StoredObjectPage> {
+    const maxKeys = options.maxKeys ?? 200;
+    const after = [...this.files.entries()]
+      .filter(
+        ([key]) =>
+          key.startsWith(prefix) && (!options.token || key > options.token),
+      )
+      .sort(([a], [b]) => (a < b ? -1 : 1));
+    const page = after.slice(0, maxKeys);
+    return Promise.resolve({
+      objects: page.map(([key, f]) => ({
+        key,
+        lastModified: f.lastModified,
+        size: f.bytes.length,
+      })),
+      nextToken: after.length > maxKeys ? page[page.length - 1][0] : null,
+    });
   }
 
   publicUrl(key: string): string {

@@ -297,6 +297,8 @@ export const PAYMENT_REPOSITORY = Symbol('PAYMENT_REPOSITORY');
 export interface PaymentProofRecord {
   paymentId: string;
   patientId: string;
+  /** La sede del abono: manda para quién puede verlo (DX-089). */
+  locationId: string;
   attachment: PaymentProofAttachment;
 }
 

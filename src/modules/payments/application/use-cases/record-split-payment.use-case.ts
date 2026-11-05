@@ -47,6 +47,7 @@ import {
   normalizePaidAt,
   type PreparedPaymentLine,
 } from './record-payment.use-case';
+import { PROOF_DUPLICATE_LINES_MESSAGE } from '../../domain/payment-proof';
 import { PaymentProofs, attachmentOf } from '../payment-proofs';
 import type { CompletedProof } from '../payment-proof-uploads';
 import { round2 } from '../../../../shared/money/money';
@@ -137,6 +138,13 @@ export class RecordSplitPaymentUseCase {
       input.lines.length > SPLIT_MAX_LINES
     ) {
       throw new BadRequestException(SPLIT_LINES_COUNT_MESSAGE);
+    }
+    // DX-389: cada forma de pago lleva su propia subida (400 antes de tocar nada).
+    const uploads = input.lines.flatMap((l) =>
+      l.proofUploadId ? [l.proofUploadId.toLowerCase()] : [],
+    );
+    if (new Set(uploads).size !== uploads.length) {
+      throw new BadRequestException(PROOF_DUPLICATE_LINES_MESSAGE);
     }
     const currencies: string[] = [];
     for (const line of input.lines) {
