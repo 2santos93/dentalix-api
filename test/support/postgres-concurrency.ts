@@ -219,3 +219,59 @@ export async function waitingQueries(
        AND pg_blocking_pids(a.pid) && ${holderPids}::int[]`;
   return rows.map((r) => r.query);
 }
+
+/** Un bloqueo retenido por una transacción propia hasta `release()`. */
+export interface HeldLock {
+  /** PID de la conexión que lo retiene: lo que mira `waitForLockWaiters`. */
+  pid: number;
+  /** Suelta el bloqueo: corre `beforeCommit` (si hay) y hace COMMIT. */
+  release: () => void;
+  /** La transacción del holder; espérala tras `release()`. */
+  done: Promise<void>;
+}
+
+/**
+ * DX-450: `acquire` toma el bloqueo en una transacción del `owner` (SELECT …
+ * FOR UPDATE, FOR NO KEY UPDATE…) y se queda con él hasta `release()`. El
+ * `timeout` de la transacción es mayor que cualquier espera del test. Si
+ * `beforeCommit` existe, se ejecuta con el bloqueo aún puesto, justo antes del
+ * COMMIT (p. ej. el cambio que la otra conexión debe ver al entrar).
+ */
+export async function holdLock(
+  owner: PrismaClient,
+  acquire: (tx: Prisma.TransactionClient) => Promise<unknown>,
+  beforeCommit?: (tx: Prisma.TransactionClient) => Promise<unknown>,
+): Promise<HeldLock> {
+  const holdOpen = gate<void>();
+  const locked = gate<number>();
+  const done = owner.$transaction(
+    async (tx) => {
+      await acquire(tx);
+      locked.open(await backendPid(tx));
+      await holdOpen.wait;
+      if (beforeCommit) await beforeCommit(tx);
+    },
+    { timeout: 30_000, maxWait: 10_000 },
+  );
+  // Si `acquire` falla, el test lo ve en `done` en vez de quedarse esperando.
+  const pid = await Promise.race([
+    locked.wait,
+    done.then(() => {
+      throw new Error('holdLock: la transacción terminó sin tomar el bloqueo');
+    }),
+  ]);
+  return { pid, release: () => holdOpen.open(), done };
+}
+
+/** La fila del plan retenida FOR NO KEY UPDATE (como un cobro o traspaso en curso). */
+export const holdPlanRowLock = (
+  owner: PrismaClient,
+  planId: string,
+  beforeCommit?: (tx: Prisma.TransactionClient) => Promise<unknown>,
+) =>
+  holdLock(
+    owner,
+    (tx) =>
+      tx.$queryRaw`SELECT 1 FROM "treatment_plans" WHERE "id" = ${planId}::uuid FOR NO KEY UPDATE`,
+    beforeCommit,
+  );

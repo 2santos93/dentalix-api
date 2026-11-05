@@ -7,6 +7,12 @@ import {
   REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
+import {
+  holdPlanRowLock,
+  settle,
+  waitForLockWaiters,
+  type Outcome,
+} from './support/postgres-concurrency';
 
 // DX-253, capa BD: los traspasos, las devoluciones, sus abonos de referencia y
 // sus asientos son append-only (sin UPDATE ni DELETE para la app), con RLS
@@ -342,10 +348,24 @@ describe('DX-253 · saldo a favor en la BD (int)', () => {
           fingerprint: 'f',
         }),
       );
-    const results = await Promise.allSettled([refund(), refund()]);
+    // DX-450: el plan retenido FOR NO KEY UPDATE por otra transacción; las dos
+    // devoluciones llegan y esperan EN el plan (pg_locks, por PID del holder)
+    // y solo entonces se suelta. Sin el candado del plan no esperan y el test
+    // falla aquí, no en un desenlace que en serie sería el mismo.
+    const lock = await holdPlanRowLock(raw, a.cancelledPlan);
+    let attempts: Promise<Outcome<unknown>>[] = [];
+    try {
+      attempts = [settle(refund()), settle(refund())];
+      await waitForLockWaiters(raw, [lock.pid], 2);
+    } finally {
+      lock.release();
+      await lock.done;
+    }
+    const results = await Promise.all(attempts);
     const fulfilled = results.filter((r) => r.status === 'fulfilled');
     const rejected = results.filter(
-      (r): r is PromiseRejectedResult => r.status === 'rejected',
+      (r): r is Extract<Outcome<unknown>, { status: 'rejected' }> =>
+        r.status === 'rejected',
     );
     expect(fulfilled).toHaveLength(1);
     expect(rejected).toHaveLength(1);

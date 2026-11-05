@@ -102,11 +102,18 @@ async function countsFor(tenantId: string): Promise<Counts> {
   return out;
 }
 
+/**
+ * Filas de OTRAS clínicas. Las de plataforma (`tenantId` NULL, p. ej. los jobs
+ * que encola el arranque de la app) no son de ninguna clínica y quedan fuera
+ * de los dos recuentos por igual (DX-450-bis): con `NOT (x = ANY(...))` un
+ * NULL contaba con la lista vacía y no con la de la demo, y el test fallaba
+ * según lo que hubieran dejado otras suites.
+ */
 async function countsOutside(tenantIds: string[]): Promise<Counts> {
   const out: Counts = {};
   for (const table of await seedDataTables()) {
     const rows = await raw.$queryRawUnsafe<{ n: number }[]>(
-      `SELECT count(*)::int AS n FROM "${table}" WHERE NOT ("tenantId" = ANY($1::uuid[]))`,
+      `SELECT count(*)::int AS n FROM "${table}" WHERE "tenantId" IS NOT NULL AND "tenantId" <> ALL($1::uuid[])`,
       tenantIds,
     );
     out[table] = rows[0].n;
@@ -2188,6 +2195,34 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       .map((u) => u.email)
       .filter((e) => !usersBefore.includes(e));
     expect(newUsers.sort()).toEqual(DEMO_USERS.map((u) => u.email).sort());
+  });
+
+  it('las filas de plataforma (tenantId NULL) no cambian el recuento de fuera de la demo', async () => {
+    // DX-450-bis: el recuento sin lista (antes del seed) y el de la lista de la
+    // demo (después) deben tratar igual un job de plataforma; runAt lejano para
+    // que ningún worker lo tome mientras existe.
+    const job = await raw.job.create({
+      data: {
+        name: 'test.dx450bis',
+        tenantId: null,
+        runAt: new Date(Date.now() + 365 * 24 * 3600 * 1000),
+      },
+    });
+    try {
+      const demoIds = (
+        await raw.tenant.findMany({
+          where: { subdomain: DEMO_SUBDOMAIN },
+          select: { id: true },
+        })
+      ).map((t) => t.id);
+      expect(demoIds.length).toBeGreaterThan(0);
+      expect((await countsOutside(demoIds)).jobs).toBe(
+        (await countsOutside([])).jobs -
+          (await raw.job.count({ where: { tenantId: { in: demoIds } } })),
+      );
+    } finally {
+      await raw.job.delete({ where: { id: job.id } });
+    }
   });
 
   it('todos los usuarios demo inician sesión en demo.localhost con la contraseña documentada', async () => {

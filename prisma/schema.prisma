@@ -3285,6 +3285,16 @@ model SignatureRequest {
   @@index([professionalUserId], map: "signature_requests_professional_idx")
   @@index([createdById], map: "signature_requests_created_by_idx")
   @@index([revokedById], map: "signature_requests_revoked_by_idx")
+  // PARCIALES y reglas en la BD que Prisma no declara (DX-425):
+  //   signature_requests_live_consent_key UNIQUE ("tenantId", "patientId", "templateId")
+  //     WHERE "type" = 'CONSENT' AND "signedAt" IS NULL AND "revokedAt" IS NULL
+  //   signature_requests_live_budget_key UNIQUE ("tenantId", "patientId", "treatmentPlanId")
+  //     WHERE "type" = 'BUDGET' AND "signedAt" IS NULL AND "revokedAt" IS NULL
+  //     -> un solo enlace vivo por documento; el INSERT que pierde la carrera da
+  //     P2002 con `meta.target` nulo y el repositorio lo responde 409.
+  //   triggers: contadores que solo suben (signature_requests_counters_monotonic) y
+  //     horas de evidencia/envío puestas por la BD (signature_requests_evidence_clock);
+  //     CHECK signedAt <= expiresAt; sin DELETE para dentalix_app.
   @@map("signature_requests")
 }
 
