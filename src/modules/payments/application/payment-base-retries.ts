@@ -79,9 +79,11 @@ export class PaymentBaseRetries {
     // `wake()` ocurre en plena pasada deja de valer y se recarga.
     let convert = this.convertAmount.memoized({ manualBackup: true });
     const candidates = await this.retries.due(limit);
-    // Generación de despertares de la que parte el convertidor: se recarga
-    // una vez por wake, no una por abono fallido.
-    let generation = Math.max(0, ...candidates.map((c) => c.wakeCount));
+    // Despertares ya absorbidos por el convertidor, medidos como diferencia
+    // por fila (la actual menos la que se leyó con el abono; un wake suma 1 a
+    // todas las filas de la clínica): se recarga una vez por wake, no una por
+    // abono fallido, y no depende de que las filas tengan contadores distintos.
+    let wakesApplied = 0;
     for (const candidate of candidates) {
       let outcome: AttemptOutcome;
       try {
@@ -113,8 +115,12 @@ export class PaymentBaseRetries {
         // es nuevo respecto al convertidor, se recarga (los siguientes abonos
         // se cotizan con las tasas actuales); si la fila ya no existe
         // (`null`) no hay nada que recargar.
-        if (postponed.wakeCount !== null && postponed.wakeCount > generation) {
-          generation = postponed.wakeCount;
+        const wakesSinceRead =
+          postponed.wakeCount === null
+            ? 0
+            : postponed.wakeCount - candidate.wakeCount;
+        if (wakesSinceRead > wakesApplied) {
+          wakesApplied = wakesSinceRead;
           convert = this.convertAmount.memoized({ manualBackup: true });
         }
         continue;

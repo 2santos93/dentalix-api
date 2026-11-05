@@ -447,6 +447,36 @@ describe('PaymentBaseRetries (DX-380, OPS-045)', () => {
     expect(memoizedWith).toHaveLength(2);
   });
 
+  it('DX-413: con contadores distintos por fila (A=5, B=0, C=0) el wake recarga una vez y C se resuelve en la misma pasada', async () => {
+    const rates: Record<string, number> = {};
+    const { retries, allocations, service, memoizedWith } = setup(rates);
+    const t = retries.now.getTime();
+    retries.add(stuck('b'), new Date(t - 3 * MIN));
+    retries.add(stuck('c'), new Date(t - 2 * MIN));
+    retries.add({ ...stuck('a'), wakeCount: 5 }, new Date(t - MIN));
+    const freezeRate = allocations.freezeRate.bind(allocations);
+    let woke = false;
+    jest
+      .spyOn(allocations, 'freezeRate')
+      .mockImplementation(async (...args) => {
+        if (!woke) {
+          woke = true;
+          // La tasa llega y la clínica despierta los reintentos en pleno intento de B.
+          rates.VES = 40;
+          await service.wake();
+        }
+        return freezeRate(...args);
+      });
+
+    const pass = await service.retryDue(50);
+
+    expect(memoizedWith).toHaveLength(2);
+    expect(retries.rows.has('c')).toBe(false);
+    expect(pass.resolved).toBeGreaterThanOrEqual(1);
+    // B vio el wake: sigue adelantado, sin intento contado.
+    expect(retries.rows.get('b')?.candidate.attempts).toBe(0);
+  });
+
   it('DX-413: si la fila desapareció durante el intento no se recarga el convertidor', async () => {
     const { retries, allocations, service, memoizedWith } = setup();
     retries.add(stuck('gone'));
