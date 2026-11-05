@@ -1,6 +1,5 @@
 import {
   BadRequestException,
-  ConflictException,
   Inject,
   Injectable,
   NotFoundException,
@@ -19,7 +18,7 @@ import {
 import { SAMPLE_NOTE_TEMPLATES } from '../../domain/sample-templates';
 import {
   NOTE_TEMPLATE_NOT_FOUND_MESSAGE,
-  NOTE_TEMPLATE_STALE_MESSAGE,
+  staleNoteTemplate,
 } from '../note-template-errors';
 
 export interface NotePromptInput {
@@ -123,7 +122,7 @@ export class UpdateNoteTemplateUseCase {
     if (!current) throw new NotFoundException(NOTE_TEMPLATE_NOT_FOUND_MESSAGE);
     // DX-231: aviso rápido; la comprobación que cuenta es la atómica del repo.
     if (input.version !== undefined && input.version !== current.version) {
-      throw new ConflictException(NOTE_TEMPLATE_STALE_MESSAGE);
+      throw staleNoteTemplate();
     }
 
     const touchesContent =

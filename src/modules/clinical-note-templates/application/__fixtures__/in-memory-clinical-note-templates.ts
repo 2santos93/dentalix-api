@@ -8,7 +8,7 @@ import type {
 import type { NoteTemplateDraft } from '../../domain/note-template-rules';
 import {
   DUPLICATE_NOTE_TEMPLATE_MESSAGE,
-  NOTE_TEMPLATE_STALE_MESSAGE,
+  staleNoteTemplate,
 } from '../note-template-errors';
 
 /**
@@ -107,7 +107,7 @@ export class InMemoryClinicalNoteTemplateRepository implements ClinicalNoteTempl
       input.expectedVersion !== undefined &&
       input.expectedVersion !== row.version
     ) {
-      throw new ConflictException(NOTE_TEMPLATE_STALE_MESSAGE);
+      throw staleNoteTemplate();
     }
     row.version += 1;
     if (input.name !== undefined) row.name = input.name;

@@ -150,7 +150,7 @@ export class ClinicalNoteTemplatesController {
   })
   @ApiConflictResponse({
     description:
-      'Ya existe una plantilla con ese nombre, o `version` ya no es la actual («La plantilla cambió, recárgala»)',
+      'Ya existe una plantilla con ese nombre, o `version` ya no es la actual (`code` NOTE_TEMPLATE_STALE: «La plantilla cambió, recárgala»)',
   })
   @ApiForbiddenResponse({ description: 'Solo ADMIN' })
   update(

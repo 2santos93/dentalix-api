@@ -725,6 +725,9 @@ describe('Plantillas de evolución ligadas a la cita (e2e, DX-170)', () => {
           category: 'Segunda',
         }).expect(409);
         expect(message(second)).toBe('La plantilla cambió, recárgala');
+        expect((second.body as { code: string }).code).toBe(
+          'NOTE_TEMPLATE_STALE',
+        );
         const row = await raw.clinicalNoteTemplate.findUniqueOrThrow({
           where: { id: tpl.id },
         });

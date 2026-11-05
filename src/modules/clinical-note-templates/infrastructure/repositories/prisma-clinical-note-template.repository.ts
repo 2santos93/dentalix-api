@@ -11,7 +11,7 @@ import type {
 import type { NoteTemplateDraft } from '../../domain/note-template-rules';
 import {
   DUPLICATE_NOTE_TEMPLATE_MESSAGE,
-  NOTE_TEMPLATE_STALE_MESSAGE,
+  staleNoteTemplate,
 } from '../../application/note-template-errors';
 
 /** Posiciones de paso (CHECK 0..49; las definitivas son 0..19). */
@@ -171,7 +171,7 @@ export class PrismaClinicalNoteTemplateRepository implements ClinicalNoteTemplat
           data: { version: { increment: 1 } },
         });
         if (claimed.count === 0) {
-          throw new ConflictException(NOTE_TEMPLATE_STALE_MESSAGE);
+          throw staleNoteTemplate();
         }
         if (input.prompts !== undefined) {
           await this.syncPrompts(tx, tenantId, id, input.prompts);
