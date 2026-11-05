@@ -80,6 +80,8 @@ function setup() {
 function todayAppointment(
   repo: InMemoryAppointmentRepository,
   status: AppointmentStatus = AppointmentStatus.CONFIRMED,
+  // DX-237: por defecto, del odontólogo que actúa en estas pruebas.
+  providerId = `u-${ClinicRole.DENTIST}`,
 ) {
   // Dentro de 30 min, o antes si eso ya cae mañana en la zona de la sede: la llegada solo
   // depende del DÍA civil de la cita.
@@ -88,8 +90,7 @@ function todayAppointment(
     Math.min(Date.now() + 30 * 60 * 1000, today.end.getTime() - HOUR),
   );
   return repo.seed({
-    // DX-237: la cita es del odontólogo que actúa en estas pruebas.
-    providerId: `u-${ClinicRole.DENTIST}`,
+    providerId,
     status,
     start,
     end: new Date(start.getTime() + 30 * 60 * 1000),
@@ -100,11 +101,11 @@ function todayAppointment(
 describe('UpdateAppointmentUseCase · flujo del paciente (DX-200)', () => {
   it('DX-237: el odontólogo no sienta la cita de otro profesional; la asistente sí', async () => {
     const { repo, uc } = setup();
-    const a = repo.seed({
-      ...todayAppointment(repo),
-      providerId: 'otro-odontologo',
-      status: AppointmentStatus.ARRIVED,
-    });
+    const a = todayAppointment(
+      repo,
+      AppointmentStatus.ARRIVED,
+      'otro-odontologo',
+    );
     await expect(
       uc.execute(
         a.id,
