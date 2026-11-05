@@ -410,6 +410,93 @@ describe('Flujo del paciente en la clínica (e2e, DX-200)', () => {
     });
   });
 
+  describe('DX-202: salida del paciente', () => {
+    const checklist = (id: string, token: string) =>
+      as(api().get(`/api/v1/appointments/${id}/checkout-checklist`), token);
+
+    it('dice qué falta con datos reales; el saldo solo para quien cobra', async () => {
+      const appt = await book('Salida', mainId, 60);
+      const res = await checklist(appt.id, reception.token).expect(200);
+      expect(res.body).toMatchObject({
+        appointmentId: appt.id,
+        nextAppointmentStart: null,
+        recallDueOn: null,
+        remindersOptedOut: false,
+        balance: { hasOverdue: false },
+      });
+      const clinical = await checklist(appt.id, dentist.token).expect(200);
+      expect((clinical.body as { balance: unknown }).balance).toBeNull();
+    });
+
+    it('una cita futura del paciente cuenta; las canceladas no', async () => {
+      const appt = await book('Salida Futura', mainId, 120);
+      const { patientId } = await raw.appointment.findUniqueOrThrow({
+        where: { id: appt.id },
+        select: { patientId: true },
+      });
+      const start = new Date(Date.now() + 30 * 24 * 60 * MIN);
+      const future = await as(
+        api().post('/api/v1/appointments'),
+        reception.token,
+        mainId,
+      )
+        .send({
+          patientId,
+          providerId: dentist.userId,
+          start: start.toISOString(),
+          end: new Date(start.getTime() + 30 * MIN).toISOString(),
+        })
+        .expect(201);
+      const res = await checklist(appt.id, reception.token).expect(200);
+      expect(
+        (res.body as { nextAppointmentStart: string }).nextAppointmentStart,
+      ).toBe(start.toISOString());
+      await raw.appointment.update({
+        where: { id: (future.body as { id: string }).id },
+        data: { status: 'CANCELLED' },
+      });
+      const after = await checklist(appt.id, reception.token).expect(200);
+      expect(
+        (after.body as { nextAppointmentStart: unknown }).nextAppointmentStart,
+      ).toBeNull();
+    });
+
+    it('otra clínica no la ve; completar con pendientes no bloquea y queda en la auditoría', async () => {
+      const appt = await book('Salida Cierre', mainId, 180);
+      await as(
+        api().get(`/api/v1/appointments/${appt.id}/checkout-checklist`),
+        other.adminToken,
+        undefined,
+        other.host,
+      ).expect(404);
+      await setStatus(appt.id, 'ARRIVED', reception.token).expect(200);
+      await setStatus(appt.id, 'IN_CHAIR', dentist.token).expect(200);
+      await setStatus(appt.id, 'READY_FOR_CHECKOUT', dentist.token).expect(200);
+      await as(api().patch(`/api/v1/appointments/${appt.id}`), reception.token)
+        .send({ status: 'COMPLETED', checkoutPending: ['NEXT_VISIT', 'EMAIL'] })
+        .expect(200);
+      const events = await raw.auditEvent.findMany({
+        where: { resourceId: appt.id, tenantId: clinic.tenantId },
+      });
+      const pending = events.find(
+        (e) =>
+          (e.metadata as { reason?: string } | null)?.reason ===
+          'APPOINTMENT_CHECKOUT_PENDING',
+      );
+      expect(pending?.metadata).toMatchObject({
+        changedFields: ['EMAIL', 'NEXT_VISIT'],
+      });
+      expect(pending?.actorUserId).toBe(reception.userId);
+    });
+
+    it('un código inventado es 400', async () => {
+      const appt = await book('Salida Rara', mainId, 240);
+      await as(api().patch(`/api/v1/appointments/${appt.id}`), reception.token)
+        .send({ status: 'CONFIRMED', checkoutPending: ['OTRO'] })
+        .expect(400);
+    });
+  });
+
   it('un paciente en la clínica no se puede archivar (su cita está en curso)', async () => {
     const appt = await book('Hilda', mainId, 10 * 60);
     const { patientId } = (

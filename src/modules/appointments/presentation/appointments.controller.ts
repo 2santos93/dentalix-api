@@ -49,7 +49,10 @@ import {
   PatientCoverageFlags,
   type CoverageSummary,
 } from '../../patient-coverages/application/patient-coverage-flags';
-import type { OverdueBalance } from '../../collections/domain/overdue-balance';
+import {
+  NO_OVERDUE,
+  type OverdueBalance,
+} from '../../collections/domain/overdue-balance';
 import { PatientMedicalAlertFlags } from '../../medical-history/application/patient-medical-alert-flags';
 import {
   NO_ANAMNESIS_FLAGS,
@@ -101,7 +104,12 @@ import {
 } from '../domain/wants-earlier';
 import { OPENING_ASSIGN_FORBIDDEN_MESSAGE } from '../../waitlist/domain/waitlist-offer-rules';
 import { RecordAuditEventUseCase } from '../../audit/application/record-audit-event.use-case';
-import { APPOINTMENT_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
+import {
+  APPOINTMENT_ROLES,
+  PAYMENT_ROLES,
+} from '../../auth/presentation/guards/clinic-role-sets';
+import { GetCheckoutChecklistUseCase } from '../application/use-cases/get-checkout-checklist.use-case';
+import { CheckoutChecklistDto } from './dto/checkout-checklist.dto';
 import {
   isTenantPayload,
   JwtPayload,
@@ -146,6 +154,7 @@ export class AppointmentsController {
     private readonly medicalAlertFlags: PatientMedicalAlertFlags,
     private readonly audit: RecordAuditEventUseCase,
     private readonly listInClinic: ListInClinicUseCase,
+    private readonly checkoutChecklist: GetCheckoutChecklistUseCase,
     // DX-279: insignia «inasistencias · cancelaciones tardías» de las tarjetas.
     private readonly attendanceFlags: PatientAttendanceFlags,
     // DX-446: motivo de «Agendar igualmente» fuera de la auditoría.
@@ -505,6 +514,32 @@ export class AppointmentsController {
     return this.getAppointment.execute(id);
   }
 
+  @Get(':id/checkout-checklist')
+  @ApiOkResponse({
+    type: CheckoutChecklistDto,
+    description:
+      'DX-202: lo que recepción comprueba al despedir al paciente. El saldo solo para los roles de cobro.',
+  })
+  @ApiNotFoundResponse({ description: 'Cita no encontrada en esta clínica' })
+  async getCheckoutChecklist(
+    @Param('id') id: string,
+    @Req() req: { user: JwtPayload },
+  ): Promise<CheckoutChecklistDto> {
+    const checklist = await this.checkoutChecklist.execute(id);
+    const role = isTenantPayload(req.user) ? req.user.role : null;
+    if (!role || !PAYMENT_ROLES.includes(role)) {
+      return { ...checklist, balance: null };
+    }
+    const flags = await this.balanceFlags.forPatients(
+      [checklist.patientId],
+      role,
+    );
+    return {
+      ...checklist,
+      balance: flags.get(checklist.patientId) ?? NO_OVERDUE,
+    };
+  }
+
   @Audit({
     action: 'UPDATE',
     resource: 'APPOINTMENT',
@@ -566,7 +601,38 @@ export class AppointmentsController {
     );
     await this.auditReservedOverride(updated, 'UPDATE', ctx);
     await this.auditPlanItems(updated, dto.planItemIds, 'UPDATE', ctx);
+    await this.auditCheckoutPending(updated, dto, ctx);
     return updated;
+  }
+
+  /**
+   * DX-202: cerrar con algo pendiente no se bloquea, pero queda quién la cerró
+   * y qué faltó. Solo los códigos de la lista: nada de datos del paciente.
+   */
+  private async auditCheckoutPending(
+    appointment: AppointmentWriteResult,
+    dto: UpdateAppointmentDto,
+    ctx: AppointmentAuditContext | undefined,
+  ): Promise<void> {
+    if (!ctx || dto.status !== 'COMPLETED' || !dto.checkoutPending?.length) {
+      return;
+    }
+    await this.audit.record({
+      tenantId: ctx.tenantId,
+      locationId: ctx.locationId,
+      actor: { kind: 'user', userId: ctx.actor.userId, role: ctx.actor.role },
+      action: 'UPDATE',
+      resourceType: 'APPOINTMENT',
+      resourceId: appointment.id,
+      patient: { kind: 'patient', id: appointment.patientId },
+      requestId: ctx.requestId,
+      ip: ctx.ip,
+      userAgent: ctx.userAgent,
+      metadata: {
+        reason: 'APPOINTMENT_CHECKOUT_PENDING',
+        changedFields: dto.checkoutPending,
+      },
+    });
   }
 
   @Post(':id/plan-items/:planItemId/claim')

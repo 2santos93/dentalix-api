@@ -1,4 +1,8 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  CHECKOUT_ITEMS,
+  type CheckoutItem,
+} from '../../application/use-cases/get-checkout-checklist.use-case';
 import { Transform } from 'class-transformer';
 import {
   ArrayMaxSize,
@@ -180,6 +184,19 @@ export class UpdateAppointmentDto {
   @IsOptional()
   @IsBoolean()
   keepOverbooked?: boolean;
+
+  @ApiPropertyOptional({
+    enum: CHECKOUT_ITEMS,
+    isArray: true,
+    description:
+      'DX-202: lo que faltaba al completar la cita desde la salida del paciente. No bloquea: queda en la auditoría.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(CHECKOUT_ITEMS.length)
+  @ArrayUnique()
+  @IsIn(CHECKOUT_ITEMS, { each: true })
+  checkoutPending?: CheckoutItem[];
 }
 
 /** DX-509: cuerpo opcional de «Deshacer llegada». */
