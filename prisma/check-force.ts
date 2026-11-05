@@ -61,6 +61,9 @@ const READ_ONLY_REFERENCES = [
   'cities',
 ];
 
+/** DX-425 (DB-065): tablas en las que dentalix_app NO tiene DELETE. */
+const NO_APP_DELETE = ['signature_requests'];
+
 const TIMEZONE_MESSAGE =
   'La zona horaria de dentalix_app no es UTC: la hora del servidor tiene que ser UTC. ' +
   "Como el owner: ALTER ROLE dentalix_app SET timezone = 'UTC' y " +
@@ -173,6 +176,13 @@ async function main(): Promise<number> {
          AND CASE WHEN to_regrole(${APP_ROLE}) IS NULL THEN false
                   ELSE has_table_privilege(${APP_ROLE}, c.oid, p.privilege) END
        ORDER BY 1`;
+    const appDelete = await prisma.$queryRaw<{ name: string }[]>`
+      SELECT c.relname || ':DELETE' AS name
+        FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+       WHERE n.nspname = 'public' AND c.relname = ANY(${NO_APP_DELETE})
+         AND CASE WHEN to_regrole(${APP_ROLE}) IS NULL THEN false
+                  ELSE has_table_privilege(${APP_ROLE}, c.oid, 'DELETE') END
+       ORDER BY 1`;
     const timezone = new Set<string>();
     const configured = await catalogTimezone(prisma);
     if (configured === null) {
@@ -194,6 +204,7 @@ async function main(): Promise<number> {
       dispatcher_delete: dispatcherDelete.map((r) => r.name),
       timezone: [...timezone],
       reference_writes: referenceWrites.map((r) => r.name),
+      app_delete: appDelete.map((r) => r.name),
     };
     if (Object.values(result).some((list) => list.length > 0)) {
       console.error(

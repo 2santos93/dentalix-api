@@ -61,6 +61,22 @@ describe('db:check-force (DX-134)', () => {
     expect(checkForce().status).toBe(0);
   }, 60_000);
 
+  it('dentalix_app con DELETE sobre signature_requests: sale con 1 y la nombra (DX-425)', async () => {
+    await raw.$executeRawUnsafe(
+      'GRANT DELETE ON public.signature_requests TO dentalix_app',
+    );
+    try {
+      const { status, out } = checkForce();
+      expect(status).toBe(1);
+      expect(out).toContain('"app_delete":["signature_requests:DELETE"]');
+    } finally {
+      await raw.$executeRawUnsafe(
+        'REVOKE DELETE ON public.signature_requests FROM dentalix_app',
+      );
+    }
+    expect(checkForce().status).toBe(0);
+  }, 60_000);
+
   it('una tabla de public con RLS y sin FORCE: sale con 1 y la nombra', async () => {
     await raw.$executeRawUnsafe(
       `CREATE TABLE public."${TABLE}" ("id" int PRIMARY KEY)`,

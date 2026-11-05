@@ -134,6 +134,17 @@ BEGIN
 END;
 $$;
 
+-- DX-425 (DB-065): la app no borra solicitudes de firma; el GRANT ... ON ALL
+-- TABLES de arriba lo habría devuelto al repetir el bootstrap sobre una base
+-- migrada (`db:check-force` lo vigila).
+DO $$
+BEGIN
+  IF pg_catalog.to_regclass('public.signature_requests') IS NOT NULL THEN
+    REVOKE DELETE ON TABLE public.signature_requests FROM dentalix_app;
+  END IF;
+END;
+$$;
+
 -- Las funciones del despachador de email (email_outbox_*: reclamar, cerrar,
 -- encolar de plataforma con su tope y purgar, DX-088/DX-113/DX-144) las
 -- concede a dentalix_app cada migración, y solo si el rol ya existía. Si esta
