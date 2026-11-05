@@ -172,6 +172,7 @@ export class PrismaSlotOfferRepository implements SlotOfferRepository {
           appointmentId: row.appointmentId,
           outcome: row.outcome,
           expiresAt: row.expiresAt,
+          outcomeAt: row.outcomeAt,
           patientArchived: row.patient.deletedAt !== null,
           createdAt: row.createdAt,
           slotStart: row.slotStart,

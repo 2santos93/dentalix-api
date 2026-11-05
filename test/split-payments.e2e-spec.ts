@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { IDEMPOTENCY_KEY_INVALID_MESSAGE } from '../src/shared/validation/idempotency-key';
 import { INestApplication } from '@nestjs/common';
 import {
   CatalogKind,
@@ -388,6 +389,34 @@ describe('Cobro dividido con un solo recibo (e2e, DX-390)', () => {
         paymentMethodId: cashA,
       })
       .expect(422);
+  });
+
+  // DX-463: el 400 de una Idempotency-Key que no es UUID sale en español, igual
+  // en el cobro dividido y en el abono suelto (antes, en inglés).
+  it('DX-463: una Idempotency-Key que no es UUID → 400 en español, en el cobro dividido y en el abono suelto', async () => {
+    const before = await countPayments();
+    const dividido = await split(firstBody(), { key: 'no-es-uuid' }).expect(
+      400,
+    );
+    const suelto = await as(
+      api().post(`/api/v1/treatment-plans/${planA}/payments`),
+      a,
+      receptionA,
+    )
+      .set('Idempotency-Key', 'no-es-uuid')
+      .send({
+        amount: 50,
+        currency: 'USD',
+        paidAt: TODAY,
+        paymentMethodId: cashA,
+      })
+      .expect(400);
+    for (const res of [dividido, suelto]) {
+      const message = (res.body as { message: string }).message;
+      expect(message).toBe(IDEMPOTENCY_KEY_INVALID_MESSAGE);
+      expect(message).not.toMatch(/must be/i);
+    }
+    expect(await countPayments()).toBe(before);
   });
 
   it('atomicidad: si una línea falla dentro de la transacción, no queda ninguna ni se gasta número', async () => {

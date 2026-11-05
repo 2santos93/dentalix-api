@@ -4,6 +4,7 @@ import { RECEIPT_PREFIX_PATTERN } from '../../payments/domain/receipt-number';
 import { moneyWithCode } from '../../../shared/format/money-with-code';
 import type { RegionalFormat } from '../../../shared/format/regional-format';
 import { fromCents, toCents } from '../../../shared/money/money';
+import { IDEMPOTENCY_KEY_INVALID_MESSAGE } from '../../../shared/validation/idempotency-key';
 import {
   civilDateIn,
   civilDayRange,
@@ -70,7 +71,7 @@ export const CREDIT_CASH_SESSION_REQUIRED_MESSAGE =
 export const CREDIT_IDEMPOTENCY_REUSED_MESSAGE =
   'Esta clave de idempotencia ya se usó para otro movimiento de saldo a favor. Vuelve a intentarlo para generar una clave nueva.';
 export const CREDIT_IDEMPOTENCY_INVALID_MESSAGE =
-  'La cabecera Idempotency-Key tiene que ser un UUID.';
+  IDEMPOTENCY_KEY_INVALID_MESSAGE;
 export const CREDIT_ROLE_FORBIDDEN_MESSAGE =
   'Tu rol no mueve saldo a favor: solo administración y recepción.';
 

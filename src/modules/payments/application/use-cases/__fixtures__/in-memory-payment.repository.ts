@@ -211,7 +211,7 @@ export class InMemoryPaymentRepository implements PaymentRepository {
     });
   }
 
-  countPlanPayments(treatmentPlanId: string): Promise<number> {
+  countPlanMovements(treatmentPlanId: string): Promise<number> {
     return Promise.resolve(
       this.payments.filter((p) => p.treatmentPlanId === treatmentPlanId).length,
     );

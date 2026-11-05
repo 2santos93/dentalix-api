@@ -31,7 +31,7 @@ import {
   PublicAnamnesisDto,
   PublicAnamnesisSubmittedDto,
 } from './dto/public-anamnesis.dto';
-import { NoStoreHeadersInterceptor } from './no-store-headers.interceptor';
+import { NoStoreHeadersInterceptor } from '../../../shared/http/no-store-headers.interceptor';
 
 interface PublicRequest {
   ip?: string;

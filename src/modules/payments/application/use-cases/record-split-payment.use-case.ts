@@ -1,15 +1,19 @@
 import {
   BadRequestException,
   ConflictException,
+  HttpException,
   Inject,
   Injectable,
   Logger,
+  ServiceUnavailableException,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { ReceiptPlanBalanceCalculator } from '../receipts/receipt-plan-balance';
+import { IDEMPOTENCY_KEY_INVALID_MESSAGE } from '../../../../shared/validation/idempotency-key';
 import { PAYMENT_REPOSITORY } from '../../domain/ports/payment-repository.port';
 import type {
   CreatePaymentRepoInput,
+  ReceiptExcessGuardInTx,
   PaymentRepository,
   SplitPaymentRecord,
 } from '../../domain/ports/payment-repository.port';
@@ -25,6 +29,8 @@ import {
   SPLIT_LINES_SAME_REFERENCE_MESSAGE,
   SPLIT_MAX_LINES,
   SPLIT_MIN_LINES,
+  SPLIT_PAYMENT_BALANCE_UNAVAILABLE,
+  SPLIT_PAYMENT_BALANCE_UNAVAILABLE_MESSAGE,
   SPLIT_PAYMENT_EXCEEDS_BALANCE,
   SPLIT_PAYMENT_EXCEEDS_BALANCE_MESSAGE,
   exceedsPending,
@@ -126,7 +132,7 @@ export class RecordSplitPaymentUseCase {
     );
     if (key !== undefined) {
       if (!UUID_RE.test(key)) {
-        throw new BadRequestException('Idempotency-Key must be a UUID');
+        throw new BadRequestException(IDEMPOTENCY_KEY_INVALID_MESSAGE);
       }
       const replay = await this.replay(
         key,
@@ -177,9 +183,9 @@ export class RecordSplitPaymentUseCase {
     // confirmación, cuántos abonos tenía el plan ANTES de leerlo: la
     // transacción bloquea el plan y, si llegó otro (dos cobros a la vez), 409
     // sin registrar nada, en vez de dejar un saldo a favor sin confirmar.
-    const planPaymentsSeen = confirmCreditBalance
+    const planMovementsSeen = confirmCreditBalance
       ? undefined
-      : await this.repo.countPlanPayments(treatmentPlanId);
+      : await this.repo.countPlanMovements(treatmentPlanId);
     const receiptPlanBalance = await this.balanceAfter(
       treatmentPlanId,
       converted,
@@ -238,9 +244,13 @@ export class RecordSplitPaymentUseCase {
         receiptPlanBalance,
         // DX-182: el saldo del recibo, recalculado con el plan bloqueado.
         receiptBalanceInTx: this.receiptBalance.inTransaction,
-        ...(planPaymentsSeen === undefined
+        ...(planMovementsSeen === undefined
           ? {}
-          : { balanceGuard: { planPaymentsSeen } }),
+          : {
+              balanceGuard: { planMovementsSeen },
+              // DX-463 (L4): y lo pendiente de AHORA, con el plan bloqueado.
+              excessGuardInTx: this.excessGuard(converted),
+            }),
       });
     } catch (error) {
       await this.proofs.settle(completed, false);
@@ -326,9 +336,11 @@ export class RecordSplitPaymentUseCase {
    * pendiente hace falta `confirmCreditBalance` (409). Como el saldo del
    * recibo de un abono suelto, se lee fuera de la transacción; la
    * transacción comprueba que ningún abono llegó entretanto
-   * (`balanceGuard`). Si el saldo no se puede leer,
-   * el cobro sigue (sin saldo en el recibo); si alguna línea está «sin tasa»,
-   * el recibo sale sin saldo.
+   * (`balanceGuard`). DX-463: si el saldo no se puede leer (o el proveedor de
+   * tasas tardó), sin `confirmCreditBalance` es 503 y no se registra nada: ya
+   * no se salta la comprobación del excedente. Con el excedente confirmado no
+   * hay nada que comprobar y el cobro sigue, sin saldo en el recibo. Si alguna
+   * línea está «sin tasa», el recibo sale sin saldo.
    */
   private async balanceAfter(
     treatmentPlanId: string,
@@ -339,33 +351,27 @@ export class RecordSplitPaymentUseCase {
     try {
       before = await this.getPlanBalance.execute(treatmentPlanId);
     } catch (error) {
+      // DX-463 (L3): un 404/409 (p. ej. el plan se retiró entre medias) sale
+      // tal cual; solo un fallo genuino de lectura es 503.
+      if (error instanceof HttpException) throw error;
       this.logger.warn({
         event: 'payment_receipt.balance_unavailable',
         error: errorName(error),
       });
-      return null;
+      return this.unavailable(confirmCreditBalance);
     }
-    // DX-054: proveedor de tasas fuera de plazo → `paid` previo incompleto:
-    // ni guarda de exceso ni saldo en el recibo (como un saldo ilegible).
+    // DX-054: proveedor de tasas fuera de plazo → `paid` previo incompleto,
+    // como un saldo ilegible (DX-463: sin confirmar, 503).
     if (before.rateProviderTimedOut) {
       this.logger.warn({
         event: 'payment_receipt.balance_unavailable',
         error: 'RateProviderTimedOut',
       });
-      return null;
+      return this.unavailable(confirmCreditBalance);
     }
     const known = knownSplitTotal(converted);
     if (!confirmCreditBalance && exceedsPending(known, before.balance)) {
-      throw new ConflictException({
-        statusCode: 409,
-        error: 'Conflict',
-        code: SPLIT_PAYMENT_EXCEEDS_BALANCE,
-        message: SPLIT_PAYMENT_EXCEEDS_BALANCE_MESSAGE,
-        currency: before.planCurrency,
-        total: known,
-        pending: Math.max(0, before.balance),
-        excess: excessOverPending(known, before.balance),
-      });
+      throw exceedsBalance(before.planCurrency, known, before.balance);
     }
     const total = splitTotal(converted);
     if (total === null) return null;
@@ -376,6 +382,41 @@ export class RecordSplitPaymentUseCase {
       paid,
       balance: round2(before.billable - paid - before.creditMovements),
     };
+  }
+
+  /**
+   * DX-463 (L4): la comprobación del excedente DENTRO de la transacción, con
+   * la misma cuenta del saldo del plan sobre la foto bajo el bloqueo. Sin red
+   * (`offline`); con abonos sin tasa se comprueba contra lo CONOCIDO.
+   */
+  private excessGuard(converted: (number | null)[]): ReceiptExcessGuardInTx {
+    return async ({ planId, snapshot, creditMovements }) => {
+      const now = await this.getPlanBalance.fromSnapshot(
+        planId,
+        snapshot,
+        creditMovements,
+        { offline: true },
+      );
+      // Un abono «sin tasa» (anterior a DX-375 o MISSING) no suma en `paid`:
+      // solo puede REDUCIR lo pendiente, así que un excedente sobre lo
+      // conocido es real y se rechaza igual; si no lo hay, sigue (el conteo
+      // de `balanceGuard` ya se comprobó). Nunca 503 aquí.
+      const known = knownSplitTotal(converted);
+      if (exceedsPending(known, now.balance)) {
+        throw exceedsBalance(now.planCurrency, known, now.balance);
+      }
+    };
+  }
+
+  /** Sin saldo legible: 503 si hacía falta comprobar el excedente; si no, sin saldo en el recibo. */
+  private unavailable(confirmCreditBalance: boolean): null {
+    if (confirmCreditBalance) return null;
+    throw new ServiceUnavailableException({
+      statusCode: 503,
+      error: 'Service Unavailable',
+      code: SPLIT_PAYMENT_BALANCE_UNAVAILABLE,
+      message: SPLIT_PAYMENT_BALANCE_UNAVAILABLE_MESSAGE,
+    });
   }
 
   /**
@@ -397,6 +438,24 @@ export class RecordSplitPaymentUseCase {
       payments: record.payments,
     };
   }
+}
+
+/** El 409 del excedente sobre lo pendiente (con las cifras de ese momento). */
+function exceedsBalance(
+  currency: string,
+  known: number,
+  balance: number,
+): ConflictException {
+  return new ConflictException({
+    statusCode: 409,
+    error: 'Conflict',
+    code: SPLIT_PAYMENT_EXCEEDS_BALANCE,
+    message: SPLIT_PAYMENT_EXCEEDS_BALANCE_MESSAGE,
+    currency,
+    total: known,
+    pending: Math.max(0, balance),
+    excess: excessOverPending(known, balance),
+  });
 }
 
 /** La línea en la moneda del plan con su tasa congelada; `null` sin ella. */

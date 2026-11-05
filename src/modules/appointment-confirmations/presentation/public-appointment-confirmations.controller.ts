@@ -27,13 +27,14 @@ import { RateLimit } from '../../../shared/security/rate-limit.decorator';
 import { PublicTenantContextInterceptor } from '../../../shared/tenancy/public-tenant-context.interceptor';
 import type { TenantHostRequest } from '../../../shared/tenancy/tenant-host-request';
 import { currentRequestId } from '../../../shared/observability/request-context';
+import { NoStoreHeadersInterceptor } from '../../../shared/http/no-store-headers.interceptor';
 
 // PÚBLICO — sin JwtAuthGuard: quien abre el enlace es el paciente. El tenant
 // sale SOLO del host (PublicTenantContextInterceptor + TenantHostMiddleware),
 // igual que public-branding e invitaciones; la RLS hace invisible un token de
 // otra clínica (→ 404).
 @ApiTags('public')
-@UseInterceptors(PublicTenantContextInterceptor)
+@UseInterceptors(NoStoreHeadersInterceptor, PublicTenantContextInterceptor)
 // Por IP: frena la enumeración de tokens. Ver y responder cuentan en baldes
 // separados (uno por ruta).
 @RateLimit('confirmation')

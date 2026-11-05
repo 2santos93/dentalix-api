@@ -593,11 +593,32 @@ export class PrismaPaymentRepository implements PaymentRepository {
     const splitId = randomUUID();
     return this.prisma.runWithTenant(async (tx) => {
       if (input.balanceGuard) {
-        await this.assertPlanPaymentsUnchanged(
+        await this.assertPlanMovementsUnchanged(
           tx,
           input.lines[0]?.treatmentPlanId ?? null,
-          input.balanceGuard.planPaymentsSeen,
+          input.balanceGuard.planMovementsSeen,
         );
+      }
+      // DX-463 (L4): con el plan ya bloqueado, lo pendiente de AHORA.
+      const guardedPlanId = input.lines[0]?.treatmentPlanId;
+      if (input.excessGuardInTx && guardedPlanId) {
+        const tenantId = this.requireTenantId();
+        const snapshot = await readPlanBalanceSnapshotIn(
+          tx,
+          tenantId,
+          guardedPlanId,
+        );
+        if (!snapshot) throw new NotFoundException('Treatment plan not found');
+        await input.excessGuardInTx({
+          planId: guardedPlanId,
+          snapshot,
+          creditMovements: await netCreditIn(
+            tx,
+            tenantId,
+            guardedPlanId,
+            snapshot.plan.currency,
+          ),
+        });
       }
       const lines: InsertedLine[] = [];
       for (const [index, line] of input.lines.entries()) {
@@ -1111,10 +1132,10 @@ export class PrismaPaymentRepository implements PaymentRepository {
    * confirmado: si creció desde la lectura de lo pendiente, 409. NO KEY: no
    * choca con el FOR KEY SHARE de las FK que apuntan al plan.
    */
-  private async assertPlanPaymentsUnchanged(
+  private async assertPlanMovementsUnchanged(
     tx: Prisma.TransactionClient,
     treatmentPlanId: string | null,
-    planPaymentsSeen: number,
+    planMovementsSeen: number,
   ): Promise<void> {
     if (!treatmentPlanId) return;
     const tenantId = this.requireTenantId();
@@ -1122,10 +1143,8 @@ export class PrismaPaymentRepository implements PaymentRepository {
       SELECT 1 FROM "treatment_plans"
        WHERE "tenantId" = ${tenantId}::uuid AND "id" = ${treatmentPlanId}::uuid
          FOR NO KEY UPDATE`;
-    const count = await tx.payment.count({
-      where: { tenantId, treatmentPlanId },
-    });
-    if (count !== planPaymentsSeen) {
+    const count = await this.planMovements(tx, treatmentPlanId);
+    if (count !== planMovementsSeen) {
       throw new ConflictException({
         statusCode: 409,
         error: 'Conflict',
@@ -1135,13 +1154,30 @@ export class PrismaPaymentRepository implements PaymentRepository {
     }
   }
 
-  async countPlanPayments(treatmentPlanId: string): Promise<number> {
-    // Vivos y anulados (un abono nunca se borra): la cuenta solo crece.
+  async countPlanMovements(treatmentPlanId: string): Promise<number> {
     return this.prisma.runWithTenant((tx) =>
-      tx.payment.count({
-        where: { tenantId: this.requireTenantId(), treatmentPlanId },
-      }),
+      this.planMovements(tx, treatmentPlanId),
     );
+  }
+
+  /**
+   * Abonos (vivos y anulados: un abono nunca se borra) más asientos de saldo
+   * a favor del plan (traspasos y devoluciones, DX-253: tampoco se borran).
+   * DX-463: un traspaso al plan a la vez que un cobro cambia lo pendiente sin
+   * ser un abono, así que también cuenta; la cuenta solo crece.
+   */
+  private async planMovements(
+    tx: Prisma.TransactionClient,
+    treatmentPlanId: string,
+  ): Promise<number> {
+    const tenantId = this.requireTenantId();
+    const payments = await tx.payment.count({
+      where: { tenantId, treatmentPlanId },
+    });
+    const entries = await tx.patientCreditEntry.count({
+      where: { tenantId, treatmentPlanId },
+    });
+    return payments + entries;
   }
 
   async findSplit(splitId: string): Promise<SplitPaymentRecord | null> {

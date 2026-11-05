@@ -13,6 +13,7 @@ import {
 } from './support/e2e-fixtures';
 import type { RegionalFixture } from './support/location-fixtures';
 import { SCHEDULE_BLOCK_CLOCK } from '../src/modules/schedule-blocks/application/schedule-block-clock';
+import { IDEMPOTENCY_KEY_INVALID_MESSAGE } from '../src/shared/validation/idempotency-key';
 import { CLOSING_QUEUE_NOW } from '../src/modules/closing-queue/domain/ports/closing-queue-repository.port';
 import {
   addCivilDays,
@@ -761,7 +762,7 @@ describe('Sobrecupo de urgencia y «Atender sin cita» idempotente (e2e, DX-509/
         400,
       );
       expect(bad.body).toMatchObject({
-        message: 'La clave de idempotencia debe ser un UUID.',
+        message: IDEMPOTENCY_KEY_INVALID_MESSAGE,
       });
     });
 

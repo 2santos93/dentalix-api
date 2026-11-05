@@ -20,6 +20,7 @@ import {
   MarkPublicPostOpOpenedUseCase,
 } from '../application/use-cases/public-post-op.use-cases';
 import { PublicPostOpDto } from './dto/public-post-op.dto';
+import { NoStoreHeadersInterceptor } from '../../../shared/http/no-store-headers.interceptor';
 
 const NOT_FOUND = 'Token malformado, desconocido o de otra clínica.';
 const GONE = 'El enlace caducó (30 días desde la entrega).';
@@ -29,7 +30,7 @@ const GONE = 'El enlace caducó (30 días desde la entrega).';
 // invisible un token de otra clínica (→ 404). Sin @Audit: la apertura queda
 // en `firstOpenedAt` de la entrega.
 @ApiTags('public')
-@UseInterceptors(PublicTenantContextInterceptor)
+@UseInterceptors(NoStoreHeadersInterceptor, PublicTenantContextInterceptor)
 // Por IP: frena la enumeración de tokens (un balde por ruta).
 @RateLimit('confirmation')
 @Controller('public/post-op-instructions')

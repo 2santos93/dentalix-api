@@ -76,8 +76,7 @@ export const FROM_CASH_METHOD_MESSAGE =
 export const FROM_CASH_PAID_ON_MESSAGE =
   'Un pago desde la caja es de hoy: no admite otra fecha.';
 export const ATTACHMENT_ALREADY_MESSAGE = 'El gasto ya tiene un soporte.';
-export const IDEMPOTENCY_KEY_INVALID_MESSAGE =
-  'La clave de idempotencia debe ser un UUID.';
+export { IDEMPOTENCY_KEY_INVALID_MESSAGE } from '../../../shared/validation/idempotency-key';
 export const IDEMPOTENCY_KEY_REUSED_MESSAGE =
   'Esta clave de idempotencia ya se usó con otros datos. Vuelve a enviar el formulario para generar una clave nueva.';
 

@@ -471,6 +471,61 @@ describe('oferta de hueco por enlace (int, DX-435)', () => {
       });
     });
 
+    it('SEC-064: la oferta aceptada deja de enseñar el hueco 7 días después de la cita y responde como un enlace caducado, también al volver a pulsar', async () => {
+      const first = await offerToEntry(a, 0);
+      const won = await inClinic(a, () =>
+        acceptOffer.execute(first.token, META),
+      );
+      expect(won.state).toBe('ACCEPTED');
+      const DAY_MS = 24 * 60 * 60 * 1000;
+      const lateClock = (after: Date, plusMs: number) => () =>
+        new Date(after.getTime() + plusMs);
+      const cases = (clockFn: () => Date) => ({
+        get: new GetPublicSlotOfferUseCase(repo, clockFn, tenantContext),
+        accept: new AcceptSlotOfferUseCase(
+          repo,
+          noSchedule,
+          new PrismaScheduleBlockRepository(prisma, tenantContext),
+          availability,
+          clockFn,
+          tenantContext,
+        ),
+        decline: new DeclineSlotOfferUseCase(repo, clockFn, tenantContext),
+      });
+
+      // Dentro del plazo (6 días y 23 h tras terminar la cita): sin cambios.
+      const within = cases(lateClock(at('15:30'), 7 * DAY_MS - 60 * 60 * 1000));
+      const seen = await inClinic(a, () => within.get.execute(first.token));
+      expect(seen.state).toBe('ACCEPTED');
+      expect(seen.offer?.patientFirstName).toBeTruthy();
+
+      // Vencido el plazo: IGUAL que la respuesta de un enlace caducado de
+      // verdad (una oferta PENDING pasada su expiresAt), sin datos del hueco.
+      const lapsed = cases(lateClock(at('15:30'), 7 * DAY_MS));
+      const pendingOffer = await offerToEntry(a, 1);
+      await owner.waitlistOffer.update({
+        where: { id: pendingOffer.offerId },
+        data: { expiresAt: new Date(Date.now() - 60_000) },
+      });
+      const reference = await inClinic(a, () =>
+        lapsed.get.execute(pendingOffer.token),
+      );
+      expect(reference).toMatchObject({ state: 'EXPIRED', offer: null });
+      const expired = await inClinic(a, () => lapsed.get.execute(first.token));
+      expect(expired).toEqual(reference);
+      for (const run of [
+        () => lapsed.accept.execute(first.token, META),
+        () => lapsed.decline.execute(first.token, META),
+      ]) {
+        expect(await inClinic(a, run)).toEqual(reference);
+      }
+      // No se escribe nada: la oferta sigue ACCEPTED y la cita, una.
+      expect(await outcomeOf(first.offerId)).toBe('ACCEPTED');
+      expect(
+        await owner.appointment.count({ where: { tenantId: a.tenantId } }),
+      ).toBe(1);
+    });
+
     it('dos aceptaciones simultáneas: exactamente una gana y la otra recibe «ocupado», sin error', async () => {
       for (let round = 0; round < 3; round++) {
         const one = await offerToEntry(a, 0);

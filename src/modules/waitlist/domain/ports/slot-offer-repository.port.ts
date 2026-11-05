@@ -19,6 +19,8 @@ export interface PublicSlotOffer {
   appointmentId: string | null;
   outcome: WaitlistOfferOutcome;
   expiresAt: Date | null;
+  /** Cuándo se resolvió (SEC-064: de aquí cuenta el plazo de una oferta aceptada). */
+  outcomeAt: Date | null;
   /** DX-461: el paciente está archivado; el enlace ya no sirve. */
   patientArchived: boolean;
   /** Cuándo se creó: para saber si otra oferta ganó el hueco después. */

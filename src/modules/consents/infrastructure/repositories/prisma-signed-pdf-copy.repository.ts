@@ -11,6 +11,7 @@ import type {
   ConsumeSignedPdfCopyOutcome,
   IssueSignedPdfCopyLinkInput,
   SignedConsentPdfBackfillRepository,
+  SignedPdfCopyDownload,
   SignedPdfCopyLinkRow,
   SignedPdfCopyRepository,
   SignedPdfCopyTarget,
@@ -122,8 +123,9 @@ export class PrismaSignedPdfCopyRepository
         },
         data: { revokedAt: input.now },
       });
-      return tx.signedConsentPdfLink.create({
+      const link = await tx.signedConsentPdfLink.create({
         data: {
+          id: input.id,
           tenantId,
           patientId: input.patientId,
           consentId: input.consentId,
@@ -134,6 +136,10 @@ export class PrismaSignedPdfCopyRepository
         },
         select: { id: true },
       });
+      // DX-463: el email del enlace nuevo, en esta misma transacción: si no
+      // se puede encolar, se deshace también la revocación del anterior.
+      await input.enqueue?.(tx);
+      return link;
     });
   }
 
@@ -159,6 +165,7 @@ export class PrismaSignedPdfCopyRepository
     linkId: string,
     now: Date,
     meta: AuditRequestMeta,
+    beforeCommit?: (download: SignedPdfCopyDownload) => Promise<void>,
   ): Promise<ConsumeSignedPdfCopyOutcome> {
     const tenantId = this.tenantId();
     return this.prisma.runWithTenant(async (tx) => {
@@ -219,6 +226,9 @@ export class PrismaSignedPdfCopyRepository
           reason: SIGNED_PDF_COPY_DOWNLOADED_REASON,
         },
       });
+      // DX-463: lo último antes del COMMIT (genera la URL firmada): si falla,
+      // se deshacen el gasto y la auditoría, y el enlace sigue sirviendo.
+      await beforeCommit?.(document);
       return { kind: 'CONSUMED', download: document };
     });
   }
