@@ -7,6 +7,7 @@ import {
   TreatmentPlanStatus,
 } from '@prisma/client';
 import { CLINICAL_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
+import { lockLivePatientOrConflict } from '../../../shared/patients/lock-live-patient';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { resolveReferenceLocation } from '../../../shared/locations/reference-location';
@@ -311,6 +312,9 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
   ): Promise<{ id: string; supersededIds: string[] }> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
+      // DX-476: primero el paciente vivo (el orden de archivar), 409 si ya
+      // está archivado: nunca un enlace vivo ni un mensaje a un archivado.
+      await lockLivePatientOrConflict(tx, input.patientId);
       // La anterior del mismo paciente y plantilla (o, BUDGET, del mismo
       // plan) que aún esperaba deja de servir: un solo enlace vivo por
       // documento.

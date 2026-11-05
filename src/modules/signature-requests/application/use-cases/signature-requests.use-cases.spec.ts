@@ -328,6 +328,16 @@ describe('enviar a firmar a distancia (DX-243)', () => {
     expect(ctx.repo.rows).toHaveLength(0);
   });
 
+  it('DX-476: si el paciente se archiva antes de guardar la solicitud, 409 «El paciente está archivado» y no sale ningún email', async () => {
+    const ctx = setup();
+    jest
+      .spyOn(ctx.repo, 'create')
+      .mockRejectedValue(new ConflictException('El paciente está archivado'));
+    await expect(send(ctx)).rejects.toThrow('El paciente está archivado');
+    expect(ctx.links).toHaveLength(0);
+    expect(ctx.codes).toHaveLength(0);
+  });
+
   it('un segundo envío del mismo documento anula el anterior y cancela su email pendiente', async () => {
     const ctx = setup();
     const first = await send(ctx);

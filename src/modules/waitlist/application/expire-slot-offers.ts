@@ -17,8 +17,14 @@ export const EXPIRE_SLOT_OFFERS_JOB = 'waitlist.expire-slot-offers';
 export const EXPIRE_SLOT_OFFERS_SCHEDULE =
   'waitlist.expire-slot-offers.every-five-minutes';
 export const EXPIRE_SLOT_OFFERS_CRON = '*/5 * * * *';
-/** Tope por clínica y pasada; lo que quede lo recoge la siguiente. */
-const BATCH = 500;
+/**
+ * DX-476: ofertas por lote; cada lote es su propia transacción (unas 150
+ * sentencias, muy por debajo del timeout de 5 s de DX-431) y el barrido sigue
+ * lote a lote hasta no encontrar más vencidas.
+ */
+export const EXPIRE_BATCH_SIZE = 50;
+/** Tope de lotes por clínica y pasada (10.000 ofertas); el resto, a la siguiente. */
+export const EXPIRE_MAX_BATCHES = 200;
 
 export interface ExpireSlotOffersResult {
   expired: number;
@@ -46,7 +52,7 @@ export class ExpireSlotOffers {
     let failed = 0;
     for (const tenantId of await this.repo.tenantIds()) {
       try {
-        expired += await this.repo.expireDue(tenantId, now, BATCH);
+        expired += await this.expireTenant(tenantId, now);
       } catch (error) {
         failed += 1;
         this.logger.warn({
@@ -61,5 +67,27 @@ export class ExpireSlotOffers {
       throw new Error(`Caducar ofertas falló en ${failed} clínica(s)`);
     }
     return { expired };
+  }
+
+  /**
+   * Una clínica: lotes pequeños, cada uno en su transacción y por id
+   * ascendente (el orden de bloqueo de «Aceptar»). Un lote que falla no
+   * deshace los anteriores, que ya están confirmados.
+   */
+  private async expireTenant(tenantId: string, now: Date): Promise<number> {
+    let expired = 0;
+    let afterId: string | null = null;
+    for (let batch = 0; batch < EXPIRE_MAX_BATCHES; batch++) {
+      const done = await this.repo.expireDueBatch(
+        tenantId,
+        now,
+        EXPIRE_BATCH_SIZE,
+        afterId,
+      );
+      expired += done.expired;
+      if (done.scanned < EXPIRE_BATCH_SIZE || done.lastId === null) break;
+      afterId = done.lastId;
+    }
+    return expired;
   }
 }

@@ -16,6 +16,7 @@ import {
 } from '../../domain/slot-offer-link';
 import type {
   ClinicBrandingRow,
+  ExpiredBatch,
   PublicSlotOffer,
   SlotOfferRepository,
   SlotOfferResolution,
@@ -305,17 +306,20 @@ export class PrismaSlotOfferRepository implements SlotOfferRepository {
     await this.resolve(tx, offer, 'ACCEPTED', now, meta, true);
     // Las demás ofertas pendientes de este hueco (de cualquier canal) se
     // quedan sin él.
-    const siblings = await tx.waitlistOffer.findMany({
-      where: {
-        id: { not: offer.id },
-        providerId: offer.providerId,
-        locationId: offer.locationId,
-        outcome: 'PENDING',
-        slotStart: { lt: offer.appointmentEnd },
-        slotEnd: { gt: offer.slotStart },
-      },
-      select: { id: true, tenantId: true, locationId: true, patientId: true },
-    });
+    // DX-476: se bloquean por id ascendente, el mismo orden del barrido de
+    // caducadas, y solo después se resuelven (nunca en el orden físico de la
+    // tabla, que puede cruzarse con el de otra transacción).
+    const siblings = await tx.$queryRaw<
+      { id: string; tenantId: string; locationId: string; patientId: string }[]
+    >`SELECT "id", "tenantId", "locationId", "patientId" FROM "waitlist_offers"
+       WHERE "id" <> ${offer.id}::uuid
+         AND "providerId" = ${offer.providerId}::uuid
+         AND "locationId" = ${offer.locationId}::uuid
+         AND "outcome" = 'PENDING'
+         AND "slotStart" < ${offer.appointmentEnd}
+         AND "slotEnd" > ${offer.slotStart}
+       ORDER BY "id"
+         FOR UPDATE`;
     if (siblings.length > 0) {
       await tx.waitlistOffer.updateMany({
         where: { id: { in: siblings.map((s) => s.id) }, outcome: 'PENDING' },
@@ -368,23 +372,38 @@ export class PrismaSlotOfferRepository implements SlotOfferRepository {
     return rows.map((r) => r.id);
   }
 
-  expireDue(tenantId: string, now: Date, limit: number): Promise<number> {
+  /**
+   * DX-476 (DB-070): UN lote del barrido, en su propia transacción. Las filas
+   * se piden por id ascendente con FOR UPDATE SKIP LOCKED: el mismo orden por
+   * id con que «Aceptar» bloquea a las hermanas, y sin esperar nunca a una
+   * fila que otra transacción tiene (la recoge la siguiente pasada), así que
+   * el barrido no puede cerrar un ciclo de deadlock con «Aceptar». El cursor
+   * `afterId` evita releer lo ya visto, también lo saltado.
+   */
+  expireDueBatch(
+    tenantId: string,
+    now: Date,
+    size: number,
+    afterId: string | null,
+  ): Promise<ExpiredBatch> {
     return this.prisma.runWithTenant(tenantId, async (tx) => {
       // Lo sirve waitlist_offers_tenant_provider_slot_pending_idx (parcial
-      // PENDING). El UPDATE es condicional: si una aceptación en curso la
-      // resuelve antes, el barrido no la toca.
-      const due = await tx.waitlistOffer.findMany({
-        where: { outcome: 'PENDING', expiresAt: { lte: now } },
-        select: { id: true, locationId: true, patientId: true },
-        orderBy: { expiresAt: 'asc' },
-        take: limit,
+      // PENDING); las filas del lote quedan bloqueadas hasta el COMMIT.
+      const due = await tx.$queryRaw<
+        { id: string; locationId: string; patientId: string }[]
+      >`SELECT "id", "locationId", "patientId" FROM "waitlist_offers"
+         WHERE "tenantId" = ${tenantId}::uuid
+           AND "outcome" = 'PENDING' AND "expiresAt" <= ${now}
+           AND (${afterId}::uuid IS NULL OR "id" > ${afterId}::uuid)
+         ORDER BY "id"
+         LIMIT ${size}
+           FOR UPDATE SKIP LOCKED`;
+      if (due.length === 0) return { scanned: 0, expired: 0, lastId: null };
+      const { count } = await tx.waitlistOffer.updateMany({
+        where: { id: { in: due.map((r) => r.id) }, outcome: 'PENDING' },
+        data: { outcome: 'EXPIRED', outcomeAt: now },
       });
       for (const row of due) {
-        const { count } = await tx.waitlistOffer.updateMany({
-          where: { id: row.id, outcome: 'PENDING' },
-          data: { outcome: 'EXPIRED', outcomeAt: now },
-        });
-        if (count === 0) continue;
         await writeAuditEvent(
           tx,
           offerAuditEvent(
@@ -395,7 +414,11 @@ export class PrismaSlotOfferRepository implements SlotOfferRepository {
           ),
         );
       }
-      return due.length;
+      return {
+        scanned: due.length,
+        expired: count,
+        lastId: due[due.length - 1].id,
+      };
     });
   }
 

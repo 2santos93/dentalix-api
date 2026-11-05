@@ -257,6 +257,17 @@ describe('copia del PDF firmado al paciente (DX-443)', () => {
       expect(ctx.emails).toEqual([]);
     });
 
+    it('DX-476: con el paciente archivado en medio, el envío automático no manda email (la cola recibe el 409)', async () => {
+      const ctx = setup();
+      jest
+        .spyOn(ctx.repo, 'issueLink')
+        .mockRejectedValue(new ConflictException('El paciente está archivado'));
+      await expect(ctx.job.handle({ consentId: CONSENT })).rejects.toThrow(
+        'El paciente está archivado',
+      );
+      expect(ctx.emails).toEqual([]);
+    });
+
     it('rechaza un payload sin uuid', async () => {
       const ctx = setup();
       await expect(ctx.job.handle({ consentId: 'x' })).rejects.toThrow(
@@ -324,6 +335,17 @@ describe('copia del PDF firmado al paciente (DX-443)', () => {
         'Espera',
       );
       expect(ctx.repo.issued).toEqual([]);
+      expect(ctx.emails).toEqual([]);
+    });
+
+    it('DX-476: si el paciente se archivó mientras tanto, el 409 sale de la creación del enlace y no se envía ningún email', async () => {
+      const ctx = setup();
+      jest
+        .spyOn(ctx.repo, 'issueLink')
+        .mockRejectedValue(new ConflictException('El paciente está archivado'));
+      await expect(ctx.resend.execute('p1', uuid, 'u1')).rejects.toThrow(
+        'El paciente está archivado',
+      );
       expect(ctx.emails).toEqual([]);
     });
 
