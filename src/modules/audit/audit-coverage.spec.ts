@@ -49,6 +49,7 @@ import { CancellationPolicyController } from '../cancellation-policies/presentat
 import { CancellationFeeController } from '../cancellation-fees/presentation/cancellation-fee.controller';
 import { DiscountReportController } from '../discounts/presentation/discount-report.controller';
 import { ProductionByProcedureController } from '../reports/presentation/production-by-procedure.controller';
+import { UnallocatedPaymentsController } from '../reports/presentation/unallocated-payments.controller';
 import { ClosingQueueController } from '../closing-queue/presentation/closing-queue.controller';
 import { ContingencyAgendaController } from '../contingency-agenda/presentation/contingency-agenda.controller';
 import { CollectionsController } from '../collections/presentation/collections.controller';
@@ -1145,6 +1146,17 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'TREATMENT_PLAN_ITEM',
     reason: 'DISCOUNT_REPORT',
   },
+  // DX-399: lo cobrado sin imputar (abonos de muchos pacientes) y su CSV.
+  'GET /reports/unallocated-payments': {
+    action: 'VIEW',
+    resource: 'ACCOUNT_STATEMENT',
+    reason: 'UNALLOCATED_PAYMENTS',
+  },
+  'GET /reports/unallocated-payments.csv': {
+    action: 'EXPORT',
+    resource: 'ACCOUNT_STATEMENT',
+    reason: 'UNALLOCATED_PAYMENTS',
+  },
   // DX-423: el detalle de una fila lleva el nombre de cada paciente.
   'GET /reports/production-by-procedure/items': {
     action: 'VIEW',
@@ -1814,6 +1826,7 @@ const CONTROLLERS: Type[] = [
   CancellationFeeController,
   DiscountReportController,
   ProductionByProcedureController,
+  UnallocatedPaymentsController,
   ClosingQueueController,
   ContingencyAgendaController,
   CollectionsController,

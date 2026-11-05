@@ -10,16 +10,26 @@ import { GetProductionByProcedureUseCase } from './application/use-cases/get-pro
 import { PRODUCTION_BY_PROCEDURE_REPOSITORY } from './domain/ports/production-by-procedure-repository.port';
 import { PrismaProductionByProcedureRepository } from './infrastructure/prisma-production-by-procedure.repository';
 import { ProductionByProcedureController } from './presentation/production-by-procedure.controller';
+import { GetUnallocatedPaymentsUseCase } from './application/use-cases/get-unallocated-payments.use-case';
+import { UNALLOCATED_PAYMENTS_REPOSITORY } from './domain/ports/unallocated-payments-repository.port';
+import { PrismaUnallocatedPaymentsRepository } from './infrastructure/prisma-unallocated-payments.repository';
+import { UnallocatedPaymentsController } from './presentation/unallocated-payments.controller';
 
 // Reportes de gestión (DX-014). Pestañas: «Comparar sedes» (indicadores en
-// `domain/kpi-definitions.ts`) y «Producción por procedimiento» (DX-423); las
+// `domain/kpi-definitions.ts`), «Producción por procedimiento» (DX-423) y
+// «Cobrado sin imputar» (DX-399, ADMIN y recepción); las
 // siguientes se añaden como controladores bajo el mismo prefijo `reports`.
 @Module({
   imports: [JwtModule.register({})],
-  controllers: [LocationsComparisonController, ProductionByProcedureController],
+  controllers: [
+    LocationsComparisonController,
+    ProductionByProcedureController,
+    UnallocatedPaymentsController,
+  ],
   providers: [
     GetLocationsComparisonUseCase,
     GetProductionByProcedureUseCase,
+    GetUnallocatedPaymentsUseCase,
     TokenService,
     TenantContextInterceptor,
     {
@@ -29,6 +39,10 @@ import { ProductionByProcedureController } from './presentation/production-by-pr
     {
       provide: PRODUCTION_BY_PROCEDURE_REPOSITORY,
       useClass: PrismaProductionByProcedureRepository,
+    },
+    {
+      provide: UNALLOCATED_PAYMENTS_REPOSITORY,
+      useClass: PrismaUnallocatedPaymentsRepository,
     },
   ],
 })

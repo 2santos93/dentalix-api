@@ -832,6 +832,58 @@ describe('Reasignación de la imputación de un abono (DX-051, e2e)', () => {
     ]);
   });
 
+  it('DX-399: the reallocation audit names the user and when, closes the metadata and reaches the audit log API', async () => {
+    const planId = await createPlan();
+    await addItem(planId, 100, 'DONE');
+    const accepted = await addItem(planId, 100);
+    const paymentId = await pay(planId, 100);
+    const done = Object.keys(await rowsOf(paymentId))[0];
+    const started = Date.now();
+
+    await put(
+      paymentId,
+      { mode: 'MANUAL', allocations: [line(accepted, 25.5)] },
+      200,
+    );
+
+    // La fila: usuario, instante del servidor y metadata cerrada.
+    const events = await raw.auditEvent.findMany({
+      where: {
+        tenantId: clinic.tenantId,
+        resourceType: 'PAYMENT_ALLOCATION',
+        resourceId: paymentId,
+      },
+    });
+    expect(events).toHaveLength(1);
+    const [event] = events;
+    expect(event.actorUserId).toBe(clinic.adminUserId);
+    expect(event.occurredAt.getTime()).toBeGreaterThanOrEqual(started - 1000);
+    expect(
+      Object.keys(event.metadata as Record<string, unknown>).sort(),
+    ).toEqual(['allocation', 'changedFields', 'params', 'reason']);
+    expect((event.metadata as { allocation: unknown }).allocation).toEqual({
+      currency: 'EUR',
+      mode: 'MANUAL',
+      before: [{ itemId: done, amount: 100 }],
+      after: [{ itemId: accepted, amount: 25.5 }],
+    });
+
+    // La lectura del registro (la que pinta la pantalla de auditoría) la trae.
+    const log = await api()
+      .get(`/audit-events?resourceType=PAYMENT_ALLOCATION&limit=50`)
+      .expect(200);
+    const listed = (
+      log.body as {
+        items: {
+          resourceId: string;
+          actor: { userId: string } | null;
+          metadata: { allocation?: { mode: string } };
+        }[];
+      }
+    ).items.find((e) => e.resourceId === paymentId);
+    expect(listed?.metadata.allocation?.mode).toBe('MANUAL');
+  });
+
   it('isolation: routes of A from B are 404; a PUT of B with an item of A is 400', async () => {
     const planA = await createPlan();
     const itemA = await addItem(planA, 100, 'DONE');

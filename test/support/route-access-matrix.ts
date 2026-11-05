@@ -625,6 +625,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // DX-430: saldo a favor por paciente, mismo dato financiero que la lista.
   'GET /receivables/credit-balances': BILLING,
   'GET /receivables/aging.csv': ADMIN_ONLY,
+  // DX-399: cobrado sin imputar / a cuenta (lista de abonos de muchos
+  // pacientes): ADMIN y recepción, también el CSV (sin teléfonos).
+  'GET /reports/unallocated-payments': BILLING,
+  'GET /reports/unallocated-payments.csv': BILLING,
   // Descuentos (loop/informes/DX-204.md): la política la leen quienes editan
   // ítems de plan y la cambia ADMIN; el informe y su CSV, solo ADMIN.
   // DX-253: saldo a favor (loop/informes/DX-253.md): financiero, ADMIN y

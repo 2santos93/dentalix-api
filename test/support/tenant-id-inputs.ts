@@ -119,6 +119,8 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
   'GET /reports/production-by-procedure/items ?catalogItemId',
   'GET /reports/production-by-procedure/items ?locationId',
   'GET /reports/production-by-procedure/items ?professionalId',
+  'GET /reports/unallocated-payments ?locationId',
+  'GET /reports/unallocated-payments.csv ?locationId',
   'GET /receivables/aging ?locationId',
   'GET /receivables/aging ?providerId',
   'GET /receivables/aging/summary ?locationId',

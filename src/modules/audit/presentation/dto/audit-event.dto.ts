@@ -293,6 +293,38 @@ export class AuditExchangeRateBackupDto {
   currencies!: string[];
 }
 
+export class AuditAllocationLineDto {
+  @ApiProperty({ format: 'uuid', description: 'El ítem del plan.' })
+  itemId!: string;
+
+  @ApiProperty({ example: 25.5, description: 'En la moneda del plan.' })
+  amount!: number;
+}
+
+export class AuditAllocationDto {
+  @ApiProperty({ description: 'ISO 4217: la moneda del plan.' })
+  currency!: string;
+
+  @ApiProperty({
+    enum: ['MANUAL', 'AUTO'],
+    description:
+      'MANUAL: el ADMIN fijó la imputación a mano. AUTO: la devolvió al reparto automático.',
+  })
+  mode!: 'MANUAL' | 'AUTO';
+
+  @ApiProperty({
+    type: [AuditAllocationLineDto],
+    description: 'Origen: las líneas de antes de guardar.',
+  })
+  before!: AuditAllocationLineDto[];
+
+  @ApiProperty({
+    type: [AuditAllocationLineDto],
+    description: 'Destino: las líneas que quedaron (tras el reparto).',
+  })
+  after!: AuditAllocationLineDto[];
+}
+
 /** Valor de un campo de configuración (DX-360): texto de una línea, número, booleano, null o lista. */
 const AUDIT_CONFIG_VALUE = {
   nullable: true,
@@ -471,6 +503,13 @@ export class AuditMetadataDto {
       'DX-381: alta de una tasa de cambio manual (`resourceId` = la tasa): moneda, día y tasa. Nada del autor ni de los abonos.',
   })
   exchangeRate?: AuditExchangeRateDto;
+
+  @ApiPropertyOptional({
+    type: AuditAllocationDto,
+    description:
+      'DX-051/DX-399: un ADMIN reasignó la imputación de un abono (`resourceId` = el abono, `reason` PAYMENT_REALLOCATED): modo, moneda del plan y las líneas (ítem e importe) de antes y de después. Nada del paciente.',
+  })
+  allocation?: AuditAllocationDto;
 
   @ApiPropertyOptional({
     type: AuditConfigChangeDto,
