@@ -1,6 +1,7 @@
 import type { RegionalFormat } from '../../../shared/format/regional-format';
 import { minuteText } from '../../../shared/format/minute-text';
 import {
+  civilDayRange,
   civilDateIn,
   civilWeekday,
   zonedWallTime,
@@ -105,6 +106,39 @@ export function providerDayAt(
       .map(({ startMinute, endMinute }) => ({ startMinute, endMinute }))
       .sort(byStart),
   };
+}
+
+/** DX-267: una cita viva del profesional, con lo mínimo para listarla. */
+export interface LiveAppointment {
+  id: string;
+  locationId: string;
+  start: Date;
+  end: Date;
+  patientName: string;
+  /** La sede está entre las del miembro: solo así sale en la muestra. */
+  visible: boolean;
+}
+
+/**
+ * DX-267: las citas que un horario deja fuera. Un profesional sin horario no
+ * tiene restricción: ninguna queda fuera. Nunca se mueve ni cancela nada: esto
+ * solo sirve para avisar antes de guardar.
+ */
+export function appointmentsOutsideSchedule(
+  appointments: readonly LiveAppointment[],
+  snapshot: ProviderScheduleSnapshot,
+  timeZoneOf: (locationId: string) => string,
+): LiveAppointment[] {
+  return appointments.filter((a) => {
+    const zone = timeZoneOf(a.locationId);
+    const day = civilDateIn(a.start, zone);
+    const ranges = providerRangesOn(snapshot, a.locationId, day);
+    if (ranges === null) return false;
+    const dayStart = civilDayRange(day, zone).start.getTime();
+    const start = (a.start.getTime() - dayStart) / 60_000;
+    const end = (a.end.getTime() - dayStart) / 60_000;
+    return !ranges.some((r) => r.startMinute <= start && end <= r.endMinute);
+  });
 }
 
 /** Atajo: solo los tramos (o `null` = sin restricción). */

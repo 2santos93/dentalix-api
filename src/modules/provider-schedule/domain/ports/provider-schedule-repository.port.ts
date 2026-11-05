@@ -1,4 +1,5 @@
 import type {
+  LiveAppointment,
   MinuteRange,
   ProviderOverride,
   ProviderScheduleSnapshot,
@@ -34,6 +35,19 @@ export interface ReplaceWeeklyInput {
    */
   validate: (current: ProviderScheduleSnapshot) => void;
   overridesFrom: string;
+  /** DX-267: las citas vivas desde ahí, dentro de la transacción y bajo el candado. */
+  checkAppointments?: AppointmentCheck;
+}
+
+/** DX-267: qué citas mirar y qué hacer con ellas (lanza para no guardar). */
+export interface AppointmentCheck {
+  from: Date;
+  to?: Date;
+  locationId?: string;
+  check: (
+    appointments: LiveAppointment[],
+    current: ProviderScheduleSnapshot,
+  ) => void;
 }
 
 export interface UpsertOverrideInput {
@@ -45,6 +59,7 @@ export interface UpsertOverrideInput {
   actorId: string;
   /** Igual que en `ReplaceWeeklyInput`, con las excepciones de esa fecha. */
   validate: (current: ProviderScheduleSnapshot) => void;
+  checkAppointments?: AppointmentCheck;
 }
 
 export interface WeeklyChange {

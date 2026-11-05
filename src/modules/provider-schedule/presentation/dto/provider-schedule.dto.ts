@@ -92,6 +92,28 @@ export class ReplaceProviderScheduleDto {
   @ValidateNested({ each: true })
   @Type(() => ProviderLocationScheduleInputDto)
   locations!: ProviderLocationScheduleInputDto[];
+
+  @ApiPropertyOptional({
+    description:
+      'DX-267: guardar aunque deje citas fuera. Sin esto, 409 con el recuento y una muestra. Las citas no se mueven.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  confirmAffected?: boolean;
+}
+
+export class AffectedAppointmentDto {
+  @ApiProperty({ format: 'uuid' }) id!: string;
+  @ApiProperty({ format: 'uuid' }) locationId!: string;
+  @ApiProperty({ type: String, format: 'date-time' }) start!: Date;
+  @ApiProperty({ type: String, format: 'date-time' }) end!: Date;
+  @ApiProperty() patientName!: string;
+}
+
+export class AffectedAppointmentsDto {
+  @ApiProperty() total!: number;
+  @ApiProperty({ type: [AffectedAppointmentDto] })
+  sample!: AffectedAppointmentDto[];
 }
 
 export class ProviderLocationScheduleDto {
@@ -126,6 +148,9 @@ export class ProviderScheduleDto {
 
   @ApiProperty({ type: [ProviderLocationScheduleDto] })
   locations!: ProviderLocationScheduleDto[];
+
+  @ApiPropertyOptional({ type: AffectedAppointmentsDto })
+  affectedAppointments?: AffectedAppointmentsDto;
 }
 
 // ---------------------------------------------------------------------------
@@ -183,6 +208,14 @@ export class SetProviderOverrideDto {
   @IsString()
   @MaxLength(200)
   note?: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      'DX-267: guardar aunque deje citas fuera. Sin esto, 409 con el recuento y una muestra. Las citas no se mueven.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  confirmAffected?: boolean;
 }
 
 export class ProviderOverrideDto {
@@ -216,6 +249,9 @@ export class SetProviderOverrideResultDto extends ProviderOverrideDto {
     description: 'Había otra excepción para esa sede y fecha y se reemplazó.',
   })
   replaced!: boolean;
+
+  @ApiPropertyOptional({ type: AffectedAppointmentsDto })
+  affectedAppointments?: AffectedAppointmentsDto;
 }
 
 // ---------------------------------------------------------------------------
