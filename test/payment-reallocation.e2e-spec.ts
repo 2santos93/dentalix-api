@@ -1,4 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
+import {
+  PLAN_ALLOCATION_REPOSITORY,
+  type PlanAllocationRepository,
+} from '../src/modules/payments/domain/ports/plan-allocation-repository.port';
+import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { INestApplication } from '@nestjs/common';
 import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
@@ -826,10 +831,109 @@ describe('Reasignación de la imputación de un abono (DX-051, e2e)', () => {
           currency: 'EUR',
           mode: 'AUTO',
           before: [{ itemId: accepted, amount: 25.5 }],
-          after: [{ itemId: done, amount: 100 }],
+          // En AUTO el reparto lo hace el sistema tras el COMMIT: el evento de
+          // la transacción no inventa un «después» (DX-399).
+          after: [],
         },
       }),
     ]);
+  });
+
+  it('DX-399: the reallocation audit names the user and when, closes the metadata and reaches the audit log API', async () => {
+    const planId = await createPlan();
+    await addItem(planId, 100, 'DONE');
+    const accepted = await addItem(planId, 100);
+    const paymentId = await pay(planId, 100);
+    const done = Object.keys(await rowsOf(paymentId))[0];
+    const started = Date.now();
+
+    await put(
+      paymentId,
+      { mode: 'MANUAL', allocations: [line(accepted, 25.5)] },
+      200,
+    );
+
+    // La fila: usuario, instante del servidor y metadata cerrada.
+    const events = await raw.auditEvent.findMany({
+      where: {
+        tenantId: clinic.tenantId,
+        resourceType: 'PAYMENT_ALLOCATION',
+        resourceId: paymentId,
+      },
+    });
+    expect(events).toHaveLength(1);
+    const [event] = events;
+    expect(event.actorUserId).toBe(clinic.adminUserId);
+    expect(event.occurredAt.getTime()).toBeGreaterThanOrEqual(started - 1000);
+    expect(
+      Object.keys(event.metadata as Record<string, unknown>).sort(),
+    ).toEqual(['allocation', 'changedFields', 'params', 'reason']);
+    expect((event.metadata as { allocation: unknown }).allocation).toEqual({
+      currency: 'EUR',
+      mode: 'MANUAL',
+      before: [{ itemId: done, amount: 100 }],
+      after: [{ itemId: accepted, amount: 25.5 }],
+    });
+
+    // La lectura del registro (la que pinta la pantalla de auditoría) la trae.
+    const log = await api()
+      .get(`/audit-events?resourceType=PAYMENT_ALLOCATION&limit=50`)
+      .expect(200);
+    const listed = (
+      log.body as {
+        items: {
+          resourceId: string;
+          actor: { userId: string } | null;
+          metadata: { allocation?: { mode: string } };
+        }[];
+      }
+    ).items.find((e) => e.resourceId === paymentId);
+    expect(listed?.metadata.allocation?.mode).toBe('MANUAL');
+  });
+
+  it('DX-399: if the audit event cannot be written, the reallocation rolls back with it', async () => {
+    const planId = await createPlan();
+    await addItem(planId, 100, 'DONE');
+    const accepted = await addItem(planId, 100);
+    const paymentId = await pay(planId, 100);
+    const before = await rowsOf(paymentId);
+    const { version } = await allocationsOf(paymentId);
+    const repo = app.get<PlanAllocationRepository>(PLAN_ALLOCATION_REPOSITORY);
+    const tenantContext = app.get(TenantContextService);
+
+    await expect(
+      tenantContext.run(clinic.tenantId, undefined, () =>
+        repo.replaceAllocations({
+          paymentId,
+          mode: 'MANUAL',
+          expectedVersion: version,
+          lines: [{ itemId: accepted, cents: 2_550 }],
+          actorId: clinic.adminUserId,
+          // Un actor que no es un uuid: el INSERT del evento falla DENTRO de la transacción.
+          audit: {
+            tenantId: clinic.tenantId,
+            locationId: null,
+            actor: { userId: 'not-a-uuid', role: 'ADMIN' },
+            requestId: null,
+            ip: null,
+            userAgent: null,
+          },
+        }),
+      ),
+    ).rejects.toBeDefined();
+
+    // Ni la imputación ni el abono fijado cambiaron, y no quedó evento.
+    expect(await rowsOf(paymentId)).toEqual(before);
+    expect((await allocationsOf(paymentId)).manual).toBe(false);
+    expect(
+      await raw.auditEvent.count({
+        where: {
+          tenantId: clinic.tenantId,
+          resourceId: paymentId,
+          resourceType: 'PAYMENT_ALLOCATION',
+        },
+      }),
+    ).toBe(0);
   });
 
   it('isolation: routes of A from B are 404; a PUT of B with an item of A is 400', async () => {

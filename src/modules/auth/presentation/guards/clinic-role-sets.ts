@@ -393,6 +393,15 @@ export const PRODUCTION_REPORT_ROLES: ClinicRole[] = [
   ClinicRole.ADMIN,
 ];
 
+// «Cobrado sin imputar / a cuenta» (DX-399): los abonos que todavía no cubren
+// ningún ítem del plan, de muchos pacientes. Dato financiero como los abonos
+// (PAYMENT_ROLES): lo trabajan la administración y recepción (y recepción
+// puede exportarlo: no lleva teléfonos); DENTIST/ASSISTANT, no.
+export const UNALLOCATED_PAYMENTS_ROLES: ClinicRole[] = [
+  ClinicRole.ADMIN,
+  ClinicRole.RECEPTION,
+];
+
 // «Pendiente de cerrar» (DX-439): el desenlace de las citas pasadas es del
 // mostrador (RECEPTION, de sus sedes); la evolución y el tratamiento sin
 // marcar, del odontólogo (solo sus citas); ADMIN ve todo. La asistente no

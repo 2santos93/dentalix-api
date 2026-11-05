@@ -10,6 +10,9 @@ import {
   TreatmentPlanItemStatus,
   TreatmentPlanStatus,
 } from '@prisma/client';
+import { auditDraftFromContext } from '../../../audit/domain/audit-request-context';
+import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
+import { loadNettingFacts, nettedFacts } from './credit-netting-facts';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { resolveLocationTimeZones } from '../../../../shared/locations/location-time-zone';
@@ -716,9 +719,39 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
                 paymentId,
               )
             : [];
-        return { target, lines, items };
+        const creditOutCents =
+          target.treatmentPlanId &&
+          target.base &&
+          target.planStatus &&
+          isPlanBillable(target.planStatus)
+            ? await this.creditOutOf(
+                tx,
+                tenantId,
+                target.treatmentPlanId,
+                paymentId,
+              )
+            : 0;
+        return { target, lines, items, creditOutCents };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+  }
+
+  /** Lo devuelto o traspasado que se atribuye a este abono (DX-399): la cascada del plan entero. */
+  private async creditOutOf(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    planId: string,
+    paymentId: string,
+  ): Promise<number> {
+    const { facts, entries } = await loadNettingFacts(
+      tx,
+      tenantId,
+      Prisma.sql`tp."id" = ${planId}::uuid`,
+    );
+    return (
+      nettedFacts(facts, entries).find((n) => n.fact.id === paymentId)?.net
+        .creditOutCents ?? 0
     );
   }
 
@@ -871,9 +904,10 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
           currency: string;
           paidAt: Date;
           locationId: string;
+          patientId: string;
         }[]
       >`
-        SELECT "treatmentPlanId", "currency", "paidAt", "locationId"
+        SELECT "treatmentPlanId", "currency", "paidAt", "locationId", "patientId"
           FROM "payments"
          WHERE "tenantId" = ${tenantId}::uuid AND "id" = ${paymentId}::uuid
            AND "deletedAt" IS NULL`;
@@ -1040,6 +1074,38 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
         });
       }
       await tx.$executeRaw`SELECT set_config('app.allocation_cause', '', true)`;
+      // DX-399: el evento de auditoría en la MISMA transacción: usuario, modo y
+      // las líneas de antes y de después (en AUTO, `after` vacío: el reparto lo
+      // hace el sistema después del COMMIT y queda en el historial de movimientos).
+      // Si algo falla, el cambio y el evento se deshacen juntos.
+      await writeAuditEvent(tx, {
+        ...auditDraftFromContext(input.audit, {
+          action: 'UPDATE',
+          resourceType: 'PAYMENT_ALLOCATION',
+          resourceId: paymentId,
+          metadata: {
+            reason: 'PAYMENT_REALLOCATED',
+            changedFields:
+              input.mode === 'MANUAL'
+                ? ['allocations', 'expectedVersion', 'mode']
+                : ['expectedVersion', 'mode'],
+            params: { id: paymentId },
+            allocation: {
+              currency: plan.currency,
+              mode: input.mode,
+              before: previous.map((r) => ({
+                itemId: r.itemId,
+                amount: r.cents / 100,
+              })),
+              after: [...wanted].map(([itemId, cents]) => ({
+                itemId,
+                amount: cents / 100,
+              })),
+            },
+          },
+        }),
+        patient: { kind: 'payment', id: paymentId },
+      });
       // Lo que este abono deja libre lo llenan otros abonos (R9).
       await enqueuePlanRebalance(tx, tenantId, planId);
       return { previous };

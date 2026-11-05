@@ -132,6 +132,22 @@ export class PaymentAllocationsDto {
   unallocated!: number | null;
 
   @ApiProperty({
+    example: 20,
+    description:
+      'De lo sin imputar a ítems, lo que el plan ya devolvió o traspasó de su saldo a favor (DX-253) y se atribuye a este abono: las salidas solo restan de abonos registrados antes que ellas, empezando por el más reciente. 0 si no hay',
+  })
+  creditOut!: number;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    example: 10,
+    description:
+      'A cuenta neto: `unallocated − creditOut`. Es la cifra que da el informe «Cobrado sin imputar» para este abono (y la que no aparece si es 0). null sin tasa',
+  })
+  onAccount!: number | null;
+
+  @ApiProperty({
     description: 'Versión de la imputación: se reenvía como expectedVersion',
   })
   version!: string;

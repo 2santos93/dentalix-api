@@ -49,6 +49,7 @@ import { CancellationPolicyController } from '../cancellation-policies/presentat
 import { CancellationFeeController } from '../cancellation-fees/presentation/cancellation-fee.controller';
 import { DiscountReportController } from '../discounts/presentation/discount-report.controller';
 import { ProductionByProcedureController } from '../reports/presentation/production-by-procedure.controller';
+import { UnallocatedPaymentsController } from '../reports/presentation/unallocated-payments.controller';
 import { ClosingQueueController } from '../closing-queue/presentation/closing-queue.controller';
 import { ContingencyAgendaController } from '../contingency-agenda/presentation/contingency-agenda.controller';
 import { CollectionsController } from '../collections/presentation/collections.controller';
@@ -952,14 +953,6 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: { param: 'id' },
     patient: { lookup: 'payment', param: 'id' },
   },
-  'PUT /payments/:id/allocations': {
-    action: 'UPDATE',
-    resource: 'PAYMENT_ALLOCATION',
-    resourceId: { param: 'id' },
-    patient: { lookup: 'payment', param: 'id' },
-    reason: 'PAYMENT_REALLOCATED',
-    allocation: true,
-  },
   // DX-136: ver, reimprimir y enviar el recibo de caja.
   'GET /payments/:id/receipt': {
     action: 'VIEW',
@@ -1144,6 +1137,17 @@ const EXPECTED: Record<string, AuditOptions> = {
     action: 'EXPORT',
     resource: 'TREATMENT_PLAN_ITEM',
     reason: 'DISCOUNT_REPORT',
+  },
+  // DX-399: lo cobrado sin imputar (abonos de muchos pacientes) y su CSV.
+  'GET /reports/unallocated-payments': {
+    action: 'VIEW',
+    resource: 'ACCOUNT_STATEMENT',
+    reason: 'UNALLOCATED_PAYMENTS',
+  },
+  'GET /reports/unallocated-payments.csv': {
+    action: 'EXPORT',
+    resource: 'ACCOUNT_STATEMENT',
+    reason: 'UNALLOCATED_PAYMENTS',
   },
   // DX-423: el detalle de una fila lleva el nombre de cada paciente.
   'GET /reports/production-by-procedure/items': {
@@ -1480,6 +1484,9 @@ const EXPECTED: Record<string, AuditOptions> = {
  * (sería un evento doble).
  */
 const AUDITED_IN_USE_CASE: Record<string, string> = {
+  // DX-399: PAYMENT_ALLOCATION / PAYMENT_REALLOCATED con las líneas antes y
+  // después, en la MISMA transacción del cambio (si algo falla, se deshacen juntos).
+  'PUT /payments/:id/allocations': 'payment-reallocation.e2e-spec.ts',
   // DX-222: CREATE POSTOP_DELIVERY con el id de `delivery` y el canal como
   // `reason`; queda auditada aunque el email no se pueda encolar.
   'POST /appointments/:appointmentId/post-op-instructions/deliveries':
@@ -1814,6 +1821,7 @@ const CONTROLLERS: Type[] = [
   CancellationFeeController,
   DiscountReportController,
   ProductionByProcedureController,
+  UnallocatedPaymentsController,
   ClosingQueueController,
   ContingencyAgendaController,
   CollectionsController,

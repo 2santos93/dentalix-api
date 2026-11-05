@@ -26,6 +26,11 @@ import {
   PAYMENT_ALLOCATION_WRITE_ROLES,
   PAYMENT_ROLES,
 } from '../../auth/presentation/guards/clinic-role-sets';
+import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
+import {
+  requireAuditRequestContext,
+  type AuditableRequest,
+} from '../../audit/presentation/audit-request-context';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 import { TenantJwtPayload } from '../../../shared/crypto/token.service';
 import { Audit } from '../../audit/presentation/audit.decorator';
@@ -44,7 +49,7 @@ import {
   ReplacedPaymentAllocationsDto,
 } from './dto/payment-allocations.dto';
 
-interface AuthenticatedRequest {
+interface AuthenticatedRequest extends AuditableRequest {
   user: TenantJwtPayload;
 }
 
@@ -71,6 +76,7 @@ export class PaymentAllocationsController {
   constructor(
     private readonly getAllocations: GetPaymentAllocationsUseCase,
     private readonly replaceAllocations: ReplacePaymentAllocationsUseCase,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   @Audit({ action: 'VIEW', resource: 'PAYMENT', ...PAYMENT_AUDIT })
@@ -90,13 +96,8 @@ export class PaymentAllocationsController {
     return this.getAllocations.execute(id);
   }
 
-  @Audit({
-    action: 'UPDATE',
-    resource: 'PAYMENT_ALLOCATION',
-    ...PAYMENT_AUDIT,
-    reason: 'PAYMENT_REALLOCATED',
-    allocation: true,
-  })
+  // DX-399: el evento (PAYMENT_ALLOCATION, PAYMENT_REALLOCATED) lo escribe el
+  // repositorio en la transacción del cambio, no el interceptor.
   @Roles(...PAYMENT_ALLOCATION_WRITE_ROLES)
   @Put()
   @ApiOperation({
@@ -132,7 +133,7 @@ export class PaymentAllocationsController {
           amount: l.amount,
         })),
       },
-      req.user.sub,
+      requireAuditRequestContext(req, this.tenantContext),
     );
   }
 }

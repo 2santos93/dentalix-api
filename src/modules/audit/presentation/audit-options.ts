@@ -66,12 +66,6 @@ export interface AuditOptions {
    */
   coverage?: true;
   /**
-   * DX-051: reasignación de la imputación de un abono. La metadata guarda, de
-   * la respuesta, la moneda del plan, el modo y los importes por ítem antes y
-   * después (ids e importes; nada del paciente).
-   */
-  allocation?: true;
-  /**
    * DX-377: alta de un abono. Si la respuesta trae una referencia repetida
    * confirmada, la metadata guarda la confirmación y los ids de los abonos
    * repetidos; nunca la referencia ni el motivo.

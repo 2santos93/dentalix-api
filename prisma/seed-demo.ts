@@ -2904,7 +2904,14 @@ class DemoSeeder {
             }),
           ),
         },
-        ownerId,
+        {
+          tenantId,
+          locationId: null,
+          actor: { userId: ownerId, role: ClinicRole.ADMIN },
+          requestId: null,
+          ip: null,
+          userAgent: null,
+        },
       );
     });
   }

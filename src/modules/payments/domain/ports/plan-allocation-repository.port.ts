@@ -1,3 +1,4 @@
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import type {
   Prisma,
   TreatmentPlanItemStatus,
@@ -121,6 +122,12 @@ export interface PaymentAllocationsSnapshot {
   target: AllocationTarget;
   lines: { itemId: string; cents: number; source: 'AUTO' | 'MANUAL' }[];
   items: AllocationItemOption[];
+  /**
+   * DX-399: lo devuelto o traspasado del saldo a favor del plan que se atribuye a
+   * este abono (regla de `credit-netting.ts`, la misma del informe «Cobrado sin
+   * imputar»), en céntimos. 0 sin base o en un plan que no se cobra.
+   */
+  creditOutCents: number;
 }
 
 /** Reasignación de un ADMIN (R10). `lines` vacío con `AUTO`. */
@@ -130,6 +137,8 @@ export interface ReplaceAllocationsInput {
   expectedVersion: string;
   lines: { itemId: string; cents: number }[];
   actorId: string;
+  /** DX-399: quién y desde dónde; el evento de auditoría se escribe en la MISMA transacción. */
+  audit: AuditRequestContext;
 }
 
 export const PLAN_ALLOCATION_REPOSITORY = Symbol('PLAN_ALLOCATION_REPOSITORY');
