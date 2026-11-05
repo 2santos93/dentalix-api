@@ -393,8 +393,8 @@ export class PlanVisitsService {
             daysSinceAccepted: Math.max(
               0,
               civilDaysInclusive(
-                civilDateIn(plan.acceptedAt, zoneOf(plan.acceptedLocationId)),
-                civilDateIn(now, zoneOf(plan.acceptedLocationId)),
+                civilDateIn(plan.acceptedAt!, zoneOf(plan.acceptedLocationId!)),
+                civilDateIn(now, zoneOf(plan.acceptedLocationId!)),
               ) - 1,
             ),
             currency: plan.currency,
@@ -411,16 +411,16 @@ export class PlanVisitsService {
               last,
               interval,
               now,
-              zoneOf(plan.acceptedLocationId),
+              zoneOf(plan.acceptedLocationId!),
             ),
             minimumDay: civilDateIn(
               minimumVisitDate(
                 last,
                 interval,
                 now,
-                zoneOf(plan.acceptedLocationId),
+                zoneOf(plan.acceptedLocationId!),
               ),
-              zoneOf(plan.acceptedLocationId),
+              zoneOf(plan.acceptedLocationId!),
             ),
             planItemIds: plan.items
               .filter((i) => i.visit === nextVisit)
