@@ -642,6 +642,154 @@ describe('DX-026 · recordatorios automáticos por email (int)', () => {
     }
   });
 
+  describe('DX-272 · un solo email aunque el worker pierda el arriendo', () => {
+    const payloadOf = (id: string, start: Date) => ({
+      appointmentId: id,
+      leadHours: 2,
+      start: start.toISOString(),
+    });
+
+    const attempt = (
+      app: TestingModule,
+      tenantId: string,
+      payload: ReturnType<typeof payloadOf>,
+      signal: AbortSignal,
+    ) =>
+      app.get(TenantContextService).run(tenantId, () =>
+        app.get(SendAppointmentReminder).handle(payload, {
+          jobId: randomUUID(),
+          attempt: 1,
+          maxAttempts: 5,
+          tenantId,
+          signal,
+        }),
+      );
+
+    /** Una puerta: `reached` avisa de que el intento llegó, `open` lo suelta. */
+    function gate() {
+      let reached!: () => void;
+      let open!: () => void;
+      const hit = new Promise<void>((resolve) => (reached = resolve));
+      const released = new Promise<void>((resolve) => (open = resolve));
+      return { hit, released, reached, open };
+    }
+
+    async function seedTwoHours() {
+      await configure(clinicA, [2]);
+      const start = new Date(Date.now() + 2 * HOUR);
+      const id = await appointment(
+        clinicA,
+        await patient(clinicA, 'ana@example.com'),
+        start,
+      );
+      return { id, start };
+    }
+
+    it('el worker A queda detenido justo antes de encolar, B retoma y termina: A encola después y sigue habiendo UN email', async () => {
+      const { id, start } = await seedTwoHours();
+      const door = gate();
+      const original = a.get(EmailOutbox).enqueue.bind(a.get(EmailOutbox));
+      const enqueue = jest
+        .spyOn(a.get(EmailOutbox), 'enqueue')
+        .mockImplementation(async (input) => {
+          door.reached();
+          await door.released;
+          return original(input);
+        });
+      try {
+        const stalled = attempt(
+          a,
+          clinicA.tenantId,
+          payloadOf(id, start),
+          new AbortController().signal,
+        );
+        await door.hit;
+        // B retoma el mismo trabajo: ve el outbound de A sin email en la
+        // cola y lo encola él.
+        await attempt(
+          b,
+          clinicA.tenantId,
+          payloadOf(id, start),
+          new AbortController().signal,
+        );
+        expect(await reminderEmails(clinicA.tenantId)).toBe(1);
+        door.open();
+        await stalled;
+        expect(await reminderEmails(clinicA.tenantId)).toBe(1);
+        expect((await records(id)).map((r) => r.status)).toEqual(['SENT']);
+        await waitFor(() => mailer.sent.length === 1, 'sale un solo email');
+      } finally {
+        enqueue.mockRestore();
+      }
+    });
+
+    it('si A pierde el arriendo mientras trabaja, no encola nada al reanudar', async () => {
+      const { id, start } = await seedTwoHours();
+      const door = gate();
+      const lease = new AbortController();
+      const record = a
+        .get(OutboundMessages)
+        .record.bind(a.get(OutboundMessages));
+      const recordSpy = jest
+        .spyOn(a.get(OutboundMessages), 'record')
+        .mockImplementation(async (...args) => {
+          const created = await record(...args);
+          door.reached();
+          await door.released;
+          return created;
+        });
+      const enqueue = jest.spyOn(a.get(EmailOutbox), 'enqueue');
+      try {
+        const stalled = attempt(
+          a,
+          clinicA.tenantId,
+          payloadOf(id, start),
+          lease.signal,
+        );
+        await door.hit;
+        lease.abort();
+        await attempt(
+          b,
+          clinicA.tenantId,
+          payloadOf(id, start),
+          new AbortController().signal,
+        );
+        door.open();
+        await expect(stalled).rejects.toThrow('Intento abortado');
+        expect(enqueue).not.toHaveBeenCalled();
+        expect(await reminderEmails(clinicA.tenantId)).toBe(1);
+        // El intento que perdió el arriendo no cierra el recordatorio como
+        // fallido: el del worker B quedó SENT.
+        expect((await records(id)).map((r) => r.status)).toEqual(['SENT']);
+      } finally {
+        recordSpy.mockRestore();
+        enqueue.mockRestore();
+      }
+    });
+
+    it('cita reprogramada: la hora nueva es otra ventana y su recordatorio sí sale', async () => {
+      const { id, start } = await seedTwoHours();
+      const live = new AbortController().signal;
+      await attempt(a, clinicA.tenantId, payloadOf(id, start), live);
+      // Reenvío del mismo trabajo (misma ventana): no duplica.
+      await attempt(b, clinicA.tenantId, payloadOf(id, start), live);
+      expect(await reminderEmails(clinicA.tenantId)).toBe(1);
+
+      const moved = new Date(start.getTime() + 24 * HOUR);
+      await owner.appointment.update({
+        where: { id },
+        data: { start: moved, end: new Date(moved.getTime() + 30 * MIN) },
+      });
+      clock.current = new Date(moved.getTime() - 2 * HOUR - MIN);
+      await attempt(a, clinicA.tenantId, payloadOf(id, moved), live);
+      expect(await reminderEmails(clinicA.tenantId)).toBe(2);
+      expect((await records(id)).map((r) => r.status)).toEqual([
+        'SENT',
+        'SENT',
+      ]);
+    });
+  });
+
   it('DX-160: escritura rechaza token ya caducado aunque lectura haya sido pendiente', async () => {
     const start = new Date(Date.now() + 2 * HOUR);
     const id = await appointment(

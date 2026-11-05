@@ -48,6 +48,11 @@ function parsePayload(payload: JobPayload): ParsedPayload {
   return { appointmentId, leadHours, start: startDate };
 }
 
+/** DX-272: el worker perdió el arriendo del trabajo (o se apaga). */
+function assertLeaseHeld(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new Error('Intento abortado');
+}
+
 /**
  * Handler del envío de UN recordatorio (DX-026). Corre como trabajo de la
  * cola con el tenant del trabajo en el contexto, y NO se fía del payload
@@ -57,7 +62,10 @@ function parsePayload(payload: JobPayload): ParsedPayload {
  * Idempotente (la cola entrega «al menos una vez»): la fila de
  * appointment_reminders, única por (cita, antelación, hora de inicio), es el
  * reclamo. Un intento caído a mitad se retoma donde quedó: si el email ya
- * está en email_outbox no se vuelve a encolar.
+ * está en email_outbox no se vuelve a encolar. Si dos workers lo intentan a la
+ * vez (arriendo perdido), la clave estable es el id del mensaje saliente de la
+ * ventana (cita, antelación, hora de inicio): email_outbox es único por
+ * (clínica, ese id) para esta plantilla.
  */
 @Injectable()
 export class SendAppointmentReminder {
@@ -79,7 +87,7 @@ export class SendAppointmentReminder {
   async handle(payload: JobPayload, context?: JobContext): Promise<void> {
     const parsed = parsePayload(payload);
     try {
-      await this.send(parsed);
+      await this.send(parsed, context?.signal);
     } catch (error) {
       if (
         context &&
@@ -99,11 +107,10 @@ export class SendAppointmentReminder {
     }
   }
 
-  private async send({
-    appointmentId,
-    leadHours,
-    start,
-  }: ParsedPayload): Promise<void> {
+  private async send(
+    { appointmentId, leadHours, start }: ParsedPayload,
+    signal?: AbortSignal,
+  ): Promise<void> {
     const ctx = await this.repo.loadSendContext(appointmentId);
     if (!ctx) {
       this.logger.warn({
@@ -149,6 +156,9 @@ export class SendAppointmentReminder {
       return;
     }
 
+    // DX-272: con el arriendo perdido otro worker ya tiene el trabajo; este
+    // intento no produce más efectos (claim, enlace, constancia, email).
+    assertLeaseHeld(signal);
     const claim = await this.repo.claim(appointmentId, leadHours, start);
     if (claim.status !== 'SENDING') return;
     if (
@@ -173,6 +183,7 @@ export class SendAppointmentReminder {
     // Sin petición: el host de PLATAFORMA de la clínica (`<sub>.<base>`),
     // nunca su dominio personalizado (SEC-033). null = sale sin enlace.
     const linkBase = await this.links.forTenant(tenantId);
+    assertLeaseHeld(signal);
     const link = await this.createLink.execute({
       appointmentId,
       automatic: true,
@@ -208,6 +219,11 @@ export class SendAppointmentReminder {
         ctx.cancellationPolicy.id,
       );
     }
+    // DX-272: última puerta antes del efecto externo. Si aun así el arriendo
+    // se pierde justo después, el índice único de email_outbox por
+    // recordatorio (`referenceId` = outbound) hace que el segundo `enqueue`
+    // devuelva el email ya encolado en vez de crear otro.
+    assertLeaseHeld(signal);
     // DX-128: la de un menor saluda a su responsable (o contacto principal)
     // y nombra al paciente.
     await this.email.enqueue({

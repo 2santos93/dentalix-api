@@ -93,10 +93,11 @@ export class PrismaEmailOutboxRepository implements EmailOutboxRepository {
     const tenantId = row.tenantId;
     // SQL crudo para que las horas las ponga la BD (ver NOW); sigue bajo la
     // RLS de la clínica, como el `create` de Prisma.
-    const [created] = await this.prisma.runWithTenant(
-      tenantId,
-      (tx) =>
-        tx.$queryRaw<{ id: string }[]>`
+    // DX-272: `ON CONFLICT DO NOTHING` sin objetivo: si el índice único de
+    // recordatorios (email_outbox_reminder_reference_key) ya tiene ese
+    // `referenceId`, el email YA está encolado y se devuelve el existente.
+    const id = await this.prisma.runWithTenant(tenantId, async (tx) => {
+      const [created] = await tx.$queryRaw<{ id: string }[]>`
         INSERT INTO "email_outbox"
           ("id", "tenantId", "template", "toHash", "toMasked", "referenceId",
            "payload", "status", "nextAttemptAt", "createdAt", "updatedAt")
@@ -104,9 +105,19 @@ export class PrismaEmailOutboxRepository implements EmailOutboxRepository {
           (gen_random_uuid(), ${tenantId}::uuid, ${row.template}::"EmailTemplate",
            ${row.toHash}, ${row.toMasked}, ${row.referenceId}::uuid,
            ${row.payload}, 'PENDING', ${NOW}, ${NOW}, ${NOW})
-        RETURNING "id"`,
-    );
-    return { id: created.id };
+        ON CONFLICT DO NOTHING
+        RETURNING "id"`;
+      if (created) return created.id;
+      const [existing] = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "email_outbox"
+         WHERE "tenantId" = ${tenantId}::uuid
+           AND "template" = ${row.template}::"EmailTemplate"
+           AND "referenceId" = ${row.referenceId}::uuid
+         ORDER BY "createdAt", "id"
+         LIMIT 1`;
+      return existing.id;
+    });
+    return { id };
   }
 
   async claimDue(

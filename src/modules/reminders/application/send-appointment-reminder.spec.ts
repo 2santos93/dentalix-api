@@ -409,6 +409,76 @@ describe('SendAppointmentReminder (DX-026)', () => {
     expect(repo.reminders[0]).toMatchObject({ status: 'SENT' });
   });
 
+  describe('DX-272 · arriendo perdido y clave estable', () => {
+    const jobContext = (signal: AbortSignal, attempt = 1) => ({
+      jobId: 'job-1',
+      attempt,
+      maxAttempts: 5,
+      tenantId: TENANT,
+      signal,
+    });
+
+    it('con la señal ya abortada no reclama, ni emite enlace, ni encola, ni marca FAILED en el último intento', async () => {
+      repo.contexts.set(APPT, context());
+      const lease = new AbortController();
+      lease.abort();
+      await expect(
+        handler.handle(payload, jobContext(lease.signal, 5)),
+      ).rejects.toThrow('Intento abortado');
+      expect(repo.reminders).toHaveLength(0);
+      expect(createLink.execute).not.toHaveBeenCalled();
+      expect(outbound.record).not.toHaveBeenCalled();
+      expect(email.enqueue).not.toHaveBeenCalled();
+    });
+
+    it('si el arriendo se pierde mientras se prepara el email, no lo encola', async () => {
+      repo.contexts.set(APPT, context());
+      const lease = new AbortController();
+      optOutLinks.issue.mockImplementation(() => {
+        lease.abort();
+        return Promise.resolve('opt_tok');
+      });
+      await expect(
+        handler.handle(payload, jobContext(lease.signal)),
+      ).rejects.toThrow('Intento abortado');
+      expect(email.enqueue).not.toHaveBeenCalled();
+      // El recordatorio queda SENDING: el worker que retoma lo termina.
+      expect(repo.reminders[0]).toMatchObject({ status: 'SENDING' });
+    });
+
+    it('la clave del email es el mensaje saliente de la ventana: la misma ventana la repite, otra hora de inicio usa otra', async () => {
+      let n = 0;
+      outbound.record.mockImplementation(
+        async (_input: unknown, attach?: AttachOutboundMessage) => {
+          const id = `out-${++n}`;
+          await attach?.(id, {} as Prisma.TransactionClient);
+          return { id };
+        },
+      );
+      repo.contexts.set(APPT, context());
+      await handler.handle(payload);
+      await handler.handle(payload);
+      const moved = new Date(START.getTime() + 24 * HOUR);
+      repo.contexts.set(
+        APPT,
+        context({
+          appointment: {
+            id: APPT,
+            start: moved,
+            status: 'SCHEDULED',
+            deleted: false,
+          },
+        }),
+      );
+      await handler.handle({ ...payload, start: moved.toISOString() });
+      expect(
+        email.enqueue.mock.calls.map(
+          ([input]: [{ referenceId: string }]) => input.referenceId,
+        ),
+      ).toEqual(['out-1', 'out-2']);
+    });
+  });
+
   it.each([1, 5])(
     'DX-160: intento %i fallido conserva SENDING hasta agotar los cinco',
     async (attempt) => {
