@@ -134,22 +134,28 @@ function makeUseCase(now: Date = new Date('2026-10-31T15:00:00.000Z')) {
     billable: 500_000,
     paid: 100_000,
     unreadable: false,
+    notFound: false,
     timedOut: false,
   };
+  const current = () => ({
+    planCurrency: 'VES',
+    billable: balance.billable,
+    paid: balance.paid,
+    balance: balance.billable - balance.paid,
+    creditMovements: 0,
+    paymentsCount: 1,
+    paymentsWithoutRate: [],
+    rateProviderTimedOut: balance.timedOut,
+  });
   const getPlanBalance = {
     execute: () =>
-      balance.unreadable
-        ? Promise.reject(new Error('db down'))
-        : Promise.resolve({
-            planCurrency: 'VES',
-            billable: balance.billable,
-            paid: balance.paid,
-            balance: balance.billable - balance.paid,
-            creditMovements: 0,
-            paymentsCount: 1,
-            paymentsWithoutRate: [],
-            rateProviderTimedOut: balance.timedOut,
-          }),
+      balance.notFound
+        ? Promise.reject(new NotFoundException('Treatment plan not found'))
+        : balance.unreadable
+          ? Promise.reject(new Error('db down'))
+          : Promise.resolve(current()),
+    // La misma cuenta sobre la foto de la transacción (DX-463, L4).
+    fromSnapshot: () => Promise.resolve(current()),
   };
   const methods = {
     findById: (id: string) =>
@@ -457,6 +463,39 @@ describe('RecordSplitPaymentUseCase (DX-390)', () => {
       expect(repo.lastSplitInput).toBeNull();
     },
   );
+
+  it('DX-463 (L3): si el plan ya no existe al leer el saldo, sale su 404, no un 503', async () => {
+    const { uc, balance } = makeUseCase();
+    balance.notFound = true;
+    await expect(
+      uc.execute('plan-1', twoLines(), 'user-1'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('DX-463 (L4): la guarda de la transacción usa lo pendiente de AHORA: si baja, 409 con las cifras nuevas; si el saldo es incierto, 503', async () => {
+    const { uc, repo, balance } = makeUseCase();
+    await uc.execute('plan-1', twoLines(), 'user-1');
+    const guard = repo.lastSplitInput?.excessGuardInTx;
+    expect(guard).toBeDefined();
+    const run = () =>
+      guard!({
+        planId: 'plan-1',
+        snapshot: {} as never,
+        creditMovements: 0,
+      });
+    balance.paid = 100_000; // pendiente 400 000: el cobro (300 000) cabe
+    await expect(run()).resolves.toBeUndefined();
+    balance.paid = 400_000; // el plan bajó o se cobró: pendiente 100 000
+    const error: unknown = await run().catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ConflictException);
+    expect((error as ConflictException).getResponse()).toMatchObject({
+      code: 'SPLIT_PAYMENT_EXCEEDS_BALANCE',
+      pending: 100_000,
+      excess: 200_000,
+    });
+    balance.timedOut = true;
+    await expect(run()).rejects.toBeInstanceOf(ServiceUnavailableException);
+  });
 
   it('DX-463: con el excedente ya confirmado, el saldo ilegible no frena el cobro (no hay comprobación que saltar) y el recibo sale sin saldo', async () => {
     const { uc, repo, balance } = makeUseCase();

@@ -154,7 +154,23 @@ export interface CreateSplitPaymentRepoInput {
    * se registra nada.
    */
   balanceGuard?: { planMovementsSeen: number };
+  /**
+   * DX-463 (L4): sin `confirmCreditBalance`, con el plan bloqueado y ANTES de
+   * insertar nada, la transacción relee la foto del saldo (la misma de
+   * `balanceForReceipt`) y llama a esto; lanza (409 de excedente, 503 de saldo
+   * ilegible) si el total supera lo pendiente de AHORA. Atrapa lo que el
+   * conteo de `balanceGuard` no ve: un ítem descontado o cancelado, o la base
+   * de un abono en otra moneda que llegó tarde.
+   */
+  excessGuardInTx?: ReceiptExcessGuardInTx;
 }
+
+/** DX-463: comprueba, bajo el bloqueo del plan, que el cobro no deja excedente sin confirmar. */
+export type ReceiptExcessGuardInTx = (data: {
+  planId: string;
+  snapshot: PlanBalanceSnapshot;
+  creditMovements: number;
+}) => Promise<void>;
 
 /** DX-390: un cobro dividido registrado, con sus líneas en orden. */
 export interface SplitPaymentRecord {

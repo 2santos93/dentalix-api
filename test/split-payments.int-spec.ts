@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { ConflictException } from '@nestjs/common';
 import { Prisma, PrismaClient, TreatmentPlanStatus } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
@@ -102,6 +103,8 @@ async function cleanup(): Promise<void> {
   });
   const ids = tenants.map((t) => t.id);
   const tenantId = { in: ids };
+  await raw.treatmentPlanItem.deleteMany({ where: { tenantId } });
+  await raw.dentalCatalogItem.deleteMany({ where: { tenantId } });
   await raw.patientCreditEntry.deleteMany({ where: { tenantId } });
   await raw.patientCreditTransfer.deleteMany({ where: { tenantId } });
   await raw.paymentReceipt.deleteMany({ where: { tenantId } });
@@ -574,5 +577,81 @@ describe('DX-390 · cobro dividido con un solo recibo (int)', () => {
         rowsBefore,
       );
     });
+  });
+
+  // DX-463 (L4): lo pendiente se recalcula bajo el bloqueo del plan; un
+  // descuento que no añade filas ya no deja pasar un excedente sin confirmar.
+  it('DX-463: el total del plan baja entre la lectura y el cobro (descuento sin filas nuevas): la guarda en la transacción ve lo pendiente de ahora y da 409', async () => {
+    const plan = await raw.treatmentPlan.create({
+      data: {
+        tenantId: a.tenantId,
+        patientId: a.patientId,
+        currency: 'USD',
+        status: TreatmentPlanStatus.ACCEPTED,
+      },
+    });
+    const catalog = await raw.dentalCatalogItem.create({
+      data: {
+        tenantId: a.tenantId,
+        code: 'dx463',
+        kind: 'PROCEDURE',
+        labelEs: 'Resina',
+        color: '#123456',
+      },
+    });
+    const item = await raw.treatmentPlanItem.create({
+      data: {
+        tenantId: a.tenantId,
+        planId: plan.id,
+        catalogItemId: catalog.id,
+        toothNumber: '11',
+        price: 100,
+        discount: 0,
+        status: 'ACCEPTED',
+      },
+    });
+    const seen = await tenantContext.run(a.tenantId, a.locationId, () =>
+      payments.countPlanMovements(plan.id),
+    );
+    // Otra sesión descuenta el ítem: lo pendiente baja a 40, sin abonos ni
+    // asientos nuevos (el conteo no se mueve).
+    await raw.treatmentPlanItem.update({
+      where: { id: item.id },
+      data: { discount: 60 },
+    });
+    const seenGuard: { billable: number }[] = [];
+    const rowsBefore = await raw.payment.count({
+      where: { tenantId: a.tenantId, treatmentPlanId: plan.id },
+    });
+    await expect(
+      split(a, {
+        lines: [
+          line(a, { treatmentPlanId: plan.id, amount: 50 }),
+          line(a, { treatmentPlanId: plan.id, amount: 50 }),
+        ],
+        balanceGuard: { planMovementsSeen: seen },
+        excessGuardInTx: ({ snapshot }) => {
+          const billable = snapshot.items.reduce(
+            (sum, i) => sum + i.price - i.discount,
+            0,
+          );
+          seenGuard.push({ billable });
+          if (100 > billable) {
+            throw new ConflictException({
+              code: 'SPLIT_PAYMENT_EXCEEDS_BALANCE',
+            });
+          }
+          return Promise.resolve();
+        },
+      }),
+    ).rejects.toMatchObject({
+      response: { code: 'SPLIT_PAYMENT_EXCEEDS_BALANCE' },
+    });
+    expect(seenGuard).toEqual([{ billable: 40 }]);
+    expect(
+      await raw.payment.count({
+        where: { tenantId: a.tenantId, treatmentPlanId: plan.id },
+      }),
+    ).toBe(rowsBefore);
   });
 });

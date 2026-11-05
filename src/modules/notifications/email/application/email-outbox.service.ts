@@ -122,19 +122,24 @@ export class EmailOutbox {
   ): Promise<PreparedEmail> {
     const brand = await this.brandOf(input.tenantId);
     const row = { ...this.prepare(input, brand), tenantId: input.tenantId };
+    let outboxId: string | null = null;
     return {
       insert: async (tx) => {
         const { id } = await this.repo.insertInTx(tx, row);
+        outboxId = id;
+        return { id };
+      },
+      // Tras el COMMIT: el log solo afirma lo que de verdad quedó encolado.
+      kick: () => {
         this.logger.log({
           event: 'email.enqueued',
-          outboxId: id,
+          outboxId,
           tenantId: input.tenantId,
           template: input.template,
           to: row.toMasked,
         });
-        return { id };
+        this.dispatcher.kick();
       },
-      kick: () => this.dispatcher.kick(),
     };
   }
 

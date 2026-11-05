@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  HttpException,
   Inject,
   Injectable,
   Logger,
@@ -12,6 +13,7 @@ import { IDEMPOTENCY_KEY_INVALID_MESSAGE } from '../../../../shared/validation/i
 import { PAYMENT_REPOSITORY } from '../../domain/ports/payment-repository.port';
 import type {
   CreatePaymentRepoInput,
+  ReceiptExcessGuardInTx,
   PaymentRepository,
   SplitPaymentRecord,
 } from '../../domain/ports/payment-repository.port';
@@ -244,7 +246,11 @@ export class RecordSplitPaymentUseCase {
         receiptBalanceInTx: this.receiptBalance.inTransaction,
         ...(planMovementsSeen === undefined
           ? {}
-          : { balanceGuard: { planMovementsSeen } }),
+          : {
+              balanceGuard: { planMovementsSeen },
+              // DX-463 (L4): y lo pendiente de AHORA, con el plan bloqueado.
+              excessGuardInTx: this.excessGuard(converted),
+            }),
       });
     } catch (error) {
       await this.proofs.settle(completed, false);
@@ -345,6 +351,9 @@ export class RecordSplitPaymentUseCase {
     try {
       before = await this.getPlanBalance.execute(treatmentPlanId);
     } catch (error) {
+      // DX-463 (L3): un 404/409 (p. ej. el plan se retiró entre medias) sale
+      // tal cual; solo un fallo genuino de lectura es 503.
+      if (error instanceof HttpException) throw error;
       this.logger.warn({
         event: 'payment_receipt.balance_unavailable',
         error: errorName(error),
@@ -362,16 +371,7 @@ export class RecordSplitPaymentUseCase {
     }
     const known = knownSplitTotal(converted);
     if (!confirmCreditBalance && exceedsPending(known, before.balance)) {
-      throw new ConflictException({
-        statusCode: 409,
-        error: 'Conflict',
-        code: SPLIT_PAYMENT_EXCEEDS_BALANCE,
-        message: SPLIT_PAYMENT_EXCEEDS_BALANCE_MESSAGE,
-        currency: before.planCurrency,
-        total: known,
-        pending: Math.max(0, before.balance),
-        excess: excessOverPending(known, before.balance),
-      });
+      throw exceedsBalance(before.planCurrency, known, before.balance);
     }
     const total = splitTotal(converted);
     if (total === null) return null;
@@ -381,6 +381,35 @@ export class RecordSplitPaymentUseCase {
       billable: before.billable,
       paid,
       balance: round2(before.billable - paid - before.creditMovements),
+    };
+  }
+
+  /**
+   * DX-463 (L4): la comprobación del excedente DENTRO de la transacción, con
+   * la misma cuenta del saldo del plan sobre la foto bajo el bloqueo. Sin red
+   * (`offline`): si el proveedor de tasas o un abono sin base dejan lo
+   * pendiente incierto, 503 como un saldo ilegible; nunca se salta.
+   */
+  private excessGuard(converted: (number | null)[]): ReceiptExcessGuardInTx {
+    return async ({ planId, snapshot, creditMovements }) => {
+      const now = await this.getPlanBalance.fromSnapshot(
+        planId,
+        snapshot,
+        creditMovements,
+        { offline: true },
+      );
+      if (now.rateProviderTimedOut || now.paymentsWithoutRate.length > 0) {
+        this.logger.warn({
+          event: 'payment_receipt.balance_unavailable',
+          error: 'BalanceIncompleteInTransaction',
+        });
+        this.unavailable(false);
+        return;
+      }
+      const known = knownSplitTotal(converted);
+      if (exceedsPending(known, now.balance)) {
+        throw exceedsBalance(now.planCurrency, known, now.balance);
+      }
     };
   }
 
@@ -414,6 +443,24 @@ export class RecordSplitPaymentUseCase {
       payments: record.payments,
     };
   }
+}
+
+/** El 409 del excedente sobre lo pendiente (con las cifras de ese momento). */
+function exceedsBalance(
+  currency: string,
+  known: number,
+  balance: number,
+): ConflictException {
+  return new ConflictException({
+    statusCode: 409,
+    error: 'Conflict',
+    code: SPLIT_PAYMENT_EXCEEDS_BALANCE,
+    message: SPLIT_PAYMENT_EXCEEDS_BALANCE_MESSAGE,
+    currency,
+    total: known,
+    pending: Math.max(0, balance),
+    excess: excessOverPending(known, balance),
+  });
 }
 
 /** La línea en la moneda del plan con su tasa congelada; `null` sin ella. */

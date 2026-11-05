@@ -599,6 +599,27 @@ export class PrismaPaymentRepository implements PaymentRepository {
           input.balanceGuard.planMovementsSeen,
         );
       }
+      // DX-463 (L4): con el plan ya bloqueado, lo pendiente de AHORA.
+      const guardedPlanId = input.lines[0]?.treatmentPlanId;
+      if (input.excessGuardInTx && guardedPlanId) {
+        const tenantId = this.requireTenantId();
+        const snapshot = await readPlanBalanceSnapshotIn(
+          tx,
+          tenantId,
+          guardedPlanId,
+        );
+        if (!snapshot) throw new NotFoundException('Treatment plan not found');
+        await input.excessGuardInTx({
+          planId: guardedPlanId,
+          snapshot,
+          creditMovements: await netCreditIn(
+            tx,
+            tenantId,
+            guardedPlanId,
+            snapshot.plan.currency,
+          ),
+        });
+      }
       const lines: InsertedLine[] = [];
       for (const [index, line] of input.lines.entries()) {
         lines.push(

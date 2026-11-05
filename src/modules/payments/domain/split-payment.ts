@@ -30,14 +30,14 @@ export const SPLIT_PAYMENT_EXCEEDS_BALANCE_MESSAGE =
 
 /**
  * 409 con código estable (revisión DX-390): sin `confirmCreditBalance`, otro
- * abono llegó al plan entre la lectura de lo pendiente y la transacción del
+ * movimiento (abono, traspaso o devolución de saldo a favor) llegó al plan entre la lectura de lo pendiente y la transacción del
  * cobro (p. ej. dos cobros a la vez). No se registra nada: repetir la petición
  * (con la misma Idempotency-Key) vuelve a leer lo pendiente.
  */
 export const SPLIT_PAYMENT_BALANCE_CHANGED = 'SPLIT_PAYMENT_BALANCE_CHANGED';
 
 export const SPLIT_PAYMENT_BALANCE_CHANGED_MESSAGE =
-  'Lo pendiente del plan cambió mientras se registraba el cobro (entró otro abono). No se registró nada: revisa el total y vuelve a intentarlo.';
+  'El saldo del plan cambió mientras registrabas el cobro (otro abono, traspaso o devolución de saldo a favor). No se registró nada: revisa el total y vuelve a intentarlo.';
 
 /**
  * 503 con código estable (DX-463, BE-058): sin `confirmCreditBalance` no se
