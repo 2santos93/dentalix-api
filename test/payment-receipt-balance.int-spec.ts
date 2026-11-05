@@ -1,3 +1,6 @@
+import { PaymentProofs } from '../src/modules/payments/application/payment-proofs';
+import { PaymentProofUploads } from '../src/modules/payments/application/payment-proof-uploads';
+import { InMemoryFileStorage } from '../src/shared/storage/__fixtures__/in-memory-file-storage';
 import { BadRequestException } from '@nestjs/common';
 import { Prisma, PrismaClient, TreatmentPlanStatus } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
@@ -34,7 +37,28 @@ const owner = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const tenantContext = new TenantContextService();
+// El pool de Prisma por defecto es 2·CPUs+1 (5 en un runner de 2 vCPU de CI).
+// Esta prueba mantiene abiertas a la vez las N transacciones (la barrera de
+// dentro de la transacción las espera juntas, y todas menos una esperan el
+// bloqueo del plan con su conexión), así que el pool tiene que ser mayor que N
+// o la 6.ª ni siquiera empieza en `maxWait` (P2028). Es una condición de la
+// PRUEBA, no del producto: en producción cada abono retiene su conexión
+// milisegundos y, si el pool se agotara, la petición sale con el 503
+// retryable `TRANSACTION_TIMEOUT` (PrismaExceptionFilter, DX-431).
+const MAX_CONCURRENCY = 10;
+const ORIGINAL_DATABASE_URL = process.env.DATABASE_URL;
+process.env.DATABASE_URL = withConnectionLimit(
+  ORIGINAL_DATABASE_URL ?? '',
+  MAX_CONCURRENCY * 2,
+);
+// Prisma lee la variable al conectar, no al construir: se restaura en afterAll.
 const prisma = new PrismaService(tenantContext);
+
+function withConnectionLimit(url: string, limit: number): string {
+  const parsed = new URL(url);
+  parsed.searchParams.set('connection_limit', String(limit));
+  return parsed.toString();
+}
 const planRepo = new PrismaTreatmentPlanRepository(prisma, tenantContext);
 const paymentRepo = new PrismaPaymentRepository(prisma, tenantContext);
 const whitelist: CurrencyWhitelist = { has: () => Promise.resolve(true) };
@@ -243,6 +267,7 @@ describe('DX-182 · saldo exacto en el recibo con abonos concurrentes (int)', ()
   afterAll(async () => {
     await purge();
     await prisma.$disconnect();
+    process.env.DATABASE_URL = ORIGINAL_DATABASE_URL;
     await owner.$disconnect();
   });
 
@@ -280,6 +305,14 @@ describe('DX-182 · saldo exacto en el recibo con abonos concurrentes (int)', ()
           new PrismaPaymentMethodRepository(prisma, tenantContext),
           paymentRepo,
           referenceCurrencyDigitsCatalog(),
+        ),
+        new PaymentProofs(
+          new PaymentProofUploads(
+            new InMemoryFileStorage(),
+            tenantContext,
+            900,
+          ),
+          paymentRepo,
         ),
         () => NOW,
       );
@@ -363,6 +396,14 @@ describe('DX-182 · saldo exacto en el recibo con abonos concurrentes (int)', ()
           new PrismaPaymentMethodRepository(prisma, tenantContext),
           paymentRepo,
           referenceCurrencyDigitsCatalog(),
+        ),
+        new PaymentProofs(
+          new PaymentProofUploads(
+            new InMemoryFileStorage(),
+            tenantContext,
+            900,
+          ),
+          paymentRepo,
         ),
         () => NOW,
       );
