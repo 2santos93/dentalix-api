@@ -1027,6 +1027,10 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
         });
       }
       await tx.$executeRaw`SELECT set_config('app.allocation_cause', '', true)`;
+      // NO debería saltar nunca con la regla actual (cada salida elige entre
+      // un conjunto de abonos que solo crece y la validación previa deja a este
+      // abono con lo que ya tenía atribuido): protege de cambios futuros de la
+      // regla, y por eso no tiene un caso rojo de integración.
       // Red de DX-399-bis: la cascada puede mover la salida a otro abono. Si
       // tras escribir quedara menos devuelto atribuido que antes, esta
       // imputación dejaría dinero devuelto imputado dos veces: se deshace.

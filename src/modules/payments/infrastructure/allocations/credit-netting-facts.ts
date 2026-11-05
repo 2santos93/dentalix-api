@@ -164,8 +164,18 @@ export async function findAffectedPlans(
     SELECT e."treatmentPlanId" AS "planId", e."patientId",
            round(-sum(e."amount") * 100)::bigint AS "cents"
       FROM "patient_credit_entries" e
+      JOIN "treatment_plans" tp
+        ON tp."tenantId" = e."tenantId" AND tp."id" = e."treatmentPlanId"
+      JOIN "patients" pt
+        ON pt."tenantId" = e."tenantId" AND pt."id" = e."patientId"
      WHERE e."tenantId" = ${tenantId}::uuid
        AND e."kind" IN ('REFUND', 'TRANSFER_OUT')
+       -- Las MISMAS condiciones de \`loadNettingFacts\`: un plan cancelado,
+       -- rechazado o borrado, o un paciente borrado, no tiene imputaciones que
+       -- el fallo pudiera tocar (devolver desde un plan cancelado es normal).
+       AND tp."deletedAt" IS NULL
+       AND tp."status"::text NOT IN (${Prisma.join([...NON_BILLABLE_PLAN_STATUSES])})
+       AND pt."deletedAt" IS NULL
      GROUP BY e."treatmentPlanId", e."patientId"`;
   if (outs.length === 0) return [];
   const planIds = outs.map((o) => o.planId);

@@ -13,8 +13,6 @@
  * afectado, solo con ids y céntimos enteros; sin afectados, solo el resumen.
  */
 import { config as loadDotenv } from 'dotenv';
-import { NestFactory } from '@nestjs/core';
-import { AppModule } from '../../src/app.module';
 import { PrismaService } from '../../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../../src/shared/tenancy/tenant-context.service';
 import { findAffectedPlans } from '../../src/modules/payments/infrastructure/allocations/credit-netting-facts';
@@ -29,12 +27,10 @@ async function main(): Promise<void> {
   if (at !== -1 && (!only || !UUID.test(only))) {
     throw new Error('--tenant necesita el uuid de una clínica.');
   }
-  const app = await NestFactory.createApplicationContext(AppModule, {
-    logger: ['error', 'warn'],
-  });
+  // Sin Nest: arrancar el AppModule con APP_ROLE=worker/all arrancaría el
+  // worker, que reclama trabajos y ESCRIBE. Solo Prisma, como phones:e164-backfill.
+  const prisma = new PrismaService(new TenantContextService());
   try {
-    const prisma = app.get(PrismaService, { strict: false });
-    const context = app.get(TenantContextService, { strict: false });
     const tenants = only
       ? [only]
       : (
@@ -45,9 +41,13 @@ async function main(): Promise<void> {
         ).map((t) => t.id);
     let affected = 0;
     for (const tenantId of tenants) {
-      const plans = await context.run(tenantId, undefined, () =>
-        prisma.runWithTenant((tx) => findAffectedPlans(tx, tenantId)),
-      );
+      const plans = await prisma.runWithTenant(tenantId, async (tx) => {
+        // Defensa en profundidad: cualquier escritura fallaría. No vale
+        // `SET TRANSACTION` (exige ser la primera sentencia; `runWithTenant` ya
+        // fijó el tenant), pero este parámetro sí se puede fijar a mitad.
+        await tx.$executeRaw`SELECT set_config('transaction_read_only', 'on', true)`;
+        return findAffectedPlans(tx, tenantId);
+      });
       for (const plan of plans) {
         console.log(
           JSON.stringify({
@@ -66,7 +66,7 @@ async function main(): Promise<void> {
       }),
     );
   } finally {
-    await app.close();
+    await prisma.$disconnect();
   }
 }
 
@@ -75,7 +75,7 @@ if (require.main === module) {
     console.error(
       JSON.stringify({
         event: 'payments.credit_netting_report_failed',
-        error: error instanceof Error ? error.message : 'unknown',
+        error: error instanceof Error ? error.name : 'unknown',
       }),
     );
     process.exit(1);

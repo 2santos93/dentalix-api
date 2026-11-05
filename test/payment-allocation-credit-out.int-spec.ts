@@ -414,4 +414,88 @@ describe('La imputación automática descuenta lo devuelto o traspasado (DX-399-
     // Solo lee: nada cambió.
     expect(await planTotal(broken)).toBe(before);
   });
+
+  it('diagnóstico: no lista planes cancelados ni de pacientes borrados (devolver desde ahí es normal), y su transacción es de solo lectura', async () => {
+    // Plan cancelado con devolución: sin imputaciones, el fallo no pudo tocarlo.
+    const cancelled = await plan();
+    await item(cancelled, 100);
+    await pay(cancelled, 130, at(0));
+    await creditOut(cancelled, 130);
+    await raw.treatmentPlan.update({
+      where: { id: cancelled },
+      data: { status: 'CANCELLED' },
+    });
+    // Paciente borrado con el mismo patrón del fallo.
+    const gone = await raw.patient.create({
+      data: { tenantId, firstName: 'Borrada', lastName: 'Devuelta' },
+    });
+    const gonePlan = (
+      await raw.treatmentPlan.create({
+        data: {
+          tenantId,
+          patientId: gone.id,
+          currency: 'EUR',
+          status: 'ACCEPTED',
+        },
+      })
+    ).id;
+    await raw.payment.create({
+      data: {
+        tenantId,
+        locationId,
+        treatmentPlanId: gonePlan,
+        patientId: gone.id,
+        amount: 30,
+        currency: 'EUR',
+        paidAt: DAY,
+        createdAt: at(0),
+      },
+    });
+    await raw.patientCreditEntry.deleteMany({ where: { patientId: gone.id } });
+    const refund = await raw.patientCreditRefund.create({
+      data: {
+        tenantId,
+        patientId: gone.id,
+        locationId,
+        treatmentPlanId: gonePlan,
+        currency: 'EUR',
+        amount: 30,
+        method: 'TRANSFER',
+        reason: 'Devolución',
+        seriesPrefix: 'DEV-T',
+        number: ++seq + 2000,
+        snapshot: {},
+        createdById: randomUUID(),
+      },
+    });
+    await raw.patientCreditEntry.create({
+      data: {
+        tenantId,
+        patientId: gone.id,
+        treatmentPlanId: gonePlan,
+        currency: 'EUR',
+        amount: -30,
+        kind: 'REFUND',
+        refundId: refund.id,
+      },
+    });
+    await raw.patient.update({
+      where: { id: gone.id },
+      data: { deletedAt: new Date() },
+    });
+
+    const affected = await inTenant(() =>
+      prisma.runWithTenant(async (tx) => {
+        await tx.$executeRaw`SELECT set_config('transaction_read_only', 'on', true)`;
+        const found = await findAffectedPlans(tx, tenantId);
+        await expect(
+          tx.$executeRaw`UPDATE "treatment_plans" SET "notes" = 'x' WHERE "id" = ${cancelled}::uuid`,
+        ).rejects.toThrow(/read-only/i);
+        return found;
+      }),
+    );
+    const ids = affected.map((p) => p.planId);
+    expect(ids).not.toContain(cancelled);
+    expect(ids).not.toContain(gonePlan);
+  });
 });
