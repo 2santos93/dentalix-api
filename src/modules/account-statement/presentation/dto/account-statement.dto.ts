@@ -443,6 +443,17 @@ export class AccountStatementMovementDto {
   })
   canVoid!: boolean;
 
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'DX-432: por qué este abono no se anula aunque su rol pueda (es ' +
+      'referencia de una devolución, que no se deshace), con el texto del ' +
+      '409 de `DELETE /payments/:id`. `null` si nada lo impide. La ' +
+      'interfaz lo pinta como «Anular» deshabilitado con esta explicación.',
+  })
+  voidBlockedReason!: string | null;
+
   @ApiProperty({ description: 'Abono anulado: se lista pero no suma.' })
   voided!: boolean;
 

@@ -1064,11 +1064,6 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'PATIENT_CREDIT',
     patient: { param: 'id' },
   },
-  'PUT /patient-credit/policy': {
-    action: 'UPDATE',
-    resource: 'PATIENT_CREDIT',
-    reason: 'POLICY',
-  },
   // DX-279: nueva versión de la política de cancelación de una sede.
   'POST /locations/:id/cancellation-policy': {
     action: 'CREATE',
@@ -1570,6 +1565,9 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   'PUT /payment-receipts/settings/locations/:locationId':
     'receipt-settings.e2e-spec.ts',
   'PUT /payments/:id/external-invoice-number': 'receipt-settings.e2e-spec.ts',
+  // DX-432: PATIENT_CREDIT POLICY con el tope de recepción antes y después
+  // (configAuditEvent), en la transacción del cambio; sin evento si no cambia.
+  'PUT /patient-credit/policy': 'patient-credit.e2e-spec.ts',
   // DX-517: CLINIC_SETTINGS CURRENCY_TEXTS con el antes y el después
   // («VES=Bs.»), en la transacción del cambio; sin evento si no cambia.
   'PUT /exchange/currency-texts': 'currency-texts.e2e-spec.ts',

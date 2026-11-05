@@ -16,6 +16,9 @@ import type { RegionalFormat } from '../../../shared/format/regional-format';
 import { requireLocationFormat } from '../../../shared/locations/location-regional';
 import { resolveReferenceLocation } from '../../../shared/locations/reference-location';
 import { resolveLocationTimeZones } from '../../../shared/locations/location-time-zone';
+import type { AuditRequestContext } from '../../audit/domain/audit-request-context';
+import { configAuditEvent } from '../../audit/domain/config-audit';
+import { writeAuditEvent } from '../../audit/infrastructure/prisma-audit-event.repository';
 import { lockDailyRefundDay } from './daily-refund-cap-lock';
 import { lockOpenSessionOf } from '../../cash-sessions/infrastructure/payment-cash-session';
 import {
@@ -275,18 +278,43 @@ export class PrismaPatientCreditRepository implements PatientCreditRepository {
     return requireLocationFormat(location);
   }
 
-  async updateReceptionCap(cents: number): Promise<number> {
+  async updateReceptionCap(
+    cents: number,
+    audit: AuditRequestContext,
+  ): Promise<number> {
     const tenantId = this.tenantId();
-    const tenant = await this.prisma.runWithTenant((tx) =>
-      tx.tenant.update({
+    return this.prisma.runWithTenant(async (tx) => {
+      // Fila bloqueada: dos cambios a la vez se ordenan y cada uno audita su
+      // antes real.
+      const [locked] = await tx.$queryRaw<{ cap: Prisma.Decimal }[]>`
+        SELECT "creditReceptionMaxAmount" AS cap
+          FROM "tenants" WHERE "id" = ${tenantId}::uuid FOR UPDATE`;
+      const tenant = await tx.tenant.update({
         where: { id: tenantId },
         data: {
           creditReceptionMaxAmount: new Prisma.Decimal(fromCents(cents)),
         },
         select: { creditReceptionMaxAmount: true },
-      }),
-    );
-    return toCents(tenant.creditReceptionMaxAmount.toNumber());
+      });
+      const event = configAuditEvent(audit, {
+        action: 'UPDATE',
+        resourceType: 'PATIENT_CREDIT',
+        resourceId: tenantId,
+        reason: 'POLICY',
+        before: {
+          creditReceptionMaxAmount: fromCents(
+            toCents(new Prisma.Decimal(locked.cap).toNumber()),
+          ),
+        },
+        after: {
+          creditReceptionMaxAmount: fromCents(
+            toCents(tenant.creditReceptionMaxAmount.toNumber()),
+          ),
+        },
+      });
+      if (event) await writeAuditEvent(tx, event);
+      return toCents(tenant.creditReceptionMaxAmount.toNumber());
+    });
   }
 
   async findTransferByKey(key: string): Promise<CreditTransferRecord | null> {
@@ -742,8 +770,23 @@ export class PrismaPatientCreditRepository implements PatientCreditRepository {
             orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
           }),
         ]);
+        // DX-432: el nombre de quien traspasó, por su membresía (RLS y
+        // `tenantId`); sin filtrar `deletedAt`: si dejó la clínica, el
+        // traspaso sigue siendo suyo.
+        const authorIds = [...new Set(transfers.map((t) => t.createdById))];
+        const authors =
+          authorIds.length === 0
+            ? []
+            : await tx.clinicMembership.findMany({
+                where: { tenantId, userId: { in: authorIds } },
+                select: { userId: true, user: { select: { fullName: true } } },
+              });
+        const nameOf = new Map(authors.map((m) => [m.userId, m.user.fullName]));
         return {
-          transfers: transfers.map(toTransfer),
+          transfers: transfers.map((t) => ({
+            ...toTransfer(t),
+            createdByName: nameOf.get(t.createdById) ?? null,
+          })),
           refunds: refunds.map(toRefund),
         };
       },

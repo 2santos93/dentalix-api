@@ -114,7 +114,7 @@ export class UpdateCreditPolicyDto {
 export class CreditPolicyDto {
   @ApiProperty({
     description:
-      'Tope de RECEPTION por traspaso o devolución, en la moneda del plan (0 = no puede). ADMIN no tiene tope.',
+      'Tope de RECEPTION, una sola cifra por clínica que se compara en cada moneda: por operación en un traspaso y, en una devolución, también acumulado por día, sede y quien devuelve (DX-462). 0 = no puede. ADMIN no tiene tope.',
   })
   receptionMaxAmount!: number;
 }
@@ -227,7 +227,18 @@ export class CreditRefundDto {
   regional!: DocumentRegionalDto | null;
 }
 
+export class CreditTransferMovementDto extends CreditTransferDto {
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'DX-432: nombre de quien traspasó; `null` si ya no es (ni fue) miembro de la clínica.',
+  })
+  createdByName!: string | null;
+}
+
 export class PatientCreditMovementsDto {
-  @ApiProperty({ type: [CreditTransferDto] }) transfers!: CreditTransferDto[];
+  @ApiProperty({ type: [CreditTransferMovementDto] })
+  transfers!: CreditTransferMovementDto[];
   @ApiProperty({ type: [CreditRefundDto] }) refunds!: CreditRefundDto[];
 }

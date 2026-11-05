@@ -1,5 +1,6 @@
 import type { RegionalFormat } from '../../../../shared/format/regional-format';
 import type { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import type { PaymentMethod, TreatmentPlanStatus } from '@prisma/client';
 
 export const PATIENT_CREDIT_REPOSITORY = Symbol('PATIENT_CREDIT_REPOSITORY');
@@ -127,8 +128,14 @@ export interface CreateRefundInput {
   dailyCap?: { capCents: number; clock: PatientCreditClock };
 }
 
+/** Un traspaso del listado (DX-432): con el nombre de quien lo hizo. */
+export interface CreditTransferMovement extends CreditTransferRecord {
+  /** `null` si ya no es (ni fue) miembro de la clínica. */
+  createdByName: string | null;
+}
+
 export interface PatientCreditMovements {
-  transfers: CreditTransferRecord[];
+  transfers: CreditTransferMovement[];
   refunds: CreditRefundRecord[];
 }
 
@@ -143,7 +150,15 @@ export interface PatientCreditRepository {
   referenceLocationFormat(): Promise<RegionalFormat>;
   /** Formato de una sede concreta (DX-462: la de la devolución rechazada). */
   locationFormat(locationId: string): Promise<RegionalFormat>;
-  updateReceptionCap(cents: number): Promise<number>;
+  /**
+   * Cambia el tope con la fila del tenant bloqueada y escribe el evento con el
+   * antes y el después en la MISMA transacción (DX-432); sin evento si no
+   * cambia.
+   */
+  updateReceptionCap(
+    cents: number,
+    audit: AuditRequestContext,
+  ): Promise<number>;
   findTransferByKey(key: string): Promise<CreditTransferRecord | null>;
   findRefundByKey(key: string): Promise<CreditRefundRecord | null>;
   /**
