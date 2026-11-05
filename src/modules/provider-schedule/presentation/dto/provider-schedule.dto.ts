@@ -102,7 +102,7 @@ export class ReplaceProviderScheduleDto {
   confirmAffected?: boolean;
 }
 
-export class AffectedAppointmentDto {
+export class ScheduleAffectedAppointmentDto {
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty({ format: 'uuid' }) locationId!: string;
   @ApiProperty({ type: String, format: 'date-time' }) start!: Date;
@@ -110,10 +110,10 @@ export class AffectedAppointmentDto {
   @ApiProperty() patientName!: string;
 }
 
-export class AffectedAppointmentsDto {
+export class ScheduleAffectedAppointmentsDto {
   @ApiProperty() total!: number;
-  @ApiProperty({ type: [AffectedAppointmentDto] })
-  sample!: AffectedAppointmentDto[];
+  @ApiProperty({ type: [ScheduleAffectedAppointmentDto] })
+  sample!: ScheduleAffectedAppointmentDto[];
 }
 
 export class ProviderLocationScheduleDto {
@@ -149,8 +149,8 @@ export class ProviderScheduleDto {
   @ApiProperty({ type: [ProviderLocationScheduleDto] })
   locations!: ProviderLocationScheduleDto[];
 
-  @ApiPropertyOptional({ type: AffectedAppointmentsDto })
-  affectedAppointments?: AffectedAppointmentsDto;
+  @ApiPropertyOptional({ type: ScheduleAffectedAppointmentsDto })
+  affectedAppointments?: ScheduleAffectedAppointmentsDto;
 }
 
 // ---------------------------------------------------------------------------
@@ -250,8 +250,8 @@ export class SetProviderOverrideResultDto extends ProviderOverrideDto {
   })
   replaced!: boolean;
 
-  @ApiPropertyOptional({ type: AffectedAppointmentsDto })
-  affectedAppointments?: AffectedAppointmentsDto;
+  @ApiPropertyOptional({ type: ScheduleAffectedAppointmentsDto })
+  affectedAppointments?: ScheduleAffectedAppointmentsDto;
 }
 
 // ---------------------------------------------------------------------------
