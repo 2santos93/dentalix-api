@@ -1,6 +1,7 @@
 import type { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
 import {
   BadRequestException,
+  ConflictException,
   Inject,
   Injectable,
   Logger,
@@ -74,6 +75,12 @@ export const POSTOP_APPOINTMENT_NOT_ATTENDED_MESSAGE =
   'No se pueden entregar indicaciones de una cita cancelada o en la que el paciente no asistió';
 export const POSTOP_APPOINTMENT_FUTURE_MESSAGE =
   'No se pueden entregar indicaciones de una cita que aún no ha llegado';
+export const POSTOP_IDEMPOTENCY_KEY_REUSED_MESSAGE =
+  'Esta clave de idempotencia ya se usó para otra entrega (otra plantilla u otro canal). Vuelve a entregar para generar una clave nueva.';
+export const POSTOP_DELIVERY_IN_PROGRESS_MESSAGE =
+  'La entrega se está registrando; espera unos segundos y vuelve a consultar';
+/** Una entrega EMAIL tan reciente aún puede estar encolando su email. */
+const IN_PROGRESS_GRACE_MS = 30_000;
 export const POSTOP_DELIVERY_NOT_FOUND_MESSAGE =
   'Entrega de indicaciones no encontrada';
 
@@ -446,7 +453,7 @@ export class DeliverPostOpInstructionsUseCase {
       : undefined;
     if (deliveryId) {
       const existing = await this.deliveries.findById(deliveryId);
-      if (existing) return this.replayed(existing);
+      if (existing) return this.replayed(existing, input);
     }
     const template = await this.templates.findById(input.templateId);
     if (!template) {
@@ -509,7 +516,7 @@ export class DeliverPostOpInstructionsUseCase {
       // inserción: es esa entrega.
       if (deliveryId && err instanceof PostOpDeliveryAlreadyExistsError) {
         const existing = await this.deliveries.findById(deliveryId);
-        if (existing) return this.replayed(existing);
+        if (existing) return this.replayed(existing, input);
       }
       throw err;
     }
@@ -587,12 +594,40 @@ export class DeliverPostOpInstructionsUseCase {
    */
   private async replayed(
     existing: PostOpDelivery,
+    input: DeliverPostOpInput,
   ): Promise<PostOpDeliveryCreated> {
+    // La misma clave solo repite LA MISMA petición (como en los abonos, DX-109).
+    if (
+      existing.templateId !== input.templateId ||
+      existing.channel !== input.channel
+    ) {
+      throw new UnprocessableEntityException({
+        statusCode: 422,
+        error: 'Unprocessable Entity',
+        message: POSTOP_IDEMPOTENCY_KEY_REUSED_MESSAGE,
+        code: 'IDEMPOTENCY_KEY_REUSED',
+      });
+    }
     const [summary] = await summarize(
       this.deliveries,
       [existing],
       this.evidenceCutoff(),
     );
+    // La primera petición puede estar entre el INSERT y el encolado del email:
+    // un EMAIL tan reciente sin fila en el outbox no se da por «no enviado».
+    if (
+      existing.channel === 'EMAIL' &&
+      summary.emailStatus === 'NOT_SENT' &&
+      this.now().getTime() - existing.deliveredAt.getTime() <
+        IN_PROGRESS_GRACE_MS
+    ) {
+      throw new ConflictException({
+        statusCode: 409,
+        error: 'Conflict',
+        message: POSTOP_DELIVERY_IN_PROGRESS_MESSAGE,
+        code: 'POSTOP_DELIVERY_IN_PROGRESS',
+      });
+    }
     const emailQueued =
       summary.emailStatus === 'QUEUED' || summary.emailStatus === 'SENT';
     return {

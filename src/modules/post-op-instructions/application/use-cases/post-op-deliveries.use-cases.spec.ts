@@ -28,6 +28,8 @@ import {
   GetPostOpSuggestionsUseCase,
   ListPatientPostOpDeliveriesUseCase,
   POSTOP_APPOINTMENT_NOT_FOUND_MESSAGE,
+  POSTOP_DELIVERY_IN_PROGRESS_MESSAGE,
+  POSTOP_IDEMPOTENCY_KEY_REUSED_MESSAGE,
   POSTOP_APPOINTMENT_NOT_ATTENDED_MESSAGE,
   POSTOP_APPOINTMENT_FUTURE_MESSAGE,
   POSTOP_DELIVERY_NOT_FOUND_MESSAGE,
@@ -1163,7 +1165,7 @@ describe('Fix round 1 de DX-250', () => {
     });
 
     it('la repetición de un email que no salió dice emailQueued false', async () => {
-      const { deliver, exo, email } = setup();
+      const { deliver, exo, email, deliveries } = setup();
       email.send = () => Promise.reject(new Error('outbox caído'));
       const warn = jest
         .spyOn(Logger.prototype, 'warn')
@@ -1173,7 +1175,10 @@ describe('Fix round 1 de DX-250', () => {
         channel: 'EMAIL' as const,
         idempotencyKey: KEY,
       };
-      await deliver.execute(APPOINTMENT_ID, input, CTX, LINK);
+      const first = await deliver.execute(APPOINTMENT_ID, input, CTX, LINK);
+      // Pasada la gracia (el encolado ya tuvo tiempo): ahora sí es «no enviado».
+      deliveries.rows.find((r) => r.id === first.delivery.id)!.deliveredAt =
+        new Date(NOW.getTime() - 60_000);
       const second = await deliver.execute(APPOINTMENT_ID, input, CTX, LINK);
       warn.mockRestore();
       expect(second.emailQueued).toBe(false);
@@ -1209,6 +1214,7 @@ describe('Fix round 1 de DX-250', () => {
         idempotencyKey: KEY,
       };
       const first = await deliver.execute(APPOINTMENT_ID, input, CTX, LINK);
+      deliveries.emailOutcomes.set(first.delivery.id, 'QUEUED');
       // La lectura previa no la ve (simula la carrera) pero la inserción choca.
       const realFind = deliveries.findById.bind(deliveries);
       let calls = 0;
@@ -1218,6 +1224,63 @@ describe('Fix round 1 de DX-250', () => {
       expect(second.delivery.id).toBe(first.delivery.id);
       expect(deliveries.rows).toHaveLength(1);
       expect(email.sent).toHaveLength(1);
+    });
+
+    it('un EMAIL recién registrado sin fila en el outbox (la primera petición aún encola): 409 reintentable, nunca «no enviado»', async () => {
+      const { deliver, exo, deliveries } = setup();
+      const input = {
+        templateId: exo.id,
+        channel: 'EMAIL' as const,
+        idempotencyKey: KEY,
+      };
+      await deliver.execute(APPOINTMENT_ID, input, CTX, LINK);
+      // Sin fila en el outbox (aún no se encoló) y recién creada.
+      const attempt = deliver.execute(APPOINTMENT_ID, input, CTX, LINK);
+      await expect(attempt).rejects.toBeInstanceOf(ConflictException);
+      await expect(attempt).rejects.toMatchObject({
+        response: expect.objectContaining({
+          code: 'POSTOP_DELIVERY_IN_PROGRESS',
+          message: POSTOP_DELIVERY_IN_PROGRESS_MESSAGE,
+        }) as Record<string, unknown>,
+      });
+      expect(deliveries.rows).toHaveLength(1);
+    });
+
+    it('la misma clave con otra plantilla u otro canal: 422 IDEMPOTENCY_KEY_REUSED, sin tocar nada', async () => {
+      const { deliver, exo, templates, deliveries, email } = setup();
+      const other = templates.seed({
+        code: 'POI-OTRA',
+        title: 'Otra',
+        body: BODY,
+      });
+      await deliver.execute(
+        APPOINTMENT_ID,
+        { templateId: exo.id, channel: 'PRINT', idempotencyKey: KEY },
+        CTX,
+        LINK,
+      );
+      for (const input of [
+        { templateId: other.id, channel: 'PRINT' as const },
+        { templateId: exo.id, channel: 'EMAIL' as const },
+      ]) {
+        const attempt = deliver.execute(
+          APPOINTMENT_ID,
+          { ...input, idempotencyKey: KEY },
+          CTX,
+          LINK,
+        );
+        await expect(attempt).rejects.toBeInstanceOf(
+          UnprocessableEntityException,
+        );
+        await expect(attempt).rejects.toMatchObject({
+          response: expect.objectContaining({
+            code: 'IDEMPOTENCY_KEY_REUSED',
+            message: POSTOP_IDEMPOTENCY_KEY_REUSED_MESSAGE,
+          }) as Record<string, unknown>,
+        });
+      }
+      expect(deliveries.rows).toHaveLength(1);
+      expect(email.sent).toHaveLength(0);
     });
   });
 });

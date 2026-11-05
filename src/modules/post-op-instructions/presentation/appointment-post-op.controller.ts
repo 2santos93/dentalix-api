@@ -16,6 +16,7 @@ import { isUUID } from 'class-validator';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
+  ApiConflictResponse,
   ApiHeader,
   ApiCreatedResponse,
   ApiNotFoundResponse,
@@ -105,20 +106,24 @@ export class AppointmentPostOpController {
   @ApiCreatedResponse({ type: PostOpDeliveryCreatedDto })
   @ApiBadRequestResponse({
     description:
-      'La plantilla está inactiva, o el host de la petición no sirve para armar el enlace (EMAIL y WHATSAPP_LINK)',
+      'La plantilla está inactiva, el host de la petición no sirve para armar el enlace (EMAIL y WHATSAPP_LINK), o la Idempotency-Key no es un UUID',
   })
   @ApiUnprocessableEntityResponse({
     description:
-      'Sin email ni responsable que reciba avisos, sin un teléfono que sirva para WhatsApp, o el paciente dio de baja los envíos; o la cita está cancelada, fue un no-show o es de un día que aún no llega (DX-250)',
+      'Sin email ni responsable que reciba avisos, sin un teléfono que sirva para WhatsApp, o el paciente dio de baja los envíos; o la cita está cancelada, fue un no-show o es de un día que aún no llega (DX-250); o la Idempotency-Key ya se usó con otra plantilla u otro canal (`code: IDEMPOTENCY_KEY_REUSED`)',
   })
   @ApiTooManyRequestsResponse({
     description: 'Tope de emails de la clínica o del destinatario',
+  })
+  @ApiConflictResponse({
+    description:
+      'Repetición (misma Idempotency-Key) de un EMAIL que aún se está registrando (`code: POSTOP_DELIVERY_IN_PROGRESS`): vuelve a consultar en unos segundos.',
   })
   @ApiHeader({
     name: 'Idempotency-Key',
     required: false,
     description:
-      'DX-250: UUID generado una vez por clic y reutilizado en los reintentos. Repetir la petición con la misma clave en la misma cita devuelve la entrega ya registrada (sin `publicUrl` ni `whatsapp`: el token solo sale en la primera respuesta) en vez de crear otra, y no vuelve a encolar el email.',
+      'DX-250: UUID generado una vez por clic y reutilizado en los reintentos. Repetir la petición con la misma clave en la misma cita devuelve la entrega ya registrada (sin `publicUrl` ni `whatsapp`: el token solo sale en la primera respuesta) en vez de crear otra, y no vuelve a encolar el email. La repetición responde igual 201 (no 200). Con otra plantilla u otro canal: 422 `IDEMPOTENCY_KEY_REUSED`.',
   })
   async create(
     @Param('appointmentId', ParseUUIDPipe) appointmentId: string,

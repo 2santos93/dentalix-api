@@ -786,6 +786,68 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
       ).toBe(1);
     });
 
+    it('EMAIL en paralelo con la misma clave: una entrega y un email; la otra respuesta es una repetición 201 o un 409, nunca «no enviado»', async () => {
+      const appt = await appointment(patientId, typeId);
+      const key = 'e2c0a3e6-7cbf-4f60-8b77-8c3b6d4fb023';
+      const [a, b] = await Promise.all([
+        withKey(appt, key, 'EMAIL'),
+        withKey(appt, key, 'EMAIL'),
+      ]);
+      for (const res of [a, b]) {
+        expect([201, 409]).toContain(res.status);
+        if (res.status === 409) {
+          expect(res.body).toMatchObject({
+            code: 'POSTOP_DELIVERY_IN_PROGRESS',
+            message: expect.stringMatching(/se está registrando/) as string,
+          });
+        } else {
+          const body = res.body as Created;
+          expect(body.delivery.emailStatus).not.toBe('NOT_SENT');
+          expect(body.emailQueued).toBe(true);
+        }
+      }
+      const created = [a, b].filter(
+        (r) => r.status === 201 && (r.body as Created).publicUrl !== null,
+      );
+      expect(created).toHaveLength(1);
+      expect(
+        await raw.postOpInstructionDelivery.count({
+          where: { appointmentId: appt },
+        }),
+      ).toBe(1);
+      const id = (created[0].body as Created).delivery.id;
+      expect(await raw.emailOutbox.count({ where: { referenceId: id } })).toBe(
+        1,
+      );
+    });
+
+    it('la misma clave con otro canal u otra plantilla: 422 IDEMPOTENCY_KEY_REUSED y nada nuevo', async () => {
+      const appt = await appointment(patientId, typeId);
+      const key = 'f3d1b4f7-8dc0-4071-9c88-9d4c7e5ac134';
+      await withKey(appt, key, 'PRINT').expect(201);
+      const otherChannel = await withKey(appt, key, 'WHATSAPP_LINK').expect(
+        422,
+      );
+      expect(otherChannel.body).toMatchObject({
+        code: 'IDEMPOTENCY_KEY_REUSED',
+      });
+      const otherTemplate = await as(clinicA, reception)
+        .post(`/appointments/${appt}/post-op-instructions/deliveries`, {
+          templateId: otherTemplateId,
+          channel: 'PRINT',
+        })
+        .set('Idempotency-Key', key)
+        .expect(422);
+      expect(otherTemplate.body).toMatchObject({
+        code: 'IDEMPOTENCY_KEY_REUSED',
+      });
+      expect(
+        await raw.postOpInstructionDelivery.count({
+          where: { appointmentId: appt },
+        }),
+      ).toBe(1);
+    });
+
     it('otra cita con la misma clave es otra entrega; sin clave nunca se deduplica; una clave que no es UUID da 400', async () => {
       const apptA = await appointment(patientId, typeId);
       const apptB = await appointment(patientId, typeId);
