@@ -163,6 +163,14 @@ describe('Crear un enlace a la vez que se archiva (e2e, DX-476)', () => {
       body: 'Yo, {{paciente}}, autorizo a {{profesional}} de {{clinica}}.',
     }).expect(201);
     templateId = (template.body as { id: string }).id;
+    // La anamnesis exige la política de datos publicada (o el consentimiento).
+    await post('/privacy-policies', {
+      policyText: 'Política de tratamiento de datos de la clínica.',
+      generalText: 'Autorizo el tratamiento de mis datos personales.',
+      sensitiveHealthText:
+        'Autorizo el tratamiento de mis datos sensibles de salud (historia clínica). No está obligado a autorizarlo. Finalidad: la atención odontológica.',
+      marketingText: 'Autorizo recibir comunicaciones comerciales.',
+    }).expect(201);
   });
 
   afterAll(async () => {
