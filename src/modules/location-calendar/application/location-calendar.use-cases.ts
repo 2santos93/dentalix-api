@@ -15,6 +15,7 @@ import {
   type LocationCalendarRepository,
   type LocationCalendarView,
 } from '../domain/ports/location-calendar-repository.port';
+import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 
 /** La regla rota de un dato del calendario sale como 400 con su texto. */
 function asBadRequest<T>(validate: () => T): T {
@@ -52,6 +53,32 @@ export class GetLocationCalendarUseCase {
 
   execute(locationId: string): Promise<LocationCalendarView> {
     return this.repo.get(locationId);
+  }
+}
+
+/**
+ * DX-358: ¿es festivo ese día en la sede? Lo consulta quien agenda (no solo
+ * ADMIN) para avisar, nunca para bloquear. Respeta las sedes del miembro.
+ */
+@Injectable()
+export class FindHolidayOnDayUseCase {
+  constructor(
+    @Inject(LOCATION_CALENDAR_REPOSITORY)
+    private readonly repo: LocationCalendarRepository,
+    private readonly tenantContext: TenantContextService,
+  ) {}
+
+  async execute(
+    locationId: string,
+    date: string,
+  ): Promise<{ date: string; name: string | null }> {
+    this.tenantContext.assertLocationAllowed(locationId);
+    const { holidays } = await this.repo.get(locationId);
+    const monthDay = date.slice(5);
+    const holiday = holidays.find(
+      (h) => h.date === date || (h.recurring && h.date.slice(5) === monthDay),
+    );
+    return { date, name: holiday?.name ?? null };
   }
 }
 

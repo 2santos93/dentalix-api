@@ -218,6 +218,49 @@ describe('Calendario de la sede: días hábiles y festivos (e2e, DX-316)', () =>
     });
   });
 
+  describe('DX-358: ¿es festivo ese día?', () => {
+    it('recepción lo consulta: puntual, recurrente en otro año y día normal', async () => {
+      const location = await newLocation();
+      await addHoliday(location, { date: '2030-12-24', name: 'Nochebuena' });
+      await addHoliday(location, {
+        date: '2030-07-05',
+        name: 'Día de la Independencia',
+        recurring: true,
+      });
+      const reception = api(a, roleTokens[ClinicRole.RECEPTION]);
+      const on = async (date: string) =>
+        (
+          await reception
+            .get(`/locations/${location}/holiday?date=${date}`)
+            .expect(200)
+        ).body as { date: string; name: string | null };
+      expect(await on('2030-12-24')).toEqual({
+        date: '2030-12-24',
+        name: 'Nochebuena',
+      });
+      expect(await on('2031-07-05')).toEqual({
+        date: '2031-07-05',
+        name: 'Día de la Independencia',
+      });
+      expect(await on('2031-12-24')).toEqual({
+        date: '2031-12-24',
+        name: null,
+      });
+      await reception
+        .get(`/locations/${location}/holiday?date=24-12-2030`)
+        .expect(400);
+      // Ver y cambiar el calendario sigue siendo de ADMIN.
+      await reception.get(`/locations/${location}/calendar`).expect(403);
+    });
+
+    it('una sede de otra clínica es 404', async () => {
+      const location = await newLocation();
+      await api(b)
+        .get(`/locations/${location}/holiday?date=2030-12-24`)
+        .expect(404);
+    });
+  });
+
   describe('festivos', () => {
     it('POST holiday 201', async () => {
       const id = await newLocation();

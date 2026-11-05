@@ -7,6 +7,7 @@ import {
   IsIn,
   IsOptional,
   IsString,
+  Matches,
   type ValidationArguments,
 } from 'class-validator';
 import { HOLIDAY_MESSAGES } from '../../domain/holiday-rules';
@@ -186,4 +187,25 @@ export class HolidayImportResultDto {
 
   @ApiProperty({ type: [HolidayImportRowDto], description: 'Por línea' })
   rows!: HolidayImportRowDto[];
+}
+
+/** DX-358: el día que se consulta, `YYYY-MM-DD`. */
+export class HolidayOnDayQueryDto {
+  @ApiProperty({ example: '2026-12-25' })
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+    message: 'La fecha debe tener el formato AAAA-MM-DD.',
+  })
+  date!: string;
+}
+
+export class HolidayOnDayDto {
+  @ApiProperty({ example: '2026-12-25' })
+  date!: string;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'Nombre del festivo de la sede ese día; null si no lo es.',
+  })
+  name!: string | null;
 }
