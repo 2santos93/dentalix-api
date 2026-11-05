@@ -18,6 +18,13 @@ import {
 } from '../src/modules/payments/domain/ports/payment-repository.port';
 import { EXCHANGE_RATE_CLOCK } from '../src/modules/exchange/application/use-cases/manual-exchange-rates.use-cases';
 import { fixedSedeDay } from './support/sede-clock';
+import { PrismaService } from '../src/shared/prisma/prisma.service';
+import {
+  pauseAfterSql,
+  settle,
+  sqlStop,
+  waitForLockWaiters,
+} from './support/postgres-concurrency';
 
 // DX-382 (BE-046) contra Postgres: anular un cargo (SEC-050) compara lo
 // cobrado en la MONEDA DEL PLAN, con la base de imputación de cada abono
@@ -54,8 +61,17 @@ interface Setup {
   usdVersion: string;
 }
 
+// DX-397: la primera sentencia de la transacción que toca el plan (y la
+// única que lo bloquea) de «anular cargo» y de «anular abono». Sin la
+// cláusula FOR a propósito: quitar el candado deja el int en rojo por la
+// espera que no llega, no colgado.
+const FEE_VOID_LOCKS_PLAN = /FROM "treatment_plans"/;
+const PAYMENT_VOID_LOCKS_PLAN = /FROM "treatment_plans"[\s\S]*"id" = ANY/;
+
 describe('anular un cargo compara en la moneda del plan (DX-382, int)', () => {
   let app: INestApplication<App>;
+  let prisma: PrismaService;
+  let undo: (() => void) | null = null;
   const setups = new Map<'AUTOMATIC' | 'MANUAL', Setup>();
   let seq = 0;
 
@@ -202,6 +218,7 @@ describe('anular un cargo compara en la moneda del plan (DX-382, int)', () => {
           .overrideProvider(EXCHANGE_RATE_CLOCK)
           .useValue(() => SEDE_DAY.at),
     });
+    prisma = app.get(PrismaService);
     await resetDatabase(raw);
     await raw.exchangeRateSnapshot.deleteMany({ where: { date: TODAY } });
     await raw.exchangeRateSnapshot.createMany({
@@ -215,6 +232,8 @@ describe('anular un cargo compara en la moneda del plan (DX-382, int)', () => {
   });
 
   afterEach(() => {
+    undo?.();
+    undo = null;
     jest.restoreAllMocks();
   });
 
@@ -370,6 +389,88 @@ describe('anular un cargo compara en la moneda del plan (DX-382, int)', () => {
       expect((again.body as { message: string }).message).toBe(
         CANCELLATION_FEE_MESSAGES.voidPaid,
       );
+    });
+
+    const voidPayment = (s: Setup, id: string) =>
+      as(
+        request(app.getHttpServer()).delete(`/api/v1/payments/${id}`),
+        s.clinic,
+      ).send({ reason: 'Cobro duplicado' });
+
+    async function twoCharges(): Promise<{
+      first: Awaited<ReturnType<typeof charge>>;
+      second: Awaited<ReturnType<typeof charge>>;
+      paymentId: string;
+    }> {
+      const p = await patient(s());
+      const first = await charge(s(), p, s().vesVersion, 100000);
+      const second = await charge(s(), p, s().vesVersion, 80000);
+      const payment = await pay(s(), first.planId, 50, 'USD');
+      return { first, second, paymentId: payment.id };
+    }
+
+    it('DX-397: anular el abono a medias (plan bloqueado): anular el cargo espera, lo ve anulado y sale (201), sin 40P01', async () => {
+      const { second, paymentId } = await twoCharges();
+      const inPaymentVoid = sqlStop(PAYMENT_VOID_LOCKS_PLAN);
+      undo = pauseAfterSql(prisma, [inPaymentVoid]);
+
+      const voidingPayment = settle(voidPayment(s(), paymentId));
+      const paymentPid = await inPaymentVoid.reached.wait;
+      const voidingFee = settle(voidFee(s(), second.appointmentId));
+      await waitForLockWaiters(raw, [paymentPid]);
+      await expect(state(second.appointmentId, second.itemId)).resolves.toEqual(
+        { voided: false, removed: false },
+      );
+
+      inPaymentVoid.release.open();
+      expect(await voidingPayment).toMatchObject({
+        status: 'fulfilled',
+        value: { status: 200 },
+      });
+      expect(await voidingFee).toMatchObject({
+        status: 'fulfilled',
+        value: { status: 201 },
+      });
+      await expect(state(second.appointmentId, second.itemId)).resolves.toEqual(
+        { voided: true, removed: true },
+      );
+      await expect(
+        raw.payment.count({ where: { id: paymentId, voidedAt: null } }),
+      ).resolves.toBe(0);
+    });
+
+    it('DX-397: anular el cargo a medias (plan bloqueado): anular el abono espera, el cargo ve el abono vivo (409) y el abono se anula después; nunca un cargo anulado con el abono vivo', async () => {
+      const { second, paymentId } = await twoCharges();
+      const inFeeVoid = sqlStop(FEE_VOID_LOCKS_PLAN);
+      undo = pauseAfterSql(prisma, [inFeeVoid]);
+
+      const voidingFee = settle(voidFee(s(), second.appointmentId));
+      const feePid = await inFeeVoid.reached.wait;
+      const voidingPayment = settle(voidPayment(s(), paymentId));
+      await waitForLockWaiters(raw, [feePid]);
+      await expect(
+        raw.payment.count({ where: { id: paymentId, voidedAt: null } }),
+      ).resolves.toBe(1);
+
+      inFeeVoid.release.open();
+      const fee = await voidingFee;
+      expect(fee).toMatchObject({
+        status: 'fulfilled',
+        value: {
+          status: 409,
+          body: { message: CANCELLATION_FEE_MESSAGES.voidPaid },
+        },
+      });
+      expect(await voidingPayment).toMatchObject({
+        status: 'fulfilled',
+        value: { status: 200 },
+      });
+      await expect(state(second.appointmentId, second.itemId)).resolves.toEqual(
+        { voided: false, removed: false },
+      );
+      await expect(
+        raw.payment.count({ where: { id: paymentId, voidedAt: null } }),
+      ).resolves.toBe(0);
     });
 
     it('anular el cargo y anular el abono a la vez no se bloquean en cruz (40P01) y nunca dejan un saldo a favor escondido (revisión DX-382)', async () => {
