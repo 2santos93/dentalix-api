@@ -704,7 +704,7 @@ describe('Horario de los profesionales por sede (e2e, DX-233)', () => {
         )
           .send({
             status: 'CANCELLED',
-            cancelledByKind: 'PATIENT',
+            cancelledByKind: 'STAFF_FOR_PATIENT',
             cancelReasonCode: 'ILLNESS',
           })
           .expect(200);
