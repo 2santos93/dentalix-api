@@ -115,6 +115,16 @@ export class PatientResponsiblePartiesController {
       );
   }
 
+  /** SEC-044: el personal clínico no escribe el documento del responsable. */
+  private withoutDocNumberForRole<T extends { docNumber?: string | null }>(
+    dto: T,
+    role: TenantJwtPayload['role'],
+  ): T {
+    return canSeeResponsibleDocNumber(role)
+      ? dto
+      : { ...dto, docNumber: undefined };
+  }
+
   private async present(
     party: ResponsiblePartyView,
   ): Promise<ResponsiblePartyWithPhoneOutput> {
@@ -183,7 +193,11 @@ export class PatientResponsiblePartiesController {
   ): Promise<ResponsiblePartyWithPhoneOutput> {
     return responsiblePartyForRole(
       await this.present(
-        await this.createParty.execute(patientId, dto, req.user.sub),
+        await this.createParty.execute(
+          patientId,
+          this.withoutDocNumberForRole(dto, req.user.role),
+          req.user.sub,
+        ),
       ),
       req.user.role,
     );
@@ -202,12 +216,9 @@ export class PatientResponsiblePartiesController {
     @Body() dto: UpdateResponsiblePartyDto,
     @Req() req: { user: TenantJwtPayload },
   ): Promise<ResponsiblePartyWithPhoneOutput> {
-    // SEC-044: quien no ve el documento recibe null al leer y lo reenvía al
-    // editar: ese null no es un borrado, se ignora (un valor nuevo sí vale).
-    const input =
-      !canSeeResponsibleDocNumber(req.user.role) && !dto.docNumber
-        ? { ...dto, docNumber: undefined }
-        : dto;
+    // SEC-044: quien no ve el documento tampoco lo escribe: se ignora lo que
+    // mande (poner, vaciar o espacios), así no hay borrado ni sobrescritura a ciegas.
+    const input = this.withoutDocNumberForRole(dto, req.user.role);
     // También la respuesta: editar no es un modo de leer el documento.
     return responsiblePartyForRole(
       await this.present(

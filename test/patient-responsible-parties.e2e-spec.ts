@@ -622,22 +622,92 @@ describe('Responsables de pago y avisos (e2e, DX-203)', () => {
       },
     );
 
-    it('editar un contacto sin ver su documento no lo borra, ni lo devuelve', async () => {
-      const contact = (await list(kid, tokens.ADMIN)).parties.find(
-        (p) => p.kind === 'CONTACT',
+    const contactOf = async (patientId: string, name: string) =>
+      (await list(patientId, tokens.ADMIN)).parties.find(
+        (p) => p.fullName === name,
+      ) as Party & { docNumber: string | null };
+
+    it.each([ClinicRole.DENTIST, ClinicRole.ASSISTANT])(
+      '%s: el documento se ignora al editar (vaciar, espacios o poner uno nuevo), sin borrarlo ni devolverlo',
+      async (role) => {
+        const contact = await contactOf(kid, 'Pedro Rojas');
+        for (const docNumber of [null, '', '   ', '11112222']) {
+          const res = await as(
+            api().patch(`${parties(kid)}/${contact.id}`),
+            tokens[role],
+          )
+            .send({ receivesNotices: true, docNumber })
+            .expect(200);
+          expect(JSON.stringify(res.body)).not.toMatch(/79345999|11112222/);
+          expect((res.body as { docNumber: unknown }).docNumber).toBeNull();
+          expect((await contactOf(kid, 'Pedro Rojas')).docNumber).toBe(
+            '79345999',
+          );
+        }
+        // El resto de la edición sí vale.
+        await as(api().patch(`${parties(kid)}/${contact.id}`), tokens[role])
+          .send({ fullName: 'Pedro J. Rojas', docNumber: ' ' })
+          .expect(200);
+        const after = await contactOf(kid, 'Pedro J. Rojas');
+        expect(after.docNumber).toBe('79345999');
+        await as(api().patch(`${parties(kid)}/${contact.id}`), tokens[role])
+          .send({ fullName: 'Pedro Rojas' })
+          .expect(200);
+      },
+    );
+
+    it.each([ClinicRole.ADMIN, ClinicRole.RECEPTION])(
+      '%s sí puede vaciar y poner el documento de un contacto',
+      async (role) => {
+        const created = await as(api().post(parties(kid)), tokens[role])
+          .send({
+            fullName: `Ana ${role}`,
+            docType: 'NATIONAL_ID',
+            docNumber: '55550001',
+            relationship: 'OTHER',
+          })
+          .expect(201);
+        const id = (created.body as { id: string }).id;
+        expect((created.body as { docNumber: string }).docNumber).toBe(
+          '55550001',
+        );
+        await as(api().patch(`${parties(kid)}/${id}`), tokens[role])
+          .send({ docNumber: null })
+          .expect(200);
+        expect((await contactOf(kid, `Ana ${role}`)).docNumber).toBeNull();
+        const set = await as(api().patch(`${parties(kid)}/${id}`), tokens[role])
+          .send({ docNumber: '55550002' })
+          .expect(200);
+        expect((set.body as { docNumber: string }).docNumber).toBe('55550002');
+        expect((await contactOf(kid, `Ana ${role}`)).docNumber).toBe(
+          '55550002',
+        );
+      },
+    );
+
+    it('un responsable paciente: el personal clínico puede editarlo reenviando docNumber null (no es un 400)', async () => {
+      const patientParty = (await list(kid, tokens.ADMIN)).parties.find(
+        (p) => p.kind === 'PATIENT',
       ) as Party;
-      const res = await as(
-        api().patch(`${parties(kid)}/${contact.id}`),
+      await as(
+        api().patch(`${parties(kid)}/${patientParty.id}`),
         tokens.DENTIST,
       )
-        .send({ fullName: 'Pedro J. Rojas', docNumber: null })
+        .send({ receivesNotices: true, docNumber: null })
         .expect(200);
-      expect(JSON.stringify(res.body)).not.toContain('79345999');
-      const after = (await list(kid, tokens.ADMIN)).parties.find(
-        (p) => p.id === contact.id,
-      ) as Party & { docNumber: string | null };
-      expect(after.docNumber).toBe('79345999');
-      expect(after.fullName).toBe('Pedro J. Rojas');
+    });
+
+    it('POST de un contacto por el personal clínico: ignora el documento y no lo devuelve', async () => {
+      const res = await as(api().post(parties(kid)), tokens.DENTIST)
+        .send({
+          fullName: 'Rosa Rojas',
+          docType: 'NATIONAL_ID',
+          docNumber: '33334444',
+          relationship: 'OTHER',
+        })
+        .expect(201);
+      expect(JSON.stringify(res.body)).not.toContain('33334444');
+      expect((await contactOf(kid, 'Rosa Rojas')).docNumber).toBeNull();
     });
   });
 
@@ -845,6 +915,31 @@ describe('Responsables de pago y avisos (e2e, DX-203)', () => {
         ).expect(200);
         expect(JSON.stringify(res.body)).toContain('FAMILY_ACCOUNT_STATEMENT');
       }
+    });
+
+    it('SEC-044: los eventos del estado familiar no se ven desde otra clínica', async () => {
+      await as(
+        api().get(`/api/v1/patients/${payer}/family-account-statement`),
+        tokens.RECEPTION,
+      ).expect(200);
+      for (const id of [payer, brother, sister]) {
+        const res = await as(
+          api().get(`/api/v1/audit-events?patientId=${id}`),
+          other.adminToken,
+          other.host,
+        );
+        expect([200, 404]).toContain(res.status);
+        expect(JSON.stringify(res.body)).not.toContain(
+          'FAMILY_ACCOUNT_STATEMENT',
+        );
+      }
+      const leaked = await raw.auditEvent.count({
+        where: {
+          tenantId: other.tenantId,
+          patientId: { in: [payer, brother, sister] },
+        },
+      });
+      expect(leaked).toBe(0);
     });
 
     it('el estado de cuenta individual de un menor sale a nombre de su responsable', async () => {
