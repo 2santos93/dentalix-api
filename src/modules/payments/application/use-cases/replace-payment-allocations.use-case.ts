@@ -144,6 +144,8 @@ export class ReplacePaymentAllocationsUseCase {
         manual,
         allocated: 0,
         unallocated: planAmount,
+        creditOut: 0,
+        onAccount: planAmount,
         version: allocationVersion({ manual, lines: [] }),
         allocations: [],
         items: [],

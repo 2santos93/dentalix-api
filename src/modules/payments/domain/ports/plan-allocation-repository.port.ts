@@ -122,6 +122,12 @@ export interface PaymentAllocationsSnapshot {
   target: AllocationTarget;
   lines: { itemId: string; cents: number; source: 'AUTO' | 'MANUAL' }[];
   items: AllocationItemOption[];
+  /**
+   * DX-399: lo devuelto o traspasado del saldo a favor del plan que se atribuye a
+   * este abono (regla de `credit-netting.ts`, la misma del informe «Cobrado sin
+   * imputar»), en céntimos. 0 sin base o en un plan que no se cobra.
+   */
+  creditOutCents: number;
 }
 
 /** Reasignación de un ADMIN (R10). `lines` vacío con `AUTO`. */

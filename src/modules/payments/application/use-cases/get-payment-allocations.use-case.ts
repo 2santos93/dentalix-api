@@ -37,6 +37,10 @@ export interface PaymentAllocationsView {
   manual: boolean;
   allocated: number;
   unallocated: number | null;
+  /** DX-399: de lo sin imputar, lo devuelto o traspasado del saldo a favor del plan. */
+  creditOut: number;
+  /** DX-399: a cuenta neto: `unallocated − creditOut` (null sin tasa). Es la cifra del informe. */
+  onAccount: number | null;
   version: string;
   allocations: {
     treatmentPlanItemId: string;
@@ -105,6 +109,11 @@ function toView(snapshot: PaymentAllocationsSnapshot): PaymentAllocationsView {
     allocated: fromCents(allocatedCents),
     unallocated:
       baseCents === null ? null : fromCents(baseCents - allocatedCents),
+    creditOut: fromCents(snapshot.creditOutCents),
+    onAccount:
+      baseCents === null
+        ? null
+        : fromCents(baseCents - allocatedCents - snapshot.creditOutCents),
     version: allocationVersion({ manual, lines }),
     allocations: ordered.map((l) => ({
       treatmentPlanItemId: l.itemId,

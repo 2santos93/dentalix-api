@@ -608,6 +608,15 @@ describe('Cobrado sin imputar / a cuenta (e2e, DX-399)', () => {
           [doraPay, 20],
         ]),
       );
+      // El detalle del abono dice lo mismo: sin imputar a ítems 30, devuelto 10, a cuenta 20.
+      const detail = (
+        await call('get', a, `/payments/${doraPay}/allocations`).expect(200)
+      ).body as { unallocated: number; creditOut: number; onAccount: number };
+      expect(detail).toMatchObject({
+        unallocated: 30,
+        creditOut: 10,
+        onAccount: 20,
+      });
       const page = await report(a, AUGUST);
       expect(page.totals).toEqual([
         { currency: 'USD', count: 2, allocated: 200, unallocated: 50 },
@@ -674,16 +683,15 @@ describe('Cobrado sin imputar / a cuenta (e2e, DX-399)', () => {
         page.items.map((r) => [r.paymentId, Math.round(r.unallocated * 100)]),
       );
       expect(listed).toEqual(expected);
-      // Los excluidos (todos los demás abonos vivos del alcance) no tienen nada a cuenta neto.
-      const others = await raw.payment.findMany({
-        where: {
-          tenantId: a.tenantId,
-          deletedAt: null,
-          id: { notIn: [...listed.keys()] },
-        },
-        select: { id: true },
-      });
-      for (const { id } of others) expect(expected.get(id) ?? 0).toBe(0);
+      // Y cada fila es lo que dice el detalle del mismo abono (a cuenta neto).
+      for (const row of page.items) {
+        const detail = (
+          await call('get', a, `/payments/${row.paymentId}/allocations`).expect(
+            200,
+          )
+        ).body as { onAccount: number };
+        expect(detail.onAccount).toBe(row.unallocated);
+      }
     });
 
     it('a VES payment to a USD plan is listed in the plan currency with its own amount', async () => {
@@ -712,7 +720,7 @@ describe('Cobrado sin imputar / a cuenta (e2e, DX-399)', () => {
       });
     });
 
-    it('excludes a migrated-balance payment and a deleted patient; a same-currency payment awaiting its base is not a missing rate', async () => {
+    it('excludes a migrated-balance payment and a deleted patient', async () => {
       const batch = await raw.patientImportBatch.create({
         data: {
           tenantId: a.tenantId,
@@ -770,15 +778,36 @@ describe('Cobrado sin imputar / a cuenta (e2e, DX-399)', () => {
         data: { deletedAt: new Date() },
       });
       expect(idsOf(await report(a, AUGUST))).not.toContain(gonePay);
+    });
 
-      // Mismo moneda que el plan y sin base (espera al barrido): no es «falta la tasa».
+    it('a same-currency payment without a base is not a missing rate; a foreign-currency one is', async () => {
       const before = (await report(a, AUGUST)).paymentsWithoutRateCount;
+      // Un abono en la moneda del plan al que se le quita la base (espera al barrido).
       const wait = await plan(a, creditPatients.Ines, catalogA, [10]);
       const waiting = await pay(a, wait.planId, 20, '2026-08-16');
-      await raw.paymentPlanAmount
-        .delete({ where: { paymentId: waiting } })
-        .catch(() => undefined);
+      await raw.paymentAllocation.deleteMany({ where: { paymentId: waiting } });
+      await raw.paymentPlanAmount.delete({ where: { paymentId: waiting } });
+      expect(
+        await raw.paymentPlanAmount.count({ where: { paymentId: waiting } }),
+      ).toBe(0);
       expect((await report(a, AUGUST)).paymentsWithoutRateCount).toBe(before);
+      // Control positivo: uno en GBP, sin tasa ese día, sí cuenta.
+      await pay(a, wait.planId, 5, '2026-08-17', { currency: 'GBP' });
+      expect((await report(a, AUGUST)).paymentsWithoutRateCount).toBe(
+        before + 1,
+      );
+    });
+
+    it('a refund only nets payments registered BEFORE it: overpay, refund, then a later payment', async () => {
+      const jana = await patient(a, 'Jana');
+      const janaPlan = await plan(a, jana, catalogA, [100]);
+      const first = await pay(a, janaPlan.planId, 130, '2026-06-10');
+      await refund(janaPlan.planId, [first], 30);
+      const second = await pay(a, janaPlan.planId, 50, '2026-07-10');
+      const june = await unallocatedOf('from=2026-06-01&to=2026-06-30');
+      const july = await unallocatedOf('from=2026-07-01&to=2026-07-31');
+      expect(june.has(first)).toBe(false);
+      expect(july.get(second)).toBe(50);
     });
   });
 

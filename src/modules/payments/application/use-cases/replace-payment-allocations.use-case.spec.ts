@@ -48,6 +48,7 @@ function makeUseCase(
     target: target({ base: { amount: 90, manual: true } }),
     lines: [{ itemId: 'item-a', cents: 4000, source: 'MANUAL' }],
     items: [],
+    creditOutCents: 0,
   };
   const findAllocationTarget = jest.fn();
   for (const t of targets) findAllocationTarget.mockResolvedValueOnce(t);

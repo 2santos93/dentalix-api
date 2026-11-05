@@ -12,6 +12,7 @@ import {
 } from '@prisma/client';
 import { auditDraftFromContext } from '../../../audit/domain/audit-request-context';
 import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
+import { loadNettingFacts, nettedFacts } from './credit-netting-facts';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { resolveLocationTimeZones } from '../../../../shared/locations/location-time-zone';
@@ -718,9 +719,39 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
                 paymentId,
               )
             : [];
-        return { target, lines, items };
+        const creditOutCents =
+          target.treatmentPlanId &&
+          target.base &&
+          target.planStatus &&
+          isPlanBillable(target.planStatus)
+            ? await this.creditOutOf(
+                tx,
+                tenantId,
+                target.treatmentPlanId,
+                paymentId,
+              )
+            : 0;
+        return { target, lines, items, creditOutCents };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+  }
+
+  /** Lo devuelto o traspasado que se atribuye a este abono (DX-399): la cascada del plan entero. */
+  private async creditOutOf(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    planId: string,
+    paymentId: string,
+  ): Promise<number> {
+    const { facts, entries } = await loadNettingFacts(
+      tx,
+      tenantId,
+      Prisma.sql`tp."id" = ${planId}::uuid`,
+    );
+    return (
+      nettedFacts(facts, entries).find((n) => n.fact.id === paymentId)?.net
+        .creditOutCents ?? 0
     );
   }
 
@@ -1054,7 +1085,10 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
           resourceId: paymentId,
           metadata: {
             reason: 'PAYMENT_REALLOCATED',
-            changedFields: ['allocations', 'expectedVersion', 'mode'],
+            changedFields:
+              input.mode === 'MANUAL'
+                ? ['allocations', 'expectedVersion', 'mode']
+                : ['expectedVersion', 'mode'],
             params: { id: paymentId },
             allocation: {
               currency: plan.currency,

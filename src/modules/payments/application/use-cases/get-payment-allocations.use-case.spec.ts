@@ -30,7 +30,13 @@ function target(over: Partial<AllocationTarget> = {}): AllocationTarget {
   };
 }
 
-function makeUseCase(snapshot: PaymentAllocationsSnapshot | null) {
+function makeUseCase(
+  input:
+    | (Omit<PaymentAllocationsSnapshot, 'creditOutCents'> &
+        Partial<Pick<PaymentAllocationsSnapshot, 'creditOutCents'>>)
+    | null,
+) {
+  const snapshot = input && { creditOutCents: 0, ...input };
   const repo = {
     readPaymentAllocations: jest.fn().mockResolvedValue(snapshot),
   };
@@ -41,6 +47,22 @@ function makeUseCase(snapshot: PaymentAllocationsSnapshot | null) {
 }
 
 describe('GetPaymentAllocationsUseCase (DX-051, spec §5.2)', () => {
+  it('DX-399: onAccount es lo sin imputar menos lo devuelto o traspasado', async () => {
+    const { uc } = makeUseCase({
+      target: target(),
+      lines: [{ itemId: 'item-a', cents: 5050, source: 'AUTO' }],
+      items: [],
+      creditOutCents: 1000,
+    });
+    const view = await uc.execute('pay-1');
+    expect(view).toMatchObject({
+      allocated: 50.5,
+      unallocated: 39.5,
+      creditOut: 10,
+      onAccount: 29.5,
+    });
+  });
+
   it('404 for a voided, missing or foreign payment', async () => {
     const { uc } = makeUseCase(null);
     const error = await uc.execute('pay-1').catch((e: unknown) => e);
@@ -107,6 +129,8 @@ describe('GetPaymentAllocationsUseCase (DX-051, spec §5.2)', () => {
       manual: false,
       allocated: 70.5,
       unallocated: 19.5,
+      creditOut: 0,
+      onAccount: 19.5,
       version: allocationVersion({
         manual: false,
         lines: [
@@ -156,6 +180,8 @@ describe('GetPaymentAllocationsUseCase (DX-051, spec §5.2)', () => {
       manual: false,
       allocated: 0,
       unallocated: null,
+      creditOut: 0,
+      onAccount: null,
       version: allocationVersion({ manual: false, lines: [] }),
     });
   });

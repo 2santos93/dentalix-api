@@ -123,7 +123,7 @@ export class UnallocatedPaymentRowDto {
   @ApiProperty({
     example: 30,
     description:
-      'Lo que queda a cuenta: el abono en la moneda del plan menos lo imputado y menos lo que el plan ya devolvió o traspasó de su saldo a favor (DX-253; se descuenta de los abonos más recientes primero, nunca por debajo de 0); siempre > 0. Un abono que queda en 0 no sale',
+      'Lo que queda a cuenta: el abono en la moneda del plan menos lo imputado y menos lo que el plan ya devolvió o traspasó de su saldo a favor (DX-253; se descuenta de los abonos más recientes primero y solo de los registrados antes de la salida, nunca por debajo de 0); siempre > 0. Un abono que queda en 0 no sale. El saldo a favor recibido por traspaso no es un abono: está en Cartera › Saldo a favor',
   })
   unallocated!: number;
 }
