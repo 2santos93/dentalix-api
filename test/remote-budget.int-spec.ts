@@ -22,6 +22,13 @@ import {
 } from '../src/modules/treatment-plans/infrastructure/repositories/plan-option-group';
 import { resetDatabase } from './support/e2e-fixtures';
 import {
+  backendPid,
+  gate,
+  holdLock,
+  settle,
+  waitForLockWaiters,
+} from './support/postgres-concurrency';
+import {
   REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
@@ -285,22 +292,16 @@ describe('presupuesto a distancia en Postgres (DX-415)', () => {
   it('carrera: la clínica acepta con firma mientras el paciente firma a distancia; queda UNA aceptación, la de la clínica, y el enlace no se usa', async () => {
     const planId = await presentedPlan(a);
     const { id, request } = await sendBudget(a, planId);
-    let releaseClinic!: () => void;
-    const clinicHolds = new Promise<void>((resolve) => {
-      releaseClinic = resolve;
-    });
-    let clinicLocked!: () => void;
-    const lockedByClinic = new Promise<void>((resolve) => {
-      clinicLocked = resolve;
-    });
+    const clinicHolds = gate();
+    const lockedByClinic = gate<number>();
     // La aceptación en la clínica (DX-012): bloquea el grupo, escribe su
     // aceptación y acepta el plan; espera con el bloqueo puesto.
     const clinic = asClinic(a.tenantId, () =>
       prisma.runWithTenant(async (tx) => {
         const locked = await lockPlanGroup(tx, planId);
         if (!locked) throw new Error('sin plan');
-        clinicLocked();
-        await clinicHolds;
+        lockedByClinic.open(await backendPid(tx));
+        await clinicHolds.wait;
         const at = new Date();
         await tx.treatmentPlanAcceptance.create({
           data: {
@@ -320,13 +321,30 @@ describe('presupuesto a distancia en Postgres (DX-415)', () => {
         await acceptPlanInTx(tx, locked, at, a.userId, a.locationId);
       }),
     );
-    await lockedByClinic;
-    // El paciente firma: bloquea su enlace y espera al grupo del plan.
-    const remote = signBudget(a, id, planId);
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    releaseClinic();
-    await expect(clinic).resolves.toBeUndefined();
-    await expect(remote).rejects.toBeInstanceOf(RemoteBudgetChangedError);
+    const clinicDone = settle(clinic);
+    const clinicPid = await Promise.race([
+      lockedByClinic.wait,
+      clinicDone.then((o) => {
+        throw new Error(
+          `la clínica terminó sin bloquear: ${JSON.stringify(o)}`,
+        );
+      }),
+    ]);
+    let remote: ReturnType<typeof settle<unknown>> | undefined;
+    try {
+      // El paciente firma: bloquea su enlace y espera al grupo del plan. Se
+      // suelta a la clínica SOLO cuando pg_locks muestra esa espera (DX-450).
+      remote = settle(signBudget(a, id, planId));
+      await waitForLockWaiters(owner, [clinicPid], 1);
+    } finally {
+      clinicHolds.open();
+    }
+    expect(await clinicDone).toEqual({ status: 'fulfilled', value: undefined });
+    const remoteOutcome = await remote;
+    expect(remoteOutcome?.status).toBe('rejected');
+    expect(
+      remoteOutcome?.status === 'rejected' && remoteOutcome.reason,
+    ).toBeInstanceOf(RemoteBudgetChangedError);
 
     const acceptances = await owner.treatmentPlanAcceptance.findMany({
       where: { planId },
@@ -340,6 +358,48 @@ describe('presupuesto a distancia en Postgres (DX-415)', () => {
       select: { signedAt: true },
     });
     expect(after.signedAt).toBeNull();
+  });
+
+  it('DX-450: la firma espera al enlace bloqueado y decide con lo que dejó quien lo tenía (candado del enlace)', async () => {
+    const planId = await presentedPlan(a);
+    const { id } = await sendBudget(a, planId);
+    const marked = new Date('2026-11-04T15:00:00.000Z');
+    // Otro paso sobre el mismo enlace (un código a la vez, doble firma): lo
+    // bloquea y deja su marca antes de confirmar.
+    const lock = await holdLock(
+      owner,
+      (tx) =>
+        tx.$queryRaw`SELECT "id" FROM "signature_requests" WHERE "id" = ${id}::uuid FOR UPDATE`,
+      async (tx) => {
+        await tx.signatureRequest.update({
+          where: { id },
+          data: { openedAt: marked },
+        });
+      },
+    );
+    let seen: Date | null | undefined;
+    let attempt: ReturnType<typeof settle<unknown>> | undefined;
+    try {
+      attempt = settle(
+        asClinic(a.tenantId, () =>
+          repo.withLockedRequest(
+            id,
+            { ipAddress: '203.0.113.7', userAgent: 'int', requestId: null },
+            (r) => {
+              seen = r.openedAt;
+              return { write: null, result: 'SEEN' as const };
+            },
+          ),
+        ),
+      );
+      await waitForLockWaiters(owner, [lock.pid], 1);
+      expect(seen).toBeUndefined();
+    } finally {
+      lock.release();
+      await lock.done;
+    }
+    expect(await attempt).toEqual({ status: 'fulfilled', value: 'SEEN' });
+    expect(seen).toEqual(marked);
   });
 
   it('CHECK: un BUDGET lleva plan, foto y hash; un CONSENT no lleva foto', async () => {
