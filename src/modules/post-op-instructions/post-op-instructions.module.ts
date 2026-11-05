@@ -1,11 +1,13 @@
 import { Module } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { TokenService } from '../../shared/crypto/token.service';
 import { PublicTenantContextInterceptor } from '../../shared/tenancy/public-tenant-context.interceptor';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 import { EmailModule } from '../notifications/email/email.module';
 import { PatientsModule } from '../patients/patients.module';
-import { POSTOP_CLOCK } from './application/post-op-clock';
+import { outboxRetentionDays } from '../notifications/email/application/email-outbox-maintenance';
+import { POSTOP_CLOCK, type PostOpClock } from './application/post-op-clock';
 import {
   DeliverPostOpInstructionsUseCase,
   GetPatientPostOpDeliveryUseCase,
@@ -14,6 +16,7 @@ import {
 } from './application/use-cases/post-op-deliveries.use-cases';
 import {
   OutboxPostOpEmailSender,
+  POSTOP_EMAIL_EVIDENCE_CUTOFF,
   POSTOP_EMAIL_SENDER,
 } from './application/postop-email';
 import {
@@ -75,6 +78,20 @@ import { PublicPostOpInstructionsController } from './presentation/public-post-o
       useClass: PrismaPostOpDeliveryRepository,
     },
     { provide: POSTOP_EMAIL_SENDER, useClass: OutboxPostOpEmailSender },
+    {
+      // DX-250: el outbox purga los envíos terminados tras su retención; una
+      // entrega EMAIL más antigua sin fila no se puede dar por «no enviada».
+      provide: POSTOP_EMAIL_EVIDENCE_CUTOFF,
+      inject: [ConfigService, POSTOP_CLOCK],
+      useFactory: (config: ConfigService, now: PostOpClock) => () =>
+        new Date(
+          now().getTime() -
+            outboxRetentionDays(
+              config.get<string>('MAIL_OUTBOX_RETENTION_DAYS'),
+            ) *
+              86_400_000,
+        ),
+    },
   ],
   exports: [LoadSamplePostOpTemplatesUseCase],
 })

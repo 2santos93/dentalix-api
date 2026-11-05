@@ -7,8 +7,8 @@ import { Injectable } from '@nestjs/common';
 import {
   EmailOutboxStatus,
   EmailTemplate,
+  Prisma,
   type PostOpInstructionDelivery,
-  type Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
@@ -19,6 +19,7 @@ import {
 } from '../../../patients/infrastructure/notices/notice-context';
 import { performedItemsOf } from '../../../clinical-entries/infrastructure/repositories/performed-items';
 import type { PostOpDelivery } from '../../domain/entities/post-op-delivery.entity';
+import { PostOpDeliveryAlreadyExistsError } from '../../domain/ports/post-op-delivery-repository.port';
 import type {
   CreatePostOpDeliveryRepoInput,
   PostOpAppointmentContext,
@@ -209,15 +210,36 @@ export class PrismaPostOpDeliveryRepository implements PostOpDeliveryRepository 
     });
   }
 
-  create(input: CreatePostOpDeliveryRepoInput): Promise<PostOpDelivery> {
+  async create(input: CreatePostOpDeliveryRepoInput): Promise<PostOpDelivery> {
     const tenantId = this.requireTenantId();
-    return this.prisma.runWithTenant(async (tx) =>
-      toEntity(
-        await tx.postOpInstructionDelivery.create({
-          data: { tenantId, ...input },
-        }),
-      ),
-    );
+    try {
+      return await this.prisma.runWithTenant(async (tx) =>
+        toEntity(
+          await tx.postOpInstructionDelivery.create({
+            data: { tenantId, ...input },
+          }),
+        ),
+      );
+    } catch (err) {
+      // DX-250: la misma `Idempotency-Key` deriva el mismo id (clave primaria).
+      if (
+        input.id &&
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002'
+      ) {
+        throw new PostOpDeliveryAlreadyExistsError();
+      }
+      throw err;
+    }
+  }
+
+  findById(id: string): Promise<PostOpDelivery | null> {
+    return this.prisma.runWithTenant(async (tx) => {
+      const row = await tx.postOpInstructionDelivery.findFirst({
+        where: { id },
+      });
+      return row ? toEntity(row) : null;
+    });
   }
 
   emailStatuses(

@@ -68,6 +68,7 @@ function setup() {
       Promise.resolve(id === PATIENT_ID ? { id } : null),
   } as unknown as PatientRepository;
   const clock = () => NOW;
+  const cutoff = () => new Date(NOW.getTime() - 90 * 86_400_000);
   const tenantContext = new TenantContextService();
   deliveries.contexts.set(APPOINTMENT_ID, appointmentContext());
   const exo = templates.seed({
@@ -82,15 +83,21 @@ function setup() {
     audit,
     clock,
     tenantContext,
+    cutoff,
   );
   const suggestions = new GetPostOpSuggestionsUseCase(
     deliveries,
     templates,
     clock,
     tenantContext,
+    cutoff,
   );
-  const list = new ListPatientPostOpDeliveriesUseCase(deliveries, patients);
-  const get = new GetPatientPostOpDeliveryUseCase(deliveries, patients);
+  const list = new ListPatientPostOpDeliveriesUseCase(
+    deliveries,
+    patients,
+    cutoff,
+  );
+  const get = new GetPatientPostOpDeliveryUseCase(deliveries, patients, cutoff);
   return {
     deliveries,
     templates,
@@ -922,7 +929,10 @@ describe('Entrega solo tras una cita atendida (DX-250)', () => {
     deliveries.contexts.set(
       APPOINTMENT_ID,
       appointmentContext({
-        appointment: { start: new Date('2026-10-21T14:00:00.000Z') },
+        appointment: {
+          status: 'SCHEDULED',
+          start: new Date('2026-10-21T14:00:00.000Z'),
+        },
       }),
     );
     const attempt = deliver.execute(
@@ -1028,5 +1038,186 @@ describe('Estado del email de la entrega (DX-250)', () => {
     expect((await get.execute(PATIENT_ID, lost.delivery.id)).emailStatus).toBe(
       'NOT_SENT',
     );
+  });
+});
+
+describe('Fix round 1 de DX-250', () => {
+  const printOf = (exoId: string) => ({
+    templateId: exoId,
+    channel: 'PRINT' as const,
+  });
+
+  it.each([
+    ['America/Caracas', '2026-10-21T02:30:00.000Z', true], // 20/10 22:30 → hoy
+    ['America/Caracas', '2026-10-21T04:00:00.000Z', false], // 21/10 00:00 → mañana
+    ['America/Caracas', '2026-10-21T04:30:00.000Z', false],
+    ['America/New_York', '2026-10-21T03:30:00.000Z', true], // 20/10 23:30 (EDT)
+    ['America/New_York', '2026-10-21T04:00:00.000Z', false], // 21/10 00:00 (EDT)
+    ['America/New_York', '2026-10-21T04:30:00.000Z', false],
+  ])(
+    'frontera sede/UTC: %s %s → entrega permitida %s',
+    async (timeZone, start, allowed) => {
+      const { deliver, exo, deliveries } = setup();
+      deliveries.contexts.set(
+        APPOINTMENT_ID,
+        appointmentContext({
+          appointment: { start: new Date(start), status: 'SCHEDULED' },
+          location: { timeZone },
+        }),
+      );
+      const attempt = deliver.execute(
+        APPOINTMENT_ID,
+        printOf(exo.id),
+        CTX,
+        LINK,
+      );
+      if (allowed) {
+        await expect(attempt).resolves.toBeDefined();
+      } else {
+        await expect(attempt).rejects.toThrow(
+          POSTOP_APPOINTMENT_FUTURE_MESSAGE,
+        );
+      }
+    },
+  );
+
+  it.each(['COMPLETED', 'ARRIVED', 'IN_CHAIR', 'READY_FOR_CHECKOUT'] as const)(
+    'una cita %s con fecha de un día posterior sí se entrega (M3)',
+    async (status) => {
+      const { deliver, exo, deliveries } = setup();
+      deliveries.contexts.set(
+        APPOINTMENT_ID,
+        appointmentContext({
+          appointment: {
+            status,
+            start: new Date('2026-10-25T14:00:00.000Z'),
+          },
+        }),
+      );
+      await deliver.execute(APPOINTMENT_ID, printOf(exo.id), CTX, LINK);
+      expect(deliveries.rows).toHaveLength(1);
+    },
+  );
+
+  it('una entrega EMAIL antigua sin fila en el outbox es «desconocido» (null), no «no enviado» (H1)', async () => {
+    const { deliver, exo, deliveries, list, get, suggestions } = setup();
+    const old = await deliver.execute(
+      APPOINTMENT_ID,
+      { templateId: exo.id, channel: 'EMAIL' },
+      CTX,
+      LINK,
+    );
+    const recent = await deliver.execute(
+      APPOINTMENT_ID,
+      { templateId: exo.id, channel: 'EMAIL' },
+      CTX,
+      LINK,
+    );
+    // Hace 120 días: el outbox (90) ya la pudo purgar.
+    deliveries.rows.find((r) => r.id === old.delivery.id)!.deliveredAt =
+      new Date(NOW.getTime() - 120 * 86_400_000);
+
+    const byId = (rows: { id: string; emailStatus: string | null }[]) =>
+      Object.fromEntries(rows.map((r) => [r.id, r.emailStatus]));
+    const expected = {
+      [old.delivery.id]: null,
+      [recent.delivery.id]: 'NOT_SENT',
+    };
+    expect(byId(await list.execute(PATIENT_ID))).toEqual(expected);
+    expect(
+      byId((await suggestions.execute(APPOINTMENT_ID)).deliveries),
+    ).toEqual(expected);
+    expect(
+      (await get.execute(PATIENT_ID, old.delivery.id)).emailStatus,
+    ).toBeNull();
+    // Con fila en el outbox, la edad no importa.
+    deliveries.emailOutcomes.set(old.delivery.id, 'SENT');
+    expect((await get.execute(PATIENT_ID, old.delivery.id)).emailStatus).toBe(
+      'SENT',
+    );
+  });
+
+  describe('Idempotency-Key (M1)', () => {
+    const KEY = '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d';
+
+    it('la misma clave dos veces: una sola entrega, un solo email, sin enlace en la repetición', async () => {
+      const { deliver, exo, deliveries, email, audits } = setup();
+      const input = {
+        templateId: exo.id,
+        channel: 'EMAIL' as const,
+        idempotencyKey: KEY,
+      };
+      const first = await deliver.execute(APPOINTMENT_ID, input, CTX, LINK);
+      deliveries.emailOutcomes.set(first.delivery.id, 'QUEUED');
+      const second = await deliver.execute(APPOINTMENT_ID, input, CTX, LINK);
+
+      expect(deliveries.rows).toHaveLength(1);
+      expect(email.sent).toHaveLength(1);
+      expect(audits).toHaveLength(1);
+      expect(second.delivery.id).toBe(first.delivery.id);
+      expect(first.publicUrl).toMatch(/\/indicaciones\//);
+      expect(second.publicUrl).toBeNull();
+      expect(second.whatsapp).toBeNull();
+      expect(second.emailQueued).toBe(true);
+      expect(second.sentTo).toBe('ca***@example.com');
+    });
+
+    it('la repetición de un email que no salió dice emailQueued false', async () => {
+      const { deliver, exo, email } = setup();
+      email.send = () => Promise.reject(new Error('outbox caído'));
+      const warn = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
+      const input = {
+        templateId: exo.id,
+        channel: 'EMAIL' as const,
+        idempotencyKey: KEY,
+      };
+      await deliver.execute(APPOINTMENT_ID, input, CTX, LINK);
+      const second = await deliver.execute(APPOINTMENT_ID, input, CTX, LINK);
+      warn.mockRestore();
+      expect(second.emailQueued).toBe(false);
+      expect(second.delivery.emailStatus).toBe('NOT_SENT');
+      expect(second.sentTo).toBeNull();
+    });
+
+    it('claves distintas, o sin clave: entregas distintas; la clave no cruza citas', async () => {
+      const { deliver, exo, deliveries } = setup();
+      const base = { templateId: exo.id, channel: 'PRINT' as const };
+      await deliver.execute(
+        APPOINTMENT_ID,
+        { ...base, idempotencyKey: KEY },
+        CTX,
+        LINK,
+      );
+      await deliver.execute(
+        APPOINTMENT_ID,
+        { ...base, idempotencyKey: '0c1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d' },
+        CTX,
+        LINK,
+      );
+      await deliver.execute(APPOINTMENT_ID, base, CTX, LINK);
+      await deliver.execute(APPOINTMENT_ID, base, CTX, LINK);
+      expect(deliveries.rows).toHaveLength(4);
+    });
+
+    it('si otra petición con la misma clave gana la carrera de la inserción, se devuelve esa entrega', async () => {
+      const { deliver, exo, deliveries, email } = setup();
+      const input = {
+        templateId: exo.id,
+        channel: 'EMAIL' as const,
+        idempotencyKey: KEY,
+      };
+      const first = await deliver.execute(APPOINTMENT_ID, input, CTX, LINK);
+      // La lectura previa no la ve (simula la carrera) pero la inserción choca.
+      const realFind = deliveries.findById.bind(deliveries);
+      let calls = 0;
+      deliveries.findById = (id: string) =>
+        ++calls === 1 ? Promise.resolve(null) : realFind(id);
+      const second = await deliver.execute(APPOINTMENT_ID, input, CTX, LINK);
+      expect(second.delivery.id).toBe(first.delivery.id);
+      expect(deliveries.rows).toHaveLength(1);
+      expect(email.sent).toHaveLength(1);
+    });
   });
 });

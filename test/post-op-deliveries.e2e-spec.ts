@@ -689,12 +689,31 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
       where: { referenceId: created.delivery.id },
       data: { status: 'FAILED' },
     });
-    // Y una entrega EMAIL cuya fila del outbox no existe tampoco salió.
+    // Una entrega EMAIL RECIENTE cuya fila del outbox no existe tampoco salió.
     const lost = (await deliver(reception, appt, 'EMAIL').expect(201))
       .body as Created;
     await raw.emailOutbox.deleteMany({
       where: { referenceId: lost.delivery.id },
     });
+    // Una ANTIGUA sin fila pudo salir y haber sido purgada del outbox: la HC
+    // no afirma «no enviado» (desconocido). La entrega es inalterable por
+    // trigger: solo el superusuario del test lo apaga un instante para
+    // envejecerla.
+    const old = (await deliver(reception, appt, 'EMAIL').expect(201))
+      .body as Created;
+    await raw.emailOutbox.deleteMany({
+      where: { referenceId: old.delivery.id },
+    });
+    await raw.$executeRawUnsafe(
+      'ALTER TABLE "post_op_instruction_deliveries" DISABLE TRIGGER "post_op_instruction_deliveries_immutable"',
+    );
+    try {
+      await raw.$executeRaw`UPDATE "post_op_instruction_deliveries" SET "deliveredAt" = now() - interval '200 days' WHERE "id" = ${old.delivery.id}::uuid`;
+    } finally {
+      await raw.$executeRawUnsafe(
+        'ALTER TABLE "post_op_instruction_deliveries" ENABLE TRIGGER "post_op_instruction_deliveries_immutable"',
+      );
+    }
     const history = (
       await as(clinicA, reception)
         .get(`/patients/${patientId}/post-op-deliveries`)
@@ -704,7 +723,87 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
       history.find((d) => d.id === id)?.emailStatus;
     expect(status(created.delivery.id)).toBe('NOT_SENT');
     expect(status(lost.delivery.id)).toBe('NOT_SENT');
+    expect(status(old.delivery.id)).toBeNull();
     expect(status(printed.delivery.id)).toBeNull();
+  });
+
+  describe('DX-250: Idempotency-Key', () => {
+    const KEY = 'c0a8e1c4-5a9f-4d4e-8f55-6a1f4b2d9e01';
+    const withKey = (appt: string, key: string, channel = 'EMAIL') =>
+      as(clinicA, reception)
+        .post(`/appointments/${appt}/post-op-instructions/deliveries`, {
+          templateId: exoId,
+          channel,
+        })
+        .set('Idempotency-Key', key);
+
+    it('la misma clave dos veces: una entrega, una fila en el outbox, sin enlace en la repetición', async () => {
+      const appt = await appointment(patientId, typeId);
+      const first = (await withKey(appt, KEY).expect(201)).body as Created;
+      expect(first.publicUrl).toMatch(/\/indicaciones\//);
+      const second = (await withKey(appt, KEY).expect(201)).body as Created;
+      expect(second.delivery.id).toBe(first.delivery.id);
+      expect(second.publicUrl).toBeNull();
+      expect(second.whatsapp).toBeNull();
+      expect(second.emailQueued).toBe(true);
+      expect(second.sentTo).toBe('ca***@example.com');
+      expect(
+        await raw.postOpInstructionDelivery.count({
+          where: { appointmentId: appt },
+        }),
+      ).toBe(1);
+      expect(
+        await raw.emailOutbox.count({
+          where: { referenceId: first.delivery.id },
+        }),
+      ).toBe(1);
+      expect(
+        await raw.auditEvent.count({
+          where: {
+            tenantId: clinicA.tenantId,
+            resourceId: first.delivery.id,
+            resourceType: 'POSTOP_DELIVERY',
+          },
+        }),
+      ).toBe(1);
+    });
+
+    it('en paralelo (dos pestañas): una sola entrega', async () => {
+      const appt = await appointment(patientId, typeId);
+      const key = 'd1b9f2d5-6bae-4e5f-9a66-7b2a5c3eaf12';
+      const [a, b] = await Promise.all([
+        withKey(appt, key, 'PRINT'),
+        withKey(appt, key, 'PRINT'),
+      ]);
+      expect([a.status, b.status]).toEqual([201, 201]);
+      expect((a.body as Created).delivery.id).toBe(
+        (b.body as Created).delivery.id,
+      );
+      expect(
+        await raw.postOpInstructionDelivery.count({
+          where: { appointmentId: appt },
+        }),
+      ).toBe(1);
+    });
+
+    it('otra cita con la misma clave es otra entrega; sin clave nunca se deduplica; una clave que no es UUID da 400', async () => {
+      const apptA = await appointment(patientId, typeId);
+      const apptB = await appointment(patientId, typeId);
+      const a = (await withKey(apptA, KEY, 'PRINT').expect(201))
+        .body as Created;
+      const b = (await withKey(apptB, KEY, 'PRINT').expect(201))
+        .body as Created;
+      expect(a.delivery.id).not.toBe(b.delivery.id);
+      await deliver(reception, apptA, 'PRINT').expect(201);
+      await deliver(reception, apptA, 'PRINT').expect(201);
+      expect(
+        await raw.postOpInstructionDelivery.count({
+          where: { appointmentId: apptA },
+        }),
+      ).toBe(3);
+      const bad = await withKey(apptA, 'no-es-un-uuid', 'PRINT').expect(400);
+      expect((bad.body as { message: string }).message).toMatch(/UUID/);
+    });
   });
 
   it('una plantilla inactiva no se entrega (400) y una inexistente da 404', async () => {

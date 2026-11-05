@@ -1,5 +1,6 @@
 import { documentRegional } from '../../../../shared/locations/document-regional';
 import { randomUUID } from 'node:crypto';
+import { PostOpDeliveryAlreadyExistsError } from '../../domain/ports/post-op-delivery-repository.port';
 import type { PostOpDelivery } from '../../domain/entities/post-op-delivery.entity';
 import type {
   CreatePostOpDeliveryRepoInput,
@@ -105,6 +106,9 @@ export class InMemoryPostOpDeliveryRepository implements PostOpDeliveryRepositor
   create(input: CreatePostOpDeliveryRepoInput): Promise<PostOpDelivery> {
     // Cada entrega un instante después de la anterior, como la hora de la BD.
     const at = new Date((this.clock += 1000));
+    if (input.id && this.rows.some((r) => r.id === input.id)) {
+      return Promise.reject(new PostOpDeliveryAlreadyExistsError());
+    }
     const row: PostOpDelivery = {
       id: randomUUID(),
       tenantId: 't1',
@@ -126,6 +130,11 @@ export class InMemoryPostOpDeliveryRepository implements PostOpDeliveryRepositor
       if (status) found.set(id, status);
     }
     return Promise.resolve(found);
+  }
+
+  findById(id: string): Promise<PostOpDelivery | null> {
+    const row = this.rows.find((r) => r.id === id);
+    return Promise.resolve(row ? { ...row } : null);
   }
 
   listByAppointment(appointmentId: string): Promise<PostOpDelivery[]> {

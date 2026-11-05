@@ -14,6 +14,17 @@ export interface PostOpEmailSendInput {
 export const POSTOP_EMAIL_SENDER = Symbol('POSTOP_EMAIL_SENDER');
 
 /**
+ * DX-250: hasta cuándo el outbox da fe de un envío. Una entrega EMAIL anterior
+ * a este instante pudo salir y haber sido purgada del outbox (retención de
+ * `MAIL_OUTBOX_RETENTION_DAYS`): sin fila ya no se sabe (ni se afirma «no
+ * enviado»). Es una función para leer el reloj y la retención al llamarla.
+ */
+export const POSTOP_EMAIL_EVIDENCE_CUTOFF = Symbol(
+  'POSTOP_EMAIL_EVIDENCE_CUTOFF',
+);
+export type PostOpEmailEvidenceCutoff = () => Date;
+
+/**
  * Envío por email de las indicaciones (DX-222). En dos pasos para que el tope
  * se mire ANTES de registrar la entrega y el email lleve su id después.
  */

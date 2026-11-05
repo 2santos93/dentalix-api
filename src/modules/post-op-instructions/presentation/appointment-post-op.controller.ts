@@ -1,7 +1,9 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
+  Headers,
   Param,
   ParseUUIDPipe,
   Post,
@@ -10,9 +12,11 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { isUUID } from 'class-validator';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
+  ApiHeader,
   ApiCreatedResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
@@ -110,11 +114,23 @@ export class AppointmentPostOpController {
   @ApiTooManyRequestsResponse({
     description: 'Tope de emails de la clínica o del destinatario',
   })
+  @ApiHeader({
+    name: 'Idempotency-Key',
+    required: false,
+    description:
+      'DX-250: UUID generado una vez por clic y reutilizado en los reintentos. Repetir la petición con la misma clave en la misma cita devuelve la entrega ya registrada (sin `publicUrl` ni `whatsapp`: el token solo sale en la primera respuesta) en vez de crear otra, y no vuelve a encolar el email.',
+  })
   async create(
     @Param('appointmentId', ParseUUIDPipe) appointmentId: string,
     @Body() dto: DeliverPostOpDto,
     @Req() req: AuthenticatedRequest,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
   ): Promise<PostOpDeliveryCreatedDto> {
+    if (idempotencyKey !== undefined && !isUUID(idempotencyKey)) {
+      throw new BadRequestException(
+        'La Idempotency-Key debe ser un UUID: genera uno nuevo por cada clic.',
+      );
+    }
     // Como el enlace de confirmación (DX-005): el host entero se valida
     // antes de registrar nada; uno manipulado no arma un enlace hacia otro
     // sitio. Solo lo usan EMAIL y WHATSAPP_LINK (el caso de uso da 400).
@@ -123,7 +139,11 @@ export class AppointmentPostOpController {
     if (!ctx) throw new Error('Sin sesión de clínica detrás del RolesGuard');
     return this.deliver.execute(
       appointmentId,
-      { templateId: dto.templateId, channel: dto.channel },
+      {
+        templateId: dto.templateId,
+        channel: dto.channel,
+        idempotencyKey,
+      },
       ctx,
       { protocol: this.protocol, host },
     );

@@ -52,8 +52,17 @@ export interface PostOpAppointmentContext {
   majorityAge: number;
 }
 
+/** DX-250: ya hay una entrega con ese id (la misma `Idempotency-Key`). */
+export class PostOpDeliveryAlreadyExistsError extends Error {
+  constructor() {
+    super('post-op delivery already exists');
+  }
+}
+
 // Sin `tenantId` (sale del contexto) ni `deliveredAt` (lo pone la BD).
 export interface CreatePostOpDeliveryRepoInput {
+  /** DX-250: id derivado de la `Idempotency-Key`; sin él lo genera la BD. */
+  id?: string;
   patientId: string;
   appointmentId: string;
   locationId: string;
@@ -120,7 +129,10 @@ export interface PostOpDeliveryRepository {
   }): Promise<string[]>;
   /** Nombre completo del usuario que entrega. */
   userName(userId: string): Promise<string | null>;
+  /** @throws PostOpDeliveryAlreadyExistsError si `input.id` ya existe. */
   create(input: CreatePostOpDeliveryRepoInput): Promise<PostOpDelivery>;
+  /** Una entrega de la clínica por su id; `null` si no existe. */
+  findById(id: string): Promise<PostOpDelivery | null>;
   /**
    * Estado del email de las entregas dadas (el outbox, por `referenceId`).
    * Solo trae las que tienen una fila; sin fila, el email no se encoló.
