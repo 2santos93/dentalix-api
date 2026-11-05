@@ -1561,6 +1561,13 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       path: () => `/payments/${a.paymentId}/receipt/print`,
       status: 404,
     },
+    // DX-389: el comprobante del cobro del abono de A (404, también sin comprobante).
+    {
+      name: 'GET /payments/:id/proof/url',
+      verb: 'get',
+      path: () => `/payments/${a.paymentId}/proof/url`,
+      status: 404,
+    },
     {
       name: 'POST /payments/:id/receipt/email',
       verb: 'post',
