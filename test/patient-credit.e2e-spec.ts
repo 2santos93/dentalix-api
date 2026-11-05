@@ -23,7 +23,7 @@ import {
   locationBody,
 } from './support/location-fixtures';
 import {
-  holdLock,
+  holdPlanRowLock,
   settle,
   waitForLockWaiters,
 } from './support/postgres-concurrency';
@@ -97,12 +97,7 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
    * DX-450: el plan retenido FOR NO KEY UPDATE por otra transacción; quien
    * escriba sobre el saldo del plan espera aquí (visto en pg_locks, por PID).
    */
-  const holdPlanLock = (planId: string) =>
-    holdLock(
-      raw,
-      (tx) =>
-        tx.$queryRaw`SELECT 1 FROM "treatment_plans" WHERE "id" = ${planId}::uuid FOR NO KEY UPDATE`,
-    );
+  const holdPlanLock = (planId: string) => holdPlanRowLock(raw, planId);
   /** Lanza las peticiones, espera a que TODAS estén bloqueadas y suelta. */
   const raceOnPlanLock = async (
     planId: string,

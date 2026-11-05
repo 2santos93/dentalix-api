@@ -21,7 +21,7 @@ import {
   locationData,
 } from './support/location-fixtures';
 import {
-  holdLock,
+  holdPlanRowLock,
   settle,
   type Outcome,
   waitForLockWaiters,
@@ -189,18 +189,8 @@ const counterOf = async (tenantId: string): Promise<number> =>
     0,
   );
 
-/**
- * DX-450: la fila del plan retenida FOR NO KEY UPDATE por una transacción
- * propia (como un cobro o un traspaso en curso). Quien escriba abonos al plan
- * tiene que ESPERAR aquí; el test lo comprueba en pg_locks (por PID) antes de
- * soltar, así que no pasa si se quita el candado de producción.
- */
 const holdPlanLock = (clinic: Clinic, planId = clinic.planId) =>
-  holdLock(
-    raw,
-    (tx) =>
-      tx.$queryRaw`SELECT 1 FROM "treatment_plans" WHERE "id" = ${planId}::uuid FOR NO KEY UPDATE`,
-  );
+  holdPlanRowLock(raw, planId);
 
 describe('DX-390 · cobro dividido con un solo recibo (int)', () => {
   beforeAll(async () => {
@@ -544,48 +534,43 @@ describe('DX-390 · cobro dividido con un solo recibo (int)', () => {
       sourcePlanId: string,
       startSplit: () => Promise<unknown>,
     ) => {
-      const lock = await holdLock(
-        raw,
-        (tx) =>
-          tx.$queryRaw`SELECT 1 FROM "treatment_plans" WHERE "id" = ${clinic.planId}::uuid FOR NO KEY UPDATE`,
-        async (tx) => {
-          const transfer = await tx.patientCreditTransfer.create({
-            data: {
+      const lock = await holdPlanRowLock(raw, clinic.planId, async (tx) => {
+        const transfer = await tx.patientCreditTransfer.create({
+          data: {
+            tenantId: clinic.tenantId,
+            locationId: clinic.locationId,
+            patientId: clinic.patientId,
+            sourcePlanId,
+            targetPlanId: clinic.planId,
+            currency: 'USD',
+            amount: new Prisma.Decimal('25.00'),
+            reason: 'Traspaso de prueba DX-463',
+            createdById: clinic.userId,
+          },
+        });
+        await tx.patientCreditEntry.createMany({
+          data: [
+            {
               tenantId: clinic.tenantId,
-              locationId: clinic.locationId,
               patientId: clinic.patientId,
-              sourcePlanId,
-              targetPlanId: clinic.planId,
+              treatmentPlanId: sourcePlanId,
+              currency: 'USD',
+              amount: new Prisma.Decimal('-25.00'),
+              kind: 'TRANSFER_OUT',
+              transferId: transfer.id,
+            },
+            {
+              tenantId: clinic.tenantId,
+              patientId: clinic.patientId,
+              treatmentPlanId: clinic.planId,
               currency: 'USD',
               amount: new Prisma.Decimal('25.00'),
-              reason: 'Traspaso de prueba DX-463',
-              createdById: clinic.userId,
+              kind: 'TRANSFER_IN',
+              transferId: transfer.id,
             },
-          });
-          await tx.patientCreditEntry.createMany({
-            data: [
-              {
-                tenantId: clinic.tenantId,
-                patientId: clinic.patientId,
-                treatmentPlanId: sourcePlanId,
-                currency: 'USD',
-                amount: new Prisma.Decimal('-25.00'),
-                kind: 'TRANSFER_OUT',
-                transferId: transfer.id,
-              },
-              {
-                tenantId: clinic.tenantId,
-                patientId: clinic.patientId,
-                treatmentPlanId: clinic.planId,
-                currency: 'USD',
-                amount: new Prisma.Decimal('25.00'),
-                kind: 'TRANSFER_IN',
-                transferId: transfer.id,
-              },
-            ],
-          });
-        },
-      );
+          ],
+        });
+      });
       let attempt: Promise<Outcome<unknown>> | undefined;
       try {
         attempt = settle(startSplit());

@@ -27,6 +27,7 @@ import {
   holdLock,
   settle,
   waitForLockWaiters,
+  waitingQueries,
 } from './support/postgres-concurrency';
 import {
   REGIONAL_CARACAS_FIXTURE,
@@ -336,6 +337,10 @@ describe('presupuesto a distancia en Postgres (DX-415)', () => {
       // suelta a la clínica SOLO cuando pg_locks muestra esa espera (DX-450).
       remote = settle(signBudget(a, id, planId));
       await waitForLockWaiters(owner, [clinicPid], 1);
+      // Y lo que espera es el bloqueo del GRUPO del plan (no otra sentencia).
+      const waiting = await waitingQueries(owner, [clinicPid]);
+      expect(waiting).toHaveLength(1);
+      expect(waiting[0]).toMatch(/FROM "treatment_plans"[\s\S]*FOR UPDATE/);
     } finally {
       clinicHolds.open();
     }

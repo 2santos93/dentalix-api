@@ -8,7 +8,7 @@ import {
   locationData,
 } from './support/location-fixtures';
 import {
-  holdLock,
+  holdPlanRowLock,
   settle,
   waitForLockWaiters,
   type Outcome,
@@ -352,11 +352,7 @@ describe('DX-253 · saldo a favor en la BD (int)', () => {
     // devoluciones llegan y esperan EN el plan (pg_locks, por PID del holder)
     // y solo entonces se suelta. Sin el candado del plan no esperan y el test
     // falla aquí, no en un desenlace que en serie sería el mismo.
-    const lock = await holdLock(
-      raw,
-      (tx) =>
-        tx.$queryRaw`SELECT 1 FROM "treatment_plans" WHERE "id" = ${a.cancelledPlan}::uuid FOR NO KEY UPDATE`,
-    );
+    const lock = await holdPlanRowLock(raw, a.cancelledPlan);
     let attempts: Promise<Outcome<unknown>>[] = [];
     try {
       attempts = [settle(refund()), settle(refund())];

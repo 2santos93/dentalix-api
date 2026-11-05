@@ -224,7 +224,7 @@ export async function waitingQueries(
 export interface HeldLock {
   /** PID de la conexión que lo retiene: lo que mira `waitForLockWaiters`. */
   pid: number;
-  /** Suelta el bloqueo (la transacción termina; con `finish` hace sus cambios). */
+  /** Suelta el bloqueo: corre `beforeCommit` (si hay) y hace COMMIT. */
   release: () => void;
   /** La transacción del holder; espérala tras `release()`. */
   done: Promise<void>;
@@ -234,13 +234,13 @@ export interface HeldLock {
  * DX-450: `acquire` toma el bloqueo en una transacción del `owner` (SELECT …
  * FOR UPDATE, FOR NO KEY UPDATE…) y se queda con él hasta `release()`. El
  * `timeout` de la transacción es mayor que cualquier espera del test. Si
- * `afterRelease` existe, se ejecuta con el bloqueo aún puesto, justo antes del
+ * `beforeCommit` existe, se ejecuta con el bloqueo aún puesto, justo antes del
  * COMMIT (p. ej. el cambio que la otra conexión debe ver al entrar).
  */
 export async function holdLock(
   owner: PrismaClient,
   acquire: (tx: Prisma.TransactionClient) => Promise<unknown>,
-  afterRelease?: (tx: Prisma.TransactionClient) => Promise<unknown>,
+  beforeCommit?: (tx: Prisma.TransactionClient) => Promise<unknown>,
 ): Promise<HeldLock> {
   const holdOpen = gate<void>();
   const locked = gate<number>();
@@ -249,7 +249,7 @@ export async function holdLock(
       await acquire(tx);
       locked.open(await backendPid(tx));
       await holdOpen.wait;
-      if (afterRelease) await afterRelease(tx);
+      if (beforeCommit) await beforeCommit(tx);
     },
     { timeout: 30_000, maxWait: 10_000 },
   );
@@ -262,3 +262,16 @@ export async function holdLock(
   ]);
   return { pid, release: () => holdOpen.open(), done };
 }
+
+/** La fila del plan retenida FOR NO KEY UPDATE (como un cobro o traspaso en curso). */
+export const holdPlanRowLock = (
+  owner: PrismaClient,
+  planId: string,
+  beforeCommit?: (tx: Prisma.TransactionClient) => Promise<unknown>,
+) =>
+  holdLock(
+    owner,
+    (tx) =>
+      tx.$queryRaw`SELECT 1 FROM "treatment_plans" WHERE "id" = ${planId}::uuid FOR NO KEY UPDATE`,
+    beforeCommit,
+  );
