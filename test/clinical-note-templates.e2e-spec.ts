@@ -564,7 +564,7 @@ describe('Plantillas de evolución ligadas a la cita (e2e, DX-170)', () => {
   });
 
   describe('DX-231: fecha de la evolución y plantillas en edición', () => {
-    const today = () => new Date().toISOString().slice(0, 10);
+    const utcDay = () => new Date().toISOString().slice(0, 10);
     const dayAfter = (day: string, n: number) =>
       new Date(new Date(`${day}T00:00:00.000Z`).getTime() + n * DAY_MS)
         .toISOString()
@@ -634,18 +634,18 @@ describe('Plantillas de evolución ligadas a la cita (e2e, DX-170)', () => {
     it('sin cita: una fecha futura (día civil de la sede) da 400; hoy y el pasado valen', async () => {
       const res = await postEntry({
         notes: 'Futura',
-        entryDate: `${dayAfter(today(), 1)}T00:00:00.000Z`,
+        entryDate: `${dayAfter(utcDay(), 1)}T00:00:00.000Z`,
       }).expect(400);
       expect(message(res)).toBe(
         'La fecha de atención no puede ser una fecha futura',
       );
       await postEntry({
         notes: 'Hoy',
-        entryDate: `${today()}T00:00:00.000Z`,
+        entryDate: `${utcDay()}T00:00:00.000Z`,
       }).expect(201);
       await postEntry({
         notes: 'Pasada',
-        entryDate: `${dayAfter(today(), -30)}T00:00:00.000Z`,
+        entryDate: `${dayAfter(utcDay(), -30)}T00:00:00.000Z`,
       }).expect(201);
     });
 
@@ -805,6 +805,40 @@ describe('Plantillas de evolución ligadas a la cita (e2e, DX-170)', () => {
         where: { id: otherTemplate.id },
       });
       expect(untouched.active).toBe(true);
+    });
+
+    it('DX-231: el id de una pregunta de otra clínica en un PATCH no se adopta: es una pregunta nueva y la ajena no cambia', async () => {
+      const foreign = otherTemplate.prompts[0];
+      const mine = await as(
+        api().post('/api/v1/clinical-note-templates'),
+        clinic.adminToken,
+      )
+        .send({
+          name: 'Con id ajeno',
+          body: 'Nota {{Nota}}.',
+          prompts: [{ label: 'Nota', type: 'TEXT' }],
+        })
+        .expect(201);
+      const tpl = mine.body as TemplateBody;
+      const edited = await as(
+        api().patch(`/api/v1/clinical-note-templates/${tpl.id}`),
+        clinic.adminToken,
+      )
+        .send({
+          body: 'Nota {{Texto}}.',
+          prompts: [{ id: foreign.id, label: 'Texto', type: 'TEXT' }],
+        })
+        .expect(200);
+      const [prompt] = (edited.body as TemplateBody).prompts;
+      expect(prompt.id).not.toBe(foreign.id);
+      const intact = await raw.clinicalNoteTemplatePrompt.findUniqueOrThrow({
+        where: { id: foreign.id },
+      });
+      expect(intact).toMatchObject({
+        tenantId: other.tenantId,
+        templateId: otherTemplate.id,
+        label: foreign.label,
+      });
     });
   });
 });
