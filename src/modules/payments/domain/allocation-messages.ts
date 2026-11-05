@@ -20,6 +20,8 @@ export const ALLOCATION_DUPLICATE_ITEM =
 export const ALLOCATION_TOO_MANY_LINES = 'Como máximo 200 ítems por abono.';
 export const ALLOCATION_MODE_MISMATCH =
   'Con el reparto automático no se envían importes; con el manual, sí.';
+export const ALLOCATION_OVER_CREDIT_OUT =
+  'Esa imputación dejaría imputado dinero que ya se devolvió o traspasó del saldo a favor de este plan. Reduce los importes y vuelve a guardar.';
 export const ALLOCATION_ITEM_NOT_IN_PLAN =
   'El ítem no es de este plan o ya no existe.';
 export const ALLOCATION_ITEM_PROPOSED =
@@ -59,6 +61,19 @@ export function allocationOverPayment(
   return `La suma imputada (${moneyWithCode(sumCents / 100, currency, fmt, null)}) supera el abono convertido a la moneda del plan (${moneyWithCode(baseCents / 100, currency, fmt, null)}).`;
 }
 
+/** DX-399-bis: parte del abono ya se devolvió o traspasó y no se puede imputar. */
+export function allocationOverNet(
+  sumCents: number,
+  baseCents: number,
+  creditOutCents: number,
+  currency: string,
+  fmt: RegionalFormat,
+): string {
+  const money = (cents: number) =>
+    moneyWithCode(cents / 100, currency, fmt, null);
+  return `La suma imputada (${money(sumCents)}) supera lo que queda a cuenta de este abono: de ${money(baseCents)}, ${money(creditOutCents)} ya se devolvieron o traspasaron del saldo a favor (máximo ${money(Math.max(0, baseCents - creditOutCents))}).`;
+}
+
 /**
  * Mensaje de una violación de las líneas (R10). `NO_RATE` no llega aquí: sin
  * base, el caso de uso responde 409 antes de validar líneas.
@@ -84,6 +99,14 @@ export function allocationViolationMessage(
       return allocationOverPayment(
         violation.sumCents ?? 0,
         baseCents,
+        currency,
+        fmt,
+      );
+    case 'OVER_NET':
+      return allocationOverNet(
+        violation.sumCents ?? 0,
+        baseCents,
+        violation.creditOutCents ?? 0,
         currency,
         fmt,
       );

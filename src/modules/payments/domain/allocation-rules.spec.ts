@@ -31,6 +31,7 @@ const donor = (over: Partial<Donor> & { paymentId: string }): Donor => ({
   createdAt: d(1),
   baseCents: 0,
   allocatedCents: 0,
+  creditOutCents: 0,
   ...over,
 });
 
@@ -232,7 +233,7 @@ describe('validateManualAllocation', () => {
   const run = (
     lines: { itemId: string; cents: number }[],
     baseCents: number | null = 120,
-  ) => validateManualAllocation({ baseCents, lines, items });
+  ) => validateManualAllocation({ baseCents, creditOutCents: 0, lines, items });
 
   it('accepts a valid list and an empty one', () => {
     expect(
@@ -389,11 +390,31 @@ describe('donantes netos de lo devuelto o traspasado (DX-399-bis)', () => {
     ).toBe(true);
   });
 
-  it('sin creditOutCents se comporta como antes (compatibilidad)', () => {
+  it('sin salidas (0) el disponible es base - imputado', () => {
     expect(
       donorAvailableCents(
         donor({ paymentId: 'A', baseCents: 500, allocatedCents: 200 }),
       ),
     ).toBe(300);
+  });
+
+  it('manual: no deja imputar lo devuelto (OVER_NET) y distingue de superar la base', () => {
+    const items = new Map([
+      ['A', { status: TreatmentPlanItemStatus.ACCEPTED, freeCents: 20_000 }],
+    ]);
+    const run = (cents: number) =>
+      validateManualAllocation({
+        baseCents: 13_000,
+        creditOutCents: 3_000,
+        lines: [{ itemId: 'A', cents }],
+        items,
+      });
+    expect(run(10_000)).toBeNull();
+    expect(run(13_000)).toEqual({
+      code: 'OVER_NET',
+      sumCents: 13_000,
+      creditOutCents: 3_000,
+    });
+    expect(run(13_001)).toEqual({ code: 'OVER_PAYMENT', sumCents: 13_001 });
   });
 });

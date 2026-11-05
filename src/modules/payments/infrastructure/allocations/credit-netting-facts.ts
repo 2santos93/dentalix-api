@@ -137,3 +137,61 @@ export function nettedFacts(
     net: net.get(fact.id) as NettedPayment,
   }));
 }
+
+interface AffectedPlan {
+  tenantId: string;
+  planId: string;
+  patientId: string;
+  /** Σ devoluciones y traspasos de salida del plan (céntimos). */
+  creditOutCents: number;
+  /** Lo que la cascada atribuye a abonos del plan. */
+  attributedCents: number;
+  /** creditOutCents - attributedCents (> 0 = afectado). */
+  discardedCents: number;
+}
+
+/**
+ * Planes cuyas salidas del saldo a favor superan lo que la cascada atribuye a
+ * sus abonos (DX-399-bis, diagnóstico de solo lectura).
+ */
+export async function findAffectedPlans(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+): Promise<AffectedPlan[]> {
+  const outs = await tx.$queryRaw<
+    { planId: string; patientId: string; cents: bigint }[]
+  >`
+    SELECT e."treatmentPlanId" AS "planId", e."patientId",
+           round(-sum(e."amount") * 100)::bigint AS "cents"
+      FROM "patient_credit_entries" e
+     WHERE e."tenantId" = ${tenantId}::uuid
+       AND e."kind" IN ('REFUND', 'TRANSFER_OUT')
+     GROUP BY e."treatmentPlanId", e."patientId"`;
+  if (outs.length === 0) return [];
+  const planIds = outs.map((o) => o.planId);
+  const { facts, entries } = await loadNettingFacts(
+    tx,
+    tenantId,
+    Prisma.sql`tp."id" = ANY(${planIds}::uuid[])`,
+  );
+  const planOf = new Map(facts.map((f) => [f.id, f.planId]));
+  const attributed = new Map<string, number>();
+  for (const { fact, net } of nettedFacts(facts, entries)) {
+    const planId = planOf.get(fact.id) as string;
+    attributed.set(planId, (attributed.get(planId) ?? 0) + net.creditOutCents);
+  }
+  return outs
+    .map((o) => {
+      const creditOutCents = Number(o.cents);
+      const attributedCents = attributed.get(o.planId) ?? 0;
+      return {
+        tenantId,
+        planId: o.planId,
+        patientId: o.patientId,
+        creditOutCents,
+        attributedCents,
+        discardedCents: creditOutCents - attributedCents,
+      };
+    })
+    .filter((p) => p.discardedCents > 0);
+}

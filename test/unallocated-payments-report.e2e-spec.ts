@@ -798,6 +798,55 @@ describe('Cobrado sin imputar / a cuenta (e2e, DX-399)', () => {
       );
     });
 
+    it('DX-399-bis: a MANUAL allocation cannot pin the refunded money either (Spanish 400, nothing written)', async () => {
+      const mara = await patient(a, 'Mara');
+      const maraPlan = await plan(a, mara, catalogA, [100]);
+      const old = await pay(a, maraPlan.planId, 130, '2026-09-15');
+      await refund(maraPlan.planId, [old], 30);
+      const item = await call(
+        'post',
+        a,
+        `/treatment-plans/${maraPlan.planId}/items`,
+      )
+        .send({ toothNumber: '32', catalogItemId: catalogA, price: 30 })
+        .expect(201);
+      const itemId = (item.body as { id: string }).id;
+      await call(
+        'patch',
+        a,
+        `/treatment-plans/${maraPlan.planId}/items/${itemId}`,
+      )
+        .send({ status: 'ACCEPTED' })
+        .expect(200);
+      const { version } = (
+        await call('get', a, `/payments/${old}/allocations`).expect(200)
+      ).body as { version: string };
+      const put = (cents: [string, number][]) =>
+        call('put', a, `/payments/${old}/allocations`).send({
+          expectedVersion: version,
+          mode: 'MANUAL',
+          allocations: cents.map(([id, amount]) => ({
+            treatmentPlanItemId: id,
+            amount,
+          })),
+        });
+      const res = await put([
+        [maraPlan.items[0], 100],
+        [itemId, 30],
+      ]).expect(400);
+      expect((res.body as { message: string }).message).toMatch(
+        /ya se devolvieron o traspasaron del saldo a favor \(máximo .*100/,
+      );
+      // Nada se escribió: el abono sigue en sus 100 AUTO y el informe no lo lista.
+      const rows = await raw.paymentAllocation.findMany({
+        where: { paymentId: old },
+      });
+      expect(rows.map((r) => Number(r.amount))).toEqual([100]);
+      expect(rows.every((r) => r.source === 'AUTO')).toBe(true);
+      // Lo que queda a cuenta sí se puede fijar a mano.
+      await put([[maraPlan.items[0], 100]]).expect(200);
+    });
+
     it('a refund only nets payments registered BEFORE it: overpay, refund, then a later payment', async () => {
       const jana = await patient(a, 'Jana');
       const janaPlan = await plan(a, jana, catalogA, [100]);

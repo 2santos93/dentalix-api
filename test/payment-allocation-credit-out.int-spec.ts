@@ -4,6 +4,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaPlanAllocationRepository } from '../src/modules/payments/infrastructure/allocations/prisma-plan-allocation.repository';
+import { findAffectedPlans } from '../src/modules/payments/infrastructure/allocations/credit-netting-facts';
 import { PlanAllocationRebalancer } from '../src/modules/payments/application/plan-allocation-rebalancer';
 import type { ConvertAmountUseCase } from '../src/modules/exchange/application/use-cases/convert-amount.use-case';
 import {
@@ -187,6 +188,22 @@ async function creditOut(
   });
 }
 
+/**
+ * Abono registrado DESPUÉS del último asiento del plan, medido con el reloj de
+ * la BD (que es quien pone el `createdAt` del asiento): sin depender del reloj
+ * de Node.
+ */
+async function payAfterCredit(planId: string, amount: number) {
+  const id = await pay(planId, amount, at(0));
+  await raw.$executeRaw`
+    UPDATE "payments"
+       SET "createdAt" = (SELECT max(e."createdAt") FROM "patient_credit_entries" e
+                           WHERE e."treatmentPlanId" = ${planId}::uuid)
+                         + interval '1 second'
+     WHERE "id" = ${id}::uuid`;
+  return id;
+}
+
 const rebalance = (planId: string) =>
   inTenant(() => rebalancer.rebalancePlan(planId, null));
 
@@ -260,7 +277,7 @@ describe('La imputación automática descuenta lo devuelto o traspasado (DX-399-
     expect(await allocatedTo(second)).toBe(0);
     expect(await allocatedBy(old)).toBe(10_000);
 
-    const fresh = await pay(planId, 30, new Date());
+    const fresh = await payAfterCredit(planId, 30);
     expect(await rebalance(planId)).toEqual({ allocatedCents: 3_000 });
     expect(await allocatedBy(fresh)).toBe(3_000);
     expect(await allocatedTo(second)).toBe(3_000);
@@ -303,7 +320,7 @@ describe('La imputación automática descuenta lo devuelto o traspasado (DX-399-
     const old = await pay(planId, 130, at(0));
     await rebalance(planId);
     await creditOut(planId, 30);
-    const later = await pay(planId, 50, new Date());
+    const later = await payAfterCredit(planId, 50);
     const extra = await item(planId, 50);
     await rebalance(planId);
     expect(await allocatedBy(later)).toBe(5_000);
@@ -366,5 +383,35 @@ describe('La imputación automática descuenta lo devuelto o traspasado (DX-399-
     });
     expect(await allocatedTo(extra)).toBe(0);
     expect(await allocatedBy(old)).toBe(10_000);
+  });
+  it('diagnóstico (solo lectura): lista el plan que dejó el fallo y no el sano; reparar no es automático', async () => {
+    const healthy = await plan();
+    await item(healthy, 100);
+    await pay(healthy, 130, at(0));
+    await rebalance(healthy);
+    await creditOut(healthy, 30);
+
+    // El estado del fallo previo: el abono antiguo quedó imputado entero (100 + 30)
+    // y luego se devolvieron 30 -> la salida no se atribuye a ningún abono.
+    const broken = await plan();
+    await item(broken, 100);
+    await item(broken, 30);
+    const old = await pay(broken, 130, at(0));
+    await rebalance(broken);
+    expect(await allocatedBy(old)).toBe(13_000);
+    await creditOut(broken, 30);
+
+    const before = await planTotal(broken);
+    const affected = await inTenant(() =>
+      prisma.runWithTenant((tx) => findAffectedPlans(tx, tenantId)),
+    );
+    expect(affected.map((p) => p.planId)).toEqual([broken]);
+    expect(affected[0]).toMatchObject({
+      creditOutCents: 3_000,
+      attributedCents: 0,
+      discardedCents: 3_000,
+    });
+    // Solo lee: nada cambió.
+    expect(await planTotal(broken)).toBe(before);
   });
 });

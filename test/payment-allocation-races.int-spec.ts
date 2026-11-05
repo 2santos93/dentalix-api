@@ -426,6 +426,7 @@ async function assertInvariants(planId: string): Promise<Map<string, number>> {
         createdAt: base.payment.createdAt,
         baseCents: cents(base.amount),
         allocatedCents: used,
+        creditOutCents: 0,
       });
     }
   }
