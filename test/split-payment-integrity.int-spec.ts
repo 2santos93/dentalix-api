@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { Prisma, PrismaClient, TreatmentPlanStatus } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
@@ -328,10 +330,11 @@ describe('cobro dividido: integridad en la BD (int, DX-426)', () => {
       const location = await raw.location.findUniqueOrThrow({
         where: { id: a.locationId },
       });
+      const prefix = location.receiptPrefix as string;
       await raw.paymentReceiptCounter.create({
         data: {
           tenantId: a.tenantId,
-          seriesPrefix: location.receiptPrefix,
+          seriesPrefix: prefix,
           lastNumber: 1,
         },
       });
@@ -342,7 +345,7 @@ describe('cobro dividido: integridad en la BD (int, DX-426)', () => {
               tenantId: a.tenantId,
               locationId: a.locationId,
               paymentId,
-              seriesPrefix: location.receiptPrefix,
+              seriesPrefix: prefix,
               number: 1,
               snapshot: { version: 1 },
             },
@@ -412,6 +415,66 @@ describe('cobro dividido: integridad en la BD (int, DX-426)', () => {
           tx.payment.update({ where: { id: ids[0] }, data: { notes: 'x' } }),
         ),
       ).rejects.toThrow(/abono anulado/);
+    });
+  });
+
+  describe('informe previo de la migración', () => {
+    // El bloque DO de la migración (lee clínica a clínica con app.current_tenant;
+    // aquí lo ejecuta el superusuario, que salta los triggers al sembrar).
+    const migration = readFileSync(
+      join(
+        __dirname,
+        '../prisma/migrations/20261121090000_dx426_split_payment_integrity/migration.sql',
+      ),
+      'utf8',
+    );
+    const report = migration.slice(migration.indexOf('DO $$'));
+
+    it('pasa con los cobros divididos coherentes', async () => {
+      await seedSplit(a, 3);
+      await seedSplit(a, 2, true);
+      await expect(raw.$executeRawUnsafe(report)).resolves.toBeDefined();
+    });
+
+    it.each([
+      [
+        'otra sede',
+        (c: Clinic): Partial<Prisma.PaymentUncheckedCreateInput> => ({
+          locationId: c.otherLocationId,
+        }),
+      ],
+      [
+        'otro paciente',
+        (c: Clinic): Partial<Prisma.PaymentUncheckedCreateInput> => ({
+          patientId: c.otherPatientId,
+          treatmentPlanId: c.otherPlanId,
+        }),
+      ],
+    ])('falla con el recuento si una línea es de %s', async (_name, change) => {
+      const { splitId } = await seedSplit(a, 2);
+      const bad = await raw.payment.create({
+        data: lineData(a, splitId, 3, change(a)),
+      });
+      await expect(raw.$executeRawUnsafe(report)).rejects.toThrow(
+        new RegExp(`clínica ${a.tenantId}: 1 líneas de otro paciente o sede`),
+      );
+      await raw.payment.delete({ where: { id: bad.id } });
+    });
+
+    it('falla si un cobro está anulado a medias', async () => {
+      const { ids } = await seedSplit(a, 2);
+      const now = new Date();
+      await raw.payment.update({
+        where: { id: ids[1] },
+        data: { deletedAt: now, voidedAt: now },
+      });
+      await expect(raw.$executeRawUnsafe(report)).rejects.toThrow(
+        /1 cobros anulados a medias/,
+      );
+      await raw.payment.update({
+        where: { id: ids[1] },
+        data: { deletedAt: null, voidedAt: null },
+      });
     });
   });
 });
