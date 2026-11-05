@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { GetPlanBalanceUseCase } from '../use-cases/get-plan-balance.use-case';
 import { errorName } from '../payment-in-plan-currency';
 import type { ReceiptPlanBalance } from '../../domain/receipt-snapshot';
+import type { ReceiptBalanceInTx } from '../../domain/ports/payment-repository.port';
 import { round2 } from '../../../../shared/money/money';
 
 /**
@@ -49,6 +50,42 @@ export class ReceiptPlanBalanceCalculator {
       return null;
     }
   }
+
+  /**
+   * DX-182: el saldo para el recibo calculado DENTRO de la transacción del
+   * abono (`ReceiptBalanceInTx`): el plan ya está bloqueado, así que la foto
+   * trae los abonos anteriores y este (con su base), y su cuenta es la del
+   * saldo del plan, sin sumar nada a mano. Sin red: lo que pidiera la tasa del
+   * día a un proveedor (un abono anterior a DX-375 aún sin congelar, o este
+   * mismo sin base) deja el recibo sin saldo, como cualquier saldo ilegible.
+   */
+  readonly inTransaction: ReceiptBalanceInTx = async ({
+    planId,
+    snapshot,
+    creditMovements,
+  }) => {
+    try {
+      const result = await this.getPlanBalance.fromSnapshot(
+        planId,
+        snapshot,
+        creditMovements,
+        { offline: true },
+      );
+      if (result.rateProviderTimedOut) {
+        this.warnUnavailable('RateProviderTimedOut');
+        return null;
+      }
+      return {
+        currency: result.planCurrency,
+        billable: result.billable,
+        paid: result.paid,
+        balance: result.balance,
+      };
+    } catch (error) {
+      this.warnUnavailable(errorName(error));
+      return null;
+    }
+  };
 
   /** Sin datos del abono ni del paciente: solo el tipo del error. */
   private warnUnavailable(error: string): void {

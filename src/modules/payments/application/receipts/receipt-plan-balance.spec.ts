@@ -81,4 +81,82 @@ describe('ReceiptPlanBalanceCalculator (DX-136)', () => {
     const { calculator } = makeCalculator(new Error('caído'));
     await expect(calculator.afterPayment('plan-1', 10)).resolves.toBeNull();
   });
+
+  describe('inTransaction (DX-182)', () => {
+    const snapshot = {
+      plan: { status: 'ACCEPTED', currency: 'USD' },
+      items: [],
+      payments: [],
+      allocations: [],
+      bases: [],
+    } as unknown as Parameters<
+      ReceiptPlanBalanceCalculator['inTransaction']
+    >[0]['snapshot'];
+
+    function withFromSnapshot(result: object | Error) {
+      const calls: unknown[][] = [];
+      const getPlanBalance = {
+        fromSnapshot: (...args: unknown[]) => {
+          calls.push(args);
+          return result instanceof Error
+            ? Promise.reject(result)
+            : Promise.resolve(result);
+        },
+      } as unknown as GetPlanBalanceUseCase;
+      return {
+        calculator: new ReceiptPlanBalanceCalculator(getPlanBalance),
+        calls,
+      };
+    }
+
+    it('usa la cuenta del saldo del plan sobre la foto, sin red, y no suma nada a mano', async () => {
+      const { calculator, calls } = withFromSnapshot({
+        planCurrency: 'USD',
+        billable: 1000,
+        paid: 300,
+        balance: 700,
+        creditMovements: 0,
+        rateProviderTimedOut: false,
+      });
+      await expect(
+        calculator.inTransaction({
+          planId: 'plan-1',
+          snapshot,
+          creditMovements: 0,
+        }),
+      ).resolves.toEqual({
+        currency: 'USD',
+        billable: 1000,
+        paid: 300,
+        balance: 700,
+      });
+      expect(calls).toEqual([['plan-1', snapshot, 0, { offline: true }]]);
+    });
+
+    it('con una tasa que no se pudo leer sin red, o un fallo, el recibo sale sin saldo', async () => {
+      const timedOut = withFromSnapshot({
+        planCurrency: 'USD',
+        billable: 1000,
+        paid: 0,
+        balance: 1000,
+        creditMovements: 0,
+        rateProviderTimedOut: true,
+      });
+      await expect(
+        timedOut.calculator.inTransaction({
+          planId: 'plan-1',
+          snapshot,
+          creditMovements: 0,
+        }),
+      ).resolves.toBeNull();
+      const failed = withFromSnapshot(new Error('caído'));
+      await expect(
+        failed.calculator.inTransaction({
+          planId: 'plan-1',
+          snapshot,
+          creditMovements: 0,
+        }),
+      ).resolves.toBeNull();
+    });
+  });
 });

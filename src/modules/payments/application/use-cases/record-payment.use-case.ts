@@ -287,6 +287,7 @@ export class RecordPaymentUseCase {
       idempotencyKey: key,
       requestFingerprint: key === undefined ? undefined : requestFingerprint,
       receiptPlanBalance,
+      receiptBalanceInTx: this.receiptBalance.inTransaction,
       planAmount,
       frozenRate,
     };

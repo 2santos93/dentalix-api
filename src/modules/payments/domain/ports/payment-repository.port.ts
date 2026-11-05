@@ -9,6 +9,7 @@ import { Payment } from '../entities/payment.entity';
 import { CashPayment } from '../entities/cash-payment.entity';
 import type { VoidSubject } from '../void-window';
 import type { ReceiptPlanBalance } from '../receipt-snapshot';
+import type { PlanBalanceSnapshot } from './plan-allocation-repository.port';
 import type { RegionalFormat } from '../../../../shared/format/regional-format';
 import type { PaymentProofAttachment } from '../payment-proof';
 import type { ComputedAdjustment } from '../../../payment-methods/domain/payment-adjustments';
@@ -27,6 +28,19 @@ import type { ComputedAdjustment } from '../../../payment-methods/domain/payment
 export interface CivilPaidDay {
   civilDate: string;
 }
+
+/**
+ * DX-182: el saldo del plan para el recibo, calculado DENTRO de la transacción
+ * del abono, con el plan ya bloqueado y el abono (y su base) ya insertados.
+ * El repositorio lee la foto (la misma que usa el saldo del plan) y quien
+ * llama aplica la cuenta del saldo sobre ella. `null`: sin saldo en el recibo.
+ */
+export type ReceiptBalanceInTx = (data: {
+  planId: string;
+  snapshot: PlanBalanceSnapshot;
+  /** Σ de los asientos del saldo a favor del plan, en su moneda (DX-253). */
+  creditMovements: number;
+}) => Promise<ReceiptPlanBalance | null>;
 
 export interface CreatePaymentRepoInput {
   /** Exactamente uno de los dos (payments_target_check, DX-262). */
@@ -79,6 +93,14 @@ export interface CreatePaymentRepoInput {
    */
   receiptPlanBalance: ReceiptPlanBalance | null;
   /**
+   * DX-182: con el plan bloqueado y el abono insertado, el repositorio
+   * recalcula el saldo del recibo en la propia transacción con esto, y
+   * `receiptPlanBalance` (leído fuera, sin garantía frente a otro abono
+   * simultáneo) queda solo de respaldo cuando falta. Cada recibo muestra así
+   * el saldo tras SU abono, en el orden en que se registraron.
+   */
+  receiptBalanceInTx?: ReceiptBalanceInTx;
+  /**
    * DX-051 (R4): el abono convertido a la moneda del plan con la tasa de su
    * `paidOn`, calculado FUERA de la transacción. Si la moneda que lee el
    * INSERT con el plan bloqueado sigue siendo `planCurrency`, nace su base y
@@ -114,6 +136,8 @@ export interface CreateSplitPaymentRepoInput {
   requestFingerprint?: string;
   /** Saldo del plan tras el cobro entero, para la foto del recibo. */
   receiptPlanBalance: ReceiptPlanBalance | null;
+  /** DX-182: como en `CreatePaymentRepoInput`, para el cobro entero. */
+  receiptBalanceInTx?: ReceiptBalanceInTx;
   /**
    * Revisión DX-390: sin `confirmCreditBalance`, lo pendiente se leyó fuera
    * de la transacción. Con esto, la transacción bloquea el plan (FOR NO KEY

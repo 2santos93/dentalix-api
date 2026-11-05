@@ -10,11 +10,17 @@ import type { PaymentRepository } from '../../domain/ports/payment-repository.po
 import { GetTreatmentPlanUseCase } from '../../../treatment-plans/application/use-cases/get-treatment-plan.use-case';
 import { isPlanBillable } from '../../../treatment-plans/domain/plan-status-machine';
 import { PLAN_ALLOCATION_REPOSITORY } from '../../domain/ports/plan-allocation-repository.port';
-import type { PlanAllocationRepository } from '../../domain/ports/plan-allocation-repository.port';
+import type {
+  PlanAllocationRepository,
+  PlanBalanceSnapshot,
+} from '../../domain/ports/plan-allocation-repository.port';
 import { itemBillableCents } from '../../domain/allocation-rules';
 import type { PaymentWithRate } from '../payment-exchange-rate';
 import { ConvertAmountUseCase } from '../../../exchange/application/use-cases/convert-amount.use-case';
-import { PlanBalanceCalculator } from '../plan-balance-calculator';
+import {
+  PlanBalanceCalculator,
+  type PlanBalanceOptions,
+} from '../plan-balance-calculator';
 import {
   PLAN_CREDIT_READER,
   type PlanCreditReader,
@@ -244,8 +250,38 @@ export class GetPlanBalanceUseCase {
    */
   computeMany(
     inputs: readonly PlanBalanceInput[],
+    options?: PlanBalanceOptions,
   ): Promise<Map<string, GetPlanBalanceResult>> {
-    return this.calculator.computeMany(inputs);
+    return this.calculator.computeMany(inputs, options);
+  }
+
+  /**
+   * DX-182: el saldo de un plan sobre su foto, leída por quien llama dentro
+   * de su transacción (el abono, con el plan bloqueado), con la MISMA cuenta
+   * que `execute` y `executeWithItems`. `options.offline`: la transacción
+   * abierta no espera al proveedor de tasas.
+   */
+  async fromSnapshot(
+    planId: string,
+    snapshot: PlanBalanceSnapshot,
+    creditMovements: number,
+    options?: PlanBalanceOptions,
+  ): Promise<GetPlanBalanceResult> {
+    const balances = await this.calculator.computeMany(
+      [
+        {
+          plan: { ...snapshot.plan, id: planId },
+          items: snapshot.items,
+          payments: snapshot.payments,
+          baseOf: new Map(
+            snapshot.bases.map((b) => [b.paymentId, b.amount] as const),
+          ),
+          creditMovements,
+        },
+      ],
+      options,
+    );
+    return balances.get(planId)!;
   }
 
   private async computeOne(

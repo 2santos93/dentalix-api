@@ -54,7 +54,9 @@ import {
   ReceivedPayment,
   ReferenceMatch,
   SplitPaymentRecord,
+  ReceiptBalanceInTx,
 } from '../../domain/ports/payment-repository.port';
+import { readPlanBalanceSnapshotIn } from '../allocations/prisma-plan-allocation.repository';
 import { Payment } from '../../domain/entities/payment.entity';
 import { exchangeRateStatus } from '../../domain/payment-exchange-rate';
 import {
@@ -528,7 +530,14 @@ export class PrismaPaymentRepository implements PaymentRepository {
         // fuera; si aquí ya no vale, el abono queda «sin tasa» y el saldo no
         // lo cuenta, así que el recibo sale sin saldo (como sin tasa).
         line.targetBalance ??
-          (line.rateInvalidated ? null : input.receiptPlanBalance),
+          (line.rateInvalidated
+            ? null
+            : await this.balanceForReceipt(
+                tx,
+                input.treatmentPlanId,
+                input.receiptBalanceInTx,
+                input.receiptPlanBalance,
+              )),
       );
       return { ...line.entity, receiptNumber };
     });
@@ -632,7 +641,14 @@ export class PrismaPaymentRepository implements PaymentRepository {
         },
         // Como en `insert`: si la tasa de alguna línea ya no vale aquí, esa
         // línea queda «sin tasa» y el recibo sale sin saldo.
-        lines.some((l) => l.rateInvalidated) ? null : input.receiptPlanBalance,
+        lines.some((l) => l.rateInvalidated)
+          ? null
+          : await this.balanceForReceipt(
+              tx,
+              head.entity.treatmentPlanId,
+              input.receiptBalanceInTx,
+              input.receiptPlanBalance,
+            ),
       );
       return {
         splitId,
@@ -850,10 +866,47 @@ export class PrismaPaymentRepository implements PaymentRepository {
   }
 
   /**
+   * DX-182: el saldo del plan tras el abono para su recibo, calculado aquí,
+   * con el plan bloqueado por esta transacción (`lockPlan`) y el abono y su
+   * base ya insertados: los abonos al mismo plan se ponen en fila en ese
+   * bloqueo, así que la foto incluye exactamente los anteriores y este. Sin
+   * `compute` (o sin plan: saldo migrado) vale el calculado fuera.
+   */
+  private async balanceForReceipt(
+    tx: Prisma.TransactionClient,
+    planId: string | null | undefined,
+    compute: ReceiptBalanceInTx | undefined,
+    fallback: ReceiptPlanBalance | null,
+  ): Promise<ReceiptPlanBalance | null> {
+    if (!compute || !planId) return fallback;
+    const tenantId = this.requireTenantId();
+    const snapshot = await readPlanBalanceSnapshotIn(tx, tenantId, planId);
+    if (!snapshot) return null;
+    const credit = await tx.patientCreditEntry.aggregate({
+      where: {
+        tenantId,
+        treatmentPlanId: planId,
+        currency: snapshot.plan.currency,
+      },
+      _sum: { amount: true },
+    });
+    return compute({
+      planId,
+      snapshot,
+      creditMovements: credit._sum.amount?.toNumber() ?? 0,
+    });
+  }
+
+  /**
    * DB-014 / DX-109: el plan se vuelve a validar DENTRO de la transacción del
-   * INSERT, vivo y con el paciente del abono, y queda bloqueado en modo
-   * compartido (FOR SHARE) hasta el COMMIT: nadie puede retirarlo entre la
-   * comprobación y el alta (la FK compuesta no mira `deletedAt`). En el MISMO
+   * INSERT, vivo y con el paciente del abono, y queda bloqueado hasta el
+   * COMMIT: nadie puede retirarlo entre la comprobación y el alta (la FK
+   * compuesta no mira `deletedAt`). DX-182: FOR NO KEY UPDATE, no FOR SHARE:
+   * FOR SHARE no pone en fila a dos abonos al mismo plan, y el saldo del
+   * recibo de cada uno tiene que incluir a los anteriores. Es el primer
+   * bloqueo de la transacción (el orden «plan primero» de todo escritor de
+   * abonos, R6), así que no hay mejora de SHARE a UPDATE entre dos abonos que
+   * se crucen; no choca con el FOR KEY SHARE de las FK hacia el plan. En el MISMO
    * SELECT se lee el estado: un plan rechazado o cancelado no admite abonos
    * (409). COMPLETED sí. Devuelve la moneda del plan (DX-051: la de la base).
    */
@@ -868,7 +921,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
        WHERE "id" = ${input.treatmentPlanId}::uuid
          AND "patientId" = ${input.patientId}::uuid
          AND "deletedAt" IS NULL
-       FOR SHARE`;
+       FOR NO KEY UPDATE`;
     if (!plan) {
       throw new NotFoundException('Treatment plan not found');
     }

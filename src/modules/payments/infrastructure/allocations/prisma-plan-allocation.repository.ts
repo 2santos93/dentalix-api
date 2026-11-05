@@ -367,91 +367,7 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
   ): Promise<PlanBalanceSnapshot | null> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(
-      async (tx) => {
-        const plan = await tx.treatmentPlan.findFirst({
-          where: { id: planId, tenantId, deletedAt: null },
-          select: { status: true, currency: true },
-        });
-        if (!plan) return null;
-        const livePayment = { deletedAt: null, treatmentPlanId: planId };
-        const items = await tx.treatmentPlanItem.findMany({
-          where: { tenantId, planId, deletedAt: null },
-          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-          select: {
-            id: true,
-            toothNumber: true,
-            catalogItemId: true,
-            status: true,
-            price: true,
-            discount: true,
-          },
-        });
-        const labelOf = await procedureLabels(tx, tenantId, items);
-        const payments = await tx.payment.findMany({
-          where: { tenantId, ...livePayment },
-          select: {
-            id: true,
-            amount: true,
-            currency: true,
-            paidAt: true,
-            locationId: true,
-            ...FROZEN_RATE_SELECT,
-          },
-        });
-        // DX-097: la fecha de la tasa es el día civil del abono en SU sede.
-        const zoneOf = await resolveLocationTimeZones(
-          tx,
-          tenantId,
-          payments.map((p) => p.locationId),
-        );
-        const allocations = await tx.paymentAllocation.findMany({
-          where: { tenantId, treatmentPlanId: planId, payment: livePayment },
-          select: {
-            paymentId: true,
-            treatmentPlanItemId: true,
-            amount: true,
-          },
-        });
-        // DX-472-bis (revisión B1): solo una base en la moneda del plan.
-        const bases = await tx.paymentPlanAmount.findMany({
-          where: {
-            tenantId,
-            treatmentPlanId: planId,
-            currency: plan.currency,
-            payment: livePayment,
-          },
-          select: { paymentId: true, amount: true, manual: true },
-        });
-        return {
-          plan,
-          items: items.map((i) => ({
-            id: i.id,
-            toothNumber: i.toothNumber,
-            procedureName: labelOf.get(i.catalogItemId) ?? '',
-            status: i.status,
-            price: Number(i.price),
-            discount: Number(i.discount),
-          })),
-          payments: payments.map((p) => ({
-            id: p.id,
-            amount: Number(p.amount),
-            currency: p.currency,
-            paidOn: civilDateIn(p.paidAt, zoneOf(p.locationId)),
-            exchangeRateCurrency: p.exchangeRateCurrency,
-            frozenRate: frozenRateOf(p),
-          })),
-          allocations: allocations.map((a) => ({
-            paymentId: a.paymentId,
-            itemId: a.treatmentPlanItemId,
-            amount: Number(a.amount),
-          })),
-          bases: bases.map((b) => ({
-            paymentId: b.paymentId,
-            amount: Number(b.amount),
-            manual: b.manual,
-          })),
-        };
-      },
+      (tx) => readPlanBalanceSnapshotIn(tx, tenantId, planId),
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
   }
@@ -1285,4 +1201,99 @@ export async function removeVoidedAllocations(
      WHERE "tenantId" = ${tenantId}::uuid AND "paymentId" = ${paymentId}::uuid`;
   await tx.$executeRaw`SELECT set_config('app.allocation_cause', '', true)`;
   await enqueuePlanRebalance(tx, tenantId, planId);
+}
+
+/**
+ * DX-051 / DX-182: la foto del plan para el saldo, leída con la transacción de
+ * quien llama (la lectura del saldo la abre `RepeatableRead`; el abono la lee
+ * dentro de la suya, con el plan bloqueado, para el saldo de su recibo).
+ */
+export async function readPlanBalanceSnapshotIn(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  planId: string,
+): Promise<PlanBalanceSnapshot | null> {
+  const plan = await tx.treatmentPlan.findFirst({
+    where: { id: planId, tenantId, deletedAt: null },
+    select: { status: true, currency: true },
+  });
+  if (!plan) return null;
+  const livePayment = { deletedAt: null, treatmentPlanId: planId };
+  const items = await tx.treatmentPlanItem.findMany({
+    where: { tenantId, planId, deletedAt: null },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    select: {
+      id: true,
+      toothNumber: true,
+      catalogItemId: true,
+      status: true,
+      price: true,
+      discount: true,
+    },
+  });
+  const labelOf = await procedureLabels(tx, tenantId, items);
+  const payments = await tx.payment.findMany({
+    where: { tenantId, ...livePayment },
+    select: {
+      id: true,
+      amount: true,
+      currency: true,
+      paidAt: true,
+      locationId: true,
+      ...FROZEN_RATE_SELECT,
+    },
+  });
+  // DX-097: la fecha de la tasa es el día civil del abono en SU sede.
+  const zoneOf = await resolveLocationTimeZones(
+    tx,
+    tenantId,
+    payments.map((p) => p.locationId),
+  );
+  const allocations = await tx.paymentAllocation.findMany({
+    where: { tenantId, treatmentPlanId: planId, payment: livePayment },
+    select: {
+      paymentId: true,
+      treatmentPlanItemId: true,
+      amount: true,
+    },
+  });
+  // DX-472-bis (revisión B1): solo una base en la moneda del plan.
+  const bases = await tx.paymentPlanAmount.findMany({
+    where: {
+      tenantId,
+      treatmentPlanId: planId,
+      currency: plan.currency,
+      payment: livePayment,
+    },
+    select: { paymentId: true, amount: true, manual: true },
+  });
+  return {
+    plan,
+    items: items.map((i) => ({
+      id: i.id,
+      toothNumber: i.toothNumber,
+      procedureName: labelOf.get(i.catalogItemId) ?? '',
+      status: i.status,
+      price: Number(i.price),
+      discount: Number(i.discount),
+    })),
+    payments: payments.map((p) => ({
+      id: p.id,
+      amount: Number(p.amount),
+      currency: p.currency,
+      paidOn: civilDateIn(p.paidAt, zoneOf(p.locationId)),
+      exchangeRateCurrency: p.exchangeRateCurrency,
+      frozenRate: frozenRateOf(p),
+    })),
+    allocations: allocations.map((a) => ({
+      paymentId: a.paymentId,
+      itemId: a.treatmentPlanItemId,
+      amount: Number(a.amount),
+    })),
+    bases: bases.map((b) => ({
+      paymentId: b.paymentId,
+      amount: Number(b.amount),
+      manual: b.manual,
+    })),
+  };
 }

@@ -1,3 +1,4 @@
+import { ReceiptPlanBalanceCalculator } from '../receipts/receipt-plan-balance';
 import {
   BadRequestException,
   ConflictException,
@@ -233,6 +234,10 @@ export class RecordSplitPaymentUseCase {
         idempotencyKey: key,
         requestFingerprint: key === undefined ? undefined : requestFingerprint,
         receiptPlanBalance,
+        // DX-182: el saldo del recibo, recalculado con el plan bloqueado.
+        receiptBalanceInTx: new ReceiptPlanBalanceCalculator(
+          this.getPlanBalance,
+        ).inTransaction,
         ...(planPaymentsSeen === undefined
           ? {}
           : { balanceGuard: { planPaymentsSeen } }),
