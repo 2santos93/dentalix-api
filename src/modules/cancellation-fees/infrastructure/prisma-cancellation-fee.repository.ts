@@ -438,7 +438,7 @@ export class PrismaCancellationFeeRepository implements CancellationFeeRepositor
    *
    * Bloqueos en el orden R6 de DX-051 (plan → bases ORDER BY "paymentId" →
    * ítems), y las sumas en sentencias POSTERIORES. El plan va FOR UPDATE, no
-   * FOR SHARE: un abono nuevo (que lo bloquea FOR SHARE), la anulación de un
+   * FOR SHARE: un abono nuevo (que lo bloquea FOR NO KEY UPDATE, DX-182), la anulación de un
    * abono, la reasignación y el reparto (que también lo toman FOR SHARE
    * primero) esperan a la anulación y la ven. Una base que el barrido cree
    * mientras tanto (`ensureBase`, sin el plan) solo hace que aquí el abono

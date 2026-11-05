@@ -169,6 +169,9 @@ function makeUseCase(now: Date = new Date('2026-10-31T15:00:00.000Z')) {
     recordPayment,
     getPlanBalance as unknown as GetPlanBalanceUseCase,
     buildPaymentProofKit(repo).proofs,
+    {
+      inTransaction: () => Promise.resolve(null),
+    } as unknown as ReceiptPlanBalanceCalculator,
   );
   return {
     repo,

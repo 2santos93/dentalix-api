@@ -6,6 +6,7 @@ import {
   Logger,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import { ReceiptPlanBalanceCalculator } from '../receipts/receipt-plan-balance';
 import { PAYMENT_REPOSITORY } from '../../domain/ports/payment-repository.port';
 import type {
   CreatePaymentRepoInput,
@@ -107,6 +108,8 @@ export class RecordSplitPaymentUseCase {
     private readonly getPlanBalance: GetPlanBalanceUseCase,
     // DX-389: el comprobante de cada línea (subida directa ya hecha).
     private readonly proofs: PaymentProofs,
+    // DX-182: el saldo del recibo, recalculado en la transacción del cobro.
+    private readonly receiptBalance: ReceiptPlanBalanceCalculator,
   ) {}
 
   async execute(
@@ -233,6 +236,8 @@ export class RecordSplitPaymentUseCase {
         idempotencyKey: key,
         requestFingerprint: key === undefined ? undefined : requestFingerprint,
         receiptPlanBalance,
+        // DX-182: el saldo del recibo, recalculado con el plan bloqueado.
+        receiptBalanceInTx: this.receiptBalance.inTransaction,
         ...(planPaymentsSeen === undefined
           ? {}
           : { balanceGuard: { planPaymentsSeen } }),

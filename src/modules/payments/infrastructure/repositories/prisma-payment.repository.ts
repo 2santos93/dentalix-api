@@ -54,7 +54,10 @@ import {
   ReceivedPayment,
   ReferenceMatch,
   SplitPaymentRecord,
+  ReceiptBalanceInTx,
 } from '../../domain/ports/payment-repository.port';
+import { netCreditIn } from '../credit/prisma-plan-credit-reader';
+import { readPlanBalanceSnapshotIn } from '../allocations/prisma-plan-allocation.repository';
 import { Payment } from '../../domain/entities/payment.entity';
 import { exchangeRateStatus } from '../../domain/payment-exchange-rate';
 import {
@@ -528,7 +531,15 @@ export class PrismaPaymentRepository implements PaymentRepository {
         // fuera; si aquí ya no vale, el abono queda «sin tasa» y el saldo no
         // lo cuenta, así que el recibo sale sin saldo (como sin tasa).
         line.targetBalance ??
-          (line.rateInvalidated ? null : input.receiptPlanBalance),
+          (line.rateInvalidated
+            ? null
+            : await this.balanceForReceipt(
+                tx,
+                input.treatmentPlanId,
+                [line.entity.id],
+                input.receiptBalanceInTx,
+                input.receiptPlanBalance,
+              )),
       );
       return { ...line.entity, receiptNumber };
     });
@@ -632,7 +643,15 @@ export class PrismaPaymentRepository implements PaymentRepository {
         },
         // Como en `insert`: si la tasa de alguna línea ya no vale aquí, esa
         // línea queda «sin tasa» y el recibo sale sin saldo.
-        lines.some((l) => l.rateInvalidated) ? null : input.receiptPlanBalance,
+        lines.some((l) => l.rateInvalidated)
+          ? null
+          : await this.balanceForReceipt(
+              tx,
+              head.entity.treatmentPlanId,
+              lines.map((l) => l.entity.id),
+              input.receiptBalanceInTx,
+              input.receiptPlanBalance,
+            ),
       );
       return {
         splitId,
@@ -653,8 +672,8 @@ export class PrismaPaymentRepository implements PaymentRepository {
   ): Promise<InsertedLine> {
     const tenantId = this.requireTenantId();
     // DB-014: el plan se vuelve a validar DENTRO de la transacción del
-    // INSERT, vivo y con el paciente del abono, y queda bloqueado en modo
-    // compartido (FOR SHARE) hasta el COMMIT: nadie puede retirarlo entre la
+    // INSERT, vivo y con el paciente del abono, y queda bloqueado (FOR NO KEY
+    // UPDATE, DX-182) hasta el COMMIT: nadie puede retirarlo entre la
     // comprobación y el alta. La FK compuesta no mira `deletedAt`.
     //
     // DX-109 (BE-013): en el MISMO SELECT bloqueante se lee el estado: un
@@ -850,10 +869,46 @@ export class PrismaPaymentRepository implements PaymentRepository {
   }
 
   /**
+   * DX-182: el saldo del plan tras el abono para su recibo, calculado aquí,
+   * con el plan bloqueado por esta transacción (`lockPlan`) y el abono y su
+   * base ya insertados: los abonos al mismo plan se ponen en fila en ese
+   * bloqueo, así que la foto incluye exactamente los anteriores y este. Sin
+   * `compute` (o sin plan: saldo migrado) vale el calculado fuera.
+   */
+  private async balanceForReceipt(
+    tx: Prisma.TransactionClient,
+    planId: string | null | undefined,
+    paymentIds: readonly string[],
+    compute: ReceiptBalanceInTx | undefined,
+    fallback: ReceiptPlanBalance | null,
+  ): Promise<ReceiptPlanBalance | null> {
+    if (!compute || !planId) return fallback;
+    const tenantId = this.requireTenantId();
+    const snapshot = await readPlanBalanceSnapshotIn(tx, tenantId, planId);
+    if (!snapshot) return null;
+    return compute({
+      planId,
+      paymentIds,
+      snapshot,
+      creditMovements: await netCreditIn(
+        tx,
+        tenantId,
+        planId,
+        snapshot.plan.currency,
+      ),
+    });
+  }
+
+  /**
    * DB-014 / DX-109: el plan se vuelve a validar DENTRO de la transacción del
-   * INSERT, vivo y con el paciente del abono, y queda bloqueado en modo
-   * compartido (FOR SHARE) hasta el COMMIT: nadie puede retirarlo entre la
-   * comprobación y el alta (la FK compuesta no mira `deletedAt`). En el MISMO
+   * INSERT, vivo y con el paciente del abono, y queda bloqueado hasta el
+   * COMMIT: nadie puede retirarlo entre la comprobación y el alta (la FK
+   * compuesta no mira `deletedAt`). DX-182: FOR NO KEY UPDATE, no FOR SHARE:
+   * FOR SHARE no pone en fila a dos abonos al mismo plan, y el saldo del
+   * recibo de cada uno tiene que incluir a los anteriores. Es el primer
+   * bloqueo de la transacción (el orden «plan primero» de todo escritor de
+   * abonos, R6), así que no hay mejora de SHARE a UPDATE entre dos abonos que
+   * se crucen; no choca con el FOR KEY SHARE de las FK hacia el plan. En el MISMO
    * SELECT se lee el estado: un plan rechazado o cancelado no admite abonos
    * (409). COMPLETED sí. Devuelve la moneda del plan (DX-051: la de la base).
    */
@@ -868,7 +923,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
        WHERE "id" = ${input.treatmentPlanId}::uuid
          AND "patientId" = ${input.patientId}::uuid
          AND "deletedAt" IS NULL
-       FOR SHARE`;
+       FOR NO KEY UPDATE`;
     if (!plan) {
       throw new NotFoundException('Treatment plan not found');
     }
@@ -1051,7 +1106,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
    * Revisión DX-390: la guarda del saldo a favor sin confirmar. Bloquea el
    * plan FOR NO KEY UPDATE ANTES que nada (el primer bloqueo de la
    * transacción, el mismo orden «plan primero» de todo escritor de abonos, R6):
-   * espera a cualquier abono en curso al plan (que lo tiene FOR SHARE) y pone
+   * espera a cualquier abono en curso al plan (que lo tiene FOR NO KEY UPDATE, DX-182) y pone
    * en fila otro cobro dividido. Con el plan bloqueado, la cuenta ve todo lo
    * confirmado: si creció desde la lectura de lo pendiente, 409. NO KEY: no
    * choca con el FOR KEY SHARE de las FK que apuntan al plan.
