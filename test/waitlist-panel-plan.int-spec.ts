@@ -123,7 +123,7 @@ describe('DX-149 · panel de pendientes con 60.000 pacientes (int, rendimiento)'
              (CASE WHEN p.n > ${ENTRIES - OPEN}::int THEN 'OPEN' ELSE 'DISMISSED' END)::"WaitlistStatus",
              CASE WHEN p.n > ${ENTRIES - OPEN}::int THEN NULL ELSE 'Ya agendó por teléfono' END,
              CASE WHEN p.n > ${ENTRIES - OPEN}::int THEN NULL ELSE now() END,
-             now() - make_interval(mins => p.n), now()
+             now() - make_interval(mins => p.n::int), now()
         FROM (
           SELECT "id", row_number() OVER (ORDER BY "id") AS n
             FROM "patients" WHERE "tenantId" = ${tenantId}::uuid
