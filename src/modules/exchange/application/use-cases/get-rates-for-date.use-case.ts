@@ -19,7 +19,14 @@ import {
   MANUAL_EXCHANGE_RATE_REPOSITORY,
   type ManualExchangeRateRepository,
 } from '../../domain/ports/manual-exchange-rate-repository.port';
-import type { ExchangeRateSource } from '../../domain/exchange-rate-source';
+import {
+  BASE_CURRENCY,
+  type ExchangeRateSource,
+} from '../../domain/exchange-rate-source';
+import {
+  selectManualRatesForPair,
+  windowStart,
+} from '../../domain/manual-rate-fallback';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
   civilDateIn,
@@ -127,6 +134,13 @@ export interface RatesForDate {
    */
   rates: Record<string, number>;
   /**
+   * DX-384: día civil de estas tasas. Es el pedido salvo con MANUAL cuando
+   * se pidieron monedas (`currencies`) y no estaban registradas ese día: la
+   * última fecha anterior, dentro del plazo de la clínica, en que estaban
+   * todas (una sola fecha para todas).
+   */
+  rateDate: string;
+  /**
    * DX-402: estas son las tasas manuales de un día ANTERIOR a `manualSince`
    * que no tiene tasa del proveedor guardada: la tasa de respaldo de los
    * abonos pendientes de ese día. Solo en la lectura que lo pide
@@ -152,8 +166,18 @@ function toRatesRecord(
  */
 export type RatesLookup = (
   date: string,
-  options?: { noBackup?: boolean },
+  options?: { noBackup?: boolean } & RatesForOptions,
 ) => Promise<RatesForDate>;
+
+/**
+ * DX-384: las monedas (además de USD, que no lleva tasa) para las que se
+ * piden las tasas del día. Con MANUAL y plazo > 0, si alguna no está
+ * registrada ese día se usa la última fecha anterior, dentro del plazo, en
+ * que están todas. Sin ellas, solo las del día exacto.
+ */
+export interface RatesForOptions {
+  currencies?: readonly string[];
+}
 
 /** DX-402: la lectura del reintento de los abonos sin tasa. */
 export interface RatesLookupOptions {
@@ -216,8 +240,14 @@ export class GetRatesForDateUseCase {
   ) {}
 
   /** La lectura de quien convierte por dentro (saldos, abonos, barridos). */
-  execute(date: string): Promise<RatesForDate> {
-    return this.ratesWith(date, () => this.clinicSettings());
+  execute(date: string, options: RatesForOptions = {}): Promise<RatesForDate> {
+    return this.ratesWith(
+      date,
+      () => this.clinicSettings(),
+      undefined,
+      false,
+      options.currencies,
+    );
   }
 
   /**
@@ -229,7 +259,10 @@ export class GetRatesForDateUseCase {
    * al proveedor si además no es anterior al alta de la clínica (o a su
    * primer abono, lo anterior).
    */
-  async forRequest(date: string): Promise<RatesForDate> {
+  async forRequest(
+    date: string,
+    options: RatesForOptions = {},
+  ): Promise<RatesForDate> {
     if (!isValidRateDate(date)) throw invalidRateDate();
     if (!isRateDateInRange(date)) throw rateDateNotInRange();
     // La ventana (alta, primer abono, zonas de las sedes) son tres consultas:
@@ -245,6 +278,8 @@ export class GetRatesForDateUseCase {
       date,
       () => this.clinicSettings(),
       async (day) => this.assertWithinProviderWindow(day, await readWindow()),
+      false,
+      options.currencies,
     );
   }
 
@@ -260,10 +295,17 @@ export class GetRatesForDateUseCase {
     const clinicSettings = () => (settings ??= this.clinicSettings());
     return (date, lookup = {}) => {
       const manualBackup = options.manualBackup === true && !lookup.noBackup;
-      const key = `${date}|${manualBackup}`;
+      const currencies = lookup.currencies;
+      const key = `${date}|${manualBackup}|${[...new Set(currencies ?? [])].sort().join(',')}`;
       let rates = byDate.get(key);
       if (!rates) {
-        rates = this.ratesWith(date, clinicSettings, undefined, manualBackup);
+        rates = this.ratesWith(
+          date,
+          clinicSettings,
+          undefined,
+          manualBackup,
+          currencies,
+        );
         byDate.set(key, rates);
       }
       return rates;
@@ -281,6 +323,7 @@ export class GetRatesForDateUseCase {
     clinicSettings: () => Promise<ClinicExchangeSettings | null>,
     beforeProviderCall?: BeforeProviderCall,
     manualBackup = false,
+    currencies?: readonly string[],
   ): Promise<RatesForDate> {
     if (!isValidRateDate(date)) throw invalidRateDate();
     const settings = await clinicSettings();
@@ -288,11 +331,12 @@ export class GetRatesForDateUseCase {
       settings?.source === 'MANUAL' &&
       (settings.manualSince === null || date >= settings.manualSince)
     ) {
-      return {
-        base: 'USD',
-        source: 'MANUAL',
-        rates: await this.manual.ratesOn(date),
-      };
+      return this.manualRates(
+        date,
+        settings.manualRateMaxAgeDays,
+        settings.manualSince,
+        currencies,
+      );
     }
     if (manualBackup && settings?.source === 'MANUAL' && settings.manualSince) {
       const backup = await this.backupRates(date, settings.manualSince);
@@ -306,7 +350,48 @@ export class GetRatesForDateUseCase {
         this.callerInContext(),
         beforeProviderCall,
       ),
+      rateDate: date,
     };
+  }
+
+  /**
+   * DX-384: las tasas manuales del día. Con `currencies` y plazo > 0, si
+   * alguna no está registrada ese día, las de la última fecha anterior dentro
+   * del plazo (días civiles de la sede del abono) que las tiene todas; si no
+   * hay ninguna, las del día tal cual, y quien convierte ve la moneda ausente
+   * como «sin tasa» (nunca 1:1). Una tasa posterior al día no se usa.
+   */
+  private async manualRates(
+    date: string,
+    maxAgeDays: number,
+    manualSince: string | null,
+    currencies?: readonly string[],
+  ): Promise<RatesForDate> {
+    const exact = await this.manual.ratesOn(date);
+    const wanted = (currencies ?? []).filter((c) => c !== BASE_CURRENCY);
+    const complete = wanted.every((c) => exact[c] !== undefined);
+    if (maxAgeDays > 0 && wanted.length > 0 && !complete) {
+      const fallback = selectManualRatesForPair(
+        date,
+        maxAgeDays,
+        wanted,
+        await this.manual.ratesBetween(
+          windowStart(date, maxAgeDays, manualSince),
+          date,
+          wanted,
+        ),
+        manualSince,
+      );
+      if (fallback) {
+        return {
+          base: 'USD',
+          source: 'MANUAL',
+          rates: fallback.rates,
+          rateDate: fallback.rateDate,
+        };
+      }
+    }
+    return { base: 'USD', source: 'MANUAL', rates: exact, rateDate: date };
   }
 
   /**
@@ -321,11 +406,22 @@ export class GetRatesForDateUseCase {
   ): Promise<RatesForDate | null> {
     const cached = await this.repo.findByDate(date);
     if (cached.length > 0) {
-      return { base: 'USD', source: 'AUTOMATIC', rates: toRatesRecord(cached) };
+      return {
+        base: 'USD',
+        source: 'AUTOMATIC',
+        rates: toRatesRecord(cached),
+        rateDate: date,
+      };
     }
     const rates = await this.manual.ratesOn(date);
     if (Object.keys(rates).length === 0) return null;
-    return { base: 'USD', source: 'MANUAL', rates, backup: { manualSince } };
+    return {
+      base: 'USD',
+      source: 'MANUAL',
+      rates,
+      rateDate: date,
+      backup: { manualSince },
+    };
   }
 
   /** SEC-058: dentro del barrido de reintentos, gasta de su cupo reservado. */

@@ -123,6 +123,7 @@ describe('Exchange (e2e)', () => {
       base: 'USD',
       source: 'AUTOMATIC',
       rates: { VES: 4000, EUR: 0.92 },
+      rateDate: RATE_DATE,
     });
   });
 

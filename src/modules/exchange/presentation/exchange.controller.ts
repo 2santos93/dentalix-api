@@ -74,7 +74,10 @@ export class ExchangeController {
       'las que la clínica registró para ese día: una moneda sin tasa NO ' +
       'aparece en `rates` y nunca se pide al proveedor. SEC-054: un día sin ' +
       'guardar solo se pide al proveedor dentro de la ventana de la clínica y ' +
-      'con su presupuesto de fallos de caché (429 al superarlo).',
+      'con su presupuesto de fallos de caché (429 al superarlo). DX-384: con ' +
+      'MANUAL y `currencies`, si alguna no tiene tasa ese día se devuelve la ' +
+      'última fecha anterior, dentro del plazo de la clínica, que las tiene ' +
+      'todas; `rateDate` dice de qué día son las tasas.',
   })
   @ApiOkResponse({ type: RatesResponseDto })
   @ApiTooManyRequestsResponse({ description: TOO_MANY_DESCRIPTION })
@@ -83,7 +86,9 @@ export class ExchangeController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<RatesForDate> {
     return withProviderErrors(res, () =>
-      this.getRatesForDate.forRequest(query.date),
+      this.getRatesForDate.forRequest(query.date, {
+        currencies: query.currencies,
+      }),
     );
   }
 

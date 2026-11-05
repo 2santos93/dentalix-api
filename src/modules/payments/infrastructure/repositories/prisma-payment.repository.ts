@@ -667,7 +667,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
     const freeze =
       frozen !== null &&
       frozen.currency === targetCurrency &&
-      frozen.date === civilDateIn(paidAt, timeZone) &&
+      (frozen.quotedOn ?? frozen.date) === civilDateIn(paidAt, timeZone) &&
       (await manualRatesStillMatch(tx, tenantId, input.currency, frozen))
         ? frozen
         : null;

@@ -123,6 +123,7 @@ class FakeConvertAmount {
     }
     return Promise.resolve({
       ...input,
+      rateDate: input.date,
       source: this.source,
       fromPerBase: rate(input.from),
       toPerBase: rate(input.to),
@@ -296,6 +297,7 @@ describe('RecordPaymentUseCase', () => {
         toPerBase: 1,
         source: 'MANUAL',
         date: '2026-03-05',
+        quotedOn: '2026-03-05',
       });
       expect(payment.frozenRate?.source).toBe('MANUAL');
       expect(repo.lastCreateInput?.planAmount?.amount).toBe(50);

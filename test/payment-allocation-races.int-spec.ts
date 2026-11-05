@@ -82,6 +82,8 @@ const convert: ConvertAmountUseCase = {
     }
     return Promise.resolve({
       ...input,
+      // DX-384: la cotización lleva el día de la tasa usada.
+      rateDate: input.date,
       source: 'AUTOMATIC',
       ...(input.from === 'USD'
         ? { fromPerBase: 1, toPerBase: rate }

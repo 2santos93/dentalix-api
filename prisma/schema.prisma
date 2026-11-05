@@ -70,6 +70,11 @@ model Tenant {
   /// DX-374: día civil (sede principal) desde el que rige la fuente MANUAL;
   /// los anteriores siguen con la automática. NULL con AUTOMATIC (CHECK).
   manualExchangeRatesSince                DateTime?                        @db.Date
+  /// DX-384: con fuente MANUAL, hasta cuántos días de antigüedad puede tener
+  /// la última tasa manual que sustituye a la del día de un abono sin tasa
+  /// ese día. 0 = solo el día exacto. CHECK 0..30. 3 por defecto. Solo ADMIN
+  /// (PUT /exchange/settings, auditado).
+  manualRateMaxAgeDays                    Int                              @default(3)
   /// DX-515: título del recibo de caja; NULL = «Recibo de caja» (lo pone la
   /// web). CHECK 1..60, una línea sin espacios en los extremos. Solo ADMIN
   /// (PUT /payment-receipts/settings, auditado). Se congela en la foto.

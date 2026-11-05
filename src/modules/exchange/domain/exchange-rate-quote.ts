@@ -10,8 +10,15 @@ import { round2 } from '../../../shared/money/money';
 export interface ExchangeRateQuote {
   from: string;
   to: string;
-  /** Día civil (AAAA-MM-DD) de la tasa. */
+  /** Día civil (AAAA-MM-DD) para el que se pidió la tasa: el del abono. */
   date: string;
+  /**
+   * DX-384: día civil (AAAA-MM-DD) de la tasa usada. Igual a `date` salvo con
+   * tasa manual cuando no había la de ese día: la última registrada dentro
+   * del plazo de la clínica (nunca posterior a `date`). Es el que congela el
+   * abono (`exchangeRateDate`).
+   */
+  rateDate: string;
   source: ExchangeRateSource;
   /** Unidades de `from` por 1 USD. */
   fromPerBase: number;

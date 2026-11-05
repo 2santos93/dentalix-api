@@ -211,6 +211,7 @@ describe('Fechas de /exchange/rates y /exchange/convert (e2e, BE-049, DX-383)', 
       base: 'USD',
       source: 'AUTOMATIC',
       rates: { VES: 3900 },
+      rateDate: CACHED_DAY,
     });
     expect(cachedConvert.body).toMatchObject({
       result: 390000,
@@ -224,6 +225,7 @@ describe('Fechas de /exchange/rates y /exchange/convert (e2e, BE-049, DX-383)', 
       base: 'USD',
       source: 'AUTOMATIC',
       rates: { VES: 4006 },
+      rateDate: MISSING_DAY,
     });
     expect(missConvert.body).toMatchObject({ result: 400600 });
     expect(fetchRates).toHaveBeenCalledTimes(1);
@@ -241,6 +243,7 @@ describe('Fechas de /exchange/rates y /exchange/convert (e2e, BE-049, DX-383)', 
       base: 'USD',
       source: 'MANUAL',
       rates: { VES: 4100 },
+      rateDate: today,
     });
     expect(todayConvert.body).toMatchObject({ result: 410000, rateUsed: 4100 });
     expect(fetchRates).not.toHaveBeenCalled();

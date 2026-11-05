@@ -97,6 +97,7 @@ function makeUseCase(
               )
             : Promise.resolve({
                 ...input,
+                rateDate: input.date,
                 source: 'AUTOMATIC',
                 fromPerBase: 1,
                 toPerBase: opts.rate,
@@ -190,6 +191,7 @@ describe('ReplacePaymentAllocationsUseCase (DX-051, spec R10)', () => {
       toPerBase: 0.9,
       source: 'AUTOMATIC' as const,
       date: '2026-10-20',
+      quotedOn: '2026-10-20',
     };
     const { uc, repo, calls } = makeUseCase(
       [

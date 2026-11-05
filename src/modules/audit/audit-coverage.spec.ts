@@ -1584,7 +1584,9 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   'PUT /prescriptions/settings':
     'prescription-settings.use-cases.spec.ts y prescription-settings.e2e-spec.ts',
   // DX-374: CLINIC_SETTINGS con EXCHANGE_RATE_SOURCE y el antes y el después;
-  // sin evento si no cambia.
+  // sin evento si no cambia. DX-384: el plazo de la última tasa registrada
+  // deja EXCHANGE_RATE_MAX_AGE con configChange antes/después, escrito por el
+  // repositorio en la misma transacción.
   'PUT /exchange/settings':
     'exchange-rate-settings.use-cases.spec.ts y exchange-rate-source.e2e-spec.ts',
   // DX-274: VIEW si se abre en el navegador, EXPORT si se descarga (la acción

@@ -44,6 +44,7 @@ function quoting(
       }
       return Promise.resolve({
         ...input,
+        rateDate: input.date,
         source: backup ? 'MANUAL' : 'AUTOMATIC',
         fromPerBase: perBase(input.from),
         toPerBase: perBase(input.to),

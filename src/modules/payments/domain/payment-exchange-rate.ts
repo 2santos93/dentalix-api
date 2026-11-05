@@ -13,8 +13,18 @@ export interface FrozenExchangeRate {
   /** Unidades de `currency` por 1 USD. */
   toPerBase: number;
   source: ExchangeRateSource;
-  /** Día civil de la tasa: el del abono en su sede. */
+  /**
+   * Día civil de la tasa USADA (`exchangeRateDate`). Es el del abono en su
+   * sede salvo con tasa manual cuando la clínica no registró la de ese día y
+   * se usó la última dentro de su plazo (DX-384): entonces es anterior.
+   */
   date: string;
+  /**
+   * DX-384: el día del abono (en su sede) para el que se cotizó. No se guarda
+   * (se deduce del abono): al registrar, solo se congela una tasa cotizada
+   * para el día en que el abono quedó. Ausente en una tasa leída de la fila.
+   */
+  quotedOn?: string;
   /**
    * DX-402: es la tasa manual de un día anterior a `manualSince` (la de
    * respaldo de un día sin tasa del proveedor). No se guarda en el abono
